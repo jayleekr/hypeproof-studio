@@ -118,9 +118,11 @@ required to merge. Direct pushes to `main` are reserved for the maintainer
 (Jay).
 
 > Enforcement note: GitHub branch protection / rulesets require a paid plan on
-> private repos, so this is currently a **team convention** backed by a local
-> `pre-push` guard (below), not a server-side block. See the open question at
-> the end of this file.
+> private repos, so this is not a server-side block. It's enforced by two soft
+> layers: a local `pre-push` guard (below) and a **CI guard**
+> (`.github/workflows/main-guard.yml`) that turns any non-PR push to `main`
+> into a red ❌ build. Maintainer pushes (`jayleekr`) and commits marked
+> `[skip-main-guard]` pass.
 
 Flow:
 
