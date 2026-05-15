@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;
+    font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh}
+  #controls{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;
+    background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;
+    font-size:15px;text-align:center;letter-spacing:.3px}
+  #controls b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="controls"><b>← → ↑ ↓</b> 또는 <b>마우스/손가락</b>으로 피하기 · <b>스페이스</b> 시작/다시</div>
+<script>
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
+// %%CUSTOMIZE%%: 주인공/피할것/색만 바꾸세요. 구조·조작바는 그대로.
+const HERO='%%PLAYER_EMOJI%%';        // 피하는 주인공 (예: 🚀 🐱 🐠)
+const FOE='%%FOE_EMOJI%%';            // 피해야 하는 적 (예: ☄️ 👾 🦈)
+const BG=['%%BG_TOP%%','%%BG_BOT%%']; // 배경 그라데이션
+let state='title',score=0,best=0,hx,hy,foes,t,keys={};
+function reset(){hx=W/2;hy=H*0.7;foes=[];t=0;score=0;state='play';}
+function bg(){const g=x.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function txt(s,y,sz,c){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';
+  x.textAlign='center';x.fillText(s,W/2,y);}
+addEventListener('keydown',e=>{keys[e.key]=1;if(e.code==='Space'){if(state!=='play')reset();}});
+addEventListener('keyup',e=>keys[e.key]=0);
+addEventListener('mousemove',e=>{if(state==='play'){hx=e.clientX;hy=e.clientY;}});
+addEventListener('touchmove',e=>{if(state==='play'){hx=e.touches[0].clientX;hy=e.touches[0].clientY;}},{passive:true});
+addEventListener('click',()=>{if(state!=='play')reset();});
+function loop(){
+  bg();
+  if(state==='title'){
+    txt('%%TITLE%%',H/2-30,Math.min(58,W/8));
+    txt('스페이스바 또는 화면을 누르면 시작!',H/2+34,22,'#ffd75b');
+  }else if(state==='play'){
+    t++;
+    if(keys['ArrowLeft'])hx-=7; if(keys['ArrowRight'])hx+=7;
+    if(keys['ArrowUp'])hy-=7; if(keys['ArrowDown'])hy+=7;
+    hx=Math.max(24,Math.min(W-24,hx)); hy=Math.max(24,Math.min(H-24,hy));
+    x.font='44px serif';x.textAlign='center';x.fillText(HERO,hx,hy);
+    if(t%26===0)foes.push({x:Math.random()*W,y:-30,s:3+score*0.05+Math.random()*2});
+    for(let i=foes.length-1;i>=0;i--){const f=foes[i];f.y+=f.s;
+      x.font='38px serif';x.fillText(FOE,f.x,f.y);
+      if(Math.abs(f.x-hx)<34&&Math.abs(f.y-hy)<34){best=Math.max(best,score);state='over';}
+      if(f.y>H+30){foes.splice(i,1);score++;}}
+    txt('점수 '+score,42,30,'#ffd75b');
+  }else{
+    bg();txt('잡혔어요! 💥',H/2-50,Math.min(52,W/9));
+    txt('점수 '+score+'   (최고 '+best+')',H/2+8,28,'#ffd75b');
+    txt('스페이스바로 다시 하기',H/2+56,20,'#bbb');
+  }
+  requestAnimationFrame(loop);
+}
+reset();state='title';loop();
+</script>
+</body>
+</html>

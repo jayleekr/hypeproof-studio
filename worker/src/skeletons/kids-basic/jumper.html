@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;
+    font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh}
+  #controls{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;
+    background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;
+    font-size:15px;text-align:center;letter-spacing:.3px}
+  #controls b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="controls"><b>스페이스</b> 또는 <b>화면 탭</b>으로 점프! 장애물을 넘으세요</div>
+<script>
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
+// %%CUSTOMIZE%%: 주인공/장애물/색만 바꾸세요. 점프 물리·조작바는 그대로.
+const HERO='%%PLAYER_EMOJI%%';        // 점프하는 주인공 (예: 🐱 🦖 🐰)
+const ROCK='%%OBSTACLE_EMOJI%%';      // 넘어야 하는 장애물 (예: 🌵 🪨 🔥)
+const BG=['%%BG_TOP%%','%%BG_BOT%%']; // 배경 그라데이션
+let state='title',score=0,best=0;
+let gy,vy,onGround,obs,t,gnd;
+function reset(){gy=0;vy=0;onGround=true;obs=[];t=0;score=0;gnd=H-90;state='play';}
+function bg(){const g=x.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function txt(s,y,sz,c){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';
+  x.textAlign='center';x.fillText(s,W/2,y);}
+function jump(){if(state!=='play'){reset();return;} if(onGround){vy=-17;onGround=false;}}
+addEventListener('keydown',e=>{if(e.code==='Space'){e.preventDefault();jump();}});
+addEventListener('mousedown',jump); addEventListener('touchstart',e=>{e.preventDefault();jump();},{passive:false});
+function loop(){
+  bg();
+  if(state==='title'){
+    txt('%%TITLE%%',H/2-30,Math.min(58,W/8));
+    txt('스페이스바 또는 화면을 누르면 시작!',H/2+34,22,'#ffd75b');
+  }else if(state==='play'){
+    t++; gnd=H-90;
+    // 땅
+    x.fillStyle='rgba(255,255,255,.15)';x.fillRect(0,gnd+44,W,6);
+    // 물리
+    vy+=1.05; gy+=vy;
+    if(gy>0){gy=0;vy=0;onGround=true;}
+    const hx=W*0.22, hy=gnd+gy;
+    x.font='46px serif';x.textAlign='center';x.fillText(HERO,hx,hy+16);
+    // 장애물
+    if(t%90===0||obs.length===0&&t>30)obs.push({x:W+30,sp:6+score*0.15});
+    for(let i=obs.length-1;i>=0;i--){const o=obs[i];o.x-=o.sp;
+      x.font='42px serif';x.fillText(ROCK,o.x,gnd+18);
+      if(Math.abs(o.x-hx)<34 && hy>gnd-26){best=Math.max(best,score);state='over';}
+      if(o.x<-40){obs.splice(i,1);score++;}}
+    txt('점수 '+score,42,30,'#ffd75b');
+  }else{
+    bg();txt('부딪혔어요! 💥',H/2-50,Math.min(52,W/9));
+    txt('점수 '+score+'   (최고 '+best+')',H/2+8,28,'#ffd75b');
+    txt('스페이스바로 다시 하기',H/2+56,20,'#bbb');
+  }
+  requestAnimationFrame(loop);
+}
+reset();state='title';loop();
+</script>
+</body>
+</html>

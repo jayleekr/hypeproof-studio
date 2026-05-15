@@ -34,6 +34,9 @@ export const profile: Profile = {
     type: "live_server",
     auto_start: true,
   },
+  game: {
+    template_tier: "kids-basic",   // 초3-4. 5-6학년 profile은 "kids-rich"로.
+  },
   publishing: {
     enabled: true,
     strategy: "per_user_github_pages",
@@ -71,14 +74,14 @@ export const profile: Profile = {
         { text: "노란 캐릭터가 빨간 적을 피하는 게임", style: "good" },
         { text: "재밌게 만들어줘", style: "weak", caption: "어떤 게 재밌어야 할지 모르겠어요. 자세히!" },
       ],
-      // 자녀가 다음 한 걸음 떼게. 마지막 chip은 essence 6 "잇기-가설" 씨앗:
-      //   "만약 ___이면" 패턴이 자녀에게 자연스럽게 스며듦 (2-3회차에서 발화).
+      // 모두 명령형 — 질문형("...하면 어떻게 돼?")은 AI가 코드 대신 되묻게
+      // 만들어 화면이 빈 채로 남는다. 1회차는 "말하면 바로 바뀐다" 체험이 핵심.
       follow_up: [
-        { text: "색을 더 밝게 바꿔줘", style: "good" },
+        { text: "색을 더 밝고 예쁘게 바꿔줘", style: "good" },
         { text: "소리 효과를 추가해줘", style: "good" },
         { text: "점점 빨라지게 해줘", style: "good" },
         { text: "캐릭터를 내가 좋아하는 동물로 바꿔줘", style: "good" },
-        { text: "적을 한 명 더 추가하면 어떻게 돼?", style: "good" },
+        { text: "적을 한 명 더 추가해줘", style: "good" },
       ],
     },
     hints: {

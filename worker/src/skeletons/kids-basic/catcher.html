@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;
+    font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh}
+  /* 항상 보이는 조작법 바 */
+  #controls{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;
+    background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;
+    font-size:15px;text-align:center;letter-spacing:.3px}
+  #controls b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="controls"><b>←  →</b> 또는 <b>마우스/손가락</b>으로 움직이기 · <b>스페이스</b> 시작/다시</div>
+<script>
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
+// %%CUSTOMIZE%%: 주인공/떨어지는것/색만 바꾸세요. 구조·조작바는 그대로.
+const PLAYER='%%PLAYER_EMOJI%%';      // 받는 주인공 (예: 🧺 🐱 🦖)
+const GOOD='%%GOOD_EMOJI%%';          // 받으면 점수 (예: ⭐ 🐟 🍎)
+const BAD='%%BAD_EMOJI%%';            // 맞으면 안 됨 (예: 💣 ☠️ 🪨)
+const BG=['%%BG_TOP%%','%%BG_BOT%%']; // 배경 그라데이션 (예: #1b1b3a / #3a1b5a)
+let state='title',score=0,best=0,lives=3,px,items=[],t=0;
+function reset(){score=0;lives=3;items=[];t=0;px=W/2;state='play';}
+function bg(){const g=x.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function txt(s,y,sz,c){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';
+  x.textAlign='center';x.fillText(s,W/2,y);}
+addEventListener('keydown',e=>{
+  if(e.code==='Space'){if(state!=='play')reset();}
+  if(e.key==='ArrowLeft')px-=40; if(e.key==='ArrowRight')px+=40;});
+addEventListener('mousemove',e=>{if(state==='play')px=e.clientX;});
+addEventListener('touchmove',e=>{if(state==='play')px=e.touches[0].clientX;},{passive:true});
+addEventListener('click',()=>{if(state!=='play')reset();});
+function loop(){
+  bg();
+  if(state==='title'){
+    txt('%%TITLE%%',H/2-30,Math.min(60,W/8));
+    txt('스페이스바 또는 화면을 누르면 시작!',H/2+34,22,'#ffd75b');
+  }else if(state==='play'){
+    t++; px=Math.max(40,Math.min(W-40,px));
+    if(t%32===0)items.push({x:60+Math.random()*(W-120),y:-30,
+      bad:Math.random()<0.22,s:3.2+Math.random()*2.2});
+    x.font='52px serif';x.textAlign='center';
+    x.fillText(PLAYER,px,H-30);
+    for(let i=items.length-1;i>=0;i--){const it=items[i];it.y+=it.s;
+      x.font='40px serif';x.fillText(it.bad?BAD:GOOD,it.x,it.y);
+      if(it.y>H-58&&it.y<H-6&&Math.abs(it.x-px)<54){
+        if(it.bad){lives--;}else{score++;}items.splice(i,1);
+      }else if(it.y>H+30){if(!it.bad)lives--;items.splice(i,1);}}
+    txt('점수 '+score,42,30,'#ffd75b');
+    x.textAlign='right';x.font='26px serif';x.fillText('❤️'.repeat(Math.max(0,lives)),W-16,40);
+    if(lives<=0){best=Math.max(best,score);state='over';}
+  }else{
+    bg();txt('게임 끝! 🎉',H/2-50,Math.min(54,W/9));
+    txt('점수 '+score+'   (최고 '+best+')',H/2+8,28,'#ffd75b');
+    txt('스페이스바로 다시 하기',H/2+56,20,'#bbb');
+  }
+  requestAnimationFrame(loop);
+}
+loop();
+</script>
+</body>
+</html>
