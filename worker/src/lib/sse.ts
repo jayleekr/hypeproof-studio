@@ -69,6 +69,81 @@ export function transformStream(
   });
 }
 
+/**
+ * Gemini's OpenAI-compatible endpoint already emits `chat.completion.chunk`
+ * SSE — exactly what the client expects. So we forward each event unchanged
+ * and only parse it to capture `usage` (present on the final chunk when the
+ * request set `stream_options.include_usage`). Gemini uses OpenAI usage names
+ * (prompt_tokens/completion_tokens); there is no prompt cache → cache = 0.
+ */
+export function passThroughOpenAIStream(
+  upstream: ReadableStream<Uint8Array>,
+  onUsage: (u: StreamUsage) => void,
+): ReadableStream<Uint8Array> {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const usage: StreamUsage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+  };
+  let buffer = "";
+  let sawDone = false;
+  let usageEmitted = false;
+
+  const scanUsage = (block: string) => {
+    for (const raw of block.split("\n")) {
+      const line = raw.trimEnd();
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      if (data === "[DONE]") { sawDone = true; continue; }
+      try {
+        const ev = JSON.parse(data);
+        const u = ev?.usage;
+        if (u) {
+          if (typeof u.prompt_tokens === "number") usage.input_tokens = u.prompt_tokens;
+          if (typeof u.completion_tokens === "number") usage.output_tokens = u.completion_tokens;
+        }
+      } catch { /* keepalive / non-JSON — forwarded verbatim anyway */ }
+    }
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = upstream.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx: number;
+          while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            const block = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            scanUsage(block);
+            controller.enqueue(encoder.encode(block + "\n\n"));   // verbatim
+          }
+        }
+        if (buffer.trim().length > 0) {
+          scanUsage(buffer);
+          controller.enqueue(encoder.encode(buffer));
+        }
+        if (!sawDone) controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      } catch (err) {
+        const errPayload = JSON.stringify({ error: { message: String(err), type: "stream_error" } });
+        controller.enqueue(encoder.encode(`data: ${errPayload}\n\n`));
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      } finally {
+        if (!usageEmitted) onUsage(usage);
+        usageEmitted = true;
+        controller.close();
+        reader.releaseLock();
+      }
+    },
+  });
+}
+
 function processBlock(
   block: string,
   controller: ReadableStreamDefaultController<Uint8Array>,

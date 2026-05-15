@@ -2,6 +2,8 @@
 // create a new module under profiles/ that exports a Profile and register it
 // in profiles/index.ts. No other code changes required.
 
+import type { LLMProvider } from "../env.ts";
+
 export interface Profile {
   id: string;
   version: number;
@@ -29,6 +31,15 @@ export interface Profile {
   preview: {
     type: "iframe" | "live_server";
     auto_start: boolean;
+  };
+  /**
+   * Which pre-built game skeleton library the model customizes from. Scales
+   * with cohort age: kids-basic → kids-rich → teen → pro-3d. The model never
+   * writes a game from scratch — it picks the closest skeleton for this tier
+   * and swaps theme/characters/colors, keeping structure + the controls bar.
+   */
+  game: {
+    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d";
   };
   publishing: {
     enabled: boolean;
@@ -116,8 +127,21 @@ export type ModelAlias =
   | "hypeproof-default"
   | "hypeproof-strong";
 
+// Anthropic model ids (used when LLM_PROVIDER=anthropic).
 export const MODEL_MAP: Record<ModelAlias, string> = {
   "hypeproof-fast":    "claude-haiku-4-5",
   "hypeproof-default": "claude-sonnet-4-6",
   "hypeproof-strong":  "claude-opus-4-7",
 };
+
+// Gemini model ids (default provider). Same alias names so profiles are
+// provider-agnostic — the alias resolves per-provider at request time.
+export const GEMINI_MODEL_MAP: Record<ModelAlias, string> = {
+  "hypeproof-fast":    "gemini-2.5-flash",
+  "hypeproof-default": "gemini-2.5-pro",
+  "hypeproof-strong":  "gemini-2.5-pro",
+};
+
+export function modelIdFor(alias: ModelAlias, provider: LLMProvider): string {
+  return provider === "gemini" ? GEMINI_MODEL_MAP[alias] : MODEL_MAP[alias];
+}

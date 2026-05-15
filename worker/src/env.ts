@@ -1,16 +1,55 @@
 // Shared binding shape — keep in sync with wrangler.toml
 
+export type LLMProvider = "gemini" | "anthropic";
+
 export interface Env {
-  // Secrets (wrangler secret put)
-  ANTHROPIC_API_KEY: string;
+  // Secrets (wrangler secret put — locally: worker/.dev.vars, gitignored)
+  GEMINI_API_KEY?: string;           // default provider key (see resolveProvider)
+  ANTHROPIC_API_KEY?: string;        // peer provider — used when LLM_PROVIDER=anthropic
   HPS_SIGNING_SECRET: string;
-  HPS_ADMIN_PASSWORD?: string;       // fallback if Cloudflare Access not used
+  HPS_ADMIN_PASSWORD?: string;       // used if Cloudflare Access not configured
 
   // Vars
   ENVIRONMENT: "production" | "dev";
+  // Switchable upstream LLM. Defaults to "gemini" when GEMINI_API_KEY is set.
+  // Set "anthropic" (with ANTHROPIC_API_KEY) to switch — a peer, not a fallback.
+  LLM_PROVIDER?: LLMProvider;
 
   // Bindings
   HPS_KV: KVNamespace;
   HPS_DB: D1Database;
   HPS_ANALYTICS: AnalyticsEngineDataset;
+}
+
+export interface ResolvedProvider {
+  provider: LLMProvider;
+  apiKey: string;
+}
+
+/**
+ * Decide which upstream LLM to call and which key to use. Gemini and
+ * Anthropic are switchable peers:
+ *  - Explicit LLM_PROVIDER wins, but only if its key is present.
+ *  - With no LLM_PROVIDER, default to "gemini" when GEMINI_API_KEY is set.
+ *  - If only an Anthropic key is present, use "anthropic".
+ *
+ * Throws when the chosen provider has no key — surfaced to the client as a
+ * 502 config error rather than a silent unauthenticated upstream call.
+ */
+export function resolveProvider(env: Env): ResolvedProvider {
+  const gem = env.GEMINI_API_KEY?.trim();
+  const ant = env.ANTHROPIC_API_KEY?.trim();
+
+  if (env.LLM_PROVIDER === "anthropic") {
+    if (!ant) throw new Error("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set");
+    return { provider: "anthropic", apiKey: ant };
+  }
+  if (env.LLM_PROVIDER === "gemini") {
+    if (!gem) throw new Error("LLM_PROVIDER=gemini but GEMINI_API_KEY is not set");
+    return { provider: "gemini", apiKey: gem };
+  }
+  // No explicit provider → default to Gemini when its key is set.
+  if (gem) return { provider: "gemini", apiKey: gem };
+  if (ant) return { provider: "anthropic", apiKey: ant };
+  throw new Error("no LLM key configured (set GEMINI_API_KEY in worker/.dev.vars)");
 }

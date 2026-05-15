@@ -6,7 +6,8 @@ Cloudflare Worker = HypeProof Studio's proxy + admin UI. Everything in this dire
 
 - Cloudflare account (any plan, free works for poc; Workers Paid $5/mo if you need >100k req/day or Analytics Engine SQL)
 - `wrangler` CLI (installed via `npm install` in this dir)
-- Anthropic API key
+- Gemini API key (default provider — https://aistudio.google.com/apikey).
+  Anthropic key if you switch `LLM_PROVIDER=anthropic` (a peer provider).
 
 ## One-time setup
 
@@ -30,9 +31,10 @@ npx wrangler d1 create hypeproof-studio
 npx wrangler d1 execute hypeproof-studio --remote --file=schema.sql
 
 # 5. Set secrets (interactive — paste values when prompted)
-npx wrangler secret put ANTHROPIC_API_KEY      # sk-ant-...
+npx wrangler secret put GEMINI_API_KEY         # default provider (AIza...)
 npx wrangler secret put HPS_SIGNING_SECRET     # openssl rand -hex 32
 npx wrangler secret put HPS_ADMIN_PASSWORD     # dev fallback only; set Cloudflare Access in prod
+# npx wrangler secret put ANTHROPIC_API_KEY    # when LLM_PROVIDER=anthropic in wrangler.toml
 
 # 6. (Optional) Custom domain
 #    In Cloudflare dashboard → Workers → hypeproof-studio-api → Custom Domains
@@ -82,8 +84,8 @@ npx wrangler deploy
 # Tail live logs:
 npx wrangler tail
 
-# Edit secret:
-npx wrangler secret put ANTHROPIC_API_KEY
+# Edit / rotate the active key:
+npx wrangler secret put GEMINI_API_KEY
 ```
 
 ## Cloudflare Access (recommended for /admin/*)
@@ -106,8 +108,12 @@ After this, `/admin/*` and `/` are gated by Cloudflare login. The Worker still f
 | Workers req | 100k/day | $0.50 / 1M (Paid plan $5/mo base) |
 | KV reads | 100k/day | $0.50 / 1M |
 | D1 storage | 5 GB | $0.75 / GB/mo |
-| Anthropic | — | Sonnet 4.6: $3 in / $15 out per 1M tok |
+| Gemini (default) | generous free tier | 2.5 Pro: ~$1.25 in / $10 out per 1M tok |
+| Anthropic (peer) | — | Sonnet 4.6: $3 in / $15 out per 1M tok |
+
+No prompt caching on Gemini's OpenAI-compatible endpoint, so the skeleton
+library (~few KB) re-sends each turn — fine for free-tier testing volumes.
 
 1회차 estimate (6 kids × 8h × ~50 turns × 800 tokens average):
-- 6 × 50 × 1600 = 480k Anthropic tokens ≈ $3-4 in Sonnet
+- 6 × 50 × 1600 = 480k tokens — within Gemini free tier for a single cohort
 - Cloudflare: 6 × 50 = 300 req → well inside free tier

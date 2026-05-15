@@ -12,12 +12,13 @@
 //   9. Log usage to Analytics Engine + D1
 
 import { Hono } from "hono";
-import type { Env } from "../env";
+import { resolveProvider, type Env } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { getProfile } from "../profiles";
-import { translate, type CoachContext } from "../lib/translate";
+import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropic } from "../lib/anthropic";
-import { transformStream } from "../lib/sse";
+import { callGemini } from "../lib/gemini";
+import { transformStream, passThroughOpenAIStream } from "../lib/sse";
 import { getActiveSession, getRoster, isSessionLive } from "../lib/kv";
 import { logChat, persistUsage } from "../lib/analytics";
 
@@ -143,7 +144,7 @@ chat.post("/chat/completions", async (c) => {
     );
   }
 
-  // 6. Translate (with optional coach context from headers)
+  // 6. Build the upstream request (with optional coach context from headers)
   let body: unknown;
   try {
     body = await c.req.json();
@@ -154,19 +155,39 @@ chat.post("/chat/completions", async (c) => {
     name: decodeHeader(c.req.header("x-hps-coach-name")),
     personality: decodeHeader(c.req.header("x-hps-coach-personality")),
   };
-  let anthropicBody;
+
+  // Pick the upstream LLM (switchable peers; default Gemini — see
+  // resolveProvider). translate / translateOpenAI both drop client
+  // system+tool messages — the trust model is identical either way.
+  let provider: "gemini" | "anthropic";
+  let apiKey: string;
   try {
-    anthropicBody = translate(body as any, profile, coach);
+    ({ provider, apiKey } = resolveProvider(env));
+  } catch (err) {
+    return c.json({ error: { message: String(err), type: "config" } }, 502);
+  }
+
+  const stream = (body as any)?.stream === true;
+  let upstream: Response;
+  let modelLabel: string;
+  try {
+    if (provider === "gemini") {
+      const gBody = translateOpenAI(body as any, profile, coach, "gemini");
+      gBody.stream = stream;
+      if (stream) gBody.stream_options = { include_usage: true };
+      modelLabel = gBody.model;
+      upstream = await callGemini(gBody, apiKey);
+    } else {
+      const aBody = translate(body as any, profile, coach);
+      aBody.stream = stream;
+      modelLabel = aBody.model;
+      upstream = await callAnthropic(aBody, apiKey);
+    }
   } catch (err) {
     return c.json({ error: { message: String(err), type: "request" } }, 400);
   }
 
-  const stream = (body as any)?.stream === true;
-  anthropicBody.stream = stream;
-  const modelLabel = anthropicBody.model;
-
-  // 7. Upstream
-  const upstream = await callAnthropic(anthropicBody, env.ANTHROPIC_API_KEY);
+  // 7. Upstream guard
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
     return c.json(
@@ -180,66 +201,83 @@ chat.post("/chat/completions", async (c) => {
     );
   }
 
-  if (!stream) {
-    // Non-streaming: collect and translate
-    const j = (await upstream.json()) as any;
-    const text = (j.content ?? [])
-      .filter((b: any) => b.type === "text")
-      .map((b: any) => b.text)
-      .join("");
-    const u = j.usage ?? {};
-    const log = {
-      cohort_id: payload.c,
-      user_id: payload.u,
-      profile_id: profile.id,
-      model: modelLabel,
-      status: 200,
-      tokens_in: u.input_tokens ?? 0,
-      tokens_out: u.output_tokens ?? 0,
-      cache_read: u.cache_read_input_tokens ?? 0,
-      cache_create: u.cache_creation_input_tokens ?? 0,
-      latency_ms: Date.now() - startedAt,
-    };
+  const mkLog = (
+    tokens_in: number,
+    tokens_out: number,
+    cache_read: number,
+    cache_create: number,
+  ) => ({
+    cohort_id: payload.c,
+    user_id: payload.u,
+    profile_id: profile.id,
+    model: modelLabel,
+    status: 200,
+    tokens_in,
+    tokens_out,
+    cache_read,
+    cache_create,
+    latency_ms: Date.now() - startedAt,
+  });
+  const record = (log: ReturnType<typeof mkLog>) => {
     logChat(env, log);
     c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
+  };
+
+  if (!stream) {
+    // Non-streaming: normalize either provider's body to an OpenAI response.
+    const j = (await upstream.json()) as any;
+    let text = "";
+    let tin = 0;
+    let tout = 0;
+    let cr = 0;
+    let cc = 0;
+    let finish = "stop";
+    if (provider === "gemini") {
+      text = j.choices?.[0]?.message?.content ?? "";
+      finish = j.choices?.[0]?.finish_reason ?? "stop";
+      tin = j.usage?.prompt_tokens ?? 0;
+      tout = j.usage?.completion_tokens ?? 0;
+    } else {
+      text = (j.content ?? [])
+        .filter((b: any) => b.type === "text")
+        .map((b: any) => b.text)
+        .join("");
+      finish = j.stop_reason ?? "stop";
+      tin = j.usage?.input_tokens ?? 0;
+      tout = j.usage?.output_tokens ?? 0;
+      cr = j.usage?.cache_read_input_tokens ?? 0;
+      cc = j.usage?.cache_creation_input_tokens ?? 0;
+    }
+    const log = mkLog(tin, tout, cr, cc);
+    record(log);
     return c.json({
-      id: j.id,
+      id: j.id ?? "chatcmpl-hps",
       object: "chat.completion",
       model: modelLabel,
-      choices: [
-        {
-          index: 0,
-          message: { role: "assistant", content: text },
-          finish_reason: j.stop_reason ?? "stop",
-        },
-      ],
+      choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: finish }],
       usage: {
-        prompt_tokens: log.tokens_in,
-        completion_tokens: log.tokens_out,
-        total_tokens: log.tokens_in + log.tokens_out,
+        prompt_tokens: tin,
+        completion_tokens: tout,
+        total_tokens: tin + tout,
       },
     });
   }
 
-  // 8. Streaming: pipe transformed SSE
-  const transformed = transformStream(upstream.body, modelLabel, (u) => {
-    const log = {
-      cohort_id: payload.c,
-      user_id: payload.u,
-      profile_id: profile.id,
-      model: modelLabel,
-      status: 200,
-      tokens_in: u.input_tokens,
-      tokens_out: u.output_tokens,
-      cache_read: u.cache_read_input_tokens,
-      cache_create: u.cache_creation_input_tokens,
-      latency_ms: Date.now() - startedAt,
-    };
-    logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
-  });
+  // 8. Streaming: Gemini already emits OpenAI chunks (passthrough + usage tap);
+  //    Anthropic events are transformed to OpenAI chunks.
+  const onUsage = (u: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_input_tokens: number;
+    cache_creation_input_tokens: number;
+  }) => record(mkLog(u.input_tokens, u.output_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens));
 
-  return new Response(transformed, {
+  const outStream =
+    provider === "gemini"
+      ? passThroughOpenAIStream(upstream.body, onUsage)
+      : transformStream(upstream.body, modelLabel, onUsage);
+
+  return new Response(outStream, {
     headers: {
       "content-type": "text/event-stream",
       "cache-control": "no-cache",

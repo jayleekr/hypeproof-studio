@@ -39,10 +39,16 @@ fallthrough = true
 
 [vars]
 ENVIRONMENT = "production"
-# ANTHROPIC_API_KEY, HPS_SIGNING_SECRET set via:
-#   wrangler secret put ANTHROPIC_API_KEY
+# Switchable upstream LLM (see resolveProvider in src/env.ts). Defaults to
+# "gemini" when GEMINI_API_KEY is set; "anthropic" is a peer, not a fallback.
+LLM_PROVIDER = "gemini"
+# Secrets — production: `wrangler secret put <NAME>`
+#   wrangler secret put GEMINI_API_KEY      # default provider key
 #   wrangler secret put HPS_SIGNING_SECRET
+#   wrangler secret put ANTHROPIC_API_KEY   # when LLM_PROVIDER=anthropic
+# Local dev: put them in worker/.dev.vars (gitignored). Fastest:
+#   bash scripts/dev-secrets.sh             # pulls Gemini key from ~/.env
 
 [env.dev]
 name = "hypeproof-studio-api-dev"
-vars = { ENVIRONMENT = "dev" }
+vars = { ENVIRONMENT = "dev", LLM_PROVIDER = "gemini" }
