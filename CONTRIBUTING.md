@@ -16,6 +16,7 @@ Quick map:
 | Run tests | DEV-GUIDE §4 |
 | Report something you noticed | DEV-GUIDE §5 (`/report-ui`) |
 | Land a code change | DEV-GUIDE §6 (`/hype-open-pr` skill) |
+| Run several issues in parallel | DEV-GUIDE §7 (`claude -w`) |
 
 No terminal? File issues via the web forms
 ([feature](.github/ISSUE_TEMPLATE/feature_request.yml) ·

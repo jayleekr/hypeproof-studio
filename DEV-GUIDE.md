@@ -193,6 +193,69 @@ Script-only path: `bash scripts/open-pr.sh` (fill the body manually). The
 
 ---
 
+## 7. 병행 작업 / Parallel work (worktrees)
+
+여러 이슈를 동시에 굴릴 땐 **Claude Code 네이티브 worktree**를 씁니다 — 별도
+스크립트 불필요:
+
+```bash
+claude -w issue-12        # 이슈 #12용 새 worktree + 세션
+claude -w issue-15 --tmux # 또 다른 이슈를 별도 worktree(+tmux 패널)에서
+```
+
+흐름은 §5–6과 동일: **이슈 발행(`/report-ui`) → 이슈별 worktree에서
+`fix/issue-N-slug` 브랜치 작업 → `/hype-open-pr` → merge 후 worktree 정리.**
+worktree는 worker/extension/docs **병행 작업용**(핫리로드, 앱 재빌드 0).
+
+이 프로젝트의 함정 3개 — worktree를 어떻게 만들든 동일하게 적용:
+
+1. **포트 8787 충돌.** `dev-stack.sh`는 8787 하드코딩. **동시에 라이브 스택은
+   1개만.** 다른 worktree는 코드 + `cd worker && npm test`(스택 불필요)로 검증.
+2. **새 worktree엔 빌드된 `.app`이 없음.** e2e는 worktree 자기 디렉토리에서
+   앱을 찾음. **빌드·e2e는 primary clone에서만** — worktree마다 빌드(1–2h·6GB)
+   금지.
+3. **`worker/.dev.vars`는 디렉토리별**(gitignored, 복사 안 됨). 새 worktree에서
+   워커를 돌리려면 복사: `cp <primary>/worker/.dev.vars worker/.dev.vars`.
+   서브모듈 `vscodium-base`도 미체크아웃 — worker/extension/docs 작업엔 불필요.
+
+`pre-push` 가드와 `core.hooksPath`는 공유 `.git`이라 모든 worktree에 자동 적용.
+worktree 디렉토리는 `.claude/worktrees/`(gitignored)에 두면 깔끔합니다.
+
+<details><summary>English</summary>
+
+For several issues in parallel, use **Claude Code's native worktree** — no
+custom script:
+
+```bash
+claude -w issue-12          # new worktree + session for issue #12
+claude -w issue-15 --tmux   # another issue in its own worktree (+tmux)
+```
+
+Same flow as §5–6: file the issue (`/report-ui`) → work a
+`fix/issue-N-slug` branch in the per-issue worktree → `/hype-open-pr` →
+tidy up after merge. Worktrees are for **parallel worker/extension/docs**
+work (hot-reload, no app rebuild).
+
+Three project gotchas — true no matter how the worktree is made:
+
+1. **Port 8787 collides.** `dev-stack.sh` hardcodes 8787 — only **one live
+   stack at a time**. Other worktrees: code + `cd worker && npm test` (no
+   stack needed).
+2. **A fresh worktree has no built `.app`.** e2e looks for the app in its
+   own dir. **Build & e2e only in the primary clone** — never rebuild per
+   worktree (1–2 h, 6 GB).
+3. **`worker/.dev.vars` is per-directory** (gitignored, not copied). To run
+   the worker in a new worktree:
+   `cp <primary>/worker/.dev.vars worker/.dev.vars`. The `vscodium-base`
+   submodule is also unchecked out — fine for worker/extension/docs.
+
+The `pre-push` guard and `core.hooksPath` live in the shared `.git`, so they
+apply in every worktree. Keep worktree dirs under `.claude/worktrees/`
+(gitignored).
+</details>
+
+---
+
 ## 부록 / Appendix
 
 - **플랫폼**: 빌드/`/report-ui` = macOS arm64만. Win은 CI 빌드만(METAPLAN §0/§6).
