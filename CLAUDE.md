@@ -21,7 +21,7 @@ Next milestones:
 - Live preview extension (`hypeproof-preview`) — separate sprint
 - 2회차–4회차 profile content
 
-See `STATUS-2026-05-15-overnight.md` for latest detailed snapshot.
+Progress tracking: METAPLAN §10. Latest detail: git history.
 
 ## Repo layout
 

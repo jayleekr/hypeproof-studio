@@ -25,8 +25,7 @@
   <a href="./docs/essence-v0.1.md">16 Essences</a> ·
   <a href="./docs/INSTALL.md">Install (workshop)</a> ·
   <a href="./docs/COHORT-AUTHORING.md">Authoring cohorts</a> ·
-  <a href="./CONTRIBUTING.md">Contributing</a> ·
-  <a href="./STATUS-2026-05-15-overnight.md">Latest status</a>
+  <a href="./CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
