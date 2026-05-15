@@ -6,6 +6,24 @@ feature that's missing, an interaction that feels wrong, or a bug.
 
 Capture it while it's fresh. Don't save it for later — file it from where you are.
 
+## Your first contribution, end to end
+
+The whole arc, in order. Each step links to its detailed section.
+
+| # | Phase | Command (macOS) | Section |
+|---|---|---|---|
+| 1 | Clone (with submodule) | `git clone --recursive …` | [Environment setup](#environment-setup-contributors-who-build--dev) |
+| 2 | Install environment | `brew … && nvm … && gh auth login` | [Environment setup](#environment-setup-contributors-who-build--dev) |
+| 3 | Build the app (once, 1–2 h) | `bash scripts/run-build.sh …` | [Build the app](#build-the-app) |
+| 4 | Run + test | `scripts/dev-stack.sh`, `npm test` | [Run & test](#run--test) |
+| 5 | Use the Studio, notice something | — | [The fast path](#the-fast-path-report-ui) |
+| 6 | File the issue | `/report-ui` | [The fast path](#the-fast-path-report-ui) |
+| 7 | Fix the code → PR | `git switch -c fix/issue-N-…` | [Contributing code](#contributing-code-issue--pr) |
+
+Steps 1–4 are one-time setup. Day to day you live in steps 5–7. You do **not**
+need to rebuild the app for worker/extension changes — only for a fresh clone or
+a `vscodium-base` change (see [Build the app](#build-the-app)).
+
 ## The fast path: `/report-ui`
 
 From a terminal in the repo, run the Claude Code skill:
@@ -101,14 +119,55 @@ HPS_SIGNING_SECRET=...       # any strong random string (shared per cohort)
 HPS_ADMIN_PASSWORD=dev       # local admin UI password
 EOF
 
-# 5. Run the stack + tests
-bash scripts/dev-stack.sh                       # wrangler dev + roster + token
+```
+
+That covers steps 1–2 of the journey. Next: build, then test.
+
+### Build the app
+
+You need a built `.app` for the Playwright screenshot path of `/report-ui`,
+for the full e2e suite, and to see UI changes in the real shell. You do **not**
+need it for worker or extension-logic iteration (those hot-reload / rebuild on
+their own — see [Contributing code](#contributing-code-issue--pr)).
+
+A full build is **1–2 h** and writes **10–20 GB**. Run it once after cloning:
+
+```bash
+cd vscodium-base
+source ../hypeproof-studio.env
+bash get_repo.sh && bash prepare_src.sh && bash prepare_vscode.sh
+bash ../scripts/run-build.sh ../logs/build-$(date +%Y%m%d-%H%M%S).log
+```
+
+Verify it built:
+
+```bash
+ls "vscodium-base/VSCode-darwin-arm64/HypeProof Studio.app"
+open "vscodium-base/VSCode-darwin-arm64/HypeProof Studio.app"   # smoke
+```
+
+Same procedure with failure modes and the **submodule bump policy** (pinned —
+do not auto-follow): [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md).
+Also summarised in the README's
+[Build from source](./README.md#build-from-source-macos-arm64) section.
+
+### Run & test
+
+Three test layers — run the one(s) your change touches before opening a PR:
+
+```bash
+# 1. Local stack (wrangler dev + roster + token at /tmp/hps-token.txt)
+bash scripts/dev-stack.sh
+
+# 2. Worker unit/smoke (9 tests) + typecheck — needs the stack NOT required
+cd worker && npm test && npm run typecheck
+
+# 3. End-to-end (13 tests) — needs the built .app AND dev-stack running
 cd e2e && npm install && npx playwright install chromium && npm test
 ```
 
-You only need a built `.app` (`bash scripts/run-build.sh`, 1–2 h) for the
-Playwright screenshot path and full e2e — not for worker/extension iteration.
-Full build rules: [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md).
+If e2e fails at preflight it tells you which of `.app` / wrangler / token is
+missing — fix that and re-run.
 
 ## Contributing code (issue → PR)
 
@@ -131,10 +190,14 @@ Flow:
 2. **Branch** off `main`: `fix/issue-<N>-<slug>` (bug) or
    `feat/issue-<N>-<slug>` (feature). The slug matches the issue's
    `HPS-SOLVER` marker when filed via the skill.
-3. **Build locally**: day-to-day work is in `worker/`,
-   `extensions/hypeproof-chat/`, `scripts/` — none of which bumps the
-   `vscodium-base` submodule (pinned; don't auto-follow — see
-   [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md)).
+3. **Change + verify locally** (no app rebuild needed; never bumps the
+   `vscodium-base` submodule):
+   - **Worker** (`worker/`): `wrangler dev` hot-reloads. Verify with
+     `cd worker && npm test && npm run typecheck`.
+   - **Extension** (`extensions/hypeproof-chat/`): `npm run build` (or
+     `npm run watch:extension` / `watch:webview`), then reload the Extension
+     Development Host. Re-run the relevant `e2e/` spec for UI changes.
+   - Run the matching [Run & test](#run--test) layer before pushing.
 4. **Open the PR.** Put `Closes #<N>` in the body so the merge auto-closes the
    issue. Chat-panel features must cite the Essence(s) they serve.
 5. **Merge** once green (squash or merge; keep history sane). Delete the branch.
