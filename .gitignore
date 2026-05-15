@@ -24,6 +24,11 @@ hypeproof-studio.env
 .vscode/
 .idea/
 
+# Git worktree checkouts (e.g. .claude/worktrees/ux) — separate working trees
+# of this same repo; never track them on main. Skills/rules under .claude/
+# stay tracked.
+.claude/worktrees/
+
 # Python cache
 **/__pycache__/
 *.pyc
