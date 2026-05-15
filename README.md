@@ -25,7 +25,7 @@
   <a href="./docs/essence-v0.1.md">16 Essences</a> ·
   <a href="./docs/INSTALL.md">Install (workshop)</a> ·
   <a href="./docs/COHORT-AUTHORING.md">Authoring cohorts</a> ·
-  <a href="./CONTRIBUTING.md">Contributing</a>
+  <a href="./DEV-GUIDE.md">Dev guide</a>
 </p>
 
 ---
@@ -139,10 +139,11 @@ Automation lands in Phase 6 (`.github/workflows/upstream-sync.yml`, `release.yml
 
 ## Contributing
 
-Most contributions start as a noticing while using the Studio. File it from
-where you are with the `/report-ui` skill — see
-[CONTRIBUTING.md](./CONTRIBUTING.md) for the full flow (setup, platform support,
-issue → PR). The team is listed in [CONTRIBUTORS.md](./CONTRIBUTORS.md).
+Most contributions start as a noticing while using the Studio. The full
+contributor guide is **[DEV-GUIDE.md](./DEV-GUIDE.md)** — bilingual (KR/EN),
+built to be run by Claude Code (*"follow DEV-GUIDE.md"*) through pre-built
+harness. [CONTRIBUTING.md](./CONTRIBUTING.md) is the quick map; the team is in
+[CONTRIBUTORS.md](./CONTRIBUTORS.md).
 
 ## License
 

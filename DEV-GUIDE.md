@@ -1,0 +1,213 @@
+# HypeProof Studio — 개발자 가이드 / Dev Guide
+
+이 문서는 **Claude Code로 그대로 실행**하도록 만든 가이드입니다. 컨트리뷰터는
+Claude Code에게 *"DEV-GUIDE.md 따라서 진행해줘"* 라고 하면, 아래 단계가 미리
+만들어 둔 하네스(스크립트·스킬·템플릿)로 실행됩니다. 각 단계는 "직접 알아내기"가
+아니라 "이 명령 실행"입니다.
+
+<details><summary>English</summary>
+
+This guide is written to be **run by Claude Code**. Tell Claude Code *"follow
+DEV-GUIDE.md"* and each step below executes through pre-built harness (scripts,
+skills, templates). Every step is "run this", not "figure this out".
+</details>
+
+---
+
+## 0. 전제 / Prerequisites
+
+- **Claude Code를 쓴다고 가정**합니다. 모든 단계가 Claude Code 실행 기준.
+- 로컬 빌드·개발은 **macOS arm64 전용**. Windows/Linux는 빌드 불가 — 이슈는
+  웹 폼으로(§5). 워크숍 참가자(Win)는 설치본만 받으므로 이 가이드 대상 아님.
+- `jayleekr/hypeproof-studio` 접근 권한 + GitHub 계정.
+
+<details><summary>English</summary>
+
+- **Assumes Claude Code.** Every step is phrased for Claude Code to execute.
+- Local build/dev is **macOS arm64 only**. Windows/Linux can't build — file
+  issues via the web forms (§5). Windows workshop participants only get the
+  installer and are not the audience here.
+- Access to `jayleekr/hypeproof-studio` + a GitHub account.
+</details>
+
+---
+
+## 1. 한 번에 셋업 / One-command setup
+
+```bash
+git clone --recursive git@github.com:jayleekr/hypeproof-studio.git
+cd hypeproof-studio
+bash scripts/setup.sh
+```
+
+`setup.sh`는 멱등(idempotent)·안전합니다: 툴체인 점검, 서브모듈 init,
+`worker/.dev.vars` 생성 + Gemini 키 주입(`dev-secrets.sh`), worker/e2e 의존성
+설치, main 직푸시 방지 가드 활성화. 빠진 건 **자동 설치하지 않고 정확한 명령을
+출력**합니다 (예: `brew install nvm`).
+
+<details><summary>English</summary>
+
+`setup.sh` is idempotent and safe: checks toolchain, inits the submodule,
+creates `worker/.dev.vars` + pulls the Gemini key via `dev-secrets.sh`,
+installs worker/e2e deps, enables the pre-push guard. Anything missing is
+**printed as an exact command, never auto-installed**.
+</details>
+
+---
+
+## 2. 키 & provider / Keys & providers
+
+- provider는 **스위칭 가능**: 워커가 `LLM_PROVIDER`(`gemini`|`anthropic`)를 읽어
+  맞는 키 사용. **Gemini**는 워크숍 비용상 기본 모델. **Anthropic은 fallback이
+  아니라 동급** — 컨트리뷰터 전원 Claude Code를 쓰니 개발 중엔 Claude가 자연스러운
+  provider. `worker/.dev.vars`에 `LLM_PROVIDER=anthropic` + `ANTHROPIC_API_KEY`
+  한 줄, 코드 변경 0.
+- **키는 서버(Worker)에만** 존재. 빌드된 앱은 raw API 키를 임포트하지 않고
+  *workshop token*만 보관 → 앱이 새도 키는 안 샘.
+- **테스트 목적 키 사용은 자유** — 빌드 앱 마음껏, 에이전트 방치, e2e 루프 다
+  정상 dev 트래픽. 비용 걱정 불필요.
+- 단 하나의 규칙: **키 자체를 커밋/공개 위치에 붙여넣지 말 것.**
+  `worker/.dev.vars`는 gitignore + `chmod 600`, `.example`만 커밋.
+  `/report-ui`·`collect-studio-env.sh`는 설계상 시크릿 미포함. 새면 Jay에게
+  알려 로테이션 — 드라마 없음.
+- 로컬-dev 빌드는 `proxyUrl`이 localhost면 `dev-stack.sh`가 쓴
+  `/tmp/hps-token.txt`를 자동 임포트(매번 붙여넣기 불필요). 워크숍 빌드
+  (`proxyUrl=https://api.hypeproof.ai/v1`)는 그 경로를 절대 안 읽음.
+
+<details><summary>English</summary>
+
+- Provider is **switchable** via `LLM_PROVIDER` (`gemini`|`anthropic`). Gemini
+  is the cost-chosen workshop default; **Anthropic is a peer, not a fallback**
+  (everyone uses Claude Code, so Claude is natural while developing) — one env
+  line, no code change.
+- The **key lives server-side (Worker) only**. The built app holds a workshop
+  token, never a raw API key — a leaked app can't expose the key.
+- **Testing usage is free** — hammer the app, leave agents running, loop e2e.
+  Expected dev traffic, not a concern.
+- One rule: **don't commit or publicly paste the key.** `worker/.dev.vars` is
+  gitignored + `chmod 600`; only `.example` is committed. `/report-ui` and
+  `collect-studio-env.sh` are secret-free by design. If a key leaks, tell Jay
+  to rotate — no drama.
+- Local-dev builds (localhost `proxyUrl`) auto-import the token
+  `dev-stack.sh` wrote to `/tmp/hps-token.txt`; workshop builds never read it.
+</details>
+
+---
+
+## 3. 앱 빌드 / Build the app — 최초 1회, ~1–2 h
+
+```bash
+cd vscodium-base
+source ../hypeproof-studio.env
+bash get_repo.sh && bash prepare_src.sh && bash prepare_vscode.sh
+bash ../scripts/run-build.sh ../logs/build-$(date +%Y%m%d-%H%M%S).log
+# 검증:
+open "vscodium-base/VSCode-darwin-arm64/HypeProof Studio.app"
+```
+
+빌드는 1–2시간, 10–20 GB. **worker/extension만 고칠 땐 재빌드 불필요**(핫리로드).
+앱 빌드가 필요한 경우: 최초 클론, `vscodium-base` 변경, UI를 실제 셸에서 확인.
+실패 모드·서브모듈 핀 정책: [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md).
+
+<details><summary>English</summary>
+
+Build is 1–2 h, 10–20 GB. **No rebuild for worker/extension changes**
+(hot-reload). You need a built app for: first clone, a `vscodium-base` change,
+or seeing UI in the real shell. Failure modes + submodule pin policy:
+[.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md).
+</details>
+
+---
+
+## 4. 실행 & 테스트 / Run & test
+
+```bash
+bash scripts/dev-stack.sh                       # wrangler dev + roster + token
+cd worker && npm test && npm run typecheck      # 9 smoke + types (no stack needed)
+cd e2e && npm test                              # 13 e2e (needs built app + dev-stack)
+```
+
+고친 영역에 해당하는 레이어만 돌리면 됩니다. e2e가 preflight에서 실패하면
+`.app`/wrangler/token 중 무엇이 없는지 알려줍니다.
+
+<details><summary>English</summary>
+
+Run the layer(s) your change touched. If e2e fails at preflight it names which
+of `.app` / wrangler / token is missing.
+</details>
+
+---
+
+## 5. 쓰다가 발견 → 이슈 / Notice something → file an issue
+
+```
+/report-ui
+```
+
+타입(feature/ux/bug) 선택 → 모국어로 서술 → 스크린샷(실제 창 클릭 or Playwright
+재현, 생략 가능) → 환경 스냅샷·라벨 자동 부착 이슈 생성 → URL 반환. macOS 전용;
+Windows/Linux는 GitHub 웹 폼([feature](.github/ISSUE_TEMPLATE/feature_request.yml)
+· [ux](.github/ISSUE_TEMPLATE/ux_suggestion.yml)
+· [bug](.github/ISSUE_TEMPLATE/bug_report.yml)) + 스크린샷 수동 첨부.
+
+<details><summary>English</summary>
+
+`/report-ui`: pick type → describe in your language → screenshot (live window
+or Playwright repro, optional) → issue created with env snapshot + labels →
+URL. macOS only; Windows/Linux use the GitHub web forms + manual screenshot.
+</details>
+
+---
+
+## 6. 코드 고치기 → PR / Fix code → PR
+
+**정책: PR 필수, 리뷰 선택.** main 직푸시는 메인테이너(Jay) 전용.
+
+```bash
+git switch -c fix/issue-<N>-<slug>      # 또는 feat/issue-<N>-<slug>
+# … 수정 + §4의 해당 테스트 통과 …
+bash scripts/open-pr.sh                  # 브랜치 push + PR 생성(템플릿 자동)
+```
+
+`open-pr.sh`는 main이면 거부하고, feature 브랜치를 push한 뒤
+`.github/pull_request_template.md`로 PR을 엽니다. PR 본문의 `Closes #<N>`,
+Essence(챗 패널 변경 시 §4.5 번호), Tested 섹션을 채우세요. CI `main-guard`가
+비-PR main 푸시를 빨간 빌드로 표시(메인테이너·`[skip-main-guard]` 제외).
+merge 후 브랜치 삭제.
+
+<details><summary>English</summary>
+
+**Policy: PR-first, review optional.** Direct main push is maintainer-only.
+`open-pr.sh` refuses on main, pushes the feature branch, opens a PR with the
+template. Fill `Closes #<N>`, Essence (§4.5 number for chat-panel), Tested.
+The `main-guard` CI flags non-PR main pushes red. Delete the branch after merge.
+</details>
+
+---
+
+## 부록 / Appendix
+
+- **플랫폼**: 빌드/`/report-ui` = macOS arm64만. Win은 CI 빌드만(METAPLAN §0/§6).
+- **가드 2겹**: `.githooks/pre-push`(로컬, `setup.sh`가 활성) +
+  `.github/workflows/main-guard.yml`(CI). 둘 다 소프트 — 서버측 차단은 유료
+  플랜 필요(미적용).
+- **건드리지 말 것**: `vscodium-base` 서브모듈 핀(의도적 bump만 —
+  [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md)),
+  `worker/.dev.vars`(시크릿).
+- 스킬은 `/skill-creator`로만 만들고 고침(`.claude/skills/skill-creator`).
+- 팀: [CONTRIBUTORS.md](./CONTRIBUTORS.md) · 페이즈/게이트: [METAPLAN.md](./METAPLAN.md)
+  · 제품 철학: [docs/essence-v0.1.md](./docs/essence-v0.1.md)
+
+<details><summary>English</summary>
+
+- **Platform**: build/`/report-ui` = macOS arm64 only; Win is CI-only
+  (METAPLAN §0/§6).
+- **Two soft guards**: `.githooks/pre-push` (local, enabled by `setup.sh`) +
+  `main-guard` CI. Server-side blocking needs a paid plan (not applied).
+- **Don't touch**: the `vscodium-base` submodule pin (deliberate bumps only),
+  `worker/.dev.vars` (secrets).
+- Skills are created/edited only via `/skill-creator`.
+- Team: [CONTRIBUTORS.md](./CONTRIBUTORS.md) · phases/gates:
+  [METAPLAN.md](./METAPLAN.md) · philosophy:
+  [docs/essence-v0.1.md](./docs/essence-v0.1.md)
+</details>
