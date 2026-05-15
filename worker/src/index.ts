@@ -8,7 +8,7 @@ import adminHtml from "./ui/admin.html";
 const app = new Hono<{ Bindings: Env }>();
 
 // Friendly root → redirect to admin UI (which itself is access-gated)
-app.get("/", (c) => {
+app.get("/", () => {
   return new Response(adminHtml as unknown as string, {
     headers: { "content-type": "text/html; charset=utf-8" },
   });

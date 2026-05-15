@@ -7,7 +7,7 @@ export const profile: Profile = {
   version: 1,
   display_name: "SK바이오팜 가족 워크숍 (3-4학년) — 1회차",
   audience: {
-    age_range: [8, 10],
+    age_range: [9, 10],
     language: "ko",
     parent_coaching: true,
   },
@@ -50,5 +50,54 @@ export const profile: Profile = {
   analytics: {
     log_user_messages: false,
     log_metadata: true,
+  },
+  ux: {
+    // 1회차 Foundation: "입력이 결과를 결정한다". UX 전체가 자녀에게
+    //   "자세히 말하면 멋진 게 나온다"를 몸으로 가르치는 도구.
+    coach: {
+      naming_mode: "user_names_it",
+      fallback_name: "코치",
+      naming_prompt_md: "같이 게임 만들 친구의 **이름**을 지어주세요 🎮",
+      personality_prompt_md: "이 친구는 어떤 친구예요? *(예: 친절한 친구, 엉뚱한 친구. 건너뛰어도 괜찮아요)*",
+      revisit_on_entry: false,
+    },
+    suggestions: {
+      // 자세한 vs 막연한 대비. 자녀가 좋은 입력 모양을 패턴 매칭으로 학습.
+      // 작은 스코프부터 → 자녀가 첫 시도에 성공 경험.
+      initial: [
+        { text: "원이 좌우로 움직이는 화면 만들어줘", style: "good" },
+        { text: "별이 떨어지고 클릭하면 점수가 오르는 게임", style: "good" },
+        { text: "고양이가 점프해서 생선을 먹는 게임", style: "good" },
+        { text: "노란 캐릭터가 빨간 적을 피하는 게임", style: "good" },
+        { text: "재밌게 만들어줘", style: "weak", caption: "어떤 게 재밌어야 할지 모르겠어요. 자세히!" },
+      ],
+      // 자녀가 다음 한 걸음 떼게. 마지막 chip은 essence 6 "잇기-가설" 씨앗:
+      //   "만약 ___이면" 패턴이 자녀에게 자연스럽게 스며듦 (2-3회차에서 발화).
+      follow_up: [
+        { text: "색을 더 밝게 바꿔줘", style: "good" },
+        { text: "소리 효과를 추가해줘", style: "good" },
+        { text: "점점 빨라지게 해줘", style: "good" },
+        { text: "캐릭터를 내가 좋아하는 동물로 바꿔줘", style: "good" },
+        { text: "적을 한 명 더 추가하면 어떻게 돼?", style: "good" },
+      ],
+    },
+    hints: {
+      short_input: {
+        enabled: true,
+        min_chars: 5,
+        message_md: "💭 조금 더 자세히 알려줄래요? *주인공·움직임·점수* 같은 걸요",
+      },
+      roll_input_button: {
+        enabled: true,
+        label: "✨ 한 번 더 떠올려보기",
+        probe_md: "좋아요! 한 가지만 더 떠올려보세요 — 캐릭터 모양? 색? 점수 규칙?",
+      },
+    },
+    retry_button: {
+      // 1회차: 버튼은 보이지만 카운터 숨김. 자녀가 자연스럽게 발견하는 게 목표.
+      // 2회차 Load(만족유예)에서 show_counter true로 켜져 의미가 노출됨.
+      enabled: true,
+      show_counter: false,
+    },
   },
 };

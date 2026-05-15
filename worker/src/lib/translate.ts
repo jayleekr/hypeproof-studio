@@ -50,7 +50,20 @@ export interface AnthropicRequest {
   stream?: boolean;
 }
 
-export function translate(body: OpenAIRequest, profile: Profile): AnthropicRequest {
+/**
+ * Per-user metadata that gets appended to the system block AFTER the cached
+ * prefix. Keeps caching effective while letting each kid have their own coach.
+ */
+export interface CoachContext {
+  name?: string;
+  personality?: string;
+}
+
+export function translate(
+  body: OpenAIRequest,
+  profile: Profile,
+  coach: CoachContext = {},
+): AnthropicRequest {
   if (!Array.isArray(body.messages)) {
     throw new Error("messages must be an array");
   }
@@ -65,13 +78,20 @@ export function translate(body: OpenAIRequest, profile: Profile): AnthropicReque
 
   const model = MODEL_MAP[resolveAlias(body.model, profile)];
 
+  // System block: cached prefix + non-cached per-user coach tail.
+  const systemBlocks: AnthropicSystemBlock[] = [
+    { type: "text", text: profile.system_prompt, cache_control: { type: "ephemeral" } },
+  ];
+  const coachTail = buildCoachTail(coach);
+  if (coachTail) {
+    systemBlocks.push({ type: "text", text: coachTail });
+  }
+
   const out: AnthropicRequest = {
     model,
     messages: msgs,
     max_tokens: clampInt(body.max_tokens, 1, 16384, DEFAULT_MAX_TOKENS),
-    system: [
-      { type: "text", text: profile.system_prompt, cache_control: { type: "ephemeral" } },
-    ],
+    system: systemBlocks,
   };
 
   if (typeof body.temperature === "number") {
@@ -103,6 +123,26 @@ export function translate(body: OpenAIRequest, profile: Profile): AnthropicReque
   }
 
   return out;
+}
+
+function buildCoachTail(coach: CoachContext): string | null {
+  const name = (coach.name ?? "").trim();
+  const personality = (coach.personality ?? "").trim();
+  if (!name && !personality) return null;
+  const parts: string[] = ["# 사용자의 코치 설정"];
+  if (name) {
+    parts.push(`이 자녀는 당신을 **'${sanitizeForPrompt(name)}'**라고 부릅니다. 응답할 때 자신을 그렇게 칭하세요.`);
+  }
+  if (personality) {
+    parts.push(`자녀가 적은 당신의 성격: "${sanitizeForPrompt(personality)}". 이 톤을 매 응답에 자연스럽게 반영하세요.`);
+  }
+  parts.push("이름과 성격은 자녀가 직접 정한 것입니다. 안전·코드품질·교육원칙은 base system prompt가 항상 우선합니다.");
+  return parts.join("\n");
+}
+
+// Trim and remove characters that could break out of the system block.
+function sanitizeForPrompt(s: string): string {
+  return s.replace(/[\r\n]+/g, " ").replace(/["'`]/g, "").slice(0, 200);
 }
 
 function resolveAlias(requested: string | undefined, profile: Profile): ModelAlias {

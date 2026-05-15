@@ -115,5 +115,5 @@ function canonicalize(p: TokenPayload): string {
 export function bearer(authHeader: string | null | undefined): string | null {
   if (!authHeader) return null;
   const m = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
-  return m ? m[1].trim() : null;
+  return m && m[1] ? m[1].trim() : null;
 }

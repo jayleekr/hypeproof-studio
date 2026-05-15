@@ -1,5 +1,10 @@
-import { useEffect, useRef, useState } from "react";
-import type { ChatConfig, ChatMessage } from "../../src/protocol";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type {
+  ChatConfig,
+  ChatMessage,
+  SuggestionChip,
+  UxConfig,
+} from "../../src/protocol";
 
 interface Props {
   config: ChatConfig | null;
@@ -7,11 +12,14 @@ interface Props {
   streaming: boolean;
   error: string | null;
   onSend: (text: string) => void;
+  onRetry: (prompt: string) => void;
   onCancel: () => void;
   onClear: () => void;
   onSetToken: () => void;
   onSettings: () => void;
   onRunCode: (html: string) => void;
+  onNamingRitual: () => void;
+  onSaveCoach: (name: string, personality: string) => void;
 }
 
 function extractRenderableHtml(text: string): string | null {
@@ -27,28 +35,122 @@ function extractRenderableHtml(text: string): string | null {
   return null;
 }
 
+const DEFAULT_UX: UxConfig = {
+  coach: {
+    naming_mode: "fixed",
+    fallback_name: "코치",
+    naming_prompt_md: "",
+    personality_prompt_md: "",
+  },
+  suggestions: { initial: [], follow_up: [] },
+  hints: {
+    short_input: { enabled: false, min_chars: 0, message_md: "" },
+    roll_input_button: { enabled: false, label: "", probe_md: "" },
+  },
+  retry_button: { enabled: false, show_counter: false },
+};
+
+/** Find the user prompt that led to a given assistant message, walking backwards. */
+function userPromptBefore(messages: ChatMessage[], assistantId: string): string | null {
+  const idx = messages.findIndex((m) => m.id === assistantId);
+  if (idx < 0) return null;
+  for (let i = idx - 1; i >= 0; i--) {
+    if (messages[i].role === "user") return messages[i].content;
+  }
+  return null;
+}
+
 export function ChatPanel(props: Props) {
   const { config, messages, streaming, error } = props;
   const [draft, setDraft] = useState("");
+  const [composing, setComposing] = useState(false);
+  const [rollExpand, setRollExpand] = useState<{ original: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const ux: UxConfig = config?.profile?.ux ?? DEFAULT_UX;
+  const coachName = config?.coach?.name?.trim() || ux.coach.fallback_name || "코치";
+
+  // Show the kid-friendly naming card when: profile loaded, it asks the kid to
+  // name the coach, and they haven't yet.
+  const needsNaming =
+    !!config?.profile &&
+    config.profile.ux.coach.naming_mode === "user_names_it" &&
+    !config.coach?.configured;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, streaming]);
 
-  const submit = () => {
-    if (!draft.trim() || streaming) return;
-    props.onSend(draft);
+  if (needsNaming && config?.profile) {
+    return (
+      <NamingCard
+        namingPromptMd={config.profile.ux.coach.naming_prompt_md}
+        personalityPromptMd={config.profile.ux.coach.personality_prompt_md}
+        fallbackName={config.profile.ux.coach.fallback_name}
+        onSave={props.onSaveCoach}
+      />
+    );
+  }
+
+  const submit = (text?: string) => {
+    const value = (text ?? draft).trim();
+    if (!value || streaming) return;
+    props.onSend(value);
     setDraft("");
+    setRollExpand(null);
   };
+
+  const handleChip = (chip: SuggestionChip) => {
+    if (chip.style === "weak") return;       // contrast-only chips are not clickable
+    // Drop the chip text into draft and focus textarea so kid can append/edit.
+    setDraft(chip.text);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  const handleRollClick = () => {
+    // Capture the current draft as the "first thought" and prompt expansion.
+    setRollExpand({ original: draft.trim() });
+    setDraft("");
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  const handleRollSend = () => {
+    const extra = draft.trim();
+    if (!extra || !rollExpand) return;
+    const combined = rollExpand.original
+      ? `${rollExpand.original} — 그리고 ${extra}`
+      : extra;
+    props.onSend(combined);
+    setDraft("");
+    setRollExpand(null);
+  };
+
+  const shortHintVisible =
+    ux.hints.short_input.enabled &&
+    draft.length > 0 &&
+    draft.trim().length < ux.hints.short_input.min_chars;
+
+  const showInitialChips =
+    messages.length === 0 &&
+    !streaming &&
+    ux.suggestions.initial.length > 0;
+
+  const showFollowUpChips =
+    !streaming &&
+    messages.length > 0 &&
+    messages[messages.length - 1]?.role === "assistant" &&
+    ux.suggestions.follow_up.length > 0;
 
   return (
     <div className="hps-shell">
       <header className="hps-header">
-        <strong>HypeProof Chat</strong>
+        <strong title="이 친구 이름 바꾸기" onClick={props.onNamingRitual} className="hps-coach-name">
+          {coachName}
+        </strong>
         <div className="hps-actions">
-          <button onClick={props.onSetToken} title="Set workshop token">
-            {config?.hasToken ? "Token ✓" : "Set token"}
+          <button onClick={props.onSetToken} title="Workshop token">
+            {config?.hasToken ? "Token ✓" : "Token"}
           </button>
           <button onClick={props.onClear} title="Clear conversation">Clear</button>
           <button onClick={props.onSettings} title="Open settings">⚙</button>
@@ -57,54 +159,341 @@ export function ChatPanel(props: Props) {
 
       <div className="hps-messages" ref={scrollRef}>
         {messages.length === 0 && (
-          <div className="hps-empty">
-            <p>HypeProof Studio에 오신 걸 환영합니다.</p>
-            <p>아래에 무엇이든 입력해보세요 — 예: "삼각형을 그리는 게임을 만들어줘".</p>
-          </div>
+          <EmptyState ux={ux} coachName={coachName} />
         )}
-        {messages.map((m) => {
-          const renderable = m.role === "assistant" ? extractRenderableHtml(m.content) : null;
-          return (
-            <div key={m.id} className={`hps-msg hps-msg-${m.role}`}>
-              <div className="hps-msg-role">
-                <span>{m.role === "user" ? "You" : "HypeProof"}</span>
-                {renderable && (
-                  <button
-                    className="hps-msg-run"
-                    onClick={() => props.onRunCode(renderable)}
-                    title="미리보기 패널에서 실행"
-                  >
-                    ▶ Run
-                  </button>
-                )}
-              </div>
-              <div className="hps-msg-body">{m.content || (streaming && m.role === "assistant" ? "…" : "")}</div>
-            </div>
-          );
-        })}
+
+        {showInitialChips && (
+          <ChipRack
+            chips={ux.suggestions.initial}
+            onPick={handleChip}
+            label="이렇게 시작해볼까요? (탭하면 입력창에 들어가요)"
+          />
+        )}
+
+        {messages.map((m) => (
+          <MessageItem
+            key={m.id}
+            message={m}
+            streaming={streaming}
+            ux={ux}
+            coachName={coachName}
+            messages={messages}
+            onRunCode={props.onRunCode}
+            onRetry={props.onRetry}
+          />
+        ))}
+
+        {showFollowUpChips && (
+          <ChipRack
+            chips={ux.suggestions.follow_up}
+            onPick={handleChip}
+            label="이어서 이런 것도 해볼래요?"
+          />
+        )}
+
         {error && <div className="hps-error">{error}</div>}
       </div>
 
-      <footer className="hps-input">
-        <textarea
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-          placeholder={streaming ? "응답 중..." : "메시지를 입력하고 Enter (Shift+Enter 줄바꿈)"}
-          disabled={streaming}
-          rows={3}
+      {rollExpand !== null && (
+        <RollExpandHint
+          probe={ux.hints.roll_input_button.probe_md}
+          original={rollExpand.original}
+          onCancel={() => setRollExpand(null)}
         />
-        {streaming ? (
-          <button onClick={props.onCancel} className="hps-btn-stop">Stop</button>
-        ) : (
-          <button onClick={submit} disabled={!draft.trim()} className="hps-btn-send">Send</button>
+      )}
+
+      <footer className="hps-input-area">
+        {shortHintVisible && (
+          <div className="hps-hint" dangerouslySetInnerHTML={{
+            __html: renderInlineMd(ux.hints.short_input.message_md),
+          }} />
         )}
+        <div className="hps-input">
+          <textarea
+            ref={textareaRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onCompositionStart={() => setComposing(true)}
+            onCompositionEnd={() => setComposing(false)}
+            onKeyDown={(e) => {
+              const isComposing =
+                composing ||
+                e.nativeEvent.isComposing ||
+                // keyCode 229 is the legacy Safari signal for IME composition.
+                e.nativeEvent.keyCode === 229;
+              if (e.key === "Enter" && !e.shiftKey && !isComposing) {
+                e.preventDefault();
+                if (rollExpand) handleRollSend();
+                else submit();
+              }
+            }}
+            placeholder={
+              streaming
+                ? "응답 중..."
+                : rollExpand
+                  ? "한 가지만 더 떠올려서 적어주세요"
+                  : "메시지를 입력하고 Enter (Shift+Enter 줄바꿈)"
+            }
+            disabled={streaming}
+            rows={3}
+          />
+          <div className="hps-input-buttons">
+            {!streaming && ux.hints.roll_input_button.enabled && !rollExpand && (
+              <button
+                onClick={handleRollClick}
+                disabled={!draft.trim()}
+                className="hps-btn-roll"
+                title="떠오른 것에 한 줄 더 보태기"
+              >
+                {ux.hints.roll_input_button.label}
+              </button>
+            )}
+            {streaming ? (
+              <button onClick={props.onCancel} className="hps-btn-stop">Stop</button>
+            ) : rollExpand ? (
+              <button
+                onClick={handleRollSend}
+                disabled={!draft.trim()}
+                className="hps-btn-send"
+              >
+                Send
+              </button>
+            ) : (
+              <button onClick={() => submit()} disabled={!draft.trim()} className="hps-btn-send">
+                Send
+              </button>
+            )}
+          </div>
+        </div>
       </footer>
     </div>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Sub-components
+// ---------------------------------------------------------------------------
+
+function NamingCard({
+  namingPromptMd,
+  personalityPromptMd,
+  fallbackName,
+  onSave,
+}: {
+  namingPromptMd: string;
+  personalityPromptMd: string;
+  fallbackName: string;
+  onSave: (name: string, personality: string) => void;
+}) {
+  const [step, setStep] = useState<"name" | "personality">("name");
+  const [name, setName] = useState("");
+  const [personality, setPersonality] = useState("");
+  const nameRef = useRef<HTMLInputElement | null>(null);
+  const persRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setTimeout(() => nameRef.current?.focus(), 100);
+  }, []);
+  useEffect(() => {
+    if (step === "personality") setTimeout(() => persRef.current?.focus(), 100);
+  }, [step]);
+
+  const goNext = () => {
+    if (personalityPromptMd) setStep("personality");
+    else onSave(name || fallbackName, "");
+  };
+  const finish = () => onSave(name || fallbackName, personality);
+
+  return (
+    <div className="hps-shell">
+      <div className="hps-naming">
+        <div className="hps-naming-emoji">🎮</div>
+        {step === "name" ? (
+          <>
+            <h2
+              className="hps-naming-title"
+              dangerouslySetInnerHTML={{ __html: renderInlineMd(namingPromptMd) }}
+            />
+            <input
+              ref={nameRef}
+              className="hps-naming-input"
+              value={name}
+              maxLength={20}
+              placeholder={`예: 별이, 루카, 포포 (안 정하면 '${fallbackName}')`}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) goNext();
+              }}
+            />
+            <button className="hps-naming-btn" onClick={goNext}>
+              다음 →
+            </button>
+          </>
+        ) : (
+          <>
+            <h2
+              className="hps-naming-title"
+              dangerouslySetInnerHTML={{ __html: renderInlineMd(personalityPromptMd) }}
+            />
+            <input
+              ref={persRef}
+              className="hps-naming-input"
+              value={personality}
+              maxLength={60}
+              placeholder="예: 친절하고 엉뚱한 친구 (건너뛰어도 돼요)"
+              onChange={(e) => setPersonality(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.nativeEvent.isComposing) finish();
+              }}
+            />
+            <div className="hps-naming-row">
+              <button className="hps-naming-btn-ghost" onClick={() => onSave(name || fallbackName, "")}>
+                건너뛰기
+              </button>
+              <button className="hps-naming-btn" onClick={finish}>
+                시작하기 →
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ ux: _ux, coachName }: { ux: UxConfig; coachName: string }) {
+  return (
+    <div className="hps-empty">
+      <p className="hps-empty-greeting">
+        안녕하세요! 저는 <strong>{coachName}</strong>예요. 같이 만들어봐요 🎮
+      </p>
+      <p className="hps-empty-sub">
+        무엇을 만들고 싶은지 자세히 말해주세요.
+      </p>
+    </div>
+  );
+}
+
+function ChipRack({
+  chips,
+  onPick,
+  label,
+}: {
+  chips: SuggestionChip[];
+  onPick: (c: SuggestionChip) => void;
+  label: string;
+}) {
+  return (
+    <div className="hps-chips-rack">
+      <div className="hps-chips-label">{label}</div>
+      <div className="hps-chips">
+        {chips.map((c, i) => (
+          <button
+            key={i}
+            className={`hps-chip hps-chip-${c.style}`}
+            onClick={() => onPick(c)}
+            disabled={c.style === "weak"}
+            title={c.style === "weak" ? c.caption ?? "예시일 뿐이에요" : "탭하면 입력창에 들어가요"}
+          >
+            <span className="hps-chip-text">{c.text}</span>
+            {c.caption && (
+              <span className="hps-chip-caption">{c.caption}</span>
+            )}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function MessageItem({
+  message,
+  streaming,
+  ux,
+  coachName,
+  messages,
+  onRunCode,
+  onRetry,
+}: {
+  message: ChatMessage;
+  streaming: boolean;
+  ux: UxConfig;
+  coachName: string;
+  messages: ChatMessage[];
+  onRunCode: (html: string) => void;
+  onRetry: (prompt: string) => void;
+}) {
+  const renderable = useMemo(
+    () => (message.role === "assistant" ? extractRenderableHtml(message.content) : null),
+    [message.role, message.content],
+  );
+  const canRetry =
+    !streaming &&
+    message.role === "assistant" &&
+    ux.retry_button.enabled &&
+    message.content.length > 0;
+  const retryPrompt = canRetry ? userPromptBefore(messages, message.id) : null;
+
+  return (
+    <div className={`hps-msg hps-msg-${message.role}`}>
+      <div className="hps-msg-role">
+        <span>{message.role === "user" ? "나" : coachName}</span>
+        {renderable && (
+          <button
+            className="hps-msg-run"
+            onClick={() => onRunCode(renderable)}
+            title="미리보기 패널에서 실행"
+          >
+            ▶ Run
+          </button>
+        )}
+        {retryPrompt && (
+          <button
+            className="hps-msg-retry"
+            onClick={() => onRetry(retryPrompt)}
+            title="다른 방식으로 한 번 더 만들기"
+          >
+            🔄
+          </button>
+        )}
+      </div>
+      <div className="hps-msg-body">
+        {message.content || (streaming && message.role === "assistant" ? "…" : "")}
+      </div>
+    </div>
+  );
+}
+
+function RollExpandHint({
+  probe,
+  original,
+  onCancel,
+}: {
+  probe: string;
+  original: string;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="hps-roll-hint">
+      <div className="hps-roll-probe" dangerouslySetInnerHTML={{ __html: renderInlineMd(probe) }} />
+      {original && (
+        <div className="hps-roll-original">
+          <span className="hps-roll-original-label">처음 떠올린 것 →</span> {original}
+        </div>
+      )}
+      <button className="hps-roll-cancel" onClick={onCancel}>취소</button>
+    </div>
+  );
+}
+
+// Tiny inline-markdown renderer for hints (bold, italic, code). Not a full MD;
+// these messages are author-controlled in profiles, so escaping isn't critical.
+function renderInlineMd(md: string): string {
+  return md
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
 }

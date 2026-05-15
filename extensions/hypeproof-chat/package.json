@@ -27,12 +27,15 @@
         {
           "id": "hypeproof-chat.panel",
           "name": "Chat",
-          "type": "webview"
+          "type": "webview",
+          "initialSize": 5
         },
         {
           "id": "hypeproof-chat.preview",
           "name": "Preview",
-          "type": "webview"
+          "type": "webview",
+          "initialSize": 1,
+          "visibility": "collapsed"
         }
       ]
     },
@@ -52,6 +55,10 @@
       {
         "command": "hypeproof-chat.runLastCode",
         "title": "HypeProof Chat: Run Last Code in Preview"
+      },
+      {
+        "command": "hypeproof-chat.renameCoach",
+        "title": "HypeProof Chat: 코치 이름 다시 짓기"
       }
     ],
     "configuration": {

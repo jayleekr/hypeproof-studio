@@ -13,7 +13,15 @@ This IDE exists to teach the **16 Essences** — the human capabilities needed w
 
 ## Current phase
 
-**Phase 0 — environment setup.** Update this line when phase advances. METAPLAN §10 is the source of truth for status.
+**Phase 4–5 (chat panel + integrated build) — UX iteration in progress.** Per-cohort profile system live, Worker (`worker/`) + Studio extension (`extensions/hypeproof-chat/`) wired through `/v1/profile`. 1회차 (sk-biopharm-kids-s1) profile fully populated; 13 e2e tests passing locally against `wrangler dev`.
+
+Next milestones:
+- Cloudflare production deploy (`worker/DEPLOY.md`)
+- GitHub Pages publish wizard (Device Flow OAuth) — separate sprint
+- Live preview extension (`hypeproof-preview`) — separate sprint
+- 2회차–4회차 profile content
+
+See `STATUS-2026-05-15-overnight.md` for latest detailed snapshot.
 
 ## Repo layout
 

@@ -93,6 +93,13 @@ export function App() {
     postToHost({ type: "sendMessage", text: trimmed, history: state.messages });
   };
 
+  const retry = (prompt: string) => {
+    if (state.streamingId) return;
+    // Re-send the same user prompt to get a fresh assistant variant.
+    dispatch({ type: "userSent", text: prompt });
+    postToHost({ type: "retryMessage", prompt, history: state.messages });
+  };
+
   const cancel = () => {
     if (state.streamId) postToHost({ type: "cancelStream", streamId: state.streamId });
   };
@@ -104,11 +111,16 @@ export function App() {
       streaming={!!state.streamingId}
       error={state.error}
       onSend={send}
+      onRetry={retry}
       onCancel={cancel}
       onClear={() => postToHost({ type: "clearHistory" })}
       onSetToken={() => postToHost({ type: "setToken" })}
       onSettings={() => postToHost({ type: "openSettings" })}
       onRunCode={(html) => postToHost({ type: "runCode", html })}
+      onNamingRitual={() => postToHost({ type: "namingRitual" })}
+      onSaveCoach={(name, personality) =>
+        postToHost({ type: "saveCoach", name, personality })
+      }
     />
   );
 }

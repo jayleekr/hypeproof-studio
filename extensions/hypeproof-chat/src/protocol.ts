@@ -14,17 +14,77 @@ export interface ChatConfig {
   proxyUrl: string;
   model: string;
   hasToken: boolean;
+  coach: CoachInfo;
+  profile: ResolvedProfile | null;
+}
+
+export interface CoachInfo {
+  name: string;
+  personality: string;
+  configured: boolean;        // has the user gone through the naming ritual?
+}
+
+/**
+ * The UX-relevant subset of a server profile, fetched via GET /v1/profile and
+ * cached client-side. Stays in sync with Worker's UxConfig type — keep both
+ * sides updated together.
+ */
+export interface ResolvedProfile {
+  profile_id: string;
+  display_name: string;
+  language: "ko" | "en";
+  series_index: number;
+  series_total: number;
+  welcome: {
+    greeting_md: string;
+    example_prompts: string[];
+  };
+  ux: UxConfig;
+  publishing: { enabled: boolean; strategy: string };
+  preview: { type: "iframe" | "live_server"; auto_start: boolean };
+}
+
+export interface UxConfig {
+  coach: {
+    naming_mode: "user_names_it" | "fixed" | "pick_from_list";
+    fallback_name: string;
+    naming_prompt_md: string;
+    personality_prompt_md: string;
+    revisit_on_entry?: boolean;
+  };
+  suggestions: {
+    initial: SuggestionChip[];
+    follow_up: SuggestionChip[];
+  };
+  hints: {
+    short_input: { enabled: boolean; min_chars: number; message_md: string };
+    roll_input_button: { enabled: boolean; label: string; probe_md: string };
+  };
+  retry_button: {
+    enabled: boolean;
+    show_counter: boolean;
+    counter_toast_md?: string;
+  };
+}
+
+export interface SuggestionChip {
+  text: string;
+  style: "good" | "weak";
+  caption?: string;
 }
 
 // Webview → Host
 export type WebviewMessage =
   | { type: "ready" }
   | { type: "sendMessage"; text: string; history: ChatMessage[] }
+  | { type: "retryMessage"; prompt: string; history: ChatMessage[] }
   | { type: "cancelStream"; streamId: string }
   | { type: "requestAction"; action: ActionRequest }
   | { type: "openSettings" }
   | { type: "setToken" }
   | { type: "clearHistory" }
+  | { type: "namingRitual" }
+  | { type: "saveCoach"; name: string; personality: string }
   | { type: "runCode"; html: string }       // from chat panel → host → preview
   | { type: "previewReady" };               // from preview webview only
 

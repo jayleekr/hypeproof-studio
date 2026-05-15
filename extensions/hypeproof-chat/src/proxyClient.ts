@@ -1,4 +1,60 @@
-import { ChatMessage } from "./protocol";
+import { ChatMessage, ResolvedProfile } from "./protocol";
+
+/**
+ * Auth/session failures need different handling than generic errors:
+ * the kid should see a friendly message AND the host should re-prompt for a
+ * token (expired/missing) or tell them to call the teacher (session/roster).
+ */
+export class ProxyAuthError extends Error {
+  kind: "expired" | "missing" | "session_inactive" | "session_window" | "not_in_roster" | "other";
+  friendly: string;
+  constructor(kind: ProxyAuthError["kind"], friendly: string) {
+    super(friendly);
+    this.kind = kind;
+    this.friendly = friendly;
+  }
+}
+
+function classifyError(status: number, bodyText: string): ProxyAuthError | null {
+  let parsed: { error?: { message?: string; type?: string; code?: string } } | null = null;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    parsed = null;
+  }
+  const type = parsed?.error?.type;
+  const code = parsed?.error?.code;
+  const serverMsg = parsed?.error?.message;
+
+  if (status === 401) {
+    if (code === "expired") {
+      return new ProxyAuthError(
+        "expired",
+        "토큰이 만료됐어요. 선생님께 새 토큰을 받아서 다시 넣어주세요. 🔑",
+      );
+    }
+    return new ProxyAuthError(
+      "missing",
+      "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑",
+    );
+  }
+  if (status === 403) {
+    if (type === "session_inactive") {
+      return new ProxyAuthError("session_inactive", serverMsg ?? "수업이 아직 시작 안 됐어요. 선생님을 불러주세요.");
+    }
+    if (type === "session_window") {
+      return new ProxyAuthError("session_window", serverMsg ?? "수업 시간이 끝났어요. 다음 시간에 다시 만나요.");
+    }
+    if (type === "not_in_roster") {
+      return new ProxyAuthError("not_in_roster", serverMsg ?? "등록이 안 됐어요. 선생님께 알려주세요.");
+    }
+    if (type === "session_profile_mismatch") {
+      return new ProxyAuthError("other", serverMsg ?? "이 토큰은 다른 시간 거예요. 선생님께 새 토큰을 받아주세요.");
+    }
+    return new ProxyAuthError("other", serverMsg ?? "지금은 사용할 수 없어요. 선생님을 불러주세요.");
+  }
+  return null;
+}
 
 interface ProxyChatArgs {
   proxyUrl: string;
@@ -8,12 +64,24 @@ interface ProxyChatArgs {
   userText: string;
   signal: AbortSignal;
   onDelta: (delta: string) => void;
+  coachName?: string;
+  coachPersonality?: string;
 }
 
 // Streaming OpenAI-compatible chat completion call against the HypeProof Proxy.
 // Expects SSE-style `data: {json}\n\n` chunks.
 export async function proxyChat(args: ProxyChatArgs): Promise<void> {
-  const { proxyUrl, model, token, history, userText, signal, onDelta } = args;
+  const {
+    proxyUrl,
+    model,
+    token,
+    history,
+    userText,
+    signal,
+    onDelta,
+    coachName,
+    coachPersonality,
+  } = args;
 
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
@@ -26,6 +94,14 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
     accept: "text/event-stream",
   };
   if (token) headers.authorization = `Bearer ${token}`;
+  // HTTP header values must be byte-safe. Korean (and any non-ASCII) coach
+  // names get URL-encoded; the Worker decodes on receipt.
+  if (coachName && coachName.trim()) {
+    headers["x-hps-coach-name"] = encodeURIComponent(coachName.trim());
+  }
+  if (coachPersonality && coachPersonality.trim()) {
+    headers["x-hps-coach-personality"] = encodeURIComponent(coachPersonality.trim());
+  }
 
   const res = await fetch(url, {
     method: "POST",
@@ -36,7 +112,10 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
 
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
-    throw new Error(`Proxy ${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
+    const authErr = classifyError(res.status, text);
+    if (authErr) throw authErr;
+    // Generic fallback — never dump raw JSON at a 9-10 year old.
+    throw new Error("앗, 잠깐 문제가 생겼어요. 다시 한 번 해보거나 선생님을 불러주세요.");
   }
 
   const reader = res.body.getReader();
@@ -63,5 +142,27 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
         // ignore malformed line
       }
     }
+  }
+}
+
+interface FetchProfileArgs {
+  proxyUrl: string;
+  token: string;
+}
+
+/** GET /v1/profile — used by extension host to cache cohort UX config. */
+export async function fetchProfile(args: FetchProfileArgs): Promise<ResolvedProfile | null> {
+  const { proxyUrl, token } = args;
+  const url = proxyUrl.replace(/\/$/, "") + "/profile";
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as ResolvedProfile;
+    return j;
+  } catch {
+    return null;
   }
 }

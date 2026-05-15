@@ -91,41 +91,44 @@ admin.get("/cohorts/:id", async (c) => {
 
 admin.post("/cohorts/:id/roster", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json<{ users?: string[] }>().catch(() => ({}));
-  if (!Array.isArray(body.users)) return c.json({ error: "users must be array" }, 400);
-  if (body.users.some((u) => typeof u !== "string" || u.length < 1 || u.length > 64)) {
+  const body = await c.req.json<{ users?: string[] }>().catch(() => ({} as { users?: string[] }));
+  const users = body.users;
+  if (!Array.isArray(users)) return c.json({ error: "users must be array" }, 400);
+  if (users.some((u) => typeof u !== "string" || u.length < 1 || u.length > 64)) {
     return c.json({ error: "user ids must be 1-64 char strings" }, 400);
   }
-  await setRoster(c.env.HPS_KV, id, body.users);
-  return c.json({ ok: true, size: body.users.length });
+  await setRoster(c.env.HPS_KV, id, users);
+  return c.json({ ok: true, size: users.length });
 });
 
 // ---- session start/end ------------------------------------------------------
 
 admin.post("/cohorts/:id/session", async (c) => {
   const cohortId = c.req.param("id");
-  const body = await c.req.json<{
+  type SessionBody = {
     session_id?: string;
     profile_id?: string;
     starts_at?: string;
     ends_at?: string;
-  }>().catch(() => ({}));
+  };
+  const body = (await c.req.json<SessionBody>().catch(() => ({} as SessionBody))) as SessionBody;
+  const { session_id, profile_id, starts_at, ends_at } = body;
 
-  if (!body.profile_id || !body.starts_at || !body.ends_at) {
+  if (!profile_id || !starts_at || !ends_at) {
     return c.json({ error: "profile_id, starts_at, ends_at required" }, 400);
   }
-  if (!Number.isFinite(Date.parse(body.starts_at)) || !Number.isFinite(Date.parse(body.ends_at))) {
+  if (!Number.isFinite(Date.parse(starts_at)) || !Number.isFinite(Date.parse(ends_at))) {
     return c.json({ error: "starts_at and ends_at must be ISO8601" }, 400);
   }
-  if (Date.parse(body.ends_at) <= Date.parse(body.starts_at)) {
+  if (Date.parse(ends_at) <= Date.parse(starts_at)) {
     return c.json({ error: "ends_at must be after starts_at" }, 400);
   }
 
   const session: ActiveSession = {
-    session_id: body.session_id || `${cohortId}-${new Date().toISOString().slice(0, 10)}`,
-    profile_id: body.profile_id,
-    starts_at: body.starts_at,
-    ends_at: body.ends_at,
+    session_id: session_id || `${cohortId}-${new Date().toISOString().slice(0, 10)}`,
+    profile_id: profile_id,
+    starts_at: starts_at,
+    ends_at: ends_at,
   };
   await startSession(c.env.HPS_KV, cohortId, session);
 

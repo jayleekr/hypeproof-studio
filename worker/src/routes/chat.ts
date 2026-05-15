@@ -13,9 +13,9 @@
 
 import { Hono } from "hono";
 import type { Env } from "../env";
-import { bearer, verify, TokenError } from "../lib/tokens";
+import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { getProfile } from "../profiles";
-import { translate } from "../lib/translate";
+import { translate, type CoachContext } from "../lib/translate";
 import { callAnthropic } from "../lib/anthropic";
 import { transformStream } from "../lib/sse";
 import { getActiveSession, getRoster, isSessionLive } from "../lib/kv";
@@ -26,6 +26,68 @@ export const chat = new Hono<{ Bindings: Env }>();
 chat.get("/health", (c) =>
   c.json({ ok: true, service: "hypeproof-studio-api", version: "0.1.0", env: c.env.ENVIRONMENT }),
 );
+
+// ---------------------------------------------------------------------------
+// GET /v1/profile
+//
+// Returns the UX-relevant subset of the participant's profile so the chat
+// extension can render cohort-specific chips/hints/coach flow without the
+// extension needing to know about cohorts at compile time.
+//
+// The system_prompt is NOT included — only the worker injects that.
+// ---------------------------------------------------------------------------
+
+chat.get("/profile", async (c) => {
+  const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
+  if (!auth.ok) return c.json({ error: { message: auth.message, type: "auth" } }, 401);
+  const profile = getProfile(auth.payload.p);
+  if (!profile) return c.json({ error: { message: "unknown profile", type: "config" } }, 400);
+
+  return c.json({
+    profile_id: profile.id,
+    display_name: profile.display_name,
+    language: profile.audience.language,
+    series_index: profile.session.series_index,
+    series_total: profile.session.series_total,
+    welcome: profile.welcome,
+    ux: profile.ux,
+    publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
+    preview: profile.preview,
+  });
+});
+
+interface AuthResult {
+  ok: boolean;
+  payload: TokenPayload;
+  message: string;
+}
+
+function decodeHeader(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+async function authenticateToken(
+  authHeader: string | null | undefined,
+  secret: string,
+): Promise<AuthResult> {
+  const token = bearer(authHeader);
+  if (!token) {
+    return { ok: false, payload: {} as TokenPayload, message: "missing bearer token" };
+  }
+  try {
+    const payload = await verify(token, secret);
+    return { ok: true, payload, message: "" };
+  } catch (err) {
+    const msg = err instanceof TokenError ? err.message : String(err);
+    return { ok: false, payload: {} as TokenPayload, message: msg };
+  }
+}
+
 
 chat.post("/chat/completions", async (c) => {
   const env = c.env;
@@ -81,16 +143,20 @@ chat.post("/chat/completions", async (c) => {
     );
   }
 
-  // 6. Translate
+  // 6. Translate (with optional coach context from headers)
   let body: unknown;
   try {
     body = await c.req.json();
   } catch {
     return c.json({ error: { message: "bad json body", type: "request" } }, 400);
   }
+  const coach: CoachContext = {
+    name: decodeHeader(c.req.header("x-hps-coach-name")),
+    personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+  };
   let anthropicBody;
   try {
-    anthropicBody = translate(body as any, profile);
+    anthropicBody = translate(body as any, profile, coach);
   } catch (err) {
     return c.json({ error: { message: String(err), type: "request" } }, 400);
   }

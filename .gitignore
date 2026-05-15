@@ -34,5 +34,6 @@ extensions/hypeproof-chat/webview-ui/src/*.js
 **/*.tsbuildinfo
 
 # Worker (Cloudflare Wrangler local state)
-worker/.wrangler/
-worker/.dev.vars
+**/.wrangler/
+**/.dev.vars
+.dev.vars
