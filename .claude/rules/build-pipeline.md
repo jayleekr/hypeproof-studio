@@ -88,6 +88,21 @@ bash scripts/run-build.sh logs/build-$(date +%Y%m%d-%H%M%S).log
 3. Verify it applies cleanly: `cd vscode && git apply --check ../patches/NN-<topic>.patch`.
 4. Document the patch's purpose in a one-line header comment inside the file.
 
+## Submodule (`vscodium-base`) bump policy
+
+`vscodium-base` is a submodule → `jayleekr/vscodium` `@hps/main`. **Policy: pin + deliberate bump.** The main repo does NOT auto-follow fork HEAD.
+
+Bump the pointer (its own reviewed commit in the main repo) **only when**:
+1. An upstream VSCodium sync has been merged into fork `hps/main` **and a build passed**, or
+2. A brand/icon/patch/`prepare_vscode.sh`-hook change in the fork is required by a main-repo change.
+
+Rules:
+- Day-to-day work (`worker/`, `extensions/`, profiles, scripts) lives in the **main repo** and never bumps the submodule. Most commits leave the pointer untouched — that is expected, not a mistake.
+- A bump is a standalone commit: `chore: bump vscodium-base → <short-sha> (<why>)`. Never fold a bump into an unrelated feature commit.
+- Never `git add vscodium-base` reflexively. Stage it only when intentionally bumping.
+- Reproducibility is the point: builds are 1–2 h; a silent pointer move would change everyone's build.
+- Phase 6: `.github/workflows/upstream-sync.yml` automates step 1 — cron merges upstream into the fork, opens a **PR** in this repo bumping the pointer; a human + a green build gate before merge.
+
 ## CI (Phase 6)
 
 Windows build runs in GitHub Actions only. Local Windows reproduction is out of scope. The workflow file lives at `.github/workflows/build-windows.yml` (Phase 6 — not yet created).

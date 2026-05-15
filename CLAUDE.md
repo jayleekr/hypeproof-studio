@@ -25,7 +25,7 @@ See `STATUS-2026-05-15-overnight.md` for latest detailed snapshot.
 
 ## Repo layout
 
-- `vscodium-base/` — VSCodium upstream + patches. **Do not edit upstream files directly**; add a patch under `vscodium-base/patches/` instead.
+- `vscodium-base/` — **submodule** → `jayleekr/vscodium@hps/main`. **Do not edit upstream files directly**; add a patch under `vscodium-base/patches/`. Pointer is pinned — bump deliberately only, never auto-follow. Policy: [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md) "Submodule bump policy".
 - `extensions/hypeproof-chat/` — own VS Code extension (React webview). Will be bundled as a built-in extension at Phase 5.
 - `proxy-poc/` — HypeProof Proxy (OpenAI-compatible). Extension talks to this.
 - `METAPLAN.md` — phased build plan. Always cross-reference by section (§N) rather than copying.
