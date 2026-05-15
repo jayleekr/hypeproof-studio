@@ -165,22 +165,30 @@ URL. macOS only; Windows/Linux use the GitHub web forms + manual screenshot.
 
 ```bash
 git switch -c fix/issue-<N>-<slug>      # 또는 feat/issue-<N>-<slug>
-# … 수정 + §4의 해당 테스트 통과 …
-bash scripts/open-pr.sh                  # 브랜치 push + PR 생성(템플릿 자동)
+# … 수정 + §4의 해당 테스트 통과 + 커밋 …
+```
+그다음 Claude Code에서:
+```
+/hype-open-pr
 ```
 
-`open-pr.sh`는 main이면 거부하고, feature 브랜치를 push한 뒤
-`.github/pull_request_template.md`로 PR을 엽니다. PR 본문의 `Closes #<N>`,
-Essence(챗 패널 변경 시 §4.5 번호), Tested 섹션을 채우세요. CI `main-guard`가
-비-PR main 푸시를 빨간 빌드로 표시(메인테이너·`[skip-main-guard]` 제외).
-merge 후 브랜치 삭제.
+`/hype-open-pr` 스킬(`/report-ui`의 PR쪽 짝)이 브랜치를 확인하고 내부적으로
+`scripts/open-pr.sh`(main 거부 → push → `.github/pull_request_template.md`로
+PR 생성)를 실행한 뒤, **본문의 `Closes #<N>` · Essence(챗 패널 변경 시 §4.5
+번호) · Tested를 대화형으로 같이 채워**줍니다. (스킬 없이 직접 하려면
+`bash scripts/open-pr.sh`만 실행하고 본문은 수동.) CI `main-guard`가 비-PR
+main 푸시를 빨간 빌드로 표시(메인테이너·`[skip-main-guard]` 제외). merge 후
+브랜치 삭제.
 
 <details><summary>English</summary>
 
 **Policy: PR-first, review optional.** Direct main push is maintainer-only.
-`open-pr.sh` refuses on main, pushes the feature branch, opens a PR with the
-template. Fill `Closes #<N>`, Essence (§4.5 number for chat-panel), Tested.
-The `main-guard` CI flags non-PR main pushes red. Delete the branch after merge.
+In Claude Code run **`/hype-open-pr`** (the PR-side counterpart of
+`/report-ui`): it checks the branch, runs `scripts/open-pr.sh` internally
+(refuses on main → pushes → opens a PR from the template), then fills
+`Closes #<N>` / Essence (§4.5 number for chat-panel) / Tested *with you*.
+Script-only path: `bash scripts/open-pr.sh` (fill the body manually). The
+`main-guard` CI flags non-PR main pushes red. Delete the branch after merge.
 </details>
 
 ---
