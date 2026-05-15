@@ -4,8 +4,12 @@
 # Fastest path: from the repo root run `bash scripts/dev-secrets.sh`
 # (pulls GEMINI_KEY from your ~/.env into worker/.dev.vars automatically).
 
-# Active LLM provider key. Get one at https://aistudio.google.com/apikey
+# LLM provider keys. The provider is switchable via LLM_PROVIDER (below).
+# Gemini is the default model for workshop runs. Get a key:
+#   Gemini    → https://aistudio.google.com/apikey
+#   Anthropic → https://console.anthropic.com/settings/keys
 GEMINI_API_KEY=
+ANTHROPIC_API_KEY=
 
 # HMAC secret used to sign/verify workshop tokens. Any long random string;
 # must match whatever issued the tokens you test with.
@@ -14,7 +18,7 @@ HPS_SIGNING_SECRET=
 # Admin panel password (only needed if you exercise /admin routes locally).
 HPS_ADMIN_PASSWORD=
 
-# Optional. Defaults to "gemini" when GEMINI_API_KEY is set. Set to
-# "anthropic" (and provide ANTHROPIC_API_KEY) only to fall back to Claude.
+# Switchable provider. Defaults to "gemini" when GEMINI_API_KEY is set.
+# Developing through Claude Code? Set this to "anthropic" (with
+# ANTHROPIC_API_KEY above) — it's a peer, not a fallback. One line, no code.
 # LLM_PROVIDER=gemini
-# ANTHROPIC_API_KEY=
