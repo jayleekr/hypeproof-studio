@@ -73,6 +73,8 @@ export function ChatPanel(props: Props) {
 
   // Show the kid-friendly naming card when: profile loaded, it asks the kid to
   // name the coach, and they haven't yet.
+  const [forceNaming, setForceNaming] = useState(false);
+
   const needsNaming =
     !!config?.profile &&
     config.profile.ux.coach.naming_mode === "user_names_it" &&
@@ -82,13 +84,16 @@ export function ChatPanel(props: Props) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, streaming]);
 
-  if (needsNaming && config?.profile) {
+  if ((needsNaming || forceNaming) && config?.profile) {
     return (
       <NamingCard
         namingPromptMd={config.profile.ux.coach.naming_prompt_md}
         personalityPromptMd={config.profile.ux.coach.personality_prompt_md}
         fallbackName={config.profile.ux.coach.fallback_name}
-        onSave={props.onSaveCoach}
+        onSave={(n, p) => {
+          props.onSaveCoach(n, p);
+          setForceNaming(false);
+        }}
       />
     );
   }
@@ -145,7 +150,7 @@ export function ChatPanel(props: Props) {
   return (
     <div className="hps-shell">
       <header className="hps-header">
-        <strong title="이 친구 이름 바꾸기" onClick={props.onNamingRitual} className="hps-coach-name">
+        <strong title="이 친구 이름 바꾸기" onClick={() => setForceNaming(true)} className="hps-coach-name">
           {coachName}
         </strong>
         <div className="hps-actions">
@@ -458,10 +463,95 @@ function MessageItem({
         )}
       </div>
       <div className="hps-msg-body">
-        {message.content || (streaming && message.role === "assistant" ? "…" : "")}
+        {message.role === "assistant" ? (
+          <AssistantContent content={message.content} streaming={streaming} />
+        ) : (
+          message.content
+        )}
       </div>
     </div>
   );
+}
+
+/**
+ * Render an assistant message with code fences hidden behind a collapsed pill.
+ * A 9-10 year old should see the friendly prose, not a wall of HTML.
+ * - While streaming and a fence has opened: show "게임 만드는 중… ✨".
+ * - When done: prose + a collapsed "📄 코드 보기" pill per code block.
+ */
+function AssistantContent({ content, streaming }: { content: string; streaming: boolean }) {
+  const segments = useMemo(() => splitFences(content), [content]);
+
+  if (content.length === 0) {
+    return <span>{streaming ? "생각하는 중… ✨" : ""}</span>;
+  }
+
+  return (
+    <>
+      {segments.map((seg, i) => {
+        if (seg.type === "text") {
+          return <span key={i} className="hps-prose">{seg.value}</span>;
+        }
+        if (seg.type === "code-open") {
+          // Fence opened but not closed yet → still generating.
+          return (
+            <div key={i} className="hps-code-progress">
+              🛠️ 게임 만드는 중… <span className="hps-dots">✨</span>
+            </div>
+          );
+        }
+        return <CodePill key={i} code={seg.value} />;
+      })}
+    </>
+  );
+}
+
+function CodePill({ code }: { code: string }) {
+  const [open, setOpen] = useState(false);
+  const lines = code.split("\n").length;
+  return (
+    <div className="hps-codepill">
+      <button className="hps-codepill-toggle" onClick={() => setOpen((v) => !v)}>
+        {open ? "▾" : "▸"} 📄 코드 {open ? "숨기기" : `보기 (${lines}줄)`}
+      </button>
+      {open && <pre className="hps-codepill-body">{code}</pre>}
+    </div>
+  );
+}
+
+type FenceSeg =
+  | { type: "text"; value: string }
+  | { type: "code"; value: string }
+  | { type: "code-open"; value: string };
+
+/** Split content into prose / closed-code / still-open-code segments. */
+function splitFences(content: string): FenceSeg[] {
+  const out: FenceSeg[] = [];
+  const fenceRe = /```[^\n]*\n?/g;
+  let idx = 0;
+  let m: RegExpExecArray | null;
+  let inCode = false;
+  let codeStart = 0;
+
+  while ((m = fenceRe.exec(content)) !== null) {
+    if (!inCode) {
+      if (m.index > idx) out.push({ type: "text", value: content.slice(idx, m.index) });
+      inCode = true;
+      codeStart = m.index + m[0].length;
+    } else {
+      out.push({ type: "code", value: content.slice(codeStart, m.index).replace(/\n$/, "") });
+      inCode = false;
+      idx = m.index + m[0].length;
+    }
+  }
+
+  if (inCode) {
+    // Opened fence with no closing yet → still being generated.
+    out.push({ type: "code-open", value: content.slice(codeStart) });
+  } else if (idx < content.length) {
+    out.push({ type: "text", value: content.slice(idx) });
+  }
+  return out;
 }
 
 function RollExpandHint({

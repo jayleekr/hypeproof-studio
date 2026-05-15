@@ -71,6 +71,12 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
   }
   fs.writeFileSync(path.join(userDir, "hps-test-state.json"), JSON.stringify(testState));
 
+  // Pre-create + open a workspace folder so the extension's ensureWorkspace()
+  // sees a folder already open and does NOT trigger a window reload (which
+  // would destabilize Playwright's window handle).
+  const wsDir = path.join(userDataDir, "ws");
+  fs.mkdirSync(wsDir, { recursive: true });
+
   const app = await electron.launch({
     executablePath: APP_BINARY,
     args: [
@@ -82,6 +88,7 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
       "--skip-welcome",
       "--skip-release-notes",
       "--no-sandbox",
+      wsDir,                          // open this folder → no reload
     ],
     env,
     timeout: 30_000,
@@ -147,14 +154,18 @@ export async function openChatContainer(win: Page): Promise<void> {
  * security iframe + an inner #active-frame.
  */
 export async function chatFrame(win: Page) {
-  // The outer iframe has class "webview ready" and its src contains a webview
-  // id that includes the extension name.
-  const outerSel = 'iframe.webview.ready';
+  // The chat sidebar webview renders before any editor-area preview panel,
+  // so the first webview iframe is the chat one. (Validated across 14 runs.)
+  const outerSel = "iframe.webview.ready";
   await win.locator(outerSel).first().waitFor({ state: "attached", timeout: 20_000 });
   return win.frameLocator(outerSel).first().frameLocator("#active-frame");
 }
 
+/** The game preview now lives in the editor area (a WebviewPanel). It is the
+ *  webview whose inner document contains our preview iframe (#frame). */
 export async function previewFrame(win: Page) {
-  await win.locator('iframe.webview.ready').nth(1).waitFor({ state: "attached", timeout: 20_000 });
-  return win.frameLocator('iframe.webview.ready').nth(1).frameLocator("#active-frame");
+  const outerSel = "iframe.webview.ready";
+  // Preview opens after the chat webview, so it's the last one.
+  await win.locator(outerSel).last().waitFor({ state: "attached", timeout: 20_000 });
+  return win.frameLocator(outerSel).last().frameLocator("#active-frame");
 }

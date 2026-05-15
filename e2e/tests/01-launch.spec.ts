@@ -13,8 +13,8 @@ test("launches + chat panel mounts when token is pre-seeded", async () => {
     preseedCoach: { name: "테스트코치" },
   });
   try {
-    const title = await ctx.win.title();
-    expect(title).toContain("HypeProof Studio");
+    // (Window title is the workspace folder name once a folder is open, so
+    // it's not a stable product check — rely on the chat panel instead.)
 
     // Activity-bar container header
     const header = ctx.win

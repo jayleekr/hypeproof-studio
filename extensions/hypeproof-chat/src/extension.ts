@@ -10,6 +10,17 @@ const TOKEN_KEY = "hypeproofChat.workshopToken";
 let providerRef: ChatPanelProvider | null = null;
 
 export async function activate(context: vscode.ExtensionContext) {
+  // Kill kid-hostile modals globally + persistently, regardless of whether a
+  // folder is already open this session. The setting lands in settings.json
+  // so every future launch is dialog-free. (Can't suppress the dialog for the
+  // current session if the folder opened before we activated, but it's a
+  // one-time click then never again.)
+  try {
+    await vscode.workspace
+      .getConfiguration("security.workspace.trust")
+      .update("enabled", false, vscode.ConfigurationTarget.Global);
+  } catch { /* ignore: read-only profile */ }
+
   // Test-only backdoors. Reads from env vars (which Playwright may not always
   // propagate to the extension host) AND a JSON file in the user-data-dir as
   // a more reliable fallback.
@@ -23,9 +34,8 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.window.registerWebviewViewProvider("hypeproof-chat.panel", provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
-    vscode.window.registerWebviewViewProvider("hypeproof-chat.preview", preview, {
-      webviewOptions: { retainContextWhenHidden: true },
-    }),
+    // Preview is no longer a sidebar view — it's an editor-area WebviewPanel
+    // created on demand by PreviewProvider.show().
 
     vscode.commands.registerCommand("hypeproof-chat.focus", () => {
       vscode.commands.executeCommand("hypeproof-chat.panel.focus");
@@ -54,16 +64,15 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       await context.secrets.store(TOKEN_KEY, token.trim());
       provider.invalidateProfile();
-      // Re-fetch profile with the new token. If it works, surface the coach
-      // naming ritual (the degraded state — no chips, default "코치" — happens
-      // precisely when the previous token was bad and profile never loaded).
+      // Re-fetch profile with the new token. The coach naming step is driven
+      // by the in-panel card (kid-friendly) — NOT a system input box. Once
+      // profile is fetched and pushed via postConfig, the webview shows the
+      // naming card itself when coach.configured is false. Do not call
+      // runCoachNamingRitual() here (it would block on a quickInput and
+      // prevent postConfig from reaching the webview).
       const profile = await provider.ensureProfile();
       if (profile) {
         vscode.window.showInformationMessage("토큰 확인 완료! 같이 만들어봐요 🎮");
-        if (provider.shouldOfferNamingRitual(profile)) {
-          await new Promise((r) => setTimeout(r, 300));
-          await provider.runCoachNamingRitual();
-        }
       } else {
         vscode.window.showWarningMessage(
           "토큰이 맞는지 확인이 안 돼요. 선생님께 토큰을 다시 받아주세요.",
@@ -97,6 +106,15 @@ async function autoOnboard(
   context: vscode.ExtensionContext,
   provider: ChatPanelProvider,
 ): Promise<void> {
+  // 0. Ensure a workspace folder exists + is open. The kid's games live here
+  //    and this is what GitHub Pages publishing will push later. If we have to
+  //    open the folder, the window reloads — fine on first launch (nothing
+  //    done yet); the post-reload activation skips this (folder already open)
+  //    and continues to token/naming.
+  if (await ensureWorkspace()) {
+    return; // window is reloading
+  }
+
   const isFirstRun = !context.globalState.get<boolean>(FIRST_RUN_KEY);
 
   if (isFirstRun) {
@@ -141,6 +159,69 @@ async function autoOnboard(
   //    and the profile requests user_names_it. Nothing to do here.
 }
 
+const WORKSPACE_DIRNAME = "HypeProofGames";
+
+const STARTER_INDEX_HTML = `<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>내 게임</title>
+  <style>
+    body { margin:0; height:100vh; display:flex; align-items:center;
+           justify-content:center; background:#1b1b2a; color:#fff;
+           font-family:-apple-system,sans-serif; text-align:center; }
+  </style>
+</head>
+<body>
+  <div>
+    <h1>🎮 내 첫 게임</h1>
+    <p>채팅에서 "게임 만들어줘"라고 말해보세요!</p>
+  </div>
+</body>
+</html>
+`;
+
+/**
+ * Make sure the kid has a real folder to work in. Returns true if the window
+ * is reloading (caller should bail). Idempotent: once a folder is open this
+ * returns false immediately.
+ */
+async function ensureWorkspace(): Promise<boolean> {
+  const folders = vscode.workspace.workspaceFolders;
+  if (folders && folders.length > 0) return false;
+
+  // Disable the "Do you trust the authors of this folder?" modal BEFORE
+  // opening the folder. It's auto-created by us; a 9-year-old should never
+  // see a scary security dialog. Persisted to global settings so it sticks.
+  try {
+    await vscode.workspace
+      .getConfiguration("security.workspace.trust")
+      .update("enabled", false, vscode.ConfigurationTarget.Global);
+    await vscode.workspace
+      .getConfiguration("workbench")
+      .update("startupEditor", "none", vscode.ConfigurationTarget.Global);
+  } catch { /* ignore: read-only profile */ }
+
+  const dir = path.join(os.homedir(), WORKSPACE_DIRNAME);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const indexPath = path.join(dir, "index.html");
+    if (!fs.existsSync(indexPath)) {
+      fs.writeFileSync(indexPath, STARTER_INDEX_HTML);
+    }
+  } catch {
+    // If we can't create the dir, don't trap the user — just continue without
+    // a workspace (chat + preview still work).
+    return false;
+  }
+
+  // Single-root open (clean Explorer for a 9-year-old). Reloads the window.
+  await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir), {
+    forceReuseWindow: true,
+  });
+  return true;
+}
+
 async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<void> {
   // Source 1: env vars (works when Playwright passes them through to the
   // extension host, which is inconsistent across VS Code versions).
@@ -169,6 +250,26 @@ async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<voi
       }
     }
   } catch { /* ignore — file missing or unparseable */ }
+
+  // Source 3: dev convenience. A manually-launched local build picks up the
+  // token `scripts/dev-stack.sh` writes, so contributors don't paste it every
+  // launch. Dev-gated: only when proxyUrl points at a local worker, so a real
+  // workshop build (proxyUrl = https://api.hypeproof.ai/v1) never reads it.
+  if (!token || token.length === 0) {
+    const proxyUrl = vscode.workspace
+      .getConfiguration("hypeproofChat")
+      .get<string>("proxyUrl", "");
+    const isLocalDev = /\/\/(localhost|127\.0\.0\.1)(:|\/)/.test(proxyUrl);
+    if (isLocalDev) {
+      const devTokenFile = process.env.HPS_DEV_TOKEN_FILE || "/tmp/hps-token.txt";
+      try {
+        if (fs.existsSync(devTokenFile)) {
+          const t = fs.readFileSync(devTokenFile, "utf8").trim();
+          if (t.length > 20) token = t;
+        }
+      } catch { /* ignore — best effort */ }
+    }
+  }
 
   if (token && token.length > 0) {
     await context.secrets.store(TOKEN_KEY, token);

@@ -170,6 +170,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  /**
+   * Save the latest game to the workspace root as index.html so it persists
+   * and is GitHub-Pages-ready. No approval modal — this is the kid saving
+   * their own game in their own workspace (the core flow), not an AI-initiated
+   * arbitrary file write.
+   */
+  private async saveGameToWorkspace(html: string): Promise<void> {
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) return;
+    try {
+      const root = folders[0].uri;
+      const target = vscode.Uri.joinPath(root, "index.html");
+      await vscode.workspace.fs.writeFile(target, Buffer.from(html, "utf8"));
+    } catch {
+      // Non-fatal: preview still works even if the save fails.
+    }
+  }
+
   /** Persist coach info chosen via the in-panel naming card. */
   private async saveCoachFromWebview(name: string, personality: string): Promise<void> {
     const profile = await this.ensureProfile();
@@ -226,6 +244,28 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleSend(text: string, history: ChatMessage[]): Promise<void> {
+    // "Show me / open it / run it" — if the kid asks to see the game in plain
+    // language and a game already exists, just open it. Don't make them hunt
+    // for the ▶ Run button or burn an AI round-trip on a deflection.
+    if (isShowIntent(text)) {
+      const lastGame = this.extractLastRenderableCode();
+      if (lastGame) {
+        const uid = randomId();
+        const aid = randomId();
+        void this.post({ type: "streamStart", streamId: uid, messageId: aid });
+        void this.post({ type: "streamChunk", streamId: uid, delta: "오른쪽 창에 게임을 열었어요! 🎮 한번 해보세요." });
+        void this.post({ type: "streamEnd", streamId: uid });
+        await this.appendHistory([
+          { id: randomId(), role: "user", content: text, createdAt: Date.now() },
+          { id: aid, role: "assistant", content: "오른쪽 창에 게임을 열었어요! 🎮 한번 해보세요.", createdAt: Date.now() },
+        ]);
+        void this.preview.show(lastGame);
+        void this.saveGameToWorkspace(lastGame);
+        return;
+      }
+      // No game yet → fall through to the AI, which will guide them to make one.
+    }
+
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof.ai/v1");
     const model = cfg.get<string>("model", "hypeproof-default");
@@ -260,6 +300,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         { id: randomId(), role: "user", content: text, createdAt: Date.now() },
         { id: messageId, role: "assistant", content: assistantText, createdAt: Date.now() },
       ]);
+      // Auto-reveal the game the moment it exists — the strongest essence-1
+      // ("감탄") moment. Opens the editor-area preview beside the chat. The
+      // ▶ Run button still re-renders into the same panel afterwards.
+      const html = extractRenderableHtml(assistantText);
+      if (html) {
+        void this.preview.show(html);
+        void this.saveGameToWorkspace(html);
+      }
     } catch (err) {
       await this.handleSendError(err, streamId);
     } finally {
@@ -380,6 +428,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 function randomId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+/**
+ * Does the kid's message mean "(just) show/open/run the existing game"?
+ *
+ * Tight on purpose: a message that *describes* a game ("별이 떨어지는 게임
+ * 보여줘") is a CREATE request, not a show request. So we only match short
+ * messages that have no create/modify verbs and no descriptive content.
+ */
+function isShowIntent(text: string): boolean {
+  const t = text.trim().toLowerCase().replace(/[!.?~\s]+$/g, "");
+  if (t.length > 14) return false;
+  // Creation/modification words → it's a new request, not "show it".
+  if (/(만들|추가|바꿔|바꾸|그려|넣어|없애|지워|색|소리|빠르|느리|크게|작게)/.test(t)) return false;
+  return /^(그거\s*)?(게임\s*)?(보여|열어|실행|돌려|켜|플레이|미리\s*보기|다시\s*보여|run|play|open|show)(줘|봐|해|해줘|해봐|해주세요|보자)?$/.test(
+    t,
+  );
 }
 
 function stripMd(s: string): string {

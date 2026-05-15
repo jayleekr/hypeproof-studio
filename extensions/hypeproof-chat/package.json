@@ -27,15 +27,7 @@
         {
           "id": "hypeproof-chat.panel",
           "name": "Chat",
-          "type": "webview",
-          "initialSize": 5
-        },
-        {
-          "id": "hypeproof-chat.preview",
-          "name": "Preview",
-          "type": "webview",
-          "initialSize": 1,
-          "visibility": "collapsed"
+          "type": "webview"
         }
       ]
     },
