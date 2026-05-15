@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Soft guard: refuse direct pushes to main (team convention — see CONTRIBUTING.md
+# "Contributing code"). GitHub branch protection isn't available on this private
+# repo's plan, so this catches accidental collaborator pushes locally.
+#
+# Enable once:   git config core.hooksPath .githooks
+# Maintainer override:   HPS_ALLOW_MAIN_PUSH=1 git push
+set -euo pipefail
+
+[[ "${HPS_ALLOW_MAIN_PUSH:-}" == "1" ]] && exit 0
+
+while read -r local_ref _ remote_ref _; do
+  if [[ "$remote_ref" == "refs/heads/main" ]]; then
+    echo "✋ Direct push to main is blocked (PR-first policy)." >&2
+    echo "   Open a PR from your feat/* or fix/* branch instead." >&2
+    echo "   Maintainer override:  HPS_ALLOW_MAIN_PUSH=1 git push" >&2
+    exit 1
+  fi
+done
+exit 0

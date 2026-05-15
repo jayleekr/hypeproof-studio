@@ -22,6 +22,10 @@ jstr() { # json-escape a string
 OS_NAME="$(uname -s)"
 OS_ARCH="$(uname -m)"
 OS_VER="$(sw_vers -productVersion 2>/dev/null || echo unknown)"
+# Local dev/build is macOS-only (METAPLAN). On other OSes this still emits valid
+# JSON (degraded) so the web-form fallback and solver parsing keep working.
+PLATFORM_SUPPORTED=false
+[[ "$OS_NAME" == "Darwin" ]] && PLATFORM_SUPPORTED=true
 
 # --- Toolchain ---------------------------------------------------------------
 NODE_VER="$(node --version 2>/dev/null || echo absent)"
@@ -61,7 +65,7 @@ cat <<JSON
 {
   "schema": "hps-env/1",
   "captured_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "os": { "name": $(jstr "$OS_NAME"), "version": $(jstr "$OS_VER"), "arch": $(jstr "$OS_ARCH") },
+  "os": { "name": $(jstr "$OS_NAME"), "version": $(jstr "$OS_VER"), "arch": $(jstr "$OS_ARCH"), "supported_for_local_dev": $PLATFORM_SUPPORTED },
   "node": $(jstr "$NODE_VER"),
   "repo": { "sha": $(jstr "$GIT_SHA"), "branch": $(jstr "$GIT_BRANCH"), "dirty": $GIT_DIRTY, "submodule_sha": $(jstr "$SUB_SHA") },
   "app": { "present": $APP_PRESENT, "bundle_id": $(jstr "$APP_BUNDLE_ID"), "version": $(jstr "$APP_VER"), "built_at": $(jstr "$APP_BUILT") },

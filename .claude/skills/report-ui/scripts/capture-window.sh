@@ -7,8 +7,10 @@ set -euo pipefail
 OUT="${1:?usage: capture-window.sh <out.png>}"
 mkdir -p "$(dirname "$OUT")"
 
-if ! command -v screencapture >/dev/null 2>&1; then
-  echo "ERR no screencapture (macOS only)" >&2
+if [[ "$(uname -s)" != "Darwin" ]] || ! command -v screencapture >/dev/null 2>&1; then
+  echo "ERR live-window capture is macOS-only. On Windows/Linux: skip the" >&2
+  echo "    screenshot here and drag an image into the GitHub issue, or use" >&2
+  echo "    the web issue form (see CONTRIBUTING.md)." >&2
   exit 2
 fi
 
