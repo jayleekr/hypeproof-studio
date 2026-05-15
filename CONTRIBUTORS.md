@@ -9,7 +9,7 @@ HypeProof Studio is built by this team. Thank you.
 | Jinyong Shin | [@JinyongShin](https://github.com/JinyongShin) | Contributor |
 | Shin (제형) | [@JeHyeong2](https://github.com/JeHyeong2) | Contributor |
 | Jkim | [@ico1036](https://github.com/ico1036) | Contributor |
-| — | [@TJ-kr](https://github.com/TJ-kr) | Contributor |
+| Taejin Kang (TJ) | [@TJ-kr](https://github.com/TJ-kr) | Contributor |
 
 <!--
 Keep this list in sync when collaborators are added/removed.
