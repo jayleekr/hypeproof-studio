@@ -17,7 +17,7 @@ import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { getProfile } from "../profiles";
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropic } from "../lib/anthropic";
-import { callGemini } from "../lib/gemini";
+import { callGeminiResilient } from "../lib/gemini";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
 import { getActiveSession, getRoster, isSessionLive } from "../lib/kv";
 import { logChat, persistUsage } from "../lib/analytics";
@@ -170,13 +170,17 @@ chat.post("/chat/completions", async (c) => {
   const stream = (body as any)?.stream === true;
   let upstream: Response;
   let modelLabel: string;
+  let fellBack = false;
   try {
     if (provider === "gemini") {
       const gBody = translateOpenAI(body as any, profile, coach, "gemini");
       gBody.stream = stream;
       if (stream) gBody.stream_options = { include_usage: true };
-      modelLabel = gBody.model;
-      upstream = await callGemini(gBody, apiKey);
+      // Retry transient 503s, then fall back to gemini-2.5-flash.
+      const g = await callGeminiResilient(gBody, apiKey);
+      upstream = g.response;
+      modelLabel = g.model;        // analytics + response reflect the real model
+      fellBack = g.fellBack;
     } else {
       const aBody = translate(body as any, profile, coach);
       aBody.stream = stream;
@@ -250,6 +254,8 @@ chat.post("/chat/completions", async (c) => {
     }
     const log = mkLog(tin, tout, cr, cc);
     record(log);
+    c.header("x-hps-model", modelLabel);
+    if (fellBack) c.header("x-hps-fallback", "1");
     return c.json({
       id: j.id ?? "chatcmpl-hps",
       object: "chat.completion",
@@ -277,11 +283,12 @@ chat.post("/chat/completions", async (c) => {
       ? passThroughOpenAIStream(upstream.body, onUsage)
       : transformStream(upstream.body, modelLabel, onUsage);
 
-  return new Response(outStream, {
-    headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
-      "x-accel-buffering": "no",
-    },
-  });
+  const streamHeaders: Record<string, string> = {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache",
+    "x-accel-buffering": "no",
+    "x-hps-model": modelLabel,
+  };
+  if (fellBack) streamHeaders["x-hps-fallback"] = "1";
+  return new Response(outStream, { headers: streamHeaders });
 });

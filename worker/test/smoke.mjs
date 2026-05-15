@@ -195,6 +195,69 @@ const stubProfile = {
   console.log("✓ resolveProvider: switchable peers, default Gemini, explicit override");
 }
 
+// ---- callGeminiResilient: retry transient, then fall back to flash --------
+{
+  const { callGeminiResilient, GEMINI_FALLBACK_MODEL } = await import("../src/lib/gemini.ts");
+  const realFetch = globalThis.fetch;
+  const reqModels = [];
+  // Drive fetch from a scripted list of HTTP statuses.
+  const scriptFetch = (statuses) => {
+    let i = 0;
+    return async (_url, init) => {
+      reqModels.push(JSON.parse(init.body).model);
+      const status = statuses[Math.min(i++, statuses.length - 1)];
+      return new Response(status === 200 ? '{"ok":true}' : '{"error":"x"}', { status });
+    };
+  };
+  const body = { model: "gemini-2.5-pro", messages: [], max_tokens: 100 };
+  try {
+    // 1. First try succeeds → no retry, no fallback.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([200]);
+    let r = await callGeminiResilient({ ...body }, "k");
+    assert.equal(r.response.status, 200);
+    assert.equal(r.model, "gemini-2.5-pro");
+    assert.equal(r.fellBack, false);
+    assert.equal(reqModels.length, 1, "no extra calls on first success");
+
+    // 2. 503 then 200 on the SAME model → retried, no fallback.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([503, 200]);
+    r = await callGeminiResilient({ ...body }, "k");
+    assert.equal(r.response.status, 200);
+    assert.equal(r.model, "gemini-2.5-pro");
+    assert.equal(r.fellBack, false);
+    assert.deepEqual(reqModels, ["gemini-2.5-pro", "gemini-2.5-pro"]);
+
+    // 3. Primary 503 x2 → fall back to flash, which answers.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([503, 503, 200]);
+    r = await callGeminiResilient({ ...body }, "k");
+    assert.equal(r.response.status, 200);
+    assert.equal(r.model, GEMINI_FALLBACK_MODEL, "fell back to flash");
+    assert.equal(r.fellBack, true);
+    assert.equal(reqModels[2], GEMINI_FALLBACK_MODEL, "3rd call used flash");
+
+    // 4. Non-retryable 400 → surfaced immediately, no retry/fallback.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([400, 200]);
+    r = await callGeminiResilient({ ...body }, "k");
+    assert.equal(r.response.status, 400, "4xx not masked");
+    assert.equal(r.fellBack, false);
+    assert.equal(reqModels.length, 1, "no retry on a non-transient error");
+
+    // 5. All attempts 503 → returns the last failing response (route → 502).
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([503, 503, 503, 503]);
+    r = await callGeminiResilient({ ...body }, "k");
+    assert.equal(r.response.status, 503, "exhausted → last failure surfaced");
+    assert.equal(reqModels.length, 4, "primary x2 + flash x2");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  console.log("✓ callGeminiResilient: retry transient, fall back to flash, surface 4xx");
+}
+
 // ---- translate: tools dropped when profile.sandbox.mcp_tools_enabled empty
 {
   const out = translate(
