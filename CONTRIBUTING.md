@@ -13,7 +13,7 @@ The whole arc, in order. Each step links to its detailed section.
 | # | Phase | Command (macOS) | Section |
 |---|---|---|---|
 | 1 | Clone (with submodule) | `git clone --recursive …` | [Environment setup](#environment-setup-contributors-who-build--dev) |
-| 2 | Install environment | `brew … && nvm … && gh auth login` | [Environment setup](#environment-setup-contributors-who-build--dev) |
+| 2 | Install environment + secrets | `dev-secrets.sh` | [Keys & cost](#keys--cost--read-this-first) → [Environment setup](#environment-setup-contributors-who-build--dev) |
 | 3 | Build the app (once, 1–2 h) | `bash scripts/run-build.sh …` | [Build the app](#build-the-app) |
 | 4 | Run + test | `scripts/dev-stack.sh`, `npm test` | [Run & test](#run--test) |
 | 5 | Use the Studio, notice something | — | [The fast path](#the-fast-path-report-ui) |
@@ -93,9 +93,31 @@ A solver — human or skill — picks it up, opens `fix/issue-<N>-<slug>`, and t
 merged PR closes the issue. Screenshots live on the orphan `contrib-evidence`
 branch, never on `main`.
 
+## Keys & cost — read this first
+
+**The LLM API key is Jay's personal money.** The model inside Studio is set to
+**Gemini** purely for cost; every request a contributor sends spends from a real
+billing account. Treat the key like a credit card number.
+
+Rules — non-negotiable:
+
+- **Never commit a key.** `worker/.dev.vars` is gitignored and `chmod 600`.
+  Only `worker/.dev.vars.example` (empty values) is committed.
+- **Never paste a key anywhere it leaves your machine** — issues, PRs, commit
+  messages, chat, screenshots, logs. The `/report-ui` skill and
+  `scripts/collect-studio-env.sh` are **secret-free by design**; don't add raw
+  command dumps that could leak one.
+- **Don't burn budget.** No load tests, no unbounded loops, no leaving an
+  automated agent hammering the worker. Dev/test traffic only.
+- **If a key leaks or you suspect it did, tell Jay immediately** so it can be
+  rotated. A rotated key is cheap; a scraped one billed for a week is not.
+- You don't mint your own key. Use the shared cohort key Jay provides, pulled
+  into `.dev.vars` by `scripts/dev-secrets.sh` (it never prints the value).
+
 ## Environment setup (contributors who build / dev)
 
-Local build and dev are **macOS arm64 only**. One-time setup:
+Assumed: you drive this with **Claude Code** (the other team members do). Local
+build and dev are **macOS arm64 only**. One-time setup:
 
 ```bash
 # 1. Toolchain
@@ -111,14 +133,13 @@ cd hypeproof-studio
 # 3. GitHub CLI (the /report-ui skill needs it)
 brew install gh && gh auth login               # needs 'repo' scope
 
-# 4. Secrets — never commit these
-cp hypeproof-studio.env.example hypeproof-studio.env   # fill in if building
-cat > worker/.dev.vars <<'EOF'
-ANTHROPIC_API_KEY=...        # ask Jay; or reuse SNT_CLAUDE_API_KEY from ~/.env
-HPS_SIGNING_SECRET=...       # any strong random string (shared per cohort)
-HPS_ADMIN_PASSWORD=dev       # local admin UI password
-EOF
-
+# 4. Secrets — see "Keys & cost" above; NEVER commit worker/.dev.vars
+cp hypeproof-studio.env.example hypeproof-studio.env   # fill in only if building
+cp worker/.dev.vars.example worker/.dev.vars
+bash scripts/dev-secrets.sh        # pulls the Gemini key from ~/.env, chmod 600
+# then edit worker/.dev.vars: set HPS_SIGNING_SECRET (must match your test
+# tokens); HPS_ADMIN_PASSWORD only if you touch /admin. ANTHROPIC_API_KEY is a
+# fallback only — leave empty unless told otherwise.
 ```
 
 That covers steps 1–2 of the journey. Next: build, then test.

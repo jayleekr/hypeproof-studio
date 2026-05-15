@@ -1,0 +1,20 @@
+# worker/.dev.vars — local secrets for `wrangler dev`. Copy to `.dev.vars`
+# and fill in. THIS FILE (.example) is committed; `.dev.vars` is gitignored.
+#
+# Fastest path: from the repo root run `bash scripts/dev-secrets.sh`
+# (pulls GEMINI_KEY from your ~/.env into worker/.dev.vars automatically).
+
+# Active LLM provider key. Get one at https://aistudio.google.com/apikey
+GEMINI_API_KEY=
+
+# HMAC secret used to sign/verify workshop tokens. Any long random string;
+# must match whatever issued the tokens you test with.
+HPS_SIGNING_SECRET=
+
+# Admin panel password (only needed if you exercise /admin routes locally).
+HPS_ADMIN_PASSWORD=
+
+# Optional. Defaults to "gemini" when GEMINI_API_KEY is set. Set to
+# "anthropic" (and provide ANTHROPIC_API_KEY) only to fall back to Claude.
+# LLM_PROVIDER=gemini
+# ANTHROPIC_API_KEY=
