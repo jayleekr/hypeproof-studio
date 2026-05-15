@@ -1,0 +1,125 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or tag to build"
+        required: false
+        default: "main"
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-win:
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    env:
+      OS_NAME: windows
+      VSCODE_ARCH: x64
+      SHOULD_BUILD: "yes"
+      SHOULD_BUILD_REH: "no"
+      SHOULD_BUILD_REH_WEB: "no"
+      DISABLE_UPDATE: "yes"
+      VSCODE_PUBLISH_COUNTER: 0
+      NODE_OPTIONS: "--max-old-space-size=12288"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install jq
+        run: choco install jq -y
+
+      - name: Load HypeProof env
+        shell: bash
+        run: |
+          # shellcheck source=/dev/null
+          source ./hypeproof-studio.env
+          # Re-export to GITHUB_ENV so subsequent steps see them
+          {
+            echo "APP_NAME=$APP_NAME"
+            echo "APP_NAME_LC=$APP_NAME_LC"
+            echo "BINARY_NAME=$BINARY_NAME"
+            echo "ORG_NAME=$ORG_NAME"
+            echo "ASSETS_REPOSITORY=$ASSETS_REPOSITORY"
+            echo "GH_REPO_PATH=$GH_REPO_PATH"
+            echo "HPS_NAME_SHORT=$HPS_NAME_SHORT"
+            echo "HPS_NAME_LONG=$HPS_NAME_LONG"
+            echo "HPS_APPLICATION_NAME=$HPS_APPLICATION_NAME"
+            echo "HPS_DATA_FOLDER_NAME=$HPS_DATA_FOLDER_NAME"
+            echo "HPS_DARWIN_BUNDLE_ID=$HPS_DARWIN_BUNDLE_ID"
+            echo "HPS_URL_PROTOCOL=$HPS_URL_PROTOCOL"
+            echo "HPS_WIN32_DIR_NAME=$HPS_WIN32_DIR_NAME"
+            echo "HPS_WIN32_NAME_VERSION=$HPS_WIN32_NAME_VERSION"
+            echo "HPS_WIN32_MUTEX_NAME=$HPS_WIN32_MUTEX_NAME"
+            echo "HPS_WIN32_APP_USER_MODEL_ID=$HPS_WIN32_APP_USER_MODEL_ID"
+            echo "HPS_WIN32_REG_VALUE_NAME=$HPS_WIN32_REG_VALUE_NAME"
+          } >> "$GITHUB_ENV"
+
+      - name: Install brand assets
+        shell: bash
+        run: bash scripts/install-brand-assets.sh
+
+      - name: Build icons
+        shell: bash
+        working-directory: vscodium-base
+        run: bash icons/build_icons.sh
+
+      - name: Fetch + prepare VS Code source
+        shell: bash
+        working-directory: vscodium-base
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash get_repo.sh
+          bash prepare_src.sh
+          bash prepare_vscode.sh
+
+      - name: Apply product.json overrides
+        shell: bash
+        working-directory: vscodium-base
+        run: bash ../scripts/apply-product-overrides.sh
+
+      - name: Inject hypeproof-chat
+        shell: bash
+        run: bash scripts/inject-builtin-extensions.sh
+
+      - name: Build (Windows)
+        shell: bash
+        working-directory: vscodium-base
+        run: bash build.sh
+
+      - name: Locate artifacts
+        id: artifacts
+        shell: bash
+        working-directory: vscodium-base
+        run: |
+          shopt -s nullglob
+          mkdir -p ../dist
+          for f in *.exe *.zip; do
+            cp -v "$f" ../dist/ || true
+          done
+          ls -la ../dist || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypeproof-studio-windows-x64
+          path: dist/
+          if-no-files-found: warn
+          retention-days: 14

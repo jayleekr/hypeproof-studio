@@ -1,0 +1,13 @@
+# Placeholder — implemented in Phase 6.
+# Goal: on tag push (v*), build Mac arm64 + Windows installers from the
+# pinned submodule commit, sign, and attach to a GitHub Release.
+name: release
+on:
+  workflow_dispatch:
+  # push:
+  #   tags: ['v*']
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "TODO Phase 6 — Mac arm64 (local), Win (build-windows.yml), sign + attach"

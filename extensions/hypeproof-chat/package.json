@@ -1,0 +1,93 @@
+{
+  "name": "hypeproof-chat",
+  "displayName": "HypeProof Chat",
+  "description": "Built-in chat panel for HypeProof Studio.",
+  "version": "0.1.0",
+  "publisher": "hypeproof",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "hypeproof-chat",
+          "title": "HypeProof Chat",
+          "icon": "media/chat.svg"
+        }
+      ]
+    },
+    "views": {
+      "hypeproof-chat": [
+        {
+          "id": "hypeproof-chat.panel",
+          "name": "Chat",
+          "type": "webview"
+        },
+        {
+          "id": "hypeproof-chat.preview",
+          "name": "Preview",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "hypeproof-chat.focus",
+        "title": "HypeProof Chat: Focus"
+      },
+      {
+        "command": "hypeproof-chat.clearHistory",
+        "title": "HypeProof Chat: Clear Conversation"
+      },
+      {
+        "command": "hypeproof-chat.setToken",
+        "title": "HypeProof Chat: Set Workshop Token"
+      },
+      {
+        "command": "hypeproof-chat.runLastCode",
+        "title": "HypeProof Chat: Run Last Code in Preview"
+      }
+    ],
+    "configuration": {
+      "title": "HypeProof Chat",
+      "properties": {
+        "hypeproofChat.proxyUrl": {
+          "type": "string",
+          "default": "https://api.hypeproof.ai/v1",
+          "description": "Base URL for the HypeProof Proxy (OpenAI-compatible). Override for local dev (e.g. http://localhost:8787/v1)."
+        },
+        "hypeproofChat.model": {
+          "type": "string",
+          "default": "hypeproof-default",
+          "description": "Model identifier sent to the proxy."
+        },
+        "hypeproofChat.requireApprovalFor": {
+          "type": "array",
+          "items": { "type": "string", "enum": ["writeFile", "executeShell"] },
+          "default": ["writeFile", "executeShell"],
+          "description": "Actions that require explicit user approval before execution."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run build:webview && npm run build:extension",
+    "build:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js",
+    "build:webview": "cd webview-ui && npm install && npm run build",
+    "watch:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js --watch",
+    "watch:webview": "cd webview-ui && npm run dev",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.90.0",
+    "esbuild": "^0.21.0",
+    "typescript": "^5.4.0"
+  }
+}

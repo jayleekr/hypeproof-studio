@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>HypeProof Studio — Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, system-ui, "Helvetica Neue", sans-serif;
+           background: #0f0f17; color: #e8e8ef; }
+    header { padding: 14px 20px; border-bottom: 1px solid #2a2a3a; display: flex;
+             align-items: center; justify-content: space-between; }
+    header h1 { font-size: 16px; margin: 0; font-weight: 700; letter-spacing: -0.3px; }
+    .pill { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #2a2a3a; color: #aaa; }
+    main { padding: 20px; max-width: 1000px; margin: 0 auto; }
+    .cohort { background: #16161f; border: 1px solid #2a2a3a; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .cohort h2 { font-size: 14px; margin: 0 0 8px; color: #c5c5d0; }
+    .cohort .meta { font-size: 12px; color: #888; margin-bottom: 12px; }
+    .session-active { background: #1a3520; border-color: #2a8540; }
+    .session-active .pill { background: #2a8540; color: #fff; }
+    button { background: #5b5bff; color: #fff; border: 0; border-radius: 5px;
+             padding: 7px 14px; cursor: pointer; font-weight: 500; font-size: 13px; margin-right: 6px; }
+    button:hover { opacity: 0.85; }
+    button.secondary { background: #2a2a3a; }
+    button.danger { background: #c0392b; }
+    input, select, textarea { background: #1a1a25; color: #e8e8ef; border: 1px solid #333;
+                              padding: 6px 10px; border-radius: 4px; font-size: 13px;
+                              font-family: inherit; }
+    textarea { width: 100%; min-height: 60px; resize: vertical; }
+    .row { display: flex; gap: 8px; align-items: center; margin: 6px 0; flex-wrap: wrap; }
+    label { font-size: 12px; color: #aaa; margin-right: 6px; }
+    .roster { font-family: -apple-system, ui-monospace, monospace; font-size: 12px;
+              color: #aaa; padding: 6px 0; }
+    .roster .chip { display: inline-block; padding: 2px 8px; margin: 2px; background: #2a2a3a;
+                    border-radius: 10px; font-size: 11px; }
+    .usage { margin-top: 12px; font-size: 12px; }
+    .usage table { width: 100%; border-collapse: collapse; }
+    .usage th, .usage td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #2a2a3a; }
+    .usage th { color: #888; font-weight: 500; font-size: 11px; }
+    details { margin-top: 8px; }
+    summary { cursor: pointer; color: #aaa; font-size: 12px; }
+    .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+             background: #1a3520; border: 1px solid #2a8540; padding: 8px 16px;
+             border-radius: 6px; font-size: 13px; opacity: 0; transition: opacity 0.2s; }
+    .toast.show { opacity: 1; }
+    .toast.error { background: #3a1a1a; border-color: #8a3030; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>HypeProof Studio — Admin</h1>
+    <span id="env-pill" class="pill">…</span>
+  </header>
+  <main id="root">Loading…</main>
+  <div id="toast" class="toast"></div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let profiles = [];
+
+    async function api(path, opts) {
+      const res = await fetch(path, {
+        ...opts,
+        headers: { "content-type": "application/json", ...(opts?.headers || {}) },
+      });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text()}`);
+      return res.json();
+    }
+
+    function toast(msg, isErr) {
+      const t = $("toast");
+      t.textContent = msg;
+      t.className = "toast show" + (isErr ? " error" : "");
+      setTimeout(() => (t.className = "toast" + (isErr ? " error" : "")), 2500);
+    }
+
+    function fmtTime(s) {
+      if (!s) return "—";
+      const d = new Date(s);
+      return d.toLocaleString("ko-KR", { hour12: false });
+    }
+
+    function defaultStarts() {
+      return new Date(Date.now() + 5 * 60_000).toISOString().slice(0, 16);
+    }
+    function defaultEnds() {
+      return new Date(Date.now() + 8 * 3600_000).toISOString().slice(0, 16);
+    }
+
+    function cohortCard(c) {
+      const isLive = c.session && Date.now() >= Date.parse(c.session.starts_at)
+                                && Date.now() <= Date.parse(c.session.ends_at);
+      const profilesForCohort = profiles.filter((p) => p.cohort_id === c.id);
+
+      const sessionHtml = c.session
+        ? `<div class="meta">
+             📅 ${fmtTime(c.session.starts_at)} – ${fmtTime(c.session.ends_at)}
+             &nbsp;|&nbsp; profile: ${c.session.profile_id}
+             &nbsp;|&nbsp; <span class="pill">${isLive ? "LIVE" : "scheduled"}</span>
+           </div>
+           <button class="danger" data-act="end" data-cohort="${c.id}">End class</button>`
+        : `<div class="meta">No active session.</div>
+           <div class="row">
+             <label>Profile</label>
+             <select id="prof-${c.id}">
+               ${profilesForCohort.map((p) => `<option value="${p.id}">${p.display_name}</option>`).join("")}
+             </select>
+             <label>Starts</label>
+             <input id="start-${c.id}" type="datetime-local" value="${defaultStarts()}">
+             <label>Ends</label>
+             <input id="end-${c.id}" type="datetime-local" value="${defaultEnds()}">
+             <button data-act="start" data-cohort="${c.id}">Start class ▶</button>
+           </div>`;
+
+      const rosterChips = (c.roster_users || []).map((u) => `<span class="chip">${u}</span>`).join("");
+
+      return `
+        <div class="cohort ${isLive ? "session-active" : ""}">
+          <h2>${c.id}</h2>
+          ${sessionHtml}
+          <details>
+            <summary>Roster (${c.roster_size || 0})</summary>
+            <div class="roster">${rosterChips || "<em>empty</em>"}</div>
+            <div class="row">
+              <textarea id="roster-${c.id}" placeholder="user-ids, one per line or comma-separated"></textarea>
+            </div>
+            <button data-act="roster" data-cohort="${c.id}">Save roster</button>
+          </details>
+          <details>
+            <summary>Recent usage</summary>
+            <div class="usage" id="usage-${c.id}">click to load…</div>
+            <button class="secondary" data-act="load-usage" data-cohort="${c.id}">Reload</button>
+          </details>
+        </div>
+      `;
+    }
+
+    async function loadAll() {
+      try {
+        const [{ cohorts }, { profiles: profs }] = await Promise.all([
+          api("/admin/cohorts"),
+          api("/admin/profiles"),
+        ]);
+        profiles = profs;
+
+        // Hydrate roster_users on each cohort
+        for (const c of cohorts) {
+          const detail = await api(`/admin/cohorts/${encodeURIComponent(c.id)}`);
+          c.roster_users = detail.roster?.users ?? [];
+        }
+        $("root").innerHTML = cohorts.map(cohortCard).join("") || "<em>no cohorts</em>";
+        $("env-pill").textContent = location.hostname.includes("workers.dev") ? "dev" : "prod";
+      } catch (err) {
+        $("root").textContent = "Error: " + err.message;
+      }
+    }
+
+    document.addEventListener("click", async (ev) => {
+      const btn = ev.target.closest("button[data-act]");
+      if (!btn) return;
+      const act = btn.dataset.act;
+      const cohort = btn.dataset.cohort;
+      try {
+        if (act === "start") {
+          const profile = $(`prof-${cohort}`).value;
+          const starts = new Date($(`start-${cohort}`).value).toISOString();
+          const ends = new Date($(`end-${cohort}`).value).toISOString();
+          await api(`/admin/cohorts/${encodeURIComponent(cohort)}/session`, {
+            method: "POST",
+            body: JSON.stringify({ profile_id: profile, starts_at: starts, ends_at: ends }),
+          });
+          toast("Class started");
+          loadAll();
+        } else if (act === "end") {
+          if (!confirm("End this class now?")) return;
+          await api(`/admin/cohorts/${encodeURIComponent(cohort)}/session`, { method: "DELETE" });
+          toast("Class ended");
+          loadAll();
+        } else if (act === "roster") {
+          const raw = $(`roster-${cohort}`).value;
+          const users = raw.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
+          await api(`/admin/cohorts/${encodeURIComponent(cohort)}/roster`, {
+            method: "POST",
+            body: JSON.stringify({ users }),
+          });
+          toast(`Roster saved (${users.length})`);
+          loadAll();
+        } else if (act === "load-usage") {
+          const { usage } = await api(`/admin/cohorts/${encodeURIComponent(cohort)}/usage?limit=30`);
+          const rows = usage.map((u) =>
+            `<tr><td>${u.user_id}</td><td>${u.model}</td>
+              <td>${u.tokens_in}</td><td>${u.tokens_out}</td>
+              <td>${u.cache_read}</td><td>${u.latency_ms ?? "–"}ms</td>
+              <td>${u.status}</td><td>${u.created_at}</td></tr>`,
+          ).join("");
+          $(`usage-${cohort}`).innerHTML = rows
+            ? `<table><thead><tr><th>user</th><th>model</th><th>in</th><th>out</th><th>cache↓</th><th>lat</th><th>code</th><th>when</th></tr></thead><tbody>${rows}</tbody></table>`
+            : "<em>no usage yet</em>";
+        }
+      } catch (err) {
+        toast("Error: " + err.message, true);
+      }
+    });
+
+    loadAll();
+  </script>
+</body>
+</html>

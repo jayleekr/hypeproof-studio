@@ -1,0 +1,4 @@
+[submodule "vscodium-base"]
+	path = vscodium-base
+	url = git@github.com:jayleekr/vscodium.git
+	branch = hps/main

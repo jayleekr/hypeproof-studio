@@ -1,0 +1,14 @@
+# Placeholder — implemented in Phase 6.
+# Goal: weekly cron that fetches VSCodium upstream into jayleekr/vscodium fork,
+# merges into hps/main, opens a PR in this repo bumping the submodule pointer.
+# On conflict: leave PR for manual resolution.
+name: upstream-sync
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 8 * * 1'  # Monday 08:00 UTC
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "TODO Phase 6 — see METAPLAN §9 + .claude/rules/build-pipeline.md"

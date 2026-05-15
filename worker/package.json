@@ -1,0 +1,25 @@
+{
+  "name": "hypeproof-studio-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker — OpenAI-compatible proxy + cohort admin for HypeProof Studio",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "test": "node --experimental-strip-types test/smoke.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250515.0",
+    "@cloudflare/vitest-pool-workers": "^0.5.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0",
+    "wrangler": "^3.80.0"
+  }
+}

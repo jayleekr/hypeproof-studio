@@ -1,0 +1,48 @@
+name = "hypeproof-studio-api"
+main = "src/index.ts"
+compatibility_date = "2026-05-15"
+compatibility_flags = ["nodejs_compat"]
+
+# Custom domain mapping (configured in Cloudflare dashboard once)
+# routes = [{ pattern = "api.hypeproof.ai", custom_domain = true }]
+
+# Workers Logs (default observability — visible in dashboard)
+[observability]
+enabled = true
+
+# KV: cohort/session/roster state
+# Create:  wrangler kv:namespace create HPS_KV
+# Preview: wrangler kv:namespace create HPS_KV --preview
+[[kv_namespaces]]
+binding = "HPS_KV"
+id = "REPLACE_WITH_KV_ID"
+preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
+
+# D1: persistent usage_log, cohorts catalog
+# Create: wrangler d1 create hypeproof-studio
+# Migrate: wrangler d1 execute hypeproof-studio --file=schema.sql
+[[d1_databases]]
+binding = "HPS_DB"
+database_name = "hypeproof-studio"
+database_id = "REPLACE_WITH_D1_ID"
+
+# Analytics Engine: per-request datapoints for usage dashboards
+[[analytics_engine_datasets]]
+binding = "HPS_ANALYTICS"
+dataset = "hypeproof_studio"
+
+# Bundle .md and .html as static text imports
+[[rules]]
+type = "Text"
+globs = ["**/*.md", "**/*.html"]
+fallthrough = true
+
+[vars]
+ENVIRONMENT = "production"
+# ANTHROPIC_API_KEY, HPS_SIGNING_SECRET set via:
+#   wrangler secret put ANTHROPIC_API_KEY
+#   wrangler secret put HPS_SIGNING_SECRET
+
+[env.dev]
+name = "hypeproof-studio-api-dev"
+vars = { ENVIRONMENT = "dev" }
