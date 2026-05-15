@@ -25,6 +25,7 @@
   <a href="./docs/essence-v0.1.md">16 Essences</a> ·
   <a href="./docs/INSTALL.md">Install (workshop)</a> ·
   <a href="./docs/COHORT-AUTHORING.md">Authoring cohorts</a> ·
+  <a href="./CONTRIBUTING.md">Contributing</a> ·
   <a href="./STATUS-2026-05-15-overnight.md">Latest status</a>
 </p>
 
@@ -136,6 +137,13 @@ and failure modes: [.claude/rules/build-pipeline.md](.claude/rules/build-pipelin
 `VSCodium/vscodium` → `jayleekr/vscodium` (fork; `hps/main` carries brand patches)
 → submodule pointer bump in this repo (deliberate, reviewed) → tagged release.
 Automation lands in Phase 6 (`.github/workflows/upstream-sync.yml`, `release.yml`).
+
+## Contributing
+
+Most contributions start as a noticing while using the Studio. File it from
+where you are with the `/report-ui` skill — see
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the full flow (setup, platform support,
+issue → PR). The team is listed in [CONTRIBUTORS.md](./CONTRIBUTORS.md).
 
 ## License
 

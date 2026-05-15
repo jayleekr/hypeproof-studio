@@ -150,3 +150,6 @@ git config core.hooksPath .githooks
 - Read [CLAUDE.md](./CLAUDE.md) and [.claude/rules/](.claude/rules/) before your
   first change.
 - English for code, comments, commits, and docs. Converse in any language.
+
+The team is listed in [CONTRIBUTORS.md](./CONTRIBUTORS.md) — add a row when a
+new collaborator is invited.
