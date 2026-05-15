@@ -110,6 +110,11 @@ Where the key lives — the important part:
   raw API key — it holds a *workshop token* in VS Code SecretStorage and calls
   the Worker, which injects the real key. So a leaked client/app build can't
   expose the key.
+- **Local-dev builds auto-import the token.** When `hypeproofChat.proxyUrl`
+  points at `localhost`/`127.0.0.1`, a manually-launched build picks up the
+  token `scripts/dev-stack.sh` wrote to `/tmp/hps-token.txt` (override with
+  `HPS_DEV_TOKEN_FILE`) — no pasting each launch. Dev-gated: a real workshop
+  build (`proxyUrl = https://api.hypeproof.ai/v1`) never reads that path.
 - **Using keys for testing is fine** — hammer the built app, leave an agent
   running, loop the e2e suite. That's expected dev traffic, not a concern.
 - The only real rule: **don't commit or publicly paste the key itself.**
