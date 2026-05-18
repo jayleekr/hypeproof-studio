@@ -1,0 +1,162 @@
+# Mac arm64 build — CI counterpart of build-windows.yml.
+# Goal: a `git tag v*` produces the Mac Release asset with zero human build.
+#
+# Deviations from build-windows.yml (intentional):
+#   - env is provisioned from hypeproof-studio.env.example: the real
+#     hypeproof-studio.env is gitignored, so it is never in a CI checkout.
+#     The .example is the complete, secret-free branding/build config.
+#   - submodules: recursive — vscodium-base is a submodule the build needs
+#     (build-windows.yml omits this; tracked as a separate follow-up).
+#   - on a tag push, the .app is zipped to HypeProof-Studio-darwin-arm64.zip
+#     (name matches scripts/install-mac.sh ASSET_SUFFIX) and published to the
+#     GitHub Release, so the operator one-liner resolves it.
+name: Build macOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch or tag to build"
+        required: false
+        default: "main"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # create/upload the GitHub Release on tag builds
+
+concurrency:
+  group: build-mac-${{ github.event.inputs.ref || github.ref }}
+  cancel-in-progress: false # never cancel an in-flight release build
+
+jobs:
+  build-mac:
+    runs-on: macos-15 # arm64 on GitHub-hosted macos-14+
+    timeout-minutes: 180 # full build is 1–2 h; headroom under the 6 h cap
+
+    env:
+      OS_NAME: osx
+      VSCODE_ARCH: arm64
+      SHOULD_BUILD: "yes"
+      SHOULD_BUILD_REH: "no"
+      SHOULD_BUILD_REH_WEB: "no"
+      DISABLE_UPDATE: "yes"
+      VSCODE_PUBLISH_COUNTER: 0
+      NODE_OPTIONS: "--max-old-space-size=12288"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build deps (libicns / icoutils / gnu-sed / jq)
+        run: |
+          brew install libicns icoutils gnu-sed jq || true
+          icns2png --version || true
+          gsed --version | head -1 || true
+
+      - name: Provision build env (from gitignored .env's committed example)
+        run: cp hypeproof-studio.env.example hypeproof-studio.env
+
+      - name: Load HypeProof env
+        shell: bash
+        run: |
+          # shellcheck source=/dev/null
+          source ./hypeproof-studio.env
+          # Re-export to GITHUB_ENV so subsequent steps see them
+          {
+            echo "APP_NAME=$APP_NAME"
+            echo "APP_NAME_LC=$APP_NAME_LC"
+            echo "BINARY_NAME=$BINARY_NAME"
+            echo "ORG_NAME=$ORG_NAME"
+            echo "ASSETS_REPOSITORY=$ASSETS_REPOSITORY"
+            echo "GH_REPO_PATH=$GH_REPO_PATH"
+            echo "HPS_NAME_SHORT=$HPS_NAME_SHORT"
+            echo "HPS_NAME_LONG=$HPS_NAME_LONG"
+            echo "HPS_APPLICATION_NAME=$HPS_APPLICATION_NAME"
+            echo "HPS_DATA_FOLDER_NAME=$HPS_DATA_FOLDER_NAME"
+            echo "HPS_DARWIN_BUNDLE_ID=$HPS_DARWIN_BUNDLE_ID"
+            echo "HPS_URL_PROTOCOL=$HPS_URL_PROTOCOL"
+          } >> "$GITHUB_ENV"
+
+      - name: Install brand assets
+        shell: bash
+        run: bash scripts/install-brand-assets.sh
+
+      - name: Build icons
+        shell: bash
+        working-directory: vscodium-base
+        run: bash icons/build_icons.sh
+
+      - name: Fetch + prepare VS Code source
+        shell: bash
+        working-directory: vscodium-base
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          bash get_repo.sh
+          bash prepare_src.sh
+          bash prepare_vscode.sh
+
+      - name: Apply product.json overrides
+        shell: bash
+        working-directory: vscodium-base
+        run: bash ../scripts/apply-product-overrides.sh
+
+      - name: Inject hypeproof-chat
+        shell: bash
+        run: bash scripts/inject-builtin-extensions.sh
+
+      - name: Build (macOS)
+        shell: bash
+        working-directory: vscodium-base
+        run: bash build.sh
+
+      - name: Package .app → darwin-arm64 zip
+        id: package
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          OUT_DIR="vscodium-base/VSCode-darwin-arm64"
+          [ -d "$OUT_DIR" ] || { echo "::error::$OUT_DIR not found"; ls -la vscodium-base || true; exit 1; }
+          APP="$(cd "$OUT_DIR" && ls -d *.app | head -1)"
+          [ -n "$APP" ] || { echo "::error::no .app in $OUT_DIR"; ls -la "$OUT_DIR"; exit 1; }
+          ( cd "$OUT_DIR" && zip -ry "$GITHUB_WORKSPACE/dist/HypeProof-Studio-darwin-arm64.zip" "$APP" )
+          ls -la dist
+
+      - name: Upload artifact (debugging / workflow_dispatch)
+        uses: actions/upload-artifact@v4
+        with:
+          name: hypeproof-studio-darwin-arm64
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish to GitHub Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          # build-windows.yml may have created the release for the same tag;
+          # create-if-absent then clobber-upload is race-safe across both jobs.
+          gh release create "$TAG" --title "HypeProof Studio $TAG" \
+            --generate-notes --verify-tag 2>/dev/null || true
+          gh release upload "$TAG" \
+            dist/HypeProof-Studio-darwin-arm64.zip --clobber
