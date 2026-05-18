@@ -254,7 +254,7 @@ async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<voi
   // Source 3: dev convenience. A manually-launched local build picks up the
   // token `scripts/dev-stack.sh` writes, so contributors don't paste it every
   // launch. Dev-gated: only when proxyUrl points at a local worker, so a real
-  // workshop build (proxyUrl = https://api.hypeproof.ai/v1) never reads it.
+  // workshop build (proxyUrl = https://api.hypeproof-ai.xyz/v1) never reads it.
   if (!token || token.length === 0) {
     const proxyUrl = vscode.workspace
       .getConfiguration("hypeproofChat")

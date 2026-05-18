@@ -72,7 +72,7 @@ installs worker/e2e deps, enables the pre-push guard. Anything missing is
   알려 로테이션 — 드라마 없음.
 - 로컬-dev 빌드는 `proxyUrl`이 localhost면 `dev-stack.sh`가 쓴
   `/tmp/hps-token.txt`를 자동 임포트(매번 붙여넣기 불필요). 워크숍 빌드
-  (`proxyUrl=https://api.hypeproof.ai/v1`)는 그 경로를 절대 안 읽음.
+  (`proxyUrl=https://api.hypeproof-ai.xyz/v1`)는 그 경로를 절대 안 읽음.
 
 <details><summary>English</summary>
 

@@ -2,7 +2,7 @@
 //
 // Auth: protected via Cloudflare Access at the route level (recommended) —
 // HPS_ADMIN_PASSWORD is the dev fallback. In production set up a Cloudflare
-// Access policy on api.hypeproof.ai/admin/* limited to Jay's email.
+// Access policy on api.hypeproof-ai.xyz/admin/* limited to Jay's email.
 //
 // Endpoints:
 //   GET    /admin/cohorts                       — list with status

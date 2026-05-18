@@ -140,7 +140,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (this.profileFetchPromise) return this.profileFetchPromise;
 
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
-    const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof.ai/v1");
+    const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
     const token = await this.context.secrets.get(TOKEN_KEY);
     if (!token) return null;
 
@@ -267,7 +267,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
 
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
-    const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof.ai/v1");
+    const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
     const model = cfg.get<string>("model", "hypeproof-default");
     const token = await this.context.secrets.get(TOKEN_KEY);
     const coach = this.getCoach();
@@ -367,7 +367,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     await this.post({
       type: "config",
       config: {
-        proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof.ai/v1"),
+        proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
         model: cfg.get<string>("model", "hypeproof-default"),
         hasToken: !!token,
         coach: this.getCoach(),
