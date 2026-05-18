@@ -38,7 +38,7 @@ npx wrangler secret put HPS_ADMIN_PASSWORD     # dev fallback only; set Cloudfla
 
 # 6. (Optional) Custom domain
 #    In Cloudflare dashboard → Workers → hypeproof-studio-api → Custom Domains
-#    Add: api.hypeproof.ai
+#    Add: api.hypeproof-ai.xyz
 #    Then uncomment the `routes = [...]` line in wrangler.toml.
 ```
 
@@ -94,7 +94,7 @@ npx wrangler secret put GEMINI_API_KEY
 
 1. Zero Trust → Access → Applications → Add → Self-hosted
 2. Application name: `HypeProof Studio Admin`
-3. Subdomain: `api.hypeproof.ai`, Path: `/admin/*` and `/`
+3. Subdomain: `api.hypeproof-ai.xyz`, Path: `/admin/*` and `/`
 4. Identity providers: Google OAuth (or email OTP)
 5. Policy: Include → Emails → `jaylee@...`
 6. Save

@@ -58,7 +58,7 @@
       "properties": {
         "hypeproofChat.proxyUrl": {
           "type": "string",
-          "default": "https://api.hypeproof.ai/v1",
+          "default": "https://api.hypeproof-ai.xyz/v1",
           "description": "Base URL for the HypeProof Proxy (OpenAI-compatible). Override for local dev (e.g. http://localhost:8787/v1)."
         },
         "hypeproofChat.model": {

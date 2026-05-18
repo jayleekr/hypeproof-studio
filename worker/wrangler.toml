@@ -3,8 +3,8 @@ main = "src/index.ts"
 compatibility_date = "2026-05-15"
 compatibility_flags = ["nodejs_compat"]
 
-# Custom domain mapping (configured in Cloudflare dashboard once)
-# routes = [{ pattern = "api.hypeproof.ai", custom_domain = true }]
+# Custom domain mapping — wrangler provisions DNS + cert (zone in this account)
+routes = [{ pattern = "api.hypeproof-ai.xyz", custom_domain = true }]
 
 # Workers Logs (default observability — visible in dashboard)
 [observability]
@@ -15,8 +15,8 @@ enabled = true
 # Preview: wrangler kv:namespace create HPS_KV --preview
 [[kv_namespaces]]
 binding = "HPS_KV"
-id = "REPLACE_WITH_KV_ID"
-preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
+id = "b70e51eb53674732b323484d7c3ed21a"
+preview_id = "558f72d8329c40a78b60f0bcb4c64910"
 
 # D1: persistent usage_log, cohorts catalog
 # Create: wrangler d1 create hypeproof-studio
@@ -24,7 +24,7 @@ preview_id = "REPLACE_WITH_KV_PREVIEW_ID"
 [[d1_databases]]
 binding = "HPS_DB"
 database_name = "hypeproof-studio"
-database_id = "REPLACE_WITH_D1_ID"
+database_id = "2427207c-272e-4ecd-9d16-7a1dcc0fc741"
 
 # Analytics Engine: per-request datapoints for usage dashboards
 [[analytics_engine_datasets]]

@@ -98,7 +98,7 @@ npx wrangler deploy   # or wrangler dev for local
 
 ### 5. Worker admin에 cohort + roster 생성
 
-브라우저로 `https://api.hypeproof.ai/admin` (또는 dev: localhost:8787) → Cloudflare Access 인증.
+브라우저로 `https://api.hypeproof-ai.xyz/admin` (또는 dev: localhost:8787) → Cloudflare Access 인증.
 
 - Roster 입력 (예: `["수강생01", "수강생02", ...]`)
 - "Start class" — 회차 profile 선택, 시간 창 설정
