@@ -26,12 +26,25 @@ Use this before any release-cutting action. Source of truth for Phase 7 decision
   - Body: copy from RELEASE-NOTES below
 - [ ] Verify one-line installers resolve to the new release (test from a fresh shell)
 
+## Endpoint / config change → re-cut
+
+When a shipped default changes (e.g. the `hypeproofChat.proxyUrl` host), every
+distributed build is stale — run the full **Cut + Dogfood**, plus:
+
+- **Interim, no rebuild:** operators set `hypeproofChat.proxyUrl` to the new
+  URL (Settings → search `proxyUrl`) and reload. Unblocks them during the
+  1–2 h build; announce in the operator chat the moment the Worker is live
+  (`curl <api>/v1/health` → 200).
+- **On the new build:** operators must **clear** that interim override before
+  trusting the new default — a leftover override silently shadows it.
+
 ## Dogfood (6 operators)
 
 - [ ] 6명에게 install link 공유 (`docs/INSTALL.md` 또는 https://hypeproof.ai/install)
 - [ ] 6명 모두 install 성공 확인 (kakaotalk 단톡방)
 - [ ] 6명 모두 token 등록 + 첫 메시지 응답 OK
 - [ ] 발견된 이슈 → GitHub Issues 또는 hotfix v0.1.1
+- [ ] (endpoint/config re-cut only) operators cleared any interim `hypeproofChat.proxyUrl` override
 
 ## Dry-run (1–2 자녀, 4시간)
 
