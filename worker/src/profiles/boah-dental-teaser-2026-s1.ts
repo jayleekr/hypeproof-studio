@@ -4,13 +4,16 @@ import systemPromptMd from "../prompts/boah-dental-teaser-2026-s1.md";
 
 // 보아치과 HypeProof 티저 (2026-05-26, D-7 강의). 단발 ~3h 체험 세션.
 //
-// NOTE (scope split): this is the *baseline* profile so the cohort is
-// registered and token-issuable now (issue #12). The 4-principle experiential
-// curriculum (전심전력·역목표·만족유예·잇기가설) — system prompt + skeleton
-// content + the authoritative essences_focus mapping — is issue #13 and will
-// enrich `prompts/boah-dental-teaser-2026-s1.md` + `essences_focus` here.
-// Assumptions flagged for curriculum review (봉호): adult audience, single
-// session, publishing disabled, template_tier reuses the only existing tier.
+// #13: 4-principle experiential curriculum applied. The teaser embodies four
+// essences (authoritative mapping vs docs/essence-v0.1.md):
+//   전심전력 → Essence 2 · 만족유예 → Essence 4 ·
+//   잇기가설 → Essence 6 · 역목표 → Essence 11
+// → essences_focus = [2, 4, 6, 11]; system prompt rewritten experiential;
+//   follow-up suggestions nudge 만족유예/역목표/잇기.
+// Skeleton: intentionally unchanged — the 4 principles are taught via prompt +
+// UX (not a bespoke dental skeleton); keeps scope tight + skeleton contract
+// test green. Assumptions still flagged for curriculum review (봉호): adult
+// audience, single session, publishing disabled, template_tier reuses tier.
 export const profile: Profile = {
   id: "boah-dental-teaser-2026-s1",
   version: 1,
@@ -52,8 +55,9 @@ export const profile: Profile = {
     enabled: false,
     strategy: "local_only",
   },
-  // baseline: 알려진 유효 essence 집합 재사용. 4원칙 ↔ essence 권위 매핑은 #13.
-  essences_focus: [1, 2, 5, 7, 16],
+  // 4원칙 ↔ essence (vs docs/essence-v0.1.md): 전심전력=2 · 만족유예=4 ·
+  // 잇기가설=6 · 역목표=11.
+  essences_focus: [2, 4, 6, 11],
   session: {
     cohort_id: "boah-dental-2026-a",
     series_total: 1,
@@ -81,10 +85,12 @@ export const profile: Profile = {
         { text: "재밌게 만들어줘", style: "weak", caption: "무엇이 재밌어야 할지 알 수 없어요. 더 구체적으로!" },
       ],
       follow_up: [
+        // 4원칙 체험형 넛지: 만족유예(4) · 역목표(11) · 잇기(6) · 전심전력(2)
+        { text: "더 좋아질 수 있을 것 같아 — 한 번 더 밀어붙여줘", style: "good", caption: "만족 유예: 적정선까지 더 추궁" },
+        { text: "이걸 일부러 재미없게 만드는 방법을 보여줘", style: "good", caption: "역목표: 약점을 드러내기" },
+        { text: "내가 잘 모르는 부분은 네가 가설로 이어줘", style: "good", caption: "잇기: 못 해도 모델은 잇는다" },
         { text: "색을 더 밝고 선명하게 바꿔줘", style: "good" },
         { text: "소리 효과를 추가해줘", style: "good" },
-        { text: "점점 빨라지게 해줘", style: "good" },
-        { text: "장애물을 하나 더 추가해줘", style: "good" },
       ],
     },
     hints: {
