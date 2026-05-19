@@ -32,6 +32,16 @@ if [[ -z "$SIGNING" || -z "$ADMIN_PASS" ]]; then
   exit 1
 fi
 
+# Cohort/profile/user — env-overridable. Defaults preserve the existing
+# sk-biopharm flow, so the existing e2e specs run unchanged. Override to run
+# the *same* specs against another cohort, e.g. the boah-dental teaser:
+#   HPS_COHORT=boah-dental-2026-a HPS_PROFILE=boah-dental-teaser-2026-s1 \
+#     HPS_USER=smoke-dental bash scripts/dev-stack.sh
+HPS_COHORT="${HPS_COHORT:-sk-biopharm-2026-a}"
+HPS_PROFILE="${HPS_PROFILE:-sk-biopharm-kids-2026-grade-3-4-s1}"
+HPS_USER="${HPS_USER:-jay-test}"
+TOKEN_FILE="/tmp/hps-token.txt"   # e2e global-setup + extension auto-import read this
+
 # Stop any previous instance
 pkill -f "wrangler dev" 2>/dev/null || true
 sleep 1
@@ -41,7 +51,7 @@ nohup npx wrangler dev --local --port 8787 > /tmp/wrangler-dev.log 2>&1 &
 sleep 2
 
 # Wait until ready
-for i in $(seq 1 20); do
+for _ in $(seq 1 20); do
   if curl -fsS http://localhost:8787/v1/health >/dev/null 2>&1; then
     break
   fi
@@ -55,22 +65,26 @@ fi
 
 AUTH_B64=$(printf ":%s" "$ADMIN_PASS" | base64)
 
-echo "▶ setting roster…"
-curl -fsS -X POST http://localhost:8787/admin/cohorts/sk-biopharm-2026-a/roster \
+echo "▶ setting roster… ($HPS_COHORT)"
+curl -fsS -X POST "http://localhost:8787/admin/cohorts/$HPS_COHORT/roster" \
   -H "Authorization: Basic $AUTH_B64" -H "content-type: application/json" \
-  -d '{"users":["kid01","kid02","kid03","jay-test"]}' >/dev/null
+  -d "{\"users\":[\"kid01\",\"kid02\",\"kid03\",\"$HPS_USER\"]}" >/dev/null
 
 echo "▶ starting class window (now → +2h)…"
 NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 END=$(date -u -v+2H +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null \
    || date -u -d "+2 hours" +"%Y-%m-%dT%H:%M:%SZ")
-curl -fsS -X POST http://localhost:8787/admin/cohorts/sk-biopharm-2026-a/session \
+curl -fsS -X POST "http://localhost:8787/admin/cohorts/$HPS_COHORT/session" \
   -H "Authorization: Basic $AUTH_B64" -H "content-type: application/json" \
-  -d "{\"profile_id\":\"sk-biopharm-kids-2026-grade-3-4-s1\",\"starts_at\":\"$NOW\",\"ends_at\":\"$END\"}" >/dev/null
+  -d "{\"profile_id\":\"$HPS_PROFILE\",\"starts_at\":\"$NOW\",\"ends_at\":\"$END\"}" >/dev/null
 
-echo "▶ issuing token for 'jay-test'…"
+echo "▶ issuing token for '$HPS_USER'…"
 TOKEN=$(HPS_SIGNING_SECRET="$SIGNING" node --experimental-strip-types scripts/issue-token.ts \
-  --user jay-test --cohort sk-biopharm-2026-a --profile sk-biopharm-kids-2026-grade-3-4-s1 --hours 2)
+  --user "$HPS_USER" --cohort "$HPS_COHORT" --profile "$HPS_PROFILE" --hours 2)
+
+# e2e global-setup + the extension's local-dev auto-import both read this file.
+# Without it the e2e preflight fails and the app can't auto-seed the token.
+printf '%s' "$TOKEN" > "$TOKEN_FILE"
 
 cat <<EOF
 
@@ -82,7 +96,10 @@ cat <<EOF
   Admin UI:      http://localhost:8787/      (basic auth — pass: $ADMIN_PASS)
   Health:        http://localhost:8787/v1/health
   Class window:  $NOW  →  $END  (2 hours)
-  Roster:        kid01, kid02, kid03, jay-test
+  Cohort:        $HPS_COHORT
+  Profile:       $HPS_PROFILE
+  Roster:        kid01, kid02, kid03, $HPS_USER
+  Token file:    $TOKEN_FILE   (e2e + extension auto-import)
 
   Workshop token (paste in HypeProof Studio.app):
     $TOKEN
