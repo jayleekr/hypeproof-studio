@@ -31,12 +31,23 @@ Use this before any release-cutting action. Source of truth for Phase 7 decision
 When a shipped default changes (e.g. the `hypeproofChat.proxyUrl` host), every
 distributed build is stale — run the full **Cut + Dogfood**, plus:
 
-- **Interim, no rebuild:** operators set `hypeproofChat.proxyUrl` to the new
-  URL (Settings → search `proxyUrl`) and reload. Unblocks them during the
-  1–2 h build; announce in the operator chat the moment the Worker is live
-  (`curl <api>/v1/health` → 200).
-- **On the new build:** operators must **clear** that interim override before
-  trusting the new default — a leftover override silently shadows it.
+- **Identify the population first — one message per group, never one for all:**
+  - *Old build* (its default was the now-dead host): needs the re-cut build;
+    stopgap = set `hypeproofChat.proxyUrl` to the new URL + reload.
+  - *Current-code build*: default is **already** the new URL — the proxyUrl
+    step is a **no-op**. Do not send it; it only confuses.
+  - *Any build, no token*: URL ≠ token. Without a workshop token the server
+    returns 401/403 regardless of URL.
+- **The blocker is usually the token, not the URL.** Any operator message must
+  carry the token path ("토큰 필요 화면이 뜨면 <연락처>로 요청") — a message
+  that only flips a setting will not make chat work on a token-less device.
+- **Broadcast self-check (before sending ANY operator message):** on a *clean*
+  instance, follow the message's own steps and reproduce the failure it claims
+  to fix. If you can't reproduce it as written, the message is wrong. (The #8
+  lesson: Message ① was a no-op on a clean current build.)
+- **On the new build:** operators must **clear** any interim
+  `hypeproofChat.proxyUrl` override — a leftover override silently shadows the
+  correct new default.
 
 ## Dogfood (6 operators)
 
