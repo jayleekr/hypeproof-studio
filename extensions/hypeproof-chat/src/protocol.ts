@@ -86,7 +86,27 @@ export type WebviewMessage =
   | { type: "namingRitual" }
   | { type: "saveCoach"; name: string; personality: string }
   | { type: "runCode"; html: string }       // from chat panel → host → preview
-  | { type: "previewReady" };               // from preview webview only
+  | { type: "previewReady" }                // from preview webview only
+  // Trace signals (#9). Webview fires; host forwards via POST /v1/trace/event.
+  // The host-side HTTP forwarding lands in a follow-up — keep these in sync
+  // with worker/src/routes/trace.ts TraceEvent union.
+  | { type: "traceTrialStart"; taskLabel?: string }
+  | { type: "traceTrialEnd"; trialId: string }
+  | {
+      type: "traceValidationRun";
+      trialId: string;
+      turnId?: string;
+      outcome: "pass" | "fail" | "partial" | "error";
+      errorsFound?: number;
+      errorsFixed?: number;
+    }
+  | {
+      type: "traceHumanAction";
+      trialId: string;
+      turnId?: string;
+      kind: "accept" | "reject" | "edit" | "replace";
+      diffChars?: number;
+    };
 
 // Host → Webview
 export type HostMessage =

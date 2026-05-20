@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./env";
 import { chat } from "./routes/chat";
+import { trace } from "./routes/trace";
 import { admin } from "./routes/admin";
 // @ts-ignore — bundled as text by wrangler rules.
 import adminHtml from "./ui/admin.html";
@@ -15,6 +16,7 @@ app.get("/", () => {
 });
 
 app.route("/v1", chat);
+app.route("/v1/trace", trace);
 app.route("/admin", admin);
 
 app.notFound((c) => c.json({ error: "not_found", path: c.req.path }, 404));
