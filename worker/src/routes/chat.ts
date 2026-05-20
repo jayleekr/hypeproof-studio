@@ -34,12 +34,42 @@ import {
   isTokenRevoked,
 } from "../lib/kv";
 import { logChat, persistUsage } from "../lib/analytics";
+import { runDeepHealth } from "../cron/health.ts";
 
 export const chat = new Hono<{ Bindings: Env }>();
 
 chat.get("/health", (c) =>
   c.json({ ok: true, service: "hypeproof-studio-api", version: "0.1.0", env: c.env.ENVIRONMENT }),
 );
+
+// Deep health probe (S-05 / #51). Live-tests every external dependency:
+// the active LLM provider (incl. anthropic proxy URL when set), KV, D1.
+// Used by:
+//   - the 15-min heartbeat cron (#45) when it needs richer diagnostics
+//   - operator console during 보아치과 티저 세션 (Jay polls)
+//   - manual `wrangler tail` smoke before deploy
+//
+// Auth: admin Basic, OR an internal "x-cron-trigger: true" header (set by
+// the scheduled() entry point — see worker/src/index.ts). This keeps the
+// endpoint cheap to call from cron without burning the chat token path.
+chat.get("/health/deep", async (c) => {
+  // Lightweight auth: admin password OR internal cron flag. We deliberately
+  // don't accept session tokens here — this is operator-only, not a path the
+  // student app calls.
+  const cronFlag = c.req.header("x-cron-trigger") === "true";
+  if (!cronFlag) {
+    const want = c.env.HPS_ADMIN_PASSWORD;
+    if (!want) return c.json({ error: "admin not configured" }, 503);
+    const authz = c.req.header("authorization") ?? "";
+    const m = /^Basic\s+(.+)$/i.exec(authz);
+    if (!m || !m[1]) return c.json({ error: "auth required" }, 401);
+    const decoded = atob(m[1]);
+    const [, pass] = decoded.split(":", 2);
+    if (pass !== want) return c.json({ error: "auth required" }, 401);
+  }
+  const result = await runDeepHealth(c.env);
+  return c.json(result, result.ok ? 200 : 503);
+});
 
 // ---------------------------------------------------------------------------
 // GET /v1/profile
