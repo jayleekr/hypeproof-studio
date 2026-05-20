@@ -10,6 +10,8 @@
 //   POST   /admin/cohorts/:id/roster            — body: { users: string[] }
 //   POST   /admin/cohorts/:id/session           — body: { profile_id, starts_at, ends_at }
 //   DELETE /admin/cohorts/:id/session           — end current session
+//   POST   /admin/cohorts/:id/pause             — kill-switch on (S-12 / #47)
+//   DELETE /admin/cohorts/:id/pause             — kill-switch off
 
 import { Hono } from "hono";
 import type { Env } from "../env";
@@ -17,9 +19,12 @@ import { listProfiles } from "../profiles";
 import {
   endSession,
   getActiveSession,
+  getCohortPause,
   getRoster,
+  pauseCohort,
   setRoster,
   startSession,
+  unpauseCohort,
   type ActiveSession,
 } from "../lib/kv";
 
@@ -80,11 +85,33 @@ admin.get("/cohorts", async (c) => {
 
 admin.get("/cohorts/:id", async (c) => {
   const id = c.req.param("id");
-  const [roster, session] = await Promise.all([
+  const [roster, session, paused] = await Promise.all([
     getRoster(c.env.HPS_KV, id),
     getActiveSession(c.env.HPS_KV, id),
+    getCohortPause(c.env.HPS_KV, id),
   ]);
-  return c.json({ id, roster, session });
+  return c.json({ id, roster, session, paused });
+});
+
+// ---- kill-switch (S-12 / #47) ----------------------------------------------
+// Cohort-wide hard stop. Returns 503 from /v1/chat/completions until cleared.
+// Independent of session/roster — useful when an active session needs to be
+// halted but state shouldn't be discarded.
+
+admin.post("/cohorts/:id/pause", async (c) => {
+  const id = c.req.param("id");
+  const body = (await c.req.json<{ reason?: string }>().catch(() => ({}))) as { reason?: string };
+  const reason = typeof body.reason === "string" && body.reason.length <= 200
+    ? body.reason
+    : undefined;
+  const paused = await pauseCohort(c.env.HPS_KV, id, reason);
+  return c.json({ ok: true, paused });
+});
+
+admin.delete("/cohorts/:id/pause", async (c) => {
+  const id = c.req.param("id");
+  await unpauseCohort(c.env.HPS_KV, id);
+  return c.json({ ok: true });
 });
 
 // ---- roster -----------------------------------------------------------------

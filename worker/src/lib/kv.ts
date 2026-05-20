@@ -3,10 +3,11 @@
 // Layout:
 //   cohort:<id>:roster           → { users: string[], updated_at: string }
 //   cohort:<id>:active_session   → { session_id, profile_id, starts_at, ends_at }
+//   cohort:<id>:paused           → { ts, reason? }   — S-12 kill-switch (#47)
 //
-// Roster + active_session are intentionally KV (not D1) because the chat hot
-// path reads them on every request. D1 holds durable history in `sessions` and
-// `usage_log` tables.
+// Roster + active_session + paused are intentionally KV (not D1) because the
+// chat hot path reads them on every request. D1 holds durable history in
+// `sessions` and `usage_log` tables.
 
 export interface Roster {
   users: string[];
@@ -20,8 +21,14 @@ export interface ActiveSession {
   ends_at: string;              // ISO8601
 }
 
+export interface CohortPause {
+  ts: string;                   // ISO8601 when paused
+  reason?: string;              // optional human note
+}
+
 const rosterKey = (cohortId: string) => `cohort:${cohortId}:roster`;
 const sessionKey = (cohortId: string) => `cohort:${cohortId}:active_session`;
+const pauseKey = (cohortId: string) => `cohort:${cohortId}:paused`;
 
 export async function getRoster(kv: KVNamespace, cohortId: string): Promise<Roster | null> {
   return kv.get<Roster>(rosterKey(cohortId), "json");
@@ -56,4 +63,28 @@ export function isSessionLive(s: ActiveSession, now: Date = new Date()): boolean
   if (!Number.isFinite(start) || !Number.isFinite(end)) return false;
   const t = now.getTime();
   return t >= start && t <= end;
+}
+
+// ---- cohort kill-switch (S-12 / #47) ---------------------------------------
+// Single KV key flip → chat.ts returns 503 immediately. Independent of
+// session/roster, so a cohort can be paused mid-class without nuking state.
+
+export async function getCohortPause(kv: KVNamespace, cohortId: string): Promise<CohortPause | null> {
+  return kv.get<CohortPause>(pauseKey(cohortId), "json");
+}
+
+export async function pauseCohort(
+  kv: KVNamespace,
+  cohortId: string,
+  reason?: string,
+): Promise<CohortPause> {
+  const p: CohortPause = { ts: new Date().toISOString(), reason };
+  // 24h TTL — a pause is a fire-drill, not a permanent state. Forces the
+  // operator to consciously re-pause if the incident lasts longer.
+  await kv.put(pauseKey(cohortId), JSON.stringify(p), { expirationTtl: 60 * 60 * 24 });
+  return p;
+}
+
+export async function unpauseCohort(kv: KVNamespace, cohortId: string): Promise<void> {
+  await kv.delete(pauseKey(cohortId));
 }
