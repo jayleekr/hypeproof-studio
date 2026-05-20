@@ -35,6 +35,7 @@ npx wrangler secret put GEMINI_API_KEY         # default provider (AIza...)
 npx wrangler secret put HPS_SIGNING_SECRET     # openssl rand -hex 32
 npx wrangler secret put HPS_ADMIN_PASSWORD     # dev fallback only; set Cloudflare Access in prod
 # npx wrangler secret put ANTHROPIC_API_KEY    # when LLM_PROVIDER=anthropic in wrangler.toml
+# npx wrangler secret put OPENAI_API_KEY        # when LLM_PROVIDER=openai in wrangler.toml
 
 # 6. (Optional) Custom domain
 #    In Cloudflare dashboard → Workers → hypeproof-studio-api → Custom Domains
@@ -109,10 +110,13 @@ After this, `/admin/*` and `/` are gated by Cloudflare login. The Worker still f
 | KV reads | 100k/day | $0.50 / 1M |
 | D1 storage | 5 GB | $0.75 / GB/mo |
 | Gemini (default) | generous free tier | 2.5 Pro: ~$1.25 in / $10 out per 1M tok |
-| Anthropic (peer) | — | Sonnet 4.6: $3 in / $15 out per 1M tok |
+| Anthropic (peer) | — | Sonnet 4.6: $3 in / $15 out per 1M tok (native prompt caching) |
+| OpenAI (peer) | — | gpt-4o: ~$2.5 in / $10 out per 1M tok (alias map in profiles/types.ts) |
 
-No prompt caching on Gemini's OpenAI-compatible endpoint, so the skeleton
-library (~few KB) re-sends each turn — fine for free-tier testing volumes.
+Prompt caching: Anthropic supports it natively (the few-KB skeleton library
+becomes cached reads after the first turn → cost ↓ + latency ↓). Gemini's
+OpenAI-compatible endpoint does not cache. OpenAI cache behavior is GA but
+not auto-applied here — leave as a future tweak per cohort.
 
 1회차 estimate (6 kids × 8h × ~50 turns × 800 tokens average):
 - 6 × 50 × 1600 = 480k tokens — within Gemini free tier for a single cohort

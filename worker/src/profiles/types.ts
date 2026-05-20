@@ -142,6 +142,19 @@ export const GEMINI_MODEL_MAP: Record<ModelAlias, string> = {
   "hypeproof-strong":  "gemini-2.5-pro",
 };
 
+// OpenAI model ids (third peer). Conservative GA-stable defaults; the team
+// can point any alias at a newer GA flagship (e.g. gpt-5*) with a one-line
+// edit here — profiles stay untouched.
+export const OPENAI_MODEL_MAP: Record<ModelAlias, string> = {
+  "hypeproof-fast":    "gpt-4o-mini",
+  "hypeproof-default": "gpt-4o",
+  "hypeproof-strong":  "gpt-4o",
+};
+
 export function modelIdFor(alias: ModelAlias, provider: LLMProvider): string {
-  return provider === "gemini" ? GEMINI_MODEL_MAP[alias] : MODEL_MAP[alias];
+  switch (provider) {
+    case "gemini":    return GEMINI_MODEL_MAP[alias];
+    case "openai":    return OPENAI_MODEL_MAP[alias];
+    case "anthropic": return MODEL_MAP[alias];
+  }
 }

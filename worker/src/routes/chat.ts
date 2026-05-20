@@ -12,12 +12,13 @@
 //   9. Log usage to Analytics Engine + D1
 
 import { Hono } from "hono";
-import { resolveProvider, type Env } from "../env";
+import { resolveProvider, type Env, type LLMProvider } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { getProfile } from "../profiles";
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropic } from "../lib/anthropic";
 import { callGeminiResilient } from "../lib/gemini";
+import { callOpenAI } from "../lib/openai";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
 import { getActiveSession, getRoster, isSessionLive } from "../lib/kv";
 import { logChat, persistUsage } from "../lib/analytics";
@@ -159,7 +160,7 @@ chat.post("/chat/completions", async (c) => {
   // Pick the upstream LLM (switchable peers; default Gemini — see
   // resolveProvider). translate / translateOpenAI both drop client
   // system+tool messages — the trust model is identical either way.
-  let provider: "gemini" | "anthropic";
+  let provider: LLMProvider;
   let apiKey: string;
   try {
     ({ provider, apiKey } = resolveProvider(env));
@@ -181,7 +182,17 @@ chat.post("/chat/completions", async (c) => {
       upstream = g.response;
       modelLabel = g.model;        // analytics + response reflect the real model
       fellBack = g.fellBack;
+    } else if (provider === "openai") {
+      // OpenAI is the canonical OpenAI schema → translateOpenAI handles
+      // system-prompt injection + alias→openai model id; the body is passed
+      // straight through.
+      const oBody = translateOpenAI(body as any, profile, coach, "openai");
+      oBody.stream = stream;
+      if (stream) oBody.stream_options = { include_usage: true };
+      modelLabel = oBody.model;
+      upstream = await callOpenAI(oBody, apiKey);
     } else {
+      // anthropic — Messages API (different schema; transformStream handles it).
       const aBody = translate(body as any, profile, coach);
       aBody.stream = stream;
       modelLabel = aBody.model;
@@ -236,12 +247,8 @@ chat.post("/chat/completions", async (c) => {
     let cr = 0;
     let cc = 0;
     let finish = "stop";
-    if (provider === "gemini") {
-      text = j.choices?.[0]?.message?.content ?? "";
-      finish = j.choices?.[0]?.finish_reason ?? "stop";
-      tin = j.usage?.prompt_tokens ?? 0;
-      tout = j.usage?.completion_tokens ?? 0;
-    } else {
+    if (provider === "anthropic") {
+      // Anthropic Messages API native shape
       text = (j.content ?? [])
         .filter((b: any) => b.type === "text")
         .map((b: any) => b.text)
@@ -251,6 +258,12 @@ chat.post("/chat/completions", async (c) => {
       tout = j.usage?.output_tokens ?? 0;
       cr = j.usage?.cache_read_input_tokens ?? 0;
       cc = j.usage?.cache_creation_input_tokens ?? 0;
+    } else {
+      // OpenAI-shape response (gemini OpenAI-compat endpoint + native openai)
+      text = j.choices?.[0]?.message?.content ?? "";
+      finish = j.choices?.[0]?.finish_reason ?? "stop";
+      tin = j.usage?.prompt_tokens ?? 0;
+      tout = j.usage?.completion_tokens ?? 0;
     }
     const log = mkLog(tin, tout, cr, cc);
     record(log);
@@ -269,8 +282,9 @@ chat.post("/chat/completions", async (c) => {
     });
   }
 
-  // 8. Streaming: Gemini already emits OpenAI chunks (passthrough + usage tap);
-  //    Anthropic events are transformed to OpenAI chunks.
+  // 8. Streaming: Gemini + OpenAI both emit OpenAI chat.completion.chunk SSE
+  //    (passthrough + usage tap); Anthropic events are transformed to OpenAI
+  //    chunks.
   const onUsage = (u: {
     input_tokens: number;
     output_tokens: number;
@@ -279,9 +293,9 @@ chat.post("/chat/completions", async (c) => {
   }) => record(mkLog(u.input_tokens, u.output_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens));
 
   const outStream =
-    provider === "gemini"
-      ? passThroughOpenAIStream(upstream.body, onUsage)
-      : transformStream(upstream.body, modelLabel, onUsage);
+    provider === "anthropic"
+      ? transformStream(upstream.body, modelLabel, onUsage)
+      : passThroughOpenAIStream(upstream.body, onUsage);
 
   const streamHeaders: Record<string, string> = {
     "content-type": "text/event-stream",
