@@ -207,10 +207,13 @@ chat.post("/chat/completions", async (c) => {
       upstream = await callOpenAI(oBody, apiKey);
     } else {
       // anthropic — Messages API (different schema; transformStream handles it).
+      // Route through the optional region-pinned proxy when set, otherwise
+      // call api.anthropic.com directly. The proxy is passthrough (same key,
+      // same headers, same SSE shape).
       const aBody = translate(body as any, profile, coach);
       aBody.stream = stream;
       modelLabel = aBody.model;
-      upstream = await callAnthropic(aBody, apiKey);
+      upstream = await callAnthropic(aBody, apiKey, { url: env.ANTHROPIC_PROXY_URL });
     }
   } catch (err) {
     return c.json({ error: { message: String(err), type: "request" } }, 400);

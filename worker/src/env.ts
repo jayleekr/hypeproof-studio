@@ -15,6 +15,10 @@ export interface Env {
   // Switchable upstream LLM. Defaults to "gemini" when GEMINI_API_KEY is set.
   // Set "anthropic" / "openai" (with their key) to switch — peers, NOT fallback.
   LLM_PROVIDER?: LLMProvider;
+  // Override Anthropic endpoint URL — used to route through a region-pinned
+  // proxy (e.g. hypeproof-sediment Fly NRT) when CF anycast egress hits an
+  // Anthropic-blocked region (HK). Leave unset to call api.anthropic.com.
+  ANTHROPIC_PROXY_URL?: string;
 
   // Bindings
   HPS_KV: KVNamespace;
