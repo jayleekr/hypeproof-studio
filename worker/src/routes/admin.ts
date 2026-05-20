@@ -236,6 +236,74 @@ admin.delete("/cohorts/:id/session", async (c) => {
   return c.json({ ok: true, ended: existing });
 });
 
+// ---- live stats snapshot (S-09 / #50) ---------------------------------------
+// 1-second polling endpoint for the operator console during a live session.
+// Returns: cohort live state (roster size + session + paused), aggregated
+// volumes for the last hour from D1 usage_log, and heartbeat KV slot.
+// JSON only — Jay polls with `watch -n 5 'curl ... | jq'` during 보아치과.
+
+admin.get("/stats", async (c) => {
+  const profiles = listProfiles();
+  const cohortIds = Array.from(new Set(profiles.map((p) => p.session.cohort_id)));
+
+  // Per-cohort live state (KV reads in parallel)
+  const cohortRows = await Promise.all(
+    cohortIds.map(async (id) => {
+      const [roster, session, paused] = await Promise.all([
+        getRoster(c.env.HPS_KV, id),
+        getActiveSession(c.env.HPS_KV, id),
+        getCohortPause(c.env.HPS_KV, id),
+      ]);
+      return {
+        id,
+        roster_size: roster?.users.length ?? 0,
+        paused: paused ?? null,
+        session: session ?? null,
+      };
+    }),
+  );
+
+  // Last-hour aggregates from D1 usage_log.
+  // SQLite datetime('now') is UTC; usage_log.created_at is UTC ISO8601 by
+  // convention (we INSERT with datetime('now') / ISO8601 timestamps).
+  let lastHour = { messages: 0, errors: 0, tokens_in: 0, tokens_out: 0 };
+  try {
+    const row = await c.env.HPS_DB
+      .prepare(
+        `SELECT
+            COUNT(*) AS messages,
+            SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+            COALESCE(SUM(tokens_in), 0)  AS tokens_in,
+            COALESCE(SUM(tokens_out), 0) AS tokens_out
+         FROM usage_log
+         WHERE created_at > datetime('now', '-1 hour')`,
+      )
+      .first<{ messages: number; errors: number; tokens_in: number; tokens_out: number }>();
+    if (row) lastHour = row;
+  } catch (err) {
+    // D1 might be unset in some dev configs; surface but don't crash.
+    console.error("/admin/stats: usage_log query failed:", err);
+  }
+
+  // Heartbeat KV slot (#45). If missing → cron not firing OR cleared.
+  const [heartbeat, alert, failStreak] = await Promise.all([
+    c.env.HPS_KV.get<unknown>("heartbeat:last", "json"),
+    c.env.HPS_KV.get<unknown>("heartbeat:alert", "json"),
+    c.env.HPS_KV.get("heartbeat:fail_streak"),
+  ]);
+
+  return c.json({
+    ts: new Date().toISOString(),
+    cohorts: cohortRows,
+    last_hour: lastHour,
+    heartbeat: {
+      last: heartbeat,
+      alert: alert,
+      fail_streak: failStreak ? parseInt(failStreak, 10) : 0,
+    },
+  });
+});
+
 // ---- recent usage -----------------------------------------------------------
 
 admin.get("/cohorts/:id/usage", async (c) => {
