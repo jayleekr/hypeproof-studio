@@ -192,7 +192,32 @@ const stubProfile = {
   assert.equal(resolveProvider({ GEMINI_API_KEY: "g" }).apiKey, "g", "returns the chosen key");
   assert.throws(() => resolveProvider({ LLM_PROVIDER: "anthropic", GEMINI_API_KEY: "g" }), /ANTHROPIC_API_KEY/, "explicit provider without its key throws");
   assert.throws(() => resolveProvider({}), /no LLM key/, "no keys at all throws");
-  console.log("✓ resolveProvider: switchable peers, default Gemini, explicit override");
+
+  // OpenAI as a third peer (#27)
+  assert.equal(resolveProvider({ OPENAI_API_KEY: "o" }).provider, "openai", "only openai key → openai");
+  assert.equal(
+    resolveProvider({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "o" }).provider,
+    "openai",
+    "explicit LLM_PROVIDER=openai with key → openai",
+  );
+  assert.equal(resolveProvider({ OPENAI_API_KEY: "o" }).apiKey, "o", "returns the openai key");
+  assert.throws(
+    () => resolveProvider({ LLM_PROVIDER: "openai", GEMINI_API_KEY: "g" }),
+    /OPENAI_API_KEY/,
+    "explicit openai without its key throws",
+  );
+  // Default-order priority: gemini > anthropic > openai (no LLM_PROVIDER set).
+  assert.equal(
+    resolveProvider({ GEMINI_API_KEY: "g", ANTHROPIC_API_KEY: "a", OPENAI_API_KEY: "o" }).provider,
+    "gemini",
+    "default order: gemini wins when all three keys present",
+  );
+  assert.equal(
+    resolveProvider({ ANTHROPIC_API_KEY: "a", OPENAI_API_KEY: "o" }).provider,
+    "anthropic",
+    "default order: anthropic > openai when gemini absent",
+  );
+  console.log("✓ resolveProvider: 3-way switchable peers (gemini/anthropic/openai), default order preserved");
 }
 
 // ---- callGeminiResilient: retry transient, then fall back to flash --------

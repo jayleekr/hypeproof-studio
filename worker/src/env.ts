@@ -1,18 +1,19 @@
 // Shared binding shape — keep in sync with wrangler.toml
 
-export type LLMProvider = "gemini" | "anthropic";
+export type LLMProvider = "gemini" | "anthropic" | "openai";
 
 export interface Env {
   // Secrets (wrangler secret put — locally: worker/.dev.vars, gitignored)
   GEMINI_API_KEY?: string;           // default provider key (see resolveProvider)
-  ANTHROPIC_API_KEY?: string;        // peer provider — used when LLM_PROVIDER=anthropic
+  ANTHROPIC_API_KEY?: string;        // peer — used when LLM_PROVIDER=anthropic
+  OPENAI_API_KEY?: string;           // peer — used when LLM_PROVIDER=openai
   HPS_SIGNING_SECRET: string;
   HPS_ADMIN_PASSWORD?: string;       // used if Cloudflare Access not configured
 
   // Vars
   ENVIRONMENT: "production" | "dev";
   // Switchable upstream LLM. Defaults to "gemini" when GEMINI_API_KEY is set.
-  // Set "anthropic" (with ANTHROPIC_API_KEY) to switch — a peer, not a fallback.
+  // Set "anthropic" / "openai" (with their key) to switch — peers, NOT fallback.
   LLM_PROVIDER?: LLMProvider;
 
   // Bindings
@@ -27,11 +28,11 @@ export interface ResolvedProvider {
 }
 
 /**
- * Decide which upstream LLM to call and which key to use. Gemini and
- * Anthropic are switchable peers:
- *  - Explicit LLM_PROVIDER wins, but only if its key is present.
- *  - With no LLM_PROVIDER, default to "gemini" when GEMINI_API_KEY is set.
- *  - If only an Anthropic key is present, use "anthropic".
+ * Decide which upstream LLM to call and which key to use. Gemini, Anthropic
+ * and OpenAI are switchable peers (NOT a runtime fallback chain):
+ *  - Explicit LLM_PROVIDER wins, but only if its key is present (else throws).
+ *  - With no LLM_PROVIDER, prefer keys in order: gemini > anthropic > openai
+ *    (preserves the pre-OpenAI default, so existing deployments don't shift).
  *
  * Throws when the chosen provider has no key — surfaced to the client as a
  * 502 config error rather than a silent unauthenticated upstream call.
@@ -39,6 +40,7 @@ export interface ResolvedProvider {
 export function resolveProvider(env: Env): ResolvedProvider {
   const gem = env.GEMINI_API_KEY?.trim();
   const ant = env.ANTHROPIC_API_KEY?.trim();
+  const oai = env.OPENAI_API_KEY?.trim();
 
   if (env.LLM_PROVIDER === "anthropic") {
     if (!ant) throw new Error("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set");
@@ -48,8 +50,15 @@ export function resolveProvider(env: Env): ResolvedProvider {
     if (!gem) throw new Error("LLM_PROVIDER=gemini but GEMINI_API_KEY is not set");
     return { provider: "gemini", apiKey: gem };
   }
-  // No explicit provider → default to Gemini when its key is set.
+  if (env.LLM_PROVIDER === "openai") {
+    if (!oai) throw new Error("LLM_PROVIDER=openai but OPENAI_API_KEY is not set");
+    return { provider: "openai", apiKey: oai };
+  }
+  // No explicit provider → preserve historical default order.
   if (gem) return { provider: "gemini", apiKey: gem };
   if (ant) return { provider: "anthropic", apiKey: ant };
-  throw new Error("no LLM key configured (set GEMINI_API_KEY in worker/.dev.vars)");
+  if (oai) return { provider: "openai", apiKey: oai };
+  throw new Error(
+    "no LLM key configured (set GEMINI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY in worker/.dev.vars)",
+  );
 }
