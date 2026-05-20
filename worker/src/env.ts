@@ -20,6 +20,7 @@ export interface Env {
   HPS_KV: KVNamespace;
   HPS_DB: D1Database;
   HPS_ANALYTICS: AnalyticsEngineDataset;
+  HPS_TRACES: R2Bucket;             // turn-body dumps (#9), gated on log_user_messages
 }
 
 export interface ResolvedProvider {
