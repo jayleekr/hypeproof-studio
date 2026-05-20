@@ -79,7 +79,7 @@ injects the cohort's system prompt and enforces the session window.
 <summary>macOS</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh | bash
 ```
 </details>
 

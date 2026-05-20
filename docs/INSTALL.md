@@ -10,7 +10,7 @@ SK바이오팜 워크숍 가족 여러분 환영합니다. 5분 안에 설치 �
 2. 아래 한 줄을 복사해서 붙여넣고 Enter:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh | bash
 ```
 
 3. 다 끝나면 자동으로 HypeProof Studio가 열립니다.

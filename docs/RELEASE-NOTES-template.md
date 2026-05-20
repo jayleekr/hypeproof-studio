@@ -10,7 +10,7 @@ VS Code 기반의 AI 코딩 환경. 자녀와 함께 4시간 안에 자기 게�
 
 **Mac:**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh | bash
 ```
 
 **Windows (PowerShell 관리자):**

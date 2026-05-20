@@ -51,7 +51,7 @@ distributed build is stale — run the full **Cut + Dogfood**, plus:
 
 ## Dogfood (6 operators)
 
-- [ ] 6명에게 install link 공유 (`docs/INSTALL.md` 또는 https://hypeproof.ai/install)
+- [ ] 6명에게 install link 공유 (`docs/INSTALL.md` 또는 https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh)
 - [ ] 6명 모두 install 성공 확인 (kakaotalk 단톡방)
 - [ ] 6명 모두 token 등록 + 첫 메시지 응답 OK
 - [ ] 발견된 이슈 → GitHub Issues 또는 hotfix v0.1.1
