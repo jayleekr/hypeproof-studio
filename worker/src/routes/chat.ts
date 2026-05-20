@@ -19,6 +19,12 @@ import { translate, translateOpenAI, type CoachContext } from "../lib/translate"
 import { callAnthropic } from "../lib/anthropic";
 import { callGeminiResilient } from "../lib/gemini";
 import { callOpenAI } from "../lib/openai";
+import {
+  extractTrialHeaders,
+  lastUserMessageText,
+  recordTurn,
+  type TrialHeaders,
+} from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
 import { getActiveSession, getRoster, isSessionLive } from "../lib/kv";
 import { logChat, persistUsage } from "../lib/analytics";
@@ -157,6 +163,14 @@ chat.post("/chat/completions", async (c) => {
     personality: decodeHeader(c.req.header("x-hps-coach-personality")),
   };
 
+  // #9c trace hook — client opts in by POST /v1/trace/event{trialStart} and
+  // sending the returned trial_id (+ a per-turn idx) as headers. Without
+  // headers, chat continues to work as before; no turn row written.
+  const trial: TrialHeaders | null = extractTrialHeaders((h) => c.req.header(h) ?? null);
+  const promptText = lastUserMessageText(body);
+  const promptChars = promptText.length;
+  const persistBody = profile.analytics.log_user_messages === true;
+
   // Pick the upstream LLM (switchable peers; default Gemini — see
   // resolveProvider). translate / translateOpenAI both drop client
   // system+tool messages — the trust model is identical either way.
@@ -267,6 +281,28 @@ chat.post("/chat/completions", async (c) => {
     }
     const log = mkLog(tin, tout, cr, cc);
     record(log);
+    // #9c trace: persist turn meta + optional R2 body. Fire-and-forget — must
+    // not block the response. Skipped when client did not send trial headers.
+    if (trial) {
+      c.executionCtx.waitUntil(
+        recordTurn(
+          env,
+          {
+            trial_id: trial.trial_id,
+            turn_idx: trial.turn_idx,
+            prompt_chars: promptChars,
+            response_chars: text.length,
+            tokens_in: tin,
+            tokens_out: tout,
+            latency_ms: Date.now() - startedAt,
+            model: modelLabel,
+          },
+          persistBody
+            ? { persistBody: true, body: { prompt: promptText, response: text } }
+            : {},
+        ).catch((err) => console.error("recordTurn (non-stream) failed:", err)),
+      );
+    }
     c.header("x-hps-model", modelLabel);
     if (fellBack) c.header("x-hps-fallback", "1");
     return c.json({
@@ -290,7 +326,27 @@ chat.post("/chat/completions", async (c) => {
     output_tokens: number;
     cache_read_input_tokens: number;
     cache_creation_input_tokens: number;
-  }) => record(mkLog(u.input_tokens, u.output_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens));
+  }) => {
+    record(mkLog(u.input_tokens, u.output_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens));
+    // #9c trace: streaming turn meta. response_chars=0 here — stream-body
+    // capture (R2 turn_body) requires a stream tee + per-provider SSE parser
+    // and is intentionally a follow-up; the meta still feeds Efficiency +
+    // Iteration scoring.
+    if (trial) {
+      c.executionCtx.waitUntil(
+        recordTurn(env, {
+          trial_id: trial.trial_id,
+          turn_idx: trial.turn_idx,
+          prompt_chars: promptChars,
+          response_chars: 0,
+          tokens_in: u.input_tokens,
+          tokens_out: u.output_tokens,
+          latency_ms: Date.now() - startedAt,
+          model: modelLabel,
+        }).catch((err) => console.error("recordTurn (stream) failed:", err)),
+      );
+    }
+  };
 
   const outStream =
     provider === "anthropic"

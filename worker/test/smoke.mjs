@@ -511,6 +511,69 @@ const stubProfile = {
   console.log("✓ storage: createTrial/endTrial/recordTurn(R2 gated)/recordValidation/recordHumanAction");
 }
 
+// ---- chat-hook helpers (#9c) -----------------------------------------------
+{
+  const { extractTrialHeaders, lastUserMessageText } = await import("../src/lib/storage.ts");
+
+  // extractTrialHeaders: both headers required + sane shape
+  function H(h) { return (name) => h[name.toLowerCase()] ?? null; }
+  assert.equal(extractTrialHeaders(H({})), null, "no headers → null");
+  assert.equal(
+    extractTrialHeaders(H({ "x-hps-trial-id": "t-1" })), null,
+    "missing turn-idx → null",
+  );
+  assert.equal(
+    extractTrialHeaders(H({ "x-hps-trial-id": "t-1", "x-hps-turn-idx": "abc" })), null,
+    "non-numeric turn-idx → null",
+  );
+  assert.equal(
+    extractTrialHeaders(H({ "x-hps-trial-id": "t-1", "x-hps-turn-idx": "-1" })), null,
+    "negative turn-idx → null",
+  );
+  assert.equal(
+    extractTrialHeaders(H({ "x-hps-trial-id": "x".repeat(80), "x-hps-turn-idx": "0" })), null,
+    "oversized trial id → null",
+  );
+  assert.deepEqual(
+    extractTrialHeaders(H({ "x-hps-trial-id": "t-uuid", "x-hps-turn-idx": "3" })),
+    { trial_id: "t-uuid", turn_idx: 3 },
+    "valid pair → parsed",
+  );
+
+  // lastUserMessageText: string content, array content, malformed bodies
+  assert.equal(lastUserMessageText(null), "", "null body");
+  assert.equal(lastUserMessageText({}), "", "no messages");
+  assert.equal(lastUserMessageText({ messages: "not-array" }), "");
+  assert.equal(
+    lastUserMessageText({ messages: [{ role: "system", content: "x" }, { role: "user", content: "안녕" }] }),
+    "안녕",
+  );
+  assert.equal(
+    lastUserMessageText({
+      messages: [
+        { role: "user", content: "first" },
+        { role: "assistant", content: "y" },
+        { role: "user", content: "second" },
+      ],
+    }),
+    "second",
+    "picks the LAST user message",
+  );
+  assert.equal(
+    lastUserMessageText({
+      messages: [{ role: "user", content: [{ type: "text", text: "한" }, { type: "image" }, { type: "text", text: "글" }] }],
+    }),
+    "한글",
+    "concatenates text parts in array content",
+  );
+  assert.equal(
+    lastUserMessageText({ messages: [{ role: "assistant", content: "no user yet" }] }),
+    "",
+    "no user message yet",
+  );
+  console.log("✓ chat-hook helpers: extractTrialHeaders + lastUserMessageText");
+}
+
 // ---- trace.ts (#9b): parseEvent unit + endpoint auth/dispatch ---------------
 {
   const { parseEvent, trace } = await import("../src/routes/trace.ts");
