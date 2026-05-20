@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>HypeProof — 강사 토큰 발급 (issuer)</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    --bg: #0f1115; --fg: #e6e8eb; --muted: #8a8f99; --line: #2a2e36;
+    --accent: #5b8def; --ok: #4dbd84; --warn: #d97757;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Pretendard", sans-serif;
+    line-height: 1.45;
+  }
+  .wrap { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 0 0 16px; }
+  legend { padding: 0 6px; color: var(--muted); font-size: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input, select, textarea {
+    width: 100%; padding: 10px 12px; font: inherit;
+    background: #1a1d24; color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  textarea { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; resize: vertical; }
+  button {
+    width: 100%; margin-top: 12px; padding: 12px;
+    border: 0; border-radius: 6px; cursor: pointer; font: inherit;
+    background: var(--accent); color: white; font-weight: 600;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .out { margin-top: 16px; padding: 14px; background: #0a3622; border: 1px solid #145a3c; border-radius: 8px; }
+  .out h3 { margin: 0 0 8px; font-size: 14px; color: var(--ok); }
+  .out .token { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; word-break: break-all; background: #0f1115; padding: 8px; border-radius: 4px; user-select: all; }
+  .out .meta { color: var(--muted); font-size: 11px; margin-top: 6px; }
+  .err { margin-top: 16px; padding: 14px; background: #3a1714; border: 1px solid #6b2622; border-radius: 8px; color: var(--warn); font-size: 13px; }
+  .reset { background: transparent; color: var(--muted); border: 1px solid var(--line); margin-top: 8px; }
+  .help { font-size: 11px; color: var(--muted); margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>강사 토큰 발급</h1>
+  <div class="sub">Self-service mint. issuer 토큰만 있으면 본인 cohort의 student 토큰을 직접 발급할 수 있어요.</div>
+
+  <fieldset>
+    <legend>① 본인 issuer 토큰</legend>
+    <label>Jay에게서 받은 issuer 토큰을 한 번 붙여넣으면 다음 발급부터는 자동으로 채워집니다 (세션 동안).</label>
+    <textarea id="issuer" rows="3" placeholder="eyJjIjoi…"></textarea>
+    <div class="help">잊어버렸으면 단톡방에 Jay에게 재발급 요청.</div>
+  </fieldset>
+
+  <fieldset>
+    <legend>② 발급할 student 토큰 정보</legend>
+    <label>학생 handle (소문자, 영숫자 + 하이픈)</label>
+    <input id="u" placeholder="participant-01">
+    <label>cohort</label>
+    <input id="c" placeholder="boah-dental-2026-a">
+    <label>profile</label>
+    <input id="p" placeholder="boah-dental-teaser-2026-s1">
+    <label>hours (유효기간)</label>
+    <input id="hours" type="number" min="1" max="1440" value="12">
+    <div class="help">로컬 데모: 6시간. 1회차 + 디버깅 여유까지: 12-24시간.</div>
+    <button id="mint">발급 →</button>
+    <button class="reset" id="forget" type="button">issuer 토큰 지우기</button>
+  </fieldset>
+
+  <div id="result"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// Persist issuer in sessionStorage (cleared on tab close). NEVER localStorage.
+const ISSUER_KEY = "hps_issuer_token";
+const saved = sessionStorage.getItem(ISSUER_KEY);
+if (saved) $("issuer").value = saved;
+
+$("forget").onclick = () => {
+  sessionStorage.removeItem(ISSUER_KEY);
+  $("issuer").value = "";
+  $("result").innerHTML = "";
+};
+
+$("mint").onclick = async () => {
+  const issuer = $("issuer").value.trim();
+  const u = $("u").value.trim();
+  const c = $("c").value.trim();
+  const p = $("p").value.trim();
+  const hours = parseInt($("hours").value, 10);
+  const result = $("result");
+  result.innerHTML = "";
+
+  if (!issuer) return (result.innerHTML = '<div class="err">issuer 토큰을 입력해주세요.</div>');
+  if (!u || !c || !p) return (result.innerHTML = '<div class="err">student handle / cohort / profile 모두 필요합니다.</div>');
+  if (!hours || hours < 1 || hours > 1440) return (result.innerHTML = '<div class="err">hours 는 1..1440 사이여야 합니다.</div>');
+
+  $("mint").disabled = true;
+  $("mint").textContent = "발급 중…";
+  try {
+    const res = await fetch("/admin/tokens/issue", {
+      method: "POST",
+      headers: {
+        "Authorization": "Bearer " + issuer,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ u, c, p, hours }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      result.innerHTML = '<div class="err">' + (body.error || ("HTTP " + res.status)) + '</div>';
+      return;
+    }
+    // Save issuer for the rest of the session
+    sessionStorage.setItem(ISSUER_KEY, issuer);
+    const expISO = new Date(body.exp * 1000).toLocaleString();
+    result.innerHTML =
+      '<div class="out">' +
+      '<h3>✓ 발급 완료 — ' + u + ' (' + c + ')</h3>' +
+      '<div class="token" id="tok">' + body.token + '</div>' +
+      '<div class="meta">jti: ' + body.jti + ' · 만료: ' + expISO + ' · 유효: ' + hours + 'h</div>' +
+      '<button onclick="navigator.clipboard.writeText(document.getElementById(\'tok\').textContent);this.textContent=\'복사됨 ✓\'">토큰 복사</button>' +
+      '</div>';
+  } catch (err) {
+    result.innerHTML = '<div class="err">네트워크 오류: ' + err + '</div>';
+  } finally {
+    $("mint").disabled = false;
+    $("mint").textContent = "발급 →";
+  }
+};
+</script>
+</body>
+</html>

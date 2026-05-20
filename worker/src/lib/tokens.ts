@@ -20,7 +20,22 @@ export interface TokenPayload {
   iat: number;     // issued at (unix seconds)
   exp: number;     // expires (unix seconds)
   jti?: string;    // per-token UUID — present on tokens issued post-S-01
+  // Self-service delegation (post-D-day-6): issuer-role tokens let an
+  // instructor mint student tokens within a declared scope without holding
+  // the admin password. Default role is implicit "student" (chat path).
+  role?: "student" | "issuer";
+  // Issuer scope — only consulted when role === "issuer". An empty / absent
+  // scopes array means "no minting permission" (defensive default).
+  scopes?: IssuerScope[];
   v: 2;
+}
+
+export interface IssuerScope {
+  cohort: string;            // cohort id the issuer can mint into
+  profiles: string[];        // profile ids the issuer can pick from
+  // Max hours a child token can declare. Caps the blast radius if the
+  // issuer credential leaks.
+  max_hours?: number;
 }
 
 export type TokenErrorCode = "malformed" | "signature" | "expired" | "version" | "revoked";
@@ -85,6 +100,35 @@ export async function issue(
   return { token: `${b64uEncode(payloadBytes)}.${b64uEncode(sig)}`, jti };
 }
 
+/**
+ * Convenience: mint an issuer-role token. Same HMAC machinery, but the
+ * payload carries `role: "issuer"` and a scopes array. The admin
+ * /tokens/issue endpoint checks role + scope on each mint request.
+ */
+export async function issueIssuer(
+  params: {
+    issuer: string;                // instructor handle, goes into u
+    scopes: IssuerScope[];
+  },
+  hours: number,
+  secret: string,
+): Promise<{ token: string; jti: string }> {
+  if (params.scopes.length === 0) {
+    throw new TokenError("issuer must have at least one scope", "malformed");
+  }
+  return issue(
+    {
+      u: params.issuer,
+      c: "__issuer__",
+      p: "__issuer__",
+      role: "issuer",
+      scopes: params.scopes,
+    },
+    hours,
+    secret,
+  );
+}
+
 export async function verify(token: string, secret: string): Promise<TokenPayload> {
   if (!token || !token.includes(".")) throw new TokenError("malformed token", "malformed");
   const [payloadB64, sigB64] = token.split(".", 2);
@@ -118,15 +162,20 @@ export async function verify(token: string, secret: string): Promise<TokenPayloa
 }
 
 // JSON canonicalization — same key order in issue + verify so the signature is
-// reproducible. jti is appended at the end ONLY when present, so legacy
-// (jti-less) tokens still verify byte-for-byte against their original
-// signature.
+// reproducible. New optional fields are appended at the end ONLY when present,
+// so legacy (jti-less, role-less) tokens still verify byte-for-byte against
+// their original signature.
+//
+// Order is fixed: base → jti → role → scopes. Adding a new optional field?
+// Append at the end; never re-order existing fields.
 function canonicalize(p: TokenPayload): string {
-  const base = { c: p.c, exp: p.exp, iat: p.iat, p: p.p, u: p.u, v: p.v };
-  if (p.jti !== undefined) {
-    return JSON.stringify({ ...base, jti: p.jti });
-  }
-  return JSON.stringify(base);
+  const out: Record<string, unknown> = {
+    c: p.c, exp: p.exp, iat: p.iat, p: p.p, u: p.u, v: p.v,
+  };
+  if (p.jti !== undefined) out.jti = p.jti;
+  if (p.role !== undefined) out.role = p.role;
+  if (p.scopes !== undefined) out.scopes = p.scopes;
+  return JSON.stringify(out);
 }
 
 // Extract Bearer token from an Authorization header value.
