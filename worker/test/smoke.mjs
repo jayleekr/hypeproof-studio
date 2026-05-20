@@ -1081,6 +1081,44 @@ const stubProfile = {
   console.log("✓ token revocation (#46): jti emission + legacy-token compat + KV round-trip + list");
 }
 
+// §5c — issuer role tokens (self-service mint) — TokenPayload + canonicalize.
+{
+  const { issueIssuer } = await import("../src/lib/tokens.ts");
+
+  // Round-trip: issue an issuer token, verify, check role + scopes
+  const { token, jti } = await issueIssuer(
+    {
+      issuer: "tj",
+      scopes: [
+        { cohort: "boah-dental-2026-a", profiles: ["boah-dental-teaser-2026-s1"], max_hours: 12 },
+      ],
+    },
+    60 * 24, // 60 days
+    SECRET,
+  );
+  assert.ok(token.includes("."), "token has expected shape");
+  assert.match(jti, /^[0-9a-f-]{36}$/, "jti is a UUID");
+  const v = await verify(token, SECRET);
+  assert.equal(v.role, "issuer");
+  assert.equal(v.u, "tj");
+  assert.equal(v.c, "__issuer__", "issuer c slot is placeholder");
+  assert.deepEqual(v.scopes, [
+    { cohort: "boah-dental-2026-a", profiles: ["boah-dental-teaser-2026-s1"], max_hours: 12 },
+  ]);
+
+  // Rejects empty scopes — defensive default
+  let threw = false;
+  try {
+    await issueIssuer({ issuer: "x", scopes: [] }, 1, SECRET);
+  } catch (e) {
+    threw = true;
+    assert.equal(e.code, "malformed");
+  }
+  assert.ok(threw, "empty scopes throws");
+
+  console.log("✓ issuer-role tokens: issueIssuer round-trip + scopes preserved + empty-scope reject");
+}
+
 // §5b — cohort kill-switch helpers (#47).
 {
   const { pauseCohort, unpauseCohort, getCohortPause } = await import("../src/lib/kv.ts");

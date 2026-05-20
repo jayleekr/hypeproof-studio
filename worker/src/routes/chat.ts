@@ -149,6 +149,15 @@ chat.post("/chat/completions", async (c) => {
     return c.json({ error: { message: String(err), type: "auth", code } }, 401);
   }
 
+  // 2a. Issuer tokens cannot chat. They exist only to mint child tokens via
+  // POST /admin/tokens/issue — sending one here is an obvious misuse.
+  if (payload.role === "issuer") {
+    return c.json(
+      { error: { message: "issuer tokens cannot chat", type: "auth", code: "wrong_role" } },
+      401,
+    );
+  }
+
   // 2b. Token revocation (S-01 / #46). Skipped for legacy tokens that
   // pre-date jti — they remain valid until exp but can't be killed
   // individually. Surfaced via x-token-legacy: 1 so clients/audits can spot

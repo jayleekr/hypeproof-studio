@@ -8,6 +8,8 @@ import { runD1Backup } from "./cron/d1-backup.ts";
 import { requestId, makeErrorBody } from "./middleware/request-id.ts";
 // @ts-ignore — bundled as text by wrangler rules.
 import adminHtml from "./ui/admin.html";
+// @ts-ignore — bundled as text by wrangler rules.
+import issuerHtml from "./ui/issuer.html";
 
 const app = new Hono<{ Bindings: Env; Variables: { requestId: string } }>();
 
@@ -19,6 +21,16 @@ app.use("*", requestId);
 // Friendly root → redirect to admin UI (which itself is access-gated)
 app.get("/", () => {
   return new Response(adminHtml as unknown as string, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+});
+
+// Self-service issuer UI — instructor pastes their issuer token, mints
+// student tokens. NOT under /admin/* because the form needs to be reachable
+// without admin Basic auth; the POST it submits IS still authed (Bearer
+// issuer-token, scope-checked by the endpoint).
+app.get("/issuer", () => {
+  return new Response(issuerHtml as unknown as string, {
     headers: { "content-type": "text/html; charset=utf-8" },
   });
 });

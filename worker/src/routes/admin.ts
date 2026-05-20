@@ -19,11 +19,13 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
+import { issue, verify } from "../lib/tokens";
 import {
   endSession,
   getActiveSession,
   getCohortPause,
   getRoster,
+  isTokenRevoked,
   listRevoked,
   pauseCohort,
   revokeToken,
@@ -39,6 +41,16 @@ export const admin = new Hono<{ Bindings: Env }>();
 admin.use("*", async (c, next) => {
   // Cloudflare Access injects this header for authenticated requests.
   if (c.req.header("cf-access-authenticated-user-email")) return next();
+
+  // Path-scoped exception: /tokens/issue ALSO accepts an issuer-role Bearer.
+  // The endpoint itself re-verifies + checks the issuer's scopes against the
+  // requested cohort/profile. All other admin paths stay admin-only.
+  const isIssuerEndpoint = c.req.path === "/admin/tokens/issue"
+    && c.req.method === "POST";
+  if (isIssuerEndpoint) {
+    const ah = c.req.header("authorization") ?? "";
+    if (/^Bearer\s+/i.test(ah)) return next();
+  }
 
   // Dev fallback: HPS_ADMIN_PASSWORD basic-auth.
   const pw = c.env.HPS_ADMIN_PASSWORD;
@@ -118,6 +130,92 @@ admin.delete("/cohorts/:id/pause", async (c) => {
   const id = c.req.param("id");
   await unpauseCohort(c.env.HPS_KV, id);
   return c.json({ ok: true });
+});
+
+// ---- self-service token mint (issuer role) ---------------------------------
+// Two auth paths:
+//   1. Admin Basic (Jay)
+//   2. Bearer <issuer-token> in Authorization header
+// Issuer tokens are minted once per instructor (via worker/scripts/issue-
+// issuer-token.ts). They embed `role:"issuer"` + `scopes:[{cohort, profiles}]`
+// and can mint STUDENT tokens only within those scopes. They cannot chat,
+// pause cohorts, revoke other tokens, or view stats — POST /admin/tokens/issue
+// is the only thing they unlock.
+
+admin.post("/tokens/issue", async (c) => {
+  type Body = { u?: string; c?: string; p?: string; hours?: number };
+  const body = (await c.req.json<Body>().catch(() => ({}))) as Body;
+  const { u, c: cohort, p: profile } = body;
+  const hours = Number.isFinite(body.hours) ? Number(body.hours) : 168;
+
+  // Field validation
+  if (!u || typeof u !== "string" || u.length < 1 || u.length > 64) {
+    return c.json({ error: "u (user handle) required (1-64 chars)" }, 400);
+  }
+  if (!cohort || typeof cohort !== "string" || cohort.length < 1 || cohort.length > 64) {
+    return c.json({ error: "c (cohort) required" }, 400);
+  }
+  if (!profile || typeof profile !== "string" || profile.length < 1 || profile.length > 80) {
+    return c.json({ error: "p (profile) required" }, 400);
+  }
+  if (!Number.isFinite(hours) || hours <= 0 || hours > 24 * 60) {
+    return c.json({ error: "hours must be 1..1440 (60 days max)" }, 400);
+  }
+
+  // Auth: admin already gated at the route prefix via the .use("*", ...) above.
+  // But we ALSO accept an issuer Bearer — so we re-inspect Authorization here
+  // to detect which path was used + enforce scope on issuers.
+  const auth = c.req.header("authorization") ?? "";
+  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
+  if (bearerMatch && bearerMatch[1]) {
+    const issuerToken = bearerMatch[1];
+    let issuerPayload;
+    try {
+      issuerPayload = await verify(issuerToken, c.env.HPS_SIGNING_SECRET);
+    } catch (err) {
+      return c.json({ error: `invalid issuer token: ${(err as Error).message}` }, 401);
+    }
+    if (issuerPayload.role !== "issuer") {
+      return c.json({ error: "token is not an issuer" }, 403);
+    }
+    const scopes = issuerPayload.scopes ?? [];
+    const allowed = scopes.find(
+      (s) => s.cohort === cohort && (s.profiles?.includes(profile) ?? false),
+    );
+    if (!allowed) {
+      return c.json(
+        { error: `issuer not scoped to (cohort=${cohort}, profile=${profile})` },
+        403,
+      );
+    }
+    if (allowed.max_hours && hours > allowed.max_hours) {
+      return c.json({ error: `requested ${hours}h exceeds scope max ${allowed.max_hours}h` }, 403);
+    }
+    // OK — also revoke check the issuer itself (so a leaked issuer can be killed)
+    if (issuerPayload.jti) {
+      const rev = await isTokenRevoked(c.env.HPS_KV, issuerPayload.jti);
+      if (rev) return c.json({ error: "issuer token revoked" }, 401);
+    }
+    // Permit; mint below.
+  }
+  // (else: the .use("*", ...) admin gate already enforced Basic auth — no extra check needed)
+
+  // Mint the student token.
+  const { token, jti } = await issue(
+    { u, c: cohort, p: profile },
+    hours,
+    c.env.HPS_SIGNING_SECRET,
+  );
+  return c.json({
+    ok: true,
+    token,
+    jti,
+    user: u,
+    cohort,
+    profile,
+    hours,
+    exp: Math.floor(Date.now() / 1000) + hours * 3600,
+  });
 });
 
 // ---- token revocation (S-01 / #46) -----------------------------------------
