@@ -1013,6 +1013,41 @@ const stubProfile = {
   console.log("✓ recordTurn idempotency: ON CONFLICT + COALESCE(body_ref)");
 }
 
+// §5b — cohort kill-switch helpers (#47).
+{
+  const { pauseCohort, unpauseCohort, getCohortPause } = await import("../src/lib/kv.ts");
+  const store = new Map();
+  const kv = {
+    async get(k, format) {
+      const v = store.get(k);
+      if (v === undefined) return null;
+      return format === "json" ? JSON.parse(v) : v;
+    },
+    async put(k, v) { store.set(k, v); },
+    async delete(k) { store.delete(k); },
+  };
+  // initially unpaused
+  assert.equal(await getCohortPause(kv, "c1"), null, "no pause initially");
+
+  // pause with reason
+  const p = await pauseCohort(kv, "c1", "smoke-test");
+  assert.equal(p.reason, "smoke-test");
+  assert.ok(p.ts);
+  const stored = await getCohortPause(kv, "c1");
+  assert.equal(stored.reason, "smoke-test");
+
+  // unpause
+  await unpauseCohort(kv, "c1");
+  assert.equal(await getCohortPause(kv, "c1"), null, "unpaused");
+
+  // pause without reason (optional)
+  await pauseCohort(kv, "c2");
+  const p2 = await getCohortPause(kv, "c2");
+  assert.equal(p2.reason, undefined);
+  assert.ok(p2.ts);
+  console.log("✓ cohort kill-switch (#47): pauseCohort/unpauseCohort/getCohortPause round-trip");
+}
+
 // §6 — heartbeat (#45): KV side-effects + fail-streak alert threshold.
 //      Mocks upstream fetch + KV; the real upstream is exercised by
 //      `wrangler dev --test-scheduled` (results in PR description).

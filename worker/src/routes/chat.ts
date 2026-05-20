@@ -26,7 +26,7 @@ import {
   type TrialHeaders,
 } from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
-import { getActiveSession, getRoster, isSessionLive } from "../lib/kv";
+import { getActiveSession, getCohortPause, getRoster, isSessionLive } from "../lib/kv";
 import { logChat, persistUsage } from "../lib/analytics";
 
 export const chat = new Hono<{ Bindings: Env }>();
@@ -148,6 +148,24 @@ chat.post("/chat/completions", async (c) => {
     return c.json(
       { error: { message: "등록된 참가자가 아니에요. 강사에게 알려주세요.", type: "not_in_roster" } },
       403,
+    );
+  }
+
+  // 5b. Cohort kill-switch (S-12 / #47) — must precede any upstream call.
+  // Checked AFTER auth/roster on purpose: anonymous probes can't observe
+  // pause state, and the response shape stays cohort-specific.
+  const pause = await getCohortPause(env.HPS_KV, payload.c);
+  if (pause) {
+    return c.json(
+      {
+        error: {
+          message: "세션이 일시정지되었습니다. 강사에게 문의해주세요.",
+          type: "cohort_paused",
+          reason: pause.reason,
+          since: pause.ts,
+        },
+      },
+      503,
     );
   }
 
