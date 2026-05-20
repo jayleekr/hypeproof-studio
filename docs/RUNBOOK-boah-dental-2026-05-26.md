@@ -46,7 +46,7 @@ HPS_SIGNING_SECRET=<prod와 동일> node --experimental-strip-types \
 
 ## 4. 당일 설치 + 세션 오픈
 1. 참가자 설치 (원라이너):
-   `curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-mac.sh | bash`
+   `curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh | bash`
    (현재 빌드 디폴트가 이미 `api.hypeproof-ai.xyz/v1` — proxyUrl 수동설정 불필요)
 2. roster 등록 + 수업 세션 오픈 (운영자, admin):
    ```bash

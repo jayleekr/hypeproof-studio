@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # One-line installer for HypeProof Studio on macOS.
 #
-# Usage (family members run this in Terminal):
-#   curl -fsSL https://hypeproof.ai/install | bash
-# or:
-#   curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-mac.sh | bash
+# Usage (family members / workshop participants run this in Terminal):
+#   curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh | bash
+#
+# Canonical copy lives in the public mirror repo (jayleekr/hypeproof-studio-releases).
+# This file in the private studio repo is a dev convenience — keep it in sync.
 
 set -euo pipefail
 
-REPO="jayleekr/hypeproof-studio"
+REPO="jayleekr/hypeproof-studio-releases"
 APP_NAME="HypeProof Studio"
 TAG="${HPS_VERSION:-latest}"
 TMP="$(mktemp -d)"
