@@ -22,7 +22,11 @@
       §2가 fail 한다.**
 - [ ] 빌트인 `.app` 준비 (Phase 5 게이트 #18, Jay 5/23) — 채팅 패널 active
 
-## 2. D-1 사전 검증 (프로덕션 왕복)
+## 2. D-3 리허설 + D-1 사전 검증 (프로덕션 왕복)
+**리허설은 D-1이 아니라 D-3 (5/23 금요일 저녁)** — D-1·D-2는 fix buffer. 같은 명령을
+D-3 리허설 / D-1 최종확인 두 번 돌립니다.
+
+
 ```bash
 cd worker
 BASE_URL=https://api.hypeproof-ai.xyz \
