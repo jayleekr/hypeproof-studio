@@ -409,3 +409,62 @@ html, body, #root {
   border-radius: 3px;
 }
 .hps-roll-cancel:hover { background: var(--vscode-input-background, #2a2d2e); }
+
+/* ---- S-04 (#48) error banner + fatal fallback ---------------------------- */
+.hps-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  margin: 8px 0;
+  background: rgba(255, 80, 80, 0.12);
+  border: 1px solid rgba(255, 80, 80, 0.4);
+  border-radius: 8px;
+  color: var(--vscode-errorForeground, #ff9090);
+}
+.hps-error-banner-icon { font-size: 22px; line-height: 1; flex: 0 0 auto; }
+.hps-error-banner-body { flex: 1 1 auto; min-width: 0; }
+.hps-error-banner-title { font-weight: 600; font-size: 13px; margin-bottom: 4px; }
+.hps-error-banner-msg { font-size: 12px; color: var(--vscode-foreground, #ddd); word-break: break-word; }
+.hps-error-banner-actions { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
+.hps-error-banner-retry,
+.hps-error-banner-dismiss {
+  border: 0; cursor: pointer; padding: 6px 12px; border-radius: 4px;
+  font-size: 12px; font-weight: 600; min-width: 84px; text-align: center;
+}
+.hps-error-banner-retry {
+  background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff);
+}
+.hps-error-banner-retry:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+.hps-error-banner-dismiss {
+  background: transparent; color: var(--vscode-foreground, #aaa); border: 1px solid rgba(255,255,255,0.15);
+}
+.hps-error-banner-dismiss:hover { background: rgba(255,255,255,0.06); }
+
+.hps-fatal {
+  padding: 32px 24px; text-align: center; max-width: 480px; margin: 40px auto;
+  color: var(--vscode-foreground, #ddd);
+}
+.hps-fatal-icon { font-size: 48px; margin-bottom: 12px; }
+.hps-fatal-title { font-size: 18px; margin: 0 0 8px; }
+.hps-fatal-sub { font-size: 13px; color: var(--vscode-descriptionForeground, #888); margin-bottom: 16px; }
+.hps-fatal-detail {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px; background: rgba(255,255,255,0.04);
+  padding: 10px 12px; border-radius: 6px; text-align: left; overflow-x: auto;
+  color: var(--vscode-errorForeground, #ff9090); margin-bottom: 16px;
+}
+.hps-fatal-row { display: flex; gap: 8px; justify-content: center; }
+.hps-fatal-btn, .hps-fatal-btn-ghost {
+  border: 0; cursor: pointer; padding: 8px 18px; border-radius: 4px;
+  font-size: 13px; font-weight: 600;
+}
+.hps-fatal-btn {
+  background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff);
+}
+.hps-fatal-btn:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+.hps-fatal-btn-ghost {
+  background: transparent; color: var(--vscode-foreground, #aaa);
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.hps-fatal-btn-ghost:hover { background: rgba(255,255,255,0.06); }

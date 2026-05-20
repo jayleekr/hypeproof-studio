@@ -2,6 +2,7 @@ import { useEffect, useReducer } from "react";
 import type { ChatConfig, ChatMessage, HostMessage } from "../../src/protocol";
 import { onHostMessage, postToHost } from "./vscode";
 import { ChatPanel } from "./ChatPanel";
+import { ChatErrorBoundary } from "./ChatErrorBoundary";
 
 interface State {
   config: ChatConfig | null;
@@ -100,27 +101,52 @@ export function App() {
     postToHost({ type: "retryMessage", prompt, history: state.messages });
   };
 
+  // S-04 (#48): "다시 보내기" on a stream error reuses the LAST user prompt
+  // that's already in history. The worker idempotently writes turn rows so
+  // a retry doesn't double-count.
+  const retryLast = () => {
+    if (state.streamingId) return;
+    for (let i = state.messages.length - 1; i >= 0; i--) {
+      const m = state.messages[i];
+      if (m && m.role === "user") {
+        postToHost({ type: "retryMessage", prompt: m.content, history: state.messages });
+        return;
+      }
+    }
+  };
+
+  const dismissError = () => dispatch({ type: "streamEnd" });
+
   const cancel = () => {
     if (state.streamId) postToHost({ type: "cancelStream", streamId: state.streamId });
   };
 
+  // streamEnd dispatches don't carry error info; clear-on-end is fine because
+  // the existing reducer only sets error on streamError, never on streamEnd.
+  const hasLastUserPrompt = state.messages.some((m) => m.role === "user");
+
   return (
-    <ChatPanel
-      config={state.config}
-      messages={state.messages}
-      streaming={!!state.streamingId}
-      error={state.error}
-      onSend={send}
-      onRetry={retry}
-      onCancel={cancel}
-      onClear={() => postToHost({ type: "clearHistory" })}
-      onSetToken={() => postToHost({ type: "setToken" })}
-      onSettings={() => postToHost({ type: "openSettings" })}
-      onRunCode={(html) => postToHost({ type: "runCode", html })}
-      onNamingRitual={() => postToHost({ type: "namingRitual" })}
-      onSaveCoach={(name, personality) =>
-        postToHost({ type: "saveCoach", name, personality })
-      }
-    />
+    <ChatErrorBoundary>
+      <ChatPanel
+        config={state.config}
+        messages={state.messages}
+        streaming={!!state.streamingId}
+        error={state.error}
+        canRetryLast={hasLastUserPrompt && !state.streamingId}
+        onSend={send}
+        onRetry={retry}
+        onRetryLast={retryLast}
+        onDismissError={dismissError}
+        onCancel={cancel}
+        onClear={() => postToHost({ type: "clearHistory" })}
+        onSetToken={() => postToHost({ type: "setToken" })}
+        onSettings={() => postToHost({ type: "openSettings" })}
+        onRunCode={(html) => postToHost({ type: "runCode", html })}
+        onNamingRitual={() => postToHost({ type: "namingRitual" })}
+        onSaveCoach={(name, personality) =>
+          postToHost({ type: "saveCoach", name, personality })
+        }
+      />
+    </ChatErrorBoundary>
   );
 }
