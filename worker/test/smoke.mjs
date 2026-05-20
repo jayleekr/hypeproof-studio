@@ -1013,4 +1013,101 @@ const stubProfile = {
   console.log("✓ recordTurn idempotency: ON CONFLICT + COALESCE(body_ref)");
 }
 
+// §6 — heartbeat (#45): KV side-effects + fail-streak alert threshold.
+//      Mocks upstream fetch + KV; the real upstream is exercised by
+//      `wrangler dev --test-scheduled` (results in PR description).
+{
+  const { runHeartbeat } = await import("../src/cron/heartbeat.ts");
+
+  /** Mock KV with the slice of API runHeartbeat touches. */
+  function mkKv(initial = {}) {
+    const store = new Map(Object.entries(initial));
+    return {
+      async get(k) { return store.has(k) ? store.get(k) : null; },
+      async put(k, v) { store.set(k, v); },
+      async delete(k) { store.delete(k); },
+      _store: store,
+    };
+  }
+
+  function mkEnv(kv, opts = {}) {
+    return {
+      LLM_PROVIDER: opts.provider ?? "anthropic",
+      GEMINI_API_KEY: opts.provider === "gemini" ? "gem-key" : undefined,
+      ANTHROPIC_API_KEY: opts.provider === "anthropic" || !opts.provider ? "ant-key" : undefined,
+      OPENAI_API_KEY: undefined,
+      ANTHROPIC_PROXY_URL: "https://test.invalid/proxy",
+      HPS_KV: kv,
+      HPS_ANALYTICS: { writeDataPoint() {} },
+    };
+  }
+
+  // §6.1 happy path: upstream 200 → KV last/streak=0/alert deleted
+  {
+    const kv = mkKv({ "heartbeat:fail_streak": "5", "heartbeat:alert": "{}" });
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () =>
+      new Response(JSON.stringify({ id: "x" }), { status: 200, headers: { "content-type": "application/json" } });
+    try {
+      const r = await runHeartbeat(mkEnv(kv));
+      assert.equal(r.ok, true, "ok on 200");
+      assert.equal(r.provider, "anthropic");
+      assert.equal(r.status, 200);
+      assert.equal(kv._store.get("heartbeat:fail_streak"), "0", "fail_streak reset to 0 on success");
+      assert.equal(kv._store.has("heartbeat:alert"), false, "alert key deleted on success");
+      const last = JSON.parse(kv._store.get("heartbeat:last"));
+      assert.equal(last.ok, true);
+      assert.ok(typeof last.latency_ms === "number");
+    } finally { globalThis.fetch = origFetch; }
+  }
+
+  // §6.2 fail streak increments + alert sets only at threshold (3)
+  {
+    const kv = mkKv();
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response("err", { status: 502 });
+    try {
+      await runHeartbeat(mkEnv(kv));
+      assert.equal(kv._store.get("heartbeat:fail_streak"), "1", "streak=1 after 1st fail");
+      assert.equal(kv._store.has("heartbeat:alert"), false, "no alert at streak=1");
+
+      await runHeartbeat(mkEnv(kv));
+      assert.equal(kv._store.get("heartbeat:fail_streak"), "2");
+      assert.equal(kv._store.has("heartbeat:alert"), false, "no alert at streak=2");
+
+      const r3 = await runHeartbeat(mkEnv(kv));
+      assert.equal(kv._store.get("heartbeat:fail_streak"), "3");
+      assert.ok(kv._store.has("heartbeat:alert"), "alert SET at streak=3 (threshold)");
+      const alert = JSON.parse(kv._store.get("heartbeat:alert"));
+      assert.equal(alert.streak, 3);
+      assert.equal(alert.last_status, 502);
+      assert.equal(r3.streak, 3, "result.streak echoes current streak");
+    } finally { globalThis.fetch = origFetch; }
+  }
+
+  // §6.3 recovery clears the alert
+  {
+    const kv = mkKv({ "heartbeat:fail_streak": "5", "heartbeat:alert": '{"streak":5}' });
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response("{}", { status: 200 });
+    try {
+      await runHeartbeat(mkEnv(kv));
+      assert.equal(kv._store.get("heartbeat:fail_streak"), "0", "streak reset on recovery");
+      assert.equal(kv._store.has("heartbeat:alert"), false, "alert cleared on recovery");
+    } finally { globalThis.fetch = origFetch; }
+  }
+
+  // §6.4 missing key → resolveProvider throws → recorded as fail
+  {
+    const kv = mkKv();
+    const env = mkEnv(kv, { provider: "openai" });   // OPENAI_API_KEY undefined
+    const r = await runHeartbeat(env);
+    assert.equal(r.ok, false);
+    assert.match(r.error ?? "", /resolveProvider/);
+    assert.equal(kv._store.get("heartbeat:fail_streak"), "1");
+  }
+
+  console.log("✓ heartbeat (#45): KV side-effects + fail-streak threshold + recovery + resolveProvider fail");
+}
+
 console.log("\nAll smoke tests passed.");
