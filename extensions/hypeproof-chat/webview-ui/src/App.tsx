@@ -10,6 +10,7 @@ interface State {
   streamingId: string | null;
   streamId: string | null;
   error: string | null;
+  errorRequestId: string | null;   // S-07 / #49 — surfaced in ErrorBanner
 }
 
 type Action =
@@ -18,7 +19,7 @@ type Action =
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; delta: string }
   | { type: "streamEnd" }
-  | { type: "streamError"; error: string }
+  | { type: "streamError"; error: string; requestId?: string }
   | { type: "userSent"; text: string };
 
 const initialState: State = {
@@ -27,6 +28,7 @@ const initialState: State = {
   streamingId: null,
   streamId: null,
   error: null,
+  errorRequestId: null,
 };
 
 function reducer(state: State, action: Action): State {
@@ -54,9 +56,15 @@ function reducer(state: State, action: Action): State {
         ),
       };
     case "streamEnd":
-      return { ...state, streamingId: null, streamId: null };
+      return { ...state, streamingId: null, streamId: null, error: null, errorRequestId: null };
     case "streamError":
-      return { ...state, streamingId: null, streamId: null, error: action.error };
+      return {
+        ...state,
+        streamingId: null,
+        streamId: null,
+        error: action.error,
+        errorRequestId: action.requestId ?? null,
+      };
     case "userSent":
       return {
         ...state,
@@ -79,7 +87,7 @@ export function App() {
         case "streamStart": dispatch({ type: "streamStart", streamId: msg.streamId, messageId: msg.messageId }); break;
         case "streamChunk": dispatch({ type: "streamChunk", delta: msg.delta }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
-        case "streamError": dispatch({ type: "streamError", error: msg.error }); break;
+        case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId }); break;
         case "actionResult": /* not yet routed to UI */ break;
       }
     });
@@ -132,6 +140,7 @@ export function App() {
         messages={state.messages}
         streaming={!!state.streamingId}
         error={state.error}
+        errorRequestId={state.errorRequestId}
         canRetryLast={hasLastUserPrompt && !state.streamingId}
         onSend={send}
         onRetry={retry}

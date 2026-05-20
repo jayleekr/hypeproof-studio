@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { TOKEN_KEY } from "./extension";
-import { proxyChat, fetchProfile, ProxyAuthError } from "./proxyClient";
+import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { PreviewProvider } from "./previewProvider";
 import {
   ChatMessage,
@@ -341,7 +341,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private async handleSendError(err: unknown, streamId: string): Promise<void> {
     if (err instanceof ProxyAuthError) {
-      void this.post({ type: "streamError", streamId, error: err.friendly });
+      void this.post({ type: "streamError", streamId, error: err.friendly, requestId: err.requestId });
       if (err.kind === "expired" || err.kind === "missing") {
         // Clear the dead token so the UI shows "Token" not "Token ✓",
         // then reopen the input box for a fresh one.
@@ -356,7 +356,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       return;
     }
     const reason = err instanceof Error ? err.message : "앗, 문제가 생겼어요. 선생님을 불러주세요.";
-    void this.post({ type: "streamError", streamId, error: reason });
+    const requestId = err instanceof ProxyTransportError ? err.requestId : undefined;
+    void this.post({ type: "streamError", streamId, error: reason, requestId });
   }
 
   private async handleActionRequest(req: ActionRequest): Promise<void> {
