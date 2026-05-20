@@ -468,3 +468,18 @@ html, body, #root {
   border: 1px solid rgba(255,255,255,0.15);
 }
 .hps-fatal-btn-ghost:hover { background: rgba(255,255,255,0.06); }
+
+.hps-error-banner-rid {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--vscode-descriptionForeground, #888);
+  cursor: help;
+}
+.hps-error-banner-rid code {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  background: rgba(255,255,255,0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  color: var(--vscode-foreground, #ccc);
+  user-select: all;
+}

@@ -8,10 +8,26 @@ import { ChatMessage, ResolvedProfile } from "./protocol";
 export class ProxyAuthError extends Error {
   kind: "expired" | "missing" | "session_inactive" | "session_window" | "not_in_roster" | "other";
   friendly: string;
-  constructor(kind: ProxyAuthError["kind"], friendly: string) {
+  requestId?: string;        // S-07 / #49 — surfaced in webview ErrorBanner
+  constructor(kind: ProxyAuthError["kind"], friendly: string, requestId?: string) {
     super(friendly);
     this.kind = kind;
     this.friendly = friendly;
+    this.requestId = requestId;
+  }
+}
+
+/**
+ * S-07 (#49): generic transport error that carries the request_id forwarded
+ * from the server. Used when the upstream is non-auth-related (5xx, network
+ * drop, etc). The webview ErrorBanner shows the request_id so the operator
+ * can paste it into a DM and Jay greps Workers Logs.
+ */
+export class ProxyTransportError extends Error {
+  requestId?: string;
+  constructor(message: string, requestId?: string) {
+    super(message);
+    this.requestId = requestId;
   }
 }
 
@@ -112,10 +128,18 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
 
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
+    const rid = res.headers.get("x-request-id") ?? undefined;
     const authErr = classifyError(res.status, text);
-    if (authErr) throw authErr;
-    // Generic fallback — never dump raw JSON at a 9-10 year old.
-    throw new Error("앗, 잠깐 문제가 생겼어요. 다시 한 번 해보거나 선생님을 불러주세요.");
+    if (authErr) {
+      authErr.requestId = rid;
+      throw authErr;
+    }
+    // Generic fallback — never dump raw JSON at a 9-10 year old; the
+    // request_id is appended so the operator can DM a single string.
+    throw new ProxyTransportError(
+      "앗, 잠깐 문제가 생겼어요. 다시 한 번 해보거나 선생님을 불러주세요.",
+      rid,
+    );
   }
 
   const reader = res.body.getReader();

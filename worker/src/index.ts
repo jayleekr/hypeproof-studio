@@ -4,10 +4,16 @@ import { chat } from "./routes/chat";
 import { trace } from "./routes/trace";
 import { admin } from "./routes/admin";
 import { runHeartbeat } from "./cron/heartbeat.ts";
+import { requestId, makeErrorBody } from "./middleware/request-id.ts";
 // @ts-ignore — bundled as text by wrangler rules.
 import adminHtml from "./ui/admin.html";
 
-const app = new Hono<{ Bindings: Env }>();
+const app = new Hono<{ Bindings: Env; Variables: { requestId: string } }>();
+
+// S-07 (#49): stamp request_id on every request. Echoed in x-request-id
+// header + structured error body so operators can correlate user reports
+// with wrangler tail logs.
+app.use("*", requestId);
 
 // Friendly root → redirect to admin UI (which itself is access-gated)
 app.get("/", () => {
@@ -20,10 +26,21 @@ app.route("/v1", chat);
 app.route("/v1/trace", trace);
 app.route("/admin", admin);
 
-app.notFound((c) => c.json({ error: "not_found", path: c.req.path }, 404));
+app.notFound((c) =>
+  c.json(makeErrorBody(c, "not_found", "endpoint not found", { path: c.req.path }), 404),
+);
 app.onError((err, c) => {
-  console.error("Worker error:", err);
-  return c.json({ error: { message: String(err), type: "internal" } }, 500);
+  const rid = c.get("requestId") ?? "no-request-id";
+  // Stack to logs ONLY — never to the client. Operator pastes the
+  // request_id and Jay greps Workers Logs (`wrangler tail | grep <rid>`).
+  console.error(`[${rid}] worker error:`, err);
+  // Surface the message bare; the type stays "internal" so the client/UI
+  // doesn't make recovery decisions on the prose. Specific error types
+  // come from c.json(makeErrorBody(c, "<type>", ...)) inside routes.
+  return c.json(
+    makeErrorBody(c, "internal", err instanceof Error ? err.message : String(err)),
+    500,
+  );
 });
 
 // Default export is { fetch, scheduled }. Hono's app exposes .fetch directly;

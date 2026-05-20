@@ -11,6 +11,7 @@ interface Props {
   messages: ChatMessage[];
   streaming: boolean;
   error: string | null;
+  errorRequestId: string | null;
   canRetryLast: boolean;
   onSend: (text: string) => void;
   onRetry: (prompt: string) => void;
@@ -202,6 +203,7 @@ export function ChatPanel(props: Props) {
         {error && (
           <ErrorBanner
             message={error}
+            requestId={props.errorRequestId}
             canRetry={props.canRetryLast}
             onRetry={props.onRetryLast}
             onDismiss={props.onDismissError}
@@ -566,11 +568,13 @@ function splitFences(content: string): FenceSeg[] {
 
 function ErrorBanner({
   message,
+  requestId,
   canRetry,
   onRetry,
   onDismiss,
 }: {
   message: string;
+  requestId: string | null;
   canRetry: boolean;
   onRetry: () => void;
   onDismiss: () => void;
@@ -589,6 +593,11 @@ function ErrorBanner({
       <div className="hps-error-banner-body">
         <div className="hps-error-banner-title">{title}</div>
         <div className="hps-error-banner-msg">{message}</div>
+        {requestId && (
+          <div className="hps-error-banner-rid" title="강사에게 이 ID를 알려주세요 — Jay가 바로 추적할 수 있어요">
+            ID: <code>{requestId}</code>
+          </div>
+        )}
       </div>
       <div className="hps-error-banner-actions">
         {canRetry && (

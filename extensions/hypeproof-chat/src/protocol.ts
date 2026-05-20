@@ -123,7 +123,7 @@ export type HostMessage =
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }
   | { type: "streamEnd"; streamId: string }
-  | { type: "streamError"; streamId: string; error: string }
+  | { type: "streamError"; streamId: string; error: string; requestId?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string };
 
