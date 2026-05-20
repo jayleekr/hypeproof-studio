@@ -4,6 +4,7 @@ import { chat } from "./routes/chat";
 import { trace } from "./routes/trace";
 import { admin } from "./routes/admin";
 import { runHeartbeat } from "./cron/heartbeat.ts";
+import { runD1Backup } from "./cron/d1-backup.ts";
 import { requestId, makeErrorBody } from "./middleware/request-id.ts";
 // @ts-ignore — bundled as text by wrangler rules.
 import adminHtml from "./ui/admin.html";
@@ -53,19 +54,26 @@ export default {
     env: Env,
     ctx: ExecutionContext,
   ): Promise<void> {
-    // Run-to-completion is important for KV writes; waitUntil keeps the
-    // isolate alive past the scheduled() return.
+    // Dispatch by cron pattern. Currently:
+    //   "*/15 * * * *" → 15-min heartbeat (#45 / S-02)
+    //   "0 17 * * *"   → D1 nightly backup to R2 at 17:00 UTC = 02:00 KST (#52 / S-06)
+    if (controller.cron === "0 17 * * *") {
+      ctx.waitUntil(
+        runD1Backup(env)
+          .then((r) => console.log("d1-backup", JSON.stringify({
+            ok: r.ok, object_key: r.object_key, total_rows: r.total_rows,
+            total_bytes: r.total_bytes, retain_deleted: r.retain_deleted.length,
+            error: r.error,
+          })))
+          .catch((err) => console.error("d1-backup crashed:", err)),
+      );
+      return;
+    }
+    // Default: 15-min heartbeat.
     ctx.waitUntil(
       runHeartbeat(env)
-        .then((r) => {
-          // Cheap operational log — visible in `wrangler tail`.
-          console.log("heartbeat", JSON.stringify(r));
-        })
-        .catch((err) => {
-          console.error("heartbeat crashed:", err);
-        }),
+        .then((r) => console.log("heartbeat", JSON.stringify(r)))
+        .catch((err) => console.error("heartbeat crashed:", err)),
     );
-    // controller.cron will be "*/15 * * * *" today; left here for future dispatch.
-    void controller;
   },
 } satisfies ExportedHandler<Env>;

@@ -10,13 +10,15 @@ routes = [{ pattern = "api.hypeproof-ai.xyz", custom_domain = true }]
 [observability]
 enabled = true
 
-# Cron Triggers — see worker/src/index.ts scheduled() and worker/src/cron/.
-# Currently only the 15-min smoke heartbeat (#45). Cron-only; not exposed
-# via HTTP. Test locally:
+# Cron Triggers — see worker/src/index.ts scheduled() dispatcher.
+#   */15 * * * *  →  15-min smoke heartbeat (#45 / S-02)
+#   0 17 * * *    →  D1 nightly backup to R2 at 02:00 KST (#52 / S-06)
+# Cron-only; not exposed via HTTP. Test locally:
 #   npx wrangler dev --test-scheduled
 #   curl 'http://localhost:8787/__scheduled?cron=*/15+*+*+*+*'
+#   curl 'http://localhost:8787/__scheduled?cron=0+17+*+*+*'
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/15 * * * *", "0 17 * * *"]
 
 # KV: cohort/session/roster state
 # Create:  wrangler kv:namespace create HPS_KV
