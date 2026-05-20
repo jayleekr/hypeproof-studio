@@ -50,7 +50,7 @@ ENVIRONMENT = "production"
 # Switchable upstream LLM (see resolveProvider in src/env.ts). 3-way peer —
 # NOT runtime fallback. Default = "gemini" when GEMINI_API_KEY is set.
 # Set to "anthropic" or "openai" (with their key) to switch.
-LLM_PROVIDER = "gemini"
+LLM_PROVIDER = "anthropic"
 # Secrets — production: `wrangler secret put <NAME>`
 #   wrangler secret put GEMINI_API_KEY      # default provider key
 #   wrangler secret put HPS_SIGNING_SECRET
