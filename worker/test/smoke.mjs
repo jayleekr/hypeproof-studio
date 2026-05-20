@@ -511,4 +511,160 @@ const stubProfile = {
   console.log("✓ storage: createTrial/endTrial/recordTurn(R2 gated)/recordValidation/recordHumanAction");
 }
 
+// ---- trace.ts (#9b): parseEvent unit + endpoint auth/dispatch ---------------
+{
+  const { parseEvent, trace } = await import("../src/routes/trace.ts");
+
+  // --- parseEvent (security-relevant validator) ---
+  assert.equal(parseEvent(null).ok, false, "null body");
+  assert.equal(parseEvent("nope").ok, false, "string body");
+  assert.equal(parseEvent({}).ok, false, "missing type");
+  assert.equal(parseEvent({ type: "garbage" }).ok, false, "unknown type");
+  assert.equal(parseEvent({ type: "trialStart" }).ok, true, "trialStart w/o label");
+  assert.equal(
+    parseEvent({ type: "trialStart", task_label: 99 }).ok, false,
+    "trialStart wrong label type",
+  );
+  assert.equal(parseEvent({ type: "trialEnd" }).ok, false, "trialEnd needs trial_id");
+  assert.equal(
+    parseEvent({ type: "validationRun", trial_id: "x", outcome: "lol" }).ok, false,
+    "validationRun bad outcome rejected",
+  );
+  assert.equal(
+    parseEvent({ type: "validationRun", trial_id: "x", outcome: "pass", errors_found: 3 }).ok,
+    true,
+  );
+  assert.equal(
+    parseEvent({ type: "humanAction", trial_id: "x", kind: "delete" }).ok, false,
+    "humanAction bad kind rejected",
+  );
+  assert.equal(
+    parseEvent({ type: "humanAction", trial_id: "x", kind: "edit", diff_chars: 5 }).ok, true,
+  );
+  console.log("✓ trace.parseEvent: rejects malformed; accepts well-formed");
+
+  // --- endpoint integration with a mock env ---
+  // Use the existing sk-biopharm profile so getProfile() resolves naturally.
+  const COHORT = "sk-biopharm-2026-a";
+  const PROFILE = "sk-biopharm-kids-2026-grade-3-4-s1";
+  const USER = "kid01";
+  const startsAt = new Date(Date.now() - 60_000).toISOString();
+  const endsAt   = new Date(Date.now() + 60 * 60_000).toISOString();
+
+  function mkEnv(opts = {}) {
+    const dbCalls = [];
+    const kvStore = new Map();
+    if (opts.withSession !== false) {
+      kvStore.set(`cohort:${COHORT}:active_session`, JSON.stringify({
+        session_id: "sess-1", profile_id: PROFILE, starts_at: startsAt, ends_at: endsAt,
+      }));
+    }
+    if (opts.withRoster !== false) {
+      kvStore.set(`cohort:${COHORT}:roster`, JSON.stringify({
+        users: [USER], updated_at: new Date().toISOString(),
+      }));
+    }
+    return {
+      HPS_SIGNING_SECRET: SECRET,
+      HPS_KV: {
+        async get(key, fmt) {
+          const v = kvStore.get(key);
+          if (v == null) return null;
+          return fmt === "json" ? JSON.parse(v) : v;
+        },
+      },
+      HPS_DB: {
+        prepare(sql) {
+          const call = { sql, bindings: null };
+          return { bind(...args) { call.bindings = args; return this; },
+                   async run() { dbCalls.push(call); return { success: true }; } };
+        },
+      },
+      HPS_TRACES: { async put() {} },
+      _dbCalls: dbCalls,
+    };
+  }
+  const ctx = { waitUntil: (p) => Promise.resolve(p).catch(() => {}) };
+  async function call(env, init) {
+    return trace.fetch(new Request("https://t/event", { method: "POST", ...init }), env, ctx);
+  }
+
+  // 401: no bearer
+  {
+    const r = await call(mkEnv(), { body: JSON.stringify({ type: "trialEnd", trial_id: "x" }),
+      headers: { "content-type": "application/json" } });
+    assert.equal(r.status, 401, "missing bearer → 401");
+  }
+  // 401: malformed token
+  {
+    const r = await call(mkEnv(), { body: JSON.stringify({ type: "trialEnd", trial_id: "x" }),
+      headers: { "content-type": "application/json", authorization: "Bearer not.a.token" } });
+    assert.equal(r.status, 401, "bad token → 401");
+  }
+
+  // Issue a real token for the rest
+  const TOKEN = await issue({ u: USER, c: COHORT, p: PROFILE }, 1, SECRET);
+  const auth = `Bearer ${TOKEN}`;
+
+  // 403: no active session
+  {
+    const r = await call(mkEnv({ withSession: false }), {
+      body: JSON.stringify({ type: "trialEnd", trial_id: "x" }),
+      headers: { "content-type": "application/json", authorization: auth },
+    });
+    assert.equal(r.status, 403, "no session → 403");
+  }
+  // 403: not in roster
+  {
+    const r = await call(mkEnv({ withRoster: false }), {
+      body: JSON.stringify({ type: "trialEnd", trial_id: "x" }),
+      headers: { "content-type": "application/json", authorization: auth },
+    });
+    assert.equal(r.status, 403, "empty roster → 403");
+  }
+  // 400: malformed body
+  {
+    const r = await call(mkEnv(), {
+      body: JSON.stringify({ type: "validationRun", trial_id: "t", outcome: "nope" }),
+      headers: { "content-type": "application/json", authorization: auth },
+    });
+    assert.equal(r.status, 400, "bad outcome → 400");
+  }
+  // 413: oversized body
+  {
+    const big = JSON.stringify({ type: "trialStart", task_label: "x".repeat(9000) });
+    const r = await call(mkEnv(), { body: big,
+      headers: { "content-type": "application/json", authorization: auth } });
+    assert.equal(r.status, 413, "oversized body → 413");
+  }
+  // 200: trialStart returns a uuid; D1 INSERT INTO trials recorded
+  {
+    const env = mkEnv();
+    const r = await call(env, {
+      body: JSON.stringify({ type: "trialStart", task_label: "삼각형 점프" }),
+      headers: { "content-type": "application/json", authorization: auth },
+    });
+    assert.equal(r.status, 200, "trialStart 200");
+    const j = await r.json();
+    assert.equal(j.ok, true);
+    assert.match(j.trial_id, /^[0-9a-f-]{36}$/i);
+    assert.ok(env._dbCalls.some((c) => /INSERT INTO trials/.test(c.sql)),
+      "trials INSERT recorded");
+  }
+  // 200: humanAction acks; waitUntil fired (dispatched, fire-and-forget)
+  {
+    const env = mkEnv();
+    const r = await call(env, {
+      body: JSON.stringify({ type: "humanAction", trial_id: "t-fake", kind: "edit", diff_chars: 12 }),
+      headers: { "content-type": "application/json", authorization: auth },
+    });
+    assert.equal(r.status, 200, "humanAction 200");
+    // give the waitUntil promise a tick to settle
+    await new Promise((r) => setTimeout(r, 5));
+    assert.ok(env._dbCalls.some((c) => /INSERT INTO human_actions/.test(c.sql)),
+      "human_actions INSERT recorded (fire-and-forget)");
+  }
+  console.log("✓ trace endpoint: auth gates (401/403), validation (400/413), happy 200 + DB dispatch");
+}
+
 console.log("\nAll smoke tests passed.");

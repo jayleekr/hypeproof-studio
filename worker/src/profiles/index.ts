@@ -1,6 +1,6 @@
 import type { Profile } from "./types";
-import { profile as skBiopharmKidsS1 } from "./sk-biopharm-kids-s1";
-import { profile as boahDentalTeaserS1 } from "./boah-dental-teaser-2026-s1";
+import { profile as skBiopharmKidsS1 } from "./sk-biopharm-kids-s1.ts";
+import { profile as boahDentalTeaserS1 } from "./boah-dental-teaser-2026-s1.ts";
 
 // All known profiles. Add new cohorts here.
 const REGISTRY: Profile[] = [skBiopharmKidsS1, boahDentalTeaserS1];
@@ -16,4 +16,4 @@ export function listProfiles(): Profile[] {
 }
 
 export type { Profile };
-export { MODEL_MAP } from "./types";
+export { MODEL_MAP } from "./types.ts";
