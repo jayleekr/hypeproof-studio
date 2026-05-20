@@ -3,6 +3,7 @@ import type { Env } from "./env";
 import { chat } from "./routes/chat";
 import { trace } from "./routes/trace";
 import { admin } from "./routes/admin";
+import { runHeartbeat } from "./cron/heartbeat.ts";
 // @ts-ignore — bundled as text by wrangler rules.
 import adminHtml from "./ui/admin.html";
 
@@ -25,4 +26,29 @@ app.onError((err, c) => {
   return c.json({ error: { message: String(err), type: "internal" } }, 500);
 });
 
-export default app;
+// Default export is { fetch, scheduled }. Hono's app exposes .fetch directly;
+// scheduled is our cron entry point — currently just the 15-min heartbeat,
+// but S-06 (D1 backup) will add a daily cron and dispatch by event.cron.
+export default {
+  fetch: app.fetch,
+  async scheduled(
+    controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    // Run-to-completion is important for KV writes; waitUntil keeps the
+    // isolate alive past the scheduled() return.
+    ctx.waitUntil(
+      runHeartbeat(env)
+        .then((r) => {
+          // Cheap operational log — visible in `wrangler tail`.
+          console.log("heartbeat", JSON.stringify(r));
+        })
+        .catch((err) => {
+          console.error("heartbeat crashed:", err);
+        }),
+    );
+    // controller.cron will be "*/15 * * * *" today; left here for future dispatch.
+    void controller;
+  },
+} satisfies ExportedHandler<Env>;
