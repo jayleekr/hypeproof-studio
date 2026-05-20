@@ -24,6 +24,10 @@ registerHooks({
 });
 
 const SECRET = "test-secret-" + "x".repeat(20);
+// Stable v4 UUID for any test that needs a "valid trial_id" (#9d ownership +
+// strict UUID validation in extractTrialHeaders / parseEvent).
+const TRIAL_UUID  = "11111111-2222-4333-8444-555555555555";
+const TRIAL_UUID2 = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
 const { issue, verify, TokenError } = await import("../src/lib/tokens.ts");
 const { translate, translateOpenAI } = await import("../src/lib/translate.ts");
@@ -511,33 +515,118 @@ const stubProfile = {
   console.log("✓ storage: createTrial/endTrial/recordTurn(R2 gated)/recordValidation/recordHumanAction");
 }
 
+// ---- storage security helpers (#9d) ----------------------------------------
+{
+  const { isUuid, verifyTrialOwnership, recordTurnIfOwned } =
+    await import("../src/lib/storage.ts");
+
+  // isUuid (R2 path-traversal defense)
+  assert.equal(isUuid(TRIAL_UUID), true);
+  assert.equal(isUuid("not-a-uuid"), false);
+  assert.equal(isUuid("../etc/passwd"), false);
+  assert.equal(isUuid("11111111-2222-3333-4444-555555555555-extra"), false);
+  assert.equal(isUuid(""), false);
+
+  function mkEnv(trials) {
+    const dbCalls = [];
+    return {
+      HPS_DB: {
+        prepare(sql) {
+          const call = { sql, bindings: null };
+          return {
+            bind(...args) { call.bindings = args; return this; },
+            async run() { dbCalls.push(call); return { success: true }; },
+            async first() {
+              dbCalls.push(call);
+              if (/SELECT user_id, cohort_id FROM trials/.test(call.sql)) {
+                return trials[call.bindings[0]] ?? null;
+              }
+              return null;
+            },
+          };
+        },
+      },
+      HPS_TRACES: { async put() {} },
+      _dbCalls: dbCalls,
+    };
+  }
+
+  // verifyTrialOwnership
+  {
+    const env = mkEnv({ [TRIAL_UUID]: { user_id: "u1", cohort_id: "c1" } });
+    assert.equal(await verifyTrialOwnership(env, TRIAL_UUID, "u1", "c1"), true);
+    assert.equal(await verifyTrialOwnership(env, TRIAL_UUID, "u2", "c1"), false,
+      "wrong user → false");
+    assert.equal(await verifyTrialOwnership(env, TRIAL_UUID, "u1", "c2"), false,
+      "wrong cohort → false");
+    assert.equal(await verifyTrialOwnership(env, TRIAL_UUID2, "u1", "c1"), false,
+      "missing trial → false");
+    assert.equal(await verifyTrialOwnership(env, "not-a-uuid", "u1", "c1"), false,
+      "non-UUID short-circuits (no DB read)");
+    // last assertion: ensure SELECT did NOT happen for the non-UUID case
+    const selectsForBadId = env._dbCalls.filter(
+      (c) => /trials/.test(c.sql) && c.bindings?.[0] === "not-a-uuid",
+    );
+    assert.equal(selectsForBadId.length, 0, "non-UUID never reaches DB");
+  }
+
+  // recordTurnIfOwned: owned → recordTurn fires; not-owned → silent skip
+  {
+    const env = mkEnv({ [TRIAL_UUID]: { user_id: "u1", cohort_id: "c1" } });
+    const fields = {
+      trial_id: TRIAL_UUID, turn_idx: 0,
+      prompt_chars: 1, response_chars: 1,
+      tokens_in: 1, tokens_out: 1, latency_ms: 10, model: "m",
+    };
+    const ok = await recordTurnIfOwned(env, fields, "u1", "c1");
+    assert.equal(ok, true);
+    assert.ok(env._dbCalls.some((c) => /INSERT INTO turns/.test(c.sql)),
+      "owned → INSERT INTO turns fired");
+
+    const env2 = mkEnv({});  // trial not in store
+    const ok2 = await recordTurnIfOwned(env2, fields, "u1", "c1");
+    assert.equal(ok2, false);
+    assert.ok(!env2._dbCalls.some((c) => /INSERT INTO turns/.test(c.sql)),
+      "not-owned → INSERT skipped (silent drop)");
+  }
+  console.log("✓ storage security: isUuid + verifyTrialOwnership + recordTurnIfOwned");
+}
+
 // ---- chat-hook helpers (#9c) -----------------------------------------------
 {
   const { extractTrialHeaders, lastUserMessageText } = await import("../src/lib/storage.ts");
 
-  // extractTrialHeaders: both headers required + sane shape
+  // extractTrialHeaders: both headers required + STRICT UUID shape (#9d F#3)
   function H(h) { return (name) => h[name.toLowerCase()] ?? null; }
   assert.equal(extractTrialHeaders(H({})), null, "no headers → null");
   assert.equal(
-    extractTrialHeaders(H({ "x-hps-trial-id": "t-1" })), null,
+    extractTrialHeaders(H({ "x-hps-trial-id": TRIAL_UUID })), null,
     "missing turn-idx → null",
   );
   assert.equal(
-    extractTrialHeaders(H({ "x-hps-trial-id": "t-1", "x-hps-turn-idx": "abc" })), null,
+    extractTrialHeaders(H({ "x-hps-trial-id": TRIAL_UUID, "x-hps-turn-idx": "abc" })), null,
     "non-numeric turn-idx → null",
   );
   assert.equal(
-    extractTrialHeaders(H({ "x-hps-trial-id": "t-1", "x-hps-turn-idx": "-1" })), null,
+    extractTrialHeaders(H({ "x-hps-trial-id": TRIAL_UUID, "x-hps-turn-idx": "-1" })), null,
     "negative turn-idx → null",
+  );
+  assert.equal(
+    extractTrialHeaders(H({ "x-hps-trial-id": TRIAL_UUID, "x-hps-turn-idx": "100000" })), null,
+    "turn_idx > 9999 → null",
+  );
+  assert.equal(
+    extractTrialHeaders(H({ "x-hps-trial-id": "../path", "x-hps-turn-idx": "0" })), null,
+    "non-UUID trial id rejected (R2 path traversal defense)",
   );
   assert.equal(
     extractTrialHeaders(H({ "x-hps-trial-id": "x".repeat(80), "x-hps-turn-idx": "0" })), null,
     "oversized trial id → null",
   );
   assert.deepEqual(
-    extractTrialHeaders(H({ "x-hps-trial-id": "t-uuid", "x-hps-turn-idx": "3" })),
-    { trial_id: "t-uuid", turn_idx: 3 },
-    "valid pair → parsed",
+    extractTrialHeaders(H({ "x-hps-trial-id": TRIAL_UUID, "x-hps-turn-idx": "3" })),
+    { trial_id: TRIAL_UUID, turn_idx: 3 },
+    "valid UUID pair → parsed",
   );
 
   // lastUserMessageText: string content, array content, malformed bodies
@@ -590,19 +679,35 @@ const stubProfile = {
   );
   assert.equal(parseEvent({ type: "trialEnd" }).ok, false, "trialEnd needs trial_id");
   assert.equal(
-    parseEvent({ type: "validationRun", trial_id: "x", outcome: "lol" }).ok, false,
+    parseEvent({ type: "trialEnd", trial_id: "not-a-uuid" }).ok, false,
+    "trialEnd rejects non-UUID trial_id (#9d F#3)",
+  );
+  assert.equal(
+    parseEvent({ type: "trialEnd", trial_id: TRIAL_UUID }).ok, true,
+    "trialEnd accepts UUID trial_id",
+  );
+  assert.equal(
+    parseEvent({ type: "validationRun", trial_id: TRIAL_UUID, outcome: "lol" }).ok, false,
     "validationRun bad outcome rejected",
   );
   assert.equal(
-    parseEvent({ type: "validationRun", trial_id: "x", outcome: "pass", errors_found: 3 }).ok,
+    parseEvent({ type: "validationRun", trial_id: TRIAL_UUID, outcome: "pass", errors_found: 3 }).ok,
     true,
   );
   assert.equal(
-    parseEvent({ type: "humanAction", trial_id: "x", kind: "delete" }).ok, false,
+    parseEvent({ type: "humanAction", trial_id: TRIAL_UUID, kind: "delete" }).ok, false,
     "humanAction bad kind rejected",
   );
   assert.equal(
-    parseEvent({ type: "humanAction", trial_id: "x", kind: "edit", diff_chars: 5 }).ok, true,
+    parseEvent({ type: "humanAction", trial_id: TRIAL_UUID, kind: "edit", diff_chars: 5 }).ok, true,
+  );
+  assert.equal(
+    parseEvent({ type: "humanAction", trial_id: TRIAL_UUID, kind: "edit", turn_id: "not-uuid" }).ok,
+    false, "humanAction rejects non-UUID turn_id",
+  );
+  assert.equal(
+    parseEvent({ type: "trialStart", task_label: "x".repeat(500) }).ok, false,
+    "trialStart task_label > 256 rejected",
   );
   console.log("✓ trace.parseEvent: rejects malformed; accepts well-formed");
 
@@ -627,6 +732,12 @@ const stubProfile = {
         users: [USER], updated_at: new Date().toISOString(),
       }));
     }
+    // Trials "table" the mock SELECTs from when verifyTrialOwnership runs.
+    // Default: TRIAL_UUID is owned by (USER, COHORT). opts.trials lets a test
+    // override (e.g. wrong cohort, missing).
+    const trials = opts.trials ?? {
+      [TRIAL_UUID]: { user_id: USER, cohort_id: COHORT },
+    };
     return {
       HPS_SIGNING_SECRET: SECRET,
       HPS_KV: {
@@ -639,8 +750,20 @@ const stubProfile = {
       HPS_DB: {
         prepare(sql) {
           const call = { sql, bindings: null };
-          return { bind(...args) { call.bindings = args; return this; },
-                   async run() { dbCalls.push(call); return { success: true }; } };
+          return {
+            bind(...args) { call.bindings = args; return this; },
+            async run() { dbCalls.push(call); return { success: true }; },
+            async first() {
+              dbCalls.push(call);
+              // Only the trial-ownership SELECT uses .first(); match on SQL
+              // to keep this faithful even if other SELECTs land later.
+              if (/SELECT user_id, cohort_id FROM trials/.test(call.sql)) {
+                const tid = call.bindings?.[0];
+                return trials[tid] ?? null;
+              }
+              return null;
+            },
+          };
         },
       },
       HPS_TRACES: { async put() {} },
@@ -654,13 +777,13 @@ const stubProfile = {
 
   // 401: no bearer
   {
-    const r = await call(mkEnv(), { body: JSON.stringify({ type: "trialEnd", trial_id: "x" }),
+    const r = await call(mkEnv(), { body: JSON.stringify({ type: "trialEnd", trial_id: TRIAL_UUID }),
       headers: { "content-type": "application/json" } });
     assert.equal(r.status, 401, "missing bearer → 401");
   }
   // 401: malformed token
   {
-    const r = await call(mkEnv(), { body: JSON.stringify({ type: "trialEnd", trial_id: "x" }),
+    const r = await call(mkEnv(), { body: JSON.stringify({ type: "trialEnd", trial_id: TRIAL_UUID }),
       headers: { "content-type": "application/json", authorization: "Bearer not.a.token" } });
     assert.equal(r.status, 401, "bad token → 401");
   }
@@ -672,7 +795,7 @@ const stubProfile = {
   // 403: no active session
   {
     const r = await call(mkEnv({ withSession: false }), {
-      body: JSON.stringify({ type: "trialEnd", trial_id: "x" }),
+      body: JSON.stringify({ type: "trialEnd", trial_id: TRIAL_UUID }),
       headers: { "content-type": "application/json", authorization: auth },
     });
     assert.equal(r.status, 403, "no session → 403");
@@ -680,7 +803,7 @@ const stubProfile = {
   // 403: not in roster
   {
     const r = await call(mkEnv({ withRoster: false }), {
-      body: JSON.stringify({ type: "trialEnd", trial_id: "x" }),
+      body: JSON.stringify({ type: "trialEnd", trial_id: TRIAL_UUID }),
       headers: { "content-type": "application/json", authorization: auth },
     });
     assert.equal(r.status, 403, "empty roster → 403");
@@ -688,7 +811,7 @@ const stubProfile = {
   // 400: malformed body
   {
     const r = await call(mkEnv(), {
-      body: JSON.stringify({ type: "validationRun", trial_id: "t", outcome: "nope" }),
+      body: JSON.stringify({ type: "validationRun", trial_id: TRIAL_UUID, outcome: "nope" }),
       headers: { "content-type": "application/json", authorization: auth },
     });
     assert.equal(r.status, 400, "bad outcome → 400");
@@ -714,20 +837,45 @@ const stubProfile = {
     assert.ok(env._dbCalls.some((c) => /INSERT INTO trials/.test(c.sql)),
       "trials INSERT recorded");
   }
-  // 200: humanAction acks; waitUntil fired (dispatched, fire-and-forget)
+  // 200: humanAction on an OWNED trial → ownership verify passes, INSERT fires
   {
     const env = mkEnv();
     const r = await call(env, {
-      body: JSON.stringify({ type: "humanAction", trial_id: "t-fake", kind: "edit", diff_chars: 12 }),
+      body: JSON.stringify({ type: "humanAction", trial_id: TRIAL_UUID, kind: "edit", diff_chars: 12 }),
       headers: { "content-type": "application/json", authorization: auth },
     });
-    assert.equal(r.status, 200, "humanAction 200");
-    // give the waitUntil promise a tick to settle
+    assert.equal(r.status, 200, "humanAction owned → 200");
     await new Promise((r) => setTimeout(r, 5));
+    assert.ok(env._dbCalls.some((c) => /SELECT user_id, cohort_id FROM trials/.test(c.sql)),
+      "ownership SELECT happens before write");
     assert.ok(env._dbCalls.some((c) => /INSERT INTO human_actions/.test(c.sql)),
       "human_actions INSERT recorded (fire-and-forget)");
   }
-  console.log("✓ trace endpoint: auth gates (401/403), validation (400/413), happy 200 + DB dispatch");
+  // 403: humanAction on a trial NOT owned by this user (#9d F#1 fix)
+  {
+    const env = mkEnv({ trials: {} });   // empty trials → SELECT returns null
+    const r = await call(env, {
+      body: JSON.stringify({ type: "humanAction", trial_id: TRIAL_UUID2, kind: "edit" }),
+      headers: { "content-type": "application/json", authorization: auth },
+    });
+    assert.equal(r.status, 403, "non-owned trial → 403 (ownership)");
+    const j = await r.json();
+    assert.equal(j.error?.type, "trial_ownership");
+    assert.ok(!env._dbCalls.some((c) => /INSERT INTO human_actions/.test(c.sql)),
+      "no write attempted when ownership fails");
+  }
+  // 403: humanAction on a trial owned by DIFFERENT cohort (#9d F#10 defense-in-depth)
+  {
+    const env = mkEnv({
+      trials: { [TRIAL_UUID]: { user_id: USER, cohort_id: "some-other-cohort" } },
+    });
+    const r = await call(env, {
+      body: JSON.stringify({ type: "humanAction", trial_id: TRIAL_UUID, kind: "edit" }),
+      headers: { "content-type": "application/json", authorization: auth },
+    });
+    assert.equal(r.status, 403, "cohort mismatch → 403");
+  }
+  console.log("✓ trace endpoint: auth gates (401/403), validation (400/413), ownership (403 owned/non-owned/cohort), happy 200");
 }
 
 console.log("\nAll smoke tests passed.");

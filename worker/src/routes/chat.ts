@@ -22,7 +22,7 @@ import { callOpenAI } from "../lib/openai";
 import {
   extractTrialHeaders,
   lastUserMessageText,
-  recordTurn,
+  recordTurnIfOwned,
   type TrialHeaders,
 } from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
@@ -285,7 +285,7 @@ chat.post("/chat/completions", async (c) => {
     // not block the response. Skipped when client did not send trial headers.
     if (trial) {
       c.executionCtx.waitUntil(
-        recordTurn(
+        recordTurnIfOwned(
           env,
           {
             trial_id: trial.trial_id,
@@ -297,10 +297,12 @@ chat.post("/chat/completions", async (c) => {
             latency_ms: Date.now() - startedAt,
             model: modelLabel,
           },
+          payload.u,
+          payload.c,
           persistBody
             ? { persistBody: true, body: { prompt: promptText, response: text } }
             : {},
-        ).catch((err) => console.error("recordTurn (non-stream) failed:", err)),
+        ).catch((err) => console.error("recordTurnIfOwned (non-stream) failed:", err)),
       );
     }
     c.header("x-hps-model", modelLabel);
@@ -334,16 +336,21 @@ chat.post("/chat/completions", async (c) => {
     // Iteration scoring.
     if (trial) {
       c.executionCtx.waitUntil(
-        recordTurn(env, {
-          trial_id: trial.trial_id,
-          turn_idx: trial.turn_idx,
-          prompt_chars: promptChars,
-          response_chars: 0,
-          tokens_in: u.input_tokens,
-          tokens_out: u.output_tokens,
-          latency_ms: Date.now() - startedAt,
-          model: modelLabel,
-        }).catch((err) => console.error("recordTurn (stream) failed:", err)),
+        recordTurnIfOwned(
+          env,
+          {
+            trial_id: trial.trial_id,
+            turn_idx: trial.turn_idx,
+            prompt_chars: promptChars,
+            response_chars: 0,
+            tokens_in: u.input_tokens,
+            tokens_out: u.output_tokens,
+            latency_ms: Date.now() - startedAt,
+            model: modelLabel,
+          },
+          payload.u,
+          payload.c,
+        ).catch((err) => console.error("recordTurnIfOwned (stream) failed:", err)),
       );
     }
   };

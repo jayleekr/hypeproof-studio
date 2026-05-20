@@ -62,9 +62,62 @@ export function newId(): string {
   return crypto.randomUUID();
 }
 
+// Strict UUID-v4 shape — used by `extractTrialHeaders` and `parseEvent` to
+// reject crafted trial_id values that could traverse the R2 namespace or
+// collide on shared paths (security review F#3).
+export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isUuid(s: string): boolean {
+  return UUID_RE.test(s);
+}
+
 // ----- R2 key shape (single source of truth) --------------------------------
 export function turnBodyKey(trial_id: string, turn_idx: number): string {
   return `turns/${trial_id}/${turn_idx}.json`;
+}
+
+// ----- ownership verification (security review F#1, F#2) --------------------
+// Non-create trace writes (endTrial / recordValidation / recordHumanAction
+// and the chat.ts recordTurn) trust a client-supplied trial_id. Without an
+// ownership check, any authenticated participant who learns or guesses
+// another trial's UUID could write rows attached to it. Verify the trial
+// belongs to the requesting (user_id, cohort_id) pair before any such write.
+export async function verifyTrialOwnership(
+  env: Env,
+  trial_id: string,
+  user_id: string,
+  cohort_id: string,
+): Promise<boolean> {
+  if (!isUuid(trial_id)) return false;
+  const row = await env.HPS_DB
+    .prepare(`SELECT user_id, cohort_id FROM trials WHERE id = ? LIMIT 1`)
+    .bind(trial_id)
+    .first<{ user_id: string; cohort_id: string }>();
+  if (!row) return false;
+  return row.user_id === user_id && row.cohort_id === cohort_id;
+}
+
+/**
+ * Ownership-checked recordTurn used by the chat.ts hook (#9c). If the
+ * trial does not belong to (user_id, cohort_id), the turn is silently
+ * dropped — the chat response continues unaffected (fail-soft).
+ * Returns true when persisted, false when skipped.
+ */
+export async function recordTurnIfOwned(
+  env: Env,
+  fields: TurnInput,
+  user_id: string,
+  cohort_id: string,
+  opts: { persistBody?: boolean; body?: TurnBody } = {},
+): Promise<boolean> {
+  const owned = await verifyTrialOwnership(env, fields.trial_id, user_id, cohort_id);
+  if (!owned) {
+    console.warn(
+      `recordTurn: trial ownership mismatch (user=${user_id} cohort=${cohort_id} trial=${fields.trial_id}) — turn dropped`,
+    );
+    return false;
+  }
+  await recordTurn(env, fields, opts);
+  return true;
 }
 
 // ----- writes ---------------------------------------------------------------
@@ -107,12 +160,24 @@ export async function recordTurn(
       httpMetadata: { contentType: "application/json" },
     });
   }
+  // Idempotency (arch review A#2): legitimate retries (client double-send,
+  // streaming usage emitted twice across an upstream retry) MUST NOT crash
+  // on the UNIQUE(trial_id, turn_idx) index. Last-write-wins on the dynamic
+  // fields; body_ref is preserved unless the new write actually has one.
   await env.HPS_DB
     .prepare(
       `INSERT INTO turns
         (id, trial_id, turn_idx, prompt_chars, response_chars,
          tokens_in, tokens_out, latency_ms, model, body_ref)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(trial_id, turn_idx) DO UPDATE SET
+         prompt_chars   = excluded.prompt_chars,
+         response_chars = excluded.response_chars,
+         tokens_in      = excluded.tokens_in,
+         tokens_out     = excluded.tokens_out,
+         latency_ms     = excluded.latency_ms,
+         model          = excluded.model,
+         body_ref       = COALESCE(excluded.body_ref, turns.body_ref)`,
     )
     .bind(
       id,
@@ -171,10 +236,11 @@ export function extractTrialHeaders(
   const id = (getHeader("x-hps-trial-id") ?? "").trim();
   const idxRaw = (getHeader("x-hps-turn-idx") ?? "").trim();
   if (!id || !idxRaw) return null;
+  // Strict UUID — defends against R2 path traversal (`../`) and key
+  // collision on shared prefixes (security review F#3).
+  if (!isUuid(id)) return null;
   const turn_idx = Number.parseInt(idxRaw, 10);
-  if (!Number.isFinite(turn_idx) || turn_idx < 0) return null;
-  // Cheap shape sanity (uuid-ish or any non-empty token-safe string).
-  if (id.length > 64) return null;
+  if (!Number.isFinite(turn_idx) || turn_idx < 0 || turn_idx > 9999) return null;
   return { trial_id: id, turn_idx };
 }
 

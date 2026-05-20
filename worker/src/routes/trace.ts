@@ -13,6 +13,8 @@ import {
   endTrial,
   recordValidation,
   recordHumanAction,
+  verifyTrialOwnership,
+  isUuid,
   type ValidationOutcome,
   type HumanActionKind,
 } from "../lib/storage.ts";
@@ -56,17 +58,25 @@ export function parseEvent(
       if (o.task_label != null && typeof o.task_label !== "string") {
         return { ok: false, message: "task_label must be string" };
       }
+      // Cap task_label length so a single field can't fill the 8KB body cap
+      // (security review F#8).
+      const tl = typeof o.task_label === "string" ? o.task_label : undefined;
+      if (tl && tl.length > 256) return { ok: false, message: "task_label too long (max 256)" };
       return {
         ok: true,
-        event: { type: "trialStart", task_label: o.task_label as string | undefined },
+        event: { type: "trialStart", task_label: tl },
       };
     }
     case "trialEnd": {
-      if (typeof o.trial_id !== "string") return { ok: false, message: "trial_id required" };
+      if (typeof o.trial_id !== "string" || !isUuid(o.trial_id))
+        return { ok: false, message: "trial_id must be a uuid" };
       return { ok: true, event: { type: "trialEnd", trial_id: o.trial_id } };
     }
     case "validationRun": {
-      if (typeof o.trial_id !== "string") return { ok: false, message: "trial_id required" };
+      if (typeof o.trial_id !== "string" || !isUuid(o.trial_id))
+        return { ok: false, message: "trial_id must be a uuid" };
+      if (o.turn_id != null && (typeof o.turn_id !== "string" || !isUuid(o.turn_id)))
+        return { ok: false, message: "turn_id must be a uuid when provided" };
       if (!isOutcome(o.outcome)) {
         return { ok: false, message: `outcome must be one of ${VALID_OUTCOMES.join(",")}` };
       }
@@ -83,7 +93,10 @@ export function parseEvent(
       };
     }
     case "humanAction": {
-      if (typeof o.trial_id !== "string") return { ok: false, message: "trial_id required" };
+      if (typeof o.trial_id !== "string" || !isUuid(o.trial_id))
+        return { ok: false, message: "trial_id must be a uuid" };
+      if (o.turn_id != null && (typeof o.turn_id !== "string" || !isUuid(o.turn_id)))
+        return { ok: false, message: "turn_id must be a uuid when provided" };
       if (!isKind(o.kind)) {
         return { ok: false, message: `kind must be one of ${VALID_KINDS.join(",")}` };
       }
@@ -178,8 +191,10 @@ trace.post("/event", async (c) => {
   const ev = parsed.event;
 
   // 7. Dispatch. trialStart awaits the INSERT so the client gets the
-  // server-assigned trial_id back. Other events are fire-and-forget via
-  // waitUntil — they never block the ack.
+  // server-assigned trial_id back. Other events ownership-verify (security
+  // F#1) — block on a small SELECT, then fire-and-forget the actual write
+  // via waitUntil. Verify failures are 403 with a generic message
+  // (no SQL/secret leak per F#5).
   try {
     switch (ev.type) {
       case "trialStart": {
@@ -192,20 +207,24 @@ trace.post("/event", async (c) => {
         });
         return c.json({ ok: true, trial_id });
       }
-      case "trialEnd": {
-        c.executionCtx.waitUntil(endTrial(env, ev.trial_id));
-        return c.json({ ok: true });
-      }
-      case "validationRun": {
-        c.executionCtx.waitUntil(recordValidation(env, ev));
-        return c.json({ ok: true });
-      }
+      case "trialEnd":
+      case "validationRun":
       case "humanAction": {
-        c.executionCtx.waitUntil(recordHumanAction(env, ev));
+        const owned = await verifyTrialOwnership(env, ev.trial_id, payload.u, payload.c);
+        if (!owned) {
+          return c.json(
+            { error: { message: "trial not owned by this user/cohort", type: "trial_ownership" } },
+            403,
+          );
+        }
+        if (ev.type === "trialEnd") c.executionCtx.waitUntil(endTrial(env, ev.trial_id));
+        else if (ev.type === "validationRun") c.executionCtx.waitUntil(recordValidation(env, ev));
+        else c.executionCtx.waitUntil(recordHumanAction(env, ev));
         return c.json({ ok: true });
       }
     }
   } catch (err) {
-    return c.json({ error: { message: String(err), type: "storage" } }, 502);
+    console.error("trace dispatch failed:", err);
+    return c.json({ error: { message: "storage failed", type: "storage" } }, 502);
   }
 });
