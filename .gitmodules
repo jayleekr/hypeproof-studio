@@ -2,3 +2,6 @@
 	path = vscodium-base
 	url = git@github.com:jayleekr/vscodium.git
 	branch = hps/main
+[submodule ".harness"]
+	path = .harness
+	url = git@github.com:jayleekr/hypeproof-harness.git
