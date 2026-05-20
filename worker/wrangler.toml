@@ -31,6 +31,14 @@ database_id = "2427207c-272e-4ecd-9d16-7a1dcc0fc741"
 binding = "HPS_ANALYTICS"
 dataset = "hypeproof_studio"
 
+# R2: trace turn-body dumps (#9). Only written when
+# profile.analytics.log_user_messages=true. Default = OFF for all current
+# cohorts incl. children — opt-in per cohort after consent/retention policy.
+# Create bucket once:  wrangler r2 bucket create hps-traces
+[[r2_buckets]]
+binding = "HPS_TRACES"
+bucket_name = "hps-traces"
+
 # Bundle .md and .html as static text imports
 [[rules]]
 type = "Text"

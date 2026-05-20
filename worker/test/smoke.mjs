@@ -389,4 +389,126 @@ const stubProfile = {
   console.log(`✓ all ${all.length} skeletons satisfy the contract (doctype, offline, 3-state, score, #controls, kbd+mouse+touch)`);
 }
 
+// ---- storage.ts (#9a) ------------------------------------------------------
+{
+  const storage = await import("../src/lib/storage.ts");
+  const { createTrial, endTrial, recordTurn, recordValidation,
+          recordHumanAction, turnBodyKey, newId } = storage;
+
+  // Mock Env bindings — record what's bound/put without hitting D1/R2.
+  function mkEnv() {
+    const dbCalls = [];
+    const r2Puts = [];
+    const env = {
+      HPS_DB: {
+        prepare(sql) {
+          const call = { sql, bindings: null };
+          return {
+            bind(...args) { call.bindings = args; return this; },
+            async run() { dbCalls.push(call); return { success: true }; },
+          };
+        },
+      },
+      HPS_TRACES: {
+        async put(key, value, opts) { r2Puts.push({ key, value, opts }); },
+      },
+    };
+    return { env, dbCalls, r2Puts };
+  }
+
+  // newId / turnBodyKey shape
+  assert.match(newId(), /^[0-9a-f-]{36}$/i, "newId returns a uuid");
+  assert.equal(turnBodyKey("t-1", 3), "turns/t-1/3.json", "turnBodyKey shape");
+
+  // createTrial → INSERT trials with the right columns + returns an id
+  {
+    const { env, dbCalls } = mkEnv();
+    const id = await createTrial(env, {
+      session_id: "sess-1", cohort_id: "boah-dental-2026-a",
+      user_id: "smoke", profile_id: "boah-dental-teaser-2026-s1",
+    });
+    assert.match(id, /^[0-9a-f-]{36}$/i);
+    assert.equal(dbCalls.length, 1);
+    assert.match(dbCalls[0].sql, /INSERT INTO trials/);
+    assert.deepEqual(dbCalls[0].bindings, [
+      id, "sess-1", "boah-dental-2026-a", "smoke", "boah-dental-teaser-2026-s1", null,
+    ], "task_label defaults to null");
+  }
+
+  // endTrial → UPDATE with id
+  {
+    const { env, dbCalls } = mkEnv();
+    await endTrial(env, "trial-xyz");
+    assert.equal(dbCalls.length, 1);
+    assert.match(dbCalls[0].sql, /UPDATE trials SET ended_at/);
+    assert.deepEqual(dbCalls[0].bindings, ["trial-xyz"]);
+  }
+
+  // recordTurn(persistBody=false) → NO R2 put; body_ref binding = null
+  {
+    const { env, dbCalls, r2Puts } = mkEnv();
+    const tid = await recordTurn(env, {
+      trial_id: "t1", turn_idx: 0,
+      prompt_chars: 12, response_chars: 200,
+      tokens_in: 10, tokens_out: 80, latency_ms: 1200,
+      model: "gemini-2.5-pro",
+    });
+    assert.match(tid, /^[0-9a-f-]{36}$/i);
+    assert.equal(r2Puts.length, 0, "no R2 write when persistBody=false");
+    assert.equal(dbCalls.length, 1);
+    assert.match(dbCalls[0].sql, /INSERT INTO turns/);
+    // body_ref is the last bound argument
+    assert.equal(dbCalls[0].bindings[dbCalls[0].bindings.length - 1], null,
+      "body_ref NULL when not persisting body");
+  }
+
+  // recordTurn(persistBody=true, body=...) → R2 put at canonical key + body_ref set
+  {
+    const { env, dbCalls, r2Puts } = mkEnv();
+    const tid = await recordTurn(
+      env,
+      { trial_id: "t2", turn_idx: 1, prompt_chars: 3, response_chars: 50,
+        tokens_in: 1, tokens_out: 20, latency_ms: 500, model: "claude-sonnet-4-6" },
+      { persistBody: true, body: { prompt: "안녕", response: "응" } },
+    );
+    assert.match(tid, /^[0-9a-f-]{36}$/i);
+    assert.equal(r2Puts.length, 1);
+    assert.equal(r2Puts[0].key, "turns/t2/1.json", "R2 key matches turnBodyKey");
+    const decoded = JSON.parse(r2Puts[0].value);
+    assert.equal(decoded.prompt, "안녕");
+    assert.equal(decoded.response, "응");
+    assert.equal(r2Puts[0].opts?.httpMetadata?.contentType, "application/json");
+    // body_ref binding equals the R2 key
+    const bindings = dbCalls[0].bindings;
+    assert.equal(bindings[bindings.length - 1], "turns/t2/1.json", "body_ref binding = R2 key");
+  }
+
+  // recordValidation → defaults applied
+  {
+    const { env, dbCalls } = mkEnv();
+    await recordValidation(env, { trial_id: "t3", outcome: "pass" });
+    assert.equal(dbCalls.length, 1);
+    assert.match(dbCalls[0].sql, /INSERT INTO validations/);
+    const [, trial_id, turn_id, outcome, ef, ex] = dbCalls[0].bindings;
+    assert.equal(trial_id, "t3");
+    assert.equal(turn_id, null, "turn_id defaults to null");
+    assert.equal(outcome, "pass");
+    assert.equal(ef, 0); assert.equal(ex, 0);
+  }
+
+  // recordHumanAction → kind + nullable diff_chars
+  {
+    const { env, dbCalls } = mkEnv();
+    await recordHumanAction(env, { trial_id: "t4", kind: "edit", diff_chars: 42 });
+    assert.equal(dbCalls.length, 1);
+    assert.match(dbCalls[0].sql, /INSERT INTO human_actions/);
+    const [, trial_id, turn_id, kind, diff] = dbCalls[0].bindings;
+    assert.equal(trial_id, "t4");
+    assert.equal(turn_id, null);
+    assert.equal(kind, "edit");
+    assert.equal(diff, 42);
+  }
+  console.log("✓ storage: createTrial/endTrial/recordTurn(R2 gated)/recordValidation/recordHumanAction");
+}
+
 console.log("\nAll smoke tests passed.");
