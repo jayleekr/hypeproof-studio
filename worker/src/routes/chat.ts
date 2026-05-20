@@ -26,7 +26,13 @@ import {
   type TrialHeaders,
 } from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
-import { getActiveSession, getCohortPause, getRoster, isSessionLive } from "../lib/kv";
+import {
+  getActiveSession,
+  getCohortPause,
+  getRoster,
+  isSessionLive,
+  isTokenRevoked,
+} from "../lib/kv";
 import { logChat, persistUsage } from "../lib/analytics";
 
 export const chat = new Hono<{ Bindings: Env }>();
@@ -111,6 +117,22 @@ chat.post("/chat/completions", async (c) => {
   } catch (err) {
     const code = err instanceof TokenError ? err.code : "unknown";
     return c.json({ error: { message: String(err), type: "auth", code } }, 401);
+  }
+
+  // 2b. Token revocation (S-01 / #46). Skipped for legacy tokens that
+  // pre-date jti — they remain valid until exp but can't be killed
+  // individually. Surfaced via x-token-legacy: 1 so clients/audits can spot
+  // tokens that should be rotated.
+  if (payload.jti) {
+    const rev = await isTokenRevoked(env.HPS_KV, payload.jti);
+    if (rev) {
+      return c.json(
+        { error: { message: "이 토큰은 더이상 사용할 수 없어요.", type: "auth", code: "revoked", since: rev.ts } },
+        401,
+      );
+    }
+  } else {
+    c.header("x-token-legacy", "1");
   }
 
   // 3. Profile
