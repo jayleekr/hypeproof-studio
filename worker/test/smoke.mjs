@@ -53,7 +53,7 @@ const stubProfile = {
 
 // ---- token roundtrip --------------------------------------------------------
 {
-  const t = await issue(
+  const { token: t } = await issue(
     { u: "kid01", c: "sk-biopharm-2026-a", p: "sk-biopharm-kids-2026-grade-3-4-s1" },
     1,
     SECRET,
@@ -68,7 +68,7 @@ const stubProfile = {
 
 // ---- bad signature rejected -------------------------------------------------
 {
-  const t = await issue({ u: "u", c: "c", p: "p" }, 1, SECRET);
+  const { token: t } = await issue({ u: "u", c: "c", p: "p" }, 1, SECRET);
   let threw = false;
   try {
     await verify(t, "different-secret-different-different");
@@ -83,7 +83,7 @@ const stubProfile = {
 
 // ---- expired token rejected -------------------------------------------------
 {
-  const t = await issue({ u: "u", c: "c", p: "p" }, -1, SECRET);  // already expired
+  const { token: t } = await issue({ u: "u", c: "c", p: "p" }, -1, SECRET);  // already expired
   let threw = false;
   try {
     await verify(t, SECRET);
@@ -789,7 +789,7 @@ const stubProfile = {
   }
 
   // Issue a real token for the rest
-  const TOKEN = await issue({ u: USER, c: COHORT, p: PROFILE }, 1, SECRET);
+  const { token: TOKEN } = await issue({ u: USER, c: COHORT, p: PROFILE }, 1, SECRET);
   const auth = `Bearer ${TOKEN}`;
 
   // 403: no active session
@@ -922,7 +922,7 @@ const stubProfile = {
     };
   }
   const ctx = { waitUntil: (p) => Promise.resolve(p).catch(() => {}) };
-  const TOKEN = await issue({ u: USER, c: COHORT, p: PROFILE }, 1, SECRET);
+  const { token: TOKEN } = await issue({ u: USER, c: COHORT, p: PROFILE }, 1, SECRET);
   const auth = `Bearer ${TOKEN}`;
   async function call(env, body) {
     return trace.fetch(new Request("https://t/event", {
@@ -1011,6 +1011,74 @@ const stubProfile = {
   assert.match(sql, /body_ref\s*=\s*COALESCE\(excluded\.body_ref, turns\.body_ref\)/,
     "body_ref uses COALESCE so retries without body don't blank it");
   console.log("✓ recordTurn idempotency: ON CONFLICT + COALESCE(body_ref)");
+}
+
+// §5a — token revocation helpers + jti emission (S-01 / #46).
+{
+  const { revokeToken, isTokenRevoked, unrevokeToken, listRevoked } = await import("../src/lib/kv.ts");
+
+  // jti emission: new tokens have a UUID jti
+  {
+    const r = await issue({ u: "u1", c: "c1", p: "p1" }, 1, SECRET);
+    assert.ok(r.jti, "issue() returns jti");
+    assert.match(r.jti, /^[0-9a-f-]{36}$/, "jti looks like UUID");
+    const v = await verify(r.token, SECRET);
+    assert.equal(v.jti, r.jti, "verify() echoes jti from payload");
+  }
+
+  // legacy tokens (jti-less) still verify — manually craft a pre-S-01 payload
+  {
+    const enc = new TextEncoder();
+    const now = Math.floor(Date.now() / 1000);
+    const payload = { c: "c0", exp: now + 600, iat: now, p: "p0", u: "u0", v: 2 };
+    const payloadBytes = enc.encode(JSON.stringify(payload));
+    const key = await crypto.subtle.importKey(
+      "raw", enc.encode(SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]
+    );
+    const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, payloadBytes));
+    const b64u = (b) => {
+      let s = ""; for (const x of b) s += String.fromCharCode(x);
+      return btoa(s).replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+    };
+    const legacy = `${b64u(payloadBytes)}.${b64u(sig)}`;
+    const v = await verify(legacy, SECRET);
+    assert.equal(v.jti, undefined, "legacy token verifies without jti");
+    assert.equal(v.u, "u0");
+  }
+
+  // KV revocation round-trip
+  {
+    const store = new Map();
+    const kv = {
+      async get(k, format) {
+        const v = store.get(k); if (v === undefined) return null;
+        return format === "json" ? JSON.parse(v) : v;
+      },
+      async put(k, v) { store.set(k, v); },
+      async delete(k) { store.delete(k); },
+      async list({ prefix, limit = 100 }) {
+        const keys = [];
+        for (const k of store.keys()) if (k.startsWith(prefix)) keys.push({ name: k });
+        return { keys: keys.slice(0, limit), list_complete: true, cursor: "" };
+      },
+    };
+    const JTI = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+
+    assert.equal(await isTokenRevoked(kv, JTI), null);
+    const rec = await revokeToken(kv, JTI, { reason: "smoke", cohort: "c1", user: "u1" }, 600);
+    assert.equal(rec.reason, "smoke");
+    const got = await isTokenRevoked(kv, JTI);
+    assert.equal(got.reason, "smoke");
+    assert.equal(got.cohort, "c1");
+
+    const list = await listRevoked(kv);
+    assert.equal(list.length, 1);
+    assert.equal(list[0].jti, JTI);
+
+    await unrevokeToken(kv, JTI);
+    assert.equal(await isTokenRevoked(kv, JTI), null);
+  }
+  console.log("✓ token revocation (#46): jti emission + legacy-token compat + KV round-trip + list");
 }
 
 // §5b — cohort kill-switch helpers (#47).

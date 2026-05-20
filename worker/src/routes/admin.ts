@@ -12,6 +12,9 @@
 //   DELETE /admin/cohorts/:id/session           — end current session
 //   POST   /admin/cohorts/:id/pause             — kill-switch on (S-12 / #47)
 //   DELETE /admin/cohorts/:id/pause             — kill-switch off
+//   POST   /admin/tokens/revoke                 — per-token kill (S-01 / #46)
+//   DELETE /admin/tokens/revoke/:jti            — un-revoke (typo / restore)
+//   GET    /admin/tokens/revoked                — current revocation list
 
 import { Hono } from "hono";
 import type { Env } from "../env";
@@ -21,10 +24,13 @@ import {
   getActiveSession,
   getCohortPause,
   getRoster,
+  listRevoked,
   pauseCohort,
+  revokeToken,
   setRoster,
   startSession,
   unpauseCohort,
+  unrevokeToken,
   type ActiveSession,
 } from "../lib/kv";
 
@@ -112,6 +118,48 @@ admin.delete("/cohorts/:id/pause", async (c) => {
   const id = c.req.param("id");
   await unpauseCohort(c.env.HPS_KV, id);
   return c.json({ ok: true });
+});
+
+// ---- token revocation (S-01 / #46) -----------------------------------------
+
+// Loose RFC 4122 UUID shape — same regex as storage.ts UUID_RE.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+admin.post("/tokens/revoke", async (c) => {
+  type Body = { jti?: string; reason?: string; cohort?: string; user?: string; exp?: number };
+  const body = (await c.req.json<Body>().catch(() => ({}))) as Body;
+  if (!body.jti || !UUID_RE.test(body.jti)) {
+    return c.json({ error: "jti must be a valid UUID" }, 400);
+  }
+  // TTL: caller passes the token's exp (unix seconds). Default 24h if unknown.
+  const now = Math.floor(Date.now() / 1000);
+  const ttl = typeof body.exp === "number" && body.exp > now
+    ? body.exp - now
+    : 60 * 60 * 24;
+  const rev = await revokeToken(
+    c.env.HPS_KV,
+    body.jti,
+    {
+      reason: typeof body.reason === "string" && body.reason.length <= 200 ? body.reason : undefined,
+      cohort: typeof body.cohort === "string" && body.cohort.length <= 64 ? body.cohort : undefined,
+      user: typeof body.user === "string" && body.user.length <= 64 ? body.user : undefined,
+    },
+    ttl,
+  );
+  return c.json({ ok: true, jti: body.jti, record: rev, ttl_seconds: ttl });
+});
+
+admin.delete("/tokens/revoke/:jti", async (c) => {
+  const jti = c.req.param("jti");
+  if (!UUID_RE.test(jti)) return c.json({ error: "jti must be a valid UUID" }, 400);
+  await unrevokeToken(c.env.HPS_KV, jti);
+  return c.json({ ok: true });
+});
+
+admin.get("/tokens/revoked", async (c) => {
+  const limit = Math.min(Number(c.req.query("limit") ?? 100), 500);
+  const list = await listRevoked(c.env.HPS_KV, { limit });
+  return c.json({ revoked: list, count: list.length });
 });
 
 // ---- roster -----------------------------------------------------------------

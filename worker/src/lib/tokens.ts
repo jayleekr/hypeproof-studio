@@ -1,11 +1,17 @@
 // HMAC-SHA256 signed stateless workshop tokens.
 //
 // v2 payload (JSON, base64url-encoded):
-//   { u: string, c: string, p: string, iat: number, exp: number, v: 2 }
+//   { u: string, c: string, p: string, iat: number, exp: number, jti?: string, v: 2 }
 //
 // Token wire format:  base64url(payload) "." base64url(sig)
 //
 // Rotating HPS_SIGNING_SECRET revokes all outstanding tokens at once.
+//
+// jti (#46 / S-01): per-token UUID. Every token issued after 2026-05-20 has
+// one; older tokens are read-through without it. The Worker checks
+// `KV revoked:<jti>` on every chat request — admin can kill a single token
+// without rotating the global secret. Tokens without jti remain valid until
+// exp (transition window) — but cannot be individually revoked.
 
 export interface TokenPayload {
   u: string;       // user id (cohort-local), e.g. "kid01"
@@ -13,10 +19,11 @@ export interface TokenPayload {
   p: string;       // profile id, e.g. "sk-biopharm-kids-2026-grade-3-4-s1"
   iat: number;     // issued at (unix seconds)
   exp: number;     // expires (unix seconds)
+  jti?: string;    // per-token UUID — present on tokens issued post-S-01
   v: 2;
 }
 
-export type TokenErrorCode = "malformed" | "signature" | "expired" | "version";
+export type TokenErrorCode = "malformed" | "signature" | "expired" | "version" | "revoked";
 
 export class TokenError extends Error {
   code: TokenErrorCode;
@@ -57,21 +64,25 @@ async function sign(payloadBytes: Uint8Array, secret: string): Promise<Uint8Arra
 }
 
 export async function issue(
-  payload: Omit<TokenPayload, "iat" | "exp" | "v">,
+  payload: Omit<TokenPayload, "iat" | "exp" | "v" | "jti">,
   hours: number,
   secret: string,
-): Promise<string> {
+  opts: { jti?: string } = {},
+): Promise<{ token: string; jti: string }> {
   if (!secret || secret.length < 16) throw new TokenError("signing secret too short", "malformed");
   const now = Math.floor(Date.now() / 1000);
+  // crypto.randomUUID is available in Workers + Node 19+ (the issue-token CLI).
+  const jti = opts.jti ?? crypto.randomUUID();
   const full: TokenPayload = {
     ...payload,
     iat: now,
     exp: now + hours * 3600,
+    jti,
     v: 2,
   };
   const payloadBytes = new TextEncoder().encode(canonicalize(full));
   const sig = await sign(payloadBytes, secret);
-  return `${b64uEncode(payloadBytes)}.${b64uEncode(sig)}`;
+  return { token: `${b64uEncode(payloadBytes)}.${b64uEncode(sig)}`, jti };
 }
 
 export async function verify(token: string, secret: string): Promise<TokenPayload> {
@@ -106,9 +117,16 @@ export async function verify(token: string, secret: string): Promise<TokenPayloa
   return p;
 }
 
-// JSON canonicalization — same key order in issue + verify so the signature is reproducible.
+// JSON canonicalization — same key order in issue + verify so the signature is
+// reproducible. jti is appended at the end ONLY when present, so legacy
+// (jti-less) tokens still verify byte-for-byte against their original
+// signature.
 function canonicalize(p: TokenPayload): string {
-  return JSON.stringify({ c: p.c, exp: p.exp, iat: p.iat, p: p.p, u: p.u, v: p.v });
+  const base = { c: p.c, exp: p.exp, iat: p.iat, p: p.p, u: p.u, v: p.v };
+  if (p.jti !== undefined) {
+    return JSON.stringify({ ...base, jti: p.jti });
+  }
+  return JSON.stringify(base);
 }
 
 // Extract Bearer token from an Authorization header value.
