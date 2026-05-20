@@ -878,4 +878,139 @@ const stubProfile = {
   console.log("✓ trace endpoint: auth gates (401/403), validation (400/413), ownership (403 owned/non-owned/cohort), happy 200");
 }
 
+// ---- pending items from docs/TEST-REQUIREMENTS-trace-persistence.md --------
+
+// §2.4 — trialEnd + validationRun endpoint happy paths (was missing; only
+// humanAction exercised the post-ownership dispatch tail).
+{
+  const { trace } = await import("../src/routes/trace.ts");
+  const COHORT = "sk-biopharm-2026-a";
+  const PROFILE = "sk-biopharm-kids-2026-grade-3-4-s1";
+  const USER = "kid01";
+  const startsAt = new Date(Date.now() - 60_000).toISOString();
+  const endsAt   = new Date(Date.now() + 60 * 60_000).toISOString();
+  function mkEnv(overrides = {}) {
+    const dbCalls = [];
+    const kv = new Map([
+      [`cohort:${COHORT}:active_session`,
+        JSON.stringify({ session_id: "sess-1", profile_id: PROFILE,
+                         starts_at: startsAt, ends_at: endsAt })],
+      [`cohort:${COHORT}:roster`,
+        JSON.stringify({ users: [USER], updated_at: new Date().toISOString() })],
+    ]);
+    const trials = overrides.trials ?? { [TRIAL_UUID]: { user_id: USER, cohort_id: COHORT } };
+    return {
+      HPS_SIGNING_SECRET: SECRET,
+      HPS_KV: { async get(k, f) { const v = kv.get(k); return v == null ? null : (f === "json" ? JSON.parse(v) : v); } },
+      HPS_DB: {
+        prepare(sql) {
+          const call = { sql, bindings: null };
+          return {
+            bind(...a) { call.bindings = a; return this; },
+            async run() { dbCalls.push(call); return { success: true }; },
+            async first() {
+              dbCalls.push(call);
+              if (/SELECT user_id, cohort_id FROM trials/.test(call.sql))
+                return trials[call.bindings[0]] ?? null;
+              return null;
+            },
+          };
+        },
+      },
+      HPS_TRACES: { async put() {} },
+      _dbCalls: dbCalls,
+    };
+  }
+  const ctx = { waitUntil: (p) => Promise.resolve(p).catch(() => {}) };
+  const TOKEN = await issue({ u: USER, c: COHORT, p: PROFILE }, 1, SECRET);
+  const auth = `Bearer ${TOKEN}`;
+  async function call(env, body) {
+    return trace.fetch(new Request("https://t/event", {
+      method: "POST", body: JSON.stringify(body),
+      headers: { "content-type": "application/json", authorization: auth },
+    }), env, ctx);
+  }
+
+  // trialEnd happy path
+  {
+    const env = mkEnv();
+    const r = await call(env, { type: "trialEnd", trial_id: TRIAL_UUID });
+    assert.equal(r.status, 200, "trialEnd owned → 200");
+    await new Promise((r) => setTimeout(r, 5));
+    assert.ok(env._dbCalls.some((c) => /UPDATE trials SET ended_at/.test(c.sql)),
+      "endTrial UPDATE fired in waitUntil");
+  }
+  // validationRun happy path
+  {
+    const env = mkEnv();
+    const r = await call(env, {
+      type: "validationRun", trial_id: TRIAL_UUID, outcome: "pass",
+      errors_found: 2, errors_fixed: 1,
+    });
+    assert.equal(r.status, 200, "validationRun owned → 200");
+    await new Promise((r) => setTimeout(r, 5));
+    const ins = env._dbCalls.find((c) => /INSERT INTO validations/.test(c.sql));
+    assert.ok(ins, "validations INSERT fired");
+    // bindings: [id, trial_id, turn_id, outcome, errors_found, errors_fixed]
+    assert.equal(ins.bindings[1], TRIAL_UUID);
+    assert.equal(ins.bindings[3], "pass");
+    assert.equal(ins.bindings[4], 2);
+    assert.equal(ins.bindings[5], 1);
+  }
+  // validationRun ownership 403 (review F#1 — fills the §2.3 pending case)
+  {
+    const env = mkEnv({ trials: {} });
+    const r = await call(env, { type: "validationRun", trial_id: TRIAL_UUID2, outcome: "fail" });
+    assert.equal(r.status, 403, "validationRun non-owned → 403");
+    assert.ok(!env._dbCalls.some((c) => /INSERT INTO validations/.test(c.sql)),
+      "no validations write when ownership fails");
+  }
+  console.log("✓ trace endpoint §2.4: trialEnd + validationRun happy + validationRun ownership 403");
+}
+
+// §4 — profile-snapshot: every registered profile keeps log_user_messages=false
+// (children's-data invariant — the only thing protecting kids data from R2).
+{
+  const { listProfiles } = await import("../src/profiles/index.ts");
+  const all = listProfiles();
+  assert.ok(all.length > 0, "at least one profile registered");
+  for (const p of all) {
+    assert.equal(
+      p.analytics.log_user_messages, false,
+      `profile ${p.id}: log_user_messages MUST default to false until consent + retention policy is in place (#9 policy decision)`,
+    );
+  }
+  console.log(`✓ profiles invariant: all ${all.length} cohorts default log_user_messages=false (kids-safe)`);
+}
+
+// §5 — recordTurn SQL carries ON CONFLICT(trial_id, turn_idx) DO UPDATE
+//      (idempotency for legitimate retries — review A#2 fix).
+{
+  const { recordTurn } = await import("../src/lib/storage.ts");
+  const dbCalls = [];
+  const env = {
+    HPS_DB: {
+      prepare(sql) {
+        const call = { sql, bindings: null };
+        return { bind(...a) { call.bindings = a; return this; },
+                 async run() { dbCalls.push(call); return { success: true }; } };
+      },
+    },
+    HPS_TRACES: { async put() {} },
+  };
+  await recordTurn(env, {
+    trial_id: TRIAL_UUID, turn_idx: 0,
+    prompt_chars: 5, response_chars: 10,
+    tokens_in: 3, tokens_out: 7, latency_ms: 100, model: "m",
+  });
+  const sql = dbCalls[0].sql;
+  assert.match(sql, /INSERT INTO turns/);
+  assert.match(sql, /ON CONFLICT\(trial_id, turn_idx\)/,
+    "ON CONFLICT clause present (review A#2 idempotency)");
+  assert.match(sql, /DO UPDATE SET/, "DO UPDATE present (last-write-wins)");
+  assert.match(sql, /body_ref\s*=\s*COALESCE\(excluded\.body_ref, turns\.body_ref\)/,
+    "body_ref uses COALESCE so retries without body don't blank it");
+  console.log("✓ recordTurn idempotency: ON CONFLICT + COALESCE(body_ref)");
+}
+
 console.log("\nAll smoke tests passed.");
