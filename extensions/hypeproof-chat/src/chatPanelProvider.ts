@@ -240,6 +240,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         return;
       case "previewReady":
         return;
+      case "webviewError":
+        // S-04 (#48). Log to output channel so the trace survives a panel
+        // reload; don't crash the host.
+        console.error(
+          `[hypeproof-chat] webview error: ${msg.message}\n` +
+          `stack:\n${msg.stack}\n` +
+          `componentStack:\n${msg.componentStack}`,
+        );
+        return;
+      // Trace events are forwarded to the worker in a separate path; they
+      // never reach this switch in the current build (#9d, follow-up). Keep
+      // the cases listed so adding the forwarder doesn't break the exhaustive
+      // check below.
+      case "traceTrialStart":
+      case "traceTrialEnd":
+      case "traceValidationRun":
+      case "traceHumanAction":
+        return;
     }
   }
 

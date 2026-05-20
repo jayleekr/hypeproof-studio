@@ -106,6 +106,14 @@ export type WebviewMessage =
       turnId?: string;
       kind: "accept" | "reject" | "edit" | "replace";
       diffChars?: number;
+    }
+  // S-04 (#48): React render-time crash caught by ChatErrorBoundary. Host
+  // logs to output channel so post-incident reconstruction has a trail.
+  | {
+      type: "webviewError";
+      message: string;
+      stack: string;
+      componentStack: string;
     };
 
 // Host → Webview

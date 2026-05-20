@@ -11,8 +11,11 @@ interface Props {
   messages: ChatMessage[];
   streaming: boolean;
   error: string | null;
+  canRetryLast: boolean;
   onSend: (text: string) => void;
   onRetry: (prompt: string) => void;
+  onRetryLast: () => void;
+  onDismissError: () => void;
   onCancel: () => void;
   onClear: () => void;
   onSetToken: () => void;
@@ -196,7 +199,14 @@ export function ChatPanel(props: Props) {
           />
         )}
 
-        {error && <div className="hps-error">{error}</div>}
+        {error && (
+          <ErrorBanner
+            message={error}
+            canRetry={props.canRetryLast}
+            onRetry={props.onRetryLast}
+            onDismiss={props.onDismissError}
+          />
+        )}
       </div>
 
       {rollExpand !== null && (
@@ -552,6 +562,50 @@ function splitFences(content: string): FenceSeg[] {
     out.push({ type: "text", value: content.slice(idx) });
   }
   return out;
+}
+
+function ErrorBanner({
+  message,
+  canRetry,
+  onRetry,
+  onDismiss,
+}: {
+  message: string;
+  canRetry: boolean;
+  onRetry: () => void;
+  onDismiss: () => void;
+}) {
+  // Spot common transport-layer signals so the framing is honest about the
+  // recovery path. We don't try to classify perfectly — just enough to pick
+  // between "연결 끊김" (worth retrying) and "토큰/세션 문제" (강사에게).
+  const isAuth = /토큰|세션|강사|만료|등록|인가/.test(message);
+  const isConn = /연결|네트워크|시간|타임아웃|중단|stream|interrupt|abort/i.test(message);
+  const icon = isAuth ? "🔒" : isConn ? "🔌" : "⚠️";
+  const title = isAuth ? "잠시 멈춰요" : isConn ? "연결이 끊겼어요" : "문제가 생겼어요";
+
+  return (
+    <div className="hps-error-banner" role="alert">
+      <div className="hps-error-banner-icon">{icon}</div>
+      <div className="hps-error-banner-body">
+        <div className="hps-error-banner-title">{title}</div>
+        <div className="hps-error-banner-msg">{message}</div>
+      </div>
+      <div className="hps-error-banner-actions">
+        {canRetry && (
+          <button className="hps-error-banner-retry" onClick={onRetry}>
+            다시 보내기
+          </button>
+        )}
+        <button
+          className="hps-error-banner-dismiss"
+          onClick={onDismiss}
+          title="이 메시지 숨기기 (대화는 계속할 수 있어요)"
+        >
+          닫기
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function RollExpandHint({
