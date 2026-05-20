@@ -1,18 +1,22 @@
-# Runbook — 보아치과 HypeProof 티저 (2026-05-26, D-day)
+# Runbook — 보아치과 HypeProof 티저 세션 (2026-05-26, D-day)
 
-운영자(비-Jay)가 당일 그대로 따라가는 단일 런북. 빌드/릴리스 메커니즘은
+강사·보조강사(비-Jay)가 당일 그대로 따라가는 단일 런북. 빌드/릴리스 메커니즘은
 [RELEASE-CHECKLIST.md](./RELEASE-CHECKLIST.md) · [../worker/DEPLOY.md](../worker/DEPLOY.md)
 가 진실 소스 — 여기선 **이 행사 고유의 절차만**. 중복 금지.
 
+용어: 본 행사는 **티저 세션**(≠ 워크숍). "워크숍"이라는 단어는 *SK바이오팜 가족 워크숍 (8h)*
+한정 — 혼동 금지. "참가자" = 보아치과측 청중(직접 Studio 써보는 사람들), "강사·보조강사" =
+HypeProof 측 6명(런북 실행, 강의 진행).
+
 | | |
 |---|---|
-| 행사 | 보아치과 HypeProof 티저 (성인, ~3h) |
+| 행사 | 보아치과 HypeProof 티저 세션 (성인, ~3h) |
 | D-day | 2026-05-26 |
 | cohort | `boah-dental-2026-a` |
 | profile | `boah-dental-teaser-2026-s1` |
 
 ## 0. 누가 / 무엇을
-운영자가 실행. 빌드는 안 함 — 프리빌드 `.app`을 받음 (Phase 5 빌드는 Jay, 5/23 — #18).
+강사·보조강사 6명이 실행. 빌드는 안 함 — 프리빌드 `.app`을 받음 (Phase 5 빌드는 Jay 완료 — #18).
 
 ## 1. 선행 조건 (D-1까지 확인)
 - [ ] SaaS 라이브: `curl -s https://api.hypeproof-ai.xyz/v1/health` → `{"ok":true,...}`
@@ -37,7 +41,7 @@ BASE_URL=https://api.hypeproof-ai.xyz \
 한국어 응답까지 한 번에 검증 — #14.) FAIL이면 §5.
 
 ## 3. 토큰 배포
-참가자 1인 1토큰. 운영자 머신에서:
+참가자 1인 1토큰. 강사 머신에서:
 ```bash
 cd worker
 HPS_SIGNING_SECRET=<prod와 동일> node --experimental-strip-types \
@@ -52,7 +56,7 @@ HPS_SIGNING_SECRET=<prod와 동일> node --experimental-strip-types \
 1. 참가자 설치 (원라이너):
    `curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh | bash`
    (현재 빌드 디폴트가 이미 `api.hypeproof-ai.xyz/v1` — proxyUrl 수동설정 불필요)
-2. roster 등록 + 수업 세션 오픈 (운영자, admin):
+2. roster 등록 + 티저 세션 오픈 (강사, admin):
    ```bash
    AUTH=$(printf ':%s' "<HPS_ADMIN_PASSWORD>" | base64)
    curl -fsS -X POST https://api.hypeproof-ai.xyz/admin/cohorts/boah-dental-2026-a/roster \
