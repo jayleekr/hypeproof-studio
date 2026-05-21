@@ -76,10 +76,93 @@
 <script>
 const $ = (id) => document.getElementById(id);
 
+// --- token paste normalization (issue #65) ----------------------------------
+// People paste from JSON dumps, Discord mobile, KakaoTalk — all of which leak
+// surrounding `"..."`, trailing `,`, embedded `\n`/`\r`, or zero-width chars.
+// Tokens are unbroken base64url payloads (`A-Z a-z 0-9 _ -`) with a single
+// `.` separator. We strip everything else BEFORE talking to the server, so
+// a near-miss paste doesn't burn a network round-trip into a confusing 401.
+const TOKEN_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+function sanitizeToken(raw) {
+  if (typeof raw !== "string") return "";
+  let s = raw;
+  // Strip ALL whitespace (incl. embedded \n\r\t and unicode space variants).
+  s = s.replace(/\s+/g, "");
+  // Strip zero-width / BOM / formatting chars that some clipboards inject.
+  s = s.replace(/[​-‍﻿⁠]/g, "");
+  // Trim surrounding JSON-ish syntax chars repeatedly until none remain.
+  // Handles: `"eyJ..."`, `"eyJ...",`, `{"eyJ..."}`, `[ "eyJ..." ]`, etc.
+  for (let i = 0; i < 8; i++) {
+    const before = s;
+    s = s.replace(/^["'`,\[\]\{\}\s]+/, "").replace(/["'`,\[\]\{\}\s]+$/, "");
+    if (s === before) break;
+  }
+  return s;
+}
+
+// Server errors come back as one human-ish string. Map known phrases to
+// actionable Korean. Unknown errors pass through as `알 수 없는 오류: <raw>`.
+function mapServerError(raw) {
+  const e = String(raw || "").toLowerCase();
+  if (e.includes("invalid signature") || e.includes("signature mismatch")) {
+    return "토큰이 손상되었거나 잘못 복사된 것 같아요. 양 끝에 따옴표(\") · 콤마(,) · 공백이 없는지 확인해주세요. 그래도 안 되면 Jay에게 재발급 요청.";
+  }
+  if (e.includes("malformed") || e.includes("missing required fields")) {
+    return "토큰 형식이 잘못됐어요. eyJj... 로 시작하는 한 줄 문자열이어야 합니다. (가운데 점 1개 포함)";
+  }
+  if (e.includes("expired")) {
+    return "토큰 유효기간이 만료됐어요. Jay에게 재발급 요청해주세요.";
+  }
+  if (e.includes("revoked")) {
+    return "이 토큰은 무효화됐어요. Jay에게 새 토큰 요청해주세요.";
+  }
+  if (e.includes("not an issuer")) {
+    return "본인 토큰이 issuer 토큰이 아니에요. 학생 토큰을 잘못 붙여넣으신 듯해요. Jay에게 받은 강사 토큰을 사용해주세요.";
+  }
+  if (e.includes("not scoped")) {
+    return "본인이 발급 권한 없는 cohort/profile 조합이에요. cohort/profile 이름 오타가 없는지 확인하고, 그래도 안 되면 단톡방 문의.";
+  }
+  if (e.includes("exceeds scope max")) {
+    return "본인 최대 발급 시간을 초과했어요. 위의 hours 칸을 줄여주세요 (보통 12시간 이하).";
+  }
+  if (e.includes("unsupported token version")) {
+    return "토큰 버전이 안 맞아요. 오래된 토큰일 수 있어요 — Jay에게 재발급 요청.";
+  }
+  if (e.includes("u (user handle) required") || e.includes("c (cohort) required") || e.includes("p (profile) required")) {
+    return "학생 정보(handle/cohort/profile)를 다시 확인해주세요.";
+  }
+  if (e.includes("hours must be")) {
+    return "hours 는 1 이상 1440 (60일) 이하 숫자여야 해요.";
+  }
+  return "알 수 없는 오류: " + raw + " — 같은 오류 반복되면 Jay에게 신고 부탁드려요.";
+}
+
+// Minimal HTML escape — error strings can echo user input.
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Persist issuer in sessionStorage (cleared on tab close). NEVER localStorage.
 const ISSUER_KEY = "hps_issuer_token";
 const saved = sessionStorage.getItem(ISSUER_KEY);
 if (saved) $("issuer").value = saved;
+
+// Auto-sanitize on paste/blur so users see the cleaned-up value immediately.
+$("issuer").addEventListener("blur", () => {
+  const cleaned = sanitizeToken($("issuer").value);
+  if (cleaned !== $("issuer").value) $("issuer").value = cleaned;
+});
+$("issuer").addEventListener("paste", () => {
+  // setTimeout 0 — let the paste land first, then sanitize.
+  setTimeout(() => {
+    $("issuer").value = sanitizeToken($("issuer").value);
+  }, 0);
+});
 
 $("forget").onclick = () => {
   sessionStorage.removeItem(ISSUER_KEY);
@@ -88,7 +171,8 @@ $("forget").onclick = () => {
 };
 
 $("mint").onclick = async () => {
-  const issuer = $("issuer").value.trim();
+  const issuer = sanitizeToken($("issuer").value);
+  $("issuer").value = issuer; // reflect cleaned value back to the user
   const u = $("u").value.trim();
   const c = $("c").value.trim();
   const p = $("p").value.trim();
@@ -96,9 +180,22 @@ $("mint").onclick = async () => {
   const result = $("result");
   result.innerHTML = "";
 
-  if (!issuer) return (result.innerHTML = '<div class="err">issuer 토큰을 입력해주세요.</div>');
-  if (!u || !c || !p) return (result.innerHTML = '<div class="err">student handle / cohort / profile 모두 필요합니다.</div>');
-  if (!hours || hours < 1 || hours > 1440) return (result.innerHTML = '<div class="err">hours 는 1..1440 사이여야 합니다.</div>');
+  // Pre-flight: catch obvious paste corruption BEFORE network — server's
+  // "invalid signature" is unhelpful for users who can't read the cause.
+  if (!issuer) {
+    return (result.innerHTML = '<div class="err">issuer 토큰을 입력해주세요.</div>');
+  }
+  if (!TOKEN_SHAPE.test(issuer)) {
+    return (result.innerHTML =
+      '<div class="err">토큰 형식이 잘못됐어요. eyJj... 로 시작하고 가운데 점(.)이 1개 있는 한 줄 문자열이어야 합니다.<br>' +
+      '받으신 메시지에서 따옴표나 콤마 같은 글자 없이 토큰만 정확히 복사했는지 확인해주세요.</div>');
+  }
+  if (!u || !c || !p) {
+    return (result.innerHTML = '<div class="err">student handle / cohort / profile 모두 필요합니다.</div>');
+  }
+  if (!hours || hours < 1 || hours > 1440) {
+    return (result.innerHTML = '<div class="err">hours 는 1..1440 사이여야 합니다.</div>');
+  }
 
   $("mint").disabled = true;
   $("mint").textContent = "발급 중…";
@@ -113,7 +210,12 @@ $("mint").onclick = async () => {
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      result.innerHTML = '<div class="err">' + (body.error || ("HTTP " + res.status)) + '</div>';
+      const rawError = body.error || ("HTTP " + res.status);
+      const friendly = mapServerError(rawError);
+      result.innerHTML =
+        '<div class="err">' + esc(friendly) +
+        '<div class="help" style="margin-top:8px;opacity:0.7">원본 오류: ' + esc(rawError) + '</div>' +
+        '</div>';
       return;
     }
     // Save issuer for the rest of the session
@@ -121,18 +223,25 @@ $("mint").onclick = async () => {
     const expISO = new Date(body.exp * 1000).toLocaleString();
     result.innerHTML =
       '<div class="out">' +
-      '<h3>✓ 발급 완료 — ' + u + ' (' + c + ')</h3>' +
-      '<div class="token" id="tok">' + body.token + '</div>' +
-      '<div class="meta">jti: ' + body.jti + ' · 만료: ' + expISO + ' · 유효: ' + hours + 'h</div>' +
+      '<h3>✓ 발급 완료 — ' + esc(u) + ' (' + esc(c) + ')</h3>' +
+      '<div class="token" id="tok">' + esc(body.token) + '</div>' +
+      '<div class="meta">jti: ' + esc(body.jti) + ' · 만료: ' + esc(expISO) + ' · 유효: ' + esc(String(hours)) + 'h</div>' +
       '<button onclick="navigator.clipboard.writeText(document.getElementById(\'tok\').textContent);this.textContent=\'복사됨 ✓\'">토큰 복사</button>' +
       '</div>';
   } catch (err) {
-    result.innerHTML = '<div class="err">네트워크 오류: ' + err + '</div>';
+    result.innerHTML = '<div class="err">네트워크 오류: ' + esc(String(err)) + '</div>';
   } finally {
     $("mint").disabled = false;
     $("mint").textContent = "발급 →";
   }
 };
+
+// Expose for tests (only when running in a Node test harness — window is
+// undefined there).
+if (typeof window === "undefined") {
+  // eslint-disable-next-line no-undef
+  (globalThis).__issuerPageHelpers = { sanitizeToken, mapServerError, TOKEN_SHAPE };
+}
 </script>
 </body>
 </html>
