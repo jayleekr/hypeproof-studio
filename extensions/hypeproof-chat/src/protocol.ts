@@ -16,6 +16,18 @@ export interface ChatConfig {
   hasToken: boolean;
   coach: CoachInfo;
   profile: ResolvedProfile | null;
+  update?: UpdateOffer | null;             // #72 — auto-update banner state
+}
+
+/**
+ * Update offer surfaced in the chat panel via a banner (#72). Host computes
+ * + pushes; webview only renders + can ask host to install/dismiss.
+ */
+export interface UpdateOffer {
+  version: string;          // "0.1.2"
+  notes: string;            // markdown — webview renders as plain text for now
+  releaseUrl: string;
+  sizeBytes: number;
 }
 
 export interface CoachInfo {
@@ -83,6 +95,8 @@ export type WebviewMessage =
   | { type: "openSettings" }
   | { type: "setToken" }
   | { type: "openReportModal" }            // #64: user clicked 🚨 on error banner
+  | { type: "installUpdate" }              // #72: user clicked "Install Now" on update banner
+  | { type: "dismissUpdate"; version: string }  // #72: user clicked "Later" — silence for 7d
   | { type: "clearHistory" }
   | { type: "namingRitual" }
   | { type: "saveCoach"; name: string; personality: string }

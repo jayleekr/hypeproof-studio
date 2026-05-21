@@ -3,6 +3,7 @@ import type {
   ChatConfig,
   ChatMessage,
   SuggestionChip,
+  UpdateOffer,
   UxConfig,
 } from "../../src/protocol";
 
@@ -25,6 +26,8 @@ interface Props {
   onNamingRitual: () => void;
   onSaveCoach: (name: string, personality: string) => void;
   onReportProblem: () => void;                          // #64
+  onInstallUpdate: () => void;                          // #72
+  onDismissUpdate: (version: string) => void;           // #72
 }
 
 function extractRenderableHtml(text: string): string | null {
@@ -166,6 +169,14 @@ export function ChatPanel(props: Props) {
           <button onClick={props.onSettings} title="Open settings">⚙</button>
         </div>
       </header>
+
+      {config?.update && (
+        <UpdateBanner
+          offer={config.update}
+          onInstall={props.onInstallUpdate}
+          onDismiss={props.onDismissUpdate}
+        />
+      )}
 
       <div className="hps-messages" ref={scrollRef}>
         {messages.length === 0 && (
@@ -660,4 +671,61 @@ function renderInlineMd(md: string): string {
     .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
     .replace(/\*([^*]+)\*/g, "<em>$1</em>")
     .replace(/`([^`]+)`/g, "<code>$1</code>");
+}
+
+// #72: in-app update banner. Sits between header and message list. Compact
+// (kid-friendly UX shouldn't be dominated by an update card), with the full
+// release notes hidden behind a "자세히" toggle to keep visual noise low.
+function UpdateBanner({
+  offer,
+  onInstall,
+  onDismiss,
+}: {
+  offer: UpdateOffer;
+  onInstall: () => void;
+  onDismiss: (version: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const sizeMb = offer.sizeBytes > 0 ? (offer.sizeBytes / 1024 / 1024).toFixed(0) + " MB" : "";
+
+  return (
+    <div className="hps-update-banner" role="status">
+      <div className="hps-update-banner-icon">⬆️</div>
+      <div className="hps-update-banner-body">
+        <div className="hps-update-banner-title">
+          새 버전 v{offer.version} 나왔어요{sizeMb ? ` · ${sizeMb}` : ""}
+        </div>
+        <div className="hps-update-banner-sub">
+          업데이트하면 자동으로 재시작됩니다. 작업 중인 내용은 미리 저장해주세요.
+        </div>
+        {expanded && offer.notes && (
+          <pre className="hps-update-banner-notes">{offer.notes}</pre>
+        )}
+        {offer.notes && (
+          <button
+            className="hps-update-banner-toggle"
+            onClick={() => setExpanded(!expanded)}
+          >
+            {expanded ? "접기" : "자세히 보기"}
+          </button>
+        )}
+      </div>
+      <div className="hps-update-banner-actions">
+        <button
+          className="hps-update-banner-install"
+          onClick={onInstall}
+          title={`v${offer.version} 다운로드 + 자동 적용`}
+        >
+          업데이트
+        </button>
+        <button
+          className="hps-update-banner-dismiss"
+          onClick={() => onDismiss(offer.version)}
+          title="이 버전은 7일 동안 다시 묻지 않음"
+        >
+          나중에
+        </button>
+      </div>
+    </div>
+  );
 }

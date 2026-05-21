@@ -50,7 +50,7 @@ export interface ReportProblemDeps {
   getRecentTurns: () => ChatMessage[];
 }
 
-const REPORT_VERSION = "0.1.1"; // hypeproof-chat extension version (matches package.json)
+const REPORT_VERSION = "0.1.2"; // hypeproof-chat extension version (matches package.json)
 
 interface SubmitResult {
   ok: true;

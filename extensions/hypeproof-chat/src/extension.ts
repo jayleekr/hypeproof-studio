@@ -5,6 +5,13 @@ import * as os from "os";
 import { ChatPanelProvider } from "./chatPanelProvider";
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
+import {
+  scheduleUpdateChecks,
+  checkForUpdates,
+  runUpdate,
+  dismissVersion,
+  currentBundleVersion,
+} from "./updateChecker";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
@@ -102,6 +109,71 @@ export async function activate(context: vscode.ExtensionContext) {
         getProfileId: () => provider.getProfileId(),
         getRecentTurns: () => provider.getHistorySnapshot(),
       });
+    }),
+
+    // #72: auto-update commands. The banner in the chat panel calls
+    // installUpdate via the openInstallUpdate webview message → provider →
+    // here. checkForUpdates is also exposed as a command so the user can
+    // manually trigger a check (Cmd+Shift+P).
+    vscode.commands.registerCommand("hypeproof-chat.checkForUpdates", async () => {
+      const current = currentBundleVersion();
+      const info = await checkForUpdates(current);
+      if (info.available) {
+        provider.setAvailableUpdate({
+          version: info.version,
+          notes: info.notes,
+          releaseUrl: info.releaseUrl,
+          sizeBytes: info.sizeBytes,
+        });
+        vscode.window.showInformationMessage(
+          `새 버전 v${info.version} 발견. 채팅 패널 상단의 배너에서 설치할 수 있어요.`,
+        );
+      } else {
+        provider.setAvailableUpdate(null);
+        vscode.window.showInformationMessage(`현재 v${current} — 최신 버전입니다.`);
+      }
+    }),
+
+    vscode.commands.registerCommand("hypeproof-chat.installUpdate", async () => {
+      // Re-fetch to be safe (the stored banner state might be stale).
+      const current = currentBundleVersion();
+      const info = await checkForUpdates(current);
+      if (!info.available) {
+        provider.setAvailableUpdate(null);
+        vscode.window.showInformationMessage("최신 버전이라 업데이트 안 해도 됩니다.");
+        return;
+      }
+      await runUpdate(info, {
+        context,
+        onUpdateScheduled: () => provider.setAvailableUpdate(null),
+      });
+    }),
+
+    vscode.commands.registerCommand("hypeproof-chat.dismissUpdate", async (version: string) => {
+      if (typeof version !== "string" || !version) return;
+      await dismissVersion(context, version);
+      provider.setAvailableUpdate(null);
+    }),
+  );
+
+  // #72: kick off background update checks. Scheduler is disposable so we
+  // attach it to the extension lifecycle.
+  context.subscriptions.push(
+    scheduleUpdateChecks({
+      context,
+      currentVersion: currentBundleVersion(),
+      pushUpdateBanner: (info) => {
+        if (!info) {
+          provider.setAvailableUpdate(null);
+          return;
+        }
+        provider.setAvailableUpdate({
+          version: info.version,
+          notes: info.notes,
+          releaseUrl: info.releaseUrl,
+          sizeBytes: info.sizeBytes,
+        });
+      },
     }),
   );
 
