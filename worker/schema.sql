@@ -105,3 +105,28 @@ CREATE TABLE IF NOT EXISTS human_actions (
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_human_actions_trial ON human_actions(trial_id);
+
+-- ====================================================================
+-- In-app bug reports (#64): POST /v1/report → D1 + Discord webhook.
+-- Discord-first triage; admin resolution may link to a GitHub issue.
+-- Anonymous flow supported (jti_hash nullable for the "I can't even auth" case).
+-- ts is unix seconds (vs ISO8601 elsewhere) — easier for ordering + TTL math
+-- against the rate-limit KV. attachments_json holds version/OS/etc as opaque
+-- JSON so we can evolve the auto-attached metadata blob without DDL.
+-- ====================================================================
+
+CREATE TABLE IF NOT EXISTS reports (
+  id TEXT PRIMARY KEY,           -- "rep_<base32>"
+  ts INTEGER NOT NULL,           -- unix seconds, created at
+  jti_hash TEXT,                 -- sha256(jti)[:16], nullable for anon
+  profile_id TEXT,
+  request_id TEXT,               -- correlates with PR #49 request_id middleware
+  description TEXT NOT NULL,
+  attachments_json TEXT,         -- JSON-encoded metadata blob (version, OS, etc)
+  contact TEXT,
+  status TEXT NOT NULL DEFAULT 'open',  -- 'open' | 'resolved'
+  resolved_at INTEGER,
+  resolution_note TEXT,
+  github_issue_url TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_reports_status_ts ON reports(status, ts DESC);

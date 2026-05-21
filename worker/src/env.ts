@@ -19,6 +19,10 @@ export interface Env {
   // proxy (e.g. hypeproof-sediment Fly NRT) when CF anycast egress hits an
   // Anthropic-blocked region (HK). Leave unset to call api.anthropic.com.
   ANTHROPIC_PROXY_URL?: string;
+  // Discord webhook for in-app bug reports (#64). When set, POST /v1/report
+  // best-effort fans a formatted embed into the #hypeproof-studio channel.
+  // Unset → reports still persist to D1; only the side-effect is skipped.
+  DISCORD_REPORT_WEBHOOK_URL?: string;
 
   // Bindings
   HPS_KV: KVNamespace;
