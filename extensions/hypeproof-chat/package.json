@@ -51,6 +51,10 @@
       {
         "command": "hypeproof-chat.renameCoach",
         "title": "HypeProof Chat: 코치 이름 다시 짓기"
+      },
+      {
+        "command": "hypeproof-chat.reportProblem",
+        "title": "HypeProof Chat: 문제 신고하기"
       }
     ],
     "configuration": {

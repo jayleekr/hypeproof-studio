@@ -155,6 +155,7 @@ export function App() {
         onSaveCoach={(name, personality) =>
           postToHost({ type: "saveCoach", name, personality })
         }
+        onReportProblem={() => postToHost({ type: "openReportModal" })}
       />
     </ChatErrorBoundary>
   );

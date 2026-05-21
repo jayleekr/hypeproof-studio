@@ -82,6 +82,7 @@ export type WebviewMessage =
   | { type: "requestAction"; action: ActionRequest }
   | { type: "openSettings" }
   | { type: "setToken" }
+  | { type: "openReportModal" }            // #64: user clicked 🚨 on error banner
   | { type: "clearHistory" }
   | { type: "namingRitual" }
   | { type: "saveCoach"; name: string; personality: string }
