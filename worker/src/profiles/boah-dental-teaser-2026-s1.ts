@@ -2,18 +2,29 @@ import type { Profile } from "./types";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import systemPromptMd from "../prompts/boah-dental-teaser-2026-s1.md";
 
-// 보아치과 HypeProof 티저 (2026-05-26, D-7 강의). 단발 ~3h 체험 세션.
+// 보아치과 HypeProof 티저 (2026-05-26). 단발 ~60–90분 체험 세션.
 //
-// #13: 4-principle experiential curriculum applied. The teaser embodies four
-// essences (authoritative mapping vs docs/essence-v0.1.md):
-//   전심전력 → Essence 2 · 만족유예 → Essence 4 ·
-//   잇기가설 → Essence 6 · 역목표 → Essence 11
-// → essences_focus = [2, 4, 6, 11]; system prompt rewritten experiential;
-//   follow-up suggestions nudge 만족유예/역목표/잇기.
-// Skeleton: intentionally unchanged — the 4 principles are taught via prompt +
-// UX (not a bespoke dental skeleton); keeps scope tight + skeleton contract
-// test green. Assumptions still flagged for curriculum review (봉호): adult
-// audience, single session, publishing disabled, template_tier reuses tier.
+// #77: dental supersearch curriculum v4 applied (replaces #13 4-principle
+// game frame). The teaser is now a "원장님을 이겨라!" 해커톤 — 직원이
+// 치과 지식 슈퍼서치엔진 V1을 만들고 원장님이 PASS/더 확인/위험으로 판정 →
+// 깨진 이유가 병원 검색 규칙으로 저장. v3 게임 만들기 프레임은 폐기.
+//
+// 7 AI Native Assets → Essence 매핑 (vs docs/essence-v0.1.md):
+//   Intent Clarity     → Essence 7  (질문으로 공터 만들기)
+//   Context Design     → Essence 2  (전심전력)
+//   Delegation Judgment→ Essence 12 (수행과 위임의 역전)
+//   Iteration Reflex   → Essence 9  (백 번 뽑아보기)
+//   Verification Reflex→ Essence 11 (역목표 설계)
+//   Taste              → Essence 13 (추상의 사다리)
+//   Ownership          → Essence 14 (언러닝)
+// → essences_focus = [2, 7, 9, 11, 12, 13, 14].
+//
+// game.template_tier: v4 산출물은 검색 웹앱이지 게임이 아니다. 현 schema에
+// "search-webapp" tier가 없어 kids-basic을 placeholder로 유지; 라이브 프리뷰는
+// 검색 웹앱 빌드 흐름에서도 동일하게 동작. tier 추가는 별개 작업 (스키마 진화
+// = #63 per-cohort segmentation과 함께).
+// Source: JinyongShin/hypeproof_kids_edu PR #11
+// (kids_edu_vault/wiki/specs/track-b/dental-supersearch-curriculum-v4.md).
 export const profile: Profile = {
   id: "boah-dental-teaser-2026-s1",
   version: 1,
@@ -29,11 +40,11 @@ export const profile: Profile = {
   },
   system_prompt: systemPromptMd as unknown as string,
   welcome: {
-    greeting_md: "안녕하세요! 오늘은 직접 말로 지시해서 작은 게임을 함께 만들어봐요 🎮",
+    greeting_md: "안녕하세요! 오늘은 **치과 지식 슈퍼서치엔진**을 함께 만들어요 🔍\n마지막엔 **원장님을 이겨봅니다.**",
     example_prompts: [
-      "공이 좌우로 움직이는 화면 만들어줘",
-      "별이 떨어지고 클릭하면 점수가 오르는 게임",
-      "캐릭터가 장애물을 피하는 게임 만들어줘",
+      "환자가 임플란트 후 운동 언제부터 되냐고 자주 물어봐요 — 답변 근거 찾기",
+      "리뷰 답글 톤이 매번 다른데 우리 병원 표준 표현으로 정리하고 싶어요",
+      "스케일링 후 주의사항 안내문 — 공식 학회 자료 기반으로 정리",
     ],
   },
   sandbox: {
@@ -47,7 +58,8 @@ export const profile: Profile = {
     auto_start: true,
   },
   game: {
-    // 현재 유일 tier. 치과 티저 전용 스켈레톤이 필요하면 #13/커리큘럼에서 결정.
+    // v4는 검색 웹앱 산출물 — schema에 search-webapp tier 추가 전까지 kids-basic을
+    // placeholder로. 라이브 프리뷰는 검색 웹앱 흐름에서도 동일하게 동작.
     template_tier: "kids-basic",
   },
   publishing: {
@@ -55,9 +67,8 @@ export const profile: Profile = {
     enabled: false,
     strategy: "local_only",
   },
-  // 4원칙 ↔ essence (vs docs/essence-v0.1.md): 전심전력=2 · 만족유예=4 ·
-  // 잇기가설=6 · 역목표=11.
-  essences_focus: [2, 4, 6, 11],
+  // 7 AI Native Assets ↔ essence (위 헤더 매핑 표 참조).
+  essences_focus: [2, 7, 9, 11, 12, 13, 14],
   session: {
     cohort_id: "boah-dental-2026-a",
     series_total: 1,
@@ -78,31 +89,36 @@ export const profile: Profile = {
       revisit_on_entry: false,
     },
     suggestions: {
+      // 직군별 실 검색 문제 — 자기 업무에서 반복·헷갈림·확인필요한 것.
+      // weak 칩으로 막연한 입력의 모양을 *대비*로 보여준다 (Intent Clarity 학습).
       initial: [
-        { text: "공이 좌우로 움직이는 화면 만들어줘", style: "good" },
-        { text: "별이 떨어지고 클릭하면 점수가 오르는 게임", style: "good" },
-        { text: "캐릭터가 장애물을 피하는 게임 만들어줘", style: "good" },
-        { text: "재밌게 만들어줘", style: "weak", caption: "무엇이 재밌어야 할지 알 수 없어요. 더 구체적으로!" },
+        { text: "환자가 임플란트 후 운동 언제부터 되냐고 자주 물어봐요 — 답변 근거 찾기", style: "good", caption: "위생사" },
+        { text: "스케일링 후 주의사항 안내문 — 공식 학회 자료 기반으로 정리", style: "good", caption: "위생사" },
+        { text: "리뷰 답글 톤이 매번 다른데 우리 병원 표준 표현으로 정리하고 싶어요", style: "good", caption: "코디" },
+        { text: "임플란트 신제품 후보 3개 비교 — 우리 케이스에 맞는 기준으로", style: "good", caption: "사모님" },
+        { text: "치과 관련 질문 답해줘", style: "weak", caption: "어떤 결정에 쓸지 모르면 검색이 안 잡혀요." },
       ],
+      // 5블록 흐름의 다음 한 수 — 7 AI Native Assets 행동을 *하게* 만든다.
       follow_up: [
-        // 4원칙 체험형 넛지: 만족유예(4) · 역목표(11) · 잇기(6) · 전심전력(2)
-        { text: "더 좋아질 수 있을 것 같아 — 한 번 더 밀어붙여줘", style: "good", caption: "만족 유예: 적정선까지 더 추궁" },
-        { text: "이걸 일부러 재미없게 만드는 방법을 보여줘", style: "good", caption: "역목표: 약점을 드러내기" },
-        { text: "내가 잘 모르는 부분은 네가 가설로 이어줘", style: "good", caption: "잇기: 못 해도 모델은 잇는다" },
-        { text: "색을 더 밝고 선명하게 바꿔줘", style: "good" },
-        { text: "소리 효과를 추가해줘", style: "good" },
+        { text: "이걸 무슨 결정에 쓸지 한 줄로 다시 써줘", style: "good", caption: "Intent Clarity (E7)" },
+        { text: "환자군·상황·금지표현·판단 기준을 처음부터 풀로 적어줘", style: "good", caption: "Context Design (E2)" },
+        { text: "검색어를 한국어·영어·전문용어 3가지로 변주해줘", style: "good", caption: "Iteration Reflex (E9)" },
+        { text: "이 검색을 *틀리게* 만드는 가장 확실한 방법은?", style: "good", caption: "Verification Reflex (E11)" },
+        { text: "환자용 / 내부용 / 원장님 컨펌용 표현으로 각각 한 줄씩", style: "good", caption: "Taste (E13)" },
+        { text: "방금 깨진 이유를 다음 검색에 자동 적용될 규칙으로 저장해줘", style: "good", caption: "Ownership (E14)" },
+        { text: "이건 AI가 결론 내릴 일이 아닌 것 같아 — 원장님께 물어볼 질문으로 바꿔줘", style: "good", caption: "Delegation Judgment (E12)" },
       ],
     },
     hints: {
       short_input: {
         enabled: true,
         min_chars: 5,
-        message_md: "💭 조금 더 구체적으로 알려주세요 — *주인공·움직임·점수* 중 하나라도요",
+        message_md: "💭 조금 더 구체적으로 — *환자가 묻는 것·내가 헷갈리는 것·확인 필요한 결정* 중 하나라도요",
       },
       roll_input_button: {
         enabled: true,
-        label: "✨ 한 번 더 떠올려보기",
-        probe_md: "좋아요! 한 가지만 더 — 캐릭터 모양? 색? 점수 규칙?",
+        label: "✨ 한 번 더 다듬어보기",
+        probe_md: "좋아요! 한 가지만 더 — 이 검색이 도와야 하는 *결정*은 뭔가요?",
       },
     },
     retry_button: {
