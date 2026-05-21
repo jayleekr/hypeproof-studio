@@ -983,6 +983,61 @@ const stubProfile = {
   console.log(`✓ profiles invariant: all ${all.length} cohorts default log_user_messages=false (kids-safe)`);
 }
 
+// §4b — boah-dental v4 supersearch contract (issue #79 — internal shape that
+// the API doesn't expose; verified here instead of e2e).
+{
+  const { profile: dental } = await import("../src/profiles/boah-dental-teaser-2026-s1.ts");
+  // T1.A.1 — essences_focus exact set + order (one Essence per AI Native Asset).
+  assert.deepEqual(
+    dental.essences_focus, [2, 7, 9, 11, 12, 13, 14],
+    `boah-dental essences_focus must be [2,7,9,11,12,13,14] (7 AI Native Assets — Intent/Context/Delegation/Iteration/Verification/Taste/Ownership)`,
+  );
+  // T1.A.3 — audience: adult Korean, no parent_coaching.
+  assert.equal(dental.audience.language, "ko");
+  assert.equal(dental.audience.parent_coaching, false);
+  // T1.A.4 — greeting contract.
+  assert.match(dental.welcome.greeting_md, /슈퍼서치엔진/);
+  assert.match(dental.welcome.greeting_md, /원장님을 이겨/);
+  // T1.A.6 — initial chip count + weak chip.
+  assert.equal(dental.ux.suggestions.initial.length, 5);
+  const weak = dental.ux.suggestions.initial.filter(c => c.style === "weak");
+  assert.equal(weak.length, 1, "exactly one weak chip");
+  assert.equal(weak[0].text, "치과 관련 질문 답해줘");
+  // T1.A.8 — role coverage in initial captions.
+  const initCaps = dental.ux.suggestions.initial
+    .filter(c => c.style === "good").map(c => c.caption ?? "").join(" ");
+  for (const role of ["위생사", "코디", "사모님"]) {
+    assert.ok(initCaps.includes(role), `initial good captions must reference role ${role} (got: ${initCaps})`);
+  }
+  // T1.A.9 + 11 — follow_up: 7 chips, one per AI Native Asset, captions carry E#.
+  assert.equal(dental.ux.suggestions.follow_up.length, 7);
+  const re = /E(2|7|9|11|12|13|14)\b/;
+  const eSeen = new Set();
+  for (const chip of dental.ux.suggestions.follow_up) {
+    const m = (chip.caption ?? "").match(re);
+    assert.ok(m, `follow_up chip caption must reference an essence (got: ${chip.caption})`);
+    eSeen.add(m[1]);
+  }
+  assert.equal(eSeen.size, 7, "follow_up captions must cover all 7 Essence numbers without dup");
+  // T1.A.12/13 — hint copy is decision-shaped, no game vestige.
+  // Note: bare /색/ would false-match inside "검색" (search). The game-palette
+  // tokens we actually want to ban are 색상|색깔|색을 + 점수|캐릭터|주인공|모양만.
+  const GAME_VESTIGE = /캐릭터|주인공|점수|색상|색깔|색을|모양만|모양은/;
+  const hintShort = dental.ux.hints.short_input.message_md;
+  assert.match(hintShort, /결정|환자|헷갈리는/);
+  assert.doesNotMatch(hintShort, GAME_VESTIGE);
+  const probe = dental.ux.hints.roll_input_button.probe_md;
+  assert.match(probe, /결정/);
+  assert.doesNotMatch(probe, GAME_VESTIGE);
+  // T1.A.14 — coach naming.
+  assert.equal(dental.ux.coach.naming_mode, "fixed");
+  assert.equal(dental.ux.coach.fallback_name, "코치");
+  // T1.A.15 — publishing.
+  assert.equal(dental.publishing.enabled, false);
+  assert.equal(dental.publishing.strategy, "local_only");
+  console.log(`✓ boah-dental v4 contract: essences[2,7,9,11,12,13,14] · 5 initial chips · 7 follow_up E# · decision-shaped hints · fixed coach name · local_only`);
+}
+
 // §5 — recordTurn SQL carries ON CONFLICT(trial_id, turn_idx) DO UPDATE
 //      (idempotency for legitimate retries — review A#2 fix).
 {
