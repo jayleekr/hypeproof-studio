@@ -180,7 +180,11 @@ export function ChatPanel(props: Props) {
 
       <div className="hps-messages" ref={scrollRef}>
         {messages.length === 0 && (
-          <EmptyState ux={ux} coachName={coachName} />
+          <EmptyState
+            ux={ux}
+            coachName={coachName}
+            greetingMd={config?.profile?.welcome.greeting_md ?? ""}
+          />
         )}
 
         {showInitialChips && (
@@ -391,14 +395,37 @@ function NamingCard({
   );
 }
 
-function EmptyState({ ux: _ux, coachName }: { ux: UxConfig; coachName: string }) {
+function EmptyState({
+  ux,
+  coachName,
+  greetingMd,
+}: {
+  ux: UxConfig;
+  coachName: string;
+  greetingMd: string;
+}) {
+  // Profile-driven greeting (welcome.greeting_md) is the source of truth per
+  // cohort. For user-named coaches (kid cohorts), prepend a coach-intro line
+  // so the kid sees the name they chose echoed back. For fixed-name cohorts
+  // (e.g. adult professional teasers — naming_mode=fixed), the coach name is
+  // just a generic label and shouldn't dilute the cohort framing.
+  const showCoachIntro = ux.coach.naming_mode === "user_names_it" && coachName;
+  const hasGreeting = greetingMd.trim().length > 0;
+
   return (
     <div className="hps-empty">
       <p className="hps-empty-greeting">
-        안녕하세요! 저는 <strong>{coachName}</strong>예요. 같이 만들어봐요 🎮
-      </p>
-      <p className="hps-empty-sub">
-        무엇을 만들고 싶은지 자세히 말해주세요.
+        {showCoachIntro && (
+          <>
+            안녕하세요! 저는 <strong>{coachName}</strong>예요.
+            {hasGreeting && <br />}
+          </>
+        )}
+        {hasGreeting ? (
+          <span dangerouslySetInnerHTML={{ __html: renderInlineMd(greetingMd) }} />
+        ) : (
+          !showCoachIntro && <>안녕하세요! 저는 <strong>{coachName}</strong>예요.</>
+        )}
       </p>
     </div>
   );
