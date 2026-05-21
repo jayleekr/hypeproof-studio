@@ -11,6 +11,13 @@ set -uo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOGFILE="${1:-}"
 
+# Absolutize LOGFILE — we `cd vscodium-base` below, after which a relative
+# log path silently resolves under that subdir and the redirect fails with
+# "No such file or directory" → build never starts.
+if [[ -n "$LOGFILE" && "$LOGFILE" != /* ]]; then
+  LOGFILE="$REPO_ROOT/$LOGFILE"
+fi
+
 cd "$REPO_ROOT"
 
 # Source nvm and pin to Node 22
