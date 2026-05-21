@@ -139,11 +139,19 @@ async function isRateLimited(kv: KVNamespace, ip: string): Promise<boolean> {
     return false;
   }
   if (count >= RATE_LIMIT) return true;
-  const remainingTtl = Math.max(1, RATE_WINDOW_SEC - (now - firstTs));
+  // Cloudflare KV requires expirationTtl >= 60. The "remaining window" math
+  // can fall below 60 as we approach the original first_ts + 60s mark, which
+  // is the natural place to bump the counter — putting `expirationTtl: 42`
+  // would 400 the entire request and turn a benign rate-bump into a 500.
+  // Effective semantics: each bump extends the window to a full 60s from
+  // *now*, which makes the limiter slightly stricter than a pure fixed
+  // window (acceptable; the intent is "stop runaway clients"). We preserve
+  // the original first_ts so the count → block transition still happens
+  // exactly once per first-request cohort.
   await kv.put(
     key,
     JSON.stringify({ count: count + 1, first_ts: firstTs }),
-    { expirationTtl: remainingTtl },
+    { expirationTtl: RATE_WINDOW_SEC },
   );
   return false;
 }
