@@ -66,6 +66,13 @@ function makeKV() {
       return type === "json" ? JSON.parse(raw) : raw;
     },
     async put(key, value, opts = {}) {
+      // Match Cloudflare KV's hard minimum: expirationTtl must be >= 60.
+      // Caught a real prod bug in the rate-limit path (issue #64 hotfix).
+      if (opts.expirationTtl !== undefined && opts.expirationTtl < 60) {
+        throw new Error(
+          `KV PUT failed: 400 Invalid expiration_ttl of ${opts.expirationTtl}. Expiration TTL must be at least 60.`,
+        );
+      }
       store.set(key, value);
       if (opts.expirationTtl) {
         expiry.set(key, Date.now() + opts.expirationTtl * 1000);
