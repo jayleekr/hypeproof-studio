@@ -20,6 +20,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
 import { issue, verify } from "../lib/tokens";
+import { postDiscordResolution } from "./report";
 import {
   endSession,
   getActiveSession,
@@ -432,4 +433,86 @@ admin.get("/profiles", (c) => {
       essences_focus: p.essences_focus,
     })),
   });
+});
+
+// ---- in-app bug reports (#64) ----------------------------------------------
+// Triage flow lives over in /v1/report (public submit + status poll). Admin
+// endpoints handle list + resolve. Resolution also announces back to the same
+// Discord webhook (best-effort).
+
+admin.get("/reports", async (c) => {
+  const status = (c.req.query("status") ?? "open").toLowerCase();
+  const limit = Math.min(Math.max(Number(c.req.query("limit") ?? 50), 1), 500);
+  let rs;
+  if (status === "all") {
+    rs = await c.env.HPS_DB
+      .prepare(
+        `SELECT id, ts, jti_hash, profile_id, request_id, description,
+                attachments_json, contact, status, resolved_at,
+                resolution_note, github_issue_url
+         FROM reports ORDER BY ts DESC LIMIT ?`,
+      )
+      .bind(limit)
+      .all();
+  } else if (status === "open" || status === "resolved") {
+    rs = await c.env.HPS_DB
+      .prepare(
+        `SELECT id, ts, jti_hash, profile_id, request_id, description,
+                attachments_json, contact, status, resolved_at,
+                resolution_note, github_issue_url
+         FROM reports WHERE status = ? ORDER BY ts DESC LIMIT ?`,
+      )
+      .bind(status, limit)
+      .all();
+  } else {
+    return c.json({ error: "status must be one of: open, resolved, all" }, 400);
+  }
+  return c.json({ reports: rs.results });
+});
+
+admin.post("/reports/:id/resolve", async (c) => {
+  const id = c.req.param("id");
+  if (!id || !/^rep_[a-z2-7]+$/.test(id)) {
+    return c.json({ error: "report not found" }, 404);
+  }
+  type Body = { resolution_note?: unknown; github_issue_url?: unknown };
+  const body = (await c.req.json<Body>().catch(() => ({}))) as Body;
+  if (typeof body.resolution_note !== "string" || body.resolution_note.trim().length === 0) {
+    return c.json({ error: "resolution_note (non-empty string) required" }, 400);
+  }
+  const resolutionNote = body.resolution_note.trim().slice(0, 2000);
+  let githubIssueUrl: string | undefined;
+  if (typeof body.github_issue_url === "string" && body.github_issue_url.length > 0) {
+    if (body.github_issue_url.length > 500) {
+      return c.json({ error: "github_issue_url exceeds 500 chars" }, 400);
+    }
+    // Light shape check — full validation against github.com is overkill;
+    // Discord/admin UI will surface a broken link visually.
+    if (!/^https?:\/\//.test(body.github_issue_url)) {
+      return c.json({ error: "github_issue_url must be an http(s) URL" }, 400);
+    }
+    githubIssueUrl = body.github_issue_url;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  const result = await c.env.HPS_DB
+    .prepare(
+      `UPDATE reports
+       SET status = 'resolved', resolved_at = ?, resolution_note = ?, github_issue_url = ?
+       WHERE id = ?`,
+    )
+    .bind(now, resolutionNote, githubIssueUrl ?? null, id)
+    .run();
+  // D1 .meta.changes is the canonical "rows affected" signal.
+  const changes = (result as { meta?: { changes?: number } }).meta?.changes ?? 0;
+  if (changes === 0) {
+    return c.json({ error: "report not found" }, 404);
+  }
+  if (c.env.DISCORD_REPORT_WEBHOOK_URL) {
+    await postDiscordResolution(c.env.DISCORD_REPORT_WEBHOOK_URL, {
+      reportId: id,
+      resolutionNote,
+      githubIssueUrl,
+    });
+  }
+  return c.json({ ok: true, report_id: id, status: "resolved" });
 });

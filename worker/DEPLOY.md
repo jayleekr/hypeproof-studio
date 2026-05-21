@@ -37,6 +37,11 @@ npx wrangler secret put HPS_ADMIN_PASSWORD     # dev fallback only; set Cloudfla
 # npx wrangler secret put ANTHROPIC_API_KEY    # when LLM_PROVIDER=anthropic in wrangler.toml
 # npx wrangler secret put OPENAI_API_KEY        # when LLM_PROVIDER=openai in wrangler.toml
 
+# Bug-report Discord webhook (#64): create a webhook in #hypeproof-studio →
+# Integrations → Webhooks, paste the URL. Optional — unset = D1 row only, no
+# Discord side-effect.
+# npx wrangler secret put DISCORD_REPORT_WEBHOOK_URL
+
 # 6. (Optional) Custom domain
 #    In Cloudflare dashboard → Workers → hypeproof-studio-api → Custom Domains
 #    Add: api.hypeproof-ai.xyz

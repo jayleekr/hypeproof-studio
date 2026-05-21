@@ -3,6 +3,7 @@ import type { Env } from "./env";
 import { chat } from "./routes/chat";
 import { trace } from "./routes/trace";
 import { admin } from "./routes/admin";
+import { report } from "./routes/report";
 import { runHeartbeat } from "./cron/heartbeat.ts";
 import { runD1Backup } from "./cron/d1-backup.ts";
 import { requestId, makeErrorBody } from "./middleware/request-id.ts";
@@ -37,6 +38,7 @@ app.get("/issuer", () => {
 
 app.route("/v1", chat);
 app.route("/v1/trace", trace);
+app.route("/v1/report", report);
 app.route("/admin", admin);
 
 app.notFound((c) =>
