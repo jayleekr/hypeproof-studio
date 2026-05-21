@@ -91,6 +91,11 @@ iwr -useb https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scrip
 ```
 </details>
 
+Once installed, Studio updates itself in place — it checks GitHub Releases on
+launch and applies the new build the next time you reopen the app. Found a bug
+in the running Studio? Open the Command Palette → **HypeProof Chat: 문제
+신고하기** to send it (with cohort + request ID) straight to the maintainers.
+
 ## Quickstart (contributors)
 
 ```bash
