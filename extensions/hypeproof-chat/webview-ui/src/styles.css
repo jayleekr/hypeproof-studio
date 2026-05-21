@@ -428,7 +428,8 @@ html, body, #root {
 .hps-error-banner-msg { font-size: 12px; color: var(--vscode-foreground, #ddd); word-break: break-word; }
 .hps-error-banner-actions { display: flex; flex-direction: column; gap: 6px; flex: 0 0 auto; }
 .hps-error-banner-retry,
-.hps-error-banner-dismiss {
+.hps-error-banner-dismiss,
+.hps-error-banner-report {
   border: 0; cursor: pointer; padding: 6px 12px; border-radius: 4px;
   font-size: 12px; font-weight: 600; min-width: 84px; text-align: center;
 }
@@ -436,6 +437,11 @@ html, body, #root {
   background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff);
 }
 .hps-error-banner-retry:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+.hps-error-banner-report {
+  background: transparent; color: var(--vscode-foreground, #d97757);
+  border: 1px solid rgba(217,119,87,0.4);
+}
+.hps-error-banner-report:hover { background: rgba(217,119,87,0.12); }
 .hps-error-banner-dismiss {
   background: transparent; color: var(--vscode-foreground, #aaa); border: 1px solid rgba(255,255,255,0.15);
 }

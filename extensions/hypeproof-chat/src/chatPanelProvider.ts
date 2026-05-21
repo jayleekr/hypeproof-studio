@@ -24,11 +24,41 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
   private cachedProfile: ResolvedProfile | null = null;
   private profileFetchPromise: Promise<ResolvedProfile | null> | null = null;
+  // Stashed for the bug-report flow (#64). Updated whenever a stream errors
+  // or completes — the Worker's request-id middleware (PR #49) plumbs an
+  // x-request-id header on every response we can correlate against in tail.
+  private lastRequestId: string | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly preview: PreviewProvider,
   ) {}
+
+  /**
+   * Public accessor for the #64 report-problem flow. Returns the most recent
+   * request_id we've seen (from a stream error or successful response). Used
+   * to auto-attach to bug reports without the user typing it.
+   */
+  getLastRequestId(): string | undefined {
+    return this.lastRequestId;
+  }
+
+  /**
+   * Public accessor for #64. Returns the cached profile_id if any. Used as
+   * an auto-attached field on bug reports.
+   */
+  getProfileId(): string | undefined {
+    return this.cachedProfile?.profile_id;
+  }
+
+  /**
+   * Public accessor for #64. Returns the persisted chat history (workspaceState).
+   * The report flow takes only the tail (last 3) and only when the user
+   * explicitly opts in.
+   */
+  getHistorySnapshot(): ChatMessage[] {
+    return this.context.workspaceState.get<ChatMessage[]>(HISTORY_KEY, []);
+  }
 
   // -------------------------------------------------------------------------
   // Public API used by extension.ts
@@ -226,6 +256,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "setToken":
         void vscode.commands.executeCommand("hypeproof-chat.setToken");
         return;
+      case "openReportModal":
+        // #64. Webview's error banner has a 🚨 link; we delegate to the same
+        // command so the QuickInput cascade lives in one place.
+        void vscode.commands.executeCommand("hypeproof-chat.reportProblem");
+        return;
       case "namingRitual":
         void this.runCoachNamingRitual({ force: true });
         return;
@@ -341,6 +376,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private async handleSendError(err: unknown, streamId: string): Promise<void> {
     if (err instanceof ProxyAuthError) {
+      if (err.requestId) this.lastRequestId = err.requestId;
       void this.post({ type: "streamError", streamId, error: err.friendly, requestId: err.requestId });
       if (err.kind === "expired" || err.kind === "missing") {
         // Clear the dead token so the UI shows "Token" not "Token ✓",
@@ -357,6 +393,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     const reason = err instanceof Error ? err.message : "앗, 문제가 생겼어요. 선생님을 불러주세요.";
     const requestId = err instanceof ProxyTransportError ? err.requestId : undefined;
+    if (requestId) this.lastRequestId = requestId;
     void this.post({ type: "streamError", streamId, error: reason, requestId });
   }
 

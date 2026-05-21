@@ -4,6 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import { ChatPanelProvider } from "./chatPanelProvider";
 import { PreviewProvider } from "./previewProvider";
+import { runReportProblemCommand } from "./reportProblem";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
@@ -92,6 +93,15 @@ export async function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand("hypeproof-chat.renameCoach", async () => {
       await provider.runCoachNamingRitual({ force: true });
+    }),
+
+    vscode.commands.registerCommand("hypeproof-chat.reportProblem", async () => {
+      await runReportProblemCommand({
+        context,
+        getLastRequestId: () => provider.getLastRequestId(),
+        getProfileId: () => provider.getProfileId(),
+        getRecentTurns: () => provider.getHistorySnapshot(),
+      });
     }),
   );
 

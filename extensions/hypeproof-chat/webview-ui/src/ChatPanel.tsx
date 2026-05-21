@@ -24,6 +24,7 @@ interface Props {
   onRunCode: (html: string) => void;
   onNamingRitual: () => void;
   onSaveCoach: (name: string, personality: string) => void;
+  onReportProblem: () => void;                          // #64
 }
 
 function extractRenderableHtml(text: string): string | null {
@@ -207,6 +208,7 @@ export function ChatPanel(props: Props) {
             canRetry={props.canRetryLast}
             onRetry={props.onRetryLast}
             onDismiss={props.onDismissError}
+            onReport={props.onReportProblem}
           />
         )}
       </div>
@@ -572,12 +574,14 @@ function ErrorBanner({
   canRetry,
   onRetry,
   onDismiss,
+  onReport,
 }: {
   message: string;
   requestId: string | null;
   canRetry: boolean;
   onRetry: () => void;
   onDismiss: () => void;
+  onReport: () => void;
 }) {
   // Spot common transport-layer signals so the framing is honest about the
   // recovery path. We don't try to classify perfectly — just enough to pick
@@ -605,6 +609,13 @@ function ErrorBanner({
             다시 보내기
           </button>
         )}
+        <button
+          className="hps-error-banner-report"
+          onClick={onReport}
+          title="이 문제를 Jay에게 신고합니다 (request_id 등 메타데이터 자동 첨부) — #64"
+        >
+          🚨 신고하기
+        </button>
         <button
           className="hps-error-banner-dismiss"
           onClick={onDismiss}
