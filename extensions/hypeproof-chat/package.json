@@ -2,7 +2,7 @@
   "name": "hypeproof-chat",
   "displayName": "HypeProof Chat",
   "description": "Built-in chat panel for HypeProof Studio.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "hypeproof",
   "engines": {
     "vscode": "^1.90.0"
@@ -55,6 +55,14 @@
       {
         "command": "hypeproof-chat.reportProblem",
         "title": "HypeProof Chat: 문제 신고하기"
+      },
+      {
+        "command": "hypeproof-chat.checkForUpdates",
+        "title": "HypeProof Chat: 업데이트 확인"
+      },
+      {
+        "command": "hypeproof-chat.installUpdate",
+        "title": "HypeProof Chat: 업데이트 설치"
       }
     ],
     "configuration": {

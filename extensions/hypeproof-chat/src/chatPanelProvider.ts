@@ -261,6 +261,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // command so the QuickInput cascade lives in one place.
         void vscode.commands.executeCommand("hypeproof-chat.reportProblem");
         return;
+      case "installUpdate":
+        // #72. User clicked "Install Now" on the update banner.
+        void vscode.commands.executeCommand("hypeproof-chat.installUpdate");
+        return;
+      case "dismissUpdate":
+        // #72. User clicked "Later" — silence this version for 7 days.
+        void vscode.commands.executeCommand("hypeproof-chat.dismissUpdate", msg.version);
+        return;
       case "namingRitual":
         void this.runCoachNamingRitual({ force: true });
         return;
@@ -428,8 +436,25 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         hasToken: !!token,
         coach: this.getCoach(),
         profile,
+        update: this.availableUpdate,
       },
     });
+  }
+
+  // ---- #72: auto-update banner state ---------------------------------------
+  // The scheduler in updateChecker.ts pushes here whenever a check completes;
+  // we relay through postConfig so the webview re-renders. Null clears.
+  private availableUpdate: import("./protocol").UpdateOffer | null = null;
+
+  setAvailableUpdate(info: import("./protocol").UpdateOffer | null): void {
+    this.availableUpdate = info;
+    // Best-effort push; if webview isn't ready yet, the next postConfig
+    // (e.g., after panel reveal) picks it up.
+    void this.postConfig();
+  }
+
+  getAvailableUpdate(): import("./protocol").UpdateOffer | null {
+    return this.availableUpdate;
   }
 
   private async postHistory(): Promise<void> {

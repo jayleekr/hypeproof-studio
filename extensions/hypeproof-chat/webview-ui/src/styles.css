@@ -489,3 +489,42 @@ html, body, #root {
   color: var(--vscode-foreground, #ccc);
   user-select: all;
 }
+
+/* #72: update banner — between header and chat. Compact, neutral palette
+   so a kid-friendly UI isn't dominated by an update card. */
+.hps-update-banner {
+  display: flex; gap: 12px; padding: 10px 12px; margin: 8px 12px 0;
+  background: rgba(91,141,239,0.10); border: 1px solid rgba(91,141,239,0.35);
+  border-radius: 6px;
+}
+.hps-update-banner-icon { font-size: 20px; flex: 0 0 auto; line-height: 1; padding-top: 2px; }
+.hps-update-banner-body { flex: 1; min-width: 0; }
+.hps-update-banner-title { font-size: 13px; font-weight: 600; color: var(--vscode-foreground, #ddd); }
+.hps-update-banner-sub   { font-size: 11px; color: var(--vscode-foreground, #aaa); margin-top: 2px; }
+.hps-update-banner-notes {
+  font-size: 11px; line-height: 1.4; margin: 8px 0 0;
+  padding: 8px; background: rgba(0,0,0,0.25); border-radius: 4px;
+  white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow-y: auto;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.hps-update-banner-toggle {
+  margin-top: 4px; padding: 2px 6px; background: transparent; border: 0;
+  color: var(--vscode-textLink-foreground, #5b8def); font-size: 11px;
+  cursor: pointer; text-decoration: underline;
+}
+.hps-update-banner-actions { display: flex; flex-direction: column; gap: 4px; flex: 0 0 auto; }
+.hps-update-banner-install,
+.hps-update-banner-dismiss {
+  border: 0; cursor: pointer; padding: 4px 10px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; min-width: 72px; text-align: center;
+}
+.hps-update-banner-install {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #fff);
+}
+.hps-update-banner-install:hover { background: var(--vscode-button-hoverBackground, #1177bb); }
+.hps-update-banner-dismiss {
+  background: transparent; color: var(--vscode-foreground, #aaa);
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.hps-update-banner-dismiss:hover { background: rgba(255,255,255,0.06); }

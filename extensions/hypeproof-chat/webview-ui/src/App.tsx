@@ -156,6 +156,8 @@ export function App() {
           postToHost({ type: "saveCoach", name, personality })
         }
         onReportProblem={() => postToHost({ type: "openReportModal" })}
+        onInstallUpdate={() => postToHost({ type: "installUpdate" })}
+        onDismissUpdate={(version) => postToHost({ type: "dismissUpdate", version })}
       />
     </ChatErrorBoundary>
   );
