@@ -19,6 +19,7 @@ jobs:
     env:
       OS_NAME: windows
       VSCODE_ARCH: x64
+      CI_BUILD: "yes"
       SHOULD_BUILD: "yes"
       SHOULD_BUILD_REH: "no"
       SHOULD_BUILD_REH_WEB: "no"
@@ -31,6 +32,16 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.inputs.ref || github.ref }}
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Verify vscodium-base submodule
+        shell: bash
+        run: |
+          set -euo pipefail
+          git submodule status --recursive
+          test -d vscodium-base/icons/stable
+          test -f vscodium-base/build.sh
 
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
@@ -45,11 +56,28 @@ jobs:
       - name: Install jq
         run: choco install jq -y
 
+      - name: Provision build env
+        shell: bash
+        run: |
+          set -euo pipefail
+          # hypeproof-studio.env is gitignored for local secrets. CI uses the
+          # committed, secret-free defaults and overrides the Windows target in
+          # the workflow env above.
+          if [ ! -f hypeproof-studio.env ]; then
+            cp hypeproof-studio.env.example hypeproof-studio.env
+          fi
+
       - name: Load HypeProof env
         shell: bash
         run: |
+          set -euo pipefail
           # shellcheck source=/dev/null
           source ./hypeproof-studio.env
+          # The committed example defaults to macOS; keep this workflow's target
+          # explicit after sourcing.
+          export OS_NAME="windows"
+          export VSCODE_ARCH="x64"
+          export CI_BUILD="yes"
           # Re-export to GITHUB_ENV so subsequent steps see them
           {
             echo "APP_NAME=$APP_NAME"
@@ -69,6 +97,9 @@ jobs:
             echo "HPS_WIN32_MUTEX_NAME=$HPS_WIN32_MUTEX_NAME"
             echo "HPS_WIN32_APP_USER_MODEL_ID=$HPS_WIN32_APP_USER_MODEL_ID"
             echo "HPS_WIN32_REG_VALUE_NAME=$HPS_WIN32_REG_VALUE_NAME"
+            echo "OS_NAME=$OS_NAME"
+            echo "VSCODE_ARCH=$VSCODE_ARCH"
+            echo "CI_BUILD=$CI_BUILD"
           } >> "$GITHUB_ENV"
 
       - name: Install brand assets
@@ -109,17 +140,22 @@ jobs:
         shell: bash
         working-directory: vscodium-base
         run: |
+          set -euo pipefail
           shopt -s nullglob
           mkdir -p ../dist
-          for f in *.exe *.zip; do
-            cp -v "$f" ../dist/ || true
-          done
+          while IFS= read -r -d '' f; do
+            cp -v "$f" ../dist/
+          done < <(find . -maxdepth 4 -type f \( -name '*.exe' -o -name '*.zip' \) -print0)
           ls -la ../dist || true
+          if ! find ../dist -type f \( -name '*.exe' -o -name '*.zip' \) | grep -q .; then
+            echo "::error::Windows build produced no .exe or .zip artifacts"
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: hypeproof-studio-windows-x64
           path: dist/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
