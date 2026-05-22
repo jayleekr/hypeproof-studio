@@ -1,17 +1,21 @@
 import * as vscode from "vscode";
+import * as path from "node:path";
 import { buildPreviewShellCsp, PREVIEW_IFRAME_SANDBOX } from "./cspBuilder";
+import { sanitizeArtifactEntry, ARTIFACT_FILES } from "./previewArtifacts";
 
 /**
- * Sandboxed HTML preview for AI-generated mini-games.
+ * Sandboxed HTML preview for AI-generated webapps.
  *
  * Renders in the EDITOR AREA (a reused WebviewPanel beside the chat sidebar),
  * not in a cramped sidebar view. The "creator cockpit": chat on the left,
- * the running game big on the right. The panel is created lazily on the first
- * game and reused for every subsequent render.
+ * the running webapp big on the right. The panel is created lazily on the
+ * first render and reused for every subsequent render.
  *
- * The game HTML runs inside an iframe sandboxed to `allow-scripts` only — no
- * network, no parent-window access. Each render replaces the iframe so prior
- * game state never leaks.
+ * The HTML runs inside an iframe sandboxed to `allow-scripts` only — no
+ * `allow-same-origin`, no network, no `acquireVsCodeApi` access. The iframe
+ * can still post messages to its parent (cross-document `postMessage` is
+ * allowed regardless of sandbox); the shell forwards `request_action`
+ * messages to the host, which surfaces a manual-approve modal (#155).
  */
 export class PreviewProvider {
   private panel: vscode.WebviewPanel | undefined;
@@ -38,6 +42,8 @@ export class PreviewProvider {
             this.panel?.webview.postMessage({ type: "renderPreview", html: this.pendingHtml });
             this.pendingHtml = null;
           }
+        } else if (msg?.type === "preview_request_action") {
+          void this.handlePreviewRequestAction(msg);
         }
       });
       this.panel.onDidDispose(() => {
@@ -55,6 +61,74 @@ export class PreviewProvider {
     } else {
       this.pendingHtml = html;
     }
+  }
+
+  /**
+   * Handle a `request_action` postMessage that bubbled up from the
+   * inner sandboxed iframe (e.g. verdict-card's [규칙 저장] button).
+   *
+   * Flow: modal-gated approval (REQ-E1/E2) → append to
+   * `workshop-output/<artifact>.{md,log}` in the active workspace.
+   * No write happens without explicit user click.
+   */
+  private async handlePreviewRequestAction(
+    msg: { action?: string; payload?: { artifact?: string; entry?: string } },
+  ): Promise<void> {
+    if (msg.action !== "append_artifact") {
+      vscode.window.showWarningMessage(`HypeProof: 알 수 없는 preview action: ${msg.action ?? "(none)"}`);
+      return;
+    }
+    const artifact = msg.payload?.artifact;
+    const entry = msg.payload?.entry;
+    if (typeof artifact !== "string" || typeof entry !== "string") {
+      return;
+    }
+    const target = ARTIFACT_FILES[artifact as keyof typeof ARTIFACT_FILES];
+    if (!target) {
+      vscode.window.showWarningMessage(`HypeProof: 지원하지 않는 artifact: ${artifact}`);
+      return;
+    }
+
+    const safeEntry = sanitizeArtifactEntry(entry);
+    if (!safeEntry) return;
+
+    const ws = vscode.workspace.workspaceFolders?.[0];
+    if (!ws) {
+      vscode.window.showWarningMessage("HypeProof: 작업 폴더가 열려있지 않아요. 폴더를 먼저 열어주세요.");
+      return;
+    }
+
+    const folderUri = vscode.Uri.joinPath(ws.uri, "workshop-output");
+    const fileUri = vscode.Uri.joinPath(folderUri, target);
+
+    const pick = await vscode.window.showWarningMessage(
+      `다음 ${target} 항목을 저장할까요?\n\n${safeEntry}`,
+      { modal: true },
+      "저장",
+      "취소",
+    );
+    if (pick !== "저장") {
+      this.panel?.webview.postMessage({ type: "previewActionResult", action: "append_artifact", artifact, ok: false });
+      return;
+    }
+
+    try {
+      await vscode.workspace.fs.createDirectory(folderUri);
+    } catch { /* exists is fine */ }
+
+    let existing = "";
+    try {
+      const buf = await vscode.workspace.fs.readFile(fileUri);
+      existing = Buffer.from(buf).toString("utf8");
+    } catch { /* fresh file */ }
+
+    const stamp = new Date().toISOString();
+    const line = `- ${stamp} · ${safeEntry}\n`;
+    const next = existing ? existing + line : `# ${path.basename(target)}\n\n${line}`;
+    await vscode.workspace.fs.writeFile(fileUri, Buffer.from(next, "utf8"));
+
+    this.panel?.webview.postMessage({ type: "previewActionResult", action: "append_artifact", artifact, ok: true });
+    vscode.window.showInformationMessage(`HypeProof: ${target}에 저장됐어요.`);
   }
 
   private shellHtml(webview: vscode.Webview): string {
@@ -77,21 +151,42 @@ export class PreviewProvider {
 <body>
   <div id="placeholder">
     <div class="big">🎮</div>
-    <div>게임이 여기에 나와요</div>
+    <div>여기에 나와요</div>
   </div>
   <iframe id="frame" style="display:none" sandbox="${PREVIEW_IFRAME_SANDBOX}" referrerpolicy="no-referrer"></iframe>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const frame = document.getElementById("frame");
     const placeholder = document.getElementById("placeholder");
+
+    // host → shell → inner iframe
     window.addEventListener("message", (ev) => {
       const m = ev.data || {};
       if (m.type === "renderPreview" && typeof m.html === "string") {
         placeholder.style.display = "none";
         frame.style.display = "block";
         frame.srcdoc = m.html;
+        return;
+      }
+      // Inner iframe (cross-document postMessage from srcdoc) → forward to host (#155).
+      // We only accept a known message shape; everything else is ignored.
+      if (ev.source === frame.contentWindow && m && typeof m === "object") {
+        if (m.type === "request_action" && typeof m.action === "string") {
+          vscode.postMessage({
+            type: "preview_request_action",
+            action: m.action,
+            payload: m.payload ?? null,
+          });
+        }
+        return;
+      }
+      // host → shell: forward action result back into the inner iframe so the
+      // card can flip its status. (sandboxed iframe still receives postMessage.)
+      if (m.type === "previewActionResult" && frame.contentWindow) {
+        try { frame.contentWindow.postMessage(m, "*"); } catch (_) { /* sandbox quirk */ }
       }
     });
+
     vscode.postMessage({ type: "previewReady" });
   </script>
 </body>
