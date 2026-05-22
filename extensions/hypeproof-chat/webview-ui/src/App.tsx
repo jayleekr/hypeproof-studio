@@ -1,4 +1,4 @@
-import { useEffect, useReducer } from "react";
+import { useEffect, useReducer, useState } from "react";
 import type { ChatConfig, ChatMessage, HostMessage } from "../../src/protocol";
 import { onHostMessage, postToHost } from "./vscode";
 import { ChatPanel } from "./ChatPanel";
@@ -78,6 +78,7 @@ function reducer(state: State, action: Action): State {
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const [shouldCrash, setShouldCrash] = useState(false);
 
   useEffect(() => {
     const off = onHostMessage((msg: HostMessage) => {
@@ -89,11 +90,16 @@ export function App() {
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId }); break;
         case "actionResult": /* not yet routed to UI */ break;
+        case "webviewTestCrash": setShouldCrash(true); break;
       }
     });
     postToHost({ type: "ready" });
     return off;
   }, []);
+
+  // (REQ-C7 crash injection is performed by <CrashIfFlagged> below, which
+  // sits INSIDE the ChatErrorBoundary tree. Throwing here in App() instead
+  // would crash above the boundary, leaving nothing to catch it.)
 
   const send = (text: string) => {
     const trimmed = text.trim();
@@ -135,6 +141,7 @@ export function App() {
 
   return (
     <ChatErrorBoundary>
+      <CrashIfFlagged crash={shouldCrash} />
       <ChatPanel
         config={state.config}
         messages={state.messages}
@@ -161,4 +168,17 @@ export function App() {
       />
     </ChatErrorBoundary>
   );
+}
+
+/**
+ * REQ-C7 crash injection. Sits inside the ErrorBoundary tree so a synthetic
+ * render-time throw lands in the boundary's componentDidCatch. Production
+ * builds never set the flag — it's only triggered by the env-gated
+ * HPS_TEST_CRASH_AFTER_MS path on the host side.
+ */
+function CrashIfFlagged({ crash }: { crash: boolean }) {
+  if (crash) {
+    throw new Error("hps-test: forced webview crash for REQ-C7 verification");
+  }
+  return null;
 }

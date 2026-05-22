@@ -179,7 +179,19 @@ export async function activate(context: vscode.ExtensionContext) {
       await dismissVersion(context, version);
       provider.setAvailableUpdate(null);
     }),
+
   );
+
+  // Test-only: if HPS_TEST_CRASH_AFTER_MS is set, post a webviewTestCrash
+  // to the panel after that many milliseconds. Lets e2e exercise REQ-C7
+  // (ChatErrorBoundary) without needing a registered command in
+  // contributes.commands. Env-gated; no-op in real workshop builds.
+  if (process.env.HPS_TEST_CRASH_AFTER_MS) {
+    const ms = Number(process.env.HPS_TEST_CRASH_AFTER_MS);
+    if (Number.isFinite(ms) && ms >= 0) {
+      setTimeout(() => provider.postTestCrash(), ms);
+    }
+  }
 
   // #72: kick off background update checks. Scheduler is disposable so we
   // attach it to the extension lifecycle.
