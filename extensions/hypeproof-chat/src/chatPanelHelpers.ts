@@ -4,6 +4,27 @@
 /** workspaceState ceiling — oldest turns dropped beyond this. */
 export const HISTORY_MAX = 200;
 
+/** Coach name length ceiling (REQ-F3). */
+export const COACH_NAME_MAX = 40;
+
+/** Coach personality length ceiling (REQ-F3). */
+export const COACH_PERSONALITY_MAX = 200;
+
+/**
+ * Sanitize coach name + personality input from the webview. Trim, clamp to
+ * length ceilings, fall back to profile-provided name when empty.
+ */
+export function sanitizeCoachInput(
+  name: string,
+  personality: string,
+  fallbackName: string,
+): { name: string; personality: string } {
+  return {
+    name: (name.trim() || fallbackName).slice(0, COACH_NAME_MAX),
+    personality: personality.trim().slice(0, COACH_PERSONALITY_MAX),
+  };
+}
+
 /**
  * Append new turns and clamp to the last HISTORY_MAX. Pure so the clamp
  * contract is testable without spinning up VS Code.
