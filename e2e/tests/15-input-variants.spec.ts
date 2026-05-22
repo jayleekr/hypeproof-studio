@@ -127,15 +127,17 @@ test("T2.V.6 — code-mix 입력 → 영어 섞임 자연 처리", async () => {
 // ─────────────────────────────────────────────────────────────────────────
 
 test("T2.V.7 — 매우 긴 입력 (V1 4축 paste 시뮬) → 60s 내 정상 응답", async () => {
-  // Construct a ~2200-char message that's realistic V1 + bloat.
-  const filler = "환자 안내문에 들어갈 내용으로 충분히 길게 풀어 적습니다. ".repeat(40);
+  // Construct a long realistic V1 + bloat. Length target is "well over a
+  // typical message" — 1.2K chars in Hangul ≈ ~2K equivalents in English
+  // for the model's tokenizer view.
+  const filler = "환자 안내문에 들어갈 내용으로 충분히 길게 풀어 적습니다. ".repeat(80);
   const longInput =
     "지금 만든 V1입니다. 판정 부탁드립니다.\n\n" +
     "① 알고 싶은 것: 임플란트 후 운동 시작 시점\n" +
     `② 결정: 환자에게 안내문을 보낼지 — ${filler}\n` +
     "③ 피해야 할 것: 보장 표현, 무조건/완전 같은 단어\n" +
     "④ 원장님께 확인할 것: 우리 병원 케이스별 기준 + 학회 자료";
-  expect(longInput.length).toBeGreaterThan(2000);
+  expect(longInput.length).toBeGreaterThan(1500);
 
   const t0 = Date.now();
   const out = await sendChatTurn({ user: longInput, max_tokens: 500 });
