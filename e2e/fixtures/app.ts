@@ -12,6 +12,16 @@ export interface AppContext {
   win: Page;
   userDataDir: string;
   token: string;
+  /** The workspace folder opened on launch — tests writing artifacts (REQ-D5)
+   *  read from here. */
+  wsDir: string;
+}
+
+export interface SeedHistoryTurn {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  createdAt: number;
 }
 
 export interface LaunchOptions {
@@ -19,6 +29,9 @@ export interface LaunchOptions {
   preseedToken?: boolean;
   /** Pre-seed coach name + personality so the naming ritual doesn't pop. */
   preseedCoach?: { name: string; personality?: string };
+  /** Pre-seed chat history into workspaceState — bypass the LLM for tests
+   *  exercising preview / reload paths. */
+  preseedHistory?: SeedHistoryTurn[];
 }
 
 export async function launchApp(opts: LaunchOptions = { preseedToken: true }): Promise<AppContext> {
@@ -61,13 +74,20 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
 
   // Also write the file backdoor — env vars don't always reach the extension
   // host, but a file in the user-data-dir does.
-  const testState: { token?: string; coach?: { name: string; personality: string } } = {};
+  const testState: {
+    token?: string;
+    coach?: { name: string; personality: string };
+    history?: SeedHistoryTurn[];
+  } = {};
   if (opts.preseedToken !== false) testState.token = token;
   if (opts.preseedCoach) {
     testState.coach = {
       name: opts.preseedCoach.name,
       personality: opts.preseedCoach.personality ?? "",
     };
+  }
+  if (opts.preseedHistory && opts.preseedHistory.length > 0) {
+    testState.history = opts.preseedHistory;
   }
   fs.writeFileSync(path.join(userDir, "hps-test-state.json"), JSON.stringify(testState));
 
@@ -98,7 +118,7 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
   // Wait for workbench to be ready (presence of activity bar)
   await win.waitForSelector(".monaco-workbench", { timeout: 30_000 });
 
-  return { app, win, userDataDir, token };
+  return { app, win, userDataDir, token, wsDir };
 }
 
 export async function closeApp(ctx: AppContext): Promise<void> {

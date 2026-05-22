@@ -335,6 +335,7 @@ async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<voi
   let token = process.env.HPS_TEST_TOKEN;
   let coachName = process.env.HPS_TEST_COACH_NAME;
   let coachPersonality = process.env.HPS_TEST_COACH_PERSONALITY ?? "";
+  let history: Array<{ id: string; role: "user" | "assistant" | "system"; content: string; createdAt: number }> | undefined;
 
   // Source 2: a JSON file the test fixture writes into the user-data-dir,
   // typically <userDataDir>/User/hps-test-state.json. Always wins over env
@@ -349,10 +350,12 @@ async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<voi
         const j = JSON.parse(fs.readFileSync(f, "utf8")) as {
           token?: string;
           coach?: { name?: string; personality?: string };
+          history?: typeof history;
         };
         if (j.token) token = j.token;
         if (j.coach?.name) coachName = j.coach.name;
         if (j.coach?.personality) coachPersonality = j.coach.personality;
+        if (Array.isArray(j.history)) history = j.history;
         break;
       }
     }
@@ -388,6 +391,11 @@ async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<voi
       configured: true,
     });
     await context.globalState.update("hypeproofChat.coachRitualDone", true);
+  }
+  // Pre-seed chat history so e2e tests can exercise preview / reload paths
+  // without depending on a live LLM round-trip.
+  if (history && history.length > 0) {
+    await context.workspaceState.update("hypeproofChat.history", history);
   }
 }
 
