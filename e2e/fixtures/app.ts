@@ -32,6 +32,8 @@ export interface LaunchOptions {
   /** Pre-seed chat history into workspaceState — bypass the LLM for tests
    *  exercising preview / reload paths. */
   preseedHistory?: SeedHistoryTurn[];
+  /** Pre-seed an issuer token into SecretStorage for mint-flow tests (G5/G6). */
+  preseedIssuerToken?: string;
 }
 
 export async function launchApp(opts: LaunchOptions = { preseedToken: true }): Promise<AppContext> {
@@ -92,6 +94,9 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
   }
   if (opts.preseedHistory && opts.preseedHistory.length > 0) {
     testState.history = opts.preseedHistory;
+  }
+  if (opts.preseedIssuerToken) {
+    (testState as { issuerToken?: string }).issuerToken = opts.preseedIssuerToken;
   }
   fs.writeFileSync(path.join(userDir, "hps-test-state.json"), JSON.stringify(testState));
 
