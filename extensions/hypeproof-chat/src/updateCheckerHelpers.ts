@@ -267,3 +267,41 @@ export function shouldShowBanner(
   if (!dismissedAt) return true;
   return nowSeconds - dismissedAt > rePromptAfterSeconds;
 }
+
+/**
+ * Minimum free disk required before kicking off an update download. The full
+ * .app + extracted contents takes several hundred MB; 1 GB gives headroom.
+ */
+export const MIN_FREE_DISK_BYTES = 1024 * 1024 * 1024;
+
+/**
+ * Pure predicate: do we have at least `threshold` bytes free?
+ *
+ * Defensive against NaN/negative/non-finite inputs — those collapse to
+ * "no free disk" so we never proceed on a bad reading.
+ */
+export function hasFreeDisk(freeBytes: number, threshold: number = MIN_FREE_DISK_BYTES): boolean {
+  if (typeof freeBytes !== "number" || !Number.isFinite(freeBytes) || freeBytes < 0) return false;
+  if (typeof threshold !== "number" || !Number.isFinite(threshold) || threshold < 0) return false;
+  return freeBytes >= threshold;
+}
+
+/**
+ * Idempotency guard for runUpdate: same-version concurrent calls share one
+ * factory invocation. Pulled out so the orchestration can use it AND a unit
+ * test can verify it without spinning up child processes.
+ *
+ * The factory runs synchronously on the first call; subsequent calls with
+ * the same key return the same Promise until it settles.
+ */
+export function pickInflight<T>(
+  map: Map<string, Promise<T>>,
+  key: string,
+  factory: () => Promise<T>,
+): Promise<T> {
+  const existing = map.get(key);
+  if (existing) return existing;
+  const p = factory().finally(() => map.delete(key));
+  map.set(key, p);
+  return p;
+}
