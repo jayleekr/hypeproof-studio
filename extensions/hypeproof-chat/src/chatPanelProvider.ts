@@ -408,22 +408,28 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleActionRequest(req: ActionRequest): Promise<void> {
+    const approved = await this.resolveActionApproval(req);
+    void this.post({ type: "actionResult", requestId: req.requestId, approved });
+  }
+
+  /**
+   * Show the manual-approve modal for an action request and return the user's
+   * decision. Public so e2e tests can synthesize a request without spinning
+   * through the streamed-assistant path.
+   */
+  async resolveActionApproval(req: ActionRequest): Promise<boolean> {
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const required = cfg.get<string[]>("requireApprovalFor", ["writeFile", "executeShell"]);
     const needsApproval = required.includes(req.kind);
+    if (!needsApproval) return true;
 
-    let approved = !needsApproval;
-    if (needsApproval) {
-      const pick = await vscode.window.showWarningMessage(
-        `HypeProof Chat wants to ${req.kind}:\n\n${req.description}`,
-        { modal: true },
-        "Approve",
-        "Deny",
-      );
-      approved = pick === "Approve";
-    }
-
-    void this.post({ type: "actionResult", requestId: req.requestId, approved });
+    const pick = await vscode.window.showWarningMessage(
+      `HypeProof Chat wants to ${req.kind}:\n\n${req.description}`,
+      { modal: true },
+      "Approve",
+      "Deny",
+    );
+    return pick === "Approve";
   }
 
   private async postConfig(): Promise<void> {
