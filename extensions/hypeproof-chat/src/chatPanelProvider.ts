@@ -474,6 +474,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // we relay through postConfig so the webview re-renders. Null clears.
   private availableUpdate: import("./protocol").UpdateOffer | null = null;
 
+  /**
+   * Test-only: post `webviewTestCrash` to the webview so the React tree
+   * throws on next render and ChatErrorBoundary catches it. Called from
+   * the env-gated `__test_crashWebview` command (REQ-C7).
+   */
+  postTestCrash(): void {
+    void this.post({ type: "webviewTestCrash" });
+  }
+
   setAvailableUpdate(info: import("./protocol").UpdateOffer | null): void {
     this.availableUpdate = info;
     // Best-effort push; if webview isn't ready yet, the next postConfig

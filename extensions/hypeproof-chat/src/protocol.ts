@@ -140,7 +140,11 @@ export type HostMessage =
   | { type: "streamEnd"; streamId: string }
   | { type: "streamError"; streamId: string; error: string; requestId?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
-  | { type: "renderPreview"; html: string };
+  | { type: "renderPreview"; html: string }
+  // Test-only: forces a React render-time throw so e2e can verify the
+  // ChatErrorBoundary fallback path (REQ-C7). Only sent from the
+  // host-side __test_crashWebview command which is itself env-gated.
+  | { type: "webviewTestCrash" };
 
 export interface ActionRequest {
   requestId: string;
