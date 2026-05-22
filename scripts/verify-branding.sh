@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# Phase 3 decision gate — verify the built .app shows zero residual VSCodium
-# branding outside legal attribution.
+# Phase 3 decision gate + post-build branding integrity (#98).
+#
+# Closes the REQ-J1·J2·J3·J4 row of epic #89 (docs/studio-requirements.md):
+#   REQ-J1 — App display name == "HypeProof Studio" (check 1)
+#   REQ-J2 — CFBundleIdentifier == "ai.hypeproof.studio" (check 2)
+#   REQ-J3 — Data folder exists after first launch (check 7)
+#   REQ-J4 — No "VSCodium"/"codium" leakage in Resources/ outside legal
+#            attribution (check 5)
+#
+# Run after every `bash scripts/run-build.sh`. Non-zero exit blocks release.
 #
 # Usage:
 #   bash scripts/verify-branding.sh [path-to.app]
