@@ -12,11 +12,10 @@ import {
   WebviewMessage,
   ActionRequest,
 } from "./protocol";
-import { isShowIntent } from "./chatPanelHelpers";
+import { isShowIntent, clampHistory, HISTORY_MAX } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
 const HISTORY_KEY = "hypeproofChat.history";
-const HISTORY_MAX = 200;
 export const COACH_KEY = "hypeproofChat.coach";
 const COACH_RITUAL_DONE_KEY = "hypeproofChat.coachRitualDone";
 
@@ -472,7 +471,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   private async appendHistory(msgs: ChatMessage[]): Promise<void> {
     const current = this.context.workspaceState.get<ChatMessage[]>(HISTORY_KEY, []);
-    const next = [...current, ...msgs].slice(-HISTORY_MAX);
+    const next = clampHistory(current, msgs, HISTORY_MAX);
     await this.context.workspaceState.update(HISTORY_KEY, next);
   }
 

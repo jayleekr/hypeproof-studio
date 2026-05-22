@@ -1,6 +1,18 @@
 // Pure helpers for the chat panel. Kept vscode-free so they can be unit-tested
 // under plain Node — mirrors mintStudentTokenHelpers.ts / reportProblemHelpers.ts.
 
+/** workspaceState ceiling — oldest turns dropped beyond this. */
+export const HISTORY_MAX = 200;
+
+/**
+ * Append new turns and clamp to the last HISTORY_MAX. Pure so the clamp
+ * contract is testable without spinning up VS Code.
+ */
+export function clampHistory<T>(current: T[], append: T[], max: number = HISTORY_MAX): T[] {
+  if (max <= 0) return [];
+  return [...current, ...append].slice(-max);
+}
+
 /**
  * Does the kid's message mean "(just) show/open/run the existing game"?
  *
