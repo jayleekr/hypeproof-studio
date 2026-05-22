@@ -1,0 +1,7 @@
+product: studio
+label: HypeProof Studio
+docs_root: docs/dev
+adr_root: docs/adr
+version_source: extensions/hypeproof-chat/package.json
+portal_path: /members/studio/docs
+required_score: 95
