@@ -45,6 +45,31 @@ BASE_URL=https://api.hypeproof-ai.xyz \
 참가자 1인 1토큰. **강사 self-service 가 기본** — 강사가 본인 issuer 토큰만
 가지고 있으면 prod 시크릿 없이 학생 토큰을 무한 발급할 수 있다 (PR #61).
 
+### Option D — sediment self-fetch (강사가 본인 토큰을 한 줄로 받음, 2026-05-22 추가)
+
+본인 issuer 토큰 자체를 분실했거나 새 머신에서 셋업 중일 때:
+
+```bash
+curl -u <name>:<passphrase> https://hypeproof-sediment.fly.dev/api/v1/issuer/<name>
+```
+
+응답에 본인 issuer 토큰 (`.token` 필드) 그대로 들어있음 — 그걸 Option A·B 의
+"본인 issuer 토큰 paste" 자리에 쓰면 됨. passphrase 는 Jay 가 5/22 개별 DM
+으로 보낸 것.
+
+토큰 만료 (60일) 가까워질 때 본인이 갱신:
+
+```bash
+curl -u <name>:<passphrase> -X POST \
+  -H 'content-type: application/json' -d '{"confirm":true,"days":60}' \
+  https://hypeproof-sediment.fly.dev/api/v1/issuer/<name>/rotate
+```
+
+응답에 새 토큰. 옛 jti 는 자동 revoke. 새 토큰을 본인이 어딘가 저장하세요 —
+sediment Fly 재시작 시 in-memory 갱신만 휘발될 수 있음 (best-effort persist).
+
+구현 참고: `sediment#14` / `sediment/services/sediment/applications/sediment_platform/routers/issuer.py`.
+
 ### Option A — `/issuer` 웹 페이지 (어디서나, 권장)
 
 1. <https://api.hypeproof-ai.xyz/issuer> 접속
