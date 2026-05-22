@@ -1,6 +1,40 @@
 // Pure helpers for the chat panel. Kept vscode-free so they can be unit-tested
 // under plain Node — mirrors mintStudentTokenHelpers.ts / reportProblemHelpers.ts.
 
+export interface CoachStateForResolve {
+  name: string;
+  personality: string;
+}
+export interface CoachProfileForResolve {
+  ux: { coach: { naming_mode: string; fallback_name: string } };
+}
+
+/**
+ * Pick the coach name + personality to send to the proxy / show in the UI.
+ *
+ * For cohorts with `naming_mode === "fixed"` (e.g. boah-dental), any
+ * user-supplied name carried over from a different cohort's user-data-dir
+ * must be ignored — fallback_name wins, no personality bleed. (#140)
+ *
+ * For other modes, use whatever the user set; fall back to the profile
+ * fallback if empty.
+ */
+export function resolveCoach(
+  state: CoachStateForResolve | null | undefined,
+  profile: CoachProfileForResolve | null | undefined,
+  defaultFallback = "코치",
+): { name: string; personality: string } {
+  const naming = profile?.ux.coach.naming_mode;
+  const fallback = profile?.ux.coach.fallback_name || defaultFallback;
+
+  if (naming === "fixed") {
+    return { name: fallback, personality: "" };
+  }
+  const name = state?.name?.trim() || fallback;
+  const personality = state?.personality?.trim() ?? "";
+  return { name, personality };
+}
+
 /** workspaceState ceiling — oldest turns dropped beyond this. */
 export const HISTORY_MAX = 200;
 

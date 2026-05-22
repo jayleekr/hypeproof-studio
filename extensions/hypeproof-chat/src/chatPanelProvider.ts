@@ -12,7 +12,7 @@ import {
   WebviewMessage,
   ActionRequest,
 } from "./protocol";
-import { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput, abortAllStreams } from "./chatPanelHelpers";
+import { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput, abortAllStreams, resolveCoach } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
 const HISTORY_KEY = "hypeproofChat.history";
@@ -324,6 +324,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const model = cfg.get<string>("model", "hypeproof-default");
     const token = await this.context.secrets.get(TOKEN_KEY);
     const coach = this.getCoach();
+    // Fixed-naming cohorts must NOT inject a user-supplied coach name carried
+    // over from a different cohort's user-data-dir into the LLM context (#140).
+    const profile = await this.ensureProfile();
+    const { name: effectiveCoachName, personality: effectiveCoachPersonality } =
+      resolveCoach(coach, profile);
 
     const streamId = randomId();
     const messageId = randomId();
@@ -354,8 +359,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         history,
         userText: text,
         signal: ctrl.signal,
-        coachName: coach.name,
-        coachPersonality: coach.personality,
+        coachName: effectiveCoachName,
+        coachPersonality: effectiveCoachPersonality,
         onDelta: (delta) => {
           assistantText += delta;
           void this.post({ type: "streamChunk", streamId, delta });
