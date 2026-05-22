@@ -23,13 +23,15 @@ import {
   detectAppBundle,
   renderInstallerScript,
   shouldShowBanner,
+  hasFreeDisk,
+  pickInflight,
+  MIN_FREE_DISK_BYTES,
   type GhRelease,
   type UpdateInfo,
 } from "./updateCheckerHelpers";
 
 const RELEASES_API = "https://api.github.com/repos/jayleekr/hypeproof-studio-releases/releases/latest";
 const EXPECTED_BUNDLE_ID = "ai.hypeproof.studio";
-const MIN_FREE_DISK_BYTES = 1024 * 1024 * 1024; // 1 GB
 const CHECK_INTERVAL_MS = 24 * 3600 * 1000;
 const INITIAL_DELAY_MS = 30 * 1000;
 const DISMISSAL_KEY = "hypeproofChat.updateDismissals";
@@ -83,11 +85,7 @@ const inflight = new Map<string, Promise<void>>();
 
 export function runUpdate(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<void> {
   if (!info.available) return Promise.resolve();
-  const existing = inflight.get(info.version);
-  if (existing) return existing;
-  const p = runUpdateImpl(info, deps).finally(() => inflight.delete(info.version));
-  inflight.set(info.version, p);
-  return p;
+  return pickInflight(inflight, info.version, () => runUpdateImpl(info, deps));
 }
 
 async function runUpdateImpl(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<void> {
@@ -101,11 +99,11 @@ async function runUpdateImpl(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<
     return;
   }
 
-  // 2. Disk space check
+  // 2. Disk space check (pure predicate in updateCheckerHelpers.hasFreeDisk)
   try {
     const stat = fs.statfsSync(os.tmpdir());
     const free = (stat.bavail as unknown as number) * (stat.bsize as unknown as number);
-    if (Number.isFinite(free) && free < MIN_FREE_DISK_BYTES) {
+    if (!hasFreeDisk(free, MIN_FREE_DISK_BYTES)) {
       vscode.window.showWarningMessage(
         `업데이트하려면 1 GB 이상 여유공간이 필요해요. 현재 ${(free / 1e9).toFixed(1)} GB 남음.`,
       );
