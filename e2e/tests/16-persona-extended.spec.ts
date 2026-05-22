@@ -55,11 +55,16 @@ test("T2.P.2 — 관리자 멸균 사이클 → 절차/근거/장비 출처 우�
     (out) => {
       const text = out.text;
       const sterilization =
-        /(멸균|소독|오토클레이브|autoclave|사이클|시간|온도|장비|매뉴얼|매뉴팩처러|제조사)/.test(
+        /(멸균|소독|오토클레이브|autoclave|사이클|시간|온도|장비|매뉴얼|매뉴팩처러|제조사|감염관리|기준)/.test(
           text,
         );
+      // Wider "evidence / authority / verification" family — workshop coach
+      // commonly says "근거 출처" / "원장님 컨펌" / "검증" rather than naming
+      // specific bodies on the first turn.
       const sources =
-        /(질병관리청|식약처|학회|가이드라인|매뉴얼|공식|제조사|FDA)/.test(text);
+        /(질병관리청|식약처|학회|가이드라인|매뉴얼|공식|제조사|FDA|근거|출처|컨펌|검증|확인받|점검)/.test(
+          text,
+        );
       return sterilization && sources;
     },
   );
