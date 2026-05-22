@@ -421,9 +421,13 @@ async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<voi
 
   // Source 3: dev convenience. A manually-launched local build picks up the
   // token `scripts/dev-stack.sh` writes, so contributors don't paste it every
-  // launch. Dev-gated: only when proxyUrl points at a local worker, so a real
-  // workshop build (proxyUrl = https://api.hypeproof-ai.xyz/v1) never reads it.
-  if (!token || token.length === 0) {
+  // launch. Dev-gated:
+  //   - only when proxyUrl points at a local worker (so a real workshop build
+  //     never reads /tmp); AND
+  //   - only when HPS_TEST_E2E is unset — the e2e fixture sets that flag so
+  //     `preseedToken: false` actually produces a cold launch instead of
+  //     getting silently filled in from the dev token file. Fix for #42.
+  if ((!token || token.length === 0) && !process.env.HPS_TEST_E2E) {
     const proxyUrl = vscode.workspace
       .getConfiguration("hypeproofChat")
       .get<string>("proxyUrl", "");
