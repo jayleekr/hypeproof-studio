@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>원장님 판정 — %%V1_TITLE%%</title>
+<style>
+  /* Clinical design track — workshop-output/verdicts/*.html */
+  :root{
+    --bg:#fafbfc; --surface:#ffffff; --ink:#1a1f2e; --muted:#4a5568;
+    --accent:#1e6091; --accent-soft:#e6f0f7;
+    --trust-good:#2ca58d; --trust-warn:#d68910; --trust-bad:#c0392b;
+    --pass-bg:#e6f7f1; --warn-bg:#fcf3e6; --risk-bg:#fbeae8;
+    --border:#e2e8f0; --radius:8px;
+    --font:-apple-system,'Apple SD Gothic Neo','Noto Sans KR',sans-serif;
+  }
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--font);
+    line-height:1.55;font-size:15px}
+  .page{max-width:680px;margin:0 auto;padding:24px 20px}
+  header{margin-bottom:18px}
+  .eyebrow{font-size:12px;color:var(--accent);font-weight:600;letter-spacing:.4px;text-transform:uppercase;margin-bottom:4px}
+  h1{font-size:18px;margin:0;color:var(--ink)}
+  .v1-title{color:var(--muted);font-size:14px;margin-top:4px}
+  .verdict-group{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:16px;margin-bottom:14px}
+  .verdict-group legend{font-size:13px;color:var(--muted);font-weight:600;padding:0 6px}
+  .verdict-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:8px}
+  .verdict-row label{flex:1;min-width:180px;cursor:pointer;display:flex;align-items:flex-start;gap:10px;
+    padding:12px 14px;border:2px solid var(--border);border-radius:var(--radius);background:var(--bg);
+    transition:all .12s ease}
+  .verdict-row label:hover{border-color:var(--accent)}
+  .verdict-row input{margin-top:3px;accent-color:var(--accent);width:18px;height:18px;flex-shrink:0}
+  .verdict-row label:has(input:checked).pass{border-color:var(--trust-good);background:var(--pass-bg)}
+  .verdict-row label:has(input:checked).warn{border-color:var(--trust-warn);background:var(--warn-bg)}
+  .verdict-row label:has(input:checked).risk{border-color:var(--trust-bad);background:var(--risk-bg)}
+  .verdict-row .v-title{font-weight:600;margin-bottom:2px}
+  .verdict-row .v-help{font-size:12px;color:var(--muted)}
+  .reason-block, .rule-block{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:14px;margin-bottom:14px}
+  .reason-block label, .rule-block label{display:block;font-weight:600;font-size:13px;color:var(--muted);margin-bottom:6px}
+  .reason-block textarea, .rule-block textarea{width:100%;box-sizing:border-box;font:inherit;
+    padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);min-height:56px;
+    resize:vertical;background:var(--bg)}
+  .reason-block textarea:focus, .rule-block textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+  .rule-block .hint{font-size:12px;color:var(--muted);margin-top:6px}
+  .actions{display:flex;gap:10px;flex-wrap:wrap}
+  .actions button{font:inherit;font-weight:600;border:0;border-radius:var(--radius);padding:10px 18px;cursor:pointer;min-height:44px}
+  .btn-primary{background:var(--accent);color:#fff}
+  .btn-secondary{background:var(--surface);color:var(--accent);border:1px solid var(--accent)}
+  .status{font-size:13px;color:var(--trust-good);margin-top:12px;min-height:18px}
+  footer{margin-top:22px;padding-top:16px;border-top:1px solid var(--border);font-size:12px;color:var(--muted)}
+  @media (max-width:520px){
+    .verdict-row{flex-direction:column}.verdict-row label{min-width:0}
+    .actions{flex-direction:column}.actions button{width:100%}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <div class="eyebrow">원장님 판정 (모의)</div>
+  <h1>%%V1_TITLE%%</h1>
+  <div class="v1-title">V1 검색엔진 초안을 판정합니다.</div>
+</header>
+
+<fieldset class="verdict-group" aria-label="판정 결과">
+  <legend>판정</legend>
+  <div class="verdict-row" role="radiogroup">
+    <label class="pass">
+      <input type="radio" name="verdict" value="PASS" %%VERDICT_PASS_CHECKED%%>
+      <span><span class="v-title">✅ PASS</span><span class="v-help">일반 안내 가능</span></span>
+    </label>
+    <label class="warn">
+      <input type="radio" name="verdict" value="REVIEW" %%VERDICT_REVIEW_CHECKED%%>
+      <span><span class="v-title">⚠️ 더 확인</span><span class="v-help">조건부 — 추가 확인 필요</span></span>
+    </label>
+    <label class="risk">
+      <input type="radio" name="verdict" value="RISK" %%VERDICT_RISK_CHECKED%%>
+      <span><span class="v-title">🚫 위험</span><span class="v-help">환자 사용 금지</span></span>
+    </label>
+  </div>
+</fieldset>
+
+<div class="reason-block">
+  <label for="reason">깨진 이유 (한 줄)</label>
+  <textarea id="reason" placeholder="예: 광고성 출처에 의존했음, 케이스별 기준 누락 등">%%REASON%%</textarea>
+</div>
+
+<div class="rule-block">
+  <label for="rule">검색 규칙으로 저장</label>
+  <textarea id="rule" placeholder="예: 광고 출처는 결과에 포함하지 않는다.">%%RULE_TO_SAVE%%</textarea>
+  <div class="hint">이 규칙은 우리 병원 검색 패킷에 누적되어 다음 검색에 자동 적용됩니다. (Ownership E14)</div>
+</div>
+
+<div class="actions">
+  <button class="btn-primary" id="save-rule" type="button">규칙 저장 → 우리 병원 패킷에 추가</button>
+  <button class="btn-secondary" id="back-to-v2" type="button">V2로 수정하러 가기</button>
+</div>
+<div class="status" id="status" aria-live="polite"></div>
+
+<footer>
+  깨지는 것이 실패가 아니라 학습입니다. 깨진 이유가 검색 규칙으로 누적되는 게 오늘 워크숍의 목표예요.
+</footer>
+
+</div>
+
+<script>
+(function(){
+  const status = document.getElementById('status');
+  const ruleBox = document.getElementById('rule');
+  const reasonBox = document.getElementById('reason');
+
+  document.getElementById('save-rule').addEventListener('click', () => {
+    const rule = ruleBox.value.trim();
+    const reason = reasonBox.value.trim();
+    if (!rule) { status.textContent = '저장할 검색 규칙을 한 줄 적어주세요.'; status.style.color = 'var(--trust-warn)'; return; }
+    // The host extension intercepts this postMessage and shows the
+    // manual-approve modal (REQ-E1/E2). The webview only requests.
+    if (typeof acquireVsCodeApi === 'function' || window.parent !== window) {
+      try {
+        const api = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null;
+        const verdict = document.querySelector('input[name="verdict"]:checked')?.value ?? 'REVIEW';
+        const entry = `[${verdict}] ${rule}` + (reason ? ` — ${reason}` : '');
+        if (api && typeof api.postMessage === 'function') {
+          api.postMessage({ type: 'request_action', action: 'append_artifact', payload: { artifact: 'rules', entry } });
+        } else {
+          window.parent.postMessage({ type: 'request_action', action: 'append_artifact', payload: { artifact: 'rules', entry } }, '*');
+        }
+        status.textContent = '저장 요청 보냄 — Studio가 승인 모달을 띄울 거예요.';
+        status.style.color = 'var(--trust-good)';
+      } catch (e) {
+        status.textContent = '저장 요청 실패: ' + e.message;
+        status.style.color = 'var(--trust-bad)';
+      }
+    } else {
+      // Standalone preview (no host) — just acknowledge.
+      status.textContent = '미리보기 모드 — Studio 안에서 실행하면 규칙이 검색 패킷에 누적됩니다.';
+      status.style.color = 'var(--accent)';
+    }
+  });
+
+  document.getElementById('back-to-v2').addEventListener('click', () => {
+    status.textContent = 'V2로 돌아가서 깨진 이유를 반영하세요.';
+    status.style.color = 'var(--accent)';
+  });
+})();
+</script>
+</body>
+</html>

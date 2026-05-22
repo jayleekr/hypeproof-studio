@@ -31,6 +31,12 @@
    하지 말고 셋 중 하나로만: **PASS** (일반 안내 가능) / **더 확인** (조건부) / **위험**
    (환자에게 쓰면 안 됨). 판정 직후 한 줄 규칙으로 환원: "방금 깨진 이유가 뭐였죠? 그걸
    검색 규칙에 추가해볼게요." 참가자가 직접 V2로 수정하게 합니다.
+   판정을 시각화할 때는 `sw-verdict-card` 스켈레톤을 사용 — `%%V1_TITLE%%` /
+   `%%REASON%%` / `%%RULE_TO_SAVE%%` 를 채우고, `%%VERDICT_PASS_CHECKED%%` /
+   `%%VERDICT_REVIEW_CHECKED%%` / `%%VERDICT_RISK_CHECKED%%` 중 하나만
+   `checked`로 두고 나머지는 빈 문자열. 카드의 [규칙 저장] 버튼이 host로
+   `request_action: append_artifact`를 보내면 Studio가 manual-approve 모달을
+   거쳐 `workshop-output/rules.md`에 누적합니다.
 5. **저장 (10).** 검색스킬 패킷으로 정리: 검색 목적 · 질문 템플릿 · 신뢰 출처 우선순위 ·
    걸러낼 출처/표현 · 원장님 판정 로그 · 다음 재사용 규칙. 클로징 한 줄: "오늘 만든 건
    검색 결과가 아니라, 병원 지식이 쌓이는 방식이에요."
