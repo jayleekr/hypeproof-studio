@@ -1,0 +1,36 @@
+// Pure helpers for proxyClient.ts. Kept vscode-free + fetch-free so they can
+// be unit-tested under plain Node — mirrors mintStudentTokenHelpers.ts.
+
+interface BuildHeadersArgs {
+  token?: string;
+  coachName?: string;
+  coachPersonality?: string;
+}
+
+/**
+ * Build the request headers for POST /v1/chat/completions.
+ *
+ * HTTP header values must be byte-safe (RFC 7230). Korean (and any non-ASCII)
+ * coach names + personalities get URL-encoded; the Worker decodes on receipt.
+ *
+ * A naive `headers["x-hps-coach-name"] = coachName` would throw
+ * `TypeError: invalid character in header content` the moment a Korean coach
+ * name is set — silent failure for half our user base.
+ */
+export function buildProxyHeaders(args: BuildHeadersArgs): Record<string, string> {
+  const { token, coachName, coachPersonality } = args;
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    accept: "text/event-stream",
+  };
+  if (token) {
+    headers.authorization = `Bearer ${token}`;
+  }
+  if (coachName && coachName.trim()) {
+    headers["x-hps-coach-name"] = encodeURIComponent(coachName.trim());
+  }
+  if (coachPersonality && coachPersonality.trim()) {
+    headers["x-hps-coach-personality"] = encodeURIComponent(coachPersonality.trim());
+  }
+  return headers;
+}
