@@ -77,7 +77,12 @@ export function ChatPanel(props: Props) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const ux: UxConfig = config?.profile?.ux ?? DEFAULT_UX;
-  const coachName = config?.coach?.name?.trim() || ux.coach.fallback_name || "코치";
+  // Fixed-naming cohorts (e.g. boah-dental) must NOT show a user-supplied
+  // coach name carried over from a different cohort's user-data-dir (#140).
+  const coachName =
+    ux.coach.naming_mode === "fixed"
+      ? (ux.coach.fallback_name || "코치")
+      : (config?.coach?.name?.trim() || ux.coach.fallback_name || "코치");
 
   // Show the kid-friendly naming card when: profile loaded, it asks the kid to
   // name the coach, and they haven't yet.
