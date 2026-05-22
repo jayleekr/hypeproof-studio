@@ -313,9 +313,14 @@ async function autoOnboard(
 
   // 2. Token exists — verify it actually works. A stale/expired token would
   //    otherwise silently degrade the whole UX (no chips, no naming, default
-  //    "코치", raw 401 on first message). Re-prompt instead.
+  //    "코치", raw 401 on first message). REQ-A5 / REQ-B3: show a friendly
+  //    warning toast so the kid knows what happened before the QuickInput
+  //    pops, then re-open setToken.
   const profile = await provider.ensureProfile();
   if (!profile) {
+    vscode.window.showWarningMessage(
+      "저장된 토큰이 유효하지 않은 것 같아요. 선생님께 토큰을 다시 받아주세요. 🔑",
+    );
     await new Promise((r) => setTimeout(r, 400));
     await vscode.commands.executeCommand("hypeproof-chat.setToken");
     return;
