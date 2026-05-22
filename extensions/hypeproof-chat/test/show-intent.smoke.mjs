@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 
-const { isShowIntent, clampHistory, HISTORY_MAX } = await import(
+const { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput, COACH_NAME_MAX, COACH_PERSONALITY_MAX } = await import(
   "../src/chatPanelHelpers.ts"
 );
 
@@ -147,6 +147,51 @@ console.log("\nAll show-intent smoke tests passed.");
   assert.deepEqual(clampHistory(["a"], ["b"], -5), []);
 
   console.log("✅ clampHistory: 8 cases (empty, under/at/over cap, 250-clamp, defensive)");
+}
+
+// ─── sanitizeCoachInput (REQ-F3) ────────────────────────────────────
+{
+  assert.equal(COACH_NAME_MAX, 40);
+  assert.equal(COACH_PERSONALITY_MAX, 200);
+
+  // Happy
+  assert.deepEqual(
+    sanitizeCoachInput("코디", "친절한", "코치"),
+    { name: "코디", personality: "친절한" },
+  );
+
+  // Trim
+  assert.deepEqual(
+    sanitizeCoachInput("  Tony  ", "  ", "코치"),
+    { name: "Tony", personality: "" },
+  );
+
+  // Empty name → fallback
+  assert.deepEqual(
+    sanitizeCoachInput("", "", "기본코치"),
+    { name: "기본코치", personality: "" },
+  );
+  assert.deepEqual(
+    sanitizeCoachInput("   ", "p", "fallback"),
+    { name: "fallback", personality: "p" },
+  );
+
+  // Length clamp on name (40)
+  const long41 = "a".repeat(41);
+  const clampedName = sanitizeCoachInput(long41, "", "_").name;
+  assert.equal(clampedName.length, 40);
+  assert.equal(clampedName, "a".repeat(40));
+
+  // Length clamp on personality (200)
+  const long201 = "p".repeat(201);
+  const clampedPers = sanitizeCoachInput("n", long201, "_").personality;
+  assert.equal(clampedPers.length, 200);
+
+  // Korean char counted by code unit (each Hangul = 1 unit)
+  const koreanName = "코".repeat(41);
+  assert.equal(sanitizeCoachInput(koreanName, "", "_").name.length, 40);
+
+  console.log("✅ sanitizeCoachInput: trim + fallback + 40/200 clamp + Korean chars");
 }
 
 console.log("\nAll chatPanelHelpers smoke tests passed.");

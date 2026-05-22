@@ -12,7 +12,7 @@ import {
   WebviewMessage,
   ActionRequest,
 } from "./protocol";
-import { isShowIntent, clampHistory, HISTORY_MAX } from "./chatPanelHelpers";
+import { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
 const HISTORY_KEY = "hypeproofChat.history";
@@ -146,11 +146,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       personality = ans ?? (opts.force ? existing.personality : "");
     }
 
-    const next: CoachInfo = {
-      name: (name.trim() || fallback).slice(0, 40),
-      personality: personality.trim().slice(0, 200),
-      configured: true,
-    };
+    const sanitized = sanitizeCoachInput(name.trim() || "", personality, fallback);
+    const next: CoachInfo = { ...sanitized, configured: true };
     await this.context.globalState.update(COACH_KEY, next);
     await this.context.globalState.update(COACH_RITUAL_DONE_KEY, true);
     await this.postConfig();
@@ -223,11 +220,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private async saveCoachFromWebview(name: string, personality: string): Promise<void> {
     const profile = await this.ensureProfile();
     const fallback = profile?.ux.coach.fallback_name ?? "코치";
-    const next: CoachInfo = {
-      name: (name.trim() || fallback).slice(0, 40),
-      personality: personality.trim().slice(0, 200),
-      configured: true,
-    };
+    const sanitized = sanitizeCoachInput(name, personality, fallback);
+    const next: CoachInfo = { ...sanitized, configured: true };
     await this.context.globalState.update(COACH_KEY, next);
     await this.context.globalState.update(COACH_RITUAL_DONE_KEY, true);
     await this.postConfig();
