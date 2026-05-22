@@ -193,6 +193,76 @@ jobs:
             exit 1
           fi
 
+      - name: Smoke portable Windows build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $zip = Get-ChildItem -Path dist -Filter "HypeProof Studio-win32-x64-*.zip" | Select-Object -First 1
+          if (-not $zip) {
+            throw "Portable Windows zip artifact was not found in dist/"
+          }
+
+          $smokeRoot = Join-Path $env:RUNNER_TEMP "hps-smoke"
+          if (Test-Path $smokeRoot) {
+            Remove-Item -Recurse -Force $smokeRoot
+          }
+          New-Item -ItemType Directory -Path $smokeRoot | Out-Null
+          Expand-Archive -Path $zip.FullName -DestinationPath $smokeRoot -Force
+
+          $productPath = Join-Path $smokeRoot "resources/app/product.json"
+          if (-not (Test-Path $productPath)) {
+            throw "resources/app/product.json was not found in portable zip"
+          }
+
+          $product = Get-Content $productPath -Raw | ConvertFrom-Json
+          if ($product.nameShort -ne "HypeProof Studio") {
+            throw "Unexpected nameShort: $($product.nameShort)"
+          }
+          if ($product.applicationName -ne "hypeproof-studio") {
+            throw "Unexpected applicationName: $($product.applicationName)"
+          }
+          if ($product.win32DirName -ne "HypeProof Studio") {
+            throw "Unexpected win32DirName: $($product.win32DirName)"
+          }
+          if ($product.win32AppUserModelId -ne "HypeProofLab.HypeProofStudio") {
+            throw "Unexpected win32AppUserModelId: $($product.win32AppUserModelId)"
+          }
+
+          $extensionPath = Join-Path $smokeRoot "resources/app/extensions/hypeproof-chat/package.json"
+          if (-not (Test-Path $extensionPath)) {
+            throw "hypeproof-chat built-in extension was not bundled"
+          }
+
+          $exe = Join-Path $smokeRoot "HypeProof Studio.exe"
+          if (-not (Test-Path $exe)) {
+            throw "HypeProof Studio.exe was not found in portable zip"
+          }
+
+          $stdout = Join-Path $env:RUNNER_TEMP "hps-version.out"
+          $stderr = Join-Path $env:RUNNER_TEMP "hps-version.err"
+          $args = @(
+            "--version",
+            "--user-data-dir", (Join-Path $env:RUNNER_TEMP "hps-user-data"),
+            "--extensions-dir", (Join-Path $env:RUNNER_TEMP "hps-extensions"),
+            "--disable-gpu",
+            "--no-sandbox"
+          )
+
+          $proc = Start-Process -FilePath $exe -ArgumentList $args -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if (-not $proc.WaitForExit(60000)) {
+            Stop-Process -Id $proc.Id -Force
+            throw "HypeProof Studio.exe --version timed out"
+          }
+          if ($proc.ExitCode -ne 0) {
+            Get-Content $stdout -ErrorAction SilentlyContinue
+            Get-Content $stderr -ErrorAction SilentlyContinue
+            throw "HypeProof Studio.exe --version failed with exit code $($proc.ExitCode)"
+          }
+
+          Write-Host "HypeProof Studio.exe --version output:"
+          Get-Content $stdout
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
