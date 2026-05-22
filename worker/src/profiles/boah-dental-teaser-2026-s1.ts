@@ -19,10 +19,10 @@ import systemPromptMd from "../prompts/boah-dental-teaser-2026-s1.md";
 //   Ownership          → Essence 14 (언러닝)
 // → essences_focus = [2, 7, 9, 11, 12, 13, 14].
 //
-// game.template_tier: v4 산출물은 검색 웹앱이지 게임이 아니다. 현 schema에
-// "search-webapp" tier가 없어 kids-basic을 placeholder로 유지; 라이브 프리뷰는
-// 검색 웹앱 빌드 흐름에서도 동일하게 동작. tier 추가는 별개 작업 (스키마 진화
-// = #63 per-cohort segmentation과 함께).
+// game.template_tier: v4 산출물은 검색 웹앱. 전용 "search-webapp" tier로 #150
+// 에서 분리 (이전엔 kids-basic placeholder로 인해 LLM 응답에 게임 frame 잔재 leak
+// #141 발생). search-webapp tier는 게임 루프 없이 정적 HTML/CSS/JS — 검색·필터·
+// 출처 신뢰도 UI가 핵심.
 // Source: JinyongShin/hypeproof_kids_edu PR #11
 // (kids_edu_vault/wiki/specs/track-b/dental-supersearch-curriculum-v4.md).
 export const profile: Profile = {
@@ -58,9 +58,9 @@ export const profile: Profile = {
     auto_start: true,
   },
   game: {
-    // v4는 검색 웹앱 산출물 — schema에 search-webapp tier 추가 전까지 kids-basic을
-    // placeholder로. 라이브 프리뷰는 검색 웹앱 흐름에서도 동일하게 동작.
-    template_tier: "kids-basic",
+    // v4 산출물은 검색 웹앱 — #150에서 search-webapp tier로 분리. 게임 frame
+    // 잔재 leak (#141) 제거 + sw-dental-v1 skeleton이 system prompt에 inject됨.
+    template_tier: "search-webapp",
   },
   publishing: {
     // 단발 티저 — per-user GitHub Pages 불필요. 로컬 미리보기로 충분.
