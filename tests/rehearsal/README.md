@@ -3,7 +3,7 @@
 Issue #83 의 cross-platform 운영 엣지케이스 테스트 번들.
 **Node 22+ 만 있으면** PowerShell · cmd · Git Bash · macOS · Linux 어디서나 동일하게 동작.
 
-## What's covered (5 categories, ~30 cases)
+## What's covered (6 categories, ~35 cases)
 
 | 영역 | 파일 | 케이스 |
 |---|---|---|
@@ -12,6 +12,7 @@ Issue #83 의 cross-platform 운영 엣지케이스 테스트 번들.
 | R3 — Coach behavior under stress | `03-coach-stress.test.mjs` | 8 |
 | R4 — Issuer & mint edge | `04-issuer-mint.test.mjs` | 6 |
 | R5 — Rate-limit & defense | `05-rate-limit.test.mjs` | 5 |
+| R6 — Report endpoint (#64) | `06-report-endpoint.test.mjs` | 5 |
 
 각 테스트는 필요한 환경변수가 없으면 **skip** 됩니다. 가지고 있는 토큰 종류에 맞춰 부분 실행해도 OK.
 

@@ -15,6 +15,7 @@
     "test:token": "node --test 02-token-lifecycle.test.mjs",
     "test:coach": "node --test 03-coach-stress.test.mjs",
     "test:issuer": "node --test 04-issuer-mint.test.mjs",
-    "test:rate": "node --test 05-rate-limit.test.mjs"
+    "test:rate": "node --test 05-rate-limit.test.mjs",
+    "test:report": "node --test 06-report-endpoint.test.mjs"
   }
 }
