@@ -553,6 +553,22 @@ function MessageItem({
  *   note so the user can retry instead of staring at a spinner forever. (#159)
  * - When done normally: prose + a collapsed "📄 코드 보기" pill per code block.
  */
+/**
+ * Stream-length-based stage label for the build spinner (#161). Lets the
+ * participant feel forward motion instead of staring at a static "만드는 중…".
+ *
+ * Stages are derived from cumulative response length + fence-open detection;
+ * no LLM-side cooperation required. Tuned for the dental V1 skeleton
+ * (~2.5KB HTML output).
+ */
+function buildStageText(buildingLabel: string, content: string, fenceOpen: boolean): string {
+  if (fenceOpen) return "거의 다 됐어요";
+  const len = content.length;
+  if (len > 500) return `${buildingLabel} — V1 화면 그리는 중`;
+  if (len > 200) return `${buildingLabel} — 검색어·출처 정리`;
+  return `${buildingLabel} — 검색 주제 잡는 중`;
+}
+
 function AssistantContent({
   content,
   streaming,
@@ -563,6 +579,7 @@ function AssistantContent({
   buildingLabel: string;
 }) {
   const segments = useMemo(() => splitFences(content), [content]);
+  const hasOpenFence = segments.some((s) => s.type === "code-open");
 
   if (content.length === 0) {
     return <span>{streaming ? "생각하는 중… ✨" : ""}</span>;
@@ -576,15 +593,14 @@ function AssistantContent({
         }
         if (seg.type === "code-open") {
           if (streaming) {
+            const stage = buildStageText(buildingLabel, content, hasOpenFence);
             return (
               <div key={i} className="hps-code-progress">
-                🛠️ {buildingLabel}… <span className="hps-dots">✨</span>
+                🛠️ {stage}… <span className="hps-dots">✨</span>
               </div>
             );
           }
-          // Stream ended with the fence still open → don't leave the user
-          // staring at an endless spinner. Render whatever code we got and
-          // tell them it was cut off so they can retry.
+          // Stream ended with the fence still open → render partial + retry note.
           return (
             <div key={i}>
               <CodePill code={seg.value} />
@@ -596,6 +612,11 @@ function AssistantContent({
         }
         return <CodePill key={i} code={seg.value} />;
       })}
+      {streaming && !hasOpenFence && content.length > 0 && (
+        <div className="hps-code-progress hps-code-progress-prelude">
+          🛠️ {buildStageText(buildingLabel, content, false)}… <span className="hps-dots">✨</span>
+        </div>
+      )}
     </>
   );
 }

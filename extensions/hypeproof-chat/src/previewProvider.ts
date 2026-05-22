@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
 import { buildPreviewShellCsp, PREVIEW_IFRAME_SANDBOX } from "./cspBuilder";
-import { sanitizeArtifactEntry, ARTIFACT_FILES } from "./previewArtifacts";
+import { sanitizeArtifactEntry, ARTIFACT_FILES, applyPlaceholderDefaults } from "./previewArtifacts";
 
 /**
  * Sandboxed HTML preview for AI-generated webapps.
@@ -46,6 +46,9 @@ export class PreviewProvider {
 
   /** Open (or reuse) the editor-area preview panel and render `html`. */
   async show(html: string): Promise<void> {
+    // Replace any unresolved `%%KEY%%` with sensible defaults (#161). Lets
+    // partial LLM responses still render a recognizable V1.
+    html = applyPlaceholderDefaults(html);
     if (!this.panel) {
       this.panel = vscode.window.createWebviewPanel(
         "hypeproofPreview",
