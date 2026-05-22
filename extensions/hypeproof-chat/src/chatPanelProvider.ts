@@ -13,6 +13,7 @@ import {
   ActionRequest,
 } from "./protocol";
 import { isShowIntent } from "./chatPanelHelpers";
+import { buildChatPanelCsp } from "./cspBuilder";
 
 const HISTORY_KEY = "hypeproofChat.history";
 const HISTORY_MAX = 200;
@@ -494,14 +495,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       },
     );
     const nonce = randomId();
-    const csp = [
-      `default-src 'none'`,
-      `img-src ${webview.cspSource} data:`,
-      `style-src ${webview.cspSource} 'unsafe-inline'`,
-      `script-src 'nonce-${nonce}' ${webview.cspSource}`,
-      `font-src ${webview.cspSource}`,
-      `connect-src ${webview.cspSource}`,
-    ].join("; ");
+    const csp = buildChatPanelCsp({ cspSource: webview.cspSource, nonce });
     html = html.replace("<head>", `<head><meta http-equiv="Content-Security-Policy" content="${csp}">`);
     html = html.replace(/<script /g, `<script nonce="${nonce}" `);
     return html;
