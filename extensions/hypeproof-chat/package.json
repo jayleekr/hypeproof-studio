@@ -2,12 +2,14 @@
   "name": "hypeproof-chat",
   "displayName": "HypeProof Chat",
   "description": "Built-in chat panel for HypeProof Studio.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "hypeproof",
   "engines": {
     "vscode": "^1.90.0"
   },
-  "categories": ["Other"],
+  "categories": [
+    "Other"
+  ],
   "activationEvents": [
     "onStartupFinished"
   ],
@@ -88,8 +90,17 @@
         },
         "hypeproofChat.requireApprovalFor": {
           "type": "array",
-          "items": { "type": "string", "enum": ["writeFile", "executeShell"] },
-          "default": ["writeFile", "executeShell"],
+          "items": {
+            "type": "string",
+            "enum": [
+              "writeFile",
+              "executeShell"
+            ]
+          },
+          "default": [
+            "writeFile",
+            "executeShell"
+          ],
           "description": "Actions that require explicit user approval before execution."
         }
       }
