@@ -35,6 +35,55 @@ export function resolveCoach(
   return { name, personality };
 }
 
+// ─── App tone (game vs search-webapp UI copy) (#159) ──────────────────
+
+export interface ProfileToneShape {
+  game?: { template_tier?: string };
+}
+
+export type AppTone = "game" | "search";
+
+/**
+ * Pick the UI tone for hard-coded chat-panel labels.
+ *
+ * `search-webapp` tier (e.g. boah-dental) → "search" tone (검색엔진 어휘).
+ * Anything else (kids-basic, etc.) → "game" tone — the legacy default.
+ *
+ * Centralized so both the host extension and the webview render consistent
+ * copy without each one redoing the tier check.
+ */
+export function appToneOf(profile: ProfileToneShape | null | undefined): AppTone {
+  return profile?.game?.template_tier === "search-webapp" ? "search" : "game";
+}
+
+/** Hard-coded copy table keyed by tone. */
+export const TONE_LABELS = {
+  game: {
+    buildingLabel: "게임 만드는 중",
+    namingEmoji: "🎮",
+    previewTitle: "🎮 내 게임",
+    previewPlaceholder: "게임이 여기에 나와요",
+    tokenConfirmTail: "같이 만들어봐요 🎮",
+    showIntentReply: "오른쪽 창에 게임을 열었어요! 🎮 한번 해보세요.",
+    aboutTitle: "🎮 내 첫 게임",
+    aboutSubtitle: '채팅에서 "게임 만들어줘"라고 말해보세요!',
+  },
+  search: {
+    buildingLabel: "검색엔진 만드는 중",
+    namingEmoji: "🔍",
+    previewTitle: "🔍 내 검색엔진",
+    previewPlaceholder: "검색엔진이 여기에 나와요",
+    tokenConfirmTail: "같이 만들어봐요 🔍",
+    showIntentReply: "오른쪽 창에 검색엔진을 띄웠어요! 🔍 한번 검색해보세요.",
+    aboutTitle: "🔍 내 첫 검색엔진",
+    aboutSubtitle: '채팅에서 "V1 짜줘"라고 말해보세요!',
+  },
+} as const;
+
+export function labelsForProfile(profile: ProfileToneShape | null | undefined) {
+  return TONE_LABELS[appToneOf(profile)];
+}
+
 /** workspaceState ceiling — oldest turns dropped beyond this. */
 export const HISTORY_MAX = 200;
 

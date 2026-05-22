@@ -143,16 +143,17 @@ test("T2.F.5 — 중도 포기 → 부드러운 출구 + 지금까지 규칙 1�
       }),
     (out) => {
       const text = out.text;
-      // Two valid coaching patterns when a participant taps out:
+      // Three valid coaching patterns when a participant taps out:
       //   (a) explicit graceful exit + takeaway
-      //   (b) compassionate reframe + low-pressure options (10분 줄임 / 쉬운 조각 / 끝내기)
+      //   (b) compassionate reframe + low-pressure options
+      //   (c) location-probing reframe ("어디서 막혔나요?" + option list)
       // Either is acceptable — the *bad* pattern is silent ignore or pushing on.
       const acknowledges =
-        /수고|괜찮|언제든|다음에|쉬어|이만큼|충분|어렵|막막|어디서 막|어떤 부분|어렵게|힘드/.test(
+        /수고|괜찮|언제든|다음에|쉬어|이만큼|충분|어렵|막막|어디서 막|어떤 부분|어렵게|힘드|당연/.test(
           text,
         );
       const offersPath =
-        /규칙|배운|얻은|남은|기록|적어|메모|정리|한 줄|간단히|10분|짧게|쉬운|조각|선택|끝내|중에|딱 하나|딱 한/.test(
+        /규칙|배운|얻은|남은|기록|적어|메모|정리|한 줄|간단히|10분|짧게|쉬운|조각|선택|끝내|중에|딱 하나|딱 한|어디서|어디부터|어느 부분|어떤 부분|어느 쪽|한 마디|한 가지|다시 시작|다시 할 필요|처음부터/.test(
           text,
         );
       return acknowledges && offersPath;

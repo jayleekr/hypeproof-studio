@@ -12,7 +12,7 @@ import {
   WebviewMessage,
   ActionRequest,
 } from "./protocol";
-import { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput, abortAllStreams, resolveCoach } from "./chatPanelHelpers";
+import { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput, abortAllStreams, resolveCoach, labelsForProfile } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
 const HISTORY_KEY = "hypeproofChat.history";
@@ -173,6 +173,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       (p) => {
         this.cachedProfile = p;
         this.profileFetchPromise = null;
+        // Apply tone-appropriate labels to the preview panel (#159).
+        const labels = labelsForProfile(p);
+        this.preview.setLabels({
+          title: labels.previewTitle,
+          placeholder: labels.previewPlaceholder,
+          emoji: labels.namingEmoji,
+        });
         return p;
       },
       () => {
@@ -303,14 +310,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (isShowIntent(text)) {
       const lastGame = this.extractLastRenderableCode();
       if (lastGame) {
+        const labels = labelsForProfile(this.cachedProfile);
+        const reply = labels.showIntentReply;
         const uid = randomId();
         const aid = randomId();
         void this.post({ type: "streamStart", streamId: uid, messageId: aid });
-        void this.post({ type: "streamChunk", streamId: uid, delta: "오른쪽 창에 게임을 열었어요! 🎮 한번 해보세요." });
+        void this.post({ type: "streamChunk", streamId: uid, delta: reply });
         void this.post({ type: "streamEnd", streamId: uid });
         await this.appendHistory([
           { id: randomId(), role: "user", content: text, createdAt: Date.now() },
-          { id: aid, role: "assistant", content: "오른쪽 창에 게임을 열었어요! 🎮 한번 해보세요.", createdAt: Date.now() },
+          { id: aid, role: "assistant", content: reply, createdAt: Date.now() },
         ]);
         void this.preview.show(lastGame);
         void this.saveGameToWorkspace(lastGame);

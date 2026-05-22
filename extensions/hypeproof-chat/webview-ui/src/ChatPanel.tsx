@@ -84,6 +84,15 @@ export function ChatPanel(props: Props) {
       ? (ux.coach.fallback_name || "코치")
       : (config?.coach?.name?.trim() || ux.coach.fallback_name || "코치");
 
+  // Tone for hard-coded chat-panel labels — game (kids cohorts) vs
+  // search-webapp (보아치과 류). Centralized in chatPanelHelpers (#159) but
+  // duplicated as a one-liner here so the webview stays vscode-free.
+  const isSearchWebapp =
+    (config?.profile as { game?: { template_tier?: string } } | undefined)?.game
+      ?.template_tier === "search-webapp";
+  const buildingLabel = isSearchWebapp ? "검색엔진 만드는 중" : "게임 만드는 중";
+  const namingEmoji = isSearchWebapp ? "🔍" : "🎮";
+
   // Show the kid-friendly naming card when: profile loaded, it asks the kid to
   // name the coach, and they haven't yet.
   const [forceNaming, setForceNaming] = useState(false);
@@ -103,6 +112,7 @@ export function ChatPanel(props: Props) {
         namingPromptMd={config.profile.ux.coach.naming_prompt_md}
         personalityPromptMd={config.profile.ux.coach.personality_prompt_md}
         fallbackName={config.profile.ux.coach.fallback_name}
+        emoji={namingEmoji}
         onSave={(n, p) => {
           props.onSaveCoach(n, p);
           setForceNaming(false);
@@ -207,6 +217,7 @@ export function ChatPanel(props: Props) {
             streaming={streaming}
             ux={ux}
             coachName={coachName}
+            buildingLabel={buildingLabel}
             messages={messages}
             onRunCode={props.onRunCode}
             onRetry={props.onRetry}
@@ -317,11 +328,13 @@ function NamingCard({
   namingPromptMd,
   personalityPromptMd,
   fallbackName,
+  emoji,
   onSave,
 }: {
   namingPromptMd: string;
   personalityPromptMd: string;
   fallbackName: string;
+  emoji: string;
   onSave: (name: string, personality: string) => void;
 }) {
   const [step, setStep] = useState<"name" | "personality">("name");
@@ -346,7 +359,7 @@ function NamingCard({
   return (
     <div className="hps-shell">
       <div className="hps-naming">
-        <div className="hps-naming-emoji">🎮</div>
+        <div className="hps-naming-emoji">{emoji}</div>
         {step === "name" ? (
           <>
             <h2
@@ -473,6 +486,7 @@ function MessageItem({
   streaming,
   ux,
   coachName,
+  buildingLabel,
   messages,
   onRunCode,
   onRetry,
@@ -481,6 +495,7 @@ function MessageItem({
   streaming: boolean;
   ux: UxConfig;
   coachName: string;
+  buildingLabel: string;
   messages: ChatMessage[];
   onRunCode: (html: string) => void;
   onRetry: (prompt: string) => void;
@@ -521,7 +536,7 @@ function MessageItem({
       </div>
       <div className="hps-msg-body">
         {message.role === "assistant" ? (
-          <AssistantContent content={message.content} streaming={streaming} />
+          <AssistantContent content={message.content} streaming={streaming} buildingLabel={buildingLabel} />
         ) : (
           message.content
         )}
@@ -532,11 +547,21 @@ function MessageItem({
 
 /**
  * Render an assistant message with code fences hidden behind a collapsed pill.
- * A 9-10 year old should see the friendly prose, not a wall of HTML.
- * - While streaming and a fence has opened: show "게임 만드는 중… ✨".
- * - When done: prose + a collapsed "📄 코드 보기" pill per code block.
+ * - While streaming and a fence has opened: show "<tone> 만드는 중… ✨".
+ * - When streaming ends with the fence still open (max_tokens cut / network
+ *   drop / model bailed) — render the partial as a code pill + a stuck-stream
+ *   note so the user can retry instead of staring at a spinner forever. (#159)
+ * - When done normally: prose + a collapsed "📄 코드 보기" pill per code block.
  */
-function AssistantContent({ content, streaming }: { content: string; streaming: boolean }) {
+function AssistantContent({
+  content,
+  streaming,
+  buildingLabel,
+}: {
+  content: string;
+  streaming: boolean;
+  buildingLabel: string;
+}) {
   const segments = useMemo(() => splitFences(content), [content]);
 
   if (content.length === 0) {
@@ -550,10 +575,22 @@ function AssistantContent({ content, streaming }: { content: string; streaming: 
           return <span key={i} className="hps-prose">{seg.value}</span>;
         }
         if (seg.type === "code-open") {
-          // Fence opened but not closed yet → still generating.
+          if (streaming) {
+            return (
+              <div key={i} className="hps-code-progress">
+                🛠️ {buildingLabel}… <span className="hps-dots">✨</span>
+              </div>
+            );
+          }
+          // Stream ended with the fence still open → don't leave the user
+          // staring at an endless spinner. Render whatever code we got and
+          // tell them it was cut off so they can retry.
           return (
-            <div key={i} className="hps-code-progress">
-              🛠️ 게임 만드는 중… <span className="hps-dots">✨</span>
+            <div key={i}>
+              <CodePill code={seg.value} />
+              <div className="hps-stream-note">
+                응답이 도중에 끊겼어요. 위의 🔄 버튼으로 다시 시도해주세요.
+              </div>
             </div>
           );
         }
