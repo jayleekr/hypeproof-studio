@@ -1,4 +1,5 @@
 import { ChatMessage, ResolvedProfile } from "./protocol";
+import { buildProxyHeaders } from "./proxyClientHelpers";
 
 /**
  * Auth/session failures need different handling than generic errors:
@@ -105,19 +106,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
   ];
 
   const url = proxyUrl.replace(/\/$/, "") + "/chat/completions";
-  const headers: Record<string, string> = {
-    "content-type": "application/json",
-    accept: "text/event-stream",
-  };
-  if (token) headers.authorization = `Bearer ${token}`;
-  // HTTP header values must be byte-safe. Korean (and any non-ASCII) coach
-  // names get URL-encoded; the Worker decodes on receipt.
-  if (coachName && coachName.trim()) {
-    headers["x-hps-coach-name"] = encodeURIComponent(coachName.trim());
-  }
-  if (coachPersonality && coachPersonality.trim()) {
-    headers["x-hps-coach-personality"] = encodeURIComponent(coachPersonality.trim());
-  }
+  const headers = buildProxyHeaders({ token, coachName, coachPersonality });
 
   const res = await fetch(url, {
     method: "POST",
