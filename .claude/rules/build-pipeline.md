@@ -75,6 +75,18 @@ bash scripts/run-build.sh logs/build-$(date +%Y%m%d-%H%M%S).log
 
 `run-build.sh`'s reset step makes restart idempotent.
 
+## Post-build verification (mandatory)
+
+After every successful `run-build.sh`, run `bash scripts/verify-branding.sh`.
+Non-zero exit blocks release. Covers epic #89 REQ-J1·J2·J3·J4: display name,
+bundle id, data folder, and "VSCodium/codium" leakage outside legal
+attribution. The script is also the canonical answer to "is this build
+ready to publish?" — never `gh release create` from a build that didn't
+pass it.
+
+In CI: pass `SKIP_DATA_FOLDER=1` since the data folder only exists after a
+launch.
+
 ## Phase-aware behavior
 
 - **Phase 0–1**: vanilla build first. Do not introduce branding overrides yet.
