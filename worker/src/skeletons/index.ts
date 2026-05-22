@@ -7,6 +7,8 @@ import jumperHtml from "./kids-basic/jumper.html";
 import dodgeHtml from "./kids-basic/dodge.html";
 // @ts-ignore
 import dentalV1Html from "./search-webapp/dental-v1.html";
+// @ts-ignore
+import verdictCardHtml from "./search-webapp/verdict-card.html";
 
 const REGISTRY: Skeleton[] = [
   {
@@ -42,6 +44,15 @@ const REGISTRY: Skeleton[] = [
       "치과/의료 직군용 검색엔진 V1 — 출처 신뢰도 4단계(학회·가이드라인·블로그·광고) 필터 + 결정 reframe + 결과 리스트",
     tags: ["검색", "찾기", "출처", "신뢰도", "엔진", "V1", "치과", "병원", "환자", "임상"],
     html: dentalV1Html as unknown as string,
+  },
+  {
+    id: "sw-verdict-card",
+    tier: "search-webapp",
+    genre: "verdict-card",
+    summary_ko:
+      "원장님 판정 카드 — PASS/더 확인/위험 3-state + 깨진 이유 + 검색 규칙 저장 (manual-approve modal 연동)",
+    tags: ["판정", "PASS", "위험", "더 확인", "원장님", "검증", "규칙", "저장"],
+    html: verdictCardHtml as unknown as string,
   },
 ];
 
