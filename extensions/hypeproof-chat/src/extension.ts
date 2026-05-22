@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { ChatPanelProvider } from "./chatPanelProvider";
+import { labelsForProfile } from "./chatPanelHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
 import { runMintStudentToken, ISSUER_TOKEN_KEY } from "./mintStudentToken";
@@ -81,7 +82,8 @@ export async function activate(context: vscode.ExtensionContext) {
       // prevent postConfig from reaching the webview).
       const profile = await provider.ensureProfile();
       if (profile) {
-        vscode.window.showInformationMessage("토큰 확인 완료! 같이 만들어봐요 🎮");
+        const tail = labelsForProfile(profile).tokenConfirmTail;
+        vscode.window.showInformationMessage(`토큰 확인 완료! ${tail}`);
       } else {
         vscode.window.showWarningMessage(
           "토큰이 맞는지 확인이 안 돼요. 선생님께 토큰을 다시 받아주세요.",

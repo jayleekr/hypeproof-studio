@@ -21,15 +21,35 @@ export class PreviewProvider {
   private panel: vscode.WebviewPanel | undefined;
   private ready = false;
   private pendingHtml: string | null = null;
+  private labels: { title: string; placeholder: string; emoji: string } = {
+    title: "🎮 내 게임",
+    placeholder: "게임이 여기에 나와요",
+    emoji: "🎮",
+  };
 
   constructor(private readonly _context: vscode.ExtensionContext) {}
+
+  /**
+   * Update the panel title + placeholder copy for the current cohort tone.
+   * Call this whenever the resolved profile changes (e.g. after token set).
+   */
+  setLabels(labels: { title: string; placeholder: string; emoji: string }): void {
+    this.labels = labels;
+    if (this.panel) {
+      this.panel.title = labels.title;
+      // Re-render shell to update inline placeholder (cheap; iframe contents
+      // are re-posted on the next show()).
+      this.panel.webview.html = this.shellHtml(this.panel.webview);
+      this.ready = false;
+    }
+  }
 
   /** Open (or reuse) the editor-area preview panel and render `html`. */
   async show(html: string): Promise<void> {
     if (!this.panel) {
       this.panel = vscode.window.createWebviewPanel(
         "hypeproofPreview",
-        "🎮 내 게임",
+        this.labels.title,
         { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
         { enableScripts: true, retainContextWhenHidden: true },
       );
@@ -150,8 +170,8 @@ export class PreviewProvider {
 </head>
 <body>
   <div id="placeholder">
-    <div class="big">🎮</div>
-    <div>여기에 나와요</div>
+    <div class="big">${this.labels.emoji}</div>
+    <div>${this.labels.placeholder}</div>
   </div>
   <iframe id="frame" style="display:none" sandbox="${PREVIEW_IFRAME_SANDBOX}" referrerpolicy="no-referrer"></iframe>
   <script nonce="${nonce}">

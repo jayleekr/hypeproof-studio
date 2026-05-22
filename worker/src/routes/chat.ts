@@ -97,6 +97,8 @@ chat.get("/profile", async (c) => {
     ux: profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
     preview: profile.preview,
+    // Drives the chat panel's tone (game vs search-webapp UI copy) (#159).
+    game: { template_tier: profile.game.template_tier },
   });
 });
 

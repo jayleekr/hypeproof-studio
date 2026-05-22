@@ -54,6 +54,8 @@ export interface ResolvedProfile {
   ux: UxConfig;
   publishing: { enabled: boolean; strategy: string };
   preview: { type: "iframe" | "live_server"; auto_start: boolean };
+  // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
+  game?: { template_tier: string };
 }
 
 export interface UxConfig {
