@@ -34,10 +34,17 @@ test("launches + chat panel mounts when token is pre-seeded", async () => {
 test("cold launch (no token) opens the setToken input box", async () => {
   const ctx = await launchApp({ preseedToken: false });
   try {
+    // autoOnboard waits 400ms after panel focus before firing setToken.
+    // The QuickInput shows both Korean title and English prompt; match
+    // either so renderer differences (line breaks, ARIA wrapping) don't
+    // false-negative. Bumped from 15s → 30s — issue #42 root cause was
+    // timing variance on cold first-launch (cache miss + workbench cold +
+    // extension activation + autoOnboard delay can pile up past 15s on a
+    // contended runner).
     const tokenPrompt = ctx.win
       .locator(".quick-input-widget")
-      .filter({ hasText: /Workshop token/i });
-    await expect(tokenPrompt).toBeVisible({ timeout: 15_000 });
+      .filter({ hasText: /Workshop token|선생님께 받은 토큰/i });
+    await expect(tokenPrompt).toBeVisible({ timeout: 30_000 });
     await ctx.win.keyboard.press("Escape");
   } finally {
     await closeApp(ctx);

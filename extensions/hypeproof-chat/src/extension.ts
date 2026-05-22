@@ -340,10 +340,20 @@ const STARTER_INDEX_HTML = `<!doctype html>
  * Make sure the kid has a real folder to work in. Returns true if the window
  * is reloading (caller should bail). Idempotent: once a folder is open this
  * returns false immediately.
+ *
+ * Race protection (#42): even with `onStartupFinished` activation, a
+ * positional `--folder` arg may take a tick to register in
+ * `workspaceFolders`. Grace-poll for up to 1s before deciding to trigger a
+ * create-and-reload — without this, e2e cold-launch with a pre-opened test
+ * folder would briefly see workspaceFolders empty, fire openFolder, and
+ * reload mid-onboard, racing the setToken QuickInput.
  */
 async function ensureWorkspace(): Promise<boolean> {
-  const folders = vscode.workspace.workspaceFolders;
-  if (folders && folders.length > 0) return false;
+  for (let i = 0; i < 10; i++) {
+    const folders = vscode.workspace.workspaceFolders;
+    if (folders && folders.length > 0) return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
 
   // Disable the "Do you trust the authors of this folder?" modal BEFORE
   // opening the folder. It's auto-created by us; a 9-year-old should never
