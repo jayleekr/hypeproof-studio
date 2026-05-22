@@ -110,14 +110,15 @@ test("T1.B.6 — after assistant reply, 7 follow-up chips render", async () => {
 
     // Follow-up chip rack renders only after a reply lands. The initial chips
     // are now hidden so the visible rack must be the follow-up one.
+    // 7 E# chips + 1 "V1 First Shot" action chip = 8 (#157).
     const racks = cf.locator(".hps-chips-rack");
-    await expect(racks.last().locator(".hps-chip")).toHaveCount(7, { timeout: 15_000 });
+    await expect(racks.last().locator(".hps-chip")).toHaveCount(8, { timeout: 15_000 });
   } finally {
     await closeApp(ctx);
   }
 });
 
-test("T1.B.7 — each follow-up caption carries E2/E7/E9/E11/E12/E13/E14", async () => {
+test("T1.B.7 — follow-up chips cover all 7 Essences plus the V1 First Shot action (#157)", async () => {
   const ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" } });
   try {
     const cf = await chatFrame(ctx.win);
@@ -130,23 +131,25 @@ test("T1.B.7 — each follow-up caption carries E2/E7/E9/E11/E12/E13/E14", async
       .toBeVisible({ timeout: 60_000 });
 
     // Wait for the follow-up rack to settle — chip caption nodes appear after
-    // streaming ends and the showFollowUpChips flag flips. Poll until we see 7.
+    // streaming ends and the showFollowUpChips flag flips. 8 = 7 E# + V1 action.
     const racks = cf.locator(".hps-chips-rack");
-    await expect(racks.last().locator(".hps-chip")).toHaveCount(7, { timeout: 30_000 });
-    await expect(racks.last().locator(".hps-chip-caption")).toHaveCount(7, { timeout: 10_000 });
+    await expect(racks.last().locator(".hps-chip")).toHaveCount(8, { timeout: 30_000 });
+    await expect(racks.last().locator(".hps-chip-caption")).toHaveCount(8, { timeout: 10_000 });
 
     const followCaps = await racks.last().locator(".hps-chip-caption").allTextContents();
-    expect(followCaps.length).toBe(7);
-    const eRegex = /E(2|7|9|11|12|13|14)\b/;
+    expect(followCaps.length).toBe(8);
+    const captionRe = /E(2|7|9|11|12|13|14)\b|V1 First Shot/;
     for (const c of followCaps) {
-      expect(c).toMatch(eRegex);
+      expect(c).toMatch(captionRe);
     }
+    // All 7 essences still surfaced; V1 First Shot accounts for the 8th.
     const seen = new Set<string>();
     for (const c of followCaps) {
-      const m = c.match(eRegex);
+      const m = c.match(/E(2|7|9|11|12|13|14)\b/);
       if (m) seen.add(m[1]);
     }
     expect(seen.size).toBe(7);
+    expect(followCaps.some((c) => /V1 First Shot/.test(c))).toBe(true);
   } finally {
     await closeApp(ctx);
   }

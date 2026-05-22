@@ -1028,16 +1028,21 @@ const stubProfile = {
   for (const role of ["위생사", "코디", "사모님"]) {
     assert.ok(initCaps.includes(role), `initial good captions must reference role ${role} (got: ${initCaps})`);
   }
-  // T1.A.9 + 11 — follow_up: 7 chips, one per AI Native Asset, captions carry E#.
-  assert.equal(dental.ux.suggestions.follow_up.length, 7);
+  // T1.A.9 + 11 — follow_up: 7 Essence chips + 1 V1 First Shot action (#157) = 8.
+  assert.equal(dental.ux.suggestions.follow_up.length, 8);
   const re = /E(2|7|9|11|12|13|14)\b/;
+  const captionRe = /E(2|7|9|11|12|13|14)\b|V1 First Shot/;
   const eSeen = new Set();
   for (const chip of dental.ux.suggestions.follow_up) {
+    assert.match(chip.caption ?? "", captionRe, `follow_up caption must be E# or V1 First Shot (got: ${chip.caption})`);
     const m = (chip.caption ?? "").match(re);
-    assert.ok(m, `follow_up chip caption must reference an essence (got: ${chip.caption})`);
-    eSeen.add(m[1]);
+    if (m) eSeen.add(m[1]);
   }
-  assert.equal(eSeen.size, 7, "follow_up captions must cover all 7 Essence numbers without dup");
+  assert.equal(eSeen.size, 7, "follow_up captions must still cover all 7 Essence numbers without dup");
+  assert.ok(
+    dental.ux.suggestions.follow_up.some((c) => /V1 First Shot/.test(c.caption ?? "")),
+    "follow_up must include a V1 First Shot action chip (#157)",
+  );
   // T1.A.12/13 — hint copy is decision-shaped, no game vestige.
   // Note: bare /색/ would false-match inside "검색" (search). The game-palette
   // tokens we actually want to ban are 색상|색깔|색을 + 점수|캐릭터|주인공|모양만.
