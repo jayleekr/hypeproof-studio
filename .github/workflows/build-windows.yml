@@ -48,8 +48,17 @@ jobs:
       - name: Load HypeProof env
         shell: bash
         run: |
+          # CI: hypeproof-studio.env is gitignored; fall back to the committed example.
+          # The example has all non-secret defaults. Secrets (GITHUB_TOKEN etc.) are
+          # injected via workflow env or GitHub Secrets, not via the env file.
+          ENV_FILE="./hypeproof-studio.env"
+          [ -f "$ENV_FILE" ] || ENV_FILE="./hypeproof-studio.env.example"
           # shellcheck source=/dev/null
-          source ./hypeproof-studio.env
+          source "$ENV_FILE"
+          # Windows CI target — override the macOS defaults in the example file
+          export OS_NAME="windows"
+          export VSCODE_ARCH="x64"
+          export CI_BUILD="yes"
           # Re-export to GITHUB_ENV so subsequent steps see them
           {
             echo "APP_NAME=$APP_NAME"
