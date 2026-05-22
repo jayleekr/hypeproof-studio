@@ -127,6 +127,7 @@ jobs:
         run: |
           set -euo pipefail
           bash get_repo.sh
+          : "${BUILD_SOURCEVERSION:=}"
           . ./version.sh
 
       - name: Prepare VS Code source
