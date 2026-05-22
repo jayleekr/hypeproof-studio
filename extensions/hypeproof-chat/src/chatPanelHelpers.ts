@@ -26,6 +26,23 @@ export function sanitizeCoachInput(
 }
 
 /**
+ * Abort every active stream + clear the map. Wired into the webview view's
+ * onDidDispose so closing the chat panel doesn't leave SSE connections
+ * dangling. Extracted so it's unit-testable without spinning up a webview
+ * (REQ-L3).
+ */
+export function abortAllStreams(
+  streams: Map<string, { abort: () => void }>,
+): void {
+  for (const ctrl of streams.values()) {
+    try {
+      ctrl.abort();
+    } catch { /* best-effort */ }
+  }
+  streams.clear();
+}
+
+/**
  * Append new turns and clamp to the last HISTORY_MAX. Pure so the clamp
  * contract is testable without spinning up VS Code.
  */

@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 
-const { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput, COACH_NAME_MAX, COACH_PERSONALITY_MAX } = await import(
+const { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput, COACH_NAME_MAX, COACH_PERSONALITY_MAX, abortAllStreams } = await import(
   "../src/chatPanelHelpers.ts"
 );
 
@@ -192,6 +192,35 @@ console.log("\nAll show-intent smoke tests passed.");
   assert.equal(sanitizeCoachInput(koreanName, "", "_").name.length, 40);
 
   console.log("✅ sanitizeCoachInput: trim + fallback + 40/200 clamp + Korean chars");
+}
+
+// ─── abortAllStreams (REQ-L3) ───────────────────────────────────────
+{
+  // Empty map — no throws
+  const empty = new Map();
+  abortAllStreams(empty);
+  assert.equal(empty.size, 0);
+
+  // Three streams, each tracking abort calls
+  const streams = new Map();
+  const log = [];
+  for (const id of ["s1", "s2", "s3"]) {
+    streams.set(id, { abort: () => log.push(`abort:${id}`) });
+  }
+  abortAllStreams(streams);
+  assert.equal(streams.size, 0, "map cleared");
+  assert.deepEqual(log.sort(), ["abort:s1", "abort:s2", "abort:s3"]);
+
+  // Defensive: a stream whose abort throws shouldn't prevent the rest
+  const streams2 = new Map();
+  let called = 0;
+  streams2.set("bad", { abort: () => { throw new Error("oops"); } });
+  streams2.set("good", { abort: () => { called++; } });
+  abortAllStreams(streams2);
+  assert.equal(called, 1, "good abort still ran after bad abort threw");
+  assert.equal(streams2.size, 0, "map still cleared after a throw");
+
+  console.log("✅ abortAllStreams: 3 cases (empty, multi, throw-resilient)");
 }
 
 console.log("\nAll chatPanelHelpers smoke tests passed.");

@@ -12,7 +12,7 @@ import {
   WebviewMessage,
   ActionRequest,
 } from "./protocol";
-import { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput } from "./chatPanelHelpers";
+import { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput, abortAllStreams } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
 const HISTORY_KEY = "hypeproofChat.history";
@@ -86,10 +86,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     view.webview.html = this.renderHtml(view.webview, webviewDist);
 
     view.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg));
-    view.onDidDispose(() => {
-      for (const ctrl of this.activeStreams.values()) ctrl.abort();
-      this.activeStreams.clear();
-    });
+    view.onDidDispose(() => abortAllStreams(this.activeStreams));
   }
 
   refreshConfig() {
