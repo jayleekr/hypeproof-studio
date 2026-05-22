@@ -2,7 +2,7 @@
   "name": "hypeproof-chat",
   "displayName": "HypeProof Chat",
   "description": "Built-in chat panel for HypeProof Studio.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "hypeproof",
   "engines": {
     "vscode": "^1.90.0"
