@@ -6,14 +6,14 @@ on:
       ref:
         description: "Branch or tag to build"
         required: false
-        default: "main"
+        default: ""
   push:
     tags:
       - "v*"
 
 jobs:
   build-win:
-    runs-on: windows-latest
+    runs-on: windows-2022
     timeout-minutes: 120
 
     env:
@@ -24,15 +24,20 @@ jobs:
       SHOULD_BUILD: "yes"
       SHOULD_BUILD_REH: "no"
       SHOULD_BUILD_REH_WEB: "no"
+      SHOULD_BUILD_MSI: "no"
+      SHOULD_BUILD_MSI_NOUP: "no"
+      SHOULD_BUILD_CLI: "no"
       DISABLE_UPDATE: "yes"
       VSCODE_PUBLISH_COUNTER: 0
       NODE_OPTIONS: "--max-old-space-size=12288"
+      npm_config_arch: x64
+      npm_config_target_arch: x64
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.ref || github.ref }}
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
           submodules: recursive
           fetch-depth: 0
 
@@ -114,14 +119,21 @@ jobs:
         working-directory: vscodium-base
         run: bash icons/build_icons.sh
 
-      - name: Fetch + prepare VS Code source
+      - name: Fetch VS Code source
         shell: bash
         working-directory: vscodium-base
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -euo pipefail
           bash get_repo.sh
-          bash prepare_src.sh
+          . ./version.sh
+
+      - name: Prepare VS Code source
+        shell: bash
+        working-directory: vscodium-base
+        run: |
+          set -euo pipefail
           bash prepare_vscode.sh
 
       - name: Apply product.json overrides
@@ -133,10 +145,30 @@ jobs:
         shell: bash
         run: bash scripts/inject-builtin-extensions.sh
 
-      - name: Build (Windows)
+      - name: Compile Windows source
         shell: bash
         working-directory: vscodium-base
-        run: bash build.sh
+        run: |
+          set -euo pipefail
+          cd vscode
+          export NODE_OPTIONS="--max-old-space-size=8192"
+          export VSCODE_PUBLISH_COUNTER=1
+          npm run gulp vscode-min-prepack
+
+      - name: Package Windows
+        shell: bash
+        working-directory: vscodium-base
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          find vscode -type f -not -path "*/node_modules/*" -not -path "vscode/.build/node/*" -not -path "vscode/.git/*" > vscode.txt
+          echo "vscode/.build/extensions/node_modules" >> vscode.txt
+          echo "vscode/.git" >> vscode.txt
+          tar -czf vscode.tar.gz -T vscode.txt
+          rm -rf vscode
+          bash build/windows/package.sh
+          bash prepare_assets.sh
 
       - name: Locate artifacts
         id: artifacts
