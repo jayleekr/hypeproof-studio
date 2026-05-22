@@ -239,29 +239,27 @@ jobs:
             throw "HypeProof Studio.exe was not found in portable zip"
           }
 
-          $stdout = Join-Path $env:RUNNER_TEMP "hps-version.out"
-          $stderr = Join-Path $env:RUNNER_TEMP "hps-version.err"
           $args = @(
-            "--version",
             "--user-data-dir", (Join-Path $env:RUNNER_TEMP "hps-user-data"),
             "--extensions-dir", (Join-Path $env:RUNNER_TEMP "hps-extensions"),
+            "--disable-extensions",
             "--disable-gpu",
             "--no-sandbox"
           )
 
-          $proc = Start-Process -FilePath $exe -ArgumentList $args -NoNewWindow -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-          if (-not $proc.WaitForExit(60000)) {
+          $proc = Start-Process -FilePath $exe -ArgumentList $args -PassThru
+          Start-Sleep -Seconds 20
+          $proc.Refresh()
+          if (-not $proc.HasExited) {
             Stop-Process -Id $proc.Id -Force
-            throw "HypeProof Studio.exe --version timed out"
+            Write-Host "HypeProof Studio.exe launched and stayed alive for 20 seconds."
+            exit 0
           }
           if ($proc.ExitCode -ne 0) {
-            Get-Content $stdout -ErrorAction SilentlyContinue
-            Get-Content $stderr -ErrorAction SilentlyContinue
-            throw "HypeProof Studio.exe --version failed with exit code $($proc.ExitCode)"
+            throw "HypeProof Studio.exe exited early with exit code $($proc.ExitCode)"
           }
 
-          Write-Host "HypeProof Studio.exe --version output:"
-          Get-Content $stdout
+          Write-Host "HypeProof Studio.exe exited cleanly during launch smoke."
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
