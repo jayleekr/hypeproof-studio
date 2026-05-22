@@ -224,7 +224,12 @@ async function maybeSynthesizeTestAction(
 ): Promise<void> {
   const raw = process.env.HPS_TEST_SYNTH_ACTION;
   if (!raw) return;
-  let cfg: { kind: "writeFile" | "executeShell"; description: string; resultFile: string };
+  let cfg: {
+    kind: "writeFile" | "executeShell";
+    description: string;
+    resultFile: string;
+    payload?: Record<string, unknown>;
+  };
   try {
     cfg = JSON.parse(raw);
   } catch {
@@ -239,7 +244,7 @@ async function maybeSynthesizeTestAction(
       requestId: `test-${Date.now()}`,
       kind: cfg.kind,
       description: cfg.description ?? "(test description)",
-      payload: { test: true },
+      payload: cfg.payload ?? { test: true },
     });
     fs.writeFileSync(cfg.resultFile, JSON.stringify({ approved, ts: Date.now() }));
   } catch (err) {

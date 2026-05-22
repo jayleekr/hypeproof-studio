@@ -412,11 +412,41 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * Show the manual-approve modal for an action request and return the user's
-   * decision. Public so e2e tests can synthesize a request without spinning
-   * through the streamed-assistant path.
+   * Resolve a manual-approve request from streamed assistant code.
+   *
+   * Policy tiers (#115 / epic #108):
+   *   1. Hard-deny: `executeShell` is refused outright — no modal, info toast.
+   *      Defense-in-depth on top of the worker's "셸 실행 금지" prompt rule.
+   *   2. Path-scope: `writeFile` with an absolute path outside the active
+   *      workspace is refused outright — warning toast, no modal.
+   *   3. Modal-gated: anything else listed in `requireApprovalFor` triggers
+   *      a Warning modal; Approve/Deny → boolean.
+   *   4. Allow-by-default: not in the required set → return true.
+   *
+   * Public so e2e tests can synthesize requests without spinning through the
+   * streamed-assistant path.
    */
   async resolveActionApproval(req: ActionRequest): Promise<boolean> {
+    // Tier 1 — hard-deny shell exec.
+    if (req.kind === "executeShell") {
+      vscode.window.showInformationMessage(
+        "셸 실행은 허용되지 않아요. 다른 방법으로 도와드릴게요.",
+      );
+      return false;
+    }
+
+    // Tier 2 — writeFile must target the active workspace.
+    if (req.kind === "writeFile") {
+      const target = (req.payload as { path?: string } | null | undefined)?.path;
+      if (typeof target === "string" && target.length > 0 && !isInsideWorkspace(target)) {
+        vscode.window.showWarningMessage(
+          `작업 폴더 밖 경로는 쓸 수 없어요: ${target}`,
+        );
+        return false;
+      }
+    }
+
+    // Tier 3 — modal-gated.
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const required = cfg.get<string[]>("requireApprovalFor", ["writeFile", "executeShell"]);
     const needsApproval = required.includes(req.kind);
@@ -509,6 +539,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 function randomId(): string {
   return Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+/**
+ * Is `targetPath` inside any of the currently-open workspace folders? Used by
+ * the writeFile path-scope check (#115). Resolves both sides to absolute paths
+ * before comparison so `..` traversal can't sneak past.
+ *
+ * Returns true when no workspace is open — we don't want to block writes in
+ * dev/test scenarios that haven't opened a folder yet. The production path
+ * always has a workspace via ensureWorkspace().
+ */
+function isInsideWorkspace(targetPath: string): boolean {
+  const folders = vscode.workspace.workspaceFolders;
+  if (!folders || folders.length === 0) return true;
+  const resolved = path.resolve(targetPath);
+  for (const f of folders) {
+    const root = path.resolve(f.uri.fsPath);
+    const rel = path.relative(root, resolved);
+    if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function stripMd(s: string): string {
