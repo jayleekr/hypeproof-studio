@@ -55,18 +55,19 @@ test("T1.A.8 — initial good captions cover 위생사 + 코디 + 사모님", ()
   expect(captions).toContain("사모님");
 });
 
-test("T1.A.9 — follow_up chips count == 7", () => {
-  expect(profile.ux.suggestions.follow_up.length).toBe(7);
+test("T1.A.9 — follow_up chips include 7 Essences + V1 first-shot action (#157)", () => {
+  // 7 E# chips + 1 "V1 First Shot" action chip = 8 (#157).
+  expect(profile.ux.suggestions.follow_up.length).toBe(8);
 });
 
-test("T1.A.10 — every follow_up caption matches /E(2|7|9|11|12|13|14)/", () => {
-  const re = /E(2|7|9|11|12|13|14)\b/;
+test("T1.A.10 — each follow_up caption is either an E# or 'V1 First Shot' action (#157)", () => {
+  const re = /E(2|7|9|11|12|13|14)\b|V1 First Shot/;
   for (const chip of profile.ux.suggestions.follow_up) {
     expect(chip.caption ?? "").toMatch(re);
   }
 });
 
-test("T1.A.11 — follow_up caption set covers all 7 Essence numbers (no dup)", () => {
+test("T1.A.11 — follow_up caption set still covers all 7 Essence numbers (no dup)", () => {
   const nums = new Set<string>();
   for (const chip of profile.ux.suggestions.follow_up) {
     const m = (chip.caption ?? "").match(/E(2|7|9|11|12|13|14)\b/);

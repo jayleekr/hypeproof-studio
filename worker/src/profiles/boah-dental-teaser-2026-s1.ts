@@ -98,8 +98,11 @@ export const profile: Profile = {
         { text: "임플란트 신제품 후보 3개 비교 — 우리 케이스에 맞는 기준으로", style: "good", caption: "사모님" },
         { text: "치과 관련 질문 답해줘", style: "weak", caption: "어떤 결정에 쓸지 모르면 검색이 안 잡혀요." },
       ],
-      // 5블록 흐름의 다음 한 수 — 7 AI Native Assets 행동을 *하게* 만든다.
+      // 5블록 흐름의 다음 한 수 — 7 AI Native Assets 행동 + V1 first-shot action.
+      // 첫 chip은 의도적으로 V1 즉시 만들기 (#157) — 참가자가 reframe loop에
+      // 갇히지 않도록.
       follow_up: [
+        { text: "이걸로 V1 한 번 만들어줘 — 우측에 띄워줘", style: "good", caption: "V1 First Shot" },
         { text: "이걸 무슨 결정에 쓸지 한 줄로 다시 써줘", style: "good", caption: "Intent Clarity (E7)" },
         { text: "환자군·상황·금지표현·판단 기준을 처음부터 풀로 적어줘", style: "good", caption: "Context Design (E2)" },
         { text: "검색어를 한국어·영어·전문용어 3가지로 변주해줘", style: "good", caption: "Iteration Reflex (E9)" },
