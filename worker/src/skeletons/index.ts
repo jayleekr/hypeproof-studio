@@ -5,6 +5,8 @@ import catcherHtml from "./kids-basic/catcher.html";
 import jumperHtml from "./kids-basic/jumper.html";
 // @ts-ignore
 import dodgeHtml from "./kids-basic/dodge.html";
+// @ts-ignore
+import dentalV1Html from "./search-webapp/dental-v1.html";
 
 const REGISTRY: Skeleton[] = [
   {
@@ -30,6 +32,16 @@ const REGISTRY: Skeleton[] = [
     summary_ko: "사방에서 오는 적/운석을 움직여서 피하는 게임",
     tags: ["피하기", "도망", "적", "운석", "우주선", "회피", "생존"],
     html: dodgeHtml as unknown as string,
+  },
+  // ─── search-webapp tier (clinical/professional workshops) ───────────────
+  {
+    id: "sw-dental-v1",
+    tier: "search-webapp",
+    genre: "clinical-search",
+    summary_ko:
+      "치과/의료 직군용 검색엔진 V1 — 출처 신뢰도 4단계(학회·가이드라인·블로그·광고) 필터 + 결정 reframe + 결과 리스트",
+    tags: ["검색", "찾기", "출처", "신뢰도", "엔진", "V1", "치과", "병원", "환자", "임상"],
+    html: dentalV1Html as unknown as string,
   },
 ];
 

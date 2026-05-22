@@ -363,34 +363,53 @@ const stubProfile = {
   const all = listTiers().flatMap((t) => getSkeletonsForTier(t));
   assert.ok(all.length >= 3, "registry is populated");
 
+  // Game tiers — full game contract.
+  const gameTiers = new Set(["kids-basic", "kids-rich", "teen", "pro-3d"]);
+
   for (const s of all) {
     const h = s.html;
     const where = `[${s.id}]`;
-    // 1. single self-contained document
+    const isGame = gameTiers.has(s.tier);
+
+    // ── Universal (every skeleton) ──────────────────────────────────────
     assert.ok(/^<!doctype html>/i.test(h.trim()), `${where} starts with <!doctype html>`);
     assert.ok(/<\/html>\s*$/i.test(h.trim()), `${where} ends with </html>`);
-    // 2. no external URLs / libraries (kids tiers are fully offline)
     assert.ok(!/https?:\/\//i.test(h), `${where} no external http(s) URL`);
     assert.ok(!/<script[^>]+src=/i.test(h), `${where} no external <script src>`);
     assert.ok(!/\bfetch\s*\(/.test(h), `${where} no network fetch()`);
-    // 3. full-viewport canvas + gradient background
-    assert.ok(/<canvas/i.test(h), `${where} has a canvas`);
-    assert.ok(/createLinearGradient/.test(h), `${where} has a gradient background`);
-    // 4. title → play → game-over state machine, restart on Space
-    assert.ok(/'title'/.test(h) && /'play'/.test(h) && /'over'/.test(h), `${where} has 3 states`);
-    assert.ok(/Space/.test(h), `${where} restarts/starts on Space`);
-    // 5. on-screen score HUD
-    assert.ok(/점수/.test(h), `${where} draws a score HUD`);
-    // 6. persistent on-screen controls bar (the #1 missing piece — non-negotiable)
-    assert.ok(/id="controls"/.test(h), `${where} has the persistent #controls bar`);
-    // 7. keyboard + mouse + touch
-    assert.ok(/keydown/.test(h), `${where} handles keyboard`);
-    assert.ok(/mouse(move|down)|click/.test(h), `${where} handles mouse`);
-    assert.ok(/touch(move|start)/.test(h), `${where} handles touch`);
-    // skeletons keep their placeholders (model fills them; output must not)
     assert.ok(/%%[A-Z_]+%%/.test(h), `${where} retains %% placeholders for the model`);
+
+    if (isGame) {
+      // ── Game-tier contract (canvas, state machine, controls bar) ──────
+      assert.ok(/<canvas/i.test(h), `${where} has a canvas`);
+      assert.ok(/createLinearGradient/.test(h), `${where} has a gradient background`);
+      assert.ok(/'title'/.test(h) && /'play'/.test(h) && /'over'/.test(h), `${where} has 3 states`);
+      assert.ok(/Space/.test(h), `${where} restarts/starts on Space`);
+      assert.ok(/점수/.test(h), `${where} draws a score HUD`);
+      assert.ok(/id="controls"/.test(h), `${where} has the persistent #controls bar`);
+      assert.ok(/keydown/.test(h), `${where} handles keyboard`);
+      assert.ok(/mouse(move|down)|click/.test(h), `${where} handles mouse`);
+      assert.ok(/touch(move|start)/.test(h), `${where} handles touch`);
+    } else if (s.tier === "search-webapp") {
+      // ── search-webapp contract (#150) ─────────────────────────────────
+      assert.ok(/<meta\s+name="viewport"/i.test(h), `${where} declares mobile viewport`);
+      assert.ok(/lang="ko"/i.test(h), `${where} declares Korean lang attribute`);
+      assert.ok(/<style/.test(h), `${where} ships inline CSS (no external stylesheet)`);
+      // Required CSS custom properties for the Clinical design track.
+      for (const v of ["--bg", "--accent", "--trust-good", "--trust-warn", "--trust-bad"]) {
+        assert.ok(h.includes(v), `${where} defines CSS variable ${v}`);
+      }
+      // Search-webapp must NOT use game vocabulary in the markup.
+      const banned = /\b점수\b|\b점프\b|\b장애물\b|\b캐릭터\b/;
+      assert.ok(!banned.test(h), `${where} must not contain game vocabulary`);
+      // a11y basics
+      assert.ok(/<label[\s>]/i.test(h), `${where} has at least one <label> for inputs`);
+    }
   }
-  console.log(`✓ all ${all.length} skeletons satisfy the contract (doctype, offline, 3-state, score, #controls, kbd+mouse+touch)`);
+  console.log(
+    `✓ all ${all.length} skeletons satisfy their tier contract ` +
+    `(${[...new Set(all.map((s) => s.tier))].join(", ")})`,
+  );
 }
 
 // ---- storage.ts (#9a) ------------------------------------------------------

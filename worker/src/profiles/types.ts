@@ -33,13 +33,17 @@ export interface Profile {
     auto_start: boolean;
   };
   /**
-   * Which pre-built game skeleton library the model customizes from. Scales
-   * with cohort age: kids-basic → kids-rich → teen → pro-3d. The model never
-   * writes a game from scratch — it picks the closest skeleton for this tier
-   * and swaps theme/characters/colors, keeping structure + the controls bar.
+   * Which pre-built skeleton library the model customizes from.
+   *
+   * Game tiers (kids-basic → kids-rich → teen → pro-3d) — for kids/teen
+   * cohorts; model picks closest game skeleton and swaps theme/characters/colors.
+   *
+   * Workshop tier "search-webapp" — for clinical/professional workshops
+   * (e.g. 보아치과 v4); model fills %%CLINIC_NAME%%/%%SEARCH_TOPIC%%/
+   * %%DECISION%%/%%SOURCES%% in the static webapp skeleton, no game loop.
    */
   game: {
-    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d";
+    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp";
   };
   publishing: {
     enabled: boolean;
