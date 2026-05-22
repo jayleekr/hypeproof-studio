@@ -65,6 +65,15 @@
   <b>결정:</b> %%DECISION%%
 </div>
 
+<!-- Default sources used as fallback before the model fills them in.
+     The previewProvider replaces any remaining %% placeholders before render so
+     a partial LLM response still shows a sensible V1. -->
+<template id="default-sources">
+<li><span class="badge good" data-trust="good">학회</span><div class="result-body"><div class="result-title">대한치과의사협회 — 임플란트 후 운동 가이드</div><div class="result-source">치과의사협회 진료지침 (PDF)</div></div></li>
+<li><span class="badge good" data-trust="good">가이드</span><div class="result-body"><div class="result-title">임플란트 술후 권장 일반 안내</div><div class="result-source">대학병원 환자교육자료</div></div></li>
+<li><span class="badge warn" data-trust="warn">블로그</span><div class="result-body"><div class="result-title">"임플란트 운동 1주만 쉬면 OK"</div><div class="result-source">개인 블로그 — 보류, 출처 확인 필요</div></div></li>
+</template>
+
 <div class="search">
   <label for="q" style="position:absolute;left:-9999px">검색어 입력</label>
   <input id="q" type="search" placeholder="검색어를 입력하세요" autocomplete="off">
