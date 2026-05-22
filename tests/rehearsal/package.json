@@ -1,0 +1,20 @@
+{
+  "name": "hypeproof-studio-rehearsal-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cross-platform Node tests for HypeProof Studio workshop rehearsal (issue #83). Zero external deps — runs anywhere Node 22+ is installed (PowerShell/cmd/bash).",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 *.test.mjs",
+    "test:tap": "node --test --test-reporter=tap *.test.mjs",
+    "test:junit": "node --test --test-reporter=junit --test-reporter-destination=results.xml *.test.mjs",
+    "test:health": "node --test 01-prod-health.test.mjs",
+    "test:token": "node --test 02-token-lifecycle.test.mjs",
+    "test:coach": "node --test 03-coach-stress.test.mjs",
+    "test:issuer": "node --test 04-issuer-mint.test.mjs",
+    "test:rate": "node --test 05-rate-limit.test.mjs"
+  }
+}
