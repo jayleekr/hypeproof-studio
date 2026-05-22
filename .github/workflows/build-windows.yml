@@ -19,6 +19,7 @@ jobs:
     env:
       OS_NAME: windows
       VSCODE_ARCH: x64
+      VSCODE_QUALITY: stable
       CI_BUILD: "yes"
       SHOULD_BUILD: "yes"
       SHOULD_BUILD_REH: "no"
@@ -77,6 +78,7 @@ jobs:
           # explicit after sourcing.
           export OS_NAME="windows"
           export VSCODE_ARCH="x64"
+          export VSCODE_QUALITY="${VSCODE_QUALITY:-stable}"
           export CI_BUILD="yes"
           # Re-export to GITHUB_ENV so subsequent steps see them
           {
@@ -99,6 +101,7 @@ jobs:
             echo "HPS_WIN32_REG_VALUE_NAME=$HPS_WIN32_REG_VALUE_NAME"
             echo "OS_NAME=$OS_NAME"
             echo "VSCODE_ARCH=$VSCODE_ARCH"
+            echo "VSCODE_QUALITY=$VSCODE_QUALITY"
             echo "CI_BUILD=$CI_BUILD"
           } >> "$GITHUB_ENV"
 
