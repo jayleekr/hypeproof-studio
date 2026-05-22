@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { buildPreviewShellCsp, PREVIEW_IFRAME_SANDBOX } from "./cspBuilder";
 
 /**
  * Sandboxed HTML preview for AI-generated mini-games.
@@ -58,12 +59,7 @@ export class PreviewProvider {
 
   private shellHtml(webview: vscode.Webview): string {
     const nonce = Math.random().toString(36).slice(2);
-    const csp = [
-      `default-src 'none'`,
-      `style-src ${webview.cspSource} 'unsafe-inline'`,
-      `script-src 'nonce-${nonce}'`,
-      `frame-src 'self' data: blob:`,
-    ].join("; ");
+    const csp = buildPreviewShellCsp({ cspSource: webview.cspSource, nonce });
     return /* html */ `<!doctype html>
 <html>
 <head>
@@ -83,7 +79,7 @@ export class PreviewProvider {
     <div class="big">🎮</div>
     <div>게임이 여기에 나와요</div>
   </div>
-  <iframe id="frame" style="display:none" sandbox="allow-scripts allow-pointer-lock allow-modals" referrerpolicy="no-referrer"></iframe>
+  <iframe id="frame" style="display:none" sandbox="${PREVIEW_IFRAME_SANDBOX}" referrerpolicy="no-referrer"></iframe>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const frame = document.getElementById("frame");
