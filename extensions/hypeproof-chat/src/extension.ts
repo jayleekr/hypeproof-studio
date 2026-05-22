@@ -5,6 +5,7 @@ import * as os from "os";
 import { ChatPanelProvider } from "./chatPanelProvider";
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
+import { runMintStudentToken, ISSUER_TOKEN_KEY } from "./mintStudentToken";
 import {
   scheduleUpdateChecks,
   checkForUpdates,
@@ -109,6 +110,30 @@ export async function activate(context: vscode.ExtensionContext) {
         getProfileId: () => provider.getProfileId(),
         getRecentTurns: () => provider.getHistorySnapshot(),
       });
+    }),
+
+    // #66 — Mint Student Token for instructors. Pulls cohort/profile defaults
+    // from the active /v1/profile response so the 강사 doesn't have to retype
+    // them. issuer token persists in SecretStorage between mints.
+    vscode.commands.registerCommand("hypeproof-chat.mintStudentToken", async () => {
+      const proxyUrl = vscode.workspace
+        .getConfiguration("hypeproofChat")
+        .get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+      // Cohort id is not exposed via /v1/profile; the issuer token payload
+      // carries cohort scope and mintStudentToken extracts the default
+      // automatically when scope is a single cohort.
+      await runMintStudentToken({
+        context,
+        proxyUrl,
+        defaults: {
+          profile: provider.getProfileId(),
+        },
+      });
+    }),
+
+    vscode.commands.registerCommand("hypeproof-chat.forgetIssuerToken", async () => {
+      await context.secrets.delete(ISSUER_TOKEN_KEY);
+      vscode.window.showInformationMessage("issuer 토큰이 지워졌어요. 다음 발급 시 다시 물어봅니다.");
     }),
 
     // #72: auto-update commands. The banner in the chat panel calls
