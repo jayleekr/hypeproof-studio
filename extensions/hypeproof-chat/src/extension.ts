@@ -205,6 +205,49 @@ export async function activate(context: vscode.ExtensionContext) {
   // Auto-onboarding: close the default welcome editor, focus the chat panel,
   // prompt for a token if none stored, then prompt for coach name.
   void autoOnboard(context, provider);
+
+  // E2E backdoor for REQ-E1/E2 manual-approve modal. Fires a synthetic
+  // actionRequest after the panel mounts and writes the approve/deny result
+  // to a file the Playwright test can read. Gated on env so it can never
+  // run in a real workshop build.
+  void maybeSynthesizeTestAction(context, provider);
+}
+
+/**
+ * Test-only: synthesize a manual-approve actionRequest if the test fixture
+ * asked for one. Result (the user's Approve/Deny click outcome) is written
+ * to a JSON file so the test side can read it after dismissing the modal.
+ */
+async function maybeSynthesizeTestAction(
+  _context: vscode.ExtensionContext,
+  provider: ChatPanelProvider,
+): Promise<void> {
+  const raw = process.env.HPS_TEST_SYNTH_ACTION;
+  if (!raw) return;
+  let cfg: { kind: "writeFile" | "executeShell"; description: string; resultFile: string };
+  try {
+    cfg = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  if (!cfg.kind || !cfg.resultFile) return;
+
+  // Give the chat panel time to mount so focus is in a sensible place.
+  await new Promise((r) => setTimeout(r, 1500));
+  try {
+    const approved = await provider.resolveActionApproval({
+      requestId: `test-${Date.now()}`,
+      kind: cfg.kind,
+      description: cfg.description ?? "(test description)",
+      payload: { test: true },
+    });
+    fs.writeFileSync(cfg.resultFile, JSON.stringify({ approved, ts: Date.now() }));
+  } catch (err) {
+    fs.writeFileSync(
+      cfg.resultFile,
+      JSON.stringify({ error: (err as Error).message, ts: Date.now() }),
+    );
+  }
 }
 
 const FIRST_RUN_KEY = "hypeproofChat.didFirstRun";
