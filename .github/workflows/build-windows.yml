@@ -126,7 +126,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          bash get_repo.sh
+          . ./get_repo.sh
           : "${BUILD_SOURCEVERSION:=}"
           . ./version.sh
 
