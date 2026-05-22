@@ -41,16 +41,63 @@ BASE_URL=https://api.hypeproof-ai.xyz \
 한국어 응답까지 한 번에 검증 — #14.) FAIL이면 §5.
 
 ## 3. 토큰 배포
-참가자 1인 1토큰. 강사 머신에서:
+
+참가자 1인 1토큰. **강사 self-service 가 기본** — 강사가 본인 issuer 토큰만
+가지고 있으면 prod 시크릿 없이 학생 토큰을 무한 발급할 수 있다 (PR #61).
+
+### Option A — `/issuer` 웹 페이지 (어디서나, 권장)
+
+1. <https://api.hypeproof-ai.xyz/issuer> 접속
+2. 본인 issuer 토큰 paste (Jay가 5/20 DM으로 보낸 것; 분실 시 단톡 / DM)
+3. 학생 handle (소문자·영숫자·하이픈), cohort, profile, hours 입력 → **발급**
+4. 출력된 토큰을 학생에게 전달
+
+issuer 토큰은 세션 동안 sessionStorage에 자동 저장 — 한 번 paste 후 연속 발급
+간단. **localStorage 사용 안 함** (탭 닫으면 사라짐 — 의도된 보안).
+
+### Option B — Studio v0.1.4+ 인앱 명령
+
+브라우저 갔다 오기 싫으면 Studio에서 바로:
+- `Cmd+Shift+P` → `HypeProof Chat: 학생 토큰 발급 (강사용)`
+- issuer 토큰은 SecretStorage에 저장 (keychain 동급) — 한 번 입력하면 자동 사용
+- cohort 디폴트는 issuer 토큰의 scope에서 자동 추출
+- 발급 성공 시 클립보드 자동 복사 + 만료 시각 토스트
+
+### Option C — `issue-token.ts` (긴급 fallback, Jay만)
+
+Self-service가 안 되는 비상 상황:
 ```bash
 cd worker
 HPS_SIGNING_SECRET=<prod와 동일> node --experimental-strip-types \
   scripts/issue-token.ts --user <참가자핸들> \
   --cohort boah-dental-2026-a --profile boah-dental-teaser-2026-s1 --hours 6
 ```
+
+이건 prod 시크릿이 손에 있어야 작동 — 강사 보내지 말 것.
+
+### 공통
+
 - 발급한 `<참가자핸들>` 들을 §4의 roster에 **그대로** 넣어야 인가됨.
 - 로컬 dev 시연이면 `bash scripts/dev-stack.sh` (cohort/profile env override —
   #15) 가 토큰을 `/tmp/hps-token.txt`에 써서 앱이 자동 임포트.
+
+### 강사 issuer 토큰 재발급 (Jay만)
+
+분실 등으로 issuer 토큰을 새로 만들어야 할 때 (시그니처 secret 필요):
+
+```bash
+cd worker
+HPS_SIGNING_SECRET=<prod와 동일> node --experimental-strip-types \
+  scripts/issue-issuer-token.ts \
+  --instructor <name> \
+  --cohorts boah-dental-2026-a,sk-biopharm-2026-a \
+  --profiles boah-dental-teaser-2026-s1,sk-biopharm-kids-2026-grade-3-4-s1 \
+  --max-hours 12 --days 60
+```
+
+JSON 출력에서 `token` 필드만 추출 → 본인에게 DM. **보안 사유로 기존 issuer를
+revoke해야 하면**: 5/20 발급 jti는 memory `instructor-issuer-tokens-2026-05-20`
+참고하여 `POST /admin/tokens/revoke` (admin 인증). 새 토큰 재발급은 위 명령.
 
 ## 4. 당일 설치 + 세션 오픈
 1. 참가자 설치 (원라이너):

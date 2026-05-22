@@ -1,0 +1,66 @@
+# Discord notification on release published.
+#
+# Listens to GH's native release.published event — fires AFTER build-mac.yml
+# (or build-windows.yml) creates the release. Single-purpose workflow so we
+# never accidentally couple Discord availability to the build's success.
+#
+# Uses the vendored scripts/notify/ module from hypeproof-harness (synced
+# via that repo's sync.sh).
+
+name: notify-release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to notify about (e.g. v0.1.2)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notify-release-${{ github.event.release.tag_name || github.event.inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: pip install --quiet httpx jinja2 pyyaml
+      - name: Resolve release info
+        id: rel
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          # Pull release details so we have changelog + asset count
+          R=$(gh release view "$TAG" --json name,body,assets,htmlUrl --repo "${{ github.repository }}")
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "url=$(echo "$R" | jq -r .htmlUrl)" >> "$GITHUB_OUTPUT"
+          echo "asset_count=$(echo "$R" | jq '.assets | length')" >> "$GITHUB_OUTPUT"
+          # Truncate body for the message envelope
+          BODY=$(echo "$R" | jq -r .body | head -c 800)
+          {
+            echo "changelog<<__EOF__"
+            echo "$BODY"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+      - name: Send notify
+        env:
+          DISCORD_WEBHOOK_HYPEPROOF_STUDIO: ${{ secrets.DISCORD_WEBHOOK_HYPEPROOF_STUDIO }}
+          DISCORD_WEBHOOK_SEDIMENT: ${{ secrets.DISCORD_WEBHOOK_SEDIMENT }}
+        run: |
+          python scripts/notify/notify.py send release.published \
+            --routes config/notify_routes.yaml \
+            --data "version=${{ steps.rel.outputs.tag }}" \
+            --data "product=hypeproof-studio" \
+            --data "url=${{ steps.rel.outputs.url }}" \
+            --data "asset_count=${{ steps.rel.outputs.asset_count }}" \
+            --data "changelog=${{ steps.rel.outputs.changelog }}"

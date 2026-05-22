@@ -1,0 +1,35 @@
+# HypeProof Studio notification routes.
+#
+# Loaded by scripts/notify/notify.py (vendored from hypeproof-harness via
+# sync.sh). Studio is a product (VS Code fork) — primary signal is release
+# tag pushes. Discord secret refs resolved at runtime from env vars.
+#
+# All notifications go to the #hypeproof-studio Discord channel by default;
+# release.published also mirrors to #sediment so the Lab team sees product
+# velocity at a glance.
+
+version: 1
+
+channels:
+  hypeproof-studio:
+    transport: discord_webhook
+    secret_env: DISCORD_WEBHOOK_HYPEPROOF_STUDIO
+  sediment:
+    transport: discord_webhook
+    secret_env: DISCORD_WEBHOOK_SEDIMENT
+
+routes:
+  "*":
+    release.published:
+      channels: [hypeproof-studio, sediment]
+      template: release_published
+    deploy.success:
+      channels: [hypeproof-studio]
+      template: deploy_success
+    deploy.failure:
+      channels: [hypeproof-studio]
+      template: deploy_failure
+      severity: critical
+
+defaults:
+  cooldown_min: 30
