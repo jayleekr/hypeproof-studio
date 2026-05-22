@@ -1,9 +1,12 @@
-// Smoke tests for isShowIntent (#94 / REQ-C9). Pure helper — no vscode host.
+// Smoke tests for chatPanelHelpers (#94 REQ-C9 + #92 REQ-C3 clamp).
+// Pure helpers — no vscode host.
 // Run: node --experimental-strip-types test/show-intent.smoke.mjs
 
 import assert from "node:assert/strict";
 
-const { isShowIntent } = await import("../src/chatPanelHelpers.ts");
+const { isShowIntent, clampHistory, HISTORY_MAX } = await import(
+  "../src/chatPanelHelpers.ts"
+);
 
 // ─── Show intents (true) ──────────────────────────────────────────────
 const showCases = [
@@ -111,3 +114,39 @@ for (const c of offTopic) {
 console.log(`✅ off-topic negatives: ${offTopic.length} cases`);
 
 console.log("\nAll show-intent smoke tests passed.");
+
+// ─── clampHistory (REQ-C3) ─────────────────────────────────────────
+{
+  assert.equal(HISTORY_MAX, 200, "default ceiling is 200");
+
+  // Empty + empty → empty
+  assert.deepEqual(clampHistory([], []), []);
+
+  // Under cap: append everything
+  const a = clampHistory(["a", "b"], ["c", "d"]);
+  assert.deepEqual(a, ["a", "b", "c", "d"]);
+
+  // Exactly at cap
+  const ten = Array.from({ length: 10 }, (_, i) => i);
+  assert.deepEqual(clampHistory(ten, [], 10), ten);
+
+  // Over cap: oldest dropped, last N kept
+  const overflow = clampHistory(ten, [10, 11, 12], 10);
+  assert.deepEqual(overflow, [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+
+  // 250-turn seed: only last 200 retained
+  const big = Array.from({ length: 250 }, (_, i) => i);
+  const clamped = clampHistory(big, [], HISTORY_MAX);
+  assert.equal(clamped.length, 200);
+  assert.equal(clamped[0], 50, "oldest 50 dropped");
+  assert.equal(clamped[199], 249, "newest retained");
+
+  // Defensive: max=0 → empty
+  assert.deepEqual(clampHistory(["a"], ["b"], 0), []);
+  // Defensive: negative max → empty
+  assert.deepEqual(clampHistory(["a"], ["b"], -5), []);
+
+  console.log("✅ clampHistory: 8 cases (empty, under/at/over cap, 250-clamp, defensive)");
+}
+
+console.log("\nAll chatPanelHelpers smoke tests passed.");
