@@ -127,13 +127,15 @@ test("REQ-E1 + REQ-E2: writeFile → Approve → approved=true", async () => {
   }
 });
 
-test("REQ-E1 + REQ-E2: executeShell → Deny → approved=false", async () => {
+test("REQ-E1 + REQ-E2: executeShell → hard-deny (no modal, approved=false)", async () => {
+  // Post-#115 policy change: executeShell is refused outright by the host
+  // before any modal is shown. Defense-in-depth on top of the worker prompt's
+  // "셸 실행 금지" rule. See chatPanelProvider.resolveActionApproval Tier 1.
   const ctx = await launchWithSynthAction({
     kind: "executeShell",
     description: "Run `npm install` in workspace",
   });
   try {
-    await clickModalButton(ctx.win, "Deny");
     const result = await readResult(ctx.resultFile);
     expect(result.error).toBeUndefined();
     expect(result.approved).toBe(false);
