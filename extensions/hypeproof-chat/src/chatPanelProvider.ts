@@ -333,6 +333,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     void this.post({ type: "streamStart", streamId, messageId });
 
     let assistantText = "";
+    // REQ-D2: auto-reveal as soon as a renderable HTML block completes in
+    // the stream, NOT waiting for streamEnd. The block closes (```) often
+    // arrives many seconds before the assistant's trailing prose. Showing
+    // the game in that window is the strongest essence-1 "감탄" moment.
+    let revealed = false;
+    const tryReveal = (text: string) => {
+      if (revealed) return;
+      const html = extractRenderableHtml(text);
+      if (!html) return;
+      revealed = true;
+      void this.preview.show(html);
+      void this.saveGameToWorkspace(html);
+    };
     try {
       await proxyChat({
         proxyUrl,
@@ -346,6 +359,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         onDelta: (delta) => {
           assistantText += delta;
           void this.post({ type: "streamChunk", streamId, delta });
+          // Cheap check; extractRenderableHtml regex returns null fast on
+          // most chunks (no fence/doctype present yet).
+          tryReveal(assistantText);
         },
       });
       void this.post({ type: "streamEnd", streamId });
@@ -353,14 +369,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         { id: randomId(), role: "user", content: text, createdAt: Date.now() },
         { id: messageId, role: "assistant", content: assistantText, createdAt: Date.now() },
       ]);
-      // Auto-reveal the game the moment it exists — the strongest essence-1
-      // ("감탄") moment. Opens the editor-area preview beside the chat. The
-      // ▶ Run button still re-renders into the same panel afterwards.
-      const html = extractRenderableHtml(assistantText);
-      if (html) {
-        void this.preview.show(html);
-        void this.saveGameToWorkspace(html);
-      }
+      // Fallback reveal in case the stream completed but the per-chunk
+      // probe missed it (e.g. the closing ``` was in the very last delta).
+      tryReveal(assistantText);
     } catch (err) {
       await this.handleSendError(err, streamId);
     } finally {
