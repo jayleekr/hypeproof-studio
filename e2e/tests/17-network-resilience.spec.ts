@@ -194,27 +194,31 @@ async function errorBannerVisible(win: Page, timeoutMs = 15_000): Promise<boolea
   }
 }
 
-test("Stream cut mid-response — error banner appears, retry succeeds", async () => {
-  // Start a slow stream. Mid-flow, kill the mock connection by switching to
-  // fail_status (the existing connection won't be terminated, but switching
-  // mode is the cleanest way to simulate "next request fails"). For the
-  // mid-stream cut itself we use Playwright's setOffline on the BrowserContext.
+test.skip("Stream cut mid-response — error banner appears, retry succeeds", async () => {
+  // Playwright's BrowserContext.setOffline(true) doesn't reliably terminate
+  // in-flight fetch() calls in Electron's main-process renderer (CDP toggle
+  // only applies to new requests; an open SSE stream stays alive on the
+  // socket layer). Verified by run on 2026-05-22 against this build: stream
+  // continued chunking past setOffline, no error banner surfaced.
+  //
+  // Two avenues for a real test:
+  //   1) Kill the mock server's TCP connection mid-response (mock.destroyAll()
+  //      via an extra knob) — proves the host surfaces a banner when fetch
+  //      errors mid-stream.
+  //   2) Wait for product-level auto-reconnect to land (separately deferred
+  //      below), then test the full happy reconnect.
+  //
+  // Left skipped to flag the gap rather than silently delete the case.
   const mock = await startMockServer({ kind: "slow_stream", chunkCount: 20, intervalMs: 400 });
   const ctx = await launchPointedAt(mock.port);
   try {
     await openChatContainer(ctx.win);
     await ctx.win.waitForTimeout(800);
-
-    // Trigger a stream; let it produce a chunk so we know it started.
     await sendMessage(ctx.win, "긴 응답을 줘");
     const frame = await chatFrame(ctx.win);
     await frame.locator("body:has-text('청크 1')").waitFor({ timeout: 10_000 });
-
-    // Go offline mid-stream — fetch should error, host should surface a banner.
     await ctx.app.context().setOffline(true);
     expect(await errorBannerVisible(ctx.win, 15_000)).toBe(true);
-
-    // Recover: back online, switch mock to fast_ok, retry-equivalent send.
     await ctx.app.context().setOffline(false);
     mock.setMode({ kind: "fast_ok", reply: "복구 성공" });
     await sendMessage(ctx.win, "다시 시도");

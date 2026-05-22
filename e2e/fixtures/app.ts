@@ -61,6 +61,10 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
   const env: Record<string, string> = {
     ...(process.env as Record<string, string>),
     ELECTRON_DISABLE_SECURITY_WARNINGS: "true",
+    // E2E mode flag: disables the dev /tmp/hps-token.txt fallback in
+    // applyTestBackdoors so `preseedToken: false` produces a real cold launch
+    // (#42 root cause).
+    HPS_TEST_E2E: "1",
   };
   if (opts.preseedToken !== false) {
     env.HPS_TEST_TOKEN = token;
@@ -139,7 +143,15 @@ export async function closeApp(ctx: AppContext): Promise<void> {
  * input element so callers can type the next thing (e.g. token).
  */
 export async function runCommand(win: Page, label: string): Promise<void> {
-  // Command palette: Cmd+Shift+P on Mac
+  // Keyboard shortcuts only reach the host when a non-webview element has
+  // focus. If a chat-panel webview is mounted and focused (the common case
+  // after openChatContainer), Cmd+Shift+P would be swallowed by the iframe
+  // and the QuickInput never opens. Defocus by clicking the title-bar area
+  // (always present, never intercepts) before sending the shortcut.
+  const titleBar = win.locator(".monaco-workbench .part.titlebar").first();
+  if ((await titleBar.count()) > 0) {
+    await titleBar.click({ position: { x: 10, y: 10 }, force: true }).catch(() => undefined);
+  }
   await win.keyboard.press("Meta+Shift+P");
   const input = win.locator(".quick-input-widget input.input").first();
   await input.waitFor({ state: "visible", timeout: 5_000 });
