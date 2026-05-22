@@ -145,6 +145,12 @@ jobs:
         shell: bash
         run: bash scripts/inject-builtin-extensions.sh
 
+      - name: Limit extension bundle concurrency
+        shell: bash
+        env:
+          HPS_EXTENSION_BUNDLE_CONCURRENCY: "2"
+        run: node scripts/limit-vscode-extension-build-concurrency.mjs
+
       - name: Compile Windows source
         shell: bash
         working-directory: vscodium-base
