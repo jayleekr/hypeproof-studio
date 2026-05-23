@@ -1,0 +1,70 @@
+# Anthropic Claude Code Action — automated issue solver (#10).
+#
+# Trigger model: dual-signal — a label OR a comment mention. Both must be
+# explicit so accidents (mass-labeling) don't burn API budget.
+#
+#   1. Label `solver:ready` is added to an issue → Claude takes the issue
+#      and tries to produce a PR.
+#   2. Anyone mentions @claude in an issue or PR comment → Claude responds
+#      in-thread or, if the comment requests changes, opens a fix PR.
+#
+# Prerequisites (one-time, by jayleekr):
+#   - Install the Claude GitHub App: https://github.com/apps/claude
+#     Grant repo permissions: contents:write, pull-requests:write,
+#     issues:read/write, actions:read.
+#   - Repo secret `ANTHROPIC_API_KEY` set (Settings → Secrets → Actions).
+#   - Label `solver:ready` exists. (Already defined per /report-ui skill.)
+#
+# Budget guards:
+#   - timeout-minutes: 45  (caps wall-clock per run)
+#   - max_turns: 30        (caps Claude's tool-call iterations)
+#   - allowed_tools: deliberately omits destructive ops (no force-push,
+#     no admin token writes). The action's own sandbox + repo permissions
+#     enforce the rest.
+#
+# Safety:
+#   - Workflow runs ONLY on labeled/commented events — not on every push
+#     or PR (so it can't loop on its own output).
+#   - Comments must contain @claude as a literal mention; bots replying to
+#     bots is filtered by `github.event.sender.type != 'Bot'`.
+#   - When budget is exceeded the action surfaces a comment + label flip
+#     (solver:stalled) — humans triage rather than blind retry.
+
+name: Claude Solver
+on:
+  issues:
+    types: [labeled]
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  solve:
+    if: |
+      github.event.sender.type != 'Bot' && (
+        (github.event_name == 'issues' && github.event.label.name == 'solver:ready') ||
+        (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+        (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: anthropics/claude-code-action@main
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Conservative iteration cap — most PR-sized tasks finish well under 30 turns.
+          max_turns: "30"
+          # Whitelist of tools the solver may call. Read/write/grep/edit/bash
+          # are needed for typical issue work; explicit allowlist avoids
+          # accidental access to anything not enumerated.
+          allowed_tools: "Read,Write,Edit,Bash,Glob,Grep"
