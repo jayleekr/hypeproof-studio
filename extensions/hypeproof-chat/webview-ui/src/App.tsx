@@ -11,6 +11,7 @@ interface State {
   streamId: string | null;
   error: string | null;
   errorRequestId: string | null;   // S-07 / #49 — surfaced in ErrorBanner
+  errorRunbookUrl: string | null;  // #165 — banner renders as clickable link
 }
 
 type Action =
@@ -19,7 +20,7 @@ type Action =
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; delta: string }
   | { type: "streamEnd" }
-  | { type: "streamError"; error: string; requestId?: string }
+  | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
   | { type: "userSent"; text: string };
 
 const initialState: State = {
@@ -29,6 +30,7 @@ const initialState: State = {
   streamId: null,
   error: null,
   errorRequestId: null,
+  errorRunbookUrl: null,
 };
 
 function reducer(state: State, action: Action): State {
@@ -56,7 +58,14 @@ function reducer(state: State, action: Action): State {
         ),
       };
     case "streamEnd":
-      return { ...state, streamingId: null, streamId: null, error: null, errorRequestId: null };
+      return {
+        ...state,
+        streamingId: null,
+        streamId: null,
+        error: null,
+        errorRequestId: null,
+        errorRunbookUrl: null,
+      };
     case "streamError":
       return {
         ...state,
@@ -64,6 +73,7 @@ function reducer(state: State, action: Action): State {
         streamId: null,
         error: action.error,
         errorRequestId: action.requestId ?? null,
+        errorRunbookUrl: action.runbookUrl ?? null,
       };
     case "userSent":
       return {
@@ -88,7 +98,7 @@ export function App() {
         case "streamStart": dispatch({ type: "streamStart", streamId: msg.streamId, messageId: msg.messageId }); break;
         case "streamChunk": dispatch({ type: "streamChunk", delta: msg.delta }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
-        case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId }); break;
+        case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;
         case "webviewTestCrash": setShouldCrash(true); break;
       }
@@ -148,6 +158,7 @@ export function App() {
         streaming={!!state.streamingId}
         error={state.error}
         errorRequestId={state.errorRequestId}
+        errorRunbookUrl={state.errorRunbookUrl}
         canRetryLast={hasLastUserPrompt && !state.streamingId}
         onSend={send}
         onRetry={retry}

@@ -402,7 +402,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private async handleSendError(err: unknown, streamId: string): Promise<void> {
     if (err instanceof ProxyAuthError) {
       if (err.requestId) this.lastRequestId = err.requestId;
-      void this.post({ type: "streamError", streamId, error: err.friendly, requestId: err.requestId });
+      void this.post({
+        type: "streamError",
+        streamId,
+        error: err.friendly,
+        requestId: err.requestId,
+        runbookUrl: err.runbookUrl,
+      });
       if (err.kind === "expired" || err.kind === "missing") {
         // Clear the dead token so the UI shows "Token" not "Token ✓",
         // then reopen the input box for a fresh one.

@@ -189,8 +189,17 @@ chat.post("/chat/completions", async (c) => {
   // 4-5. Session window + roster
   const session = await getActiveSession(env.HPS_KV, payload.c);
   if (!session) {
+    // #165 — student-facing copy is no longer a dead-end. The chat panel's
+    // error banner pairs the `runbook_url` link below with this text, so the
+    // person who can fix it (instructor) has a one-click path.
     return c.json(
-      { error: { message: "수업이 시작되지 않았어요. 강사에게 문의해주세요.", type: "session_inactive" } },
+      {
+        error: {
+          message: "수업이 아직 시작 전이에요. 강사가 곧 열어줄 거예요 — 잠시 후 다시 보내보세요.",
+          type: "session_inactive",
+          runbook_url: "https://github.com/jayleekr/hypeproof-studio/blob/main/docs/runbook.md#start-session",
+        },
+      },
       403,
     );
   }
