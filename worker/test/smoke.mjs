@@ -137,6 +137,47 @@ const stubProfile = {
   console.log("✓ translate injects the tier skeleton library into the cached block");
 }
 
+// ---- #168 M1: profile.skills → bundled meta-skill md in cached prefix -------
+{
+  const skilledProfile = { ...stubProfile, skills: ["boa-search-skill-creator"] };
+  const out = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "검색 스킬 만들고 싶어" }] },
+    skilledProfile,
+  );
+  const sys0 = out.system[0].text;
+  assert.ok(sys0.includes("boa-search-skill-creator"), "skill name appears in cached prefix");
+  assert.ok(sys0.includes("Phase 1"), "skill phase 1 instruction present");
+  assert.ok(sys0.includes("Intent clarity"), "7 assets enumerated");
+  assert.ok(sys0.includes("Ownership"), "7 assets list complete");
+  // Skill text sits between system_prompt and skeleton library
+  const promptIdx = sys0.indexOf(stubProfile.system_prompt);
+  const skillIdx = sys0.indexOf("boa-search-skill-creator");
+  const skeletonIdx = sys0.indexOf("# 게임 스켈레톤 라이브러리");
+  assert.ok(promptIdx >= 0 && skillIdx > promptIdx, "skill placed after profile system_prompt");
+  assert.ok(skeletonIdx > skillIdx, "skill placed before skeleton library");
+  assert.equal(out.system[0].cache_control?.type, "ephemeral", "skill md cached with prefix");
+  // Negative path: profile without skills field → no skill content
+  const out2 = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "hi" }] },
+    stubProfile,
+  );
+  assert.ok(!out2.system[0].text.includes("boa-search-skill-creator"), "skill absent when profile.skills not declared");
+  console.log("✓ #168 M1: profile.skills appends meta-skill md to cached prefix");
+}
+
+// ---- #168 M1: unknown skill name is dropped, not thrown ---------------------
+{
+  const badProfile = { ...stubProfile, skills: ["nonexistent-skill", "boa-search-skill-creator"] };
+  // Should not throw — unknown skills get console.warn'd, known ones still inject.
+  const out = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "hi" }] },
+    badProfile,
+  );
+  assert.ok(out.system[0].text.includes("Phase 1"), "known skill still injected");
+  assert.ok(!out.system[0].text.includes("nonexistent-skill"), "unknown skill name not leaked into prompt");
+  console.log("✓ #168 M1: unknown skill names drop silently, known ones still inject");
+}
+
 // ---- translateOpenAI: Gemini path, same trust model -----------------------
 {
   const out = translateOpenAI(

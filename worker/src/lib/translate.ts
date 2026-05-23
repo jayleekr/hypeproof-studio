@@ -7,6 +7,7 @@
 import { modelIdFor, type Profile, type ModelAlias } from "../profiles/types.ts";
 import type { LLMProvider } from "../env.ts";
 import { getSkeletonsForTier } from "../skeletons/index.ts";
+import { resolveSkills } from "../skills/index.ts";
 
 // A polished single-file game (gradient bg, 3 states, score, juice) plus the
 // coach's friendly intro runs ~3-6k output tokens. 4096 truncated games
@@ -95,11 +96,22 @@ function filterMessages(body: OpenAIRequest): Array<{ role: "user" | "assistant"
 }
 
 /**
- * The cached/static system prefix = profile system prompt + the tier's
- * skeleton library. Identical text for every user in a cohort.
+ * The cached/static system prefix = profile system prompt + bundled skills
+ * (#168 M1) + the tier's skeleton library. Identical text for every user in
+ * a cohort, so prompt caching kicks in across the workshop.
+ *
+ * Skills order between system_prompt and skeleton library is deliberate: the
+ * skill text instructs *behavior* (how to coach), the skeleton library is the
+ * raw material the behavior acts on.
  */
 function buildCachedPrefix(profile: Profile): string {
-  return profile.system_prompt + "\n\n" + buildSkeletonLibrary(profile);
+  const skillsMd = resolveSkills(profile.skills);
+  const sections = [
+    profile.system_prompt,
+    skillsMd,
+    buildSkeletonLibrary(profile),
+  ].filter((s) => s && s.length > 0);
+  return sections.join("\n\n");
 }
 
 export function translate(
