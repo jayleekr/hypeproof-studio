@@ -19,7 +19,7 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
-import { issue, verify } from "../lib/tokens";
+import { issue, verify, type IssuerScope, type TokenPayload } from "../lib/tokens";
 import { postDiscordResolution } from "./report";
 import {
   endSession,
@@ -39,16 +39,25 @@ import {
 
 export const admin = new Hono<{ Bindings: Env }>();
 
+// Path-scoped issuer-Bearer exceptions. Each endpoint listed here re-verifies
+// the issuer token + checks scope inside its own handler. The middleware just
+// lets the request through gating so the handler can do the real check. All
+// other admin paths stay admin-only.
+function isIssuerAllowedEndpoint(path: string, method: string): boolean {
+  if (path === "/admin/tokens/issue" && method === "POST") return true;
+  // #167 — issuer-role tokens with can_start_session scope may start/end
+  // their scoped cohort's session without admin Basic auth.
+  if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/session$/.test(path)) return true;
+  if (method === "DELETE" && /^\/admin\/cohorts\/[^/]+\/session$/.test(path)) return true;
+  return false;
+}
+
 admin.use("*", async (c, next) => {
   // Cloudflare Access injects this header for authenticated requests.
   if (c.req.header("cf-access-authenticated-user-email")) return next();
 
-  // Path-scoped exception: /tokens/issue ALSO accepts an issuer-role Bearer.
-  // The endpoint itself re-verifies + checks the issuer's scopes against the
-  // requested cohort/profile. All other admin paths stay admin-only.
-  const isIssuerEndpoint = c.req.path === "/admin/tokens/issue"
-    && c.req.method === "POST";
-  if (isIssuerEndpoint) {
+  // Path-scoped issuer-Bearer exception (see isIssuerAllowedEndpoint above).
+  if (isIssuerAllowedEndpoint(c.req.path, c.req.method)) {
     const ah = c.req.header("authorization") ?? "";
     if (/^Bearer\s+/i.test(ah)) return next();
   }
@@ -277,6 +286,60 @@ admin.post("/cohorts/:id/roster", async (c) => {
 
 // ---- session start/end ------------------------------------------------------
 
+// #167 — when an issuer-role Bearer is presented to /cohorts/:id/session
+// (POST/DELETE), this helper does the same re-verify + scope check pattern
+// that /tokens/issue uses. Returns `null` if no Bearer was present (so the
+// caller knows the middleware admitted via Basic/CF Access). Throws a Response
+// (caught + returned) on Bearer-but-not-authorized cases.
+//
+// `requireProfileId`: when set, the matched scope must include this profile.
+// (start needs it; end does not — end just kills the current session).
+async function authorizeIssuerForSession(
+  c: { env: Env; req: { header: (k: string) => string | undefined } },
+  cohortId: string,
+  requireProfileId: string | null,
+): Promise<{ scope: IssuerScope; payload: TokenPayload } | null | Response> {
+  const auth = c.req.header("authorization") ?? "";
+  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
+  if (!bearerMatch || !bearerMatch[1]) return null;
+  const issuerToken = bearerMatch[1];
+
+  let payload: TokenPayload;
+  try {
+    payload = await verify(issuerToken, c.env.HPS_SIGNING_SECRET);
+  } catch (err) {
+    return Response.json(
+      { error: `invalid issuer token: ${(err as Error).message}` },
+      { status: 401 },
+    );
+  }
+  if (payload.role !== "issuer") {
+    return Response.json({ error: "token is not an issuer" }, { status: 403 });
+  }
+  const scopes: IssuerScope[] = payload.scopes ?? [];
+  const scope = scopes.find(
+    (s) =>
+      s.cohort === cohortId &&
+      s.can_start_session === true &&
+      (requireProfileId === null || (s.profiles?.includes(requireProfileId) ?? false)),
+  );
+  if (!scope) {
+    return Response.json(
+      {
+        error: requireProfileId
+          ? `issuer not scoped for session start on (cohort=${cohortId}, profile=${requireProfileId}). scope needs can_start_session=true.`
+          : `issuer not scoped for session control on cohort=${cohortId}. scope needs can_start_session=true.`,
+      },
+      { status: 403 },
+    );
+  }
+  if (payload.jti) {
+    const rev = await isTokenRevoked(c.env.HPS_KV, payload.jti);
+    if (rev) return Response.json({ error: "issuer token revoked" }, { status: 401 });
+  }
+  return { scope, payload };
+}
+
 admin.post("/cohorts/:id/session", async (c) => {
   const cohortId = c.req.param("id");
   type SessionBody = {
@@ -296,6 +359,26 @@ admin.post("/cohorts/:id/session", async (c) => {
   }
   if (Date.parse(ends_at) <= Date.parse(starts_at)) {
     return c.json({ error: "ends_at must be after starts_at" }, 400);
+  }
+
+  // #167 — if request came via issuer Bearer (no CF Access, no admin Basic),
+  // verify scope + cap duration. Returns null when admin/CF auth path was
+  // used → no extra check. Returns Response on rejection. Returns scope+payload
+  // when an issuer was admitted.
+  const issuerCheck = await authorizeIssuerForSession(c, cohortId, profile_id);
+  if (issuerCheck instanceof Response) return issuerCheck;
+  if (issuerCheck) {
+    const maxHours = issuerCheck.scope.max_session_hours ?? 4;
+    const durationHours =
+      (Date.parse(ends_at) - Date.parse(starts_at)) / (3600 * 1000);
+    if (durationHours > maxHours + 0.001) {
+      return c.json(
+        {
+          error: `session duration ${durationHours.toFixed(2)}h exceeds issuer scope max ${maxHours}h`,
+        },
+        403,
+      );
+    }
   }
 
   const session: ActiveSession = {
@@ -322,6 +405,11 @@ admin.post("/cohorts/:id/session", async (c) => {
 
 admin.delete("/cohorts/:id/session", async (c) => {
   const cohortId = c.req.param("id");
+  // #167 — same Bearer gate as POST, but profile match is not required for
+  // ending (an instructor with cohort-level can_start_session may also stop).
+  const issuerCheck = await authorizeIssuerForSession(c, cohortId, null);
+  if (issuerCheck instanceof Response) return issuerCheck;
+
   const existing = await getActiveSession(c.env.HPS_KV, cohortId);
   await endSession(c.env.HPS_KV, cohortId);
   if (existing) {

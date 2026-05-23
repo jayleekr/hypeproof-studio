@@ -33,9 +33,18 @@ export interface TokenPayload {
 export interface IssuerScope {
   cohort: string;            // cohort id the issuer can mint into
   profiles: string[];        // profile ids the issuer can pick from
-  // Max hours a child token can declare. Caps the blast radius if the
-  // issuer credential leaks.
+  // Max hours a child (student) token can declare. Caps the blast radius if
+  // the issuer credential leaks.
   max_hours?: number;
+  // #167 — when true, this scope also lets the issuer start/end the cohort's
+  // active session without admin Basic auth. Defensive default: undefined →
+  // session control denied. The endpoint additionally caps requested session
+  // duration to `max_session_hours` (or 4h if unset).
+  can_start_session?: boolean;
+  // Max duration of a session the issuer can open in hours. Independent of
+  // `max_hours` (which bounds STUDENT tokens, not sessions). Only consulted
+  // when `can_start_session === true`.
+  max_session_hours?: number;
 }
 
 export type TokenErrorCode = "malformed" | "signature" | "expired" | "version" | "revoked";
