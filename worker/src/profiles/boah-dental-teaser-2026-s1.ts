@@ -69,6 +69,10 @@ export const profile: Profile = {
   },
   // 7 AI Native Assets ↔ essence (위 헤더 매핑 표 참조).
   essences_focus: [2, 7, 9, 11, 12, 13, 14],
+  // #168 M1 — Studio-bundled meta-skill. When the worker assembles the
+  // cached system prefix it appends `worker/src/skills/<name>.md` for each
+  // entry. boa-search-skill-creator drives the 7-asset coaching flow.
+  skills: ["boa-search-skill-creator"],
   session: {
     cohort_id: "boah-dental-2026-a",
     series_total: 1,

@@ -53,6 +53,13 @@ export interface Profile {
     shared_repo?: string;
   };
   essences_focus: number[];          // 1..16
+  /**
+   * #168 M1 — Optional Studio-bundled meta-skills to inject into the cached
+   * system prefix at chat time. Names must be present in
+   * `worker/src/skills/index.ts` (typos fall through with a console.warn,
+   * so the cohort behaves as un-skilled — debuggable, not crash-prone).
+   */
+  skills?: string[];
   session: {
     cohort_id: string;
     series_total: number;
