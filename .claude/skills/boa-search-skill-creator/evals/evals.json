@@ -1,0 +1,26 @@
+{
+  "skill_name": "boa-search-skill-creator",
+  "evals": [
+    {
+      "id": 1,
+      "eval_name": "phase1-desk-employee-onboarding",
+      "prompt": "안녕하세요. 보아치과 데스크에서 일하고 있어요. 환자 상담할 때 임플란트나 시술 관련 자료를 빨리 찾고 싶은데 매번 막막해요. 저한테 맞는 검색 스킬 같이 만들어주실 수 있나요?",
+      "expected_output": "Phase 1 진입. 역할/한 줄 목적 받고 7자산 Q&A를 한 번에 한 질문씩 진행. 임직원 답이 모호하면 default 제안. 마지막에 child skill (이름·트리거·실패신호 임직원 결정) V1 명세 요약 + ~/.claude/skills/<name>/ 파일 3개 생성 제안. 일반론적 SKILL.md 덤프 금지.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "eval_name": "phase2a-turn-logging-and-scoring",
+      "prompt": "이 턴 기록해줘. 어제 만든 desk-kim-counseling-search 써봤어. 내가 던진 프롬프트는 '60대 환자 상담용 임플란트 가격 비교 자료 찾아줘' 였고, AI가 세 곳 가격대 비교를 줬는데 한 곳은 대한치과의사협회 자료, 두 곳은 개인 블로그였어. 원장님은 PASS 주셨는데 '블로그는 빼고 학회 자료만 가져와도 됐을 듯' 코멘트 주셨고. 나는 출처 좀 약했다고 회고함.",
+      "expected_output": "7자산 0/1/2점 + 한 줄 근거 각각. JSONL을 ~/.claude/boa-skills/logs/desk-kim-counseling-search.jsonl 에 append (디렉토리 mkdir -p). 가장 약한 1자산만 코칭 (점수 7개 전부 나열 금지). Verification reflex 약하게 채점되어야 자연스러움 (출처 mixed).",
+      "files": []
+    },
+    {
+      "id": 3,
+      "eval_name": "phase2b-histogram-and-coaching",
+      "prompt": "내 desk-kim-counseling-search 히스토그램 보여줘. 점수 어때?",
+      "expected_output": "scripts/histogram.py를 desk-kim-counseling-search 인자로 호출. stdout을 임직원에게 그대로 보여줌. 출력에서 가장 낮은 두 자산을 짚어 SKILL.md/reference 업데이트 제안. 로그 없으면 '먼저 턴 기록부터' 안내.",
+      "files": []
+    }
+  ]
+}
