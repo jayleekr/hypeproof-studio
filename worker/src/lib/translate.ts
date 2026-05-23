@@ -39,12 +39,23 @@ interface AnthropicMessage {
   content: string | Array<{ type: string; text?: string }>;
 }
 
-interface AnthropicTool {
+// Function tools = MCP-passthrough (profile.sandbox.mcp_tools_enabled).
+interface AnthropicFunctionTool {
   name: string;
   description: string;
   input_schema: unknown;
   cache_control?: { type: "ephemeral" };
 }
+
+// Server-hosted builtin tools (#168 M2). Anthropic runs these on its end —
+// no schema, just a type tag + optional cap. Currently: web_search.
+interface AnthropicBuiltinTool {
+  type: "web_search_20250305";
+  name: "web_search";
+  max_uses?: number;
+}
+
+type AnthropicTool = AnthropicFunctionTool | AnthropicBuiltinTool;
 
 export interface AnthropicRequest {
   model: string;
@@ -149,10 +160,25 @@ export function translate(
     out.stream = true;
   }
 
+  // Assemble outbound tools array from two sources:
+  // 1. Anthropic-hosted builtin tools the profile opts into (#168 M2) —
+  //    e.g. web_search. Static per cohort, so safe to cache.
+  // 2. Client-supplied function tools, intersected with the profile's
+  //    mcp_tools_enabled allowlist.
+  const tools: AnthropicTool[] = [];
+
+  if (profile.tools?.web_search === true) {
+    const maxUses = profile.tools.max_uses ?? 5;
+    tools.push({
+      type: "web_search_20250305",
+      name: "web_search",
+      max_uses: maxUses,
+    });
+  }
+
   if (Array.isArray(body.tools) && body.tools.length > 0 && profile.sandbox.mcp_tools_enabled.length > 0) {
-    // Tools are passed through only if the profile permits MCP tools at all.
-    // For 1회차 (chat-only) mcp_tools_enabled is [], so tools are dropped.
-    const tools: AnthropicTool[] = [];
+    // Function tools are passed through only if the profile permits MCP tools.
+    // For 1회차 (chat-only) mcp_tools_enabled is [], so function tools are dropped.
     for (let i = 0; i < body.tools.length; i++) {
       const fn = body.tools[i]?.function;
       if (!fn?.name) continue;
@@ -163,10 +189,18 @@ export function translate(
         input_schema: fn.parameters ?? { type: "object" },
       });
     }
-    if (tools.length > 0) {
-      tools[tools.length - 1]!.cache_control = { type: "ephemeral" };
-      out.tools = tools;
+  }
+
+  if (tools.length > 0) {
+    // cache_control goes on the LAST function tool only (builtin tools don't
+    // support cache_control per Anthropic). If the only tool is a builtin,
+    // skip the marker — Anthropic caches the entire tools block by default
+    // when no marker is present and the block is static.
+    const last = tools[tools.length - 1];
+    if (last && !("type" in last)) {
+      last.cache_control = { type: "ephemeral" };
     }
+    out.tools = tools;
   }
 
   return out;
@@ -177,6 +211,14 @@ export function translate(
  * translate(): client system/tool messages dropped, the worker supplies the
  * system prompt. Gemini has no prompt-cache concept, so prefix + coach tail
  * collapse into a single leading `system` message.
+ *
+ * #168 M2 NOTE: `profile.tools.web_search` is intentionally ignored on this
+ * path. Google's OpenAI-compatible endpoint does not expose the native
+ * `googleSearch` grounding tool — that requires switching to the native
+ * Gemini endpoint (`/v1beta/models/{model}:streamGenerateContent`) with a
+ * different request shape and a different SSE format. Tracked as a follow-up
+ * to this milestone. Prod runs LLM_PROVIDER=anthropic, so the boah-dental
+ * workshop is served by the translate() path above.
  */
 export function translateOpenAI(
   body: OpenAIRequest,

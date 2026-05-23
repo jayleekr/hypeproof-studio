@@ -60,6 +60,22 @@ export interface Profile {
    * so the cohort behaves as un-skilled — debuggable, not crash-prone).
    */
   skills?: string[];
+  /**
+   * #168 M2 — Provider-hosted tools the profile opts into. The worker
+   * translates these to the upstream provider's native tool format.
+   *
+   * - `web_search`: Anthropic `web_search_20250305` (server-hosted); the
+   *   model can search the live web during a turn and inline citations into
+   *   the response. Gemini native endpoint with `googleSearch` tool is
+   *   tracked as follow-up — the prod path (LLM_PROVIDER=anthropic) is
+   *   served by this flag today.
+   * - `max_uses`: per-turn search call cap (default 5). Caps cost on a
+   *   single user message.
+   */
+  tools?: {
+    web_search?: boolean;
+    max_uses?: number;
+  };
   session: {
     cohort_id: string;
     series_total: number;

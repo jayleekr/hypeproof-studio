@@ -73,6 +73,10 @@ export const profile: Profile = {
   // cached system prefix it appends `worker/src/skills/<name>.md` for each
   // entry. boa-search-skill-creator drives the 7-asset coaching flow.
   skills: ["boa-search-skill-creator"],
+  // #168 M2 — Anthropic web_search ON. The v4 workshop ("원장님을 이겨라")
+  // needs live search results + citations for the boss-fight verdict. max_uses
+  // caps per-turn cost; 5 is comfortable for a single query exploration loop.
+  tools: { web_search: true, max_uses: 5 },
   session: {
     cohort_id: "boah-dental-2026-a",
     series_total: 1,
