@@ -10,11 +10,18 @@ export class ProxyAuthError extends Error {
   kind: "expired" | "missing" | "session_inactive" | "session_window" | "not_in_roster" | "other";
   friendly: string;
   requestId?: string;        // S-07 / #49 — surfaced in webview ErrorBanner
-  constructor(kind: ProxyAuthError["kind"], friendly: string, requestId?: string) {
+  runbookUrl?: string;       // #165 — when present, banner renders as clickable link
+  constructor(
+    kind: ProxyAuthError["kind"],
+    friendly: string,
+    requestId?: string,
+    runbookUrl?: string,
+  ) {
     super(friendly);
     this.kind = kind;
     this.friendly = friendly;
     this.requestId = requestId;
+    this.runbookUrl = runbookUrl;
   }
 }
 
@@ -33,7 +40,9 @@ export class ProxyTransportError extends Error {
 }
 
 function classifyError(status: number, bodyText: string): ProxyAuthError | null {
-  let parsed: { error?: { message?: string; type?: string; code?: string } } | null = null;
+  let parsed:
+    | { error?: { message?: string; type?: string; code?: string; runbook_url?: string } }
+    | null = null;
   try {
     parsed = JSON.parse(bodyText);
   } catch {
@@ -42,6 +51,7 @@ function classifyError(status: number, bodyText: string): ProxyAuthError | null 
   const type = parsed?.error?.type;
   const code = parsed?.error?.code;
   const serverMsg = parsed?.error?.message;
+  const runbookUrl = parsed?.error?.runbook_url;
 
   if (status === 401) {
     if (code === "expired") {
@@ -57,7 +67,12 @@ function classifyError(status: number, bodyText: string): ProxyAuthError | null 
   }
   if (status === 403) {
     if (type === "session_inactive") {
-      return new ProxyAuthError("session_inactive", serverMsg ?? "수업이 아직 시작 안 됐어요. 선생님을 불러주세요.");
+      return new ProxyAuthError(
+        "session_inactive",
+        serverMsg ?? "수업이 아직 시작 전이에요. 강사가 곧 열어줄 거예요 — 잠시 후 다시 보내보세요.",
+        undefined,
+        runbookUrl,
+      );
     }
     if (type === "session_window") {
       return new ProxyAuthError("session_window", serverMsg ?? "수업 시간이 끝났어요. 다음 시간에 다시 만나요.");

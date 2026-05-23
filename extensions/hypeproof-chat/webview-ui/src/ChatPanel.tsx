@@ -13,6 +13,7 @@ interface Props {
   streaming: boolean;
   error: string | null;
   errorRequestId: string | null;
+  errorRunbookUrl: string | null;  // #165 — render as clickable runbook link
   canRetryLast: boolean;
   onSend: (text: string) => void;
   onRetry: (prompt: string) => void;
@@ -236,6 +237,7 @@ export function ChatPanel(props: Props) {
           <ErrorBanner
             message={error}
             requestId={props.errorRequestId}
+            runbookUrl={props.errorRunbookUrl}
             canRetry={props.canRetryLast}
             onRetry={props.onRetryLast}
             onDismiss={props.onDismissError}
@@ -672,6 +674,7 @@ function splitFences(content: string): FenceSeg[] {
 function ErrorBanner({
   message,
   requestId,
+  runbookUrl,
   canRetry,
   onRetry,
   onDismiss,
@@ -679,6 +682,7 @@ function ErrorBanner({
 }: {
   message: string;
   requestId: string | null;
+  runbookUrl: string | null;
   canRetry: boolean;
   onRetry: () => void;
   onDismiss: () => void;
@@ -698,6 +702,13 @@ function ErrorBanner({
       <div className="hps-error-banner-body">
         <div className="hps-error-banner-title">{title}</div>
         <div className="hps-error-banner-msg">{message}</div>
+        {runbookUrl && (
+          <div className="hps-error-banner-runbook">
+            <a href={runbookUrl} target="_blank" rel="noopener noreferrer">
+              📖 강사 안내 — 세션 여는 법
+            </a>
+          </div>
+        )}
         {requestId && (
           <div className="hps-error-banner-rid" title="강사에게 이 ID를 알려주세요 — Jay가 바로 추적할 수 있어요">
             ID: <code>{requestId}</code>
