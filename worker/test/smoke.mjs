@@ -178,6 +178,52 @@ const stubProfile = {
   console.log("✓ #168 M1: unknown skill names drop silently, known ones still inject");
 }
 
+// ---- #168 M2: web_search builtin tool injected on Anthropic path -----------
+{
+  const searchProfile = { ...stubProfile, tools: { web_search: true, max_uses: 3 } };
+  const out = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "임플란트 후 운동 가이드라인" }] },
+    searchProfile,
+  );
+  assert.ok(Array.isArray(out.tools), "tools array present when web_search enabled");
+  assert.equal(out.tools.length, 1, "exactly one builtin tool injected");
+  const t = out.tools[0];
+  assert.equal(t.type, "web_search_20250305", "builtin type tag");
+  assert.equal(t.name, "web_search", "builtin name");
+  assert.equal(t.max_uses, 3, "max_uses honored from profile");
+  assert.ok(!("cache_control" in t), "builtin tools have no cache_control");
+
+  // Negative: no tools field → out.tools undefined
+  const out2 = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "hi" }] },
+    stubProfile,
+  );
+  assert.equal(out2.tools, undefined, "tools absent when profile.tools not declared");
+  console.log("✓ #168 M2: web_search builtin tool injected when profile.tools.web_search=true");
+}
+
+// ---- #168 M2: max_uses default = 5 when profile flag has no number ---------
+{
+  const p = { ...stubProfile, tools: { web_search: true } };
+  const out = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "hi" }] },
+    p,
+  );
+  assert.equal(out.tools[0].max_uses, 5, "default max_uses = 5 when unspecified");
+  console.log("✓ #168 M2: max_uses defaults to 5 when profile only sets web_search=true");
+}
+
+// ---- #168 M2: web_search is NOT injected on the Gemini OpenAI-compat path --
+{
+  const p = { ...stubProfile, tools: { web_search: true } };
+  const out = translateOpenAI(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "hi" }] },
+    p, {}, "gemini",
+  );
+  assert.equal(out.tools, undefined, "Gemini OpenAI-compat path ignores web_search (native endpoint follow-up)");
+  console.log("✓ #168 M2: Gemini OpenAI-compat path silently ignores web_search (documented follow-up)");
+}
+
 // ---- translateOpenAI: Gemini path, same trust model -----------------------
 {
   const out = translateOpenAI(
