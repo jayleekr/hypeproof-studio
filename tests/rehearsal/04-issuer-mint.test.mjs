@@ -14,6 +14,11 @@ import { fetchJson } from "./helpers/api.mjs";
 
 const issuerSkip = !ISSUER_TOKEN && "ISSUER_TOKEN not set";
 const mintUrl = `${adminBase()}/admin/tokens/issue`;
+const sessionUrl = `${adminBase()}/admin/cohorts/${COHORT}/session`;
+// R4.7–R4.9 (#167) need an issuer with can_start_session in its scope.
+// Without it, the start tests can only assert the negative path.
+const sessionIssuerSkip =
+  !process.env.SESSION_ISSUER_TOKEN && "SESSION_ISSUER_TOKEN not set";
 
 test("R4.1 — garbage issuer token → 401/403", async () => {
   const r = await fetchJson(mintUrl, {
@@ -120,5 +125,84 @@ test(
     assert.equal(r1.status, 200, `1st mint failed: ${r1.status}`);
     assert.equal(r2.status, 200, `2nd mint failed: ${r2.status}`);
     assert.notEqual(r1.json.jti, r2.json.jti, "jti collided across 2 mints — uniqueness invariant broken");
+  },
+);
+
+// R4.7 (#167) — non-session-scoped issuer hitting POST /session → 403 with
+// `can_start_session` hint. Uses the regular ISSUER_TOKEN; no extra env needed.
+test(
+  "R4.7 — plain issuer (no can_start_session) on POST /session → 403",
+  { skip: issuerSkip },
+  async () => {
+    const nowIso = new Date().toISOString();
+    const endIso = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+    const r = await fetchJson(sessionUrl, {
+      method: "POST",
+      headers: { authorization: `Bearer ${ISSUER_TOKEN}` },
+      body: { profile_id: PROFILE, starts_at: nowIso, ends_at: endIso },
+      allowNon2xx: true,
+    });
+    assert.equal(r.status, 403, `expected 403, got ${r.status}: ${r.text.slice(0, 200)}`);
+    if (r.json?.error) {
+      assert.match(
+        r.json.error.toLowerCase(),
+        /can_start_session|not scoped/,
+        `error body should mention scope: ${r.json.error}`,
+      );
+    }
+  },
+);
+
+// R4.8 (#167) — session-scoped issuer can start a session at default duration.
+// SESSION_ISSUER_TOKEN must be minted with --can-start-session.
+test(
+  "R4.8 — session-scoped issuer → opens then closes session",
+  { skip: sessionIssuerSkip },
+  async () => {
+    const token = process.env.SESSION_ISSUER_TOKEN;
+    const nowIso = new Date().toISOString();
+    const endIso = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+
+    const open = await fetchJson(sessionUrl, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: { profile_id: PROFILE, starts_at: nowIso, ends_at: endIso },
+      allowNon2xx: true,
+    });
+    assert.equal(open.status, 200, `open failed: ${open.status} ${open.text.slice(0, 200)}`);
+    assert.ok(open.json?.session, "no session in open response");
+
+    const close = await fetchJson(sessionUrl, {
+      method: "DELETE",
+      headers: { authorization: `Bearer ${token}` },
+      allowNon2xx: true,
+    });
+    assert.equal(close.status, 200, `close failed: ${close.status} ${close.text.slice(0, 200)}`);
+  },
+);
+
+// R4.9 (#167) — session-scoped issuer cannot exceed max_session_hours.
+// Default max is 4h; we ask for 12h and expect 403.
+test(
+  "R4.9 — session-scoped issuer exceeding max_session_hours → 403",
+  { skip: sessionIssuerSkip },
+  async () => {
+    const token = process.env.SESSION_ISSUER_TOKEN;
+    const nowIso = new Date().toISOString();
+    const endIso = new Date(Date.now() + 12 * 60 * 60 * 1000).toISOString();
+    const r = await fetchJson(sessionUrl, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}` },
+      body: { profile_id: PROFILE, starts_at: nowIso, ends_at: endIso },
+      allowNon2xx: true,
+    });
+    assert.equal(r.status, 403, `expected 403, got ${r.status}: ${r.text.slice(0, 200)}`);
+    if (r.json?.error) {
+      assert.match(
+        r.json.error.toLowerCase(),
+        /max|exceeds/,
+        `error body should mention max: ${r.json.error}`,
+      );
+    }
   },
 );
