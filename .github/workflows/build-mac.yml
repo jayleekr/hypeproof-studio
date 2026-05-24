@@ -38,6 +38,12 @@ jobs:
     env:
       OS_NAME: osx
       VSCODE_ARCH: arm64
+      # Required by get_repo.sh + prepare_vscode.sh. Missing → exit 56 at
+      # "Retrieve lastest version" (malformed update.code.visualstudio.com URL).
+      # hypeproof-studio.env.example:32 declares these but "Load HypeProof env"
+      # step only propagates HPS_* / APP_*, not these.
+      VSCODE_QUALITY: stable
+      CI_BUILD: "no"
       SHOULD_BUILD: "yes"
       SHOULD_BUILD_REH: "no"
       SHOULD_BUILD_REH_WEB: "no"
