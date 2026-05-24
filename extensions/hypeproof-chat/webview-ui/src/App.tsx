@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState } from "react";
-import type { ChatConfig, ChatMessage, HostMessage } from "../../src/protocol";
+import type { ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
 import { onHostMessage, postToHost } from "./vscode";
 import { ChatPanel } from "./ChatPanel";
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
@@ -19,6 +19,7 @@ type Action =
   | { type: "history"; messages: ChatMessage[] }
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; delta: string }
+  | { type: "streamCitations"; citations: Citation[] }
   | { type: "streamEnd" }
   | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
   | { type: "userSent"; text: string };
@@ -55,6 +56,15 @@ function reducer(state: State, action: Action): State {
         ...state,
         messages: state.messages.map((m) =>
           m.id === state.streamingId ? { ...m, content: m.content + action.delta } : m,
+        ),
+      };
+    case "streamCitations":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.id === state.streamingId
+            ? { ...m, citations: [...(m.citations ?? []), ...action.citations] }
+            : m,
         ),
       };
     case "streamEnd":
@@ -97,6 +107,7 @@ export function App() {
         case "history":     dispatch({ type: "history", messages: msg.messages }); break;
         case "streamStart": dispatch({ type: "streamStart", streamId: msg.streamId, messageId: msg.messageId }); break;
         case "streamChunk": dispatch({ type: "streamChunk", delta: msg.delta }); break;
+        case "streamCitations": dispatch({ type: "streamCitations", citations: msg.citations }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;

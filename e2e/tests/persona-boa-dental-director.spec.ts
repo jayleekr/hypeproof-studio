@@ -114,8 +114,10 @@ test("보아치과 원장 페르소나 — 5블록 × 7자산 학습 여정", as
 
     // ─── 1. Welcome — 도입 ─────────────────────────────────────────────
     // Block 1 도입: chip rack + greeting should already be visible. No turn yet.
+    // #187 chip option B: starter rack is 1 chip (meta-skill drives 7자산 Q&A
+    // in chat instead of via visual chip palette).
     await cf.locator(".hps-chip").first().waitFor({ state: "visible", timeout: 10_000 });
-    await expect.soft(cf.locator(".hps-chip")).toHaveCount(5, { timeout: 10_000 });
+    await expect.soft(cf.locator(".hps-chip")).toHaveCount(1, { timeout: 10_000 });
     await shot(cf, "01-welcome.png");
 
     // ─── 2. Intent Clarity (E7) — weak chip → reframe ──────────────────

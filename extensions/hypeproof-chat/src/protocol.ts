@@ -8,6 +8,24 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
   createdAt: number;
+  /**
+   * #173 — Web search citations attached to an assistant message. Populated
+   * by the worker's SSE translator (`hps_citations` delta), accumulated by
+   * the chat panel during streaming, persisted with the message.
+   */
+  citations?: Citation[];
+}
+
+/**
+ * #173 — Source attached to an assistant message. `tier` (1–4) is computed
+ * server-side from the URL so the chip palette is consistent across clients.
+ * 1 학회·edu·gov, 2 논문·DOI, 3 제조사 공식, 4 블로그·유튜브·기타.
+ */
+export interface Citation {
+  url: string;
+  title: string;
+  domain: string;
+  tier: 1 | 2 | 3 | 4;
 }
 
 export interface ChatConfig {
@@ -104,6 +122,7 @@ export type WebviewMessage =
   | { type: "saveCoach"; name: string; personality: string }
   | { type: "runCode"; html: string }       // from chat panel → host → preview
   | { type: "previewReady" }                // from preview webview only
+  | { type: "openExternal"; url: string }   // #173 — citation chip click → host opens browser
   // Trace signals (#9). Webview fires; host forwards via POST /v1/trace/event.
   // The host-side HTTP forwarding lands in a follow-up — keep these in sync
   // with worker/src/routes/trace.ts TraceEvent union.
@@ -139,6 +158,7 @@ export type HostMessage =
   | { type: "history"; messages: ChatMessage[] }
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }
+  | { type: "streamCitations"; streamId: string; citations: Citation[] }  // #173
   | { type: "streamEnd"; streamId: string }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }

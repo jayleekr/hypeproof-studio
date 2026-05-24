@@ -29,68 +29,32 @@ test("T1.B.1 — greeting in webview references 슈퍼서치엔진 (NOT v3 game 
   }
 });
 
-test("T1.B.2 — initial chips render 5 (4 good + 1 weak), weak is disabled", async () => {
+// #174/#187 — chip option B: meta-skill (boa-search-skill-creator) drives
+// 7자산 Q&A in chat. Initial rack is reduced to 1 starter chip and
+// follow_up is empty. Tests T1.B.2–T1.B.7 collapsed to T1.B.2 (single
+// starter chip render + dental-relevant text) + T1.B.6 (no follow_up rack
+// appears after a reply).
+
+test("T1.B.2 — single starter chip renders, dental/search-relevant text, not game vestige", async () => {
   const ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" } });
   try {
     const cf = await chatFrame(ctx.win);
     await cf.locator(".hps-shell").waitFor({ state: "visible", timeout: 25_000 });
     const chips = cf.locator(".hps-chip");
     await expect(chips.first()).toBeVisible({ timeout: 10_000 });
-    await expect(chips).toHaveCount(5);
-    await expect(cf.locator(".hps-chip-good")).toHaveCount(4);
-    const weakChips = cf.locator(".hps-chip-weak");
-    await expect(weakChips).toHaveCount(1);
-    await expect(weakChips.first()).toBeDisabled();
+    await expect(chips).toHaveCount(1);
+    const text = (await chips.first().locator(".hps-chip-text").textContent()) ?? "";
+    expect(text).toMatch(/검색 스킬|시작|search skill/i);
+    expect(text).not.toMatch(GAME_WORDS);
+    // No weak chip variant in option B — the meta-skill teaches Intent Clarity
+    // via Phase 1 Q&A instead of a visual contrast chip.
+    await expect(cf.locator(".hps-chip-weak")).toHaveCount(0);
   } finally {
     await closeApp(ctx);
   }
 });
 
-test("T1.B.3 — every good initial chip carries dental content", async () => {
-  const ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" } });
-  try {
-    const cf = await chatFrame(ctx.win);
-    await cf.locator(".hps-shell").waitFor({ state: "visible", timeout: 25_000 });
-    const goodChipTexts = await cf.locator(".hps-chip-good .hps-chip-text").allTextContents();
-    expect(goodChipTexts.length).toBe(4);
-    const dental = /임플란트|스케일링|리뷰|환자|치과|검색|병원/;
-    for (const t of goodChipTexts) {
-      expect(t).toMatch(dental);
-      expect(t).not.toMatch(GAME_WORDS);
-    }
-  } finally {
-    await closeApp(ctx);
-  }
-});
-
-test("T1.B.4 — weak chip text == '치과 관련 질문 답해줘'", async () => {
-  const ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" } });
-  try {
-    const cf = await chatFrame(ctx.win);
-    await cf.locator(".hps-shell").waitFor({ state: "visible", timeout: 25_000 });
-    const weakText = await cf.locator(".hps-chip-weak .hps-chip-text").first().textContent();
-    expect((weakText ?? "").trim()).toBe("치과 관련 질문 답해줘");
-  } finally {
-    await closeApp(ctx);
-  }
-});
-
-test("T1.B.5 — initial chip role captions cover 위생사/코디/사모님", async () => {
-  const ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" } });
-  try {
-    const cf = await chatFrame(ctx.win);
-    await cf.locator(".hps-shell").waitFor({ state: "visible", timeout: 25_000 });
-    const caps = await cf.locator(".hps-chip-good .hps-chip-caption").allTextContents();
-    const joined = caps.join(" ");
-    expect(joined).toContain("위생사");
-    expect(joined).toContain("코디");
-    expect(joined).toContain("사모님");
-  } finally {
-    await closeApp(ctx);
-  }
-});
-
-test("T1.B.6 — after assistant reply, 7 follow-up chips render", async () => {
+test("T1.B.6 — option B: no follow-up chip rack after an assistant reply", async () => {
   const ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" } });
   try {
     const cf = await chatFrame(ctx.win);
@@ -102,54 +66,15 @@ test("T1.B.6 — after assistant reply, 7 follow-up chips render", async () => {
 
     const assistant = cf.locator(".hps-msg-assistant .hps-msg-body").last();
     await expect(assistant).toBeVisible({ timeout: 60_000 });
-    // Wait for streaming to settle.
     await expect(async () => {
       const t = (await assistant.textContent()) ?? "";
       expect(t.length).toBeGreaterThan(5);
     }).toPass({ timeout: 60_000 });
 
-    // Follow-up chip rack renders only after a reply lands. The initial chips
-    // are now hidden so the visible rack must be the follow-up one.
-    // 7 E# chips + 1 "V1 First Shot" action chip = 8 (#157).
-    const racks = cf.locator(".hps-chips-rack");
-    await expect(racks.last().locator(".hps-chip")).toHaveCount(8, { timeout: 15_000 });
-  } finally {
-    await closeApp(ctx);
-  }
-});
-
-test("T1.B.7 — follow-up chips cover all 7 Essences plus the V1 First Shot action (#157)", async () => {
-  const ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" } });
-  try {
-    const cf = await chatFrame(ctx.win);
-    await cf.locator(".hps-shell").waitFor({ state: "visible", timeout: 25_000 });
-
-    const textarea = cf.locator(".hps-input textarea").first();
-    await textarea.fill("안녕");
-    await textarea.press("Enter");
-    await expect(cf.locator(".hps-msg-assistant .hps-msg-body").last())
-      .toBeVisible({ timeout: 60_000 });
-
-    // Wait for the follow-up rack to settle — chip caption nodes appear after
-    // streaming ends and the showFollowUpChips flag flips. 8 = 7 E# + V1 action.
-    const racks = cf.locator(".hps-chips-rack");
-    await expect(racks.last().locator(".hps-chip")).toHaveCount(8, { timeout: 30_000 });
-    await expect(racks.last().locator(".hps-chip-caption")).toHaveCount(8, { timeout: 10_000 });
-
-    const followCaps = await racks.last().locator(".hps-chip-caption").allTextContents();
-    expect(followCaps.length).toBe(8);
-    const captionRe = /E(2|7|9|11|12|13|14)\b|V1 First Shot/;
-    for (const c of followCaps) {
-      expect(c).toMatch(captionRe);
-    }
-    // All 7 essences still surfaced; V1 First Shot accounts for the 8th.
-    const seen = new Set<string>();
-    for (const c of followCaps) {
-      const m = c.match(/E(2|7|9|11|12|13|14)\b/);
-      if (m) seen.add(m[1]);
-    }
-    expect(seen.size).toBe(7);
-    expect(followCaps.some((c) => /V1 First Shot/.test(c))).toBe(true);
+    // With follow_up: [] the chip rack should not appear after a reply.
+    // We allow at most the initial rack (which hides on reply by design).
+    const followUpChips = cf.locator(".hps-chips-rack .hps-chip");
+    await expect(followUpChips).toHaveCount(0, { timeout: 5_000 });
   } finally {
     await closeApp(ctx);
   }

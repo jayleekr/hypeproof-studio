@@ -35,45 +35,26 @@ test("T1.A.5 — example_prompts ≥ 3 and dental-themed (임플란트/스케일
   }
 });
 
-test("T1.A.6 — initial suggestion chips count == 5", () => {
-  expect(profile.ux.suggestions.initial.length).toBe(5);
+// #174/#187 — chip option B: boa-search-skill-creator meta-skill drives the
+// 7자산 Q&A in chat, so the chip rack is reduced to one starter + empty
+// follow_up. Previous 5+8 contract retired.
+
+test("T1.A.6 — chip option B: exactly 1 starter chip + empty follow_up", () => {
+  expect(profile.ux.suggestions.initial.length).toBe(1);
+  expect(profile.ux.suggestions.initial[0].style).toBe("good");
+  expect(profile.ux.suggestions.follow_up.length).toBe(0);
 });
 
-test("T1.A.7 — weak chip text == '치과 관련 질문 답해줘'", () => {
-  const weak = profile.ux.suggestions.initial.filter((c) => c.style === "weak");
-  expect(weak.length).toBe(1);
-  expect(weak[0].text).toBe("치과 관련 질문 답해줘");
+test("T1.A.7 — starter chip text invites skill-creation", () => {
+  const txt = profile.ux.suggestions.initial[0].text;
+  expect(txt).toMatch(/검색 스킬|시작/);
 });
 
-test("T1.A.8 — initial good captions cover 위생사 + 코디 + 사모님", () => {
-  const captions = profile.ux.suggestions.initial
-    .filter((c) => c.style === "good")
-    .map((c) => c.caption ?? "")
-    .join(" ");
-  expect(captions).toContain("위생사");
-  expect(captions).toContain("코디");
-  expect(captions).toContain("사모님");
-});
-
-test("T1.A.9 — follow_up chips include 7 Essences + V1 first-shot action (#157)", () => {
-  // 7 E# chips + 1 "V1 First Shot" action chip = 8 (#157).
-  expect(profile.ux.suggestions.follow_up.length).toBe(8);
-});
-
-test("T1.A.10 — each follow_up caption is either an E# or 'V1 First Shot' action (#157)", () => {
-  const re = /E(2|7|9|11|12|13|14)\b|V1 First Shot/;
-  for (const chip of profile.ux.suggestions.follow_up) {
-    expect(chip.caption ?? "").toMatch(re);
-  }
-});
-
-test("T1.A.11 — follow_up caption set still covers all 7 Essence numbers (no dup)", () => {
-  const nums = new Set<string>();
-  for (const chip of profile.ux.suggestions.follow_up) {
-    const m = (chip.caption ?? "").match(/E(2|7|9|11|12|13|14)\b/);
-    if (m) nums.add(m[1]);
-  }
-  expect(nums.size).toBe(7);
+test("T1.A.8 — starter chip caption is a friendly opener (no role label)", () => {
+  // Roles (위생사/코디/사모님) used to be split across 4 chips. With option B
+  // the meta-skill asks the role during Phase 1 instead.
+  const cap = profile.ux.suggestions.initial[0].caption ?? "";
+  expect(cap.length).toBeGreaterThan(0);
 });
 
 // Note on the negative-match regex: bare /색/ false-matches the 색 inside

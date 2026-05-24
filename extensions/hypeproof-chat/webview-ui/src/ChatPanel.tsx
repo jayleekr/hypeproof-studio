@@ -2,10 +2,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatConfig,
   ChatMessage,
+  Citation,
   SuggestionChip,
   UpdateOffer,
   UxConfig,
 } from "../../src/protocol";
+import { postToHost } from "./vscode";
 
 interface Props {
   config: ChatConfig | null;
@@ -543,6 +545,36 @@ function MessageItem({
           message.content
         )}
       </div>
+      {message.role === "assistant" && message.citations && message.citations.length > 0 && (
+        <CitationRack citations={message.citations} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * #173 — Render the citation chip rack under an assistant message body.
+ * Tier number drives the trust palette via CSS class; clicking a chip posts
+ * to the host so VS Code opens the URL in the user's default browser
+ * (webview iframe has no direct openExternal capability).
+ */
+function CitationRack({ citations }: { citations: Citation[] }) {
+  return (
+    <div className="hps-cit-rack" role="list" aria-label="검색 출처">
+      {citations.map((c, i) => (
+        <button
+          key={`${c.url}-${i}`}
+          type="button"
+          role="listitem"
+          className={`hps-cit-chip hps-cit-tier-${c.tier}`}
+          onClick={() => postToHost({ type: "openExternal", url: c.url })}
+          title={c.url}
+        >
+          <span className="hps-cit-index">[{i + 1}]</span>
+          <span className="hps-cit-title">{c.title || c.domain}</span>
+          <span className="hps-cit-domain">{c.domain}</span>
+        </button>
+      ))}
     </div>
   );
 }

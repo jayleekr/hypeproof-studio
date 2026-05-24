@@ -363,17 +363,95 @@ function clampInt(v: unknown, lo: number, hi: number, fallback: number): number 
   return n;
 }
 
+// #173 — Web-search citation, OpenAI-extension-shaped delta payload. The
+// webview reads `delta.hps_citations` and renders a chip rack under the
+// streaming assistant message. `tier` is computed server-side from `domain`
+// so all clients agree on the same trust palette (학회/edu/gov → green,
+// pubmed/doi → teal, 제조사·회사 공식 → yellow, 블로그/유튜브/기타 → gray).
+export interface CitationChip {
+  url: string;
+  title: string;
+  domain: string;
+  tier: 1 | 2 | 3 | 4;
+}
+
+// Domain → trust tier classifier. Pure — exported so smoke tests can hit it
+// without mocking SSE. Order matters: more specific patterns first.
+export function tierForUrl(url: string): { domain: string; tier: 1 | 2 | 3 | 4 } {
+  let host = "";
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return { domain: "", tier: 4 };
+  }
+  // Tier 1 — 학회 / 대학병원 / 정부 / .edu / .gov
+  if (
+    /\.(edu|gov|ac\.kr)$/.test(host) ||
+    /(^|\.)hospital\./.test(host) ||
+    /(^|\.)(who|cdc|nih|fda|kdca)\./.test(host) ||
+    /(^|\.)(snubh|amc|samsunghospital|cmcseoul|severance|kmedi|kma)\./.test(host) ||
+    /(^|\.)(iti|aaid|eao|aap|aaoms|kaomi|aaomp)\./.test(host)
+  ) {
+    return { domain: host, tier: 1 };
+  }
+  // Tier 2 — 논문 / 리뷰 / DOI
+  if (
+    /(^|\.)(pubmed|ncbi\.nlm\.nih|doi|cochrane|scholar\.google|sciencedirect|springer|wiley|jstor|jamanetwork|nejm|nature|elsevier)\./.test(
+      host,
+    )
+  ) {
+    return { domain: host, tier: 2 };
+  }
+  // Tier 3 — 제조사 / 회사 공식 (often ".com" with known brand markers)
+  if (
+    /(^|\.)(straumann|nobelbiocare|dentsply|zimmer|osstem|dentium|neobiotech|megagen|astratech|ankylos)\./.test(
+      host,
+    )
+  ) {
+    return { domain: host, tier: 3 };
+  }
+  // Tier 4 — 블로그 / 유튜브 / 기타 (default)
+  return { domain: host, tier: 4 };
+}
+
 // SSE event translation: Anthropic stream event → OpenAI chunk JSON.
 // Returns null for events that should not be forwarded (e.g. ping, start).
 export function anthropicEventToOpenAIChunk(event: unknown, model: string): string | null {
   if (!event || typeof event !== "object") return null;
-  const e = event as { type?: string; delta?: { text?: string; type?: string }; usage?: unknown };
+  const e = event as {
+    type?: string;
+    delta?: { text?: string; type?: string };
+    content_block?: { type?: string; content?: unknown };
+    usage?: unknown;
+  };
   if (e.type === "content_block_delta" && e.delta?.type === "text_delta" && typeof e.delta.text === "string") {
     return JSON.stringify({
       id: "chatcmpl-hps",
       object: "chat.completion.chunk",
       model,
       choices: [{ index: 0, delta: { content: e.delta.text }, finish_reason: null }],
+    });
+  }
+  // #173 — server-side web_search results arrive in a single content_block_start
+  // event with the full content[] array (results are already executed
+  // server-side; no streaming deltas inside the block). Translate to
+  // `delta.hps_citations` for the webview.
+  if (e.type === "content_block_start" && e.content_block?.type === "web_search_tool_result") {
+    const raw = Array.isArray(e.content_block.content) ? e.content_block.content : [];
+    const chips: CitationChip[] = [];
+    for (const item of raw) {
+      const r = item as { type?: string; url?: string; title?: string };
+      if (r?.type === "web_search_result" && typeof r.url === "string" && r.url.length > 0) {
+        const { domain, tier } = tierForUrl(r.url);
+        chips.push({ url: r.url, title: typeof r.title === "string" ? r.title : "", domain, tier });
+      }
+    }
+    if (chips.length === 0) return null;
+    return JSON.stringify({
+      id: "chatcmpl-hps",
+      object: "chat.completion.chunk",
+      model,
+      choices: [{ index: 0, delta: { hps_citations: chips }, finish_reason: null }],
     });
   }
   if (e.type === "message_stop") {
