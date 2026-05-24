@@ -30,7 +30,8 @@ const TRIAL_UUID  = "11111111-2222-4333-8444-555555555555";
 const TRIAL_UUID2 = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
 const { issue, verify, TokenError } = await import("../src/lib/tokens.ts");
-const { translate, translateOpenAI } = await import("../src/lib/translate.ts");
+const { translate, translateOpenAI, anthropicEventToOpenAIChunk, tierForUrl } =
+  await import("../src/lib/translate.ts");
 const { resolveProvider } = await import("../src/env.ts");
 
 /** @type {import("../src/profiles/types.ts").Profile} */
@@ -1104,32 +1105,17 @@ const stubProfile = {
   // T1.A.4 — greeting contract.
   assert.match(dental.welcome.greeting_md, /슈퍼서치엔진/);
   assert.match(dental.welcome.greeting_md, /원장님을 이겨/);
-  // T1.A.6 — initial chip count + weak chip.
-  assert.equal(dental.ux.suggestions.initial.length, 5);
-  const weak = dental.ux.suggestions.initial.filter(c => c.style === "weak");
-  assert.equal(weak.length, 1, "exactly one weak chip");
-  assert.equal(weak[0].text, "치과 관련 질문 답해줘");
-  // T1.A.8 — role coverage in initial captions.
-  const initCaps = dental.ux.suggestions.initial
-    .filter(c => c.style === "good").map(c => c.caption ?? "").join(" ");
-  for (const role of ["위생사", "코디", "사모님"]) {
-    assert.ok(initCaps.includes(role), `initial good captions must reference role ${role} (got: ${initCaps})`);
-  }
-  // T1.A.9 + 11 — follow_up: 7 Essence chips + 1 V1 First Shot action (#157) = 8.
-  assert.equal(dental.ux.suggestions.follow_up.length, 8);
-  const re = /E(2|7|9|11|12|13|14)\b/;
-  const captionRe = /E(2|7|9|11|12|13|14)\b|V1 First Shot/;
-  const eSeen = new Set();
-  for (const chip of dental.ux.suggestions.follow_up) {
-    assert.match(chip.caption ?? "", captionRe, `follow_up caption must be E# or V1 First Shot (got: ${chip.caption})`);
-    const m = (chip.caption ?? "").match(re);
-    if (m) eSeen.add(m[1]);
-  }
-  assert.equal(eSeen.size, 7, "follow_up captions must still cover all 7 Essence numbers without dup");
-  assert.ok(
-    dental.ux.suggestions.follow_up.some((c) => /V1 First Shot/.test(c.caption ?? "")),
-    "follow_up must include a V1 First Shot action chip (#157)",
+  // T1.A.6 — #174/#187 chip option B: meta-skill (boa-search-skill-creator)
+  // drives 7자산 Q&A in chat, so chip rack is reduced to a single starter
+  // chip + empty follow_up. Previous 5+8 contract retired with #187.
+  assert.equal(dental.ux.suggestions.initial.length, 1, "option B keeps exactly 1 starter chip");
+  assert.equal(dental.ux.suggestions.initial[0].style, "good");
+  assert.match(
+    dental.ux.suggestions.initial[0].text,
+    /검색 스킬|시작/,
+    "starter chip text is a skill-creation invite",
   );
+  assert.equal(dental.ux.suggestions.follow_up.length, 0, "option B clears follow_up — meta-skill drives the flow");
   // T1.A.12/13 — hint copy is decision-shaped, no game vestige.
   // Note: bare /색/ would false-match inside "검색" (search). The game-palette
   // tokens we actually want to ban are 색상|색깔|색을 + 점수|캐릭터|주인공|모양만.
@@ -1146,7 +1132,7 @@ const stubProfile = {
   // T1.A.15 — publishing.
   assert.equal(dental.publishing.enabled, false);
   assert.equal(dental.publishing.strategy, "local_only");
-  console.log(`✓ boah-dental v4 contract: essences[2,7,9,11,12,13,14] · 5 initial chips · 7 follow_up E# · decision-shaped hints · fixed coach name · local_only`);
+  console.log(`✓ boah-dental v4 contract: essences[2,7,9,11,12,13,14] · 1 starter chip (option B) · empty follow_up · decision-shaped hints · fixed coach name · local_only`);
 }
 
 // §5 — recordTurn SQL carries ON CONFLICT(trial_id, turn_idx) DO UPDATE
@@ -1415,6 +1401,64 @@ const stubProfile = {
   }
 
   console.log("✓ heartbeat (#45): KV side-effects + fail-streak threshold + recovery + resolveProvider fail");
+}
+
+// ---- #173: citation chunk emit + tier classifier ---------------------------
+{
+  // Tier classifier — sample inputs against the 4-tier palette.
+  assert.equal(tierForUrl("https://www.snubh.org/foo").tier, 1, "snubh → tier 1");
+  assert.equal(tierForUrl("https://iti.org/x").tier, 1, "iti → tier 1");
+  assert.equal(tierForUrl("https://pubmed.ncbi.nlm.nih.gov/123").tier, 1, "ncbi.nlm.nih.gov → tier 1 (gov)");
+  assert.equal(tierForUrl("https://doi.org/10.1234/abc").tier, 2, "doi → tier 2");
+  assert.equal(tierForUrl("https://www.osstem.com/x").tier, 3, "osstem → tier 3 (manufacturer)");
+  assert.equal(tierForUrl("https://blog.naver.com/x").tier, 4, "blog → tier 4");
+  assert.equal(tierForUrl("not a url").tier, 4, "malformed URL falls back to tier 4");
+
+  // SSE translator: web_search_tool_result → hps_citations chunk.
+  const webResultEvent = {
+    type: "content_block_start",
+    index: 1,
+    content_block: {
+      type: "web_search_tool_result",
+      content: [
+        { type: "web_search_result", url: "https://www.iti.org/clinical-guidelines/x", title: "ITI guideline" },
+        { type: "web_search_result", url: "https://pubmed.ncbi.nlm.nih.gov/789", title: "PubMed paper" },
+        { type: "web_search_result", url: "https://blog.naver.com/dentist/123", title: "Blog post" },
+        // Garbage entries must be silently filtered (no url / wrong type).
+        { type: "wrong_type", url: "https://x" },
+        { type: "web_search_result", url: "" },
+      ],
+    },
+  };
+  const out = anthropicEventToOpenAIChunk(webResultEvent, "hypeproof-default");
+  assert.ok(out !== null, "web_search_tool_result emits a chunk");
+  const parsed = JSON.parse(out);
+  const chips = parsed?.choices?.[0]?.delta?.hps_citations;
+  assert.ok(Array.isArray(chips), "chunk has delta.hps_citations array");
+  assert.equal(chips.length, 3, "filtered down to 3 valid web_search_result entries");
+  assert.equal(chips[0].tier, 1, "ITI URL classified tier 1");
+  assert.equal(chips[1].tier, 1, "pubmed URL classified tier 1 (gov host)");
+  assert.equal(chips[2].tier, 4, "blog URL classified tier 4");
+  for (const c of chips) {
+    assert.ok(c.domain.length > 0, "chip has domain");
+    assert.ok(c.url.startsWith("https://"), "chip has https url");
+  }
+
+  // Empty/all-invalid block → null (do not emit an empty chunk).
+  const emptyEvent = {
+    type: "content_block_start",
+    content_block: { type: "web_search_tool_result", content: [] },
+  };
+  assert.equal(anthropicEventToOpenAIChunk(emptyEvent, "x"), null, "empty result block emits no chunk");
+
+  // Existing event paths unchanged — text_delta still works.
+  const td = anthropicEventToOpenAIChunk(
+    { type: "content_block_delta", delta: { type: "text_delta", text: "안녕" } },
+    "m",
+  );
+  assert.ok(td && JSON.parse(td).choices[0].delta.content === "안녕", "text_delta still translates");
+
+  console.log("✓ #173: web_search citation chunk + 4-tier classifier");
 }
 
 console.log("\nAll smoke tests passed.");

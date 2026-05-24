@@ -282,6 +282,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         return;
       case "previewReady":
         return;
+      case "openExternal":
+        // #173 — citation chip click. Guard the URL: http(s) only, no
+        // file://, javascript:, vscode:, etc. The webview should never
+        // request anything else (citations come from the worker which only
+        // emits web_search_result entries), but defend against a compromised
+        // upstream that might inject a hostile scheme.
+        if (typeof msg.url === "string" && /^https?:\/\//i.test(msg.url)) {
+          void vscode.env.openExternal(vscode.Uri.parse(msg.url));
+        }
+        return;
       case "webviewError":
         // S-04 (#48). Log to output channel so the trace survives a panel
         // reload; don't crash the host.
@@ -360,6 +370,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       void this.preview.show(html);
       void this.saveGameToWorkspace(html);
     };
+    // #173 — accumulate citations across the stream so they persist to history.
+    const assistantCitations: import("./protocol").Citation[] = [];
     try {
       await proxyChat({
         proxyUrl,
@@ -377,11 +389,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           // most chunks (no fence/doctype present yet).
           tryReveal(assistantText);
         },
+        onCitations: (cites) => {
+          for (const c of cites) assistantCitations.push(c);
+          void this.post({ type: "streamCitations", streamId, citations: cites });
+        },
       });
       void this.post({ type: "streamEnd", streamId });
       await this.appendHistory([
         { id: randomId(), role: "user", content: text, createdAt: Date.now() },
-        { id: messageId, role: "assistant", content: assistantText, createdAt: Date.now() },
+        {
+          id: messageId,
+          role: "assistant",
+          content: assistantText,
+          createdAt: Date.now(),
+          ...(assistantCitations.length > 0 ? { citations: assistantCitations } : {}),
+        },
       ]);
       // Fallback reveal in case the stream completed but the per-chunk
       // probe missed it (e.g. the closing ``` was in the very last delta).

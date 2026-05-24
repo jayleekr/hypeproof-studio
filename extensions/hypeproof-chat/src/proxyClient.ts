@@ -1,4 +1,4 @@
-import { ChatMessage, ResolvedProfile } from "./protocol";
+import { ChatMessage, Citation, ResolvedProfile } from "./protocol";
 import { buildProxyHeaders } from "./proxyClientHelpers";
 
 /**
@@ -96,6 +96,8 @@ interface ProxyChatArgs {
   userText: string;
   signal: AbortSignal;
   onDelta: (delta: string) => void;
+  /** #173 — fires for each citations chunk in the SSE stream. */
+  onCitations?: (citations: Citation[]) => void;
   coachName?: string;
   coachPersonality?: string;
 }
@@ -111,6 +113,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
     userText,
     signal,
     onDelta,
+    onCitations,
     coachName,
     coachPersonality,
   } = args;
@@ -164,8 +167,14 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
       if (data === "[DONE]") return;
       try {
         const j = JSON.parse(data);
-        const delta = j?.choices?.[0]?.delta?.content;
+        const choice = j?.choices?.[0]?.delta;
+        const delta = choice?.content;
         if (typeof delta === "string" && delta.length) onDelta(delta);
+        // #173 — citations chunk
+        const cites = choice?.hps_citations;
+        if (Array.isArray(cites) && cites.length > 0 && onCitations) {
+          onCitations(cites as Citation[]);
+        }
       } catch {
         // ignore malformed line
       }
