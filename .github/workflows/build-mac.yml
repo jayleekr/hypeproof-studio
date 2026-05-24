@@ -137,8 +137,13 @@ jobs:
 
       - name: Build (macOS)
         shell: bash
-        working-directory: vscodium-base
-        run: bash build.sh
+        # Use the canonical entry point (build-pipeline.md): scripts/run-build.sh.
+        # Direct `bash build.sh` skips the .yet restore + vscode/ reset that
+        # run-build.sh handles. CI hit that gap at v0.1.8 (build.sh:11 sources
+        # prepare_vscode.sh, whose mv .yet→.patch failed on second run).
+        # No working-directory: run-build.sh cd's into vscodium-base itself.
+        # No logfile arg: keep output in the GH Actions step log.
+        run: bash scripts/run-build.sh
 
       - name: Package .app → darwin-arm64 zip
         id: package
