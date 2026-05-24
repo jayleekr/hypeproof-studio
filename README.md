@@ -87,7 +87,7 @@ curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/
 <summary>Windows</summary>
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-win.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-win.ps1 | iex
 ```
 </details>
 
