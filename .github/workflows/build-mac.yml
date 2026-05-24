@@ -97,6 +97,14 @@ jobs:
             echo "HPS_DATA_FOLDER_NAME=$HPS_DATA_FOLDER_NAME"
             echo "HPS_DARWIN_BUNDLE_ID=$HPS_DARWIN_BUNDLE_ID"
             echo "HPS_URL_PROTOCOL=$HPS_URL_PROTOCOL"
+            # Win32 names — needed even for Mac build because
+            # scripts/apply-product-overrides.sh bakes them into the shared
+            # product.json (cross-platform), not just for Windows builds.
+            echo "HPS_WIN32_DIR_NAME=$HPS_WIN32_DIR_NAME"
+            echo "HPS_WIN32_NAME_VERSION=$HPS_WIN32_NAME_VERSION"
+            echo "HPS_WIN32_MUTEX_NAME=$HPS_WIN32_MUTEX_NAME"
+            echo "HPS_WIN32_APP_USER_MODEL_ID=$HPS_WIN32_APP_USER_MODEL_ID"
+            echo "HPS_WIN32_REG_VALUE_NAME=$HPS_WIN32_REG_VALUE_NAME"
           } >> "$GITHUB_ENV"
 
       - name: Install brand assets
