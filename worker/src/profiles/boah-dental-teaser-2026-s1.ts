@@ -97,28 +97,12 @@ export const profile: Profile = {
       revisit_on_entry: false,
     },
     suggestions: {
-      // 직군별 실 검색 문제 — 자기 업무에서 반복·헷갈림·확인필요한 것.
-      // weak 칩으로 막연한 입력의 모양을 *대비*로 보여준다 (Intent Clarity 학습).
-      initial: [
-        { text: "환자가 임플란트 후 운동 언제부터 되냐고 자주 물어봐요 — 답변 근거 찾기", style: "good", caption: "위생사" },
-        { text: "스케일링 후 주의사항 안내문 — 공식 학회 자료 기반으로 정리", style: "good", caption: "위생사" },
-        { text: "리뷰 답글 톤이 매번 다른데 우리 병원 표준 표현으로 정리하고 싶어요", style: "good", caption: "코디" },
-        { text: "임플란트 신제품 후보 3개 비교 — 우리 케이스에 맞는 기준으로", style: "good", caption: "사모님" },
-        { text: "치과 관련 질문 답해줘", style: "weak", caption: "어떤 결정에 쓸지 모르면 검색이 안 잡혀요." },
-      ],
-      // 5블록 흐름의 다음 한 수 — 7 AI Native Assets 행동 + V1 first-shot action.
-      // 첫 chip은 의도적으로 V1 즉시 만들기 (#157) — 참가자가 reframe loop에
-      // 갇히지 않도록.
-      follow_up: [
-        { text: "이걸로 V1 한 번 만들어줘 — 우측에 띄워줘", style: "good", caption: "V1 First Shot" },
-        { text: "이걸 무슨 결정에 쓸지 한 줄로 다시 써줘", style: "good", caption: "Intent Clarity (E7)" },
-        { text: "환자군·상황·금지표현·판단 기준을 처음부터 풀로 적어줘", style: "good", caption: "Context Design (E2)" },
-        { text: "검색어를 한국어·영어·전문용어 3가지로 변주해줘", style: "good", caption: "Iteration Reflex (E9)" },
-        { text: "이 검색을 *틀리게* 만드는 가장 확실한 방법은?", style: "good", caption: "Verification Reflex (E11)" },
-        { text: "환자용 / 내부용 / 원장님 컨펌용 표현으로 각각 한 줄씩", style: "good", caption: "Taste (E13)" },
-        { text: "방금 깨진 이유를 다음 검색에 자동 적용될 규칙으로 저장해줘", style: "good", caption: "Ownership (E14)" },
-        { text: "이건 AI가 결론 내릴 일이 아닌 것 같아 — 원장님께 물어볼 질문으로 바꿔줘", style: "good", caption: "Delegation Judgment (E12)" },
-      ],
+      // #168 M4: 보아치과 cohort는 boa-search-skill-creator 메타-스킬(M1으로
+      // system prompt에 bundled)이 7자산 Q&A 흐름을 *대화로* 진행한다. chip이
+      // 그 흐름과 경쟁 + 학생에게 "옛 게임 프레임 잔재" 인상 → 비워둠.
+      // 다른 cohort (sk-biopharm-kids 등)는 chip 그대로 유지.
+      initial: [],
+      follow_up: [],
     },
     hints: {
       short_input: {
