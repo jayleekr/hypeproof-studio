@@ -1,5 +1,9 @@
 // Retry button regenerates a fresh assistant response. Roll-input button
 // captures original + appends a follow-up, sending the combined prompt.
+//
+// Streaming race: after assistant message text reaches len > 2, the retry
+// button only renders once streaming ends (canRetry checks !streaming in
+// ChatPanel). Wait for stream end before asserting button visibility.
 
 import { test, expect } from "@playwright/test";
 import { launchApp, closeApp, chatFrame } from "../fixtures/app.ts";
@@ -26,9 +30,11 @@ test("retry button regenerates an assistant message", async () => {
       expect(t.length).toBeGreaterThan(2);
     }).toPass({ timeout: 30_000, intervals: [500, 1000, 2000] });
 
-    // Click retry on the assistant message
+    // Click retry on the assistant message. canRetry checks !streaming so
+    // the button only appears once the stream truly ends — long enough for
+    // a full LLM response, not just the first chunk.
     const retryBtn = cf.locator(".hps-msg-retry").first();
-    await expect(retryBtn).toBeVisible({ timeout: 5_000 });
+    await expect(retryBtn).toBeVisible({ timeout: 30_000 });
     await retryBtn.click();
 
     // A second assistant message appears

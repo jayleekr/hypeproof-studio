@@ -58,8 +58,9 @@ test("01-greeting", async () => {
     const cf = await chatFrame(ctx.win);
     await cf.locator(".hps-shell").waitFor({ state: "visible", timeout: 25_000 });
     await cf.locator(".hps-chip").first().waitFor({ state: "visible", timeout: 10_000 });
-    // make sure all 5 chips rendered
-    await expect(cf.locator(".hps-chip")).toHaveCount(5, { timeout: 10_000 });
+    // #187 chip option B: starter rack reduced to 1 chip (meta-skill drives
+    // 7자산 Q&A via chat, not visual chip palette).
+    await expect(cf.locator(".hps-chip")).toHaveCount(1, { timeout: 10_000 });
     await shotShell(cf, "01-greeting.png");
   } finally {
     await closeApp(ctx);
@@ -119,7 +120,11 @@ test("04-v1-axes", async () => {
   }
 });
 
-// 5 — follow-up chips with 7 AI Native Asset captions visible.
+// 5 — follow-up chips: retired with #187 chip option B (follow_up: []).
+// Meta-skill (boa-search-skill-creator) carries 7자산 Q&A via chat prose
+// instead of a chip palette. Snapshot kept as a placeholder so the
+// curriculum doc has 10 numbered panels — captures the post-reply shell
+// shape (no chip rack present).
 test("05-followup-chips", async () => {
   const ctx = await launchApp({ preseedToken: true, preseedCoach: { name: "코치" } });
   try {
@@ -129,16 +134,8 @@ test("05-followup-chips", async () => {
     await ta.fill("안녕");
     await ta.press("Enter");
     await waitForAssistantReply(cf, 30);
-    // Wait for all 7 follow-up chips to be present.
-    await expect(cf.locator(".hps-chips-rack").last().locator(".hps-chip")).toHaveCount(7, {
-      timeout: 15_000,
-    });
-    await expect(cf.locator(".hps-chips-rack").last().locator(".hps-chip-caption")).toHaveCount(7, {
-      timeout: 10_000,
-    });
-    // Scroll to the chips so they're in frame.
-    await cf.locator(".hps-chips-rack").last().scrollIntoViewIfNeeded();
-    await new Promise((r) => setTimeout(r, 500));
+    // Option B: no follow-up chip rack appears after the reply.
+    await expect(cf.locator(".hps-chips-rack .hps-chip")).toHaveCount(0, { timeout: 5_000 });
     await shotShell(cf, "05-followup-chips.png");
   } finally {
     await closeApp(ctx);

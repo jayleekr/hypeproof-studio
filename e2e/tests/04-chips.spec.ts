@@ -1,8 +1,24 @@
 // Initial suggestion chips render with good/weak contrast, click drops into
 // input box, follow-up chips appear after assistant response.
+//
+// These specs require a profile with at least one weak chip AND non-empty
+// follow_up. Current dev-stack default (boah-dental) is option B (1 starter
+// chip, no weak, empty follow_up — #187). Skip until sk-biopharm-kids
+// run-mode is wired into the e2e harness (epic #200 follow-up).
 
 import { test, expect } from "@playwright/test";
 import { launchApp, closeApp, chatFrame } from "../fixtures/app.ts";
+import { fetchDentalProfile } from "../fixtures/dental-helpers.ts";
+
+test.beforeAll(async () => {
+  const profile = await fetchDentalProfile();
+  const hasWeak = profile.ux.suggestions.initial.some((c) => c.style === "weak");
+  const hasFollowUp = profile.ux.suggestions.follow_up.length > 0;
+  test.skip(
+    !hasWeak || !hasFollowUp,
+    `profile ${profile.profile_id} has no weak chip (weak=${hasWeak}) or no follow_up (count=${profile.ux.suggestions.follow_up.length}) — chip-flow specs N/A in option B.`,
+  );
+});
 
 test("initial chips show, weak chip is disabled, good chip drops into input", async () => {
   const ctx = await launchApp({
