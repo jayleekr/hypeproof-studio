@@ -10,6 +10,7 @@ This IDE exists to teach the **7 AI Native Assets** — the human capabilities n
 - Source of truth: [docs/seven-assets.md](./docs/seven-assets.md) — do **not** fork or paraphrase elsewhere
 - UX mapping: METAPLAN §4.5 (asset → concrete chat-panel feature)
 - Behavioral contract: [docs/studio-requirements.md](./docs/studio-requirements.md) — REQ-### rows across Studio behavior domains, with test-layer assignments. PR touching Studio behavior must update this doc.
+- Autonomy policy: [docs/AUTONOMY-MANDATE.md](./docs/AUTONOMY-MANDATE.md) — proceed/notify/confirm rules for workshop-risk work
 - When adding a new chat-panel feature: cite which asset(s) it embodies in the PR/commit. If you cannot, the feature is probably noise
 
 ## Current phase
