@@ -63,7 +63,7 @@ export async function runDeepHealth(env: Env): Promise<DeepHealthResult> {
   }
   if (env.ANTHROPIC_API_KEY) {
     probes.push(
-      probeAnthropic(env.ANTHROPIC_API_KEY, env.ANTHROPIC_PROXY_URL).then((r) => {
+      probeAnthropic(env.ANTHROPIC_API_KEY, env.ANTHROPIC_PROXY_URL, env.ANTHROPIC_PROXY_SECRET).then((r) => {
         out.providers.anthropic = r;
       }),
     );
@@ -97,18 +97,21 @@ async function probeGemini(apiKey: string): Promise<ProbeResult> {
 }
 
 /** Anthropic via the configured proxy (when set) or direct. */
-async function probeAnthropic(apiKey: string, proxyUrl?: string): Promise<ProbeResult> {
+async function probeAnthropic(apiKey: string, proxyUrl?: string, proxySecret?: string): Promise<ProbeResult> {
   // The proxy is transparent passthrough — we can hit its /v1/messages with a
   // tiny POST. Cheapest tokens model (haiku) keeps cost at ~$0/call when capped
   // at max_tokens=1. Note: max_tokens=0 is invalid for Anthropic, so use 1.
   const base = proxyUrl ?? "https://api.anthropic.com/v1/messages";
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "x-api-key": apiKey,
+    "anthropic-version": "2023-06-01",
+  };
+  // Sediment proxy (sediment#3eddd06) gates with X-Sediment-Proxy-Secret.
+  if (proxySecret && proxyUrl) headers["X-Sediment-Proxy-Secret"] = proxySecret;
   const r = await timedFetch(base, {
     method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-    },
+    headers,
     body: JSON.stringify({
       model: "claude-haiku-4-5",
       max_tokens: 1,

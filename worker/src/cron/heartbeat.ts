@@ -101,7 +101,7 @@ function callUpstream(
         messages: [{ role: "user", content: "ping" }],
       },
       apiKey,
-      { url: env.ANTHROPIC_PROXY_URL, signal },
+      { url: env.ANTHROPIC_PROXY_URL, signal, proxySecret: env.ANTHROPIC_PROXY_SECRET },
     );
   }
   if (provider === "gemini") {

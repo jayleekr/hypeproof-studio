@@ -303,7 +303,10 @@ chat.post("/chat/completions", async (c) => {
       const aBody = translate(body as any, profile, coach);
       aBody.stream = stream;
       modelLabel = aBody.model;
-      upstream = await callAnthropic(aBody, apiKey, { url: env.ANTHROPIC_PROXY_URL });
+      upstream = await callAnthropic(aBody, apiKey, {
+        url: env.ANTHROPIC_PROXY_URL,
+        proxySecret: env.ANTHROPIC_PROXY_SECRET,
+      });
     }
   } catch (err) {
     return c.json({ error: { message: String(err), type: "request" } }, 400);

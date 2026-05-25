@@ -19,6 +19,11 @@ export interface Env {
   // proxy (e.g. hypeproof-sediment Fly NRT) when CF anycast egress hits an
   // Anthropic-blocked region (HK). Leave unset to call api.anthropic.com.
   ANTHROPIC_PROXY_URL?: string;
+  // Shared secret for the hypeproof-sediment proxy (sediment#3eddd06).
+  // Sent as `X-Sediment-Proxy-Secret` to /proxy/anthropic/*; without it the
+  // proxy returns 403 and the worker bubbles up 502. Local dev unset →
+  // worker calls api.anthropic.com directly, no proxy involved.
+  ANTHROPIC_PROXY_SECRET?: string;
   // Discord webhook for in-app bug reports (#64). When set, POST /v1/report
   // best-effort fans a formatted embed into the #hypeproof-studio channel.
   // Unset → reports still persist to D1; only the side-effect is skipped.
