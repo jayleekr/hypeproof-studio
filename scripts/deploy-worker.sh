@@ -34,9 +34,11 @@ note "preflight: branch + sync + tree"
 branch="$(git rev-parse --abbrev-ref HEAD)"
 [ "$branch" = "main" ] || die "must be on main (current: $branch). switch to main first."
 
-# Working tree must be clean (submodule modified content is OK — that's the
-# rename residue documented in build-pipeline.md).
-if ! git diff --quiet || ! git diff --cached --quiet; then
+# Working tree must be clean. Submodule modified content is OK — that's the
+# rename residue documented in build-pipeline.md, plus `-dirty` from any
+# local vscodium build. Pass --ignore-submodules to both git diff calls so
+# those don't wedge the deploy.
+if ! git diff --quiet --ignore-submodules || ! git diff --cached --quiet --ignore-submodules; then
   die "working tree dirty. commit or stash first."
 fi
 
