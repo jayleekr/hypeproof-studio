@@ -108,6 +108,19 @@ check("detectAppBundle: dev path with .app", () => {
   const result = detectAppBundle("/Users/jay/dev/build/HypeProof Studio.app/Contents/MacOS/Electron");
   assert.equal(result, "/Users/jay/dev/build/HypeProof Studio.app");
 });
+// #206: the extension host's execPath is the nested helper, NOT the top app.
+check("detectAppBundle: nested Helper (Plugin) execPath → outermost app", () => {
+  const result = detectAppBundle(
+    "/Applications/HypeProof Studio.app/Contents/Frameworks/HypeProof Studio Helper (Plugin).app/Contents/MacOS/HypeProof Studio Helper (Plugin)",
+  );
+  assert.equal(result, "/Applications/HypeProof Studio.app");
+});
+check("detectAppBundle: doubly-nested helper (already-bloated install) → outermost app", () => {
+  const result = detectAppBundle(
+    "/Applications/HypeProof Studio.app/Contents/Frameworks/HypeProof Studio Helper (Plugin).app/Contents/Frameworks/HypeProof Studio Helper (Plugin).app/Contents/MacOS/HypeProof Studio Helper (Plugin)",
+  );
+  assert.equal(result, "/Applications/HypeProof Studio.app");
+});
 check("detectAppBundle: non-.app path → null", () => {
   assert.equal(detectAppBundle("/usr/local/bin/code"), null);
 });
@@ -136,6 +149,10 @@ check("renderInstallerScript: includes expected anchors", () => {
   assert.match(script, /OLD_APP="\/Applications\/HypeProof Studio\.app"/);
   // Has bundle id sanity guard
   assert.ok(script.includes("Print :CFBundleIdentifier"), "missing PlistBuddy check");
+  // #206: refuses to install into a nested sub-bundle
+  assert.ok(script.includes("*/Contents/Frameworks/*)"), "missing nested-bundle guard");
+  // #206: validates OLD_APP's own bundle id, not just NEW_APP's
+  assert.ok(script.includes("OLD_BID="), "missing old-app bundle id check");
   // Has quarantine strip
   assert.ok(script.includes("xattr -dr com.apple.quarantine"), "missing quarantine strip");
   // Has reopen step
