@@ -55,7 +55,12 @@ export const profile: Profile = {
   },
   preview: {
     type: "live_server",
-    auto_start: true,
+    // #198 — auto-open이 비결정적 (tryReveal 스트림 race + 닫는 펜스 누락
+    // 케이스). v0.1.10 ChatPanel.tsx에 이미 `▶ Run` 버튼이 HTML 응답마다
+    // 노출되므로 학생이 명시적으로 트리거. 결정적 + 학생 통제. v2 polish
+    // (".app rebuild 필요한 chip 스타일 + 라벨 ▶ Run → 🖼 미리보기) 는
+    // epic #200 Stratum 4에서 v0.1.11 출시 시 동반.
+    auto_start: false,
   },
   game: {
     // v4 산출물은 검색 웹앱 — #150에서 search-webapp tier로 분리. 게임 frame
