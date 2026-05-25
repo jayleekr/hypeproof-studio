@@ -34,6 +34,14 @@ nvm use 22.22.1 --silent
 # shellcheck disable=SC1091
 . ./hypeproof-studio.env >/dev/null
 
+# Stamp a real commit into product.json. VSCodium's version.sh derives
+# BUILD_SOURCEVERSION = sha1sum(RELEASE_VERSION) when unset — with no
+# RELEASE_VERSION that hashes a newline to the adc83b19… placeholder, which the
+# build then writes to product.json.commit (clobbering apply-product-overrides).
+# Default it to the repo HEAD so the About screen shows a real commit (#206).
+export BUILD_SOURCEVERSION="${BUILD_SOURCEVERSION:-$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)}"
+echo "  BUILD_SOURCEVERSION=${BUILD_SOURCEVERSION:-<unset>}"
+
 # Verify before kicking off the long build
 {
   echo "==================================================="
