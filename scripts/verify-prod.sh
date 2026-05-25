@@ -10,6 +10,7 @@
 #   bash scripts/verify-prod.sh                       # layer 1 only
 #   HPS_ADMIN_PASSWORD=… bash scripts/verify-prod.sh  # + layer 2
 #   TOKEN=… HPS_ADMIN_PASSWORD=… bash …               # + layer 3
+#   SKIP_CHAT=1 TOKEN=… bash …                        # profile-only L3
 #
 # Layer 3 takes a cohort token via the TOKEN env var. Mint one in advance:
 #   - via /issuer (instructor flow) on api.hypeproof-ai.xyz/issuer/, OR
@@ -60,11 +61,19 @@ if [[ -n "${TOKEN:-}" ]]; then
   echo "  profile_id=$(echo "$profile" | python3 -c 'import sys,json; print(json.load(sys.stdin)["profile_id"])')"
   echo "$profile" | grep -q "슈퍼서치엔진" || die "L3a: greeting missing '슈퍼서치엔진' — wrong profile or stale deploy"
   echo "$profile" | grep -q "원장님을 이겨" || die "L3a: greeting missing '원장님을 이겨'"
+  asset_count="$(echo "$profile" | python3 -c 'import sys,json; print(len(json.load(sys.stdin).get("assets_focus", [])))')"
+  [[ "$asset_count" == "7" ]] || die "L3a: assets_focus count is $asset_count, expected 7"
   follow_count="$(echo "$profile" | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["ux"]["suggestions"]["follow_up"]))')"
-  [[ "$follow_count" == "7" ]] || die "L3a: follow_up chip count is $follow_count, expected 7"
+  [[ "$follow_count" == "0" ]] || die "L3a: follow_up chip count is $follow_count, expected 0 after #174/#187 chip cleanup"
   ok "L3a — /v1/profile reflects v4 dental contract"
 
   # 3b. /v1/chat/completions must respect cohort system prompt (no game vocab)
+  if [[ "${SKIP_CHAT:-0}" == "1" ]]; then
+    warn "L3b skipped (SKIP_CHAT=1)"
+    echo
+    ok "verify-prod done"
+    exit 0
+  fi
   note "L3b — sample chat turn (1 LLM call ≈ $0.002)"
   chat="$(curl -fsS --max-time 60 -X POST \
     -H "authorization: Bearer $TOKEN" \

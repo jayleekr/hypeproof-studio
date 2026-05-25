@@ -6,7 +6,9 @@
 #   2. Deploy (top-level env — wrangler.toml has multiple env blocks).
 #   3. Capture active version ID.
 #   4. Post-deploy /v1/health smoke.
-#   5. Print a one-block summary (timestamp · version · health).
+#   5. Optional full prod smoke via scripts/verify-prod.sh when TOKEN or
+#      HPS_ADMIN_PASSWORD is present.
+#   6. Print a one-block summary (timestamp · version · health).
 #
 # Usage:
 #   bash scripts/deploy-worker.sh                  # interactive confirm
@@ -97,7 +99,16 @@ else
   die "health check failed: $health" 3
 fi
 
-# 6. Summary ------------------------------------------------------------------
+# 6. Optional full smoke -------------------------------------------------------
+if [[ -n "${TOKEN:-}" || -n "${HPS_ADMIN_PASSWORD:-}" ]]; then
+  note "post-deploy full smoke: scripts/verify-prod.sh"
+  PROD="$PROD_URL" bash scripts/verify-prod.sh
+  ok "full smoke passed"
+else
+  warn "full smoke skipped (set TOKEN for profile+chat, HPS_ADMIN_PASSWORD for deep health)"
+fi
+
+# 7. Summary ------------------------------------------------------------------
 echo
 ok "deploy summary"
 printf "  time:    %s\n" "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
