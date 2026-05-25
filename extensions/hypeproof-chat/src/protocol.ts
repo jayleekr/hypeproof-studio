@@ -65,6 +65,7 @@ export interface ResolvedProfile {
   language: "ko" | "en";
   series_index: number;
   series_total: number;
+  assets_focus?: string[];
   welcome: {
     greeting_md: string;
     example_prompts: string[];

@@ -93,6 +93,7 @@ chat.get("/profile", async (c) => {
     language: profile.audience.language,
     series_index: profile.session.series_index,
     series_total: profile.session.series_total,
+    assets_focus: profile.assets_focus,
     welcome: profile.welcome,
     ux: profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
