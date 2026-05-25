@@ -22,7 +22,7 @@
 
 <p align="center">
   <a href="./METAPLAN.md">Build plan</a> ·
-  <a href="./docs/essence-v0.1.md">16 Essences</a> ·
+  <a href="./docs/seven-assets.md">7 AI Native Assets</a> ·
   <a href="./docs/INSTALL.md">Install (workshop)</a> ·
   <a href="./docs/COHORT-AUTHORING.md">Authoring cohorts</a> ·
   <a href="./DEV-GUIDE.md">Dev guide</a>
@@ -33,13 +33,13 @@
 ## What it is
 
 HypeProof Studio is a desktop IDE — a [VSCodium](https://vscodium.com) fork — built
-to teach the **16 Essences**: the human capabilities a person needs when building
+to teach the **7 AI Native Assets**: the human capabilities a person needs when building
 with AI models. The product is not the editor; it is the **coach** living in the
 chat panel. Every UX decision (welcome flow, suggestion chips, the "think again"
-button, manual-approve modals) serves one or more of those essences.
+button, manual-approve modals) serves one or more of those assets.
 
-Product philosophy is fixed in [docs/essence-v0.1.md](./docs/essence-v0.1.md) —
-the single source of truth. Do not fork or paraphrase it.
+Product philosophy is fixed in [docs/seven-assets.md](./docs/seven-assets.md) —
+the single source of truth. `docs/essence-v0.1.md` is deprecated history.
 
 ## Features
 
@@ -47,7 +47,7 @@ the single source of truth. Do not fork or paraphrase it.
 |---|---|
 | **A coach, not an autocomplete** — the learner names their coach and builds with it conversationally. | <img src=".github/assets/coach-naming.png" alt="Coach naming ritual" width="380"> |
 | **Guided suggestion chips** — good vs. weak prompts are shown side by side so the learner *feels* the difference, not just hears it. | <img src=".github/assets/conversation.png" alt="A real conversation with follow-up chips" width="380"> |
-| **"Think again" expansion** — short inputs get rolled back into the learner so they practice articulating intent (Essence 8). | <img src=".github/assets/roll-input.png" alt="Roll-input expansion banner" width="380"> |
+| **"Think again" expansion** — short inputs get rolled back into the learner so they practice Intent clarity. | <img src=".github/assets/roll-input.png" alt="Roll-input expansion banner" width="380"> |
 | **Per-cohort profiles** — each workshop session is one profile file: system prompt, model policy, UX copy. Adding a cohort is one file, zero code. | See [docs/COHORT-AUTHORING.md](./docs/COHORT-AUTHORING.md) |
 
 ## Architecture
@@ -133,7 +133,7 @@ and failure modes: [.claude/rules/build-pipeline.md](.claude/rules/build-pipelin
 | `proxy-poc/` | Python proxy from early iteration (superseded by `worker/`). |
 | `scripts/` | Build wrappers — `run-build.sh`, `dev-stack.sh`, `generate-platform-icons.sh`, `verify-branding.sh`. |
 | `e2e/` | Playwright suite driving the built `.app`. |
-| `docs/` | INSTALL, COHORT-AUTHORING, essence-v0.1, release guides. |
+| `docs/` | INSTALL, COHORT-AUTHORING, 7 AI Native Assets, release guides. |
 | `METAPLAN.md` | Phased build plan — the source of truth. Cross-reference by §N. |
 
 ## Upstream sync model

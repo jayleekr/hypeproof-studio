@@ -5,12 +5,12 @@ Strategic + phase plan: see [METAPLAN.md](./METAPLAN.md). Do not duplicate it he
 
 ## Product philosophy (READ BEFORE DESIGNING UX)
 
-This IDE exists to teach the **16 Essences** — the human capabilities needed when working with AI models. Every UX decision in the chat panel, welcome flow, manual-approve modals, and onboarding must serve one or more of these essences.
+This IDE exists to teach the **7 AI Native Assets** — the human capabilities needed when working with AI models. Every UX decision in the chat panel, welcome flow, manual-approve modals, and onboarding must serve one or more of these assets.
 
-- Source of truth: [docs/essence-v0.1.md](./docs/essence-v0.1.md) — do **not** fork or paraphrase elsewhere
-- UX mapping: METAPLAN §4.5 (essence → concrete chat-panel feature)
-- Behavioral contract: [docs/studio-requirements.md](./docs/studio-requirements.md) — 50 REQ-### rows across 12 domains, with test-layer assignments. PR touching Studio behavior must update both this doc and epic #89.
-- When adding a new chat-panel feature: cite which essence(s) it embodies in the PR/commit. If you cannot, the feature is probably noise
+- Source of truth: [docs/seven-assets.md](./docs/seven-assets.md) — do **not** fork or paraphrase elsewhere
+- UX mapping: METAPLAN §4.5 (asset → concrete chat-panel feature)
+- Behavioral contract: [docs/studio-requirements.md](./docs/studio-requirements.md) — REQ-### rows across Studio behavior domains, with test-layer assignments. PR touching Studio behavior must update this doc.
+- When adding a new chat-panel feature: cite which asset(s) it embodies in the PR/commit. If you cannot, the feature is probably noise
 
 ## Current phase
 
@@ -67,4 +67,4 @@ Each phase has a gate in METAPLAN. Do not proceed past a gate without confirming
 - [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md) — build failure modes, env vars, jq patterns
 - [.claude/rules/branding-swap.md](.claude/rules/branding-swap.md) — asset replacement checklist
 - [.claude/rules/extension-dev.md](.claude/rules/extension-dev.md) — hypeproof-chat React webview
-- [docs/essence-v0.1.md](docs/essence-v0.1.md) — 16 Essences (product philosophy, drives chat-panel UX)
+- [docs/seven-assets.md](docs/seven-assets.md) — 7 AI Native Assets (canonical product philosophy, drives chat-panel UX)

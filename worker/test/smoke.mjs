@@ -47,6 +47,7 @@ const stubProfile = {
   preview: { type: "iframe", auto_start: false },
   game: { template_tier: "kids-basic" },
   publishing: { enabled: false, strategy: "local_only" },
+  assets_focus: ["intent_clarity"],
   essences_focus: [1],
   session: { cohort_id: "stub", series_total: 1, series_index: 1, hours: 1 },
   analytics: { log_user_messages: false, log_metadata: true },
@@ -1094,10 +1095,25 @@ const stubProfile = {
 // the API doesn't expose; verified here instead of e2e).
 {
   const { profile: dental } = await import("../src/profiles/boah-dental-teaser-2026-s1.ts");
-  // T1.A.1 — essences_focus exact set + order (one Essence per AI Native Asset).
+  // T1.A.1 — assets_focus exact set + order (canonical 7 AI Native Assets).
+  assert.deepEqual(
+    dental.assets_focus,
+    [
+      "intent_clarity",
+      "context_design",
+      "delegation_judgment",
+      "iteration_reflex",
+      "verification_reflex",
+      "taste",
+      "ownership",
+    ],
+    `boah-dental assets_focus must cover the 7 AI Native Assets in workshop flow order`,
+  );
+  // Deprecated v0.1 bridge remains stable until extension/API clients stop
+  // reading old essence ids.
   assert.deepEqual(
     dental.essences_focus, [2, 7, 9, 11, 12, 13, 14],
-    `boah-dental essences_focus must be [2,7,9,11,12,13,14] (7 AI Native Assets — Intent/Context/Delegation/Iteration/Verification/Taste/Ownership)`,
+    `boah-dental essences_focus compatibility bridge must stay stable`,
   );
   // T1.A.3 — audience: adult Korean, no parent_coaching.
   assert.equal(dental.audience.language, "ko");
@@ -1132,7 +1148,7 @@ const stubProfile = {
   // T1.A.15 — publishing.
   assert.equal(dental.publishing.enabled, false);
   assert.equal(dental.publishing.strategy, "local_only");
-  console.log(`✓ boah-dental v4 contract: essences[2,7,9,11,12,13,14] · 1 starter chip (option B) · empty follow_up · decision-shaped hints · fixed coach name · local_only`);
+  console.log(`✓ boah-dental v4 contract: 7 assets + v0.1 bridge · 1 starter chip (option B) · empty follow_up · decision-shaped hints · fixed coach name · local_only`);
 }
 
 // §5 — recordTurn SQL carries ON CONFLICT(trial_id, turn_idx) DO UPDATE

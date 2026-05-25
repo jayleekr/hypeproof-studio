@@ -360,7 +360,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // REQ-D2: auto-reveal as soon as a renderable HTML block completes in
     // the stream, NOT waiting for streamEnd. The block closes (```) often
     // arrives many seconds before the assistant's trailing prose. Showing
-    // the game in that window is the strongest essence-1 "감탄" moment.
+    // the game in that window is the strongest Taste "감탄" moment.
     let revealed = false;
     const tryReveal = (text: string) => {
       if (revealed) return;

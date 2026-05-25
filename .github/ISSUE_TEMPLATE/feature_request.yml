@@ -24,17 +24,20 @@ body:
     validations:
       required: true
   - type: dropdown
-    id: essence
+    id: assets
     attributes:
-      label: Which of the 16 Essences does this serve?
-      description: A feature that serves none is probably noise (see docs/essence-v0.1.md).
+      label: Which 7 AI Native Asset(s) does this serve?
+      description: A feature that serves none is probably noise (see docs/seven-assets.md).
       multiple: true
       options:
         - "Not sure / needs discussion"
-        - "1–4 (intent / framing)"
-        - "5–8 (iteration / articulation)"
-        - "9–12 (judgement / verification)"
-        - "13–16 (reflection / transfer)"
+        - "Taste"
+        - "Intent clarity"
+        - "Context design"
+        - "Verification reflex"
+        - "Delegation judgment"
+        - "Iteration reflex"
+        - "Ownership"
     validations:
       required: true
   - type: textarea

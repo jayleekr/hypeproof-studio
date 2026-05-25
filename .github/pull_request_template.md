@@ -17,10 +17,11 @@ Closes #<!-- issue number — required so the merge auto-closes it -->
 - docs / scripts
 - build / `vscodium-base` submodule (bump policy: .claude/rules/build-pipeline.md)
 
-## Essence(s) served
+## AI Native Asset(s) served
 
-<!-- Required for chat-panel changes. Cite the §4.5 essence number(s) from
-     METAPLAN. If a chat-panel change serves none, it is probably noise. -->
+<!-- Required for chat-panel changes. Cite the 7 AI Native Asset(s) from
+     docs/seven-assets.md / METAPLAN §4.5. If a chat-panel change serves none,
+     it is probably noise. -->
 
 ## Tested
 

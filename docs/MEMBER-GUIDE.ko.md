@@ -263,7 +263,7 @@ worktree에서 동시 세션 1개 권장.
   `hypeprooflab:jay/reports/2026-05-19-repo-structure-diagram.html`
 - Vendor 마이그레이션 보고서 (2026-05-20):
   `hypeprooflab:jay/reports/2026-05-20-vendor-migration.html`
-- 16 Essences(제품 철학): `hypeproof-studio:docs/essence-v0.1.md`
+- 7 AI Native Assets(제품 철학): `hypeproof-studio:docs/seven-assets.md`
 
 ---
 

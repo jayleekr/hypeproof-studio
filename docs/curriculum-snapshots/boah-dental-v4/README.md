@@ -9,13 +9,13 @@ HypeProof Studio 안에서 보아치과 cohort 토큰으로 들어갔을 때 실
 
 ## 5블록 흐름 + 핵심 UX
 
-| # | 파일 | 무엇을 보여주나 | 본질 (Essence) |
+| # | 파일 | 무엇을 보여주나 | 7 AI Native Assets |
 |---|---|---|---|
 | 01 | `01-greeting.png` | **블록 1 도입**: "치과 지식 슈퍼서치엔진을 함께 만들어요 🔍 마지막엔 원장님을 이겨봅니다" greeting + 직군별 4 good 칩 (위생사·코디·사모님) + 1 weak 칩 ("치과 관련 질문 답해줘"). 좋은 입력 모양 vs 막연한 입력의 대비. | E7 Intent Clarity (weak 칩의 교육적 대비) |
 | 02 | `02-chip-pick.png` | **블록 2 탐색**: 위생사 칩 클릭 → 임플란트 후 운동 시점 시나리오가 textarea에 들어감. 미션카드 제시 금지 — 참가자가 자기 문제로 진입하는 입구. | E7 Intent Clarity |
 | 03 | `03-intent-clarity.png` | **블록 3 V1 제작**: 막연한 "환자 안내 도와줘"에 대해 코치가 "어떤 결정/상황?"으로 reframe. 검색 목적이 *결정 모양*으로 잡히기 전엔 V1 안 만듦. | E7 Intent Clarity |
 | 04 | `04-v1-axes.png` | **블록 3 V1 제작**: V1 초안에 채울 4축 입력 — ① 알고 싶은 것 ② 이 검색이 도와야 하는 결정 ③ 피해야 할 것 ④ 원장님께 확인할 것. Context Design 행동의 가시화. | E2 Context Design |
-| 05 | `05-followup-chips.png` | **7 AI Native Assets 캡션 링**: 첫 응답 후 follow-up 칩 7개가 등장. 각 캡션에 Essence 번호 (E2/E7/E9/E11/E12/E13/E14) — 참가자가 다음 한 수가 어떤 Asset 행동인지 *눈에 보이게*. | E2·E7·E9·E11·E12·E13·E14 (전부) |
+| 05 | `05-followup-chips.png` | **7 AI Native Assets 캡션 링**: 첫 응답 후 follow-up 칩 7개가 등장. 각 캡션은 다음 한 수가 어떤 Asset 행동인지 *눈에 보이게* 만든다. | Intent clarity · Context design · Delegation judgment · Iteration reflex · Verification reflex · Taste · Ownership |
 | 06 | `06-clinical-guard.png` | **Delegation 가드 (E12)**: 임상 결론 미끼 ("환자한테 운동해도 된다고 말해도 돼?")에 코치가 직접 답하지 않고 원장님 질문으로 변환. 핵심 안전 장치. | E12 Delegation Judgment |
 | 07 | `07-verdict.png` | **블록 4 원장님을 이겨라**: V1 한 개를 코치가 *모의 원장님* 입장으로 PASS / 더 확인 / 위험 중 하나로 판정. 깨지는 게 학습의 클라이맥스. | E11 Verification Reflex |
 | 08 | `08-save-packet.png` | **블록 5 저장**: 판정에서 나온 한 줄 ("광고 출처는 보류한다")를 다음 검색에 자동 적용되는 *우리 병원 검색 규칙*으로 저장. 일회성 답이 아니라 자산. | E14 Ownership |

@@ -43,6 +43,14 @@ export const profile: Profile = {
     repo_template: "my-hypeproof-games",
     pages_branch: "main",
   },
+  assets_focus: [
+    "intent_clarity",
+    "context_design",
+    "iteration_reflex",
+    "taste",
+    "ownership",
+  ],
+  // Deprecated v0.1 bridge for clients that still render old essence ids.
   essences_focus: [1, 2, 5, 7, 16],
   session: {
     cohort_id: "sk-biopharm-2026-a",

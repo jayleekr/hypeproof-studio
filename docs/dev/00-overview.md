@@ -30,7 +30,7 @@ participant can install the app, receive a cohort-scoped token, talk to a coach,
 generate a small game or artifact, preview it inside the IDE, and leave with a
 saved project plus a traceable learning experience.
 
-The product philosophy lives in `docs/essence-v0.1.md`. The stable behavior
+The product philosophy lives in `docs/seven-assets.md`. The stable behavior
 contract lives in `docs/studio-requirements.md`. This dev docs set explains how
 those documents map onto code, tests, release, and operations.
 

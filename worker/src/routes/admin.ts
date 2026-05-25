@@ -518,7 +518,8 @@ admin.get("/profiles", (c) => {
       series_index: p.session.series_index,
       series_total: p.session.series_total,
       model: p.model.default,
-      essences_focus: p.essences_focus,
+      assets_focus: p.assets_focus,
+      essences_focus: p.essences_focus ?? [],
     })),
   });
 });

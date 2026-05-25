@@ -52,7 +52,12 @@ export interface Profile {
     pages_branch?: string;
     shared_repo?: string;
   };
-  essences_focus: number[];          // 1..16
+  assets_focus: AssetFocus[];
+  /**
+   * Deprecated compatibility bridge for v0.1 clients/tests that still expect
+   * the old 16-essence numbering. New code should consume `assets_focus`.
+   */
+  essences_focus?: number[];
   /**
    * #168 M1 — Optional Studio-bundled meta-skills to inject into the cached
    * system prefix at chat time. Names must be present in
@@ -129,7 +134,7 @@ export interface UxConfig {
   retry_button: {
     /** Show the small retry icon on assistant messages. */
     enabled: boolean;
-    /** When true, an "Nth try" counter is shown — emphasizes essence 9 (백 번 뽑기). */
+    /** When true, an "Nth try" counter is shown — emphasizes Iteration reflex. */
     show_counter: boolean;
     /** Optional encouragement when the counter advances. Empty = no toast. */
     counter_toast_md?: string;
@@ -153,6 +158,15 @@ export type ModelAlias =
   | "hypeproof-fast"
   | "hypeproof-default"
   | "hypeproof-strong";
+
+export type AssetFocus =
+  | "taste"
+  | "intent_clarity"
+  | "context_design"
+  | "verification_reflex"
+  | "delegation_judgment"
+  | "iteration_reflex"
+  | "ownership";
 
 // Anthropic model ids (used when LLM_PROVIDER=anthropic).
 export const MODEL_MAP: Record<ModelAlias, string> = {

@@ -13,7 +13,7 @@
 - [ ] Anthropic prod 키 + 보아치과 토큰 발급 완료 (`/admin/cohorts/boah-dental-2026-a/...`)
 - [ ] `runtime/exthost.log` 무에러 (`extension activation succeeded`)
 - [ ] `api.hypeproof-ai.xyz/v1/health` → 200 OK
-- [ ] `/v1/profile` 응답에 `essences_focus`, `welcome`, `ux.suggestions.follow_up` 7개 확인
+- [ ] `/v1/profile` 응답에 `assets_focus`, `welcome`, `ux.suggestions.follow_up` 확인
 
 ## Tier 3 인간 평가 시트
 

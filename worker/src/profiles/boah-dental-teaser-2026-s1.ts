@@ -9,15 +9,10 @@ import systemPromptMd from "../prompts/boah-dental-teaser-2026-s1.md";
 // 치과 지식 슈퍼서치엔진 V1을 만들고 원장님이 PASS/더 확인/위험으로 판정 →
 // 깨진 이유가 병원 검색 규칙으로 저장. v3 게임 만들기 프레임은 폐기.
 //
-// 7 AI Native Assets → Essence 매핑 (vs docs/essence-v0.1.md):
-//   Intent Clarity     → Essence 7  (질문으로 공터 만들기)
-//   Context Design     → Essence 2  (전심전력)
-//   Delegation Judgment→ Essence 12 (수행과 위임의 역전)
-//   Iteration Reflex   → Essence 9  (백 번 뽑아보기)
-//   Verification Reflex→ Essence 11 (역목표 설계)
-//   Taste              → Essence 13 (추상의 사다리)
-//   Ownership          → Essence 14 (언러닝)
-// → essences_focus = [2, 7, 9, 11, 12, 13, 14].
+// 7 AI Native Assets focus:
+//   Intent clarity, Context design, Delegation judgment, Iteration reflex,
+//   Verification reflex, Taste, Ownership.
+// `essences_focus` below is kept only as a v0.1 compatibility bridge.
 //
 // game.template_tier: v4 산출물은 검색 웹앱. 전용 "search-webapp" tier로 #150
 // 에서 분리 (이전엔 kids-basic placeholder로 인해 LLM 응답에 게임 frame 잔재 leak
@@ -72,7 +67,16 @@ export const profile: Profile = {
     enabled: false,
     strategy: "local_only",
   },
-  // 7 AI Native Assets ↔ essence (위 헤더 매핑 표 참조).
+  assets_focus: [
+    "intent_clarity",
+    "context_design",
+    "delegation_judgment",
+    "iteration_reflex",
+    "verification_reflex",
+    "taste",
+    "ownership",
+  ],
+  // Deprecated v0.1 bridge: 7 AI Native Assets mapped to the old 16-essence ids.
   essences_focus: [2, 7, 9, 11, 12, 13, 14],
   // #168 M1 — Studio-bundled meta-skill. When the worker assembles the
   // cached system prefix it appends `worker/src/skills/<name>.md` for each

@@ -1,18 +1,18 @@
 # Studio behavioral requirements
 
 > **Spec version:** v0.1.0
-> **Last reviewed:** 2026-05-22
-> **Live tracker:** [epic #89](https://github.com/jayleekr/hypeproof-studio/issues/89)
-> **Philosophy anchor:** [docs/essence-v0.1.md](./essence-v0.1.md) — 16 Essences; chat-panel features follow [METAPLAN §4.5](../METAPLAN.md).
+> **Last reviewed:** 2026-05-25
+> **Live tracker:** [epic #200](https://github.com/jayleekr/hypeproof-studio/issues/200)
+> **Philosophy anchor:** [docs/seven-assets.md](./seven-assets.md) — 7 AI Native Assets; chat-panel features follow [METAPLAN §4.5](../METAPLAN.md).
 
 This file is the **contract** for what HypeProof Studio (the IDE-side bundle: `extensions/hypeproof-chat/` + the built `.app`) must do. The companion epic carries live status (🟢/🟡/🔴), this doc carries stable behavior.
 
 Two artifacts, two audiences:
 
-- **Epic (#89)** — triage signal, alive, status-changing
+- **Epic (#200)** — current workshop gate and status-changing tracker
 - **This doc** — contract, stable, PR-reviewable
 
-When a PR touches Studio behavior, update **both** the epic row AND this doc in the same commit.
+When a PR touches Studio behavior, update this doc and link the relevant tracking issue in the same commit.
 
 ---
 
@@ -76,7 +76,7 @@ When in doubt:
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
 | REQ-D1 | ▶ Run last code 명령 | 마지막 assistant turn 에서 ` ```html ` / `<!doctype>` / ` ```js ` 추출 → preview 패널 오픈 | U + E |
-| REQ-D2 | HTML 자동-reveal | assistant 스트림에 HTML 포함 → 별도 클릭 없이 preview 자동 오픈 (essence #1 감탄) | E |
+| REQ-D2 | HTML 자동-reveal | assistant 스트림에 HTML 포함 → 별도 클릭 없이 preview 자동 오픈 (Taste 감탄) | E |
 | REQ-D3 | Preview iframe 샌드박싱 | `sandbox="allow-scripts allow-pointer-lock allow-modals"` 만. `allow-same-origin`/`allow-top-navigation` 금지. CSP `connect-src none` | U (cspBuilder) + E |
 | REQ-D4 | Preview 패널 재사용 | 두 번째 render → 새 WebviewPanel 아니라 기존 panel.reveal | E |
 | REQ-D5 | 게임 저장 (workspace `index.html`) | preview 오픈 시 자동으로 workspaceFolder/index.html 에 write (GitHub Pages 준비) | E |
@@ -190,8 +190,8 @@ Major version bump is reserved for a deliberate restructuring of the doc itself 
 
 ## Related
 
-- [METAPLAN.md](../METAPLAN.md) §4.5 — Essence → Chat Panel UX map
-- [docs/essence-v0.1.md](./essence-v0.1.md) — 16 Essences (product philosophy)
+- [METAPLAN.md](../METAPLAN.md) §4.5 — AI Native Asset → Chat Panel UX map
+- [docs/seven-assets.md](./seven-assets.md) — 7 AI Native Assets (canonical product philosophy)
 - [.claude/rules/extension-dev.md](../.claude/rules/extension-dev.md) — hypeproof-chat extension architecture
 - [.claude/rules/build-pipeline.md](../.claude/rules/build-pipeline.md) — build + post-build branding verification
 - [tests/rehearsal/README.md](../tests/rehearsal/README.md) — R1–R6 rehearsal categories

@@ -46,7 +46,11 @@ export const profile: Profile = {
   },
   preview: { type: "iframe"|"live_server", auto_start: bool },
   publishing: { enabled: bool, strategy: "per_user_github_pages"|"shared_repo"|"local_only", ... },
-  essences_focus: [1..16],         // 강조할 essence 번호
+  assets_focus: [                  // 강조할 7 AI Native Assets
+    "intent_clarity",
+    "context_design"
+  ],
+  essences_focus: [..],            // deprecated v0.1 compatibility bridge only
   session: {
     cohort_id: "<cohort-id>",      // 같은 cohort의 다른 profile들과 일치
     series_total: 4,
@@ -122,25 +126,25 @@ HPS_SIGNING_SECRET=<secret> node --experimental-strip-types worker/scripts/issue
 - `ux.coach.revisit_on_entry: true`로 두면 자녀가 매 회차 코치 이름 다시 짓기 권유받음
 
 ### Foundation week (s1) 추천 설정
-- `essences_focus: [2, 7, 8]`
+- `assets_focus: ["intent_clarity", "context_design", "iteration_reflex"]`
 - suggestions: 짧은 vs 자세한 대비 강조
 - short_input hint enabled
 - retry_button: enabled but show_counter false
 
 ### Load week (s2) 추천 설정 (HYROX 제안서 §03 참조)
-- `essences_focus: [3, 4, 5, 11]`
+- `assets_focus: ["delegation_judgment", "verification_reflex", "iteration_reflex"]`
 - suggestions: 도전 강도 ↑ ("더 어렵게", "약점 찾기")
-- retry_button.show_counter: **true** ← 만족 유예 essence 명시화
-- coach revisit_on_entry: **true** (역할 부여 essence 5)
+- retry_button.show_counter: **true** ← Iteration reflex를 눈에 보이게 함
+- coach revisit_on_entry: **true** (역할 부여)
 
 ### Mastery week (s3)
-- `essences_focus: [9, 10, 12, 13]`
+- `assets_focus: ["verification_reflex", "delegation_judgment", "taste"]`
 - mcp_tools_enabled: 일부 허용 (file_write 등)
 - "다중 모델" — 다른 model alias 활용 유도
 - retry counter 강조 ("이번이 7번째 도전!")
 
 ### Transcendence week (s4)
-- `essences_focus: [1, 14, 15, 16]`
+- `assets_focus: ["taste", "ownership"]`
 - suggestions: "지금 만든 거 다시 처음 봤다고 상상" 같은 reflection chips
 - system prompt: meta 톤 (배운 걸 의심하는 자세)
 
