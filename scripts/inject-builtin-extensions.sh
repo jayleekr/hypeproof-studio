@@ -49,6 +49,17 @@ cp -r "$EXT_SRC/media"      "$EXT_DST/"
 mkdir -p "$EXT_DST/webview-ui"
 cp -r "$EXT_SRC/webview-ui/dist" "$EXT_DST/webview-ui/dist"
 
+# 2b. Stamp the bundled extension's version to the release version. The in-app
+# updater's currentBundleVersion() reads THIS package.json to decide whether an
+# update is available. If it stays at the source dev version while releases are
+# tagged ahead, every install reports out-of-date forever (#206). Stamp the
+# copy only — the source package.json stays the dev baseline.
+RESOLVED_VERSION="$(bash "$REPO_ROOT/scripts/resolve-version.sh")"
+tmp_pkg=$(mktemp)
+jq --arg v "$RESOLVED_VERSION" '.version = $v' "$EXT_DST/package.json" > "$tmp_pkg"
+mv "$tmp_pkg" "$EXT_DST/package.json"
+echo "Stamped bundled extension version → $RESOLVED_VERSION"
+
 # 3. NOTE: do NOT add to product.json.builtInExtensions. That list triggers
 # a marketplace/GH download at build time. Extensions placed in extensions/
 # at build time are bundled automatically — same mechanism vscode itself
