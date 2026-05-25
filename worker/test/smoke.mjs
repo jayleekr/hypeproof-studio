@@ -33,6 +33,7 @@ const { issue, verify, TokenError } = await import("../src/lib/tokens.ts");
 const { translate, translateOpenAI, anthropicEventToOpenAIChunk, tierForUrl } =
   await import("../src/lib/translate.ts");
 const { resolveProvider } = await import("../src/env.ts");
+const { assetKeys, clampAssetScores, scoreTurnAssets } = await import("../src/lib/asset-scorer.ts");
 
 /** @type {import("../src/profiles/types.ts").Profile} */
 const stubProfile = {
@@ -66,6 +67,53 @@ const stubProfile = {
   assert.equal(v.p, "sk-biopharm-kids-2026-grade-3-4-s1");
   assert.equal(v.v, 2);
   console.log("✓ token issue+verify roundtrip");
+}
+
+// ---- 7 AI Native Asset scorer ----------------------------------------------
+{
+  const keys = assetKeys();
+  assert.deepEqual(keys, [
+    "taste",
+    "intent_clarity",
+    "context_design",
+    "verification_reflex",
+    "delegation_judgment",
+    "iteration_reflex",
+    "ownership",
+  ]);
+
+  const result = scoreTurnAssets(`
+    어떤 결정을 도와야 하는지 먼저 정해볼게요. 환자군과 상황, 피해야 할 표현,
+    확인할 출처 후보를 적고, AI는 검색과 비교를 맡깁니다. 임상 판단은 원장님께
+    물어볼 질문으로 분리해요. 이 검색을 틀리게 만드는 위험 신호를 검증하고,
+    V2에서 검색어를 다시 바꿔봅니다. 마지막으로 병원 검색 규칙으로 저장해
+    다음 검색부터 재사용합니다.
+  `);
+  assert.equal(result.version, 1);
+  assert.equal(result.method, "heuristic-v1");
+  for (const key of keys) {
+    assert.ok(result.scores[key] >= 0 && result.scores[key] <= 1, `${key} score range`);
+  }
+  assert.ok(result.scores.intent_clarity > 0, "intent_clarity detected");
+  assert.ok(result.scores.context_design > 0, "context_design detected");
+  assert.ok(result.scores.verification_reflex > 0, "verification_reflex detected");
+  assert.ok(result.scores.delegation_judgment > 0, "delegation_judgment detected");
+  assert.ok(result.scores.iteration_reflex > 0, "iteration_reflex detected");
+  assert.ok(result.scores.ownership > 0, "ownership detected");
+
+  assert.deepEqual(
+    clampAssetScores({ taste: 2, ownership: -1, intent_clarity: Number.NaN }),
+    {
+      taste: 1,
+      intent_clarity: 0,
+      context_design: 0,
+      verification_reflex: 0,
+      delegation_judgment: 0,
+      iteration_reflex: 0,
+      ownership: 0,
+    },
+  );
+  console.log("✓ 7 AI Native Asset scorer: stable shape + range clamp + workshop signals");
 }
 
 // ---- bad signature rejected -------------------------------------------------
