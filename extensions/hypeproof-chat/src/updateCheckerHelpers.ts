@@ -89,27 +89,42 @@ export function parseLatestRelease(
 }
 
 /**
- * Given the Electron exec path, return the .app bundle root path or null if
- * the running process is not inside an .app bundle (e.g., dev build, F5 in
- * Extension Development Host). The updater bails in the null case — we
+ * Given the Electron exec path, return the **top-level** .app bundle root, or
+ * null if the running process is not inside an .app bundle (e.g., dev build,
+ * F5 in Extension Development Host). The updater bails in the null case — we
  * don't want to silently overwrite the wrong target.
+ *
+ * IMPORTANT (#206): in the VS Code extension host, `process.execPath` is NOT
+ * the top-level Electron binary — it's the utility/plugin **helper** executable
+ * nested inside the app's Contents/Frameworks:
+ *
+ *   /Applications/HypeProof Studio.app/Contents/Frameworks/
+ *     HypeProof Studio Helper (Plugin).app/Contents/MacOS/HypeProof Studio Helper (Plugin)
+ *
+ * Slicing at the *first* /Contents/MacOS/ returns the **helper** sub-bundle,
+ * which the installer then `mv`'d the new app into — burying it one level
+ * deeper each update (matryoshka). So we resolve the **outermost** .app
+ * segment instead, which is always /Applications/<App>.app.
  *
  * Examples:
  *   /Applications/HypeProof Studio.app/Contents/MacOS/Electron
  *     → /Applications/HypeProof Studio.app
- *   /Users/jay/.../vscode/Contents/MacOS/Electron     (dev path)
- *     → that path's .app root (works) — caller decides whether to proceed
+ *   /Applications/HypeProof Studio.app/Contents/Frameworks/…Helper (Plugin).app/Contents/MacOS/…
+ *     → /Applications/HypeProof Studio.app   (NOT the nested helper)
+ *   /Users/jay/.../vscode/Contents/MacOS/Electron     (dev path, no .app)
+ *     → null
  *   /usr/local/bin/code                               (CLI, no .app)
  *     → null
  */
 export function detectAppBundle(execPath: string): string | null {
   if (typeof execPath !== "string" || !execPath) return null;
-  const marker = "/Contents/MacOS/";
-  const idx = execPath.indexOf(marker);
-  if (idx < 0) return null;
-  const candidate = execPath.slice(0, idx);
-  // Sanity: bundle should end with ".app". If not, something unusual.
-  return candidate.endsWith(".app") ? candidate : null;
+  // Must be an executable living inside a bundle (…/Contents/MacOS/<bin>).
+  // A bare .app path or a CLI binary is not an update target.
+  if (!execPath.includes("/Contents/MacOS/")) return null;
+  // Take the OUTERMOST .app segment, not the nearest enclosing one. `.*?` is
+  // non-greedy so it stops at the first ".app" boundary from the left.
+  const outer = execPath.match(/^(.*?\.app)(?:\/|$)/);
+  return outer ? outer[1]! : null;
 }
 
 export interface InstallerScriptInput {
@@ -185,11 +200,26 @@ abort() { echo "[ABORT] $*"; exit 1; }
 [[ -d "$NEW_APP" ]]       || abort "new .app not found: $NEW_APP"
 [[ -d "$OLD_APP" ]]       || abort "old .app not found: $OLD_APP"
 
+# Guard (#206): OLD_APP must be the TOP-LEVEL app, never a helper sub-bundle
+# nested inside Contents/Frameworks. A regression in app-root detection
+# installed the new bundle *inside* the running one, burying it a level deeper
+# every update (matryoshka). Refuse rather than nest.
+case "$OLD_APP" in
+  */Contents/Frameworks/*) abort "refusing to install into a nested sub-bundle: $OLD_APP" ;;
+esac
+
 # Verify new bundle id matches expected (prevents a malicious or corrupt zip
 # from being mv'd over /Applications/HypeProof Studio.app).
 NEW_BID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$NEW_APP/Contents/Info.plist" 2>/dev/null || echo "")
-[[ "$NEW_BID" == "$EXPECTED_BUNDLE_ID" ]] || abort "bundle id mismatch: got '$NEW_BID', expected '$EXPECTED_BUNDLE_ID'"
-echo "[ok] bundle id verified"
+[[ "$NEW_BID" == "$EXPECTED_BUNDLE_ID" ]] || abort "new bundle id mismatch: got '$NEW_BID', expected '$EXPECTED_BUNDLE_ID'"
+echo "[ok] new bundle id verified"
+
+# Guard (#206): OLD_APP's own bundle id must also match — a second signal that
+# the resolved target is the real app and not some unrelated .app the path
+# happened to land on.
+OLD_BID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$OLD_APP/Contents/Info.plist" 2>/dev/null || echo "")
+[[ "$OLD_BID" == "$EXPECTED_BUNDLE_ID" ]] || abort "old bundle id mismatch: got '$OLD_BID', expected '$EXPECTED_BUNDLE_ID'"
+echo "[ok] old app is top-level + bundle id verified"
 
 # Wait for the old app to fully quit. Extension already asked the app to
 # quit before spawning us; this is a safety belt.

@@ -34,8 +34,24 @@ fi
 
 echo "Applying HypeProof Studio overrides to $PRODUCT_JSON"
 
+# Resolve the release version (single source of truth — see resolve-version.sh).
+# This must reach product.json (.version) AND the VS Code source package.json
+# (drives Info.plist CFBundleShortVersionString + the About screen). Without it
+# builds shipped an empty version, which made the in-app updater treat every
+# install as out-of-date forever (#206).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+HPS_RESOLVED_VERSION="$(bash "$SCRIPT_DIR/resolve-version.sh")"
+# Best-effort commit + date so product.json stops shipping the placeholder
+# adc83b19… commit. Falls back gracefully outside a git checkout.
+HPS_COMMIT_SHA="${HPS_COMMIT:-$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || echo "")}"
+HPS_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "  version = $HPS_RESOLVED_VERSION  commit = ${HPS_COMMIT_SHA:-<none>}"
+
 tmp=$(mktemp)
 jq \
+  --arg version             "$HPS_RESOLVED_VERSION" \
+  --arg commit              "$HPS_COMMIT_SHA" \
+  --arg buildDate           "$HPS_BUILD_DATE" \
   --arg nameShort           "$HPS_NAME_SHORT" \
   --arg nameLong            "$HPS_NAME_LONG" \
   --arg applicationName     "$HPS_APPLICATION_NAME" \
@@ -47,7 +63,10 @@ jq \
   --arg win32MutexName      "$HPS_WIN32_MUTEX_NAME" \
   --arg win32AppUserModelId "$HPS_WIN32_APP_USER_MODEL_ID" \
   --arg win32RegValueName   "$HPS_WIN32_REG_VALUE_NAME" \
-  '.nameShort              = $nameShort
+  '.version               = $version
+   | (if $commit != "" then .commit = $commit else . end)
+   | .date                = $buildDate
+   | .nameShort           = $nameShort
    | .nameLong             = $nameLong
    | .applicationName      = $applicationName
    | .dataFolderName       = $dataFolderName
@@ -66,5 +85,18 @@ jq \
 
 mv "$tmp" "$PRODUCT_JSON"
 
+# Also stamp the VS Code source package.json — gulp reads its .version to set
+# CFBundleShortVersionString in Info.plist and the version on the About screen.
+# product.json.version alone is not enough for those surfaces.
+SRC_PKG="$(dirname "$PRODUCT_JSON")/package.json"
+if [[ -f "$SRC_PKG" ]]; then
+  tmp_pkg=$(mktemp)
+  jq --arg version "$HPS_RESOLVED_VERSION" '.version = $version' "$SRC_PKG" > "$tmp_pkg"
+  mv "$tmp_pkg" "$SRC_PKG"
+  echo "  stamped $SRC_PKG version → $HPS_RESOLVED_VERSION"
+else
+  echo "  WARN: $SRC_PKG not found — Info.plist version may stay unset" >&2
+fi
+
 echo "Done. Verify with:"
-echo "  jq '.nameShort, .nameLong, .applicationName, .darwinBundleIdentifier' $PRODUCT_JSON"
+echo "  jq '.version, .commit, .nameShort, .applicationName, .darwinBundleIdentifier' $PRODUCT_JSON"

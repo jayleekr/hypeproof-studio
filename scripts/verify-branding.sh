@@ -90,6 +90,23 @@ if [[ -n "$PJSON" ]]; then
   else
     bad "product.json mismatch: nameShort=$NS, nameLong=$NL, applicationName=$AN, darwinBundleId=$DBI"
   fi
+
+  # 6b. Version must be present + non-placeholder, and the bundled extension's
+  # version must match it. An empty/placeholder version makes the in-app updater
+  # loop forever (#206), so this is a release gate, not a nicety.
+  PVER=$(jq -r '.version // ""' "$PJSON")
+  PCOMMIT=$(jq -r '.commit // ""' "$PJSON")
+  EXT_PKG=$(find "$APP/Contents/Resources/app" -maxdepth 4 -path "*hypeproof-chat/package.json" 2>/dev/null | head -1)
+  EXT_VER=$([[ -n "$EXT_PKG" ]] && jq -r '.version // ""' "$EXT_PKG" || echo "")
+  if [[ -z "$PVER" ]]; then
+    bad "product.json.version is EMPTY — build did not inject a version (#206)"
+  elif [[ "$PCOMMIT" == "adc83b19e793491b1c6ea0fd8b46cd9f32e592fc" ]]; then
+    bad "product.json.commit is the placeholder (version metadata not injected) (#206)"
+  elif [[ -n "$EXT_VER" && "$EXT_VER" != "$PVER" ]]; then
+    bad "version mismatch: product.json=$PVER but bundled extension=$EXT_VER (updater will misfire) (#206)"
+  else
+    ok "version: product.json=$PVER, bundled extension=${EXT_VER:-<none>}, commit=${PCOMMIT:0:10}"
+  fi
 else
   bad "product.json not found inside .app"
 fi

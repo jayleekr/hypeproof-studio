@@ -107,6 +107,20 @@ jobs:
             echo "HPS_WIN32_REG_VALUE_NAME=$HPS_WIN32_REG_VALUE_NAME"
           } >> "$GITHUB_ENV"
 
+      - name: Resolve release version
+        shell: bash
+        # On a tag build, the tag (v0.1.10) is the version source of truth and
+        # must reach product.json + Info.plist + the bundled extension's
+        # package.json (#206). Untagged builds (workflow_dispatch / branch) fall
+        # back to the extension package.json version inside resolve-version.sh.
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "HPS_VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV"
+            echo "Tag build → HPS_VERSION=${GITHUB_REF#refs/tags/v}"
+          else
+            echo "Untagged build → HPS_VERSION unset, falling back to extension package.json"
+          fi
+
       - name: Install brand assets
         shell: bash
         run: bash scripts/install-brand-assets.sh

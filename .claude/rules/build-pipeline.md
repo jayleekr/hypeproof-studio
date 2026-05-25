@@ -25,7 +25,7 @@ Skipping these resets makes the second build fail on `git apply` (patches alread
 
 `build.sh` line 11 sources `prepare_vscode.sh`. We added a HypeProof hook **at the end** of `prepare_vscode.sh` (look for `--- HypeProof Studio overrides ---`) that does, in this order:
 
-1. Run `scripts/apply-product-overrides.sh` → patches `vscode/product.json` with HPS values (nameShort, applicationName, bundle id, urlProtocol, dataFolderName, win32 keys)
+1. Run `scripts/apply-product-overrides.sh` → patches `vscode/product.json` with HPS values (nameShort, applicationName, bundle id, urlProtocol, dataFolderName, win32 keys) **and the release version** (`.version`/`.commit`/`.date`, plus `vscode/package.json` `.version` which drives Info.plist `CFBundleShortVersionString`). Version comes from `scripts/resolve-version.sh` — single source of truth: `$HPS_VERSION` (CI sets it from the git tag) → extension `package.json` fallback. An empty version made the in-app updater loop forever (#206), so `verify-branding.sh` now fails the build if `product.json.version` is empty/placeholder or disagrees with the bundled extension.
 2. Copy pre-built `extensions/hypeproof-chat/` (dist + webview-ui/dist + media + package.json) into `vscode/extensions/hypeproof-chat/`
 3. Inject `builtInExtensions` entry into `vscode/product.json`
 
