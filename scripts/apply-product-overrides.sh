@@ -41,17 +41,15 @@ echo "Applying HypeProof Studio overrides to $PRODUCT_JSON"
 # install as out-of-date forever (#206).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HPS_RESOLVED_VERSION="$(bash "$SCRIPT_DIR/resolve-version.sh")"
-# Best-effort commit + date so product.json stops shipping the placeholder
-# adc83b19… commit. Falls back gracefully outside a git checkout.
-HPS_COMMIT_SHA="${HPS_COMMIT:-$(git -C "$SCRIPT_DIR/.." rev-parse HEAD 2>/dev/null || echo "")}"
-HPS_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-echo "  version = $HPS_RESOLVED_VERSION  commit = ${HPS_COMMIT_SHA:-<none>}"
+echo "  version = $HPS_RESOLVED_VERSION"
+# NOTE: do NOT stamp .commit/.date here. VSCodium's build sets product.json.commit
+# from $BUILD_SOURCEVERSION AFTER this hook runs, clobbering anything we write.
+# A real commit is injected by exporting BUILD_SOURCEVERSION before build.sh
+# (run-build.sh defaults it to the repo HEAD) — see resolve-version.sh / #206.
 
 tmp=$(mktemp)
 jq \
   --arg version             "$HPS_RESOLVED_VERSION" \
-  --arg commit              "$HPS_COMMIT_SHA" \
-  --arg buildDate           "$HPS_BUILD_DATE" \
   --arg nameShort           "$HPS_NAME_SHORT" \
   --arg nameLong            "$HPS_NAME_LONG" \
   --arg applicationName     "$HPS_APPLICATION_NAME" \
@@ -64,8 +62,6 @@ jq \
   --arg win32AppUserModelId "$HPS_WIN32_APP_USER_MODEL_ID" \
   --arg win32RegValueName   "$HPS_WIN32_REG_VALUE_NAME" \
   '.version               = $version
-   | (if $commit != "" then .commit = $commit else . end)
-   | .date                = $buildDate
    | .nameShort           = $nameShort
    | .nameLong             = $nameLong
    | .applicationName      = $applicationName
