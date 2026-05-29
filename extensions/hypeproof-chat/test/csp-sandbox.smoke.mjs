@@ -33,21 +33,34 @@ const NONCE = "n0nc3-test";
 
 // ─── Preview shell CSP — required directives ───────────────────────
 {
-  const csp = buildPreviewShellCsp({ cspSource: CSP_SOURCE, nonce: NONCE });
+  const csp = buildPreviewShellCsp({ cspSource: CSP_SOURCE });
 
-  // Required
+  // Required. Inner srcdoc inherits this CSP (CSP3 §4.2.3) regardless of
+  // sandbox, so script-src MUST include 'unsafe-inline'/'unsafe-eval' or
+  // every AI-generated game's click/key handler dies silently.
   assert.match(csp, /default-src 'none'/);
-  assert.match(csp, new RegExp(`script-src 'nonce-${NONCE}'`));
+  assert.match(csp, new RegExp(`script-src ${escapeRe(CSP_SOURCE)} 'unsafe-inline' 'unsafe-eval'`));
   assert.match(csp, /frame-src 'self' data: blob:/);
   assert.match(csp, new RegExp(`style-src ${escapeRe(CSP_SOURCE)} 'unsafe-inline'`));
+  assert.match(csp, new RegExp(`connect-src ${escapeRe(CSP_SOURCE)}`));
+  assert.match(csp, new RegExp(`img-src ${escapeRe(CSP_SOURCE)} data: blob:`));
+  assert.match(csp, new RegExp(`base-uri ${escapeRe(CSP_SOURCE)}`));
+  assert.match(csp, /object-src 'none'/);
 
-  // Forbidden
-  assert.doesNotMatch(csp, /frame-src .*https:/, "frame-src must not include https: (no remote frames)");
-  assert.doesNotMatch(csp, /default-src \*/, "wildcard default-src forbidden");
+  // Forbidden — exfil gate: connect/frame/img must not allow https: so
+  // generated code can't phone home. (Inherited into inner CSP.)
+  for (const dir of ["connect-src", "frame-src", "img-src", "media-src"]) {
+    const m = csp.match(new RegExp(`${dir} [^;]+`));
+    assert.ok(m, `${dir} must be present`);
+    assert.doesNotMatch(m[0], / https:/, `${dir} must not include https:`);
+  }
+  // No wildcards anywhere
   assert.doesNotMatch(csp, /\*/, "wildcard star never legitimate");
-  assert.doesNotMatch(csp, /unsafe-eval/);
+  // No nonce: shell must not require a nonce since inner srcdoc inherits
+  // and inline-script-heavy games have no nonce attribute.
+  assert.doesNotMatch(csp, /'nonce-/, "shell must not use a nonce (would break inner inline scripts via inheritance)");
 
-  console.log("✅ preview shell CSP: required directives + forbidden absent");
+  console.log("✅ preview shell CSP: inline-permissive, exfil gates closed, no nonce");
 }
 
 // ─── Preview iframe sandbox — token set ────────────────────────────
@@ -57,9 +70,14 @@ const NONCE = "n0nc3-test";
   assert.match(PREVIEW_IFRAME_SANDBOX, /\ballow-pointer-lock\b/);
   assert.match(PREVIEW_IFRAME_SANDBOX, /\ballow-modals\b/);
 
-  // Must NOT include — these are the threat-model breakers
+  // allow-same-origin is DELIBERATELY forbidden — see cspBuilder.ts header
+  // comment. With it, srcdoc inherits parent-shell CSP (CSP3 §4.2.2,
+  // intersected with meta CSP), so the shell's `script-src 'nonce-XXX'`
+  // blocks all inline scripts in the AI-generated game → rendered but inert.
+  // Opaque-origin (no allow-same-origin) restores inline-script capability;
+  // cost is CORS fetch/XHR to workspace assets.
   const forbidden = [
-    "allow-same-origin",   // would let game read parent.acquireVsCodeApi()
+    "allow-same-origin",
     "allow-top-navigation",
     "allow-top-navigation-by-user-activation",
     "allow-popups",
@@ -71,21 +89,21 @@ const NONCE = "n0nc3-test";
   ];
   for (const f of forbidden) {
     assert.ok(
-      !PREVIEW_IFRAME_SANDBOX.includes(f),
+      !new RegExp(`\\b${f}\\b`).test(PREVIEW_IFRAME_SANDBOX),
       `preview iframe sandbox must NOT include "${f}" (found in: "${PREVIEW_IFRAME_SANDBOX}")`,
     );
   }
-  console.log(`✅ preview iframe sandbox: 3 allowed, ${forbidden.length} forbidden tokens absent`);
+  console.log(`✅ preview iframe sandbox: 3 allowed, ${forbidden.length} forbidden tokens absent (incl. same-origin)`);
 }
 
-// ─── Nonce uniqueness propagates ───────────────────────────────────
+// ─── Nonce uniqueness propagates (chat panel only — preview shell has no nonce)
 {
   const csp1 = buildChatPanelCsp({ cspSource: CSP_SOURCE, nonce: "AAA" });
   const csp2 = buildChatPanelCsp({ cspSource: CSP_SOURCE, nonce: "BBB" });
   assert.notEqual(csp1, csp2);
   assert.match(csp1, /'nonce-AAA'/);
   assert.match(csp2, /'nonce-BBB'/);
-  console.log("✅ nonce propagates into script-src");
+  console.log("✅ chat panel nonce propagates into script-src");
 }
 
 // ─── Builders are pure (no side effects) ──────────────────────────
@@ -93,6 +111,9 @@ const NONCE = "n0nc3-test";
   const a = buildChatPanelCsp({ cspSource: CSP_SOURCE, nonce: NONCE });
   const b = buildChatPanelCsp({ cspSource: CSP_SOURCE, nonce: NONCE });
   assert.equal(a, b, "same inputs → same output");
+  const c = buildPreviewShellCsp({ cspSource: CSP_SOURCE });
+  const d = buildPreviewShellCsp({ cspSource: CSP_SOURCE });
+  assert.equal(c, d, "preview shell same inputs → same output");
   console.log("✅ builders are pure");
 }
 
