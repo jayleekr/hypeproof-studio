@@ -73,8 +73,29 @@
       {
         "command": "hypeproof-chat.forgetIssuerToken",
         "title": "HypeProof Chat: 저장된 issuer 토큰 지우기"
+      },
+      {
+        "command": "hypeproof-chat.previewActiveFile",
+        "title": "HypeProof: HTML 미리보기 (옆 패널)",
+        "icon": "$(open-preview)"
       }
     ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "hypeproof-chat.previewActiveFile",
+          "when": "resourceExtname == .html || resourceExtname == .htm",
+          "group": "navigation"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "hypeproof-chat.previewActiveFile",
+          "when": "resourceExtname == .html || resourceExtname == .htm",
+          "group": "navigation@5"
+        }
+      ]
+    },
     "configuration": {
       "title": "HypeProof Chat",
       "properties": {

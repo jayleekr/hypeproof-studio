@@ -187,6 +187,51 @@ const stubProfile = {
   console.log("✓ translate injects the tier skeleton library into the cached block");
 }
 
+// ---- preview-env contract: injected into cached prefix for every cohort ----
+{
+  // The contract lives in worker/src/prompts/_preview-env-contract.md and is
+  // glued into buildCachedPrefix() by translate.ts so every cohort/user sees
+  // it. The Studio iframe sandbox + inherited CSP would otherwise make any
+  // contract-violating code (external fetch, <script src>, localStorage)
+  // silently break — see PreviewProvider + cspBuilder for why.
+  const out = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "x" }] },
+    stubProfile,
+  );
+  const sys0 = out.system[0].text;
+
+  // Contract header must be there
+  assert.ok(
+    sys0.includes("Preview 환경 contract"),
+    "preview-env contract header must appear in cached prefix",
+  );
+
+  // The four highest-value bans — these are the ones that the previous
+  // (pre-fix) games most often tripped on. Listed as plain strings so a
+  // future docs rewrite that drops them shows up as a failed test, not a
+  // silently-degraded prompt.
+  for (const phrase of ["fetch()", "WebSocket", "localStorage", "window.open"]) {
+    assert.ok(sys0.includes(phrase), `contract must mention "${phrase}" (network/storage/window ban)`);
+  }
+  assert.ok(sys0.includes("inline"), "inline-only mandate must appear");
+  assert.ok(sys0.includes("data:"), "data: URL escape hatch must be mentioned");
+
+  // Order invariant: cohort tone first, then env contract, then skeleton
+  // library (cohort-specific behavior reads the env contract; skeletons are
+  // raw material the contract applies to).
+  const promptStart = sys0.indexOf(stubProfile.system_prompt);
+  const contractStart = sys0.indexOf("Preview 환경 contract");
+  const skeletonStart = sys0.indexOf("# 게임 스켈레톤 라이브러리");
+  assert.ok(promptStart === 0, "cohort system_prompt must be first");
+  assert.ok(contractStart > promptStart, "contract must come after cohort prompt");
+  assert.ok(skeletonStart > contractStart, "skeleton library must come after contract");
+
+  // Still cached — adding the contract MUST NOT split the cache prefix.
+  assert.equal(out.system[0].cache_control?.type, "ephemeral", "contract stays inside cached block");
+
+  console.log("✓ preview-env contract: injected, ordered, cached");
+}
+
 // ---- #168 M1: profile.skills → bundled meta-skill md in cached prefix -------
 {
   const skilledProfile = { ...stubProfile, skills: ["boa-search-skill-creator"] };
