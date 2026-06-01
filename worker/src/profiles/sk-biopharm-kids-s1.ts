@@ -38,10 +38,12 @@ export const profile: Profile = {
     template_tier: "kids-basic",   // 초3-4. 5-6학년 profile은 "kids-rich"로.
   },
   publishing: {
-    enabled: true,
-    strategy: "per_user_github_pages",
-    repo_template: "my-hypeproof-games",
-    pages_branch: "main",
+    // 1회차는 chat-only — sandbox.mcp_tools_enabled []와 정합하고, system prompt
+    // 끝부분("이번엔 우리 사이에서만 보여요 … 다음 시간에 공개하는 법을 배울 거예요")과도
+    // 일치한다. 미성년 게임의 공개 GitHub Pages 퍼블리시는 부모 동의·PII 설계가 끝나는
+    // 후속 회차에서 켠다 (per_user_github_pages).
+    enabled: false,
+    strategy: "local_only",
   },
   assets_focus: [
     "intent_clarity",

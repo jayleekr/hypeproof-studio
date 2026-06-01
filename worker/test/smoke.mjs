@@ -1135,8 +1135,18 @@ const stubProfile = {
       p.analytics.log_user_messages, false,
       `profile ${p.id}: log_user_messages MUST default to false until consent + retention policy is in place (#9 policy decision)`,
     );
+    // Minors' cohorts (parent-coached kids) must not publish to public hosting
+    // until parental-consent + PII handling is designed — a public GitHub Pages
+    // of a child's game is a privacy exposure. Live SK biopharm 1회차 is chat-only
+    // and its system prompt tells the coach publishing isn't available yet.
+    if (p.audience.parent_coaching === true) {
+      assert.equal(
+        p.publishing.enabled, false,
+        `profile ${p.id}: minors' cohort MUST keep publishing.enabled=false until parental consent + PII handling is designed`,
+      );
+    }
   }
-  console.log(`✓ profiles invariant: all ${all.length} cohorts default log_user_messages=false (kids-safe)`);
+  console.log(`✓ profiles invariant: all ${all.length} cohorts default log_user_messages=false + minors no public publish (kids-safe)`);
 }
 
 // §4b — boah-dental v4 supersearch contract (issue #79 — internal shape that
