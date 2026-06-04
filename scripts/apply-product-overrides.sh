@@ -73,6 +73,11 @@ jq \
    | .win32MutexName       = $win32MutexName
    | .win32AppUserModelId  = $win32AppUserModelId
    | .win32RegValueName    = $win32RegValueName
+   | .tunnelApplicationName = ($applicationName + "-tunnel")
+   | .win32ShellNameShort  = $nameShort
+   | .win32TunnelServiceMutex = ($applicationName + "-tunnelservice")
+   | .win32TunnelMutex     = ($applicationName + "-tunnel")
+   | .linuxIconName        = $applicationName
    | .licenseUrl           = "https://github.com/jayleekr/hypeproof-studio/blob/main/LICENSE"
    | .reportIssueUrl       = "https://github.com/jayleekr/hypeproof-studio/issues/new"
    | .serverApplicationName = ($applicationName + "-server")
@@ -95,4 +100,4 @@ else
 fi
 
 echo "Done. Verify with:"
-echo "  jq '.version, .commit, .nameShort, .applicationName, .darwinBundleIdentifier' $PRODUCT_JSON"
+echo "  jq '.version, .commit, .nameShort, .applicationName, .darwinBundleIdentifier, .tunnelApplicationName, .linuxIconName' $PRODUCT_JSON"
