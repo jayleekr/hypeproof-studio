@@ -1,0 +1,88 @@
+name: autonomous-task-runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: "GitHub issue number to route"
+        required: true
+      execution_mode:
+        description: "How to route the task"
+        type: choice
+        options:
+          - goal-comment
+          - solver
+          - verify-only
+        default: goal-comment
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: autonomous-task-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      REPO: ${{ github.repository }}
+      ISSUE: ${{ inputs.issue_number }}
+      MODE: ${{ inputs.execution_mode }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inspect issue autonomy state
+        id: issue
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue view "$ISSUE" --repo "$REPO" --json number,title,labels,state,body > issue.json
+          state="$(jq -r .state issue.json)"
+          title="$(jq -r .title issue.json)"
+          labels="$(jq -r '[.labels[].name] | join(",")' issue.json)"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          echo "labels=$labels" >> "$GITHUB_OUTPUT"
+          [[ "$state" == "OPEN" ]] || { echo "::error::issue is not open"; exit 1; }
+          if jq -e '.labels[].name == "autonomy:blocked-human"' issue.json >/dev/null; then
+            echo "blocked=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "blocked=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stop on human-gated tasks
+        if: steps.issue.outputs.blocked == 'true' && inputs.execution_mode != 'verify-only'
+        run: |
+          echo "::error::Issue #${ISSUE} is human-gated. Use verify-only or remove the gate after explicit approval."
+          exit 1
+
+      - name: Add solver label
+        if: inputs.execution_mode == 'solver'
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --repo "$REPO" --add-label "solver:ready"
+          gh issue comment "$ISSUE" --repo "$REPO" --body "Routed to Claude Solver via \`solver:ready\` by autonomous-task-runner."
+
+      - name: Leave /goal prompt
+        if: inputs.execution_mode == 'goal-comment'
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="$(jq -r .title issue.json)"
+          {
+            printf 'Suggested /goal execution prompt:\n\n'
+            printf '```text\n'
+            printf '/goal Execute GitHub issue #%s: %s. Follow docs/AUTONOMY-MANDATE.md. Work issue→branch→targeted tests→PR→merge. Do not mutate secrets, billing/access policy, participant data retention, or irreversible production state. If the issue is blocked by a human gate, leave a blocking comment with the exact missing approval instead of implementing.\n' "$ISSUE" "$title"
+            printf '```\n'
+          } > goal-comment.md
+          gh issue comment "$ISSUE" --repo "$REPO" --body-file goal-comment.md
+
+      - name: Verify-only summary
+        if: inputs.execution_mode == 'verify-only'
+        shell: bash
+        run: |
+          jq '{number, title, state, labels: [.labels[].name]}' issue.json
