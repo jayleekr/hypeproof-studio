@@ -50,13 +50,14 @@ check        "imagemagick (composite)" command -v composite
 check        "librsvg (rsvg-convert)" command -v rsvg-convert
 
 echo
-echo "Disk space (/ needs >= 60 GB free for build + artifacts):"
+MIN_FREE_GB="${HPS_MIN_FREE_GB:-60}"
+echo "Disk space (/ needs >= ${MIN_FREE_GB} GB free for build + artifacts):"
 AVAIL_GB=$(df -g / | awk 'NR==2 {print $4}')
-if [[ "${AVAIL_GB:-0}" -ge 60 ]]; then
+if [[ "${AVAIL_GB:-0}" -ge "$MIN_FREE_GB" ]]; then
   printf "  \033[32m✓\033[0m %s GB free\n" "$AVAIL_GB"
   PASS=$((PASS+1))
 else
-  printf "  \033[31m✗\033[0m only %s GB free, need >= 60\n" "$AVAIL_GB"
+  printf "  \033[31m✗\033[0m only %s GB free, need >= %s\n" "$AVAIL_GB" "$MIN_FREE_GB"
   FAIL=$((FAIL+1))
 fi
 
