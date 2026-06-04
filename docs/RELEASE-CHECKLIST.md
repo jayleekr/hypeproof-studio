@@ -17,7 +17,11 @@ Use this before any release-cutting action. Source of truth for Phase 7 decision
 
 ## Cut
 
-- [ ] Bump version: `extensions/hypeproof-chat/package.json` + product.json release tag
+- [ ] Choose release tag: `v0.1.0` style. On tagged builds, this tag is the
+      canonical shipped version (`HPS_VERSION` → `scripts/resolve-version.sh`
+      → product.json / Info.plist / bundled extension). Only bump
+      `extensions/hypeproof-chat/package.json` when changing the untagged
+      local/dev fallback version.
 - [ ] `git tag v0.1.0 && git push --tags` → auto-triggers Win build
 - [ ] Wait for Win artifact to land
 - [ ] Zip Mac .app: `cd vscodium-base/VSCode-darwin-arm64 && zip -ry ../../dist/HypeProof-Studio-darwin-arm64.zip "HypeProof Studio.app"`
