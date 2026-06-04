@@ -9,6 +9,58 @@ export interface CoachProfileForResolve {
   ux: { coach: { naming_mode: string; fallback_name: string } };
 }
 
+export const LEGACY_HISTORY_KEY = "hypeproofChat.history";
+export const LEGACY_COACH_KEY = "hypeproofChat.coach";
+export const LEGACY_COACH_RITUAL_DONE_KEY = "hypeproofChat.coachRitualDone";
+export const HISTORY_MIGRATION_DONE_KEY = "hypeproofChat.historyMigratedToCohort";
+export const COACH_MIGRATION_DONE_KEY = "hypeproofChat.coachMigratedToCohort";
+
+/**
+ * Local state is segmented by cohort. Keep the raw cohort id visible in the
+ * key so support logs are readable, but constrain surprising characters.
+ */
+export function stateBucketId(cohortId: string | null | undefined): string | null {
+  const id = cohortId?.trim();
+  if (!id) return null;
+  return id.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120);
+}
+
+export function historyKeyForCohort(cohortId: string | null | undefined): string {
+  const bucket = stateBucketId(cohortId);
+  return bucket ? `${LEGACY_HISTORY_KEY}:${bucket}` : LEGACY_HISTORY_KEY;
+}
+
+export function coachKeyForCohort(cohortId: string | null | undefined): string {
+  const bucket = stateBucketId(cohortId);
+  return bucket ? `${LEGACY_COACH_KEY}:${bucket}` : LEGACY_COACH_KEY;
+}
+
+export function coachRitualDoneKeyForCohort(cohortId: string | null | undefined): string {
+  const bucket = stateBucketId(cohortId);
+  return bucket ? `${LEGACY_COACH_RITUAL_DONE_KEY}:${bucket}` : LEGACY_COACH_RITUAL_DONE_KEY;
+}
+
+/**
+ * HypeProof participant tokens are `<base64url(payload)>.<sig>`, where payload
+ * includes `c` (cohort). The token has already been verified by /v1/profile
+ * before the value is used for state isolation; this helper only chooses a
+ * local storage bucket and never grants access.
+ */
+export function extractCohortIdUnverified(token: string | null | undefined): string | undefined {
+  try {
+    if (!token) return undefined;
+    const parts = token.split(".");
+    if (parts.length !== 2) return undefined;
+    const payload = parts[0].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
+    const json = Buffer.from(padded, "base64").toString("utf8");
+    const parsed = JSON.parse(json) as { c?: unknown };
+    return typeof parsed.c === "string" && parsed.c.trim() ? parsed.c : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Pick the coach name + personality to send to the proxy / show in the UI.
  *

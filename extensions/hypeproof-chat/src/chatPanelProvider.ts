@@ -13,12 +13,26 @@ import {
   WebviewMessage,
   ActionRequest,
 } from "./protocol";
-import { isShowIntent, clampHistory, HISTORY_MAX, sanitizeCoachInput, abortAllStreams, resolveCoach, labelsForProfile } from "./chatPanelHelpers";
+import {
+  isShowIntent,
+  clampHistory,
+  HISTORY_MAX,
+  sanitizeCoachInput,
+  abortAllStreams,
+  resolveCoach,
+  labelsForProfile,
+  LEGACY_HISTORY_KEY,
+  LEGACY_COACH_KEY,
+  LEGACY_COACH_RITUAL_DONE_KEY,
+  HISTORY_MIGRATION_DONE_KEY,
+  COACH_MIGRATION_DONE_KEY,
+  historyKeyForCohort,
+  coachKeyForCohort,
+  coachRitualDoneKeyForCohort,
+  stateBucketId,
+  extractCohortIdUnverified,
+} from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
-
-const HISTORY_KEY = "hypeproofChat.history";
-export const COACH_KEY = "hypeproofChat.coach";
-const COACH_RITUAL_DONE_KEY = "hypeproofChat.coachRitualDone";
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
@@ -26,6 +40,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
   private cachedProfile: ResolvedProfile | null = null;
   private profileFetchPromise: Promise<ResolvedProfile | null> | null = null;
+  private activeCohortId: string | null = null;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
   // x-request-id header on every response we can correlate against in tail.
@@ -60,7 +75,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * explicitly opts in.
    */
   getHistorySnapshot(): ChatMessage[] {
-    return this.context.workspaceState.get<ChatMessage[]>(HISTORY_KEY, []);
+    return this.getHistory();
   }
 
   // -------------------------------------------------------------------------
@@ -68,7 +83,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // -------------------------------------------------------------------------
 
   extractLastRenderableCode(): string | null {
-    const messages = this.context.workspaceState.get<ChatMessage[]>(HISTORY_KEY, []);
+    const messages = this.getHistory();
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];
       if (m.role !== "assistant") continue;
@@ -92,11 +107,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   refreshConfig() {
-    void this.postConfig();
+    void (async () => {
+      await this.postConfig();
+      await this.postHistory();
+    })();
   }
 
   async clearHistory(): Promise<void> {
-    await this.context.workspaceState.update(HISTORY_KEY, []);
+    await this.context.workspaceState.update(this.historyKey(), []);
     this.assetScores?.resetAssetScores();
     void this.post({ type: "history", messages: [] });
   }
@@ -105,6 +123,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   invalidateProfile(): void {
     this.cachedProfile = null;
     this.profileFetchPromise = null;
+    this.activeCohortId = null;
     this.assetScores?.resetAssetScores();
   }
 
@@ -149,8 +168,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     const sanitized = sanitizeCoachInput(name.trim() || "", personality, fallback);
     const next: CoachInfo = { ...sanitized, configured: true };
-    await this.context.globalState.update(COACH_KEY, next);
-    await this.context.globalState.update(COACH_RITUAL_DONE_KEY, true);
+    await this.context.globalState.update(this.coachKey(), next);
+    await this.context.globalState.update(this.coachRitualDoneKey(), true);
     await this.postConfig();
   }
 
@@ -158,7 +177,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   shouldOfferNamingRitual(profile: ResolvedProfile | null): boolean {
     const mode = profile?.ux.coach.naming_mode ?? "fixed";
     if (mode === "fixed") return false;
-    const done = this.context.globalState.get<boolean>(COACH_RITUAL_DONE_KEY, false);
+    const done = this.context.globalState.get<boolean>(this.coachRitualDoneKey(), false);
     if (!done) return true;
     return !!profile?.ux.coach.revisit_on_entry;
   }
@@ -174,9 +193,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (!token) return null;
 
     this.profileFetchPromise = fetchProfile({ proxyUrl, token }).then(
-      (p) => {
+      async (p) => {
         this.cachedProfile = p;
         this.profileFetchPromise = null;
+        this.activeCohortId = extractCohortIdUnverified(token) ?? null;
+        await this.migrateLegacyStateForActiveCohort();
         // Apply tone-appropriate labels to the preview panel (#159).
         const labels = labelsForProfile(p);
         this.preview.setLabels({
@@ -199,7 +220,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // -------------------------------------------------------------------------
 
   private getCoach(): CoachInfo {
-    return this.context.globalState.get<CoachInfo>(COACH_KEY, {
+    return this.context.globalState.get<CoachInfo>(this.coachKey(), {
       name: "",
       personality: "",
       configured: false,
@@ -230,8 +251,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const fallback = profile?.ux.coach.fallback_name ?? "코치";
     const sanitized = sanitizeCoachInput(name, personality, fallback);
     const next: CoachInfo = { ...sanitized, configured: true };
-    await this.context.globalState.update(COACH_KEY, next);
-    await this.context.globalState.update(COACH_RITUAL_DONE_KEY, true);
+    await this.context.globalState.update(this.coachKey(), next);
+    await this.context.globalState.update(this.coachRitualDoneKey(), true);
     await this.postConfig();
   }
 
@@ -556,14 +577,64 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async postHistory(): Promise<void> {
-    const messages = this.context.workspaceState.get<ChatMessage[]>(HISTORY_KEY, []);
+    const messages = this.getHistory();
     await this.post({ type: "history", messages });
   }
 
   private async appendHistory(msgs: ChatMessage[]): Promise<void> {
-    const current = this.context.workspaceState.get<ChatMessage[]>(HISTORY_KEY, []);
+    const current = this.getHistory();
     const next = clampHistory(current, msgs, HISTORY_MAX);
-    await this.context.workspaceState.update(HISTORY_KEY, next);
+    await this.context.workspaceState.update(this.historyKey(), next);
+  }
+
+  private historyKey(): string {
+    return historyKeyForCohort(this.activeCohortId);
+  }
+
+  private coachKey(): string {
+    return coachKeyForCohort(this.activeCohortId);
+  }
+
+  private coachRitualDoneKey(): string {
+    return coachRitualDoneKeyForCohort(this.activeCohortId);
+  }
+
+  private getHistory(): ChatMessage[] {
+    return this.context.workspaceState.get<ChatMessage[]>(this.historyKey(), []);
+  }
+
+  private async migrateLegacyStateForActiveCohort(): Promise<void> {
+    const bucket = stateBucketId(this.activeCohortId);
+    if (!bucket) return;
+
+    const historyDone = this.context.globalState.get<boolean>(HISTORY_MIGRATION_DONE_KEY, false);
+    if (!historyDone) {
+      const targetKey = this.historyKey();
+      const target = this.context.workspaceState.get<ChatMessage[]>(targetKey, []);
+      const legacy = this.context.workspaceState.get<ChatMessage[]>(LEGACY_HISTORY_KEY, []);
+      if (target.length === 0 && legacy.length > 0) {
+        await this.context.workspaceState.update(targetKey, legacy);
+      }
+      await this.context.globalState.update(HISTORY_MIGRATION_DONE_KEY, true);
+    }
+
+    const coachDone = this.context.globalState.get<boolean>(COACH_MIGRATION_DONE_KEY, false);
+    if (!coachDone) {
+      const targetKey = this.coachKey();
+      const target = this.context.globalState.get<CoachInfo | undefined>(targetKey, undefined);
+      const legacy = this.context.globalState.get<CoachInfo | undefined>(LEGACY_COACH_KEY, undefined);
+      if (!target && legacy) {
+        await this.context.globalState.update(targetKey, legacy);
+      }
+
+      const targetDoneKey = this.coachRitualDoneKey();
+      const targetDone = this.context.globalState.get<boolean | undefined>(targetDoneKey, undefined);
+      const legacyDone = this.context.globalState.get<boolean>(LEGACY_COACH_RITUAL_DONE_KEY, false);
+      if (targetDone === undefined && legacyDone) {
+        await this.context.globalState.update(targetDoneKey, true);
+      }
+      await this.context.globalState.update(COACH_MIGRATION_DONE_KEY, true);
+    }
   }
 
   private async post(msg: HostMessage): Promise<boolean | void> {
