@@ -20,17 +20,23 @@ fi
 
 cd "$REPO_ROOT"
 
-# Source nvm and pin to Node 22
+# Source nvm and pin to Node 22. In CI, actions/setup-node may have already
+# provided the exact runtime without nvm.
 export NVM_DIR="$HOME/.nvm"
 # shellcheck disable=SC1091
 [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && . "/opt/homebrew/opt/nvm/nvm.sh"
-if ! command -v nvm >/dev/null 2>&1; then
-  echo "[run-build] ERROR: nvm is missing. Install with: brew install nvm && nvm install 22.22.1" >&2
-  exit 1
-fi
-if ! nvm use 22.22.1 --silent; then
-  echo "[run-build] ERROR: Node 22.22.1 is not installed. Run: nvm install 22.22.1" >&2
-  exit 1
+if command -v nvm >/dev/null 2>&1; then
+  if ! nvm use 22.22.1 --silent; then
+    echo "[run-build] ERROR: Node 22.22.1 is not installed. Run: nvm install 22.22.1" >&2
+    exit 1
+  fi
+else
+  node_version="$(node --version 2>/dev/null || true)"
+  if [[ "$node_version" != "v22.22.1" ]]; then
+    echo "[run-build] ERROR: nvm is missing and current node is ${node_version:-missing}; need v22.22.1." >&2
+    echo "[run-build] Install with: brew install nvm && nvm install 22.22.1" >&2
+    exit 1
+  fi
 fi
 
 # Source cargo (rust) — needed for native module compilation
