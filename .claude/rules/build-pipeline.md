@@ -15,11 +15,27 @@ Both are safe to run without re-confirming each time inside the same task.
 
 Always launch builds via `scripts/run-build.sh <logfile>`. It:
 1. Sources nvm (Node 22), cargo, `hypeproof-studio.env`
-2. Restores `patches/00-update-disable.patch.yet` from git (the rename in `prepare_vscode.sh:148-150` is one-shot)
-3. `git reset --hard && git clean -fdx` inside `vscodium-base/vscode/` to wipe any previously-applied patches + injected extension
-4. Execs `bash build.sh` with logging
+2. Runs `scripts/check-env.sh` before the long build, so missing fresh-machine dependencies fail fast
+3. Restores `patches/00-update-disable.patch.yet` from git (the rename in `prepare_vscode.sh:148-150` is one-shot)
+4. `git reset --hard && git clean -fdx` inside `vscodium-base/vscode/` to wipe any previously-applied patches + injected extension
+5. Execs `bash build.sh` with logging
 
 Skipping these resets makes the second build fail on `git apply` (patches already applied) or `mv .yet .patch` (.yet already renamed).
+
+## Fresh macOS build prerequisites
+
+Run `bash scripts/check-env.sh` before a first build. A clean machine needs:
+
+```bash
+brew install nvm jq gnu-sed libicns icoutils imagemagick librsvg python@3.11
+nvm install 22.22.1
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+xcode-select --install
+```
+
+Required tools checked by `scripts/check-env.sh`: Node `22.22.1`, `python3.11`,
+`cargo`/`rustc`, Xcode CLI tools, Homebrew, `jq`, `gsed`, `icns2png`,
+`icotool`, ImageMagick `composite`, and `rsvg-convert`.
 
 ## How HypeProof Studio overrides reach the build
 
@@ -60,7 +76,12 @@ To get HypeProof branding on Linux/Win/server, **pre-generate the platform icons
 | `prepare_src.sh: line 11: checksum: command not found` | `~/.npmrc` has `prefix=` that breaks nvm globals | Cosmetic. Source archives still build. Ignore for local builds |
 | `mv: ../patches/00-update-disable.patch.yet: No such file or directory` | Second build with stale rename | `run-build.sh` restores from git |
 | `error: patch failed: build/gulpfile.vscode.ts` | Patches already applied to `vscode/` | `run-build.sh` resets via `git clean -fdx` |
-| `icns2png could not be found` | Missing libicns | `brew install libicns icoutils gnu-sed` |
+| `nvm: command not found` or `N/A: version "v22.22.1"` | Missing nvm or exact Node pin | `brew install nvm && nvm install 22.22.1` |
+| `cargo: command not found` / `rustc: command not found` | Missing Rust toolchain | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| `icns2png could not be found` | Missing libicns | `brew install libicns` |
+| `icotool could not be found` | Missing icoutils | `brew install icoutils` |
+| `composite could not be found` | Missing ImageMagick | `brew install imagemagick` |
+| `rsvg-convert could not be found` | Missing librsvg | `brew install librsvg` |
 | Build silently uses VSCodium icons | `build_icons.sh` skipped regeneration because files exist | Delete `src/stable/resources/*/code.{icns,png,ico}` before re-running |
 | `Request https://api.github.com/repos/.../releases/tags/v0.1.0 failed with status code: 404` during `bundle-marketplace-extensions-build` | Extension listed in `product.json.builtInExtensions` triggers a marketplace/GH download. The download target doesn't exist (no release yet) | Don't list bundled extensions in `builtInExtensions`. Place them in `vscode/extensions/` only — VSCodium picks them up automatically as built-ins (same as `git`, `npm`, etc.) |
 
