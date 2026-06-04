@@ -24,15 +24,35 @@ cd "$REPO_ROOT"
 export NVM_DIR="$HOME/.nvm"
 # shellcheck disable=SC1091
 [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && . "/opt/homebrew/opt/nvm/nvm.sh"
-nvm use 22.22.1 --silent
+if ! command -v nvm >/dev/null 2>&1; then
+  echo "[run-build] ERROR: nvm is missing. Install with: brew install nvm && nvm install 22.22.1" >&2
+  exit 1
+fi
+if ! nvm use 22.22.1 --silent; then
+  echo "[run-build] ERROR: Node 22.22.1 is not installed. Run: nvm install 22.22.1" >&2
+  exit 1
+fi
 
 # Source cargo (rust) — needed for native module compilation
 # shellcheck disable=SC1091
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+  echo "[run-build] ERROR: Rust toolchain is missing. Run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
+  exit 1
+fi
 
 # Source HPS env vars (APP_NAME, BINARY_NAME, etc.)
+if [[ ! -f ./hypeproof-studio.env ]]; then
+  echo "[run-build] ERROR: hypeproof-studio.env is missing. Create it before starting a build." >&2
+  exit 1
+fi
 # shellcheck disable=SC1091
 . ./hypeproof-studio.env >/dev/null
+
+if ! bash scripts/check-env.sh; then
+  echo "[run-build] ERROR: environment check failed; fix the items above before starting the long build." >&2
+  exit 1
+fi
 
 # Stamp a real commit into product.json. VSCodium's version.sh derives
 # BUILD_SOURCEVERSION = sha1sum(RELEASE_VERSION) when unset — with no
