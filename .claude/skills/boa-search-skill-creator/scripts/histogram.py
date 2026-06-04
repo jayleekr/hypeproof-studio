@@ -54,6 +54,9 @@ def render(skill, rows):
 
 
 def main(argv):
+    if len(argv) < 2:
+        print("사용: histogram.py <child-skill-name> [<log-path>]", file=sys.stderr)
+        return 2
     skill = argv[1]
     log = Path(argv[2]) if len(argv) > 2 else (
         Path.home() / ".claude" / "boa-skills" / "logs" / f"{skill}.jsonl"

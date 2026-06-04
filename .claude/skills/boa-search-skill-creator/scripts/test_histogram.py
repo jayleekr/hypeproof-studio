@@ -5,10 +5,12 @@
 자산 키부재, 자산 score=null)을 단언한다. measurement-architecture.md §5 P0.
 """
 import sys
+import contextlib
+import io
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from histogram import render, asset_score  # noqa: E402
+from histogram import render, asset_score, main as histogram_main  # noqa: E402
 
 # 4종 모드를 모두 담은 fixture
 ROWS = [
@@ -62,6 +64,10 @@ def main():
 
     # 빈 로그 / 전부 미채점도 안전
     ok &= check(render("x", [{}]) is not None, "scores 없는 단일 행도 안전")
+    usage_stderr = io.StringIO()
+    with contextlib.redirect_stderr(usage_stderr):
+        usage_code = histogram_main(["histogram.py"])
+    ok &= check(usage_code == 2 and "사용:" in usage_stderr.getvalue(), "인자 누락 시 usage + exit 2")
 
     print("\nPASS" if ok else "\nFAIL")
     return 0 if ok else 1
