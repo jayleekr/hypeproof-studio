@@ -1,6 +1,6 @@
 ---
 name: hype-open-pr
-description: Open a pull request for the current HypeProof Studio fix/feat branch — pushes the branch, creates the PR from the template, and fills Closes #N / Essence / Tested with the contributor. Use when a code change is ready to land and a contributor wants to open the PR (the PR-side counterpart of /report-ui).
+description: Open a pull request for the current HypeProof Studio fix/feat branch — pushes the branch, creates the PR from the template, and fills Closes #N / AI Native Assets / Tested with the contributor. Use when a code change is ready to land and a contributor wants to open the PR (the PR-side counterpart of /report-ui).
 user_invocable: true
 triggers:
   - "open pr"
@@ -58,7 +58,7 @@ The template has placeholders. Gather, in the contributor's language:
 - **What & why** — one tight paragraph.
 - **Area** — keep the matching line(s) (worker / extension / docs·scripts /
   build·submodule).
-- **Essence(s)** — for chat-panel changes, cite the §4.5 essence number(s)
+- **AI Native Asset(s)** — for chat-panel changes, cite the §4.5 asset name(s)
   from METAPLAN. Challenge "serves none" for a chat-panel change.
 - **Tested** — check the `Run & test` layer(s) actually run (DEV-GUIDE §4).
 - **Checklist** — confirm branched off main, no secrets in diff, submodule
