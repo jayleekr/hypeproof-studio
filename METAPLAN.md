@@ -1,7 +1,7 @@
 # HypeProof Studio — Solo Build Metaplan
 
 > **Owner:** Jay (solo) · **Target:** SK바이오팜 1회차 (June 2026)
-> **Philosophy (drives UX):** [docs/essence-v0.1.md](./docs/essence-v0.1.md) — 16 Essences; chat-panel features follow the §4.5 map.
+> **Philosophy (drives UX):** [docs/seven-assets.md](./docs/seven-assets.md) — 7 AI Native Assets; chat-panel features follow the §4.5 map.
 > **Strategic plan:** [hypeproof-studio-plan.md](../hypeproof/.claude/worktrees/curriculum/products/ai-architect-academy/internal/hypeproof-studio-plan.md)
 
 This is the phase map and decision gates. Mechanics live elsewhere — build in
@@ -58,36 +58,28 @@ About shows attribution → Phase 3.
 (own extension, later bundled built-in). Chat UI + streaming + Proxy fetch +
 workshop-token input + history.
 
-**Gate:** open panel → message → Proxy round-trip streams back; **≥8 MVP
-essences from §4.5 reflected** → Phase 5.
+**Gate:** open panel → message → Proxy round-trip streams back; **all 7 AI
+Native Assets have at least one MVP panel affordance from §4.5** → Phase 5.
 
-## 4.5. Essence → Chat Panel UX map
+## 4.5. AI Native Asset → Chat Panel UX map
 
-> Source: [docs/essence-v0.1.md](./docs/essence-v0.1.md). Chat-panel features
+> Source: [docs/seven-assets.md](./docs/seven-assets.md). Chat-panel features
 > are added/removed against this table. **MVP ✅** = required for the Phase 4
 > debut; the rest are Phase 5+ / v0.2.
 
-| # | Essence | Panel UX | MVP |
-|---|---------|----------|-----|
-| 1 | 천 번째도 첫 번째처럼 감탄 | welcome copy + "왜 신기한가" slot | — |
-| 2 | 전심전력으로 임하기 | empty-prompt block + resolution hint | ✅ |
-| 3 | 부하 걸기 | "더 무겁게 물어보기" preset | ✅ |
-| 4 | 만족 유예, 추궁 | "한 번 더 (n)" + meaning-loss warning | ✅ |
-| 5 | 역할 몰입과 관점 부여 | role presets + system-prompt library | ✅ |
-| 6 | 잇기 — 가설 세우기 | hypothesis-tree review (Phase 5) | — |
-| 7 | 질문으로 공터 만들기 | "되물어주세요" — model asks first | ✅ |
-| 8 | 입력 먼저 굴리기 | quick-iterate seed mode (Phase 5) | — |
-| 9 | 백 번 뽑아보기 | variation runner + compare grid | — |
-| 10 | 다중 모델 조율 | model selector + cross-critique | ✅ toggle / P5 critique |
-| 11 | 역목표 설계 | "실패시키는 길" red-team preset | — |
-| 12 | 수행과 위임의 역전 | scaffold mode (Phase 5+) | — |
-| 13 | 추상의 사다리 | metaprompt builder (v0.2) | — |
-| 14 | 언러닝 | "검증된 전략 다시 의심" on model switch | — |
-| 15 | 상상하기 | deliberate response delay toggle | — |
-| 16 | 소격하기 | manual-approve modal *is* the kick + CoT always-on | ✅ |
+| Asset | Panel UX | MVP |
+|---|---|---|
+| Taste | welcome copy, preview auto-reveal, generated artifact save path | ✅ |
+| Intent clarity | empty-prompt block, good-vs-weak chips, short-input roll prompt | ✅ |
+| Context design | role/profile-driven system prompt, cohort examples, token-bound profile fetch | ✅ |
+| Verification reflex | verdict prompts, source/citation chips, report-problem path with request id | ✅ |
+| Delegation judgment | manual-approve modal, hard-deny shell execution, scoped file-write approval | ✅ |
+| Iteration reflex | retry / think-again affordance, retry counter hooks, quick V1-first-shot flow | ✅ |
+| Ownership | named coach, workspace `index.html` save, update/install continuity | ✅ |
 
-**MVP coverage (Phase 4 debut, 8):** 2, 3, 4, 5, 7, 10 (toggle), 16
-(manual-approve + CoT), and 1 (welcome copy).
+**MVP coverage (Phase 4 debut):** all 7 assets have at least one panel affordance.
+Per-cohort profiles choose emphasis with `assets_focus`; the deprecated
+`essences_focus` array remains only as a v0.1 compatibility bridge.
 
 ## Phase 5. Chat panel + build integration
 
