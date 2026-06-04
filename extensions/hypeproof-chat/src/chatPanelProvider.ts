@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { TOKEN_KEY } from "./extension";
+import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { PreviewProvider } from "./previewProvider";
 import {
@@ -33,6 +34,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly preview: PreviewProvider,
+    private readonly assetScores?: AssetScoreSink,
   ) {}
 
   /**
@@ -95,6 +97,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   async clearHistory(): Promise<void> {
     await this.context.workspaceState.update(HISTORY_KEY, []);
+    this.assetScores?.resetAssetScores();
     void this.post({ type: "history", messages: [] });
   }
 
@@ -102,6 +105,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   invalidateProfile(): void {
     this.cachedProfile = null;
     this.profileFetchPromise = null;
+    this.assetScores?.resetAssetScores();
   }
 
   /**
@@ -394,6 +398,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           void this.post({ type: "streamCitations", streamId, citations: cites });
         },
         onAssetScore: (assetScore) => {
+          this.assetScores?.recordAssetScore(assetScore);
           void this.post({ type: "streamAssetScore", streamId, assetScore });
         },
       });

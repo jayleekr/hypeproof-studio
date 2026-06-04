@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { ChatPanelProvider } from "./chatPanelProvider";
+import { AssetStatusBar } from "./assetStatusBar";
 import { labelsForProfile } from "./chatPanelHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
@@ -37,10 +38,12 @@ export async function activate(context: vscode.ExtensionContext) {
   await applyTestBackdoors(context);
 
   const preview = new PreviewProvider(context);
-  const provider = new ChatPanelProvider(context, preview);
+  const assetStatus = new AssetStatusBar();
+  const provider = new ChatPanelProvider(context, preview, assetStatus);
   providerRef = provider;
 
   context.subscriptions.push(
+    assetStatus,
     vscode.window.registerWebviewViewProvider("hypeproof-chat.panel", provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
