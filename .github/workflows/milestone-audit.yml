@@ -1,0 +1,61 @@
+name: milestone-audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Do not create issues"
+        type: boolean
+        default: true
+      phase:
+        description: "Phase number or all"
+        required: false
+        default: "all"
+      max_create:
+        description: "Maximum new issues to create"
+        required: false
+        default: "10"
+  schedule:
+    - cron: "17 1 * * 1"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: milestone-audit
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DRY_RUN: ${{ github.event_name == 'schedule' && 'true' || inputs.dry_run }}
+      PHASE: ${{ inputs.phase || 'all' }}
+      MAX_CREATE: ${{ inputs.max_create || '10' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run milestone audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--mode issue --phase "$PHASE" --max-create "$MAX_CREATE")
+          if [[ "$DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          node scripts/milestone-audit.mjs "${args[@]}"
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        with:
+          name: milestone-audit
+          path: milestone-audit.json
+          if-no-files-found: error
