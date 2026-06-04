@@ -34,8 +34,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh release view "$TAG" --repo "$SOURCE_REPO" --json tagName,name,body,assets,htmlUrl > source-release.json
-          jq '{tagName, name, htmlUrl, assets: [.assets[].name]}' source-release.json
+          gh release view "$TAG" --repo "$SOURCE_REPO" --json tagName,name,body,assets,url > source-release.json
+          jq '{tagName, name, url, assets: [.assets[].name]}' source-release.json
           asset_count="$(jq '.assets | length' source-release.json)"
           [[ "$asset_count" -gt 0 ]] || { echo "::error::source release has no assets"; exit 1; }
 
@@ -72,5 +72,5 @@ jobs:
           GH_TOKEN: ${{ secrets.MIRROR_RELEASE_PAT }}
         run: |
           set -euo pipefail
-          gh release view "$TAG" --repo "$TARGET_REPO" --json tagName,assets,htmlUrl \
-            | jq '{tagName, htmlUrl, assets: [.assets[].name]}'
+          gh release view "$TAG" --repo "$TARGET_REPO" --json tagName,assets,url \
+            | jq '{tagName, url, assets: [.assets[].name]}'
