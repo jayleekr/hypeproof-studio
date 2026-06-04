@@ -393,6 +393,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           for (const c of cites) assistantCitations.push(c);
           void this.post({ type: "streamCitations", streamId, citations: cites });
         },
+        onAssetScore: (assetScore) => {
+          void this.post({ type: "streamAssetScore", streamId, assetScore });
+        },
       });
       void this.post({ type: "streamEnd", streamId });
       await this.appendHistory([

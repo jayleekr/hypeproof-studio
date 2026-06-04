@@ -1,4 +1,4 @@
-import { ChatMessage, Citation, ResolvedProfile } from "./protocol";
+import type { AssetScoreChunk, ChatMessage, Citation, ResolvedProfile } from "./protocol";
 import { buildProxyHeaders } from "./proxyClientHelpers";
 
 /**
@@ -98,6 +98,8 @@ interface ProxyChatArgs {
   onDelta: (delta: string) => void;
   /** #173 — fires for each citations chunk in the SSE stream. */
   onCitations?: (citations: Citation[]) => void;
+  /** #204 — fires when the worker emits the final 7-asset score chunk. */
+  onAssetScore?: (assetScore: AssetScoreChunk) => void;
   coachName?: string;
   coachPersonality?: string;
 }
@@ -114,6 +116,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
     signal,
     onDelta,
     onCitations,
+    onAssetScore,
     coachName,
     coachPersonality,
   } = args;
@@ -167,6 +170,10 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
       if (data === "[DONE]") return;
       try {
         const j = JSON.parse(data);
+        if (j?.type === "asset_score" && isAssetScoreChunk(j) && onAssetScore) {
+          onAssetScore(j);
+          continue;
+        }
         const choice = j?.choices?.[0]?.delta;
         const delta = choice?.content;
         if (typeof delta === "string" && delta.length) onDelta(delta);
@@ -180,6 +187,15 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
       }
     }
   }
+}
+
+function isAssetScoreChunk(value: unknown): value is AssetScoreChunk {
+  const chunk = value as AssetScoreChunk | null;
+  if (!chunk || chunk.type !== "asset_score" || chunk.version !== 1 || chunk.method !== "heuristic-v1") {
+    return false;
+  }
+  const scores = chunk.scores as Record<string, unknown> | undefined;
+  return !!scores && typeof scores === "object";
 }
 
 interface FetchProfileArgs {

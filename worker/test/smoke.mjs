@@ -10,6 +10,16 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier.startsWith(".") && !/\.[a-z0-9]+$/i.test(specifier)) {
+      try {
+        return nextResolve(`${specifier}.ts`, context);
+      } catch {
+        return nextResolve(specifier, context);
+      }
+    }
+    return nextResolve(specifier, context);
+  },
   load(url, context, nextLoad) {
     if (url.endsWith(".html") || url.endsWith(".md")) {
       const text = readFileSync(fileURLToPath(url), "utf8");
@@ -34,6 +44,7 @@ const { translate, translateOpenAI, anthropicEventToOpenAIChunk, tierForUrl } =
   await import("../src/lib/translate.ts");
 const { resolveProvider } = await import("../src/env.ts");
 const { assetKeys, clampAssetScores, scoreTurnAssets } = await import("../src/lib/asset-scorer.ts");
+const { transformStream, passThroughOpenAIStream } = await import("../src/lib/sse.ts");
 
 /** @type {import("../src/profiles/types.ts").Profile} */
 const stubProfile = {
@@ -53,6 +64,29 @@ const stubProfile = {
   session: { cohort_id: "stub", series_total: 1, series_index: 1, hours: 1 },
   analytics: { log_user_messages: false, log_metadata: true },
 };
+
+function streamFromText(text) {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(text));
+      controller.close();
+    },
+  });
+}
+
+async function readStreamText(stream) {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let out = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    out += decoder.decode(value, { stream: true });
+  }
+  out += decoder.decode();
+  return out;
+}
 
 // ---- token roundtrip --------------------------------------------------------
 {
@@ -114,6 +148,58 @@ const stubProfile = {
     },
   );
   console.log("✓ 7 AI Native Asset scorer: stable shape + range clamp + workshop signals");
+}
+
+// ---- #204: Anthropic SSE emits final asset_score before DONE ---------------
+{
+  let text = "";
+  const upstream = [
+    `data: ${JSON.stringify({ type: "message_start", message: { usage: { input_tokens: 2 } } })}`,
+    "",
+    `data: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "결정을 먼저 정하고 " } })}`,
+    "",
+    `data: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "출처를 검증해요." } })}`,
+    "",
+    `data: ${JSON.stringify({ type: "message_delta", usage: { output_tokens: 5 } })}`,
+    "",
+  ].join("\n");
+  const out = await readStreamText(transformStream(streamFromText(upstream), "claude-test", () => {}, {
+    onTextDelta: (delta) => { text += delta; },
+    onBeforeDone: () => ({ type: "asset_score", ...scoreTurnAssets(text) }),
+  }));
+  const scoreIdx = out.indexOf('"type":"asset_score"');
+  const doneIdx = out.indexOf("data: [DONE]");
+  assert.ok(scoreIdx > 0, "asset_score chunk emitted");
+  assert.ok(doneIdx > scoreIdx, "asset_score arrives before DONE");
+  assert.ok(out.includes("결정을 먼저 정하고"), "translated text chunks still flow");
+  assert.ok(out.includes('"verification_reflex"'), "score payload includes all asset keys");
+  console.log("✓ #204 Anthropic SSE emits final asset_score before DONE");
+}
+
+// ---- #204: OpenAI-compatible SSE inserts asset_score and de-dupes DONE -----
+{
+  let text = "";
+  const upstream = [
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "AI에게 검색을 맡기고 " } }] })}`,
+    "",
+    `data: ${JSON.stringify({ choices: [{ delta: { content: "내가 최종 판단해요." } }], usage: { prompt_tokens: 3, completion_tokens: 4 } })}`,
+    "",
+    "data: [DONE]",
+    "",
+  ].join("\n");
+  let usage = null;
+  const out = await readStreamText(passThroughOpenAIStream(streamFromText(upstream), (u) => { usage = u; }, {
+    onTextDelta: (delta) => { text += delta; },
+    onBeforeDone: () => ({ type: "asset_score", ...scoreTurnAssets(text) }),
+  }));
+  const scoreIdx = out.indexOf('"type":"asset_score"');
+  const doneMatches = out.match(/data: \[DONE\]/g) ?? [];
+  assert.ok(scoreIdx > 0, "asset_score chunk emitted");
+  assert.ok(out.indexOf("data: [DONE]") > scoreIdx, "asset_score arrives before DONE");
+  assert.equal(doneMatches.length, 1, "DONE emitted exactly once");
+  assert.equal(usage.input_tokens, 3);
+  assert.equal(usage.output_tokens, 4);
+  console.log("✓ #204 OpenAI-compatible SSE inserts asset_score before single DONE");
 }
 
 // ---- bad signature rejected -------------------------------------------------

@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState } from "react";
-import type { ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
+import type { AssetScoreChunk, ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
 import { onHostMessage, postToHost } from "./vscode";
 import { ChatPanel } from "./ChatPanel";
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
@@ -12,6 +12,7 @@ interface State {
   error: string | null;
   errorRequestId: string | null;   // S-07 / #49 — surfaced in ErrorBanner
   errorRunbookUrl: string | null;  // #165 — banner renders as clickable link
+  assetScore: AssetScoreChunk | null;
 }
 
 type Action =
@@ -20,6 +21,7 @@ type Action =
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; delta: string }
   | { type: "streamCitations"; citations: Citation[] }
+  | { type: "streamAssetScore"; assetScore: AssetScoreChunk }
   | { type: "streamEnd" }
   | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
   | { type: "userSent"; text: string };
@@ -32,6 +34,7 @@ const initialState: State = {
   error: null,
   errorRequestId: null,
   errorRunbookUrl: null,
+  assetScore: null,
 };
 
 function reducer(state: State, action: Action): State {
@@ -46,6 +49,7 @@ function reducer(state: State, action: Action): State {
         streamingId: action.messageId,
         streamId: action.streamId,
         error: null,
+        assetScore: null,
         messages: [
           ...state.messages,
           { id: action.messageId, role: "assistant", content: "", createdAt: Date.now() },
@@ -67,6 +71,8 @@ function reducer(state: State, action: Action): State {
             : m,
         ),
       };
+    case "streamAssetScore":
+      return { ...state, assetScore: action.assetScore };
     case "streamEnd":
       return {
         ...state,
@@ -108,6 +114,7 @@ export function App() {
         case "streamStart": dispatch({ type: "streamStart", streamId: msg.streamId, messageId: msg.messageId }); break;
         case "streamChunk": dispatch({ type: "streamChunk", delta: msg.delta }); break;
         case "streamCitations": dispatch({ type: "streamCitations", citations: msg.citations }); break;
+        case "streamAssetScore": dispatch({ type: "streamAssetScore", assetScore: msg.assetScore }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;

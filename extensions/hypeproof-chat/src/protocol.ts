@@ -28,6 +28,24 @@ export interface Citation {
   tier: 1 | 2 | 3 | 4;
 }
 
+export type AssetKey =
+  | "taste"
+  | "intent_clarity"
+  | "context_design"
+  | "verification_reflex"
+  | "delegation_judgment"
+  | "iteration_reflex"
+  | "ownership";
+
+export type AssetScores = Record<AssetKey, number>;
+
+export interface AssetScoreChunk {
+  type: "asset_score";
+  version: 1;
+  method: "heuristic-v1";
+  scores: AssetScores;
+}
+
 export interface ChatConfig {
   proxyUrl: string;
   model: string;
@@ -160,6 +178,7 @@ export type HostMessage =
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }
   | { type: "streamCitations"; streamId: string; citations: Citation[] }  // #173
+  | { type: "streamAssetScore"; streamId: string; assetScore: AssetScoreChunk }  // #204
   | { type: "streamEnd"; streamId: string }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
