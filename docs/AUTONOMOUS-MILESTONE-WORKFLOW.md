@@ -30,12 +30,19 @@ loop. It is deliberately built around the existing repo sources of truth:
    - CI can route eligible issues to the existing Claude Solver by applying
      `solver:ready`.
    - Interactive execution should use the `/goal` prompt below.
+   - Runtime changes that affect the Worker, API, release artifacts, or shipped
+     extension must include the relevant dispatch-only dry-run first and, when
+     that passes and no human gate applies, production deploy or release mirror
+     execution.
 
 4. **Verify and close the loop**
    - Every task ends with targeted tests, a PR or explicit blocked comment, and
      an issue update.
-   - Worker deploys run `scripts/verify-prod.sh` after deploy.
+   - Worker deploys run `deploy-worker.yml` with `dry_run=false` and
+     `verify_prod=true`, then run `scripts/verify-prod.sh` after deploy.
    - Release/mirror work verifies installer resolution against the mirror repo.
+   - If production deploy is intentionally skipped, the issue/PR must say why:
+     docs-only, workflow-only, human-gated, missing secret, or unsafe state.
 
 ## Human Gates
 
@@ -57,10 +64,21 @@ defaults.
 /goal Implement the HypeProof Studio autonomous milestone ops workflow. Use METAPLAN.md as the phase/gate source, docs/AUTONOMY-MANDATE.md as the autonomy boundary, and GitHub issues as the backlog source. Add milestone audit/task generation scripts, GitHub Actions workflows for audit/task execution/release mirror/worker deploy, tests, and docs. Preserve human gates for secrets, billing/access policy, privacy/data retention, and irreversible production changes. Work issue→branch→tests→PR→merge.
 ```
 
+When the implementation changes Worker/API runtime behavior, shipped extension
+behavior, installer artifacts, or release distribution, the goal run must also:
+
+1. run the relevant dispatch-only dry-run workflow first;
+2. merge only after tests and dry-run evidence pass;
+3. run the production deploy or release mirror workflow when no human gate
+   applies;
+4. run production smoke verification after deploy; and
+5. comment the deploy URL/run id, smoke result, and any skipped deploy reason on
+   the issue.
+
 ### Operating prompt
 
 ```text
-/goal Run one autonomous HypeProof Studio milestone cycle. Audit METAPLAN phases and open GitHub epics, create or update missing task issues with stable hps:auto-task markers, classify risk using AUTONOMY-MANDATE, execute eligible low-risk tasks through issue→branch→tests→PR→merge, run relevant smoke checks, and leave issue comments for every completed, blocked, or human-gated item. Do not change secrets, billing/access policy, participant data retention, or irreversible production state.
+/goal Run one autonomous HypeProof Studio milestone cycle. Audit METAPLAN phases and open GitHub epics, create or update missing task issues with stable hps:auto-task markers, classify risk using AUTONOMY-MANDATE, execute eligible low-risk tasks through issue→branch→tests→PR→merge, run relevant dry-run workflows, and for runtime/release-distribution changes that pass dry-run and are not human-gated, run the production deploy or release mirror workflow and production smoke verification. Leave issue comments for every completed, deployed, skipped-deploy, blocked, or human-gated item with run ids and evidence. Do not change secrets, billing/access policy, participant data retention, or irreversible production state without explicit approval.
 ```
 
 ## CI Entry Points
