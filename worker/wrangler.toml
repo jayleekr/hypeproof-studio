@@ -2,6 +2,7 @@ name = "hypeproof-studio-api"
 main = "src/index.ts"
 compatibility_date = "2026-05-15"
 compatibility_flags = ["nodejs_compat"]
+account_id = "f1da7073b98021b4117c82a4a219eef0"
 
 # Custom domain mapping — wrangler provisions DNS + cert (zone in this account)
 routes = [{ pattern = "api.hypeproof-ai.xyz", custom_domain = true }]
