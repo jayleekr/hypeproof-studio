@@ -27,7 +27,7 @@ Skipping these resets makes the second build fail on `git apply` (patches alread
 
 1. Run `scripts/apply-product-overrides.sh` → patches `vscode/product.json` with HPS values (nameShort, applicationName, bundle id, urlProtocol, dataFolderName, win32 keys) **and the release version** (`.version`/`.commit`/`.date`, plus `vscode/package.json` `.version` which drives Info.plist `CFBundleShortVersionString`). Version comes from `scripts/resolve-version.sh` — single source of truth: `$HPS_VERSION` (CI sets it from the git tag) → extension `package.json` fallback. An empty version made the in-app updater loop forever (#206), so `verify-branding.sh` now fails the build if `product.json.version` is empty/placeholder or disagrees with the bundled extension.
 2. Copy pre-built `extensions/hypeproof-chat/` (dist + webview-ui/dist + media + package.json) into `vscode/extensions/hypeproof-chat/`
-3. Inject `builtInExtensions` entry into `vscode/product.json`
+3. Leave `product.json.builtInExtensions` untouched. Listing the extension there triggers marketplace/GitHub download during build; a folder under `extensions/` is bundled automatically.
 
 **Prerequisite**: `extensions/hypeproof-chat/dist/extension.js` and `extensions/hypeproof-chat/webview-ui/dist/index.html` must exist before the build starts. Run `npm run build` inside `extensions/hypeproof-chat/` (or `scripts/inject-builtin-extensions.sh` which does both build + inject) before any `scripts/run-build.sh` invocation that wants the extension included.
 
@@ -91,7 +91,7 @@ launch.
 
 - **Phase 0–1**: vanilla build first. Do not introduce branding overrides yet.
 - **Phase 2+**: `hypeproof-studio.env` must be sourced before any `prepare_*` or `build.sh` call.
-- **Phase 5**: bundling `hypeproof-chat` as built-in needs both an entry in `product.json.builtInExtensions` and the extension folder injected into VS Code source during `prepare_vscode.sh`.
+- **Phase 5**: bundling `hypeproof-chat` as built-in needs the extension folder injected into VS Code source during `prepare_vscode.sh`. Do not add a `product.json.builtInExtensions` entry.
 
 ## Adding a new patch
 
