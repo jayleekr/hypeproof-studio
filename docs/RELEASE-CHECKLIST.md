@@ -31,6 +31,8 @@ Use this before any release-cutting action. Source of truth for Phase 7 decision
   - Body must include: summary, highlights, install/update guidance, asset list,
     verification run links, mirror status, production deploy status, known notes,
     and changelog links.
+- [ ] Mirror release body is installer-facing, not a verbatim copy of the main
+      repo engineering release notes.
 - [ ] Verify one-line installers resolve to the new release (test from a fresh shell)
 
 ## Endpoint / config change → re-cut
