@@ -60,9 +60,68 @@ jobs:
           GITHUB_TOKEN_SOURCE="${{ secrets.GITHUB_TOKEN }}"
           GH_TOKEN="$GITHUB_TOKEN_SOURCE" gh release download "$TAG" --repo "$SOURCE_REPO" --dir dist
           ls -la dist
+          cat > mirror-release-notes.md <<EOF
+          ## HypeProof Studio $TAG
+
+          This is the public installer/update mirror for HypeProof Studio. Use
+          this page when installing the app or checking that the latest workshop
+          build is available.
+
+          ## Install
+
+          ### macOS
+
+          Recommended one-line install:
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh | bash
+          \`\`\`
+
+          Manual download:
+
+          - \`HypeProof-Studio-darwin-arm64.zip\`
+
+          ### Windows
+
+          Recommended PowerShell install:
+
+          \`\`\`powershell
+          iwr -useb https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-win.ps1 | iex
+          \`\`\`
+
+          Manual downloads:
+
+          - \`HypeProof.StudioUserSetup-x64-*.exe\` — per-user installer
+          - \`HypeProof.StudioSetup-x64-*.exe\` — machine installer
+          - \`HypeProof.Studio-win32-x64-*.zip\` — portable zip
+
+          ## Assets
+          EOF
+          sed -i 's/^          //' mirror-release-notes.md
+          for asset in dist/*; do
+            printf -- "- \`%s\`\n" "$(basename "$asset")" >> mirror-release-notes.md
+          done
+          cat >> mirror-release-notes.md <<EOF
+
+          ## Notes
+
+          - The build is unsigned. macOS Gatekeeper or Windows SmartScreen may
+            show the usual warning for downloaded apps.
+          - Workshop/API access may still require the token provided by the
+            operator.
+          - If an older troubleshooting step set \`hypeproofChat.proxyUrl\`,
+            clear that override after updating so the app uses the shipped
+            default endpoint.
+
+          ## Verification
+
+          - Main release: https://github.com/$SOURCE_REPO/releases/tag/$TAG
+          - Source assets mirrored from: $SOURCE_REPO@$TAG
+          EOF
+          sed -i '/^          /s/^          //' mirror-release-notes.md
           name="$(jq -r '.name // empty' source-release.json)"
-          body="$(jq -r '.body // ""' source-release.json)"
-          gh release create "$TAG" --repo "$TARGET_REPO" --title "${name:-HypeProof Studio $TAG}" --notes "$body" 2>/dev/null || true
+          gh release create "$TAG" --repo "$TARGET_REPO" --title "${name:-HypeProof Studio $TAG}" --notes-file mirror-release-notes.md 2>/dev/null || true
+          gh release edit "$TAG" --repo "$TARGET_REPO" --notes-file mirror-release-notes.md
           gh release upload "$TAG" --repo "$TARGET_REPO" dist/* --clobber
 
       - name: Verify mirror
