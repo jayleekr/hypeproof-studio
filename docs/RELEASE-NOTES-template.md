@@ -1,43 +1,69 @@
-# HypeProof Studio v0.1.0
+# HypeProof Studio RELEASE-NOTES template
 
-> First public release — SK바이오팜 워크숍 1회차 가족 배포용.
+Copy this body into each GitHub Release before publishing or mirroring. Keep it
+operator-readable: the release page is the first place people check when an
+installer or production deploy needs to be trusted.
 
-## What it is
+```md
+## Summary
 
-VS Code 기반의 AI 코딩 환경. 자녀와 함께 4시간 안에 자기 게임을 만들어볼 수 있도록 설계됨.
+One or two sentences describing what this release changes for participants,
+operators, or production reliability.
 
-## Install (one-liner)
+## Highlights
 
-**Mac:**
+- Participant-facing:
+- Operator-facing:
+- Build/release:
+- Production/API:
+
+## Install / Update
+
+- macOS: use `HypeProof-Studio-darwin-arm64.zip`.
+- Windows: use `HypeProof.StudioUserSetup-x64-*.exe` for a per-user install, or
+  `HypeProof.StudioSetup-x64-*.exe` for a machine install.
+- One-line installers resolve from the mirror repo:
+  `jayleekr/hypeproof-studio-releases`.
+- If this release changes endpoint defaults, clear any temporary
+  `hypeproofChat.proxyUrl` override after updating.
+
+macOS one-liner:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh | bash
 ```
 
-**Windows (PowerShell 관리자):**
+Windows PowerShell:
+
 ```powershell
 iwr -useb https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-win.ps1 | iex
 ```
 
-자세한 가이드: [docs/INSTALL.md](./docs/INSTALL.md)
+## Included Assets
 
-## What's inside
+- `HypeProof-Studio-darwin-arm64.zip` — macOS arm64 app zip
+- `HypeProof.Studio-win32-x64-*.zip` — Windows portable zip
+- `HypeProof.StudioUserSetup-x64-*.exe` — Windows user installer
+- `HypeProof.StudioSetup-x64-*.exe` — Windows system installer
+- `HypeProof.Studio.exe` — Windows app executable
+- `hypeproof-studio-tunnel.exe` — tunnel helper
+- `inno_updater.exe` — Windows updater helper
 
-- VSCodium 기반 (텔레메트리 제거된 VS Code)
-- 사전 번들된 **HypeProof Chat** 패널 (Anthropic 모델 via HypeProof Proxy)
-- 파일 쓰기 / 셸 실행은 항상 모달 확인 후 진행
-- Workshop token으로 사용량 게이팅
+## Verification
 
-## Known limitations
+- macOS release build:
+- Windows release build:
+- Mirror publish:
+- Production Worker deploy:
+- Production health:
 
-- Mac 빌드: 미서명. 처음 실행 시 시스템 설정에서 "확인 없이 열기" 필요.
-- Windows 빌드: 미서명. SmartScreen 경고 → "추가 정보" → "실행".
-- Workshop token은 운영진에게 받아야 함 (이번 회차 수동 발급).
+## Known Notes
 
-## Attribution
+- Unsigned binaries may require the usual macOS/Windows trust prompt handling.
+- Staff dogfood/install count:
 
-Built on [VSCodium](https://github.com/VSCodium/vscodium) (MIT) which is built on [Visual Studio Code](https://github.com/microsoft/vscode) (MIT). License notices preserved in About dialog.
+## Changes
 
-## Feedback
-
-GitHub Issues: https://github.com/jayleekr/hypeproof-studio/issues
-워크숍 단톡방 또는 jayleekr0125@gmail.com
+- PR / issue links:
+- Full changelog:
+```
