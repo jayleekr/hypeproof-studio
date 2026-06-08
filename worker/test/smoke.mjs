@@ -1110,6 +1110,13 @@ async function readStreamText(stream) {
       headers: { "content-type": "application/json", authorization: auth } });
     assert.equal(r.status, 413, "oversized body → 413");
   }
+  // 413: F#7 (#33) — oversized declared Content-Length is rejected before the
+  // body is read. Small valid body, large declared length.
+  {
+    const r = await call(mkEnv(), { body: JSON.stringify({ type: "trialStart" }),
+      headers: { "content-type": "application/json", authorization: auth, "content-length": String(9 * 1024) } });
+    assert.equal(r.status, 413, "oversized Content-Length → 413 (early reject)");
+  }
   // 200: trialStart returns a uuid; D1 INSERT INTO trials recorded
   {
     const env = mkEnv();

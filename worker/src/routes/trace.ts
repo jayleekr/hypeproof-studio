@@ -170,7 +170,17 @@ trace.post("/event", async (c) => {
     return c.json({ error: { message: "not in roster", type: "not_in_roster" } }, 403);
   }
 
-  // 6. Body size cap + parse
+  // 6. Body size cap + parse. F#7 (#33): early-reject via Content-Length
+  // BEFORE reading the whole body into memory — a cheap guard against
+  // oversized payloads. The post-read length check below stays as the
+  // authoritative cap for when the header is absent or understated (chunked).
+  const declaredLen = Number(c.req.header("content-length"));
+  if (Number.isFinite(declaredLen) && declaredLen > BODY_MAX) {
+    return c.json(
+      { error: { message: `event body exceeds ${BODY_MAX} bytes`, type: "request" } },
+      413,
+    );
+  }
   const raw = await c.req.text();
   if (raw.length > BODY_MAX) {
     return c.json(
