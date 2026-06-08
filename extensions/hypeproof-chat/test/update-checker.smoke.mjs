@@ -77,6 +77,17 @@ check("parseLatestRelease: same version → not available", () => {
   const info = parseLatestRelease(REAL_RELEASE, "0.1.2");
   assert.equal(info.available, false);
 });
+// #249 regression: a build whose stamped version equals the latest release must
+// NOT offer an update. The bug fed currentBundleVersion()'s esbuild-inlined
+// source value (0.1.5) instead of the stamped on-disk version (0.1.15); since
+// 0.1.5 < 0.1.15 (two-digit patch), the updater looped forever offering the
+// installed version. The fix makes currentBundleVersion() resolve the running
+// .app so the check sees the real 0.1.15.
+check("parseLatestRelease: #249 — stamped version == latest tag → not available", () => {
+  const rel = { ...REAL_RELEASE, tag_name: "v0.1.15", name: "v0.1.15" };
+  assert.equal(parseLatestRelease(rel, "0.1.15").available, false, "0.1.15 vs 0.1.15 must not loop");
+  assert.equal(parseLatestRelease(rel, "0.1.5").available, true, "stale 0.1.5 (the bug) WOULD loop — shows why the fix matters");
+});
 check("parseLatestRelease: older release → not available (e.g., rollback scenario)", () => {
   const info = parseLatestRelease(REAL_RELEASE, "0.1.3");
   assert.equal(info.available, false);
