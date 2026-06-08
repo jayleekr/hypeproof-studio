@@ -1,7 +1,15 @@
 # HypeProof Academy — Essence v0.1
+
+> [!WARNING]
+> **DEPRECATED (2026-05-23).** The 16-essence framework was replaced by the
+> **7 AI Native Assets**. Canonical source of truth:
+> [docs/seven-assets.md](./seven-assets.md). This file is kept only as
+> historical origin material — do **not** cite it in profiles, prompts,
+> system docs, or UX. See #166.
+
 > AI 시대, 인간이 모델과 함께 일하며 체득해야 할 본질 역량
 
-Status: Draft
+Status: Deprecated (superseded by [seven-assets.md](./seven-assets.md))
 Owner: Jay (원저), BH (발전 및 평가체계 설계)
 Date: 2026-04-06
 
