@@ -1033,13 +1033,19 @@ async function readStreamText(stream) {
           if (v == null) return null;
           return fmt === "json" ? JSON.parse(v) : v;
         },
+        // #33 F#6: rate-limit counter writes go through put.
+        async put(key, val) {
+          kvStore.set(key, typeof val === "string" ? val : JSON.stringify(val));
+        },
       },
       HPS_DB: {
         prepare(sql) {
           const call = { sql, bindings: null };
           return {
             bind(...args) { call.bindings = args; return this; },
-            async run() { dbCalls.push(call); return { success: true }; },
+            // meta.changes mirrors D1 (#33 A#12: endTrial reads it). Default 1
+            // = a row matched, so happy-path endTrial doesn't false-warn.
+            async run() { dbCalls.push(call); return { success: true, meta: { changes: 1 } }; },
             async first() {
               dbCalls.push(call);
               // Only the trial-ownership SELECT uses .first(); match on SQL
@@ -1195,7 +1201,10 @@ async function readStreamText(stream) {
     const trials = overrides.trials ?? { [TRIAL_UUID]: { user_id: USER, cohort_id: COHORT } };
     return {
       HPS_SIGNING_SECRET: SECRET,
-      HPS_KV: { async get(k, f) { const v = kv.get(k); return v == null ? null : (f === "json" ? JSON.parse(v) : v); } },
+      HPS_KV: {
+        async get(k, f) { const v = kv.get(k); return v == null ? null : (f === "json" ? JSON.parse(v) : v); },
+        async put(k, v) { kv.set(k, typeof v === "string" ? v : JSON.stringify(v)); },
+      },
       HPS_DB: {
         prepare(sql) {
           const call = { sql, bindings: null };
@@ -1260,6 +1269,34 @@ async function readStreamText(stream) {
       "no validations write when ownership fails");
   }
   console.log("✓ trace endpoint §2.4: trialEnd + validationRun happy + validationRun ownership 403");
+}
+
+// §3c — bumpRateCounter coarse limiter (#33 F#6). Pure helper, injectable now.
+{
+  const { bumpRateCounter } = await import("../src/lib/kv.ts");
+  const store = new Map();
+  const kv = {
+    async get(k, fmt) { const v = store.get(k); return v == null ? null : (fmt === "json" ? JSON.parse(v) : v); },
+    async put(k, v) { store.set(k, v); },
+  };
+  const NOW = 1_000_000;
+  const KEY = "rate:trace:c:u";
+  for (let i = 1; i <= 3; i++) {
+    const r = await bumpRateCounter(kv, KEY, 3, 60, NOW);
+    assert.equal(r.allowed, true, `call ${i} under limit=3`);
+    assert.equal(r.count, i, `count increments to ${i}`);
+  }
+  const over = await bumpRateCounter(kv, KEY, 3, 60, NOW);
+  assert.equal(over.allowed, false, "4th call exceeds limit");
+  assert.equal(over.count, 4);
+  // window expiry → counter resets
+  const reset = await bumpRateCounter(kv, KEY, 3, 60, NOW + 61_000);
+  assert.equal(reset.allowed, true, "after window → reset");
+  assert.equal(reset.count, 1);
+  // distinct key is independent
+  const other = await bumpRateCounter(kv, "rate:trace:c:other", 3, 60, NOW);
+  assert.equal(other.count, 1, "separate key counts independently");
+  console.log("✓ bumpRateCounter (#33 F#6): window count + limit + reset + key isolation");
 }
 
 // §4 — profile-snapshot: every registered profile keeps log_user_messages=false

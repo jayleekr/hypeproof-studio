@@ -135,10 +135,15 @@ export async function createTrial(env: Env, t: TrialInput): Promise<string> {
 }
 
 export async function endTrial(env: Env, trial_id: string): Promise<void> {
-  await env.HPS_DB
+  const res = await env.HPS_DB
     .prepare(`UPDATE trials SET ended_at = datetime('now') WHERE id = ? AND ended_at IS NULL`)
     .bind(trial_id)
     .run();
+  // A#12 (#33): an UPDATE matching 0 rows still returns success. Surface the
+  // no-op so a stale/unknown/already-ended trial_id isn't silently swallowed.
+  if (!res?.meta?.changes) {
+    console.warn(`endTrial: no open trial matched id=${trial_id} (already ended or unknown)`);
+  }
 }
 
 /**
