@@ -140,3 +140,31 @@ export async function listRevoked(
   }
   return out;
 }
+
+// --- coarse rate limiting (#33 F#6) -----------------------------------------
+// Best-effort per-key counter in a fixed window. KV is eventually consistent
+// and the increment is read-modify-write (not atomic), so this is a coarse
+// abuse guard — fine layered on top of the session + roster gate, not an exact
+// limiter. `now` is injectable for tests.
+export interface RateResult {
+  allowed: boolean;
+  count: number;
+}
+
+export async function bumpRateCounter(
+  kv: KVNamespace,
+  key: string,
+  limit: number,
+  windowSec: number,
+  now: number = Date.now(),
+): Promise<RateResult> {
+  const cur = await kv.get<{ n: number; resetAt: number }>(key, "json");
+  let n = 1;
+  let resetAt = now + windowSec * 1000;
+  if (cur && typeof cur.resetAt === "number" && cur.resetAt > now) {
+    n = (typeof cur.n === "number" ? cur.n : 0) + 1;
+    resetAt = cur.resetAt;
+  }
+  await kv.put(key, JSON.stringify({ n, resetAt }), { expirationTtl: windowSec });
+  return { allowed: n <= limit, count: n };
+}
