@@ -20,6 +20,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
 import { issue, verify, type IssuerScope, type TokenPayload } from "../lib/tokens";
+import { isIssuerAllowedEndpoint } from "./issuer-acl";
 import { postDiscordResolution } from "./report";
 import {
   endSession,
@@ -38,19 +39,6 @@ import {
 } from "../lib/kv";
 
 export const admin = new Hono<{ Bindings: Env }>();
-
-// Path-scoped issuer-Bearer exceptions. Each endpoint listed here re-verifies
-// the issuer token + checks scope inside its own handler. The middleware just
-// lets the request through gating so the handler can do the real check. All
-// other admin paths stay admin-only.
-function isIssuerAllowedEndpoint(path: string, method: string): boolean {
-  if (path === "/admin/tokens/issue" && method === "POST") return true;
-  // #167 — issuer-role tokens with can_start_session scope may start/end
-  // their scoped cohort's session without admin Basic auth.
-  if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/session$/.test(path)) return true;
-  if (method === "DELETE" && /^\/admin\/cohorts\/[^/]+\/session$/.test(path)) return true;
-  return false;
-}
 
 admin.use("*", async (c, next) => {
   // Cloudflare Access injects this header for authenticated requests.
@@ -274,6 +262,15 @@ admin.get("/tokens/revoked", async (c) => {
 
 admin.post("/cohorts/:id/roster", async (c) => {
   const id = c.req.param("id");
+
+  // #191 — instructor self-service. If the request came via an issuer Bearer
+  // (no CF Access, no admin Basic), it must be scoped to THIS cohort with
+  // can_start_session. Roster isn't profile-specific, so requireProfileId=null.
+  // Returns null when an admin/CF path was used (no extra check); a Response on
+  // rejection; scope+payload when an issuer was admitted for this cohort.
+  const issuerCheck = await authorizeIssuerForSession(c, id, null);
+  if (issuerCheck instanceof Response) return issuerCheck;
+
   const body = await c.req.json<{ users?: string[] }>().catch(() => ({} as { users?: string[] }));
   const users = body.users;
   if (!Array.isArray(users)) return c.json({ error: "users must be array" }, 400);

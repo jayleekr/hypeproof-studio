@@ -1476,6 +1476,30 @@ async function readStreamText(stream) {
   console.log("✓ issuer-role tokens: issueIssuer round-trip + scopes preserved + empty-scope reject");
 }
 
+// §5c-acl — issuer-Bearer admin allow-list (#167 session + #191 roster).
+// Routing predicate only; the handlers still re-verify token + cohort scope.
+{
+  const { isIssuerAllowedEndpoint } = await import("../src/routes/issuer-acl.ts");
+
+  // #191 — roster set is now reachable by a scoped issuer Bearer
+  assert.equal(isIssuerAllowedEndpoint("/admin/cohorts/boah-dental-2026-a/roster", "POST"), true,
+    "#191: POST roster admitted for issuer");
+  // …only POST. roster has no DELETE/GET issuer path.
+  assert.equal(isIssuerAllowedEndpoint("/admin/cohorts/x/roster", "DELETE"), false, "DELETE roster not allowed");
+  assert.equal(isIssuerAllowedEndpoint("/admin/cohorts/x/roster", "GET"), false, "GET roster not allowed");
+  // #167 — existing session entries still hold
+  assert.equal(isIssuerAllowedEndpoint("/admin/cohorts/x/session", "POST"), true, "POST session allowed");
+  assert.equal(isIssuerAllowedEndpoint("/admin/cohorts/x/session", "DELETE"), true, "DELETE session allowed");
+  assert.equal(isIssuerAllowedEndpoint("/admin/tokens/issue", "POST"), true, "POST tokens/issue allowed");
+  // Everything else stays admin-only — no privilege creep
+  assert.equal(isIssuerAllowedEndpoint("/admin/cohorts", "POST"), false, "cohort create stays admin-only");
+  assert.equal(isIssuerAllowedEndpoint("/admin/cohorts/x", "GET"), false, "cohort detail stays admin-only");
+  assert.equal(isIssuerAllowedEndpoint("/admin/cohorts/x/roster/extra", "POST"), false, "anchored regex: no suffix match");
+  assert.equal(isIssuerAllowedEndpoint("/admin/tokens/revoke", "POST"), false, "revoke stays admin-only");
+
+  console.log("✓ issuer-acl: #191 roster POST admitted; session/issue intact; no other endpoint leaks");
+}
+
 // §5b — cohort kill-switch helpers (#47).
 {
   const { pauseCohort, unpauseCohort, getCohortPause } = await import("../src/lib/kv.ts");
