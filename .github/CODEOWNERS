@@ -1,0 +1,7 @@
+# HypeProof Studio ownership.
+* @jayleekr @JeHyeong2
+
+# Build/release surfaces are high-blast-radius.
+/.github/workflows/ @jayleekr @JeHyeong2
+/scripts/ @jayleekr @JeHyeong2
+/worker/ @jayleekr @JeHyeong2
