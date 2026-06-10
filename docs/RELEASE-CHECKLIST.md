@@ -27,7 +27,12 @@ Use this before any release-cutting action. Source of truth for Phase 7 decision
 - [ ] Zip Mac .app: `cd vscodium-base/VSCode-darwin-arm64 && zip -ry ../../dist/HypeProof-Studio-darwin-arm64.zip "HypeProof Studio.app"`
 - [ ] Create GitHub Release v0.1.0:
   - Attach: `HypeProof-Studio-darwin-arm64.zip`, `HypeProof Studio Setup *.exe`, `HypeProof Studio-x64.zip`
-  - Body: copy from RELEASE-NOTES below
+  - Body: copy and complete `docs/RELEASE-NOTES-template.md`
+  - Body must include: summary, highlights, install/update guidance, asset list,
+    verification run links, mirror status, production deploy status, known notes,
+    and changelog links.
+- [ ] Mirror release body is installer-facing, not a verbatim copy of the main
+      repo engineering release notes.
 - [ ] Verify one-line installers resolve to the new release (test from a fresh shell)
 
 ## Endpoint / config change → re-cut

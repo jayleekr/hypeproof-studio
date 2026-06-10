@@ -267,7 +267,7 @@ apply in every worktree. Keep worktree dirs under `.claude/worktrees/`
   `worker/.dev.vars`(시크릿).
 - 스킬은 `/skill-creator`로만 만들고 고침(`.claude/skills/skill-creator`).
 - 팀: [CONTRIBUTORS.md](./CONTRIBUTORS.md) · 페이즈/게이트: [METAPLAN.md](./METAPLAN.md)
-  · 제품 철학: [docs/essence-v0.1.md](./docs/essence-v0.1.md)
+  · 제품 철학: [docs/seven-assets.md](./docs/seven-assets.md)
 
 <details><summary>English</summary>
 
@@ -280,5 +280,5 @@ apply in every worktree. Keep worktree dirs under `.claude/worktrees/`
 - Skills are created/edited only via `/skill-creator`.
 - Team: [CONTRIBUTORS.md](./CONTRIBUTORS.md) · phases/gates:
   [METAPLAN.md](./METAPLAN.md) · philosophy:
-  [docs/essence-v0.1.md](./docs/essence-v0.1.md)
+  [docs/seven-assets.md](./docs/seven-assets.md)
 </details>
