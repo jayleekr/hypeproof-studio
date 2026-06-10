@@ -4,8 +4,8 @@ product: studio
 doc_type: release
 status: canonical
 owner: core
-version: 0.1.4
-last_reviewed: 2026-05-22
+version: 0.1.5
+last_reviewed: 2026-06-04
 audience: release owners
 source_paths:
   - scripts/build-all.sh
@@ -21,12 +21,16 @@ quality_gates:
 
 ## Version Source
 
-The product version comes from `extensions/hypeproof-chat/package.json`. Member
-docs may have a separate portal version, but Studio behavior, release notes, and
-binary packaging must reference the product version. A version bump must update
-release notes, the release checklist, and any member-facing docs that mention
-the installable build. The docs harness checks that `docs/dev/*` frontmatter
-matches the package version.
+Tagged releases are versioned from the git tag. CI sets `HPS_VERSION` from a
+`v*` tag, and `scripts/resolve-version.sh` stamps that value into
+`product.json`, `Info.plist`, and the bundled `hypeproof-chat` extension. This
+tag-driven value is canonical for shipped binaries, release notes, installers,
+and operator announcements.
+
+For untagged local/dev builds, `scripts/resolve-version.sh` falls back to
+`extensions/hypeproof-chat/package.json`. The docs harness also uses that
+package version as its local fallback, so `docs/dev/*` frontmatter should track
+the package version until a tagged release supplies `HPS_VERSION`.
 
 ## Build And Publish
 

@@ -5,8 +5,8 @@
 #
 #   1. Label `solver:ready` is added to an issue → Claude takes the issue
 #      and tries to produce a PR.
-#   2. Anyone mentions @claude in an issue or PR comment → Claude responds
-#      in-thread or, if the comment requests changes, opens a fix PR.
+#   2. A collaborator with write/maintain/admin permission mentions @claude in
+#      an issue or PR comment → Claude responds in-thread or opens a fix PR.
 #
 # Prerequisites (one-time, by jayleekr):
 #   - Install the Claude GitHub App: https://github.com/apps/claude
@@ -40,13 +40,12 @@ on:
     types: [created]
 
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  actions: read
+  contents: read
+  pull-requests: read
+  issues: read
 
 jobs:
-  solve:
+  authorize:
     if: |
       github.event.sender.type != 'Bot' && (
         (github.event_name == 'issues' && github.event.label.name == 'solver:ready') ||
@@ -54,7 +53,38 @@ jobs:
         (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
       )
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      allowed: ${{ steps.permission.outputs.allowed }}
+    steps:
+      - name: Require collaborator write permission
+        id: permission
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const username = context.payload.sender.login;
+            const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username,
+            });
+            const allowed = ["admin", "maintain", "write"].includes(data.permission);
+            core.info(`${username} permission=${data.permission}; allowed=${allowed}`);
+            core.setOutput("allowed", String(allowed));
+
+  solve:
+    needs: authorize
+    if: needs.authorize.outputs.allowed == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
         with:

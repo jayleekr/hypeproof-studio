@@ -4,7 +4,7 @@ product: studio
 doc_type: architecture
 status: canonical
 owner: core
-version: 0.1.4
+version: 0.1.5
 last_reviewed: 2026-05-22
 audience: maintainers
 source_paths:

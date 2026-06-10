@@ -14,9 +14,13 @@ hdr(){ printf '\n\033[1m%s\033[0m\n' "$1"; }
 [ "$(uname -s)" = "Darwin" ] || { echo "Local dev is macOS-only. On Win/Linux use the web issue forms (see DEV-GUIDE.md)."; exit 1; }
 
 hdr "1. Toolchain"
-command -v node >/dev/null && ok "node $(node -v)" || todo "install Node 22.22.1: brew install nvm && nvm install 22.22.1"
+node --version 2>/dev/null | grep -q '^v22\.22\.1' && ok "node $(node -v)" || todo "install Node 22.22.1: brew install nvm && nvm install 22.22.1"
 command -v gh >/dev/null && ok "gh present" || todo "install gh: brew install gh"
-command -v jq >/dev/null && ok "jq present" || todo "brew install jq imagemagick librsvg"
+command -v jq >/dev/null && ok "jq present" || todo "brew install jq"
+command -v gsed >/dev/null && command -v icns2png >/dev/null && command -v icotool >/dev/null && command -v composite >/dev/null && command -v rsvg-convert >/dev/null \
+  && ok "build icon tools present" \
+  || todo "install build/icon deps: brew install gnu-sed libicns icoutils imagemagick librsvg"
+command -v cargo >/dev/null && command -v rustc >/dev/null && ok "rust toolchain present" || todo "install rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh"
 gh auth status >/dev/null 2>&1 && ok "gh authenticated" || todo "gh auth login   (needs 'repo' scope)"
 
 hdr "2. Submodule"

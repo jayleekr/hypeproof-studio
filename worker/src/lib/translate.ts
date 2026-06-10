@@ -7,6 +7,8 @@
 import { modelIdFor, type Profile, type ModelAlias } from "../profiles/types.ts";
 import type { LLMProvider } from "../env.ts";
 import { getSkeletonsForTier } from "../skeletons/index.ts";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import previewEnvContractMd from "../prompts/_preview-env-contract.md";
 import { resolveSkills } from "../skills/index.ts";
 
 // A polished single-file game (gradient bg, 3 states, score, juice) plus the
@@ -107,18 +109,24 @@ function filterMessages(body: OpenAIRequest): Array<{ role: "user" | "assistant"
 }
 
 /**
- * The cached/static system prefix = profile system prompt + bundled skills
- * (#168 M1) + the tier's skeleton library. Identical text for every user in
- * a cohort, so prompt caching kicks in across the workshop.
+ * The cached/static system prefix = profile system prompt + preview-env
+ * contract + bundled skills (#168 M1) + the tier's skeleton library. Identical
+ * text for every user in a cohort, so prompt caching kicks in across the
+ * workshop.
  *
- * Skills order between system_prompt and skeleton library is deliberate: the
- * skill text instructs *behavior* (how to coach), the skeleton library is the
- * raw material the behavior acts on.
+ * Order is deliberate:
+ *  1. system_prompt — cohort tone / coaching behavior
+ *  2. preview-env contract — technical invariants of the Studio iframe
+ *     (sandbox + inherited CSP). Same for every cohort, so live in one file
+ *     and injected here, not duplicated in every prompts/<cohort>.md.
+ *  3. skills — behavioral how-to (e.g., how to coach)
+ *  4. skeleton library — raw HTML templates the behavior fills in
  */
 function buildCachedPrefix(profile: Profile): string {
   const skillsMd = resolveSkills(profile.skills);
   const sections = [
     profile.system_prompt,
+    previewEnvContractMd as unknown as string,
     skillsMd,
     buildSkeletonLibrary(profile),
   ].filter((s) => s && s.length > 0);

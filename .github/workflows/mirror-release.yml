@@ -1,0 +1,135 @@
+name: mirror-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to mirror, e.g. v0.1.12"
+        required: true
+      dry_run:
+        description: "List operations without writing to the mirror repo"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mirror-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_REPO: ${{ github.repository }}
+      TARGET_REPO: jayleekr/hypeproof-studio-releases
+      TAG: ${{ inputs.tag }}
+      DRY_RUN: ${{ inputs.dry_run }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      MIRROR_RELEASE_PAT: ${{ secrets.MIRROR_RELEASE_PAT }}
+    steps:
+      - name: Inspect source release
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$SOURCE_REPO" --json tagName,name,body,assets,url > source-release.json
+          jq '{tagName, name, url, assets: [.assets[].name]}' source-release.json
+          asset_count="$(jq '.assets | length' source-release.json)"
+          [[ "$asset_count" -gt 0 ]] || { echo "::error::source release has no assets"; exit 1; }
+
+      - name: Dry-run summary
+        if: inputs.dry_run
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Would mirror $SOURCE_REPO@$TAG to $TARGET_REPO@$TAG"
+          jq -r '.assets[].name | "  - " + .' source-release.json
+
+      - name: Mirror assets
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          [[ -n "${GH_TOKEN:-}" ]] || { echo "::error::MIRROR_RELEASE_PAT is required for real mirror writes"; exit 1; }
+          mkdir -p dist
+          # Use the default token for source download, then the mirror PAT for target writes.
+          GITHUB_TOKEN_SOURCE="${{ secrets.GITHUB_TOKEN }}"
+          GH_TOKEN="$GITHUB_TOKEN_SOURCE" gh release download "$TAG" --repo "$SOURCE_REPO" --dir dist
+          ls -la dist
+          cat > mirror-release-notes.md <<EOF
+          ## HypeProof Studio $TAG
+
+          This is the public installer/update mirror for HypeProof Studio. Use
+          this page when installing the app or checking that the latest workshop
+          build is available.
+
+          ## Install
+
+          ### macOS
+
+          Recommended one-line install:
+
+          \`\`\`bash
+          curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-mac.sh | bash
+          \`\`\`
+
+          Manual download:
+
+          - \`HypeProof-Studio-darwin-arm64.zip\`
+
+          ### Windows
+
+          Recommended PowerShell install:
+
+          \`\`\`powershell
+          iwr -useb https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-win.ps1 | iex
+          \`\`\`
+
+          Manual downloads:
+
+          - \`HypeProof.StudioUserSetup-x64-*.exe\` — per-user installer
+          - \`HypeProof.StudioSetup-x64-*.exe\` — machine installer
+          - \`HypeProof.Studio-win32-x64-*.zip\` — portable zip
+
+          ## Assets
+          EOF
+          sed -i 's/^          //' mirror-release-notes.md
+          for asset in dist/*; do
+            printf -- "- \`%s\`\n" "$(basename "$asset")" >> mirror-release-notes.md
+          done
+          cat >> mirror-release-notes.md <<EOF
+
+          ## Notes
+
+          - The build is unsigned. macOS Gatekeeper or Windows SmartScreen may
+            show the usual warning for downloaded apps.
+          - Workshop/API access may still require the token provided by the
+            operator.
+          - If an older troubleshooting step set \`hypeproofChat.proxyUrl\`,
+            clear that override after updating so the app uses the shipped
+            default endpoint.
+
+          ## Verification
+
+          - Main release: https://github.com/$SOURCE_REPO/releases/tag/$TAG
+          - Source assets mirrored from: $SOURCE_REPO@$TAG
+          EOF
+          sed -i '/^          /s/^          //' mirror-release-notes.md
+          name="$(jq -r '.name // empty' source-release.json)"
+          gh release create "$TAG" --repo "$TARGET_REPO" --title "${name:-HypeProof Studio $TAG}" --notes-file mirror-release-notes.md 2>/dev/null || true
+          gh release edit "$TAG" --repo "$TARGET_REPO" --notes-file mirror-release-notes.md
+          gh release upload "$TAG" --repo "$TARGET_REPO" dist/* --clobber
+
+      - name: Verify mirror
+        if: ${{ !inputs.dry_run }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.MIRROR_RELEASE_PAT }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --repo "$TARGET_REPO" --json tagName,assets,url \
+            | jq '{tagName, url, assets: [.assets[].name]}'

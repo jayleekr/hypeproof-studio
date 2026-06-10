@@ -30,7 +30,7 @@ Done via jq in `prepare_vscode.sh` (not by editing `product.json` directly — t
 
 After build, inspect:
 
-1. App display name — `mdls -name kMDItemDisplayName "VSCode-darwin-arm64/HypeProof Studio.app"`
+1. App display name — `defaults read "VSCode-darwin-arm64/HypeProof Studio.app/Contents/Info" CFBundleDisplayName`
 2. Bundle ID — `defaults read "VSCode-darwin-arm64/HypeProof Studio.app/Contents/Info.plist" CFBundleIdentifier` → `ai.hypeproof.studio`
 3. Data folder — launch app, confirm `~/Library/Application Support/HypeProof-Studio/` created (not `Code/` or `VSCodium/`)
 4. Search for residual strings — `grep -ri "VSCodium\|codium" "VSCode-darwin-arm64/HypeProof Studio.app/Contents/Resources" | grep -v -i "license\|notice\|attribution"`

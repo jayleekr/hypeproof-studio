@@ -7,7 +7,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { bearer, verify, TokenError } from "../lib/tokens.ts";
 import { getProfile } from "../profiles/index.ts";
-import { getActiveSession, getRoster, isSessionLive } from "../lib/kv.ts";
+import { getActiveSession, getRoster, isSessionLive, bumpRateCounter } from "../lib/kv.ts";
 import {
   createTrial,
   endTrial,
@@ -126,6 +126,10 @@ function numOrUndef(v: unknown): number | undefined {
 }
 
 const BODY_MAX = 8 * 1024; // 8KB cap on event JSON (events are tiny by design)
+// F#6 (#33): coarse per-user event cap. Generous — trace events are tiny and
+// can burst during active work; this only stops a runaway loop / abuse.
+const TRACE_RATE_LIMIT = 600;
+const TRACE_RATE_WINDOW_SEC = 60;
 
 trace.post("/event", async (c) => {
   const env = c.env;
@@ -170,7 +174,28 @@ trace.post("/event", async (c) => {
     return c.json({ error: { message: "not in roster", type: "not_in_roster" } }, 403);
   }
 
-  // 6. Body size cap + parse
+  // 5b. F#6 (#33): coarse per-user rate limit on top of the session+roster gate.
+  const rl = await bumpRateCounter(
+    env.HPS_KV,
+    `rate:trace:${payload.c}:${payload.u}`,
+    TRACE_RATE_LIMIT,
+    TRACE_RATE_WINDOW_SEC,
+  );
+  if (!rl.allowed) {
+    return c.json({ error: { message: "too many trace events", type: "rate_limit" } }, 429);
+  }
+
+  // 6. Body size cap + parse. F#7 (#33): early-reject via Content-Length
+  // BEFORE reading the whole body into memory — a cheap guard against
+  // oversized payloads. The post-read length check below stays as the
+  // authoritative cap for when the header is absent or understated (chunked).
+  const declaredLen = Number(c.req.header("content-length"));
+  if (Number.isFinite(declaredLen) && declaredLen > BODY_MAX) {
+    return c.json(
+      { error: { message: `event body exceeds ${BODY_MAX} bytes`, type: "request" } },
+      413,
+    );
+  }
   const raw = await c.req.text();
   if (raw.length > BODY_MAX) {
     return c.json(

@@ -1,0 +1,65 @@
+name: studio-pr-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
+      - 'extensions/hypeproof-chat/**'
+      - '.github/workflows/pr-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  worker-test:
+    name: worker / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Install worker deps
+        working-directory: worker
+        run: npm ci
+      - name: Run worker tests
+        working-directory: worker
+        run: npm test
+
+  worker-typecheck:
+    name: worker / typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - name: Install worker deps
+        working-directory: worker
+        run: npm ci
+      - name: Typecheck worker
+        working-directory: worker
+        run: npm run typecheck
+
+  extension-typecheck:
+    name: extension / typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: extensions/hypeproof-chat/package-lock.json
+      - name: Install extension deps
+        working-directory: extensions/hypeproof-chat
+        run: npm ci
+      - name: Typecheck extension
+        working-directory: extensions/hypeproof-chat
+        run: npm run typecheck

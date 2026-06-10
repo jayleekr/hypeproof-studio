@@ -42,9 +42,9 @@ wrong → `ux`; something broke → `bug`.
 Ask the contributor (conversationally, in their language) for the type-specific
 fields. Mirror the web forms in `.github/ISSUE_TEMPLATE/`:
 
-- **feature**: problem (not solution) · proposed capability · which of the 16
-  Essences it serves (challenge "serves none" answers — that is likely noise,
-  see `docs/essence-v0.1.md`).
+- **feature**: problem (not solution) · proposed capability · which 7 AI
+  Native Asset(s) it serves (challenge "serves none" answers — that is likely
+  noise, see `docs/seven-assets.md`).
 - **ux**: which UI surface · what happens now · what would be better + why it
   helps the learner.
 - **bug**: what happened · what was expected · numbered repro steps (capture the
