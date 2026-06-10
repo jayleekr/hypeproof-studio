@@ -1,13 +1,49 @@
-# Placeholder — implemented in Phase 6.
-# Goal: on tag push (v*), build Mac arm64 + Windows installers from the
-# pinned submodule commit, sign, and attach to a GitHub Release.
+# Release pipeline readiness check.
+#
+# The actual tag build is split by platform:
+# - build-mac.yml: v* tag -> Mac arm64 artifact -> GitHub Release upload
+# - build-windows.yml: v* tag -> Windows x64 artifact -> GitHub Release upload
+# - mirror-release.yml: explicit dispatch -> mirror source release assets to
+#   jayleekr/hypeproof-studio-releases after operator dry-run
+#
+# This dispatch-only workflow prevents the old Phase 6 TODO placeholder from
+# drifting back in and gives operators a cheap way to verify the release wiring
+# before cutting a tag.
+
 name: release
+
 on:
   workflow_dispatch:
-  # push:
-  #   tags: ['v*']
+
+permissions:
+  contents: read
+
 jobs:
-  noop:
+  readiness:
     runs-on: ubuntu-latest
     steps:
-      - run: echo "TODO Phase 6 — Mac arm64 (local), Win (build-windows.yml), sign + attach"
+      - uses: actions/checkout@v4
+
+      - name: Verify release workflow wiring
+        run: |
+          set -euo pipefail
+
+          grep -q 'tags:' .github/workflows/build-mac.yml
+          grep -Fq '"v*"' .github/workflows/build-mac.yml
+          grep -q 'Publish to GitHub Release' .github/workflows/build-mac.yml
+
+          grep -q 'tags:' .github/workflows/build-windows.yml
+          grep -Fq '"v*"' .github/workflows/build-windows.yml
+          grep -q 'Publish to GitHub Release' .github/workflows/build-windows.yml
+
+          grep -q 'workflow_dispatch:' .github/workflows/mirror-release.yml
+          grep -q 'MIRROR_RELEASE_PAT' .github/workflows/mirror-release.yml
+
+      - name: Summary
+        run: |
+          {
+            echo "## Release readiness"
+            echo "- build-mac.yml has v* tag trigger and GitHub Release upload"
+            echo "- build-windows.yml has v* tag trigger and GitHub Release upload"
+            echo "- mirror-release.yml remains explicit dispatch with PAT-gated writes"
+          } >> "$GITHUB_STEP_SUMMARY"

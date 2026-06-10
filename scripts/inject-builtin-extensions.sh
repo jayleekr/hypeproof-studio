@@ -50,15 +50,24 @@ mkdir -p "$EXT_DST/webview-ui"
 cp -r "$EXT_SRC/webview-ui/dist" "$EXT_DST/webview-ui/dist"
 
 # 2b. Stamp the bundled extension's version to the release version. The in-app
-# updater's currentBundleVersion() reads THIS package.json to decide whether an
-# update is available. If it stays at the source dev version while releases are
-# tagged ahead, every install reports out-of-date forever (#206). Stamp the
-# copy only — the source package.json stays the dev baseline.
+# updater's currentBundleVersion() reads this package.json to decide whether an
+# update is available; if it stays at the dev version while releases are tagged
+# ahead, every install reports out-of-date forever (#206).
+#
+# CRITICAL: stamp the SOURCE package.json, not just the vscode/ copy. The fork's
+# prepare_vscode.sh "HypeProof Studio overrides" hook re-injects from
+# $EXT_SRC during build.sh — AFTER run-build.sh's `git clean -fdx` wipes
+# vscode/extensions/ — by copying $EXT_SRC/package.json verbatim. So the SOURCE
+# version is what actually ships. run-build's reset only touches vscode/, so a
+# source stamp set here (an explicit step before run-build) survives to the
+# hook. We stamp the copy too for standalone/F5 correctness.
 RESOLVED_VERSION="$(bash "$REPO_ROOT/scripts/resolve-version.sh")"
-tmp_pkg=$(mktemp)
-jq --arg v "$RESOLVED_VERSION" '.version = $v' "$EXT_DST/package.json" > "$tmp_pkg"
-mv "$tmp_pkg" "$EXT_DST/package.json"
-echo "Stamped bundled extension version → $RESOLVED_VERSION"
+for pkg in "$EXT_SRC/package.json" "$EXT_DST/package.json"; do
+  tmp_pkg=$(mktemp)
+  jq --arg v "$RESOLVED_VERSION" '.version = $v' "$pkg" > "$tmp_pkg"
+  mv "$tmp_pkg" "$pkg"
+done
+echo "Stamped extension version (source + bundled copy) → $RESOLVED_VERSION"
 
 # 3. NOTE: do NOT add to product.json.builtInExtensions. That list triggers
 # a marketplace/GH download at build time. Extensions placed in extensions/

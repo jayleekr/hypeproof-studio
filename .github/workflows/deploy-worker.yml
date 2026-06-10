@@ -1,0 +1,71 @@
+name: deploy-worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or SHA to deploy"
+        required: false
+        default: "main"
+      dry_run:
+        description: "Run tests/typecheck but skip wrangler deploy"
+        type: boolean
+        default: true
+      verify_prod:
+        description: "Run scripts/verify-prod.sh after deploy"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-worker-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      HPS_ADMIN_PASSWORD: ${{ secrets.HPS_ADMIN_PASSWORD }}
+      PROD: https://api.hypeproof-ai.xyz
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+
+      - name: Install worker dependencies
+        working-directory: worker
+        run: npm ci
+
+      - name: Worker smoke tests
+        working-directory: worker
+        run: npm test
+
+      - name: Worker typecheck
+        working-directory: worker
+        run: npm run typecheck
+
+      - name: Dry-run stop
+        if: inputs.dry_run
+        run: echo "dry_run=true; skipping wrangler deploy"
+
+      - name: Deploy Worker
+        if: ${{ !inputs.dry_run }}
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || { echo "::error::CLOUDFLARE_API_TOKEN is required"; exit 1; }
+          npx wrangler deploy
+
+      - name: Verify production
+        if: ${{ !inputs.dry_run && inputs.verify_prod }}
+        run: bash scripts/verify-prod.sh

@@ -50,6 +50,10 @@ jobs:
       DISABLE_UPDATE: "yes"
       VSCODE_PUBLISH_COUNTER: 0
       NODE_OPTIONS: "--max-old-space-size=12288"
+      # GitHub-hosted macos-15 arm64 runners currently expose about 40 GB free
+      # after checkout + source prep. Full local builds still use the stricter
+      # scripts/check-env.sh default.
+      HPS_MIN_FREE_GB: 35
 
     steps:
       - name: Checkout
@@ -62,18 +66,30 @@ jobs:
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "22.22.1"
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install build deps (libicns / icoutils / gnu-sed / jq)
+      - name: Free macOS runner disk
+        shell: bash
         run: |
-          brew install libicns icoutils gnu-sed jq || true
+          set -euo pipefail
+          df -h /
+          sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes/* || true
+          sudo rm -rf "$HOME/Library/Android" || true
+          brew cleanup -s || true
+          df -h /
+
+      - name: Install build deps (libicns / icoutils / gnu-sed / jq / imagemagick / librsvg)
+        run: |
+          brew install libicns icoutils gnu-sed jq imagemagick librsvg || true
           icns2png --version || true
           gsed --version | head -1 || true
+          composite -version | head -1 || true
+          rsvg-convert --version || true
 
       - name: Provision build env (from gitignored .env's committed example)
         run: cp hypeproof-studio.env.example hypeproof-studio.env
@@ -120,6 +136,13 @@ jobs:
           else
             echo "Untagged build → HPS_VERSION unset, falling back to extension package.json"
           fi
+          # Real commit for product.json.commit. version.sh would otherwise hash
+          # an empty RELEASE_VERSION to the adc83b19… placeholder (#206). Set it
+          # at the job level so it reaches the build regardless of whether the
+          # build step routes through run-build.sh (Mac) or sources version.sh
+          # directly (Windows).
+          echo "BUILD_SOURCEVERSION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_SOURCEVERSION set to $(git rev-parse HEAD)"
 
       - name: Install brand assets
         shell: bash

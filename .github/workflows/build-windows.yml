@@ -11,6 +11,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write # create/upload the GitHub Release on tag builds
+
 jobs:
   build-win:
     runs-on: windows-2022
@@ -123,6 +126,11 @@ jobs:
           else
             echo "Untagged build → HPS_VERSION unset, falling back to extension package.json"
           fi
+          # Real commit for product.json.commit. This Windows job sources
+          # version.sh directly (not run-build.sh), so without this it would hash
+          # an empty RELEASE_VERSION to the adc83b19… placeholder (#206).
+          echo "BUILD_SOURCEVERSION=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          echo "BUILD_SOURCEVERSION set to $(git rev-parse HEAD)"
 
       - name: Install brand assets
         shell: bash
@@ -282,3 +290,23 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish to GitHub Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          shopt -s nullglob
+          assets=(dist/*.exe dist/*.zip)
+          if [ "${#assets[@]}" -eq 0 ]; then
+            echo "::error::No Windows release assets found in dist/"
+            exit 1
+          fi
+          # build-mac.yml may have created the release for the same tag;
+          # create-if-absent then clobber-upload is race-safe across both jobs.
+          gh release create "$TAG" --title "HypeProof Studio $TAG" \
+            --generate-notes --verify-tag 2>/dev/null || true
+          gh release upload "$TAG" "${assets[@]}" --clobber

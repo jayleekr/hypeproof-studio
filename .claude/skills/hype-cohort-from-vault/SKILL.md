@@ -1,6 +1,6 @@
 ---
 name: hype-cohort-from-vault
-description: Translate a curriculum doc from the HypeProof curriculum vault (JinyongShin/hypeproof_kids_edu) into a worker cohort profile + system prompt — pick the file, map curriculum behaviors to 16-essence focus, rewrite ts profile + md prompt, run typecheck + smoke, hand off to /hype-open-pr. Use when a new vault curriculum (or a vN→vN+1 update) needs to land on the live cohort.
+description: Translate a curriculum doc from the HypeProof curriculum vault (JinyongShin/hypeproof_kids_edu) into a worker cohort profile + system prompt — pick the file, map curriculum behaviors to 7 AI Native Assets focus, rewrite ts profile + md prompt, run typecheck + smoke, hand off to /hype-open-pr. Use when a new vault curriculum (or a vN→vN+1 update) needs to land on the live cohort.
 user_invocable: true
 triggers:
   - "hype-cohort-from-vault"
@@ -22,8 +22,8 @@ skill is the deterministic bridge between the two — read the vault doc,
 encode the curriculum's *behaviors* (not its prose) into the profile, ship a
 PR.
 
-Source of truth precedence: **vault wins on content**, **`docs/essence-v0.1.md`
-wins on essence numbering**, **`worker/src/profiles/types.ts` wins on schema**.
+Source of truth precedence: **vault wins on content**, **`docs/seven-assets.md`
+wins on asset definitions**, **`worker/src/profiles/types.ts` wins on schema**.
 
 ## Preconditions
 
@@ -58,32 +58,35 @@ Read it fully. Identify:
 - **Game / pedagogical devices** (e.g. "원장님을 이겨라", PASS/더 확인/위험,
   HYROX framing). These become coach-mode in the prompt.
 - **Behavioral axes** (e.g. 7 AI Native Assets, 4원칙). Each axis maps to one
-  or more essence numbers — see §3.
+  or more AI Native Assets — see §3.
 - **Outputs / artifacts** (what gets saved at session end — drives
   `welcome.example_prompts` + `ux.suggestions.initial` shape).
 - **Audience / role context** (e.g. dental hygienist vs grade-3 kid) —
   drives tone, hint copy, weak-chip examples.
 
-### 3. Map behavioral axes → essence numbers (the only judgment call)
-Open `docs/essence-v0.1.md`. For each behavioral axis in the curriculum,
-pick the single best-fit essence (1..16). Document the mapping in a comment
-block at the top of the .ts file:
+### 3. Map behavioral axes → AI Native Assets (the judgment call)
+Open `docs/seven-assets.md`. For each behavioral axis in the curriculum,
+pick the best-fit asset key(s). Document the mapping in a comment block at the
+top of the .ts file:
 
 ```ts
-// 7 AI Native Assets → Essence mapping (vs docs/essence-v0.1.md):
-//   Intent Clarity      → Essence 7  (질문으로 공터 만들기)
-//   Context Design      → Essence 2  (전심전력)
+// 7 AI Native Assets focus:
+//   intent_clarity      → user must state the decision / object before asking AI
+//   context_design      → user must provide role, audience, and constraints
 //   ...
 ```
 
 Rules:
-- One essence per axis (not many-to-many). Pick the *primary* fit.
-- If two axes both map to the same essence, that's a signal to revisit —
-  either the axes overlap, or you're forcing a fit.
-- `essences_focus` array = the union of mapped numbers, sorted ascending.
+- Prefer one primary asset per axis; use multiple only when the curriculum
+  explicitly trains more than one behavior in the same block.
+- If every axis maps to the same asset, revisit the mapping; the curriculum may
+  need more precise behavioral labels.
+- `assets_focus` array = the union of mapped asset keys in canonical order:
+  `taste`, `intent_clarity`, `context_design`, `verification_reflex`,
+  `delegation_judgment`, `iteration_reflex`, `ownership`.
 
-Always show the proposed mapping to the user before writing it — a wrong
-essence number propagates into UX captions.
+Always show the proposed mapping to the user before writing it — a wrong asset
+mapping propagates into UX captions and measurement.
 
 ### 4. Rewrite `worker/src/prompts/<cohort>.md` (the system prompt)
 Replace the file entirely. The structure should follow:
@@ -93,8 +96,8 @@ Replace the file entirely. The structure should follow:
 2. **One-line definition** — verbatim from vault, in a blockquote.
 3. **Block flow** — numbered list mirroring the vault's timing blocks. Tell
    the coach to *follow* the pace without naming the blocks like a teacher.
-4. **Behavioral-axis section** — one bullet per axis with: name → essence
-   number+title → one-line behavioral cue.
+4. **Behavioral-axis section** — one bullet per axis with: name → AI Native
+   Asset → one-line behavioral cue.
 5. **운영 원칙** — language (한국어 / English), output-shape guardrails (e.g.
    "AI must not draw clinical conclusions"), source priority, safety
    (file_write scoped to workspace, no shell), success metric.
@@ -112,15 +115,15 @@ Update **only** these fields (the schema is shared — don't change shape):
 - `welcome.greeting_md` — short, ends with the session hook.
 - `welcome.example_prompts` — three or four real-job examples sourced from
   the curriculum's audience-context section.
-- `essences_focus` — sorted list from step 3.
+- `assets_focus` — canonical-order list from step 3.
 - `ux.suggestions.initial` — 3–5 good chips (mirror `example_prompts`'s
   domain) + 1 `weak` chip that illustrates *what bad input looks like* for
-  the headline essence (e.g. Intent Clarity vague → "치과 관련 질문 답해줘").
+  the headline asset (e.g. Intent clarity vague → "치과 관련 질문 답해줘").
   Use `caption` to label the role (위생사/코디/etc.) so the panel renders
   it as audience-targeted.
 - `ux.suggestions.follow_up` — one chip per behavioral axis. `caption`
-  should cite the essence (e.g. "Intent Clarity (E7)") so the participant
-  sees the essence in context.
+  should cite the asset (e.g. "Intent clarity") so the participant sees the
+  learning behavior in context.
 - `ux.hints.short_input.message_md` / `roll_input_button.probe_md` —
   rephrase around the curriculum's central object (e.g. "결정" vs
   "캐릭터·움직임").
@@ -143,9 +146,9 @@ you accidentally touched the privacy bit — revert that field.
 Branch convention: `feat/issue-<N>-<short-slug>` (e.g.
 `feat/issue-77-dental-supersearch-v4`). Commit message body must include:
 - Vault source: `JinyongShin/hypeproof_kids_edu#<PR>` + the doc path.
-- Field-by-field changes (the before/after of `essences_focus`,
+- Field-by-field changes (the before/after of `assets_focus`,
   `example_prompts`, etc. in a small table).
-- `Closes #<N>` if there's an open issue. `Essence: <list>` if chat-panel
+- `Closes #<N>` if there's an open issue. `Assets: <list>` if chat-panel
   UX shifts.
 
 Then invoke `/hype-open-pr` for the PR body.
@@ -158,13 +161,15 @@ close any `ops:` redeploy tracker.
 
 - Vault PR must be **merged** before translation. Don't ship a profile
   rewrite from a draft curriculum — the wording will shift.
-- Never invent essence mappings the curriculum doesn't request. If the
-  vault doc says "7 Assets", produce a 7-essence map; don't pad to 16.
+- Never invent asset mappings the curriculum doesn't request. If the vault doc
+  trains three assets, list those three; don't pad to all seven.
 - Never write the curriculum prose into the profile verbatim. The vault is
   for facilitators; the prompt is for the coach. Translate behaviors, not
   paragraphs.
-- The `essences_focus` array is product-visible (UI captions, analytics
-  filters). Mapping changes are not cosmetic — surface them in the PR body.
+- The `assets_focus` array is product-visible (UI captions, analytics filters).
+  Mapping changes are not cosmetic — surface them in the PR body.
+- Leave `essences_focus` alone unless the compatibility bridge is explicitly in
+  scope for the PR.
 - One cohort per invocation. Two cohorts changing in lockstep is two PRs.
 - Don't bump `version` field unless the schema shape changed (it didn't, in
   a curriculum-only update).

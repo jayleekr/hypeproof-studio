@@ -20,19 +20,60 @@ fi
 
 cd "$REPO_ROOT"
 
-# Source nvm and pin to Node 22
+# Source nvm and pin to Node 22. In CI, actions/setup-node may have already
+# provided the exact runtime without nvm.
 export NVM_DIR="$HOME/.nvm"
 # shellcheck disable=SC1091
 [ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && . "/opt/homebrew/opt/nvm/nvm.sh"
-nvm use 22.22.1 --silent
+if command -v nvm >/dev/null 2>&1; then
+  if ! nvm use 22.22.1 --silent; then
+    echo "[run-build] ERROR: Node 22.22.1 is not installed. Run: nvm install 22.22.1" >&2
+    exit 1
+  fi
+else
+  node_version="$(node --version 2>/dev/null || true)"
+  if [[ "$node_version" != "v22.22.1" ]]; then
+    echo "[run-build] ERROR: nvm is missing and current node is ${node_version:-missing}; need v22.22.1." >&2
+    echo "[run-build] Install with: brew install nvm && nvm install 22.22.1" >&2
+    exit 1
+  fi
+fi
 
 # Source cargo (rust) — needed for native module compilation
 # shellcheck disable=SC1091
 [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
+if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+  echo "[run-build] ERROR: Rust toolchain is missing. Run: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" >&2
+  exit 1
+fi
 
 # Source HPS env vars (APP_NAME, BINARY_NAME, etc.)
+if [[ ! -f ./hypeproof-studio.env ]]; then
+  echo "[run-build] ERROR: hypeproof-studio.env is missing. Create it before starting a build." >&2
+  exit 1
+fi
 # shellcheck disable=SC1091
 . ./hypeproof-studio.env >/dev/null
+
+if ! bash scripts/check-env.sh; then
+  echo "[run-build] ERROR: environment check failed; fix the items above before starting the long build." >&2
+  exit 1
+fi
+
+# Stamp a real commit into product.json. VSCodium's version.sh derives
+# BUILD_SOURCEVERSION = sha1sum(RELEASE_VERSION) when unset — with no
+# RELEASE_VERSION that hashes a newline to the adc83b19… placeholder, which the
+# build then writes to product.json.commit (clobbering apply-product-overrides).
+# Default it to the repo HEAD so the About screen shows a real commit (#206).
+# Only export when we actually have a value — never export set-but-empty, so a
+# git failure leaves it unset and version.sh derives its own value rather than
+# treating "" as an authoritative empty commit.
+if [[ -z "${BUILD_SOURCEVERSION:-}" ]]; then
+  _hps_commit="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || true)"
+  [[ -n "$_hps_commit" ]] && export BUILD_SOURCEVERSION="$_hps_commit"
+  unset _hps_commit
+fi
+echo "  BUILD_SOURCEVERSION=${BUILD_SOURCEVERSION:-<unset — version.sh will derive>}"
 
 # Verify before kicking off the long build
 {

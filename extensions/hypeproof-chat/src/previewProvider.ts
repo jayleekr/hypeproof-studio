@@ -2,25 +2,41 @@ import * as vscode from "vscode";
 import * as path from "node:path";
 import { buildPreviewShellCsp, PREVIEW_IFRAME_SANDBOX } from "./cspBuilder";
 import { sanitizeArtifactEntry, ARTIFACT_FILES, applyPlaceholderDefaults } from "./previewArtifacts";
+import { injectBaseHref, injectInnerCsp } from "./previewHtml";
 
 /**
- * Sandboxed HTML preview for AI-generated webapps.
+ * HTML preview for AI-generated webapps + user-opened .html files.
  *
- * Renders in the EDITOR AREA (a reused WebviewPanel beside the chat sidebar),
- * not in a cramped sidebar view. The "creator cockpit": chat on the left,
- * the running webapp big on the right. The panel is created lazily on the
- * first render and reused for every subsequent render.
+ * Renders in the EDITOR AREA (a reused WebviewPanel beside the chat sidebar).
+ * The HTML lives inside a sandboxed iframe (srcdoc). Threat-model + capability
+ * trade-off (see PREVIEW_IFRAME_SANDBOX comment for the spec details):
+ *  - `allow-same-origin` is OMITTED → opaque origin → no parent-CSP inherit →
+ *    inner-page inline scripts (and therefore click/keyboard handlers) run.
+ *  - Cost: fetch/XHR to workspace assets fails CORS. Static asset loads via
+ *    `<img>/<script src>/<link>` still work via `<base href>` injection.
+ *  - Exfil gate: the inner meta CSP from `injectInnerCsp` (connect/frame/img
+ *    exclude https:), enforced standalone since opaque-origin srcdoc doesn't
+ *    intersect with parent.
+ *  - `localResourceRoots` is the workspace folders ∪ the previewed file's
+ *    parent dir only — webview refuses to serve anything outside that set.
+ *  - Host message handler still routes ONLY `previewReady` +
+ *    `preview_request_action`; the latter only acts on `append_artifact` and
+ *    only after a modal confirm, writing to `workshop-output/` (#155).
  *
- * The HTML runs inside an iframe sandboxed to `allow-scripts` only — no
- * `allow-same-origin`, no network, no `acquireVsCodeApi` access. The iframe
- * can still post messages to its parent (cross-document `postMessage` is
- * allowed regardless of sandbox); the shell forwards `request_action`
- * messages to the host, which surfaces a manual-approve modal (#155).
+ * If you weaken any of those, update test/csp-sandbox.smoke.mjs and
+ * docs/studio-requirements.md REQ-D rows.
  */
+
 export class PreviewProvider {
   private panel: vscode.WebviewPanel | undefined;
   private ready = false;
   private pendingHtml: string | null = null;
+  // For the "preview .html file" path: watched file URI + its parent dir.
+  // On save we re-read and re-render. Cleared when panel disposes or user
+  // previews a different file.
+  private watchedFile: vscode.Uri | undefined;
+  private watchedBase: vscode.Uri | undefined;
+  private saveSubscription: vscode.Disposable | undefined;
   private labels: { title: string; placeholder: string; emoji: string } = {
     title: "🎮 내 게임",
     placeholder: "게임이 여기에 나와요",
@@ -28,6 +44,25 @@ export class PreviewProvider {
   };
 
   constructor(private readonly _context: vscode.ExtensionContext) {}
+
+  /**
+   * Re-render the preview every time `fileUri` is saved. Called by the
+   * `hypeproof-chat.previewActiveFile` command. Calling again with a
+   * different URI swaps the watch target; the previous one stops firing.
+   */
+  watchForReload(fileUri: vscode.Uri): void {
+    this.watchedFile = fileUri;
+    this.watchedBase = vscode.Uri.joinPath(fileUri, "..");
+    if (this.saveSubscription) return; // single subscription, gated on watchedFile
+    this.saveSubscription = vscode.workspace.onDidSaveTextDocument(async (doc) => {
+      if (!this.watchedFile) return;
+      if (doc.uri.fsPath !== this.watchedFile.fsPath) return;
+      try {
+        const buf = await vscode.workspace.fs.readFile(this.watchedFile);
+        await this.show(Buffer.from(buf).toString("utf8"), this.watchedBase);
+      } catch { /* file may have been deleted; ignore */ }
+    });
+  }
 
   /**
    * Update the panel title + placeholder copy for the current cohort tone.
@@ -44,17 +79,40 @@ export class PreviewProvider {
     }
   }
 
-  /** Open (or reuse) the editor-area preview panel and render `html`. */
-  async show(html: string): Promise<void> {
+  /**
+   * Open (or reuse) the editor-area preview panel and render `html`.
+   *
+   * `basePath` is the directory the inner page resolves relative URLs against
+   * (`./pic.png`, `<link href="style.css">`, `fetch('./data.json')`, etc.).
+   * - Pass the file's parent dir for the "preview .html in editor" path.
+   * - For AI-generated chat HTML, omit it → defaults to the first workspace
+   *   folder (matches REQ-D5: game auto-saved at `workspaceFolder/index.html`).
+   * Without a workspace AND without an explicit basePath, the iframe falls
+   * back to `about:srcdoc` and relative paths remain dead (matches old
+   * behavior, just doesn't crash).
+   */
+  async show(html: string, basePath?: vscode.Uri): Promise<void> {
     // Replace any unresolved `%%KEY%%` with sensible defaults (#161). Lets
     // partial LLM responses still render a recognizable V1.
     html = applyPlaceholderDefaults(html);
+    const effectiveBase = basePath ?? vscode.workspace.workspaceFolders?.[0]?.uri;
     if (!this.panel) {
+      // localResourceRoots: union of every workspace folder + basePath. Webview
+      // refuses to serve files outside this allowlist via asWebviewUri.
+      const roots: vscode.Uri[] = [];
+      for (const wf of vscode.workspace.workspaceFolders ?? []) roots.push(wf.uri);
+      if (basePath && !roots.some((r) => r.fsPath === basePath.fsPath)) {
+        roots.push(basePath);
+      }
       this.panel = vscode.window.createWebviewPanel(
         "hypeproofPreview",
         this.labels.title,
         { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-        { enableScripts: true, retainContextWhenHidden: true },
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+          localResourceRoots: roots.length > 0 ? roots : undefined,
+        },
       );
       this.panel.webview.html = this.shellHtml(this.panel.webview);
       this.ready = false;
@@ -73,16 +131,36 @@ export class PreviewProvider {
         this.panel = undefined;
         this.ready = false;
         this.pendingHtml = null;
+        this.watchedFile = undefined;
+        this.watchedBase = undefined;
+        this.saveSubscription?.dispose();
+        this.saveSubscription = undefined;
       });
     } else {
       // Bring the existing panel forward without stealing focus from chat.
       this.panel.reveal(vscode.ViewColumn.Beside, true);
     }
 
+    // Inject `<base href="...">` so relative paths (./pic.png, style.css,
+    // fetch('./data.json')) resolve against the workspace / file dir via
+    // webview URIs. Without a base, iframe srcdoc anchors at about:srcdoc
+    // and every relative ref dies.
+    //
+    // Then inject the inner CSP. With `allow-same-origin` on the iframe
+    // sandbox, srcdoc inherits the shell's strict `script-src 'nonce-XXX'`
+    // (CSP3 §4.2.2), which would block every inline script in AI-generated
+    // games. The inner CSP overrides that with `'unsafe-inline' 'unsafe-eval'`
+    // (needed for game handlers) while keeping `connect-src`/`frame-src`/etc.
+    // off https:* so generated code can't exfil.
+    const baseAware = effectiveBase
+      ? injectBaseHref(html, String(this.panel.webview.asWebviewUri(effectiveBase)))
+      : html;
+    const renderedHtml = injectInnerCsp(baseAware, this.panel.webview.cspSource);
+
     if (this.ready) {
-      this.panel.webview.postMessage({ type: "renderPreview", html });
+      this.panel.webview.postMessage({ type: "renderPreview", html: renderedHtml });
     } else {
-      this.pendingHtml = html;
+      this.pendingHtml = renderedHtml;
     }
   }
 
@@ -155,8 +233,10 @@ export class PreviewProvider {
   }
 
   private shellHtml(webview: vscode.Webview): string {
-    const nonce = Math.random().toString(36).slice(2);
-    const csp = buildPreviewShellCsp({ cspSource: webview.cspSource, nonce });
+    // No nonce: the inner srcdoc inherits this CSP, and a nonce-based shell
+    // policy would (via inheritance) block every inline script in AI-generated
+    // games. See buildPreviewShellCsp comment for the spec rationale.
+    const csp = buildPreviewShellCsp({ cspSource: webview.cspSource });
     return /* html */ `<!doctype html>
 <html>
 <head>
@@ -177,7 +257,7 @@ export class PreviewProvider {
     <div>${this.labels.placeholder}</div>
   </div>
   <iframe id="frame" style="display:none" sandbox="${PREVIEW_IFRAME_SANDBOX}" referrerpolicy="no-referrer"></iframe>
-  <script nonce="${nonce}">
+  <script>
     const vscode = acquireVsCodeApi();
     const frame = document.getElementById("frame");
     const placeholder = document.getElementById("placeholder");

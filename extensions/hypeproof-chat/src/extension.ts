@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { ChatPanelProvider } from "./chatPanelProvider";
+import { AssetStatusBar } from "./assetStatusBar";
 import { labelsForProfile } from "./chatPanelHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
@@ -37,10 +38,12 @@ export async function activate(context: vscode.ExtensionContext) {
   await applyTestBackdoors(context);
 
   const preview = new PreviewProvider(context);
-  const provider = new ChatPanelProvider(context, preview);
+  const assetStatus = new AssetStatusBar();
+  const provider = new ChatPanelProvider(context, preview, assetStatus);
   providerRef = provider;
 
   context.subscriptions.push(
+    assetStatus,
     vscode.window.registerWebviewViewProvider("hypeproof-chat.panel", provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
@@ -99,6 +102,30 @@ export async function activate(context: vscode.ExtensionContext) {
         return;
       }
       await preview.show(html);
+    }),
+
+    // Preview the .html file in the active editor (or a passed-in URI from
+    // the explorer context menu). basePath = the file's parent dir so
+    // sibling assets (./style.css, ./pic.png) resolve.
+    vscode.commands.registerCommand("hypeproof-chat.previewActiveFile", async (uri?: vscode.Uri) => {
+      const target = uri ?? vscode.window.activeTextEditor?.document.uri;
+      if (!target || target.scheme !== "file") {
+        vscode.window.showWarningMessage("HypeProof: preview할 .html 파일을 열어주세요.");
+        return;
+      }
+      if (!/\.html?$/i.test(target.fsPath)) {
+        vscode.window.showWarningMessage("HypeProof: .html / .htm 파일만 preview 가능합니다.");
+        return;
+      }
+      const basePath = vscode.Uri.joinPath(target, "..");
+      try {
+        const buf = await vscode.workspace.fs.readFile(target);
+        const html = Buffer.from(buf).toString("utf8");
+        await preview.show(html, basePath);
+        await preview.watchForReload(target);
+      } catch (err) {
+        vscode.window.showErrorMessage(`HypeProof: 파일을 읽지 못했어요 — ${err instanceof Error ? err.message : String(err)}`);
+      }
     }),
 
     vscode.commands.registerCommand("hypeproof-chat.renameCoach", async () => {

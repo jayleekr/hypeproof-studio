@@ -17,13 +17,22 @@ Use this before any release-cutting action. Source of truth for Phase 7 decision
 
 ## Cut
 
-- [ ] Bump version: `extensions/hypeproof-chat/package.json` + product.json release tag
+- [ ] Choose release tag: `v0.1.0` style. On tagged builds, this tag is the
+      canonical shipped version (`HPS_VERSION` → `scripts/resolve-version.sh`
+      → product.json / Info.plist / bundled extension). Only bump
+      `extensions/hypeproof-chat/package.json` when changing the untagged
+      local/dev fallback version.
 - [ ] `git tag v0.1.0 && git push --tags` → auto-triggers Win build
 - [ ] Wait for Win artifact to land
 - [ ] Zip Mac .app: `cd vscodium-base/VSCode-darwin-arm64 && zip -ry ../../dist/HypeProof-Studio-darwin-arm64.zip "HypeProof Studio.app"`
 - [ ] Create GitHub Release v0.1.0:
   - Attach: `HypeProof-Studio-darwin-arm64.zip`, `HypeProof Studio Setup *.exe`, `HypeProof Studio-x64.zip`
-  - Body: copy from RELEASE-NOTES below
+  - Body: copy and complete `docs/RELEASE-NOTES-template.md`
+  - Body must include: summary, highlights, install/update guidance, asset list,
+    verification run links, mirror status, production deploy status, known notes,
+    and changelog links.
+- [ ] Mirror release body is installer-facing, not a verbatim copy of the main
+      repo engineering release notes.
 - [ ] Verify one-line installers resolve to the new release (test from a fresh shell)
 
 ## Endpoint / config change → re-cut

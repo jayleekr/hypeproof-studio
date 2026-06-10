@@ -210,11 +210,21 @@ async function runUpdateImpl(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<
  * purposes; we cut Studio + extension in lockstep).
  */
 export function currentBundleVersion(appPath?: string): string {
+  // When no explicit path is given, resolve the running .app bundle so the
+  // update *check* reads the same stamped on-disk package.json as the install
+  // path (runUpdate already passes detectAppBundle(process.execPath)). Without
+  // this, the no-arg callers (checkForUpdates / installUpdate /
+  // scheduleUpdateChecks in extension.ts) fall through to the esbuild-inlined
+  // require("../package.json") below — frozen at build time to the un-stamped
+  // source version (e.g. 0.1.5) — so the updater perpetually offers the
+  // version that is already installed and loops forever (#249; residual of
+  // #213 Gap #3 / #206).
+  const resolved = appPath ?? detectAppBundle(process.execPath) ?? undefined;
   // Prefer the bundled extension's package.json — it's part of the .app
   // we're trying to replace, so it's authoritative for "what's running".
   try {
-    const candidate = appPath
-      ? path.join(appPath, "Contents", "Resources", "app", "extensions", "hypeproof-chat", "package.json")
+    const candidate = resolved
+      ? path.join(resolved, "Contents", "Resources", "app", "extensions", "hypeproof-chat", "package.json")
       : null;
     if (candidate && fs.existsSync(candidate)) {
       const pkg = JSON.parse(fs.readFileSync(candidate, "utf8")) as { version?: string };

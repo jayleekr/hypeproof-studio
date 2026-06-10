@@ -1,0 +1,108 @@
+# Discord notification for published releases.
+#
+# This workflow intentionally listens only to release.published and manual
+# dispatch. CI-created releases that use the default GITHUB_TOKEN do not trigger
+# recursive release workflows, so operators can use workflow_dispatch to notify
+# after those releases.
+
+name: notify-release-published
+
+on:
+  release:
+    types:
+      - published
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to notify about, for example v0.1.2"
+        required: true
+      dry_run:
+        description: "Resolve release data without sending Discord webhooks"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: notify-release-published-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      REPO: ${{ github.repository }}
+      EVENT_NAME: ${{ github.event_name }}
+      RELEASE_TAG: ${{ github.event.release.tag_name }}
+      DISPATCH_TAG: ${{ inputs.tag }}
+      DRY_RUN: ${{ inputs.dry_run || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install --quiet httpx jinja2 pyyaml
+
+      - name: Resolve release info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          TAG="$RELEASE_TAG"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$DISPATCH_TAG"
+          fi
+
+          if [ -z "$TAG" ]; then
+            echo "Could not resolve release tag from event payload or input." >&2
+            exit 1
+          fi
+
+          R=$(gh release view "$TAG" --json name,body,assets,url --repo "$REPO")
+          URL=$(echo "$R" | jq -r .url)
+          COUNT=$(echo "$R" | jq '.assets | length')
+          BODY=$(echo "$R" | jq -r .body | head -c 800)
+
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "URL=$URL" >> "$GITHUB_ENV"
+          echo "ASSET_COUNT=$COUNT" >> "$GITHUB_ENV"
+          {
+            echo "CHANGELOG<<__EOF__"
+            echo "$BODY"
+            echo "__EOF__"
+          } >> "$GITHUB_ENV"
+
+      - name: Dry-run summary
+        if: ${{ env.DRY_RUN == 'true' }}
+        run: |
+          {
+            echo "## notify-release-published dry-run"
+            echo "- tag: $TAG"
+            echo "- url: $URL"
+            echo "- asset_count: $ASSET_COUNT"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Send notify
+        if: ${{ env.DRY_RUN != 'true' }}
+        env:
+          DISCORD_WEBHOOK_HYPEPROOF_STUDIO: ${{ secrets.DISCORD_WEBHOOK_HYPEPROOF_STUDIO }}
+          DISCORD_WEBHOOK_SEDIMENT: ${{ secrets.DISCORD_WEBHOOK_SEDIMENT }}
+        run: |
+          set -euo pipefail
+          python scripts/notify/notify.py send release.published \
+            --routes config/notify_routes.yaml \
+            --data "version=$TAG" \
+            --data product=hypeproof-studio \
+            --data "url=$URL" \
+            --data "asset_count=$ASSET_COUNT" \
+            --data "changelog=$CHANGELOG"

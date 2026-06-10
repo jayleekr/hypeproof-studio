@@ -34,9 +34,11 @@ warn() { printf "  \033[33m!\033[0m %s\n" "$1"; }
 echo "Verifying $APP"
 echo
 
-# 1. Display name
-DISP=$(mdls -name kMDItemDisplayName -raw "$APP" 2>/dev/null || true)
-if [[ "$DISP" == "HypeProof Studio.app" || "$DISP" == "HypeProof Studio" ]]; then
+# 1. Display name. Read Info.plist instead of Spotlight metadata: mdls is null
+# for uninstalled build-dir apps and in CI, which made this gate unsatisfiable.
+DISP=$(defaults read "$APP/Contents/Info" CFBundleDisplayName 2>/dev/null || true)
+[[ -n "$DISP" ]] || DISP=$(defaults read "$APP/Contents/Info" CFBundleName 2>/dev/null || true)
+if [[ "$DISP" == "HypeProof Studio" ]]; then
   ok "Display name: $DISP"
 else
   bad "Display name: $DISP (expected HypeProof Studio)"
@@ -85,10 +87,18 @@ if [[ -n "$PJSON" ]]; then
   NL=$(jq -r '.nameLong' "$PJSON")
   AN=$(jq -r '.applicationName' "$PJSON")
   DBI=$(jq -r '.darwinBundleIdentifier' "$PJSON")
-  if [[ "$NS" == "HypeProof Studio" && "$AN" == "hypeproof-studio" && "$DBI" == "ai.hypeproof.studio" ]]; then
-    ok "product.json: nameShort=$NS, applicationName=$AN, darwinBundleId=$DBI"
+  TUNNEL_APP=$(jq -r '.tunnelApplicationName // ""' "$PJSON")
+  WIN_SHELL=$(jq -r '.win32ShellNameShort // ""' "$PJSON")
+  WIN_TUNNEL_SERVICE=$(jq -r '.win32TunnelServiceMutex // ""' "$PJSON")
+  WIN_TUNNEL=$(jq -r '.win32TunnelMutex // ""' "$PJSON")
+  LINUX_ICON=$(jq -r '.linuxIconName // ""' "$PJSON")
+  if [[ "$NS" == "HypeProof Studio" && "$AN" == "hypeproof-studio" && "$DBI" == "ai.hypeproof.studio" \
+        && "$TUNNEL_APP" == "hypeproof-studio-tunnel" && "$WIN_SHELL" == "HypeProof Studio" \
+        && "$WIN_TUNNEL_SERVICE" == "hypeproof-studio-tunnelservice" \
+        && "$WIN_TUNNEL" == "hypeproof-studio-tunnel" && "$LINUX_ICON" == "hypeproof-studio" ]]; then
+    ok "product.json: nameShort=$NS, applicationName=$AN, darwinBundleId=$DBI, tunnel=$TUNNEL_APP, linuxIcon=$LINUX_ICON"
   else
-    bad "product.json mismatch: nameShort=$NS, nameLong=$NL, applicationName=$AN, darwinBundleId=$DBI"
+    bad "product.json mismatch: nameShort=$NS, nameLong=$NL, applicationName=$AN, darwinBundleId=$DBI, tunnelApplicationName=$TUNNEL_APP, win32ShellNameShort=$WIN_SHELL, win32TunnelServiceMutex=$WIN_TUNNEL_SERVICE, win32TunnelMutex=$WIN_TUNNEL, linuxIconName=$LINUX_ICON"
   fi
 
   # 6b. Version must be present + non-placeholder, and the bundled extension's
@@ -139,13 +149,15 @@ else
   bad "hypeproof-chat extension NOT bundled into the .app"
 fi
 
-# 9. builtInExtensions list contains us?
+# 9. builtInExtensions list should NOT contain us. hypeproof-chat ships by
+# being copied into Resources/app/extensions; listing it in product.json makes
+# VSCodium try a marketplace/GitHub download during build, which 404s.
 if [[ -n "$PJSON" ]]; then
   BUILT_IN_HIT=$(jq -r '.builtInExtensions[]?.name // empty' "$PJSON" | grep -c "hypeproof" || true)
-  if [[ "$BUILT_IN_HIT" -ge 1 ]]; then
-    ok "Registered in product.json.builtInExtensions"
+  if [[ "$BUILT_IN_HIT" -eq 0 ]]; then
+    ok "Not listed in product.json.builtInExtensions (bundled via extensions/)"
   else
-    bad "NOT in product.json.builtInExtensions"
+    bad "Unexpected product.json.builtInExtensions entry for hypeproof-chat"
   fi
 fi
 

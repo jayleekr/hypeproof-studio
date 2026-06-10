@@ -26,6 +26,7 @@ import {
   type TrialHeaders,
 } from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
+import { scoreTurnAssets } from "../lib/asset-scorer";
 import {
   getActiveSession,
   getCohortPause,
@@ -420,6 +421,16 @@ chat.post("/chat/completions", async (c) => {
   // 8. Streaming: Gemini + OpenAI both emit OpenAI chat.completion.chunk SSE
   //    (passthrough + usage tap); Anthropic events are transformed to OpenAI
   //    chunks.
+  let streamedAssistantText = "";
+  const streamOptions = {
+    onTextDelta: (delta: string) => {
+      streamedAssistantText += delta;
+    },
+    onBeforeDone: () => ({
+      type: "asset_score",
+      ...scoreTurnAssets(streamedAssistantText),
+    }),
+  };
   const onUsage = (u: {
     input_tokens: number;
     output_tokens: number;
@@ -454,8 +465,8 @@ chat.post("/chat/completions", async (c) => {
 
   const outStream =
     provider === "anthropic"
-      ? transformStream(upstream.body, modelLabel, onUsage)
-      : passThroughOpenAIStream(upstream.body, onUsage);
+      ? transformStream(upstream.body, modelLabel, onUsage, streamOptions)
+      : passThroughOpenAIStream(upstream.body, onUsage, streamOptions);
 
   const streamHeaders: Record<string, string> = {
     "content-type": "text/event-stream",

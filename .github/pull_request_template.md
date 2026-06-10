@@ -35,3 +35,5 @@ Closes #<!-- issue number — required so the merge auto-closes it -->
 - [ ] Branched off `main` (no direct push to `main`)
 - [ ] No secrets in the diff (`worker/.dev.vars` stays local)
 - [ ] Submodule pointer untouched unless this PR is intentionally a bump
+- [ ] No workflow grants write/deploy permissions to external PR or comment triggers
+- [ ] Branch protection / required checks remain compatible with this change
