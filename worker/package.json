@@ -10,7 +10,10 @@
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
     "test": "node --experimental-strip-types test/smoke.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "dump-profiles": "node --experimental-strip-types scripts/dump-profiles.ts",
+    "scaffold-profile": "node --experimental-strip-types scripts/scaffold-profile.ts",
+    "validate-profiles": "node --experimental-strip-types scripts/dump-profiles.ts | python3 ../scripts/cohort-harness/validate.py"
   },
   "dependencies": {
     "hono": "^4.12.21"

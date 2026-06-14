@@ -7,14 +7,35 @@ HypeProof Studio의 핵심 추상화: **cohort마다 다른 UX**를 코드 수�
 ## 어떤 cohort들이 가능한가
 
 지금까지 검증된 분기:
-- **SK바이오팜 자녀 (3-4학년, 8주×4회)** — 1회차 profile 작동 중
+- **SK바이오팜 가족 (v126, 4시간 단발 · 2트랙)** — 초3·4 `kids-basic` + 초5·6 `kids-rich`,
+  같은 `cohort_id`(`sk-biopharm-2026-a`)를 공유하고 `profile_id`로만 갈라짐 → [단발 2-트랙 패턴](#단발-2-트랙-패턴-v126-sk바이오팜)
 - **치과** — 시뮬레이션 가능 (의료 종사자, 성인, 다른 페르소나)
 - **기업 AX 임원** — 시뮬레이션 가능 (formal tone, business case prompts)
 - **강사 양성 / 컴피티션** — Verify 모드 (HYROX 프레임)
 
-각 cohort = 별도 `profile_id`. 같은 cohort라도 회차마다 별도 profile.
+각 cohort = 별도 `profile_id`. 같은 cohort라도 회차/트랙마다 별도 profile.
 
 ## 절차
+
+### 0. 빠른 시작: scaffold (권장)
+
+손으로 빈 파일을 만들지 말고 scaffolder로 **kids 안전 기본값**(message 로깅 OFF,
+공개 퍼블리시 OFF, "외부 URL 호출 금지" 가드레일 포함) 스켈레톤을 생성하세요. prompt+profile을
+만들고 `index.ts`에 **멱등** 등록까지 합니다(이미 있으면 `--force` 필요):
+
+```bash
+cd worker
+npm run scaffold-profile -- \
+  --id sk-biopharm-kids-2026-grade-5-6-s1 \
+  --display "SK바이오팜 가족 AI 창작 워크숍 (5-6학년)" \
+  --cohort sk-biopharm-2026-a \
+  --tier kids-rich --age-min 11 --age-max 12 \
+  --hours 4 --series-total 1 --series-index 1 \
+  --assets intent_clarity,context_design,verification_reflex,iteration_reflex,taste,ownership
+```
+
+그다음 생성된 `prompts/<id>.md`·`profiles/<id>.ts`를 다듬고(아래 1–2단계), `npm run validate-profiles`
+로 검증합니다. 처음부터 손으로 쓰려면 1단계부터 진행하세요.
 
 ### 1. 시스템 프롬프트 작성 (`worker/src/prompts/<profile-id>.md`)
 
@@ -52,10 +73,10 @@ export const profile: Profile = {
   ],
   essences_focus: [..],            // deprecated v0.1 compatibility bridge only
   session: {
-    cohort_id: "<cohort-id>",      // 같은 cohort의 다른 profile들과 일치
-    series_total: 4,
+    cohort_id: "<cohort-id>",      // 같은 cohort의 다른 profile/트랙과 일치
+    series_total: 1,               // 단발이면 1. 시리즈면 회차 수 (같은 cohort면 값 일치)
     series_index: 1,
-    hours: 8,
+    hours: 4,
   },
   analytics: { log_user_messages: bool, log_metadata: bool },
   ux: {
@@ -148,6 +169,31 @@ HPS_SIGNING_SECRET=<secret> node --experimental-strip-types worker/scripts/issue
 - suggestions: "지금 만든 거 다시 처음 봤다고 상상" 같은 reflection chips
 - system prompt: meta 톤 (배운 걸 의심하는 자세)
 
+## 단발 2-트랙 패턴 (v126 SK바이오팜)
+
+연령대만 다른 **단발(single-session)** 워크숍을 두 트랙으로 운영할 때의 패턴.
+SK바이오팜 v126이 모델: 초3·4 / 초5·6이 **같은 7단계·두 레슨**(Context Engineering /
+Feedback Loop)을 지나되 "운전법"만 다르다.
+
+| | 초3·4 (`...grade-3-4-s1`) | 초5·6 (`...grade-5-6-s1`) |
+|---|---|---|
+| `game.template_tier` | `kids-basic` | `kids-rich` |
+| `audience.age_range` | `[8, 10]` | `[11, 12]` |
+| `session` | `series_total: 1, hours: 4` | `series_total: 1, hours: 4` |
+| `session.cohort_id` | `sk-biopharm-2026-a` | `sk-biopharm-2026-a` (**동일**) |
+| `assets_focus` | intent_clarity, context_design, iteration_reflex, taste, ownership | + **verification_reflex** (규칙·검증·밸런싱) |
+| `retry_button.show_counter` | `false` (자연 발견) | `true` (반복=성장 신호 가시화) |
+| prompt 운영 | 짧은 문장 여러 번, 캐릭터·장면 중심, 부모 타이핑 보조 허용 | 규칙·점수·난이도, 직접 검증·공정성, 부모는 질문만 |
+
+핵심 규칙:
+- **같은 `cohort_id`**, 다른 `profile_id`. 두 트랙은 하나의 cohort 안에서 profile로만 갈라진다.
+  admin "Start class"에서 회차마다 해당 트랙 profile을 선택한다. 토큰은
+  `--profile <트랙 id> --cohort sk-biopharm-2026-a`로 발급.
+- 같은 cohort의 모든 profile은 **`series_total`이 일치**해야 한다 (validator가 강제).
+- v126 자산 매핑: ContextEngineering = `intent_clarity` + `context_design`,
+  FeedbackLoop = `iteration_reflex` + `verification_reflex`, 와우·소유 = `taste` + `ownership`.
+- 미성년 트랙이므로 **`log_user_messages: false` · `publishing.enabled: false`** 고정(아래 가드레일).
+
 ## 보안 / 가드레일
 
 새 profile 작성 시 반드시 :
@@ -158,10 +204,22 @@ HPS_SIGNING_SECRET=<secret> node --experimental-strip-types worker/scripts/issue
 
 ## Validation
 
-새 profile 작성 후:
-1. `npm run test` (worker smoke + e2e test) → 회귀 0
-2. 로컬 wrangler dev에서 token 발급 → 채팅 → 코치 응답 → ▶ Run 흐름 직접 검증
-3. 첫 cohort 회차 dry-run (2-3명 dogfood) → 실제 prompt 데이터로 system prompt tune
+새 profile 작성 후, 순서대로:
+
+1. **`npm run validate-profiles`** — registry를 JSON으로 덤프해
+   ([`scripts/dump-profiles.ts`](../worker/scripts/dump-profiles.ts)) vendored cohort-harness
+   규칙 엔진(`scripts/cohort-harness/validate.py`)에 먹인다. 7자산 enum·prompt↔profile 정합·
+   미성년 가드레일(log_user_messages, 공개 퍼블리시, "외부 URL 호출 금지")을 데이터로 검증.
+   FAIL이면 비0 종료 → PR CI(`worker / validate-profiles`)가 막는다.
+   > cohort-harness는 **hypeproof-harness가 canonical**이고 `sync.sh`로 vendor된다 —
+   > studio 안에서 `scripts/cohort-harness/`를 **직접 수정하지 말 것**. 규칙을 고치려면 harness에서
+   > 고친 뒤 sync한다. (vendoring 전에는 validate-profiles가 "validator not found"로 스킵된다.)
+2. **`npm run typecheck`** — profile이 `Profile` 타입과 정합.
+3. **`npm test`** (worker smoke) → 회귀 0. smoke §4가 모든 cohort의 미성년 불변식을 재확인한다.
+4. **`bash scripts/preview-profile.sh --profile <id>`** — 로컬 wrangler dev에 토큰을 발급해
+   `GET /v1/profile`로 greeting·chips·coach 계약을 점검하고 round-trip 토큰을 출력한다
+   (앱에 붙여 채팅 → ▶ Run 흐름 직접 검증).
+5. 첫 cohort dry-run (2-3명 dogfood) → 실제 데이터로 system prompt tune.
 
 ## 트러블슈팅
 

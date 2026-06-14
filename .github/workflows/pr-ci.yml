@@ -47,6 +47,35 @@ jobs:
         working-directory: worker
         run: npm run typecheck
 
+  validate-profiles:
+    name: worker / validate-profiles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install worker deps
+        working-directory: worker
+        run: npm ci
+      # The validator (validate.py + rules.yaml) is vendored from
+      # hypeproof-harness (cohort-harness) during integration (workstream B-3).
+      # Until it lands, skip green so this check doesn't block the authoring PR;
+      # once vendored it becomes a real gate on every PR.
+      - name: Validate cohort profiles
+        working-directory: worker
+        run: |
+          if [ -f ../scripts/cohort-harness/validate.py ]; then
+            npm run validate-profiles
+          else
+            echo "::notice::cohort-harness validator not yet vendored — skipping (lands in B-3)"
+          fi
+
   extension-typecheck:
     name: extension / typecheck
     runs-on: ubuntu-latest

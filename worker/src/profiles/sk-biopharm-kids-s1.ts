@@ -3,11 +3,13 @@ import type { Profile } from "./types";
 import systemPromptMd from "../prompts/sk-biopharm-kids-s1.md";
 
 export const profile: Profile = {
+  // id/cohort_id are unchanged for token + roster compatibility; the "-s1"
+  // suffix is legacy (v126 made this a single-session workshop, not a series).
   id: "sk-biopharm-kids-2026-grade-3-4-s1",
   version: 1,
-  display_name: "SK바이오팜 가족 워크숍 (3-4학년) — 1회차",
+  display_name: "SK바이오팜 가족 AI 창작 워크숍 (3-4학년)",
   audience: {
-    age_range: [9, 10],
+    age_range: [8, 10],          // v126 분반: 초3·4 = 만 8~10세
     language: "ko",
     parent_coaching: true,
   },
@@ -35,13 +37,12 @@ export const profile: Profile = {
     auto_start: true,
   },
   game: {
-    template_tier: "kids-basic",   // 초3-4. 5-6학년 profile은 "kids-rich"로.
+    template_tier: "kids-basic",   // 초3·4 트랙. 초5·6 트랙은 "kids-rich".
   },
   publishing: {
-    // 1회차는 chat-only — sandbox.mcp_tools_enabled []와 정합하고, system prompt
-    // 끝부분("이번엔 우리 사이에서만 보여요 … 다음 시간에 공개하는 법을 배울 거예요")과도
-    // 일치한다. 미성년 게임의 공개 GitHub Pages 퍼블리시는 부모 동의·PII 설계가 끝나는
-    // 후속 회차에서 켠다 (per_user_github_pages).
+    // 단발 4시간 워크숍 — 로컬 미리보기(▶ Run)로 충분하고 chat-only
+    // (sandbox.mcp_tools_enabled [])와 정합한다. 미성년 게임의 공개 퍼블리시는
+    // 부모 동의·PII 설계가 끝나기 전엔 켜지 않는다(smoke.mjs §4 불변식).
     enabled: false,
     strategy: "local_only",
   },
@@ -55,18 +56,18 @@ export const profile: Profile = {
   // Deprecated v0.1 bridge for clients that still render old essence ids.
   essences_focus: [1, 2, 5, 7, 16],
   session: {
-    cohort_id: "sk-biopharm-2026-a",
-    series_total: 4,
+    cohort_id: "sk-biopharm-2026-a",   // 초3·4·초5·6 두 트랙이 공유하는 cohort
+    series_total: 1,                    // v126: 8주×4회 시리즈 → 4시간 단발
     series_index: 1,
-    hours: 8,
+    hours: 4,
   },
   analytics: {
     log_user_messages: false,
     log_metadata: true,
   },
   ux: {
-    // 1회차 Foundation: "입력이 결과를 결정한다". UX 전체가 자녀에게
-    //   "자세히 말하면 멋진 게 나온다"를 몸으로 가르치는 도구.
+    // 단발 4h 초3·4 트랙. 두 레슨(생각 구체화 / 만들고-확인하고-고치기)을 자녀가
+    //   몸으로 익히게 하는 UX — "자세히 말하면 멋진 게 나온다" + "한 번 만들고 끝이 아니다".
     coach: {
       naming_mode: "user_names_it",
       fallback_name: "코치",
@@ -107,8 +108,8 @@ export const profile: Profile = {
       },
     },
     retry_button: {
-      // 1회차: 버튼은 보이지만 카운터 숨김. 자녀가 자연스럽게 발견하는 게 목표.
-      // 2회차 Load(만족유예)에서 show_counter true로 켜져 의미가 노출됨.
+      // 단발 초3·4: 버튼은 보이되 카운터는 숨김 — 다시 요청해서 게임이 바뀌는
+      // 경험(Feedback Loop)을 자녀가 자연스럽게 발견하게. 카운터 강조는 초5·6 트랙.
       enabled: true,
       show_counter: false,
     },
