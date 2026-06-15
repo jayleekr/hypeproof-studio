@@ -327,18 +327,18 @@ if (changed) {
   console.log(`• ${varName} already registered in index.ts (idempotent no-op)`);
 }
 
-// ---- run the validator (best-effort until cohort-harness is vendored) ------
+// ---- run the studio-local cohort validator ---------------------------------
 
 if (skipValidate) {
   console.log("• skipping validation (--no-validate)");
   process.exit(0);
 }
 
-const validatorPath = resolve(WORKER_DIR, "..", "scripts", "cohort-harness", "validate.py");
+const validatorPath = resolve(WORKER_DIR, "scripts", "cohort-harness", "validate.py");
 if (!existsSync(validatorPath)) {
   console.log(
-    `• validator not found at ${validatorPath} — it is vendored from hypeproof-harness ` +
-      `(cohort-harness) during integration. Run \`npm run validate-profiles\` once it lands.`,
+    `• validator not found at ${validatorPath}. Restore worker/scripts/cohort-harness ` +
+      `or run \`npm run validate-profiles\` after checkout.`,
   );
   process.exit(0);
 }
@@ -346,7 +346,7 @@ if (!existsSync(validatorPath)) {
 console.log("▶ running validate-profiles…");
 const res = spawnSync(
   "sh",
-  ["-c", "node --experimental-strip-types scripts/dump-profiles.ts | python3 ../scripts/cohort-harness/validate.py"],
+  ["-c", "node --experimental-strip-types scripts/dump-profiles.ts | python3 scripts/cohort-harness/validate.py"],
   { cwd: WORKER_DIR, stdio: "inherit" },
 );
 process.exit(res.status ?? 1);

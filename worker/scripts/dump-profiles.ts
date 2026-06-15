@@ -1,10 +1,10 @@
 #!/usr/bin/env -S node --experimental-strip-types
 // Dump every registered cohort profile as a JSON array to stdout — including
-// the fully-resolved `system_prompt` text — so the vendored cohort-harness
+// the fully-resolved `system_prompt` text — so the studio-local cohort-harness
 // validator can lint them without importing any worker code:
 //
 //   node --experimental-strip-types scripts/dump-profiles.ts \
-//     | python3 ../scripts/cohort-harness/validate.py
+//     | python3 scripts/cohort-harness/validate.py
 //
 // (wired as `npm run validate-profiles`).
 //

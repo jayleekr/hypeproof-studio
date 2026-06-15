@@ -46,6 +46,15 @@ const { resolveProvider } = await import("../src/env.ts");
 const { assetKeys, clampAssetScores, scoreTurnAssets } = await import("../src/lib/asset-scorer.ts");
 const { transformStream, passThroughOpenAIStream } = await import("../src/lib/sse.ts");
 
+// ---- scaffold-profile validator path ---------------------------------------
+{
+  const scaffoldSource = readFileSync(new URL("../scripts/scaffold-profile.ts", import.meta.url), "utf8");
+  assert.match(scaffoldSource, /resolve\(WORKER_DIR,\s*"scripts",\s*"cohort-harness",\s*"validate\.py"\)/);
+  assert.match(scaffoldSource, /python3 scripts\/cohort-harness\/validate\.py/);
+  assert.doesNotMatch(scaffoldSource, /python3 \.\.\/scripts\/cohort-harness\/validate\.py/);
+  console.log("✓ scaffold-profile uses studio-local cohort validator");
+}
+
 /** @type {import("../src/profiles/types.ts").Profile} */
 const stubProfile = {
   id: "stub-s1",
