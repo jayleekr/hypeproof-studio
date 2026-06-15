@@ -207,13 +207,13 @@ Feedback Loop)을 지나되 "운전법"만 다르다.
 새 profile 작성 후, 순서대로:
 
 1. **`npm run validate-profiles`** — registry를 JSON으로 덤프해
-   ([`scripts/dump-profiles.ts`](../worker/scripts/dump-profiles.ts)) vendored cohort-harness
-   규칙 엔진(`scripts/cohort-harness/validate.py`)에 먹인다. 7자산 enum·prompt↔profile 정합·
+   ([`scripts/dump-profiles.ts`](../worker/scripts/dump-profiles.ts)) studio-local cohort 검증기
+   (`worker/scripts/cohort-harness/validate.py`)에 먹인다. 7자산 enum·prompt↔profile 정합·
    미성년 가드레일(log_user_messages, 공개 퍼블리시, "외부 URL 호출 금지")을 데이터로 검증.
    FAIL이면 비0 종료 → PR CI(`worker / validate-profiles`)가 막는다.
-   > cohort-harness는 **hypeproof-harness가 canonical**이고 `sync.sh`로 vendor된다 —
-   > studio 안에서 `scripts/cohort-harness/`를 **직접 수정하지 말 것**. 규칙을 고치려면 harness에서
-   > 고친 뒤 sync한다. (vendoring 전에는 validate-profiles가 "validator not found"로 스킵된다.)
+   > 검증기는 **studio 소유**(`worker/scripts/cohort-harness/` — validate.py + rules.yaml). 규칙을
+   > 바꾸려면 `rules.yaml`을 직접 고친다(파이썬 불필요). cohort 개념은 studio 단독이라 harness로
+   > vendor하지 않는다. 자체 테스트: `bash worker/scripts/cohort-harness/test/run.sh`.
 2. **`npm run typecheck`** — profile이 `Profile` 타입과 정합.
 3. **`npm test`** (worker smoke) → 회귀 0. smoke §4가 모든 cohort의 미성년 불변식을 재확인한다.
 4. **`bash scripts/preview-profile.sh --profile <id>`** — 로컬 wrangler dev에 토큰을 발급해

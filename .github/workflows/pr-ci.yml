@@ -63,18 +63,12 @@ jobs:
       - name: Install worker deps
         working-directory: worker
         run: npm ci
-      # The validator (validate.py + rules.yaml) is vendored from
-      # hypeproof-harness (cohort-harness) during integration (workstream B-3).
-      # Until it lands, skip green so this check doesn't block the authoring PR;
-      # once vendored it becomes a real gate on every PR.
+      # Validator (validate.py + rules.yaml) is studio-local at
+      # worker/scripts/cohort-harness/ — guardrails for cohort profiles
+      # (7-asset enum, prompt↔profile coherence, child-safety). Real gate.
       - name: Validate cohort profiles
         working-directory: worker
-        run: |
-          if [ -f ../scripts/cohort-harness/validate.py ]; then
-            npm run validate-profiles
-          else
-            echo "::notice::cohort-harness validator not yet vendored — skipping (lands in B-3)"
-          fi
+        run: npm run validate-profiles
 
   extension-typecheck:
     name: extension / typecheck
