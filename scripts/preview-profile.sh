@@ -4,7 +4,7 @@
 #   2. mint a local workshop token with scripts/issue-token.ts
 #   3. GET /v1/profile and assert the panel-facing contract
 #      (mirrors e2e/tests/06-dental-profile-api.spec.ts) — greeting, chips, coach
-#   4. print the token for a manual round-trip in the app
+#   4. optionally print the token for a manual round-trip in the app
 #
 # /v1/profile only needs a valid token + a registered profile id — no roster or
 # active class window required, so this is a fast author-time rehearsal.
@@ -13,6 +13,7 @@
 #   bash scripts/preview-profile.sh                                  # default: 초3·4 track
 #   bash scripts/preview-profile.sh --profile sk-biopharm-kids-2026-grade-5-6-s1
 #   bash scripts/preview-profile.sh --profile <id> --cohort <id> --user <name> --port 8787
+#   bash scripts/preview-profile.sh --print-token                    # local manual paste only
 #
 # Secret: reads HPS_SIGNING_SECRET from worker/.dev.vars (the same secret the
 # running wrangler dev verifies with) or the env. Run `bash scripts/dev-secrets.sh`
@@ -32,12 +33,14 @@ PROFILE="sk-biopharm-kids-2026-grade-3-4-s1"
 COHORT=""
 USER_ID="preview-smoke"
 PORT="8787"
+PRINT_TOKEN=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile) PROFILE="$2"; shift 2;;
     --cohort)  COHORT="$2";  shift 2;;
     --user)    USER_ID="$2"; shift 2;;
     --port)    PORT="$2";    shift 2;;
+    --print-token|--show-token) PRINT_TOKEN=1; shift;;
     *) echo "unknown flag: $1" >&2; exit 2;;
   esac
 done
@@ -128,6 +131,10 @@ echo "$BODY" | node -e '
 echo ""
 echo "─── round-trip token (paste in HypeProof Studio.app → Set Workshop Token) ───"
 echo "  proxy url : ${BASE}/v1"
-echo "  token     : ${TOKEN}"
+if [[ "$PRINT_TOKEN" == "1" ]]; then
+  echo "  token     : ${TOKEN}"
+else
+  echo "  token     : <redacted; rerun with --print-token for local manual paste>"
+fi
 echo "─────────────────────────────────────────────────────────────────────────────"
 [[ "$STARTED_BY_US" == "1" ]] && echo "(this script started wrangler dev and will stop it on exit; run scripts/dev-stack.sh for a persistent stack)"

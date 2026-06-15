@@ -217,8 +217,8 @@ Feedback Loop)을 지나되 "운전법"만 다르다.
 2. **`npm run typecheck`** — profile이 `Profile` 타입과 정합.
 3. **`npm test`** (worker smoke) → 회귀 0. smoke §4가 모든 cohort의 미성년 불변식을 재확인한다.
 4. **`bash scripts/preview-profile.sh --profile <id>`** — 로컬 wrangler dev에 토큰을 발급해
-   `GET /v1/profile`로 greeting·chips·coach 계약을 점검하고 round-trip 토큰을 출력한다
-   (앱에 붙여 채팅 → ▶ Run 흐름 직접 검증).
+   `GET /v1/profile`로 greeting·chips·coach 계약을 점검한다. 앱에 직접 붙여 채팅 →
+   ▶ Run 흐름까지 수동 검증해야 할 때만 `--print-token`을 추가한다.
 5. 첫 cohort dry-run (2-3명 dogfood) → 실제 데이터로 system prompt tune.
 
 ## 트러블슈팅
