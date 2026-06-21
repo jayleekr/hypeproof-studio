@@ -41,9 +41,14 @@ export interface Profile {
    * Workshop tier "search-webapp" — for clinical/professional workshops
    * (e.g. 보아치과 v4); model fills %%CLINIC_NAME%%/%%SEARCH_TOPIC%%/
    * %%DECISION%%/%%SOURCES%% in the static webapp skeleton, no game loop.
+   *
+   * Workshop tier "website" — for website-copyclone (보아치과 원장 v2). No
+   * skeleton library is injected; the model reconstructs structure from a
+   * pasted target screenshot (needs `input.image_paste`). The system prompt,
+   * not a skeleton, drives the output.
    */
   game: {
-    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp";
+    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website";
   };
   publishing: {
     enabled: boolean;
@@ -80,6 +85,19 @@ export interface Profile {
   tools?: {
     web_search?: boolean;
     max_uses?: number;
+  };
+  /**
+   * Optional input-channel capabilities. Default-off so a minor cohort never
+   * exposes a new data flow implicitly (see COHORT-AUTHORING 가드레일).
+   *
+   * - `image_paste`: allow pasted-image context (website-copyclone). When
+   *   false/absent (default), the webview's clipboard-paste handler stays
+   *   text-only AND the worker strips any image content blocks server-side
+   *   (defense-in-depth — a client can't smuggle images into a text-only
+   *   cohort). Enable only on adult cohorts that need screenshot injection.
+   */
+  input?: {
+    image_paste?: boolean;
   };
   session: {
     cohort_id: string;

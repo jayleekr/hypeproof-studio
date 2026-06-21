@@ -93,19 +93,23 @@ export interface ProfileToneShape {
   game?: { template_tier?: string };
 }
 
-export type AppTone = "game" | "search";
+export type AppTone = "game" | "search" | "site";
 
 /**
  * Pick the UI tone for hard-coded chat-panel labels.
  *
- * `search-webapp` tier (e.g. boah-dental) → "search" tone (검색엔진 어휘).
+ * `search-webapp` tier (e.g. boah-dental teaser) → "search" tone (검색엔진 어휘).
+ * `website` tier (보아치과 원장 copyclone) → "site" tone (웹사이트 어휘).
  * Anything else (kids-basic, etc.) → "game" tone — the legacy default.
  *
  * Centralized so both the host extension and the webview render consistent
  * copy without each one redoing the tier check.
  */
 export function appToneOf(profile: ProfileToneShape | null | undefined): AppTone {
-  return profile?.game?.template_tier === "search-webapp" ? "search" : "game";
+  const tier = profile?.game?.template_tier;
+  if (tier === "search-webapp") return "search";
+  if (tier === "website") return "site";
+  return "game";
 }
 
 /** Hard-coded copy table keyed by tone. */
@@ -129,6 +133,16 @@ export const TONE_LABELS = {
     showIntentReply: "오른쪽 창에 검색엔진을 띄웠어요! 🔍 한번 검색해보세요.",
     aboutTitle: "🔍 내 첫 검색엔진",
     aboutSubtitle: '채팅에서 "V1 짜줘"라고 말해보세요!',
+  },
+  site: {
+    buildingLabel: "웹사이트 만드는 중",
+    namingEmoji: "🌐",
+    previewTitle: "🌐 내 웹사이트",
+    previewPlaceholder: "웹사이트가 여기에 나와요",
+    tokenConfirmTail: "같이 만들어봐요 🌐",
+    showIntentReply: "오른쪽 창에 웹사이트를 띄웠어요! 🌐 한번 살펴보세요.",
+    aboutTitle: "🌐 내 웹사이트",
+    aboutSubtitle: '채팅에서 "이 화면처럼 만들어줘"라고 말해보세요!',
   },
 } as const;
 
