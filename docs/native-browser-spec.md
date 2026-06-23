@@ -187,6 +187,25 @@ product 결정(§11).
 7. **게임 통합** — 옵션 A 배선(병행), 프로필 `preview.type`.
 8. **문서/테스트** — REQ-D 갱신, e2e, 이 스펙·ADR 상태 갱신.
 
+## 9.1 PoC 검증 결과 (standalone Electron 32.3.3, 2026-06-23)
+
+VS Code 소스/풀빌드 없이 standalone Electron PoC로 핵심 API를 실증했다(electron@32.3.3
+= `WebContentsView` 지원 확인). 세 교육 시나리오 + 안전 모델이 모두 API 수준에서 통과.
+
+| 시나리오 | 결과 | 확인된 API |
+|---|---|---|
+| Q1 외부 `https` 로드 | ✅ `example.com` title="Example Domain" | `new WebContentsView({webPreferences:{partition}})` + `webContents.loadURL` |
+| Q1 positioning | ✅ | `win.contentView.addChildView(view)` + `view.setBounds({x,y,width,height})` |
+| Q2a 스크린샷 | ✅ (offscreen 400×300 PNG) | `webContents.capturePage()` / offscreen `paint` → `image.toPNG()`·`toJPEG(80)` |
+| Q2b DOM/AX 추출 | ✅ AX 15노드 + 본문 텍스트 | `webContents.debugger.attach("1.3")` → `Accessibility.getFullAXTree`, `Runtime.evaluate` |
+| Q3 게임 실행 | ✅ rAF score=40 | `loadFile()` + canvas/requestAnimationFrame, `executeJavaScript` 상태 read-back |
+| 안전 세션 | ✅ | `session.fromPartition("persist:…")` + `setPermissionRequestHandler(deny)` |
+
+주의: 헤드리스(디스플레이 표면 없음) 환경에선 일반 `capturePage`·rAF가 표면 부재로 실패 →
+**offscreen 렌더링**으로 동일 결과 실증. 디스플레이가 있는 실제 머신에선 일반 경로로 동작
+하므로 이는 API 한계가 아니라 자동화 셸 제약이다. Electron 버전 일치는 vscodium-base
+빌드에서 재확인 필요(§3 [PoC검증]). PoC 소스: 세션 스크래치패드 `poc/`(throwaway).
+
 ## 10. 테스트 전략
 
 - Unit: bounds 계산, URL 정책, page_context 게이트(off→거부), 스크린샷 인코딩 cap.
