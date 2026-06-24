@@ -26,6 +26,9 @@ Playwright/CDP 자동화, 확장용 **`browser` proposed API**. VSCodium 패치�
   - **per-cohort 게이트** `input.page_context`(default off) — worker `profiles/types.ts`
     + `/v1/profile`(chat.ts) → 확장 `ResolvedProfile`. host가 강제(미성년 보호).
     확장·worker typecheck + worker 테스트 27건 통과.
+  - **진입점** — 채팅 패널 view/title에 🌐 브라우저 열기 버튼(항상) + 💬 페이지를 코치에게
+    버튼(`page_context` 켜진 코호트만, context key `hypeproof-chat.pageContextEnabled`
+    게이트). 그전엔 Command Palette 전용이라 아이가 못 찾았음.
 
 **발견(중요):** 기존 image-paste 기능은 **webview UI까지만 구현**돼 있고 host→worker→LLM
 이미지 전달(멀티모달)이 없다 — `proxyClient`는 텍스트만 보내고 worker엔 image 처리가
@@ -33,8 +36,8 @@ Playwright/CDP 자동화, 확장용 **`browser` proposed API**. VSCodium 패치�
 구현했고, **스크린샷(vision) 주입은 멀티모달 proxy 파이프라인 구축이 선행**되어야 한다(후속).
 
 **후속(별도 커밋):** ① 멀티모달 proxy 파이프라인(이미지 content part → Anthropic image
-block) 구축 후 screenshot 주입 ② 미성년 안전 세션/URL 정책 ③ 브라우저 진입점 노출
-(`workbench.browser.showInTitleBar` 기본값) ④ 게임을 네이티브로 통합할지 결정.
+block) 구축 후 screenshot(vision) 주입 ② 미성년 안전 세션/URL 정책 ③ 게임을 네이티브로
+통합할지 결정.
 
 **검증 한계:** 디스플레이 없는 자동화 셸이라 IDE에서 브라우저가 실제로 그려지는 시각
 확인은 불가 — typecheck + jq 검증까지가 여기서 가능한 범위, 최종 확인은 풀빌드 후 실제
