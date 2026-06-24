@@ -8,9 +8,10 @@ import * as vscode from "vscode";
 // enabled for this built-in extension via product.json
 // `extensionEnabledApiProposals` — see scripts/apply-product-overrides.sh.
 //
-// This module is the extension-host side only (typecheck-covered). The chat-turn
-// injection of captured page context (worker `page_context` gate + image-paste
-// reuse) and the minor-safe session are follow-ups tracked in #278.
+// This module is the extension-host browser primitives only. The chat-turn
+// injection + the `page_context` gate live in chatPanelProvider; the screenshot
+// (vision) path waits on the multimodal proxy pipeline, which is not yet wired
+// (proxyClient sends text-only) — so today only the DOM text/AX is used.
 
 /** Captured context from a browser tab, ready to feed to the coach (Q2). */
 export interface PageContext {
@@ -78,11 +79,7 @@ function cdpRequest(
   });
 }
 
-/**
- * Capture screenshot + visible text + AX summary from a browser tab via CDP. Q2.
- * The screenshot reuses the existing image-paste path once chat injection lands;
- * the text/AX become text context.
- */
+/** Capture screenshot + visible text + AX summary from a browser tab via CDP. Q2. */
 export async function capturePageContext(tab: vscode.BrowserTab): Promise<PageContext> {
   const session = await tab.startCDPSession();
   try {
@@ -111,32 +108,23 @@ export async function capturePageContext(tab: vscode.BrowserTab): Promise<PageCo
 }
 
 /**
- * Capture the active browser tab for the coach. FOUNDATION (#278): proves the
- * proposed-API + CDP capture works end-to-end and persists the screenshot.
- * Feeding it into the chat turn (worker `page_context` gate + image attachment)
- * is the next commit.
+ * Capture the currently active browser tab. Returns null (with a nudge) when no
+ * tab is open or capture fails — callers should bail quietly.
  */
-export async function sendPageToCoach(context: vscode.ExtensionContext): Promise<void> {
+export async function captureActivePage(): Promise<PageContext | null> {
   const tab = vscode.window.activeBrowserTab;
   if (!tab) {
     vscode.window.showWarningMessage(
       "HypeProof: 먼저 브라우저 탭을 열어주세요 (명령: HypeProof: 브라우저 열기).",
     );
-    return;
+    return null;
   }
-  let ctx: PageContext;
   try {
-    ctx = await capturePageContext(tab);
+    return await capturePageContext(tab);
   } catch (err) {
     vscode.window.showErrorMessage(
       `HypeProof: 페이지 캡처 실패 — ${err instanceof Error ? err.message : String(err)}`,
     );
-    return;
+    return null;
   }
-  await vscode.workspace.fs.createDirectory(context.globalStorageUri);
-  const file = vscode.Uri.joinPath(context.globalStorageUri, "page-capture.jpg");
-  await vscode.workspace.fs.writeFile(file, Buffer.from(ctx.imageBase64, "base64"));
-  vscode.window.showInformationMessage(
-    `페이지 캡처됨 — ${ctx.title || ctx.url} · 텍스트 ${ctx.text.length}자 · AX ${ctx.axNodeCount}노드`,
-  );
 }

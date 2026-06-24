@@ -18,11 +18,22 @@ Playwright/CDP 자동화, 확장용 **`browser` proposed API**. VSCodium 패치�
   (`src/vscode.proposed.browser.d.ts`) + `src/nativeBrowser.ts`:
   - `hypeproof-chat.openBrowser` (Q1) — `window.openBrowserTab(url, {Beside})`로 외부/
     localhost/file 페이지 열기.
-  - `capturePageContext()` + `hypeproof-chat.sendPageToCoach` (Q2 foundation) —
-    `BrowserTab.startCDPSession()`로 screenshot+innerText+AX 추출. 확장 typecheck 통과.
+  - `capturePageContext()`/`captureActivePage()` — `BrowserTab.startCDPSession()`로
+    screenshot+innerText+AX 추출.
+  - **Q2 채팅 주입(텍스트 경로)** — `hypeproof-chat.sendPageToCoach`가 활성 탭의 DOM
+    텍스트+URL/제목을 다음 턴 프롬프트에 prepend(`chatPanelProvider.attachPageContext`/
+    `handleSend`). 히스토리엔 사용자 원문만 남김.
+  - **per-cohort 게이트** `input.page_context`(default off) — worker `profiles/types.ts`
+    + `/v1/profile`(chat.ts) → 확장 `ResolvedProfile`. host가 강제(미성년 보호).
+    확장·worker typecheck + worker 테스트 27건 통과.
 
-**후속(별도 커밋):** ① 캡처 컨텍스트를 채팅 턴에 주입(webview + worker `page_context`
-게이트, image-paste 재사용) ② 미성년 안전 세션/ URL 정책 ③ 브라우저 진입점 노출
+**발견(중요):** 기존 image-paste 기능은 **webview UI까지만 구현**돼 있고 host→worker→LLM
+이미지 전달(멀티모달)이 없다 — `proxyClient`는 텍스트만 보내고 worker엔 image 처리가
+없으며 worker Profile에 `input` 필드 자체가 없었다. 그래서 Q2 주입은 **텍스트 경로로 먼저**
+구현했고, **스크린샷(vision) 주입은 멀티모달 proxy 파이프라인 구축이 선행**되어야 한다(후속).
+
+**후속(별도 커밋):** ① 멀티모달 proxy 파이프라인(이미지 content part → Anthropic image
+block) 구축 후 screenshot 주입 ② 미성년 안전 세션/URL 정책 ③ 브라우저 진입점 노출
 (`workbench.browser.showInTitleBar` 기본값) ④ 게임을 네이티브로 통합할지 결정.
 
 **검증 한계:** 디스플레이 없는 자동화 셸이라 IDE에서 브라우저가 실제로 그려지는 시각

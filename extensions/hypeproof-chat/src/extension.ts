@@ -15,7 +15,7 @@ import {
   dismissVersion,
   currentBundleVersion,
 } from "./updateChecker";
-import { openBrowser, sendPageToCoach } from "./nativeBrowser";
+import { openBrowser, captureActivePage } from "./nativeBrowser";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
@@ -217,9 +217,23 @@ export async function activate(context: vscode.ExtensionContext) {
       openBrowser(typeof url === "string" ? url : undefined),
     ),
 
-    vscode.commands.registerCommand("hypeproof-chat.sendPageToCoach", () =>
-      sendPageToCoach(context),
-    ),
+    vscode.commands.registerCommand("hypeproof-chat.sendPageToCoach", async () => {
+      // Per-cohort gate (default off → minor-safe). Worker emits input.page_context
+      // via /v1/profile; the host enforces it here for the text-injection path.
+      if (!provider.isPageContextEnabled()) {
+        vscode.window.showInformationMessage(
+          "이 코호트에서는 '페이지를 코치에게' 기능이 꺼져 있어요.",
+        );
+        return;
+      }
+      const ctx = await captureActivePage();
+      if (!ctx) return;
+      provider.attachPageContext({ url: ctx.url, title: ctx.title, text: ctx.text });
+      await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+      vscode.window.showInformationMessage(
+        `📄 페이지를 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
+      );
+    }),
 
   );
 
