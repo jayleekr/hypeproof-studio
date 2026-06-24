@@ -1,6 +1,40 @@
 # 교육용 네이티브 브라우저 — 설계 스펙
 
-상태: Draft (설계) · 추적: [#278](https://github.com/jayleekr/hypeproof-studio/issues/278) · 결정: [adr/0002-native-browser-via-webcontentsview.md](adr/0002-native-browser-via-webcontentsview.md)
+상태: Draft (설계, 구현 착수) · 추적: [#278](https://github.com/jayleekr/hypeproof-studio/issues/278) · 결정: [adr/0002-native-browser-via-webcontentsview.md](adr/0002-native-browser-via-webcontentsview.md)
+
+## 0. 구현 방향 갱신 (2026-06-24) — 중요
+
+소스를 받아 확인한 결과 **VS Code 1.116.0(Electron 39.8.7)에 이미 완성된 통합 브라우저가
+존재**한다(MS #300319): `WebContentsView` 기반 에디터-탭 브라우저, 세션 격리,
+Playwright/CDP 자동화, 확장용 **`browser` proposed API**. VSCodium 패치가 제거하지도
+않는다. → 아래 §3–§4의 "WebContentsView를 코어 패치로 처음부터 빌드" 설계는 **불필요**
+해졌고, **upstream 기능을 enable + 배선**하는 방식으로 대체한다(훨씬 작고 안전).
+
+**구현된 것(이번 작업):**
+- `scripts/apply-product-overrides.sh` — product.json `extensionEnabledApiProposals`에
+  `{"hypeproof.hypeproof-chat":["browser"]}` 추가 → built-in 확장에 proposed API 허용
+  (코어 소스 패치 없음). jq 검증 완료.
+- `extensions/hypeproof-chat/` — `enabledApiProposals:["browser"]` + 벤더 dts
+  (`src/vscode.proposed.browser.d.ts`) + `src/nativeBrowser.ts`:
+  - `hypeproof-chat.openBrowser` (Q1) — `window.openBrowserTab(url, {Beside})`로 외부/
+    localhost/file 페이지 열기.
+  - `capturePageContext()` + `hypeproof-chat.sendPageToCoach` (Q2 foundation) —
+    `BrowserTab.startCDPSession()`로 screenshot+innerText+AX 추출. 확장 typecheck 통과.
+
+**후속(별도 커밋):** ① 캡처 컨텍스트를 채팅 턴에 주입(webview + worker `page_context`
+게이트, image-paste 재사용) ② 미성년 안전 세션/ URL 정책 ③ 브라우저 진입점 노출
+(`workbench.browser.showInTitleBar` 기본값) ④ 게임을 네이티브로 통합할지 결정.
+
+**검증 한계:** 디스플레이 없는 자동화 셸이라 IDE에서 브라우저가 실제로 그려지는 시각
+확인은 불가 — typecheck + jq 검증까지가 여기서 가능한 범위, 최종 확인은 풀빌드 후 실제
+머신 몫.
+
+> 아래 §1–§12는 원래 설계(처음부터 빌드 가정)의 기록이다. upstream 재사용으로 상당수가
+> "이미 제공됨"으로 대체됨 — §0가 현재 진실의 출처다.
+
+---
+
+상태(원본): Draft (설계) · 추적: [#278](https://github.com/jayleekr/hypeproof-studio/issues/278) · 결정: [adr/0002-native-browser-via-webcontentsview.md](adr/0002-native-browser-via-webcontentsview.md)
 
 > 이 문서는 "왜/무엇"(ADR 0002, 이슈 #278)을 받아 "어떻게"를 정의하는 엔지니어링 설계
 > 스펙이다. 구현 PR은 이 문서를 갱신해야 한다. 코어 내부 동작에 대한 단언 중 vscode 소스를

@@ -5,8 +5,11 @@
   "version": "0.1.5",
   "publisher": "hypeproof",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.116.0"
   },
+  "enabledApiProposals": [
+    "browser"
+  ],
   "categories": [
     "Other"
   ],
@@ -37,6 +40,15 @@
       {
         "command": "hypeproof-chat.focus",
         "title": "HypeProof Chat: Focus"
+      },
+      {
+        "command": "hypeproof-chat.openBrowser",
+        "title": "HypeProof: 브라우저 열기",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "hypeproof-chat.sendPageToCoach",
+        "title": "HypeProof: 현재 페이지를 코치에게 보내기"
       },
       {
         "command": "hypeproof-chat.clearHistory",

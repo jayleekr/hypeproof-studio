@@ -15,6 +15,7 @@ import {
   dismissVersion,
   currentBundleVersion,
 } from "./updateChecker";
+import { openBrowser, sendPageToCoach } from "./nativeBrowser";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
@@ -208,6 +209,17 @@ export async function activate(context: vscode.ExtensionContext) {
       await dismissVersion(context, version);
       provider.setAvailableUpdate(null);
     }),
+
+    // #278 — native integrated browser. openBrowser: open a real browser tab
+    // (own/external/localhost/file pages, Q1). sendPageToCoach: capture the
+    // active tab via CDP for the coach (Q2 foundation).
+    vscode.commands.registerCommand("hypeproof-chat.openBrowser", (url?: string) =>
+      openBrowser(typeof url === "string" ? url : undefined),
+    ),
+
+    vscode.commands.registerCommand("hypeproof-chat.sendPageToCoach", () =>
+      sendPageToCoach(context),
+    ),
 
   );
 
