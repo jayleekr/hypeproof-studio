@@ -213,6 +213,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       async (p) => {
         this.cachedProfile = p;
         this.profileFetchPromise = null;
+        // #278 — gate the "페이지를 코치에게" toolbar button to opted-in cohorts.
+        void vscode.commands.executeCommand(
+          "setContext",
+          "hypeproof-chat.pageContextEnabled",
+          p?.input?.page_context === true,
+        );
         this.activeCohortId = extractCohortIdUnverified(token) ?? null;
         await this.migrateLegacyStateForActiveCohort();
         // Apply tone-appropriate labels to the preview panel (#159).

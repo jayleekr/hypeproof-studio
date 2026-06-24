@@ -48,7 +48,8 @@
       },
       {
         "command": "hypeproof-chat.sendPageToCoach",
-        "title": "HypeProof: 현재 페이지를 코치에게 보내기"
+        "title": "HypeProof: 현재 페이지를 코치에게 보내기",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "hypeproof-chat.clearHistory",
@@ -93,6 +94,18 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "hypeproof-chat.openBrowser",
+          "when": "view == hypeproof-chat.panel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "hypeproof-chat.sendPageToCoach",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.pageContextEnabled",
+          "group": "navigation@2"
+        }
+      ],
       "editor/title": [
         {
           "command": "hypeproof-chat.previewActiveFile",
