@@ -180,6 +180,12 @@ jobs:
         # prepare_vscode.sh, whose mv .yet→.patch failed on second run).
         # No working-directory: run-build.sh cd's into vscodium-base itself.
         # No logfile arg: keep output in the GH Actions step log.
+        env:
+          # vscode-min-prepack fetches the bundled MS debug extensions
+          # (vscode-js-debug etc.) from api.github.com. Unauthenticated those
+          # hit the 60/hr shared-runner rate limit → 403 (flaky: v0.1.14 failed,
+          # v0.1.15 passed by luck). Passing the token raises it to 1000/hr.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/run-build.sh
 
       - name: Package .app → darwin-arm64 zip
