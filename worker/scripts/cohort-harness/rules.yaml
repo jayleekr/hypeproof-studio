@@ -14,8 +14,9 @@
 version: 1
 
 # The 7 AI Native Assets. A profile's `assets_focus` must be a non-empty,
-# duplicate-free subset of these. Keep in sync with worker/src/profiles/types.ts
-# (AssetFocus union) — this list is the canonical guardrail copy.
+# duplicate-free subset of these. Keep in sync with ASSET_FOCUS in
+# worker/src/profiles/types.ts (the TS single source) — this is the Python-side
+# guardrail copy. TS↔Python unification is out of scope; keep them aligned by hand.
 assets:
   - taste
   - intent_clarity
@@ -68,8 +69,15 @@ publishing:
 
 child:
   # Optional escape hatch. If this dotted profile key is truthy, a child cohort
-  # MAY use per_user_github_pages — downgraded from FAIL to WARN (parental
-  # consent + no-real-name design assumed handled out of band). Absent → FAIL.
+  # MAY use per_user_github_pages — downgraded from FAIL to WARN. Absent → FAIL.
+  #
+  # By design, this flag is an ASSERTION, not verification: the validator does
+  # NOT check that parental consent or no-real-name handling actually happened —
+  # those are out-of-band (consent forms, PII review). The flag only records
+  # that an author claims they are in place, flipping the gate to WARN so the
+  # build isn't blocked. The real safety backstop is smoke.mjs §4, which hard-
+  # forbids public publishing for any parent_coaching cohort regardless of this
+  # flag. (#267 item 4 — intended, confirmed in PR.)
   publish_consent_key: publishing.child_publish_consent
   # A child cohort's system_prompt MUST contain this exact phrase (no external
   # URL fetches from generated code — a flaky room wifi must not break a game,
@@ -98,3 +106,4 @@ severity:
   child_log_user_messages: fail
   child_per_user_pages: fail
   child_missing_url_ban: fail
+  child_age_range_required: fail

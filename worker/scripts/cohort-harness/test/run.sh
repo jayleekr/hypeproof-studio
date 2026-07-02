@@ -26,7 +26,7 @@ if ! command -v "$PY" >/dev/null 2>&1; then
 fi
 [ -f "$VALIDATE" ] && ok "validate.py present" || bad "validate.py missing at $VALIDATE"
 [ -f "$HERE/../rules.yaml" ] && ok "rules.yaml present" || bad "rules.yaml missing"
-for f in pass warn fail malformed; do
+for f in pass warn fail malformed child-missing-agerange promise-deferred-adjacent; do
   [ -f "$FIX/$f.json" ] && ok "fixture $f.json present" || bad "fixture $f.json missing"
 done
 
@@ -71,6 +71,29 @@ rc="$(run_rc "$FIX/malformed.json")"
 # T6: stdin path works identically to file path
 rc_stdin="$(cat "$FIX/fail.json" | "$PY" "$VALIDATE" >/dev/null 2>&1; echo $?)"
 [ "$rc_stdin" -eq 1 ] && ok "stdin pipe → exit 1 (matches file path)" || bad "stdin pipe → exit $rc_stdin (want 1)"
+
+# T7 (#267 item 1): a parent_coaching child cohort that OMITS age_range still
+# trips the child guardrails (is_child now gates on parent_coaching) AND a hard
+# FAIL for the missing field — so age_range can't be dropped to bypass them.
+rc="$(run_rc "$FIX/child-missing-agerange.json")"
+[ "$rc" -eq 1 ] && ok "child-missing-agerange.json → exit 1" || bad "child-missing-agerange.json → exit $rc (want 1)"
+need_a="child_age_range_required child_per_user_pages child_missing_url_ban"
+got_a="$("$PY" "$VALIDATE" --json "$FIX/child-missing-agerange.json" 2>/dev/null \
+       | "$PY" -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(sorted({f["check"] for f in d["findings"] if f["severity"]=="fail"})))')"
+miss_a=""
+for c in $need_a; do case " $got_a " in *" $c "*) : ;; *) miss_a="$miss_a $c" ;; esac; done
+[ -z "$miss_a" ] && ok "child-missing-agerange fires parent_coaching-gated child FAILs" || bad "child-missing-agerange missing FAIL checks:$miss_a"
+
+# T8 (#267 item 2): a promise whose deferral marker sits in the NEXT sentence is
+# read as deferred (sliding window) — no false-positive promise contradiction.
+rc="$(run_rc "$FIX/promise-deferred-adjacent.json")"
+[ "$rc" -eq 0 ] && ok "promise-deferred-adjacent.json → exit 0" || bad "promise-deferred-adjacent.json → exit $rc (want 0)"
+if "$PY" "$VALIDATE" --json "$FIX/promise-deferred-adjacent.json" 2>/dev/null \
+   | "$PY" -c 'import sys,json; d=json.load(sys.stdin); sys.exit(1 if any(f["check"]=="publishing_promise_contradiction" for f in d["findings"]) else 0)'; then
+  ok "promise-deferred-adjacent → no publishing_promise_contradiction"
+else
+  bad "promise-deferred-adjacent wrongly flagged publishing_promise_contradiction"
+fi
 
 echo
 echo "Totals: PASS=$pass FAIL=$fail"
