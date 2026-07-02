@@ -1,0 +1,30 @@
+[
+  {
+    "id": "fixture-promise-deferred",
+    "version": 1,
+    "display_name": "Fixture Adult — promise deferred in adjacent sentence (#267 item 2 regression)",
+    "audience": { "age_range": [20, 60], "language": "ko", "parent_coaching": false },
+    "model": { "default": "hypeproof-default" },
+    "system_prompt": "당신은 성인 참가자와 함께 웹 결과물을 만드는 코치입니다. 완성한 작품은 친구에게 공개해서 보여줄 수 있어요. 하지만 그건 아직 준비 중이에요. 지금은 이 화면 안에서만 미리 봅니다. 한국어로 짧고 명확하게 안내하세요. (약속 문구 '공개해서'와 deferral 마커 '아직'이 서로 다른 문장에 있어, 슬라이딩 윈도우가 없으면 오탐으로 FAIL이 나는 픽스처입니다.)",
+    "welcome": { "greeting_md": "안녕하세요!", "example_prompts": ["검색 도구 만들어줘"] },
+    "sandbox": { "file_write": true, "execute_shell": false, "mcp_tools_enabled": [] },
+    "preview": { "type": "live_server", "auto_start": false },
+    "game": { "template_tier": "search-webapp" },
+    "publishing": { "enabled": false, "strategy": "local_only" },
+    "assets_focus": ["intent_clarity", "verification_reflex"],
+    "session": { "cohort_id": "fixture-adult-c", "series_total": 1, "series_index": 1, "hours": 2 },
+    "analytics": { "log_user_messages": false, "log_metadata": true },
+    "ux": {
+      "coach": { "naming_mode": "fixed", "fallback_name": "코치", "naming_prompt_md": "", "personality_prompt_md": "" },
+      "suggestions": {
+        "initial": [{ "text": "검색 도구 만들어줘", "style": "good" }],
+        "follow_up": []
+      },
+      "hints": {
+        "short_input": { "enabled": true, "min_chars": 5, "message_md": "조금 더 구체적으로!" },
+        "roll_input_button": { "enabled": false, "label": "", "probe_md": "" }
+      },
+      "retry_button": { "enabled": true, "show_counter": false }
+    }
+  }
+]
