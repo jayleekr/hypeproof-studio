@@ -22,6 +22,8 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+// Single source of truth for the 7-asset enum (no hardcoded copy here). #267 item 3.
+import { ASSET_FOCUS, type AssetFocus } from "../src/profiles/types.ts";
 
 const SCRIPTS_DIR = fileURLToPath(new URL(".", import.meta.url));
 const WORKER_DIR = resolve(SCRIPTS_DIR, "..");
@@ -29,15 +31,6 @@ const PROFILES_DIR = join(WORKER_DIR, "src", "profiles");
 const PROMPTS_DIR = join(WORKER_DIR, "src", "prompts");
 const INDEX_TS = join(PROFILES_DIR, "index.ts");
 
-const ASSET_ENUM = [
-  "taste",
-  "intent_clarity",
-  "context_design",
-  "verification_reflex",
-  "delegation_judgment",
-  "iteration_reflex",
-  "ownership",
-] as const;
 const TIER_ENUM = ["kids-basic", "kids-rich", "teen", "pro-3d", "search-webapp"] as const;
 
 function arg(flag: string, fallback?: string): string {
@@ -90,8 +83,8 @@ const force = flagPresent("--force");
 const skipValidate = flagPresent("--no-validate");
 
 for (const a of assets) {
-  if (!ASSET_ENUM.includes(a as (typeof ASSET_ENUM)[number])) {
-    fail(`unknown asset "${a}" — must be one of ${ASSET_ENUM.join(", ")}`);
+  if (!ASSET_FOCUS.includes(a as AssetFocus)) {
+    fail(`unknown asset "${a}" — must be one of ${ASSET_FOCUS.join(", ")}`);
   }
 }
 if (new Set(assets).size !== assets.length) fail("--assets has duplicates");

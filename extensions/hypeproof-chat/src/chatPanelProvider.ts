@@ -40,6 +40,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
   private cachedProfile: ResolvedProfile | null = null;
   private profileFetchPromise: Promise<ResolvedProfile | null> | null = null;
+  // #278 — browser-page context queued by "페이지를 코치에게", prepended to the
+  // NEXT turn's prompt only (history keeps the user's clean text).
+  private pendingPageContext: string | null = null;
   private activeCohortId: string | null = null;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
@@ -67,6 +70,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   getProfileId(): string | undefined {
     return this.cachedProfile?.profile_id;
+  }
+
+  /** #278 — is "페이지를 코치에게" allowed for this cohort? Default off (minor-safe). */
+  isPageContextEnabled(): boolean {
+    return this.cachedProfile?.input?.page_context === true;
+  }
+
+  /** #278 — stash captured browser-page context to prepend to the next turn. */
+  attachPageContext(ctx: { url: string; title: string; text: string }): void {
+    const body = ctx.text.trim().slice(0, 3000);
+    this.pendingPageContext =
+      `[현재 브라우저 페이지]\nURL: ${ctx.url}\n제목: ${ctx.title}\n` +
+      `--- 페이지 내용(일부) ---\n${body}\n---\n` +
+      `위 페이지를 참고해서 답해줘.`;
   }
 
   /**
@@ -196,6 +213,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       async (p) => {
         this.cachedProfile = p;
         this.profileFetchPromise = null;
+        // #278 — gate the "페이지를 코치에게" toolbar button to opted-in cohorts.
+        void vscode.commands.executeCommand(
+          "setContext",
+          "hypeproof-chat.pageContextEnabled",
+          p?.input?.page_context === true,
+        );
         this.activeCohortId = extractCohortIdUnverified(token) ?? null;
         await this.migrateLegacyStateForActiveCohort();
         // Apply tone-appropriate labels to the preview panel (#159).
@@ -374,6 +397,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const { name: effectiveCoachName, personality: effectiveCoachPersonality } =
       resolveCoach(coach, profile);
 
+    // #278 — consume any queued browser-page context for THIS turn only. The
+    // user message stored in history keeps their clean text; only the model
+    // sees the prepended page context.
+    const pageContext = this.pendingPageContext;
+    this.pendingPageContext = null;
+    const userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
+
     const streamId = randomId();
     const messageId = randomId();
     const ctrl = new AbortController();
@@ -403,7 +433,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         model,
         token,
         history,
-        userText: text,
+        userText: userTextForModel,
         signal: ctrl.signal,
         coachName: effectiveCoachName,
         coachPersonality: effectiveCoachPersonality,
