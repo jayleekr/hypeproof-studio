@@ -131,9 +131,16 @@ def find_promise_hits(prompt: str, rules: dict) -> list:
     pub = rules.get("publishing", {}) or {}
     phrases = pub.get("promise_phrases") or []
     deferrals = pub.get("deferral_markers") or []
+    segments = re.split(r"[\n。.!?！？]", prompt)
+    # Sliding window: a deferral/negation marker in the SAME or an ADJACENT
+    # sentence (±1) reads the promise as a future-session reference ("you'll
+    # learn to publish next time"), not a live contradiction. Sentence splitting
+    # otherwise put the promise and its deferral in separate segments, producing
+    # a false positive on legitimately-deferred prompts (#267 item 2).
+    has_deferral = [any(d in seg for d in deferrals) for seg in segments]
     hits = []
-    for segment in re.split(r"[\n。.!?！？]", prompt):
-        if any(d in segment for d in deferrals):
+    for i, segment in enumerate(segments):
+        if any(has_deferral[max(0, i - 1): i + 2]):
             continue
         for phrase in phrases:
             if phrase in segment:
@@ -231,17 +238,29 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
         if n < lo or n > hi:
             add(findings, rules, pid, "system_prompt_length", f"system_prompt {n} chars outside [{lo}, {hi}]")
 
-    # --- child cohort guardrails (age_range max ≤ child_age_max) ---
+    # --- child cohort guardrails ---
+    # A cohort is "child" when audience.parent_coaching is true OR its age_range
+    # max is ≤ child_age_max. parent_coaching is a REQUIRED field in types.ts, so
+    # gating on it closes the hole where a child profile could omit the optional
+    # age_range to slip past these checks, and aligns with smoke.mjs (which keys
+    # minors off parent_coaching === true). #267 item 1.
     aud = p.get("audience") or {}
     ar = aud.get("age_range")
     child_max = th.get("child_age_max", 12)
-    is_child = (
+    parent_coaching = aud.get("parent_coaching") is True
+    ar_valid_format = (
         isinstance(ar, list)
         and len(ar) == 2
-        and isinstance(ar[1], (int, float))
-        and not isinstance(ar[1], bool)
-        and ar[1] <= child_max
+        and all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in ar)
     )
+    age_says_child = ar_valid_format and ar[1] <= child_max
+    is_child = parent_coaching or age_says_child
+    # A parent-coached (child) cohort MUST declare a valid age_range, so it can't
+    # drop the field to dodge the URL-ban / per-user-pages child checks.
+    if parent_coaching and not ar_valid_format:
+        add(findings, rules, pid, "child_age_range_required",
+            "parent_coaching=true requires a valid audience.age_range [min, max] "
+            "(missing or malformed) so child guardrails can't be bypassed")
     if is_child:
         child_rules = rules.get("child", {}) or {}
         analytics = p.get("analytics") or {}
