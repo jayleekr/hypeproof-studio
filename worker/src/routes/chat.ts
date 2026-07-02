@@ -99,6 +99,12 @@ chat.get("/profile", async (c) => {
     ux: profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
     preview: profile.preview,
+    // #278 — input capabilities, default off (minor-safe). Drives whether the
+    // chat panel exposes "페이지를 코치에게" / image paste.
+    input: {
+      page_context: profile.input?.page_context === true,
+      image_paste: profile.input?.image_paste === true,
+    },
     // Drives the chat panel's tone (game vs search-webapp UI copy) (#159).
     game: { template_tier: profile.game.template_tier },
     // Input-channel capabilities. Resolved to a concrete boolean so the

@@ -5,8 +5,11 @@
   "version": "0.1.5",
   "publisher": "hypeproof",
   "engines": {
-    "vscode": "^1.90.0"
+    "vscode": "^1.116.0"
   },
+  "enabledApiProposals": [
+    "browser"
+  ],
   "categories": [
     "Other"
   ],
@@ -37,6 +40,16 @@
       {
         "command": "hypeproof-chat.focus",
         "title": "HypeProof Chat: Focus"
+      },
+      {
+        "command": "hypeproof-chat.openBrowser",
+        "title": "HypeProof: 브라우저 열기",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "hypeproof-chat.sendPageToCoach",
+        "title": "HypeProof: 현재 페이지를 코치에게 보내기",
+        "icon": "$(comment-discussion)"
       },
       {
         "command": "hypeproof-chat.clearHistory",
@@ -81,6 +94,18 @@
       }
     ],
     "menus": {
+      "view/title": [
+        {
+          "command": "hypeproof-chat.openBrowser",
+          "when": "view == hypeproof-chat.panel",
+          "group": "navigation@1"
+        },
+        {
+          "command": "hypeproof-chat.sendPageToCoach",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.pageContextEnabled",
+          "group": "navigation@2"
+        }
+      ],
       "editor/title": [
         {
           "command": "hypeproof-chat.previewActiveFile",

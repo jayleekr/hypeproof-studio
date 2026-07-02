@@ -33,6 +33,16 @@ export interface Profile {
     auto_start: boolean;
   };
   /**
+   * Optional input capabilities — all default off so minor cohorts never expose
+   * them unless a profile opts in. `page_context` (#278) lets "현재 페이지를
+   * 코치에게" inject the native browser tab's content into a chat turn.
+   * `image_paste` is the website-copyclone screenshot path.
+   */
+  input?: {
+    page_context?: boolean;
+    image_paste?: boolean;
+  };
+  /**
    * Which pre-built skeleton library the model customizes from.
    *
    * Game tiers (kids-basic → kids-rich → teen → pro-3d) — for kids/teen

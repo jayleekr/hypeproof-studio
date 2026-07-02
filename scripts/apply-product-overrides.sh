@@ -82,6 +82,7 @@ jq \
    | .reportIssueUrl       = "https://github.com/jayleekr/hypeproof-studio/issues/new"
    | .serverApplicationName = ($applicationName + "-server")
    | .serverDataFolderName  = ($dataFolderName + "-server")
+   | .extensionEnabledApiProposals = ((.extensionEnabledApiProposals // {}) + {"hypeproof.hypeproof-chat": ["browser"]})
   ' "$PRODUCT_JSON" > "$tmp"
 
 mv "$tmp" "$PRODUCT_JSON"

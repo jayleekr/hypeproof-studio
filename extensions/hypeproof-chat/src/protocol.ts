@@ -100,6 +100,8 @@ export interface ResolvedProfile {
   ux: UxConfig;
   publishing: { enabled: boolean; strategy: string };
   preview: { type: "iframe" | "live_server"; auto_start: boolean };
+  /** Optional input capabilities (default off). #278 / website-copyclone. */
+  input?: { page_context?: boolean; image_paste?: boolean };
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
   // Input-channel capabilities (resolved booleans). Absent on older cached
