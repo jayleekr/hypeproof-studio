@@ -104,10 +104,6 @@ export interface ResolvedProfile {
   input?: { page_context?: boolean; image_paste?: boolean };
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
-  // Input-channel capabilities (resolved booleans). Absent on older cached
-  // responses → treated as all-off. `image_paste` gates the clipboard-image
-  // paste handler; only adult copyclone cohorts enable it.
-  input?: { image_paste?: boolean };
 }
 
 export interface UxConfig {

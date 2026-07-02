@@ -107,9 +107,6 @@ chat.get("/profile", async (c) => {
     },
     // Drives the chat panel's tone (game vs search-webapp UI copy) (#159).
     game: { template_tier: profile.game.template_tier },
-    // Input-channel capabilities. Resolved to a concrete boolean so the
-    // webview gates its paste handler without knowing the default. Default-off.
-    input: { image_paste: profile.input?.image_paste === true },
   });
 });
 

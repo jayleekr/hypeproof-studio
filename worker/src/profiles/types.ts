@@ -96,19 +96,6 @@ export interface Profile {
     web_search?: boolean;
     max_uses?: number;
   };
-  /**
-   * Optional input-channel capabilities. Default-off so a minor cohort never
-   * exposes a new data flow implicitly (see COHORT-AUTHORING 가드레일).
-   *
-   * - `image_paste`: allow pasted-image context (website-copyclone). When
-   *   false/absent (default), the webview's clipboard-paste handler stays
-   *   text-only AND the worker strips any image content blocks server-side
-   *   (defense-in-depth — a client can't smuggle images into a text-only
-   *   cohort). Enable only on adult cohorts that need screenshot injection.
-   */
-  input?: {
-    image_paste?: boolean;
-  };
   session: {
     cohort_id: string;
     series_total: number;
