@@ -169,14 +169,22 @@ export type ModelAlias =
   | "hypeproof-default"
   | "hypeproof-strong";
 
-export type AssetFocus =
-  | "taste"
-  | "intent_clarity"
-  | "context_design"
-  | "verification_reflex"
-  | "delegation_judgment"
-  | "iteration_reflex"
-  | "ownership";
+// The 7 AI Native Assets — single source of truth. Tooling (scaffold-profile.ts)
+// imports this array instead of re-listing the values; the AssetFocus union is
+// derived from it so adding an asset here updates both the type and the runtime
+// enum. The cohort-harness validator keeps a Python copy in rules.yaml (`assets`)
+// — kept in sync by hand (see the keep-in-sync note there).
+export const ASSET_FOCUS = [
+  "taste",
+  "intent_clarity",
+  "context_design",
+  "verification_reflex",
+  "delegation_judgment",
+  "iteration_reflex",
+  "ownership",
+] as const;
+
+export type AssetFocus = (typeof ASSET_FOCUS)[number];
 
 // Anthropic model ids (used when LLM_PROVIDER=anthropic).
 export const MODEL_MAP: Record<ModelAlias, string> = {
