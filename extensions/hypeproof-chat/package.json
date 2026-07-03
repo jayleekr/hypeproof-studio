@@ -134,6 +134,15 @@
           "default": "hypeproof-default",
           "description": "Model identifier sent to the proxy."
         },
+        "hypeproofChat.coachRuntime": {
+          "type": "string",
+          "enum": [
+            "proxy",
+            "agent-sdk"
+          ],
+          "default": "proxy",
+          "description": "Coach runtime. 'proxy' = the current single-turn provider proxy (default). 'agent-sdk' = the Claude Agent SDK coach (epic #282, Phase-0 spike — not yet wired; requires @anthropic-ai/claude-agent-sdk)."
+        },
         "hypeproofChat.requireApprovalFor": {
           "type": "array",
           "items": {
