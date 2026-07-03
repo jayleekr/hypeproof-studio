@@ -9,9 +9,10 @@ Epic: #282
 The chat coach in `extensions/hypeproof-chat/` is, today, a single-turn
 chat-only client talking to `worker/` which proxies three LLM providers through
 an OpenAI-compatible shim. It has **no agentic loop, no tool-use, no subagents,
-and no MCP** — `mcp_tools_enabled` is an unused allowlist field and the
-manual-approve gate (`resolveActionApproval`) is dormant because the model never
-issues tool actions. The coach emits an HTML blob per turn; the client
+and no MCP** — `mcp_tools_enabled` is a tool allowlist that `translate.ts`
+already enforces but that is empty (`[]`) in every current profile, so it is
+effectively dormant; the manual-approve gate (`resolveActionApproval`) is
+likewise dormant because the model never issues tool actions. The coach emits an HTML blob per turn; the client
 string-extracts it and writes `index.html` itself. The gap versus Claude Code is
 structural, not incremental: the product is not a weak agent, it is not an agent.
 
@@ -48,11 +49,20 @@ the engine and keep the pedagogy.
   `worker/src/prompts/*`, `asset-scorer.ts`, `routes/trace.ts` + `lib/storage.ts`
   analytics, child-safety rules, token/session ops, guided coach UX, skeletons.
   A cohort `Profile` maps to SDK options: `systemPrompt` from `prompts/*.md`,
-  `permissionMode`, tool allowlist from `mcp_tools_enabled`, model from
+  `permissionMode`, tool allowlist from the profile's tool policy, model from
   `ModelAlias`. The asset scorer and trace run as post-turn hooks; the
   manual-approve gate becomes a `PreToolUse` hook reusing the existing modal.
-- **Retire (once the SDK path is default):**
+  (The profile is the canonical owner of the tool allowlist. The Phase-0/1
+  spike derives it client-side from `game.template_tier` + `tools.web_search`;
+  Phase 2 should move that policy into the worker profile — folding in
+  `mcp_tools_enabled` — so a single server-side field governs both the proxy
+  and SDK paths. See #284.)
+- **Retire (once the SDK path is default AND no cohort runs the proxy path):**
   `worker/src/lib/{translate,sse,gemini}.ts` and the three model-alias maps.
+  Note `translate.ts` is the only place the `mcp_tools_enabled` allowlist is
+  enforced today — re-home that check (into the profile→SDK tool policy) before
+  deleting it, or a non-empty allowlist on a still-proxied cohort silently stops
+  filtering.
 
 Migration is staged behind a feature flag (Phase 0 spike → Phase 1 flagged SDK
 coach → Phase 2 real tool-use/subagents → Phase 3 remove the plumbing) so the
