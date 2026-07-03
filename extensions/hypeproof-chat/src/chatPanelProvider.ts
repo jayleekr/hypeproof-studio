@@ -4,6 +4,7 @@ import * as fs from "fs";
 import { TOKEN_KEY } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
+import { runSdkCoach } from "./sdkCoach";
 import { PreviewProvider } from "./previewProvider";
 import {
   ChatMessage,
@@ -428,31 +429,69 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #173 — accumulate citations across the stream so they persist to history.
     const assistantCitations: import("./protocol").Citation[] = [];
     try {
-      await proxyChat({
-        proxyUrl,
-        model,
-        token,
-        history,
-        userText: userTextForModel,
-        signal: ctrl.signal,
-        coachName: effectiveCoachName,
-        coachPersonality: effectiveCoachPersonality,
-        onDelta: (delta) => {
-          assistantText += delta;
-          void this.post({ type: "streamChunk", streamId, delta });
-          // Cheap check; extractRenderableHtml regex returns null fast on
-          // most chunks (no fence/doctype present yet).
-          tryReveal(assistantText);
-        },
-        onCitations: (cites) => {
-          for (const c of cites) assistantCitations.push(c);
-          void this.post({ type: "streamCitations", streamId, citations: cites });
-        },
-        onAssetScore: (assetScore) => {
-          this.assetScores?.recordAssetScore(assetScore);
-          void this.post({ type: "streamAssetScore", streamId, assetScore });
-        },
-      });
+      // #282 Phase 1 — route to the Agent SDK coach behind the flag. Default
+      // "proxy" keeps the exact existing single-turn behavior; "agent-sdk"
+      // runs runSdkCoach with the SAME callbacks so nothing downstream changes.
+      const runtime = cfg.get<"proxy" | "agent-sdk">("coachRuntime", "proxy");
+      const onDelta = (delta: string) => {
+        assistantText += delta;
+        void this.post({ type: "streamChunk", streamId, delta });
+        // Cheap check; extractRenderableHtml regex returns null fast on
+        // most chunks (no fence/doctype present yet).
+        tryReveal(assistantText);
+      };
+      const onCitations = (cites: import("./protocol").Citation[]) => {
+        for (const c of cites) assistantCitations.push(c);
+        void this.post({ type: "streamCitations", streamId, citations: cites });
+      };
+      const onAssetScore = (assetScore: import("./protocol").AssetScoreChunk) => {
+        this.assetScores?.recordAssetScore(assetScore);
+        void this.post({ type: "streamAssetScore", streamId, assetScore });
+      };
+      if (runtime === "agent-sdk") {
+        if (!profile) {
+          throw new Error("코치 프로필을 아직 못 받았어요. 잠시 후 다시 시도해주세요.");
+        }
+        if (!token) {
+          throw new ProxyAuthError("missing", "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑");
+        }
+        await runSdkCoach({
+          gatewayUrl: proxyUrl,
+          token,
+          model,
+          profile,
+          // TODO(#282 Phase 1): source the cohort system prompt via the worker
+          // gateway (keeps the key server-side; worker injects prompt + auth).
+          systemPrompt: "",
+          history: history.map((m) => ({ role: m.role, content: m.content })),
+          userText: userTextForModel,
+          signal: ctrl.signal,
+          onDelta,
+          onCitations,
+          onAssetScore,
+          requestApproval: (a) =>
+            this.resolveActionApproval({
+              requestId: randomId(),
+              kind: a.kind === "run" ? "executeShell" : "writeFile",
+              description: a.detail,
+              payload: { path: a.detail },
+            }),
+        });
+      } else {
+        await proxyChat({
+          proxyUrl,
+          model,
+          token,
+          history,
+          userText: userTextForModel,
+          signal: ctrl.signal,
+          coachName: effectiveCoachName,
+          coachPersonality: effectiveCoachPersonality,
+          onDelta,
+          onCitations,
+          onAssetScore,
+        });
+      }
       void this.post({ type: "streamEnd", streamId });
       await this.appendHistory([
         { id: randomId(), role: "user", content: text, createdAt: Date.now() },

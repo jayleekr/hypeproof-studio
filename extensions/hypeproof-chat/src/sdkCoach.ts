@@ -26,7 +26,7 @@ export interface SdkCoachArgs {
   profile: ResolvedProfile;
   /** Cohort system prompt text (tuned Korean coaching script). */
   systemPrompt: string;
-  history: { role: "user" | "assistant"; content: string }[];
+  history: { role: string; content: string }[];
   userText: string;
   signal: AbortSignal;
   onDelta: (delta: string) => void;
