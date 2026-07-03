@@ -1,25 +1,39 @@
-// Phase-0 spike (#282) — ORCHESTRATION: run the coach on the Claude Agent SDK
-// instead of the single-turn proxy. Drop-in with proxyChat's callback contract
-// so chatPanelProvider can route to it behind the `hypeproofChat.coachRuntime`
-// flag with a one-line branch (Phase 1).
+// #282 — ORCHESTRATION: run the coach on the Claude Agent SDK instead of the
+// single-turn proxy. Drop-in with proxyChat's callback contract so
+// chatPanelProvider can route to it behind the `hypeproofChat.coachRuntime`
+// flag (Phase 1), falling back to the proxy runtime when the SDK isn't present.
 //
 // Side effects are injected as callbacks (onDelta / onCitations / onAssetScore /
 // requestApproval) — this module stays `vscode`-free and testable, same split
 // as proxyClient. The SDK is loaded via a dynamic import so this file compiles
-// and ships even before the dependency is installed; flipping the flag without
-// the dep throws a clear, single error instead of breaking the live proxy path.
+// and ships even before the dependency is installed; when it's absent this
+// throws SdkUnavailableError so the caller can fall back to the proxy path
+// instead of surfacing a raw error to the student.
 
 import type { AssetScoreChunk, Citation, ResolvedProfile } from "./protocol";
-import { profileToAgentOptions } from "./sdkCoachHelpers";
+import {
+  profileToAgentOptions,
+  sdkToolToActionRequest,
+  type CoachToolAction,
+} from "./sdkCoachHelpers";
 
-/** A tool action the coach wants to perform, surfaced to the host modal. */
-export interface CoachActionRequest {
-  kind: "write_file" | "edit_file" | "run" | "web_search" | string;
-  detail: string;
+export type { CoachToolAction } from "./sdkCoachHelpers";
+
+/**
+ * Thrown when the agent-sdk runtime is selected but the SDK package isn't
+ * installed (the pre-Phase-1 state). The caller catches this and falls back to
+ * the proxy runtime, so a misconfigured flag never breaks the live coach or
+ * shows a technical English error to a child.
+ */
+export class SdkUnavailableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SdkUnavailableError";
+  }
 }
 
 export interface SdkCoachArgs {
-  /** Worker gateway base (fronts the shared classroom key — no key on device). */
+  /** Worker gateway base, exposed to the SDK as ANTHROPIC_BASE_URL. */
   gatewayUrl: string;
   token: string;
   model: string;
@@ -32,8 +46,8 @@ export interface SdkCoachArgs {
   onDelta: (delta: string) => void;
   onCitations: (citations: Citation[]) => void;
   onAssetScore: (score: AssetScoreChunk) => void;
-  /** Manual-approve gate (essence #16). Resolves true to allow the tool. */
-  requestApproval: (action: CoachActionRequest) => Promise<boolean>;
+  /** Manual-approve gate. Resolves true to allow the tool. */
+  requestApproval: (action: CoachToolAction) => Promise<boolean>;
 }
 
 /** npm package that provides the SDK once wired (Phase 1). */
@@ -50,13 +64,31 @@ interface AgentSdkModule {
     options: {
       systemPrompt: string;
       model: string;
+      /**
+       * Tools auto-approved WITHOUT hitting canUseTool. We keep this EMPTY on
+       * purpose — every tool must fall through to canUseTool so the host modal
+       * gates it. (A bare entry like "Read" would silently bypass the gate.)
+       */
       allowedTools: string[];
+      /**
+       * Filesystem setting sources the SDK reads allow/deny rules from. Pinned
+       * to [] so a workspace `.claude/settings.json` in a classroom checkout
+       * can't inject allow-rules that bypass canUseTool.
+       */
+      settingSources: string[];
       permissionMode: string;
       maxTurns: number;
-      // Fronts the shared key through our worker instead of a per-device key.
-      // (Exact wiring — base URL vs custom fetch/auth — is a Phase-1 detail.)
-      env?: Record<string, string>;
-      canUseTool?: (name: string, input: unknown) => Promise<{ behavior: "allow" | "deny" }>;
+      /**
+       * Environment for the spawned CLI. The SDK REPLACES the subprocess env
+       * with this (it does not merge), so we spread process.env to keep PATH
+       * etc., and route model calls through our worker via the SDK-recognized
+       * ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN (custom names do nothing).
+       */
+      env?: Record<string, string | undefined>;
+      canUseTool?: (
+        name: string,
+        input: unknown,
+      ) => Promise<{ behavior: "allow" | "deny"; updatedInput?: unknown }>;
       abortController?: AbortController;
     };
   }): AsyncIterable<Record<string, unknown>>;
@@ -69,27 +101,44 @@ async function loadSdk(): Promise<AgentSdkModule> {
     const spec: string = SDK_PACKAGE;
     const mod = (await import(spec)) as unknown as AgentSdkModule;
     return mod;
-  } catch {
-    throw new Error(
-      `[coach] agent-sdk runtime selected but ${SDK_PACKAGE} is not installed yet. ` +
-        `This is the Phase-0 spike (#282); keep hypeproofChat.coachRuntime = "proxy" until Phase 1 wires the SDK.`,
+  } catch (err) {
+    // Keep the technical detail for developers (console), NOT for the student.
+    console.warn(`[coach] failed to load ${SDK_PACKAGE}:`, err);
+    throw new SdkUnavailableError(
+      `agent-sdk runtime selected but ${SDK_PACKAGE} is not installed. ` +
+        `Falling back to the proxy runtime (Phase-0 spike, #282).`,
     );
   }
 }
 
+function abortError(): Error {
+  // Mirror the proxy path (fetch throws a DOMException AbortError on abort) so
+  // the caller's catch treats an SDK abort identically and skips history commit.
+  if (typeof DOMException === "function") return new DOMException("Aborted", "AbortError");
+  const err = new Error("Aborted");
+  err.name = "AbortError";
+  return err;
+}
+
 /**
  * Run one coach turn on the Agent SDK. Mirrors proxyChat's contract so the
- * caller doesn't care which runtime produced the stream.
+ * caller doesn't care which runtime produced the stream. Throws an AbortError
+ * on cancellation (parity with proxyChat) and SdkUnavailableError when the SDK
+ * package is absent.
  */
 export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
+  // Bridge the caller's signal to an SDK AbortController UP FRONT — before any
+  // await — so a stop during loadSdk() still cancels. (addEventListener added
+  // after the signal already fired would never run.)
+  if (args.signal.aborted) throw abortError();
+  const abortController = new AbortController();
+  args.signal.addEventListener("abort", () => abortController.abort(), { once: true });
+
   const sdk = await loadSdk();
   const opts = profileToAgentOptions(args.profile, {
     model: args.model,
     systemPrompt: args.systemPrompt,
   });
-
-  const abortController = new AbortController();
-  args.signal.addEventListener("abort", () => abortController.abort(), { once: true });
 
   // Compose the transcript into a single prompt string for the spike. Phase 1
   // switches to the SDK streaming-input session API to preserve real history.
@@ -101,17 +150,23 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     options: {
       systemPrompt: opts.systemPrompt,
       model: opts.model,
-      allowedTools: opts.allowedTools,
+      allowedTools: [],
+      settingSources: [],
       permissionMode: opts.permissionMode,
       maxTurns: opts.maxTurns,
-      env: { HYPEPROOF_GATEWAY: args.gatewayUrl, HYPEPROOF_TOKEN: args.token },
-      // Every tool use is gated through the existing host modal.
+      env: {
+        ...process.env,
+        ANTHROPIC_BASE_URL: args.gatewayUrl,
+        ANTHROPIC_AUTH_TOKEN: args.token,
+      },
+      // Every tool call routes here (allowedTools is empty). First enforce the
+      // cohort's permitted set, then gate the survivors through the host modal.
       canUseTool: async (name: string, input: unknown) => {
-        const ok = await args.requestApproval({
-          kind: name.toLowerCase(),
-          detail: typeof input === "string" ? input : JSON.stringify(input),
-        });
-        return { behavior: ok ? "allow" : "deny" };
+        if (!opts.permittedTools.includes(name)) {
+          return { behavior: "deny" as const };
+        }
+        const ok = await args.requestApproval({ toolName: name, input });
+        return ok ? { behavior: "allow" as const, updatedInput: input } : { behavior: "deny" as const };
       },
       abortController,
     },
@@ -120,14 +175,16 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   // Map SDK messages → the proxyChat callback shape. Field access is defensive
   // (Record<string,unknown>) until the real SDK types land in Phase 1.
   for await (const msg of stream) {
+    // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
+    if (args.signal.aborted) throw abortError();
     const type = String((msg as Record<string, unknown>).type ?? "");
     if (type === "assistant" || type === "text" || type === "content_block_delta") {
       const delta = extractText(msg);
       if (delta) args.onDelta(delta);
-    } else if (type === "result" || type === "message_stop") {
-      // terminal — nothing to emit; caller posts streamEnd
     }
-    if (args.signal.aborted) break;
+    // Other message types (result / message_stop) are terminal — nothing to
+    // emit; the caller posts streamEnd. (onCitations / onAssetScore are wired
+    // for parity but the SDK stream mapping for those lands in Phase 1.)
   }
 }
 
