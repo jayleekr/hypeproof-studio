@@ -107,6 +107,10 @@ chat.get("/profile", async (c) => {
     },
     // Drives the chat panel's tone (game vs search-webapp UI copy) (#159).
     game: { template_tier: profile.game.template_tier },
+    // #282 — expose the cohort's provider-tool opt-in so the Studio Agent SDK
+    // coach grants WebSearch only where the profile explicitly enabled it
+    // (the profile owns tool policy; the client never infers it).
+    tools: { web_search: profile.tools?.web_search === true },
   });
 });
 

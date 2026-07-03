@@ -151,6 +151,7 @@ When in doubt:
 |---|---|---|---|
 | REQ-K1 | 3개 설정 노출 | `hypeproofChat.proxyUrl` / `model` / `requireApprovalFor` 가 settings UI 에 검색됨 | M |
 | REQ-K2 | webview → openSettings 브릿지 | 패널 내부 ⚙ 클릭 → `workbench.action.openSettings` 호출 | E |
+| REQ-K3 | `coachRuntime` 설정 노출 | `hypeproofChat.coachRuntime` (proxy/agent-sdk) 가 settings UI 에 검색됨 | M |
 
 ## L. Safety / observability
 
@@ -159,6 +160,21 @@ When in doubt:
 | REQ-L1 | Chat webview CSP | `default-src 'none'` + nonce'd script-src + connect-src webview only | U (cspBuilder) |
 | REQ-L2 | Preview iframe 격리 | iframe sandbox 위 D3 + parent CSP `frame-src 'self' data: blob:` | U (cspBuilder) |
 | REQ-L3 | Stream abort on dispose | view dispose 시 모든 activeStreams.abort + map clear | U |
+
+## M. Agent SDK coach runtime (#282)
+
+> `hypeproofChat.coachRuntime = "agent-sdk"` 로 전환 시 코치를 Claude Agent SDK 위에서 구동. Phase-0/1 스캐폴드 — 아래 안전 계약은 SDK 미설치 상태에서도 pure helper 단위로 검증된다. 도구 정책의 canonical owner 는 궁극적으로 worker 프로필이어야 한다 ([ADR 0003](adr/0003-agent-sdk-coach-runtime.md) / #283).
+
+| ID | 요구사항 | 수용 기준 | Layer |
+|---|---|---|---|
+| REQ-M1 | 프로필 → 도구 정책 매핑 (fail-closed) | `permittedToolsFor`: `search-webapp`(워크숍) → Read/Write/Edit; 게임/kids/teen/미지정 tier → chat-only(`[]`) | U (`test/sdk-coach-helpers`) |
+| REQ-M2 | WebSearch 는 프로필 opt-in 에만 | `tools.web_search === true` 인 cohort 만 WebSearch 부여 (assets_focus 추론 금지) | U (`test/sdk-coach-helpers`) |
+| REQ-M3 | Minor 루프 bound | `maxTurnsFor`: 워크숍 20, 그 외(미지정 포함) 6 | U (`test/sdk-coach-helpers`) |
+| REQ-M4 | SDK 도구 → 정확한 ActionRequest kind | `sdkToolToActionRequest`: Bash → `executeShell`(Tier-1 hard-deny), Write/Edit → `writeFile`+실경로, Read → `readFile`, WebSearch → `webSearch`, 미지 도구 → fail-closed(`executeShell`) | U (`test/sdk-coach-helpers`) |
+| REQ-M5 | 매 tool use 는 canUseTool 게이트 | SDK `allowedTools` 는 빈 값 + `settingSources: []` — 모든 도구가 canUseTool 로 fall-through, cohort 미허용 도구는 deny | U + E |
+| REQ-M6 | 게이트웨이 라우팅 + env 보존 | `env: { ...process.env, ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN }` (커스텀 이름 금지, PATH 보존) | U |
+| REQ-M7 | SDK 미가용 시 proxy fallback | 패키지 부재 → `SdkUnavailableError` → 콘솔 경고 + 해당 턴 proxy 로 폴백 (학생에게 raw 에러 미노출) | U + E |
+| REQ-M8 | Abort parity | agent-sdk 경로도 stop 시 AbortError throw → streamEnd·appendHistory 건너뜀 (잘린 턴 미커밋); abort listener 는 `loadSdk()` 이전 등록 | U + E |
 
 ---
 

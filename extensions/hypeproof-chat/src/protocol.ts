@@ -95,6 +95,10 @@ export interface ResolvedProfile {
   input?: { page_context?: boolean; image_paste?: boolean };
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
+  // #282 — provider-hosted tools the cohort profile opted into (sourced from the
+  // worker, not inferred client-side). Drives which Agent SDK tools the coach may
+  // use. Absent/false → the coach is chat-only for that capability.
+  tools?: { web_search?: boolean };
 }
 
 export interface UxConfig {
@@ -192,7 +196,10 @@ export type HostMessage =
 
 export interface ActionRequest {
   requestId: string;
-  kind: "writeFile" | "executeShell";
+  // #282 — extended beyond writeFile/executeShell so Agent SDK tool calls map to
+  // an accurate kind: Read/Glob → readFile, WebSearch/WebFetch → webSearch. The
+  // approval policy (resolveActionApproval) keys its tiers on these.
+  kind: "writeFile" | "executeShell" | "readFile" | "webSearch";
   description: string;
   payload: unknown;
 }
