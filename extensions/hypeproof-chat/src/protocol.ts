@@ -14,6 +14,15 @@ export interface ChatMessage {
    * the chat panel during streaming, persisted with the message.
    */
   citations?: Citation[];
+  /**
+   * Pasted-image context attached to a user message (website-copyclone
+   * curriculum). Each entry is a `data:image/<type>;base64,...` URL produced
+   * by the webview's clipboard-paste handler. Carried so the webview can
+   * render a thumbnail on the bubble; the model only receives the image on
+   * the turn it was pasted (see proxyClient — history is sent text-only, so
+   * a screenshot is injected exactly once and never re-sent / persisted).
+   */
+  images?: string[];
 }
 
 /**
@@ -129,7 +138,7 @@ export interface SuggestionChip {
 // Webview → Host
 export type WebviewMessage =
   | { type: "ready" }
-  | { type: "sendMessage"; text: string; history: ChatMessage[] }
+  | { type: "sendMessage"; text: string; history: ChatMessage[]; images?: string[] }
   | { type: "retryMessage"; prompt: string; history: ChatMessage[] }
   | { type: "cancelStream"; streamId: string }
   | { type: "requestAction"; action: ActionRequest }

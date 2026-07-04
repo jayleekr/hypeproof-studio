@@ -286,7 +286,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.postHistory();
         return;
       case "sendMessage":
-        await this.handleSend(msg.text, msg.history);
+        await this.handleSend(msg.text, msg.history, msg.images);
         return;
       case "retryMessage":
         await this.handleSend(msg.prompt, msg.history);
@@ -361,11 +361,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async handleSend(text: string, history: ChatMessage[]): Promise<void> {
+  private async handleSend(text: string, history: ChatMessage[], images?: string[]): Promise<void> {
     // "Show me / open it / run it" — if the kid asks to see the game in plain
     // language and a game already exists, just open it. Don't make them hunt
-    // for the ▶ Run button or burn an AI round-trip on a deflection.
-    if (isShowIntent(text)) {
+    // for the ▶ Run button or burn an AI round-trip on a deflection. Skipped
+    // when an image is attached — a pasted screenshot is always a real turn.
+    if (isShowIntent(text) && (!images || images.length === 0)) {
       const lastGame = this.extractLastRenderableCode();
       if (lastGame) {
         const labels = labelsForProfile(this.cachedProfile);
@@ -434,6 +435,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         token,
         history,
         userText: userTextForModel,
+        images,
         signal: ctrl.signal,
         coachName: effectiveCoachName,
         coachPersonality: effectiveCoachPersonality,

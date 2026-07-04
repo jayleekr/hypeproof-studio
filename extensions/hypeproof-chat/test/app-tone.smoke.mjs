@@ -11,6 +11,7 @@ const { appToneOf, labelsForProfile, TONE_LABELS } = await import(
 // ─── appToneOf — tier discrimination ─────────────────────────────────
 {
   assert.equal(appToneOf({ game: { template_tier: "search-webapp" } }), "search");
+  assert.equal(appToneOf({ game: { template_tier: "website" } }), "site");
   assert.equal(appToneOf({ game: { template_tier: "kids-basic" } }), "game");
   assert.equal(appToneOf({ game: { template_tier: "kids-rich" } }), "game");
   assert.equal(appToneOf({ game: { template_tier: "teen" } }), "game");
@@ -37,7 +38,7 @@ const { appToneOf, labelsForProfile, TONE_LABELS } = await import(
     "aboutTitle",
     "aboutSubtitle",
   ];
-  for (const tone of ["game", "search"]) {
+  for (const tone of ["game", "search", "site"]) {
     const labels = TONE_LABELS[tone];
     for (const slot of required) {
       assert.ok(
@@ -51,11 +52,8 @@ const { appToneOf, labelsForProfile, TONE_LABELS } = await import(
 // ─── labels are tone-distinct (no shared copy that hides bugs) ───────
 {
   for (const slot of ["buildingLabel", "previewTitle", "showIntentReply"]) {
-    assert.notEqual(
-      TONE_LABELS.game[slot],
-      TONE_LABELS.search[slot],
-      `${slot} must differ between tones`,
-    );
+    const vals = [TONE_LABELS.game[slot], TONE_LABELS.search[slot], TONE_LABELS.site[slot]];
+    assert.equal(new Set(vals).size, 3, `${slot} must differ across all three tones`);
   }
 }
 
@@ -65,6 +63,15 @@ const { appToneOf, labelsForProfile, TONE_LABELS } = await import(
   for (const slot of ["buildingLabel", "previewTitle", "showIntentReply", "aboutTitle", "aboutSubtitle"]) {
     assert.doesNotMatch(s[slot], /게임|🎮|점프|캐릭터|점수/, `search.${slot} leaks game copy: ${s[slot]}`);
   }
+}
+
+// ─── site tone uses website vocabulary, no game/search leakage ───────
+{
+  const s = TONE_LABELS.site;
+  for (const slot of ["buildingLabel", "previewTitle", "showIntentReply", "aboutTitle", "aboutSubtitle"]) {
+    assert.doesNotMatch(s[slot], /게임|🎮|검색엔진|🔍/, `site.${slot} leaks game/search copy: ${s[slot]}`);
+  }
+  assert.match(s.previewTitle, /웹사이트|🌐/, "site.previewTitle uses website vocabulary");
 }
 
 // ─── game tone keeps its legacy vocabulary ───────────────────────────
@@ -82,4 +89,10 @@ const { appToneOf, labelsForProfile, TONE_LABELS } = await import(
   assert.deepEqual(actual, expected);
 }
 
-console.log("✅ app-tone: 6 case groups passed");
+// ─── labelsForProfile resolves the website tier to the site tone ─────
+{
+  const actual = labelsForProfile({ game: { template_tier: "website" } });
+  assert.deepEqual(actual, TONE_LABELS.site);
+}
+
+console.log("✅ app-tone: 8 case groups passed");

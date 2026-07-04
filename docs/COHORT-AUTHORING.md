@@ -9,7 +9,11 @@ HypeProof Studio의 핵심 추상화: **cohort마다 다른 UX**를 코드 수�
 지금까지 검증된 분기:
 - **SK바이오팜 가족 (v126, 4시간 단발 · 2트랙)** — 초3·4 `kids-basic` + 초5·6 `kids-rich`,
   같은 `cohort_id`(`sk-biopharm-2026-a`)를 공유하고 `profile_id`로만 갈라짐 → [단발 2-트랙 패턴](#단발-2-트랙-패턴-v126-sk바이오팜)
-- **치과** — 시뮬레이션 가능 (의료 종사자, 성인, 다른 페르소나)
+- **보아치과 (성인 · 2트랙)** — 같은 `cohort_id`(`boah-dental-2026-a`) 안에서 *다른 커리큘럼*을
+  병렬 트랙으로: 직원 검색엔진(`...teaser...`, `search-webapp` tier) + 원장 웹사이트 카피클론
+  (`...director-copyclone...`, `website` tier + `input.image_paste`). 둘 다 `series_total:1, series_index:1`.
+  한 cohort가 *동일 레슨 2연령*(SK)이 아니라 *다른 커리큘럼 2역할*도 담을 수 있음을 보여주는 예.
+- **치과(기타)** — 추가 페르소나 시뮬레이션 가능 (의료 종사자, 성인)
 - **기업 AX 임원** — 시뮬레이션 가능 (formal tone, business case prompts)
 - **강사 양성 / 컴피티션** — Verify 모드 (HYROX 프레임)
 
@@ -201,6 +205,9 @@ Feedback Loop)을 지나되 "운전법"만 다르다.
 2. `sandbox.execute_shell: true` 는 워크숍 환경 신뢰도 확인 후만
 3. `publishing.strategy: "per_user_github_pages"`는 자녀 cohort에서 부모 동의 + 본명 노출 X 룰 필요
 4. system prompt에 "외부 URL 호출 금지" 룰 포함
+5. `input.image_paste`는 **default OFF** — 성인 cohort가 스크린샷 주입(website-copyclone 류)을
+   필요로 할 때만 `true`. 자녀 cohort는 절대 켜지 말 것(임의 이미지가 LLM으로 전송됨). 끄면 웹뷰
+   paste가 텍스트 전용으로 동작하고 워커도 image 블록을 server-side로 strip한다(이중 방어).
 
 ## Validation
 
