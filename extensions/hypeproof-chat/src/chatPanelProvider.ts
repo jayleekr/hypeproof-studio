@@ -5,7 +5,7 @@ import { TOKEN_KEY } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { runSdkCoach, SdkUnavailableError } from "./sdkCoach";
-import { sdkToolToActionRequest } from "./sdkCoachHelpers";
+import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
 import {
   ChatMessage,
@@ -786,15 +786,6 @@ function isInsideWorkspace(targetPath: string): boolean {
     }
   }
   return false;
-}
-
-/** True for an AbortError from either runtime (fetch abort or SDK abort). */
-function isAbortError(err: unknown): boolean {
-  return (
-    !!err &&
-    typeof err === "object" &&
-    (err as { name?: unknown }).name === "AbortError"
-  );
 }
 
 function stripMd(s: string): string {

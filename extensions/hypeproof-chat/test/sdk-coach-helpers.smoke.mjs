@@ -11,14 +11,20 @@ const {
   isMinorTier,
   maxTurnsFor,
   sdkToolToActionRequest,
+  isAbortError,
 } = await import("../src/sdkCoachHelpers.ts");
 
 const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : undefined, ...extra });
 
 // ─── permittedToolsFor — file tools only for the professional webapp tier ────
 {
-  // search-webapp (보아치과) → file tools.
+  // Adult workshop webapp tiers (search-webapp + website copyclone, #273) → file tools.
   assert.deepEqual(permittedToolsFor(profile("search-webapp")), ["Read", "Write", "Edit"]);
+  assert.deepEqual(
+    permittedToolsFor(profile("website")),
+    ["Read", "Write", "Edit"],
+    "website copyclone tier gets file tools (#273 tier, not fail-closed to chat-only)",
+  );
 
   // Game/kids/teen cohorts → chat-only, NO autonomous tools.
   for (const tier of ["kids-basic", "kids-rich", "teen", "pro-3d"]) {
@@ -62,6 +68,7 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   assert.equal(isMinorTier(profile(null)), true, "missing tier fails closed to minor");
   assert.equal(isMinorTier(profile("weird-new-tier")), true, "unknown tier fails closed to minor");
   assert.equal(isMinorTier(profile("search-webapp")), false, "search-webapp is the adult workshop tier");
+  assert.equal(isMinorTier(profile("website")), false, "website copyclone is an adult workshop tier");
 }
 
 // ─── maxTurnsFor — tight for minors, looser for the workshop ─────────────────
@@ -70,6 +77,30 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   assert.equal(maxTurnsFor(profile("teen")), 6);
   assert.equal(maxTurnsFor(profile(null)), 6, "unknown tier gets the tight minor cap");
   assert.equal(maxTurnsFor(profile("search-webapp")), 20);
+  assert.equal(maxTurnsFor(profile("website")), 20, "website copyclone gets the workshop cap");
+}
+
+// ─── isAbortError — user-stop parity across BOTH runtimes ─────────────────────
+// The default proxy path raises a DOMException("AbortError") on stop; the SDK
+// path throws an Error with name "AbortError". Both must be recognized so the
+// panel skips committing the truncated turn AND suppresses the error banner —
+// the regression basis for "proxy stop behavior preserved" (JinyongShin #284).
+{
+  // Proxy path: fetch abort surfaces a DOMException named AbortError.
+  const domAbort =
+    typeof DOMException === "function"
+      ? new DOMException("Aborted", "AbortError")
+      : Object.assign(new Error("Aborted"), { name: "AbortError" });
+  assert.equal(isAbortError(domAbort), true, "fetch/proxy AbortError is recognized");
+
+  // SDK path: plain Error with name AbortError (see sdkCoach abortError()).
+  assert.equal(isAbortError(Object.assign(new Error("Aborted"), { name: "AbortError" })), true);
+
+  // Real failures must NOT be swallowed as a stop (they still show a banner).
+  assert.equal(isAbortError(new Error("network down")), false, "genuine errors are not aborts");
+  assert.equal(isAbortError(new TypeError("boom")), false);
+  assert.equal(isAbortError(null), false);
+  assert.equal(isAbortError("AbortError"), false, "a bare string is not an error object");
 }
 
 // ─── sdkToolToActionRequest — SDK tool → accurate host ActionRequest ─────────

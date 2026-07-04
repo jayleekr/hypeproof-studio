@@ -47,13 +47,14 @@ export interface ProfileToAgentCtx {
 // Real worker `game.template_tier` values (worker/src/profiles/types.ts).
 // Game tiers (kids-basic/kids-rich/teen/pro-3d) are kids/teen cohorts — guided,
 // chat-only, minor bounds. The WORKSHOP tiers below are the professional
-// cohorts (e.g. 보아치과 "search-webapp") whose deliverable IS a webapp the
-// coach edits directly. Anything NOT in this set — including a tier we don't
-// recognize or a missing field — is treated as a minor game cohort (fail
-// closed). This is the single source of truth for both audience and file-tool
-// eligibility; keep it in sync with types.ts (or, ideally, let the worker
-// profile own the policy — see ADR 0003 / #283).
-const WORKSHOP_TIERS = new Set(["search-webapp"]);
+// adult cohorts whose deliverable IS a webapp the coach edits directly:
+// "search-webapp" (보아치과 clinical workshop) and "website" (website-copyclone,
+// 보아치과 원장 v2 — added in #273). Anything NOT in this set — including a tier
+// we don't recognize or a missing field — is treated as a minor game cohort
+// (fail closed). This is the single source of truth for both audience and
+// file-tool eligibility; keep it in sync with types.ts (or, ideally, let the
+// worker profile own the policy — see ADR 0003 / #283).
+const WORKSHOP_TIERS = new Set(["search-webapp", "website"]);
 
 /**
  * Whether this cohort is a minor/guided audience — used to tighten loop bounds.
@@ -90,6 +91,23 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
 
 export function maxTurnsFor(profile: ResolvedProfile): number {
   return isMinorTier(profile) ? 6 : 20;
+}
+
+/**
+ * True for an AbortError from EITHER runtime. The proxy path's fetch abort raises
+ * a DOMException with name "AbortError"; the SDK path throws an Error with the
+ * same name (see sdkCoach `abortError()`). Both runtimes surface a user-initiated
+ * stop identically, so the panel can (a) skip committing the truncated turn and
+ * (b) suppress the error banner — matching the pre-#282 proxy behavior on stop,
+ * minus the stray banner (a bugfix). Pure + exported so this parity is locked by
+ * a smoke test rather than resting on manual stop repro.
+ */
+export function isAbortError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    (err as { name?: unknown }).name === "AbortError"
+  );
 }
 
 /**
