@@ -82,6 +82,11 @@ export const profile: Profile = {
   input: {
     image_paste: true,
   },
+  // 원장 웹사이트 클론 중 근거 탐색(레퍼런스 사이트·섹션 구성·컴포넌트 구현법 등)을
+  // 위해 web_search ON. 프록시 경로의 Anthropic 호스티드 web_search 툴 — teaser와
+  // 동일 매핑, 턴당 최대 사용 제한. (claude-code식 WebFetch/에이전트 루프는 Agent SDK
+  // 전환(#282) Phase 2 몫으로 별개. 이 플래그는 "간단한 웹서치"를 지금 아키텍처에서 켠다.)
+  tools: { web_search: true, max_uses: 5 },
   session: {
     cohort_id: "boah-dental-2026-a",   // teaser와 같은 cohort, profile_id로만 분기
     series_total: 1,                   // 단발 — cohort 내 모든 profile의 series_total 일치(validator 강제)
