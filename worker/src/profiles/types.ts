@@ -51,9 +51,14 @@ export interface Profile {
    * Workshop tier "search-webapp" — for clinical/professional workshops
    * (e.g. 보아치과 v4); model fills %%CLINIC_NAME%%/%%SEARCH_TOPIC%%/
    * %%DECISION%%/%%SOURCES%% in the static webapp skeleton, no game loop.
+   *
+   * Workshop tier "website" — for website-copyclone (보아치과 원장 v2). No
+   * skeleton library is injected; the model reconstructs structure from a
+   * pasted target screenshot (needs `input.image_paste`). The system prompt,
+   * not a skeleton, drives the output.
    */
   game: {
-    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp";
+    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website";
   };
   publishing: {
     enabled: boolean;

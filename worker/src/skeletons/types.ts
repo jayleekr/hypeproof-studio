@@ -15,7 +15,8 @@ export type SkeletonTier =
   | "kids-rich"      // 초5-6 (11-12세): 여러 메커니즘, 레벨/적, 파티클, 사운드
   | "teen"           // 중등+: 물리, 상태 많음, 저장, 좀 더 코드 노출 OK
   | "pro-3d"         // 고급/성인: Three.js WebGL 3D, 씬 그래프
-  | "search-webapp"; // 전문직 워크숍: 검색 결과·출처 신뢰도·결정 reframe 정적 웹앱 (no game loop)
+  | "search-webapp"  // 전문직 워크숍: 검색 결과·출처 신뢰도·결정 reframe 정적 웹앱 (no game loop)
+  | "website";       // website-copyclone: 타겟 스크린샷을 클론. 스켈레톤 없음 — 구조는 정답지(스크린샷)에서 옴
 
 export interface Skeleton {
   id: string;

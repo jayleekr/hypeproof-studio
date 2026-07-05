@@ -14,6 +14,15 @@ export interface ChatMessage {
    * the chat panel during streaming, persisted with the message.
    */
   citations?: Citation[];
+  /**
+   * Pasted-image context attached to a user message (website-copyclone
+   * curriculum). Each entry is a `data:image/<type>;base64,...` URL produced
+   * by the webview's clipboard-paste handler. Carried so the webview can
+   * render a thumbnail on the bubble; the model only receives the image on
+   * the turn it was pasted (see proxyClient — history is sent text-only, so
+   * a screenshot is injected exactly once and never re-sent / persisted).
+   */
+  images?: string[];
 }
 
 /**
@@ -95,6 +104,10 @@ export interface ResolvedProfile {
   input?: { page_context?: boolean; image_paste?: boolean };
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
+  // #282 — provider-hosted tools the cohort profile opted into (sourced from the
+  // worker, not inferred client-side). Drives which Agent SDK tools the coach may
+  // use. Absent/false → the coach is chat-only for that capability.
+  tools?: { web_search?: boolean };
 }
 
 export interface UxConfig {
@@ -129,7 +142,7 @@ export interface SuggestionChip {
 // Webview → Host
 export type WebviewMessage =
   | { type: "ready" }
-  | { type: "sendMessage"; text: string; history: ChatMessage[] }
+  | { type: "sendMessage"; text: string; history: ChatMessage[]; images?: string[] }
   | { type: "retryMessage"; prompt: string; history: ChatMessage[] }
   | { type: "cancelStream"; streamId: string }
   | { type: "requestAction"; action: ActionRequest }
@@ -192,7 +205,10 @@ export type HostMessage =
 
 export interface ActionRequest {
   requestId: string;
-  kind: "writeFile" | "executeShell";
+  // #282 — extended beyond writeFile/executeShell so Agent SDK tool calls map to
+  // an accurate kind: Read/Glob → readFile, WebSearch/WebFetch → webSearch. The
+  // approval policy (resolveActionApproval) keys its tiers on these.
+  kind: "writeFile" | "executeShell" | "readFile" | "webSearch";
   description: string;
   payload: unknown;
 }

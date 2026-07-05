@@ -24,7 +24,7 @@ type Action =
   | { type: "streamAssetScore"; assetScore: AssetScoreChunk }
   | { type: "streamEnd" }
   | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
-  | { type: "userSent"; text: string };
+  | { type: "userSent"; text: string; images?: string[] };
 
 const initialState: State = {
   config: null,
@@ -96,7 +96,13 @@ function reducer(state: State, action: Action): State {
         ...state,
         messages: [
           ...state.messages,
-          { id: `local-${Date.now()}`, role: "user", content: action.text, createdAt: Date.now() },
+          {
+            id: `local-${Date.now()}`,
+            role: "user",
+            content: action.text,
+            createdAt: Date.now(),
+            ...(action.images && action.images.length > 0 ? { images: action.images } : {}),
+          },
         ],
       };
   }
@@ -129,11 +135,12 @@ export function App() {
   // sits INSIDE the ChatErrorBoundary tree. Throwing here in App() instead
   // would crash above the boundary, leaving nothing to catch it.)
 
-  const send = (text: string) => {
+  const send = (text: string, images?: string[]) => {
     const trimmed = text.trim();
-    if (!trimmed || state.streamingId) return;
-    dispatch({ type: "userSent", text: trimmed });
-    postToHost({ type: "sendMessage", text: trimmed, history: state.messages });
+    const hasImages = !!images && images.length > 0;
+    if ((!trimmed && !hasImages) || state.streamingId) return;
+    dispatch({ type: "userSent", text: trimmed, images });
+    postToHost({ type: "sendMessage", text: trimmed, history: state.messages, images });
   };
 
   const retry = (prompt: string) => {

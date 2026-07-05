@@ -16,10 +16,31 @@ import { resolveSkills } from "../skills/index.ts";
 // mid-code → broken (unclosed fence). 8192 leaves comfortable headroom.
 const DEFAULT_MAX_TOKENS = 8192;
 
+// OpenAI multimodal content block. `text` blocks carry prose; `image_url`
+// blocks carry a data URL (pasted screenshot) or http(s) URL — the
+// website-copyclone curriculum injects a target screenshot this way.
+interface OpenAIContentBlock {
+  type: string;                  // "text" | "image_url"
+  text?: string;
+  image_url?: { url: string };
+}
+
 interface OpenAIMessage {
   role: "system" | "user" | "assistant" | "tool";
-  content: string | Array<{ type: string; text?: string }>;
+  content: string | OpenAIContentBlock[];
 }
+
+// A trusted conversation turn after filterMessages: same shape as an
+// OpenAI user/assistant message (string or sanitized content blocks).
+type Turn = { role: "user" | "assistant"; content: string | OpenAIContentBlock[] };
+
+// Hard caps on inbound images — defense-in-depth against a client (or a
+// compromised webview) sending huge or many image blocks. Anthropic's own
+// per-image limit is ~5MB of base64; we cap a bit under that and bound the
+// count so one turn can't blow the request size / token budget.
+const MAX_IMAGES_PER_TURN = 4;
+const MAX_IMAGE_DATAURL_CHARS = 6_500_000;   // base64 chars → ~4.8MB decoded, under Anthropic's ~5MB/image cap
+const ALLOWED_IMAGE_URL = /^(data:image\/(png|jpe?g|gif|webp);base64,|https?:\/\/)/i;
 
 interface OpenAIRequest {
   model?: string;
@@ -36,9 +57,23 @@ interface AnthropicSystemBlock {
   cache_control?: { type: "ephemeral" };
 }
 
+// Anthropic content blocks. Image source is either inline base64 (from a
+// pasted data URL) or a remote URL — both are accepted by the Messages API.
+interface AnthropicTextBlock {
+  type: "text";
+  text: string;
+}
+interface AnthropicImageBlock {
+  type: "image";
+  source:
+    | { type: "base64"; media_type: string; data: string }
+    | { type: "url"; url: string };
+}
+type AnthropicContentBlock = AnthropicTextBlock | AnthropicImageBlock;
+
 interface AnthropicMessage {
   role: "user" | "assistant";
-  content: string | Array<{ type: string; text?: string }>;
+  content: string | AnthropicContentBlock[];
 }
 
 // Function tools = MCP-passthrough (profile.sandbox.mcp_tools_enabled).
@@ -81,7 +116,7 @@ export interface CoachContext {
 /** OpenAI-compatible request (Gemini's `/v1beta/openai/chat/completions`). */
 export interface OpenAIChatRequest {
   model: string;
-  messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+  messages: Array<{ role: "system" | "user" | "assistant"; content: string | OpenAIContentBlock[] }>;
   max_tokens: number;
   temperature?: number;
   stream?: boolean;
@@ -93,19 +128,102 @@ export interface OpenAIChatRequest {
  * Filter the client's messages down to the conversation turns we trust.
  * Client-supplied `system`/`tool` messages are dropped — only the worker
  * supplies the system prompt (anti-injection: identical for both providers).
+ *
+ * Content is preserved as either a plain string OR sanitized OpenAI content
+ * blocks (text + image_url). A turn that carries no image collapses back to
+ * a string so text-only turns stay byte-identical to the old behavior (and
+ * caching/snapshots don't churn). Image blocks survive — that is the fix for
+ * the website-copyclone screenshot-injection path, which the old
+ * `String(content)` coercion silently destroyed.
  */
-function filterMessages(body: OpenAIRequest): Array<{ role: "user" | "assistant"; content: string }> {
+function filterMessages(body: OpenAIRequest, allowImages: boolean): Turn[] {
   if (!Array.isArray(body.messages)) {
     throw new Error("messages must be an array");
   }
-  const msgs: Array<{ role: "user" | "assistant"; content: string }> = [];
+  const msgs: Turn[] = [];
   for (const m of body.messages) {
     if (m.role === "system" || m.role === "tool") continue;          // server-side system only
     if (m.role !== "user" && m.role !== "assistant") continue;
-    const content = typeof m.content === "string" ? m.content : (m.content ?? "");
-    msgs.push({ role: m.role, content: String(content) });
+    if (typeof m.content === "string") {
+      msgs.push({ role: m.role, content: m.content });
+      continue;
+    }
+    if (Array.isArray(m.content)) {
+      const blocks = sanitizeContentBlocks(m.content, allowImages);
+      // No surviving image → collapse to a string (preserve legacy shape).
+      const hasImage = blocks.some((b) => b.type === "image_url");
+      if (!hasImage) {
+        const text = blocks.map((b) => (b.type === "text" ? b.text ?? "" : "")).join("");
+        msgs.push({ role: m.role, content: text });
+      } else {
+        msgs.push({ role: m.role, content: blocks });
+      }
+      continue;
+    }
+    msgs.push({ role: m.role, content: "" });
   }
   return msgs;
+}
+
+/**
+ * Keep only the content blocks we trust: `text` and `image_url` whose URL is a
+ * supported image data URL or an http(s) URL. Caps image count + size. Unknown
+ * block types and unsupported URL schemes (file:, javascript:, vscode:, …) are
+ * dropped — defense-in-depth against a hostile/buggy client.
+ *
+ * When `allowImages` is false (the profile didn't opt into `input.image_paste`)
+ * ALL image blocks are dropped server-side, even if the client sent them — a
+ * text-only cohort (e.g. a minor cohort) can't be coerced into an image flow.
+ */
+function sanitizeContentBlocks(blocks: OpenAIContentBlock[], allowImages: boolean): OpenAIContentBlock[] {
+  const out: OpenAIContentBlock[] = [];
+  let images = 0;
+  for (const b of blocks) {
+    if (!b || typeof b !== "object") continue;
+    if (b.type === "text" && typeof b.text === "string") {
+      out.push({ type: "text", text: b.text });
+    } else if (allowImages && b.type === "image_url" && b.image_url && typeof b.image_url.url === "string") {
+      const url = b.image_url.url;
+      if (images >= MAX_IMAGES_PER_TURN) continue;
+      if (url.length > MAX_IMAGE_DATAURL_CHARS) continue;
+      if (!ALLOWED_IMAGE_URL.test(url)) continue;
+      out.push({ type: "image_url", image_url: { url } });
+      images++;
+    }
+  }
+  return out;
+}
+
+/** Map a sanitized OpenAI turn's content into Anthropic content. */
+function toAnthropicContent(content: string | OpenAIContentBlock[]): string | AnthropicContentBlock[] {
+  if (typeof content === "string") return content;
+  const out: AnthropicContentBlock[] = [];
+  for (const b of content) {
+    if (b.type === "text" && typeof b.text === "string") {
+      out.push({ type: "text", text: b.text });
+    } else if (b.type === "image_url" && b.image_url?.url) {
+      const img = imageUrlToAnthropicImage(b.image_url.url);
+      if (img) out.push(img);
+    }
+  }
+  // An all-dropped array would be an invalid empty content — fall back to "".
+  return out.length > 0 ? out : "";
+}
+
+/**
+ * OpenAI `image_url` → Anthropic image block. Inline data URLs become base64
+ * sources; http(s) URLs become url sources. Anything else returns null (the
+ * caller drops it). Mirrors the ALLOWED_IMAGE_URL allowlist.
+ */
+function imageUrlToAnthropicImage(url: string): AnthropicImageBlock | null {
+  const dataUrl = /^data:([^;,]+);base64,(.+)$/.exec(url);
+  if (dataUrl && dataUrl[1] && dataUrl[2]) {
+    return { type: "image", source: { type: "base64", media_type: dataUrl[1], data: dataUrl[2] } };
+  }
+  if (/^https?:\/\//i.test(url)) {
+    return { type: "image", source: { type: "url", url } };
+  }
+  return null;
 }
 
 /**
@@ -138,7 +256,10 @@ export function translate(
   profile: Profile,
   coach: CoachContext = {},
 ): AnthropicRequest {
-  const msgs: AnthropicMessage[] = filterMessages(body);
+  const msgs: AnthropicMessage[] = filterMessages(body, profile.input?.image_paste === true).map((t) => ({
+    role: t.role,
+    content: toAnthropicContent(t.content),
+  }));
 
   const model = modelIdFor(resolveAlias(body.model, profile), "anthropic");
 
@@ -234,7 +355,7 @@ export function translateOpenAI(
   coach: CoachContext = {},
   provider: LLMProvider = "gemini",
 ): OpenAIChatRequest {
-  const turns = filterMessages(body);
+  const turns = filterMessages(body, profile.input?.image_paste === true);
 
   let systemText = buildCachedPrefix(profile);
   const coachTail = buildCoachTail(coach);

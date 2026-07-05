@@ -17,7 +17,7 @@ interface Props {
   errorRequestId: string | null;
   errorRunbookUrl: string | null;  // #165 — render as clickable runbook link
   canRetryLast: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, images?: string[]) => void;
   onRetry: (prompt: string) => void;
   onRetryLast: () => void;
   onDismissError: () => void;
@@ -45,6 +45,12 @@ function extractRenderableHtml(text: string): string | null {
   }
   return null;
 }
+
+// Pasted-image context (website-copyclone). Bounds match the worker's
+// translate.ts caps so a paste that the webview accepts is one the worker
+// will also forward. Raw-file bytes here ≈ base64 chars there with headroom.
+const MAX_IMAGES = 4;
+const MAX_IMAGE_BYTES = 3_500_000;   // ~3.5MB raw → ~4.7MB base64, under the worker's ceiling
 
 const DEFAULT_UX: UxConfig = {
   coach: {
@@ -76,10 +82,19 @@ export function ChatPanel(props: Props) {
   const [draft, setDraft] = useState("");
   const [composing, setComposing] = useState(false);
   const [rollExpand, setRollExpand] = useState<{ original: string } | null>(null);
+  // Pasted-image attachments for the next turn (data URLs). `imgNote` surfaces
+  // a brief reason when a paste is rejected (too big / too many).
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [imgNote, setImgNote] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const ux: UxConfig = config?.profile?.ux ?? DEFAULT_UX;
+  // Image paste is a per-profile opt-in (website-copyclone). Default-off so
+  // minor cohorts never expose the image flow — the worker enforces the same
+  // gate server-side, this just keeps the UI honest (no thumbnail, plain text
+  // paste). Absent on older cached /v1/profile responses → treated as off.
+  const imagePasteEnabled = config?.profile?.input?.image_paste === true;
   // Fixed-naming cohorts (e.g. boah-dental) must NOT show a user-supplied
   // coach name carried over from a different cohort's user-data-dir (#140).
   const coachName =
@@ -87,14 +102,17 @@ export function ChatPanel(props: Props) {
       ? (ux.coach.fallback_name || "코치")
       : (config?.coach?.name?.trim() || ux.coach.fallback_name || "코치");
 
-  // Tone for hard-coded chat-panel labels — game (kids cohorts) vs
-  // search-webapp (보아치과 류). Centralized in chatPanelHelpers (#159) but
-  // duplicated as a one-liner here so the webview stays vscode-free.
-  const isSearchWebapp =
-    (config?.profile as { game?: { template_tier?: string } } | undefined)?.game
-      ?.template_tier === "search-webapp";
-  const buildingLabel = isSearchWebapp ? "검색엔진 만드는 중" : "게임 만드는 중";
-  const namingEmoji = isSearchWebapp ? "🔍" : "🎮";
+  // Tone for hard-coded chat-panel labels — game (kids) vs search-webapp
+  // (보아치과 teaser) vs website (보아치과 원장 copyclone). Centralized in
+  // chatPanelHelpers (appToneOf/TONE_LABELS) but mirrored here so the webview
+  // stays vscode-free (chatPanelHelpers imports Node `Buffer`).
+  const templateTier =
+    (config?.profile as { game?: { template_tier?: string } } | undefined)?.game?.template_tier;
+  const appTone: "game" | "search" | "site" =
+    templateTier === "search-webapp" ? "search" : templateTier === "website" ? "site" : "game";
+  const buildingLabel =
+    appTone === "search" ? "검색엔진 만드는 중" : appTone === "site" ? "웹사이트 만드는 중" : "게임 만드는 중";
+  const namingEmoji = appTone === "search" ? "🔍" : appTone === "site" ? "🌐" : "🎮";
 
   // Show the kid-friendly naming card when: profile loaded, it asks the kid to
   // name the coach, and they haven't yet.
@@ -126,10 +144,56 @@ export function ChatPanel(props: Props) {
 
   const submit = (text?: string) => {
     const value = (text ?? draft).trim();
-    if (!value || streaming) return;
-    props.onSend(value);
+    if ((!value && pendingImages.length === 0) || streaming) return;
+    props.onSend(value, pendingImages.length > 0 ? pendingImages : undefined);
     setDraft("");
+    setPendingImages([]);
+    setImgNote(null);
     setRollExpand(null);
+  };
+
+  // Clipboard paste of an image (e.g. ⌘⇧4 screenshot → ⌘V) attaches it to the
+  // next turn instead of pasting raw text. A normal text paste falls through
+  // to the textarea default (we only preventDefault when we found image data).
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!imagePasteEnabled) return;          // text-only cohort — let default text paste happen
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "file" && it.type.startsWith("image/")) {
+        const f = it.getAsFile();
+        if (f) imageFiles.push(f);
+      }
+    }
+    if (imageFiles.length === 0) return;     // plain text paste — let default happen
+    e.preventDefault();
+    for (const f of imageFiles) {
+      if (f.size > MAX_IMAGE_BYTES) {
+        setImgNote(`이미지가 너무 커요 (최대 ${Math.round(MAX_IMAGE_BYTES / 1_000_000)}MB). 더 작게 캡처해 주세요.`);
+        continue;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = typeof reader.result === "string" ? reader.result : "";
+        if (!url) return;
+        setPendingImages((prev) => {
+          if (prev.length >= MAX_IMAGES) {
+            setImgNote(`이미지는 한 번에 최대 ${MAX_IMAGES}장까지 붙일 수 있어요.`);
+            return prev;
+          }
+          setImgNote(null);
+          return [...prev, url];
+        });
+      };
+      reader.readAsDataURL(f);
+    }
+  };
+
+  const removePendingImage = (idx: number) => {
+    setPendingImages((prev) => prev.filter((_, i) => i !== idx));
+    setImgNote(null);
   };
 
   const handleChip = (chip: SuggestionChip) => {
@@ -152,8 +216,10 @@ export function ChatPanel(props: Props) {
     const combined = rollExpand.original
       ? `${rollExpand.original} — 그리고 ${extra}`
       : extra;
-    props.onSend(combined);
+    props.onSend(combined, pendingImages.length > 0 ? pendingImages : undefined);
     setDraft("");
+    setPendingImages([]);
+    setImgNote(null);
     setRollExpand(null);
   };
 
@@ -221,6 +287,7 @@ export function ChatPanel(props: Props) {
             ux={ux}
             coachName={coachName}
             buildingLabel={buildingLabel}
+            tone={appTone}
             messages={messages}
             onRunCode={props.onRunCode}
             onRetry={props.onRetry}
@@ -262,11 +329,31 @@ export function ChatPanel(props: Props) {
             __html: renderInlineMd(ux.hints.short_input.message_md),
           }} />
         )}
+        {imgNote && <div className="hps-img-note">{imgNote}</div>}
+        {pendingImages.length > 0 && (
+          <div className="hps-attachments" aria-label="첨부한 이미지">
+            {pendingImages.map((url, i) => (
+              <div key={i} className="hps-attachment">
+                <img src={url} alt={`첨부 이미지 ${i + 1}`} />
+                <button
+                  type="button"
+                  className="hps-attachment-remove"
+                  onClick={() => removePendingImage(i)}
+                  title="이미지 제거"
+                  aria-label="이미지 제거"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="hps-input">
           <textarea
             ref={textareaRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onPaste={handlePaste}
             onCompositionStart={() => setComposing(true)}
             onCompositionEnd={() => setComposing(false)}
             onKeyDown={(e) => {
@@ -286,7 +373,9 @@ export function ChatPanel(props: Props) {
                 ? "응답 중..."
                 : rollExpand
                   ? "한 가지만 더 떠올려서 적어주세요"
-                  : "메시지를 입력하고 Enter (Shift+Enter 줄바꿈)"
+                  : imagePasteEnabled
+                    ? "메시지를 입력하고 Enter — 이미지는 ⌘V로 붙여넣기 (Shift+Enter 줄바꿈)"
+                    : "메시지를 입력하고 Enter (Shift+Enter 줄바꿈)"
             }
             disabled={streaming}
             rows={3}
@@ -313,7 +402,11 @@ export function ChatPanel(props: Props) {
                 Send
               </button>
             ) : (
-              <button onClick={() => submit()} disabled={!draft.trim()} className="hps-btn-send">
+              <button
+                onClick={() => submit()}
+                disabled={!draft.trim() && pendingImages.length === 0}
+                className="hps-btn-send"
+              >
                 Send
               </button>
             )}
@@ -491,6 +584,7 @@ function MessageItem({
   ux,
   coachName,
   buildingLabel,
+  tone,
   messages,
   onRunCode,
   onRetry,
@@ -500,6 +594,7 @@ function MessageItem({
   ux: UxConfig;
   coachName: string;
   buildingLabel: string;
+  tone: "game" | "search" | "site";
   messages: ChatMessage[];
   onRunCode: (html: string) => void;
   onRetry: (prompt: string) => void;
@@ -540,9 +635,18 @@ function MessageItem({
       </div>
       <div className="hps-msg-body">
         {message.role === "assistant" ? (
-          <AssistantContent content={message.content} streaming={streaming} buildingLabel={buildingLabel} />
+          <AssistantContent content={message.content} streaming={streaming} buildingLabel={buildingLabel} tone={tone} />
         ) : (
-          message.content
+          <>
+            {message.images && message.images.length > 0 && (
+              <div className="hps-msg-images">
+                {message.images.map((url, i) => (
+                  <img key={i} src={url} alt={`첨부 이미지 ${i + 1}`} />
+                ))}
+              </div>
+            )}
+            {message.content}
+          </>
         )}
       </div>
       {message.role === "assistant" && message.citations && message.citations.length > 0 && (
@@ -595,9 +699,20 @@ function CitationRack({ citations }: { citations: Citation[] }) {
  * no LLM-side cooperation required. Tuned for the dental V1 skeleton
  * (~2.5KB HTML output).
  */
-function buildStageText(buildingLabel: string, content: string, fenceOpen: boolean): string {
+function buildStageText(
+  buildingLabel: string,
+  content: string,
+  fenceOpen: boolean,
+  tone: "game" | "search" | "site",
+): string {
   if (fenceOpen) return "거의 다 됐어요";
   const len = content.length;
+  if (tone === "site") {
+    // website-copyclone substages (clone target → layout → polish).
+    if (len > 500) return `${buildingLabel} — 화면 그리는 중`;
+    if (len > 200) return `${buildingLabel} — 레이아웃 잡는 중`;
+    return `${buildingLabel} — 구조 정리 중`;
+  }
   if (len > 500) return `${buildingLabel} — V1 화면 그리는 중`;
   if (len > 200) return `${buildingLabel} — 검색어·출처 정리`;
   return `${buildingLabel} — 검색 주제 잡는 중`;
@@ -607,10 +722,12 @@ function AssistantContent({
   content,
   streaming,
   buildingLabel,
+  tone,
 }: {
   content: string;
   streaming: boolean;
   buildingLabel: string;
+  tone: "game" | "search" | "site";
 }) {
   const segments = useMemo(() => splitFences(content), [content]);
   const hasOpenFence = segments.some((s) => s.type === "code-open");
@@ -627,7 +744,7 @@ function AssistantContent({
         }
         if (seg.type === "code-open") {
           if (streaming) {
-            const stage = buildStageText(buildingLabel, content, hasOpenFence);
+            const stage = buildStageText(buildingLabel, content, hasOpenFence, tone);
             return (
               <div key={i} className="hps-code-progress">
                 🛠️ {stage}… <span className="hps-dots">✨</span>
@@ -648,7 +765,7 @@ function AssistantContent({
       })}
       {streaming && !hasOpenFence && content.length > 0 && (
         <div className="hps-code-progress hps-code-progress-prelude">
-          🛠️ {buildStageText(buildingLabel, content, false)}… <span className="hps-dots">✨</span>
+          🛠️ {buildStageText(buildingLabel, content, false, tone)}… <span className="hps-dots">✨</span>
         </div>
       )}
     </>

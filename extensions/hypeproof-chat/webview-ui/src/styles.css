@@ -441,6 +441,65 @@ html, body, #root {
   color: #fff;
 }
 
+/* ---------- Pasted-image attachments (website-copyclone) ---------- */
+
+.hps-img-note {
+  font-size: 11px;
+  color: var(--vscode-inputValidation-warningForeground, #d7a05a);
+  opacity: 0.9;
+}
+.hps-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.hps-attachment {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--vscode-input-border, #444);
+}
+.hps-attachment img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.hps-attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.hps-attachment-remove:hover { background: rgba(0, 0, 0, 0.85); }
+
+/* Thumbnails rendered inside a sent user bubble. */
+.hps-msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.hps-msg-images img {
+  max-width: 160px;
+  max-height: 160px;
+  border-radius: 6px;
+  border: 1px solid var(--vscode-input-border, #444);
+  display: block;
+}
+
 /* ---------- Roll-expand hint banner ---------- */
 
 .hps-roll-hint {

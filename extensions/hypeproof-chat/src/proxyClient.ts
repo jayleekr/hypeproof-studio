@@ -94,6 +94,12 @@ interface ProxyChatArgs {
   token: string | undefined;
   history: ChatMessage[];
   userText: string;
+  /**
+   * Pasted-image data URLs attached to THIS user turn (website-copyclone).
+   * Only the current turn carries images — `history` is mapped text-only
+   * below, so a screenshot is injected to the model exactly once.
+   */
+  images?: string[];
   signal: AbortSignal;
   onDelta: (delta: string) => void;
   /** #173 — fires for each citations chunk in the SSE stream. */
@@ -113,6 +119,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
     token,
     history,
     userText,
+    images,
     signal,
     onDelta,
     onCitations,
@@ -121,9 +128,20 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
     coachPersonality,
   } = args;
 
+  // History is sent text-only (drops any in-memory thumbnails from earlier
+  // turns); the only multimodal turn is the current one. When images are
+  // attached, the user turn becomes OpenAI-style content blocks — a text
+  // block (only if there's text) plus one image_url block per pasted image.
+  const userContent =
+    images && images.length > 0
+      ? [
+          ...(userText ? [{ type: "text", text: userText }] : []),
+          ...images.map((url) => ({ type: "image_url", image_url: { url } })),
+        ]
+      : userText;
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
-    { role: "user", content: userText },
+    { role: "user", content: userContent },
   ];
 
   const url = proxyUrl.replace(/\/$/, "") + "/chat/completions";

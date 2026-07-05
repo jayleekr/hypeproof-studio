@@ -70,6 +70,7 @@ const stubProfile = {
   publishing: { enabled: false, strategy: "local_only" },
   assets_focus: ["intent_clarity"],
   essences_focus: [1],
+  input: { image_paste: true },     // image tests below exercise the opt-in path
   session: { cohort_id: "stub", series_total: 1, series_index: 1, hours: 1 },
   analytics: { log_user_messages: false, log_metadata: true },
 };
@@ -280,6 +281,152 @@ async function readStreamText(stream) {
   assert.equal(out.system.length, 1, "no separate block — appended to cached prefix");
   assert.equal(out.system[0].cache_control?.type, "ephemeral", "skeleton library is cached");
   console.log("✓ translate injects the tier skeleton library into the cached block");
+}
+
+// ---- translate: pasted image (data URL) survives → Anthropic image block ----
+// Regression guard for the old String(content) coercion that silently
+// destroyed multimodal content (website-copyclone screenshot injection).
+const TINY_PNG =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+{
+  const out = translate(
+    {
+      model: "hypeproof-default",
+      messages: [
+        { role: "user", content: "이전 질문" },                                   // history: text-only string
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "이 화면이랑 똑같이 만들어줘" },
+            { type: "image_url", image_url: { url: TINY_PNG } },
+          ],
+        },
+      ],
+    },
+    stubProfile,
+  );
+  assert.equal(out.messages.length, 2, "both user turns kept");
+  assert.equal(typeof out.messages[0].content, "string", "text-only history stays a string");
+  const blocks = out.messages[1].content;
+  assert.ok(Array.isArray(blocks), "multimodal turn becomes a content-block array");
+  assert.equal(blocks[0].type, "text", "text block preserved");
+  assert.equal(blocks[1].type, "image", "image_url translated to Anthropic image block");
+  assert.equal(blocks[1].source.type, "base64", "data URL → base64 source");
+  assert.equal(blocks[1].source.media_type, "image/png", "media_type parsed from data URL");
+  assert.ok(blocks[1].source.data.startsWith("iVBOR"), "base64 payload carried (no data: prefix)");
+  console.log("✓ translate preserves a pasted image as an Anthropic image block");
+}
+
+// ---- translate: hostile / oversized image inputs are dropped ---------------
+{
+  const out = translate(
+    {
+      model: "hypeproof-default",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "안녕" },
+            { type: "image_url", image_url: { url: "file:///etc/passwd" } },        // bad scheme → dropped
+            { type: "image_url", image_url: { url: "javascript:alert(1)" } },        // bad scheme → dropped
+          ],
+        },
+      ],
+    },
+    stubProfile,
+  );
+  // All images dropped → no image blocks survive; turn collapses to a string.
+  assert.equal(typeof out.messages[0].content, "string", "no surviving image → string content");
+  assert.equal(out.messages[0].content, "안녕", "only the text block survives");
+  console.log("✓ translate drops disallowed image URL schemes");
+}
+
+// ---- translate: image count is capped per turn -----------------------------
+{
+  const many = Array.from({ length: 6 }, () => ({ type: "image_url", image_url: { url: TINY_PNG } }));
+  const out = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: [{ type: "text", text: "x" }, ...many] }] },
+    stubProfile,
+  );
+  const imgs = out.messages[0].content.filter((b) => b.type === "image");
+  assert.equal(imgs.length, 4, "no more than 4 images forwarded per turn");
+  console.log("✓ translate caps images per turn (MAX_IMAGES_PER_TURN)");
+}
+
+// ---- translateOpenAI: image blocks pass through to the OpenAI-shape body ----
+{
+  const out = translateOpenAI(
+    {
+      model: "hypeproof-default",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "이 화면" },
+            { type: "image_url", image_url: { url: TINY_PNG } },
+          ],
+        },
+      ],
+    },
+    stubProfile,
+    {},
+    "gemini",
+  );
+  // [0] is the injected system message; [1] is the user turn with blocks.
+  const user = out.messages[1];
+  assert.ok(Array.isArray(user.content), "user content stays a block array for OpenAI-compat endpoint");
+  assert.equal(user.content[1].type, "image_url", "image_url block passed through unchanged");
+  assert.equal(user.content[1].image_url.url, TINY_PNG, "data URL preserved for gemini/openai");
+  console.log("✓ translateOpenAI passes image blocks through");
+}
+
+// ---- gate: profile WITHOUT input.image_paste strips images server-side -----
+// Defense-in-depth: a text-only cohort (e.g. a minor cohort) can't be coerced
+// into an image flow even if the client sends image blocks.
+{
+  const gated = { ...stubProfile, input: { image_paste: false } };
+  const out = translate(
+    {
+      model: "hypeproof-default",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "안녕" },
+            { type: "image_url", image_url: { url: TINY_PNG } },
+          ],
+        },
+      ],
+    },
+    gated,
+  );
+  assert.equal(typeof out.messages[0].content, "string", "image dropped → content collapses to string");
+  assert.equal(out.messages[0].content, "안녕", "only text survives when image_paste is off");
+
+  // Same for the gemini/openai path.
+  const outO = translateOpenAI(
+    {
+      model: "hypeproof-default",
+      messages: [{ role: "user", content: [{ type: "text", text: "안녕" }, { type: "image_url", image_url: { url: TINY_PNG } }] }],
+    },
+    gated,
+    {},
+    "gemini",
+  );
+  assert.equal(typeof outO.messages[1].content, "string", "translateOpenAI also strips images when gated");
+  console.log("✓ profiles without input.image_paste strip images (gate enforced server-side)");
+}
+
+// ---- gate default: a profile that omits `input` entirely is treated as off --
+{
+  const noInput = { ...stubProfile };
+  delete noInput.input;
+  const out = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: [{ type: "text", text: "hi" }, { type: "image_url", image_url: { url: TINY_PNG } }] }] },
+    noInput,
+  );
+  assert.equal(typeof out.messages[0].content, "string", "absent input → default-off → image dropped");
+  console.log("✓ absent input field defaults image_paste to off");
 }
 
 // ---- preview-env contract: injected into cached prefix for every cohort ----

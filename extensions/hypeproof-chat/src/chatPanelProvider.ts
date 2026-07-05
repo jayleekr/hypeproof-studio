@@ -4,6 +4,8 @@ import * as fs from "fs";
 import { TOKEN_KEY } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
+import { runSdkCoach, SdkUnavailableError } from "./sdkCoach";
+import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
 import {
   ChatMessage,
@@ -286,7 +288,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.postHistory();
         return;
       case "sendMessage":
-        await this.handleSend(msg.text, msg.history);
+        await this.handleSend(msg.text, msg.history, msg.images);
         return;
       case "retryMessage":
         await this.handleSend(msg.prompt, msg.history);
@@ -361,11 +363,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async handleSend(text: string, history: ChatMessage[]): Promise<void> {
+  private async handleSend(text: string, history: ChatMessage[], images?: string[]): Promise<void> {
     // "Show me / open it / run it" — if the kid asks to see the game in plain
     // language and a game already exists, just open it. Don't make them hunt
-    // for the ▶ Run button or burn an AI round-trip on a deflection.
-    if (isShowIntent(text)) {
+    // for the ▶ Run button or burn an AI round-trip on a deflection. Skipped
+    // when an image is attached — a pasted screenshot is always a real turn.
+    if (isShowIntent(text) && (!images || images.length === 0)) {
       const lastGame = this.extractLastRenderableCode();
       if (lastGame) {
         const labels = labelsForProfile(this.cachedProfile);
@@ -428,45 +431,100 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #173 — accumulate citations across the stream so they persist to history.
     const assistantCitations: import("./protocol").Citation[] = [];
     try {
-      await proxyChat({
-        proxyUrl,
-        model,
-        token,
-        history,
-        userText: userTextForModel,
-        signal: ctrl.signal,
-        coachName: effectiveCoachName,
-        coachPersonality: effectiveCoachPersonality,
-        onDelta: (delta) => {
-          assistantText += delta;
-          void this.post({ type: "streamChunk", streamId, delta });
-          // Cheap check; extractRenderableHtml regex returns null fast on
-          // most chunks (no fence/doctype present yet).
-          tryReveal(assistantText);
-        },
-        onCitations: (cites) => {
-          for (const c of cites) assistantCitations.push(c);
-          void this.post({ type: "streamCitations", streamId, citations: cites });
-        },
-        onAssetScore: (assetScore) => {
-          this.assetScores?.recordAssetScore(assetScore);
-          void this.post({ type: "streamAssetScore", streamId, assetScore });
-        },
-      });
-      void this.post({ type: "streamEnd", streamId });
-      await this.appendHistory([
-        { id: randomId(), role: "user", content: text, createdAt: Date.now() },
-        {
-          id: messageId,
-          role: "assistant",
-          content: assistantText,
-          createdAt: Date.now(),
-          ...(assistantCitations.length > 0 ? { citations: assistantCitations } : {}),
-        },
-      ]);
-      // Fallback reveal in case the stream completed but the per-chunk
-      // probe missed it (e.g. the closing ``` was in the very last delta).
-      tryReveal(assistantText);
+      // #282 Phase 1 — route to the Agent SDK coach behind the flag. Default
+      // "proxy" keeps the exact existing single-turn behavior; "agent-sdk"
+      // runs runSdkCoach with the SAME callbacks so nothing downstream changes.
+      const runtime = cfg.get<"proxy" | "agent-sdk">("coachRuntime", "proxy");
+      const onDelta = (delta: string) => {
+        assistantText += delta;
+        void this.post({ type: "streamChunk", streamId, delta });
+        // Cheap check; extractRenderableHtml regex returns null fast on
+        // most chunks (no fence/doctype present yet).
+        tryReveal(assistantText);
+      };
+      const onCitations = (cites: import("./protocol").Citation[]) => {
+        for (const c of cites) assistantCitations.push(c);
+        void this.post({ type: "streamCitations", streamId, citations: cites });
+      };
+      const onAssetScore = (assetScore: import("./protocol").AssetScoreChunk) => {
+        this.assetScores?.recordAssetScore(assetScore);
+        void this.post({ type: "streamAssetScore", streamId, assetScore });
+      };
+      const runProxy = () =>
+        proxyChat({
+          proxyUrl,
+          model,
+          token,
+          history,
+          userText: userTextForModel,
+          images,
+          signal: ctrl.signal,
+          coachName: effectiveCoachName,
+          coachPersonality: effectiveCoachPersonality,
+          onDelta,
+          onCitations,
+          onAssetScore,
+        });
+      if (runtime === "agent-sdk") {
+        if (!profile) {
+          throw new Error("코치 프로필을 아직 못 받았어요. 잠시 후 다시 시도해주세요.");
+        }
+        if (!token) {
+          throw new ProxyAuthError("missing", "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑");
+        }
+        try {
+          await runSdkCoach({
+            gatewayUrl: proxyUrl,
+            token,
+            model,
+            profile,
+            // TODO(#282 Phase 1): source the cohort system prompt via the worker
+            // gateway (keeps the key server-side; worker injects prompt + auth).
+            systemPrompt: "",
+            history: history.map((m) => ({ role: m.role, content: m.content })),
+            userText: userTextForModel,
+            signal: ctrl.signal,
+            onDelta,
+            onCitations,
+            onAssetScore,
+            // Map the SDK tool call → an accurate host ActionRequest so the
+            // executeShell hard-deny and writeFile workspace-scope actually fire.
+            requestApproval: (action) =>
+              this.resolveActionApproval({ requestId: randomId(), ...sdkToolToActionRequest(action) }),
+          });
+        } catch (err) {
+          if (!(err instanceof SdkUnavailableError)) throw err;
+          // Pre-Phase-1: the SDK package isn't installed. Keep the classroom
+          // working — log for developers and fall back to the proxy runtime for
+          // this turn instead of showing the student a technical error.
+          console.warn(`[coach] ${err.message}`);
+          assistantText = "";
+          assistantCitations.length = 0;
+          revealed = false;
+          await runProxy();
+        }
+      } else {
+        await runProxy();
+      }
+      // On user-initiated stop the cancelStream handler already ended the stream
+      // in the webview; don't post streamEnd or commit the truncated turn
+      // (parity with the proxy path, which throws on abort).
+      if (!ctrl.signal.aborted) {
+        void this.post({ type: "streamEnd", streamId });
+        await this.appendHistory([
+          { id: randomId(), role: "user", content: text, createdAt: Date.now() },
+          {
+            id: messageId,
+            role: "assistant",
+            content: assistantText,
+            createdAt: Date.now(),
+            ...(assistantCitations.length > 0 ? { citations: assistantCitations } : {}),
+          },
+        ]);
+        // Fallback reveal in case the stream completed but the per-chunk
+        // probe missed it (e.g. the closing ``` was in the very last delta).
+        tryReveal(assistantText);
+      }
     } catch (err) {
       await this.handleSendError(err, streamId);
     } finally {
@@ -481,6 +539,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * to call the teacher.
    */
   private async handleSendError(err: unknown, streamId: string): Promise<void> {
+    // User-initiated stop (cancelStream) surfaces as an AbortError on both the
+    // proxy and agent-sdk paths — it's not an error, and the webview already
+    // ended the stream. Don't show a banner.
+    if (isAbortError(err)) return;
     if (err instanceof ProxyAuthError) {
       if (err.requestId) this.lastRequestId = err.requestId;
       void this.post({
@@ -538,8 +600,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       return false;
     }
 
-    // Tier 2 — writeFile must target the active workspace.
-    if (req.kind === "writeFile") {
+    // Tier 2 — file access must target the active workspace (write and read).
+    if (req.kind === "writeFile" || req.kind === "readFile") {
       const target = (req.payload as { path?: string } | null | undefined)?.path;
       if (typeof target === "string" && target.length > 0 && !isInsideWorkspace(target)) {
         vscode.window.showWarningMessage(
