@@ -86,3 +86,21 @@ jobs:
       - name: Typecheck extension
         working-directory: extensions/hypeproof-chat
         run: npm run typecheck
+
+  extension-test:
+    name: extension / smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: extensions/hypeproof-chat/package-lock.json
+      - name: Install extension deps
+        working-directory: extensions/hypeproof-chat
+        run: npm ci
+      # U-layer pure smoke tests (test/*.smoke.mjs) — no vscode host needed.
+      - name: Run extension smoke tests
+        working-directory: extensions/hypeproof-chat
+        run: npm test

@@ -134,6 +134,15 @@
           "default": "hypeproof-default",
           "description": "Model identifier sent to the proxy."
         },
+        "hypeproofChat.coachRuntime": {
+          "type": "string",
+          "enum": [
+            "proxy",
+            "agent-sdk"
+          ],
+          "default": "proxy",
+          "description": "Coach runtime. 'proxy' = the current single-turn provider proxy (default). 'agent-sdk' = the Claude Agent SDK coach (epic #282). Until the SDK is bundled (Phase 1), selecting 'agent-sdk' transparently falls back to the proxy runtime for each turn (a dev warning is logged); it never interrupts the student."
+        },
         "hypeproofChat.requireApprovalFor": {
           "type": "array",
           "items": {
@@ -157,6 +166,7 @@
     "build:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js",
     "build:webview": "cd webview-ui && npm install && npm run build",
     "typecheck": "tsc --noEmit",
+    "test": "for f in test/*.smoke.mjs; do echo \"— $f\"; node --experimental-strip-types \"$f\" || exit 1; done",
     "watch:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js --watch",
     "watch:webview": "cd webview-ui && npm run dev",
     "package": "vsce package --no-dependencies"
