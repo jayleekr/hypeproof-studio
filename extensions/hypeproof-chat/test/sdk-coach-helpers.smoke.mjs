@@ -38,10 +38,11 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
 
 // ─── WebSearch is gated on the profile's explicit tools.web_search opt-in ────
 {
-  // Dental cohort: search-webapp + web_search opt-in → file tools + WebSearch.
+  // Dental cohort: search-webapp + web_search opt-in → file tools + WebSearch +
+  // WebFetch (research = find + read; granting search without fetch is half).
   assert.deepEqual(
     permittedToolsFor(profile("search-webapp", { tools: { web_search: true } })),
-    ["Read", "Write", "Edit", "WebSearch"],
+    ["Read", "Write", "Edit", "WebSearch", "WebFetch"],
   );
 
   // A minor cohort that did NOT opt in never gets WebSearch, even if its
@@ -131,6 +132,11 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   const search = sdkToolToActionRequest({ toolName: "WebSearch", input: { query: "치과" } });
   assert.equal(search.kind, "webSearch");
   assert.equal(search.payload.query, "치과");
+
+  // WebFetch routes through the same web-approval tier, surfacing the URL.
+  const fetch = sdkToolToActionRequest({ toolName: "WebFetch", input: { url: "https://ref.example/clinic" } });
+  assert.equal(fetch.kind, "webSearch", "WebFetch also goes through the web-approval modal");
+  assert.equal(fetch.payload.query, "https://ref.example/clinic", "WebFetch url surfaced for the modal");
 
   // Unknown tool → fail closed via the shell hard-deny tier.
   assert.equal(

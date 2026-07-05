@@ -73,7 +73,7 @@ export function isMinorTier(profile: ResolvedProfile): boolean {
  * - the professional workshop tiers (e.g. "search-webapp", the 보아치과
  *   direction) may read/write/edit the workspace so the coach edits the page
  *   directly instead of the client string-extracting a blob.
- * - WebSearch only where the cohort profile explicitly opted in
+ * - WebSearch + WebFetch only where the cohort profile explicitly opted in
  *   (`tools.web_search`, sourced from the worker), matching the trust-tiering
  *   pedagogy. An unknown/missing tier grants nothing.
  */
@@ -84,7 +84,12 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
     tools.push("Read", "Write", "Edit");
   }
   if (profile.tools?.web_search === true) {
-    tools.push("WebSearch");
+    // Web research = search (find sources) + fetch (open and read them). Granting
+    // WebSearch without WebFetch is claude-code half — the coach can find a
+    // reference URL but not read it. Both route through canUseTool (SEARCH_TOOLS
+    // includes "webfetch") → approval modal, and minors never reach here (they
+    // get []), so WebFetch lands only on adult workshop tiers.
+    tools.push("WebSearch", "WebFetch");
   }
   return tools;
 }
