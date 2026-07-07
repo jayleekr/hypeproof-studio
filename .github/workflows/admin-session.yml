@@ -1,0 +1,120 @@
+name: admin-session
+
+# One-shot instructor session control via the already-wired HPS_ADMIN_PASSWORD
+# CI secret — opens (or closes) a workshop session + mints a scoped student
+# token without anyone holding the prod signing secret or admin password in
+# plaintext. Partially delivers #191 (강사 자율 세션 START, Jay 의존성 제거).
+#
+# `open`  : GET cohort (guard) → mint student token → merge user into roster
+#           → start session for <profile>. Prints token + jti to job summary.
+# `close` : DELETE session → revoke the minted token (by jti).
+#
+# admin Basic auth is NOT scope-limited (worker admin.ts), so this can target
+# any cohort/profile. Guard-checks a live session before overwriting it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "open | close"
+        type: choice
+        options: [open, close]
+        default: open
+      cohort:
+        description: "cohort id"
+        default: boah-dental-2026-a
+      profile:
+        description: "profile id (open)"
+        default: boah-dental-director-copyclone-2026-s1
+      user_handle:
+        description: "student handle to mint + add to roster (open)"
+        default: rehearsal-director
+      token_hours:
+        description: "student token lifetime (open)"
+        default: "6"
+      session_hours:
+        description: "session window length (open)"
+        default: "3"
+      jti:
+        description: "token jti to revoke (close only)"
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-session-${{ github.event.inputs.cohort }}
+  cancel-in-progress: false
+
+jobs:
+  admin-session:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      PROD: https://api.hypeproof-ai.xyz
+      PW: ${{ secrets.HPS_ADMIN_PASSWORD }}
+      ACTION: ${{ github.event.inputs.action }}
+      COHORT: ${{ github.event.inputs.cohort }}
+      PROFILE: ${{ github.event.inputs.profile }}
+      UHANDLE: ${{ github.event.inputs.user_handle }}
+      THOURS: ${{ github.event.inputs.token_hours }}
+      SHOURS: ${{ github.event.inputs.session_hours }}
+      JTI: ${{ github.event.inputs.jti }}
+    steps:
+      - name: run
+        run: |
+          set -euo pipefail
+          if [ -z "${PW:-}" ]; then echo "::error::HPS_ADMIN_PASSWORD secret is empty"; exit 1; fi
+          a() { curl -sS -u "admin:$PW" "$@"; }
+          j() { python3 -c "import sys,json;d=json.load(sys.stdin);print(d$1)"; }
+
+          if [ "$ACTION" = "close" ]; then
+            echo "### admin-session: close ($COHORT)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- DELETE session -> $(a -o /dev/null -w '%{http_code}' -X DELETE "$PROD/admin/cohorts/$COHORT/session")" >> "$GITHUB_STEP_SUMMARY"
+            if [ -n "${JTI:-}" ]; then
+              rc=$(a -o /dev/null -w '%{http_code}' -X POST "$PROD/admin/tokens/revoke" -H 'content-type: application/json' -d "{\"jti\":\"$JTI\",\"reason\":\"rehearsal cleanup\"}")
+              echo "- revoke $JTI -> $rc" >> "$GITHUB_STEP_SUMMARY"
+            fi
+            exit 0
+          fi
+
+          # ---- open ----
+          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          END=$(date -u -d "+${SHOURS} hours" +%Y-%m-%dT%H:%M:%SZ)
+
+          # Step A — guard: refuse to clobber a live session on this cohort.
+          DETAIL=$(a "$PROD/admin/cohorts/$COHORT")
+          LIVE=$(printf '%s' "$DETAIL" | python3 -c "import sys,json;d=json.load(sys.stdin);s=d.get('session');print(s.get('profile_id','') if s else '')" || true)
+          if [ -n "$LIVE" ]; then
+            echo "::warning::cohort $COHORT already has a live session (profile=$LIVE). Overwriting it."
+          fi
+
+          # Step B — mint copyclone STUDENT token (server signs with live prod secret).
+          MINT=$(a -X POST "$PROD/admin/tokens/issue" -H 'content-type: application/json' \
+            -d "{\"u\":\"$UHANDLE\",\"c\":\"$COHORT\",\"p\":\"$PROFILE\",\"hours\":$THOURS}")
+          TOKEN=$(printf '%s' "$MINT" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
+          JTI_OUT=$(printf '%s' "$MINT" | python3 -c "import sys,json;print(json.load(sys.stdin).get('jti',''))")
+          if [ -z "$TOKEN" ]; then echo "::error::mint failed: $MINT"; exit 1; fi
+
+          # Step C — roster MERGE (setRoster is a full replace; GET + append).
+          EXIST=$(printf '%s' "$DETAIL" | python3 -c "import sys,json;d=json.load(sys.stdin);r=d.get('roster') or {};u=r.get('users') if isinstance(r,dict) else r;print('\n'.join(u or []))" || true)
+          USERS=$(printf '%s\n%s\n' "$EXIST" "$UHANDLE" | grep -v '^$' | sort -u | python3 -c "import sys,json;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
+          RC=$(a -o /dev/null -w '%{http_code}' -X POST "$PROD/admin/cohorts/$COHORT/roster" -H 'content-type: application/json' -d "{\"users\":$USERS}")
+          echo "roster set ($RC): $USERS"
+
+          # Step D — open the session for the copyclone profile.
+          SESS=$(a -X POST "$PROD/admin/cohorts/$COHORT/session" -H 'content-type: application/json' \
+            -d "{\"profile_id\":\"$PROFILE\",\"starts_at\":\"$NOW\",\"ends_at\":\"$END\"}")
+          echo "session: $SESS"
+
+          {
+            echo "### admin-session: open"
+            echo "- cohort: \`$COHORT\`  profile: \`$PROFILE\`"
+            echo "- user: \`$UHANDLE\`  window: $NOW → $END"
+            echo "- jti (for close): \`$JTI_OUT\`"
+            echo ""
+            echo "student token:"
+            echo '```'
+            echo "$TOKEN"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
