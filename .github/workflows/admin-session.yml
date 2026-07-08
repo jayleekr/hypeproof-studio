@@ -1,16 +1,19 @@
 name: admin-session
 
-# One-shot instructor session control via the already-wired HPS_ADMIN_PASSWORD
-# CI secret — opens (or closes) a workshop session + mints a scoped student
-# token without anyone holding the prod signing secret or admin password in
-# plaintext. Partially delivers #191 (강사 자율 세션 START, Jay 의존성 제거).
+# Thin dispatcher over the #293 composite endpoints. One workflow_dispatch,
+# authenticated by the already-wired HPS_ADMIN_PASSWORD CI secret, lets an
+# operator with merge rights open/close a workshop session WITHOUT holding the
+# admin password or signing secret in plaintext. Partially serves #191 (강사
+# 자율 세션); unblocks the copyclone homepage rehearsal (#290).
 #
-# `open`  : GET cohort (guard) → mint student token → merge user into roster
-#           → start session for <profile>. Prints token + jti to job summary.
-# `close` : DELETE session → revoke the minted token (by jti).
+# `open`  : POST /admin/cohorts/:id/session/open  (server does guard→mint→
+#           roster→start atomically; 409 unless force). The minted student
+#           token is delivered to a PRIVATE Discord channel — never the public
+#           job summary. Summary shows only jti/user/window.
+# `close` : POST /admin/cohorts/:id/session/close (end session + revoke jti).
 #
-# admin Basic auth is NOT scope-limited (worker admin.ts), so this can target
-# any cohort/profile. Guard-checks a live session before overwriting it.
+# Requires #293 to be DEPLOYED to prod first (endpoints are merged to main but
+# ship on the next `wrangler deploy`).
 
 on:
   workflow_dispatch:
@@ -30,13 +33,17 @@ on:
         description: "student handle to mint + add to roster (open)"
         default: rehearsal-director
       token_hours:
-        description: "student token lifetime (open)"
+        description: "student token lifetime, 1..24 (open)"
         default: "6"
       session_hours:
-        description: "session window length (open)"
+        description: "session window length, 1..24 (open)"
         default: "3"
+      force:
+        description: "replace a live session (open)"
+        type: boolean
+        default: false
       jti:
-        description: "token jti to revoke (close only)"
+        description: "token jti to revoke (close)"
         default: ""
 
 permissions:
@@ -53,68 +60,60 @@ jobs:
     env:
       PROD: https://api.hypeproof-ai.xyz
       PW: ${{ secrets.HPS_ADMIN_PASSWORD }}
+      DISCORD: ${{ secrets.DISCORD_WEBHOOK_HYPEPROOF_STUDIO }}
       ACTION: ${{ github.event.inputs.action }}
       COHORT: ${{ github.event.inputs.cohort }}
       PROFILE: ${{ github.event.inputs.profile }}
       UHANDLE: ${{ github.event.inputs.user_handle }}
       THOURS: ${{ github.event.inputs.token_hours }}
       SHOURS: ${{ github.event.inputs.session_hours }}
+      FORCE: ${{ github.event.inputs.force }}
       JTI: ${{ github.event.inputs.jti }}
     steps:
       - name: run
         run: |
           set -euo pipefail
-          if [ -z "${PW:-}" ]; then echo "::error::HPS_ADMIN_PASSWORD secret is empty"; exit 1; fi
-          a() { curl -sS -u "admin:$PW" "$@"; }
-          j() { python3 -c "import sys,json;d=json.load(sys.stdin);print(d$1)"; }
+          [ -n "${PW:-}" ] || { echo "::error::HPS_ADMIN_PASSWORD secret is empty"; exit 1; }
+          # --fail-with-body: non-2xx makes curl exit non-zero (so a guard/auth
+          # error can never be misread as success) while still printing the body.
+          a() { curl -sS --fail-with-body -u "admin:$PW" "$@"; }
 
           if [ "$ACTION" = "close" ]; then
-            echo "### admin-session: close ($COHORT)" >> "$GITHUB_STEP_SUMMARY"
-            echo "- DELETE session -> $(a -o /dev/null -w '%{http_code}' -X DELETE "$PROD/admin/cohorts/$COHORT/session")" >> "$GITHUB_STEP_SUMMARY"
-            if [ -n "${JTI:-}" ]; then
-              rc=$(a -o /dev/null -w '%{http_code}' -X POST "$PROD/admin/tokens/revoke" -H 'content-type: application/json' -d "{\"jti\":\"$JTI\",\"reason\":\"rehearsal cleanup\"}")
-              echo "- revoke $JTI -> $rc" >> "$GITHUB_STEP_SUMMARY"
-            fi
+            [ -n "${JTI:-}" ] || { echo "::error::close needs a jti input"; exit 1; }
+            RESP=$(a -X POST "$PROD/admin/cohorts/$COHORT/session/close" \
+              -H 'content-type: application/json' -d "{\"jti\":\"$JTI\"}")
+            echo "### admin-session: close ($COHORT) — revoked $JTI" >> "$GITHUB_STEP_SUMMARY"
+            echo "$RESP"
             exit 0
           fi
 
           # ---- open ----
-          NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          END=$(date -u -d "+${SHOURS} hours" +%Y-%m-%dT%H:%M:%SZ)
+          case "$UHANDLE" in *[!a-zA-Z0-9_-]*) echo "::error::user_handle must be [a-zA-Z0-9_-]"; exit 1;; esac
+          case "$THOURS" in ''|*[!0-9]*) echo "::error::token_hours must be an integer"; exit 1;; esac
+          case "$SHOURS" in ''|*[!0-9]*) echo "::error::session_hours must be an integer"; exit 1;; esac
+          [ -n "${DISCORD:-}" ] || { echo "::error::DISCORD_WEBHOOK_HYPEPROOF_STUDIO empty — refusing to open (token would have nowhere private to go)"; exit 1; }
+          FORCE_JSON=false; [ "$FORCE" = "true" ] && FORCE_JSON=true
 
-          # Step A — guard: refuse to clobber a live session on this cohort.
-          DETAIL=$(a "$PROD/admin/cohorts/$COHORT")
-          LIVE=$(printf '%s' "$DETAIL" | python3 -c "import sys,json;d=json.load(sys.stdin);s=d.get('session');print(s.get('profile_id','') if s else '')" || true)
-          if [ -n "$LIVE" ]; then
-            echo "::warning::cohort $COHORT already has a live session (profile=$LIVE). Overwriting it."
-          fi
+          # Server does guard(409-unless-force) → mint → roster append → start,
+          # and returns the token ONLY in this HTTPS response body.
+          RESP=$(a -X POST "$PROD/admin/cohorts/$COHORT/session/open" \
+            -H 'content-type: application/json' \
+            -d "{\"profile_id\":\"$PROFILE\",\"user\":\"$UHANDLE\",\"token_hours\":$THOURS,\"session_hours\":$SHOURS,\"force\":$FORCE_JSON}")
 
-          # Step B — mint copyclone STUDENT token (server signs with live prod secret).
-          MINT=$(a -X POST "$PROD/admin/tokens/issue" -H 'content-type: application/json' \
-            -d "{\"u\":\"$UHANDLE\",\"c\":\"$COHORT\",\"p\":\"$PROFILE\",\"hours\":$THOURS}")
-          TOKEN=$(printf '%s' "$MINT" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
-          JTI_OUT=$(printf '%s' "$MINT" | python3 -c "import sys,json;print(json.load(sys.stdin).get('jti',''))")
-          if [ -z "$TOKEN" ]; then echo "::error::mint failed: $MINT"; exit 1; fi
+          TOKEN=$(printf '%s' "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
+          JTI_OUT=$(printf '%s' "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('jti',''))")
+          [ -n "$TOKEN" ] || { echo "::error::open returned no token"; exit 1; }
 
-          # Step C — roster MERGE (setRoster is a full replace; GET + append).
-          EXIST=$(printf '%s' "$DETAIL" | python3 -c "import sys,json;d=json.load(sys.stdin);r=d.get('roster') or {};u=r.get('users') if isinstance(r,dict) else r;print('\n'.join(u or []))" || true)
-          USERS=$(printf '%s\n%s\n' "$EXIST" "$UHANDLE" | grep -v '^$' | sort -u | python3 -c "import sys,json;print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))")
-          RC=$(a -o /dev/null -w '%{http_code}' -X POST "$PROD/admin/cohorts/$COHORT/roster" -H 'content-type: application/json' -d "{\"users\":$USERS}")
-          echo "roster set ($RC): $USERS"
-
-          # Step D — open the session for the copyclone profile.
-          SESS=$(a -X POST "$PROD/admin/cohorts/$COHORT/session" -H 'content-type: application/json' \
-            -d "{\"profile_id\":\"$PROFILE\",\"starts_at\":\"$NOW\",\"ends_at\":\"$END\"}")
-          echo "session: $SESS"
+          # Deliver the token to the PRIVATE Discord channel (not the public log).
+          # Token comes via env (never interpolated into the shell) and the JSON
+          # is written to a file, so there is no quoting/injection surface.
+          TOKEN="$TOKEN" JTI_OUT="$JTI_OUT" python3 -c "import json,os;open('/tmp/msg.json','w').write(json.dumps({'content':'admin-session open — cohort=%s profile=%s user=%s jti=%s — token(%sh): %s'%(os.environ['COHORT'],os.environ['PROFILE'],os.environ['UHANDLE'],os.environ['JTI_OUT'],os.environ['THOURS'],os.environ['TOKEN'])}))"
+          curl -sS --fail-with-body -X POST "$DISCORD" -H 'content-type: application/json' -d @/tmp/msg.json >/dev/null
+          echo "token delivered to Discord"
 
           {
-            echo "### admin-session: open"
-            echo "- cohort: \`$COHORT\`  profile: \`$PROFILE\`"
-            echo "- user: \`$UHANDLE\`  window: $NOW → $END"
+            echo "### admin-session: open ✅"
+            echo "- cohort: \`$COHORT\`  profile: \`$PROFILE\`  user: \`$UHANDLE\`"
+            echo "- token: delivered to private Discord (#hypeproof-studio) — NOT logged here"
             echo "- jti (for close): \`$JTI_OUT\`"
-            echo ""
-            echo "student token:"
-            echo '```'
-            echo "$TOKEN"
-            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
