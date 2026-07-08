@@ -7,9 +7,12 @@
 // Endpoints:
 //   GET    /admin/cohorts                       — list with status
 //   GET    /admin/cohorts/:id                   — detail (roster + active session)
-//   POST   /admin/cohorts/:id/roster            — body: { users: string[] }
+//   POST   /admin/cohorts/:id/roster            — body: { users: string[] } (full replace)
+//   POST   /admin/cohorts/:id/roster/append     — body: { users: string[] } (server-side merge, #290)
 //   POST   /admin/cohorts/:id/session           — body: { profile_id, starts_at, ends_at }
 //   DELETE /admin/cohorts/:id/session           — end current session
+//   POST   /admin/cohorts/:id/session/open      — composite: guard→mint→roster→start (#290)
+//   POST   /admin/cohorts/:id/session/close     — composite: end + revoke minted token (#290)
 //   POST   /admin/cohorts/:id/pause             — kill-switch on (S-12 / #47)
 //   DELETE /admin/cohorts/:id/pause             — kill-switch off
 //   POST   /admin/tokens/revoke                 — per-token kill (S-01 / #46)
@@ -49,6 +52,10 @@ function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   // their scoped cohort's session without admin Basic auth.
   if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/session$/.test(path)) return true;
   if (method === "DELETE" && /^\/admin\/cohorts\/[^/]+\/session$/.test(path)) return true;
+  // #290 — scoped issuers may append to their cohort's roster and use the
+  // composite session open/close endpoints (self-service workshop ops).
+  if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/roster\/append$/.test(path)) return true;
+  if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/session\/(open|close)$/.test(path)) return true;
   return false;
 }
 
@@ -284,6 +291,43 @@ admin.post("/cohorts/:id/roster", async (c) => {
   return c.json({ ok: true, size: users.length });
 });
 
+// #290 — append-merge roster. The endpoint above is a full replace, which
+// forced callers into a client-side GET+replace round-trip that (a) races
+// concurrent writers and (b) wipes the roster on a partial GET. Merging
+// server-side removes both hazards. Issuer-role tokens scoped to the cohort
+// may call it: a scoped issuer can already mint a student token, and being
+// unable to put that student on the roster was the last admin-only step in
+// the workshop-open flow.
+const ROSTER_MAX = 500;
+admin.post("/cohorts/:id/roster/append", async (c) => {
+  const id = c.req.param("id");
+  const issuerCheck = await authorizeIssuerForCohort(c, id);
+  if (issuerCheck instanceof Response) return issuerCheck;
+
+  const body = await c.req.json<{ users?: string[] }>().catch(() => ({} as { users?: string[] }));
+  const users = body.users;
+  if (!Array.isArray(users) || users.length === 0) {
+    return c.json({ error: "users must be a non-empty array" }, 400);
+  }
+  if (users.some((u) => typeof u !== "string" || u.length < 1 || u.length > 64)) {
+    return c.json({ error: "user ids must be 1-64 char strings" }, 400);
+  }
+  const existing = (await getRoster(c.env.HPS_KV, id))?.users ?? [];
+  const merged = [...existing];
+  const added: string[] = [];
+  for (const u of users) {
+    if (!merged.includes(u)) {
+      merged.push(u);
+      added.push(u);
+    }
+  }
+  if (merged.length > ROSTER_MAX) {
+    return c.json({ error: `roster would exceed ${ROSTER_MAX} users` }, 400);
+  }
+  if (added.length > 0) await setRoster(c.env.HPS_KV, id, merged);
+  return c.json({ ok: true, size: merged.length, added });
+});
+
 // ---- session start/end ------------------------------------------------------
 
 // #167 — when an issuer-role Bearer is presented to /cohorts/:id/session
@@ -294,6 +338,44 @@ admin.post("/cohorts/:id/roster", async (c) => {
 //
 // `requireProfileId`: when set, the matched scope must include this profile.
 // (start needs it; end does not — end just kills the current session).
+// #290 — issuer-Bearer gate for roster append: any scope on this cohort is
+// enough (no can_start_session needed — minting rights already imply the
+// minted student must be able to join the roster). Same null/Response/result
+// contract as authorizeIssuerForSession below.
+async function authorizeIssuerForCohort(
+  c: { env: Env; req: { header: (k: string) => string | undefined } },
+  cohortId: string,
+): Promise<{ scope: IssuerScope; payload: TokenPayload } | null | Response> {
+  const auth = c.req.header("authorization") ?? "";
+  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
+  if (!bearerMatch || !bearerMatch[1]) return null;
+
+  let payload: TokenPayload;
+  try {
+    payload = await verify(bearerMatch[1], c.env.HPS_SIGNING_SECRET);
+  } catch (err) {
+    return Response.json(
+      { error: `invalid issuer token: ${(err as Error).message}` },
+      { status: 401 },
+    );
+  }
+  if (payload.role !== "issuer") {
+    return Response.json({ error: "token is not an issuer" }, { status: 403 });
+  }
+  const scope = (payload.scopes ?? []).find((s) => s.cohort === cohortId);
+  if (!scope) {
+    return Response.json(
+      { error: `issuer not scoped to cohort=${cohortId}` },
+      { status: 403 },
+    );
+  }
+  if (payload.jti) {
+    const rev = await isTokenRevoked(c.env.HPS_KV, payload.jti);
+    if (rev) return Response.json({ error: "issuer token revoked" }, { status: 401 });
+  }
+  return { scope, payload };
+}
+
 async function authorizeIssuerForSession(
   c: { env: Env; req: { header: (k: string) => string | undefined } },
   cohortId: string,
@@ -421,6 +503,145 @@ admin.delete("/cohorts/:id/session", async (c) => {
     );
   }
   return c.json({ ok: true, ended: existing });
+});
+
+// ---- composite session open/close (#290 / #191) ------------------------------
+//
+// One call = live-session guard → mint student token → roster append →
+// session start. Exists so an instructor holding only a scoped issuer token
+// can open a workshop with zero admin involvement, and so the student token
+// travels only inside this HTTPS response — never a CI log or public job
+// summary (the leak that killed the PR #291 workflow approach).
+
+admin.post("/cohorts/:id/session/open", async (c) => {
+  const cohortId = c.req.param("id");
+  type OpenBody = {
+    profile_id?: string;
+    user?: string;
+    token_hours?: number;
+    session_hours?: number;
+    force?: boolean;
+  };
+  const body = (await c.req.json<OpenBody>().catch(() => ({} as OpenBody))) as OpenBody;
+  const { profile_id, user } = body;
+  if (!profile_id || typeof profile_id !== "string" || profile_id.length > 80) {
+    return c.json({ error: "profile_id required" }, 400);
+  }
+  if (!user || typeof user !== "string" || user.length < 1 || user.length > 64) {
+    return c.json({ error: "user required (1-64 chars)" }, 400);
+  }
+  const tokenHours = Number.isFinite(body.token_hours) ? Number(body.token_hours) : 6;
+  const sessionHours = Number.isFinite(body.session_hours) ? Number(body.session_hours) : 3;
+  // 24h hard cap on both: a rehearsal/workshop credential should never span
+  // days, and it keeps the close-side revocation TTL bounded even when the
+  // caller forgets to pass exp.
+  if (tokenHours <= 0 || tokenHours > 24) return c.json({ error: "token_hours must be 1..24" }, 400);
+  if (sessionHours <= 0 || sessionHours > 24) return c.json({ error: "session_hours must be 1..24" }, 400);
+
+  const issuerCheck = await authorizeIssuerForSession(c, cohortId, profile_id);
+  if (issuerCheck instanceof Response) return issuerCheck;
+  if (issuerCheck) {
+    const maxSession = issuerCheck.scope.max_session_hours ?? 4;
+    if (sessionHours > maxSession) {
+      return c.json(
+        { error: `session_hours ${sessionHours} exceeds issuer scope max ${maxSession}h` },
+        403,
+      );
+    }
+    if (issuerCheck.scope.max_hours && tokenHours > issuerCheck.scope.max_hours) {
+      return c.json(
+        { error: `token_hours ${tokenHours} exceeds issuer scope max ${issuerCheck.scope.max_hours}h` },
+        403,
+      );
+    }
+  }
+
+  // Guard — refuse to clobber a live session unless the caller opts in.
+  // (active_session is a single key per cohort; a silent overwrite would end
+  // whatever class is currently running — the #291 blast-radius concern.)
+  const live = await getActiveSession(c.env.HPS_KV, cohortId);
+  const liveNow = live && Date.parse(live.ends_at) > Date.now() ? live : null;
+  if (liveNow && body.force !== true) {
+    return c.json(
+      { error: "cohort has a live session — pass force:true to replace it", active: liveNow },
+      409,
+    );
+  }
+
+  const { token, jti } = await issue(
+    { u: user, c: cohortId, p: profile_id },
+    tokenHours,
+    c.env.HPS_SIGNING_SECRET,
+  );
+
+  // Roster merge — same server-side semantics as /roster/append.
+  const existing = (await getRoster(c.env.HPS_KV, cohortId))?.users ?? [];
+  const onRoster = existing.includes(user);
+  if (!onRoster) await setRoster(c.env.HPS_KV, cohortId, [...existing, user]);
+
+  const now = Date.now();
+  const session: ActiveSession = {
+    session_id: `${cohortId}-${new Date(now).toISOString().slice(0, 10)}`,
+    profile_id,
+    starts_at: new Date(now).toISOString(),
+    ends_at: new Date(now + sessionHours * 3600_000).toISOString(),
+  };
+  await startSession(c.env.HPS_KV, cohortId, session);
+  c.executionCtx.waitUntil(
+    c.env.HPS_DB
+      .prepare(
+        `INSERT OR REPLACE INTO sessions (id, cohort_id, profile_id, starts_at, ends_at)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .bind(session.session_id, cohortId, session.profile_id, session.starts_at, session.ends_at)
+      .run(),
+  );
+
+  return c.json({
+    ok: true,
+    token,
+    jti,
+    user,
+    cohort: cohortId,
+    profile: profile_id,
+    exp: Math.floor(now / 1000) + tokenHours * 3600,
+    session,
+    roster_size: onRoster ? existing.length : existing.length + 1,
+    replaced: liveNow,
+  });
+});
+
+admin.post("/cohorts/:id/session/close", async (c) => {
+  const cohortId = c.req.param("id");
+  type CloseBody = { jti?: string; exp?: number };
+  const body = (await c.req.json<CloseBody>().catch(() => ({} as CloseBody))) as CloseBody;
+
+  const issuerCheck = await authorizeIssuerForSession(c, cohortId, null);
+  if (issuerCheck instanceof Response) return issuerCheck;
+
+  const existing = await getActiveSession(c.env.HPS_KV, cohortId);
+  await endSession(c.env.HPS_KV, cohortId);
+  if (existing) {
+    c.executionCtx.waitUntil(
+      c.env.HPS_DB
+        .prepare(`UPDATE sessions SET ended_at = datetime('now') WHERE id = ?`)
+        .bind(existing.session_id)
+        .run(),
+    );
+  }
+
+  let revoked: string | null = null;
+  if (body.jti) {
+    if (!UUID_RE.test(body.jti)) return c.json({ error: "jti must be a valid UUID" }, 400);
+    const now = Math.floor(Date.now() / 1000);
+    // TTL runs to the token's actual exp when given — a fixed 24h TTL would
+    // let a longer-lived token outlive its revocation record and come back
+    // from the dead.
+    const ttl = typeof body.exp === "number" && body.exp > now ? body.exp - now : 60 * 60 * 24;
+    await revokeToken(c.env.HPS_KV, body.jti, { reason: "session-close", cohort: cohortId }, ttl);
+    revoked = body.jti;
+  }
+  return c.json({ ok: true, ended: existing, revoked });
 });
 
 // ---- live stats snapshot (S-09 / #50) ---------------------------------------
