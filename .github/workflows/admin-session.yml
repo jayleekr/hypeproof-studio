@@ -77,9 +77,11 @@ jobs:
           # --fail-with-body: non-2xx makes curl exit non-zero (so a guard/auth
           # error can never be misread as success) while still printing the body.
           a() { curl -sS --fail-with-body -u "admin:$PW" "$@"; }
+          case "$COHORT" in ''|*[!a-zA-Z0-9_-]*) echo "::error::cohort must be [a-zA-Z0-9_-]"; exit 1;; esac
 
           if [ "$ACTION" = "close" ]; then
             [ -n "${JTI:-}" ] || { echo "::error::close needs a jti input"; exit 1; }
+            case "$JTI" in *[!0-9a-fA-F-]*) echo "::error::jti must be a UUID"; exit 1;; esac
             RESP=$(a -X POST "$PROD/admin/cohorts/$COHORT/session/close" \
               -H 'content-type: application/json' -d "{\"jti\":\"$JTI\"}")
             echo "### admin-session: close ($COHORT) — revoked $JTI" >> "$GITHUB_STEP_SUMMARY"
@@ -91,6 +93,7 @@ jobs:
           case "$UHANDLE" in *[!a-zA-Z0-9_-]*) echo "::error::user_handle must be [a-zA-Z0-9_-]"; exit 1;; esac
           case "$THOURS" in ''|*[!0-9]*) echo "::error::token_hours must be an integer"; exit 1;; esac
           case "$SHOURS" in ''|*[!0-9]*) echo "::error::session_hours must be an integer"; exit 1;; esac
+          case "$PROFILE" in ''|*[!a-zA-Z0-9_-]*) echo "::error::profile must be [a-zA-Z0-9_-]"; exit 1;; esac
           [ -n "${DISCORD:-}" ] || { echo "::error::DISCORD_WEBHOOK_HYPEPROOF_STUDIO empty — refusing to open (token would have nowhere private to go)"; exit 1; }
           FORCE_JSON=false; [ "$FORCE" = "true" ] && FORCE_JSON=true
 
@@ -103,6 +106,7 @@ jobs:
           TOKEN=$(printf '%s' "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('token',''))")
           JTI_OUT=$(printf '%s' "$RESP" | python3 -c "import sys,json;print(json.load(sys.stdin).get('jti',''))")
           [ -n "$TOKEN" ] || { echo "::error::open returned no token"; exit 1; }
+          echo "::add-mask::$TOKEN"   # defense-in-depth: redact token from any log line
 
           # Deliver the token to the PRIVATE Discord channel (not the public log).
           # Token comes via env (never interpolated into the shell) and the JSON
