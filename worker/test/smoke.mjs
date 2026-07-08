@@ -15,7 +15,12 @@ registerHooks({
       try {
         return nextResolve(`${specifier}.ts`, context);
       } catch {
-        return nextResolve(specifier, context);
+        try {
+          return nextResolve(specifier, context);
+        } catch {
+          // Directory modules (e.g. "../profiles" → profiles/index.ts).
+          return nextResolve(`${specifier}/index.ts`, context);
+        }
       }
     }
     return nextResolve(specifier, context);
@@ -1864,6 +1869,217 @@ const TINY_PNG =
   assert.ok(td && JSON.parse(td).choices[0].delta.content === "안녕", "text_delta still translates");
 
   console.log("✓ #173: web_search citation chunk + 4-tier classifier");
+}
+
+// §issuer-self-service — roster/append + composite session open/close (#290).
+// Route-level tests through the real app (index.ts) so the /admin middleware's
+// issuer-Bearer path exceptions are exercised with full paths.
+{
+  const app = (await import("../src/index.ts")).default;
+  const { issueIssuer } = await import("../src/lib/tokens.ts");
+  const { isTokenRevoked } = await import("../src/lib/kv.ts");
+
+  const COHORT = "boah-dental-2026-a";
+  const PROFILE = "boah-dental-director-copyclone-2026-s1";
+  const ADMIN_PW = "pw-test";
+  const BASIC = "Basic " + btoa(`admin:${ADMIN_PW}`);
+
+  function mkEnv(seed = {}) {
+    const store = new Map(Object.entries(seed));
+    const dbCalls = [];
+    return {
+      HPS_SIGNING_SECRET: SECRET,
+      HPS_ADMIN_PASSWORD: ADMIN_PW,
+      HPS_KV: {
+        async get(k, fmt) {
+          const v = store.get(k);
+          if (v == null) return null;
+          return fmt === "json" ? JSON.parse(v) : v;
+        },
+        async put(k, v) { store.set(k, v); },
+        async delete(k) { store.delete(k); },
+        async list({ prefix, limit = 100 }) {
+          const keys = [];
+          for (const k of store.keys()) if (k.startsWith(prefix)) keys.push({ name: k });
+          return { keys: keys.slice(0, limit), list_complete: true, cursor: "" };
+        },
+      },
+      HPS_DB: {
+        prepare(sql) {
+          const call = { sql, bindings: null };
+          return {
+            bind(...args) { call.bindings = args; return this; },
+            async run() { dbCalls.push(call); return { success: true }; },
+            async first() { dbCalls.push(call); return null; },
+          };
+        },
+      },
+      HPS_TRACES: { async put() {} },
+      _store: store,
+      _dbCalls: dbCalls,
+    };
+  }
+  const ctx = { waitUntil: (p) => Promise.resolve(p).catch(() => {}) };
+  const hit = (env, path, method, bodyObj, authHeader) =>
+    app.fetch(
+      new Request(`https://t${path}`, {
+        method,
+        body: bodyObj === undefined ? undefined : JSON.stringify(bodyObj),
+        headers: {
+          "content-type": "application/json",
+          ...(authHeader ? { authorization: authHeader } : {}),
+        },
+      }),
+      env,
+      ctx,
+    );
+
+  const { token: ISSUER } = await issueIssuer(
+    {
+      issuer: "jiwoong",
+      scopes: [{
+        cohort: COHORT, profiles: [PROFILE],
+        max_hours: 12, max_session_hours: 4, can_start_session: true,
+      }],
+    },
+    24, SECRET,
+  );
+  const { token: MINT_ONLY_ISSUER } = await issueIssuer(
+    { issuer: "mintonly", scopes: [{ cohort: COHORT, profiles: [PROFILE], max_hours: 12 }] },
+    24, SECRET,
+  );
+  const { token: OTHER_COHORT_ISSUER } = await issueIssuer(
+    { issuer: "other", scopes: [{ cohort: "other-cohort", profiles: ["p"], can_start_session: true }] },
+    24, SECRET,
+  );
+
+  // roster/append — scoped issuer merges + dedupes, existing users preserved
+  {
+    const env = mkEnv({
+      [`cohort:${COHORT}:roster`]: JSON.stringify({ users: ["kid-a"], updated_at: "x" }),
+    });
+    const r = await hit(env, `/admin/cohorts/${COHORT}/roster/append`, "POST",
+      { users: ["kid-b", "kid-a"] }, `Bearer ${ISSUER}`);
+    assert.equal(r.status, 200, "issuer roster append → 200");
+    const j = await r.json();
+    assert.equal(j.size, 2);
+    assert.deepEqual(j.added, ["kid-b"], "only the new user reported as added");
+    const roster = JSON.parse(env._store.get(`cohort:${COHORT}:roster`));
+    assert.deepEqual(roster.users, ["kid-a", "kid-b"], "merge preserves existing order");
+  }
+  // roster/append — mint-only issuer scope (no can_start_session) is enough
+  {
+    const env = mkEnv();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/roster/append`, "POST",
+      { users: ["kid-c"] }, `Bearer ${MINT_ONLY_ISSUER}`);
+    assert.equal(r.status, 200, "mint-only issuer may append roster");
+  }
+  // roster/append — issuer scoped to a different cohort → 403
+  {
+    const env = mkEnv();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/roster/append`, "POST",
+      { users: ["kid-x"] }, `Bearer ${OTHER_COHORT_ISSUER}`);
+    assert.equal(r.status, 403, "wrong-cohort issuer → 403");
+  }
+  // roster/append — no auth at all → 401 (middleware Basic wall)
+  {
+    const env = mkEnv();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/roster/append`, "POST", { users: ["kid-x"] });
+    assert.equal(r.status, 401, "unauthenticated → 401");
+  }
+  console.log("✓ #290 roster/append: server-side merge + issuer scope gate");
+
+  // session/open — full composite happy path (issuer)
+  {
+    const env = mkEnv();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "director-01", token_hours: 6, session_hours: 3 },
+      `Bearer ${ISSUER}`);
+    assert.equal(r.status, 200, "composite open → 200");
+    const j = await r.json();
+    assert.ok(j.token && j.jti, "student token returned in response body");
+    const student = await verify(j.token, SECRET);
+    assert.equal(student.u, "director-01");
+    assert.equal(student.c, COHORT);
+    assert.equal(student.p, PROFILE, "student token scoped to requested profile");
+    const roster = JSON.parse(env._store.get(`cohort:${COHORT}:roster`));
+    assert.ok(roster.users.includes("director-01"), "user appended to roster");
+    const sess = JSON.parse(env._store.get(`cohort:${COHORT}:active_session`));
+    assert.equal(sess.profile_id, PROFILE, "session opened for requested profile");
+    assert.ok(env._dbCalls.some((c2) => /INSERT OR REPLACE INTO sessions/.test(c2.sql)),
+      "session persisted to D1");
+  }
+  // session/open — refuses to clobber a live session without force
+  {
+    const env = mkEnv({
+      [`cohort:${COHORT}:active_session`]: JSON.stringify({
+        session_id: "sess-live", profile_id: "teaser-profile",
+        starts_at: new Date(Date.now() - 60_000).toISOString(),
+        ends_at: new Date(Date.now() + 3600_000).toISOString(),
+      }),
+    });
+    const r1 = await hit(env, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "director-01" }, `Bearer ${ISSUER}`);
+    assert.equal(r1.status, 409, "live session + no force → 409");
+    const r2 = await hit(env, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "director-01", force: true }, `Bearer ${ISSUER}`);
+    assert.equal(r2.status, 200, "force:true replaces live session");
+    const j2 = await r2.json();
+    assert.equal(j2.replaced.session_id, "sess-live", "replaced session reported");
+  }
+  // session/open — issuer without can_start_session → 403
+  {
+    const env = mkEnv();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "u1" }, `Bearer ${MINT_ONLY_ISSUER}`);
+    assert.equal(r.status, 403, "mint-only issuer cannot open sessions");
+  }
+  // session/open — issuer scope caps enforced (max_session_hours=4, max_hours=12)
+  {
+    const env = mkEnv();
+    const r1 = await hit(env, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "u1", session_hours: 5 }, `Bearer ${ISSUER}`);
+    assert.equal(r1.status, 403, "session_hours over scope cap → 403");
+    const r2 = await hit(env, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "u1", token_hours: 13 }, `Bearer ${ISSUER}`);
+    assert.equal(r2.status, 403, "token_hours over scope cap → 403");
+  }
+  // session/open — admin Basic path works and is not scope-capped (24h hard cap only)
+  {
+    const env = mkEnv();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "u1", token_hours: 24, session_hours: 24 }, BASIC);
+    assert.equal(r.status, 200, "admin Basic composite open → 200");
+    const r2 = await hit(env, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "u1", token_hours: 25, force: true }, BASIC);
+    assert.equal(r2.status, 400, "token_hours over 24h hard cap → 400 even for admin");
+  }
+  console.log("✓ #290 session/open: composite mint+roster+start, guard, scope caps");
+
+  // session/close — ends session + revokes with exp-bounded TTL
+  {
+    const env = mkEnv();
+    const open = await hit(env, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "u1", token_hours: 6 }, `Bearer ${ISSUER}`);
+    const oj = await open.json();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/session/close`, "POST",
+      { jti: oj.jti, exp: oj.exp }, `Bearer ${ISSUER}`);
+    assert.equal(r.status, 200, "composite close → 200");
+    const j = await r.json();
+    assert.equal(j.revoked, oj.jti);
+    assert.equal(j.ended.profile_id, PROFILE, "previous session reported");
+    assert.equal(env._store.get(`cohort:${COHORT}:active_session`), undefined, "session key deleted");
+    const rev = await isTokenRevoked(env.HPS_KV, oj.jti);
+    assert.equal(rev.reason, "session-close", "student token revoked");
+  }
+  // session/close — bad jti shape rejected
+  {
+    const env = mkEnv();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/session/close`, "POST",
+      { jti: "not-a-uuid" }, `Bearer ${ISSUER}`);
+    assert.equal(r.status, 400, "non-UUID jti → 400");
+  }
+  console.log("✓ #290 session/close: end + exp-bounded revoke");
 }
 
 console.log("\nAll smoke tests passed.");
