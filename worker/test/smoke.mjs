@@ -2080,6 +2080,95 @@ const TINY_PNG =
     assert.equal(r.status, 400, "non-UUID jti → 400");
   }
   console.log("✓ #290 session/close: end + exp-bounded revoke");
+
+  // §issuer-mint (#290/#191) — admin-only server-side issuer minting.
+  {
+    // ① happy path: admin Basic mints an issuer; token only in the response body
+    const env = mkEnv();
+    const r = await hit(env, "/admin/issuers", "POST", {
+      instructor: "newteacher",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE], max_hours: 12, can_start_session: true, max_session_hours: 4 }],
+      days: 30,
+    }, BASIC);
+    assert.equal(r.status, 200, "admin mints issuer → 200");
+    const j = await r.json();
+    assert.ok(j.token && j.jti, "issuer token + jti in response body");
+    const payload = await verify(j.token, SECRET);
+    assert.equal(payload.role, "issuer", "minted token is role=issuer");
+    assert.equal(payload.u, "newteacher");
+    assert.equal(payload.scopes[0].cohort, COHORT);
+    assert.equal(payload.scopes[0].can_start_session, true);
+    // ⑦ audit record written, ① metadata only — token must NOT appear in it
+    const audit = env._store.get(`issuer_audit:${j.jti}`);
+    assert.ok(audit, "audit record written to KV");
+    assert.ok(!audit.includes(j.token), "audit record does NOT contain the token");
+
+    // end-to-end: the freshly-minted issuer can actually open a session
+    const env2 = mkEnv();
+    const open = await hit(env2, `/admin/cohorts/${COHORT}/session/open`, "POST",
+      { profile_id: PROFILE, user: "dir-9", token_hours: 6, session_hours: 3 }, `Bearer ${j.token}`);
+    assert.equal(open.status, 200, "freshly-minted issuer opens a session → 200");
+  }
+  // ② security: a plain issuer Bearer cannot mint another issuer (admin-only)
+  {
+    const env = mkEnv();
+    const r = await hit(env, "/admin/issuers", "POST",
+      { instructor: "x", scopes: [{ cohort: COHORT, profiles: [PROFILE] }] }, `Bearer ${ISSUER}`);
+    assert.equal(r.status, 401, "issuer Bearer → 401 (root-of-trust is admin-only)");
+  }
+  // ② unauthenticated → 401
+  {
+    const env = mkEnv();
+    const r = await hit(env, "/admin/issuers", "POST",
+      { instructor: "x", scopes: [{ cohort: COHORT, profiles: [PROFILE] }] });
+    assert.equal(r.status, 401, "no auth → 401");
+  }
+  // ④ scope caps — even admin cannot exceed policy hard caps
+  {
+    const env = mkEnv();
+    const overDays = await hit(env, "/admin/issuers", "POST",
+      { instructor: "t", scopes: [{ cohort: COHORT, profiles: [PROFILE] }], days: 91 }, BASIC);
+    assert.equal(overDays.status, 400, "days > 90 → 400");
+    const overHours = await hit(env, "/admin/issuers", "POST",
+      { instructor: "t", scopes: [{ cohort: COHORT, profiles: [PROFILE], max_hours: 169 }] }, BASIC);
+    assert.equal(overHours.status, 400, "max_hours > 168 → 400");
+    const overSess = await hit(env, "/admin/issuers", "POST",
+      { instructor: "t", scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true, max_session_hours: 25 }] }, BASIC);
+    assert.equal(overSess.status, 400, "max_session_hours > 24 → 400");
+  }
+  // ③ input validation
+  {
+    const env = mkEnv();
+    const bad = [
+      [{ scopes: [{ cohort: COHORT, profiles: [PROFILE] }] }, "missing instructor"],
+      [{ instructor: "a b", scopes: [{ cohort: COHORT, profiles: [PROFILE] }] }, "bad instructor chars"],
+      [{ instructor: "t", scopes: [] }, "empty scopes"],
+      [{ instructor: "t", scopes: [{ cohort: COHORT, profiles: ["bad id!"] }] }, "bad profile id"],
+      [{ instructor: "t", scopes: [{ profiles: [PROFILE] }] }, "missing cohort"],
+    ];
+    for (const [body, why] of bad) {
+      const r = await hit(env, "/admin/issuers", "POST", body, BASIC);
+      assert.equal(r.status, 400, `${why} → 400`);
+    }
+  }
+  // ⑤/⑥ re-scope: revoke_jti kills the replaced issuer (bounded TTL, no resurrection)
+  {
+    const env = mkEnv();
+    const first = await hit(env, "/admin/issuers", "POST",
+      { instructor: "reissue-me", scopes: [{ cohort: COHORT, profiles: [PROFILE] }], days: 10 }, BASIC);
+    const fj = await first.json();
+    const second = await hit(env, "/admin/issuers", "POST",
+      { instructor: "reissue-me", scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true }], days: 10, revoke_jti: fj.jti }, BASIC);
+    assert.equal(second.status, 200, "re-scope → 200");
+    const rev = await isTokenRevoked(env.HPS_KV, fj.jti);
+    assert.ok(rev, "old issuer jti revoked on re-scope");
+    assert.equal(rev.reason, "issuer re-scope", "revocation reason recorded");
+    // bad revoke_jti shape rejected before minting
+    const badRe = await hit(env, "/admin/issuers", "POST",
+      { instructor: "t", scopes: [{ cohort: COHORT, profiles: [PROFILE] }], revoke_jti: "nope" }, BASIC);
+    assert.equal(badRe.status, 400, "non-UUID revoke_jti → 400");
+  }
+  console.log("✓ #290/#191 issuer mint: admin-only server-side, caps, audit, re-scope");
 }
 
 console.log("\nAll smoke tests passed.");

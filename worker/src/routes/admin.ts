@@ -18,11 +18,12 @@
 //   POST   /admin/tokens/revoke                 — per-token kill (S-01 / #46)
 //   DELETE /admin/tokens/revoke/:jti            — un-revoke (typo / restore)
 //   GET    /admin/tokens/revoked                — current revocation list
+//   POST   /admin/issuers                       — mint/re-scope an instructor issuer token (admin-only; #290/#191)
 
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
-import { issue, verify, type IssuerScope, type TokenPayload } from "../lib/tokens";
+import { issue, issueIssuer, verify, type IssuerScope, type TokenPayload } from "../lib/tokens";
 import { postDiscordResolution } from "./report";
 import {
   endSession,
@@ -275,6 +276,121 @@ admin.get("/tokens/revoked", async (c) => {
   const limit = Math.min(Number(c.req.query("limit") ?? 100), 500);
   const list = await listRevoked(c.env.HPS_KV, { limit });
   return c.json({ revoked: list, count: list.length });
+});
+
+// ---- issuer minting (admin-only, root-of-trust) — #290 / #191 --------------
+// Mint or re-scope an INSTRUCTOR issuer token SERVER-SIDE so the raw
+// HPS_SIGNING_SECRET never leaves the Worker (previously only the offline
+// worker/scripts/issue-issuer-token.ts could do this → Jay-only bottleneck).
+// This is the root of trust — an issuer can mint arbitrary student tokens
+// within its scope — so it is deliberately ADMIN-ONLY: it is NOT listed in
+// isIssuerAllowedEndpoint, so the .use("*") middleware requires admin Basic /
+// CF Access, and a plain issuer Bearer cannot mint another issuer.
+admin.post("/issuers", async (c) => {
+  const MAX_DAYS = 90;
+  const MAX_TOKEN_HOURS = 168;
+  const MAX_SESSION_HOURS = 24;
+  const HANDLE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+  const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
+
+  type ScopeIn = {
+    cohort?: string;
+    profiles?: string[];
+    max_hours?: number;
+    can_start_session?: boolean;
+    max_session_hours?: number;
+  };
+  type Body = { instructor?: string; scopes?: ScopeIn[]; days?: number; revoke_jti?: string };
+  const body = (await c.req.json<Body>().catch(() => ({}))) as Body;
+
+  // ③ input validation — whitelist every field before anything is signed.
+  const instructor = body.instructor;
+  if (typeof instructor !== "string" || !HANDLE_RE.test(instructor)) {
+    return c.json({ error: "instructor required ([A-Za-z0-9_-], 1-64 chars)" }, 400);
+  }
+  const days = body.days === undefined ? 60 : body.days;
+  if (typeof days !== "number" || !Number.isInteger(days) || days <= 0 || days > MAX_DAYS) {
+    return c.json({ error: `days must be an integer 1..${MAX_DAYS}` }, 400);
+  }
+  if (!Array.isArray(body.scopes) || body.scopes.length === 0 || body.scopes.length > 20) {
+    return c.json({ error: "scopes[] required (1..20 entries)" }, 400);
+  }
+
+  // ④ scope caps — even an admin cannot mint an unbounded issuer.
+  const scopes: IssuerScope[] = [];
+  for (const s of body.scopes) {
+    if (!s || typeof s !== "object") return c.json({ error: "each scope must be an object" }, 400);
+    if (typeof s.cohort !== "string" || !ID_RE.test(s.cohort)) {
+      return c.json({ error: "scope.cohort invalid ([A-Za-z0-9_-], 1..80)" }, 400);
+    }
+    if (
+      !Array.isArray(s.profiles) || s.profiles.length === 0 || s.profiles.length > 20 ||
+      s.profiles.some((p) => typeof p !== "string" || !ID_RE.test(p))
+    ) {
+      return c.json({ error: "scope.profiles[] required (1..20, each [A-Za-z0-9_-])" }, 400);
+    }
+    const maxHours = s.max_hours === undefined ? 24 : s.max_hours;
+    if (typeof maxHours !== "number" || !Number.isInteger(maxHours) || maxHours <= 0 || maxHours > MAX_TOKEN_HOURS) {
+      return c.json({ error: `scope.max_hours must be an integer 1..${MAX_TOKEN_HOURS}` }, 400);
+    }
+    const canStart = s.can_start_session === true;
+    let maxSession: number | undefined;
+    if (canStart) {
+      maxSession = s.max_session_hours === undefined ? 4 : s.max_session_hours;
+      if (
+        typeof maxSession !== "number" || !Number.isInteger(maxSession) ||
+        maxSession <= 0 || maxSession > MAX_SESSION_HOURS
+      ) {
+        return c.json({ error: `scope.max_session_hours must be an integer 1..${MAX_SESSION_HOURS}` }, 400);
+      }
+    }
+    scopes.push({
+      cohort: s.cohort,
+      profiles: s.profiles,
+      max_hours: maxHours,
+      ...(canStart ? { can_start_session: true, max_session_hours: maxSession } : {}),
+    });
+  }
+
+  // ⑤ validate revoke_jti shape up-front (fail-closed before any signing);
+  // the actual revoke runs AFTER a successful mint (see below).
+  if (
+    body.revoke_jti !== undefined &&
+    (typeof body.revoke_jti !== "string" || !UUID_RE.test(body.revoke_jti))
+  ) {
+    return c.json({ error: "revoke_jti must be a valid UUID" }, 400);
+  }
+
+  // ① mint server-side with the Worker's own secret; the token is returned
+  // ONLY in this HTTPS response body — never logged, never audited in plaintext.
+  const { token, jti } = await issueIssuer(
+    { issuer: instructor, scopes },
+    days * 24,
+    c.env.HPS_SIGNING_SECRET,
+  );
+  const exp = Math.floor(Date.now() / 1000) + days * 24 * 60 * 60;
+
+  // ⑤/⑥ re-scope: revoke the replaced issuer AFTER the mint succeeds, so a
+  // mint failure leaves the instructor with their OLD token rather than
+  // neither. TTL = 90-day hard cap >= any issuer lifetime → no resurrection.
+  if (body.revoke_jti !== undefined) {
+    await revokeToken(
+      c.env.HPS_KV,
+      body.revoke_jti,
+      { reason: "issuer re-scope", user: instructor },
+      MAX_DAYS * 24 * 60 * 60,
+    );
+  }
+
+  // ⑦ audit — metadata only (NEVER the token). Root-of-trust issuance must be
+  // traceable; TTL tracks the token's own lifetime.
+  await c.env.HPS_KV.put(
+    `issuer_audit:${jti}`,
+    JSON.stringify({ instructor, scopes, exp, days, revoked_jti: body.revoke_jti ?? null }),
+    { expirationTtl: days * 24 * 60 * 60 },
+  );
+
+  return c.json({ ok: true, token, jti, instructor, scopes, exp, exp_days: days });
 });
 
 // ---- roster -----------------------------------------------------------------
