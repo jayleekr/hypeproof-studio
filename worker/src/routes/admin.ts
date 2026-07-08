@@ -329,7 +329,7 @@ admin.post("/issuers", async (c) => {
     ) {
       return c.json({ error: "scope.profiles[] required (1..20, each [A-Za-z0-9_-])" }, 400);
     }
-    const maxHours = s.max_hours === undefined ? 168 : s.max_hours;
+    const maxHours = s.max_hours === undefined ? 24 : s.max_hours;
     if (typeof maxHours !== "number" || !Number.isInteger(maxHours) || maxHours <= 0 || maxHours > MAX_TOKEN_HOURS) {
       return c.json({ error: `scope.max_hours must be an integer 1..${MAX_TOKEN_HOURS}` }, 400);
     }
@@ -352,20 +352,13 @@ admin.post("/issuers", async (c) => {
     });
   }
 
-  // ⑤ explicit re-scope: optionally revoke the issuer being replaced so two
-  // live issuers for the same instructor never silently coexist. ⑥ the TTL is
-  // the 90-day hard cap — always >= any issuer token's own max lifetime — so a
-  // revocation can never expire before the token it kills (no resurrection).
-  if (body.revoke_jti !== undefined) {
-    if (typeof body.revoke_jti !== "string" || !UUID_RE.test(body.revoke_jti)) {
-      return c.json({ error: "revoke_jti must be a valid UUID" }, 400);
-    }
-    await revokeToken(
-      c.env.HPS_KV,
-      body.revoke_jti,
-      { reason: "issuer re-scope", user: instructor },
-      MAX_DAYS * 24 * 60 * 60,
-    );
+  // ⑤ validate revoke_jti shape up-front (fail-closed before any signing);
+  // the actual revoke runs AFTER a successful mint (see below).
+  if (
+    body.revoke_jti !== undefined &&
+    (typeof body.revoke_jti !== "string" || !UUID_RE.test(body.revoke_jti))
+  ) {
+    return c.json({ error: "revoke_jti must be a valid UUID" }, 400);
   }
 
   // ① mint server-side with the Worker's own secret; the token is returned
@@ -376,6 +369,18 @@ admin.post("/issuers", async (c) => {
     c.env.HPS_SIGNING_SECRET,
   );
   const exp = Math.floor(Date.now() / 1000) + days * 24 * 60 * 60;
+
+  // ⑤/⑥ re-scope: revoke the replaced issuer AFTER the mint succeeds, so a
+  // mint failure leaves the instructor with their OLD token rather than
+  // neither. TTL = 90-day hard cap >= any issuer lifetime → no resurrection.
+  if (body.revoke_jti !== undefined) {
+    await revokeToken(
+      c.env.HPS_KV,
+      body.revoke_jti,
+      { reason: "issuer re-scope", user: instructor },
+      MAX_DAYS * 24 * 60 * 60,
+    );
+  }
 
   // ⑦ audit — metadata only (NEVER the token). Root-of-trust issuance must be
   // traceable; TTL tracks the token's own lifetime.
