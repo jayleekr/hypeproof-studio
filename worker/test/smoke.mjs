@@ -1877,7 +1877,7 @@ const TINY_PNG =
 {
   const app = (await import("../src/index.ts")).default;
   const { issueIssuer } = await import("../src/lib/tokens.ts");
-  const { isTokenRevoked } = await import("../src/lib/kv.ts");
+  const { isTokenRevoked, revokeToken } = await import("../src/lib/kv.ts");
 
   const COHORT = "boah-dental-2026-a";
   const PROFILE = "boah-dental-director-copyclone-2026-s1";
@@ -2109,12 +2109,14 @@ const TINY_PNG =
       { profile_id: PROFILE, user: "dir-9", token_hours: 6, session_hours: 3 }, `Bearer ${j.token}`);
     assert.equal(open.status, 200, "freshly-minted issuer opens a session → 200");
   }
-  // ② security: a plain issuer Bearer cannot mint another issuer (admin-only)
+  // ② security: a plain issuer Bearer (no can_issue_issuers) cannot mint an
+  // issuer — reaches the handler now (#295) but is rejected 403 (authenticated,
+  // not authorized). Admin-tier delegation is covered in §issuer-mint-delegation.
   {
     const env = mkEnv();
     const r = await hit(env, "/admin/issuers", "POST",
       { instructor: "x", scopes: [{ cohort: COHORT, profiles: [PROFILE] }] }, `Bearer ${ISSUER}`);
-    assert.equal(r.status, 401, "issuer Bearer → 401 (root-of-trust is admin-only)");
+    assert.equal(r.status, 403, "plain issuer Bearer → 403 (needs can_issue_issuers)");
   }
   // ② unauthenticated → 401
   {
@@ -2169,6 +2171,73 @@ const TINY_PNG =
     assert.equal(badRe.status, 400, "non-UUID revoke_jti → 400");
   }
   console.log("✓ #290/#191 issuer mint: admin-only server-side, caps, audit, re-scope");
+
+  // §issuer-mint-delegation (#295) — admin-tier members mint issuers via their
+  // OWN Bearer token (can_issue_issuers), no shared admin password.
+  {
+    // full admin (Basic) mints an admin-tier MINTER for a member
+    const env = mkEnv();
+    const mk = await hit(env, "/admin/issuers", "POST", {
+      instructor: "ico1036",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true }],
+      days: 60,
+      can_issue_issuers: true,
+    }, BASIC);
+    assert.equal(mk.status, 200, "admin mints an admin-tier minter → 200");
+    const mj = await mk.json();
+    assert.equal(mj.can_issue_issuers, true, "response marks the minter capability");
+    assert.equal(mj.minted_by, "admin", "audit: minted_by admin");
+    const minterPayload = await verify(mj.token, SECRET);
+    assert.equal(minterPayload.can_issue_issuers, true, "minted token carries can_issue_issuers");
+    const auditRaw = env._store.get(`issuer_audit:${mj.jti}`);
+    assert.ok(auditRaw && !auditRaw.includes(mj.token), "audit metadata only, no token");
+
+    // that member now mints an INSTRUCTOR issuer with their OWN Bearer (env2 so
+    // the minter's own revocation state is clean)
+    const env2 = mkEnv();
+    const teach = await hit(env2, "/admin/issuers", "POST", {
+      instructor: "some-instructor",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+      days: 30,
+    }, `Bearer ${mj.token}`);
+    assert.equal(teach.status, 200, "admin-tier minter mints an instructor issuer via Bearer → 200");
+    const tj = await teach.json();
+    assert.equal(tj.minted_by, "ico1036", "audit records WHO minted (the member, not 'admin')");
+    const taughtPayload = await verify(tj.token, SECRET);
+    assert.equal(taughtPayload.role, "issuer");
+    assert.notEqual(taughtPayload.can_issue_issuers, true, "instructor issuer is NOT itself a minter");
+
+    // capability cannot spread: a Bearer minter may NOT grant can_issue_issuers
+    const spread = await hit(env2, "/admin/issuers", "POST", {
+      instructor: "sneaky",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+      can_issue_issuers: true,
+    }, `Bearer ${mj.token}`);
+    assert.equal(spread.status, 403, "Bearer minter cannot grant can_issue_issuers → 403");
+
+    // a plain issuer (no can_issue_issuers) cannot mint issuers at all
+    const plain = await hit(env2, "/admin/issuers", "POST", {
+      instructor: "nope",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+    }, `Bearer ${ISSUER}`);
+    assert.equal(plain.status, 403, "plain issuer Bearer → 403 (needs can_issue_issuers)");
+
+    // revoking the minter kills its minting power
+    const env3 = mkEnv();
+    const mk3 = await hit(env3, "/admin/issuers", "POST", {
+      instructor: "temp-admin",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+      can_issue_issuers: true,
+    }, BASIC);
+    const mj3 = await mk3.json();
+    await revokeToken(env3.HPS_KV, mj3.jti, { reason: "test" }, 3600);
+    const afterRevoke = await hit(env3, "/admin/issuers", "POST", {
+      instructor: "x",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+    }, `Bearer ${mj3.token}`);
+    assert.equal(afterRevoke.status, 401, "revoked minter → 401");
+  }
+  console.log("✓ #295 issuer-mint delegation: per-member minter, audit trail, no capability spread");
 }
 
 console.log("\nAll smoke tests passed.");

@@ -27,6 +27,13 @@ export interface TokenPayload {
   // Issuer scope — only consulted when role === "issuer". An empty / absent
   // scopes array means "no minting permission" (defensive default).
   scopes?: IssuerScope[];
+  // #295 — admin-tier delegation. When true, this issuer token may also call
+  // POST /admin/issuers to MINT OTHER issuer tokens (i.e. it is an "admin
+  // minter"), without holding the shared admin password. Defensive default
+  // undefined → cannot mint issuers. A Bearer-authed mint can NEVER set this
+  // flag on its child (only true admin Basic/CF Access can create new admin
+  // minters), so the capability cannot spread on its own.
+  can_issue_issuers?: boolean;
   v: 2;
 }
 
@@ -118,6 +125,7 @@ export async function issueIssuer(
   params: {
     issuer: string;                // instructor handle, goes into u
     scopes: IssuerScope[];
+    can_issue_issuers?: boolean;   // #295 — admin-tier minter capability
   },
   hours: number,
   secret: string,
@@ -132,6 +140,7 @@ export async function issueIssuer(
       p: "__issuer__",
       role: "issuer",
       scopes: params.scopes,
+      ...(params.can_issue_issuers ? { can_issue_issuers: true } : {}),
     },
     hours,
     secret,
@@ -184,6 +193,7 @@ function canonicalize(p: TokenPayload): string {
   if (p.jti !== undefined) out.jti = p.jti;
   if (p.role !== undefined) out.role = p.role;
   if (p.scopes !== undefined) out.scopes = p.scopes;
+  if (p.can_issue_issuers !== undefined) out.can_issue_issuers = p.can_issue_issuers;
   return JSON.stringify(out);
 }
 

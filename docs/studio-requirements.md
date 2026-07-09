@@ -117,6 +117,8 @@ When in doubt:
 | REQ-G7 | Issuer roster append (#290) | `POST /admin/cohorts/:id/roster/append` — cohort-scoped issuer(can_start_session 불요)로 서버측 merge·dedupe, 기존 멤버 보존, 상한 500 | U |
 | REQ-G8 | Composite session open (#290) | `POST /admin/cohorts/:id/session/open` — 가드(라이브 세션 시 409, `force:true`로만 교체)→학생토큰 발급→roster append→세션 시작 원자 수행. 토큰은 응답 body로만 전달. issuer는 `max_hours`/`max_session_hours` 상한, 전 경로 24h 하드캡 | U |
 | REQ-G9 | Composite session close (#290) | `POST /admin/cohorts/:id/session/close` — 세션 종료 + `{jti, exp}` revoke. TTL은 exp까지 (고정 24h TTL이 장수 토큰보다 먼저 만료되는 구멍 금지) | U |
+| REQ-G10 | Server-side issuer mint (#294) | `POST /admin/issuers` (admin Basic/CF) — 서명키 없이 서버가 issuer 발급/재스코프. days≤90·max_hours≤168·session≤24 하드캡, `revoke_jti`로 원자 교체(mint 성공 후 revoke), `issuer_audit:<jti>` 메타데이터 기록(토큰 미포함) | U |
+| REQ-G11 | Admin-tier mint delegation (#295) | `can_issue_issuers` 토큰을 든 운영 멤버는 본인 Bearer로 `/admin/issuers` 호출해 강사 issuer 발급 가능(비번 공유 X). 감사에 `minted_by` 기록. **Bearer minter는 `can_issue_issuers` 재부여 불가**(403) — 권한 자가증식 차단; 새 admin-minter는 full admin(Basic/CF)만 생성. minter revoke 시 발급권 즉시 소멸 | U |
 
 ## H. Report problem (#64)
 
