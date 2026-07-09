@@ -269,6 +269,22 @@ async function readStreamText(stream) {
   console.log("✓ translate enforces profile system prompt + cache_control");
 }
 
+// ---- translate: per-profile max_tokens fallback (#1 truncation fix) ---------
+{
+  const base = { model: "hypeproof-default", messages: [{ role: "user", content: "홈페이지 만들어줘" }] };
+  const bigProfile = { ...stubProfile, model: { ...stubProfile.model, max_tokens: 16384 } };
+  const smallProfile = { ...stubProfile, model: { default: stubProfile.model.default } };
+  // client omits max_tokens → profile ceiling used (both provider paths)
+  assert.equal(translate(base, bigProfile).max_tokens, 16384, "profile max_tokens used as fallback (anthropic)");
+  assert.equal(translateOpenAI(base, bigProfile).max_tokens, 16384, "profile max_tokens used as fallback (openai)");
+  // profile omits it → DEFAULT_MAX_TOKENS (8192)
+  assert.equal(translate(base, smallProfile).max_tokens, 8192, "default 8192 when profile omits max_tokens");
+  // explicit client value wins, clamped to 1..16384
+  assert.equal(translate({ ...base, max_tokens: 2000 }, bigProfile).max_tokens, 2000, "client max_tokens honored");
+  assert.equal(translate({ ...base, max_tokens: 99999 }, bigProfile).max_tokens, 16384, "client max_tokens clamped to 16384");
+  console.log("✓ translate: per-profile max_tokens fallback (#1) + client override + clamp");
+}
+
 // ---- translate: tier skeleton library is injected into the cached block ----
 {
   const out = translate(

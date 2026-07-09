@@ -16,6 +16,10 @@ export interface Profile {
   model: {
     default: ModelAlias;
     fallback?: ModelAlias;
+    /** Per-profile output-token ceiling used when the client omits max_tokens.
+     *  Long-output profiles (e.g. website copyclone → full HTML) set this high so
+     *  responses are not truncated at DEFAULT_MAX_TOKENS. Clamped to 1..16384. */
+    max_tokens?: number;
   };
   system_prompt: string;            // full text (loaded from prompts/*.md at build time)
   welcome: {

@@ -32,6 +32,8 @@ export const profile: Profile = {
   model: {
     default: "hypeproof-default",   // claude-sonnet-4-6 — vision + 견고한 HTML 생성
     fallback: "hypeproof-fast",
+    // 홈페이지 전체 HTML은 기본 8192 토큰을 넘겨 잘림(#1) → 상한(16384)까지 허용.
+    max_tokens: 16384,
   },
   system_prompt: systemPromptMd as unknown as string,
   welcome: {
