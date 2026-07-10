@@ -37,6 +37,9 @@ export function transformStream(
   };
   let buffer = "";
   let usageEmitted = false;
+  // #1 — flipped when the model stopped on max_tokens, so the student is told the
+  // document is incomplete instead of silently receiving a broken page.
+  const state = { truncated: false };
 
   return new ReadableStream<Uint8Array>({
     async start(controller) {
@@ -51,13 +54,14 @@ export function transformStream(
           while ((idx = buffer.indexOf("\n\n")) !== -1) {
             const block = buffer.slice(0, idx);
             buffer = buffer.slice(idx + 2);
-            processBlock(block, controller, encoder, model, usage, options);
+            processBlock(block, controller, encoder, model, usage, options, state);
           }
         }
         // Tail
         if (buffer.trim().length > 0) {
-          processBlock(buffer, controller, encoder, model, usage, options);
+          processBlock(buffer, controller, encoder, model, usage, options, state);
         }
+        if (state.truncated) enqueueTruncationNotice(controller, encoder, model, options);
         enqueueFinalChunk(controller, encoder, options);
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
@@ -99,6 +103,11 @@ export function passThroughOpenAIStream(
   let buffer = "";
   let usageEmitted = false;
 
+  // #1 — see TRUNCATION_NOTICE. OpenAI/Gemini signal a max_tokens stop with
+  // finish_reason === "length".
+  let truncated = false;
+  let modelSeen = "";
+
   const scanBlock = (block: string) => {
     let isDoneBlock = false;
     for (const raw of block.split("\n")) {
@@ -111,6 +120,8 @@ export function passThroughOpenAIStream(
       }
       try {
         const ev = JSON.parse(data);
+        if (!modelSeen && typeof ev?.model === "string") modelSeen = ev.model;
+        if (ev?.choices?.[0]?.finish_reason === "length") truncated = true;
         const delta = ev?.choices?.[0]?.delta?.content;
         if (typeof delta === "string" && delta.length > 0) options.onTextDelta?.(delta);
         const u = ev?.usage;
@@ -143,6 +154,7 @@ export function passThroughOpenAIStream(
           const isDoneBlock = scanBlock(buffer);
           if (!isDoneBlock) controller.enqueue(encoder.encode(buffer));
         }
+        if (truncated) enqueueTruncationNotice(controller, encoder, modelSeen || "hypeproof", options);
         enqueueFinalChunk(controller, encoder, options);
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
@@ -166,6 +178,7 @@ function processBlock(
   model: string,
   usage: StreamUsage,
   options: StreamTransformOptions,
+  state?: { truncated: boolean },
 ) {
   let dataLine: string | null = null;
   for (const raw of block.split("\n")) {
@@ -188,8 +201,9 @@ function processBlock(
     if (typeof u.cache_read_input_tokens === "number") usage.cache_read_input_tokens = u.cache_read_input_tokens;
     if (typeof u.cache_creation_input_tokens === "number") usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
   }
-  if (event?.type === "message_delta" && event.usage) {
-    if (typeof event.usage.output_tokens === "number") usage.output_tokens = event.usage.output_tokens;
+  if (event?.type === "message_delta") {
+    if (typeof event.usage?.output_tokens === "number") usage.output_tokens = event.usage.output_tokens;
+    if (event.delta?.stop_reason === "max_tokens" && state) state.truncated = true;
   }
   if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
     const delta = event.delta.text;
@@ -200,6 +214,33 @@ function processBlock(
   if (out !== null) {
     controller.enqueue(encoder.encode(`data: ${out}\n\n`));
   }
+}
+
+/**
+ * #1 — a response that stops because it hit max_tokens used to reach the student
+ * as a silently broken document (HTML cut mid-tag, no `</html>`). Providers do
+ * signal it (Anthropic `message_delta.delta.stop_reason === "max_tokens"`,
+ * OpenAI/Gemini `finish_reason === "length"`), so we surface it as visible text.
+ */
+export const TRUNCATION_NOTICE =
+  "\n\n---\n⚠️ **응답이 길이 제한에 걸려 잘렸습니다 — 문서가 완성되지 않았어요.**\n" +
+  '"더 간결하게, 반드시 `</html>`까지 완결해서 다시 만들어줘" 라고 요청해 주세요.';
+
+function enqueueTruncationNotice(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  model: string,
+  options: StreamTransformOptions,
+) {
+  options.onTextDelta?.(TRUNCATION_NOTICE);
+  const chunk = {
+    id: "chatcmpl-truncation-notice",
+    object: "chat.completion.chunk",
+    created: Math.floor(Date.now() / 1000),
+    model,
+    choices: [{ index: 0, delta: { content: TRUNCATION_NOTICE }, finish_reason: null }],
+  };
+  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
 }
 
 function enqueueFinalChunk(
