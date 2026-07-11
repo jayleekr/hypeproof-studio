@@ -288,6 +288,30 @@ async function readStreamText(stream) {
   console.log("✓ translate injects the tier skeleton library into the cached block");
 }
 
+// ---- translate: preview-env contract switches on preview.type (#278 Ph1) ----
+{
+  // iframe cohort → the strict single-file/no-external contract.
+  const iframeOut = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "hi" }] },
+    stubProfile,
+  );
+  const iframeSys = iframeOut.system[0].text;
+  assert.ok(iframeSys.includes("단일 HTML 문서"), "iframe cohort gets the single-file contract");
+  assert.ok(!iframeSys.includes("로컬 라이브 서버"), "iframe cohort does NOT get the live-server contract");
+
+  // live_server cohort → the relaxed multi-file / real-origin contract.
+  const liveProfile = { ...stubProfile, preview: { type: "live_server", auto_start: false } };
+  const liveOut = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "hi" }] },
+    liveProfile,
+  );
+  const liveSys = liveOut.system[0].text;
+  assert.ok(liveSys.includes("로컬 라이브 서버"), "live_server cohort gets the live-server contract");
+  assert.ok(liveSys.includes("여러 파일"), "live-server contract allows multi-file");
+  assert.ok(!liveSys.includes("단일 HTML 문서"), "live_server cohort does NOT get the iframe single-file rule");
+  console.log("✓ translate selects preview-env contract by preview.type (iframe vs live_server)");
+}
+
 // ---- translate: pasted image (data URL) survives → Anthropic image block ----
 // Regression guard for the old String(content) coercion that silently
 // destroyed multimodal content (website-copyclone screenshot injection).
