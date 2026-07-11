@@ -58,8 +58,8 @@ export class CdpSession {
     return this.raw.onDidClose(listener);
   }
 
-  close(): Thenable<void> {
-    return this.raw.close();
+  close(): Promise<void> {
+    return Promise.resolve(this.raw.close());
   }
 
   private async ensureAttached(): Promise<void> {
