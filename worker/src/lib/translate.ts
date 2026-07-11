@@ -9,6 +9,8 @@ import type { LLMProvider } from "../env.ts";
 import { getSkeletonsForTier } from "../skeletons/index.ts";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import previewEnvContractMd from "../prompts/_preview-env-contract.md";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import previewEnvContractLiveServerMd from "../prompts/_preview-env-contract-live-server.md";
 import { resolveSkills } from "../skills/index.ts";
 
 // A polished single-file game (gradient bg, 3 states, score, juice) plus the
@@ -242,9 +244,18 @@ function imageUrlToAnthropicImage(url: string): AnthropicImageBlock | null {
  */
 function buildCachedPrefix(profile: Profile): string {
   const skillsMd = resolveSkills(profile.skills);
+  // #278 Phase 1 — live_server cohorts get a relaxed contract: a real
+  // http://127.0.0.1 origin (native browser), so multi-file / relative paths /
+  // same-origin fetch / storage / navigation are all allowed. The default
+  // iframe contract (single-file, no external, base64-inline) would fight a
+  // multi-file homepage.
+  const previewContract =
+    profile.preview?.type === "live_server"
+      ? (previewEnvContractLiveServerMd as unknown as string)
+      : (previewEnvContractMd as unknown as string);
   const sections = [
     profile.system_prompt,
-    previewEnvContractMd as unknown as string,
+    previewContract,
     skillsMd,
     buildSkeletonLibrary(profile),
   ].filter((s) => s && s.length > 0);
