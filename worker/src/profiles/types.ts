@@ -56,9 +56,15 @@ export interface Profile {
    * skeleton library is injected; the model reconstructs structure from a
    * pasted target screenshot (needs `input.image_paste`). The system prompt,
    * not a skeleton, drives the output.
+   *
+   * Homepage tier "homepage" (#278) — 보아치과 홈페이지 만들기. Adult builds a
+   * real multi-file clinic homepage *from scratch by conversation* (distinct
+   * from "website" copyclone). No skeleton is injected — structure is taught
+   * by the cohort system prompt, and `preview.type: "live_server"` + the
+   * browser tools drive the workflow.
    */
   game: {
-    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website";
+    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website" | "homepage";
   };
   publishing: {
     enabled: boolean;
