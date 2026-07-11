@@ -16,6 +16,7 @@ import {
   currentBundleVersion,
 } from "./updateChecker";
 import { openBrowser, captureActivePage } from "./nativeBrowser";
+import { LiveServer } from "./liveServer";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
@@ -39,11 +40,13 @@ export async function activate(context: vscode.ExtensionContext) {
   await applyTestBackdoors(context);
 
   const preview = new PreviewProvider(context);
+  const liveServer = new LiveServer();
   const assetStatus = new AssetStatusBar();
-  const provider = new ChatPanelProvider(context, preview, assetStatus);
+  const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus);
   providerRef = provider;
 
   context.subscriptions.push(
+    { dispose: () => liveServer.dispose() },
     assetStatus,
     vscode.window.registerWebviewViewProvider("hypeproof-chat.panel", provider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -102,7 +105,7 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage("HypeProof Chat: 마지막 응답에서 실행할 코드가 없어요.");
         return;
       }
-      await preview.show(html);
+      await provider.revealBuilt(html);
     }),
 
     // Preview the .html file in the active editor (or a passed-in URI from
