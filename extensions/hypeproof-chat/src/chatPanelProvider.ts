@@ -7,6 +7,7 @@ import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./
 import { runSdkCoach, SdkUnavailableError } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
+import { LiveServer } from "./liveServer";
 import {
   ChatMessage,
   CoachInfo,
@@ -54,6 +55,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly preview: PreviewProvider,
+    private readonly liveServer: LiveServer,
     private readonly assetScores?: AssetScoreSink,
   ) {}
 
@@ -270,6 +272,51 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** #278 Phase 1 — does this cohort's profile request the native live-server preview? */
+  private isLiveServerPreview(): boolean {
+    return this.cachedProfile?.preview?.type === "live_server";
+  }
+
+  /**
+   * Reveal a freshly-built page. Always persists it to the workspace root
+   * (index.html, GitHub-Pages-ready). Then either:
+   *  - live_server cohorts (#278): serve the workspace root over
+   *    http://127.0.0.1 and open/refresh the native integrated browser — real
+   *    origin, so multi-file, same-origin fetch, storage, and page navigation
+   *    all work; or
+   *  - default: the sandboxed iframe PreviewProvider (existing behavior).
+   * Public so extension.ts (runLastCode) shares the same routing.
+   */
+  async revealBuilt(html: string): Promise<void> {
+    await this.saveGameToWorkspace(html);
+    if (this.isLiveServerPreview() && (await this.openInLiveServer())) return;
+    void this.preview.show(html);
+  }
+
+  /**
+   * Ensure the live server is up for the workspace root and open (or refresh)
+   * the native browser at its URL. Returns false on any failure so the caller
+   * falls back to the iframe preview.
+   */
+  private async openInLiveServer(): Promise<boolean> {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return false;
+    try {
+      const url = await this.liveServer.ensure(root);
+      // Avoid stacking tabs: if a tab already shows this server, it refreshes
+      // itself via the injected live-reload SSE; otherwise open a new one.
+      const already = (vscode.window.browserTabs ?? []).some((t) => t.url?.startsWith(url));
+      if (already) {
+        this.liveServer.reload();
+      } else {
+        await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Persist coach info chosen via the in-panel naming card. */
   private async saveCoachFromWebview(name: string, personality: string): Promise<void> {
     const profile = await this.ensureProfile();
@@ -328,7 +375,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         void this.clearHistory();
         return;
       case "runCode":
-        void this.preview.show(msg.html);
+        void this.revealBuilt(msg.html);
         return;
       case "previewReady":
         return;
@@ -382,8 +429,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           { id: randomId(), role: "user", content: text, createdAt: Date.now() },
           { id: aid, role: "assistant", content: reply, createdAt: Date.now() },
         ]);
-        void this.preview.show(lastGame);
-        void this.saveGameToWorkspace(lastGame);
+        void this.revealBuilt(lastGame);
         return;
       }
       // No game yet → fall through to the AI, which will guide them to make one.
@@ -425,8 +471,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const html = extractRenderableHtml(text);
       if (!html) return;
       revealed = true;
-      void this.preview.show(html);
-      void this.saveGameToWorkspace(html);
+      void this.revealBuilt(html);
     };
     // #173 — accumulate citations across the stream so they persist to history.
     const assistantCitations: import("./protocol").Citation[] = [];
