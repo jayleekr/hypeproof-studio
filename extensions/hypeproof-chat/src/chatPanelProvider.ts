@@ -46,6 +46,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // #278 — browser-page context queued by "페이지를 코치에게", prepended to the
   // NEXT turn's prompt only (history keeps the user's clean text).
   private pendingPageContext: string | null = null;
+  // #278 Phase 2 — screenshot of the current browser page (data: URL), sent as
+  // an image with the NEXT turn so the coach can *see* the page. image_paste-
+  // gated; consumed once, like pendingPageContext.
+  private pendingPageImage: string | null = null;
   private activeCohortId: string | null = null;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
@@ -81,13 +85,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return this.cachedProfile?.input?.page_context === true;
   }
 
-  /** #278 — stash captured browser-page context to prepend to the next turn. */
-  attachPageContext(ctx: { url: string; title: string; text: string }): void {
+  /** #278 Phase 2 — may we attach a page screenshot (image)? Worker enforces the same gate. */
+  isImagePasteEnabled(): boolean {
+    return this.cachedProfile?.input?.image_paste === true;
+  }
+
+  /**
+   * #278 — stash captured browser-page context for the NEXT turn. The DOM text
+   * is prepended to the prompt; the screenshot (if present, and if this cohort
+   * has image_paste) rides along as an image so the coach can *see* the page
+   * too. History keeps the user's clean text.
+   */
+  attachPageContext(ctx: { url: string; title: string; text: string; imageBase64?: string }): void {
     const body = ctx.text.trim().slice(0, 3000);
     this.pendingPageContext =
       `[현재 브라우저 페이지]\nURL: ${ctx.url}\n제목: ${ctx.title}\n` +
       `--- 페이지 내용(일부) ---\n${body}\n---\n` +
       `위 페이지를 참고해서 답해줘.`;
+    // capturePageContext returns raw JPEG base64 (no data: prefix). Only attach
+    // when the cohort allows images — otherwise the worker would drop it anyway.
+    this.pendingPageImage =
+      ctx.imageBase64 && this.isImagePasteEnabled()
+        ? `data:image/jpeg;base64,${ctx.imageBase64}`
+        : null;
   }
 
   /**
@@ -452,6 +472,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const pageContext = this.pendingPageContext;
     this.pendingPageContext = null;
     const userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
+    // #278 Phase 2 — fold any queued page screenshot into this turn's images.
+    const pageImage = this.pendingPageImage;
+    this.pendingPageImage = null;
+    const effectiveImages = pageImage ? [...(images ?? []), pageImage] : images;
 
     const streamId = randomId();
     const messageId = randomId();
@@ -502,7 +526,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           token,
           history,
           userText: userTextForModel,
-          images,
+          images: effectiveImages,
           signal: ctrl.signal,
           coachName: effectiveCoachName,
           coachPersonality: effectiveCoachPersonality,
