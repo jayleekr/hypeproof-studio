@@ -224,3 +224,46 @@ export function isShowIntent(text: string): boolean {
     t,
   );
 }
+
+/**
+ * #278 Phase 3 — a compact action-log line (icon + Korean label) for a browser
+ * tool call, shown in the chat panel as the coach drives the browser. Pure so
+ * it's unit-testable. Truncates long inputs; extracts the host for navigate.
+ */
+export function browserToolLogLine(
+  name: string,
+  input: Record<string, unknown>,
+): { icon: string; label: string } {
+  const clip = (v: unknown, n = 24): string => {
+    const t = String(v ?? "");
+    return t.length > n ? `${t.slice(0, n)}…` : t;
+  };
+  switch (name) {
+    case "browser_navigate": {
+      const raw = String(input.url ?? "");
+      let host = raw;
+      try {
+        host = new URL(/^\w+:\/\//.test(raw) ? raw : `https://${raw}`).host || raw;
+      } catch {
+        /* keep raw */
+      }
+      return { icon: "🔗", label: `${host} 로 이동` };
+    }
+    case "browser_read":
+      return { icon: "👀", label: "페이지 읽는 중" };
+    case "browser_screenshot":
+      return { icon: "📸", label: "화면 캡처" };
+    case "browser_click":
+      return { icon: "👆", label: `${clip(input.ref)} 클릭` };
+    case "browser_type":
+      return { icon: "⌨️", label: `입력: "${clip(input.text)}"` };
+    case "browser_back":
+      return { icon: "◀", label: "뒤로" };
+    case "browser_forward":
+      return { icon: "▶", label: "앞으로" };
+    case "browser_dialog":
+      return { icon: "💬", label: `대화상자 ${clip(input.action)}` };
+    default:
+      return { icon: "🤖", label: name };
+  }
+}

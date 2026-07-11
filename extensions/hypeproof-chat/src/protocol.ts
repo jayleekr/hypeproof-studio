@@ -197,6 +197,9 @@ export type HostMessage =
   | { type: "streamCitations"; streamId: string; citations: Citation[] }  // #173
   | { type: "streamAssetScore"; streamId: string; assetScore: AssetScoreChunk }  // #204
   | { type: "streamEnd"; streamId: string }
+  // #278 Phase 3 — agentic browser tool loop action log (auto-run + log, no
+  // modal). One line per tool call; `state` flips running → done/error.
+  | { type: "toolLog"; streamId: string; id: string; icon: string; label: string; state: "running" | "done" | "error" }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string }

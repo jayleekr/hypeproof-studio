@@ -16,7 +16,8 @@ import systemPromptMd from "../prompts/boah-homepage-2026-s1.md";
 // - game.template_tier: "homepage" — 게임/검색 skeleton 미주입(교육은 프롬프트).
 // - input.page_context + image_paste ON (Phase 2): 참가자가 "페이지를 코치에게"로
 //   현재 브라우저 화면(스크린샷+DOM 텍스트)을 코치에게 보낼 수 있다. 성인 코호트라 안전.
-// - browser_control (Phase 3) 은 후속 Phase에서 켠다.
+// - browser_control ON (Phase 3): 코치가 브라우저를 자율로 navigate/read/click/type/
+//   screenshot 하며 돕는다(worker가 tool+규약 주입, 확장 host가 CDP로 실행). 성인.
 //
 // 7 AI Native Assets focus (홈페이지 제작 맥락):
 //   Intent clarity, Taste, Context design, Iteration reflex,
@@ -64,6 +65,12 @@ export const profile: Profile = {
   input: {
     page_context: true,
     image_paste: true,
+  },
+  // #278 Phase 3 — 코치의 자율 브라우저 제어 루프 활성화. worker가 8개 브라우저
+  // tool + 사용 규약을 주입하고, 확장 host가 CDP로 실행한다. 성인 코호트.
+  browser_control: {
+    enabled: true,
+    max_iterations: 8,
   },
   game: {
     // 홈페이지 tier — 게임/검색 skeleton 미주입(등록된 skeleton 없음).

@@ -8,6 +8,7 @@ import { runSdkCoach, SdkUnavailableError } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
+import { BrowserControl } from "./browserControl";
 import {
   ChatMessage,
   CoachInfo,
@@ -34,6 +35,7 @@ import {
   coachRitualDoneKeyForCohort,
   stateBucketId,
   extractCohortIdUnverified,
+  browserToolLogLine,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
@@ -572,6 +574,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           revealed = false;
           await runProxy();
         }
+      } else if (this.cachedProfile?.browser_control?.enabled) {
+        // #278 Phase 3 — client-driven agentic browser loop for opted-in cohorts.
+        await this.runBrowserLoop({
+          proxyUrl,
+          model,
+          token,
+          history,
+          userText: userTextForModel,
+          images: effectiveImages,
+          signal: ctrl.signal,
+          streamId,
+          coachName: effectiveCoachName,
+          coachPersonality: effectiveCoachPersonality,
+          onDelta,
+          onCitations,
+        });
       } else {
         await runProxy();
       }
@@ -598,6 +616,92 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       await this.handleSendError(err, streamId);
     } finally {
       this.activeStreams.delete(streamId);
+    }
+  }
+
+  /**
+   * #278 Phase 3 — client-driven agentic browser loop. Streams a turn; if the
+   * coach emitted tool_use blocks, runs each via the CDP executor, posts an
+   * action-log line (auto-run + log, no modal), appends the tool_use +
+   * tool_result as EPHEMERAL scratch turns, and re-invokes — until the coach
+   * stops calling tools (or the per-cohort iteration cap). Text streams through
+   * `onDelta` (accumulated into the caller's assistant message + history);
+   * scratch turns never touch persisted history. Asset score is recorded from
+   * the terminal (non-tool) turn only.
+   */
+  private async runBrowserLoop(p: {
+    proxyUrl: string;
+    model: string;
+    token: string | undefined;
+    history: ChatMessage[];
+    userText: string;
+    images?: string[];
+    signal: AbortSignal;
+    streamId: string;
+    coachName: string;
+    coachPersonality: string;
+    onDelta: (delta: string) => void;
+    onCitations: (cites: import("./protocol").Citation[]) => void;
+  }): Promise<void> {
+    const browser = new BrowserControl();
+    const maxIter = this.cachedProfile?.browser_control?.max_iterations ?? 8;
+    const scratch: Array<{ role: "user" | "assistant"; content: unknown }> = [];
+    let lastAssetScore: import("./protocol").AssetScoreChunk | null = null;
+    try {
+      for (let iter = 0; ; iter++) {
+        if (p.signal.aborted) return;
+        const result = await proxyChat({
+          proxyUrl: p.proxyUrl,
+          model: p.model,
+          token: p.token,
+          history: p.history,
+          userText: p.userText,
+          images: p.images,
+          toolTurns: scratch,
+          signal: p.signal,
+          coachName: p.coachName,
+          coachPersonality: p.coachPersonality,
+          onDelta: p.onDelta,
+          onCitations: p.onCitations,
+          onAssetScore: (s) => {
+            lastAssetScore = s; // buffer; only the terminal turn is recorded
+          },
+        });
+        if (result.toolUses.length === 0) break; // terminal turn → done
+        if (iter >= maxIter) {
+          p.onDelta("\n\n_(브라우저 작업을 여기서 멈췄어요.)_");
+          break;
+        }
+        // Assistant tool_use turn (its text + tool_use blocks) — scratch only.
+        const asstContent: unknown[] = [];
+        if (result.text) asstContent.push({ type: "text", text: result.text });
+        for (const b of result.toolUses) {
+          asstContent.push({ type: "tool_use", id: b.id, name: b.name, input: b.input });
+        }
+        scratch.push({ role: "assistant", content: asstContent });
+        // Run each tool → action log + tool_result (executor never throws).
+        const toolResults: unknown[] = [];
+        for (const call of result.toolUses) {
+          if (p.signal.aborted) return;
+          const line = browserToolLogLine(call.name, call.input);
+          void this.post({ type: "toolLog", streamId: p.streamId, id: call.id, ...line, state: "running" });
+          const tr = await browser.execute(call);
+          void this.post({ type: "toolLog", streamId: p.streamId, id: call.id, ...line, state: tr.isError ? "error" : "done" });
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: call.id,
+            content: tr.content,
+            ...(tr.isError ? { is_error: true } : {}),
+          });
+        }
+        scratch.push({ role: "user", content: toolResults });
+      }
+      if (lastAssetScore) {
+        this.assetScores?.recordAssetScore(lastAssetScore);
+        void this.post({ type: "streamAssetScore", streamId: p.streamId, assetScore: lastAssetScore });
+      }
+    } finally {
+      await browser.dispose();
     }
   }
 
