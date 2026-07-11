@@ -102,6 +102,8 @@ export interface ResolvedProfile {
   preview: { type: "iframe" | "live_server"; auto_start: boolean };
   /** Optional input capabilities (default off). #278 / website-copyclone. */
   input?: { page_context?: boolean; image_paste?: boolean };
+  /** #278 Phase 3 — coach's client-driven browser control loop (default off). */
+  browser_control?: { enabled: boolean; max_iterations?: number };
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
   // #282 — provider-hosted tools the cohort profile opted into (sourced from the

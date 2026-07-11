@@ -106,6 +106,17 @@ export interface Profile {
     web_search?: boolean;
     max_uses?: number;
   };
+  /**
+   * #278 Phase 3 — the client-driven agentic browser tool loop. When enabled,
+   * the worker injects the browser control tools (lib/browser-tools.ts) into the
+   * Anthropic tools array + a usage contract into the cached system prefix, and
+   * the extension host executes each tool_use via CDP over the integrated
+   * browser. Default off — only adult cohorts that need it opt in.
+   */
+  browser_control?: {
+    enabled: boolean;
+    max_iterations?: number;   // client loop cap hint (default 8)
+  };
   session: {
     cohort_id: string;
     series_total: number;

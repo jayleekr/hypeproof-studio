@@ -105,6 +105,12 @@ chat.get("/profile", async (c) => {
       page_context: profile.input?.page_context === true,
       image_paste: profile.input?.image_paste === true,
     },
+    // #278 Phase 3 — the coach's browser control loop. The host runs the loop +
+    // CDP executor only when enabled; max_iterations caps the loop.
+    browser_control: {
+      enabled: profile.browser_control?.enabled === true,
+      max_iterations: profile.browser_control?.max_iterations ?? 8,
+    },
     // Drives the chat panel's tone (game vs search-webapp UI copy) (#159).
     game: { template_tier: profile.game.template_tier },
     // #282 — expose the cohort's provider-tool opt-in so the Studio Agent SDK

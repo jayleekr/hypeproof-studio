@@ -379,6 +379,61 @@ async function readStreamText(stream) {
   console.log("✓ translate selects preview-env contract by preview.type (iframe vs live_server)");
 }
 
+// ---- #278 Phase 3: tool_use streamed → hps_tool_use chunk -------------------
+{
+  const upstream = [
+    `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "페이지를 볼게요." } })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_stop", index: 0 })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "toolu_1", name: "browser_navigate" } })}`, "",
+    // input JSON split across two deltas — must be reassembled before JSON.parse.
+    `data: ${JSON.stringify({ type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"url":"http://loc' } })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: 'alhost:5173/"}' } })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_stop", index: 1 })}`, "",
+    `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 5 } })}`, "",
+    `data: ${JSON.stringify({ type: "message_stop" })}`, "",
+  ].join("\n");
+  const out = await readStreamText(transformStream(streamFromText(upstream), "claude-test", () => {}, {}));
+  assert.ok(out.includes("페이지를 볼게요"), "assistant text before the tool call still streams");
+  assert.ok(out.includes('"hps_tool_use"'), "hps_tool_use chunk emitted");
+  assert.ok(out.includes('"name":"browser_navigate"') && out.includes('"id":"toolu_1"'), "tool name + id carried");
+  assert.ok(out.includes('"url":"http://localhost:5173/"'), "split input_json_delta reassembled + JSON.parsed");
+  assert.ok(out.includes('"finish_reason":"stop"'), "finish path unchanged (message_stop → stop)");
+  console.log("✓ #278 Phase 3: streamed tool_use → hps_tool_use (split input reassembled), finish path intact");
+}
+
+// ---- #278 Phase 3: tool blocks + tools + contract gated on browser_control --
+{
+  const withTools = [
+    { role: "user", content: "가격 페이지 봐줘" },
+    { role: "assistant", content: [
+      { type: "text", text: "확인할게요." },
+      { type: "tool_use", id: "t1", name: "browser_read", input: {} },
+    ] },
+    { role: "user", content: [
+      { type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: "[ref=e1] button 가격" }] },
+    ] },
+  ];
+
+  // browser_control ON → tool_use/tool_result preserved, browser tools + contract injected.
+  const bcProfile = { ...stubProfile, browser_control: { enabled: true, max_iterations: 8 } };
+  const on = translate({ model: "hypeproof-default", messages: withTools }, bcProfile);
+  const asst = on.messages.find((m) => m.role === "assistant");
+  assert.ok(Array.isArray(asst.content) && asst.content.some((b) => b.type === "tool_use" && b.name === "browser_read"), "tool_use preserved");
+  const lastUser = on.messages[on.messages.length - 1];
+  assert.ok(Array.isArray(lastUser.content) && lastUser.content.some((b) => b.type === "tool_result" && b.tool_use_id === "t1"), "tool_result preserved");
+  assert.ok(on.tools?.some((t) => t.name === "browser_navigate"), "browser tools injected when browser_control on");
+  assert.ok(on.system[0].text.includes("브라우저 제어 도구 사용 규약"), "browser-control contract injected");
+
+  // browser_control OFF (stub) → tool blocks dropped (collapse), no tools/contract.
+  const off = translate({ model: "hypeproof-default", messages: withTools }, stubProfile);
+  const asstOff = off.messages.find((m) => m.role === "assistant");
+  assert.equal(typeof asstOff.content, "string", "off → tool_use dropped, assistant collapses to text");
+  assert.ok(!off.tools?.some((t) => t.name === "browser_navigate"), "no browser tools when off");
+  assert.ok(!off.system[0].text.includes("브라우저 제어 도구 사용 규약"), "no browser contract when off");
+  console.log("✓ #278 Phase 3: tool_use/tool_result + tools + contract injected iff browser_control on");
+}
+
 // ---- translate: pasted image (data URL) survives → Anthropic image block ----
 // Regression guard for the old String(content) coercion that silently
 // destroyed multimodal content (website-copyclone screenshot injection).
