@@ -14,7 +14,9 @@ import systemPromptMd from "../prompts/boah-homepage-2026-s1.md";
 //   워크스페이스 루트를 서빙해 멀티파일/상대경로/스토리지가 동작한다 (Phase 1이
 //   이 필드를 최초로 소비).
 // - game.template_tier: "homepage" — 게임/검색 skeleton 미주입(교육은 프롬프트).
-// - input.image_paste (Phase 2) / browser_control (Phase 3) 은 후속 Phase에서 켠다.
+// - input.page_context + image_paste ON (Phase 2): 참가자가 "페이지를 코치에게"로
+//   현재 브라우저 화면(스크린샷+DOM 텍스트)을 코치에게 보낼 수 있다. 성인 코호트라 안전.
+// - browser_control (Phase 3) 은 후속 Phase에서 켠다.
 //
 // 7 AI Native Assets focus (홈페이지 제작 맥락):
 //   Intent clarity, Taste, Context design, Iteration reflex,
@@ -55,6 +57,13 @@ export const profile: Profile = {
     // Phase 1이 이 필드를 iframe 대신 처음으로 소비한다.
     type: "live_server",
     auto_start: false,
+  },
+  // #278 Phase 2 — 성인 코호트: 현재 브라우저 페이지(화면+DOM)를 코치에게 보내는
+  // "페이지를 코치에게" 경로 활성화. page_context가 버튼을 노출하고, image_paste가
+  // 스크린샷(vision) 전달을 허용(worker가 동일하게 강제).
+  input: {
+    page_context: true,
+    image_paste: true,
   },
   game: {
     // 홈페이지 tier — 게임/검색 skeleton 미주입(등록된 skeleton 없음).

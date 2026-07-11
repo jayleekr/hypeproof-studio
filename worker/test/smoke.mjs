@@ -1574,6 +1574,23 @@ const TINY_PNG =
     }
   }
   console.log(`✓ profiles invariant: all ${all.length} cohorts default log_user_messages=false + minors no public publish (kids-safe)`);
+
+  // #278 Phase 2 — input capabilities (page_context / image_paste) send browser
+  // page content + screenshots to the LLM; they MUST stay off for minors.
+  for (const p of all) {
+    if (p.audience.parent_coaching === true) {
+      assert.notEqual(p.input?.page_context, true, `minor cohort ${p.id}: page_context MUST stay off`);
+      assert.notEqual(p.input?.image_paste, true, `minor cohort ${p.id}: image_paste MUST stay off`);
+    }
+  }
+  // The homepage cohort (adult) opts into both so "페이지를 코치에게" ships screenshot+DOM.
+  const homepage = all.find((p) => p.id === "boah-homepage-2026-s1");
+  assert.ok(homepage, "boah-homepage cohort registered");
+  assert.equal(homepage.audience.parent_coaching, false, "homepage cohort is adult");
+  assert.equal(homepage.input?.page_context, true, "homepage: page_context on (Phase 2)");
+  assert.equal(homepage.input?.image_paste, true, "homepage: image_paste on (Phase 2)");
+  assert.equal(homepage.preview.type, "live_server", "homepage: live_server preview (Phase 1)");
+  console.log("✓ #278 Phase 2: input capabilities minor-safe (off for kids) + homepage adult opt-in");
 }
 
 // §4b — boah-dental v4 supersearch contract (issue #79 — internal shape that
