@@ -355,6 +355,108 @@ async function readStreamText(stream) {
   console.log("✓ translate injects the tier skeleton library into the cached block");
 }
 
+// ---- translate: preview-env contract switches on preview.type (#278 Ph1) ----
+{
+  // iframe cohort → the strict single-file/no-external contract.
+  const iframeOut = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "hi" }] },
+    stubProfile,
+  );
+  const iframeSys = iframeOut.system[0].text;
+  assert.ok(iframeSys.includes("단일 HTML 문서"), "iframe cohort gets the single-file contract");
+  assert.ok(!iframeSys.includes("로컬 라이브 서버"), "iframe cohort does NOT get the live-server contract");
+
+  // live_server cohort → the relaxed multi-file / real-origin contract.
+  const liveProfile = { ...stubProfile, preview: { type: "live_server", auto_start: false } };
+  const liveOut = translate(
+    { model: "hypeproof-default", messages: [{ role: "user", content: "hi" }] },
+    liveProfile,
+  );
+  const liveSys = liveOut.system[0].text;
+  assert.ok(liveSys.includes("로컬 라이브 서버"), "live_server cohort gets the live-server contract");
+  assert.ok(liveSys.includes("여러 파일"), "live-server contract allows multi-file");
+  assert.ok(!liveSys.includes("단일 HTML 문서"), "live_server cohort does NOT get the iframe single-file rule");
+  console.log("✓ translate selects preview-env contract by preview.type (iframe vs live_server)");
+}
+
+// ---- #278 Phase 3: tool_use streamed → hps_tool_use chunk -------------------
+{
+  const upstream = [
+    `data: ${JSON.stringify({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "페이지를 볼게요." } })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_stop", index: 0 })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_start", index: 1, content_block: { type: "tool_use", id: "toolu_1", name: "browser_navigate" } })}`, "",
+    // input JSON split across two deltas — must be reassembled before JSON.parse.
+    `data: ${JSON.stringify({ type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: '{"url":"http://loc' } })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_delta", index: 1, delta: { type: "input_json_delta", partial_json: 'alhost:5173/"}' } })}`, "",
+    `data: ${JSON.stringify({ type: "content_block_stop", index: 1 })}`, "",
+    `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "tool_use" }, usage: { output_tokens: 5 } })}`, "",
+    `data: ${JSON.stringify({ type: "message_stop" })}`, "",
+  ].join("\n");
+  const out = await readStreamText(transformStream(streamFromText(upstream), "claude-test", () => {}, {}));
+  assert.ok(out.includes("페이지를 볼게요"), "assistant text before the tool call still streams");
+  assert.ok(out.includes('"hps_tool_use"'), "hps_tool_use chunk emitted");
+  assert.ok(out.includes('"name":"browser_navigate"') && out.includes('"id":"toolu_1"'), "tool name + id carried");
+  assert.ok(out.includes('"url":"http://localhost:5173/"'), "split input_json_delta reassembled + JSON.parsed");
+  assert.ok(out.includes('"finish_reason":"stop"'), "finish path unchanged (message_stop → stop)");
+  console.log("✓ #278 Phase 3: streamed tool_use → hps_tool_use (split input reassembled), finish path intact");
+}
+
+// ---- #278 Phase 3: tool blocks + tools + contract gated on browser_control --
+{
+  const withTools = [
+    { role: "user", content: "가격 페이지 봐줘" },
+    { role: "assistant", content: [
+      { type: "text", text: "확인할게요." },
+      { type: "tool_use", id: "t1", name: "browser_read", input: {} },
+    ] },
+    { role: "user", content: [
+      { type: "tool_result", tool_use_id: "t1", content: [{ type: "text", text: "[ref=e1] button 가격" }] },
+    ] },
+  ];
+
+  // browser_control ON → tool_use/tool_result preserved, browser tools + contract injected.
+  const bcProfile = { ...stubProfile, browser_control: { enabled: true, max_iterations: 8 } };
+  const on = translate({ model: "hypeproof-default", messages: withTools }, bcProfile);
+  const asst = on.messages.find((m) => m.role === "assistant");
+  assert.ok(Array.isArray(asst.content) && asst.content.some((b) => b.type === "tool_use" && b.name === "browser_read"), "tool_use preserved");
+  const lastUser = on.messages[on.messages.length - 1];
+  assert.ok(Array.isArray(lastUser.content) && lastUser.content.some((b) => b.type === "tool_result" && b.tool_use_id === "t1"), "tool_result preserved");
+  assert.ok(on.tools?.some((t) => t.name === "browser_navigate"), "browser tools injected when browser_control on");
+  assert.ok(on.system[0].text.includes("브라우저 제어 도구 사용 규약"), "browser-control contract injected");
+
+  // browser_control OFF (stub) → tool blocks dropped (collapse), no tools/contract.
+  const off = translate({ model: "hypeproof-default", messages: withTools }, stubProfile);
+  const asstOff = off.messages.find((m) => m.role === "assistant");
+  assert.equal(typeof asstOff.content, "string", "off → tool_use dropped, assistant collapses to text");
+  assert.ok(!off.tools?.some((t) => t.name === "browser_navigate"), "no browser tools when off");
+  assert.ok(!off.system[0].text.includes("브라우저 제어 도구 사용 규약"), "no browser contract when off");
+  console.log("✓ #278 Phase 3: tool_use/tool_result + tools + contract injected iff browser_control on");
+
+  // The real target cohort (원장 copyclone) runs web_search AND browser_control
+  // together — a combination the standalone homepage cohort never had. Anthropic
+  // rejects cache_control on builtin (server) tools, so the marker must land on
+  // the last *function* tool (a browser tool), never on the web_search builtin.
+  const bothProfile = {
+    ...stubProfile,
+    tools: { web_search: true, max_uses: 5 },
+    browser_control: { enabled: true, max_iterations: 8 },
+  };
+  const both = translate({ model: "hypeproof-default", messages: withTools }, bothProfile);
+  const builtin = both.tools.find((t) => t.type === "web_search_20250305");
+  assert.ok(builtin, "web_search builtin still injected alongside browser tools");
+  assert.ok(!("cache_control" in builtin), "cache_control MUST NOT be set on the web_search builtin");
+  assert.equal(both.tools.filter((t) => t.name?.startsWith("browser_")).length, 8, "all 8 browser tools coexist with web_search");
+  const lastTool = both.tools[both.tools.length - 1];
+  assert.ok(!("type" in lastTool), "last tool is a function tool, not the builtin");
+  assert.deepEqual(lastTool.cache_control, { type: "ephemeral" }, "cache_control lands on the last browser (function) tool");
+
+  // web_search alone (no browser_control) → last tool IS the builtin → no marker.
+  const wsOnly = translate({ model: "hypeproof-default", messages: withTools }, { ...stubProfile, tools: { web_search: true } });
+  assert.ok(!("cache_control" in wsOnly.tools[wsOnly.tools.length - 1]), "builtin-only tools block carries no cache_control marker");
+  console.log("✓ #278: copyclone combo — web_search builtin + 8 browser tools coexist, cache_control only on last function tool");
+}
+
 // ---- translate: pasted image (data URL) survives → Anthropic image block ----
 // Regression guard for the old String(content) coercion that silently
 // destroyed multimodal content (website-copyclone screenshot injection).
@@ -1550,6 +1652,32 @@ const TINY_PNG =
     }
   }
   console.log(`✓ profiles invariant: all ${all.length} cohorts default log_user_messages=false + minors no public publish (kids-safe)`);
+
+  // #278 Phase 2 — input capabilities (page_context / image_paste) send browser
+  // page content + screenshots to the LLM; they MUST stay off for minors.
+  for (const p of all) {
+    if (p.audience.parent_coaching === true) {
+      assert.notEqual(p.input?.page_context, true, `minor cohort ${p.id}: page_context MUST stay off`);
+      assert.notEqual(p.input?.image_paste, true, `minor cohort ${p.id}: image_paste MUST stay off`);
+    }
+  }
+  // #278 is layered onto the existing website-copyclone track (원장 v2), not a
+  // separate homepage cohort — the reviewer's operational call (issuer token is
+  // scoped to boah-dental-2026-a; the cuesheet is the copyclone pedagogy).
+  // The adult copyclone profile opts into the 3 native-browser conditions:
+  // page_context+image_paste (조건② 읽기 — "페이지를 코치에게"), live_server
+  // (조건③), browser_control (조건② 제어 — agentic 루프).
+  const copyclone = all.find((p) => p.id === "boah-dental-director-copyclone-2026-s1");
+  assert.ok(copyclone, "boah-dental copyclone cohort registered");
+  assert.equal(copyclone.audience.parent_coaching, false, "copyclone cohort is adult");
+  assert.equal(copyclone.input?.page_context, true, "copyclone: page_context on (조건② 읽기)");
+  assert.equal(copyclone.input?.image_paste, true, "copyclone: image_paste on (target screenshot)");
+  assert.equal(copyclone.preview.type, "live_server", "copyclone: live_server preview (조건③)");
+  assert.equal(copyclone.browser_control?.enabled, true, "copyclone: browser_control on (조건② 제어)");
+  // No stray homepage cohort/tier survived the merge into copyclone.
+  assert.ok(!all.some((p) => p.id === "boah-homepage-2026-s1"), "boah-homepage cohort removed (merged into copyclone)");
+  assert.ok(!all.some((p) => p.game?.template_tier === "homepage"), "no profile uses removed 'homepage' tier");
+  console.log("✓ #278: native-browser 3 conditions merged into adult copyclone track; minors stay off; no stray homepage cohort/tier");
 }
 
 // §4b — boah-dental v4 supersearch contract (issue #79 — internal shape that

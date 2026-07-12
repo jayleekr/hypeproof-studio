@@ -4,6 +4,9 @@ import { onHostMessage, postToHost } from "./vscode";
 import { ChatPanel } from "./ChatPanel";
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
 
+// #278 Phase 3 — one line in the browser tool action log.
+export type ToolLogEntry = { id: string; icon: string; label: string; state: "running" | "done" | "error" };
+
 interface State {
   config: ChatConfig | null;
   messages: ChatMessage[];
@@ -13,6 +16,7 @@ interface State {
   errorRequestId: string | null;   // S-07 / #49 — surfaced in ErrorBanner
   errorRunbookUrl: string | null;  // #165 — banner renders as clickable link
   assetScore: AssetScoreChunk | null;
+  toolLog: ToolLogEntry[];          // #278 Phase 3 — browser loop action log (current turn)
 }
 
 type Action =
@@ -22,6 +26,7 @@ type Action =
   | { type: "streamChunk"; delta: string }
   | { type: "streamCitations"; citations: Citation[] }
   | { type: "streamAssetScore"; assetScore: AssetScoreChunk }
+  | { type: "toolLog"; entry: ToolLogEntry }
   | { type: "streamEnd" }
   | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
   | { type: "userSent"; text: string; images?: string[] };
@@ -35,6 +40,7 @@ const initialState: State = {
   errorRequestId: null,
   errorRunbookUrl: null,
   assetScore: null,
+  toolLog: [],
 };
 
 function reducer(state: State, action: Action): State {
@@ -50,6 +56,7 @@ function reducer(state: State, action: Action): State {
         streamId: action.streamId,
         error: null,
         assetScore: null,
+        toolLog: [],
         messages: [
           ...state.messages,
           { id: action.messageId, role: "assistant", content: "", createdAt: Date.now() },
@@ -73,6 +80,14 @@ function reducer(state: State, action: Action): State {
       };
     case "streamAssetScore":
       return { ...state, assetScore: action.assetScore };
+    case "toolLog": {
+      // Upsert by id (a running line flips to done/error in place).
+      const exists = state.toolLog.some((e) => e.id === action.entry.id);
+      const toolLog = exists
+        ? state.toolLog.map((e) => (e.id === action.entry.id ? action.entry : e))
+        : [...state.toolLog, action.entry];
+      return { ...state, toolLog };
+    }
     case "streamEnd":
       return {
         ...state,
@@ -121,6 +136,7 @@ export function App() {
         case "streamChunk": dispatch({ type: "streamChunk", delta: msg.delta }); break;
         case "streamCitations": dispatch({ type: "streamCitations", citations: msg.citations }); break;
         case "streamAssetScore": dispatch({ type: "streamAssetScore", assetScore: msg.assetScore }); break;
+        case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state } }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;
@@ -180,6 +196,7 @@ export function App() {
       <ChatPanel
         config={state.config}
         messages={state.messages}
+        toolLog={state.toolLog}
         streaming={!!state.streamingId}
         error={state.error}
         errorRequestId={state.errorRequestId}

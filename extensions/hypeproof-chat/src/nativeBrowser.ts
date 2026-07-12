@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import { CdpSession } from "./cdpSession";
 
 // Native integrated browser wiring (#278).
 //
@@ -48,49 +49,24 @@ function normalizeUrl(input: string): string {
   return `https://${v}`;
 }
 
-let cdpMessageId = 0;
-
 /**
- * One CDP request over the proposed-API raw message channel. The channel is
- * fire-and-forget (`sendMessage` + `onDidReceiveMessage`), so we correlate
- * responses by a monotonic `id` ourselves.
+ * Capture screenshot + visible text + AX summary from a browser tab via CDP. Q2.
+ *
+ * Uses CdpSession, which does the Target.attachToTarget handshake first — the
+ * #278 spike proved page-level CDP methods (Page.captureScreenshot,
+ * Runtime.evaluate, Accessibility.*) are "Method not found" without it.
  */
-function cdpRequest(
-  session: vscode.BrowserCDPSession,
-  method: string,
-  params: Record<string, unknown> = {},
-  timeoutMs = 10_000,
-): Promise<any> {
-  const id = ++cdpMessageId;
-  return new Promise<any>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      sub.dispose();
-      reject(new Error(`CDP ${method} timed out`));
-    }, timeoutMs);
-    const sub = session.onDidReceiveMessage((raw) => {
-      const m = raw as { id?: number; result?: unknown; error?: { message?: string } };
-      if (!m || m.id !== id) return;
-      clearTimeout(timer);
-      sub.dispose();
-      if (m.error) reject(new Error(m.error.message ?? `CDP ${method} failed`));
-      else resolve(m.result);
-    });
-    void session.sendMessage({ id, method, params });
-  });
-}
-
-/** Capture screenshot + visible text + AX summary from a browser tab via CDP. Q2. */
 export async function capturePageContext(tab: vscode.BrowserTab): Promise<PageContext> {
-  const session = await tab.startCDPSession();
+  const session = await CdpSession.attach(tab);
   try {
-    const shot = await cdpRequest(session, "Page.captureScreenshot", { format: "jpeg", quality: 70 });
-    const textRes = await cdpRequest(session, "Runtime.evaluate", {
+    const shot = await session.send("Page.captureScreenshot", { format: "jpeg", quality: 70 });
+    const textRes = await session.send("Runtime.evaluate", {
       expression: "document.body ? document.body.innerText : ''",
       returnByValue: true,
     });
     let axNodeCount = 0;
     try {
-      const ax = await cdpRequest(session, "Accessibility.getFullAXTree", {});
+      const ax = await session.send("Accessibility.getFullAXTree", {});
       axNodeCount = Array.isArray(ax?.nodes) ? ax.nodes.length : 0;
     } catch {
       /* AX tree is best-effort; some pages reject it */

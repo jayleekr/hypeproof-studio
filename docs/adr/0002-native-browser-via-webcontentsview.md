@@ -1,6 +1,9 @@
 # 0002 — Native browser via Electron WebContentsView
 
-Status: Proposed
+Status: Accepted — 구현 완료 (Phase 0–3, 2026-07). 실기계 e2e 검증 대기.
+CDP 스파이크(2026-07-11)로 `startCDPSession` 경로 확정: Target.attachToTarget({flatten})
+핸드셰이크 필요, sessionId는 cross-origin 이동에서 생존, Input.dispatch* 실동작. 상세:
+[../native-browser-spec.md](../native-browser-spec.md) §0.5.
 
 Tracking: [#278](https://github.com/jayleekr/hypeproof-studio/issues/278) · Design spec: [../native-browser-spec.md](../native-browser-spec.md)
 

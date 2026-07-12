@@ -59,7 +59,10 @@ export interface Profile {
    * Workshop tier "website" — for website-copyclone (보아치과 원장 v2). No
    * skeleton library is injected; the model reconstructs structure from a
    * pasted target screenshot (needs `input.image_paste`). The system prompt,
-   * not a skeleton, drives the output.
+   * not a skeleton, drives the output. #278 layers the native browser 3
+   * conditions (live_server preview, page→coach vision, agentic browser
+   * control) onto this same tier — the reference site can be opened by URL,
+   * not only pasted, and the coach drives the browser to clone it.
    */
   game: {
     template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website";
@@ -99,6 +102,17 @@ export interface Profile {
   tools?: {
     web_search?: boolean;
     max_uses?: number;
+  };
+  /**
+   * #278 Phase 3 — the client-driven agentic browser tool loop. When enabled,
+   * the worker injects the browser control tools (lib/browser-tools.ts) into the
+   * Anthropic tools array + a usage contract into the cached system prefix, and
+   * the extension host executes each tool_use via CDP over the integrated
+   * browser. Default off — only adult cohorts that need it opt in.
+   */
+  browser_control?: {
+    enabled: boolean;
+    max_iterations?: number;   // client loop cap hint (default 8)
   };
   session: {
     cohort_id: string;

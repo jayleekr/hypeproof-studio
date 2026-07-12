@@ -1,6 +1,6 @@
 # 교육용 네이티브 브라우저 — 설계 스펙
 
-상태: Draft (설계, 구현 착수) · 추적: [#278](https://github.com/jayleekr/hypeproof-studio/issues/278) · 결정: [adr/0002-native-browser-via-webcontentsview.md](adr/0002-native-browser-via-webcontentsview.md)
+상태: **구현 완료 (Phase 0–3, 2026-07) — 실기계 e2e 검증 대기** · 추적: [#278](https://github.com/jayleekr/hypeproof-studio/issues/278) · 결정: [adr/0002-native-browser-via-webcontentsview.md](adr/0002-native-browser-via-webcontentsview.md) · 현재 진실: §0.5
 
 ## 0. 구현 방향 갱신 (2026-06-24) — 중요
 
@@ -42,6 +42,55 @@ block) 구축 후 screenshot(vision) 주입 ② 미성년 안전 세션/URL 정�
 **검증 한계:** 디스플레이 없는 자동화 셸이라 IDE에서 브라우저가 실제로 그려지는 시각
 확인은 불가 — typecheck + jq 검증까지가 여기서 가능한 범위, 최종 확인은 풀빌드 후 실제
 머신 몫.
+
+## 0.5 구현 완료 (2026-07) — Phase 0–3 · 현재 진실의 출처
+
+보아치과 홈페이지 커리큘럼(성인)을 위해 세 조건을 모두 구현했다. 통합 브랜치
+`feat/boah-homepage-browser`(→ #278). 각 커밋 tsc·단위테스트 green. (참고: #278 본체 —
+upstream 통합 브라우저 enable + 확장 배선 — 은 이미 #279로 main에 머지됨. 아래는 그 위 후속.)
+
+- **Phase 0** — 최초엔 별도 `boah-homepage-2026-s1` 코호트 + `homepage` tier로 스캐폴드했으나,
+  PR #309 리뷰(ico1036)의 운영 판단으로 **기존 원장 website-copyclone 트랙
+  (`boah-dental-director-copyclone-2026-s1`, cohort `boah-dental-2026-a`)에 통합**했다.
+  근거: 강사 issuer 토큰이 `boah-dental-2026-a`로 스코프돼 신규 cohort는 세션을 못 열고,
+  확정 큐시트가 copyclone 페다고지(정답지 클론)다. 신규 프로필/프롬프트/`homepage` tier는
+  제거하고, copyclone(이미 `preview.type:"live_server"`)에 `page_context`·`browser_control`·
+  `max_tokens`(#298) 3필드를 얹어 조건 ①②③을 `website` tier에서 굴린다.
+- **Phase 1 (조건 ③)** — 인프로세스 live server(`liveServer.ts`, 127.0.0.1, SSE 자동
+  새로고침) + `preview.type:"live_server"` 최초 소비(iframe 대신 네이티브 브라우저) +
+  `_preview-env-contract-live-server.md`(멀티파일·상대경로·same-origin fetch 허용).
+- **Phase 2 (조건 ② 읽기)** — image-paste 멀티모달 파이프라인이 이미 머지돼 있어,
+  "페이지를 코치에게"가 캡쳐 스크린샷을 이미지로 전달하도록 배선 + 프로필
+  page_context/image_paste ON. `capturePageContext`가 핸드셰이크 없이 직접 CDP를 불러
+  실패하던 버그를 Phase 3에서 수정.
+- **Phase 3 (조건 ② 제어)** — client-driven agentic 루프:
+  - worker: content block에 tool_use/tool_result, `browser-tools.ts`(8개 도구),
+    `browser_control` 게이팅, `_browser-control-contract.md`, tool_use SSE(`hps_tool_use`).
+  - 확장: `CdpSession`(Target.attachToTarget 핸드셰이크 → sessionId 재사용),
+    `browserControl.ts` 실행기(navigate/read/click/type/screenshot/back/forward/dialog),
+    `runBrowserLoop`(자동실행 + 액션로그, 히스토리 미오염), 웹뷰 액션 로그.
+
+### CDP 스파이크 결과 (2026-07-11, 실기계 Studio 창)
+
+`startCDPSession` raw CDP를 실기계에서 실증(throwaway `__cdpSpike` 커맨드, dev-host):
+- `needsHandshake: true` — 페이지 레벨 명령은 root 세션에서 "Method not found" →
+  `Target.attachToTarget({flatten:true})`로 sessionId 확보 후 모든 명령에 실어야 함.
+- `crossOriginSurvived: true` — sessionId가 cross-origin 이동에서 생존(재-attach 불필요).
+- `inputWorks: true` — `Input.dispatchMouseEvent`로 실제 클릭 동작(JS-eval 폴백 불필요).
+→ 실행기를 "핸드셰이크 1회 → sessionId 고정" 형태로 확정.
+
+### 성인 세션 정책 (Phase 4, 경량)
+
+성인 코호트라 미성년 하드닝 불필요. URL 스킴 화이트리스트(http/https/localhost/file만,
+js/data/vscode 거부)는 `browserControlHelpers.safeNavigateUrl`에 포함. 다운로드-off·per-cohort
+파티션 하드닝은 **코어 패치 영역**(`browserSession.ts`가 확장 API로 파티션 선택 미노출) →
+미성년 트랙 후속으로 분리(§5).
+
+### 남은 검증
+
+end-to-end 실동작(코치가 실제로 브라우저를 모는 것)은 실기계에서만 확인 — 풀빌드 또는
+dev-host(로컬 worker + homepage 토큰). 단위 로직(핸드셰이크·실행기 헬퍼·tool_use SSE·
+로그라인·live server)은 테스트됨.
 
 > 아래 §1–§12는 원래 설계(처음부터 빌드 가정)의 기록이다. upstream 재사용으로 상당수가
 > "이미 제공됨"으로 대체됨 — §0가 현재 진실의 출처다.

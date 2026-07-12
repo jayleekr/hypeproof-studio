@@ -12,6 +12,14 @@ export interface StreamUsage {
   cache_creation_input_tokens: number;
 }
 
+// #278 Phase 3 — per-stream accumulator for streamed tool_use blocks. Anthropic
+// streams a tool call as content_block_start(tool_use) → input_json_delta* →
+// content_block_stop; we buffer the partial JSON by block index and emit one
+// `hps_tool_use` chunk when the block closes.
+interface ToolAccum {
+  byIndex: Map<number, { id: string; name: string; json: string }>;
+}
+
 export interface StreamTransformOptions {
   onTextDelta?: (delta: string) => void;
   onBeforeDone?: () => unknown | null | undefined;
@@ -35,6 +43,7 @@ export function transformStream(
     cache_read_input_tokens: 0,
     cache_creation_input_tokens: 0,
   };
+  const toolAccum: ToolAccum = { byIndex: new Map() };
   let buffer = "";
   let usageEmitted = false;
   // #1 — flipped when the model stopped on max_tokens, so the student is told the
@@ -54,12 +63,12 @@ export function transformStream(
           while ((idx = buffer.indexOf("\n\n")) !== -1) {
             const block = buffer.slice(0, idx);
             buffer = buffer.slice(idx + 2);
-            processBlock(block, controller, encoder, model, usage, options, state);
+            processBlock(block, controller, encoder, model, usage, toolAccum, options, state);
           }
         }
         // Tail
         if (buffer.trim().length > 0) {
-          processBlock(buffer, controller, encoder, model, usage, options, state);
+          processBlock(buffer, controller, encoder, model, usage, toolAccum, options, state);
         }
         if (state.truncated) enqueueTruncationNotice(controller, encoder, model, options);
         enqueueFinalChunk(controller, encoder, options);
@@ -177,6 +186,7 @@ function processBlock(
   encoder: TextEncoder,
   model: string,
   usage: StreamUsage,
+  toolAccum: ToolAccum,
   options: StreamTransformOptions,
   state?: { truncated: boolean },
 ) {
@@ -208,6 +218,50 @@ function processBlock(
   if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
     const delta = event.delta.text;
     if (typeof delta === "string" && delta.length > 0) options.onTextDelta?.(delta);
+  }
+
+  // #278 Phase 3 — assemble streamed tool_use blocks and emit an hps_tool_use
+  // chunk when a block closes. anthropicEventToOpenAIChunk returns null for
+  // these events, so nothing double-emits; the finish path is unchanged.
+  if (
+    event?.type === "content_block_start" &&
+    event.content_block?.type === "tool_use" &&
+    typeof event.index === "number" &&
+    typeof event.content_block.id === "string" &&
+    typeof event.content_block.name === "string"
+  ) {
+    toolAccum.byIndex.set(event.index, {
+      id: event.content_block.id,
+      name: event.content_block.name,
+      json: "",
+    });
+  } else if (
+    event?.type === "content_block_delta" &&
+    event.delta?.type === "input_json_delta" &&
+    typeof event.index === "number"
+  ) {
+    const acc = toolAccum.byIndex.get(event.index);
+    if (acc && typeof event.delta.partial_json === "string") acc.json += event.delta.partial_json;
+  } else if (event?.type === "content_block_stop" && typeof event.index === "number") {
+    const acc = toolAccum.byIndex.get(event.index);
+    if (acc) {
+      toolAccum.byIndex.delete(event.index);
+      let input: unknown = {};
+      try {
+        input = acc.json ? JSON.parse(acc.json) : {};
+      } catch {
+        input = {};
+      }
+      const toolChunk = JSON.stringify({
+        id: "chatcmpl-hps",
+        object: "chat.completion.chunk",
+        model,
+        choices: [
+          { index: 0, delta: { hps_tool_use: { id: acc.id, name: acc.name, input } }, finish_reason: null },
+        ],
+      });
+      controller.enqueue(encoder.encode(`data: ${toolChunk}\n\n`));
+    }
   }
 
   const out = anthropicEventToOpenAIChunk(event, model);

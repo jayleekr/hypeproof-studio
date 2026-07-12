@@ -8,10 +8,12 @@ import type {
   UxConfig,
 } from "../../src/protocol";
 import { postToHost } from "./vscode";
+import type { ToolLogEntry } from "./App";
 
 interface Props {
   config: ChatConfig | null;
   messages: ChatMessage[];
+  toolLog: ToolLogEntry[];              // #278 Phase 3 — browser loop action log
   streaming: boolean;
   error: string | null;
   errorRequestId: string | null;
@@ -293,6 +295,20 @@ export function ChatPanel(props: Props) {
             onRetry={props.onRetry}
           />
         ))}
+
+        {props.toolLog.length > 0 && (
+          <div className="hps-tool-log" role="status" aria-live="polite">
+            {props.toolLog.map((e) => (
+              <div key={e.id} className={`hps-tool-log-line hps-tool-${e.state}`}>
+                <span className="hps-tool-icon">{e.icon}</span>
+                <span className="hps-tool-label">{e.label}</span>
+                <span className="hps-tool-mark">
+                  {e.state === "running" ? "…" : e.state === "error" ? "⚠️" : "✓"}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {showFollowUpChips && (
           <ChipRack

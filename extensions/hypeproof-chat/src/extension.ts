@@ -16,6 +16,7 @@ import {
   currentBundleVersion,
 } from "./updateChecker";
 import { openBrowser, captureActivePage } from "./nativeBrowser";
+import { LiveServer } from "./liveServer";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
@@ -39,11 +40,13 @@ export async function activate(context: vscode.ExtensionContext) {
   await applyTestBackdoors(context);
 
   const preview = new PreviewProvider(context);
+  const liveServer = new LiveServer();
   const assetStatus = new AssetStatusBar();
-  const provider = new ChatPanelProvider(context, preview, assetStatus);
+  const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus);
   providerRef = provider;
 
   context.subscriptions.push(
+    { dispose: () => liveServer.dispose() },
     assetStatus,
     vscode.window.registerWebviewViewProvider("hypeproof-chat.panel", provider, {
       webviewOptions: { retainContextWhenHidden: true },
@@ -102,7 +105,7 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage("HypeProof Chat: 마지막 응답에서 실행할 코드가 없어요.");
         return;
       }
-      await preview.show(html);
+      await provider.revealBuilt(html);
     }),
 
     // Preview the .html file in the active editor (or a passed-in URI from
@@ -228,10 +231,17 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       const ctx = await captureActivePage();
       if (!ctx) return;
-      provider.attachPageContext({ url: ctx.url, title: ctx.title, text: ctx.text });
+      // #278 Phase 2 — attach the screenshot too (image_paste-gated inside).
+      provider.attachPageContext({
+        url: ctx.url,
+        title: ctx.title,
+        text: ctx.text,
+        imageBase64: ctx.imageBase64,
+      });
       await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+      const withShot = provider.isImagePasteEnabled();
       vscode.window.showInformationMessage(
-        `📄 페이지를 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
+        `${withShot ? "🖼 화면과 내용을" : "📄 내용을"} 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
       );
     }),
 
