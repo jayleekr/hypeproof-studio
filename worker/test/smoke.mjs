@@ -1638,14 +1638,23 @@ const TINY_PNG =
       assert.notEqual(p.input?.image_paste, true, `minor cohort ${p.id}: image_paste MUST stay off`);
     }
   }
-  // The homepage cohort (adult) opts into both so "페이지를 코치에게" ships screenshot+DOM.
-  const homepage = all.find((p) => p.id === "boah-homepage-2026-s1");
-  assert.ok(homepage, "boah-homepage cohort registered");
-  assert.equal(homepage.audience.parent_coaching, false, "homepage cohort is adult");
-  assert.equal(homepage.input?.page_context, true, "homepage: page_context on (Phase 2)");
-  assert.equal(homepage.input?.image_paste, true, "homepage: image_paste on (Phase 2)");
-  assert.equal(homepage.preview.type, "live_server", "homepage: live_server preview (Phase 1)");
-  console.log("✓ #278 Phase 2: input capabilities minor-safe (off for kids) + homepage adult opt-in");
+  // #278 is layered onto the existing website-copyclone track (원장 v2), not a
+  // separate homepage cohort — the reviewer's operational call (issuer token is
+  // scoped to boah-dental-2026-a; the cuesheet is the copyclone pedagogy).
+  // The adult copyclone profile opts into the 3 native-browser conditions:
+  // page_context+image_paste (조건② 읽기 — "페이지를 코치에게"), live_server
+  // (조건③), browser_control (조건② 제어 — agentic 루프).
+  const copyclone = all.find((p) => p.id === "boah-dental-director-copyclone-2026-s1");
+  assert.ok(copyclone, "boah-dental copyclone cohort registered");
+  assert.equal(copyclone.audience.parent_coaching, false, "copyclone cohort is adult");
+  assert.equal(copyclone.input?.page_context, true, "copyclone: page_context on (조건② 읽기)");
+  assert.equal(copyclone.input?.image_paste, true, "copyclone: image_paste on (target screenshot)");
+  assert.equal(copyclone.preview.type, "live_server", "copyclone: live_server preview (조건③)");
+  assert.equal(copyclone.browser_control?.enabled, true, "copyclone: browser_control on (조건② 제어)");
+  // No stray homepage cohort/tier survived the merge into copyclone.
+  assert.ok(!all.some((p) => p.id === "boah-homepage-2026-s1"), "boah-homepage cohort removed (merged into copyclone)");
+  assert.ok(!all.some((p) => p.game?.template_tier === "homepage"), "no profile uses removed 'homepage' tier");
+  console.log("✓ #278: native-browser 3 conditions merged into adult copyclone track; minors stay off; no stray homepage cohort/tier");
 }
 
 // §4b — boah-dental v4 supersearch contract (issue #79 — internal shape that

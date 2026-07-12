@@ -49,8 +49,13 @@ block) 구축 후 screenshot(vision) 주입 ② 미성년 안전 세션/URL 정�
 `feat/boah-homepage-browser`(→ #278). 각 커밋 tsc·단위테스트 green. (참고: #278 본체 —
 upstream 통합 브라우저 enable + 확장 배선 — 은 이미 #279로 main에 머지됨. 아래는 그 위 후속.)
 
-- **Phase 0** — `boah-homepage-2026-s1` 코호트 + `homepage` tier(skeleton 미주입, 기존
-  copyclone용 `website` tier와 구분: 대화로 새 홈페이지 제작).
+- **Phase 0** — 최초엔 별도 `boah-homepage-2026-s1` 코호트 + `homepage` tier로 스캐폴드했으나,
+  PR #309 리뷰(ico1036)의 운영 판단으로 **기존 원장 website-copyclone 트랙
+  (`boah-dental-director-copyclone-2026-s1`, cohort `boah-dental-2026-a`)에 통합**했다.
+  근거: 강사 issuer 토큰이 `boah-dental-2026-a`로 스코프돼 신규 cohort는 세션을 못 열고,
+  확정 큐시트가 copyclone 페다고지(정답지 클론)다. 신규 프로필/프롬프트/`homepage` tier는
+  제거하고, copyclone(이미 `preview.type:"live_server"`)에 `page_context`·`browser_control`·
+  `max_tokens`(#298) 3필드를 얹어 조건 ①②③을 `website` tier에서 굴린다.
 - **Phase 1 (조건 ③)** — 인프로세스 live server(`liveServer.ts`, 127.0.0.1, SSE 자동
   새로고침) + `preview.type:"live_server"` 최초 소비(iframe 대신 네이티브 브라우저) +
   `_preview-env-contract-live-server.md`(멀티파일·상대경로·same-origin fetch 허용).

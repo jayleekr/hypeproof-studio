@@ -81,8 +81,18 @@ export const profile: Profile = {
   essences_focus: [2, 7, 9, 11, 12, 13, 14],
   // website-copyclone의 핵심 전제: 타겟 스크린샷 맥락 주입. 성인(원장/직원) cohort라
   // 켠다. 미성년 cohort는 default OFF (COHORT-AUTHORING 가드레일 §5).
+  // #278 — 여기에 네이티브 브라우저 3조건을 얹는다(별도 homepage 코호트 대신 이 트랙에 통합).
+  // page_context: "페이지를 코치에게"로 현재 브라우저 화면(스크린샷+DOM 텍스트)을 코치에게 전달.
   input: {
+    page_context: true,
     image_paste: true,
+  },
+  // #278 Phase 3 — 코치 자율 브라우저 제어 루프. 참가자가 참고 사이트 URL만 줘도 코치가
+  // 브라우저를 직접 열어 구조를 읽고 클론을 시작한다(스크린샷 첨부는 선택으로 격하).
+  // worker가 8개 브라우저 tool + 사용 규약을 주입하고, 확장 host가 CDP로 실행. 성인 cohort.
+  browser_control: {
+    enabled: true,
+    max_iterations: 8,
   },
   // 원장 웹사이트 클론 중 근거 탐색(레퍼런스 사이트·섹션 구성·컴포넌트 구현법 등)을
   // 위해 web_search ON. 프록시 경로의 Anthropic 호스티드 web_search 툴 — teaser와

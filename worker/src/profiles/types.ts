@@ -59,16 +59,13 @@ export interface Profile {
    * Workshop tier "website" — for website-copyclone (보아치과 원장 v2). No
    * skeleton library is injected; the model reconstructs structure from a
    * pasted target screenshot (needs `input.image_paste`). The system prompt,
-   * not a skeleton, drives the output.
-   *
-   * Homepage tier "homepage" (#278) — 보아치과 홈페이지 만들기. Adult builds a
-   * real multi-file clinic homepage *from scratch by conversation* (distinct
-   * from "website" copyclone). No skeleton is injected — structure is taught
-   * by the cohort system prompt, and `preview.type: "live_server"` + the
-   * browser tools drive the workflow.
+   * not a skeleton, drives the output. #278 layers the native browser 3
+   * conditions (live_server preview, page→coach vision, agentic browser
+   * control) onto this same tier — the reference site can be opened by URL,
+   * not only pasted, and the coach drives the browser to clone it.
    */
   game: {
-    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website" | "homepage";
+    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website";
   };
   publishing: {
     enabled: boolean;

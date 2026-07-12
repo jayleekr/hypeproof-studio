@@ -16,8 +16,7 @@ export type SkeletonTier =
   | "teen"           // 중등+: 물리, 상태 많음, 저장, 좀 더 코드 노출 OK
   | "pro-3d"         // 고급/성인: Three.js WebGL 3D, 씬 그래프
   | "search-webapp"  // 전문직 워크숍: 검색 결과·출처 신뢰도·결정 reframe 정적 웹앱 (no game loop)
-  | "website"        // website-copyclone: 타겟 스크린샷을 클론. 스켈레톤 없음 — 구조는 정답지(스크린샷)에서 옴
-  | "homepage";      // 성인 홈페이지 제작(#278): 대화로 멀티파일 병원 홈페이지. 스켈레톤 미등록(교육은 프롬프트)
+  | "website";       // website-copyclone: 타겟 스크린샷을 클론. 스켈레톤 없음 — 구조는 정답지(스크린샷)에서 옴. #278 네이티브 브라우저 3조건도 이 tier에 얹힘
 
 export interface Skeleton {
   id: string;
