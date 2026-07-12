@@ -110,6 +110,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       ctx.imageBase64 && this.isImagePasteEnabled()
         ? `data:image/jpeg;base64,${ctx.imageBase64}`
         : null;
+    // #308 — announce inline in the chat panel, NOT via a VS Code toast (a toast
+    // pauses the integrated browser). The webview clears it on the next send.
+    const withShot = !!this.pendingPageImage;
+    void this.post({
+      type: "pageAttached",
+      label: `${withShot ? "🖼 화면과 내용을" : "📄 내용을"} 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
+    });
   }
 
   /**

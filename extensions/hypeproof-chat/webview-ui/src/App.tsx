@@ -17,6 +17,7 @@ interface State {
   errorRunbookUrl: string | null;  // #165 — banner renders as clickable link
   assetScore: AssetScoreChunk | null;
   toolLog: ToolLogEntry[];          // #278 Phase 3 — browser loop action log (current turn)
+  pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
 }
 
 type Action =
@@ -27,6 +28,7 @@ type Action =
   | { type: "streamCitations"; citations: Citation[] }
   | { type: "streamAssetScore"; assetScore: AssetScoreChunk }
   | { type: "toolLog"; entry: ToolLogEntry }
+  | { type: "pageAttached"; label: string }
   | { type: "streamEnd" }
   | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
   | { type: "userSent"; text: string; images?: string[] };
@@ -41,6 +43,7 @@ const initialState: State = {
   errorRunbookUrl: null,
   assetScore: null,
   toolLog: [],
+  pageNotice: null,
 };
 
 function reducer(state: State, action: Action): State {
@@ -88,6 +91,9 @@ function reducer(state: State, action: Action): State {
         : [...state.toolLog, action.entry];
       return { ...state, toolLog };
     }
+    case "pageAttached":
+      // #308 — inline notice; cleared on the next send (userSent) or new stream.
+      return { ...state, pageNotice: action.label };
     case "streamEnd":
       return {
         ...state,
@@ -109,6 +115,7 @@ function reducer(state: State, action: Action): State {
     case "userSent":
       return {
         ...state,
+        pageNotice: null,   // #308 — clear the "붙였어요" notice once the user sends
         messages: [
           ...state.messages,
           {
@@ -137,6 +144,7 @@ export function App() {
         case "streamCitations": dispatch({ type: "streamCitations", citations: msg.citations }); break;
         case "streamAssetScore": dispatch({ type: "streamAssetScore", assetScore: msg.assetScore }); break;
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state } }); break;
+        case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;
@@ -197,6 +205,7 @@ export function App() {
         config={state.config}
         messages={state.messages}
         toolLog={state.toolLog}
+        pageNotice={state.pageNotice}
         streaming={!!state.streamingId}
         error={state.error}
         errorRequestId={state.errorRequestId}

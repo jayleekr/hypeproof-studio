@@ -200,6 +200,10 @@ export type HostMessage =
   // #278 Phase 3 — agentic browser tool loop action log (auto-run + log, no
   // modal). One line per tool call; `state` flips running → done/error.
   | { type: "toolLog"; streamId: string; id: string; icon: string; label: string; state: "running" | "done" | "error" }
+  // #308 — "페이지를 코치에게" 완료 안내. VS Code 알림 토스트를 띄우면 통합
+  // 브라우저가 "Paused due to Notification"으로 멈추므로(코어 동작), 토스트 대신
+  // 채팅 패널 인라인 상태줄로 알린다.
+  | { type: "pageAttached"; label: string }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string }
