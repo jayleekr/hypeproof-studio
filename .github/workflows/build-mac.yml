@@ -188,6 +188,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/run-build.sh
 
+      # Our build modifies the bundle after Electron signed it (extension injection +
+      # product.json rewrite), which breaks the seal. A *malformed* signature makes
+      # macOS say "손상되었기 때문에 열 수 없습니다 — 휴지통으로 이동" with NO
+      # "Open Anyway" escape hatch, so a downloaded release is unopenable. Re-sealing
+      # ad-hoc (free, no certificate) turns that dead end into the recoverable
+      # "unidentified developer" prompt. Also hard-fails the build if the seal is
+      # still invalid, so a broken-signature artifact can never be released again.
+      - name: Re-sign .app (ad-hoc seal) + verify
+        shell: bash
+        run: bash scripts/sign-mac.sh
+
       - name: Package .app → darwin-arm64 zip
         id: package
         shell: bash
