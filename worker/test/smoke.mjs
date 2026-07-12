@@ -432,6 +432,29 @@ async function readStreamText(stream) {
   assert.ok(!off.tools?.some((t) => t.name === "browser_navigate"), "no browser tools when off");
   assert.ok(!off.system[0].text.includes("브라우저 제어 도구 사용 규약"), "no browser contract when off");
   console.log("✓ #278 Phase 3: tool_use/tool_result + tools + contract injected iff browser_control on");
+
+  // The real target cohort (원장 copyclone) runs web_search AND browser_control
+  // together — a combination the standalone homepage cohort never had. Anthropic
+  // rejects cache_control on builtin (server) tools, so the marker must land on
+  // the last *function* tool (a browser tool), never on the web_search builtin.
+  const bothProfile = {
+    ...stubProfile,
+    tools: { web_search: true, max_uses: 5 },
+    browser_control: { enabled: true, max_iterations: 8 },
+  };
+  const both = translate({ model: "hypeproof-default", messages: withTools }, bothProfile);
+  const builtin = both.tools.find((t) => t.type === "web_search_20250305");
+  assert.ok(builtin, "web_search builtin still injected alongside browser tools");
+  assert.ok(!("cache_control" in builtin), "cache_control MUST NOT be set on the web_search builtin");
+  assert.equal(both.tools.filter((t) => t.name?.startsWith("browser_")).length, 8, "all 8 browser tools coexist with web_search");
+  const lastTool = both.tools[both.tools.length - 1];
+  assert.ok(!("type" in lastTool), "last tool is a function tool, not the builtin");
+  assert.deepEqual(lastTool.cache_control, { type: "ephemeral" }, "cache_control lands on the last browser (function) tool");
+
+  // web_search alone (no browser_control) → last tool IS the builtin → no marker.
+  const wsOnly = translate({ model: "hypeproof-default", messages: withTools }, { ...stubProfile, tools: { web_search: true } });
+  assert.ok(!("cache_control" in wsOnly.tools[wsOnly.tools.length - 1]), "builtin-only tools block carries no cache_control marker");
+  console.log("✓ #278: copyclone combo — web_search builtin + 8 browser tools coexist, cache_control only on last function tool");
 }
 
 // ---- translate: pasted image (data URL) survives → Anthropic image block ----
