@@ -277,7 +277,7 @@ export function translate(
   const out: AnthropicRequest = {
     model,
     messages: msgs,
-    max_tokens: clampInt(body.max_tokens, 1, 16384, DEFAULT_MAX_TOKENS),
+    max_tokens: clampInt(body.max_tokens, 1, 16384, profile.model.max_tokens ?? DEFAULT_MAX_TOKENS),
     system: systemBlocks,
   };
 
@@ -364,7 +364,7 @@ export function translateOpenAI(
   const out: OpenAIChatRequest = {
     model: modelIdFor(resolveAlias(body.model, profile), provider),
     messages: [{ role: "system", content: systemText }, ...turns],
-    max_tokens: clampInt(body.max_tokens, 1, 16384, DEFAULT_MAX_TOKENS),
+    max_tokens: clampInt(body.max_tokens, 1, 16384, profile.model.max_tokens ?? DEFAULT_MAX_TOKENS),
   };
 
   if (typeof body.temperature === "number") {

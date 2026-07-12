@@ -191,6 +191,57 @@ async function readStreamText(stream) {
   console.log("✓ #204 Anthropic SSE emits final asset_score before DONE");
 }
 
+// ---- #1: SSE surfaces a max_tokens stop instead of a silent broken page -----
+{
+  // Anthropic — message_delta.delta.stop_reason === "max_tokens"
+  const cut = [
+    `data: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "<!doctype html><html><body><div" } })}`,
+    "",
+    `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "max_tokens" }, usage: { output_tokens: 16384 } })}`,
+    "",
+  ].join("\n");
+  let seen = "";
+  const out = await readStreamText(transformStream(streamFromText(cut), "claude-test", () => {}, {
+    onTextDelta: (d) => { seen += d; },
+  }));
+  assert.ok(out.includes("길이 제한"), "anthropic: truncation notice enqueued");
+  assert.ok(seen.includes("길이 제한"), "anthropic: notice also reaches onTextDelta (transcript)");
+  assert.ok(out.indexOf("길이 제한") < out.indexOf("data: [DONE]"), "notice arrives before DONE");
+
+  // Anthropic — normal stop emits no notice
+  const okA = [
+    `data: ${JSON.stringify({ type: "content_block_delta", delta: { type: "text_delta", text: "완성" } })}`,
+    "",
+    `data: ${JSON.stringify({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 3 } })}`,
+    "",
+  ].join("\n");
+  const outA = await readStreamText(transformStream(streamFromText(okA), "claude-test", () => {}, {}));
+  assert.ok(!outA.includes("길이 제한"), "anthropic: no notice on a normal stop");
+
+  // OpenAI/Gemini — finish_reason === "length"
+  const cutO = [
+    `data: ${JSON.stringify({ model: "gemini-x", choices: [{ delta: { content: "<div" }, finish_reason: null }] })}`,
+    "",
+    `data: ${JSON.stringify({ model: "gemini-x", choices: [{ delta: {}, finish_reason: "length" }] })}`,
+    "",
+    "data: [DONE]",
+    "",
+  ].join("\n");
+  const outO = await readStreamText(passThroughOpenAIStream(streamFromText(cutO), () => {}, {}));
+  assert.ok(outO.includes("길이 제한"), "openai/gemini: truncation notice enqueued");
+
+  // OpenAI/Gemini — normal finish emits no notice
+  const okO = [
+    `data: ${JSON.stringify({ model: "gemini-x", choices: [{ delta: { content: "완성" }, finish_reason: "stop" }] })}`,
+    "",
+    "data: [DONE]",
+    "",
+  ].join("\n");
+  const outOk = await readStreamText(passThroughOpenAIStream(streamFromText(okO), () => {}, {}));
+  assert.ok(!outOk.includes("길이 제한"), "openai/gemini: no notice on a normal finish");
+  console.log("✓ #1 SSE surfaces max_tokens truncation (both providers) — no silent broken page");
+}
+
 // ---- #204: OpenAI-compatible SSE inserts asset_score and de-dupes DONE -----
 {
   let text = "";
@@ -267,6 +318,22 @@ async function readStreamText(stream) {
   assert.equal(out.system[0].cache_control?.type, "ephemeral", "cache_control set");
   assert.equal(out.stream, true);
   console.log("✓ translate enforces profile system prompt + cache_control");
+}
+
+// ---- translate: per-profile max_tokens fallback (#1 truncation fix) ---------
+{
+  const base = { model: "hypeproof-default", messages: [{ role: "user", content: "홈페이지 만들어줘" }] };
+  const bigProfile = { ...stubProfile, model: { ...stubProfile.model, max_tokens: 16384 } };
+  const smallProfile = { ...stubProfile, model: { default: stubProfile.model.default } };
+  // client omits max_tokens → profile ceiling used (both provider paths)
+  assert.equal(translate(base, bigProfile).max_tokens, 16384, "profile max_tokens used as fallback (anthropic)");
+  assert.equal(translateOpenAI(base, bigProfile).max_tokens, 16384, "profile max_tokens used as fallback (openai)");
+  // profile omits it → DEFAULT_MAX_TOKENS (8192)
+  assert.equal(translate(base, smallProfile).max_tokens, 8192, "default 8192 when profile omits max_tokens");
+  // explicit client value wins, clamped to 1..16384
+  assert.equal(translate({ ...base, max_tokens: 2000 }, bigProfile).max_tokens, 2000, "client max_tokens honored");
+  assert.equal(translate({ ...base, max_tokens: 99999 }, bigProfile).max_tokens, 16384, "client max_tokens clamped to 16384");
+  console.log("✓ translate: per-profile max_tokens fallback (#1) + client override + clamp");
 }
 
 // ---- translate: tier skeleton library is injected into the cached block ----
