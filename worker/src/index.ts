@@ -7,6 +7,7 @@ import { report } from "./routes/report";
 import { runHeartbeat } from "./cron/heartbeat.ts";
 import { runD1Backup } from "./cron/d1-backup.ts";
 import { requestId, makeErrorBody } from "./middleware/request-id.ts";
+import { signingSecretGuard } from "./middleware/signing-secret.ts";
 // @ts-ignore — bundled as text by wrangler rules.
 import adminHtml from "./ui/admin.html";
 // @ts-ignore — bundled as text by wrangler rules.
@@ -18,6 +19,15 @@ const app = new Hono<{ Bindings: Env; Variables: { requestId: string } }>();
 // header + structured error body so operators can correlate user reports
 // with wrangler tail logs.
 app.use("*", requestId);
+
+// #258 — fail closed (503 in production) on token-authenticated routes when
+// the signing secret is missing/weak/placeholder. /v1/report is deliberately
+// exempt (REQ-H6: anonymous bug reporting survives config breakage), as is
+// /v1/health (no token involved).
+app.use("/v1/chat/*", signingSecretGuard);
+app.use("/v1/profile", signingSecretGuard);
+app.use("/v1/trace/*", signingSecretGuard);
+app.use("/admin/*", signingSecretGuard);
 
 // Friendly root → redirect to admin UI (which itself is access-gated)
 app.get("/", () => {

@@ -2571,4 +2571,121 @@ const TINY_PNG =
   console.log("✓ #295 issuer-mint delegation: per-member minter, audit trail, no capability spread");
 }
 
+// ---------------------------------------------------------------------------
+// Shared route-level env factory for the security-cluster tests (#258/#257/#260).
+// Same shape as the #290 mkEnv but module-scoped, with ENVIRONMENT overridable.
+function mkSecEnv(overrides = {}, seed = {}) {
+  const store = new Map(Object.entries(seed));
+  const dbCalls = [];
+  return {
+    HPS_SIGNING_SECRET: SECRET,
+    HPS_ADMIN_PASSWORD: "pw-test",
+    ENVIRONMENT: "dev",
+    HPS_KV: {
+      async get(k, fmt) {
+        const v = store.get(k);
+        if (v == null) return null;
+        return fmt === "json" ? JSON.parse(v) : v;
+      },
+      async put(k, v) { store.set(k, v); },
+      async delete(k) { store.delete(k); },
+      async list({ prefix, limit = 100 }) {
+        const keys = [];
+        for (const k of store.keys()) if (k.startsWith(prefix)) keys.push({ name: k });
+        return { keys: keys.slice(0, limit), list_complete: true, cursor: "" };
+      },
+    },
+    HPS_DB: {
+      prepare(sql) {
+        const call = { sql, bindings: null };
+        return {
+          bind(...args) { call.bindings = args; return this; },
+          async run() { dbCalls.push(call); return { success: true, meta: { changes: 1 } }; },
+          async first() { dbCalls.push(call); return null; },
+        };
+      },
+    },
+    HPS_TRACES: { async put() {} },
+    HPS_ANALYTICS: { writeDataPoint() {} },
+    _store: store,
+    _dbCalls: dbCalls,
+    ...overrides,
+  };
+}
+const secCtx = { waitUntil: (p) => Promise.resolve(p).catch(() => {}) };
+const secApp = (await import("../src/index.ts")).default;
+const secHit = (env, path, init = {}) =>
+  secApp.fetch(new Request(`https://t${path}`, init), env, secCtx);
+
+// §signing-secret guard (#258) — issue/verify share one strength gate;
+// production fails closed on token-authed routes when the secret is unusable.
+{
+  const { validateSigningSecret, SigningSecretError } = await import("../src/lib/tokens.ts");
+
+  // Unit: category detection.
+  assert.equal(validateSigningSecret(undefined), "missing");
+  assert.equal(validateSigningSecret(""), "missing");
+  assert.equal(validateSigningSecret("   "), "missing");
+  assert.equal(validateSigningSecret("shortsecret"), "too_short", "< 16 chars rejected");
+  assert.equal(validateSigningSecret("your-secret-here"), "placeholder", "known placeholder rejected");
+  assert.equal(validateSigningSecret("x".repeat(32)), "placeholder", "single repeated char rejected");
+  assert.equal(validateSigningSecret(SECRET), null, "strong secret passes");
+
+  // issue() and verify() enforce the SAME gate (shared helper).
+  await assert.rejects(
+    issue({ u: "a", c: "b", p: "c" }, 1, "weak"),
+    SigningSecretError,
+    "issue() rejects a weak secret",
+  );
+  const { token: okToken } = await issue({ u: "a", c: "b", p: "c" }, 1, SECRET);
+  await assert.rejects(
+    verify(okToken, "x".repeat(32)),
+    SigningSecretError,
+    "verify() rejects a weak secret even for a well-formed token",
+  );
+  // The error message never echoes the secret value.
+  try {
+    await verify(okToken, "x".repeat(32));
+    assert.fail("expected SigningSecretError");
+  } catch (err) {
+    assert.ok(!String(err).includes("x".repeat(32)), "secret value not echoed in error");
+  }
+
+  // Route-level: production + weak secret → 503 fail-closed on token routes.
+  const weakProd = () => mkSecEnv({ ENVIRONMENT: "production", HPS_SIGNING_SECRET: "changeme" });
+  for (const path of ["/v1/profile", "/v1/chat/completions", "/v1/trace/event", "/admin/cohorts"]) {
+    const r = await secHit(weakProd(), path, { method: path === "/v1/profile" ? "GET" : "POST" });
+    assert.equal(r.status, 503, `${path} fails closed (503) in production with weak secret`);
+    const j = await r.json();
+    assert.equal(j.error.type, "config");
+    assert.ok(j.error.request_id, "503 body carries request_id");
+    assert.ok(!JSON.stringify(j).includes("changeme"), "secret value never leaks to client");
+  }
+
+  // /v1/report stays reachable (REQ-H6 — bug reporting survives config breakage).
+  {
+    const r = await secHit(weakProd(), "/v1/report", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "secret misconfigured but I can still report" }),
+    });
+    assert.equal(r.status, 200, "/v1/report exempt from the fail-closed guard");
+  }
+
+  // Dev + weak secret → guard warns but does not 503 (verify still refuses per-call).
+  {
+    const r = await secHit(mkSecEnv({ HPS_SIGNING_SECRET: "changeme" }), "/v1/profile", { method: "GET" });
+    assert.notEqual(r.status, 503, "dev is not blocked by the guard");
+    assert.equal(r.status, 401, "no bearer → 401 as before");
+  }
+
+  // Strong secret in production → guard is a no-op.
+  {
+    const r = await secHit(mkSecEnv({ ENVIRONMENT: "production" }), "/v1/profile", { method: "GET" });
+    assert.equal(r.status, 401, "strong secret: request flows through to normal auth");
+  }
+
+  console.log("✓ #258 signing-secret guard: shared issue/verify gate + production fail-closed");
+}
+
 console.log("\nAll smoke tests passed.");
