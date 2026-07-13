@@ -23,7 +23,16 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
-import { issue, issueIssuer, verify, type IssuerScope, type TokenPayload } from "../lib/tokens";
+import { issue, issueIssuer, verify, TokenError, type IssuerScope, type TokenPayload } from "../lib/tokens";
+
+// #257 — verify() failures surface curated TokenError prose only; anything
+// else (crypto/config internals) is logged server-side, client gets a
+// generic message.
+function publicVerifyError(err: unknown, label: string): string {
+  if (err instanceof TokenError) return `invalid ${label} token: ${err.message}`;
+  console.error(`${label} token verify failed:`, err);
+  return `invalid ${label} token`;
+}
 import { postDiscordResolution } from "./report";
 import {
   endSession,
@@ -195,7 +204,7 @@ admin.post("/tokens/issue", async (c) => {
     try {
       issuerPayload = await verify(issuerToken, c.env.HPS_SIGNING_SECRET);
     } catch (err) {
-      return c.json({ error: `invalid issuer token: ${(err as Error).message}` }, 401);
+      return c.json({ error: publicVerifyError(err, "issuer") }, 401);
     }
     if (issuerPayload.role !== "issuer") {
       return c.json({ error: "token is not an issuer" }, 403);
@@ -327,7 +336,7 @@ admin.post("/issuers", async (c) => {
     try {
       mp = await verify(bearerMatch[1], c.env.HPS_SIGNING_SECRET);
     } catch (err) {
-      return c.json({ error: `invalid minter token: ${(err as Error).message}` }, 401);
+      return c.json({ error: publicVerifyError(err, "minter") }, 401);
     }
     if (mp.role !== "issuer" || mp.can_issue_issuers !== true) {
       return c.json({ error: "token not permitted to mint issuers (needs can_issue_issuers)" }, 403);
@@ -607,7 +616,7 @@ async function authorizeIssuerForCohort(
     payload = await verify(bearerMatch[1], c.env.HPS_SIGNING_SECRET);
   } catch (err) {
     return Response.json(
-      { error: `invalid issuer token: ${(err as Error).message}` },
+      { error: publicVerifyError(err, "issuer") },
       { status: 401 },
     );
   }
@@ -643,7 +652,7 @@ async function authorizeIssuerForSession(
     payload = await verify(issuerToken, c.env.HPS_SIGNING_SECRET);
   } catch (err) {
     return Response.json(
-      { error: `invalid issuer token: ${(err as Error).message}` },
+      { error: publicVerifyError(err, "issuer") },
       { status: 401 },
     );
   }

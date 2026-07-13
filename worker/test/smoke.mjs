@@ -2571,4 +2571,325 @@ const TINY_PNG =
   console.log("✓ #295 issuer-mint delegation: per-member minter, audit trail, no capability spread");
 }
 
+// ---------------------------------------------------------------------------
+// Shared route-level env factory for the security-cluster tests (#258/#257/#260).
+// Same shape as the #290 mkEnv but module-scoped, with ENVIRONMENT overridable.
+function mkSecEnv(overrides = {}, seed = {}) {
+  const store = new Map(Object.entries(seed));
+  const dbCalls = [];
+  return {
+    HPS_SIGNING_SECRET: SECRET,
+    HPS_ADMIN_PASSWORD: "pw-test",
+    ENVIRONMENT: "dev",
+    HPS_KV: {
+      async get(k, fmt) {
+        const v = store.get(k);
+        if (v == null) return null;
+        return fmt === "json" ? JSON.parse(v) : v;
+      },
+      async put(k, v) { store.set(k, v); },
+      async delete(k) { store.delete(k); },
+      async list({ prefix, limit = 100 }) {
+        const keys = [];
+        for (const k of store.keys()) if (k.startsWith(prefix)) keys.push({ name: k });
+        return { keys: keys.slice(0, limit), list_complete: true, cursor: "" };
+      },
+    },
+    HPS_DB: {
+      prepare(sql) {
+        const call = { sql, bindings: null };
+        return {
+          bind(...args) { call.bindings = args; return this; },
+          async run() { dbCalls.push(call); return { success: true, meta: { changes: 1 } }; },
+          async first() { dbCalls.push(call); return null; },
+        };
+      },
+    },
+    HPS_TRACES: { async put() {} },
+    HPS_ANALYTICS: { writeDataPoint() {} },
+    _store: store,
+    _dbCalls: dbCalls,
+    ...overrides,
+  };
+}
+const secCtx = { waitUntil: (p) => Promise.resolve(p).catch(() => {}) };
+const secApp = (await import("../src/index.ts")).default;
+const secHit = (env, path, init = {}) =>
+  secApp.fetch(new Request(`https://t${path}`, init), env, secCtx);
+
+// §signing-secret guard (#258) — issue/verify share one strength gate;
+// production fails closed on token-authed routes when the secret is unusable.
+{
+  const { validateSigningSecret, SigningSecretError } = await import("../src/lib/tokens.ts");
+
+  // Unit: category detection.
+  assert.equal(validateSigningSecret(undefined), "missing");
+  assert.equal(validateSigningSecret(""), "missing");
+  assert.equal(validateSigningSecret("   "), "missing");
+  assert.equal(validateSigningSecret("shortsecret"), "too_short", "< 16 chars rejected");
+  assert.equal(validateSigningSecret("your-secret-here"), "placeholder", "known placeholder rejected");
+  assert.equal(validateSigningSecret("x".repeat(32)), "placeholder", "single repeated char rejected");
+  assert.equal(validateSigningSecret(SECRET), null, "strong secret passes");
+
+  // issue() and verify() enforce the SAME gate (shared helper).
+  await assert.rejects(
+    issue({ u: "a", c: "b", p: "c" }, 1, "weak"),
+    SigningSecretError,
+    "issue() rejects a weak secret",
+  );
+  const { token: okToken } = await issue({ u: "a", c: "b", p: "c" }, 1, SECRET);
+  await assert.rejects(
+    verify(okToken, "x".repeat(32)),
+    SigningSecretError,
+    "verify() rejects a weak secret even for a well-formed token",
+  );
+  // The error message never echoes the secret value.
+  try {
+    await verify(okToken, "x".repeat(32));
+    assert.fail("expected SigningSecretError");
+  } catch (err) {
+    assert.ok(!String(err).includes("x".repeat(32)), "secret value not echoed in error");
+  }
+
+  // Route-level: production + weak secret → 503 fail-closed on token routes.
+  const weakProd = () => mkSecEnv({ ENVIRONMENT: "production", HPS_SIGNING_SECRET: "changeme" });
+  for (const path of ["/v1/profile", "/v1/chat/completions", "/v1/trace/event", "/admin/cohorts"]) {
+    const r = await secHit(weakProd(), path, { method: path === "/v1/profile" ? "GET" : "POST" });
+    assert.equal(r.status, 503, `${path} fails closed (503) in production with weak secret`);
+    const j = await r.json();
+    assert.equal(j.error.type, "config");
+    assert.ok(j.error.request_id, "503 body carries request_id");
+    assert.ok(!JSON.stringify(j).includes("changeme"), "secret value never leaks to client");
+  }
+
+  // /v1/report stays reachable (REQ-H6 — bug reporting survives config breakage).
+  {
+    const r = await secHit(weakProd(), "/v1/report", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ description: "secret misconfigured but I can still report" }),
+    });
+    assert.equal(r.status, 200, "/v1/report exempt from the fail-closed guard");
+  }
+
+  // Dev + weak secret → guard warns but does not 503 (verify still refuses per-call).
+  {
+    const r = await secHit(mkSecEnv({ HPS_SIGNING_SECRET: "changeme" }), "/v1/profile", { method: "GET" });
+    assert.notEqual(r.status, 503, "dev is not blocked by the guard");
+    assert.equal(r.status, 401, "no bearer → 401 as before");
+  }
+
+  // Strong secret in production → guard is a no-op.
+  {
+    const r = await secHit(mkSecEnv({ ENVIRONMENT: "production" }), "/v1/profile", { method: "GET" });
+    assert.equal(r.status, 401, "strong secret: request flows through to normal auth");
+  }
+
+  console.log("✓ #258 signing-secret guard: shared issue/verify gate + production fail-closed");
+}
+
+// §error sanitization (#257) — clients get generic message + request_id;
+// full detail (stack, config prose, upstream bodies) stays in server logs.
+{
+  const { listProfiles } = await import("../src/profiles/index.ts");
+  const prof = listProfiles()[0];
+  const COHORT = prof.session.cohort_id;
+  const { token: STUDENT } = await issue({ u: "student1", c: COHORT, p: prof.id }, 1, SECRET);
+
+  // ① onError backstop: an unexpected throw (here: KV explodes during the
+  // revocation check) → 500 with generic message + request_id, no internals.
+  {
+    const env = mkSecEnv();
+    env.HPS_KV.get = async () => { throw new Error("KABOOM_SECRET_INTERNAL_DETAIL d1-binding-name"); };
+    const r = await secHit(env, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${STUDENT}` },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.equal(r.status, 500, "unexpected throw → 500 via onError");
+    const j = await r.json();
+    const raw = JSON.stringify(j);
+    assert.ok(!raw.includes("KABOOM_SECRET_INTERNAL_DETAIL"), "raw err.message not in client body");
+    assert.ok(!raw.includes("d1-binding-name"), "internal names not in client body");
+    assert.equal(j.error.type, "internal");
+    assert.ok(j.error.request_id, "500 body carries request_id");
+    assert.equal(r.headers.get("x-request-id"), j.error.request_id, "header and body request_id agree");
+  }
+
+  // ② TokenError whitelist: curated auth prose is preserved (UX must not
+  // regress to "unexpected server error").
+  {
+    const r = await secHit(mkSecEnv(), "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer not-a-token" },
+      body: JSON.stringify({ messages: [] }),
+    });
+    assert.equal(r.status, 401);
+    const j = await r.json();
+    assert.equal(j.error.message, "malformed token", "curated TokenError prose kept");
+    assert.equal(j.error.code, "malformed");
+  }
+
+  // ③ provider config errors: env-var prose stays server-side.
+  {
+    const now = Date.now();
+    const env = mkSecEnv({}, {
+      [`cohort:${COHORT}:active_session`]: JSON.stringify({
+        session_id: "sess-1", profile_id: prof.id,
+        starts_at: new Date(now - 60_000).toISOString(),
+        ends_at: new Date(now + 3600_000).toISOString(),
+      }),
+      [`cohort:${COHORT}:roster`]: JSON.stringify({ users: ["student1"], updated_at: "x" }),
+    });
+    // mkSecEnv sets no LLM keys → resolveProvider throws its config prose.
+    const r = await secHit(env, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${STUDENT}` },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.equal(r.status, 502, "missing provider key → 502 config error");
+    const j = await r.json();
+    const raw = JSON.stringify(j);
+    assert.ok(!raw.includes("GEMINI_API_KEY"), "env var names not leaked");
+    assert.ok(!raw.includes(".dev.vars"), "config file paths not leaked");
+    assert.equal(j.error.type, "config");
+    assert.ok(j.error.request_id, "config error carries request_id");
+  }
+
+  // ④ SSE stream_error: mid-stream failures emit a sanitized event with the
+  // request_id, never raw internal prose. Both provider paths.
+  {
+    const boom = () => new ReadableStream({
+      pull() { throw new Error("UPSTREAM_INTERNAL_DETAIL https://internal.example/creds"); },
+    });
+    const outA = await readStreamText(
+      transformStream(boom(), "m", () => {}, { requestId: "rid-aaa1" }),
+    );
+    assert.ok(!outA.includes("UPSTREAM_INTERNAL_DETAIL"), "anthropic path: raw error not in stream");
+    assert.ok(outA.includes('"type":"stream_error"'), "anthropic path: stream_error event emitted");
+    assert.ok(outA.includes("rid-aaa1"), "anthropic path: request_id present");
+    assert.ok(outA.includes("data: [DONE]"), "anthropic path: stream still terminates cleanly");
+
+    const outB = await readStreamText(
+      passThroughOpenAIStream(boom(), () => {}, { requestId: "rid-bbb2" }),
+    );
+    assert.ok(!outB.includes("UPSTREAM_INTERNAL_DETAIL"), "openai path: raw error not in stream");
+    assert.ok(outB.includes('"type":"stream_error"'), "openai path: stream_error event emitted");
+    assert.ok(outB.includes("rid-bbb2"), "openai path: request_id present");
+    assert.ok(outB.includes("data: [DONE]"), "openai path: stream still terminates cleanly");
+  }
+
+  console.log("✓ #257 error sanitization: generic client message + request_id, curated auth prose kept");
+}
+
+// §report endpoint hardening (#260) — stays unauthenticated (REQ-H6) but with
+// abuse caps: total body 413, attachments key/size caps, contact never
+// forwarded to Discord (REQ-H7·H8).
+{
+  const postReport = (env, bodyObj, headers = {}) =>
+    secHit(env, "/v1/report", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: typeof bodyObj === "string" ? bodyObj : JSON.stringify(bodyObj),
+    });
+
+  // happy path still works
+  {
+    const r = await postReport(mkSecEnv(), { description: "버그: 미리보기가 안 열려요" });
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.match(j.report_id, /^rep_[a-z2-7]+$/);
+  }
+
+  // total body cap → 413 (payload_too_large), both via content-length and raw bytes
+  {
+    const big = { description: "ok", pad: "x".repeat(40_000) };
+    const r = await postReport(mkSecEnv(), big);
+    assert.equal(r.status, 413, "body > 32KB → 413");
+    const j = await r.json();
+    assert.equal(j.error.type, "payload_too_large");
+    assert.ok(j.error.request_id, "413 carries request_id");
+  }
+
+  // attachments: too many keys → 400
+  {
+    const attachments = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`k${i}`, "v"]));
+    const r = await postReport(mkSecEnv(), { description: "d", attachments });
+    assert.equal(r.status, 400, "attachments > 20 keys → 400");
+    const j = await r.json();
+    assert.match(j.error.message, /attachments exceeds 20 keys/);
+  }
+
+  // attachments: oversized serialized blob → 400
+  {
+    const r = await postReport(mkSecEnv(), {
+      description: "d",
+      attachments: { blob: "y".repeat(10_000) },
+    });
+    assert.equal(r.status, 400, "attachments > 8KB serialized → 400");
+    const j = await r.json();
+    assert.match(j.error.message, /serialized/);
+  }
+
+  // attachments: overlong key name → 400
+  {
+    const r = await postReport(mkSecEnv(), {
+      description: "d",
+      attachments: { ["k".repeat(65)]: "v" },
+    });
+    assert.equal(r.status, 400, "attachment key > 64 chars → 400");
+  }
+
+  // in-bounds attachments still accepted + persisted
+  {
+    const env = mkSecEnv();
+    const r = await postReport(env, {
+      description: "d",
+      attachments: { studio_version: "0.1.0", os: "macOS 14.5" },
+    });
+    assert.equal(r.status, 200, "capped-but-valid attachments → 200");
+    const insert = env._dbCalls.find((call) => /INSERT INTO reports/.test(call.sql));
+    assert.ok(insert && String(insert.bindings[6]).includes("studio_version"), "attachments persisted to D1");
+  }
+
+  // rate limit unchanged: 4th report from the same IP → 429
+  {
+    const env = mkSecEnv();
+    for (let i = 0; i < 3; i++) {
+      const r = await postReport(env, { description: `spam ${i}` });
+      assert.equal(r.status, 200, `report ${i + 1}/3 within limit → 200`);
+    }
+    const r4 = await postReport(env, { description: "spam 4" });
+    assert.equal(r4.status, 429, "4th report in 60s window → 429");
+  }
+
+  // PII minimization: contact reaches D1 but NOT the Discord webhook payload
+  {
+    const captured = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      captured.push({ url: String(url), body: init?.body });
+      return new Response("ok", { status: 204 });
+    };
+    try {
+      const env = mkSecEnv({ DISCORD_REPORT_WEBHOOK_URL: "https://discord.test/webhook" });
+      const r = await postReport(env, {
+        description: "연락처 포함 리포트",
+        contact: "kid01@example.com",
+        attachments: { studio_version: "0.1.0" },
+      });
+      assert.equal(r.status, 200);
+      const insert = env._dbCalls.find((call) => /INSERT INTO reports/.test(call.sql));
+      assert.equal(insert.bindings[7], "kid01@example.com", "contact persisted to D1");
+      assert.equal(captured.length, 1, "discord webhook fired");
+      assert.ok(!captured[0].body.includes("kid01@example.com"), "contact NOT in Discord payload");
+      assert.ok(captured[0].body.includes("studio_version"), "non-PII metadata still in embed");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  console.log("✓ #260 report hardening: 413 body cap, attachments caps, contact kept out of Discord");
+}
+
 console.log("\nAll smoke tests passed.");

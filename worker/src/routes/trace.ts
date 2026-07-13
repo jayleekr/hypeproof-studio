@@ -143,7 +143,12 @@ trace.post("/event", async (c) => {
     payload = await verify(token, env.HPS_SIGNING_SECRET);
   } catch (err) {
     const code = err instanceof TokenError ? err.code : "unknown";
-    return c.json({ error: { message: String(err), type: "auth", code } }, 401);
+    // #257 — curated TokenError prose only; internal failures stay in logs.
+    if (!(err instanceof TokenError)) {
+      console.error(`[${c.get("requestId")}] trace token verify failed:`, err);
+    }
+    const message = err instanceof TokenError ? err.message : "invalid token";
+    return c.json({ error: { message, type: "auth", code } }, 401);
   }
 
   // 3. Profile

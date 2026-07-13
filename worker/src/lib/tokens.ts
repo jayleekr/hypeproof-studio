@@ -56,6 +56,60 @@ export interface IssuerScope {
 
 export type TokenErrorCode = "malformed" | "signature" | "expired" | "version" | "revoked";
 
+// --- Signing-secret guard (#258) --------------------------------------------
+// issue() and verify() share ONE strength gate, so a missing/weak/placeholder
+// secret can never sign OR verify. Config problems surface immediately (and
+// fail closed in production via the signingSecretGuard middleware) instead of
+// silently minting/accepting tokens under a guessable key.
+
+export type SigningSecretIssue = "missing" | "too_short" | "placeholder";
+
+export const MIN_SIGNING_SECRET_LENGTH = 16;
+
+// Exact-match (lowercased) values that are obviously not real secrets. Most
+// short ones are already caught by the length gate; this catches the ≥16-char
+// "looks configured but isn't" cases.
+const PLACEHOLDER_SECRETS = new Set([
+  "changeme",
+  "change-me",
+  "please-change-me",
+  "replace-this-secret",
+  "placeholder",
+  "your-secret-here",
+  "hps-signing-secret",
+  "hps_signing_secret",
+  "signing-secret",
+  "insert-secret-here",
+]);
+
+/** Returns the reason a secret is unusable, or null when it passes the gate. */
+export function validateSigningSecret(secret: unknown): SigningSecretIssue | null {
+  if (typeof secret !== "string" || secret.trim().length === 0) return "missing";
+  const s = secret.trim();
+  if (s.length < MIN_SIGNING_SECRET_LENGTH) return "too_short";
+  if (PLACEHOLDER_SECRETS.has(s.toLowerCase())) return "placeholder";
+  if (/^(.)\1*$/.test(s)) return "placeholder"; // one character repeated ("xxxx…")
+  return null;
+}
+
+/**
+ * Config error, NOT a token error — a rejected secret means the SERVER is
+ * misconfigured, never that the caller's token is bad. The message carries
+ * only the category; the secret value itself is never echoed.
+ */
+export class SigningSecretError extends Error {
+  issue: SigningSecretIssue;
+  constructor(issue: SigningSecretIssue) {
+    super(`signing secret rejected: ${issue}`);
+    this.issue = issue;
+  }
+}
+
+export function assertSigningSecret(secret: unknown): asserts secret is string {
+  const issue = validateSigningSecret(secret);
+  if (issue) throw new SigningSecretError(issue);
+}
+
 export class TokenError extends Error {
   code: TokenErrorCode;
   constructor(message: string, code: TokenErrorCode) {
@@ -100,7 +154,7 @@ export async function issue(
   secret: string,
   opts: { jti?: string } = {},
 ): Promise<{ token: string; jti: string }> {
-  if (!secret || secret.length < 16) throw new TokenError("signing secret too short", "malformed");
+  assertSigningSecret(secret);
   const now = Math.floor(Date.now() / 1000);
   // crypto.randomUUID is available in Workers + Node 19+ (the issue-token CLI).
   const jti = opts.jti ?? crypto.randomUUID();
@@ -148,6 +202,10 @@ export async function issueIssuer(
 }
 
 export async function verify(token: string, secret: string): Promise<TokenPayload> {
+  // #258 — same gate as issue(). A weak secret must not VERIFY either, or a
+  // misconfigured deployment would happily accept tokens signed with a
+  // guessable key.
+  assertSigningSecret(secret);
   if (!token || !token.includes(".")) throw new TokenError("malformed token", "malformed");
   const [payloadB64, sigB64] = token.split(".", 2);
   if (!payloadB64 || !sigB64) throw new TokenError("malformed token", "malformed");
