@@ -750,7 +750,7 @@ const TINY_PNG =
     {},
     "gemini",
   );
-  assert.equal(out.model, "gemini-2.5-pro", "default alias → gemini-2.5-pro");
+  assert.equal(out.model, "gemini-3.5-flash", "default alias → gemini-3.5-flash (#307 repin)");
   assert.equal(out.messages[0].role, "system", "single leading system message");
   assert.ok(out.messages[0].content.startsWith(stubProfile.system_prompt), "profile prompt is the system prefix");
   assert.ok(out.messages[0].content.includes("# 게임 스켈레톤 라이브러리"), "skeleton library merged into system msg");
@@ -836,14 +836,15 @@ const TINY_PNG =
       return new Response(status === 200 ? '{"ok":true}' : '{"error":"x"}', { status });
     };
   };
-  const body = { model: "gemini-2.5-pro", messages: [], max_tokens: 100 };
+  const PRIMARY = "gemini-3.5-flash"; // any non-fallback model id
+  const body = { model: PRIMARY, messages: [], max_tokens: 100 };
   try {
     // 1. First try succeeds → no retry, no fallback.
     reqModels.length = 0;
     globalThis.fetch = scriptFetch([200]);
     let r = await callGeminiResilient({ ...body }, "k");
     assert.equal(r.response.status, 200);
-    assert.equal(r.model, "gemini-2.5-pro");
+    assert.equal(r.model, PRIMARY);
     assert.equal(r.fellBack, false);
     assert.equal(reqModels.length, 1, "no extra calls on first success");
 
@@ -852,9 +853,9 @@ const TINY_PNG =
     globalThis.fetch = scriptFetch([503, 200]);
     r = await callGeminiResilient({ ...body }, "k");
     assert.equal(r.response.status, 200);
-    assert.equal(r.model, "gemini-2.5-pro");
+    assert.equal(r.model, PRIMARY);
     assert.equal(r.fellBack, false);
-    assert.deepEqual(reqModels, ["gemini-2.5-pro", "gemini-2.5-pro"]);
+    assert.deepEqual(reqModels, [PRIMARY, PRIMARY]);
 
     // 3. Primary 503 x2 → fall back to flash, which answers.
     reqModels.length = 0;
@@ -879,10 +880,40 @@ const TINY_PNG =
     r = await callGeminiResilient({ ...body }, "k");
     assert.equal(r.response.status, 503, "exhausted → last failure surfaced");
     assert.equal(reqModels.length, 4, "primary x2 + flash x2");
+
+    // 6. 404 on primary (retired model, #307) → NO same-model retry,
+    //    straight to the fallback model, which answers → fellBack=true.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([404, 200]);
+    r = await callGeminiResilient({ ...body }, "k");
+    assert.equal(r.response.status, 200);
+    assert.equal(r.model, GEMINI_FALLBACK_MODEL, "404 → fell back to flash");
+    assert.equal(r.fellBack, true);
+    assert.deepEqual(reqModels, [PRIMARY, GEMINI_FALLBACK_MODEL],
+      "exactly 2 calls: no same-model retry on 404");
+
+    // 7. 404 on primary AND 404 on the fallback → genuine 404 surfaced,
+    //    no retry loop on the fallback either.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([404, 404]);
+    r = await callGeminiResilient({ ...body }, "k");
+    assert.equal(r.response.status, 404, "fallback 404 surfaced, not masked");
+    assert.equal(r.fellBack, true, "we did switch models before failing");
+    assert.deepEqual(reqModels, [PRIMARY, GEMINI_FALLBACK_MODEL],
+      "no retries once both models 404");
+
+    // 8. Request already ON the fallback model → 404 surfaces immediately
+    //    (no indirection to itself).
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([404]);
+    r = await callGeminiResilient({ ...body, model: GEMINI_FALLBACK_MODEL }, "k");
+    assert.equal(r.response.status, 404);
+    assert.equal(r.fellBack, false);
+    assert.equal(reqModels.length, 1, "single call when primary === fallback");
   } finally {
     globalThis.fetch = realFetch;
   }
-  console.log("✓ callGeminiResilient: retry transient, fall back to flash, surface 4xx");
+  console.log("✓ callGeminiResilient: retry transient, 404 → skip to fallback, surface 4xx");
 }
 
 // ---- translate: tools dropped when profile.sandbox.mcp_tools_enabled empty
@@ -1072,7 +1103,7 @@ const TINY_PNG =
       trial_id: "t1", turn_idx: 0,
       prompt_chars: 12, response_chars: 200,
       tokens_in: 10, tokens_out: 80, latency_ms: 1200,
-      model: "gemini-2.5-pro",
+      model: "gemini-3.5-flash",
     });
     assert.match(tid, /^[0-9a-f-]{36}$/i);
     assert.equal(r2Puts.length, 0, "no R2 write when persistBody=false");
