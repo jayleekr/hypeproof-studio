@@ -107,3 +107,4 @@ severity:
   child_per_user_pages: fail
   child_missing_url_ban: fail
   child_age_range_required: fail
+  child_browser_session_safe: fail

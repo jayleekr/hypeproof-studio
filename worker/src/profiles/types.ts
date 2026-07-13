@@ -114,6 +114,24 @@ export interface Profile {
     enabled: boolean;
     max_iterations?: number;   // client loop cap hint (default 8)
   };
+  /**
+   * #306 — hardened native-browser session for minor cohorts. When `mode` is
+   * `"safe"`, the Studio core (patches/62-hp-safe-session.patch in the
+   * vscodium-base fork) backs the integrated browser with the locked-down
+   * `persist:hp-safe` Electron session: every permission denied, downloads and
+   * popups blocked, devtools disabled, and navigation confined to `allowlist`
+   * (plus `file://`, `about:` and localhost, which are always permitted so the
+   * participant's own pages / live_server preview keep working). Absent or
+   * `"browse"` → the normal integrated browser (adult default; zero change).
+   *
+   * Inert until the fork patch ships in a build; the Studio extension sets the
+   * matching `hypeproof.browser.safeSession` setting, which unpatched builds
+   * simply ignore.
+   */
+  browser_session?: {
+    mode: "safe" | "browse";
+    allowlist?: string[];
+  };
   session: {
     cohort_id: string;
     series_total: number;

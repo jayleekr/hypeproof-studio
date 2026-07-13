@@ -9,6 +9,7 @@ import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
+import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import {
   ChatMessage,
   CoachInfo,
@@ -93,6 +94,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   /** #278 — is "페이지를 코치에게" allowed for this cohort? Default off (minor-safe). */
   isPageContextEnabled(): boolean {
     return this.cachedProfile?.input?.page_context === true;
+  }
+
+  /**
+   * #306 — mirror the cohort's browser_session onto the two settings the fork
+   * core patch reads (`hypeproof.browser.safeSession` / `.safeAllowlist`). Safe
+   * cohorts (minors) get the hardened persist:hp-safe integrated-browser
+   * session; every other cohort explicitly clears it, so switching cohorts in
+   * one install self-corrects. Best-effort + feature-detecting: on a Studio
+   * build without patches/62-hp-safe-session.patch these keys are unregistered
+   * and `update` rejects — we swallow it, since there is no hardened session to
+   * drive there and the panel must not crash on older builds.
+   */
+  private async applyBrowserSafety(profile: ResolvedProfile | null): Promise<void> {
+    const { safeSession, safeAllowlist } = resolveBrowserSafety(profile);
+    try {
+      const cfg = vscode.workspace.getConfiguration("hypeproof.browser");
+      await cfg.update("safeSession", safeSession, vscode.ConfigurationTarget.Global);
+      await cfg.update("safeAllowlist", safeAllowlist, vscode.ConfigurationTarget.Global);
+    } catch {
+      /* setting not registered → build without the fork patch; nothing to enforce */
+    }
   }
 
   /** #278 Phase 2 — may we attach a page screenshot (image)? Worker enforces the same gate. */
@@ -272,6 +294,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           "hypeproof-chat.pageContextEnabled",
           p?.input?.page_context === true,
         );
+        // #306 — mirror the cohort's browser_session onto the hardened-session
+        // settings the fork core patch reads (minor cohorts → persist:hp-safe).
+        await this.applyBrowserSafety(p);
         this.activeCohortId = extractCohortIdUnverified(token) ?? null;
         await this.migrateLegacyStateForActiveCohort();
         // Apply tone-appropriate labels to the preview panel (#159).

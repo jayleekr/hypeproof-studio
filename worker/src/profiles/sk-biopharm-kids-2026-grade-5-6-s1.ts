@@ -45,6 +45,13 @@ export const profile: Profile = {
     type: "live_server",
     auto_start: false,
   },
+  // #306 — 미성년 코호트: 통합 브라우저가 열릴 경우 하드닝된 persist:hp-safe
+  // 세션을 쓴다(권한 전부 deny, 다운로드·팝업 차단, devtools off). allowlist는
+  // 비워 둠 → file://·localhost(live_server 미리보기)만 허용, 외부 사이트 차단.
+  browser_session: {
+    mode: "safe",
+    allowlist: [],
+  },
   game: {
     template_tier: "kids-rich",
   },

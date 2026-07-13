@@ -105,6 +105,14 @@ chat.get("/profile", async (c) => {
       enabled: profile.browser_control?.enabled === true,
       max_iterations: profile.browser_control?.max_iterations ?? 8,
     },
+    // #306 — per-cohort hardened native-browser session. Minor cohorts send
+    // mode="safe"; the Studio host maps it to hypeproof.browser.safeSession so
+    // the integrated browser uses the locked-down persist:hp-safe session.
+    // Default browse (adult), so unchanged for existing cohorts.
+    browser_session: {
+      mode: profile.browser_session?.mode ?? "browse",
+      allowlist: profile.browser_session?.allowlist ?? [],
+    },
     // Drives the chat panel's tone (game vs search-webapp UI copy) (#159).
     game: { template_tier: profile.game.template_tier },
     // #282 — expose the cohort's provider-tool opt-in so the Studio Agent SDK
