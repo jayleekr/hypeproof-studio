@@ -52,6 +52,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // an image with the NEXT turn so the coach can *see* the page. image_paste-
   // gated; consumed once, like pendingPageContext.
   private pendingPageImage: string | null = null;
+  // #308 — inline "붙였어요" notice queued for the webview. post() silently
+  // drops messages while the view is unresolved, and extension.ts calls
+  // attachPageContext() BEFORE panel.focus creates the view — so the notice
+  // must survive until the webview signals "ready". Also re-flushed on every
+  // remount: WebviewView does not support retainContextWhenHidden, so React
+  // state (pageNotice) resets whenever the panel is hidden and re-shown.
+  // Cleared alongside pendingPageContext when the queued context is consumed.
+  private pendingPageNotice: string | null = null;
   private activeCohortId: string | null = null;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
@@ -113,10 +121,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #308 — announce inline in the chat panel, NOT via a VS Code toast (a toast
     // pauses the integrated browser). The webview clears it on the next send.
     const withShot = !!this.pendingPageImage;
-    void this.post({
-      type: "pageAttached",
-      label: `${withShot ? "🖼 화면과 내용을" : "📄 내용을"} 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
-    });
+    this.postPageNotice(
+      `${withShot ? "🖼 화면과 내용을" : "📄 내용을"} 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
+    );
+  }
+
+  /**
+   * #308 — show an inline notice line in the chat panel (toast replacement;
+   * a visible toast pauses the integrated browser). The label is stashed in
+   * pendingPageNotice and flushed on webview "ready", because at call time the
+   * view may not exist yet (attachPageContext runs before panel.focus) or may
+   * be recreated later (WebviewView has no retainContextWhenHidden). Posting
+   * is idempotent: the webview reducer replaces pageNotice, never appends.
+   */
+  postPageNotice(label: string): void {
+    this.pendingPageNotice = label;
+    void this.post({ type: "pageAttached", label });
   }
 
   /**
@@ -362,6 +382,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "ready":
         await this.postConfig();
         await this.postHistory();
+        // #308 — flush the pending inline notice. The webview may have just
+        // been created for the first time (attachPageContext ran before
+        // panel.focus) or recreated after hide/show (no retainContextWhenHidden
+        // for WebviewView → React state reset). Re-posting is idempotent: the
+        // reducer replaces pageNotice rather than appending.
+        if (this.pendingPageNotice) {
+          void this.post({ type: "pageAttached", label: this.pendingPageNotice });
+        }
         return;
       case "sendMessage":
         await this.handleSend(msg.text, msg.history, msg.images);
@@ -480,6 +508,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // sees the prepended page context.
     const pageContext = this.pendingPageContext;
     this.pendingPageContext = null;
+    // #308 — the notice describes the queued context; once consumed, stop
+    // resurrecting it on webview remounts (webview clears its copy on userSent).
+    this.pendingPageNotice = null;
     const userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
     // #278 Phase 2 — fold any queued page screenshot into this turn's images.
     const pageImage = this.pendingPageImage;

@@ -92,7 +92,7 @@ function reducer(state: State, action: Action): State {
       return { ...state, toolLog };
     }
     case "pageAttached":
-      // #308 — inline notice; cleared on the next send (userSent) or new stream.
+      // #308 — inline notice; cleared on the next send (userSent) only.
       return { ...state, pageNotice: action.label };
     case "streamEnd":
       return {
