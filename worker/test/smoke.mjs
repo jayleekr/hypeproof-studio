@@ -2103,7 +2103,7 @@ const TINY_PNG =
 {
   const app = (await import("../src/index.ts")).default;
   const { issueIssuer } = await import("../src/lib/tokens.ts");
-  const { isTokenRevoked } = await import("../src/lib/kv.ts");
+  const { isTokenRevoked, revokeToken } = await import("../src/lib/kv.ts");
 
   const COHORT = "boah-dental-2026-a";
   const PROFILE = "boah-dental-director-copyclone-2026-s1";
@@ -2335,12 +2335,14 @@ const TINY_PNG =
       { profile_id: PROFILE, user: "dir-9", token_hours: 6, session_hours: 3 }, `Bearer ${j.token}`);
     assert.equal(open.status, 200, "freshly-minted issuer opens a session → 200");
   }
-  // ② security: a plain issuer Bearer cannot mint another issuer (admin-only)
+  // ② security: a plain issuer Bearer (no can_issue_issuers) cannot mint an
+  // issuer — reaches the handler now (#295) but is rejected 403 (authenticated,
+  // not authorized). Admin-tier delegation is covered in §issuer-mint-delegation.
   {
     const env = mkEnv();
     const r = await hit(env, "/admin/issuers", "POST",
       { instructor: "x", scopes: [{ cohort: COHORT, profiles: [PROFILE] }] }, `Bearer ${ISSUER}`);
-    assert.equal(r.status, 401, "issuer Bearer → 401 (root-of-trust is admin-only)");
+    assert.equal(r.status, 403, "plain issuer Bearer → 403 (needs can_issue_issuers)");
   }
   // ② unauthenticated → 401
   {
@@ -2395,6 +2397,178 @@ const TINY_PNG =
     assert.equal(badRe.status, 400, "non-UUID revoke_jti → 400");
   }
   console.log("✓ #290/#191 issuer mint: admin-only server-side, caps, audit, re-scope");
+
+  // §issuer-mint-delegation (#295) — admin-tier members mint issuers via their
+  // OWN Bearer token (can_issue_issuers), no shared admin password.
+  {
+    // full admin (Basic) mints an admin-tier MINTER for a member
+    const env = mkEnv();
+    const mk = await hit(env, "/admin/issuers", "POST", {
+      instructor: "ico1036",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true }],
+      days: 60,
+      can_issue_issuers: true,
+    }, BASIC);
+    assert.equal(mk.status, 200, "admin mints an admin-tier minter → 200");
+    const mj = await mk.json();
+    assert.equal(mj.can_issue_issuers, true, "response marks the minter capability");
+    assert.equal(mj.minted_by, "admin", "audit: minted_by admin");
+    const minterPayload = await verify(mj.token, SECRET);
+    assert.equal(minterPayload.can_issue_issuers, true, "minted token carries can_issue_issuers");
+    const auditRaw = env._store.get(`issuer_audit:${mj.jti}`);
+    assert.ok(auditRaw && !auditRaw.includes(mj.token), "audit metadata only, no token");
+
+    // that member now mints an INSTRUCTOR issuer with their OWN Bearer (env2 so
+    // the minter's own revocation state is clean)
+    const env2 = mkEnv();
+    const teach = await hit(env2, "/admin/issuers", "POST", {
+      instructor: "some-instructor",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+      days: 30,
+    }, `Bearer ${mj.token}`);
+    assert.equal(teach.status, 200, "admin-tier minter mints an instructor issuer via Bearer → 200");
+    const tj = await teach.json();
+    assert.equal(tj.minted_by, "ico1036", "audit records WHO minted (the member, not 'admin')");
+    const taughtPayload = await verify(tj.token, SECRET);
+    assert.equal(taughtPayload.role, "issuer");
+    assert.notEqual(taughtPayload.can_issue_issuers, true, "instructor issuer is NOT itself a minter");
+
+    // capability cannot spread: a Bearer minter may NOT grant can_issue_issuers
+    const spread = await hit(env2, "/admin/issuers", "POST", {
+      instructor: "sneaky",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+      can_issue_issuers: true,
+    }, `Bearer ${mj.token}`);
+    assert.equal(spread.status, 403, "Bearer minter cannot grant can_issue_issuers → 403");
+
+    // a plain issuer (no can_issue_issuers) cannot mint issuers at all
+    const plain = await hit(env2, "/admin/issuers", "POST", {
+      instructor: "nope",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+    }, `Bearer ${ISSUER}`);
+    assert.equal(plain.status, 403, "plain issuer Bearer → 403 (needs can_issue_issuers)");
+
+    // revoking the minter kills its minting power
+    const env3 = mkEnv();
+    const mk3 = await hit(env3, "/admin/issuers", "POST", {
+      instructor: "temp-admin",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+      can_issue_issuers: true,
+    }, BASIC);
+    const mj3 = await mk3.json();
+    await revokeToken(env3.HPS_KV, mj3.jti, { reason: "test" }, 3600);
+    const afterRevoke = await hit(env3, "/admin/issuers", "POST", {
+      instructor: "x",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+    }, `Bearer ${mj3.token}`);
+    assert.equal(afterRevoke.status, 401, "revoked minter → 401");
+
+    // ---- PR #297 review B2 — SUBSET ENFORCEMENT: a Bearer minter can only
+    // delegate authority it holds itself (child scopes ⊆ minter scopes).
+    // mj is scoped to COHORT only ([{cohort, profiles:[PROFILE], can_start_session:true}]).
+    {
+      // (b) minter scoped to cohort A mints for cohort B → 403
+      const crossCohort = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "invader",
+        scopes: [{ cohort: "sk-biopharm-2026-a", profiles: [PROFILE] }],
+      }, `Bearer ${mj.token}`);
+      assert.equal(crossCohort.status, 403, "minter scoped to cohort A minting for cohort B → 403");
+      const ccj = await crossCohort.json();
+      assert.match(ccj.error, /subset|minter authority/i, "error names the subset rule");
+
+      // profiles not ⊆ minter profiles → 403
+      const crossProfile = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "invader2",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE, "some-other-profile"] }],
+      }, `Bearer ${mj.token}`);
+      assert.equal(crossProfile.status, 403, "child profiles outside minter profiles → 403");
+
+      // max_session_hours above the minter's effective cap (unset → 4h) → 403
+      const overSession = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "invader3",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true, max_session_hours: 5 }],
+      }, `Bearer ${mj.token}`);
+      assert.equal(overSession.status, 403, "child max_session_hours > minter effective cap → 403");
+
+      // can_start_session escalation: minter WITHOUT the flag cannot grant it
+      const envS = mkEnv();
+      const mkNoSess = await hit(envS, "/admin/issuers", "POST", {
+        instructor: "no-sess-minter",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+        can_issue_issuers: true,
+      }, BASIC);
+      const noSessJ = await mkNoSess.json();
+      const escalate = await hit(envS, "/admin/issuers", "POST", {
+        instructor: "escalator",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true }],
+      }, `Bearer ${noSessJ.token}`);
+      assert.equal(escalate.status, 403, "minter without can_start_session cannot grant it → 403");
+
+      // in-scope mint (⊆) still works after enforcement
+      const inScope = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "legit-teacher",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], max_hours: 12, can_start_session: true, max_session_hours: 4 }],
+      }, `Bearer ${mj.token}`);
+      assert.equal(inScope.status, 200, "child scope ⊆ minter scope still mints → 200");
+
+      // full admin (Basic/CF) is NOT scope-restricted
+      const adminCross = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "admin-minted",
+        scopes: [{ cohort: "sk-biopharm-2026-a", profiles: ["any-profile"] }],
+      }, BASIC);
+      assert.equal(adminCross.status, 200, "full admin unrestricted by subset rule → 200");
+    }
+    console.log("✓ #297 B2 subset enforcement: cross-cohort/profile/session-cap/escalation 403, in-scope 200");
+
+    // ---- PR #297 review B1 — revoke_jti OWNERSHIP: a Bearer minter may only
+    // revoke (re-scope) tokens it minted itself, proven via issuer_audit.minted_by.
+    {
+      // (a) minter A (ico1036) minted tj earlier; minter B tries to revoke tj.jti → 403
+      const mkB = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "member-b",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true }],
+        can_issue_issuers: true,
+      }, BASIC);
+      const mbj = await mkB.json();
+      const steal = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "member-b-instructor",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+        revoke_jti: tj.jti,
+      }, `Bearer ${mbj.token}`);
+      assert.equal(steal.status, 403, "minter B revoking a jti minted by A → 403");
+      const sj = await steal.json();
+      assert.match(sj.error, /minted itself/i, "error names the ownership rule");
+      assert.equal(await isTokenRevoked(env2.HPS_KV, tj.jti), null, "A's issuer NOT revoked by B's attempt");
+
+      // no audit record (arbitrary jti, e.g. another operator's minter) → 403
+      const ghost = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "ghost-instructor",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+        revoke_jti: "11111111-2222-4333-8444-555555555555",
+      }, `Bearer ${mbj.token}`);
+      assert.equal(ghost.status, 403, "revoke_jti with no issuer_audit record → 403");
+
+      // owner path: minter A re-scopes the issuer it minted itself → 200 + revoked
+      const rescope = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "some-instructor",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], max_hours: 6 }],
+        revoke_jti: tj.jti,
+      }, `Bearer ${mj.token}`);
+      assert.equal(rescope.status, 200, "minter re-scoping its OWN minted issuer → 200");
+      const rev = await isTokenRevoked(env2.HPS_KV, tj.jti);
+      assert.ok(rev, "old jti revoked when the owner re-scopes");
+
+      // full admin stays unrestricted (arbitrary jti, no audit record needed)
+      const adminRevoke = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "admin-rescope",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+        revoke_jti: "22222222-3333-4444-8555-666666666666",
+      }, BASIC);
+      assert.equal(adminRevoke.status, 200, "full admin revoke_jti unrestricted → 200");
+    }
+    console.log("✓ #297 B1 revoke_jti ownership: cross-minter 403, no-audit 403, owner 200, admin unrestricted");
+  }
+  console.log("✓ #295 issuer-mint delegation: per-member minter, audit trail, no capability spread");
 }
 
 console.log("\nAll smoke tests passed.");
