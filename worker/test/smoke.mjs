@@ -2782,4 +2782,114 @@ const secHit = (env, path, init = {}) =>
   console.log("✓ #257 error sanitization: generic client message + request_id, curated auth prose kept");
 }
 
+// §report endpoint hardening (#260) — stays unauthenticated (REQ-H6) but with
+// abuse caps: total body 413, attachments key/size caps, contact never
+// forwarded to Discord (REQ-H7·H8).
+{
+  const postReport = (env, bodyObj, headers = {}) =>
+    secHit(env, "/v1/report", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: typeof bodyObj === "string" ? bodyObj : JSON.stringify(bodyObj),
+    });
+
+  // happy path still works
+  {
+    const r = await postReport(mkSecEnv(), { description: "버그: 미리보기가 안 열려요" });
+    assert.equal(r.status, 200);
+    const j = await r.json();
+    assert.match(j.report_id, /^rep_[a-z2-7]+$/);
+  }
+
+  // total body cap → 413 (payload_too_large), both via content-length and raw bytes
+  {
+    const big = { description: "ok", pad: "x".repeat(40_000) };
+    const r = await postReport(mkSecEnv(), big);
+    assert.equal(r.status, 413, "body > 32KB → 413");
+    const j = await r.json();
+    assert.equal(j.error.type, "payload_too_large");
+    assert.ok(j.error.request_id, "413 carries request_id");
+  }
+
+  // attachments: too many keys → 400
+  {
+    const attachments = Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`k${i}`, "v"]));
+    const r = await postReport(mkSecEnv(), { description: "d", attachments });
+    assert.equal(r.status, 400, "attachments > 20 keys → 400");
+    const j = await r.json();
+    assert.match(j.error.message, /attachments exceeds 20 keys/);
+  }
+
+  // attachments: oversized serialized blob → 400
+  {
+    const r = await postReport(mkSecEnv(), {
+      description: "d",
+      attachments: { blob: "y".repeat(10_000) },
+    });
+    assert.equal(r.status, 400, "attachments > 8KB serialized → 400");
+    const j = await r.json();
+    assert.match(j.error.message, /serialized/);
+  }
+
+  // attachments: overlong key name → 400
+  {
+    const r = await postReport(mkSecEnv(), {
+      description: "d",
+      attachments: { ["k".repeat(65)]: "v" },
+    });
+    assert.equal(r.status, 400, "attachment key > 64 chars → 400");
+  }
+
+  // in-bounds attachments still accepted + persisted
+  {
+    const env = mkSecEnv();
+    const r = await postReport(env, {
+      description: "d",
+      attachments: { studio_version: "0.1.0", os: "macOS 14.5" },
+    });
+    assert.equal(r.status, 200, "capped-but-valid attachments → 200");
+    const insert = env._dbCalls.find((call) => /INSERT INTO reports/.test(call.sql));
+    assert.ok(insert && String(insert.bindings[6]).includes("studio_version"), "attachments persisted to D1");
+  }
+
+  // rate limit unchanged: 4th report from the same IP → 429
+  {
+    const env = mkSecEnv();
+    for (let i = 0; i < 3; i++) {
+      const r = await postReport(env, { description: `spam ${i}` });
+      assert.equal(r.status, 200, `report ${i + 1}/3 within limit → 200`);
+    }
+    const r4 = await postReport(env, { description: "spam 4" });
+    assert.equal(r4.status, 429, "4th report in 60s window → 429");
+  }
+
+  // PII minimization: contact reaches D1 but NOT the Discord webhook payload
+  {
+    const captured = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      captured.push({ url: String(url), body: init?.body });
+      return new Response("ok", { status: 204 });
+    };
+    try {
+      const env = mkSecEnv({ DISCORD_REPORT_WEBHOOK_URL: "https://discord.test/webhook" });
+      const r = await postReport(env, {
+        description: "연락처 포함 리포트",
+        contact: "kid01@example.com",
+        attachments: { studio_version: "0.1.0" },
+      });
+      assert.equal(r.status, 200);
+      const insert = env._dbCalls.find((call) => /INSERT INTO reports/.test(call.sql));
+      assert.equal(insert.bindings[7], "kid01@example.com", "contact persisted to D1");
+      assert.equal(captured.length, 1, "discord webhook fired");
+      assert.ok(!captured[0].body.includes("kid01@example.com"), "contact NOT in Discord payload");
+      assert.ok(captured[0].body.includes("studio_version"), "non-PII metadata still in embed");
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  }
+
+  console.log("✓ #260 report hardening: 413 body cap, attachments caps, contact kept out of Discord");
+}
+
 console.log("\nAll smoke tests passed.");

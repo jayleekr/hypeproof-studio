@@ -14,14 +14,22 @@
 // hash + record the jti (16 hex chars of sha256) for correlation; an invalid
 // token gets logged and ignored (because the broken token might BE the bug).
 //
-// Anti-abuse:
+// Anti-abuse (#64, hardened in #260):
 //   - 3 reports / 60s per cf-connecting-ip (KV-backed)
+//   - total request body capped at 32 KB (413)
 //   - description capped at 5000 chars
+//   - attachments capped: ≤20 keys, key names ≤64 chars, ≤8 KB serialized
 //   - jti hashed (never stored / forwarded raw)
 //   - recent_turns server-side stripped unless `include_recent_turns:true`;
 //     when included, cap to 3 messages × 2000 chars each
 //   - Discord embed shows only the first 1000 chars of description, never
-//     contact/jti raw
+//     contact/jti raw — contact (PII) stays in D1 only
+//
+// Retention / redaction (REQ-H8·H9 in docs/studio-requirements.md):
+//   - D1 `reports` rows are diagnostic-only; contact is the ONLY direct PII
+//     field and is optional + capped at 200 chars.
+//   - Operator checklist: purge or null out `contact` within 90 days of a
+//     report reaching `resolved`; raw jti is never stored (16-hex hash only).
 
 import { Hono } from "hono";
 import type { Env } from "../env";
@@ -36,6 +44,16 @@ export const report = new Hono<{ Bindings: Env; Variables: { requestId: string }
 const MAX_DESC = 5000;
 const MIN_DESC = 1;
 const MAX_CONTACT = 200;
+// #260 — unauthenticated endpoint: bound total memory/storage per request.
+// 32 KB comfortably fits the legitimate maximum (5000-char description +
+// 3×2000-char recent turns + metadata) while stopping multi-MB spam bodies.
+const MAX_BODY_BYTES = 32_768;
+// #260 — attachments is an operator-defined metadata blob (studio_version,
+// os, locale, …), not a dumping ground. Caps keep D1 rows + Discord embeds
+// bounded even though the field is schemaless.
+const MAX_ATTACHMENT_KEYS = 20;
+const MAX_ATTACHMENT_KEY_LEN = 64;
+const MAX_ATTACHMENTS_JSON = 8_192;
 const RATE_WINDOW_SEC = 60;
 const RATE_LIMIT = 3;
 const MAX_RECENT_TURNS = 3;
@@ -205,7 +223,6 @@ export async function postDiscordReport(
     jtiHash?: string | null;
     studioVersion?: string;
     os?: string;
-    contact?: string;
     createdAtUnix: number;
   },
 ): Promise<void> {
@@ -221,7 +238,9 @@ export async function postDiscordReport(
     if (args.jtiHash) fields.push({ name: "jti_hash", value: args.jtiHash, inline: true });
     if (args.studioVersion) fields.push({ name: "studio_version", value: args.studioVersion, inline: true });
     if (args.os) fields.push({ name: "os", value: args.os, inline: true });
-    if (args.contact) fields.push({ name: "contact", value: args.contact, inline: false });
+    // #260 — contact is direct PII; it stays in D1 only. The Discord channel
+    // is broader-audience than the DB, and the stated policy ("never
+    // contact/jti raw" in the header comment) now matches the code.
 
     const ts = new Date(args.createdAtUnix * 1000).toISOString().replace("T", " ").slice(0, 19);
 
@@ -289,11 +308,35 @@ report.post("/", async (c) => {
     );
   }
 
-  let body: ReportBody;
+  // #260 — total body size cap. Check the declared length first (cheap), then
+  // the actual bytes (content-length is client-controlled and may be absent).
+  const declaredLen = Number(c.req.header("content-length") ?? "0");
+  if (Number.isFinite(declaredLen) && declaredLen > MAX_BODY_BYTES) {
+    return c.json(
+      makeErrorBody(c, "payload_too_large", `request body exceeds ${MAX_BODY_BYTES} bytes`),
+      413,
+    );
+  }
+  let rawBody: string;
   try {
-    body = await c.req.json<ReportBody>();
+    rawBody = await c.req.text();
   } catch {
     return c.json(makeErrorBody(c, "invalid_body", "expected JSON body"), 400);
+  }
+  if (new TextEncoder().encode(rawBody).byteLength > MAX_BODY_BYTES) {
+    return c.json(
+      makeErrorBody(c, "payload_too_large", `request body exceeds ${MAX_BODY_BYTES} bytes`),
+      413,
+    );
+  }
+  let body: ReportBody;
+  try {
+    body = JSON.parse(rawBody) as ReportBody;
+  } catch {
+    return c.json(makeErrorBody(c, "invalid_body", "expected JSON body"), 400);
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return c.json(makeErrorBody(c, "invalid_body", "expected JSON object body"), 400);
   }
 
   // Description validation
@@ -337,9 +380,30 @@ report.post("/", async (c) => {
   }
 
   // Attachments metadata (free-form JSON blob — studio_version, os, etc.).
+  // #260 — bounded: key count, key length, and serialized size.
   let attachmentsObj: Record<string, unknown> = {};
   if (body.attachments && typeof body.attachments === "object" && !Array.isArray(body.attachments)) {
-    attachmentsObj = body.attachments as Record<string, unknown>;
+    const candidate = body.attachments as Record<string, unknown>;
+    const keys = Object.keys(candidate);
+    if (keys.length > MAX_ATTACHMENT_KEYS) {
+      return c.json(
+        makeErrorBody(c, "invalid_body", `attachments exceeds ${MAX_ATTACHMENT_KEYS} keys`),
+        400,
+      );
+    }
+    if (keys.some((k) => k.length > MAX_ATTACHMENT_KEY_LEN)) {
+      return c.json(
+        makeErrorBody(c, "invalid_body", `attachment key names must be <= ${MAX_ATTACHMENT_KEY_LEN} chars`),
+        400,
+      );
+    }
+    if (JSON.stringify(candidate).length > MAX_ATTACHMENTS_JSON) {
+      return c.json(
+        makeErrorBody(c, "invalid_body", `attachments exceeds ${MAX_ATTACHMENTS_JSON} serialized chars`),
+        400,
+      );
+    }
+    attachmentsObj = candidate;
   }
   if (recentTurns.length > 0) {
     attachmentsObj = { ...attachmentsObj, recent_turns: recentTurns };
@@ -408,7 +472,6 @@ report.post("/", async (c) => {
       jtiHash,
       studioVersion,
       os,
-      contact,
       createdAtUnix: ts,
     });
   }
