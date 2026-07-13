@@ -218,10 +218,16 @@ export const MODEL_MAP: Record<ModelAlias, string> = {
 
 // Gemini model ids (default provider). Same alias names so profiles are
 // provider-agnostic — the alias resolves per-provider at request time.
+//
+// Pin policy (#307): gemini-2.5-pro was retired for new API keys (upstream
+// 404 "no longer available to new users"), which killed the default/strong
+// aliases. Repinned to gemini-3.5-flash — the newest GA flash, verified live
+// on the OpenAI-compat endpoint 2026-07-13. No pro-class GA id exists today
+// (gemini-3.x pro are all `-preview`), so strong shares the flash pin.
 export const GEMINI_MODEL_MAP: Record<ModelAlias, string> = {
   "hypeproof-fast":    "gemini-2.5-flash",
-  "hypeproof-default": "gemini-2.5-pro",
-  "hypeproof-strong":  "gemini-2.5-pro",
+  "hypeproof-default": "gemini-3.5-flash",
+  "hypeproof-strong":  "gemini-3.5-flash",
 };
 
 // OpenAI model ids (third peer). Conservative GA-stable defaults; the team
