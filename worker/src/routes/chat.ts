@@ -22,9 +22,9 @@ import { callOpenAI } from "../lib/openai";
 import {
   extractTrialHeaders,
   lastUserMessageText,
-  recordTurnIfOwned,
   type TrialHeaders,
-} from "../lib/storage";
+} from "../lib/chat-extract";
+import { recordTurnIfOwned } from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
 import { scoreTurnAssets } from "../lib/asset-scorer";
 import {

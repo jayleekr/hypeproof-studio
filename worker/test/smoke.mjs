@@ -1242,7 +1242,7 @@ const TINY_PNG =
 
 // ---- chat-hook helpers (#9c) -----------------------------------------------
 {
-  const { extractTrialHeaders, lastUserMessageText } = await import("../src/lib/storage.ts");
+  const { extractTrialHeaders, lastUserMessageText } = await import("../src/lib/chat-extract.ts");
 
   // extractTrialHeaders: both headers required + STRICT UUID shape (#9d F#3)
   function H(h) { return (name) => h[name.toLowerCase()] ?? null; }
