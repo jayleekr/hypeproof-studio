@@ -81,8 +81,10 @@ jobs:
           cache: npm
           cache-dependency-path: extensions/hypeproof-chat/package-lock.json
       - name: Install extension deps
+        # --omit=optional skips @anthropic-ai/claude-agent-sdk's ~250 MB native
+        # `claude` binary package (#282) — typecheck/smoke never spawn it.
         working-directory: extensions/hypeproof-chat
-        run: npm ci
+        run: npm ci --omit=optional
       - name: Typecheck extension
         working-directory: extensions/hypeproof-chat
         run: npm run typecheck
@@ -98,8 +100,10 @@ jobs:
           cache: npm
           cache-dependency-path: extensions/hypeproof-chat/package-lock.json
       - name: Install extension deps
+        # --omit=optional skips @anthropic-ai/claude-agent-sdk's ~250 MB native
+        # `claude` binary package (#282) — typecheck/smoke never spawn it.
         working-directory: extensions/hypeproof-chat
-        run: npm ci
+        run: npm ci --omit=optional
       # U-layer pure smoke tests (test/*.smoke.mjs) — no vscode host needed.
       - name: Run extension smoke tests
         working-directory: extensions/hypeproof-chat

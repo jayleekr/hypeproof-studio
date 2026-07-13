@@ -587,12 +587,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             token,
             model,
             profile,
-            // TODO(#282 Phase 1): source the cohort system prompt via the worker
-            // gateway (keeps the key server-side; worker injects prompt + auth).
+            // The worker gateway (POST /v1/messages, #316) DROPS the client
+            // `system` field and injects the cohort profile blocks server-side
+            // (REQ-M10) — the tuned Korean prompt + classroom key never leave
+            // the worker, so there is nothing to send from here.
             systemPrompt: "",
             history: history.map((m) => ({ role: m.role, content: m.content })),
             userText: userTextForModel,
             signal: ctrl.signal,
+            cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
             onDelta,
             onCitations,
             onAssetScore,

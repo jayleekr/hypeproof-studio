@@ -175,7 +175,7 @@ When in doubt:
 
 ## M. Agent SDK coach runtime (#282)
 
-> `hypeproofChat.coachRuntime = "agent-sdk"` 로 전환 시 코치를 Claude Agent SDK 위에서 구동. Phase-0/1 스캐폴드 — 아래 안전 계약은 SDK 미설치 상태에서도 pure helper 단위로 검증된다. 도구 정책의 canonical owner 는 궁극적으로 worker 프로필이어야 한다 ([ADR 0003](adr/0003-agent-sdk-coach-runtime.md) / #283).
+> `hypeproofChat.coachRuntime = "agent-sdk"` 로 전환 시 코치를 Claude Agent SDK 위에서 구동. Phase 1: `@anthropic-ai/claude-agent-sdk` 가 실제 의존성으로 설치되어 있고(dev/extension-host 경로), worker 게이트웨이(`POST /v1/messages`, #316)로 라우팅된다. 아래 안전 계약은 pure helper 단위로 검증된다. 도구 정책의 canonical owner 는 궁극적으로 worker 프로필이어야 한다 ([ADR 0003](adr/0003-agent-sdk-coach-runtime.md) / #283). 주의: SDK 는 플랫폼별 native `claude` 바이너리(~240 MB)를 optionalDependency 로 동반한다 — 패키징(.vsix/built-in)은 node_modules 를 포함하지 않으므로 그 경로에서는 REQ-M7 폴백이 동작하며, built-in 번들링 전략은 Phase-2+ 결정 사항이다.
 
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
@@ -184,13 +184,15 @@ When in doubt:
 | REQ-M3 | Minor 루프 bound | `maxTurnsFor`: 워크숍 20, 그 외(미지정 포함) 6 | U (`test/sdk-coach-helpers`) |
 | REQ-M4 | SDK 도구 → 정확한 ActionRequest kind | `sdkToolToActionRequest`: Bash → `executeShell`(Tier-1 hard-deny), Write/Edit → `writeFile`+실경로, Read → `readFile`, WebSearch → `webSearch`, 미지 도구 → fail-closed(`executeShell`) | U (`test/sdk-coach-helpers`) |
 | REQ-M5 | 매 tool use 는 canUseTool 게이트 | SDK `allowedTools` 는 빈 값 + `settingSources: []` — 모든 도구가 canUseTool 로 fall-through, cohort 미허용 도구는 deny | U + E |
-| REQ-M6 | 게이트웨이 라우팅 + env 보존 | `env: { ...process.env, ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN }` (커스텀 이름 금지, PATH 보존) | U |
-| REQ-M7 | SDK 미가용 시 proxy fallback | 패키지 부재 → `SdkUnavailableError` → 콘솔 경고 + 해당 턴 proxy 로 폴백 (학생에게 raw 에러 미노출) | U + E |
+| REQ-M6 | 게이트웨이 라우팅 + env 보존 | `buildSdkGatewayEnv`: process.env 스프레드(PATH/HOME 보존) 위에 SDK 인식 변수만 설정 — `ANTHROPIC_BASE_URL` 은 `proxyUrl` 설정에서 **파생**(`/v1` 접미사 제거 — SDK 가 `/v1/messages` 를 스스로 붙임), `ANTHROPIC_AUTH_TOKEN` = workshop 토큰 (커스텀 이름 금지) | U (`test/sdk-gateway`) |
+| REQ-M7 | SDK 미가용 시 proxy fallback | 패키지 로드 실패(패키징 빌드 등 node_modules 부재) → `SdkUnavailableError` → 콘솔 경고 + 해당 턴 proxy 로 폴백 (학생에게 raw 에러 미노출) | U + E |
 | REQ-M8 | Abort parity | agent-sdk 경로도 stop 시 AbortError throw → streamEnd·appendHistory 건너뜀 (잘린 턴 미커밋); abort listener 는 `loadSdk()` 이전 등록 | U + E |
 | REQ-M9 | `/v1/messages` 게이트 parity | worker `POST /v1/messages` (Anthropic-native 게이트웨이) 는 `/v1/chat/completions` 와 동일 게이트 공유 (`lib/chat-gate.ts`): 토큰 verify · issuer 거부 · revocation · session window · roster · cohort pause · signingSecretGuard | R (`worker/test/messages-integration.test.mjs`, `route-order.test.mjs`) |
 | REQ-M10 | 서버측 system prompt 강제 | `/v1/messages` 는 클라이언트 `system` 을 병합 없이 폐기하고 cohort 프로필 블록으로 교체 (`buildAnthropicSystemBlocks` — `/v1/chat` 과 byte-identical, prompt-cache 마커 유지). classroom key 는 worker 밖으로 안 나감 (upstream 은 `x-api-key`, 학생 토큰 미전달) | R (`worker/test/messages-integration.test.mjs`) |
 | REQ-M11 | 모델 정책 clamp | `/v1/messages` 요청 모델은 프로필 catalog (default/fallback/fast alias 또는 그 id) 로 clamp; `claude-*haiku*` 는 fast 핀으로 (SDK aux 호출 비용 상향 방지); 그 외는 프로필 default 강제 | R (`worker/test/messages-integration.test.mjs`) |
 | REQ-M12 | Anthropic-native passthrough + 계량 | 응답은 원형 그대로 (non-stream JSON verbatim; stream 은 Anthropic SSE verbatim — OpenAI chunk/[DONE]/asset_score 미주입) + usage tap 으로 `usage_log`/`turns` 를 chat 과 동일 스키마로 기록; upstream 에러·stream 중단은 #257 규율 (request_id 만 노출) | R (`worker/test/messages-integration.test.mjs`) |
+| REQ-M13 | 로컬 API key 불요·불허 | agent-sdk 경로의 유일한 자격증명은 workshop 토큰. `buildSdkGatewayEnv` 가 ambient `ANTHROPIC_API_KEY`(AUTH_TOKEN 보다 우선순위 높음)·`CLAUDE_CODE_USE_BEDROCK`·`CLAUDE_CODE_USE_VERTEX` 를 스크럽 — 개발 머신의 키/프로바이더 스위치가 게이트웨이를 우회할 수 없다. classroom Anthropic key 는 worker 밖으로 안 나감 | U (`test/sdk-gateway`) |
+| REQ-M14 | 런타임 플래그 기본값 고정 | `hypeproofChat.coachRuntime` default 는 `"proxy"` — Phase-3 전환은 Jay-gated 별도 결정 (스모크가 package.json 기본값을 잠금) | U (`test/sdk-gateway`) |
 
 ---
 

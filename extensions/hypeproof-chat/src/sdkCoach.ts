@@ -5,13 +5,18 @@
 //
 // Side effects are injected as callbacks (onDelta / onCitations / onAssetScore /
 // requestApproval) — this module stays `vscode`-free and testable, same split
-// as proxyClient. The SDK is loaded via a dynamic import so this file compiles
-// and ships even before the dependency is installed; when it's absent this
-// throws SdkUnavailableError so the caller can fall back to the proxy path
-// instead of surfacing a raw error to the student.
+// as proxyClient. `@anthropic-ai/claude-agent-sdk` is a real dependency as of
+// Phase 1 (#282); it is still loaded via a variable-specifier dynamic import
+// (never bundled by esbuild — the SDK spawns a native `claude` binary from its
+// platform package, which must resolve from node_modules at runtime). In a
+// packaged build without node_modules the import fails and this throws
+// SdkUnavailableError so the caller falls back to the proxy path instead of
+// surfacing a raw error to the student (REQ-M7).
 
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { AssetScoreChunk, Citation, ResolvedProfile } from "./protocol";
 import {
+  buildSdkQueryOptions,
   profileToAgentOptions,
   sdkToolToActionRequest,
   type CoachToolAction,
@@ -33,80 +38,75 @@ export class SdkUnavailableError extends Error {
 }
 
 export interface SdkCoachArgs {
-  /** Worker gateway base, exposed to the SDK as ANTHROPIC_BASE_URL. */
+  /**
+   * The extension's proxyUrl setting (OpenAI-compat base ending in /v1).
+   * ANTHROPIC_BASE_URL is DERIVED from it (the /v1 suffix stripped — the SDK
+   * appends /v1/messages itself); see buildSdkGatewayEnv.
+   */
   gatewayUrl: string;
   token: string;
   model: string;
   profile: ResolvedProfile;
-  /** Cohort system prompt text (tuned Korean coaching script). */
+  /**
+   * Client-side system prompt for the SDK loop. The worker gateway DROPS the
+   * client `system` field and injects the cohort profile blocks server-side
+   * (REQ-M10, #316), so what the model sees is always the tuned Korean cohort
+   * prompt regardless of this value. Kept in the contract for local-dev runs
+   * against a non-gateway upstream.
+   */
   systemPrompt: string;
   history: { role: string; content: string }[];
   userText: string;
   signal: AbortSignal;
+  /** Workspace root for the SDK's file tools (Phase-2 tiers). */
+  cwd?: string;
   onDelta: (delta: string) => void;
   onCitations: (citations: Citation[]) => void;
   onAssetScore: (score: AssetScoreChunk) => void;
   /** Manual-approve gate. Resolves true to allow the tool. */
   requestApproval: (action: CoachToolAction) => Promise<boolean>;
+  /** Test seam: inject a fake SDK module instead of importing the real one. */
+  sdk?: AgentSdkModule;
 }
 
 /** npm package that provides the SDK once wired (Phase 1). */
 const SDK_PACKAGE = "@anthropic-ai/claude-agent-sdk";
 
 /**
- * Minimal shape we rely on from the Agent SDK. Documentation-only: the real
- * types come from the package once it is a dependency. Kept here so the mapping
- * is explicit and Phase 1 is a small step.
+ * The seam this module (and its tests) depend on from the Agent SDK. `Options`
+ * is the REAL SDK type (type-only import — erased at build time), so the
+ * option mapping below is checked against the actual package contract while
+ * tests can still inject a fake module. The real `query()` returns a `Query`
+ * (an AsyncGenerator with extra control methods); we only consume it as an
+ * AsyncIterable of loosely-typed messages.
  */
-interface AgentSdkModule {
+export interface AgentSdkModule {
   query(input: {
     prompt: string | AsyncIterable<unknown>;
-    options: {
-      systemPrompt: string;
-      model: string;
-      /**
-       * Tools auto-approved WITHOUT hitting canUseTool. We keep this EMPTY on
-       * purpose — every tool must fall through to canUseTool so the host modal
-       * gates it. (A bare entry like "Read" would silently bypass the gate.)
-       */
-      allowedTools: string[];
-      /**
-       * Filesystem setting sources the SDK reads allow/deny rules from. Pinned
-       * to [] so a workspace `.claude/settings.json` in a classroom checkout
-       * can't inject allow-rules that bypass canUseTool.
-       */
-      settingSources: string[];
-      permissionMode: string;
-      maxTurns: number;
-      /**
-       * Environment for the spawned CLI. The SDK REPLACES the subprocess env
-       * with this (it does not merge), so we spread process.env to keep PATH
-       * etc., and route model calls through our worker via the SDK-recognized
-       * ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN (custom names do nothing).
-       */
-      env?: Record<string, string | undefined>;
-      canUseTool?: (
-        name: string,
-        input: unknown,
-      ) => Promise<{ behavior: "allow" | "deny"; updatedInput?: unknown }>;
-      abortController?: AbortController;
-    };
+    options?: Options;
   }): AsyncIterable<Record<string, unknown>>;
 }
 
 async function loadSdk(): Promise<AgentSdkModule> {
   try {
-    // Variable specifier → TS treats the import as `any`, so this file
-    // typechecks and bundles without the dependency present yet.
+    // Variable specifier → esbuild leaves this as a true runtime dynamic
+    // import() (never inlined into dist/extension.js). That matters twice:
+    // the SDK is ESM-only and spawns a ~240 MB native `claude` binary from
+    // its platform package (@anthropic-ai/claude-agent-sdk-<platform>), both
+    // of which must resolve from node_modules at runtime, not from a bundle.
     const spec: string = SDK_PACKAGE;
-    const mod = (await import(spec)) as unknown as AgentSdkModule;
+    const mod = (await import(spec)) as AgentSdkModule;
+    if (typeof mod.query !== "function") {
+      throw new Error(`${SDK_PACKAGE} loaded but does not export query()`);
+    }
     return mod;
   } catch (err) {
+    if (err instanceof SdkUnavailableError) throw err;
     // Keep the technical detail for developers (console), NOT for the student.
     console.warn(`[coach] failed to load ${SDK_PACKAGE}:`, err);
     throw new SdkUnavailableError(
-      `agent-sdk runtime selected but ${SDK_PACKAGE} is not installed. ` +
-        `Falling back to the proxy runtime (Phase-0 spike, #282).`,
+      `agent-sdk runtime selected but ${SDK_PACKAGE} could not be loaded ` +
+        `(packaged build without node_modules?). Falling back to the proxy runtime (#282).`,
     );
   }
 }
@@ -134,43 +134,46 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   const abortController = new AbortController();
   args.signal.addEventListener("abort", () => abortController.abort(), { once: true });
 
-  const sdk = await loadSdk();
+  const sdk = args.sdk ?? (await loadSdk());
   const opts = profileToAgentOptions(args.profile, {
     model: args.model,
     systemPrompt: args.systemPrompt,
   });
 
-  // Compose the transcript into a single prompt string for the spike. Phase 1
+  // Compose the transcript into a single prompt string for now. A follow-up
   // switches to the SDK streaming-input session API to preserve real history.
   const transcript = args.history.map((m) => `${m.role}: ${m.content}`).join("\n");
   const prompt = transcript ? `${transcript}\nuser: ${args.userText}` : args.userText;
 
-  const stream = sdk.query({
-    prompt,
-    options: {
-      systemPrompt: opts.systemPrompt,
-      model: opts.model,
-      allowedTools: [],
-      settingSources: [],
-      permissionMode: opts.permissionMode,
-      maxTurns: opts.maxTurns,
-      env: {
-        ...process.env,
-        ANTHROPIC_BASE_URL: args.gatewayUrl,
-        ANTHROPIC_AUTH_TOKEN: args.token,
-      },
-      // Every tool call routes here (allowedTools is empty). First enforce the
-      // cohort's permitted set, then gate the survivors through the host modal.
-      canUseTool: async (name: string, input: unknown) => {
-        if (!opts.permittedTools.includes(name)) {
-          return { behavior: "deny" as const };
-        }
-        const ok = await args.requestApproval({ toolName: name, input });
-        return ok ? { behavior: "allow" as const, updatedInput: input } : { behavior: "deny" as const };
-      },
-      abortController,
+  // Pure option/env construction (allowedTools/settingSources pinned to [],
+  // ANTHROPIC_BASE_URL derived from proxyUrl, ANTHROPIC_API_KEY scrubbed) is
+  // locked by unit tests via buildSdkQueryOptions (REQ-M5/M6/M13); the two
+  // host-bound fields are attached here. `Options` is the REAL SDK type.
+  const options: Options = {
+    ...buildSdkQueryOptions(opts, {
+      proxyUrl: args.gatewayUrl,
+      token: args.token,
+      cwd: args.cwd,
+      baseEnv: process.env,
+    }),
+    // Every tool call routes here (allowedTools is empty). First enforce the
+    // cohort's permitted set, then gate the survivors through the host modal.
+    canUseTool: async (name, input) => {
+      if (!opts.permittedTools.includes(name)) {
+        return {
+          behavior: "deny" as const,
+          message: "이 도구는 지금 수업에서는 사용할 수 없어요.",
+        };
+      }
+      const ok = await args.requestApproval({ toolName: name, input });
+      return ok
+        ? { behavior: "allow" as const, updatedInput: input }
+        : { behavior: "deny" as const, message: "사용자가 이 작업을 허용하지 않았어요." };
     },
-  });
+    abortController,
+  };
+
+  const stream = sdk.query({ prompt, options });
 
   // Map SDK messages → the proxyChat callback shape. Field access is defensive
   // (Record<string,unknown>) until the real SDK types land in Phase 1.
