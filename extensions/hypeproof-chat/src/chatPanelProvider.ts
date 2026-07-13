@@ -7,6 +7,8 @@ import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./
 import { runSdkCoach, SdkUnavailableError } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
+import { LiveServer } from "./liveServer";
+import { BrowserControl } from "./browserControl";
 import {
   ChatMessage,
   CoachInfo,
@@ -33,6 +35,7 @@ import {
   coachRitualDoneKeyForCohort,
   stateBucketId,
   extractCohortIdUnverified,
+  browserToolLogLine,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
@@ -45,6 +48,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // #278 — browser-page context queued by "페이지를 코치에게", prepended to the
   // NEXT turn's prompt only (history keeps the user's clean text).
   private pendingPageContext: string | null = null;
+  // #278 Phase 2 — screenshot of the current browser page (data: URL), sent as
+  // an image with the NEXT turn so the coach can *see* the page. image_paste-
+  // gated; consumed once, like pendingPageContext.
+  private pendingPageImage: string | null = null;
   private activeCohortId: string | null = null;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
@@ -54,6 +61,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly preview: PreviewProvider,
+    private readonly liveServer: LiveServer,
     private readonly assetScores?: AssetScoreSink,
   ) {}
 
@@ -79,13 +87,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return this.cachedProfile?.input?.page_context === true;
   }
 
-  /** #278 — stash captured browser-page context to prepend to the next turn. */
-  attachPageContext(ctx: { url: string; title: string; text: string }): void {
+  /** #278 Phase 2 — may we attach a page screenshot (image)? Worker enforces the same gate. */
+  isImagePasteEnabled(): boolean {
+    return this.cachedProfile?.input?.image_paste === true;
+  }
+
+  /**
+   * #278 — stash captured browser-page context for the NEXT turn. The DOM text
+   * is prepended to the prompt; the screenshot (if present, and if this cohort
+   * has image_paste) rides along as an image so the coach can *see* the page
+   * too. History keeps the user's clean text.
+   */
+  attachPageContext(ctx: { url: string; title: string; text: string; imageBase64?: string }): void {
     const body = ctx.text.trim().slice(0, 3000);
     this.pendingPageContext =
       `[현재 브라우저 페이지]\nURL: ${ctx.url}\n제목: ${ctx.title}\n` +
       `--- 페이지 내용(일부) ---\n${body}\n---\n` +
       `위 페이지를 참고해서 답해줘.`;
+    // capturePageContext returns raw JPEG base64 (no data: prefix). Only attach
+    // when the cohort allows images — otherwise the worker would drop it anyway.
+    this.pendingPageImage =
+      ctx.imageBase64 && this.isImagePasteEnabled()
+        ? `data:image/jpeg;base64,${ctx.imageBase64}`
+        : null;
   }
 
   /**
@@ -270,6 +294,51 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  /** #278 Phase 1 — does this cohort's profile request the native live-server preview? */
+  private isLiveServerPreview(): boolean {
+    return this.cachedProfile?.preview?.type === "live_server";
+  }
+
+  /**
+   * Reveal a freshly-built page. Always persists it to the workspace root
+   * (index.html, GitHub-Pages-ready). Then either:
+   *  - live_server cohorts (#278): serve the workspace root over
+   *    http://127.0.0.1 and open/refresh the native integrated browser — real
+   *    origin, so multi-file, same-origin fetch, storage, and page navigation
+   *    all work; or
+   *  - default: the sandboxed iframe PreviewProvider (existing behavior).
+   * Public so extension.ts (runLastCode) shares the same routing.
+   */
+  async revealBuilt(html: string): Promise<void> {
+    await this.saveGameToWorkspace(html);
+    if (this.isLiveServerPreview() && (await this.openInLiveServer())) return;
+    void this.preview.show(html);
+  }
+
+  /**
+   * Ensure the live server is up for the workspace root and open (or refresh)
+   * the native browser at its URL. Returns false on any failure so the caller
+   * falls back to the iframe preview.
+   */
+  private async openInLiveServer(): Promise<boolean> {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) return false;
+    try {
+      const url = await this.liveServer.ensure(root);
+      // Avoid stacking tabs: if a tab already shows this server, it refreshes
+      // itself via the injected live-reload SSE; otherwise open a new one.
+      const already = (vscode.window.browserTabs ?? []).some((t) => t.url?.startsWith(url));
+      if (already) {
+        this.liveServer.reload();
+      } else {
+        await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   /** Persist coach info chosen via the in-panel naming card. */
   private async saveCoachFromWebview(name: string, personality: string): Promise<void> {
     const profile = await this.ensureProfile();
@@ -328,7 +397,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         void this.clearHistory();
         return;
       case "runCode":
-        void this.preview.show(msg.html);
+        void this.revealBuilt(msg.html);
         return;
       case "previewReady":
         return;
@@ -382,8 +451,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           { id: randomId(), role: "user", content: text, createdAt: Date.now() },
           { id: aid, role: "assistant", content: reply, createdAt: Date.now() },
         ]);
-        void this.preview.show(lastGame);
-        void this.saveGameToWorkspace(lastGame);
+        void this.revealBuilt(lastGame);
         return;
       }
       // No game yet → fall through to the AI, which will guide them to make one.
@@ -406,6 +474,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const pageContext = this.pendingPageContext;
     this.pendingPageContext = null;
     const userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
+    // #278 Phase 2 — fold any queued page screenshot into this turn's images.
+    const pageImage = this.pendingPageImage;
+    this.pendingPageImage = null;
+    const effectiveImages = pageImage ? [...(images ?? []), pageImage] : images;
 
     const streamId = randomId();
     const messageId = randomId();
@@ -425,8 +497,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const html = extractRenderableHtml(text);
       if (!html) return;
       revealed = true;
-      void this.preview.show(html);
-      void this.saveGameToWorkspace(html);
+      void this.revealBuilt(html);
     };
     // #173 — accumulate citations across the stream so they persist to history.
     const assistantCitations: import("./protocol").Citation[] = [];
@@ -457,7 +528,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           token,
           history,
           userText: userTextForModel,
-          images,
+          images: effectiveImages,
           signal: ctrl.signal,
           coachName: effectiveCoachName,
           coachPersonality: effectiveCoachPersonality,
@@ -503,6 +574,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           revealed = false;
           await runProxy();
         }
+      } else if (this.cachedProfile?.browser_control?.enabled) {
+        // #278 Phase 3 — client-driven agentic browser loop for opted-in cohorts.
+        await this.runBrowserLoop({
+          proxyUrl,
+          model,
+          token,
+          history,
+          userText: userTextForModel,
+          images: effectiveImages,
+          signal: ctrl.signal,
+          streamId,
+          coachName: effectiveCoachName,
+          coachPersonality: effectiveCoachPersonality,
+          onDelta,
+          onCitations,
+        });
       } else {
         await runProxy();
       }
@@ -529,6 +616,92 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       await this.handleSendError(err, streamId);
     } finally {
       this.activeStreams.delete(streamId);
+    }
+  }
+
+  /**
+   * #278 Phase 3 — client-driven agentic browser loop. Streams a turn; if the
+   * coach emitted tool_use blocks, runs each via the CDP executor, posts an
+   * action-log line (auto-run + log, no modal), appends the tool_use +
+   * tool_result as EPHEMERAL scratch turns, and re-invokes — until the coach
+   * stops calling tools (or the per-cohort iteration cap). Text streams through
+   * `onDelta` (accumulated into the caller's assistant message + history);
+   * scratch turns never touch persisted history. Asset score is recorded from
+   * the terminal (non-tool) turn only.
+   */
+  private async runBrowserLoop(p: {
+    proxyUrl: string;
+    model: string;
+    token: string | undefined;
+    history: ChatMessage[];
+    userText: string;
+    images?: string[];
+    signal: AbortSignal;
+    streamId: string;
+    coachName: string;
+    coachPersonality: string;
+    onDelta: (delta: string) => void;
+    onCitations: (cites: import("./protocol").Citation[]) => void;
+  }): Promise<void> {
+    const browser = new BrowserControl();
+    const maxIter = this.cachedProfile?.browser_control?.max_iterations ?? 8;
+    const scratch: Array<{ role: "user" | "assistant"; content: unknown }> = [];
+    let lastAssetScore: import("./protocol").AssetScoreChunk | null = null;
+    try {
+      for (let iter = 0; ; iter++) {
+        if (p.signal.aborted) return;
+        const result = await proxyChat({
+          proxyUrl: p.proxyUrl,
+          model: p.model,
+          token: p.token,
+          history: p.history,
+          userText: p.userText,
+          images: p.images,
+          toolTurns: scratch,
+          signal: p.signal,
+          coachName: p.coachName,
+          coachPersonality: p.coachPersonality,
+          onDelta: p.onDelta,
+          onCitations: p.onCitations,
+          onAssetScore: (s) => {
+            lastAssetScore = s; // buffer; only the terminal turn is recorded
+          },
+        });
+        if (result.toolUses.length === 0) break; // terminal turn → done
+        if (iter >= maxIter) {
+          p.onDelta("\n\n_(브라우저 작업을 여기서 멈췄어요.)_");
+          break;
+        }
+        // Assistant tool_use turn (its text + tool_use blocks) — scratch only.
+        const asstContent: unknown[] = [];
+        if (result.text) asstContent.push({ type: "text", text: result.text });
+        for (const b of result.toolUses) {
+          asstContent.push({ type: "tool_use", id: b.id, name: b.name, input: b.input });
+        }
+        scratch.push({ role: "assistant", content: asstContent });
+        // Run each tool → action log + tool_result (executor never throws).
+        const toolResults: unknown[] = [];
+        for (const call of result.toolUses) {
+          if (p.signal.aborted) return;
+          const line = browserToolLogLine(call.name, call.input);
+          void this.post({ type: "toolLog", streamId: p.streamId, id: call.id, ...line, state: "running" });
+          const tr = await browser.execute(call);
+          void this.post({ type: "toolLog", streamId: p.streamId, id: call.id, ...line, state: tr.isError ? "error" : "done" });
+          toolResults.push({
+            type: "tool_result",
+            tool_use_id: call.id,
+            content: tr.content,
+            ...(tr.isError ? { is_error: true } : {}),
+          });
+        }
+        scratch.push({ role: "user", content: toolResults });
+      }
+      if (lastAssetScore) {
+        this.assetScores?.recordAssetScore(lastAssetScore);
+        void this.post({ type: "streamAssetScore", streamId: p.streamId, assetScore: lastAssetScore });
+      }
+    } finally {
+      await browser.dispose();
     }
   }
 

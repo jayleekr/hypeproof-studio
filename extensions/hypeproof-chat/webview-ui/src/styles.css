@@ -651,3 +651,43 @@ html, body, #root {
   border: 1px solid rgba(255,255,255,0.15);
 }
 .hps-update-banner-dismiss:hover { background: rgba(255,255,255,0.06); }
+
+/* #278 Phase 3 — browser tool action log (auto-run + log, no modal). */
+.hps-tool-log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--vscode-focusBorder, #4a9);
+  background: var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.08));
+  border-radius: 4px;
+  font-size: 12px;
+}
+.hps-tool-log-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hps-tool-icon {
+  flex: 0 0 auto;
+}
+.hps-tool-label {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hps-tool-mark {
+  flex: 0 0 auto;
+  opacity: 0.8;
+}
+.hps-tool-running {
+  opacity: 0.65;
+}
+.hps-tool-error {
+  color: var(--vscode-errorForeground, #e55);
+}
+.hps-tool-done .hps-tool-mark {
+  color: var(--vscode-charts-green, #4a4);
+}

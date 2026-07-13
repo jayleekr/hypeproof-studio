@@ -102,6 +102,8 @@ export interface ResolvedProfile {
   preview: { type: "iframe" | "live_server"; auto_start: boolean };
   /** Optional input capabilities (default off). #278 / website-copyclone. */
   input?: { page_context?: boolean; image_paste?: boolean };
+  /** #278 Phase 3 — coach's client-driven browser control loop (default off). */
+  browser_control?: { enabled: boolean; max_iterations?: number };
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
   // #282 — provider-hosted tools the cohort profile opted into (sourced from the
@@ -195,6 +197,9 @@ export type HostMessage =
   | { type: "streamCitations"; streamId: string; citations: Citation[] }  // #173
   | { type: "streamAssetScore"; streamId: string; assetScore: AssetScoreChunk }  // #204
   | { type: "streamEnd"; streamId: string }
+  // #278 Phase 3 — agentic browser tool loop action log (auto-run + log, no
+  // modal). One line per tool call; `state` flips running → done/error.
+  | { type: "toolLog"; streamId: string; id: string; icon: string; label: string; state: "running" | "done" | "error" }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string }

@@ -9,6 +9,11 @@ import type { LLMProvider } from "../env.ts";
 import { getSkeletonsForTier } from "../skeletons/index.ts";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import previewEnvContractMd from "../prompts/_preview-env-contract.md";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import previewEnvContractLiveServerMd from "../prompts/_preview-env-contract-live-server.md";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import browserControlContractMd from "../prompts/_browser-control-contract.md";
+import { BROWSER_TOOLS } from "./browser-tools.ts";
 import { resolveSkills } from "../skills/index.ts";
 
 // A polished single-file game (gradient bg, 3 states, score, juice) plus the
@@ -20,9 +25,17 @@ const DEFAULT_MAX_TOKENS = 8192;
 // blocks carry a data URL (pasted screenshot) or http(s) URL — the
 // website-copyclone curriculum injects a target screenshot this way.
 interface OpenAIContentBlock {
-  type: string;                  // "text" | "image_url"
+  type: string;                  // "text" | "image_url" | "tool_use" | "tool_result"
   text?: string;
   image_url?: { url: string };
+  // #278 Phase 3 — tool_use (assistant turn) / tool_result (user turn) blocks
+  // for the client-driven browser tool loop. Gated on browser_control.
+  id?: string;                   // tool_use: the tool call id
+  name?: string;                 // tool_use: the tool name
+  input?: unknown;               // tool_use: the tool arguments
+  tool_use_id?: string;          // tool_result: which tool_use it answers
+  content?: OpenAIContentBlock[]; // tool_result: nested text/image blocks
+  is_error?: boolean;            // tool_result: the tool failed
 }
 
 interface OpenAIMessage {
@@ -69,7 +82,25 @@ interface AnthropicImageBlock {
     | { type: "base64"; media_type: string; data: string }
     | { type: "url"; url: string };
 }
-type AnthropicContentBlock = AnthropicTextBlock | AnthropicImageBlock;
+// #278 Phase 3 — agentic browser tool loop blocks (client-driven). The coach
+// emits tool_use; the extension executes it via CDP and echoes a tool_result.
+interface AnthropicToolUseBlock {
+  type: "tool_use";
+  id: string;
+  name: string;
+  input: unknown;
+}
+interface AnthropicToolResultBlock {
+  type: "tool_result";
+  tool_use_id: string;
+  content: Array<AnthropicTextBlock | AnthropicImageBlock>;
+  is_error?: boolean;
+}
+type AnthropicContentBlock =
+  | AnthropicTextBlock
+  | AnthropicImageBlock
+  | AnthropicToolUseBlock
+  | AnthropicToolResultBlock;
 
 interface AnthropicMessage {
   role: "user" | "assistant";
@@ -136,7 +167,7 @@ export interface OpenAIChatRequest {
  * the website-copyclone screenshot-injection path, which the old
  * `String(content)` coercion silently destroyed.
  */
-function filterMessages(body: OpenAIRequest, allowImages: boolean): Turn[] {
+function filterMessages(body: OpenAIRequest, allowImages: boolean, allowToolBlocks: boolean): Turn[] {
   if (!Array.isArray(body.messages)) {
     throw new Error("messages must be an array");
   }
@@ -149,10 +180,13 @@ function filterMessages(body: OpenAIRequest, allowImages: boolean): Turn[] {
       continue;
     }
     if (Array.isArray(m.content)) {
-      const blocks = sanitizeContentBlocks(m.content, allowImages);
-      // No surviving image → collapse to a string (preserve legacy shape).
-      const hasImage = blocks.some((b) => b.type === "image_url");
-      if (!hasImage) {
+      const blocks = sanitizeContentBlocks(m.content, allowImages, allowToolBlocks);
+      // No image AND no tool block → collapse to a string (preserve legacy
+      // shape so text-only turns stay byte-identical + cache-stable).
+      const hasRich = blocks.some(
+        (b) => b.type === "image_url" || b.type === "tool_use" || b.type === "tool_result",
+      );
+      if (!hasRich) {
         const text = blocks.map((b) => (b.type === "text" ? b.text ?? "" : "")).join("");
         msgs.push({ role: m.role, content: text });
       } else {
@@ -175,7 +209,11 @@ function filterMessages(body: OpenAIRequest, allowImages: boolean): Turn[] {
  * ALL image blocks are dropped server-side, even if the client sent them — a
  * text-only cohort (e.g. a minor cohort) can't be coerced into an image flow.
  */
-function sanitizeContentBlocks(blocks: OpenAIContentBlock[], allowImages: boolean): OpenAIContentBlock[] {
+function sanitizeContentBlocks(
+  blocks: OpenAIContentBlock[],
+  allowImages: boolean,
+  allowToolBlocks: boolean,
+): OpenAIContentBlock[] {
   const out: OpenAIContentBlock[] = [];
   let images = 0;
   for (const b of blocks) {
@@ -189,6 +227,21 @@ function sanitizeContentBlocks(blocks: OpenAIContentBlock[], allowImages: boolea
       if (!ALLOWED_IMAGE_URL.test(url)) continue;
       out.push({ type: "image_url", image_url: { url } });
       images++;
+    } else if (allowToolBlocks && b.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
+      // Assistant turn echoed back by the client so the model has its own
+      // prior tool call in context.
+      out.push({ type: "tool_use", id: b.id, name: b.name, input: b.input ?? {} });
+    } else if (allowToolBlocks && b.type === "tool_result" && typeof b.tool_use_id === "string") {
+      // The tool's result. Its nested content is agent-generated (e.g. a
+      // screenshot the coach requested), so images are allowed here regardless
+      // of image_paste — the browser_control gate governs it.
+      const inner = Array.isArray(b.content) ? sanitizeContentBlocks(b.content, true, false) : [];
+      out.push({
+        type: "tool_result",
+        tool_use_id: b.tool_use_id,
+        content: inner,
+        ...(b.is_error === true ? { is_error: true } : {}),
+      });
     }
   }
   return out;
@@ -204,6 +257,24 @@ function toAnthropicContent(content: string | OpenAIContentBlock[]): string | An
     } else if (b.type === "image_url" && b.image_url?.url) {
       const img = imageUrlToAnthropicImage(b.image_url.url);
       if (img) out.push(img);
+    } else if (b.type === "tool_use" && typeof b.id === "string" && typeof b.name === "string") {
+      out.push({ type: "tool_use", id: b.id, name: b.name, input: b.input ?? {} });
+    } else if (b.type === "tool_result" && typeof b.tool_use_id === "string") {
+      const inner: Array<AnthropicTextBlock | AnthropicImageBlock> = [];
+      for (const ib of Array.isArray(b.content) ? b.content : []) {
+        if (ib.type === "text" && typeof ib.text === "string") {
+          inner.push({ type: "text", text: ib.text });
+        } else if (ib.type === "image_url" && ib.image_url?.url) {
+          const img = imageUrlToAnthropicImage(ib.image_url.url);
+          if (img) inner.push(img);
+        }
+      }
+      out.push({
+        type: "tool_result",
+        tool_use_id: b.tool_use_id,
+        content: inner,
+        ...(b.is_error === true ? { is_error: true } : {}),
+      });
     }
   }
   // An all-dropped array would be an invalid empty content — fall back to "".
@@ -242,9 +313,25 @@ function imageUrlToAnthropicImage(url: string): AnthropicImageBlock | null {
  */
 function buildCachedPrefix(profile: Profile): string {
   const skillsMd = resolveSkills(profile.skills);
+  // #278 Phase 1 — live_server cohorts get a relaxed contract: a real
+  // http://127.0.0.1 origin (native browser), so multi-file / relative paths /
+  // same-origin fetch / storage / navigation are all allowed. The default
+  // iframe contract (single-file, no external, base64-inline) would fight a
+  // multi-file homepage.
+  const previewContract =
+    profile.preview?.type === "live_server"
+      ? (previewEnvContractLiveServerMd as unknown as string)
+      : (previewEnvContractMd as unknown as string);
+  // #278 Phase 3 — teach the coach the browser tools + discipline, only for
+  // cohorts that opted into browser_control.
+  const browserContract =
+    profile.browser_control?.enabled === true
+      ? (browserControlContractMd as unknown as string)
+      : "";
   const sections = [
     profile.system_prompt,
-    previewEnvContractMd as unknown as string,
+    previewContract,
+    browserContract,
     skillsMd,
     buildSkeletonLibrary(profile),
   ].filter((s) => s && s.length > 0);
@@ -256,7 +343,11 @@ export function translate(
   profile: Profile,
   coach: CoachContext = {},
 ): AnthropicRequest {
-  const msgs: AnthropicMessage[] = filterMessages(body, profile.input?.image_paste === true).map((t) => ({
+  const msgs: AnthropicMessage[] = filterMessages(
+    body,
+    profile.input?.image_paste === true,
+    profile.browser_control?.enabled === true,
+  ).map((t) => ({
     role: t.role,
     content: toAnthropicContent(t.content),
   }));
@@ -277,7 +368,7 @@ export function translate(
   const out: AnthropicRequest = {
     model,
     messages: msgs,
-    max_tokens: clampInt(body.max_tokens, 1, 16384, DEFAULT_MAX_TOKENS),
+    max_tokens: clampInt(body.max_tokens, 1, 16384, profile.model.max_tokens ?? DEFAULT_MAX_TOKENS),
     system: systemBlocks,
   };
 
@@ -303,6 +394,15 @@ export function translate(
       name: "web_search",
       max_uses: maxUses,
     });
+  }
+
+  // #278 Phase 3 — worker-defined browser control tools (client-driven loop).
+  // Static per cohort → cache with the other function tools. Only injected when
+  // the profile opts in; the extension host executes them via CDP.
+  if (profile.browser_control?.enabled === true) {
+    for (const t of BROWSER_TOOLS) {
+      tools.push({ name: t.name, description: t.description, input_schema: t.input_schema });
+    }
   }
 
   if (Array.isArray(body.tools) && body.tools.length > 0 && profile.sandbox.mcp_tools_enabled.length > 0) {
@@ -355,7 +455,9 @@ export function translateOpenAI(
   coach: CoachContext = {},
   provider: LLMProvider = "gemini",
 ): OpenAIChatRequest {
-  const turns = filterMessages(body, profile.input?.image_paste === true);
+  // The agentic browser tool loop is Anthropic-only (v1); the Gemini/OpenAI
+  // path never carries tool blocks.
+  const turns = filterMessages(body, profile.input?.image_paste === true, false);
 
   let systemText = buildCachedPrefix(profile);
   const coachTail = buildCoachTail(coach);
@@ -364,7 +466,7 @@ export function translateOpenAI(
   const out: OpenAIChatRequest = {
     model: modelIdFor(resolveAlias(body.model, profile), provider),
     messages: [{ role: "system", content: systemText }, ...turns],
-    max_tokens: clampInt(body.max_tokens, 1, 16384, DEFAULT_MAX_TOKENS),
+    max_tokens: clampInt(body.max_tokens, 1, 16384, profile.model.max_tokens ?? DEFAULT_MAX_TOKENS),
   };
 
   if (typeof body.temperature === "number") {

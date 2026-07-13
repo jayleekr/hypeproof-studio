@@ -221,3 +221,20 @@ Major version bump is reserved for a deliberate restructuring of the doc itself 
 - [.claude/rules/build-pipeline.md](../.claude/rules/build-pipeline.md) — build + post-build branding verification
 - [tests/rehearsal/README.md](../tests/rehearsal/README.md) — R1–R6 rehearsal categories
 - [e2e/README.md](../e2e/README.md) — Playwright Electron e2e
+
+## N. Native browser + agentic control (#278)
+
+Phase 0–3 (통합 브랜치 `feat/boah-homepage-browser`). "실기계"는 디스플레이 있는 풀빌드/
+dev-host 검증(자동화 셸 불가). REQ-D3(iframe 샌드박싱)은 live_server 코호트엔 REQ-N1이 대체.
+**대상 코호트: 원장 website-copyclone(`boah-dental-director-copyclone-2026-s1`, cohort
+`boah-dental-2026-a`, tier `website`)** — PR #309 리뷰로 별도 homepage 코호트 대신 이 트랙에 통합.
+
+| ID | 요구 | 설명 | 테스트 |
+|---|---|---|---|
+| REQ-N1 | live_server 프리뷰 | `preview.type:"live_server"` 코호트는 iframe 대신 워크스페이스를 127.0.0.1로 서빙해 네이티브 브라우저로 열고, 저장 시 SSE로 자동 새로고침. path-traversal 거부 | U(liveServerHelpers) + 실기계 |
+| REQ-N2 | live_server 계약 완화 | live_server 코호트는 멀티파일·상대경로·same-origin fetch·스토리지 허용 계약을 받음(iframe 단일파일 계약 아님) | U(translate 분기) |
+| REQ-N3 | 페이지→코치(vision) | page_context+image_paste 코호트에서 "페이지를 코치에게"가 현재 탭 스크린샷+DOM을 코치에 전달. 미성년 코호트는 반드시 off | U(worker gate) + 실기계 |
+| REQ-N4 | 브라우저 tool 게이팅 | `browser_control` 켜진 코호트만 worker가 8개 브라우저 도구 + 사용 규약을 주입. 꺼지면 tool_use/tool_result 블록도 drop | U(translate) |
+| REQ-N5 | CDP 실행기 핸드셰이크 | 실행기는 `Target.attachToTarget({flatten})` 후 sessionId로 모든 페이지 명령 라우팅(스파이크 확정). navigate URL은 스킴 화이트리스트(http/https/localhost/file) | U(cdpSession, browserControlHelpers) + 실기계 |
+| REQ-N6 | 자동실행 + 액션로그 | 코치의 브라우저 액션은 모달 없이 자동 실행되고, 채팅에 액션 로그(running→done/error)로 표시. tool 루프 scratch 턴은 영속 히스토리 미오염 | U + 실기계 |
+| REQ-N7 | 루프 안전 | agentic 루프는 per-cohort `max_iterations` 캡 + abort 준수. asset_score는 최종(비-tool) 턴만 기록 | U |

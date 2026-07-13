@@ -88,6 +88,21 @@ function classifyError(status: number, bodyText: string): ProxyAuthError | null 
   return null;
 }
 
+/** #278 Phase 3 — a tool_use block the coach emitted (from an hps_tool_use chunk). */
+export interface ToolUseBlock {
+  id: string;
+  name: string;
+  input: Record<string, unknown>;
+}
+
+/** #278 Phase 3 — what one streamed turn produced, so the loop can decide to run
+ *  tools + continue (toolUses non-empty) or finish. */
+export interface ProxyChatResult {
+  finishReason: string | null;
+  toolUses: ToolUseBlock[];
+  text: string;
+}
+
 interface ProxyChatArgs {
   proxyUrl: string;
   model: string;
@@ -100,19 +115,29 @@ interface ProxyChatArgs {
    * below, so a screenshot is injected to the model exactly once.
    */
   images?: string[];
+  /**
+   * #278 Phase 3 — scratch turns for the agentic browser loop: the assistant's
+   * prior tool_use turn(s) + the user's tool_result turn(s), Anthropic-shaped
+   * content blocks. Appended AFTER the current user turn so the model has its
+   * own tool calls + results in context on re-invocation. Ephemeral (never
+   * persisted to history).
+   */
+  toolTurns?: Array<{ role: "user" | "assistant"; content: unknown }>;
   signal: AbortSignal;
   onDelta: (delta: string) => void;
   /** #173 — fires for each citations chunk in the SSE stream. */
   onCitations?: (citations: Citation[]) => void;
   /** #204 — fires when the worker emits the final 7-asset score chunk. */
   onAssetScore?: (assetScore: AssetScoreChunk) => void;
+  /** #278 Phase 3 — fires per streamed tool_use block (browser control loop). */
+  onToolUse?: (block: ToolUseBlock) => void;
   coachName?: string;
   coachPersonality?: string;
 }
 
 // Streaming OpenAI-compatible chat completion call against the HypeProof Proxy.
 // Expects SSE-style `data: {json}\n\n` chunks.
-export async function proxyChat(args: ProxyChatArgs): Promise<void> {
+export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
   const {
     proxyUrl,
     model,
@@ -120,10 +145,12 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
     history,
     userText,
     images,
+    toolTurns,
     signal,
     onDelta,
     onCitations,
     onAssetScore,
+    onToolUse,
     coachName,
     coachPersonality,
   } = args;
@@ -142,6 +169,8 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
   const messages = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: userContent },
+    // #278 Phase 3 — the loop's scratch tool_use/tool_result turns (if any).
+    ...(toolTurns ?? []),
   ];
 
   const url = proxyUrl.replace(/\/$/, "") + "/chat/completions";
@@ -174,6 +203,12 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
   const decoder = new TextDecoder();
   let buffer = "";
 
+  // #278 Phase 3 — accumulate what this turn produced for the loop caller.
+  let text = "";
+  let finishReason: string | null = null;
+  const toolUses: ToolUseBlock[] = [];
+  const result = (): ProxyChatResult => ({ finishReason, toolUses, text });
+
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
@@ -185,26 +220,43 @@ export async function proxyChat(args: ProxyChatArgs): Promise<void> {
       buffer = buffer.slice(nl + 1);
       if (!line.startsWith("data:")) continue;
       const data = line.slice(5).trim();
-      if (data === "[DONE]") return;
+      if (data === "[DONE]") return result();
       try {
         const j = JSON.parse(data);
         if (j?.type === "asset_score" && isAssetScoreChunk(j) && onAssetScore) {
           onAssetScore(j);
           continue;
         }
-        const choice = j?.choices?.[0]?.delta;
+        const c0 = j?.choices?.[0];
+        const choice = c0?.delta;
         const delta = choice?.content;
-        if (typeof delta === "string" && delta.length) onDelta(delta);
+        if (typeof delta === "string" && delta.length) {
+          onDelta(delta);
+          text += delta;
+        }
         // #173 — citations chunk
         const cites = choice?.hps_citations;
         if (Array.isArray(cites) && cites.length > 0 && onCitations) {
           onCitations(cites as Citation[]);
         }
+        // #278 Phase 3 — tool_use chunk (browser control loop).
+        const tu = choice?.hps_tool_use;
+        if (tu && typeof tu.id === "string" && typeof tu.name === "string") {
+          const block: ToolUseBlock = {
+            id: tu.id,
+            name: tu.name,
+            input: (tu.input ?? {}) as Record<string, unknown>,
+          };
+          toolUses.push(block);
+          onToolUse?.(block);
+        }
+        if (typeof c0?.finish_reason === "string") finishReason = c0.finish_reason;
       } catch {
         // ignore malformed line
       }
     }
   }
+  return result();
 }
 
 function isAssetScoreChunk(value: unknown): value is AssetScoreChunk {
