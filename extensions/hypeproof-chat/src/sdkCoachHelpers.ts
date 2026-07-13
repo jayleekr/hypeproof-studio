@@ -10,6 +10,9 @@
 // verification_reflex / delegation_judgment assets (docs/seven-assets.md) — the
 // student decides whether to delegate each consequential action to the coach.
 
+// Type-only import — erased at build/strip time, so this file stays a leaf
+// module that Node can run standalone in the smoke tests.
+import type { Options as AgentSdkOptions } from "@anthropic-ai/claude-agent-sdk";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
 
 export type AgentPermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
@@ -96,6 +99,86 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
 
 export function maxTurnsFor(profile: ResolvedProfile): number {
   return isMinorTier(profile) ? 6 : 20;
+}
+
+// ── Worker gateway env construction (#282 Phase 1, REQ-M6/M13) ──────────────
+// The Agent SDK routes model calls to `${ANTHROPIC_BASE_URL}/v1/messages` and
+// authenticates with `Authorization: Bearer ${ANTHROPIC_AUTH_TOKEN}`. Our
+// worker gateway (worker/src/routes/messages.ts, #316) serves POST /v1/messages
+// and verifies the SAME workshop tokens as /v1/chat/completions — the classroom
+// Anthropic key never leaves the worker. These helpers are pure so the
+// URL-derivation and no-local-API-key invariants are unit-testable.
+
+/**
+ * Derive the SDK's ANTHROPIC_BASE_URL from the extension's proxyUrl setting.
+ * `hypeproofChat.proxyUrl` is the OpenAI-compat base ENDING IN /v1 (e.g.
+ * "https://api.hypeproof-ai.xyz/v1"); the SDK appends "/v1/messages" itself,
+ * so the /v1 suffix must be stripped or every call would hit /v1/v1/messages.
+ */
+export function anthropicBaseUrlFor(proxyUrl: string): string {
+  let url = proxyUrl.trim().replace(/\/+$/, "");
+  if (/\/v1$/i.test(url)) {
+    url = url.slice(0, -"/v1".length).replace(/\/+$/, "");
+  }
+  return url;
+}
+
+/**
+ * Build the subprocess env for the SDK. The TS SDK REPLACES the subprocess
+ * env with `options.env` (it does not merge), so the caller's base env
+ * (process.env) is spread to keep PATH/HOME, then:
+ * - ANTHROPIC_BASE_URL / ANTHROPIC_AUTH_TOKEN route auth'd calls to the worker
+ *   gateway (the workshop token IS the credential — REQ-M6);
+ * - ambient Anthropic credentials/provider switches are scrubbed so a dev
+ *   machine's ANTHROPIC_API_KEY (which outranks AUTH_TOKEN) or a Bedrock/
+ *   Vertex switch can never bypass the gateway. No local API key is ever
+ *   required or honored on this path (REQ-M13).
+ */
+export function buildSdkGatewayEnv(
+  baseEnv: Record<string, string | undefined>,
+  args: { proxyUrl: string; token: string },
+): Record<string, string | undefined> {
+  const env: Record<string, string | undefined> = { ...baseEnv };
+  // Scrub anything that could shadow the gateway routing or bearer token.
+  delete env.ANTHROPIC_API_KEY;
+  delete env.CLAUDE_CODE_USE_BEDROCK;
+  delete env.CLAUDE_CODE_USE_VERTEX;
+  env.ANTHROPIC_BASE_URL = anthropicBaseUrlFor(args.proxyUrl);
+  env.ANTHROPIC_AUTH_TOKEN = args.token;
+  return env;
+}
+
+/**
+ * Build the SDK `query()` options for a gateway-routed coach turn — everything
+ * EXCEPT the two host-bound fields (canUseTool, abortController), which the
+ * orchestration layer (sdkCoach.ts) attaches. Pure and total so the full
+ * option/env threading is locked by unit tests (REQ-M5/M6/M13):
+ * - allowedTools stays [] (every tool falls through to canUseTool);
+ * - settingSources stays [] (workspace settings can't inject allow-rules);
+ * - env comes from buildSdkGatewayEnv (base-URL derivation + key scrub).
+ */
+export function buildSdkQueryOptions(
+  agent: AgentCoachOptions,
+  args: {
+    proxyUrl: string;
+    token: string;
+    cwd?: string;
+    baseEnv: Record<string, string | undefined>;
+  },
+): Omit<AgentSdkOptions, "canUseTool" | "abortController"> {
+  return {
+    systemPrompt: agent.systemPrompt,
+    model: agent.model,
+    allowedTools: [],
+    settingSources: [],
+    permissionMode: agent.permissionMode,
+    maxTurns: agent.maxTurns,
+    ...(args.cwd ? { cwd: args.cwd } : {}),
+    env: buildSdkGatewayEnv(args.baseEnv, {
+      proxyUrl: args.proxyUrl,
+      token: args.token,
+    }),
+  };
 }
 
 /**
