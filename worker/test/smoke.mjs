@@ -1,42 +1,13 @@
 // Standalone smoke test — runs with `node --experimental-strip-types test/smoke.mjs`.
 // Tests tokens.ts and translate.ts. translate.ts transitively imports the
-// skeleton library (skeletons/index.ts → kids-basic/*.html), so we register a
-// text-import hook that mirrors wrangler's `[[rules]] type="Text"` rule:
-// `.html`/`.md` imports resolve to `export default <file contents>`.
+// skeleton library (skeletons/index.ts → kids-basic/*.html), so we import the
+// shared loader hooks (harness/loader.mjs, #255 A#11) that mirror wrangler's
+// `[[rules]] type="Text"` rule: `.html`/`.md` imports resolve to
+// `export default <file contents>`.
 
 import assert from "node:assert/strict";
-import { registerHooks } from "node:module";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith(".") && !/\.[a-z0-9]+$/i.test(specifier)) {
-      try {
-        return nextResolve(`${specifier}.ts`, context);
-      } catch {
-        try {
-          return nextResolve(specifier, context);
-        } catch {
-          // Directory modules (e.g. "../profiles" → profiles/index.ts).
-          return nextResolve(`${specifier}/index.ts`, context);
-        }
-      }
-    }
-    return nextResolve(specifier, context);
-  },
-  load(url, context, nextLoad) {
-    if (url.endsWith(".html") || url.endsWith(".md")) {
-      const text = readFileSync(fileURLToPath(url), "utf8");
-      return {
-        format: "module",
-        shortCircuit: true,
-        source: `export default ${JSON.stringify(text)};`,
-      };
-    }
-    return nextLoad(url, context);   // .ts → built-in strip-types, etc.
-  },
-});
+import "./harness/loader.mjs";
 
 const SECRET = "test-secret-" + "x".repeat(20);
 // Stable v4 UUID for any test that needs a "valid trial_id" (#9d ownership +
@@ -1242,7 +1213,7 @@ const TINY_PNG =
 
 // ---- chat-hook helpers (#9c) -----------------------------------------------
 {
-  const { extractTrialHeaders, lastUserMessageText } = await import("../src/lib/storage.ts");
+  const { extractTrialHeaders, lastUserMessageText } = await import("../src/lib/chat-extract.ts");
 
   // extractTrialHeaders: both headers required + STRICT UUID shape (#9d F#3)
   function H(h) { return (name) => h[name.toLowerCase()] ?? null; }

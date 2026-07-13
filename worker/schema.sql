@@ -1,5 +1,10 @@
 -- D1 schema for HypeProof Studio Worker.
--- Apply: wrangler d1 execute hypeproof-studio --file=schema.sql
+-- Apply (fresh database): wrangler d1 execute hypeproof-studio --file=schema.sql
+--
+-- EXISTING databases: CREATE TABLE IF NOT EXISTS never alters a table that
+-- already exists — column additions land via worker/migrations/NNNN-*.sql,
+-- applied once each, in order. Keep this file and the migrations in sync:
+-- a fresh schema.sql install must equal (old schema + all migrations).
 
 CREATE TABLE IF NOT EXISTS cohorts (
   id           TEXT PRIMARY KEY,        -- e.g. sk-biopharm-2026-a
@@ -43,6 +48,7 @@ CREATE TABLE IF NOT EXISTS usage_log (
   cache_write  INTEGER NOT NULL DEFAULT 0,
   latency_ms   INTEGER,
   status       INTEGER NOT NULL,
+  trial_id     TEXT,                    -- #255 (A#6): optional trial attribution; NULL when chat ran without trial headers
   created_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_usage_session ON usage_log(session_id);
@@ -68,6 +74,9 @@ CREATE TABLE IF NOT EXISTS trials (
 );
 CREATE INDEX IF NOT EXISTS idx_trials_user ON trials(user_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_trials_cohort ON trials(cohort_id, started_at DESC);
+-- #255: per-user trial timelines within a cohort (scoring filters
+-- (cohort_id, user_id) and orders by started_at DESC).
+CREATE INDEX IF NOT EXISTS idx_trials_cohort_user ON trials(cohort_id, user_id, started_at DESC);
 
 CREATE TABLE IF NOT EXISTS turns (
   id              TEXT PRIMARY KEY,     -- uuid
@@ -80,6 +89,8 @@ CREATE TABLE IF NOT EXISTS turns (
   latency_ms      INTEGER,
   model           TEXT,
   body_ref        TEXT,                  -- R2 key when log_user_messages=true; else NULL
+  status          TEXT NOT NULL DEFAULT 'ok',  -- #255: 'ok' | 'error' — failed turns feed Iteration Depth
+  error_kind      TEXT,                  -- #255: NULL when ok; coarse class ('upstream' | 'stream' | 'translate'), never raw provider prose (#257)
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_trial_idx ON turns(trial_id, turn_idx);

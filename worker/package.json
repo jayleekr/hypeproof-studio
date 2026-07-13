@@ -9,7 +9,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "test": "node --experimental-strip-types test/smoke.mjs",
+    "test": "node --experimental-strip-types test/smoke.mjs && node --experimental-strip-types test/chat-integration.test.mjs && node --experimental-strip-types test/route-order.test.mjs",
     "typecheck": "tsc --noEmit",
     "dump-profiles": "node --experimental-strip-types scripts/dump-profiles.ts",
     "scaffold-profile": "node --experimental-strip-types scripts/scaffold-profile.ts",
