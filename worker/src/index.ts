@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import type { Env } from "./env";
 import { chat } from "./routes/chat";
+import { messages } from "./routes/messages";
 import { trace } from "./routes/trace";
 import { admin } from "./routes/admin";
 import { report } from "./routes/report";
@@ -26,6 +27,7 @@ app.use("*", requestId);
 // exempt (REQ-H6: anonymous bug reporting survives config breakage), as is
 // /v1/health (no token involved).
 app.use("/v1/chat/*", signingSecretGuard);
+app.use("/v1/messages", signingSecretGuard);
 app.use("/v1/profile", signingSecretGuard);
 app.use("/v1/trace/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
@@ -48,6 +50,9 @@ app.get("/issuer", () => {
 });
 
 app.route("/v1", chat);
+// #282 — Anthropic-native Agent SDK gateway (POST /v1/messages). Own router,
+// same /v1 base; the chat router doesn't define /messages so no shadowing.
+app.route("/v1", messages);
 app.route("/v1/trace", trace);
 app.route("/v1/report", report);
 app.route("/admin", admin);

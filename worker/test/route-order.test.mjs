@@ -65,6 +65,7 @@ console.log("✓ route-order: requestId middleware runs before routing (404 path
 
   for (const [label, req] of [
     ["/v1/chat/completions", post("/v1/chat/completions", { headers: auth })],
+    ["/v1/messages", post("/v1/messages", { headers: auth })],
     ["/v1/profile", new Request("https://api.test/v1/profile", { headers: auth })],
     ["/v1/trace/event", post("/v1/trace/event", { headers: auth })],
     ["/admin/cohorts", new Request("https://api.test/admin/cohorts")],
@@ -76,7 +77,7 @@ console.log("✓ route-order: requestId middleware runs before routing (404 path
   }
   void env;
 }
-console.log("✓ route-order: signingSecretGuard precedes /v1/chat, /v1/profile, /v1/trace, /admin");
+console.log("✓ route-order: signingSecretGuard precedes /v1/chat, /v1/messages, /v1/profile, /v1/trace, /admin");
 
 // --- 3. guard exemptions: health, report, HTML pages survive a broken secret -
 {

@@ -236,6 +236,72 @@ export function openAIStreamBody(deltas, { model = "gpt-test", tokensIn = 11, to
   return s;
 }
 
+/** Canned Anthropic Messages API non-streaming body (#282 /v1/messages). */
+export function anthropicJsonBody({
+  text,
+  model = "claude-mock",
+  tokensIn = 11,
+  tokensOut = 7,
+  cacheRead = 0,
+  cacheCreate = 0,
+}) {
+  return {
+    id: "msg_mock",
+    type: "message",
+    role: "assistant",
+    model,
+    content: [{ type: "text", text }],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: {
+      input_tokens: tokensIn,
+      output_tokens: tokensOut,
+      cache_read_input_tokens: cacheRead,
+      cache_creation_input_tokens: cacheCreate,
+    },
+  };
+}
+
+/**
+ * Canned Anthropic-native SSE stream (#282 /v1/messages): message_start →
+ * text deltas → message_delta (output usage) → message_stop. No [DONE]
+ * sentinel — that's an OpenAI convention.
+ */
+export function anthropicStreamBody(deltas, { model = "claude-mock", tokensIn = 11, tokensOut = 7 } = {}) {
+  const ev = (type, data) => `event: ${type}\ndata: ${JSON.stringify(data)}\n\n`;
+  let s = ev("message_start", {
+    type: "message_start",
+    message: {
+      id: "msg_mock",
+      type: "message",
+      role: "assistant",
+      model,
+      content: [],
+      usage: { input_tokens: tokensIn, output_tokens: 0 },
+    },
+  });
+  s += ev("content_block_start", {
+    type: "content_block_start",
+    index: 0,
+    content_block: { type: "text", text: "" },
+  });
+  for (const d of deltas) {
+    s += ev("content_block_delta", {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: d },
+    });
+  }
+  s += ev("content_block_stop", { type: "content_block_stop", index: 0 });
+  s += ev("message_delta", {
+    type: "message_delta",
+    delta: { stop_reason: "end_turn", stop_sequence: null },
+    usage: { output_tokens: tokensOut },
+  });
+  s += ev("message_stop", { type: "message_stop" });
+  return s;
+}
+
 /** Wrap a string as an SSE upstream Response. */
 export function sseResponse(bodyText, status = 200) {
   return new Response(bodyText, {

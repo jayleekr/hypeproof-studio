@@ -64,7 +64,7 @@ interface OpenAIRequest {
   tools?: Array<{ function?: { name?: string; description?: string; parameters?: unknown } }>;
 }
 
-interface AnthropicSystemBlock {
+export interface AnthropicSystemBlock {
   type: "text";
   text: string;
   cache_control?: { type: "ephemeral" };
@@ -338,6 +338,36 @@ function buildCachedPrefix(profile: Profile): string {
   return sections.join("\n\n");
 }
 
+/**
+ * The Anthropic system blocks the worker enforces: cached cohort prefix
+ * (system prompt + contracts + skills + skeletons) followed by the uncached
+ * per-user coach tail. Shared by translate() (OpenAI-compat /v1/chat path)
+ * and routes/messages.ts (Anthropic-native gateway, #282) so both paths
+ * inject byte-identical system prompts — the client-supplied `system` never
+ * survives on either route.
+ */
+export function buildAnthropicSystemBlocks(
+  profile: Profile,
+  coach: CoachContext = {},
+): AnthropicSystemBlock[] {
+  const systemBlocks: AnthropicSystemBlock[] = [
+    { type: "text", text: buildCachedPrefix(profile), cache_control: { type: "ephemeral" } },
+  ];
+  const coachTail = buildCoachTail(coach);
+  if (coachTail) {
+    systemBlocks.push({ type: "text", text: coachTail });
+  }
+  return systemBlocks;
+}
+
+/**
+ * Clamp a client-requested max_tokens into the worker's accepted range,
+ * falling back to the profile's tuned budget. Shared by both LLM routes.
+ */
+export function clampMaxTokens(requested: unknown, profile: Profile): number {
+  return clampInt(requested, 1, 16384, profile.model.max_tokens ?? DEFAULT_MAX_TOKENS);
+}
+
 export function translate(
   body: OpenAIRequest,
   profile: Profile,
@@ -357,13 +387,7 @@ export function translate(
   // System block: cached prefix + non-cached per-user coach tail.
   // Cached prefix = system prompt + the tier's skeleton library. Static per
   // cohort → high cache hit rate. Per-user coach tail stays uncached after.
-  const systemBlocks: AnthropicSystemBlock[] = [
-    { type: "text", text: buildCachedPrefix(profile), cache_control: { type: "ephemeral" } },
-  ];
-  const coachTail = buildCoachTail(coach);
-  if (coachTail) {
-    systemBlocks.push({ type: "text", text: coachTail });
-  }
+  const systemBlocks = buildAnthropicSystemBlocks(profile, coach);
 
   const out: AnthropicRequest = {
     model,

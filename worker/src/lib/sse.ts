@@ -200,6 +200,122 @@ export function passThroughOpenAIStream(
   });
 }
 
+// #282 — mid-stream failure notice for the Anthropic-native /v1/messages
+// gateway. Same #257 discipline as enqueueStreamError, but emitted in the
+// Anthropic SSE error-event shape the Agent SDK client parses (an OpenAI
+// `stream_error` chunk would be gibberish to it).
+function enqueueAnthropicStreamError(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  err: unknown,
+  requestId: string | undefined,
+) {
+  const rid = requestId ?? "no-request-id";
+  console.error(`[${rid}] stream error:`, err);
+  const errPayload = JSON.stringify({
+    type: "error",
+    error: {
+      type: "api_error",
+      message: `stream interrupted — please retry (request_id: ${rid})`,
+    },
+  });
+  controller.enqueue(encoder.encode(`event: error\ndata: ${errPayload}\n\n`));
+}
+
+/**
+ * #282 — Anthropic-native SSE passthrough with a usage tap, for the
+ * POST /v1/messages gateway. Unlike transformStream (which rewrites Anthropic
+ * events into OpenAI chunks for /v1/chat), this forwards the upstream bytes
+ * VERBATIM — the consumer is an Anthropic-native client (the Agent SDK coach)
+ * that parses the raw event stream itself. We only peek at each event to:
+ *   - capture usage (message_start input/cache tokens, message_delta output
+ *     tokens) so workshop quota accounting keeps working, and
+ *   - surface text deltas to `options.onTextDelta` (trace response_chars).
+ *
+ * No [DONE] sentinel, no asset_score injection, no truncation-notice chunk —
+ * those are OpenAI-stream conventions; injecting foreign events here would
+ * corrupt the Anthropic protocol. Mid-stream failures follow #257: full
+ * detail to logs keyed by request_id, sanitized Anthropic-shape `error`
+ * event to the client.
+ */
+export function tapAnthropicStream(
+  upstream: ReadableStream<Uint8Array>,
+  onUsage: (u: StreamUsage) => void,
+  options: StreamTransformOptions = {},
+): ReadableStream<Uint8Array> {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  const usage: StreamUsage = {
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+  };
+  let buffer = "";
+  let usageEmitted = false;
+
+  const scanBlock = (block: string) => {
+    for (const raw of block.split("\n")) {
+      const line = raw.trimEnd();
+      if (!line.startsWith("data:")) continue;
+      const data = line.slice(5).trim();
+      try {
+        const event = JSON.parse(data);
+        if (event?.type === "message_start" && event.message?.usage) {
+          const u = event.message.usage;
+          if (typeof u.input_tokens === "number") usage.input_tokens = u.input_tokens;
+          if (typeof u.cache_read_input_tokens === "number") {
+            usage.cache_read_input_tokens = u.cache_read_input_tokens;
+          }
+          if (typeof u.cache_creation_input_tokens === "number") {
+            usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
+          }
+        }
+        if (event?.type === "message_delta" && typeof event.usage?.output_tokens === "number") {
+          usage.output_tokens = event.usage.output_tokens;
+        }
+        if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
+          const delta = event.delta.text;
+          if (typeof delta === "string" && delta.length > 0) options.onTextDelta?.(delta);
+        }
+      } catch {
+        /* keepalive / non-JSON — forwarded verbatim anyway */
+      }
+    }
+  };
+
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const reader = upstream.getReader();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let idx: number;
+          while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            const block = buffer.slice(0, idx);
+            buffer = buffer.slice(idx + 2);
+            scanBlock(block);
+            controller.enqueue(encoder.encode(block + "\n\n")); // verbatim
+          }
+        }
+        if (buffer.trim().length > 0) {
+          scanBlock(buffer);
+          controller.enqueue(encoder.encode(buffer));
+        }
+      } catch (err) {
+        enqueueAnthropicStreamError(controller, encoder, err, options.requestId);
+      } finally {
+        if (!usageEmitted) onUsage(usage);
+        usageEmitted = true;
+        controller.close();
+        reader.releaseLock();
+      }
+    },
+  });
+}
+
 function processBlock(
   block: string,
   controller: ReadableStreamDefaultController<Uint8Array>,
