@@ -14,6 +14,7 @@
 import { Hono } from "hono";
 import { resolveProvider, type Env, type LLMProvider } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
+import { gateChatRequest } from "../lib/chat-gate";
 import { getProfile } from "../profiles";
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropic } from "../lib/anthropic";
@@ -27,13 +28,6 @@ import {
 import { recordTurnIfOwned } from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
 import { scoreTurnAssets } from "../lib/asset-scorer";
-import {
-  getActiveSession,
-  getCohortPause,
-  getRoster,
-  isSessionLive,
-  isTokenRevoked,
-} from "../lib/kv";
 import { logChat, persistUsage } from "../lib/analytics";
 import { runDeepHealth } from "../cron/health.ts";
 
@@ -159,113 +153,12 @@ chat.post("/chat/completions", async (c) => {
   const env = c.env;
   const startedAt = Date.now();
 
-  // 1-2. Auth
-  const token = bearer(c.req.header("authorization"));
-  if (!token) return c.json({ error: { message: "missing bearer token", type: "auth" } }, 401);
-
-  let payload;
-  try {
-    payload = await verify(token, env.HPS_SIGNING_SECRET);
-  } catch (err) {
-    const code = err instanceof TokenError ? err.code : "unknown";
-    // #257 — TokenError messages are curated user-facing prose; anything
-    // else is an internal failure and must not reach the client raw.
-    if (!(err instanceof TokenError)) {
-      console.error(`[${c.get("requestId")}] token verify failed:`, err);
-    }
-    const message = err instanceof TokenError ? err.message : "invalid token";
-    return c.json({ error: { message, type: "auth", code, request_id: c.get("requestId") } }, 401);
-  }
-
-  // 2a. Issuer tokens cannot chat. They exist only to mint child tokens via
-  // POST /admin/tokens/issue — sending one here is an obvious misuse.
-  if (payload.role === "issuer") {
-    return c.json(
-      { error: { message: "issuer tokens cannot chat", type: "auth", code: "wrong_role" } },
-      401,
-    );
-  }
-
-  // 2b. Token revocation (S-01 / #46). Skipped for legacy tokens that
-  // pre-date jti — they remain valid until exp but can't be killed
-  // individually. Surfaced via x-token-legacy: 1 so clients/audits can spot
-  // tokens that should be rotated.
-  if (payload.jti) {
-    const rev = await isTokenRevoked(env.HPS_KV, payload.jti);
-    if (rev) {
-      return c.json(
-        { error: { message: "이 토큰은 더이상 사용할 수 없어요.", type: "auth", code: "revoked", since: rev.ts } },
-        401,
-      );
-    }
-  } else {
-    c.header("x-token-legacy", "1");
-  }
-
-  // 3. Profile
-  const profile = getProfile(payload.p);
-  if (!profile) {
-    return c.json({ error: { message: `unknown profile: ${payload.p}`, type: "config" } }, 400);
-  }
-  // Sanity: token cohort must match profile cohort
-  if (payload.c !== profile.session.cohort_id) {
-    return c.json({ error: { message: "token cohort/profile mismatch", type: "auth" } }, 401);
-  }
-
-  // 4-5. Session window + roster
-  const session = await getActiveSession(env.HPS_KV, payload.c);
-  if (!session) {
-    // #165 — student-facing copy is no longer a dead-end. The chat panel's
-    // error banner pairs the `runbook_url` link below with this text, so the
-    // person who can fix it (instructor) has a one-click path.
-    return c.json(
-      {
-        error: {
-          message: "수업이 아직 시작 전이에요. 강사가 곧 열어줄 거예요 — 잠시 후 다시 보내보세요.",
-          type: "session_inactive",
-          runbook_url: "https://github.com/jayleekr/hypeproof-studio/blob/main/docs/runbook.md#start-session",
-        },
-      },
-      403,
-    );
-  }
-  if (!isSessionLive(session)) {
-    return c.json(
-      { error: { message: "수업 시간이 끝났어요. 다음 시간에 다시 만나요.", type: "session_window" } },
-      403,
-    );
-  }
-  if (session.profile_id !== profile.id) {
-    return c.json(
-      { error: { message: "이 토큰은 다른 회차용이에요.", type: "session_profile_mismatch" } },
-      403,
-    );
-  }
-  const roster = await getRoster(env.HPS_KV, payload.c);
-  if (!roster || !roster.users.includes(payload.u)) {
-    return c.json(
-      { error: { message: "등록된 참가자가 아니에요. 강사에게 알려주세요.", type: "not_in_roster" } },
-      403,
-    );
-  }
-
-  // 5b. Cohort kill-switch (S-12 / #47) — must precede any upstream call.
-  // Checked AFTER auth/roster on purpose: anonymous probes can't observe
-  // pause state, and the response shape stays cohort-specific.
-  const pause = await getCohortPause(env.HPS_KV, payload.c);
-  if (pause) {
-    return c.json(
-      {
-        error: {
-          message: "세션이 일시정지되었습니다. 강사에게 문의해주세요.",
-          type: "cohort_paused",
-          reason: pause.reason,
-          since: pause.ts,
-        },
-      },
-      503,
-    );
-  }
+  // 1-5b. Auth → revocation → profile → session/roster → kill-switch.
+  // Shared with POST /v1/messages (#282) via gateChatRequest so the two
+  // LLM-serving routes enforce identical trust gates.
+  const gate = await gateChatRequest(c);
+  if (!gate.ok) return gate.response;
+  const { payload, profile, session } = gate;
 
   // 6. Build the upstream request (with optional coach context from headers)
   let body: unknown;

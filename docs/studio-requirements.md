@@ -187,6 +187,10 @@ When in doubt:
 | REQ-M6 | 게이트웨이 라우팅 + env 보존 | `env: { ...process.env, ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN }` (커스텀 이름 금지, PATH 보존) | U |
 | REQ-M7 | SDK 미가용 시 proxy fallback | 패키지 부재 → `SdkUnavailableError` → 콘솔 경고 + 해당 턴 proxy 로 폴백 (학생에게 raw 에러 미노출) | U + E |
 | REQ-M8 | Abort parity | agent-sdk 경로도 stop 시 AbortError throw → streamEnd·appendHistory 건너뜀 (잘린 턴 미커밋); abort listener 는 `loadSdk()` 이전 등록 | U + E |
+| REQ-M9 | `/v1/messages` 게이트 parity | worker `POST /v1/messages` (Anthropic-native 게이트웨이) 는 `/v1/chat/completions` 와 동일 게이트 공유 (`lib/chat-gate.ts`): 토큰 verify · issuer 거부 · revocation · session window · roster · cohort pause · signingSecretGuard | R (`worker/test/messages-integration.test.mjs`, `route-order.test.mjs`) |
+| REQ-M10 | 서버측 system prompt 강제 | `/v1/messages` 는 클라이언트 `system` 을 병합 없이 폐기하고 cohort 프로필 블록으로 교체 (`buildAnthropicSystemBlocks` — `/v1/chat` 과 byte-identical, prompt-cache 마커 유지). classroom key 는 worker 밖으로 안 나감 (upstream 은 `x-api-key`, 학생 토큰 미전달) | R (`worker/test/messages-integration.test.mjs`) |
+| REQ-M11 | 모델 정책 clamp | `/v1/messages` 요청 모델은 프로필 catalog (default/fallback/fast alias 또는 그 id) 로 clamp; `claude-*haiku*` 는 fast 핀으로 (SDK aux 호출 비용 상향 방지); 그 외는 프로필 default 강제 | R (`worker/test/messages-integration.test.mjs`) |
+| REQ-M12 | Anthropic-native passthrough + 계량 | 응답은 원형 그대로 (non-stream JSON verbatim; stream 은 Anthropic SSE verbatim — OpenAI chunk/[DONE]/asset_score 미주입) + usage tap 으로 `usage_log`/`turns` 를 chat 과 동일 스키마로 기록; upstream 에러·stream 중단은 #257 규율 (request_id 만 노출) | R (`worker/test/messages-integration.test.mjs`) |
 
 ---
 
