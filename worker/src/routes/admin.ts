@@ -295,6 +295,15 @@ admin.get("/tokens/revoked", async (c) => {
 //     issuers with their OWN auditable credential (no shared password). A
 //     Bearer minter may NOT set can_issue_issuers on its child, so the
 //     capability cannot spread without a full admin.
+//
+// Bearer-minter trust model (PR #297 review — B1/B2): a minter is NOT a full
+// admin. It is confined to its own scopes:
+//   • child scopes must be a SUBSET of the minter's scopes (⑧ below) — a
+//     cohort-A minter cannot mint issuers for cohort B, nor grant
+//     can_start_session / caps it does not hold itself;
+//   • revoke_jti may only target tokens the minter itself minted, proven via
+//     issuer_audit.minted_by (⑨ below) — no revoking other operators' tokens.
+// Only full admin (Basic/CF) is unrestricted on both counts.
 // isIssuerAllowedEndpoint admits the Bearer through the middleware; this
 // handler does the real verify + capability check.
 admin.post("/issuers", async (c) => {
@@ -311,6 +320,7 @@ admin.post("/issuers", async (c) => {
   const bearerMatch = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
   let minter = "admin";       // recorded in the audit trail
   let viaBearer = false;
+  let minterScopes: IssuerScope[] = [];   // consulted for subset enforcement (Bearer only)
   if (bearerMatch && bearerMatch[1]) {
     viaBearer = true;
     let mp;
@@ -326,6 +336,7 @@ admin.post("/issuers", async (c) => {
       return c.json({ error: "minter token revoked" }, 401);
     }
     minter = mp.u;
+    minterScopes = mp.scopes ?? [];
   }
 
   type ScopeIn = {
@@ -400,6 +411,44 @@ admin.post("/issuers", async (c) => {
     });
   }
 
+  // ⑧ #295 SUBSET ENFORCEMENT (B2) — a Bearer minter can only delegate
+  // authority it holds itself: every requested child scope must be covered by
+  // a single one of the minter's own scopes. "Covered" mirrors how scopes are
+  // consumed elsewhere (/admin/tokens/issue, session open):
+  //   • same cohort,
+  //   • child profiles ⊆ minter profiles,
+  //   • child max_hours ≤ minter max_hours (absent minter max_hours = uncapped,
+  //     same as the /tokens/issue check),
+  //   • can_start_session only if the minter scope has it, and child
+  //     max_session_hours ≤ the minter's effective cap (max_session_hours ?? 4,
+  //     same default the session endpoint applies).
+  // Full admin (Basic/CF) is NOT scope-restricted — it holds the root of trust.
+  if (viaBearer) {
+    for (const s of scopes) {
+      const covered = minterScopes.some((m) => {
+        if (m.cohort !== s.cohort) return false;
+        if (!s.profiles.every((p) => m.profiles?.includes(p) ?? false)) return false;
+        if (m.max_hours !== undefined && (s.max_hours ?? 24) > m.max_hours) return false;
+        if (s.can_start_session === true) {
+          if (m.can_start_session !== true) return false;
+          if ((s.max_session_hours ?? 4) > (m.max_session_hours ?? 4)) return false;
+        }
+        return true;
+      });
+      if (!covered) {
+        return c.json(
+          {
+            error:
+              `scope (cohort=${s.cohort}) exceeds minter authority — ` +
+              "child scopes must be a subset of the minter's own scopes " +
+              "(cohort, profiles, max_hours, can_start_session, max_session_hours)",
+          },
+          403,
+        );
+      }
+    }
+  }
+
   // ⑤ validate revoke_jti shape up-front (fail-closed before any signing);
   // the actual revoke runs AFTER a successful mint (see below).
   if (
@@ -407,6 +456,27 @@ admin.post("/issuers", async (c) => {
     (typeof body.revoke_jti !== "string" || !UUID_RE.test(body.revoke_jti))
   ) {
     return c.json({ error: "revoke_jti must be a valid UUID" }, 400);
+  }
+
+  // ⑨ #295 revoke_jti OWNERSHIP (B1) — on the Bearer path, revoke_jti may only
+  // target a token the minter itself minted, proven by the issuer_audit record
+  // this endpoint writes on every mint (minted_by). Otherwise any admin-tier
+  // minter could fill a well-formed mint request and silently revoke another
+  // operator's minter or a live instructor issuer (DoS side channel).
+  //   • no audit record → not minted via this endpoint (or audit expired) → deny
+  //   • minted_by !== minter → someone else's token → deny
+  // Full admin (Basic/CF) stays unrestricted — it already holds
+  // /admin/tokens/revoke for arbitrary jtis.
+  if (viaBearer && body.revoke_jti !== undefined) {
+    const rec = await c.env.HPS_KV.get(`issuer_audit:${body.revoke_jti}`, "json") as
+      | { minted_by?: string }
+      | null;
+    if (!rec || rec.minted_by !== minter) {
+      return c.json(
+        { error: "revoke_jti: a Bearer minter may only re-scope issuers it minted itself" },
+        403,
+      );
+    }
   }
 
   // ① mint server-side with the Worker's own secret; the token is returned

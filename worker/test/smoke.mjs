@@ -2431,6 +2431,111 @@ const TINY_PNG =
       scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
     }, `Bearer ${mj3.token}`);
     assert.equal(afterRevoke.status, 401, "revoked minter → 401");
+
+    // ---- PR #297 review B2 — SUBSET ENFORCEMENT: a Bearer minter can only
+    // delegate authority it holds itself (child scopes ⊆ minter scopes).
+    // mj is scoped to COHORT only ([{cohort, profiles:[PROFILE], can_start_session:true}]).
+    {
+      // (b) minter scoped to cohort A mints for cohort B → 403
+      const crossCohort = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "invader",
+        scopes: [{ cohort: "sk-biopharm-2026-a", profiles: [PROFILE] }],
+      }, `Bearer ${mj.token}`);
+      assert.equal(crossCohort.status, 403, "minter scoped to cohort A minting for cohort B → 403");
+      const ccj = await crossCohort.json();
+      assert.match(ccj.error, /subset|minter authority/i, "error names the subset rule");
+
+      // profiles not ⊆ minter profiles → 403
+      const crossProfile = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "invader2",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE, "some-other-profile"] }],
+      }, `Bearer ${mj.token}`);
+      assert.equal(crossProfile.status, 403, "child profiles outside minter profiles → 403");
+
+      // max_session_hours above the minter's effective cap (unset → 4h) → 403
+      const overSession = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "invader3",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true, max_session_hours: 5 }],
+      }, `Bearer ${mj.token}`);
+      assert.equal(overSession.status, 403, "child max_session_hours > minter effective cap → 403");
+
+      // can_start_session escalation: minter WITHOUT the flag cannot grant it
+      const envS = mkEnv();
+      const mkNoSess = await hit(envS, "/admin/issuers", "POST", {
+        instructor: "no-sess-minter",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+        can_issue_issuers: true,
+      }, BASIC);
+      const noSessJ = await mkNoSess.json();
+      const escalate = await hit(envS, "/admin/issuers", "POST", {
+        instructor: "escalator",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true }],
+      }, `Bearer ${noSessJ.token}`);
+      assert.equal(escalate.status, 403, "minter without can_start_session cannot grant it → 403");
+
+      // in-scope mint (⊆) still works after enforcement
+      const inScope = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "legit-teacher",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], max_hours: 12, can_start_session: true, max_session_hours: 4 }],
+      }, `Bearer ${mj.token}`);
+      assert.equal(inScope.status, 200, "child scope ⊆ minter scope still mints → 200");
+
+      // full admin (Basic/CF) is NOT scope-restricted
+      const adminCross = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "admin-minted",
+        scopes: [{ cohort: "sk-biopharm-2026-a", profiles: ["any-profile"] }],
+      }, BASIC);
+      assert.equal(adminCross.status, 200, "full admin unrestricted by subset rule → 200");
+    }
+    console.log("✓ #297 B2 subset enforcement: cross-cohort/profile/session-cap/escalation 403, in-scope 200");
+
+    // ---- PR #297 review B1 — revoke_jti OWNERSHIP: a Bearer minter may only
+    // revoke (re-scope) tokens it minted itself, proven via issuer_audit.minted_by.
+    {
+      // (a) minter A (ico1036) minted tj earlier; minter B tries to revoke tj.jti → 403
+      const mkB = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "member-b",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], can_start_session: true }],
+        can_issue_issuers: true,
+      }, BASIC);
+      const mbj = await mkB.json();
+      const steal = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "member-b-instructor",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+        revoke_jti: tj.jti,
+      }, `Bearer ${mbj.token}`);
+      assert.equal(steal.status, 403, "minter B revoking a jti minted by A → 403");
+      const sj = await steal.json();
+      assert.match(sj.error, /minted itself/i, "error names the ownership rule");
+      assert.equal(await isTokenRevoked(env2.HPS_KV, tj.jti), null, "A's issuer NOT revoked by B's attempt");
+
+      // no audit record (arbitrary jti, e.g. another operator's minter) → 403
+      const ghost = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "ghost-instructor",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+        revoke_jti: "11111111-2222-4333-8444-555555555555",
+      }, `Bearer ${mbj.token}`);
+      assert.equal(ghost.status, 403, "revoke_jti with no issuer_audit record → 403");
+
+      // owner path: minter A re-scopes the issuer it minted itself → 200 + revoked
+      const rescope = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "some-instructor",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE], max_hours: 6 }],
+        revoke_jti: tj.jti,
+      }, `Bearer ${mj.token}`);
+      assert.equal(rescope.status, 200, "minter re-scoping its OWN minted issuer → 200");
+      const rev = await isTokenRevoked(env2.HPS_KV, tj.jti);
+      assert.ok(rev, "old jti revoked when the owner re-scopes");
+
+      // full admin stays unrestricted (arbitrary jti, no audit record needed)
+      const adminRevoke = await hit(env2, "/admin/issuers", "POST", {
+        instructor: "admin-rescope",
+        scopes: [{ cohort: COHORT, profiles: [PROFILE] }],
+        revoke_jti: "22222222-3333-4444-8555-666666666666",
+      }, BASIC);
+      assert.equal(adminRevoke.status, 200, "full admin revoke_jti unrestricted → 200");
+    }
+    console.log("✓ #297 B1 revoke_jti ownership: cross-minter 403, no-audit 403, owner 200, admin unrestricted");
   }
   console.log("✓ #295 issuer-mint delegation: per-member minter, audit trail, no capability spread");
 }
