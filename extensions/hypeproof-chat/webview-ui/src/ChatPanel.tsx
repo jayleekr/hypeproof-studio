@@ -14,6 +14,7 @@ interface Props {
   config: ChatConfig | null;
   messages: ChatMessage[];
   toolLog: ToolLogEntry[];              // #278 Phase 3 — browser loop action log
+  pageNotice: string | null;           // #308 — "페이지를 코치에게" 인라인 안내
   streaming: boolean;
   error: string | null;
   errorRequestId: string | null;
@@ -295,6 +296,12 @@ export function ChatPanel(props: Props) {
             onRetry={props.onRetry}
           />
         ))}
+
+        {props.pageNotice && (
+          <div className="hps-page-notice" role="status" aria-live="polite">
+            {props.pageNotice}
+          </div>
+        )}
 
         {props.toolLog.length > 0 && (
           <div className="hps-tool-log" role="status" aria-live="polite">

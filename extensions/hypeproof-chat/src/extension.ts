@@ -224,9 +224,14 @@ export async function activate(context: vscode.ExtensionContext) {
       // Per-cohort gate (default off → minor-safe). Worker emits input.page_context
       // via /v1/profile; the host enforces it here for the text-injection path.
       if (!provider.isPageContextEnabled()) {
-        vscode.window.showInformationMessage(
+        // #308 — inline notice, not a toast: same trigger path, same freeze
+        // mechanism (any visible toast pauses the integrated browser). Focus
+        // the panel so the notice is actually visible; if the webview isn't
+        // mounted yet, the pending-notice flush on "ready" delivers it.
+        provider.postPageNotice(
           "이 코호트에서는 '페이지를 코치에게' 기능이 꺼져 있어요.",
         );
+        await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
         return;
       }
       const ctx = await captureActivePage();
@@ -239,10 +244,10 @@ export async function activate(context: vscode.ExtensionContext) {
         imageBase64: ctx.imageBase64,
       });
       await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
-      const withShot = provider.isImagePasteEnabled();
-      vscode.window.showInformationMessage(
-        `${withShot ? "🖼 화면과 내용을" : "📄 내용을"} 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
-      );
+      // #308 — the "붙였어요" confirmation is shown inline in the chat panel by
+      // attachPageContext (pageAttached message). A VS Code toast is NOT used
+      // here: a visible toast pauses the integrated browser ("Paused due to
+      // Notification"), which broke every capture in the workshop.
     }),
 
   );
