@@ -23,6 +23,32 @@ interface ToolAccum {
 export interface StreamTransformOptions {
   onTextDelta?: (delta: string) => void;
   onBeforeDone?: () => unknown | null | undefined;
+  // #257 — correlates the sanitized client-facing stream_error with the full
+  // server-side log line. Raw error prose never enters the SSE stream.
+  requestId?: string;
+}
+
+// #257 — mid-stream failures used to forward String(err) to the client, which
+// can carry upstream URLs, provider prose, or parser internals. Full detail
+// goes to logs keyed by request_id; the client gets a generic message + the
+// id to quote at the operator.
+function enqueueStreamError(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  err: unknown,
+  requestId: string | undefined,
+) {
+  const rid = requestId ?? "no-request-id";
+  console.error(`[${rid}] stream error:`, err);
+  const errPayload = JSON.stringify({
+    error: {
+      message: `stream interrupted — please retry (request_id: ${rid})`,
+      type: "stream_error",
+      request_id: rid,
+    },
+  });
+  controller.enqueue(encoder.encode(`data: ${errPayload}\n\n`));
+  controller.enqueue(encoder.encode("data: [DONE]\n\n"));
 }
 
 /**
@@ -74,11 +100,7 @@ export function transformStream(
         enqueueFinalChunk(controller, encoder, options);
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
-        const errPayload = JSON.stringify({
-          error: { message: String(err), type: "stream_error" },
-        });
-        controller.enqueue(encoder.encode(`data: ${errPayload}\n\n`));
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        enqueueStreamError(controller, encoder, err, options.requestId);
       } finally {
         if (!usageEmitted) onUsage(usage);
         usageEmitted = true;
@@ -167,9 +189,7 @@ export function passThroughOpenAIStream(
         enqueueFinalChunk(controller, encoder, options);
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
-        const errPayload = JSON.stringify({ error: { message: String(err), type: "stream_error" } });
-        controller.enqueue(encoder.encode(`data: ${errPayload}\n\n`));
-        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        enqueueStreamError(controller, encoder, err, options.requestId);
       } finally {
         if (!usageEmitted) onUsage(usage);
         usageEmitted = true;

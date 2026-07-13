@@ -8,6 +8,7 @@ import { runHeartbeat } from "./cron/heartbeat.ts";
 import { runD1Backup } from "./cron/d1-backup.ts";
 import { requestId, makeErrorBody } from "./middleware/request-id.ts";
 import { signingSecretGuard } from "./middleware/signing-secret.ts";
+import { TokenError } from "./lib/tokens.ts";
 // @ts-ignore — bundled as text by wrangler rules.
 import adminHtml from "./ui/admin.html";
 // @ts-ignore — bundled as text by wrangler rules.
@@ -56,14 +57,19 @@ app.notFound((c) =>
 );
 app.onError((err, c) => {
   const rid = c.get("requestId") ?? "no-request-id";
-  // Stack to logs ONLY — never to the client. Operator pastes the
-  // request_id and Jay greps Workers Logs (`wrangler tail | grep <rid>`).
+  // Full detail (message + stack) to logs ONLY — never to the client (#257).
+  // Operator pastes the request_id and Jay greps Workers Logs
+  // (`wrangler tail | grep <rid>`).
   console.error(`[${rid}] worker error:`, err);
-  // Surface the message bare; the type stays "internal" so the client/UI
-  // doesn't make recovery decisions on the prose. Specific error types
-  // come from c.json(makeErrorBody(c, "<type>", ...)) inside routes.
+  // Whitelist: TokenError carries curated, user-facing prose (auth UX must
+  // not regress to "unexpected server error"). Everything else gets a
+  // generic message — raw err.message can leak internals (dependency
+  // errors, binding names, data shapes).
+  if (err instanceof TokenError) {
+    return c.json(makeErrorBody(c, "auth", err.message, { code: err.code }), 401);
+  }
   return c.json(
-    makeErrorBody(c, "internal", err instanceof Error ? err.message : String(err)),
+    makeErrorBody(c, "internal", "unexpected server error — quote this request_id to the operator"),
     500,
   );
 });

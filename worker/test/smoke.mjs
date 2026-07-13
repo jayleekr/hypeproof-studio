@@ -2688,4 +2688,98 @@ const secHit = (env, path, init = {}) =>
   console.log("✓ #258 signing-secret guard: shared issue/verify gate + production fail-closed");
 }
 
+// §error sanitization (#257) — clients get generic message + request_id;
+// full detail (stack, config prose, upstream bodies) stays in server logs.
+{
+  const { listProfiles } = await import("../src/profiles/index.ts");
+  const prof = listProfiles()[0];
+  const COHORT = prof.session.cohort_id;
+  const { token: STUDENT } = await issue({ u: "student1", c: COHORT, p: prof.id }, 1, SECRET);
+
+  // ① onError backstop: an unexpected throw (here: KV explodes during the
+  // revocation check) → 500 with generic message + request_id, no internals.
+  {
+    const env = mkSecEnv();
+    env.HPS_KV.get = async () => { throw new Error("KABOOM_SECRET_INTERNAL_DETAIL d1-binding-name"); };
+    const r = await secHit(env, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${STUDENT}` },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.equal(r.status, 500, "unexpected throw → 500 via onError");
+    const j = await r.json();
+    const raw = JSON.stringify(j);
+    assert.ok(!raw.includes("KABOOM_SECRET_INTERNAL_DETAIL"), "raw err.message not in client body");
+    assert.ok(!raw.includes("d1-binding-name"), "internal names not in client body");
+    assert.equal(j.error.type, "internal");
+    assert.ok(j.error.request_id, "500 body carries request_id");
+    assert.equal(r.headers.get("x-request-id"), j.error.request_id, "header and body request_id agree");
+  }
+
+  // ② TokenError whitelist: curated auth prose is preserved (UX must not
+  // regress to "unexpected server error").
+  {
+    const r = await secHit(mkSecEnv(), "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: "Bearer not-a-token" },
+      body: JSON.stringify({ messages: [] }),
+    });
+    assert.equal(r.status, 401);
+    const j = await r.json();
+    assert.equal(j.error.message, "malformed token", "curated TokenError prose kept");
+    assert.equal(j.error.code, "malformed");
+  }
+
+  // ③ provider config errors: env-var prose stays server-side.
+  {
+    const now = Date.now();
+    const env = mkSecEnv({}, {
+      [`cohort:${COHORT}:active_session`]: JSON.stringify({
+        session_id: "sess-1", profile_id: prof.id,
+        starts_at: new Date(now - 60_000).toISOString(),
+        ends_at: new Date(now + 3600_000).toISOString(),
+      }),
+      [`cohort:${COHORT}:roster`]: JSON.stringify({ users: ["student1"], updated_at: "x" }),
+    });
+    // mkSecEnv sets no LLM keys → resolveProvider throws its config prose.
+    const r = await secHit(env, "/v1/chat/completions", {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${STUDENT}` },
+      body: JSON.stringify({ messages: [{ role: "user", content: "hi" }] }),
+    });
+    assert.equal(r.status, 502, "missing provider key → 502 config error");
+    const j = await r.json();
+    const raw = JSON.stringify(j);
+    assert.ok(!raw.includes("GEMINI_API_KEY"), "env var names not leaked");
+    assert.ok(!raw.includes(".dev.vars"), "config file paths not leaked");
+    assert.equal(j.error.type, "config");
+    assert.ok(j.error.request_id, "config error carries request_id");
+  }
+
+  // ④ SSE stream_error: mid-stream failures emit a sanitized event with the
+  // request_id, never raw internal prose. Both provider paths.
+  {
+    const boom = () => new ReadableStream({
+      pull() { throw new Error("UPSTREAM_INTERNAL_DETAIL https://internal.example/creds"); },
+    });
+    const outA = await readStreamText(
+      transformStream(boom(), "m", () => {}, { requestId: "rid-aaa1" }),
+    );
+    assert.ok(!outA.includes("UPSTREAM_INTERNAL_DETAIL"), "anthropic path: raw error not in stream");
+    assert.ok(outA.includes('"type":"stream_error"'), "anthropic path: stream_error event emitted");
+    assert.ok(outA.includes("rid-aaa1"), "anthropic path: request_id present");
+    assert.ok(outA.includes("data: [DONE]"), "anthropic path: stream still terminates cleanly");
+
+    const outB = await readStreamText(
+      passThroughOpenAIStream(boom(), () => {}, { requestId: "rid-bbb2" }),
+    );
+    assert.ok(!outB.includes("UPSTREAM_INTERNAL_DETAIL"), "openai path: raw error not in stream");
+    assert.ok(outB.includes('"type":"stream_error"'), "openai path: stream_error event emitted");
+    assert.ok(outB.includes("rid-bbb2"), "openai path: request_id present");
+    assert.ok(outB.includes("data: [DONE]"), "openai path: stream still terminates cleanly");
+  }
+
+  console.log("✓ #257 error sanitization: generic client message + request_id, curated auth prose kept");
+}
+
 console.log("\nAll smoke tests passed.");

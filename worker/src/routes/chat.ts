@@ -147,7 +147,9 @@ async function authenticateToken(
     const payload = await verify(token, secret);
     return { ok: true, payload, message: "" };
   } catch (err) {
-    const msg = err instanceof TokenError ? err.message : String(err);
+    // #257 — only TokenError prose is curated for users; anything else
+    // (crypto/config failures) stays server-side.
+    const msg = err instanceof TokenError ? err.message : "invalid token";
     return { ok: false, payload: {} as TokenPayload, message: msg };
   }
 }
@@ -166,7 +168,13 @@ chat.post("/chat/completions", async (c) => {
     payload = await verify(token, env.HPS_SIGNING_SECRET);
   } catch (err) {
     const code = err instanceof TokenError ? err.code : "unknown";
-    return c.json({ error: { message: String(err), type: "auth", code } }, 401);
+    // #257 — TokenError messages are curated user-facing prose; anything
+    // else is an internal failure and must not reach the client raw.
+    if (!(err instanceof TokenError)) {
+      console.error(`[${c.get("requestId")}] token verify failed:`, err);
+    }
+    const message = err instanceof TokenError ? err.message : "invalid token";
+    return c.json({ error: { message, type: "auth", code, request_id: c.get("requestId") } }, 401);
   }
 
   // 2a. Issuer tokens cannot chat. They exist only to mint child tokens via
@@ -287,7 +295,18 @@ chat.post("/chat/completions", async (c) => {
   try {
     ({ provider, apiKey } = resolveProvider(env));
   } catch (err) {
-    return c.json({ error: { message: String(err), type: "config" } }, 502);
+    // #257 — config prose (env var names, provider wiring) stays in logs.
+    console.error(`[${c.get("requestId")}] provider config error:`, err);
+    return c.json(
+      {
+        error: {
+          message: "LLM provider is not configured — contact the operator",
+          type: "config",
+          request_id: c.get("requestId"),
+        },
+      },
+      502,
+    );
   }
 
   const stream = (body as any)?.stream === true;
@@ -327,17 +346,27 @@ chat.post("/chat/completions", async (c) => {
       });
     }
   } catch (err) {
-    return c.json({ error: { message: String(err), type: "request" } }, 400);
+    // #257 — translation/fetch errors can embed upstream URLs, header names,
+    // or body shapes. Log full, return generic.
+    console.error(`[${c.get("requestId")}] upstream call failed:`, err);
+    return c.json(
+      { error: { message: "upstream request failed", type: "request", request_id: c.get("requestId") } },
+      400,
+    );
   }
 
   // 7. Upstream guard
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
+    // #257 — the upstream error body (provider prose, key hints, quota info)
+    // goes to logs only; the client learns the status code + request_id.
+    console.error(`[${c.get("requestId")}] upstream ${upstream.status}: ${text.slice(0, 500)}`);
     return c.json(
       {
         error: {
-          message: `upstream ${upstream.status}: ${text.slice(0, 200)}`,
+          message: `upstream error (status ${upstream.status})`,
           type: "upstream",
+          request_id: c.get("requestId"),
         },
       },
       502,
@@ -439,6 +468,9 @@ chat.post("/chat/completions", async (c) => {
   //    chunks.
   let streamedAssistantText = "";
   const streamOptions = {
+    // #257 — lets the SSE layer emit a sanitized stream_error carrying the
+    // request_id instead of raw internal prose.
+    requestId: c.get("requestId"),
     onTextDelta: (delta: string) => {
       streamedAssistantText += delta;
     },
