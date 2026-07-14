@@ -149,6 +149,59 @@ else
   bad "hypeproof-chat extension NOT bundled into the .app"
 fi
 
+# 8b. Vendored Agent SDK JS shipped? (#282 W4b · #343 review)
+# A PACKAGED build loads the Agent SDK via a variable-specifier dynamic import
+# that esbuild never bundles; sdkCoach.loadSdk() therefore falls back to the
+# vendored copy under dist/vendor/node_modules (see
+# extensions/hypeproof-chat/src/sdkCoachHelpers.ts VENDORED_SDK_ENTRY_SUBPATH,
+# written by scripts/inject-builtin-extensions.sh). If that vendor tree is
+# absent the SDK import throws and the coach SILENTLY degrades to the proxy-only
+# runtime — even on an SDK release. That silent proxy-only ship is the release
+# defect #343 caught, so this is a hard gate for SDK-coach builds.
+#
+# Trigger (so pre-SDK / pure-vanilla builds never false-fail):
+#   * REQUIRE_SDK_VENDOR=1        → always assert (explicit CI/release gate)
+#   * else auto-detect: assert only when the bundled extension's package.json
+#     declares the "@anthropic-ai/claude-agent-sdk" dependency (i.e. this build
+#     is an SDK-coach build). A vanilla build (no hypeproof-chat) or a pre-SDK
+#     extension (no such dep) is SKIPPED with an informational note.
+echo
+echo "Checking vendored Agent SDK JS (SDK-coach builds only)..."
+SDK_DEP=""
+if [[ -n "$EXT_DIR" && -f "$EXT_DIR/package.json" ]]; then
+  SDK_DEP=$(jq -r '.dependencies["@anthropic-ai/claude-agent-sdk"] // ""' "$EXT_DIR/package.json" 2>/dev/null || echo "")
+fi
+if [[ "${REQUIRE_SDK_VENDOR:-0}" == "1" || -n "$SDK_DEP" ]]; then
+  if [[ "${REQUIRE_SDK_VENDOR:-0}" == "1" ]]; then
+    SDK_TRIGGER="REQUIRE_SDK_VENDOR=1"
+  else
+    SDK_TRIGGER="extension declares @anthropic-ai/claude-agent-sdk"
+  fi
+  if [[ -z "$EXT_DIR" ]]; then
+    bad "SDK vendor required ($SDK_TRIGGER) but hypeproof-chat is not bundled — cannot ship the SDK coach"
+  else
+    VENDOR_SDK_ENTRY="$EXT_DIR/dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
+    if [[ -f "$VENDOR_SDK_ENTRY" ]]; then
+      ok "Vendored SDK entrypoint shipped (dist/vendor/.../claude-agent-sdk/sdk.mjs) [$SDK_TRIGGER]"
+    else
+      bad "Vendored SDK entrypoint MISSING at $VENDOR_SDK_ENTRY — packaged build will SILENTLY fall back to the proxy-only coach (#343) [$SDK_TRIGGER]"
+    fi
+    # The 229 MB per-platform native binary packages (claude-agent-sdk-<platform>)
+    # must NEVER land in the shipped bundle — they reach students via the W4a seed
+    # (scripts/seed-sdk-binary.sh); bundling them clobbers Anthropic's Developer-ID
+    # signature. `find` (not a shell glob) so an empty match is safe under zsh too.
+    LEAKED_BIN=$(find "$EXT_DIR/dist/vendor/node_modules/@anthropic-ai" -maxdepth 1 -type d -name 'claude-agent-sdk-*' 2>/dev/null || true)
+    if [[ -z "$LEAKED_BIN" ]]; then
+      ok "No per-platform SDK binary package leaked into the shipped vendor tree"
+    else
+      bad "Per-platform SDK binary package(s) leaked into the shipped vendor (must be seeded, not bundled):"
+      echo "$LEAKED_BIN" | sed 's/^/      /'
+    fi
+  fi
+else
+  warn "No SDK-coach vendor expected (bundled extension has no @anthropic-ai/claude-agent-sdk dep; set REQUIRE_SDK_VENDOR=1 to force) — skipping"
+fi
+
 # 9. builtInExtensions list should NOT contain us. hypeproof-chat ships by
 # being copied into Resources/app/extensions; listing it in product.json makes
 # VSCodium try a marketplace/GitHub download during build, which 404s.

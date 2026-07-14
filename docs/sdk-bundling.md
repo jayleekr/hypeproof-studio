@@ -282,3 +282,12 @@ Deferred to a later W4 slice:
 - Release-E2E check that a **packaged** build with a seeded binary runs a live
   SDK turn (needs a real `build.sh` + a signed app on venue macOS — release E2E
   discipline); runbook/D-3 rehearsal line for the seed step.
+  - Partial coverage landed (#343 review): `scripts/verify-branding.sh` now
+    asserts, as a hard gate, that the vendored SDK entrypoint
+    (`dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs`) actually
+    shipped inside the built app and that no `claude-agent-sdk-<platform>`
+    binary leaked into the bundle — so a non-canonical build can't SILENTLY
+    ship a proxy-only coach. Trigger: auto-detected from the bundled
+    extension's `@anthropic-ai/claude-agent-sdk` dependency, or forced with
+    `REQUIRE_SDK_VENDOR=1` (see `.claude/rules/build-pipeline.md`). Still TODO:
+    an actual SDK-turn smoke on the packaged app.
