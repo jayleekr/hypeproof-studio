@@ -66,6 +66,27 @@ function anthropicError(
   };
 }
 
+// Upstream 4xx statuses that pass through to the client AS-IS (#282 e2e
+// BLOCKER, #257 discipline). These are request-shaped failures the SDK CLI
+// must see verbatim to fail fast — collapsing them to 502 made the CLI treat
+// them as transient and retry 10x per turn. The body stays sanitized (generic
+// message + upstream status + request_id, NO raw upstream prose); only the
+// status code and an Anthropic-native error.type are forwarded. Everything
+// else (401/403 upstream key problems, 5xx, 529 overloaded) is still OUR
+// gateway failure → 502.
+const PASSTHROUGH_4XX = {
+  400: "invalid_request_error",
+  404: "not_found_error",
+  413: "request_too_large",
+  422: "invalid_request_error",
+  429: "rate_limit_error",
+} as const;
+type Passthrough4xx = keyof typeof PASSTHROUGH_4XX;
+
+function isPassthrough4xx(status: number): status is Passthrough4xx {
+  return status in PASSTHROUGH_4XX;
+}
+
 function decodeHeader(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
   try {
@@ -163,11 +184,17 @@ messages.post("/messages", async (c) => {
   } as unknown as AnthropicRequest;
 
   // 4. Upstream call — same proxy indirection as chat.ts's anthropic branch.
+  // clientBeta/beta: the Agent SDK sets its own anthropic-beta header (e.g.
+  // context-management-2025-06-27 for the context_management body field) and
+  // calls /v1/messages?beta=true — both must survive to the upstream (#282
+  // e2e BLOCKER: dropping the header 400'd every SDK turn).
   let upstream: Response;
   try {
     upstream = await callAnthropic(upstreamBody, apiKey, {
       url: env.ANTHROPIC_PROXY_URL,
       proxySecret: env.ANTHROPIC_PROXY_SECRET,
+      clientBeta: c.req.header("anthropic-beta"),
+      beta: c.req.query("beta") === "true",
     });
   } catch (err) {
     // #257 — fetch errors can embed upstream URLs or header names. Log full,
@@ -181,6 +208,14 @@ messages.post("/messages", async (c) => {
     // #257 — the upstream error body (provider prose, key hints, quota info)
     // goes to logs only; the client learns the status code + request_id.
     console.error(`[${c.get("requestId")}] upstream ${upstream.status}: ${text.slice(0, 500)}`);
+    if (isPassthrough4xx(upstream.status)) {
+      // Request-shaped upstream 4xx → same status, sanitized body, so the
+      // SDK fails fast instead of retrying a permanent error 10x.
+      return c.json(
+        anthropicError(c, PASSTHROUGH_4XX[upstream.status], `upstream error (status ${upstream.status})`),
+        upstream.status,
+      );
+    }
     return c.json(
       anthropicError(c, "api_error", `upstream error (status ${upstream.status})`),
       502,
@@ -379,11 +414,16 @@ messages.post("/messages/count_tokens", async (c) => {
   delete upstreamBody.stream;
 
   // 4. Upstream call — same key + proxy indirection, count_tokens subpath.
+  // Same clientBeta/beta threading as /v1/messages: the SDK sends the same
+  // anthropic-beta header (and body beta fields like context_management) on
+  // its count_tokens calls, so the count must be made under the same flags.
   let upstream: Response;
   try {
     upstream = await callAnthropic(upstreamBody as unknown as AnthropicRequest, apiKey, {
       url: countTokensUrl(env.ANTHROPIC_PROXY_URL),
       proxySecret: env.ANTHROPIC_PROXY_SECRET,
+      clientBeta: c.req.header("anthropic-beta"),
+      beta: c.req.query("beta") === "true",
     });
   } catch (err) {
     // #257 — fetch errors can embed upstream URLs or header names.
@@ -395,6 +435,14 @@ messages.post("/messages/count_tokens", async (c) => {
     const text = await upstream.text().catch(() => "");
     // #257 — upstream error prose to logs only; client gets status + request_id.
     console.error(`[${c.get("requestId")}] count_tokens upstream ${upstream.status}: ${text.slice(0, 500)}`);
+    if (isPassthrough4xx(upstream.status)) {
+      // Same fail-fast contract as /v1/messages: request-shaped 4xx pass
+      // through with a sanitized body; everything else is a 502.
+      return c.json(
+        anthropicError(c, PASSTHROUGH_4XX[upstream.status], `upstream error (status ${upstream.status})`),
+        upstream.status,
+      );
+    }
     return c.json(
       anthropicError(c, "api_error", `upstream error (status ${upstream.status})`),
       502,
