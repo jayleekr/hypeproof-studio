@@ -1,6 +1,8 @@
 # SDK CLI binary bundling — decision pack (#282 Phase 2)
 
-Status: **Decided — option (b): on-demand download + instructor pre-seed + proxy fallback** (2026-07-14)
+Status: **Implemented (W4a)** — option (b): binary resolution order + instructor
+pre-seed + integrity gate shipped (see §7); in-app consent download flow and
+SDK-JS vendoring into the built-in remain (W4b). Decided 2026-07-14.
 Epic: [#282](https://github.com/jayleekr/hypeproof-studio/issues/282) · ADR: [adr/0003-agent-sdk-coach-runtime.md](adr/0003-agent-sdk-coach-runtime.md) · Trigger: PR #317
 
 ## 1. Problem
@@ -192,3 +194,49 @@ Ship in the W4 work item of #282 Phase 2; this PR is docs-only.
   keeps distribution on npm's own channel rather than redistributing the
   binary inside our artifact. Re-confirm alongside the shared-classroom-key
   licensing item already tracked in ADR 0003 before the first SDK workshop.
+
+## 7. Implementation status (W4a, 2026-07-14)
+
+Shipped (REQ-M24, `docs/studio-requirements.md`):
+
+- **Resolution order** (`sdkCoachHelpers.resolveSdkBinary`, pure + unit-tested;
+  host probes in `sdkCoach.resolveSdkBinaryForHost`):
+  1. `hypeproofChat.sdkBinaryPath` setting (explicit override, used if the
+     file exists);
+  2. `HPS_SDK_BINARY` env var (e2e/CI seam, same contract);
+  3. seeded location — `seededSdkBinaryPath` is the ONE definition:
+     darwin `~/Library/Application Support/HypeProof-Studio/sdk/<version>/claude`,
+     win32 `%APPDATA%\HypeProof-Studio\sdk\<version>\claude.exe`,
+     linux `${XDG_CONFIG_HOME:-~/.config}/HypeProof-Studio/sdk/<version>/claude`
+     — accepted only when the seed-time `.verified.json` marker checks out
+     (exists + executable + exact size + coarse floor; the full sha512 runs
+     once at seed time, not per launch — trust model in `sdkBinaryManifest.ts`);
+  4. node_modules (dev): no `pathToClaudeCodeExecutable` is passed, the SDK's
+     own optionalDependency lookup runs;
+  5. nothing → `SdkUnavailableError` → proxy coach (REQ-M7, unchanged).
+- **Pinned manifest** — `extensions/hypeproof-chat/src/sdkBinaryManifest.ts`
+  (version + per-platform URL/sha512/unpackedSize), smoke-locked to
+  `package-lock.json` AND to the seed script's embedded pins
+  (`test/sdk-binary.smoke.mjs`). Note: the lockfile pins **0.3.207** — the
+  §2 measurements were taken on 0.3.208; the 0.3.207 values in the manifest
+  were re-verified against the registry (`dist.integrity`/`unpackedSize`).
+- **Instructor pre-seed** — `scripts/seed-sdk-binary.sh` (zsh-compatible):
+  direct registry download (no npm/node on the venue machine), sha512 verify
+  (openssl/shasum), extract `package/claude`, chmod 755, write marker,
+  idempotent re-run, `--tarball` for air-gapped venues, `--force`, `--version`
+  (non-pinned versions fetch `dist.integrity` from the registry). Verified
+  end-to-end on darwin-arm64 (download → hash match → extracted binary
+  answers `--version` → second run no-ops).
+- Binary presence never widens tool policy — a minor cohort still gets
+  `tools: []` with a binary resolved (smoke-locked).
+
+Deferred to W4b:
+
+- Sketch step 1 (vendor the 3.8 MB SDK JS into the injected built-in +
+  `loadSdk()` vendored-path fallback) — until it lands, a **packaged** build
+  still falls back to the proxy coach even with a seeded binary, because the
+  SDK JS itself only resolves from node_modules (dev). The seeded binary is
+  exercised today via dev hosts and `HPS_SDK_BINARY`-driven e2e.
+- Sketch step 4 (in-app consent download flow + progress UI).
+- Release-E2E check that a packaged build with a seeded binary runs an SDK
+  turn; runbook/D-3 rehearsal line for the seed step.
