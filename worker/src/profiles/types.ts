@@ -13,6 +13,16 @@ export interface Profile {
     language: "ko" | "en";
     parent_coaching: boolean;
   };
+  /**
+   * #320 — compliance flag: this cohort serves MINORS (Anthropic minors-guide
+   * + PIPA). Drives the gateway moderation layer (lib/moderation.ts) and is
+   * exposed via /v1/profile so the client can render minor-specific UX (AI
+   * disclosure, etc.). Belt-and-braces: `isMinorCohort()` ALSO treats any
+   * `audience.age_range` upper bound < 18 as minor, so forgetting this flag
+   * on a future kids profile cannot silently disable moderation (project
+   * minor-safety invariant: when in doubt, deny for minors).
+   */
+  minor_cohort?: boolean;
   model: {
     default: ModelAlias;
     fallback?: ModelAlias;
