@@ -24,6 +24,27 @@ export function logChat(env: Env, l: ChatLog): void {
   });
 }
 
+// #320 — moderation-block datapoint (REQ-O5). Shares the dataset with chat
+// datapoints; blobs[0] = "moderation_block" is the discriminator. Carries
+// category + rule id + a short hash of the match — NEVER the matched text.
+export interface ModerationLogEntry {
+  cohort_id: string;
+  user_id: string;
+  profile_id: string;
+  direction: "inbound" | "outbound";
+  category: string;
+  rule_id: string;
+  match_hash: string;
+}
+
+export function logModeration(env: Env, l: ModerationLogEntry): void {
+  env.HPS_ANALYTICS.writeDataPoint({
+    indexes: [l.cohort_id],
+    blobs: ["moderation_block", l.direction, l.category, l.rule_id, l.match_hash, l.user_id, l.profile_id],
+    doubles: [1],
+  });
+}
+
 // Also persist to D1 for historical query. Fire-and-forget via ctx.waitUntil.
 //
 // Resilience (prod D1 accounting outage postmortem): usage_log.session_id

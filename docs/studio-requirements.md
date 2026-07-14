@@ -1,6 +1,6 @@
 # Studio behavioral requirements
 
-> **Spec version:** v0.1.0
+> **Spec version:** v0.2.0
 > **Last reviewed:** 2026-05-25
 > **Live tracker:** [epic #200](https://github.com/jayleekr/hypeproof-studio/issues/200)
 > **Philosophy anchor:** [docs/seven-assets.md](./seven-assets.md) — 7 AI Native Assets; chat-panel features follow [METAPLAN §4.5](../METAPLAN.md).
@@ -249,3 +249,20 @@ dev-host 검증(자동화 셸 불가). REQ-D3(iframe 샌드박싱)은 live_serve
 | REQ-N5 | CDP 실행기 핸드셰이크 | 실행기는 `Target.attachToTarget({flatten})` 후 sessionId로 모든 페이지 명령 라우팅(스파이크 확정). navigate URL은 스킴 화이트리스트(http/https/localhost/file) | U(cdpSession, browserControlHelpers) + 실기계 |
 | REQ-N6 | 자동실행 + 액션로그 | 코치의 브라우저 액션은 모달 없이 자동 실행되고, 채팅에 액션 로그(running→done/error)로 표시. tool 루프 scratch 턴은 영속 히스토리 미오염 | U + 실기계 |
 | REQ-N7 | 루프 안전 | agentic 루프는 per-cohort `max_iterations` 캡 + abort 준수. asset_score는 최종(비-tool) 턴만 기록 | U |
+
+## O. 미성년 안전·컴플라이언스 (#320)
+
+Anthropic 미성년자 가이드(#282 의 2026-07-13 라이선싱 코멘트) 구현 계층. 게이트웨이 모더레이션은
+`worker/src/lib/moderation.ts` — deterministic 토큰/패턴 스크린이며 모델 호출이 아니다. **성인
+코호트는 이 계층을 완전히 건너뛴다 (동작 변화 0).** 프로젝트 불변식: 미성년 코호트는 의심스러우면
+차단(deny) 방향으로만 실패한다.
+
+| ID | 요구사항 | 수용 기준 | Layer |
+|---|---|---|---|
+| REQ-O1 | Minor cohort 판별 fail-safe | `minor_cohort: true` 플래그 **또는** `audience.age_range` 상한 < 18 → minor (`isMinorCohort`). 플래그 누락이 모더레이션을 silent-disable 할 수 없음. `/v1/profile` 응답에 `minor_cohort` 노출 (클라이언트 AI 디스클로저 등 minor UX 근거) | R (`worker/test/moderation.test.mjs`) |
+| REQ-O2 | 인바운드 게이트웨이 모더레이션 | minor cohort 의 최신 user 텍스트를 **upstream 호출 전** 스크린 (`/v1/chat` + `/v1/messages` 동일, stream/non-stream 공통). 카테고리: 노골적 성적 콘텐츠 · 자해 지시 · 잔혹 폭력 · PII 요구 (전화번호/집주소/주민번호). 한국어 토큰은 multi-char only (bare 색 → 검색 매칭 함정). 차단 시 400 + `type: "moderation_block"` + kid-friendly 한국어 문구 + `request_id`, upstream 호출 0회 | R (`worker/test/moderation.test.mjs`) |
+| REQ-O3 | 아웃바운드 non-stream 모더레이션 | non-stream 응답의 assistant 텍스트 스크린 — 차단 시에도 usage 계량은 유지 (토큰은 실소비). **스트리밍 아웃바운드는 문서화된 후속** (스트림 버퍼링 금지 — 인바운드 스크린 + 코호트 child-safety 프롬프트가 스트림 경로 방어) | R (`worker/test/moderation.test.mjs`) |
+| REQ-O4 | 성인 코호트 무영향 | adult profile 은 스크린을 아예 호출하지 않음 — 동일 텍스트가 성인 경로에선 그대로 통과 | R (`worker/test/moderation.test.mjs`) |
+| REQ-O5 | 로그 위생 | 차단 로그(console.error + Analytics `moderation_block` datapoint)는 category + rule id + FNV hash 만 — 매칭된 텍스트 verbatim 절대 금지 | R (`worker/test/moderation.test.mjs`) |
+| REQ-O6 | Age-verification 설계 노트 | [docs/age-verification.md](./age-verification.md) 유지 — 수강등록+roster+토큰 게이트가 minors-guide 의 "only intended users" 요건을 충족한다는 논거 + 잔여 갭 추적 | M (문서 리뷰) |
+| REQ-O7 | False-positive 회귀 목록 | 검색/색상/이야기한(야한)/유니섹스(섹스)/게임 속 몬스터 처치/사이트 주소/전화번호 입력 화면 등 benign 한국어가 절대 차단되지 않음 — 룰 추가 PR 은 이 목록을 통과해야 머지 | R (`worker/test/moderation.test.mjs`) |

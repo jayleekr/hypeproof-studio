@@ -29,6 +29,12 @@ import { recordTurnIfOwned } from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
 import { scoreTurnAssets } from "../lib/asset-scorer";
 import { logChat, persistUsage } from "../lib/analytics";
+import {
+  isMinorCohort,
+  screenText,
+  reportModerationHit,
+  MODERATION_BLOCK_MESSAGE_KO,
+} from "../lib/moderation";
 import { runDeepHealth } from "../cron/health.ts";
 
 export const chat = new Hono<{ Bindings: Env }>();
@@ -105,6 +111,11 @@ chat.get("/profile", async (c) => {
       enabled: profile.browser_control?.enabled === true,
       max_iterations: profile.browser_control?.max_iterations ?? 8,
     },
+    // #320 — minors compliance flag (REQ-O1). True when the profile is
+    // explicitly flagged OR its age_range upper bound is under 18. Lets the
+    // client render minor-specific UX (AI disclosure etc.) without hardcoding
+    // cohort knowledge.
+    minor_cohort: isMinorCohort(profile),
     // Drives the chat panel's tone (game vs search-webapp UI copy) (#159).
     game: { template_tier: profile.game.template_tier },
     // #282 — expose the cohort's provider-tool opt-in so the Studio Agent SDK
@@ -179,6 +190,36 @@ chat.post("/chat/completions", async (c) => {
   const promptText = lastUserMessageText(body);
   const promptChars = promptText.length;
   const persistBody = profile.analytics.log_user_messages === true;
+
+  // #320 — gateway moderation, MINOR cohorts only (REQ-O2). Deterministic
+  // conservative screen of the latest user text BEFORE any upstream call:
+  // a blocked turn costs zero tokens and never reaches the model. Adult
+  // cohorts skip this entirely (REQ-O4 — no behavior change). This covers
+  // the inbound side of BOTH stream and non-stream requests; outbound
+  // streaming moderation is a documented follow-up (we do not buffer
+  // streams — see lib/moderation.ts header).
+  if (isMinorCohort(profile)) {
+    const hit = screenText(promptText);
+    if (hit) {
+      reportModerationHit(
+        env,
+        c.get("requestId"),
+        { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "inbound" },
+        hit,
+      );
+      return c.json(
+        {
+          error: {
+            message: MODERATION_BLOCK_MESSAGE_KO,
+            type: "moderation_block",
+            category: hit.category,
+            request_id: c.get("requestId"),
+          },
+        },
+        400,
+      );
+    }
+  }
 
   // Pick the upstream LLM (switchable peers; default Gemini — see
   // resolveProvider). translate / translateOpenAI both drop client
@@ -323,6 +364,32 @@ chat.post("/chat/completions", async (c) => {
     }
     const log = mkLog(tin, tout, cr, cc);
     record(log);
+    // #320 — outbound moderation, MINOR cohorts, non-stream only (REQ-O3).
+    // Usage was recorded above (the tokens were genuinely spent) but the
+    // blocked text never reaches the client and the trace turn body is not
+    // persisted. Streaming outbound is the documented follow-up.
+    if (isMinorCohort(profile)) {
+      const hit = screenText(text);
+      if (hit) {
+        reportModerationHit(
+          env,
+          c.get("requestId"),
+          { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "outbound" },
+          hit,
+        );
+        return c.json(
+          {
+            error: {
+              message: MODERATION_BLOCK_MESSAGE_KO,
+              type: "moderation_block",
+              category: hit.category,
+              request_id: c.get("requestId"),
+            },
+          },
+          400,
+        );
+      }
+    }
     // #9c trace: persist turn meta + optional R2 body. Fire-and-forget — must
     // not block the response. Skipped when client did not send trial headers.
     if (trial) {
