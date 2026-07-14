@@ -41,8 +41,8 @@ function messagesEnv(opts = {}) {
   return createMockEnv({ ...opts, env: { ANTHROPIC_API_KEY: "test-anthropic-key", ...(opts.env ?? {}) } });
 }
 
-function messagesRequest({ body = {}, headers = {}, auth = AUTH } = {}) {
-  return new Request("https://api.test/v1/messages", {
+function messagesRequest({ body = {}, headers = {}, auth = AUTH, query = "" } = {}) {
+  return new Request(`https://api.test/v1/messages${query}`, {
     method: "POST",
     headers: {
       "content-type": "application/json",
@@ -244,6 +244,90 @@ console.log("✓ messages: non-streaming — verbatim passthrough + usage_log + 
 }
 console.log("✓ messages: streaming — verbatim Anthropic SSE, usage tapped, turn meta row");
 
+// --- anthropic-beta merge + context_management + ?beta=true (#282 blocker) ---
+{
+  const env = messagesEnv();
+  const CTX_MGMT = { edits: [{ type: "clear_thinking_20251015", keep: "all" }] };
+  await withMockUpstream(
+    () => Response.json(anthropicJsonBody({ text: "hi" })),
+    async (calls) => {
+      // The Agent SDK CLI shape: ?beta=true + its own anthropic-beta header
+      // (with a flag we also set, to prove dedupe) + context_management body.
+      const r = await app.fetch(
+        messagesRequest({
+          query: "?beta=true",
+          headers: {
+            "anthropic-beta": "context-management-2025-06-27, prompt-caching-2024-07-31",
+          },
+          body: { context_management: CTX_MGMT },
+        }),
+        env,
+        makeCtx(),
+      );
+      assert.equal(r.status, 200);
+      assert.equal(
+        calls[0].init.headers["anthropic-beta"],
+        "prompt-caching-2024-07-31,context-management-2025-06-27",
+        "client anthropic-beta merged with ours — deduped, comma-joined",
+      );
+      assert.match(
+        calls[0].url,
+        /api\.anthropic\.com\/v1\/messages\?beta=true$/,
+        "?beta=true preserved on the upstream URL",
+      );
+      const sent = JSON.parse(calls[0].init.body);
+      assert.deepEqual(sent.context_management, CTX_MGMT, "context_management passes through untouched");
+
+      // Without client betas: ours only, no query appended.
+      await app.fetch(messagesRequest(), env, makeCtx());
+      assert.equal(
+        calls[1].init.headers["anthropic-beta"],
+        "prompt-caching-2024-07-31",
+        "no client beta → worker's caching beta only",
+      );
+      assert.ok(!calls[1].url.includes("beta="), "no ?beta=true when the client sent none");
+    },
+  );
+}
+console.log("✓ messages: anthropic-beta merged+deduped, context_management + ?beta=true preserved");
+
+// --- upstream 4xx passthrough: fail fast, sanitized (#282 retry storm) -------
+{
+  const env = messagesEnv();
+  const SECRET_PROSE =
+    "context_management requires the beta header context-management-2025-06-27 sk-ant-SUPERSECRET";
+  await withMockUpstream(
+    () =>
+      new Response(
+        JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: SECRET_PROSE } }),
+        { status: 400 },
+      ),
+    async () => {
+      const r = await app.fetch(messagesRequest(), env, makeCtx());
+      assert.equal(r.status, 400, "upstream 400 → client 400 (SDK fails fast, no 10x retry)");
+      const body = await r.text();
+      assert.ok(!body.includes("SUPERSECRET"), "upstream 400 prose does NOT leak");
+      assert.ok(!body.includes("context-management"), "no raw upstream prose in the client body");
+      const j = JSON.parse(body);
+      assert.equal(j.type, "error", "Anthropic-native error envelope");
+      assert.equal(j.error.type, "invalid_request_error");
+      assert.match(j.error.message, /upstream error \(status 400\)/);
+      assert.ok(j.request_id, "request_id present for operator correlation");
+    },
+  );
+  await withMockUpstream(
+    () => new Response("rate limited, retry in 60s", { status: 429 }),
+    async () => {
+      const r = await app.fetch(messagesRequest(), env, makeCtx());
+      assert.equal(r.status, 429, "upstream 429 → client 429");
+      const j = await r.json();
+      assert.equal(j.error.type, "rate_limit_error");
+      assert.ok(!JSON.stringify(j).includes("retry in 60s"), "429 prose sanitized too");
+    },
+  );
+}
+console.log("✓ messages: upstream 400/429 pass through same-status, sanitized");
+
 // --- upstream error: #257 sanitization (log-only detail) ---------------------
 {
   const env = messagesEnv();
@@ -263,7 +347,7 @@ console.log("✓ messages: streaming — verbatim Anthropic SSE, usage tapped, t
     },
   );
 }
-console.log("✓ messages: upstream error sanitized — status + request_id only");
+console.log("✓ messages: upstream 529 sanitized 502 — status + request_id only");
 
 // --- missing ANTHROPIC_API_KEY: sanitized 502 config error --------------------
 {
@@ -460,6 +544,51 @@ console.log("✓ count_tokens: model policy — catalog clamp + haiku fast-pin (
   );
 }
 console.log("✓ count_tokens: no usage_log / turns / analytics rows (not a turn)");
+
+// --- anthropic-beta merge (parity with /v1/messages) ---------------------------
+{
+  const env = messagesEnv();
+  await withMockUpstream(
+    () => Response.json({ input_tokens: 5 }),
+    async (calls) => {
+      const r = await app.fetch(
+        countTokensRequest({ headers: { "anthropic-beta": "context-management-2025-06-27" } }),
+        env,
+        makeCtx(),
+      );
+      assert.equal(r.status, 200);
+      assert.equal(
+        calls[0].init.headers["anthropic-beta"],
+        "prompt-caching-2024-07-31,context-management-2025-06-27",
+        "client anthropic-beta merged into the count_tokens upstream call",
+      );
+    },
+  );
+}
+console.log("✓ count_tokens: client anthropic-beta merged (parity with /v1/messages)");
+
+// --- upstream 4xx passthrough: fail fast, sanitized -----------------------------
+{
+  const env = messagesEnv();
+  await withMockUpstream(
+    () =>
+      new Response(
+        JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "prompt too long sk-ant-SUPERSECRET" } }),
+        { status: 400 },
+      ),
+    async () => {
+      const r = await app.fetch(countTokensRequest(), env, makeCtx());
+      assert.equal(r.status, 400, "count_tokens upstream 400 → client 400");
+      const body = await r.text();
+      assert.ok(!body.includes("SUPERSECRET"), "prose sanitized");
+      const j = JSON.parse(body);
+      assert.equal(j.error.type, "invalid_request_error");
+      assert.match(j.error.message, /upstream error \(status 400\)/);
+      assert.ok(j.request_id);
+    },
+  );
+}
+console.log("✓ count_tokens: upstream 400 passes through same-status, sanitized");
 
 // --- upstream error: #257 sanitization ----------------------------------------
 {
