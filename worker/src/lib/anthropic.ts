@@ -12,6 +12,17 @@ import type { AnthropicRequest } from "./translate";
 const DEFAULT_URL = "https://api.anthropic.com/v1/messages";
 const API_VERSION = "2023-06-01";
 
+/**
+ * Token-counting endpoint URL (#282 follow-up: /v1/messages/count_tokens).
+ * Derived from the same base as the Messages call so the ANTHROPIC_PROXY_URL
+ * indirection (#26 sediment region pin) keeps working: the proxy is a
+ * transparent passthrough under /proxy/anthropic/*, so appending the subpath
+ * to the configured messages URL routes count_tokens through it too.
+ */
+export function countTokensUrl(baseUrl?: string): string {
+  return (baseUrl ?? DEFAULT_URL).replace(/\/+$/, "") + "/count_tokens";
+}
+
 export async function callAnthropic(
   body: AnthropicRequest,
   apiKey: string,

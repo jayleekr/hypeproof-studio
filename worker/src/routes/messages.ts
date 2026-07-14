@@ -44,7 +44,7 @@ import {
   clampMaxTokens,
   type CoachContext,
 } from "../lib/translate";
-import { callAnthropic } from "../lib/anthropic";
+import { callAnthropic, countTokensUrl } from "../lib/anthropic";
 import type { AnthropicRequest } from "../lib/translate";
 import { MODEL_MAP, type ModelAlias, type Profile } from "../profiles/types";
 import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../lib/chat-extract";
@@ -306,4 +306,104 @@ messages.post("/messages", async (c) => {
       "x-hps-model": modelLabel,
     },
   });
+});
+
+// POST /v1/messages/count_tokens — Anthropic token-counting passthrough.
+//
+// The Agent SDK calls this during the agent loop to budget context (compaction
+// triggers, max_tokens headroom). Without it the gateway 404s and the SDK's
+// budgeting silently degrades — the known gap from #316.
+//
+// Same trust pipeline as /v1/messages above:
+//   - gateChatRequest (token / revocation / session / roster / pause)
+//   - client `system` DROPPED and replaced with the cohort blocks — the count
+//     must reflect what /v1/messages would actually send upstream, otherwise
+//     the SDK budgets against a prompt that never exists
+//   - resolveMessagesModel clamp (counts are tokenizer/model-specific)
+//   - ANTHROPIC_PROXY_URL indirection (transparent /proxy/anthropic/* proxy)
+//   - #257 sanitized errors
+//
+// Deliberately NO usage_log / turns rows: count_tokens is free upstream (not
+// billed, no completion) and is not a conversational turn — recording it
+// would pollute workshop quota dashboards and trial analytics with zero-output
+// noise rows. Reasoning spelled out in the PR for #282.
+messages.post("/messages/count_tokens", async (c) => {
+  const env = c.env;
+
+  // 1. Same trust gates as /v1/messages (shared module).
+  const gate = await gateChatRequest(c);
+  if (!gate.ok) return gate.response;
+  const { profile } = gate;
+
+  // Body
+  let raw: Record<string, unknown>;
+  try {
+    const parsed = await c.req.json();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    raw = parsed as Record<string, unknown>;
+  } catch {
+    return c.json(anthropicError(c, "invalid_request_error", "bad json body"), 400);
+  }
+  if (!Array.isArray(raw.messages)) {
+    return c.json(anthropicError(c, "invalid_request_error", "messages must be an array"), 400);
+  }
+
+  const apiKey = env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) {
+    // #257 — config prose (env var names) stays in logs.
+    console.error(`[${c.get("requestId")}] /v1/messages/count_tokens: ANTHROPIC_API_KEY is not set`);
+    return c.json(
+      anthropicError(c, "api_error", "Anthropic upstream is not configured — contact the operator"),
+      502,
+    );
+  }
+
+  const coach: CoachContext = {
+    name: decodeHeader(c.req.header("x-hps-coach-name")),
+    personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+  };
+
+  // 2-3. Enforced fields, mirroring /v1/messages: spread-first keeps unknown
+  // count_tokens fields (tools, tool_choice, thinking, …) flowing through;
+  // `system` is REPLACED with the cohort blocks and the model is clamped so
+  // the count matches the request /v1/messages would actually send. The
+  // count_tokens contract has no max_tokens/stream — strip them in case a
+  // client blindly reuses a messages body (upstream 400s on unknown params).
+  const modelLabel = resolveMessagesModel(raw.model, profile);
+  const upstreamBody = {
+    ...raw,
+    model: modelLabel,
+    system: buildAnthropicSystemBlocks(profile, coach),
+  } as Record<string, unknown>;
+  delete upstreamBody.max_tokens;
+  delete upstreamBody.stream;
+
+  // 4. Upstream call — same key + proxy indirection, count_tokens subpath.
+  let upstream: Response;
+  try {
+    upstream = await callAnthropic(upstreamBody as unknown as AnthropicRequest, apiKey, {
+      url: countTokensUrl(env.ANTHROPIC_PROXY_URL),
+      proxySecret: env.ANTHROPIC_PROXY_SECRET,
+    });
+  } catch (err) {
+    // #257 — fetch errors can embed upstream URLs or header names.
+    console.error(`[${c.get("requestId")}] count_tokens upstream call failed:`, err);
+    return c.json(anthropicError(c, "api_error", "upstream request failed"), 502);
+  }
+
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => "");
+    // #257 — upstream error prose to logs only; client gets status + request_id.
+    console.error(`[${c.get("requestId")}] count_tokens upstream ${upstream.status}: ${text.slice(0, 500)}`);
+    return c.json(
+      anthropicError(c, "api_error", `upstream error (status ${upstream.status})`),
+      502,
+    );
+  }
+
+  // 5. Verbatim JSON passthrough ({"input_tokens": N}) — no usage_log, no
+  // turns row (see header comment).
+  const j = (await upstream.json()) as Record<string, unknown>;
+  c.header("x-hps-model", modelLabel);
+  return c.json(j);
 });
