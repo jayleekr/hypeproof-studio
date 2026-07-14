@@ -36,6 +36,7 @@ import {
   stateBucketId,
   extractCohortIdUnverified,
   browserToolLogLine,
+  AiDisclosureGate,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
@@ -60,6 +61,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // state (pageNotice) resets whenever the panel is hidden and re-shown.
   // Cleared alongside pendingPageContext when the queued context is consumed.
   private pendingPageNotice: string | null = null;
+  // #320 — AI disclosure at session start (REQ-C14). Host-side gate because
+  // the webview forgets everything on hide/show remounts; see AiDisclosureGate.
+  private readonly aiDisclosure = new AiDisclosureGate();
   private activeCohortId: string | null = null;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
@@ -187,6 +191,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     await this.context.workspaceState.update(this.historyKey(), []);
     this.assetScores?.resetAssetScores();
     void this.post({ type: "history", messages: [] });
+    // #320 — a cleared conversation is a fresh session: disclose again (REQ-C14).
+    void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
   }
 
   /** Force re-fetch on next config push (e.g. after token change). */
@@ -389,6 +395,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // reducer replaces pageNotice rather than appending.
         if (this.pendingPageNotice) {
           void this.post({ type: "pageAttached", label: this.pendingPageNotice });
+        }
+        // #320 — AI disclosure at session start (REQ-C14). First "ready" of
+        // a session shows the notice; hide/show remounts within the same
+        // session return null here and stay silent. A history clear resets
+        // the session (see clearHistory), so the next conversation start is
+        // disclosed again.
+        {
+          const disclosure = this.aiDisclosure.noticeForReady();
+          if (disclosure) void this.post({ type: "aiDisclosure", text: disclosure });
         }
         return;
       case "sendMessage":

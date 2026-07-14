@@ -74,6 +74,7 @@ When in doubt:
 | REQ-C11 | 이미지 단발 주입 | 첨부 이미지는 **그 user 턴에만** 모델로 전송됨. `history` 는 text-only 로 매핑(`proxyClient` 가 `m.content` 만 사용) → 후속 턴 재전송·workspaceState 영속 저장 모두 안 함. show-intent 단축은 이미지 첨부 시 건너뜀 | U + E |
 | REQ-C12 | 이미지 입력 sanitize + 캡 (worker) | `translate()` 가 OpenAI `image_url` → Anthropic image 블록(data URL→base64 source, http(s)→url source) 변환. `data:image/{png,jpe?g,gif,webp}` + http(s) 만 허용, `file:`/`javascript:` 등은 drop. 턴당 최대 4장·data URL 6.5M자 상한. 이미지 없는 array 는 string 으로 collapse(legacy shape 유지) | U |
 | REQ-C13 | 이미지 입력 profile 게이트 (default OFF) | `Profile.input.image_paste` 미설정/false 면 (1) 웹뷰 paste 핸들러가 텍스트 전용으로 동작 + (2) **워커가 `filterMessages` 에서 image 블록 server-side strip** (클라가 보내도 차단). 현 3개 cohort 전부 OFF — 미성년 cohort 가 이미지 흐름에 노출되지 않음. `/v1/profile` 이 resolved boolean 으로 노출 | U |
+| REQ-C14 | AI 상호작용 고지 (세션 시작) (#320) | Anthropic Usage Policy — consumer-facing chat 은 최소 세션 시작 시 "AI 와 대화 중" 고지. `AiDisclosureGate`(호스트측): 세션 첫 webview mount 에서 1회 + history clear 직후 재고지; 같은 세션 내 hide/show remount 에는 미재노출. 문구는 오답 가능성·확인 권고 문장 포함(ToS §D.3, verification_reflex). webview 는 메시지 리스트 상단에 `role=note` + `aria-live=polite` 배너로 렌더 | U (`test/ai-disclosure`) |
 
 ## D. Preview / Run
 

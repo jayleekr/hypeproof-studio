@@ -15,6 +15,7 @@ interface Props {
   messages: ChatMessage[];
   toolLog: ToolLogEntry[];              // #278 Phase 3 — browser loop action log
   pageNotice: string | null;           // #308 — "페이지를 코치에게" 인라인 안내
+  aiNotice: string | null;             // #320 — AI disclosure at session start
   streaming: boolean;
   error: string | null;
   errorRequestId: string | null;
@@ -266,6 +267,15 @@ export function ChatPanel(props: Props) {
       )}
 
       <div className="hps-messages" ref={scrollRef}>
+        {props.aiNotice && (
+          // #320 — AI disclosure (Anthropic Usage Policy / ToS §D.3). Compact
+          // and unobtrusive; sits at the top of the conversation so it reads
+          // as a session-start notice, not an interruption.
+          <div className="hps-ai-disclosure" role="note" aria-live="polite">
+            {props.aiNotice}
+          </div>
+        )}
+
         {messages.length === 0 && (
           <EmptyState
             ux={ux}
