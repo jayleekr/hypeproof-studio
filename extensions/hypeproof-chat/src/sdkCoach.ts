@@ -20,6 +20,7 @@ import { TOKEN_EXPIRED_FRIENDLY } from "./proxyClientHelpers";
 import {
   buildSdkQueryOptions,
   consumeSdkStream,
+  evaluateSdkToolUse,
   profileToAgentOptions,
   sdkToolToActionRequest,
   type CoachToolAction,
@@ -159,14 +160,27 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       cwd: args.cwd,
       baseEnv: process.env,
     }),
-    // Every tool call routes here (allowedTools is empty). First enforce the
-    // cohort's permitted set, then gate the survivors through the host modal.
+    // Every tool call routes here (allowedTools is empty — an entry there
+    // would auto-approve and bypass this gate). The pure policy matrix
+    // (evaluateSdkToolUse, #282 Phase 2) decides:
+    //   deny  → not profile-granted (Bash & co) or path escapes the workspace;
+    //           reason logged host-side, student sees the Korean line;
+    //   allow → read tools contained in the workspace (auto, no modal);
+    //   ask   → write tools (ALWAYS the approve/deny modal — the gate is the
+    //           pedagogy) + web research (host approval tiers decide).
     canUseTool: async (name, input) => {
-      if (!opts.permittedTools.includes(name)) {
-        return {
-          behavior: "deny" as const,
-          message: "이 도구는 지금 수업에서는 사용할 수 없어요.",
-        };
+      const verdict = evaluateSdkToolUse({
+        toolName: name,
+        input,
+        permittedTools: opts.permittedTools,
+        workspaceRoot: args.cwd,
+      });
+      if (verdict.decision === "deny") {
+        console.warn(`[coach] tool denied: ${name} — ${verdict.reason}`);
+        return { behavior: "deny" as const, message: verdict.friendly };
+      }
+      if (verdict.decision === "allow") {
+        return { behavior: "allow" as const, updatedInput: input };
       }
       const ok = await args.requestApproval({ toolName: name, input });
       return ok

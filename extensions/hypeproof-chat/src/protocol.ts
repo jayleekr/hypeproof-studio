@@ -110,6 +110,12 @@ export interface ResolvedProfile {
   // worker, not inferred client-side). Drives which Agent SDK tools the coach may
   // use. Absent/false → the coach is chat-only for that capability.
   tools?: { web_search?: boolean };
+  // #282 Phase 2 — Agent SDK workspace tools, owned by the worker profile
+  // (ADR 0003). read → Read/Grep/Glob, write → Write/Edit. Absent/false →
+  // chat-only (fail closed). No shell/exec flag exists in the schema; minors'
+  // cohorts never carry write:true (harness child_sdk_write FAIL + client-side
+  // strip for minor tiers).
+  sdk_tools?: { read?: boolean; write?: boolean };
 }
 
 export interface UxConfig {

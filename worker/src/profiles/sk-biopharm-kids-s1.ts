@@ -13,6 +13,8 @@ export const profile: Profile = {
     language: "ko",
     parent_coaching: true,
   },
+  // #320 — minors cohort: enables the gateway moderation layer (REQ-O1/O2).
+  minor_cohort: true,
   model: {
     default: "hypeproof-default",       // Sonnet for higher quality; switch to fast if cost pressure
     fallback: "hypeproof-fast",

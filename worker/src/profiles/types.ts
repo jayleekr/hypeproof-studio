@@ -13,6 +13,16 @@ export interface Profile {
     language: "ko" | "en";
     parent_coaching: boolean;
   };
+  /**
+   * #320 — compliance flag: this cohort serves MINORS (Anthropic minors-guide
+   * + PIPA). Drives the gateway moderation layer (lib/moderation.ts) and is
+   * exposed via /v1/profile so the client can render minor-specific UX (AI
+   * disclosure, etc.). Belt-and-braces: `isMinorCohort()` ALSO treats any
+   * `audience.age_range` upper bound < 18 as minor, so forgetting this flag
+   * on a future kids profile cannot silently disable moderation (project
+   * minor-safety invariant: when in doubt, deny for minors).
+   */
+  minor_cohort?: boolean;
   model: {
     default: ModelAlias;
     fallback?: ModelAlias;
@@ -102,6 +112,26 @@ export interface Profile {
   tools?: {
     web_search?: boolean;
     max_uses?: number;
+  };
+  /**
+   * #282 Phase 2 — Agent SDK workspace tools the coach may use when the Studio
+   * runs on the agent-sdk runtime ("coach edits index.html directly"). The
+   * PROFILE owns this policy (ADR 0003): the client maps these flags to SDK
+   * tool names (read → Read/Grep/Glob, write → Write/Edit) and must never
+   * widen beyond them.
+   *
+   * Absent = all false → the coach is chat-only (fail closed). There is
+   * deliberately NO shell/exec flag in this schema — shell execution cannot be
+   * granted by any cohort profile in Phase 2, period.
+   *
+   * MINOR-SAFETY INVARIANT: minors' cohorts (parent_coaching / kids tiers)
+   * must NEVER set `write: true`. Enforced by the cohort harness
+   * (`child_sdk_write` FAIL) and again client-side (write tools are stripped
+   * for minor tiers regardless of this flag).
+   */
+  sdk_tools?: {
+    read?: boolean;
+    write?: boolean;
   };
   /**
    * #278 Phase 3 — the client-driven agentic browser tool loop. When enabled,

@@ -51,6 +51,12 @@ import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../
 import { recordTurnIfOwned } from "../lib/storage";
 import { tapAnthropicStream } from "../lib/sse";
 import { logChat, persistUsage } from "../lib/analytics";
+import {
+  isMinorCohort,
+  screenText,
+  reportModerationHit,
+  MODERATION_BLOCK_MESSAGE_KO,
+} from "../lib/moderation";
 
 export const messages = new Hono<{ Bindings: Env }>();
 
@@ -167,6 +173,27 @@ messages.post("/messages", async (c) => {
   const promptChars = promptText.length;
   const persistBody = profile.analytics.log_user_messages === true;
 
+  // #320 — gateway moderation, MINOR cohorts only (REQ-O2), same layer as
+  // /v1/chat/completions: the latest user text is screened BEFORE the
+  // upstream call. Applies to stream and non-stream requests alike (it's
+  // the inbound side); outbound STREAMING moderation is a documented
+  // follow-up — the SDK path streams and we do not buffer streams (see
+  // lib/moderation.ts header). Adult cohorts skip entirely (REQ-O4). The
+  // 400 status doubles as the SDK's fast-fail signal (REQ-M15) so the CLI
+  // does not retry a deterministic block.
+  if (isMinorCohort(profile)) {
+    const hit = screenText(promptText);
+    if (hit) {
+      reportModerationHit(
+        env,
+        c.get("requestId"),
+        { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "inbound" },
+        hit,
+      );
+      return c.json(anthropicError(c, "moderation_block", MODERATION_BLOCK_MESSAGE_KO), 400);
+    }
+  }
+
   const stream = raw.stream === true;
   const modelLabel = resolveMessagesModel(raw.model, profile);
 
@@ -268,6 +295,21 @@ messages.post("/messages", async (c) => {
       .map((b) => b.text as string)
       .join("");
     record(mkLog(tin, tout, cr, cc));
+    // #320 — outbound moderation, MINOR cohorts, non-stream only (REQ-O3).
+    // Usage stays recorded (tokens were spent); the blocked text never
+    // reaches the client and the trace turn body is not persisted.
+    if (isMinorCohort(profile)) {
+      const hit = screenText(text);
+      if (hit) {
+        reportModerationHit(
+          env,
+          c.get("requestId"),
+          { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "outbound" },
+          hit,
+        );
+        return c.json(anthropicError(c, "moderation_block", MODERATION_BLOCK_MESSAGE_KO), 400);
+      }
+    }
     if (trial) {
       c.executionCtx.waitUntil(
         recordTurnIfOwned(

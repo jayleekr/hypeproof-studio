@@ -1663,6 +1663,14 @@ const TINY_PNG =
       assert.notEqual(p.input?.image_paste, true, `minor cohort ${p.id}: image_paste MUST stay off`);
     }
   }
+  // #282 Phase 2 — Agent SDK workspace tools. MINOR-SAFETY INVARIANT: minors'
+  // cohorts must NEVER gain write capability (and there is no exec flag in the
+  // schema at all). Mirrors the harness child_sdk_write FAIL check.
+  for (const p of all) {
+    if (p.audience.parent_coaching === true) {
+      assert.notEqual(p.sdk_tools?.write, true, `minor cohort ${p.id}: sdk_tools.write MUST stay off`);
+    }
+  }
   // #278 is layered onto the existing website-copyclone track (원장 v2), not a
   // separate homepage cohort — the reviewer's operational call (issuer token is
   // scoped to boah-dental-2026-a; the cuesheet is the copyclone pedagogy).
@@ -1676,6 +1684,14 @@ const TINY_PNG =
   assert.equal(copyclone.input?.image_paste, true, "copyclone: image_paste on (target screenshot)");
   assert.equal(copyclone.preview.type, "live_server", "copyclone: live_server preview (조건③)");
   assert.equal(copyclone.browser_control?.enabled, true, "copyclone: browser_control on (조건② 제어)");
+  // #282 Phase 2 — the adult copyclone cohort is the ONLY profile with
+  // read+write SDK workspace tools (coach edits index.html directly).
+  assert.deepEqual(copyclone.sdk_tools, { read: true, write: true }, "copyclone: SDK workspace read+write on (adult, #282 Phase 2)");
+  for (const p of all) {
+    if (p.id !== copyclone.id) {
+      assert.notEqual(p.sdk_tools?.write, true, `profile ${p.id}: sdk_tools.write reserved for the adult copyclone cohort in Phase 2`);
+    }
+  }
   // No stray homepage cohort/tier survived the merge into copyclone.
   assert.ok(!all.some((p) => p.id === "boah-homepage-2026-s1"), "boah-homepage cohort removed (merged into copyclone)");
   assert.ok(!all.some((p) => p.game?.template_tier === "homepage"), "no profile uses removed 'homepage' tier");
