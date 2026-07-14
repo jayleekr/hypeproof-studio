@@ -116,7 +116,7 @@ async function reportQuietState(app: ElectronApplication): Promise<void> {
     dockVisible:
       (electronApp as unknown as { dock?: { isVisible?(): boolean } }).dock?.isVisible?.() ?? null,
     appHidden: (electronApp as unknown as { isHidden?(): boolean }).isHidden?.() ?? null,
-    windows: BrowserWindow.getAllWindows().map((w) => ({
+    windows: BrowserWindow.getAllWindows().map((w: { getBounds(): unknown; isVisible(): boolean }) => ({
       bounds: w.getBounds(),
       visible: w.isVisible(),
     })),
