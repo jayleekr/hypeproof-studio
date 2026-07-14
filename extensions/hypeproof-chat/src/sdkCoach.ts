@@ -15,8 +15,11 @@
 
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import type { AssetScoreChunk, Citation, ResolvedProfile } from "./protocol";
+import { ProxyAuthError } from "./proxyClient";
+import { TOKEN_EXPIRED_FRIENDLY } from "./proxyClientHelpers";
 import {
   buildSdkQueryOptions,
+  consumeSdkStream,
   profileToAgentOptions,
   sdkToolToActionRequest,
   type CoachToolAction,
@@ -175,34 +178,26 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
 
   const stream = sdk.query({ prompt, options });
 
-  // Map SDK messages → the proxyChat callback shape. Field access is defensive
-  // (Record<string,unknown>) until the real SDK types land in Phase 1.
-  for await (const msg of stream) {
-    // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
-    if (args.signal.aborted) throw abortError();
-    const type = String((msg as Record<string, unknown>).type ?? "");
-    if (type === "assistant" || type === "text" || type === "content_block_delta") {
-      const delta = extractText(msg);
-      if (delta) args.onDelta(delta);
-    }
-    // Other message types (result / message_stop) are terminal — nothing to
-    // emit; the caller posts streamEnd. (onCitations / onAssetScore are wired
-    // for parity but the SDK stream mapping for those lands in Phase 1.)
-  }
-}
-
-/** Best-effort text extraction across candidate SDK message shapes (spike). */
-function extractText(msg: Record<string, unknown>): string {
-  const direct = msg["text"];
-  if (typeof direct === "string") return direct;
-  const delta = msg["delta"] as Record<string, unknown> | undefined;
-  if (delta && typeof delta["text"] === "string") return delta["text"] as string;
-  const message = msg["message"] as Record<string, unknown> | undefined;
-  const content = message?.["content"];
-  if (Array.isArray(content)) {
-    return content
-      .map((b) => (b && typeof b === "object" && typeof (b as Record<string, unknown>).text === "string" ? (b as Record<string, unknown>).text : ""))
-      .join("");
-  }
-  return "";
+  // Map SDK messages → the proxyChat callback shape via the pure consumer
+  // (sdkCoachHelpers.consumeSdkStream — unit-tested). Two exits besides normal
+  // completion:
+  // - user stop → AbortError (proxy-path parity, REQ-M8);
+  // - gateway 401/400 api_retry → fast-fail (#320, REQ-M15): the SDK CLI would
+  //   otherwise retry up to 10x with backoff, i.e. a bad/expired workshop token
+  //   became a multi-minute silent hang for a kid. We abort the query on the
+  //   FIRST such event and throw the SAME student-friendly token error the
+  //   proxy path uses (ProxyAuthError kind "expired" → chatPanelProvider
+  //   clears the dead token + reopens the token input box). "expired" fits
+  //   both statuses here: the workshop token is the only credential on this
+  //   path, so a 400/401 means that token is unusable — replacing it is the
+  //   recovery, retrying is not.
+  // (onCitations / onAssetScore are wired for parity but the SDK stream
+  // mapping for those lands in a later phase.)
+  await consumeSdkStream(stream, {
+    isAborted: () => args.signal.aborted,
+    makeAbortError: abortError,
+    abortQuery: () => abortController.abort(),
+    makeFatalAuthError: () => new ProxyAuthError("expired", TOKEN_EXPIRED_FRIENDLY),
+    onDelta: args.onDelta,
+  });
 }
