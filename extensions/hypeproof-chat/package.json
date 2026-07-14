@@ -143,6 +143,11 @@
           "default": "proxy",
           "description": "Coach runtime. 'proxy' = the current single-turn provider proxy (default). 'agent-sdk' = the Claude Agent SDK coach (epic #282). Until the SDK is bundled (Phase 1), selecting 'agent-sdk' transparently falls back to the proxy runtime for each turn (a dev warning is logged); it never interrupts the student."
         },
+        "hypeproofChat.sdkBinaryPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to a claude CLI binary for the agent-sdk coach runtime (epic #282). Highest-priority override; when empty, resolution falls through HPS_SDK_BINARY (env) → the seeded per-user location (scripts/seed-sdk-binary.sh) → node_modules (dev). If nothing resolves, the coach falls back to the proxy runtime."
+        },
         "hypeproofChat.requireApprovalFor": {
           "type": "array",
           "items": {

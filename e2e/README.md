@@ -24,6 +24,23 @@ HPS_APP_PATH="/path/to/copy/HypeProof Studio.app" npm test
 `HPS_APP_PATH` accepts either the `.app` bundle root or the inner
 `Contents/MacOS/HypeProof Studio` binary. Unset → the default in-tree artifact.
 
+### SDK coach binary — `HPS_SDK_BINARY`
+
+Tests that exercise the agent-sdk coach runtime need the native `claude` CLI
+(#282 W4a, REQ-M24). Packaged builds don't carry it; the extension resolves it
+as `hypeproofChat.sdkBinaryPath` setting → **`HPS_SDK_BINARY` env** → seeded
+location → node_modules. For e2e, either:
+
+```bash
+# one-time seed to the standard per-user location (integrity-verified):
+bash scripts/seed-sdk-binary.sh
+# or point at any binary explicitly (e.g. the dev node_modules copy):
+HPS_SDK_BINARY="$PWD/extensions/hypeproof-chat/node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/claude" npm test
+```
+
+Neither set → the coach falls back to the proxy runtime (REQ-M7), which is
+also a valid state to test.
+
 ### Quiet mode — `HPS_QUIET` (invisible local runs)
 
 GUI e2e runs LOCALLY (private-repo macOS CI minutes bill at 10x). To keep a run

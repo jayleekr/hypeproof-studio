@@ -14,6 +14,10 @@
 // surfacing a raw error to the student (REQ-M7).
 
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import * as fs from "node:fs";
+import { createRequire } from "node:module";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   buildHypeproofMcpServer,
   HYPEPROOF_MCP_SERVER_NAME,
@@ -29,8 +33,13 @@ import {
   consumeSdkStream,
   evaluateSdkToolUse,
   profileToAgentOptions,
+  resolveSdkBinary,
+  sdkBinaryMarkerPath,
   sdkToolToActionRequest,
+  seededSdkBinaryPath,
   type CoachToolAction,
+  type SdkBinaryResolution,
+  type SdkBinaryStat,
 } from "./sdkCoachHelpers";
 
 export type { BrowserMcpHost } from "./browserMcp";
@@ -85,6 +94,14 @@ export interface SdkCoachArgs {
    * browser-less. Implemented by chatPanelProvider (it has the vscode API).
    */
   browserHost?: BrowserMcpHost;
+  /**
+   * #282 W4a — the hypeproofChat.sdkBinaryPath setting (highest-priority
+   * binary override). Undefined/empty = unset; resolution then walks
+   * HPS_SDK_BINARY → seeded location → node_modules (REQ-M24).
+   */
+  binaryPathSetting?: string;
+  /** Test seam: inject a pre-computed binary resolution (skip fs probes). */
+  binaryResolution?: SdkBinaryResolution;
   /** Test seam: inject a fake SDK module instead of importing the real one. */
   sdk?: AgentSdkModule;
   /** Test seam: inject a fake zod instead of importing the real one. */
@@ -159,6 +176,94 @@ async function loadZod(): Promise<ZodLike | null> {
   }
 }
 
+// ── Native `claude` binary resolution — host side (#282 W4a, REQ-M24) ────────
+// The pure order/gate logic lives in sdkCoachHelpers (resolveSdkBinary,
+// isSeededBinaryTrusted); this side supplies the real fs/os/require probes.
+
+function statBinary(p: string): SdkBinaryStat {
+  try {
+    const st = fs.statSync(p);
+    if (!st.isFile()) return { exists: false, executable: false, size: 0 };
+    let executable = true;
+    if (process.platform !== "win32") {
+      try {
+        fs.accessSync(p, fs.constants.X_OK);
+      } catch {
+        executable = false;
+      }
+    }
+    return { exists: true, executable, size: st.size };
+  } catch {
+    return { exists: false, executable: false, size: 0 };
+  }
+}
+
+function readMarker(binaryPath: string): string | null {
+  try {
+    return fs.readFileSync(sdkBinaryMarkerPath(binaryPath), "utf8");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Does the SDK's own node_modules optionalDependency lookup stand a chance?
+ * Mirrors the SDK's fallback (doc §2.1): createRequire().resolve over the
+ * platform package's `claude[.exe]` subpath. `__filename` exists in the
+ * esbuild CJS bundle (extension host); under the ESM smoke tests it is
+ * undefined and we anchor to cwd — either way this is only a cheap probe.
+ */
+function nodeModulesBinaryAvailable(): boolean {
+  const anchor =
+    typeof __filename === "string" && __filename
+      ? __filename
+      : path.join(process.cwd(), "noop.js");
+  let req: NodeJS.Require;
+  try {
+    req = createRequire(anchor);
+  } catch {
+    return false;
+  }
+  const suffixes =
+    process.platform === "linux"
+      ? [`linux-${process.arch}`, `linux-${process.arch}-musl`]
+      : [`${process.platform}-${process.arch}`];
+  const binName = process.platform === "win32" ? "claude.exe" : "claude";
+  for (const suffix of suffixes) {
+    try {
+      const resolved = req.resolve(`@anthropic-ai/claude-agent-sdk-${suffix}/${binName}`);
+      if (fs.existsSync(resolved)) return true;
+    } catch {
+      // keep probing
+    }
+  }
+  return false;
+}
+
+/**
+ * Resolve the claude binary with real host probes. Exported for the
+ * orchestration path (runSdkCoach calls it when no test seam is injected)
+ * and for diagnostics.
+ */
+export function resolveSdkBinaryForHost(args?: { settingPath?: string }): SdkBinaryResolution {
+  const seededPath = seededSdkBinaryPath({
+    platform: process.platform,
+    homeDir: os.homedir(),
+    env: process.env,
+  });
+  return resolveSdkBinary({
+    settingPath: args?.settingPath,
+    envPath: process.env.HPS_SDK_BINARY,
+    seeded: {
+      path: seededPath,
+      stat: statBinary(seededPath),
+      markerRaw: readMarker(seededPath),
+    },
+    nodeModulesAvailable: nodeModulesBinaryAvailable(),
+    fileExists: (p) => fs.existsSync(p),
+  });
+}
+
 function abortError(): Error {
   // Mirror the proxy path (fetch throws a DOMException AbortError on abort) so
   // the caller's catch treats an SDK abort identically and skips history commit.
@@ -181,6 +286,26 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   if (args.signal.aborted) throw abortError();
   const abortController = new AbortController();
   args.signal.addEventListener("abort", () => abortController.abort(), { once: true });
+
+  // #282 W4a — locate the native `claude` binary BEFORE loading the SDK JS:
+  // setting > HPS_SDK_BINARY > seeded (integrity-gated) > node_modules. When
+  // nothing resolves we throw SdkUnavailableError here — same proxy-fallback
+  // contract as a missing SDK package (REQ-M7), but with the reasons logged —
+  // instead of letting the SDK crash mid-turn on a missing binary.
+  const binary = args.binaryResolution ?? resolveSdkBinaryForHost({
+    settingPath: args.binaryPathSetting,
+  });
+  if (!binary.available) {
+    console.warn(`[coach] no claude binary resolvable: ${binary.reasons.join("; ")}`);
+    throw new SdkUnavailableError(
+      "agent-sdk runtime selected but no claude CLI binary is available " +
+        "(set hypeproofChat.sdkBinaryPath or run scripts/seed-sdk-binary.sh). " +
+        "Falling back to the proxy runtime (#282 W4a).",
+    );
+  }
+  if (binary.path) {
+    console.info(`[coach] claude binary via ${binary.source}: ${binary.path}`);
+  }
 
   const sdk = args.sdk ?? (await loadSdk());
   const opts = profileToAgentOptions(args.profile, {
@@ -234,6 +359,10 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       token: args.token,
       cwd: args.cwd,
       baseEnv: process.env,
+      // W4a — explicit binary path (setting/env/seeded). Undefined for the
+      // node-modules source: the option is omitted and the SDK's own
+      // optionalDependency lookup runs (dev behavior, unchanged).
+      pathToClaudeCodeExecutable: binary.path,
     }),
     // Every tool call routes here (allowedTools is empty — an entry there
     // would auto-approve and bypass this gate). The pure policy matrix

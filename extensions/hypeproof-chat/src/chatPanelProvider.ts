@@ -658,6 +658,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             userText: userTextForModel,
             signal: ctrl.signal,
             cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+            // #282 W4a — explicit claude-binary override (highest priority in
+            // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
+            // seeded > node_modules). Empty string = unset.
+            binaryPathSetting: cfg.get<string>("sdkBinaryPath", "") || undefined,
             onDelta,
             onCitations,
             onAssetScore,

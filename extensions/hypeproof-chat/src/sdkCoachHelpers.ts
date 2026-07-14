@@ -28,6 +28,7 @@ import {
   MCP_LIVE_PREVIEW_START,
 } from "./browserMcp.ts";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
+import { SDK_BINARY_MIN_BYTES, SDK_BINARY_VERSION } from "./sdkBinaryManifest.ts";
 
 export type AgentPermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
 
@@ -298,6 +299,224 @@ export function maxTurnsFor(profile: ResolvedProfile): number {
   return isMinorTier(profile) ? 6 : 20;
 }
 
+// ── SDK native binary resolution (#282 W4a, docs/sdk-bundling.md §5) ─────────
+// The Agent SDK spawns a vendored native `claude` CLI. Packaged Studio builds
+// exclude node_modules, so the binary must be resolvable from OUTSIDE the app:
+// the SDK checks `options.pathToClaudeCodeExecutable` FIRST, arbitrary path,
+// no node_modules requirement (doc §2.1). Resolution order (REQ-M24):
+//   1. explicit setting  — hypeproofChat.sdkBinaryPath (instructor/dev
+//      override; used as-is if the file exists);
+//   2. env override      — HPS_SDK_BINARY (e2e/CI seam; same contract);
+//   3. seeded location   — the per-user dir scripts/seed-sdk-binary.sh
+//      installs to, accepted ONLY when the seed-time integrity marker checks
+//      out (isSeededBinaryTrusted);
+//   4. node_modules      — dev environments: no explicit path is passed and
+//      the SDK's own optionalDependency lookup runs;
+//   5. none of the above — the orchestration layer throws SdkUnavailableError
+//      and the caller falls back to the proxy coach (REQ-M7, unchanged).
+// Everything here is pure (fs probes injected) so the order is unit-testable.
+
+/**
+ * THE single definition of where a seeded binary lives (the seed script and a
+ * future in-app downloader must write to exactly this path):
+ *   darwin — ~/Library/Application Support/HypeProof-Studio/sdk/<version>/claude
+ *   win32  — %APPDATA%\HypeProof-Studio\sdk\<version>\claude.exe
+ *   linux  — ${XDG_CONFIG_HOME:-~/.config}/HypeProof-Studio/sdk/<version>/claude
+ * "HypeProof-Studio" matches the app's dataFolderName (branding-swap REQ-J3),
+ * but the path is deliberately FIXED rather than derived from globalStorageUri
+ * so the shell seeder and the extension agree without a running app, and dev
+ * hosts (plain VS Code, data folder "Code") still find a seeded binary.
+ * The binary is versioned per SDK release: a dependency bump changes the dir,
+ * so a stale binary is simply never resolved (doc §6 "Version skew").
+ */
+export function seededSdkBinaryPath(args: {
+  platform: string;
+  homeDir: string;
+  env?: Record<string, string | undefined>;
+  version?: string;
+}): string {
+  const version = args.version ?? SDK_BINARY_VERSION;
+  const env = args.env ?? {};
+  if (args.platform === "win32") {
+    const base = env.APPDATA && env.APPDATA.length > 0
+      ? env.APPDATA
+      : path.win32.join(args.homeDir, "AppData", "Roaming");
+    return path.win32.join(base, "HypeProof-Studio", "sdk", version, "claude.exe");
+  }
+  if (args.platform === "darwin") {
+    return path.posix.join(
+      args.homeDir,
+      "Library",
+      "Application Support",
+      "HypeProof-Studio",
+      "sdk",
+      version,
+      "claude",
+    );
+  }
+  // linux + anything else POSIX-ish (XDG convention).
+  const base = env.XDG_CONFIG_HOME && env.XDG_CONFIG_HOME.length > 0
+    ? env.XDG_CONFIG_HOME
+    : path.posix.join(args.homeDir, ".config");
+  return path.posix.join(base, "HypeProof-Studio", "sdk", version, "claude");
+}
+
+/** Seed-time integrity marker written next to the binary (same for .exe). */
+export function sdkBinaryMarkerPath(binaryPath: string): string {
+  return `${binaryPath}.verified.json`;
+}
+
+/** Contents of the `.verified.json` marker the seed script writes. */
+export interface SdkBinaryMarker {
+  sdkVersion: string;
+  /** Byte size of the extracted binary, measured at seed time. */
+  size: number;
+  /** SRI sha512 of the TARBALL that was verified at seed time. */
+  tarballSha512: string;
+  verifiedAt?: string;
+}
+
+/** Parse + shape-validate a marker file's raw text. null = not trustable. */
+export function parseSdkBinaryMarker(raw: string | null | undefined): SdkBinaryMarker | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (
+      typeof parsed.sdkVersion !== "string" ||
+      typeof parsed.size !== "number" ||
+      !Number.isFinite(parsed.size) ||
+      parsed.size <= 0 ||
+      typeof parsed.tarballSha512 !== "string" ||
+      !parsed.tarballSha512.startsWith("sha512-")
+    ) {
+      return null;
+    }
+    return {
+      sdkVersion: parsed.sdkVersion,
+      size: parsed.size,
+      tarballSha512: parsed.tarballSha512,
+      ...(typeof parsed.verifiedAt === "string" ? { verifiedAt: parsed.verifiedAt } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** What the fs probe reports about a candidate binary file. */
+export interface SdkBinaryStat {
+  exists: boolean;
+  /** X_OK for the current user (on win32 the probe reports existence). */
+  executable: boolean;
+  /** Byte size; 0/absent when the file doesn't exist. */
+  size: number;
+}
+
+/**
+ * The W4a integrity gate for a SEEDED binary (never applied to the explicit
+ * setting/env overrides — those are operator assertions). Cheap by design:
+ * sha512 over ~229 MiB at every coach turn is too slow, so the full hash runs
+ * ONCE at seed time (scripts/seed-sdk-binary.sh) and the runtime trusts
+ * marker presence + exact size match + a coarse minimum floor. See the trust
+ * model note in sdkBinaryManifest.ts.
+ */
+export function isSeededBinaryTrusted(args: {
+  stat: SdkBinaryStat;
+  markerRaw: string | null | undefined;
+  /** Expected SDK version (defaults to the pinned manifest version). */
+  version?: string;
+  minBytes?: number;
+}): { ok: true } | { ok: false; reason: string } {
+  const version = args.version ?? SDK_BINARY_VERSION;
+  const minBytes = args.minBytes ?? SDK_BINARY_MIN_BYTES;
+  if (!args.stat.exists) return { ok: false, reason: "seeded binary not found" };
+  if (!args.stat.executable) return { ok: false, reason: "seeded binary is not executable" };
+  const marker = parseSdkBinaryMarker(args.markerRaw);
+  if (!marker) return { ok: false, reason: "missing or malformed .verified.json marker" };
+  if (marker.sdkVersion !== version) {
+    return {
+      ok: false,
+      reason: `marker sdkVersion "${marker.sdkVersion}" does not match expected "${version}"`,
+    };
+  }
+  if (args.stat.size !== marker.size) {
+    return {
+      ok: false,
+      reason: `binary size ${args.stat.size} does not match seed-time size ${marker.size}`,
+    };
+  }
+  if (args.stat.size < minBytes) {
+    return { ok: false, reason: `binary size ${args.stat.size} below sanity floor ${minBytes}` };
+  }
+  return { ok: true };
+}
+
+export type SdkBinarySource = "setting" | "env" | "seeded" | "node-modules";
+
+export type SdkBinaryResolution =
+  | {
+      available: true;
+      source: SdkBinarySource;
+      /**
+       * Absolute path to pass as `pathToClaudeCodeExecutable`. Undefined for
+       * source "node-modules": no override is passed and the SDK's own
+       * optionalDependency lookup runs (dev behavior, unchanged).
+       */
+      path?: string;
+    }
+  | { available: false; reasons: string[] };
+
+/** Injected candidates — the orchestration layer supplies real fs probes. */
+export interface SdkBinaryCandidates {
+  /** hypeproofChat.sdkBinaryPath setting (empty/undefined = unset). */
+  settingPath?: string;
+  /** HPS_SDK_BINARY env var (e2e/CI). */
+  envPath?: string;
+  /** Probe result for the seededSdkBinaryPath location. */
+  seeded?: { path: string; stat: SdkBinaryStat; markerRaw: string | null };
+  /** Whether the SDK platform package's binary resolves from node_modules. */
+  nodeModulesAvailable: boolean;
+  /** fs.existsSync seam for the setting/env candidates. */
+  fileExists: (p: string) => boolean;
+  version?: string;
+}
+
+/**
+ * Resolve the claude binary per the REQ-M24 order. Pure: every probe is
+ * injected. An unset/invalid higher-priority candidate FALLS THROUGH (with a
+ * recorded reason) rather than failing the whole chain — a stale setting on a
+ * dev machine must not disable the node_modules path.
+ */
+export function resolveSdkBinary(c: SdkBinaryCandidates): SdkBinaryResolution {
+  const reasons: string[] = [];
+
+  const setting = c.settingPath?.trim();
+  if (setting) {
+    if (c.fileExists(setting)) return { available: true, source: "setting", path: setting };
+    reasons.push(`hypeproofChat.sdkBinaryPath is set but no file exists at ${setting}`);
+  }
+
+  const envPath = c.envPath?.trim();
+  if (envPath) {
+    if (c.fileExists(envPath)) return { available: true, source: "env", path: envPath };
+    reasons.push(`HPS_SDK_BINARY is set but no file exists at ${envPath}`);
+  }
+
+  if (c.seeded) {
+    const verdict = isSeededBinaryTrusted({
+      stat: c.seeded.stat,
+      markerRaw: c.seeded.markerRaw,
+      version: c.version,
+    });
+    if (verdict.ok) return { available: true, source: "seeded", path: c.seeded.path };
+    reasons.push(`seeded binary at ${c.seeded.path} rejected: ${verdict.reason}`);
+  }
+
+  if (c.nodeModulesAvailable) return { available: true, source: "node-modules" };
+  reasons.push("no SDK platform binary in node_modules (packaged build?)");
+
+  return { available: false, reasons };
+}
+
 // ── Worker gateway env construction (#282 Phase 1, REQ-M6/M13) ──────────────
 // The Agent SDK routes model calls to `${ANTHROPIC_BASE_URL}/v1/messages` and
 // authenticates with `Authorization: Bearer ${ANTHROPIC_AUTH_TOKEN}`. Our
@@ -368,6 +587,12 @@ export function buildSdkQueryOptions(
     token: string;
     cwd?: string;
     baseEnv: Record<string, string | undefined>;
+    /**
+     * #282 W4a — resolved native `claude` binary path (resolveSdkBinary:
+     * setting > HPS_SDK_BINARY > seeded). When absent the option is OMITTED
+     * so the SDK's own node_modules optionalDependency lookup runs (dev).
+     */
+    pathToClaudeCodeExecutable?: string;
   },
 ): Omit<AgentSdkOptions, "canUseTool" | "abortController"> {
   // #282 P2 slice 3 — the read-only subagent catalog rides on the same flag
@@ -398,6 +623,9 @@ export function buildSdkQueryOptions(
     permissionMode: agent.permissionMode,
     maxTurns: agent.maxTurns,
     ...(args.cwd ? { cwd: args.cwd } : {}),
+    ...(args.pathToClaudeCodeExecutable
+      ? { pathToClaudeCodeExecutable: args.pathToClaudeCodeExecutable }
+      : {}),
     env: buildSdkGatewayEnv(args.baseEnv, {
       proxyUrl: args.proxyUrl,
       token: args.token,
