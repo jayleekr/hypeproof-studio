@@ -108,7 +108,12 @@ export const profile: Profile = {
   // live_preview_start). browser_open은 URL 정책 + 승인 모달을 항상 거친다.
   // 성인 cohort 전용 — 미성년은 safe-session 전까지 false (harness
   // child_sdk_browser FAIL, #306/#318).
-  sdk_tools: { read: true, write: true, browser: true },
+  // subagents (#282 P2 slice 3): 읽기 전용 코드리뷰어/리서처 서브에이전트.
+  // 코치가 "리뷰 맡길까요?"를 위임(delegation_judgment) — 매 위임은 승인 모달,
+  // 서브에이전트 도구 호출도 부모와 동일한 canUseTool 정책을 통과한다.
+  // 성인(원장) cohort 전용 — 미성년은 pedagogy 결정 전까지 false (harness
+  // child_sdk_subagents FAIL).
+  sdk_tools: { read: true, write: true, browser: true, subagents: true },
   session: {
     cohort_id: "boah-dental-2026-a",   // teaser와 같은 cohort, profile_id로만 분기
     series_total: 1,                   // 단발 — cohort 내 모든 profile의 series_total 일치(validator 강제)

@@ -250,8 +250,11 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       const verdict = evaluateSdkToolUse({
         toolName: name,
         input,
-        // Union of built-in grants + the MCP tools that actually registered.
-        permittedTools: [...opts.permittedTools, ...grantedMcpTools],
+        // Union of built-in grants + the Agent/Task invoker (when the profile
+        // grants subagents, #282 P2 slice 3) + the MCP tools that actually
+        // registered. Subagent-context calls (sdk.d.ts CanUseTool `agentID`)
+        // arrive here too and face the same matrix.
+        permittedTools: [...opts.permittedTools, ...opts.permittedAgentTools, ...grantedMcpTools],
         workspaceRoot: args.cwd,
       });
       if (verdict.decision === "deny") {

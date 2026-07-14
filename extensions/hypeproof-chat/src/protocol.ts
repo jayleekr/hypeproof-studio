@@ -119,7 +119,11 @@ export interface ResolvedProfile {
   // tools (browser_open / browser_screenshot / live_preview_start). Adults
   // only — minors never carry browser:true (harness child_sdk_browser FAIL +
   // client-side strip), per the #306/#318 safety posture.
-  sdk_tools?: { read?: boolean; write?: boolean; browser?: boolean };
+  // `subagents` (#282 P2 slice 3) grants the read-only 코드리뷰어/리서처 SDK
+  // subagents (delegation modal-gated; definition tools intersected with the
+  // cohort's permitted set). Adults only — minors never carry subagents:true
+  // (harness child_sdk_subagents FAIL + client-side strip).
+  sdk_tools?: { read?: boolean; write?: boolean; browser?: boolean; subagents?: boolean };
 }
 
 export interface UxConfig {
@@ -236,7 +240,11 @@ export interface ActionRequest {
   // approval policy (resolveActionApproval) keys its tiers on these.
   // "openBrowser" (#282 P2 slice 2): the hypeproof MCP browser_open tool — an
   // outward action, modal-gated by default (requireApprovalFor).
-  kind: "writeFile" | "executeShell" | "readFile" | "webSearch" | "openBrowser";
+  // "delegateAgent" (#282 P2 slice 3): the coach wants to hand a task to a
+  // read-only subagent (코드리뷰어/리서처) via the SDK Agent/Task tool. The
+  // modal makes the student consciously decide the delegation — the
+  // delegation_judgment asset IS this decision (docs/seven-assets.md §5).
+  kind: "writeFile" | "executeShell" | "readFile" | "webSearch" | "openBrowser" | "delegateAgent";
   description: string;
   payload: unknown;
 }

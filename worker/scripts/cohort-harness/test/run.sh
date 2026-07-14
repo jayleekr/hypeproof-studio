@@ -55,7 +55,7 @@ rc="$(run_rc "$FIX/fail.json")"
 [ "$rc" -eq 1 ] && ok "fail.json → exit 1" || bad "fail.json → exit $rc (want 1)"
 
 # T4: the safety-critical checks actually fire on fail.json
-required_checks="child_log_user_messages publishing_promise_contradiction child_missing_url_ban id_unique asset_enum_unknown series_index_range hours_positive cohort_series_total_consistent child_per_user_pages publishing_strategy_unknown child_sdk_write child_sdk_browser"
+required_checks="child_log_user_messages publishing_promise_contradiction child_missing_url_ban id_unique asset_enum_unknown series_index_range hours_positive cohort_series_total_consistent child_per_user_pages publishing_strategy_unknown child_sdk_write child_sdk_browser child_sdk_subagents"
 got="$("$PY" "$VALIDATE" --json "$FIX/fail.json" 2>/dev/null \
       | "$PY" -c 'import sys,json; d=json.load(sys.stdin); print(" ".join(sorted({f["check"] for f in d["findings"] if f["severity"]=="fail"})))')"
 miss=""

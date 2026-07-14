@@ -896,10 +896,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // openBrowser (#282 P2 slice 2) is modal-gated by default too: the coach
     // driving the browser to a URL is an outward action the student should
     // consciously delegate (delegation_judgment), same as a file write.
+    // delegateAgent (#282 P2 slice 3): handing a task to a subagent is the
+    // delegation decision itself — the modal IS the pedagogy.
     const required = cfg.get<string[]>("requireApprovalFor", [
       "writeFile",
       "executeShell",
       "openBrowser",
+      "delegateAgent",
     ]);
     const needsApproval = required.includes(req.kind);
     if (!needsApproval) return true;

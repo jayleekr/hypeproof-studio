@@ -109,3 +109,4 @@ severity:
   child_age_range_required: fail
   child_sdk_write: fail
   child_sdk_browser: fail
+  child_sdk_subagents: fail

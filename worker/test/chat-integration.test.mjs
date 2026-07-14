@@ -238,7 +238,7 @@ function chatRequest({ prompt = "안녕 코치", stream = false, headers = {} } 
   // kids profile (no opt-in) normalizes to all-false (fail closed, minor-safe).
   assert.deepEqual(
     j.sdk_tools,
-    { read: false, write: false, browser: false },
+    { read: false, write: false, browser: false, subagents: false },
     "kids profile exposes sdk_tools all-false (absent flags normalize to false)",
   );
 }
