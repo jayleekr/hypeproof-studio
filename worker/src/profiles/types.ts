@@ -114,6 +114,26 @@ export interface Profile {
     max_uses?: number;
   };
   /**
+   * #282 Phase 2 — Agent SDK workspace tools the coach may use when the Studio
+   * runs on the agent-sdk runtime ("coach edits index.html directly"). The
+   * PROFILE owns this policy (ADR 0003): the client maps these flags to SDK
+   * tool names (read → Read/Grep/Glob, write → Write/Edit) and must never
+   * widen beyond them.
+   *
+   * Absent = all false → the coach is chat-only (fail closed). There is
+   * deliberately NO shell/exec flag in this schema — shell execution cannot be
+   * granted by any cohort profile in Phase 2, period.
+   *
+   * MINOR-SAFETY INVARIANT: minors' cohorts (parent_coaching / kids tiers)
+   * must NEVER set `write: true`. Enforced by the cohort harness
+   * (`child_sdk_write` FAIL) and again client-side (write tools are stripped
+   * for minor tiers regardless of this flag).
+   */
+  sdk_tools?: {
+    read?: boolean;
+    write?: boolean;
+  };
+  /**
    * #278 Phase 3 — the client-driven agentic browser tool loop. When enabled,
    * the worker injects the browser control tools (lib/browser-tools.ts) into the
    * Anthropic tools array + a usage contract into the cached system prefix, and
