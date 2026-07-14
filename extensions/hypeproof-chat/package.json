@@ -17,6 +17,18 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "The coach can run shell commands and resolve an SDK executable. In an untrusted workspace, the runtime/executable and gateway settings are ignored and every action still passes through the approval gate.",
+      "restrictedConfigurations": [
+        "hypeproofChat.sdkBinaryPath",
+        "hypeproofChat.coachRuntime",
+        "hypeproofChat.proxyUrl",
+        "hypeproofChat.requireApprovalFor"
+      ]
+    }
+  },
   "contributes": {
     "viewsContainers": {
       "activitybar": [
@@ -127,7 +139,8 @@
         "hypeproofChat.proxyUrl": {
           "type": "string",
           "default": "https://api.hypeproof-ai.xyz/v1",
-          "description": "Base URL for the HypeProof Proxy (OpenAI-compatible). Override for local dev (e.g. http://localhost:8787/v1)."
+          "scope": "machine",
+          "description": "Base URL for the HypeProof Proxy (OpenAI-compatible). Override for local dev (e.g. http://localhost:8787/v1). Machine-scoped: a workspace cannot repoint the coach at an untrusted gateway."
         },
         "hypeproofChat.model": {
           "type": "string",
@@ -141,12 +154,14 @@
             "agent-sdk"
           ],
           "default": "proxy",
-          "description": "Coach runtime. 'proxy' = the current single-turn provider proxy (default). 'agent-sdk' = the Claude Agent SDK coach (epic #282). Until the SDK is bundled (Phase 1), selecting 'agent-sdk' transparently falls back to the proxy runtime for each turn (a dev warning is logged); it never interrupts the student."
+          "scope": "machine",
+          "description": "Coach runtime. 'proxy' = the current single-turn provider proxy (default). 'agent-sdk' = the Claude Agent SDK coach (epic #282). Until the SDK is bundled (Phase 1), selecting 'agent-sdk' transparently falls back to the proxy runtime for each turn (a dev warning is logged); it never interrupts the student. Machine-scoped: a workspace cannot flip the runtime to the SDK executable path."
         },
         "hypeproofChat.sdkBinaryPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to a claude CLI binary for the agent-sdk coach runtime (epic #282). Highest-priority override; when empty, resolution falls through HPS_SDK_BINARY (env) → the seeded per-user location (scripts/seed-sdk-binary.sh) → node_modules (dev). If nothing resolves, the coach falls back to the proxy runtime."
+          "scope": "machine",
+          "description": "Absolute path to a claude CLI binary for the agent-sdk coach runtime (epic #282). Highest-priority override; when empty, resolution falls through HPS_SDK_BINARY (env) → the seeded per-user location (scripts/seed-sdk-binary.sh) → node_modules (dev). If nothing resolves, the coach falls back to the proxy runtime. Machine-scoped: this selects an executable, so a workspace must not be able to set it."
         },
         "hypeproofChat.requireApprovalFor": {
           "type": "array",
@@ -165,7 +180,8 @@
             "openBrowser",
             "delegateAgent"
           ],
-          "description": "Actions that require explicit user approval before execution."
+          "scope": "machine",
+          "description": "Actions that require explicit user approval before execution. Machine-scoped: a workspace cannot weaken the approval gate (e.g. clear it to auto-run shell/file writes)."
         }
       }
     }
