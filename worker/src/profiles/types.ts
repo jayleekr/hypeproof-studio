@@ -128,10 +128,19 @@ export interface Profile {
    * must NEVER set `write: true`. Enforced by the cohort harness
    * (`child_sdk_write` FAIL) and again client-side (write tools are stripped
    * for minor tiers regardless of this flag).
+   *
+   * `browser` (#282 P2 slice 2): grants the in-process "hypeproof" SDK MCP
+   * browser tools (browser_open / browser_screenshot / live_preview_start)
+   * built on the #309 native-browser + live-server work. browser_open always
+   * passes the client URL policy (safeNavigateUrl) AND the approval modal.
+   * Minors follow the #306/#318 safety posture: `browser: true` on a child
+   * cohort is a harness FAIL (`child_sdk_browser`) until safe-session ships,
+   * and the client strips it for minor tiers regardless.
    */
   sdk_tools?: {
     read?: boolean;
     write?: boolean;
+    browser?: boolean;
   };
   /**
    * #278 Phase 3 — the client-driven agentic browser tool loop. When enabled,
