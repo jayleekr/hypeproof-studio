@@ -49,6 +49,11 @@ if ! python3 -c 'import Quartz' >/dev/null 2>&1; then
   exit 2
 fi
 
+# ── SCREEN-LOCK GATE — must pass BEFORE any Electron launch ──────────────────
+# Nothing above this point launches the app (only a Quartz-availability probe).
+# The suite (the sole launch site) starts only once the screen is confirmed
+# locked, so even a "quick verification" run is physically gated on Jay being
+# away.
 echo "▶ waiting for screen lock (poll ${POLL}s)… lock the screen to start the suite."
 until is_locked; do sleep "$POLL"; done
 
