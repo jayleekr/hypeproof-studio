@@ -52,6 +52,45 @@ import {
 
 export const admin = new Hono<{ Bindings: Env }>();
 
+// D1 mirror of a session start. Prod outage postmortem: sessions.cohort_id
+// REFERENCES cohorts(id) NOT NULL, D1 enforces foreign keys unconditionally,
+// and the cohorts table was never seeded in production — so this INSERT
+// failed with SQLITE_CONSTRAINT_FOREIGNKEY on every session start, inside a
+// waitUntil() whose rejection nobody logged. sessions stayed empty, which in
+// turn FK-killed every usage_log and trials INSERT (they reference
+// sessions.id): the entire D1 accounting chain was dead while KV worked.
+// Fix: self-heal the cohort parent row in the same batch (transactional),
+// and log loudly on failure. Cohort rows are catalog entries keyed by the
+// profile registry — id-as-display_name is fine; INSERT OR IGNORE never
+// overwrites a curated name.
+async function persistSessionStart(
+  env: Env,
+  cohortId: string,
+  session: ActiveSession,
+): Promise<void> {
+  try {
+    await env.HPS_DB.batch([
+      env.HPS_DB
+        .prepare(`INSERT OR IGNORE INTO cohorts (id, display_name) VALUES (?, ?)`)
+        .bind(cohortId, cohortId),
+      env.HPS_DB
+        .prepare(
+          `INSERT OR REPLACE INTO sessions (id, cohort_id, profile_id, starts_at, ends_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(session.session_id, cohortId, session.profile_id, session.starts_at, session.ends_at),
+    ]);
+  } catch (err) {
+    // KV is the gating source of truth — the class must still start — but a
+    // missing D1 mirror means usage_log/trials rows fall back to NULL
+    // session attribution. Make it visible in wrangler tail / Workers Logs.
+    console.error(
+      `persistSessionStart: D1 sessions mirror failed (cohort=${cohortId} session=${session.session_id}):`,
+      err,
+    );
+  }
+}
+
 // Path-scoped issuer-Bearer exceptions. Each endpoint listed here re-verifies
 // the issuer token + checks scope inside its own handler. The middleware just
 // lets the request through gating so the handler can do the real check. All
@@ -732,16 +771,10 @@ admin.post("/cohorts/:id/session", async (c) => {
   };
   await startSession(c.env.HPS_KV, cohortId, session);
 
-  // Persist to D1 for history
-  c.executionCtx.waitUntil(
-    c.env.HPS_DB
-      .prepare(
-        `INSERT OR REPLACE INTO sessions (id, cohort_id, profile_id, starts_at, ends_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .bind(session.session_id, cohortId, session.profile_id, session.starts_at, session.ends_at)
-      .run(),
-  );
+  // Persist to D1 for history — awaited (not waitUntil) so the sessions row
+  // exists before the first student chat's usage_log INSERT references it.
+  // persistSessionStart never throws; failure is logged, class still starts.
+  await persistSessionStart(c.env, cohortId, session);
 
   return c.json({ ok: true, session });
 });
@@ -760,7 +793,10 @@ admin.delete("/cohorts/:id/session", async (c) => {
       c.env.HPS_DB
         .prepare(`UPDATE sessions SET ended_at = datetime('now') WHERE id = ?`)
         .bind(existing.session_id)
-        .run(),
+        .run()
+        .catch((err) =>
+          console.error(`session end: D1 ended_at UPDATE failed (session=${existing.session_id}):`, err),
+        ),
     );
   }
   return c.json({ ok: true, ended: existing });
@@ -848,15 +884,9 @@ admin.post("/cohorts/:id/session/open", async (c) => {
     ends_at: new Date(now + sessionHours * 3600_000).toISOString(),
   };
   await startSession(c.env.HPS_KV, cohortId, session);
-  c.executionCtx.waitUntil(
-    c.env.HPS_DB
-      .prepare(
-        `INSERT OR REPLACE INTO sessions (id, cohort_id, profile_id, starts_at, ends_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .bind(session.session_id, cohortId, session.profile_id, session.starts_at, session.ends_at)
-      .run(),
-  );
+  // Awaited D1 mirror (see persistSessionStart) — the minted token is used
+  // for chatting immediately; the sessions row must precede usage_log rows.
+  await persistSessionStart(c.env, cohortId, session);
 
   return c.json({
     ok: true,
@@ -887,7 +917,10 @@ admin.post("/cohorts/:id/session/close", async (c) => {
       c.env.HPS_DB
         .prepare(`UPDATE sessions SET ended_at = datetime('now') WHERE id = ?`)
         .bind(existing.session_id)
-        .run(),
+        .run()
+        .catch((err) =>
+          console.error(`session close: D1 ended_at UPDATE failed (session=${existing.session_id}):`, err),
+        ),
     );
   }
 
@@ -954,6 +987,26 @@ admin.get("/stats", async (c) => {
     console.error("/admin/stats: usage_log query failed:", err);
   }
 
+  // D1 accounting self-check (prod outage postmortem): total row counts for
+  // the FK chain cohorts → sessions → usage_log. A cohort with a live KV
+  // session while `sessions`/`usage_log` totals sit at 0 means D1 writes are
+  // dying silently (the exact blindness that hid the FK outage). -1 = the
+  // self-check query itself failed.
+  let d1 = { cohorts: -1, sessions: -1, usage_log: -1 };
+  try {
+    const row = await c.env.HPS_DB
+      .prepare(
+        `SELECT
+            (SELECT COUNT(*) FROM cohorts)   AS cohorts,
+            (SELECT COUNT(*) FROM sessions)  AS sessions,
+            (SELECT COUNT(*) FROM usage_log) AS usage_log`,
+      )
+      .first<{ cohorts: number; sessions: number; usage_log: number }>();
+    if (row) d1 = row;
+  } catch (err) {
+    console.error("/admin/stats: d1 self-check failed:", err);
+  }
+
   // Heartbeat KV slot (#45). If missing → cron not firing OR cleared.
   const [heartbeat, alert, failStreak] = await Promise.all([
     c.env.HPS_KV.get<unknown>("heartbeat:last", "json"),
@@ -965,6 +1018,7 @@ admin.get("/stats", async (c) => {
     ts: new Date().toISOString(),
     cohorts: cohortRows,
     last_hour: lastHour,
+    d1,
     heartbeat: {
       last: heartbeat,
       alert: alert,

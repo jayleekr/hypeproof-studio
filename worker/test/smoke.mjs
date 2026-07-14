@@ -2110,6 +2110,11 @@ const TINY_PNG =
             async first() { dbCalls.push(call); return null; },
           };
         },
+        async batch(stmts) {
+          const out = [];
+          for (const s of stmts) out.push(await s.run());
+          return out;
+        },
       },
       HPS_TRACES: { async put() {} },
       _store: store,
@@ -2574,6 +2579,11 @@ function mkSecEnv(overrides = {}, seed = {}) {
           async run() { dbCalls.push(call); return { success: true, meta: { changes: 1 } }; },
           async first() { dbCalls.push(call); return null; },
         };
+      },
+      async batch(stmts) {
+        const out = [];
+        for (const s of stmts) out.push(await s.run());
+        return out;
       },
     },
     HPS_TRACES: { async put() {} },

@@ -138,8 +138,14 @@ export function createMockEnv(opts = {}) {
           },
           // meta.changes mirrors D1 (#33 A#12: endTrial reads it). Default 1
           // = a row matched, so happy-path endTrial doesn't false-warn.
+          // opts.d1RunError(sql, bindings) → Error | null lets a test inject
+          // per-statement write failures (e.g. simulate D1's always-on
+          // FOREIGN KEY enforcement — the prod accounting outage). Failed
+          // attempts are still recorded in _dbCalls with error set.
           async run() {
-            dbCalls.push(call);
+            const err = opts.d1RunError?.(call.sql, call.bindings);
+            dbCalls.push(err ? { ...call, error: String(err) } : call);
+            if (err) throw err;
             return { success: true, meta: { changes: opts.d1Changes ?? 1 } };
           },
           async first() {
@@ -156,6 +162,13 @@ export function createMockEnv(opts = {}) {
             return { results: [], success: true };
           },
         };
+      },
+      // D1Database.batch — sequential like D1's transactional batch; first
+      // failure rejects the whole batch (D1 rolls back; the mock just stops).
+      async batch(stmts) {
+        const results = [];
+        for (const s of stmts) results.push(await s.run());
+        return results;
       },
     },
     HPS_TRACES: {
