@@ -108,6 +108,33 @@ pass it.
 In CI: pass `SKIP_DATA_FOLDER=1` since the data folder only exists after a
 launch.
 
+### Vendored Agent SDK JS assertion (SDK-coach builds)
+
+`verify-branding.sh` also asserts that the vendored Agent SDK JS actually
+shipped inside the built app (#282 W4b, added after the #343 review). A packaged
+build loads `sdk.mjs` through a variable-specifier dynamic import that esbuild
+never bundles, so `sdkCoach.loadSdk()` falls back to
+`dist/vendor/node_modules` (see `sdkCoachHelpers.ts`
+`VENDORED_SDK_ENTRY_SUBPATH`, written by `scripts/inject-builtin-extensions.sh`).
+If that vendor tree is missing, the SDK import throws and the coach **silently**
+degrades to the proxy-only runtime — a non-canonical, proxy-only ship even on an
+SDK release. The check makes that a hard failure. It asserts:
+
+1. `Contents/Resources/app/extensions/hypeproof-chat/dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs` exists, and
+2. no `claude-agent-sdk-<platform>` (229 MB native binary) package leaked into the shipped vendor tree — those reach students via the W4a seed (`scripts/seed-sdk-binary.sh`), never the app bundle.
+
+**Trigger** (so pre-SDK / pure-vanilla builds never false-fail):
+
+- `REQUIRE_SDK_VENDOR=1` → always assert (explicit CI/release gate for the SDK build).
+- Otherwise auto-detect: assert only when the **bundled** extension's
+  `package.json` declares the `@anthropic-ai/claude-agent-sdk` dependency (i.e.
+  this build is an SDK-coach build). A vanilla build (no `hypeproof-chat`) or a
+  pre-SDK extension (no such dep) is skipped with an informational note.
+
+For a real SDK release (v0.1.17+) set `REQUIRE_SDK_VENDOR=1` in the release/CI
+job so a build that forgot to vendor the SDK fails the gate rather than shipping
+proxy-only.
+
 ## Phase-aware behavior
 
 - **Phase 0–1**: vanilla build first. Do not introduce branding overrides yet.
