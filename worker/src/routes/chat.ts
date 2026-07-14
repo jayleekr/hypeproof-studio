@@ -230,6 +230,12 @@ chat.post("/chat/completions", async (c) => {
       // Route through the optional region-pinned proxy when set, otherwise
       // call api.anthropic.com directly. The proxy is passthrough (same key,
       // same headers, same SSE shape).
+      //
+      // No clientBeta threading here (#282 — unlike routes/messages.ts):
+      // /v1/chat clients speak the OpenAI schema, never send an
+      // anthropic-beta header or beta-gated body fields, and translate()
+      // builds the Anthropic body from scratch — only the worker's own
+      // prompt-caching beta is needed upstream.
       const aBody = translate(body as any, profile, coach);
       aBody.stream = stream;
       modelLabel = aBody.model;
