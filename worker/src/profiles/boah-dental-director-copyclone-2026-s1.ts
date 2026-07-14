@@ -99,6 +99,12 @@ export const profile: Profile = {
   // 동일 매핑, 턴당 최대 사용 제한. (claude-code식 WebFetch/에이전트 루프는 Agent SDK
   // 전환(#282) Phase 2 몫으로 별개. 이 플래그는 "간단한 웹서치"를 지금 아키텍처에서 켠다.)
   tools: { web_search: true, max_uses: 5 },
+  // #282 Phase 2 — Agent SDK 워크스페이스 도구. 성인(원장) copyclone cohort만
+  // read+write: 코치가 index.html을 직접 읽고 고친다("coach edits index.html
+  // directly"). write 도구는 클라이언트에서 항상 승인 모달을 거치고 워크스페이스
+  // 밖 경로는 거부된다. 미성년 cohort는 이 플래그를 절대 켜지 않는다(harness
+  // child_sdk_write FAIL).
+  sdk_tools: { read: true, write: true },
   session: {
     cohort_id: "boah-dental-2026-a",   // teaser와 같은 cohort, profile_id로만 분기
     series_total: 1,                   // 단발 — cohort 내 모든 profile의 series_total 일치(validator 강제)

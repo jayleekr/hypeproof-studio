@@ -279,6 +279,14 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
         if req and req not in prompt:
             add(findings, rules, pid, "child_missing_url_ban",
                 f"child cohort system_prompt missing required phrase: {req!r}")
+        # #282 Phase 2 minor-safety invariant: a child cohort must NEVER grant
+        # the Agent SDK workspace write tools. (The schema has no exec flag at
+        # all, so this check covers the only write-capable knob.)
+        sdk_tools = p.get("sdk_tools") or {}
+        if sdk_tools.get("write") is True:
+            add(findings, rules, pid, "child_sdk_write",
+                "HARD FAIL: child cohort must not set sdk_tools.write=true "
+                "(minors never gain workspace write capability)")
 
 
 def check_cohort_consistency(cohort_totals: dict, rules: dict, findings: list) -> None:

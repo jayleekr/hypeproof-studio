@@ -99,6 +99,7 @@ const { anthropicBaseUrlFor, buildSdkGatewayEnv, buildSdkQueryOptions, profileTo
   assert.equal(options.model, "hypeproof-default", "model threaded to the SDK");
   assert.deepEqual(options.allowedTools, [], "REQ-M5: nothing bypasses canUseTool");
   assert.deepEqual(options.settingSources, [], "REQ-M5: workspace settings cannot inject allow-rules");
+  assert.deepEqual(options.tools, [], "REQ-M16: chat-only cohort disables ALL built-in tools (tools: [])");
   assert.equal(options.permissionMode, "default");
   assert.equal(options.maxTurns, 6, "minor cohort keeps the tight loop bound");
   assert.equal(options.env.ANTHROPIC_BASE_URL, "https://api.hypeproof-ai.xyz");
@@ -113,6 +114,29 @@ const { anthropicBaseUrlFor, buildSdkGatewayEnv, buildSdkQueryOptions, profileTo
     baseEnv: {},
   });
   assert.equal(withCwd.cwd, "/ws/student", "workspace root threaded for file tools");
+
+  // #282 Phase 2 (REQ-M16): profile.sdk_tools → Options.tools (base tool set,
+  // availability ONLY — approval still runs through canUseTool). allowedTools
+  // must stay [] even for the widest cohort: an allowedTools entry would
+  // AUTO-APPROVE and bypass canUseTool, defeating the write modal.
+  const copyclone = {
+    game: { template_tier: "website" },
+    sdk_tools: { read: true, write: true },
+  };
+  const adult = profileToAgentOptions(copyclone, { model: "hypeproof-default", systemPrompt: "" });
+  const adultOptions = buildSdkQueryOptions(adult, {
+    proxyUrl: "https://api.hypeproof-ai.xyz/v1",
+    token: "hps-token",
+    cwd: "/ws/clinic",
+    baseEnv: {},
+  });
+  assert.deepEqual(
+    adultOptions.tools,
+    ["Read", "Grep", "Glob", "Write", "Edit"],
+    "adult copyclone cohort: sdk_tools maps to the exact SDK tool names",
+  );
+  assert.deepEqual(adultOptions.allowedTools, [], "REQ-M5 holds for tooled cohorts too — no auto-approval");
+  assert.ok(!adultOptions.tools.includes("Bash"), "no profile flag can put Bash in the tool set");
 }
 
 // ─── coachRuntime flag still defaults to "proxy" (Phase-3 flip is Jay-gated) ─

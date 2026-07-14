@@ -79,6 +79,10 @@
         "enabled": true,
         "show_counter": false
       }
+    },
+    "sdk_tools": {
+      "read": true,
+      "write": true
     }
   },
   {

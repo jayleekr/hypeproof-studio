@@ -13,6 +13,7 @@
 // Type-only import — erased at build/strip time, so this file stays a leaf
 // module that Node can run standalone in the smoke tests.
 import type { Options as AgentSdkOptions } from "@anthropic-ai/claude-agent-sdk";
+import * as path from "node:path";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
 
 export type AgentPermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
@@ -49,14 +50,13 @@ export interface ProfileToAgentCtx {
 
 // Real worker `game.template_tier` values (worker/src/profiles/types.ts).
 // Game tiers (kids-basic/kids-rich/teen/pro-3d) are kids/teen cohorts — guided,
-// chat-only, minor bounds. The WORKSHOP tiers below are the professional
-// adult cohorts whose deliverable IS a webapp the coach edits directly:
+// minor bounds. The WORKSHOP tiers below are the professional adult cohorts:
 // "search-webapp" (보아치과 clinical workshop) and "website" (website-copyclone,
 // 보아치과 원장 v2 — added in #273). Anything NOT in this set — including a tier
 // we don't recognize or a missing field — is treated as a minor game cohort
-// (fail closed). This is the single source of truth for both audience and
-// file-tool eligibility; keep it in sync with types.ts (or, ideally, let the
-// worker profile own the policy — see ADR 0003 / #283).
+// (fail closed). Since #282 Phase 2 the tier drives AUDIENCE bounds only
+// (maxTurns + the minor write-strip); file-tool eligibility is owned by the
+// worker profile's `sdk_tools` (ADR 0003). Keep in sync with types.ts.
 const WORKSHOP_TIERS = new Set(["search-webapp", "website"]);
 
 /**
@@ -69,29 +69,41 @@ export function isMinorTier(profile: ResolvedProfile): boolean {
   return !WORKSHOP_TIERS.has(tier);
 }
 
+// #282 Phase 2 — exact Agent SDK tool names granted per sdk_tools flag. These
+// are the SDK's CamelCase built-in tool names (sdk.d.ts `Options.tools`).
+// There is deliberately no shell mapping: no profile flag can grant Bash.
+const SDK_READ_TOOL_NAMES = ["Read", "Grep", "Glob"] as const;
+const SDK_WRITE_TOOL_NAMES = ["Write", "Edit"] as const;
+
 /**
  * Which tools a cohort may use. Conservative and fail-closed by design:
- * - game/kids/teen cohorts get NO autonomous tools — parity with today's
- *   single-turn coach, guided by the panel.
- * - the professional workshop tiers (e.g. "search-webapp", the 보아치과
- *   direction) may read/write/edit the workspace so the coach edits the page
- *   directly instead of the client string-extracting a blob.
+ * - the WORKER PROFILE owns file-tool policy (`sdk_tools`, ADR 0003 / #282
+ *   Phase 2): `read` → Read/Grep/Glob, `write` → Write/Edit. Absent flags
+ *   grant nothing — a cohort with no `sdk_tools` is chat-only, and the client
+ *   never infers tools from the tier anymore (the pre-Phase-2 tier heuristic
+ *   is gone; the tier now only drives audience bounds like maxTurns).
+ * - MINOR-SAFETY INVARIANT: write tools are stripped for minor tiers even if
+ *   a profile mistakenly carries write:true — defense-in-depth on top of the
+ *   worker harness's child_sdk_write FAIL. Minors never gain write capability.
  * - WebSearch + WebFetch only where the cohort profile explicitly opted in
  *   (`tools.web_search`, sourced from the worker), matching the trust-tiering
- *   pedagogy. An unknown/missing tier grants nothing.
+ *   pedagogy.
  */
 export function permittedToolsFor(profile: ResolvedProfile): string[] {
-  const tier = profile.game?.template_tier ?? "";
   const tools: string[] = [];
-  if (WORKSHOP_TIERS.has(tier)) {
-    tools.push("Read", "Write", "Edit");
+  if (profile.sdk_tools?.read === true) {
+    tools.push(...SDK_READ_TOOL_NAMES);
+  }
+  if (profile.sdk_tools?.write === true && !isMinorTier(profile)) {
+    tools.push(...SDK_WRITE_TOOL_NAMES);
   }
   if (profile.tools?.web_search === true) {
     // Web research = search (find sources) + fetch (open and read them). Granting
     // WebSearch without WebFetch is claude-code half — the coach can find a
     // reference URL but not read it. Both route through canUseTool (SEARCH_TOOLS
-    // includes "webfetch") → approval modal, and minors never reach here (they
-    // get []), so WebFetch lands only on adult workshop tiers.
+    // includes "webfetch") → approval path. No minor cohort profile opts into
+    // web_search today, so WebFetch lands only on adult workshop tiers — the
+    // gate is the worker profile, same owner as sdk_tools.
     tools.push("WebSearch", "WebFetch");
   }
   return tools;
@@ -152,8 +164,15 @@ export function buildSdkGatewayEnv(
  * Build the SDK `query()` options for a gateway-routed coach turn — everything
  * EXCEPT the two host-bound fields (canUseTool, abortController), which the
  * orchestration layer (sdkCoach.ts) attaches. Pure and total so the full
- * option/env threading is locked by unit tests (REQ-M5/M6/M13):
- * - allowedTools stays [] (every tool falls through to canUseTool);
+ * option/env threading is locked by unit tests (REQ-M5/M6/M13/M16):
+ * - `tools` = the cohort's permitted set (profile.sdk_tools → SDK tool names):
+ *   tools NOT granted by the profile are removed from the model's context
+ *   entirely — a chat-only cohort runs with `tools: []`, so Bash & co never
+ *   even exist for the model. Availability only; approval is NOT implied.
+ * - allowedTools stays [] — an allowedTools entry AUTO-APPROVES and bypasses
+ *   canUseTool (sdk.d.ts: "auto-allowed without prompting"), which would
+ *   defeat the manual-approve modal. Every surviving tool call falls through
+ *   to canUseTool where evaluateSdkToolUse enforces the policy matrix;
  * - settingSources stays [] (workspace settings can't inject allow-rules);
  * - env comes from buildSdkGatewayEnv (base-URL derivation + key scrub).
  */
@@ -169,6 +188,7 @@ export function buildSdkQueryOptions(
   return {
     systemPrompt: agent.systemPrompt,
     model: agent.model,
+    tools: [...agent.permittedTools],
     allowedTools: [],
     settingSources: [],
     permissionMode: agent.permissionMode,
@@ -386,5 +406,135 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
     kind: "executeShell",
     description: `${action.toolName} (unrecognized): ${safeStringify(action.input)}`,
     payload: { raw: action.input },
+  };
+}
+
+// ── canUseTool policy matrix (#282 Phase 2, REQ-M16/M17) ─────────────────────
+// Pure decision function the orchestration layer (sdkCoach.ts canUseTool) runs
+// on EVERY tool call. Three verdicts:
+//   allow — read tools whose target stays inside the workspace: auto-run, no
+//           modal (a read-only look at the student's own folder is the coach
+//           "seeing the page", not a consequential delegation);
+//   ask   — write tools (always — the approve/deny modal IS the
+//           delegation_judgment / verification_reflex pedagogy) and the
+//           web-research tools (existing modal tiers decide);
+//   deny  — anything not granted by the cohort profile (Bash, WebFetch without
+//           opt-in, unknown tools) or any path escaping the workspace
+//           (`../` traversal, absolute paths outside cwd). Deny reasons are
+//           logged host-side; the student sees the Korean `friendly` line.
+
+export type SdkToolVerdict =
+  | { decision: "allow" }
+  | { decision: "ask" }
+  | { decision: "deny"; reason: string; friendly: string };
+
+/** Student-facing copy for a policy deny (tool not granted / never grantable). */
+export const TOOL_DENIED_FRIENDLY = "이 도구는 지금 수업에서는 사용할 수 없어요.";
+/** Student-facing copy for a workspace path-escape deny. */
+export const PATH_ESCAPE_FRIENDLY = "작업 폴더 밖의 파일에는 접근할 수 없어요.";
+
+/**
+ * Is `target` inside `workspaceRoot`? Relative targets resolve AGAINST the
+ * root (the SDK runs with cwd=workspace), then both sides are normalized so
+ * `../` traversal and absolute paths outside the root are caught. Mirrors the
+ * host-side isInsideWorkspace (#115) so the two containment checks agree.
+ */
+export function isPathContained(workspaceRoot: string, target: string): boolean {
+  const root = path.resolve(workspaceRoot);
+  const resolved = path.isAbsolute(target) ? path.resolve(target) : path.resolve(root, target);
+  const rel = path.relative(root, resolved);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+const PATH_INPUT_KEYS = ["file_path", "path", "notebook_path"] as const;
+
+/**
+ * Path-like strings a tool call wants to touch. Besides the explicit path
+ * params, Glob's `pattern` doubles as a path when absolute or `..`-relative
+ * ("/etc/**", "../secrets/*") — include it so a glob can't walk out of the
+ * workspace. (Grep's `pattern` is a regex, never treated as a path.)
+ */
+function pathCandidates(toolName: string, input: unknown): string[] {
+  if (!input || typeof input !== "object") return [];
+  const rec = input as Record<string, unknown>;
+  const out: string[] = [];
+  for (const key of PATH_INPUT_KEYS) {
+    const value = rec[key];
+    if (typeof value === "string" && value.length > 0) out.push(value);
+  }
+  const pattern = rec["pattern"];
+  if (
+    toolName.toLowerCase() === "glob" &&
+    typeof pattern === "string" &&
+    (path.isAbsolute(pattern) || pattern.startsWith(".."))
+  ) {
+    out.push(pattern);
+  }
+  return out;
+}
+
+/**
+ * The #282 Phase 2 tool policy. `permittedTools` comes from the cohort profile
+ * (permittedToolsFor — sdk_tools + web_search); the verdict never widens beyond
+ * it. `workspaceRoot` is the SDK cwd; when absent (dev/test without a folder,
+ * matching isInsideWorkspace's convention) containment is skipped — the
+ * production path always has a workspace via ensureWorkspace().
+ */
+export function evaluateSdkToolUse(args: {
+  toolName: string;
+  input: unknown;
+  permittedTools: readonly string[];
+  workspaceRoot?: string;
+}): SdkToolVerdict {
+  const { toolName, input, permittedTools, workspaceRoot } = args;
+
+  // Gate 1 — the profile's permitted set. Bash/WebFetch/anything not granted
+  // dies here with a logged reason, even if the upstream model requests it.
+  if (!permittedTools.includes(toolName)) {
+    return {
+      decision: "deny",
+      reason: `tool "${toolName}" is not granted by the cohort profile`,
+      friendly: TOOL_DENIED_FRIENDLY,
+    };
+  }
+
+  const name = toolName.toLowerCase();
+
+  // Gate 1b — belt over suspenders: shell can NEVER be permitted (no profile
+  // flag exists for it in Phase 2), so deny even if a future permitted set
+  // widens by mistake.
+  if (SHELL_TOOLS.has(name)) {
+    return {
+      decision: "deny",
+      reason: "shell execution is never granted (Phase 2 invariant)",
+      friendly: TOOL_DENIED_FRIENDLY,
+    };
+  }
+
+  if (READ_TOOLS.has(name) || WRITE_TOOLS.has(name)) {
+    // Gate 2 — workspace containment for every path the call names.
+    if (workspaceRoot) {
+      for (const candidate of pathCandidates(toolName, input)) {
+        if (!isPathContained(workspaceRoot, candidate)) {
+          return {
+            decision: "deny",
+            reason: `path escapes the workspace: ${candidate}`,
+            friendly: PATH_ESCAPE_FRIENDLY,
+          };
+        }
+      }
+    }
+    // Gate 3 — reads auto-allow inside the workspace; writes ALWAYS ask.
+    return READ_TOOLS.has(name) ? { decision: "allow" } : { decision: "ask" };
+  }
+
+  // Web research (profile-opted): route through the host approval tiers.
+  if (SEARCH_TOOLS.has(name)) return { decision: "ask" };
+
+  // Permitted but unclassified — should be unreachable; fail closed.
+  return {
+    decision: "deny",
+    reason: `unrecognized tool "${toolName}"`,
+    friendly: TOOL_DENIED_FRIENDLY,
   };
 }

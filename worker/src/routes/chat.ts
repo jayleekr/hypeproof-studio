@@ -111,6 +111,13 @@ chat.get("/profile", async (c) => {
     // coach grants WebSearch only where the profile explicitly enabled it
     // (the profile owns tool policy; the client never infers it).
     tools: { web_search: profile.tools?.web_search === true },
+    // #282 Phase 2 — Agent SDK workspace tools. Profile owns the policy
+    // (ADR 0003); absent flags normalize to false (fail closed, minor-safe).
+    // No shell/exec flag exists in the schema — it cannot be exposed here.
+    sdk_tools: {
+      read: profile.sdk_tools?.read === true,
+      write: profile.sdk_tools?.write === true,
+    },
   });
 });
 
