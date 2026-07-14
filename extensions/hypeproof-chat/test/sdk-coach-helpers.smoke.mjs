@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 
 const {
   permittedToolsFor,
+  permittedMcpToolsFor,
   isMinorTier,
   maxTurnsFor,
   sdkToolToActionRequest,
@@ -15,6 +16,11 @@ const {
   isPathContained,
   evaluateSdkToolUse,
 } = await import("../src/sdkCoachHelpers.ts");
+const {
+  MCP_BROWSER_OPEN,
+  MCP_BROWSER_SCREENSHOT,
+  MCP_LIVE_PREVIEW_START,
+} = await import("../src/browserMcp.ts");
 
 const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : undefined, ...extra });
 
@@ -254,4 +260,103 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   );
 }
 
-console.log("✓ #282: sdk-coach helpers — tool policy + SDK-tool→ActionRequest mapping + P2 policy matrix");
+// ─── permittedMcpToolsFor — profile.sdk_tools.browser owns the grant (#282 P2 s2) ─
+{
+  const ALL_BROWSER_MCP = [MCP_BROWSER_OPEN, MCP_BROWSER_SCREENSHOT, MCP_LIVE_PREVIEW_START];
+
+  // Adult cohort with the browser grant → all three tools, exact MCP names.
+  assert.deepEqual(
+    permittedMcpToolsFor(profile("website", { sdk_tools: { browser: true } })),
+    ALL_BROWSER_MCP,
+    "adult browser cohort gets the three hypeproof MCP tools",
+  );
+
+  // Absent / false / non-boolean → nothing (fail closed, === true only).
+  assert.deepEqual(permittedMcpToolsFor(profile("website")), [], "no sdk_tools → no browser MCP");
+  assert.deepEqual(permittedMcpToolsFor(profile("website", { sdk_tools: { browser: false } })), []);
+  assert.deepEqual(permittedMcpToolsFor(profile("website", { sdk_tools: { browser: "yes" } })), []);
+  assert.deepEqual(permittedMcpToolsFor(profile("website", { sdk_tools: { read: true, write: true } })), [],
+    "read/write grants do NOT imply the browser grant");
+
+  // MINOR-SAFETY INVARIANT (#306/#318): a minor tier with a (misconfigured)
+  // browser:true still gets NO browser MCP tools — client strip on top of the
+  // worker harness's child_sdk_browser FAIL. When in doubt, deny for minors.
+  for (const tier of ["kids-basic", "kids-rich", "teen", "pro-3d", "mystery-NEW", null]) {
+    assert.deepEqual(
+      permittedMcpToolsFor(profile(tier, { sdk_tools: { browser: true } })),
+      [],
+      `minor/unknown tier ${tier} NEVER gains browser MCP tools, even with browser:true`,
+    );
+  }
+}
+
+// ─── evaluateSdkToolUse — hypeproof browser MCP policy (#282 P2 s2, REQ-M20) ─
+{
+  const ws = "/ws/student";
+  const adultBrowser = [
+    "Read", "Grep", "Glob", "Write", "Edit",
+    MCP_BROWSER_OPEN, MCP_BROWSER_SCREENSHOT, MCP_LIVE_PREVIEW_START,
+  ];
+  const evalTool = (toolName, input, permittedTools) =>
+    evaluateSdkToolUse({ toolName, input, permittedTools, workspaceRoot: ws });
+
+  // Not granted (chat-only / no browser opt-in) → deny with a logged reason.
+  for (const name of [MCP_BROWSER_OPEN, MCP_BROWSER_SCREENSHOT, MCP_LIVE_PREVIEW_START]) {
+    const v = evalTool(name, {}, ["Read", "Grep", "Glob"]);
+    assert.equal(v.decision, "deny", `${name} denied when the profile did not grant browser`);
+    assert.ok(v.reason.length > 0 && v.friendly.length > 0);
+  }
+
+  // browser_open is an OUTWARD action → always "ask" (the approval modal),
+  // after the URL policy (the same safeNavigateUrl whitelist as #278).
+  assert.deepEqual(
+    evalTool(MCP_BROWSER_OPEN, { url: "https://example.com" }, adultBrowser),
+    { decision: "ask" },
+    "granted browser_open with a policy-clean URL → modal, never auto-run",
+  );
+  assert.deepEqual(evalTool(MCP_BROWSER_OPEN, { url: "localhost:5173" }, adultBrowser), { decision: "ask" });
+
+  // URL policy rejections — hostile schemes and ambiguous inputs are denied
+  // BEFORE any modal (the student never sees an approvable hostile action).
+  for (const url of ["javascript:alert(1)", "vscode://settings", "data:text/html,hi", "/etc/passwd", ""]) {
+    const v = evalTool(MCP_BROWSER_OPEN, { url }, adultBrowser);
+    assert.equal(v.decision, "deny", `browser_open URL ${JSON.stringify(url)} must be denied by policy`);
+  }
+  assert.equal(evalTool(MCP_BROWSER_OPEN, {}, adultBrowser).decision, "deny", "missing url → deny");
+
+  // Screenshot + live preview auto-allow once the browser capability is
+  // granted — reading the student's own tab / serving their own workspace.
+  assert.deepEqual(evalTool(MCP_BROWSER_SCREENSHOT, {}, adultBrowser), { decision: "allow" });
+  assert.deepEqual(evalTool(MCP_LIVE_PREVIEW_START, {}, adultBrowser), { decision: "allow" });
+
+  // Foreign MCP tools stay denied even for the widest cohort (gate 1), and a
+  // permitted-but-unknown MCP name would fail closed (final deny).
+  assert.equal(evalTool("mcp__github__create_pr", {}, adultBrowser).decision, "deny");
+  assert.equal(
+    evalTool("mcp__hypeproof__mystery", {}, [...adultBrowser, "mcp__hypeproof__mystery"]).decision,
+    "deny",
+    "an unclassified hypeproof MCP name fails closed even if the permitted set is polluted",
+  );
+}
+
+// ─── sdkToolToActionRequest — browser_open maps to the openBrowser kind ──────
+{
+  const req = sdkToolToActionRequest({
+    toolName: MCP_BROWSER_OPEN,
+    input: { url: "https://example.com" },
+  });
+  assert.equal(req.kind, "openBrowser", "browser_open → openBrowser (modal-gated by default)");
+  assert.ok(req.description.includes("https://example.com"), "modal shows the target URL");
+  assert.deepEqual(req.payload, { url: "https://example.com" });
+
+  // The other hypeproof MCP tools never reach the approval path (auto-allow),
+  // but if one ever did, the unknown-tool fallback must fail closed to the
+  // executeShell hard-deny tier.
+  assert.equal(
+    sdkToolToActionRequest({ toolName: MCP_BROWSER_SCREENSHOT, input: {} }).kind,
+    "executeShell",
+    "non-open browser MCP tools fail closed in the approval mapping",
+  );
+}
+
+console.log("✓ #282: sdk-coach helpers — tool policy + SDK-tool→ActionRequest mapping + P2 policy matrix + browser MCP policy");

@@ -104,7 +104,11 @@ export const profile: Profile = {
   // directly"). write 도구는 클라이언트에서 항상 승인 모달을 거치고 워크스페이스
   // 밖 경로는 거부된다. 미성년 cohort는 이 플래그를 절대 켜지 않는다(harness
   // child_sdk_write FAIL).
-  sdk_tools: { read: true, write: true },
+  // browser (#282 P2 slice 2): 통합 브라우저 MCP 도구(browser_open/screenshot/
+  // live_preview_start). browser_open은 URL 정책 + 승인 모달을 항상 거친다.
+  // 성인 cohort 전용 — 미성년은 safe-session 전까지 false (harness
+  // child_sdk_browser FAIL, #306/#318).
+  sdk_tools: { read: true, write: true, browser: true },
   session: {
     cohort_id: "boah-dental-2026-a",   // teaser와 같은 cohort, profile_id로만 분기
     series_total: 1,                   // 단발 — cohort 내 모든 profile의 series_total 일치(validator 강제)

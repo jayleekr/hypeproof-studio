@@ -14,6 +14,16 @@
 // module that Node can run standalone in the smoke tests.
 import type { Options as AgentSdkOptions } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "node:path";
+// Explicit .ts specifiers: the leaf/pure-module graph must load under
+// `node --experimental-strip-types` (smoke tests) which resolves specifiers
+// literally; esbuild + tsc (allowImportingTsExtensions) accept them.
+import { safeNavigateUrl } from "./browserControlHelpers.ts";
+import {
+  MCP_BROWSER_OPEN,
+  MCP_BROWSER_SCREENSHOT,
+  MCP_BROWSER_TOOLS,
+  MCP_LIVE_PREVIEW_START,
+} from "./browserMcp.ts";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
 
 export type AgentPermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
@@ -31,6 +41,15 @@ export interface AgentCoachOptions {
    * = chat-only.
    */
   permittedTools: string[];
+  /**
+   * In-process MCP tools this cohort may use (#282 P2 slice 2) — the
+   * `mcp__hypeproof__*` browser tools when `sdk_tools.browser` is granted.
+   * Kept SEPARATE from `permittedTools` because SDK `Options.tools` is the
+   * BUILT-IN base tool set only; MCP tools arrive via `mcpServers`, which the
+   * orchestration layer registers exactly when this list is non-empty. Every
+   * call still routes through canUseTool. Empty = no browser MCP.
+   */
+  permittedMcpTools: string[];
   /**
    * Permission mode. We keep "default" (no auto-approvals) so every tool use
    * falls through to `canUseTool`, where the host modal gates it — that gate is
@@ -107,6 +126,23 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
     tools.push("WebSearch", "WebFetch");
   }
   return tools;
+}
+
+/**
+ * Which in-process MCP tools a cohort may use (#282 P2 slice 2). Same
+ * ownership and fail-closed posture as permittedToolsFor:
+ * - the WORKER PROFILE owns the policy: `sdk_tools.browser === true` grants
+ *   the three hypeproof browser tools as one unit. Absent/false → none.
+ * - MINOR-SAFETY INVARIANT (#306/#318): minors get NO browser MCP tools until
+ *   safe-session ships — stripped for minor tiers even if a profile
+ *   mistakenly carries browser:true, defense-in-depth on top of the worker
+ *   harness's child_sdk_browser FAIL. When in doubt, deny for minors.
+ */
+export function permittedMcpToolsFor(profile: ResolvedProfile): string[] {
+  if (profile.sdk_tools?.browser === true && !isMinorTier(profile)) {
+    return [...MCP_BROWSER_TOOLS];
+  }
+  return [];
 }
 
 export function maxTurnsFor(profile: ResolvedProfile): number {
@@ -188,9 +224,17 @@ export function buildSdkQueryOptions(
   return {
     systemPrompt: agent.systemPrompt,
     model: agent.model,
+    // Built-in base tool set ONLY — the mcp__hypeproof__* names never go here
+    // (REQ-M19): Options.tools filters BUILT-INS; MCP tools are delivered via
+    // mcpServers, which the orchestration layer attaches (host-bound instance)
+    // exactly when the profile grants them.
     tools: [...agent.permittedTools],
     allowedTools: [],
     settingSources: [],
+    // #282 P2 slice 2 — only the mcpServers WE pass exist: project .mcp.json,
+    // user settings, and plugin MCP configs are ignored, so no ambient config
+    // can add tools behind the cohort profile's back.
+    strictMcpConfig: true,
     permissionMode: agent.permissionMode,
     maxTurns: agent.maxTurns,
     ...(args.cwd ? { cwd: args.cwd } : {}),
@@ -229,6 +273,7 @@ export function profileToAgentOptions(
     systemPrompt: ctx.systemPrompt,
     model: ctx.model,
     permittedTools: permittedToolsFor(profile),
+    permittedMcpTools: permittedMcpToolsFor(profile),
     // Always gate. Minors and adults alike route every tool use through the
     // manual-approve modal — the gate is the lesson.
     permissionMode: "default",
@@ -377,6 +422,19 @@ function safeStringify(input: unknown): string {
 export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequest, "requestId"> {
   const name = action.toolName.toLowerCase();
 
+  // #282 P2 slice 2 — browser_open is the only hypeproof MCP tool that reaches
+  // the approval path ("ask"); it maps to its own kind so resolveActionApproval
+  // modal-gates it by default (requireApprovalFor includes "openBrowser").
+  // Screenshot/live-preview auto-allow in evaluateSdkToolUse and never get here.
+  if (action.toolName === MCP_BROWSER_OPEN) {
+    const url = firstString(action.input, ["url"]) ?? "";
+    return {
+      kind: "openBrowser",
+      description: `브라우저 열기: ${url || safeStringify(action.input)}`,
+      payload: { url },
+    };
+  }
+
   if (SHELL_TOOLS.has(name)) {
     const command = firstString(action.input, ["command"]) ?? safeStringify(action.input);
     return { kind: "executeShell", description: `${action.toolName}: ${command}`, payload: { command } };
@@ -414,14 +472,18 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
 // on EVERY tool call. Three verdicts:
 //   allow — read tools whose target stays inside the workspace: auto-run, no
 //           modal (a read-only look at the student's own folder is the coach
-//           "seeing the page", not a consequential delegation);
+//           "seeing the page", not a consequential delegation); also the
+//           granted browser MCP screenshot/live-preview tools (#282 P2 s2 —
+//           the coach looking at the student's own tab/workspace);
 //   ask   — write tools (always — the approve/deny modal IS the
-//           delegation_judgment / verification_reflex pedagogy) and the
-//           web-research tools (existing modal tiers decide);
+//           delegation_judgment / verification_reflex pedagogy), the
+//           web-research tools (existing modal tiers decide), and
+//           browser_open (outward action → modal, after the URL policy);
 //   deny  — anything not granted by the cohort profile (Bash, WebFetch without
-//           opt-in, unknown tools) or any path escaping the workspace
-//           (`../` traversal, absolute paths outside cwd). Deny reasons are
-//           logged host-side; the student sees the Korean `friendly` line.
+//           opt-in, unknown/foreign MCP tools), any path escaping the
+//           workspace (`../` traversal, absolute paths outside cwd), and any
+//           browser_open URL the safeNavigateUrl policy rejects. Deny reasons
+//           are logged host-side; the student sees the Korean `friendly` line.
 
 export type SdkToolVerdict =
   | { decision: "allow" }
@@ -432,6 +494,8 @@ export type SdkToolVerdict =
 export const TOOL_DENIED_FRIENDLY = "이 도구는 지금 수업에서는 사용할 수 없어요.";
 /** Student-facing copy for a workspace path-escape deny. */
 export const PATH_ESCAPE_FRIENDLY = "작업 폴더 밖의 파일에는 접근할 수 없어요.";
+/** Student-facing copy for a browser_open URL the policy rejects (#282 P2 slice 2). */
+export const URL_POLICY_FRIENDLY = "이 주소는 열 수 없어요.";
 
 /**
  * Is `target` inside `workspaceRoot`? Relative targets resolve AGAINST the
@@ -509,6 +573,31 @@ export function evaluateSdkToolUse(args: {
       reason: "shell execution is never granted (Phase 2 invariant)",
       friendly: TOOL_DENIED_FRIENDLY,
     };
+  }
+
+  // ── hypeproof MCP browser tools (#282 P2 slice 2, REQ-M20) ────────────────
+  // Grant already passed Gate 1 (profile opted in via sdk_tools.browser and
+  // the cohort is not a minor — permittedMcpToolsFor stripped it otherwise).
+  if (toolName === MCP_BROWSER_OPEN) {
+    // URL policy: the SAME whitelist the #278 browser-control loop uses
+    // (safeNavigateUrl) — http(s)/localhost/file only; javascript:, vscode:,
+    // data:, bare local paths are rejected before any modal is shown.
+    const url = firstString(input, ["url"]) ?? "";
+    if (!safeNavigateUrl(url)) {
+      return {
+        decision: "deny",
+        reason: `browser_open URL rejected by policy: ${url || "(empty)"}`,
+        friendly: URL_POLICY_FRIENDLY,
+      };
+    }
+    // Outward action → ALWAYS the approval modal (kind "openBrowser").
+    return { decision: "ask" };
+  }
+  if (toolName === MCP_BROWSER_SCREENSHOT || toolName === MCP_LIVE_PREVIEW_START) {
+    // Auto-allow once the browser capability is granted: a screenshot of the
+    // student's own tab / serving their own workspace locally is the coach
+    // "looking at the page", not an outward delegation.
+    return { decision: "allow" };
   }
 
   if (READ_TOOLS.has(name) || WRITE_TOOLS.has(name)) {

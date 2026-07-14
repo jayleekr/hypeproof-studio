@@ -128,6 +128,10 @@ chat.get("/profile", async (c) => {
     sdk_tools: {
       read: profile.sdk_tools?.read === true,
       write: profile.sdk_tools?.write === true,
+      // #282 P2 slice 2 — native-browser MCP tools (browser_open/screenshot/
+      // live_preview). Adults only; minors stay false until safe-session
+      // ships (#306/#318) — harness child_sdk_browser FAIL enforces it.
+      browser: profile.sdk_tools?.browser === true,
     },
   });
 });
