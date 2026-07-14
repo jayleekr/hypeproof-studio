@@ -13,10 +13,29 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "../..");
 
-export const APP_BINARY = path.join(
+const DEFAULT_APP_ROOT = path.join(
   REPO_ROOT,
-  "vscodium-base/VSCode-darwin-arm64/HypeProof Studio.app/Contents/MacOS/HypeProof Studio",
+  "vscodium-base/VSCode-darwin-arm64/HypeProof Studio.app",
 );
+
+/**
+ * The .app to drive. Defaults to the in-tree build artifact, but
+ * `HPS_APP_PATH` overrides it — point it at a copy of the .app that has a
+ * freshly-injected extension (e.g. a scratchpad copy) to verify a not-yet-built
+ * extension against the shipped shell without touching vscodium-base/.
+ * Accepts either the ".../HypeProof Studio.app" bundle root or the inner
+ * ".../Contents/MacOS/HypeProof Studio" binary path.
+ */
+function resolveAppBinary(): string {
+  const override = process.env.HPS_APP_PATH?.trim();
+  const root = override && override.length > 0 ? override : DEFAULT_APP_ROOT;
+  // If they passed the binary directly, use it as-is; else append the standard
+  // macOS bundle inner path.
+  if (root.includes("/Contents/MacOS/")) return root;
+  return path.join(root, "Contents/MacOS/HypeProof Studio");
+}
+
+export const APP_BINARY = resolveAppBinary();
 
 export const TOKEN_FILE = "/tmp/hps-token.txt";
 

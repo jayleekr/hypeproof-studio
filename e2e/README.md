@@ -8,6 +8,22 @@ Drives the actual `HypeProof Studio.app` binary, exercises the chat extension en
 - Dev stack running: `bash scripts/dev-stack.sh` (starts wrangler, sets roster, issues a token to `/tmp/hps-token.txt`)
 - npm install once: `npm install && npx playwright install chromium` (chromium isn't used but playwright wants it)
 
+### Driving a different `.app` — `HPS_APP_PATH`
+
+By default the suite drives the in-tree build artifact. To verify a
+not-yet-shipped extension against the current shell without rebuilding (or
+touching `vscodium-base/`), copy the `.app` somewhere writable, inject a fresh
+`extensions/hypeproof-chat/{dist,webview-ui/dist,media,package.json}` build into
+its `Contents/Resources/app/extensions/hypeproof-chat/`, then point the suite at
+the copy:
+
+```bash
+HPS_APP_PATH="/path/to/copy/HypeProof Studio.app" npm test
+```
+
+`HPS_APP_PATH` accepts either the `.app` bundle root or the inner
+`Contents/MacOS/HypeProof Studio` binary. Unset → the default in-tree artifact.
+
 ## Run
 
 ```bash
@@ -29,6 +45,7 @@ ls test-results/        # screenshots + traces on failure
 
 - **01-launch.spec.ts** — app boots, workbench DOM ready, our activity bar container present.
 - **02-chat-roundtrip.spec.ts** — autoOnboard's token prompt fills → "안녕" sent → Korean assistant reply received within 30s.
+- **27-ai-disclosure.spec.ts** — the AI-disclosure banner (#320, REQ-C14) shows once at the top of a fresh session, persists across the first turn, and re-appears (never duplicated) after Clear Conversation.
 
 ## What's not (yet)
 

@@ -4,7 +4,16 @@ import * as path from "path";
 import * as os from "os";
 import { ChatPanelProvider } from "./chatPanelProvider";
 import { AssetStatusBar } from "./assetStatusBar";
-import { labelsForProfile } from "./chatPanelHelpers";
+import {
+  labelsForProfile,
+  extractCohortIdUnverified,
+  coachKeyForCohort,
+  coachRitualDoneKeyForCohort,
+  historyKeyForCohort,
+  LEGACY_COACH_KEY,
+  LEGACY_COACH_RITUAL_DONE_KEY,
+  LEGACY_HISTORY_KEY,
+} from "./chatPanelHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
 import { runMintStudentToken, ISSUER_TOKEN_KEY } from "./mintStudentToken";
@@ -537,17 +546,33 @@ async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<voi
     await context.secrets.store(TOKEN_KEY, token);
   }
   if (coachName && coachName.length > 0) {
-    await context.globalState.update("hypeproofChat.coach", {
-      name: coachName,
-      personality: coachPersonality,
-      configured: true,
-    });
-    await context.globalState.update("hypeproofChat.coachRitualDone", true);
+    const coachInfo = { name: coachName, personality: coachPersonality, configured: true };
+    // Legacy flat keys — kept for back-compat with pre-cohort-scoping builds.
+    await context.globalState.update(LEGACY_COACH_KEY, coachInfo);
+    await context.globalState.update(LEGACY_COACH_RITUAL_DONE_KEY, true);
+    // Cohort-scoped keys — the runtime moved coach state to per-cohort buckets
+    // (coachKeyForCohort) and only back-fills the legacy value via an async
+    // migration that runs *after* the profile fetch resolves. On webview
+    // "ready" postConfig can read the still-empty scoped key first, flashing
+    // the naming ritual in front of a preseeded test (breaks preseedCoach on
+    // the current extension). Writing the scoped keys directly here removes
+    // that race. The cohort is read (unverified) from the seeded token.
+    const cohortId = extractCohortIdUnverified(token);
+    if (cohortId) {
+      await context.globalState.update(coachKeyForCohort(cohortId), coachInfo);
+      await context.globalState.update(coachRitualDoneKeyForCohort(cohortId), true);
+    }
   }
   // Pre-seed chat history so e2e tests can exercise preview / reload paths
-  // without depending on a live LLM round-trip.
+  // without depending on a live LLM round-trip. Same legacy + cohort-scoped
+  // dual-write as the coach state above (history moved to per-cohort buckets
+  // with the same async migration race).
   if (history && history.length > 0) {
-    await context.workspaceState.update("hypeproofChat.history", history);
+    await context.workspaceState.update(LEGACY_HISTORY_KEY, history);
+    const cohortId = extractCohortIdUnverified(token);
+    if (cohortId) {
+      await context.workspaceState.update(historyKeyForCohort(cohortId), history);
+    }
   }
   // Pre-seed issuer token for mint-flow tests (G5/G6).
   if (issuerToken && issuerToken.length > 0) {
