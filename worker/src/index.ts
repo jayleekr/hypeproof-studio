@@ -28,6 +28,9 @@ app.use("*", requestId);
 // /v1/health (no token involved).
 app.use("/v1/chat/*", signingSecretGuard);
 app.use("/v1/messages", signingSecretGuard);
+// The exact-path line above does NOT cover subpaths — /v1/messages/count_tokens
+// (#282 count_tokens passthrough) needs its own wildcard mount.
+app.use("/v1/messages/*", signingSecretGuard);
 app.use("/v1/profile", signingSecretGuard);
 app.use("/v1/trace/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
