@@ -83,7 +83,8 @@
     "sdk_tools": {
       "read": true,
       "write": true,
-      "browser": true
+      "browser": true,
+      "subagents": true
     }
   },
   {

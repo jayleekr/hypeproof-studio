@@ -132,6 +132,10 @@ chat.get("/profile", async (c) => {
       // live_preview). Adults only; minors stay false until safe-session
       // ships (#306/#318) — harness child_sdk_browser FAIL enforces it.
       browser: profile.sdk_tools?.browser === true,
+      // #282 P2 slice 3 — read-only 코드리뷰어/리서처 subagents. Adults only;
+      // minors stay false until a pedagogy decision lands — harness
+      // child_sdk_subagents FAIL enforces it.
+      subagents: profile.sdk_tools?.subagents === true,
     },
   });
 });
