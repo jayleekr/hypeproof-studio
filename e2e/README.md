@@ -8,6 +8,61 @@ Drives the actual `HypeProof Studio.app` binary, exercises the chat extension en
 - Dev stack running: `bash scripts/dev-stack.sh` (starts wrangler, sets roster, issues a token to `/tmp/hps-token.txt`)
 - npm install once: `npm install && npx playwright install chromium` (chromium isn't used but playwright wants it)
 
+### Driving a different `.app` — `HPS_APP_PATH`
+
+By default the suite drives the in-tree build artifact. To verify a
+not-yet-shipped extension against the current shell without rebuilding (or
+touching `vscodium-base/`), copy the `.app` somewhere writable, inject a fresh
+`extensions/hypeproof-chat/{dist,webview-ui/dist,media,package.json}` build into
+its `Contents/Resources/app/extensions/hypeproof-chat/`, then point the suite at
+the copy:
+
+```bash
+HPS_APP_PATH="/path/to/copy/HypeProof Studio.app" npm test
+```
+
+`HPS_APP_PATH` accepts either the `.app` bundle root or the inner
+`Contents/MacOS/HypeProof Studio` binary. Unset → the default in-tree artifact.
+
+### Quiet mode — `HPS_QUIET` (invisible local runs)
+
+GUI e2e runs LOCALLY (private-repo macOS CI minutes bill at 10x). To keep a run
+from taking over the machine, `launchApp()` runs in **quiet mode by default**
+(`HPS_QUIET=1`; set `HPS_QUIET=0` for headed debugging). In the Electron main
+process it:
+
+1. `app.dock.hide()` — no dock icon.
+2. moves every window to `(-4000,-4000)` + `showInactive()`, re-applied on
+   `ready-to-show`/`show` (VS Code re-centers its window after creation).
+3. `app.hide()` once the workbench is ready, so focus returns to you
+   (escape hatch: `HPS_QUIET_NO_HIDE=1` leaves it shown-but-off-screen).
+
+Playwright drives everything over CDP, which captures the off-screen/hidden
+surface directly, so DOM interaction and `page.screenshot` keep working. A
+hidden/occluded renderer normally throttles timers ~5x, so quiet launches also
+pass `--disable-background-timer-throttling`,
+`--disable-renderer-backgrounding`, and
+`--disable-backgrounding-occluded-windows` to stay fast.
+
+Diagnostic: `HPS_QUIET_DEBUG=1` logs `[HPS_QUIET] {dockVisible,appHidden,windows[bounds,visible]}`
+so a run can assert invisibility.
+
+### Full local suite while away — `scripts/e2e-quiet.sh`
+
+**Rule: full suite = run while away; quiet mode keeps even that invisible.**
+Beyond quiet mode, never let a suite launch windows while you're using the Mac.
+`scripts/e2e-quiet.sh` gates on the screen lock (`CGSSessionScreenIsLocked` via
+pyobjc `Quartz`): it waits until the screen is **locked** to start, and
+**aborts + kills the app** the instant it unlocks.
+
+```bash
+pip3 install pyobjc-framework-Quartz   # once — lock detection dep
+bash scripts/e2e-quiet.sh              # waits for lock, then runs the suite invisibly
+```
+
+If Quartz isn't installed the script refuses to run (fails safe — never runs
+while it can't confirm you're away).
+
 ## Run
 
 ```bash
@@ -29,6 +84,7 @@ ls test-results/        # screenshots + traces on failure
 
 - **01-launch.spec.ts** — app boots, workbench DOM ready, our activity bar container present.
 - **02-chat-roundtrip.spec.ts** — autoOnboard's token prompt fills → "안녕" sent → Korean assistant reply received within 30s.
+- **27-ai-disclosure.spec.ts** — the AI-disclosure banner (#320, REQ-C14) shows once at the top of a fresh session, persists across the first turn, and re-appears (never duplicated) after Clear Conversation.
 
 ## What's not (yet)
 
