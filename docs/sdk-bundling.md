@@ -1,8 +1,11 @@
 # SDK CLI binary bundling — decision pack (#282 Phase 2)
 
-Status: **Implemented (W4a)** — option (b): binary resolution order + instructor
-pre-seed + integrity gate shipped (see §7); in-app consent download flow and
-SDK-JS vendoring into the built-in remain (W4b). Decided 2026-07-14.
+Status: **Implemented (W4a + W4b)** — option (b): binary resolution order +
+instructor pre-seed + integrity gate (W4a, §7) AND SDK-JS vendoring into the
+built-in (W4b, §7) shipped. A packaged build now has both halves it needs to run
+the SDK coach: the vendored JS (shipped in the app) + a seeded native binary
+(W4a). The in-app consent download flow remains (W4b, deferred — instructor
+pre-seed covers venues today). Decided 2026-07-14.
 Epic: [#282](https://github.com/jayleekr/hypeproof-studio/issues/282) · ADR: [adr/0003-agent-sdk-coach-runtime.md](adr/0003-agent-sdk-coach-runtime.md) · Trigger: PR #317
 
 ## 1. Problem
@@ -49,11 +52,19 @@ can live anywhere outside `node_modules`** — e.g. the extension's
 `globalStorageUri` under `~/Library/Application Support/HypeProof-Studio/` —
 as long as we pass `pathToClaudeCodeExecutable`.
 
-Also load-bearing: **`sdk.mjs` is self-contained.** Grepping every import
-specifier in the bundle yields only Node built-ins (`fs`, `child_process`,
-`module`, `node:path`, …) — zod and the MCP SDK are inlined. So the 3.8 MB JS
-package can be vendored into the built-in extension without carrying a
-dependency tree; the listed `peerDependencies` are type-level for consumers.
+Also load-bearing: **`sdk.mjs` is *almost* self-contained.** Grepping every
+import specifier in the bundle yields Node built-ins (`fs`, `child_process`,
+`module`, `node:path`, …) plus a small runtime tail: `ajv/dist/runtime/*` and
+`ajv-formats/dist/formats` (schema-validation helpers). zod, the MCP SDK, and
+the heavy peer deps (`@anthropic-ai/sdk`, express, hono…) are inlined or unused
+at runtime. **Correction to the earlier "only Node built-ins" note (measured on
+0.3.207):** the vendored SDK JS therefore needs a *minimal* dependency tree —
+`ajv` + `ajv-formats` (+ their deps) — not zero. zod is vendored alongside for
+the browser MCP tool schemas (loaded separately by `loadZod`). The whole JS
+closure, platform binaries EXCLUDED, is **~13 MB** (verified: a clean
+`npm install --omit=optional --omit=dev --omit=peer` of the SDK + ajv +
+ajv-formats + zod imports successfully and exposes `query`/`createSdkMcpServer`/
+`tool`). The listed `peerDependencies` remain type-level for consumers.
 
 ### 2.2 Real sizes (measured)
 
@@ -230,13 +241,44 @@ Shipped (REQ-M24, `docs/studio-requirements.md`):
 - Binary presence never widens tool policy — a minor cohort still gets
   `tools: []` with a binary resolved (smoke-locked).
 
-Deferred to W4b:
+## 8. Implementation status (W4b, 2026-07-14)
 
-- Sketch step 1 (vendor the 3.8 MB SDK JS into the injected built-in +
-  `loadSdk()` vendored-path fallback) — until it lands, a **packaged** build
-  still falls back to the proxy coach even with a seeded binary, because the
-  SDK JS itself only resolves from node_modules (dev). The seeded binary is
-  exercised today via dev hosts and `HPS_SDK_BINARY`-driven e2e.
-- Sketch step 4 (in-app consent download flow + progress UI).
-- Release-E2E check that a packaged build with a seeded binary runs an SDK
-  turn; runbook/D-3 rehearsal line for the seed step.
+Shipped (REQ-M25, `docs/studio-requirements.md`) — sketch step 1, the SDK-JS
+vendoring:
+
+- **Vendored into `dist/vendor/node_modules`** (NOT a top-level `vendor/`).
+  `scripts/inject-builtin-extensions.sh` runs a clean
+  `npm install --omit=optional --omit=dev --omit=peer` of
+  `@anthropic-ai/claude-agent-sdk@<locked>` + `ajv` + `ajv-formats` + `zod`
+  into `dist/vendor`, then guards: the SDK + zod entrypoints must exist, **no**
+  `@anthropic-ai/claude-agent-sdk-<platform>` package may leak in (the 229 MB
+  binaries stay a W4a seed concern), no file may exceed 50 MB, and the vendored
+  `sdk.mjs` must actually **import** and expose `query()` (proves the runtime
+  closure — ajv included — is complete). Real size: **~13 MB**.
+- **Why under `dist/`, not a top-level `vendor/`:** the fork's
+  `prepare_vscode.sh` re-inject and `inject-builtin-extensions.sh` both ship the
+  extension by copying `dist/` wholesale (`cp -r dist`). Vendoring into the
+  SOURCE `dist/vendor` — exactly how the version stamp writes the SOURCE
+  `package.json` — makes the vendored tree ride along on BOTH paths with **no
+  `vscodium-base` change**. (A top-level `vendor/` would require editing the
+  fork's copy list.) `dist/` is gitignored, so the vendored tree is built at
+  inject time, never committed (same posture as the esbuild bundle).
+- **`loadSdk()` / `loadZod()` resolution** (`sdkCoach.ts`, pure resolvers
+  `resolveSdkModule`/`resolveZodModule` in `sdkCoachHelpers.ts`, unit-tested):
+  vendored copy under `<dist>/vendor` (packaged, imported via a `file://` URL —
+  `__dirname` anchors the dist dir in the CJS bundle) → bare specifier (dev
+  node_modules) → import throws → `SdkUnavailableError` → proxy fallback
+  (REQ-M7, unchanged). sdk.mjs's own `import "ajv/..."` resolves from the
+  sibling `vendor/node_modules`.
+
+**Net:** a packaged build now ships the SDK JS AND (via W4a) can resolve a
+seeded native binary → the SDK coach runs in a packaged app for the first time,
+with the proxy fallback intact whenever either half is absent.
+
+Deferred to a later W4 slice:
+
+- Sketch step 4 (in-app consent download flow + progress UI) — instructor
+  pre-seed (`scripts/seed-sdk-binary.sh`, W4a) covers venue provisioning today.
+- Release-E2E check that a **packaged** build with a seeded binary runs a live
+  SDK turn (needs a real `build.sh` + a signed app on venue macOS — release E2E
+  discipline); runbook/D-3 rehearsal line for the seed step.

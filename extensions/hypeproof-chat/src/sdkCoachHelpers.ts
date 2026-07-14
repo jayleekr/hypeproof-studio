@@ -517,6 +517,109 @@ export function resolveSdkBinary(c: SdkBinaryCandidates): SdkBinaryResolution {
   return { available: false, reasons };
 }
 
+// ── SDK JS module resolution (#282 W4b, docs/sdk-bundling.md §5 step 1) ──────
+// W4a made the native `claude` BINARY resolvable outside node_modules. But the
+// SDK JS itself (`sdk.mjs`) is still loaded via a variable-specifier dynamic
+// import in sdkCoach.loadSdk — esbuild never bundles it, so a PACKAGED build
+// (no node_modules) fails that import and falls back to the proxy coach even
+// with a seeded binary (the W4b gap). W4b vendors the SDK JS + its runtime
+// closure into the built-in under `dist/vendor/node_modules`, and loadSdk tries
+// that copy first.
+//
+// Why UNDER dist/: scripts/inject-builtin-extensions.sh AND the fork's
+// prepare_vscode.sh re-inject BOTH ship the extension by copying `dist/`
+// wholesale (`cp -r dist`), so a vendor tree under dist/ rides along on both
+// paths with NO vscodium-base change — exactly how the version stamp survives
+// the re-inject by writing the SOURCE package.json.
+//
+// Why a real `node_modules` subtree: `sdk.mjs` is NOT self-contained — it
+// `import`s `ajv/dist/runtime/*` and `ajv-formats/dist/formats` at runtime.
+// Node resolves those bare specifiers by walking up from sdk.mjs, so the deps
+// MUST sit in a sibling `node_modules` (the 229 MB platform binary packages are
+// EXCLUDED — those reach students via the W4a seed, not the app bundle).
+//
+// These resolvers are pure (fileExists injected) so the path logic is unit-
+// tested; sdkCoach supplies the real __dirname (the dist/ dir at runtime) + the
+// fs probe. Absent vendor + absent node_modules is handled downstream: the
+// import throws and loadSdk maps it to SdkUnavailableError → proxy fallback
+// (REQ-M7, unchanged).
+
+/** Bare npm specifier for the SDK — used for the dev (node_modules) path. */
+export const SDK_JS_SPECIFIER = "@anthropic-ai/claude-agent-sdk";
+
+/**
+ * Vendored SDK entry, RELATIVE to the extension's dist/ dir (where the esbuild
+ * CJS bundle runs → __dirname). `sdk.mjs` is the package `exports["."]` default;
+ * its own `import "ajv/..."` resolves from the sibling vendor/node_modules tree.
+ * scripts/inject-builtin-extensions.sh writes exactly this layout.
+ */
+export const VENDORED_SDK_ENTRY_SUBPATH = path.posix.join(
+  "vendor",
+  "node_modules",
+  "@anthropic-ai",
+  "claude-agent-sdk",
+  "sdk.mjs",
+);
+
+/**
+ * Vendored zod ESM entry (zod v4 `exports["."].import` = ./index.js), RELATIVE
+ * to dist/. Loaded by loadZod for the browser MCP tool input schemas; absent →
+ * loadZod returns null and the coach runs browser-less (graceful).
+ */
+export const VENDORED_ZOD_ENTRY_SUBPATH = path.posix.join(
+  "vendor",
+  "node_modules",
+  "zod",
+  "index.js",
+);
+
+export type VendoredModuleResolution =
+  | { source: "vendored"; entryPath: string }
+  | { source: "node-modules"; specifier: string };
+
+function resolveVendoredModule(
+  subpath: string,
+  specifier: string,
+  distDir: string | undefined,
+  fileExists: (p: string) => boolean,
+): VendoredModuleResolution {
+  if (distDir) {
+    const entryPath = path.join(distDir, subpath);
+    if (fileExists(entryPath)) return { source: "vendored", entryPath };
+  }
+  return { source: "node-modules", specifier };
+}
+
+/**
+ * Resolve where to load the Agent SDK JS from: the vendored copy under
+ * `<dist>/vendor` (packaged built-in) when present, else the bare specifier so
+ * Node's own node_modules lookup runs (dev/standalone). No distDir (e.g. the
+ * ESM smoke context where __dirname is undefined) also falls to the specifier.
+ */
+export function resolveSdkModule(args: {
+  distDir?: string;
+  fileExists: (p: string) => boolean;
+  specifier?: string;
+}): VendoredModuleResolution {
+  return resolveVendoredModule(
+    VENDORED_SDK_ENTRY_SUBPATH,
+    args.specifier ?? SDK_JS_SPECIFIER,
+    args.distDir,
+    args.fileExists,
+  );
+}
+
+/**
+ * Same resolution for zod (the SDK's peer dep, needed only for the browser MCP
+ * tool schemas): vendored copy → bare "zod" (dev) → (downstream) loadZod null.
+ */
+export function resolveZodModule(args: {
+  distDir?: string;
+  fileExists: (p: string) => boolean;
+}): VendoredModuleResolution {
+  return resolveVendoredModule(VENDORED_ZOD_ENTRY_SUBPATH, "zod", args.distDir, args.fileExists);
+}
+
 // ── Worker gateway env construction (#282 Phase 1, REQ-M6/M13) ──────────────
 // The Agent SDK routes model calls to `${ANTHROPIC_BASE_URL}/v1/messages` and
 // authenticates with `Authorization: Bearer ${ANTHROPIC_AUTH_TOKEN}`. Our
