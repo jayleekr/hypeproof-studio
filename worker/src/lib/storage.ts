@@ -124,13 +124,32 @@ export async function recordTurnIfOwned(
 
 export async function createTrial(env: Env, t: TrialInput): Promise<string> {
   const id = newId();
-  await env.HPS_DB
-    .prepare(
-      `INSERT INTO trials (id, session_id, cohort_id, user_id, profile_id, task_label)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .bind(id, t.session_id, t.cohort_id, t.user_id, t.profile_id, t.task_label ?? null)
-    .run();
+  const insert = (session_id: string | null) =>
+    env.HPS_DB
+      .prepare(
+        `INSERT INTO trials (id, session_id, cohort_id, user_id, profile_id, task_label)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(id, session_id, t.cohort_id, t.user_id, t.profile_id, t.task_label ?? null)
+      .run();
+  try {
+    await insert(t.session_id);
+  } catch (err) {
+    // Prod D1 accounting outage postmortem: trials.session_id REFERENCES
+    // sessions(id) and D1 always enforces foreign keys. A missing parent
+    // sessions row must not kill the whole trial (and with it every turn of
+    // the attempt) — session_id is nullable, so retry unattributed. Rethrow
+    // only when even that fails (caller surfaces 502).
+    console.error(
+      `createTrial: INSERT failed (cohort=${t.cohort_id} user=${t.user_id} session=${t.session_id}):`,
+      err,
+    );
+    if (t.session_id == null) throw err;
+    await insert(null);
+    console.error(
+      `createTrial: retried with session_id=NULL — trial ${id} saved without session attribution`,
+    );
+  }
   return id;
 }
 
