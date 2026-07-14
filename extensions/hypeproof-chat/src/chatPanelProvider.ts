@@ -4,6 +4,7 @@ import * as fs from "fs";
 import { TOKEN_KEY } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
+import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
@@ -36,6 +37,7 @@ import {
   stateBucketId,
   extractCohortIdUnverified,
   browserToolLogLine,
+  AiDisclosureGate,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
@@ -60,6 +62,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // state (pageNotice) resets whenever the panel is hidden and re-shown.
   // Cleared alongside pendingPageContext when the queued context is consumed.
   private pendingPageNotice: string | null = null;
+  // #320 — AI disclosure at session start (REQ-C14). Host-side gate because
+  // the webview forgets everything on hide/show remounts; see AiDisclosureGate.
+  private readonly aiDisclosure = new AiDisclosureGate();
   private activeCohortId: string | null = null;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
@@ -187,6 +192,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     await this.context.workspaceState.update(this.historyKey(), []);
     this.assetScores?.resetAssetScores();
     void this.post({ type: "history", messages: [] });
+    // #320 — a cleared conversation is a fresh session: disclose again (REQ-C14).
+    void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
   }
 
   /** Force re-fetch on next config push (e.g. after token change). */
@@ -390,6 +397,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (this.pendingPageNotice) {
           void this.post({ type: "pageAttached", label: this.pendingPageNotice });
         }
+        // #320 — AI disclosure at session start (REQ-C14). First "ready" of
+        // a session shows the notice; hide/show remounts within the same
+        // session return null here and stay silent. A history clear resets
+        // the session (see clearHistory), so the next conversation start is
+        // disclosed again.
+        {
+          const disclosure = this.aiDisclosure.noticeForReady();
+          if (disclosure) void this.post({ type: "aiDisclosure", text: disclosure });
+        }
         return;
       case "sendMessage":
         await this.handleSend(msg.text, msg.history, msg.images);
@@ -579,7 +595,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           throw new Error("코치 프로필을 아직 못 받았어요. 잠시 후 다시 시도해주세요.");
         }
         if (!token) {
-          throw new ProxyAuthError("missing", "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑");
+          throw new ProxyAuthError("missing", TOKEN_MISSING_FRIENDLY);
         }
         try {
           await runSdkCoach({

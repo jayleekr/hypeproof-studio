@@ -18,6 +18,7 @@ interface State {
   assetScore: AssetScoreChunk | null;
   toolLog: ToolLogEntry[];          // #278 Phase 3 — browser loop action log (current turn)
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
+  aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
 }
 
 type Action =
@@ -29,6 +30,7 @@ type Action =
   | { type: "streamAssetScore"; assetScore: AssetScoreChunk }
   | { type: "toolLog"; entry: ToolLogEntry }
   | { type: "pageAttached"; label: string }
+  | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
   | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
   | { type: "userSent"; text: string; images?: string[] };
@@ -44,6 +46,7 @@ const initialState: State = {
   assetScore: null,
   toolLog: [],
   pageNotice: null,
+  aiNotice: null,
 };
 
 function reducer(state: State, action: Action): State {
@@ -94,6 +97,11 @@ function reducer(state: State, action: Action): State {
     case "pageAttached":
       // #308 — inline notice; cleared on the next send (userSent) only.
       return { ...state, pageNotice: action.label };
+    case "aiDisclosure":
+      // #320 — session-start AI disclosure. The host gates when this arrives
+      // (once per session + after clear); the webview just keeps it visible
+      // for the rest of this mount. Replaces, never appends.
+      return { ...state, aiNotice: action.text };
     case "streamEnd":
       return {
         ...state,
@@ -145,6 +153,7 @@ export function App() {
         case "streamAssetScore": dispatch({ type: "streamAssetScore", assetScore: msg.assetScore }); break;
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
+        case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;
@@ -206,6 +215,7 @@ export function App() {
         messages={state.messages}
         toolLog={state.toolLog}
         pageNotice={state.pageNotice}
+        aiNotice={state.aiNotice}
         streaming={!!state.streamingId}
         error={state.error}
         errorRequestId={state.errorRequestId}

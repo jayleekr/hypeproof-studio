@@ -74,6 +74,7 @@ When in doubt:
 | REQ-C11 | 이미지 단발 주입 | 첨부 이미지는 **그 user 턴에만** 모델로 전송됨. `history` 는 text-only 로 매핑(`proxyClient` 가 `m.content` 만 사용) → 후속 턴 재전송·workspaceState 영속 저장 모두 안 함. show-intent 단축은 이미지 첨부 시 건너뜀 | U + E |
 | REQ-C12 | 이미지 입력 sanitize + 캡 (worker) | `translate()` 가 OpenAI `image_url` → Anthropic image 블록(data URL→base64 source, http(s)→url source) 변환. `data:image/{png,jpe?g,gif,webp}` + http(s) 만 허용, `file:`/`javascript:` 등은 drop. 턴당 최대 4장·data URL 6.5M자 상한. 이미지 없는 array 는 string 으로 collapse(legacy shape 유지) | U |
 | REQ-C13 | 이미지 입력 profile 게이트 (default OFF) | `Profile.input.image_paste` 미설정/false 면 (1) 웹뷰 paste 핸들러가 텍스트 전용으로 동작 + (2) **워커가 `filterMessages` 에서 image 블록 server-side strip** (클라가 보내도 차단). 현 3개 cohort 전부 OFF — 미성년 cohort 가 이미지 흐름에 노출되지 않음. `/v1/profile` 이 resolved boolean 으로 노출 | U |
+| REQ-C14 | AI 상호작용 고지 (세션 시작) (#320) | Anthropic Usage Policy — consumer-facing chat 은 최소 세션 시작 시 "AI 와 대화 중" 고지. `AiDisclosureGate`(호스트측): 세션 첫 webview mount 에서 1회 + history clear 직후 재고지; 같은 세션 내 hide/show remount 에는 미재노출. 문구는 오답 가능성·확인 권고 문장 포함(ToS §D.3, verification_reflex). webview 는 메시지 리스트 상단에 `role=note` + `aria-live=polite` 배너로 렌더 | U (`test/ai-disclosure`) |
 
 ## D. Preview / Run
 
@@ -193,6 +194,7 @@ When in doubt:
 | REQ-M12 | Anthropic-native passthrough + 계량 | 응답은 원형 그대로 (non-stream JSON verbatim; stream 은 Anthropic SSE verbatim — OpenAI chunk/[DONE]/asset_score 미주입) + usage tap 으로 `usage_log`/`turns` 를 chat 과 동일 스키마로 기록; upstream 에러·stream 중단은 #257 규율 (request_id 만 노출) | R (`worker/test/messages-integration.test.mjs`) |
 | REQ-M13 | 로컬 API key 불요·불허 | agent-sdk 경로의 유일한 자격증명은 workshop 토큰. `buildSdkGatewayEnv` 가 ambient `ANTHROPIC_API_KEY`(AUTH_TOKEN 보다 우선순위 높음)·`CLAUDE_CODE_USE_BEDROCK`·`CLAUDE_CODE_USE_VERTEX` 를 스크럽 — 개발 머신의 키/프로바이더 스위치가 게이트웨이를 우회할 수 없다. classroom Anthropic key 는 worker 밖으로 안 나감 | U (`test/sdk-gateway`) |
 | REQ-M14 | 런타임 플래그 기본값 고정 | `hypeproofChat.coachRuntime` default 는 `"proxy"` — Phase-3 전환은 Jay-gated 별도 결정 (스모크가 package.json 기본값을 잠금) | U (`test/sdk-gateway`) |
+| REQ-M15 | 게이트웨이 4xx fast-fail (#320) | SDK CLI 는 401/400 도 최대 10회 backoff 재시도 → 만료 토큰이 아이에게 수 분간 무응답으로 보임. `consumeSdkStream`: `api_retry` 이벤트의 `error_status` 401/400 이면 **첫 이벤트에서** 쿼리 abort + proxy 경로와 동일한 토큰 복구 경로 throw (`ProxyAuthError("expired", TOKEN_EXPIRED_FRIENDLY)` — 죽은 토큰 삭제 + 재입력 prompt, 문구는 `proxyClientHelpers` 단일 소스). 429/5xx/529/연결오류(null status)는 SDK backoff 유지 | U (`test/sdk-fastfail`) |
 
 ---
 

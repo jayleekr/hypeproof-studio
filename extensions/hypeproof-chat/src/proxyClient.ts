@@ -1,5 +1,9 @@
 import type { AssetScoreChunk, ChatMessage, Citation, ResolvedProfile } from "./protocol";
-import { buildProxyHeaders } from "./proxyClientHelpers";
+import {
+  buildProxyHeaders,
+  TOKEN_EXPIRED_FRIENDLY,
+  TOKEN_MISSING_FRIENDLY,
+} from "./proxyClientHelpers";
 
 /**
  * Auth/session failures need different handling than generic errors:
@@ -55,15 +59,9 @@ function classifyError(status: number, bodyText: string): ProxyAuthError | null 
 
   if (status === 401) {
     if (code === "expired") {
-      return new ProxyAuthError(
-        "expired",
-        "토큰이 만료됐어요. 선생님께 새 토큰을 받아서 다시 넣어주세요. 🔑",
-      );
+      return new ProxyAuthError("expired", TOKEN_EXPIRED_FRIENDLY);
     }
-    return new ProxyAuthError(
-      "missing",
-      "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑",
-    );
+    return new ProxyAuthError("missing", TOKEN_MISSING_FRIENDLY);
   }
   if (status === 403) {
     if (type === "session_inactive") {

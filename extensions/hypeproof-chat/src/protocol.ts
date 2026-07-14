@@ -204,6 +204,13 @@ export type HostMessage =
   // 브라우저가 "Paused due to Notification"으로 멈추므로(코어 동작), 토스트 대신
   // 채팅 패널 인라인 상태줄로 알린다.
   | { type: "pageAttached"; label: string }
+  // #320 — AI disclosure notice (Anthropic Usage Policy: consumer-facing chat
+  // must disclose "you are interacting with AI" at minimum at session start).
+  // Host posts once per session — first webview mount of this run and again
+  // right after a history clear; hide/show remounts within the same session
+  // stay silent (host-side AiDisclosureGate remembers). Webview renders a
+  // compact role=note + aria-live=polite banner at the top of the messages.
+  | { type: "aiDisclosure"; text: string }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string }
