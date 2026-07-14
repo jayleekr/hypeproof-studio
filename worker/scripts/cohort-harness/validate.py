@@ -287,6 +287,20 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
             add(findings, rules, pid, "child_sdk_write",
                 "HARD FAIL: child cohort must not set sdk_tools.write=true "
                 "(minors never gain workspace write capability)")
+        # #282 P2 slice 2 (#306/#318): a child cohort must not grant the
+        # native-browser MCP tools either — outward navigation stays off for
+        # minors until safe-session ships. When in doubt, deny for minors.
+        if sdk_tools.get("browser") is True:
+            add(findings, rules, pid, "child_sdk_browser",
+                "HARD FAIL: child cohort must not set sdk_tools.browser=true "
+                "(minors get no browser MCP tools until safe-session ships)")
+        # #282 P2 slice 3: a child cohort must not grant the Agent SDK
+        # subagents either — delegation stays adult-only until a pedagogy
+        # decision lands. When in doubt, deny for minors.
+        if sdk_tools.get("subagents") is True:
+            add(findings, rules, pid, "child_sdk_subagents",
+                "HARD FAIL: child cohort must not set sdk_tools.subagents=true "
+                "(minors get no SDK subagents until a pedagogy decision lands)")
 
 
 def check_cohort_consistency(cohort_totals: dict, rules: dict, findings: list) -> None:

@@ -12,8 +12,21 @@
 
 // Type-only import — erased at build/strip time, so this file stays a leaf
 // module that Node can run standalone in the smoke tests.
-import type { Options as AgentSdkOptions } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  AgentDefinition,
+  Options as AgentSdkOptions,
+} from "@anthropic-ai/claude-agent-sdk";
 import * as path from "node:path";
+// Explicit .ts specifiers: the leaf/pure-module graph must load under
+// `node --experimental-strip-types` (smoke tests) which resolves specifiers
+// literally; esbuild + tsc (allowImportingTsExtensions) accept them.
+import { safeNavigateUrl } from "./browserControlHelpers.ts";
+import {
+  MCP_BROWSER_OPEN,
+  MCP_BROWSER_SCREENSHOT,
+  MCP_BROWSER_TOOLS,
+  MCP_LIVE_PREVIEW_START,
+} from "./browserMcp.ts";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
 
 export type AgentPermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
@@ -31,6 +44,24 @@ export interface AgentCoachOptions {
    * = chat-only.
    */
   permittedTools: string[];
+  /**
+   * In-process MCP tools this cohort may use (#282 P2 slice 2) — the
+   * `mcp__hypeproof__*` browser tools when `sdk_tools.browser` is granted.
+   * Kept SEPARATE from `permittedTools` because SDK `Options.tools` is the
+   * BUILT-IN base tool set only; MCP tools arrive via `mcpServers`, which the
+   * orchestration layer registers exactly when this list is non-empty. Every
+   * call still routes through canUseTool. Empty = no browser MCP.
+   */
+  permittedMcpTools: string[];
+  /**
+   * SDK subagent-invocation tool names this cohort may use (#282 P2 slice 3)
+   * — ["Task", "Agent"] when `sdk_tools.subagents` is granted, [] otherwise.
+   * Non-empty ⇒ buildSdkQueryOptions attaches the 코드리뷰어/리서처
+   * AgentDefinitions (tools = intersection with `permittedTools`). Every
+   * delegation AND every subagent tool call still routes through canUseTool
+   * (sdk.d.ts CanUseTool carries `agentID` for sub-agent-context calls).
+   */
+  permittedAgentTools: string[];
   /**
    * Permission mode. We keep "default" (no auto-approvals) so every tool use
    * falls through to `canUseTool`, where the host modal gates it — that gate is
@@ -109,6 +140,160 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
   return tools;
 }
 
+/**
+ * Which in-process MCP tools a cohort may use (#282 P2 slice 2). Same
+ * ownership and fail-closed posture as permittedToolsFor:
+ * - the WORKER PROFILE owns the policy: `sdk_tools.browser === true` grants
+ *   the three hypeproof browser tools as one unit. Absent/false → none.
+ * - MINOR-SAFETY INVARIANT (#306/#318): minors get NO browser MCP tools until
+ *   safe-session ships — stripped for minor tiers even if a profile
+ *   mistakenly carries browser:true, defense-in-depth on top of the worker
+ *   harness's child_sdk_browser FAIL. When in doubt, deny for minors.
+ */
+export function permittedMcpToolsFor(profile: ResolvedProfile): string[] {
+  if (profile.sdk_tools?.browser === true && !isMinorTier(profile)) {
+    return [...MCP_BROWSER_TOOLS];
+  }
+  return [];
+}
+
+// ── SDK subagents (#282 P2 slice 3, REQ-M22/M23) ─────────────────────────────
+// Two READ-ONLY Korean subagents the coach can delegate to when the worker
+// profile grants `sdk_tools.subagents` — the Delegation-judgment asset made
+// concrete (docs/seven-assets.md §5): the coach proposes a delegation, the
+// student approves it in a modal, a bounded specialist does the read-only work.
+//
+// canUseTool routing (load-bearing, verified against sdk.d.ts@0.3.207): a
+// subagent's tool calls DO route through the PARENT query's canUseTool — the
+// CanUseTool options carry `agentID?: string` ("If running within the context
+// of a sub-agent, the sub-agent's ID."), so the same evaluateSdkToolUse policy
+// matrix gates every subagent call. The definition-level `tools` allowlist is
+// therefore defense in depth, not the only gate — but it is kept STRICT
+// anyway: read-only wishlist, intersected with the cohort's permitted set.
+
+/** The subagent-invocation tool. sdk.d.ts names it both ways across versions
+ *  ("invoked via the Agent tool" / "via the Task tool"), so both names are
+ *  granted/gated — the unregistered one is inert in `Options.tools`. */
+export const SDK_AGENT_TOOL_NAMES = ["Task", "Agent"] as const;
+const AGENT_TOOLS = new Set(["task", "agent"]);
+
+export const SUBAGENT_CODE_REVIEWER = "코드리뷰어";
+export const SUBAGENT_RESEARCHER = "리서처";
+
+/** Base (pre-intersection) shape of a HypeProof subagent. */
+export interface SubagentBaseDefinition {
+  description: string;
+  prompt: string;
+  /** Read-only tool WISHLIST — intersected with the cohort's permitted set. */
+  tools: readonly string[];
+  maxTurns: number;
+}
+
+// Belt over suspenders: even if a base definition drifts, these can never be
+// granted to a subagent. Mirrors the parent invariants (shell never grantable;
+// this slice ships NO web tools and NO writes on subagents).
+const SUBAGENT_DISALLOWED_TOOLS = [
+  "Bash",
+  "Write",
+  "Edit",
+  "NotebookEdit",
+  "WebSearch",
+  "WebFetch",
+] as const;
+
+/**
+ * The read-only subagent catalog. Keys are the `subagent_type` values the
+ * model uses AND the student-facing names in the delegation modal — Korean by
+ * design. Wishlist tools are the read-only built-ins only; a definition that
+ * drifts wider is clamped by buildSubagentDefinitions (intersection) and by
+ * SUBAGENT_DISALLOWED_TOOLS.
+ */
+export const SUBAGENT_DEFINITIONS: Readonly<Record<string, SubagentBaseDefinition>> = {
+  [SUBAGENT_CODE_REVIEWER]: {
+    description:
+      "참가자의 워크스페이스 파일(HTML/CSS/JS)을 읽고 코드 리뷰 피드백을 주는 읽기 전용 리뷰어. 코드를 고치지 않고 리뷰만 한다.",
+    prompt: [
+      "당신은 HypeProof Studio의 코드리뷰어입니다. 참가자(성인 워크숍)의 워크스페이스 파일을 읽고 리뷰합니다.",
+      "",
+      "규칙:",
+      "- 읽기 전용입니다. 파일을 수정하거나 새로 만들지 않고, 리뷰 의견만 돌려줍니다.",
+      "- 워크스페이스 안의 파일만 읽습니다.",
+      "- 한국어 존댓말로, 친근하지만 전문적으로 씁니다. 참가자를 주눅 들게 하지 않되 실질적인 지적을 아끼지 않습니다.",
+      "",
+      "리뷰 형식:",
+      "1. 잘한 점 — 구체적으로 2~3가지 (파일·부분을 짚어서)",
+      "2. 개선점 — 중요한 순서로, 각 항목에 파일 경로와 이유를 함께",
+      "3. 다음 한 걸음 — 지금 바로 시도할 수 있는 가장 작은 개선 1가지",
+      "",
+      "전체 코드를 다시 써 주지 말고, 바꿀 곳과 방향만 짚어 주세요 — 고치는 것은 참가자와 코치의 몫입니다.",
+    ].join("\n"),
+    tools: SDK_READ_TOOL_NAMES,
+    maxTurns: 10,
+  },
+  [SUBAGENT_RESEARCHER]: {
+    description:
+      "워크스페이스 안의 문서(md/txt/html 등)를 읽고 정리·요약해 주는 읽기 전용 리서처. 웹에는 접근하지 않는다.",
+    prompt: [
+      "당신은 HypeProof Studio의 리서처입니다. 참가자의 워크스페이스 안 문서를 읽고 질문에 답합니다.",
+      "",
+      "규칙:",
+      "- 읽기 전용입니다. 파일을 수정하지 않습니다.",
+      "- 웹 검색·외부 자료 접근은 하지 않습니다. 근거는 오직 워크스페이스 안의 파일입니다.",
+      "- 답할 때 근거가 된 파일 경로를 함께 적습니다.",
+      "- 워크스페이스에서 근거를 찾지 못하면 지어내지 말고 '워크스페이스에서 찾을 수 없어요'라고 말합니다.",
+      "- 한국어 존댓말로, 간결하고 구조적으로 정리합니다.",
+    ].join("\n"),
+    tools: SDK_READ_TOOL_NAMES,
+    maxTurns: 10,
+  },
+};
+
+/**
+ * Which subagent-invocation tool names a cohort may use. Same ownership and
+ * fail-closed posture as permittedToolsFor / permittedMcpToolsFor:
+ * - the WORKER PROFILE owns the policy: `sdk_tools.subagents === true` grants
+ *   the Agent/Task tool (and with it the read-only subagent catalog). Absent/
+ *   false → none.
+ * - MINOR-SAFETY INVARIANT: minors get NO subagents until a pedagogy decision
+ *   lands — stripped for minor tiers even if a profile mistakenly carries
+ *   subagents:true, defense-in-depth on top of the worker harness's
+ *   child_sdk_subagents FAIL. When in doubt, deny for minors.
+ */
+export function permittedAgentToolsFor(profile: ResolvedProfile): string[] {
+  if (profile.sdk_tools?.subagents === true && !isMinorTier(profile)) {
+    return [...SDK_AGENT_TOOL_NAMES];
+  }
+  return [];
+}
+
+/**
+ * Materialize the SDK `agents` option from the base catalog: each subagent's
+ * `tools` is the INTERSECTION of its read-only wishlist and the cohort's
+ * permitted set — a read-only cohort's 코드리뷰어 can never Write even if a
+ * definition drifts, and a chat-only cohort's subagents get `tools: []`.
+ * `tools` is ALWAYS set explicitly (possibly empty): omitting it would inherit
+ * ALL tools from the parent (sdk.d.ts AgentDefinition.tools — "If omitted,
+ * inherits all tools from parent"), which is exactly the widening this
+ * function exists to prevent. `disallowedTools` is the second belt.
+ */
+export function buildSubagentDefinitions(
+  permittedTools: readonly string[],
+  defs: Readonly<Record<string, SubagentBaseDefinition>> = SUBAGENT_DEFINITIONS,
+): Record<string, AgentDefinition> {
+  const out: Record<string, AgentDefinition> = {};
+  for (const [name, def] of Object.entries(defs)) {
+    out[name] = {
+      description: def.description,
+      prompt: def.prompt,
+      tools: def.tools.filter((t) => permittedTools.includes(t)),
+      disallowedTools: [...SUBAGENT_DISALLOWED_TOOLS],
+      // model omitted → inherit the main (gateway-clamped) model.
+      maxTurns: def.maxTurns,
+    };
+  }
+  return out;
+}
+
 export function maxTurnsFor(profile: ResolvedProfile): number {
   return isMinorTier(profile) ? 6 : 20;
 }
@@ -185,12 +370,31 @@ export function buildSdkQueryOptions(
     baseEnv: Record<string, string | undefined>;
   },
 ): Omit<AgentSdkOptions, "canUseTool" | "abortController"> {
+  // #282 P2 slice 3 — the read-only subagent catalog rides on the same flag
+  // that grants the Agent/Task invoker. Definition tools are the intersection
+  // with the cohort's permitted set (buildSubagentDefinitions); no grant → no
+  // `agents` key at all, so the model never sees a subagent.
+  const agents =
+    agent.permittedAgentTools.length > 0
+      ? buildSubagentDefinitions(agent.permittedTools)
+      : undefined;
   return {
     systemPrompt: agent.systemPrompt,
     model: agent.model,
-    tools: [...agent.permittedTools],
+    // Built-in base tool set ONLY — the mcp__hypeproof__* names never go here
+    // (REQ-M19): Options.tools filters BUILT-INS; MCP tools are delivered via
+    // mcpServers, which the orchestration layer attaches (host-bound instance)
+    // exactly when the profile grants them. The Agent/Task invoker IS a
+    // built-in, so it joins the base set only when the profile grants
+    // subagents (REQ-M22).
+    tools: [...agent.permittedTools, ...agent.permittedAgentTools],
+    ...(agents ? { agents } : {}),
     allowedTools: [],
     settingSources: [],
+    // #282 P2 slice 2 — only the mcpServers WE pass exist: project .mcp.json,
+    // user settings, and plugin MCP configs are ignored, so no ambient config
+    // can add tools behind the cohort profile's back.
+    strictMcpConfig: true,
     permissionMode: agent.permissionMode,
     maxTurns: agent.maxTurns,
     ...(args.cwd ? { cwd: args.cwd } : {}),
@@ -229,6 +433,8 @@ export function profileToAgentOptions(
     systemPrompt: ctx.systemPrompt,
     model: ctx.model,
     permittedTools: permittedToolsFor(profile),
+    permittedMcpTools: permittedMcpToolsFor(profile),
+    permittedAgentTools: permittedAgentToolsFor(profile),
     // Always gate. Minors and adults alike route every tool use through the
     // manual-approve modal — the gate is the lesson.
     permissionMode: "default",
@@ -377,6 +583,34 @@ function safeStringify(input: unknown): string {
 export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequest, "requestId"> {
   const name = action.toolName.toLowerCase();
 
+  // #282 P2 slice 2 — browser_open is the only hypeproof MCP tool that reaches
+  // the approval path ("ask"); it maps to its own kind so resolveActionApproval
+  // modal-gates it by default (requireApprovalFor includes "openBrowser").
+  // Screenshot/live-preview auto-allow in evaluateSdkToolUse and never get here.
+  if (action.toolName === MCP_BROWSER_OPEN) {
+    const url = firstString(action.input, ["url"]) ?? "";
+    return {
+      kind: "openBrowser",
+      description: `브라우저 열기: ${url || safeStringify(action.input)}`,
+      payload: { url },
+    };
+  }
+
+  // #282 P2 slice 3 — the Agent/Task tool: the coach wants to delegate to a
+  // subagent (코드리뷰어/리서처). Own kind so resolveActionApproval modal-gates
+  // it by default — the student consciously decides the delegation
+  // (delegation_judgment, docs/seven-assets.md §5).
+  if (AGENT_TOOLS.has(name)) {
+    const subagent = firstString(action.input, ["subagent_type"]) ?? "";
+    const task =
+      firstString(action.input, ["description", "prompt"]) ?? safeStringify(action.input);
+    return {
+      kind: "delegateAgent",
+      description: `${subagent || "서브에이전트"}에게 위임: ${task}`,
+      payload: { subagent, task },
+    };
+  }
+
   if (SHELL_TOOLS.has(name)) {
     const command = firstString(action.input, ["command"]) ?? safeStringify(action.input);
     return { kind: "executeShell", description: `${action.toolName}: ${command}`, payload: { command } };
@@ -414,14 +648,18 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
 // on EVERY tool call. Three verdicts:
 //   allow — read tools whose target stays inside the workspace: auto-run, no
 //           modal (a read-only look at the student's own folder is the coach
-//           "seeing the page", not a consequential delegation);
+//           "seeing the page", not a consequential delegation); also the
+//           granted browser MCP screenshot/live-preview tools (#282 P2 s2 —
+//           the coach looking at the student's own tab/workspace);
 //   ask   — write tools (always — the approve/deny modal IS the
-//           delegation_judgment / verification_reflex pedagogy) and the
-//           web-research tools (existing modal tiers decide);
+//           delegation_judgment / verification_reflex pedagogy), the
+//           web-research tools (existing modal tiers decide), and
+//           browser_open (outward action → modal, after the URL policy);
 //   deny  — anything not granted by the cohort profile (Bash, WebFetch without
-//           opt-in, unknown tools) or any path escaping the workspace
-//           (`../` traversal, absolute paths outside cwd). Deny reasons are
-//           logged host-side; the student sees the Korean `friendly` line.
+//           opt-in, unknown/foreign MCP tools), any path escaping the
+//           workspace (`../` traversal, absolute paths outside cwd), and any
+//           browser_open URL the safeNavigateUrl policy rejects. Deny reasons
+//           are logged host-side; the student sees the Korean `friendly` line.
 
 export type SdkToolVerdict =
   | { decision: "allow" }
@@ -432,6 +670,8 @@ export type SdkToolVerdict =
 export const TOOL_DENIED_FRIENDLY = "이 도구는 지금 수업에서는 사용할 수 없어요.";
 /** Student-facing copy for a workspace path-escape deny. */
 export const PATH_ESCAPE_FRIENDLY = "작업 폴더 밖의 파일에는 접근할 수 없어요.";
+/** Student-facing copy for a browser_open URL the policy rejects (#282 P2 slice 2). */
+export const URL_POLICY_FRIENDLY = "이 주소는 열 수 없어요.";
 
 /**
  * Is `target` inside `workspaceRoot`? Relative targets resolve AGAINST the
@@ -509,6 +749,52 @@ export function evaluateSdkToolUse(args: {
       reason: "shell execution is never granted (Phase 2 invariant)",
       friendly: TOOL_DENIED_FRIENDLY,
     };
+  }
+
+  // ── Agent/Task tool — subagent delegation (#282 P2 slice 3, REQ-M22) ──────
+  // Grant already passed Gate 1 (profile opted in via sdk_tools.subagents and
+  // the cohort is not a minor — permittedAgentToolsFor stripped it otherwise).
+  if (AGENT_TOOLS.has(name)) {
+    // Only OUR read-only catalog is delegable: an unknown/absent subagent_type
+    // (a general-purpose agent, a hallucinated name) dies here, fail closed.
+    const subagentType = firstString(input, ["subagent_type"]) ?? "";
+    if (!Object.prototype.hasOwnProperty.call(SUBAGENT_DEFINITIONS, subagentType)) {
+      return {
+        decision: "deny",
+        reason: `subagent_type "${subagentType || "(empty)"}" is not in the HypeProof subagent catalog`,
+        friendly: TOOL_DENIED_FRIENDLY,
+      };
+    }
+    // Delegation → ALWAYS the approval modal (kind "delegateAgent") — the
+    // student's approve/deny IS the delegation_judgment pedagogy. The
+    // subagent's own tool calls come back through this same function
+    // (sdk.d.ts: CanUseTool options carry agentID for sub-agent context).
+    return { decision: "ask" };
+  }
+
+  // ── hypeproof MCP browser tools (#282 P2 slice 2, REQ-M20) ────────────────
+  // Grant already passed Gate 1 (profile opted in via sdk_tools.browser and
+  // the cohort is not a minor — permittedMcpToolsFor stripped it otherwise).
+  if (toolName === MCP_BROWSER_OPEN) {
+    // URL policy: the SAME whitelist the #278 browser-control loop uses
+    // (safeNavigateUrl) — http(s)/localhost/file only; javascript:, vscode:,
+    // data:, bare local paths are rejected before any modal is shown.
+    const url = firstString(input, ["url"]) ?? "";
+    if (!safeNavigateUrl(url)) {
+      return {
+        decision: "deny",
+        reason: `browser_open URL rejected by policy: ${url || "(empty)"}`,
+        friendly: URL_POLICY_FRIENDLY,
+      };
+    }
+    // Outward action → ALWAYS the approval modal (kind "openBrowser").
+    return { decision: "ask" };
+  }
+  if (toolName === MCP_BROWSER_SCREENSHOT || toolName === MCP_LIVE_PREVIEW_START) {
+    // Auto-allow once the browser capability is granted: a screenshot of the
+    // student's own tab / serving their own workspace locally is the coach
+    // "looking at the page", not an outward delegation.
+    return { decision: "allow" };
   }
 
   if (READ_TOOLS.has(name) || WRITE_TOOLS.has(name)) {

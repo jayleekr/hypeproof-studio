@@ -82,7 +82,9 @@
     },
     "sdk_tools": {
       "read": true,
-      "write": true
+      "write": true,
+      "browser": true,
+      "subagents": true
     }
   },
   {

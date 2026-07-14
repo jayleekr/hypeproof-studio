@@ -14,6 +14,13 @@
 // surfacing a raw error to the student (REQ-M7).
 
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import {
+  buildHypeproofMcpServer,
+  HYPEPROOF_MCP_SERVER_NAME,
+  type BrowserMcpHost,
+  type SdkMcpFactory,
+  type ZodLike,
+} from "./browserMcp";
 import type { AssetScoreChunk, Citation, ResolvedProfile } from "./protocol";
 import { ProxyAuthError } from "./proxyClient";
 import { TOKEN_EXPIRED_FRIENDLY } from "./proxyClientHelpers";
@@ -25,6 +32,8 @@ import {
   sdkToolToActionRequest,
   type CoachToolAction,
 } from "./sdkCoachHelpers";
+
+export type { BrowserMcpHost } from "./browserMcp";
 
 export type { CoachToolAction } from "./sdkCoachHelpers";
 
@@ -69,8 +78,17 @@ export interface SdkCoachArgs {
   onAssetScore: (score: AssetScoreChunk) => void;
   /** Manual-approve gate. Resolves true to allow the tool. */
   requestApproval: (action: CoachToolAction) => Promise<boolean>;
+  /**
+   * #282 P2 slice 2 — host capabilities behind the in-process "hypeproof" MCP
+   * browser tools. Optional: when absent (or the profile doesn't grant
+   * sdk_tools.browser) no MCP server is registered and the coach stays
+   * browser-less. Implemented by chatPanelProvider (it has the vscode API).
+   */
+  browserHost?: BrowserMcpHost;
   /** Test seam: inject a fake SDK module instead of importing the real one. */
   sdk?: AgentSdkModule;
+  /** Test seam: inject a fake zod instead of importing the real one. */
+  zod?: ZodLike;
 }
 
 /** npm package that provides the SDK once wired (Phase 1). */
@@ -89,6 +107,13 @@ export interface AgentSdkModule {
     prompt: string | AsyncIterable<unknown>;
     options?: Options;
   }): AsyncIterable<Record<string, unknown>>;
+  /**
+   * In-process MCP server factory functions (#282 P2 slice 2). Optional on
+   * the seam: an older/fake module without them simply gets no browser MCP
+   * server (graceful degradation — chat still works).
+   */
+  createSdkMcpServer?: SdkMcpFactory["createSdkMcpServer"];
+  tool?: SdkMcpFactory["tool"];
 }
 
 async function loadSdk(): Promise<AgentSdkModule> {
@@ -112,6 +137,25 @@ async function loadSdk(): Promise<AgentSdkModule> {
       `agent-sdk runtime selected but ${SDK_PACKAGE} could not be loaded ` +
         `(packaged build without node_modules?). Falling back to the proxy runtime (#282).`,
     );
+  }
+}
+
+/**
+ * Load zod (the SDK's peer dep — needed for MCP tool input schemas) the same
+ * way the SDK itself is loaded: variable-specifier dynamic import, never
+ * bundled. Returns null when unavailable (packaged build without
+ * node_modules) so the caller degrades to a browser-less coach instead of
+ * failing the turn.
+ */
+async function loadZod(): Promise<ZodLike | null> {
+  try {
+    const spec: string = "zod";
+    const mod = (await import(spec)) as { z?: ZodLike; string?: unknown };
+    const z = (mod.z ?? mod) as ZodLike;
+    return typeof z.string === "function" ? z : null;
+  } catch (err) {
+    console.warn("[coach] failed to load zod for the browser MCP tools:", err);
+    return null;
   }
 }
 
@@ -149,6 +193,37 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   const transcript = args.history.map((m) => `${m.role}: ${m.content}`).join("\n");
   const prompt = transcript ? `${transcript}\nuser: ${args.userText}` : args.userText;
 
+  // #282 P2 slice 2 — register the in-process "hypeproof" browser MCP server
+  // ONLY when (a) the worker profile grants it (permittedMcpTools non-empty —
+  // adults with sdk_tools.browser; minors are always stripped), (b) the host
+  // provided the capabilities, and (c) the loaded SDK + zod expose the factory
+  // (a fake/old module without them degrades to a browser-less coach).
+  // grantedMcpTools mirrors what was ACTUALLY registered so canUseTool never
+  // grants a name no server serves — and stays [] when registration didn't
+  // happen, keeping the policy fail-closed.
+  let mcpServers: Options["mcpServers"];
+  let grantedMcpTools: readonly string[] = [];
+  if (opts.permittedMcpTools.length > 0 && args.browserHost) {
+    const hasFactory =
+      typeof sdk.createSdkMcpServer === "function" && typeof sdk.tool === "function";
+    const z = hasFactory ? args.zod ?? (await loadZod()) : null;
+    if (hasFactory && z) {
+      const server = buildHypeproofMcpServer(
+        { createSdkMcpServer: sdk.createSdkMcpServer!, tool: sdk.tool! },
+        z,
+        args.browserHost,
+      );
+      mcpServers = {
+        [HYPEPROOF_MCP_SERVER_NAME]: server as NonNullable<Options["mcpServers"]>[string],
+      };
+      grantedMcpTools = opts.permittedMcpTools;
+    } else {
+      console.warn(
+        "[coach] profile grants browser MCP tools but the SDK/zod factory is unavailable — running browser-less",
+      );
+    }
+  }
+
   // Pure option/env construction (allowedTools/settingSources pinned to [],
   // ANTHROPIC_BASE_URL derived from proxyUrl, ANTHROPIC_API_KEY scrubbed) is
   // locked by unit tests via buildSdkQueryOptions (REQ-M5/M6/M13); the two
@@ -168,11 +243,18 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     //   allow → read tools contained in the workspace (auto, no modal);
     //   ask   → write tools (ALWAYS the approve/deny modal — the gate is the
     //           pedagogy) + web research (host approval tiers decide).
+    // MCP server registration is conditional (see above); mcpServers stays
+    // absent for ungranted cohorts, so the model never even sees the tools.
+    ...(mcpServers ? { mcpServers } : {}),
     canUseTool: async (name, input) => {
       const verdict = evaluateSdkToolUse({
         toolName: name,
         input,
-        permittedTools: opts.permittedTools,
+        // Union of built-in grants + the Agent/Task invoker (when the profile
+        // grants subagents, #282 P2 slice 3) + the MCP tools that actually
+        // registered. Subagent-context calls (sdk.d.ts CanUseTool `agentID`)
+        // arrive here too and face the same matrix.
+        permittedTools: [...opts.permittedTools, ...opts.permittedAgentTools, ...grantedMcpTools],
         workspaceRoot: args.cwd,
       });
       if (verdict.decision === "deny") {

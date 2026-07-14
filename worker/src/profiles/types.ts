@@ -128,10 +128,32 @@ export interface Profile {
    * must NEVER set `write: true`. Enforced by the cohort harness
    * (`child_sdk_write` FAIL) and again client-side (write tools are stripped
    * for minor tiers regardless of this flag).
+   *
+   * `browser` (#282 P2 slice 2): grants the in-process "hypeproof" SDK MCP
+   * browser tools (browser_open / browser_screenshot / live_preview_start)
+   * built on the #309 native-browser + live-server work. browser_open always
+   * passes the client URL policy (safeNavigateUrl) AND the approval modal.
+   * Minors follow the #306/#318 safety posture: `browser: true` on a child
+   * cohort is a harness FAIL (`child_sdk_browser`) until safe-session ships,
+   * and the client strips it for minor tiers regardless.
+   *
+   * `subagents` (#282 P2 slice 3): grants the Agent SDK subagent feature —
+   * the client defines two READ-ONLY Korean subagents ("코드리뷰어" /
+   * "리서처") behind this flag and the coach can delegate to them via the
+   * SDK's Agent/Task tool. Every delegation is modal-gated (delegation
+   * judgment pedagogy) and every subagent tool call routes through the SAME
+   * canUseTool policy as the parent. Definition tools are the INTERSECTION
+   * of the definition's read-only wishlist and this cohort's permitted set —
+   * a subagent can never widen beyond the profile. Minors: `subagents: true`
+   * on a child cohort is a harness FAIL (`child_sdk_subagents`) until a
+   * pedagogy decision lands, and the client strips it for minor tiers
+   * regardless.
    */
   sdk_tools?: {
     read?: boolean;
     write?: boolean;
+    browser?: boolean;
+    subagents?: boolean;
   };
   /**
    * #278 Phase 3 — the client-driven agentic browser tool loop. When enabled,

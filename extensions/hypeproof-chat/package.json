@@ -149,12 +149,16 @@
             "type": "string",
             "enum": [
               "writeFile",
-              "executeShell"
+              "executeShell",
+              "openBrowser",
+              "delegateAgent"
             ]
           },
           "default": [
             "writeFile",
-            "executeShell"
+            "executeShell",
+            "openBrowser",
+            "delegateAgent"
           ],
           "description": "Actions that require explicit user approval before execution."
         }

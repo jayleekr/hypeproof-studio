@@ -1666,9 +1666,16 @@ const TINY_PNG =
   // #282 Phase 2 — Agent SDK workspace tools. MINOR-SAFETY INVARIANT: minors'
   // cohorts must NEVER gain write capability (and there is no exec flag in the
   // schema at all). Mirrors the harness child_sdk_write FAIL check.
+  // Slice 2 (#306/#318): the browser MCP grant is equally off for minors until
+  // safe-session ships — mirrors the harness child_sdk_browser FAIL check.
+  // Slice 3: the SDK subagents grant (읽기 전용 코드리뷰어/리서처) is equally
+  // off for minors until a pedagogy decision lands — mirrors the harness
+  // child_sdk_subagents FAIL check.
   for (const p of all) {
     if (p.audience.parent_coaching === true) {
       assert.notEqual(p.sdk_tools?.write, true, `minor cohort ${p.id}: sdk_tools.write MUST stay off`);
+      assert.notEqual(p.sdk_tools?.browser, true, `minor cohort ${p.id}: sdk_tools.browser MUST stay off`);
+      assert.notEqual(p.sdk_tools?.subagents, true, `minor cohort ${p.id}: sdk_tools.subagents MUST stay off`);
     }
   }
   // #278 is layered onto the existing website-copyclone track (원장 v2), not a
@@ -1685,11 +1692,19 @@ const TINY_PNG =
   assert.equal(copyclone.preview.type, "live_server", "copyclone: live_server preview (조건③)");
   assert.equal(copyclone.browser_control?.enabled, true, "copyclone: browser_control on (조건② 제어)");
   // #282 Phase 2 — the adult copyclone cohort is the ONLY profile with
-  // read+write SDK workspace tools (coach edits index.html directly).
-  assert.deepEqual(copyclone.sdk_tools, { read: true, write: true }, "copyclone: SDK workspace read+write on (adult, #282 Phase 2)");
+  // read+write SDK workspace tools (coach edits index.html directly), the
+  // only browser MCP grant (slice 2), and the only SDK subagents grant
+  // (slice 3 — read-only 코드리뷰어/리서처, delegation modal-gated).
+  assert.deepEqual(
+    copyclone.sdk_tools,
+    { read: true, write: true, browser: true, subagents: true },
+    "copyclone: SDK workspace read+write + browser MCP + subagents on (adult, #282 P2)",
+  );
   for (const p of all) {
     if (p.id !== copyclone.id) {
       assert.notEqual(p.sdk_tools?.write, true, `profile ${p.id}: sdk_tools.write reserved for the adult copyclone cohort in Phase 2`);
+      assert.notEqual(p.sdk_tools?.browser, true, `profile ${p.id}: sdk_tools.browser reserved for the adult copyclone cohort in Phase 2`);
+      assert.notEqual(p.sdk_tools?.subagents, true, `profile ${p.id}: sdk_tools.subagents reserved for the adult copyclone cohort in P2 slice 3`);
     }
   }
   // No stray homepage cohort/tier survived the merge into copyclone.
