@@ -194,6 +194,7 @@ When in doubt:
 | REQ-M12 | Anthropic-native passthrough + 계량 | 응답은 원형 그대로 (non-stream JSON verbatim; stream 은 Anthropic SSE verbatim — OpenAI chunk/[DONE]/asset_score 미주입) + usage tap 으로 `usage_log`/`turns` 를 chat 과 동일 스키마로 기록; upstream 에러·stream 중단은 #257 규율 (request_id 만 노출) | R (`worker/test/messages-integration.test.mjs`) |
 | REQ-M13 | 로컬 API key 불요·불허 | agent-sdk 경로의 유일한 자격증명은 workshop 토큰. `buildSdkGatewayEnv` 가 ambient `ANTHROPIC_API_KEY`(AUTH_TOKEN 보다 우선순위 높음)·`CLAUDE_CODE_USE_BEDROCK`·`CLAUDE_CODE_USE_VERTEX` 를 스크럽 — 개발 머신의 키/프로바이더 스위치가 게이트웨이를 우회할 수 없다. classroom Anthropic key 는 worker 밖으로 안 나감 | U (`test/sdk-gateway`) |
 | REQ-M14 | 런타임 플래그 기본값 고정 | `hypeproofChat.coachRuntime` default 는 `"proxy"` — Phase-3 전환은 Jay-gated 별도 결정 (스모크가 package.json 기본값을 잠금) | U (`test/sdk-gateway`) |
+| REQ-M15 | 게이트웨이 4xx fast-fail (#320) | SDK CLI 는 401/400 도 최대 10회 backoff 재시도 → 만료 토큰이 아이에게 수 분간 무응답으로 보임. `consumeSdkStream`: `api_retry` 이벤트의 `error_status` 401/400 이면 **첫 이벤트에서** 쿼리 abort + proxy 경로와 동일한 토큰 복구 경로 throw (`ProxyAuthError("expired", TOKEN_EXPIRED_FRIENDLY)` — 죽은 토큰 삭제 + 재입력 prompt, 문구는 `proxyClientHelpers` 단일 소스). 429/5xx/529/연결오류(null status)는 SDK backoff 유지 | U (`test/sdk-fastfail`) |
 
 ---
 

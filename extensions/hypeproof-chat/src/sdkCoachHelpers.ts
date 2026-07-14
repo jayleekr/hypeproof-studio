@@ -216,6 +216,99 @@ export function profileToAgentOptions(
   };
 }
 
+// ── SDK stream consumption + gateway 4xx fast-fail (#320, REQ-M15) ──────────
+// e2e finding: the SDK CLI retries 401/400 responses up to 10x with backoff —
+// a bad/expired workshop token turned into a multi-minute SILENT hang for a
+// kid. The retry attempts surface in the SDK message stream as
+// `{type:"system", subtype:"api_retry", error_status, ...}` events (the e2e
+// proved error_status:401 rides on them), so the loop can fast-fail on the
+// FIRST such event instead of waiting out the backoff schedule.
+
+/**
+ * Gateway statuses that can never succeed by retrying on this path: the
+ * workshop token is the only credential, so a 401 (rejected/expired token)
+ * or 400 (request the gateway refuses outright) will fail all 10 retries
+ * identically. 403 is NOT here — the worker uses it for session-window/roster
+ * states that the SDK doesn't retry (they surface as a terminal error), and
+ * 5xx/429/529 stay retryable (the SDK's backoff is the right behavior there).
+ */
+export const SDK_FATAL_AUTH_STATUSES: ReadonlySet<number> = new Set([400, 401]);
+
+/**
+ * If this SDK stream event is an api_retry carrying a fatal auth-ish status
+ * (400/401), return that status; otherwise null (keep consuming the stream).
+ * `error_status` is null for connection errors — those stay retryable.
+ */
+export function sdkFatalAuthStatus(msg: Record<string, unknown>): number | null {
+  if (msg["type"] !== "system" || msg["subtype"] !== "api_retry") return null;
+  const status = msg["error_status"];
+  return typeof status === "number" && SDK_FATAL_AUTH_STATUSES.has(status) ? status : null;
+}
+
+/** Best-effort text extraction across candidate SDK message shapes. */
+export function extractSdkText(msg: Record<string, unknown>): string {
+  const direct = msg["text"];
+  if (typeof direct === "string") return direct;
+  const delta = msg["delta"] as Record<string, unknown> | undefined;
+  if (delta && typeof delta["text"] === "string") return delta["text"] as string;
+  const message = msg["message"] as Record<string, unknown> | undefined;
+  const content = message?.["content"];
+  if (Array.isArray(content)) {
+    return content
+      .map((b) => (b && typeof b === "object" && typeof (b as Record<string, unknown>).text === "string" ? (b as Record<string, unknown>).text : ""))
+      .join("");
+  }
+  return "";
+}
+
+/**
+ * Error/abort construction is injected so this stays a leaf module (no import
+ * of proxyClient's error classes → still loadable standalone by smoke tests).
+ * sdkCoach.ts wires makeFatalAuthError to ProxyAuthError with the SAME Korean
+ * token copy the proxy path uses (TOKEN_EXPIRED_FRIENDLY, REQ-B5).
+ */
+export interface SdkStreamHandlers {
+  /** The caller's (user-stop) abort signal state. */
+  isAborted: () => boolean;
+  /** Build the AbortError thrown on user stop (proxy-path parity, REQ-M8). */
+  makeAbortError: () => Error;
+  /** Abort the SDK query (its AbortController) so the CLI stops retrying NOW. */
+  abortQuery: () => void;
+  /** Build the student-friendly auth error thrown on a fatal 400/401. */
+  makeFatalAuthError: (status: number) => Error;
+  onDelta: (delta: string) => void;
+}
+
+/**
+ * Consume one SDK coach turn's message stream. Pure and injected so the
+ * fast-fail contract is locked by unit tests: on the FIRST api_retry event
+ * with error_status 400/401 the query is aborted and the auth error thrown —
+ * within one event, no further stream consumption, no minutes-long backoff.
+ */
+export async function consumeSdkStream(
+  stream: AsyncIterable<unknown>,
+  h: SdkStreamHandlers,
+): Promise<void> {
+  for await (const raw of stream) {
+    // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
+    if (h.isAborted()) throw h.makeAbortError();
+    const msg = (raw ?? {}) as Record<string, unknown>;
+    const fatal = sdkFatalAuthStatus(msg);
+    if (fatal !== null) {
+      // Kill the subprocess's retry loop first, then surface the token error.
+      h.abortQuery();
+      throw h.makeFatalAuthError(fatal);
+    }
+    const type = String(msg["type"] ?? "");
+    if (type === "assistant" || type === "text" || type === "content_block_delta") {
+      const delta = extractSdkText(msg);
+      if (delta) h.onDelta(delta);
+    }
+    // Other message types (result / message_stop) are terminal — nothing to
+    // emit; the caller posts streamEnd.
+  }
+}
+
 // ── SDK tool call → host ActionRequest ──────────────────────────────────────
 // The Agent SDK sends CamelCase tool names ("Bash"/"Write"/"WebSearch") with a
 // structured input object; resolveActionApproval keys its safety tiers on our

@@ -4,6 +4,7 @@ import * as fs from "fs";
 import { TOKEN_KEY } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
+import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
@@ -594,7 +595,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           throw new Error("코치 프로필을 아직 못 받았어요. 잠시 후 다시 시도해주세요.");
         }
         if (!token) {
-          throw new ProxyAuthError("missing", "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑");
+          throw new ProxyAuthError("missing", TOKEN_MISSING_FRIENDLY);
         }
         try {
           await runSdkCoach({
