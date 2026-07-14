@@ -38,12 +38,81 @@ echo "Building hypeproof-chat..."
   npm run build
 )
 
+# 1b. Vendor the Agent SDK JS (#282 W4b, docs/sdk-bundling.md §5 step 1) into
+# dist/vendor so a PACKAGED build can actually load the SDK. loadSdk() tries
+# <dist>/vendor first; without this the packaged built-in has no SDK JS (only
+# dist/ + webview-ui/dist + media + package.json ship), so the SDK import fails
+# and the coach falls back to the proxy runtime even with a seeded binary.
+#
+# The 229 MB per-platform native binaries are EXCLUDED (--omit=optional) — those
+# reach students via the W4a seed (scripts/seed-sdk-binary.sh), NOT the app
+# bundle (embedding would clobber Anthropic's Developer-ID signature; doc §2.4).
+# We also --omit=peer: sdk.mjs imports only ajv/ajv-formats at runtime (verified
+# below by importing it), not the heavy peer deps (@anthropic-ai/sdk, express,
+# hono…), so peers would just bloat the bundle 40 MB→ needlessly.
+#
+# CRITICAL (re-inject constraint): vendor into the SOURCE dist/, exactly like
+# the version stamp below writes the SOURCE package.json. The fork's
+# prepare_vscode.sh "HypeProof Studio overrides" hook re-injects from $EXT_SRC
+# during build.sh (AFTER run-build's git clean wipes vscode/extensions/) by
+# copying dist/ wholesale — so a vendor tree UNDER dist/ ships via BOTH this
+# inject path and the build.sh re-inject, with no vscodium-base change.
+echo "Vendoring Agent SDK JS into dist/vendor (platform binaries excluded)..."
+SDK_VERSION="$(node -e "process.stdout.write(require('$EXT_SRC/package-lock.json').packages['node_modules/@anthropic-ai/claude-agent-sdk'].version)")"
+VENDOR_ROOT="$EXT_SRC/dist/vendor"
+rm -rf "$VENDOR_ROOT"
+mkdir -p "$VENDOR_ROOT"
+cat > "$VENDOR_ROOT/package.json" <<JSON
+{ "name": "hypeproof-sdk-vendor", "private": true, "version": "0.0.0" }
+JSON
+(
+  cd "$VENDOR_ROOT"
+  # ajv/ajv-formats: sdk.mjs's direct runtime imports (belt over the closure
+  # npm resolves). zod: the SDK peer used by the browser MCP tool schemas.
+  npm install --no-audit --no-fund --omit=optional --omit=dev --omit=peer \
+    "@anthropic-ai/claude-agent-sdk@${SDK_VERSION}" ajv ajv-formats zod
+)
+
+# 1c. Vendor guards — fail the build rather than ship a broken/oversized vendor.
+VENDOR_SDK_ENTRY="$VENDOR_ROOT/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
+VENDOR_ZOD_ENTRY="$VENDOR_ROOT/node_modules/zod/index.js"
+if [[ ! -f "$VENDOR_SDK_ENTRY" ]]; then
+  echo "ERROR: vendored SDK entry missing: $VENDOR_SDK_ENTRY" >&2
+  exit 1
+fi
+if [[ ! -f "$VENDOR_ZOD_ENTRY" ]]; then
+  echo "ERROR: vendored zod entry missing: $VENDOR_ZOD_ENTRY" >&2
+  exit 1
+fi
+# The platform-binary packages (@anthropic-ai/claude-agent-sdk-<platform>) are
+# ~229 MB each and must NEVER land in the app bundle (W4a seeds the binary).
+if ls -d "$VENDOR_ROOT"/node_modules/@anthropic-ai/claude-agent-sdk-* >/dev/null 2>&1; then
+  echo "ERROR: a platform-binary package leaked into dist/vendor — the SDK binary must be seeded (W4a), not shipped" >&2
+  exit 1
+fi
+# Coarse ceiling: the JS closure is ~13 MB; a >50 MB file means a binary slipped in.
+BIG_FILE="$(find "$VENDOR_ROOT" -type f -size +50M 2>/dev/null | head -1)"
+if [[ -n "$BIG_FILE" ]]; then
+  echo "ERROR: oversized file in dist/vendor (binary leak?): $BIG_FILE" >&2
+  exit 1
+fi
+# Strongest guard: actually import the vendored SDK JS from its own tree (proves
+# the runtime closure — ajv/ajv-formats included — is complete, not just present).
+if ! node --input-type=module -e "import { pathToFileURL } from 'node:url'; const m = await import(pathToFileURL(process.argv[1]).href); if (typeof m.query !== 'function') { console.error('vendored SDK missing query()'); process.exit(1); }" "$VENDOR_SDK_ENTRY"; then
+  echo "ERROR: vendored SDK JS failed to import from dist/vendor (incomplete runtime closure?)" >&2
+  exit 1
+fi
+VENDOR_SIZE="$(du -sh "$VENDOR_ROOT" | cut -f1)"
+echo "Vendored Agent SDK JS closure → dist/vendor ($VENDOR_SIZE, SDK $SDK_VERSION, native binaries excluded)"
+
 # 2. Copy the built extension into vscode/extensions/
 echo "Injecting into $EXT_DST"
 rm -rf "$EXT_DST"
 mkdir -p "$EXT_DST"
 # Files that ship inside the bundled extension:
 cp "$EXT_SRC/package.json"  "$EXT_DST/"
+# dist/ carries the esbuild bundle AND the vendored Agent SDK JS (dist/vendor,
+# step 1b) — cp -r ships both, same as the fork's prepare_vscode.sh re-inject.
 cp -r "$EXT_SRC/dist"       "$EXT_DST/"
 cp -r "$EXT_SRC/media"      "$EXT_DST/"
 mkdir -p "$EXT_DST/webview-ui"

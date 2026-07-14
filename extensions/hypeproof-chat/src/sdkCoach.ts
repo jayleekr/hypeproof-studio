@@ -18,6 +18,7 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   buildHypeproofMcpServer,
   HYPEPROOF_MCP_SERVER_NAME,
@@ -34,6 +35,8 @@ import {
   evaluateSdkToolUse,
   profileToAgentOptions,
   resolveSdkBinary,
+  resolveSdkModule,
+  resolveZodModule,
   sdkBinaryMarkerPath,
   sdkToolToActionRequest,
   seededSdkBinaryPath,
@@ -133,26 +136,53 @@ export interface AgentSdkModule {
   tool?: SdkMcpFactory["tool"];
 }
 
+/**
+ * The extension's dist/ dir at runtime — where the esbuild CJS bundle
+ * (dist/extension.js) lives, and the anchor for the vendored SDK JS under
+ * dist/vendor (#282 W4b). `__dirname` exists in the CJS bundle (esbuild
+ * platform=node, no --format → cjs); under the ESM smoke tests this module
+ * isn't loaded, so the guard is only belt. Undefined → resolveSdkModule falls
+ * to the bare specifier (dev node_modules lookup).
+ */
+function extensionDistDir(): string | undefined {
+  return typeof __dirname === "string" && __dirname ? __dirname : undefined;
+}
+
 async function loadSdk(): Promise<AgentSdkModule> {
+  // #282 W4b — prefer the vendored SDK JS under <dist>/vendor (packaged
+  // built-in), else the bare specifier so Node's node_modules lookup runs
+  // (dev). The vendored sdk.mjs is ESM and its own `import "ajv/..."` resolves
+  // from the sibling vendor/node_modules; the native binary is located
+  // separately (W4a, pathToClaudeCodeExecutable).
+  const resolution = resolveSdkModule({
+    distDir: extensionDistDir(),
+    fileExists: (p) => fs.existsSync(p),
+  });
   try {
-    // Variable specifier → esbuild leaves this as a true runtime dynamic
-    // import() (never inlined into dist/extension.js). That matters twice:
-    // the SDK is ESM-only and spawns a ~240 MB native `claude` binary from
-    // its platform package (@anthropic-ai/claude-agent-sdk-<platform>), both
-    // of which must resolve from node_modules at runtime, not from a bundle.
-    const spec: string = SDK_PACKAGE;
+    // Variable specifier → esbuild leaves this a true runtime dynamic import()
+    // (never inlined into dist/extension.js). Vendored: an absolute file:// URL
+    // to sdk.mjs (a raw absolute path is not portably importable on win32).
+    // node-modules: the bare specifier.
+    const spec: string =
+      resolution.source === "vendored"
+        ? pathToFileURL(resolution.entryPath).href
+        : resolution.specifier;
     const mod = (await import(spec)) as AgentSdkModule;
     if (typeof mod.query !== "function") {
       throw new Error(`${SDK_PACKAGE} loaded but does not export query()`);
+    }
+    if (resolution.source === "vendored") {
+      console.info(`[coach] agent-sdk JS via vendored copy: ${resolution.entryPath}`);
     }
     return mod;
   } catch (err) {
     if (err instanceof SdkUnavailableError) throw err;
     // Keep the technical detail for developers (console), NOT for the student.
-    console.warn(`[coach] failed to load ${SDK_PACKAGE}:`, err);
+    console.warn(`[coach] failed to load ${SDK_PACKAGE} (source=${resolution.source}):`, err);
     throw new SdkUnavailableError(
       `agent-sdk runtime selected but ${SDK_PACKAGE} could not be loaded ` +
-        `(packaged build without node_modules?). Falling back to the proxy runtime (#282).`,
+        `(source=${resolution.source}; packaged build without the vendored SDK JS or node_modules?). ` +
+        `Falling back to the proxy runtime (#282 W4b).`,
     );
   }
 }
@@ -165,10 +195,25 @@ async function loadSdk(): Promise<AgentSdkModule> {
  * failing the turn.
  */
 async function loadZod(): Promise<ZodLike | null> {
+  // #282 W4b — same vendored-first resolution as the SDK: the packaged built-in
+  // has no node_modules, so the bare "zod" specifier would fail and the coach
+  // would silently lose the browser MCP tools. The vendored copy under
+  // <dist>/vendor keeps them working; still null-tolerant (dev without zod).
+  const resolution = resolveZodModule({
+    distDir: extensionDistDir(),
+    fileExists: (p) => fs.existsSync(p),
+  });
   try {
-    const spec: string = "zod";
-    const mod = (await import(spec)) as { z?: ZodLike; string?: unknown };
-    const z = (mod.z ?? mod) as ZodLike;
+    const spec: string =
+      resolution.source === "vendored"
+        ? pathToFileURL(resolution.entryPath).href
+        : resolution.specifier;
+    const mod = (await import(spec)) as {
+      z?: ZodLike;
+      string?: unknown;
+      default?: ({ z?: ZodLike } & ZodLike) | undefined;
+    };
+    const z = (mod.z ?? mod.default?.z ?? mod.default ?? mod) as ZodLike;
     return typeof z.string === "function" ? z : null;
   } catch (err) {
     console.warn("[coach] failed to load zod for the browser MCP tools:", err);
