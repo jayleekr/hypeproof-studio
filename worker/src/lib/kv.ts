@@ -179,7 +179,9 @@ export async function listIssuerAudits(
   kv: KVNamespace,
   opts: { mintedBy?: string; limit?: number } = {},
 ): Promise<Array<{ jti: string; record: IssuerAuditRecord }>> {
-  const limit = Math.max(1, Math.min(opts.limit ?? 200, 1000));
+  // NaN-safe clamp: a non-finite limit falls back to the default rather than
+  // disabling the cap (Math.min(NaN,…) = NaN → `out.length >= NaN` never trips).
+  const limit = Number.isFinite(opts.limit) ? Math.max(1, Math.min(opts.limit as number, 1000)) : 200;
   const out: Array<{ jti: string; record: IssuerAuditRecord }> = [];
   let cursor: string | undefined;
   do {

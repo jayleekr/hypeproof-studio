@@ -44,6 +44,7 @@ registerHooks({
 
 const SECRET = "test-secret-" + "x".repeat(20);
 const { default: worker } = await import("../src/index.ts");
+const { listIssuerAudits, issuerAuditKey } = await import("../src/lib/kv.ts");
 
 // In-memory KV mock with cursor-less list (list_complete always true) — enough
 // for the audit-prefix scan listIssuerAudits performs.
@@ -231,6 +232,119 @@ await check("limit=1 caps the returned rows", async () => {
   assert.equal(status, 200);
   assert.equal(json.count, 1);
   assert.equal(json.limit, 1);
+});
+
+// --- input-validation / limit-clamp contract (adversarial-review gaps) -------
+
+await check("minted_by longer than 64 chars → 400", async () => {
+  const { status, json } = await fetchOnce(
+    `/admin/issuers?minted_by=${"x".repeat(65)}`,
+    { headers: { authorization: ADMIN } },
+  );
+  assert.equal(status, 400, `expected 400, got ${status}`);
+  assert.match(json.error, /minted_by/i);
+});
+
+await check("limit clamp: >1000 → 1000, non-numeric → 200, 0/neg → 1", async () => {
+  const big = await fetchOnce("/admin/issuers?limit=5000", { headers: { authorization: ADMIN } });
+  assert.equal(big.json.limit, 1000, "?limit=5000 should clamp to 1000");
+  const nan = await fetchOnce("/admin/issuers?limit=abc", { headers: { authorization: ADMIN } });
+  assert.equal(nan.json.limit, 200, "?limit=abc should default to 200");
+  const zero = await fetchOnce("/admin/issuers?limit=0", { headers: { authorization: ADMIN } });
+  assert.equal(zero.json.limit, 1, "?limit=0 should floor to 1");
+  const neg = await fetchOnce("/admin/issuers?limit=-5", { headers: { authorization: ADMIN } });
+  assert.equal(neg.json.limit, 1, "?limit=-5 should floor to 1");
+});
+
+// --- `expired` flag: seed a past-exp audit record directly ------------------
+// The live POST path only ever writes a future exp, so the expired:true branch
+// (admin.ts) is unreachable through minting alone. Seed one under an isolated
+// minted_by so it doesn't perturb the counts above.
+await check("expired flag reflects a past-exp audit record", async () => {
+  const expiredJti = "99999999-8888-4777-8666-555544443333";
+  await env.HPS_KV.put(
+    issuerAuditKey(expiredJti),
+    JSON.stringify({
+      instructor: "ghost",
+      scopes: [{ cohort: COHORT, profiles: [PROFILE], max_hours: 24 }],
+      exp: 1000, // 1970 — unambiguously in the past (unix seconds)
+      days: 1,
+      revoked_jti: null,
+      minted_by: "olduser",
+      can_issue_issuers: false,
+    }),
+  );
+  const { status, json } = await fetchOnce("/admin/issuers?minted_by=olduser", {
+    headers: { authorization: ADMIN },
+  });
+  assert.equal(status, 200, `got ${status}`);
+  assert.equal(json.count, 1);
+  assert.equal(json.issuers[0].instructor, "ghost");
+  assert.equal(json.issuers[0].expired, true, "past exp should read expired:true");
+});
+
+// --- listIssuerAudits cursor pagination (real multi-page KV contract) --------
+// The endpoint tests above run against a single-page mock (list_complete:true),
+// so the cursor do/while loop — the whole reason the helper exists (paging past
+// the 1000-key platform cap) — is never exercised there. Drive it directly with
+// a mock that pages via cursor, so a continuation-logic regression can't ship
+// green.
+function makePagingKV(records, pageSize) {
+  const store = new Map(records.map((r) => [issuerAuditKey(r.jti), JSON.stringify(r.record)]));
+  return {
+    async get(key, type) {
+      const raw = store.get(key);
+      if (raw === undefined) return null;
+      return type === "json" ? JSON.parse(raw) : raw;
+    },
+    async put(key, value) { store.set(key, value); },
+    async delete(key) { store.delete(key); },
+    async list({ prefix, cursor } = {}) {
+      const all = [...store.keys()].filter((k) => !prefix || k.startsWith(prefix)).sort();
+      const start = cursor ? Number(cursor) : 0;
+      const page = all.slice(start, start + pageSize).map((name) => ({ name }));
+      const next = start + pageSize;
+      const complete = next >= all.length;
+      return { keys: page, list_complete: complete, ...(complete ? {} : { cursor: String(next) }) };
+    },
+  };
+}
+
+const scope = [{ cohort: COHORT, profiles: [PROFILE], max_hours: 24 }];
+const mkRec = (n, minter) => ({
+  jti: `page-${n}`,
+  record: {
+    instructor: `i${n}`, scopes: scope, exp: 9999999999, days: 1,
+    revoked_jti: null, minted_by: minter, can_issue_issuers: false,
+  },
+});
+// 5 records, pageSize 2 → 3 pages (2,2,1): forces ≥2 cursor round-trips.
+const pagingKV = makePagingKV(
+  [mkRec(1, "m1"), mkRec(2, "m1"), mkRec(3, "m1"), mkRec(4, "m2"), mkRec(5, "m2")],
+  2,
+);
+
+await check("listIssuerAudits accumulates across cursor pages", async () => {
+  const all = await listIssuerAudits(pagingKV, {});
+  assert.equal(all.length, 5, `expected 5 across 3 pages, got ${all.length}`);
+});
+
+await check("listIssuerAudits filters minted_by across pages", async () => {
+  const m2 = await listIssuerAudits(pagingKV, { mintedBy: "m2" });
+  assert.equal(m2.length, 2);
+  assert.deepEqual(m2.map((r) => r.jti).sort(), ["page-4", "page-5"]);
+});
+
+await check("listIssuerAudits limit early-returns mid-pagination", async () => {
+  const three = await listIssuerAudits(pagingKV, { limit: 3 });
+  assert.equal(three.length, 3, "limit must cap before scanning all pages");
+});
+
+await check("listIssuerAudits NaN limit falls back to default (not uncapped)", async () => {
+  // Regression guard for the hardened NaN-safe clamp — a non-finite limit must
+  // not disable the cap; with <200 records it simply returns them all.
+  const all = await listIssuerAudits(pagingKV, { limit: NaN });
+  assert.equal(all.length, 5);
 });
 
 const failed = results.filter((r) => !r.ok);
