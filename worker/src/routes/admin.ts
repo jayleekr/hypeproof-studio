@@ -19,6 +19,7 @@
 //   DELETE /admin/tokens/revoke/:jti            — un-revoke (typo / restore)
 //   GET    /admin/tokens/revoked                — current revocation list
 //   POST   /admin/issuers                       — mint/re-scope an instructor issuer token (admin Basic/CF, or a member's can_issue_issuers Bearer; #290/#191/#295)
+//   GET    /admin/issuers?minted_by=<u>          — issuer mint-lineage query (admin only; #313)
 
 import { Hono } from "hono";
 import type { Env } from "../env";
@@ -40,6 +41,8 @@ import {
   getCohortPause,
   getRoster,
   isTokenRevoked,
+  issuerAuditKey,
+  listIssuerAudits,
   listRevoked,
   pauseCohort,
   revokeToken,
@@ -516,7 +519,7 @@ admin.post("/issuers", async (c) => {
   // Full admin (Basic/CF) stays unrestricted — it already holds
   // /admin/tokens/revoke for arbitrary jtis.
   if (viaBearer && body.revoke_jti !== undefined) {
-    const rec = await c.env.HPS_KV.get(`issuer_audit:${body.revoke_jti}`, "json") as
+    const rec = await c.env.HPS_KV.get(issuerAuditKey(body.revoke_jti), "json") as
       | { minted_by?: string }
       | null;
     if (!rec || rec.minted_by !== minter) {
@@ -551,7 +554,7 @@ admin.post("/issuers", async (c) => {
   // ⑦ audit — metadata only (NEVER the token). Root-of-trust issuance must be
   // traceable; TTL tracks the token's own lifetime.
   await c.env.HPS_KV.put(
-    `issuer_audit:${jti}`,
+    issuerAuditKey(jti),
     JSON.stringify({
       instructor,
       scopes,
@@ -575,6 +578,55 @@ admin.post("/issuers", async (c) => {
     can_issue_issuers: childCanIssue,
     minted_by: minter,
   });
+});
+
+// ---- issuer mint-lineage query (#313) --------------------------------------
+// "Which instructor issuers did minter X create?" — the ops tool that makes a
+// minter revoke actionable. Revoking a minter blocks FURTHER mints immediately,
+// but the issuers it already signed live until their own expiry (≤90d); this
+// lets an operator enumerate that lineage and revoke each one via the existing
+// POST /admin/tokens/revoke.
+//
+// ADMIN ONLY — deliberately NOT in isIssuerAllowedEndpoint. A Bearer minter can
+// re-scope only tokens it minted itself (revoke_jti ownership, #295 B1), but it
+// must not be able to *enumerate* other operators' issuers, so this reads the
+// full audit trail behind admin Basic / CF Access only.
+//
+//   GET /admin/issuers?minted_by=<u>&limit=<n>
+//     minted_by — optional; filter to a single minter's lineage (omit = all)
+//     limit     — optional; 1..1000 (default 200) KV-scan cap
+//
+// Each row cross-checks live revocation state so the operator sees at a glance
+// which lineage tokens still need killing (revoked/expired ones don't).
+admin.get("/issuers", async (c) => {
+  const mintedByRaw = c.req.query("minted_by");
+  const mintedBy =
+    typeof mintedByRaw === "string" && mintedByRaw.length > 0 ? mintedByRaw : undefined;
+  if (mintedBy !== undefined && mintedBy.length > 64) {
+    return c.json({ error: "minted_by must be 1-64 chars" }, 400);
+  }
+  const limitRaw = Number(c.req.query("limit"));
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 1000) : 200;
+
+  const audits = await listIssuerAudits(c.env.HPS_KV, { mintedBy, limit });
+  const now = Math.floor(Date.now() / 1000);
+  const issuers = await Promise.all(
+    audits.map(async ({ jti, record }) => {
+      const rev = await isTokenRevoked(c.env.HPS_KV, jti);
+      return {
+        jti,
+        instructor: record.instructor,
+        minted_by: record.minted_by,
+        can_issue_issuers: record.can_issue_issuers === true,
+        exp: record.exp,
+        expired: typeof record.exp === "number" ? record.exp <= now : false,
+        revoked: rev ? { ts: rev.ts, reason: rev.reason ?? null } : null,
+        cohorts: Array.isArray(record.scopes) ? record.scopes.map((s) => s.cohort) : [],
+        scopes: record.scopes,
+      };
+    }),
+  );
+  return c.json({ issuers, count: issuers.length, minted_by: mintedBy ?? null, limit });
 });
 
 // ---- roster -----------------------------------------------------------------
