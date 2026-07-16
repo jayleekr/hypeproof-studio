@@ -267,6 +267,14 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
         if analytics.get("log_user_messages") is True:
             add(findings, rules, pid, "child_log_user_messages",
                 "HARD FAIL: child cohort must set analytics.log_user_messages=false (no PII without consent)")
+        # #306 — a child cohort that ever opens the native browser must do so in
+        # the hardened session. Enforce browser_session.mode="safe" regardless of
+        # whether the native browser is wired today (defense-in-depth).
+        browser_session = p.get("browser_session") or {}
+        if browser_session.get("mode") != "safe":
+            add(findings, rules, pid, "child_browser_session_safe",
+                "HARD FAIL: child cohort must set browser_session.mode='safe' "
+                "(#306 hardened native-browser session)")
         if strat == "per_user_github_pages":
             consent = dotted_get(p, child_rules.get("publish_consent_key", ""))
             if consent:
