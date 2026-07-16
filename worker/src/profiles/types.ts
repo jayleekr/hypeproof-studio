@@ -13,6 +13,16 @@ export interface Profile {
     language: "ko" | "en";
     parent_coaching: boolean;
   };
+  /**
+   * #320 — compliance flag: this cohort serves MINORS (Anthropic minors-guide
+   * + PIPA). Drives the gateway moderation layer (lib/moderation.ts) and is
+   * exposed via /v1/profile so the client can render minor-specific UX (AI
+   * disclosure, etc.). Belt-and-braces: `isMinorCohort()` ALSO treats any
+   * `audience.age_range` upper bound < 18 as minor, so forgetting this flag
+   * on a future kids profile cannot silently disable moderation (project
+   * minor-safety invariant: when in doubt, deny for minors).
+   */
+  minor_cohort?: boolean;
   model: {
     default: ModelAlias;
     fallback?: ModelAlias;
@@ -102,6 +112,48 @@ export interface Profile {
   tools?: {
     web_search?: boolean;
     max_uses?: number;
+  };
+  /**
+   * #282 Phase 2 — Agent SDK workspace tools the coach may use when the Studio
+   * runs on the agent-sdk runtime ("coach edits index.html directly"). The
+   * PROFILE owns this policy (ADR 0003): the client maps these flags to SDK
+   * tool names (read → Read/Grep/Glob, write → Write/Edit) and must never
+   * widen beyond them.
+   *
+   * Absent = all false → the coach is chat-only (fail closed). There is
+   * deliberately NO shell/exec flag in this schema — shell execution cannot be
+   * granted by any cohort profile in Phase 2, period.
+   *
+   * MINOR-SAFETY INVARIANT: minors' cohorts (parent_coaching / kids tiers)
+   * must NEVER set `write: true`. Enforced by the cohort harness
+   * (`child_sdk_write` FAIL) and again client-side (write tools are stripped
+   * for minor tiers regardless of this flag).
+   *
+   * `browser` (#282 P2 slice 2): grants the in-process "hypeproof" SDK MCP
+   * browser tools (browser_open / browser_screenshot / live_preview_start)
+   * built on the #309 native-browser + live-server work. browser_open always
+   * passes the client URL policy (safeNavigateUrl) AND the approval modal.
+   * Minors follow the #306/#318 safety posture: `browser: true` on a child
+   * cohort is a harness FAIL (`child_sdk_browser`) until safe-session ships,
+   * and the client strips it for minor tiers regardless.
+   *
+   * `subagents` (#282 P2 slice 3): grants the Agent SDK subagent feature —
+   * the client defines two READ-ONLY Korean subagents ("코드리뷰어" /
+   * "리서처") behind this flag and the coach can delegate to them via the
+   * SDK's Agent/Task tool. Every delegation is modal-gated (delegation
+   * judgment pedagogy) and every subagent tool call routes through the SAME
+   * canUseTool policy as the parent. Definition tools are the INTERSECTION
+   * of the definition's read-only wishlist and this cohort's permitted set —
+   * a subagent can never widen beyond the profile. Minors: `subagents: true`
+   * on a child cohort is a harness FAIL (`child_sdk_subagents`) until a
+   * pedagogy decision lands, and the client strips it for minor tiers
+   * regardless.
+   */
+  sdk_tools?: {
+    read?: boolean;
+    write?: boolean;
+    browser?: boolean;
+    subagents?: boolean;
   };
   /**
    * #278 Phase 3 — the client-driven agentic browser tool loop. When enabled,

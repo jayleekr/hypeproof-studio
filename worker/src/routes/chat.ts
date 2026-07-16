@@ -29,6 +29,12 @@ import { recordTurnIfOwned } from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
 import { scoreTurnAssets } from "../lib/asset-scorer";
 import { logChat, persistUsage } from "../lib/analytics";
+import {
+  isMinorCohort,
+  screenText,
+  reportModerationHit,
+  MODERATION_BLOCK_MESSAGE_KO,
+} from "../lib/moderation";
 import { runDeepHealth } from "../cron/health.ts";
 
 export const chat = new Hono<{ Bindings: Env }>();
@@ -113,12 +119,32 @@ chat.get("/profile", async (c) => {
       mode: profile.browser_session?.mode ?? "browse",
       allowlist: profile.browser_session?.allowlist ?? [],
     },
+    // #320 — minors compliance flag (REQ-O1). True when the profile is
+    // explicitly flagged OR its age_range upper bound is under 18. Lets the
+    // client render minor-specific UX (AI disclosure etc.) without hardcoding
+    // cohort knowledge.
+    minor_cohort: isMinorCohort(profile),
     // Drives the chat panel's tone (game vs search-webapp UI copy) (#159).
     game: { template_tier: profile.game.template_tier },
     // #282 — expose the cohort's provider-tool opt-in so the Studio Agent SDK
     // coach grants WebSearch only where the profile explicitly enabled it
     // (the profile owns tool policy; the client never infers it).
     tools: { web_search: profile.tools?.web_search === true },
+    // #282 Phase 2 — Agent SDK workspace tools. Profile owns the policy
+    // (ADR 0003); absent flags normalize to false (fail closed, minor-safe).
+    // No shell/exec flag exists in the schema — it cannot be exposed here.
+    sdk_tools: {
+      read: profile.sdk_tools?.read === true,
+      write: profile.sdk_tools?.write === true,
+      // #282 P2 slice 2 — native-browser MCP tools (browser_open/screenshot/
+      // live_preview). Adults only; minors stay false until safe-session
+      // ships (#306/#318) — harness child_sdk_browser FAIL enforces it.
+      browser: profile.sdk_tools?.browser === true,
+      // #282 P2 slice 3 — read-only 코드리뷰어/리서처 subagents. Adults only;
+      // minors stay false until a pedagogy decision lands — harness
+      // child_sdk_subagents FAIL enforces it.
+      subagents: profile.sdk_tools?.subagents === true,
+    },
   });
 });
 
@@ -188,6 +214,36 @@ chat.post("/chat/completions", async (c) => {
   const promptChars = promptText.length;
   const persistBody = profile.analytics.log_user_messages === true;
 
+  // #320 — gateway moderation, MINOR cohorts only (REQ-O2). Deterministic
+  // conservative screen of the latest user text BEFORE any upstream call:
+  // a blocked turn costs zero tokens and never reaches the model. Adult
+  // cohorts skip this entirely (REQ-O4 — no behavior change). This covers
+  // the inbound side of BOTH stream and non-stream requests; outbound
+  // streaming moderation is a documented follow-up (we do not buffer
+  // streams — see lib/moderation.ts header).
+  if (isMinorCohort(profile)) {
+    const hit = screenText(promptText);
+    if (hit) {
+      reportModerationHit(
+        env,
+        c.get("requestId"),
+        { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "inbound" },
+        hit,
+      );
+      return c.json(
+        {
+          error: {
+            message: MODERATION_BLOCK_MESSAGE_KO,
+            type: "moderation_block",
+            category: hit.category,
+            request_id: c.get("requestId"),
+          },
+        },
+        400,
+      );
+    }
+  }
+
   // Pick the upstream LLM (switchable peers; default Gemini — see
   // resolveProvider). translate / translateOpenAI both drop client
   // system+tool messages — the trust model is identical either way.
@@ -238,6 +294,12 @@ chat.post("/chat/completions", async (c) => {
       // Route through the optional region-pinned proxy when set, otherwise
       // call api.anthropic.com directly. The proxy is passthrough (same key,
       // same headers, same SSE shape).
+      //
+      // No clientBeta threading here (#282 — unlike routes/messages.ts):
+      // /v1/chat clients speak the OpenAI schema, never send an
+      // anthropic-beta header or beta-gated body fields, and translate()
+      // builds the Anthropic body from scratch — only the worker's own
+      // prompt-caching beta is needed upstream.
       const aBody = translate(body as any, profile, coach);
       aBody.stream = stream;
       modelLabel = aBody.model;
@@ -325,6 +387,32 @@ chat.post("/chat/completions", async (c) => {
     }
     const log = mkLog(tin, tout, cr, cc);
     record(log);
+    // #320 — outbound moderation, MINOR cohorts, non-stream only (REQ-O3).
+    // Usage was recorded above (the tokens were genuinely spent) but the
+    // blocked text never reaches the client and the trace turn body is not
+    // persisted. Streaming outbound is the documented follow-up.
+    if (isMinorCohort(profile)) {
+      const hit = screenText(text);
+      if (hit) {
+        reportModerationHit(
+          env,
+          c.get("requestId"),
+          { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "outbound" },
+          hit,
+        );
+        return c.json(
+          {
+            error: {
+              message: MODERATION_BLOCK_MESSAGE_KO,
+              type: "moderation_block",
+              category: hit.category,
+              request_id: c.get("requestId"),
+            },
+          },
+          400,
+        );
+      }
+    }
     // #9c trace: persist turn meta + optional R2 body. Fire-and-forget — must
     // not block the response. Skipped when client did not send trial headers.
     if (trial) {

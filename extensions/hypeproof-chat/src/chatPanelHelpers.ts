@@ -225,6 +225,55 @@ export function isShowIntent(text: string): boolean {
   );
 }
 
+// ─── AI disclosure at session start (#320, REQ-C14) ─────────────────────────
+
+/**
+ * #320 — mandatory AI disclosure copy. Anthropic Usage Policy requires
+ * consumer-facing chat products to disclose "you are interacting with AI" at
+ * minimum at the start of a session; the second sentence (don't rely on
+ * outputs without checking) also satisfies ToS §D.3 and embodies the
+ * verification_reflex asset (docs/seven-assets.md). Kid-friendly Korean —
+ * keep both sentences if you edit.
+ */
+export const AI_DISCLOSURE_TEXT =
+  "🤖 AI 코치와 대화하고 있어요. AI의 답은 틀릴 수 있으니 중요한 내용은 꼭 확인해요!";
+
+/**
+ * Session gate for the AI disclosure notice (#320). The webview has no memory
+ * across hide/show remounts (WebviewView lacks retainContextWhenHidden — React
+ * state resets every time), so the HOST decides when the notice is due, same
+ * provider-side idiom as pendingPageNotice (#308/#310):
+ *
+ * - first webview "ready" of a session → show once;
+ * - later "ready"s (hide/show remounts) within the same session → silent;
+ * - history clear starts a NEW session → show again immediately.
+ *
+ * A "session" here is one extension-host run of the Studio, re-segmented by
+ * every history clear — which is exactly when the conversation restarts from
+ * the kid's point of view. Pure (no vscode) so the gating contract is locked
+ * by a smoke test.
+ */
+export class AiDisclosureGate {
+  private shown = false;
+
+  /** Called on webview "ready". Returns the notice text only the first time per session. */
+  noticeForReady(): string | null {
+    if (this.shown) return null;
+    this.shown = true;
+    return AI_DISCLOSURE_TEXT;
+  }
+
+  /**
+   * Called right after a history clear — a new session starts and the notice
+   * is due again NOW (the caller posts it immediately; the gate stays "shown"
+   * so subsequent remounts within this new session are silent).
+   */
+  noticeForHistoryClear(): string {
+    this.shown = true;
+    return AI_DISCLOSURE_TEXT;
+  }
+}
+
 /**
  * #278 Phase 3 — a compact action-log line (icon + Korean label) for a browser
  * tool call, shown in the chat panel as the coach drives the browser. Pure so

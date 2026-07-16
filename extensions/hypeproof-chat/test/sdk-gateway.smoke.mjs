@@ -99,6 +99,7 @@ const { anthropicBaseUrlFor, buildSdkGatewayEnv, buildSdkQueryOptions, profileTo
   assert.equal(options.model, "hypeproof-default", "model threaded to the SDK");
   assert.deepEqual(options.allowedTools, [], "REQ-M5: nothing bypasses canUseTool");
   assert.deepEqual(options.settingSources, [], "REQ-M5: workspace settings cannot inject allow-rules");
+  assert.deepEqual(options.tools, [], "REQ-M16: chat-only cohort disables ALL built-in tools (tools: [])");
   assert.equal(options.permissionMode, "default");
   assert.equal(options.maxTurns, 6, "minor cohort keeps the tight loop bound");
   assert.equal(options.env.ANTHROPIC_BASE_URL, "https://api.hypeproof-ai.xyz");
@@ -113,6 +114,67 @@ const { anthropicBaseUrlFor, buildSdkGatewayEnv, buildSdkQueryOptions, profileTo
     baseEnv: {},
   });
   assert.equal(withCwd.cwd, "/ws/student", "workspace root threaded for file tools");
+
+  // #282 Phase 2 (REQ-M16): profile.sdk_tools → Options.tools (base tool set,
+  // availability ONLY — approval still runs through canUseTool). allowedTools
+  // must stay [] even for the widest cohort: an allowedTools entry would
+  // AUTO-APPROVE and bypass canUseTool, defeating the write modal.
+  const copyclone = {
+    game: { template_tier: "website" },
+    sdk_tools: { read: true, write: true },
+  };
+  const adult = profileToAgentOptions(copyclone, { model: "hypeproof-default", systemPrompt: "" });
+  const adultOptions = buildSdkQueryOptions(adult, {
+    proxyUrl: "https://api.hypeproof-ai.xyz/v1",
+    token: "hps-token",
+    cwd: "/ws/clinic",
+    baseEnv: {},
+  });
+  assert.deepEqual(
+    adultOptions.tools,
+    ["Read", "Grep", "Glob", "Write", "Edit"],
+    "adult copyclone cohort: sdk_tools maps to the exact SDK tool names",
+  );
+  assert.deepEqual(adultOptions.allowedTools, [], "REQ-M5 holds for tooled cohorts too — no auto-approval");
+  assert.ok(!adultOptions.tools.includes("Bash"), "no profile flag can put Bash in the tool set");
+
+  // #282 P2 slice 2 (REQ-M19): the browser grant lives in permittedMcpTools,
+  // NEVER in Options.tools (that field filters BUILT-INS; MCP tools arrive
+  // via mcpServers, attached by the orchestration layer only when granted).
+  // strictMcpConfig is pinned true so ambient MCP configs (.mcp.json, user
+  // settings, plugins) can never add tools behind the cohort profile's back.
+  const browserCohort = {
+    game: { template_tier: "website" },
+    sdk_tools: { read: true, write: true, browser: true },
+  };
+  const browserAgent = profileToAgentOptions(browserCohort, { model: "hypeproof-default", systemPrompt: "" });
+  assert.deepEqual(
+    browserAgent.permittedMcpTools,
+    ["mcp__hypeproof__browser_open", "mcp__hypeproof__browser_screenshot", "mcp__hypeproof__live_preview_start"],
+    "browser grant → the three hypeproof MCP tool names on the agent options",
+  );
+  const browserOptions = buildSdkQueryOptions(browserAgent, {
+    proxyUrl: "https://api.hypeproof-ai.xyz/v1",
+    token: "hps-token",
+    cwd: "/ws/clinic",
+    baseEnv: {},
+  });
+  assert.deepEqual(
+    browserOptions.tools,
+    ["Read", "Grep", "Glob", "Write", "Edit"],
+    "REQ-M19: MCP names never leak into Options.tools (built-in base set only)",
+  );
+  assert.ok(!("mcpServers" in browserOptions), "mcpServers is host-bound — attached by sdkCoach, never by the pure builder");
+  assert.equal(options.strictMcpConfig, true, "strictMcpConfig pinned for chat-only cohorts");
+  assert.equal(browserOptions.strictMcpConfig, true, "strictMcpConfig pinned for browser cohorts too");
+  assert.deepEqual(browserOptions.allowedTools, [], "REQ-M5: browser MCP tools also route through canUseTool");
+
+  // Minor cohort defense-in-depth: even a polluted profile grants nothing.
+  const pollutedKids = profileToAgentOptions(
+    { game: { template_tier: "kids-rich" }, sdk_tools: { browser: true } },
+    { model: "hypeproof-default", systemPrompt: "" },
+  );
+  assert.deepEqual(pollutedKids.permittedMcpTools, [], "minor tier: browser grant stripped client-side");
 }
 
 // ─── coachRuntime flag still defaults to "proxy" (Phase-3 flip is Jay-gated) ─

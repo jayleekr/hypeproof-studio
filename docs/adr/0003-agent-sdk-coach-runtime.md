@@ -81,3 +81,7 @@ first SDK-backed workshop, and must work around Workflows being CLI-only (via a
 subprocess or hand-rolled Node orchestration) if multi-agent orchestration is
 needed. The pedagogy, profiles, safety rules, and analytics are preserved
 unchanged; this ADR changes the runtime boundary, not the product philosophy.
+
+## Addendum
+
+- 2026-07-14 — CLI binary provisioning for packaged builds decided: option (b) on-demand download + instructor pre-seed + proxy fallback (REQ-M7). Evidence, comparison, and W4 implementation sketch: [docs/sdk-bundling.md](../sdk-bundling.md).

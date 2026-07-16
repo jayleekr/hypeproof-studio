@@ -36,6 +36,95 @@ export interface LaunchOptions {
   preseedIssuerToken?: string;
 }
 
+/**
+ * Quiet mode (#e2e-quiet) — keep the Electron window off Jay's screen so a
+ * local GUI run doesn't interrupt him. On by default; `HPS_QUIET=0` opts out
+ * for headed debugging.
+ *
+ * Strategy (macOS), applied in the Electron MAIN process via `app.evaluate`:
+ *   (a) `app.dock.hide()` — no bouncing dock icon.
+ *   (b) move every BrowserWindow to (-4000,-4000) and `showInactive()` — the
+ *       window stays *shown* (so the renderer is NOT occlusion-throttled and
+ *       CDP waits stay stable) but is off every physical display and never
+ *       steals focus. Hook `browser-window-created` so windows spawned after
+ *       launch (VS Code can recreate) get stashed too.
+ *   (c) after the workbench is ready, `app.hide()` so macOS returns focus to
+ *       whatever Jay was doing — UNLESS `HPS_QUIET_NO_HIDE=1`, the escape hatch
+ *       if hide-throttling ever destabilizes waits (off-screen alone is enough
+ *       to be invisible).
+ *
+ * Playwright drives everything over CDP, which captures the offscreen/hidden
+ * surface directly, so DOM interaction and `page.screenshot` keep working.
+ */
+const QUIET = process.env.HPS_QUIET !== "0";
+
+async function applyQuietMode(app: ElectronApplication): Promise<void> {
+  if (!QUIET) return;
+  await app.evaluate(({ app: electronApp, BrowserWindow }) => {
+    try {
+      (electronApp as unknown as { dock?: { hide(): void } }).dock?.hide();
+    } catch {
+      /* non-macOS or already hidden */
+    }
+    type Win = {
+      setPosition(x: number, y: number): void;
+      showInactive?(): void;
+      once?(ev: string, cb: () => void): void;
+      on?(ev: string, cb: () => void): void;
+    };
+    const stash = (w: Win) => {
+      try {
+        w.setPosition(-4000, -4000);
+        w.showInactive?.();
+      } catch {
+        /* window torn down mid-call */
+      }
+    };
+    // VS Code re-centers its window shortly after creation (measured: it
+    // overrode our -4000 back to an on-screen position). Re-stash on every
+    // surfacing event so it never actually lands on a physical display.
+    const wire = (w: Win) => {
+      stash(w);
+      try {
+        w.once?.("ready-to-show", () => stash(w));
+        w.on?.("show", () => stash(w));
+      } catch {
+        /* ignore */
+      }
+    };
+    for (const w of BrowserWindow.getAllWindows()) wire(w as Win);
+    electronApp.on("browser-window-created", (_e: unknown, w: unknown) => wire(w as Win));
+  });
+}
+
+async function hideAppAfterReady(app: ElectronApplication): Promise<void> {
+  if (!QUIET || process.env.HPS_QUIET_NO_HIDE === "1") return;
+  await app.evaluate(({ app: electronApp }) => {
+    try {
+      (electronApp as unknown as { hide?(): void }).hide?.();
+    } catch {
+      /* non-macOS */
+    }
+  });
+}
+
+/** Diagnostic (HPS_QUIET_DEBUG=1): report dock/app/window visibility so a
+ *  verification run can assert the window really is off-screen + hidden. */
+async function reportQuietState(app: ElectronApplication): Promise<void> {
+  if (process.env.HPS_QUIET_DEBUG !== "1") return;
+  const state = await app.evaluate(({ app: electronApp, BrowserWindow }) => ({
+    dockVisible:
+      (electronApp as unknown as { dock?: { isVisible?(): boolean } }).dock?.isVisible?.() ?? null,
+    appHidden: (electronApp as unknown as { isHidden?(): boolean }).isHidden?.() ?? null,
+    windows: BrowserWindow.getAllWindows().map((w: { getBounds(): unknown; isVisible(): boolean }) => ({
+      bounds: w.getBounds(),
+      visible: w.isVisible(),
+    })),
+  }));
+  // eslint-disable-next-line no-console
+  console.log(`[HPS_QUIET] ${JSON.stringify(state)}`);
+}
+
 export async function launchApp(opts: LaunchOptions = { preseedToken: true }): Promise<AppContext> {
   const token = fs.readFileSync(TOKEN_FILE, "utf8").trim();
 
@@ -117,15 +206,34 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
       "--skip-welcome",
       "--skip-release-notes",
       "--no-sandbox",
+      // Quiet mode hides / off-screens the window (see applyQuietMode). A
+      // hidden/occluded Chromium renderer normally throttles timers + pauses
+      // rAF (measured ~5x slowdown), which risks tripping LLM-spec timeouts.
+      // These switches keep it running at full speed while invisible.
+      ...(QUIET
+        ? [
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-backgrounding-occluded-windows",
+          ]
+        : []),
       wsDir,                          // open this folder → no reload
     ],
     env,
     timeout: 30_000,
   });
 
+  // Stash the window off-screen ASAP (before we even resolve firstWindow) so
+  // it doesn't linger on Jay's display during the run.
+  await applyQuietMode(app);
+
   const win = await app.firstWindow({ timeout: 30_000 });
   // Wait for workbench to be ready (presence of activity bar)
   await win.waitForSelector(".monaco-workbench", { timeout: 30_000 });
+
+  // Now that the workbench is up, hide the app so focus returns to Jay.
+  await hideAppAfterReady(app);
+  await reportQuietState(app);
 
   return { app, win, userDataDir, token, wsDir };
 }

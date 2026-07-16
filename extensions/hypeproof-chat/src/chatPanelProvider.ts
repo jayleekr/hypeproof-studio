@@ -4,12 +4,14 @@ import * as fs from "fs";
 import { TOKEN_KEY } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
-import { runSdkCoach, SdkUnavailableError } from "./sdkCoach";
+import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
+import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
+import { capturePageContext } from "./nativeBrowser";
 import {
   ChatMessage,
   CoachInfo,
@@ -37,6 +39,7 @@ import {
   stateBucketId,
   extractCohortIdUnverified,
   browserToolLogLine,
+  AiDisclosureGate,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
@@ -61,6 +64,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // state (pageNotice) resets whenever the panel is hidden and re-shown.
   // Cleared alongside pendingPageContext when the queued context is consumed.
   private pendingPageNotice: string | null = null;
+  // #320 — AI disclosure at session start (REQ-C14). Host-side gate because
+  // the webview forgets everything on hide/show remounts; see AiDisclosureGate.
+  private readonly aiDisclosure = new AiDisclosureGate();
   private activeCohortId: string | null = null;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
@@ -209,6 +215,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     await this.context.workspaceState.update(this.historyKey(), []);
     this.assetScores?.resetAssetScores();
     void this.post({ type: "history", messages: [] });
+    // #320 — a cleared conversation is a fresh session: disclose again (REQ-C14).
+    void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
   }
 
   /** Force re-fetch on next config push (e.g. after token change). */
@@ -373,8 +381,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * falls back to the iframe preview.
    */
   private async openInLiveServer(): Promise<boolean> {
+    return (await this.startLivePreview()) !== null;
+  }
+
+  /**
+   * Ensure the live server is up for the workspace root and open (or refresh)
+   * the native browser at its URL. Returns the server URL, or null on failure
+   * (no workspace / server error) so callers can fall back or report.
+   * Shared by the live_server preview path and the coach's
+   * `live_preview_start` MCP tool (#282 P2 slice 2).
+   */
+  async startLivePreview(): Promise<string | null> {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!root) return false;
+    if (!root) return null;
     try {
       const url = await this.liveServer.ensure(root);
       // Avoid stacking tabs: if a tab already shows this server, it refreshes
@@ -385,10 +404,44 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       } else {
         await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
       }
-      return true;
+      return url;
     } catch {
-      return false;
+      return null;
     }
+  }
+
+  /**
+   * #282 P2 slice 2 — host capabilities behind the "hypeproof" MCP browser
+   * tools. Registered by runSdkCoach only when the profile grants
+   * sdk_tools.browser (adults; minors are stripped). Silent by design: MCP
+   * failures become isError tool results the coach can react to in-chat —
+   * a toast here would pause the integrated browser (#308).
+   */
+  private buildBrowserMcpHost(): BrowserMcpHost {
+    return {
+      openBrowser: async (url: string) => {
+        // URL already passed evaluateSdkToolUse's policy + the approval modal;
+        // the shared command normalizes and opens the integrated browser tab.
+        await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
+      },
+      screenshot: async () => {
+        const tab = vscode.window.activeBrowserTab;
+        if (!tab) return null;
+        try {
+          const ctx = await capturePageContext(tab);
+          if (!ctx.imageBase64) return null;
+          return {
+            imageBase64: ctx.imageBase64,
+            mimeType: "image/jpeg",
+            url: ctx.url,
+            title: ctx.title,
+          };
+        } catch {
+          return null;
+        }
+      },
+      startLivePreview: () => this.startLivePreview(),
+    };
   }
 
   /** Persist coach info chosen via the in-panel naming card. */
@@ -414,6 +467,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // reducer replaces pageNotice rather than appending.
         if (this.pendingPageNotice) {
           void this.post({ type: "pageAttached", label: this.pendingPageNotice });
+        }
+        // #320 — AI disclosure at session start (REQ-C14). First "ready" of
+        // a session shows the notice; hide/show remounts within the same
+        // session return null here and stay silent. A history clear resets
+        // the session (see clearHistory), so the next conversation start is
+        // disclosed again.
+        {
+          const disclosure = this.aiDisclosure.noticeForReady();
+          if (disclosure) void this.post({ type: "aiDisclosure", text: disclosure });
         }
         return;
       case "sendMessage":
@@ -604,7 +666,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           throw new Error("코치 프로필을 아직 못 받았어요. 잠시 후 다시 시도해주세요.");
         }
         if (!token) {
-          throw new ProxyAuthError("missing", "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑");
+          throw new ProxyAuthError("missing", TOKEN_MISSING_FRIENDLY);
         }
         try {
           await runSdkCoach({
@@ -621,6 +683,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             userText: userTextForModel,
             signal: ctrl.signal,
             cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+            // #282 W4a — explicit claude-binary override (highest priority in
+            // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
+            // seeded > node_modules). Empty string = unset.
+            binaryPathSetting: cfg.get<string>("sdkBinaryPath", "") || undefined,
             onDelta,
             onCitations,
             onAssetScore,
@@ -628,6 +694,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // executeShell hard-deny and writeFile workspace-scope actually fire.
             requestApproval: (action) =>
               this.resolveActionApproval({ requestId: randomId(), ...sdkToolToActionRequest(action) }),
+            // #282 P2 slice 2 — native-browser capabilities for the hypeproof
+            // MCP tools. Always passed; runSdkCoach registers the server only
+            // when the profile grants sdk_tools.browser (minors never do).
+            browserHost: this.buildBrowserMcpHost(),
           });
         } catch (err) {
           if (!(err instanceof SdkUnavailableError)) throw err;
@@ -852,7 +922,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     // Tier 3 — modal-gated.
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
-    const required = cfg.get<string[]>("requireApprovalFor", ["writeFile", "executeShell"]);
+    // openBrowser (#282 P2 slice 2) is modal-gated by default too: the coach
+    // driving the browser to a URL is an outward action the student should
+    // consciously delegate (delegation_judgment), same as a file write.
+    // delegateAgent (#282 P2 slice 3): handing a task to a subagent is the
+    // delegation decision itself — the modal IS the pedagogy.
+    const required = cfg.get<string[]>("requireApprovalFor", [
+      "writeFile",
+      "executeShell",
+      "openBrowser",
+      "delegateAgent",
+    ]);
     const needsApproval = required.includes(req.kind);
     if (!needsApproval) return true;
 

@@ -117,6 +117,20 @@ export interface ResolvedProfile {
   // worker, not inferred client-side). Drives which Agent SDK tools the coach may
   // use. Absent/false → the coach is chat-only for that capability.
   tools?: { web_search?: boolean };
+  // #282 Phase 2 — Agent SDK workspace tools, owned by the worker profile
+  // (ADR 0003). read → Read/Grep/Glob, write → Write/Edit. Absent/false →
+  // chat-only (fail closed). No shell/exec flag exists in the schema; minors'
+  // cohorts never carry write:true (harness child_sdk_write FAIL + client-side
+  // strip for minor tiers).
+  // `browser` (#282 P2 slice 2) grants the in-process "hypeproof" MCP browser
+  // tools (browser_open / browser_screenshot / live_preview_start). Adults
+  // only — minors never carry browser:true (harness child_sdk_browser FAIL +
+  // client-side strip), per the #306/#318 safety posture.
+  // `subagents` (#282 P2 slice 3) grants the read-only 코드리뷰어/리서처 SDK
+  // subagents (delegation modal-gated; definition tools intersected with the
+  // cohort's permitted set). Adults only — minors never carry subagents:true
+  // (harness child_sdk_subagents FAIL + client-side strip).
+  sdk_tools?: { read?: boolean; write?: boolean; browser?: boolean; subagents?: boolean };
 }
 
 export interface UxConfig {
@@ -211,6 +225,13 @@ export type HostMessage =
   // 브라우저가 "Paused due to Notification"으로 멈추므로(코어 동작), 토스트 대신
   // 채팅 패널 인라인 상태줄로 알린다.
   | { type: "pageAttached"; label: string }
+  // #320 — AI disclosure notice (Anthropic Usage Policy: consumer-facing chat
+  // must disclose "you are interacting with AI" at minimum at session start).
+  // Host posts once per session — first webview mount of this run and again
+  // right after a history clear; hide/show remounts within the same session
+  // stay silent (host-side AiDisclosureGate remembers). Webview renders a
+  // compact role=note + aria-live=polite banner at the top of the messages.
+  | { type: "aiDisclosure"; text: string }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string }
@@ -224,7 +245,13 @@ export interface ActionRequest {
   // #282 — extended beyond writeFile/executeShell so Agent SDK tool calls map to
   // an accurate kind: Read/Glob → readFile, WebSearch/WebFetch → webSearch. The
   // approval policy (resolveActionApproval) keys its tiers on these.
-  kind: "writeFile" | "executeShell" | "readFile" | "webSearch";
+  // "openBrowser" (#282 P2 slice 2): the hypeproof MCP browser_open tool — an
+  // outward action, modal-gated by default (requireApprovalFor).
+  // "delegateAgent" (#282 P2 slice 3): the coach wants to hand a task to a
+  // read-only subagent (코드리뷰어/리서처) via the SDK Agent/Task tool. The
+  // modal makes the student consciously decide the delegation — the
+  // delegation_judgment asset IS this decision (docs/seven-assets.md §5).
+  kind: "writeFile" | "executeShell" | "readFile" | "webSearch" | "openBrowser" | "delegateAgent";
   description: string;
   payload: unknown;
 }

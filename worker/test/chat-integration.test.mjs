@@ -234,6 +234,13 @@ function chatRequest({ prompt = "안녕 코치", stream = false, headers = {} } 
   const j = await r.json();
   assert.equal(j.profile_id, PROFILE, "profile resolved from token payload");
   assert.ok(!("system_prompt" in j), "system_prompt never leaves the worker");
+  // #282 Phase 2 — sdk_tools is always present with explicit booleans, and a
+  // kids profile (no opt-in) normalizes to all-false (fail closed, minor-safe).
+  assert.deepEqual(
+    j.sdk_tools,
+    { read: false, write: false, browser: false, subagents: false },
+    "kids profile exposes sdk_tools all-false (absent flags normalize to false)",
+  );
 }
 console.log("✓ integration: GET /v1/profile — token-resolved, system_prompt withheld");
 

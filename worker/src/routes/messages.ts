@@ -44,13 +44,19 @@ import {
   clampMaxTokens,
   type CoachContext,
 } from "../lib/translate";
-import { callAnthropic } from "../lib/anthropic";
+import { callAnthropic, countTokensUrl } from "../lib/anthropic";
 import type { AnthropicRequest } from "../lib/translate";
 import { MODEL_MAP, type ModelAlias, type Profile } from "../profiles/types";
 import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../lib/chat-extract";
 import { recordTurnIfOwned } from "../lib/storage";
 import { tapAnthropicStream } from "../lib/sse";
 import { logChat, persistUsage } from "../lib/analytics";
+import {
+  isMinorCohort,
+  screenText,
+  reportModerationHit,
+  MODERATION_BLOCK_MESSAGE_KO,
+} from "../lib/moderation";
 
 export const messages = new Hono<{ Bindings: Env }>();
 
@@ -64,6 +70,27 @@ function anthropicError(
     error: { type, message },
     request_id: c.get("requestId") ?? "no-request-id",
   };
+}
+
+// Upstream 4xx statuses that pass through to the client AS-IS (#282 e2e
+// BLOCKER, #257 discipline). These are request-shaped failures the SDK CLI
+// must see verbatim to fail fast — collapsing them to 502 made the CLI treat
+// them as transient and retry 10x per turn. The body stays sanitized (generic
+// message + upstream status + request_id, NO raw upstream prose); only the
+// status code and an Anthropic-native error.type are forwarded. Everything
+// else (401/403 upstream key problems, 5xx, 529 overloaded) is still OUR
+// gateway failure → 502.
+const PASSTHROUGH_4XX = {
+  400: "invalid_request_error",
+  404: "not_found_error",
+  413: "request_too_large",
+  422: "invalid_request_error",
+  429: "rate_limit_error",
+} as const;
+type Passthrough4xx = keyof typeof PASSTHROUGH_4XX;
+
+function isPassthrough4xx(status: number): status is Passthrough4xx {
+  return status in PASSTHROUGH_4XX;
 }
 
 function decodeHeader(raw: string | null | undefined): string | undefined {
@@ -146,6 +173,27 @@ messages.post("/messages", async (c) => {
   const promptChars = promptText.length;
   const persistBody = profile.analytics.log_user_messages === true;
 
+  // #320 — gateway moderation, MINOR cohorts only (REQ-O2), same layer as
+  // /v1/chat/completions: the latest user text is screened BEFORE the
+  // upstream call. Applies to stream and non-stream requests alike (it's
+  // the inbound side); outbound STREAMING moderation is a documented
+  // follow-up — the SDK path streams and we do not buffer streams (see
+  // lib/moderation.ts header). Adult cohorts skip entirely (REQ-O4). The
+  // 400 status doubles as the SDK's fast-fail signal (REQ-M15) so the CLI
+  // does not retry a deterministic block.
+  if (isMinorCohort(profile)) {
+    const hit = screenText(promptText);
+    if (hit) {
+      reportModerationHit(
+        env,
+        c.get("requestId"),
+        { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "inbound" },
+        hit,
+      );
+      return c.json(anthropicError(c, "moderation_block", MODERATION_BLOCK_MESSAGE_KO), 400);
+    }
+  }
+
   const stream = raw.stream === true;
   const modelLabel = resolveMessagesModel(raw.model, profile);
 
@@ -163,11 +211,17 @@ messages.post("/messages", async (c) => {
   } as unknown as AnthropicRequest;
 
   // 4. Upstream call — same proxy indirection as chat.ts's anthropic branch.
+  // clientBeta/beta: the Agent SDK sets its own anthropic-beta header (e.g.
+  // context-management-2025-06-27 for the context_management body field) and
+  // calls /v1/messages?beta=true — both must survive to the upstream (#282
+  // e2e BLOCKER: dropping the header 400'd every SDK turn).
   let upstream: Response;
   try {
     upstream = await callAnthropic(upstreamBody, apiKey, {
       url: env.ANTHROPIC_PROXY_URL,
       proxySecret: env.ANTHROPIC_PROXY_SECRET,
+      clientBeta: c.req.header("anthropic-beta"),
+      beta: c.req.query("beta") === "true",
     });
   } catch (err) {
     // #257 — fetch errors can embed upstream URLs or header names. Log full,
@@ -181,6 +235,14 @@ messages.post("/messages", async (c) => {
     // #257 — the upstream error body (provider prose, key hints, quota info)
     // goes to logs only; the client learns the status code + request_id.
     console.error(`[${c.get("requestId")}] upstream ${upstream.status}: ${text.slice(0, 500)}`);
+    if (isPassthrough4xx(upstream.status)) {
+      // Request-shaped upstream 4xx → same status, sanitized body, so the
+      // SDK fails fast instead of retrying a permanent error 10x.
+      return c.json(
+        anthropicError(c, PASSTHROUGH_4XX[upstream.status], `upstream error (status ${upstream.status})`),
+        upstream.status,
+      );
+    }
     return c.json(
       anthropicError(c, "api_error", `upstream error (status ${upstream.status})`),
       502,
@@ -233,6 +295,21 @@ messages.post("/messages", async (c) => {
       .map((b) => b.text as string)
       .join("");
     record(mkLog(tin, tout, cr, cc));
+    // #320 — outbound moderation, MINOR cohorts, non-stream only (REQ-O3).
+    // Usage stays recorded (tokens were spent); the blocked text never
+    // reaches the client and the trace turn body is not persisted.
+    if (isMinorCohort(profile)) {
+      const hit = screenText(text);
+      if (hit) {
+        reportModerationHit(
+          env,
+          c.get("requestId"),
+          { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "outbound" },
+          hit,
+        );
+        return c.json(anthropicError(c, "moderation_block", MODERATION_BLOCK_MESSAGE_KO), 400);
+      }
+    }
     if (trial) {
       c.executionCtx.waitUntil(
         recordTurnIfOwned(
@@ -306,4 +383,117 @@ messages.post("/messages", async (c) => {
       "x-hps-model": modelLabel,
     },
   });
+});
+
+// POST /v1/messages/count_tokens — Anthropic token-counting passthrough.
+//
+// The Agent SDK calls this during the agent loop to budget context (compaction
+// triggers, max_tokens headroom). Without it the gateway 404s and the SDK's
+// budgeting silently degrades — the known gap from #316.
+//
+// Same trust pipeline as /v1/messages above:
+//   - gateChatRequest (token / revocation / session / roster / pause)
+//   - client `system` DROPPED and replaced with the cohort blocks — the count
+//     must reflect what /v1/messages would actually send upstream, otherwise
+//     the SDK budgets against a prompt that never exists
+//   - resolveMessagesModel clamp (counts are tokenizer/model-specific)
+//   - ANTHROPIC_PROXY_URL indirection (transparent /proxy/anthropic/* proxy)
+//   - #257 sanitized errors
+//
+// Deliberately NO usage_log / turns rows: count_tokens is free upstream (not
+// billed, no completion) and is not a conversational turn — recording it
+// would pollute workshop quota dashboards and trial analytics with zero-output
+// noise rows. Reasoning spelled out in the PR for #282.
+messages.post("/messages/count_tokens", async (c) => {
+  const env = c.env;
+
+  // 1. Same trust gates as /v1/messages (shared module).
+  const gate = await gateChatRequest(c);
+  if (!gate.ok) return gate.response;
+  const { profile } = gate;
+
+  // Body
+  let raw: Record<string, unknown>;
+  try {
+    const parsed = await c.req.json();
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    raw = parsed as Record<string, unknown>;
+  } catch {
+    return c.json(anthropicError(c, "invalid_request_error", "bad json body"), 400);
+  }
+  if (!Array.isArray(raw.messages)) {
+    return c.json(anthropicError(c, "invalid_request_error", "messages must be an array"), 400);
+  }
+
+  const apiKey = env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) {
+    // #257 — config prose (env var names) stays in logs.
+    console.error(`[${c.get("requestId")}] /v1/messages/count_tokens: ANTHROPIC_API_KEY is not set`);
+    return c.json(
+      anthropicError(c, "api_error", "Anthropic upstream is not configured — contact the operator"),
+      502,
+    );
+  }
+
+  const coach: CoachContext = {
+    name: decodeHeader(c.req.header("x-hps-coach-name")),
+    personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+  };
+
+  // 2-3. Enforced fields, mirroring /v1/messages: spread-first keeps unknown
+  // count_tokens fields (tools, tool_choice, thinking, …) flowing through;
+  // `system` is REPLACED with the cohort blocks and the model is clamped so
+  // the count matches the request /v1/messages would actually send. The
+  // count_tokens contract has no max_tokens/stream — strip them in case a
+  // client blindly reuses a messages body (upstream 400s on unknown params).
+  const modelLabel = resolveMessagesModel(raw.model, profile);
+  const upstreamBody = {
+    ...raw,
+    model: modelLabel,
+    system: buildAnthropicSystemBlocks(profile, coach),
+  } as Record<string, unknown>;
+  delete upstreamBody.max_tokens;
+  delete upstreamBody.stream;
+
+  // 4. Upstream call — same key + proxy indirection, count_tokens subpath.
+  // Same clientBeta/beta threading as /v1/messages: the SDK sends the same
+  // anthropic-beta header (and body beta fields like context_management) on
+  // its count_tokens calls, so the count must be made under the same flags.
+  let upstream: Response;
+  try {
+    upstream = await callAnthropic(upstreamBody as unknown as AnthropicRequest, apiKey, {
+      url: countTokensUrl(env.ANTHROPIC_PROXY_URL),
+      proxySecret: env.ANTHROPIC_PROXY_SECRET,
+      clientBeta: c.req.header("anthropic-beta"),
+      beta: c.req.query("beta") === "true",
+    });
+  } catch (err) {
+    // #257 — fetch errors can embed upstream URLs or header names.
+    console.error(`[${c.get("requestId")}] count_tokens upstream call failed:`, err);
+    return c.json(anthropicError(c, "api_error", "upstream request failed"), 502);
+  }
+
+  if (!upstream.ok) {
+    const text = await upstream.text().catch(() => "");
+    // #257 — upstream error prose to logs only; client gets status + request_id.
+    console.error(`[${c.get("requestId")}] count_tokens upstream ${upstream.status}: ${text.slice(0, 500)}`);
+    if (isPassthrough4xx(upstream.status)) {
+      // Same fail-fast contract as /v1/messages: request-shaped 4xx pass
+      // through with a sanitized body; everything else is a 502.
+      return c.json(
+        anthropicError(c, PASSTHROUGH_4XX[upstream.status], `upstream error (status ${upstream.status})`),
+        upstream.status,
+      );
+    }
+    return c.json(
+      anthropicError(c, "api_error", `upstream error (status ${upstream.status})`),
+      502,
+    );
+  }
+
+  // 5. Verbatim JSON passthrough ({"input_tokens": N}) — no usage_log, no
+  // turns row (see header comment).
+  const j = (await upstream.json()) as Record<string, unknown>;
+  c.header("x-hps-model", modelLabel);
+  return c.json(j);
 });

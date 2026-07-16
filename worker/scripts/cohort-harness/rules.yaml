@@ -108,3 +108,6 @@ severity:
   child_missing_url_ban: fail
   child_age_range_required: fail
   child_browser_session_safe: fail
+  child_sdk_write: fail
+  child_sdk_browser: fail
+  child_sdk_subagents: fail
