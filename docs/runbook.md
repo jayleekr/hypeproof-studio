@@ -101,6 +101,45 @@ curl -fsS -u ":$HPS_ADMIN_PASSWORD" \
 
 ---
 
+## revoke a departing/compromised member's issuers (#313)
+
+> A member leaves, or an admin-tier minter token (`can_issue_issuers`) leaks.
+> Revoking the minter blocks any FURTHER mints immediately, but the instructor
+> issuers it already signed stay valid until their own expiry (≤90 days). Find
+> that lineage and revoke each live one. Admin password (or CF Access) only —
+> a Bearer minter cannot enumerate other operators' issuers.
+
+```bash
+MINTER='<member-handle>'   # the `minted_by` value, e.g. the departing member
+
+# 1. Revoke the minter itself so it can mint nothing new.
+#    (jti + exp from your records or the /admin/issuers row below.)
+curl -fsS -u ":$HPS_ADMIN_PASSWORD" \
+  -X POST https://api.hypeproof-ai.xyz/admin/tokens/revoke \
+  -H 'content-type: application/json' \
+  -d '{"jti":"<minter-jti>","reason":"member offboarding"}'
+
+# 2. List every issuer that minter created. `revoked`/`expired` rows need no
+#    action — only live ones do.
+curl -fsS -u ":$HPS_ADMIN_PASSWORD" \
+  "https://api.hypeproof-ai.xyz/admin/issuers?minted_by=$MINTER" | jq .
+
+# 3. Revoke each still-live jti from that list (repeat per jti). `exp` (unix
+#    seconds) sets the revocation TTL so it outlives the token.
+curl -fsS -u ":$HPS_ADMIN_PASSWORD" \
+  -X POST https://api.hypeproof-ai.xyz/admin/tokens/revoke \
+  -H 'content-type: application/json' \
+  -d '{"jti":"<lineage-jti>","exp":<exp>,"reason":"minter revoke cascade"}'
+
+# 4. Re-run step 2 to confirm every row now shows a non-null `revoked`.
+```
+
+There is no one-shot cascade endpoint by design — a bulk revoke on a stale
+`minted_by` match is high blast-radius, so the operator reviews the list before
+killing each token. See [#313](https://github.com/jayleekr/hypeproof-studio/issues/313).
+
+---
+
 ## I lost everything
 
 - Issuer token: ask Jay to mint a fresh one via

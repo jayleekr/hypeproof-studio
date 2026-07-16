@@ -5,10 +5,13 @@
 //   cohort:<id>:active_session   → { session_id, profile_id, starts_at, ends_at }
 //   cohort:<id>:paused           → { ts, reason? }   — S-12 kill-switch (#47)
 //   revoked:<jti>                → { ts, reason?, cohort, user } — S-01 (#46)
+//   issuer_audit:<jti>           → { instructor, scopes, exp, days, ... } — #294/#295 mint trail
 //
 // Roster + active_session + paused + revoked are intentionally KV (not D1)
 // because the chat hot path reads them on every request. D1 holds durable
 // history in `sessions` and `usage_log` tables.
+
+import type { IssuerScope } from "./tokens";
 
 export interface Roster {
   users: string[];
@@ -38,6 +41,8 @@ const rosterKey = (cohortId: string) => `cohort:${cohortId}:roster`;
 const sessionKey = (cohortId: string) => `cohort:${cohortId}:active_session`;
 const pauseKey = (cohortId: string) => `cohort:${cohortId}:paused`;
 const revokedKey = (jti: string) => `revoked:${jti}`;
+const ISSUER_AUDIT_PREFIX = "issuer_audit:";
+export const issuerAuditKey = (jti: string) => `${ISSUER_AUDIT_PREFIX}${jti}`;
 
 export async function getRoster(kv: KVNamespace, cohortId: string): Promise<Roster | null> {
   return kv.get<Roster>(rosterKey(cohortId), "json");
@@ -138,6 +143,58 @@ export async function listRevoked(
     const record = await kv.get<TokenRevocation>(k.name, "json");
     if (record) out.push({ jti, record });
   }
+  return out;
+}
+
+// --- issuer mint-lineage audit (#294 / #295 / #313) -------------------------
+// Metadata-only record `/admin/issuers` POST writes on every mint (NEVER the
+// token). TTL tracks the issued token's lifetime, so the working set is small
+// (tens) and prefix-scanning it is an ops-console operation, not a hot path.
+
+export interface IssuerAuditRecord {
+  instructor: string;           // issuer-token subject (the instructor handle)
+  scopes: IssuerScope[];        // cohort/profile authority granted
+  exp: number;                  // unix seconds — the issued token's expiry
+  days: number;                 // requested lifetime in days
+  revoked_jti: string | null;   // jti this mint replaced on re-scope, if any
+  minted_by: string;            // "admin" (Basic/CF) OR the Bearer minter handle
+  can_issue_issuers: boolean;   // whether the child is itself an admin-minter
+}
+
+/**
+ * List issuer-mint audit records, optionally filtered to a single minter.
+ *
+ * The lineage query behind #313: when a member departs or a minter token leaks,
+ * "which instructor issuers did minter X create?" has no answer without scanning
+ * `issuer_audit:` and matching `minted_by` — additional mints are blocked the
+ * moment the minter is revoked, but the issuers it already signed live until
+ * their own expiry (≤90d) and must be found to be revoked.
+ *
+ * KV scan → get per key (list() returns names only), so it is O(matched keys).
+ * `limit` caps the number of returned records; a single KV list() page is
+ * capped at 1000 keys by the platform, so we page with the cursor until we have
+ * `limit` matches or the namespace is exhausted.
+ */
+export async function listIssuerAudits(
+  kv: KVNamespace,
+  opts: { mintedBy?: string; limit?: number } = {},
+): Promise<Array<{ jti: string; record: IssuerAuditRecord }>> {
+  // NaN-safe clamp: a non-finite limit falls back to the default rather than
+  // disabling the cap (Math.min(NaN,…) = NaN → `out.length >= NaN` never trips).
+  const limit = Number.isFinite(opts.limit) ? Math.max(1, Math.min(opts.limit as number, 1000)) : 200;
+  const out: Array<{ jti: string; record: IssuerAuditRecord }> = [];
+  let cursor: string | undefined;
+  do {
+    const page = await kv.list({ prefix: ISSUER_AUDIT_PREFIX, limit: 1000, cursor });
+    for (const k of page.keys) {
+      const record = await kv.get<IssuerAuditRecord>(k.name, "json");
+      if (!record) continue;
+      if (opts.mintedBy !== undefined && record.minted_by !== opts.mintedBy) continue;
+      out.push({ jti: k.name.slice(ISSUER_AUDIT_PREFIX.length), record });
+      if (out.length >= limit) return out;
+    }
+    cursor = page.list_complete ? undefined : page.cursor;
+  } while (cursor);
   return out;
 }
 
