@@ -111,6 +111,14 @@ chat.get("/profile", async (c) => {
       enabled: profile.browser_control?.enabled === true,
       max_iterations: profile.browser_control?.max_iterations ?? 8,
     },
+    // #306 — per-cohort hardened native-browser session. Minor cohorts send
+    // mode="safe"; the Studio host maps it to hypeproof.browser.safeSession so
+    // the integrated browser uses the locked-down persist:hp-safe session.
+    // Default browse (adult), so unchanged for existing cohorts.
+    browser_session: {
+      mode: profile.browser_session?.mode ?? "browse",
+      allowlist: profile.browser_session?.allowlist ?? [],
+    },
     // #320 — minors compliance flag (REQ-O1). True when the profile is
     // explicitly flagged OR its age_range upper bound is under 18. Lets the
     // client render minor-specific UX (AI disclosure etc.) without hardcoding

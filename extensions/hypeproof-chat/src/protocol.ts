@@ -104,6 +104,13 @@ export interface ResolvedProfile {
   input?: { page_context?: boolean; image_paste?: boolean };
   /** #278 Phase 3 — coach's client-driven browser control loop (default off). */
   browser_control?: { enabled: boolean; max_iterations?: number };
+  /**
+   * #306 — hardened native-browser session for minor cohorts. `mode: "safe"`
+   * makes the host enable the locked-down `persist:hp-safe` integrated-browser
+   * session (via the hypeproof.browser.safeSession setting). Absent / "browse"
+   * → normal browser. Inert on a Studio build without the fork core patch.
+   */
+  browser_session?: { mode: "safe" | "browse"; allowlist?: string[] };
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
   // #282 — provider-hosted tools the cohort profile opted into (sourced from the
