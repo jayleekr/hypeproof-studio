@@ -4,7 +4,10 @@ vscodium-base/VSCode-*/
 vscodium-base/VSCodium-*/
 
 # Node
-**/node_modules/
+# No trailing slash: also ignores a `node_modules` *symlink* (a slash-suffixed
+# pattern matches directories only, so `git add -A` would otherwise stage a
+# node_modules symlink — see the #318 worktree leak).
+**/node_modules
 **/dist/
 
 # Logs / local state
