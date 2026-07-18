@@ -169,7 +169,10 @@ echo
 echo "Checking vendored Agent SDK JS (SDK-coach builds only)..."
 SDK_DEP=""
 if [[ -n "$EXT_DIR" && -f "$EXT_DIR/package.json" ]]; then
-  SDK_DEP=$(jq -r '.dependencies["@anthropic-ai/claude-agent-sdk"] // ""' "$EXT_DIR/package.json" 2>/dev/null || echo "")
+  # devDependencies, not dependencies: the packaged extension loads the SDK from
+  # dist/vendor (#343), so a prod-dep declaration would make vscode-min-prepack's
+  # `npm list --production` fail on the node_modules-less injected copy (#349).
+  SDK_DEP=$(jq -r '(.dependencies["@anthropic-ai/claude-agent-sdk"] // .devDependencies["@anthropic-ai/claude-agent-sdk"]) // ""' "$EXT_DIR/package.json" 2>/dev/null || echo "")
 fi
 if [[ "${REQUIRE_SDK_VENDOR:-0}" == "1" || -n "$SDK_DEP" ]]; then
   if [[ "${REQUIRE_SDK_VENDOR:-0}" == "1" ]]; then
