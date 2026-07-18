@@ -199,6 +199,17 @@ jobs:
         shell: bash
         run: bash scripts/sign-mac.sh
 
+      # Post-build gate (build-pipeline.md says mandatory; was missing from CI
+      # until #349). REQUIRE_SDK_VENDOR=1: a build whose injected extension is
+      # missing the dist/vendor SDK tree fails here instead of shipping a
+      # silently proxy-only coach (#343). The data-folder check is a warn-only
+      # (needs a first launch, which CI never does), so no skip knob is needed.
+      - name: Verify branding + vendored SDK
+        shell: bash
+        env:
+          REQUIRE_SDK_VENDOR: "1"
+        run: bash scripts/verify-branding.sh
+
       - name: Package .app → darwin-arm64 zip
         id: package
         shell: bash

@@ -197,12 +197,10 @@
     "package": "vsce package --no-dependencies"
   },
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.207",
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.90.0",
     "esbuild": "^0.28.1",
     "typescript": "^5.4.0"
-  },
-  "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.207"
   }
 }
