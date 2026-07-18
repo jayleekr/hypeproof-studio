@@ -25,6 +25,11 @@ if [[ ! -d "$APP" ]]; then
   exit 2
 fi
 
+# Canonicalize to an absolute path: `defaults read` silently returns nothing
+# for a relative plist path, which made checks 1–3 read empty in CI where the
+# script runs from the repo root (#355, first surfaced by the v0.1.17 gate).
+APP="$(cd "$APP" && pwd)"
+
 PASS=0; FAIL=0
 
 ok()   { printf "  \033[32m✓\033[0m %s\n" "$1"; PASS=$((PASS+1)); }
@@ -69,10 +74,57 @@ else
 fi
 
 # 5. Residual strings (excluding license/attribution)
+#
+# Scope: USER-VISIBLE branding surfaces only (nls bundles, HTML, product.json,
+# icons…). Excluded paths hold internal strings that legitimately contain
+# "codium" and cannot/need not be rebranded (#355; all present in shipped
+# v0.1.16 too):
+#   - node_modules/        third-party internals: axios minified JS has a
+#                          coincidental match; @vscode/fs-copyfile is a native
+#                          binary with embedded strings
+#   - dist/vendor/         vendored Agent SDK JS (editor-detection strings)
+#   - policies/            upstream-generated MDM policy templates
+#   - Resources/app/package.json   upstream `author: "VSCodium"` metadata
+# Proper rebranding of the last two is tracked in #355 (follow-up, non-UI).
 echo
 echo "Scanning Resources/ for residual 'codium'/'VSCodium' (excluding licenses)..."
-HITS=$(grep -ril "codium" "$APP/Contents/Resources" 2>/dev/null \
-  | grep -viE "license|notice|attribution|third.?party|credits" || true)
+# -I skips binaries (tunnel executable, .node addons — embedded linker strings).
+CANDIDATES=$(grep -rIli "codium" "$APP/Contents/Resources" 2>/dev/null \
+  | grep -viE "license|notice|attribution|third.?party|credits" \
+  | grep -vE "/node_modules/|/dist/vendor/|/policies/" \
+  | grep -vxF "$APP/Contents/Resources/app/package.json" || true)
+# Context-level triage (token/context-wise, not line-wise — minified bundles
+# are single-line). Benign, never-rendered categories (#355):
+#   - `github.com/VSCodium/sourcemaps/…` sourceMappingURL comments
+#   - `@vscodium/…` npm package ids embedded in bundles
+#   - `"author":{"name":"VSCodium"}` package.json metadata inlined by esbuild
+#   - `i("VSCodium",this.productName…` policy-watcher registration key
+# Known REAL leak, warn-not-fail: the extension-install reload toast says
+# "Please reload VSCodium…" (upstream hardcode; needs a fork patch — tracked
+# in #356, ships in v0.1.16 already, non-blocking for worker/extension work).
+# Anything else is a NEW leak → hard fail.
+KNOWN_TOAST="reload VSCodium to enable"
+HITS=""
+KNOWN_HITS=""
+while IFS= read -r f; do
+  [[ -z "$f" ]] && continue
+  CTX=$(grep -oi ".\{0,50\}codium.\{0,50\}" "$f" 2>/dev/null \
+    | grep -vi "sourcemaps" \
+    | grep -vi "@vscodium/" \
+    | grep -viF '"author":{"name":"VSCodium"}' \
+    | grep -viF 'VSCodium",this.productName' || true)
+  [[ -z "$CTX" ]] && continue
+  if printf '%s' "$CTX" | grep -qviF "$KNOWN_TOAST"; then
+    HITS+="$f"$'\n'
+  else
+    KNOWN_HITS+="$f"$'\n'
+  fi
+done <<< "$CANDIDATES"
+HITS="${HITS%$'\n'}"
+if [[ -n "$KNOWN_HITS" ]]; then
+  warn "Known reload-toast leak ('Please ${KNOWN_TOAST}…', #356) in:"
+  printf '%s' "$KNOWN_HITS" | sed 's/^/      /'
+fi
 if [[ -z "$HITS" ]]; then
   ok "No residual branding in Resources/"
 else

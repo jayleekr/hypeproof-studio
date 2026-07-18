@@ -58,7 +58,10 @@ echo "Building hypeproof-chat..."
 # copying dist/ wholesale — so a vendor tree UNDER dist/ ships via BOTH this
 # inject path and the build.sh re-inject, with no vscodium-base change.
 echo "Vendoring Agent SDK JS into dist/vendor (platform binaries excluded)..."
-SDK_VERSION="$(node -e "process.stdout.write(require('$EXT_SRC/package-lock.json').packages['node_modules/@anthropic-ai/claude-agent-sdk'].version)")"
+# Path goes through argv, NOT interpolated into the -e source: on the Windows
+# runner (Git Bash) $EXT_SRC is an MSYS path (/d/a/…) that node's require()
+# can't resolve, but MSYS auto-converts argv paths to native ones (#355).
+SDK_VERSION="$(node -e "const fs=require('fs');const lock=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));process.stdout.write(lock.packages['node_modules/@anthropic-ai/claude-agent-sdk'].version)" "$EXT_SRC/package-lock.json")"
 VENDOR_ROOT="$EXT_SRC/dist/vendor"
 rm -rf "$VENDOR_ROOT"
 mkdir -p "$VENDOR_ROOT"
