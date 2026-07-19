@@ -371,7 +371,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   async revealBuilt(html: string): Promise<void> {
     await this.saveGameToWorkspace(html);
-    if (this.isLiveServerPreview() && (await this.openInLiveServer())) return;
+    // A self-contained single-page output (games, search-webapp teaser) renders
+    // in place in the srcdoc PreviewProvider panel (#218) — reused, no extra
+    // browser tab per Run. Only the multi-file website-copyclone tier genuinely
+    // needs the live server + native integrated browser for real-origin, so gate
+    // that path to it (and fall back to srcdoc if the server can't come up).
+    // Routing every live_server cohort to the native browser (#309) both left a
+    // blank preview when it failed AND opened a fresh tab on each Run.
+    const multiFile = this.cachedProfile?.game?.template_tier === "website";
+    if (multiFile && this.isLiveServerPreview() && (await this.openInLiveServer())) return;
     void this.preview.show(html);
   }
 
