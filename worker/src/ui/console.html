@@ -1,0 +1,345 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>HypeProof — 강사 세션 콘솔</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+  :root {
+    --bg: #0f1115; --fg: #e6e8eb; --muted: #8a8f99; --line: #2a2e36;
+    --accent: #5b8def; --ok: #4dbd84; --warn: #d97757; --card: #1a1d24;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Pretendard", sans-serif;
+    line-height: 1.45;
+  }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin: 0 0 16px; }
+  legend { padding: 0 6px; color: var(--muted); font-size: 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 10px 0 4px; }
+  input, select, textarea {
+    width: 100%; padding: 10px 12px; font: inherit;
+    background: var(--card); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  textarea { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; resize: vertical; }
+  button {
+    width: 100%; margin-top: 12px; padding: 12px;
+    border: 0; border-radius: 6px; cursor: pointer; font: inherit;
+    background: var(--accent); color: white; font-weight: 600;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); }
+  button.danger { background: #6b2622; }
+  .banner { padding: 12px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+  .banner.ok { background: #0a3622; border: 1px solid #145a3c; }
+  .banner.warn { background: #3a2a14; border: 1px solid #6b4d22; color: #e0b070; }
+  .banner.err { background: #3a1714; border: 1px solid #6b2622; color: var(--warn); }
+  .track {
+    border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-top: 10px;
+    background: var(--card);
+  }
+  .track.live { border-color: #145a3c; background: #0a3622; }
+  .track h3 { margin: 0 0 2px; font-size: 15px; }
+  .track .pid { color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; word-break: break-all; }
+  .track .countdown { font-size: 13px; color: var(--ok); margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .row { display: flex; gap: 8px; align-items: flex-end; }
+  .row > div { flex: 1; }
+  .row button { margin-top: 0; }
+  .tok-line { margin-top: 8px; padding: 8px; background: #0f1115; border-radius: 4px; }
+  .tok-line .name { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .tok-line .token { font-family: ui-monospace, monospace; font-size: 10px; word-break: break-all; user-select: all; }
+  .help { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .err-detail { margin-top: 8px; opacity: 0.7; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>강사 세션 콘솔</h1>
+  <div class="sub">세션 열기/닫기 · 학생 토큰 일괄 발급. 토큰 발급만 필요하면 <a href="/issuer" style="color:var(--accent)">/issuer</a>.</div>
+
+  <fieldset>
+    <legend>① 본인 issuer 토큰</legend>
+    <textarea id="issuer" rows="3" placeholder="eyJjIgi… (Jay에게 받은 강사 토큰)"></textarea>
+    <button id="load">콘솔 열기 →</button>
+    <button class="ghost" id="forget" type="button">토큰 지우기</button>
+    <div class="help">붙여넣고 「콘솔 열기」. 링크에 토큰이 포함돼 있었다면 자동으로 채워져 있어요.</div>
+  </fieldset>
+
+  <div id="tokenBanner"></div>
+  <div id="cohorts"></div>
+  <div id="minter"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+// --- shared with /issuer (issue #65): paste normalization -------------------
+const TOKEN_SHAPE = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/;
+function sanitizeToken(raw) {
+  if (typeof raw !== "string") return "";
+  let s = raw.replace(/\s+/g, "");
+  s = s.replace(/[​-‍﻿⁠]/g, "");
+  for (let i = 0; i < 8; i++) {
+    const before = s;
+    s = s.replace(/^["'`,\[\]\{\}\s]+/, "").replace(/["'`,\[\]\{\}\s]+$/, "");
+    if (s === before) break;
+  }
+  return s;
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+function mapServerError(raw) {
+  const e = String(raw || "").toLowerCase();
+  if (e.includes("expired")) return "issuer 토큰이 만료됐어요. Jay에게 재발급 요청해주세요.";
+  if (e.includes("revoked")) return "이 토큰은 무효화됐어요. Jay에게 새 토큰 요청해주세요.";
+  if (e.includes("not an issuer")) return "학생 토큰을 붙여넣으신 듯해요. Jay에게 받은 강사(issuer) 토큰이 필요해요.";
+  if (e.includes("can_start_session")) return "이 토큰에는 세션 시작 권한이 없어요. 구버전 토큰일 수 있어요 — Jay에게 재발급 요청해주세요. (오늘 겪은 그 403이 이거예요)";
+  if (e.includes("not scoped")) return "이 토큰의 권한 범위 밖 cohort예요. Jay에게 스코프 추가를 요청해주세요.";
+  if (e.includes("invalid signature") || e.includes("malformed")) return "토큰이 손상되었거나 잘못 복사됐어요. 따옴표·콤마·공백 없이 다시 붙여넣어 주세요.";
+  if (e.includes("exceeds") && e.includes("max")) return "본인 권한의 최대 시간을 초과했어요. 시간을 줄여주세요.";
+  return "오류: " + raw;
+}
+
+// Decode the payload half of a v2 token (base64url JSON). Display-only — the
+// server re-verifies everything; this never gates an action.
+function decodePayload(tok) {
+  try {
+    const b64 = tok.split(".")[0].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = b64 + "===".slice((b64.length + 3) % 4);
+    return JSON.parse(decodeURIComponent(escape(atob(pad))));
+  } catch { return null; }
+}
+
+// Token via URL fragment (#t=…) → prefill once, then scrub the URL so the
+// token doesn't linger in the address bar / browser history UI.
+(function () {
+  const m = /[#&]t=([^&]+)/.exec(location.hash || "");
+  if (m) {
+    $("issuer").value = sanitizeToken(decodeURIComponent(m[1]));
+    history.replaceState(null, "", location.pathname);
+  }
+})();
+
+// Persist in sessionStorage only (tab-scoped), same policy as /issuer.
+const KEY = "hps_issuer_token";
+if (!$("issuer").value && sessionStorage.getItem(KEY)) $("issuer").value = sessionStorage.getItem(KEY);
+
+$("forget").onclick = () => {
+  sessionStorage.removeItem(KEY);
+  $("issuer").value = "";
+  $("tokenBanner").innerHTML = $("cohorts").innerHTML = $("minter").innerHTML = "";
+};
+
+let countdownTimer = null;
+
+async function api(path, opts) {
+  const issuer = sanitizeToken($("issuer").value);
+  const res = await fetch(path, {
+    ...opts,
+    headers: { "Authorization": "Bearer " + issuer, "content-type": "application/json", ...(opts && opts.headers) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || ("HTTP " + res.status));
+  return body;
+}
+
+$("load").onclick = load;
+async function load() {
+  const issuer = sanitizeToken($("issuer").value);
+  $("issuer").value = issuer;
+  const banner = $("tokenBanner");
+  banner.innerHTML = ""; $("cohorts").innerHTML = ""; $("minter").innerHTML = "";
+  if (countdownTimer) { clearInterval(countdownTimer); countdownTimer = null; }
+
+  if (!issuer) return (banner.innerHTML = '<div class="banner err">issuer 토큰을 입력해주세요.</div>');
+  if (!TOKEN_SHAPE.test(issuer)) {
+    return (banner.innerHTML = '<div class="banner err">토큰 형식이 잘못됐어요. eyJj… 로 시작하고 점(.)이 1개인 한 줄이어야 해요.</div>');
+  }
+  const payload = decodePayload(issuer);
+  if (!payload || payload.role !== "issuer") {
+    return (banner.innerHTML = '<div class="banner err">강사(issuer) 토큰이 아니에요. 학생 토큰을 붙여넣으신 듯해요.</div>');
+  }
+  sessionStorage.setItem(KEY, issuer);
+
+  // Expiry banner — surfaces the "stale token" failure the moment the page
+  // opens, not as a 403 mid-lecture.
+  const expMs = (payload.exp || 0) * 1000;
+  const daysLeft = Math.floor((expMs - Date.now()) / 86400000);
+  if (expMs && expMs < Date.now()) {
+    banner.innerHTML = '<div class="banner err">이 토큰은 <b>만료</b>됐어요 (' + esc(new Date(expMs).toLocaleDateString()) + '). Jay에게 재발급 요청해주세요.</div>';
+    return;
+  }
+  banner.innerHTML = '<div class="banner ' + (daysLeft <= 7 ? "warn" : "ok") + '">' +
+    esc(payload.u || "강사") + ' · 토큰 유효: ' + esc(new Date(expMs).toLocaleDateString()) + '까지' +
+    (daysLeft <= 7 ? ' — <b>만료 ' + daysLeft + '일 전!</b> 미리 Jay에게 재발급 요청해두세요.' : '') + '</div>';
+
+  for (const scope of payload.scopes || []) renderCohort(scope);
+}
+
+async function renderCohort(scope) {
+  const wrap = document.createElement("fieldset");
+  wrap.innerHTML = '<legend>② 세션 — ' + esc(scope.cohort) + '</legend><div class="help">불러오는 중…</div>';
+  $("cohorts").appendChild(wrap);
+
+  let state;
+  try {
+    state = await api("/admin/cohorts/" + encodeURIComponent(scope.cohort) + "/state", { method: "GET" });
+  } catch (err) {
+    wrap.innerHTML = '<legend>② 세션 — ' + esc(scope.cohort) + '</legend>' +
+      '<div class="banner err">' + esc(mapServerError(err.message)) +
+      '<div class="err-detail">원본 오류: ' + esc(err.message) + '</div></div>';
+    return;
+  }
+
+  const canStart = state.scope ? state.scope.can_start_session : false;
+  const maxH = state.scope ? state.scope.max_session_hours : 4;
+  let html = '<legend>② 세션 — ' + esc(scope.cohort) + '</legend>';
+  if (state.paused) html += '<div class="banner warn">⚠ 이 cohort는 일시정지(pause) 상태예요 — 세션을 열어도 학생 채팅이 차단됩니다. Jay 확인 필요.</div>';
+  if (!canStart) html += '<div class="banner warn">이 토큰엔 세션 시작 권한이 없어요 (조회·토큰 발급만 가능). 구버전 토큰이면 Jay에게 재발급 요청.</div>';
+
+  const live = state.session && Date.parse(state.session.ends_at) > Date.now();
+  for (const p of state.profiles) {
+    const isLive = live && state.session.profile_id === p.id;
+    html += '<div class="track' + (isLive ? " live" : "") + '" id="trk-' + esc(p.id) + '">' +
+      '<h3>' + esc(p.display_name) + (isLive ? ' — <span style="color:var(--ok)">진행 중</span>' : '') + '</h3>' +
+      '<div class="pid">' + esc(p.id) + '</div>' +
+      (isLive
+        ? '<div class="countdown" data-ends="' + esc(state.session.ends_at) + '"></div>' +
+          '<button class="danger" data-close="' + esc(scope.cohort) + '">세션 닫기</button>'
+        : (canStart
+          ? '<div class="row"><div><label>시간</label><select data-hours>' +
+            [1,2,3,4,5,6].filter(h => h <= maxH).map(h =>
+              '<option value="' + h + '"' + (h === Math.min(4, maxH) ? " selected" : "") + '>' + h + '시간</option>').join("") +
+            '</select></div>' +
+            '<button data-open="' + esc(scope.cohort) + '" data-profile="' + esc(p.id) + '">이 트랙으로 세션 열기</button></div>'
+          : "")) +
+      '</div>';
+  }
+  if (live && !state.profiles.some((p) => p.id === state.session.profile_id)) {
+    html += '<div class="banner warn">지금 열려 있는 세션(' + esc(state.session.profile_id) + ')은 이 토큰의 트랙 범위 밖이에요.</div>';
+  }
+  html += '<div class="help">참가자 ' + state.roster_size + '명 등록됨 · 한 cohort에 세션은 동시에 1개 — 다른 트랙을 열면 기존 세션이 닫혀요.</div>';
+  wrap.innerHTML = html;
+
+  wrap.querySelectorAll("[data-open]").forEach((btn) => {
+    btn.onclick = async () => {
+      const hours = parseInt(btn.closest(".row").querySelector("[data-hours]").value, 10);
+      btn.disabled = true; btn.textContent = "여는 중…";
+      try {
+        const now = new Date();
+        await api("/admin/cohorts/" + encodeURIComponent(btn.dataset.open) + "/session", {
+          method: "POST",
+          body: JSON.stringify({
+            profile_id: btn.dataset.profile,
+            starts_at: now.toISOString(),
+            ends_at: new Date(now.getTime() + hours * 3600000).toISOString(),
+          }),
+        });
+        load();
+      } catch (err) {
+        btn.disabled = false; btn.textContent = "이 트랙으로 세션 열기";
+        alert(mapServerError(err.message));
+      }
+    };
+  });
+  wrap.querySelectorAll("[data-close]").forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm("지금 세션을 닫을까요? 학생들의 코치 대화가 즉시 중단됩니다.")) return;
+      btn.disabled = true;
+      try { await api("/admin/cohorts/" + encodeURIComponent(btn.dataset.close) + "/session", { method: "DELETE" }); load(); }
+      catch (err) { btn.disabled = false; alert(mapServerError(err.message)); }
+    };
+  });
+
+  startCountdowns();
+  renderMinter(scope, state);
+}
+
+function startCountdowns() {
+  if (countdownTimer) clearInterval(countdownTimer);
+  const tick = () => {
+    document.querySelectorAll(".countdown[data-ends]").forEach((el) => {
+      const left = Date.parse(el.dataset.ends) - Date.now();
+      if (left <= 0) { el.textContent = "종료됨 — 새로고침하세요"; return; }
+      const h = Math.floor(left / 3600000), m = Math.floor((left % 3600000) / 60000), s = Math.floor((left % 60000) / 1000);
+      el.textContent = "종료까지 " + h + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0") +
+        " (" + new Date(Date.parse(el.dataset.ends)).toLocaleTimeString() + " 종료)";
+    });
+  };
+  tick();
+  countdownTimer = setInterval(tick, 1000);
+}
+
+function renderMinter(scope, state) {
+  if (document.getElementById("mint-" + scope.cohort)) return;
+  const maxTokH = state.scope ? state.scope.max_hours : 12;
+  const wrap = document.createElement("fieldset");
+  wrap.id = "mint-" + scope.cohort;
+  wrap.innerHTML =
+    '<legend>③ 학생 토큰 일괄 발급 — ' + esc(scope.cohort) + '</legend>' +
+    '<label>트랙</label><select id="mp-' + esc(scope.cohort) + '">' +
+    state.profiles.map((p) => '<option value="' + esc(p.id) + '">' + esc(p.display_name) + '</option>').join("") +
+    '</select>' +
+    '<label>참가자 handle 목록 (한 줄에 한 명 — 소문자·영숫자·하이픈)</label>' +
+    '<textarea id="mu-' + esc(scope.cohort) + '" rows="4" placeholder="kim-cheolsu&#10;lee-younghee"></textarea>' +
+    '<label>유효시간 (최대 ' + maxTokH + 'h)</label>' +
+    '<input id="mh-' + esc(scope.cohort) + '" type="number" min="1" max="' + maxTokH + '" value="' + Math.min(12, maxTokH) + '">' +
+    '<button id="mb-' + esc(scope.cohort) + '">일괄 발급 →</button>' +
+    '<div id="mr-' + esc(scope.cohort) + '"></div>';
+  $("minter").appendChild(wrap);
+
+  $("mb-" + scope.cohort).onclick = async () => {
+    const btn = $("mb-" + scope.cohort);
+    const out = $("mr-" + scope.cohort);
+    const p = $("mp-" + scope.cohort).value;
+    const hours = parseInt($("mh-" + scope.cohort).value, 10);
+    const users = $("mu-" + scope.cohort).value.split("\n").map((s) => s.trim()).filter(Boolean);
+    out.innerHTML = "";
+    if (!users.length) return (out.innerHTML = '<div class="banner err">참가자 handle을 한 줄에 한 명씩 입력해주세요.</div>');
+    btn.disabled = true;
+    const results = [];
+    for (const u of users) {
+      btn.textContent = "발급 중… (" + (results.length + 1) + "/" + users.length + ")";
+      try {
+        const body = await api("/admin/tokens/issue", { method: "POST", body: JSON.stringify({ u, c: scope.cohort, p, hours }) });
+        results.push({ u, token: body.token });
+      } catch (err) {
+        results.push({ u, error: err.message });
+      }
+    }
+    btn.disabled = false; btn.textContent = "일괄 발급 →";
+    out.innerHTML =
+      results.map((r) => '<div class="tok-line"><div class="name">' + esc(r.u) + (r.error ? ' — <span style="color:var(--warn)">' + esc(mapServerError(r.error)) + '</span>' : "") + '</div>' +
+        (r.token ? '<div class="token">' + esc(r.token) + '</div>' : "") + '</div>').join("") +
+      (results.some((r) => r.token)
+        ? '<button id="copyall-' + esc(scope.cohort) + '">전체 복사 (이름: 토큰)</button>'
+        : "");
+    const copyBtn = document.getElementById("copyall-" + scope.cohort);
+    if (copyBtn) copyBtn.onclick = () => {
+      navigator.clipboard.writeText(results.filter((r) => r.token).map((r) => r.u + ": " + r.token).join("\n\n"));
+      copyBtn.textContent = "복사됨 ✓";
+    };
+  };
+}
+
+// Auto-load when a token is already present (fragment link or sessionStorage).
+if ($("issuer").value) load();
+
+// Expose pure helpers for the Node test harness (window undefined there).
+if (typeof window === "undefined") {
+  (globalThis).__consolePageHelpers = { sanitizeToken, mapServerError, decodePayload, TOKEN_SHAPE };
+}
+</script>
+</body>
+</html>

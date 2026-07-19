@@ -95,13 +95,13 @@ console.log("✓ route-order: signingSecretGuard precedes /v1/chat, /v1/messages
   assert.notEqual(report.status, 503, "/v1/report exempt (REQ-H6: bug reporting survives config breakage)");
   assert.notEqual(report.status, 404, "/v1/report is mounted");
 
-  for (const page of ["/", "/issuer"]) {
+  for (const page of ["/", "/issuer", "/console"]) {
     const r = await app.fetch(new Request(`https://api.test${page}`), badEnv(), makeCtx());
     assert.equal(r.status, 200, `${page} HTML page serves without the guard`);
     assert.match(r.headers.get("content-type") ?? "", /text\/html/);
   }
 }
-console.log("✓ route-order: /v1/health, /v1/report, / and /issuer stay reachable on bad secret");
+console.log("✓ route-order: /v1/health, /v1/report, /, /issuer and /console stay reachable on bad secret");
 
 // --- 4. /v1 mount does not shadow /v1/trace ----------------------------------
 {

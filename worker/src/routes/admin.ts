@@ -7,6 +7,7 @@
 // Endpoints:
 //   GET    /admin/cohorts                       — list with status
 //   GET    /admin/cohorts/:id                   — detail (roster + active session)
+//   GET    /admin/cohorts/:id/state             — read-only console state; issuer Bearer OK (#352)
 //   POST   /admin/cohorts/:id/roster            — body: { users: string[] } (full replace)
 //   POST   /admin/cohorts/:id/roster/append     — body: { users: string[] } (server-side merge, #290)
 //   POST   /admin/cohorts/:id/session           — body: { profile_id, starts_at, ends_at }
@@ -108,6 +109,10 @@ function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   // composite session open/close endpoints (self-service workshop ops).
   if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/roster\/append$/.test(path)) return true;
   if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/session\/(open|close)$/.test(path)) return true;
+  // #352 — the instructor console reads cohort state (active session, pause,
+  // track display names) before any mutation. Read-only; any scope on the
+  // cohort qualifies (handler re-verifies via authorizeIssuerForCohort).
+  if (method === "GET" && /^\/admin\/cohorts\/[^/]+\/state$/.test(path)) return true;
   // #295 — an admin-tier minter (issuer token with can_issue_issuers) may mint
   // instructor issuers via Bearer. The handler re-verifies the token AND the
   // capability; a Bearer minter still cannot create another admin-minter.
@@ -182,6 +187,46 @@ admin.get("/cohorts/:id", async (c) => {
     getCohortPause(c.env.HPS_KV, id),
   ]);
   return c.json({ id, roster, session, paused });
+});
+
+// #352 — read-only cohort state for the instructor console (/console).
+// Issuer Bearer with ANY scope on the cohort qualifies (no can_start_session:
+// a mint-only instructor must still SEE what's open before handing out
+// tokens). Admin Basic / CF Access also pass (authz === null). Unlike
+// GET /cohorts/:id this returns display names for the issuer's scoped
+// profiles, so the console renders human track cards instead of profile IDs,
+// and only roster_size (not member handles) — the console never needs names.
+admin.get("/cohorts/:id/state", async (c) => {
+  const cohortId = c.req.param("id");
+  const authz = await authorizeIssuerForCohort(c, cohortId);
+  if (authz instanceof Response) return authz;
+  const [session, roster, paused] = await Promise.all([
+    getActiveSession(c.env.HPS_KV, cohortId),
+    getRoster(c.env.HPS_KV, cohortId),
+    getCohortPause(c.env.HPS_KV, cohortId),
+  ]);
+  const scopedIds = authz?.scope.profiles ?? null;
+  const profiles = listProfiles()
+    .filter((p) => p.session.cohort_id === cohortId)
+    .filter((p) => scopedIds === null || scopedIds.includes(p.id))
+    .map((p) => ({ id: p.id, display_name: p.display_name }));
+  return c.json({
+    id: cohortId,
+    now: new Date().toISOString(),
+    session,
+    roster_size: roster?.users.length ?? 0,
+    paused,
+    profiles,
+    // Server-authoritative caps so the console renders the same limits the
+    // mutation endpoints will enforce (null on the admin auth path).
+    scope: authz
+      ? {
+          can_start_session: authz.scope.can_start_session === true,
+          max_session_hours: authz.scope.max_session_hours ?? 4,
+          max_hours: authz.scope.max_hours ?? 12,
+        }
+      : null,
+  });
 });
 
 // ---- kill-switch (S-12 / #47) ----------------------------------------------
