@@ -291,7 +291,7 @@ function renderMinter(scope, state) {
     '<label>트랙</label><select id="mp-' + esc(scope.cohort) + '">' +
     state.profiles.map((p) => '<option value="' + esc(p.id) + '">' + esc(p.display_name) + '</option>').join("") +
     '</select>' +
-    '<label>참가자 handle 목록 (한 줄에 한 명 — 소문자·영숫자·하이픈)</label>' +
+    '<label>참가자 handle 목록 (한 줄에 한 명 — 소문자·영숫자·하이픈). 발급하면 명단에도 자동 등록돼요.</label>' +
     '<textarea id="mu-' + esc(scope.cohort) + '" rows="4" placeholder="kim-cheolsu&#10;lee-younghee"></textarea>' +
     '<label>유효시간 (최대 ' + maxTokH + 'h)</label>' +
     '<input id="mh-' + esc(scope.cohort) + '" type="number" min="1" max="' + maxTokH + '" value="' + Math.min(12, maxTokH) + '">' +
@@ -308,6 +308,20 @@ function renderMinter(scope, state) {
     out.innerHTML = "";
     if (!users.length) return (out.innerHTML = '<div class="banner err">참가자 handle을 한 줄에 한 명씩 입력해주세요.</div>');
     btn.disabled = true;
+    // #367 — roster BEFORE minting: the chat gate blocks any handle not in
+    // the cohort roster (not_in_roster), so a minted-but-unrostered token is
+    // a lecture-day trap. Registering first makes "token issued" imply
+    // "student can actually chat". Server-side merge, so re-runs are safe.
+    try {
+      btn.textContent = "명단 등록 중…";
+      await api("/admin/cohorts/" + encodeURIComponent(scope.cohort) + "/roster/append", {
+        method: "POST",
+        body: JSON.stringify({ users }),
+      });
+    } catch (err) {
+      btn.disabled = false; btn.textContent = "일괄 발급 →";
+      return (out.innerHTML = '<div class="banner err">참가자 명단 등록 실패 — 발급을 중단했어요. ' + esc(mapServerError(err.message)) + '</div>');
+    }
     const results = [];
     for (const u of users) {
       btn.textContent = "발급 중… (" + (results.length + 1) + "/" + users.length + ")";

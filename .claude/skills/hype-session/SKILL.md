@@ -64,8 +64,11 @@ Confirm ("학생 채팅이 즉시 끊깁니다"), then
 `DELETE /admin/cohorts/<cohort>/session`. Report what was ended.
 
 ### tokens <names…> [track] [hours, default 12 capped by max_hours]
-Track confirmed (iron rule — must match the session being run). For each
-handle (lowercase, alnum+hyphen): `POST /admin/tokens/issue`
+Track confirmed (iron rule — must match the session being run). **Roster
+first, then mint** (#367): `POST /admin/cohorts/<cohort>/roster/append`
+`{users}` — the chat gate blocks any handle not in the roster
+(`not_in_roster`), so a minted-but-unrostered token strands the student.
+Then for each handle (lowercase, alnum+hyphen): `POST /admin/tokens/issue`
 `{u, c, p, hours}`. Output one `name: token` block per student for easy
 paste into KakaoTalk. Never write tokens to tracked files.
 
