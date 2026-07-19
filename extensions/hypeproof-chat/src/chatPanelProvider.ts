@@ -12,6 +12,7 @@ import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import { capturePageContext } from "./nativeBrowser";
+import { validateAndRepairHtml, type HtmlStructureResult } from "./htmlStructure";
 import {
   ChatMessage,
   CoachInfo,
@@ -369,10 +370,40 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  - default: the sandboxed iframe PreviewProvider (existing behavior).
    * Public so extension.ts (runLastCode) shares the same routing.
    */
-  async revealBuilt(html: string): Promise<void> {
-    await this.saveGameToWorkspace(html);
-    if (this.isLiveServerPreview() && (await this.openInLiveServer())) return;
-    void this.preview.show(html);
+  async revealBuilt(html: string, opts?: { streamId?: string }): Promise<boolean> {
+    // #359 — structural guard: auto-repair the known comment-close typo, and
+    // refuse to reveal a still-broken document as if it succeeded. Returns
+    // false when blocked so the streaming caller can let a corrected block retry.
+    const checked = validateAndRepairHtml(html);
+    if (checked.issues.length > 0) this.surfaceStructureIssues(checked, opts?.streamId);
+    if (checked.blocked) return false;
+
+    await this.saveGameToWorkspace(checked.html);
+    if (this.isLiveServerPreview() && (await this.openInLiveServer())) return true;
+    void this.preview.show(checked.html);
+    return true;
+  }
+
+  /**
+   * #359 — surface a one-line structural note for a build. In-stream we reuse
+   * the existing toolLog channel (a corrected/blocked build reads like any
+   * other build step); off-stream (e.g. the ▶ Run button) we fall back to a
+   * VS Code warning toast.
+   */
+  private surfaceStructureIssues(r: HtmlStructureResult, streamId?: string): void {
+    const label = `생성물 점검: ${r.issues.join(" · ")}`;
+    if (streamId) {
+      void this.post({
+        type: "toolLog",
+        streamId,
+        id: randomId(),
+        icon: r.blocked ? "🚫" : "⚠️",
+        label,
+        state: r.blocked ? "error" : "done",
+      });
+    } else {
+      void vscode.window.showWarningMessage(label);
+    }
   }
 
   /**
@@ -621,8 +652,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (revealed) return;
       const html = extractRenderableHtml(text);
       if (!html) return;
-      revealed = true;
-      void this.revealBuilt(html);
+      revealed = true; // optimistic — stop later chunks from re-revealing
+      void this.revealBuilt(html, { streamId }).then((ok) => {
+        // #359 — a blocked (still-broken after repair) build didn't ship;
+        // let a later, corrected HTML block in the same stream try again.
+        if (!ok) revealed = false;
+      });
     };
     // #173 — accumulate citations across the stream so they persist to history.
     const assistantCitations: import("./protocol").Citation[] = [];
