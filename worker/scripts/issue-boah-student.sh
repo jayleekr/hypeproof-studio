@@ -61,4 +61,14 @@ if ! TOKEN=$(printf '%s' "$RESP" | python3 -c 'import json,sys; print(json.load(
   esac
   exit 1
 fi
+# #367 — the chat gate requires roster membership on top of a valid token;
+# register the handle so the minted token actually works. Best-effort: token
+# already exists either way, so a failure here is a loud warning, not fatal.
+ROSTER=$(curl -sS -X POST "https://api.hypeproof-ai.xyz/admin/cohorts/boah-dental-2026-a/roster/append" \
+  -H "Authorization: Bearer $ISSUER" \
+  -H 'content-type: application/json' \
+  -d "{\"users\":[\"$HANDLE\"]}") || ROSTER=""
+if ! printf '%s' "$ROSTER" | grep -q '"ok":true'; then
+  echo "WARN: roster append failed for '$HANDLE' — 학생이 not_in_roster로 차단됩니다. 콘솔에서 재시도: $ROSTER" >&2
+fi
 printf '%s\n' "$TOKEN"
