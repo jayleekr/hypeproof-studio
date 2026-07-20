@@ -55,11 +55,17 @@ export default async function globalSetup() {
     }
   }
 
+  // HPS_E2E_PROXY_URL overrides the app's proxy (e.g. prod for evidence
+  // captures against a deployed cohort). Health-check THAT origin, not the
+  // local dev worker, so the preflight matches where the app will actually go.
+  const proxyBase = (process.env.HPS_E2E_PROXY_URL || "http://localhost:8787/v1").replace(/\/$/, "");
+  const healthUrl = proxyBase.replace(/\/v1$/, "") + "/v1/health";
   try {
-    const res = await fetch("http://localhost:8787/v1/health");
-    if (!res.ok) errors.push(`✗ wrangler dev /v1/health returned ${res.status}`);
+    const res = await fetch(healthUrl);
+    if (!res.ok) errors.push(`✗ proxy /v1/health returned ${res.status} (${healthUrl})`);
   } catch (err) {
-    errors.push(`✗ wrangler dev not reachable at localhost:8787 (${err})\n   Run: bash scripts/dev-stack.sh`);
+    const hint = process.env.HPS_E2E_PROXY_URL ? "" : "\n   Run: bash scripts/dev-stack.sh";
+    errors.push(`✗ proxy not reachable at ${healthUrl} (${err})${hint}`);
   }
 
   if (errors.length > 0) {

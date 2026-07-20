@@ -76,6 +76,41 @@ function chatRequest({ prompt = "안녕 코치", stream = false, headers = {} } 
   assert.equal(j.error.type, "cohort_paused");
 }
 
+// --- 413 passthrough: oversized image → real 413 + request_too_large (#358) --
+{
+  const env = createMockEnv();
+  await withMockUpstream(
+    () => new Response("payload too large: image exceeds limit", { status: 413 }),
+    async (calls) => {
+      const r = await app.fetch(chatRequest({ prompt: "이 화면처럼 만들어줘" }), env, makeCtx());
+      assert.equal(r.status, 413, "upstream 413 passes through — NOT masked as a generic 502");
+      const j = await r.json();
+      assert.equal(j.error.type, "request_too_large", "sanitized passthrough type");
+      assert.doesNotMatch(
+        JSON.stringify(j),
+        /payload too large|exceeds limit/,
+        "raw upstream prose stays in logs, never reaches the client",
+      );
+      assert.ok(j.error.request_id, "request_id surfaced for the operator");
+      assert.equal(calls.length, 1, "exactly one upstream call (no retry on a permanent 4xx)");
+    },
+  );
+}
+
+// --- 5xx upstream → still OUR generic 502 gateway failure --------------------
+{
+  const env = createMockEnv();
+  await withMockUpstream(
+    () => new Response("boom", { status: 500 }),
+    async () => {
+      const r = await app.fetch(chatRequest(), env, makeCtx());
+      assert.equal(r.status, 502, "upstream 5xx stays a 502 gateway failure (not passed through)");
+      const j = await r.json();
+      assert.equal(j.error.type, "upstream");
+    },
+  );
+}
+
 // --- 200 non-streaming: upstream JSON → OpenAI response + usage + turn row ---
 {
   const env = createMockEnv({ trials: { [TRIAL_UUID]: { user_id: USER, cohort_id: COHORT } } });

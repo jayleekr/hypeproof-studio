@@ -191,7 +191,13 @@ export function App() {
     for (let i = state.messages.length - 1; i >= 0; i--) {
       const m = state.messages[i];
       if (m && m.role === "user") {
-        postToHost({ type: "retryMessage", prompt: m.content, history: state.messages });
+        // #358 — re-attach the failed turn's pending image(s). Without this the
+        // retry re-sent text only, so the coach replied "스크린샷을 아직 못
+        // 받았어요" even though the student did paste one. Images live only on
+        // the in-memory message (single-shot, REQ-C11), which is exactly what a
+        // same-session retry needs.
+        const images = m.images && m.images.length > 0 ? m.images : undefined;
+        postToHost({ type: "retryMessage", prompt: m.content, history: state.messages, images });
         return;
       }
     }
