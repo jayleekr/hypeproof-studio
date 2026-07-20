@@ -662,7 +662,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // #282 Phase 1 — route to the Agent SDK coach behind the flag. Default
       // "proxy" keeps the exact existing single-turn behavior; "agent-sdk"
       // runs runSdkCoach with the SAME callbacks so nothing downstream changes.
-      const runtime = cfg.get<"proxy" | "agent-sdk">("coachRuntime", "proxy");
+      // #371 — the cohort profile can request "agent-sdk" (worker already
+      // force-pinned minors to "proxy"), OR the machine-scoped setting can
+      // select it. Either opts in; the SDK path still gates every tool via
+      // canUseTool and strips minor tools. Belt-and-suspenders: never honor a
+      // profile agent-sdk request for a minor_cohort, even if the worker
+      // somehow sent one.
+      const settingRuntime = cfg.get<"proxy" | "agent-sdk">("coachRuntime", "proxy");
+      const profileWantsSdk = profile?.coach_runtime === "agent-sdk" && profile?.minor_cohort !== true;
+      const runtime: "proxy" | "agent-sdk" =
+        settingRuntime === "agent-sdk" || profileWantsSdk ? "agent-sdk" : "proxy";
       const onDelta = (delta: string) => {
         assistantText += delta;
         void this.post({ type: "streamChunk", streamId, delta });
