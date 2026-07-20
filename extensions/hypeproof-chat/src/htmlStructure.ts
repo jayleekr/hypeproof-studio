@@ -39,7 +39,10 @@ const DISCLAIMER_MARKERS = ["의료광고", "치료 효과"];
  * Never throws; on any unexpected input it returns the text unchanged with
  * `blocked: false` so it can only ever ADD safety, never break the happy path.
  */
-export function validateAndRepairHtml(input: string): HtmlStructureResult {
+export function validateAndRepairHtml(
+  input: string,
+  opts: { medicalAdCohort?: boolean } = {},
+): HtmlStructureResult {
   if (typeof input !== "string" || input.length === 0) {
     return { html: input, repaired: false, blocked: false, issues: [] };
   }
@@ -65,8 +68,10 @@ export function validateAndRepairHtml(input: string): HtmlStructureResult {
   }
   const blocked = commentUnterminated || scriptUnbalanced;
 
-  // 3. Advisory: medical-ad disclaimer presence (warn-only).
-  if (!DISCLAIMER_MARKERS.some((m) => html.includes(m))) {
+  // 3. Advisory: medical-ad disclaimer presence (warn-only). ONLY for medical
+  // cohorts (dental copyclone). Without this gate a kids game build would show
+  // "⚠️ 의료광고 면책 문구가 없습니다" — nonsense for a 초등학생 게임 (review #364).
+  if (opts.medicalAdCohort && !DISCLAIMER_MARKERS.some((m) => html.includes(m))) {
     issues.push("⚠️ 의료광고 면책 문구가 출력물에 보이지 않습니다 — 확인해 주세요.");
   }
 

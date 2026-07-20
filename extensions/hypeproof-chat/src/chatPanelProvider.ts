@@ -403,7 +403,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #359 — structural guard: auto-repair the known comment-close typo, and
     // refuse to reveal a still-broken document as if it succeeded. Returns
     // false when blocked so the streaming caller can let a corrected block retry.
-    const checked = validateAndRepairHtml(html);
+    // #364 — the medical-ad disclaimer advisory only applies to the dental
+    // copyclone cohort (game.template_tier "website"); other tiers (kids games)
+    // must not see a medical-ad warning. Structural repair/block always runs.
+    const medicalAdCohort = this.cachedProfile?.game?.template_tier === "website";
+    const checked = validateAndRepairHtml(html, { medicalAdCohort });
     if (checked.issues.length > 0) this.surfaceStructureIssues(checked, opts?.streamId);
     if (checked.blocked) return false;
 

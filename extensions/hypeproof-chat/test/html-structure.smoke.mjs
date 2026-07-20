@@ -77,15 +77,28 @@ const CORRUPTED = `<!doctype html>
   assert.ok(r.issues.some((i) => i.includes("script")), "script imbalance noted");
 }
 
-// ─── 5. Disclaimer absent → advisory warning, but NOT blocked ────────────────
+// ─── 5. Disclaimer absent + medicalAdCohort → advisory (not blocked) ─────────
 {
   const noDisclaimer = `<!doctype html><html><body><h1>홈페이지</h1><footer>© 2026</footer></body></html>`;
-  const r = validateAndRepairHtml(noDisclaimer);
+  const r = validateAndRepairHtml(noDisclaimer, { medicalAdCohort: true });
   assert.equal(r.blocked, false, "missing disclaimer is advisory only, never blocks");
   assert.ok(
     r.issues.some((i) => i.includes("의료광고 면책")),
-    "advisory disclaimer warning surfaced",
+    "advisory disclaimer warning surfaced for a medical cohort",
   );
+}
+
+// ─── 5b. #364 — NON-medical cohort must NOT get the disclaimer warning ───────
+{
+  const kidsGame = `<!doctype html><html><body><h1>내 게임</h1><script>start()</script></body></html>`;
+  const r = validateAndRepairHtml(kidsGame); // no medicalAdCohort flag
+  assert.equal(r.blocked, false);
+  assert.ok(
+    !r.issues.some((i) => i.includes("의료광고")),
+    "a kids game build must never see a medical-ad disclaimer warning",
+  );
+  // Structural checks still run for everyone:
+  assert.equal(isScriptBalanced(r.html), true);
 }
 
 // ─── 6. Empty / non-string input → safe passthrough ──────────────────────────
