@@ -169,6 +169,16 @@ if [[ -n "$PJSON" ]]; then
   else
     ok "version: product.json=$PVER, bundled extension=${EXT_VER:-<none>}, commit=${PCOMMIT:0:10}"
   fi
+  # #361 — CFBundleShortVersionString is stamped separately (pre-sign step)
+  # now that vscode/package.json .version is no longer overwritten. Assert it
+  # matches the product version so a dropped/misordered stamp fails the gate
+  # instead of shipping the raw VS Code version in Finder/Get Info.
+  SHORTVER=$(defaults read "$APP/Contents/Info" CFBundleShortVersionString 2>/dev/null || echo "")
+  if [[ -n "$PVER" && "$SHORTVER" == "$PVER" ]]; then
+    ok "Info.plist CFBundleShortVersionString=$SHORTVER matches product version"
+  else
+    bad "Info.plist CFBundleShortVersionString='$SHORTVER' != product.json.version='$PVER' (#361 stamp missing/misordered)"
+  fi
 else
   bad "product.json not found inside .app"
 fi
