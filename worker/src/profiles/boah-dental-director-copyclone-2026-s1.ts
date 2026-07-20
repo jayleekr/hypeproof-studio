@@ -114,6 +114,12 @@ export const profile: Profile = {
   // 성인(원장) cohort 전용 — 미성년은 pedagogy 결정 전까지 false (harness
   // child_sdk_subagents FAIL).
   sdk_tools: { read: true, write: true, browser: true, subagents: true },
+  // #371 — 원장(성인) 트랙은 Agent SDK 런타임으로 돈다: 코치가 파일을 직접
+  // 읽고·쓰고·고쳐 루브릭/agent.md를 지속 상태로 관리한다(proxy 런타임은
+  // 파일 되읽기가 없어 루브릭이 대화 메모리에만 남음). 워커가 미성년이면
+  // proxy로 강제 고정하므로 이 값은 성인 cohort에서만 유효하다. SDK 바이너리
+  // 미시딩 시 클라이언트가 proxy로 안전 폴백한다.
+  coach_runtime: "agent-sdk",
   session: {
     cohort_id: "boah-dental-2026-a",   // teaser와 같은 cohort, profile_id로만 분기
     series_total: 1,                   // 단발 — cohort 내 모든 profile의 series_total 일치(validator 강제)
