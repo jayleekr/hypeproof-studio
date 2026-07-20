@@ -69,6 +69,19 @@ const CORRUPTED = `<!doctype html>
   );
 }
 
+// ─── 3b. #364 (Jay) — unterminated comment BEFORE a <style> with a valid CSS
+// */: the repair must NOT rewrite the stylesheet's */ into --> and pass it off
+// as clean. Documents the known-limitation boundary Jay flagged. ─────────────
+{
+  const tricky = `<head><!-- TODO fill later\n<style>.a{color:#a33} /* palette */</style></head><body>x</body>`;
+  const r = validateAndRepairHtml(tricky, { medicalAdCohort: true });
+  // The CSS close must survive intact...
+  assert.ok(r.html.includes("/* palette */"), "valid CSS */ inside <style> is never rewritten to -->");
+  // ...and because the real fix (closing the TODO comment) didn't happen, the
+  // doc must NOT be silently passed as clean — the unterminated comment blocks.
+  assert.equal(r.blocked, true, "unterminated comment before <style> still blocks (not a false-clean pass)");
+}
+
 // ─── 4. Unbalanced <script> → blocked ────────────────────────────────────────
 {
   const broken = `<body><p>치료 효과 관련 안내</p><script>doStuff();</body>`;

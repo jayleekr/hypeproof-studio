@@ -684,14 +684,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // arrives many seconds before the assistant's trailing prose. Showing
     // the game in that window is the strongest Taste "감탄" moment.
     let revealed = false;
+    // #364 (Jay review) — the LAST html we attempted to reveal. On a blocked
+    // reveal we reset `revealed` so a corrected block can retry, but without
+    // this every subsequent delta re-extracts the SAME still-broken html and
+    // re-surfaces a fresh toolLog warning (new randomId each chunk → warning
+    // spam, no UI dedup). Retry ONLY when the extracted html actually changed.
+    let lastAttemptedHtml = "";
     const tryReveal = (text: string) => {
       if (revealed) return;
       const html = extractRenderableHtml(text);
       if (!html) return;
+      if (html === lastAttemptedHtml) return; // unchanged → don't re-warn
+      lastAttemptedHtml = html;
       revealed = true; // optimistic — stop later chunks from re-revealing
       void this.revealBuilt(html, { streamId }).then((ok) => {
         // #359 — a blocked (still-broken after repair) build didn't ship;
-        // let a later, corrected HTML block in the same stream try again.
+        // let a later, CORRECTED (different) HTML block in the same stream try.
         if (!ok) revealed = false;
       });
     };

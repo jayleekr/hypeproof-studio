@@ -97,16 +97,45 @@ export function isScriptBalanced(html: string): boolean {
   return opens === closes;
 }
 
-/**
- * Rewrite a mistyped comment close back to `-->`, but ONLY when the comment is
- * genuinely unterminated: there is no `-->` before the next `<!--` (or EOF),
- * and a CSS-style close sits in that gap. A well-formed CSS/JS close (its own
- * comment balanced, and not inside an open `<!--`) is never rewritten.
- */
+// Ranges [start, end) covered by `<style>…</style>` and `<script>…</script>`.
+// A `*/` inside these is a legitimate CSS/JS comment close and must NEVER be
+// treated as a mistyped HTML-comment close (Jay review #364).
+// (Line comments, not JSDoc: a literal `*/` would prematurely close a block.)
+function styleScriptRanges(html: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+  // Two literals instead of a backreference (`\1` reads as an octal escape
+  // under TS strict parsing). Body range = just inside the open tag to the
+  // start of the close tag.
+  for (const re of [
+    /<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi,
+    /<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi,
+  ]) {
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      const bodyStart = m.index + m[0].indexOf(">") + 1;
+      ranges.push([bodyStart, m.index + m[0].length]);
+    }
+  }
+  return ranges;
+}
+
+function inRanges(pos: number, ranges: Array<[number, number]>): boolean {
+  return ranges.some(([a, b]) => pos >= a && pos < b);
+}
+
+// Rewrite a mistyped comment close back to `-->`, but ONLY when the comment is
+// genuinely unterminated AND the mistaken `*/` sits in ordinary markup — never
+// inside a `<style>`/`<script>` body, where `*/` is a real CSS/JS comment close
+// (Jay review #364: an unterminated comment BEFORE a stylesheet must not cause
+// the stylesheet's `*/` to be silently rewritten). A well-formed CSS/JS close
+// is never rewritten. (Line comments, not JSDoc — a literal `*/` would close a
+// block comment early.)
 export function repairCommentCloseTypo(html: string): string {
   let out = html;
   let i = 0;
   for (;;) {
+    // Recompute per iteration: an earlier rewrite shifts later offsets.
+    const ranges = styleScriptRanges(out);
     const open = out.indexOf("<!--", i);
     if (open === -1) break;
 
@@ -118,10 +147,13 @@ export function repairCommentCloseTypo(html: string): string {
       continue;
     }
 
-    // Unterminated comment at `open`. Look for a `*/` (the mistyped close)
-    // before the next comment opener / EOF.
+    // Unterminated comment at `open`. Look for the FIRST `*/` before the next
+    // comment opener / EOF that is NOT inside a <style>/<script> body.
     const gapEnd = nextOpen === -1 ? out.length : nextOpen;
-    const typo = out.indexOf("*/", open + 4);
+    let typo = out.indexOf("*/", open + 4);
+    while (typo !== -1 && typo < gapEnd && inRanges(typo, ranges)) {
+      typo = out.indexOf("*/", typo + 2);
+    }
     if (typo !== -1 && typo < gapEnd) {
       out = out.slice(0, typo) + "-->" + out.slice(typo + 2);
       i = typo + 3;
