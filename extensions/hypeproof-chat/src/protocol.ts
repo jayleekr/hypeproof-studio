@@ -166,7 +166,7 @@ export interface SuggestionChip {
 export type WebviewMessage =
   | { type: "ready" }
   | { type: "sendMessage"; text: string; history: ChatMessage[]; images?: string[] }
-  | { type: "retryMessage"; prompt: string; history: ChatMessage[] }
+  | { type: "retryMessage"; prompt: string; history: ChatMessage[]; images?: string[] }
   | { type: "cancelStream"; streamId: string }
   | { type: "requestAction"; action: ActionRequest }
   | { type: "openSettings" }
