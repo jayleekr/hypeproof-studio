@@ -162,6 +162,16 @@ chat.get("/profile", async (c) => {
       // child_sdk_subagents FAIL enforces it.
       subagents: profile.sdk_tools?.subagents === true,
     },
+    // #371/#282 — profile-requested coach runtime. Only an ADULT cohort that
+    // opts into sdk_tools may request "agent-sdk" (real file Read/Write/Edit →
+    // durable task/rubric tracking). Minors are force-pinned to proxy here so
+    // a profile mistake can never route a child to the file/exec-capable
+    // runtime. Absent → proxy. The client still gates every tool via
+    // canUseTool and honors the machine-scoped runtime setting.
+    coach_runtime:
+      profile.coach_runtime === "agent-sdk" && !isMinorCohort(profile)
+        ? "agent-sdk"
+        : "proxy",
   });
 });
 
