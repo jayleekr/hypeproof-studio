@@ -12,7 +12,8 @@ import {
   adminBaseFor,
   mapMintError,
   validateInputs,
-  issuerDefaultCohort,
+  issuerCohorts,
+  issuerProfilesFor,
   ISSUER_TOKEN_KEY,
   type MintResponse,
 } from "./mintStudentTokenHelpers";
@@ -24,8 +25,9 @@ export interface MintCommandDeps {
   /** Worker /v1 base URL from configuration (proxyUrl). Mint endpoint lives
    *  at <origin>/admin/tokens/issue. */
   proxyUrl: string;
-  /** Optional defaults the panel knows (profile from /v1/profile).
-   *  Cohort is derived from the issuer token payload when possible. */
+  /** Optional defaults the panel knows (profile from /v1/profile). Cohort and
+   *  profile are read off the issuer token's scopes first; this profile is only
+   *  a fallback hint for tokens whose scopes could not be decoded. */
   defaults?: { profile?: string };
 }
 
@@ -52,25 +54,49 @@ export async function runMintStudentToken(deps: MintCommandDeps): Promise<MintRe
     await context.secrets.store(ISSUER_TOKEN_KEY, issuerToken);
   }
 
-  // 2. Cohort — issuer-scope-derived default if possible.
-  const defaultCohort = issuerDefaultCohort(issuerToken) ?? "boah-dental-2026-a";
-  const c = await vscode.window.showInputBox({
-    title: "Cohort id",
-    value: defaultCohort,
-    prompt: "예: boah-dental-2026-a",
-    ignoreFocusOut: true,
-  });
+  // 2. Cohort — read off the issuer token's own scopes (#347).
+  //    One scope → prefill it. Several → make the 강사 pick; guessing one would
+  //    mint into the wrong cohort and only fail later, at the student's first
+  //    chat. Unreadable → empty box, never a hardcoded guess.
+  const cohorts = issuerCohorts(issuerToken);
+  const c =
+    cohorts.length > 1
+      ? await vscode.window.showQuickPick(cohorts, {
+          title: "Cohort id — 내 issuer 토큰으로 발급 가능한 cohort",
+          ignoreFocusOut: true,
+        })
+      : await vscode.window.showInputBox({
+          title: "Cohort id",
+          value: cohorts[0] ?? "",
+          prompt:
+            cohorts.length === 1
+              ? "issuer 토큰 scope에서 가져왔어요"
+              : "issuer 토큰에서 cohort를 읽지 못했어요 — 직접 입력하세요 (예: boah-dental-2026-a)",
+          ignoreFocusOut: true,
+        });
   if (c === undefined || c.trim() === "") return undefined;
+  const cohort = c.trim();
 
-  // 3. Profile — active /v1/profile default.
-  const defaultProfile = defaults?.profile ?? "boah-dental-teaser-2026-s1";
-  const p = await vscode.window.showInputBox({
-    title: "Profile id",
-    value: defaultProfile,
-    prompt: "예: boah-dental-teaser-2026-s1",
-    ignoreFocusOut: true,
-  });
+  // 3. Profile — scoped to the cohort just chosen; /v1/profile default is only
+  //    a hint for tokens whose scopes we could not read.
+  const scopedProfiles = issuerProfilesFor(issuerToken, cohort);
+  const p =
+    scopedProfiles.length > 1
+      ? await vscode.window.showQuickPick(scopedProfiles, {
+          title: `Profile id — ${cohort}`,
+          ignoreFocusOut: true,
+        })
+      : await vscode.window.showInputBox({
+          title: "Profile id",
+          value: scopedProfiles[0] ?? defaults?.profile ?? "",
+          prompt:
+            scopedProfiles.length === 1
+              ? "issuer 토큰 scope에서 가져왔어요"
+              : "예: boah-dental-teaser-2026-s1",
+          ignoreFocusOut: true,
+        });
   if (p === undefined || p.trim() === "") return undefined;
+  const profile = p.trim();
 
   // 4. Student user id.
   const u = await vscode.window.showInputBox({
@@ -97,7 +123,7 @@ export async function runMintStudentToken(deps: MintCommandDeps): Promise<MintRe
   const hours = Number(hoursStr);
 
   // 6. Composite validate.
-  const v = validateInputs(u.trim(), c.trim(), p.trim(), hours);
+  const v = validateInputs(u.trim(), cohort, profile, hours);
   if (!v.ok) {
     vscode.window.showWarningMessage(`발급 불가: ${v.reason}`);
     return undefined;
@@ -114,7 +140,7 @@ export async function runMintStudentToken(deps: MintCommandDeps): Promise<MintRe
         Authorization: `Bearer ${issuerToken}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({ u: u.trim(), c: c.trim(), p: p.trim(), hours }),
+      body: JSON.stringify({ u: u.trim(), c: cohort, p: profile, hours }),
     });
     status = res.status;
     body = await res.json().catch(() => ({}));
@@ -141,7 +167,7 @@ export async function runMintStudentToken(deps: MintCommandDeps): Promise<MintRe
   const expISO = new Date(result.exp * 1000).toLocaleString();
   vscode.window
     .showInformationMessage(
-      `✓ ${u}@${c} 학생 토큰 발급 — 클립보드에 복사됨 (만료: ${expISO})`,
+      `✓ ${u.trim()}@${cohort} 학생 토큰 발급 — 클립보드에 복사됨 (만료: ${expISO})`,
       "다시 복사",
       "issuer 토큰 지우기",
     )
