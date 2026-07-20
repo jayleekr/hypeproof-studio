@@ -482,7 +482,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.handleSend(msg.text, msg.history, msg.images);
         return;
       case "retryMessage":
-        await this.handleSend(msg.prompt, msg.history);
+        // #358 — carry the failed turn's image(s) through the retry so the
+        // coach actually re-receives the screenshot (was text-only → "스크린샷을
+        // 아직 못 받았어요").
+        await this.handleSend(msg.prompt, msg.history, msg.images);
         return;
       case "cancelStream":
         this.activeStreams.get(msg.streamId)?.abort();

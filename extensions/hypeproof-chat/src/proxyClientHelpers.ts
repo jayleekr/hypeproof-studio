@@ -12,6 +12,25 @@ export const TOKEN_EXPIRED_FRIENDLY =
 export const TOKEN_MISSING_FRIENDLY =
   "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑";
 
+/**
+ * #358 — student-friendly copy for a 413 (payload too large), which in this
+ * app means an oversized pasted screenshot pushed the request past the
+ * region-pinned Anthropic proxy's body limit. Without this the webview showed
+ * the generic error card and the cause was invisible.
+ */
+export const IMAGE_TOO_LARGE_FRIENDLY =
+  "붙여넣은 이미지가 너무 커요. 더 작은 화면을 캡처하거나 이미지 크기를 줄여서 다시 보내주세요. 🖼️";
+
+/**
+ * Map a non-auth upstream status to a specific, kid-friendly message, or null
+ * when there's nothing better than the generic card. Kept pure for unit tests;
+ * auth statuses (401/403) are handled separately in classifyError.
+ */
+export function friendlyTransportMessage(status: number): string | null {
+  if (status === 413) return IMAGE_TOO_LARGE_FRIENDLY;
+  return null;
+}
+
 interface BuildHeadersArgs {
   token?: string;
   coachName?: string;

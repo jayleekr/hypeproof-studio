@@ -37,6 +37,23 @@ import {
 } from "../lib/moderation";
 import { runDeepHealth } from "../cron/health.ts";
 
+// #358 — request-shaped upstream 4xx that /v1/chat passes through with its REAL
+// status + a sanitized OpenAI-shaped error `type`, instead of masking it as a
+// generic 502. Sibling of routes/messages.ts PASSTHROUGH_4XX (Anthropic shape).
+// The type guard narrows the status to a literal union so Hono's c.json accepts
+// it as a StatusCode. 413 is the load-bearing case: an oversized pasted image
+// pushes the body past the region-pinned Anthropic proxy's limit.
+const CHAT_PASSTHROUGH_4XX = {
+  400: "invalid_request_error",
+  413: "request_too_large",
+  422: "invalid_request_error",
+  429: "rate_limit_error",
+} as const;
+
+function isChatPassthrough4xx(status: number): status is keyof typeof CHAT_PASSTHROUGH_4XX {
+  return status in CHAT_PASSTHROUGH_4XX;
+}
+
 export const chat = new Hono<{ Bindings: Env }>();
 
 chat.get("/health", (c) =>
@@ -324,6 +341,22 @@ chat.post("/chat/completions", async (c) => {
     // #257 — the upstream error body (provider prose, key hints, quota info)
     // goes to logs only; the client learns the status code + request_id.
     console.error(`[${c.get("requestId")}] upstream ${upstream.status}: ${text.slice(0, 500)}`);
+    // #358 — pass a request-shaped 4xx through with its REAL status + sanitized
+    // type so the webview can show a specific, friendly message (esp. 413 →
+    // "이미지가 너무 커요") instead of the generic card. Raw upstream prose stays
+    // in logs only. Everything else (5xx / network) is OUR gateway failure → 502.
+    if (isChatPassthrough4xx(upstream.status)) {
+      return c.json(
+        {
+          error: {
+            message: `upstream error (status ${upstream.status})`,
+            type: CHAT_PASSTHROUGH_4XX[upstream.status],
+            request_id: c.get("requestId"),
+          },
+        },
+        upstream.status,
+      );
+    }
     return c.json(
       {
         error: {

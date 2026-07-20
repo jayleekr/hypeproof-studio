@@ -66,25 +66,85 @@ export function validateInputs(
 }
 
 /**
- * Given an issuer token (HypeProof shape `<base64(payload)>.<sig>`),
- * return the single cohort the issuer is scoped to. Useful as a default for
- * the cohort prompt. Returns undefined for any unrecognized structure —
- * never throws.
+ * One scope entry inside an issuer token payload.
+ *
+ * SOURCE OF TRUTH: `IssuerScope` in worker/src/lib/tokens.ts — the worker
+ * signs these, so this is a read-only mirror. If the two drift apart, every
+ * function below silently returns nothing (that was #347: this file read a
+ * `scope.cohorts` shape the worker never minted, so the cohort default was
+ * dead and a hardcoded fallback surfaced instead). The smoke test mints its
+ * fixtures with the worker's real issueIssuer() so drift breaks the test.
  */
-export function issuerDefaultCohort(issuerToken: string): string | undefined {
+export interface IssuerScope {
+  cohort: string;
+  profiles?: string[];
+  max_hours?: number;
+  can_start_session?: boolean;
+  max_session_hours?: number;
+}
+
+/**
+ * Decode the payload of a HypeProof token.
+ *
+ * Wire format is `base64url(payload) "." base64url(sig)` (tokens.ts) — TWO
+ * segments, not a 3-segment JWT. The payload is therefore parts[0].
+ * Returns undefined for any unrecognized structure — never throws.
+ */
+function decodeTokenPayload(token: string): Record<string, unknown> | undefined {
   try {
-    const parts = issuerToken.split(".");
-    if (parts.length !== 2 && parts.length !== 3) return undefined;
+    const parts = token.split(".");
+    if (parts.length !== 2) return undefined;
     const raw = parts[0];
     const padded = raw + "=".repeat((4 - (raw.length % 4)) % 4);
     const json = Buffer.from(padded, "base64").toString("utf8");
-    const payload = JSON.parse(json);
-    const cohorts: unknown = payload?.scope?.cohorts;
-    if (Array.isArray(cohorts) && cohorts.length === 1 && typeof cohorts[0] === "string") {
-      return cohorts[0];
-    }
-    return undefined;
+    const payload: unknown = JSON.parse(json);
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return undefined;
+    return payload as Record<string, unknown>;
   } catch {
     return undefined;
   }
+}
+
+/** Every well-formed scope an issuer token carries. `[]` when the token is not
+ *  an issuer token, is unparseable, or carries no usable scopes. Never throws. */
+export function issuerScopes(issuerToken: string): IssuerScope[] {
+  const raw = decodeTokenPayload(issuerToken)?.scopes;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (s): s is IssuerScope =>
+      !!s && typeof s === "object" && typeof (s as IssuerScope).cohort === "string",
+  );
+}
+
+/** Distinct cohorts this issuer may mint into, in scope order. */
+export function issuerCohorts(issuerToken: string): string[] {
+  const out: string[] = [];
+  for (const s of issuerScopes(issuerToken)) {
+    if (!out.includes(s.cohort)) out.push(s.cohort);
+  }
+  return out;
+}
+
+/**
+ * The single cohort the issuer is scoped to — a safe default for the cohort
+ * prompt. Returns undefined when the token grants several cohorts (the caller
+ * must ask) or none could be read: prefilling a *guess* is worse than an empty
+ * box, because mint succeeds and the student only fails later at chat time
+ * with `token cohort/profile mismatch` (#347).
+ */
+export function issuerDefaultCohort(issuerToken: string): string | undefined {
+  const cohorts = issuerCohorts(issuerToken);
+  return cohorts.length === 1 ? cohorts[0] : undefined;
+}
+
+/** Profiles this issuer may mint for `cohort`, in scope order, deduped. */
+export function issuerProfilesFor(issuerToken: string, cohort: string): string[] {
+  const out: string[] = [];
+  for (const s of issuerScopes(issuerToken)) {
+    if (s.cohort !== cohort || !Array.isArray(s.profiles)) continue;
+    for (const p of s.profiles) {
+      if (typeof p === "string" && !out.includes(p)) out.push(p);
+    }
+  }
+  return out;
 }
