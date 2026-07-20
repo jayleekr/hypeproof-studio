@@ -188,6 +188,31 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: bash scripts/run-build.sh
 
+      # Stamp CFBundleShortVersionString on the built .app (#361). Must run
+      # BEFORE Re-sign: apply-product-overrides.sh no longer stamps
+      # vscode/package.json .version (that feeds the runtime vscode.version API
+      # and 0.1.x broke json-language-features), so the .app's Info.plist would
+      # otherwise carry the raw VS Code version. Stamping here — before the
+      # ad-hoc re-seal — means the seal covers the stamped plist and sign-mac's
+      # codesign --verify gate stays valid. (Stamping AFTER Re-sign would break
+      # the seal that #311 fixed, re-triggering "손상되어 열 수 없습니다".)
+      - name: Stamp product version on Info.plist (#361)
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT_DIR="vscodium-base/VSCode-darwin-arm64"
+          APP="$(cd "$OUT_DIR" && ls -d *.app | head -1)"
+          [ -n "$APP" ] || { echo "::error::no .app in $OUT_DIR"; ls -la "$OUT_DIR"; exit 1; }
+          PLIST="$OUT_DIR/$APP/Contents/Info.plist"
+          HPS_VER="${HPS_VERSION:-$(bash scripts/resolve-version.sh)}"
+          if [ -n "$HPS_VER" ] && [ -f "$PLIST" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $HPS_VER" "$PLIST" \
+              || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $HPS_VER" "$PLIST"
+            echo "Stamped CFBundleShortVersionString → $HPS_VER (pre-sign)"
+          else
+            echo "::warning::skipped Info.plist version stamp (HPS_VER='$HPS_VER', plist='$PLIST')"
+          fi
+
       # Our build modifies the bundle after Electron signed it (extension injection +
       # product.json rewrite), which breaks the seal. A *malformed* signature makes
       # macOS say "손상되었기 때문에 열 수 없습니다 — 휴지통으로 이동" with NO
@@ -220,6 +245,8 @@ jobs:
           [ -d "$OUT_DIR" ] || { echo "::error::$OUT_DIR not found"; ls -la vscodium-base || true; exit 1; }
           APP="$(cd "$OUT_DIR" && ls -d *.app | head -1)"
           [ -n "$APP" ] || { echo "::error::no .app in $OUT_DIR"; ls -la "$OUT_DIR"; exit 1; }
+          # Version stamp happened in the pre-sign "Stamp product version" step
+          # (#361) so the ad-hoc seal covers it — do NOT stamp here.
           ( cd "$OUT_DIR" && zip -ry "$GITHUB_WORKSPACE/dist/HypeProof-Studio-darwin-arm64.zip" "$APP" )
           ls -la dist
 
