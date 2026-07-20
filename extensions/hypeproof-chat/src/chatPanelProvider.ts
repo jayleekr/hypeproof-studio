@@ -11,6 +11,7 @@ import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
+import { extractAgentMd } from "./agentHandoff";
 import { capturePageContext } from "./nativeBrowser";
 import {
   ChatMessage,
@@ -342,6 +343,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * their own game in their own workspace (the core flow), not an AI-initiated
    * arbitrary file write.
    */
+  /**
+   * #371 — persist the coach's ```agent-md handoff fence to workspace/agent.md
+   * (same sanctioned workspace-write pattern as index.html, REQ-D5). Surfaced
+   * as a toolLog line so the participant knows the file exists.
+   */
+  private async saveAgentMdIfPresent(text: string, streamId?: string): Promise<void> {
+    const md = extractAgentMd(text);
+    if (!md) return;
+    const folders = vscode.workspace.workspaceFolders;
+    if (!folders || folders.length === 0) return;
+    try {
+      const target = vscode.Uri.joinPath(folders[0].uri, "agent.md");
+      await vscode.workspace.fs.writeFile(target, Buffer.from(md, "utf8"));
+      if (streamId) {
+        void this.post({
+          type: "toolLog",
+          streamId,
+          id: randomId(),
+          icon: "📝",
+          label: "agent.md 저장됨 — 작업 폴더에서 확인하세요",
+          state: "done",
+        });
+      }
+    } catch {
+      // Non-fatal: the coach's reply already tells the user to copy manually.
+    }
+  }
+
   private async saveGameToWorkspace(html: string): Promise<void> {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) return;
@@ -482,7 +511,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.handleSend(msg.text, msg.history, msg.images);
         return;
       case "retryMessage":
-        await this.handleSend(msg.prompt, msg.history);
+        // #358 — carry the failed turn's image(s) through the retry so the
+        // coach actually re-receives the screenshot (was text-only → "스크린샷을
+        // 아직 못 받았어요").
+        await this.handleSend(msg.prompt, msg.history, msg.images);
         return;
       case "cancelStream":
         this.activeStreams.get(msg.streamId)?.abort();
@@ -747,6 +779,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // Fallback reveal in case the stream completed but the per-chunk
         // probe missed it (e.g. the closing ``` was in the very last delta).
         tryReveal(assistantText);
+        // #371 — persist the agent.md handoff fence, if the coach emitted one.
+        void this.saveAgentMdIfPresent(assistantText, streamId);
       }
     } catch (err) {
       await this.handleSendError(err, streamId);
@@ -807,6 +841,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (iter >= maxIter) {
           p.onDelta("\n\n_(브라우저 작업을 여기서 멈췄어요.)_");
           break;
+        }
+        // #371 — save+reveal THIS iteration's HTML BEFORE running its browser
+        // tools, so a re-check (browser_navigate to the live preview) reads the
+        // freshly-saved page, not a stale one. Without this the autonomous
+        // rubric loop re-reads iteration-0's HTML every round and can't
+        // converge on later fixes. tryReveal's once-per-stream latch does not
+        // fire here (browser loop path), so reveal explicitly per iteration.
+        if (result.text) {
+          const iterHtml = extractRenderableHtml(result.text);
+          if (iterHtml) await this.revealBuilt(iterHtml);
         }
         // Assistant tool_use turn (its text + tool_use blocks) — scratch only.
         const asstContent: unknown[] = [];

@@ -133,11 +133,14 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
   fs.mkdirSync(userDir, { recursive: true });
 
   // Pre-seed settings: local wrangler URL, no telemetry, no welcome page.
+  // HPS_E2E_PROXY_URL overrides the proxy (e.g. prod for run-through evidence
+  // captures — the sanctioned test target is the deployed cohort when the
+  // local .dev.vars has no live LLM key). Same knob spirit as HPS_APP_PATH.
   fs.writeFileSync(
     path.join(userDir, "settings.json"),
     JSON.stringify(
       {
-        "hypeproofChat.proxyUrl": "http://localhost:8787/v1",
+        "hypeproofChat.proxyUrl": process.env.HPS_E2E_PROXY_URL?.trim() || "http://localhost:8787/v1",
         "workbench.startupEditor": "none",
         "telemetry.telemetryLevel": "off",
         "update.mode": "none",

@@ -14,6 +14,8 @@ import { TokenError } from "./lib/tokens.ts";
 import adminHtml from "./ui/admin.html";
 // @ts-ignore — bundled as text by wrangler rules.
 import issuerHtml from "./ui/issuer.html";
+// @ts-ignore — bundled as text by wrangler rules.
+import consoleHtml from "./ui/console.html";
 
 const app = new Hono<{ Bindings: Env; Variables: { requestId: string } }>();
 
@@ -48,6 +50,16 @@ app.get("/", () => {
 // issuer-token, scope-checked by the endpoint).
 app.get("/issuer", () => {
   return new Response(issuerHtml as unknown as string, {
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+});
+
+// #352 — instructor session console: open/close the cohort session on the
+// right track and bulk-mint student tokens, lecture-day proof. Same auth
+// model as /issuer: page is public, every API call it makes carries the
+// instructor's Bearer issuer token and is scope-checked server-side.
+app.get("/console", () => {
+  return new Response(consoleHtml as unknown as string, {
     headers: { "content-type": "text/html; charset=utf-8" },
   });
 });

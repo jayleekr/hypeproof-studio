@@ -1,6 +1,7 @@
 import type { AssetScoreChunk, ChatMessage, Citation, ResolvedProfile } from "./protocol";
 import {
   buildProxyHeaders,
+  friendlyTransportMessage,
   TOKEN_EXPIRED_FRIENDLY,
   TOKEN_MISSING_FRIENDLY,
 } from "./proxyClientHelpers";
@@ -189,10 +190,13 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
       authErr.requestId = rid;
       throw authErr;
     }
-    // Generic fallback — never dump raw JSON at a 9-10 year old; the
+    // #358 — a few non-auth statuses have a specific, friendlier message than
+    // the generic card (today: 413 = oversized pasted image). Fall back to the
+    // generic copy otherwise. Never dump raw JSON at a 9-10 year old; the
     // request_id is appended so the operator can DM a single string.
     throw new ProxyTransportError(
-      "앗, 잠깐 문제가 생겼어요. 다시 한 번 해보거나 선생님을 불러주세요.",
+      friendlyTransportMessage(res.status) ??
+        "앗, 잠깐 문제가 생겼어요. 다시 한 번 해보거나 선생님을 불러주세요.",
       rid,
     );
   }
