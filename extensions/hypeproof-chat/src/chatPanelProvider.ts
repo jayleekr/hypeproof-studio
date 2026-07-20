@@ -13,6 +13,7 @@ import { BrowserControl } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import { extractAgentMd } from "./agentHandoff";
 import { capturePageContext } from "./nativeBrowser";
+import { validateAndRepairHtml, type HtmlStructureResult } from "./htmlStructure";
 import {
   ChatMessage,
   CoachInfo,
@@ -398,10 +399,44 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  - default: the sandboxed iframe PreviewProvider (existing behavior).
    * Public so extension.ts (runLastCode) shares the same routing.
    */
-  async revealBuilt(html: string): Promise<void> {
-    await this.saveGameToWorkspace(html);
-    if (this.isLiveServerPreview() && (await this.openInLiveServer())) return;
-    void this.preview.show(html);
+  async revealBuilt(html: string, opts?: { streamId?: string }): Promise<boolean> {
+    // #359 — structural guard: auto-repair the known comment-close typo, and
+    // refuse to reveal a still-broken document as if it succeeded. Returns
+    // false when blocked so the streaming caller can let a corrected block retry.
+    // #364 — the medical-ad disclaimer advisory only applies to the dental
+    // copyclone cohort (game.template_tier "website"); other tiers (kids games)
+    // must not see a medical-ad warning. Structural repair/block always runs.
+    const medicalAdCohort = this.cachedProfile?.game?.template_tier === "website";
+    const checked = validateAndRepairHtml(html, { medicalAdCohort });
+    if (checked.issues.length > 0) this.surfaceStructureIssues(checked, opts?.streamId);
+    if (checked.blocked) return false;
+
+    await this.saveGameToWorkspace(checked.html);
+    if (this.isLiveServerPreview() && (await this.openInLiveServer())) return true;
+    void this.preview.show(checked.html);
+    return true;
+  }
+
+  /**
+   * #359 — surface a one-line structural note for a build. In-stream we reuse
+   * the existing toolLog channel (a corrected/blocked build reads like any
+   * other build step); off-stream (e.g. the ▶ Run button) we fall back to a
+   * VS Code warning toast.
+   */
+  private surfaceStructureIssues(r: HtmlStructureResult, streamId?: string): void {
+    const label = `생성물 점검: ${r.issues.join(" · ")}`;
+    if (streamId) {
+      void this.post({
+        type: "toolLog",
+        streamId,
+        id: randomId(),
+        icon: r.blocked ? "🚫" : "⚠️",
+        label,
+        state: r.blocked ? "error" : "done",
+      });
+    } else {
+      void vscode.window.showWarningMessage(label);
+    }
   }
 
   /**
@@ -649,12 +684,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // arrives many seconds before the assistant's trailing prose. Showing
     // the game in that window is the strongest Taste "감탄" moment.
     let revealed = false;
+    // #364 (Jay review) — the LAST html we attempted to reveal. On a blocked
+    // reveal we reset `revealed` so a corrected block can retry, but without
+    // this every subsequent delta re-extracts the SAME still-broken html and
+    // re-surfaces a fresh toolLog warning (new randomId each chunk → warning
+    // spam, no UI dedup). Retry ONLY when the extracted html actually changed.
+    let lastAttemptedHtml = "";
     const tryReveal = (text: string) => {
       if (revealed) return;
       const html = extractRenderableHtml(text);
       if (!html) return;
-      revealed = true;
-      void this.revealBuilt(html);
+      if (html === lastAttemptedHtml) return; // unchanged → don't re-warn
+      lastAttemptedHtml = html;
+      revealed = true; // optimistic — stop later chunks from re-revealing
+      void this.revealBuilt(html, { streamId }).then((ok) => {
+        // #359 — a blocked (still-broken after repair) build didn't ship;
+        // let a later, CORRECTED (different) HTML block in the same stream try.
+        if (!ok) revealed = false;
+      });
     };
     // #173 — accumulate citations across the stream so they persist to history.
     const assistantCitations: import("./protocol").Citation[] = [];
