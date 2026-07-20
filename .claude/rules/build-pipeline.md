@@ -84,6 +84,7 @@ To get HypeProof branding on Linux/Win/server, **pre-generate the platform icons
 | `rsvg-convert could not be found` | Missing librsvg | `brew install librsvg` |
 | Build silently uses VSCodium icons | `build_icons.sh` skipped regeneration because files exist | Delete `src/stable/resources/*/code.{icns,png,ico}` before re-running |
 | `Request https://api.github.com/repos/.../releases/tags/v0.1.0 failed with status code: 404` during `bundle-marketplace-extensions-build` | Extension listed in `product.json.builtInExtensions` triggers a marketplace/GH download. The download target doesn't exist (no release yet) | Don't list bundled extensions in `builtInExtensions`. Place them in `vscode/extensions/` only — VSCodium picks them up automatically as built-ins (same as `git`, `npm`, etc.) |
+| `npm error ELSPROBLEMS / missing: <pkg>, required by hypeproof-chat` during `vscode-min-prepack` (#349, killed the v0.1.17 tag builds) | The injected extension ships pre-built with NO `node_modules`, but its `package.json` declared a runtime `dependencies` entry — `npm list --production` then fails on the copy | Runtime deps of hypeproof-chat must live in `devDependencies`; the packaged build loads them from `dist/vendor` (#343). Never add a `dependencies` entry to the extension |
 
 ## Restarting a stuck/failed build
 
@@ -105,8 +106,10 @@ attribution. The script is also the canonical answer to "is this build
 ready to publish?" — never `gh release create` from a build that didn't
 pass it.
 
-In CI: pass `SKIP_DATA_FOLDER=1` since the data folder only exists after a
-launch.
+In CI this runs as the "Verify branding + vendored SDK" step in
+`build-mac.yml` with `REQUIRE_SDK_VENDOR=1` (added with #349; there is no
+`SKIP_DATA_FOLDER` knob — the data-folder check is warn-only and safe
+without a launch).
 
 ### Vendored Agent SDK JS assertion (SDK-coach builds)
 
@@ -127,13 +130,19 @@ SDK release. The check makes that a hard failure. It asserts:
 
 - `REQUIRE_SDK_VENDOR=1` → always assert (explicit CI/release gate for the SDK build).
 - Otherwise auto-detect: assert only when the **bundled** extension's
-  `package.json` declares the `@anthropic-ai/claude-agent-sdk` dependency (i.e.
-  this build is an SDK-coach build). A vanilla build (no `hypeproof-chat`) or a
-  pre-SDK extension (no such dep) is skipped with an informational note.
+  `package.json` declares the `@anthropic-ai/claude-agent-sdk` dependency —
+  in `dependencies` OR `devDependencies` (i.e. this build is an SDK-coach
+  build). A vanilla build (no `hypeproof-chat`) or a pre-SDK extension (no
+  such dep) is skipped with an informational note.
 
-For a real SDK release (v0.1.17+) set `REQUIRE_SDK_VENDOR=1` in the release/CI
-job so a build that forgot to vendor the SDK fails the gate rather than shipping
+`build-mac.yml` sets `REQUIRE_SDK_VENDOR=1` on its verify step (#349) so a
+build that forgot to vendor the SDK fails the gate rather than shipping
 proxy-only.
+
+**Dep placement rule (#349)**: the SDK must stay in the extension's
+`devDependencies`, never `dependencies` — the injected copy has no
+`node_modules`, and a declared prod dep makes `vscode-min-prepack`'s
+`npm list --production` hard-fail the whole build (see failure-mode table).
 
 ## Phase-aware behavior
 

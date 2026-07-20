@@ -183,10 +183,20 @@ const { anthropicBaseUrlFor, buildSdkGatewayEnv, buildSdkQueryOptions, profileTo
   const flag = pkg.contributes.configuration.properties["hypeproofChat.coachRuntime"];
   assert.equal(flag.default, "proxy", "#282 Phase 1 must NOT flip the default runtime");
   assert.deepEqual(flag.enum, ["proxy", "agent-sdk"]);
+  // #349 — the SDK must be a devDependency, NEVER a prod dependency: the
+  // injected built-in ships without node_modules (runtime loads dist/vendor,
+  // #343), and a declared prod dep makes vscode-min-prepack's
+  // `npm list --production` hard-fail the whole tag build (killed v0.1.17).
+  // Actual loadability is asserted by the dynamic-import block below.
+  assert.equal(
+    "@anthropic-ai/claude-agent-sdk" in (pkg.devDependencies ?? {}),
+    true,
+    "the Agent SDK is declared as a devDependency (dev installs get it)",
+  );
   assert.equal(
     "@anthropic-ai/claude-agent-sdk" in (pkg.dependencies ?? {}),
-    true,
-    "the Agent SDK is a real dependency of the extension host bundle",
+    false,
+    "the Agent SDK must NOT be a prod dependency — breaks vscode-min-prepack on the node_modules-less injected copy (#349)",
   );
 }
 
