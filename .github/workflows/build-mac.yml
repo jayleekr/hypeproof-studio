@@ -196,7 +196,7 @@ jobs:
       # ad-hoc re-seal — means the seal covers the stamped plist and sign-mac's
       # codesign --verify gate stays valid. (Stamping AFTER Re-sign would break
       # the seal that #311 fixed, re-triggering "손상되어 열 수 없습니다".)
-      - name: Stamp product version on Info.plist (#361)
+      - name: Stamp product version on Info.plist + product.json (#361)
         shell: bash
         run: |
           set -euo pipefail
@@ -209,8 +209,24 @@ jobs:
             /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $HPS_VER" "$PLIST" \
               || /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $HPS_VER" "$PLIST"
             echo "Stamped CFBundleShortVersionString → $HPS_VER (pre-sign)"
+            # Re-stamp the BUILT product.json too. apply-product-overrides.sh
+            # stamps it pre-build, but VS Code's gulp derives product.json.version
+            # from vscode/package.json .version during the build — and #361 stopped
+            # stamping THAT (it feeds the runtime vscode.version API). Net effect:
+            # the built product.json.version reverts to the raw VS Code version
+            # (1.116.x), tripping the #206 updater gate. Re-stamp the product
+            # version here, pre-sign, so the seal covers it and vscode.version
+            # (from package.json) stays the real engine version.
+            APP_PJSON="$OUT_DIR/$APP/Contents/Resources/app/product.json"
+            if [ -f "$APP_PJSON" ]; then
+              tmp=$(mktemp)
+              jq --arg v "$HPS_VER" '.version = $v' "$APP_PJSON" > "$tmp" && mv "$tmp" "$APP_PJSON"
+              echo "Stamped product.json.version → $HPS_VER (pre-sign)"
+            else
+              echo "::warning::built product.json not found at $APP_PJSON"
+            fi
           else
-            echo "::warning::skipped Info.plist version stamp (HPS_VER='$HPS_VER', plist='$PLIST')"
+            echo "::warning::skipped version stamp (HPS_VER='$HPS_VER', plist='$PLIST')"
           fi
 
       # Our build modifies the bundle after Electron signed it (extension injection +
