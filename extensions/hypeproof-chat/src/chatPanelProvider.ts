@@ -842,6 +842,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           p.onDelta("\n\n_(브라우저 작업을 여기서 멈췄어요.)_");
           break;
         }
+        // #371 — save+reveal THIS iteration's HTML BEFORE running its browser
+        // tools, so a re-check (browser_navigate to the live preview) reads the
+        // freshly-saved page, not a stale one. Without this the autonomous
+        // rubric loop re-reads iteration-0's HTML every round and can't
+        // converge on later fixes. tryReveal's once-per-stream latch does not
+        // fire here (browser loop path), so reveal explicitly per iteration.
+        if (result.text) {
+          const iterHtml = extractRenderableHtml(result.text);
+          if (iterHtml) await this.revealBuilt(iterHtml);
+        }
         // Assistant tool_use turn (its text + tool_use blocks) — scratch only.
         const asstContent: unknown[] = [];
         if (result.text) asstContent.push({ type: "text", text: result.text });
