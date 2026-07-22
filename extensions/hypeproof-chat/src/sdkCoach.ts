@@ -432,7 +432,23 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
         workspaceRoot: args.cwd,
       });
       if (verdict.decision === "deny") {
-        console.warn(`[coach] tool denied: ${name} — ${verdict.reason}`);
+        if (verdict.drift) {
+          // #375 — the SDK emitted a tool NAME the Phase 2 policy matrix has
+          // never classified. The fail-closed deny is correct, but this is
+          // capability drift, NOT a routine policy denial: the installed
+          // @anthropic-ai/claude-agent-sdk likely grew a tool Studio hasn't
+          // wired, and the coach is silently dropping it. Log loudly and
+          // distinctly (console.error, not the high-volume warn) so an SDK
+          // bump produces a signal instead of silence. The CI drift smoke test
+          // (sdk-tool-drift.smoke.mjs) is the PR-time counterpart.
+          console.error(
+            `[coach] SDK TOOL DRIFT: unclassified tool "${name}" denied (fail-closed) — ${verdict.reason}. ` +
+              `Update the classification sets in sdkCoachHelpers.ts (SDK_*_TOOL_NAMES / *_TOOLS) if Studio should ` +
+              `handle this tool, or leave it denied deliberately.`,
+          );
+        } else {
+          console.warn(`[coach] tool denied: ${name} — ${verdict.reason}`);
+        }
         return { behavior: "deny" as const, message: verdict.friendly };
       }
       if (verdict.decision === "allow") {

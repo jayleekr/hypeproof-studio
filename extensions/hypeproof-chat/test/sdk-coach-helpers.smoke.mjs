@@ -242,6 +242,23 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   assert.equal(evalTool("MysteryTool", { x: 1 }, adultRW).decision, "deny");
   assert.equal(evalTool("mcp__github__create_pr", {}, adultRW).decision, "deny");
 
+  // #375 — the same gate denies two opposite things; the `drift` flag tells
+  // them apart. A name the matrix CLASSIFIES but the profile doesn't grant is a
+  // ROUTINE policy denial (drift falsy). A name the matrix has never classified
+  // is SDK tool drift (drift === true). Deny stays deny in both cases.
+  const bashDeny = evalTool("Bash", { command: "ls" }, adultRW);
+  assert.equal(bashDeny.decision, "deny");
+  assert.ok(!bashDeny.drift, "Bash is classified — a routine policy denial, not drift");
+  const webfetchDeny = evalTool("WebFetch", { url: "https://x" }, adultRW);
+  assert.ok(!webfetchDeny.drift, "WebFetch is classified — routine denial when web_search is not opted in");
+  const readNotGranted = evaluateSdkToolUse({ toolName: "Read", input: { file_path: "x" }, permittedTools: [], workspaceRoot: ws });
+  assert.ok(readNotGranted.decision === "deny" && !readNotGranted.drift, "Read is classified — chat-only cohort denial is routine, not drift");
+  const mysteryDeny = evalTool("MysteryTool", { x: 1 }, adultRW);
+  assert.equal(mysteryDeny.decision, "deny");
+  assert.ok(mysteryDeny.drift === true, "an unclassified name is flagged as SDK tool drift");
+  const foreignMcpDeny = evalTool("mcp__github__create_pr", {}, adultRW);
+  assert.ok(foreignMcpDeny.drift === true, "an unknown MCP tool name is flagged as drift");
+
   // Web research, when the profile opted in, routes to the approval path.
   const withWeb = [...adultRW, "WebSearch", "WebFetch"];
   assert.deepEqual(evalTool("WebSearch", { query: "치과" }, withWeb), { decision: "ask" });

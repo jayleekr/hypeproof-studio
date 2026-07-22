@@ -878,6 +878,36 @@ const WRITE_TOOLS = new Set(["write", "edit", "multiedit", "notebookedit"]);
 const READ_TOOLS = new Set(["read", "glob", "grep", "ls"]);
 const SEARCH_TOOLS = new Set(["websearch", "webfetch"]);
 
+/**
+ * The complete vocabulary of Agent SDK tool names the #282 Phase 2 policy
+ * matrix CLASSIFIES — every name any gate in evaluateSdkToolUse recognizes,
+ * whether or not a given cohort profile grants it. Read/Write/Search/Shell/
+ * Agent (by lowercased name, mirroring the sets above and AGENT_TOOLS) plus
+ * the three hypeproof MCP browser tools (by exact name).
+ *
+ * This is the SDK-tool-drift boundary (#375). A denied tool call whose name is
+ * in this set is a ROUTINE policy denial — Bash for a kids cohort, WebFetch
+ * with no web_search opt-in — expected and high-volume. A denied name OUTSIDE
+ * this set means the installed @anthropic-ai/claude-agent-sdk has grown a tool
+ * the matrix has never classified: silent capability drift the coach is
+ * dropping, which must surface loudly and distinctly instead of blending into
+ * the routine-denial stream. Deny stays deny either way (fail-closed); this
+ * only tells the two denials apart.
+ */
+export function isClassifiedSdkToolName(toolName: string): boolean {
+  const name = toolName.toLowerCase();
+  if (
+    SHELL_TOOLS.has(name) ||
+    WRITE_TOOLS.has(name) ||
+    READ_TOOLS.has(name) ||
+    SEARCH_TOOLS.has(name) ||
+    AGENT_TOOLS.has(name)
+  ) {
+    return true;
+  }
+  return (MCP_BROWSER_TOOLS as readonly string[]).includes(toolName);
+}
+
 /** A tool action the coach wants to perform, surfaced to the host modal. */
 export interface CoachToolAction {
   /** Raw Agent SDK tool name, e.g. "Bash", "Write", "WebSearch". */
@@ -995,7 +1025,11 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
 export type SdkToolVerdict =
   | { decision: "allow" }
   | { decision: "ask" }
-  | { decision: "deny"; reason: string; friendly: string };
+  // `drift` (#375): true only when the denied tool NAME is one the matrix has
+  // never classified (isClassifiedSdkToolName === false) — i.e. possible Agent
+  // SDK tool drift, not a routine profile/policy denial. The caller logs the
+  // two at different volume/severity; the deny itself is identical.
+  | { decision: "deny"; reason: string; friendly: string; drift?: boolean };
 
 /** Student-facing copy for a policy deny (tool not granted / never grantable). */
 export const TOOL_DENIED_FRIENDLY = "이 도구는 지금 수업에서는 사용할 수 없어요.";
@@ -1062,6 +1096,20 @@ export function evaluateSdkToolUse(args: {
   // Gate 1 — the profile's permitted set. Bash/WebFetch/anything not granted
   // dies here with a logged reason, even if the upstream model requests it.
   if (!permittedTools.includes(toolName)) {
+    // #375 — two denials that mean opposite things share this gate. A name the
+    // matrix CLASSIFIES (Bash for kids, WebFetch with no opt-in, …) is a
+    // routine policy denial. A name it has never classified is SDK tool drift:
+    // the Agent SDK likely grew a tool Studio hasn't wired, and we are silently
+    // dropping it. Both fail closed, but they are flagged apart so the caller
+    // can surface drift loudly instead of burying it in the routine stream.
+    if (!isClassifiedSdkToolName(toolName)) {
+      return {
+        decision: "deny",
+        drift: true,
+        reason: `unclassified tool "${toolName}" — the Phase 2 policy matrix has no rule for this name (possible Agent SDK tool drift)`,
+        friendly: TOOL_DENIED_FRIENDLY,
+      };
+    }
     return {
       decision: "deny",
       reason: `tool "${toolName}" is not granted by the cohort profile`,
@@ -1148,9 +1196,11 @@ export function evaluateSdkToolUse(args: {
   // Web research (profile-opted): route through the host approval tiers.
   if (SEARCH_TOOLS.has(name)) return { decision: "ask" };
 
-  // Permitted but unclassified — should be unreachable; fail closed.
+  // Permitted but unclassified — should be unreachable; fail closed. If it ever
+  // fires, the permitted set granted a name no gate handles: also drift (#375).
   return {
     decision: "deny",
+    drift: true,
     reason: `unrecognized tool "${toolName}"`,
     friendly: TOOL_DENIED_FRIENDLY,
   };
