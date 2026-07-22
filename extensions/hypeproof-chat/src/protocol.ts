@@ -111,6 +111,10 @@ export interface ResolvedProfile {
    * → normal browser. Inert on a Studio build without the fork core patch.
    */
   browser_session?: { mode: "safe" | "browse"; allowlist?: string[] };
+  // #320 — true when the cohort is a minor cohort (explicit flag or age_range
+  // upper bound < 18). Drives minor-specific UX and force-pins the coach to the
+  // proxy runtime (#371).
+  minor_cohort?: boolean;
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
   // #282 — provider-hosted tools the cohort profile opted into (sourced from the
@@ -131,6 +135,11 @@ export interface ResolvedProfile {
   // cohort's permitted set). Adults only — minors never carry subagents:true
   // (harness child_sdk_subagents FAIL + client-side strip).
   sdk_tools?: { read?: boolean; write?: boolean; browser?: boolean; subagents?: boolean };
+  // #371 — coach runtime the worker resolved for this cohort. "agent-sdk" only
+  // for an adult, sdk_tools-opted-in cohort (worker force-pins minors to
+  // "proxy"). Absent → proxy. The client ORs this with the machine-scoped
+  // setting; either can select agent-sdk, and canUseTool still gates tools.
+  coach_runtime?: "proxy" | "agent-sdk";
 }
 
 export interface UxConfig {

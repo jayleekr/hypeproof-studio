@@ -87,18 +87,20 @@ jq \
 
 mv "$tmp" "$PRODUCT_JSON"
 
-# Also stamp the VS Code source package.json — gulp reads its .version to set
-# CFBundleShortVersionString in Info.plist and the version on the About screen.
-# product.json.version alone is not enough for those surfaces.
-SRC_PKG="$(dirname "$PRODUCT_JSON")/package.json"
-if [[ -f "$SRC_PKG" ]]; then
-  tmp_pkg=$(mktemp)
-  jq --arg version "$HPS_RESOLVED_VERSION" '.version = $version' "$SRC_PKG" > "$tmp_pkg"
-  mv "$tmp_pkg" "$SRC_PKG"
-  echo "  stamped $SRC_PKG version → $HPS_RESOLVED_VERSION"
-else
-  echo "  WARN: $SRC_PKG not found — Info.plist version may stay unset" >&2
-fi
+# NOTE (#361): We deliberately do NOT stamp vscode/package.json .version here.
+# That same field is the source of the runtime `vscode.version` API. Stamping it
+# to the product version (0.1.x) made vscode.version return 0.1.x instead of the
+# real VS Code engine version (1.116.x), so built-in extensions that semver-gate
+# on it break — json-language-features fails to activate and JSON editing dies.
+#
+# CFBundleShortVersionString (the macOS surface this stamp was originally for) is
+# now set directly on the built .app's Info.plist in the packaging step of
+# .github/workflows/build-mac.yml, which keeps the product version (0.1.x)
+# visible in Finder/Get Info WITHOUT corrupting vscode.version.
+#
+# product.json.version (0.1.x) is still stamped above — it drives the in-app
+# updater and the #206 empty-version gate (verify-branding.sh), and is what the
+# About screen shows as the product version.
 
 echo "Done. Verify with:"
 echo "  jq '.version, .commit, .nameShort, .applicationName, .darwinBundleIdentifier, .tunnelApplicationName, .linuxIconName' $PRODUCT_JSON"

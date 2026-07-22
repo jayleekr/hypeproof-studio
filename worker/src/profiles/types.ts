@@ -156,6 +156,16 @@ export interface Profile {
     subagents?: boolean;
   };
   /**
+   * #371/#282 — coach runtime this cohort requests. "agent-sdk" gives the coach
+   * real file Read/Write/Edit (durable task/rubric tracking, agentic loop);
+   * "proxy" (default/absent) is the single-turn provider proxy. The worker
+   * FORCES this to "proxy" for any minor cohort regardless of the value here
+   * (see /profile), so only an adult, sdk_tools-opted-in cohort can reach the
+   * file/exec-capable runtime. The client also honors the machine-scoped
+   * `hypeproofChat.coachRuntime` setting and gates every tool via canUseTool.
+   */
+  coach_runtime?: "proxy" | "agent-sdk";
+  /**
    * #278 Phase 3 — the client-driven agentic browser tool loop. When enabled,
    * the worker injects the browser control tools (lib/browser-tools.ts) into the
    * Anthropic tools array + a usage contract into the cached system prefix, and
