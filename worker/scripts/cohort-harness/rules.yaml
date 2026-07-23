@@ -29,12 +29,12 @@ assets:
 thresholds:
   # system_prompt length band (characters). Empty is a hard FAIL; outside the
   # band is a WARN (too short → model drifts; too long → cache cost ↑).
-  # Max raised 5000→6000 with #371: the copyclone prompt legitimately carries
-  # three curriculum layers now (output budget #370 · Loop/루브릭 + 배포 가이드
-  # + agent.md #371). Prompts are cache-prefixed, so the marginal cost is on
-  # cache writes, not every turn.
+  # Max raised over time as the copyclone prompt gained legitimate layers:
+  # 5000→6000 (#371 curriculum: output budget · Loop/루브릭 · 배포 · agent.md),
+  # 6000→7500 (#384 디자인 원칙 섹션 — frontend-design 기반). Prompts are
+  # cache-prefixed, so the marginal cost is on cache writes, not every turn.
   system_prompt_min_chars: 2000
-  system_prompt_max_chars: 6000
+  system_prompt_max_chars: 7500
   # A cohort is treated as a "child" cohort when audience.age_range max is at
   # or below this age. Drives the stricter child guardrails below.
   child_age_max: 12
