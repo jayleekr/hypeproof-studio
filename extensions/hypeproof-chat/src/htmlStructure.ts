@@ -29,20 +29,16 @@ export interface HtmlStructureResult {
   issues: string[];
 }
 
-// Presence proxies for the medical-ad-law disclaimer. Advisory only: we warn
-// if none appears, but never re-inject (that would make Studio the owner of a
-// legal string it does not author).
-const DISCLAIMER_MARKERS = ["의료광고", "치료 효과"];
-
 /**
  * Validate and, where safe, repair coach-generated HTML before it is shown.
  * Never throws; on any unexpected input it returns the text unchanged with
  * `blocked: false` so it can only ever ADD safety, never break the happy path.
+ *
+ * Purely STRUCTURAL — repairs a broken comment close and blocks a document
+ * that would render broken. No legal/medical-ad checks (removed per product
+ * decision: the coach builds freely, legal review is the publisher's).
  */
-export function validateAndRepairHtml(
-  input: string,
-  opts: { medicalAdCohort?: boolean } = {},
-): HtmlStructureResult {
+export function validateAndRepairHtml(input: string): HtmlStructureResult {
   if (typeof input !== "string" || input.length === 0) {
     return { html: input, repaired: false, blocked: false, issues: [] };
   }
@@ -67,13 +63,6 @@ export function validateAndRepairHtml(
     issues.push("<script>와 </script> 짝이 맞지 않습니다.");
   }
   const blocked = commentUnterminated || scriptUnbalanced;
-
-  // 3. Advisory: medical-ad disclaimer presence (warn-only). ONLY for medical
-  // cohorts (dental copyclone). Without this gate a kids game build would show
-  // "⚠️ 의료광고 면책 문구가 없습니다" — nonsense for a 초등학생 게임 (review #364).
-  if (opts.medicalAdCohort && !DISCLAIMER_MARKERS.some((m) => html.includes(m))) {
-    issues.push("⚠️ 의료광고 면책 문구가 출력물에 보이지 않습니다 — 확인해 주세요.");
-  }
 
   return { html, repaired, blocked, issues };
 }
