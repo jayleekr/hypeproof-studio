@@ -119,6 +119,49 @@ console.log("✓ messages: session/pause/roster gates — parity with /v1/chat")
 }
 console.log("✓ messages: client system stripped — cohort prompt enforced server-side");
 
+// --- #384: mid-conversation role:"system" downgraded to user context ---------
+// Claude Code CLI 2.x sends role:"system" entries inside messages[] (beta
+// mid-conversation-system). Pinned classroom models reject the role → every
+// SDK turn 400'd. The gateway must downgrade them to user-role context.
+{
+  const env = messagesEnv();
+  await withMockUpstream(
+    () => Response.json(anthropicJsonBody({ text: "ok" })),
+    async (calls) => {
+      const r = await app.fetch(
+        messagesRequest({
+          body: {
+            messages: [
+              { role: "user", content: [{ type: "text", text: "안녕", cache_control: { type: "ephemeral" } }] },
+              { role: "system", content: "Available agent types: ..." },
+            ],
+          },
+        }),
+        env,
+        makeCtx(),
+      );
+      assert.equal(r.status, 200);
+      const sent = JSON.parse(calls[0].init.body);
+      assert.ok(
+        sent.messages.every((m) => m.role !== "system"),
+        "no role:system survives to upstream",
+      );
+      const converted = sent.messages[1];
+      assert.equal(converted.role, "user", "system entry downgraded to user");
+      const text = JSON.stringify(converted.content);
+      assert.ok(text.includes("<system-context>"), "context marker wraps the downgraded content");
+      assert.ok(text.includes("Available agent types"), "original content preserved");
+      // Block-array content variant keeps its blocks (cache_control intact).
+      assert.deepEqual(
+        sent.messages[0].content[0].cache_control,
+        { type: "ephemeral" },
+        "untouched user message keeps cache_control",
+      );
+    },
+  );
+}
+console.log("✓ messages: role:system entries downgraded to user context (#384 SDK CLI)");
+
 // --- model clamp: unknown → profile default; haiku ids → fast pin ------------
 {
   const env = messagesEnv();
