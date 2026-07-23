@@ -734,6 +734,32 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.assetScores?.recordAssetScore(assetScore);
         void this.post({ type: "streamAssetScore", streamId, assetScore });
       };
+      // The non-SDK runtime: the agentic browser loop when the cohort opted
+      // into browser_control (copyclone opens the reference URL / re-checks the
+      // live preview), else the plain single-turn proxy. #371 — the SDK path's
+      // SdkUnavailableError fallback MUST route here too; falling back to a bare
+      // runProxy() drops the browser loop, so the coach only *narrates* "브라우저
+      // 열게요" and never opens it (regression from the #380 SDK-runtime flip).
+      const runProxyRuntime = async () => {
+        if (this.cachedProfile?.browser_control?.enabled) {
+          await this.runBrowserLoop({
+            proxyUrl,
+            model,
+            token,
+            history,
+            userText: userTextForModel,
+            images: effectiveImages,
+            signal: ctrl.signal,
+            streamId,
+            coachName: effectiveCoachName,
+            coachPersonality: effectiveCoachPersonality,
+            onDelta,
+            onCitations,
+          });
+        } else {
+          await runProxy();
+        }
+      };
       const runProxy = () =>
         proxyChat({
           proxyUrl,
@@ -796,26 +822,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           assistantText = "";
           assistantCitations.length = 0;
           revealed = false;
-          await runProxy();
+          // #371 — fall back to the browser-loop-aware runtime, NOT bare proxy,
+          // so a browser_control cohort (copyclone) still opens the browser when
+          // the SDK binary isn't seeded.
+          await runProxyRuntime();
         }
-      } else if (this.cachedProfile?.browser_control?.enabled) {
-        // #278 Phase 3 — client-driven agentic browser loop for opted-in cohorts.
-        await this.runBrowserLoop({
-          proxyUrl,
-          model,
-          token,
-          history,
-          userText: userTextForModel,
-          images: effectiveImages,
-          signal: ctrl.signal,
-          streamId,
-          coachName: effectiveCoachName,
-          coachPersonality: effectiveCoachPersonality,
-          onDelta,
-          onCitations,
-        });
       } else {
-        await runProxy();
+        // #278 Phase 3 — browser loop for opted-in cohorts, else plain proxy.
+        await runProxyRuntime();
       }
       // On user-initiated stop the cancelStream handler already ended the stream
       // in the webview; don't post streamEnd or commit the truncated turn
