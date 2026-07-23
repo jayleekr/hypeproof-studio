@@ -127,6 +127,43 @@ export function resolveMessagesModel(requested: unknown, profile: Profile): stri
   return MODEL_MAP[profile.model.default];
 }
 
+/**
+ * #384 — downgrade `role:"system"` entries inside `messages` to user-role
+ * context. Claude Code CLI 2.x sends them (mid-conversation-system beta) but
+ * the pinned classroom models reject the role, 400-ing every SDK turn.
+ * String content is wrapped in a <system-context> marker; block-array content
+ * keeps its blocks (incl. cache_control) with a small marker block prepended.
+ * Non-array/malformed input passes through untouched (upstream validates).
+ */
+export function normalizeSystemRoleMessages(messages: unknown): unknown {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map((m) => {
+    if (!m || typeof m !== "object" || (m as { role?: unknown }).role !== "system") return m;
+    const msg = m as { role: string; content?: unknown };
+    if (typeof msg.content === "string") {
+      return {
+        ...msg,
+        role: "user",
+        content: [
+          { type: "text", text: `<system-context>\n${msg.content}\n</system-context>` },
+        ],
+      };
+    }
+    if (Array.isArray(msg.content)) {
+      return {
+        ...msg,
+        role: "user",
+        content: [
+          { type: "text", text: "<system-context>" },
+          ...msg.content,
+          { type: "text", text: "</system-context>" },
+        ],
+      };
+    }
+    return { ...msg, role: "user" };
+  });
+}
+
 messages.post("/messages", async (c) => {
   const env = c.env;
   const startedAt = Date.now();
@@ -205,6 +242,13 @@ messages.post("/messages", async (c) => {
   const upstreamBody = {
     ...raw,
     model: modelLabel,
+    // #384 — Claude Code CLI 2.x emits mid-conversation `role:"system"`
+    // messages (beta mid-conversation-system-2026-04-07). The classroom
+    // models this gateway pins reject that role even with the beta — every
+    // SDK-runtime turn 400'd. Downgrade them to user-role context (verified:
+    // same request 200s once converted). No privilege is conferred: the
+    // top-level `system` is still replaced with the profile blocks below.
+    messages: normalizeSystemRoleMessages(raw.messages),
     system: buildAnthropicSystemBlocks(profile, coach),
     max_tokens: clampMaxTokens(raw.max_tokens, profile),
     stream,
