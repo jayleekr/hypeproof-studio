@@ -148,6 +148,28 @@ function extensionDistDir(): string | undefined {
   return typeof __dirname === "string" && __dirname ? __dirname : undefined;
 }
 
+/**
+ * #384 — canonicalize a path for containment comparison: realpath the nearest
+ * EXISTING ancestor (target may not exist yet — new-file writes) and re-append
+ * the tail. Twin of chatPanelProvider.canonicalizeForCompare.
+ */
+function canonicalizeFsPath(p: string): string {
+  let base = path.resolve(p);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return tail.length === 0
+        ? fs.realpathSync(base)
+        : path.join(fs.realpathSync(base), ...tail.reverse());
+    } catch {
+      const parent = path.dirname(base);
+      if (parent === base) return path.resolve(p);
+      tail.push(path.basename(base));
+      base = parent;
+    }
+  }
+}
+
 async function loadSdk(): Promise<AgentSdkModule> {
   // #282 W4b — prefer the vendored SDK JS under <dist>/vendor (packaged
   // built-in), else the bare specifier so Node's node_modules lookup runs
@@ -430,6 +452,11 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
         // arrive here too and face the same matrix.
         permittedTools: [...opts.permittedTools, ...opts.permittedAgentTools, ...grantedMcpTools],
         workspaceRoot: args.cwd,
+        // #384 — realpath-based canonicalizer: without it a symlinked
+        // workspace (macOS /var → /private/var, iCloud Desktop, …) fails
+        // containment and EVERY coach write auto-denies. Twin of
+        // chatPanelProvider.canonicalizeForCompare.
+        canonicalize: canonicalizeFsPath,
       });
       if (verdict.decision === "deny") {
         if (verdict.drift) {

@@ -377,3 +377,37 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
 }
 
 console.log("✓ #282: sdk-coach helpers — tool policy + SDK-tool→ActionRequest mapping + P2 policy matrix + browser MCP policy");
+
+// ─── #384: symlinked workspace — canonicalize hook keeps containment honest ──
+{
+  const { evaluateSdkToolUse } = await import("../src/sdkCoachHelpers.ts");
+  // macOS: workspace opened as /var/… but the SDK canonicalizes to
+  // /private/var/…. Without the canonicalizer this denies as an escape.
+  const canon = (p) => (p.startsWith("/var/") ? "/private" + p : p);
+  const symlinked = evaluateSdkToolUse({
+    toolName: "Write",
+    input: { file_path: "/private/var/ws/rubric.md", content: "x" },
+    permittedTools: ["Write"],
+    workspaceRoot: "/var/ws",
+    canonicalize: canon,
+  });
+  assert.equal(symlinked.decision, "ask", "canonicalized root matches canonical path → modal, not deny");
+  // Without the hook the same call denies (documents why the hook exists).
+  const withoutHook = evaluateSdkToolUse({
+    toolName: "Write",
+    input: { file_path: "/private/var/ws/rubric.md", content: "x" },
+    permittedTools: ["Write"],
+    workspaceRoot: "/var/ws",
+  });
+  assert.equal(withoutHook.decision, "deny", "identity canonicalizer keeps the strict default");
+  // A REAL escape still denies even with the canonicalizer.
+  const escape = evaluateSdkToolUse({
+    toolName: "Write",
+    input: { file_path: "/private/etc/passwd", content: "x" },
+    permittedTools: ["Write"],
+    workspaceRoot: "/var/ws",
+    canonicalize: canon,
+  });
+  assert.equal(escape.decision, "deny", "real out-of-workspace path still denies");
+}
+console.log("✓ #384: containment canonicalizer — symlinked roots pass, real escapes still deny");

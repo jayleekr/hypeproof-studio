@@ -1203,12 +1203,36 @@ function randomId(): string {
  * dev/test scenarios that haven't opened a folder yet. The production path
  * always has a workspace via ensureWorkspace().
  */
+/**
+ * Canonicalize a path for containment comparison. realpath the nearest
+ * EXISTING ancestor (the target itself may not exist yet — new-file writes),
+ * then re-append the non-existing tail. Resolves macOS /var → /private/var
+ * style symlinks so a canonicalized SDK path still matches the workspace root
+ * (#384: without this every coach Write in a symlinked workspace auto-denied).
+ */
+function canonicalizeForCompare(p: string): string {
+  let base = path.resolve(p);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return tail.length === 0
+        ? fs.realpathSync(base)
+        : path.join(fs.realpathSync(base), ...tail.reverse());
+    } catch {
+      const parent = path.dirname(base);
+      if (parent === base) return path.resolve(p); // hit fs root — give up
+      tail.push(path.basename(base));
+      base = parent;
+    }
+  }
+}
+
 function isInsideWorkspace(targetPath: string): boolean {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) return true;
-  const resolved = path.resolve(targetPath);
+  const resolved = canonicalizeForCompare(targetPath);
   for (const f of folders) {
-    const root = path.resolve(f.uri.fsPath);
+    const root = canonicalizeForCompare(f.uri.fsPath);
     const rel = path.relative(root, resolved);
     if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
       return true;

@@ -1090,8 +1090,17 @@ export function evaluateSdkToolUse(args: {
   input: unknown;
   permittedTools: readonly string[];
   workspaceRoot?: string;
+  /**
+   * #384 — canonicalizer applied to BOTH the workspace root and each candidate
+   * path before containment. The host injects an fs.realpath-based resolver so
+   * macOS /var → /private/var symlinked workspaces don't auto-deny every
+   * write ("path escapes the workspace" on paths that ARE inside it). Pure
+   * default: identity (unit tests stay fs-free).
+   */
+  canonicalize?: (p: string) => string;
 }): SdkToolVerdict {
   const { toolName, input, permittedTools, workspaceRoot } = args;
+  const canon = args.canonicalize ?? ((p: string) => p);
 
   // Gate 1 — the profile's permitted set. Bash/WebFetch/anything not granted
   // dies here with a logged reason, even if the upstream model requests it.
@@ -1177,10 +1186,15 @@ export function evaluateSdkToolUse(args: {
   }
 
   if (READ_TOOLS.has(name) || WRITE_TOOLS.has(name)) {
-    // Gate 2 — workspace containment for every path the call names.
+    // Gate 2 — workspace containment for every path the call names. Both
+    // sides go through the injected canonicalizer (#384: symlinked roots).
     if (workspaceRoot) {
+      const canonRoot = canon(workspaceRoot);
       for (const candidate of pathCandidates(toolName, input)) {
-        if (!isPathContained(workspaceRoot, candidate)) {
+        const canonCandidate = path.isAbsolute(candidate)
+          ? canon(candidate)
+          : candidate; // relative resolves against the (canonical) root inside isPathContained
+        if (!isPathContained(canonRoot, canonCandidate)) {
           return {
             decision: "deny",
             reason: `path escapes the workspace: ${candidate}`,
