@@ -74,7 +74,7 @@ const CORRUPTED = `<!doctype html>
 // as clean. Documents the known-limitation boundary Jay flagged. ─────────────
 {
   const tricky = `<head><!-- TODO fill later\n<style>.a{color:#a33} /* palette */</style></head><body>x</body>`;
-  const r = validateAndRepairHtml(tricky, { medicalAdCohort: true });
+  const r = validateAndRepairHtml(tricky);
   // The CSS close must survive intact...
   assert.ok(r.html.includes("/* palette */"), "valid CSS */ inside <style> is never rewritten to -->");
   // ...and because the real fix (closing the TODO comment) didn't happen, the
@@ -90,28 +90,18 @@ const CORRUPTED = `<!doctype html>
   assert.ok(r.issues.some((i) => i.includes("script")), "script imbalance noted");
 }
 
-// ─── 5. Disclaimer absent + medicalAdCohort → advisory (not blocked) ─────────
+// ─── 5. No legal/medical-ad advisory — a doc WITHOUT any disclaimer is clean ──
+// (The medical-ad disclaimer check was removed per product decision; validation
+// is now purely structural.)
 {
   const noDisclaimer = `<!doctype html><html><body><h1>홈페이지</h1><footer>© 2026</footer></body></html>`;
-  const r = validateAndRepairHtml(noDisclaimer, { medicalAdCohort: true });
-  assert.equal(r.blocked, false, "missing disclaimer is advisory only, never blocks");
-  assert.ok(
-    r.issues.some((i) => i.includes("의료광고 면책")),
-    "advisory disclaimer warning surfaced for a medical cohort",
-  );
-}
-
-// ─── 5b. #364 — NON-medical cohort must NOT get the disclaimer warning ───────
-{
-  const kidsGame = `<!doctype html><html><body><h1>내 게임</h1><script>start()</script></body></html>`;
-  const r = validateAndRepairHtml(kidsGame); // no medicalAdCohort flag
-  assert.equal(r.blocked, false);
+  const r = validateAndRepairHtml(noDisclaimer);
+  assert.equal(r.blocked, false, "structurally sound → not blocked");
   assert.ok(
     !r.issues.some((i) => i.includes("의료광고")),
-    "a kids game build must never see a medical-ad disclaimer warning",
+    "no medical-ad advisory is ever surfaced",
   );
-  // Structural checks still run for everyone:
-  assert.equal(isScriptBalanced(r.html), true);
+  assert.equal(r.issues.length, 0, "clean structural doc → zero notes");
 }
 
 // ─── 6. Empty / non-string input → safe passthrough ──────────────────────────
