@@ -8,6 +8,16 @@ export interface Profile {
   id: string;
   version: number;
   display_name: string;
+  /**
+   * Instructor console (/console) presentation. `dashboard_hidden` drops this
+   * track from the console's session-open cards AND the token-mint dropdown
+   * (does NOT affect /v1/profile resolution — a student token still resolves).
+   * `dashboard_order` sorts the visible tracks (lower first); absent → after
+   * ordered ones, then registry order. Used to make a cohort's primary track
+   * the default and hide a track that won't be run this round (#384).
+   */
+  dashboard_hidden?: boolean;
+  dashboard_order?: number;
   audience: {
     age_range?: [number, number];
     language: "ko" | "en";

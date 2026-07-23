@@ -113,6 +113,8 @@ export const profile: Profile = {
   // 서브에이전트 도구 호출도 부모와 동일한 canUseTool 정책을 통과한다.
   // 성인(원장) cohort 전용 — 미성년은 pedagogy 결정 전까지 false (harness
   // child_sdk_subagents FAIL).
+  // #384 — 이번 라운드 기본(대표) 트랙. 강사 콘솔에서 맨 앞에 온다.
+  dashboard_order: 0,
   sdk_tools: { read: true, write: true, browser: true, subagents: true },
   // #371 — 원장 트랙은 Agent SDK 런타임(파일 기반 루브릭/agent.md)이 목표지만,
   // SDK 바이너리 시딩이 아직 배포 안 됐고, 배포된 v0.1.19 클라이언트에는
