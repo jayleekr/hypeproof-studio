@@ -317,7 +317,15 @@ export function ChatPanel(props: Props) {
     ux.suggestions.follow_up.length > 0;
 
   return (
-    <div className="hps-shell">
+    <div
+      className={`hps-shell${dragActive ? " hps-shell-drag" : ""}`}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {dragActive && (
+        <div className="hps-shell-drop-overlay">여기에 놓으면 이미지가 첨부돼요 🖼</div>
+      )}
       <header className="hps-header">
         <strong title="이 친구 이름 바꾸기" onClick={() => setForceNaming(true)} className="hps-coach-name">
           {coachName}
@@ -456,13 +464,7 @@ export function ChatPanel(props: Props) {
         )}
         <div
           className={`hps-input${dragActive ? " hps-input-drag" : ""}`}
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
         >
-          {dragActive && (
-            <div className="hps-drop-hint">여기에 놓으면 이미지가 첨부돼요 🖼</div>
-          )}
           <textarea
             ref={textareaRef}
             value={draft}
@@ -488,7 +490,7 @@ export function ChatPanel(props: Props) {
                 : rollExpand
                   ? "한 가지만 더 떠올려서 적어주세요"
                   : imagePasteEnabled
-                    ? "메시지를 입력하고 Enter — 이미지는 ⌘V 또는 드래그&드롭 (Shift+Enter 줄바꿈)"
+                    ? "메시지를 입력하고 Enter — 이미지는 ⌘V로 붙여넣기 (Shift+Enter 줄바꿈)"
                     : "메시지를 입력하고 Enter (Shift+Enter 줄바꿈)"
             }
             disabled={streaming}

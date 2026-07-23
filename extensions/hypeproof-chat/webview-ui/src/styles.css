@@ -397,23 +397,38 @@ html, body, #root {
   gap: 6px;
   position: relative;
 }
-/* #384 — drag-and-drop image affordance. */
+/* #384 — drag-and-drop image affordance. Drop zone = the WHOLE chat panel
+   (widened from the input box) so an image lands wherever it's dropped in the
+   sidebar. NOTE: VS Code's workbench intercepts OS file drops onto the editor
+   area, so ⌘V paste remains the fully reliable path. */
+.hps-shell {
+  position: relative;
+}
 .hps-input-drag textarea {
   border-color: var(--vscode-focusBorder, #5b8def);
   border-style: dashed;
 }
-.hps-drop-hint {
+.hps-shell-drag::after {
+  content: "";
   position: absolute;
-  inset: 0;
-  z-index: 2;
+  inset: 4px;
+  z-index: 9;
+  border-radius: 8px;
+  border: 2px dashed var(--vscode-focusBorder, #5b8def);
+  pointer-events: none;
+}
+.hps-shell-drop-overlay {
+  position: absolute;
+  inset: 4px;
+  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--vscode-input-background, #2a2d2e) 82%, transparent);
-  border: 1px dashed var(--vscode-focusBorder, #5b8def);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 78%, transparent);
   color: var(--vscode-foreground, #ccc);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
   pointer-events: none;
 }
 .hps-input textarea {
