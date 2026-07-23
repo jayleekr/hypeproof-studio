@@ -170,12 +170,14 @@ await check("state: reflects a session opened via the issuer session endpoint", 
 
 // --- 3. state read: auth boundaries -----------------------------------------
 
-await check("state: admin Basic path sees ALL cohort tracks, scope=null", async () => {
+await check("state: admin Basic path — dashboard_hidden track excluded, scope=null", async () => {
   const { status, json, text } = await fetchOnce(`/admin/cohorts/${COHORT}/state`, {
     headers: { authorization: ADMIN },
   });
   assert.equal(status, 200, `got ${status}: ${text}`);
-  assert.deepEqual(json.profiles.map((p) => p.id).sort(), [COPYCLONE, TEASER].sort());
+  // #384 — teaser is dashboard_hidden this round; the console must not list it
+  // (in the cards OR the mint dropdown). copyclone (dashboard_order 0) leads.
+  assert.deepEqual(json.profiles.map((p) => p.id), [COPYCLONE], "hidden teaser excluded, copyclone first");
   assert.equal(json.scope, null);
 });
 

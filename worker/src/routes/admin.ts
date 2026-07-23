@@ -206,9 +206,14 @@ admin.get("/cohorts/:id/state", async (c) => {
     getCohortPause(c.env.HPS_KV, cohortId),
   ]);
   const scopedIds = authz?.scope.profiles ?? null;
+  // #384 — hide dashboard_hidden tracks from the console (session cards + mint
+  // dropdown both read this), and order by dashboard_order (lower first; absent
+  // sorts last, then registry order). Does not touch /v1/profile resolution.
   const profiles = listProfiles()
     .filter((p) => p.session.cohort_id === cohortId)
     .filter((p) => scopedIds === null || scopedIds.includes(p.id))
+    .filter((p) => p.dashboard_hidden !== true)
+    .sort((a, b) => (a.dashboard_order ?? Number.MAX_SAFE_INTEGER) - (b.dashboard_order ?? Number.MAX_SAFE_INTEGER))
     .map((p) => ({ id: p.id, display_name: p.display_name }));
   return c.json({
     id: cohortId,

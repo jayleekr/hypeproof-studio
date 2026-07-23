@@ -24,6 +24,10 @@ export const profile: Profile = {
   id: "boah-dental-teaser-2026-s1",
   version: 1,
   display_name: "보아치과 — HypeProof 티저 (2026-05-26)",
+  // #384 — 이번 라운드엔 검색엔진 트랙("원장님을 이겨라")을 진행하지 않는다.
+  // 강사 콘솔의 세션 카드·토큰 발급 목록에서 숨긴다(프로필 자체는 유효 —
+  // 학생 토큰은 여전히 resolve됨). 다시 진행하면 이 줄만 지우면 된다.
+  dashboard_hidden: true,
   audience: {
     age_range: [20, 60],
     language: "ko",
