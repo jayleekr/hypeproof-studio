@@ -116,13 +116,14 @@ export const profile: Profile = {
   // #384 — 이번 라운드 기본(대표) 트랙. 강사 콘솔에서 맨 앞에 온다.
   dashboard_order: 0,
   sdk_tools: { read: true, write: true, browser: true, subagents: true },
-  // #371 — 원장 트랙은 Agent SDK 런타임(파일 기반 루브릭/agent.md)이 목표지만,
-  // SDK 바이너리 시딩이 아직 배포 안 됐고, 배포된 v0.1.19 클라이언트에는
-  // "SDK 미가용 → 브라우저 루프로 폴백" 픽스가 없어 agent-sdk를 켜면
-  // browser_control 루프가 통째로 스킵돼 코치가 참고 URL을 못 연다(라이브
-  // 회귀 2026-07-23). 폴백 픽스가 릴리스에 실리고 바이너리 시딩이 준비되면
-  // 다시 켠다. 그전까진 proxy(브라우저 루프 정상)로 둔다.
-  // coach_runtime: "agent-sdk",
+  // #371/#384 — 원장 트랙은 Agent SDK 런타임: 코치가 파일을 직접 읽고·쓰고·
+  // 고쳐 루브릭/agent.md/이미지 참조를 실제 파일로 다룬다(Claude Code와 동일
+  // 아키텍처 + canUseTool 교실 정책). 재활성 조건 충족(2026-07-24):
+  // ① 클라이언트 폴백 픽스(#387, v0.1.20+) — SDK 미가용이어도 브라우저 루프
+  //    유지(2026-07-23 회귀 재발 불가), ② 시딩 스크립트 검증 완료.
+  // 미시딩 머신은 자동으로 proxy(+브라우저 루프)로 폴백하므로 안전.
+  // 미성년은 워커가 무조건 proxy 강제.
+  coach_runtime: "agent-sdk",
   session: {
     cohort_id: "boah-dental-2026-a",   // teaser와 같은 cohort, profile_id로만 분기
     series_total: 1,                   // 단발 — cohort 내 모든 profile의 series_total 일치(validator 강제)
