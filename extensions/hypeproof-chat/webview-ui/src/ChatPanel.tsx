@@ -55,6 +55,56 @@ function extractRenderableHtml(text: string): string | null {
 // will also forward. Raw-file bytes here ≈ base64 chars there with headroom.
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 3_500_000;   // ~3.5MB raw → ~4.7MB base64, under the worker's ceiling
+const DOWNSCALE_MAX_DIM = 1600;      // longest side after downscale — plenty for reading a webpage layout
+
+/** Estimate decoded byte size of a data: URL from its base64 payload length. */
+function dataUrlBytes(dataUrl: string): number {
+  const comma = dataUrl.indexOf(",");
+  const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+  return Math.floor((b64.length * 3) / 4);
+}
+
+/**
+ * Turn a pasted image File into a data: URL that fits under MAX_IMAGE_BYTES —
+ * a full-res Retina screenshot (which would otherwise be rejected) is scaled
+ * down + re-encoded as JPEG so image paste "just works" for any screenshot.
+ * All in-webview (canvas + data URLs) — CSP-safe, no external fetch.
+ */
+async function fitPastedImage(file: File): Promise<string> {
+  const original: string = await new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(typeof r.result === "string" ? r.result : "");
+    r.onerror = () => reject(new Error("read failed"));
+    r.readAsDataURL(file);
+  });
+  // Already small enough → send as-is (keeps PNG crispness for tiny images).
+  if (file.size <= MAX_IMAGE_BYTES) return original;
+
+  const img: HTMLImageElement = await new Promise((resolve, reject) => {
+    const el = new Image();
+    el.onload = () => resolve(el);
+    el.onerror = () => reject(new Error("decode failed"));
+    el.src = original;
+  });
+
+  let scale = Math.min(1, DOWNSCALE_MAX_DIM / Math.max(img.width, img.height));
+  let quality = 0.85;
+  let out = original;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(img.width * scale));
+    canvas.height = Math.max(1, Math.round(img.height * scale));
+    const ctx = canvas.getContext("2d");
+    if (!ctx) break;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    out = canvas.toDataURL("image/jpeg", quality);
+    if (dataUrlBytes(out) <= MAX_IMAGE_BYTES) return out;
+    // Still too big → shrink dimensions, then bite into quality.
+    if (attempt < 3) scale *= 0.75;
+    else quality -= 0.15;
+  }
+  return out; // best effort — worker cap still guards the extreme tail
+}
 
 const DEFAULT_UX: UxConfig = {
   coach: {
@@ -174,24 +224,23 @@ export function ChatPanel(props: Props) {
     if (imageFiles.length === 0) return;     // plain text paste — let default happen
     e.preventDefault();
     for (const f of imageFiles) {
-      if (f.size > MAX_IMAGE_BYTES) {
-        setImgNote(`이미지가 너무 커요 (최대 ${Math.round(MAX_IMAGE_BYTES / 1_000_000)}MB). 더 작게 캡처해 주세요.`);
-        continue;
-      }
-      const reader = new FileReader();
-      reader.onload = () => {
-        const url = typeof reader.result === "string" ? reader.result : "";
-        if (!url) return;
-        setPendingImages((prev) => {
-          if (prev.length >= MAX_IMAGES) {
-            setImgNote(`이미지는 한 번에 최대 ${MAX_IMAGES}장까지 붙일 수 있어요.`);
-            return prev;
-          }
-          setImgNote(null);
-          return [...prev, url];
+      // Downscale oversized screenshots instead of rejecting them (#384) — a
+      // Retina full-page capture should still attach, just smaller.
+      fitPastedImage(f)
+        .then((url) => {
+          if (!url) return;
+          setPendingImages((prev) => {
+            if (prev.length >= MAX_IMAGES) {
+              setImgNote(`이미지는 한 번에 최대 ${MAX_IMAGES}장까지 붙일 수 있어요.`);
+              return prev;
+            }
+            setImgNote(null);
+            return [...prev, url];
+          });
+        })
+        .catch(() => {
+          setImgNote("이미지를 붙이지 못했어요. 다시 시도하거나 URL로 참고 화면을 주세요.");
         });
-      };
-      reader.readAsDataURL(f);
     }
   };
 
