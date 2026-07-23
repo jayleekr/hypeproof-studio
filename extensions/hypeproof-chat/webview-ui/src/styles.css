@@ -395,6 +395,26 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
+}
+/* #384 — drag-and-drop image affordance. */
+.hps-input-drag textarea {
+  border-color: var(--vscode-focusBorder, #5b8def);
+  border-style: dashed;
+}
+.hps-drop-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--vscode-input-background, #2a2d2e) 82%, transparent);
+  border: 1px dashed var(--vscode-focusBorder, #5b8def);
+  color: var(--vscode-foreground, #ccc);
+  font-size: 13px;
+  pointer-events: none;
 }
 .hps-input textarea {
   width: 100%;

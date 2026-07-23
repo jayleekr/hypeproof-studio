@@ -206,26 +206,11 @@ export function ChatPanel(props: Props) {
     setRollExpand(null);
   };
 
-  // Clipboard paste of an image (e.g. ⌘⇧4 screenshot → ⌘V) attaches it to the
-  // next turn instead of pasting raw text. A normal text paste falls through
-  // to the textarea default (we only preventDefault when we found image data).
-  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    if (!imagePasteEnabled) return;          // text-only cohort — let default text paste happen
-    const items = e.clipboardData?.items;
-    if (!items) return;
-    const imageFiles: File[] = [];
-    for (let i = 0; i < items.length; i++) {
-      const it = items[i];
-      if (it.kind === "file" && it.type.startsWith("image/")) {
-        const f = it.getAsFile();
-        if (f) imageFiles.push(f);
-      }
-    }
-    if (imageFiles.length === 0) return;     // plain text paste — let default happen
-    e.preventDefault();
+  // Shared attach path for both clipboard paste (⌘V) and drag-and-drop.
+  // Downscales oversized screenshots instead of rejecting them (#384), bounds
+  // the count, and surfaces a brief note on limit/failure.
+  const attachImageFiles = (imageFiles: File[]) => {
     for (const f of imageFiles) {
-      // Downscale oversized screenshots instead of rejecting them (#384) — a
-      // Retina full-page capture should still attach, just smaller.
       fitPastedImage(f)
         .then((url) => {
           if (!url) return;
@@ -242,6 +227,45 @@ export function ChatPanel(props: Props) {
           setImgNote("이미지를 붙이지 못했어요. 다시 시도하거나 URL로 참고 화면을 주세요.");
         });
     }
+  };
+
+  // Clipboard paste of an image (e.g. ⌘⌃⇧4 screenshot → ⌘V) attaches it to the
+  // next turn instead of pasting raw text. A normal text paste falls through
+  // to the textarea default (we only preventDefault when we found image data).
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!imagePasteEnabled) return;          // text-only cohort — let default text paste happen
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const imageFiles: File[] = [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "file" && it.type.startsWith("image/")) {
+        const f = it.getAsFile();
+        if (f) imageFiles.push(f);
+      }
+    }
+    if (imageFiles.length === 0) return;     // plain text paste — let default happen
+    e.preventDefault();
+    attachImageFiles(imageFiles);
+  };
+
+  // #384 — drag a screenshot file from Finder/desktop straight onto the input.
+  // Same attach path as paste. dragover must preventDefault so drop fires.
+  const [dragActive, setDragActive] = useState(false);
+  const handleDragOver = (e: React.DragEvent<HTMLElement>) => {
+    if (!imagePasteEnabled) return;
+    if (!Array.from(e.dataTransfer.items ?? []).some((it) => it.kind === "file")) return;
+    e.preventDefault();
+    if (!dragActive) setDragActive(true);
+  };
+  const handleDragLeave = () => setDragActive(false);
+  const handleDrop = (e: React.DragEvent<HTMLElement>) => {
+    if (!imagePasteEnabled) return;
+    const files = Array.from(e.dataTransfer.files ?? []).filter((f) => f.type.startsWith("image/"));
+    if (files.length === 0) { setDragActive(false); return; }
+    e.preventDefault();
+    setDragActive(false);
+    attachImageFiles(files);
   };
 
   const removePendingImage = (idx: number) => {
@@ -430,7 +454,15 @@ export function ChatPanel(props: Props) {
             ))}
           </div>
         )}
-        <div className="hps-input">
+        <div
+          className={`hps-input${dragActive ? " hps-input-drag" : ""}`}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+        >
+          {dragActive && (
+            <div className="hps-drop-hint">여기에 놓으면 이미지가 첨부돼요 🖼</div>
+          )}
           <textarea
             ref={textareaRef}
             value={draft}
@@ -456,7 +488,7 @@ export function ChatPanel(props: Props) {
                 : rollExpand
                   ? "한 가지만 더 떠올려서 적어주세요"
                   : imagePasteEnabled
-                    ? "메시지를 입력하고 Enter — 이미지는 ⌘V로 붙여넣기 (Shift+Enter 줄바꿈)"
+                    ? "메시지를 입력하고 Enter — 이미지는 ⌘V 또는 드래그&드롭 (Shift+Enter 줄바꿈)"
                     : "메시지를 입력하고 Enter (Shift+Enter 줄바꿈)"
             }
             disabled={streaming}
