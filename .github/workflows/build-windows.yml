@@ -202,6 +202,14 @@ jobs:
           set -euo pipefail
           find vscode -type f -not -path "*/node_modules/*" -not -path "vscode/.build/node/*" -not -path "vscode/.git/*" > vscode.txt
           echo "vscode/.build/extensions/node_modules" >> vscode.txt
+          # The hand-vendored Agent SDK JS lives under dist/vendor/node_modules,
+          # so the `*/node_modules/*` exclusion above strips it from the tarball —
+          # and package.sh's `npm ci` never restores a hand-vendored tree. Without
+          # this line the packaged Windows app ships with NO SDK and the coach
+          # silently degrades to proxy-only (#343); Mac never hit it because its
+          # build.sh works in-place with no tar/re-extract. Re-add the whole
+          # vendor dir (tar -T recurses into it).
+          echo "vscode/extensions/hypeproof-chat/dist/vendor" >> vscode.txt
           echo "vscode/.git" >> vscode.txt
           tar -czf vscode.tar.gz -T vscode.txt
           rm -rf vscode
