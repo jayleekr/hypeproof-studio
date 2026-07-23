@@ -200,20 +200,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          find vscode -type f -not -path "*/node_modules/*" -not -path "vscode/.build/node/*" -not -path "vscode/.git/*" > vscode.txt
+          # Keep the hand-vendored Agent SDK JS (dist/vendor/node_modules) through
+          # the tar strip. The generic `*/node_modules/*` exclusion would drop it
+          # from BOTH the source extension AND its compiled copy under
+          # .build/extensions — and min-packing ships from .build, so the packaged
+          # app ends up with dist/vendor/package.json but no node_modules/sdk.mjs,
+          # and the coach silently degrades to proxy-only (#343). Mac never hit
+          # this: build.sh works in-place with no tar/re-extract. The
+          # `*/hypeproof-chat/dist/vendor/*` exception rescues both locations
+          # file-by-file (no reliance on tar -T dir recursion, which left only the
+          # two non-node_modules files last run).
+          find vscode -type f \( -path "*/hypeproof-chat/dist/vendor/*" -o -not -path "*/node_modules/*" \) -not -path "vscode/.build/node/*" -not -path "vscode/.git/*" > vscode.txt
           echo "vscode/.build/extensions/node_modules" >> vscode.txt
-          # The hand-vendored Agent SDK JS lives under dist/vendor/node_modules,
-          # so the `*/node_modules/*` exclusion above strips it from the tarball —
-          # and package.sh's `npm ci` never restores a hand-vendored tree. Without
-          # this line the packaged Windows app ships with NO SDK and the coach
-          # silently degrades to proxy-only (#343); Mac never hit it because its
-          # build.sh works in-place with no tar/re-extract. Re-add the whole
-          # vendor dir (tar -T recurses into it).
-          echo "vscode/extensions/hypeproof-chat/dist/vendor" >> vscode.txt
           echo "vscode/.git" >> vscode.txt
           tar -czf vscode.tar.gz -T vscode.txt
           rm -rf vscode
           bash build/windows/package.sh
+          # Diagnostic: confirm the vendored SDK entry survived into the packaged
+          # app (the smoke step asserts the same path; this makes a failure obvious
+          # here, right after packaging, rather than 3 steps later).
+          VENDOR_SDK="VSCode-win32-${VSCODE_ARCH}/resources/app/extensions/hypeproof-chat/dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
+          if [ -f "$VENDOR_SDK" ]; then echo "vendor sanity: sdk.mjs present in packaged app"; else echo "::warning::vendor sanity: sdk.mjs MISSING from packaged app ($VENDOR_SDK)"; fi
           # Re-stamp product.json.version on the PACKAGED app before it is zipped
           # + turned into installers. Parity with build-mac.yml #361: VS Code's
           # gulp re-derives product.json.version from vscode/package.json (the
