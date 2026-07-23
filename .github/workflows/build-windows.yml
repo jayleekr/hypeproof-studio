@@ -14,6 +14,13 @@ on:
 permissions:
   contents: write # create/upload the GitHub Release on tag builds
 
+# Match build-mac.yml: never cancel an in-flight release build, and serialize
+# runs for the same ref so a tag push + manual dispatch can't race on the
+# shared GitHub Release upload.
+concurrency:
+  group: build-win-${{ github.event.inputs.ref || github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-win:
     runs-on: windows-2022
@@ -55,7 +62,10 @@ jobs:
       - name: Setup Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          # Pin the exact version check-env.sh / build-mac.yml require (22.22.1),
+          # not the floating "22.x", so Windows builds are reproducible against
+          # the same toolchain as Mac.
+          node-version: "22.22.1"
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -196,6 +206,23 @@ jobs:
           tar -czf vscode.tar.gz -T vscode.txt
           rm -rf vscode
           bash build/windows/package.sh
+          # Re-stamp product.json.version on the PACKAGED app before it is zipped
+          # + turned into installers. Parity with build-mac.yml #361: VS Code's
+          # gulp re-derives product.json.version from vscode/package.json (the
+          # engine version, e.g. 1.116.x) during packaging, reverting the 0.1.x
+          # apply-product-overrides.sh set pre-build. Without this the shipped
+          # Windows zip + installers carry the engine version on the About screen
+          # instead of the HPS release version. Must run before prepare_assets.sh
+          # so the stamp is inside every artifact.
+          PKG_PRODUCT="VSCode-win32-${VSCODE_ARCH}/resources/app/product.json"
+          HPS_VER="${HPS_VERSION:-$(bash ../scripts/resolve-version.sh)}"
+          if [ -n "$HPS_VER" ] && [ -f "$PKG_PRODUCT" ]; then
+            tmp=$(mktemp)
+            jq --arg v "$HPS_VER" '.version = $v' "$PKG_PRODUCT" > "$tmp" && mv "$tmp" "$PKG_PRODUCT"
+            echo "Stamped packaged product.json.version → $HPS_VER"
+          else
+            echo "::warning::skipped Windows version stamp (HPS_VER='$HPS_VER', product='$PKG_PRODUCT')"
+          fi
           bash prepare_assets.sh
 
       - name: Locate artifacts
@@ -214,6 +241,26 @@ jobs:
             echo "::error::Windows build produced no .exe or .zip artifacts"
             exit 1
           fi
+
+      - name: Verify installer .exe present
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The user-facing installer (scripts/install-win.ps1) resolves a
+          # *Setup*x64*.exe release asset. The portable-zip smoke and the
+          # exe-OR-zip "Locate artifacts" check both pass on the zip alone, so
+          # an installer-less build (inno-updater hiccup, a SHOULD_BUILD_EXE_*
+          # regression, a failed mv) would go green and publish — then every
+          # end-user install fails with "No Windows x64 installer .exe found".
+          # Assert at least one Setup installer actually reached dist/.
+          shopt -s nullglob
+          setups=(dist/*Setup*x64*.exe)
+          if [ "${#setups[@]}" -eq 0 ]; then
+            echo "::error::No *Setup*x64*.exe installer in dist/ — install-win.ps1 would fail for users"
+            ls -la dist || true
+            exit 1
+          fi
+          printf 'Installer present: %s\n' "${setups[@]##*/}"
 
       - name: Smoke portable Windows build
         shell: pwsh
@@ -255,6 +302,82 @@ jobs:
           if (-not (Test-Path $extensionPath)) {
             throw "hypeproof-chat built-in extension was not bundled"
           }
+
+          # Version parity (mirrors the verify-branding.sh / #206 gate + the
+          # #361 restamp): the packaged product.json.version must be the HPS
+          # release version, not the reverted VS Code engine version. On tag
+          # builds HPS_VERSION is authoritative; otherwise it must match the
+          # bundled extension's version (resolve-version.sh's fallback source).
+          $prodVer = $product.version
+          if (-not $prodVer) { throw "product.json.version is empty (#206 updater gate)" }
+          $extPkg = Get-Content $extensionPath -Raw | ConvertFrom-Json
+          $expectedVer = if ($env:HPS_VERSION) { $env:HPS_VERSION -replace '^v','' } else { $extPkg.version }
+          if ($prodVer -ne $expectedVer) {
+            throw "product.json.version '$prodVer' != expected '$expectedVer' — VS Code engine version leaked in? (see build-mac.yml #361 restamp)"
+          }
+          Write-Host "product.json.version = $prodVer (matches expected release version)."
+
+          # Vendored Agent SDK JS must have survived into the shipped bundle.
+          # verify-branding.sh asserts this on Mac (REQUIRE_SDK_VENDOR=1) but is
+          # macOS-only; without a Windows equivalent a build whose vendor tree
+          # dropped out silently degrades the coach to proxy-only (#282/#343).
+          $sdkEntry = Join-Path $smokeRoot "resources/app/extensions/hypeproof-chat/dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"
+          if (-not (Test-Path $sdkEntry)) {
+            throw "Vendored Agent SDK JS missing from packaged build (dist/vendor/.../claude-agent-sdk/sdk.mjs) — coach would silently run proxy-only (#343)"
+          }
+          Write-Host "Vendored Agent SDK JS present in packaged build."
+
+          # The 229 MB per-platform native binary packages reach students via the
+          # W4a seed, never the app bundle — fail if one leaked into the vendor tree.
+          $vendorAnthropic = Join-Path $smokeRoot "resources/app/extensions/hypeproof-chat/dist/vendor/node_modules/@anthropic-ai"
+          if (Test-Path $vendorAnthropic) {
+            $leakedBin = Get-ChildItem -Path $vendorAnthropic -Directory -Filter "claude-agent-sdk-*" -ErrorAction SilentlyContinue
+            if ($leakedBin) {
+              throw "Platform-binary SDK package leaked into shipped vendor tree: $($leakedBin.Name -join ', ') — must be seeded (W4a), not shipped"
+            }
+          }
+
+          # Residual VSCodium/codium leakage in the shipped bundle — the Windows
+          # counterpart of verify-branding.sh check 5 (REQ-J4). Same exclusions:
+          # skip node_modules / dist/vendor / policies paths and license/notice
+          # files, extract ~100-char windows around each 'codium' hit, then drop
+          # the known-benign contexts. Anything left is a real, never-before-seen
+          # leak → hard fail. The upstream reload toast (#356) is warn-only.
+          $appResources = Join-Path $smokeRoot "resources/app"
+          $knownToast = "reload VSCodium to enable"
+          $leaks = @()
+          $toastLeaks = @()
+          Get-ChildItem -Path $appResources -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+            $_.FullName -notmatch '[\\/](node_modules|vendor|policies)[\\/]' -and
+            $_.Name -notmatch '(?i)(license|notice|attribution|third.?party|credits)' -and
+            $_.FullName -notmatch '[\\/]resources[\\/]app[\\/]package\.json$'
+          } | ForEach-Object {
+            $file = $_.FullName
+            $content = Get-Content -Path $file -Raw -ErrorAction SilentlyContinue
+            if (-not $content -or $content.Contains([char]0)) { return }  # skip binary
+            if ($content -notmatch '(?i)codium') { return }
+            foreach ($w in [regex]::Matches($content, '(?is).{0,50}codium.{0,50}')) {
+              $ctx = $w.Value
+              if ($ctx -match '(?i)sourcemaps') { continue }
+              if ($ctx -match '(?i)@vscodium/') { continue }
+              if ($ctx -match '"author":\{"name":"VSCodium"\}') { continue }
+              if ($ctx -match 'VSCodium",this\.productName') { continue }
+              if ($ctx -match [regex]::Escape($knownToast)) { $toastLeaks += $file; continue }
+              $leaks += $file
+              break
+            }
+          }
+          if ($toastLeaks.Count -gt 0) {
+            Write-Host "! Known reload-toast leak (#356, non-blocking) in:" -ForegroundColor Yellow
+            ($toastLeaks | Sort-Object -Unique) | ForEach-Object { Write-Host "    $_" }
+          }
+          $leaks = $leaks | Sort-Object -Unique
+          if ($leaks.Count -gt 0) {
+            Write-Host "Residual 'codium'/'VSCodium' found in shipped bundle:" -ForegroundColor Red
+            $leaks | ForEach-Object { Write-Host "    $_" }
+            throw "Residual VSCodium/codium branding in shipped bundle (REQ-J4)"
+          }
+          Write-Host "No residual VSCodium/codium branding in resources/app."
 
           $exe = Join-Path $smokeRoot "HypeProof Studio.exe"
           if (-not (Test-Path $exe)) {
