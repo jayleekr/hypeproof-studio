@@ -259,6 +259,37 @@ export async function activate(context: vscode.ExtensionContext) {
       // Notification"), which broke every capture in the workshop.
     }),
 
+    // #384 — "drag a screenshot in" that survives VS Code. Dropping a file on
+    // the editor makes VS Code open it as a tab (it intercepts the drop before
+    // the chat webview ever sees it). So we watch for an image tab opening and
+    // offer to attach it to the coach — turning the interception into the
+    // feature. image_paste-gated; the user still confirms via a one-click
+    // notification (never silent).
+    vscode.window.tabGroups.onDidChangeTabs(async (e) => {
+      if (!provider.isImagePasteEnabled()) return;
+      for (const tab of e.opened) {
+        const input = tab.input as { uri?: vscode.Uri } | undefined;
+        const uri = input?.uri;
+        if (!uri || uri.scheme !== "file") continue;
+        if (!/\.(png|jpe?g|gif|webp)$/i.test(uri.fsPath)) continue;
+        const name = uri.path.split("/").pop() ?? "이미지";
+        const pick = await vscode.window.showInformationMessage(
+          `🖼 방금 연 이미지 "${name}"를 코치 채팅에 붙일까요?`,
+          "붙이기",
+        );
+        if (pick !== "붙이기") continue;
+        try {
+          const bytes = await vscode.workspace.fs.readFile(uri);
+          const ext = (uri.path.split(".").pop() ?? "png").toLowerCase();
+          const mime = ext === "jpg" ? "jpeg" : ext;
+          const dataUrl = `data:image/${mime};base64,${Buffer.from(bytes).toString("base64")}`;
+          provider.attachImageDataUrl(dataUrl, name);
+          await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+        } catch {
+          void vscode.window.showWarningMessage("이미지를 읽지 못했어요. ⌘V로 붙여넣어 주세요.");
+        }
+      }
+    }),
   );
 
   // Test-only: if HPS_TEST_CRASH_AFTER_MS is set, post a webviewTestCrash

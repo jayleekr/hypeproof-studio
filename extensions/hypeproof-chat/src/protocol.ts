@@ -241,6 +241,11 @@ export type HostMessage =
   // stay silent (host-side AiDisclosureGate remembers). Webview renders a
   // compact role=note + aria-live=polite banner at the top of the messages.
   | { type: "aiDisclosure"; text: string }
+  // #384 — an image opened in an editor tab (VS Code intercepts file drops onto
+  // the editor and opens them). The host reads the bytes and hands the webview
+  // a data URL to attach to the next turn — making "drag a screenshot in" work
+  // WITH VS Code's drop behavior instead of fighting it. image_paste-gated.
+  | { type: "attachImage"; dataUrl: string; name: string }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string }
