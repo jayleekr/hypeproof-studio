@@ -164,6 +164,60 @@ export function normalizeSystemRoleMessages(messages: unknown): unknown {
   });
 }
 
+/**
+ * #406 — request params the CLIENT shapes for the model IT picked, which the
+ * model this gateway PINS does not accept.
+ *
+ * The gateway owns the model (`resolveMessagesModel` rewrites whatever the SDK
+ * asked for into the cohort catalog) but the body is forwarded spread-first, so
+ * every other field still describes the client's model. Claude Code CLI 2.x
+ * defaults to a newer generation than the classroom pin and always ships its
+ * generation's params — the upstream then gets "old model + new feature set"
+ * and 400s the whole turn. The SDK CLI swallows that 400 in its own retry loop,
+ * so the student sees an endless "생각하는 중… ✨" instead of an error (#403).
+ *
+ * Third occurrence of one failure class (#384 was `role:"system"` messages).
+ * The invariant this restores: WHOEVER OWNS THE MODEL OWNS THE MODEL-GATED
+ * PARAMS. Verified on prod 2026-07-24, same token + cohort, one field at a time:
+ *   baseline · +tools(52) · +thinking{adaptive}   → 200
+ *   +output_config{effort:"xhigh"}                → 400
+ *   +context_management{clear_thinking_…}         → 400
+ *
+ * Keyed on the RESOLVED model, not on "did we override it": the pinned model is
+ * what upstream validates against, and a client that asked for our exact model
+ * would 400 the same way. When a profile later pins a generation that does
+ * support one of these, add its id to the param's `supportedBy` list — the
+ * check then stops stripping for that model only.
+ */
+const MODEL_GATED_PARAMS: readonly { param: string; supportedBy: readonly string[] }[] = [
+  // Effort control — newer-generation only. No classroom pin accepts it today.
+  { param: "output_config", supportedBy: [] },
+  // Server-side context editing (context-management beta). Same story.
+  { param: "context_management", supportedBy: [] },
+];
+
+/**
+ * Drop the model-gated params the resolved model cannot accept. Pure; returns a
+ * new body plus the names dropped so the caller can log them — an SDK bump that
+ * introduces the NEXT such param must surface as a log line, not as another
+ * silent classroom outage.
+ */
+export function stripModelGatedParams(
+  body: Record<string, unknown>,
+  resolvedModel: string,
+): { body: Record<string, unknown>; dropped: string[] } {
+  const dropped: string[] = [];
+  let out = body;
+  for (const { param, supportedBy } of MODEL_GATED_PARAMS) {
+    if (!(param in body) || body[param] === undefined) continue;
+    if (supportedBy.includes(resolvedModel)) continue;
+    if (out === body) out = { ...body };
+    delete out[param];
+    dropped.push(param);
+  }
+  return { body: out, dropped };
+}
+
 messages.post("/messages", async (c) => {
   const env = c.env;
   const startedAt = Date.now();
@@ -254,6 +308,20 @@ messages.post("/messages", async (c) => {
     stream,
   } as unknown as AnthropicRequest;
 
+  // #406 — the model is ours, so the model-gated params are ours too. Without
+  // this every SDK turn 400s (see stripModelGatedParams).
+  const stripped = stripModelGatedParams(
+    upstreamBody as unknown as Record<string, unknown>,
+    modelLabel,
+  );
+  if (stripped.dropped.length > 0) {
+    console.warn(
+      `[${c.get("requestId")}] #406 dropped model-gated param(s) [${stripped.dropped.join(", ")}] ` +
+        `— client asked for model ${JSON.stringify(raw.model)}, gateway pinned ${modelLabel}. ` +
+        `If the SDK now needs these, repin the profile model instead of forwarding them.`,
+    );
+  }
+
   // 4. Upstream call — same proxy indirection as chat.ts's anthropic branch.
   // clientBeta/beta: the Agent SDK sets its own anthropic-beta header (e.g.
   // context-management-2025-06-27 for the context_management body field) and
@@ -261,7 +329,7 @@ messages.post("/messages", async (c) => {
   // e2e BLOCKER: dropping the header 400'd every SDK turn).
   let upstream: Response;
   try {
-    upstream = await callAnthropic(upstreamBody, apiKey, {
+    upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {
       url: env.ANTHROPIC_PROXY_URL,
       proxySecret: env.ANTHROPIC_PROXY_SECRET,
       clientBeta: c.req.header("anthropic-beta"),
@@ -498,6 +566,16 @@ messages.post("/messages/count_tokens", async (c) => {
   } as Record<string, unknown>;
   delete upstreamBody.max_tokens;
   delete upstreamBody.stream;
+  // #406 — same model-gated strip as /v1/messages. The count MUST be made
+  // against the body /v1/messages would actually send, and a 400 here breaks
+  // the SDK's context budgeting just as silently.
+  const strippedCount = stripModelGatedParams(upstreamBody, modelLabel);
+  if (strippedCount.dropped.length > 0) {
+    console.warn(
+      `[${c.get("requestId")}] #406 count_tokens dropped model-gated param(s) ` +
+        `[${strippedCount.dropped.join(", ")}] — gateway pinned ${modelLabel}.`,
+    );
+  }
 
   // 4. Upstream call — same key + proxy indirection, count_tokens subpath.
   // Same clientBeta/beta threading as /v1/messages: the SDK sends the same
@@ -505,7 +583,7 @@ messages.post("/messages/count_tokens", async (c) => {
   // its count_tokens calls, so the count must be made under the same flags.
   let upstream: Response;
   try {
-    upstream = await callAnthropic(upstreamBody as unknown as AnthropicRequest, apiKey, {
+    upstream = await callAnthropic(strippedCount.body as unknown as AnthropicRequest, apiKey, {
       url: countTokensUrl(env.ANTHROPIC_PROXY_URL),
       proxySecret: env.ANTHROPIC_PROXY_SECRET,
       clientBeta: c.req.header("anthropic-beta"),
