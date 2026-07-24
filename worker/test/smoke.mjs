@@ -1700,12 +1700,25 @@ const TINY_PNG =
     { read: true, write: true, browser: true, subagents: true },
     "copyclone: SDK workspace read+write + browser MCP + subagents on (adult, #282 P2)",
   );
+  // EXPERIMENT ESCAPE HATCH — branch exp/design-ablation-real ONLY, never merged.
+  // The design-layer ablation runs the SAME adult copyclone harness with only the
+  // design section swapped, so its throwaway `abl-*` profiles must carry the same
+  // capabilities. They are held to a STRICTER rule than the invariant they skip:
+  // an exact clone of copyclone's sdk_tools (they can never grant more), adult
+  // audience, and the same cohort. Deleting these profiles restores the plain
+  // invariant — which is the plan once the measurement lands.
+  const isAblationClone = (p) => p.id.startsWith("abl-");
   for (const p of all) {
-    if (p.id !== copyclone.id) {
-      assert.notEqual(p.sdk_tools?.write, true, `profile ${p.id}: sdk_tools.write reserved for the adult copyclone cohort in Phase 2`);
-      assert.notEqual(p.sdk_tools?.browser, true, `profile ${p.id}: sdk_tools.browser reserved for the adult copyclone cohort in Phase 2`);
-      assert.notEqual(p.sdk_tools?.subagents, true, `profile ${p.id}: sdk_tools.subagents reserved for the adult copyclone cohort in P2 slice 3`);
+    if (p.id === copyclone.id) continue;
+    if (isAblationClone(p)) {
+      assert.deepEqual(p.sdk_tools, copyclone.sdk_tools, `${p.id}: ablation clone must mirror copyclone sdk_tools exactly`);
+      assert.equal(p.audience?.parent_coaching, false, `${p.id}: ablation clone stays an adult track`);
+      assert.equal(p.session?.cohort_id, copyclone.session?.cohort_id, `${p.id}: ablation clone stays in the copyclone cohort`);
+      continue;
     }
+    assert.notEqual(p.sdk_tools?.write, true, `profile ${p.id}: sdk_tools.write reserved for the adult copyclone cohort in Phase 2`);
+    assert.notEqual(p.sdk_tools?.browser, true, `profile ${p.id}: sdk_tools.browser reserved for the adult copyclone cohort in Phase 2`);
+    assert.notEqual(p.sdk_tools?.subagents, true, `profile ${p.id}: sdk_tools.subagents reserved for the adult copyclone cohort in P2 slice 3`);
   }
   // No stray homepage cohort/tier survived the merge into copyclone.
   assert.ok(!all.some((p) => p.id === "boah-homepage-2026-s1"), "boah-homepage cohort removed (merged into copyclone)");
