@@ -116,6 +116,11 @@ chat.get("/profile", async (c) => {
     ux: profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
     preview: profile.preview,
+    // #422 — the cohort's on-disk workspace folder. The chat extension opens
+    // this folder on onboarding (and GitHub Pages publishing pushes it later).
+    // Absent → the client keeps its legacy default. Exposing it here is what
+    // lets the client stop hardcoding "~/HypeProofGames" for every cohort.
+    workspace_root: profile.sandbox.workspace_root ?? null,
     // #278 — input capabilities, default off (minor-safe). Drives whether the
     // chat panel exposes "페이지를 코치에게" / image paste.
     input: {

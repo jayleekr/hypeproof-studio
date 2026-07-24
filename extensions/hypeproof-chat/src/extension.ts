@@ -6,6 +6,8 @@ import { ChatPanelProvider } from "./chatPanelProvider";
 import { AssetStatusBar } from "./assetStatusBar";
 import {
   labelsForProfile,
+  appToneOf,
+  TONE_LABELS,
   extractCohortIdUnverified,
   coachKeyForCohort,
   coachRitualDoneKeyForCohort,
@@ -26,6 +28,7 @@ import {
 } from "./updateChecker";
 import { openBrowser, captureActivePage } from "./nativeBrowser";
 import { LiveServer } from "./liveServer";
+import type { ResolvedProfile } from "./protocol";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
@@ -100,6 +103,14 @@ export async function activate(context: vscode.ExtensionContext) {
       if (profile) {
         const tail = labelsForProfile(profile).tokenConfirmTail;
         vscode.window.showInformationMessage(`토큰 확인 완료! ${tail}`);
+        // #422 — first launch has no workspace yet (we no longer create one
+        // before the cohort is known). Now that the profile resolved, open the
+        // cohort's folder (website vs game). If one is already open, no-op.
+        // NOTE: this may reload the window; refreshConfig below still runs for
+        // the already-open case.
+        if (await ensureWorkspace(profile)) {
+          return; // window is reloading; post-reload activation continues onboarding
+        }
       } else {
         vscode.window.showWarningMessage(
           "토큰이 맞는지 확인이 안 돼요. 선생님께 토큰을 다시 받아주세요.",
@@ -352,14 +363,11 @@ async function autoOnboard(
   context: vscode.ExtensionContext,
   provider: ChatPanelProvider,
 ): Promise<void> {
-  // 0. Ensure a workspace folder exists + is open. The kid's games live here
-  //    and this is what GitHub Pages publishing will push later. If we have to
-  //    open the folder, the window reloads — fine on first launch (nothing
-  //    done yet); the post-reload activation skips this (folder already open)
-  //    and continues to token/naming.
-  if (await ensureWorkspace()) {
-    return; // window is reloading
-  }
+  // 0. The workspace folder is now cohort-driven (#422): it is created/opened
+  //    only AFTER the profile is resolved, so its name + starter match the
+  //    cohort (website vs game). That happens in the token paths below and in
+  //    the setToken success handler. We no longer create a hardcoded folder
+  //    here before we know the cohort.
 
   const isFirstRun = !context.globalState.get<boolean>(FIRST_RUN_KEY);
 
@@ -405,37 +413,91 @@ async function autoOnboard(
     return;
   }
 
-  // 3. Coach naming is now driven by an in-panel card (kid-friendly), not a
+  // 3. Profile is valid — open the cohort's workspace folder (#422). If a
+  //    folder is already open this is a no-op; otherwise it opens the
+  //    profile-specified folder and the window reloads (post-reload activation
+  //    finds the folder open and skips it).
+  if (await ensureWorkspace(profile)) {
+    return; // window is reloading
+  }
+
+  // 4. Coach naming is now driven by an in-panel card (kid-friendly), not a
   //    system input box. The webview shows it when coach.configured is false
   //    and the profile requests user_names_it. Nothing to do here.
 }
 
-const WORKSPACE_DIRNAME = "HypeProofGames";
+// Legacy fallback folder — used only when the profile carries no (or an
+// unusable) `workspace_root`. Cohorts now drive this via profile.workspace_root
+// (#422): "~/HypeProofClinic" for the dental website cohort, "~/HypeProofGames"
+// for kids, etc. os.homedir() makes the fallback path always absolute.
+const LEGACY_WORKSPACE_DIRNAME = "HypeProofGames";
 
-const STARTER_INDEX_HTML = `<!doctype html>
+// Per-tone background for the throwaway starter index.html. The title/subtitle
+// come from the single source of truth (TONE_LABELS.aboutTitle/aboutSubtitle),
+// so game / search-webapp / website each get copy matching their chat panel.
+const STARTER_BG: Record<string, string> = {
+  game: "#1b1b2a",
+  search: "#0b1f2a",
+  site: "#0f172a",
+};
+
+/**
+ * The placeholder index.html seeded into a fresh workspace. Uses the cohort's
+ * tone (appToneOf) so a website cohort never sees a "🎮 게임" starter (#422).
+ * It's a throwaway — the coach overwrites it on the first build.
+ */
+function starterIndexHtml(profile?: ResolvedProfile | null): string {
+  const tone = appToneOf(profile ?? undefined);
+  const { aboutTitle, aboutSubtitle } = TONE_LABELS[tone];
+  const bg = STARTER_BG[tone] ?? STARTER_BG.game;
+  return `<!doctype html>
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <title>내 게임</title>
+  <title>${aboutTitle}</title>
   <style>
     body { margin:0; height:100vh; display:flex; align-items:center;
-           justify-content:center; background:#1b1b2a; color:#fff;
+           justify-content:center; background:${bg}; color:#fff;
            font-family:-apple-system,sans-serif; text-align:center; }
   </style>
 </head>
 <body>
   <div>
-    <h1>🎮 내 첫 게임</h1>
-    <p>채팅에서 "게임 만들어줘"라고 말해보세요!</p>
+    <h1>${aboutTitle}</h1>
+    <p>${aboutSubtitle}</p>
   </div>
 </body>
 </html>
 `;
+}
 
 /**
- * Make sure the kid has a real folder to work in. Returns true if the window
- * is reloading (caller should bail). Idempotent: once a folder is open this
- * returns false immediately.
+ * Resolve a profile's `workspace_root` to an absolute path. Expands a leading
+ * `~`. Returns null when the value can't be trusted as an absolute location
+ * (relative or empty) — the caller then falls back to the legacy folder, so a
+ * misauthored profile can never point the open-folder at a relative path and
+ * trigger a reload loop.
+ */
+function resolveWorkspaceRoot(raw: string): string | null {
+  const v = raw.trim();
+  if (!v) return null;
+  const expanded =
+    v === "~" ? os.homedir()
+    : v.startsWith("~/") || v.startsWith("~\\") ? path.join(os.homedir(), v.slice(2))
+    : v;
+  return path.isAbsolute(expanded) ? expanded : null;
+}
+
+/**
+ * Make sure the learner has a real folder to work in, matching their cohort.
+ * The folder path comes from `profile.workspace_root` and the starter page from
+ * `profile.game.template_tier` (website vs game) — #422. When the profile is
+ * absent (called before onboarding resolves it) or carries no workspace_root,
+ * we fall back to the legacy `~/HypeProofGames` + game starter, so existing
+ * cohorts are unchanged.
+ *
+ * Returns true if the window is reloading (caller should bail). Idempotent:
+ * once a folder is open this returns false immediately.
  *
  * Race protection (#42): even with `onStartupFinished` activation, a
  * positional `--folder` arg may take a tick to register in
@@ -444,7 +506,7 @@ const STARTER_INDEX_HTML = `<!doctype html>
  * folder would briefly see workspaceFolders empty, fire openFolder, and
  * reload mid-onboard, racing the setToken QuickInput.
  */
-async function ensureWorkspace(): Promise<boolean> {
+async function ensureWorkspace(profile?: ResolvedProfile | null): Promise<boolean> {
   for (let i = 0; i < 10; i++) {
     const folders = vscode.workspace.workspaceFolders;
     if (folders && folders.length > 0) return false;
@@ -452,7 +514,7 @@ async function ensureWorkspace(): Promise<boolean> {
   }
 
   // Disable the "Do you trust the authors of this folder?" modal BEFORE
-  // opening the folder. It's auto-created by us; a 9-year-old should never
+  // opening the folder. It's auto-created by us; a learner should never
   // see a scary security dialog. Persisted to global settings so it sticks.
   try {
     await vscode.workspace
@@ -463,12 +525,16 @@ async function ensureWorkspace(): Promise<boolean> {
       .update("startupEditor", "none", vscode.ConfigurationTarget.Global);
   } catch { /* ignore: read-only profile */ }
 
-  const dir = path.join(os.homedir(), WORKSPACE_DIRNAME);
+  // Folder + starter are cohort-driven; legacy fallback keeps old cohorts intact
+  // and guarantees an absolute path (a relative workspace_root resolves to null).
+  const resolved = profile?.workspace_root ? resolveWorkspaceRoot(profile.workspace_root) : null;
+  const dir = resolved ?? path.join(os.homedir(), LEGACY_WORKSPACE_DIRNAME);
+
   try {
     fs.mkdirSync(dir, { recursive: true });
     const indexPath = path.join(dir, "index.html");
     if (!fs.existsSync(indexPath)) {
-      fs.writeFileSync(indexPath, STARTER_INDEX_HTML);
+      fs.writeFileSync(indexPath, starterIndexHtml(profile));
     }
   } catch {
     // If we can't create the dir, don't trap the user — just continue without
@@ -476,7 +542,7 @@ async function ensureWorkspace(): Promise<boolean> {
     return false;
   }
 
-  // Single-root open (clean Explorer for a 9-year-old). Reloads the window.
+  // Single-root open (clean Explorer). Reloads the window.
   await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir), {
     forceReuseWindow: true,
   });
