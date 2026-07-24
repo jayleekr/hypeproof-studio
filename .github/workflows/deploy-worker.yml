@@ -69,3 +69,13 @@ jobs:
       - name: Verify production
         if: ${{ !inputs.dry_run && inputs.verify_prod }}
         run: bash scripts/verify-prod.sh
+
+      # #406 — verify-prod.sh never makes a real model call (its chat layer
+      # needs a TOKEN it has no way to mint), so a deploy could green-light a
+      # gateway that 400s every agent-sdk turn. This step opens a short session
+      # on the CANARY cohort (empty roster, console-hidden), replays the Agent
+      # SDK's real request shape against the live upstream, and closes it again.
+      # Skips itself when the admin secret is absent.
+      - name: SDK request-shape contract (R7)
+        if: ${{ !inputs.dry_run && inputs.verify_prod }}
+        run: bash scripts/run-sdk-contract.sh
