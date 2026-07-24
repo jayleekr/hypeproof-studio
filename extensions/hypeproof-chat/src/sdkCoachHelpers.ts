@@ -821,10 +821,21 @@ export function isSdkRetryEvent(msg: Record<string, unknown>): boolean {
  * Silence budget (ms) before a turn is declared stalled. Measured from the last
  * PROGRESS event — an `api_retry` tick deliberately does NOT renew it, or a
  * backoff schedule would extend the budget forever, which is the exact hang
- * this catches. Generous on purpose: a heavy first turn can legitimately take
- * ~1 min before its first token.
+ * this catches.
+ *
+ * Calibrated against a REAL healthy turn, not guessed (2026-07-24, seeded SDK →
+ * prod gateway, copyclone prompt, "make the homepage" brief):
+ *   result: success · duration 286s · 4 turns · 87 stream events
+ *   thinking → Write → thinking → Bash → Write → text
+ *   longest silence between events ≈ 86s (long thinking stretches; the periodic
+ *   `system/thinking_tokens` events are what break the silence)
+ * A healthy turn is MINUTES long here, and 86s of it can be silent. The first
+ * cut of this constant was 120s — barely 34s of headroom, i.e. a slightly
+ * heavier page would have had the watchdog killing turns that were working.
+ * 240s is ~3x the observed worst-case gap and still bounded, which is the whole
+ * point: bounded-and-visible beats forever-and-silent.
  */
-export const SDK_STREAM_STALL_MS = 120_000;
+export const SDK_STREAM_STALL_MS = 240_000;
 
 /**
  * Student-facing stall copy. Same register as the token copy (REQ-B5): says

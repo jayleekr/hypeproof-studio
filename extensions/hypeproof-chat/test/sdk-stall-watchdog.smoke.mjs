@@ -197,7 +197,7 @@ function pacedStream(events, gapMs, state = {}) {
   assert.equal(prop.type, "number");
   assert.equal(prop.default, SDK_STREAM_STALL_MS, "manifest default matches SDK_STREAM_STALL_MS");
   assert.equal(prop.scope, "machine");
-  assert.equal(SDK_STREAM_STALL_MS, 120_000, "budget is generous — a heavy first turn is slow, not stalled");
+  assert.equal(SDK_STREAM_STALL_MS, 240_000, "3x the measured worst-case silent gap (86s) on a healthy 286s turn");
   assert.equal(SDK_STALL_FRIENDLY, "코치 응답이 너무 오래 걸려요. 다시 한 번 보내주세요. 🕐");
 }
 
