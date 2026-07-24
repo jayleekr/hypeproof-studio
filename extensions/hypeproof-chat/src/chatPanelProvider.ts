@@ -807,6 +807,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
             // seeded > node_modules). Empty string = unset.
             binaryPathSetting: cfg.get<string>("sdkBinaryPath", "") || undefined,
+            // #403 — no-progress budget before the turn is aborted with a
+            // visible retry message instead of an endless "생각하는 중…".
+            stallTimeoutMs: cfg.get<number>("sdkStallTimeoutMs"),
             onDelta,
             onCitations,
             onAssetScore,
