@@ -42,6 +42,7 @@ import {
   sdkBinaryMarkerPath,
   sdkToolToActionRequest,
   seededSdkBinaryPath,
+  type SdkActivity,
   type CoachToolAction,
   type SdkBinaryResolution,
   type SdkBinaryStat,
@@ -102,6 +103,12 @@ export interface SdkCoachArgs {
   /** Workspace root for the SDK's file tools (Phase-2 tiers). */
   cwd?: string;
   onDelta: (delta: string) => void;
+  /**
+   * #414 — what the coach is DOING (thinking / tool calls / results), so the
+   * student sees real work instead of a static "만드는 중" line. Optional: the
+   * proxy path has no equivalent, and a caller that omits it loses nothing else.
+   */
+  onActivity?: (activity: SdkActivity) => void;
   onCitations: (citations: Citation[]) => void;
   onAssetScore: (score: AssetScoreChunk) => void;
   /** Manual-approve gate. Resolves true to allow the tool. */
@@ -558,6 +565,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     abortQuery: () => abortController.abort(),
     makeFatalAuthError: () => new ProxyAuthError("expired", TOKEN_EXPIRED_FRIENDLY),
     onDelta: args.onDelta,
+    ...(args.onActivity ? { onActivity: args.onActivity } : {}),
     stallMs,
     makeStallError: () => {
       // Developer-side signal — the student only ever sees the Korean line.

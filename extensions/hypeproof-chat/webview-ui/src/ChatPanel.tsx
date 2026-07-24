@@ -9,6 +9,7 @@ import type {
 } from "../../src/protocol";
 import { postToHost } from "./vscode";
 import type { ToolLogEntry } from "./App";
+import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
 
 interface Props {
   config: ChatConfig | null;
@@ -148,8 +149,12 @@ export function ChatPanel(props: Props) {
   // a brief reason when a paste is rejected (too big / too many).
   const [pendingImages, setPendingImages] = useState<string[]>([]);
   const [imgNote, setImgNote] = useState<string | null>(null);
+  // #416 — the ONE message parked while a turn is running (null = none).
+  const [queued, setQueued] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  /** Previous `streaming` value — the flush must fire on the edge, not the state. */
+  const prevStreamingRef = useRef(streaming);
 
   const ux: UxConfig = config?.profile?.ux ?? DEFAULT_UX;
   // Image paste is a per-profile opt-in (website-copyclone). Default-off so
@@ -212,6 +217,25 @@ export function ChatPanel(props: Props) {
     setPendingImages([]);
     setImgNote(null);
     setRollExpand(null);
+  };
+
+  // #416 — the turn ended: send the message the participant parked during it.
+  // Edge-triggered (see shouldFlushQueue): firing while `streaming` is still
+  // true would hit submit()'s own guard and silently drop the message.
+  useEffect(() => {
+    const prev = prevStreamingRef.current;
+    prevStreamingRef.current = streaming;
+    if (!shouldFlushQueue(prev, streaming, queued)) return;
+    const text = queued as string;
+    setQueued(null);
+    submit(text);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streaming, queued]);
+
+  /** Stop / cancel-reservation: the parked text goes back to the draft, never away. */
+  const restoreQueuedToDraft = () => {
+    setDraft((d) => draftAfterStop(d, queued));
+    setQueued(null);
   };
 
   // Shared attach path for both clipboard paste (⌘V) and drag-and-drop.
@@ -413,6 +437,7 @@ export function ChatPanel(props: Props) {
             buildingLabel={buildingLabel}
             tone={appTone}
             messages={messages}
+            hasActivity={props.toolLog.length > 0}
             onRunCode={props.onRunCode}
             onRetry={props.onRetry}
           />
@@ -474,6 +499,23 @@ export function ChatPanel(props: Props) {
           }} />
         )}
         {imgNote && <div className="hps-img-note">{imgNote}</div>}
+        {queued !== null && (
+          // #416 — what is parked, and how to take it back. Cancel returns it to
+          // the draft (see restoreQueuedToDraft): the × must not mean "delete".
+          <div className="hps-queued" role="status" aria-live="polite">
+            <span className="hps-queued-label">다음에 보낼 메시지</span>
+            <span className="hps-queued-text" title={queued}>{queued}</span>
+            <button
+              type="button"
+              className="hps-queued-cancel"
+              onClick={restoreQueuedToDraft}
+              title="예약 취소 — 입력창으로 되돌려요"
+              aria-label="예약 취소"
+            >
+              ×
+            </button>
+          </div>
+        )}
         {pendingImages.length > 0 && (
           <div className="hps-attachments" aria-label="첨부한 이미지">
             {pendingImages.map((url, i) => (
@@ -508,22 +550,42 @@ export function ChatPanel(props: Props) {
                 e.nativeEvent.isComposing ||
                 // keyCode 229 is the legacy Safari signal for IME composition.
                 e.nativeEvent.keyCode === 229;
-              if (e.key === "Enter" && !e.shiftKey && !isComposing) {
-                e.preventDefault();
-                if (rollExpand) handleRollSend();
-                else submit();
+              // Composing Hangul: Enter commits the syllable, it must never
+              // send. Unchanged from before — typing mid-turn does not make the
+              // IME any less load-bearing.
+              if (e.key !== "Enter" || e.shiftKey || isComposing) return;
+              e.preventDefault();
+              // Roll-expand owns Enter while it is open (idle-only flow).
+              if (rollExpand && !streaming) {
+                handleRollSend();
+                return;
               }
+              // #416 — mid-turn Enter parks the message instead of sending it.
+              const decision = decideEnter({
+                draft,
+                streaming,
+                queued,
+                hasImages: pendingImages.length > 0,
+              });
+              if (decision.action === "ignore") return;
+              if (decision.action === "queue") {
+                setQueued(decision.queued);
+                setDraft("");
+                return;
+              }
+              submit();
             }}
             placeholder={
               streaming
-                ? "응답 중..."
+                ? queued
+                  ? "이어서 적으면 예약 메시지에 덧붙여요"
+                  : "응답 중에도 적을 수 있어요 — Enter 로 예약하면 끝나고 바로 보내요"
                 : rollExpand
                   ? "한 가지만 더 떠올려서 적어주세요"
                   : imagePasteEnabled
                     ? "메시지를 입력하고 Enter — 이미지는 ⌘V로 붙여넣기 (Shift+Enter 줄바꿈)"
                     : "메시지를 입력하고 Enter (Shift+Enter 줄바꿈)"
             }
-            disabled={streaming}
             rows={3}
           />
           <div className="hps-input-buttons">
@@ -538,7 +600,16 @@ export function ChatPanel(props: Props) {
               </button>
             )}
             {streaming ? (
-              <button onClick={props.onCancel} className="hps-btn-stop">Stop</button>
+              <button
+                onClick={() => {
+                  // #416 — a parked message survives the stop as draft text.
+                  restoreQueuedToDraft();
+                  props.onCancel();
+                }}
+                className="hps-btn-stop"
+              >
+                Stop
+              </button>
             ) : rollExpand ? (
               <button
                 onClick={handleRollSend}
@@ -732,6 +803,7 @@ function MessageItem({
   buildingLabel,
   tone,
   messages,
+  hasActivity,
   onRunCode,
   onRetry,
 }: {
@@ -742,6 +814,8 @@ function MessageItem({
   buildingLabel: string;
   tone: "game" | "search" | "site";
   messages: ChatMessage[];
+  /** #414 — an activity log is on screen, so the spinner must not invent stages. */
+  hasActivity: boolean;
   onRunCode: (html: string) => void;
   onRetry: (prompt: string) => void;
 }) {
@@ -781,7 +855,13 @@ function MessageItem({
       </div>
       <div className="hps-msg-body">
         {message.role === "assistant" ? (
-          <AssistantContent content={message.content} streaming={streaming} buildingLabel={buildingLabel} tone={tone} />
+          <AssistantContent
+            content={message.content}
+            streaming={streaming}
+            buildingLabel={buildingLabel}
+            tone={tone}
+            hasActivity={hasActivity}
+          />
         ) : (
           <>
             {message.images && message.images.length > 0 && (
@@ -844,14 +924,24 @@ function CitationRack({ citations }: { citations: Citation[] }) {
  * Stages are derived from cumulative response length + fence-open detection;
  * no LLM-side cooperation required. Tuned for the dental V1 skeleton
  * (~2.5KB HTML output).
+ *
+ * #414 — the length heuristic is a PROXY-path device. On the agent-sdk path the
+ * coach writes files with tools, so the chat text barely grows and every turn
+ * froze on "구조 정리 중" while the coach was actually running thinking → Write
+ * → Bash → Write. When a real activity log is on screen (`hasActivity`) the
+ * truth is right there, so the spinner drops the invented sub-stage instead of
+ * contradicting it. A guess is only acceptable while nothing better exists.
  */
 function buildStageText(
   buildingLabel: string,
   content: string,
   fenceOpen: boolean,
   tone: "game" | "search" | "site",
+  hasActivity = false,
 ): string {
   if (fenceOpen) return "거의 다 됐어요";
+  // Real signal present → say only what is certainly true.
+  if (hasActivity) return buildingLabel;
   const len = content.length;
   if (tone === "site") {
     // website-copyclone substages (clone target → layout → polish).
@@ -869,11 +959,14 @@ function AssistantContent({
   streaming,
   buildingLabel,
   tone,
+  hasActivity = false,
 }: {
   content: string;
   streaming: boolean;
   buildingLabel: string;
   tone: "game" | "search" | "site";
+  /** #414 — the tool/activity log below carries the real state of the turn. */
+  hasActivity?: boolean;
 }) {
   const segments = useMemo(() => splitFences(content), [content]);
   const hasOpenFence = segments.some((s) => s.type === "code-open");
@@ -890,7 +983,7 @@ function AssistantContent({
         }
         if (seg.type === "code-open") {
           if (streaming) {
-            const stage = buildStageText(buildingLabel, content, hasOpenFence, tone);
+            const stage = buildStageText(buildingLabel, content, hasOpenFence, tone, hasActivity);
             return (
               <div key={i} className="hps-code-progress">
                 🛠️ {stage}… <span className="hps-dots">✨</span>
@@ -911,7 +1004,7 @@ function AssistantContent({
       })}
       {streaming && !hasOpenFence && content.length > 0 && (
         <div className="hps-code-progress hps-code-progress-prelude">
-          🛠️ {buildStageText(buildingLabel, content, false, tone)}… <span className="hps-dots">✨</span>
+          🛠️ {buildStageText(buildingLabel, content, false, tone, hasActivity)}… <span className="hps-dots">✨</span>
         </div>
       )}
     </>

@@ -848,6 +848,103 @@ export const SDK_STALL_FRIENDLY =
 /** Sentinel for the watchdog leg of the stream/timer race. */
 const STALLED = Symbol("sdk-stream-stalled");
 
+// ── SDK activity → what the student actually sees the coach doing (#414) ────
+// The stream already carries everything: `thinking` blocks, `tool_use` blocks
+// with their full input, `tool_result` blocks, and periodic
+// `system/thinking_tokens` ticks with a running token estimate. Until now
+// consumeSdkStream extracted ONLY `.text`, so a turn that spent 286s writing
+// files, hitting a read-only path, recovering via a shell probe, and writing
+// again showed the student one static line. Nothing new has to be invented
+// here — this stops throwing away what already arrives.
+//
+// Presentation (icons, truncation, Korean framing) stays OUT of this module:
+// it emits raw activity, the host maps it to the toolLog protocol the browser
+// loop already renders.
+
+export type SdkActivity =
+  /** Running token estimate while the model thinks (Claude Code's "✻ …" counter). */
+  | { kind: "thinking_tokens"; tokens: number }
+  /** A completed thinking block. Raw model text — NOT translated (it is usually English). */
+  | { kind: "thinking"; text: string }
+  /** The coach is about to run a tool. `id` pairs with the matching tool_result. */
+  | { kind: "tool_use"; id: string; name: string; input: unknown }
+  /** That tool finished. */
+  | { kind: "tool_result"; id: string; isError: boolean };
+
+/**
+ * The one input field worth showing next to a tool name, in Claude Code's
+ * `Write(index.html)` spirit. Falls back to a compact JSON clip so an unknown
+ * tool still shows something real instead of a bare name.
+ */
+export function summarizeToolInput(name: string, input: unknown, max = 60): string {
+  if (!input || typeof input !== "object") return "";
+  const rec = input as Record<string, unknown>;
+  const clip = (v: string): string => {
+    const one = v.replace(/\s+/g, " ").trim();
+    return one.length > max ? `${one.slice(0, max)}…` : one;
+  };
+  // Ordered by how identifying the field is, not by tool — the same key means
+  // the same thing across tools, and unknown tools get the same treatment.
+  for (const key of ["file_path", "path", "command", "url", "query", "pattern", "prompt", "description"]) {
+    const v = rec[key];
+    if (typeof v === "string" && v.length > 0) {
+      // A path is identified by its tail, not its (long, invariant) prefix.
+      const shown = key === "file_path" || key === "path" ? v.split("/").filter(Boolean).pop() ?? v : v;
+      return clip(shown);
+    }
+  }
+  try {
+    return clip(JSON.stringify(rec));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Pull every displayable activity out of ONE SDK stream event. Pure; returns []
+ * for events that carry nothing to show (text deltas, init, result).
+ */
+export function extractSdkActivity(msg: Record<string, unknown>): SdkActivity[] {
+  const type = String(msg["type"] ?? "");
+
+  if (type === "system" && msg["subtype"] === "thinking_tokens") {
+    const tokens = msg["estimated_tokens"];
+    return typeof tokens === "number" ? [{ kind: "thinking_tokens", tokens }] : [];
+  }
+
+  // tool_use rides on assistant messages; tool_result comes back on user ones.
+  if (type !== "assistant" && type !== "user") return [];
+  const content = (msg["message"] as Record<string, unknown> | undefined)?.["content"];
+  if (!Array.isArray(content)) return [];
+
+  const out: SdkActivity[] = [];
+  for (const raw of content) {
+    if (!raw || typeof raw !== "object") continue;
+    const b = raw as Record<string, unknown>;
+    switch (b["type"]) {
+      case "thinking": {
+        const text = typeof b["thinking"] === "string" ? b["thinking"] : "";
+        if (text.trim()) out.push({ kind: "thinking", text });
+        break;
+      }
+      case "tool_use": {
+        const id = typeof b["id"] === "string" ? b["id"] : "";
+        const name = typeof b["name"] === "string" ? b["name"] : "";
+        if (id && name) out.push({ kind: "tool_use", id, name, input: b["input"] });
+        break;
+      }
+      case "tool_result": {
+        const id = typeof b["tool_use_id"] === "string" ? b["tool_use_id"] : "";
+        if (id) out.push({ kind: "tool_result", id, isError: b["is_error"] === true });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
 /** Best-effort text extraction across candidate SDK message shapes. */
 export function extractSdkText(msg: Record<string, unknown>): string {
   const direct = msg["text"];
@@ -880,6 +977,12 @@ export interface SdkStreamHandlers {
   /** Build the student-friendly auth error thrown on a fatal 400/401. */
   makeFatalAuthError: (status: number) => Error;
   onDelta: (delta: string) => void;
+  /**
+   * #414 — everything the coach is DOING (thinking, tool calls, their results).
+   * Optional so the fast-fail/stall tests can ignore it; when absent the stream
+   * behaves exactly as before.
+   */
+  onActivity?: (activity: SdkActivity) => void;
   /**
    * #403 — silence budget in ms before the turn is declared stalled. Omit for
    * SDK_STREAM_STALL_MS; 0 disables the watchdog (escape hatch / old behavior).
@@ -991,6 +1094,12 @@ export async function consumeSdkStream(
       if (!isSdkRetryEvent(msg)) {
         progressAt = Date.now();
         sawPause = false;
+      }
+      // #414 — surface the work itself (thinking / tool calls / results) before
+      // the text, so the activity line appears when it happens rather than
+      // after the prose that describes it.
+      if (h.onActivity) {
+        for (const activity of extractSdkActivity(msg)) h.onActivity(activity);
       }
       const type = String(msg["type"] ?? "");
       if (type === "assistant" || type === "text" || type === "content_block_delta") {
