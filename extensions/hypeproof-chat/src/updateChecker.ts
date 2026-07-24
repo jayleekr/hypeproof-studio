@@ -41,6 +41,14 @@ const DISMISSAL_KEY = "hypeproofChat.updateDismissals";
  * The 24h cadence + 1 strructor per user means we're nowhere near the limit.
  */
 export async function checkForUpdates(currentVersion: string): Promise<UpdateInfo> {
+  // #425 — the auto-update flow is macOS-only: the asset matcher defaults to
+  // `darwin-arm64.zip`, `detectAppBundle` returns null off an .app bundle (so
+  // `runUpdate` bails and the version compare falls back to the esbuild-inlined
+  // number), and `renderInstallerScript` is bash + osascript/xattr/PlistBuddy.
+  // On Windows/Linux this surfaced a dead, misleading banner offering the 162 MB
+  // macOS zip (often as a "downgrade"). Until a per-platform update path exists,
+  // skip the check entirely off macOS — no banner, no wrong-platform download.
+  if (process.platform !== "darwin") return emptyInfo();
   try {
     const res = await fetch(RELEASES_API, {
       headers: { accept: "application/vnd.github+json" },
