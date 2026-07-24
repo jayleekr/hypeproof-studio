@@ -1,6 +1,6 @@
 import type { Profile } from "./types";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
-import systemPromptMd from "../prompts/boah-dental-director-copyclone-2026-s1.md";
+import systemPromptMd from "../prompts/cc-frontend.md";
 
 // 보아치과 원장 website-copyclone (v2). 단발 ~3.5시간 해커톤.
 //
