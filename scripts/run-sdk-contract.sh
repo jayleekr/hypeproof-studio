@@ -15,11 +15,17 @@
 # in the classroom died silently (#403).
 #
 # Usage:
-#   HPS_ADMIN_PASSWORD=… bash scripts/run-sdk-contract.sh
-# Env:
-#   HPS_ADMIN_PASSWORD  required — admin Basic; mints the token + opens/closes
-#                       the session. Without it the script SKIPS (exit 0), so a
-#                       fork/PR run without secrets is not a false failure.
+#   HPS_CANARY_ISSUER=… bash scripts/run-sdk-contract.sh     # preferred
+#   HPS_ADMIN_PASSWORD=… bash scripts/run-sdk-contract.sh    # also works
+# Env — EITHER credential opens the canary session; neither present → SKIP:
+#   HPS_CANARY_ISSUER   PREFERRED. An issuer token scoped to ONLY
+#                       (canary-internal, canary-sdk-contract) with
+#                       can_start_session. Least privilege: it cannot touch a
+#                       real cohort even if the runner leaks it. Mint per
+#                       worker/scripts/issue-issuer-token.ts.
+#   HPS_ADMIN_PASSWORD  Fallback. Admin Basic is full admin over every cohort —
+#                       works, but it is a much bigger credential to hand a CI
+#                       runner for the sake of one canary session.
 #   PROD                default https://api.hypeproof-ai.xyz
 #   CANARY_COHORT       default canary-internal
 #   CANARY_PROFILE      default canary-sdk-contract
@@ -36,12 +42,17 @@ ok()   { printf '\033[32m✓ %s\033[0m\n' "$*"; }
 note() { printf '\033[36m▸ %s\033[0m\n' "$*"; }
 die()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
-if [[ -z "${HPS_ADMIN_PASSWORD:-}" ]]; then
-  printf '\033[33m! HPS_ADMIN_PASSWORD not set — skipping the SDK contract check\033[0m\n'
+if [[ -n "${HPS_CANARY_ISSUER:-}" ]]; then
+  AUTH="Bearer $HPS_CANARY_ISSUER"
+  note "auth: canary-scoped issuer token"
+elif [[ -n "${HPS_ADMIN_PASSWORD:-}" ]]; then
+  AUTH="Basic $(printf ':%s' "$HPS_ADMIN_PASSWORD" | base64)"
+  note "auth: admin Basic (broader than needed — prefer HPS_CANARY_ISSUER)"
+else
+  printf '\033[33m! neither HPS_CANARY_ISSUER nor HPS_ADMIN_PASSWORD is set — skipping the SDK contract check\033[0m\n'
+  printf '\033[33m  (mint a canary-scoped issuer per scripts/run-sdk-contract.sh header, then add it as a repo secret)\033[0m\n'
   exit 0
 fi
-
-AUTH="Basic $(printf ':%s' "$HPS_ADMIN_PASSWORD" | base64)"
 JTI=""
 
 # Always close the session, even when the tests fail or the runner is cancelled.

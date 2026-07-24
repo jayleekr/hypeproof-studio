@@ -78,4 +78,9 @@ jobs:
       # Skips itself when the admin secret is absent.
       - name: SDK request-shape contract (R7)
         if: ${{ !inputs.dry_run && inputs.verify_prod }}
+        env:
+          # Least-privilege credential: an issuer scoped to the canary cohort +
+          # profile only. Falls back to the job-level HPS_ADMIN_PASSWORD when
+          # absent, and skips (exit 0) when neither is configured — see #412.
+          HPS_CANARY_ISSUER: ${{ secrets.HPS_CANARY_ISSUER }}
         run: bash scripts/run-sdk-contract.sh
