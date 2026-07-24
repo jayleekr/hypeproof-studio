@@ -12,6 +12,8 @@ import type { ToolLogEntry } from "./App";
 
 interface Props {
   config: ChatConfig | null;
+  // #384 — image handed from the host (editor-tab image → attach to coach).
+  incomingImage: { dataUrl: string; nonce: number } | null;
   messages: ChatMessage[];
   toolLog: ToolLogEntry[];              // #278 Phase 3 — browser loop action log
   pageNotice: string | null;           // #308 — "페이지를 코치에게" 인라인 안내
@@ -79,7 +81,13 @@ async function fitPastedImage(file: File): Promise<string> {
   });
   // Already small enough → send as-is (keeps PNG crispness for tiny images).
   if (file.size <= MAX_IMAGE_BYTES) return original;
+  return fitDataUrl(original);
+}
 
+/** #384 — downscale a data: URL (from the host "image opened" flow) the same
+ *  way fitPastedImage handles a File. Already-small URLs pass through. */
+async function fitDataUrl(original: string): Promise<string> {
+  if (dataUrlBytes(original) <= MAX_IMAGE_BYTES) return original;
   const img: HTMLImageElement = await new Promise((resolve, reject) => {
     const el = new Image();
     el.onload = () => resolve(el);
@@ -132,7 +140,7 @@ function userPromptBefore(messages: ChatMessage[], assistantId: string): string 
 }
 
 export function ChatPanel(props: Props) {
-  const { config, messages, streaming, error } = props;
+  const { config, messages, streaming, error, incomingImage } = props;
   const [draft, setDraft] = useState("");
   const [composing, setComposing] = useState(false);
   const [rollExpand, setRollExpand] = useState<{ original: string } | null>(null);
@@ -228,6 +236,28 @@ export function ChatPanel(props: Props) {
         });
     }
   };
+
+  // #384 — attach an image handed over by the host (an image opened in an
+  // editor tab, e.g. a dropped screenshot). Same downscale + thumbnail path as
+  // paste, just from a data URL. Re-runs on nonce so the same file re-attaches.
+  const incomingNonce = incomingImage?.nonce;
+  useEffect(() => {
+    if (!incomingImage || !imagePasteEnabled) return;
+    fitDataUrl(incomingImage.dataUrl)
+      .then((url) => {
+        if (!url) return;
+        setPendingImages((prev) => {
+          if (prev.length >= MAX_IMAGES) {
+            setImgNote(`이미지는 한 번에 최대 ${MAX_IMAGES}장까지 붙일 수 있어요.`);
+            return prev;
+          }
+          setImgNote(null);
+          return [...prev, url];
+        });
+      })
+      .catch(() => setImgNote("이미지를 붙이지 못했어요. ⌘V로 다시 시도해 주세요."));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incomingNonce]);
 
   // Clipboard paste of an image (e.g. ⌘⌃⇧4 screenshot → ⌘V) attaches it to the
   // next turn instead of pasting raw text. A normal text paste falls through
