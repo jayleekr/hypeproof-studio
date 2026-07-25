@@ -1715,15 +1715,31 @@ const TINY_PNG =
   // Shell without the skill → the coach reaches for `git`, and macOS's
   // /usr/bin/git is a CLT stub that opens a 2 GB GUI installer mid-lecture.
   // Assert both together so neither can be removed alone.
-  assert.ok(
-    copyclone.skills?.includes("publish-homepage"),
-    "copyclone: publish-homepage skill declared (#431)",
+  assert.deepEqual(
+    copyclone.skills,
+    ["design-craft", "github-repo", "publish-homepage"],
+    "copyclone: 스킬 3종 (디자인 · GitHub · 배포)",
   );
   // resolveSkills only console.warns on an unknown name, so a typo would ship
   // an inert cohort that LOOKS configured. Resolve it for real.
+  for (const name of copyclone.skills ?? []) {
+    assert.ok(isKnownSkill(name), `${name} resolves in the registry — a typo ships silently`);
+  }
+  // 디자인은 프롬프트에서 스킬로 옮긴 것이다. 옮기다 유실되면 품질 바닥이 통째로
+  // 사라지므로 특징적인 문장으로 도착을 확인한다.
+  const designMd = resolveSkills(["design-craft"]);
+  assert.ok(designMd.includes("품질 바닥"), "design-craft: 품질 바닥 섹션이 살아 있다");
+  assert.ok(designMd.includes("prefers-reduced-motion"), "design-craft: 접근성 항목이 살아 있다");
+  // 프롬프트에는 더 이상 없어야 한다 — 양쪽에 있으면 지시가 두 배로 실린다.
   assert.ok(
-    isKnownSkill("publish-homepage"),
-    "publish-homepage resolves in the registry — a typo here ships silently",
+    !copyclone.system_prompt.includes("품질 바닥"),
+    "코호트 프롬프트에서 디자인 본문이 제거됐다 (중복 주입 방지)",
+  );
+  // #431 — 셸을 부여했으므로 "셸 실행 금지"가 프롬프트에 남아 있으면 코치가 스스로
+  // 거부한다. 부여와 프롬프트가 어긋나지 않게 잠근다.
+  assert.ok(
+    !copyclone.system_prompt.includes("셸 실행·외부 명령 금지"),
+    "프롬프트의 셸 금지 문구가 제거됐다 (sdk_tools.shell과 모순)",
   );
   assert.ok(
     resolveSkills(copyclone.skills).length > 500,

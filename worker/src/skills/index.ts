@@ -18,14 +18,27 @@
 import boaSearchSkillCreator from "./boa-search-skill-creator.md";
 // @ts-ignore — string import enabled via wrangler text rules (wrangler.toml).
 import publishHomepage from "./publish-homepage.md";
+// @ts-ignore — string import enabled via wrangler text rules (wrangler.toml).
+import designCraft from "./design-craft.md";
+// @ts-ignore — string import enabled via wrangler text rules (wrangler.toml).
+import githubRepo from "./github-repo.md";
 
-export type SkillName = "boa-search-skill-creator" | "publish-homepage";
+export type SkillName =
+  | "boa-search-skill-creator"
+  | "design-craft"
+  | "github-repo"
+  | "publish-homepage";
 
 const SKILLS: Record<SkillName, string> = {
   "boa-search-skill-creator": boaSearchSkillCreator as unknown as string,
-  // epic #431 — 큐시트 20:35 블록. 정적이면 GitHub Pages(영구 주소), 동적이거나
-  // 막히면 Cloudflare 빠른 터널(로그인 불필요). git은 쓰지 않는다: macOS의
+  // #434 — 코호트 프롬프트에 박혀 있던 디자인 원칙(80줄)을 그대로 분리. 코호트가
+  // 바뀌어도 같은 how-to라 teaser 등 다른 트랙이 복사 없이 쓸 수 있다.
+  "design-craft": designCraft as unknown as string,
+  // epic #431 — 큐시트 결과물 3번(저장소). git은 쓰지 않는다: macOS의
   // /usr/bin/git은 CLT stub이라 수업 중에 2GB GUI 설치를 띄운다.
+  "github-repo": githubRepo as unknown as string,
+  // epic #431 — 큐시트 결과물 2번(배포 URL). 정적이면 GitHub Pages(영구 주소,
+  // github-repo 선행), 동적이거나 막히면 Cloudflare 빠른 터널(로그인 불필요).
   "publish-homepage": publishHomepage as unknown as string,
 };
 
