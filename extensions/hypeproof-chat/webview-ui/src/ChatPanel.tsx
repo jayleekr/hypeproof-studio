@@ -288,7 +288,7 @@ export function ChatPanel(props: Props) {
           return [...prev, url];
         });
       })
-      .catch(() => setImgNote("이미지를 붙이지 못했어요. ⌘V로 다시 시도해 주세요."));
+      .catch(() => setImgNote(platformizeKeys("이미지를 붙이지 못했어요. ⌘V로 다시 시도해 주세요.")));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [incomingNonce]);
 
@@ -593,7 +593,7 @@ export function ChatPanel(props: Props) {
                 : rollExpand
                   ? "한 가지만 더 떠올려서 적어주세요"
                   : imagePasteEnabled
-                    ? "메시지를 입력하고 Enter — 이미지는 ⌘V로 붙여넣기 (Shift+Enter 줄바꿈)"
+                    ? platformizeKeys("메시지를 입력하고 Enter — 이미지는 ⌘V로 붙여넣기 (Shift+Enter 줄바꿈)")
                     : "메시지를 입력하고 Enter (Shift+Enter 줄바꿈)"
             }
             rows={3}
@@ -792,11 +792,11 @@ function ChipRack({
             className={`hps-chip hps-chip-${c.style}`}
             onClick={() => onPick(c)}
             disabled={c.style === "weak"}
-            title={c.style === "weak" ? c.caption ?? "예시일 뿐이에요" : "탭하면 입력창에 들어가요"}
+            title={c.style === "weak" ? platformizeKeys(c.caption ?? "예시일 뿐이에요") : "탭하면 입력창에 들어가요"}
           >
-            <span className="hps-chip-text">{c.text}</span>
+            <span className="hps-chip-text">{platformizeKeys(c.text)}</span>
             {c.caption && (
-              <span className="hps-chip-caption">{c.caption}</span>
+              <span className="hps-chip-caption">{platformizeKeys(c.caption)}</span>
             )}
           </button>
         ))}
@@ -1166,8 +1166,25 @@ function RollExpandHint({
 
 // Tiny inline-markdown renderer for hints (bold, italic, code). Not a full MD;
 // these messages are author-controlled in profiles, so escaping isn't critical.
+// Profiles author keyboard hints with macOS glyphs (⌘V). On Windows/Linux we
+// rewrite them to the real platform keys so a learner is never told to press a
+// key that doesn't exist on their machine. `navigator.platform` reflects the
+// host OS inside the VS Code webview renderer.
+const IS_MAC =
+  typeof navigator !== "undefined" &&
+  /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent || "");
+
+function platformizeKeys(text: string): string {
+  if (IS_MAC) return text;
+  return text
+    .replace(/⌘/g, "Ctrl+")
+    .replace(/⌥/g, "Alt+")
+    .replace(/⌃/g, "Ctrl+")
+    .replace(/⇧/g, "Shift+");
+}
+
 function renderInlineMd(md: string): string {
-  return md
+  return platformizeKeys(md)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")

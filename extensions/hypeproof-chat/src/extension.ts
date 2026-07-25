@@ -320,7 +320,8 @@ export async function activate(context: vscode.ExtensionContext) {
           provider.attachImageDataUrl(dataUrl, name);
           await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
         } catch {
-          void vscode.window.showWarningMessage("이미지를 읽지 못했어요. ⌘V로 붙여넣어 주세요.");
+          const pasteKey = process.platform === "darwin" ? "⌘V" : "Ctrl+V";
+          void vscode.window.showWarningMessage(`이미지를 읽지 못했어요. ${pasteKey}로 붙여넣어 주세요.`);
         }
       }
     }),
