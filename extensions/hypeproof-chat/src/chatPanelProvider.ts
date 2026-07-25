@@ -6,7 +6,7 @@ import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
-import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
+import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -748,6 +748,39 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.assetScores?.recordAssetScore(assetScore);
         void this.post({ type: "streamAssetScore", streamId, assetScore });
       };
+      // #414 — the SDK coach's real work, rendered through the same toolLog
+      // lines the browser loop already uses. Deliberately NOT translated: the
+      // model thinks in English and the tool names are the SDK's own, and a
+      // Korean paraphrase of "Write(index.html)" would be a worse signal than
+      // the thing itself. Shape follows Claude Code — one truncated line per
+      // action (the CSS ellipsizes), plus a live token counter while thinking.
+      let thinkingIndex = 0;
+      // The webview replaces an entry wholesale by id, so a tool_result has to
+      // re-send the label the tool_use showed — keep it per stream.
+      const toolLabels = new Map<string, string>();
+      const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
+        const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
+          void this.post({ type: "toolLog", streamId, id, icon, label, state });
+        switch (a.kind) {
+          case "thinking_tokens":
+            // One entry that ticks in place; the completed block replaces it.
+            log(`think-${thinkingIndex}`, "💭", `Thinking… ${a.tokens} tokens`, "running");
+            break;
+          case "thinking":
+            log(`think-${thinkingIndex}`, "💭", a.text, "done");
+            thinkingIndex += 1;
+            break;
+          case "tool_use": {
+            const label = `${a.name}(${summarizeToolInput(a.name, a.input)})`;
+            toolLabels.set(a.id, label);
+            log(a.id, "🔧", label, "running");
+            break;
+          }
+          case "tool_result":
+            log(a.id, "🔧", toolLabels.get(a.id) ?? "", a.isError ? "error" : "done");
+            break;
+        }
+      };
       // The non-SDK runtime: the agentic browser loop when the cohort opted
       // into browser_control (copyclone opens the reference URL / re-checks the
       // live preview), else the plain single-turn proxy. #371 — the SDK path's
@@ -819,6 +852,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // visible retry message instead of an endless "생각하는 중…".
             stallTimeoutMs: cfg.get<number>("sdkStallTimeoutMs"),
             onDelta,
+            onActivity,
             onCitations,
             onAssetScore,
             // Map the SDK tool call → an accurate host ActionRequest so the
