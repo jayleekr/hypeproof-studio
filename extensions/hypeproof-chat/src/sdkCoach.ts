@@ -22,6 +22,8 @@ import { pathToFileURL } from "node:url";
 import {
   buildHypeproofMcpServer,
   HYPEPROOF_MCP_SERVER_NAME,
+  MCP_BROWSER_OPEN,
+  resolveAlreadyOpen,
   type BrowserMcpHost,
   type SdkMcpFactory,
   type ZodLike,
@@ -518,6 +520,17 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       }
       if (verdict.decision === "allow") {
         return { behavior: "allow" as const, updatedInput: input };
+      }
+      // #415 — 이미 열려 있는 페이지를 다시 여는 browser_open 은 모달 없이
+      // 통과시킨다. 핸들러가 short-circuit 해서 **실제로 여는 동작이 없기**
+      // 때문 — 물을 것이 없는데 뜨는 승인 모달은 학생의 턴을 몇 분씩 막고
+      // (2026-07-24 실사용 ~2분), 반복되면 게이트가 교육 장치가 아니라 잡음이
+      // 된다(delegation_judgment). 판정은 핸들러와 동일한 resolveAlreadyOpen
+      // 단일 소스 — 갈라지면 "모달 없는 실제 오픈" 구멍이 된다.
+      if (name === MCP_BROWSER_OPEN && args.browserHost) {
+        const { alreadyOpen } = await resolveAlreadyOpen(args.browserHost,
+          (input as { url?: unknown } | undefined)?.url);
+        if (alreadyOpen) return { behavior: "allow" as const, updatedInput: input };
       }
       // #403 — the modal blocks the SDK stream for as long as the human takes
       // to decide. Mark the turn as human-blocked so the stall watchdog below

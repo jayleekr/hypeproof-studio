@@ -511,6 +511,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
       },
       startLivePreview: () => this.startLivePreview(),
+      // #415 — 지금 떠 있는 페이지를 가장 싸게 읽는 경로. `activeBrowserTab` 은
+      // url/title 을 그대로 들고 있어 CDP 접속도 스크린샷도 필요 없다
+      // (URL 하나 알자고 이미지를 뜨면 토큰도 시간도 낭비).
+      currentPage: async () => {
+        const tab = vscode.window.activeBrowserTab;
+        if (!tab?.url) return null;
+        return { url: tab.url, title: tab.title };
+      },
     };
   }
 
