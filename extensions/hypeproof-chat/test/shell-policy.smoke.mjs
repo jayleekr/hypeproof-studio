@@ -73,6 +73,29 @@ const { evaluateSdkToolUse, permittedToolsFor, profileToAgentOptions, buildSdkQu
 
   assert.equal(isDestructiveCommand(""), false, "empty");
   assert.equal(isDestructiveCommand("   "), false, "whitespace");
+
+  // 리다이렉션 — 실측으로 조정한 규칙 (#431 B5 검증).
+  //
+  // 처음엔 `>` 전부를 파괴적으로 봤다. 실기기에서 코치가 낸 명령 4개 중 3개가
+  // 강한 확인을 받았고(2>/dev/null, > /tmp/cf_tunnel.log 2>&1), 그건 이 게이트가
+  // 막으려던 무지성 승인을 오히려 훈련시킨다. 아래가 그때 관측된 실제 명령들이다.
+  for (const noise of [
+    "command -v cloudflared 2>/dev/null || ls ~/bin/cloudflared",   // stderr 억제
+    "cloudflared tunnel --url http://127.0.0.1:58982 > /tmp/cf_tunnel.log 2>&1 &",
+    "echo hi >/dev/null",
+    "npm run build >> build.log",                                   // 추가는 덮지 않는다
+    "date +%s > /tmp/scratch.txt",                                  // 임시 공간
+  ]) {
+    assert.equal(isDestructiveCommand(noise), false, `리다이렉션 노이즈: ${noise.slice(0, 44)}`);
+  }
+  // 참가자의 작업물을 덮는 형태만 남긴다.
+  for (const clobber of [
+    "echo x > index.html",
+    "cat a > ~/notes.md",
+    "echo x 1> report.txt",   // 1> 은 stdout — 2> 와 다르다
+  ]) {
+    assert.equal(isDestructiveCommand(clobber), true, `덮어쓰기: ${clobber}`);
+  }
 }
 
 // ─── commandSignature — the "항상 허용" key ──────────────────────────────────
