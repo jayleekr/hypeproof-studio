@@ -115,7 +115,10 @@ export const profile: Profile = {
   // child_sdk_subagents FAIL).
   // #384 — 이번 라운드 기본(대표) 트랙. 강사 콘솔에서 맨 앞에 온다.
   dashboard_order: 0,
-  sdk_tools: { read: true, write: true, browser: true, subagents: true },
+  // epic #431 — shell. 큐시트 20:35 블록(배포 URL·GitHub 저장소)이 이것 없이는
+  // 구현 경로가 없다. 스킬만 주고 실행 수단을 안 주면 코치가 가짜 배포 URL을
+  // 지어낸다(#428과 같은 실패 계열). 임의 명령 허용 — 승인 모달이 게이트.
+  sdk_tools: { read: true, write: true, browser: true, subagents: true, shell: true },
   // #371/#384 — 원장 트랙은 Agent SDK 런타임: 코치가 파일을 직접 읽고·쓰고·
   // 고쳐 루브릭/agent.md/이미지 참조를 실제 파일로 다룬다(Claude Code와 동일
   // 아키텍처 + canUseTool 교실 정책). 재활성 조건 충족(2026-07-24):

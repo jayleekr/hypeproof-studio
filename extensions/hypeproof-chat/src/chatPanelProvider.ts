@@ -7,6 +7,7 @@ import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./
 import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
+import { commandSignature, describeCommandForApproval } from "./shellPolicy";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -70,6 +71,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // the webview forgets everything on hide/show remounts; see AiDisclosureGate.
   private readonly aiDisclosure = new AiDisclosureGate();
   private activeCohortId: string | null = null;
+  /**
+   * epic #431 — shell command signatures the participant chose to always
+   * allow. SESSION-SCOPED and never persisted: a fresh window restores the
+   * full judgment. Destructive commands never reach this set (shellPolicy's
+   * commandSignature returns null for them), so `rm` can never be remembered.
+   */
+  private readonly approvedCommandSignatures = new Set<string>();
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
   // x-request-id header on every response we can correlate against in tail.
@@ -1066,12 +1074,51 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * streamed-assistant path.
    */
   async resolveActionApproval(req: ActionRequest): Promise<boolean> {
-    // Tier 1 — hard-deny shell exec.
+    // Tier 1 — shell (epic #431). No longer a hard deny: a cohort that set
+    // `sdk_tools.shell` gets arbitrary commands, and THIS modal is the gate.
+    // Three shapes, in order of how much they interrupt:
+    //   destructive → strong confirm every time, never remembered;
+    //   remembered  → silent (the participant already said "항상 허용");
+    //   otherwise   → normal confirm + the option to remember.
     if (req.kind === "executeShell") {
-      vscode.window.showInformationMessage(
-        "셸 실행은 허용되지 않아요. 다른 방법으로 도와드릴게요.",
+      const command = (req.payload as { command?: string } | null | undefined)?.command ?? "";
+      const destructive = req.destructive === true;
+      const signature = destructive ? null : commandSignature(command);
+
+      if (signature && this.approvedCommandSignatures.has(signature)) {
+        return true;
+      }
+
+      const pretty = describeCommandForApproval(command);
+      if (destructive) {
+        // Deliberately NOT offering "항상 허용". Approving `rm -rf` once must
+        // never approve it for the rest of the session, and the whole point of
+        // the strong confirm is that it stays interruptive.
+        const pick = await vscode.window.showWarningMessage(
+          `⚠️ 되돌리기 어려운 명령이에요. 정말 실행할까요?\n\n${pretty}`,
+          { modal: true },
+          "실행",
+          "취소",
+        );
+        return pick === "실행";
+      }
+
+      const REMEMBER = signature ? `항상 허용 (${signature})` : null;
+      const buttons = REMEMBER ? ["실행", REMEMBER] : ["실행"];
+      const pick = await vscode.window.showWarningMessage(
+        `코치가 명령을 실행하려고 해요:\n\n${pretty}`,
+        { modal: true },
+        ...buttons,
       );
-      return false;
+      if (pick === REMEMBER && signature) {
+        // Session-scoped only — never persisted. A new window starts the
+        // participant's judgment over, which is the intended lesson; what we
+        // are killing is the fifteen identical modals inside ONE 20:35 block
+        // that train them to stop reading.
+        this.approvedCommandSignatures.add(signature);
+        return true;
+      }
+      return pick === "실행";
     }
 
     // Tier 2 — file access must target the active workspace (write and read).
