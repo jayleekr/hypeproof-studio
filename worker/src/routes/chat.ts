@@ -154,7 +154,6 @@ chat.get("/profile", async (c) => {
     tools: { web_search: profile.tools?.web_search === true },
     // #282 Phase 2 — Agent SDK workspace tools. Profile owns the policy
     // (ADR 0003); absent flags normalize to false (fail closed, minor-safe).
-    // No shell/exec flag exists in the schema — it cannot be exposed here.
     sdk_tools: {
       read: profile.sdk_tools?.read === true,
       write: profile.sdk_tools?.write === true,
@@ -166,6 +165,12 @@ chat.get("/profile", async (c) => {
       // minors stay false until a pedagogy decision lands — harness
       // child_sdk_subagents FAIL enforces it.
       subagents: profile.sdk_tools?.subagents === true,
+      // epic #431 — shell. This serializer is the LAST hop: a profile can set
+      // `shell: true` and it still never reaches the client unless it is listed
+      // here, and the client's permittedToolsFor reads only what arrives. The
+      // whole grant is inert without this line (found by probing prod after the
+      // deploy — the profile said true, the API served four keys).
+      shell: profile.sdk_tools?.shell === true,
     },
     // #371/#282 — profile-requested coach runtime. Only an ADULT cohort that
     // opts into sdk_tools may request "agent-sdk" (real file Read/Write/Edit →
