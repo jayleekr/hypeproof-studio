@@ -29,6 +29,7 @@ import {
 } from "./browserMcp.ts";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
 import { SDK_BINARY_MIN_BYTES, SDK_BINARY_VERSION } from "./sdkBinaryManifest.ts";
+import { isDestructiveCommand } from "./shellPolicy.ts";
 
 export type AgentPermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
 
@@ -155,6 +156,14 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
   }
   if (profile.sdk_tools?.write === true && !isMinorTier(profile)) {
     tools.push(...SDK_WRITE_TOOL_NAMES);
+  }
+  // epic #431 — shell. Profile-gated only, no separate minor strip: a minor
+  // cohort grants it by simply not setting the flag. Arbitrary commands are
+  // intended; `evaluateSdkToolUse` routes every one of them to the approval
+  // modal, and shellPolicy decides which ones additionally refuse to be
+  // remembered by "항상 허용".
+  if (profile.sdk_tools?.shell === true) {
+    tools.push("Bash");
   }
   if (profile.tools?.web_search === true) {
     // Web research = search (find sources) + fetch (open and read them). Granting
@@ -1191,6 +1200,13 @@ export interface CoachToolAction {
   toolName: string;
   /** Raw tool input object as given by the SDK. */
   input: unknown;
+  /**
+   * epic #431 — carried from the policy verdict so the host can pick the
+   * strong confirm. Computed once in evaluateSdkToolUse rather than re-derived
+   * at the modal, so policy and UI can never disagree about what is
+   * destructive.
+   */
+  destructive?: boolean;
 }
 
 function firstString(input: unknown, keys: string[]): string | undefined {
@@ -1251,7 +1267,12 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
 
   if (SHELL_TOOLS.has(name)) {
     const command = firstString(action.input, ["command"]) ?? safeStringify(action.input);
-    return { kind: "executeShell", description: `${action.toolName}: ${command}`, payload: { command } };
+    return {
+      kind: "executeShell",
+      description: `${action.toolName}: ${command}`,
+      payload: { command },
+      ...(action.destructive ? { destructive: true } : {}),
+    };
   }
   if (WRITE_TOOLS.has(name)) {
     const path = firstString(action.input, ["file_path", "path", "notebook_path"]);
@@ -1301,7 +1322,10 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
 
 export type SdkToolVerdict =
   | { decision: "allow" }
-  | { decision: "ask" }
+  // `destructive` (epic #431): shell only. The command is still ask-able —
+  // arbitrary commands are the point — but the host must show the stronger
+  // confirm and must NOT let "항상 허용" remember it.
+  | { decision: "ask"; destructive?: boolean }
   // `drift` (#375): true only when the denied tool NAME is one the matrix has
   // never classified (isClassifiedSdkToolName === false) — i.e. possible Agent
   // SDK tool drift, not a routine profile/policy denial. The caller logs the
@@ -1405,15 +1429,26 @@ export function evaluateSdkToolUse(args: {
 
   const name = toolName.toLowerCase();
 
-  // Gate 1b — belt over suspenders: shell can NEVER be permitted (no profile
-  // flag exists for it in Phase 2), so deny even if a future permitted set
-  // widens by mistake.
+  // ── Shell (epic #431) ─────────────────────────────────────────────────────
+  // Gate 1 already proved the cohort opted in (`sdk_tools.shell`). From here
+  // ANY command may be proposed — there is deliberately no content allowlist,
+  // because an allowlist makes the coach invent detours for off-list work,
+  // which is the gap-filling that produced #428's fabricated `/app/workdir`.
+  //
+  // The modal is the gate. What the policy still decides is how LOUD it is:
+  // destructive commands (`rm`, `sudo`, `git push --force`, pipe-to-shell)
+  // carry a flag so the host shows the stronger confirm and never lets
+  // "항상 허용" remember them.
   if (SHELL_TOOLS.has(name)) {
-    return {
-      decision: "deny",
-      reason: "shell execution is never granted (Phase 2 invariant)",
-      friendly: TOOL_DENIED_FRIENDLY,
-    };
+    const command = firstString(input, ["command"]) ?? "";
+    if (!command.trim()) {
+      return {
+        decision: "deny",
+        reason: "shell call carried no command string",
+        friendly: TOOL_DENIED_FRIENDLY,
+      };
+    }
+    return { decision: "ask", destructive: isDestructiveCommand(command) };
   }
 
   // ── Agent/Task tool — subagent delegation (#282 P2 slice 3, REQ-M22) ──────

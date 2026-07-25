@@ -538,7 +538,11 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       awaitingUser += 1;
       let ok: boolean;
       try {
-        ok = await args.requestApproval({ toolName: name, input });
+        ok = await args.requestApproval({
+          toolName: name,
+          input,
+          ...(verdict.destructive ? { destructive: true } : {}),
+        });
       } finally {
         awaitingUser -= 1;
       }

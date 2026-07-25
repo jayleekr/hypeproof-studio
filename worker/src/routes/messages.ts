@@ -51,6 +51,7 @@ import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../
 import { recordTurnIfOwned } from "../lib/storage";
 import { tapAnthropicStream } from "../lib/sse";
 import { logChat, persistUsage } from "../lib/analytics";
+import { scrubToolResultSecrets } from "../lib/scrub-secrets";
 import {
   isMinorCohort,
   screenText,
@@ -302,7 +303,12 @@ messages.post("/messages", async (c) => {
     // SDK-runtime turn 400'd. Downgrade them to user-role context (verified:
     // same request 200s once converted). No privilege is conferred: the
     // top-level `system` is still replaced with the profile blocks below.
-    messages: normalizeSystemRoleMessages(raw.messages),
+    // epic #431 — the coach can run shell now, so a tool_result block may
+    // carry whatever a command printed: a PAT from ~/.git-credentials, an
+    // API token echoed by a failing wrangler deploy, a stray `env` dump.
+    // Mask before it becomes prompt content and before it reaches our logs.
+    // Server-side on purpose — an old or modified client cannot skip it.
+    messages: scrubToolResultSecrets(normalizeSystemRoleMessages(raw.messages)),
     system: buildAnthropicSystemBlocks(profile, coach),
     max_tokens: clampMaxTokens(raw.max_tokens, profile),
     stream,

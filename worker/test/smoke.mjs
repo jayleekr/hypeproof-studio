@@ -1695,10 +1695,17 @@ const TINY_PNG =
   // read+write SDK workspace tools (coach edits index.html directly), the
   // only browser MCP grant (slice 2), and the only SDK subagents grant
   // (slice 3 — read-only 코드리뷰어/리서처, delegation modal-gated).
+  // epic #431 — and the only `shell` grant: the 큐시트 20:35 블록(배포 URL·
+  // GitHub 저장소) has no implementation path without it, and a deploy SKILL
+  // without a deploy TOOL just makes the coach fabricate a URL (#428's failure
+  // class). Arbitrary commands; the approval modal is the gate.
+  // deepEqual (not a subset check) is deliberate — a shell grant must never
+  // spread to another cohort by accident, so widening this shape has to be an
+  // explicit edit here.
   assert.deepEqual(
     copyclone.sdk_tools,
-    { read: true, write: true, browser: true, subagents: true },
-    "copyclone: SDK workspace read+write + browser MCP + subagents on (adult, #282 P2)",
+    { read: true, write: true, browser: true, subagents: true, shell: true },
+    "copyclone: SDK read+write + browser MCP + subagents + shell on (adult, #282 P2 / #431)",
   );
   for (const p of all) {
     if (p.id !== copyclone.id) {
