@@ -802,6 +802,52 @@ export function sdkFatalAuthStatus(msg: Record<string, unknown>): number | null 
   return typeof status === "number" && SDK_FATAL_AUTH_STATUSES.has(status) ? status : null;
 }
 
+/** True for the SDK's retry tick (`{type:"system", subtype:"api_retry"}`). */
+export function isSdkRetryEvent(msg: Record<string, unknown>): boolean {
+  return msg["type"] === "system" && msg["subtype"] === "api_retry";
+}
+
+// ── First-token / idle stall watchdog (#403) ────────────────────────────────
+// The 400/401 fast-fail above only covers the credential case. Everything else
+// the gateway can answer with — 429 / 529 / 5xx / a dropped connection — the
+// SDK CLI retries up to 10x with backoff, and a merely SLOW first turn (long
+// cohort prompt + a heavy design brief) emits no stream events at all in the
+// meantime. Both look identical to a student: "생각하는 중… ✨" forever, no
+// error, no way out — observed 4/4 on the heavy-design-prompt runs. The proxy
+// path at least terminates with a visible error, so the SDK consumer keeps its
+// own deadline for parity.
+
+/**
+ * Silence budget (ms) before a turn is declared stalled. Measured from the last
+ * PROGRESS event — an `api_retry` tick deliberately does NOT renew it, or a
+ * backoff schedule would extend the budget forever, which is the exact hang
+ * this catches.
+ *
+ * Calibrated against a REAL healthy turn, not guessed (2026-07-24, seeded SDK →
+ * prod gateway, copyclone prompt, "make the homepage" brief):
+ *   result: success · duration 286s · 4 turns · 87 stream events
+ *   thinking → Write → thinking → Bash → Write → text
+ *   longest silence between events ≈ 86s (long thinking stretches; the periodic
+ *   `system/thinking_tokens` events are what break the silence)
+ * A healthy turn is MINUTES long here, and 86s of it can be silent. The first
+ * cut of this constant was 120s — barely 34s of headroom, i.e. a slightly
+ * heavier page would have had the watchdog killing turns that were working.
+ * 240s is ~3x the observed worst-case gap and still bounded, which is the whole
+ * point: bounded-and-visible beats forever-and-silent.
+ */
+export const SDK_STREAM_STALL_MS = 240_000;
+
+/**
+ * Student-facing stall copy. Same register as the token copy (REQ-B5): says
+ * what to do, never shows a technical reason. Retrying is the real recovery —
+ * the aborted turn leaves no server-side state behind.
+ */
+export const SDK_STALL_FRIENDLY =
+  "코치 응답이 너무 오래 걸려요. 다시 한 번 보내주세요. 🕐";
+
+/** Sentinel for the watchdog leg of the stream/timer race. */
+const STALLED = Symbol("sdk-stream-stalled");
+
 /** Best-effort text extraction across candidate SDK message shapes. */
 export function extractSdkText(msg: Record<string, unknown>): string {
   const direct = msg["text"];
@@ -834,35 +880,130 @@ export interface SdkStreamHandlers {
   /** Build the student-friendly auth error thrown on a fatal 400/401. */
   makeFatalAuthError: (status: number) => Error;
   onDelta: (delta: string) => void;
+  /**
+   * #403 — silence budget in ms before the turn is declared stalled. Omit for
+   * SDK_STREAM_STALL_MS; 0 disables the watchdog (escape hatch / old behavior).
+   */
+  stallMs?: number;
+  /**
+   * Build the student-friendly error thrown when the budget elapses. Defaults
+   * to a bare Error(SDK_STALL_FRIENDLY) so a caller can't accidentally turn a
+   * stall into a silent hang by forgetting to wire it.
+   */
+  makeStallError?: () => Error;
+  /**
+   * True while the turn is legitimately blocked OUTSIDE the stream: the
+   * approve/deny modal is open (the student is reading it), or a tool the SDK
+   * is still executing. Silence there is correct, so the watchdog grants a
+   * fresh budget instead of aborting.
+   */
+  isTurnBlocked?: () => boolean;
 }
 
 /**
- * Consume one SDK coach turn's message stream. Pure and injected so the
- * fast-fail contract is locked by unit tests: on the FIRST api_retry event
- * with error_status 400/401 the query is aborted and the auth error thrown —
- * within one event, no further stream consumption, no minutes-long backoff.
+ * Consume one SDK coach turn's message stream. Pure and injected so both
+ * no-silent-hang contracts are locked by unit tests:
+ * - on the FIRST api_retry event with error_status 400/401 the query is
+ *   aborted and the auth error thrown — within one event, no minutes-long
+ *   backoff (#320, REQ-M15);
+ * - after `stallMs` of silence with no progress the query is aborted and the
+ *   friendly stall error thrown, so a retry storm or a wedged first turn ends
+ *   in a visible message instead of an endless "생각하는 중…" (#403, REQ-M26).
+ *
+ * The manual iterator (instead of `for await`) is what makes the timer race
+ * possible; the early-exit paths close the iterator explicitly, which
+ * `for await` used to do for us.
  */
 export async function consumeSdkStream(
   stream: AsyncIterable<unknown>,
   h: SdkStreamHandlers,
 ): Promise<void> {
-  for await (const raw of stream) {
-    // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
-    if (h.isAborted()) throw h.makeAbortError();
-    const msg = (raw ?? {}) as Record<string, unknown>;
-    const fatal = sdkFatalAuthStatus(msg);
-    if (fatal !== null) {
-      // Kill the subprocess's retry loop first, then surface the token error.
+  const budget = h.stallMs ?? SDK_STREAM_STALL_MS;
+  const it = stream[Symbol.asyncIterator]();
+  /** In-flight it.next(); kept across timer re-arms so it is never called twice. */
+  let pending: Promise<IteratorResult<unknown>> | null = null;
+  let progressAt = Date.now();
+  /**
+   * The blocked state is only sampled when the budget expires, so a modal that
+   * closes mid-window would otherwise leave the coach ~0ms to answer. One grace
+   * window is granted after any observed block: "once the human (or the tool)
+   * is done, the coach gets a full budget", regardless of the timing.
+   */
+  let sawPause = false;
+
+  const nextEvent = async (): Promise<IteratorResult<unknown>> => {
+    if (!pending) pending = it.next();
+    if (budget <= 0) {
+      const settled = await pending;
+      pending = null;
+      return settled;
+    }
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const remaining = Math.max(1, budget - (Date.now() - progressAt));
+      // NOT unref'd on purpose: this timer is the only thing that ends a wedged
+      // turn, so it has to be able to keep the loop alive while one is live.
+      // It is always cleared below (both legs of the race).
+      const expired = new Promise<typeof STALLED>((resolve) => {
+        timer = setTimeout(() => resolve(STALLED), remaining);
+      });
+      const won = await Promise.race([pending.then((value) => ({ value })), expired]);
+      clearTimeout(timer);
+      if (won !== STALLED) {
+        pending = null;
+        return won.value;
+      }
+      if (h.isTurnBlocked?.()) {
+        // An open approval modal / a running tool is not a stall.
+        sawPause = true;
+        progressAt = Date.now();
+        continue;
+      }
+      if (sawPause) {
+        // The block ended somewhere inside the window that just expired; the
+        // coach hasn't had a fair budget yet. Spend the grace window.
+        sawPause = false;
+        progressAt = Date.now();
+        continue;
+      }
+      // Nobody awaits `pending` after this throw and abortQuery() rejects it.
+      pending.catch(() => {});
       h.abortQuery();
-      throw h.makeFatalAuthError(fatal);
+      throw h.makeStallError?.() ?? new Error(SDK_STALL_FRIENDLY);
     }
-    const type = String(msg["type"] ?? "");
-    if (type === "assistant" || type === "text" || type === "content_block_delta") {
-      const delta = extractSdkText(msg);
-      if (delta) h.onDelta(delta);
+  };
+
+  try {
+    for (;;) {
+      const step = await nextEvent();
+      if (step.done) return;
+      // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
+      if (h.isAborted()) throw h.makeAbortError();
+      const msg = (step.value ?? {}) as Record<string, unknown>;
+      const fatal = sdkFatalAuthStatus(msg);
+      if (fatal !== null) {
+        // Kill the subprocess's retry loop first, then surface the token error.
+        h.abortQuery();
+        throw h.makeFatalAuthError(fatal);
+      }
+      // Retry ticks are the pathology, not progress — they must not renew the
+      // watchdog budget.
+      if (!isSdkRetryEvent(msg)) {
+        progressAt = Date.now();
+        sawPause = false;
+      }
+      const type = String(msg["type"] ?? "");
+      if (type === "assistant" || type === "text" || type === "content_block_delta") {
+        const delta = extractSdkText(msg);
+        if (delta) h.onDelta(delta);
+      }
+      // Other message types (result / message_stop) are terminal — nothing to
+      // emit; the caller posts streamEnd.
     }
-    // Other message types (result / message_stop) are terminal — nothing to
-    // emit; the caller posts streamEnd.
+  } catch (err) {
+    // `for await` closed the iterator on an early exit; the manual loop must.
+    void Promise.resolve(it.return?.()).catch(() => {});
+    throw err;
   }
 }
 

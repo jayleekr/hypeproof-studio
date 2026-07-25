@@ -131,6 +131,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * #384 — hand the webview an image data URL to attach to the next turn. Used
+   * by the "image opened in an editor tab" flow (extension.ts) so dropping a
+   * screenshot onto the editor still reaches the coach. The webview downscales
+   * + thumbnails it, same path as ⌘V paste. image_paste-gated by the caller.
+   */
+  attachImageDataUrl(dataUrl: string, name: string): void {
+    void this.post({ type: "attachImage", dataUrl, name });
+  }
+
+  /**
    * #278 — stash captured browser-page context for the NEXT turn. The DOM text
    * is prepended to the prompt; the screenshot (if present, and if this cohort
    * has image_paste) rides along as an image so the coach can *see* the page
@@ -797,6 +807,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
             // seeded > node_modules). Empty string = unset.
             binaryPathSetting: cfg.get<string>("sdkBinaryPath", "") || undefined,
+            // #403 — no-progress budget before the turn is aborted with a
+            // visible retry message instead of an endless "생각하는 중…".
+            stallTimeoutMs: cfg.get<number>("sdkStallTimeoutMs"),
             onDelta,
             onCitations,
             onAssetScore,

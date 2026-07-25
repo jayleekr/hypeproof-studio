@@ -3,6 +3,9 @@ import { profile as skBiopharmKidsS1 } from "./sk-biopharm-kids-s1.ts";
 import { profile as boahDentalTeaserS1 } from "./boah-dental-teaser-2026-s1.ts";
 import { profile as skBiopharmKids2026Grade56S1 } from "./sk-biopharm-kids-2026-grade-5-6-s1.ts";
 import { profile as boahDentalDirectorCopycloneS1 } from "./boah-dental-director-copyclone-2026-s1.ts";
+// Synthetic — CI-only gateway contract canary (#406). Empty roster, hidden
+// from the instructor console; see the file header for why it exists.
+import { profile as canarySdkContract } from "./canary-sdk-contract.ts";
 
 // All known profiles. Add new cohorts here.
 const REGISTRY: Profile[] = [
@@ -10,6 +13,7 @@ const REGISTRY: Profile[] = [
   boahDentalTeaserS1,
   skBiopharmKids2026Grade56S1,
   boahDentalDirectorCopycloneS1,
+  canarySdkContract,
 ];
 
 const BY_ID = new Map(REGISTRY.map((p) => [p.id, p]));
