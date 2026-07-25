@@ -17,6 +17,18 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 
+// Playwright 의 line 리포터가 ANSI 로 콘솔 줄을 덮어써서 코치 답변·판정이
+// 로그에서 사라진다(#431 검증 중 실제로 겪음 — 엇갈린 판정의 원인을 못 밝혔다).
+// 증거는 파일로 남긴다.
+const ARTIFACT_DIR = "test-artifacts";
+function artifact(name: string, body: string): void {
+  try {
+    fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+    fs.writeFileSync(path.join(ARTIFACT_DIR, name), body);
+    console.log(`[artifact] ${ARTIFACT_DIR}/${name} (${body.length}B)`);
+  } catch (e) { console.log(`[artifact] 실패: ${String(e)}`); }
+}
+
 async function chatCf(win: Page, timeoutMs = 40_000): Promise<FrameLocator> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -73,6 +85,11 @@ async function ask(cf: FrameLocator, win: Page, text: string, timeoutMs = 600_00
   // 그 표시의 소멸이 곧 종료 신호다. 표시가 사라진 뒤에도 텍스트가 잠깐
   // 흔들릴 수 있어 안정까지 함께 본다.
   const progress = cf.locator(".hps-msg-assistant").last().locator(".hps-code-progress");
+  // 진행 표시는 두 형태다 (ChatPanel.tsx AssistantContent 확인):
+  //   content 비었을 때  → "생각하는 중… ✨" 텍스트만, 칩 없음
+  //   content 있을 때    → .hps-code-progress 칩
+  // 칩만 보면 첫 형태를 "안정된 텍스트"로 읽어 18초에 종료 오판한다(실제로 겪음).
+  const THINKING = "생각하는 중";
   const deadline = Date.now() + timeoutMs;
   let last = "", stable = 0, sawProgress = false;
   while (Date.now() < deadline) {

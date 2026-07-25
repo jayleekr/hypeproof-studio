@@ -18,6 +18,18 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 
+// Playwright 의 line 리포터가 ANSI 로 콘솔 줄을 덮어써서 코치 답변·판정이
+// 로그에서 사라진다(#431 검증 중 실제로 겪음 — 엇갈린 판정의 원인을 못 밝혔다).
+// 증거는 파일로 남긴다.
+const ARTIFACT_DIR = "test-artifacts";
+function artifact(name: string, body: string): void {
+  try {
+    fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+    fs.writeFileSync(path.join(ARTIFACT_DIR, name), body);
+    console.log(`[artifact] ${ARTIFACT_DIR}/${name} (${body.length}B)`);
+  } catch (e) { console.log(`[artifact] 실패: ${String(e)}`); }
+}
+
 async function chatCf(win: Page, timeoutMs = 40_000): Promise<FrameLocator> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -66,14 +78,19 @@ async function ask(cf: FrameLocator, win: Page, text: string, timeoutMs = 900_00
   const body = cf.locator(".hps-msg-assistant .hps-msg-body").last();
   // #429 — 진행 표시는 스트리밍 중인 메시지에만 붙는다. 그 소멸이 종료 신호.
   const progress = cf.locator(".hps-msg-assistant").last().locator(".hps-code-progress");
+  // 진행 표시는 두 형태다 (ChatPanel.tsx AssistantContent 확인):
+  //   content 비었을 때  → "생각하는 중… ✨" 텍스트만, 칩 없음
+  //   content 있을 때    → .hps-code-progress 칩
+  // 칩만 보면 첫 형태를 "안정된 텍스트"로 읽어 18초에 종료 오판한다(실제로 겪음).
+  const THINKING = "생각하는 중";
   const deadline = Date.now() + timeoutMs;
   let last = "", stable = 0;
   while (Date.now() < deadline) {
     await win.waitForTimeout(4_000);
-    if ((await progress.count().catch(() => 0)) > 0) {
-      stable = 0; last = ((await body.textContent().catch(() => "")) ?? ""); continue;
-    }
     const now = ((await body.textContent().catch(() => "")) ?? "");
+    const busy = (await progress.count().catch(() => 0)) > 0
+      || (now.trim().startsWith(THINKING) && now.trim().length < 40);
+    if (busy) { stable = 0; last = now; continue; }
     if (now === last && now.length > 0) stable++; else { stable = 0; last = now; }
     if (stable >= 3) break;
   }
@@ -92,7 +109,7 @@ function httpStatus(url: string): number {
 test("B4+B5 — 저장소와 영구 배포 주소가 실재하는가", async () => {
   test.setTimeout(2_400_000);
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const repo = `hps-rubric-b4-${stamp}`;
+  const repo = `hps-rubric-b4-${stamp}-${String(Date.now()).slice(-5)}`;
   const owner = execFileSync("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8" }).trim();
   const marker = `hps-b4-${Date.now()}`;
   console.log(`\n[SETUP] owner=${owner} repo=${repo} marker=${marker}`);
@@ -130,7 +147,8 @@ test("B4+B5 — 저장소와 영구 배포 주소가 실재하는가", async () 
       `주소가 실제로 열리는 것까지 확인하고 알려줘.`,
       2_000_000,
     );
-    console.log(`\n[B4/B5] 코치 답변:\n${ans.slice(0, 2500)}\n`);
+    artifact("b4b5-answer.txt", ans);
+    console.log(`\n[B4/B5] 코치 답변 ${ans.length}자 (전문은 artifact)`);
 
     // ── B4 — 저장소가 실재하는가 (코치의 말이 아니라 API로) ──────────────────
     let repoExists = false, filesOnRepo: string[] = [];
@@ -156,11 +174,12 @@ test("B4+B5 — 저장소와 영구 배포 주소가 실재하는가", async () 
       .map((u) => u.replace(/[.,)\]]+$/, ""))
       .filter((u) => /github\.io|trycloudflare/.test(u)))];
     console.log(`[R0] 코치가 말한 배포 URL: ${JSON.stringify(urls)}`);
+    artifact("b4b5-urls.json", JSON.stringify({ urls, all: ans.match(/https?:\/\/[^\s`'")\]]+/g) ?? [] }, null, 2));
 
     // Pages 는 첫 배포에 1~2분 걸린다 — 코치가 기다렸어야 하지만, 테스트는
     // 여유를 주고 재확인한다(코치가 성급했는지는 아래 별도 판정).
     let live: { u: string; code: number } | undefined;
-    for (let i = 0; i < 10 && !live; i++) {
+    for (let i = 0; i < 30 && !live; i++) {
       for (const u of urls) {
         const code = httpStatus(u);
         console.log(`[R0]   ${code || "실패"}  ${u}`);
@@ -182,6 +201,7 @@ test("B4+B5 — 저장소와 영구 배포 주소가 실재하는가", async () 
       verdict.push(`B5 내 페이지인가 : ${ours ? "PASS" : "FAIL (200이지만 내용 불일치)"}`);
     }
 
+    artifact("b4b5-verdict.txt", verdict.join("\n") + "\n\n--- 모달 ---\n" + modalLog.join("\n\n"));
     console.log("\n──────── 판정 ────────");
     verdict.forEach((v) => console.log("  " + v));
     console.log("──────── 모달 ────────");
