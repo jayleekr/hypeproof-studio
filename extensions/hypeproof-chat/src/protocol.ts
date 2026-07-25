@@ -100,6 +100,10 @@ export interface ResolvedProfile {
   ux: UxConfig;
   publishing: { enabled: boolean; strategy: string };
   preview: { type: "iframe" | "live_server"; auto_start: boolean };
+  // #422 — the cohort's on-disk workspace folder (e.g. "~/HypeProofClinic" for
+  // the dental website cohort, "~/HypeProofGames" for kids). The extension opens
+  // this folder on onboarding. Absent → the legacy default folder is used.
+  workspace_root?: string | null;
   /** Optional input capabilities (default off). #278 / website-copyclone. */
   input?: { page_context?: boolean; image_paste?: boolean };
   /** #278 Phase 3 — coach's client-driven browser control loop (default off). */
