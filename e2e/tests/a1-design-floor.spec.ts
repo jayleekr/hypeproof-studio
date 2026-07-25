@@ -60,14 +60,19 @@ async function ask(cf: FrameLocator, win: Page, text: string, timeoutMs = 900_00
     .toBeGreaterThan(before);
   const body = cf.locator(".hps-msg-assistant .hps-msg-body").last();
   const progress = cf.locator(".hps-msg-assistant").last().locator(".hps-code-progress");
+  // 진행 표시는 두 형태다 (ChatPanel.tsx AssistantContent 확인):
+  //   content 비었을 때  → "생각하는 중… ✨" 텍스트만, 칩 없음
+  //   content 있을 때    → .hps-code-progress 칩
+  // 칩만 보면 첫 형태를 "안정된 텍스트"로 읽어 18초에 종료 오판한다(실제로 겪음).
+  const THINKING = "생각하는 중";
   const deadline = Date.now() + timeoutMs;
   let last = "", stable = 0;
   while (Date.now() < deadline) {
     await win.waitForTimeout(4_000);
-    if ((await progress.count().catch(() => 0)) > 0) {
-      stable = 0; last = ((await body.textContent().catch(() => "")) ?? ""); continue;
-    }
     const now = ((await body.textContent().catch(() => "")) ?? "");
+    const busy = (await progress.count().catch(() => 0)) > 0
+      || (now.trim().startsWith(THINKING) && now.trim().length < 40);
+    if (busy) { stable = 0; last = now; continue; }
     if (now === last && now.length > 0) stable++; else { stable = 0; last = now; }
     if (stable >= 3) break;
   }
@@ -83,7 +88,18 @@ function scoreDesignFloor(html: string) {
   const checks: Array<[string, boolean]> = [
     ["아이콘이 인라인 SVG (이모지 아님)", /<svg[\s>]/i.test(html) && !emojiIcon],
     ["cursor: pointer", /cursor\s*:\s*pointer/i.test(html)],
-    ["150~300ms 상태 전환", /transition[^;}]*\b(1[5-9]\d|2\d\d|300)ms/i.test(html)],
+    // 패턴 매칭 대신 **값을 뽑아 범위로 판정**한다. 실제 산출물은 `.15s`/`.2s`
+    // 로 쓰는데 ms 만 보는 정규식은 통과한 디자인을 미달로 오판했고(실측),
+    // 단위별 정규식을 덧대는 방식도 `\b` 경계 때문에 또 틀렸다. 숫자를 꺼내
+    // ms 로 환산하면 표기 방식과 무관하게 옳다.
+    ["150~300ms 상태 전환", (() => {
+      const decls = html.match(/transition[^;}]*/gi) ?? [];
+      return decls.some((d) =>
+        [...d.matchAll(/(\d*\.?\d+)\s*(ms|s)\b/gi)]
+          .map((m) => (m[2].toLowerCase() === "s" ? parseFloat(m[1]) * 1000 : parseFloat(m[1])))
+          .some((v) => v >= 150 && v <= 300),
+      );
+    })()],
     ["모든 이미지에 alt", (() => {
       const imgs = html.match(/<img\b[^>]*>/gi) ?? [];
       return imgs.length === 0 || imgs.every((t) => /\balt\s*=/i.test(t));
@@ -132,10 +148,24 @@ test("A1 — 디자인 품질 바닥을 코치가 스스로 통과시키는가",
     );
     const elapsed = Math.round((Date.now() - t0) / 1000);
     console.log(`\n[A1] 첫 턴 소요: ${elapsed}초`);
+    console.log(`[A1] 코치 답변 (앞 1800자):\n${ans.slice(0, 1800)}\n`);
 
-    expect(fs.existsSync(target), "A1: index.html 이 실제로 생겨야 한다").toBe(true);
-    const html = fs.readFileSync(target, "utf8");
-    console.log(`[A1] 산출물 ${html.length.toLocaleString()} chars`);
+    // 산출물은 두 경로 중 하나로 온다. 파일만 기대하면 안 된다 — 코호트
+    // 프롬프트의 기본 출력 방식은 채팅의 ```html 펜스이고(“본문은 html 블록
+    // 안에 완전한 단일 문서로”), Studio가 ▶ Run 으로 미리보기한다. 파일 쓰기는
+    // 참가자가 저장을 요청했을 때의 경로다. A1이 재는 것은 **산출물의 품질**이지
+    // 저장 방식이 아니므로 둘 다 받는다.
+    let html = "";
+    let source = "";
+    if (fs.existsSync(target)) {
+      html = fs.readFileSync(target, "utf8");
+      source = "파일(index.html)";
+    } else {
+      const m = ans.match(/<!doctype html[\s\S]*?<\/html>/i) ?? ans.match(/<html[\s\S]*?<\/html>/i);
+      if (m) { html = m[0]; source = "채팅 펜스"; }
+    }
+    console.log(`[A1] 산출물 경로: ${source || "없음"} · ${html.length.toLocaleString()} chars`);
+    expect(html.length, "A1: 산출물이 파일이든 펜스든 나와야 한다").toBeGreaterThan(200);
 
     const { checks, passed, total } = scoreDesignFloor(html);
     console.log("\n──── A1 품질 바닥 ────");
