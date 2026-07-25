@@ -20,6 +20,15 @@ interface Props {
   pageNotice: string | null;           // #308 — "페이지를 코치에게" 인라인 안내
   aiNotice: string | null;             // #320 — AI disclosure at session start
   streaming: boolean;
+  /**
+   * WHICH message is streaming, not just whether one is (#429). `streaming` is
+   * a turn-level flag; handing it to every row made each FINISHED assistant
+   * message re-render its in-progress spinner the moment a NEW turn started, so
+   * "🛠️ 웹사이트 만드는 중… ✨" sat under a turn that had visibly ended. Row-level
+   * progress has to key off identity; turn-level concerns (composer disabled,
+   * retry buttons hidden) correctly stay on `streaming`.
+   */
+  streamingId: string | null;
   error: string | null;
   errorRequestId: string | null;
   errorRunbookUrl: string | null;  // #165 — render as clickable runbook link
@@ -141,7 +150,7 @@ function userPromptBefore(messages: ChatMessage[], assistantId: string): string 
 }
 
 export function ChatPanel(props: Props) {
-  const { config, messages, streaming, error, incomingImage } = props;
+  const { config, messages, streaming, streamingId, error, incomingImage } = props;
   const [draft, setDraft] = useState("");
   const [composing, setComposing] = useState(false);
   const [rollExpand, setRollExpand] = useState<{ original: string } | null>(null);
@@ -432,6 +441,7 @@ export function ChatPanel(props: Props) {
             key={m.id}
             message={m}
             streaming={streaming}
+            isStreamingThis={streaming && m.id === streamingId}
             ux={ux}
             coachName={coachName}
             buildingLabel={buildingLabel}
@@ -798,6 +808,7 @@ function ChipRack({
 function MessageItem({
   message,
   streaming,
+  isStreamingThis,
   ux,
   coachName,
   buildingLabel,
@@ -808,7 +819,10 @@ function MessageItem({
   onRetry,
 }: {
   message: ChatMessage;
+  /** Turn-level: any stream in flight. Gates the retry button, not the spinner. */
   streaming: boolean;
+  /** Row-level: THIS message is the one streaming. Gates the spinner (#429). */
+  isStreamingThis: boolean;
   ux: UxConfig;
   coachName: string;
   buildingLabel: string;
@@ -857,7 +871,7 @@ function MessageItem({
         {message.role === "assistant" ? (
           <AssistantContent
             content={message.content}
-            streaming={streaming}
+            streaming={isStreamingThis}
             buildingLabel={buildingLabel}
             tone={tone}
             hasActivity={hasActivity}
