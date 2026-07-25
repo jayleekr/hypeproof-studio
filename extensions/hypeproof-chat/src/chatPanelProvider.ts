@@ -474,13 +474,38 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (!root) return null;
     try {
       const url = await this.liveServer.ensure(root);
-      // Avoid stacking tabs: if a tab already shows this server, it refreshes
-      // itself via the injected live-reload SSE; otherwise open a new one.
-      const already = (vscode.window.browserTabs ?? []).some((t) => t.url?.startsWith(url));
-      if (already) {
+      // Avoid stacking preview tabs on the right. The live server binds a fresh
+      // random port on each (re)start (app relaunch, root change), so the URL
+      // can differ from a previously-opened tab — an exact-URL match alone then
+      // fails and every restart opens ANOTHER tab. So we match by "is this a
+      // loopback preview tab" (port-independent): reuse the one already on the
+      // current URL via SSE reload; otherwise close any STALE preview tabs
+      // (dead port from a prior server start) and open exactly one fresh tab.
+      const tabs = vscode.window.browserTabs ?? [];
+      const isPreviewTab = (u?: string): boolean =>
+        !!u && /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(u);
+      const current = tabs.find((t) => t.url?.startsWith(url));
+      if (current) {
         this.liveServer.reload();
       } else {
-        await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
+        for (const t of tabs) {
+          if (isPreviewTab(t.url)) {
+            try {
+              await t.close();
+            } catch {
+              /* best-effort — a tab we can't close shouldn't block the preview */
+            }
+          }
+        }
+        // Open in the FIRST editor column (not Beside): this cohort edits via the
+        // coach, so the editor area is otherwise an empty welcome group. Beside
+        // would open the preview next to that empty group, leaving a blank pane
+        // between the chat sidebar and the preview. ViewColumn.One fills the main
+        // editor area so the layout is just: chat sidebar | preview.
+        await vscode.window.openBrowserTab(url, {
+          viewColumn: vscode.ViewColumn.One,
+          preserveFocus: true,
+        });
       }
       return url;
     } catch {
