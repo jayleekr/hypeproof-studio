@@ -497,7 +497,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             }
           }
         }
-        await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
+        // Open in the FIRST editor column (not Beside): this cohort edits via the
+        // coach, so the editor area is otherwise an empty welcome group. Beside
+        // would open the preview next to that empty group, leaving a blank pane
+        // between the chat sidebar and the preview. ViewColumn.One fills the main
+        // editor area so the layout is just: chat sidebar | preview.
+        await vscode.window.openBrowserTab(url, {
+          viewColumn: vscode.ViewColumn.One,
+          preserveFocus: true,
+        });
       }
       return url;
     } catch {
