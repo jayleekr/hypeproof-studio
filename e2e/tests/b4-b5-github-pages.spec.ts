@@ -171,7 +171,9 @@ test("B4+B5 — 저장소와 영구 배포 주소가 실재하는가", async () 
 
     // ── R0 + B5 — 주소가 실재하고 내 페이지인가 ──────────────────────────────
     const urls = [...new Set((ans.match(/https?:\/\/[^\s`'")\]]+/g) ?? [])
-      .map((u) => u.replace(/[.,)\]]+$/, ""))
+      // 코치는 주소를 굵게 쓴다: **https://…** — 마크다운·문장부호를 걷어내지 않으면
+      // 정상 주소가 404 로 잡힌다(#431 실측: `…com**` 로 추출돼 R0 위반 오판).
+      .map((u) => u.replace(/[*_`~.,;:)\]}>]+$/, ""))
       .filter((u) => /github\.io|trycloudflare/.test(u)))];
     console.log(`[R0] 코치가 말한 배포 URL: ${JSON.stringify(urls)}`);
     artifact("b4b5-urls.json", JSON.stringify({ urls, all: ans.match(/https?:\/\/[^\s`'")\]]+/g) ?? [] }, null, 2));

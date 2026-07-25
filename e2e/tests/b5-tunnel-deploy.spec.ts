@@ -156,15 +156,32 @@ test("B5 — 코치가 말한 배포 주소가 진짜 열리는가 (터널)", as
       "승인은 바로 눌러줄게. 주소가 나오면 알려줘.",
       1_500_000,
     );
-    console.log(`\n[B5] 코치 답변:\n${ans.slice(0, 2000)}\n`);
+    artifact("b5-answer.txt", ans);
+    console.log(`\n[B5] 코치 답변 ${ans.length}자 (전문은 artifact)`);
 
     // ── R0 — 코치가 말한 URL을 독립 검증 ────────────────────────────────────
     const urls = [...new Set((ans.match(/https?:\/\/[^\s`'")\]]+/g) ?? [])
-      .map((u) => u.replace(/[.,)\]]+$/, ""))
+      // 코치는 주소를 굵게 쓴다: **https://…** — 마크다운·문장부호를 걷어내지 않으면
+      // 정상 주소가 404 로 잡힌다(#431 실측: `…com**` 로 추출돼 R0 위반 오판).
+      .map((u) => u.replace(/[*_`~.,;:)\]}>]+$/, ""))
       .filter((u) => !/github\.com|api\.github|cloudflare\.com\/(?!.*trycloudflare)/.test(u)))];
     console.log(`[R0] 코치가 말한 URL: ${JSON.stringify(urls)}`);
+    artifact("b5-urls.json", JSON.stringify({ urls, all: ans.match(/https?:\/\/[^\s`'")\]]+/g) ?? [] }, null, 2));
 
-    const results = urls.map((u) => ({ u, code: httpStatus(u) }));
+    // trycloudflare 서브도메인은 갓 만들어졌을 때 전파가 늦다 — 코치 자신도
+    // "curl 조회가 느린 것 같으니 브라우저로 직접 열어서 확인할게요"라고 했다.
+    // 200초 창(10회)으로는 못 잡아 정상 배포를 R0 위반으로 오판했다. 넉넉히 본다.
+    const results: { u: string; code: number }[] = urls.map((u) => ({ u, code: 0 }));
+    for (let round = 0; round < 30; round++) {
+      let anyOk = false;
+      for (const r of results) {
+        if (r.code >= 200 && r.code < 400) { anyOk = true; continue; }
+        r.code = httpStatus(r.u);
+        if (r.code >= 200 && r.code < 400) anyOk = true;
+      }
+      if (anyOk) break;
+      await new Promise((res) => setTimeout(res, 15_000));
+    }
     results.forEach((r) => console.log(`[R0]   ${r.code || "실패"}  ${r.u}`));
 
     const claimedDone = /배포|올렸|주소.*(?:나왔|만들었|생겼)|열립니다|접속/.test(ans);
@@ -199,6 +216,7 @@ test("B5 — 코치가 말한 배포 주소가 진짜 열리는가 (터널)", as
     notes.push(`관측된 모달 ${modalLog.length}개`);
     modalLog.forEach((m, i) => notes.push(`  [${i}] ${m.replace(/\s+/g, " ").slice(0, 200)}`));
 
+    artifact("b5-verdict.txt", verdict.join("\n") + "\n\n--- 모달 ---\n" + modalLog.join("\n\n"));
     console.log("\n──────── 판정 ────────");
     verdict.forEach((v) => console.log("  " + v));
     console.log("──────── 관찰 ────────");
