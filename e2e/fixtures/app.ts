@@ -128,7 +128,10 @@ async function reportQuietState(app: ElectronApplication): Promise<void> {
 export async function launchApp(opts: LaunchOptions = { preseedToken: true }): Promise<AppContext> {
   const token = fs.readFileSync(TOKEN_FILE, "utf8").trim();
 
-  const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "hps-e2e-"));
+  // realpathSync: macOS os.tmpdir() is /var/… which symlinks to /private/var/….
+  // The SDK canonicalizes paths, so an un-resolved workspace root fails the
+  // workspace-containment check and every coach Write is auto-denied (#384).
+  const userDataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hps-e2e-")));
   const userDir = path.join(userDataDir, "User");
   fs.mkdirSync(userDir, { recursive: true });
 
@@ -141,6 +144,10 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
     JSON.stringify(
       {
         "hypeproofChat.proxyUrl": process.env.HPS_E2E_PROXY_URL?.trim() || "http://localhost:8787/v1",
+        // Render dialogs in the DOM (default on macOS is a NATIVE NSAlert that
+        // Playwright cannot see or click) — required to drive approval modals
+        // (writeFile/openBrowser) in SDK-runtime specs.
+        "window.dialogStyle": "custom",
         "workbench.startupEditor": "none",
         "telemetry.telemetryLevel": "off",
         "update.mode": "none",

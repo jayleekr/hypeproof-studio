@@ -119,6 +119,49 @@ console.log("✓ messages: session/pause/roster gates — parity with /v1/chat")
 }
 console.log("✓ messages: client system stripped — cohort prompt enforced server-side");
 
+// --- #384: mid-conversation role:"system" downgraded to user context ---------
+// Claude Code CLI 2.x sends role:"system" entries inside messages[] (beta
+// mid-conversation-system). Pinned classroom models reject the role → every
+// SDK turn 400'd. The gateway must downgrade them to user-role context.
+{
+  const env = messagesEnv();
+  await withMockUpstream(
+    () => Response.json(anthropicJsonBody({ text: "ok" })),
+    async (calls) => {
+      const r = await app.fetch(
+        messagesRequest({
+          body: {
+            messages: [
+              { role: "user", content: [{ type: "text", text: "안녕", cache_control: { type: "ephemeral" } }] },
+              { role: "system", content: "Available agent types: ..." },
+            ],
+          },
+        }),
+        env,
+        makeCtx(),
+      );
+      assert.equal(r.status, 200);
+      const sent = JSON.parse(calls[0].init.body);
+      assert.ok(
+        sent.messages.every((m) => m.role !== "system"),
+        "no role:system survives to upstream",
+      );
+      const converted = sent.messages[1];
+      assert.equal(converted.role, "user", "system entry downgraded to user");
+      const text = JSON.stringify(converted.content);
+      assert.ok(text.includes("<system-context>"), "context marker wraps the downgraded content");
+      assert.ok(text.includes("Available agent types"), "original content preserved");
+      // Block-array content variant keeps its blocks (cache_control intact).
+      assert.deepEqual(
+        sent.messages[0].content[0].cache_control,
+        { type: "ephemeral" },
+        "untouched user message keeps cache_control",
+      );
+    },
+  );
+}
+console.log("✓ messages: role:system entries downgraded to user context (#384 SDK CLI)");
+
 // --- model clamp: unknown → profile default; haiku ids → fast pin ------------
 {
   const env = messagesEnv();
@@ -145,6 +188,60 @@ console.log("✓ messages: client system stripped — cohort prompt enforced ser
   );
 }
 console.log("✓ messages: model policy — catalog clamp + haiku fast-pin");
+
+// --- #406 model-gated params: stripped so the clamp can't build a 400 -------
+// The gateway rewrites the model but forwards the body spread-first, so a newer
+// CLI's generation-specific params rode along with an older pinned model and
+// upstream 400'd EVERY SDK turn (swallowed by the CLI retry loop → the endless
+// "생각하는 중" of #403). Prod-verified one field at a time: baseline/tools/
+// thinking → 200; output_config{effort} → 400; context_management{edits} → 400.
+{
+  const env = messagesEnv();
+  await withMockUpstream(
+    () => Response.json(anthropicJsonBody({ text: "hi" })),
+    async (calls) => {
+      await app.fetch(
+        messagesRequest({
+          body: {
+            model: "claude-fable-5",            // the CLI's own default
+            output_config: { effort: "xhigh" }, // its generation's params
+            context_management: { edits: [{ type: "clear_thinking_20251015", keep: "all" }] },
+            thinking: { type: "adaptive", display: "omitted" },
+            metadata: { user_id: "device" },
+          },
+        }),
+        env,
+        makeCtx(),
+      );
+      const sent = JSON.parse(calls[0].init.body);
+      assert.equal(sent.model, DEFAULT_ID, "model still clamped to the cohort catalog");
+      assert.equal("output_config" in sent, false, "#406: output_config stripped (400s the pinned model)");
+      assert.equal("context_management" in sent, false, "#406: context_management stripped");
+      // Everything the pinned model DOES accept must survive — this strip is a
+      // scalpel, not a whitelist. thinking{adaptive} 200s upstream, so it stays.
+      assert.deepEqual(sent.thinking, { type: "adaptive", display: "omitted" }, "thinking preserved");
+      assert.deepEqual(sent.metadata, { user_id: "device" }, "metadata preserved");
+    },
+  );
+}
+console.log("✓ #406: model-gated params stripped when the gateway pins the model");
+
+// --- #406 unit: the strip is keyed on the resolved model, not on override ---
+{
+  const { stripModelGatedParams } = await import("../src/routes/messages.ts");
+  const base = { model: DEFAULT_ID, tools: [], output_config: { effort: "xhigh" } };
+  const r = stripModelGatedParams(base, DEFAULT_ID);
+  assert.deepEqual(r.dropped, ["output_config"], "dropped names reported for the log line");
+  assert.equal("output_config" in r.body, false);
+  assert.deepEqual(base.output_config, { effort: "xhigh" }, "input body not mutated");
+  assert.deepEqual(r.body.tools, [], "untouched fields survive");
+
+  const clean = { model: DEFAULT_ID, messages: [] };
+  const r2 = stripModelGatedParams(clean, DEFAULT_ID);
+  assert.deepEqual(r2.dropped, [], "nothing to drop → no log noise");
+  assert.equal(r2.body, clean, "same object back when nothing changed");
+}
+console.log("✓ #406: stripModelGatedParams — pure, non-mutating, reports what it dropped");
 
 // --- 200 non-streaming: verbatim passthrough + usage_log + owned turn row ----
 {
@@ -276,7 +373,18 @@ console.log("✓ messages: streaming — verbatim Anthropic SSE, usage tapped, t
         "?beta=true preserved on the upstream URL",
       );
       const sent = JSON.parse(calls[0].init.body);
-      assert.deepEqual(sent.context_management, CTX_MGMT, "context_management passes through untouched");
+      // #406 — this assertion USED to be "context_management passes through
+      // untouched" (#282). Re-verified against prod on 2026-07-24 with this
+      // exact header + ?beta=true: the pinned claude-sonnet-4-6 **400s** on
+      // the body field (control request with the same header → 200). The mock
+      // upstream never validated it, so the test kept passing while every real
+      // SDK turn died. The header/query plumbing below is still the point of
+      // this block and still asserted — only the body field is now stripped.
+      assert.equal(
+        "context_management" in sent,
+        false,
+        "#406: model-gated body field stripped even though its beta header survives",
+      );
 
       // Without client betas: ours only, no query appended.
       await app.fetch(messagesRequest(), env, makeCtx());

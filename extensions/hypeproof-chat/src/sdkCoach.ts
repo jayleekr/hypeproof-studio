@@ -22,6 +22,8 @@ import { pathToFileURL } from "node:url";
 import {
   buildHypeproofMcpServer,
   HYPEPROOF_MCP_SERVER_NAME,
+  MCP_BROWSER_OPEN,
+  resolveAlreadyOpen,
   type BrowserMcpHost,
   type SdkMcpFactory,
   type ZodLike,
@@ -33,6 +35,8 @@ import {
   buildSdkQueryOptions,
   consumeSdkStream,
   evaluateSdkToolUse,
+  SDK_STALL_FRIENDLY,
+  SDK_STREAM_STALL_MS,
   profileToAgentOptions,
   resolveSdkBinary,
   resolveSdkModule,
@@ -40,6 +44,7 @@ import {
   sdkBinaryMarkerPath,
   sdkToolToActionRequest,
   seededSdkBinaryPath,
+  type SdkActivity,
   type CoachToolAction,
   type SdkBinaryResolution,
   type SdkBinaryStat,
@@ -59,6 +64,20 @@ export class SdkUnavailableError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "SdkUnavailableError";
+  }
+}
+
+/**
+ * #403 — thrown when the SDK stream produced no progress for the whole stall
+ * budget. Carries the student-friendly Korean copy as its message, so
+ * chatPanelProvider's generic error path renders it verbatim in the stream
+ * error banner (no raw JSON, no English). A distinct class so a caller (or a
+ * problem report) can tell "the coach wedged" apart from a real API error.
+ */
+export class CoachStallError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CoachStallError";
   }
 }
 
@@ -86,6 +105,12 @@ export interface SdkCoachArgs {
   /** Workspace root for the SDK's file tools (Phase-2 tiers). */
   cwd?: string;
   onDelta: (delta: string) => void;
+  /**
+   * #414 — what the coach is DOING (thinking / tool calls / results), so the
+   * student sees real work instead of a static "만드는 중" line. Optional: the
+   * proxy path has no equivalent, and a caller that omits it loses nothing else.
+   */
+  onActivity?: (activity: SdkActivity) => void;
   onCitations: (citations: Citation[]) => void;
   onAssetScore: (score: AssetScoreChunk) => void;
   /** Manual-approve gate. Resolves true to allow the tool. */
@@ -103,6 +128,12 @@ export interface SdkCoachArgs {
    * HPS_SDK_BINARY → seeded location → node_modules (REQ-M24).
    */
   binaryPathSetting?: string;
+  /**
+   * #403 — silence budget (ms) before a wedged turn is aborted with a visible
+   * message instead of an endless "생각하는 중…". Undefined = the helper default
+   * (SDK_STREAM_STALL_MS); 0 disables the watchdog.
+   */
+  stallTimeoutMs?: number;
   /** Test seam: inject a pre-computed binary resolution (skip fs probes). */
   binaryResolution?: SdkBinaryResolution;
   /** Test seam: inject a fake SDK module instead of importing the real one. */
@@ -146,6 +177,28 @@ export interface AgentSdkModule {
  */
 function extensionDistDir(): string | undefined {
   return typeof __dirname === "string" && __dirname ? __dirname : undefined;
+}
+
+/**
+ * #384 — canonicalize a path for containment comparison: realpath the nearest
+ * EXISTING ancestor (target may not exist yet — new-file writes) and re-append
+ * the tail. Twin of chatPanelProvider.canonicalizeForCompare.
+ */
+function canonicalizeFsPath(p: string): string {
+  let base = path.resolve(p);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return tail.length === 0
+        ? fs.realpathSync(base)
+        : path.join(fs.realpathSync(base), ...tail.reverse());
+    } catch {
+      const parent = path.dirname(base);
+      if (parent === base) return path.resolve(p);
+      tail.push(path.basename(base));
+      base = parent;
+    }
+  }
 }
 
 async function loadSdk(): Promise<AgentSdkModule> {
@@ -371,6 +424,14 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   // grantedMcpTools mirrors what was ACTUALLY registered so canUseTool never
   // grants a name no server serves — and stays [] when registration didn't
   // happen, keeping the policy fail-closed.
+  // #403 — stall-watchdog bookkeeping (see the consumeSdkStream call below).
+  // `awaitingUser` is >0 while an approve/deny modal is open; `lastToolCallAt`
+  // stamps every canUseTool decision, because the SDK then runs that tool with
+  // NO stream events until its result — a subagent (copyclone grants them) can
+  // legitimately be silent for a while there.
+  let awaitingUser = 0;
+  let lastToolCallAt = 0;
+
   let mcpServers: Options["mcpServers"];
   let grantedMcpTools: readonly string[] = [];
   if (opts.permittedMcpTools.length > 0 && args.browserHost) {
@@ -421,6 +482,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     // absent for ungranted cohorts, so the model never even sees the tools.
     ...(mcpServers ? { mcpServers } : {}),
     canUseTool: async (name, input) => {
+      lastToolCallAt = Date.now();
       const verdict = evaluateSdkToolUse({
         toolName: name,
         input,
@@ -430,6 +492,11 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
         // arrive here too and face the same matrix.
         permittedTools: [...opts.permittedTools, ...opts.permittedAgentTools, ...grantedMcpTools],
         workspaceRoot: args.cwd,
+        // #384 — realpath-based canonicalizer: without it a symlinked
+        // workspace (macOS /var → /private/var, iCloud Desktop, …) fails
+        // containment and EVERY coach write auto-denies. Twin of
+        // chatPanelProvider.canonicalizeForCompare.
+        canonicalize: canonicalizeFsPath,
       });
       if (verdict.decision === "deny") {
         if (verdict.drift) {
@@ -454,7 +521,31 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       if (verdict.decision === "allow") {
         return { behavior: "allow" as const, updatedInput: input };
       }
-      const ok = await args.requestApproval({ toolName: name, input });
+      // #415 — 이미 열려 있는 페이지를 다시 여는 browser_open 은 모달 없이
+      // 통과시킨다. 핸들러가 short-circuit 해서 **실제로 여는 동작이 없기**
+      // 때문 — 물을 것이 없는데 뜨는 승인 모달은 학생의 턴을 몇 분씩 막고
+      // (2026-07-24 실사용 ~2분), 반복되면 게이트가 교육 장치가 아니라 잡음이
+      // 된다(delegation_judgment). 판정은 핸들러와 동일한 resolveAlreadyOpen
+      // 단일 소스 — 갈라지면 "모달 없는 실제 오픈" 구멍이 된다.
+      if (name === MCP_BROWSER_OPEN && args.browserHost) {
+        const { alreadyOpen } = await resolveAlreadyOpen(args.browserHost,
+          (input as { url?: unknown } | undefined)?.url);
+        if (alreadyOpen) return { behavior: "allow" as const, updatedInput: input };
+      }
+      // #403 — the modal blocks the SDK stream for as long as the human takes
+      // to decide. Mark the turn as human-blocked so the stall watchdog below
+      // doesn't read that (correct) silence as a wedged turn.
+      awaitingUser += 1;
+      let ok: boolean;
+      try {
+        ok = await args.requestApproval({
+          toolName: name,
+          input,
+          ...(verdict.destructive ? { destructive: true } : {}),
+        });
+      } finally {
+        awaitingUser -= 1;
+      }
       return ok
         ? { behavior: "allow" as const, updatedInput: input }
         : { behavior: "deny" as const, message: "사용자가 이 작업을 허용하지 않았어요." };
@@ -465,8 +556,8 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   const stream = sdk.query({ prompt, options });
 
   // Map SDK messages → the proxyChat callback shape via the pure consumer
-  // (sdkCoachHelpers.consumeSdkStream — unit-tested). Two exits besides normal
-  // completion:
+  // (sdkCoachHelpers.consumeSdkStream — unit-tested). Three exits besides
+  // normal completion:
   // - user stop → AbortError (proxy-path parity, REQ-M8);
   // - gateway 401/400 api_retry → fast-fail (#320, REQ-M15): the SDK CLI would
   //   otherwise retry up to 10x with backoff, i.e. a bad/expired workshop token
@@ -477,13 +568,34 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   //   both statuses here: the workshop token is the only credential on this
   //   path, so a 400/401 means that token is unusable — replacing it is the
   //   recovery, retrying is not.
+  // - stall watchdog → CoachStallError (#403, REQ-M26): everything the 4xx
+  //   fast-fail does NOT cover (429/529/5xx/connection retries, or a first turn
+  //   that simply never produces a token) left the student on "생각하는 중… ✨"
+  //   with no error and no way out. After stallTimeoutMs of no progress we
+  //   abort the query and surface a retry-me message.
   // (onCitations / onAssetScore are wired for parity but the SDK stream
   // mapping for those lands in a later phase.)
+  const stallMs = args.stallTimeoutMs ?? SDK_STREAM_STALL_MS;
   await consumeSdkStream(stream, {
     isAborted: () => args.signal.aborted,
     makeAbortError: abortError,
     abortQuery: () => abortController.abort(),
     makeFatalAuthError: () => new ProxyAuthError("expired", TOKEN_EXPIRED_FRIENDLY),
     onDelta: args.onDelta,
+    ...(args.onActivity ? { onActivity: args.onActivity } : {}),
+    stallMs,
+    makeStallError: () => {
+      // Developer-side signal — the student only ever sees the Korean line.
+      console.warn(
+        `[coach] SDK stream stalled: no progress for ${stallMs}ms — aborting the turn (#403). ` +
+          `Likely a gateway retry storm (429/529/5xx) or a first turn that never produced a token.`,
+      );
+      return new CoachStallError(SDK_STALL_FRIENDLY);
+    },
+    // Silence that is NOT a stall: an open modal, or a tool the SDK is still
+    // running (one budget of slack after the decision — a long subagent gets
+    // ~2 budgets total before the watchdog calls it wedged, a never-returning
+    // one still ends in a message rather than a hang).
+    isTurnBlocked: () => awaitingUser > 0 || Date.now() - lastToolCallAt < stallMs,
   });
 }

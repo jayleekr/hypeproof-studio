@@ -395,6 +395,41 @@ html, body, #root {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: relative;
+}
+/* #384 — drag-and-drop image affordance. Drop zone = the WHOLE chat panel
+   (widened from the input box) so an image lands wherever it's dropped in the
+   sidebar. NOTE: VS Code's workbench intercepts OS file drops onto the editor
+   area, so ⌘V paste remains the fully reliable path. */
+.hps-shell {
+  position: relative;
+}
+.hps-input-drag textarea {
+  border-color: var(--vscode-focusBorder, #5b8def);
+  border-style: dashed;
+}
+.hps-shell-drag::after {
+  content: "";
+  position: absolute;
+  inset: 4px;
+  z-index: 9;
+  border-radius: 8px;
+  border: 2px dashed var(--vscode-focusBorder, #5b8def);
+  pointer-events: none;
+}
+.hps-shell-drop-overlay {
+  position: absolute;
+  inset: 4px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--vscode-editor-background, #1e1e1e) 78%, transparent);
+  color: var(--vscode-foreground, #ccc);
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: none;
 }
 .hps-input textarea {
   width: 100%;
@@ -440,6 +475,48 @@ html, body, #root {
   background: var(--vscode-errorForeground, #c33);
   color: #fff;
 }
+
+/* ---------- Queued message while a turn runs (#416) ---------- */
+
+.hps-queued {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-left: 2px solid var(--vscode-focusBorder, #4a9);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.08));
+  font-size: 11px;
+}
+.hps-queued-label {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+.hps-queued-text {
+  /* One line, whatever was typed — the title attribute carries the full text. */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hps-queued-cancel {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.hps-queued-cancel:hover { opacity: 1; }
 
 /* ---------- Pasted-image attachments (website-copyclone) ---------- */
 

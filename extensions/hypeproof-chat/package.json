@@ -163,6 +163,13 @@
           "scope": "machine",
           "description": "Absolute path to a claude CLI binary for the agent-sdk coach runtime (epic #282). Highest-priority override; when empty, resolution falls through HPS_SDK_BINARY (env) → the seeded per-user location (scripts/seed-sdk-binary.sh) → node_modules (dev). If nothing resolves, the coach falls back to the proxy runtime. Machine-scoped: this selects an executable, so a workspace must not be able to set it."
         },
+        "hypeproofChat.sdkStallTimeoutMs": {
+          "type": "number",
+          "default": 240000,
+          "minimum": 0,
+          "scope": "machine",
+          "description": "How long (ms) the agent-sdk coach may go without progress before the turn is aborted with a friendly retry message (#403). Guards the cases the 401/400 fast-fail does not cover — gateway 429/529/5xx retry storms, or a first turn that never produces a token — which otherwise leave the student on \"생각하는 중…\" forever. 0 disables the watchdog."
+        },
         "hypeproofChat.requireApprovalFor": {
           "type": "array",
           "items": {

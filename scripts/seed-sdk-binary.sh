@@ -13,9 +13,8 @@
 #   darwin — ~/Library/Application Support/HypeProof-Studio/sdk/<version>/claude
 #   linux  — ${XDG_CONFIG_HOME:-~/.config}/HypeProof-Studio/sdk/<version>/claude
 #   win32  — %APPDATA%\HypeProof-Studio\sdk\<version>\claude.exe
-#            (not handled by this script — on Windows, download the win32-x64
-#            tarball, verify the sha512 below, and extract package/claude.exe
-#            to that path manually or via a future install-win companion.)
+#            (handled by the PowerShell companion scripts/seed-sdk-binary.ps1,
+#            which mirrors this script for win32-x64 / win32-arm64. #426)
 #
 # Usage:
 #   bash scripts/seed-sdk-binary.sh                    # networked venue machine
@@ -76,7 +75,7 @@ if [ -z "$PLATFORM" ]; then
   esac
 fi
 case "$PLATFORM" in
-  win32-*) err "win32 seeding is documented in the header but not automated by this script" ;;
+  win32-*) err "win32 seeding lives in the PowerShell companion — run scripts/seed-sdk-binary.ps1 (#426)" ;;
 esac
 
 # ── Version resolution: pinned by default, cross-checked against the repo ───

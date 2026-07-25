@@ -316,3 +316,59 @@ export function browserToolLogLine(
       return { icon: "🤖", label: name };
   }
 }
+
+/**
+ * Normalize whatever the instructor actually pasted into the token box (#427).
+ *
+ * The workshop token is base64url segments joined by ".", so its alphabet is
+ * [A-Za-z0-9_-.] — no whitespace, no colon. Anything else in the box is
+ * packaging picked up on the way from the console to the app, and every form
+ * of it used to produce a silent 401:
+ *
+ * - "jiwoong: eyJ…"  the console's bulk-copy format (이름: 토큰). This is the
+ *                    one that actually bit us — the ONLY copy button used to
+ *                    emit this shape, so the natural action produced a token
+ *                    the app rejected.
+ * - "Bearer eyJ…"    copied out of a curl invocation or the network tab.
+ * - "eyJ…\n  …kCk"   relayed through KakaoTalk / a doc that hard-wrapped it;
+ *                    the quick input joins the lines but keeps the indent.
+ * - quoted/backticked when copied out of a chat message or code fence.
+ *
+ * Pure + exported so the parsing is locked by unit tests rather than by
+ * retrying a lecture-day paste.
+ */
+export function sanitizeWorkshopToken(raw: string): string {
+  // All whitespace, not just the ends — a wrapped paste carries the wrap indent
+  // INSIDE the string, which `trim()` alone leaves behind.
+  let s = raw.replace(/\s+/g, "");
+  // The wrappers nest, and in no fixed order — 'jiwoong: "Bearer eyJ…"' is one
+  // real paste. Peel until nothing changes instead of assuming an order; every
+  // rule strictly shortens, so this terminates (the bound is belt-over-braces).
+  for (let i = 0; i < 8; i++) {
+    const before = s;
+    // "<name>: <token>". A colon cannot occur inside base64url, so keeping only
+    // what follows the LAST one is safe and never truncates a real token.
+    const lastColon = s.lastIndexOf(":");
+    if (lastColon !== -1) s = s.slice(lastColon + 1);
+    // Quotes/backticks from a chat message or code fence.
+    s = s.replace(/^["'`]+/, "").replace(/["'`]+$/, "");
+    // "Bearer <token>" — whitespace is already gone, so match the bare prefix.
+    // No base64url payload starts with "bearer" (ours all start "eyJ").
+    s = s.replace(/^bearer/i, "");
+    if (s === before) break;
+  }
+  return s;
+}
+
+/**
+ * Does this look like a workshop token at all? `<base64url>.<base64url>`, the
+ * same shape check the instructor console applies to its issuer box (#65).
+ *
+ * DIAGNOSIS ONLY — never a gate. The server owns validity; this just lets the
+ * failure toast say "붙여넣기가 잘렸어요" instead of a generic "확인 안 됨",
+ * which was the other half of why #427 cost a session. Because it never blocks,
+ * a future token format cannot be false-rejected on the client.
+ */
+export function looksLikeWorkshopToken(token: string): boolean {
+  return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token);
+}

@@ -198,19 +198,26 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   const evalTool = (toolName, input, permittedTools, workspaceRoot = ws) =>
     evaluateSdkToolUse({ toolName, input, permittedTools, workspaceRoot });
 
-  // Bash is denied even when the upstream model requests it — for EVERY
-  // cohort, including the widest adult set. There is no profile flag that can
-  // grant it (Phase 2 invariant).
+  // Bash is denied for every cohort that did NOT opt in. epic #431 replaced the
+  // old "shell is never grantable" invariant with a profile flag
+  // (`sdk_tools.shell`), so the gate is now the permitted set — not an absolute
+  // refusal. These three sets all lack Bash, so all three still deny.
   for (const permitted of [[], minorRO, adultRW]) {
     const v = evalTool("Bash", { command: "rm -rf /" }, permitted);
-    assert.equal(v.decision, "deny", "Bash must be denied regardless of cohort");
+    assert.equal(v.decision, "deny", "Bash denied for a cohort that did not opt in");
     assert.ok(v.friendly.length > 0, "student sees the Korean friendly line");
     assert.ok(v.reason.length > 0, "host gets a loggable reason");
   }
-  // Belt over suspenders: even if a permitted set were (wrongly) widened to
-  // include a shell tool, Gate 1b still denies it.
-  assert.equal(evalTool("Bash", { command: "ls" }, ["Bash"]).decision, "deny",
-    "shell denied even if the permitted set is misconfigured to include it");
+  // epic #431 — an opted-in cohort reaches the approval modal instead. There is
+  // deliberately NO content allowlist: a narrow one makes the coach invent
+  // detours for off-list work, the same gap-filling that produced #428's
+  // fabricated "/app/workdir". Destructive commands still ask, but carry the
+  // flag that drives the strong confirm (shell-policy.smoke.mjs owns the
+  // detail; this is the wiring assertion).
+  assert.equal(evalTool("Bash", { command: "ls" }, ["Bash"]).decision, "ask",
+    "opted-in cohort: shell routes to the approval modal");
+  assert.equal(evalTool("Bash", { command: "rm -rf ~" }, ["Bash"]).destructive, true,
+    "destructive command flagged for the strong confirm");
 
   // Minor read-only cohort: reads inside the workspace auto-allow (no modal)…
   assert.deepEqual(evalTool("Read", { file_path: "/ws/student/index.html" }, minorRO), { decision: "allow" });
@@ -377,3 +384,37 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
 }
 
 console.log("✓ #282: sdk-coach helpers — tool policy + SDK-tool→ActionRequest mapping + P2 policy matrix + browser MCP policy");
+
+// ─── #384: symlinked workspace — canonicalize hook keeps containment honest ──
+{
+  const { evaluateSdkToolUse } = await import("../src/sdkCoachHelpers.ts");
+  // macOS: workspace opened as /var/… but the SDK canonicalizes to
+  // /private/var/…. Without the canonicalizer this denies as an escape.
+  const canon = (p) => (p.startsWith("/var/") ? "/private" + p : p);
+  const symlinked = evaluateSdkToolUse({
+    toolName: "Write",
+    input: { file_path: "/private/var/ws/rubric.md", content: "x" },
+    permittedTools: ["Write"],
+    workspaceRoot: "/var/ws",
+    canonicalize: canon,
+  });
+  assert.equal(symlinked.decision, "ask", "canonicalized root matches canonical path → modal, not deny");
+  // Without the hook the same call denies (documents why the hook exists).
+  const withoutHook = evaluateSdkToolUse({
+    toolName: "Write",
+    input: { file_path: "/private/var/ws/rubric.md", content: "x" },
+    permittedTools: ["Write"],
+    workspaceRoot: "/var/ws",
+  });
+  assert.equal(withoutHook.decision, "deny", "identity canonicalizer keeps the strict default");
+  // A REAL escape still denies even with the canonicalizer.
+  const escape = evaluateSdkToolUse({
+    toolName: "Write",
+    input: { file_path: "/private/etc/passwd", content: "x" },
+    permittedTools: ["Write"],
+    workspaceRoot: "/var/ws",
+    canonicalize: canon,
+  });
+  assert.equal(escape.decision, "deny", "real out-of-workspace path still denies");
+}
+console.log("✓ #384: containment canonicalizer — symlinked roots pass, real escapes still deny");

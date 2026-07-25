@@ -8,6 +8,16 @@ export interface Profile {
   id: string;
   version: number;
   display_name: string;
+  /**
+   * Instructor console (/console) presentation. `dashboard_hidden` drops this
+   * track from the console's session-open cards AND the token-mint dropdown
+   * (does NOT affect /v1/profile resolution — a student token still resolves).
+   * `dashboard_order` sorts the visible tracks (lower first); absent → after
+   * ordered ones, then registry order. Used to make a cohort's primary track
+   * the default and hide a track that won't be run this round (#384).
+   */
+  dashboard_hidden?: boolean;
+  dashboard_order?: number;
   audience: {
     age_range?: [number, number];
     language: "ko" | "en";
@@ -154,6 +164,17 @@ export interface Profile {
     write?: boolean;
     browser?: boolean;
     subagents?: boolean;
+    /**
+     * epic #431 — the SDK Bash tool. ARBITRARY commands are permitted; the
+     * approval modal is the gate (Claude Code's posture), because a narrow
+     * allowlist makes the coach invent detours for anything off-list — the
+     * same gap-filling that produced #428's fabricated `/app/workdir`.
+     *
+     * Only set this on adult workshop cohorts. Minor cohorts simply leave it
+     * absent: there is no separate minor guard on this flag, the profile IS
+     * the policy.
+     */
+    shell?: boolean;
   };
   /**
    * #371/#282 — coach runtime this cohort requests. "agent-sdk" gives the coach

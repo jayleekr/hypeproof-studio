@@ -51,6 +51,7 @@ import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../
 import { recordTurnIfOwned } from "../lib/storage";
 import { tapAnthropicStream } from "../lib/sse";
 import { logChat, persistUsage } from "../lib/analytics";
+import { scrubToolResultSecrets } from "../lib/scrub-secrets";
 import {
   isMinorCohort,
   screenText,
@@ -125,6 +126,97 @@ export function resolveMessagesModel(requested: unknown, profile: Profile): stri
     if (/^claude-.*haiku/.test(requested)) return MODEL_MAP["hypeproof-fast"];
   }
   return MODEL_MAP[profile.model.default];
+}
+
+/**
+ * #384 — downgrade `role:"system"` entries inside `messages` to user-role
+ * context. Claude Code CLI 2.x sends them (mid-conversation-system beta) but
+ * the pinned classroom models reject the role, 400-ing every SDK turn.
+ * String content is wrapped in a <system-context> marker; block-array content
+ * keeps its blocks (incl. cache_control) with a small marker block prepended.
+ * Non-array/malformed input passes through untouched (upstream validates).
+ */
+export function normalizeSystemRoleMessages(messages: unknown): unknown {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map((m) => {
+    if (!m || typeof m !== "object" || (m as { role?: unknown }).role !== "system") return m;
+    const msg = m as { role: string; content?: unknown };
+    if (typeof msg.content === "string") {
+      return {
+        ...msg,
+        role: "user",
+        content: [
+          { type: "text", text: `<system-context>\n${msg.content}\n</system-context>` },
+        ],
+      };
+    }
+    if (Array.isArray(msg.content)) {
+      return {
+        ...msg,
+        role: "user",
+        content: [
+          { type: "text", text: "<system-context>" },
+          ...msg.content,
+          { type: "text", text: "</system-context>" },
+        ],
+      };
+    }
+    return { ...msg, role: "user" };
+  });
+}
+
+/**
+ * #406 — request params the CLIENT shapes for the model IT picked, which the
+ * model this gateway PINS does not accept.
+ *
+ * The gateway owns the model (`resolveMessagesModel` rewrites whatever the SDK
+ * asked for into the cohort catalog) but the body is forwarded spread-first, so
+ * every other field still describes the client's model. Claude Code CLI 2.x
+ * defaults to a newer generation than the classroom pin and always ships its
+ * generation's params — the upstream then gets "old model + new feature set"
+ * and 400s the whole turn. The SDK CLI swallows that 400 in its own retry loop,
+ * so the student sees an endless "생각하는 중… ✨" instead of an error (#403).
+ *
+ * Third occurrence of one failure class (#384 was `role:"system"` messages).
+ * The invariant this restores: WHOEVER OWNS THE MODEL OWNS THE MODEL-GATED
+ * PARAMS. Verified on prod 2026-07-24, same token + cohort, one field at a time:
+ *   baseline · +tools(52) · +thinking{adaptive}   → 200
+ *   +output_config{effort:"xhigh"}                → 400
+ *   +context_management{clear_thinking_…}         → 400
+ *
+ * Keyed on the RESOLVED model, not on "did we override it": the pinned model is
+ * what upstream validates against, and a client that asked for our exact model
+ * would 400 the same way. When a profile later pins a generation that does
+ * support one of these, add its id to the param's `supportedBy` list — the
+ * check then stops stripping for that model only.
+ */
+const MODEL_GATED_PARAMS: readonly { param: string; supportedBy: readonly string[] }[] = [
+  // Effort control — newer-generation only. No classroom pin accepts it today.
+  { param: "output_config", supportedBy: [] },
+  // Server-side context editing (context-management beta). Same story.
+  { param: "context_management", supportedBy: [] },
+];
+
+/**
+ * Drop the model-gated params the resolved model cannot accept. Pure; returns a
+ * new body plus the names dropped so the caller can log them — an SDK bump that
+ * introduces the NEXT such param must surface as a log line, not as another
+ * silent classroom outage.
+ */
+export function stripModelGatedParams(
+  body: Record<string, unknown>,
+  resolvedModel: string,
+): { body: Record<string, unknown>; dropped: string[] } {
+  const dropped: string[] = [];
+  let out = body;
+  for (const { param, supportedBy } of MODEL_GATED_PARAMS) {
+    if (!(param in body) || body[param] === undefined) continue;
+    if (supportedBy.includes(resolvedModel)) continue;
+    if (out === body) out = { ...body };
+    delete out[param];
+    dropped.push(param);
+  }
+  return { body: out, dropped };
 }
 
 messages.post("/messages", async (c) => {
@@ -205,10 +297,36 @@ messages.post("/messages", async (c) => {
   const upstreamBody = {
     ...raw,
     model: modelLabel,
+    // #384 — Claude Code CLI 2.x emits mid-conversation `role:"system"`
+    // messages (beta mid-conversation-system-2026-04-07). The classroom
+    // models this gateway pins reject that role even with the beta — every
+    // SDK-runtime turn 400'd. Downgrade them to user-role context (verified:
+    // same request 200s once converted). No privilege is conferred: the
+    // top-level `system` is still replaced with the profile blocks below.
+    // epic #431 — the coach can run shell now, so a tool_result block may
+    // carry whatever a command printed: a PAT from ~/.git-credentials, an
+    // API token echoed by a failing wrangler deploy, a stray `env` dump.
+    // Mask before it becomes prompt content and before it reaches our logs.
+    // Server-side on purpose — an old or modified client cannot skip it.
+    messages: scrubToolResultSecrets(normalizeSystemRoleMessages(raw.messages)),
     system: buildAnthropicSystemBlocks(profile, coach),
     max_tokens: clampMaxTokens(raw.max_tokens, profile),
     stream,
   } as unknown as AnthropicRequest;
+
+  // #406 — the model is ours, so the model-gated params are ours too. Without
+  // this every SDK turn 400s (see stripModelGatedParams).
+  const stripped = stripModelGatedParams(
+    upstreamBody as unknown as Record<string, unknown>,
+    modelLabel,
+  );
+  if (stripped.dropped.length > 0) {
+    console.warn(
+      `[${c.get("requestId")}] #406 dropped model-gated param(s) [${stripped.dropped.join(", ")}] ` +
+        `— client asked for model ${JSON.stringify(raw.model)}, gateway pinned ${modelLabel}. ` +
+        `If the SDK now needs these, repin the profile model instead of forwarding them.`,
+    );
+  }
 
   // 4. Upstream call — same proxy indirection as chat.ts's anthropic branch.
   // clientBeta/beta: the Agent SDK sets its own anthropic-beta header (e.g.
@@ -217,7 +335,7 @@ messages.post("/messages", async (c) => {
   // e2e BLOCKER: dropping the header 400'd every SDK turn).
   let upstream: Response;
   try {
-    upstream = await callAnthropic(upstreamBody, apiKey, {
+    upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {
       url: env.ANTHROPIC_PROXY_URL,
       proxySecret: env.ANTHROPIC_PROXY_SECRET,
       clientBeta: c.req.header("anthropic-beta"),
@@ -454,6 +572,16 @@ messages.post("/messages/count_tokens", async (c) => {
   } as Record<string, unknown>;
   delete upstreamBody.max_tokens;
   delete upstreamBody.stream;
+  // #406 — same model-gated strip as /v1/messages. The count MUST be made
+  // against the body /v1/messages would actually send, and a 400 here breaks
+  // the SDK's context budgeting just as silently.
+  const strippedCount = stripModelGatedParams(upstreamBody, modelLabel);
+  if (strippedCount.dropped.length > 0) {
+    console.warn(
+      `[${c.get("requestId")}] #406 count_tokens dropped model-gated param(s) ` +
+        `[${strippedCount.dropped.join(", ")}] — gateway pinned ${modelLabel}.`,
+    );
+  }
 
   // 4. Upstream call — same key + proxy indirection, count_tokens subpath.
   // Same clientBeta/beta threading as /v1/messages: the SDK sends the same
@@ -461,7 +589,7 @@ messages.post("/messages/count_tokens", async (c) => {
   // its count_tokens calls, so the count must be made under the same flags.
   let upstream: Response;
   try {
-    upstream = await callAnthropic(upstreamBody as unknown as AnthropicRequest, apiKey, {
+    upstream = await callAnthropic(strippedCount.body as unknown as AnthropicRequest, apiKey, {
       url: countTokensUrl(env.ANTHROPIC_PROXY_URL),
       proxySecret: env.ANTHROPIC_PROXY_SECRET,
       clientBeta: c.req.header("anthropic-beta"),

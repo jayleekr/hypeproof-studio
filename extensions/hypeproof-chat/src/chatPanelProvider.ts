@@ -6,7 +6,8 @@ import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
-import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
+import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
+import { commandSignature, describeCommandForApproval } from "./shellPolicy";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -70,6 +71,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // the webview forgets everything on hide/show remounts; see AiDisclosureGate.
   private readonly aiDisclosure = new AiDisclosureGate();
   private activeCohortId: string | null = null;
+  /**
+   * epic #431 — shell command signatures the participant chose to always
+   * allow. SESSION-SCOPED and never persisted: a fresh window restores the
+   * full judgment. Destructive commands never reach this set (shellPolicy's
+   * commandSignature returns null for them), so `rm` can never be remembered.
+   */
+  private readonly approvedCommandSignatures = new Set<string>();
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
   // x-request-id header on every response we can correlate against in tail.
@@ -128,6 +136,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   /** #278 Phase 2 — may we attach a page screenshot (image)? Worker enforces the same gate. */
   isImagePasteEnabled(): boolean {
     return this.cachedProfile?.input?.image_paste === true;
+  }
+
+  /**
+   * #384 — hand the webview an image data URL to attach to the next turn. Used
+   * by the "image opened in an editor tab" flow (extension.ts) so dropping a
+   * screenshot onto the editor still reaches the coach. The webview downscales
+   * + thumbnails it, same path as ⌘V paste. image_paste-gated by the caller.
+   */
+  attachImageDataUrl(dataUrl: string, name: string): void {
+    void this.post({ type: "attachImage", dataUrl, name });
   }
 
   /**
@@ -403,11 +421,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #359 — structural guard: auto-repair the known comment-close typo, and
     // refuse to reveal a still-broken document as if it succeeded. Returns
     // false when blocked so the streaming caller can let a corrected block retry.
-    // #364 — the medical-ad disclaimer advisory only applies to the dental
-    // copyclone cohort (game.template_tier "website"); other tiers (kids games)
-    // must not see a medical-ad warning. Structural repair/block always runs.
-    const medicalAdCohort = this.cachedProfile?.game?.template_tier === "website";
-    const checked = validateAndRepairHtml(html, { medicalAdCohort });
+    const checked = validateAndRepairHtml(html);
     if (checked.issues.length > 0) this.surfaceStructureIssues(checked, opts?.streamId);
     if (checked.blocked) return false;
 
@@ -505,6 +519,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
       },
       startLivePreview: () => this.startLivePreview(),
+      // #415 — 지금 떠 있는 페이지를 가장 싸게 읽는 경로. `activeBrowserTab` 은
+      // url/title 을 그대로 들고 있어 CDP 접속도 스크린샷도 필요 없다
+      // (URL 하나 알자고 이미지를 뜨면 토큰도 시간도 낭비).
+      currentPage: async () => {
+        const tab = vscode.window.activeBrowserTab;
+        if (!tab?.url) return null;
+        return { url: tab.url, title: tab.title };
+      },
     };
   }
 
@@ -734,6 +756,65 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.assetScores?.recordAssetScore(assetScore);
         void this.post({ type: "streamAssetScore", streamId, assetScore });
       };
+      // #414 — the SDK coach's real work, rendered through the same toolLog
+      // lines the browser loop already uses. Deliberately NOT translated: the
+      // model thinks in English and the tool names are the SDK's own, and a
+      // Korean paraphrase of "Write(index.html)" would be a worse signal than
+      // the thing itself. Shape follows Claude Code — one truncated line per
+      // action (the CSS ellipsizes), plus a live token counter while thinking.
+      let thinkingIndex = 0;
+      // The webview replaces an entry wholesale by id, so a tool_result has to
+      // re-send the label the tool_use showed — keep it per stream.
+      const toolLabels = new Map<string, string>();
+      const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
+        const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
+          void this.post({ type: "toolLog", streamId, id, icon, label, state });
+        switch (a.kind) {
+          case "thinking_tokens":
+            // One entry that ticks in place; the completed block replaces it.
+            log(`think-${thinkingIndex}`, "💭", `Thinking… ${a.tokens} tokens`, "running");
+            break;
+          case "thinking":
+            log(`think-${thinkingIndex}`, "💭", a.text, "done");
+            thinkingIndex += 1;
+            break;
+          case "tool_use": {
+            const label = `${a.name}(${summarizeToolInput(a.name, a.input)})`;
+            toolLabels.set(a.id, label);
+            log(a.id, "🔧", label, "running");
+            break;
+          }
+          case "tool_result":
+            log(a.id, "🔧", toolLabels.get(a.id) ?? "", a.isError ? "error" : "done");
+            break;
+        }
+      };
+      // The non-SDK runtime: the agentic browser loop when the cohort opted
+      // into browser_control (copyclone opens the reference URL / re-checks the
+      // live preview), else the plain single-turn proxy. #371 — the SDK path's
+      // SdkUnavailableError fallback MUST route here too; falling back to a bare
+      // runProxy() drops the browser loop, so the coach only *narrates* "브라우저
+      // 열게요" and never opens it (regression from the #380 SDK-runtime flip).
+      const runProxyRuntime = async () => {
+        if (this.cachedProfile?.browser_control?.enabled) {
+          await this.runBrowserLoop({
+            proxyUrl,
+            model,
+            token,
+            history,
+            userText: userTextForModel,
+            images: effectiveImages,
+            signal: ctrl.signal,
+            streamId,
+            coachName: effectiveCoachName,
+            coachPersonality: effectiveCoachPersonality,
+            onDelta,
+            onCitations,
+          });
+        } else {
+          await runProxy();
+        }
+      };
       const runProxy = () =>
         proxyChat({
           proxyUrl,
@@ -775,7 +856,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
             // seeded > node_modules). Empty string = unset.
             binaryPathSetting: cfg.get<string>("sdkBinaryPath", "") || undefined,
+            // #403 — no-progress budget before the turn is aborted with a
+            // visible retry message instead of an endless "생각하는 중…".
+            stallTimeoutMs: cfg.get<number>("sdkStallTimeoutMs"),
             onDelta,
+            onActivity,
             onCitations,
             onAssetScore,
             // Map the SDK tool call → an accurate host ActionRequest so the
@@ -796,26 +881,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           assistantText = "";
           assistantCitations.length = 0;
           revealed = false;
-          await runProxy();
+          // #371 — fall back to the browser-loop-aware runtime, NOT bare proxy,
+          // so a browser_control cohort (copyclone) still opens the browser when
+          // the SDK binary isn't seeded.
+          await runProxyRuntime();
         }
-      } else if (this.cachedProfile?.browser_control?.enabled) {
-        // #278 Phase 3 — client-driven agentic browser loop for opted-in cohorts.
-        await this.runBrowserLoop({
-          proxyUrl,
-          model,
-          token,
-          history,
-          userText: userTextForModel,
-          images: effectiveImages,
-          signal: ctrl.signal,
-          streamId,
-          coachName: effectiveCoachName,
-          coachPersonality: effectiveCoachPersonality,
-          onDelta,
-          onCitations,
-        });
       } else {
-        await runProxy();
+        // #278 Phase 3 — browser loop for opted-in cohorts, else plain proxy.
+        await runProxyRuntime();
       }
       // On user-initiated stop the cancelStream handler already ended the stream
       // in the webview; don't post streamEnd or commit the truncated turn
@@ -1001,12 +1074,51 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * streamed-assistant path.
    */
   async resolveActionApproval(req: ActionRequest): Promise<boolean> {
-    // Tier 1 — hard-deny shell exec.
+    // Tier 1 — shell (epic #431). No longer a hard deny: a cohort that set
+    // `sdk_tools.shell` gets arbitrary commands, and THIS modal is the gate.
+    // Three shapes, in order of how much they interrupt:
+    //   destructive → strong confirm every time, never remembered;
+    //   remembered  → silent (the participant already said "항상 허용");
+    //   otherwise   → normal confirm + the option to remember.
     if (req.kind === "executeShell") {
-      vscode.window.showInformationMessage(
-        "셸 실행은 허용되지 않아요. 다른 방법으로 도와드릴게요.",
+      const command = (req.payload as { command?: string } | null | undefined)?.command ?? "";
+      const destructive = req.destructive === true;
+      const signature = destructive ? null : commandSignature(command);
+
+      if (signature && this.approvedCommandSignatures.has(signature)) {
+        return true;
+      }
+
+      const pretty = describeCommandForApproval(command);
+      if (destructive) {
+        // Deliberately NOT offering "항상 허용". Approving `rm -rf` once must
+        // never approve it for the rest of the session, and the whole point of
+        // the strong confirm is that it stays interruptive.
+        const pick = await vscode.window.showWarningMessage(
+          `⚠️ 되돌리기 어려운 명령이에요. 정말 실행할까요?\n\n${pretty}`,
+          { modal: true },
+          "실행",
+          "취소",
+        );
+        return pick === "실행";
+      }
+
+      const REMEMBER = signature ? `항상 허용 (${signature})` : null;
+      const buttons = REMEMBER ? ["실행", REMEMBER] : ["실행"];
+      const pick = await vscode.window.showWarningMessage(
+        `코치가 명령을 실행하려고 해요:\n\n${pretty}`,
+        { modal: true },
+        ...buttons,
       );
-      return false;
+      if (pick === REMEMBER && signature) {
+        // Session-scoped only — never persisted. A new window starts the
+        // participant's judgment over, which is the intended lesson; what we
+        // are killing is the fifteen identical modals inside ONE 20:35 block
+        // that train them to stop reading.
+        this.approvedCommandSignatures.add(signature);
+        return true;
+      }
+      return pick === "실행";
     }
 
     // Tier 2 — file access must target the active workspace (write and read).
@@ -1193,12 +1305,36 @@ function randomId(): string {
  * dev/test scenarios that haven't opened a folder yet. The production path
  * always has a workspace via ensureWorkspace().
  */
+/**
+ * Canonicalize a path for containment comparison. realpath the nearest
+ * EXISTING ancestor (the target itself may not exist yet — new-file writes),
+ * then re-append the non-existing tail. Resolves macOS /var → /private/var
+ * style symlinks so a canonicalized SDK path still matches the workspace root
+ * (#384: without this every coach Write in a symlinked workspace auto-denied).
+ */
+function canonicalizeForCompare(p: string): string {
+  let base = path.resolve(p);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return tail.length === 0
+        ? fs.realpathSync(base)
+        : path.join(fs.realpathSync(base), ...tail.reverse());
+    } catch {
+      const parent = path.dirname(base);
+      if (parent === base) return path.resolve(p); // hit fs root — give up
+      tail.push(path.basename(base));
+      base = parent;
+    }
+  }
+}
+
 function isInsideWorkspace(targetPath: string): boolean {
   const folders = vscode.workspace.workspaceFolders;
   if (!folders || folders.length === 0) return true;
-  const resolved = path.resolve(targetPath);
+  const resolved = canonicalizeForCompare(targetPath);
   for (const f of folders) {
-    const root = path.resolve(f.uri.fsPath);
+    const root = canonicalizeForCompare(f.uri.fsPath);
     const rel = path.relative(root, resolved);
     if (rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel))) {
       return true;

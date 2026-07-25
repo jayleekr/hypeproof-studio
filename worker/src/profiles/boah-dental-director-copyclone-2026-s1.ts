@@ -15,8 +15,9 @@ import systemPromptMd from "../prompts/boah-dental-director-copyclone-2026-s1.md
 //   - input.image_paste: true  → 타겟 스크린샷을 모델에 맥락 주입 (이 트랙의 전제)
 //   - game.template_tier: "website" → 스켈레톤 라이브러리 미주입. 구조는 정답지
 //     (스크린샷)에서 오고 system prompt가 행동을 전부 드라이브한다.
-//   - publishing: local_only/false — Studio 퍼블리시 위저드는 별도 스프린트.
-//     실제 배포는 워크숍 후반 외부 도구 단계(이 프로필 범위 밖).
+//   - 배포는 이제 코호트 안에서 끝난다(#431): sdk_tools.shell + github-repo /
+//     publish-homepage 스킬. `publishing` 플래그는 클라이언트가 읽지 않는 잔재라
+//     local_only로 둔다 — 별도 퍼블리시 위저드는 만들지 않기로 했다.
 //
 // 7 AI Native Assets focus: Context Design · Taste · Verification 전면 강화,
 // 나머지 4종 유지. `essences_focus`는 v0.1 호환 브리지로만 남겨둔다.
@@ -48,7 +49,9 @@ export const profile: Profile = {
   sandbox: {
     file_write: true,
     workspace_root: "~/HypeProofClinic",
-    execute_shell: false,
+    // 레거시 필드 — 실제 셸 정책은 sdk_tools.shell이 소유한다(#431). 읽는 코드는
+    // 없지만 sdk_tools.shell: true 옆에 false로 남아 있으면 다음 사람이 오독한다.
+    execute_shell: true,
     mcp_tools_enabled: [],
   },
   preview: {
@@ -113,12 +116,23 @@ export const profile: Profile = {
   // 서브에이전트 도구 호출도 부모와 동일한 canUseTool 정책을 통과한다.
   // 성인(원장) cohort 전용 — 미성년은 pedagogy 결정 전까지 false (harness
   // child_sdk_subagents FAIL).
-  sdk_tools: { read: true, write: true, browser: true, subagents: true },
-  // #371 — 원장(성인) 트랙은 Agent SDK 런타임으로 돈다: 코치가 파일을 직접
-  // 읽고·쓰고·고쳐 루브릭/agent.md를 지속 상태로 관리한다(proxy 런타임은
-  // 파일 되읽기가 없어 루브릭이 대화 메모리에만 남음). 워커가 미성년이면
-  // proxy로 강제 고정하므로 이 값은 성인 cohort에서만 유효하다. SDK 바이너리
-  // 미시딩 시 클라이언트가 proxy로 안전 폴백한다.
+  // #384 — 이번 라운드 기본(대표) 트랙. 강사 콘솔에서 맨 앞에 온다.
+  dashboard_order: 0,
+  // epic #431 — shell. 큐시트 20:35 블록(배포 URL·GitHub 저장소)이 이것 없이는
+  // 구현 경로가 없다. 스킬만 주고 실행 수단을 안 주면 코치가 가짜 배포 URL을
+  // 지어낸다(#428과 같은 실패 계열). 임의 명령 허용 — 승인 모달이 게이트.
+  sdk_tools: { read: true, write: true, browser: true, subagents: true, shell: true },
+  // 스킬 3종. shell과 반드시 짝이다(#431): 스킬만 있고 실행 수단이 없으면 코치가
+  // 배포한 척하고, 실행 수단만 있고 스킬이 없으면 git을 부르다 CLT 설치 창(2GB)을
+  // 띄운다. design-craft는 코호트 프롬프트에 박혀 있던 80줄을 그대로 옮긴 것(#434).
+  skills: ["design-craft", "github-repo", "publish-homepage"],
+  // #371/#384 — 원장 트랙은 Agent SDK 런타임: 코치가 파일을 직접 읽고·쓰고·
+  // 고쳐 루브릭/agent.md/이미지 참조를 실제 파일로 다룬다(Claude Code와 동일
+  // 아키텍처 + canUseTool 교실 정책). 재활성 조건 충족(2026-07-24):
+  // ① 클라이언트 폴백 픽스(#387, v0.1.20+) — SDK 미가용이어도 브라우저 루프
+  //    유지(2026-07-23 회귀 재발 불가), ② 시딩 스크립트 검증 완료.
+  // 미시딩 머신은 자동으로 proxy(+브라우저 루프)로 폴백하므로 안전.
+  // 미성년은 워커가 무조건 proxy 강제.
   coach_runtime: "agent-sdk",
   session: {
     cohort_id: "boah-dental-2026-a",   // teaser와 같은 cohort, profile_id로만 분기

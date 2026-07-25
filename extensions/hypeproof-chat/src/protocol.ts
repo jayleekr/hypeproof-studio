@@ -100,6 +100,10 @@ export interface ResolvedProfile {
   ux: UxConfig;
   publishing: { enabled: boolean; strategy: string };
   preview: { type: "iframe" | "live_server"; auto_start: boolean };
+  // #422 — the cohort's on-disk workspace folder (e.g. "~/HypeProofClinic" for
+  // the dental website cohort, "~/HypeProofGames" for kids). The extension opens
+  // this folder on onboarding. Absent → the legacy default folder is used.
+  workspace_root?: string | null;
   /** Optional input capabilities (default off). #278 / website-copyclone. */
   input?: { page_context?: boolean; image_paste?: boolean };
   /** #278 Phase 3 — coach's client-driven browser control loop (default off). */
@@ -134,7 +138,15 @@ export interface ResolvedProfile {
   // subagents (delegation modal-gated; definition tools intersected with the
   // cohort's permitted set). Adults only — minors never carry subagents:true
   // (harness child_sdk_subagents FAIL + client-side strip).
-  sdk_tools?: { read?: boolean; write?: boolean; browser?: boolean; subagents?: boolean };
+  // `shell` (epic #431) grants the SDK Bash tool. Arbitrary commands are
+  // allowed by design — the approval modal is the gate, same as Claude Code.
+  sdk_tools?: {
+    read?: boolean;
+    write?: boolean;
+    browser?: boolean;
+    subagents?: boolean;
+    shell?: boolean;
+  };
   // #371 — coach runtime the worker resolved for this cohort. "agent-sdk" only
   // for an adult, sdk_tools-opted-in cohort (worker force-pins minors to
   // "proxy"). Absent → proxy. The client ORs this with the machine-scoped
@@ -241,6 +253,11 @@ export type HostMessage =
   // stay silent (host-side AiDisclosureGate remembers). Webview renders a
   // compact role=note + aria-live=polite banner at the top of the messages.
   | { type: "aiDisclosure"; text: string }
+  // #384 — an image opened in an editor tab (VS Code intercepts file drops onto
+  // the editor and opens them). The host reads the bytes and hands the webview
+  // a data URL to attach to the next turn — making "drag a screenshot in" work
+  // WITH VS Code's drop behavior instead of fighting it. image_paste-gated.
+  | { type: "attachImage"; dataUrl: string; name: string }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string }
@@ -261,6 +278,12 @@ export interface ActionRequest {
   // modal makes the student consciously decide the delegation — the
   // delegation_judgment asset IS this decision (docs/seven-assets.md §5).
   kind: "writeFile" | "executeShell" | "readFile" | "webSearch" | "openBrowser" | "delegateAgent";
+  /**
+   * epic #431, shell only — the command is unrecoverable if approved by
+   * reflex (`rm`, `sudo`, `git push --force`, pipe-to-shell). The host shows
+   * the strong confirm and refuses to remember it under "항상 허용".
+   */
+  destructive?: boolean;
   description: string;
   payload: unknown;
 }
