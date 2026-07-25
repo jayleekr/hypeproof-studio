@@ -29,6 +29,7 @@ import {
 } from "./browserMcp.ts";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
 import { SDK_BINARY_MIN_BYTES, SDK_BINARY_VERSION } from "./sdkBinaryManifest.ts";
+import { isDestructiveCommand } from "./shellPolicy.ts";
 
 export type AgentPermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
 
@@ -108,6 +109,33 @@ const SDK_READ_TOOL_NAMES = ["Read", "Grep", "Glob"] as const;
 const SDK_WRITE_TOOL_NAMES = ["Write", "Edit"] as const;
 
 /**
+ * Tell the coach where it actually is (#428).
+ *
+ * Passing `systemPrompt` as a string REPLACES the SDK's default preamble, and
+ * that preamble is what normally carries the working-directory env block — the
+ * same block Claude Code itself injects. With `settingSources: []` on top (no
+ * CLAUDE.md), the coach was left with zero knowledge of its own cwd while its
+ * tools resolved against it correctly. Asked "내 워킹디렉토리 절대경로", it
+ * listed the RIGHT files under an invented "/app/workdir".
+ *
+ * There is no shell to fall back on either — `permittedToolsFor` can never
+ * grant Bash, so the coach cannot run `pwd` to recover. The path has to be
+ * given, and it has to come from here: `cwd` is per-student (each cohort has
+ * its own workspace_root under a different home dir), so it cannot live in the
+ * worker's cohort prompt.
+ */
+export function withWorkspaceContext(systemPrompt: string, cwd?: string): string {
+  if (!cwd) return systemPrompt;
+  return (
+    systemPrompt +
+    "\n\n<env>\n" +
+    `Working directory (absolute): ${cwd}\n` +
+    "파일이나 폴더의 경로를 말할 때는 반드시 위 절대경로를 기준으로 답한다. 추측하거나 지어내지 않는다.\n" +
+    "</env>"
+  );
+}
+
+/**
  * Which tools a cohort may use. Conservative and fail-closed by design:
  * - the WORKER PROFILE owns file-tool policy (`sdk_tools`, ADR 0003 / #282
  *   Phase 2): `read` → Read/Grep/Glob, `write` → Write/Edit. Absent flags
@@ -128,6 +156,14 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
   }
   if (profile.sdk_tools?.write === true && !isMinorTier(profile)) {
     tools.push(...SDK_WRITE_TOOL_NAMES);
+  }
+  // epic #431 — shell. Profile-gated only, no separate minor strip: a minor
+  // cohort grants it by simply not setting the flag. Arbitrary commands are
+  // intended; `evaluateSdkToolUse` routes every one of them to the approval
+  // modal, and shellPolicy decides which ones additionally refuse to be
+  // remembered by "항상 허용".
+  if (profile.sdk_tools?.shell === true) {
+    tools.push("Bash");
   }
   if (profile.tools?.web_search === true) {
     // Web research = search (find sources) + fetch (open and read them). Granting
@@ -707,7 +743,7 @@ export function buildSdkQueryOptions(
       ? buildSubagentDefinitions(agent.permittedTools)
       : undefined;
   return {
-    systemPrompt: agent.systemPrompt,
+    systemPrompt: withWorkspaceContext(agent.systemPrompt, args.cwd),
     model: agent.model,
     // Built-in base tool set ONLY — the mcp__hypeproof__* names never go here
     // (REQ-M19): Options.tools filters BUILT-INS; MCP tools are delivered via
@@ -802,6 +838,149 @@ export function sdkFatalAuthStatus(msg: Record<string, unknown>): number | null 
   return typeof status === "number" && SDK_FATAL_AUTH_STATUSES.has(status) ? status : null;
 }
 
+/** True for the SDK's retry tick (`{type:"system", subtype:"api_retry"}`). */
+export function isSdkRetryEvent(msg: Record<string, unknown>): boolean {
+  return msg["type"] === "system" && msg["subtype"] === "api_retry";
+}
+
+// ── First-token / idle stall watchdog (#403) ────────────────────────────────
+// The 400/401 fast-fail above only covers the credential case. Everything else
+// the gateway can answer with — 429 / 529 / 5xx / a dropped connection — the
+// SDK CLI retries up to 10x with backoff, and a merely SLOW first turn (long
+// cohort prompt + a heavy design brief) emits no stream events at all in the
+// meantime. Both look identical to a student: "생각하는 중… ✨" forever, no
+// error, no way out — observed 4/4 on the heavy-design-prompt runs. The proxy
+// path at least terminates with a visible error, so the SDK consumer keeps its
+// own deadline for parity.
+
+/**
+ * Silence budget (ms) before a turn is declared stalled. Measured from the last
+ * PROGRESS event — an `api_retry` tick deliberately does NOT renew it, or a
+ * backoff schedule would extend the budget forever, which is the exact hang
+ * this catches.
+ *
+ * Calibrated against a REAL healthy turn, not guessed (2026-07-24, seeded SDK →
+ * prod gateway, copyclone prompt, "make the homepage" brief):
+ *   result: success · duration 286s · 4 turns · 87 stream events
+ *   thinking → Write → thinking → Bash → Write → text
+ *   longest silence between events ≈ 86s (long thinking stretches; the periodic
+ *   `system/thinking_tokens` events are what break the silence)
+ * A healthy turn is MINUTES long here, and 86s of it can be silent. The first
+ * cut of this constant was 120s — barely 34s of headroom, i.e. a slightly
+ * heavier page would have had the watchdog killing turns that were working.
+ * 240s is ~3x the observed worst-case gap and still bounded, which is the whole
+ * point: bounded-and-visible beats forever-and-silent.
+ */
+export const SDK_STREAM_STALL_MS = 240_000;
+
+/**
+ * Student-facing stall copy. Same register as the token copy (REQ-B5): says
+ * what to do, never shows a technical reason. Retrying is the real recovery —
+ * the aborted turn leaves no server-side state behind.
+ */
+export const SDK_STALL_FRIENDLY =
+  "코치 응답이 너무 오래 걸려요. 다시 한 번 보내주세요. 🕐";
+
+/** Sentinel for the watchdog leg of the stream/timer race. */
+const STALLED = Symbol("sdk-stream-stalled");
+
+// ── SDK activity → what the student actually sees the coach doing (#414) ────
+// The stream already carries everything: `thinking` blocks, `tool_use` blocks
+// with their full input, `tool_result` blocks, and periodic
+// `system/thinking_tokens` ticks with a running token estimate. Until now
+// consumeSdkStream extracted ONLY `.text`, so a turn that spent 286s writing
+// files, hitting a read-only path, recovering via a shell probe, and writing
+// again showed the student one static line. Nothing new has to be invented
+// here — this stops throwing away what already arrives.
+//
+// Presentation (icons, truncation, Korean framing) stays OUT of this module:
+// it emits raw activity, the host maps it to the toolLog protocol the browser
+// loop already renders.
+
+export type SdkActivity =
+  /** Running token estimate while the model thinks (Claude Code's "✻ …" counter). */
+  | { kind: "thinking_tokens"; tokens: number }
+  /** A completed thinking block. Raw model text — NOT translated (it is usually English). */
+  | { kind: "thinking"; text: string }
+  /** The coach is about to run a tool. `id` pairs with the matching tool_result. */
+  | { kind: "tool_use"; id: string; name: string; input: unknown }
+  /** That tool finished. */
+  | { kind: "tool_result"; id: string; isError: boolean };
+
+/**
+ * The one input field worth showing next to a tool name, in Claude Code's
+ * `Write(index.html)` spirit. Falls back to a compact JSON clip so an unknown
+ * tool still shows something real instead of a bare name.
+ */
+export function summarizeToolInput(name: string, input: unknown, max = 60): string {
+  if (!input || typeof input !== "object") return "";
+  const rec = input as Record<string, unknown>;
+  const clip = (v: string): string => {
+    const one = v.replace(/\s+/g, " ").trim();
+    return one.length > max ? `${one.slice(0, max)}…` : one;
+  };
+  // Ordered by how identifying the field is, not by tool — the same key means
+  // the same thing across tools, and unknown tools get the same treatment.
+  for (const key of ["file_path", "path", "command", "url", "query", "pattern", "prompt", "description"]) {
+    const v = rec[key];
+    if (typeof v === "string" && v.length > 0) {
+      // A path is identified by its tail, not its (long, invariant) prefix.
+      const shown = key === "file_path" || key === "path" ? v.split("/").filter(Boolean).pop() ?? v : v;
+      return clip(shown);
+    }
+  }
+  try {
+    return clip(JSON.stringify(rec));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Pull every displayable activity out of ONE SDK stream event. Pure; returns []
+ * for events that carry nothing to show (text deltas, init, result).
+ */
+export function extractSdkActivity(msg: Record<string, unknown>): SdkActivity[] {
+  const type = String(msg["type"] ?? "");
+
+  if (type === "system" && msg["subtype"] === "thinking_tokens") {
+    const tokens = msg["estimated_tokens"];
+    return typeof tokens === "number" ? [{ kind: "thinking_tokens", tokens }] : [];
+  }
+
+  // tool_use rides on assistant messages; tool_result comes back on user ones.
+  if (type !== "assistant" && type !== "user") return [];
+  const content = (msg["message"] as Record<string, unknown> | undefined)?.["content"];
+  if (!Array.isArray(content)) return [];
+
+  const out: SdkActivity[] = [];
+  for (const raw of content) {
+    if (!raw || typeof raw !== "object") continue;
+    const b = raw as Record<string, unknown>;
+    switch (b["type"]) {
+      case "thinking": {
+        const text = typeof b["thinking"] === "string" ? b["thinking"] : "";
+        if (text.trim()) out.push({ kind: "thinking", text });
+        break;
+      }
+      case "tool_use": {
+        const id = typeof b["id"] === "string" ? b["id"] : "";
+        const name = typeof b["name"] === "string" ? b["name"] : "";
+        if (id && name) out.push({ kind: "tool_use", id, name, input: b["input"] });
+        break;
+      }
+      case "tool_result": {
+        const id = typeof b["tool_use_id"] === "string" ? b["tool_use_id"] : "";
+        if (id) out.push({ kind: "tool_result", id, isError: b["is_error"] === true });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
 /** Best-effort text extraction across candidate SDK message shapes. */
 export function extractSdkText(msg: Record<string, unknown>): string {
   const direct = msg["text"];
@@ -834,35 +1013,142 @@ export interface SdkStreamHandlers {
   /** Build the student-friendly auth error thrown on a fatal 400/401. */
   makeFatalAuthError: (status: number) => Error;
   onDelta: (delta: string) => void;
+  /**
+   * #414 — everything the coach is DOING (thinking, tool calls, their results).
+   * Optional so the fast-fail/stall tests can ignore it; when absent the stream
+   * behaves exactly as before.
+   */
+  onActivity?: (activity: SdkActivity) => void;
+  /**
+   * #403 — silence budget in ms before the turn is declared stalled. Omit for
+   * SDK_STREAM_STALL_MS; 0 disables the watchdog (escape hatch / old behavior).
+   */
+  stallMs?: number;
+  /**
+   * Build the student-friendly error thrown when the budget elapses. Defaults
+   * to a bare Error(SDK_STALL_FRIENDLY) so a caller can't accidentally turn a
+   * stall into a silent hang by forgetting to wire it.
+   */
+  makeStallError?: () => Error;
+  /**
+   * True while the turn is legitimately blocked OUTSIDE the stream: the
+   * approve/deny modal is open (the student is reading it), or a tool the SDK
+   * is still executing. Silence there is correct, so the watchdog grants a
+   * fresh budget instead of aborting.
+   */
+  isTurnBlocked?: () => boolean;
 }
 
 /**
- * Consume one SDK coach turn's message stream. Pure and injected so the
- * fast-fail contract is locked by unit tests: on the FIRST api_retry event
- * with error_status 400/401 the query is aborted and the auth error thrown —
- * within one event, no further stream consumption, no minutes-long backoff.
+ * Consume one SDK coach turn's message stream. Pure and injected so both
+ * no-silent-hang contracts are locked by unit tests:
+ * - on the FIRST api_retry event with error_status 400/401 the query is
+ *   aborted and the auth error thrown — within one event, no minutes-long
+ *   backoff (#320, REQ-M15);
+ * - after `stallMs` of silence with no progress the query is aborted and the
+ *   friendly stall error thrown, so a retry storm or a wedged first turn ends
+ *   in a visible message instead of an endless "생각하는 중…" (#403, REQ-M26).
+ *
+ * The manual iterator (instead of `for await`) is what makes the timer race
+ * possible; the early-exit paths close the iterator explicitly, which
+ * `for await` used to do for us.
  */
 export async function consumeSdkStream(
   stream: AsyncIterable<unknown>,
   h: SdkStreamHandlers,
 ): Promise<void> {
-  for await (const raw of stream) {
-    // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
-    if (h.isAborted()) throw h.makeAbortError();
-    const msg = (raw ?? {}) as Record<string, unknown>;
-    const fatal = sdkFatalAuthStatus(msg);
-    if (fatal !== null) {
-      // Kill the subprocess's retry loop first, then surface the token error.
+  const budget = h.stallMs ?? SDK_STREAM_STALL_MS;
+  const it = stream[Symbol.asyncIterator]();
+  /** In-flight it.next(); kept across timer re-arms so it is never called twice. */
+  let pending: Promise<IteratorResult<unknown>> | null = null;
+  let progressAt = Date.now();
+  /**
+   * The blocked state is only sampled when the budget expires, so a modal that
+   * closes mid-window would otherwise leave the coach ~0ms to answer. One grace
+   * window is granted after any observed block: "once the human (or the tool)
+   * is done, the coach gets a full budget", regardless of the timing.
+   */
+  let sawPause = false;
+
+  const nextEvent = async (): Promise<IteratorResult<unknown>> => {
+    if (!pending) pending = it.next();
+    if (budget <= 0) {
+      const settled = await pending;
+      pending = null;
+      return settled;
+    }
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const remaining = Math.max(1, budget - (Date.now() - progressAt));
+      // NOT unref'd on purpose: this timer is the only thing that ends a wedged
+      // turn, so it has to be able to keep the loop alive while one is live.
+      // It is always cleared below (both legs of the race).
+      const expired = new Promise<typeof STALLED>((resolve) => {
+        timer = setTimeout(() => resolve(STALLED), remaining);
+      });
+      const won = await Promise.race([pending.then((value) => ({ value })), expired]);
+      clearTimeout(timer);
+      if (won !== STALLED) {
+        pending = null;
+        return won.value;
+      }
+      if (h.isTurnBlocked?.()) {
+        // An open approval modal / a running tool is not a stall.
+        sawPause = true;
+        progressAt = Date.now();
+        continue;
+      }
+      if (sawPause) {
+        // The block ended somewhere inside the window that just expired; the
+        // coach hasn't had a fair budget yet. Spend the grace window.
+        sawPause = false;
+        progressAt = Date.now();
+        continue;
+      }
+      // Nobody awaits `pending` after this throw and abortQuery() rejects it.
+      pending.catch(() => {});
       h.abortQuery();
-      throw h.makeFatalAuthError(fatal);
+      throw h.makeStallError?.() ?? new Error(SDK_STALL_FRIENDLY);
     }
-    const type = String(msg["type"] ?? "");
-    if (type === "assistant" || type === "text" || type === "content_block_delta") {
-      const delta = extractSdkText(msg);
-      if (delta) h.onDelta(delta);
+  };
+
+  try {
+    for (;;) {
+      const step = await nextEvent();
+      if (step.done) return;
+      // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
+      if (h.isAborted()) throw h.makeAbortError();
+      const msg = (step.value ?? {}) as Record<string, unknown>;
+      const fatal = sdkFatalAuthStatus(msg);
+      if (fatal !== null) {
+        // Kill the subprocess's retry loop first, then surface the token error.
+        h.abortQuery();
+        throw h.makeFatalAuthError(fatal);
+      }
+      // Retry ticks are the pathology, not progress — they must not renew the
+      // watchdog budget.
+      if (!isSdkRetryEvent(msg)) {
+        progressAt = Date.now();
+        sawPause = false;
+      }
+      // #414 — surface the work itself (thinking / tool calls / results) before
+      // the text, so the activity line appears when it happens rather than
+      // after the prose that describes it.
+      if (h.onActivity) {
+        for (const activity of extractSdkActivity(msg)) h.onActivity(activity);
+      }
+      const type = String(msg["type"] ?? "");
+      if (type === "assistant" || type === "text" || type === "content_block_delta") {
+        const delta = extractSdkText(msg);
+        if (delta) h.onDelta(delta);
+      }
+      // Other message types (result / message_stop) are terminal — nothing to
+      // emit; the caller posts streamEnd.
     }
-    // Other message types (result / message_stop) are terminal — nothing to
-    // emit; the caller posts streamEnd.
+  } catch (err) {
+    // `for await` closed the iterator on an early exit; the manual loop must.
+    void Promise.resolve(it.return?.()).catch(() => {});
+    throw err;
   }
 }
 
@@ -914,6 +1200,13 @@ export interface CoachToolAction {
   toolName: string;
   /** Raw tool input object as given by the SDK. */
   input: unknown;
+  /**
+   * epic #431 — carried from the policy verdict so the host can pick the
+   * strong confirm. Computed once in evaluateSdkToolUse rather than re-derived
+   * at the modal, so policy and UI can never disagree about what is
+   * destructive.
+   */
+  destructive?: boolean;
 }
 
 function firstString(input: unknown, keys: string[]): string | undefined {
@@ -974,7 +1267,12 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
 
   if (SHELL_TOOLS.has(name)) {
     const command = firstString(action.input, ["command"]) ?? safeStringify(action.input);
-    return { kind: "executeShell", description: `${action.toolName}: ${command}`, payload: { command } };
+    return {
+      kind: "executeShell",
+      description: `${action.toolName}: ${command}`,
+      payload: { command },
+      ...(action.destructive ? { destructive: true } : {}),
+    };
   }
   if (WRITE_TOOLS.has(name)) {
     const path = firstString(action.input, ["file_path", "path", "notebook_path"]);
@@ -1024,7 +1322,10 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
 
 export type SdkToolVerdict =
   | { decision: "allow" }
-  | { decision: "ask" }
+  // `destructive` (epic #431): shell only. The command is still ask-able —
+  // arbitrary commands are the point — but the host must show the stronger
+  // confirm and must NOT let "항상 허용" remember it.
+  | { decision: "ask"; destructive?: boolean }
   // `drift` (#375): true only when the denied tool NAME is one the matrix has
   // never classified (isClassifiedSdkToolName === false) — i.e. possible Agent
   // SDK tool drift, not a routine profile/policy denial. The caller logs the
@@ -1128,15 +1429,26 @@ export function evaluateSdkToolUse(args: {
 
   const name = toolName.toLowerCase();
 
-  // Gate 1b — belt over suspenders: shell can NEVER be permitted (no profile
-  // flag exists for it in Phase 2), so deny even if a future permitted set
-  // widens by mistake.
+  // ── Shell (epic #431) ─────────────────────────────────────────────────────
+  // Gate 1 already proved the cohort opted in (`sdk_tools.shell`). From here
+  // ANY command may be proposed — there is deliberately no content allowlist,
+  // because an allowlist makes the coach invent detours for off-list work,
+  // which is the gap-filling that produced #428's fabricated `/app/workdir`.
+  //
+  // The modal is the gate. What the policy still decides is how LOUD it is:
+  // destructive commands (`rm`, `sudo`, `git push --force`, pipe-to-shell)
+  // carry a flag so the host shows the stronger confirm and never lets
+  // "항상 허용" remember them.
   if (SHELL_TOOLS.has(name)) {
-    return {
-      decision: "deny",
-      reason: "shell execution is never granted (Phase 2 invariant)",
-      friendly: TOOL_DENIED_FRIENDLY,
-    };
+    const command = firstString(input, ["command"]) ?? "";
+    if (!command.trim()) {
+      return {
+        decision: "deny",
+        reason: "shell call carried no command string",
+        friendly: TOOL_DENIED_FRIENDLY,
+      };
+    }
+    return { decision: "ask", destructive: isDestructiveCommand(command) };
   }
 
   // ── Agent/Task tool — subagent delegation (#282 P2 slice 3, REQ-M22) ──────

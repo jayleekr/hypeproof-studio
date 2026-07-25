@@ -273,10 +273,45 @@ function chatRequest({ prompt = "안녕 코치", stream = false, headers = {} } 
   // kids profile (no opt-in) normalizes to all-false (fail closed, minor-safe).
   assert.deepEqual(
     j.sdk_tools,
-    { read: false, write: false, browser: false, subagents: false },
+    { read: false, write: false, browser: false, subagents: false, shell: false },
     "kids profile exposes sdk_tools all-false (absent flags normalize to false)",
   );
 }
+
+// epic #431 — THE gap this suite existed to catch and didn't. The serializer in
+// routes/chat.ts builds sdk_tools key-by-key, so a profile can set `shell: true`
+// and it still never reaches the client. The client's permittedToolsFor reads
+// only what arrives, so the entire grant goes inert — silently, with the profile
+// looking correct. Found by probing prod AFTER a green deploy.
+//
+// Asserting the SERVED shape (not listProfiles()) is the point: profile-level
+// tests pass either way. Every sdk_tools flag must be reachable end to end.
+{
+  const { listProfiles } = await import("../src/profiles/index.ts");
+  const shellCohort = listProfiles().find((p) => p.sdk_tools?.shell === true);
+  assert.ok(shellCohort, "at least one cohort opts into shell (fixture for this test)");
+
+  const { token } = await issue(
+    { u: USER, c: shellCohort.session.cohort_id, p: shellCohort.id },
+    1,
+    TEST_SECRET,
+  );
+  const r = await app.fetch(
+    new Request("https://api.test/v1/profile", {
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    createMockEnv(),
+    makeCtx(),
+  );
+  assert.equal(r.status, 200, "shell cohort profile fetch → 200");
+  const j = await r.json();
+  assert.equal(
+    j.sdk_tools?.shell,
+    true,
+    `${shellCohort.id}: sdk_tools.shell must SURVIVE serialization — without it the app never grants Bash`,
+  );
+}
+console.log("✓ #431: sdk_tools.shell survives the /v1/profile serializer");
 console.log("✓ integration: GET /v1/profile — token-resolved, system_prompt withheld");
 
 console.log("All chat integration tests passed.");

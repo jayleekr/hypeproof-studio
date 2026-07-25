@@ -141,6 +141,9 @@ function reducer(state: State, action: Action): State {
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [shouldCrash, setShouldCrash] = useState(false);
+  // #384 — image handed over from the host (an image opened in an editor tab).
+  // nonce forces ChatPanel's effect to re-run even for the same dataUrl.
+  const [incomingImage, setIncomingImage] = useState<{ dataUrl: string; nonce: number } | null>(null);
 
   useEffect(() => {
     const off = onHostMessage((msg: HostMessage) => {
@@ -157,6 +160,7 @@ export function App() {
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;
+        case "attachImage": setIncomingImage({ dataUrl: msg.dataUrl, nonce: Date.now() }); break;
         case "webviewTestCrash": setShouldCrash(true); break;
       }
     });
@@ -217,12 +221,14 @@ export function App() {
     <ChatErrorBoundary>
       <CrashIfFlagged crash={shouldCrash} />
       <ChatPanel
+        incomingImage={incomingImage}
         config={state.config}
         messages={state.messages}
         toolLog={state.toolLog}
         pageNotice={state.pageNotice}
         aiNotice={state.aiNotice}
         streaming={!!state.streamingId}
+        streamingId={state.streamingId}
         error={state.error}
         errorRequestId={state.errorRequestId}
         errorRunbookUrl={state.errorRunbookUrl}
