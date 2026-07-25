@@ -16,6 +16,7 @@
     "test:coach": "node --test 03-coach-stress.test.mjs",
     "test:issuer": "node --test 04-issuer-mint.test.mjs",
     "test:rate": "node --test 05-rate-limit.test.mjs",
-    "test:report": "node --test 06-report-endpoint.test.mjs"
+    "test:report": "node --test 06-report-endpoint.test.mjs",
+    "test:sdkshape": "node --test 07-sdk-request-shape.test.mjs"
   }
 }

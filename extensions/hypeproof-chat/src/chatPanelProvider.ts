@@ -6,7 +6,8 @@ import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
-import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
+import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
+import { commandSignature, describeCommandForApproval } from "./shellPolicy";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -70,6 +71,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // the webview forgets everything on hide/show remounts; see AiDisclosureGate.
   private readonly aiDisclosure = new AiDisclosureGate();
   private activeCohortId: string | null = null;
+  /**
+   * epic #431 — shell command signatures the participant chose to always
+   * allow. SESSION-SCOPED and never persisted: a fresh window restores the
+   * full judgment. Destructive commands never reach this set (shellPolicy's
+   * commandSignature returns null for them), so `rm` can never be remembered.
+   */
+  private readonly approvedCommandSignatures = new Set<string>();
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
   // x-request-id header on every response we can correlate against in tail.
@@ -128,6 +136,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   /** #278 Phase 2 — may we attach a page screenshot (image)? Worker enforces the same gate. */
   isImagePasteEnabled(): boolean {
     return this.cachedProfile?.input?.image_paste === true;
+  }
+
+  /**
+   * #384 — hand the webview an image data URL to attach to the next turn. Used
+   * by the "image opened in an editor tab" flow (extension.ts) so dropping a
+   * screenshot onto the editor still reaches the coach. The webview downscales
+   * + thumbnails it, same path as ⌘V paste. image_paste-gated by the caller.
+   */
+  attachImageDataUrl(dataUrl: string, name: string): void {
+    void this.post({ type: "attachImage", dataUrl, name });
   }
 
   /**
@@ -501,6 +519,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
       },
       startLivePreview: () => this.startLivePreview(),
+      // #415 — 지금 떠 있는 페이지를 가장 싸게 읽는 경로. `activeBrowserTab` 은
+      // url/title 을 그대로 들고 있어 CDP 접속도 스크린샷도 필요 없다
+      // (URL 하나 알자고 이미지를 뜨면 토큰도 시간도 낭비).
+      currentPage: async () => {
+        const tab = vscode.window.activeBrowserTab;
+        if (!tab?.url) return null;
+        return { url: tab.url, title: tab.title };
+      },
     };
   }
 
@@ -730,6 +756,39 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.assetScores?.recordAssetScore(assetScore);
         void this.post({ type: "streamAssetScore", streamId, assetScore });
       };
+      // #414 — the SDK coach's real work, rendered through the same toolLog
+      // lines the browser loop already uses. Deliberately NOT translated: the
+      // model thinks in English and the tool names are the SDK's own, and a
+      // Korean paraphrase of "Write(index.html)" would be a worse signal than
+      // the thing itself. Shape follows Claude Code — one truncated line per
+      // action (the CSS ellipsizes), plus a live token counter while thinking.
+      let thinkingIndex = 0;
+      // The webview replaces an entry wholesale by id, so a tool_result has to
+      // re-send the label the tool_use showed — keep it per stream.
+      const toolLabels = new Map<string, string>();
+      const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
+        const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
+          void this.post({ type: "toolLog", streamId, id, icon, label, state });
+        switch (a.kind) {
+          case "thinking_tokens":
+            // One entry that ticks in place; the completed block replaces it.
+            log(`think-${thinkingIndex}`, "💭", `Thinking… ${a.tokens} tokens`, "running");
+            break;
+          case "thinking":
+            log(`think-${thinkingIndex}`, "💭", a.text, "done");
+            thinkingIndex += 1;
+            break;
+          case "tool_use": {
+            const label = `${a.name}(${summarizeToolInput(a.name, a.input)})`;
+            toolLabels.set(a.id, label);
+            log(a.id, "🔧", label, "running");
+            break;
+          }
+          case "tool_result":
+            log(a.id, "🔧", toolLabels.get(a.id) ?? "", a.isError ? "error" : "done");
+            break;
+        }
+      };
       // The non-SDK runtime: the agentic browser loop when the cohort opted
       // into browser_control (copyclone opens the reference URL / re-checks the
       // live preview), else the plain single-turn proxy. #371 — the SDK path's
@@ -797,7 +856,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
             // seeded > node_modules). Empty string = unset.
             binaryPathSetting: cfg.get<string>("sdkBinaryPath", "") || undefined,
+            // #403 — no-progress budget before the turn is aborted with a
+            // visible retry message instead of an endless "생각하는 중…".
+            stallTimeoutMs: cfg.get<number>("sdkStallTimeoutMs"),
             onDelta,
+            onActivity,
             onCitations,
             onAssetScore,
             // Map the SDK tool call → an accurate host ActionRequest so the
@@ -1011,12 +1074,51 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * streamed-assistant path.
    */
   async resolveActionApproval(req: ActionRequest): Promise<boolean> {
-    // Tier 1 — hard-deny shell exec.
+    // Tier 1 — shell (epic #431). No longer a hard deny: a cohort that set
+    // `sdk_tools.shell` gets arbitrary commands, and THIS modal is the gate.
+    // Three shapes, in order of how much they interrupt:
+    //   destructive → strong confirm every time, never remembered;
+    //   remembered  → silent (the participant already said "항상 허용");
+    //   otherwise   → normal confirm + the option to remember.
     if (req.kind === "executeShell") {
-      vscode.window.showInformationMessage(
-        "셸 실행은 허용되지 않아요. 다른 방법으로 도와드릴게요.",
+      const command = (req.payload as { command?: string } | null | undefined)?.command ?? "";
+      const destructive = req.destructive === true;
+      const signature = destructive ? null : commandSignature(command);
+
+      if (signature && this.approvedCommandSignatures.has(signature)) {
+        return true;
+      }
+
+      const pretty = describeCommandForApproval(command);
+      if (destructive) {
+        // Deliberately NOT offering "항상 허용". Approving `rm -rf` once must
+        // never approve it for the rest of the session, and the whole point of
+        // the strong confirm is that it stays interruptive.
+        const pick = await vscode.window.showWarningMessage(
+          `⚠️ 되돌리기 어려운 명령이에요. 정말 실행할까요?\n\n${pretty}`,
+          { modal: true },
+          "실행",
+          "취소",
+        );
+        return pick === "실행";
+      }
+
+      const REMEMBER = signature ? `항상 허용 (${signature})` : null;
+      const buttons = REMEMBER ? ["실행", REMEMBER] : ["실행"];
+      const pick = await vscode.window.showWarningMessage(
+        `코치가 명령을 실행하려고 해요:\n\n${pretty}`,
+        { modal: true },
+        ...buttons,
       );
-      return false;
+      if (pick === REMEMBER && signature) {
+        // Session-scoped only — never persisted. A new window starts the
+        // participant's judgment over, which is the intended lesson; what we
+        // are killing is the fifteen identical modals inside ONE 20:35 block
+        // that train them to stop reading.
+        this.approvedCommandSignatures.add(signature);
+        return true;
+      }
+      return pick === "실행";
     }
 
     // Tier 2 — file access must target the active workspace (write and read).

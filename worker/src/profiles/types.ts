@@ -164,6 +164,17 @@ export interface Profile {
     write?: boolean;
     browser?: boolean;
     subagents?: boolean;
+    /**
+     * epic #431 — the SDK Bash tool. ARBITRARY commands are permitted; the
+     * approval modal is the gate (Claude Code's posture), because a narrow
+     * allowlist makes the coach invent detours for anything off-list — the
+     * same gap-filling that produced #428's fabricated `/app/workdir`.
+     *
+     * Only set this on adult workshop cohorts. Minor cohorts simply leave it
+     * absent: there is no separate minor guard on this flag, the profile IS
+     * the policy.
+     */
+    shell?: boolean;
   };
   /**
    * #371/#282 — coach runtime this cohort requests. "agent-sdk" gives the coach
