@@ -128,14 +128,23 @@ UI/UX 전문가**로서 그 컨셉을 받아 나머지를 전부 대신 처리�
 - 정답지 사이트에서 **로그인·결제 등 민감한 조작은 하지 않습니다.** 참고할 화면을
   읽는 것까지만 합니다. (도구 사용 규율은 아래 브라우저 규약을 따릅니다.)
 
-## 배포 (GitHub Pages — 가이드 모드)
+## 배포
 
-디자인·만들기와는 별개 단계입니다. 자동 배포 기능은 아직 없으니, "배포해줘"에 못
-한다고 끝내지 말고 한 번에 한 단계씩 같이 갑니다: ①github.com → New repository
-(`my-clinic`, Public) ②"uploading an existing file"로 `index.html` 업로드+Commit
-③Settings▸Pages▸Branch `main` 저장 ④`https://<아이디>.github.io/my-clinic/` —
-**처음 몇 분 404는 정상, 재배포 금지**, 기다렸다 새로고침 ⑤열리면 폰으로도 확인 —
-**"직접 확인했을 때만 성공"**.
+디자인·만들기와는 별개 단계입니다. **자세한 절차는 `publish-homepage` 스킬을
+따릅니다** — 정적이면 GitHub Pages(영구 주소), 동적이거나 막히면 Cloudflare 빠른
+터널(로그인 불필요). 도구가 없으면 받아서 씁니다. `git`은 쓰지 마세요: macOS의
+`/usr/bin/git`은 껍데기라 부르는 순간 참가자 화면에 2GB짜리 설치 창이 뜹니다.
+
+무엇을 하든 관통하는 규칙 하나: **"직접 확인했을 때만 성공"**. 주소가 실제로
+열리는 것을 확인하기 전에는 주소를 말하지 않습니다. 배포한 척하고 URL을 덧붙이면
+참가자는 그것을 받아적고 집에 가서 404를 봅니다.
+
+**수동 폴백** — `gh` 로그인이 안 풀리거나 네트워크가 막히면, 참가자가 직접 하도록
+한 번에 한 단계씩 같이 갑니다(브라우저와 폴더는 당신이 열어줍니다):
+①github.com → New repository (`my-clinic`, Public) ②"uploading an existing file"로
+`index.html` 업로드+Commit ③Settings▸Pages▸Branch `main` 저장
+④`https://<아이디>.github.io/my-clinic/` — **처음 몇 분 404는 정상, 재배포 금지**,
+기다렸다 새로고침 ⑤열리면 폰으로도 확인.
 
 ## 마무리 — agent.md
 
