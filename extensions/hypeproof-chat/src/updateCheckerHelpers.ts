@@ -46,21 +46,51 @@ export interface UpdateInfo {
   sizeBytes: number;
 }
 
+export type ReleaseAsset = GhRelease["assets"][number];
+
+/** Picks the update asset for the running platform out of a release's assets. */
+export type AssetPicker = (assets: ReleaseAsset[]) => ReleaseAsset | undefined;
+
+/**
+ * macOS: the single darwin-arm64 zip. Its name is a fixed suffix (the build
+ * stamps a stable asset name), so an `endsWith` match is enough.
+ */
+export function pickDarwinAsset(assets: ReleaseAsset[]): ReleaseAsset | undefined {
+  return assets.find((a) => a.name.endsWith("darwin-arm64.zip"));
+}
+
+/**
+ * Windows: the Inno Setup installer .exe. Prefer the per-user installer
+ * (`install-win.ps1`'s first choice — no admin needed), fall back to the
+ * system installer. Unlike the darwin asset, the Windows asset name carries a
+ * VS Code *engine* version suffix (e.g. `…Setup-x64-1.116.04919.exe`), not the
+ * HPS release version, so we match by SHAPE with a regex rather than a fixed
+ * suffix. Mirrors the asset selection in `install-win.ps1`.
+ */
+export function pickWindowsInstaller(assets: ReleaseAsset[]): ReleaseAsset | undefined {
+  return (
+    assets.find((a) => /UserSetup.*x64.*\.exe$/i.test(a.name)) ??
+    assets.find((a) => /Setup.*x64.*\.exe$/i.test(a.name))
+  );
+}
+
 /**
  * Parse a GitHub Releases API response into update info relative to the
  * currently-bundled version. Returns `available: false` when:
  *   - response is malformed
  *   - latest tag <= current
  *   - latest is draft / prerelease
- *   - matching darwin-arm64 asset not found
+ *   - no asset for this platform (per `pickAsset`) is found
  *
  * Callers must do the `compareVersions` check via this function; raw tag
- * comparisons elsewhere are a hazard.
+ * comparisons elsewhere are a hazard. `pickAsset` selects the platform's
+ * download (defaults to macOS); `checkForUpdates` passes the win32 picker off
+ * macOS.
  */
 export function parseLatestRelease(
   release: GhRelease | null | undefined,
   currentVersion: string,
-  assetSuffix: string = "darwin-arm64.zip",
+  pickAsset: AssetPicker = pickDarwinAsset,
 ): UpdateInfo {
   const empty: UpdateInfo = {
     available: false,
@@ -76,7 +106,7 @@ export function parseLatestRelease(
   const version = tag.replace(/^v/, "");
   if (!version) return empty;
   if (compareVersions(version, currentVersion) <= 0) return empty;
-  const asset = (release.assets ?? []).find((a) => a.name.endsWith(assetSuffix));
+  const asset = pickAsset(release.assets ?? []);
   if (!asset) return empty;
   return {
     available: true,
