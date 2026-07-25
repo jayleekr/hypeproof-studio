@@ -16,11 +16,17 @@
 
 // @ts-ignore — string import enabled via wrangler text rules (wrangler.toml).
 import boaSearchSkillCreator from "./boa-search-skill-creator.md";
+// @ts-ignore — string import enabled via wrangler text rules (wrangler.toml).
+import publishHomepage from "./publish-homepage.md";
 
-export type SkillName = "boa-search-skill-creator";
+export type SkillName = "boa-search-skill-creator" | "publish-homepage";
 
 const SKILLS: Record<SkillName, string> = {
   "boa-search-skill-creator": boaSearchSkillCreator as unknown as string,
+  // epic #431 — 큐시트 20:35 블록. 정적이면 GitHub Pages(영구 주소), 동적이거나
+  // 막히면 Cloudflare 빠른 터널(로그인 불필요). git은 쓰지 않는다: macOS의
+  // /usr/bin/git은 CLT stub이라 수업 중에 2GB GUI 설치를 띄운다.
+  "publish-homepage": publishHomepage as unknown as string,
 };
 
 /**

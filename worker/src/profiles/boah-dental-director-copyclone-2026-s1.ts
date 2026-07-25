@@ -119,6 +119,10 @@ export const profile: Profile = {
   // 구현 경로가 없다. 스킬만 주고 실행 수단을 안 주면 코치가 가짜 배포 URL을
   // 지어낸다(#428과 같은 실패 계열). 임의 명령 허용 — 승인 모달이 게이트.
   sdk_tools: { read: true, write: true, browser: true, subagents: true, shell: true },
+  // epic #431 — 배포 스킬. shell과 반드시 짝이다: 스킬만 있고 실행 수단이 없으면
+  // 코치가 배포한 척하고, 실행 수단만 있고 스킬이 없으면 git을 부르다 CLT 설치
+  // 창(2GB)을 띄운다.
+  skills: ["publish-homepage"],
   // #371/#384 — 원장 트랙은 Agent SDK 런타임: 코치가 파일을 직접 읽고·쓰고·
   // 고쳐 루브릭/agent.md/이미지 참조를 실제 파일로 다룬다(Claude Code와 동일
   // 아키텍처 + canUseTool 교실 정책). 재활성 조건 충족(2026-07-24):

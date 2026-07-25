@@ -1635,6 +1635,7 @@ const TINY_PNG =
 // (children's-data invariant — the only thing protecting kids data from R2).
 {
   const { listProfiles } = await import("../src/profiles/index.ts");
+  const { isKnownSkill, resolveSkills } = await import("../src/skills/index.ts");
   const all = listProfiles();
   assert.ok(all.length > 0, "at least one profile registered");
   for (const p of all) {
@@ -1706,6 +1707,27 @@ const TINY_PNG =
     copyclone.sdk_tools,
     { read: true, write: true, browser: true, subagents: true, shell: true },
     "copyclone: SDK read+write + browser MCP + subagents + shell on (adult, #282 P2 / #431)",
+  );
+
+  // epic #431 — the publish skill and the shell grant are a PAIR. Skill without
+  // shell → the coach narrates a deploy it cannot perform and fabricates a URL
+  // (#428's failure class, with the final deliverable as the fabrication).
+  // Shell without the skill → the coach reaches for `git`, and macOS's
+  // /usr/bin/git is a CLT stub that opens a 2 GB GUI installer mid-lecture.
+  // Assert both together so neither can be removed alone.
+  assert.ok(
+    copyclone.skills?.includes("publish-homepage"),
+    "copyclone: publish-homepage skill declared (#431)",
+  );
+  // resolveSkills only console.warns on an unknown name, so a typo would ship
+  // an inert cohort that LOOKS configured. Resolve it for real.
+  assert.ok(
+    isKnownSkill("publish-homepage"),
+    "publish-homepage resolves in the registry — a typo here ships silently",
+  );
+  assert.ok(
+    resolveSkills(copyclone.skills).length > 500,
+    "copyclone skill markdown is actually bundled (non-trivial length)",
   );
   for (const p of all) {
     if (p.id !== copyclone.id) {
