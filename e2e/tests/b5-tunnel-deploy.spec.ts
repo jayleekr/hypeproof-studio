@@ -73,6 +73,11 @@ async function ask(cf: FrameLocator, win: Page, text: string, timeoutMs = 600_00
   // 그 표시의 소멸이 곧 종료 신호다. 표시가 사라진 뒤에도 텍스트가 잠깐
   // 흔들릴 수 있어 안정까지 함께 본다.
   const progress = cf.locator(".hps-msg-assistant").last().locator(".hps-code-progress");
+  // 진행 표시는 두 형태다 (ChatPanel.tsx AssistantContent 확인):
+  //   content 비었을 때  → "생각하는 중… ✨" 텍스트만, 칩 없음
+  //   content 있을 때    → .hps-code-progress 칩
+  // 칩만 보면 첫 형태를 "안정된 텍스트"로 읽어 18초에 종료 오판한다(실제로 겪음).
+  const THINKING = "생각하는 중";
   const deadline = Date.now() + timeoutMs;
   let last = "", stable = 0, sawProgress = false;
   while (Date.now() < deadline) {

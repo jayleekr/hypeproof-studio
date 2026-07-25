@@ -66,14 +66,19 @@ async function ask(cf: FrameLocator, win: Page, text: string, timeoutMs = 900_00
   const body = cf.locator(".hps-msg-assistant .hps-msg-body").last();
   // #429 — 진행 표시는 스트리밍 중인 메시지에만 붙는다. 그 소멸이 종료 신호.
   const progress = cf.locator(".hps-msg-assistant").last().locator(".hps-code-progress");
+  // 진행 표시는 두 형태다 (ChatPanel.tsx AssistantContent 확인):
+  //   content 비었을 때  → "생각하는 중… ✨" 텍스트만, 칩 없음
+  //   content 있을 때    → .hps-code-progress 칩
+  // 칩만 보면 첫 형태를 "안정된 텍스트"로 읽어 18초에 종료 오판한다(실제로 겪음).
+  const THINKING = "생각하는 중";
   const deadline = Date.now() + timeoutMs;
   let last = "", stable = 0;
   while (Date.now() < deadline) {
     await win.waitForTimeout(4_000);
-    if ((await progress.count().catch(() => 0)) > 0) {
-      stable = 0; last = ((await body.textContent().catch(() => "")) ?? ""); continue;
-    }
     const now = ((await body.textContent().catch(() => "")) ?? "");
+    const busy = (await progress.count().catch(() => 0)) > 0
+      || (now.trim().startsWith(THINKING) && now.trim().length < 40);
+    if (busy) { stable = 0; last = now; continue; }
     if (now === last && now.length > 0) stable++; else { stable = 0; last = now; }
     if (stable >= 3) break;
   }
@@ -92,7 +97,7 @@ function httpStatus(url: string): number {
 test("B4+B5 — 저장소와 영구 배포 주소가 실재하는가", async () => {
   test.setTimeout(2_400_000);
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  const repo = `hps-rubric-b4-${stamp}`;
+  const repo = `hps-rubric-b4-${stamp}-${String(Date.now()).slice(-5)}`;
   const owner = execFileSync("gh", ["api", "user", "--jq", ".login"], { encoding: "utf8" }).trim();
   const marker = `hps-b4-${Date.now()}`;
   console.log(`\n[SETUP] owner=${owner} repo=${repo} marker=${marker}`);
