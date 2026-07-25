@@ -25,7 +25,10 @@ import {
   shouldShowBanner,
   hasFreeDisk,
   pickInflight,
+  pickDarwinAsset,
+  pickWindowsInstaller,
   MIN_FREE_DISK_BYTES,
+  type AssetPicker,
   type GhRelease,
   type UpdateInfo,
 } from "./updateCheckerHelpers";
@@ -41,14 +44,13 @@ const DISMISSAL_KEY = "hypeproofChat.updateDismissals";
  * The 24h cadence + 1 strructor per user means we're nowhere near the limit.
  */
 export async function checkForUpdates(currentVersion: string): Promise<UpdateInfo> {
-  // #425 — the auto-update flow is macOS-only: the asset matcher defaults to
-  // `darwin-arm64.zip`, `detectAppBundle` returns null off an .app bundle (so
-  // `runUpdate` bails and the version compare falls back to the esbuild-inlined
-  // number), and `renderInstallerScript` is bash + osascript/xattr/PlistBuddy.
-  // On Windows/Linux this surfaced a dead, misleading banner offering the 162 MB
-  // macOS zip (often as a "downgrade"). Until a per-platform update path exists,
-  // skip the check entirely off macOS — no banner, no wrong-platform download.
-  if (process.platform !== "darwin") return emptyInfo();
+  // The updater ships per-platform paths (#447): macOS swaps the .app bundle
+  // via a bash installer; Windows runs the Inno Setup .exe. Each platform
+  // selects its own release asset. Any other platform (Linux) has no updater
+  // yet, so skip the check entirely — no banner, no wrong-platform download
+  // (the pre-#447 bug offered the 162 MB macOS zip as a "downgrade", #425/#438).
+  const pickAsset = assetPickerForPlatform();
+  if (!pickAsset) return emptyInfo();
   try {
     const res = await fetch(RELEASES_API, {
       headers: { accept: "application/vnd.github+json" },
@@ -58,11 +60,18 @@ export async function checkForUpdates(currentVersion: string): Promise<UpdateInf
       return emptyInfo();
     }
     const release = (await res.json()) as GhRelease;
-    return parseLatestRelease(release, currentVersion);
+    return parseLatestRelease(release, currentVersion, pickAsset);
   } catch (err) {
     console.warn(`[hypeproof-chat/update] check failed: ${(err as Error).message}`);
     return emptyInfo();
   }
+}
+
+/** The release-asset picker for the running OS, or null if we have no updater. */
+function assetPickerForPlatform(): AssetPicker | null {
+  if (process.platform === "darwin") return pickDarwinAsset;
+  if (process.platform === "win32") return pickWindowsInstaller;
+  return null;
 }
 
 function emptyInfo(): UpdateInfo {
@@ -93,10 +102,11 @@ const inflight = new Map<string, Promise<void>>();
 
 export function runUpdate(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<void> {
   if (!info.available) return Promise.resolve();
-  return pickInflight(inflight, info.version, () => runUpdateImpl(info, deps));
+  const impl = process.platform === "win32" ? runUpdateWindows : runUpdateMac;
+  return pickInflight(inflight, info.version, () => impl(info, deps));
 }
 
-async function runUpdateImpl(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<void> {
+async function runUpdateMac(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<void> {
   // 1. Locate the running .app. If we're in dev (Extension Development Host),
   // there's no /Applications path to replace; bail with a friendly toast.
   const appPath = detectAppBundle(process.execPath);
@@ -214,6 +224,99 @@ async function runUpdateImpl(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<
 }
 
 /**
+ * Windows update path (#447). Unlike macOS — where we unzip a .app and swap it
+ * ourselves — Windows delegates the swap to the Inno Setup installer .exe that
+ * `checkForUpdates` already matched. This mirrors VS Code's own win32 updater:
+ * download the installer, then run it `/silent /mergetasks=runcode` and quit;
+ * the installer's AppMutex waits for Studio to exit, replaces the files in
+ * place, and relaunches.
+ */
+async function runUpdateWindows(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<void> {
+  // 1. Disk space check (same predicate as macOS).
+  try {
+    const stat = fs.statfsSync(os.tmpdir());
+    const free = (stat.bavail as unknown as number) * (stat.bsize as unknown as number);
+    if (!hasFreeDisk(free, MIN_FREE_DISK_BYTES)) {
+      vscode.window.showWarningMessage(
+        `업데이트하려면 1 GB 이상 여유공간이 필요해요. 현재 ${(free / 1e9).toFixed(1)} GB 남음.`,
+      );
+      return;
+    }
+  } catch { /* statfsSync not available? best-effort skip */ }
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: `HypeProof Studio v${info.version} 다운로드 중…`,
+      cancellable: false,
+    },
+    async (progress) => {
+      const workDir = fs.mkdtempSync(path.join(os.tmpdir(), `hps-update-${info.version}-`));
+      // Preserve the installer's own name (…UserSetup-x64-<ver>.exe) so it's
+      // recognizable if the user runs it manually.
+      const installerName =
+        safeBasename(info.downloadUrl) || `HypeProofStudioSetup-${info.version}.exe`;
+      const exePath = path.join(workDir, installerName);
+
+      progress.report({ message: "다운로드 중…" });
+      await downloadFile(info.downloadUrl, exePath);
+
+      // 2. Confirmation modal — the installer will close Studio, so warn first.
+      const currentVersion = currentBundleVersion();
+      const choice = await vscode.window.showInformationMessage(
+        `v${info.version} 설치 준비 완료. 지금 재시작하면 업데이트가 적용됩니다.`,
+        {
+          modal: true,
+          detail: `현재 ${currentVersion} → 새 버전 ${info.version}\n설치 관리자가 실행되며 Studio가 잠시 종료됩니다. 작업 중인 내용이 있다면 먼저 저장해주세요.`,
+        },
+        "재시작하고 업데이트",
+        "나중에",
+      );
+      if (choice !== "재시작하고 업데이트") {
+        vscode.window.showInformationMessage(
+          `설치 관리자를 준비했어요. 나중에 수동으로 실행해도 됩니다: ${exePath}`,
+        );
+        return;
+      }
+
+      deps.onUpdateScheduled?.();
+
+      // 3. Spawn the Inno installer detached, then quit Studio. Flags mirror VS
+      // Code's win32 updater: `/silent` shows only a progress bar (no wizard),
+      // `/mergetasks=runcode` relaunches Studio after install. `/LOG` gives us a
+      // trace if a student reports a failed update. detached + unref + ignored
+      // stdio is the canonical "survive my exit" pattern; the installer's
+      // AppMutex blocks the actual file swap until Studio's process is gone.
+      const logPath = path.join(os.tmpdir(), `hps-update-${info.version}.log`);
+      const child = cp.spawn(
+        exePath,
+        ["/silent", "/mergetasks=runcode", `/LOG=${logPath}`],
+        { detached: true, stdio: "ignore" },
+      );
+      child.unref();
+
+      // 4. Quit Studio so the installer can replace the files (700ms so the
+      // modal closes + the progress toast renders first).
+      setTimeout(() => {
+        vscode.commands.executeCommand("workbench.action.quit");
+      }, 700);
+    },
+  );
+}
+
+/**
+ * Basename of a URL's path (the installer file name), or "" if unparseable.
+ * Kept defensive so a malformed download URL can't throw mid-update.
+ */
+function safeBasename(url: string): string {
+  try {
+    return path.basename(new URL(url).pathname);
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Read the bundled extension's version (== Studio's effective version for our
  * purposes; we cut Studio + extension in lockstep).
  */
@@ -239,7 +342,23 @@ export function currentBundleVersion(appPath?: string): string {
       if (typeof pkg.version === "string") return pkg.version;
     }
   } catch { /* fallthrough */ }
-  // Dev/Extension Development Host fallback
+  // Windows/Linux (no .app bundle): read the extension's OWN on-disk
+  // package.json relative to the running dist/extension.js. `__dirname` is
+  // <installRoot>/resources/app/extensions/hypeproof-chat/dist, so
+  // `../package.json` is the BUILD-STAMPED manifest — the authoritative running
+  // version. This must precede the require() fallback below: esbuild inlines
+  // `require("../package.json")` at build time to the un-stamped SOURCE version
+  // (e.g. 0.1.5), which on Windows made the updater compare against the wrong
+  // version and misfire (#447 / same class as #249). Reading via fs at runtime
+  // gets the real stamped value.
+  try {
+    const onDisk = path.join(__dirname, "..", "package.json");
+    if (fs.existsSync(onDisk)) {
+      const pkg = JSON.parse(fs.readFileSync(onDisk, "utf8")) as { version?: string };
+      if (typeof pkg.version === "string") return pkg.version;
+    }
+  } catch { /* fallthrough */ }
+  // Dev/Extension Development Host fallback (esbuild-inlined source version).
   try {
     const ourPkg = require("../package.json") as { version?: string };
     if (typeof ourPkg.version === "string") return ourPkg.version;
