@@ -17,6 +17,18 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 
+// Playwright 의 line 리포터가 ANSI 로 콘솔 줄을 덮어써서 코치 답변·판정이
+// 로그에서 사라진다(#431 검증 중 실제로 겪음 — 엇갈린 판정의 원인을 못 밝혔다).
+// 증거는 파일로 남긴다.
+const ARTIFACT_DIR = "test-artifacts";
+function artifact(name: string, body: string): void {
+  try {
+    fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+    fs.writeFileSync(path.join(ARTIFACT_DIR, name), body);
+    console.log(`[artifact] ${ARTIFACT_DIR}/${name} (${body.length}B)`);
+  } catch (e) { console.log(`[artifact] 실패: ${String(e)}`); }
+}
+
 async function chatCf(win: Page, timeoutMs = 40_000): Promise<FrameLocator> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
