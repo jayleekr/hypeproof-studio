@@ -9,6 +9,8 @@ import {
   appToneOf,
   TONE_LABELS,
   extractCohortIdUnverified,
+  sanitizeWorkshopToken,
+  looksLikeWorkshopToken,
   coachKeyForCohort,
   coachRitualDoneKeyForCohort,
   historyKeyForCohort,
@@ -84,14 +86,19 @@ export async function activate(context: vscode.ExtensionContext) {
         placeHolder: "eyJ... 로 시작하는 긴 문자열",
       });
       if (token === undefined) return;
-      if (token.trim() === "") {
+      // #427 — accept the token in whatever packaging it arrived in ("이름: 토큰"
+      // from the console's bulk copy, "Bearer …", a hard-wrapped relay). The old
+      // bare trim() left the packaging in place and the paste 401'd silently,
+      // with `password: true` hiding the evidence.
+      const clean = sanitizeWorkshopToken(token);
+      if (clean === "") {
         await context.secrets.delete(TOKEN_KEY);
         vscode.window.showInformationMessage("HypeProof Chat: token cleared.");
         provider.invalidateProfile();
         provider.refreshConfig();
         return;
       }
-      await context.secrets.store(TOKEN_KEY, token.trim());
+      await context.secrets.store(TOKEN_KEY, clean);
       provider.invalidateProfile();
       // Re-fetch profile with the new token. The coach naming step is driven
       // by the in-panel card (kid-friendly) — NOT a system input box. Once
@@ -112,9 +119,25 @@ export async function activate(context: vscode.ExtensionContext) {
           return; // window is reloading; post-reload activation continues onboarding
         }
       } else {
-        vscode.window.showWarningMessage(
-          "토큰이 맞는지 확인이 안 돼요. 선생님께 토큰을 다시 받아주세요.",
+        // #427 — a rejected token used to be a dead end: the toast fired and the
+        // input box never came back, so the only way to retry was to know about
+        // the panel's Token button or the command palette entry. Hand the retry
+        // back directly. The user drives the loop, so it cannot spin.
+        provider.refreshConfig();
+        // Name the likely cause instead of one generic line. A shape mismatch
+        // can only be a paste problem; a well-formed token that still fails is
+        // expiry/revocation/network. Diagnosis only — never a gate, so a future
+        // token format can't be false-rejected client-side (the server decides).
+        const retry = await vscode.window.showWarningMessage(
+          looksLikeWorkshopToken(clean)
+            ? "토큰이 확인되지 않았어요. 만료됐거나 인터넷이 끊겼을 수 있어요. 선생님께 새 토큰을 받아주세요."
+            : "붙여넣은 값이 토큰 형식이 아니에요. 이름이나 따옴표가 섞이지 않았는지 확인하고, eyJ… 로 시작하는 부분만 넣어주세요.",
+          "다시 입력",
         );
+        if (retry === "다시 입력") {
+          await vscode.commands.executeCommand("hypeproof-chat.setToken");
+        }
+        return;
       }
       provider.refreshConfig();
     }),

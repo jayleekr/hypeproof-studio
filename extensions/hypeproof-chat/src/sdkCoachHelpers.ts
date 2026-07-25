@@ -108,6 +108,33 @@ const SDK_READ_TOOL_NAMES = ["Read", "Grep", "Glob"] as const;
 const SDK_WRITE_TOOL_NAMES = ["Write", "Edit"] as const;
 
 /**
+ * Tell the coach where it actually is (#428).
+ *
+ * Passing `systemPrompt` as a string REPLACES the SDK's default preamble, and
+ * that preamble is what normally carries the working-directory env block — the
+ * same block Claude Code itself injects. With `settingSources: []` on top (no
+ * CLAUDE.md), the coach was left with zero knowledge of its own cwd while its
+ * tools resolved against it correctly. Asked "내 워킹디렉토리 절대경로", it
+ * listed the RIGHT files under an invented "/app/workdir".
+ *
+ * There is no shell to fall back on either — `permittedToolsFor` can never
+ * grant Bash, so the coach cannot run `pwd` to recover. The path has to be
+ * given, and it has to come from here: `cwd` is per-student (each cohort has
+ * its own workspace_root under a different home dir), so it cannot live in the
+ * worker's cohort prompt.
+ */
+export function withWorkspaceContext(systemPrompt: string, cwd?: string): string {
+  if (!cwd) return systemPrompt;
+  return (
+    systemPrompt +
+    "\n\n<env>\n" +
+    `Working directory (absolute): ${cwd}\n` +
+    "파일이나 폴더의 경로를 말할 때는 반드시 위 절대경로를 기준으로 답한다. 추측하거나 지어내지 않는다.\n" +
+    "</env>"
+  );
+}
+
+/**
  * Which tools a cohort may use. Conservative and fail-closed by design:
  * - the WORKER PROFILE owns file-tool policy (`sdk_tools`, ADR 0003 / #282
  *   Phase 2): `read` → Read/Grep/Glob, `write` → Write/Edit. Absent flags
@@ -707,7 +734,7 @@ export function buildSdkQueryOptions(
       ? buildSubagentDefinitions(agent.permittedTools)
       : undefined;
   return {
-    systemPrompt: agent.systemPrompt,
+    systemPrompt: withWorkspaceContext(agent.systemPrompt, args.cwd),
     model: agent.model,
     // Built-in base tool set ONLY — the mcp__hypeproof__* names never go here
     // (REQ-M19): Options.tools filters BUILT-INS; MCP tools are delivered via

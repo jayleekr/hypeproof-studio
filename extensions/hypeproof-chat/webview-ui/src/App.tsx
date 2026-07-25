@@ -228,6 +228,7 @@ export function App() {
         pageNotice={state.pageNotice}
         aiNotice={state.aiNotice}
         streaming={!!state.streamingId}
+        streamingId={state.streamingId}
         error={state.error}
         errorRequestId={state.errorRequestId}
         errorRunbookUrl={state.errorRunbookUrl}
