@@ -73,7 +73,17 @@ const DESTRUCTIVE_ARG_PATTERNS: readonly RegExp[] = [
   /\bgit\s+clean\b[^\n]*-[a-zA-Z]*[fd]/,      // deletes untracked files
   /\bgit\s+checkout\s+--\s/,                  // discards file changes
   /\bgit\s+branch\b[^\n]*\s-D\b/,
-  />\s*\/?[^\s|]/,                            // output redirection clobbers
+  // Output redirection, but ONLY the shape that can destroy the participant's
+  // work: stdout to a path that is not scratch. Measured on a real run (#431
+  // B5 verification): the naive `>` rule fired on 3 of 4 commands the coach
+  // issued — `2>/dev/null`, `> /tmp/cf_tunnel.log 2>&1`. A strong confirm that
+  // fires on noise-suppression is worse than none: it trains the reflex-approve
+  // this whole gate exists to prevent.
+  //
+  //   NOT destructive:  2>/dev/null · 2>&1 · >/dev/null · > /tmp/x · >> file
+  //   destructive:      > index.html · > ~/notes.md · 1> report.txt
+  //   `1>` IS stdout (destructive); `2>`..`9>` are stderr/other fds; `>>` appends.
+  /(?<![2-9&>])>(?!>)\s*(?!\/dev\/null|\/tmp\/|&)[^\s|&;]/,
   /\bcurl\b[^\n]*\|\s*(ba)?sh\b/,             // pipe-to-shell
   /\bwget\b[^\n]*\|\s*(ba)?sh\b/,
   /\bnpm\s+publish\b/,
