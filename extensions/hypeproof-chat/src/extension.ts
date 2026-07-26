@@ -533,7 +533,7 @@ function starterIndexHtml(profile?: ResolvedProfile | null): string {
  * misauthored profile can never point the open-folder at a relative path and
  * trigger a reload loop.
  */
-function resolveWorkspaceRoot(raw: string): string | null {
+export function resolveWorkspaceRoot(raw: string): string | null {
   const v = raw.trim();
   if (!v) return null;
   const expanded =

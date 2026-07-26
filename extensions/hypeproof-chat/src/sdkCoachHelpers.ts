@@ -25,6 +25,9 @@ import {
   MCP_BROWSER_OPEN,
   MCP_BROWSER_SCREENSHOT,
   MCP_BROWSER_TOOLS,
+  MCP_BROWSER_READ,
+  MCP_BROWSER_CLICK,
+  MCP_BROWSER_TYPE,
   MCP_LIVE_PREVIEW_START,
 } from "./browserMcp.ts";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
@@ -1488,6 +1491,17 @@ export function evaluateSdkToolUse(args: {
       };
     }
     // Outward action → ALWAYS the approval modal (kind "openBrowser").
+    return { decision: "ask" };
+  }
+  // #457 — 검사 3종.
+  //   browser_read  : 관측이다. 스크린샷과 같은 등급으로 자동 허용한다. 여기에
+  //                   모달을 달면 "검사 → 수정 → 재검사" 루프가 승인 지옥이 된다.
+  //   click / type  : 페이지를 **실제로 조작**한다. 학생 화면에서 무언가 일어나는
+  //                   행위이므로 모달을 거친다(browser_open 과 같은 등급).
+  if (toolName === MCP_BROWSER_READ) {
+    return { decision: "allow" };
+  }
+  if (toolName === MCP_BROWSER_CLICK || toolName === MCP_BROWSER_TYPE) {
     return { decision: "ask" };
   }
   if (toolName === MCP_BROWSER_SCREENSHOT || toolName === MCP_LIVE_PREVIEW_START) {

@@ -40,12 +40,25 @@ export const HYPEPROOF_MCP_SERVER_NAME = "hypeproof";
 export const MCP_BROWSER_OPEN = "mcp__hypeproof__browser_open";
 export const MCP_BROWSER_SCREENSHOT = "mcp__hypeproof__browser_screenshot";
 export const MCP_LIVE_PREVIEW_START = "mcp__hypeproof__live_preview_start";
+// #457 — 검사(inspect) 3종. 스크린샷만으로는 "버튼이 실제로 눌리는가"를 알 수
+// 없다. 큐시트 Loop Engineering(20:05–20:35)은 "검사 → 수정 → 재검사" 반복이고,
+// 클릭이 없으면 그 검사가 반쪽이다. 2026-07-26 실사용에서 코치가 "제가 직접
+// 클릭 도구가 없어서 … 직접 눌러봐 달라고 부탁드릴게요"라며 참가자에게
+// 떠넘겼고 루브릭 "직접 눌러보며 확인"이 끝내 못 채워졌다.
+// CDP 구현은 이미 browserControl.ts 에 있다(프록시 경로 #278). 여기서는 SDK
+// 경로에 노출만 한다 — 새 능력이 아니라 안 이어져 있던 배선이다.
+export const MCP_BROWSER_READ = "mcp__hypeproof__browser_read";
+export const MCP_BROWSER_CLICK = "mcp__hypeproof__browser_click";
+export const MCP_BROWSER_TYPE = "mcp__hypeproof__browser_type";
 
 /** All hypeproof MCP browser tools, granted as one capability unit. */
 export const MCP_BROWSER_TOOLS = [
   MCP_BROWSER_OPEN,
   MCP_BROWSER_SCREENSHOT,
   MCP_LIVE_PREVIEW_START,
+  MCP_BROWSER_READ,
+  MCP_BROWSER_CLICK,
+  MCP_BROWSER_TYPE,
 ] as const;
 
 /** MCP CallToolResult content we produce (structural subset of the MCP SDK type). */
@@ -93,6 +106,12 @@ export interface BrowserMcpHost {
    * 그대로 동작해야 한다 — 없으면 예전처럼 무조건 여는 동작으로 폴백한다.
    */
   currentPage?(): Promise<BrowserPage | null>;
+  /**
+   * #457 — CDP 검사 도구 위임. `browserControl.ts` 의 execute() 를 그대로 태운다
+   * (browser_read / browser_click / browser_type). optional 인 이유는
+   * currentPage 와 같다: 이 능력이 없는 호스트에서도 나머지 도구는 동작해야 한다.
+   */
+  inspect?(name: string, input: Record<string, unknown>): Promise<McpToolResult | null>;
 }
 
 /**
@@ -176,6 +195,8 @@ export interface SdkMcpFactory {
 /** Minimal zod surface we use (injected — zod is the SDK's peer dep). */
 export interface ZodLike {
   string(): unknown;
+  /** #457 — browser_type 의 submit 플래그용. */
+  boolean?(): unknown;
 }
 
 /**
@@ -286,9 +307,78 @@ export function buildHypeproofMcpServer(
     },
   );
 
+  // ── #457 검사 3종 ─────────────────────────────────────────────────────────
+  // 전부 host.inspect 로 위임한다 — CDP 구현은 browserControl.ts 에 이미 있고
+  // 여기서 다시 구현하면 프록시 경로와 갈라진다(같은 동작이 두 벌이 되는 순간
+  // 한쪽만 고쳐지는 버그가 생긴다).
+  const inspectOrFail = async (
+    name: string,
+    input: Record<string, unknown>,
+    absent: string,
+  ): Promise<McpToolResult> => {
+    if (!host.inspect) {
+      return withPageState(
+        { content: [{ type: "text", text: absent }], isError: true },
+        await readCurrentPage(host),
+      );
+    }
+    const r = await host.inspect(name, input);
+    return withPageState(
+      r ?? { content: [{ type: "text", text: absent }], isError: true },
+      await readCurrentPage(host),
+    );
+  };
+
+  const browserRead = factory.tool(
+    "browser_read",
+    "지금 열려 있는 페이지의 접근성/DOM 스냅샷을 **텍스트로** 읽는다. 상호작용 요소마다 " +
+      "[ref=eN] 라벨이 붙는다. browser_click / browser_type 전에 **반드시 먼저** 호출해 " +
+      "최신 ref 를 얻어라 — 페이지가 이동하거나 클릭이 일어나면 이전 ref 는 무효가 된다. " +
+      "스크린샷은 '어떻게 보이는가'를, 이 도구는 '무엇을 누를 수 있는가'를 알려준다.",
+    {},
+    async () => inspectOrFail("browser_read", {}, "열려 있는 브라우저 탭이 없어서 페이지를 읽지 못했어요."),
+  );
+
+  const browserClick = factory.tool(
+    "browser_click",
+    "페이지의 요소를 **실제로 클릭한다**(CDP 입력 이벤트 — 진짜 마우스 클릭과 같다). " +
+      "ref 는 browser_read 가 붙여준 [ref=eN] 값이다. 버튼·링크가 정말 동작하는지 " +
+      "확인하려면 눈으로 보는 것이 아니라 이 도구로 눌러봐야 한다.",
+    { ref: z.string() },
+    async (args: Record<string, unknown>) =>
+      inspectOrFail(
+        "browser_click",
+        { ref: String(args["ref"] ?? "") },
+        "클릭하지 못했어요. browser_read 로 ref 를 다시 받아보세요.",
+      ),
+  );
+
+  const browserType = factory.tool(
+    "browser_type",
+    "입력 요소에 텍스트를 **실제로 타이핑한다**. submit=true 면 입력 후 Enter 까지 누른다. " +
+      "폼이 동작하는지 확인할 때 쓴다. ref 는 browser_read 가 준 값이다.",
+    {
+      ref: z.string(),
+      text: z.string(),
+      // boolean 을 제공하지 않는 주입(테스트 fake)에서도 서버가 만들어져야 하므로
+      // 없으면 이 필드를 생략한다 — submit 은 핸들러가 기본 false 로 처리한다.
+      ...(typeof z.boolean === "function" ? { submit: z.boolean() } : {}),
+    },
+    async (args: Record<string, unknown>) =>
+      inspectOrFail(
+        "browser_type",
+        {
+          ref: String(args["ref"] ?? ""),
+          text: String(args["text"] ?? ""),
+          submit: args["submit"] === true,
+        },
+        "입력하지 못했어요. browser_read 로 ref 를 다시 받아보세요.",
+      ),
+  );
+
   return factory.createSdkMcpServer({
     name: HYPEPROOF_MCP_SERVER_NAME,
     version: "1.0.0",
-    tools: [browserOpen, browserScreenshot, livePreviewStart],
+    tools: [browserOpen, browserScreenshot, livePreviewStart, browserRead, browserClick, browserType],
   });
 }

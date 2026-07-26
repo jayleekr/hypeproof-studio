@@ -21,7 +21,8 @@ const {
   assert.equal(HYPEPROOF_MCP_SERVER_NAME, "hypeproof");
   assert.deepEqual(
     [...MCP_BROWSER_TOOLS],
-    ["mcp__hypeproof__browser_open", "mcp__hypeproof__browser_screenshot", "mcp__hypeproof__live_preview_start"],
+    ["mcp__hypeproof__browser_open", "mcp__hypeproof__browser_screenshot", "mcp__hypeproof__live_preview_start",
+     "mcp__hypeproof__browser_read", "mcp__hypeproof__browser_click", "mcp__hypeproof__browser_type"],
     "full MCP tool names = mcp__<server>__<tool> — the canUseTool contract",
   );
   // The full names must be derivable from the server name + short names the
@@ -67,10 +68,11 @@ const fakeZ = { string: () => ({ __zod: "string" }) };
   assert.equal(opts.name, HYPEPROOF_MCP_SERVER_NAME, "server registered under 'hypeproof'");
   assert.deepEqual(
     registered.map((t) => t.name),
-    ["browser_open", "browser_screenshot", "live_preview_start"],
+    ["browser_open", "browser_screenshot", "live_preview_start",
+     "browser_read", "browser_click", "browser_type"],
     "short tool names (SDK prefixes mcp__hypeproof__ itself)",
   );
-  assert.equal(opts.tools.length, 3, "all three tools attached to the server");
+  assert.equal(opts.tools.length, 6, "여섯 도구 전부 서버에 붙는다 (#457 검사 3종 포함)");
   // browser_open takes a url string; the parameterless tools take {}.
   const open = registered.find((t) => t.name === "browser_open");
   assert.deepEqual(open.inputSchema, { url: { __zod: "string" } });
