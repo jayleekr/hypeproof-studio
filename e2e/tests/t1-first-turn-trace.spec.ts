@@ -19,6 +19,7 @@
 
 import { test, expect, type FrameLocator, type Page } from "@playwright/test";
 import { launchApp, closeApp, openChatContainer, type AppContext } from "../fixtures/app.ts";
+import { resetWorkspace } from "../fixtures/workspace.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { scoreDesignFloor } from "../scoring.ts";
@@ -110,6 +111,7 @@ test("T1 — 첫 턴 현미경: 생각·도구·성공·소요", async () => {
     })();
     const ws = (wsProbe.match(/\/(?:Users|private|var|tmp)[^\s`'"]*/g) ?? [])
       .map((p) => p.replace(/[.,)\]]+$/, "")).filter((p) => fs.existsSync(p))[0] ?? ctx.wsDir;
+    resetWorkspace(ws);   // 더러운 상태로 재면 "만들었는가"와 "이미 있었는가"가 구분되지 않는다
     const target = path.join(ws, "index.html");
     if (fs.existsSync(target)) fs.rmSync(target);
     console.log(`[T1] 작업 폴더: ${ws}`);

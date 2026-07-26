@@ -15,6 +15,7 @@
 
 import { test, expect, type FrameLocator, type Page } from "@playwright/test";
 import { launchApp, closeApp, openChatContainer, type AppContext } from "../fixtures/app.ts";
+import { resetWorkspace } from "../fixtures/workspace.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -124,6 +125,7 @@ test("B1·B2·C2·C5 — 앞 구간과 UI 회귀", async () => {
     const wsAns = await ask(cf, ctx.win, "내 작업 폴더 절대경로만 딱 한 줄로.", 240_000);
     const ws = (wsAns.match(/\/(?:Users|private|var|tmp)[^\s`'"]*/g) ?? [])
       .map((p) => p.replace(/[.,)\]]+$/, "")).filter((p) => fs.existsSync(p))[0] ?? ctx.wsDir;
+    resetWorkspace(ws);   // 더러운 상태로 재면 "만들었는가"와 "이미 있었는가"가 구분되지 않는다
     const target = path.join(ws, "index.html");
     if (fs.existsSync(target)) fs.rmSync(target);
     console.log(`[WS] ${ws}`);
