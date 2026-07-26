@@ -20,6 +20,7 @@ const {
   MCP_BROWSER_OPEN,
   MCP_BROWSER_SCREENSHOT,
   MCP_LIVE_PREVIEW_START,
+  MCP_BROWSER_TOOLS,
 } = await import("../src/browserMcp.ts");
 
 const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : undefined, ...extra });
@@ -286,13 +287,15 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
 
 // ─── permittedMcpToolsFor — profile.sdk_tools.browser owns the grant (#282 P2 s2) ─
 {
-  const ALL_BROWSER_MCP = [MCP_BROWSER_OPEN, MCP_BROWSER_SCREENSHOT, MCP_LIVE_PREVIEW_START];
+  // #457 — 검사 3종(read/click/type)이 같은 grant 단위로 함께 부여된다.
+  // MCP_BROWSER_TOOLS 를 그대로 쓴다: 목록을 두 벌 적으면 한쪽만 고쳐진다.
+  const ALL_BROWSER_MCP = [...MCP_BROWSER_TOOLS];
 
   // Adult cohort with the browser grant → all three tools, exact MCP names.
   assert.deepEqual(
     permittedMcpToolsFor(profile("website", { sdk_tools: { browser: true } })),
     ALL_BROWSER_MCP,
-    "adult browser cohort gets the three hypeproof MCP tools",
+    "adult browser cohort gets the six hypeproof MCP tools (#457)",
   );
 
   // Absent / false / non-boolean → nothing (fail closed, === true only).

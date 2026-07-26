@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
-import { TOKEN_KEY } from "./extension";
+import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
@@ -78,6 +78,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * commandSignature returns null for them), so `rm` can never be remembered.
    */
   private readonly approvedCommandSignatures = new Set<string>();
+  /** #457 — SDK 경로의 검사 도구용 CDP 실행기. 첫 사용 때 만든다. */
+  private mcpBrowser?: BrowserControl;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
   // x-request-id header on every response we can correlate against in tail.
@@ -552,7 +554,59 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (!tab?.url) return null;
         return { url: tab.url, title: tab.title };
       },
+      // #457 — 검사 3종(read/click/type)을 CDP 실행기에 그대로 위임한다.
+      // 프록시 경로(#278)가 쓰던 BrowserControl 을 재사용한다 — 같은 동작을 두 벌
+      // 구현하면 한쪽만 고쳐지는 버그가 생긴다. 인스턴스는 여기서 lazily 만들고
+      // dispose 는 패널 정리 경로가 맡는다.
+      inspect: async (name, input) => {
+        try {
+          this.mcpBrowser ??= new BrowserControl();
+          const r = await this.mcpBrowser.execute({ id: `mcp-${name}`, name, input });
+          // BrowserToolResult(content: text | image_url) → McpToolResult(text | image)
+          return {
+            content: r.content.map((b) =>
+              b.type === "text"
+                ? { type: "text" as const, text: b.text }
+                : {
+                    type: "image" as const,
+                    data: b.image_url.url.replace(/^data:[^,]*,/, ""),
+                    mimeType: "image/jpeg",
+                  },
+            ),
+            ...(r.isError ? { isError: true } : {}),
+          };
+        } catch (e) {
+          return {
+            content: [{ type: "text" as const, text: `브라우저 조작 실패: ${String(e)}` }],
+            isError: true,
+          };
+        }
+      },
     };
+  }
+
+  /**
+   * #457 — 코치가 설 작업 폴더. 열린 폴더 → 프로필의 workspace_root 순.
+   * 둘 다 없으면 undefined 를 돌려주되 **조용히 넘어가지 않는다**: 그 상태는
+   * 코치가 파일을 못 찾는다는 뜻이고, 로그가 없으면 사후에 원인을 못 밝힌다.
+   */
+  private resolveCoachCwd(): string | undefined {
+    const opened = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (opened) return opened;
+
+    const root = this.cachedProfile?.workspace_root;
+    const resolved = root ? resolveWorkspaceRoot(root) : null;
+    if (resolved) {
+      console.warn(
+        `[coach] no folder open — falling back to profile workspace_root: ${resolved}`,
+      );
+      return resolved;
+    }
+    console.error(
+      "[coach] cwd is UNKNOWN (no folder open, no usable profile workspace_root). " +
+        "The coach will not receive a working directory and file tools will fail.",
+    );
+    return undefined;
   }
 
   /** Persist coach info chosen via the in-panel naming card. */
@@ -876,7 +930,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             history: history.map((m) => ({ role: m.role, content: m.content })),
             userText: userTextForModel,
             signal: ctrl.signal,
-            cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+            // #457 — 폴더가 안 열려 있으면 workspaceFolders 가 비고, cwd 가
+            // undefined 로 넘어간다. 그러면 withWorkspaceContext 가 프롬프트를
+            // **그대로** 돌려주므로(경로 주입 없음) 코치는 자기 위치를 모르는
+            // 채로 상대 경로를 쓰다 전부 실패한다. 2026-07-26 실사용에서 Read 5회가
+            // 연속 실패했고, 코치가 `find ~` 로 홈 전체를 뒤지느라 20턴 중 13턴을
+            // 태우고 maxTurns 로 세션이 죽었다.
+            //
+            // 프로필이 workspace_root 를 이미 알고 있으므로 그걸로 폴백한다.
+            // 두 소스가 모두 없을 때만 undefined 로 두고, 그 경우는 소리 나게 남긴다.
+            cwd: this.resolveCoachCwd(),
             // #282 W4a — explicit claude-binary override (highest priority in
             // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
             // seeded > node_modules). Empty string = unset.
