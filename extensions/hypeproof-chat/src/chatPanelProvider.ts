@@ -8,7 +8,7 @@ import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
-import { originOfUrl } from "./browserControlHelpers";
+import { originOfUrl, coachTabsToClose } from "./browserControlHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -531,6 +531,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private buildBrowserMcpHost(): BrowserMcpHost {
     return {
       openBrowser: async (url: string) => {
+        // 코치 브라우징 탭은 하나로 유지한다. 재사용 없이 매번 새로 열면 탭이
+        // 쌓이고(실측: 3개, 그중 하나는 404), 스크린샷이 쓰는 activeBrowserTab 이
+        // 방금 연 탭이 아니게 될 수 있다. 라이브 프리뷰(루프백)는 건드리지 않는다.
+        const tabs = vscode.window.browserTabs ?? [];
+        for (const i of coachTabsToClose(tabs.map((t) => t.url), url)) {
+          try {
+            await tabs[i]?.close();
+          } catch {
+            /* 못 닫는 탭이 열기를 막아서는 안 된다 */
+          }
+        }
         // URL already passed evaluateSdkToolUse's policy + the approval modal;
         // the shared command normalizes and opens the integrated browser tab.
         await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);

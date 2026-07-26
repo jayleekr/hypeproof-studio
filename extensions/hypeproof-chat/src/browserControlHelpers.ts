@@ -76,6 +76,39 @@ export function originOfUrl(input: string): string | null {
 }
 
 /**
+ * 코치가 새 주소를 열 때 **닫아야 할 탭**을 고른다.
+ *
+ * 왜. `openBrowser` 에는 탭 재사용이 전혀 없어서 부를 때마다 새 탭이 열렸다.
+ * 2026-07-26 실사용에서 `보아치과 / 보아치과 / Not Found(404)` 가 쌓였다 —
+ * 404 는 코치가 서브페이지 URL 을 찍어보다 틀린 것이다. 라이브 프리뷰 쪽
+ * (`startLivePreview`)은 재사용·정리 로직이 꼼꼼한데 이쪽만 방치돼 있었다.
+ *
+ * 쌓인 탭은 화면만 어지럽히는 게 아니다. 스크린샷 도구가
+ * `vscode.window.activeBrowserTab` 을 쓰므로 "활성 탭"이 코치가 방금 연 탭이
+ * 아닐 수 있다 — 간헐적 스크린샷 실패의 유력 후보다.
+ *
+ * 규칙:
+ *   - 루프백(라이브 프리뷰)은 **절대 닫지 않는다.** 학생 결과물을 보여 주는
+ *     창이고 수명 관리는 startLivePreview 의 몫이다.
+ *   - 이제 열려는 주소와 같은 탭도 닫지 않는다 (그건 재사용 대상이다).
+ *   - 나머지 바깥 주소 탭은 닫는다 → 코치 브라우징 탭이 항상 1개로 유지된다.
+ */
+export function coachTabsToClose(
+  tabUrls: readonly (string | undefined)[],
+  nextUrl: string,
+): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < tabUrls.length; i++) {
+    const u = tabUrls[i];
+    if (!u) continue;
+    if (isLoopbackUrl(u)) continue;
+    if (isSameBrowserUrl(u, nextUrl)) continue;
+    out.push(i);
+  }
+  return out;
+}
+
+/**
  * #415 — 같은 페이지인지 비교하기 위한 정규화. 브라우저가 실제로 보여주는 URL
  * (`tab.url`)과 코치가 요청한 URL 은 표기가 조금씩 다르다: 끝 슬래시가 붙거나
  * (`http://127.0.0.1:5432` vs `.../`), 스킴/호스트 대소문자가 다르거나, 빈
