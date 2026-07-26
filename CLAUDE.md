@@ -68,4 +68,5 @@ Each phase has a gate in METAPLAN. Do not proceed past a gate without confirming
 - [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md) — build failure modes, env vars, jq patterns
 - [.claude/rules/branding-swap.md](.claude/rules/branding-swap.md) — asset replacement checklist
 - [.claude/rules/extension-dev.md](.claude/rules/extension-dev.md) — hypeproof-chat React webview
+- [.claude/rules/verification.md](.claude/rules/verification.md) — 큐시트 검증 하네스 규율. **판정 기준을 세우기 전에 대상을 열어본다** · 대조군 먼저 · CI 초록은 아무것도 보장하지 않는다
 - [docs/seven-assets.md](docs/seven-assets.md) — 7 AI Native Assets (canonical product philosophy, drives chat-panel UX)
