@@ -109,8 +109,13 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   assert.equal(maxTurnsFor(profile("kids-basic")), 6);
   assert.equal(maxTurnsFor(profile("teen")), 6);
   assert.equal(maxTurnsFor(profile(null)), 6, "unknown tier gets the tight minor cap");
-  assert.equal(maxTurnsFor(profile("search-webapp")), 20);
-  assert.equal(maxTurnsFor(profile("website")), 20, "website copyclone gets the workshop cap");
+  // 20 → 60. 실측(2026-07-26)에서 멀티페이지 제작 한 요청이 툴 54회를 썼고 두 번
+  // 연속 예산 소진으로 죽었다. 낭비(경로 탐색·중복 읽기)를 먼저 걷어낸 뒤 올렸다.
+  // 잠정값 — 고친 코드로 재측정한 뒤 조정한다.
+  assert.equal(maxTurnsFor(profile("search-webapp")), 60);
+  assert.equal(maxTurnsFor(profile("website")), 60, "website copyclone gets the workshop cap");
+  // 미성년 경계는 성능이 아니라 대상 연령 문제다 — 같이 올라가면 안 된다.
+  assert.equal(maxTurnsFor(profile("kids-basic")), 6, "미성년 상한은 그대로");
 }
 
 // ─── isAbortError — user-stop parity across BOTH runtimes ─────────────────────

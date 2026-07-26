@@ -292,3 +292,36 @@ const mockStream = (events) =>
 }
 
 console.log("✓ #414: sdk activity — thinking/tool_use/tool_result/thinking_tokens 를 순서대로, 텍스트·fast-fail·stall 무회귀");
+
+// ─── maxTurns 소진은 우리 말로 알린다 ───────────────────────────────────────
+{
+  const { SDK_MAX_TURNS_FRIENDLY } = await import("../src/sdkCoachHelpers.ts");
+  const deltas = [];
+  await consumeSdkStream(
+    (async function* () {
+      yield { type: "assistant", message: { content: [{ type: "text", text: "만드는 중" }] } };
+      yield { type: "result", subtype: "error_max_turns", result: "Reached maximum number of turns (20)" };
+    })(),
+    { isAborted: () => false, makeAbortError: () => new Error("abort"),
+      abortQuery: () => {}, makeFatalAuthError: () => new Error("auth"),
+      onDelta: (d) => deltas.push(d), stallMs: 0 },
+  );
+  const joined = deltas.join("");
+  assert.ok(joined.includes("파일로 저장돼 있어요"), "예산 소진을 우리 말로 알려야 한다");
+  assert.ok(!joined.includes("Reached maximum"), "SDK 영어 원문이 그대로 나가면 안 된다");
+  assert.equal(SDK_MAX_TURNS_FRIENDLY.includes("이어서"), true, "다음 행동을 제시해야 한다");
+
+  // 음성 대조군 — 정상 종료(result/success)에는 이 줄이 붙지 않아야 한다.
+  const ok = [];
+  await consumeSdkStream(
+    (async function* () {
+      yield { type: "assistant", message: { content: [{ type: "text", text: "다 됐어요" }] } };
+      yield { type: "result", subtype: "success", result: "done" };
+    })(),
+    { isAborted: () => false, makeAbortError: () => new Error("abort"),
+      abortQuery: () => {}, makeFatalAuthError: () => new Error("auth"),
+      onDelta: (d) => ok.push(d), stallMs: 0 },
+  );
+  assert.ok(!ok.join("").includes("파일로 저장돼 있어요"), "정상 종료에는 붙지 않아야 한다");
+  console.log("✓ maxTurns 소진 — 우리 말 안내 · 정상 종료에는 안 붙음");
+}

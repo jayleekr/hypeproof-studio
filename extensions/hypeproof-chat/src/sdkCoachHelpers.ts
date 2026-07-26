@@ -353,8 +353,24 @@ export function buildSubagentDefinitions(
   return out;
 }
 
+/**
+ * 한 턴에 허용할 SDK 턴 수.
+ *
+ * 성인 20 은 **실측으로 부족함이 확인됐다** (2026-07-26): 멀티페이지 사이트를
+ * 만드는 한 요청이 툴 54회를 썼고 두 번 연속 예산 소진으로 죽었다. #457 노트에
+ * "지금 올리면 낭비를 감춘 채 넘어간다 — 다시 재본 뒤에 판단한다"고 미뤄 뒀던
+ * 그 재측정이 그것이다.
+ *
+ * 낭비 쪽을 먼저 걷어냈다: 상대경로 흡수 + 워크스페이스 목록 주입으로 탐색이
+ * 사라지고(한 턴의 80%), 탭 정리로 재확인이 줄었다. 그 위에서 60 으로 올린다.
+ *
+ * 60 은 **잠정값**이다. 고친 코드로 같은 시나리오를 다시 재기 전까지는 근거가
+ * "54 를 봤으니 그보다 넉넉히" 수준이다. 재측정 후 조정한다.
+ *
+ * 미성년 6 은 건드리지 않는다 — 이건 성능이 아니라 대상 연령 경계다.
+ */
 export function maxTurnsFor(profile: ResolvedProfile): number {
-  return isMinorTier(profile) ? 6 : 20;
+  return isMinorTier(profile) ? 6 : 60;
 }
 
 // ── SDK native binary resolution (#282 W4a, docs/sdk-bundling.md §5) ─────────
@@ -905,6 +921,18 @@ export const SDK_STREAM_STALL_MS = 240_000;
 export const SDK_STALL_FRIENDLY =
   "코치 응답이 너무 오래 걸려요. 다시 한 번 보내주세요. 🕐";
 
+/**
+ * 턴 예산을 다 썼을 때 학생이 보는 줄.
+ *
+ * 예전에는 SDK 가 낸 영어 한 줄(`Reached maximum number of turns (20)`)이 그대로
+ * 나갔다. 참가자에게는 고장으로 보이고, 실제로 원장은 그 자리에서 두 번 멈췄다.
+ * 여기서 중요한 것은 **이게 실패가 아니라 예산 소진**이라는 사실과, 지금까지 한
+ * 일이 디스크에 남아 있다는 사실을 알려 주는 것이다.
+ */
+export const SDK_MAX_TURNS_FRIENDLY =
+  "\n\n---\n\n한 번에 할 수 있는 작업량을 다 썼어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+  "이어서 하려면 무엇을 더 할지 알려주세요 — 예: `이어서 계속해줘` 🔧";
+
 /** Sentinel for the watchdog leg of the stream/timer race. */
 const STALLED = Symbol("sdk-stream-stalled");
 
@@ -1194,6 +1222,14 @@ export async function consumeSdkStream(
       if (type === "assistant" || type === "text" || type === "content_block_delta") {
         const delta = extractSdkText(msg);
         if (delta) h.onDelta(delta);
+      }
+      // 턴 예산 소진은 조용히 끝나면 안 된다. SDK 는 `{type:"result",
+      // subtype:"error_max_turns"}` 로 알리는데, 예전에는 이 분기가 없어서 영어
+      // 원문이 그대로 학생에게 나갔다. 실패가 아니라 예산 소진임을, 그리고 한
+      // 일이 디스크에 남아 있음을 우리 말로 알려 준다.
+      if (type === "result" && msg["subtype"] === "error_max_turns") {
+        console.warn("[coach] maxTurns 소진 — 턴 예산을 다 쓰고 종료했다");
+        h.onDelta(SDK_MAX_TURNS_FRIENDLY);
       }
       // Other message types (result / message_stop) are terminal — nothing to
       // emit; the caller posts streamEnd.
