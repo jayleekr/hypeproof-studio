@@ -47,6 +47,19 @@ import {
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
+/**
+ * 승인 모달 문구. `kind` 별로 무엇을 하려는지 한국어로 말하고, 확인 버튼도
+ * 그 행동의 동사로 쓴다 — `Approve` 보다 `저장`/`위임`이 무엇을 승인하는지
+ * 분명하다. 취소는 VS Code 가 항상 붙이므로 따로 만들지 않는다.
+ */
+const APPROVAL_COPY: Record<string, { title: string; verb: string }> = {
+  writeFile: { title: "코치가 파일을 저장하려고 해요:", verb: "저장" },
+  readFile: { title: "코치가 파일을 읽으려고 해요:", verb: "읽기" },
+  webSearch: { title: "코치가 웹에서 찾아보려고 해요:", verb: "검색" },
+  delegateAgent: { title: "코치가 다른 에이전트에게 맡기려고 해요:", verb: "맡기기" },
+};
+
+
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private activeStreams = new Map<string, AbortController>();
@@ -895,7 +908,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             log(
               a.id,
               "🔧",
-              a.isError ? `${toolLabels.get(a.id) ?? ""} — 실패` : (toolLabels.get(a.id) ?? ""),
+              a.isError
+                ? `${toolLabels.get(a.id) ?? ""} — 실패${a.reason ? `: ${a.reason}` : ""}`
+                : (toolLabels.get(a.id) ?? ""),
               a.isError ? "error" : "done",
             );
             break;
@@ -1296,13 +1311,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const needsApproval = required.includes(req.kind);
     if (!needsApproval) return true;
 
+    // 한국어로 묻는다. 셸(`코치가 명령을 실행하려고 해요`)과 브라우저(`코치가
+    // 브라우저를 열려고 해요`)는 한국어인데 파일 쓰기만 이 일반 폴백으로 빠져
+    // `HypeProof Chat wants to writeFile:` / `Deny·Cancel·Approve` 로 나갔다.
+    //
+    // 잡음 제거가 아니라 **속도** 문제다(2026-07-27 실측): 한국어 모달은 3~4초
+    // 만에 눌렸는데 이 영어 모달 하나가 42.2초를 잡아먹었다 — 그 한 건이 그 턴
+    // 승인 대기의 77%였다. 성인 전문직 청중에게 갑자기 영어가 뜨면 읽는 데
+    // 시간이 걸린다.
+    //
+    // 승인 게이트 자체는 유지한다(원장 결정 2026-07-27): 자기 결과물이 바뀌는
+    // 순간마다 의식적으로 승인하는 것이 이 트랙의 위임 판단 훈련이다.
+    const { title, verb } = APPROVAL_COPY[req.kind] ?? {
+      title: "코치가 작업을 하려고 해요",
+      verb: "허용",
+    };
     const pick = await vscode.window.showWarningMessage(
-      `HypeProof Chat wants to ${req.kind}:\n\n${req.description}`,
+      `${title}\n\n${req.description}`,
       { modal: true },
-      "Approve",
-      "Deny",
+      verb,
     );
-    return pick === "Approve";
+    return pick === verb;
   }
 
   private async postConfig(): Promise<void> {

@@ -126,13 +126,28 @@ function head(word: string): string {
 export function isDestructiveCommand(command: string): boolean {
   if (!command || !command.trim()) return false;
 
-  for (const pattern of DESTRUCTIVE_ARG_PATTERNS) {
-    if (pattern.test(command)) return true;
-  }
-
-  // Quoted text is data, not commands: `git commit -m "rm the header"` must
-  // not trip the scan. Strip quoted runs before looking for command words.
+  // Quoted text is data, not shell syntax: `git commit -m "rm the header"` must
+  // not trip the scan. Strip quoted runs BEFORE anything else looks at the
+  // string — including the arg patterns below.
+  //
+  // 이 순서가 실측으로 틀렸던 자리다(2026-07-27). 예전에는 arg 패턴을 **원본**에
+  // 걸었고, 그래서 읽기 전용 명령이 파괴적으로 분류됐다:
+  //
+  //   curl -sL "<url>" | python3 -c "import re; print(re.sub(r'<[^>]+>','',s))"
+  //                                                          ^^^ 여기 `>]` 를
+  //   출력 리다이렉트(`> 파일`)로 읽었다. 파이썬 정규식의 일부일 뿐인데.
+  //
+  // 결과는 「항상 허용」이 없는 강한 확인이 매 호출마다 뜨는 것 — 승인 게이트가
+  // 교육 장치가 아니라 잡음이 된다. 따옴표 안을 먼저 비우면 사라진다.
+  //
+  // 살균이 진짜 위험을 가리지는 않는다: `rm -rf "$HOME"` 은 따옴표를 비워도
+  // `rm -rf` 가 남아 아래 단어 스캔에 걸리고, `> "my file.txt"` 는 `> ""` 가 되어
+  // 리다이렉트 규칙에 그대로 걸린다.
   const scannable = stripQuoted(command);
+
+  for (const pattern of DESTRUCTIVE_ARG_PATTERNS) {
+    if (pattern.test(scannable)) return true;
+  }
 
   // Each chaining operator (and each substitution) starts a NEW command, so
   // scan every segment — `git status && rm -rf ~` is destructive even though
