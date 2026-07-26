@@ -252,6 +252,18 @@ export function buildHypeproofMcpServer(
       "학생이 만든 페이지가 실제로 어떻게 보이는지 확인할 때 사용.",
     {},
     async () => {
+      // #457 후속 — 스크린샷 경로가 둘로 갈려 있었다. 이 도구는
+      // host.screenshot()(capturePageContext: 매 호출 새 CDP 세션 attach+close)
+      // 을 쓰고, browser_read 는 BrowserControl(세션 재사용)을 쓴다. 실측에서
+      // **screenshot 만** 반복 실패했다(2026-07-26 T1: 2/2 실패, 실사용 로그에서도
+      // 동일). 같은 Page.captureScreenshot 인데 세션 관리만 다르다.
+      //
+      // 그래서 inspect 가 있으면 그쪽(BrowserControl)을 먼저 쓴다 — 구현이 하나면
+      // 한쪽만 고쳐지는 일이 없다. 없을 때만 기존 경로로 폴백한다.
+      if (host.inspect) {
+        const viaCdp = await host.inspect("browser_screenshot", {});
+        if (viaCdp && !viaCdp.isError) return withPageState(viaCdp, await readCurrentPage(host));
+      }
       const shot = await host.screenshot();
       if (!shot || !shot.imageBase64) {
         return withPageState(

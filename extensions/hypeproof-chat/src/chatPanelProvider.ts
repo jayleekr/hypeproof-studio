@@ -534,14 +534,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (!tab) return null;
         try {
           const ctx = await capturePageContext(tab);
-          if (!ctx.imageBase64) return null;
+          if (!ctx.imageBase64) {
+            // 원인을 남긴다. `catch { return null }` 이 이유를 통째로 삼켜서
+            // 실측(2026-07-26)에서 스크린샷이 왜 실패하는지 못 밝혔다.
+            console.warn(`[coach] screenshot: empty image for ${tab.url ?? "(no url)"}`);
+            return null;
+          }
           return {
             imageBase64: ctx.imageBase64,
             mimeType: "image/jpeg",
             url: ctx.url,
             title: ctx.title,
           };
-        } catch {
+        } catch (e) {
+          console.warn(`[coach] screenshot failed for ${tab.url ?? "(no url)"}: ${String(e)}`);
           return null;
         }
       },
