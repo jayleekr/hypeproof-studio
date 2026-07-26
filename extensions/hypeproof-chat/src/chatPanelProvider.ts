@@ -8,6 +8,7 @@ import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
+import { originOfUrl } from "./browserControlHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -78,6 +79,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * commandSignature returns null for them), so `rm` can never be remembered.
    */
   private readonly approvedCommandSignatures = new Set<string>();
+  /**
+   * "이 사이트는 항상 허용" 을 누른 오리진. 셸 시그니처와 같은 규율 —
+   * 세션 한정, 저장하지 않는다. 오리진 단위라 다른 사이트는 다시 묻는다.
+   */
+  private readonly approvedBrowserOrigins = new Set<string>();
   /** #457 — SDK 경로의 검사 도구용 CDP 실행기. 첫 사용 때 만든다. */
   private mcpBrowser?: BrowserControl;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
@@ -1213,6 +1219,33 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         return true;
       }
       return pick === "실행";
+    }
+
+    // Tier 1.5 — 브라우저 열기. 오리진 단위로 한 번만 묻는다.
+    //
+    // 실측(2026-07-26 실사용): 코치가 정답지 사이트의 서브페이지를 차례로 읽는
+    // 동안 About·첨단디지털·평생예방·시니어… 페이지마다 모달이 떴다. 판단은
+    // "이 사이트를 코치가 둘러봐도 되는가" 한 번이면 끝나는데, 같은 답을 다섯 번
+    // 요구하면 읽지 않고 누르는 습관만 남는다 — 승인 게이트가 훈련시키려던 것과
+    // 정반대다. 셸의 `항상 허용`(위)과 같은 장치이고, 마찬가지로 세션 한정이다.
+    if (req.kind === "openBrowser") {
+      const url = (req.payload as { url?: string } | null | undefined)?.url ?? "";
+      const origin = originOfUrl(url);
+      if (origin && this.approvedBrowserOrigins.has(origin)) {
+        return true;
+      }
+      const REMEMBER = origin ? `이 사이트는 항상 허용 (${origin})` : null;
+      const buttons = REMEMBER ? ["열기", REMEMBER] : ["열기"];
+      const pick = await vscode.window.showWarningMessage(
+        `코치가 브라우저를 열려고 해요:\n\n${url || req.description}`,
+        { modal: true },
+        ...buttons,
+      );
+      if (pick === REMEMBER && origin) {
+        this.approvedBrowserOrigins.add(origin);
+        return true;
+      }
+      return pick === "열기";
     }
 
     // Tier 2 — file access must target the active workspace (write and read).

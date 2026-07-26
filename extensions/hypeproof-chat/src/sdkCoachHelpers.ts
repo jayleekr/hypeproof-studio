@@ -20,7 +20,7 @@ import * as path from "node:path";
 // Explicit .ts specifiers: the leaf/pure-module graph must load under
 // `node --experimental-strip-types` (smoke tests) which resolves specifiers
 // literally; esbuild + tsc (allowImportingTsExtensions) accept them.
-import { safeNavigateUrl } from "./browserControlHelpers.ts";
+import { safeNavigateUrl, isLoopbackUrl } from "./browserControlHelpers.ts";
 import {
   MCP_BROWSER_OPEN,
   MCP_BROWSER_SCREENSHOT,
@@ -1490,7 +1490,16 @@ export function evaluateSdkToolUse(args: {
         friendly: URL_POLICY_FRIENDLY,
       };
     }
-    // Outward action → ALWAYS the approval modal (kind "openBrowser").
+    // 자기 워크스페이스를 보는 것은 바깥 행위가 아니다. live_preview_start 는
+    // 이미 자동 허용인데(바로 아래), 그렇게 띄운 서버를 **열어서 보는 것**에
+    // 모달을 달면 앞뒤가 안 맞는다. 실사용에서 코치는 고칠 때마다 자기 결과를
+    // 다시 열어 확인하므로, 이 모달은 "만들고 → 보고 → 고치고 → 다시 보고"
+    // 루프마다 반복된다. browser_read 를 자동 허용한 것(#457)과 같은 이유다.
+    if (isLoopbackUrl(url)) {
+      return { decision: "allow" };
+    }
+    // 바깥 주소 → 승인 모달 (kind "openBrowser"). 호스트가 오리진 단위로
+    // 기억하므로 같은 사이트의 서브페이지는 다시 묻지 않는다.
     return { decision: "ask" };
   }
   // #457 — 검사 3종.

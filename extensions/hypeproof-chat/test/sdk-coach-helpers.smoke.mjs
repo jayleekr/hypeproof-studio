@@ -334,14 +334,42 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
     assert.ok(v.reason.length > 0 && v.friendly.length > 0);
   }
 
-  // browser_open is an OUTWARD action → always "ask" (the approval modal),
-  // after the URL policy (the same safeNavigateUrl whitelist as #278).
+  // browser_open to an OUTWARD address → "ask" (the approval modal), after the
+  // URL policy (the same safeNavigateUrl whitelist as #278).
   assert.deepEqual(
     evalTool(MCP_BROWSER_OPEN, { url: "https://example.com" }, adultBrowser),
     { decision: "ask" },
-    "granted browser_open with a policy-clean URL → modal, never auto-run",
+    "granted browser_open with a policy-clean outward URL → modal, never auto-run",
   );
-  assert.deepEqual(evalTool(MCP_BROWSER_OPEN, { url: "localhost:5173" }, adultBrowser), { decision: "ask" });
+
+  // 루프백은 자동 허용 — **의도적으로 바뀐 동작이다** (이전엔 여기도 "ask").
+  //
+  // 근거(2026-07-26 실사용 실측): live_preview_start 는 이미 자동 허용인데 그렇게
+  // 띄운 서버를 열어 보는 데 모달이 떴다. 코치는 고칠 때마다 자기 결과를 다시
+  // 열어 확인하므로 "만들고 → 보고 → 고치고 → 다시 보고" 루프마다 반복됐다.
+  // 자기 워크스페이스를 보는 것은 바깥 행위가 아니다 — browser_read(#457) 와 동급.
+  for (const url of ["localhost:5173", "127.0.0.1:51884", "http://127.0.0.1:8080/index.html", "http://localhost:3000"]) {
+    assert.deepEqual(
+      evalTool(MCP_BROWSER_OPEN, { url }, adultBrowser),
+      { decision: "allow" },
+      `루프백은 자동 허용이어야 한다: ${url}`,
+    );
+  }
+
+  // 음성 대조군 — 루프백처럼 **생겼지만** 바깥인 주소는 반드시 계속 물어야 한다.
+  // 호스트명 앞뒤에 뭘 붙여 자동 허용을 훔치는 경우를 막는다.
+  for (const url of [
+    "https://127.0.0.1.evil.com/",
+    "https://localhost.attacker.io/",
+    "https://notlocalhost/",
+    "https://example.com/?next=http://127.0.0.1",
+  ]) {
+    assert.deepEqual(
+      evalTool(MCP_BROWSER_OPEN, { url }, adultBrowser),
+      { decision: "ask" },
+      `루프백을 가장한 바깥 주소는 계속 물어야 한다: ${url}`,
+    );
+  }
 
   // URL policy rejections — hostile schemes and ambiguous inputs are denied
   // BEFORE any modal (the student never sees an approvable hostile action).

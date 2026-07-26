@@ -46,6 +46,35 @@ export function safeNavigateUrl(input: string): string | null {
   return null;
 }
 
+const LOOPBACK_URL = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?(\/|$|\?|#)/i;
+
+/**
+ * 이 주소가 **학생 자기 컴퓨터**인가 (라이브 프리뷰 서버).
+ *
+ * 정규화 후에 판정한다 — 코치는 `127.0.0.1:51884` 처럼 스킴 없이 넘기기도 하고,
+ * safeNavigateUrl 이 그걸 `http://` 로 채운다. 원문에 정규식을 걸면 그 경우를
+ * 놓친다.
+ */
+export function isLoopbackUrl(input: string): boolean {
+  const url = safeNavigateUrl(input);
+  return !!url && LOOPBACK_URL.test(url);
+}
+
+/**
+ * 승인 기억용 키. `https://boaclinic.com/about` → `https://boaclinic.com`.
+ * 서브페이지마다 다시 묻지 않기 위한 것이므로 **오리진 단위**다 — 경로가 아니라.
+ * 정규화에 실패하면 null 을 돌려주고, 호출부는 기억하지 않고 매번 묻는다.
+ */
+export function originOfUrl(input: string): string | null {
+  const url = safeNavigateUrl(input);
+  if (!url) return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * #415 — 같은 페이지인지 비교하기 위한 정규화. 브라우저가 실제로 보여주는 URL
  * (`tab.url`)과 코치가 요청한 URL 은 표기가 조금씩 다르다: 끝 슬래시가 붙거나
