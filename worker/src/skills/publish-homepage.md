@@ -131,13 +131,30 @@ curl -sL https://api.github.com/repos/cloudflare/cloudflared/releases/latest \
 받아서 `tar -xzf`로 풀고 `~/Library/Application Support/HypeProof-Studio/bin/`에
 둔다. 18MB 정도다. 받기 전에 뭘 왜 받는지 설명하고 승인을 받아라.
 
-### 터널 열기
+### 터널 열기 — 포트를 먼저 검증해라
 
-Studio의 미리보기 서버가 이미 `http://127.0.0.1:<포트>`로 돌고 있다. 그 포트에
-붙인다:
+Studio의 미리보기 서버가 `http://127.0.0.1:<포트>`로 돌고 있다. 그런데 **열려
+있는 로컬 포트가 그것만이 아니다** — Studio 자체가 디버깅 포트 등을 함께 연다.
+포트 목록에서 눈으로 고르면 틀린다. 2026-07-26 실측: 디버깅 포트를 홈페이지로
+오인해 터널을 열었고 500이 나왔다.
+
+**터널을 열기 전에 그 포트가 정말 내 페이지를 주는지 확인해라:**
 
 ```
-cloudflared tunnel --url http://127.0.0.1:<포트>
+curl -s http://127.0.0.1:<포트>/ | head -c 200
+```
+
+내가 만든 내용(병원 이름 등)이 보이면 맞는 포트다. 안 보이면 다음 후보로 간다.
+후보는 이렇게 찾는다:
+
+```
+lsof -nP -iTCP -sTCP:LISTEN | grep -i 'node\|Studio' | awk '{print $9}'
+```
+
+맞는 포트를 확인한 뒤에 터널을 연다:
+
+```
+cloudflared tunnel --url http://127.0.0.1:<확인한 포트>
 ```
 
 출력에 `https://<무작위>.trycloudflare.com`이 나온다. 이것도 `curl -sIL`로 200을
