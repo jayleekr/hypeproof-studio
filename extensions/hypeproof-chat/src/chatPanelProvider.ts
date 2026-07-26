@@ -8,6 +8,7 @@ import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
+import { originOfUrl, coachTabsToClose } from "./browserControlHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -78,6 +79,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * commandSignature returns null for them), so `rm` can never be remembered.
    */
   private readonly approvedCommandSignatures = new Set<string>();
+  /**
+   * "이 사이트는 항상 허용" 을 누른 오리진. 셸 시그니처와 같은 규율 —
+   * 세션 한정, 저장하지 않는다. 오리진 단위라 다른 사이트는 다시 묻는다.
+   */
+  private readonly approvedBrowserOrigins = new Set<string>();
   /** #457 — SDK 경로의 검사 도구용 CDP 실행기. 첫 사용 때 만든다. */
   private mcpBrowser?: BrowserControl;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
@@ -525,6 +531,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private buildBrowserMcpHost(): BrowserMcpHost {
     return {
       openBrowser: async (url: string) => {
+        // 코치 브라우징 탭은 하나로 유지한다. 재사용 없이 매번 새로 열면 탭이
+        // 쌓이고(실측: 3개, 그중 하나는 404), 스크린샷이 쓰는 activeBrowserTab 이
+        // 방금 연 탭이 아니게 될 수 있다. 라이브 프리뷰(루프백)는 건드리지 않는다.
+        const tabs = vscode.window.browserTabs ?? [];
+        for (const i of coachTabsToClose(tabs.map((t) => t.url), url)) {
+          try {
+            await tabs[i]?.close();
+          } catch {
+            /* 못 닫는 탭이 열기를 막아서는 안 된다 */
+          }
+        }
         // URL already passed evaluateSdkToolUse's policy + the approval modal;
         // the shared command normalizes and opens the integrated browser tab.
         await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
@@ -534,14 +551,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (!tab) return null;
         try {
           const ctx = await capturePageContext(tab);
-          if (!ctx.imageBase64) return null;
+          if (!ctx.imageBase64) {
+            // 원인을 남긴다. `catch { return null }` 이 이유를 통째로 삼켜서
+            // 실측(2026-07-26)에서 스크린샷이 왜 실패하는지 못 밝혔다.
+            console.warn(`[coach] screenshot: empty image for ${tab.url ?? "(no url)"}`);
+            return null;
+          }
           return {
             imageBase64: ctx.imageBase64,
             mimeType: "image/jpeg",
             url: ctx.url,
             title: ctx.title,
           };
-        } catch {
+        } catch (e) {
+          console.warn(`[coach] screenshot failed for ${tab.url ?? "(no url)"}: ${String(e)}`);
           return null;
         }
       },
@@ -858,13 +881,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             thinkingIndex += 1;
             break;
           case "tool_use": {
-            const label = `${a.name}(${summarizeToolInput(a.name, a.input)})`;
+            // 워크스페이스 루트를 넘겨 경로를 루트 기준으로 보여 준다. 파일명만
+            // 남기면 "정상 · 상대경로 거부 · 워크스페이스 밖"이 같은 글자가 된다.
+            const label = `${a.name}(${summarizeToolInput(a.name, a.input, 60, this.resolveCoachCwd())})`;
             toolLabels.set(a.id, label);
             log(a.id, "🔧", label, "running");
             break;
           }
           case "tool_result":
-            log(a.id, "🔧", toolLabels.get(a.id) ?? "", a.isError ? "error" : "done");
+            // 실패는 라벨에 표시를 남긴다 — 아이콘만으로는 스크롤 지나가면
+            // 사라진다. 실사용에서 Write 실패를 놓치고 "저장됐습니다"를 그대로
+            // 믿었다(2026-07-26).
+            log(
+              a.id,
+              "🔧",
+              a.isError ? `${toolLabels.get(a.id) ?? ""} — 실패` : (toolLabels.get(a.id) ?? ""),
+              a.isError ? "error" : "done",
+            );
             break;
         }
       };
@@ -1207,6 +1240,33 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         return true;
       }
       return pick === "실행";
+    }
+
+    // Tier 1.5 — 브라우저 열기. 오리진 단위로 한 번만 묻는다.
+    //
+    // 실측(2026-07-26 실사용): 코치가 정답지 사이트의 서브페이지를 차례로 읽는
+    // 동안 About·첨단디지털·평생예방·시니어… 페이지마다 모달이 떴다. 판단은
+    // "이 사이트를 코치가 둘러봐도 되는가" 한 번이면 끝나는데, 같은 답을 다섯 번
+    // 요구하면 읽지 않고 누르는 습관만 남는다 — 승인 게이트가 훈련시키려던 것과
+    // 정반대다. 셸의 `항상 허용`(위)과 같은 장치이고, 마찬가지로 세션 한정이다.
+    if (req.kind === "openBrowser") {
+      const url = (req.payload as { url?: string } | null | undefined)?.url ?? "";
+      const origin = originOfUrl(url);
+      if (origin && this.approvedBrowserOrigins.has(origin)) {
+        return true;
+      }
+      const REMEMBER = origin ? `이 사이트는 항상 허용 (${origin})` : null;
+      const buttons = REMEMBER ? ["열기", REMEMBER] : ["열기"];
+      const pick = await vscode.window.showWarningMessage(
+        `코치가 브라우저를 열려고 해요:\n\n${url || req.description}`,
+        { modal: true },
+        ...buttons,
+      );
+      if (pick === REMEMBER && origin) {
+        this.approvedBrowserOrigins.add(origin);
+        return true;
+      }
+      return pick === "열기";
     }
 
     // Tier 2 — file access must target the active workspace (write and read).

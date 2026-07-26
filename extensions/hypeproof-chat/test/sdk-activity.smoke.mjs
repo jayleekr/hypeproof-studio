@@ -113,9 +113,20 @@ const apiRetry = (error_status) => ({
 
 // ─── summarizeToolInput: 도구 옆에 붙일 '식별되는 한 조각' ──────────────────
 {
-  // 경로는 꼬리가 정보다 — /Users/…/workspace 접두사는 매 줄 똑같아 쓸모없다.
-  assert.equal(summarizeToolInput("Write", { file_path: "/Users/kid/workspace/index.html" }), "index.html");
-  assert.equal(summarizeToolInput("Read", { path: "/w/src/styles.css" }), "styles.css");
+  // 경로는 **워크스페이스 루트 기준**으로 보여 준다. 접두사는 매 줄 똑같아
+  // 쓸모없지만, 파일명만 남기는 축약은 정보를 너무 많이 버렸다 — 2026-07-26
+  // 실측에서 이 셋이 화면에 같은 글자로 보여 같은 결함을 세 번 오진했다:
+  //   정상(절대·루트 안) · 상대경로(SDK 가 거부) · 루트 밖(위험)
+  const WS = "/Users/kid/workspace";
+  assert.equal(summarizeToolInput("Write", { file_path: `${WS}/index.html` }, 60, WS), "index.html");
+  assert.equal(summarizeToolInput("Write", { file_path: `${WS}/sub/a.css` }, 60, WS), "sub/a.css");
+  // 루트 밖은 축약하지 않는다 — 눈에 띄어야 한다.
+  assert.equal(summarizeToolInput("Read", { path: "/etc/passwd" }, 60, WS), "/etc/passwd");
+  // 상대경로는 `./` 로 구분된다 (흡수 전에 보이면 그게 곧 원인 표시다).
+  assert.equal(summarizeToolInput("Read", { file_path: "agent.md" }, 60, WS), "./agent.md");
+  // 루트를 모르면 절대경로를 그대로 — 잘라서 숨기지 않는다.
+  assert.equal(summarizeToolInput("Write", { file_path: `${WS}/index.html` }), `${WS}/index.html`);
+  assert.equal(summarizeToolInput("Read", { path: "/w/src/styles.css" }), "/w/src/styles.css");
   assert.equal(summarizeToolInput("Bash", { command: "ls -la" }), "ls -la");
   assert.equal(summarizeToolInput("WebFetch", { url: "https://example.com/pricing" }), "https://example.com/pricing");
   assert.equal(summarizeToolInput("WebSearch", { query: "임플란트 가격" }), "임플란트 가격");
@@ -281,3 +292,36 @@ const mockStream = (events) =>
 }
 
 console.log("✓ #414: sdk activity — thinking/tool_use/tool_result/thinking_tokens 를 순서대로, 텍스트·fast-fail·stall 무회귀");
+
+// ─── maxTurns 소진은 우리 말로 알린다 ───────────────────────────────────────
+{
+  const { SDK_MAX_TURNS_FRIENDLY } = await import("../src/sdkCoachHelpers.ts");
+  const deltas = [];
+  await consumeSdkStream(
+    (async function* () {
+      yield { type: "assistant", message: { content: [{ type: "text", text: "만드는 중" }] } };
+      yield { type: "result", subtype: "error_max_turns", result: "Reached maximum number of turns (20)" };
+    })(),
+    { isAborted: () => false, makeAbortError: () => new Error("abort"),
+      abortQuery: () => {}, makeFatalAuthError: () => new Error("auth"),
+      onDelta: (d) => deltas.push(d), stallMs: 0 },
+  );
+  const joined = deltas.join("");
+  assert.ok(joined.includes("파일로 저장돼 있어요"), "예산 소진을 우리 말로 알려야 한다");
+  assert.ok(!joined.includes("Reached maximum"), "SDK 영어 원문이 그대로 나가면 안 된다");
+  assert.equal(SDK_MAX_TURNS_FRIENDLY.includes("이어서"), true, "다음 행동을 제시해야 한다");
+
+  // 음성 대조군 — 정상 종료(result/success)에는 이 줄이 붙지 않아야 한다.
+  const ok = [];
+  await consumeSdkStream(
+    (async function* () {
+      yield { type: "assistant", message: { content: [{ type: "text", text: "다 됐어요" }] } };
+      yield { type: "result", subtype: "success", result: "done" };
+    })(),
+    { isAborted: () => false, makeAbortError: () => new Error("abort"),
+      abortQuery: () => {}, makeFatalAuthError: () => new Error("auth"),
+      onDelta: (d) => ok.push(d), stallMs: 0 },
+  );
+  assert.ok(!ok.join("").includes("파일로 저장돼 있어요"), "정상 종료에는 붙지 않아야 한다");
+  console.log("✓ maxTurns 소진 — 우리 말 안내 · 정상 종료에는 안 붙음");
+}

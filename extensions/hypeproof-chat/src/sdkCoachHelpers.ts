@@ -20,7 +20,7 @@ import * as path from "node:path";
 // Explicit .ts specifiers: the leaf/pure-module graph must load under
 // `node --experimental-strip-types` (smoke tests) which resolves specifiers
 // literally; esbuild + tsc (allowImportingTsExtensions) accept them.
-import { safeNavigateUrl } from "./browserControlHelpers.ts";
+import { safeNavigateUrl, isLoopbackUrl } from "./browserControlHelpers.ts";
 import {
   MCP_BROWSER_OPEN,
   MCP_BROWSER_SCREENSHOT,
@@ -127,13 +127,32 @@ const SDK_WRITE_TOOL_NAMES = ["Write", "Edit"] as const;
  * its own workspace_root under a different home dir), so it cannot live in the
  * worker's cohort prompt.
  */
-export function withWorkspaceContext(systemPrompt: string, cwd?: string): string {
+export function withWorkspaceContext(
+  systemPrompt: string,
+  cwd?: string,
+  /**
+   * 워크스페이스에 지금 있는 파일들 (루트 기준 상대경로). 경로만 알려 주는 것으로는
+   * 부족했다 — 2026-07-26 실측에서 코치는 cwd 를 받고도 `Glob` → `ls` → `find ~` 로
+   * "여기 뭐가 있지"를 툴로 물었고, 한 턴의 151초 중 120초를 거기 썼다. Claude Code
+   * 가 세션 시작에 디렉터리 구조를 미리 넣어 주는 것과 같은 이유다: **물어볼 필요가
+   * 없으면 안 묻는다.** 코호트 워크스페이스는 파일이 몇 개 안 되므로 비용이 없다.
+   */
+  files?: readonly string[],
+): string {
   if (!cwd) return systemPrompt;
+  const listing =
+    files === undefined
+      ? ""
+      : files.length === 0
+        ? "Files: (비어 있음 — 아직 아무것도 만들지 않았다)\n"
+        : `Files:\n${files.map((f) => `  ${f}`).join("\n")}\n`;
   return (
     systemPrompt +
     "\n\n<env>\n" +
     `Working directory (absolute): ${cwd}\n` +
+    listing +
     "파일이나 폴더의 경로를 말할 때는 반드시 위 절대경로를 기준으로 답한다. 추측하거나 지어내지 않는다.\n" +
+    "파일 도구(Read/Write/Edit)에는 **절대경로**를 넘긴다. 위 목록에 있는 파일을 찾으려고 탐색하지 않는다.\n" +
     "</env>"
   );
 }
@@ -334,8 +353,24 @@ export function buildSubagentDefinitions(
   return out;
 }
 
+/**
+ * 한 턴에 허용할 SDK 턴 수.
+ *
+ * 성인 20 은 **실측으로 부족함이 확인됐다** (2026-07-26): 멀티페이지 사이트를
+ * 만드는 한 요청이 툴 54회를 썼고 두 번 연속 예산 소진으로 죽었다. #457 노트에
+ * "지금 올리면 낭비를 감춘 채 넘어간다 — 다시 재본 뒤에 판단한다"고 미뤄 뒀던
+ * 그 재측정이 그것이다.
+ *
+ * 낭비 쪽을 먼저 걷어냈다: 상대경로 흡수 + 워크스페이스 목록 주입으로 탐색이
+ * 사라지고(한 턴의 80%), 탭 정리로 재확인이 줄었다. 그 위에서 60 으로 올린다.
+ *
+ * 60 은 **잠정값**이다. 고친 코드로 같은 시나리오를 다시 재기 전까지는 근거가
+ * "54 를 봤으니 그보다 넉넉히" 수준이다. 재측정 후 조정한다.
+ *
+ * 미성년 6 은 건드리지 않는다 — 이건 성능이 아니라 대상 연령 경계다.
+ */
 export function maxTurnsFor(profile: ResolvedProfile): number {
-  return isMinorTier(profile) ? 6 : 20;
+  return isMinorTier(profile) ? 6 : 60;
 }
 
 // ── SDK native binary resolution (#282 W4a, docs/sdk-bundling.md §5) ─────────
@@ -735,6 +770,8 @@ export function buildSdkQueryOptions(
      * so the SDK's own node_modules optionalDependency lookup runs (dev).
      */
     pathToClaudeCodeExecutable?: string;
+    /** 워크스페이스 파일 목록 (루트 기준 상대). withWorkspaceContext 로 전달된다. */
+    workspaceFiles?: readonly string[];
   },
 ): Omit<AgentSdkOptions, "canUseTool" | "abortController"> {
   // #282 P2 slice 3 — the read-only subagent catalog rides on the same flag
@@ -746,7 +783,7 @@ export function buildSdkQueryOptions(
       ? buildSubagentDefinitions(agent.permittedTools)
       : undefined;
   return {
-    systemPrompt: withWorkspaceContext(agent.systemPrompt, args.cwd),
+    systemPrompt: withWorkspaceContext(agent.systemPrompt, args.cwd, args.workspaceFiles),
     model: agent.model,
     // Built-in base tool set ONLY — the mcp__hypeproof__* names never go here
     // (REQ-M19): Options.tools filters BUILT-INS; MCP tools are delivered via
@@ -884,6 +921,18 @@ export const SDK_STREAM_STALL_MS = 240_000;
 export const SDK_STALL_FRIENDLY =
   "코치 응답이 너무 오래 걸려요. 다시 한 번 보내주세요. 🕐";
 
+/**
+ * 턴 예산을 다 썼을 때 학생이 보는 줄.
+ *
+ * 예전에는 SDK 가 낸 영어 한 줄(`Reached maximum number of turns (20)`)이 그대로
+ * 나갔다. 참가자에게는 고장으로 보이고, 실제로 원장은 그 자리에서 두 번 멈췄다.
+ * 여기서 중요한 것은 **이게 실패가 아니라 예산 소진**이라는 사실과, 지금까지 한
+ * 일이 디스크에 남아 있다는 사실을 알려 주는 것이다.
+ */
+export const SDK_MAX_TURNS_FRIENDLY =
+  "\n\n---\n\n한 번에 할 수 있는 작업량을 다 썼어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+  "이어서 하려면 무엇을 더 할지 알려주세요 — 예: `이어서 계속해줘` 🔧";
+
 /** Sentinel for the watchdog leg of the stream/timer race. */
 const STALLED = Symbol("sdk-stream-stalled");
 
@@ -911,11 +960,42 @@ export type SdkActivity =
   | { kind: "tool_result"; id: string; isError: boolean };
 
 /**
+ * 활동 로그에 보여 줄 경로 표기.
+ *
+ * 파일명만 남기던 예전 방식은 **세 가지 서로 다른 상황을 같은 글자로** 만들었다:
+ *
+ *   Read(/Users/…/HypeProofClinic/agent.md)  →  Read(agent.md)   정상
+ *   Read(agent.md)                            →  Read(agent.md)   상대경로, 거부됨
+ *   Read(/etc/passwd)                         →  Read(passwd)     워크스페이스 밖!
+ *
+ * 2026-07-26 실측에서 이것 때문에 같은 결함을 하루에 세 번 만나고 매번 다른
+ * 원인으로 추정했다. 세 번째에야 벤더 SDK 타입을 열어 보고 확정했다.
+ *
+ * 이제 셋이 다르게 보인다:
+ *   워크스페이스 안  → `agent.md` · `sub/a.css`   (루트 기준 상대)
+ *   워크스페이스 밖  → `/etc/passwd`               (전체 경로 — 눈에 띄어야 한다)
+ *   상대경로         → `./agent.md`                (흡수 전이라면 그대로 보인다)
+ */
+export function displayPath(value: string, workspaceRoot?: string): string {
+  if (!path.isAbsolute(value)) return value.startsWith(".") ? value : `./${value}`;
+  if (!workspaceRoot) return value;
+  const rel = path.relative(workspaceRoot, value);
+  // `..` 로 시작하면 루트 밖이다 — 축약하지 않고 전체를 보여 준다.
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return value;
+  return rel;
+}
+
+/**
  * The one input field worth showing next to a tool name, in Claude Code's
  * `Write(index.html)` spirit. Falls back to a compact JSON clip so an unknown
  * tool still shows something real instead of a bare name.
  */
-export function summarizeToolInput(name: string, input: unknown, max = 60): string {
+export function summarizeToolInput(
+  name: string,
+  input: unknown,
+  max = 60,
+  workspaceRoot?: string,
+): string {
   if (!input || typeof input !== "object") return "";
   const rec = input as Record<string, unknown>;
   const clip = (v: string): string => {
@@ -927,9 +1007,7 @@ export function summarizeToolInput(name: string, input: unknown, max = 60): stri
   for (const key of ["file_path", "path", "command", "url", "query", "pattern", "prompt", "description"]) {
     const v = rec[key];
     if (typeof v === "string" && v.length > 0) {
-      // A path is identified by its tail, not its (long, invariant) prefix.
-      const shown = key === "file_path" || key === "path" ? v.split("/").filter(Boolean).pop() ?? v : v;
-      return clip(shown);
+      return clip(key === "file_path" || key === "path" ? displayPath(v, workspaceRoot) : v);
     }
   }
   try {
@@ -1144,6 +1222,14 @@ export async function consumeSdkStream(
       if (type === "assistant" || type === "text" || type === "content_block_delta") {
         const delta = extractSdkText(msg);
         if (delta) h.onDelta(delta);
+      }
+      // 턴 예산 소진은 조용히 끝나면 안 된다. SDK 는 `{type:"result",
+      // subtype:"error_max_turns"}` 로 알리는데, 예전에는 이 분기가 없어서 영어
+      // 원문이 그대로 학생에게 나갔다. 실패가 아니라 예산 소진임을, 그리고 한
+      // 일이 디스크에 남아 있음을 우리 말로 알려 준다.
+      if (type === "result" && msg["subtype"] === "error_max_turns") {
+        console.warn("[coach] maxTurns 소진 — 턴 예산을 다 쓰고 종료했다");
+        h.onDelta(SDK_MAX_TURNS_FRIENDLY);
       }
       // Other message types (result / message_stop) are terminal — nothing to
       // emit; the caller posts streamEnd.
@@ -1383,6 +1469,58 @@ function pathCandidates(toolName: string, input: unknown): string[] {
 }
 
 /**
+ * 상대경로를 워크스페이스 기준 절대경로로 바꿔 준다.
+ *
+ * 왜 필요한가 (2026-07-26 실측). 벤더 SDK 의 파일 도구는 **절대경로만** 받는다:
+ *
+ *   sdk-tools.d.ts  "absolute path to the file to read"
+ *                   "absolute path to the file to write (must be absolute, not relative)"
+ *
+ * 코치가 `agent.md` 를 넘기면 파일이 있든 없든 거부된다. 그러면 코치는 "파일이
+ * 없나?" 로 해석하고 찾아 나선다 — 실사용에서 `~/Desktop/HypeProof Studio/
+ * workspace/` 같은 없는 경로를 지어내고, 이어서 `find ~` 로 홈 전체를 훑었다.
+ * 턴 3 의 151초 중 120초가 여기서 증발했고, 같은 행동이 그 전 세션을 maxTurns 로
+ * 죽였다(#457 노트).
+ *
+ * 프롬프트로 "절대경로를 쓰라"고 훈계하는 방법도 있지만 #428 이래 그 방향으로
+ * 세 번 시도했고 세 번 다 재발했다. **제품이 흡수하는 쪽이 확실하다.**
+ *
+ * 규칙:
+ *   - `PATH_INPUT_KEYS` 만 건드린다. Glob 의 `pattern` 은 경로가 아니라 패턴이라
+ *     손대지 않는다 — `**\/*.html` 을 절대화하면 매칭이 깨진다.
+ *   - 이미 절대경로면 그대로 둔다.
+ *   - 워크스페이스 밖으로 나가는 상대경로(`../../etc/passwd`)도 **절대화만** 한다.
+ *     막는 것은 이 함수가 아니라 뒤이은 containment 검사의 몫이다 — 판정을 한
+ *     곳에 모아 둬야 구멍이 안 생긴다.
+ */
+export function absolutizeToolPaths(args: {
+  toolName: string;
+  input: unknown;
+  workspaceRoot?: string;
+}): { input: unknown; rewritten: Array<{ key: string; from: string; to: string }> } {
+  const { toolName, input, workspaceRoot } = args;
+  const rewritten: Array<{ key: string; from: string; to: string }> = [];
+  if (!workspaceRoot || !input || typeof input !== "object" || Array.isArray(input)) {
+    return { input, rewritten };
+  }
+  const name = toolName.toLowerCase();
+  if (!READ_TOOLS.has(name) && !WRITE_TOOLS.has(name)) return { input, rewritten };
+
+  const rec = input as Record<string, unknown>;
+  let next: Record<string, unknown> | null = null;
+  for (const key of PATH_INPUT_KEYS) {
+    const value = rec[key];
+    if (typeof value !== "string" || value.length === 0) continue;
+    if (path.isAbsolute(value)) continue;
+    const abs = path.resolve(workspaceRoot, value);
+    next ??= { ...rec };
+    next[key] = abs;
+    rewritten.push({ key, from: value, to: abs });
+  }
+  return { input: next ?? input, rewritten };
+}
+
+/**
  * The #282 Phase 2 tool policy. `permittedTools` comes from the cohort profile
  * (permittedToolsFor — sdk_tools + web_search); the verdict never widens beyond
  * it. `workspaceRoot` is the SDK cwd; when absent (dev/test without a folder,
@@ -1490,7 +1628,16 @@ export function evaluateSdkToolUse(args: {
         friendly: URL_POLICY_FRIENDLY,
       };
     }
-    // Outward action → ALWAYS the approval modal (kind "openBrowser").
+    // 자기 워크스페이스를 보는 것은 바깥 행위가 아니다. live_preview_start 는
+    // 이미 자동 허용인데(바로 아래), 그렇게 띄운 서버를 **열어서 보는 것**에
+    // 모달을 달면 앞뒤가 안 맞는다. 실사용에서 코치는 고칠 때마다 자기 결과를
+    // 다시 열어 확인하므로, 이 모달은 "만들고 → 보고 → 고치고 → 다시 보고"
+    // 루프마다 반복된다. browser_read 를 자동 허용한 것(#457)과 같은 이유다.
+    if (isLoopbackUrl(url)) {
+      return { decision: "allow" };
+    }
+    // 바깥 주소 → 승인 모달 (kind "openBrowser"). 호스트가 오리진 단위로
+    // 기억하므로 같은 사이트의 서브페이지는 다시 묻지 않는다.
     return { decision: "ask" };
   }
   // #457 — 검사 3종.
