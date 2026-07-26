@@ -325,3 +325,42 @@ console.log("✓ #414: sdk activity — thinking/tool_use/tool_result/thinking_t
   assert.ok(!ok.join("").includes("파일로 저장돼 있어요"), "정상 종료에는 붙지 않아야 한다");
   console.log("✓ maxTurns 소진 — 우리 말 안내 · 정상 종료에는 안 붙음");
 }
+
+// ─── 실패한 툴은 이유까지 싣는다 ────────────────────────────────────────────
+{
+  const { toolResultText } = await import("../src/sdkCoachHelpers.ts");
+
+  // 실패 → reason 이 붙는다. 2026-07-27 에 browser_click 이 두 턴 연속 실패했는데
+  // ⚠️ 아이콘만 있고 사유가 없어 소스를 읽어 추정해야 했다.
+  const err = extractSdkActivity(
+    userBlocks({
+      type: "tool_result", tool_use_id: "t1", is_error: true,
+      content: [{ type: "text", text: "e12를 찾을 수 없어요. browser_read로 페이지를 다시 읽어 최신 ref를 받아주세요." }],
+    }),
+  );
+  assert.equal(err[0].kind, "tool_result");
+  assert.equal(err[0].isError, true);
+  assert.ok(err[0].reason.includes("e12를 찾을 수 없어요"), "실패 사유가 실려야 한다");
+
+  // 성공 → reason 없음. 성공 결과는 길고 대부분 노이즈다.
+  const ok = extractSdkActivity(
+    userBlocks({ type: "tool_result", tool_use_id: "t2", content: "저장했어요 (2.1KB)" }),
+  );
+  assert.equal(ok[0].isError, false);
+  assert.equal(ok[0].reason, undefined, "성공에는 사유를 붙이지 않는다");
+
+  // 문자열 content 도 읽는다 (MCP/SDK 양쪽 모양)
+  const strErr = extractSdkActivity(
+    userBlocks({ type: "tool_result", tool_use_id: "t3", is_error: true, content: "권한이 없어요" }),
+  );
+  assert.equal(strErr[0].reason, "권한이 없어요");
+
+  // 음성 대조군 — 뽑을 게 없으면 undefined (빈 문자열로 라벨을 더럽히지 않는다)
+  assert.equal(toolResultText(undefined), undefined);
+  assert.equal(toolResultText([]), undefined);
+  assert.equal(toolResultText([{ type: "image", data: "x" }]), undefined);
+  assert.equal(toolResultText("   "), undefined);
+  // 길면 자른다
+  assert.ok(toolResultText("x".repeat(500)).endsWith("…"));
+  console.log("✓ 실패한 툴은 사유까지 · 성공은 안 붙임 · 빈 값은 undefined");
+}

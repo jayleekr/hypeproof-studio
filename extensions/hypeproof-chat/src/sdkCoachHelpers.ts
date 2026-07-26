@@ -729,7 +729,14 @@ export function anthropicBaseUrlFor(proxyUrl: string): string {
  */
 export function buildSdkGatewayEnv(
   baseEnv: Record<string, string | undefined>,
-  args: { proxyUrl: string; token: string },
+  args: {
+    proxyUrl: string;
+    token: string;
+    /** 작업 폴더 절대경로 — 워커가 `x-hps-workspace` 로 받아 시스템 블록에 넣는다. */
+    workspace?: string;
+    /** 작업 폴더의 파일 목록 (루트 기준 상대). */
+    workspaceFiles?: readonly string[];
+  },
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...baseEnv };
   // Scrub anything that could shadow the gateway routing or bearer token.
@@ -738,6 +745,30 @@ export function buildSdkGatewayEnv(
   delete env.CLAUDE_CODE_USE_VERTEX;
   env.ANTHROPIC_BASE_URL = anthropicBaseUrlFor(args.proxyUrl);
   env.ANTHROPIC_AUTH_TOKEN = args.token;
+
+  // #431 — 작업 폴더를 **헤더로** 보낸다.
+  //
+  // 시스템 프롬프트에 붙이는 방법은 통하지 않는다: 워커가 클라이언트 `system` 을
+  // 통째로 교체한다(주입 방지 설계). 그래서 #428·#457·07-26 세 번의 수정이 전부
+  // 무력이었고, 코치는 SDK 경로에서 자기 작업 폴더를 한 번도 받은 적이 없다.
+  //
+  // 형식은 SDK 가 정한다 (vendor bridge.mjs 확인): `ANTHROPIC_CUSTOM_HEADERS` 를
+  // 개행으로 나누고 각 줄을 첫 `:` 에서 이름/값으로 가른다. 따라서 값 안에 개행이
+  // 있으면 안 되고 — 파일 목록의 구분자는 퍼센트 인코딩해서 넘긴다. 한글 폴더명도
+  // 같은 이유로 인코딩이 필요하다(HTTP 헤더는 바이트 안전해야 한다).
+  const custom: string[] = [];
+  if (args.workspace?.trim()) {
+    custom.push(`x-hps-workspace: ${encodeURIComponent(args.workspace.trim())}`);
+  }
+  if (args.workspaceFiles?.length) {
+    custom.push(
+      `x-hps-workspace-files: ${encodeURIComponent(args.workspaceFiles.slice(0, 80).join("\n"))}`,
+    );
+  }
+  if (custom.length) {
+    const existing = (env.ANTHROPIC_CUSTOM_HEADERS ?? "").trim();
+    env.ANTHROPIC_CUSTOM_HEADERS = existing ? `${existing}\n${custom.join("\n")}` : custom.join("\n");
+  }
   return env;
 }
 
@@ -808,6 +839,9 @@ export function buildSdkQueryOptions(
     env: buildSdkGatewayEnv(args.baseEnv, {
       proxyUrl: args.proxyUrl,
       token: args.token,
+      // 시스템 프롬프트 경로는 워커가 버리므로 헤더로 보낸다 (#431).
+      ...(args.cwd ? { workspace: args.cwd } : {}),
+      ...(args.workspaceFiles ? { workspaceFiles: args.workspaceFiles } : {}),
     }),
   };
 }
@@ -957,7 +991,31 @@ export type SdkActivity =
   /** The coach is about to run a tool. `id` pairs with the matching tool_result. */
   | { kind: "tool_use"; id: string; name: string; input: unknown }
   /** That tool finished. */
-  | { kind: "tool_result"; id: string; isError: boolean };
+  | { kind: "tool_result"; id: string; isError: boolean; reason?: string };
+
+/**
+ * 툴 결과에서 사람이 읽을 첫 텍스트 한 조각. MCP/SDK 모두 content 가 문자열이거나
+ * 블록 배열이므로 둘 다 받는다. 없으면 undefined — 빈 문자열로 라벨을 더럽히지 않는다.
+ */
+export function toolResultText(content: unknown, max = 90): string | undefined {
+  const pick = (v: unknown): string | undefined => {
+    if (typeof v === "string") return v;
+    if (Array.isArray(v)) {
+      for (const b of v) {
+        if (b && typeof b === "object" && (b as { type?: unknown }).type === "text") {
+          const t = (b as { text?: unknown }).text;
+          if (typeof t === "string" && t.trim()) return t;
+        }
+      }
+    }
+    return undefined;
+  };
+  const raw = pick(content);
+  if (!raw) return undefined;
+  const one = raw.replace(/\s+/g, " ").trim();
+  if (!one) return undefined;
+  return one.length > max ? `${one.slice(0, max)}…` : one;
+}
 
 /**
  * 활동 로그에 보여 줄 경로 표기.
@@ -1052,7 +1110,14 @@ export function extractSdkActivity(msg: Record<string, unknown>): SdkActivity[] 
       }
       case "tool_result": {
         const id = typeof b["tool_use_id"] === "string" ? b["tool_use_id"] : "";
-        if (id) out.push({ kind: "tool_result", id, isError: b["is_error"] === true });
+        if (!id) break;
+        const isError = b["is_error"] === true;
+        // 실패한 이유는 결과 안에 있는데 그동안 버려졌다. 그래서 화면에는 ⚠️ 하나만
+        // 남고 "왜"는 아무 데도 없었다 — 2026-07-27 실측에서 browser_click 이 두 턴
+        // 연속 실패했는데 사유를 알 길이 없어 소스를 읽어 추정해야 했다. 짧게 실어
+        // 보낸다(성공 결과는 길고 대부분 노이즈이므로 실패일 때만).
+        const reason = isError ? toolResultText(b["content"]) : undefined;
+        out.push({ kind: "tool_result", id, isError, ...(reason ? { reason } : {}) });
         break;
       }
       default:
