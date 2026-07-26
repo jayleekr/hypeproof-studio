@@ -16,6 +16,15 @@ import { launchApp, closeApp, openChatContainer, type AppContext } from "../fixt
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+const ARTIFACT_DIR = "test-artifacts";
+function artifact(name: string, body: string): void {
+  try {
+    fs.mkdirSync(ARTIFACT_DIR, { recursive: true });
+    fs.writeFileSync(path.join(ARTIFACT_DIR, name), body);
+    console.log(`[artifact] ${ARTIFACT_DIR}/${name} (${body.length}B)`);
+  } catch (e) { console.log(`[artifact] 실패: ${String(e)}`); }
+}
+
 async function chatCf(win: Page, timeoutMs = 40_000): Promise<FrameLocator> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
