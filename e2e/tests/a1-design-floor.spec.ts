@@ -172,6 +172,10 @@ test("A1 — 디자인 품질 바닥을 코치가 스스로 통과시키는가",
     checks.forEach(([label, ok]) => console.log(`  ${ok ? "✓" : "✗"}  ${label}`));
     console.log(`  ────────────────────`);
     console.log(`  ${passed}/${total}`);
+    artifact("a1-verdict.txt",
+      checks.map(([l, ok]) => `${ok ? "PASS" : "FAIL"}  ${l}`).join("\n") +
+      `\n\n${passed}/${total}\n기준선(2026-07-24, 이식 전): 0.3/4`);
+    artifact("a1-output.html", html);
     console.log(`  기준선(2026-07-24, 이식 전): 0.3/4 · 이모지 아이콘`);
 
     // A2 — 저수준 결정을 되물었는가 (프롬프트가 금지한 것)
