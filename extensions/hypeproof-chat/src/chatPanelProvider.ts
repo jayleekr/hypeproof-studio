@@ -870,13 +870,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             thinkingIndex += 1;
             break;
           case "tool_use": {
-            const label = `${a.name}(${summarizeToolInput(a.name, a.input)})`;
+            // 워크스페이스 루트를 넘겨 경로를 루트 기준으로 보여 준다. 파일명만
+            // 남기면 "정상 · 상대경로 거부 · 워크스페이스 밖"이 같은 글자가 된다.
+            const label = `${a.name}(${summarizeToolInput(a.name, a.input, 60, this.resolveCoachCwd())})`;
             toolLabels.set(a.id, label);
             log(a.id, "🔧", label, "running");
             break;
           }
           case "tool_result":
-            log(a.id, "🔧", toolLabels.get(a.id) ?? "", a.isError ? "error" : "done");
+            // 실패는 라벨에 표시를 남긴다 — 아이콘만으로는 스크롤 지나가면
+            // 사라진다. 실사용에서 Write 실패를 놓치고 "저장됐습니다"를 그대로
+            // 믿었다(2026-07-26).
+            log(
+              a.id,
+              "🔧",
+              a.isError ? `${toolLabels.get(a.id) ?? ""} — 실패` : (toolLabels.get(a.id) ?? ""),
+              a.isError ? "error" : "done",
+            );
             break;
         }
       };

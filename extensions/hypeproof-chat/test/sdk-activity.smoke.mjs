@@ -113,9 +113,20 @@ const apiRetry = (error_status) => ({
 
 // ─── summarizeToolInput: 도구 옆에 붙일 '식별되는 한 조각' ──────────────────
 {
-  // 경로는 꼬리가 정보다 — /Users/…/workspace 접두사는 매 줄 똑같아 쓸모없다.
-  assert.equal(summarizeToolInput("Write", { file_path: "/Users/kid/workspace/index.html" }), "index.html");
-  assert.equal(summarizeToolInput("Read", { path: "/w/src/styles.css" }), "styles.css");
+  // 경로는 **워크스페이스 루트 기준**으로 보여 준다. 접두사는 매 줄 똑같아
+  // 쓸모없지만, 파일명만 남기는 축약은 정보를 너무 많이 버렸다 — 2026-07-26
+  // 실측에서 이 셋이 화면에 같은 글자로 보여 같은 결함을 세 번 오진했다:
+  //   정상(절대·루트 안) · 상대경로(SDK 가 거부) · 루트 밖(위험)
+  const WS = "/Users/kid/workspace";
+  assert.equal(summarizeToolInput("Write", { file_path: `${WS}/index.html` }, 60, WS), "index.html");
+  assert.equal(summarizeToolInput("Write", { file_path: `${WS}/sub/a.css` }, 60, WS), "sub/a.css");
+  // 루트 밖은 축약하지 않는다 — 눈에 띄어야 한다.
+  assert.equal(summarizeToolInput("Read", { path: "/etc/passwd" }, 60, WS), "/etc/passwd");
+  // 상대경로는 `./` 로 구분된다 (흡수 전에 보이면 그게 곧 원인 표시다).
+  assert.equal(summarizeToolInput("Read", { file_path: "agent.md" }, 60, WS), "./agent.md");
+  // 루트를 모르면 절대경로를 그대로 — 잘라서 숨기지 않는다.
+  assert.equal(summarizeToolInput("Write", { file_path: `${WS}/index.html` }), `${WS}/index.html`);
+  assert.equal(summarizeToolInput("Read", { path: "/w/src/styles.css" }), "/w/src/styles.css");
   assert.equal(summarizeToolInput("Bash", { command: "ls -la" }), "ls -la");
   assert.equal(summarizeToolInput("WebFetch", { url: "https://example.com/pricing" }), "https://example.com/pricing");
   assert.equal(summarizeToolInput("WebSearch", { query: "임플란트 가격" }), "임플란트 가격");
