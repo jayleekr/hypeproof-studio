@@ -94,3 +94,39 @@ const parse = (raw) => {
 }
 
 console.log("\n✓ workspace-header smoke 통과");
+
+// ─── 동시 툴 실행 상한 (2026-07-27) ─────────────────────────────────────────
+{
+  // 서브에이전트 4개 병렬 → 모든 툴이 `Stream closed` 로 무너졌다(한 턴 28건).
+  // 1개일 때는 멀쩡했다. 방아쇠는 능력이 아니라 동시성이므로 능력을 끄지 않고
+  // 동시성만 묶는다.
+  assert.equal(gw({}).CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY, "2", "기본 2");
+  assert.equal(gw({ maxToolConcurrency: 1 }).CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY, "1", "조절 가능");
+
+  // 음성 대조군 — 게이트웨이 라우팅과 키 스크럽은 그대로여야 한다.
+  const env = gw({ maxToolConcurrency: 3 });
+  assert.equal(env.ANTHROPIC_AUTH_TOKEN, "t");
+  assert.equal(env.ANTHROPIC_API_KEY, undefined);
+  console.log("✓ 동시 툴 실행 상한 — 기본 2 · 조절 가능 · 라우팅 회귀 없음");
+}
+
+// ─── Read 라벨이 읽은 구간을 보여 준다 ──────────────────────────────────────
+{
+  const { summarizeToolInput } = await import("../src/sdkCoachHelpers.ts");
+  const WS = "/Users/student/HypeProofClinic";
+
+  // 범위를 준 읽기 → 어디를 읽었는지 보인다. 라벨이 파일명만 보여 주면
+  // `Read(index.html)` 다섯 번이 "다른 구간"인지 "같은 걸 반복"인지 구분되지 않는다.
+  assert.equal(summarizeToolInput("Read", { file_path: `${WS}/index.html`, offset: 100, limit: 200 }, 60, WS),
+    "index.html [100~300]");
+  assert.equal(summarizeToolInput("Read", { file_path: `${WS}/index.html`, offset: 500 }, 60, WS),
+    "index.html [500~]");
+  assert.equal(summarizeToolInput("Read", { file_path: `${WS}/index.html`, limit: 50 }, 60, WS),
+    "index.html [~50]");
+
+  // 음성 대조군 — 범위가 없으면(전체 읽기) 접미사도 없다. 그 자체가 신호다.
+  assert.equal(summarizeToolInput("Read", { file_path: `${WS}/index.html` }, 60, WS), "index.html");
+  // 숫자가 아닌 값은 무시한다.
+  assert.equal(summarizeToolInput("Read", { file_path: `${WS}/a.md`, offset: "x" }, 60, WS), "a.md");
+  console.log("✓ Read 라벨 — 읽은 구간 표기 · 전체 읽기는 접미사 없음");
+}
