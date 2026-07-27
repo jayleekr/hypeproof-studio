@@ -21,14 +21,24 @@ gh api user --jq .login
 
 ## 2. 로그인시킨다 — 여기만 까다롭다
 
-`gh auth login --web` 은 **참가자가 승인할 때까지 반환하지 않고, 여덟 글자가 그
+### 먼저 A 인지 B 인지 정한다 — 정하기 전에 아무 명령도 쓰지 마라
+
+**작업 폴더 절대경로**를 보면 알 수 있다. 이미 알고 있으니 확인하려고 명령을 따로
+돌리지 마라.
+
+```
+/Users/… · /home/…  로 시작  →  A (bash)
+C:\…                로 시작  →  B (PowerShell)
+```
+
+**A 와 B 는 서로의 문법에서 파싱조차 되지 않는다.** 잘못 고르면 첫 줄부터 실패한다.
+고른 쪽 블록을 **통째로 그대로** 붙여 실행해라. 손대면 코드를 잃는다.
+
+`gh auth login --web` 은 참가자가 승인할 때까지 **반환하지 않고, 여덟 글자가 그
 명령의 출력(stderr)에 갇힌다.** 그냥 실행하면 당신은 멈춰 있고 참가자는 뭘 눌러야
-하는지도 모른다. 백그라운드로 보내고 **출력을 파일로 받아라** — `&` 만 붙이면
-코드가 사라진다.
+하는지도 모른다. 그래서 두 블록 다 **백그라운드로 보내고 출력을 파일로 받는다.**
 
-**둘 중 하나를 골라 그대로 붙여라. 고르는 기준은 작업 폴더 경로다.**
-
-`/Users/` · `/home/` 로 시작 → macOS·Linux (bash):
+#### A — bash (macOS · Linux)
 
 ```
 nohup gh auth login --web --hostname github.com \
@@ -38,7 +48,9 @@ sleep 3
 grep -oE 'one-time code: [A-Z0-9]{4}-[A-Z0-9]{4}' /tmp/hps-ghlogin.log | grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}'
 ```
 
-`C:\` 로 시작 → **Windows, 셸은 PowerShell** (위 bash 판은 첫 줄부터 파싱조차 안 된다):
+#### B — PowerShell (Windows)
+
+`nohup` · `grep` · `/tmp` · `&` 는 **여기에 없다.** 위 A 를 쓰면 안 된다.
 
 ```powershell
 Start-Process gh -NoNewWindow -ArgumentList `
@@ -48,8 +60,6 @@ Start-Sleep 3
 (Select-String -Path "$env:TEMP\hps-ghlogin.log" -Pattern 'one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})' |
   Select-Object -First 1).Matches[0].Groups[1].Value
 ```
-
-경로는 이미 알고 있으니 어느 쪽인지 확인하려고 명령을 따로 돌리지 마라.
 
 `one-time code:` 를 앵커로 잡는 이유가 있다. 앵커 없이 여덟 글자 패턴만 긁으면
 로그에 다른 8자 문자열이 먼저 있을 때 **그걸 집어서 참가자에게 엉뚱한 코드를
