@@ -27,6 +27,7 @@ import {
   pickInflight,
   pickDarwinAsset,
   pickWindowsInstaller,
+  renderWindowsUpdateWrapper,
   MIN_FREE_DISK_BYTES,
   type AssetPicker,
   type GhRelease,
@@ -224,12 +225,38 @@ async function runUpdateMac(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<v
 }
 
 /**
+ * The app's main executable base name (Get-Process -Name form, no ".exe"), used
+ * by the update wrapper to wait for the app to fully exit. On an installed
+ * build the app root folder is named after the product (VSCodium/VS Code
+ * convention), and the main exe shares that name — so
+ * `<root>\HypeProof Studio.exe` → process name "HypeProof Studio". __dirname is
+ * `<root>\resources\app\extensions\hypeproof-chat\dist`, i.e. five levels deep.
+ */
+function windowsAppProcessName(): string {
+  try {
+    const root = path.resolve(__dirname, "..", "..", "..", "..", "..");
+    const base = path.basename(root);
+    const lower = base.toLowerCase();
+    if (base && lower !== "resources" && lower !== "app" && lower !== "dist") {
+      return base;
+    }
+  } catch { /* fall through to the product default */ }
+  return "HypeProof Studio";
+}
+
+/**
  * Windows update path (#447). Unlike macOS — where we unzip a .app and swap it
  * ourselves — Windows delegates the swap to the Inno Setup installer .exe that
  * `checkForUpdates` already matched. This mirrors VS Code's own win32 updater:
- * download the installer, then run it `/silent /mergetasks=runcode` and quit;
- * the installer's AppMutex waits for Studio to exit, replaces the files in
- * place, and relaunches.
+ * run it `/silent /mergetasks=runcode`.
+ *
+ * Sequencing (relaunch-race fix): we quit BEFORE the installer runs. The
+ * extension host dies with the app, so we can't quit-then-install inline —
+ * instead we spawn a detached PowerShell wrapper that waits for the app to
+ * fully exit, THEN runs the installer, THEN lets `/mergetasks=runcode` relaunch
+ * cleanly. Running the installer while the old instance is still releasing its
+ * single-instance lock made the relaunched process hand off to the dying old
+ * one and exit (updated, but didn't relaunch).
  */
 async function runUpdateWindows(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<void> {
   // 1. Disk space check (same predicate as macOS).
@@ -281,25 +308,34 @@ async function runUpdateWindows(info: UpdateInfo, deps: UpdateRunnerDeps): Promi
 
       deps.onUpdateScheduled?.();
 
-      // 3. Spawn the Inno installer detached, then quit Studio. Flags mirror VS
-      // Code's win32 updater: `/silent` shows only a progress bar (no wizard),
-      // `/mergetasks=runcode` relaunches Studio after install. `/LOG` gives us a
-      // trace if a student reports a failed update. detached + unref + ignored
-      // stdio is the canonical "survive my exit" pattern; the installer's
-      // AppMutex blocks the actual file swap until Studio's process is gone.
+      // 3. Write a detached wrapper that waits for THIS app to fully exit, then
+      // runs the installer. Installer flags mirror VS Code's win32 updater:
+      // `/silent` = progress bar only (no wizard), `/mergetasks=runcode` =
+      // relaunch after install, `/LOG` = a trace for failed-update reports.
+      // Quitting before the install (rather than racing it) is what makes the
+      // post-install relaunch reliable — see the function-level comment.
       const logPath = path.join(os.tmpdir(), `hps-update-${info.version}.log`);
+      const wrapperPath = path.join(workDir, "run-installer.ps1");
+      fs.writeFileSync(
+        wrapperPath,
+        renderWindowsUpdateWrapper({
+          appProcessName: windowsAppProcessName(),
+          installerPath: exePath,
+          installerArgs: ["/silent", "/mergetasks=runcode", `/LOG=${logPath}`],
+        }),
+      );
       const child = cp.spawn(
-        exePath,
-        ["/silent", "/mergetasks=runcode", `/LOG=${logPath}`],
+        "powershell.exe",
+        ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", wrapperPath],
         { detached: true, stdio: "ignore" },
       );
       child.unref();
 
-      // 4. Quit Studio so the installer can replace the files (700ms so the
-      // modal closes + the progress toast renders first).
+      // 4. Quit Studio. The wrapper is already waiting for this exit; once the
+      // app is gone it runs the installer (400ms so the modal closes first).
       setTimeout(() => {
         vscode.commands.executeCommand("workbench.action.quit");
-      }, 700);
+      }, 400);
     },
   );
 }
