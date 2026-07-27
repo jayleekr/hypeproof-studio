@@ -164,14 +164,28 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage("HypeProof: .html / .htm 파일만 preview 가능합니다.");
         return;
       }
-      const basePath = vscode.Uri.joinPath(target, "..");
+      // 미리보기는 **라이브 서버 하나로** 모은다 (원장 결정 2026-07-27).
+      //
+      // 예전에는 webview 로 HTML 을 직접 렌더했다. 그러면 코치가 보는 화면
+      // (live_preview_start → 127.0.0.1)과 학생이 우클릭으로 여는 화면이 **서로 다른
+      // 진실**이 된다. 실사용에서 우클릭 미리보기가 라이브보다 뒤처진 내용을 보여
+      // 줬고, 학생은 어느 쪽이 맞는지 알 방법이 없었다.
+      //
+      // 라이브 서버는 진짜 HTTP + 진짜 브라우저 + 저장 시 자동 새로고침이라
+      // 코치가 검증하는 화면과 정확히 같다.
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!root) {
+        vscode.window.showWarningMessage("HypeProof: 작업 폴더를 먼저 열어주세요.");
+        return;
+      }
       try {
-        const buf = await vscode.workspace.fs.readFile(target);
-        const html = Buffer.from(buf).toString("utf8");
-        await preview.show(html, basePath);
-        await preview.watchForReload(target);
+        const base = await liveServer.ensure(root);
+        // 워크스페이스 루트 기준 상대경로로 연다. 루트의 index.html 은 `/`.
+        const rel = path.relative(root, target.fsPath).split(path.sep).join("/");
+        const url = rel === "index.html" ? base : `${base.replace(/\/$/, "")}/${rel}`;
+        await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
       } catch (err) {
-        vscode.window.showErrorMessage(`HypeProof: 파일을 읽지 못했어요 — ${err instanceof Error ? err.message : String(err)}`);
+        vscode.window.showErrorMessage(`HypeProof: 미리보기를 열지 못했어요 — ${err instanceof Error ? err.message : String(err)}`);
       }
     }),
 
