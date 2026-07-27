@@ -277,7 +277,7 @@ export interface ActionRequest {
   // read-only subagent (코드리뷰어/리서처) via the SDK Agent/Task tool. The
   // modal makes the student consciously decide the delegation — the
   // delegation_judgment asset IS this decision (docs/seven-assets.md §5).
-  kind: "writeFile" | "executeShell" | "readFile" | "webSearch" | "openBrowser" | "delegateAgent";
+  kind: "writeFile" | "executeShell" | "readFile" | "webSearch" | "openBrowser" | "delegateAgent" | "browserClick" | "browserType";
   /**
    * epic #431, shell only — the command is unrecoverable if approved by
    * reflex (`rm`, `sudo`, `git push --force`, pipe-to-shell). The host shows

@@ -57,6 +57,7 @@ const APPROVAL_COPY: Record<string, { title: string; verb: string }> = {
   readFile: { title: "코치가 파일을 읽으려고 해요:", verb: "읽기" },
   webSearch: { title: "코치가 웹에서 찾아보려고 해요:", verb: "검색" },
   delegateAgent: { title: "코치가 다른 에이전트에게 맡기려고 해요:", verb: "맡기기" },
+  browserType: { title: "코치가 페이지에 입력하려고 해요:", verb: "입력" },
 };
 
 
@@ -1297,16 +1298,35 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     // Tier 3 — modal-gated.
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
-    // openBrowser (#282 P2 slice 2) is modal-gated by default too: the coach
-    // driving the browser to a URL is an outward action the student should
-    // consciously delegate (delegation_judgment), same as a file write.
-    // delegateAgent (#282 P2 slice 3): handing a task to a subagent is the
-    // delegation decision itself — the modal IS the pedagogy.
+    //
+    // writeFile 은 여기서 **빠졌다** (원장 결정 2026-07-27, 이전 결정 번복).
+    //
+    // 이 모달이 뜰 때는 이미 안전 검사가 끝나 있다: 워크스페이스 밖 경로는
+    // evaluateSdkToolUse 의 containment 가 모달 없이 거부한다. 그래서 남은 기능은
+    // 안전이 아니라 위임 판단 교육뿐이었는데, 실측에서 그 교육이 성립하지 않았다.
+    //
+    //   07-27 턴 2: 파일 저장 모달 하나가 **174초** 방치됐다. 원장이 화면 앞에
+    //   없었고, 코치는 그동안 아무것도 못 하고 멈춰 있었다. 그 전날엔 42.2초짜리가
+    //   한 턴 승인 대기의 77% 였다. 한 턴에 8번 뜨던 날도 있었고 그때는 3~4초 만에
+    //   눌렸다 — 읽지 않고 누르는 리듬이다.
+    //
+    // 즉 이 모달은 둘 중 하나가 된다: 놓쳐서 세션을 멈추거나, 반사로 눌러 교육
+    // 효과가 없거나. 위임 판단은 셸·브라우저·서브에이전트에서 가르친다 — 그쪽은
+    // 진짜로 되돌리기 어렵거나 바깥으로 나가는 행위다.
+    //
+    // 되돌리려면 설정 한 줄이다: hypeproofChat.requireApprovalFor 에 "writeFile" 추가.
+    // browserClick 은 목록에 **없다** → 자동 허용.
+    //
+    // 페이지를 여는 결정(openBrowser)에서 이미 위임 판단을 한 뒤다. 그 페이지 안에서
+    // 누르는 것은 새로운 바깥 행위가 아니라 검증이고, 같은 페이지의 browser_read 는
+    // 이미 자동 허용이다. 실측(07-27): 코치가 "고치고 직접 눌러 확인"하는 루프마다
+    // 모달이 떴고, 그것도 매핑 누락 탓에 **셸 문구에 빈 내용**으로 떴다.
+    // browserType 은 남긴다 — 값을 넣고 제출까지 갈 수 있어 성격이 다르다.
     const required = cfg.get<string[]>("requireApprovalFor", [
-      "writeFile",
       "executeShell",
       "openBrowser",
       "delegateAgent",
+      "browserType",
     ]);
     const needsApproval = required.includes(req.kind);
     if (!needsApproval) return true;

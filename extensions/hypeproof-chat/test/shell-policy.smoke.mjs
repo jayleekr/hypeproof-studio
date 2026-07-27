@@ -224,12 +224,13 @@ const { evaluateSdkToolUse, permittedToolsFor, profileToAgentOptions, buildSdkQu
       workspaceRoot: "/Users/x/HypeProofClinic",
     });
 
-  // Arbitrary commands reach the modal rather than dying at the policy — this
-  // is the behavior change of the epic.
-  assert.equal(ev("git status").decision, "ask", "routine → modal");
-  assert.notEqual(ev("git status").destructive, true, "routine is not flagged");
-  assert.equal(ev("npx wrangler pages deploy ./").decision, "ask", "deploy → modal");
-  assert.equal(ev("some-tool-we-never-listed --flag").decision, "ask", "no content allowlist");
+  // 콘텐츠 허용목록은 없다 — 목록에 없는 도구도 죽지 않는다. 다만 게이트는 이제
+  // **되돌릴 수 있느냐**로만 가른다(원장 결정 2026-07-27, 이전 동작 번복): 예전에는
+  // 모든 셸 호출이 모달이었고, 실측에서 읽기 전용 `curl … | grep` 이 한 턴에 6번까지
+  // 모달을 띄웠다. 같은 질문을 반복하면 학습되는 것은 판단이 아니라 반사다.
+  assert.equal(ev("git status").decision, "allow", "일상 명령은 자동 실행");
+  assert.equal(ev("some-tool-we-never-listed --flag").decision, "allow", "허용목록은 여전히 없다");
+  assert.equal(ev("npx wrangler pages deploy ./").decision, "allow", "배포도 되돌릴 수 있다");
 
   const rm = ev("rm -rf ~/Documents");
   assert.equal(rm.decision, "ask", "destructive still ASKS — the human decides");
