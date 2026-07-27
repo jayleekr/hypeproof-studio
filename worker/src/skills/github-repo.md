@@ -10,35 +10,88 @@
 
 macOS의 `/usr/bin/git`은 껍데기다(CLT stub). 부르는 순간 참가자 화면에 **"명령어
 라인 개발자 도구 설치" 창이 뜨고 2GB를 받는다.** 수업 중에 절대 하지 마라.
+Windows에도 git이 깔려 있지 않을 수 있고, 설치를 시키면 같은 함정이다.
 
 대신 `gh` 하나로 GitHub API를 통해 전부 처리한다. 저장소 생성·파일 업로드·설정
 모두 git 없이 된다.
 
-## 1. gh 준비
+## 0. 어느 OS인지 먼저 확인한다
 
-이미 있으면 건너뛴다:
+명령이 갈린다. **짐작하지 말고 물어보고 시작해라:**
 
 ```
+uname -s 2>/dev/null || echo Windows
+```
+
+`Darwin` → macOS · `Linux` → Linux · 그 외/실패 → Windows.
+작업 폴더 경로가 `C:\...` 로 시작하면 그것도 Windows 신호다.
+
+아래는 갈리는 것만 표로 둔다. 나머지 단계(로그인·저장소 생성·업로드)는 `gh` 가
+같으므로 OS와 무관하다.
+
+| | macOS | Windows |
+|---|---|---|
+| 설치 위치 | `~/Library/Application Support/HypeProof-Studio/bin/` | `%APPDATA%\HypeProof-Studio\bin\` |
+| 있는지 확인 | `command -v gh` | `where gh` |
+| 릴리스 자산 | `macOS_arm64.zip` | `windows_amd64.zip` |
+| 압축 해제 | `unzip` | `tar -xf` (Windows 10+ 내장) |
+| base64 | `base64 -i <파일>` | 아래 4단계 참조 |
+
+## 1. gh 준비
+
+이미 있으면 건너뛴다.
+
+```
+# macOS
 command -v gh || ls ~/Library/Application\ Support/HypeProof-Studio/bin/gh
+# Windows
+where gh 2>NUL || dir "%APPDATA%\HypeProof-Studio\bin\gh.exe"
 ```
 
 없으면 받는다. **파일 이름을 직접 조립하지 마라** — 버전이 올라가면 404가 난다.
 릴리스 API가 주는 `browser_download_url`을 그대로 쓴다:
 
 ```
+# macOS — macOS_arm64.zip
 curl -sL https://api.github.com/repos/cli/cli/releases/latest \
   | grep -o '"browser_download_url": *"[^"]*macOS_arm64\.zip"' \
   | head -1 | cut -d'"' -f4
+
+# Windows — windows_amd64.zip
+curl -sL https://api.github.com/repos/cli/cli/releases/latest \
+  | grep -o '"browser_download_url": *"[^"]*windows_amd64\.zip"' \
+  | head -1 | cut -d'"' -f4
 ```
 
-나온 주소로 `curl -L -o /tmp/gh.zip <주소>` → `unzip` → `gh_*/bin/gh`를
-`~/Library/Application Support/HypeProof-Studio/bin/` 으로 옮긴다.
-`curl`·`unzip`·`tar`는 모든 맥에 있으니 따로 설치할 것이 없고 sudo도 필요 없다.
+나온 주소로 받아서 풀고 `gh` 실행 파일을 위 표의 설치 위치로 옮긴다.
+`curl` 은 macOS·Windows 10+ 둘 다 내장이고, 압축 해제는 macOS `unzip` /
+Windows `tar -xf` 로 한다. **어느 쪽도 sudo·관리자 권한이 필요 없다.**
 
 인터넷에서 실행 파일을 받는 일이다. **뭘 왜 받는지 한 줄로 설명하고 승인을
 받아라.** 조용히 지나가면 안 된다.
 
-## 2. 로그인 — 참가자는 여덟 글자만 친다
+> **Windows 경로는 실기기 검증 전이다(#451).** 다운로드·압축 해제가 한 번에
+> 안 되면 붙잡고 있지 말고 **아래 수동 폴백으로 바로 넘어가라.** 참가자를
+> 명령줄 디버깅에 끌고 들어가는 것이 수업에서 가장 비싼 실패다.
+
+## 2. 로그인 — 세 가지 상태를 먼저 가른다
+
+**"이미 로그인돼 있겠지"로 시작하지 마라.** 참가자는 셋 중 하나다:
+
+```
+gh api user --jq .login
+```
+
+| 결과 | 상태 | 다음 |
+|---|---|---|
+| 아이디가 나옴 | 이미 로그인됨 | 3단계로 |
+| 인증 오류 | 계정은 있으나 앱이 로그인 안 됨 | 아래 **2-A** |
+| — | 계정 자체가 없음 | 아래 **2-B** 먼저, 그다음 2-A |
+
+계정이 있는지는 **참가자에게 물어봐라.** "GitHub 아이디 있으세요?" 한 마디면 된다.
+없다고 하면 부끄러워할 일이 아니라고 짚어주고 2-B로 간다 — 3분이면 된다.
+
+### 2-A. 앱에 로그인시키기 (계정은 있는 경우)
 
 ```
 gh auth login --hostname github.com --git-protocol https --web
@@ -48,12 +101,30 @@ gh auth login --hostname github.com --git-protocol https --web
 
 > 브라우저에 이 여덟 글자를 넣어주세요: **A1B2-C3D4**
 
-참가자는 이미 GitHub에 로그인돼 있으니 코드만 넣으면 끝난다. 비밀번호도 토큰도
-만들 필요 없다. 확인:
+브라우저에서 GitHub에 로그인돼 있으면 코드만 넣으면 끝난다. **비밀번호도 토큰도
+만들 필요 없다.** 브라우저 쪽이 로그아웃 상태면 거기서 먼저 로그인하게 안내한다.
+
+확인:
 
 ```
 gh api user --jq .login
 ```
+
+### 2-B. 계정 만들기 (처음인 경우)
+
+당신이 브라우저로 `https://github.com/signup` 을 열어주고, **한 번에 한 단계씩**
+읽어준다. 참가자가 직접 입력해야 하는 것들이다:
+
+1. **이메일** — 평소 쓰는 것. 확인 메일이 온다
+2. **비밀번호** — 그 자리에서 정한다
+3. **아이디(username)** — 이게 나중에 주소에 들어간다고 미리 말해줘라
+   (`github.com/<아이디>` · 홈페이지 주소도 `<아이디>.github.io/...`)
+4. 이메일로 온 **확인 코드** 입력
+
+가입이 끝나면 브라우저는 로그인 상태가 된다. 그 상태로 **2-A** 로 돌아간다.
+
+막히면 붙잡고 있지 마라 — 보조강사를 부르고, 그 사이 참가자의 파일은 워크스페이스에
+안전하게 있다고 알려준다. 저장소는 나중에 올려도 된다.
 
 ## 3. 저장소 만들기
 
@@ -72,13 +143,29 @@ gh repo create <이름> --public
 Contents API로 올린다. 각 파일마다:
 
 ```
+# macOS
 gh api -X PUT repos/{owner}/<이름>/contents/<파일명> \
   -f message="홈페이지 올리기" \
   -f content="$(base64 -i <파일경로>)"
 ```
 
+Windows에는 `base64` 명령이 없다. PowerShell로 만든다 — `certutil -encode` 는
+머리말·꼬리말 줄이 붙어서 그대로 쓰면 깨진다:
+
+```
+# Windows — 한 줄짜리 base64 를 만들어 넘긴다
+powershell -Command "[Convert]::ToBase64String([IO.File]::ReadAllBytes('<파일경로>'))"
+```
+
 `index.html` 먼저, 그다음 이미지들. base64라서 이미지 같은 바이너리도 그대로
 올라간다.
+
+**같은 파일을 두 번째 올릴 때는 `sha` 가 필요하다.** 없으면 409가 난다:
+
+```
+gh api repos/{owner}/<이름>/contents/<파일명> --jq .sha
+# 그 값을 -f sha="<값>" 로 함께 넘긴다
+```
 
 올린 뒤 **실제로 올라갔는지 확인하고 말해라**:
 
@@ -102,13 +189,22 @@ gh api repos/{owner}/<이름>/contents --jq '.[].name'
 | 로그인 코드 입력이 안 끝남 | 브라우저에서 GitHub 로그인 여부부터 확인. 다시 시도 |
 | 저장소 이름 중복 | 다른 이름을 **제안**하고 동의를 받아라 |
 | 다운로드가 느림/실패 | 행사장 와이파이일 수 있다. 아래 수동 폴백으로 |
+| GitHub 계정이 없음 | 2-B로. 3분이면 된다. 부끄러워할 일이 아니라고 짚어줘라 |
+| `gh` 설치가 Windows에서 막힘 | 붙잡지 말고 수동 폴백. 실기기 미검증 경로다(#451) |
+| 같은 파일 재업로드 409 | `sha` 를 조회해서 함께 넘겨라 (4단계) |
 | 어느 것도 안 됨 | 정직하게 말해라. 파일은 워크스페이스에 안전하게 있다 |
 
-**수동 폴백** — `gh`가 안 되면 참가자가 직접 한다. 브라우저와 폴더는 당신이
-열어주고 한 번에 한 단계씩 같이 간다:
-① github.com → New repository (Public)
-② "uploading an existing file" 로 파일 끌어다 놓기 + Commit
-③ 올라간 것을 같이 확인
+**수동 폴백** — `gh`가 안 되면 참가자가 직접 한다. **Windows에서는 이쪽이 더
+빠를 수 있다**(자동 설치 경로가 실기기 미검증, #451). 부끄러운 우회가 아니라
+정식 경로다. 브라우저와 폴더는 당신이 열어주고 한 번에 한 단계씩 같이 간다:
+
+① `github.com/new` → 이름 입력 → **Public** → Create repository
+② 빈 저장소 화면의 **"uploading an existing file"** 링크
+③ 워크스페이스 폴더를 열어주고 `index.html`·`agent.md` 를 끌어다 놓기
+④ 아래 **Commit changes** 버튼
+⑤ 새로고침해서 파일이 보이는지 **같이 확인한다**
+
+폴더를 여는 법: macOS `open <작업폴더>` · Windows `explorer <작업폴더>`.
 
 ## 이 스킬이 가르치는 것
 
