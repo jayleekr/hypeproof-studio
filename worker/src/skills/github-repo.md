@@ -21,15 +21,14 @@ gh api user --jq .login
 
 ## 2. 로그인시킨다 — 여기만 까다롭다
 
-**명령을 쓰기 전에 어디서 도는지부터 봐라.** 작업 폴더 경로가 `C:\` 로 시작하면
-**Windows 고 셸은 PowerShell 이다** — 아래 bash 명령은 첫 줄부터 파싱조차 안 되니
-"## Windows" 절의 PowerShell 판을 써라. `/Users/` · `/home/` 로 시작하면 아래 것을
-그대로 쓴다. 확인하려고 명령을 따로 돌릴 필요 없다, 경로는 이미 알고 있다.
-
 `gh auth login --web` 은 **참가자가 승인할 때까지 반환하지 않고, 여덟 글자가 그
 명령의 출력(stderr)에 갇힌다.** 그냥 실행하면 당신은 멈춰 있고 참가자는 뭘 눌러야
 하는지도 모른다. 백그라운드로 보내고 **출력을 파일로 받아라** — `&` 만 붙이면
-코드가 사라진다. (Windows 는 아래 "Windows" 절의 PowerShell 판을 쓴다.)
+코드가 사라진다.
+
+**둘 중 하나를 골라 그대로 붙여라. 고르는 기준은 작업 폴더 경로다.**
+
+`/Users/` · `/home/` 로 시작 → macOS·Linux (bash):
 
 ```
 nohup gh auth login --web --hostname github.com \
@@ -38,6 +37,19 @@ nohup gh auth login --web --hostname github.com \
 sleep 3
 grep -oE 'one-time code: [A-Z0-9]{4}-[A-Z0-9]{4}' /tmp/hps-ghlogin.log | grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}'
 ```
+
+`C:\` 로 시작 → **Windows, 셸은 PowerShell** (위 bash 판은 첫 줄부터 파싱조차 안 된다):
+
+```powershell
+Start-Process gh -NoNewWindow -ArgumentList `
+  'auth','login','--web','--hostname','github.com','--git-protocol','https','--scopes','repo,workflow' `
+  -RedirectStandardError "$env:TEMP\hps-ghlogin.log"
+Start-Sleep 3
+(Select-String -Path "$env:TEMP\hps-ghlogin.log" -Pattern 'one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})' |
+  Select-Object -First 1).Matches[0].Groups[1].Value
+```
+
+경로는 이미 알고 있으니 어느 쪽인지 확인하려고 명령을 따로 돌리지 마라.
 
 `one-time code:` 를 앵커로 잡는 이유가 있다. 앵커 없이 여덟 글자 패턴만 긁으면
 로그에 다른 8자 문자열이 먼저 있을 때 **그걸 집어서 참가자에게 엉뚱한 코드를
@@ -114,8 +126,9 @@ gh api repos/<아이디>/<이름>/contents --jq '.[].name'
 
 ## Windows — 기본 셸이 PowerShell 이다
 
-`uname -s` 가 실패하면 Windows 고, **거기 셸은 bash 가 아니라 PowerShell 이다.**
-위 명령을 그대로 쓰면 안 되는 것들이 있다. `gh api` 자체는 똑같다.
+작업 폴더 경로가 `C:\` 로 시작하면 Windows 고, **거기 셸은 bash 가 아니라
+PowerShell 이다.** 위 명령을 그대로 쓰면 안 되는 것들이 있다. `gh api` 자체는 똑같다.
+(2번 로그인의 PowerShell 판은 위 2번에 나란히 있다.)
 
 | | macOS (bash) | Windows (PowerShell) |
 |---|---|---|
@@ -126,17 +139,8 @@ gh api repos/<아이디>/<이름>/contents --jq '.[].name'
 | 폴더 열기 | `open <폴더>` | `explorer <폴더>` |
 | `$(...)` 로 값 끼워넣기 | 된다 | **변수에 먼저 담아라** (아래) |
 
-**2번 로그인 (PowerShell).** `gh` 는 코드를 **stderr 로 내보낸다** — stdout 을
-받으면 빈 파일이 나온다:
-
-```powershell
-Start-Process gh -NoNewWindow -ArgumentList `
-  'auth','login','--web','--hostname','github.com','--git-protocol','https','--scopes','repo,workflow' `
-  -RedirectStandardError "$env:TEMP\hps-ghlogin.log"
-Start-Sleep 3
-(Select-String -Path "$env:TEMP\hps-ghlogin.log" -Pattern 'one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})' |
-  Select-Object -First 1).Matches[0].Groups[1].Value
-```
+2번 로그인에서 `-RedirectStandardError` 를 쓰는 이유: `gh` 는 코드를 **stderr 로
+내보낸다.** stdout 을 받으면 빈 파일이 나온다.
 
 **4번 업로드 (PowerShell).** `base64` 명령이 없다. `certutil -encode` 는 머리말이
 붙어 그대로 넘기면 깨진다. 변수에 담아서 넘겨라:
