@@ -1,7 +1,7 @@
 # 검증 규율 — 짐작으로 판정하지 않는다
 
-큐시트 검증 하네스(`e2e/`, `docs/rubric-boah-cuesheet-runthrough.md`)를 쓰거나
-고칠 때 로드된다. 2026-07-25~26 첫 완주에서 **하네스가 9번 틀린** 경험에서 나왔다.
+실사용을 관측하거나(`e2e/observe/`) 무언가를 "확인했다"고 말하려 할 때 로드된다.
+2026-07-25~27 사흘 동안 **계측기가 열다섯 번 틀린** 경험에서 나왔다.
 
 ## 왜 이 문서가 있나
 
@@ -46,12 +46,8 @@
 
 ### 2. 실기기 런 전에 대조군을 돌린다
 
-```
-cd e2e && node --experimental-strip-types tests/scoring.smoke.mjs
-```
-
-밀리초 만에 돈다. 채점 함수는 `e2e/scoring.ts` 에 순수 함수로 있고, 대조군
-두 종류가 계측기 자체를 검증한다.
+순수 함수로 뽑아낼 수 있는 판정은 앱 없이 먼저 돌린다(밀리초). 대조군 두 종류가
+계측기 자체를 검증한다.
 
 - **양성 대조군** — 확실히 좋은 시료가 **통과해야** 한다 → *너무 엄격한* 계측기를 잡는다
 - **음성 대조군** — 확실히 나쁜 시료가 **실패해야** 한다 → *너무 관대한* 계측기를 잡는다
@@ -134,13 +130,13 @@ GitHub Pages 레거시 빌더 startup_failure           배포 전원 실패
 curl -H "Authorization: Bearer <학생토큰>" https://api.hypeproof-ai.xyz/v1/profile | jq .sdk_tools
 ```
 
-## 한 번에 돌리기
+## 관측 루프
+
+큐시트는 **강사가 채팅으로 몬다.** 자동 스위트로 대신 돌리지 않는다.
 
 ```
-cd e2e && node --experimental-strip-types tests/scoring.smoke.mjs   # 먼저, 밀리초
-HPS_APP_PATH="/Applications/HypeProof Studio.app" \
-HPS_E2E_PROXY_URL="https://api.hypeproof-ai.xyz/v1" \
-  npx playwright test c6-preview shell-live b5-tunnel a1-design b3-loop b6-c b1-b2 --workers=1
+강사가 친다  →  관측한다  →  이상한 걸 짚는다  →  고친다  →  빌드한다
 ```
 
-`b4-b5-github-pages` 는 **돌 때마다 공개 저장소가 생기므로** 별도로 돌린다.
+도구와 함정은 `e2e/observe/README.md` 에 있다. 특히 거기 적힌 **계측기 오류 6건**을
+읽고 나서 관측기를 고쳐라 — 전부 "아마 이럴 것"으로 시작해서 틀린 것들이다.
