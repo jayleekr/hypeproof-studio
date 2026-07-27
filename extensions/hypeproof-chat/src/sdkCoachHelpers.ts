@@ -736,6 +736,8 @@ export function buildSdkGatewayEnv(
     workspace?: string;
     /** 작업 폴더의 파일 목록 (루트 기준 상대). */
     workspaceFiles?: readonly string[];
+    /** 동시 툴 실행 상한. 기본 2 — 병렬 권한 요청이 SDK 제어 채널을 끊는다. */
+    maxToolConcurrency?: number;
   },
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...baseEnv };
@@ -745,6 +747,20 @@ export function buildSdkGatewayEnv(
   delete env.CLAUDE_CODE_USE_VERTEX;
   env.ANTHROPIC_BASE_URL = anthropicBaseUrlFor(args.proxyUrl);
   env.ANTHROPIC_AUTH_TOKEN = args.token;
+
+  // #431 — 동시 툴 실행을 묶는다.
+  //
+  // 2026-07-27 실측: 코치가 서브에이전트 4개를 **병렬로** 띄운 직후 모든 툴 호출이
+  // `Tool permission request failed: Error: Stream closed` 로 무너졌다 — 한 턴에
+  // 28건, 산출물 0. 같은 서브에이전트가 1개일 때는 멀쩡히 돌았다.
+  //
+  // 방아쇠는 서브에이전트 자체가 아니라 **동시성**으로 보인다. 그 전 빌드에서는
+  // 툴마다 승인 모달이 떠서 사람이 하나씩 눌렀고, 그것이 우연히 직렬화 장치였다.
+  // 승인을 자동 허용으로 바꾸자 권한 요청이 한꺼번에 쏟아졌다.
+  //
+  // 그래서 능력을 끄는 대신(subagents: false) 동시성만 제한한다. 병렬 수집의
+  // 이점은 2개까지 남기고, 채널을 무너뜨리는 폭주는 막는다.
+  env.CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY = String(args.maxToolConcurrency ?? 2);
 
   // #431 — 작업 폴더를 **헤더로** 보낸다.
   //
@@ -993,6 +1009,20 @@ export type SdkActivity =
   /** That tool finished. */
   | { kind: "tool_result"; id: string; isError: boolean; reason?: string };
 
+/** `Read` 의 읽은 구간 표기. 범위를 안 줬으면(전체 읽기) 빈 문자열. */
+function readRangeSuffix(rec: Record<string, unknown>): string {
+  const num = (k: string): number | null => {
+    const v = rec[k];
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+  const offset = num("offset");
+  const limit = num("limit");
+  if (offset === null && limit === null) return "";
+  if (offset !== null && limit !== null) return ` [${offset}~${offset + limit}]`;
+  if (offset !== null) return ` [${offset}~]`;
+  return ` [~${limit}]`;
+}
+
 /**
  * 툴 결과에서 사람이 읽을 첫 텍스트 한 조각. MCP/SDK 모두 content 가 문자열이거나
  * 블록 배열이므로 둘 다 받는다. 없으면 undefined — 빈 문자열로 라벨을 더럽히지 않는다.
@@ -1065,7 +1095,13 @@ export function summarizeToolInput(
   for (const key of ["file_path", "path", "command", "url", "query", "pattern", "prompt", "description"]) {
     const v = rec[key];
     if (typeof v === "string" && v.length > 0) {
-      return clip(key === "file_path" || key === "path" ? displayPath(v, workspaceRoot) : v);
+      if (key !== "file_path" && key !== "path") return clip(v);
+      // 파일 읽기는 **어디를 읽었는지**까지 보여 준다. 큰 파일을 다룰 때 코치는
+      // Grep 으로 위치를 찾고 그 구간만 읽는 것이 정상 패턴인데(Claude Code 자신도
+      // 그렇게 한다), 라벨이 파일명만 보여 주면 `Read(index.html)` 다섯 번이
+      // "다른 구간 다섯 번"인지 "같은 걸 다섯 번"인지 구분되지 않는다. 2026-07-27
+      // 실측에서 편집 구간 391초를 낭비로 볼지 정상으로 볼지 판정하지 못했다.
+      return clip(displayPath(v, workspaceRoot) + readRangeSuffix(rec));
     }
   }
   try {

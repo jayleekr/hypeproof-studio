@@ -118,10 +118,19 @@ const MODAL_SNAP = `JSON.stringify((() => {
   const el = document.querySelector(sel);
   if (!el) return { open: false };
   const buttons = [...el.querySelectorAll('button, .monaco-button')].map(b => (b.textContent||'').trim()).filter(Boolean);
+  const text = (el.textContent || '').trim();
+  // 코치 승인만 센다. 워크벤치 모달은 전부 같은 셀렉터에 걸리므로 VS Code 자신의
+  // 다이얼로그(파일 삭제 확인 등)까지 승인으로 세어 통계가 오염된다 — 실측에서
+  // 원장이 index.html 을 지울 때 뜬 "Move to Trash" 가 [승인 1] 로 찍혔다.
+  //
+  // 코치 모달은 우리가 문구를 소유하므로 접두사로 가른다(chatPanelProvider 의
+  // APPROVAL_COPY + 셸/브라우저 분기). 새 문구를 추가하면 여기도 같이 고쳐야 한다.
+  const isCoach = /코치가 .*(하려고|열려고|실행하려고|저장하려고|입력하려고) 해요|되돌리기 어려운 명령/.test(text);
   return {
     open: true,
+    coach: isCoach,
     cls: el.className,
-    text: (el.textContent || '').trim().slice(0, 400),
+    text: text.slice(0, 400),
     buttons,
   };
 })())`;
@@ -179,7 +188,10 @@ for (;;) {
   if (wb) {
     try {
       const m = await evalIn(wb, MODAL_SNAP);
-      if (m.open && modalOpenAt === null) {
+      if (m.open && !m.coach) {
+        // 시스템 다이얼로그 — 기록만 하고 승인 통계에는 넣지 않는다.
+        rec({ ev: "system_modal", turn, text: m.text.slice(0, 120) });
+      } else if (m.open && modalOpenAt === null) {
         modalOpenAt = Date.now();
         modalCount += 1;
         const first = modalSeen.length === 0;
