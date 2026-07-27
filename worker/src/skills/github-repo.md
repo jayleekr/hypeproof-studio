@@ -21,6 +21,11 @@ gh api user --jq .login
 
 ## 2. 로그인시킨다 — 여기만 까다롭다
 
+**명령을 쓰기 전에 어디서 도는지부터 봐라.** 작업 폴더 경로가 `C:\` 로 시작하면
+**Windows 고 셸은 PowerShell 이다** — 아래 bash 명령은 첫 줄부터 파싱조차 안 되니
+"## Windows" 절의 PowerShell 판을 써라. `/Users/` · `/home/` 로 시작하면 아래 것을
+그대로 쓴다. 확인하려고 명령을 따로 돌릴 필요 없다, 경로는 이미 알고 있다.
+
 `gh auth login --web` 은 **참가자가 승인할 때까지 반환하지 않고, 여덟 글자가 그
 명령의 출력(stderr)에 갇힌다.** 그냥 실행하면 당신은 멈춰 있고 참가자는 뭘 눌러야
 하는지도 모른다. 백그라운드로 보내고 **출력을 파일로 받아라** — `&` 만 붙이면
@@ -31,8 +36,12 @@ nohup gh auth login --web --hostname github.com \
       --git-protocol https --scopes repo,workflow \
       < /dev/null > /tmp/hps-ghlogin.log 2>&1 &
 sleep 3
-grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}' /tmp/hps-ghlogin.log | head -1
+grep -oE 'one-time code: [A-Z0-9]{4}-[A-Z0-9]{4}' /tmp/hps-ghlogin.log | grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}'
 ```
+
+`one-time code:` 를 앵커로 잡는 이유가 있다. 앵커 없이 여덟 글자 패턴만 긁으면
+로그에 다른 8자 문자열이 먼저 있을 때 **그걸 집어서 참가자에게 엉뚱한 코드를
+불러준다.**
 
 여덟 글자를 **크게 보여주고** `https://github.com/login/device` 를 열어준다.
 
@@ -125,7 +134,8 @@ Start-Process gh -NoNewWindow -ArgumentList `
   'auth','login','--web','--hostname','github.com','--git-protocol','https','--scopes','repo,workflow' `
   -RedirectStandardError "$env:TEMP\hps-ghlogin.log"
 Start-Sleep 3
-(Select-String -Path "$env:TEMP\hps-ghlogin.log" -Pattern '[A-Z0-9]{4}-[A-Z0-9]{4}').Matches[0].Value
+(Select-String -Path "$env:TEMP\hps-ghlogin.log" -Pattern 'one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})' |
+  Select-Object -First 1).Matches[0].Groups[1].Value
 ```
 
 **4번 업로드 (PowerShell).** `base64` 명령이 없다. `certutil -encode` 는 머리말이
