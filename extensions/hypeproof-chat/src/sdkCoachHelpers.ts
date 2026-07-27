@@ -1408,6 +1408,27 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
   // subagent (코드리뷰어/리서처). Own kind so resolveActionApproval modal-gates
   // it by default — the student consciously decides the delegation
   // (delegation_judgment, docs/seven-assets.md §5).
+  // #457 배선 누락 수정 (2026-07-27 실측). click/type 은 정책(evaluateSdkToolUse)에는
+  // 추가됐는데 여기 매핑이 빠져서 "미지의 툴" 폴백(executeShell)으로 떨어졌다.
+  // 그래서 클릭인데 **셸 모달**이 뜨고, 셸 분기는 payload.command 를 읽는데 클릭엔
+  // 그게 없어서 문구가 통째로 비었다("코치가 명령을 실행하려고 해요:" 뒤가 공백).
+  if (action.toolName === MCP_BROWSER_CLICK) {
+    const ref = firstString(action.input, ["ref"]) ?? "";
+    return {
+      kind: "browserClick",
+      description: `페이지 요소 클릭: ${ref || safeStringify(action.input)}`,
+      payload: { ref },
+    };
+  }
+  if (action.toolName === MCP_BROWSER_TYPE) {
+    const ref = firstString(action.input, ["ref"]) ?? "";
+    const text = firstString(action.input, ["text"]) ?? "";
+    return {
+      kind: "browserType",
+      description: `입력창(${ref})에 입력: ${text.slice(0, 60)}`,
+      payload: { ref, text },
+    };
+  }
   if (AGENT_TOOLS.has(name)) {
     const subagent = firstString(action.input, ["subagent_type"]) ?? "";
     const task =
@@ -1654,7 +1675,21 @@ export function evaluateSdkToolUse(args: {
         friendly: TOOL_DENIED_FRIENDLY,
       };
     }
-    return { decision: "ask", destructive: isDestructiveCommand(command) };
+    // 되돌리기 어려운 명령만 묻는다 (원장 결정 2026-07-27).
+    //
+    // 예전에는 모든 셸 호출이 모달이었다 — "모달이 유일한 게이트"라는 전제였다.
+    // 실측에서 그 전제가 무너졌다: 코치가 정답지를 읽으려고 `curl … | grep` 을 쓸
+    // 때마다 모달이 떴고, 한 턴에 6번까지 갔다. 읽기만 하는 명령에 승인을 물으면
+    // 학습되는 것은 판단이 아니라 반사다.
+    //
+    // 이제 판단은 **되돌릴 수 있느냐**로 가른다. `rm`·`mv`·강제 push·`curl | sh` 처럼
+    // 학생 작업을 날릴 수 있는 것은 강한 확인을 유지하고(「항상 허용」도 안 준다),
+    // 나머지는 자동 실행한다. 파일 쓰기는 이미 워크스페이스 containment 가 지키고,
+    // 셸의 위험은 그 containment 밖으로 나가는 명령이다 — 그게 정확히 이 목록이다.
+    if (isDestructiveCommand(command)) {
+      return { decision: "ask", destructive: true };
+    }
+    return { decision: "allow" };
   }
 
   // ── Agent/Task tool — subagent delegation (#282 P2 slice 3, REQ-M22) ──────
