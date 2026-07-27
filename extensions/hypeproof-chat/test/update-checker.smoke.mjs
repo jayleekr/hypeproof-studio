@@ -12,6 +12,9 @@ const {
   detectAppBundle,
   renderInstallerScript,
   shouldShowBanner,
+  pickDarwinAsset,
+  pickWindowsInstaller,
+  renderWindowsUpdateWrapper,
 } = await import("../src/updateCheckerHelpers.ts");
 
 const results = [];
@@ -107,6 +110,83 @@ check("parseLatestRelease: missing asset → not available", () => {
 check("parseLatestRelease: null input → not available", () => {
   assert.equal(parseLatestRelease(null, "0.1.1").available, false);
   assert.equal(parseLatestRelease(undefined, "0.1.1").available, false);
+});
+
+// --- Windows asset selection (#447) -------------------------------------
+// Real win32 releases carry FOUR assets; the name suffix is the VS Code engine
+// version (1.116.04919), not the HPS release version — so selection is by shape.
+const WIN_DL = "https://github.com/jayleekr/hypeproof-studio-releases/releases/download/v0.1.2";
+const WIN_ASSETS = [
+  { name: "HypeProof-Studio-darwin-arm64.zip", browser_download_url: `${WIN_DL}/HypeProof-Studio-darwin-arm64.zip`, size: 170 * 1024 * 1024 },
+  { name: "HypeProof.Studio-win32-x64-1.116.04919.zip", browser_download_url: `${WIN_DL}/HypeProof.Studio-win32-x64-1.116.04919.zip`, size: 178 * 1024 * 1024 },
+  { name: "HypeProof.StudioSetup-x64-1.116.04919.exe", browser_download_url: `${WIN_DL}/HypeProof.StudioSetup-x64-1.116.04919.exe`, size: 126 * 1024 * 1024 },
+  { name: "HypeProof.StudioUserSetup-x64-1.116.04919.exe", browser_download_url: `${WIN_DL}/HypeProof.StudioUserSetup-x64-1.116.04919.exe`, size: 126 * 1024 * 1024 },
+];
+const WIN_RELEASE = { ...REAL_RELEASE, assets: WIN_ASSETS };
+
+check("pickWindowsInstaller: prefers the per-user Setup .exe", () => {
+  const a = pickWindowsInstaller(WIN_ASSETS);
+  assert.equal(a?.name, "HypeProof.StudioUserSetup-x64-1.116.04919.exe");
+});
+check("pickWindowsInstaller: falls back to system Setup when no UserSetup", () => {
+  const a = pickWindowsInstaller(WIN_ASSETS.filter((x) => !/UserSetup/.test(x.name)));
+  assert.equal(a?.name, "HypeProof.StudioSetup-x64-1.116.04919.exe");
+});
+check("pickWindowsInstaller: ignores the portable zip (never the installer)", () => {
+  const a = pickWindowsInstaller(WIN_ASSETS.filter((x) => /\.zip$/.test(x.name)));
+  assert.equal(a, undefined);
+});
+check("pickDarwinAsset: never returns a Windows .exe", () => {
+  const a = pickDarwinAsset(WIN_ASSETS);
+  assert.equal(a?.name, "HypeProof-Studio-darwin-arm64.zip");
+});
+check("parseLatestRelease: win32 picker → resolves the UserSetup .exe download", () => {
+  const info = parseLatestRelease(WIN_RELEASE, "0.1.1", pickWindowsInstaller);
+  assert.equal(info.available, true);
+  assert.equal(info.version, "0.1.2");
+  assert.match(info.downloadUrl, /UserSetup-x64-.*\.exe$/);
+  assert.equal(info.sizeBytes, 126 * 1024 * 1024);
+});
+check("parseLatestRelease: win32 picker + no installer asset → not available", () => {
+  const rel = { ...WIN_RELEASE, assets: WIN_ASSETS.filter((x) => /\.zip$/.test(x.name)) };
+  assert.equal(parseLatestRelease(rel, "0.1.1", pickWindowsInstaller).available, false);
+});
+check("parseLatestRelease: win32 picker still honors version gate (same version)", () => {
+  assert.equal(parseLatestRelease(WIN_RELEASE, "0.1.2", pickWindowsInstaller).available, false);
+});
+
+// --- renderWindowsUpdateWrapper (relaunch-race fix) ---------------------
+check("renderWindowsUpdateWrapper: waits for app exit BEFORE launching installer", () => {
+  const s = renderWindowsUpdateWrapper({
+    appProcessName: "HypeProof Studio",
+    installerPath: "C:\\Temp\\hps\\Setup.exe",
+    installerArgs: ["/silent", "/mergetasks=runcode", "/LOG=C:\\Temp\\hps\\u.log"],
+  });
+  // The wait loop precedes the Start-Process — that ordering IS the fix.
+  const waitAt = s.indexOf("Get-Process -Name $name");
+  const runAt = s.indexOf("Start-Process");
+  assert.ok(waitAt > 0 && runAt > 0, "must contain both a wait loop and a launch");
+  assert.ok(waitAt < runAt, "the app-exit wait must come before launching the installer");
+  assert.ok(s.includes("$name = 'HypeProof Studio'"));
+  // Installer args are passed through, single-quoted for PowerShell.
+  assert.ok(
+    s.includes("-ArgumentList '/silent', '/mergetasks=runcode', '/LOG=C:\\Temp\\hps\\u.log'"),
+    "installer args must be passed through single-quoted",
+  );
+});
+check("renderWindowsUpdateWrapper: escapes single quotes in paths", () => {
+  const s = renderWindowsUpdateWrapper({
+    appProcessName: "App",
+    installerPath: "C:\\it's here\\Setup.exe",
+    installerArgs: ["/silent"],
+  });
+  // A literal single quote must be doubled so PowerShell keeps it inside the string.
+  assert.ok(s.includes("-FilePath 'C:\\it''s here\\Setup.exe'"));
+});
+check("renderWindowsUpdateWrapper: has a bounded wait (deadline), not an infinite loop", () => {
+  const s = renderWindowsUpdateWrapper({ appProcessName: "App", installerPath: "x.exe", installerArgs: [], maxWaitMs: 5000 });
+  assert.match(s, /AddMilliseconds\(5000\)/);
+  assert.match(s, /\(Get-Date\) -lt \$deadline/);
 });
 
 // --- detectAppBundle ----------------------------------------------------

@@ -150,7 +150,8 @@ const { anthropicBaseUrlFor, buildSdkGatewayEnv, buildSdkQueryOptions, profileTo
   const browserAgent = profileToAgentOptions(browserCohort, { model: "hypeproof-default", systemPrompt: "" });
   assert.deepEqual(
     browserAgent.permittedMcpTools,
-    ["mcp__hypeproof__browser_open", "mcp__hypeproof__browser_screenshot", "mcp__hypeproof__live_preview_start"],
+    ["mcp__hypeproof__browser_open", "mcp__hypeproof__browser_screenshot", "mcp__hypeproof__live_preview_start",
+     "mcp__hypeproof__browser_read", "mcp__hypeproof__browser_click", "mcp__hypeproof__browser_type"],
     "browser grant → the three hypeproof MCP tool names on the agent options",
   );
   const browserOptions = buildSdkQueryOptions(browserAgent, {
