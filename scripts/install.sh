@@ -38,7 +38,12 @@ STUDIO_VERSION="0.1.33"
 STUDIO_ASSET_GLOB_DARWIN_ARM64="HypeProof-Studio-darwin-arm64-*.zip"
 STUDIO_ASSET_GLOB_DARWIN_X64="HypeProof-Studio-darwin-x64-*.zip"
 
-SDK_NPM_PACKAGE="@anthropic-ai/claude-code"
+# SDK seeding is delegated to the canonical scripts/seed-sdk-binary.sh — the
+# single source of truth for the platform package, the pinned SDK version, the
+# sha512 table, the seeded location (darwin/linux), and the runtime-trusted
+# `.verified.json` marker. Do NOT reinvent seeding here.
+SEED_SCRIPT_NAME="seed-sdk-binary.sh"
+RAW_BASE="${HPS_RAW_BASE:-https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main}"
 
 HPS_HOME="${HOME}/.hypeproof"
 RECEIPT="${HPS_HOME}/receipt.json"
@@ -390,47 +395,49 @@ install_studio_mac() {
   ok "Studio ${STUDIO_VERSION} installed to /Applications"
 }
 
-seed_sdk() {
-  # Native claude binary seeded where hypeproof-chat resolves it.
-  # Manifest darwin seed_dir: ~/Library/Application Support/HypeProof-Studio/sdk/<version>/claude
-  step "Seeding native SDK binary (${SDK_NPM_PACKAGE})"
-  have npm || { warn "npm unavailable — skipping SDK seed (Studio will self-heal on first run)"; return 0; }
-  # Resolve the pinned version Studio expects. Best-effort: use 'latest' unless a pin is discoverable.
-  _sdk_ver="${HPS_SDK_VERSION:-latest}"
-  _seed_root="${STUDIO_SUPPORT}/sdk"
-  mkdir -p "$_seed_root"
-  _tmp="$(mktemp -d)"
-  info "Fetching ${SDK_NPM_PACKAGE}@${_sdk_ver} via npm…"
-  if ( cd "$_tmp" && npm pack "${SDK_NPM_PACKAGE}@${_sdk_ver}" >/dev/null 2>&1 ); then
-    _tgz="$(cd "$_tmp" && find . -maxdepth 1 -name '*.tgz' 2>/dev/null | head -n1)"; _tgz="${_tgz#./}"
-    if [ -n "$_tgz" ]; then
-      ( cd "$_tmp" && tar -xzf "$_tgz" )
-      # derive the real version from package.json
-      _rv="$(grep -o '"version": *"[^"]*"' "${_tmp}/package/package.json" 2>/dev/null | head -n1 | sed 's/.*"version": *"\([^"]*\)".*/\1/')"
-      [ -n "$_rv" ] || _rv="$_sdk_ver"
-      _dest="${_seed_root}/${_rv}"
-      mkdir -p "$_dest"
-      # the claude launcher lives in the package bin; copy the whole package for resolution
-      cp -R "${_tmp}/package/." "$_dest/" 2>/dev/null || true
-      # normalize an executable named 'claude'
-      if [ -f "${_dest}/cli.js" ] && [ ! -e "${_dest}/claude" ]; then
-        ln -sf cli.js "${_dest}/claude" 2>/dev/null || true
-      fi
-      # verification receipt (sha512 of the tarball) -> .verified.json (fail-open on hash tooling absence)
-      if have shasum; then
-        _sha="$(shasum -a 512 "${_tmp}/${_tgz}" | awk '{print $1}')"
-        printf '{ "package": "%s", "version": "%s", "sha512": "%s", "seeded_at": "%s" }\n' \
-          "$SDK_NPM_PACKAGE" "$_rv" "$_sha" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "${_dest}/.verified.json"
-      fi
-      receipt_note "sdk" "$_rv"
-      ok "SDK seeded: ${_dest}"
-    else
-      warn "npm pack produced no tarball — SDK will self-heal on first Studio launch"
-    fi
-  else
-    warn "npm pack failed — SDK will self-heal on first Studio launch"
+# Resolve the canonical seed script: prefer a local sibling (repo checkout or a
+# curl -O download); otherwise fetch it from the same raw base as install.sh.
+# Echoes the path to run, or empty on failure.
+resolve_seed_script() {
+  _self_dir=""
+  # $0 is meaningful only when run from a file (not curl | bash).
+  case "$0" in
+    */*) _self_dir="$(cd "$(dirname "$0")" 2>/dev/null && pwd)" ;;
+  esac
+  if [ -n "$_self_dir" ] && [ -f "${_self_dir}/${SEED_SCRIPT_NAME}" ]; then
+    printf '%s\n' "${_self_dir}/${SEED_SCRIPT_NAME}"; return 0
   fi
-  rm -rf "$_tmp"
+  _dl="$(mktemp -d)/${SEED_SCRIPT_NAME}"
+  if curl -fsSL -o "$_dl" "${RAW_BASE}/${SEED_SCRIPT_NAME}" 2>/dev/null; then
+    printf '%s\n' "$_dl"; return 0
+  fi
+  return 1
+}
+
+seed_sdk() {
+  # Delegate to the canonical seed-sdk-binary.sh (single source of truth for the
+  # package, pinned version 0.3.207, sha512 table, seeded location, and the
+  # runtime-trusted marker). An earlier inline copy here drifted (wrong package/
+  # version, a marker schema + linux path the Studio runtime would not trust).
+  step "Seeding native SDK binary (canonical ${SEED_SCRIPT_NAME})"
+  _seed="$(resolve_seed_script)" || {
+    warn "Could not obtain ${SEED_SCRIPT_NAME} (local or ${RAW_BASE}) — Studio will self-heal on first run"
+    return 0
+  }
+  # Pass --platform on Linux where auto-detect may need help; darwin auto-detects.
+  if bash "$_seed" ${HPS_SDK_VERSION:+--version "$HPS_SDK_VERSION"}; then
+    # Record the version the seeder actually wrote (from its verified marker).
+    _mk="$(find "${STUDIO_SUPPORT%/*}/HypeProof-Studio/sdk" \
+             "${XDG_CONFIG_HOME:-$HOME/.config}/HypeProof-Studio/sdk" \
+             -name 'claude.verified.json' 2>/dev/null | head -n1)"
+    if [ -n "$_mk" ] && have grep; then
+      _rv="$(grep -o '"sdkVersion": *"[^"]*"' "$_mk" 2>/dev/null | head -n1 | sed 's/.*"sdkVersion": *"\([^"]*\)".*/\1/')"
+      [ -n "$_rv" ] && receipt_note "sdk" "$_rv"
+    fi
+    ok "SDK seeded (canonical seeder)"
+  else
+    warn "${SEED_SCRIPT_NAME} did not complete — Studio will self-heal on first launch"
+  fi
 }
 
 install_studio() {
@@ -470,7 +477,14 @@ doctor() {
 
   if [ "${HPS_SKIP_STUDIO:-0}" != "1" ] && [ "$OS" = "darwin" ]; then
     if [ -d "/Applications/HypeProof Studio.app" ]; then ok "Studio: installed"; else warn "Studio: not found — remediation: re-run installer"; _fail=1; fi
-    if ls "${STUDIO_SUPPORT}/sdk"/*/.verified.json >/dev/null 2>&1; then ok "SDK: seeded + verified"; else warn "SDK: not seeded (Studio self-heals on first launch)"; fi
+    # Canonical marker written by seed-sdk-binary.sh is <version>/claude.verified.json
+    # (darwin under Application Support, linux under XDG_CONFIG_HOME).
+    if ls "${STUDIO_SUPPORT}/sdk"/*/claude.verified.json >/dev/null 2>&1 \
+       || ls "${XDG_CONFIG_HOME:-$HOME/.config}/HypeProof-Studio/sdk"/*/claude.verified.json >/dev/null 2>&1; then
+      ok "SDK: seeded + verified"
+    else
+      warn "SDK: not seeded (Studio self-heals on first launch)"
+    fi
   fi
 
   if [ "$_fail" -ne 0 ]; then

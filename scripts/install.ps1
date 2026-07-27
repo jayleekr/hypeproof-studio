@@ -99,10 +99,12 @@ $EMBEDDED_MANIFEST = [ordered]@{
         asset_glob_fallback = '*Setup-x64-*.exe'
     }
     sdk = [ordered]@{
-        npm_package = '@anthropic-ai/claude-code'
-        version     = '0.1.33'   # matches Studio expectation (sdkBinaryManifest.ts)
-        # seed_dir (win32): %APPDATA%\HypeProof-Studio\sdk\<version>\claude.exe
-        sha512      = ''          # pinned in sdkBinaryManifest.ts; empty => resolve from npm dist
+        # SDK seeding is delegated to the canonical scripts/seed-sdk-binary.ps1 —
+        # the single source of truth for the platform package, the pinned version
+        # (0.3.207), the sha512 table, and the runtime-trusted marker schema
+        # (sdkVersion/size/tarballSha512, checked by isSeededBinaryTrusted).
+        # Do NOT re-pin a version or package here; that only drifts.
+        seed_script = 'seed-sdk-binary.ps1'
     }
     # REAL runtime tools only. Build-time-only tools are intentionally excluded.
     tools = @(
@@ -123,8 +125,8 @@ function Sync-ManifestVersions {
         $raw = (Invoke-WebRequest -UseBasicParsing -Uri $url -TimeoutSec 15).Content
         $sv = [regex]::Match($raw, '(?ms)^studio:.*?^\s*version:\s*"?([0-9][^"\r\n]*)"?')
         if ($sv.Success) { $manifest.studio.version = $sv.Groups[1].Value.Trim() }
-        # sdk version_pin is descriptive; keep the studio version as the paired pin.
-        $manifest.sdk.version = $manifest.studio.version
+        # The SDK version is owned entirely by seed-sdk-binary.ps1 (pinned there);
+        # nothing to sync here.
         Write-Info ("Manifest versions synced from remote: studio {0}" -f $manifest.studio.version)
     } catch {
         Write-Info 'Remote manifest unreachable; using embedded pinned versions.'
@@ -495,108 +497,87 @@ function Install-Studio {
 # ----------------------------------------------------------------------------
 # 11. Seed the native SDK binary (claude.exe) - NOW automated for win32
 # ----------------------------------------------------------------------------
+# Locate the canonical SDK seed produced by seed-sdk-binary.ps1:
+#   %APPDATA%\HypeProof-Studio\sdk\<version>\claude.exe(+ .verified.json)
+# Returns @{ version; bin; marker; size } for the newest trusted marker, or $null.
+# The trust test mirrors the runtime's isSeededBinaryTrusted: marker.sdkVersion
+# present, marker.size == on-disk size, and size >= the SDK binary floor.
+function Get-SeededSdk {
+    $sdkRoot = Join-Path $script:HpsHome 'sdk'
+    if (-not (Test-Path $sdkRoot)) { return $null }
+    $minBytes = 150 * 1024 * 1024   # SDK_BINARY_MIN_BYTES, matches seed-sdk-binary.ps1
+    $markers = Get-ChildItem -Path $sdkRoot -Recurse -Filter 'claude.exe.verified.json' -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending
+    foreach ($mk in $markers) {
+        $bin = $mk.FullName -replace '\.verified\.json$', ''
+        if (-not (Test-Path -LiteralPath $bin)) { continue }
+        try { $j = Get-Content -Raw -LiteralPath $mk.FullName | ConvertFrom-Json } catch { continue }
+        $size = (Get-Item -LiteralPath $bin).Length
+        if ($j.sdkVersion -and ([int64]$j.size -eq $size) -and ($size -ge $minBytes)) {
+            return [ordered]@{ version = $j.sdkVersion; bin = $bin; marker = $mk.FullName; size = $size }
+        }
+    }
+    return $null
+}
+
 function Seed-Sdk {
     param($manifest, $receipt)
-    $ver = $manifest.sdk.version
-    $seedDir = Join-Path $script:HpsHome ("sdk\{0}" -f $ver)
-    $seedBin = Join-Path $seedDir 'claude.exe'
-    $verified = Join-Path $seedDir '.verified.json'
+    # Delegate to the canonical scripts/seed-sdk-binary.ps1. That script is the
+    # single source of truth for the platform package, the pinned SDK version and
+    # sha512 table, and the runtime-trusted marker schema. An earlier inline copy
+    # here drifted (wrong package/version, and a marker schema the Studio runtime
+    # would NOT trust), so we always defer to the canonical seeder instead.
 
-    if ((Test-Path $seedBin) -and (Test-Path $verified) -and $receipt.sdk -eq $ver) {
-        Write-Ok "SDK $ver already seeded + verified (idempotent skip)."
+    # Already seeded + trusted from a prior run → idempotent skip.
+    $existing = Get-SeededSdk
+    if ($existing) {
+        $receipt.sdk = $existing.version
+        Write-Ok "SDK $($existing.version) already seeded + verified (idempotent skip)."
         return $true
     }
-    if (-not (Test-Command 'npm')) {
-        Write-Err2 'npm not available; cannot seed SDK. Ensure Node.js installed then re-run.'
-        return $false
+
+    $seedName = $manifest.sdk.seed_script
+
+    # 1) Local sibling (repo checkout, or install.ps1 fetched with -OutFile).
+    $seedScript = $null
+    if ($PSScriptRoot) {
+        $sib = Join-Path $PSScriptRoot $seedName
+        if (Test-Path $sib) { $seedScript = $sib }
     }
-    New-Item -ItemType Directory -Force -Path $seedDir | Out-Null
-
-    $pkg = $manifest.sdk.npm_package
-    Write-Info "Resolving $pkg@$ver from npm ..."
-    # Ask npm for the tarball URL + integrity so we can verify against the pin.
-    $tarUrl = (& npm view "$pkg@$ver" dist.tarball 2>$null | Select-Object -First 1)
-    $integrity = (& npm view "$pkg@$ver" dist.integrity 2>$null | Select-Object -First 1)
-    if (-not $tarUrl) {
-        # version may be a range/tag mismatch; fall back to latest that Studio expects.
-        $tarUrl = (& npm view "$pkg" dist.tarball 2>$null | Select-Object -First 1)
-        $integrity = (& npm view "$pkg" dist.integrity 2>$null | Select-Object -First 1)
-    }
-    if (-not $tarUrl) { Write-Err2 "Could not resolve npm tarball for $pkg."; return $false }
-
-    New-Item -ItemType Directory -Force -Path $script:TempRoot | Out-Null
-    $tgz = Join-Path $script:TempRoot 'claude-code.tgz'
-    Write-Info "Downloading $tarUrl ..."
-    Invoke-WebRequest -UseBasicParsing -Uri $tarUrl -OutFile $tgz
-
-    # --- Verify sha512 against the pinned manifest ---
-    $pin = $manifest.sdk.sha512
-    if (-not $pin -and $integrity -and $integrity.StartsWith('sha512-')) {
-        # No local pin: adopt npm's registry integrity as the verification source.
-        $pin = [Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash([IO.File]::ReadAllBytes($tgz)))
-        $regB64 = $integrity.Substring('sha512-'.Length)
-        if ($pin -ne $regB64) {
-            Write-Err2 'SDK tarball sha512 does not match npm registry integrity - refusing to seed.'
-            return $false
-        }
-        Write-Ok 'SDK tarball verified against npm registry sha512 integrity.'
-        $pinSource = 'npm-registry'
-    } elseif ($pin) {
-        $actual = [Convert]::ToBase64String([Security.Cryptography.SHA512]::Create().ComputeHash([IO.File]::ReadAllBytes($tgz)))
-        if ($actual -ne $pin) {
-            Write-Err2 'SDK tarball sha512 does not match pinned manifest - refusing to seed (fail-closed).'
-            return $false
-        }
-        Write-Ok 'SDK tarball verified against pinned manifest sha512.'
-        $pinSource = 'manifest-pin'
-    } else {
-        Write-Warn2 'No sha512 pin and no registry integrity available - proceeding unverified is unsafe.'
-        return $false
-    }
-
-    # --- Extract the native win32-x64 binary from the tarball ---
-    Write-Info 'Extracting native binary ...'
-    $extract = Join-Path $script:TempRoot 'sdk-extract'
-    New-Item -ItemType Directory -Force -Path $extract | Out-Null
-    & tar -xzf $tgz -C $extract 2>$null
-    if ($LASTEXITCODE -ne 0) { Write-Err2 'tar extraction failed.'; return $false }
-
-    # The native binary lives under package/vendor|bin for win32-x64; search for it.
-    $candidate = Get-ChildItem -Path $extract -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -in @('claude.exe','claude-win32-x64.exe','claude') -or $_.Name -like '*win32-x64*' } |
-        Sort-Object Length -Descending | Select-Object -First 1
-    if (-not $candidate) {
-        # Fallback: install the package and let its postinstall place the binary, then copy.
-        Write-Info 'No prebuilt binary in tarball; running npm install to materialize it ...'
-        Push-Location $script:TempRoot
+    # 2) Bootstrap path (irm | iex): fetch the seeder from the same raw base as
+    #    the manifest URL. The seeder self-verifies the tarball sha512 against its
+    #    own pinned table (fail-closed), so no extra integrity step is needed here.
+    if (-not $seedScript) {
+        $base = ($ManifestUrl -replace '[^/]+$', '')   # strip filename -> dir URL
+        $seedUrl = $base + $seedName
+        New-Item -ItemType Directory -Force -Path $script:TempRoot | Out-Null
+        $seedScript = Join-Path $script:TempRoot $seedName
         try {
-            & npm install --no-save --prefix $script:TempRoot "$pkg@$ver" 2>&1 |
-                ForEach-Object { Write-Host "      $_" -ForegroundColor DarkGray }
-        } finally { Pop-Location }
-        $candidate = Get-ChildItem -Path (Join-Path $script:TempRoot 'node_modules') -Recurse -File -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -eq 'claude.exe' -or $_.Name -like '*win32-x64*.exe' } |
-            Sort-Object Length -Descending | Select-Object -First 1
+            Invoke-WebRequest -UseBasicParsing -Uri $seedUrl -OutFile $seedScript
+        } catch {
+            Write-Err2 "Could not fetch $seedName from $seedUrl : $($_.Exception.Message)"
+            return $false
+        }
     }
-    if (-not $candidate) { Write-Err2 'Could not locate a win32-x64 claude binary to seed.'; return $false }
 
-    Copy-Item -LiteralPath $candidate.FullName -Destination $seedBin -Force
-    $binHash = (Get-FileHash -Algorithm SHA512 -LiteralPath $seedBin).Hash
-
-    $verifiedObj = [ordered]@{
-        package      = $pkg
-        version      = $ver
-        seeded_at    = (Get-Date).ToString('o')
-        source       = $pinSource
-        tarball_url  = $tarUrl
-        binary       = $seedBin
-        binary_sha512 = $binHash
-        verified     = $true
+    Write-Info "Seeding native SDK binary via $seedName (canonical) ..."
+    $psExe = try { (Get-Process -Id $PID).Path } catch { $null }
+    if (-not $psExe) { $psExe = 'powershell' }
+    & $psExe -NoProfile -ExecutionPolicy Bypass -File $seedScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-Err2 "seed-sdk-binary.ps1 failed (exit $LASTEXITCODE)."
+        return $false
     }
-    ($verifiedObj | ConvertTo-Json -Depth 6) | Set-Content -Encoding UTF8 -LiteralPath $verified
-    $receipt.sdk = $ver
-    Write-Ok "SDK seeded: $seedBin"
-    Write-Ok ".verified.json written: $verified"
-    return $true
+
+    # Read back the canonical marker so the receipt/doctor track the real version.
+    $seeded = Get-SeededSdk
+    if ($seeded) {
+        $receipt.sdk = $seeded.version
+        Write-Ok "SDK $($seeded.version) seeded + verified (canonical marker)."
+        return $true
+    }
+    Write-Warn2 'Seed script reported success but no trusted marker was found.'
+    return $false
 }
 
 # ----------------------------------------------------------------------------
@@ -646,13 +627,13 @@ function Invoke-Doctor {
         $fail += "Studio $($manifest.studio.version): not recorded as installed"
     }
 
-    # SDK seed + verification marker.
-    $verified = Join-Path $script:HpsHome ("sdk\{0}\.verified.json" -f $manifest.sdk.version)
-    $seedBin  = Join-Path $script:HpsHome ("sdk\{0}\claude.exe" -f $manifest.sdk.version)
-    if ((Test-Path $verified) -and (Test-Path $seedBin)) {
-        Write-Ok "SDK $($manifest.sdk.version): seeded + verified"
+    # SDK seed + verification marker (canonical seed-sdk-binary.ps1 convention:
+    # sdk\<version>\claude.exe + claude.exe.verified.json, trusted via marker).
+    $seeded = Get-SeededSdk
+    if ($seeded) {
+        Write-Ok "SDK $($seeded.version): seeded + verified"
     } else {
-        $fail += "SDK $($manifest.sdk.version): missing seed or .verified.json"
+        $fail += 'SDK: missing seed or untrusted claude.exe.verified.json marker'
     }
 
     Write-Host ''
