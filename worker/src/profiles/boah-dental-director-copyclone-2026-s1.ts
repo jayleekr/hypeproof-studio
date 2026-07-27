@@ -121,7 +121,18 @@ export const profile: Profile = {
   // epic #431 — shell. 큐시트 20:35 블록(배포 URL·GitHub 저장소)이 이것 없이는
   // 구현 경로가 없다. 스킬만 주고 실행 수단을 안 주면 코치가 가짜 배포 URL을
   // 지어낸다(#428과 같은 실패 계열). 임의 명령 허용 — 승인 모달이 게이트.
-  sdk_tools: { read: true, write: true, browser: true, subagents: true, shell: true },
+  // subagents 를 끈다 (2026-07-27 실측). 서브에이전트 4개를 병렬로 띄운 직후
+  // 모든 툴 호출이 `Tool permission request failed: Error: Stream closed` 로
+  // 무너졌다 — 한 턴에 28건. SDK 제어 채널 오류이지 우리 정책 코드가 아니다.
+  //
+  // v0.1.30 에서는 같은 서브에이전트 5개가 멀쩡히 돌았다. 그때는 툴마다 승인
+  // 모달이 떠서 사람이 하나씩 눌렀고, 그것이 **우연히 직렬화 장치** 역할을 했다.
+  // v0.1.31 에서 승인을 자동 허용으로 바꾸자 권한 요청이 한꺼번에 쏟아지면서
+  // 채널이 끊겼다. 미확정 가설이지만 상관관계가 강하고 다른 설명이 맞지 않는다.
+  //
+  // 잃는 것은 서브페이지 병렬 수집 속도뿐이다 — 코치는 browser_open → read 를
+  // 순차로 돌아 같은 일을 한다. 원인이 확정되면 되돌린다.
+  sdk_tools: { read: true, write: true, browser: true, subagents: false, shell: true },
   // 스킬 3종. shell과 반드시 짝이다(#431): 스킬만 있고 실행 수단이 없으면 코치가
   // 배포한 척하고, 실행 수단만 있고 스킬이 없으면 git을 부르다 CLT 설치 창(2GB)을
   // 띄운다. design-craft는 코호트 프롬프트에 박혀 있던 80줄을 그대로 옮긴 것(#434).

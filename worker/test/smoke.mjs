@@ -1703,10 +1703,16 @@ const TINY_PNG =
   // deepEqual (not a subset check) is deliberate — a shell grant must never
   // spread to another cohort by accident, so widening this shape has to be an
   // explicit edit here.
+  // subagents 는 **꺼져 있다** (2026-07-27 실측). 서브에이전트 4개를 병렬로 띄운
+  // 직후 모든 툴 호출이 `Tool permission request failed: Error: Stream closed` 로
+  // 무너졌다 — 한 턴에 28건. v0.1.30 에서는 같은 서브에이전트 5개가 멀쩡히 돌았고,
+  // 그때는 툴마다 승인 모달이 떠서 사람이 하나씩 눌렀다. 그 모달이 **우연히
+  // 직렬화 장치**였고, 자동 허용으로 바꾸자 권한 요청이 한꺼번에 쏟아져 채널이
+  // 끊겼다(미확정 가설). 원인이 확정되면 되돌린다.
   assert.deepEqual(
     copyclone.sdk_tools,
-    { read: true, write: true, browser: true, subagents: true, shell: true },
-    "copyclone: SDK read+write + browser MCP + subagents + shell on (adult, #282 P2 / #431)",
+    { read: true, write: true, browser: true, subagents: false, shell: true },
+    "copyclone: SDK read+write + browser MCP + shell on, subagents off (#431)",
   );
 
   // epic #431 — the publish skill and the shell grant are a PAIR. Skill without
