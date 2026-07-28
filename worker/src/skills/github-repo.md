@@ -21,24 +21,10 @@ gh api user --jq .login
 
 ## 2. 로그인시킨다 — 여기만 까다롭다
 
-### 먼저 A 인지 B 인지 정한다 — 정하기 전에 아무 명령도 쓰지 마라
-
-**작업 폴더 절대경로**를 보면 알 수 있다. 이미 알고 있으니 확인하려고 명령을 따로
-돌리지 마라.
-
-```
-/Users/… · /home/…  로 시작  →  A (bash)
-C:\…                로 시작  →  B (PowerShell)
-```
-
-**A 와 B 는 서로의 문법에서 파싱조차 되지 않는다.** 잘못 고르면 첫 줄부터 실패한다.
-고른 쪽 블록을 **통째로 그대로** 붙여 실행해라. 손대면 코드를 잃는다.
-
 `gh auth login --web` 은 참가자가 승인할 때까지 **반환하지 않고, 여덟 글자가 그
 명령의 출력(stderr)에 갇힌다.** 그냥 실행하면 당신은 멈춰 있고 참가자는 뭘 눌러야
-하는지도 모른다. 그래서 두 블록 다 **백그라운드로 보내고 출력을 파일로 받는다.**
-
-#### A — bash (macOS · Linux)
+하는지도 모른다. 백그라운드로 보내고 **출력을 파일로 받아라** — `&` 만 붙이면
+코드가 사라진다. 아래를 **통째로 그대로** 붙여라. 손대면 코드를 잃는다.
 
 ```
 nohup gh auth login --web --hostname github.com \
@@ -46,19 +32,6 @@ nohup gh auth login --web --hostname github.com \
       < /dev/null > /tmp/hps-ghlogin.log 2>&1 &
 sleep 3
 grep -oE 'one-time code: [A-Z0-9]{4}-[A-Z0-9]{4}' /tmp/hps-ghlogin.log | grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}'
-```
-
-#### B — PowerShell (Windows)
-
-`nohup` · `grep` · `/tmp` · `&` 는 **여기에 없다.** 위 A 를 쓰면 안 된다.
-
-```powershell
-Start-Process gh -NoNewWindow -ArgumentList `
-  'auth','login','--web','--hostname','github.com','--git-protocol','https','--scopes','repo,workflow' `
-  -RedirectStandardError "$env:TEMP\hps-ghlogin.log"
-Start-Sleep 3
-(Select-String -Path "$env:TEMP\hps-ghlogin.log" -Pattern 'one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})' |
-  Select-Object -First 1).Matches[0].Groups[1].Value
 ```
 
 `one-time code:` 를 앵커로 잡는 이유가 있다. 앵커 없이 여덟 글자 패턴만 긁으면
@@ -139,35 +112,6 @@ gh api repos/<아이디>/<이름>/contents --jq '.[].name'
   브라우저는 로그인 코드 화면 · 결과 보여주기 · 아래 폴백에만 쓴다.
 - **명령을 참가자에게 붙여넣으라고 시키지 마라.** 참가자에게는 터미널이 없다.
 
-## Windows — 기본 셸이 PowerShell 이다
-
-작업 폴더 경로가 `C:\` 로 시작하면 Windows 고, **거기 셸은 bash 가 아니라
-PowerShell 이다.** 위 명령을 그대로 쓰면 안 되는 것들이 있다. `gh api` 자체는 똑같다.
-(2번 로그인의 PowerShell 판은 위 2번에 나란히 있다.)
-
-| | macOS (bash) | Windows (PowerShell) |
-|---|---|---|
-| gh 있나 | `command -v gh` | `Get-Command gh` — **`where gh` 는 안 된다** (`Where-Object` 별칭이다) |
-| 기다리기 | `sleep 3` | `Start-Sleep 3` |
-| 찾기 | `grep -oE` | `Select-String -Pattern` |
-| 임시 폴더 | `/tmp` | `$env:TEMP` |
-| 폴더 열기 | `open <폴더>` | `explorer <폴더>` |
-| `$(...)` 로 값 끼워넣기 | 된다 | **변수에 먼저 담아라** (아래) |
-
-2번 로그인에서 `-RedirectStandardError` 를 쓰는 이유: `gh` 는 코드를 **stderr 로
-내보낸다.** stdout 을 받으면 빈 파일이 나온다.
-
-**4번 업로드 (PowerShell).** `base64` 명령이 없다. `certutil -encode` 는 머리말이
-붙어 그대로 넘기면 깨진다. 변수에 담아서 넘겨라:
-
-```powershell
-$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("<작업폴더>\index.html"))
-gh api -X PUT repos/<아이디>/<이름>/contents/index.html -f message="홈페이지 올리기" -f content="$b64"
-```
-
-**Windows 는 실기기 미검증이다(#451).** 한 번에 안 되면 붙잡지 말고 아래로 가라.
-참가자를 명령줄 디버깅에 끌고 들어가는 것이 수업에서 가장 비싼 실패다.
-
 ## 막히면 — 브라우저로 직접
 
 **이 경로는 gh 도 로그인도 필요 없다.** 참가자 브라우저는 이미 GitHub 에 로그인돼
@@ -175,8 +119,13 @@ gh api -X PUT repos/<아이디>/<이름>/contents/index.html -f message="홈페�
 
 ① `github.com/new` → 이름 → **Public** → Create repository
 ② 빈 저장소 화면의 **"uploading an existing file"**
-③ 작업 폴더를 열어주고(`open` / `explorer`) 파일을 끌어다 놓기
+③ 작업 폴더를 열어주고(macOS `open <폴더>` · Windows `explorer <폴더>`)
+   파일을 끌어다 놓기
 ④ **Commit changes** → 새로고침해서 같이 확인
+
+명령이 `command not found` · `인식되지 않습니다` 로 실패하면 **설치가 안 된 것**이다.
+붙잡고 디버깅하지 말고 바로 이 경로로 와라 — 참가자를 명령줄 디버깅에 끌고 들어가는
+것이 수업에서 가장 비싼 실패다.
 
 막힌 것은 막혔다고 말해라. 우회해서 성공한 척하는 것이 가장 나쁘다. 파일은
 워크스페이스에 안전하게 있다.
