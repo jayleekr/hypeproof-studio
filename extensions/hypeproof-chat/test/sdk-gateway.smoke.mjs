@@ -13,8 +13,14 @@ import { dirname, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-const { anthropicBaseUrlFor, buildSdkGatewayEnv, buildSdkQueryOptions, profileToAgentOptions } =
-  await import("../src/sdkCoachHelpers.ts");
+const {
+  anthropicBaseUrlFor,
+  buildSdkGatewayEnv,
+  buildSdkQueryOptions,
+  profileToAgentOptions,
+  sdkConfigDirFor,
+  SDK_CONFIG_DIR_NAME,
+} = await import("../src/sdkCoachHelpers.ts");
 
 // ─── anthropicBaseUrlFor — proxyUrl (/v1 base) → SDK base URL ────────────────
 // The SDK appends /v1/messages to ANTHROPIC_BASE_URL; passing the proxyUrl
@@ -61,6 +67,7 @@ const { anthropicBaseUrlFor, buildSdkGatewayEnv, buildSdkQueryOptions, profileTo
       CLAUDE_CODE_USE_VERTEX: "1",
       ANTHROPIC_BASE_URL: "https://api.anthropic.com",
       ANTHROPIC_AUTH_TOKEN: "stale-token",
+      CLAUDE_CODE_OAUTH_TOKEN: "sk-ant-oat01-dev-machine-oauth",
     },
     { proxyUrl: "https://api.hypeproof-ai.xyz/v1", token: "hps-workshop-token" },
   );
@@ -79,11 +86,67 @@ const { anthropicBaseUrlFor, buildSdkGatewayEnv, buildSdkQueryOptions, profileTo
   assert.equal(env.PATH, "/usr/bin:/bin", "PATH preserved");
   assert.equal(env.HOME, "/Users/student", "HOME preserved");
 
+  assert.equal(
+    "CLAUDE_CODE_OAUTH_TOKEN" in env,
+    false,
+    "an ambient OAuth token outranks AUTH_TOKEN exactly like an API key — scrub it too",
+  );
+
   // Works with NO local credentials at all (clean classroom machine).
   const clean = buildSdkGatewayEnv({ PATH: "/bin" }, { proxyUrl: "http://localhost:8787/v1", token: "t" });
   assert.equal(clean.ANTHROPIC_BASE_URL, "http://localhost:8787");
   assert.equal(clean.ANTHROPIC_AUTH_TOKEN, "t");
   assert.equal("ANTHROPIC_API_KEY" in clean, false, "no API key is ever required or invented");
+}
+
+// ─── REQ-M13, the part an env scrub cannot reach: credentials on DISK ────────
+// Measured 2026-07-28 (Windows, api.hypeproof-ai.xyz): with the default config
+// dir the CLI authenticated as the machine's Claude account
+// (`Bearer sk-ant-oat01-…` + `anthropic-beta: …,oauth-2025-04-20,…`) and the
+// gateway answered 401 `authentication_failed` nine times, even though the
+// workshop token was valid for another 9.7 h and succeeded on a direct call.
+// Isolating CLAUDE_CONFIG_DIR made the SAME token succeed on attempt 1.
+{
+  const env = buildSdkGatewayEnv(
+    { PATH: "/bin", HOME: "/Users/student" },
+    { proxyUrl: "https://api.hypeproof-ai.xyz/v1", token: "hps-workshop-token" },
+  );
+  assert.ok(env.CLAUDE_CONFIG_DIR, "the coach must never inherit the user's ~/.claude");
+  assert.ok(
+    env.CLAUDE_CONFIG_DIR.includes(SDK_CONFIG_DIR_NAME),
+    "config dir is our own, not the CLI default",
+  );
+  assert.ok(
+    !/(^|\/)\.claude(\/|$)/.test(env.CLAUDE_CONFIG_DIR),
+    "must not resolve back onto ~/.claude",
+  );
+
+  // Windows uses %APPDATA%; POSIX falls back to $HOME. Both stay under our
+  // per-user state so wiping Studio data removes the coach's CLI state with it.
+  assert.equal(
+    sdkConfigDirFor({ APPDATA: "C:/Users/s/AppData/Roaming" }),
+    `C:/Users/s/AppData/Roaming/HypeProof-Studio/${SDK_CONFIG_DIR_NAME}`,
+  );
+  assert.equal(
+    sdkConfigDirFor({ HOME: "/Users/student" }),
+    `/Users/student/.hypeproof-studio/${SDK_CONFIG_DIR_NAME}`,
+  );
+  assert.equal(
+    sdkConfigDirFor({ USERPROFILE: "C:/Users/s" }),
+    `C:/Users/s/.hypeproof-studio/${SDK_CONFIG_DIR_NAME}`,
+    "USERPROFILE is the fallback when APPDATA/HOME are absent",
+  );
+  assert.ok(
+    !sdkConfigDirFor({}).includes(".claude"),
+    "even with no home at all we never fall back to the CLI default",
+  );
+
+  // An explicit override (the host passes the dir it actually created) wins.
+  const pinned = buildSdkGatewayEnv(
+    { PATH: "/bin" },
+    { proxyUrl: "http://localhost:8787/v1", token: "t", configDir: "/tmp/coach-cfg" },
+  );
+  assert.equal(pinned.CLAUDE_CONFIG_DIR, "/tmp/coach-cfg");
 }
 
 // ─── buildSdkQueryOptions — full option threading to query() ─────────────────

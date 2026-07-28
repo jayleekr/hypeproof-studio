@@ -724,6 +724,41 @@ export function anthropicBaseUrlFor(proxyUrl: string): string {
   return url;
 }
 
+/** Directory name (under the user's app-data root) for the coach's own CLI config. */
+export const SDK_CONFIG_DIR_NAME = "claude-config";
+
+/**
+ * Where the coach's `claude` subprocess keeps ITS config — deliberately NOT the
+ * user's `~/.claude` (REQ-M13).
+ *
+ * The CLI reads stored Claude Code / Claude Desktop OAuth credentials from its
+ * config dir and those OUTRANK `ANTHROPIC_AUTH_TOKEN`. On any machine where a
+ * human has ever run `claude` (every dev box, and any student who tried the CLI),
+ * the coach then authenticates to our gateway with that person's personal
+ * account instead of the workshop token. The gateway rejects it with 401 and the
+ * turn dies — while the workshop token itself is perfectly valid.
+ *
+ * Measured 2026-07-28 on Windows against api.hypeproof-ai.xyz. The CLI sent
+ * `authorization: Bearer sk-ant-oat01-…` plus `anthropic-beta: …,oauth-2025-04-20,…`
+ * and got 401 `authentication_failed` nine times; pointing CLAUDE_CONFIG_DIR at an
+ * empty directory made the SAME token succeed on the first attempt. This is the
+ * same class of leak REQ-M13 already scrubs `ANTHROPIC_API_KEY` for — the stored
+ * credential file was simply the hole the env scrub could not see.
+ *
+ * Pure (string derivation only); the caller creates the directory.
+ */
+export function sdkConfigDirFor(baseEnv: Record<string, string | undefined>): string {
+  // Windows: %APPDATA%\HypeProof-Studio\… (beside the seeded SDK binary).
+  // macOS/Linux: ~/.hypeproof-studio/… — both sit with the rest of our per-user
+  // state, so wiping a student's Studio data removes this with everything else.
+  const appData = baseEnv.APPDATA?.trim();
+  if (appData) return `${appData}/HypeProof-Studio/${SDK_CONFIG_DIR_NAME}`;
+  const home = baseEnv.HOME?.trim() || baseEnv.USERPROFILE?.trim();
+  if (home) return `${home}/.hypeproof-studio/${SDK_CONFIG_DIR_NAME}`;
+  // No home at all (locked-down CI): a relative dir still beats inheriting ~/.claude.
+  return `.hypeproof-studio/${SDK_CONFIG_DIR_NAME}`;
+}
+
 /**
  * Build the subprocess env for the SDK. The TS SDK REPLACES the subprocess
  * env with `options.env` (it does not merge), so the caller's base env
@@ -746,6 +781,8 @@ export function buildSdkGatewayEnv(
     workspaceFiles?: readonly string[];
     /** 동시 툴 실행 상한. 기본 2 — 병렬 권한 요청이 SDK 제어 채널을 끊는다. */
     maxToolConcurrency?: number;
+    /** Coach-owned CLI config dir. Defaults to sdkConfigDirFor(baseEnv). */
+    configDir?: string;
   },
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...baseEnv };
@@ -753,8 +790,15 @@ export function buildSdkGatewayEnv(
   delete env.ANTHROPIC_API_KEY;
   delete env.CLAUDE_CODE_USE_BEDROCK;
   delete env.CLAUDE_CODE_USE_VERTEX;
+  // An ambient OAuth token outranks ANTHROPIC_AUTH_TOKEN exactly like an API key.
+  delete env.CLAUDE_CODE_OAUTH_TOKEN;
   env.ANTHROPIC_BASE_URL = anthropicBaseUrlFor(args.proxyUrl);
   env.ANTHROPIC_AUTH_TOKEN = args.token;
+  // The env scrub above cannot reach credentials stored on DISK. The CLI reads
+  // those from its config dir and prefers them over ANTHROPIC_AUTH_TOKEN, so the
+  // coach must get a config dir of its own or the workshop token is ignored
+  // (REQ-M13 — see sdkConfigDirFor for the measurement).
+  env.CLAUDE_CONFIG_DIR = args.configDir?.trim() || sdkConfigDirFor(baseEnv);
 
   // #431 — 동시 툴 실행을 묶는다.
   //
@@ -827,6 +871,8 @@ export function buildSdkQueryOptions(
     pathToClaudeCodeExecutable?: string;
     /** 워크스페이스 파일 목록 (루트 기준 상대). withWorkspaceContext 로 전달된다. */
     workspaceFiles?: readonly string[];
+    /** REQ-M13 — coach-owned CLI config dir (the host creates it). */
+    configDir?: string;
   },
 ): Omit<AgentSdkOptions, "canUseTool" | "abortController"> {
   // #282 P2 slice 3 — the read-only subagent catalog rides on the same flag
@@ -863,6 +909,7 @@ export function buildSdkQueryOptions(
     env: buildSdkGatewayEnv(args.baseEnv, {
       proxyUrl: args.proxyUrl,
       token: args.token,
+      ...(args.configDir ? { configDir: args.configDir } : {}),
       // 시스템 프롬프트 경로는 워커가 버리므로 헤더로 보낸다 (#431).
       ...(args.cwd ? { workspace: args.cwd } : {}),
       ...(args.workspaceFiles ? { workspaceFiles: args.workspaceFiles } : {}),
