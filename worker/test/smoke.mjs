@@ -1782,8 +1782,8 @@ const TINY_PNG =
   // Assert both together so neither can be removed alone.
   assert.deepEqual(
     copyclone.skills,
-    ["design-craft", "github-repo", "publish-homepage"],
-    "copyclone: 스킬 3종 (디자인 · GitHub · 배포)",
+    ["design-craft", "github-repo", "publish-homepage", "workshop-setup"],
+    "copyclone: 스킬 4종 (디자인 · GitHub · 배포 · 세팅)",
   );
   // resolveSkills only console.warns on an unknown name, so a typo would ship
   // an inert cohort that LOOKS configured. Resolve it for real.

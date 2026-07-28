@@ -133,7 +133,7 @@ export const profile: Profile = {
   // 스킬 3종. shell과 반드시 짝이다(#431): 스킬만 있고 실행 수단이 없으면 코치가
   // 배포한 척하고, 실행 수단만 있고 스킬이 없으면 git을 부르다 CLT 설치 창(2GB)을
   // 띄운다. design-craft는 코호트 프롬프트에 박혀 있던 80줄을 그대로 옮긴 것(#434).
-  skills: ["design-craft", "github-repo", "publish-homepage"],
+  skills: ["design-craft", "github-repo", "publish-homepage", "workshop-setup"],
   // #371/#384 — 원장 트랙은 Agent SDK 런타임: 코치가 파일을 직접 읽고·쓰고·
   // 고쳐 루브릭/agent.md/이미지 참조를 실제 파일로 다룬다(Claude Code와 동일
   // 아키텍처 + canUseTool 교실 정책). 재활성 조건 충족(2026-07-24):
@@ -167,6 +167,13 @@ export const profile: Profile = {
           text: "참고할 치과 홈페이지 스크린샷을 붙여넣고 — 이 화면처럼 만들어줘",
           style: "good",
           caption: "이렇게 시작해보세요 (⌘V로 이미지 붙여넣기)",
+        },
+        {
+          // #431 — 클릭 설치(앱만) 참가자용 세팅 입구. workshop-setup 스킬이 받는다.
+          // 이미 세팅된 사람이 눌러도 스크립트가 멱등이라 "준비 완료 ✓" 로 끝난다.
+          text: "환경 세팅 점검해줘",
+          style: "good",
+          caption: "설치 직후 한 번 — 필요한 도구가 준비됐는지 확인하고 없으면 설치해요",
         },
       ],
       follow_up: [],
