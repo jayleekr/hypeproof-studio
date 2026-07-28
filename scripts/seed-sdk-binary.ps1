@@ -181,7 +181,16 @@ try {
     verifiedAt    = $now
     seededBy      = "scripts/seed-sdk-binary.ps1"
   }
-  ($markerObj | ConvertTo-Json) | Out-File -FilePath $marker -Encoding utf8
+  # BOM-less UTF-8, deliberately NOT `Out-File -Encoding utf8`: under Windows
+  # PowerShell 5.1 (what venue machines run) that always emits EF BB BF, and the
+  # extension reads this marker with fs.readFileSync(…, "utf8") + JSON.parse,
+  # which throws on a leading BOM. isSeededBinaryTrusted then rejected a
+  # perfectly good seed and Studio silently fell back to the proxy-only runtime.
+  # The runtime now strips a BOM too (parseSdkBinaryMarker), so old seeds heal on
+  # update — but write it clean here. PS 7's `-Encoding utf8NoBOM` does not exist
+  # in 5.1, hence the .NET call.
+  $json = $markerObj | ConvertTo-Json
+  [System.IO.File]::WriteAllText($marker, $json, (New-Object System.Text.UTF8Encoding($false)))
 
   # ── Verification printout ───────────────────────────────────────────────────
   Say "Seeded successfully"
