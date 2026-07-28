@@ -13,6 +13,24 @@ export const TOKEN_MISSING_FRIENDLY =
   "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑";
 
 /**
+ * agent-sdk 경로 전용 (#320 수정). 프록시 경로는 게이트웨이가 준 `error.code`
+ * 로 만료 여부를 **읽을 수 있지만**, SDK 경로는 `api_retry` 이벤트의 상태코드
+ * 밖에 못 본다 — 401 이 만료인지, 자격증명이 잘못 실렸는지, roster 문제인지
+ * 구분할 근거가 없다.
+ *
+ * 그런데도 여기서 "만료됐어요" 를 띄우면 두 가지가 동시에 망가진다: 원인이
+ * 만료로 오인돼 추적이 막히고(2026-07-28 실측: 원인은 ambient OAuth 자격증명
+ * 이었다 — sdkConfigDirFor 참조), `kind: "expired"` 가 **멀쩡한 토큰을 지운다**.
+ * 그래서 SDK 경로는 단정하지 않는 문장을 쓰고 kind 도 파괴적이지 않은 쪽을 쓴다.
+ */
+export const GATEWAY_AUTH_FAILED_FRIENDLY =
+  "코치가 로그인에 실패했어요. 토큰을 다시 넣어보고, 그래도 같으면 선생님께 알려주세요. 🔑";
+
+/** 400 은 인증 문제가 아니다 — 토큰 얘기를 꺼내면 안 된다. */
+export const GATEWAY_BAD_REQUEST_FRIENDLY =
+  "요청이 게이트웨이에서 거절됐어요. 다시 보내보고, 계속 같으면 선생님께 알려주세요. 🛠️";
+
+/**
  * #358 — student-friendly copy for a 413 (payload too large), which in this
  * app means an oversized pasted screenshot pushed the request past the
  * region-pinned Anthropic proxy's body limit. Without this the webview showed

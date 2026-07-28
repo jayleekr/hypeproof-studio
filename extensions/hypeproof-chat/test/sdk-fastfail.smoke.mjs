@@ -1,17 +1,32 @@
 // Smoke tests for the SDK-coach gateway 4xx fast-fail (#320, REQ-M15). Pure —
 // no vscode, no SDK. e2e finding: the SDK CLI retries 401/400 up to 10x with
-// backoff, so a bad/expired workshop token was a multi-minute SILENT hang for
+// backoff, so a rejected workshop token was a multi-minute SILENT hang for
 // a kid. consumeSdkStream must abort the query on the FIRST api_retry event
-// carrying error_status 400/401 and surface the SAME student-friendly token
-// copy the proxy path uses (single-source constants in proxyClientHelpers).
+// carrying error_status 400/401 and surface student-friendly copy.
+//
+// 2026-07-28 — the copy must NOT be the proxy path's "만료됐어요". An api_retry
+// event carries a status and nothing else: 401 can be expiry, a rejected
+// credential, or roster trouble, and the SDK path has no `error.code` to tell
+// them apart. Naming expiry there sent a real investigation down the wrong
+// path for days AND (via kind:"expired") deleted a perfectly valid token on
+// every turn. See proxyClientHelpers.GATEWAY_AUTH_FAILED_FRIENDLY.
 // Run: node --experimental-strip-types test/sdk-fastfail.smoke.mjs
 
 import assert from "node:assert/strict";
 
 const { sdkFatalAuthStatus, consumeSdkStream, extractSdkText, SDK_FATAL_AUTH_STATUSES } =
   await import("../src/sdkCoachHelpers.ts");
-const { TOKEN_EXPIRED_FRIENDLY, TOKEN_MISSING_FRIENDLY } =
-  await import("../src/proxyClientHelpers.ts");
+const {
+  TOKEN_EXPIRED_FRIENDLY,
+  TOKEN_MISSING_FRIENDLY,
+  GATEWAY_AUTH_FAILED_FRIENDLY,
+  GATEWAY_BAD_REQUEST_FRIENDLY,
+} = await import("../src/proxyClientHelpers.ts");
+
+// Mirrors sdkCoach.ts's makeFatalAuthError so the status→copy mapping is
+// exercised here rather than only in the (vscode-adjacent) orchestration layer.
+const fatalCopyFor = (status) =>
+  status === 401 ? GATEWAY_AUTH_FAILED_FRIENDLY : GATEWAY_BAD_REQUEST_FRIENDLY;
 
 // Real SDKAPIRetryMessage shape (sdk.d.ts): type system / subtype api_retry /
 // error_status number|null / error SDKAssistantMessageError.
@@ -48,7 +63,7 @@ function handlers(overrides = {}) {
       calls.aborted++;
     },
     makeFatalAuthError: (status) =>
-      Object.assign(new Error(TOKEN_EXPIRED_FRIENDLY), { name: "FatalAuth", status }),
+      Object.assign(new Error(fatalCopyFor(status)), { name: "FatalAuth", status }),
     onDelta: (d) => calls.deltas.push(d),
     ...overrides,
   };
@@ -89,7 +104,7 @@ function handlers(overrides = {}) {
   assert.ok(err, "fatal 401 must reject the turn");
   assert.equal(err.name, "FatalAuth", "throws the injected auth error, not a raw error");
   assert.equal(err.status, 401);
-  assert.equal(err.message, TOKEN_EXPIRED_FRIENDLY, "same Korean token copy as the proxy path");
+  assert.equal(err.message, GATEWAY_AUTH_FAILED_FRIENDLY, "401 copy does not claim expiry");
   assert.equal(calls.aborted, 1, "SDK query aborted exactly once (kills the CLI retry loop)");
   assert.equal(pulled.length, 1, "aborts within one event — no further stream consumption");
   assert.deepEqual(calls.deltas, [], "no delta flushed from the poisoned turn");
@@ -153,6 +168,24 @@ function handlers(overrides = {}) {
 {
   assert.equal(TOKEN_EXPIRED_FRIENDLY, "토큰이 만료됐어요. 선생님께 새 토큰을 받아서 다시 넣어주세요. 🔑");
   assert.equal(TOKEN_MISSING_FRIENDLY, "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑");
+
+  // The SDK path may not diagnose a cause it cannot observe.
+  assert.ok(
+    !GATEWAY_AUTH_FAILED_FRIENDLY.includes("만료"),
+    "a bare 401 is not evidence of expiry — never say it is",
+  );
+  assert.notEqual(
+    GATEWAY_AUTH_FAILED_FRIENDLY,
+    TOKEN_EXPIRED_FRIENDLY,
+    "the proxy path reads error.code and MAY say 만료; the SDK path cannot",
+  );
+  // 400 is a malformed request. Mentioning the token there sends a student
+  // (and whoever they escalate to) after the wrong thing entirely.
+  assert.ok(
+    !GATEWAY_BAD_REQUEST_FRIENDLY.includes("토큰"),
+    "400 is not an auth failure — keep tokens out of its copy",
+  );
+  assert.notEqual(GATEWAY_BAD_REQUEST_FRIENDLY, GATEWAY_AUTH_FAILED_FRIENDLY);
 }
 
 console.log("✓ #320: sdk fast-fail — 401/400 api_retry aborts within one event + proxy-path token copy");
