@@ -33,6 +33,8 @@
     Unattended:
       -y / -NonInteractive  or  env HPS_NONINTERACTIVE=1   -> no prompts.
       -NoModifyPath         or  env INSTALLER_NO_MODIFY_PATH -> never touch PATH.
+      -SkipStudio           or  env HPS_SKIP_STUDIO=1 -> deps only (skip Studio
+                            app + SDK seed), mirroring install.sh's flag.
 #>
 
 [CmdletBinding()]
@@ -42,6 +44,12 @@ param(
     [switch]$NonInteractive,
     [switch]$NoModifyPath,
     [switch]$DoctorOnly,
+    # Mirror of install.sh's HPS_SKIP_STUDIO=1 ("skip Studio app + SDK seed —
+    # deps only"): same name, same semantics. Needed when this script runs from
+    # INSIDE a running Studio (the coach's shell): Install-Studio would try to
+    # replace the very app executing it. The doctor honors it too, exactly like
+    # install.sh gates its Studio/SDK checks behind the flag (install.sh:512).
+    [switch]$SkipStudio,
     # Remote manifest refresh is best-effort (falls back to the embedded pins).
     [string]$ManifestUrl = 'https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/hypeproof-deps.yaml',
     # Raw base for the bootstrap (irm | iex) path, where no sibling script exists.
@@ -62,6 +70,7 @@ $ProgressPreference     = 'SilentlyContinue'   # speeds up Invoke-WebRequest hug
 if ($env:HPS_NONINTERACTIVE -eq '1' -or $env:HPS_NONINTERACTIVE -eq 'true') { $NonInteractive = $true }
 if ($Yes) { $NonInteractive = $true }
 if ($env:INSTALLER_NO_MODIFY_PATH) { $NoModifyPath = $true }
+if ($env:HPS_SKIP_STUDIO -eq '1') { $SkipStudio = $true }
 
 $script:ExitCode = 0
 $script:AppData  = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $env:USERPROFILE 'AppData\Roaming' }
@@ -639,20 +648,27 @@ function Invoke-Doctor {
         if ($lp -ne 'true')   { $fail += "git core.longpaths is '$lp' (want true)" } else { Write-Ok 'git core.longpaths=true' }
     }
 
-    # Studio install marker.
-    if ($receipt.studio -eq $manifest.studio.version) {
-        Write-Ok "Studio $($manifest.studio.version): installed"
+    if ($SkipStudio) {
+        # deps-only pass (mirrors install.sh:512): the Studio app + SDK are the
+        # caller's concern — e.g. the coach runs this from inside a running
+        # Studio that click-install already provided and that self-seeds its SDK.
+        Write-Info 'Studio/SDK checks skipped (HPS_SKIP_STUDIO=1 - deps-only pass)'
     } else {
-        $fail += "Studio $($manifest.studio.version): not recorded as installed"
-    }
+        # Studio install marker.
+        if ($receipt.studio -eq $manifest.studio.version) {
+            Write-Ok "Studio $($manifest.studio.version): installed"
+        } else {
+            $fail += "Studio $($manifest.studio.version): not recorded as installed"
+        }
 
-    # SDK seed + verification marker (canonical seed-sdk-binary.ps1 convention:
-    # sdk\<version>\claude.exe + claude.exe.verified.json, trusted via marker).
-    $seeded = Get-SeededSdk
-    if ($seeded) {
-        Write-Ok "SDK $($seeded.version): seeded + verified"
-    } else {
-        $fail += 'SDK: missing seed or untrusted claude.exe.verified.json marker'
+        # SDK seed + verification marker (canonical seed-sdk-binary.ps1 convention:
+        # sdk\<version>\claude.exe + claude.exe.verified.json, trusted via marker).
+        $seeded = Get-SeededSdk
+        if ($seeded) {
+            Write-Ok "SDK $($seeded.version): seeded + verified"
+        } else {
+            $fail += 'SDK: missing seed or untrusted claude.exe.verified.json marker'
+        }
     }
 
     Write-Host ''
@@ -720,13 +736,18 @@ function Main {
     Write-Head 'Configure git (CRLF + long paths)'
     Configure-Git
 
-    Write-Head 'Install HypeProof Studio app'
-    try { Install-Studio $manifest $receipt | Out-Null }
-    catch { Write-Err2 "Studio install error: $($_.Exception.Message)" }
+    if ($SkipStudio) {
+        Write-Head 'Install HypeProof Studio app'
+        Write-Warn2 'HPS_SKIP_STUDIO=1 - skipping Studio app + SDK seed (deps only)'
+    } else {
+        Write-Head 'Install HypeProof Studio app'
+        try { Install-Studio $manifest $receipt | Out-Null }
+        catch { Write-Err2 "Studio install error: $($_.Exception.Message)" }
 
-    Write-Head 'Seed native SDK binary (claude.exe)'
-    try { Seed-Sdk $manifest $receipt | Out-Null }
-    catch { Write-Err2 "SDK seed error: $($_.Exception.Message)" }
+        Write-Head 'Seed native SDK binary (claude.exe)'
+        try { Seed-Sdk $manifest $receipt | Out-Null }
+        catch { Write-Err2 "SDK seed error: $($_.Exception.Message)" }
+    }
 
     Write-Receipt $receipt
     Write-Ok "Receipt written: $script:ReceiptPath"
