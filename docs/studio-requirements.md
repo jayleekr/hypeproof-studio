@@ -68,7 +68,7 @@ When in doubt:
 | REQ-C3 | History 영속화 (workspaceState) | 최대 200 turn 유지, 패널 reload 후 복원, 별도 workspace 에선 보이지 않음 | E + U (clampHistory) |
 | REQ-C4 | Clear conversation 명령 | workspaceState 비움 + 빈 history push | E |
 | REQ-C5 | Retry message | 직전 user prompt 그대로 다시 전송, history 에 새 assistant turn append. **(#358)** 실패 턴에 첨부 이미지가 있으면 `retryMessage.images` 로 재첨부(단발성이라 in-memory 메시지에서만 읽음) → 코치가 스크린샷을 다시 받음 | E |
-| REQ-C6 | Cancel in-flight stream | AbortController.abort → streamEnd 도착하지 않음, 다음 send 가능 | E |
+| REQ-C6 | Cancel in-flight stream | Stop → `cancelStream` → `AbortController.abort()` **그리고 호스트가 `streamStopped` 를 post** (#497). 이전 계약은 "streamEnd 도착하지 않음"이었는데, 그 상태를 푸는 메시지가 **아무것도** 없어서 웹뷰가 스트리밍 상태에 영구히 갇혔다 — Stop 이 먹통으로 보이고, 이후 입력은 REQ-C16 큐에 park 된 뒤 `streaming → idle` 엣지가 오지 않아 영영 flush 되지 않았다(2026-07-06 `2ae96bd` 회귀, 3주간 미검출). `streamStopped` 는 streamEnd 와 같은 상태 해제를 하되 **오류가 아니다** — `streamError` 배너("문제가 생겼어요" + 🚨 신고하기)는 정상 조작을 사고로 만들므로 쓰지 않고, 조용한 인라인 안내(`.hps-stop-notice`)로 "답변 생성이 중지되었습니다. 다시 채팅을 입력해주세요." 를 띄운다. 안내는 다음 턴 시작(`streamStart`) 또는 재입력(`userSent`) 시 사라진다. 잘린 턴을 히스토리에 커밋하지 않는 것은 REQ-M8 그대로 | E |
 | REQ-C7 | Webview crash 복구 (S-04 #48) | React render-time error → ErrorBoundary fallback + `webviewError` 호스트 로그 | E |
 | REQ-C8 | request_id 가 error banner 에 표시 (S-07 #49) | 스트림 실패 시 `x-request-id` 8글자가 webview ErrorBanner 에 노출 | E |
 | REQ-C9 | Show-intent 단축 | "게임 보여줘"/"실행해" 같은 짧은 비-create 입력 → LLM 호출 없이 마지막 게임 preview 재오픈 | U + E |
@@ -195,7 +195,7 @@ When in doubt:
 | REQ-M5 | 매 tool use 는 canUseTool 게이트 | SDK `allowedTools` 는 빈 값 + `settingSources: []` — 모든 도구가 canUseTool 로 fall-through, cohort 미허용 도구는 deny | U + E |
 | REQ-M6 | 게이트웨이 라우팅 + env 보존 | `buildSdkGatewayEnv`: process.env 스프레드(PATH/HOME 보존) 위에 SDK 인식 변수만 설정 — `ANTHROPIC_BASE_URL` 은 `proxyUrl` 설정에서 **파생**(`/v1` 접미사 제거 — SDK 가 `/v1/messages` 를 스스로 붙임), `ANTHROPIC_AUTH_TOKEN` = workshop 토큰 (커스텀 이름 금지) | U (`test/sdk-gateway`) |
 | REQ-M7 | SDK 미가용 시 proxy fallback | 패키지 로드 실패(패키징 빌드 등 node_modules 부재) → `SdkUnavailableError` → 콘솔 경고 + 해당 턴 proxy 로 폴백 (학생에게 raw 에러 미노출) | U + E |
-| REQ-M8 | Abort parity | agent-sdk 경로도 stop 시 AbortError throw → streamEnd·appendHistory 건너뜀 (잘린 턴 미커밋); abort listener 는 `loadSdk()` 이전 등록 | U + E |
+| REQ-M8 | Abort parity | agent-sdk 경로도 stop 시 AbortError throw → streamEnd·appendHistory 건너뜀 (잘린 턴 미커밋); abort listener 는 `loadSdk()` 이전 등록. **UI 상태 해제는 이 경로가 아니라 `cancelStream` 핸들러의 `streamStopped` 가 책임진다** (REQ-C6, #497) — `handleSend`/`handleSendError` 의 "웹뷰가 이미 스트림을 끝냈다"는 전제는 성립한 적이 없었다. 부분 출력은 화면에만 남고 영속 히스토리엔 들어가지 않는다(의도된 동작) | U + E |
 | REQ-M9 | `/v1/messages` 게이트 parity | worker `POST /v1/messages` (Anthropic-native 게이트웨이) 는 `/v1/chat/completions` 와 동일 게이트 공유 (`lib/chat-gate.ts`): 토큰 verify · issuer 거부 · revocation · session window · roster · cohort pause · signingSecretGuard | R (`worker/test/messages-integration.test.mjs`, `route-order.test.mjs`) |
 | REQ-M10 | 서버측 system prompt 강제 | `/v1/messages` 는 클라이언트 `system` 을 병합 없이 폐기하고 cohort 프로필 블록으로 교체 (`buildAnthropicSystemBlocks` — `/v1/chat` 과 byte-identical, prompt-cache 마커 유지). classroom key 는 worker 밖으로 안 나감 (upstream 은 `x-api-key`, 학생 토큰 미전달) | R (`worker/test/messages-integration.test.mjs`) |
 | REQ-M11 | 모델 정책 clamp | `/v1/messages` 요청 모델은 프로필 catalog (default/fallback/fast alias 또는 그 id) 로 clamp; `claude-*haiku*` 는 fast 핀으로 (SDK aux 호출 비용 상향 방지); 그 외는 프로필 default 강제 | R (`worker/test/messages-integration.test.mjs`) |

@@ -239,6 +239,11 @@ export type HostMessage =
   | { type: "streamCitations"; streamId: string; citations: Citation[] }  // #173
   | { type: "streamAssetScore"; streamId: string; assetScore: AssetScoreChunk }  // #204
   | { type: "streamEnd"; streamId: string }
+  // #497 — user pressed Stop. Distinct from streamEnd (the turn did NOT finish)
+  // and from streamError (nothing went wrong — the user asked for this, so no
+  // "문제가 생겼어요" banner and no 🚨 신고하기 button). The webview leaves the
+  // streaming state and shows a plain notice inviting the next message.
+  | { type: "streamStopped"; streamId: string }
   // #278 Phase 3 — agentic browser tool loop action log (auto-run + log, no
   // modal). One line per tool call; `state` flips running → done/error.
   | { type: "toolLog"; streamId: string; id: string; icon: string; label: string; state: "running" | "done" | "error" }

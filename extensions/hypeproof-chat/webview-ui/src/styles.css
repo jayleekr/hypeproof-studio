@@ -754,6 +754,27 @@ html, body, #root {
   line-height: 1.5;
 }
 
+/* #497 — Stop 직후 안내. page-notice 와 같은 형태를 쓰되 강조색을 죽여서
+   "무언가 잘못됐다"로 읽히지 않게 한다. 사용자가 스스로 누른 결과다. */
+.hps-stop-notice {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--vscode-descriptionForeground, #888);
+  background: var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.08));
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--vscode-descriptionForeground, #888);
+}
+
+.hps-stop-notice-icon {
+  flex: none;
+  font-size: 11px;
+}
+
 .hps-tool-log {
   display: flex;
   flex-direction: column;
