@@ -691,6 +691,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         return;
       case "cancelStream":
         this.activeStreams.get(msg.streamId)?.abort();
+        // #497 — abort() alone tells the webview NOTHING. handleSend and
+        // handleSendError both skip their posts on an aborted signal, each
+        // citing "the webview already ended the stream" — a premise no code
+        // ever satisfied. The panel therefore stayed in the streaming state
+        // forever: Stop and the spinner never cleared, and every later message
+        // parked in the #416 queue whose flush only fires on the streaming →
+        // idle edge. Say it explicitly here, where we know it was user-initiated.
+        void this.post({ type: "streamStopped", streamId: msg.streamId });
         return;
       case "requestAction":
         await this.handleActionRequest(msg.action);

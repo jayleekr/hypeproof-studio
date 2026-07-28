@@ -19,6 +19,7 @@ interface Props {
   toolLog: ToolLogEntry[];              // #278 Phase 3 — browser loop action log
   pageNotice: string | null;           // #308 — "페이지를 코치에게" 인라인 안내
   aiNotice: string | null;             // #320 — AI disclosure at session start
+  stopNotice: string | null;           // #497 — Stop 으로 턴이 끊겼음을 알리는 안내
   streaming: boolean;
   /**
    * WHICH message is streaming, not just whether one is (#429). `streaming` is
@@ -456,6 +457,15 @@ export function ChatPanel(props: Props) {
         {props.pageNotice && (
           <div className="hps-page-notice" role="status" aria-live="polite">
             {props.pageNotice}
+          </div>
+        )}
+
+        {/* #497 — Stop 직후 안내. 오류가 아니므로 에러 배너가 아니라 조용한
+            인라인 상태줄로 알린다. 다음 입력을 하면 사라진다. */}
+        {props.stopNotice && (
+          <div className="hps-stop-notice" role="status" aria-live="polite">
+            <span className="hps-stop-notice-icon" aria-hidden="true">⏹</span>
+            {props.stopNotice}
           </div>
         )}
 
