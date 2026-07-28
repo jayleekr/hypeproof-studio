@@ -121,6 +121,14 @@ export const profile: Profile = {
   // epic #431 — shell. 큐시트 20:35 블록(배포 URL·GitHub 저장소)이 이것 없이는
   // 구현 경로가 없다. 스킬만 주고 실행 수단을 안 주면 코치가 가짜 배포 URL을
   // 지어낸다(#428과 같은 실패 계열). 임의 명령 허용 — 승인 모달이 게이트.
+  // subagents 를 다시 켠다 (2026-07-27). 껐던 이유는 서브에이전트 4개를 **병렬로**
+  // 띄운 직후 모든 툴이 `Tool permission request failed: Error: Stream closed` 로
+  // 무너졌기 때문이다(한 턴 28건, 산출물 0). 그런데 같은 서브에이전트가 **1개일 때는
+  // 멀쩡히 돌았다** — 방아쇠는 능력이 아니라 **동시성**이다.
+  //
+  // 그래서 능력을 끄는 대신 클라이언트가 CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=2 로
+  // 동시 실행을 묶는다(buildSdkGatewayEnv). 병렬 수집의 이점은 남기고 채널을
+  // 무너뜨리는 폭주만 막는다. 재발하면 여기를 false 로 되돌린다 — 빌드 불필요.
   sdk_tools: { read: true, write: true, browser: true, subagents: true, shell: true },
   // 스킬 3종. shell과 반드시 짝이다(#431): 스킬만 있고 실행 수단이 없으면 코치가
   // 배포한 척하고, 실행 수단만 있고 스킬이 없으면 git을 부르다 CLT 설치 창(2GB)을
@@ -171,7 +179,9 @@ export const profile: Profile = {
           "💭 조금 더 구체적으로 — *어느 섹션*을 *어떤 톤*으로, 또는 *참고 화면 스크린샷*을 붙여주세요",
       },
       roll_input_button: {
-        enabled: true,
+        // 실사용에서 쓰이지 않는다(원장 확인 2026-07-27). 입력창 옆 버튼은
+        // 자리를 차지하고 시선을 나눠 갖는데 눌리지 않으면 순수 잡음이다.
+        enabled: false,
         label: "✨ 한 번 더 다듬어보기",
         probe_md: "좋아요! 한 가지만 더 — 이 화면으로 환자가 하길 바라는 *행동*(전화·예약·약도)은 뭔가요?",
       },

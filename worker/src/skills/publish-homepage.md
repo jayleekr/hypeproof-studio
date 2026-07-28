@@ -13,10 +13,18 @@
 curl -sIL -o /dev/null -w "%{http_code}\n" <주소>
 ```
 
+Windows에서는 `curl.exe`로 써라 — PowerShell의 `curl`은 `Invoke-WebRequest`
+별칭이라 이 인자들로는 실패한다. `-o /dev/null`은 Windows curl.exe에서도
+그대로 동작하니 바꿀 필요 없다(실측 확인).
+
 200이 아니면 아직 배포된 게 아니다. 그렇게 말해라. GitHub Pages는 첫 배포에
 1~2분 걸리니 **"지금 만들어지는 중, 1분 뒤 다시 확인할게요"가 정직한 답이다.**
 
 ## 0. 정적인가 동적인가 — 여기서 갈린다
+
+> **배포 설정은 `gh api` 로 한다.** Pages 활성화·워크플로 업로드를
+> `browser_click`/`browser_type` 으로 하지 마라 — 결과를 확인할 수 없고 화면 변경에
+>깨진다. 브라우저는 **참가자에게 보여주거나 참가자가 직접 누를 때만** 쓴다.
 
 - **정적** — HTML/CSS/JS/이미지뿐. 브라우저만으로 돈다. 치과 홈페이지는 거의
   항상 여기다 → **1번 경로 (GitHub Pages)**
@@ -78,6 +86,12 @@ gh api -X PUT repos/{owner}/<이름>/contents/.github/workflows/pages.yml \
   -f message="Pages 배포 설정" -f content="$(base64 -i <워크플로파일>)"
 ```
 
+Windows에는 `base64`가 없을 수 있다. 그때는 PowerShell로 만든다(항상 있다):
+
+```
+powershell -NoProfile -Command '[Convert]::ToBase64String([IO.File]::ReadAllBytes("<워크플로파일>"))'
+```
+
 파일이 올라가면 push 이벤트로 워크플로가 돌고 1~2분 뒤 주소가 열린다.
 
 주소는 `https://<아이디>.github.io/<이름>/` 이다. **여기서 바로 말하지 말고**
@@ -118,9 +132,21 @@ gh api repos/{owner}/<이름>/actions/runs --jq '.workflow_runs[0].conclusion'
 
 로그인이 필요 없다. 지금 도는 화면을 그대로 인터넷에 노출한다.
 
+### 먼저 어느 OS인지 확인해라 — 명령이 갈린다
+
+**작업 폴더 경로로 판별한다.** `C:\…` 로 시작하면 **Windows**, `/Users/…` 면
+**macOS**. 작업 폴더는 시스템 프롬프트의 작업 디렉터리 줄에 있다. 참가자에게
+묻지 마라 — 이미 알 수 있는 것을 묻는 것은 시간 낭비다.
+
+아래 명령은 macOS용과 Windows용이 **다르다**. 한쪽을 다른 쪽에서 쓰면 "명령을
+찾을 수 없다"로 죽는다. 실제로 그렇게 막힌 적이 있다 — Windows에서 `lsof`를
+불러 포트를 못 찾았다.
+
 ### cloudflared 준비
 
-`gh`와 같은 방식이다. **파일명을 조립하지 말고** 릴리스 API를 쓴다:
+**파일명을 조립하지 말고** 릴리스 API가 주는 `browser_download_url`을 쓴다.
+
+**macOS** — tgz라서 풀어야 한다:
 
 ```
 curl -sL https://api.github.com/repos/cloudflare/cloudflared/releases/latest \
@@ -128,16 +154,63 @@ curl -sL https://api.github.com/repos/cloudflare/cloudflared/releases/latest \
   | head -1 | cut -d'"' -f4
 ```
 
-받아서 `tar -xzf`로 풀고 `~/Library/Application Support/HypeProof-Studio/bin/`에
-둔다. 18MB 정도다. 받기 전에 뭘 왜 받는지 설명하고 승인을 받아라.
+받아서 `tar -xzf`로 풀고 `~/Library/Application Support/HypeProof-Studio/bin/`에 둔다.
 
-### 터널 열기
-
-Studio의 미리보기 서버가 이미 `http://127.0.0.1:<포트>`로 돌고 있다. 그 포트에
-붙인다:
+**Windows** — exe를 직접 배포한다. **압축 해제가 없다**:
 
 ```
-cloudflared tunnel --url http://127.0.0.1:<포트>
+curl.exe -sL https://api.github.com/repos/cloudflare/cloudflared/releases/latest \
+  | grep -o '"browser_download_url": *"[^"]*windows-amd64\.exe"' \
+  | head -1 | cut -d'"' -f4
+```
+
+받은 exe를 `%APPDATA%\HypeProof-Studio\bin\cloudflared.exe` 로 둔다(Studio가
+SDK를 두는 곳과 같은 뿌리다). `chmod +x`는 필요 없다.
+
+둘 다 18MB 정도다. 받기 전에 뭘 왜 받는지 설명하고 승인을 받아라.
+
+### 터널 열기 — 포트를 먼저 검증해라
+
+Studio의 미리보기 서버가 `http://127.0.0.1:<포트>`로 돌고 있다. 그런데 **열려
+있는 로컬 포트가 그것만이 아니다** — Studio 자체가 디버깅 포트 등을 함께 연다.
+포트 목록에서 눈으로 고르면 틀린다. 2026-07-26 실측: 디버깅 포트를 홈페이지로
+오인해 터널을 열었고 500이 나왔다.
+
+**가장 좋은 방법은 포트를 찾지 않는 것이다.** `live_preview_start` 도구를 쓸 수
+있으면 그것이 완성된 주소를 그대로 돌려준다 — 추측할 필요가 없다. 그 주소의
+포트를 쓰면 아래 탐색은 통째로 건너뛴다.
+
+도구를 못 쓰는 상황일 때만 후보를 찾는다.
+
+**macOS:**
+
+```
+lsof -nP -iTCP -sTCP:LISTEN | grep -i 'node\|Studio' | awk '{print $9}'
+```
+
+**Windows** — `lsof`는 없다. `netstat`은 프로세스로 못 걸러서 무관한 포트가
+잔뜩 섞이니 PowerShell을 쓴다. **작은따옴표로 감싸라** — 큰따옴표로 감싸면
+`$_`가 셸에서 먼저 비워져 명령이 깨진다(실측 확인):
+
+```
+powershell -NoProfile -Command 'Get-NetTCPConnection -State Listen -LocalAddress 127.0.0.1 | Where-Object { (Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue).ProcessName -match "node|HypeProof" } | Select-Object -ExpandProperty LocalPort'
+```
+
+**후보마다 그 포트가 정말 내 페이지를 주는지 확인해라:**
+
+```
+curl -s http://127.0.0.1:<포트>/ | head -c 200
+```
+
+Windows에서는 **반드시 `curl.exe`**로 써라. PowerShell에서 `curl`은
+`Invoke-WebRequest`의 별칭이라 이 인자들로는 실패한다(실측 확인).
+
+내가 만든 내용(병원 이름 등)이 보이면 맞는 포트다. 안 보이면 다음 후보로 간다.
+
+맞는 포트를 확인한 뒤에 터널을 연다:
+
+```
+cloudflared tunnel --url http://127.0.0.1:<확인한 포트>
 ```
 
 출력에 `https://<무작위>.trycloudflare.com`이 나온다. 이것도 `curl -sIL`로 200을
@@ -162,7 +235,7 @@ cloudflared tunnel --url http://127.0.0.1:<포트>
 |---|---|
 | Pages 가 `building` 에서 안 넘어감 | **레거시로 켜진 것이다.** `actions/runs` 에서 `startup_failure` 를 확인하고 위의 Actions 방식으로 다시 켠다. 재빌드 요청(`POST /pages/builds`)은 소용없다 — 실측으로 확인됨 |
 | Pages 주소가 404 (빌드는 success) | 1~2분 더 기다린다. 워크플로가 success면 곧 열린다 |
-| 저장소는 됐는데 Pages API 실패 | Settings▸Pages 를 브라우저로 열어 참가자와 같이 본다 |
+| 저장소는 됐는데 Pages API 실패 | Settings▸Pages 를 브라우저로 열어 **참가자와 같이 본다** — 코치가 대신 클릭하지 않는다 |
 | 다운로드가 느림/실패 | 행사장 와이파이일 수 있다. 터널(18MB)이 `gh`보다 가볍다 |
 | 어느 것도 안 됨 | 정직하게 말해라. 파일은 워크스페이스에 안전하게 있고, 저장소까지 됐다면 나중에 Pages만 켜면 된다 |
 

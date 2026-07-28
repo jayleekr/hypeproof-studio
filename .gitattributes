@@ -1,0 +1,11 @@
+# Normalize line endings so shell scripts never get CRLF-corrupted on Windows
+# checkouts. Git stores text as LF; the eol=* rules pin the working-tree ending.
+
+# Default: auto-detect text vs binary, and check out text with LF everywhere.
+* text=auto eol=lf
+
+# POSIX shell scripts MUST stay LF — CRLF breaks the shebang and `bash`.
+*.sh text eol=lf
+
+# PowerShell is happiest with CRLF on Windows.
+*.ps1 text eol=crlf

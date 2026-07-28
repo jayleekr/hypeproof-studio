@@ -94,3 +94,37 @@ const { safeNavigateUrl, quadCenter, buildAxSnapshot, normalizeBrowserUrl, isSam
 }
 
 console.log("All browser-control-helpers smoke tests passed.");
+
+// ─── coachTabsToClose — 코치 브라우징 탭을 하나로 유지한다 ───────────────────
+{
+  const { coachTabsToClose } = await import("../src/browserControlHelpers.ts");
+
+  // 실사용에서 실제로 쌓였던 조합: 프리뷰 + 보아치과 2개 + 404
+  const tabs = [
+    "http://127.0.0.1:51884/index.html",   // 0 라이브 프리뷰
+    "https://boaclinic.com/",              // 1
+    "https://boaclinic.com/about",         // 2
+    "https://boaclinic.com/about-us",      // 3 (404)
+  ];
+  // 다음에 /vision 을 연다 → 프리뷰만 남기고 바깥 탭 3개는 정리
+  assert.deepEqual(coachTabsToClose(tabs, "https://boaclinic.com/vision"), [1, 2, 3]);
+
+  // 이미 열려 있는 주소로 가면 그 탭은 남긴다 (재사용 대상)
+  assert.deepEqual(coachTabsToClose(tabs, "https://boaclinic.com/about"), [1, 3]);
+
+  // 음성 대조군 — 루프백은 어떤 경우에도 닫지 않는다
+  for (const preview of [
+    "http://127.0.0.1:51884/",
+    "http://localhost:3000/index.html",
+    "http://127.0.0.1:8080/a/b.html",
+  ]) {
+    assert.deepEqual(coachTabsToClose([preview], "https://example.com"), [],
+      `루프백을 닫으면 안 된다: ${preview}`);
+  }
+
+  // 빈 값·빈 목록은 아무것도 닫지 않는다
+  assert.deepEqual(coachTabsToClose([], "https://example.com"), []);
+  assert.deepEqual(coachTabsToClose([undefined, ""], "https://example.com"), []);
+
+  console.log("✓ coachTabsToClose: 프리뷰는 지키고 · 재사용 대상은 남기고 · 나머지만 정리");
+}

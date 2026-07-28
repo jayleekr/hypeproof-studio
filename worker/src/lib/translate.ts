@@ -142,6 +142,22 @@ export interface AnthropicRequest {
 export interface CoachContext {
   name?: string;
   personality?: string;
+  /**
+   * 학생 컴퓨터의 작업 폴더 절대경로. 클라이언트가 `x-hps-workspace` 헤더로 보낸다.
+   *
+   * 왜 헤더인가 (2026-07-27 실측). 앱은 시스템 프롬프트에 `<env>` 블록으로 이걸
+   * 붙여 왔지만(#428·#457), 워커는 클라이언트 `system` 을 **통째로 교체**한다
+   * (messages.ts: "REPLACED, never merged" — 주입 통로를 막는 올바른 설계).
+   * 그래서 세 번의 수정이 전부 무력이었고 코치는 SDK 경로에서 자기 작업 폴더를
+   * 한 번도 받은 적이 없다. 매 턴 `/app/workdir`·`/Users/workspace/` 같은 경로를
+   * 지어내고, 실패하고, `pwd` 로 복구하느라 한 턴에 34~164초를 태웠다.
+   *
+   * 경로만 받고 **문구는 워커가 소유한다.** 클라이언트는 문장을 넣을 수 없으므로
+   * 교체 설계의 안티-인젝션 성질이 유지된다.
+   */
+  workspace?: string;
+  /** 작업 폴더에 지금 있는 파일들 (루트 기준 상대경로). `x-hps-workspace-files`. */
+  workspaceFiles?: string[];
 }
 
 /** OpenAI-compatible request (Gemini's `/v1beta/openai/chat/completions`). */
@@ -582,11 +598,49 @@ function buildSkeletonLibrary(profile: Profile): string {
   return parts.join("\n");
 }
 
+/**
+ * 작업 폴더 블록. 경로가 없으면 아무것도 내지 않는다 — 없는 경로를 지어내라고
+ * 부추기는 빈 블록보다 침묵이 낫다.
+ *
+ * 파일 목록까지 주는 이유: 경로만 알려 줬을 때 코치는 여전히 `Glob` → `ls` →
+ * `find` 로 "여기 뭐가 있지"를 툴로 물었다(2026-07-26 실측, 한 턴의 80%). 목록이
+ * 있으면 물어볼 이유가 없다.
+ */
+function buildWorkspaceBlock(coach: CoachContext): string | null {
+  const cwd = sanitizePath(coach.workspace);
+  if (!cwd) return null;
+  const files = (coach.workspaceFiles ?? [])
+    .map((f) => sanitizePath(f))
+    .filter((f): f is string => !!f)
+    .slice(0, 80);
+  const lines = [
+    "# 작업 폴더",
+    `절대경로: ${cwd}`,
+    files.length
+      ? `지금 있는 파일:\n${files.map((f) => `  ${f}`).join("\n")}`
+      : "지금 있는 파일: (없음 — 아직 아무것도 만들지 않았다)",
+    "",
+    "파일 도구(Read/Write/Edit)에는 **위 절대경로 기준의 절대경로**를 넘긴다 — " +
+      "상대경로는 거부된다. 경로를 추측하거나 지어내지 않는다. 위 목록에 있는 " +
+      "파일을 찾으려고 탐색(find·ls·Glob)하지 않는다.",
+  ];
+  return lines.join("\n");
+}
+
+/** 경로 살균 — 개행/따옴표 제거, 길이 제한. 블록을 깨거나 문장을 주입할 수 없게. */
+function sanitizePath(s: string | undefined): string | null {
+  const v = (s ?? "").replace(/[\r\n]+/g, " ").replace(/["'`]/g, "").trim().slice(0, 400);
+  return v.length > 0 ? v : null;
+}
+
 function buildCoachTail(coach: CoachContext): string | null {
+  const workspace = buildWorkspaceBlock(coach);
   const name = (coach.name ?? "").trim();
   const personality = (coach.personality ?? "").trim();
-  if (!name && !personality) return null;
-  const parts: string[] = ["# 사용자의 코치 설정"];
+  if (!name && !personality) return workspace;
+  const parts: string[] = [];
+  if (workspace) parts.push(workspace, "");
+  parts.push("# 사용자의 코치 설정");
   if (name) {
     parts.push(`이 자녀는 당신을 **'${sanitizeForPrompt(name)}'**라고 부릅니다. 응답할 때 자신을 그렇게 칭하세요.`);
   }

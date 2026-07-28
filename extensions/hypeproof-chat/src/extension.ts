@@ -30,6 +30,7 @@ import {
 } from "./updateChecker";
 import { openBrowser, captureActivePage } from "./nativeBrowser";
 import { LiveServer } from "./liveServer";
+import { decideWorkspaceSwitch, isSameLocation } from "./workspaceRouting";
 import type { ResolvedProfile } from "./protocol";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
@@ -115,7 +116,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // cohort's folder (website vs game). If one is already open, no-op.
         // NOTE: this may reload the window; refreshConfig below still runs for
         // the already-open case.
-        if (await ensureWorkspace(profile)) {
+        if (await ensureWorkspace(profile, context)) {
           return; // window is reloading; post-reload activation continues onboarding
         }
       } else {
@@ -164,14 +165,28 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage("HypeProof: .html / .htm 파일만 preview 가능합니다.");
         return;
       }
-      const basePath = vscode.Uri.joinPath(target, "..");
+      // 미리보기는 **라이브 서버 하나로** 모은다 (원장 결정 2026-07-27).
+      //
+      // 예전에는 webview 로 HTML 을 직접 렌더했다. 그러면 코치가 보는 화면
+      // (live_preview_start → 127.0.0.1)과 학생이 우클릭으로 여는 화면이 **서로 다른
+      // 진실**이 된다. 실사용에서 우클릭 미리보기가 라이브보다 뒤처진 내용을 보여
+      // 줬고, 학생은 어느 쪽이 맞는지 알 방법이 없었다.
+      //
+      // 라이브 서버는 진짜 HTTP + 진짜 브라우저 + 저장 시 자동 새로고침이라
+      // 코치가 검증하는 화면과 정확히 같다.
+      const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (!root) {
+        vscode.window.showWarningMessage("HypeProof: 작업 폴더를 먼저 열어주세요.");
+        return;
+      }
       try {
-        const buf = await vscode.workspace.fs.readFile(target);
-        const html = Buffer.from(buf).toString("utf8");
-        await preview.show(html, basePath);
-        await preview.watchForReload(target);
+        const base = await liveServer.ensure(root);
+        // 워크스페이스 루트 기준 상대경로로 연다. 루트의 index.html 은 `/`.
+        const rel = path.relative(root, target.fsPath).split(path.sep).join("/");
+        const url = rel === "index.html" ? base : `${base.replace(/\/$/, "")}/${rel}`;
+        await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
       } catch (err) {
-        vscode.window.showErrorMessage(`HypeProof: 파일을 읽지 못했어요 — ${err instanceof Error ? err.message : String(err)}`);
+        vscode.window.showErrorMessage(`HypeProof: 미리보기를 열지 못했어요 — ${err instanceof Error ? err.message : String(err)}`);
       }
     }),
 
@@ -320,7 +335,8 @@ export async function activate(context: vscode.ExtensionContext) {
           provider.attachImageDataUrl(dataUrl, name);
           await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
         } catch {
-          void vscode.window.showWarningMessage("이미지를 읽지 못했어요. ⌘V로 붙여넣어 주세요.");
+          const pasteKey = process.platform === "darwin" ? "⌘V" : "Ctrl+V";
+          void vscode.window.showWarningMessage(`이미지를 읽지 못했어요. ${pasteKey}로 붙여넣어 주세요.`);
         }
       }
     }),
@@ -471,7 +487,7 @@ async function autoOnboard(
   //    folder is already open this is a no-op; otherwise it opens the
   //    profile-specified folder and the window reloads (post-reload activation
   //    finds the folder open and skips it).
-  if (await ensureWorkspace(profile)) {
+  if (await ensureWorkspace(profile, context)) {
     return; // window is reloading
   }
 
@@ -485,6 +501,45 @@ async function autoOnboard(
 // (#422): "~/HypeProofClinic" for the dental website cohort, "~/HypeProofGames"
 // for kids, etc. os.homedir() makes the fallback path always absolute.
 const LEGACY_WORKSPACE_DIRNAME = "HypeProofGames";
+
+/**
+ * globalState key holding the root we last tried to switch TO. Written before
+ * the reload, cleared once we land (or once we decide not to switch). Its only
+ * job is to make a failed `vscode.openFolder` fail ONCE: without it, a root that
+ * cannot be opened would be retried on every post-reload activation and the
+ * learner's window would reload forever mid-lecture.
+ */
+const WORKSPACE_SWITCH_ATTEMPT_KEY = "hypeproofChat.workspaceSwitchAttempt";
+
+async function clearWorkspaceSwitchAttempt(context?: vscode.ExtensionContext): Promise<void> {
+  if (!context) return;
+  if (context.globalState.get<string>(WORKSPACE_SWITCH_ATTEMPT_KEY) === undefined) return;
+  await context.globalState.update(WORKSPACE_SWITCH_ATTEMPT_KEY, undefined);
+}
+
+/**
+ * realpath the nearest EXISTING ancestor and re-append the tail, so a folder
+ * that does not exist yet still canonicalizes. Same shape as the twins in
+ * chatPanelProvider/sdkCoach (#384) — a symlinked home (`/var` → `/private/var`,
+ * a redirected profile folder on Windows) must not read as a DIFFERENT root, or
+ * we would switch away from the folder we are already in, forever.
+ */
+function canonicalizeFsPath(p: string): string {
+  let base = path.resolve(p);
+  const tail: string[] = [];
+  for (;;) {
+    try {
+      return tail.length === 0
+        ? fs.realpathSync(base)
+        : path.join(fs.realpathSync(base), ...tail.reverse());
+    } catch {
+      const parent = path.dirname(base);
+      if (parent === base) return path.resolve(p);
+      tail.push(path.basename(base));
+      base = parent;
+    }
+  }
+}
 
 // Per-tone background for the throwaway starter index.html. The title/subtitle
 // come from the single source of truth (TONE_LABELS.aboutTitle/aboutSubtitle),
@@ -532,7 +587,7 @@ function starterIndexHtml(profile?: ResolvedProfile | null): string {
  * misauthored profile can never point the open-folder at a relative path and
  * trigger a reload loop.
  */
-function resolveWorkspaceRoot(raw: string): string | null {
+export function resolveWorkspaceRoot(raw: string): string | null {
   const v = raw.trim();
   if (!v) return null;
   const expanded =
@@ -550,8 +605,15 @@ function resolveWorkspaceRoot(raw: string): string | null {
  * we fall back to the legacy `~/HypeProofGames` + game starter, so existing
  * cohorts are unchanged.
  *
- * Returns true if the window is reloading (caller should bail). Idempotent:
- * once a folder is open this returns false immediately.
+ * Returns true if the window is reloading (caller should bail).
+ *
+ * A folder being open is NOT automatically a no-op. VS Code restores the last
+ * window, so once `~/HypeProofGames` was opened it hijacked every later session:
+ * a different cohort's token could never move the window, and the coach's cwd
+ * (resolveCoachCwd prefers the OPEN folder) stayed on the stale one — an adult
+ * cohort ran its lecture inside the kids' game folder. So when the profile names
+ * a different root we switch to it (decideWorkspaceSwitch owns the rules; the
+ * reload-loop guard is `WORKSPACE_SWITCH_ATTEMPT_KEY` below).
  *
  * Race protection (#42): even with `onStartupFinished` activation, a
  * positional `--folder` arg may take a tick to register in
@@ -560,13 +622,73 @@ function resolveWorkspaceRoot(raw: string): string | null {
  * folder would briefly see workspaceFolders empty, fire openFolder, and
  * reload mid-onboard, racing the setToken QuickInput.
  */
-async function ensureWorkspace(profile?: ResolvedProfile | null): Promise<boolean> {
+async function ensureWorkspace(
+  profile?: ResolvedProfile | null,
+  context?: vscode.ExtensionContext,
+): Promise<boolean> {
+  let open: string[] = [];
   for (let i = 0; i < 10; i++) {
     const folders = vscode.workspace.workspaceFolders;
-    if (folders && folders.length > 0) return false;
+    if (folders && folders.length > 0) {
+      open = folders.map((f) => f.uri.fsPath);
+      break;
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
 
+  if (open.length > 0) {
+    const attempted = context?.globalState.get<string>(WORKSPACE_SWITCH_ATTEMPT_KEY) ?? null;
+    const decision = decideWorkspaceSwitch({
+      openFolders: open,
+      desiredRoot: profile?.workspace_root ? resolveWorkspaceRoot(profile.workspace_root) : null,
+      lastAttemptedRoot: attempted,
+      isE2E: !!process.env.HPS_TEST_E2E,
+      canonicalize: canonicalizeFsPath,
+    });
+    if (!decision.switch) {
+      console.info(`[workspace] staying in ${open[0]} — ${decision.reason}`);
+      // We just came back from a switch we ordered. Say so: a folder that
+      // silently changes underneath the learner reads as "my files are gone".
+      // The toast is post-reload on purpose — one fired before openFolder dies
+      // with the window and is never seen.
+      if (attempted && open.some((f) => isSameLocation(f, attempted, canonicalizeFsPath))) {
+        vscode.window.showInformationMessage(
+          `작업 폴더를 수업에 맞는 곳으로 옮겼어요: ${path.basename(attempted)} 📁`,
+        );
+      }
+      // The attempt marker has served its purpose (either we landed where we
+      // meant to, or we deliberately gave up). Clear it so a LATER cohort change
+      // is not mistaken for a failed retry of this one.
+      await clearWorkspaceSwitchAttempt(context);
+      return false;
+    }
+    console.warn(`[workspace] cohort folder differs — switching ${decision.from} → ${decision.to}`);
+    // Record BEFORE the reload: if the open fails we must not try again.
+    await context?.globalState.update(WORKSPACE_SWITCH_ATTEMPT_KEY, decision.to);
+    return await openWorkspaceFolder(decision.to, profile);
+  }
+
+  // Folder + starter are cohort-driven; legacy fallback keeps old cohorts intact
+  // and guarantees an absolute path (a relative workspace_root resolves to null).
+  const resolved = profile?.workspace_root ? resolveWorkspaceRoot(profile.workspace_root) : null;
+  const dir = resolved ?? path.join(os.homedir(), LEGACY_WORKSPACE_DIRNAME);
+  return await openWorkspaceFolder(dir, profile);
+}
+
+/**
+ * Create `dir` (with the cohort's starter page if empty) and open it as the
+ * single workspace root. Returns true when the open was issued — the window is
+ * reloading and the caller must bail. Returns false if the folder could not be
+ * created: we continue without a workspace rather than trapping the learner
+ * (chat + preview still work).
+ *
+ * Shared by BOTH entry paths (first open, and the cohort switch) so a switched
+ * folder gets the same trust/startup-editor treatment as a freshly created one.
+ */
+async function openWorkspaceFolder(
+  dir: string,
+  profile?: ResolvedProfile | null,
+): Promise<boolean> {
   // Disable the "Do you trust the authors of this folder?" modal BEFORE
   // opening the folder. It's auto-created by us; a learner should never
   // see a scary security dialog. Persisted to global settings so it sticks.
@@ -579,11 +701,6 @@ async function ensureWorkspace(profile?: ResolvedProfile | null): Promise<boolea
       .update("startupEditor", "none", vscode.ConfigurationTarget.Global);
   } catch { /* ignore: read-only profile */ }
 
-  // Folder + starter are cohort-driven; legacy fallback keeps old cohorts intact
-  // and guarantees an absolute path (a relative workspace_root resolves to null).
-  const resolved = profile?.workspace_root ? resolveWorkspaceRoot(profile.workspace_root) : null;
-  const dir = resolved ?? path.join(os.homedir(), LEGACY_WORKSPACE_DIRNAME);
-
   try {
     fs.mkdirSync(dir, { recursive: true });
     const indexPath = path.join(dir, "index.html");
@@ -591,8 +708,6 @@ async function ensureWorkspace(profile?: ResolvedProfile | null): Promise<boolea
       fs.writeFileSync(indexPath, starterIndexHtml(profile));
     }
   } catch {
-    // If we can't create the dir, don't trap the user — just continue without
-    // a workspace (chat + preview still work).
     return false;
   }
 

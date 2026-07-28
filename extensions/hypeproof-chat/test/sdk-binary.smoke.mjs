@@ -82,6 +82,7 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
 
 // ─── marker parsing + the seeded integrity gate ──────────────────────────────
 {
+  const BOM = "\uFEFF"; // PS 5.1 Out-File -Encoding utf8 prefix
   const SIZE = 240_245_936; // plausible real binary size (doc §2.2)
   const marker = JSON.stringify({
     sdkVersion: SDK_BINARY_VERSION,
@@ -97,6 +98,25 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
     tarballSha512: "sha512-abc",
     verifiedAt: "2026-07-14T00:00:00Z",
   });
+  // Windows PowerShell 5.1 `Out-File -Encoding utf8` prefixes EF BB BF. The
+  // marker written by an older seed-sdk-binary.ps1 must still parse, or the
+  // seeded claude.exe is rejected and Studio silently drops to proxy-only.
+  assert.deepEqual(
+    parseSdkBinaryMarker(BOM + marker),
+    {
+      sdkVersion: SDK_BINARY_VERSION,
+      size: SIZE,
+      tarballSha512: "sha512-abc",
+      verifiedAt: "2026-07-14T00:00:00Z",
+    },
+    "UTF-8 BOM (PS 5.1 Out-File) must not break the marker",
+  );
+  assert.deepEqual(
+    isSeededBinaryTrusted({ stat, markerRaw: BOM + marker }),
+    { ok: true },
+    "a BOM-prefixed marker must still trust the seeded binary",
+  );
+
   assert.equal(parseSdkBinaryMarker(null), null);
   assert.equal(parseSdkBinaryMarker("not json"), null);
   assert.equal(parseSdkBinaryMarker(JSON.stringify({ sdkVersion: "x" })), null, "missing fields");

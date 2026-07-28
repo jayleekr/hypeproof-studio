@@ -54,7 +54,11 @@ function reducer(state: State, action: Action): State {
     case "config":
       return { ...state, config: action.config };
     case "history":
-      return { ...state, messages: action.messages };
+      // 활동 로그와 에러도 같이 비운다. Clear 를 눌러도 직전 턴의 툴 호출 목록이
+      // 화면에 남아 있었다(2026-07-27 실사용) — 대화는 사라졌는데 "무슨 도구를
+      // 썼는지"만 떠 있어서 어느 대화의 것인지 알 수 없는 상태가 된다.
+      // toolLog 는 streamStart 에서만 비워지고 있었다.
+      return { ...state, messages: action.messages, toolLog: [], error: null };
     case "streamStart":
       return {
         ...state,
