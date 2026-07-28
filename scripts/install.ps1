@@ -33,8 +33,11 @@
     Unattended:
       -y / -NonInteractive  or  env HPS_NONINTERACTIVE=1   -> no prompts.
       -NoModifyPath         or  env INSTALLER_NO_MODIFY_PATH -> never touch PATH.
-      -SkipStudio           or  env HPS_SKIP_STUDIO=1 -> deps only (skip Studio
-                            app + SDK seed), mirroring install.sh's flag.
+      -SkipStudio           or  env HPS_SKIP_STUDIO=1 -> skip the Studio APP
+                            install (it is already here). Deps, the SDK seed and
+                            the doctor's SDK check all still run — a
+                            click-installed Studio ships no claude.exe, so this
+                            flag must not be the thing that keeps it missing.
 #>
 
 [CmdletBinding()]
@@ -44,11 +47,18 @@ param(
     [switch]$NonInteractive,
     [switch]$NoModifyPath,
     [switch]$DoctorOnly,
-    # Mirror of install.sh's HPS_SKIP_STUDIO=1 ("skip Studio app + SDK seed —
-    # deps only"): same name, same semantics. Needed when this script runs from
-    # INSIDE a running Studio (the coach's shell): Install-Studio would try to
-    # replace the very app executing it. The doctor honors it too, exactly like
-    # install.sh gates its Studio/SDK checks behind the flag (install.sh:512).
+    # "The Studio APP is already here — don't reinstall it." Needed when this
+    # script runs from INSIDE a running Studio (the coach's shell):
+    # Install-Studio would try to replace the very app executing it.
+    #
+    # Scope is the app and nothing else. The SDK seed and the doctor's SDK check
+    # deliberately run anyway: a click-installed (.exe) Studio arrives WITHOUT
+    # claude.exe, so folding the seed into this flag left the coach's own
+    # "환경 세팅 점검" unable to supply the one piece those participants lacked,
+    # and made doctor pass on a machine that would silently run proxy-only.
+    # install.sh still gates both behind its flag (install.sh:477,512); that is
+    # a known divergence, tracked separately — macOS never reaches this path
+    # because workshop-setup only runs the installer on Windows.
     [switch]$SkipStudio,
     # Remote manifest refresh is best-effort (falls back to the embedded pins).
     [string]$ManifestUrl = 'https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/hypeproof-deps.yaml',
@@ -649,10 +659,10 @@ function Invoke-Doctor {
     }
 
     if ($SkipStudio) {
-        # deps-only pass (mirrors install.sh:512): the Studio app + SDK are the
-        # caller's concern — e.g. the coach runs this from inside a running
-        # Studio that click-install already provided and that self-seeds its SDK.
-        Write-Info 'Studio/SDK checks skipped (HPS_SKIP_STUDIO=1 - deps-only pass)'
+        # deps-only pass: the Studio APP is the caller's concern — the coach runs
+        # this from inside a running Studio that click-install already provided.
+        # The SDK seed is NOT skipped with it (see below).
+        Write-Info 'Studio app check skipped (HPS_SKIP_STUDIO=1 - deps-only pass)'
     } else {
         # Studio install marker.
         if ($receipt.studio -eq $manifest.studio.version) {
@@ -660,15 +670,26 @@ function Invoke-Doctor {
         } else {
             $fail += "Studio $($manifest.studio.version): not recorded as installed"
         }
+    }
 
-        # SDK seed + verification marker (canonical seed-sdk-binary.ps1 convention:
-        # sdk\<version>\claude.exe + claude.exe.verified.json, trusted via marker).
-        $seeded = Get-SeededSdk
-        if ($seeded) {
-            Write-Ok "SDK $($seeded.version): seeded + verified"
-        } else {
-            $fail += 'SDK: missing seed or untrusted claude.exe.verified.json marker'
-        }
+    # SDK seed + verification marker (canonical seed-sdk-binary.ps1 convention:
+    # sdk\<version>\claude.exe + claude.exe.verified.json, trusted via marker).
+    #
+    # Checked in BOTH passes on purpose. This used to sit inside the else-branch,
+    # resting on "click-install already provided a Studio that self-seeds its
+    # SDK" — a premise nothing implements: the native claude.exe is deliberately
+    # excluded from the app bundle (verify-branding.sh fails the build if it
+    # leaks in), and there is no in-app seeder yet. So a participant who
+    # installed via the .exe and then ran the coach's "환경 세팅 점검"
+    # (workshop-setup skill → HPS_SKIP_STUDIO=1) got "doctor: ALL CHECKS PASSED"
+    # on a machine with no claude.exe. Studio then fell back to the proxy coach
+    # — no file/shell tools, an 8-iteration browser-loop cap instead of 60 SDK
+    # turns — silently (#476). Nobody in the room could tell.
+    $seeded = Get-SeededSdk
+    if ($seeded) {
+        Write-Ok "SDK $($seeded.version): seeded + verified"
+    } else {
+        $fail += 'SDK: missing seed or untrusted claude.exe.verified.json marker'
     }
 
     Write-Host ''
@@ -738,16 +759,26 @@ function Main {
 
     if ($SkipStudio) {
         Write-Head 'Install HypeProof Studio app'
-        Write-Warn2 'HPS_SKIP_STUDIO=1 - skipping Studio app + SDK seed (deps only)'
+        Write-Warn2 'HPS_SKIP_STUDIO=1 - skipping the Studio app install (deps only)'
     } else {
         Write-Head 'Install HypeProof Studio app'
         try { Install-Studio $manifest $receipt | Out-Null }
         catch { Write-Err2 "Studio install error: $($_.Exception.Message)" }
-
-        Write-Head 'Seed native SDK binary (claude.exe)'
-        try { Seed-Sdk $manifest $receipt | Out-Null }
-        catch { Write-Err2 "SDK seed error: $($_.Exception.Message)" }
     }
+
+    # The SDK seed runs in BOTH passes. HPS_SKIP_STUDIO means "the app is already
+    # here" — it does NOT mean the native claude.exe is: a click-installed
+    # (.exe) Studio ships without it, on purpose (verify-branding.sh fails the
+    # build if the native package leaks into the bundle) and nothing seeds it
+    # afterwards. Bundling the seed into the skip made the coach's own
+    # "환경 세팅 점검" (workshop-setup skill, which runs this with
+    # HPS_SKIP_STUDIO=1) the one path that could never fix the one thing those
+    # participants were missing. Seed-Sdk is idempotent — an already-seeded
+    # machine short-circuits on the trusted marker, so re-running stays cheap
+    # and safe, which is what the skill promises participants.
+    Write-Head 'Seed native SDK binary (claude.exe)'
+    try { Seed-Sdk $manifest $receipt | Out-Null }
+    catch { Write-Err2 "SDK seed error: $($_.Exception.Message)" }
 
     Write-Receipt $receipt
     Write-Ok "Receipt written: $script:ReceiptPath"
