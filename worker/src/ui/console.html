@@ -54,6 +54,7 @@
   .tok-line { margin-top: 8px; padding: 8px; background: #0f1115; border-radius: 4px; }
   .tok-line .name { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
   .tok-line .token { font-family: ui-monospace, monospace; font-size: 10px; word-break: break-all; user-select: all; }
+  .tok-line .tok-copy { width: auto; margin-top: 8px; padding: 6px 12px; font-size: 11px; }
   .help { font-size: 11px; color: var(--muted); margin-top: 4px; }
   .err-detail { margin-top: 8px; opacity: 0.7; font-size: 11px; }
 </style>
@@ -333,12 +334,28 @@ function renderMinter(scope, state) {
       }
     }
     btn.disabled = false; btn.textContent = "일괄 발급 →";
+    // Two copy affordances, because they serve two different destinations and
+    // mixing them up is a lecture-day trap (#427): the per-line button copies
+    // the RAW token (goes straight into the Studio token box), the bulk button
+    // copies "이름: 토큰" pairs (goes into KakaoTalk so each student can find
+    // their own line). Pasting the bulk format into the app yields a 401 —
+    // hence the explicit warning on the bulk label.
     out.innerHTML =
-      results.map((r) => '<div class="tok-line"><div class="name">' + esc(r.u) + (r.error ? ' — <span style="color:var(--warn)">' + esc(mapServerError(r.error)) + '</span>' : "") + '</div>' +
-        (r.token ? '<div class="token">' + esc(r.token) + '</div>' : "") + '</div>').join("") +
+      results.map((r, i) => '<div class="tok-line"><div class="name">' + esc(r.u) + (r.error ? ' — <span style="color:var(--warn)">' + esc(mapServerError(r.error)) + '</span>' : "") + '</div>' +
+        (r.token
+          ? '<div class="token">' + esc(r.token) + '</div>' +
+            '<button class="tok-copy" data-idx="' + i + '">이 토큰만 복사</button>'
+          : "") + '</div>').join("") +
       (results.some((r) => r.token)
-        ? '<button id="copyall-' + esc(scope.cohort) + '">전체 복사 (이름: 토큰)</button>'
+        ? '<button class="ghost" id="copyall-' + esc(scope.cohort) + '">명단용 전체 복사 (이름: 토큰 — 앱에 그대로 붙이면 안 됩니다)</button>'
         : "");
+    out.querySelectorAll(".tok-copy").forEach((b) => {
+      b.onclick = () => {
+        navigator.clipboard.writeText(results[Number(b.dataset.idx)].token);
+        b.textContent = "복사됨 ✓";
+        setTimeout(() => { b.textContent = "이 토큰만 복사"; }, 1500);
+      };
+    });
     const copyBtn = document.getElementById("copyall-" + scope.cohort);
     if (copyBtn) copyBtn.onclick = () => {
       navigator.clipboard.writeText(results.filter((r) => r.token).map((r) => r.u + ": " + r.token).join("\n\n"));

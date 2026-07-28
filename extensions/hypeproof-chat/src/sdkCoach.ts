@@ -22,6 +22,8 @@ import { pathToFileURL } from "node:url";
 import {
   buildHypeproofMcpServer,
   HYPEPROOF_MCP_SERVER_NAME,
+  MCP_BROWSER_OPEN,
+  resolveAlreadyOpen,
   type BrowserMcpHost,
   type SdkMcpFactory,
   type ZodLike,
@@ -35,6 +37,7 @@ import {
   evaluateSdkToolUse,
   SDK_STALL_FRIENDLY,
   SDK_STREAM_STALL_MS,
+  absolutizeToolPaths,
   profileToAgentOptions,
   resolveSdkBinary,
   resolveSdkModule,
@@ -42,6 +45,7 @@ import {
   sdkBinaryMarkerPath,
   sdkToolToActionRequest,
   seededSdkBinaryPath,
+  type SdkActivity,
   type CoachToolAction,
   type SdkBinaryResolution,
   type SdkBinaryStat,
@@ -102,6 +106,12 @@ export interface SdkCoachArgs {
   /** Workspace root for the SDK's file tools (Phase-2 tiers). */
   cwd?: string;
   onDelta: (delta: string) => void;
+  /**
+   * #414 — what the coach is DOING (thinking / tool calls / results), so the
+   * student sees real work instead of a static "만드는 중" line. Optional: the
+   * proxy path has no equivalent, and a caller that omits it loses nothing else.
+   */
+  onActivity?: (activity: SdkActivity) => void;
   onCitations: (citations: Citation[]) => void;
   onAssetScore: (score: AssetScoreChunk) => void;
   /** Manual-approve gate. Resolves true to allow the tool. */
@@ -168,6 +178,43 @@ export interface AgentSdkModule {
  */
 function extensionDistDir(): string | undefined {
   return typeof __dirname === "string" && __dirname ? __dirname : undefined;
+}
+
+/**
+ * 워크스페이스에 지금 있는 파일 목록 (루트 기준 상대경로, 정렬).
+ *
+ * 시스템 프롬프트의 `<env>` 에 실려 코치가 "여기 뭐가 있지"를 툴로 묻지 않게 한다.
+ * 2026-07-26 실측: cwd 를 받고도 `Glob` → `ls` → `find ~` 로 홈 전체를 훑었고
+ * 그 한 턴의 151초 중 120초가 거기서 증발했다.
+ *
+ * 상한을 둔다 — 학생이 node_modules 를 만들어 두면 프롬프트가 터진다. 코호트
+ * 워크스페이스는 보통 파일 10개 미만이라 실사용에서는 상한에 닿지 않는다.
+ */
+const WORKSPACE_LISTING_MAX = 80;
+function listWorkspaceFiles(root?: string): string[] | undefined {
+  if (!root) return undefined;
+  const SKIP = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__"]);
+  const out: string[] = [];
+  const walk = (dir: string, rel: string, depth: number): void => {
+    if (out.length >= WORKSPACE_LISTING_MAX || depth > 3) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (out.length >= WORKSPACE_LISTING_MAX) return;
+      if (e.name.startsWith(".") || SKIP.has(e.name)) continue;
+      const next = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(path.join(dir, e.name), next, depth + 1);
+      else out.push(next);
+    }
+  };
+  walk(root, "", 0);
+  // 목록이 없다는 것과 "비어 있다"는 다르다. 전자는 undefined(블록 생략),
+  // 후자는 빈 배열 → "아직 아무것도 만들지 않았다"로 표시된다.
+  return out.sort();
 }
 
 /**
@@ -460,6 +507,9 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       // node-modules source: the option is omitted and the SDK's own
       // optionalDependency lookup runs (dev behavior, unchanged).
       pathToClaudeCodeExecutable: binary.path,
+      // 코치가 "여기 뭐가 있지"를 툴로 묻지 않게 미리 준다. 실측에서 이 탐색이
+      // 한 턴의 80%를 먹었다.
+      workspaceFiles: listWorkspaceFiles(args.cwd),
     }),
     // Every tool call routes here (allowedTools is empty — an entry there
     // would auto-approve and bypass this gate). The pure policy matrix
@@ -474,6 +524,20 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     ...(mcpServers ? { mcpServers } : {}),
     canUseTool: async (name, input) => {
       lastToolCallAt = Date.now();
+      // 상대경로를 먼저 흡수한다. 벤더 SDK 의 파일 도구는 절대경로만 받으므로
+      // (`sdk-tools.d.ts`: "must be absolute, not relative") `Read("agent.md")` 는
+      // 파일이 있어도 거부된다. 코치는 그걸 "파일이 없다"로 읽고 `find ~` 로
+      // 홈을 뒤진다 — 2026-07-26 실측에서 한 턴의 151초 중 120초가 여기서 증발했다.
+      //
+      // 판정(containment)보다 **먼저** 고친다. 그래야 정책도 절대경로를 보고
+      // 판단하고, 학생에게 보이는 승인 모달에도 실제 경로가 뜬다.
+      const abs = absolutizeToolPaths({ toolName: name, input, workspaceRoot: args.cwd });
+      if (abs.rewritten.length > 0) {
+        for (const r of abs.rewritten) {
+          console.warn(`[coach] 상대경로 흡수: ${name}.${r.key} "${r.from}" → "${r.to}"`);
+        }
+      }
+      input = abs.input as typeof input;
       const verdict = evaluateSdkToolUse({
         toolName: name,
         input,
@@ -512,13 +576,28 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       if (verdict.decision === "allow") {
         return { behavior: "allow" as const, updatedInput: input };
       }
+      // #415 — 이미 열려 있는 페이지를 다시 여는 browser_open 은 모달 없이
+      // 통과시킨다. 핸들러가 short-circuit 해서 **실제로 여는 동작이 없기**
+      // 때문 — 물을 것이 없는데 뜨는 승인 모달은 학생의 턴을 몇 분씩 막고
+      // (2026-07-24 실사용 ~2분), 반복되면 게이트가 교육 장치가 아니라 잡음이
+      // 된다(delegation_judgment). 판정은 핸들러와 동일한 resolveAlreadyOpen
+      // 단일 소스 — 갈라지면 "모달 없는 실제 오픈" 구멍이 된다.
+      if (name === MCP_BROWSER_OPEN && args.browserHost) {
+        const { alreadyOpen } = await resolveAlreadyOpen(args.browserHost,
+          (input as { url?: unknown } | undefined)?.url);
+        if (alreadyOpen) return { behavior: "allow" as const, updatedInput: input };
+      }
       // #403 — the modal blocks the SDK stream for as long as the human takes
       // to decide. Mark the turn as human-blocked so the stall watchdog below
       // doesn't read that (correct) silence as a wedged turn.
       awaitingUser += 1;
       let ok: boolean;
       try {
-        ok = await args.requestApproval({ toolName: name, input });
+        ok = await args.requestApproval({
+          toolName: name,
+          input,
+          ...(verdict.destructive ? { destructive: true } : {}),
+        });
       } finally {
         awaitingUser -= 1;
       }
@@ -558,6 +637,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     abortQuery: () => abortController.abort(),
     makeFatalAuthError: () => new ProxyAuthError("expired", TOKEN_EXPIRED_FRIENDLY),
     onDelta: args.onDelta,
+    ...(args.onActivity ? { onActivity: args.onActivity } : {}),
     stallMs,
     makeStallError: () => {
       // Developer-side signal — the student only ever sees the Korean line.

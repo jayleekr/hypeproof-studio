@@ -887,6 +887,67 @@ const TINY_PNG =
   console.log("✓ callGeminiResilient: retry transient, 404 → skip to fallback, surface 4xx");
 }
 
+// ---- callAnthropicResilient: retry transient 429/5xx, NO model fallback -----
+// #373 — the prod (anthropic) `/v1/chat` path must absorb a transient 429 from
+// the shared org token pool during the 23-concurrent SK Biopharm class, the
+// way the gemini branch already does. Unlike gemini there is NO model
+// fallback: the requested model must never change across retries.
+{
+  const { callAnthropicResilient } = await import("../src/lib/anthropic.ts");
+  const realFetch = globalThis.fetch;
+  const reqModels = [];
+  const scriptFetch = (statuses) => {
+    let i = 0;
+    return async (_url, init) => {
+      reqModels.push(JSON.parse(init.body).model);
+      const status = statuses[Math.min(i++, statuses.length - 1)];
+      return new Response(status === 200 ? '{"ok":true}' : '{"error":"x"}', { status });
+    };
+  };
+  const MODEL = "claude-sonnet-4-6";
+  const body = { model: MODEL, messages: [], max_tokens: 100 };
+  try {
+    // 1. First try succeeds → single call, no retry.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([200]);
+    let r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 200);
+    assert.equal(reqModels.length, 1, "no extra calls on first success");
+
+    // 2. 429 then 200 → retried once, absorbed invisibly.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([429, 200]);
+    r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 200, "429 absorbed by retry");
+    assert.deepEqual(reqModels, [MODEL, MODEL], "same model on retry — no fallback");
+
+    // 3. 503 x2 then 200 → two retries, still same model.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([503, 503, 200]);
+    r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 200);
+    assert.deepEqual(reqModels, [MODEL, MODEL, MODEL], "3 calls, model never changes");
+
+    // 4. Non-retryable 400 → surfaced immediately, no retry.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([400, 200]);
+    r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 400, "4xx not masked");
+    assert.equal(reqModels.length, 1, "no retry on a non-transient error");
+
+    // 5. Persistent 429 → exhausted after 3 attempts, last failure surfaced
+    //    (route then maps it to CHAT_PASSTHROUGH_4XX). Bounded: exactly 3 calls.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([429, 429, 429, 429]);
+    r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 429, "exhausted → last failure surfaced");
+    assert.equal(reqModels.length, 3, "initial + 2 retries, then stop");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  console.log("✓ callAnthropicResilient: retry transient 429/5xx, no model fallback, surface 4xx");
+}
+
 // ---- translate: tools dropped when profile.sandbox.mcp_tools_enabled empty
 {
   const out = translate(
@@ -1635,6 +1696,7 @@ const TINY_PNG =
 // (children's-data invariant — the only thing protecting kids data from R2).
 {
   const { listProfiles } = await import("../src/profiles/index.ts");
+  const { isKnownSkill, resolveSkills } = await import("../src/skills/index.ts");
   const all = listProfiles();
   assert.ok(all.length > 0, "at least one profile registered");
   for (const p of all) {
@@ -1695,10 +1757,58 @@ const TINY_PNG =
   // read+write SDK workspace tools (coach edits index.html directly), the
   // only browser MCP grant (slice 2), and the only SDK subagents grant
   // (slice 3 — read-only 코드리뷰어/리서처, delegation modal-gated).
+  // epic #431 — and the only `shell` grant: the 큐시트 20:35 블록(배포 URL·
+  // GitHub 저장소) has no implementation path without it, and a deploy SKILL
+  // without a deploy TOOL just makes the coach fabricate a URL (#428's failure
+  // class). Arbitrary commands; the approval modal is the gate.
+  // deepEqual (not a subset check) is deliberate — a shell grant must never
+  // spread to another cohort by accident, so widening this shape has to be an
+  // explicit edit here.
+  // subagents 는 켜져 있다. 한때 껐던 이유(병렬 4개 → Stream closed 28건)는 능력이
+  // 아니라 **동시성**이 방아쇠였기 때문이다 — 같은 서브에이전트가 1개일 때는 멀쩡했다.
+  // 그래서 클라이언트가 CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=2 로 묶는다
+  // (extensions/hypeproof-chat/test/workspace-header.smoke.mjs 가 그 값을 검증).
   assert.deepEqual(
     copyclone.sdk_tools,
-    { read: true, write: true, browser: true, subagents: true },
-    "copyclone: SDK workspace read+write + browser MCP + subagents on (adult, #282 P2)",
+    { read: true, write: true, browser: true, subagents: true, shell: true },
+    "copyclone: SDK read+write + browser MCP + subagents + shell on (#282 P2 / #431)",
+  );
+
+  // epic #431 — the publish skill and the shell grant are a PAIR. Skill without
+  // shell → the coach narrates a deploy it cannot perform and fabricates a URL
+  // (#428's failure class, with the final deliverable as the fabrication).
+  // Shell without the skill → the coach reaches for `git`, and macOS's
+  // /usr/bin/git is a CLT stub that opens a 2 GB GUI installer mid-lecture.
+  // Assert both together so neither can be removed alone.
+  assert.deepEqual(
+    copyclone.skills,
+    ["design-craft", "github-repo", "publish-homepage"],
+    "copyclone: 스킬 3종 (디자인 · GitHub · 배포)",
+  );
+  // resolveSkills only console.warns on an unknown name, so a typo would ship
+  // an inert cohort that LOOKS configured. Resolve it for real.
+  for (const name of copyclone.skills ?? []) {
+    assert.ok(isKnownSkill(name), `${name} resolves in the registry — a typo ships silently`);
+  }
+  // 디자인은 프롬프트에서 스킬로 옮긴 것이다. 옮기다 유실되면 품질 바닥이 통째로
+  // 사라지므로 특징적인 문장으로 도착을 확인한다.
+  const designMd = resolveSkills(["design-craft"]);
+  assert.ok(designMd.includes("품질 바닥"), "design-craft: 품질 바닥 섹션이 살아 있다");
+  assert.ok(designMd.includes("prefers-reduced-motion"), "design-craft: 접근성 항목이 살아 있다");
+  // 프롬프트에는 더 이상 없어야 한다 — 양쪽에 있으면 지시가 두 배로 실린다.
+  assert.ok(
+    !copyclone.system_prompt.includes("품질 바닥"),
+    "코호트 프롬프트에서 디자인 본문이 제거됐다 (중복 주입 방지)",
+  );
+  // #431 — 셸을 부여했으므로 "셸 실행 금지"가 프롬프트에 남아 있으면 코치가 스스로
+  // 거부한다. 부여와 프롬프트가 어긋나지 않게 잠근다.
+  assert.ok(
+    !copyclone.system_prompt.includes("셸 실행·외부 명령 금지"),
+    "프롬프트의 셸 금지 문구가 제거됐다 (sdk_tools.shell과 모순)",
+  );
+  assert.ok(
+    resolveSkills(copyclone.skills).length > 500,
+    "copyclone skill markdown is actually bundled (non-trivial length)",
   );
   for (const p of all) {
     if (p.id !== copyclone.id) {

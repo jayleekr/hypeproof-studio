@@ -1,12 +1,14 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
-import { TOKEN_KEY } from "./extension";
+import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
-import { sdkToolToActionRequest, isAbortError } from "./sdkCoachHelpers";
+import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
+import { commandSignature, describeCommandForApproval } from "./shellPolicy";
+import { originOfUrl, coachTabsToClose } from "./browserControlHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -45,6 +47,20 @@ import {
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
+/**
+ * 승인 모달 문구. `kind` 별로 무엇을 하려는지 한국어로 말하고, 확인 버튼도
+ * 그 행동의 동사로 쓴다 — `Approve` 보다 `저장`/`위임`이 무엇을 승인하는지
+ * 분명하다. 취소는 VS Code 가 항상 붙이므로 따로 만들지 않는다.
+ */
+const APPROVAL_COPY: Record<string, { title: string; verb: string }> = {
+  writeFile: { title: "코치가 파일을 저장하려고 해요:", verb: "저장" },
+  readFile: { title: "코치가 파일을 읽으려고 해요:", verb: "읽기" },
+  webSearch: { title: "코치가 웹에서 찾아보려고 해요:", verb: "검색" },
+  delegateAgent: { title: "코치가 다른 에이전트에게 맡기려고 해요:", verb: "맡기기" },
+  browserType: { title: "코치가 페이지에 입력하려고 해요:", verb: "입력" },
+};
+
+
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private activeStreams = new Map<string, AbortController>();
@@ -70,6 +86,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // the webview forgets everything on hide/show remounts; see AiDisclosureGate.
   private readonly aiDisclosure = new AiDisclosureGate();
   private activeCohortId: string | null = null;
+  /**
+   * epic #431 — shell command signatures the participant chose to always
+   * allow. SESSION-SCOPED and never persisted: a fresh window restores the
+   * full judgment. Destructive commands never reach this set (shellPolicy's
+   * commandSignature returns null for them), so `rm` can never be remembered.
+   */
+  private readonly approvedCommandSignatures = new Set<string>();
+  /**
+   * "이 사이트는 항상 허용" 을 누른 오리진. 셸 시그니처와 같은 규율 —
+   * 세션 한정, 저장하지 않는다. 오리진 단위라 다른 사이트는 다시 묻는다.
+   */
+  private readonly approvedBrowserOrigins = new Set<string>();
+  /** #457 — SDK 경로의 검사 도구용 CDP 실행기. 첫 사용 때 만든다. */
+  private mcpBrowser?: BrowserControl;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
   // x-request-id header on every response we can correlate against in tail.
@@ -466,13 +496,38 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (!root) return null;
     try {
       const url = await this.liveServer.ensure(root);
-      // Avoid stacking tabs: if a tab already shows this server, it refreshes
-      // itself via the injected live-reload SSE; otherwise open a new one.
-      const already = (vscode.window.browserTabs ?? []).some((t) => t.url?.startsWith(url));
-      if (already) {
+      // Avoid stacking preview tabs on the right. The live server binds a fresh
+      // random port on each (re)start (app relaunch, root change), so the URL
+      // can differ from a previously-opened tab — an exact-URL match alone then
+      // fails and every restart opens ANOTHER tab. So we match by "is this a
+      // loopback preview tab" (port-independent): reuse the one already on the
+      // current URL via SSE reload; otherwise close any STALE preview tabs
+      // (dead port from a prior server start) and open exactly one fresh tab.
+      const tabs = vscode.window.browserTabs ?? [];
+      const isPreviewTab = (u?: string): boolean =>
+        !!u && /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(u);
+      const current = tabs.find((t) => t.url?.startsWith(url));
+      if (current) {
         this.liveServer.reload();
       } else {
-        await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
+        for (const t of tabs) {
+          if (isPreviewTab(t.url)) {
+            try {
+              await t.close();
+            } catch {
+              /* best-effort — a tab we can't close shouldn't block the preview */
+            }
+          }
+        }
+        // Open in the FIRST editor column (not Beside): this cohort edits via the
+        // coach, so the editor area is otherwise an empty welcome group. Beside
+        // would open the preview next to that empty group, leaving a blank pane
+        // between the chat sidebar and the preview. ViewColumn.One fills the main
+        // editor area so the layout is just: chat sidebar | preview.
+        await vscode.window.openBrowserTab(url, {
+          viewColumn: vscode.ViewColumn.One,
+          preserveFocus: true,
+        });
       }
       return url;
     } catch {
@@ -490,6 +545,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private buildBrowserMcpHost(): BrowserMcpHost {
     return {
       openBrowser: async (url: string) => {
+        // 코치 브라우징 탭은 하나로 유지한다. 재사용 없이 매번 새로 열면 탭이
+        // 쌓이고(실측: 3개, 그중 하나는 404), 스크린샷이 쓰는 activeBrowserTab 이
+        // 방금 연 탭이 아니게 될 수 있다. 라이브 프리뷰(루프백)는 건드리지 않는다.
+        const tabs = vscode.window.browserTabs ?? [];
+        for (const i of coachTabsToClose(tabs.map((t) => t.url), url)) {
+          try {
+            await tabs[i]?.close();
+          } catch {
+            /* 못 닫는 탭이 열기를 막아서는 안 된다 */
+          }
+        }
         // URL already passed evaluateSdkToolUse's policy + the approval modal;
         // the shared command normalizes and opens the integrated browser tab.
         await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
@@ -499,19 +565,85 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (!tab) return null;
         try {
           const ctx = await capturePageContext(tab);
-          if (!ctx.imageBase64) return null;
+          if (!ctx.imageBase64) {
+            // 원인을 남긴다. `catch { return null }` 이 이유를 통째로 삼켜서
+            // 실측(2026-07-26)에서 스크린샷이 왜 실패하는지 못 밝혔다.
+            console.warn(`[coach] screenshot: empty image for ${tab.url ?? "(no url)"}`);
+            return null;
+          }
           return {
             imageBase64: ctx.imageBase64,
             mimeType: "image/jpeg",
             url: ctx.url,
             title: ctx.title,
           };
-        } catch {
+        } catch (e) {
+          console.warn(`[coach] screenshot failed for ${tab.url ?? "(no url)"}: ${String(e)}`);
           return null;
         }
       },
       startLivePreview: () => this.startLivePreview(),
+      // #415 — 지금 떠 있는 페이지를 가장 싸게 읽는 경로. `activeBrowserTab` 은
+      // url/title 을 그대로 들고 있어 CDP 접속도 스크린샷도 필요 없다
+      // (URL 하나 알자고 이미지를 뜨면 토큰도 시간도 낭비).
+      currentPage: async () => {
+        const tab = vscode.window.activeBrowserTab;
+        if (!tab?.url) return null;
+        return { url: tab.url, title: tab.title };
+      },
+      // #457 — 검사 3종(read/click/type)을 CDP 실행기에 그대로 위임한다.
+      // 프록시 경로(#278)가 쓰던 BrowserControl 을 재사용한다 — 같은 동작을 두 벌
+      // 구현하면 한쪽만 고쳐지는 버그가 생긴다. 인스턴스는 여기서 lazily 만들고
+      // dispose 는 패널 정리 경로가 맡는다.
+      inspect: async (name, input) => {
+        try {
+          this.mcpBrowser ??= new BrowserControl();
+          const r = await this.mcpBrowser.execute({ id: `mcp-${name}`, name, input });
+          // BrowserToolResult(content: text | image_url) → McpToolResult(text | image)
+          return {
+            content: r.content.map((b) =>
+              b.type === "text"
+                ? { type: "text" as const, text: b.text }
+                : {
+                    type: "image" as const,
+                    data: b.image_url.url.replace(/^data:[^,]*,/, ""),
+                    mimeType: "image/jpeg",
+                  },
+            ),
+            ...(r.isError ? { isError: true } : {}),
+          };
+        } catch (e) {
+          return {
+            content: [{ type: "text" as const, text: `브라우저 조작 실패: ${String(e)}` }],
+            isError: true,
+          };
+        }
+      },
     };
+  }
+
+  /**
+   * #457 — 코치가 설 작업 폴더. 열린 폴더 → 프로필의 workspace_root 순.
+   * 둘 다 없으면 undefined 를 돌려주되 **조용히 넘어가지 않는다**: 그 상태는
+   * 코치가 파일을 못 찾는다는 뜻이고, 로그가 없으면 사후에 원인을 못 밝힌다.
+   */
+  private resolveCoachCwd(): string | undefined {
+    const opened = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (opened) return opened;
+
+    const root = this.cachedProfile?.workspace_root;
+    const resolved = root ? resolveWorkspaceRoot(root) : null;
+    if (resolved) {
+      console.warn(
+        `[coach] no folder open — falling back to profile workspace_root: ${resolved}`,
+      );
+      return resolved;
+    }
+    console.error(
+      "[coach] cwd is UNKNOWN (no folder open, no usable profile workspace_root). " +
+        "The coach will not receive a working directory and file tools will fail.",
+    );
+    return undefined;
   }
 
   /** Persist coach info chosen via the in-panel naming card. */
@@ -740,6 +872,51 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.assetScores?.recordAssetScore(assetScore);
         void this.post({ type: "streamAssetScore", streamId, assetScore });
       };
+      // #414 — the SDK coach's real work, rendered through the same toolLog
+      // lines the browser loop already uses. Deliberately NOT translated: the
+      // model thinks in English and the tool names are the SDK's own, and a
+      // Korean paraphrase of "Write(index.html)" would be a worse signal than
+      // the thing itself. Shape follows Claude Code — one truncated line per
+      // action (the CSS ellipsizes), plus a live token counter while thinking.
+      let thinkingIndex = 0;
+      // The webview replaces an entry wholesale by id, so a tool_result has to
+      // re-send the label the tool_use showed — keep it per stream.
+      const toolLabels = new Map<string, string>();
+      const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
+        const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
+          void this.post({ type: "toolLog", streamId, id, icon, label, state });
+        switch (a.kind) {
+          case "thinking_tokens":
+            // One entry that ticks in place; the completed block replaces it.
+            log(`think-${thinkingIndex}`, "💭", `Thinking… ${a.tokens} tokens`, "running");
+            break;
+          case "thinking":
+            log(`think-${thinkingIndex}`, "💭", a.text, "done");
+            thinkingIndex += 1;
+            break;
+          case "tool_use": {
+            // 워크스페이스 루트를 넘겨 경로를 루트 기준으로 보여 준다. 파일명만
+            // 남기면 "정상 · 상대경로 거부 · 워크스페이스 밖"이 같은 글자가 된다.
+            const label = `${a.name}(${summarizeToolInput(a.name, a.input, 60, this.resolveCoachCwd())})`;
+            toolLabels.set(a.id, label);
+            log(a.id, "🔧", label, "running");
+            break;
+          }
+          case "tool_result":
+            // 실패는 라벨에 표시를 남긴다 — 아이콘만으로는 스크롤 지나가면
+            // 사라진다. 실사용에서 Write 실패를 놓치고 "저장됐습니다"를 그대로
+            // 믿었다(2026-07-26).
+            log(
+              a.id,
+              "🔧",
+              a.isError
+                ? `${toolLabels.get(a.id) ?? ""} — 실패${a.reason ? `: ${a.reason}` : ""}`
+                : (toolLabels.get(a.id) ?? ""),
+              a.isError ? "error" : "done",
+            );
+            break;
+        }
+      };
       // The non-SDK runtime: the agentic browser loop when the cohort opted
       // into browser_control (copyclone opens the reference URL / re-checks the
       // live preview), else the plain single-turn proxy. #371 — the SDK path's
@@ -802,7 +979,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             history: history.map((m) => ({ role: m.role, content: m.content })),
             userText: userTextForModel,
             signal: ctrl.signal,
-            cwd: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+            // #457 — 폴더가 안 열려 있으면 workspaceFolders 가 비고, cwd 가
+            // undefined 로 넘어간다. 그러면 withWorkspaceContext 가 프롬프트를
+            // **그대로** 돌려주므로(경로 주입 없음) 코치는 자기 위치를 모르는
+            // 채로 상대 경로를 쓰다 전부 실패한다. 2026-07-26 실사용에서 Read 5회가
+            // 연속 실패했고, 코치가 `find ~` 로 홈 전체를 뒤지느라 20턴 중 13턴을
+            // 태우고 maxTurns 로 세션이 죽었다.
+            //
+            // 프로필이 workspace_root 를 이미 알고 있으므로 그걸로 폴백한다.
+            // 두 소스가 모두 없을 때만 undefined 로 두고, 그 경우는 소리 나게 남긴다.
+            cwd: this.resolveCoachCwd(),
             // #282 W4a — explicit claude-binary override (highest priority in
             // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
             // seeded > node_modules). Empty string = unset.
@@ -811,6 +997,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // visible retry message instead of an endless "생각하는 중…".
             stallTimeoutMs: cfg.get<number>("sdkStallTimeoutMs"),
             onDelta,
+            onActivity,
             onCitations,
             onAssetScore,
             // Map the SDK tool call → an accurate host ActionRequest so the
@@ -1024,12 +1211,78 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * streamed-assistant path.
    */
   async resolveActionApproval(req: ActionRequest): Promise<boolean> {
-    // Tier 1 — hard-deny shell exec.
+    // Tier 1 — shell (epic #431). No longer a hard deny: a cohort that set
+    // `sdk_tools.shell` gets arbitrary commands, and THIS modal is the gate.
+    // Three shapes, in order of how much they interrupt:
+    //   destructive → strong confirm every time, never remembered;
+    //   remembered  → silent (the participant already said "항상 허용");
+    //   otherwise   → normal confirm + the option to remember.
     if (req.kind === "executeShell") {
-      vscode.window.showInformationMessage(
-        "셸 실행은 허용되지 않아요. 다른 방법으로 도와드릴게요.",
+      const command = (req.payload as { command?: string } | null | undefined)?.command ?? "";
+      const destructive = req.destructive === true;
+      const signature = destructive ? null : commandSignature(command);
+
+      if (signature && this.approvedCommandSignatures.has(signature)) {
+        return true;
+      }
+
+      const pretty = describeCommandForApproval(command);
+      if (destructive) {
+        // Deliberately NOT offering "항상 허용". Approving `rm -rf` once must
+        // never approve it for the rest of the session, and the whole point of
+        // the strong confirm is that it stays interruptive.
+        const pick = await vscode.window.showWarningMessage(
+          `⚠️ 되돌리기 어려운 명령이에요. 정말 실행할까요?\n\n${pretty}`,
+          { modal: true },
+          "실행",
+          "취소",
+        );
+        return pick === "실행";
+      }
+
+      const REMEMBER = signature ? `항상 허용 (${signature})` : null;
+      const buttons = REMEMBER ? ["실행", REMEMBER] : ["실행"];
+      const pick = await vscode.window.showWarningMessage(
+        `코치가 명령을 실행하려고 해요:\n\n${pretty}`,
+        { modal: true },
+        ...buttons,
       );
-      return false;
+      if (pick === REMEMBER && signature) {
+        // Session-scoped only — never persisted. A new window starts the
+        // participant's judgment over, which is the intended lesson; what we
+        // are killing is the fifteen identical modals inside ONE 20:35 block
+        // that train them to stop reading.
+        this.approvedCommandSignatures.add(signature);
+        return true;
+      }
+      return pick === "실행";
+    }
+
+    // Tier 1.5 — 브라우저 열기. 오리진 단위로 한 번만 묻는다.
+    //
+    // 실측(2026-07-26 실사용): 코치가 정답지 사이트의 서브페이지를 차례로 읽는
+    // 동안 About·첨단디지털·평생예방·시니어… 페이지마다 모달이 떴다. 판단은
+    // "이 사이트를 코치가 둘러봐도 되는가" 한 번이면 끝나는데, 같은 답을 다섯 번
+    // 요구하면 읽지 않고 누르는 습관만 남는다 — 승인 게이트가 훈련시키려던 것과
+    // 정반대다. 셸의 `항상 허용`(위)과 같은 장치이고, 마찬가지로 세션 한정이다.
+    if (req.kind === "openBrowser") {
+      const url = (req.payload as { url?: string } | null | undefined)?.url ?? "";
+      const origin = originOfUrl(url);
+      if (origin && this.approvedBrowserOrigins.has(origin)) {
+        return true;
+      }
+      const REMEMBER = origin ? `이 사이트는 항상 허용 (${origin})` : null;
+      const buttons = REMEMBER ? ["열기", REMEMBER] : ["열기"];
+      const pick = await vscode.window.showWarningMessage(
+        `코치가 브라우저를 열려고 해요:\n\n${url || req.description}`,
+        { modal: true },
+        ...buttons,
+      );
+      if (pick === REMEMBER && origin) {
+        this.approvedBrowserOrigins.add(origin);
+        return true;
+      }
+      return pick === "열기";
     }
 
     // Tier 2 — file access must target the active workspace (write and read).
@@ -1045,27 +1298,60 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     // Tier 3 — modal-gated.
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
-    // openBrowser (#282 P2 slice 2) is modal-gated by default too: the coach
-    // driving the browser to a URL is an outward action the student should
-    // consciously delegate (delegation_judgment), same as a file write.
-    // delegateAgent (#282 P2 slice 3): handing a task to a subagent is the
-    // delegation decision itself — the modal IS the pedagogy.
+    //
+    // writeFile 은 여기서 **빠졌다** (원장 결정 2026-07-27, 이전 결정 번복).
+    //
+    // 이 모달이 뜰 때는 이미 안전 검사가 끝나 있다: 워크스페이스 밖 경로는
+    // evaluateSdkToolUse 의 containment 가 모달 없이 거부한다. 그래서 남은 기능은
+    // 안전이 아니라 위임 판단 교육뿐이었는데, 실측에서 그 교육이 성립하지 않았다.
+    //
+    //   07-27 턴 2: 파일 저장 모달 하나가 **174초** 방치됐다. 원장이 화면 앞에
+    //   없었고, 코치는 그동안 아무것도 못 하고 멈춰 있었다. 그 전날엔 42.2초짜리가
+    //   한 턴 승인 대기의 77% 였다. 한 턴에 8번 뜨던 날도 있었고 그때는 3~4초 만에
+    //   눌렸다 — 읽지 않고 누르는 리듬이다.
+    //
+    // 즉 이 모달은 둘 중 하나가 된다: 놓쳐서 세션을 멈추거나, 반사로 눌러 교육
+    // 효과가 없거나. 위임 판단은 셸·브라우저·서브에이전트에서 가르친다 — 그쪽은
+    // 진짜로 되돌리기 어렵거나 바깥으로 나가는 행위다.
+    //
+    // 되돌리려면 설정 한 줄이다: hypeproofChat.requireApprovalFor 에 "writeFile" 추가.
+    // browserClick 은 목록에 **없다** → 자동 허용.
+    //
+    // 페이지를 여는 결정(openBrowser)에서 이미 위임 판단을 한 뒤다. 그 페이지 안에서
+    // 누르는 것은 새로운 바깥 행위가 아니라 검증이고, 같은 페이지의 browser_read 는
+    // 이미 자동 허용이다. 실측(07-27): 코치가 "고치고 직접 눌러 확인"하는 루프마다
+    // 모달이 떴고, 그것도 매핑 누락 탓에 **셸 문구에 빈 내용**으로 떴다.
+    // browserType 은 남긴다 — 값을 넣고 제출까지 갈 수 있어 성격이 다르다.
     const required = cfg.get<string[]>("requireApprovalFor", [
-      "writeFile",
       "executeShell",
       "openBrowser",
       "delegateAgent",
+      "browserType",
     ]);
     const needsApproval = required.includes(req.kind);
     if (!needsApproval) return true;
 
+    // 한국어로 묻는다. 셸(`코치가 명령을 실행하려고 해요`)과 브라우저(`코치가
+    // 브라우저를 열려고 해요`)는 한국어인데 파일 쓰기만 이 일반 폴백으로 빠져
+    // `HypeProof Chat wants to writeFile:` / `Deny·Cancel·Approve` 로 나갔다.
+    //
+    // 잡음 제거가 아니라 **속도** 문제다(2026-07-27 실측): 한국어 모달은 3~4초
+    // 만에 눌렸는데 이 영어 모달 하나가 42.2초를 잡아먹었다 — 그 한 건이 그 턴
+    // 승인 대기의 77%였다. 성인 전문직 청중에게 갑자기 영어가 뜨면 읽는 데
+    // 시간이 걸린다.
+    //
+    // 승인 게이트 자체는 유지한다(원장 결정 2026-07-27): 자기 결과물이 바뀌는
+    // 순간마다 의식적으로 승인하는 것이 이 트랙의 위임 판단 훈련이다.
+    const { title, verb } = APPROVAL_COPY[req.kind] ?? {
+      title: "코치가 작업을 하려고 해요",
+      verb: "허용",
+    };
     const pick = await vscode.window.showWarningMessage(
-      `HypeProof Chat wants to ${req.kind}:\n\n${req.description}`,
+      `${title}\n\n${req.description}`,
       { modal: true },
-      "Approve",
-      "Deny",
+      verb,
     );
-    return pick === "Approve";
+    return pick === verb;
   }
 
   private async postConfig(): Promise<void> {

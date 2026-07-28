@@ -51,6 +51,7 @@ import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../
 import { recordTurnIfOwned } from "../lib/storage";
 import { tapAnthropicStream } from "../lib/sse";
 import { logChat, persistUsage } from "../lib/analytics";
+import { scrubToolResultSecrets } from "../lib/scrub-secrets";
 import {
   isMinorCohort,
   screenText,
@@ -100,6 +101,22 @@ function decodeHeader(raw: string | null | undefined): string | undefined {
   } catch {
     return raw;
   }
+}
+
+/**
+ * 개행으로 구분된 목록 헤더. HTTP 헤더에는 개행을 넣을 수 없으므로 클라이언트가
+ * `\n` 을 퍼센트 인코딩해 보내고 여기서 되돌린다. 상한을 둬서 학생이 node_modules
+ * 를 만들어 놔도 프롬프트가 터지지 않게 한다.
+ */
+function decodeHeaderList(raw: string | null | undefined): string[] | undefined {
+  const v = decodeHeader(raw);
+  if (v === undefined) return undefined;
+  const out = v
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 80);
+  return out;
 }
 
 /**
@@ -256,6 +273,10 @@ messages.post("/messages", async (c) => {
   const coach: CoachContext = {
     name: decodeHeader(c.req.header("x-hps-coach-name")),
     personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+    // #431 — 작업 폴더는 학생 머신마다 다르므로 프로필에 넣을 수 없고, 클라이언트
+    // system 은 통째로 교체되므로 거기 실어 보낼 수도 없다. 헤더가 유일한 통로다.
+    workspace: decodeHeader(c.req.header("x-hps-workspace")),
+    workspaceFiles: decodeHeaderList(c.req.header("x-hps-workspace-files")),
   };
 
   // #9c trace hook — identical opt-in to chat.ts (trial headers).
@@ -302,7 +323,12 @@ messages.post("/messages", async (c) => {
     // SDK-runtime turn 400'd. Downgrade them to user-role context (verified:
     // same request 200s once converted). No privilege is conferred: the
     // top-level `system` is still replaced with the profile blocks below.
-    messages: normalizeSystemRoleMessages(raw.messages),
+    // epic #431 — the coach can run shell now, so a tool_result block may
+    // carry whatever a command printed: a PAT from ~/.git-credentials, an
+    // API token echoed by a failing wrangler deploy, a stray `env` dump.
+    // Mask before it becomes prompt content and before it reaches our logs.
+    // Server-side on purpose — an old or modified client cannot skip it.
+    messages: scrubToolResultSecrets(normalizeSystemRoleMessages(raw.messages)),
     system: buildAnthropicSystemBlocks(profile, coach),
     max_tokens: clampMaxTokens(raw.max_tokens, profile),
     stream,
@@ -550,6 +576,10 @@ messages.post("/messages/count_tokens", async (c) => {
   const coach: CoachContext = {
     name: decodeHeader(c.req.header("x-hps-coach-name")),
     personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+    // #431 — 작업 폴더는 학생 머신마다 다르므로 프로필에 넣을 수 없고, 클라이언트
+    // system 은 통째로 교체되므로 거기 실어 보낼 수도 없다. 헤더가 유일한 통로다.
+    workspace: decodeHeader(c.req.header("x-hps-workspace")),
+    workspaceFiles: decodeHeaderList(c.req.header("x-hps-workspace-files")),
   };
 
   // 2-3. Enforced fields, mirroring /v1/messages: spread-first keeps unknown
