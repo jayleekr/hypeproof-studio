@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
     install.ps1 - HypeProof Windows one-line bootstrap.
 
@@ -201,8 +201,20 @@ function Get-Arch {
     }
 }
 
+# Resolve a tool name to a REAL executable, never an alias/function/cmdlet.
+# Windows PowerShell 5.1 ships `curl` as an alias for Invoke-WebRequest, so a
+# bare Get-Command matched the alias: step 3 printed "curl present" while the
+# doctor's `& curl --version` threw a WebException and read as NOT FOUND. Every
+# Test-Command call site here is an executable (winget/wsl/git/$tool.cmd), so
+# restricting to Application is the correct contract.
+function Resolve-ToolCommand([string]$name) {
+    $app = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue
+    if ($app) { return @($app)[0] }
+    return $null
+}
+
 function Test-Command([string]$name) {
-    return [bool](Get-Command $name -ErrorAction SilentlyContinue)
+    return [bool](Resolve-ToolCommand $name)
 }
 
 # Compare dotted versions: returns $true when $have >= $min.
@@ -220,9 +232,13 @@ function Test-VersionAtLeast([string]$have, [string]$min) {
 
 # Run a tool's check command and return the raw version string (or $null).
 function Get-ToolVersion($tool) {
-    if (-not (Test-Command $tool.cmd)) { return $null }
+    $cmd = Resolve-ToolCommand $tool.cmd
+    if (-not $cmd) { return $null }
     try {
-        $out = & $tool.cmd $tool.args.Split(' ') 2>&1 | Out-String
+        # Invoke the resolved PATH, not the bare name: `& 'curl'` would still
+        # pick the Invoke-WebRequest alias (alias beats application in
+        # PowerShell's command precedence) and fail with a WebException.
+        $out = & $cmd.Source $tool.args.Split(' ') 2>&1 | Out-String
         return $out.Trim()
     } catch { return $null }
 }

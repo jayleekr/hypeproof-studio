@@ -1,4 +1,4 @@
-# One-line installer for HypeProof Studio on Windows.
+﻿# One-line installer for HypeProof Studio on Windows.
 #
 # Usage (family members run in PowerShell):
 #   iwr -useb https://hypeproof.ai/install.ps1 | iex

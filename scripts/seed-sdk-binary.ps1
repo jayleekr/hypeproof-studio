@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   seed-sdk-binary.ps1 — Windows instructor pre-seed of the Claude Agent SDK
   native `claude.exe` for venue machines (#282 W4a / #426, the win32 companion
