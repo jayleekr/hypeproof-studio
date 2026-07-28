@@ -19,6 +19,7 @@ interface State {
   toolLog: ToolLogEntry[];          // #278 Phase 3 — browser loop action log (current turn)
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
+  stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
 }
 
 type Action =
@@ -32,8 +33,13 @@ type Action =
   | { type: "pageAttached"; label: string }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
+  | { type: "streamStopped" }
   | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
   | { type: "userSent"; text: string; images?: string[] };
+
+// #497 — 사용자가 Stop 을 눌렀을 때의 안내. 오류가 아니므로 에러 배너를 쓰지
+// 않는다 ("문제가 생겼어요" + 🚨 신고하기 는 정상 조작을 사고로 만든다).
+const STOP_NOTICE = "답변 생성이 중지되었습니다. 다시 채팅을 입력해주세요.";
 
 const initialState: State = {
   config: null,
@@ -47,6 +53,7 @@ const initialState: State = {
   toolLog: [],
   pageNotice: null,
   aiNotice: null,
+  stopNotice: null,
 };
 
 function reducer(state: State, action: Action): State {
@@ -65,6 +72,7 @@ function reducer(state: State, action: Action): State {
         streamingId: action.messageId,
         streamId: action.streamId,
         error: null,
+        stopNotice: null,   // #497 — 새 턴이 시작되면 이전 중지 안내는 사라진다
         assetScore: null,
         toolLog: [],
         messages: [
@@ -115,6 +123,20 @@ function reducer(state: State, action: Action): State {
         errorRequestId: null,
         errorRunbookUrl: null,
       };
+    case "streamStopped":
+      // #497 — 턴이 완주한 게 아니라 사용자가 끊은 것. streamEnd 와 같은 상태
+      // 해제를 하되, 무슨 일이 있었는지 한 줄 남긴다. 여기까지 스트리밍된 부분
+      // 답변은 화면에 그대로 두고(무엇이 만들어졌는지 보이는 편이 낫다),
+      // 호스트는 이 턴을 영속 히스토리에 커밋하지 않는다.
+      return {
+        ...state,
+        streamingId: null,
+        streamId: null,
+        error: null,
+        errorRequestId: null,
+        errorRunbookUrl: null,
+        stopNotice: STOP_NOTICE,
+      };
     case "streamError":
       return {
         ...state,
@@ -128,6 +150,7 @@ function reducer(state: State, action: Action): State {
       return {
         ...state,
         pageNotice: null,   // #308 — clear the "붙였어요" notice once the user sends
+        stopNotice: null,   // #497 — 다시 입력했으면 중지 안내는 역할을 다했다
         messages: [
           ...state.messages,
           {
@@ -162,6 +185,7 @@ export function App() {
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
+        case "streamStopped": dispatch({ type: "streamStopped" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;
         case "attachImage": setIncomingImage({ dataUrl: msg.dataUrl, nonce: Date.now() }); break;
@@ -231,6 +255,7 @@ export function App() {
         toolLog={state.toolLog}
         pageNotice={state.pageNotice}
         aiNotice={state.aiNotice}
+        stopNotice={state.stopNotice}
         streaming={!!state.streamingId}
         streamingId={state.streamingId}
         error={state.error}
