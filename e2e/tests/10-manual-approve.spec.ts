@@ -100,6 +100,24 @@ async function clickModalButton(win: import("@playwright/test").Page, label: str
   await button.click({ timeout: 10_000 });
 }
 
+/**
+ * True if the host settled the request (wrote a result) within `ms`.
+ *
+ * The gated case cannot be asserted by clicking: `showWarningMessage({modal:true})`
+ * renders as a native OS dialog (NSAlert), not a DOM node. What IS observable —
+ * and is exactly the property REQ-E1 promises — is that a gated action does
+ * **not** settle on its own. No result inside the window = something is waiting
+ * for a human. Auto-allowed actions settle in well under a second.
+ */
+async function settledWithin(resultFile: string, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(resultFile)) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return fs.existsSync(resultFile);
+}
+
 async function readResult(resultFile: string): Promise<{ approved?: boolean; error?: string }> {
   for (let i = 0; i < 30; i++) {
     if (fs.existsSync(resultFile)) {
@@ -112,17 +130,21 @@ async function readResult(resultFile: string): Promise<{ approved?: boolean; err
   throw new Error(`result file never appeared: ${resultFile}`);
 }
 
-test.skip("REQ-E1 + REQ-E2: writeFile → Approve → approved=true", async () => {
-  // `vscode.window.showWarningMessage({modal: true}, ...)` renders as a
-  // native OS dialog (NSAlert on macOS) when the workbench window is
-  // electron-driven — not a DOM element. Playwright cannot reach it via
-  // .monaco-dialog selectors because it's not in the DOM at all.
+test.skip("REQ-E2: (구 전제) writeFile → Approve → approved=true", async () => {
+  // 두 가지 이유로 skip 이고, **두 번째가 지금은 더 크다.**
   //
-  // The path-scope rejection (10-approval-gates.spec.ts Tier 2) + hard-deny
-  // (Tier 1) DO test resolveActionApproval's policy logic without needing
-  // to click a modal. The actual Approve click is verified only via manual
-  // QA. Leaving this skipped pins the contract; a future webview-rendered
-  // approval modal would let us re-enable.
+  // 1. `vscode.window.showWarningMessage({modal: true}, ...)` 는 네이티브 OS
+  //    다이얼로그(macOS NSAlert)로 뜬다 — DOM 노드가 아니라서 Playwright 의
+  //    .monaco-dialog 셀렉터로는 애초에 닿지 않는다.
+  // 2. **전제가 뒤집혔다 (#464 → #499).** writeFile 은 더 이상 모달 대상이
+  //    아니다. 기본 정책은 [executeShell, openBrowser, delegateAgent,
+  //    browserType] 이고 writeFile 은 Tier 3 에서 자동 허용된다. 이 테스트를
+  //    그대로 되살리면 모달이 없어서 실패하는데, 위 주석 1번이 말하는 이유와는
+  //    무관한 실패다.
+  //
+  // 지금의 writeFile 동작은 아래 "모달 없이 자동 허용" 테스트가 잰다.
+  // REQ-E2(Approve 클릭 → approved=true)는 여전히 수동 QA 로만 검증된다 —
+  // 승인 모달이 webview 로 렌더되면 그때 되살린다.
   const ctx = await launchWithSynthAction({
     kind: "writeFile",
     description: "Save game to index.html",
@@ -137,18 +159,42 @@ test.skip("REQ-E1 + REQ-E2: writeFile → Approve → approved=true", async () =
   }
 });
 
-test("REQ-E1 + REQ-E2: executeShell → hard-deny (no modal, approved=false)", async () => {
-  // Post-#115 policy change: executeShell is refused outright by the host
-  // before any modal is shown. Defense-in-depth on top of the worker prompt's
-  // "셸 실행 금지" rule. See chatPanelProvider.resolveActionApproval Tier 1.
+test("REQ-E1: writeFile → 모달 없이 자동 허용 (approved=true)", async () => {
+  // #464 → #499 의 실제 동작을 재는 자리. writeFile 은 정책 목록에서 빠졌으므로
+  // Tier 3 를 그냥 통과한다 — 사람이 아무것도 누르지 않아도 곧바로 settle 한다.
+  //
+  // 워크숍에서 이게 뒤집히면(= 다시 모달) 07-27 실측처럼 모달 하나가 174초를
+  // 잡아먹으므로, 자동 허용 자체가 요구사항이다. payload 에 path 를 주지 않으면
+  // Tier 2 containment 는 건너뛴다(워크스페이스 안 경로의 동작은
+  // 16-approval-gates.spec.ts 가 실제 경로로 잰다).
+  const ctx = await launchWithSynthAction({
+    kind: "writeFile",
+    description: "Save game to index.html",
+  });
+  try {
+    const result = await readResult(ctx.resultFile);
+    expect(result.error).toBeUndefined();
+    expect(result.approved).toBe(true);
+  } finally {
+    await teardown(ctx);
+  }
+});
+
+test("REQ-E1: executeShell → 게이트에 걸린다 (스스로 승인되지 않는다)", async () => {
+  // 옛 전제("#115 이후 executeShell 은 모달 없이 즉시 거부")는 **죽었다**.
+  // #431 에서 셸이 코호트 기능이 되면서 hard deny 가 사라졌다 —
+  // chatPanelProvider.ts Tier 1: "No longer a hard deny … THIS modal is the gate."
+  //
+  // 모달은 네이티브라 클릭할 수 없다. 대신 게이트의 본질을 잰다: 아무도 누르지
+  // 않으면 **아무 일도 일어나지 않는다.** 자동 허용이었다면(위 writeFile 처럼)
+  // 1초 안에 settle 한다. 이 단언이 깨지는 방향은 하나뿐 — 셸이 조용히 자동
+  // 실행되는 것이고, 그게 이 요구사항이 막으려는 상태다.
   const ctx = await launchWithSynthAction({
     kind: "executeShell",
     description: "Run `npm install` in workspace",
   });
   try {
-    const result = await readResult(ctx.resultFile);
-    expect(result.error).toBeUndefined();
-    expect(result.approved).toBe(false);
+    expect(await settledWithin(ctx.resultFile, 8_000)).toBe(false);
   } finally {
     await teardown(ctx);
   }

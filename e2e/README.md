@@ -106,7 +106,11 @@ ls test-results/        # screenshots + traces on failure
 ## What's not (yet)
 
 - ▶ Run → Preview render
-- Manual-approve modal for `requireApprovalFor` actions
+- Manual-approve modal — **버튼 클릭**만 미커버(`showWarningMessage({modal:true})` 는
+  네이티브 OS 다이얼로그라 DOM 에 없다). 정책 자체는 잰다: 자동 허용은 즉시
+  `approved=true`, 게이트된 종류는 사람이 누를 때까지 settle 하지 않는다
+  (`10-manual-approve` · `16-approval-gates`, REQ-E1). Approve→approved=true(REQ-E2)는
+  여전히 수동 QA
 - Multi-turn conversation persistence after reload
 - Session-window expiry (force end-class mid-test → next message gets 403)
 

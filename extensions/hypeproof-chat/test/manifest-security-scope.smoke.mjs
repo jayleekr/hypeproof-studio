@@ -57,6 +57,15 @@ for (const key of MACHINE_SCOPED) {
 // and browserType (fully wired: sdkCoachHelpers.ts, protocol.ts, APPROVAL_COPY)
 // was never in the policy → auto-allowed every time. items.enum matters too:
 // a kind missing there cannot be toggled from the Settings UI.
+//
+// 아래 층까지 확인해 둔다 (리뷰 #501 — 매번 다시 파지 않도록). 이 목록에 넣어도
+// **한 층 아래가 `allow` 를 돌려주면 무효**다. 확인 결과 3층이 다 연결돼 있다:
+//   1. sdkCoachHelpers.ts — MCP_BROWSER_CLICK | MCP_BROWSER_TYPE → { decision: "ask" }
+//      (browser_read/screenshot 는 "allow" 로 자동 허용, 의도대로다)
+//   2. protocol.ts ActionRequest.kind 에 "browserType" 존재
+//   3. chatPanelProvider.ts APPROVAL_COPY.browserType 한국어 문구 존재
+// browserClick 은 `ask` 로 올라온 뒤 이 목록에 없어 Tier 3 에서 자동 허용된다 —
+// 의도된 동작이다(같은 페이지 안의 검증 행위).
 const EXPECTED_APPROVAL = ["executeShell", "openBrowser", "delegateAgent", "browserType"];
 
 const approval = props["hypeproofChat.requireApprovalFor"];

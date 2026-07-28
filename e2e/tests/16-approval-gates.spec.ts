@@ -3,10 +3,16 @@
 // Extends 10-manual-approve.spec.ts (REQ-E1·E2 modal Approve/Deny) with the
 // defense-in-depth tiers that came out of epic #108:
 //
-//   Tier 1 (hard-deny)   — executeShell refused without modal
+//   Tier 1 (modal-gated) — executeShell waits for a human. #115 의 hard-deny 는
+//                          #431 에서 죽었다(셸이 코호트 기능이 됐다). 지금은
+//                          모달이 게이트다
 //   Tier 2 (path-scope)  — writeFile outside workspace refused without modal
-//   Tier 3 (modal-gated) — writeFile inside workspace shows modal (positive
-//                          control to prove path-scope doesn't break legit writes)
+//   Tier 3 (auto-allow)  — writeFile inside workspace 는 모달 없이 통과한다
+//                          (#464 → #499). path-scope 가 정상 쓰기를 막지 않는다는
+//                          양성 대조군이자, writeFile 모달 부활을 잡는 잠금
+//
+// 승인 정책의 단일 소스는 `extensions/hypeproof-chat/package.json` 의
+// `requireApprovalFor.default` 다 — 코드의 getConfiguration 폴백이 아니다(#499).
 //
 // LLM-driven shell-refusal scenario (issue #115 case 4) is deferred — the
 // rehearsal R3 suite already exercises that prompt rule against the live
@@ -30,6 +36,12 @@ async function launch(opts: {
   kind: "writeFile" | "executeShell";
   description: string;
   payload?: Record<string, unknown>;
+  /**
+   * 워크스페이스 폴더는 launch 안에서 만들어지므로 호출자가 미리 그 경로를 쓸 수
+   * 없다. 이 이름을 주면 wsDir 기준으로 풀어서 payload.path 로 넣는다 —
+   * Tier 2 containment 를 "진짜 안쪽 경로"로 통과시키는 양성 대조군용.
+   */
+  pathInWorkspace?: string;
 }): Promise<GateCtx> {
   const token = fs.readFileSync(TOKEN_FILE, "utf8").trim();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "hps-e2e-gates-"));
@@ -62,7 +74,9 @@ async function launch(opts: {
     HPS_TEST_SYNTH_ACTION: JSON.stringify({
       kind: opts.kind,
       description: opts.description,
-      payload: opts.payload,
+      payload: opts.pathInWorkspace
+        ? { ...opts.payload, path: path.join(wsDir, opts.pathInWorkspace) }
+        : opts.payload,
       resultFile,
     }),
   };
@@ -110,18 +124,26 @@ async function modalCount(win: Page): Promise<number> {
   return win.locator(".monaco-dialog-box, .monaco-dialog, .dialog-shadow").count();
 }
 
-test("Tier 1: executeShell is hard-denied without showing a modal", async () => {
+test("Tier 1: 파괴적 executeShell 은 사람을 기다린다 (조용히 실행되지 않는다)", async () => {
+  // 옛 이름은 "hard-denied without showing a modal" 이었다. 그 전제는 #431 에서
+  // 죽었다 — `sdk_tools.shell` 을 켠 코호트는 임의 명령을 받고, 모달이 게이트다.
+  // 파괴적 명령은 "실행 / 취소" 강한 확인이고 `항상 허용` 을 주지 않는다.
+  //
+  // 네이티브 다이얼로그라 클릭은 못 하지만, 게이트의 본질은 잴 수 있다:
+  // 아무도 누르지 않으면 settle 하지 않는다. 이게 깨지는 방향은 `rm -rf` 가
+  // 조용히 승인되는 것 하나뿐이다.
   const ctx = await launch({
     kind: "executeShell",
-    description: "rm -rf / (this should be flat-refused)",
+    description: "rm -rf / (must never auto-approve)",
   });
   try {
-    // Result file appears quickly — no modal interaction needed
-    const result = await readResult(ctx.resultFile, 10_000);
-    expect(result.error).toBeUndefined();
-    expect(result.approved).toBe(false);
-    // No modal was shown
-    expect(await modalCount(ctx.win)).toBe(0);
+    let settled = false;
+    const deadline = Date.now() + 8_000;
+    while (Date.now() < deadline && !settled) {
+      settled = fs.existsSync(ctx.resultFile);
+      await new Promise((r) => setTimeout(r, 250));
+    }
+    expect(settled).toBe(false);
   } finally {
     await teardown(ctx);
   }
@@ -146,26 +168,27 @@ test("Tier 2: writeFile outside workspace is refused without modal", async () =>
   }
 });
 
-test.skip("Tier 3: writeFile inside workspace shows modal + Approve works", async () => {
-  // showWarningMessage({modal:true}) renders as a native OS dialog
-  // (NSAlert on macOS) — not in the DOM, so Playwright can't see/click it.
-  // The non-modal path coverage (Tier 1 hard-deny + Tier 2 path-scope) above
-  // already exercises resolveActionApproval's branching logic. A future
-  // webview-rendered approval modal would let us re-enable this.
+test("Tier 3: 워크스페이스 안 writeFile 은 모달 없이 통과한다", async () => {
+  // 이 테스트는 원래 "shows modal + Approve works" 였고, 네이티브 다이얼로그를
+  // 클릭할 수 없어 skip 돼 있었다. #464 → #499 로 전제가 바뀌면서 오히려
+  // **클릭 없이 잴 수 있는** 테스트가 됐다: writeFile 은 정책 목록에 없으므로
+  // Tier 3 를 그냥 통과한다.
+  //
+  // 두 가지를 동시에 지킨다.
+  //   · 원래 의도 — path-scope(Tier 2)가 정상적인 워크스페이스 내 쓰기를
+  //     막지 않는다는 양성 대조군. 위 Tier 2 의 거부가 "무조건 거부"가 아님을 증명한다.
+  //   · #499 잠금 — 매니페스트 default 에 writeFile 이 다시 들어오면 모달이 떠서
+  //     settle 하지 않고, 이 테스트가 타임아웃으로 잡는다.
   const ctx = await launch({
     kind: "writeFile",
     description: "Save game to index.html",
+    pathInWorkspace: "index.html",
   });
   try {
-    const dialog = ctx.win.locator(".monaco-dialog-box, .monaco-dialog, .dialog-shadow").first();
-    await dialog.waitFor({ state: "visible", timeout: 15_000 });
-    const approve = dialog
-      .locator('a.monaco-text-button:has-text("Approve"), button:has-text("Approve")')
-      .first();
-    await approve.click({ timeout: 10_000 });
-    const result = await readResult(ctx.resultFile);
+    const result = await readResult(ctx.resultFile, 15_000);
     expect(result.error).toBeUndefined();
     expect(result.approved).toBe(true);
+    expect(await modalCount(ctx.win)).toBe(0);
   } finally {
     await teardown(ctx);
   }
