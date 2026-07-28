@@ -775,21 +775,21 @@ html, body, #root {
   font-size: 11px;
 }
 
-.hps-tool-log {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin: 6px 0 10px;
-  padding: 8px 10px;
-  border-left: 2px solid var(--vscode-focusBorder, #4a9);
-  background: var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.08));
-  border-radius: 4px;
-  font-size: 12px;
-}
+/*
+ * #503 — 툴 줄은 이제 말풍선들과 같은 타임라인에 한 줄씩 놓인다(예전의
+ * `.hps-tool-log` 상자는 사라졌다 — 그게 화면을 [말풍선 전부] / [툴 전부] 두
+ * 덩어리로 가르던 컨테이너다). 클래스 이름은 e2e·관측기 셀렉터 호환으로 유지.
+ */
 .hps-tool-log-line {
   display: flex;
   align-items: center;
   gap: 6px;
+  margin: 4px 0;
+  padding: 4px 10px;
+  border-left: 2px solid var(--vscode-focusBorder, #4a9);
+  background: var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.08));
+  border-radius: 4px;
+  font-size: 12px;
 }
 .hps-tool-icon {
   flex: 0 0 auto;

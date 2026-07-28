@@ -14,6 +14,17 @@ import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import { extractAgentMd } from "./agentHandoff";
+import {
+  clampTimeline,
+  emptyTimeline,
+  modelHistory,
+  timelineDelta,
+  timelineEnd,
+  timelineStart,
+  timelineTool,
+  type TimelineState,
+  type ToolEntry,
+} from "./chatTimeline";
 import { capturePageContext } from "./nativeBrowser";
 import { validateAndRepairHtml, type HtmlStructureResult } from "./htmlStructure";
 import {
@@ -64,6 +75,12 @@ const APPROVAL_COPY: Record<string, { title: string; verb: string }> = {
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private activeStreams = new Map<string, AbortController>();
+  /**
+   * #503 — 진행 중인 턴의 단일 타임라인(스트림 id 별). 웹뷰가 화면에 그리는 것과
+   * **같은 순수 리듀서**로 만들어 그대로 영속화한다. 규칙이 두 벌이면 창을 다시
+   * 열었을 때 순서가 달라진다.
+   */
+  private turnTimelines = new Map<string, TimelineState>();
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
   private cachedProfile: ResolvedProfile | null = null;
   private profileFetchPromise: Promise<ResolvedProfile | null> | null = null;
@@ -398,9 +415,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const target = vscode.Uri.joinPath(folders[0].uri, "agent.md");
       await vscode.workspace.fs.writeFile(target, Buffer.from(md, "utf8"));
       if (streamId) {
-        void this.post({
-          type: "toolLog",
-          streamId,
+        this.postToolLog(streamId, {
           id: randomId(),
           icon: "📝",
           label: "agent.md 저장됨 — 작업 폴더에서 확인하세요",
@@ -462,9 +477,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private surfaceStructureIssues(r: HtmlStructureResult, streamId?: string): void {
     const label = `생성물 점검: ${r.issues.join(" · ")}`;
     if (streamId) {
-      void this.post({
-        type: "toolLog",
-        streamId,
+      this.postToolLog(streamId, {
         id: randomId(),
         icon: r.blocked ? "🚫" : "⚠️",
         label,
@@ -767,7 +780,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private async handleSend(text: string, history: ChatMessage[], images?: string[]): Promise<void> {
+  private async handleSend(
+    text: string,
+    rawHistory: ChatMessage[],
+    images?: string[],
+  ): Promise<void> {
+    // #503 — 웹뷰의 히스토리에는 이제 툴 줄(role:"tool")이 섞여 있다. 모델로
+    // 나가는 경로는 여기 하나뿐이므로 초입에서 한 번 거른다. 아래쪽 프록시·SDK
+    // 게이트웨이 호출은 user/assistant 만 아는 계약이다.
+    const history = modelHistory(rawHistory);
     // "Show me / open it / run it" — if the kid asks to see the game in plain
     // language and a game already exists, just open it. Don't make them hunt
     // for the ▶ Run button or burn an AI round-trip on a deflection. Skipped
@@ -823,6 +844,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.activeStreams.set(streamId, ctrl);
 
     void this.post({ type: "streamStart", streamId, messageId });
+    // #503 — 이 턴의 단일 타임라인. 웹뷰와 같은 리듀서를 돌려 화면 순서 그대로
+    // 히스토리에 남긴다.
+    this.turnTimelines.set(streamId, timelineStart(emptyTimeline(), messageId, Date.now()));
 
     let assistantText = "";
     // REQ-D2: auto-reveal as soon as a renderable HTML block completes in
@@ -867,6 +891,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         settingRuntime === "agent-sdk" || profileWantsSdk ? "agent-sdk" : "proxy";
       const onDelta = (delta: string) => {
         assistantText += delta;
+        const t = this.turnTimelines.get(streamId);
+        if (t) this.turnTimelines.set(streamId, timelineDelta(t, delta, Date.now()));
         void this.post({ type: "streamChunk", streamId, delta });
         // Cheap check; extractRenderableHtml regex returns null fast on
         // most chunks (no fence/doctype present yet).
@@ -892,7 +918,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const toolLabels = new Map<string, string>();
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
         const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
-          void this.post({ type: "toolLog", streamId, id, icon, label, state });
+          // #503 — a.at: SDK 가 실어 보낸 자기 시각. 영속화된 줄의 createdAt 이 된다.
+          this.postToolLog(streamId, { id, icon, label, state, ...(a.at ? { at: a.at } : {}) });
         switch (a.kind) {
           case "thinking_tokens":
             // One entry that ticks in place; the completed block replaces it.
@@ -1026,6 +1053,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           assistantText = "";
           assistantCitations.length = 0;
           revealed = false;
+          // #503 — 텍스트를 버리면 타임라인도 같이 버린다. 안 그러면 폴백 전에
+          // 찍힌 툴 줄만 히스토리에 남아 "말은 없고 행동만 있는" 턴이 된다.
+          this.turnTimelines.set(streamId, timelineStart(emptyTimeline(), messageId, Date.now()));
           // #371 — fall back to the browser-loop-aware runtime, NOT bare proxy,
           // so a browser_control cohort (copyclone) still opens the browser when
           // the SDK binary isn't seeded.
@@ -1040,27 +1070,66 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // (parity with the proxy path, which throws on abort).
       if (!ctrl.signal.aborted) {
         void this.post({ type: "streamEnd", streamId });
+        // #371 — persist the agent.md handoff fence, if the coach emitted one.
+        // #503 — 히스토리를 굳히기 **전에** 기다린다. 이게 남기는 toolLog 줄도
+        // 이 턴의 타임라인에 들어가야 창을 다시 열었을 때 같이 보인다.
+        await this.saveAgentMdIfPresent(assistantText, streamId);
         await this.appendHistory([
           { id: randomId(), role: "user", content: text, createdAt: Date.now() },
-          {
-            id: messageId,
-            role: "assistant",
-            content: assistantText,
-            createdAt: Date.now(),
-            ...(assistantCitations.length > 0 ? { citations: assistantCitations } : {}),
-          },
+          ...this.finishTurnItems(streamId, messageId, assistantText, assistantCitations),
         ]);
         // Fallback reveal in case the stream completed but the per-chunk
         // probe missed it (e.g. the closing ``` was in the very last delta).
         tryReveal(assistantText);
-        // #371 — persist the agent.md handoff fence, if the coach emitted one.
-        void this.saveAgentMdIfPresent(assistantText, streamId);
       }
     } catch (err) {
       await this.handleSendError(err, streamId);
     } finally {
       this.activeStreams.delete(streamId);
+      this.turnTimelines.delete(streamId);
     }
+  }
+
+  /**
+   * #503 — 턴을 닫고 영속화할 아이템들을 낸다. 말풍선과 툴 줄이 **일어난 순서
+   * 그대로** 섞여 있는 배열이다. 인용은 마지막 어시스턴트 말풍선에 붙인다(툴이
+   * 말풍선을 여러 개로 쪼갤 수 있으므로 "그 턴의 어시스턴트 메시지 하나"라는
+   * 가정을 더는 쓸 수 없다).
+   *
+   * 타임라인이 없으면(호출 순서가 어긋난 경우) 기존과 똑같이 어시스턴트 한
+   * 덩어리로 폴백한다 — 히스토리가 비는 것보다 낫다.
+   */
+  private finishTurnItems(
+    streamId: string,
+    messageId: string,
+    assistantText: string,
+    citations: import("./protocol").Citation[],
+  ): ChatMessage[] {
+    const t = this.turnTimelines.get(streamId);
+    const fallback: ChatMessage[] = [
+      {
+        id: messageId,
+        role: "assistant",
+        content: assistantText,
+        createdAt: Date.now(),
+        ...(citations.length > 0 ? { citations } : {}),
+      },
+    ];
+    if (!t) return fallback;
+    const items = timelineEnd(t, Date.now()).items;
+    if (items.length === 0) return assistantText ? fallback : [];
+    if (citations.length === 0) return items;
+    let lastAssistant = -1;
+    for (let i = items.length - 1; i >= 0; i--) {
+      if (items[i].role === "assistant") {
+        lastAssistant = i;
+        break;
+      }
+    }
+    if (lastAssistant < 0) return items;
+    return items.map((m, i) =>
+      i === lastAssistant ? { ...m, citations: [...(m.citations ?? []), ...citations] } : m,
+    );
   }
 
   /**
@@ -1138,9 +1207,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         for (const call of result.toolUses) {
           if (p.signal.aborted) return;
           const line = browserToolLogLine(call.name, call.input);
-          void this.post({ type: "toolLog", streamId: p.streamId, id: call.id, ...line, state: "running" });
+          this.postToolLog(p.streamId, { id: call.id, ...line, state: "running" });
           const tr = await browser.execute(call);
-          void this.post({ type: "toolLog", streamId: p.streamId, id: call.id, ...line, state: tr.isError ? "error" : "done" });
+          this.postToolLog(p.streamId, { id: call.id, ...line, state: tr.isError ? "error" : "done" });
           toolResults.push({
             type: "tool_result",
             tool_use_id: call.id,
@@ -1418,7 +1487,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   private async appendHistory(msgs: ChatMessage[]): Promise<void> {
     const current = this.getHistory();
-    const next = clampHistory(current, msgs, HISTORY_MAX);
+    // #503 — 상한은 '말한 것' 기준으로 센다. 툴 줄까지 같은 200 안에서 세면 SDK
+    // 턴 한 번(수십 줄)이 대화 히스토리를 통째로 밀어낸다.
+    const next = clampTimeline([...current, ...msgs], HISTORY_MAX);
     await this.context.workspaceState.update(this.historyKey(), next);
   }
 
@@ -1470,6 +1541,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
       await this.context.globalState.update(COACH_MIGRATION_DONE_KEY, true);
     }
+  }
+
+  /**
+   * #503 — 툴 한 줄을 웹뷰로 보내면서 **같은 줄을 이 턴의 타임라인에도** 남긴다.
+   * 이 한 지점을 통과하지 않는 toolLog 는 화면엔 뜨는데 히스토리엔 없는 줄이 되어,
+   * 창을 다시 열면 사라진다 — 이 이슈가 잡으려는 증상 그 자체다.
+   */
+  private postToolLog(streamId: string, entry: ToolEntry): void {
+    const t = this.turnTimelines.get(streamId);
+    if (t) this.turnTimelines.set(streamId, timelineTool(t, entry, Date.now()));
+    void this.post({ type: "toolLog", streamId, ...entry });
   }
 
   private async post(msg: HostMessage): Promise<boolean | void> {

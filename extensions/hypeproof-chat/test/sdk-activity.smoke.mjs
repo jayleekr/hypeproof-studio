@@ -17,7 +17,7 @@
 
 import assert from "node:assert/strict";
 
-const { extractSdkActivity, summarizeToolInput, consumeSdkStream, SDK_STALL_FRIENDLY } =
+const { extractSdkActivity, summarizeToolInput, consumeSdkStream, sdkEventTime, SDK_STALL_FRIENDLY } =
   await import("../src/sdkCoachHelpers.ts");
 
 // 실제 SDK 메시지 모양(sdk.d.ts 기준)만 쓴다 — 모양이 바뀌면 이 테스트가 먼저 깨져야 한다.
@@ -363,4 +363,33 @@ console.log("✓ #414: sdk activity — thinking/tool_use/tool_result/thinking_t
   // 길면 자른다
   assert.ok(toolResultText("x".repeat(500)).endsWith("…"));
   console.log("✓ 실패한 툴은 사유까지 · 성공은 안 붙임 · 빈 값은 undefined");
+}
+
+// ─── #503 — 이벤트 시각을 그대로 실어 보낸다 ────────────────────────────────
+//
+// 왜: 툴 줄이 대화 히스토리의 일부가 되어 영속화되므로(단일 타임라인) 정렬
+// 근거가 필요하다. SDK 가 이벤트마다 `timestamp` 를 이미 싣고 오므로 순서표를
+// 새로 발명하지 않고 그걸 쓴다 — 호스트 시계로 다시 찍으면 "창을 다시 열었을 때"
+// 의 순서 근거가 우리 쪽 추정이 된다.
+//
+// 여기서 SDK 의 메시지 **모양**(한 메시지 = 한 블록)을 단언하지 않는 것은 의도다:
+// 2026-07-28 실측(0.3.207, assistant 12/12 content 길이 1)은 우리가 강제할 수 없는
+// 벤더 속성이라, 테스트로 잠그면 SDK 업그레이드 때 아무것도 알려주지 않고 깨진다.
+// 사실은 sdkCoachHelpers.ts 의 주석에 남겼다. 여기서는 우리가 소유한 것만 잠근다.
+{
+  assert.equal(sdkEventTime({ timestamp: "2026-07-28T01:02:03.000Z" }), Date.parse("2026-07-28T01:02:03.000Z"));
+  assert.equal(sdkEventTime({ timestamp: 1700000000000 }), 1700000000000);
+  assert.equal(sdkEventTime({}), undefined);
+  assert.equal(sdkEventTime({ timestamp: "그냥 글자" }), undefined);
+
+  const at = Date.parse("2026-07-28T01:02:03.000Z");
+  const acts = extractSdkActivity({
+    type: "assistant",
+    timestamp: "2026-07-28T01:02:03.000Z",
+    message: { content: [{ type: "tool_use", id: "toolu_9", name: "Write", input: { file_path: "/w/a.html" } }] },
+  });
+  assert.equal(acts[0].at, at, "SDK 시각이 활동에 실려야 한다");
+  // 시각이 없는 이벤트는 필드를 만들지 않는다 — 호출자가 자기 시계로 채운다.
+  assert.equal(extractSdkActivity(assistantBlocks({ type: "tool_use", id: "t", name: "Read", input: {} }))[0].at, undefined);
+  console.log("✓ #503: SDK 이벤트 시각(timestamp)을 활동에 실어 보낸다");
 }

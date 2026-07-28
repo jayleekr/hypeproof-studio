@@ -1007,7 +1007,7 @@ const STALLED = Symbol("sdk-stream-stalled");
 // it emits raw activity, the host maps it to the toolLog protocol the browser
 // loop already renders.
 
-export type SdkActivity =
+export type SdkActivity = (
   /** Running token estimate while the model thinks (Claude Code's "✻ …" counter). */
   | { kind: "thinking_tokens"; tokens: number }
   /** A completed thinking block. Raw model text — NOT translated (it is usually English). */
@@ -1015,7 +1015,26 @@ export type SdkActivity =
   /** The coach is about to run a tool. `id` pairs with the matching tool_result. */
   | { kind: "tool_use"; id: string; name: string; input: unknown }
   /** That tool finished. */
-  | { kind: "tool_result"; id: string; isError: boolean; reason?: string };
+  | { kind: "tool_result"; id: string; isError: boolean; reason?: string }
+) & {
+  /**
+   * #503 — SDK 가 이벤트마다 실어 보내는 자기 시각(ms). 단일 타임라인이 영속화될
+   * 때 툴 줄의 `createdAt` 으로 쓴다: 호스트 시계로 다시 찍으면 창을 다시 열었을
+   * 때의 정렬 근거가 우리 쪽 추정이 되어 버린다. 없으면 호출자가 시계를 준다.
+   */
+  at?: number;
+};
+
+/** SDK 이벤트의 `timestamp`(ISO 문자열 또는 ms)를 ms 로. 없으면 undefined. */
+export function sdkEventTime(msg: Record<string, unknown>): number | undefined {
+  const raw = msg["timestamp"];
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string") {
+    const ms = Date.parse(raw);
+    if (Number.isFinite(ms)) return ms;
+  }
+  return undefined;
+}
 
 /** `Read` 의 읽은 구간 표기. 범위를 안 줬으면(전체 읽기) 빈 문자열. */
 function readRangeSuffix(rec: Record<string, unknown>): string {
@@ -1125,10 +1144,12 @@ export function summarizeToolInput(
  */
 export function extractSdkActivity(msg: Record<string, unknown>): SdkActivity[] {
   const type = String(msg["type"] ?? "");
+  const at = sdkEventTime(msg);
+  const stamp = (a: SdkActivity): SdkActivity => (at === undefined ? a : { ...a, at });
 
   if (type === "system" && msg["subtype"] === "thinking_tokens") {
     const tokens = msg["estimated_tokens"];
-    return typeof tokens === "number" ? [{ kind: "thinking_tokens", tokens }] : [];
+    return typeof tokens === "number" ? [stamp({ kind: "thinking_tokens", tokens })] : [];
   }
 
   // tool_use rides on assistant messages; tool_result comes back on user ones.
@@ -1143,13 +1164,13 @@ export function extractSdkActivity(msg: Record<string, unknown>): SdkActivity[] 
     switch (b["type"]) {
       case "thinking": {
         const text = typeof b["thinking"] === "string" ? b["thinking"] : "";
-        if (text.trim()) out.push({ kind: "thinking", text });
+        if (text.trim()) out.push(stamp({ kind: "thinking", text }));
         break;
       }
       case "tool_use": {
         const id = typeof b["id"] === "string" ? b["id"] : "";
         const name = typeof b["name"] === "string" ? b["name"] : "";
-        if (id && name) out.push({ kind: "tool_use", id, name, input: b["input"] });
+        if (id && name) out.push(stamp({ kind: "tool_use", id, name, input: b["input"] }));
         break;
       }
       case "tool_result": {
@@ -1161,7 +1182,7 @@ export function extractSdkActivity(msg: Record<string, unknown>): SdkActivity[] 
         // 연속 실패했는데 사유를 알 길이 없어 소스를 읽어 추정해야 했다. 짧게 실어
         // 보낸다(성공 결과는 길고 대부분 노이즈이므로 실패일 때만).
         const reason = isError ? toolResultText(b["content"]) : undefined;
-        out.push({ kind: "tool_result", id, isError, ...(reason ? { reason } : {}) });
+        out.push(stamp({ kind: "tool_result", id, isError, ...(reason ? { reason } : {}) }));
         break;
       }
       default:
@@ -1324,6 +1345,22 @@ export async function consumeSdkStream(
       // #414 — surface the work itself (thinking / tool calls / results) before
       // the text, so the activity line appears when it happens rather than
       // after the prose that describes it.
+      //
+      // #503 실측(2026-07-28, @anthropic-ai/claude-agent-sdk 0.3.207, 제품과 같은
+      // 옵션으로 2회 실행): assistant 메시지 12개 전수에서 `message.content` 길이가
+      // 1이었다. SDK 는 API 메시지 하나를 thinking / text / tool_use 세 개의 SDK
+      // 메시지로 쪼개 순서대로 보낸다(같은 message.id·request_id·usage 로 묶인다).
+      // 그러므로 한 이벤트에서 onActivity 와 onDelta 가 **둘 다** 발화하는 일이
+      // 없고, 이 호출 순서는 화면 순서에 영향을 주지 않는다 — 순서를 잃는 곳은
+      // 여기가 아니라 웹뷰 리듀서였다(#503 ②③).
+      //
+      // 같은 실측에서 확인된 것: 최상위 `type === "content_block_delta"` 와
+      // `type === "text"` 는 두 런 모두 0건이라 아래 세 갈래 중 실제로 타는 것은
+      // "assistant" 뿐이다. 부분 스트리밍(includePartialMessages)을 켜도 이 분기는
+      // 안 탄다 — 델타는 최상위 `type: "stream_event"` 로 오고 실제 종류는 한 겹
+      // 안쪽 `msg.event.type` 에 있으며, 텍스트 경로도 `msg.delta.text` 가 아니라
+      // `msg.event.delta.text` 다(extractSdkText 도 같이 고쳐야 한다). 이 이슈
+      // 범위 밖이라 손대지 않는다 — 사실만 남긴다.
       if (h.onActivity) {
         for (const activity of extractSdkActivity(msg)) h.onActivity(activity);
       }

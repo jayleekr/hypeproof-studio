@@ -8,15 +8,19 @@ import type {
   UxConfig,
 } from "../../src/protocol";
 import { postToHost } from "./vscode";
-import type { ToolLogEntry } from "./App";
+import { hasActivityThisTurn } from "../../src/chatTimeline";
 import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
 
 interface Props {
   config: ChatConfig | null;
   // #384 — image handed from the host (editor-tab image → attach to coach).
   incomingImage: { dataUrl: string; nonce: number } | null;
+  /**
+   * #503 — 단일 타임라인. user / assistant / tool 이 일어난 순서대로 섞여 있다.
+   * 툴 로그를 따로 받던 `toolLog` prop 은 사라졌다 — 그게 화면을 두 덩어리로
+   * 가르던 원인이었다.
+   */
   messages: ChatMessage[];
-  toolLog: ToolLogEntry[];              // #278 Phase 3 — browser loop action log
   pageNotice: string | null;           // #308 — "페이지를 코치에게" 인라인 안내
   aiNotice: string | null;             // #320 — AI disclosure at session start
   stopNotice: string | null;           // #497 — Stop 으로 턴이 끊겼음을 알리는 안내
@@ -374,11 +378,16 @@ export function ChatPanel(props: Props) {
     !streaming &&
     ux.suggestions.initial.length > 0;
 
+  // #503 — 타임라인 끝에 툴 줄이 올 수 있으므로 "마지막이 어시스턴트인가"를
+  // 마지막 **말풍선** 기준으로 본다. 안 그러면 툴로 끝난 턴에서 후속 칩이 사라진다.
+  const lastSpoken = [...messages].reverse().find((m) => m.role !== "tool");
   const showFollowUpChips =
     !streaming &&
     messages.length > 0 &&
-    messages[messages.length - 1]?.role === "assistant" &&
+    lastSpoken?.role === "assistant" &&
     ux.suggestions.follow_up.length > 0;
+  // #414 — 이번 턴에 진짜 활동 로그가 떴으면 스피너가 가짜 단계를 지어내지 않는다.
+  const turnHasActivity = hasActivityThisTurn(messages);
 
   return (
     <div
@@ -437,22 +446,26 @@ export function ChatPanel(props: Props) {
           />
         )}
 
-        {messages.map((m) => (
-          <MessageItem
-            key={m.id}
-            message={m}
-            streaming={streaming}
-            isStreamingThis={streaming && m.id === streamingId}
-            ux={ux}
-            coachName={coachName}
-            buildingLabel={buildingLabel}
-            tone={appTone}
-            messages={messages}
-            hasActivity={props.toolLog.length > 0}
-            onRunCode={props.onRunCode}
-            onRetry={props.onRetry}
-          />
-        ))}
+        {messages.map((m) =>
+          m.role === "tool" ? (
+            <ToolLine key={m.id} message={m} />
+          ) : (
+            <MessageItem
+              key={m.id}
+              message={m}
+              streaming={streaming}
+              isStreamingThis={streaming && m.id === streamingId}
+              ux={ux}
+              coachName={coachName}
+              buildingLabel={buildingLabel}
+              tone={appTone}
+              messages={messages}
+              hasActivity={turnHasActivity}
+              onRunCode={props.onRunCode}
+              onRetry={props.onRetry}
+            />
+          ),
+        )}
 
         {props.pageNotice && (
           <div className="hps-page-notice" role="status" aria-live="polite">
@@ -466,20 +479,6 @@ export function ChatPanel(props: Props) {
           <div className="hps-stop-notice" role="status" aria-live="polite">
             <span className="hps-stop-notice-icon" aria-hidden="true">⏹</span>
             {props.stopNotice}
-          </div>
-        )}
-
-        {props.toolLog.length > 0 && (
-          <div className="hps-tool-log" role="status" aria-live="polite">
-            {props.toolLog.map((e) => (
-              <div key={e.id} className={`hps-tool-log-line hps-tool-${e.state}`}>
-                <span className="hps-tool-icon">{e.icon}</span>
-                <span className="hps-tool-label">{e.label}</span>
-                <span className="hps-tool-mark">
-                  {e.state === "running" ? "…" : e.state === "error" ? "⚠️" : "✓"}
-                </span>
-              </div>
-            ))}
           </div>
         )}
 
@@ -811,6 +810,29 @@ function ChipRack({
           </button>
         ))}
       </div>
+    </div>
+  );
+}
+
+/**
+ * #503 — 타임라인 안의 툴 한 줄. 예전에는 말풍선 전부 **아래**에 있는 하나의
+ * `.hps-tool-log` 상자였고, 그래서 "코치가 무슨 말을 하고 나서 무슨 일을 했는지"가
+ * 화면에서 읽히지 않았다. 지금은 일어난 자리에 그대로 놓인다.
+ *
+ * 클래스 이름(`hps-tool-log-line` / `hps-tool-icon` / `hps-tool-label` /
+ * `hps-tool-<state>`)은 **일부러 그대로 둔다** — e2e(t1-first-turn-trace)와
+ * 관측기(e2e/observe/watch.mjs)가 이 셀렉터로 활동을 읽는다.
+ */
+function ToolLine({ message }: { message: ChatMessage }) {
+  const t = message.tool;
+  if (!t) return null;
+  return (
+    <div className={`hps-tool-log-line hps-tool-${t.state}`} role="status" aria-live="polite">
+      <span className="hps-tool-icon">{t.icon}</span>
+      <span className="hps-tool-label">{t.label}</span>
+      <span className="hps-tool-mark">
+        {t.state === "running" ? "…" : t.state === "error" ? "⚠️" : "✓"}
+      </span>
     </div>
   );
 }

@@ -137,6 +137,9 @@ const MODAL_SNAP = `JSON.stringify((() => {
 
 // ─── 상태 ────────────────────────────────────────────────────────────────────
 let seen = new Map(), turn = 0, turnStart = 0, lastUserCount = 0;
+// #503 — 툴 로그가 대화 기록의 일부가 되어 턴을 넘어 누적된다. 이번 턴의 행은
+// 이 인덱스부터다(그 아래는 지난 턴들의 것).
+let lineBase = 0;
 let wasStreaming = false, wsBefore = snapWs(), primed = false;
 let modalOpenAt = null, modalWaitMs = 0, modalCount = 0, modalSeen = [];
 
@@ -218,6 +221,7 @@ for (;;) {
     primed = true;
     lastUserCount = s.msgs.filter((m) => m.role === "user").length;
     wasStreaming = s.streaming;
+    lineBase = s.lines.length;   // 지난 대화의 행은 전부 기준선 아래로 둔다
     for (const l of s.lines) seen.set(l.i, { i: l.i, at: 0, icon: l.icon.trim(), label: l.label, state: l.state, stale: true });
     rec({ ev: "primed", users: lastUserCount, stale_lines: s.lines.length, streaming: s.streaming });
     console.log(`[${hhmm(Date.now())}] 기준선 — 기존 대화 ${lastUserCount}턴 · 잔여 로그 ${s.lines.length}행 무시`);
@@ -231,7 +235,10 @@ for (;;) {
   if (started) {
     if (turn && wasStreaming) flushTurn();   // 이전 턴이 안 닫혔으면 닫고 간다
     lastUserCount = Math.max(lastUserCount, userCount);
-    turn++; turnStart = Date.now(); seen = new Map();   // 잔여 행도 함께 버려진다
+    // #503 — 툴 로그가 더는 턴마다 비워지지 않는다(대화 기록의 일부가 됐다).
+    // 그래서 `seen` 만 비우면 **직전 턴들의 행 전부**가 이번 턴에 새로 생긴 것으로
+    // 다시 세어진다. 이번 턴의 행은 "지금 DOM 에 있는 개수보다 뒤 인덱스"뿐이다.
+    turn++; turnStart = Date.now(); seen = new Map(); lineBase = s.lines.length;
     modalWaitMs = 0; modalCount = 0; modalOpenAt = null;
     const q = [...s.msgs].reverse().find((m) => m.role === "user")?.text ?? "";
     rec({ ev: "turn_start", turn, prompt: q });
@@ -239,7 +246,9 @@ for (;;) {
   }
 
   // ── 툴/생각 행 (정체성 = DOM 인덱스) ──
+  // #503 이후 행은 턴을 넘어 누적되므로 이번 턴 구간만 본다.
   for (const l of s.lines) {
+    if (l.i < lineBase) continue;
     const prev = seen.get(l.i);
     if (!prev) {
       const e = { i: l.i, at: Date.now() - turnStart, icon: l.icon.trim(), label: l.label, state: l.state };
