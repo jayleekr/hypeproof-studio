@@ -34,9 +34,16 @@ set -eu
 MANIFEST_SCHEMA=1
 
 STUDIO_RELEASES_REPO="jayleekr/hypeproof-studio-releases"
-STUDIO_VERSION="0.1.33"
-STUDIO_ASSET_GLOB_DARWIN_ARM64="HypeProof-Studio-darwin-arm64-*.zip"
-STUDIO_ASSET_GLOB_DARWIN_X64="HypeProof-Studio-darwin-x64-*.zip"
+# "latest" resolves from the releases API at run time. A hard pin here goes stale
+# the moment a release ships (it sat at 0.1.33 while the repo served v0.1.34),
+# and every participant would then install a version behind. Override with
+# HPS_STUDIO_VERSION=0.1.33 to install a specific one.
+STUDIO_VERSION="${HPS_STUDIO_VERSION:-latest}"
+# The published assets carry NO version in the name — `HypeProof-Studio-darwin-arm64.zip`.
+# The trailing `-` before `*` made the glob unmatchable, so step 5 always died with
+# "No Studio asset matching …". `*` after the arch matches both shapes.
+STUDIO_ASSET_GLOB_DARWIN_ARM64="HypeProof-Studio-darwin-arm64*.zip"
+STUDIO_ASSET_GLOB_DARWIN_X64="HypeProof-Studio-darwin-x64*.zip"
 
 # SDK seeding is delegated to the canonical scripts/seed-sdk-binary.sh — the
 # single source of truth for the platform package, the pinned SDK version, the
@@ -340,16 +347,38 @@ check_deps() {
 # ----------------------------------------------------------------------------- #
 # 7. HypeProof Studio app + native SDK seed
 # ----------------------------------------------------------------------------- #
+# Turn STUDIO_VERSION="latest" into the concrete tag the releases repo serves.
+# Everything downstream (the installed-version compare, the receipt) needs a real
+# number, so resolve once and rewrite the global.
+resolve_studio_version() {
+  [ "$STUDIO_VERSION" != "latest" ] && return 0
+  _tag=""
+  if have gh; then
+    _tag="$(gh release view --repo "$STUDIO_RELEASES_REPO" --json tagName --jq .tagName 2>/dev/null || true)"
+  fi
+  if [ -z "$_tag" ]; then
+    _tag="$(curl -fsSL "https://api.github.com/repos/${STUDIO_RELEASES_REPO}/releases/latest" 2>/dev/null \
+      | grep -o '"tag_name": *"[^"]*"' | head -n1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
+  fi
+  [ -n "$_tag" ] || die "could not resolve the latest Studio release from ${STUDIO_RELEASES_REPO} (set HPS_STUDIO_VERSION=<x.y.z>)"
+  STUDIO_VERSION="${_tag#v}"
+  info "Studio version: ${STUDIO_VERSION} (resolved from latest)"
+}
+
 gh_asset_url() {  # gh_asset_url <glob> -> download URL of first matching asset for STUDIO_VERSION
   _glob="$1"
   _api="https://api.github.com/repos/${STUDIO_RELEASES_REPO}/releases/tags/v${STUDIO_VERSION}"
   _auth=""; [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ] && _auth="-H \"Authorization: Bearer ${GH_TOKEN:-$GITHUB_TOKEN}\""
   # Prefer gh (handles auth + pagination) when available; else curl the API.
-  # Match on the asset NAME (the API `.url` basename is a numeric asset id that
-  # never matches a filename glob) and download via `browser_download_url`.
+  # Match on the asset NAME, never on a URL basename.
+  #
+  # The two sources spell the download URL differently and mixing them up yields
+  # the literal string "null":
+  #   gh release view --json assets  ->  .url      (browser download)  /  .apiUrl
+  #   REST /releases/tags/<tag>      ->  .browser_download_url         /  .url (api)
   if have gh; then
     gh release view "v${STUDIO_VERSION}" --repo "$STUDIO_RELEASES_REPO" \
-      --json assets --jq '.assets[] | "\(.name)\t\(.browser_download_url)"' 2>/dev/null | \
+      --json assets --jq '.assets[] | "\(.name)\t\(.url)"' 2>/dev/null | \
       while IFS="$(printf '\t')" read -r _name _dl; do
         # shellcheck disable=SC2254  # $_glob is INTENDED as a glob pattern here
         case "$_name" in $_glob) echo "$_dl"; break ;; esac
@@ -446,6 +475,7 @@ seed_sdk() {
 
 install_studio() {
   [ "${HPS_SKIP_STUDIO:-0}" = "1" ] && { warn "HPS_SKIP_STUDIO=1 — skipping Studio app + SDK seed"; return 0; }
+  resolve_studio_version
   step "Installing HypeProof Studio ${STUDIO_VERSION}"
   if [ "$OS" = "darwin" ]; then
     install_studio_mac
