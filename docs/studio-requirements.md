@@ -96,7 +96,7 @@ When in doubt:
 
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
-| REQ-E1 | `requireApprovalFor` 기본값 적용 | webview 가 `requestAction(writeFile)` 또는 `executeShell` 시 modal 노출 | E |
+| REQ-E1 | `requireApprovalFor` 기본값 적용 | 기본 정책은 `extensions/hypeproof-chat/package.json` 의 `default` = `[executeShell, openBrowser, delegateAgent, browserType]` 하나뿐이다(#499 — 코드 폴백은 도달 불가). 이 네 종은 modal 노출, `writeFile`·`browserClick`·`readFile` 은 modal 없이 진행(#464) | E |
 | REQ-E2 | Approve/Deny → actionResult | "Approve" 클릭 → `actionResult.approved=true` 가 webview 로 회신 | E |
 | REQ-E3 | 설정으로 bypass 가능 | `requireApprovalFor: []` 일 때 modal 없이 즉시 approved 회신 | M |
 

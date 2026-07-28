@@ -49,4 +49,26 @@ for (const key of MACHINE_SCOPED) {
   );
 }
 
+// --- Approval policy lock (#499) ---------------------------------------
+// The manifest `default` IS the policy. VS Code only falls back to the
+// getConfiguration() second argument when the manifest declares no default —
+// which it does, so the code-side array is unreachable. #499: the code was
+// updated for #464 and the manifest was not, so writeFile still opened a modal
+// and browserType (fully wired: sdkCoachHelpers.ts, protocol.ts, APPROVAL_COPY)
+// was never in the policy → auto-allowed every time. items.enum matters too:
+// a kind missing there cannot be toggled from the Settings UI.
+const EXPECTED_APPROVAL = ["executeShell", "openBrowser", "delegateAgent", "browserType"];
+
+const approval = props["hypeproofChat.requireApprovalFor"];
+assert.deepEqual(
+  [...(approval.default ?? [])].sort(),
+  [...EXPECTED_APPROVAL].sort(),
+  "requireApprovalFor.default is the effective policy — writeFile out (#464), browserType in (#499)",
+);
+assert.deepEqual(
+  [...(approval.items?.enum ?? [])].sort(),
+  [...EXPECTED_APPROVAL, "writeFile"].sort(),
+  "items.enum must offer every gateable kind (incl. writeFile as an opt-in) or Settings UI cannot set it",
+);
+
 console.log("manifest-security-scope.smoke: all assertions passed");
