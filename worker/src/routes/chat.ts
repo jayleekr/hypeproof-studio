@@ -17,7 +17,7 @@ import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
 import { getProfile } from "../profiles";
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
-import { callAnthropic } from "../lib/anthropic";
+import { callAnthropicResilient } from "../lib/anthropic";
 import { callGeminiResilient } from "../lib/gemini";
 import { callOpenAI } from "../lib/openai";
 import {
@@ -340,7 +340,12 @@ chat.post("/chat/completions", async (c) => {
       const aBody = translate(body as any, profile, coach);
       aBody.stream = stream;
       modelLabel = aBody.model;
-      upstream = await callAnthropic(aBody, apiKey, {
+      // #373 — retry transient 429/5xx (same model, bounded backoff) so a
+      // burst from the shared org token pool during the 23-concurrent SK
+      // Biopharm class is absorbed invisibly instead of dying on a child's
+      // screen. The gemini branch above already had callGeminiResilient; this
+      // brings the prod (anthropic) path to parity. No model fallback here.
+      upstream = await callAnthropicResilient(aBody, apiKey, {
         url: env.ANTHROPIC_PROXY_URL,
         proxySecret: env.ANTHROPIC_PROXY_SECRET,
       });

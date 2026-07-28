@@ -887,6 +887,67 @@ const TINY_PNG =
   console.log("✓ callGeminiResilient: retry transient, 404 → skip to fallback, surface 4xx");
 }
 
+// ---- callAnthropicResilient: retry transient 429/5xx, NO model fallback -----
+// #373 — the prod (anthropic) `/v1/chat` path must absorb a transient 429 from
+// the shared org token pool during the 23-concurrent SK Biopharm class, the
+// way the gemini branch already does. Unlike gemini there is NO model
+// fallback: the requested model must never change across retries.
+{
+  const { callAnthropicResilient } = await import("../src/lib/anthropic.ts");
+  const realFetch = globalThis.fetch;
+  const reqModels = [];
+  const scriptFetch = (statuses) => {
+    let i = 0;
+    return async (_url, init) => {
+      reqModels.push(JSON.parse(init.body).model);
+      const status = statuses[Math.min(i++, statuses.length - 1)];
+      return new Response(status === 200 ? '{"ok":true}' : '{"error":"x"}', { status });
+    };
+  };
+  const MODEL = "claude-sonnet-4-6";
+  const body = { model: MODEL, messages: [], max_tokens: 100 };
+  try {
+    // 1. First try succeeds → single call, no retry.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([200]);
+    let r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 200);
+    assert.equal(reqModels.length, 1, "no extra calls on first success");
+
+    // 2. 429 then 200 → retried once, absorbed invisibly.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([429, 200]);
+    r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 200, "429 absorbed by retry");
+    assert.deepEqual(reqModels, [MODEL, MODEL], "same model on retry — no fallback");
+
+    // 3. 503 x2 then 200 → two retries, still same model.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([503, 503, 200]);
+    r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 200);
+    assert.deepEqual(reqModels, [MODEL, MODEL, MODEL], "3 calls, model never changes");
+
+    // 4. Non-retryable 400 → surfaced immediately, no retry.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([400, 200]);
+    r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 400, "4xx not masked");
+    assert.equal(reqModels.length, 1, "no retry on a non-transient error");
+
+    // 5. Persistent 429 → exhausted after 3 attempts, last failure surfaced
+    //    (route then maps it to CHAT_PASSTHROUGH_4XX). Bounded: exactly 3 calls.
+    reqModels.length = 0;
+    globalThis.fetch = scriptFetch([429, 429, 429, 429]);
+    r = await callAnthropicResilient({ ...body }, "k");
+    assert.equal(r.status, 429, "exhausted → last failure surfaced");
+    assert.equal(reqModels.length, 3, "initial + 2 retries, then stop");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  console.log("✓ callAnthropicResilient: retry transient 429/5xx, no model fallback, surface 4xx");
+}
+
 // ---- translate: tools dropped when profile.sandbox.mcp_tools_enabled empty
 {
   const out = translate(
