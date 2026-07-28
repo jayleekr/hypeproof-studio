@@ -1,13 +1,24 @@
 // Shared message contract between extension host (Node) and webview (browser).
 // Import this file from both sides; do not redefine these types anywhere else.
 
-export type ChatRole = "user" | "assistant" | "system";
+/**
+ * #503 — `"tool"` 은 화면·영속화 전용 역할이다. 대화와 툴 실행이 하나의
+ * 타임라인이 되면서 툴 한 줄도 `ChatMessage` 가 됐다. **모델에 보내는
+ * 히스토리에는 절대 들어가지 않는다** — `chatTimeline.modelHistory()` 로 거른다.
+ */
+export type ChatRole = "user" | "assistant" | "system" | "tool";
 
 export interface ChatMessage {
   id: string;
   role: ChatRole;
   content: string;
   createdAt: number;
+  /**
+   * #503 — `role: "tool"` 일 때만 채워진다. 툴 한 줄의 표시 내용
+   * (`🔧 Write(index.html) ✓`). `id` 는 SDK 의 tool_use id 라 running → done
+   * 갱신이 제자리에서 일어난다.
+   */
+  tool?: { icon: string; label: string; state: "running" | "done" | "error" };
   /**
    * #173 — Web search citations attached to an assistant message. Populated
    * by the worker's SSE translator (`hps_citations` delta), accumulated by
@@ -246,7 +257,10 @@ export type HostMessage =
   | { type: "streamStopped"; streamId: string }
   // #278 Phase 3 — agentic browser tool loop action log (auto-run + log, no
   // modal). One line per tool call; `state` flips running → done/error.
-  | { type: "toolLog"; streamId: string; id: string; icon: string; label: string; state: "running" | "done" | "error" }
+  // #503 — 채널이 하나라 도착 순서가 곧 발생 순서다. 웹뷰는 이 줄을 `streamChunk`
+  // 와 **같은 배열**에 끼워 넣어 [말풍선] → [툴] → [말풍선] 을 만든다. `at` 은 SDK
+  // 가 실어 보낸 자기 시각(ms, 없으면 호스트 시계) — 영속화된 줄의 createdAt.
+  | { type: "toolLog"; streamId: string; id: string; icon: string; label: string; state: "running" | "done" | "error"; at?: number }
   // #308 — "페이지를 코치에게" 완료 안내. VS Code 알림 토스트를 띄우면 통합
   // 브라우저가 "Paused due to Notification"으로 멈추므로(코어 동작), 토스트 대신
   // 채팅 패널 인라인 상태줄로 알린다.

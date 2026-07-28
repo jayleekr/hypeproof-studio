@@ -1,22 +1,32 @@
 import { useEffect, useReducer, useState } from "react";
 import type { AssetScoreChunk, ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
+import {
+  emptyTimeline,
+  timelineCitations,
+  timelineDelta,
+  timelineEnd,
+  timelineReset,
+  timelineStart,
+  timelineTool,
+  type TimelineState,
+  type ToolEntry,
+} from "../../src/chatTimeline";
 import { onHostMessage, postToHost } from "./vscode";
 import { ChatPanel } from "./ChatPanel";
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
 
-// #278 Phase 3 — one line in the browser tool action log.
-export type ToolLogEntry = { id: string; icon: string; label: string; state: "running" | "done" | "error" };
-
 interface State {
   config: ChatConfig | null;
-  messages: ChatMessage[];
-  streamingId: string | null;
+  /**
+   * #503 — 대화와 툴 실행이 **하나의 배열**이다. 예전에는 messages 와 toolLog 가
+   * 평행선 두 개였고, 그래서 화면이 [말풍선 전부] 아래 [툴 전부] 로 그려졌다.
+   */
+  timeline: TimelineState;
   streamId: string | null;
   error: string | null;
   errorRequestId: string | null;   // S-07 / #49 — surfaced in ErrorBanner
   errorRunbookUrl: string | null;  // #165 — banner renders as clickable link
   assetScore: AssetScoreChunk | null;
-  toolLog: ToolLogEntry[];          // #278 Phase 3 — browser loop action log (current turn)
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
@@ -29,7 +39,7 @@ type Action =
   | { type: "streamChunk"; delta: string }
   | { type: "streamCitations"; citations: Citation[] }
   | { type: "streamAssetScore"; assetScore: AssetScoreChunk }
-  | { type: "toolLog"; entry: ToolLogEntry }
+  | { type: "toolLog"; entry: ToolEntry }
   | { type: "pageAttached"; label: string }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
@@ -43,14 +53,12 @@ const STOP_NOTICE = "답변 생성이 중지되었습니다. 다시 채팅을 �
 
 const initialState: State = {
   config: null,
-  messages: [],
-  streamingId: null,
+  timeline: emptyTimeline(),
   streamId: null,
   error: null,
   errorRequestId: null,
   errorRunbookUrl: null,
   assetScore: null,
-  toolLog: [],
   pageNotice: null,
   aiNotice: null,
   stopNotice: null,
@@ -61,51 +69,31 @@ function reducer(state: State, action: Action): State {
     case "config":
       return { ...state, config: action.config };
     case "history":
-      // 활동 로그와 에러도 같이 비운다. Clear 를 눌러도 직전 턴의 툴 호출 목록이
-      // 화면에 남아 있었다(2026-07-27 실사용) — 대화는 사라졌는데 "무슨 도구를
-      // 썼는지"만 떠 있어서 어느 대화의 것인지 알 수 없는 상태가 된다.
-      // toolLog 는 streamStart 에서만 비워지고 있었다.
-      return { ...state, messages: action.messages, toolLog: [], error: null };
+      // 대화·툴·에러가 한 번에 갈린다. Clear 를 눌러도 직전 턴의 툴 호출 목록이
+      // 화면에 남아 있었다(2026-07-27 실사용) — 이제 툴이 타임라인의 일부라
+      // 배열 하나를 갈아끼우면 끝이다.
+      return { ...state, timeline: timelineReset(action.messages), error: null };
     case "streamStart":
       return {
         ...state,
-        streamingId: action.messageId,
         streamId: action.streamId,
         error: null,
         stopNotice: null,   // #497 — 새 턴이 시작되면 이전 중지 안내는 사라진다
         assetScore: null,
-        toolLog: [],
-        messages: [
-          ...state.messages,
-          { id: action.messageId, role: "assistant", content: "", createdAt: Date.now() },
-        ],
+        // #503 — 직전 턴의 툴 줄을 **비우지 않는다**. 예전에는 여기서 toolLog 를
+        // [] 로 밀어서, 다음 턴이 시작되는 순간 이전 턴이 무슨 도구를 썼는지가
+        // 통째로 증발했다(스크롤을 올려도 말풍선만 남았다).
+        timeline: timelineStart(state.timeline, action.messageId, Date.now()),
       };
     case "streamChunk":
-      return {
-        ...state,
-        messages: state.messages.map((m) =>
-          m.id === state.streamingId ? { ...m, content: m.content + action.delta } : m,
-        ),
-      };
+      return { ...state, timeline: timelineDelta(state.timeline, action.delta, Date.now()) };
     case "streamCitations":
-      return {
-        ...state,
-        messages: state.messages.map((m) =>
-          m.id === state.streamingId
-            ? { ...m, citations: [...(m.citations ?? []), ...action.citations] }
-            : m,
-        ),
-      };
+      return { ...state, timeline: timelineCitations(state.timeline, action.citations) };
     case "streamAssetScore":
       return { ...state, assetScore: action.assetScore };
-    case "toolLog": {
-      // Upsert by id (a running line flips to done/error in place).
-      const exists = state.toolLog.some((e) => e.id === action.entry.id);
-      const toolLog = exists
-        ? state.toolLog.map((e) => (e.id === action.entry.id ? action.entry : e))
-        : [...state.toolLog, action.entry];
-      return { ...state, toolLog };
-    }
+    case "toolLog":
+      // 같은 id 는 제자리 갱신(running → done/error), 새 id 는 지금 이 자리에 삽입.
+      return { ...state, timeline: timelineTool(state.timeline, action.entry, Date.now()) };
     case "pageAttached":
       // #308 — inline notice; cleared on the next send (userSent) only.
       return { ...state, pageNotice: action.label };
@@ -117,8 +105,8 @@ function reducer(state: State, action: Action): State {
     case "streamEnd":
       return {
         ...state,
-        streamingId: null,
         streamId: null,
+        timeline: timelineEnd(state.timeline, Date.now()),
         error: null,
         errorRequestId: null,
         errorRunbookUrl: null,
@@ -130,8 +118,10 @@ function reducer(state: State, action: Action): State {
       // 호스트는 이 턴을 영속 히스토리에 커밋하지 않는다.
       return {
         ...state,
-        streamingId: null,
         streamId: null,
+        // #503 — 끊긴 턴도 타임라인은 닫는다: 보류된 툴 줄이 남아 있으면
+        // 흘려 넣고 말풍선을 닫는다. 스트리밍된 부분 답변은 그대로 둔다.
+        timeline: timelineEnd(state.timeline, Date.now()),
         error: null,
         errorRequestId: null,
         errorRunbookUrl: null,
@@ -140,8 +130,8 @@ function reducer(state: State, action: Action): State {
     case "streamError":
       return {
         ...state,
-        streamingId: null,
         streamId: null,
+        timeline: timelineEnd(state.timeline, Date.now()),
         error: action.error,
         errorRequestId: action.requestId ?? null,
         errorRunbookUrl: action.runbookUrl ?? null,
@@ -151,16 +141,19 @@ function reducer(state: State, action: Action): State {
         ...state,
         pageNotice: null,   // #308 — clear the "붙였어요" notice once the user sends
         stopNotice: null,   // #497 — 다시 입력했으면 중지 안내는 역할을 다했다
-        messages: [
-          ...state.messages,
-          {
-            id: `local-${Date.now()}`,
-            role: "user",
-            content: action.text,
-            createdAt: Date.now(),
-            ...(action.images && action.images.length > 0 ? { images: action.images } : {}),
-          },
-        ],
+        timeline: {
+          ...state.timeline,
+          items: [
+            ...state.timeline.items,
+            {
+              id: `local-${Date.now()}`,
+              role: "user",
+              content: action.text,
+              createdAt: Date.now(),
+              ...(action.images && action.images.length > 0 ? { images: action.images } : {}),
+            },
+          ],
+        },
       };
   }
 }
@@ -181,7 +174,7 @@ export function App() {
         case "streamChunk": dispatch({ type: "streamChunk", delta: msg.delta }); break;
         case "streamCitations": dispatch({ type: "streamCitations", citations: msg.citations }); break;
         case "streamAssetScore": dispatch({ type: "streamAssetScore", assetScore: msg.assetScore }); break;
-        case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state } }); break;
+        case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state, ...(msg.at ? { at: msg.at } : {}) } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
@@ -200,28 +193,32 @@ export function App() {
   // sits INSIDE the ChatErrorBoundary tree. Throwing here in App() instead
   // would crash above the boundary, leaving nothing to catch it.)
 
+  // #503 — 화면과 히스토리는 같은 배열이다. 호스트로 넘어간 뒤 모델로 나가기
+  // 전에 role:"tool" 이 걸러진다(chatTimeline.modelHistory).
+  const messages = state.timeline.items;
+
   const send = (text: string, images?: string[]) => {
     const trimmed = text.trim();
     const hasImages = !!images && images.length > 0;
-    if ((!trimmed && !hasImages) || state.streamingId) return;
+    if ((!trimmed && !hasImages) || state.streamId) return;
     dispatch({ type: "userSent", text: trimmed, images });
-    postToHost({ type: "sendMessage", text: trimmed, history: state.messages, images });
+    postToHost({ type: "sendMessage", text: trimmed, history: messages, images });
   };
 
   const retry = (prompt: string) => {
-    if (state.streamingId) return;
+    if (state.streamId) return;
     // Re-send the same user prompt to get a fresh assistant variant.
     dispatch({ type: "userSent", text: prompt });
-    postToHost({ type: "retryMessage", prompt, history: state.messages });
+    postToHost({ type: "retryMessage", prompt, history: messages });
   };
 
   // S-04 (#48): "다시 보내기" on a stream error reuses the LAST user prompt
   // that's already in history. The worker idempotently writes turn rows so
   // a retry doesn't double-count.
   const retryLast = () => {
-    if (state.streamingId) return;
-    for (let i = state.messages.length - 1; i >= 0; i--) {
-      const m = state.messages[i];
+    if (state.streamId) return;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
       if (m && m.role === "user") {
         // #358 — re-attach the failed turn's pending image(s). Without this the
         // retry re-sent text only, so the coach replied "스크린샷을 아직 못
@@ -229,7 +226,7 @@ export function App() {
         // the in-memory message (single-shot, REQ-C11), which is exactly what a
         // same-session retry needs.
         const images = m.images && m.images.length > 0 ? m.images : undefined;
-        postToHost({ type: "retryMessage", prompt: m.content, history: state.messages, images });
+        postToHost({ type: "retryMessage", prompt: m.content, history: messages, images });
         return;
       }
     }
@@ -243,7 +240,7 @@ export function App() {
 
   // streamEnd dispatches don't carry error info; clear-on-end is fine because
   // the existing reducer only sets error on streamError, never on streamEnd.
-  const hasLastUserPrompt = state.messages.some((m) => m.role === "user");
+  const hasLastUserPrompt = messages.some((m) => m.role === "user");
 
   return (
     <ChatErrorBoundary>
@@ -251,17 +248,16 @@ export function App() {
       <ChatPanel
         incomingImage={incomingImage}
         config={state.config}
-        messages={state.messages}
-        toolLog={state.toolLog}
+        messages={messages}
         pageNotice={state.pageNotice}
         aiNotice={state.aiNotice}
         stopNotice={state.stopNotice}
-        streaming={!!state.streamingId}
-        streamingId={state.streamingId}
+        streaming={!!state.streamId}
+        streamingId={state.timeline.openId}
         error={state.error}
         errorRequestId={state.errorRequestId}
         errorRunbookUrl={state.errorRunbookUrl}
-        canRetryLast={hasLastUserPrompt && !state.streamingId}
+        canRetryLast={hasLastUserPrompt && !state.streamId}
         onSend={send}
         onRetry={retry}
         onRetryLast={retryLast}

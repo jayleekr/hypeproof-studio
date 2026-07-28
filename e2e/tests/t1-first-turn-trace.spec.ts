@@ -130,6 +130,9 @@ test("T1 — 첫 턴 현미경: 생각·도구·성공·소요", async () => {
     // 활동 로그를 도는 동안 샘플링한다. 렌더 구조는 ChatPanel.tsx 를 열어 확인했다:
     //   .hps-tool-log-line > .hps-tool-icon(💭/🔧) + .hps-tool-label + 상태 클래스
     //   state: running | error | (done)
+    // #503 이후 이 줄들은 말풍선들과 **같은 타임라인**에 섞여 놓인다(컨테이너
+    // .hps-tool-log 는 사라졌다). 행 클래스는 그대로라 이 셀렉터는 유효하고,
+    // 첫 턴만 재므로 누적(턴을 넘어 남는다)도 이 스펙엔 영향이 없다.
     const body = cf.locator(".hps-msg-assistant .hps-msg-body").last();
     const progress = cf.locator(".hps-msg-assistant").last().locator(".hps-code-progress");
     const seen = new Map<string, TraceEntry>();

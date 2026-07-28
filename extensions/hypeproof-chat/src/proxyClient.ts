@@ -166,7 +166,10 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
         ]
       : userText;
   const messages = [
-    ...history.map((m) => ({ role: m.role, content: m.content })),
+    // #503 — 툴 줄(role:"tool")은 화면·히스토리 전용이다. 호출부(handleSend)에서
+    // 이미 걸러 오지만, 이 함수는 모델로 나가는 마지막 문이라 여기서도 막는다.
+    ...history.filter((m) => m.role === "user" || m.role === "assistant")
+      .map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: userContent },
     // #278 Phase 3 — the loop's scratch tool_use/tool_result turns (if any).
     ...(toolTurns ?? []),

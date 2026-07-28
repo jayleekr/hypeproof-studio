@@ -61,8 +61,8 @@ open -a "HypeProof Studio" --args --remote-debugging-port=9333
 | 짐작한 것 | 실제 | 그래서 |
 |---|---|---|
 | Playwright 로 채팅에 붙을 수 있다 | 채팅 React 앱은 웹뷰 셸 안의 별도 CDP 타깃(OOPIF)이라 `page.frames()` 에 안 잡힌다 | 웹뷰 타깃에 **직접** 붙고 `Page.createIsolatedWorld` 로 들어간다 |
-| 턴이 끝난 뒤 활동 로그를 읽으면 된다 | `toolLog` 는 `streamStart` 마다 `[]` 로 비워진다 (`App.tsx:65`). DB 에도 안 남는다 | **도는 동안** 잡지 않으면 영구 소실 |
-| 로그 행은 추가된다 | `💭` 는 같은 행이 제자리 갱신된다 (`App.tsx:89-95`) | 행 정체성은 **DOM 인덱스**. 라벨을 키로 쓰면 개수가 몇 배로 부푼다 |
+| 턴이 끝난 뒤 활동 로그를 읽으면 된다 | ~~`toolLog` 는 `streamStart` 마다 `[]` 로 비워진다~~ → **#503 에서 고쳐졌다.** 툴 줄은 이제 대화 타임라인의 일부(`role:"tool"`)라 턴이 넘어가도 남고 workspaceState 에도 저장된다 | 여전히 **도는 동안** 잡는 게 정확하다(모달 대기·상태 전이 시각은 사후에 복원 못 한다). 대신 행이 누적되므로 턴 경계에서 `lineBase` 아래를 걸러야 한다 |
+| 로그 행은 추가된다 | `💭` 는 같은 행이 제자리 갱신된다 (`chatTimeline.ts` `timelineTool` — id upsert) | 행 정체성은 **DOM 인덱스**. 라벨을 키로 쓰면 개수가 몇 배로 부푼다 |
 | 텍스트가 멈추면 턴이 끝난 것 | 긴 툴 호출 중엔 당연히 멈춘다 | `.hps-btn-stop` 존재 여부가 권위 있는 신호 (`ChatPanel.tsx:612`) |
 | 승인 모달은 DOM 에 있다 | macOS 기본은 **네이티브 NSAlert** — DOM 에 없다 | 측정 전에 `window.dialogStyle: "custom"` 을 켜고, 모달은 **워크벤치 페이지**에 있으므로 CDP 연결이 두 개 필요 |
 | 붙는 순간부터 세면 된다 | DOM 에 지난 턴의 잔여물이 남아 있다 | 첫 스냅샷은 **기준선만** 잡는다 (`primed`) |
