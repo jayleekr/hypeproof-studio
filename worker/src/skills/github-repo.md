@@ -1,212 +1,184 @@
-# 스킬: GitHub 저장소에 내 것으로 올리기
+# 스킬: 홈페이지를 GitHub 에 올리기
 
-참가자의 작업을 **참가자 계정의 저장소**로 올린다. 큐시트 최종 결과물 3번.
+**참가자는 10분 전에 GitHub 에 가입했다.** 아이디와 비밀번호만 안다. 터미널이
+없고 git 도 gh 도 모른다. 브라우저는 가입 직후라 GitHub 에 로그인돼 있다.
+`gh` 는 이미 깔려 있다.
 
-참가자는 git을 모른다. **GitHub 아이디만 있으면 된다** — 나머지는 당신이 하고,
-참가자가 눌러야 하는 것만 짚어준다. 저장소는 참가자 것이고, 당신은 대신 갖지
-않는다.
+**참가자가 할 일은 딱 하나 — 여덟 글자 입력이다.** 나머지는 전부 당신이 한다.
+설명하지 말고 하고 나서 알려줘라.
 
-## git 을 쓰지 마라
-
-macOS의 `/usr/bin/git`은 껍데기다(CLT stub). 부르는 순간 참가자 화면에 **"명령어
-라인 개발자 도구 설치" 창이 뜨고 2GB를 받는다.** 수업 중에 절대 하지 마라.
-Windows에도 git이 깔려 있지 않을 수 있고, 설치를 시키면 같은 함정이다.
-
-대신 `gh` 하나로 GitHub API를 통해 전부 처리한다. 저장소 생성·파일 업로드·설정
-모두 git 없이 된다.
-
-## 0. 어느 OS인지 먼저 확인한다
-
-명령이 갈린다. **짐작하지 말고 물어보고 시작해라:**
-
-```
-uname -s 2>/dev/null || echo Windows
-```
-
-`Darwin` → macOS · `Linux` → Linux · 그 외/실패 → Windows.
-작업 폴더 경로가 `C:\...` 로 시작하면 그것도 Windows 신호다.
-
-아래는 갈리는 것만 표로 둔다. 나머지 단계(로그인·저장소 생성·업로드)는 `gh` 가
-같으므로 OS와 무관하다.
-
-| | macOS | Windows |
-|---|---|---|
-| 설치 위치 | `~/Library/Application Support/HypeProof-Studio/bin/` | `%APPDATA%\HypeProof-Studio\bin\` |
-| 있는지 확인 | `command -v gh` | `where gh` |
-| 릴리스 자산 | `macOS_arm64.zip` | `windows_amd64.zip` |
-| 압축 해제 | `unzip` | `tar -xf` (Windows 10+ 내장) |
-| base64 | `base64 -i <파일>` | 아래 4단계 참조 |
-
-## 1. gh 준비
-
-이미 있으면 건너뛴다.
-
-```
-# macOS
-command -v gh || ls ~/Library/Application\ Support/HypeProof-Studio/bin/gh
-# Windows
-where gh 2>NUL || dir "%APPDATA%\HypeProof-Studio\bin\gh.exe"
-```
-
-없으면 받는다. **파일 이름을 직접 조립하지 마라** — 버전이 올라가면 404가 난다.
-릴리스 API가 주는 `browser_download_url`을 그대로 쓴다:
-
-```
-# macOS — macOS_arm64.zip
-curl -sL https://api.github.com/repos/cli/cli/releases/latest \
-  | grep -o '"browser_download_url": *"[^"]*macOS_arm64\.zip"' \
-  | head -1 | cut -d'"' -f4
-
-# Windows — windows_amd64.zip
-curl -sL https://api.github.com/repos/cli/cli/releases/latest \
-  | grep -o '"browser_download_url": *"[^"]*windows_amd64\.zip"' \
-  | head -1 | cut -d'"' -f4
-```
-
-나온 주소로 받아서 풀고 `gh` 실행 파일을 위 표의 설치 위치로 옮긴다.
-`curl` 은 macOS·Windows 10+ 둘 다 내장이고, 압축 해제는 macOS `unzip` /
-Windows `tar -xf` 로 한다. **어느 쪽도 sudo·관리자 권한이 필요 없다.**
-
-인터넷에서 실행 파일을 받는 일이다. **뭘 왜 받는지 한 줄로 설명하고 승인을
-받아라.** 조용히 지나가면 안 된다.
-
-> **Windows 경로는 실기기 검증 전이다(#451).** 다운로드·압축 해제가 한 번에
-> 안 되면 붙잡고 있지 말고 **아래 수동 폴백으로 바로 넘어가라.** 참가자를
-> 명령줄 디버깅에 끌고 들어가는 것이 수업에서 가장 비싼 실패다.
-
-## 2. 로그인 — 세 가지 상태를 먼저 가른다
-
-**"이미 로그인돼 있겠지"로 시작하지 마라.** 참가자는 셋 중 하나다:
+## 1. 로그인됐는지 본다
 
 ```
 gh api user --jq .login
 ```
 
-| 결과 | 상태 | 다음 |
-|---|---|---|
-| 아이디가 나옴 | 이미 로그인됨 | 3단계로 |
-| 인증 오류 | 계정은 있으나 앱이 로그인 안 됨 | 아래 **2-A** |
-| — | 계정 자체가 없음 | 아래 **2-B** 먼저, 그다음 2-A |
+아이디가 나오면 **2번을 건너뛰고 3번으로 간다.** 실패하면 2번.
 
-계정이 있는지는 **참가자에게 물어봐라.** "GitHub 아이디 있으세요?" 한 마디면 된다.
-없다고 하면 부끄러워할 일이 아니라고 짚어주고 2-B로 간다 — 3분이면 된다.
+**"GitHub 계정 있으세요?" 를 묻지 마라.** 방금 가입한 사람은 자기가 "계정이
+있는" 상태인지도 모르고, 아이디·로그인·가입이 뭐가 다른지도 모른다. 답할 수 없는
+질문이다. 확인은 위 명령이 해준다.
 
-### 2-A. 앱에 로그인시키기 (계정은 있는 경우)
+## 2. 로그인시킨다 — 여기만 까다롭다
+
+### 먼저 A 인지 B 인지 정한다 — 정하기 전에 아무 명령도 쓰지 마라
+
+**작업 폴더 절대경로**를 보면 알 수 있다. 이미 알고 있으니 확인하려고 명령을 따로
+돌리지 마라.
 
 ```
-gh auth login --hostname github.com --git-protocol https --web
+/Users/… · /home/…  로 시작  →  A (bash)
+C:\…                로 시작  →  B (PowerShell)
 ```
 
-코드가 나온다(예: `A1B2-C3D4`). 브라우저는 당신이 열어주고, 참가자에게:
+**A 와 B 는 서로의 문법에서 파싱조차 되지 않는다.** 잘못 고르면 첫 줄부터 실패한다.
+고른 쪽 블록을 **통째로 그대로** 붙여 실행해라. 손대면 코드를 잃는다.
 
-> 브라우저에 이 여덟 글자를 넣어주세요: **A1B2-C3D4**
+`gh auth login --web` 은 참가자가 승인할 때까지 **반환하지 않고, 여덟 글자가 그
+명령의 출력(stderr)에 갇힌다.** 그냥 실행하면 당신은 멈춰 있고 참가자는 뭘 눌러야
+하는지도 모른다. 그래서 두 블록 다 **백그라운드로 보내고 출력을 파일로 받는다.**
 
-브라우저에서 GitHub에 로그인돼 있으면 코드만 넣으면 끝난다. **비밀번호도 토큰도
-만들 필요 없다.** 브라우저 쪽이 로그아웃 상태면 거기서 먼저 로그인하게 안내한다.
+#### A — bash (macOS · Linux)
 
-확인:
+```
+nohup gh auth login --web --hostname github.com \
+      --git-protocol https --scopes repo,workflow \
+      < /dev/null > /tmp/hps-ghlogin.log 2>&1 &
+sleep 3
+grep -oE 'one-time code: [A-Z0-9]{4}-[A-Z0-9]{4}' /tmp/hps-ghlogin.log | grep -oE '[A-Z0-9]{4}-[A-Z0-9]{4}'
+```
+
+#### B — PowerShell (Windows)
+
+`nohup` · `grep` · `/tmp` · `&` 는 **여기에 없다.** 위 A 를 쓰면 안 된다.
+
+```powershell
+Start-Process gh -NoNewWindow -ArgumentList `
+  'auth','login','--web','--hostname','github.com','--git-protocol','https','--scopes','repo,workflow' `
+  -RedirectStandardError "$env:TEMP\hps-ghlogin.log"
+Start-Sleep 3
+(Select-String -Path "$env:TEMP\hps-ghlogin.log" -Pattern 'one-time code: ([A-Z0-9]{4}-[A-Z0-9]{4})' |
+  Select-Object -First 1).Matches[0].Groups[1].Value
+```
+
+`one-time code:` 를 앵커로 잡는 이유가 있다. 앵커 없이 여덟 글자 패턴만 긁으면
+로그에 다른 8자 문자열이 먼저 있을 때 **그걸 집어서 참가자에게 엉뚱한 코드를
+불러준다.**
+
+여덟 글자를 **크게 보여주고** `https://github.com/login/device` 를 열어준다.
+
+> 브라우저에 이 여덟 글자만 넣어주세요: **4C2A-9BE1**
+> 그다음 초록색 Authorize 버튼이요.
+
+**여기서 대신 눌러주지 마라.** 코드 입력과 Authorize 는 참가자 계정의 권한을 넘기는
+동작이라 **참가자 손으로 해야 한다.** 답이 없어도 `browser_click` 으로 대신 치지
+말고 기다려라 — 참가자가 화면 앞에 있다. 기다리는 동안은 로그를 다시 읽거나
+`gh api user` 로 확인하는 것까지다.
+
+비밀번호도 토큰도 새로 만들 필요 없다. 참가자가 눌렀으면 확인한다:
 
 ```
 gh api user --jq .login
 ```
 
-### 2-B. 계정 만들기 (처음인 경우)
+여기서 나온 아이디가 **아래에서 계속 쓰는 `<아이디>`** 다.
 
-당신이 브라우저로 `https://github.com/signup` 을 열어주고, **한 번에 한 단계씩**
-읽어준다. 참가자가 직접 입력해야 하는 것들이다:
+## 3. 저장소를 만든다
 
-1. **이메일** — 평소 쓰는 것. 확인 메일이 온다
-2. **비밀번호** — 그 자리에서 정한다
-3. **아이디(username)** — 이게 나중에 주소에 들어간다고 미리 말해줘라
-   (`github.com/<아이디>` · 홈페이지 주소도 `<아이디>.github.io/...`)
-4. 이메일로 온 **확인 코드** 입력
-
-가입이 끝나면 브라우저는 로그인 상태가 된다. 그 상태로 **2-A** 로 돌아간다.
-
-막히면 붙잡고 있지 마라 — 보조강사를 부르고, 그 사이 참가자의 파일은 워크스페이스에
-안전하게 있다고 알려준다. 저장소는 나중에 올려도 된다.
-
-## 3. 저장소 만들기
-
-이름을 **제안하고 동의를 받는다**. 이름은 나중에 주소에 그대로 들어간다고
-알려줘라(예: `boa-dental` → `.../boa-dental/`).
+이름은 **그대로 주소가 된다.** 제안하고 동의를 받아라.
 
 ```
 gh repo create <이름> --public
 ```
 
-이름이 이미 있으면 다른 이름을 제안한다. 참가자 동의 없이 임의로 바꾸지 마라 —
-참가자의 저장소다.
+> `boa-dental` 로 만들까요? 주소가 `<아이디>.github.io/boa-dental/` 이 됩니다.
 
-## 4. 파일 올리기
+갓 만든 계정은 **이메일 인증 전에 막힐 수 있다.** 그런 에러가 나오면 메일함에서
+GitHub 확인 메일을 눌러달라고 하고 다시 시도한다.
 
-Contents API로 올린다. 각 파일마다:
+## 4. 파일을 올린다
+
+`index.html` 먼저, 그다음 나머지. base64 라 이미지도 그대로 올라간다.
 
 ```
-# macOS
-gh api -X PUT repos/{owner}/<이름>/contents/<파일명> \
+gh api -X PUT repos/<아이디>/<이름>/contents/index.html \
   -f message="홈페이지 올리기" \
-  -f content="$(base64 -i <파일경로>)"
+  -f content="$(base64 -i <작업폴더>/index.html)"
 ```
 
-Windows에는 `base64` 명령이 없다. PowerShell로 만든다 — `certutil -encode` 는
-머리말·꼬리말 줄이 붙어서 그대로 쓰면 깨진다:
+`-f message` 가 커밋 메시지다. **git 은 필요 없다** — 커밋은 GitHub 쪽에서 생긴다.
+
+같은 파일을 **다시** 올릴 때는 `sha` 가 있어야 한다(없으면 409):
 
 ```
-# Windows — 한 줄짜리 base64 를 만들어 넘긴다
-powershell -Command "[Convert]::ToBase64String([IO.File]::ReadAllBytes('<파일경로>'))"
+gh api repos/<아이디>/<이름>/contents/index.html --jq .sha
+# 그 값을 -f sha="<값>" 로 같이 넘긴다
 ```
 
-`index.html` 먼저, 그다음 이미지들. base64라서 이미지 같은 바이너리도 그대로
-올라간다.
-
-**같은 파일을 두 번째 올릴 때는 `sha` 가 필요하다.** 없으면 409가 난다:
+## 5. 올라갔는지 확인한다
 
 ```
-gh api repos/{owner}/<이름>/contents/<파일명> --jq .sha
-# 그 값을 -f sha="<값>" 로 함께 넘긴다
+gh api repos/<아이디>/<이름>/contents --jq '.[].name'
 ```
 
-올린 뒤 **실제로 올라갔는지 확인하고 말해라**:
+**확인하고 나서 말해라.** 올렸다고 말하기 전에 이걸 본다.
 
+## 6. 보여준다
+
+저장소 주소를 브라우저로 열어주고, **참가자 계정의 참가자 것**이라고 분명히
+말한다. 인터넷 주소까지 만들려면 `publish-homepage` 로 이어간다.
+
+---
+
+## 하지 말 것
+
+- **git 을 부르지 마라.** macOS 의 `/usr/bin/git` 은 껍데기라 부르는 순간 2GB
+  설치창이 뜬다. GitHub 이 새 저장소 화면에 보여주는 `git remote add …` 도 같다.
+  위 4번이면 git 없이 다 된다.
+- **브라우저를 클릭해서 저장소를 만들지 마라.** 느리고 실패해도 흔적이 안 남는다.
+  브라우저는 로그인 코드 화면 · 결과 보여주기 · 아래 폴백에만 쓴다.
+- **명령을 참가자에게 붙여넣으라고 시키지 마라.** 참가자에게는 터미널이 없다.
+
+## Windows — 기본 셸이 PowerShell 이다
+
+작업 폴더 경로가 `C:\` 로 시작하면 Windows 고, **거기 셸은 bash 가 아니라
+PowerShell 이다.** 위 명령을 그대로 쓰면 안 되는 것들이 있다. `gh api` 자체는 똑같다.
+(2번 로그인의 PowerShell 판은 위 2번에 나란히 있다.)
+
+| | macOS (bash) | Windows (PowerShell) |
+|---|---|---|
+| gh 있나 | `command -v gh` | `Get-Command gh` — **`where gh` 는 안 된다** (`Where-Object` 별칭이다) |
+| 기다리기 | `sleep 3` | `Start-Sleep 3` |
+| 찾기 | `grep -oE` | `Select-String -Pattern` |
+| 임시 폴더 | `/tmp` | `$env:TEMP` |
+| 폴더 열기 | `open <폴더>` | `explorer <폴더>` |
+| `$(...)` 로 값 끼워넣기 | 된다 | **변수에 먼저 담아라** (아래) |
+
+2번 로그인에서 `-RedirectStandardError` 를 쓰는 이유: `gh` 는 코드를 **stderr 로
+내보낸다.** stdout 을 받으면 빈 파일이 나온다.
+
+**4번 업로드 (PowerShell).** `base64` 명령이 없다. `certutil -encode` 는 머리말이
+붙어 그대로 넘기면 깨진다. 변수에 담아서 넘겨라:
+
+```powershell
+$b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes("<작업폴더>\index.html"))
+gh api -X PUT repos/<아이디>/<이름>/contents/index.html -f message="홈페이지 올리기" -f content="$b64"
 ```
-gh api repos/{owner}/<이름>/contents --jq '.[].name'
-```
 
-## 5. 참가자에게 남기기
+**Windows 는 실기기 미검증이다(#451).** 한 번에 안 되면 붙잡지 말고 아래로 가라.
+참가자를 명령줄 디버깅에 끌고 들어가는 것이 수업에서 가장 비싼 실패다.
 
-- 저장소 주소를 브라우저로 열어 보여준다
-- **참가자 계정의, 참가자 것**이라고 분명히 말한다
-- 나중에 고치려면 같은 저장소에 파일을 다시 올리면 된다고 알려준다
-- 배포까지 하려면 `publish-homepage` 스킬로 이어간다
+## 막히면 — 브라우저로 직접
 
-## 막혔을 때
+**이 경로는 gh 도 로그인도 필요 없다.** 참가자 브라우저는 이미 GitHub 에 로그인돼
+있다. 부끄러운 우회가 아니라 정식 경로다. 한 번에 한 단계씩 같이 간다:
 
-**막힌 것을 막혔다고 말해라.** 우회해서 성공한 척하는 것이 가장 나쁘다.
+① `github.com/new` → 이름 → **Public** → Create repository
+② 빈 저장소 화면의 **"uploading an existing file"**
+③ 작업 폴더를 열어주고(`open` / `explorer`) 파일을 끌어다 놓기
+④ **Commit changes** → 새로고침해서 같이 확인
 
-| 증상 | 대응 |
-|---|---|
-| 로그인 코드 입력이 안 끝남 | 브라우저에서 GitHub 로그인 여부부터 확인. 다시 시도 |
-| 저장소 이름 중복 | 다른 이름을 **제안**하고 동의를 받아라 |
-| 다운로드가 느림/실패 | 행사장 와이파이일 수 있다. 아래 수동 폴백으로 |
-| GitHub 계정이 없음 | 2-B로. 3분이면 된다. 부끄러워할 일이 아니라고 짚어줘라 |
-| `gh` 설치가 Windows에서 막힘 | 붙잡지 말고 수동 폴백. 실기기 미검증 경로다(#451) |
-| 같은 파일 재업로드 409 | `sha` 를 조회해서 함께 넘겨라 (4단계) |
-| 어느 것도 안 됨 | 정직하게 말해라. 파일은 워크스페이스에 안전하게 있다 |
+막힌 것은 막혔다고 말해라. 우회해서 성공한 척하는 것이 가장 나쁘다. 파일은
+워크스페이스에 안전하게 있다.
 
-**수동 폴백** — `gh`가 안 되면 참가자가 직접 한다. **Windows에서는 이쪽이 더
-빠를 수 있다**(자동 설치 경로가 실기기 미검증, #451). 부끄러운 우회가 아니라
-정식 경로다. 브라우저와 폴더는 당신이 열어주고 한 번에 한 단계씩 같이 간다:
-
-① `github.com/new` → 이름 입력 → **Public** → Create repository
-② 빈 저장소 화면의 **"uploading an existing file"** 링크
-③ 워크스페이스 폴더를 열어주고 `index.html`·`agent.md` 를 끌어다 놓기
-④ 아래 **Commit changes** 버튼
-⑤ 새로고침해서 파일이 보이는지 **같이 확인한다**
-
-폴더를 여는 법: macOS `open <작업폴더>` · Windows `explorer <작업폴더>`.
-
-## 이 스킬이 가르치는 것
-
-**Ownership.** 결과물이 참가자 계정에 참가자 이름으로 남는다. 오늘 수업이
-끝나도 참가자 것이고, 다른 도구로 이어서 할 수 있다.
+**Ownership.** 결과물이 참가자 계정에 참가자 이름으로 남는다.
