@@ -454,7 +454,15 @@ export interface SdkBinaryMarker {
 export function parseSdkBinaryMarker(raw: string | null | undefined): SdkBinaryMarker | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Strip a UTF-8 BOM before parsing. `seed-sdk-binary.ps1` runs under
+    // Windows PowerShell 5.1 on venue machines, where `Out-File -Encoding utf8`
+    // ALWAYS emits EF BB BF — and `JSON.parse` of a BOM-prefixed string throws. The marker
+    // then read as "malformed", isSeededBinaryTrusted said no, and the seeded
+    // claude.exe was never used: every Windows machine silently fell back to
+    // the proxy-only runtime despite a correct, verified seed. The seeder now
+    // writes BOM-less UTF-8, but this stays so machines seeded by an older
+    // script are repaired by the update rather than needing a re-seed.
+    const parsed = JSON.parse(raw.replace(/^\uFEFF/, "")) as Record<string, unknown>;
     if (
       typeof parsed.sdkVersion !== "string" ||
       typeof parsed.size !== "number" ||

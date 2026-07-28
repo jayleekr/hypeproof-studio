@@ -183,6 +183,29 @@ check("renderWindowsUpdateWrapper: escapes single quotes in paths", () => {
   // A literal single quote must be doubled so PowerShell keeps it inside the string.
   assert.ok(s.includes("-FilePath 'C:\\it''s here\\Setup.exe'"));
 });
+// The BOM is load-bearing, not cosmetic: Windows PowerShell 5.1 decodes a
+// BOM-less `-File` script as the ANSI codepage (CP949 in Korea). The installer
+// path we bake in lives under %TEMP% = C:\Users\<계정명>\AppData\Local\Temp, so
+// on a Korean-username machine it became mojibake, Start-Process found nothing,
+// and Studio quit without ever updating. Measured on PS 5.1.26100:
+//   BOM-less  → Test-Path 'C:\Users\신제형\…\Setup.exe' = False
+//   UTF-8 BOM → Test-Path 'C:\Users\신제형\…\Setup.exe' = True
+check("renderWindowsUpdateWrapper: starts with a UTF-8 BOM (non-ASCII paths under PS 5.1)", () => {
+  const s = renderWindowsUpdateWrapper({
+    appProcessName: "HypeProof Studio",
+    installerPath: "C:\\Users\\신제형\\AppData\\Local\\Temp\\hps-update\\Setup.exe",
+    installerArgs: ["/silent"],
+  });
+  assert.equal(s.charCodeAt(0), 0xfeff, "the wrapper must lead with U+FEFF");
+  // …and the BOM must be the ONLY thing before the header comment.
+  assert.ok(s.startsWith("\uFEFF# Auto-generated"), "BOM immediately precedes the script body");
+  // The non-ASCII path survives rendering verbatim; the BOM is what makes
+  // PowerShell read those bytes as UTF-8 rather than CP949.
+  assert.ok(s.includes("-FilePath 'C:\\Users\\신제형\\AppData\\Local\\Temp\\hps-update\\Setup.exe'"));
+  // Written with fs.writeFileSync(path, s) (default utf8) this is EF BB BF.
+  const bytes = Buffer.from(s, "utf8");
+  assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], "on-disk bytes are EF BB BF");
+});
 check("renderWindowsUpdateWrapper: has a bounded wait (deadline), not an infinite loop", () => {
   const s = renderWindowsUpdateWrapper({ appProcessName: "App", installerPath: "x.exe", installerArgs: [], maxWaitMs: 5000 });
   assert.match(s, /AddMilliseconds\(5000\)/);
