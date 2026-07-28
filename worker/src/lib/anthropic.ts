@@ -95,3 +95,60 @@ export async function callAnthropic(
     body: JSON.stringify(body),
   });
 }
+
+// Transient upstream statuses worth a retry. 4xx (400/401/403/413) are our
+// bug, a bad key, or an oversize image — surface those immediately, don't mask
+// them. Mirrors gemini.ts RETRYABLE.
+const RETRYABLE = new Set([429, 500, 502, 503, 504]);
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// Free a failed response's socket before we retry (don't leak the connection).
+async function drain(res: Response): Promise<void> {
+  try {
+    await res.body?.cancel();
+  } catch {
+    /* already errored/closed */
+  }
+}
+
+/**
+ * Resilient Anthropic call: retry the SAME model on a transient status
+ * (429 / 5xx) with bounded backoff. This is the counterpart to
+ * callGeminiResilient (gemini.ts), added for #373 — prod runs
+ * LLM_PROVIDER=anthropic and the `/v1/chat` proxy path (the ONLY coach route
+ * minor cohorts use — worker force-pins minors to "proxy", chat.ts:181) called
+ * the bare `callAnthropic` with no retry, while the gemini branch on the same
+ * route already had one. So the 23-concurrent SK Biopharm kids class had zero
+ * cushioning: a transient 429 from the shared org ITPM/OTPM pool surfaced as a
+ * dead turn on a child's screen.
+ *
+ * DELIBERATELY no model fallback (unlike gemini's → flash). A minor classroom
+ * must not silently drop to a weaker model mid-exercise; that quality
+ * trade-off is #373 §3's separate go/no-go, not something to smuggle in here.
+ *
+ * Safe for streaming: Anthropic returns 429/5xx as an immediate non-200
+ * *before* any SSE body, so the status check never races a partially-sent
+ * stream. Once a 200 is returned the body streams and can't be retried — same
+ * limitation as callGeminiResilient. Bounds added latency to ≤2 extra requests
+ * + ~1.3s backoff so a waiting child isn't stuck.
+ *
+ * `/v1/messages` (Agent SDK route) deliberately does NOT use this — its
+ * fast-fail passthrough is intentional (messages.ts) and minors never hit it.
+ */
+export async function callAnthropicResilient(
+  body: AnthropicRequest,
+  apiKey: string,
+  opts: Parameters<typeof callAnthropic>[2] = {},
+): Promise<Response> {
+  const MAX_ATTEMPTS = 3; // initial + 2 retries
+  let res!: Response;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    res = await callAnthropic(body, apiKey, opts);
+    if (res.ok || !RETRYABLE.has(res.status)) return res;
+    if (attempt + 1 >= MAX_ATTEMPTS) return res; // exhausted → surface last failure
+    await drain(res);
+    await sleep(attempt === 0 ? 400 : 900);
+  }
+  return res;
+}
