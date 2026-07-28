@@ -89,6 +89,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1 -y
 | `-y` / `HPS_NONINTERACTIVE=1` | 무인 모드 (프롬프트 없이 yes) |
 | `INSTALLER_NO_MODIFY_PATH=1` | PATH / rc 파일을 절대 건드리지 않음 |
 | `HPS_SKIP_STUDIO=1` (mac) | Studio 앱 + SDK seed 건너뛰고 의존성만 |
+| `HPS_SKIP_STUDIO=1` (win) | **Studio 앱 설치만** 건너뜀. SDK seed 와 doctor 의 SDK 검사는 그대로 실행한다 — 클릭 설치(.exe)본에는 `claude.exe` 가 없으므로, 이 플래그가 그 결손을 유지시키면 안 된다 |
 | `-DoctorOnly` (win) | 설치 없이 doctor 검증만 |
 | `HPS_DEBUG=1` (mac) | xtrace |
 
