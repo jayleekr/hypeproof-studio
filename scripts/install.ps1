@@ -99,7 +99,10 @@ $EMBEDDED_MANIFEST = [ordered]@{
     schema = 1
     studio = [ordered]@{
         releases_repo = 'jayleekr/hypeproof-studio-releases'
-        version       = '0.1.33'
+        # 'latest' resolves from the releases API at run time. A hard pin goes
+        # stale the moment a release ships (it sat at 0.1.33 while the repo
+        # served v0.1.34). Override with -StudioVersion / HPS_STUDIO_VERSION.
+        version       = $(if ($env:HPS_STUDIO_VERSION) { $env:HPS_STUDIO_VERSION } else { 'latest' })
         # Windows asset glob + fallback glob.
         asset_glob    = '*UserSetup-x64-*.exe'
         asset_glob_fallback = '*Setup-x64-*.exe'
@@ -458,6 +461,12 @@ function Resolve-StudioAsset {
     }
     if (-not $rel) { throw "No release found for $repo ($tag / latest)." }
 
+    # Write the tag we actually resolved back into the manifest. With
+    # version='latest' the tag lookup 404s and we fall through to /releases/latest,
+    # so without this the receipt and the idempotent-skip compare would keep
+    # seeing the literal string 'latest' and reinstall on every run.
+    if ($rel.tag_name) { $manifest.studio.version = ($rel.tag_name -replace '^v', '') }
+
     $globs = @($manifest.studio.asset_glob, $manifest.studio.asset_glob_fallback)
     foreach ($g in $globs) {
         $a = $rel.assets | Where-Object { $_.name -like $g } | Select-Object -First 1
@@ -468,15 +477,17 @@ function Resolve-StudioAsset {
 
 function Install-Studio {
     param($manifest, $receipt)
-    if ($receipt.studio -eq $manifest.studio.version) {
-        Write-Ok "Studio $($manifest.studio.version) already recorded as installed (idempotent skip)."
-        return $true
-    }
+    # Resolve BEFORE the idempotent-skip compare: with version='latest' there is
+    # nothing meaningful to compare against until the tag is known.
     try {
         $asset = Resolve-StudioAsset $manifest
     } catch {
         Write-Err2 "Studio asset resolution failed: $($_.Exception.Message)"
         return $false
+    }
+    if ($receipt.studio -eq $manifest.studio.version) {
+        Write-Ok "Studio $($manifest.studio.version) already recorded as installed (idempotent skip)."
+        return $true
     }
     New-Item -ItemType Directory -Force -Path $script:TempRoot | Out-Null
     $exe = Join-Path $script:TempRoot $asset.name
