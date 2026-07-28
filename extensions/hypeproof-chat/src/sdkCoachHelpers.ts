@@ -20,15 +20,19 @@ import * as path from "node:path";
 // Explicit .ts specifiers: the leaf/pure-module graph must load under
 // `node --experimental-strip-types` (smoke tests) which resolves specifiers
 // literally; esbuild + tsc (allowImportingTsExtensions) accept them.
-import { safeNavigateUrl } from "./browserControlHelpers.ts";
+import { safeNavigateUrl, isLoopbackUrl } from "./browserControlHelpers.ts";
 import {
   MCP_BROWSER_OPEN,
   MCP_BROWSER_SCREENSHOT,
   MCP_BROWSER_TOOLS,
+  MCP_BROWSER_READ,
+  MCP_BROWSER_CLICK,
+  MCP_BROWSER_TYPE,
   MCP_LIVE_PREVIEW_START,
 } from "./browserMcp.ts";
 import type { ActionRequest, ResolvedProfile } from "./protocol";
 import { SDK_BINARY_MIN_BYTES, SDK_BINARY_VERSION } from "./sdkBinaryManifest.ts";
+import { isDestructiveCommand } from "./shellPolicy.ts";
 
 export type AgentPermissionMode = "default" | "plan" | "acceptEdits" | "bypassPermissions";
 
@@ -108,6 +112,52 @@ const SDK_READ_TOOL_NAMES = ["Read", "Grep", "Glob"] as const;
 const SDK_WRITE_TOOL_NAMES = ["Write", "Edit"] as const;
 
 /**
+ * Tell the coach where it actually is (#428).
+ *
+ * Passing `systemPrompt` as a string REPLACES the SDK's default preamble, and
+ * that preamble is what normally carries the working-directory env block — the
+ * same block Claude Code itself injects. With `settingSources: []` on top (no
+ * CLAUDE.md), the coach was left with zero knowledge of its own cwd while its
+ * tools resolved against it correctly. Asked "내 워킹디렉토리 절대경로", it
+ * listed the RIGHT files under an invented "/app/workdir".
+ *
+ * There is no shell to fall back on either — `permittedToolsFor` can never
+ * grant Bash, so the coach cannot run `pwd` to recover. The path has to be
+ * given, and it has to come from here: `cwd` is per-student (each cohort has
+ * its own workspace_root under a different home dir), so it cannot live in the
+ * worker's cohort prompt.
+ */
+export function withWorkspaceContext(
+  systemPrompt: string,
+  cwd?: string,
+  /**
+   * 워크스페이스에 지금 있는 파일들 (루트 기준 상대경로). 경로만 알려 주는 것으로는
+   * 부족했다 — 2026-07-26 실측에서 코치는 cwd 를 받고도 `Glob` → `ls` → `find ~` 로
+   * "여기 뭐가 있지"를 툴로 물었고, 한 턴의 151초 중 120초를 거기 썼다. Claude Code
+   * 가 세션 시작에 디렉터리 구조를 미리 넣어 주는 것과 같은 이유다: **물어볼 필요가
+   * 없으면 안 묻는다.** 코호트 워크스페이스는 파일이 몇 개 안 되므로 비용이 없다.
+   */
+  files?: readonly string[],
+): string {
+  if (!cwd) return systemPrompt;
+  const listing =
+    files === undefined
+      ? ""
+      : files.length === 0
+        ? "Files: (비어 있음 — 아직 아무것도 만들지 않았다)\n"
+        : `Files:\n${files.map((f) => `  ${f}`).join("\n")}\n`;
+  return (
+    systemPrompt +
+    "\n\n<env>\n" +
+    `Working directory (absolute): ${cwd}\n` +
+    listing +
+    "파일이나 폴더의 경로를 말할 때는 반드시 위 절대경로를 기준으로 답한다. 추측하거나 지어내지 않는다.\n" +
+    "파일 도구(Read/Write/Edit)에는 **절대경로**를 넘긴다. 위 목록에 있는 파일을 찾으려고 탐색하지 않는다.\n" +
+    "</env>"
+  );
+}
+
+/**
  * Which tools a cohort may use. Conservative and fail-closed by design:
  * - the WORKER PROFILE owns file-tool policy (`sdk_tools`, ADR 0003 / #282
  *   Phase 2): `read` → Read/Grep/Glob, `write` → Write/Edit. Absent flags
@@ -128,6 +178,14 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
   }
   if (profile.sdk_tools?.write === true && !isMinorTier(profile)) {
     tools.push(...SDK_WRITE_TOOL_NAMES);
+  }
+  // epic #431 — shell. Profile-gated only, no separate minor strip: a minor
+  // cohort grants it by simply not setting the flag. Arbitrary commands are
+  // intended; `evaluateSdkToolUse` routes every one of them to the approval
+  // modal, and shellPolicy decides which ones additionally refuse to be
+  // remembered by "항상 허용".
+  if (profile.sdk_tools?.shell === true) {
+    tools.push("Bash");
   }
   if (profile.tools?.web_search === true) {
     // Web research = search (find sources) + fetch (open and read them). Granting
@@ -295,8 +353,24 @@ export function buildSubagentDefinitions(
   return out;
 }
 
+/**
+ * 한 턴에 허용할 SDK 턴 수.
+ *
+ * 성인 20 은 **실측으로 부족함이 확인됐다** (2026-07-26): 멀티페이지 사이트를
+ * 만드는 한 요청이 툴 54회를 썼고 두 번 연속 예산 소진으로 죽었다. #457 노트에
+ * "지금 올리면 낭비를 감춘 채 넘어간다 — 다시 재본 뒤에 판단한다"고 미뤄 뒀던
+ * 그 재측정이 그것이다.
+ *
+ * 낭비 쪽을 먼저 걷어냈다: 상대경로 흡수 + 워크스페이스 목록 주입으로 탐색이
+ * 사라지고(한 턴의 80%), 탭 정리로 재확인이 줄었다. 그 위에서 60 으로 올린다.
+ *
+ * 60 은 **잠정값**이다. 고친 코드로 같은 시나리오를 다시 재기 전까지는 근거가
+ * "54 를 봤으니 그보다 넉넉히" 수준이다. 재측정 후 조정한다.
+ *
+ * 미성년 6 은 건드리지 않는다 — 이건 성능이 아니라 대상 연령 경계다.
+ */
 export function maxTurnsFor(profile: ResolvedProfile): number {
-  return isMinorTier(profile) ? 6 : 20;
+  return isMinorTier(profile) ? 6 : 60;
 }
 
 // ── SDK native binary resolution (#282 W4a, docs/sdk-bundling.md §5) ─────────
@@ -380,7 +454,15 @@ export interface SdkBinaryMarker {
 export function parseSdkBinaryMarker(raw: string | null | undefined): SdkBinaryMarker | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    // Strip a UTF-8 BOM before parsing. `seed-sdk-binary.ps1` runs under
+    // Windows PowerShell 5.1 on venue machines, where `Out-File -Encoding utf8`
+    // ALWAYS emits EF BB BF — and `JSON.parse` of a BOM-prefixed string throws. The marker
+    // then read as "malformed", isSeededBinaryTrusted said no, and the seeded
+    // claude.exe was never used: every Windows machine silently fell back to
+    // the proxy-only runtime despite a correct, verified seed. The seeder now
+    // writes BOM-less UTF-8, but this stays so machines seeded by an older
+    // script are repaired by the update rather than needing a re-seed.
+    const parsed = JSON.parse(raw.replace(/^\uFEFF/, "")) as Record<string, unknown>;
     if (
       typeof parsed.sdkVersion !== "string" ||
       typeof parsed.size !== "number" ||
@@ -655,7 +737,16 @@ export function anthropicBaseUrlFor(proxyUrl: string): string {
  */
 export function buildSdkGatewayEnv(
   baseEnv: Record<string, string | undefined>,
-  args: { proxyUrl: string; token: string },
+  args: {
+    proxyUrl: string;
+    token: string;
+    /** 작업 폴더 절대경로 — 워커가 `x-hps-workspace` 로 받아 시스템 블록에 넣는다. */
+    workspace?: string;
+    /** 작업 폴더의 파일 목록 (루트 기준 상대). */
+    workspaceFiles?: readonly string[];
+    /** 동시 툴 실행 상한. 기본 2 — 병렬 권한 요청이 SDK 제어 채널을 끊는다. */
+    maxToolConcurrency?: number;
+  },
 ): Record<string, string | undefined> {
   const env: Record<string, string | undefined> = { ...baseEnv };
   // Scrub anything that could shadow the gateway routing or bearer token.
@@ -664,6 +755,44 @@ export function buildSdkGatewayEnv(
   delete env.CLAUDE_CODE_USE_VERTEX;
   env.ANTHROPIC_BASE_URL = anthropicBaseUrlFor(args.proxyUrl);
   env.ANTHROPIC_AUTH_TOKEN = args.token;
+
+  // #431 — 동시 툴 실행을 묶는다.
+  //
+  // 2026-07-27 실측: 코치가 서브에이전트 4개를 **병렬로** 띄운 직후 모든 툴 호출이
+  // `Tool permission request failed: Error: Stream closed` 로 무너졌다 — 한 턴에
+  // 28건, 산출물 0. 같은 서브에이전트가 1개일 때는 멀쩡히 돌았다.
+  //
+  // 방아쇠는 서브에이전트 자체가 아니라 **동시성**으로 보인다. 그 전 빌드에서는
+  // 툴마다 승인 모달이 떠서 사람이 하나씩 눌렀고, 그것이 우연히 직렬화 장치였다.
+  // 승인을 자동 허용으로 바꾸자 권한 요청이 한꺼번에 쏟아졌다.
+  //
+  // 그래서 능력을 끄는 대신(subagents: false) 동시성만 제한한다. 병렬 수집의
+  // 이점은 2개까지 남기고, 채널을 무너뜨리는 폭주는 막는다.
+  env.CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY = String(args.maxToolConcurrency ?? 2);
+
+  // #431 — 작업 폴더를 **헤더로** 보낸다.
+  //
+  // 시스템 프롬프트에 붙이는 방법은 통하지 않는다: 워커가 클라이언트 `system` 을
+  // 통째로 교체한다(주입 방지 설계). 그래서 #428·#457·07-26 세 번의 수정이 전부
+  // 무력이었고, 코치는 SDK 경로에서 자기 작업 폴더를 한 번도 받은 적이 없다.
+  //
+  // 형식은 SDK 가 정한다 (vendor bridge.mjs 확인): `ANTHROPIC_CUSTOM_HEADERS` 를
+  // 개행으로 나누고 각 줄을 첫 `:` 에서 이름/값으로 가른다. 따라서 값 안에 개행이
+  // 있으면 안 되고 — 파일 목록의 구분자는 퍼센트 인코딩해서 넘긴다. 한글 폴더명도
+  // 같은 이유로 인코딩이 필요하다(HTTP 헤더는 바이트 안전해야 한다).
+  const custom: string[] = [];
+  if (args.workspace?.trim()) {
+    custom.push(`x-hps-workspace: ${encodeURIComponent(args.workspace.trim())}`);
+  }
+  if (args.workspaceFiles?.length) {
+    custom.push(
+      `x-hps-workspace-files: ${encodeURIComponent(args.workspaceFiles.slice(0, 80).join("\n"))}`,
+    );
+  }
+  if (custom.length) {
+    const existing = (env.ANTHROPIC_CUSTOM_HEADERS ?? "").trim();
+    env.ANTHROPIC_CUSTOM_HEADERS = existing ? `${existing}\n${custom.join("\n")}` : custom.join("\n");
+  }
   return env;
 }
 
@@ -696,6 +825,8 @@ export function buildSdkQueryOptions(
      * so the SDK's own node_modules optionalDependency lookup runs (dev).
      */
     pathToClaudeCodeExecutable?: string;
+    /** 워크스페이스 파일 목록 (루트 기준 상대). withWorkspaceContext 로 전달된다. */
+    workspaceFiles?: readonly string[];
   },
 ): Omit<AgentSdkOptions, "canUseTool" | "abortController"> {
   // #282 P2 slice 3 — the read-only subagent catalog rides on the same flag
@@ -707,7 +838,7 @@ export function buildSdkQueryOptions(
       ? buildSubagentDefinitions(agent.permittedTools)
       : undefined;
   return {
-    systemPrompt: agent.systemPrompt,
+    systemPrompt: withWorkspaceContext(agent.systemPrompt, args.cwd, args.workspaceFiles),
     model: agent.model,
     // Built-in base tool set ONLY — the mcp__hypeproof__* names never go here
     // (REQ-M19): Options.tools filters BUILT-INS; MCP tools are delivered via
@@ -732,6 +863,9 @@ export function buildSdkQueryOptions(
     env: buildSdkGatewayEnv(args.baseEnv, {
       proxyUrl: args.proxyUrl,
       token: args.token,
+      // 시스템 프롬프트 경로는 워커가 버리므로 헤더로 보낸다 (#431).
+      ...(args.cwd ? { workspace: args.cwd } : {}),
+      ...(args.workspaceFiles ? { workspaceFiles: args.workspaceFiles } : {}),
     }),
   };
 }
@@ -802,6 +936,241 @@ export function sdkFatalAuthStatus(msg: Record<string, unknown>): number | null 
   return typeof status === "number" && SDK_FATAL_AUTH_STATUSES.has(status) ? status : null;
 }
 
+/** True for the SDK's retry tick (`{type:"system", subtype:"api_retry"}`). */
+export function isSdkRetryEvent(msg: Record<string, unknown>): boolean {
+  return msg["type"] === "system" && msg["subtype"] === "api_retry";
+}
+
+// ── First-token / idle stall watchdog (#403) ────────────────────────────────
+// The 400/401 fast-fail above only covers the credential case. Everything else
+// the gateway can answer with — 429 / 529 / 5xx / a dropped connection — the
+// SDK CLI retries up to 10x with backoff, and a merely SLOW first turn (long
+// cohort prompt + a heavy design brief) emits no stream events at all in the
+// meantime. Both look identical to a student: "생각하는 중… ✨" forever, no
+// error, no way out — observed 4/4 on the heavy-design-prompt runs. The proxy
+// path at least terminates with a visible error, so the SDK consumer keeps its
+// own deadline for parity.
+
+/**
+ * Silence budget (ms) before a turn is declared stalled. Measured from the last
+ * PROGRESS event — an `api_retry` tick deliberately does NOT renew it, or a
+ * backoff schedule would extend the budget forever, which is the exact hang
+ * this catches.
+ *
+ * Calibrated against a REAL healthy turn, not guessed (2026-07-24, seeded SDK →
+ * prod gateway, copyclone prompt, "make the homepage" brief):
+ *   result: success · duration 286s · 4 turns · 87 stream events
+ *   thinking → Write → thinking → Bash → Write → text
+ *   longest silence between events ≈ 86s (long thinking stretches; the periodic
+ *   `system/thinking_tokens` events are what break the silence)
+ * A healthy turn is MINUTES long here, and 86s of it can be silent. The first
+ * cut of this constant was 120s — barely 34s of headroom, i.e. a slightly
+ * heavier page would have had the watchdog killing turns that were working.
+ * 240s is ~3x the observed worst-case gap and still bounded, which is the whole
+ * point: bounded-and-visible beats forever-and-silent.
+ */
+export const SDK_STREAM_STALL_MS = 240_000;
+
+/**
+ * Student-facing stall copy. Same register as the token copy (REQ-B5): says
+ * what to do, never shows a technical reason. Retrying is the real recovery —
+ * the aborted turn leaves no server-side state behind.
+ */
+export const SDK_STALL_FRIENDLY =
+  "코치 응답이 너무 오래 걸려요. 다시 한 번 보내주세요. 🕐";
+
+/**
+ * 턴 예산을 다 썼을 때 학생이 보는 줄.
+ *
+ * 예전에는 SDK 가 낸 영어 한 줄(`Reached maximum number of turns (20)`)이 그대로
+ * 나갔다. 참가자에게는 고장으로 보이고, 실제로 원장은 그 자리에서 두 번 멈췄다.
+ * 여기서 중요한 것은 **이게 실패가 아니라 예산 소진**이라는 사실과, 지금까지 한
+ * 일이 디스크에 남아 있다는 사실을 알려 주는 것이다.
+ */
+export const SDK_MAX_TURNS_FRIENDLY =
+  "\n\n---\n\n한 번에 할 수 있는 작업량을 다 썼어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+  "이어서 하려면 무엇을 더 할지 알려주세요 — 예: `이어서 계속해줘` 🔧";
+
+/** Sentinel for the watchdog leg of the stream/timer race. */
+const STALLED = Symbol("sdk-stream-stalled");
+
+// ── SDK activity → what the student actually sees the coach doing (#414) ────
+// The stream already carries everything: `thinking` blocks, `tool_use` blocks
+// with their full input, `tool_result` blocks, and periodic
+// `system/thinking_tokens` ticks with a running token estimate. Until now
+// consumeSdkStream extracted ONLY `.text`, so a turn that spent 286s writing
+// files, hitting a read-only path, recovering via a shell probe, and writing
+// again showed the student one static line. Nothing new has to be invented
+// here — this stops throwing away what already arrives.
+//
+// Presentation (icons, truncation, Korean framing) stays OUT of this module:
+// it emits raw activity, the host maps it to the toolLog protocol the browser
+// loop already renders.
+
+export type SdkActivity =
+  /** Running token estimate while the model thinks (Claude Code's "✻ …" counter). */
+  | { kind: "thinking_tokens"; tokens: number }
+  /** A completed thinking block. Raw model text — NOT translated (it is usually English). */
+  | { kind: "thinking"; text: string }
+  /** The coach is about to run a tool. `id` pairs with the matching tool_result. */
+  | { kind: "tool_use"; id: string; name: string; input: unknown }
+  /** That tool finished. */
+  | { kind: "tool_result"; id: string; isError: boolean; reason?: string };
+
+/** `Read` 의 읽은 구간 표기. 범위를 안 줬으면(전체 읽기) 빈 문자열. */
+function readRangeSuffix(rec: Record<string, unknown>): string {
+  const num = (k: string): number | null => {
+    const v = rec[k];
+    return typeof v === "number" && Number.isFinite(v) ? v : null;
+  };
+  const offset = num("offset");
+  const limit = num("limit");
+  if (offset === null && limit === null) return "";
+  if (offset !== null && limit !== null) return ` [${offset}~${offset + limit}]`;
+  if (offset !== null) return ` [${offset}~]`;
+  return ` [~${limit}]`;
+}
+
+/**
+ * 툴 결과에서 사람이 읽을 첫 텍스트 한 조각. MCP/SDK 모두 content 가 문자열이거나
+ * 블록 배열이므로 둘 다 받는다. 없으면 undefined — 빈 문자열로 라벨을 더럽히지 않는다.
+ */
+export function toolResultText(content: unknown, max = 90): string | undefined {
+  const pick = (v: unknown): string | undefined => {
+    if (typeof v === "string") return v;
+    if (Array.isArray(v)) {
+      for (const b of v) {
+        if (b && typeof b === "object" && (b as { type?: unknown }).type === "text") {
+          const t = (b as { text?: unknown }).text;
+          if (typeof t === "string" && t.trim()) return t;
+        }
+      }
+    }
+    return undefined;
+  };
+  const raw = pick(content);
+  if (!raw) return undefined;
+  const one = raw.replace(/\s+/g, " ").trim();
+  if (!one) return undefined;
+  return one.length > max ? `${one.slice(0, max)}…` : one;
+}
+
+/**
+ * 활동 로그에 보여 줄 경로 표기.
+ *
+ * 파일명만 남기던 예전 방식은 **세 가지 서로 다른 상황을 같은 글자로** 만들었다:
+ *
+ *   Read(/Users/…/HypeProofClinic/agent.md)  →  Read(agent.md)   정상
+ *   Read(agent.md)                            →  Read(agent.md)   상대경로, 거부됨
+ *   Read(/etc/passwd)                         →  Read(passwd)     워크스페이스 밖!
+ *
+ * 2026-07-26 실측에서 이것 때문에 같은 결함을 하루에 세 번 만나고 매번 다른
+ * 원인으로 추정했다. 세 번째에야 벤더 SDK 타입을 열어 보고 확정했다.
+ *
+ * 이제 셋이 다르게 보인다:
+ *   워크스페이스 안  → `agent.md` · `sub/a.css`   (루트 기준 상대)
+ *   워크스페이스 밖  → `/etc/passwd`               (전체 경로 — 눈에 띄어야 한다)
+ *   상대경로         → `./agent.md`                (흡수 전이라면 그대로 보인다)
+ */
+export function displayPath(value: string, workspaceRoot?: string): string {
+  if (!path.isAbsolute(value)) return value.startsWith(".") ? value : `./${value}`;
+  if (!workspaceRoot) return value;
+  const rel = path.relative(workspaceRoot, value);
+  // `..` 로 시작하면 루트 밖이다 — 축약하지 않고 전체를 보여 준다.
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) return value;
+  return rel;
+}
+
+/**
+ * The one input field worth showing next to a tool name, in Claude Code's
+ * `Write(index.html)` spirit. Falls back to a compact JSON clip so an unknown
+ * tool still shows something real instead of a bare name.
+ */
+export function summarizeToolInput(
+  name: string,
+  input: unknown,
+  max = 60,
+  workspaceRoot?: string,
+): string {
+  if (!input || typeof input !== "object") return "";
+  const rec = input as Record<string, unknown>;
+  const clip = (v: string): string => {
+    const one = v.replace(/\s+/g, " ").trim();
+    return one.length > max ? `${one.slice(0, max)}…` : one;
+  };
+  // Ordered by how identifying the field is, not by tool — the same key means
+  // the same thing across tools, and unknown tools get the same treatment.
+  for (const key of ["file_path", "path", "command", "url", "query", "pattern", "prompt", "description"]) {
+    const v = rec[key];
+    if (typeof v === "string" && v.length > 0) {
+      if (key !== "file_path" && key !== "path") return clip(v);
+      // 파일 읽기는 **어디를 읽었는지**까지 보여 준다. 큰 파일을 다룰 때 코치는
+      // Grep 으로 위치를 찾고 그 구간만 읽는 것이 정상 패턴인데(Claude Code 자신도
+      // 그렇게 한다), 라벨이 파일명만 보여 주면 `Read(index.html)` 다섯 번이
+      // "다른 구간 다섯 번"인지 "같은 걸 다섯 번"인지 구분되지 않는다. 2026-07-27
+      // 실측에서 편집 구간 391초를 낭비로 볼지 정상으로 볼지 판정하지 못했다.
+      return clip(displayPath(v, workspaceRoot) + readRangeSuffix(rec));
+    }
+  }
+  try {
+    return clip(JSON.stringify(rec));
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Pull every displayable activity out of ONE SDK stream event. Pure; returns []
+ * for events that carry nothing to show (text deltas, init, result).
+ */
+export function extractSdkActivity(msg: Record<string, unknown>): SdkActivity[] {
+  const type = String(msg["type"] ?? "");
+
+  if (type === "system" && msg["subtype"] === "thinking_tokens") {
+    const tokens = msg["estimated_tokens"];
+    return typeof tokens === "number" ? [{ kind: "thinking_tokens", tokens }] : [];
+  }
+
+  // tool_use rides on assistant messages; tool_result comes back on user ones.
+  if (type !== "assistant" && type !== "user") return [];
+  const content = (msg["message"] as Record<string, unknown> | undefined)?.["content"];
+  if (!Array.isArray(content)) return [];
+
+  const out: SdkActivity[] = [];
+  for (const raw of content) {
+    if (!raw || typeof raw !== "object") continue;
+    const b = raw as Record<string, unknown>;
+    switch (b["type"]) {
+      case "thinking": {
+        const text = typeof b["thinking"] === "string" ? b["thinking"] : "";
+        if (text.trim()) out.push({ kind: "thinking", text });
+        break;
+      }
+      case "tool_use": {
+        const id = typeof b["id"] === "string" ? b["id"] : "";
+        const name = typeof b["name"] === "string" ? b["name"] : "";
+        if (id && name) out.push({ kind: "tool_use", id, name, input: b["input"] });
+        break;
+      }
+      case "tool_result": {
+        const id = typeof b["tool_use_id"] === "string" ? b["tool_use_id"] : "";
+        if (!id) break;
+        const isError = b["is_error"] === true;
+        // 실패한 이유는 결과 안에 있는데 그동안 버려졌다. 그래서 화면에는 ⚠️ 하나만
+        // 남고 "왜"는 아무 데도 없었다 — 2026-07-27 실측에서 browser_click 이 두 턴
+        // 연속 실패했는데 사유를 알 길이 없어 소스를 읽어 추정해야 했다. 짧게 실어
+        // 보낸다(성공 결과는 길고 대부분 노이즈이므로 실패일 때만).
+        const reason = isError ? toolResultText(b["content"]) : undefined;
+        out.push({ kind: "tool_result", id, isError, ...(reason ? { reason } : {}) });
+        break;
+      }
+      default:
+        break;
+    }
+  }
+  return out;
+}
+
 /** Best-effort text extraction across candidate SDK message shapes. */
 export function extractSdkText(msg: Record<string, unknown>): string {
   const direct = msg["text"];
@@ -834,35 +1203,150 @@ export interface SdkStreamHandlers {
   /** Build the student-friendly auth error thrown on a fatal 400/401. */
   makeFatalAuthError: (status: number) => Error;
   onDelta: (delta: string) => void;
+  /**
+   * #414 — everything the coach is DOING (thinking, tool calls, their results).
+   * Optional so the fast-fail/stall tests can ignore it; when absent the stream
+   * behaves exactly as before.
+   */
+  onActivity?: (activity: SdkActivity) => void;
+  /**
+   * #403 — silence budget in ms before the turn is declared stalled. Omit for
+   * SDK_STREAM_STALL_MS; 0 disables the watchdog (escape hatch / old behavior).
+   */
+  stallMs?: number;
+  /**
+   * Build the student-friendly error thrown when the budget elapses. Defaults
+   * to a bare Error(SDK_STALL_FRIENDLY) so a caller can't accidentally turn a
+   * stall into a silent hang by forgetting to wire it.
+   */
+  makeStallError?: () => Error;
+  /**
+   * True while the turn is legitimately blocked OUTSIDE the stream: the
+   * approve/deny modal is open (the student is reading it), or a tool the SDK
+   * is still executing. Silence there is correct, so the watchdog grants a
+   * fresh budget instead of aborting.
+   */
+  isTurnBlocked?: () => boolean;
 }
 
 /**
- * Consume one SDK coach turn's message stream. Pure and injected so the
- * fast-fail contract is locked by unit tests: on the FIRST api_retry event
- * with error_status 400/401 the query is aborted and the auth error thrown —
- * within one event, no further stream consumption, no minutes-long backoff.
+ * Consume one SDK coach turn's message stream. Pure and injected so both
+ * no-silent-hang contracts are locked by unit tests:
+ * - on the FIRST api_retry event with error_status 400/401 the query is
+ *   aborted and the auth error thrown — within one event, no minutes-long
+ *   backoff (#320, REQ-M15);
+ * - after `stallMs` of silence with no progress the query is aborted and the
+ *   friendly stall error thrown, so a retry storm or a wedged first turn ends
+ *   in a visible message instead of an endless "생각하는 중…" (#403, REQ-M26).
+ *
+ * The manual iterator (instead of `for await`) is what makes the timer race
+ * possible; the early-exit paths close the iterator explicitly, which
+ * `for await` used to do for us.
  */
 export async function consumeSdkStream(
   stream: AsyncIterable<unknown>,
   h: SdkStreamHandlers,
 ): Promise<void> {
-  for await (const raw of stream) {
-    // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
-    if (h.isAborted()) throw h.makeAbortError();
-    const msg = (raw ?? {}) as Record<string, unknown>;
-    const fatal = sdkFatalAuthStatus(msg);
-    if (fatal !== null) {
-      // Kill the subprocess's retry loop first, then surface the token error.
+  const budget = h.stallMs ?? SDK_STREAM_STALL_MS;
+  const it = stream[Symbol.asyncIterator]();
+  /** In-flight it.next(); kept across timer re-arms so it is never called twice. */
+  let pending: Promise<IteratorResult<unknown>> | null = null;
+  let progressAt = Date.now();
+  /**
+   * The blocked state is only sampled when the budget expires, so a modal that
+   * closes mid-window would otherwise leave the coach ~0ms to answer. One grace
+   * window is granted after any observed block: "once the human (or the tool)
+   * is done, the coach gets a full budget", regardless of the timing.
+   */
+  let sawPause = false;
+
+  const nextEvent = async (): Promise<IteratorResult<unknown>> => {
+    if (!pending) pending = it.next();
+    if (budget <= 0) {
+      const settled = await pending;
+      pending = null;
+      return settled;
+    }
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const remaining = Math.max(1, budget - (Date.now() - progressAt));
+      // NOT unref'd on purpose: this timer is the only thing that ends a wedged
+      // turn, so it has to be able to keep the loop alive while one is live.
+      // It is always cleared below (both legs of the race).
+      const expired = new Promise<typeof STALLED>((resolve) => {
+        timer = setTimeout(() => resolve(STALLED), remaining);
+      });
+      const won = await Promise.race([pending.then((value) => ({ value })), expired]);
+      clearTimeout(timer);
+      if (won !== STALLED) {
+        pending = null;
+        return won.value;
+      }
+      if (h.isTurnBlocked?.()) {
+        // An open approval modal / a running tool is not a stall.
+        sawPause = true;
+        progressAt = Date.now();
+        continue;
+      }
+      if (sawPause) {
+        // The block ended somewhere inside the window that just expired; the
+        // coach hasn't had a fair budget yet. Spend the grace window.
+        sawPause = false;
+        progressAt = Date.now();
+        continue;
+      }
+      // Nobody awaits `pending` after this throw and abortQuery() rejects it.
+      pending.catch(() => {});
       h.abortQuery();
-      throw h.makeFatalAuthError(fatal);
+      throw h.makeStallError?.() ?? new Error(SDK_STALL_FRIENDLY);
     }
-    const type = String(msg["type"] ?? "");
-    if (type === "assistant" || type === "text" || type === "content_block_delta") {
-      const delta = extractSdkText(msg);
-      if (delta) h.onDelta(delta);
+  };
+
+  try {
+    for (;;) {
+      const step = await nextEvent();
+      if (step.done) return;
+      // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
+      if (h.isAborted()) throw h.makeAbortError();
+      const msg = (step.value ?? {}) as Record<string, unknown>;
+      const fatal = sdkFatalAuthStatus(msg);
+      if (fatal !== null) {
+        // Kill the subprocess's retry loop first, then surface the token error.
+        h.abortQuery();
+        throw h.makeFatalAuthError(fatal);
+      }
+      // Retry ticks are the pathology, not progress — they must not renew the
+      // watchdog budget.
+      if (!isSdkRetryEvent(msg)) {
+        progressAt = Date.now();
+        sawPause = false;
+      }
+      // #414 — surface the work itself (thinking / tool calls / results) before
+      // the text, so the activity line appears when it happens rather than
+      // after the prose that describes it.
+      if (h.onActivity) {
+        for (const activity of extractSdkActivity(msg)) h.onActivity(activity);
+      }
+      const type = String(msg["type"] ?? "");
+      if (type === "assistant" || type === "text" || type === "content_block_delta") {
+        const delta = extractSdkText(msg);
+        if (delta) h.onDelta(delta);
+      }
+      // 턴 예산 소진은 조용히 끝나면 안 된다. SDK 는 `{type:"result",
+      // subtype:"error_max_turns"}` 로 알리는데, 예전에는 이 분기가 없어서 영어
+      // 원문이 그대로 학생에게 나갔다. 실패가 아니라 예산 소진임을, 그리고 한
+      // 일이 디스크에 남아 있음을 우리 말로 알려 준다.
+      if (type === "result" && msg["subtype"] === "error_max_turns") {
+        console.warn("[coach] maxTurns 소진 — 턴 예산을 다 쓰고 종료했다");
+        h.onDelta(SDK_MAX_TURNS_FRIENDLY);
+      }
+      // Other message types (result / message_stop) are terminal — nothing to
+      // emit; the caller posts streamEnd.
     }
-    // Other message types (result / message_stop) are terminal — nothing to
-    // emit; the caller posts streamEnd.
+  } catch (err) {
+    // `for await` closed the iterator on an early exit; the manual loop must.
+    void Promise.resolve(it.return?.()).catch(() => {});
+    throw err;
   }
 }
 
@@ -914,6 +1398,13 @@ export interface CoachToolAction {
   toolName: string;
   /** Raw tool input object as given by the SDK. */
   input: unknown;
+  /**
+   * epic #431 — carried from the policy verdict so the host can pick the
+   * strong confirm. Computed once in evaluateSdkToolUse rather than re-derived
+   * at the modal, so policy and UI can never disagree about what is
+   * destructive.
+   */
+  destructive?: boolean;
 }
 
 function firstString(input: unknown, keys: string[]): string | undefined {
@@ -961,6 +1452,27 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
   // subagent (코드리뷰어/리서처). Own kind so resolveActionApproval modal-gates
   // it by default — the student consciously decides the delegation
   // (delegation_judgment, docs/seven-assets.md §5).
+  // #457 배선 누락 수정 (2026-07-27 실측). click/type 은 정책(evaluateSdkToolUse)에는
+  // 추가됐는데 여기 매핑이 빠져서 "미지의 툴" 폴백(executeShell)으로 떨어졌다.
+  // 그래서 클릭인데 **셸 모달**이 뜨고, 셸 분기는 payload.command 를 읽는데 클릭엔
+  // 그게 없어서 문구가 통째로 비었다("코치가 명령을 실행하려고 해요:" 뒤가 공백).
+  if (action.toolName === MCP_BROWSER_CLICK) {
+    const ref = firstString(action.input, ["ref"]) ?? "";
+    return {
+      kind: "browserClick",
+      description: `페이지 요소 클릭: ${ref || safeStringify(action.input)}`,
+      payload: { ref },
+    };
+  }
+  if (action.toolName === MCP_BROWSER_TYPE) {
+    const ref = firstString(action.input, ["ref"]) ?? "";
+    const text = firstString(action.input, ["text"]) ?? "";
+    return {
+      kind: "browserType",
+      description: `입력창(${ref})에 입력: ${text.slice(0, 60)}`,
+      payload: { ref, text },
+    };
+  }
   if (AGENT_TOOLS.has(name)) {
     const subagent = firstString(action.input, ["subagent_type"]) ?? "";
     const task =
@@ -974,7 +1486,12 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
 
   if (SHELL_TOOLS.has(name)) {
     const command = firstString(action.input, ["command"]) ?? safeStringify(action.input);
-    return { kind: "executeShell", description: `${action.toolName}: ${command}`, payload: { command } };
+    return {
+      kind: "executeShell",
+      description: `${action.toolName}: ${command}`,
+      payload: { command },
+      ...(action.destructive ? { destructive: true } : {}),
+    };
   }
   if (WRITE_TOOLS.has(name)) {
     const path = firstString(action.input, ["file_path", "path", "notebook_path"]);
@@ -1024,7 +1541,10 @@ export function sdkToolToActionRequest(action: CoachToolAction): Omit<ActionRequ
 
 export type SdkToolVerdict =
   | { decision: "allow" }
-  | { decision: "ask" }
+  // `destructive` (epic #431): shell only. The command is still ask-able —
+  // arbitrary commands are the point — but the host must show the stronger
+  // confirm and must NOT let "항상 허용" remember it.
+  | { decision: "ask"; destructive?: boolean }
   // `drift` (#375): true only when the denied tool NAME is one the matrix has
   // never classified (isClassifiedSdkToolName === false) — i.e. possible Agent
   // SDK tool drift, not a routine profile/policy denial. The caller logs the
@@ -1079,6 +1599,58 @@ function pathCandidates(toolName: string, input: unknown): string[] {
 }
 
 /**
+ * 상대경로를 워크스페이스 기준 절대경로로 바꿔 준다.
+ *
+ * 왜 필요한가 (2026-07-26 실측). 벤더 SDK 의 파일 도구는 **절대경로만** 받는다:
+ *
+ *   sdk-tools.d.ts  "absolute path to the file to read"
+ *                   "absolute path to the file to write (must be absolute, not relative)"
+ *
+ * 코치가 `agent.md` 를 넘기면 파일이 있든 없든 거부된다. 그러면 코치는 "파일이
+ * 없나?" 로 해석하고 찾아 나선다 — 실사용에서 `~/Desktop/HypeProof Studio/
+ * workspace/` 같은 없는 경로를 지어내고, 이어서 `find ~` 로 홈 전체를 훑었다.
+ * 턴 3 의 151초 중 120초가 여기서 증발했고, 같은 행동이 그 전 세션을 maxTurns 로
+ * 죽였다(#457 노트).
+ *
+ * 프롬프트로 "절대경로를 쓰라"고 훈계하는 방법도 있지만 #428 이래 그 방향으로
+ * 세 번 시도했고 세 번 다 재발했다. **제품이 흡수하는 쪽이 확실하다.**
+ *
+ * 규칙:
+ *   - `PATH_INPUT_KEYS` 만 건드린다. Glob 의 `pattern` 은 경로가 아니라 패턴이라
+ *     손대지 않는다 — `**\/*.html` 을 절대화하면 매칭이 깨진다.
+ *   - 이미 절대경로면 그대로 둔다.
+ *   - 워크스페이스 밖으로 나가는 상대경로(`../../etc/passwd`)도 **절대화만** 한다.
+ *     막는 것은 이 함수가 아니라 뒤이은 containment 검사의 몫이다 — 판정을 한
+ *     곳에 모아 둬야 구멍이 안 생긴다.
+ */
+export function absolutizeToolPaths(args: {
+  toolName: string;
+  input: unknown;
+  workspaceRoot?: string;
+}): { input: unknown; rewritten: Array<{ key: string; from: string; to: string }> } {
+  const { toolName, input, workspaceRoot } = args;
+  const rewritten: Array<{ key: string; from: string; to: string }> = [];
+  if (!workspaceRoot || !input || typeof input !== "object" || Array.isArray(input)) {
+    return { input, rewritten };
+  }
+  const name = toolName.toLowerCase();
+  if (!READ_TOOLS.has(name) && !WRITE_TOOLS.has(name)) return { input, rewritten };
+
+  const rec = input as Record<string, unknown>;
+  let next: Record<string, unknown> | null = null;
+  for (const key of PATH_INPUT_KEYS) {
+    const value = rec[key];
+    if (typeof value !== "string" || value.length === 0) continue;
+    if (path.isAbsolute(value)) continue;
+    const abs = path.resolve(workspaceRoot, value);
+    next ??= { ...rec };
+    next[key] = abs;
+    rewritten.push({ key, from: value, to: abs });
+  }
+  return { input: next ?? input, rewritten };
+}
+
+/**
  * The #282 Phase 2 tool policy. `permittedTools` comes from the cohort profile
  * (permittedToolsFor — sdk_tools + web_search); the verdict never widens beyond
  * it. `workspaceRoot` is the SDK cwd; when absent (dev/test without a folder,
@@ -1128,15 +1700,40 @@ export function evaluateSdkToolUse(args: {
 
   const name = toolName.toLowerCase();
 
-  // Gate 1b — belt over suspenders: shell can NEVER be permitted (no profile
-  // flag exists for it in Phase 2), so deny even if a future permitted set
-  // widens by mistake.
+  // ── Shell (epic #431) ─────────────────────────────────────────────────────
+  // Gate 1 already proved the cohort opted in (`sdk_tools.shell`). From here
+  // ANY command may be proposed — there is deliberately no content allowlist,
+  // because an allowlist makes the coach invent detours for off-list work,
+  // which is the gap-filling that produced #428's fabricated `/app/workdir`.
+  //
+  // The modal is the gate. What the policy still decides is how LOUD it is:
+  // destructive commands (`rm`, `sudo`, `git push --force`, pipe-to-shell)
+  // carry a flag so the host shows the stronger confirm and never lets
+  // "항상 허용" remember them.
   if (SHELL_TOOLS.has(name)) {
-    return {
-      decision: "deny",
-      reason: "shell execution is never granted (Phase 2 invariant)",
-      friendly: TOOL_DENIED_FRIENDLY,
-    };
+    const command = firstString(input, ["command"]) ?? "";
+    if (!command.trim()) {
+      return {
+        decision: "deny",
+        reason: "shell call carried no command string",
+        friendly: TOOL_DENIED_FRIENDLY,
+      };
+    }
+    // 되돌리기 어려운 명령만 묻는다 (원장 결정 2026-07-27).
+    //
+    // 예전에는 모든 셸 호출이 모달이었다 — "모달이 유일한 게이트"라는 전제였다.
+    // 실측에서 그 전제가 무너졌다: 코치가 정답지를 읽으려고 `curl … | grep` 을 쓸
+    // 때마다 모달이 떴고, 한 턴에 6번까지 갔다. 읽기만 하는 명령에 승인을 물으면
+    // 학습되는 것은 판단이 아니라 반사다.
+    //
+    // 이제 판단은 **되돌릴 수 있느냐**로 가른다. `rm`·`mv`·강제 push·`curl | sh` 처럼
+    // 학생 작업을 날릴 수 있는 것은 강한 확인을 유지하고(「항상 허용」도 안 준다),
+    // 나머지는 자동 실행한다. 파일 쓰기는 이미 워크스페이스 containment 가 지키고,
+    // 셸의 위험은 그 containment 밖으로 나가는 명령이다 — 그게 정확히 이 목록이다.
+    if (isDestructiveCommand(command)) {
+      return { decision: "ask", destructive: true };
+    }
+    return { decision: "allow" };
   }
 
   // ── Agent/Task tool — subagent delegation (#282 P2 slice 3, REQ-M22) ──────
@@ -1175,7 +1772,27 @@ export function evaluateSdkToolUse(args: {
         friendly: URL_POLICY_FRIENDLY,
       };
     }
-    // Outward action → ALWAYS the approval modal (kind "openBrowser").
+    // 자기 워크스페이스를 보는 것은 바깥 행위가 아니다. live_preview_start 는
+    // 이미 자동 허용인데(바로 아래), 그렇게 띄운 서버를 **열어서 보는 것**에
+    // 모달을 달면 앞뒤가 안 맞는다. 실사용에서 코치는 고칠 때마다 자기 결과를
+    // 다시 열어 확인하므로, 이 모달은 "만들고 → 보고 → 고치고 → 다시 보고"
+    // 루프마다 반복된다. browser_read 를 자동 허용한 것(#457)과 같은 이유다.
+    if (isLoopbackUrl(url)) {
+      return { decision: "allow" };
+    }
+    // 바깥 주소 → 승인 모달 (kind "openBrowser"). 호스트가 오리진 단위로
+    // 기억하므로 같은 사이트의 서브페이지는 다시 묻지 않는다.
+    return { decision: "ask" };
+  }
+  // #457 — 검사 3종.
+  //   browser_read  : 관측이다. 스크린샷과 같은 등급으로 자동 허용한다. 여기에
+  //                   모달을 달면 "검사 → 수정 → 재검사" 루프가 승인 지옥이 된다.
+  //   click / type  : 페이지를 **실제로 조작**한다. 학생 화면에서 무언가 일어나는
+  //                   행위이므로 모달을 거친다(browser_open 과 같은 등급).
+  if (toolName === MCP_BROWSER_READ) {
+    return { decision: "allow" };
+  }
+  if (toolName === MCP_BROWSER_CLICK || toolName === MCP_BROWSER_TYPE) {
     return { decision: "ask" };
   }
   if (toolName === MCP_BROWSER_SCREENSHOT || toolName === MCP_LIVE_PREVIEW_START) {

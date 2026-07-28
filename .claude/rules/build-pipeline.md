@@ -67,7 +67,9 @@ Discovered during Phase 1: missing any of these causes silent or confusing failu
 1. For Mac: rasterizes our `icons/stable/codium_*.svg` files into `src/stable/resources/darwin/code.icns`
 2. For Linux/Win/server: **downloads VSCodium-flavored icons** from `raw.githubusercontent.com/VSCodium/icons` via wget unless the target files already exist
 
-To get HypeProof branding on Linux/Win/server, **pre-generate the platform icons** by running `scripts/generate-platform-icons.sh` before `build_icons.sh` (or before `run-build.sh`). The script writes HPS-rasterized PNGs/ICOs to `src/stable/resources/{linux,win32,server}/` so the existence check in `build_icons.sh` short-circuits the download path.
+**Current state:** the fork (`jayleekr/vscodium@hps/main`) ships **pre-generated HypeProof-branded platform icons committed under `src/stable/resources/{darwin,win32,linux,server}/`** (`code.icns`, `code.ico`, `code.png`, `favicon.ico` — the "HP" logo, committed in the brand-assets commit). So `build_icons.sh`'s existence checks short-circuit both the darwin rasterize and the Linux/Win/server download paths, and **neither `build-mac.yml` nor `build-windows.yml` runs `generate-platform-icons.sh`** — branding is already correct from the committed icons. This is why CI needs no `rsvg-convert`/ImageMagick for icons.
+
+`scripts/generate-platform-icons.sh` is now a **refresh tool**: run it (after `install-brand-assets.sh`, before `build_icons.sh`) only when the brand SVG changes and you need to regenerate + re-commit the platform rasters. It requires `rsvg-convert` (librsvg) + ImageMagick locally. It is no longer a required build step.
 
 ## Common failure modes (from real Phase 1 run)
 

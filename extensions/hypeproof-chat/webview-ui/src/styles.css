@@ -476,6 +476,48 @@ html, body, #root {
   color: #fff;
 }
 
+/* ---------- Queued message while a turn runs (#416) ---------- */
+
+.hps-queued {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 4px 8px;
+  border-left: 2px solid var(--vscode-focusBorder, #4a9);
+  border-radius: 4px;
+  background: var(--vscode-editorWidget-background, rgba(127, 127, 127, 0.08));
+  font-size: 11px;
+}
+.hps-queued-label {
+  flex: 0 0 auto;
+  opacity: 0.75;
+}
+.hps-queued-text {
+  /* One line, whatever was typed — the title attribute carries the full text. */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hps-queued-cancel {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 16px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  opacity: 0.7;
+}
+.hps-queued-cancel:hover { opacity: 1; }
+
 /* ---------- Pasted-image attachments (website-copyclone) ---------- */
 
 .hps-img-note {
