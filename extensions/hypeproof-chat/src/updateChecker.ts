@@ -316,6 +316,12 @@ async function runUpdateWindows(info: UpdateInfo, deps: UpdateRunnerDeps): Promi
       // post-install relaunch reliable — see the function-level comment.
       const logPath = path.join(os.tmpdir(), `hps-update-${info.version}.log`);
       const wrapperPath = path.join(workDir, "run-installer.ps1");
+      // utf8 verbatim — renderWindowsUpdateWrapper already prefixes the UTF-8
+      // BOM that Windows PowerShell 5.1 needs to read the baked-in installer
+      // path as UTF-8 instead of CP949. Without it every Korean-username
+      // machine (%TEMP% = C:\Users\<한글>\…) got a mojibake path, the installer
+      // never ran, and the quit below left Studio closed and un-updated.
+      // Do not re-encode or strip the leading \uFEFF here.
       fs.writeFileSync(
         wrapperPath,
         renderWindowsUpdateWrapper({
@@ -323,6 +329,7 @@ async function runUpdateWindows(info: UpdateInfo, deps: UpdateRunnerDeps): Promi
           installerPath: exePath,
           installerArgs: ["/silent", "/mergetasks=runcode", `/LOG=${logPath}`],
         }),
+        "utf8",
       );
       const child = cp.spawn(
         "powershell.exe",

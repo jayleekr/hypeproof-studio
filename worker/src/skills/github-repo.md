@@ -81,6 +81,13 @@ gh api -X PUT repos/<아이디>/<이름>/contents/index.html \
 
 `-f message` 가 커밋 메시지다. **git 은 필요 없다** — 커밋은 GitHub 쪽에서 생긴다.
 
+Windows 에서 `base64` 가 없다고 나오면(`인식되지 않습니다`) PowerShell 로 만든다.
+표준 명령이라 항상 있고, 출력은 `base64` 와 바이트까지 같다(실측 확인):
+
+```
+powershell -NoProfile -Command '[Convert]::ToBase64String([IO.File]::ReadAllBytes("<작업폴더>\index.html"))'
+```
+
 같은 파일을 **다시** 올릴 때는 `sha` 가 있어야 한다(없으면 409):
 
 ```
