@@ -332,6 +332,9 @@ if [ "$SKIP_STUDIO" != "1" ]; then
   add_root() { [ -n "$1" ] && SEED_ROOTS="${SEED_ROOTS}$1
 "; }
   add_root "$HOME/Library/Application Support/HypeProof-Studio/sdk"
+  # Linux: seed-sdk-binary.sh writes under XDG_CONFIG_HOME (~/.config). The
+  # XDG_DATA_HOME root is kept as a secondary candidate for older seeds.
+  add_root "${XDG_CONFIG_HOME:-$HOME/.config}/HypeProof-Studio/sdk"
   add_root "${XDG_DATA_HOME:-$HOME/.local/share}/HypeProof-Studio/sdk"
   [ -n "${APPDATA:-}" ]     && add_root "$(printf '%s' "$APPDATA" | sed 's#\\\\#/#g; s#\\#/#g')/HypeProof-Studio/sdk"
   [ -n "${USERPROFILE:-}" ] && add_root "$(printf '%s' "$USERPROFILE" | sed 's#\\\\#/#g; s#\\#/#g')/AppData/Roaming/HypeProof-Studio/sdk"
@@ -343,19 +346,23 @@ if [ "$SKIP_STUDIO" != "1" ]; then
       ok "Studio app: /Applications/HypeProof Studio.app"
     else
       fail "Studio app not found in /Applications" \
-           "re-run the installer:  curl -fsSL https://hypeproof.ai/install.sh | bash"
+           "re-run the installer:  curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install.sh | bash"
     fi
   else
     info "Studio desktop app check skipped on $OS (no first-class build / path varies)"
   fi
 
-  # SDK seed .verified.json integrity.
+  # SDK seed marker integrity. The canonical marker is written by
+  # scripts/seed-sdk-binary.{sh,ps1} NEXT TO the binary it describes:
+  #   <root>/<version>/claude.verified.json       (macOS / Linux)
+  #   <root>/<version>/claude.exe.verified.json   (Windows)
+  # Schema: { sdkVersion, size, tarballSha512, verifiedAt, seededBy }.
   VERIFIED_FILE=""
   OLDIFS="$IFS"; IFS='
 '
   for _root in $SEED_ROOTS; do
     [ -d "$_root" ] || continue
-    for _vf in "$_root"/*/.verified.json; do
+    for _vf in "$_root"/*/claude.verified.json "$_root"/*/claude.exe.verified.json; do
       [ -f "$_vf" ] && { VERIFIED_FILE="$_vf"; break; }
     done
     [ -n "$VERIFIED_FILE" ] && break
@@ -364,17 +371,28 @@ if [ "$SKIP_STUDIO" != "1" ]; then
 
   if [ -z "$VERIFIED_FILE" ]; then
     # Not yet seeded is not fatal: Studio self-heals the SDK on first launch.
-    warn "native SDK not seeded (.verified.json not found under any HypeProof-Studio/sdk)" \
-         "launch Studio once to self-heal, or re-run the installer"
-  elif grep -q '"verified"[[:space:]]*:[[:space:]]*false' "$VERIFIED_FILE" 2>/dev/null; then
-    fail "SDK seed marked unverified: $VERIFIED_FILE" \
-         "delete the seed dir and re-run the installer to re-seed + re-verify the SDK"
-  elif grep -Eq '"sha512"[[:space:]]*:[[:space:]]*"[0-9A-Za-z+/=]+"' "$VERIFIED_FILE" 2>/dev/null \
-    || grep -q '"verified"[[:space:]]*:[[:space:]]*true' "$VERIFIED_FILE" 2>/dev/null; then
-    ok "SDK seed verified: $VERIFIED_FILE"
+    warn "native SDK not seeded (no claude[.exe].verified.json under any HypeProof-Studio/sdk)" \
+         "launch Studio once to self-heal, or run: bash scripts/seed-sdk-binary.sh"
   else
-    fail "SDK seed receipt is malformed (no sha512 / verified flag): $VERIFIED_FILE" \
-         "delete the seed dir and re-run the installer to re-seed the SDK"
+    SEEDED_BIN="${VERIFIED_FILE%.verified.json}"
+    MK_VER="$(sed -n 's/.*"sdkVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VERIFIED_FILE" 2>/dev/null | head -n1)"
+    MK_SIZE="$(sed -n 's/.*"size"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$VERIFIED_FILE" 2>/dev/null | head -n1)"
+    BIN_SIZE=""
+    [ -f "$SEEDED_BIN" ] && BIN_SIZE="$(wc -c < "$SEEDED_BIN" 2>/dev/null | tr -d ' ')"
+    _reseed="delete the seed dir and re-run scripts/seed-sdk-binary.sh to re-seed + re-verify the SDK"
+
+    if [ -z "$MK_VER" ] || [ -z "$MK_SIZE" ] \
+       || ! grep -q '"tarballSha512"[[:space:]]*:[[:space:]]*"sha512-' "$VERIFIED_FILE" 2>/dev/null; then
+      fail "SDK seed receipt is malformed (need sdkVersion + size + tarballSha512): $VERIFIED_FILE" "$_reseed"
+    elif [ -z "$BIN_SIZE" ]; then
+      fail "SDK seed receipt has no binary beside it: $SEEDED_BIN is missing" "$_reseed"
+    elif [ "$BIN_SIZE" != "$MK_SIZE" ]; then
+      # Same trust test the runtime applies (isSeededBinaryTrusted): marker size
+      # must equal the on-disk binary size.
+      fail "SDK seed size mismatch (marker $MK_SIZE, binary $BIN_SIZE): $SEEDED_BIN" "$_reseed"
+    else
+      ok "SDK seed verified: $MK_VER ($VERIFIED_FILE)"
+    fi
   fi
 fi
 

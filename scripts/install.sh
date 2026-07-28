@@ -43,7 +43,11 @@ STUDIO_ASSET_GLOB_DARWIN_X64="HypeProof-Studio-darwin-x64-*.zip"
 # sha512 table, the seeded location (darwin/linux), and the runtime-trusted
 # `.verified.json` marker. Do NOT reinvent seeding here.
 SEED_SCRIPT_NAME="seed-sdk-binary.sh"
-RAW_BASE="${HPS_RAW_BASE:-https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main}"
+# Raw base for the bootstrap (curl | bash) path, where no sibling script exists.
+# It must point at a tree that ACTUALLY hosts scripts/seed-sdk-binary.sh: that is
+# this repo, not the releases repo (which carries the Studio binaries only).
+# Override with HPS_RAW_BASE once a mirror is published.
+RAW_BASE="${HPS_RAW_BASE:-https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts}"
 
 HPS_HOME="${HOME}/.hypeproof"
 RECEIPT="${HPS_HOME}/receipt.json"

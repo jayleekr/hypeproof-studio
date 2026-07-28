@@ -50,10 +50,17 @@ exit 0으로 끝난다.
 
 ## 2. 원라인 커맨드
 
+> **호스팅 주의.** 아래 URL은 스크립트가 실제로 존재하는 트리
+> (`jayleekr/hypeproof-studio` — public)를 가리킨다. 릴리스 저장소
+> (`hypeproof-studio-releases`)에는 Studio 바이너리와 구형 `install-mac.sh` /
+> `install-win.ps1`만 있고 `install.sh` / `install.ps1` / `seed-sdk-binary.*` /
+> `dependencies.yaml`은 없다(404). 짧은 신뢰 도메인(`hypeproof.ai`) 미러는 §9의
+> 후속 과제다 — 미러가 뜨기 전까지 아래 raw URL이 유일하게 동작하는 경로다.
+
 ### macOS / Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install.sh | bash
 ```
 
 버전 고정 실행(선택):
@@ -65,7 +72,7 @@ curl -fsSL …/install.sh | bash -s 0.1.33
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install.ps1 | iex
 ```
 
 플래그를 쓰려면 먼저 내려받아 실행:

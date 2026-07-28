@@ -42,7 +42,13 @@ param(
     [switch]$NonInteractive,
     [switch]$NoModifyPath,
     [switch]$DoctorOnly,
-    [string]$ManifestUrl = 'https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/hypeproof-deps.yaml'
+    # Remote manifest refresh is best-effort (falls back to the embedded pins).
+    [string]$ManifestUrl = 'https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/hypeproof-deps.yaml',
+    # Raw base for the bootstrap (irm | iex) path, where no sibling script exists.
+    # It must point at a tree that ACTUALLY hosts scripts/seed-sdk-binary.ps1:
+    # this repo, not the releases repo (Studio binaries only). Deriving it from
+    # $ManifestUrl gave a 404 seeder URL, which is fail-closed on Windows.
+    [string]$ScriptsBaseUrl = 'https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/'
 )
 
 # ----------------------------------------------------------------------------
@@ -110,7 +116,7 @@ $EMBEDDED_MANIFEST = [ordered]@{
     tools = @(
         [ordered]@{ id='git';    winget='Git.Git';             cmd='git';     args='--version'; min='2.30'; required=$true;  post='' }
         [ordered]@{ id='gh';     winget='GitHub.cli';          cmd='gh';      args='--version'; min='2.40'; required=$true;  post='gh_auth' }
-        [ordered]@{ id='node';   winget='OpenJS.NodeJS.LTS';   cmd='node';    args='--version'; min='22.0'; required=$true;  post='' }
+        [ordered]@{ id='node';   winget='OpenJS.NodeJS.LTS';   cmd='node';    args='--version'; min='18.0'; required=$true;  post='' }
         [ordered]@{ id='python'; winget='Python.Python.3.11';  cmd='python';  args='--version'; min='3.11'; required=$true;  post='' }
         [ordered]@{ id='jq';     winget='jqlang.jq';           cmd='jq';      args='--version'; min='1.6';  required=$true;  post='' }
         [ordered]@{ id='curl';   winget='';                    cmd='curl';    args='--version'; min='';     required=$true;  post='preinstalled' }
@@ -544,11 +550,13 @@ function Seed-Sdk {
         $sib = Join-Path $PSScriptRoot $seedName
         if (Test-Path $sib) { $seedScript = $sib }
     }
-    # 2) Bootstrap path (irm | iex): fetch the seeder from the same raw base as
-    #    the manifest URL. The seeder self-verifies the tarball sha512 against its
-    #    own pinned table (fail-closed), so no extra integrity step is needed here.
+    # 2) Bootstrap path (irm | iex): fetch the seeder from the scripts raw base.
+    #    NOT derived from $ManifestUrl — the manifest and the seeders do not live
+    #    in the same tree, and deriving it produced a 404. The seeder self-verifies
+    #    the tarball sha512 against its own pinned table (fail-closed), so no extra
+    #    integrity step is needed here.
     if (-not $seedScript) {
-        $base = ($ManifestUrl -replace '[^/]+$', '')   # strip filename -> dir URL
+        $base = $ScriptsBaseUrl.TrimEnd('/') + '/'
         $seedUrl = $base + $seedName
         New-Item -ItemType Directory -Force -Path $script:TempRoot | Out-Null
         $seedScript = Join-Path $script:TempRoot $seedName
