@@ -1330,6 +1330,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // 이미 자동 허용이다. 실측(07-27): 코치가 "고치고 직접 눌러 확인"하는 루프마다
     // 모달이 떴고, 그것도 매핑 누락 탓에 **셸 문구에 빈 내용**으로 떴다.
     // browserType 은 남긴다 — 값을 넣고 제출까지 갈 수 있어 성격이 다르다.
+    //
+    // 정책의 단일 소스는 package.json 의 `requireApprovalFor.default` 다.
+    // 매니페스트에 default 가 선언돼 있으면 **항상 매니페스트가 이기고** 아래
+    // 두 번째 인자는 도달하지 않는다. #499 는 그 사실을 놓쳐서 생긴 드리프트였다
+    // — 코드만 고치고 매니페스트를 안 고쳐서 writeFile 모달이 살아 있었고
+    // browserType 은 목록에 없어 무조건 자동 허용이었다. 정책을 바꿀 때는
+    // package.json 의 `default` 와 `items.enum` 을 고친다(스모크 테스트가 잠근다).
     const required = cfg.get<string[]>("requireApprovalFor", [
       "executeShell",
       "openBrowser",
