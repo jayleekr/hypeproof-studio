@@ -30,7 +30,10 @@ import {
 } from "./browserMcp";
 import type { AssetScoreChunk, Citation, ResolvedProfile } from "./protocol";
 import { ProxyAuthError } from "./proxyClient";
-import { TOKEN_EXPIRED_FRIENDLY } from "./proxyClientHelpers";
+import {
+  GATEWAY_AUTH_FAILED_FRIENDLY,
+  GATEWAY_BAD_REQUEST_FRIENDLY,
+} from "./proxyClientHelpers";
 import {
   buildSdkQueryOptions,
   consumeSdkStream,
@@ -43,6 +46,7 @@ import {
   resolveSdkModule,
   resolveZodModule,
   sdkBinaryMarkerPath,
+  sdkConfigDirFor,
   sdkToolToActionRequest,
   seededSdkBinaryPath,
   type SdkActivity,
@@ -493,6 +497,18 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     }
   }
 
+  // REQ-M13 — the coach's CLI gets a config dir of its own so stored Claude
+  // Code / Claude Desktop credentials can't outrank the workshop token. The
+  // path is derived purely (sdkConfigDirFor); creating it is the host's job.
+  // A failure here is not fatal: the CLI creates it itself, and pointing the
+  // env at a not-yet-existing dir still keeps ~/.claude out of the picture.
+  const sdkConfigDir = sdkConfigDirFor(process.env);
+  try {
+    fs.mkdirSync(sdkConfigDir, { recursive: true });
+  } catch (err) {
+    console.warn(`[coach] could not create SDK config dir ${sdkConfigDir}:`, err);
+  }
+
   // Pure option/env construction (allowedTools/settingSources pinned to [],
   // ANTHROPIC_BASE_URL derived from proxyUrl, ANTHROPIC_API_KEY scrubbed) is
   // locked by unit tests via buildSdkQueryOptions (REQ-M5/M6/M13); the two
@@ -503,6 +519,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       token: args.token,
       cwd: args.cwd,
       baseEnv: process.env,
+      configDir: sdkConfigDir,
       // W4a — explicit binary path (setting/env/seeded). Undefined for the
       // node-modules source: the option is omitted and the SDK's own
       // optionalDependency lookup runs (dev behavior, unchanged).
@@ -635,7 +652,22 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     isAborted: () => args.signal.aborted,
     makeAbortError: abortError,
     abortQuery: () => abortController.abort(),
-    makeFatalAuthError: () => new ProxyAuthError("expired", TOKEN_EXPIRED_FRIENDLY),
+    makeFatalAuthError: (status) => {
+      // The status is the ONLY signal we get here — log it, because the friendly
+      // copy deliberately does not name a cause. Without this line a 401 from a
+      // mis-sent credential is indistinguishable from a real expiry in the logs.
+      console.warn(
+        `[coach] SDK gateway returned ${status} — aborting the turn. ` +
+          `401 = the CLI's credential was rejected (expired token, or an ambient ` +
+          `credential outranking it — CLAUDE_CONFIG_DIR is isolated for exactly that, ` +
+          `REQ-M13); 400 = malformed request, not auth.`,
+      );
+      return status === 401
+        ? // NOT "expired": we cannot tell, and that kind DELETES the stored token.
+          // "missing" reopens the token input without destroying a valid token.
+          new ProxyAuthError("missing", GATEWAY_AUTH_FAILED_FRIENDLY)
+        : new ProxyAuthError("other", GATEWAY_BAD_REQUEST_FRIENDLY);
+    },
     onDelta: args.onDelta,
     ...(args.onActivity ? { onActivity: args.onActivity } : {}),
     stallMs,
