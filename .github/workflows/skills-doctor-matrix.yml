@@ -1,0 +1,130 @@
+# Runtime-path gate for the one-liner installers (install.sh / install.ps1).
+#
+# WHY THIS EXISTS
+#   The bundled skills assume git + gh + a POSIX bash are present. On Windows
+#   that assumption only ever got exercised on tag/dispatch builds
+#   (build-windows.yml), never in PR CI — so a regression in the Windows
+#   runtime path could merge unseen. This job runs the fail-closed doctor plus
+#   a shell-assumption smoke on BOTH windows-2022 and macos-14 for every PR,
+#   finally testing the Windows path pre-merge.
+#
+# Grounded in the installer plan (hypeproof-deps.yaml is the single source of
+# truth; scripts/hps-doctor.sh re-verifies that same manifest, fail-closed).
+
+name: skills-doctor-matrix
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skills-doctor-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # On windows-2022 this resolves to Git Bash — exactly the POSIX bash the
+    # bundled skills rely on. On macos-14 it is the system bash. Same script,
+    # both runtimes.
+    shell: bash
+
+jobs:
+  doctor:
+    name: doctor + shell smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, macos-14]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # (b) Fail-closed doctor: re-verify the manifest toolchain. HPS_SKIP_STUDIO
+      # keeps this to a deps-only pass — the Studio app + SDK seed are not
+      # provisioned in a lean PR job and are out of scope for this gate.
+      - name: Run hps-doctor
+        env:
+          HPS_SKIP_STUDIO: "1"
+        run: bash scripts/hps-doctor.sh
+
+      # (b2) SDK-seed contract fixture. The deps-only pass above skips section 8
+      # of the doctor entirely, so the seed-marker glob + schema checks would
+      # ship untested (they did: the glob looked for a dotfile the seeders never
+      # write). This provisions a FAKE seed — no 67 MiB download — at the exact
+      # path and schema scripts/seed-sdk-binary.ps1 produces, then runs the
+      # doctor with the Studio section ENABLED.
+      # Windows-only: the macOS leg additionally hard-fails on a missing
+      # /Applications/HypeProof Studio.app, which a lean PR job cannot provide.
+      - name: Fixture — SDK seed marker contract
+        if: runner.os == 'Windows'
+        run: |
+          set -euo pipefail
+          seed="${APPDATA//\\//}/HypeProof-Studio/sdk/0.3.207"
+          mkdir -p "$seed"
+          printf 'ci-fixture-not-a-real-sdk' > "$seed/claude.exe"
+          size="$(wc -c < "$seed/claude.exe" | tr -d ' ')"
+          marker="$seed/claude.exe.verified.json"
+          write_marker() {  # write_marker <size>
+            printf '{\n  "sdkVersion": "0.3.207",\n  "size": %s,\n  "tarballSha512": "sha512-Y2ktZml4dHVyZQ==",\n  "verifiedAt": "1970-01-01T00:00:00Z",\n  "seededBy": "ci-fixture"\n}\n' "$1" > "$marker"
+          }
+
+          # Positive control: a well-formed seed must be recognised.
+          write_marker "$size"
+          if ! out="$(bash scripts/hps-doctor.sh 2>&1)"; then
+            printf '%s\n' "$out"
+            echo "FAIL doctor exited non-zero on a valid fixture seed"
+            exit 1
+          fi
+          printf '%s\n' "$out"
+          printf '%s\n' "$out" | grep -q 'SDK seed verified: 0.3.207' || {
+            echo "FAIL doctor did not report the fixture seed as verified"; exit 1; }
+
+          # Negative control: a marker whose size disagrees with the binary is
+          # exactly what the runtime refuses to trust — the doctor must too.
+          write_marker "$(( size + 1 ))"
+          if out="$(bash scripts/hps-doctor.sh 2>&1)"; then
+            printf '%s\n' "$out"
+            echo "FAIL doctor passed a tampered seed (size mismatch)"
+            exit 1
+          fi
+          printf '%s\n' "$out" | grep -q 'SDK seed size mismatch' || {
+            printf '%s\n' "$out"; echo "FAIL doctor failed for the wrong reason"; exit 1; }
+          echo "ok   SDK seed contract: positive + negative control both behaved"
+
+          rm -rf "${APPDATA//\\//}/HypeProof-Studio/sdk"
+
+      # (c) Lightweight smoke of the bundled skills' shell assumptions:
+      # git + gh must exist, and a POSIX bash must resolve and run.
+      - name: Smoke — skill shell assumptions
+        run: |
+          set -euo pipefail
+          fail=0
+
+          for tool in git gh bash; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              printf 'ok   %-4s -> %s\n' "$tool" "$(command -v "$tool")"
+            else
+              printf 'FAIL %-4s not on PATH\n' "$tool"
+              fail=1
+            fi
+          done
+
+          # A POSIX bash must actually execute (Git Bash on Windows).
+          if bash -c 'printf "%s\n" "posix-bash-ok"' | grep -q posix-bash-ok; then
+            echo "ok   bash executes a POSIX one-liner"
+          else
+            echo "FAIL bash could not run a POSIX one-liner"
+            fail=1
+          fi
+
+          echo "--- versions ---"
+          git --version || true
+          gh --version | head -n1 || true
+          bash --version | head -n1 || true
+
+          exit "$fail"
