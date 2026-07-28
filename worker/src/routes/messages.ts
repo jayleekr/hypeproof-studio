@@ -104,6 +104,22 @@ function decodeHeader(raw: string | null | undefined): string | undefined {
 }
 
 /**
+ * 개행으로 구분된 목록 헤더. HTTP 헤더에는 개행을 넣을 수 없으므로 클라이언트가
+ * `\n` 을 퍼센트 인코딩해 보내고 여기서 되돌린다. 상한을 둬서 학생이 node_modules
+ * 를 만들어 놔도 프롬프트가 터지지 않게 한다.
+ */
+function decodeHeaderList(raw: string | null | undefined): string[] | undefined {
+  const v = decodeHeader(raw);
+  if (v === undefined) return undefined;
+  const out = v
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, 80);
+  return out;
+}
+
+/**
  * Clamp the requested model to the cohort's catalog. The SDK sends real
  * Anthropic model ids (not our aliases), so the policy is:
  *   - profile default / fallback alias (by alias name or by mapped id) → honored
@@ -257,6 +273,10 @@ messages.post("/messages", async (c) => {
   const coach: CoachContext = {
     name: decodeHeader(c.req.header("x-hps-coach-name")),
     personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+    // #431 — 작업 폴더는 학생 머신마다 다르므로 프로필에 넣을 수 없고, 클라이언트
+    // system 은 통째로 교체되므로 거기 실어 보낼 수도 없다. 헤더가 유일한 통로다.
+    workspace: decodeHeader(c.req.header("x-hps-workspace")),
+    workspaceFiles: decodeHeaderList(c.req.header("x-hps-workspace-files")),
   };
 
   // #9c trace hook — identical opt-in to chat.ts (trial headers).
@@ -556,6 +576,10 @@ messages.post("/messages/count_tokens", async (c) => {
   const coach: CoachContext = {
     name: decodeHeader(c.req.header("x-hps-coach-name")),
     personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+    // #431 — 작업 폴더는 학생 머신마다 다르므로 프로필에 넣을 수 없고, 클라이언트
+    // system 은 통째로 교체되므로 거기 실어 보낼 수도 없다. 헤더가 유일한 통로다.
+    workspace: decodeHeader(c.req.header("x-hps-workspace")),
+    workspaceFiles: decodeHeaderList(c.req.header("x-hps-workspace-files")),
   };
 
   // 2-3. Enforced fields, mirroring /v1/messages: spread-first keeps unknown

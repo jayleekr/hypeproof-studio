@@ -1703,10 +1703,14 @@ const TINY_PNG =
   // deepEqual (not a subset check) is deliberate — a shell grant must never
   // spread to another cohort by accident, so widening this shape has to be an
   // explicit edit here.
+  // subagents 는 켜져 있다. 한때 껐던 이유(병렬 4개 → Stream closed 28건)는 능력이
+  // 아니라 **동시성**이 방아쇠였기 때문이다 — 같은 서브에이전트가 1개일 때는 멀쩡했다.
+  // 그래서 클라이언트가 CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY=2 로 묶는다
+  // (extensions/hypeproof-chat/test/workspace-header.smoke.mjs 가 그 값을 검증).
   assert.deepEqual(
     copyclone.sdk_tools,
     { read: true, write: true, browser: true, subagents: true, shell: true },
-    "copyclone: SDK read+write + browser MCP + subagents + shell on (adult, #282 P2 / #431)",
+    "copyclone: SDK read+write + browser MCP + subagents + shell on (#282 P2 / #431)",
   );
 
   // epic #431 — the publish skill and the shell grant are a PAIR. Skill without

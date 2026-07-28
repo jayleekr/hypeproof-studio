@@ -1,0 +1,208 @@
+# HypeProof Harness — Dependency Manifest
+# =============================================================================
+# SINGLE SOURCE OF TRUTH for external tool dependencies.
+#
+# Read by:
+#   - the installers            (scripts/install/*  — brew / winget bootstrap)
+#   - the preflight doctor       (scripts/doctor     — verify & report)
+#
+# Do NOT hand-maintain install steps elsewhere. Add or bump a dependency here
+# and both the installer and the doctor pick it up automatically.
+#
+# Per-tool fields
+#   id             stable key used by installer/doctor (never rename in place)
+#   name           human label
+#   tier           required | recommended | dev | maintainer
+#   why            what in the harness actually needs it
+#   min_version    lowest version the harness is tested against (semver-ish)
+#   check          shell command the doctor runs to read the installed version
+#   version_regex  first capture group = the version, parsed from `check` output
+#   install.brew   Homebrew formula id (macOS + Linuxbrew) — null if n/a
+#   install.winget winget package id (native Windows)      — null if no package
+#   platforms      OSes where the tool is needed: [macos, linux, windows]
+#   notes          caveats (optional)
+#
+# Tiers
+#   required     every member/agent; the harness scripts fail without it
+#   recommended  needed for common flows (consumer-repo builds, deploys)
+#   dev          contributors to the harness itself / local CI parity
+#   maintainer   vendor-sync tooling; only the harness maintainer runs these
+# =============================================================================
+
+schema_version: 1
+
+meta:
+  python_min: "3.11"
+  # Native Windows is NOT a supported platform for the harness itself — use WSL2
+  # (see docs/MEMBER-GUIDE.ko.md §0). The winget ids below exist so a Windows dev
+  # box can still bootstrap the common toolchain outside WSL; tools with no native
+  # Windows package are marked `winget: null` and are expected to run under WSL2.
+  windows_policy: wsl2-recommended
+
+tools:
+  # --------------------------------------------------------------------- required
+  - id: git
+    name: Git
+    tier: required
+    why: Version control for every repo; all harness scripts shell out to git.
+    min_version: "2.30"
+    check: "git --version"
+    version_regex: "git version ([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)"
+    install:
+      brew: git
+      winget: Git.Git
+    platforms: [macos, linux, windows]
+
+  - id: gh
+    name: GitHub CLI
+    tier: required
+    why: >-
+      PR / review / merge / api operations — the busiest dependency in the
+      harness (hype-review, hype-merge, hype-pr, repo-governance all call `gh`).
+    min_version: "2.40"
+    check: "gh --version"
+    version_regex: "gh version ([0-9]+\\.[0-9]+\\.[0-9]+)"
+    install:
+      brew: gh
+      winget: GitHub.cli
+    platforms: [macos, linux, windows]
+    notes: >-
+      Must be authenticated (`gh auth login`) before the scripts work; the
+      doctor checks presence + version only, not auth state.
+
+  - id: python
+    name: Python
+    tier: required
+    why: >-
+      Runtime for every scripts/*.py entry point (repo-governance, weekly-harness,
+      hype-review, hype-merge, hype-pr, notify, ai-review, docs-harness).
+    min_version: "3.11"
+    check: "python3 --version"
+    version_regex: "Python ([0-9]+\\.[0-9]+\\.[0-9]+)"
+    install:
+      brew: python@3.11
+      winget: Python.Python.3.11
+    platforms: [macos, linux, windows]
+
+  - id: jq
+    name: jq
+    tier: required
+    why: JSON shaping in shell scripts (sync.sh, security checks, gh api pipelines).
+    min_version: "1.6"
+    check: "jq --version"
+    version_regex: "jq-([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)"
+    install:
+      brew: jq
+      winget: jqlang.jq
+    platforms: [macos, linux, windows]
+
+  # ------------------------------------------------------------------ recommended
+  - id: node
+    name: Node.js (LTS)
+    tier: recommended
+    why: >-
+      Consumer-repo builds and front-end tooling (sediment / studio / lab).
+      Not required by the harness core, but every member who builds a consumer
+      repo needs it.
+    min_version: "18.0"
+    check: "node --version"
+    version_regex: "v([0-9]+\\.[0-9]+\\.[0-9]+)"
+    install:
+      brew: node
+      winget: OpenJS.NodeJS.LTS
+    platforms: [macos, linux, windows]
+
+  # -------------------------------------------------------------------------- dev
+  - id: shellcheck
+    name: ShellCheck
+    tier: dev
+    why: >-
+      Lints the shell scripts the way CI does (repo-governance-live workflow runs
+      `shellcheck -S warning` on sync.sh / check-secrets.sh / register-skills.sh /
+      run.sh). Run it locally to match CI.
+    min_version: "0.9"
+    check: "shellcheck --version"
+    version_regex: "version:\\s*([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)"
+    install:
+      brew: shellcheck
+      winget: koalaman.shellcheck
+    platforms: [macos, linux, windows]
+
+  - id: pre-commit
+    name: pre-commit
+    tier: dev
+    why: Runs the repo's git hooks (.githooks / .pre-commit-config) before push.
+    min_version: "3.0"
+    check: "pre-commit --version"
+    version_regex: "pre-commit ([0-9]+\\.[0-9]+\\.[0-9]+)"
+    install:
+      brew: pre-commit
+      winget: null
+    platforms: [macos, linux, windows]
+    notes: "No native winget package — install via pip: `python3 -m pip install pre-commit`."
+
+  # ------------------------------------------------------------------- maintainer
+  - id: rsync
+    name: rsync
+    tier: maintainer
+    why: >-
+      Vendor sync — scripts/sync.sh mirrors canonical skills/docs into each
+      consumer repo with `rsync -a --delete`. Maintainer-only workflow.
+    min_version: "3.1"
+    check: "rsync --version"
+    version_regex: "version ([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)"
+    install:
+      brew: rsync
+      winget: null
+    platforms: [macos, linux]
+    notes: >-
+      Ships with macOS/Linux. No first-class native Windows package — run under
+      WSL2. macOS default rsync is old (2.6.9); brew rsync (3.x) is preferred.
+
+  - id: bash
+    name: Bash (5+)
+    tier: maintainer
+    why: >-
+      Maintainer shell scripts assume Bash 5 features. macOS still ships Bash 3.2
+      by default, so the harness maintainer needs a modern Bash on PATH.
+    min_version: "5.0"
+    check: "bash --version"
+    version_regex: "version ([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)"
+    install:
+      brew: bash
+      winget: null
+    platforms: [macos, linux]
+    notes: >-
+      Member/agent scripts are written portably and do not require Bash 5; this
+      is only enforced for maintainer tooling.
+
+# =============================================================================
+# Python packages (pip) — verified by the doctor with the harness Python.
+# Installers run: python3 -m pip install <name>>=<min_version>
+# =============================================================================
+pip_packages:
+  - id: httpx
+    name: httpx
+    tier: required
+    why: Async HTTP client used by hype-merge/monitor and ai-review/review_pr.
+    min_version: "0.24"
+    check: "python3 -c 'import httpx; print(httpx.__version__)'"
+    version_regex: "([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)"
+
+  - id: pyyaml
+    name: PyYAML
+    tier: required
+    why: >-
+      Parses policy YAML and manifests (repo-governance/audit, notify, hype-merge,
+      hype-review). Imported as `yaml`.
+    min_version: "6.0"
+    check: "python3 -c 'import yaml; print(yaml.__version__)'"
+    version_regex: "([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)"
+
+  - id: pytest
+    name: pytest
+    tier: dev
+    why: Runs the harness test suite (tests/ and scripts/**/tests/).
+    min_version: "7.4"
+    check: "python3 -c 'import pytest; print(pytest.__version__)'"
+    version_regex: "([0-9]+\\.[0-9]+(?:\\.[0-9]+)?)"
