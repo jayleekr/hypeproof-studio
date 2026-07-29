@@ -120,6 +120,94 @@ case "$UNAME_S" in
 esac
 
 # ----------------------------------------------------------------------------- #
+# 2b. Resolve the POSIX interpreter name `python3` to a binary that exists here.
+#
+# The manifest is POSIX-shaped on purpose: it asks for `python3`, the name every
+# Unix distro guarantees (PEP 394). Windows CPython ships `python.exe` ONLY —
+# there is no `python3.exe` in the install dir. The only `python3.exe` on a
+# stock Windows PATH is the 0-byte %LOCALAPPDATA%\Microsoft\WindowsApps
+# reparse-point stub that opens the Microsoft Store.
+#
+# So a name-only lookup on Windows has two failure modes, and we hit the first:
+#   * MISS  — Python 3.11.9 installed at
+#             ~/AppData/Local/Programs/Python/Python311/python.exe, yet the
+#             doctor reported "python: not found on PATH (tier=required)" and
+#             told the user to `winget install Python.Python.3.11` again.
+#   * WORSE — match the Store stub and either hang on a Store window or accept
+#             a "python3" that cannot run a single line of code.
+#
+# Rule: NEVER accept a candidate on its name. A candidate is accepted only if it
+# actually executes and prints a version that satisfies the manifest pin. That
+# is what keeps `python` == python2 (2.7.x < 3.11) out and what makes the 0-byte
+# stub fail closed instead of turning the check green.
+#
+# POSIX is untouched: on macOS/Linux the candidate list is exactly `python3`,
+# so the resolved command is byte-identical to the manifest's and every verdict
+# (missing / below-min / ok) is what it was before.
+# ----------------------------------------------------------------------------- #
+PY_PREFIX=""   # interpreter prefix chosen for this run ("" = none usable)
+
+# resolve_python_prefix <min_version>
+#   Prints the command prefix to use in place of `python3`, or "" if no
+#   candidate even exists. Prefers the first candidate that runs AND reports
+#   >= <min>; otherwise falls back to the first candidate that exists at all so
+#   the caller still reports that one's REAL version / real error.
+resolve_python_prefix() {
+  _rp_min="${1:-}"
+  if [ "$OS" = "windows" ]; then
+    # Priority = what PATH would run first, then the documented Windows names.
+    # `py -3` is the PEP 397 launcher (C:\Windows\py.exe), the last resort that
+    # works even when no python*.exe is on PATH at all.
+    set -- "python3" "python" "py -3"
+  else
+    set -- "python3"
+  fi
+
+  _rp_fallback=""
+  for _rp_c in "$@"; do
+    _rp_bin="${_rp_c%% *}"
+    have "$_rp_bin" || continue
+
+    # Microsoft Store "App Execution Alias" stubs are 0-byte reparse points that
+    # launch the Store UI instead of running. Never execute one, never count it.
+    _rp_path="$(command -v "$_rp_bin" 2>/dev/null || true)"
+    if [ -n "$_rp_path" ] && [ -f "$_rp_path" ] && [ ! -s "$_rp_path" ]; then
+      continue
+    fi
+
+    [ -n "$_rp_fallback" ] || _rp_fallback="$_rp_c"
+
+    # Word splitting on $_rp_c is intentional: the list is a fixed literal and
+    # "py -3" must reach the launcher as two argv entries.
+    # shellcheck disable=SC2086
+    _rp_out="$($_rp_c --version 2>&1 || true)"
+    case "$_rp_out" in *[Pp]ython*) : ;; *) continue ;; esac
+    _rp_ver="$(printf '%s\n' "$_rp_out" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
+    [ -n "$_rp_ver" ] || continue
+    if [ -z "$_rp_min" ] || [ "$_rp_min" = "null" ] || ver_ge "$_rp_ver" "$_rp_min"; then
+      printf '%s\n' "$_rp_c"
+      return 0
+    fi
+  done
+
+  printf '%s\n' "$_rp_fallback"
+  [ -n "$_rp_fallback" ]
+}
+
+# rewrite_python_check <check-command> <prefix>
+#   Swaps a leading `python3`/`python3.11` token for the resolved prefix, so the
+#   manifest's own check command still supplies the args and the version regex
+#   surface stays exactly as authored.
+rewrite_python_check() {
+  _rw_check="$1"; _rw_prefix="$2"
+  _rw_bin="${_rw_check%% *}"
+  case "$_rw_bin" in
+    python3|python3.*) printf '%s%s\n' "$_rw_prefix" "${_rw_check#"$_rw_bin"}" ;;
+    *)                 printf '%s\n' "$_rw_check" ;;
+  esac
+}
+
+# ----------------------------------------------------------------------------- #
 # 3. Locate the manifest (single source of truth). Fail closed if absent.
 # ----------------------------------------------------------------------------- #
 case "$0" in
@@ -242,6 +330,21 @@ while IFS="$TAB" read -r id tier min check brew winget plat; do
   esac
   bin="${check%% *}"
   [ -n "$bin" ] || bin="$id"
+
+  # POSIX interpreter name -> a binary that exists on THIS OS (see §2b). The pin
+  # is passed in, so a candidate is only adopted when it reports >= $min; that
+  # keeps a python2 named `python` from being adopted as "python3".
+  case "$bin" in
+    python3|python3.*)
+      _pyc="$(resolve_python_prefix "$min" || true)"
+      PY_PREFIX="$_pyc"
+      if [ -n "$_pyc" ] && [ "$_pyc" != "$bin" ]; then
+        info "$id: manifest asks for '$bin'; Windows CPython ships no python3.exe — using '$_pyc'"
+        check="$(rewrite_python_check "$check" "$_pyc")"
+        bin="${_pyc%% *}"
+      fi
+      ;;
+  esac
 
   if ! have "$bin"; then
     _fix="$(remediate "$id" "$brew" "$winget" install)"
@@ -401,9 +504,15 @@ fi
 # ----------------------------------------------------------------------------- #
 if [ "$CHECK_PIP" = "1" ]; then
   section "python packages (pip_packages — opt-in)"
-  if ! have python3; then
-    warn "python3 not on PATH — cannot verify pip_packages" "install python (see toolchain section)"
+  # Reuse the interpreter §6 already resolved+version-verified; if the python
+  # tool was skipped there (platform scope), resolve now against meta.python_min
+  # so we never fall back to an unversioned guess.
+  PY_MIN="$(sed -n 's/^[ \t]*python_min:[ \t]*"\{0,1\}\([0-9][0-9.]*\)"\{0,1\}[ \t]*$/\1/p' "$MANIFEST" 2>/dev/null | head -n1)"
+  [ -n "$PY_PREFIX" ] || PY_PREFIX="$(resolve_python_prefix "$PY_MIN" || true)"
+  if [ -z "$PY_PREFIX" ]; then
+    warn "no python3 interpreter on PATH — cannot verify pip_packages" "install python (see toolchain section)"
   else
+    info "pip_packages verified with: $PY_PREFIX"
     # parse pip_packages block (id / tier / min_version / check)
     PIP_TMP="$(mktemp 2>/dev/null || echo /tmp/hps-doctor-pip.$$)"
     awk '
@@ -423,7 +532,8 @@ if [ "$CHECK_PIP" = "1" ]; then
     while IFS="$TAB" read -r id tier min check; do
       [ -n "$id" ] || continue
       case "$tier" in required|recommended) hard=1 ;; *) hard=0 ;; esac
-      _fix="python3 -m pip install '${id}>=${min}'"
+      _fix="$PY_PREFIX -m pip install '${id}>=${min}'"
+      check="$(rewrite_python_check "$check" "$PY_PREFIX")"
       out="$(sh -c "$check" 2>&1 || true)"
       ver="$(printf '%s\n' "$out" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n1)"
       if [ -z "$ver" ]; then
