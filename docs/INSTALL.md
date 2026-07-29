@@ -26,7 +26,7 @@ curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/
 2. 아래 한 줄을 복사해서 붙여넣고 Enter:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-win.ps1 | iex
+irm https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-win.ps1 | iex
 ```
 
 3. SmartScreen 경고가 뜨면 → "추가 정보" → "실행" 클릭
