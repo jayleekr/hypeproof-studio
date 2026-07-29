@@ -20,6 +20,12 @@ const ROOT = "/Users/student/HypeProofClinic";
 const run = (toolName, input, workspaceRoot = ROOT) =>
   absolutizeToolPaths({ toolName, input, workspaceRoot });
 
+// 오라클은 **구현이 쓰는 것과 같은 연산**이어야 한다: 제품은 path.resolve 다
+// (sdkCoachHelpers.ts absolutizeToolPaths). path.join 으로 기대값을 만들면
+// Windows 에서만 드라이브 문자(`C:`) 유무가 갈려 멀쩡한 제품이 빨강이 된다.
+// POSIX 에서는 두 연산의 결과가 같으므로 이 교체는 macOS/CI 동작을 바꾸지 않는다.
+const abs = (...segments) => path.resolve(ROOT, ...segments);
+
 // ─── 양성 대조군 — 상대경로는 절대화된다 ────────────────────────────────────
 {
   for (const [tool, key] of [
@@ -29,17 +35,17 @@ const run = (toolName, input, workspaceRoot = ROOT) =>
     ["NotebookEdit", "notebook_path"],
   ]) {
     const r = run(tool, { [key]: "agent.md" });
-    assert.equal(r.input[key], path.join(ROOT, "agent.md"), `${tool}.${key} 절대화`);
+    assert.equal(r.input[key], abs("agent.md"), `${tool}.${key} 절대화`);
     assert.equal(r.rewritten.length, 1);
-    assert.deepEqual(r.rewritten[0], { key, from: "agent.md", to: path.join(ROOT, "agent.md") });
+    assert.deepEqual(r.rewritten[0], { key, from: "agent.md", to: abs("agent.md") });
   }
 
   // 하위 경로 · ./ 접두 · 중첩
-  assert.equal(run("Read", { file_path: "./index.html" }).input.file_path, path.join(ROOT, "index.html"));
-  assert.equal(run("Read", { file_path: "sub/dir/a.css" }).input.file_path, path.join(ROOT, "sub/dir/a.css"));
+  assert.equal(run("Read", { file_path: "./index.html" }).input.file_path, abs("index.html"));
+  assert.equal(run("Read", { file_path: "sub/dir/a.css" }).input.file_path, abs("sub/dir/a.css"));
 
   // Glob 의 `path`(탐색 시작 디렉터리)는 경로다 → 절대화 대상
-  assert.equal(run("Glob", { path: "src", pattern: "**/*.ts" }).input.path, path.join(ROOT, "src"));
+  assert.equal(run("Glob", { path: "src", pattern: "**/*.ts" }).input.path, abs("src"));
 
   console.log("✓ 양성 대조군 — 상대경로는 워크스페이스 기준으로 절대화된다");
 }
@@ -79,7 +85,11 @@ const run = (toolName, input, workspaceRoot = ROOT) =>
   // 이 함수는 막지 않는다. evaluateSdkToolUse 의 containment 가 막는다.
   // 여기서 막으면 판정이 두 곳으로 갈라져 한쪽만 고쳐지는 사고가 난다.
   const r = run("Write", { file_path: "../../../etc/passwd" });
-  assert.equal(r.input.file_path, "/etc/passwd", "절대화는 한다");
+  assert.equal(r.input.file_path, abs("../../../etc/passwd"), "절대화는 한다");
+  // 절대화가 `..` 를 실제로 접었는지 — 오라클과 구현이 같은 연산이라 위 단언만으로는
+  // 약해진다. 루트를 벗어났고 절대경로라는 것은 연산과 무관하게 참이어야 한다.
+  assert.ok(path.isAbsolute(r.input.file_path), "절대경로여야 한다");
+  assert.ok(!r.input.file_path.includes("HypeProofClinic"), "`..` 가 접혀 루트를 벗어나야 한다");
   assert.equal(r.rewritten.length, 1);
 
   const { evaluateSdkToolUse } = await import("../src/sdkCoachHelpers.ts");
@@ -101,7 +111,8 @@ console.log("\n✓ absolutize-paths smoke 통과");
 
   // 워크스페이스 안 → 루트 기준 상대
   assert.equal(displayPath(`${ROOT}/agent.md`, ROOT), "agent.md");
-  assert.equal(displayPath(`${ROOT}/sub/a.css`, ROOT), "sub/a.css");
+  // displayPath 는 path.relative 로 만든다 → 구분자는 그 플랫폼의 것이다.
+  assert.equal(displayPath(`${ROOT}/sub/a.css`, ROOT), path.join("sub", "a.css"));
   // 워크스페이스 밖 → 전체 경로 (눈에 띄어야 한다)
   assert.equal(displayPath("/etc/passwd", ROOT), "/etc/passwd");
   assert.equal(displayPath("/Users/student/Desktop/x.html", ROOT), "/Users/student/Desktop/x.html");
