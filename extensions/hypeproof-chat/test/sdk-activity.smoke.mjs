@@ -16,6 +16,7 @@
 // Run: node --experimental-strip-types test/sdk-activity.smoke.mjs
 
 import assert from "node:assert/strict";
+import * as path from "node:path";
 
 const { extractSdkActivity, summarizeToolInput, consumeSdkStream, sdkEventTime, SDK_STALL_FRIENDLY } =
   await import("../src/sdkCoachHelpers.ts");
@@ -119,7 +120,8 @@ const apiRetry = (error_status) => ({
   //   정상(절대·루트 안) · 상대경로(SDK 가 거부) · 루트 밖(위험)
   const WS = "/Users/kid/workspace";
   assert.equal(summarizeToolInput("Write", { file_path: `${WS}/index.html` }, 60, WS), "index.html");
-  assert.equal(summarizeToolInput("Write", { file_path: `${WS}/sub/a.css` }, 60, WS), "sub/a.css");
+  // 루트 기준 상대경로는 displayPath → path.relative 이므로 구분자가 플랫폼의 것이다.
+  assert.equal(summarizeToolInput("Write", { file_path: `${WS}/sub/a.css` }, 60, WS), path.join("sub", "a.css"));
   // 루트 밖은 축약하지 않는다 — 눈에 띄어야 한다.
   assert.equal(summarizeToolInput("Read", { path: "/etc/passwd" }, 60, WS), "/etc/passwd");
   // 상대경로는 `./` 로 구분된다 (흡수 전에 보이면 그게 곧 원인 표시다).

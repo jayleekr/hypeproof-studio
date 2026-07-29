@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -78,8 +78,12 @@ const {
   //     what loadSdk feeds pathToFileURL at runtime.
   const r = resolveSdkModule({ distDir: DIST, fileExists: () => true });
   assert.equal(r.source, "vendored");
-  assert.ok(r.entryPath.startsWith("/"), "absolute path for the file:// URL");
-  assert.ok(r.entryPath.endsWith("/sdk.mjs"), "points at the SDK ESM entry");
+  // Portable oracles: resolveVendoredModule joins with path.join, so the
+  // separator is the host platform's. `startsWith("/")` / `endsWith("/sdk.mjs")`
+  // are POSIX-only spellings of these two facts and false-fail on Windows.
+  assert.ok(isAbsolute(r.entryPath), "absolute path for the file:// URL");
+  assert.equal(basename(r.entryPath), "sdk.mjs", "points at the SDK ESM entry");
+  assert.equal(r.entryPath, join(DIST, VENDORED_SDK_ENTRY_SUBPATH), "under dist/vendor, not a bare name");
 }
 
 // ─── resolveZodModule — same contract ────────────────────────────────────────
