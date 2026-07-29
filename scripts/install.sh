@@ -43,6 +43,8 @@ STUDIO_VERSION="${HPS_STUDIO_VERSION:-latest}"
 # The trailing `-` before `*` made the glob unmatchable, so step 5 always died with
 # "No Studio asset matching …". `*` after the arch matches both shapes.
 STUDIO_ASSET_GLOB_DARWIN_ARM64="HypeProof-Studio-darwin-arm64*.zip"
+# shellcheck disable=SC2034  # unused while install_studio_mac fails Intel early;
+# kept as the ready-made glob for when a darwin-x64 asset ships (#331).
 STUDIO_ASSET_GLOB_DARWIN_X64="HypeProof-Studio-darwin-x64*.zip"
 
 # SDK seeding is delegated to the canonical scripts/seed-sdk-binary.sh — the
@@ -376,14 +378,38 @@ gh_asset_url() {  # gh_asset_url <glob> -> download URL of first matching asset 
   # the literal string "null":
   #   gh release view --json assets  ->  .url      (browser download)  /  .apiUrl
   #   REST /releases/tags/<tag>      ->  .browser_download_url         /  .url (api)
+  #
+  # `have gh` is NOT proof gh can talk to the API. check_deps brew-installs gh
+  # from the manifest and only WARNS when it is unauthenticated, so on every
+  # fresh machine install_studio reaches here with a gh that exits 4 and prints
+  # nothing to stdout ("please run: gh auth login"). The old code returned
+  # unconditionally after the gh pipeline, so an empty result skipped the
+  # anonymous curl fallback entirely and the caller reported the asset as missing —
+  # "No Studio asset matching 'HypeProof-Studio-darwin-arm64*.zip' … build may
+  # not exist yet" — while the asset was in fact published and downloadable
+  # without auth. Only return when gh actually produced a URL; otherwise fall
+  # through, exactly as resolve_studio_version() already does for the tag.
+  # NOTE: the `case … in $_glob)` below must never sit inside a $(…) — macOS
+  # /bin/bash is 3.2, which cannot parse an unquoted glob pattern in a case arm
+  # inside a command substitution ("syntax error near unexpected token
+  # `newline'"). `curl … | bash` runs under exactly that shell, so capture gh's
+  # output FIRST and match outside the substitution.
   if have gh; then
-    gh release view "v${STUDIO_VERSION}" --repo "$STUDIO_RELEASES_REPO" \
-      --json assets --jq '.assets[] | "\(.name)\t\(.url)"' 2>/dev/null | \
-      while IFS="$(printf '\t')" read -r _name _dl; do
+    # `|| _assets=""` is load-bearing under `set -e` (line 29): assigning from a
+    # command substitution that exits non-zero (unauthenticated gh exits 4)
+    # aborts the whole script right here, before die() can ever report why.
+    _assets="$(gh release view "v${STUDIO_VERSION}" --repo "$STUDIO_RELEASES_REPO" \
+      --json assets --jq '.assets[] | "\(.name)\t\(.url)"' 2>/dev/null)" || _assets=""
+    # Non-empty means gh reached the API and we saw the authoritative asset
+    # list — match against it and return, even if nothing matches.
+    if [ -n "$_assets" ]; then
+      printf '%s\n' "$_assets" | while IFS="$(printf '\t')" read -r _name _dl; do
         # shellcheck disable=SC2254  # $_glob is INTENDED as a glob pattern here
         case "$_name" in $_glob) echo "$_dl"; break ;; esac
       done
-    return 0
+      return 0
+    fi
+    # Empty means gh could not talk to the API at all — fall through to curl.
   fi
   # curl fallback: match browser_download_url lines against the glob.
   curl -fsSL "$_api" 2>/dev/null | grep -o '"browser_download_url": *"[^"]*"' | \
@@ -398,7 +424,13 @@ install_studio_mac() {
   _glob=""
   case "$PLATFORM" in
     darwin-arm64) _glob="$STUDIO_ASSET_GLOB_DARWIN_ARM64" ;;
-    darwin-x64)   _glob="$STUDIO_ASSET_GLOB_DARWIN_X64" ;;
+    # build-mac.yml is arm64-only, so no darwin-x64 asset is ever produced.
+    # Without this branch an Intel Mac installs every brew dependency first and
+    # only then dies on a generic "asset may not exist yet", which reads as a
+    # broken release rather than an unsupported machine. Mirrors the early
+    # guard install-mac.sh already carries (#362). Turn this back into the
+    # x64 glob once a matching asset ships.
+    darwin-x64)   die "Intel Mac(x86_64)는 현재 지원되지 않습니다 — HypeProof Studio는 Apple Silicon(arm64) 전용 빌드만 제공합니다. (Intel 지원 여부는 논의 중: jayleekr/hypeproof-studio#331)" ;;
   esac
   if [ -d "/Applications/HypeProof Studio.app" ]; then
     # Idempotent upgrade: only replace if version differs.
