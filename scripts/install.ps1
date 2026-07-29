@@ -82,6 +82,23 @@ if ($Yes) { $NonInteractive = $true }
 if ($env:INSTALLER_NO_MODIFY_PATH) { $NoModifyPath = $true }
 if ($env:HPS_SKIP_STUDIO -eq '1') { $SkipStudio = $true }
 
+# Is it safe to call `exit` when we finish?
+#
+# The published entry point is `irm <url> | iex`, and `iex` runs this code in
+# the CALLER's session -- it is not a child script. So a top-level `exit` does
+# not end "the script", it ends the participant's PowerShell window. On the
+# success path that makes the window vanish the instant setup finishes; on the
+# failure path it also takes away the very output the last line tells them to
+# read ("Setup incomplete - see doctor failures above"). Measured: with `exit`,
+# a statement after `Invoke-Expression` never runs; without it, it does.
+#
+# Exiting IS correct when we own the process:
+#   - launched as `powershell -File install.ps1` ($PSCommandPath is set), or
+#   - unattended, i.e. the workshop-setup skill's dedicated hidden process,
+#     which sets HPS_NONINTERACTIVE=1 and needs the code to propagate.
+# Otherwise we set $LASTEXITCODE and return, leaving the prompt alive.
+$script:OwnsProcess = [bool]$PSCommandPath -or $NonInteractive
+
 $script:ExitCode = 0
 $script:AppData  = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $env:USERPROFILE 'AppData\Roaming' }
 $script:HpsHome  = Join-Path $script:AppData 'HypeProof-Studio'
@@ -863,13 +880,14 @@ function Main {
     if ($DoctorOnly) {
         $script:ExitCode = Invoke-Doctor $manifest $receipt
         Write-Receipt $receipt
-        exit $script:ExitCode
+        return
     }
 
     Write-Head 'Ensure package manager (winget)'
     if (-not (Ensure-Winget)) {
         Write-Err2 'Cannot proceed without winget.'
-        exit 2
+        $script:ExitCode = 2
+        return
     }
 
     Write-Head 'Install runtime dependencies (manifest tools)'
@@ -923,7 +941,6 @@ function Main {
     } else {
         Write-Host 'Setup incomplete - see doctor failures above. Open a new terminal and re-run.' -ForegroundColor Red
     }
-    exit $script:ExitCode
 }
 
 try {
@@ -931,6 +948,11 @@ try {
 } catch {
     Write-Err2 "Fatal: $($_.Exception.Message)"
     Write-Host $_.ScriptStackTrace -ForegroundColor DarkGray
-    exit 1
+    $script:ExitCode = 1
 }
+
+# See $script:OwnsProcess above: `exit` here would close the participant's
+# window when this ran through `irm | iex`, hiding the output above it.
+$global:LASTEXITCODE = $script:ExitCode
+if ($script:OwnsProcess) { exit $script:ExitCode }
 
