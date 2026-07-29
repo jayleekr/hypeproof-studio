@@ -559,6 +559,53 @@ function Resolve-StudioAsset {
     throw "No Studio asset matched globs [$($globs -join ', ')] in release $($rel.tag_name)."
 }
 
+# Is the Studio APP actually on this machine? Presence only - never the receipt.
+#
+# receipt.json is a marker WE wrote; it is not synchronized with the app. Once
+# `studio` is recorded it keeps reading "installed" after the user uninstalls,
+# so a re-bootstrap skipped step 6 and the doctor still printed ALL CHECKS
+# PASSED on a machine with no app and no Start-menu entry (#514). Every other
+# doctor check looks at the artifact - tools run --version, the POSIX shell is
+# Test-Path'd, git config is read back, the SDK seed goes through Get-SeededSdk.
+# The Studio check was the last one resting on a marker, which is the same shape
+# of defect as #476.
+#
+# Presence, not version, on purpose: the uninstall entry records the Inno
+# installer's version (1.116.x), while the manifest and the receipt speak the
+# product version (0.1.x). Those are two different numbering schemes for the
+# same release, so the registry cannot answer "which version". It can only
+# answer "is anything here", which is exactly the question the receipt cannot
+# be trusted on. The receipt keeps owning the version claim.
+function Test-StudioInstalled {
+    $uninstallRoots = @(
+        'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+        'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    )
+    # Most uninstall keys carry a DisplayName; plenty do not (patch and
+    # component keys). Under `Set-StrictMode -Version Latest` reading the
+    # missing property throws PropertyNotFoundStrict and takes the whole doctor
+    # down, so probe the property rather than dereferencing it.
+    $entries = @(Get-ItemProperty $uninstallRoots -ErrorAction SilentlyContinue |
+        Where-Object {
+            $prop = $_.PSObject.Properties['DisplayName']
+            $prop -and $prop.Value -and ([string]$prop.Value) -like 'HypeProof Studio*'
+        })
+    if ($entries.Count -gt 0) { return $true }
+
+    # Fallback: a per-user install whose uninstall entry was removed by hand.
+    # Both scopes, because /VERYSILENT UserSetup lands in LOCALAPPDATA while an
+    # admin-scope setup lands in Program Files.
+    foreach ($root in @($env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if (-not $root) { continue }
+        foreach ($rel in @('Programs\HypeProof Studio\HypeProof Studio.exe',
+                           'HypeProof Studio\HypeProof Studio.exe')) {
+            if (Test-Path -LiteralPath (Join-Path $root $rel)) { return $true }
+        }
+    }
+    return $false
+}
+
 function Install-Studio {
     param($manifest, $receipt)
     # Resolve BEFORE the idempotent-skip compare: with version='latest' there is
@@ -569,9 +616,14 @@ function Install-Studio {
         Write-Err2 "Studio asset resolution failed: $($_.Exception.Message)"
         return $false
     }
+    # Skip only when the receipt's claim is corroborated by an app that is
+    # actually here. A stale receipt must cause a reinstall, not a skip.
     if ($receipt.studio -eq $manifest.studio.version) {
-        Write-Ok "Studio $($manifest.studio.version) already recorded as installed (idempotent skip)."
-        return $true
+        if (Test-StudioInstalled) {
+            Write-Ok "Studio $($manifest.studio.version) already installed (idempotent skip)."
+            return $true
+        }
+        Write-Warn2 "Receipt records Studio $($manifest.studio.version) but the app is not on this machine - reinstalling."
     }
     New-Item -ItemType Directory -Force -Path $script:TempRoot | Out-Null
     $exe = Join-Path $script:TempRoot $asset.name
@@ -729,11 +781,22 @@ function Invoke-Doctor {
         # The SDK seed is NOT skipped with it (see below).
         Write-Info 'Studio app check skipped (HPS_SKIP_STUDIO=1 - deps-only pass)'
     } else {
-        # Studio install marker.
-        if ($receipt.studio -eq $manifest.studio.version) {
+        # Studio app: the machine is the authority, the receipt is only the
+        # version claim. Reporting "installed" off the marker alone is what let
+        # a machine with no app at all reach ALL CHECKS PASSED (#514).
+        if (-not (Test-StudioInstalled)) {
+            if ($receipt.studio -eq $manifest.studio.version) {
+                $fail += "Studio: receipt records $($manifest.studio.version) but no install is present on this machine"
+            } else {
+                $fail += "Studio $($manifest.studio.version): not installed"
+            }
+        } elseif ($receipt.studio -eq $manifest.studio.version) {
             Write-Ok "Studio $($manifest.studio.version): installed"
         } else {
-            $fail += "Studio $($manifest.studio.version): not recorded as installed"
+            # Present, but not the version this manifest pins. Not a hard
+            # failure - the app runs - but the participant is on an old build
+            # and the in-app updater is the thing that should have moved them.
+            Write-Warn2 "Studio: installed, but the receipt does not record $($manifest.studio.version) (receipt: $(if ($receipt.studio) { $receipt.studio } else { 'none' }))"
         }
     }
 
