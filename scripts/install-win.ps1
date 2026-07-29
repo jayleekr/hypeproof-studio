@@ -1,9 +1,9 @@
-﻿# One-line installer for HypeProof Studio on Windows.
+# One-line installer for HypeProof Studio on Windows.
 #
 # Usage (family members run in PowerShell):
-#   iwr -useb https://hypeproof.ai/install.ps1 | iex
+#   irm https://hypeproof.ai/install.ps1 | iex
 # or:
-#   iwr -useb https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-win.ps1 | iex
+#   irm https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/main/install-win.ps1 | iex
 
 $ErrorActionPreference = "Stop"
 $Repo = "jayleekr/hypeproof-studio-releases"
@@ -38,8 +38,8 @@ try {
     # 3. SmartScreen warning notice
     Write-Host ""
     Write-Host "⚠  Windows SmartScreen may warn ('Windows protected your PC')." -ForegroundColor Yellow
-    Write-Host "   This is expected — the build is currently unsigned." -ForegroundColor Yellow
-    Write-Host "   Click 'More info' → 'Run anyway' to proceed." -ForegroundColor Yellow
+    Write-Host "   This is expected - the build is currently unsigned." -ForegroundColor Yellow
+    Write-Host "   Click 'More info' -> 'Run anyway' to proceed." -ForegroundColor Yellow
     Write-Host ""
 
     # 4. Run installer

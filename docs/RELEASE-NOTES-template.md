@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/jayleekr/hypeproof-studio-releases/
 Windows PowerShell:
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-win.ps1 | iex
+irm https://raw.githubusercontent.com/jayleekr/hypeproof-studio/main/scripts/install-win.ps1 | iex
 ```
 
 ## Included Assets

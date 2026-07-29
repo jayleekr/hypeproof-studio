@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
     install.ps1 - HypeProof Windows one-line bootstrap.
 
@@ -35,7 +35,7 @@
       -NoModifyPath         or  env INSTALLER_NO_MODIFY_PATH -> never touch PATH.
       -SkipStudio           or  env HPS_SKIP_STUDIO=1 -> skip the Studio APP
                             install (it is already here). Deps, the SDK seed and
-                            the doctor's SDK check all still run — a
+                            the doctor's SDK check all still run - a
                             click-installed Studio ships no claude.exe, so this
                             flag must not be the thing that keeps it missing.
 #>
@@ -47,7 +47,7 @@ param(
     [switch]$NonInteractive,
     [switch]$NoModifyPath,
     [switch]$DoctorOnly,
-    # "The Studio APP is already here — don't reinstall it." Needed when this
+    # "The Studio APP is already here - don't reinstall it." Needed when this
     # script runs from INSIDE a running Studio (the coach's shell):
     # Install-Studio would try to replace the very app executing it.
     #
@@ -57,7 +57,7 @@ param(
     # "환경 세팅 점검" unable to supply the one piece those participants lacked,
     # and made doctor pass on a machine that would silently run proxy-only.
     # install.sh still gates both behind its flag (install.sh:477,512); that is
-    # a known divergence, tracked separately — macOS never reaches this path
+    # a known divergence, tracked separately - macOS never reaches this path
     # because workshop-setup only runs the installer on Windows.
     [switch]$SkipStudio,
     # Remote manifest refresh is best-effort (falls back to the embedded pins).
@@ -127,7 +127,7 @@ $EMBEDDED_MANIFEST = [ordered]@{
         asset_glob_fallback = '*Setup-x64-*.exe'
     }
     sdk = [ordered]@{
-        # SDK seeding is delegated to the canonical scripts/seed-sdk-binary.ps1 —
+        # SDK seeding is delegated to the canonical scripts/seed-sdk-binary.ps1 -
         # the single source of truth for the platform package, the pinned version
         # (0.3.207), the sha512 table, and the runtime-trusted marker schema
         # (sdkVersion/size/tarballSha512, checked by isSeededBinaryTrusted).
@@ -164,20 +164,62 @@ function Sync-ManifestVersions {
 # ----------------------------------------------------------------------------
 # 3. Receipt (idempotency ledger)
 # ----------------------------------------------------------------------------
+# Windows PowerShell 5.1's ConvertFrom-Json deserializes EVERY JSON object into
+# a PSCustomObject and has NO -AsHashtable (that switch is 6.0+; 5.1's parameter
+# set is InputObject + common params only). The receipt's `installed` member is
+# used as a dictionary -- `$receipt.installed[$tool.id] = ...` in Ensure-Tool --
+# and a PSObject has no set_Item, so that assignment throws
+#   "Unable to index into an object of type System.Management.Automation.PSObject"
+# Result: the FIRST run (fresh `installed = @{}` hashtable) worked and EVERY
+# re-run died on the first manifest tool (git), before winget, before the Studio
+# install, before the SDK seed and before the doctor -- i.e. the installer's own
+# advertised remedy ("Re-run this installer (idempotent)", Invoke-Doctor) was a
+# dead end, because the doctor writes a receipt on every exit path including
+# -DoctorOnly. (-DoctorOnly never calls Ensure-Tool, which is why it kept
+# working and hid this.)
+#
+# Same shape mismatch, second face: a legacy/partial receipt deserializes to a
+# PSCustomObject that simply LACKS a member, and under `Set-StrictMode -Version
+# Latest` even reading `$receipt.installed` throws PropertyNotFoundStrict, while
+# `$receipt.arch = $arch` (Main) throws "The property 'arch' cannot be found".
+#
+# So normalize ONCE, here, into exactly the shape the fresh receipt has, instead
+# of type-testing at every use site (:274,:290,:383,:409,:531,:552,:594,:637,:744).
+function ConvertTo-ReceiptMap($value) {
+    $map = @{}
+    if ($null -eq $value) { return $map }
+    if ($value -is [System.Collections.IDictionary]) {
+        foreach ($k in @($value.Keys)) { $map[[string]$k] = $value[$k] }
+        return $map
+    }
+    foreach ($p in @($value.PSObject.Properties)) { $map[$p.Name] = $p.Value }
+    return $map
+}
+
+# Strict-mode-safe field read: returns $default when the receipt on disk is
+# missing that member (legacy/partial file) or stored it as null.
+function Get-ReceiptField($obj, [string]$name, $default) {
+    if ($null -eq $obj) { return $default }
+    $prop = $obj.PSObject.Properties[$name]
+    if (-not $prop -or $null -eq $prop.Value) { return $default }
+    return $prop.Value
+}
+
 function Read-Receipt {
+    $raw = $null
     if (Test-Path $script:ReceiptPath) {
-        try { return (Get-Content -Raw -LiteralPath $script:ReceiptPath | ConvertFrom-Json) } catch { }
+        try { $raw = (Get-Content -Raw -LiteralPath $script:ReceiptPath | ConvertFrom-Json) } catch { $raw = $null }
     }
     return [pscustomobject]@{
-        schema     = 1
-        first_run  = (Get-Date).ToString('o')
-        last_run   = $null
-        os         = 'win32'
-        arch       = $null
-        installed  = @{}      # id -> version
-        path_edits = @()      # PATH fragments we have already added
-        studio     = $null    # installed studio version
-        sdk        = $null    # seeded sdk version
+        schema     = (Get-ReceiptField $raw 'schema' 1)
+        first_run  = (Get-ReceiptField $raw 'first_run' ((Get-Date).ToString('o')))
+        last_run   = (Get-ReceiptField $raw 'last_run' $null)
+        os         = (Get-ReceiptField $raw 'os' 'win32')
+        arch       = (Get-ReceiptField $raw 'arch' $null)
+        installed  = (ConvertTo-ReceiptMap (Get-ReceiptField $raw 'installed' $null))   # id -> version
+        path_edits = @(Get-ReceiptField $raw 'path_edits' @())                          # PATH fragments we have already added
+        studio     = (Get-ReceiptField $raw 'studio' $null)                             # installed studio version
+        sdk        = (Get-ReceiptField $raw 'sdk' $null)                                # seeded sdk version
     }
 }
 function Write-Receipt($r) {
@@ -207,6 +249,13 @@ function Get-Arch {
 # doctor's `& curl --version` threw a WebException and read as NOT FOUND. Every
 # Test-Command call site here is an executable (winget/wsl/git/$tool.cmd), so
 # restricting to Application is the correct contract.
+#
+# Two properties of -CommandType Application this relies on:
+#   - It still resolves Windows app-execution aliases (the 0-byte ReparsePoint
+#     stub at %LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe), which is what
+#     Ensure-Winget depends on.
+#   - Some names resolve to several applications (e.g. wsl.exe in System32 plus
+#     a WindowsApps alias); @(...)[0] takes the one PATH order would run.
 function Resolve-ToolCommand([string]$name) {
     $app = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue
     if ($app) { return @($app)[0] }
@@ -580,7 +629,7 @@ function Seed-Sdk {
     # here drifted (wrong package/version, and a marker schema the Studio runtime
     # would NOT trust), so we always defer to the canonical seeder instead.
 
-    # Already seeded + trusted from a prior run → idempotent skip.
+    # Already seeded + trusted from a prior run -> idempotent skip.
     $existing = Get-SeededSdk
     if ($existing) {
         $receipt.sdk = $existing.version
@@ -597,7 +646,7 @@ function Seed-Sdk {
         if (Test-Path $sib) { $seedScript = $sib }
     }
     # 2) Bootstrap path (irm | iex): fetch the seeder from the scripts raw base.
-    #    NOT derived from $ManifestUrl — the manifest and the seeders do not live
+    #    NOT derived from $ManifestUrl - the manifest and the seeders do not live
     #    in the same tree, and deriving it produced a 404. The seeder self-verifies
     #    the tarball sha512 against its own pinned table (fail-closed), so no extra
     #    integrity step is needed here.
@@ -675,7 +724,7 @@ function Invoke-Doctor {
     }
 
     if ($SkipStudio) {
-        # deps-only pass: the Studio APP is the caller's concern — the coach runs
+        # deps-only pass: the Studio APP is the caller's concern - the coach runs
         # this from inside a running Studio that click-install already provided.
         # The SDK seed is NOT skipped with it (see below).
         Write-Info 'Studio app check skipped (HPS_SKIP_STUDIO=1 - deps-only pass)'
@@ -693,14 +742,14 @@ function Invoke-Doctor {
     #
     # Checked in BOTH passes on purpose. This used to sit inside the else-branch,
     # resting on "click-install already provided a Studio that self-seeds its
-    # SDK" — a premise nothing implements: the native claude.exe is deliberately
+    # SDK" - a premise nothing implements: the native claude.exe is deliberately
     # excluded from the app bundle (verify-branding.sh fails the build if it
     # leaks in), and there is no in-app seeder yet. So a participant who
     # installed via the .exe and then ran the coach's "환경 세팅 점검"
-    # (workshop-setup skill → HPS_SKIP_STUDIO=1) got "doctor: ALL CHECKS PASSED"
+    # (workshop-setup skill -> HPS_SKIP_STUDIO=1) got "doctor: ALL CHECKS PASSED"
     # on a machine with no claude.exe. Studio then fell back to the proxy coach
-    # — no file/shell tools, an 8-iteration browser-loop cap instead of 60 SDK
-    # turns — silently (#476). Nobody in the room could tell.
+    # - no file/shell tools, an 8-iteration browser-loop cap instead of 60 SDK
+    # turns - silently (#476). Nobody in the room could tell.
     $seeded = Get-SeededSdk
     if ($seeded) {
         Write-Ok "SDK $($seeded.version): seeded + verified"
@@ -783,13 +832,13 @@ function Main {
     }
 
     # The SDK seed runs in BOTH passes. HPS_SKIP_STUDIO means "the app is already
-    # here" — it does NOT mean the native claude.exe is: a click-installed
+    # here" - it does NOT mean the native claude.exe is: a click-installed
     # (.exe) Studio ships without it, on purpose (verify-branding.sh fails the
     # build if the native package leaks into the bundle) and nothing seeds it
     # afterwards. Bundling the seed into the skip made the coach's own
     # "환경 세팅 점검" (workshop-setup skill, which runs this with
     # HPS_SKIP_STUDIO=1) the one path that could never fix the one thing those
-    # participants were missing. Seed-Sdk is idempotent — an already-seeded
+    # participants were missing. Seed-Sdk is idempotent - an already-seeded
     # machine short-circuits on the trusted marker, so re-running stays cheap
     # and safe, which is what the skill promises participants.
     Write-Head 'Seed native SDK binary (claude.exe)'
