@@ -12,8 +12,11 @@ import previewEnvContractMd from "../prompts/_preview-env-contract.md";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import previewEnvContractLiveServerMd from "../prompts/_preview-env-contract-live-server.md";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
-import browserControlContractMd from "../prompts/_browser-control-contract.md";
+import browserControlContractProxyMd from "../prompts/_browser-control-contract-proxy.md";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import browserControlContractSdkMd from "../prompts/_browser-control-contract-sdk.md";
 import { BROWSER_TOOLS } from "./browser-tools.ts";
+import { isMinorCohort } from "./moderation.ts";
 import { resolveSkills } from "../skills/index.ts";
 
 // A polished single-file game (gradient bg, 3 states, score, juice) plus the
@@ -314,6 +317,58 @@ function imageUrlToAnthropicImage(url: string): AnthropicImageBlock | null {
 }
 
 /**
+ * Which coach runtime this request is being served for (#520).
+ *
+ * It is the ROUTE, not the profile, that decides: `/v1/chat/completions` +
+ * `/v1/messages` differ in who owns the tool list, so the same cohort profile
+ * can produce two different tool sets. `profile.coach_runtime` is only a
+ * *request* from the cohort author (and the client can be overridden by a
+ * machine-scoped setting), so it is not the ground truth here.
+ *
+ *  - "proxy" — lib/translate.ts, /v1/chat. The WORKER injects the tools
+ *    (BROWSER_TOOLS, browser-tools.ts) and the extension host executes them
+ *    via CDP.
+ *  - "sdk"   — routes/messages.ts, the Anthropic-native gateway (#282). The
+ *    CLIENT owns the tool list; the worker passes `tools` through untouched.
+ *    Browser capability arrives as in-process MCP tools (browserMcp.ts).
+ */
+export type CoachRuntime = "proxy" | "sdk";
+
+/**
+ * The browser-tool contract for this runtime, or "" when the runtime grants no
+ * browser tools at all.
+ *
+ * #520 — the two runtimes hold DIFFERENT tool sets, so they must not be taught
+ * the same contract. Before this split, the proxy contract (navigate / back /
+ * forward / dialog) was injected on both paths, so the SDK coach learned four
+ * tools it does not have and never learned the two it does (`browser_open`,
+ * `live_preview_start`).
+ *
+ * The gates differ too, and deliberately mirror where each runtime's tools
+ * actually come from:
+ *  - proxy → `browser_control.enabled`, the same flag that injects
+ *    BROWSER_TOOLS below (translate(), "worker-defined browser control tools").
+ *  - sdk   → `sdk_tools.browser`, the same flag `permittedMcpToolsFor()`
+ *    (sdkCoachHelpers.ts) reads, minus minors. The client strips browser MCP
+ *    tools for minor tiers regardless of the flag (#306/#318), so teaching the
+ *    contract there would recreate exactly this bug for kids cohorts. Mirrored
+ *    here, fail-closed: an unknown tier counts as minor.
+ */
+function browserContractFor(profile: Profile, runtime: CoachRuntime): string {
+  if (runtime === "sdk") {
+    if (profile.sdk_tools?.browser !== true) return "";
+    // Mirrors isMinorTier() in sdkCoachHelpers.ts — keep the tier list in sync.
+    const workshopTier =
+      profile.game.template_tier === "search-webapp" || profile.game.template_tier === "website";
+    if (!workshopTier || isMinorCohort(profile)) return "";
+    return browserControlContractSdkMd as unknown as string;
+  }
+  return profile.browser_control?.enabled === true
+    ? (browserControlContractProxyMd as unknown as string)
+    : "";
+}
+
+/**
  * The cached/static system prefix = profile system prompt + preview-env
  * contract + bundled skills (#168 M1) + the tier's skeleton library. Identical
  * text for every user in a cohort, so prompt caching kicks in across the
@@ -327,7 +382,7 @@ function imageUrlToAnthropicImage(url: string): AnthropicImageBlock | null {
  *  3. skills — behavioral how-to (e.g., how to coach)
  *  4. skeleton library — raw HTML templates the behavior fills in
  */
-function buildCachedPrefix(profile: Profile): string {
+function buildCachedPrefix(profile: Profile, runtime: CoachRuntime = "proxy"): string {
   const skillsMd = resolveSkills(profile.skills);
   // #278 Phase 1 — live_server cohorts get a relaxed contract: a real
   // http://127.0.0.1 origin (native browser), so multi-file / relative paths /
@@ -338,12 +393,10 @@ function buildCachedPrefix(profile: Profile): string {
     profile.preview?.type === "live_server"
       ? (previewEnvContractLiveServerMd as unknown as string)
       : (previewEnvContractMd as unknown as string);
-  // #278 Phase 3 — teach the coach the browser tools + discipline, only for
-  // cohorts that opted into browser_control.
-  const browserContract =
-    profile.browser_control?.enabled === true
-      ? (browserControlContractMd as unknown as string)
-      : "";
+  // #278 Phase 3 / #520 — teach the coach the browser tools + discipline. The
+  // contract is RUNTIME-SPECIFIC because the tool sets are: see
+  // browserContractFor().
+  const browserContract = browserContractFor(profile, runtime);
   const sections = [
     profile.system_prompt,
     previewContract,
@@ -359,15 +412,25 @@ function buildCachedPrefix(profile: Profile): string {
  * (system prompt + contracts + skills + skeletons) followed by the uncached
  * per-user coach tail. Shared by translate() (OpenAI-compat /v1/chat path)
  * and routes/messages.ts (Anthropic-native gateway, #282) so both paths
- * inject byte-identical system prompts — the client-supplied `system` never
- * survives on either route.
+ * inject the same cohort prompt — the client-supplied `system` never survives
+ * on either route.
+ *
+ * #520 — the ONE part that is deliberately not byte-identical is the browser
+ * contract: each runtime is taught the tools it actually has. Callers must
+ * pass their `runtime`; the "proxy" default keeps the pre-#520 behavior for
+ * any path that has no browser tools either way.
  */
 export function buildAnthropicSystemBlocks(
   profile: Profile,
   coach: CoachContext = {},
+  runtime: CoachRuntime = "proxy",
 ): AnthropicSystemBlock[] {
   const systemBlocks: AnthropicSystemBlock[] = [
-    { type: "text", text: buildCachedPrefix(profile), cache_control: { type: "ephemeral" } },
+    {
+      type: "text",
+      text: buildCachedPrefix(profile, runtime),
+      cache_control: { type: "ephemeral" },
+    },
   ];
   const coachTail = buildCoachTail(coach);
   if (coachTail) {
