@@ -237,6 +237,47 @@ function makeHost(initial = null) {
   assert.equal((await resolveAlreadyOpen(dumb, "http://127.0.0.1:5432/")).alreadyOpen, false);
 }
 
+// #519 — openPages: 슬롯이 둘이므로 "지금 보는 페이지" 하나로는 부족하다.
+{
+  // 코치는 정답지를 보는 중이고(currentPage), 참가자 결과물은 다른 슬롯에 떠 있다.
+  const base = {
+    openBrowser: async () => {},
+    screenshot: async () => null,
+    startLivePreview: async () => null,
+    currentPage: async () => ({ url: "https://boaclinic.com/", title: "보아치과" }),
+  };
+  const twoSlots = {
+    ...base,
+    openPages: async () => [
+      { url: "http://127.0.0.1:5432/", title: "내 홈페이지" },
+      { url: "https://boaclinic.com/", title: "보아치과" },
+    ],
+  };
+  // 양성 대조군 — 다른 슬롯에 이미 떠 있으면 모달 없이 통과해야 한다.
+  assert.equal((await resolveAlreadyOpen(twoSlots, "http://127.0.0.1:5432")).alreadyOpen, true,
+    "다른 슬롯에 이미 떠 있는 페이지에 승인 모달이 또 뜨면 안 된다");
+  assert.equal((await resolveAlreadyOpen(twoSlots, "https://boaclinic.com/")).alreadyOpen, true);
+
+  // 음성 대조군 — 안 떠 있는 주소는 여전히 모달을 거친다(게이트 우회 금지).
+  assert.equal((await resolveAlreadyOpen(twoSlots, "https://boaclinic.com/vision")).alreadyOpen, false);
+  assert.equal((await resolveAlreadyOpen(twoSlots, "http://127.0.0.1:5432/about.html")).alreadyOpen, false);
+  // 정책 위반은 openPages 가 있어도 절대 통과 못 한다.
+  assert.equal((await resolveAlreadyOpen(twoSlots, "javascript:alert(1)")).alreadyOpen, false);
+
+  // openPages 없는 호스트는 예전 동작(currentPage 비교) 그대로 — 능력은 optional.
+  assert.equal((await resolveAlreadyOpen(base, "http://127.0.0.1:5432")).alreadyOpen, false);
+  assert.equal((await resolveAlreadyOpen(base, "https://boaclinic.com/")).alreadyOpen, true);
+
+  // 조회가 던지거나 이상한 값을 주면 '모름' → currentPage 폴백 (짐작하지 않는다).
+  const broken = { ...base, openPages: async () => { throw new Error("탭 조회 실패"); } };
+  assert.equal((await resolveAlreadyOpen(broken, "https://boaclinic.com/")).alreadyOpen, true);
+  assert.equal((await resolveAlreadyOpen(broken, "http://127.0.0.1:5432")).alreadyOpen, false);
+  const junk = { ...base, openPages: async () => null };
+  assert.equal((await resolveAlreadyOpen(junk, "https://boaclinic.com/")).alreadyOpen, true);
+
+  console.log("✓ #519: openPages — 열린 탭 전부와 비교(슬롯 2개), 미지원/실패는 예전 동작으로 폴백");
+}
+
 // 탭이 아예 없으면(null) 열어야 한다 + 상태 줄은 "없음".
 {
   const { factory, registered } = makeFactory();

@@ -95,36 +95,109 @@ const { safeNavigateUrl, quadCenter, buildAxSnapshot, normalizeBrowserUrl, isSam
 
 console.log("All browser-control-helpers smoke tests passed.");
 
-// ─── coachTabsToClose — 코치 브라우징 탭을 하나로 유지한다 ───────────────────
+// ─── planCoachBrowserTabs — 슬롯당 탭 하나, 슬롯 간 불간섭 (#519) ────────────
 {
-  const { coachTabsToClose } = await import("../src/browserControlHelpers.ts");
+  const { planCoachBrowserTabs, coachTabSlot } = await import("../src/browserControlHelpers.ts");
+
+  // 슬롯 판정 — 루프백은 결과물, 나머지는 참고.
+  assert.equal(coachTabSlot("http://127.0.0.1:51884/about.html"), "preview");
+  assert.equal(coachTabSlot("http://localhost:3000/"), "preview");
+  assert.equal(coachTabSlot("127.0.0.1:8080"), "preview", "스킴 없이 와도 루프백이다");
+  assert.equal(coachTabSlot("https://boaclinic.com/"), "reference");
+  assert.equal(coachTabSlot("file:///tmp/x.html"), "reference");
 
   // 실사용에서 실제로 쌓였던 조합: 프리뷰 + 보아치과 2개 + 404
   const tabs = [
-    "http://127.0.0.1:51884/index.html",   // 0 라이브 프리뷰
+    "http://127.0.0.1:51884/index.html",   // 0 라이브 프리뷰 (preview 슬롯)
     "https://boaclinic.com/",              // 1
     "https://boaclinic.com/about",         // 2
     "https://boaclinic.com/about-us",      // 3 (404)
   ];
-  // 다음에 /vision 을 연다 → 프리뷰만 남기고 바깥 탭 3개는 정리
-  assert.deepEqual(coachTabsToClose(tabs, "https://boaclinic.com/vision"), [1, 2, 3]);
+  // 바깥 주소로 간다 → 참고 슬롯 첫 탭을 재사용, 나머지 참고 탭만 정리.
+  // 프리뷰(0)는 목록에 없다 — 다른 슬롯은 건드리지 않는다.
+  assert.deepEqual(planCoachBrowserTabs(tabs, "https://boaclinic.com/vision"),
+    { reuse: 1, close: [2, 3] });
 
-  // 이미 열려 있는 주소로 가면 그 탭은 남긴다 (재사용 대상)
-  assert.deepEqual(coachTabsToClose(tabs, "https://boaclinic.com/about"), [1, 3]);
+  // 이미 열려 있는 주소로 가면 **그 탭**을 고른다 (이동조차 필요 없다)
+  assert.deepEqual(planCoachBrowserTabs(tabs, "https://boaclinic.com/about"),
+    { reuse: 2, close: [1, 3] });
 
-  // 음성 대조군 — 루프백은 어떤 경우에도 닫지 않는다
-  for (const preview of [
-    "http://127.0.0.1:51884/",
-    "http://localhost:3000/index.html",
-    "http://127.0.0.1:8080/a/b.html",
-  ]) {
-    assert.deepEqual(coachTabsToClose([preview], "https://example.com"), [],
-      `루프백을 닫으면 안 된다: ${preview}`);
+  // ── 회귀: 루프백 하위 페이지 (#519 주 원인) ──────────────────────────────
+  // 전신 coachTabsToClose 는 루프백을 정리 대상에서 통째로 뺐고, 재사용 개념이
+  // 없어 4번 탐색에 탭 4개가 쌓였다. 이제 프리뷰 탭 하나를 계속 이동시킨다.
+  assert.deepEqual(
+    planCoachBrowserTabs(["http://127.0.0.1:51884/"], "http://127.0.0.1:51884/about.html"),
+    { reuse: 0, close: [] },
+    "결과물 하위 페이지는 프리뷰 탭을 이동시켜 본다 — 새 탭이 아니다",
+  );
+  // 이미 쌓여 있던 레거시 프리뷰 탭들은 하나만 남기고 정리된다.
+  assert.deepEqual(
+    planCoachBrowserTabs(
+      ["http://127.0.0.1:51884/", "http://127.0.0.1:51884/about.html", "http://127.0.0.1:51884/contact.html"],
+      "http://127.0.0.1:51884/about.html",
+    ),
+    { reuse: 1, close: [0, 2] },
+  );
+
+  // ── 양성 대조군: 두 슬롯은 공존해야 한다 ────────────────────────────────
+  // 커리큘럼이 "정답지와 내 결과물을 비교"를 요구한다(코호트 프롬프트 :107-109).
+  // 전신은 다음 주소가 루프백일 때도 바깥 탭을 전부 닫아서 정답지를 죽였다.
+  const both = ["http://127.0.0.1:51884/", "https://boaclinic.com/"];
+  assert.deepEqual(planCoachBrowserTabs(both, "http://127.0.0.1:51884/about.html"),
+    { reuse: 0, close: [] }, "프리뷰로 이동해도 정답지 탭은 살아 있어야 한다");
+  assert.deepEqual(planCoachBrowserTabs(both, "https://boaclinic.com/vision"),
+    { reuse: 1, close: [] }, "정답지로 이동해도 결과물 탭은 살아 있어야 한다");
+
+  // ── 음성 대조군: 슬롯이 비어 있으면 새로 연다 ───────────────────────────
+  assert.deepEqual(planCoachBrowserTabs([], "https://example.com"), { reuse: null, close: [] });
+  assert.deepEqual(planCoachBrowserTabs([undefined, ""], "https://example.com"),
+    { reuse: null, close: [] }, "빈 값은 재사용 대상이 아니다");
+  assert.deepEqual(planCoachBrowserTabs(["http://127.0.0.1:51884/"], "https://example.com"),
+    { reuse: null, close: [] }, "참고 슬롯이 비었으면 프리뷰를 뺏지 않고 새로 연다");
+
+  console.log("✓ planCoachBrowserTabs: 슬롯당 하나 재사용 · 잉여만 정리 · 다른 슬롯 불간섭");
+}
+
+// ─── 탭 개수 회귀 그물 — 아무리 탐색해도 슬롯 수(2)를 넘지 않는다 (#519) ─────
+// 이 스위트가 e2e 없이 잡을 수 있는 유일한 누적 회귀다. 순수 함수만으로 host의
+// openBrowser 상태 전이(닫기 → 재사용 or 새 탭)를 그대로 재현한다.
+{
+  const { planCoachBrowserTabs } = await import("../src/browserControlHelpers.ts");
+
+  /** host.openBrowser 한 번의 탭 목록 전이. 구현과 같은 순서: 닫고 → 이동 or 열기. */
+  function step(tabs, url) {
+    const plan = planCoachBrowserTabs(tabs, url);
+    const next = tabs.filter((_, i) => !plan.close.includes(i));
+    if (plan.reuse === null) return [...next, url];          // 새 탭
+    const reuseUrl = tabs[plan.reuse];
+    return next.map((u) => (u === reuseUrl ? url : u));      // 기존 탭을 이동
   }
 
-  // 빈 값·빈 목록은 아무것도 닫지 않는다
-  assert.deepEqual(coachTabsToClose([], "https://example.com"), []);
-  assert.deepEqual(coachTabsToClose([undefined, ""], "https://example.com"), []);
+  const base = "http://127.0.0.1:51884";
+  const walk = [
+    `${base}/`,
+    "https://boaclinic.com/",
+    `${base}/about.html`,
+    "https://boaclinic.com/about",
+    `${base}/contact.html`,
+    `${base}/about.html`,               // 재방문
+    "https://boaclinic.com/vision",
+    `${base}/`,
+  ];
+  let tabs = [];
+  for (const url of walk) {
+    tabs = step(tabs, url);
+    assert.ok(tabs.length <= 2, `탐색 ${url} 뒤 탭이 ${tabs.length}개 — 슬롯 수(2)를 넘었다`);
+  }
+  // 마지막 상태: 결과물 하나 + 정답지 하나, 각각 마지막으로 간 주소.
+  assert.deepEqual(tabs.sort(), ["http://127.0.0.1:51884/", "https://boaclinic.com/vision"]);
 
-  console.log("✓ coachTabsToClose: 프리뷰는 지키고 · 재사용 대상은 남기고 · 나머지만 정리");
+  // 프리뷰만 계속 도는 경우 (주 원인 시나리오) — 끝까지 탭 1개.
+  let only = [];
+  for (const p of ["/", "/about.html", "/contact.html", "/about.html", "/pricing.html"]) {
+    only = step(only, `${base}${p}`);
+    assert.equal(only.length, 1, `결과물 탐색은 탭 1개여야 한다 (${p} 뒤 ${only.length}개)`);
+  }
+
+  console.log("✓ 탭 누적 회귀: 8회 혼합 탐색 후에도 탭 2개 · 결과물 단독 탐색은 1개");
 }

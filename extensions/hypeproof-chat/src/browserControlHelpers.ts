@@ -76,36 +76,67 @@ export function originOfUrl(input: string): string | null {
 }
 
 /**
- * 코치가 새 주소를 열 때 **닫아야 할 탭**을 고른다.
+ * 코치 브라우징의 **슬롯**. 두 개뿐이고, 서로를 절대 침범하지 않는다.
  *
- * 왜. `openBrowser` 에는 탭 재사용이 전혀 없어서 부를 때마다 새 탭이 열렸다.
- * 2026-07-26 실사용에서 `보아치과 / 보아치과 / Not Found(404)` 가 쌓였다 —
- * 404 는 코치가 서브페이지 URL 을 찍어보다 틀린 것이다. 라이브 프리뷰 쪽
- * (`startLivePreview`)은 재사용·정리 로직이 꼼꼼한데 이쪽만 방치돼 있었다.
- *
- * 쌓인 탭은 화면만 어지럽히는 게 아니다. 스크린샷 도구가
- * `vscode.window.activeBrowserTab` 을 쓰므로 "활성 탭"이 코치가 방금 연 탭이
- * 아닐 수 있다 — 간헐적 스크린샷 실패의 유력 후보다.
- *
- * 규칙:
- *   - 루프백(라이브 프리뷰)은 **절대 닫지 않는다.** 학생 결과물을 보여 주는
- *     창이고 수명 관리는 startLivePreview 의 몫이다.
- *   - 이제 열려는 주소와 같은 탭도 닫지 않는다 (그건 재사용 대상이다).
- *   - 나머지 바깥 주소 탭은 닫는다 → 코치 브라우징 탭이 항상 1개로 유지된다.
+ * 왜 둘인가: 카피클론 커리큘럼이 "정답지와 내 결과물을 **비교**"를 요구한다
+ * (`prompts/boah-dental-director-copyclone-2026-s1.md:107-109`). 한 탭으로 합치면
+ * 나란히 볼 수가 없다.
  */
-export function coachTabsToClose(
+export type CoachTabSlot = "preview" | "reference";
+
+/** 이 주소가 어느 슬롯에 속하나. 루프백 = 학생 결과물, 나머지 = 참고 사이트. */
+export function coachTabSlot(url: string): CoachTabSlot {
+  return isLoopbackUrl(url) ? "preview" : "reference";
+}
+
+/** `planCoachBrowserTabs` 의 결과 — 어느 탭을 재사용하고 어느 탭을 닫을지. */
+export interface CoachTabPlan {
+  /** 이동(CDP navigate)시킬 기존 탭의 인덱스. null 이면 새 탭을 하나 연다. */
+  reuse: number | null;
+  /** 정리할 탭 인덱스 (같은 슬롯의 잉여분만). */
+  close: number[];
+}
+
+/**
+ * 코치가 새 주소로 갈 때 **어느 탭을 이동시키고 어느 탭을 닫을지** 정한다 (#519).
+ *
+ * 전신은 `coachTabsToClose` 였다. 그 함수는 "바깥 주소 탭 1개 유지"만 보장했고,
+ * 두 군데가 틀려 있었다 (2026-08-01 대조군 관측):
+ *
+ *   1. 루프백을 정리 대상에서 **통째로** 뺐다. "루프백 = 라이브 프리뷰 하나"라는
+ *      가정이었는데, 코치가 결과물의 하위 페이지(`/about.html`, `/contact.html`)를
+ *      돌아다니는 순간 깨진다 — 4번 탐색에 탭 4개가 쌓였다. 같은 URL 재방문조차
+ *      중복됐다(#415 dedup 은 **활성** 탭에만 걸리므로 여기까지 못 온다).
+ *   2. 다음 주소가 루프백일 때도 **바깥 주소 탭을 전부 닫았다.** 참가자가 보던
+ *      정답지가 코치의 프리뷰 탐색 한 번에 사라진다 — 커리큘럼이 요구하는 "나란히
+ *      비교"가 코드에서 깨져 있었다.
+ *
+ * 새 규칙 — 슬롯당 탭 하나, 슬롯 간 불간섭:
+ *   - 같은 슬롯에 탭이 있으면 **그 탭을 재사용**한다(닫고 새로 여는 게 아니라
+ *     CDP 로 이동 → 탭·컬럼이 늘지 않고 페이지 히스토리가 살아 있다).
+ *     같은 URL 인 탭이 있으면 그것을 우선 고른다.
+ *   - 같은 슬롯의 **잉여** 탭만 닫는다(이미 쌓인 레거시 정리).
+ *   - **다른 슬롯 탭은 건드리지 않는다.** 정답지와 결과물은 공존해야 한다.
+ *
+ * 결과적으로 코치 탐색이 몇 번이든 탭 총수는 슬롯 수(2)를 넘지 않는다.
+ */
+export function planCoachBrowserTabs(
   tabUrls: readonly (string | undefined)[],
   nextUrl: string,
-): number[] {
-  const out: number[] = [];
+): CoachTabPlan {
+  const slot = coachTabSlot(nextUrl);
+  const sameSlot: number[] = [];
   for (let i = 0; i < tabUrls.length; i++) {
     const u = tabUrls[i];
     if (!u) continue;
-    if (isLoopbackUrl(u)) continue;
-    if (isSameBrowserUrl(u, nextUrl)) continue;
-    out.push(i);
+    if (coachTabSlot(u) === slot) sameSlot.push(i);
   }
-  return out;
+  if (sameSlot.length === 0) return { reuse: null, close: [] };
+  // 같은 주소인 탭이 있으면 그것을 재사용한다 — 이동조차 필요 없는 경우가 되고,
+  // 참가자가 보고 있던 화면을 그대로 둔다.
+  const exact = sameSlot.find((i) => isSameBrowserUrl(tabUrls[i] as string, nextUrl));
+  const reuse = exact ?? sameSlot[0];
+  return { reuse, close: sameSlot.filter((i) => i !== reuse) };
 }
 
 /**

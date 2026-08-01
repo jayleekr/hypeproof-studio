@@ -39,7 +39,43 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export class BrowserControl {
   private session: CdpSession | undefined;
   private tabForSession: vscode.BrowserTab | undefined;
+  private targetTab: vscode.BrowserTab | undefined;
   private refs = new Map<string, number>();
+
+  /**
+   * 코치가 운전할 탭을 **고정**한다 (#519).
+   *
+   * 왜. 전에는 모든 도구가 `vscode.window.activeBrowserTab` 을 봤다. 그런데 그
+   * 값은 **활성 에디터가 브라우저일 때만** 세팅된다(mainThreadBrowsers 의
+   * `_syncActiveBrowserTab`). 참가자가 `index.html` 탭을 클릭하는 순간 코치는
+   * 자기가 방금 연 페이지를 "없다"고 보게 되고 — 중복 방지가 꺼지고, 검사 도구가
+   * "열린 탭이 없어요"로 실패한다.
+   *
+   * 탭 핸들을 들고 있으면 포커스와 무관하게 같은 페이지를 계속 운전할 수 있다.
+   * 이것이 `preserveFocus: true`(컬럼 갈라짐 방지)를 안전하게 켜기 위한 전제다.
+   */
+  setTargetTab(tab: vscode.BrowserTab | undefined): void {
+    if (this.targetTab === tab) return;
+    this.targetTab = tab;
+    // 대상이 바뀌면 이전 탭에 붙어 있던 세션·ref 는 무효다.
+    void this.session?.close().catch(() => {});
+    this.session = undefined;
+    this.tabForSession = undefined;
+    this.refs.clear();
+  }
+
+  /**
+   * 지금 운전 중인 탭. 고정 탭이 **아직 살아 있으면** 그것, 아니면 활성 탭.
+   * (고정 탭이 닫히면 `browserTabs` 에서 사라지므로 그것으로 생존을 판정한다.)
+   */
+  currentTab(): vscode.BrowserTab | undefined {
+    if (this.targetTab) {
+      const alive = (vscode.window.browserTabs ?? []).includes(this.targetTab);
+      if (alive) return this.targetTab;
+      this.targetTab = undefined; // 닫힌 탭은 잊는다
+    }
+    return vscode.window.activeBrowserTab;
+  }
 
   /** Route + run one tool call. Always resolves (errors become is_error results). */
   async execute(call: BrowserToolCall): Promise<BrowserToolResult> {
@@ -79,6 +115,7 @@ export class BrowserControl {
       this.session = undefined;
       this.tabForSession = undefined;
     }
+    this.targetTab = undefined;
     this.refs.clear();
   }
 
@@ -87,18 +124,23 @@ export class BrowserControl {
   private async navigate(rawUrl: string): Promise<BrowserToolResult> {
     const url = safeNavigateUrl(rawUrl);
     if (!url) return fail(`허용되지 않은 주소예요: ${rawUrl} (http/https/localhost/file만 가능)`);
-    const tab = vscode.window.activeBrowserTab;
+    const tab = this.currentTab();
     if (!tab) {
       // No tab yet — open one (this is the only tool that may create a tab).
-      await vscode.window.openBrowserTab(url, { viewColumn: vscode.ViewColumn.Beside });
+      // 열자마자 고정한다: 그래야 다음 호출부터 포커스와 무관하게 이 탭을 운전한다.
+      const opened = await vscode.window.openBrowserTab(url, {
+        viewColumn: vscode.ViewColumn.Beside,
+      });
+      this.setTargetTab(opened);
       await sleep(800);
     } else {
+      this.setTargetTab(tab);
       const s = await this.cdp();
       await s.send("Page.navigate", { url });
     }
     await this.waitLoad();
     this.refs.clear(); // navigation invalidates old refs
-    const active = vscode.window.activeBrowserTab;
+    const active = this.currentTab();
     return ok(`이동 완료 — ${active?.title || ""} (${active?.url || url})`);
   }
 
@@ -107,7 +149,7 @@ export class BrowserControl {
     const ax = await s.send("Accessibility.getFullAXTree", {});
     const { text, refs } = buildAxSnapshot(Array.isArray(ax?.nodes) ? ax.nodes : []);
     this.refs = refs;
-    const tab = vscode.window.activeBrowserTab;
+    const tab = this.currentTab();
     return ok(`URL: ${tab?.url ?? ""}\n제목: ${tab?.title ?? ""}\n\n${text}`);
   }
 
@@ -173,9 +215,9 @@ export class BrowserControl {
 
   // ---- internals -----------------------------------------------------------
 
-  /** Get (or re-establish) the CDP session for the active tab. */
+  /** Get (or re-establish) the CDP session for the tab we're driving (#519). */
   private async cdp(): Promise<CdpSession> {
-    const tab = vscode.window.activeBrowserTab;
+    const tab = this.currentTab();
     if (!tab) throw new Error("열린 브라우저 탭이 없어요. 먼저 browser_navigate로 페이지를 여세요.");
     if (this.session && this.tabForSession === tab) return this.session;
     if (this.session) await this.session.close().catch(() => {});
