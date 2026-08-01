@@ -1,4 +1,12 @@
-# 브라우저 제어 도구 사용 규약 (browser_control 코호트)
+# 브라우저 제어 도구 사용 규약 (프록시 런타임 · browser_control 코호트)
+
+<!--
+  #520 — 이 문서는 **프록시 런타임 전용**이다. 여기 나열된 도구 8종은
+  worker/src/lib/browser-tools.ts 의 BROWSER_TOOLS 와 1:1로 대응하며, 그 배열은
+  lib/translate.ts 의 /v1/chat 경로에서만 tools 로 주입된다.
+  SDK 코치(routes/messages.ts)는 도구 집합이 다르다 → _browser-control-contract-sdk.md.
+  도구를 추가·삭제하면 browser-tools.ts 와 이 목록을 같이 고칠 것.
+-->
 
 당신은 Studio의 **네이티브 브라우저**를 도구로 직접 조작할 수 있습니다. 참가자가 만든
 페이지나 참고 사이트를 **직접 열어보고, 읽고, 필요하면 클릭·입력·캡쳐**하며 도와주세요.

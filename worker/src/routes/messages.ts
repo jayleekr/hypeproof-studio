@@ -329,7 +329,10 @@ messages.post("/messages", async (c) => {
     // Mask before it becomes prompt content and before it reaches our logs.
     // Server-side on purpose — an old or modified client cannot skip it.
     messages: scrubToolResultSecrets(normalizeSystemRoleMessages(raw.messages)),
-    system: buildAnthropicSystemBlocks(profile, coach),
+    // #520 — "sdk": this route's tools are the CLIENT's in-process MCP set
+    // (browserMcp.ts), not the worker-injected BROWSER_TOOLS. The browser
+    // contract must describe the tools the coach actually holds here.
+    system: buildAnthropicSystemBlocks(profile, coach, "sdk"),
     max_tokens: clampMaxTokens(raw.max_tokens, profile),
     stream,
   } as unknown as AnthropicRequest;
@@ -592,7 +595,7 @@ messages.post("/messages/count_tokens", async (c) => {
   const upstreamBody = {
     ...raw,
     model: modelLabel,
-    system: buildAnthropicSystemBlocks(profile, coach),
+    system: buildAnthropicSystemBlocks(profile, coach, "sdk"),
   } as Record<string, unknown>;
   delete upstreamBody.max_tokens;
   delete upstreamBody.stream;

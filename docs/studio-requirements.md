@@ -267,10 +267,11 @@ dev-host 검증(자동화 셸 불가). REQ-D3(iframe 샌드박싱)은 live_serve
 | REQ-N1 | live_server 프리뷰 | `preview.type:"live_server"` 코호트는 iframe 대신 워크스페이스를 127.0.0.1로 서빙해 네이티브 브라우저로 열고, 저장 시 SSE로 자동 새로고침. path-traversal 거부 | U(liveServerHelpers) + 실기계 |
 | REQ-N2 | live_server 계약 완화 | live_server 코호트는 멀티파일·상대경로·same-origin fetch·스토리지 허용 계약을 받음(iframe 단일파일 계약 아님) | U(translate 분기) |
 | REQ-N3 | 페이지→코치(vision) | page_context+image_paste 코호트에서 "페이지를 코치에게"가 현재 탭 스크린샷+DOM을 코치에 전달. 미성년 코호트는 반드시 off | U(worker gate) + 실기계 |
-| REQ-N4 | 브라우저 tool 게이팅 | `browser_control` 켜진 코호트만 worker가 8개 브라우저 도구 + 사용 규약을 주입. 꺼지면 tool_use/tool_result 블록도 drop | U(translate) |
+| REQ-N4 | 브라우저 tool 게이팅 | `browser_control` 켜진 코호트만 worker가 8개 브라우저 도구 + **프록시용** 사용 규약을 주입. 꺼지면 tool_use/tool_result 블록도 drop. 규약 주입은 런타임별로 갈린다 — REQ-N8 | U(translate, browser-contract) |
 | REQ-N5 | CDP 실행기 핸드셰이크 | 실행기는 `Target.attachToTarget({flatten})` 후 sessionId로 모든 페이지 명령 라우팅(스파이크 확정). navigate URL은 스킴 화이트리스트(http/https/localhost/file) | U(cdpSession, browserControlHelpers) + 실기계 |
 | REQ-N6 | 자동실행 + 액션로그 | 코치의 브라우저 액션은 모달 없이 자동 실행되고, 채팅에 액션 로그(running→done/error)로 표시. tool 루프 scratch 턴은 영속 히스토리 미오염 | U + 실기계 |
 | REQ-N7 | 루프 안전 | agentic 루프는 per-cohort `max_iterations` 캡 + abort 준수. asset_score는 최종(비-tool) 턴만 기록 | U |
+| REQ-N8 | 브라우저 규약은 런타임별 (#520) | 두 런타임은 **도구 집합이 다르다** — 프록시(/v1/chat, worker가 `BROWSER_TOOLS` 8종 주입: navigate·read·screenshot·click·type·back·forward·dialog) vs SDK 코치(/v1/messages, 클라이언트가 `MCP_BROWSER_TOOLS` 6종 소유: open·screenshot·live_preview_start·read·click·type). 따라서 시스템 프롬프트에 주입되는 사용 규약도 갈린다: `_browser-control-contract-proxy.md`(게이트 `browser_control.enabled`) / `_browser-control-contract-sdk.md`(게이트 `sdk_tools.browser` **AND** 성인 워크숍 tier — 클라이언트가 미성년에게 브라우저 MCP 도구를 벗기는 #306/#318 posture 를 미러링). 판정은 **라우트**가 소유한다(`buildAnthropicSystemBlocks(profile, coach, runtime)`) — `profile.coach_runtime` 은 요청일 뿐 실제 도구 소유자가 아니다. 계약 문서와 각 런타임의 도구 목록은 **양방향으로** 일치해야 한다(없는 도구를 가르치지 않고, 가진 도구를 빠뜨리지 않는다) | U(`worker/test/browser-contract`) |
 
 ## O. 미성년 안전·컴플라이언스 (#320)
 
