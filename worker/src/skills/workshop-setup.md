@@ -25,7 +25,7 @@ C:\ 로 시작              → Windows. 아래 절차를 실행한다
 > 터미널에 붙여넣기 한 번이면 전부 설치됩니다. 막히면 스태프를 불러 주세요."
 >
 > 페이지 주소는 정확히 이것이다 — **다른 주소를 지어내지 마라**:
-> `https://hypeproof-ai.xyz/adult-edu/boa#download` (browser_open 으로 열어줘라)"
+> `https://hypeproof-ai.xyz/adult-edu/boa#download` (브라우저 도구가 있으면 직접 열어줘라)"
 >
 > 이유(참가자에게 설명할 필요는 없다): 새 맥은 설치 중 관리자 암호를 물어야
 > 하는데, 여기(앱 속 셸)서는 암호를 받을 수 없다. 터미널에서는 된다.
