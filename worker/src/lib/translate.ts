@@ -15,6 +15,8 @@ import previewEnvContractLiveServerMd from "../prompts/_preview-env-contract-liv
 import browserControlContractProxyMd from "../prompts/_browser-control-contract-proxy.md";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import browserControlContractSdkMd from "../prompts/_browser-control-contract-sdk.md";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import runtimeDegradedNoticeMd from "../prompts/_runtime-degraded-notice.md";
 import { BROWSER_TOOLS } from "./browser-tools.ts";
 import { isMinorCohort } from "./moderation.ts";
 import { resolveSkills } from "../skills/index.ts";
@@ -383,6 +385,50 @@ function browserContractFor(profile: Profile, runtime: CoachRuntime): string {
 }
 
 /**
+ * 코치가 **자기 능력을 알게** 하는 블록, 또는 "" (#476).
+ *
+ * 왜 필요한가: 클라이언트는 SDK 네이티브 바이너리를 못 찾으면 프록시 런타임으로
+ * 폴백한다(#387 — 미시딩 머신에서도 수업이 죽지 않게 하는 의도된 설계). 그런데
+ * 코호트 프롬프트와 스킬은 파일·셸이 있다는 전제로 쓰여 있다. 예:
+ * `boah-dental-director-copyclone-2026-s1.md` 는 "index.html 을 만들어
+ * **저장합니다**" 라고 지시하고, `github-repo`/`publish-homepage` 스킬은 통째로
+ * 셸 절차다. 도구가 0개인 코치가 그 역할을 자임하면 다음이 나온다(2026-07-27 실측):
+ *
+ *   "제가 위에서 코드를 채팅창에 붙여넣었는데, 그걸 직접 파일로 저장하는 작업을
+ *    빠뜨렸어요. Studio 워크스페이스에 index.html 로 저장해주시겠어요?"
+ *
+ * 망각이 아니라 `Write` 가 없었던 것이고, 참가자는 해결할 수 없는 요청을 받는다.
+ * #476 은 이 오진이 능력 상실 자체보다 비쌌다고 기록한다 — 이슈 3건(#470·#471·
+ * #472)이 같은 원인을 각각 다른 제품 결함으로 진단했다.
+ *
+ * **왜 여기(워커)인가:** ① #520 이후 런타임의 ground truth 는 **라우트**다 —
+ * 워커는 클라이언트에게 묻지 않고도 이 요청이 프록시 경로임을 안다. ② 프롬프트의
+ * 소유자가 워커다(REQ-M10). ③ 스킬 마크다운과 마찬가지로 **워커 배포만으로
+ * 반영**되어 앱 릴리스를 기다리지 않는다.
+ *
+ * **왜 사고 보고가 아니라 능력 설명인가:** 이 조건은 폴백 말고도 성립한다 —
+ * 강사가 `hypeproofChat.coachRuntime` 을 프록시로 고정한 경우다. 문구가 "SDK 를
+ * 못 찾았다"고 단정하면 그 경우에 거짓이 된다. 도구 목록만 말하면 언제나 참이다.
+ *
+ * 게이트가 `coach_runtime === "agent-sdk"` 인 이유: 애초에 프록시로 설계된
+ * 코호트(teaser·kids)는 프롬프트가 파일·셸을 약속하지 않으므로 정정할 것이
+ * 없다. 미성년은 워커가 의도적으로 프록시에 고정하는 쪽이라(chat.ts) 제외한다 —
+ * 그쪽은 degraded 가 아니라 설계다.
+ *
+ * 프롬프트 캐시: #520 이 이미 런타임별로 프리픽스를 둘로 갈라 놓았고, 이 블록은
+ * 그 두 변형 안에서만 달라지므로 **캐시 변형 수가 늘지 않는다.**
+ */
+function degradedRuntimeNoticeFor(profile: Profile, runtime: CoachRuntime): string {
+  if (runtime !== "proxy") return "";
+  if (profile.coach_runtime !== "agent-sdk") return "";
+  if (isMinorCohort(profile)) return "";
+  const t = profile.sdk_tools;
+  const grantsHostTools = t?.read === true || t?.write === true || t?.shell === true;
+  if (!grantsHostTools) return "";
+  return runtimeDegradedNoticeMd as unknown as string;
+}
+
+/**
  * The cached/static system prefix = profile system prompt + preview-env
  * contract + bundled skills (#168 M1) + the tier's skeleton library. Identical
  * text for every user in a cohort, so prompt caching kicks in across the
@@ -411,12 +457,17 @@ function buildCachedPrefix(profile: Profile, runtime: CoachRuntime = "proxy"): s
   // contract is RUNTIME-SPECIFIC because the tool sets are: see
   // browserContractFor().
   const browserContract = browserContractFor(profile, runtime);
+  // #476 — 능력 정정은 **스킬 뒤**에 온다. 스킬(github-repo·publish-homepage)이
+  // 셸 절차를 176줄에 걸쳐 가르치는데 그 앞에서 "셸이 없다"고 말하면, 뒤에 오는
+  // 긴 절차가 앞의 한 문단을 덮는다. 마지막에 두어 정정이 마지막 말이 되게 한다.
+  const degradedNotice = degradedRuntimeNoticeFor(profile, runtime);
   const sections = [
     profile.system_prompt,
     previewContract,
     browserContract,
     skillsMd,
     buildSkeletonLibrary(profile),
+    degradedNotice,
   ].filter((s) => s && s.length > 0);
   return sections.join("\n\n");
 }

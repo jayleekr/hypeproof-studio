@@ -69,6 +69,8 @@ import {
   extractCohortIdUnverified,
   browserToolLogLine,
   AiDisclosureGate,
+  COACH_DEGRADED_NOTICE,
+  sdkFallbackLogLine,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
@@ -96,6 +98,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private turnTimelines = new Map<string, TimelineState>();
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
+  /**
+   * #476 — agent-sdk → proxy 폴백을 참가자에게 알린 적이 있는가 (세션 1회).
+   *
+   * 매 턴 붙이지 않는 이유: 폴백은 그 머신에서 **계속** 일어난다(시드가 없으면
+   * 다음 턴도 마찬가지). 턴마다 같은 경고가 뜨면 두 번째부터는 아무도 안 읽고,
+   * 대화 기록이 경고로 덮인다. 능력 상실은 상태이지 사건이 아니다.
+   */
+  private fallbackNoticeShown = false;
+  /**
+   * #476 — 개발자용 진단 채널. 이전에는 폴백이 `console.warn` 한 줄이었는데,
+   * 확장에 `createOutputChannel` 이 **한 군데도 없어서** 그 줄은 어디에도 남지
+   * 않았다: 사고 당일 전 세션의 `exthost.log` 에서 `[coach]` 문자열이 0건이었다.
+   * 즉 사후에 "이 교실이 프록시로 돌았는가" 를 확인할 방법이 없었다.
+   */
+  private logChannel: vscode.OutputChannel | null = null;
   private cachedProfile: ResolvedProfile | null = null;
   private profileFetchPromise: Promise<ResolvedProfile | null> | null = null;
   /**
@@ -470,6 +487,40 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     } catch {
       // Non-fatal: preview still works even if the save fails.
     }
+  }
+
+  /**
+   * #476 — agent-sdk → proxy 폴백을 **세 대상에게** 남긴다.
+   *
+   * 1. 개발자 — 전용 출력 채널. 이전의 `console.warn` 은 확장에
+   *    `createOutputChannel` 이 한 군데도 없어 `exthost.log` 에도 안 남았고,
+   *    사고 당일 전 세션에서 `[coach]` 문자열이 0건이었다. 사후 확인 자체가
+   *    불가능했다. 사유 원문을 그대로 싣는다 — `SdkUnavailableError` 메시지가
+   *    해석 후보 4개를 이미 나열한다.
+   * 2. 참가자 — 대화 타임라인의 한 줄(세션 1회). 무엇이 안 되고 무엇이 되는지
+   *    같이 말한다.
+   * 3. 강사 — 별도 채널을 만들지 않았다. 학생 화면의 그 한 줄이 강사가 교실을
+   *    돌며 볼 수 있는 실물이고, 대화 기록에 남으므로(REQ-C17) 사후에도 보인다.
+   *    워커까지 신호를 보내 `/console` 에서 교실 단위로 보는 것은 별건으로 남긴다.
+   *
+   * 코치 자신에게 알리는 것은 **워커**가 한다 — `degradedRuntimeNoticeFor`
+   * (translate.ts). 런타임의 ground truth 가 라우트이고 프롬프트 소유자가
+   * 워커라서, 앱 릴리스 없이 배포만으로 반영된다.
+   */
+  private noteSdkFallback(reason: string, streamId: string): void {
+    this.logChannel ??= vscode.window.createOutputChannel("HypeProof Coach");
+    this.logChannel.appendLine(sdkFallbackLogLine(reason, new Date()));
+
+    // 세션 1회. 폴백은 그 머신에서 계속 일어나므로(시드가 없으면 다음 턴도
+    // 마찬가지) 매 턴 붙이면 두 번째부터 아무도 안 읽고 기록이 경고로 덮인다.
+    if (this.fallbackNoticeShown) return;
+    this.fallbackNoticeShown = true;
+    this.postToolLog(streamId, {
+      id: randomId(),
+      icon: "⚠️",
+      label: COACH_DEGRADED_NOTICE,
+      state: "error",
+    });
   }
 
   /**
@@ -1282,15 +1333,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         } catch (err) {
           if (!(err instanceof SdkUnavailableError)) throw err;
           // Pre-Phase-1: the SDK package isn't installed. Keep the classroom
-          // working — log for developers and fall back to the proxy runtime for
-          // this turn instead of showing the student a technical error.
-          console.warn(`[coach] ${err.message}`);
+          // working — fall back to the proxy runtime for this turn instead of
+          // showing the student a technical error.
+          //
+          // #476 — 폴백 자체는 유지하되(동작 변경 없음) **보이게** 한다. 이전에는
+          // `console.warn` 한 줄이 전부였고, 확장에 출력 채널이 없어 그 줄은
+          // 어디에도 남지 않았다: 학생도 강사도 개발자도 코치 자신도 능력이
+          // 사라진 걸 몰랐고, 그 오진이 이슈 3건(#470·#471·#472)을 만들었다.
           assistantText = "";
           assistantCitations.length = 0;
           revealed = false;
           // #503 — 텍스트를 버리면 타임라인도 같이 버린다. 안 그러면 폴백 전에
           // 찍힌 툴 줄만 히스토리에 남아 "말은 없고 행동만 있는" 턴이 된다.
           this.turnTimelines.set(streamId, timelineStart(emptyTimeline(), messageId, Date.now()));
+          // #476 — 안내는 이 리셋 **뒤에** 넣는다. 앞에 넣으면 방금 찍은 줄이
+          // 같이 지워져 웹뷰에만 남고 히스토리에는 안 남는다(창을 다시 열면 사라짐).
+          this.noteSdkFallback(err.message, streamId);
           // #371 — fall back to the browser-loop-aware runtime, NOT bare proxy,
           // so a browser_control cohort (copyclone) still opens the browser when
           // the SDK binary isn't seeded.
