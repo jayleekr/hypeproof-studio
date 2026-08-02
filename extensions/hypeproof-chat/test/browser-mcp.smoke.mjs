@@ -488,6 +488,50 @@ function makeHost(initial = null) {
     }
   }
 
+  // 양성 대조군 ② — **교정과 밀려남이 동시에** 일어나는 경우 (#507 + #526 합류).
+  //
+  // 성립한다: 라이브 서버가 58085 에 떠 있는데 코치가 3000 을 찍으면 주소가
+  // 교정되고(#507), 교정된 주소는 여전히 루프백이라 프리뷰 슬롯을 쓰므로 그
+  // 슬롯에 떠 있던 다른 페이지가 밀려난다(#526). 두 사실을 다 말해야 한다.
+  //
+  // **순서가 계약이다**: 교정이 먼저. 교정은 코치가 방금 한 행동의 *대상 자체*를
+  // 바꾸는 정보이고 밀려남은 그 부수 효과라, 뒤집으면 코치가 잘못된 대상 위에서
+  // 해석을 시작한다.
+  {
+    const opens = [];
+    const host = {
+      openBrowser: async (url) => {
+        opens.push(url);
+        return { replaced: { url: "http://127.0.0.1:58085/", title: "내 홈페이지" } };
+      },
+      screenshot: async () => null,
+      startLivePreview: async () => null,
+      currentPage: async () => null,
+      openPages: async () => [],
+      livePreviewUrl: async () => "http://127.0.0.1:58085/",
+    };
+    const res = await openOf(host).handler({ url: "http://127.0.0.1:3000/about.html" }, {});
+    assert.deepEqual(opens, ["http://127.0.0.1:58085/about.html"], "교정된 주소로 연다");
+    const text = res.content.map((c) => c.text).join("\n");
+
+    // #507 쪽이 살아 있는가
+    assert.ok(text.includes("3000"), "무엇을 고쳤는지 말한다 (#507)");
+    assert.ok(text.includes("58085"), "실제 주소를 말한다 (#507)");
+    // #526 쪽이 살아 있는가
+    assert.ok(text.includes("내 홈페이지"), "밀려난 페이지를 말한다 (#526)");
+    assert.ok(text.includes("이동했어요"), "밀려났다는 사실을 말한다 (#526)");
+
+    // 한쪽 문장만 남고 다른 쪽이 조용히 사라지는 회귀를 잡는다.
+    const correction = text.indexOf("이 아니라 실제 라이브 서버 주소로 열었어요");
+    const displacement = text.indexOf("같은 자리에 있던");
+    assert.ok(correction >= 0, "교정 문장이 통째로 사라지면 안 된다");
+    assert.ok(displacement >= 0, "밀려남 문장이 통째로 사라지면 안 된다");
+    assert.ok(
+      correction < displacement,
+      "교정이 먼저 읽혀야 한다 — 순서가 뒤집히면 코치가 잘못된 대상 위에서 해석한다",
+    );
+  }
+
   console.log("✓ #526: 슬롯이 하나뿐이라 밀려난 페이지를 결과가 숨기지 않는다 (슬롯 개수는 그대로)");
 }
 

@@ -3,8 +3,8 @@ import * as path from "path";
 import * as fs from "fs";
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
-import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
-import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
+import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
+import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
@@ -13,10 +13,11 @@ import {
   planCoachBrowserTabs,
   coachTabSlot,
   isSameBrowserUrl,
+  resolveLivePreviewUrl,
 } from "./browserControlHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
-import { BrowserControl } from "./browserControl";
+import { BrowserControl, type BrowserToolCall } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import { extractAgentMd } from "./agentHandoff";
 import {
@@ -68,6 +69,8 @@ import {
   extractCohortIdUnverified,
   browserToolLogLine,
   AiDisclosureGate,
+  COACH_DEGRADED_NOTICE,
+  sdkFallbackLogLine,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
@@ -95,8 +98,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private turnTimelines = new Map<string, TimelineState>();
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
+  /**
+   * #476 — agent-sdk → proxy 폴백을 참가자에게 알린 적이 있는가 (세션 1회).
+   *
+   * 매 턴 붙이지 않는 이유: 폴백은 그 머신에서 **계속** 일어난다(시드가 없으면
+   * 다음 턴도 마찬가지). 턴마다 같은 경고가 뜨면 두 번째부터는 아무도 안 읽고,
+   * 대화 기록이 경고로 덮인다. 능력 상실은 상태이지 사건이 아니다.
+   */
+  private fallbackNoticeShown = false;
+  /**
+   * #476 — 개발자용 진단 채널. 이전에는 폴백이 `console.warn` 한 줄이었는데,
+   * 확장에 `createOutputChannel` 이 **한 군데도 없어서** 그 줄은 어디에도 남지
+   * 않았다: 사고 당일 전 세션의 `exthost.log` 에서 `[coach]` 문자열이 0건이었다.
+   * 즉 사후에 "이 교실이 프록시로 돌았는가" 를 확인할 방법이 없었다.
+   */
+  private logChannel: vscode.OutputChannel | null = null;
   private cachedProfile: ResolvedProfile | null = null;
   private profileFetchPromise: Promise<ResolvedProfile | null> | null = null;
+  /**
+   * #381 — why the last profile fetch failed (null when it succeeded or was
+   * never attempted). Read by the token-entry command so a rejected paste gets
+   * a cause-specific sentence instead of one generic failure message.
+   */
+  private lastProfileFailure: ProfileFailure | null = null;
   // #278 — browser-page context queued by "페이지를 코치에게", prepended to the
   // NEXT turn's prompt only (history keeps the user's clean text).
   private pendingPageContext: string | null = null;
@@ -295,8 +319,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   invalidateProfile(): void {
     this.cachedProfile = null;
     this.profileFetchPromise = null;
+    this.lastProfileFailure = null;
     this.activeCohortId = null;
     this.assetScores?.resetAssetScores();
+  }
+
+  /** #381 — cause of the most recent failed profile fetch, if any. */
+  profileFailure(): ProfileFailure | null {
+    return this.lastProfileFailure;
   }
 
   /**
@@ -362,10 +392,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
     const token = await this.context.secrets.get(TOKEN_KEY);
-    if (!token) return null;
+    if (!token) {
+      this.lastProfileFailure = null;
+      return null;
+    }
 
-    this.profileFetchPromise = fetchProfile({ proxyUrl, token }).then(
-      async (p) => {
+    this.profileFetchPromise = fetchProfileResult({ proxyUrl, token }).then(
+      async (r) => {
+        // #381 — remember WHY, so the token-entry flow can say something the
+        // participant can act on instead of one generic "확인이 안 돼요".
+        this.lastProfileFailure = r.ok ? null : r.failure;
+        const p = r.ok ? r.profile : null;
         this.cachedProfile = p;
         this.profileFetchPromise = null;
         // #278 — gate the "페이지를 코치에게" toolbar button to opted-in cohorts.
@@ -450,6 +487,40 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     } catch {
       // Non-fatal: preview still works even if the save fails.
     }
+  }
+
+  /**
+   * #476 — agent-sdk → proxy 폴백을 **세 대상에게** 남긴다.
+   *
+   * 1. 개발자 — 전용 출력 채널. 이전의 `console.warn` 은 확장에
+   *    `createOutputChannel` 이 한 군데도 없어 `exthost.log` 에도 안 남았고,
+   *    사고 당일 전 세션에서 `[coach]` 문자열이 0건이었다. 사후 확인 자체가
+   *    불가능했다. 사유 원문을 그대로 싣는다 — `SdkUnavailableError` 메시지가
+   *    해석 후보 4개를 이미 나열한다.
+   * 2. 참가자 — 대화 타임라인의 한 줄(세션 1회). 무엇이 안 되고 무엇이 되는지
+   *    같이 말한다.
+   * 3. 강사 — 별도 채널을 만들지 않았다. 학생 화면의 그 한 줄이 강사가 교실을
+   *    돌며 볼 수 있는 실물이고, 대화 기록에 남으므로(REQ-C17) 사후에도 보인다.
+   *    워커까지 신호를 보내 `/console` 에서 교실 단위로 보는 것은 별건으로 남긴다.
+   *
+   * 코치 자신에게 알리는 것은 **워커**가 한다 — `degradedRuntimeNoticeFor`
+   * (translate.ts). 런타임의 ground truth 가 라우트이고 프롬프트 소유자가
+   * 워커라서, 앱 릴리스 없이 배포만으로 반영된다.
+   */
+  private noteSdkFallback(reason: string, streamId: string): void {
+    this.logChannel ??= vscode.window.createOutputChannel("HypeProof Coach");
+    this.logChannel.appendLine(sdkFallbackLogLine(reason, new Date()));
+
+    // 세션 1회. 폴백은 그 머신에서 계속 일어나므로(시드가 없으면 다음 턴도
+    // 마찬가지) 매 턴 붙이면 두 번째부터 아무도 안 읽고 기록이 경고로 덮인다.
+    if (this.fallbackNoticeShown) return;
+    this.fallbackNoticeShown = true;
+    this.postToolLog(streamId, {
+      id: randomId(),
+      icon: "⚠️",
+      label: COACH_DEGRADED_NOTICE,
+      state: "error",
+    });
   }
 
   /**
@@ -658,6 +729,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * #507 — 프록시 경로(#278)의 `browser_navigate` 를 실행 직전에 교정한다.
+   *
+   * 코치는 라이브 서버 주소를 모르면 `127.0.0.1:3000` 같은 흔한 포트를 반사적으로
+   * 찍는다(코드 어디에도 3000 은 없다 — 모델의 추측이다). 라이브 서버는 매 실행
+   * `listen(0)` 으로 임의 포트를 받으므로 그 주소는 항상 비어 있고,
+   * `ERR_CONNECTION_REFUSED` 로 끝난다. Run 버튼은 URL 을 직접 받으므로 멀쩡했고,
+   * 코치만 이 경로가 없어서 실패했다 (#470 재발).
+   *
+   * 서버가 안 떠 있으면 교정하지 않는다 — 짐작으로 고치지 않는다(모르면 그대로).
+   */
+  private retargetLoopbackNavigation(call: BrowserToolCall): {
+    call: BrowserToolCall;
+    note?: string;
+  } {
+    if (call.name !== "browser_navigate") return { call };
+    const requested = String(call.input?.url ?? "");
+    const target = resolveLivePreviewUrl(requested, this.liveServer.currentUrl());
+    if (!target?.redirected) return { call };
+    return {
+      call: { ...call, input: { ...call.input, url: target.url } },
+      note:
+        `참고: ${target.requested} 은(는) 이 Studio 의 주소가 아니라 실제 라이브 서버 주소 ` +
+        `${target.url} 로 이동했어요. 라이브 서버 포트는 실행할 때마다 달라지니 ` +
+        `추측하지 말고 이 주소를 쓰세요.`,
+    };
+  }
+
+  /**
    * #282 P2 slice 2 — host capabilities behind the "hypeproof" MCP browser
    * tools. Registered by runSdkCoach only when the profile grants
    * sdk_tools.browser (adults; minors are stripped). Silent by design: MCP
@@ -739,6 +838,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
       },
       startLivePreview: () => this.startLivePreview(),
+      // #507 — 지금 떠 있는 라이브 서버 주소. 시작시키지 않는다(조회에 부작용을
+      // 두면 "주소가 뭐냐"가 서버를 켜게 된다). 이게 유일한 진실이고, 이걸 안
+      // 읽는 쪽은 전부 추측이다 — 그 추측이 127.0.0.1:3000 이었다.
+      livePreviewUrl: async () => this.liveServer.currentUrl() ?? null,
       // #415 — 지금 떠 있는 페이지를 가장 싸게 읽는 경로. BrowserTab 은 url/title 을
       // 그대로 들고 있어 CDP 접속도 스크린샷도 필요 없다 (URL 하나 알자고 이미지를
       // 뜨면 토큰도 시간도 낭비).
@@ -1170,6 +1273,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           signal: ctrl.signal,
           coachName: effectiveCoachName,
           coachPersonality: effectiveCoachPersonality,
+          // #507 — 떠 있는 라이브 서버 주소를 매 턴 실어 보낸다. 없으면 생략:
+          // 워커가 "아직 안 떠 있다 + 포트를 추측하지 마라"를 대신 말한다.
+          previewUrl: this.liveServer.currentUrl(),
           onDelta,
           onCitations,
           onAssetScore,
@@ -1205,6 +1311,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // 프로필이 workspace_root 를 이미 알고 있으므로 그걸로 폴백한다.
             // 두 소스가 모두 없을 때만 undefined 로 두고, 그 경우는 소리 나게 남긴다.
             cwd: this.resolveCoachCwd(),
+            // #507 — 떠 있는 라이브 서버 주소(없으면 생략). MCP 도구 결과로도
+            // 알려주지만, 턴 시작 시점의 컨텍스트에 있어야 첫 이동부터 맞는다.
+            previewUrl: this.liveServer.currentUrl(),
             // #282 W4a — explicit claude-binary override (highest priority in
             // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
             // seeded > node_modules). Empty string = unset.
@@ -1228,15 +1337,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         } catch (err) {
           if (!(err instanceof SdkUnavailableError)) throw err;
           // Pre-Phase-1: the SDK package isn't installed. Keep the classroom
-          // working — log for developers and fall back to the proxy runtime for
-          // this turn instead of showing the student a technical error.
-          console.warn(`[coach] ${err.message}`);
+          // working — fall back to the proxy runtime for this turn instead of
+          // showing the student a technical error.
+          //
+          // #476 — 폴백 자체는 유지하되(동작 변경 없음) **보이게** 한다. 이전에는
+          // `console.warn` 한 줄이 전부였고, 확장에 출력 채널이 없어 그 줄은
+          // 어디에도 남지 않았다: 학생도 강사도 개발자도 코치 자신도 능력이
+          // 사라진 걸 몰랐고, 그 오진이 이슈 3건(#470·#471·#472)을 만들었다.
           assistantText = "";
           assistantCitations.length = 0;
           revealed = false;
           // #503 — 텍스트를 버리면 타임라인도 같이 버린다. 안 그러면 폴백 전에
           // 찍힌 툴 줄만 히스토리에 남아 "말은 없고 행동만 있는" 턴이 된다.
           this.turnTimelines.set(streamId, timelineStart(emptyTimeline(), messageId, Date.now()));
+          // #476 — 안내는 이 리셋 **뒤에** 넣는다. 앞에 넣으면 방금 찍은 줄이
+          // 같이 지워져 웹뷰에만 남고 히스토리에는 안 남는다(창을 다시 열면 사라짐).
+          this.noteSdkFallback(err.message, streamId);
           // #371 — fall back to the browser-loop-aware runtime, NOT bare proxy,
           // so a browser_control cohort (copyclone) still opens the browser when
           // the SDK binary isn't seeded.
@@ -1355,6 +1471,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           signal: p.signal,
           coachName: p.coachName,
           coachPersonality: p.coachPersonality,
+          // #507 — 루프 안에서 매 턴 다시 읽는다: live_preview_start 로 방금 뜬
+          // 서버 주소가 다음 턴 컨텍스트에 들어가야 추측할 이유가 사라진다.
+          previewUrl: this.liveServer.currentUrl(),
           onDelta: p.onDelta,
           onCitations: p.onCitations,
           onAssetScore: (s) => {
@@ -1387,14 +1506,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         const toolResults: unknown[] = [];
         for (const call of result.toolUses) {
           if (p.signal.aborted) return;
-          const line = browserToolLogLine(call.name, call.input);
+          // #507 — 추측된 루프백 포트를 실제 라이브 서버로 교정한 뒤 실행한다.
+          // **로그를 만들기 전에** 고친다: 화면 줄이 요청한 주소를 보여주면
+          // 참가자는 실제로 열린 곳과 다른 주소를 읽게 된다.
+          const fixed = this.retargetLoopbackNavigation(call);
+          const line = browserToolLogLine(fixed.call.name, fixed.call.input);
           this.postToolLog(p.streamId, { id: call.id, ...line, state: "running" });
-          const tr = await browser.execute(call);
+          const tr = await browser.execute(fixed.call);
           this.postToolLog(p.streamId, { id: call.id, ...line, state: tr.isError ? "error" : "done" });
           toolResults.push({
             type: "tool_result",
             tool_use_id: call.id,
-            content: tr.content,
+            // 교정했으면 모델에게도 말한다 — 조용히 고치면 다음 턴에 또 추측한다.
+            content: fixed.note
+              ? [...tr.content, { type: "text" as const, text: fixed.note }]
+              : tr.content,
             ...(tr.isError ? { is_error: true } : {}),
           });
         }
@@ -1429,7 +1555,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         requestId: err.requestId,
         runbookUrl: err.runbookUrl,
       });
-      if (err.kind === "expired" || err.kind === "missing") {
+      // #381 — "wrong_role" (instructor token) also needs a different token,
+      // so reopen the box. It is NOT deleted: only "expired" is provably dead.
+      if (err.kind === "expired" || err.kind === "missing" || err.kind === "wrong_role") {
         // Clear the dead token so the UI shows "Token" not "Token ✓",
         // then reopen the input box for a fresh one.
         if (err.kind === "expired") {

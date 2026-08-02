@@ -277,6 +277,8 @@ messages.post("/messages", async (c) => {
     // system 은 통째로 교체되므로 거기 실어 보낼 수도 없다. 헤더가 유일한 통로다.
     workspace: decodeHeader(c.req.header("x-hps-workspace")),
     workspaceFiles: decodeHeaderList(c.req.header("x-hps-workspace-files")),
+    // #507 — 떠 있는 라이브 서버 주소. 같은 이유로 헤더가 유일한 통로다.
+    previewUrl: decodeHeader(c.req.header("x-hps-preview-url")),
   };
 
   // #9c trace hook — identical opt-in to chat.ts (trial headers).
@@ -583,6 +585,8 @@ messages.post("/messages/count_tokens", async (c) => {
     // system 은 통째로 교체되므로 거기 실어 보낼 수도 없다. 헤더가 유일한 통로다.
     workspace: decodeHeader(c.req.header("x-hps-workspace")),
     workspaceFiles: decodeHeaderList(c.req.header("x-hps-workspace-files")),
+    // #507 — 떠 있는 라이브 서버 주소. 같은 이유로 헤더가 유일한 통로다.
+    previewUrl: decodeHeader(c.req.header("x-hps-preview-url")),
   };
 
   // 2-3. Enforced fields, mirroring /v1/messages: spread-first keeps unknown

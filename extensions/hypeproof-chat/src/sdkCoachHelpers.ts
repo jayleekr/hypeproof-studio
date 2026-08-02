@@ -779,6 +779,12 @@ export function buildSdkGatewayEnv(
     workspace?: string;
     /** 작업 폴더의 파일 목록 (루트 기준 상대). */
     workspaceFiles?: readonly string[];
+    /**
+     * #507 — 지금 떠 있는 라이브 서버 주소. 워커가 `x-hps-preview-url` 로 받아
+     * 시스템 블록에 넣는다. 안 떠 있으면 보내지 않는다 — 없는 주소를 지어내는
+     * 것보다 침묵이 낫고, 워커가 "아직 없다"는 사실 쪽 문구를 낸다.
+     */
+    previewUrl?: string;
     /** 동시 툴 실행 상한. 기본 2 — 병렬 권한 요청이 SDK 제어 채널을 끊는다. */
     maxToolConcurrency?: number;
     /** Coach-owned CLI config dir. Defaults to sdkConfigDirFor(baseEnv). */
@@ -833,6 +839,11 @@ export function buildSdkGatewayEnv(
       `x-hps-workspace-files: ${encodeURIComponent(args.workspaceFiles.slice(0, 80).join("\n"))}`,
     );
   }
+  // #507 — 라이브 서버 주소도 같은 통로로. 시스템 프롬프트에 직접 붙이는 길은
+  // 없다(워커가 클라이언트 system 을 통째로 교체한다 — 위 주석 참조).
+  if (args.previewUrl?.trim()) {
+    custom.push(`x-hps-preview-url: ${encodeURIComponent(args.previewUrl.trim())}`);
+  }
   if (custom.length) {
     const existing = (env.ANTHROPIC_CUSTOM_HEADERS ?? "").trim();
     env.ANTHROPIC_CUSTOM_HEADERS = existing ? `${existing}\n${custom.join("\n")}` : custom.join("\n");
@@ -871,6 +882,8 @@ export function buildSdkQueryOptions(
     pathToClaudeCodeExecutable?: string;
     /** 워크스페이스 파일 목록 (루트 기준 상대). withWorkspaceContext 로 전달된다. */
     workspaceFiles?: readonly string[];
+    /** #507 — 떠 있는 라이브 서버 주소. 헤더로 워커에 전달된다. */
+    previewUrl?: string;
     /** REQ-M13 — coach-owned CLI config dir (the host creates it). */
     configDir?: string;
   },
@@ -913,6 +926,7 @@ export function buildSdkQueryOptions(
       // 시스템 프롬프트 경로는 워커가 버리므로 헤더로 보낸다 (#431).
       ...(args.cwd ? { workspace: args.cwd } : {}),
       ...(args.workspaceFiles ? { workspaceFiles: args.workspaceFiles } : {}),
+      ...(args.previewUrl ? { previewUrl: args.previewUrl } : {}),
     }),
   };
 }

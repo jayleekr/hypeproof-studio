@@ -60,6 +60,56 @@ export function isLoopbackUrl(input: string): boolean {
   return !!url && LOOPBACK_URL.test(url);
 }
 
+/** `resolveLivePreviewUrl` 의 결과. */
+export interface LivePreviewTarget {
+  /** 실제로 이동할 주소 (정책 통과 + 필요하면 라이브 서버로 교정된 것). */
+  url: string;
+  /** 코치가 요청한 주소를 라이브 서버 쪽으로 바꿨는가. */
+  redirected: boolean;
+  /** 교정 전 주소 (redirected 일 때만). 모델에게 왜 바뀌었는지 말해줄 때 쓴다. */
+  requested?: string;
+}
+
+/**
+ * #507 — 코치가 **포트를 추측해서** 죽은 주소로 가는 것을 막는다.
+ *
+ * Studio 의 라이브 서버는 `listen(0)` 으로 매 실행마다 **다른** 에페메랄 포트를
+ * 받는다(liveServer.ts). 그래서 `127.0.0.1:3000` 은 "포트가 사용 중"이라서가
+ * 아니라 **아무도 안 듣고 있어서** `ERR_CONNECTION_REFUSED` 로 죽는다. 어떤
+ * 고정 포트도 맞을 수 없다 — 3000 이든 5500 이든 8080 이든.
+ *
+ * 그런데 코드 어디에도 `3000` 은 없다(#507 조사). 하드코딩이 아니라 모델의
+ * 반사적 추측이고, 추측을 막을 근거가 컨텍스트에 없었다. 프롬프트로도 막지만
+ * (worker 가 실제 주소를 시스템 블록에 넣는다), 프롬프트는 **지켜지지 않을 수
+ * 있고** 이 함수는 지켜지지 않아도 참가자가 깨진 화면을 보지 않게 한다.
+ *
+ * 규칙: 루프백 → 루프백만 교정한다. 외부 주소는 절대 건드리지 않으며(참고
+ * 사이트는 코치가 요청한 그대로), 승인 정책이 나뉘는 경계도 넘지 않는다 —
+ * 두 주소 모두 같은 "학생 자기 컴퓨터" 부류라 canUseTool 판정이 달라지지 않는다.
+ * 라이브 서버 주소를 모르면 아무것도 바꾸지 않는다(짐작으로 고치지 않는다).
+ */
+export function resolveLivePreviewUrl(
+  requested: string,
+  liveServerBase: string | null | undefined,
+): LivePreviewTarget | null {
+  const url = safeNavigateUrl(requested);
+  if (!url) return null;
+  if (!isLoopbackUrl(url)) return { url, redirected: false };
+  const base = safeNavigateUrl(liveServerBase ?? "");
+  if (!base || !isLoopbackUrl(base)) return { url, redirected: false };
+  try {
+    const target = new URL(url);
+    const server = new URL(base);
+    // 이미 라이브 서버를 가리키면 그대로. 호스트 표기만 다른 경우
+    // (`localhost` vs `127.0.0.1`)는 포트가 같으면 같은 서버로 본다.
+    if (target.port === server.port) return { url, redirected: false };
+    const fixed = new URL(target.pathname + target.search + target.hash, server.origin);
+    return { url: fixed.toString(), redirected: true, requested: url };
+  } catch {
+    return { url, redirected: false };
+  }
+}
+
 /**
  * 승인 기억용 키. `https://boaclinic.com/about` → `https://boaclinic.com`.
  * 서브페이지마다 다시 묻지 않기 위한 것이므로 **오리진 단위**다 — 경로가 아니라.

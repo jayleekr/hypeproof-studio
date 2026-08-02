@@ -15,6 +15,8 @@ import previewEnvContractLiveServerMd from "../prompts/_preview-env-contract-liv
 import browserControlContractProxyMd from "../prompts/_browser-control-contract-proxy.md";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import browserControlContractSdkMd from "../prompts/_browser-control-contract-sdk.md";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import runtimeDegradedNoticeMd from "../prompts/_runtime-degraded-notice.md";
 import { BROWSER_TOOLS } from "./browser-tools.ts";
 import { isMinorCohort } from "./moderation.ts";
 import { resolveSkills } from "../skills/index.ts";
@@ -161,6 +163,20 @@ export interface CoachContext {
   workspace?: string;
   /** 작업 폴더에 지금 있는 파일들 (루트 기준 상대경로). `x-hps-workspace-files`. */
   workspaceFiles?: string[];
+  /**
+   * #507 — 지금 떠 있는 로컬 라이브 서버 주소. 클라이언트가 `x-hps-preview-url`
+   * 로 보낸다.
+   *
+   * 왜 필요한가 (2026-07-28 실측). Studio 의 라이브 서버는 `listen(0)` 으로 매
+   * 실행마다 **다른 에페메랄 포트**를 받는다(실측 58085). 그런데 그 주소가 코치
+   * 컨텍스트로 들어가는 통로가 없었다 — Run 버튼은 확장이 URL 을 직접 받아서
+   * 멀쩡했고, 코치만 알 방법이 없어 `127.0.0.1:3000` 을 반사적으로 추측하다
+   * `ERR_CONNECTION_REFUSED` 로 멈췄다(#470 재발, 코드 어디에도 3000 은 없다).
+   *
+   * 주소만 받고 **문구는 워커가 소유한다** — workspace 와 같은 계약이라 교체
+   * 설계의 안티-인젝션 성질이 그대로 유지된다. 루프백 http(s) 가 아니면 버린다.
+   */
+  previewUrl?: string;
 }
 
 /** OpenAI-compatible request (Gemini's `/v1beta/openai/chat/completions`). */
@@ -369,6 +385,50 @@ function browserContractFor(profile: Profile, runtime: CoachRuntime): string {
 }
 
 /**
+ * 코치가 **자기 능력을 알게** 하는 블록, 또는 "" (#476).
+ *
+ * 왜 필요한가: 클라이언트는 SDK 네이티브 바이너리를 못 찾으면 프록시 런타임으로
+ * 폴백한다(#387 — 미시딩 머신에서도 수업이 죽지 않게 하는 의도된 설계). 그런데
+ * 코호트 프롬프트와 스킬은 파일·셸이 있다는 전제로 쓰여 있다. 예:
+ * `boah-dental-director-copyclone-2026-s1.md` 는 "index.html 을 만들어
+ * **저장합니다**" 라고 지시하고, `github-repo`/`publish-homepage` 스킬은 통째로
+ * 셸 절차다. 도구가 0개인 코치가 그 역할을 자임하면 다음이 나온다(2026-07-27 실측):
+ *
+ *   "제가 위에서 코드를 채팅창에 붙여넣었는데, 그걸 직접 파일로 저장하는 작업을
+ *    빠뜨렸어요. Studio 워크스페이스에 index.html 로 저장해주시겠어요?"
+ *
+ * 망각이 아니라 `Write` 가 없었던 것이고, 참가자는 해결할 수 없는 요청을 받는다.
+ * #476 은 이 오진이 능력 상실 자체보다 비쌌다고 기록한다 — 이슈 3건(#470·#471·
+ * #472)이 같은 원인을 각각 다른 제품 결함으로 진단했다.
+ *
+ * **왜 여기(워커)인가:** ① #520 이후 런타임의 ground truth 는 **라우트**다 —
+ * 워커는 클라이언트에게 묻지 않고도 이 요청이 프록시 경로임을 안다. ② 프롬프트의
+ * 소유자가 워커다(REQ-M10). ③ 스킬 마크다운과 마찬가지로 **워커 배포만으로
+ * 반영**되어 앱 릴리스를 기다리지 않는다.
+ *
+ * **왜 사고 보고가 아니라 능력 설명인가:** 이 조건은 폴백 말고도 성립한다 —
+ * 강사가 `hypeproofChat.coachRuntime` 을 프록시로 고정한 경우다. 문구가 "SDK 를
+ * 못 찾았다"고 단정하면 그 경우에 거짓이 된다. 도구 목록만 말하면 언제나 참이다.
+ *
+ * 게이트가 `coach_runtime === "agent-sdk"` 인 이유: 애초에 프록시로 설계된
+ * 코호트(teaser·kids)는 프롬프트가 파일·셸을 약속하지 않으므로 정정할 것이
+ * 없다. 미성년은 워커가 의도적으로 프록시에 고정하는 쪽이라(chat.ts) 제외한다 —
+ * 그쪽은 degraded 가 아니라 설계다.
+ *
+ * 프롬프트 캐시: #520 이 이미 런타임별로 프리픽스를 둘로 갈라 놓았고, 이 블록은
+ * 그 두 변형 안에서만 달라지므로 **캐시 변형 수가 늘지 않는다.**
+ */
+function degradedRuntimeNoticeFor(profile: Profile, runtime: CoachRuntime): string {
+  if (runtime !== "proxy") return "";
+  if (profile.coach_runtime !== "agent-sdk") return "";
+  if (isMinorCohort(profile)) return "";
+  const t = profile.sdk_tools;
+  const grantsHostTools = t?.read === true || t?.write === true || t?.shell === true;
+  if (!grantsHostTools) return "";
+  return runtimeDegradedNoticeMd as unknown as string;
+}
+
+/**
  * The cached/static system prefix = profile system prompt + preview-env
  * contract + bundled skills (#168 M1) + the tier's skeleton library. Identical
  * text for every user in a cohort, so prompt caching kicks in across the
@@ -397,12 +457,17 @@ function buildCachedPrefix(profile: Profile, runtime: CoachRuntime = "proxy"): s
   // contract is RUNTIME-SPECIFIC because the tool sets are: see
   // browserContractFor().
   const browserContract = browserContractFor(profile, runtime);
+  // #476 — 능력 정정은 **스킬 뒤**에 온다. 스킬(github-repo·publish-homepage)이
+  // 셸 절차를 176줄에 걸쳐 가르치는데 그 앞에서 "셸이 없다"고 말하면, 뒤에 오는
+  // 긴 절차가 앞의 한 문단을 덮는다. 마지막에 두어 정정이 마지막 말이 되게 한다.
+  const degradedNotice = degradedRuntimeNoticeFor(profile, runtime);
   const sections = [
     profile.system_prompt,
     previewContract,
     browserContract,
     skillsMd,
     buildSkeletonLibrary(profile),
+    degradedNotice,
   ].filter((s) => s && s.length > 0);
   return sections.join("\n\n");
 }
@@ -690,6 +755,37 @@ function buildWorkspaceBlock(coach: CoachContext): string | null {
   return lines.join("\n");
 }
 
+/**
+ * 미리보기(라이브 서버) 블록 (#507). 주소가 없으면 아무것도 내지 않는다 —
+ * 서버가 안 떠 있는 상태에서 "주소는 …" 이라고 운을 떼면 그게 곧 추측을
+ * 부추긴다. 그 경우의 규칙("포트를 추측하지 마라")은 코호트 프롬프트의
+ * preview-env contract 가 담당한다.
+ */
+function buildPreviewBlock(coach: CoachContext): string | null {
+  const url = sanitizeLoopbackUrl(coach.previewUrl);
+  if (!url) return null;
+  return [
+    "# 미리보기 (라이브 서버)",
+    `지금 떠 있는 주소: ${url}`,
+    "브라우저로 참가자의 결과물을 볼 때는 **이 주소를 그대로** 쓴다. 포트는 실행할 때마다 " +
+      "무작위로 배정되므로 3000·5500·8080 같은 흔한 번호는 **반드시 틀린다** — " +
+      "추측해서 이동하지 말고, 참가자에게 포트 번호를 묻지도 않는다.",
+  ].join("\n");
+}
+
+/**
+ * 라이브 서버 주소 살균 (#507). **루프백 http(s) 주소만** 통과시킨다. 클라이언트가
+ * 보내는 값이므로, 여기가 느슨하면 시스템 블록에 임의 문장/주소를 넣는 통로가 된다.
+ */
+function sanitizeLoopbackUrl(s: string | undefined): string | null {
+  const v = (s ?? "").trim();
+  if (!v || v.length > 200) return null;
+  if (!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/[^\s"'`]*)?$/i.test(v)) {
+    return null;
+  }
+  return v;
+}
+
 /** 경로 살균 — 개행/따옴표 제거, 길이 제한. 블록을 깨거나 문장을 주입할 수 없게. */
 function sanitizePath(s: string | undefined): string | null {
   const v = (s ?? "").replace(/[\r\n]+/g, " ").replace(/["'`]/g, "").trim().slice(0, 400);
@@ -698,11 +794,15 @@ function sanitizePath(s: string | undefined): string | null {
 
 function buildCoachTail(coach: CoachContext): string | null {
   const workspace = buildWorkspaceBlock(coach);
+  // #507 — 작업 폴더 바로 다음에 미리보기 주소. 둘 다 "지어내지 마라"를 없애는
+  // 사실 블록이라 붙어 있는 편이 읽기 좋다.
+  const preview = buildPreviewBlock(coach);
+  const head = [workspace, preview].filter((b): b is string => !!b).join("\n\n");
   const name = (coach.name ?? "").trim();
   const personality = (coach.personality ?? "").trim();
-  if (!name && !personality) return workspace;
+  if (!name && !personality) return head || null;
   const parts: string[] = [];
-  if (workspace) parts.push(workspace, "");
+  if (head) parts.push(head, "");
   parts.push("# 사용자의 코치 설정");
   if (name) {
     parts.push(`이 자녀는 당신을 **'${sanitizeForPrompt(name)}'**라고 부릅니다. 응답할 때 자신을 그렇게 칭하세요.`);

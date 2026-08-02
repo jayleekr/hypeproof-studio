@@ -1810,6 +1810,37 @@ const TINY_PNG =
     resolveSkills(copyclone.skills).length > 500,
     "copyclone skill markdown is actually bundled (non-trivial length)",
   );
+
+  // #500 — 배포 자동화가 3회 연속 실패한 원인은 **순서**였다. `PUT /pages` 의 2xx
+  // 는 프로비저닝 완료가 아니라 접수 확인이라, 곧바로 워크플로를 올리면
+  // `actions/configure-pages` 가 활성 Pages 환경을 못 찾고 죽는다. 순서는 글로만
+  // 존재하므로(스킬 = 코치의 실행 절차) 순서 자체를 잠근다 — 문장이 살아 있는지가
+  // 아니라 **대기가 업로드보다 앞에 오는지**를 잰다.
+  const publishMd = resolveSkills(["publish-homepage"]);
+  const waitIdx = publishMd.indexOf("pages ready");
+  const uploadIdx = publishMd.indexOf("contents/.github/workflows/pages.yml");
+  assert.notEqual(waitIdx, -1, "publish-homepage: Pages 프로비저닝 대기 루프가 있다 (#500)");
+  assert.notEqual(uploadIdx, -1, "publish-homepage: 워크플로 업로드 절차가 있다 (fixture 존재 확인)");
+  assert.ok(
+    waitIdx < uploadIdx,
+    "publish-homepage: 대기가 워크플로 업로드보다 **먼저** 나온다 — 이 순서가 #500 그 자체다",
+  );
+  assert.ok(
+    publishMd.includes("build_type"),
+    "publish-homepage: 대기 조건이 build_type 확인이다 (2xx 를 준비 완료로 읽지 않는다)",
+  );
+  // 두 번째 결함: sha 없는 덮어쓰기 + 브라우저 편집 혼용 → pages.yml 이 병합돼 파싱
+  // 불가. 재작성 절차에 sha 가 없으면 같은 손상이 되돌아온다.
+  assert.ok(
+    /sha=\$\(gh api/.test(publishMd) || publishMd.includes("-f sha="),
+    "publish-homepage: 재업로드는 최신 sha 를 받아서 넘긴다 (#500 2차 결함)",
+  );
+  // 스킬 자신의 규칙: 끝나지 않는 루프 금지. 새로 넣은 대기 루프가 그 규칙을
+  // 어기면 코치가 수업 중에 영원히 매달린다.
+  assert.ok(
+    !/^\s*until\s/m.test(publishMd),
+    "publish-homepage: 끝나지 않는 until 루프를 가르치지 않는다",
+  );
   for (const p of all) {
     if (p.id !== copyclone.id) {
       assert.notEqual(p.sdk_tools?.write, true, `profile ${p.id}: sdk_tools.write reserved for the adult copyclone cohort in Phase 2`);
@@ -2331,6 +2362,43 @@ const TINY_PNG =
     assert.equal(r.status, 401, "unauthenticated → 401");
   }
   console.log("✓ #290 roster/append: server-side merge + issuer scope gate");
+
+  // #381 — the plain POST /session starts a session and nothing else. Opening a
+  // class this way leaves the roster empty, and every correctly-issued student
+  // token is then rejected with not_in_roster. The operator used to learn this
+  // from a student mid-class; now the response says it.
+  {
+    const env = mkEnv();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/session`, "POST",
+      {
+        profile_id: PROFILE,
+        starts_at: new Date().toISOString(),
+        ends_at: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+      `Bearer ${ISSUER}`);
+    assert.equal(r.status, 200, "plain session start → 200");
+    const j = await r.json();
+    assert.equal(j.roster_size, 0, "roster size reported");
+    assert.match(j.warning ?? "", /not_in_roster/, "empty roster is called out");
+    assert.match(j.warning ?? "", /session\/open/, "steers the operator to the composite endpoint");
+  }
+  // …and stays quiet when the roster is already populated.
+  {
+    const env = mkEnv({
+      [`cohort:${COHORT}:roster`]: JSON.stringify({ users: ["kid-a"], updated_at: "x" }),
+    });
+    const r = await hit(env, `/admin/cohorts/${COHORT}/session`, "POST",
+      {
+        profile_id: PROFILE,
+        starts_at: new Date().toISOString(),
+        ends_at: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+      `Bearer ${ISSUER}`);
+    const j = await r.json();
+    assert.equal(j.roster_size, 1);
+    assert.equal(j.warning, undefined, "populated roster → no warning noise");
+  }
+  console.log("✓ #381 session start: empty roster is reported, not discovered mid-class");
 
   // session/open — full composite happy path (issuer)
   {

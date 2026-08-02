@@ -1,9 +1,13 @@
 import type { AssetScoreChunk, ChatMessage, Citation, ResolvedProfile } from "./protocol";
 import {
   buildProxyHeaders,
+  classifyProfileFailure,
   friendlyTransportMessage,
+  profileNetworkFailure,
+  PROFILE_ISSUER_TOKEN_FRIENDLY,
   TOKEN_EXPIRED_FRIENDLY,
   TOKEN_MISSING_FRIENDLY,
+  type ProfileFailure,
 } from "./proxyClientHelpers";
 
 /**
@@ -12,7 +16,14 @@ import {
  * token (expired/missing) or tell them to call the teacher (session/roster).
  */
 export class ProxyAuthError extends Error {
-  kind: "expired" | "missing" | "session_inactive" | "session_window" | "not_in_roster" | "other";
+  kind:
+    | "expired"
+    | "missing"
+    | "wrong_role"
+    | "session_inactive"
+    | "session_window"
+    | "not_in_roster"
+    | "other";
   friendly: string;
   requestId?: string;        // S-07 / #49 — surfaced in webview ErrorBanner
   runbookUrl?: string;       // #165 — when present, banner renders as clickable link
@@ -61,6 +72,11 @@ function classifyError(status: number, bodyText: string): ProxyAuthError | null 
   if (status === 401) {
     if (code === "expired") {
       return new ProxyAuthError("expired", TOKEN_EXPIRED_FRIENDLY);
+    }
+    // #381 — an instructor token in the participant box. Naming it is the
+    // difference between a 5-second fix and finding an instructor.
+    if (code === "wrong_role") {
+      return new ProxyAuthError("wrong_role", PROFILE_ISSUER_TOKEN_FRIENDLY);
     }
     return new ProxyAuthError("missing", TOKEN_MISSING_FRIENDLY);
   }
@@ -132,6 +148,8 @@ interface ProxyChatArgs {
   onToolUse?: (block: ToolUseBlock) => void;
   coachName?: string;
   coachPersonality?: string;
+  /** #507 — 지금 떠 있는 라이브 서버 주소(없으면 생략). 워커가 문구를 만든다. */
+  previewUrl?: string;
 }
 
 // Streaming OpenAI-compatible chat completion call against the HypeProof Proxy.
@@ -152,6 +170,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
     onToolUse,
     coachName,
     coachPersonality,
+    previewUrl,
   } = args;
 
   // History is sent text-only (drops any in-memory thumbnails from earlier
@@ -176,7 +195,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
   ];
 
   const url = proxyUrl.replace(/\/$/, "") + "/chat/completions";
-  const headers = buildProxyHeaders({ token, coachName, coachPersonality });
+  const headers = buildProxyHeaders({ token, coachName, coachPersonality, previewUrl });
 
   const res = await fetch(url, {
     method: "POST",
@@ -278,19 +297,38 @@ interface FetchProfileArgs {
   token: string;
 }
 
+/**
+ * #381 — the outcome of a profile fetch, cause included. `null` used to be the
+ * only answer, which is why first-run could not tell a participant what went
+ * wrong.
+ */
+export type ProfileFetchResult =
+  | { ok: true; profile: ResolvedProfile }
+  | { ok: false; failure: ProfileFailure };
+
 /** GET /v1/profile — used by extension host to cache cohort UX config. */
-export async function fetchProfile(args: FetchProfileArgs): Promise<ResolvedProfile | null> {
+export async function fetchProfileResult(args: FetchProfileArgs): Promise<ProfileFetchResult> {
   const { proxyUrl, token } = args;
   const url = proxyUrl.replace(/\/$/, "") + "/profile";
+  let res: Response;
   try {
-    const res = await fetch(url, {
+    res = await fetch(url, {
       method: "GET",
       headers: { authorization: `Bearer ${token}` },
     });
-    if (!res.ok) return null;
-    const j = (await res.json()) as ResolvedProfile;
-    return j;
   } catch {
-    return null;
+    // We never reached the server — the token is not the suspect.
+    return { ok: false, failure: profileNetworkFailure() };
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => "");
+    return { ok: false, failure: classifyProfileFailure(res.status, body) };
+  }
+  try {
+    return { ok: true, profile: (await res.json()) as ResolvedProfile };
+  } catch {
+    // 200 with an unparseable body — a captive portal / proxy page, not a token
+    // problem. Classified as server-side so the copy doesn't blame the paste.
+    return { ok: false, failure: classifyProfileFailure(res.status, "") };
   }
 }
