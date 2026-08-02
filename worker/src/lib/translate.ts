@@ -163,6 +163,20 @@ export interface CoachContext {
   workspace?: string;
   /** 작업 폴더에 지금 있는 파일들 (루트 기준 상대경로). `x-hps-workspace-files`. */
   workspaceFiles?: string[];
+  /**
+   * #507 — 지금 떠 있는 로컬 라이브 서버 주소. 클라이언트가 `x-hps-preview-url`
+   * 로 보낸다.
+   *
+   * 왜 필요한가 (2026-07-28 실측). Studio 의 라이브 서버는 `listen(0)` 으로 매
+   * 실행마다 **다른 에페메랄 포트**를 받는다(실측 58085). 그런데 그 주소가 코치
+   * 컨텍스트로 들어가는 통로가 없었다 — Run 버튼은 확장이 URL 을 직접 받아서
+   * 멀쩡했고, 코치만 알 방법이 없어 `127.0.0.1:3000` 을 반사적으로 추측하다
+   * `ERR_CONNECTION_REFUSED` 로 멈췄다(#470 재발, 코드 어디에도 3000 은 없다).
+   *
+   * 주소만 받고 **문구는 워커가 소유한다** — workspace 와 같은 계약이라 교체
+   * 설계의 안티-인젝션 성질이 그대로 유지된다. 루프백 http(s) 가 아니면 버린다.
+   */
+  previewUrl?: string;
 }
 
 /** OpenAI-compatible request (Gemini's `/v1beta/openai/chat/completions`). */
@@ -741,6 +755,37 @@ function buildWorkspaceBlock(coach: CoachContext): string | null {
   return lines.join("\n");
 }
 
+/**
+ * 미리보기(라이브 서버) 블록 (#507). 주소가 없으면 아무것도 내지 않는다 —
+ * 서버가 안 떠 있는 상태에서 "주소는 …" 이라고 운을 떼면 그게 곧 추측을
+ * 부추긴다. 그 경우의 규칙("포트를 추측하지 마라")은 코호트 프롬프트의
+ * preview-env contract 가 담당한다.
+ */
+function buildPreviewBlock(coach: CoachContext): string | null {
+  const url = sanitizeLoopbackUrl(coach.previewUrl);
+  if (!url) return null;
+  return [
+    "# 미리보기 (라이브 서버)",
+    `지금 떠 있는 주소: ${url}`,
+    "브라우저로 참가자의 결과물을 볼 때는 **이 주소를 그대로** 쓴다. 포트는 실행할 때마다 " +
+      "무작위로 배정되므로 3000·5500·8080 같은 흔한 번호는 **반드시 틀린다** — " +
+      "추측해서 이동하지 말고, 참가자에게 포트 번호를 묻지도 않는다.",
+  ].join("\n");
+}
+
+/**
+ * 라이브 서버 주소 살균 (#507). **루프백 http(s) 주소만** 통과시킨다. 클라이언트가
+ * 보내는 값이므로, 여기가 느슨하면 시스템 블록에 임의 문장/주소를 넣는 통로가 된다.
+ */
+function sanitizeLoopbackUrl(s: string | undefined): string | null {
+  const v = (s ?? "").trim();
+  if (!v || v.length > 200) return null;
+  if (!/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d{1,5})?(\/[^\s"'`]*)?$/i.test(v)) {
+    return null;
+  }
+  return v;
+}
+
 /** 경로 살균 — 개행/따옴표 제거, 길이 제한. 블록을 깨거나 문장을 주입할 수 없게. */
 function sanitizePath(s: string | undefined): string | null {
   const v = (s ?? "").replace(/[\r\n]+/g, " ").replace(/["'`]/g, "").trim().slice(0, 400);
@@ -749,11 +794,15 @@ function sanitizePath(s: string | undefined): string | null {
 
 function buildCoachTail(coach: CoachContext): string | null {
   const workspace = buildWorkspaceBlock(coach);
+  // #507 — 작업 폴더 바로 다음에 미리보기 주소. 둘 다 "지어내지 마라"를 없애는
+  // 사실 블록이라 붙어 있는 편이 읽기 좋다.
+  const preview = buildPreviewBlock(coach);
+  const head = [workspace, preview].filter((b): b is string => !!b).join("\n\n");
   const name = (coach.name ?? "").trim();
   const personality = (coach.personality ?? "").trim();
-  if (!name && !personality) return workspace;
+  if (!name && !personality) return head || null;
   const parts: string[] = [];
-  if (workspace) parts.push(workspace, "");
+  if (head) parts.push(head, "");
   parts.push("# 사용자의 코치 설정");
   if (name) {
     parts.push(`이 자녀는 당신을 **'${sanitizeForPrompt(name)}'**라고 부릅니다. 응답할 때 자신을 그렇게 칭하세요.`);

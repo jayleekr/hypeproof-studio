@@ -47,6 +47,15 @@ export function coachRitualDoneKeyForCohort(cohortId: string | null | undefined)
  * local storage bucket and never grants access.
  */
 export function extractCohortIdUnverified(token: string | null | undefined): string | undefined {
+  const parsed = decodeTokenPayloadUnverified(token);
+  const c = parsed?.c;
+  return typeof c === "string" && c.trim() ? c : undefined;
+}
+
+/** Decode the (unverified) payload half of `<base64url(payload)>.<sig>`. */
+export function decodeTokenPayloadUnverified(
+  token: string | null | undefined,
+): Record<string, unknown> | undefined {
   try {
     if (!token) return undefined;
     const parts = token.split(".");
@@ -54,11 +63,34 @@ export function extractCohortIdUnverified(token: string | null | undefined): str
     const payload = parts[0].replace(/-/g, "+").replace(/_/g, "/");
     const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
     const json = Buffer.from(padded, "base64").toString("utf8");
-    const parsed = JSON.parse(json) as { c?: unknown };
-    return typeof parsed.c === "string" && parsed.c.trim() ? parsed.c : undefined;
+    const parsed = JSON.parse(json) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    return parsed as Record<string, unknown>;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * #381 — is this an issuer (instructor) token pasted into the participant
+ * token box? Instructor tokens carry `role: "issuer"` and a placeholder
+ * cohort/profile, so the server's answer is `unknown profile` — historically
+ * shown as the same "확인이 안 돼요" as every other failure.
+ *
+ * DIAGNOSIS ONLY — never a gate (same contract as looksLikeWorkshopToken).
+ * Signature is not checked, so this can only make the message better; the
+ * server still decides what the token may do. Catching it client-side also
+ * means the message is right against a worker that predates the `wrong_role`
+ * code, and before any network call at all.
+ */
+export function looksLikeIssuerTokenUnverified(token: string | null | undefined): boolean {
+  const payload = decodeTokenPayloadUnverified(token);
+  if (!payload) return false;
+  if (payload.role === "issuer") return true;
+  // Belt-over-braces: issueIssuer() stamps these placeholders (worker
+  // lib/tokens.ts), so an older issuer token without an explicit role still
+  // gets named correctly.
+  return payload.c === "__issuer__" || payload.p === "__issuer__";
 }
 
 /**

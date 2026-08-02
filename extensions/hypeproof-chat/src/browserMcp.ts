@@ -31,7 +31,12 @@
 // Explicit .ts specifier: this pure-module graph must load under
 // `node --experimental-strip-types` (smoke tests), which resolves ESM
 // specifiers literally. esbuild + tsc (allowImportingTsExtensions) accept it.
-import { safeNavigateUrl, isSameBrowserUrl } from "./browserControlHelpers.ts";
+import {
+  safeNavigateUrl,
+  isSameBrowserUrl,
+  isLoopbackUrl,
+  resolveLivePreviewUrl,
+} from "./browserControlHelpers.ts";
 
 /** Server key in the SDK `mcpServers` option → tool prefix `mcp__hypeproof__`. */
 export const HYPEPROOF_MCP_SERVER_NAME = "hypeproof";
@@ -99,6 +104,14 @@ export interface BrowserMcpHost {
   /** Ensure the #309 live server + open the browser; returns the URL or null. */
   startLivePreview(): Promise<string | null>;
   /**
+   * #507 — 지금 **떠 있는** 라이브 서버의 주소 (안 떠 있으면 null). 시작시키지
+   * 않는다 — "주소가 뭐냐"를 묻는 것이 서버를 켜는 부작용을 가지면 안 된다.
+   *
+   * optional 인 이유는 currentPage 와 같다: 이 능력이 없는 호스트에서는 주소를
+   * 모르는 것이고, 모르면 **교정하지 않는다**(짐작 금지).
+   */
+  livePreviewUrl?(): Promise<string | null>;
+  /**
    * #415 — 지금 열려 있는 페이지를 **가볍게** 읽는다 (스크린샷 금지: URL 하나
    * 알자고 이미지를 뜨는 건 과하다). 탭이 없으면 null.
    *
@@ -162,8 +175,10 @@ async function readCurrentPage(host: BrowserMcpHost): Promise<BrowserPage | null
 
 /** `resolveAlreadyOpen` 의 결과 — 판정 + 상태 줄에 필요한 재료를 한 번에. */
 export interface AlreadyOpenVerdict {
-  /** 정책 통과 후 정규화된 URL (정책 위반이면 null). */
+  /** 정책 통과 + 라이브 서버 교정(#507) 후의 URL (정책 위반이면 null). */
   url: string | null;
+  /** #507 — 교정이 일어났다면 코치가 원래 요청했던 주소. */
+  redirectedFrom?: string;
   /** 지금 열려 있는 페이지 (undefined = 모름 — 호스트 미지원/조회 실패). */
   current: BrowserPage | null | undefined;
   /** 요청한 URL 이 이미 떠 있는가. 모르면 false (= 평소대로 연다). */
@@ -183,8 +198,14 @@ export async function resolveAlreadyOpen(
   host: BrowserMcpHost,
   rawUrl: unknown,
 ): Promise<AlreadyOpenVerdict> {
-  const url = safeNavigateUrl(typeof rawUrl === "string" ? rawUrl : "");
-  if (!url) return { url: null, current: undefined, alreadyOpen: false };
+  const raw = safeNavigateUrl(typeof rawUrl === "string" ? rawUrl : "");
+  if (!raw) return { url: null, current: undefined, alreadyOpen: false };
+  // #507 — 추측된 루프백 포트를 **실제로 떠 있는** 라이브 서버로 교정한다.
+  // 판정 함수 안에서 하는 이유: 승인 모달(canUseTool)과 핸들러가 같은 주소를
+  // 봐야 한다. 갈라지면 모달에 뜬 주소와 실제로 여는 주소가 달라진다.
+  const target = resolveLivePreviewUrl(raw, (await readLivePreviewUrl(host)) ?? null);
+  const url = target?.url ?? raw;
+  const redirectedFrom = target?.redirected ? target.requested : undefined;
   const current = await readCurrentPage(host);
   // #519 — 열린 탭 **전부**와 비교한다(호스트가 알려줄 때만). 슬롯이 둘이라
   // "지금 보고 있는 페이지"만으로는 이미 떠 있는 다른 슬롯을 놓친다.
@@ -192,7 +213,26 @@ export async function resolveAlreadyOpen(
   const alreadyOpen = open
     ? open.some((p) => isSameBrowserUrl(p.url, url))
     : !!current && isSameBrowserUrl(current.url, url);
-  return { url, current, alreadyOpen };
+  return { url, current, alreadyOpen, ...(redirectedFrom ? { redirectedFrom } : {}) };
+}
+
+/**
+ * 라이브 서버 주소 조회. 세 상태를 구분한다 (readCurrentPage 와 같은 규율):
+ *   `undefined` = 호스트가 이 능력을 지원하지 않음(또는 조회 실패) → **모른다**;
+ *   `null`      = 지원하는데 지금 서버가 안 떠 있음;
+ *   `string`    = 떠 있는 주소.
+ *
+ * 모름과 없음을 뭉개면 안 된다: "모른다"에서 서버를 띄우거나 주소를 교정하면
+ * 그게 곧 짐작이다.
+ */
+async function readLivePreviewUrl(host: BrowserMcpHost): Promise<string | null | undefined> {
+  if (typeof host.livePreviewUrl !== "function") return undefined;
+  try {
+    const url = await host.livePreviewUrl();
+    return typeof url === "string" && url ? url : null;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -282,7 +322,7 @@ export function buildHypeproofMcpServer(
       const raw = typeof args["url"] === "string" ? (args["url"] as string) : "";
       // Belt over suspenders: canUseTool already ran the URL policy, but the
       // handler re-validates so a policy bug can't turn into a hostile scheme.
-      const { url, current, alreadyOpen } = await resolveAlreadyOpen(host, raw);
+      const { url, current, alreadyOpen, redirectedFrom } = await resolveAlreadyOpen(host, raw);
       if (!url) {
         return {
           content: [{ type: "text", text: `이 주소는 열 수 없어요: ${raw}` }],
@@ -305,11 +345,49 @@ export function buildHypeproofMcpServer(
           focused ?? current ?? null,
         );
       }
+      // #507 — 라이브 서버가 **안 떠 있는 걸 아는데** 코치가 루프백 주소를
+      // 요청했다면 그 주소는 반드시 틀렸다: 포트는 매 실행 무작위라 추측이 맞을
+      // 수 없다(실측 58085 vs 코치가 찍은 3000). 죽은 포트로 보내
+      // ERR_CONNECTION_REFUSED 를 보여주는 대신, 라이브 서버를 띄우고 **진짜
+      // 주소**를 알려준다. 호스트가 이 능력을 모르면(undefined) 손대지 않는다.
+      if (isLoopbackUrl(url) && (await readLivePreviewUrl(host)) === null) {
+        const started = await host.startLivePreview();
+        if (started) {
+          return withPageState(
+            {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `${url} 은(는) 이 Studio 의 주소가 아니에요 — 라이브 서버 포트는 실행할 때마다 ` +
+                    `무작위로 정해집니다. 라이브 서버를 시작하고 브라우저에 열었어요: ${started}. ` +
+                    `앞으로 미리보기는 이 주소를 그대로 쓰세요(포트를 추측하거나 참가자에게 묻지 마세요).`,
+                },
+              ],
+            },
+            { url: started },
+          );
+        }
+        // 시작 실패(작업 폴더 없음 등)는 아래 일반 경로로 떨어진다 — 여기서
+        // 멈추면 정상적인 루프백 요청까지 막힌다.
+      }
       await host.openBrowser(url);
       // 방금 연 주소가 곧 현재 상태다 (재조회는 탭이 아직 갱신 전일 수 있어
       // 오히려 틀린 상태를 적을 위험이 있다).
       return withPageState(
-        { content: [{ type: "text", text: `브라우저에서 열었어요: ${url}` }] },
+        {
+          content: [
+            {
+              type: "text",
+              // #507 — 교정했으면 **말한다.** 조용히 바꾸면 코치는 다음 턴에도
+              // 같은 포트를 추측하고, 도구 결과와 자기 기억이 어긋난 채로 말한다.
+              text: redirectedFrom
+                ? `${redirectedFrom} 이 아니라 실제 라이브 서버 주소로 열었어요: ${url} ` +
+                  `(포트는 실행할 때마다 달라집니다 — 추측하지 말고 이 주소를 쓰세요).`
+                : `브라우저에서 열었어요: ${url}`,
+            },
+          ],
+        },
         { url },
       );
     },
