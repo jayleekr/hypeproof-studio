@@ -399,6 +399,98 @@ function makeHost(initial = null) {
   console.log("✓ #523: alreadyOpen — 열지 않되 매칭된 탭을 운전 대상으로 고정 + 상태 줄도 그 탭");
 }
 
+// #526 — "열었어요"가 사실이 아닐 때가 있다. 슬롯당 탭 하나(#519)라 같은 슬롯에
+// 탭이 있으면 그 탭이 이 주소로 **이동**하고, 보고 있던 페이지는 화면에서 사라진다.
+// 결과가 그걸 말하지 않으면 코치는 참고 사이트 둘이 나란히 떠 있다고 믿고 없는
+// 화면을 설명한다(지어낸 성공 — R0 와 같은 실패 계열).
+//
+// 슬롯 개수는 늘리지 않는다(#519 의 목적이 탭 누적 방지다). 여기서 고치는 것은
+// **한계를 숨기지 않는 것**이다.
+{
+  function makeSlotHost(replaced) {
+    const state = { opens: [] };
+    return {
+      state,
+      host: {
+        openBrowser: async (url) => {
+          state.opens.push(url);
+          return replaced ? { replaced } : undefined;
+        },
+        screenshot: async () => null,
+        startLivePreview: async () => null,
+        currentPage: async () => null,
+        openPages: async () => [],
+      },
+    };
+  }
+  const openOf = (host) => {
+    const { factory, registered } = makeFactory();
+    buildHypeproofMcpServer(factory, fakeZ, host);
+    return registered.find((t) => t.name === "browser_open");
+  };
+
+  // 양성 대조군 — 참고 슬롯에 있던 다른 사이트가 밀려나면 결과가 그것을 말한다.
+  {
+    const { host, state } = makeSlotHost({ url: "https://boaclinic.com/", title: "보아치과" });
+    const res = await openOf(host).handler({ url: "https://otherclinic.com/" }, {});
+    const text = res.content.map((c) => c.text).join("\n");
+    assert.equal(state.opens.length, 1);
+    assert.ok(text.includes("https://otherclinic.com/"), "요청한 주소는 그대로 보고한다");
+    assert.ok(text.includes("보아치과"), "밀려난 페이지를 이름으로 알려준다");
+    assert.ok(
+      text.includes("이동했어요"),
+      "밀려났다는 사실을 말해야 코치가 '나란히 떠 있다'고 착각하지 않는다",
+    );
+    assert.ok(
+      /참고 사이트 1개|번갈아/.test(text),
+      "왜 그런지(자리가 하나씩)를 같이 줘야 코치가 참가자에게 설명할 수 있다",
+    );
+    assert.ok(!res.isError, "정상 동작이다 — 오류가 아니다");
+  }
+
+  // 음성 대조군 ① — 밀려난 게 없으면 예전 문장 그대로. 없는 상실을 지어내지 않는다.
+  {
+    const { host } = makeSlotHost(undefined);
+    const res = await openOf(host).handler({ url: "https://boaclinic.com/" }, {});
+    const text = res.content.map((c) => c.text).join("\n");
+    assert.equal(text.split("\n")[0], "브라우저에서 열었어요: https://boaclinic.com/");
+    assert.ok(!text.includes("이동했어요"));
+  }
+
+  // 음성 대조군 ② — 같은 주소가 "밀려났다"고 보고돼도 참가자 눈엔 아무것도 안
+  // 사라졌다. 그걸 상실로 적으면 코치에게 없는 사실을 가르친다(정규화 차이 포함).
+  {
+    for (const same of ["https://boaclinic.com/", "https://boaclinic.com"]) {
+      const { host } = makeSlotHost({ url: same, title: "보아치과" });
+      const res = await openOf(host).handler({ url: "https://boaclinic.com/" }, {});
+      assert.ok(
+        !res.content.map((c) => c.text).join("\n").includes("이동했어요"),
+        `같은 주소(${same})는 상실이 아니다`,
+      );
+    }
+  }
+
+  // 음성 대조군 ③ — 구버전 호스트(void 반환)·기형 값에도 죽지 않는다.
+  {
+    for (const bad of [undefined, null, {}, { replaced: null }, { replaced: { title: "url 없음" } }]) {
+      const opens = [];
+      const host = {
+        openBrowser: async (url) => { opens.push(url); return bad; },
+        screenshot: async () => null,
+        startLivePreview: async () => null,
+        currentPage: async () => null,
+        openPages: async () => [],
+      };
+      const res = await openOf(host).handler({ url: "https://boaclinic.com/" }, {});
+      assert.ok(!res.isError);
+      assert.equal(opens.length, 1);
+      assert.ok(res.content.map((c) => c.text).join("\n").includes("브라우저에서 열었어요"));
+    }
+  }
+
+  console.log("✓ #526: 슬롯이 하나뿐이라 밀려난 페이지를 결과가 숨기지 않는다 (슬롯 개수는 그대로)");
+}
+
 // 탭이 아예 없으면(null) 열어야 한다 + 상태 줄은 "없음".
 {
   const { factory, registered } = makeFactory();
