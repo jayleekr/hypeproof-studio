@@ -33,6 +33,14 @@ import {
 import { capturePageContext } from "./nativeBrowser";
 import { validateAndRepairHtml, type HtmlStructureResult } from "./htmlStructure";
 import {
+  PASTED_IMAGE_DIR,
+  parsePastedImage,
+  pastedImageFailureLabel,
+  pastedImageName,
+  pastedImageNote,
+  pastedImageSavedLabel,
+} from "./pastedImages";
+import {
   ChatMessage,
   CoachInfo,
   HostMessage,
@@ -461,6 +469,93 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     } catch {
       // Non-fatal: preview still works even if the save fails.
     }
+  }
+
+  /**
+   * #421 — 붙여넣은 이미지를 `<작업폴더>/assets/` 에 실제 파일로 저장한다.
+   *
+   * 승인 게이트와의 관계 (이슈가 확인을 요청한 항목): 이건 **모델이 요청한 쓰기가
+   * 아니라 참가자가 방금 첨부한 자기 자료를 호스트가 보관하는 것**이다. 같은
+   * 계열의 선례가 이미 둘 있다 — `saveGameToWorkspace`(index.html)와
+   * `saveAgentMdIfPresent`(agent.md). 모달을 태우는 `resolveActionApproval` 은
+   * **모델발 액션**(writeFile/executeShell)의 게이트이고, 그 정책의 핵심인
+   * "워크스페이스 밖 절대경로 거절"은 여기서 구조적으로 성립한다: 경로가
+   * `resolveCoachCwd()` + 고정 하위 폴더 + mime 에서 뽑은 확장자로만 조립되고,
+   * 파일명은 참가자·모델 어느 쪽 문자열도 타지 않는다(#421 · REQ-C10~C13).
+   *
+   * 실패는 조용히 넘기지 않는다 — 저장이 안 됐는데 코치만 "있다"고 믿으면
+   * 원래 증상으로 되돌아간다. 그때는 note 를 비우고(코치는 예전처럼 없는 것으로
+   * 취급) 참가자에게 한 줄 남긴다.
+   */
+  private async savePastedImages(
+    images: string[] | undefined,
+    streamId: string,
+  ): Promise<{ note: string; relPaths: string[] }> {
+    const empty = { note: "", relPaths: [] as string[] };
+    if (!images || images.length === 0) return empty;
+    const cwd = this.resolveCoachCwd();
+    if (!cwd) return empty;
+
+    const dir = vscode.Uri.joinPath(vscode.Uri.file(cwd), PASTED_IMAGE_DIR);
+    const at = new Date();
+    const relPaths: string[] = [];
+    let failed = 0;
+    try {
+      await vscode.workspace.fs.createDirectory(dir);
+    } catch {
+      this.postToolLog(streamId, {
+        id: randomId(),
+        icon: "⚠️",
+        label: pastedImageFailureLabel(images.length),
+        state: "error",
+      });
+      return empty;
+    }
+
+    for (let i = 0; i < images.length; i++) {
+      const parsed = parsePastedImage(images[i]);
+      if (!parsed) {
+        failed++;
+        continue;
+      }
+      try {
+        // 같은 초에 같은 순번이 이미 있으면 이름을 올려 가며 빈 자리를 찾는다.
+        // 덮어쓰면 참가자가 앞서 붙인 사진이 소리 없이 사라진다.
+        let name = pastedImageName(at, i + 1, parsed.ext);
+        for (let dedupe = 1; dedupe <= 20; dedupe++) {
+          try {
+            await vscode.workspace.fs.stat(vscode.Uri.joinPath(dir, name));
+          } catch {
+            break; // stat 실패 = 없음 = 이 이름을 쓴다
+          }
+          name = pastedImageName(at, i + 1, parsed.ext, dedupe);
+        }
+        await vscode.workspace.fs.writeFile(
+          vscode.Uri.joinPath(dir, name),
+          Buffer.from(parsed.base64, "base64"),
+        );
+        relPaths.push(`${PASTED_IMAGE_DIR}/${name}`);
+      } catch {
+        failed++;
+      }
+    }
+
+    if (failed > 0) {
+      this.postToolLog(streamId, {
+        id: randomId(),
+        icon: "⚠️",
+        label: pastedImageFailureLabel(failed),
+        state: "error",
+      });
+    }
+    if (relPaths.length === 0) return empty;
+    this.postToolLog(streamId, {
+      id: randomId(),
+      icon: "🖼️",
+      label: pastedImageSavedLabel(relPaths),
+      state: "done",
+    });
+    return { note: pastedImageNote(relPaths, cwd), relPaths };
   }
 
   /** #278 Phase 1 — does this cohort's profile request the native live-server preview? */
@@ -923,7 +1018,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #308 — the notice describes the queued context; once consumed, stop
     // resurrecting it on webview remounts (webview clears its copy on userSent).
     this.pendingPageNotice = null;
-    const userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
+    let userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
     // #278 Phase 2 — fold any queued page screenshot into this turn's images.
     const pageImage = this.pendingPageImage;
     this.pendingPageImage = null;
@@ -938,6 +1033,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #503 — 이 턴의 단일 타임라인. 웹뷰와 같은 리듀서를 돌려 화면 순서 그대로
     // 히스토리에 남긴다.
     this.turnTimelines.set(streamId, timelineStart(emptyTimeline(), messageId, Date.now()));
+
+    // #421 — 붙여넣은 이미지를 작업 폴더에 파일로 남기고, 그 경로를 이 턴의
+    // 모델 입력에 얹는다. 저장하지 않으면 코치가 `<img src>` 로 걸 대상이 없어
+    // "파일로 저장해 주시겠어요?" 라고 참가자에게 일을 떠넘긴다(2026-07-24 실강의).
+    //
+    // `images` 만 저장한다 — `pageImage`(#278 "이 페이지를 코치에게") 는 참가자가
+    // 간직하겠다고 붙인 자료가 아니라 브라우저 캡처라, 저장하면 작업 폴더가
+    // 참가자가 요청한 적 없는 파일로 찬다.
+    const savedImages = await this.savePastedImages(images, streamId);
+    if (savedImages.note) userTextForModel = `${userTextForModel}\n\n${savedImages.note}`;
 
     let assistantText = "";
     // REQ-D2: auto-reveal as soon as a renderable HTML block completes in
