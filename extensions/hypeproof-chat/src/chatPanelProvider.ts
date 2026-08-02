@@ -8,7 +8,12 @@ import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
-import { originOfUrl, planCoachBrowserTabs, coachTabSlot } from "./browserControlHelpers";
+import {
+  originOfUrl,
+  planCoachBrowserTabs,
+  coachTabSlot,
+  isSameBrowserUrl,
+} from "./browserControlHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -654,6 +659,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         (vscode.window.browserTabs ?? [])
           .filter((t) => !!t.url)
           .map((t) => ({ url: t.url, title: t.title })),
+      // #523 — "이미 열려 있다"로 판정된 탭을 운전 대상으로 고정한다. openPages 가
+      // URL 만 넘기므로(탭 핸들은 이 경계를 넘지 않는다) 여기서 다시 찾는다 —
+      // 판정과 **같은 비교 함수**로 찾아야 판정된 탭과 고정된 탭이 갈라지지 않는다.
+      //
+      // 시각적으로 앞에 가져오지는 못한다: proposed API 의 BrowserTab 에는
+      // close()/startCDPSession() 뿐이고 show()/reveal() 이 없다. 유일한 우회로인
+      // openBrowserTab(url) 재호출은 새 탭을 만들어 #519 를 되돌린다. 참가자 화면에
+      // 보이게 하는 것은 fork 의 proposed API 확장이 필요한 별건이다 (#523).
+      focusOpenPage: async (url: string) => {
+        const tab = (vscode.window.browserTabs ?? []).find(
+          (t) => !!t.url && isSameBrowserUrl(t.url, url),
+        );
+        if (!tab?.url) return null;
+        this.mcpBrowser ??= new BrowserControl();
+        this.mcpBrowser.setTargetTab(tab);
+        return { url: tab.url, title: tab.title };
+      },
       // #457 — 검사 3종(read/click/type)을 CDP 실행기에 그대로 위임한다.
       // 프록시 경로(#278)가 쓰던 BrowserControl 을 재사용한다 — 같은 동작을 두 벌
       // 구현하면 한쪽만 고쳐지는 버그가 생긴다. 인스턴스는 여기서 lazily 만들고
