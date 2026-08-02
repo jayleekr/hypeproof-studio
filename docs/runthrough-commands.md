@@ -173,6 +173,10 @@ browser_click(e7) — 실패: e7를 찾을 수 없어요
 저장소  30s · git 호출 0회 · gh api 로 실재 확인
 배포    82s · Pages build_type=workflow · curl -sIL 로 200 확인 후 주소 발설
         404 구간에서 재배포 대신 12회 폴링으로 대기
+
+#500 이후 추가로 볼 것: 코치가 `PUT /pages` **직후에** 워크플로 파일을 올리는가.
+그러면 `configure-pages` 가 `HttpError: Not Found` 로 죽는다(프로비저닝 비동기).
+`build_type=workflow` 를 확인하는 대기 루프가 업로드보다 **먼저** 나와야 한다.
 ```
 
 **돌릴 때마다 공개 저장소가 생긴다** — 테스트 계정이나 정리 계획을 정하고 시작한다.
