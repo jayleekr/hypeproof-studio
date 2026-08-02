@@ -8,7 +8,7 @@ import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
-import { originOfUrl, coachTabsToClose } from "./browserControlHelpers";
+import { originOfUrl, planCoachBrowserTabs, coachTabSlot } from "./browserControlHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl } from "./browserControl";
@@ -520,8 +520,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const isPreviewTab = (u?: string): boolean =>
         !!u && /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(u);
       const current = tabs.find((t) => t.url?.startsWith(url));
+      // #519 — 아래에서 프리뷰 탭을 코치의 운전 대상으로 고정한다. `?.` 로 두면
+      // live_preview_start 가 첫 도구 호출일 때(인스턴스가 아직 없다) 고정이
+      // 조용히 날아가고, 뒤이은 screenshot 이 다시 activeBrowserTab 에 의존한다.
+      this.mcpBrowser ??= new BrowserControl();
       if (current) {
         this.liveServer.reload();
+        // #519 — 코치가 이어서 screenshot/read 를 부를 때 이 탭이 대상이 되도록
+        // 고정한다. 이 경로는 `preserveFocus: true` 로 열기 때문에 activeBrowserTab
+        // 이 안 잡힐 수 있고, 그때 검사 도구가 "열린 탭이 없어요"로 실패했다.
+        this.mcpBrowser.setTargetTab(current);
       } else {
         for (const t of tabs) {
           if (isPreviewTab(t.url)) {
@@ -537,10 +545,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // would open the preview next to that empty group, leaving a blank pane
         // between the chat sidebar and the preview. ViewColumn.One fills the main
         // editor area so the layout is just: chat sidebar | preview.
-        await vscode.window.openBrowserTab(url, {
+        const opened = await vscode.window.openBrowserTab(url, {
           viewColumn: vscode.ViewColumn.One,
           preserveFocus: true,
         });
+        this.mcpBrowser.setTargetTab(opened);
       }
       return url;
     } catch {
@@ -558,23 +567,53 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private buildBrowserMcpHost(): BrowserMcpHost {
     return {
       openBrowser: async (url: string) => {
-        // 코치 브라우징 탭은 하나로 유지한다. 재사용 없이 매번 새로 열면 탭이
-        // 쌓이고(실측: 3개, 그중 하나는 404), 스크린샷이 쓰는 activeBrowserTab 이
-        // 방금 연 탭이 아니게 될 수 있다. 라이브 프리뷰(루프백)는 건드리지 않는다.
+        // #519 — **여는 게 아니라 이동한다.**
+        //
+        // `openBrowserTab` 은 부를 때마다 새 에디터를 만든다(mainThreadBrowsers 가
+        // 매번 새 UUID 를 뽑는다) — 플랫폼에는 URL 재사용이 아예 없다. 전에는 그
+        // 위에 "닫고 새로 열기"를 얹었는데, 루프백(참가자 결과물)은 정리 대상에서
+        // 빠져 있어 하위 페이지를 돌 때마다 탭이 쌓였다. 이제 슬롯(결과물/참고)당
+        // 탭 하나를 잡아 CDP 로 이동시킨다: 탭도 컬럼도 늘지 않고, 페이지
+        // 히스토리(browser_back)가 살아 있고, 참가자가 보던 다른 슬롯은 그대로다.
         const tabs = vscode.window.browserTabs ?? [];
-        for (const i of coachTabsToClose(tabs.map((t) => t.url), url)) {
+        const plan = planCoachBrowserTabs(tabs.map((t) => t.url), url);
+        // 같은 슬롯에 이미 쌓여 있던 잉여 탭만 정리한다(레거시 누적분).
+        for (const i of plan.close) {
           try {
             await tabs[i]?.close();
           } catch {
-            /* 못 닫는 탭이 열기를 막아서는 안 된다 */
+            /* 못 닫는 탭이 이동을 막아서는 안 된다 */
           }
         }
-        // URL already passed evaluateSdkToolUse's policy + the approval modal;
-        // the shared command normalizes and opens the integrated browser tab.
-        await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
+        this.mcpBrowser ??= new BrowserControl();
+        if (plan.reuse !== null) {
+          // 재사용 탭을 고정한 뒤 CDP navigate — 프록시 경로(#278)가 쓰는 실행기를
+          // 그대로 태운다. 같은 동작을 두 벌 두면 한쪽만 고쳐진다(#457 과 같은 이유).
+          this.mcpBrowser.setTargetTab(tabs[plan.reuse]);
+          const r = await this.mcpBrowser.execute({
+            id: "mcp-browser_open",
+            name: "browser_navigate",
+            input: { url },
+          });
+          if (!r.isError) return;
+          // 이동 실패(탭이 방금 닫혔다든지)는 새로 여는 쪽으로 폴백한다 —
+          // 학생 눈에는 "안 열렸다"가 되어선 안 된다.
+          this.mcpBrowser.setTargetTab(undefined);
+        }
+        // 슬롯이 비었으면 새로 연다. 컬럼을 **명시**하는 이유: `Beside`(SIDE_GROUP)는
+        // 활성 그룹 오른쪽 이웃을 찾고 없으면 새 그룹을 만든다. 방금 연 브라우저
+        // 탭이 활성(=맨 오른쪽)이면 다음 호출마다 컬럼이 갈라져 작업 공간이 좁아진다.
+        // preserveFocus 는 그 활성화 자체를 막고, 포커스가 없어도 탭 핸들로 운전한다.
+        const opened = await vscode.window.openBrowserTab(url, {
+          viewColumn:
+            coachTabSlot(url) === "preview" ? vscode.ViewColumn.One : vscode.ViewColumn.Two,
+          preserveFocus: true,
+        });
+        this.mcpBrowser.setTargetTab(opened);
       },
       screenshot: async () => {
-        const tab = vscode.window.activeBrowserTab;
+        // #519 — 폴백 경로도 운전 중인 탭을 먼저 본다(위 currentPage 와 같은 이유).
+        const tab = this.mcpBrowser?.currentTab() ?? vscode.window.activeBrowserTab;
         if (!tab) return null;
         try {
           const ctx = await capturePageContext(tab);
@@ -596,14 +635,25 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
       },
       startLivePreview: () => this.startLivePreview(),
-      // #415 — 지금 떠 있는 페이지를 가장 싸게 읽는 경로. `activeBrowserTab` 은
-      // url/title 을 그대로 들고 있어 CDP 접속도 스크린샷도 필요 없다
-      // (URL 하나 알자고 이미지를 뜨면 토큰도 시간도 낭비).
+      // #415 — 지금 떠 있는 페이지를 가장 싸게 읽는 경로. BrowserTab 은 url/title 을
+      // 그대로 들고 있어 CDP 접속도 스크린샷도 필요 없다 (URL 하나 알자고 이미지를
+      // 뜨면 토큰도 시간도 낭비).
+      //
+      // #519 — 여기서 `activeBrowserTab` 만 보면 안 된다. 그 값은 활성 에디터가
+      // 브라우저일 때만 세팅되므로, 참가자가 코드 탭을 클릭한 순간 "열린 페이지
+      // 없음"이 되어 중복 방지가 조용히 꺼졌다(같은 페이지를 또 열고 승인 모달이
+      // 또 뜬다). 코치가 운전 중인 탭을 먼저 보고, 없을 때만 활성 탭으로 폴백한다.
       currentPage: async () => {
-        const tab = vscode.window.activeBrowserTab;
+        const tab = this.mcpBrowser?.currentTab() ?? vscode.window.activeBrowserTab;
         if (!tab?.url) return null;
         return { url: tab.url, title: tab.title };
       },
+      // #519 — 중복 판정용. 슬롯이 둘이므로 "지금 보는 페이지" 하나로는 이미 떠
+      // 있는 다른 슬롯을 놓치고 불필요한 승인 모달이 뜬다.
+      openPages: async () =>
+        (vscode.window.browserTabs ?? [])
+          .filter((t) => !!t.url)
+          .map((t) => ({ url: t.url, title: t.title })),
       // #457 — 검사 3종(read/click/type)을 CDP 실행기에 그대로 위임한다.
       // 프록시 경로(#278)가 쓰던 BrowserControl 을 재사용한다 — 같은 동작을 두 벌
       // 구현하면 한쪽만 고쳐지는 버그가 생긴다. 인스턴스는 여기서 lazily 만들고

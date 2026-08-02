@@ -107,6 +107,17 @@ export interface BrowserMcpHost {
    */
   currentPage?(): Promise<BrowserPage | null>;
   /**
+   * #519 — 지금 **열려 있는 모든** 페이지. 중복 판정(resolveAlreadyOpen)이 쓴다.
+   *
+   * `currentPage` 하나로는 부족하다: 코치 브라우징은 슬롯이 둘이다(참가자 결과물 /
+   * 참고 사이트). 참고 사이트를 보는 중에 결과물 주소를 요청받으면 "지금 페이지"와
+   * 다르다는 이유로 이미 떠 있는 페이지에 승인 모달이 또 뜬다 — #415 가 없애려던
+   * 바로 그 잡음이다.
+   *
+   * optional 인 이유는 currentPage 와 같다: 없으면 currentPage 로 폴백한다.
+   */
+  openPages?(): Promise<BrowserPage[] | null>;
+  /**
    * #457 — CDP 검사 도구 위임. `browserControl.ts` 의 execute() 를 그대로 태운다
    * (browser_read / browser_click / browser_type). optional 인 이유는
    * currentPage 와 같다: 이 능력이 없는 호스트에서도 나머지 도구는 동작해야 한다.
@@ -158,7 +169,25 @@ export async function resolveAlreadyOpen(
   const url = safeNavigateUrl(typeof rawUrl === "string" ? rawUrl : "");
   if (!url) return { url: null, current: undefined, alreadyOpen: false };
   const current = await readCurrentPage(host);
-  return { url, current, alreadyOpen: !!current && isSameBrowserUrl(current.url, url) };
+  // #519 — 열린 탭 **전부**와 비교한다(호스트가 알려줄 때만). 슬롯이 둘이라
+  // "지금 보고 있는 페이지"만으로는 이미 떠 있는 다른 슬롯을 놓친다.
+  const open = await readOpenPages(host);
+  const alreadyOpen = open
+    ? open.some((p) => isSameBrowserUrl(p.url, url))
+    : !!current && isSameBrowserUrl(current.url, url);
+  return { url, current, alreadyOpen };
+}
+
+/** 열린 페이지 목록 조회. 지원 안 함/실패 → undefined (짐작하지 않는다). */
+async function readOpenPages(host: BrowserMcpHost): Promise<BrowserPage[] | undefined> {
+  if (typeof host.openPages !== "function") return undefined;
+  try {
+    const pages = await host.openPages();
+    if (!Array.isArray(pages)) return undefined;
+    return pages.filter((p) => p && typeof p.url === "string" && p.url);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
