@@ -241,6 +241,9 @@ chat.post("/chat/completions", async (c) => {
   const coach: CoachContext = {
     name: decodeHeader(c.req.header("x-hps-coach-name")),
     personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+    // #507 — 프록시 경로의 브라우저 루프도 같은 주소를 알아야 한다. 클라이언트는
+    // 주소만 보내고, 문구는 워커가 만든다(주입 통로가 되지 않게).
+    previewUrl: decodeHeader(c.req.header("x-hps-preview-url")),
   };
 
   // #9c trace hook — client opts in by POST /v1/trace/event{trialStart} and

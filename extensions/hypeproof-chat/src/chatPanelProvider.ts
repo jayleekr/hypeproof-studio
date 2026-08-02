@@ -13,10 +13,11 @@ import {
   planCoachBrowserTabs,
   coachTabSlot,
   isSameBrowserUrl,
+  resolveLivePreviewUrl,
 } from "./browserControlHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
-import { BrowserControl } from "./browserControl";
+import { BrowserControl, type BrowserToolCall } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import { extractAgentMd } from "./agentHandoff";
 import {
@@ -563,6 +564,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * #507 — 프록시 경로(#278)의 `browser_navigate` 를 실행 직전에 교정한다.
+   *
+   * 코치는 라이브 서버 주소를 모르면 `127.0.0.1:3000` 같은 흔한 포트를 반사적으로
+   * 찍는다(코드 어디에도 3000 은 없다 — 모델의 추측이다). 라이브 서버는 매 실행
+   * `listen(0)` 으로 임의 포트를 받으므로 그 주소는 항상 비어 있고,
+   * `ERR_CONNECTION_REFUSED` 로 끝난다. Run 버튼은 URL 을 직접 받으므로 멀쩡했고,
+   * 코치만 이 경로가 없어서 실패했다 (#470 재발).
+   *
+   * 서버가 안 떠 있으면 교정하지 않는다 — 짐작으로 고치지 않는다(모르면 그대로).
+   */
+  private retargetLoopbackNavigation(call: BrowserToolCall): {
+    call: BrowserToolCall;
+    note?: string;
+  } {
+    if (call.name !== "browser_navigate") return { call };
+    const requested = String(call.input?.url ?? "");
+    const target = resolveLivePreviewUrl(requested, this.liveServer.currentUrl());
+    if (!target?.redirected) return { call };
+    return {
+      call: { ...call, input: { ...call.input, url: target.url } },
+      note:
+        `참고: ${target.requested} 은(는) 이 Studio 의 주소가 아니라 실제 라이브 서버 주소 ` +
+        `${target.url} 로 이동했어요. 라이브 서버 포트는 실행할 때마다 달라지니 ` +
+        `추측하지 말고 이 주소를 쓰세요.`,
+    };
+  }
+
+  /**
    * #282 P2 slice 2 — host capabilities behind the "hypeproof" MCP browser
    * tools. Registered by runSdkCoach only when the profile grants
    * sdk_tools.browser (adults; minors are stripped). Silent by design: MCP
@@ -640,6 +669,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
       },
       startLivePreview: () => this.startLivePreview(),
+      // #507 — 지금 떠 있는 라이브 서버 주소. 시작시키지 않는다(조회에 부작용을
+      // 두면 "주소가 뭐냐"가 서버를 켜게 된다). 이게 유일한 진실이고, 이걸 안
+      // 읽는 쪽은 전부 추측이다 — 그 추측이 127.0.0.1:3000 이었다.
+      livePreviewUrl: async () => this.liveServer.currentUrl() ?? null,
       // #415 — 지금 떠 있는 페이지를 가장 싸게 읽는 경로. BrowserTab 은 url/title 을
       // 그대로 들고 있어 CDP 접속도 스크린샷도 필요 없다 (URL 하나 알자고 이미지를
       // 뜨면 토큰도 시간도 낭비).
@@ -1061,6 +1094,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           signal: ctrl.signal,
           coachName: effectiveCoachName,
           coachPersonality: effectiveCoachPersonality,
+          // #507 — 떠 있는 라이브 서버 주소를 매 턴 실어 보낸다. 없으면 생략:
+          // 워커가 "아직 안 떠 있다 + 포트를 추측하지 마라"를 대신 말한다.
+          previewUrl: this.liveServer.currentUrl(),
           onDelta,
           onCitations,
           onAssetScore,
@@ -1096,6 +1132,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // 프로필이 workspace_root 를 이미 알고 있으므로 그걸로 폴백한다.
             // 두 소스가 모두 없을 때만 undefined 로 두고, 그 경우는 소리 나게 남긴다.
             cwd: this.resolveCoachCwd(),
+            // #507 — 떠 있는 라이브 서버 주소(없으면 생략). MCP 도구 결과로도
+            // 알려주지만, 턴 시작 시점의 컨텍스트에 있어야 첫 이동부터 맞는다.
+            previewUrl: this.liveServer.currentUrl(),
             // #282 W4a — explicit claude-binary override (highest priority in
             // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
             // seeded > node_modules). Empty string = unset.
@@ -1246,6 +1285,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           signal: p.signal,
           coachName: p.coachName,
           coachPersonality: p.coachPersonality,
+          // #507 — 루프 안에서 매 턴 다시 읽는다: live_preview_start 로 방금 뜬
+          // 서버 주소가 다음 턴 컨텍스트에 들어가야 추측할 이유가 사라진다.
+          previewUrl: this.liveServer.currentUrl(),
           onDelta: p.onDelta,
           onCitations: p.onCitations,
           onAssetScore: (s) => {
@@ -1278,14 +1320,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         const toolResults: unknown[] = [];
         for (const call of result.toolUses) {
           if (p.signal.aborted) return;
-          const line = browserToolLogLine(call.name, call.input);
+          // #507 — 추측된 루프백 포트를 실제 라이브 서버로 교정한 뒤 실행한다.
+          // **로그를 만들기 전에** 고친다: 화면 줄이 요청한 주소를 보여주면
+          // 참가자는 실제로 열린 곳과 다른 주소를 읽게 된다.
+          const fixed = this.retargetLoopbackNavigation(call);
+          const line = browserToolLogLine(fixed.call.name, fixed.call.input);
           this.postToolLog(p.streamId, { id: call.id, ...line, state: "running" });
-          const tr = await browser.execute(call);
+          const tr = await browser.execute(fixed.call);
           this.postToolLog(p.streamId, { id: call.id, ...line, state: tr.isError ? "error" : "done" });
           toolResults.push({
             type: "tool_result",
             tool_use_id: call.id,
-            content: tr.content,
+            // 교정했으면 모델에게도 말한다 — 조용히 고치면 다음 턴에 또 추측한다.
+            content: fixed.note
+              ? [...tr.content, { type: "text" as const, text: fixed.note }]
+              : tr.content,
             ...(tr.isError ? { is_error: true } : {}),
           });
         }

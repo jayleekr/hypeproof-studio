@@ -132,6 +132,8 @@ interface ProxyChatArgs {
   onToolUse?: (block: ToolUseBlock) => void;
   coachName?: string;
   coachPersonality?: string;
+  /** #507 — 지금 떠 있는 라이브 서버 주소(없으면 생략). 워커가 문구를 만든다. */
+  previewUrl?: string;
 }
 
 // Streaming OpenAI-compatible chat completion call against the HypeProof Proxy.
@@ -152,6 +154,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
     onToolUse,
     coachName,
     coachPersonality,
+    previewUrl,
   } = args;
 
   // History is sent text-only (drops any in-memory thumbnails from earlier
@@ -176,7 +179,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
   ];
 
   const url = proxyUrl.replace(/\/$/, "") + "/chat/completions";
-  const headers = buildProxyHeaders({ token, coachName, coachPersonality });
+  const headers = buildProxyHeaders({ token, coachName, coachPersonality, previewUrl });
 
   const res = await fetch(url, {
     method: "POST",

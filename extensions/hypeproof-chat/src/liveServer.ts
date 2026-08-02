@@ -45,6 +45,20 @@ export class LiveServer {
     return this.startPromise;
   }
 
+  /**
+   * #507 — the base URL of the RUNNING server, or undefined when nothing is
+   * serving. Never starts anything: callers that only need to tell the coach
+   * "the preview lives here" must not have the side effect of booting a server.
+   *
+   * This is the single source of truth for the preview address. The port is
+   * chosen by the OS on every start (`listen(0)`), so anyone who does not read
+   * it here is guessing — which is exactly how the coach ended up navigating
+   * to a dead `127.0.0.1:3000`.
+   */
+  currentUrl(): string | undefined {
+    return this.server ? this.baseUrl : undefined;
+  }
+
   /** Push a reload to all connected browser pages. */
   reload(): void {
     for (const res of this.sseClients) {

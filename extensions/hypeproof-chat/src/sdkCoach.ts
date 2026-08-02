@@ -109,6 +109,12 @@ export interface SdkCoachArgs {
   signal: AbortSignal;
   /** Workspace root for the SDK's file tools (Phase-2 tiers). */
   cwd?: string;
+  /**
+   * #507 — 지금 떠 있는 라이브 서버 주소(없으면 생략). 워커가 헤더로 받아
+   * 시스템 블록에 넣는다. 이 값이 없던 것이 코치가 `127.0.0.1:3000` 을
+   * 반사적으로 추측하던 원인이다 — 주소를 알 통로가 아예 없었다.
+   */
+  previewUrl?: string;
   onDelta: (delta: string) => void;
   /**
    * #414 — what the coach is DOING (thinking / tool calls / results), so the
@@ -527,6 +533,9 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       // 코치가 "여기 뭐가 있지"를 툴로 묻지 않게 미리 준다. 실측에서 이 탐색이
       // 한 턴의 80%를 먹었다.
       workspaceFiles: listWorkspaceFiles(args.cwd),
+      // #507 — 떠 있는 라이브 서버 주소(없으면 생략). 코치가 미리보기 포트를
+      // 추측하던 유일한 이유는 이 값이 컨텍스트에 없었기 때문이다.
+      ...(args.previewUrl ? { previewUrl: args.previewUrl } : {}),
     }),
     // Every tool call routes here (allowedTools is empty — an entry there
     // would auto-approve and bypass this gate). The pure policy matrix
