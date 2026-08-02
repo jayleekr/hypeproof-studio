@@ -296,3 +296,14 @@ Anthropic 미성년자 가이드(#282 의 2026-07-13 라이선싱 코멘트) 구
 | REQ-O5 | 로그 위생 | 차단 로그(console.error + Analytics `moderation_block` datapoint)는 category + rule id + FNV hash 만 — 매칭된 텍스트 verbatim 절대 금지 | R (`worker/test/moderation.test.mjs`) |
 | REQ-O6 | Age-verification 설계 노트 | [docs/age-verification.md](./age-verification.md) 유지 — 수강등록+roster+토큰 게이트가 minors-guide 의 "only intended users" 요건을 충족한다는 논거 + 잔여 갭 추적 | M (문서 리뷰) |
 | REQ-O7 | False-positive 회귀 목록 | 검색/색상/이야기한(야한)/유니섹스(섹스)/게임 속 몬스터 처치/사이트 주소/전화번호 입력 화면 등 benign 한국어가 절대 차단되지 않음 — 룰 추가 PR 은 이 목록을 통과해야 머지 | R (`worker/test/moderation.test.mjs`) |
+
+## P. 배포 자동화 (코치 스킬 · #431 결과물 2번)
+
+배포 절차는 코드가 아니라 **스킬 마크다운**(`worker/src/skills/publish-homepage.md`)에
+있다 — 코치가 셸로 직접 수행하는 실행 절차다. 그래서 회귀도 "함수가 틀렸다"가 아니라
+**"절차의 순서가 틀렸다"** 로 나타나고, 테스트도 순서를 잰다.
+
+| ID | 요구사항 | 수용 기준 | Layer |
+|---|---|---|---|
+| REQ-P1 | Pages 프로비저닝을 기다린 뒤 워크플로를 올린다 (#500) | `gh api -X PUT .../pages -f build_type=workflow` 의 **2xx 는 접수 확인이지 준비 완료가 아니다** — 백엔드 프로비저닝은 비동기라, 곧바로 워크플로 파일을 올리면 push 로 실행이 걸리고 `actions/configure-pages@v5` 가 활성 Pages 환경을 못 찾아 `HttpError: Not Found` 로 죽는다(2026-07-28 실측: 3연속 실패 중 2건). GitHub UI 의 "Static HTML ▸ Configure" 버튼이 되는 이유도 기능이 아니라 **순서**다 — 프로비저닝이 끝난 뒤에 워크플로를 쓴다. 계약: ① PUT 후 `repos/{owner}/{repo}/pages` 의 `build_type` 이 `workflow` 로 보일 때까지 **끝나는 루프**(12회×5s, bash/PowerShell 양쪽 제공)로 대기 — 스킬 자신의 규칙대로 `until` 금지(끝나지 않는 루프는 수업을 세운다); ② 준비 확인 전에는 **워크플로를 올리지 않는다** — 올려봐야 실패한 빨간 실행 기록만 남는다; ③ 실패 표에 `configure-pages ▸ Not Found` 행을 두고 재실행(`workflow_dispatch`) 경로를 준다 | R (`worker/test/smoke.mjs` §profile-snapshot — **순서 판정**: 대기 표식이 워크플로 업로드보다 앞선다. 양성/음성 대조군으로 계측기 검증) |
+| REQ-P2 | `pages.yml` 재작성은 최신 `sha` 와 함께, 한 번에 (#500) | 이미 있는 파일을 `sha` 없이 PUT 하면 409 고, 브라우저 편집과 API 덮어쓰기를 번갈아 하면 내용이 중복·병합돼 **YAML 파싱 자체가 실패**한다(`This workflow graph cannot be shown` — 워크플로가 실패한 게 아니라 읽히지도 않은 것). 계약: ① 재업로드는 `contents/... --jq .sha` 로 최신 sha 를 받아 `-f sha=` 로 넘긴다; ② 한 파일을 두 통로(브라우저 편집 / `gh api`)로 번갈아 건드리지 않는다; ③ 이미 깨졌으면 부분 수정하지 말고 **전체를 한 번에** 다시 쓴다 | R (`worker/test/smoke.mjs` — 재업로드 절차에 sha 가 살아 있다) |

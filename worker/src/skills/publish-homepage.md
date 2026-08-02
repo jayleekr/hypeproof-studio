@@ -53,7 +53,41 @@ Windows에서는 `curl.exe`로 써라 — PowerShell의 `curl`은 `Invoke-WebReq
 gh api -X PUT repos/{owner}/<이름>/pages -f build_type=workflow
 ```
 
-그다음 워크플로 파일을 올린다(내용을 base64로 감싸 Contents API로):
+#### 여기서 바로 워크플로를 올리면 실패한다 — 먼저 기다려라
+
+**이 명령의 2xx 는 "Pages 가 준비됐다"는 뜻이 아니다.** API 는 요청을 받았다고
+답하고 실제 프로비저닝은 **비동기로** 뒤따른다. 준비되기 전에 워크플로가 돌면
+`actions/configure-pages@v5` 가 활성 Pages 환경을 못 찾고 죽는다:
+
+```
+Error: HttpError: Not Found
+```
+
+2026-07-28 실측: 이 순서 때문에 배포가 **3회 연속 실패**했다(#500). GitHub UI 의
+"Static HTML ▸ Configure" 버튼이 되는 이유도 순서다 — 그 버튼은 **프로비저닝이
+끝난 뒤에** 워크플로 파일을 쓴다. 우리도 같은 순서를 지키면 된다.
+
+그러니 워크플로를 올리기 **전에**, Pages 가 실제로 `workflow` 로 잡혔는지
+확인될 때까지 기다린다. 끝나는 루프로 — 여기서도 `until` 은 쓰지 마라:
+
+```
+for i in $(seq 1 12); do
+  ready=$(gh api repos/{owner}/<이름>/pages --jq .build_type 2>/dev/null)
+  [ "$ready" = "workflow" ] && echo "pages ready" && break
+  sleep 5
+done
+```
+
+Windows(PowerShell)에서는:
+
+```
+powershell -NoProfile -Command 'for ($i=0; $i -lt 12; $i++) { $r = gh api repos/{owner}/<이름>/pages --jq .build_type 2>$null; if ($r -eq "workflow") { "pages ready"; break }; Start-Sleep 5 }'
+```
+
+`pages ready` 가 안 나오면 **워크플로를 올리지 마라.** 올려봐야 위의 Not Found 로
+죽고, 참가자는 실패한 빨간 실행 기록만 본다. 그때는 `막혔을 때` 표로 간다.
+
+준비된 것을 확인했으면 워크플로 파일을 올린다(내용을 base64로 감싸 Contents API로):
 
 ```yaml
 name: pages
@@ -91,6 +125,34 @@ Windows에는 `base64`가 없을 수 있다. 그때는 PowerShell로 만든다(�
 ```
 powershell -NoProfile -Command '[Convert]::ToBase64String([IO.File]::ReadAllBytes("<워크플로파일>"))'
 ```
+
+#### 같은 파일을 두 번째 쓸 때 — `sha` 없이 덮어쓰지 마라
+
+위 명령은 **파일이 없을 때만** 통한다. 이미 있는 `pages.yml` 을 `sha` 없이
+다시 PUT 하면 409 가 나고, 그 상태에서 브라우저 편집과 API 덮어쓰기를 번갈아
+하면 내용이 **중복·병합되어 YAML 자체가 깨진다**. 2026-07-28 실측(#500) 3번째
+시도가 정확히 이것이었고, 증상은 파싱조차 안 되는 상태다:
+
+```
+This workflow graph cannot be shown
+```
+
+워크플로가 실행에 실패한 게 아니라 **읽히지도 않은** 것이다. 규칙 두 개:
+
+- 다시 쓸 때는 **최신 `sha` 를 먼저 받아서** 같이 넘긴다:
+
+  ```
+  sha=$(gh api repos/{owner}/<이름>/contents/.github/workflows/pages.yml --jq .sha)
+  gh api -X PUT repos/{owner}/<이름>/contents/.github/workflows/pages.yml \
+    -f message="Pages 배포 설정 수정" -f content="$(base64 -i <워크플로파일>)" -f sha="$sha"
+  ```
+
+- **한 파일을 브라우저 편집과 `gh api` 로 번갈아 건드리지 마라.** 참가자에게
+  브라우저에서 고쳐 달라고 했다면, 그 뒤 API 로 덮어쓰기 전에 반드시 `sha` 를
+  다시 받는다. 편집 통로를 하나로 정하는 편이 더 안전하다.
+
+깨진 뒤에는 고치려 하지 말고 **내용 전체를 한 번에 다시 써라**(위 `sha` 방식).
+반쪽짜리 YAML 을 손보는 것은 시간만 태운다.
 
 파일이 올라가면 push 이벤트로 워크플로가 돌고 1~2분 뒤 주소가 열린다.
 
@@ -236,6 +298,8 @@ cloudflared tunnel --url http://127.0.0.1:<확인한 포트>
 | 증상 | 대응 |
 |---|---|
 | Pages 가 `building` 에서 안 넘어감 | **레거시로 켜진 것이다.** `actions/runs` 에서 `startup_failure` 를 확인하고 위의 Actions 방식으로 다시 켠다. 재빌드 요청(`POST /pages/builds`)은 소용없다 — 실측으로 확인됨 |
+| 실행 로그에 `configure-pages` 에서 `HttpError: Not Found` | **Pages 프로비저닝 전에 워크플로가 돌았다** (#500). `PUT /pages` 의 2xx 는 준비 완료가 아니다. 위의 대기 루프로 `build_type=workflow` 를 확인한 뒤, 워크플로를 다시 돌린다(`gh api -X POST repos/{owner}/<이름>/actions/workflows/pages.yml/dispatches -f ref=main`). 12회 폴링에도 준비가 안 되면 참가자와 함께 Settings▸Pages 를 열어 본다 — 코치가 대신 클릭하지 않는다 |
+| `This workflow graph cannot be shown` / 워크플로가 아예 안 도는데 파일은 있음 | **`pages.yml` 이 깨졌다** (#500). `sha` 없는 덮어쓰기와 브라우저 편집이 섞이면 내용이 중복·병합돼 파싱이 안 된다. 내용 전체를 최신 `sha` 와 함께 **한 번에** 다시 쓴다. 반쪽 YAML 을 손보지 마라 |
 | Pages 주소가 404 (빌드는 success) | 1~2분 더 기다린다. 워크플로가 success면 곧 열린다 |
 | 저장소는 됐는데 Pages API 실패 | Settings▸Pages 를 브라우저로 열어 **참가자와 같이 본다** — 코치가 대신 클릭하지 않는다 |
 | 다운로드가 느림/실패 | 행사장 와이파이일 수 있다. 터널(18MB)이 `gh`보다 가볍다 |
