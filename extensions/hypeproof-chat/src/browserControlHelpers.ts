@@ -189,6 +189,63 @@ export function planCoachBrowserTabs(
   return { reuse, close: sameSlot.filter((i) => i !== reuse) };
 }
 
+/** `pickRevealTabIndex` 입력 — `vscode.Tab` 에서 필요한 것만 추린 순수 형태. */
+export interface RevealCandidate {
+  /** 그룹 안에서의 인덱스. `workbench.action.openEditorAtIndex` 가 쓰는 값(0-based). */
+  index: number;
+  /** 탭 라벨 = 코어의 `EditorInput.getName()`. */
+  label: string;
+  /** `tab.input === undefined` 인가. */
+  inputIsUndefined: boolean;
+  /** 이미 그 그룹의 활성 탭인가. */
+  isActive: boolean;
+}
+
+/**
+ * 이 컬럼에서 **앞으로 가져올 브라우저 탭**의 인덱스 (#525). 확실하지 않으면 null.
+ *
+ * 왜 이렇게 까다로운가 — 확장에는 "이 탭이 그 브라우저 탭이다"를 말해주는 식별자가
+ * 아예 없다. `BrowserEditorInput` 은 tabs DTO 에서 `UnknownInput` 으로 떨어지므로
+ * (`mainThreadEditorTabs.ts` 에 그 타입 분기가 없다) `tab.input` 은 **undefined** 이고
+ * URI 도 id 도 안 온다. 남는 단서는 컬럼과 라벨뿐이다.
+ *
+ * 그래서 세 조건의 **교집합**으로만 고른다:
+ *   ① 슬롯 컬럼 (호출부가 이미 걸러서 넘긴다)
+ *   ② `input === undefined`  — 브라우저 전용 신호는 아니다. 웰컴/시작하기·설정
+ *      편집기 등 매핑되지 않은 입력도 여기 걸린다. 그래서 이것만으로는 부족하다.
+ *   ③ 라벨이 `BrowserTab.title` 의 접두사 — 코어에서 라벨은 `getName()`
+ *      (= 제목을 30자로 truncate), `BrowserTab.title` 은 `getTitle()`
+ *      (= `"<제목> (<주소>)"`). **같은 문자열이 아니다** — 2026-08-02 실측
+ *      (0.1.16): 라벨 `"Example Domain"` vs title `"Example Domain (https://example.com/)"`.
+ *      truncate 된 라벨은 `…` 로 끝날 수 있어 그 꼬리는 떼고 비교한다.
+ *
+ * **후보가 2개 이상이면 null 이다.** 같은 실측에서 example.com 과 example.org 의
+ * 라벨이 **둘 다 `"Example Domain"`** 이었다 — 라벨은 동점을 만든다. 잘못 고르면
+ * 참가자가 보던 화면을 엉뚱한 페이지로 바꾼다. 그건 아무것도 안 하느니만 못하다.
+ *
+ * 이미 활성인 탭도 null 이다 — 할 일이 없다(포커스만 흔들 뿐).
+ */
+export function pickRevealTabIndex(
+  tabs: readonly RevealCandidate[],
+  browserTitle: string | undefined,
+): number | null {
+  if (!browserTitle) return null;
+  const matches = tabs.filter(
+    (t) => t.inputIsUndefined && labelIsPrefixOfTitle(t.label, browserTitle),
+  );
+  if (matches.length !== 1) return null;    // 0개 = 못 찾음, 2개 이상 = 동점 → 손대지 않는다
+  const hit = matches[0] as RevealCandidate;
+  if (hit.isActive) return null;            // 이미 앞에 있다
+  return hit.index;
+}
+
+/** 라벨(truncate 된 이름)이 `BrowserTab.title` 의 접두사인가. */
+function labelIsPrefixOfTitle(label: string, title: string): boolean {
+  const trimmed = label.replace(/[…]+$/, "").trim();
+  if (!trimmed) return false;
+  return title.startsWith(trimmed);
+}
+
 /**
  * #415 — 같은 페이지인지 비교하기 위한 정규화. 브라우저가 실제로 보여주는 URL
  * (`tab.url`)과 코치가 요청한 URL 은 표기가 조금씩 다르다: 끝 슬래시가 붙거나

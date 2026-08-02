@@ -14,7 +14,16 @@ import {
   coachTabSlot,
   isSameBrowserUrl,
   resolveLivePreviewUrl,
+  pickRevealTabIndex,
 } from "./browserControlHelpers";
+
+// #525 — 코어에 등록된 일반 에디터 명령. 브라우저 전용 API 로는 탭을 앞으로 가져올
+// 수 없어서(BrowserTab 에 show()/reveal() 없음) 이 경로를 쓴다. `openEditorAtIndex`
+// 는 **활성 그룹**에서 0-based 인덱스로 연다(코어 editorCommands.ts) — 그래서 그룹
+// 활성화가 먼저다.
+const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
+const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
+const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
 import { PreviewProvider } from "./previewProvider";
 import { LiveServer } from "./liveServer";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
@@ -701,6 +710,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // 고정한다. 이 경로는 `preserveFocus: true` 로 열기 때문에 activeBrowserTab
         // 이 안 잡힐 수 있고, 그때 검사 도구가 "열린 탭이 없어요"로 실패했다.
         this.mcpBrowser.setTargetTab(current);
+        // #525 — 참가자가 "미리보기 띄워줘"라고 한 흐름이다. 이미 떠 있는 탭이
+        // 배경에 있으면 리로드만 하고 화면은 그대로여서 "아무 일도 안 일어난"
+        // 것처럼 보인다. 앞으로 가져온다.
+        await this.revealBrowserTab(current);
       } else {
         for (const t of tabs) {
           if (isPreviewTab(t.url)) {
@@ -763,6 +776,65 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * failures become isError tool results the coach can react to in-chat —
    * a toast here would pause the integrated browser (#308).
    */
+  /**
+   * 이미 열려 있는 브라우저 탭을 **참가자 화면 앞으로** 가져온다 (#525).
+   *
+   * proposed API 의 `BrowserTab` 에는 `show()`/`reveal()` 이 없고, `openBrowserTab`
+   * 재호출은 새 탭을 만들어 #519 를 되돌린다. 그래서 **일반 에디터 경로**를 쓴다:
+   * 그룹을 활성화한 뒤 `openEditorAtIndex` 로 그 탭을 앞세우고, 참가자가 편집기에
+   * 있었으면 되돌린다(bounce).
+   *
+   * 2026-08-02 실측(설치된 0.1.16, 격리 프로파일)에서 확인한 것:
+   *   - 배경에 있던 브라우저 탭이 실제로 앞으로 나온다
+   *   - bounce 후 `activeTextEditor` 와 **선택 영역이 그대로 보존**된다
+   *   - 그 컬럼은 계속 브라우저를 보여준다(되돌아가지 않는다)
+   *
+   * 규율 두 가지 — 둘 다 "확실하지 않으면 참가자 화면을 건드리지 않는다":
+   *   ① 탭 식별은 `pickRevealTabIndex` 의 세 조건 교집합. 후보가 둘이면 아무것도
+   *      안 한다(실측에서 라벨이 동점 나는 것을 봤다).
+   *   ② `activeTextEditor` 가 없으면 bounce 를 생략한다 — 되돌릴 커서가 없으면
+   *      IME 조합을 흔들 위험이 0 이다(코치가 도구를 쓸 때 참가자 포커스는 대개
+   *      채팅 사이드바에 있다).
+   *
+   * 전부 best-effort 다. 실패해도 던지지 않는다 — 도구 결과를 오류로 바꾸면
+   * "열렸는데 실패로 보이는" 더 나쁜 상태가 된다.
+   */
+  private async revealBrowserTab(tab: vscode.BrowserTab): Promise<void> {
+    try {
+      if (!tab.url) return;
+      const column = coachTabSlot(tab.url) === "preview" ? 1 : 2;
+      const group = (vscode.window.tabGroups?.all ?? []).find((g) => g.viewColumn === column);
+      if (!group) return;
+      const index = pickRevealTabIndex(
+        group.tabs.map((t, i) => ({
+          index: i,
+          label: t.label,
+          inputIsUndefined: t.input === undefined,
+          isActive: t.isActive,
+        })),
+        tab.title,
+      );
+      if (index === null) return;
+
+      // bounce 대상은 **명령을 쏘기 전에** 붙잡는다 — 쏜 뒤엔 이미 옮겨가 있다.
+      const restore = vscode.window.activeTextEditor;
+      const focusGroup = column === 1 ? FOCUS_FIRST_GROUP : FOCUS_SECOND_GROUP;
+      await vscode.commands.executeCommand(focusGroup);
+      await vscode.commands.executeCommand(OPEN_EDITOR_AT_INDEX, index);
+      if (restore) {
+        // 커서·선택까지 되돌린다. showTextDocument 는 컬럼을 명시할 수 있어
+        // focus{N}EditorGroup 조합보다 정확하다(참가자가 3번 컬럼에 있을 수도 있다).
+        await vscode.window.showTextDocument(restore.document, {
+          viewColumn: restore.viewColumn,
+          selection: restore.selection,
+          preserveFocus: false,
+        });
+      }
+    } catch {
+      /* 앞으로 못 가져와도 도구 자체는 성공이다 — 조용히 넘어간다 */
+    }
+  }
+
   private buildBrowserMcpHost(): BrowserMcpHost {
     return {
       openBrowser: async (url: string) => {
@@ -798,7 +870,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             name: "browser_navigate",
             input: { url },
           });
-          if (!r.isError) return { replaced };
+          if (!r.isError) {
+            // #525 — 이동은 됐는데 그 탭이 배경이면 참가자 화면은 그대로다.
+            // 참가자가 "열어줘"라고 한 흐름이므로 앞으로 가져온다.
+            if (reused) await this.revealBrowserTab(reused);
+            return { replaced };
+          }
           // 이동 실패(탭이 방금 닫혔다든지)는 새로 여는 쪽으로 폴백한다 —
           // 학생 눈에는 "안 열렸다"가 되어선 안 된다.
           this.mcpBrowser.setTargetTab(undefined);
@@ -865,10 +942,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // URL 만 넘기므로(탭 핸들은 이 경계를 넘지 않는다) 여기서 다시 찾는다 —
       // 판정과 **같은 비교 함수**로 찾아야 판정된 탭과 고정된 탭이 갈라지지 않는다.
       //
-      // 시각적으로 앞에 가져오지는 못한다: proposed API 의 BrowserTab 에는
-      // close()/startCDPSession() 뿐이고 show()/reveal() 이 없다. 유일한 우회로인
-      // openBrowserTab(url) 재호출은 새 탭을 만들어 #519 를 되돌린다. 참가자 화면에
-      // 보이게 하는 것은 fork 의 proposed API 확장이 필요한 별건이다 (#523).
+      // #525 — 고정만으로는 참가자가 못 본다. 그 탭이 배경에 있으면 화면은 그대로다.
+      // 앞으로 가져오는 것까지 한다(revealBrowserTab — 실패는 조용히 무시).
       focusOpenPage: async (url: string) => {
         const tab = (vscode.window.browserTabs ?? []).find(
           (t) => !!t.url && isSameBrowserUrl(t.url, url),
@@ -876,6 +951,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (!tab?.url) return null;
         this.mcpBrowser ??= new BrowserControl();
         this.mcpBrowser.setTargetTab(tab);
+        await this.revealBrowserTab(tab);
         return { url: tab.url, title: tab.title };
       },
       // #457 — 검사 3종(read/click/type)을 CDP 실행기에 그대로 위임한다.
