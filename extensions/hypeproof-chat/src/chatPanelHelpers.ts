@@ -307,6 +307,38 @@ export class AiDisclosureGate {
 }
 
 /**
+ * #476 — agent-sdk 런타임을 요청한 코호트가 프록시로 떨어졌을 때 **참가자에게**
+ * 보이는 한 줄.
+ *
+ * 왜 필요한가: 폴백 자체는 의도된 설계다(#387 — 미시딩 머신에서도 수업이 죽지
+ * 않게). 문제는 그 사실이 아무에게도 안 보인다는 것이었다. 학생은 코치가 왜
+ * 파일을 못 찾는지 모르고, 강사는 그 교실의 절반이 능력 없는 코치로 도는 걸
+ * 모른다.
+ *
+ * 문구 원칙 두 가지:
+ *  1. **할 수 없는 것을 구체적으로** 말한다. "문제가 생겼어요" 류는 참가자가
+ *     자기가 뭘 잘못했다고 느끼게 만들고, 무엇을 포기해야 하는지도 안 알려준다.
+ *  2. **여전히 되는 것을 같이** 말한다. 오늘의 핵심(페이지를 만들고 눈으로
+ *     확인하기)은 프록시에서도 끝까지 된다 — 그걸 안 말하면 참가자가 수업을
+ *     통째로 포기한다.
+ */
+export const COACH_DEGRADED_NOTICE =
+  "지금 코치는 파일 저장·명령 실행 도구 없이 돌고 있어요 — 만들기와 미리보기는 그대로 되지만, " +
+  "저장소·배포는 이 상태에서 안 돼요. 스태프를 불러주세요.";
+
+/**
+ * 개발자 로그 한 줄 (#476). `console.warn` 을 대신한다 — 확장에
+ * `createOutputChannel` 이 없어 그 줄은 어디에도 안 남았고, 사고 당일
+ * `exthost.log` 에서 `[coach]` 가 0건이었다.
+ *
+ * 사유(어떤 후보가 없었는지)를 그대로 싣는다. `SdkUnavailableError` 의 메시지가
+ * 이미 해석 후보 4개를 나열하므로 재가공하지 않는다 — 요약하면 진단이 사라진다.
+ */
+export function sdkFallbackLogLine(reason: string, at: Date): string {
+  return `[${at.toISOString()}] agent-sdk → proxy fallback: ${reason}`;
+}
+
+/**
  * #278 Phase 3 — a compact action-log line (icon + Korean label) for a browser
  * tool call, shown in the chat panel as the coach drives the browser. Pure so
  * it's unit-testable. Truncates long inputs; extracts the host for navigate.
