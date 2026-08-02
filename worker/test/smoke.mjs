@@ -2332,6 +2332,43 @@ const TINY_PNG =
   }
   console.log("✓ #290 roster/append: server-side merge + issuer scope gate");
 
+  // #381 — the plain POST /session starts a session and nothing else. Opening a
+  // class this way leaves the roster empty, and every correctly-issued student
+  // token is then rejected with not_in_roster. The operator used to learn this
+  // from a student mid-class; now the response says it.
+  {
+    const env = mkEnv();
+    const r = await hit(env, `/admin/cohorts/${COHORT}/session`, "POST",
+      {
+        profile_id: PROFILE,
+        starts_at: new Date().toISOString(),
+        ends_at: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+      `Bearer ${ISSUER}`);
+    assert.equal(r.status, 200, "plain session start → 200");
+    const j = await r.json();
+    assert.equal(j.roster_size, 0, "roster size reported");
+    assert.match(j.warning ?? "", /not_in_roster/, "empty roster is called out");
+    assert.match(j.warning ?? "", /session\/open/, "steers the operator to the composite endpoint");
+  }
+  // …and stays quiet when the roster is already populated.
+  {
+    const env = mkEnv({
+      [`cohort:${COHORT}:roster`]: JSON.stringify({ users: ["kid-a"], updated_at: "x" }),
+    });
+    const r = await hit(env, `/admin/cohorts/${COHORT}/session`, "POST",
+      {
+        profile_id: PROFILE,
+        starts_at: new Date().toISOString(),
+        ends_at: new Date(Date.now() + 3_600_000).toISOString(),
+      },
+      `Bearer ${ISSUER}`);
+    const j = await r.json();
+    assert.equal(j.roster_size, 1);
+    assert.equal(j.warning, undefined, "populated roster → no warning noise");
+  }
+  console.log("✓ #381 session start: empty roster is reported, not discovered mid-class");
+
   // session/open — full composite happy path (issuer)
   {
     const env = mkEnv();

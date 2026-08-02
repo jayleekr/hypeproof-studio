@@ -97,13 +97,59 @@ chat.get("/health/deep", async (c) => {
 // extension needing to know about cohorts at compile time.
 //
 // The system_prompt is NOT included — only the worker injects that.
+//
+// #381 — every failure here carries an `error.code`. This is the FIRST call a
+// new participant's app makes, so it is also the only place the app can learn
+// why a paste failed. Without a code the client can only say "확인이 안 돼요",
+// which is what blocked first-run: expired / wrong-role / unknown-cohort were
+// indistinguishable. Codes mirror gateChatRequest so the two paths agree.
 // ---------------------------------------------------------------------------
 
 chat.get("/profile", async (c) => {
   const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
-  if (!auth.ok) return c.json({ error: { message: auth.message, type: "auth" } }, 401);
+  if (!auth.ok) {
+    return c.json(
+      {
+        error: {
+          message: auth.message,
+          type: "auth",
+          code: auth.code,
+          request_id: c.get("requestId"),
+        },
+      },
+      401,
+    );
+  }
+  // An issuer (instructor) token pasted into the student field used to fall
+  // through to `unknown profile` (400) because issuer payloads carry no usable
+  // `p`. Name it: chat-gate already rejects issuer tokens with `wrong_role`.
+  if (auth.payload.role === "issuer") {
+    return c.json(
+      {
+        error: {
+          message: "issuer tokens cannot open a participant session",
+          type: "auth",
+          code: "wrong_role",
+          request_id: c.get("requestId"),
+        },
+      },
+      401,
+    );
+  }
   const profile = getProfile(auth.payload.p);
-  if (!profile) return c.json({ error: { message: "unknown profile", type: "config" } }, 400);
+  if (!profile) {
+    return c.json(
+      {
+        error: {
+          message: "unknown profile",
+          type: "config",
+          code: "unknown_profile",
+          request_id: c.get("requestId"),
+        },
+      },
+      400,
+    );
+  }
 
   return c.json({
     profile_id: profile.id,
@@ -189,6 +235,12 @@ interface AuthResult {
   ok: boolean;
   payload: TokenPayload;
   message: string;
+  /**
+   * #381 — TokenError code ("expired" | "signature" | "malformed" | …) so
+   * /v1/profile can tell the app WHICH failure it was. "unknown" when the
+   * throw was not a TokenError (never surfaced verbatim; see #257).
+   */
+  code?: string;
 }
 
 function decodeHeader(raw: string | null | undefined): string | undefined {
@@ -206,7 +258,12 @@ async function authenticateToken(
 ): Promise<AuthResult> {
   const token = bearer(authHeader);
   if (!token) {
-    return { ok: false, payload: {} as TokenPayload, message: "missing bearer token" };
+    return {
+      ok: false,
+      payload: {} as TokenPayload,
+      message: "missing bearer token",
+      code: "missing",
+    };
   }
   try {
     const payload = await verify(token, secret);
@@ -215,7 +272,8 @@ async function authenticateToken(
     // #257 — only TokenError prose is curated for users; anything else
     // (crypto/config failures) stays server-side.
     const msg = err instanceof TokenError ? err.message : "invalid token";
-    return { ok: false, payload: {} as TokenPayload, message: msg };
+    const code = err instanceof TokenError ? err.code : "unknown";
+    return { ok: false, payload: {} as TokenPayload, message: msg, code };
   }
 }
 

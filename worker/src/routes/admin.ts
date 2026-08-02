@@ -11,6 +11,8 @@
 //   POST   /admin/cohorts/:id/roster            — body: { users: string[] } (full replace)
 //   POST   /admin/cohorts/:id/roster/append     — body: { users: string[] } (server-side merge, #290)
 //   POST   /admin/cohorts/:id/session           — body: { profile_id, starts_at, ends_at }
+//                                                 STARTS ONLY — does not touch the roster (#381).
+//                                                 Prefer /session/open for a self-service class open.
 //   DELETE /admin/cohorts/:id/session           — end current session
 //   POST   /admin/cohorts/:id/session/open      — composite: guard→mint→roster→start (#290)
 //   POST   /admin/cohorts/:id/session/close     — composite: end + revoke minted token (#290)
@@ -878,7 +880,25 @@ admin.post("/cohorts/:id/session", async (c) => {
   // persistSessionStart never throws; failure is logged, class still starts.
   await persistSessionStart(c.env, cohortId, session);
 
-  return c.json({ ok: true, session });
+  // #381 — this endpoint starts a session and NOTHING else. The roster is a
+  // separate key, so a cohort opened this way rejects every student with
+  // `not_in_roster` — including correctly-issued tokens. The operator's only
+  // clue used to be a student's error message mid-class. Report the roster
+  // size with the session, and say what to do when it is empty.
+  const rosterUsers = (await getRoster(c.env.HPS_KV, cohortId))?.users ?? [];
+  return c.json({
+    ok: true,
+    session,
+    roster_size: rosterUsers.length,
+    ...(rosterUsers.length === 0
+      ? {
+          warning:
+            "roster is empty — every student token will be rejected with not_in_roster. " +
+            "Add participants via POST /admin/cohorts/:id/roster(/append), or use " +
+            "POST /admin/cohorts/:id/session/open which mints + rosters + starts in one call.",
+        }
+      : {}),
+  });
 });
 
 admin.delete("/cohorts/:id/session", async (c) => {

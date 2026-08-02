@@ -58,6 +58,8 @@ When in doubt:
 | REQ-B3 | 토큰 검증을 `/v1/profile` 로 수행 | 200 + valid shape → 통과. 401/403/timeout → 경고 + 재-prompt 트리거 | E |
 | REQ-B4 | `hasToken` UI 상태 동기화 | secrets 변화 → `postConfig` → webview 헤더 pill 갱신 | E |
 | REQ-B5 | Auth error 분류 (4 sub) | 401/expired·missing → 재-prompt. 403/session_inactive·session_window·not_in_roster·mismatch → 친절한 토스트 (raw JSON 노출 금지) | U + R |
+| REQ-B6 | 첫 실행 토큰 실패는 **원인**을 말한다 (#381) | `fetchProfile()` 이 모든 실패를 `null` 로 뭉개서 만료·강사토큰·모르는 회차·서버다운·네트워크단절이 한 문장("확인이 안 돼요")으로 보였다 — 신규 참가자가 스스로 풀 방법이 없어 강사를 불러야만 했다. 계약: ① worker `GET /v1/profile` 의 **모든** 실패가 `error.code` 를 싣는다 — 401 `expired`/`malformed`/`signature`, issuer 토큰은 `wrong_role`(401, 기존엔 `p` 가 placeholder 라 400 "unknown profile" 로 떨어졌다), 모르는 프로필은 400 `unknown_profile`. `request_id` 동봉(#49); ② 클라이언트 `fetchProfileResult()` 가 `null` 대신 `ProfileFailure{reason,friendly,status,requestId}` 를 돌려주고 `classifyProfileFailure` 가 원인별 문장을 고른다. **401 이 `expired` 가 아니면 만료를 단정하지 않는다** (REQ-M13 이 태운 이틀); ③ 강사 토큰은 네트워크 이전에 로컬에서 판정(`looksLikeIssuerTokenUnverified` — payload `role:"issuer"` 또는 `__issuer__` placeholder). **진단 전용, 게이트 아님** — 저장도 하지 않고 재입력을 준다(저장하면 채팅 못 하는 토큰에 "Token ✓" 가 뜬다); ④ 붙여넣기 형식 오류(`looksLikeWorkshopToken` 불일치)가 서버 원인보다 우선 — 서버까지 못 간 실패다 | U (`test/profile-failure`) + R (`worker/test/chat-integration`) |
+| REQ-B7 | 세션만 열면 roster 는 비어 있다 (#381) | `POST /admin/cohorts/:id/session` 은 세션 시작 **only** — roster 는 별개 키라, 이 엔드포인트로 수업을 열면 정상 발급된 학생 토큰도 전부 `not_in_roster` 로 막힌다(원인을 수업 중 학생 입으로 알게 됨). 응답에 `roster_size` 를 싣고, 0 이면 `warning` 으로 `not_in_roster` 위험 + `/session/open`(guard→mint→roster→start) 경로를 명시한다. roster 가 이미 차 있으면 warning 없음(잡음 금지) | R (`worker/test/smoke.mjs` §issuer-self-service) |
 
 ## C. Chat round-trip
 

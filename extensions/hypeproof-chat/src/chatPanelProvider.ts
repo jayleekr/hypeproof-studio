@@ -3,8 +3,8 @@ import * as path from "path";
 import * as fs from "fs";
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
-import { proxyChat, fetchProfile, ProxyAuthError, ProxyTransportError } from "./proxyClient";
-import { TOKEN_MISSING_FRIENDLY } from "./proxyClientHelpers";
+import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
+import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
@@ -89,6 +89,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
   private cachedProfile: ResolvedProfile | null = null;
   private profileFetchPromise: Promise<ResolvedProfile | null> | null = null;
+  /**
+   * #381 — why the last profile fetch failed (null when it succeeded or was
+   * never attempted). Read by the token-entry command so a rejected paste gets
+   * a cause-specific sentence instead of one generic failure message.
+   */
+  private lastProfileFailure: ProfileFailure | null = null;
   // #278 — browser-page context queued by "페이지를 코치에게", prepended to the
   // NEXT turn's prompt only (history keeps the user's clean text).
   private pendingPageContext: string | null = null;
@@ -287,8 +293,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   invalidateProfile(): void {
     this.cachedProfile = null;
     this.profileFetchPromise = null;
+    this.lastProfileFailure = null;
     this.activeCohortId = null;
     this.assetScores?.resetAssetScores();
+  }
+
+  /** #381 — cause of the most recent failed profile fetch, if any. */
+  profileFailure(): ProfileFailure | null {
+    return this.lastProfileFailure;
   }
 
   /**
@@ -354,10 +366,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
     const token = await this.context.secrets.get(TOKEN_KEY);
-    if (!token) return null;
+    if (!token) {
+      this.lastProfileFailure = null;
+      return null;
+    }
 
-    this.profileFetchPromise = fetchProfile({ proxyUrl, token }).then(
-      async (p) => {
+    this.profileFetchPromise = fetchProfileResult({ proxyUrl, token }).then(
+      async (r) => {
+        // #381 — remember WHY, so the token-entry flow can say something the
+        // participant can act on instead of one generic "확인이 안 돼요".
+        this.lastProfileFailure = r.ok ? null : r.failure;
+        const p = r.ok ? r.profile : null;
         this.cachedProfile = p;
         this.profileFetchPromise = null;
         // #278 — gate the "페이지를 코치에게" toolbar button to opted-in cohorts.
@@ -1320,7 +1339,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         requestId: err.requestId,
         runbookUrl: err.runbookUrl,
       });
-      if (err.kind === "expired" || err.kind === "missing") {
+      // #381 — "wrong_role" (instructor token) also needs a different token,
+      // so reopen the box. It is NOT deleted: only "expired" is provably dead.
+      if (err.kind === "expired" || err.kind === "missing" || err.kind === "wrong_role") {
         // Clear the dead token so the UI shows "Token" not "Token ✓",
         // then reopen the input box for a fresh one.
         if (err.kind === "expired") {

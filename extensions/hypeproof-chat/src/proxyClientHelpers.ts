@@ -49,6 +49,88 @@ export function friendlyTransportMessage(status: number): string | null {
   return null;
 }
 
+// ─── Profile-fetch failure classification (#381) ─────────────────────────────
+//
+// GET /v1/profile is the first call the app makes after a token is pasted, and
+// for a brand-new participant it is the ONLY thing standing between them and
+// the first turn. fetchProfile() used to collapse every failure into `null`,
+// so the toast could only say "확인이 안 돼요" — expired token, instructor
+// token, unknown cohort, wrong proxy URL and a dead network were one message.
+// A participant could not act on it; the only recovery was an instructor.
+//
+// These helpers are pure so the copy is locked by unit tests instead of by a
+// lecture-day paste (same discipline as sanitizeWorkshopToken/#427).
+
+export type ProfileFailureReason =
+  | "expired"        // 401 code=expired — the token aged out
+  | "issuer_token"   // 401 code=wrong_role — instructor token in the student box
+  | "rejected"       // 401 anything else — server refused; cause NOT asserted
+  | "unknown_cohort" // 400 code=unknown_profile — token points at no known 회차
+  | "server"         // 5xx / other status — server-side, retry later
+  | "network";       // fetch threw — bad URL, offline, DNS, TLS
+
+export interface ProfileFailure {
+  reason: ProfileFailureReason;
+  /** Participant-facing sentence. Names the cause AND the next action. */
+  friendly: string;
+  /** HTTP status when there was a response at all. */
+  status?: number;
+  /** #49 — server request_id, when the response carried one. */
+  requestId?: string;
+}
+
+export const PROFILE_ISSUER_TOKEN_FRIENDLY =
+  "이건 선생님(강사)용 토큰이에요. 참가자용 토큰을 받아서 넣어주세요. 🎫";
+/**
+ * 401 that is not `expired`. Deliberately does NOT say "만료됐어요" — the same
+ * mistake the SDK path made (see GATEWAY_AUTH_FAILED_FRIENDLY): a 401 can be a
+ * revoked token, a truncated paste, or a server key rotation, and asserting
+ * expiry sends everyone down the wrong road.
+ */
+export const PROFILE_REJECTED_FRIENDLY =
+  "서버가 이 토큰을 받아주지 않았어요. 붙여넣은 값이 잘리지 않았는지 확인하고, 그래도 안 되면 선생님께 새 토큰을 받아주세요. 🔑";
+export const PROFILE_UNKNOWN_COHORT_FRIENDLY =
+  "이 토큰이 가리키는 수업(회차)을 서버가 몰라요. 선생님께 이 화면을 그대로 알려주세요. 🗂️";
+export const PROFILE_SERVER_FRIENDLY =
+  "서버가 지금 응답하지 못했어요. 잠시 뒤에 다시 넣어보고, 계속 같으면 선생님께 알려주세요. 🛠️";
+export const PROFILE_NETWORK_FRIENDLY =
+  "서버에 연결하지 못했어요. 인터넷 연결을 확인해주세요. 🌐";
+
+/** fetch() threw — we never reached the server, so the token is not the suspect. */
+export function profileNetworkFailure(): ProfileFailure {
+  return { reason: "network", friendly: PROFILE_NETWORK_FRIENDLY };
+}
+
+/**
+ * Map a non-OK GET /v1/profile response to a cause the participant can act on.
+ * `bodyText` is the raw body; a non-JSON body is fine (older worker, HTML error
+ * page from a proxy) and simply degrades to status-based classification.
+ */
+export function classifyProfileFailure(status: number, bodyText: string): ProfileFailure {
+  type ErrorBody = { error?: { code?: string; type?: string; request_id?: string } };
+  let parsed: ErrorBody | null = null;
+  try {
+    parsed = JSON.parse(bodyText) as ErrorBody;
+  } catch {
+    parsed = null;
+  }
+  const code = parsed?.error?.code;
+  const requestId = parsed?.error?.request_id;
+  const base = { status, requestId };
+
+  if (status === 401) {
+    if (code === "expired") return { ...base, reason: "expired", friendly: TOKEN_EXPIRED_FRIENDLY };
+    if (code === "wrong_role") {
+      return { ...base, reason: "issuer_token", friendly: PROFILE_ISSUER_TOKEN_FRIENDLY };
+    }
+    return { ...base, reason: "rejected", friendly: PROFILE_REJECTED_FRIENDLY };
+  }
+  if (status === 400) {
+    return { ...base, reason: "unknown_cohort", friendly: PROFILE_UNKNOWN_COHORT_FRIENDLY };
+  }
+  return { ...base, reason: "server", friendly: PROFILE_SERVER_FRIENDLY };
+}
+
 interface BuildHeadersArgs {
   token?: string;
   coachName?: string;
