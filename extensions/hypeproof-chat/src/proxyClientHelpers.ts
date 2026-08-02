@@ -135,6 +135,12 @@ interface BuildHeadersArgs {
   token?: string;
   coachName?: string;
   coachPersonality?: string;
+  /**
+   * #507 — 지금 떠 있는 라이브 서버 주소. 워커가 `x-hps-preview-url` 로 받아
+   * 시스템 블록에 넣는다(문구는 워커가 소유 — 클라이언트는 주소만 보낸다).
+   * 서버가 안 떠 있으면 보내지 않는다: 없는 주소를 지어내는 것보다 침묵이 낫다.
+   */
+  previewUrl?: string;
 }
 
 /**
@@ -161,6 +167,9 @@ export function buildProxyHeaders(args: BuildHeadersArgs): Record<string, string
   }
   if (coachPersonality && coachPersonality.trim()) {
     headers["x-hps-coach-personality"] = encodeURIComponent(coachPersonality.trim());
+  }
+  if (args.previewUrl && args.previewUrl.trim()) {
+    headers["x-hps-preview-url"] = encodeURIComponent(args.previewUrl.trim());
   }
   return headers;
 }
