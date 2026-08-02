@@ -15,6 +15,9 @@ const {
   MCP_BROWSER_TOOLS,
   resolveAlreadyOpen,
 } = await import("../src/browserMcp.ts");
+// 판정과 **같은 비교 함수**로 매칭한다 — fake 가 자기 규칙으로 찾으면 계측기가
+// 제품보다 관대해지고, 실기기에서만 갈라지는 차이를 못 잡는다.
+const { isSameBrowserUrl } = await import("../src/browserControlHelpers.ts");
 
 // ─── constants — names the model/canUseTool sees must never drift ────────────
 {
@@ -276,6 +279,124 @@ function makeHost(initial = null) {
   assert.equal((await resolveAlreadyOpen(junk, "https://boaclinic.com/")).alreadyOpen, true);
 
   console.log("✓ #519: openPages — 열린 탭 전부와 비교(슬롯 2개), 미지원/실패는 예전 동작으로 폴백");
+}
+
+// #523 — "안 여는" 것으로 끝나면 안 된다: 매칭된 탭을 **운전 대상으로 고정**해야
+// 한다. 안 그러면 뒤이은 read/click/type 이 직전 타깃(다른 슬롯)에 붙어, 코치가
+// A 를 본다고 믿으며 B 를 읽는다. #522 가 판정 범위를 열린 탭 전체로 넓히면서
+// 실제로 가능해진 상태다(그 전에는 매칭 = 타깃이라 무해했다).
+{
+  // 재현 시나리오: 참고 사이트를 보다가 프리뷰로 옮겨간 뒤, 다시 참고 사이트를
+  // 열어달라는 요청. 그 탭은 이미 떠 있으므로 열리지 않는다 — 그런데 타깃은?
+  const PREVIEW = { url: "http://127.0.0.1:5432/", title: "내 홈페이지" };
+  const REFERENCE = { url: "https://boaclinic.com/", title: "보아치과" };
+  function makeTwoSlotHost() {
+    // targetTab 을 흉내낸다: 지금 운전 중인 페이지(=프리뷰). 실기기에서는
+    // live_preview_start 가 setTargetTab 으로 여기까지 옮겨놓은 상태다.
+    const state = { target: PREVIEW, opens: [] };
+    return {
+      state,
+      host: {
+        openBrowser: async (url) => state.opens.push(url),
+        screenshot: async () => null,
+        startLivePreview: async () => null,
+        currentPage: async () => state.target,
+        openPages: async () => [PREVIEW, REFERENCE],
+        focusOpenPage: async (url) => {
+          const hit = [PREVIEW, REFERENCE].find((p) => isSameBrowserUrl(p.url, url));
+          if (!hit) return null;
+          state.target = hit;      // ← setTargetTab 에 대응
+          return hit;
+        },
+      },
+    };
+  }
+
+  // 양성 대조군 — 백그라운드 슬롯의 URL 로 열면, 열지는 않되 **타깃은 그 탭으로**.
+  {
+    const { factory, registered } = makeFactory();
+    const { host, state } = makeTwoSlotHost();
+    buildHypeproofMcpServer(factory, fakeZ, host);
+    const open = registered.find((t) => t.name === "browser_open");
+
+    const res = await open.handler({ url: "https://boaclinic.com/" }, {});
+    assert.equal(state.opens.length, 0, "이미 떠 있으므로 열지 않는다 (#415 유지)");
+    assert.equal(
+      state.target.url,
+      REFERENCE.url,
+      "매칭된 탭이 운전 대상이어야 한다 — 안 그러면 다음 browser_read 가 프리뷰를 읽는다",
+    );
+    const text = res.content.map((c) => c.text).join("\n");
+    assert.ok(text.includes("이미"));
+    assert.ok(
+      text.includes(`현재 열린 페이지: ${REFERENCE.url}`),
+      "상태 줄도 매칭된 탭이어야 한다 — 한 결과 안에서 두 줄이 다른 페이지를 말하면 안 된다",
+    );
+    assert.ok(!text.includes(PREVIEW.url), "직전 타깃(프리뷰)이 상태 줄에 남으면 안 된다");
+  }
+
+  // 음성 대조군 ① — 이미 타깃인 페이지를 다시 열어도 타깃은 그대로다(무해한 재지정).
+  {
+    const { factory, registered } = makeFactory();
+    const { host, state } = makeTwoSlotHost();
+    buildHypeproofMcpServer(factory, fakeZ, host);
+    const open = registered.find((t) => t.name === "browser_open");
+
+    await open.handler({ url: "http://127.0.0.1:5432" }, {});   // 끝 슬래시 없이
+    assert.equal(state.opens.length, 0);
+    assert.equal(state.target.url, PREVIEW.url, "정규화 차이로 타깃이 튀면 안 된다");
+  }
+
+  // 음성 대조군 ② — 안 떠 있는 주소는 평소대로 **열리고**, 고정은 openBrowser 가
+  // 한다(이 경로는 예전부터 setTargetTab 을 태운다). focusOpenPage 는 안 불린다.
+  {
+    const { factory, registered } = makeFactory();
+    const { host, state } = makeTwoSlotHost();
+    let focusCalls = 0;
+    const spied = { ...host, focusOpenPage: async (u) => { focusCalls++; return host.focusOpenPage(u); } };
+    buildHypeproofMcpServer(factory, fakeZ, spied);
+    const open = registered.find((t) => t.name === "browser_open");
+
+    await open.handler({ url: "https://boaclinic.com/vision" }, {});
+    assert.equal(state.opens.length, 1, "안 떠 있는 주소는 열어야 한다");
+    assert.equal(focusCalls, 0, "여는 경로에서 focusOpenPage 를 부를 이유가 없다");
+  }
+
+  // 음성 대조군 ③ — 능력 없는 호스트(구버전·다른 fake)에서도 죽지 않고 예전 동작.
+  {
+    const { factory, registered } = makeFactory();
+    const { host, state } = makeTwoSlotHost();
+    delete host.focusOpenPage;
+    buildHypeproofMcpServer(factory, fakeZ, host);
+    const open = registered.find((t) => t.name === "browser_open");
+
+    const res = await open.handler({ url: "https://boaclinic.com/" }, {});
+    assert.equal(state.opens.length, 0);
+    assert.equal(state.target.url, PREVIEW.url, "능력이 없으면 예전 동작 그대로");
+    assert.ok(res.content.map((c) => c.text).join("\n").includes("이미"));
+  }
+
+  // 음성 대조군 ④ — 고정이 던지거나 null 이어도 결과가 오류로 바뀌면 안 된다.
+  // "이미 열려 있다"는 판정 자체는 여전히 유효하다.
+  {
+    for (const broken of [
+      async () => { throw new Error("탭이 방금 닫혔다"); },
+      async () => null,
+      async () => ({ title: "url 없음" }),
+    ]) {
+      const { factory, registered } = makeFactory();
+      const { host } = makeTwoSlotHost();
+      host.focusOpenPage = broken;
+      buildHypeproofMcpServer(factory, fakeZ, host);
+      const open = registered.find((t) => t.name === "browser_open");
+
+      const res = await open.handler({ url: "https://boaclinic.com/" }, {});
+      assert.ok(!res.isError, "고정 실패가 멀쩡한 결과를 오류로 바꾸면 안 된다");
+      assert.ok(res.content.map((c) => c.text).join("\n").includes("이미"));
+    }
+  }
+
+  console.log("✓ #523: alreadyOpen — 열지 않되 매칭된 탭을 운전 대상으로 고정 + 상태 줄도 그 탭");
 }
 
 // 탭이 아예 없으면(null) 열어야 한다 + 상태 줄은 "없음".

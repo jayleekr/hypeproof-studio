@@ -118,6 +118,23 @@ export interface BrowserMcpHost {
    */
   openPages?(): Promise<BrowserPage[] | null>;
   /**
+   * #523 — 이미 열려 있는 그 탭을 **코치의 운전 대상으로 고정**한다. 매칭된
+   * 페이지를 돌려주고, 못 찾으면 null.
+   *
+   * 왜 필요한가: `browser_open` 이 "이미 열려 있다"고 판정하면 탭을 열지 않으므로
+   * `setTargetTab` 을 태우는 경로(host.openBrowser)를 통째로 건너뛴다. 그러면
+   * 뒤이은 browser_read/click/type 이 **직전 타깃**(다른 슬롯)에 붙어, 코치가
+   * A 를 본다고 믿으면서 B 를 읽는다. #522 가 판정 범위를 열린 탭 전체로 넓히면서
+   * 실제로 가능해진 상태다(그 전에는 매칭 = 타깃이라 무해했다).
+   *
+   * 왜 탭 핸들이 아니라 URL 인가: 이 모듈은 의도적으로 vscode-free 다(노드에서
+   * 단위 테스트한다). `vscode.BrowserTab` 을 여기로 들이면 그 경계가 깨진다.
+   * 탭을 찾아 고정하는 일은 vscode API 를 가진 호스트가 한다.
+   *
+   * optional 인 이유는 currentPage 와 같다 — 없으면 예전 동작(타깃 그대로)이다.
+   */
+  focusOpenPage?(url: string): Promise<BrowserPage | null>;
+  /**
    * #457 — CDP 검사 도구 위임. `browserControl.ts` 의 execute() 를 그대로 태운다
    * (browser_read / browser_click / browser_type). optional 인 이유는
    * currentPage 와 같다: 이 능력이 없는 호스트에서도 나머지 도구는 동작해야 한다.
@@ -176,6 +193,22 @@ export async function resolveAlreadyOpen(
     ? open.some((p) => isSameBrowserUrl(p.url, url))
     : !!current && isSameBrowserUrl(current.url, url);
   return { url, current, alreadyOpen };
+}
+
+/**
+ * 매칭된 탭을 코치의 운전 대상으로 고정하고 그 페이지를 돌려준다 (#523).
+ * 지원 안 함 / 못 찾음 / 실패 → null (호출부가 예전 동작으로 폴백한다).
+ */
+async function focusOpenPage(host: BrowserMcpHost, url: string): Promise<BrowserPage | null> {
+  if (typeof host.focusOpenPage !== "function") return null;
+  try {
+    const page = await host.focusOpenPage(url);
+    return page && typeof page.url === "string" && page.url ? page : null;
+  } catch {
+    // 고정에 실패해도 "이미 열려 있다"는 판정 자체는 유효하다. 여기서 던지면
+    // 멀쩡한 결과가 오류로 바뀐다.
+    return null;
+  }
 }
 
 /** 열린 페이지 목록 조회. 지원 안 함/실패 → undefined (짐작하지 않는다). */
@@ -260,9 +293,16 @@ export function buildHypeproofMcpServer(
       // 생기고, 보고 있던 페이지가 리로드돼 스크롤·상태가 날아가고, 턴 예산이
       // 깎인다. (승인 모달은 canUseTool 이 같은 판정으로 이미 건너뛴다.)
       if (alreadyOpen) {
+        // #523 — 열지 않는다고 해서 **아무것도 안 해도 되는 게 아니다.** 그 탭을
+        // 코치의 운전 대상으로 고정하지 않으면 뒤이은 read/click/type 이 직전
+        // 타깃(다른 슬롯)에 붙어, 코치가 A 를 본다고 믿으며 B 를 읽는다.
+        const focused = await focusOpenPage(host, url);
+        // 상태 줄도 **매칭된 탭**으로 적는다. `current` 는 운전 중인 탭이라,
+        // 그대로 쓰면 한 결과 안에서 "A 가 열려 있다 / 현재 페이지는 B" 로
+        // 갈라진다 — 모델이 읽는 두 줄이 서로 다른 페이지를 말하게 된다.
         return withPageState(
           { content: [{ type: "text", text: `이미 브라우저에 열려 있어요 — 다시 열지 않았어요: ${url}` }] },
-          current ?? null,
+          focused ?? current ?? null,
         );
       }
       await host.openBrowser(url);
