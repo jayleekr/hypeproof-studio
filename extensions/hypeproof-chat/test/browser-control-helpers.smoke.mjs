@@ -201,3 +201,67 @@ console.log("All browser-control-helpers smoke tests passed.");
 
   console.log("✓ 탭 누적 회귀: 8회 혼합 탐색 후에도 탭 2개 · 결과물 단독 탐색은 1개");
 }
+
+// #525 — 앞으로 가져올 탭 고르기. 확장에는 "이 탭이 그 브라우저 탭"이라는 식별자가
+// 없다(tabs DTO 에서 BrowserEditorInput 이 UnknownInput 으로 떨어져 input===undefined).
+// 그래서 세 조건 교집합으로만 고르고, 애매하면 **아무것도 안 한다.**
+//
+// 여기 숫자와 문자열은 2026-08-02 실측(설치된 0.1.16, 격리 프로파일)에서 나온 것이다:
+//   tab.label            = "Example Domain"
+//   BrowserTab.title     = "Example Domain (https://example.com/)"
+//   example.com/.org 라벨이 **동일**했다 → 라벨은 동점을 만든다.
+{
+  const { pickRevealTabIndex } = await import("../src/browserControlHelpers.ts");
+  const T = (index, label, inputIsUndefined, isActive = false) =>
+    ({ index, label, inputIsUndefined, isActive });
+  const TITLE = "Example Domain (https://example.com/)";
+
+  // 양성 — 배경에 있는 그 브라우저 탭 하나를 정확히 고른다.
+  assert.equal(
+    pickRevealTabIndex(
+      [T(0, "index.html", false), T(1, "Example Domain", true), T(2, "notes.md", false)],
+      TITLE,
+    ),
+    1,
+  );
+
+  // 양성 — 라벨이 30자에서 잘려 `…` 로 끝나도 접두사로 인정한다(코어 getName 은 truncate).
+  assert.equal(
+    pickRevealTabIndex([T(0, "보아치과 강남점 임플란트 전문…", true)], "보아치과 강남점 임플란트 전문 클리닉 (https://boaclinic.com/)"),
+    0,
+  );
+
+  // ── 음성 대조군: 여기가 틀리면 참가자 화면이 엉뚱하게 바뀐다 ──────────────
+
+  // **후보 2개 = 아무것도 안 한다.** 실측에서 example.com 과 example.org 의 라벨이
+  // 둘 다 "Example Domain" 이었다. 하나를 찍으면 50% 확률로 남의 화면을 바꾼다.
+  assert.equal(
+    pickRevealTabIndex([T(0, "Example Domain", true), T(1, "Example Domain", true)], TITLE),
+    null,
+    "라벨 동점이면 손대지 않는다",
+  );
+
+  // input 이 정의된 탭(텍스트 편집기 등)은 후보가 아니다 — 라벨이 우연히 맞아도.
+  assert.equal(pickRevealTabIndex([T(0, "Example Domain", false)], TITLE), null);
+
+  // input===undefined 지만 라벨이 안 맞으면 후보 아님. 웰컴/시작하기·설정 편집기도
+  // UnknownInput 이라 여기 걸린다 — 그것을 앞세우면 안 된다.
+  assert.equal(pickRevealTabIndex([T(0, "시작하기", true), T(1, "설정", true)], TITLE), null);
+
+  // 웰컴 탭이 **같이 있어도** 진짜 후보가 하나면 고른다 (교집합이 일하는 자리).
+  assert.equal(
+    pickRevealTabIndex([T(0, "시작하기", true), T(1, "Example Domain", true)], TITLE),
+    1,
+  );
+
+  // 이미 활성이면 할 일이 없다 — 포커스만 흔들 뿐.
+  assert.equal(pickRevealTabIndex([T(0, "Example Domain", true, true)], TITLE), null);
+
+  // 후보 없음 / 제목 없음 / 빈 목록 → 전부 null (조용히 아무것도 안 한다).
+  assert.equal(pickRevealTabIndex([], TITLE), null);
+  assert.equal(pickRevealTabIndex([T(0, "Example Domain", true)], undefined), null);
+  assert.equal(pickRevealTabIndex([T(0, "", true)], TITLE), null, "빈 라벨은 모든 제목의 접두사가 되면 안 된다");
+  assert.equal(pickRevealTabIndex([T(0, "   ", true)], TITLE), null);
+
+  console.log("✓ #525: 앞세울 탭 고르기 — 세 조건 교집합, 애매하면 손대지 않는다");
+}
