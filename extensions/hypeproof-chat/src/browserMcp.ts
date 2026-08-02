@@ -91,14 +91,31 @@ export interface BrowserPage {
 }
 
 /**
+ * `openBrowser` 가 실제로 무슨 일을 했는지 (#526).
+ *
+ * 슬롯당 탭 하나라는 규칙(#519) 때문에 "연다"는 요청이 실제로는 **기존 탭의
+ * 이동**이 될 수 있다. 그때 밀려난 페이지를 여기 담아 도구 결과에 적는다 —
+ * 안 그러면 코치는 참고 사이트 두 개가 나란히 떠 있다고 **믿는다**.
+ */
+export interface BrowserOpenOutcome {
+  /** 같은 슬롯의 이 페이지가 요청 주소로 이동했다(= 화면에서 사라졌다). */
+  replaced?: BrowserPage;
+}
+
+/**
  * Host capabilities the extension side (chatPanelProvider/extension.ts, which
  * has the `vscode` API) implements. All best-effort: return null / resolve on
  * failure rather than throwing user-facing errors — the handler converts
  * failures into isError tool results the model can react to in Korean.
  */
 export interface BrowserMcpHost {
-  /** Open (or reveal) the integrated browser at an already-policy-checked URL. */
-  openBrowser(url: string): Promise<void>;
+  /**
+   * Open (or reveal) the integrated browser at an already-policy-checked URL.
+   *
+   * #526 — 슬롯이 차 있으면 기존 탭이 그 주소로 **이동**한다. 무엇이 밀려났는지
+   * 돌려주면 결과에 적는다. 안 돌려줘도(구버전 호스트·fake) 동작은 그대로다.
+   */
+  openBrowser(url: string): Promise<BrowserOpenOutcome | void>;
   /** Capture the active integrated-browser tab; null when no tab / capture failed. */
   screenshot(): Promise<BrowserScreenshot | null>;
   /** Ensure the #309 live server + open the browser; returns the URL or null. */
@@ -236,6 +253,20 @@ async function readLivePreviewUrl(host: BrowserMcpHost): Promise<string | null |
 }
 
 /**
+ * 이번 open 으로 **밀려난** 페이지의 표기(제목 — 주소) (#526). 없으면 null.
+ *
+ * 요청 주소와 같은 페이지가 밀려난 것으로 보고되면 무시한다 — 같은 주소로의
+ * 이동은 참가자 눈에 아무것도 사라지지 않은 것이라, 그걸 "사라졌다"고 적으면
+ * 없는 상실을 코치에게 가르친다.
+ */
+function replacedPageOf(outcome: BrowserOpenOutcome | void, url: string): string | null {
+  const page = outcome && typeof outcome === "object" ? outcome.replaced : undefined;
+  if (!page || typeof page.url !== "string" || !page.url) return null;
+  if (isSameBrowserUrl(page.url, url)) return null;
+  return page.title ? `${page.title}(${page.url})` : page.url;
+}
+
+/**
  * 매칭된 탭을 코치의 운전 대상으로 고정하고 그 페이지를 돌려준다 (#523).
  * 지원 안 함 / 못 찾음 / 실패 → null (호출부가 예전 동작으로 폴백한다).
  */
@@ -350,6 +381,9 @@ export function buildHypeproofMcpServer(
       // 수 없다(실측 58085 vs 코치가 찍은 3000). 죽은 포트로 보내
       // ERR_CONNECTION_REFUSED 를 보여주는 대신, 라이브 서버를 띄우고 **진짜
       // 주소**를 알려준다. 호스트가 이 능력을 모르면(undefined) 손대지 않는다.
+      //
+      // 이 분기는 `host.openBrowser` 를 타지 않는다(라이브 프리뷰가 브라우저까지
+      // 연다) — 그래서 #526 의 "밀려남" 고지는 여기에 붙지 않는다.
       if (isLoopbackUrl(url) && (await readLivePreviewUrl(host)) === null) {
         const started = await host.startLivePreview();
         if (started) {
@@ -371,25 +405,32 @@ export function buildHypeproofMcpServer(
         // 시작 실패(작업 폴더 없음 등)는 아래 일반 경로로 떨어진다 — 여기서
         // 멈추면 정상적인 루프백 요청까지 막힌다.
       }
-      await host.openBrowser(url);
+      const outcome = await host.openBrowser(url);
+      // #526 — "열었어요"가 사실이 아닐 때가 있다. 슬롯당 탭 하나(#519)라서, 같은
+      // 슬롯에 탭이 있으면 그 탭이 **이 주소로 이동**한다 — 즉 보고 있던 페이지가
+      // 화면에서 사라진다. 결과가 그걸 말하지 않으면 코치는 참고 사이트 두 개가
+      // 나란히 떠 있다고 믿고 "왼쪽이 A, 오른쪽이 B" 같은 없는 화면을 설명한다
+      // (지어낸 성공 — R0 와 같은 실패 계열).
+      const replaced = replacedPageOf(outcome, url);
+      // #507 — 교정했으면 **말한다.** 조용히 바꾸면 코치는 다음 턴에도 같은 포트를
+      // 추측하고, 도구 결과와 자기 기억이 어긋난 채로 말한다.
+      const opened = redirectedFrom
+        ? `${redirectedFrom} 이 아니라 실제 라이브 서버 주소로 열었어요: ${url} ` +
+          `(포트는 실행할 때마다 달라집니다 — 추측하지 말고 이 주소를 쓰세요).`
+        : `브라우저에서 열었어요: ${url}`;
+      // 순서가 의미를 만든다 (#507 + #526 합류): **교정이 먼저**다. 교정은 코치가
+      // 방금 한 행동의 *대상 자체*를 바꾸는 정보라 먼저 읽혀야 하고, 밀려남은 그
+      // 행동의 부수 효과다. 뒤집으면 코치가 "밀려났구나"를 먼저 읽고 **잘못된
+      // 대상 위에서** 해석을 시작한다.
+      const text = replaced
+        ? `${opened}\n` +
+          `(참고: 같은 자리에 있던 ${replaced} 는 이 주소로 이동했어요 — ` +
+          `결과물 1개 · 참고 사이트 1개까지만 동시에 띄울 수 있어요. ` +
+          `둘을 비교하려면 번갈아 열어야 합니다.)`
+        : opened;
       // 방금 연 주소가 곧 현재 상태다 (재조회는 탭이 아직 갱신 전일 수 있어
       // 오히려 틀린 상태를 적을 위험이 있다).
-      return withPageState(
-        {
-          content: [
-            {
-              type: "text",
-              // #507 — 교정했으면 **말한다.** 조용히 바꾸면 코치는 다음 턴에도
-              // 같은 포트를 추측하고, 도구 결과와 자기 기억이 어긋난 채로 말한다.
-              text: redirectedFrom
-                ? `${redirectedFrom} 이 아니라 실제 라이브 서버 주소로 열었어요: ${url} ` +
-                  `(포트는 실행할 때마다 달라집니다 — 추측하지 말고 이 주소를 쓰세요).`
-                : `브라우저에서 열었어요: ${url}`,
-            },
-          ],
-        },
-        { url },
-      );
+      return withPageState({ content: [{ type: "text", text }] }, { url });
     },
   );
 

@@ -786,15 +786,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
         this.mcpBrowser ??= new BrowserControl();
         if (plan.reuse !== null) {
+          // #526 — 이동 **전에** 이 탭이 무엇을 보여주고 있었는지 붙잡아 둔다.
+          // 이동 후에 읽으면 이미 새 주소라 "무엇이 밀려났는지"를 알 수 없다.
+          const reused = tabs[plan.reuse];
+          const replaced = reused?.url ? { url: reused.url, title: reused.title } : undefined;
           // 재사용 탭을 고정한 뒤 CDP navigate — 프록시 경로(#278)가 쓰는 실행기를
           // 그대로 태운다. 같은 동작을 두 벌 두면 한쪽만 고쳐진다(#457 과 같은 이유).
-          this.mcpBrowser.setTargetTab(tabs[plan.reuse]);
+          this.mcpBrowser.setTargetTab(reused);
           const r = await this.mcpBrowser.execute({
             id: "mcp-browser_open",
             name: "browser_navigate",
             input: { url },
           });
-          if (!r.isError) return;
+          if (!r.isError) return { replaced };
           // 이동 실패(탭이 방금 닫혔다든지)는 새로 여는 쪽으로 폴백한다 —
           // 학생 눈에는 "안 열렸다"가 되어선 안 된다.
           this.mcpBrowser.setTargetTab(undefined);
