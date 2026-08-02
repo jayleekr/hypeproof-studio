@@ -314,4 +314,53 @@ function chatRequest({ prompt = "안녕 코치", stream = false, headers = {} } 
 console.log("✓ #431: sdk_tools.shell survives the /v1/profile serializer");
 console.log("✓ integration: GET /v1/profile — token-resolved, system_prompt withheld");
 
+// --- #381: /v1/profile names WHY it failed -----------------------------------
+//
+// This is the first call a new participant's app makes, and for a while it was
+// the last thing they saw: every failure came back shapeless, so the app could
+// only say "확인이 안 돼요" for an expired token, an instructor token, and an
+// unknown cohort alike. The app cannot classify what the server doesn't say.
+{
+  const { issueIssuer } = await import("../src/lib/tokens.ts");
+  const env = createMockEnv();
+
+  const profileReq = (tok) =>
+    new Request("https://api.test/v1/profile", { headers: { authorization: `Bearer ${tok}` } });
+
+  // expired
+  const { token: dead } = await issue({ u: USER, c: COHORT, p: PROFILE }, -1, TEST_SECRET);
+  const rExpired = await app.fetch(profileReq(dead), env, makeCtx());
+  assert.equal(rExpired.status, 401);
+  const jExpired = await rExpired.json();
+  assert.equal(jExpired.error.code, "expired", "expired token is named 'expired'");
+  assert.ok(jExpired.error.request_id, "carries request_id for support (#49)");
+
+  // issuer token pasted into the participant box — used to be a bare 400
+  // "unknown profile", because issuer payloads carry a placeholder p.
+  const { token: issuerTok } = await issueIssuer(
+    { issuer: "jay", scopes: [{ cohort: COHORT, profiles: [PROFILE] }] },
+    1,
+    TEST_SECRET,
+  );
+  const rIssuer = await app.fetch(profileReq(issuerTok), env, makeCtx());
+  assert.equal(rIssuer.status, 401, "issuer token cannot open a participant session");
+  assert.equal((await rIssuer.json()).error.code, "wrong_role");
+
+  // a well-formed token pointing at a cohort this deploy doesn't know
+  const { token: strayTok } = await issue(
+    { u: USER, c: COHORT, p: "no-such-profile-id" },
+    1,
+    TEST_SECRET,
+  );
+  const rStray = await app.fetch(profileReq(strayTok), env, makeCtx());
+  assert.equal(rStray.status, 400);
+  assert.equal((await rStray.json()).error.code, "unknown_profile");
+
+  // garbage in the box
+  const rJunk = await app.fetch(profileReq("not-a-token"), env, makeCtx());
+  assert.equal(rJunk.status, 401);
+  assert.equal((await rJunk.json()).error.code, "malformed");
+}
+console.log("✓ #381: GET /v1/profile — every failure carries an actionable error.code");
+
 console.log("All chat integration tests passed.");
