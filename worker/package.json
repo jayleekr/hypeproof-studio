@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Cloudflare Worker \u2014 OpenAI-compatible proxy + cohort admin for HypeProof Studio",
+  "description": "Cloudflare Worker — OpenAI-compatible proxy + cohort admin for HypeProof Studio",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
@@ -19,8 +19,8 @@
     "hono": "^4.12.27"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250515.0",
+    "@cloudflare/workers-types": "^5.20260801.1",
     "typescript": "^5.4.0",
-    "wrangler": "^4.106.0"
+    "wrangler": "^4.118.0"
   }
 }
