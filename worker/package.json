@@ -16,7 +16,7 @@
     "validate-profiles": "node --experimental-strip-types scripts/dump-profiles.ts | python3 scripts/cohort-harness/validate.py"
   },
   "dependencies": {
-    "hono": "^4.12.27"
+    "hono": "^4.12.34"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260801.1",
