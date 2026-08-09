@@ -98,6 +98,32 @@ done
 # stdin is the piped script under curl|bash, so prompts are impossible there.
 [ -t 0 ] || NONINTERACTIVE=1
 
+# --- curl | bash 안전장치: 자기 자신을 파일로 다시 실행한다 ------------------- #
+# 파이프로 오면 bash 는 이 스크립트를 stdin 에서 조금씩 읽어가며 실행한다. 그런데
+# Homebrew 설치기와 그것이 부르는 CLT 설치(softwareupdate)가 **같은 stdin 을
+# 소비**하기 때문에, 아직 안 읽은 뒷부분(4 Studio 설치 · 5 SDK 시드 · 6 doctor)이
+# 통째로 사라진다. bash 는 EOF 를 만나 그대로 **성공(0)** 으로 끝나고, 참가자는
+# "설치 완료" 를 본 뒤 앱이 없는 상태로 남는다.
+#
+# brew·CLT 가 이미 있는 기기에서는 stdin 을 먹는 놈이 없어 재현되지 않는다 —
+# 그래서 개발기에서는 늘 통과했고, 공기계에서만 터졌다. 2026-08-09 vanilla
+# macOS VM 에서 재현: 9m54s / exit 0 / Studio·SDK 없음, 로그에 스크립트 뒷부분이
+# 실행 대신 텍스트로 출력됨.
+#
+# 파일에서 읽히는 순간 이 문제는 원천적으로 사라지므로, 파이프로 들어왔으면
+# 내려받아 exec 한다.
+_hps_is_piped() {
+  case "${0##*/}" in bash|sh|dash|zsh|-bash|-sh) return 0 ;; esac
+  [ -r "$0" ] || return 0
+  return 1
+}
+if [ -z "${HPS_REEXEC:-}" ] && _hps_is_piped; then
+  _self="$(mktemp -t hps-install)" || die "mktemp failed"
+  curl -fsSL "${RAW_BASE}/install.sh" -o "$_self" \
+    || die "installer re-fetch failed: ${RAW_BASE}/install.sh"
+  HPS_REEXEC=1 exec bash "$_self" "$@"
+fi
+
 confirm() {  # confirm "question" -> 0 yes / 1 no; auto-yes when noninteractive
   [ "$NONINTERACTIVE" = "1" ] && return 0
   printf '%s [Y/n] ' "$1"
@@ -192,8 +218,12 @@ ensure_brew() {
     if confirm "Homebrew not found. Install it now (also triggers Xcode CLT)?"; then
       NONINTERACTIVE_BREW=""
       [ "$NONINTERACTIVE" = "1" ] && NONINTERACTIVE_BREW="NONINTERACTIVE=1"
+      # </dev/null 은 이중 안전장치다. 위쪽 re-exec 가 이미 stdin 의존을 없앴지만,
+      # brew 설치기와 그것이 부르는 softwareupdate 가 stdin 을 읽는다는 사실 자체는
+      # 그대로이므로 여기서도 끊어둔다 (누가 re-exec 를 걷어내도 안 터지게).
       env $NONINTERACTIVE_BREW /bin/bash -c \
         "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+        </dev/null \
         || die "Homebrew install failed. See https://brew.sh"
       resolve_brew || die "Homebrew installed but 'brew' not on PATH; open a new shell and re-run."
       ensure_path_entry "$(dirname "$BREW")"
