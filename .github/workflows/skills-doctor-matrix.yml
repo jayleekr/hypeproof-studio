@@ -100,6 +100,14 @@ jobs:
 
       # (c) Lightweight smoke of the bundled skills' shell assumptions:
       # git + gh must exist, and a POSIX bash must resolve and run.
+      # (c0) 회귀 TC — `curl | bash` 로 설치가 조용히 중단되던 것 (#544).
+      # 공기계(brew·CLT 없음)에서만 터지던 버그라 CI·개발기에서는 늘 통과했다.
+      # 이 TC 는 stdin 을 삼키는 가짜 자식으로 그 조건을 재현하므로 러너 환경과
+      # 무관하게 돈다. 실제 설치를 하지 않아 네트워크·디스크를 쓰지 않는다.
+      - name: Regression — installer survives `curl | bash`
+        shell: bash
+        run: bash scripts/test-installer-pipe.sh
+
       - name: Smoke — skill shell assumptions
         run: |
           set -euo pipefail
