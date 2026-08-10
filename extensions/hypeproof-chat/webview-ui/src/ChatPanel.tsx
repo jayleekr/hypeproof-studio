@@ -208,20 +208,8 @@ export function ChatPanel(props: Props) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, streaming]);
 
-  if ((needsNaming || forceNaming) && config?.profile) {
-    return (
-      <NamingCard
-        namingPromptMd={config.profile.ux.coach.naming_prompt_md}
-        personalityPromptMd={config.profile.ux.coach.personality_prompt_md}
-        fallbackName={config.profile.ux.coach.fallback_name}
-        emoji={namingEmoji}
-        onSave={(n, p) => {
-          props.onSaveCoach(n, p);
-          setForceNaming(false);
-        }}
-      />
-    );
-  }
+  // NOTE: 작명 카드로 빠지는 조기 return 은 **이 컴포넌트의 마지막 훅 아래**에 있다.
+  // 여기(훅 사이)에 두면 안 된다 — 아래 "훅 순서" 주석 참조.
 
   const submit = (text?: string) => {
     const value = (text ?? draft).trim();
@@ -320,6 +308,38 @@ export function ChatPanel(props: Props) {
   // #384 — drag a screenshot file from Finder/desktop straight onto the input.
   // Same attach path as paste. dragover must preventDefault so drop fires.
   const [dragActive, setDragActive] = useState(false);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 훅 순서 — 이 아래로는 훅을 추가하지 말 것. 조기 return 이 여기 있다.
+  //
+  // 작명 카드는 `needsNaming` 이 true 일 때만 렌더된다. 이 return 이 훅들 **사이**
+  // 에 있으면 렌더마다 훅 개수가 달라져 React 가 크래시한다:
+  //
+  //   작명 전 (needsNaming=true)  → return → 훅 N개
+  //   아이가 이름 저장 → coach.configured=true
+  //   작명 후 (needsNaming=false) → 통과   → 훅 N+3개   ← React #310
+  //   (반대 방향 — config 지연 도착·`코치 이름 다시 짓기` → 훅 감소 → React #300)
+  //
+  // 작명 의식은 모든 학생이 반드시 통과하므로 이 전이는 정상 경로에서 100% 발생한다.
+  // 2026-08-10 실기기 세션에서 #300·#310 두 방향 모두 재현됐다 (2/2).
+  // ErrorBoundary 가 잡아 "화면을 그리다가 멈췄어요" 로 떨어지고 "다시 열기" 로만 복구된다.
+  //
+  // 새 훅이 필요하면 이 블록 **위**에 추가한다.
+  // ─────────────────────────────────────────────────────────────────────────
+  if ((needsNaming || forceNaming) && config?.profile) {
+    return (
+      <NamingCard
+        namingPromptMd={config.profile.ux.coach.naming_prompt_md}
+        personalityPromptMd={config.profile.ux.coach.personality_prompt_md}
+        fallbackName={config.profile.ux.coach.fallback_name}
+        emoji={namingEmoji}
+        onSave={(n, p) => {
+          props.onSaveCoach(n, p);
+          setForceNaming(false);
+        }}
+      />
+    );
+  }
   const handleDragOver = (e: React.DragEvent<HTMLElement>) => {
     if (!imagePasteEnabled) return;
     if (!Array.from(e.dataTransfer.items ?? []).some((it) => it.kind === "file")) return;
