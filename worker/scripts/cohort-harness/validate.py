@@ -309,6 +309,18 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
             add(findings, rules, pid, "child_sdk_subagents",
                 "HARD FAIL: child cohort must not set sdk_tools.subagents=true "
                 "(minors get no SDK subagents until a pedagogy decision lands)")
+        # 2026-08-10 — `sandbox.file_write` 는 읽는 코드가 없는 레거시인데
+        # (도구 정책의 owner 는 sdk_tools), child 프로필에 true 로 남아 있어
+        # 실제로 두 사람이 "미성년도 파일 쓰기가 켜져 있다" 고 오독했다.
+        # 위 child_sdk_write 는 진짜 권한을 막고, 이 항목은 **오독을 막는다**.
+        # 산출물은 코치가 아니라 확장이 저장한다(revealBuilt → saveGameToWorkspace,
+        # workspace_root/index.html) — 이 필드와 무관하다.
+        if (p.get("sandbox") or {}).get("file_write") is True:
+            add(findings, rules, pid, "child_legacy_file_write",
+                "child cohort sets legacy sandbox.file_write=true — 읽는 코드가 없어 "
+                "런타임 영향은 0 이지만 '미성년도 쓰기 가능' 으로 오독된다. 산출물은 "
+                "확장이 workspace_root/index.html 로 저장한다(revealBuilt). "
+                "필드를 제거하거나 false 로 두고, 정책은 sdk_tools 로만 표현할 것")
 
 
 def check_cohort_consistency(cohort_totals: dict, rules: dict, findings: list) -> None:

@@ -47,10 +47,32 @@ export interface Profile {
     example_prompts: string[];
   };
   sandbox: {
+    /**
+     * @deprecated 읽는 코드가 없다. 도구 정책의 canonical owner 는
+     * `sdk_tools.write` 다 (#282 P2 / ADR 0003). 이 필드는 그보다 앞선
+     * 시기의 잔재이며 값이 무엇이든 런타임에 아무 영향이 없다.
+     *
+     * **왜 지우지 않고 남겨 두는가:** 프로필 4종이 이미 값을 갖고 있어
+     * 일괄 제거는 별건이다. 그때까지 이 주석이 오독을 막는다 —
+     * 2026-08-10 에 실제로 두 사람(프로필 작성자·검증자)이 이 필드를
+     * 보고 "파일 쓰기가 켜져 있다"고 판단했다.
+     *
+     * **아동 코호트에서 산출물이 저장되는 진짜 경로:** 코치는 Write 도구가
+     * 없고(chat-only, L3 결정), 대신 확장이 코치의 ```html 펜스를 파싱해
+     * 워크스페이스 루트의 `index.html` 로 쓴다
+     * (`chatPanelProvider.ts` `revealBuilt()` → `saveGameToWorkspace()`).
+     * 즉 이 필드가 false 든 true 든 산출물은 저장된다.
+     */
     file_write: boolean;
+    /** 코호트 작업 폴더. 읽힘 — chat.ts 가 /v1/profile 로 내보내고 클라이언트가 폴더를 전환한다. */
     workspace_root?: string;
+    /**
+     * @deprecated 읽는 코드가 없다. 실제 셸 정책은 `sdk_tools.shell` 이
+     * 소유한다 (#431). 위 `file_write` 와 같은 잔재.
+     */
     execute_shell: boolean;
-    mcp_tools_enabled: string[];    // empty array = no tools
+    /** 읽힘 — translate.ts 가 클라이언트 tools 배열을 이 목록으로 필터한다. empty = no tools */
+    mcp_tools_enabled: string[];
   };
   preview: {
     type: "iframe" | "live_server";

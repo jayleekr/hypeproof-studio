@@ -38,10 +38,15 @@ export const profile: Profile = {
     ],
   },
   sandbox: {
+    // 레거시 — 읽는 코드가 없다(types.ts 참조). 코치는 Write 도구가 없고,
+    // 산출물은 확장이 ```html 펜스를 파싱해 workspace_root/index.html 로 쓴다
+    // (revealBuilt → saveGameToWorkspace). 값과 무관하게 저장은 일어난다.
     file_write: true,
     workspace_root: "~/HypeProofGames",
+    // 레거시 — 실제 셸 정책은 sdk_tools.shell 이 소유한다(#431). 미성년은
+    // 워커가 proxy 로 고정하므로 파일·셸 도구가 도달할 런타임이 없다.
     execute_shell: false,
-    mcp_tools_enabled: [],
+    mcp_tools_enabled: [],              // B반과 동일 — chat-only (L3 결정)
   },
   preview: {
     type: "live_server",
