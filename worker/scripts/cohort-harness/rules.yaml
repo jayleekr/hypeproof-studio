@@ -117,3 +117,5 @@ severity:
   child_sdk_write: fail
   child_sdk_browser: fail
   child_sdk_subagents: fail
+  # 오독 방지용 — 진짜 권한이 아니라 죽은 필드라 warn. 값 정리는 별건(프로필 4종 일괄).
+  child_legacy_file_write: warn
