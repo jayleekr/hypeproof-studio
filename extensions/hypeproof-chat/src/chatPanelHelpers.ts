@@ -436,3 +436,41 @@ export function sanitizeWorkshopToken(raw: string): string {
 export function looksLikeWorkshopToken(token: string): boolean {
   return /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(token);
 }
+
+/**
+ * 어느 코치 런타임으로 갈 것인가 — 미성년은 어느 경로로도 SDK 에 닿지 않는다.
+ *
+ * 2026-08-11 실측에서 드러난 비대칭: 이 판단이 인라인이었을 때 프로필 경로만
+ * 미성년을 걸렀고 **머신 설정 경로는 안 걸렀다.**
+ *
+ *   const profileWantsSdk = profile?.coach_runtime === "agent-sdk" && profile?.minor_cohort !== true;
+ *   const runtime = settingRuntime === "agent-sdk" || profileWantsSdk ? "agent-sdk" : "proxy";
+ *                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 미성년 검사 없음
+ *
+ * 워커는 미성년 프로필의 coach_runtime 을 무조건 "proxy" 로 강제하는데
+ * (routes/chat.ts, REQ-O 계열), `hypeproofChat.coachRuntime` 을 agent-sdk 로
+ * 둔 기기에서는 그 핀이 우회됐다.
+ *
+ * **권한 침해는 아니다** — 도구는 프로필이 소유하고(permittedToolsFor),
+ * 미성년 코호트는 sdk_tools 를 두지 않으므로 빈 배열이 나가며, write 는 minor
+ * tier 에서 한 번 더 스트립된다. 하지만 결과가 나쁘다: 도구 0개로 SDK 루프가
+ * 돌면서 **툴 호출 원문이 아이 화면에 그대로 렌더되고, 쓰지도 않은 파일을
+ * 썼다고 단언**한다(R0 위반). 실기기에서 관측했다.
+ *
+ * 원 주석이 선언한 belt-and-suspenders 의도를 실제로 지킨다 — 미성년 검사를
+ * 두 경로의 **합집합 바깥**에 둔다.
+ */
+export function resolveCoachRuntime(args: {
+  /** 머신 스코프 설정 `hypeproofChat.coachRuntime`. */
+  settingRuntime: "proxy" | "agent-sdk";
+  /** 워커가 내려준 프로필의 요청 런타임 (없으면 proxy). */
+  profileRuntime?: "proxy" | "agent-sdk";
+  /** 워커가 내려준 minor_cohort. 모르면 undefined — 그 경우 막지 않는다(기존 동작). */
+  minorCohort?: boolean;
+}): "proxy" | "agent-sdk" {
+  const wantsSdk = args.settingRuntime === "agent-sdk" || args.profileRuntime === "agent-sdk";
+  if (!wantsSdk) return "proxy";
+  // 미성년이면 어느 경로로 요청했든 proxy. fail-closed 는 아니다 —
+  // minorCohort 를 모르는 상태(구 워커 응답)에서 기존 동작을 깨지 않는다.
+  return args.minorCohort === true ? "proxy" : "agent-sdk";
+}

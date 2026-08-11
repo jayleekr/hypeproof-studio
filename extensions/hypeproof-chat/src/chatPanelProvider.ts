@@ -80,6 +80,7 @@ import {
   AiDisclosureGate,
   COACH_DEGRADED_NOTICE,
   sdkFallbackLogLine,
+  resolveCoachRuntime,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
@@ -1245,10 +1246,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // canUseTool and strips minor tools. Belt-and-suspenders: never honor a
       // profile agent-sdk request for a minor_cohort, even if the worker
       // somehow sent one.
+      // 판단은 resolveCoachRuntime (chatPanelHelpers) 가 소유한다 — 미성년 검사가
+      // 설정 경로에만 빠져 있던 비대칭을 고치면서 순수 함수로 뺐다. 대조군 포함
+      // 단위 테스트: test/coach-runtime.smoke.mjs
       const settingRuntime = cfg.get<"proxy" | "agent-sdk">("coachRuntime", "proxy");
-      const profileWantsSdk = profile?.coach_runtime === "agent-sdk" && profile?.minor_cohort !== true;
-      const runtime: "proxy" | "agent-sdk" =
-        settingRuntime === "agent-sdk" || profileWantsSdk ? "agent-sdk" : "proxy";
+      const runtime: "proxy" | "agent-sdk" = resolveCoachRuntime({
+        settingRuntime,
+        profileRuntime: profile?.coach_runtime,
+        minorCohort: profile?.minor_cohort,
+      });
       const onDelta = (delta: string) => {
         assistantText += delta;
         const t = this.turnTimelines.get(streamId);
