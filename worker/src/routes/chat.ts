@@ -224,10 +224,23 @@ chat.get("/profile", async (c) => {
     // a profile mistake can never route a child to the file/exec-capable
     // runtime. Absent → proxy. The client still gates every tool via
     // canUseTool and honors the machine-scoped runtime setting.
-    coach_runtime:
-      profile.coach_runtime === "agent-sdk" && !isMinorCohort(profile)
-        ? "agent-sdk"
-        : "proxy",
+    // 2026-08-11 결정 — 미성년 코호트도 프로필이 명시적으로 opt-in 하면
+    // agent-sdk 에 도달한다. SK 아동 워크숍의 커리큘럼이 "코치가 워크스페이스의
+    // 파일을 읽고 고친다" 를 전제로 바뀌었고, 그러려면 파일 도구가 실행될
+    // 런타임이 필요하다. 이전에는 여기서 무조건 proxy 로 핀했다.
+    //
+    // **무엇이 바뀌지 않았는가 (중요):**
+    //   - 모더레이션 — 인바운드/아웃바운드 스크린은 isMinorCohort 로 그대로 돈다
+    //     (이 파일 322·513행, messages.ts 298·444행). 이 변경과 무관한 계층이다.
+    //   - 도구 범위 — shell·browser·subagents 는 아동 프로필에 여전히 없고
+    //     하네스가 hard fail 로 막는다. 열린 것은 read/write 뿐이다.
+    //   - 경로 봉쇄 + 승인 모달 — 모든 툴 호출은 canUseTool 을 지나고
+    //     워크스페이스 밖 경로는 거부된다(evaluateSdkToolUse).
+    //
+    // 즉 "미성년은 무조건 proxy" 가 아니라 "미성년은 프로필이 명시하지 않으면
+    // proxy" 로 바뀐 것이다. 프로필에 sdk_tools 를 두지 않은 아동 코호트는
+    // 이전과 동작이 완전히 같다.
+    coach_runtime: profile.coach_runtime === "agent-sdk" ? "agent-sdk" : "proxy",
   });
 });
 

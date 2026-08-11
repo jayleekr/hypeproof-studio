@@ -176,7 +176,12 @@ export function permittedToolsFor(profile: ResolvedProfile): string[] {
   if (profile.sdk_tools?.read === true) {
     tools.push(...SDK_READ_TOOL_NAMES);
   }
-  if (profile.sdk_tools?.write === true && !isMinorTier(profile)) {
+  // 2026-08-11 — minor tier 스트립을 걷어낸다. 도구 정책의 owner 는 워커
+  // 프로필의 sdk_tools 다(ADR 0003). 클라이언트가 tier 로 한 번 더 깎으면
+  // 프로필이 명시적으로 연 권한이 조용히 사라지고, 그때 코치는 도구가 있다고
+  // 믿은 채 실패한다(#476 의 오진 패턴). shell·browser·subagents 는 여전히
+  // 프로필 게이트 + 하네스 hard fail 로 아동에게 닫혀 있다.
+  if (profile.sdk_tools?.write === true) {
     tools.push(...SDK_WRITE_TOOL_NAMES);
   }
   // epic #431 — shell. Profile-gated only, no separate minor strip: a minor

@@ -421,7 +421,10 @@ function browserContractFor(profile: Profile, runtime: CoachRuntime): string {
 function degradedRuntimeNoticeFor(profile: Profile, runtime: CoachRuntime): string {
   if (runtime !== "proxy") return "";
   if (profile.coach_runtime !== "agent-sdk") return "";
-  if (isMinorCohort(profile)) return "";
+  // 2026-08-11 — 미성년 제외를 걷어낸다. 아동 코호트가 agent-sdk 를 opt-in 할 수
+  // 있게 된 뒤로는(chat.ts) 그쪽에도 폴백이 성립하고, 폴백했는데 코치가 파일을
+  // 다룰 수 있다고 믿으면 #476 이 기록한 그 오진("저장해주시겠어요?")이 아이에게
+  // 그대로 간다. opt-in 하지 않은 아동 프로필은 아래 grantsHostTools 에서 걸러진다.
   const t = profile.sdk_tools;
   const grantsHostTools = t?.read === true || t?.write === true || t?.shell === true;
   if (!grantsHostTools) return "";

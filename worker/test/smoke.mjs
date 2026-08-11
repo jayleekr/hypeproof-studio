@@ -1725,9 +1725,13 @@ const TINY_PNG =
       assert.notEqual(p.input?.image_paste, true, `minor cohort ${p.id}: image_paste MUST stay off`);
     }
   }
-  // #282 Phase 2 — Agent SDK workspace tools. MINOR-SAFETY INVARIANT: minors'
-  // cohorts must NEVER gain write capability (and there is no exec flag in the
-  // schema at all). Mirrors the harness child_sdk_write FAIL check.
+  // #282 Phase 2 — Agent SDK workspace tools.
+  // 2026-08-11 결정: 아동 코호트도 workspace read/write 를 갖는다 (커리큘럼이
+  // "코치가 파일을 읽고 고친다" 를 전제로 바뀌었다). 대신 배선 정합성을 잡는다 —
+  // write 를 열었으면 실행될 런타임(coach_runtime: agent-sdk)이 있어야 한다.
+  // 없으면 워커가 proxy 로 내려주고 코치는 도구가 있다고 믿은 채 실패한다(#476).
+  // 하네스의 child_sdk_write_without_runtime FAIL 과 같은 검사다.
+  // shell / browser / subagents 는 아동에게 여전히 닫혀 있다.
   // Slice 2 (#306/#318): the browser MCP grant is equally off for minors until
   // safe-session ships — mirrors the harness child_sdk_browser FAIL check.
   // Slice 3: the SDK subagents grant (읽기 전용 코드리뷰어/리서처) is equally
@@ -1735,7 +1739,13 @@ const TINY_PNG =
   // child_sdk_subagents FAIL check.
   for (const p of all) {
     if (p.audience.parent_coaching === true) {
-      assert.notEqual(p.sdk_tools?.write, true, `minor cohort ${p.id}: sdk_tools.write MUST stay off`);
+      if (p.sdk_tools?.write === true) {
+        assert.equal(
+          p.coach_runtime,
+          "agent-sdk",
+          `minor cohort ${p.id}: sdk_tools.write=true 인데 coach_runtime 이 agent-sdk 가 아니다 — 도구를 열고 실행할 런타임이 없다`,
+        );
+      }
       assert.notEqual(p.sdk_tools?.browser, true, `minor cohort ${p.id}: sdk_tools.browser MUST stay off`);
       assert.notEqual(p.sdk_tools?.subagents, true, `minor cohort ${p.id}: sdk_tools.subagents MUST stay off`);
     }
@@ -1843,7 +1853,16 @@ const TINY_PNG =
   );
   for (const p of all) {
     if (p.id !== copyclone.id) {
-      assert.notEqual(p.sdk_tools?.write, true, `profile ${p.id}: sdk_tools.write reserved for the adult copyclone cohort in Phase 2`);
+      // 2026-08-11 — write 는 더 이상 copyclone 전용이 아니다. SK 아동 두 트랙이
+      // 커리큘럼 변경으로 workspace read/write 를 갖는다. browser/subagents 는
+      // 아래처럼 여전히 copyclone 전용.
+      if (p.sdk_tools?.write === true) {
+        assert.equal(
+          p.coach_runtime,
+          "agent-sdk",
+          `profile ${p.id}: sdk_tools.write=true 인데 coach_runtime 이 agent-sdk 가 아니다`,
+        );
+      }
       assert.notEqual(p.sdk_tools?.browser, true, `profile ${p.id}: sdk_tools.browser reserved for the adult copyclone cohort in Phase 2`);
       assert.notEqual(p.sdk_tools?.subagents, true, `profile ${p.id}: sdk_tools.subagents reserved for the adult copyclone cohort in P2 slice 3`);
     }

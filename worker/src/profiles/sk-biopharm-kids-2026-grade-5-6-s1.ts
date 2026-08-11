@@ -48,6 +48,24 @@ export const profile: Profile = {
     execute_shell: false,
     mcp_tools_enabled: [],              // B반과 동일 — chat-only (L3 결정)
   },
+  // 2026-08-11 결정 — 아동 트랙에 **파일 도구만** 연다.
+  //
+  // 왜: 커리큘럼이 "코치가 워크스페이스의 파일을 읽고 고친다" 를 전제로 바뀌었다.
+  // 이전에는 코치가 채팅에 ```html 을 뱉고 확장이 index.html 로 저장하는 단방향
+  // 이었다 — 아이가 넣어둔 파일을 코치가 못 읽고, 고친 결과를 파일에 못 썼다.
+  //
+  // 무엇을 열지 않았는가 (의도적):
+  //   shell      — 임의 명령 실행. 아동 코호트는 열지 않는다
+  //   browser    — 외부 탐색. browser_session.mode:"safe" 와 함께 닫아 둔다
+  //   subagents  — 위임 판단은 성인 트랙 전용
+  //
+  // 함께 유지되는 것: 인바운드/아웃바운드 모더레이션(REQ-O2/O3)은 이 플래그와
+  // 무관하게 그대로 돈다. 모든 툴 호출은 canUseTool 승인 게이트를 지나고,
+  // 워크스페이스(workspace_root) 밖 경로는 evaluateSdkToolUse 가 거부한다.
+  sdk_tools: { read: true, write: true },
+  // 위 sdk_tools 가 실행될 런타임. 워커는 프로필이 명시적으로 요청할 때만
+  // agent-sdk 를 내려준다(routes/chat.ts) — 미설정 아동 코호트는 proxy 그대로.
+  coach_runtime: "agent-sdk",
   preview: {
     type: "live_server",
     auto_start: false,

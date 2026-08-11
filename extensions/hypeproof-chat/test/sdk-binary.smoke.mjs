@@ -270,13 +270,17 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   );
 }
 
-// ─── minor-safety invariant unaffected by binary presence (REQ-M18/M21/M23) ──
-// A seeded/resolved binary changes WHERE the CLI runs from — never WHAT a
-// cohort may do. A minor profile (even one mistakenly carrying every grant)
-// still gets tools: [] with a binary present.
+// ─── 바이너리 존재가 도구 정책을 바꾸지 않는다 (REQ-M18/M21/M23) ──────────────
+// 시드된 바이너리는 CLI 가 **어디서** 도는지를 바꿀 뿐 코호트가 **무엇을** 할 수
+// 있는지는 건드리지 않는다.
+//
+// 2026-08-11 — 이전에는 "아동은 무엇을 주든 tools: []" 였다. 지금은 도구 정책의
+// owner 가 프로필이므로(ADR 0003) write 는 프로필이 열면 열린다. 대신 **아동에게
+// 여전히 닫힌 것**(browser·subagents)으로 이 불변식을 검사한다 — 바이너리가
+// 있어도 그 둘은 새어나오지 않아야 한다.
 {
   const pollutedMinor = profile("kids-rich", {
-    sdk_tools: { read: false, write: true, browser: true, subagents: true },
+    sdk_tools: { read: false, write: false, browser: true, subagents: true },
   });
   const agent = profileToAgentOptions(pollutedMinor, { model: "m", systemPrompt: "s" });
   const opts = buildSdkQueryOptions(agent, {
@@ -285,7 +289,11 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
     baseEnv: {},
     pathToClaudeCodeExecutable: "/seed/claude",
   });
-  assert.deepEqual(opts.tools, [], "minor cohort stays chat-only even with a binary present");
+  assert.deepEqual(
+    opts.tools,
+    [],
+    "바이너리가 있어도 아동에게 browser/subagents 는 새지 않는다",
+  );
   assert.equal(opts.agents, undefined, "no subagents for minors regardless of binary");
   assert.deepEqual(opts.allowedTools, [], "allowedTools stays [] (no auto-approve)");
   assert.equal(opts.pathToClaudeCodeExecutable, "/seed/claude");
