@@ -468,9 +468,18 @@ export function resolveCoachRuntime(args: {
   /** 워커가 내려준 minor_cohort. 모르면 undefined — 그 경우 막지 않는다(기존 동작). */
   minorCohort?: boolean;
 }): "proxy" | "agent-sdk" {
-  const wantsSdk = args.settingRuntime === "agent-sdk" || args.profileRuntime === "agent-sdk";
-  if (!wantsSdk) return "proxy";
-  // 미성년이면 어느 경로로 요청했든 proxy. fail-closed 는 아니다 —
-  // minorCohort 를 모르는 상태(구 워커 응답)에서 기존 동작을 깨지 않는다.
-  return args.minorCohort === true ? "proxy" : "agent-sdk";
+  // 2026-08-11 — 프로필이 agent-sdk 를 요청하면 미성년이어도 존중한다.
+  // 워커가 이미 그 판단을 했고(routes/chat.ts), 아동 코호트가 파일 도구를
+  // opt-in 할 수 있게 됐다. 여기서 한 번 더 깎으면 프로필이 연 권한이 조용히
+  // 사라진다.
+  if (args.profileRuntime === "agent-sdk") return "agent-sdk";
+
+  // 머신 스코프 설정은 여전히 미성년을 넘지 못한다. 프로필이 opt-in 하지 않은
+  // 아동 코호트를 로컬 설정만으로 SDK 루프에 넣으면, 도구 0개 상태로 돌면서
+  // 툴 호출 원문이 아이 화면에 노출되고 쓰지도 않은 파일을 썼다고 단언한다
+  // (2026-08-11 실기기 관측, R0 위반). 그 경로만 막는다.
+  if (args.settingRuntime === "agent-sdk") {
+    return args.minorCohort === true ? "proxy" : "agent-sdk";
+  }
+  return "proxy";
 }

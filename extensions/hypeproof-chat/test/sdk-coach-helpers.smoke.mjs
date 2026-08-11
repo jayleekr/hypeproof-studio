@@ -48,18 +48,28 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   }
   assert.deepEqual(permittedToolsFor(profile(null)), [], "missing game field + no sdk_tools grants nothing");
 
-  // MINOR-SAFETY INVARIANT: a minor tier with a (misconfigured) write:true
-  // still gets NO write tools — the client strips them as defense-in-depth on
-  // top of the worker harness's child_sdk_write FAIL.
+  // 2026-08-11 — 클라이언트의 minor tier write 스트립을 걷어냈다.
+  // 도구 정책의 owner 는 워커 프로필의 sdk_tools 다(ADR 0003). 클라이언트가
+  // tier 로 한 번 더 깎으면 프로필이 명시적으로 연 권한이 조용히 사라지고,
+  // 코치는 도구가 있다고 믿은 채 실패한다(#476 오진 패턴).
+  // SK 아동 트랙이 커리큘럼 변경으로 read/write 를 opt-in 했다.
   assert.deepEqual(
     permittedToolsFor(profile("kids-rich", { sdk_tools: { read: true, write: true } })),
-    ["Read", "Grep", "Glob"],
-    "minor cohort NEVER gains write tools, even if the profile says write:true",
+    ["Read", "Grep", "Glob", "Write", "Edit"],
+    "아동 tier 도 프로필이 opt-in 하면 write 를 받는다",
   );
   assert.deepEqual(
     permittedToolsFor(profile(null, { sdk_tools: { write: true } })),
+    ["Write", "Edit"],
+    "tier 불명이어도 프로필이 소유한다 — tier 로 추론하지 않는다",
+  );
+  // shell 은 여전히 프로필 게이트 전용이고 아동 프로필은 두지 않는다.
+  assert.deepEqual(
+    permittedToolsFor(profile("kids-rich", { sdk_tools: { read: true, write: true } })).filter(
+      (t) => t === "Bash",
+    ),
     [],
-    "unknown/missing tier fails closed to minor → write stripped",
+    "아동 tier 에 셸은 없다",
   );
 
   // Explicit false / non-boolean truthy values grant nothing (=== true only).

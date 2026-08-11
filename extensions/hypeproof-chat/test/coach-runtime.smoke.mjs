@@ -26,7 +26,7 @@ const t = (name, fn) => {
   console.log(`  ok   ${name}`);
 };
 
-console.log("=== 미성년 — 어느 경로로도 proxy 여야 한다 ===");
+console.log("=== 미성년 — 프로필 opt-in 은 존중, 로컬 설정만으로는 못 넘는다 ===");
 
 t("설정 agent-sdk + 프로필 proxy → proxy (이게 뚫려 있던 구멍)", () => {
   assert.equal(
@@ -35,21 +35,21 @@ t("설정 agent-sdk + 프로필 proxy → proxy (이게 뚫려 있던 구멍)", 
   );
 });
 
-t("설정 proxy + 프로필 agent-sdk → proxy (워커 실수 방어)", () => {
+t("설정 proxy + 프로필 agent-sdk → agent-sdk (2026-08-11: 프로필 opt-in 존중)", () => {
   assert.equal(
     resolveCoachRuntime({ settingRuntime: "proxy", profileRuntime: "agent-sdk", minorCohort: true }),
-    "proxy",
+    "agent-sdk",
   );
 });
 
-t("설정·프로필 둘 다 agent-sdk → proxy", () => {
+t("설정·프로필 둘 다 agent-sdk → agent-sdk", () => {
   assert.equal(
     resolveCoachRuntime({
       settingRuntime: "agent-sdk",
       profileRuntime: "agent-sdk",
       minorCohort: true,
     }),
-    "proxy",
+    "agent-sdk",
   );
 });
 
