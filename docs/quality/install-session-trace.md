@@ -17,8 +17,8 @@
 | 2 | 토큰 발급과 세션 열기 화면이 단일 준비 페이지에 있음 | **PASS** | §1 |
 | 3 | 토큰 발급과 세션 열기가 3분 안에 완료 | **PASS** (3.1초) | §2 |
 | 4 | 토큰 끊김·만료·권한 오류의 복구 행동이 보임 | **PASS** (단서 1건) | §3 |
-| 5 | Mac/Windows 공개계 설치가 각각 10분 안에 완료 | **PARTIAL** — 클린 계정 실측 미수행 | §4 |
-| 6 | 강의 필수 라이브러리가 양쪽 OS에 설치됨 | **PARTIAL** — Mac 공기계 통과(8/9), 본 실측기는 로컬 사유로 실패 | §5 |
+| 5 | Mac/Windows 공개계 설치가 각각 10분 안에 완료 | **Mac PASS** (171초, 순정 VM) · Windows 미검증 | §4 · §9 |
+| 6 | 강의 필수 라이브러리가 양쪽 OS에 설치됨 | **Mac PASS** — 단 **결함 1건 발견·수정** (설치기 버전 게이트) | §5 · §9 |
 | 7 | Mac/Windows가 fallback 없이 같은 SDK 로직으로 작동 | **PARTIAL** — CI 증거 있음 | §6 |
 | 8 | 자기 workspace path와 실행 컨텍스트를 정확히 읽음 | **재정의 필요** — 아동 트랙엔 항목 문언이 안 맞음 | §7 · §8 |
 
@@ -114,7 +114,9 @@ node     ✓ v23.11.0    /opt/homebrew/bin/node
 python3  △ 3.10.5      /Library/Frameworks/Python.framework/Versions/3.10/bin/python3
 ```
 
-**버전 게이트는 정상 작동한다** — `dependencies.yaml` 이 `min_version: "3.11"` 과 `version_regex` 를 선언하고, `scripts/hps-doctor.sh` 가 이를 강제하며 **종료코드 1** 로 fail-closed 한다. 실행 결과:
+**⚠ 이 절은 두 번 뒤집혔다. 최종 결론은 §9 다.** 결론만 먼저: **doctor 가 둘이고, 설치기 쪽 게이트가 비어 있었다.** 아래 §5 본문은 `scripts/hps-doctor.sh`(레포 스크립트)만 검증한 것이며, 참가자가 실제로 타는 `install.sh` 내장 `doctor()` 는 버전을 보지 않았다 — 순정 VM 실측(§9)에서 드러났다.
+
+**레포 스크립트(`scripts/hps-doctor.sh`)의 게이트는 정상 작동한다** — `dependencies.yaml` 이 `min_version: "3.11"` 과 `version_regex` 를 선언하고, 이를 강제하며 **종료코드 1** 로 fail-closed 한다. 실행 결과:
 
 ```
 FAIL  python: 3.10.5 is below the required minimum 3.11
@@ -263,3 +265,84 @@ if (this.isLiveServerPreview() && (await this.openInLiveServer())) return true;
 | `verification.md` §5 — 코치의 말은 증거가 아니다 | 코치가 말한 파일명(`hello.html`)으로 디스크를 확인하고 "미생성" 판정했다. 실제 저장 경로(`index.html`)는 보지 않았다 |
 
 덧붙여, 당시 세운 조치안("미성년 프로필에 `sdk_tools.write: true` 추가")은 **하네스가 하드 실패로 막는 항목**이었다 — `validate.py` 의 `child_sdk_write`: *"minors never gain workspace write capability"*. 제안 자체가 강제된 불변식 위반이었다.
+
+---
+
+## §9. 순정 macOS VM 실측 (2026-08-11) — 참가자 머신 전원에 해당하는 결함 1건
+
+### 환경
+
+`tart` + `ghcr.io/cirruslabs/macos-sequoia-vanilla` (macOS 15.7.7 arm64).
+**PATH 가 아니라 파일 경로로** 공기계 조건을 확인했다 — 첫 시도에서 `macos-sequoia-base`(CI 이미지)를 쓰고 PATH 만 보고 "brew 없음" 으로 오판한 뒤 바로잡은 절차다.
+
+```
+/opt/homebrew/bin/brew              없음 ✅
+/opt/homebrew/bin/gh · node         없음 ✅
+/Library/Developer/CommandLineTools  존재 ⚠ (1.8G 실설치 — 이 이미지의 한계)
+```
+
+**측정 한계:** CLT 가 이미 있으므로 아래 171초에는 CLT 설치(~2GB)가 빠져 있다. #539 의 3분 26초는 CLT 까지 포함한 값이며 두 수치는 정합적이다.
+
+### 항목 ⑤·⑥ — 설치 171초 (기준 600초의 28%)
+
+```
+EXIT=0 · 소요 171초
+==> [2] Ensuring package manager (Homebrew)
+==> Downloading and installing Homebrew...      ← 실제 설치 (base 이미지에서는 "brew present" 였다)
+==> Installing node@22
+✓ Studio: installed · ✓ SDK: seeded + verified · ✓ doctor: all manifest checks passed
+```
+
+설치 결과를 파일 경로로 확인: `/opt/homebrew/bin/{brew,node,gh}` ✅, `/Applications/HypeProof Studio.app` ✅.
+
+### 결함 — 설치기의 doctor 가 버전을 보지 않는다 (참가자 전원 해당)
+
+같은 런에서 doctor 가 `✓ python: Python 3.9.6` 을 통과시켰다. **매니페스트 요구는 3.11 이다.**
+
+```
+python@3.11        ❌ 미설치
+PATH python3       /usr/bin/python3 → 3.9.6   (stock macOS 기본)
+brew formula       node@22, gh, … python@3.11 없음
+doctor             "✓ python: Python 3.9.6" + "all manifest checks passed"
+```
+
+원인 — `install.sh` 의 두 곳이 **존재만** 본다:
+
+```sh
+install_one_dep()  if have "$_bin"; then ok ...; return 0        # 버전 비교 없음
+doctor()           _ver="$(eval "$(dep_check_cmd "$_id")")"      # 찍기만 하고 대조 안 함
+                   ok "${_id}: ${_ver:-present}"
+```
+
+`scripts/hps-doctor.sh` 는 처음부터 `min_version` 을 강제했다. **doctor 가 둘이었고 설치기 쪽만 비어 있었다.** stock macOS 가 python 3.9.6 을 기본 탑재하므로 **순정 기기로 오는 참가자는 전원 이 상태**가 되고, 화면에는 "전 항목 통과" 가 찍힌다.
+
+현재 실동작 영향은 낮다(레포 `*.py` 22개 중 3.11 전용 문법 0건). 그러나 3.11+ 문법이 하나라도 들어오는 순간 **전 참가자 머신에서 조용히 깨지고 게이트가 못 잡는다.** #544(공기계에서만 터지던 `curl\|bash` 중단)와 같은 계열이다.
+
+### 조치 + 검증
+
+`install.sh` 에 매니페스트 `min_version` 을 임베드하고 두 호출 지점에 게이트를 배선했다. tier 를 존중한다 — required/recommended 만 강제하고 `bash`(maintainer, min 5.0)는 제외한다. 강제하면 `/bin/bash` 3.2 인 모든 macOS 설치가 깨진다.
+
+**같은 VM 에서 수정본으로 재실행:**
+
+```
+python: 3.9.6 < 최소 3.11 — 설치를 진행합니다…
+→ brew install python@3.11
+→ /opt/homebrew/opt/python@3.11              ✅ 설치됨
+→ doctor: ✓ python: Python 3.11.15
+→ 대화형 셸: /opt/homebrew/opt/python@3.11/libexec/bin/python3 → 3.11.15
+EXIT=0 · 27초
+```
+
+회귀 TC: `scripts/test-installer-version-gate.sh` — 대조군(3.9.6 미달 / 3.11.5 충족 / 경계 / 자릿수), 버전 추출기(`jq-1.7.1-apple`·`v22.23.2` 등 실제 출력 형태), 매니페스트↔임베드 값 일치, tier 정책, 두 호출 지점 배선까지 검사한다. 기기 없이 1초에 끝난다.
+
+### 본 절이 남기는 교훈 — 대리 신호로 판정하지 말 것
+
+오늘 같은 실수를 세 번 했다. 전부 **대상을 열지 않고 대리 신호를 읽은** 것이다.
+
+| # | 읽은 대리 신호 | 실제 |
+|---|---|---|
+| 1 | 코치가 말한 파일명(`hello.html`) | 저장은 `index.html` 로 되고 있었다 (§8) |
+| 2 | 비대화형 SSH 의 PATH | brew 는 설치돼 있었고 PATH 에만 없었다 |
+| 3 | 레포 `hps-doctor.sh` | 참가자가 타는 것은 `install.sh` 내장 doctor 였다 |
+
+세 번째 착시는 이 절 안에서도 한 번 더 났다 — `zsh -lc` 가 `.zshrc` 를 읽지 않아 PATH 반영이 안 된 것처럼 보였다. 대화형 셸로 다시 재서 3.11.15 를 확인했다. `.claude/rules/verification.md` §1 이 정확히 이 실패 방식을 경고하고 있다.
