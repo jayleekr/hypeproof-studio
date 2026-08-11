@@ -312,11 +312,64 @@ dep_preinstalled_ok() {  # deps we accept as-is if already present (no forced up
   esac
 }
 
+# --- version gate (embedded from manifest `min_version`) --------------------- #
+# 2026-08-10, 순정 macOS VM 실측에서 드러난 구멍: 이 아래 두 곳(install_one_dep /
+# doctor)이 **존재만** 보고 버전을 보지 않았다. 그 결과 stock macOS 의
+# /usr/bin/python3 (3.9.6) 이 manifest 의 min_version 3.11 을 만족하는 것으로
+# 취급되어 python@3.11 이 아예 설치되지 않았고, 그럼에도 "all manifest checks
+# passed" 가 찍혔다. 참가자 머신 전부가 이 상태로 워크숍에 온다.
+#
+# tier 를 존중한다 — required/recommended 만 강제한다. bash(maintainer, min 5.0)
+# 를 강제하면 /bin/bash 3.2 인 모든 macOS 설치가 깨진다. dev/maintainer 티어는
+# scripts/hps-doctor.sh 가 warn 으로 다룬다(동일 정책).
+dep_min_version() {
+  case "$1" in
+    git)    echo "2.30" ;;
+    gh)     echo "2.40" ;;
+    python) echo "3.11" ;;
+    jq)     echo "1.6"  ;;
+    node)   echo "18.0" ;;
+    *)      echo ""     ;;   # bash·curl: tier 상 강제하지 않는다
+  esac
+}
+
+# 체크 명령 출력에서 첫 dotted-numeric 토큰을 뽑는다.
+#   "git version 2.39.5" → 2.39.5 · "jq-1.7.1-apple" → 1.7.1 · "v22.23.2" → 22.23.2
+dep_version_of() {
+  eval "$(dep_check_cmd "$1")" 2>/dev/null | head -n1 \
+    | sed -n 's/[^0-9]*\([0-9][0-9]*\(\.[0-9][0-9]*\)*\).*/\1/p'
+}
+
+# ver_ge A B — dotted-numeric A >= B. hps-doctor.sh 와 동일 구현(정책 일치).
+ver_ge() {
+  awk -v a="$1" -v b="$2" 'BEGIN{
+    na=split(a,A,"."); nb=split(b,B,".");
+    n=(na>nb)?na:nb;
+    for(i=1;i<=n;i++){ x=(i<=na?A[i]+0:0); y=(i<=nb?B[i]+0:0);
+      if(x>y){ exit 0 } if(x<y){ exit 1 } }
+    exit 0
+  }'
+}
+
+# dep_satisfies_min <id> — 버전 요구가 없거나(빈 min) 충족하면 0.
+dep_satisfies_min() {
+  _min="$(dep_min_version "$1")"
+  [ -z "$_min" ] && return 0
+  _got="$(dep_version_of "$1")"
+  [ -z "$_got" ] && return 0        # 버전을 못 읽으면 막지 않는다(기존 동작 유지)
+  ver_ge "$_got" "$_min"
+}
+
 install_one_dep() {  # install_one_dep <id>
   _id="$1"; _bin="$(dep_binary "$_id")"
   if have "$_bin"; then
-    ok "${_id}: $(eval "$(dep_check_cmd "$_id")" 2>/dev/null | head -n1)"
-    return 0
+    if dep_satisfies_min "$_id"; then
+      ok "${_id}: $(eval "$(dep_check_cmd "$_id")" 2>/dev/null | head -n1)"
+      return 0
+    fi
+    # 있지만 manifest 최소 버전 미만 — 설치를 계속 진행해 브루 패키지를 올린다.
+    # (예: stock macOS 의 python3 3.9.6 vs min 3.11 → python@3.11 설치)
+    info "${_id}: $(dep_version_of "$_id") < 최소 $(dep_min_version "$_id") — 설치를 진행합니다…"
   fi
 
   # mac /bin/bash 3.2 & system curl satisfy the manifest even if not on PATH as such.
@@ -559,7 +612,13 @@ doctor() {
     _bin="$(dep_binary "$_id")"
     if have "$_bin" || { dep_preinstalled_ok "$_id" && [ -x "/bin/$_id" ]; }; then
       _ver="$(eval "$(dep_check_cmd "$_id")" 2>/dev/null | head -n1)"
-      ok "${_id}: ${_ver:-present}"
+      if dep_satisfies_min "$_id"; then
+        ok "${_id}: ${_ver:-present}"
+      else
+        # fail-closed — 헤더가 약속한 "re-verifies the SAME manifest" 를 실제로 지킨다.
+        warn "${_id}: ${_ver:-present} — manifest 최소 $(dep_min_version "$_id") 미만. 'brew install $(dep_brew_pkg "$_id")' 후 새 터미널에서 재시도"
+        _fail=1
+      fi
     else
       warn "${_id}: MISSING — remediation: re-run installer, or install '$(dep_brew_pkg "$_id")' via brew"
       _fail=1
@@ -592,6 +651,11 @@ doctor() {
 # ----------------------------------------------------------------------------- #
 # 9. Main
 # ----------------------------------------------------------------------------- #
+# 테스트 훅 — `HPS_LIB_ONLY=1 . scripts/install.sh` 로 부르면 함수 정의만 하고
+# 아무것도 설치하지 않는다. scripts/test-installer-version-gate.sh 가 이걸로
+# 버전 게이트를 대조군과 함께 검증한다. 이 줄 위는 전부 정의부여야 한다.
+[ "${HPS_LIB_ONLY:-0}" = "1" ] && return 0 2>/dev/null
+
 printf '%s\n' "${C_BOLD}HypeProof bootstrap — platform ${PLATFORM}, manifest schema ${MANIFEST_SCHEMA}${C_RESET}"
 [ "$NONINTERACTIVE" = "1" ] && info "(unattended mode)"
 
