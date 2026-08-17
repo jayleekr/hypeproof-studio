@@ -6,11 +6,23 @@ import jumperHtml from "./kids-basic/jumper.html";
 // @ts-ignore
 import dodgeHtml from "./kids-basic/dodge.html";
 // @ts-ignore
+import worldHtml from "./kids-world/world.html";
+// @ts-ignore
 import dentalV1Html from "./search-webapp/dental-v1.html";
 // @ts-ignore
 import verdictCardHtml from "./search-webapp/verdict-card.html";
 
 const REGISTRY: Skeleton[] = [
+  // ─── kids-world tier — "내가 만든 미래" (SK 2026-08-22 워크숍 산출물) ───
+  {
+    id: "kw-world",
+    tier: "kids-world",
+    genre: "living-world",
+    summary_ko:
+      "아이가 말로 묘사한 미래가 살아 움직이는 도트 세계 — 비·눈이 내리고 낮밤이 바뀌고 창문에 불이 켜진다. 집·빌딩·나무·가로등·차·이모지를 배치해 만든다",
+    tags: ["미래", "세계", "동네", "도시", "집", "학교", "비", "눈", "밤", "낮", "도트", "그리기", "만들기", "우리 동네", "2050"],
+    html: worldHtml as unknown as string,
+  },
   {
     id: "kb-catcher",
     tier: "kids-basic",

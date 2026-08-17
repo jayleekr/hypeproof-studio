@@ -143,7 +143,17 @@ def find_promise_hits(prompt: str, rules: dict) -> list:
         if any(has_deferral[max(0, i - 1): i + 2]):
             continue
         for phrase in phrases:
-            if phrase in segment:
+            # `re:` 접두사는 정규식으로 취급한다. 한국어는 단어 경계가 없어
+            # 부분 문자열 매칭이 다른 낱말을 잡는다 — 2026-08-17 "내가 만든
+            # 미래" 커리큘럼에서 "이**전 세계** 전체를"(= 앞서 만든 세계)이
+            # 퍼블리싱 약속 "전 세계"로 오탐돼 CI 가 막혔다. 그 트랙은 "세계"가
+            # 핵심 어휘라 재발한다. 규칙을 느슨하게 하는 게 아니라 **경계를
+            # 주는** 방향으로 고친다 — "전 세계에 공개" 는 그대로 잡힌다.
+            if phrase.startswith("re:"):
+                if re.search(phrase[3:], segment):
+                    hits.append(phrase)
+                    break
+            elif phrase in segment:
                 hits.append(phrase)
                 break
     return hits

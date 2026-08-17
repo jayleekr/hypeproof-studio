@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#07080d;
+    font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;image-rendering:pixelated;position:absolute}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:9px 14px;z-index:2;
+    background:rgba(0,0,0,.55);backdrop-filter:blur(6px);color:#fff;
+    font-size:15px;text-align:center;letter-spacing:.3px}
+  #bar b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="bar">%%CAPTION%%</div>
+<script>
+/* ══ CONFIG — 여기만 바꾸세요 ═══════════════════════════════════════════ */
+const SKY_DAY=['%%SKY_DAY_TOP%%','%%SKY_DAY_BOT%%'];      // 낮 하늘 위/아래
+const SKY_NIGHT=['%%SKY_NIGHT_TOP%%','%%SKY_NIGHT_BOT%%'];// 밤 하늘 위/아래
+const HILL=['%%HILL_FAR%%','%%HILL_NEAR%%'];              // 먼 산 / 가까운 산
+const GROUND='%%GROUND%%';                                 // 땅 색
+const WEATHER='%%WEATHER%%';   // 'rain' | 'snow' | 'none'
+const DAYNIGHT=%%DAYNIGHT%%;   // true=낮밤 순환, false=낮 고정
+/* 이 미래에 있는 것들. x:0~192, 땅은 y=132. 왼쪽부터 그려집니다.
+   t: house(집) tower(빌딩) tree(나무) lamp(가로등) car(차) emoji(이모지)
+   house/tower: w=너비 h=높이 c=색  |  car: fly:1 이면 하늘을 납니다
+   emoji: e='🐕' s=크기                                                    */
+const THINGS=%%THINGS%%;
+/* ══ ENGINE — 아래는 그대로 두세요 ══════════════════════════════════════ */
+const W=192,H=144,GY=132;
+const cv=c,g=cv.getContext('2d');cv.width=W;cv.height=H;g.imageSmoothingEnabled=false;
+function fit(){const s=Math.max(1,Math.floor(Math.min(innerWidth/W,(innerHeight-42)/H)));
+ cv.style.width=W*s+'px';cv.style.height=H*s+'px';
+ cv.style.left=((innerWidth-W*s)/2|0)+'px';cv.style.top=((innerHeight-42-H*s)/2|0)+'px';}
+fit();onresize=fit;
+const B=[[0,8,2,10],[12,4,14,6],[3,11,1,9],[15,7,13,5]];           // Bayer 4x4
+const hex=c=>[parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)];
+const mix=(a,b,k)=>a.map((v,i)=>v+(b[i]-v)*k);
+const css=c=>'rgb('+c.map(v=>v|0).join(',')+')';
+const SD=SKY_DAY.map(hex),SN=SKY_NIGHT.map(hex),HF=hex(HILL[0]),HN=hex(HILL[1]),GR=hex(GROUND);
+// 지형·오브젝트 시드 (매 프레임 동일하게)
+let sd=7;const rnd=()=>(sd=sd*16807%2147483647)/2147483647;
+const ridge=(n,amp,base)=>{const a=[];let y=base;for(let x=0;x<=W;x+=n){y+=(rnd()-.5)*amp;a.push([x,Math.max(30,Math.min(GY-6,y))]);}return a;};
+const R1=ridge(16,10,74),R2=ridge(10,7,92);
+const stars=[...Array(70)].map(()=>({x:rnd()*W|0,y:rnd()*82|0,b:rnd()}));
+const clouds=[...Array(5)].map(()=>({x:rnd()*W,y:14+rnd()*34,w:14+rnd()*20,s:.5+rnd()*.5,v:.03+rnd()*.05}));
+THINGS.forEach(o=>{o._w=[...Array(28)].map(()=>rnd()>.42);o._p=rnd()*6.28;});
+// 겹침 방지 — 왼쪽부터 훑으며 최소 간격을 벌린다(코치가 x를 겹치게 줘도 안 사라진다)
+(()=>{const gnd=THINGS.filter(o=>!o.fly).sort((a,b)=>a.x-b.x);let cur=-99;
+ gnd.forEach(o=>{const w=o.w||(o.t==='emoji'?(o.s||12):o.t==='tree'?12:o.t==='lamp'?6:16);
+   if(o.x<cur+3)o.x=cur+3;cur=o.x+w;
+   if(o.x>W-8){o.x=W-8;}});})();
+const drops=WEATHER==='none'?[]:[...Array(WEATHER==='snow'?110:150)].map(()=>({x:rnd()*W,y:rnd()*H,v:WEATHER==='snow'?.22+rnd()*.28:1.6+rnd()*1.1,w:rnd()*.5-.25,p:rnd()*6.28}));
+const splash=[];const snowpile=new Float32Array(W);
+let t=0;
+function px(x,y,c,a){if(a!==undefined)g.globalAlpha=a;g.fillStyle=c;g.fillRect(x|0,y|0,1,1);if(a!==undefined)g.globalAlpha=1;}
+function poly(pts,col){g.fillStyle=col;g.beginPath();g.moveTo(0,GY);pts.forEach(p=>g.lineTo(p[0],p[1]));g.lineTo(W,GY);g.closePath();g.fill();}
+
+function draw(){
+ t++;
+ const k=DAYNIGHT?Math.min(1,Math.max(0,Math.sin(t/700)*.65+.5)):0;  // 0낮 1밤
+ const dusk=Math.sin(k*Math.PI)*.55;                                  // 노을 강도
+ const warm=[255,150,86];
+ // ── 하늘 (디더링 그라데이션)
+ const top=mix(SD[0],SN[0],k),bot=mix(SD[1],SN[1],k);
+ for(let y=0;y<GY;y++){
+   let c=mix(top,bot,y/GY);
+   if(dusk>.03&&y>GY*.45)c=mix(c,warm,dusk*(y/GY-.45)*1.5);
+   const lo=css(c.map(Math.floor)),hi=css(c.map(v=>Math.floor(v)+1));
+   const th=(c[1]-Math.floor(c[1]))*16;                      // 소수부 → 디더 임계
+   for(let x=0;x<W;x++)px(x,y,B[y&3][x&3]<th?hi:lo);
+ }
+ // ── 별
+ if(k>.22)stars.forEach(s=>{const tw=(Math.sin(t/16+s.b*9)+1)/2;
+   const a=(k-.22)*1.3*(.45+s.b*.55)*(.55+tw*.45);
+   px(s.x,s.y,s.b>.82?'#dfe8ff':'#fff',Math.min(1,a));
+   if(s.b>.93&&tw>.7){px(s.x-1,s.y,'#fff',a*.4);px(s.x+1,s.y,'#fff',a*.4);
+     px(s.x,s.y-1,'#fff',a*.4);px(s.x,s.y+1,'#fff',a*.4);}});
+ // ── 해/달 + 글로우
+ const ay=(t/700)%(Math.PI*2),sy=48-Math.cos(ay)*30,sx=W*.72;
+ const isMoon=k>.5;g.save();
+ const gl=g.createRadialGradient(sx,sy,0,sx,sy,isMoon?18:26);
+ gl.addColorStop(0,isMoon?'rgba(200,220,255,.5)':'rgba(255,225,150,.55)');
+ gl.addColorStop(1,'rgba(0,0,0,0)');g.fillStyle=gl;g.fillRect(sx-30,sy-30,60,60);g.restore();
+ g.fillStyle=isMoon?'#e8eeff':'#ffe680';
+ for(let i=-3;i<=3;i++)for(let j=-3;j<=3;j++)if(i*i+j*j<=9)g.fillRect(sx+i,sy+j,1,1);
+ if(isMoon){g.fillStyle=css(mix(SN[0],[232,238,255],.25));
+   for(let i=-3;i<=1;i++)for(let j=-3;j<=3;j++)if((i+2)**2+j*j<=8)g.fillRect(sx+i-1,sy+j,1,1);}
+ // ── 구름
+ clouds.forEach(c=>{c.x+=c.v;if(c.x>W+c.w)c.x=-c.w;
+   const base=mix(mix([252,252,255],[126,138,178],k),warm,dusk*.55);
+   const w=c.w,x=c.x|0,y=c.y|0,r=Math.max(2,w*.17|0);
+   // 둥근 덩어리 3개 + 밑면 그림자 → 진짜 구름 실루엣
+   g.fillStyle=css(base);
+   [[0,0,r*1.5],[w*.34,-r*.75,r*1.15],[w*.68,-r*.2,r*1.3]].forEach(b=>{
+     const bx=x+b[0],by=y+b[1],br=b[2]|0;
+     for(let dy=-br;dy<=br*.7;dy++){const hw=Math.sqrt(Math.max(0,br*br-dy*dy))|0;
+       g.fillRect(bx-hw,by+dy,hw*2,1);}});
+   g.fillStyle=css(base.map(v=>v*.86));g.fillRect(x-r,y+(r*.6|0),w+r,1);});
+ // ── 원경 산 2겹
+ // 대기 원근: 먼 산일수록 하늘색에 섞여 옅어진다 → 깊이가 생긴다
+ const haze=mix(SD[1],SN[1],k);
+ const far=mix(mix(HF,haze,.42),mix(SN[0],[70,88,140],.5),k);
+ const near=mix(mix(HN,haze,.12),mix(SN[0],[40,56,92],.55),k);
+ poly(R1,css(far));
+ g.globalAlpha=.5;poly(R1.map(p=>[p[0],p[1]+3]),css(mix(far,haze,.5)));g.globalAlpha=1;
+ poly(R2,css(near));
+ g.fillStyle=css(mix(near,[255,255,255],.16));                    // 능선 하이라이트
+ R2.forEach((p,i)=>{if(i)g.fillRect(p[0]-4,p[1],9,1);});
+ // 밤: 먼 산자락 도시 불빛
+ if(k>.4){g.fillStyle='#ffd07a';g.globalAlpha=(k-.4)*1.5;
+   for(let i=0;i<34;i++){const x=(i*47+13)%W,ry=R1[Math.min(R1.length-1,(x/16)|0)][1];
+     if((i*13)%5<2)g.fillRect(x,ry+3+((i*7)%9),1,1);}g.globalAlpha=1;}
+ // ── 수평선 헤이즈 (깊이의 핵심)
+ const hz=mix(mix(SD[1],SN[1],k),warm,dusk*.6);
+ for(let y=GY-16;y<GY;y++){g.globalAlpha=(y-(GY-16))/16*.4;
+   g.fillStyle=css(hz);g.fillRect(0,y,W,1);}g.globalAlpha=1;
+ // ── 땅
+ const gc=mix(GR,mix(SN[1],[26,34,58],.5),k*.72);
+ g.fillStyle=css(gc);g.fillRect(0,GY,W,H-GY);
+ g.fillStyle=css(gc.map(v=>v*1.2));g.fillRect(0,GY,W,1);          // 풀 하이라이트
+ for(let x=0;x<W;x+=2)px(x+((x*7)%2),GY+2+((x*5)%4),css(gc.map(v=>v*.78)),.45);
+ const rc=mix([74,74,82],[24,28,44],k*.8);                         // 도로
+ g.fillStyle=css(rc);g.fillRect(0,GY+5,W,H-GY-5);
+ g.fillStyle=css(rc.map(v=>v*1.25));g.fillRect(0,GY+5,W,1);
+ g.fillStyle=k>.4?'#c9a94a':'#f0e6c0';                             // 중앙선
+ for(let x=2;x<W;x+=12)g.fillRect(x,GY+9,6,1);
+ // ── 오브젝트
+ THINGS.forEach(o=>{
+   const lit=k>.42;
+   if(o.t==='house'||o.t==='tower'){
+     const w=o.w||20,h=o.h||(o.t==='tower'?52:22),x=o.x|0,y=GY-h;
+     const bc=mix(hex(o.c||'#8a6a52'),SN[1],k*.55);
+     g.fillStyle=css(bc);g.fillRect(x,y,w,h);
+     g.fillStyle=css(bc.map(v=>v*.72));g.fillRect(x,y,1,h);g.fillRect(x+w-1,y,1,h);
+     if(o.t==='house'){const rf=mix(hex(o.roof||'#a3453b'),SN[1],k*.55);
+       g.fillStyle=css(rf);for(let i=0;i<7;i++)g.fillRect(x-2+i,y-7+i,w+4-i*2,1);
+       g.fillStyle=css(rf.map(v=>v*1.18));g.fillRect(x+1,y-6,w-2,1);   // 지붕 하이라이트
+       g.fillStyle=css(bc.map(v=>v*.6));g.fillRect(x+w-6,y-11,3,5);    // 굴뚝
+     }else{ // 빌딩 옥상: 난간·물탱크·안테나 (실루엣에 변화를 준다)
+       g.fillStyle=css(bc.map(v=>v*1.15));g.fillRect(x-1,y-2,w+2,2);
+       const seed=(x*7)%3;
+       if(seed===0){g.fillStyle=css(bc.map(v=>v*.75));g.fillRect(x+3,y-7,6,5);}
+       if(seed===1){g.fillStyle=css(bc.map(v=>v*.7));g.fillRect(x+w-8,y-6,5,4);
+         g.fillRect(x+w-6,y-12,1,6);
+         if(lit){g.fillStyle='#ff5a5a';g.fillRect(x+w-6,y-13,1,1);}}   // 항공장애등
+       if(seed===2){g.fillStyle=css(bc.map(v=>v*.72));g.fillRect(x+w/2|0,y-10,1,8);
+         if(lit){g.fillStyle='#ff5a5a';g.fillRect(x+w/2|0,y-11,1,1);}}
+     }
+     let n=0;for(let wy=y+4;wy<GY-4;wy+=6)for(let wx=x+3;wx<x+w-3;wx+=5,n++){
+       const on=o._w[n%28];
+       g.fillStyle=lit&&on?'#ffd98a':css(mix([70,90,120],[20,26,40],k));
+       g.fillRect(wx,wy,2,3);
+       if(lit&&on){g.globalAlpha=.16;g.fillStyle='#ffcc66';g.fillRect(wx-2,wy-2,6,7);g.globalAlpha=1;}}
+     g.fillStyle=css(bc.map(v=>v*.86));                                // 층 구분선
+     for(let fy=y+8;fy<GY-2;fy+=6)g.fillRect(x+1,fy,w-2,1);
+   }else if(o.t==='tree'){
+     const x=o.x|0,h=o.h||16,sw=Math.sin(t/70+o._p)*1.2;
+     g.fillStyle=css(mix([92,62,40],SN[1],k*.6));g.fillRect(x,GY-h*.42,2,h*.42);
+     const lc=mix(hex(o.c||'#3f8f4a'),SN[1],k*.62);
+     for(let i=0;i<4;i++){const r=(h*.34)*(1-i*.18)|0,cyy=GY-h*.42-i*(h*.16);
+       g.fillStyle=css(lc.map(v=>v*(1-i*.07)));
+       g.fillRect(x+1-r+sw*(i*.4),cyy-r*.62,r*2,r*1.15);}
+   }else if(o.t==='lamp'){
+     const x=o.x|0,h=o.h||18;g.fillStyle=css(mix([60,62,72],SN[1],k*.5));
+     g.fillRect(x,GY-h,1,h);g.fillRect(x-2,GY-h,5,1);
+     if(k>.35){g.fillStyle='#ffd98a';g.fillRect(x-1,GY-h+1,3,2);
+       const lg=g.createRadialGradient(x,GY-h+2,0,x,GY-h+2,20);
+       lg.addColorStop(0,'rgba(255,205,120,'+(k*.34)+')');lg.addColorStop(1,'rgba(0,0,0,0)');
+       g.fillStyle=lg;g.fillRect(x-20,GY-h-10,40,34);}
+   }else if(o.t==='car'){
+     const w=o.w||14,fy=o.fly?Math.sin(t/48+o._p)*3-30:0,x=o.x|0,y=GY-6+fy;
+     const cc=mix(hex(o.c||'#d9534f'),SN[1],k*.5);
+     g.fillStyle=css(cc);g.fillRect(x,y,w,4);g.fillRect(x+3,y-3,w-7,3);
+     g.fillStyle=css(mix([150,200,235],SN[1],k*.4));g.fillRect(x+4,y-2,w-9,2);
+     if(k>.35){g.fillStyle='#fff2b0';g.fillRect(x+w,y+1,1,1);
+       g.globalAlpha=.16;g.fillRect(x+w,y-1,14,5);g.globalAlpha=1;}
+     if(o.fly){g.globalAlpha=.3;g.fillStyle='#8fd8ff';g.fillRect(x+2,y+4,w-4,1);g.globalAlpha=1;}
+     else{g.fillStyle='#222';g.fillRect(x+2,y+4,2,1);g.fillRect(x+w-4,y+4,2,1);}
+   }else if(o.t==='emoji'){
+     const s=o.s||12;g.font=s+'px serif';g.textAlign='center';g.textBaseline='bottom';
+     g.fillText(o.e,o.x,GY+1+(o.fly?Math.sin(t/45+o._p)*3-20:0));
+   }
+ });
+ // ── 날씨
+ if(WEATHER==='rain'){
+   drops.forEach(d=>{d.y+=d.v;d.x+=d.w+.35;
+     if(d.y>GY){if(rnd()>.86)splash.push({x:d.x,y:GY,l:0});d.y=-4;d.x=rnd()*W;}
+     g.strokeStyle='rgba(165,205,255,.55)';g.beginPath();
+     g.moveTo(d.x|0,d.y|0);g.lineTo((d.x-1)|0,(d.y-4)|0);g.stroke();});
+   for(let i=splash.length-1;i>=0;i--){const s=splash[i];s.l+=.5;
+     g.globalAlpha=Math.max(0,.5-s.l*.12);g.fillStyle='#bcdcff';
+     g.fillRect(s.x-s.l,s.y,1,1);g.fillRect(s.x+s.l,s.y,1,1);g.globalAlpha=1;
+     if(s.l>4)splash.splice(i,1);}
+ }else if(WEATHER==='snow'){
+   drops.forEach(d=>{d.y+=d.v;d.x+=Math.sin(t/40+d.p)*.22;
+     const xi=Math.max(0,Math.min(W-1,d.x|0));
+     if(d.y>GY-snowpile[xi]){if(snowpile[xi]<4)snowpile[xi]+=.22;
+       // 옆으로 무너뜨려 자연스러운 눈더미
+       if(xi>0&&snowpile[xi]-snowpile[xi-1]>1.2)snowpile[xi-1]+=.12;
+       if(xi<W-1&&snowpile[xi]-snowpile[xi+1]>1.2)snowpile[xi+1]+=.12;
+       d.y=-2;d.x=rnd()*W;}
+     px(d.x,d.y,'#fff',.92);});
+   for(let x=0;x<W;x++){const h=snowpile[x];if(h>.15){
+     g.fillStyle='#f4f8ff';g.fillRect(x,GY-h,1,h+1);
+     g.fillStyle='#ffffff';g.fillRect(x,GY-h,1,1);}}
+ }
+ // ── 야간 색보정 + 비네트
+ if(k>.05){g.globalAlpha=k*.11;g.fillStyle='#1a2050';g.fillRect(0,0,W,H);g.globalAlpha=1;}
+ const vg=g.createRadialGradient(W/2,H/2,H*.42,W/2,H/2,H*.95);
+ vg.addColorStop(0,'rgba(0,0,0,0)');vg.addColorStop(1,'rgba(0,0,0,.26)');
+ g.fillStyle=vg;g.fillRect(0,0,W,H);
+ requestAnimationFrame(draw);
+}
+draw();
+</script>
+</body>
+</html>
