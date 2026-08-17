@@ -643,9 +643,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (checked.issues.length > 0) this.surfaceStructureIssues(checked, opts?.streamId);
     if (checked.blocked) return false;
 
+    // 2026-08-17 Windows 실기기 — 코치가 "완성됐어요!" 라고 말한 **뒤에도** 화면이
+    // 한참 비어 있었다. 스트림이 끝난 시점과 미리보기가 실제로 뜨는 시점 사이에
+    // 라이브서버 기동 + 탭 열기가 들어가는데, 그 구간에 아무 표시가 없어서
+    // 아이 눈에는 그냥 멈춘 것으로 보인다("완성된거 안보여").
+    //
+    // 그 공백을 타임라인 한 줄로 메운다. 실제로 뜨면 done, 실패하면 error 로
+    // 바뀌므로 "떴다고 말했는데 안 뜬" 상태가 화면에 남지 않는다(R0).
+    const revealLogId = randomId();
+    const logReveal = (state: "running" | "done" | "error", label: string): void => {
+      if (!opts?.streamId) return;
+      this.postToolLog(opts.streamId, { id: revealLogId, icon: "🖼️", label, state });
+    };
+
+    logReveal("running", "미리보기 여는 중");
     await this.saveGameToWorkspace(checked.html);
-    if (this.isLiveServerPreview() && (await this.openInLiveServer())) return true;
+    if (this.isLiveServerPreview() && (await this.openInLiveServer())) {
+      logReveal("done", "미리보기를 열었어요");
+      return true;
+    }
     void this.preview.show(checked.html);
+    logReveal("done", "미리보기를 열었어요");
     return true;
   }
 

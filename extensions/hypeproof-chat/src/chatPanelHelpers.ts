@@ -125,14 +125,22 @@ export interface ProfileToneShape {
   game?: { template_tier?: string };
 }
 
-export type AppTone = "game" | "search" | "site";
+export type AppTone = "game" | "search" | "site" | "world";
 
 /**
  * Pick the UI tone for hard-coded chat-panel labels.
  *
  * `search-webapp` tier (e.g. boah-dental teaser) → "search" tone (검색엔진 어휘).
  * `website` tier (보아치과 원장 copyclone) → "site" tone (웹사이트 어휘).
+ * `kids-world` tier ("내가 만든 미래") → "world" tone (미래 어휘).
  * Anything else (kids-basic, etc.) → "game" tone — the legacy default.
+ *
+ * 2026-08-17 — kids-world 를 추가하기 전에는 이 함수가 `game` 으로 떨어뜨렸고,
+ * 그래서 "게임" 이라는 낱말이 UI 8곳(만드는 중 라벨·미리보기 제목·플레이스홀더·
+ * show-intent 회신·about 카드 2줄·토큰 확인 문구·이모지)에 그대로 나왔다.
+ * 그 커리큘럼은 **"게임" 프레임을 금지**한다("게임이라는 말을 먼저 꺼내지
+ * 마세요") — 프롬프트는 지키는데 앱이 어겼다. Windows 실기기 손 테스트에서
+ * 발견됐다.
  *
  * Centralized so both the host extension and the webview render consistent
  * copy without each one redoing the tier check.
@@ -141,11 +149,25 @@ export function appToneOf(profile: ProfileToneShape | null | undefined): AppTone
   const tier = profile?.game?.template_tier;
   if (tier === "search-webapp") return "search";
   if (tier === "website") return "site";
+  if (tier === "kids-world") return "world";
   return "game";
 }
 
 /** Hard-coded copy table keyed by tone. */
 export const TONE_LABELS = {
+  // "내가 만든 미래" 트랙. 산출물은 게임이 아니라 살아 움직이는 미래 그림이다.
+  // 진행 라벨은 "생각 중…" — 만드는 대상을 이름 붙이지 않는다(무엇을 만드는지는
+  // 아이가 정하는 것이고, 코치가 먼저 규정하면 그 자체가 프레임이 된다).
+  world: {
+    buildingLabel: "생각 중…",
+    namingEmoji: "✨",
+    previewTitle: "✨ 내가 만든 미래",
+    previewPlaceholder: "여기에 미래가 나와요",
+    tokenConfirmTail: "같이 만들어봐요 ✨",
+    showIntentReply: "오른쪽 창에 띄웠어요! ✨ 한번 보세요.",
+    aboutTitle: "✨ 내가 만든 미래",
+    aboutSubtitle: '채팅에서 "미래의 우리 동네를 그려줘"라고 말해보세요!',
+  },
   game: {
     buildingLabel: "게임 만드는 중",
     namingEmoji: "🎮",
@@ -252,7 +274,11 @@ export function isShowIntent(text: string): boolean {
   if (/(만들|추가|바꿔|바꾸|그려|넣어|없애|지워|색깔|색을|색이|색상|소리|빠르|느리|크게|작게)/.test(t)) {
     return false;
   }
-  return /^(그거\s*)?(게임\s*)?(보여|열어|실행|돌려|켜|플레이|미리\s*보기|다시\s*보여|run|play|open|show)(줘|봐|해|해줘|해봐|해주세요|보자)?$/.test(
+  // 2026-08-17 Windows 실기기 — "띄워봐" 가 여기 없어서 show-intent 가 안 걸렸고,
+  // 메시지가 코치에게 넘어가 **세계를 처음부터 다시 그렸다**("또 만드는 중이 나옴").
+  // 접두사도 `게임` 뿐이라 "미래 보여줘"·"그림 보여줘" 처럼 새 트랙에서 아이가
+  // 실제로 쓰는 말이 전부 빠져나갔다. 동사와 접두사를 트랙 어휘까지 넓힌다.
+  return /^(그거\s*)?(게임|미래|그림|세계|동네|화면\s*)?\s*(보여|열어|띄워|띄어|실행|돌려|켜|플레이|미리\s*보기|다시\s*보여|run|play|open|show)(줘|봐|해|해줘|해봐|해주세요|보자|주세요)?$/.test(
     t,
   );
 }
