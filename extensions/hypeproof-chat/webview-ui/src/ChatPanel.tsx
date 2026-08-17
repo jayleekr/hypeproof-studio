@@ -184,16 +184,34 @@ export function ChatPanel(props: Props) {
       : (config?.coach?.name?.trim() || ux.coach.fallback_name || "코치");
 
   // Tone for hard-coded chat-panel labels — game (kids) vs search-webapp
-  // (보아치과 teaser) vs website (보아치과 원장 copyclone). Centralized in
-  // chatPanelHelpers (appToneOf/TONE_LABELS) but mirrored here so the webview
-  // stays vscode-free (chatPanelHelpers imports Node `Buffer`).
+  // (보아치과 teaser) vs website (보아치과 원장 copyclone) vs world
+  // ("내가 만든 미래"). Centralized in chatPanelHelpers (appToneOf/TONE_LABELS)
+  // but mirrored here so the webview stays vscode-free (chatPanelHelpers
+  // imports Node `Buffer`).
+  //
+  // ⚠ 이 미러가 어긋나면 화면에 틀린 낱말이 뜬다. 2026-08-17 실기기에서 kids-world
+  // 트랙이 "게임 만드는 중" 을 띄웠다 — 그 커리큘럼은 "게임" 프레임을 금지한다.
+  // test/tone-mirror.smoke.mjs 가 두 곳의 일치를 강제한다. 톤을 추가하면 양쪽 다 고칠 것.
   const templateTier =
     (config?.profile as { game?: { template_tier?: string } } | undefined)?.game?.template_tier;
-  const appTone: "game" | "search" | "site" =
-    templateTier === "search-webapp" ? "search" : templateTier === "website" ? "site" : "game";
+  const appTone: "game" | "search" | "site" | "world" =
+    templateTier === "search-webapp"
+      ? "search"
+      : templateTier === "website"
+        ? "site"
+        : templateTier === "kids-world"
+          ? "world"
+          : "game";
   const buildingLabel =
-    appTone === "search" ? "검색엔진 만드는 중" : appTone === "site" ? "웹사이트 만드는 중" : "게임 만드는 중";
-  const namingEmoji = appTone === "search" ? "🔍" : appTone === "site" ? "🌐" : "🎮";
+    appTone === "search"
+      ? "검색엔진 만드는 중"
+      : appTone === "site"
+        ? "웹사이트 만드는 중"
+        : appTone === "world"
+          ? "생각 중…"
+          : "게임 만드는 중";
+  const namingEmoji =
+    appTone === "search" ? "🔍" : appTone === "site" ? "🌐" : appTone === "world" ? "✨" : "🎮";
 
   // Show the kid-friendly naming card when: profile loaded, it asks the kid to
   // name the coach, and they haven't yet.
@@ -878,7 +896,7 @@ function MessageItem({
   ux: UxConfig;
   coachName: string;
   buildingLabel: string;
-  tone: "game" | "search" | "site";
+  tone: "game" | "search" | "site" | "world";
   messages: ChatMessage[];
   /** #414 — an activity log is on screen, so the spinner must not invent stages. */
   hasActivity: boolean;
@@ -1002,10 +1020,13 @@ function buildStageText(
   buildingLabel: string,
   content: string,
   fenceOpen: boolean,
-  tone: "game" | "search" | "site",
+  tone: "game" | "search" | "site" | "world",
   hasActivity = false,
 ): string {
   if (fenceOpen) return "거의 다 됐어요";
+  // world 트랙은 만드는 대상을 이름 붙이지 않는다 — 라벨 자체가 "생각 중…" 이고
+  // 하위 단계를 붙이면 다시 "무엇을" 만드는지 규정하게 된다.
+  if (tone === "world") return buildingLabel;
   // Real signal present → say only what is certainly true.
   if (hasActivity) return buildingLabel;
   const len = content.length;
@@ -1030,7 +1051,7 @@ function AssistantContent({
   content: string;
   streaming: boolean;
   buildingLabel: string;
-  tone: "game" | "search" | "site";
+  tone: "game" | "search" | "site" | "world";
   /** #414 — the tool/activity log below carries the real state of the turn. */
   hasActivity?: boolean;
 }) {

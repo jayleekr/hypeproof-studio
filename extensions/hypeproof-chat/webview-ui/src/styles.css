@@ -264,6 +264,42 @@ html, body, #root {
 .hps-dots { animation: hps-pulse 1s ease-in-out infinite; display: inline-block; }
 @keyframes hps-pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
 
+/* 2026-08-17 — 코치가 일하는 동안 화면이 "멈춘 것처럼" 보였다(Windows 실기기).
+   초3·4 는 진행 표시가 정적이면 고장으로 읽는다. 두 겹으로 살아있음을 보인다:
+   ① 진행 줄 위를 훑고 지나가는 빛(shimmer), ② 테두리의 느린 숨쉬기(breathe).
+   prefers-reduced-motion 이면 둘 다 끈다 — 정지 상태에서도 문구는 읽힌다. */
+.hps-code-progress {
+  position: relative;
+  overflow: hidden;
+  animation: hps-breathe 2.4s ease-in-out infinite;
+}
+.hps-code-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.14) 45%,
+    rgba(255, 255, 255, 0.22) 50%,
+    rgba(255, 255, 255, 0.14) 55%,
+    transparent 80%
+  );
+  transform: translateX(-100%);
+  animation: hps-shimmer 1.8s linear infinite;
+  pointer-events: none;
+}
+@keyframes hps-shimmer { to { transform: translateX(100%); } }
+@keyframes hps-breathe {
+  0%, 100% { border-color: rgba(91, 91, 255, 0.30); box-shadow: 0 0 0 0 rgba(91, 91, 255, 0.00); }
+  50%      { border-color: rgba(91, 91, 255, 0.75); box-shadow: 0 0 10px 0 rgba(91, 91, 255, 0.28); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hps-code-progress { animation: none; }
+  .hps-code-progress::after { animation: none; opacity: 0; }
+  .hps-dots { animation: none; }
+}
+
 .hps-codepill {
   margin: 8px 0;
 }
