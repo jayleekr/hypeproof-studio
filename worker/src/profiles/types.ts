@@ -107,7 +107,7 @@ export interface Profile {
    * not only pasted, and the coach drives the browser to clone it.
    */
   game: {
-    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website";
+    template_tier: "kids-world" | "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website";
   };
   publishing: {
     enabled: boolean;

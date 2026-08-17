@@ -57,7 +57,8 @@ publishing:
     - "공유해서"
     - "링크를 공유"
     - "URL을 공유"
-    - "전 세계"
+    # 앞에 한글이 붙으면 다른 낱말이다("이전 세계"·"직전 세계"). 경계를 준다.
+    - "re:(?<![가-힣])전[ ]?세계"
     - "퍼블리시"
   # If the same sentence/line also carries one of these deferral or negation
   # markers, the phrase is read as a future-session reference ("next time you'll
