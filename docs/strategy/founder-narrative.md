@@ -19,7 +19,7 @@
 **Jay Lee**
 
 - **실리콘밸리 SDV 소프트웨어 회사(Sonatus, 서니베일)의 엔지니어**로 합류
-- 그 회사의 기술은 현재 **600만 대 이상의 양산 차량**에 탑재되어 있다
+- 그 회사의 기술은 현재 **800만 대 이상의 양산 차량**에 탑재되어 있다
 - 투자자: **현대차그룹(CRADLE)·기아·LG전자·폭스콘(Hon Hai)·Marvell·SAIC Capital** 외. 누적 조달 **$110M+**
 - 현대차그룹과 3년 이상 공동개발 끝에 **ESU(1세대)·CCU(2세대) 양산 성공**
 - 2026년 현재 **AI 제품을 만드는 PM**으로 일하고 있다
@@ -28,7 +28,7 @@
 
 **한 문장 버전**
 
-> 600만 대의 자동차에 들어가는 소프트웨어를 만드는 실리콘밸리 회사에서, 지금은 AI 제품을 만들고 있습니다.
+> 800만 대의 자동차에 들어가는 소프트웨어를 만드는 실리콘밸리 회사에서, 지금은 AI 제품을 만들고 있습니다.
 
 **두 문장 버전 (권장)**
 
@@ -38,7 +38,7 @@
 **왜 이 서사가 IPO 서사보다 강한가**
 
 1. **전부 공개 검증 가능하다.** 링크 하나로 끝난다
-2. **"600만 대"는 IPO보다 구체적이다.** 숫자가 실물을 가리킨다
+2. **"800만 대"는 IPO보다 구체적이다.** 숫자가 실물을 가리킨다
 3. **상장 경험은 빌리는 게 더 정직하고 더 세다** — "내가 겪었다"보다 "두 번 만든 사람이 내 위에 있다"가 검증도 쉽고 무게도 크다
 4. 상장이 실제로 일어나면 그때 서사를 **업그레이드**할 여지가 남는다
 
@@ -61,7 +61,7 @@
 >
 > Hi {Name},
 >
-> I'm an engineer-turned-PM at Sonatus in Sunnyvale — our software ships in 6M+ production vehicles. Outside of work I've built something I'd like your eyes on.
+> I'm an engineer-turned-PM at Sonatus in Sunnyvale — our software ships in 8M+ production vehicles. Outside of work I've built something I'd like your eyes on.
 >
 > Entry-level hiring is down 73% since 2022, and 47% of companies plan to eliminate junior roles entirely by 2027. The remaining roles ask juniors for senior judgment. For a 17-year-old, there's now exactly one way to demonstrate that: actually run a company once.
 >
