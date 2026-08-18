@@ -519,6 +519,10 @@ export function translate(
   body: OpenAIRequest,
   profile: Profile,
   coach: CoachContext = {},
+  // Anthropic 스키마를 말하는 상류가 둘이다 — Anthropic 과 GLM(Z.ai 호환 경로).
+  // 스키마는 같고 **모델 id 만 다르므로** 프로바이더만 받아 alias 를 해석한다.
+  // translateOpenAI 가 gemini/openai 를 같은 방식으로 가르는 것과 대칭이다.
+  provider: "anthropic" | "glm" = "anthropic",
 ): AnthropicRequest {
   const msgs: AnthropicMessage[] = filterMessages(
     body,
@@ -529,7 +533,7 @@ export function translate(
     content: toAnthropicContent(t.content),
   }));
 
-  const model = modelIdFor(resolveAlias(body.model, profile), "anthropic");
+  const model = modelIdFor(resolveAlias(body.model, profile), provider);
 
   // System block: cached prefix + non-cached per-user coach tail.
   // Cached prefix = system prompt + the tier's skeleton library. Static per
