@@ -12,7 +12,7 @@
 //   9. Log usage to Analytics Engine + D1
 
 import { Hono } from "hono";
-import { resolveProvider, type Env, type LLMProvider } from "../env";
+import { resolveProvider, providerKey, type Env, type LLMProvider } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
 import { getProfile } from "../profiles";
@@ -356,13 +356,25 @@ chat.post("/chat/completions", async (c) => {
     }
   }
 
-  // Pick the upstream LLM (switchable peers; default Gemini — see
-  // resolveProvider). translate / translateOpenAI both drop client
-  // system+tool messages — the trust model is identical either way.
+  // Pick the upstream LLM. 우선순위는 **프로필 → 배포 기본값** 이다.
+  //
+  // 쓰임새마다 맞는 모델이 다르다 — 아이들 수업은 싸고 빠른 쪽, 고위험 산출물은 비싸도
+  // 정확한 쪽. 배포 전체를 한 모델로 묶을 이유가 없어서, 프로필이 `model.provider` 를
+  // 선언하면 그 요청만 그쪽으로 나간다. 선언하지 않은 프로필은 지금까지와 똑같이
+  // LLM_PROVIDER 를 따른다 (기존 배포의 동작이 바뀌지 않는다).
+  //
+  // translate / translateOpenAI both drop client system+tool messages — the
+  // trust model is identical either way.
   let provider: LLMProvider;
   let apiKey: string;
   try {
-    ({ provider, apiKey } = resolveProvider(env));
+    const pinned = profile.model.provider;
+    if (pinned) {
+      provider = pinned;
+      apiKey = providerKey(env, pinned);
+    } else {
+      ({ provider, apiKey } = resolveProvider(env));
+    }
   } catch (err) {
     // #257 — config prose (env var names, provider wiring) stays in logs.
     console.error(`[${c.get("requestId")}] provider config error:`, err);

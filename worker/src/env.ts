@@ -54,6 +54,30 @@ export interface ResolvedProvider {
  * Throws when the chosen provider has no key — surfaced to the client as a
  * 502 config error rather than a silent unauthenticated upstream call.
  */
+/**
+ * 지정한 프로바이더의 키를 준다. **UC(프로필)마다 다른 모델을 동시에 쓰기 위한 것.**
+ *
+ * `resolveProvider` 는 배포 전체의 기본값 하나를 고른다. 그런데 쓰임새는 하나가 아니다 —
+ * 아이들 수업은 싸고 빠른 쪽이, 고위험 산출물은 비싸도 정확한 쪽이 맞는다. 프로필이
+ * `model.provider` 를 선언하면 그 요청만 그쪽으로 나가고, 선언하지 않은 프로필은
+ * 배포 기본값을 그대로 쓴다.
+ *
+ * 키가 없으면 던진다 — 인증 없는 상류 호출을 조용히 하지 않는다. 프로필이 가리키는
+ * 프로바이더의 키를 안 넣어두면 **그 프로필만** 502 가 되고 나머지는 정상이다.
+ */
+export function providerKey(env: Env, provider: LLMProvider): string {
+  const key = {
+    gemini: env.GEMINI_API_KEY,
+    anthropic: env.ANTHROPIC_API_KEY,
+    openai: env.OPENAI_API_KEY,
+    glm: env.GLM_API_KEY,
+  }[provider]?.trim();
+  if (!key) {
+    throw new Error(`profile pins provider=${provider} but its API key is not set`);
+  }
+  return key;
+}
+
 export function resolveProvider(env: Env): ResolvedProvider {
   const gem = env.GEMINI_API_KEY?.trim();
   const ant = env.ANTHROPIC_API_KEY?.trim();

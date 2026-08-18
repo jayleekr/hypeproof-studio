@@ -36,6 +36,14 @@ export interface Profile {
   model: {
     default: ModelAlias;
     fallback?: ModelAlias;
+    /**
+     * 이 프로필만 다른 상류로 보낸다. 없으면 배포 기본값(LLM_PROVIDER)을 쓴다.
+     *
+     * 쓰임새마다 맞는 모델이 다르다 — 아이들 수업은 싸고 빠른 쪽, 고위험 산출물은
+     * 비싸도 정확한 쪽. 배포 전체를 한 모델로 묶을 이유가 없다.
+     * 여기에 적은 프로바이더의 키가 없으면 **이 프로필만** 502 가 된다 (나머지는 정상).
+     */
+    provider?: LLMProvider;
     /** Per-profile output-token ceiling used when the client omits max_tokens.
      *  Long-output profiles (e.g. website copyclone → full HTML) set this high so
      *  responses are not truncated at DEFAULT_MAX_TOKENS. Clamped to 1..16384. */
