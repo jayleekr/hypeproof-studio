@@ -1,0 +1,1507 @@
+<title>창업교육 BM 레퍼런스</title>
+
+<style>
+  :root {
+    color-scheme: light;
+    --ground:        #f6f7f9;
+    --panel:         #ffffff;
+    --ink:           #14171a;
+    --ink-2:         #545c65;
+    --ink-3:         #7d868f;
+    --rule:          #dde2e7;
+    --rule-soft:     #eaeef1;
+    --series:        #2a78d6;
+    --ours:          #eb6834;
+    --ours-soft:     #fbe0d4;
+    --risk:          #a3352c;
+    --risk-bg:       #fbeeec;
+    --ok:            #1b6b4c;
+    --ok-bg:         #e8f3ee;
+
+    --display: "Iowan Old Style", "Charter", Palatino, Georgia, serif;
+    --body: "Avenir Next", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+    --data: "SF Mono", "Menlo", "Consolas", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --ground:      #14171a;
+      --panel:       #1b1f23;
+      --ink:         #eef1f4;
+      --ink-2:       #a6aeb6;
+      --ink-3:       #78818a;
+      --rule:        #2c3339;
+      --rule-soft:   #232a2f;
+      --series:      #3987e5;
+      --ours:        #d95926;
+      --ours-soft:   #5c2a14;
+      --risk:        #e88b82;
+      --risk-bg:     #2e1c1a;
+      --ok:          #6fbf9a;
+      --ok-bg:       #16281f;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --ground:      #14171a;
+    --panel:       #1b1f23;
+    --ink:         #eef1f4;
+    --ink-2:       #a6aeb6;
+    --ink-3:       #78818a;
+    --rule:        #2c3339;
+    --rule-soft:   #232a2f;
+    --series:      #3987e5;
+    --ours:        #d95926;
+    --ours-soft:   #5c2a14;
+    --risk:        #e88b82;
+    --risk-bg:     #2e1c1a;
+    --ok:          #6fbf9a;
+    --ok-bg:       #16281f;
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--body);
+    font-size: 16px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 4rem 1.75rem 6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 4rem;
+  }
+
+  .prose { max-width: 66ch; }
+
+  h1, h2, h3 { font-family: var(--display); font-weight: 600; text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(2.3rem, 5.5vw, 3.3rem); line-height: 1.06; letter-spacing: -0.015em; }
+  h2 { font-size: clamp(1.45rem, 3vw, 1.85rem); line-height: 1.2; }
+  h3 { font-size: 1.1rem; line-height: 1.3; }
+  p { margin: 0; }
+
+  .eyebrow {
+    font-family: var(--data);
+    font-size: 0.7rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+  }
+
+  header.masthead { display: flex; flex-direction: column; gap: 1.4rem; }
+  .masthead .lede { font-size: 1.14rem; color: var(--ink-2); max-width: 62ch; }
+  .masthead .meta {
+    font-family: var(--data); font-size: 0.72rem; color: var(--ink-3);
+    display: flex; flex-wrap: wrap; gap: 1.25rem; padding-top: 1.2rem;
+    border-top: 1px solid var(--rule);
+  }
+
+  nav.toc {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
+    padding: 1.1rem 1.25rem;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0.5rem 1.5rem;
+  }
+  nav.toc a { font-size: 0.85rem; text-decoration: none; color: var(--ink-2); display: flex; gap: 0.6rem; }
+  nav.toc a:hover { color: var(--series); }
+  nav.toc a i { font-family: var(--data); font-size: 0.72rem; color: var(--ink-3); font-style: normal; }
+
+  section { display: flex; flex-direction: column; gap: 1.4rem; scroll-margin-top: 1.5rem; }
+  .sec-head { display: flex; flex-direction: column; gap: 0.45rem; }
+
+  figure { margin: 0; display: flex; flex-direction: column; gap: 1rem; }
+  .figcap { font-size: 0.85rem; color: var(--ink-2); max-width: 62ch; }
+
+  .legend { display: flex; gap: 1.25rem; font-size: 0.8rem; color: var(--ink-2); align-items: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 0.45rem; }
+  .swatch { width: 14px; height: 10px; border-radius: 3px; display: inline-block; }
+
+  .ladder {
+    background: var(--panel); border: 1px solid var(--rule); border-radius: 6px;
+    padding: 1.5rem 1.25rem 0.75rem; overflow-x: auto;
+  }
+  .ladder-inner { min-width: 620px; }
+  .row { display: grid; grid-template-columns: 190px 1fr; align-items: center; gap: 0.9rem; padding: 0.28rem 0; }
+  .row .name { font-size: 0.82rem; color: var(--ink-2); text-align: right; line-height: 1.25; }
+  .row .name b { color: var(--ink); font-weight: 600; }
+  .track { position: relative; height: 22px; }
+  .bar { position: absolute; top: 5px; height: 12px; background: var(--series); border-radius: 4px; min-width: 4px; transition: filter .12s ease; }
+  .bar.ours { background: var(--ours); height: 16px; top: 3px; }
+  .row:hover .bar { filter: brightness(1.12); }
+  .val { position: absolute; top: 2px; font-family: var(--data); font-size: 0.72rem; color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 0.5rem; }
+  .row.ours-row .name b { color: var(--ours); }
+  .axis { position: relative; height: 34px; margin-left: 200px; border-top: 1px solid var(--rule); margin-top: 0.6rem; }
+  .tick { position: absolute; top: 0; height: 6px; border-left: 1px solid var(--rule); }
+  .tick i { position: absolute; top: 8px; left: 0; transform: translateX(-50%); font-family: var(--data); font-size: 0.68rem; color: var(--ink-3); font-style: normal; font-variant-numeric: tabular-nums; }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.86rem; min-width: 520px; }
+  th, td { padding: 0.6rem 0.85rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--rule-soft); }
+  thead th { font-family: var(--data); font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); font-weight: 500; background: var(--ground); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-family: var(--data); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.total td { font-weight: 600; background: var(--rule-soft); }
+  tr.hi td { background: var(--ours-soft); }
+  .tag { display: inline-block; font-family: var(--data); font-size: 0.66rem; padding: 0.1rem 0.4rem; border-radius: 3px; border: 1px solid var(--rule); color: var(--ink-2); white-space: nowrap; }
+
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); border-radius: 6px; overflow: hidden; }
+  .stat { background: var(--panel); padding: 1.05rem 1rem; display: flex; flex-direction: column; gap: 0.28rem; }
+  .stat .k { font-family: var(--data); font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-3); }
+  .stat .v { font-family: var(--display); font-size: 1.5rem; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stat .n { font-size: 0.76rem; color: var(--ink-2); }
+
+  .note { border-left: 3px solid var(--rule); padding: 0.15rem 0 0.15rem 1.1rem; color: var(--ink-2); font-size: 0.92rem; max-width: 66ch; display: flex; flex-direction: column; gap: 0.6rem; }
+  .note.risk { border-left-color: var(--risk); background: var(--risk-bg); padding: 0.9rem 1rem; border-radius: 0 5px 5px 0; color: var(--ink); }
+  .note.ok { border-left-color: var(--ok); background: var(--ok-bg); padding: 0.9rem 1rem; border-radius: 0 5px 5px 0; color: var(--ink); }
+  .note strong { color: var(--ink); }
+
+  .matrix { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 1.5rem; overflow-x: auto; }
+  .matrix svg { display: block; width: 100%; height: auto; min-width: 460px; }
+
+  .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.4rem; }
+  .card { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 1.2rem; display: flex; flex-direction: column; gap: 0.7rem; }
+  .card p { font-size: 0.9rem; color: var(--ink-2); }
+  .card ul { margin: 0; padding-left: 1.1rem; font-size: 0.88rem; color: var(--ink-2); display: flex; flex-direction: column; gap: 0.35rem; }
+
+  ul.plain { margin: 0; padding-left: 1.15rem; display: flex; flex-direction: column; gap: 0.5rem; color: var(--ink-2); max-width: 66ch; }
+  ul.plain strong { color: var(--ink); }
+
+  details { border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); }
+  summary { cursor: pointer; padding: 0.7rem 1rem; font-size: 0.82rem; font-family: var(--data); color: var(--ink-2); }
+  summary:focus-visible { outline: 2px solid var(--series); outline-offset: -2px; }
+  details[open] summary { border-bottom: 1px solid var(--rule); }
+  details .tablewrap { border: none; border-radius: 0; }
+
+  /* ---- link archive ---- */
+  .archive { display: flex; flex-direction: column; gap: 1.75rem; }
+  .arcgroup { display: flex; flex-direction: column; gap: 0.6rem; }
+  .arcgroup h3 {
+    font-family: var(--data); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--ink-3); font-weight: 500; padding-bottom: 0.4rem; border-bottom: 1px solid var(--rule);
+  }
+  .arcgroup ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 0.3rem 1.5rem; }
+  .arcgroup li { font-size: 0.83rem; line-height: 1.45; display: flex; gap: 0.5rem; }
+  .arcgroup li::before { content: "→"; color: var(--ink-3); flex: none; font-size: 0.75rem; padding-top: 0.15rem; }
+  .arcgroup li em { font-style: normal; color: var(--ink-3); font-size: 0.78rem; }
+
+  a { color: var(--series); text-decoration-thickness: 1px; text-underline-offset: 2px; word-break: break-word; }
+  a:focus-visible { outline: 2px solid var(--series); outline-offset: 2px; border-radius: 2px; }
+
+  hr.rule { border: none; border-top: 1px solid var(--rule); margin: 0; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">HypeProof · 고등학생 창업 트랙</p>
+    <h1>창업교육 BM 레퍼런스</h1>
+    <p class="lede">
+      사교육 P0 전환에 따른 시장·경쟁·가격·규제 조사 아카이브.
+      결론을 담은 문서가 아니라 <b>BM 설계를 계속 돌리기 위한 원자료</b>다.
+      모든 주장에 원본 링크를 붙였고, 하단에 조사된 링크를 주제별로 전량 보관한다.
+    </p>
+    <div class="meta">
+      <span>최종 갱신 2026-08-18</span>
+      <span>환율 1,400원/USD</span>
+      <span>가격 전부 2026 기준</span>
+      <span>원본 링크 190+</span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="목차">
+    <a href="#map"><i>01</i>경쟁 지형 7클러스터</a>
+    <a href="#crimson"><i>02</i>Crimson 정밀 해부</a>
+    <a href="#launchx"><i>02b</i>LaunchX — 가장 가까운 원형</a>
+    <a href="#ladder"><i>03</i>가격 사다리</a>
+    <a href="#cost"><i>04</i>멘토 원가 모델</a>
+    <a href="#unit"><i>05</i>단위경제 · 할인 3안</a>
+    <a href="#law"><i>06</i>학원법 제약</a>
+    <a href="#capital"><i>07</i>한국 자본 · 엑싯</a>
+    <a href="#demand"><i>08</i>수요 근거 — 신입채용 붕괴</a>
+    <a href="#cert"><i>09</i>인증 · 표준 · 회사구조</a>
+    <a href="#archive"><i>10</i>링크 아카이브 전량</a>
+  </nav>
+
+  <hr class="rule">
+
+  <!-- ===== 01 시장 지도 ===== -->
+  <section id="map">
+    <div class="sec-head">
+      <p class="eyebrow">01 · 경쟁 지형</p>
+      <h2>여섯 개 클러스터</h2>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>클러스터</th><th>대표 사업자</th><th>가격</th><th>결정적 한계</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="tag">학교 라이선스</span></td>
+            <td><a href="https://www.unchartedlearning.org/student-programs/incubatoredu-high-school-entrepreneurship">INCubatoredu</a> · <a href="https://nfte.com/programs/grades-9-12/">NFTE</a> · <a href="https://nmost.org/youth-entrepreneurship/">JA</a> · <a href="https://yeep.go.kr/main/main.do">YEEP</a></td>
+            <td>학교 단위 / <b>YEEP 무료</b></td>
+            <td>창업 사이클은 완비. <b>프로덕트가 종이 MVP에서 멈춘다</b></td>
+          </tr>
+          <tr>
+            <td><span class="tag">1:1 크리덴셜</span></td>
+            <td><a href="https://www.topcollegeadmissionsconsultants.com/crimson-education-2026">Crimson</a> · <a href="https://www.immerse.education/knowledge-base/polygence-complete-guide-2026/">Polygence</a> · <a href="https://www.immerse.education/knowledge-base/lumiere-education-complete-guide-2026/">Lumiere</a></td>
+            <td>$2.6k – $200k</td>
+            <td>목적이 <b>합격</b>. 창업은 비교과 수단이다. 멘토 인건비가 원가라 <b>마진과 확장성이 동시에 안 잡힌다</b></td>
+          </tr>
+          <tr style="background:var(--ours-soft)">
+            <td><span class="tag">창업 프로그램</span></td>
+            <td><a href="https://www.launchx.com/high-school-programs">LaunchX</a> · <a href="https://www.leangap.org/">Leangap</a> · <a href="https://www.join.tks.world/">TKS</a></td>
+            <td><b>$1,995 – $11,495</b></td>
+            <td><b>가장 가까운 원형.</b> 4–5주 · 팀 창업 · 데모데이. 프로토타입에서 멈추고 <b>코드가 안 나온다</b></td>
+          </tr>
+          <tr>
+            <td><span class="tag">AI 툴 + 가드레일</span></td>
+            <td><a href="https://techcrunch.com/2026/07/23/edtech-platform-raises-4-5m-to-help-teach-students-how-to-vibe-code/">Imagi</a> ($4.5M 시드) · <a href="https://www.businesswire.com/news/home/20260305399568/en/Kira-and-Lovable-Launch-Vibe-Coding-Course-Bringing-AI-Powered-App-Building-to-Classrooms">Kira×Lovable</a> · <a href="https://fabricate.build/compare/replit-vs-cursor">Replit Edu</a></td>
+            <td>구독 / 학교 단위</td>
+            <td>툴만 있고 <b>창업 사이클이 없다</b>. 앱 하나 만들고 끝</td>
+          </tr>
+          <tr>
+            <td><span class="tag">AI 학교</span></td>
+            <td><a href="https://www.axios.com/2026/08/02/alpha-schools-ai-expansion-50-campuses">Alpha School</a> · <a href="https://orieladmissions.com/ai-private-schools-elite-college-admissions/">Sora</a> · Synthesis</td>
+            <td>연 $17.9k – $75k</td>
+            <td>학교라 진입장벽이 다르다. 가격 상한의 참고치</td>
+          </tr>
+          <tr>
+            <td><span class="tag">한국 인컴번트</span></td>
+            <td><a href="https://demoday.co.kr/bm-analysis/246">엘리스</a> (2024 매출 351억) · 코드잇 · <a href="https://www.gangmom.kr/news/65b7b4809397912a33ec76e5">대치 코딩학원</a></td>
+            <td>B2G / B2C</td>
+            <td>입시 통화는 <a href="https://citcoding.com/competitions/ai-coding-competitions-guide.html">IOI·ISEF</a>. <b>창업은 그 서열에 없다</b></td>
+          </tr>
+          <tr>
+            <td><span class="tag">반면교사</span></td>
+            <td><a href="https://www.therunway.ventures/p/buildspace">buildspace</a></td>
+            <td>무료</td>
+            <td>최전성기에 종료 (2024-08). <b>커뮤니티는 해자가 아니다</b></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="matrix">
+      <svg viewBox="0 0 720 380" role="img" aria-label="창업 사이클 완결성과 AI 네이티브 실제 빌드 두 축으로 본 경쟁 위치. HypeProof 만 오른쪽 위 사분면에 있다.">
+        <defs>
+          <marker id="ah" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M0 0 L8 4 L0 8 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g color="var(--rule)" stroke="currentColor" stroke-width="1">
+          <line x1="90" y1="330" x2="690" y2="330" marker-end="url(#ah)"/>
+          <line x1="90" y1="330" x2="90" y2="30" marker-end="url(#ah)"/>
+        </g>
+        <line x1="390" y1="40" x2="390" y2="330" stroke="var(--rule-soft)" stroke-width="1" stroke-dasharray="3 4"/>
+        <line x1="90" y1="185" x2="680" y2="185" stroke="var(--rule-soft)" stroke-width="1" stroke-dasharray="3 4"/>
+        <text x="690" y="358" text-anchor="end" font-family="var(--data)" font-size="12" fill="var(--ink-3)">AI 네이티브 실제 빌드 →</text>
+        <text x="78" y="34" text-anchor="end" font-family="var(--data)" font-size="12" fill="var(--ink-3)" transform="rotate(-90 78 34)" style="dominant-baseline:hanging">창업 사이클 완결성 →</text>
+        <g font-family="var(--body)" font-size="13" fill="var(--ink-2)">
+          <circle cx="175" cy="80" r="5" fill="var(--series)"/>
+          <text x="190" y="84">INCubatoredu · NFTE · JA</text>
+          <circle cx="200" cy="128" r="5" fill="var(--series)"/>
+          <text x="215" y="132">YEEP (무료)</text>
+          <circle cx="250" cy="172" r="5" fill="var(--series)"/>
+          <text x="265" y="176">Crimson · Polygence · Lumiere</text>
+          <circle cx="330" cy="252" r="5" fill="var(--series)"/>
+          <text x="345" y="256">Alpha · Sora</text>
+          <circle cx="545" cy="290" r="5" fill="var(--series)"/>
+          <text x="560" y="294">Imagi · Kira×Lovable</text>
+          <circle cx="600" cy="248" r="5" fill="var(--series)"/>
+          <text x="560" y="228">Replit Edu</text>
+        </g>
+        <g>
+          <circle cx="588" cy="92" r="9" fill="var(--ours)"/>
+          <text x="572" y="70" text-anchor="end" font-family="var(--display)" font-size="17" font-weight="600" fill="var(--ours)">HypeProof Studio</text>
+          <text x="572" y="90" text-anchor="end" font-family="var(--body)" font-size="12" fill="var(--ink-2)">창업 사이클 × 실제 빌드 × 7에셋 계측</text>
+        </g>
+      </svg>
+    </div>
+
+    <div class="note">
+      <p><strong>이 지도의 요점은 빈칸이다.</strong> 왼쪽 위는 커리큘럼만 있고 코드가 안 나온다.
+      오른쪽 아래는 툴만 있고 회사가 안 나온다. <b>오른쪽 위에 아무도 없다.</b></p>
+      <p>그리고 나열된 전부가 <b>산출물</b>을 판다 — 논문, 앱, 피치덱.
+      <b>과정을 계측해서 파는 곳은 하나도 없다.</b></p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== 02 크림슨 ===== -->
+  <section id="crimson">
+    <div class="sec-head">
+      <p class="eyebrow">02 · 벤치마크 정밀 해부</p>
+      <h2>Crimson Education</h2>
+    </div>
+    <p class="prose" style="color:var(--ink-2)">
+      우리 가격대에서 실제로 돈을 받고 있는 유일한 회사이고, <b>한국이 핵심 시장</b>이다.
+      타겟 고객은 이미 여기에 지불하고 있다 — 수요는 검증이 필요 없다.
+    </p>
+
+    <div class="stats">
+      <div class="stat"><span class="k">연매출</span><span class="v">$110M</span><span class="n">첫 1억 달러 돌파 · 직전 2년 연 65% 성장</span></div>
+      <div class="stat"><span class="k">밸류에이션</span><span class="v">$1B</span><span class="n">누적 조달 $114M · Tiger Global 외</span></div>
+      <div class="stat"><span class="k">임직원</span><span class="v">1,986</span><span class="n">2022년 정직원 630 + 튜터·멘토 3,000</span></div>
+      <div class="stat"><span class="k">거점</span><span class="v">26곳</span><span class="n">25개국+ · 뉴욕 상하이 싱가포르 서울</span></div>
+      <div class="stat"><span class="k">누적 학생</span><span class="v">100k+</span><span class="n">60개국</span></div>
+      <div class="stat"><span class="k">창업</span><span class="v">2013</span><span class="n">Jamie Beaton 외 2인 · HQ 오클랜드</span></div>
+    </div>
+
+    <div class="cols">
+      <div class="card">
+        <h3>구조에서 배울 것</h3>
+        <ul>
+          <li><b>온라인 고교(CGA)가 그룹 매출의 20%.</b> 컨설팅 → 학교로 확장. 우리의 “직접 운영 → 공급자” 궤적과 같다</li>
+          <li><b>정직원 630 + 프리랜서 멘토 3,000.</b> 멘토를 고용하지 않고 네트워크로 굴린다</li>
+          <li><b>컨설팅 매출의 95%+가 본국 밖.</b> 중국·한국·싱가포르·미국</li>
+          <li><b>결과를 약속하지 않는다.</b> 파는 것은 “무엇을 받는지”의 명세</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>약점 — 정면으로 다르게 갈 지점</h3>
+        <ul>
+          <li><b><a href="https://www.consumer.org.nz/consumer-rights-and-campaigns/scams/crimson-education-s-unfair-contract-terms">환불 불가 조항</a>.</b> 뉴질랜드 소비자단체가 “불공정 계약조건”으로 지적. 중도 해지해도 잔여 수업료 의무</li>
+          <li><a href="https://businessdesk.co.nz/article/law-regulation/crimson-education-settles-china-dispute-with-unhappy-student">중국 자회사 청산 관련 $40,000 환불 분쟁</a></li>
+          <li>스탠퍼드 합격 후 $5,000 환불 요구 등 개별 분쟁 다수</li>
+          <li><a href="https://kforkindling.wordpress.com/2022/02/05/why-i-dont-support-crimson-education/">계약·투명성 비판</a>. 단 <a href="https://www.trustpilot.com/review/crimsoneducation.org">Trustpilot 142건</a>은 대체로 긍정</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note ok">
+      <strong>인당 매출 $55k.</strong> 매출 $110M ÷ 임직원 1,986명. 철저히 사람 장사다.
+      우리 재무적 wedge — <b>AI 코치가 멘토 레이어를 대체하면 같은 가격에 원가 1/5</b> — 는
+      정확히 이 숫자를 겨냥한다. 그리고 환불 분쟁은 <b>계약 설계에서 우리가 이길 수 있는 유일한 지점</b>이다.
+    </div>
+
+    <div class="note risk">
+      <p><strong>Crimson 은 경쟁자가 아니다 — 앵커이자 잠재 채널이다.</strong></p>
+      <p>Crimson 도 창업을 다룬다: <a href="https://en.m.wikipedia.org/wiki/Crimson_Education">entrepreneurship programme</a> ·
+      2024년 <b>UPenn 제휴 Global Entrepreneurship and Innovation 인증</b> ·
+      <a href="https://rise.crimsoneducation.org/our-services">캡스톤(앱 제작 · 동아리 창설 · 런칭)</a> ·
+      파트너 기업 work immersion. 하지만 <b>성공 기준이 다르다</b> —
+      그들은 “지원서에 잘 써지면” 성공이고 우리는 “사람이 실제로 쓰면” 성공이다.</p>
+      <p>그리고 <a href="https://pages.crimsoneducation.org/launchx">Crimson × LaunchX 랜딩 페이지</a>가 존재한다.
+      <b>Crimson 은 창업 프로그램을 외부에서 조달한다.</b> 그 자리는 우리가 들어갈 수 있는 자리다.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== LaunchX ===== -->
+  <section id="launchx">
+    <div class="sec-head">
+      <p class="eyebrow">02b · 가장 가까운 원형</p>
+      <h2>LaunchX</h2>
+    </div>
+    <p class="prose" style="color:var(--ink-2)">
+      우리가 만들려는 것과 가장 닮은 프로그램. <b>MIT 계보 · 13년 · 3,000명</b>으로
+      $11,495 를 받는다. 가격 방어 논리를 여기서 배워야 한다.
+    </p>
+
+    <div class="stats">
+      <div class="stat"><span class="k">기원</span><span class="v">2012</span><span class="n">2014 MIT Martin Trust Center 산하 → 스핀아웃. MIT·Harvard·Northwestern 창업가 설립</span></div>
+      <div class="stat"><span class="k">누적 수료</span><span class="v">3,000+</span><span class="n">2013 첫 여름 이후</span></div>
+      <div class="stat"><span class="k">2025 지원</span><span class="v">15,000</span><span class="n">지원 시작 건수 · 실제 참가 약 700명</span></div>
+      <div class="stat"><span class="k">합격률</span><span class="v">≈30%</span><span class="n">Flagship 기준</span></div>
+      <div class="stat"><span class="k">동문 창업률</span><span class="v">≈70%</span><span class="n">프로그램 중 만든 회사의 15%가 현재도 운영</span></div>
+      <div class="stat"><span class="k">최고가</span><span class="v">$11,495</span><span class="n">San Diego Flagship 4주 · 숙식 포함</span></div>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>프로그램</th><th>형식</th><th class="num">2026 학비</th><th class="num">주당 환산</th></tr></thead>
+        <tbody>
+          <tr><td>Online BootCamp</td><td>온라인</td><td class="num">$1,995</td><td class="num">—</td></tr>
+          <tr><td>Online Startup Experience (가을)</td><td>온라인</td><td class="num">$4,495</td><td class="num">—</td></tr>
+          <tr><td>Online Innovation (여름)</td><td>온라인</td><td class="num">$4,495</td><td class="num">—</td></tr>
+          <tr><td>Online Flagship Entrepreneurship</td><td>온라인 5주</td><td class="num">$6,495</td><td class="num">$1,299</td></tr>
+          <tr><td>San Diego Exploration</td><td>온사이트</td><td class="num">$6,495</td><td class="num">—</td></tr>
+          <tr class="total"><td><b>San Diego Flagship Entrepreneurship</b></td><td>레지던셜 4주</td><td class="num">$11,495</td><td class="num">$2,874</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="figcap">온사이트는 숙식 포함. 미국 외 거주자 +$250 (국제보험).</p>
+
+    <div class="cols">
+      <div class="card">
+        <h3>구조 — 우리와 거의 같다</h3>
+        <ul>
+          <li>4–5주. 팀으로 <b>아이디어 → 검증 → 개발</b></li>
+          <li>고객 인터뷰 · 가치제안 정련 · 프로토타입 · 세일즈 · 피칭</li>
+          <li>공동창업자 팀 구성. 마지막은 <b>데모데이</b></li>
+          <li>멘토가 <b>현직 창업가 · VC · 프로덕트 리더</b> — 학계 강사가 아니다</li>
+          <li>“learning by doing” — 강의가 아니라 실행</li>
+        </ul>
+      </div>
+      <div class="card" style="border-color:var(--ours)">
+        <h3 style="color:var(--ours)">그들이 못 하는 것</h3>
+        <ul>
+          <li><b>코드가 안 나온다.</b> rapid prototyping 에서 멈춘다 — AI 네이티브 빌드가 아니다</li>
+          <li><b>4–5주에 끝난다.</b> 재무·IR 구간이 없고 후속 동행도 없다</li>
+          <li><b>과정을 계측하지 않는다.</b> 산출물(피치·프로토타입)만 남는다</li>
+          <li>국가 대회 출전 같은 <b>제3자 검증 관문이 없다</b></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note ok">
+      <p><strong>가격 방어의 진짜 구조 — 시간이 아니라 희소성이다.</strong>
+      LaunchX 는 <b>합격률 30%</b>와 <b>MIT 계보</b>로 $11,495 를 만든다. 멘토 단가로 만드는 게 아니다.</p>
+      <p>주당 $2,874 라는 산술 앵커가 생긴다. 8주로 환산하면 <b>$23,000 ≈ 3,200만원</b>이
+      “같은 논리로 방어되는” 선이다.
+      <b>4,000만원(≈$29k)은 그 1.25배 — 방어 가능.</b>
+      8,000만원(≈$57k)은 2.5배 — 브랜드·선발률이 생긴 뒤(2기 이후)에 올릴 자리.</p>
+      <p><b>“완전 프리미엄”은 가격표가 아니라 멘토 급과 선발률로 만든다.</b>
+      지인 4명을 그냥 받으면 선발 서사가 0이다 — <b>초대제를 희소성 장치로 명시</b>해야 한다.</p>
+    </div>
+
+    <div class="note">
+      <strong>벤치마킹할 지표.</strong> 동문 창업률 70% · 창업 회사 존속률 15%.
+      우리 7에셋 계측이 겨눠야 할 비교 기준이 이 두 숫자다.
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== 03 가격 사다리 ===== -->
+  <section id="ladder">
+    <div class="sec-head">
+      <p class="eyebrow">03 · 가격 분포</p>
+      <h2>같은 축 위에 올려놓고 보기</h2>
+    </div>
+    <p class="prose" style="color:var(--ink-2)">
+      고등학생 대상 프로그램의 실제 가격을 로그 축에 올렸다. 상단으로 갈수록 파는 것이
+      “수업 시간”에서 “접근권”으로 바뀐다.
+    </p>
+
+    <figure>
+      <div class="legend">
+        <span><i class="swatch" style="background:var(--series)"></i>시장 (기존 사업자)</span>
+        <span><i class="swatch" style="background:var(--ours)"></i>HypeProof 검토 밴드</span>
+      </div>
+
+      <div class="ladder">
+        <div class="ladder-inner">
+          <div class="row">
+            <div class="name">Lumiere <b>Research Scholar</b><br><span style="font-size:.74rem">12주 · 1:1 PhD 멘토</span></div>
+            <div class="track"><div class="bar" style="left:5.7%;width:1.5%" title="$2,600 · 12주 리서치 멘토링"></div><div class="val" style="left:7.2%">$2,600</div></div>
+          </div>
+          <div class="row">
+            <div class="name"><b>Polygence</b> Core<br><span style="font-size:.74rem">1:1 10세션</span></div>
+            <div class="track"><div class="bar" style="left:8.8%;width:1.5%" title="$3,000 · 1:1 10세션 + 산출물. 그룹 pod 은 $495"></div><div class="val" style="left:10.3%">$3,000</div></div>
+          </div>
+          <div class="row">
+            <div class="name"><b>LaunchX</b> 전 라인업<br><span style="font-size:.74rem">부트캠프 → 레지던셜 4주</span></div>
+            <div class="track"><div class="bar" style="left:0%;width:38.0%" title="$1,995 (온라인 부트캠프) → $11,495 (San Diego Flagship 4주, 숙식 포함). 합격률 30%"></div><div class="val" style="left:38.0%">$1,995–11,495</div></div>
+          </div>
+          <div class="row">
+            <div class="name">TKS (밴쿠버)<br><span style="font-size:.74rem">CAD 6,850 · 재정지원 최대 100%</span></div>
+            <div class="track"><div class="bar" style="left:19.9%;width:1.5%" title="CAD 6,850 ≈ $5,000. 60%+ 학생이 재정지원 수혜, 누적 $2M+ 지급"></div><div class="val" style="left:21.4%">≈$5,000</div></div>
+          </div>
+          <div class="row">
+            <div class="name">NUS Enterprise Summer<br><span style="font-size:.74rem">싱가포르 · SGD 5,600</span></div>
+            <div class="track"><div class="bar" style="left:16.6%;width:1.5%" title="SGD 5,600 (+9% GST) ≈ $4,300"></div><div class="val" style="left:18.1%">≈$4,300</div></div>
+          </div>
+          <div class="row">
+            <div class="name"><b>UC Berkeley Haas</b><br><span style="font-size:.74rem">고교 창업 · 2주</span></div>
+            <div class="track"><div class="bar" style="left:30.0%;width:1.5%" title="$7,950 (out-of-state) / $7,450 (in-state) · 2주 · Haas 교수진"></div><div class="val" style="left:31.5%">$7,950 <span style="color:var(--ink-3)">/ 2주</span></div></div>
+          </div>
+          <div class="row">
+            <div class="name">Lumiere 펠로우십 상단</div>
+            <div class="track"><div class="bar" style="left:5.7%;width:24.4%" title="$2,600 → 출판 트랙 $4,800 → 펠로우십 $8,000+"></div><div class="val" style="left:30.1%">$8,000+</div></div>
+          </div>
+          <div class="row">
+            <div class="name">Sora Schools<br><span style="font-size:.74rem">온라인 학교 · 연간</span></div>
+            <div class="track"><div class="bar" style="left:47.6%;width:1.5%" title="연 $17,900 · 완전 온라인 프로젝트 기반"></div><div class="val" style="left:49.1%">$17,900 <span style="color:var(--ink-3)">/ 년</span></div></div>
+          </div>
+          <div class="row">
+            <div class="name"><b>Crimson</b> 표준 밴드<br><span style="font-size:.74rem">2년 풀서비스</span></div>
+            <div class="track"><div class="bar" style="left:54.9%;width:14.0%" title="$25,000–45,000 · 2년 풀서비스 (대부분의 가정)"></div><div class="val" style="left:68.9%">$25k–45k</div></div>
+          </div>
+          <div class="row">
+            <div class="name">Alpha School<br><span style="font-size:.74rem">AI 사립학교 · 연간</span></div>
+            <div class="track"><div class="bar" style="left:65.1%;width:13.9%" title="연 $40,000 · 대도시 $65,000–75,000 · 브라운즈빌 $10,000"></div><div class="val" style="left:79.0%">$40k–75k <span style="color:var(--ink-3)">/ 년</span></div></div>
+          </div>
+          <div class="row ours-row">
+            <div class="name"><b>HypeProof 검토</b><br><span style="font-size:.74rem">8주 + 1년 동행</span></div>
+            <div class="track"><div class="bar ours" style="left:66.0%;width:8.5%" title="4,000만–8,000만원 ≈ $29k–57k · 정가 미확정"></div><div class="val" style="left:74.5%; color:var(--ours); font-weight:600">₩4,000–8,000만</div></div>
+          </div>
+          <div class="row">
+            <div class="name"><b>Crimson</b> 상위 밴드</div>
+            <div class="track"><div class="bar" style="left:69.9%;width:9.3%" title="$35,000–76,875+ · 최상위 패키지"></div><div class="val" style="left:79.2%">$35k–76.9k+</div></div>
+          </div>
+          <div class="row">
+            <div class="name">Crimson 공동창업자 직접<br><span style="font-size:.74rem">일부 가정</span></div>
+            <div class="track"><div class="bar" style="left:98.5%;width:1.5%" title="~$200,000 · 공동창업자가 직접 지도"></div><div class="val" style="left:100%; transform:translateX(-100%); padding-right:.2rem">~$200k</div></div>
+          </div>
+
+          <div class="axis">
+            <div class="tick" style="left:0%"><i>$2k</i></div>
+            <div class="tick" style="left:19.9%"><i>$5k</i></div>
+            <div class="tick" style="left:34.9%"><i>$10k</i></div>
+            <div class="tick" style="left:50%"><i>$20k</i></div>
+            <div class="tick" style="left:69.9%"><i>$50k</i></div>
+            <div class="tick" style="left:85%"><i>$100k</i></div>
+            <div class="tick" style="left:100%"><i>$200k</i></div>
+          </div>
+        </div>
+      </div>
+
+      <figcaption class="figcap">
+        로그 축. 기간 단위가 서로 다르므로 (2주 · 8주 · 1년 · 2년) 절대 비교가 아니라
+        <b>지불 규모의 분포</b>로 읽는다. 핵심은 <b>$25k 위로 시장이 실재한다</b>는 것.
+      </figcaption>
+    </figure>
+
+    <details>
+      <summary>표로 보기</summary>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>사업자</th><th>기간</th><th class="num">가격 (USD)</th><th>파는 것</th></tr></thead>
+          <tbody>
+            <tr><td>Lumiere Research Scholar</td><td>12주</td><td class="num">2,600</td><td>1:1 PhD 멘토 + 논문</td></tr>
+            <tr><td>Polygence Core</td><td>10세션</td><td class="num">3,000</td><td>1:1 멘토 + 산출물 (pod $495)</td></tr>
+            <tr><td>NUS Enterprise Summer</td><td>여름</td><td class="num">≈4,300</td><td>대학 브랜드 프로그램</td></tr>
+            <tr><td>SMU Young Leaders</td><td>1주</td><td class="num">≈2,700</td><td>싱가포르 대학 브랜드</td></tr>
+            <tr><td>UC Berkeley Haas</td><td>2주</td><td class="num">7,950</td><td>교수진 강의 + 브랜드</td></tr>
+            <tr><td>Lumiere 펠로우십</td><td>—</td><td class="num">8,000+</td><td>출판 + 학점</td></tr>
+            <tr><td>Sora Schools</td><td>1년</td><td class="num">17,900</td><td>온라인 학교</td></tr>
+            <tr><td>Crimson 표준</td><td>2년</td><td class="num">25,000–45,000</td><td>전담 전략가 + 전문가 네트워크</td></tr>
+            <tr><td>Alpha School</td><td>1년</td><td class="num">40,000–75,000</td><td>AI 사립학교</td></tr>
+            <tr class="hi"><td><b>HypeProof 검토</b></td><td>8주 + 1년</td><td class="num">≈29,000–57,000</td><td>SV 네트워크 접근 + 계측 증거</td></tr>
+            <tr><td>Crimson 상위</td><td>2년</td><td class="num">35,000–76,875+</td><td>최상위 패키지</td></tr>
+            <tr><td>Crimson 공동창업자</td><td>2년</td><td class="num">≈200,000</td><td>창업자 직접 지도</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </details>
+
+    <div class="note risk">
+      <p><strong>카테고리를 바꾸지 않으면 8,000만원은 안 팔린다.</strong>
+      <b>창업교육 카테고리의 실제 최고가는 $11,495 ≈ 1,600만원</b>이다 — Crimson 의 $25–77k 가 아니라.
+      8,000만원(≈$57k)은 같은 카테고리 최고가의 <b>5배</b>이고, “더 길다 · 실제 배포한다”로는 5배가 안 메워진다.</p>
+      <p><b>(가) 창업교육에 남는다</b> → 상한 2,000–2,500만원. 이 가격이면 A급 멘토($1,000/hr) 구성이 원가에서 안 버틴다.<br>
+      <b>(나) 카테고리를 바꾼다</b> → “창업 캠프”가 아니라 <b>창업을 매개로 한 프리미엄 소수 액셀러레이션</b>. 앵커는 Crimson.
+      파는 것이 커리큘럼이 아니라 <b>멘토 급과 접근권</b>이어야 한다.</p>
+      <p><b>원가가 이미 답을 정하고 있다.</b> LaunchX $11,495 는 젊은 멘토·대학원생을 쓴다.
+      IPO 경험 창업가·SV VP 는 시간당 $600–1,000 이다 — <b>멘토 급이 카테고리를 가른다.</b></p>
+    </div>
+
+    <div class="note">
+      <strong>대치동 참고치.</strong> 입시컨설팅 회당 10–30만 · <b>시간당 30만</b> · 유학은 대학당 200만.
+      진학상담 학원은 <b>1분당 5,000원</b>이 조정기준 상한이다.
+      (<a href="https://www.bizhankook.com/bk/article/26794">비즈한국</a> · <a href="http://gnscedu.sen.go.kr/CMS/civilapp/civilapp0a/civilapp0a03/civilapp0a0301/1324963_4489.html">강남서초교육지원청 조정기준</a>)
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== 04 원가 ===== -->
+  <section id="cost">
+    <div class="sec-head">
+      <p class="eyebrow">04 · 원가</p>
+      <h2>멘토 단가가 가격을 강제한다</h2>
+    </div>
+
+    <p class="prose" style="color:var(--ink-2)">
+      멘토를 현금으로 지급하면 가격은 “얼마 받고 싶은가”가 아니라
+      <b>“어떤 사람을 데려올 것인가”</b>로 결정된다. 아래는
+      <a href="https://expertopportunities.com/glg-review/">GLG 전문가 수령 단가</a>와
+      <a href="https://justinmckelvey.com/blog/fractional-cto-cost-hourly-rate">SV fractional 실무자 단가</a> 기준.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>등급</th><th>대상</th><th class="num">시간당 USD</th><th class="num">원화</th><th>시장 근거</th></tr></thead>
+        <tbody>
+          <tr><td><span class="tag">A</span></td><td>IPO 경험 창업가 · C-level · 저명 인사</td><td class="num">1,000</td><td class="num">140만</td><td>GLG C-suite $800–1,200+</td></tr>
+          <tr><td><span class="tag">B</span></td><td>SV 시니어 엔지니어 · PM · VP</td><td class="num">600</td><td class="num">84만</td><td>GLG 시니어 임원 $600–800</td></tr>
+          <tr><td><span class="tag">C</span></td><td>현직 시니어 실무자</td><td class="num">400</td><td class="num">56만</td><td>SV fractional CTO $400–500</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="prose" style="color:var(--ink-2)">
+      GLG 는 <b>고객에게 시간당 $1,500–2,000</b>을 청구한다. 위는 전문가 수령액 기준이고,
+      연 100건 이상이면 25–35% 볼륨 할인 사례가 있다.
+    </p>
+
+    <div class="cols">
+      <div class="card">
+        <h3>설계 A — 1:1 멘토링 중심</h3>
+        <p>Polygence 방식. 주간 1:1 세션 8회.</p>
+        <div class="tablewrap" style="border:none">
+          <table style="min-width:0">
+            <thead><tr><th>항목</th><th class="num">4명</th><th class="num">9명</th></tr></thead>
+            <tbody>
+              <tr><td>오프닝 특강 A급 2h</td><td class="num">280만</td><td class="num">280만</td></tr>
+              <tr><td>주간 1:1 B급 8h/인</td><td class="num">2,688만</td><td class="num">6,048만</td></tr>
+              <tr><td>재무·IR 특강 B급 4h</td><td class="num">336만</td><td class="num">336만</td></tr>
+              <tr><td>IR 리허설 C급 2h/인</td><td class="num">448만</td><td class="num">1,008만</td></tr>
+              <tr><td>데모데이 심사 A×2 + B×1</td><td class="num">1,456만</td><td class="num">2,184만</td></tr>
+              <tr class="total"><td>합계</td><td class="num">5,208만</td><td class="num">9,856만</td></tr>
+              <tr class="total"><td>학생 1인당</td><td class="num">1,302만</td><td class="num">1,095만</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><b>규모의 경제가 없다.</b> 멘토 시간이 학생 수에 비례한다.</p>
+      </div>
+
+      <div class="card" style="border-color:var(--ours)">
+        <h3 style="color:var(--ours)">설계 B — 그룹 + 이벤트</h3>
+        <p>AI 코치가 일상을 맡고, 사람은 이벤트로만.</p>
+        <div class="tablewrap" style="border:none">
+          <table style="min-width:0">
+            <thead><tr><th>항목</th><th class="num">4명</th><th class="num">9명</th></tr></thead>
+            <tbody>
+              <tr><td>오프닝 특강 A급 2h</td><td class="num">280만</td><td class="num">280만</td></tr>
+              <tr><td>그룹 세션 B급 8회×2h</td><td class="num">1,344만</td><td class="num">1,344만</td></tr>
+              <tr><td>1:1 B급 <b>2h/인</b></td><td class="num">672만</td><td class="num">1,512만</td></tr>
+              <tr><td>재무·IR 특강 B급 4h</td><td class="num">336만</td><td class="num">336만</td></tr>
+              <tr><td>데모데이 심사 A×2 + B×1</td><td class="num">1,456만</td><td class="num">1,456만</td></tr>
+              <tr class="total"><td>합계</td><td class="num">4,088만</td><td class="num">4,928만</td></tr>
+              <tr class="total hi"><td>학생 1인당</td><td class="num">1,022만</td><td class="num">548만</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><b>9명일 때 1인당 548만.</b> 고정비가 학생 수로 나뉜다.</p>
+      </div>
+    </div>
+
+    <div class="note risk">
+      <p><strong>설계 A 는 원가 문제가 아니라 교육 목표 문제다.</strong></p>
+      <p>7에셋 중 <b>Delegation judgment · Iteration reflex · Verification reflex</b> 는
+      혼자 AI 와 씨름해야 생기는 근육이다. 옆에 사람 멘토가 붙어 있으면 학생은 막히는 순간
+      AI 가 아니라 <b>사람에게 묻는다</b>. 8주 동안 배우는 것이
+      “AI 에게 일을 시키는 법”이 아니라 “좋은 멘토에게 물어보는 법”이 된다.</p>
+      <p>즉 1:1 멘토링은 <b>돈을 더 쓰면서 우리가 팔겠다는 것을 훼손한다.</b></p>
+    </div>
+
+    <div class="note ok">
+      <p><strong>사람이 반드시 필요한 세 가지</strong> — 이것만 사람이 한다.</p>
+      <ul class="plain" style="color:inherit">
+        <li><strong>고객 접촉</strong> — AI 가 대신할 수 없다</li>
+        <li><strong>추궁과 심사</strong> — 증거 없는 주장을 사람이 집는다</li>
+        <li><strong>야망의 상향 조정</strong> — “이 정도면 됐다”를 깨는 것. 만나본 적 없는 급의 사람을 만났을 때만 일어나고, <b>8회가 아니라 한 번에 일어난다</b></li>
+      </ul>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== 05 단위경제 ===== -->
+  <section id="unit">
+    <div class="sec-head">
+      <p class="eyebrow">05 · 단위경제</p>
+      <h2>손익과 1기 할인 3안</h2>
+    </div>
+
+    <div class="cols">
+      <div class="card">
+        <h3>정상 운영 (설계 B · 9명 · 8,000만원)</h3>
+        <div class="tablewrap" style="border:none">
+          <table style="min-width:0">
+            <tbody>
+              <tr><td>매출</td><td class="num">7.2억</td></tr>
+              <tr><td>멘토비</td><td class="num">4,928만</td></tr>
+              <tr><td>코치 인건비 (1명·3개월)</td><td class="num">2,500만</td></tr>
+              <tr><td>AI 토큰 (학생당 100만)</td><td class="num">900만</td></tr>
+              <tr><td>운영·장소</td><td class="num">500만</td></tr>
+              <tr class="total"><td>직접비 합계</td><td class="num">8,828만</td></tr>
+              <tr class="total hi"><td>기여이익 / 기</td><td class="num">6.3억</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>연 2기 = <b>12.6억</b>. 학원법상 9명 상한이 사업의 천장이 아니게 된다.</p>
+      </div>
+
+      <div class="card">
+        <h3>1기 할인 3안 (설계 B · 4명 · 멘토비 4,088만)</h3>
+        <div class="tablewrap" style="border:none">
+          <table style="min-width:0">
+            <thead><tr><th>안</th><th class="num">학생당</th><th class="num">매출</th><th class="num">멘토비 차감 후</th></tr></thead>
+            <tbody>
+              <tr><td>정가</td><td class="num">8,000만</td><td class="num">3.2억</td><td class="num">+2.8억</td></tr>
+              <tr class="hi"><td><b>1안</b> 50%</td><td class="num">4,000만</td><td class="num">1.6억</td><td class="num">+1.2억</td></tr>
+              <tr class="hi"><td><b>2안</b> 75%</td><td class="num">2,000만</td><td class="num">8,000만</td><td class="num">+3,912만</td></tr>
+              <tr class="hi"><td><b>3안</b> 90%</td><td class="num">800만</td><td class="num">3,200만</td><td class="num" style="color:var(--risk)">−888만</td></tr>
+              <tr><td>100% 장학</td><td class="num">0</td><td class="num">0</td><td class="num" style="color:var(--risk)">−4,088만</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><b>2안까지는 멘토비를 회수하고도 남는다.</b> 3안부터 순수 유출.</p>
+      </div>
+    </div>
+
+    <div class="note">
+      <p><strong>정가는 공표하고 1기는 “초대 기수 특별가”로 처리한다.</strong>
+      프리미엄 시장에서 무료는 앵커를 0원에 박고, 그 신호는 지인 네트워크를 통해
+      정확히 타겟 커뮤니티에 퍼진다.</p>
+      <p><b>시간당으로 팔면 학원이고 접근권으로 팔면 액셀러레이터다.</b>
+      Crimson 이 시간당으로 안 파는 이유이기도 하다.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== 06 학원법 ===== -->
+  <section id="law">
+    <div class="sec-head">
+      <p class="eyebrow">06 · 규제</p>
+      <h2>학원법 — 가격이 아니라 확장을 막는다</h2>
+    </div>
+
+    <p class="prose" style="color:var(--ink-2)">
+      <a href="https://casenote.kr/%EB%B2%95%EB%A0%B9/%ED%95%99%EC%9B%90%EC%9D%98_%EC%84%A4%EB%A6%BD%C2%B7%EC%9A%B4%EC%98%81_%EB%B0%8F_%EA%B3%BC%EC%99%B8%EA%B5%90%EC%8A%B5%EC%97%90_%EA%B4%80%ED%95%9C_%EB%B2%95%EB%A5%A0/%EC%A0%9C2%EC%A1%B0">「학원의 설립·운영 및 과외교습에 관한 법률」 제2조</a>.
+      <b>세 요건이 전부 충족될 때만</b> 학원이다. 원격교습과 상급학교 진학 컨설팅도 명시적으로 포함된다.
+    </p>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>요건</th><th>내용</th><th>우리 (4–9명 · 지인)</th></tr></thead>
+        <tbody>
+          <tr><td>① 인원</td><td><b>같은 시간에</b> 교습받을 수 있는 <b>10명 이상</b> 또는 <b>불특정다수</b></td><td style="color:var(--ok)">동시 9명까지 미달. <b>총원이 아니라 동시 인원이다</b></td></tr>
+          <tr><td>② 기간</td><td>30일 이상의 교습과정. <b>여러 사람에게 반복한 교습일수 합계가 30일 이상이면 포함</b></td><td style="color:var(--risk)">기수를 반복하면 결국 넘는다</td></tr>
+          <tr><td>③ 내용</td><td>지식·기술·예능 교습</td><td style="color:var(--risk)">해당됨 — 회피 불가</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="cols">
+      <div class="card">
+        <h3>학원이 되면 생기는 것</h3>
+        <ul>
+          <li>교육감 등록 의무</li>
+          <li><a href="https://www.easylaw.go.kr/CSP/CnpClsMain.laf?csmSeq=1140&amp;ccfNo=2&amp;cciNo=3&amp;cnpClsNo=2">등록한 교습비 초과 수령 불가</a> · 게시·표시 의무</li>
+          <li>과다하다고 인정되면 <b>교육감이 조정 명령</b></li>
+          <li>위반 시 <b>등록말소 또는 1년 이내 교습정지</b></li>
+          <li>“교습비등”의 정의가 넓어 <b>플랫폼비·라이선스비로 쪼개는 형식적 분리는 안 통한다</b></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>결론 — 막는 것은 인원이 아니라 공개 모집이다</h3>
+        <ul>
+          <li><b>“같은 시간에”가 기준이다.</b> 시간대를 나누면 총 인원은 늘어난다 — 동시 9명 × 여러 반 × 연 4기</li>
+          <li>동시 9명 이하는 학원이 아니라 <b>교습소</b> 영역 (실면적 ㎡당 0.3명 이하 · 최대 9명 · 피아노 5명)</li>
+          <li><b>교습소는 신고 대상이고 1개 과목만</b> 가능하다. 창업 커리큘럼을 한 과목으로 등록 가능한지 미확인</li>
+          <li><b>공개 모집으로 전환하는 순간 “불특정다수”에 걸린다.</b> 인원과 무관하게 학원 — <b>여기가 진짜 전환점</b></li>
+          <li><b>반복 교습일수 30일 합산</b> 조항은 그대로 살아 있다</li>
+          <li>적용 제외 목록에 <b>평생교육법상 평생교육시설</b>이 있다. 정식 경로 후보</li>
+          <li>근본 해법은 <b>우리가 가르치지 않는 것</b> — 라이선스 공급자가 되면 학원법 밖이다</li>
+          <li>국제학교 학생도 초·중등교육법상 학교의 학생이라 <b>지위가 같다</b>. 회피책이 아니다</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note ok">
+      <strong>재계산.</strong> “9명이 사업의 천장”은 틀렸다 — 동시 9명이지 총 9명이 아니다.
+      동시 9명 × 연 4기 = <b>36명 · 28.8억</b>, 반 2개 병행이면 <b>72명 · 57.6억</b>.
+      <b>법이 아니라 코치·멘토 캐파가 천장이다.</b>
+    </div>
+
+    <div class="note risk">
+      <p><strong>이 문서의 법률 서술은 자문이 아니다.</strong> 검색된 조문과 해설에 근거한 정리이고,
+      교습소 1과목 제한의 적용, 신고 의무, 반을 시간대로 나누는 것이 회피로 판단될 여지,
+      평생교육시설 등록 요건은 확인되지 않았다. 필요 시점은 <b>공개 모집 전환 설계 전</b>이다.</p>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== 07 한국 자본 ===== -->
+  <section id="capital">
+    <div class="sec-head">
+      <p class="eyebrow">07 · 자본 · 엑싯</p>
+      <h2>대치동 자본이 AI 에듀테크를 사고 있다</h2>
+    </div>
+
+    <p class="prose" style="color:var(--ink-2)">
+      2025-08, <b>시대인재를 운영하는 하이컨시가 매스프레소(콴다)의 최대주주가 됐다.</b>
+      바이트댄스를 제치고. 경쟁 지형이 아니라 <b>자본 지형</b>의 사건이고,
+      우리에게는 엑싯 경로와 밸류에이션 앵커를 동시에 준다.
+    </p>
+
+    <div class="cols">
+      <div class="card">
+        <h3>하이컨시 (시대인재)</h3>
+        <div class="tablewrap" style="border:none">
+          <table style="min-width:0">
+            <tbody>
+              <tr><td>2024 매출 (비연결)</td><td class="num">3,818억</td></tr>
+              <tr><td>영업이익</td><td class="num">354억</td></tr>
+              <tr><td>당기순이익</td><td class="num">225억</td></tr>
+              <tr class="total"><td>2018 → 2024 매출</td><td class="num">636억 → 4,300억</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>7년 연속 매출 경신. <b>성장 방식이 연쇄 M&amp;A</b> — 대찬 · 세움 · 다원교육 인수</li>
+          <li>2025 기숙학원 개원 · 이매진피앤엠 인수 → 시대인재LEET</li>
+          <li>서울대 의대 · 메이저 의대 진학 실적에서 강남대성 이상</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>매스프레소 (콴다)</h3>
+        <div class="tablewrap" style="border:none">
+          <table style="min-width:0">
+            <tbody>
+              <tr><td>2024 매출</td><td class="num">242억 <span style="color:var(--ink-3)">(+42%)</span></td></tr>
+              <tr><td>영업손실</td><td class="num" style="color:var(--risk)">−194억</td></tr>
+              <tr><td>누적 순손실 (’18–’24)</td><td class="num" style="color:var(--risk)">≈1,470억</td></tr>
+              <tr><td>누적 투자유치</td><td class="num">1,530억</td></tr>
+              <tr class="total hi"><td>하이컨시 투자 (2025-08)</td><td class="num">≈300억 / 17%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <ul>
+          <li>투자자: 구글 · 바이트댄스 · 소프트뱅크벤처스 · 미래에셋</li>
+          <li>성장 동력: 콴다과외(1:1 비대면) + 베트남 온라인 학원</li>
+          <li>런웨이 2년 경고</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div class="card" style="border-color:var(--ok)">
+        <h3 style="color:var(--ok)">우리에게 유리한 두 가지</h3>
+        <ul>
+          <li><b>엑싯 경로가 실재한다.</b> 하이컨시는 학원을 M&amp;A 로 키운 회사고 이제 기술도 M&amp;A 로 산다. 잠재 인수자 명단 1번</li>
+          <li><b>밸류에이션 앵커.</b> 300억 ÷ 17% = 기업가치 <b>약 1,760억</b>. 매출 242억 <b>적자</b> 회사에 매출 7.3배 — 국내 AI 에듀테크 IP 지불의사가 검증됐다</li>
+        </ul>
+      </div>
+      <div class="card" style="border-color:var(--risk)">
+        <h3 style="color:var(--risk)">동시에 강력한 경고</h3>
+        <ul>
+          <li><b>매출 242억에 영업손실 194억 — 매출의 80%가 적자다.</b> B2C AI 에듀테크가 돈을 못 번다는 증거</li>
+          <li>우리가 구독형 · 대중형으로 가면 같은 함정</li>
+          <li>반대로 프리미엄 소수 모델은 9명 × 8,000만 = 7.2억에 기여이익 6.3억. <b>“작아서”가 아니라 “구조가 달라서” 낫다</b> — 투자 설득 자료에 그대로 쓸 수 있다</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="note">
+      <strong>카테고리는 다르다.</strong> 하이컨시가 사는 것은 <b>문제풀이 AI</b>(수능·내신)이고
+      우리는 <b>제작·창업 AI</b> 다. “AI 교육”이라는 단어는 그들이 선점할 수 있어도 우리 자리를 먹지는 않는다.
+      오히려 <b>공급자 모델에서 가장 자연스러운 첫 고객이자 인수자</b>다.
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== 07 수요 근거 ===== -->
+  <section id="demand">
+    <div class="sec-head">
+      <p class="eyebrow">08 · 수요 근거</p>
+      <h2>신입채용은 실제로 무너졌다</h2>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>지표</th><th class="num">값</th><th>출처</th></tr></thead>
+        <tbody>
+          <tr><td>무경력 채용 (2022 피크 → 2026 Q1)</td><td class="num">−73%</td><td><a href="https://www.autoapplymax.com/blog/entry-level-jobs-crisis-2026">AutoApplyMax</a></td></tr>
+          <tr><td>생성형 AI 도입 기업 신입 채용 감소</td><td class="num">분기당 −80%</td><td><a href="https://www.metaintro.com/blog/entry-level-roles-disappearing-2026-job-market">Metaintro</a></td></tr>
+          <tr><td>신입 SW 개발자 고용 (2024 피크 대비)</td><td class="num">−20%</td><td><a href="https://www.metaintro.com/blog/entry-level-jobs-ai-2026-college-graduates">Metaintro</a></td></tr>
+          <tr><td>AI 때문에 신입 채용 <b>이미 동결</b></td><td class="num">21%</td><td><a href="https://blog.theinterviewguys.com/the-state-of-the-entry-level-job-collapse-2026-why-a-college-degree/">Resume.org</a></td></tr>
+          <tr><td>2027까지 신입 직군 <b>자체를 없앨</b> 계획</td><td class="num">47%</td><td><a href="https://blog.theinterviewguys.com/the-state-of-the-entry-level-job-collapse-2026-why-a-college-degree/">Resume.org</a></td></tr>
+          <tr><td>대졸(22–27) 실업률 2026 Q1</td><td class="num">5.7%</td><td><a href="https://www.metaintro.com/blog/new-grad-job-market-2026-ai-entry-level">Metaintro</a> · 2025-09 엔 9.7% = 고졸 동률</td></tr>
+          <tr><td>빅테크 4사 AI 창업팀 흡수 (’24.3–’26.1)</td><td class="num">$20B+</td><td><a href="https://www.fastaijobs.com/career-hacks/ai-acquihire-map-2026">Acquihire Map</a> · 정식 인수 0건</td></tr>
+          <tr><td>YC 창업자 평균 연령</td><td class="num">29 → 26</td><td><a href="https://www.thevccorner.com/p/yc-w26-batch-complete-company-database">VC Corner</a> · 25세 미만이 다수</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note risk">
+      <p><strong>과장하면 안 되는 지점.</strong> acquihire 는 <b>시니어 1인당 $1–5M</b>로 앵커되고,
+      수혜자는 명시적으로 창업자와 최상위 연구 인력이지 팀 전체가 아니다.
+      고등학생 회사가 그 가격표에 오르는 일은 사실상 없다.</p>
+      <p>그리고 <a href="https://fortune.com/2025/09/08/yc-cofounder-gen-z-warning-high-school-not-time-to-start-startup-reddit-airbnb-dropbox">YC 공동창업자가 “고등학교는 창업할 때가 아니다”라고 공개 경고</a>했다.
+      정반대 메시지를 파는 순간 반박 자료가 된다.</p>
+      <p><strong>공개 카피 원칙:</strong> 결과를 약속하지 않는다. <b>역량 증명(seniorization 대응)만</b> 약속하고
+      Micro M&amp;A 는 상단 결말로만 언급한다.</p>
+    </div>
+
+    <div class="note ok">
+      <strong>종착점.</strong> <a href="https://www.modoo.or.kr/">모두의 창업 프로젝트</a>(중기부) —
+      공고 <b>2026.03.26</b> · 접수 <b>05.15</b> · 창업활동비 200만 · AI 솔루션 월 100만×2 ·
+      시제품비 최대 1,000만 · 상금 5억 + 투자 5억 · 멘토 풀 2,100명.
+      상단 옵션은 <a href="https://techcrunch.com/2025/09/24/y-combinator-launches-early-decision-for-students-who-want-to-graduate-first-build-later">YC Early Decision</a>
+      (재학 중 지원 · 졸업 후 참가, 제휴 비용 0원).
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== 08 인증 ===== -->
+  <section id="cert">
+    <div class="sec-head">
+      <p class="eyebrow">09 · 구조 · 브랜딩</p>
+      <h2>인증 · 표준 · 회사구조</h2>
+    </div>
+
+    <div class="cols">
+      <div class="card">
+        <h3>제3자 제품 인증 — Digital Promise</h3>
+        <ul>
+          <li><b><a href="https://productcertifications.microcredentials.digitalpromise.org/explore/research-based-design-essa-tier-4-product-certific">Research-Based Design (ESSA Tier 4)</a></b> — 논리모델 + 실증 인용 5개 이상. <b>결과 데이터 없이 지금 신청 가능</b>. 인증 제품 103개</li>
+          <li><a href="https://digitalpromise.org/product-certifications/evidence-based-edtech-essa-tier-3/">Evidence-Based (Tier 3)</a> — 정량 연구 1건 필요. 데이터 축적 후</li>
+          <li>비용: “modest submission fee”(금액 비공개) · <b>심사 4주</b> · 2년마다 갱신 (<a href="https://digitalpromise.org/product-certifications/frequently-asked-questions/">FAQ</a>)</li>
+          <li>대행: <a href="https://lxdresearch.com/how-to-get-essa-certified">LXD Research</a></li>
+          <li><b>“실증 인용”은 남의 논문을 인용하는 것이다.</b> 우리가 논문을 쓰는 게 아니다</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>글로벌 정당성 — Squirrel AI 모델</h3>
+        <ul>
+          <li><a href="https://en.wikipedia.org/wiki/Squirrel_AI">Squirrel AI(Yixue)</a> 는 <b>HQ 를 상하이에 그대로 두고</b> 실리콘밸리에 <b>SRI International 주 파트너 조인트 랩</b>을 세웠다. CMU · UC Berkeley 연구 협력</li>
+          <li>즉 파는 것은 “미국 본사”가 아니라 <b>“미국 연구기관과 함께 만들었다”</b></li>
+          <li>중국 내 700개 학습센터 · 3,000명 교직원 · 100개 도시 (<a href="https://www.scmp.com/tech/start-ups/article/3018297/chinese-education-unicorn-squirrel-ai-targets-foreign-markets-plans">SCMP</a>)</li>
+          <li>법인 이전 없이 글로벌 서사를 확보하는 가장 싼 경로</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>크리덴셜 표준 — 우선순위 낮음</h3>
+        <ul>
+          <li><a href="https://www.virtualbadge.io/blog-articles/open-badges-3-0-what-is-the-status-in-2026">Open Badges 3.0</a> 이 W3C Verifiable Credentials 와 정렬. 암호학적 검증 · 포터빌리티 · 학생 소유</li>
+          <li>2026 현재 <b>주류는 여전히 2.0</b>. <a href="https://www.accredible.com/blog/now-supporting-open-badge-3-0-and-w3c-verifiable-credentials">Accredible</a> · Credly · <a href="https://www.bcdiploma.com/en/blog/bcdiploma-earns-1edtech-open-badges-3-0-certification-strengthening-trust-in-digital-credentials">BCdiploma</a> 등이 3.0 발급자 인증</li>
+          <li><b>표준은 정의상 누구나 쓸 수 있다 — 해자가 아니라 위생 요소다.</b> 지금 투자 대상 아님</li>
+          <li>다만 AssetTrace 설계 시 <b>criteria / evidence 구조만 미리 맞춰두면</b> 나중 전환 비용이 0</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <h3>법인 · 이중구조</h3>
+        <ul>
+          <li><a href="https://www.1edtech.org/blog/the-non-profit-member-guided-goodness-of-1edtech">1EdTech Foundation</a> — IRS Type I 지원조직으로 자선 자금을 본체 미션에 투입</li>
+          <li><a href="https://www.sciencedirect.com/science/article/pii/S0738059325000707">philanthropic LLC</a> (CZI · Emerson · Omidyar) — 재단 대신 LLC. 투명성 의무를 피한다는 비판도 함께</li>
+          <li><a href="https://www.angellist.com/learn/delaware-c-corp">Delaware C-Corp</a> — 미국 자본·시장 타겟 시 사실상 기본값. 다만 <b>고객은 법인 관할이 아니라 제품 가치를 본다</b></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <!-- ===== 09 링크 아카이브 ===== -->
+  <section id="archive" class="archive">
+    <div class="sec-head">
+      <p class="eyebrow">10 · 아카이브</p>
+      <h2>조사된 원본 링크 전량</h2>
+      <p class="prose" style="color:var(--ink-2); padding-top:.5rem">
+        본문에 인용되지 않은 것까지 포함해 이 조사에서 열람·수집된 링크를 주제별로 전부 보관한다.
+        후속 BM 조사의 출발점.
+      </p>
+    </div>
+
+    <div class="arcgroup">
+      <h3>Crimson Education</h3>
+      <ul>
+        <li><a href="https://tracxn.com/d/companies/crimsoneducation/__5zLOwHkaY-eE0SraSFb6LmoxmXbc3Ck0kIMOF3vvt04">Tracxn — 회사 프로필 · 펀딩 · 경쟁사 (2026)</a></li>
+        <li><a href="https://pitchbook.com/profiles/company/233227-45">PitchBook — 밸류에이션 · 투자자</a></li>
+        <li><a href="https://www.crunchbase.com/organization/crimson-education/company_financials">Crunchbase — 재무</a></li>
+        <li><a href="https://www.crunchbase.com/organization/crimson-education">Crunchbase — 회사 프로필</a></li>
+        <li><a href="https://www.crunchbase.com/person/jamie-beaton">Crunchbase — Jamie Beaton</a></li>
+        <li><a href="https://en.wikipedia.org/wiki/Crimson_Education">Wikipedia — Crimson Education</a></li>
+        <li><a href="https://en.wikipedia.org/wiki/Jamie_Beaton">Wikipedia — Jamie Beaton</a></li>
+        <li><a href="https://www.crimsonglobalacademy.school/us/blog/crimson-billion-dollar-valuation/">유니콘 발표 — 매출 $110M · CGA 매출 20%</a></li>
+        <li><a href="https://www.crimsonglobalacademy.school/hk-en/blog/crimson-billion-dollar-valuation">유니콘 발표 (HK)</a></li>
+        <li><a href="https://www.topcollegeadmissionsconsultants.com/crimson-education-2026">Top College Admissions Consultants — 2026 리뷰</a></li>
+        <li><a href="https://www.topcollegeadmissionsconsultants.com/crimson-education-review">동 — 상세 리뷰</a></li>
+        <li><a href="https://www.findmyorbit.com/blog/college-admissions-consulting-reviews-2026">Crimson · IvyWise · Empowerly · College Coach 랭킹</a></li>
+        <li><a href="https://blog.prepscholar.com/prepscholar-vs-crimson-education-admissions-consulting-2026-which-is-better">PrepScholar vs Crimson 비교</a></li>
+        <li><a href="https://www.crimsoneducation.org/kr">Crimson Education 한국 페이지</a></li>
+        <li><a href="https://www.crimsoneducation.org/kr/about-us/our-story/">Crimson 한국 — 회사 소개</a></li>
+        <li><a href="https://www.facebook.com/crimson.southkorea/?locale=ko_KR">Crimson Korea 페이스북</a></li>
+        <li><a href="https://www.edtech.com/jobs/regional-strategy-consultant-korea-7806">채용공고 — Regional Strategy Consultant, Korea</a> <em>(한국 조직 구조 단서)</em></li>
+        <li><a href="https://jobs.crimsoneducation.org/jobs/3693561-regional-strategy-consultant-korea">동 — 원문 공고</a></li>
+        <li><a href="https://profiles.crustdata.com/company/crimson-education">Crustdata — 임직원 수 추이 (2026-08)</a></li>
+        <li><a href="https://www.crimsoneducation.org/us/blog/crimson-education-global-offices-team/">글로벌 오피스 · 팀 구성</a></li>
+        <li><a href="https://www.crimsoneducation.org/us/about-us">Crimson US — About</a></li>
+        <li><a href="https://app.dealroom.co/companies/crimson_education">Dealroom — Crimson</a></li>
+        <li><a href="https://www.cbinsights.com/company/crimson-education">CB Insights — Crimson</a></li>
+        <li><a href="https://www.cbinsights.com/company/crimson-education/financials">CB Insights — 재무</a></li>
+        <li><a href="https://www.caplight.com/company/crimson-educational-and-training-services-b2c">Caplight — 밸류에이션 · 세컨더리</a></li>
+        <li><a href="https://vizologi.com/business-strategy-canvas/crimson-education-business-model-canvas/">Crimson BM 캔버스 분석</a></li>
+        <li><a href="https://businessmodelcanvastemplate.com/blogs/growth-strategy/crimson-education-growth-strategy">Crimson 성장 전략 분석</a></li>
+        <li><a href="https://nztechpodcast.com/crimsons-growth-edtech-innovation-jamie-beaton/">NZ Tech Podcast — Jamie Beaton 인터뷰</a></li>
+        <li><a href="https://www.consumer.org.nz/consumer-rights-and-campaigns/scams/crimson-education-s-unfair-contract-terms">Consumer NZ — 불공정 계약조건</a></li>
+        <li><a href="https://businessdesk.co.nz/article/law-regulation/crimson-education-settles-china-dispute-with-unhappy-student">BusinessDesk — 중국 환불 분쟁 합의</a></li>
+        <li><a href="https://www.justanswer.com/law/ph22k-paid-11-200-crimson-education-usa-inc-june-2023.html">환불 분쟁 사례 — $11,200</a></li>
+        <li><a href="https://kforkindling.wordpress.com/2022/02/05/why-i-dont-support-crimson-education/">비판 에세이 — 계약 · 투명성</a></li>
+        <li><a href="https://www.trustpilot.com/review/crimsoneducation.org">Trustpilot 리뷰 (142건)</a></li>
+        <li><a href="https://www.crimsonglobalacademy.school/sg">Crimson Global Academy 싱가포르</a></li>
+        <li><a href="https://www.niche.com/k12/crimson-global-academy-usa-orlando-fl/">Niche — CGA USA 랭킹</a></li>
+        <li><a href="https://www.cbinsights.com/compare/crimson-education-vs-naviance">Crimson vs Naviance</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>LaunchX · 청소년 창업 프로그램 (가장 가까운 원형)</h3>
+      <ul>
+        <li><a href="https://www.launchx.com/high-school-programs">LaunchX — 고교 창업 프로그램 2026</a></li>
+        <li><a href="https://www.launchx.com/admissions/cost">LaunchX — 학비 전체 ($1,995–11,495)</a></li>
+        <li><a href="https://www.launchx.com/faqs">LaunchX FAQ — 프로그램 · 비용 · 입학</a></li>
+        <li><a href="https://www.launchx.com/programs/online-entrepreneurship">LaunchX 온라인 창업 프로그램</a></li>
+        <li><a href="https://www.launchx.com/command-post/articles/is-launchx-still-prestigious">LaunchX 는 아직 권위 있는가 — 합격률 30% · 동문 창업률 70%</a></li>
+        <li><a href="https://www.launchx.com/command-post/articles/the-launchx-summer-program-a-complete-guide-for-aspiring-young-entrepreneurs">LaunchX 여름 프로그램 완전 가이드</a></li>
+        <li><a href="https://www.launchx.com/command-post/articles/is-launchx-online-worth-it-a-students-perspective">참가 학생 관점 — 온라인 프로그램은 값어치를 하나</a></li>
+        <li><a href="https://admissionsight.com/launchx/">AdmissionSight — LaunchX 완전 가이드</a></li>
+        <li><a href="https://admissionsight.com/how-to-launch-a-future-career-through-launchx/">AdmissionSight — LaunchX 로 커리어 시작하기</a></li>
+        <li><a href="https://admissionsight.com/mit-launch/">AdmissionSight — MIT Launch 지원 방법 (연혁)</a></li>
+        <li><a href="https://www.lumiere-education.com/post/the-ultimate-guide-to-launchx">Lumiere — LaunchX 가이드</a></li>
+        <li><a href="https://www.collegetransitions.com/blog/summer-programs/launchx">College Transitions — LaunchX</a></li>
+        <li><a href="https://www.collegetransitions.com/blog/launchx-summer-program-spotlight">College Transitions — 프로그램 스포트라이트</a></li>
+        <li><a href="https://www.collegeessayguy.com/blog/launchx-program-guide">College Essay Guy — LaunchX 는 값어치가 있나</a></li>
+        <li><a href="https://www.eduavenues.com/blog/launch-x-guide">EduAvenues — 고교에서 진짜 스타트업 만들기</a></li>
+        <li><a href="https://www.teenlife.com/l/summer/launchx-online-entrepreneurship-program/">TeenLife — LaunchX 온라인 플래그십</a></li>
+        <li><a href="https://www.teenlife.com/blog/student-testimonial-launchx/">TeenLife — 학생 후기</a></li>
+        <li><a href="https://www.summerapply.com/school/launchx/online-entrepreneurship-summer-program/">SummerApply — LaunchX 프로그램 정보</a></li>
+        <li><a href="https://pages.crimsoneducation.org/launchx">Crimson × LaunchX 랜딩 페이지</a> <em>(Crimson 이 창업 프로그램을 외부 조달한다는 증거)</em></li>
+        <li><a href="https://www.leangap.org/">Leangap — 고교 재학 중 스타트업 런칭</a></li>
+        <li><a href="https://www.leangap.org/articles/launchx-vs-leangap-an-evidence-based-comparison">LaunchX vs Leangap 근거 기반 비교</a></li>
+        <li><a href="https://www.join.tks.world/">TKS — 청소년 액셀러레이터 지원 2026–27</a></li>
+        <li><a href="https://www.teenlife.com/l/enrichment/tks-the-knowledge-society/">TeenLife — TKS 프로그램 정보</a></li>
+        <li><a href="https://studentsxstudents.com/the-knowledge-society-tks-review-vancouver-irl-6d7fbb42284f">TKS 밴쿠버 후기 — CAD 6,850 · 재정지원 정책</a></li>
+        <li><a href="https://rise.crimsoneducation.org/our-services">Crimson Rise — 서비스 (캡스톤 · 비교과 개발)</a></li>
+        <li><a href="https://rise.crimsoneducation.org/programs">Crimson Rise — 프로그램</a></li>
+        <li><a href="https://www.crimsonglobalacademy.school/our-programme/extracurricular-and-leadership">CGA — 비교과 · 리더십 프로그램</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>한국 자본 · 엑싯 (하이컨시 × 매스프레소)</h3>
+      <ul>
+        <li><a href="https://www.thebell.co.kr/front/newsview.asp?key=202508250943089640107331">더벨 — 하이컨시, 틱톡 제치고 매스프레소 최대주주로 (300억 · 17%)</a></li>
+        <li><a href="https://www.thebell.co.kr/front/newsview.asp?key=202504280914521060105523">더벨 — 하이컨시, 매스프레소 최대주주 오른다 (2025-04)</a></li>
+        <li><a href="https://thevc.kr/hiconsy">THE VC — 하이컨시(시대인재) 매출 · 기업가치</a></li>
+        <li><a href="https://www.etnews.com/20250415000039">전자신문 — 시대인재 독주 vs 전통 강자들</a></li>
+        <li><a href="https://orbi.kr/00067865903">시대인재 7년 연속 매출 경신 — 3,300억</a></li>
+        <li><a href="https://news.nate.com/view/20250423n00626">매출 4,000억과 함께 커진 문제</a></li>
+        <li><a href="https://v.daum.net/v/20251105090230171">대치동 대표 학원 시대인재 급성장의 그늘</a></li>
+        <li><a href="https://namu.wiki/w/%EC%8B%9C%EB%8C%80%EC%9D%B8%EC%9E%AC">나무위키 — 시대인재 (M&amp;A 이력)</a></li>
+        <li><a href="https://www.hiconsy.com/news">하이컨시 뉴스룸</a></li>
+        <li><a href="https://thevc.kr/mathpresso">THE VC — 매스프레소(콴다) 투자 · 매출 · 기업가치</a></li>
+        <li><a href="https://www.innoforest.co.kr/company/CP00000089/%EB%A7%A4%EC%8A%A4%ED%94%84%EB%A0%88%EC%86%8C">혁신의숲 — 매스프레소 매출 · 투자 · 고용 데이터</a></li>
+        <li><a href="https://outstanding.kr/press/1131/20250411">아웃스탠딩 — 매스프레소 2024 매출 242억 역대 최대</a></li>
+        <li><a href="https://www.hankookilbo.com/News/Read/A2025041111250004777">한국일보 — 콴다 최대 매출 기록</a></li>
+        <li><a href="https://g9inside.com/?p=54369">“런웨이 2년이면 끝” — 매스프레소 생존 리스크</a></li>
+        <li><a href="https://brunch.co.kr/@bitinsight/479">AI 혼선 속 콴다의 생존 전략</a></li>
+        <li><a href="https://www.asiatime.co.kr/1065589342327185">매스프레소 시리즈B — 레전드캐피털 주도</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>1:1 리서치 · 크리덴셜 (Polygence · Lumiere 외)</h3>
+      <ul>
+        <li><a href="https://www.immerse.education/knowledge-base/polygence-complete-guide-2026/">Polygence 완전 가이드 2026</a></li>
+        <li><a href="https://www.immerse.education/knowledge-base/lumiere-education-complete-guide-2026/">Lumiere Education 완전 가이드 2026</a></li>
+        <li><a href="https://www.globalresearchfellowship.com/blog/how-much-do-high-school-research-programs-cost-in-2026-lumiere-polygence-ccir-and-grf-compared">고교 리서치 프로그램 가격 횡비교 (Lumiere·Polygence·CCIR·GRF)</a></li>
+        <li><a href="https://riseglobaleducation.com/blogs/lumiere-education-alternative">Lumiere 대안 비교 — 가격 · 멘토 모델 · 성과</a></li>
+        <li><a href="https://riseglobaleducation.com/blogs/high-school-research-mentorship-program-reviewed">고교 리서치 멘토십 프로그램 전수 비교</a></li>
+        <li><a href="https://www.yriscience.com/blog/best-online-research-programs-high-school">온라인 리서치 프로그램 랭킹 2026</a></li>
+        <li><a href="https://algoverseairesearch.org/blog/ai-research-programs-guide-2026">고교생 AI 리서치 프로그램 가이드 2026</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>학교 라이선스 커리큘럼 (INCubatoredu · NFTE · JA)</h3>
+      <ul>
+        <li><a href="https://www.unchartedlearning.org/student-programs/incubatoredu-high-school-entrepreneurship">INCubatoredu — 고교 창업 커리큘럼</a></li>
+        <li><a href="https://www.unchartedlearning.org/student-entrepreneurship-programs">Uncharted Learning — 전체 학생 프로그램</a></li>
+        <li><a href="https://www.unchartedlearning.org/blog/acceleratoredu-for-teen-entrepreneurs-what-it-is-why-it-matters">ACCELeratoredu — 2년차 트랙</a></li>
+        <li><a href="https://www.unchartedlearning.org/blog/from-student-to-startup-how-acceleratoredu-prepares-high-school-students-for-life-beyond-the-classroom">ACCELeratoredu — 졸업 이후 준비</a></li>
+        <li><a href="https://www.unchartedlearning.org/blog/connecting-high-school-entrepreneurship-with-higher-education-1">고교 창업교육과 대학 진학의 연결</a></li>
+        <li><a href="https://www.unchartedlearning.org/blog/connecting-students-community-through-parent-proud-entrepreneurship-curriculum">“학부모가 자랑스러워하는” 커리큘럼</a> <em>(학부모 설득 카피 참고)</em></li>
+        <li><a href="https://www.unchartedlearning.org/blog/fostering-problem-solving-in-a-real-world-sense-through-high-school-entrepreneurship">실제 문제해결 중심 설계</a></li>
+        <li><a href="https://www.leanderisd.org/unchartedlearning/">Leander ISD — 도입 학교구 사례</a></li>
+        <li><a href="https://lzhs.lz95.org/academics/incubatoredu-entrepreneurship-program">Lake Zurich HS — 운영 사례</a></li>
+        <li><a href="https://nfte.com/programs/grades-9-12/">NFTE — 9–12학년 프로그램</a></li>
+        <li><a href="https://nfte.com/programs/grades-6-12/">NFTE — 6–12학년</a></li>
+        <li><a href="https://nfte.com/programs/all-programs/">NFTE — 전체 프로그램</a></li>
+        <li><a href="https://en.wikipedia.org/wiki/Network_For_Teaching_Entrepreneurship">Wikipedia — NFTE (1987년 이후 150만명)</a></li>
+        <li><a href="https://www.teenlife.com/l/competition/network-for-teaching-entrepreneurship-national-youth-entrepreneurship-challenge/">NFTE 전국 청소년 창업 챌린지</a></li>
+        <li><a href="https://nmost.org/youth-entrepreneurship/">JA Company Program 등 청소년 창업 프로그램</a></li>
+        <li><a href="https://www.gettingsmart.com/2025/10/21/entrepreneurshipthe-new-core-curriculum/">Getting Smart — “창업이 새로운 핵심 교과”</a></li>
+        <li><a href="https://www.launchx.com/command-post/articles/10-best-teen-entrepreneurship-programs-that-teach-real-startup-skills-in-2026">LaunchX — 청소년 창업 프로그램 10선 2026</a></li>
+        <li><a href="https://www.launchx.com/command-post/articles/25-summer-business-programs-for-high-school-students-in-2026-launchx">LaunchX — 여름 비즈니스 프로그램 25선</a></li>
+        <li><a href="https://horizoninspires.com/blog/startup-incubators-high-school/">고교생 스타트업 인큐베이터 15선</a></li>
+        <li><a href="https://www.cbinsights.com/compare/buildspace-vs-startup-teens">buildspace vs Startup Teens 비교</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>여름 · 부트캠프 프로그램 (가격 비교군)</h3>
+      <ul>
+        <li><a href="https://haas.berkeley.edu/business-academy/high-school-entrepreneurship/summer-bootcamp/apply-now/">UC Berkeley Haas — 고교 창업 부트캠프 ($7,950)</a></li>
+        <li><a href="https://met.berkeley.edu/about-met/met-ia/">UC Berkeley M.E.T. Innovation Academy</a></li>
+        <li><a href="https://foster.uw.edu/pre-college-programs/business-startup-bootcamp/">UW Foster — Business Startup Bootcamp</a></li>
+        <li><a href="https://foster.uw.edu/wp-content/uploads/2025/11/2026-Business-Startup-Bootcamp-website.pdf">UW Foster — 2026 프로그램 PDF</a></li>
+        <li><a href="https://www.sjsu.edu/partners/international/summer-silicon-valley.php">SJSU — Summer in Silicon Valley</a></li>
+        <li><a href="https://www.collegetransitions.com/blog/best-summer-program-in-the-bay-area/">베이 에어리어 여름 프로그램 총정리 2026</a></li>
+        <li><a href="https://www.immerse.education/knowledge-base/15-entrepreneurship-summer-programs-in-san-francisco-for-high-school-students/">SF 창업 여름 프로그램 15선</a></li>
+        <li><a href="https://horizoninspires.com/blog/summer-schools-high-school-students-silicon-valley/">실리콘밸리 여름학교 15선</a></li>
+        <li><a href="https://www.eduavenues.com/blog/best-entrepreneurship-summer-programs">창업 여름 프로그램 베스트</a></li>
+        <li><a href="https://www.leangap.org/summer-program">Leangap — 한 여름에 스타트업 만들기</a></li>
+        <li><a href="https://abcbootcamps.com/programs/abc-silicon-valley/">ABC BootCamps — Silicon Valley</a></li>
+        <li><a href="https://techdevacademy.com/young-entrepreneur-bootcamp/">TechDev Academy — 온라인 청년 창업가 부트캠프</a></li>
+        <li><a href="https://outschool.com/ko/classes/high-school-entrepreneurship-amg5wzdx">Outschool — 고등학생 창업가정신 (한국어)</a></li>
+        <li><a href="https://events.ycombinator.com/startup-school-2026">YC Startup School 2026</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>싱가포르 · 아시아 프리미엄 시장</h3>
+      <ul>
+        <li><a href="https://international.ui.ac.id/nus-enterprise-summer26/">NUS Enterprise Summer Programme 2026 (SGD 5,600)</a></li>
+        <li><a href="https://smiletutor.sg/12-best-entrepreneurship-financial-literacy-classes-for-youths-in-singapore-guide/">싱가포르 청소년 창업 · 금융 클래스 12선</a></li>
+        <li><a href="https://smiletutor.sg/secondary-school-enrichment-programmes-in-singapore-2026-guide/">싱가포르 중등 심화 프로그램 가이드 2026</a></li>
+        <li><a href="https://smiletutor.sg/top-20-coding-robotics-classes-in-singapore-for-kids-edition/">싱가포르 코딩 · 로보틱스 클래스 20선</a></li>
+        <li><a href="https://www.youngfoundersschool.com/programs/singapore">Young Founders School 싱가포르</a></li>
+        <li><a href="https://www.immerse.education/knowledge-base/15-summer-programs-in-singapore-for-high-school-students/">싱가포르 여름 프로그램 15선</a></li>
+        <li><a href="https://www.lumiere-education.com/post/singapore-summer-programs-high-school">Lumiere — 싱가포르 여름 프로그램</a></li>
+        <li><a href="https://www.doris.school/international-schools/china/premium-schools">중국 프리미엄 국제학교 (학비 비교)</a></li>
+        <li><a href="https://www.doris.school/international-schools/china/shanghai">상하이 국제학교 가이드 2026</a></li>
+        <li><a href="https://www.international-schools-database.com/in/shanghai">상하이 국제학교 DB (학비 검증)</a></li>
+        <li><a href="https://infochina.co.kr/schools">중국 국제학교 디렉토리 (한국어)</a></li>
+        <li><a href="https://world-schools.com/best-private-schools-in-china/">중국 최고 사립학교</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>AI 툴 × 교육 (직접 경쟁)</h3>
+      <ul>
+        <li><a href="https://techcrunch.com/2026/07/23/edtech-platform-raises-4-5m-to-help-teach-students-how-to-vibe-code/">TechCrunch — Imagi $4.5M 시드</a></li>
+        <li><a href="https://app.dealroom.co/news/note/imagi-raises-4-5m-to-teach-students-how-to-vibe-code-safely">Dealroom — Imagi 라운드 상세</a></li>
+        <li><a href="https://finance.yahoo.com/technology/ai/articles/edtech-platform-raises-4-5m-150000098.html">Yahoo Finance — Imagi</a></li>
+        <li><a href="https://www.businesswire.com/news/home/20260305399568/en/Kira-and-Lovable-Launch-Vibe-Coding-Course-Bringing-AI-Powered-App-Building-to-Classrooms">Kira × Lovable — vibe coding 코스 (2026-03)</a></li>
+        <li><a href="https://fabricate.build/compare/replit-vs-cursor">Replit vs Cursor 2026 — Agent 이후 매출 $10M→$100M</a></li>
+        <li><a href="https://justinmckelvey.com/blog/replit-vs-cursor">Replit vs Cursor 비교 (2)</a></li>
+        <li><a href="https://medium.com/@aftab001x/the-2026-ai-coding-platform-wars-replit-vs-windsurf-vs-bolt-new-f908b9f76325">2026 AI 코딩 플랫폼 전쟁 — Replit · Windsurf · Bolt · Lovable</a></li>
+        <li><a href="https://www.campvibecode.com/">Camp Vibe Code — 3–12학년 AI 코딩 캠프</a></li>
+        <li><a href="https://www.thecoderschool.com/camps/vibe/">theCoderSchool — Vibe Coding 캠프</a></li>
+        <li><a href="https://codakid.com/blog/ai-for-kids/vibe-coding-for-kids">CodaKid — 아동 vibe coding 가이드</a></li>
+        <li><a href="https://novaschool.ai/blog/what-is-vibe-coding">Nova School — 십대를 위한 vibe coding</a></li>
+        <li><a href="https://www.w3schools.com/bootcamp/lovable.php">W3Schools — Lovable 부트캠프</a></li>
+        <li><a href="https://productschool.com/certifications/vibe-coding">Product School — Vibe Coding 인증</a></li>
+        <li><a href="https://www.forbes.com/sites/sarahhernholm/2026/07/23/vibe-coding-is-rewriting-who-gets-to-start-a-business/">Forbes — “vibe coding 이 창업 자격을 다시 쓴다”</a></li>
+        <li><a href="https://medium.com/@barronqasem/why-every-kid-aged-9-16-should-learn-ai-coding-in-2026-and-how-to-start-today-9f6162210027">9–16세 AI 코딩 교육론</a></li>
+        <li><a href="https://www.coursera.org/learn/mobile-app-development-ai">Coursera — Replit AI 모바일 앱 개발</a></li>
+        <li><a href="https://www.udemy.com/course/bootcamp-generative-artificial-intelligence-and-llm-app-development/">Udemy — 생성형 AI · LLM 앱 부트캠프</a></li>
+        <li><a href="https://aiweekly.co/learning-ai/ai-applications/ai-startups-watch-2026-complete-landscape">AI 스타트업 랜드스케이프 2026</a></li>
+        <li><a href="https://fundraiseinsider.com/blog/recently-funded-education-startups/">최근 투자유치 에듀테크 목록 2026</a></li>
+        <li><a href="https://news.crunchbase.com/venture/edtech-funding-stays-low/">Crunchbase — 에듀테크 투자 침체</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>AI 학교 (가격 상한 참고)</h3>
+      <ul>
+        <li><a href="https://www.axios.com/2026/08/02/alpha-schools-ai-expansion-50-campuses">Axios — Alpha School 50개 캠퍼스 확장</a></li>
+        <li><a href="https://alpha.school/">Alpha School 공식</a></li>
+        <li><a href="https://en.wikipedia.org/wiki/Alpha_School">Wikipedia — Alpha School</a></li>
+        <li><a href="https://orieladmissions.com/alpha-school-austin-tuition-locations-2026/">Alpha School 학비 · 지점 · 대학 파이프라인 2026</a></li>
+        <li><a href="https://orieladmissions.com/ai-private-schools-elite-college-admissions/">AI 사립학교와 엘리트 대학 입시 전략</a></li>
+        <li><a href="https://www.cbsnews.com/news/alpha-school-artificial-intelligence/">CBS — 연 $40,000, 교사 없는 학교</a></li>
+        <li><a href="https://www.cbsnews.com/chicago/news/alpha-schools-chicago-ai-classes-no-teachers/">CBS Chicago — 2026 가을 시카고 모집</a></li>
+        <li><a href="https://cybernews.com/ai-news/alpha-school-ai/">Cybernews — Alpha School</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>한국 에듀테크 · 사교육</h3>
+      <ul>
+        <li><a href="https://demoday.co.kr/bm-analysis/246">엘리스그룹 BM 분석 — 2024 매출 351억 · 영업이익 134억</a></li>
+        <li><a href="https://thevc.kr/elicegroup">THE VC — 엘리스그룹 투자 · 기업가치</a></li>
+        <li><a href="https://elice.io/ko">엘리스 공식</a></li>
+        <li><a href="https://elice.io/ko/resources/newsroom/eliceschool-helpyedu">엘리스스쿨 — 공교육 정보과목 AI 솔루션</a></li>
+        <li><a href="https://elice.training/">엘리스트랙 — 국비 부트캠프</a></li>
+        <li><a href="https://www.etnews.com/20240829000213">전자신문 — 엘리스그룹 글로벌 전략</a></li>
+        <li><a href="https://www.saramin.co.kr/zf_user/company-info/view/csn/cHhGeFR0MlAwcDFMVkdERUJUb0RJQT09/company_nm/(%EC%A3%BC)%EC%BD%94%EB%93%9C%EC%9E%87?nomo=1">코드잇 기업정보</a></li>
+        <li><a href="https://thevc.kr/collections/645de951e718680013c695a3">THE VC — 에듀테크 기업 리스트 25</a></li>
+        <li><a href="https://thevc.kr/collections/64c22968a40b970013f5f113">THE VC — 에듀테크 리스트 2</a></li>
+        <li><a href="https://www.innoforest.co.kr/report/NS00000284/%EC%97%B0-%EB%A7%A4%EC%B6%9C-200%EC%96%B5-%EC%9D%B4%EC%83%81%EC%9D%98-%EC%84%B1%EC%9D%B8%EA%B5%90%EC%9C%A1-%EC%8A%A4%ED%83%80%ED%8A%B8%EC%97%85%EB%93%A4">연매출 200억+ 성인교육 스타트업들</a></li>
+        <li><a href="https://www.hankyung.com/article/2024022605831">한국경제 — 코딩교육 스타트업 사업 다각화</a></li>
+        <li><a href="https://www.venturesquare.net/900003">벤처스퀘어 — 영어 사교육 에듀테크</a></li>
+        <li><a href="https://thevc.kr/pensive">펜시브 — SF 소재 한국계 교육 스타트업</a></li>
+        <li><a href="https://namu.wiki/w/%EB%B6%84%EB%A5%98:%EB%8C%80%ED%95%9C%EB%AF%BC%EA%B5%AD%EC%9D%98%20%EC%82%AC%EA%B5%90%EC%9C%A1%20%EA%B8%B0%EC%97%85">나무위키 — 한국 사교육 기업 분류</a></li>
+        <li><a href="https://overseas.mofa.go.kr/us-losangeles-ko/brd/m_4370/view.do?seq=1172913">LA 총영사관 — 실리콘밸리 교육 스타트업 동향</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>대치동 · 입시 통화</h3>
+      <ul>
+        <li><a href="https://citcoding.com/competitions/ai-coding-competitions-guide.html">CIT — AI · 코딩 대회 총정리 2026 (입시 통화 서열)</a></li>
+        <li><a href="https://www.gangmom.kr/news/65b7b4809397912a33ec76e5">플레이코딩아카데미 대치본원 — ISEF 국가대표 배출</a></li>
+        <li><a href="https://www.bizhankook.com/bk/article/26794">비즈한국 — “50분 100만원” 고액 입시컨설팅</a></li>
+        <li><a href="https://www.hankookilbo.com/News/Read/202001070858747788">한국일보 — “시간당 30만원 기본”</a></li>
+        <li><a href="https://www.pressian.com/pages/articles/5010">프레시안 — 200만원짜리 입시컨설팅의 실상</a></li>
+        <li><a href="https://v.daum.net/v/20231211181548375">‘시간당 30만원’ 기준 무력화</a></li>
+        <li><a href="https://www.seoul.co.kr/news/newsView.php?id=20241022016001">서울신문 — 과태료 140만원이면 끝</a></li>
+        <li><a href="https://www.ajunews.com/view/20260729134858011">아주경제 (2026-07-29) — 고액 컨설팅 규제 · 학생부 상업적 이용 금지</a></li>
+        <li><a href="https://www.spo.go.kr/common/board/Download.do?bcIdx=1045370&amp;cbIdx=1403">대검찰청 — 대치동 입시컨설팅 편취 사건</a></li>
+        <li><a href="https://ipsi.jongro.co.kr/con03.asp">종로학원 대입컨설팅센터</a></li>
+        <li><a href="https://www.koreaconsulting.co.kr/">코리아대학입시컨설팅</a></li>
+        <li><a href="https://deolux.or.kr/blog/admission-consulting-cost-guide-2/">데오럭스 — 입시컨설팅 비용 기준</a></li>
+        <li><a href="https://ynkedu.co.kr/">윤앤고 입시컨설팅</a></li>
+        <li><a href="https://www.tomatoschool.com/tomato34.html">토마토스쿨 — 대치동 수시 · 생기부 컨설팅</a></li>
+        <li><a href="https://www.sdij.com/aca/">시대인재</a></li>
+        <li><a href="https://www.codelabit.co.kr/">코드랩아카데미</a></li>
+        <li><a href="https://www.apolloneducation.com/">대치 아폴론교육</a></li>
+        <li><a href="https://kernel.fastcampus.co.kr/180_ai">패스트캠퍼스 커널 아카데미 — AI 부트캠프</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>학원법 · 규제</h3>
+      <ul>
+        <li><a href="https://casenote.kr/%EB%B2%95%EB%A0%B9/%ED%95%99%EC%9B%90%EC%9D%98_%EC%84%A4%EB%A6%BD%C2%B7%EC%9A%B4%EC%98%81_%EB%B0%8F_%EA%B3%BC%EC%99%B8%EA%B5%90%EC%8A%B5%EC%97%90_%EA%B4%80%ED%95%9C_%EB%B2%95%EB%A5%A0/%EC%A0%9C2%EC%A1%B0">학원법 제2조 (정의) — CaseNote</a></li>
+        <li><a href="https://law.go.kr/LSW/lsInfoP.do?lsId=000850">국가법령정보센터 — 학원법 본문</a></li>
+        <li><a href="https://www.law.go.kr/LSW/lsInfoP.do?lsiSeq=262551">학원법 시행령</a></li>
+        <li><a href="https://law.go.kr/LSW/lsInfoP.do?lsiSeq=182667">학원법 시행규칙</a></li>
+        <li><a href="https://elaw.klri.re.kr/kor_service/lawView.do?hseq=67738&amp;lang=KOR">시행령 (영문 병기)</a></li>
+        <li><a href="https://lbox.kr/v2/statute/%ED%95%99%EC%9B%90%EC%9D%98%EC%84%A4%EB%A6%BD%E3%86%8D%EC%9A%B4%EC%98%81%EB%B0%8F%EA%B3%BC%EC%99%B8%EA%B5%90%EC%8A%B5%EC%97%90%EA%B4%80%ED%95%9C%EB%B2%95%EB%A5%A0">LBOX — 학원법 전문</a></li>
+        <li><a href="https://ko.wikisource.org/wiki/%ED%95%99%EC%9B%90%EC%9D%98_%EC%84%A4%EB%A6%BD%C2%B7%EC%9A%B4%EC%98%81_%EB%B0%8F_%EA%B3%BC%EC%99%B8%EA%B5%90%EC%8A%B5%EC%97%90_%EA%B4%80%ED%95%9C_%EB%B2%95%EB%A5%A0">위키문헌 — 학원법</a></li>
+        <li><a href="https://easylaw.go.kr/CSP/CnpClsMain.laf?csmSeq=1140&amp;ccfNo=1&amp;cciNo=1&amp;cnpClsNo=1">학원 · 교습소 · 개인과외 구분</a></li>
+        <li><a href="https://easylaw.go.kr/CSP/CnpClsMain.laf?popMenu=ov&amp;csmSeq=1140&amp;ccfNo=2&amp;cciNo=2&amp;cnpClsNo=1">학원 설립 · 운영 등록</a></li>
+        <li><a href="https://www.easylaw.go.kr/CSP/CnpClsMain.laf?csmSeq=1140&amp;ccfNo=2&amp;cciNo=3&amp;cnpClsNo=2">교습비 등 징수 — 초과 수령 금지</a></li>
+        <li><a href="https://easylaw.go.kr/CSP/CnpClsMain.laf?popMenu=ov&amp;csmSeq=1140&amp;ccfNo=4&amp;cciNo=2&amp;cnpClsNo=1">개인과외교습자 — 교습비 징수</a></li>
+        <li><a href="https://www.easylaw.go.kr/CSP/CnpClsMain.laf?popMenu=ov&amp;csmSeq=1140&amp;ccfNo=2&amp;cciNo=3&amp;cnpClsNo=1">강사의 자격 및 인적사항</a></li>
+        <li><a href="http://gnscedu.sen.go.kr/CMS/civilapp/civilapp0a/civilapp0a03/civilapp0a0301/1324963_4489.html">강남서초교육지원청 — 교습비 조정 기준</a></li>
+        <li><a href="https://www.goe.go.kr/resource/old/BBSMSTR_000000030142/BBS_202409120542384900.pdf">경기도교육청 — 학원 업무 편람 2024 (PDF)</a></li>
+        <li><a href="https://casenote.kr/%EB%8C%80%EB%B2%95%EC%9B%90/2014%EB%8F%8413280">대법원 2014도13280 — 학원법 위반</a></li>
+        <li><a href="https://casenote.kr/%EB%8C%80%EB%B2%95%EC%9B%90/95%EB%8F%84280">대법원 95도280</a></li>
+        <li><a href="https://casenote.kr/%ED%97%8C%EB%B2%95%EC%9E%AC%ED%8C%90%EC%86%8C/99%ED%97%8C%EB%B0%9493">헌법재판소 99헌바93 (합헌)</a></li>
+        <li><a href="https://www.lawmaking.go.kr/nl4li/lsItptEmp/41539?mode=all&amp;pageIndex=632">법령해석 — 입시컨설팅업체의 학원법 해당 여부</a></li>
+        <li><a href="https://www.lawtalk.co.kr/qna/620782">로톡 — 학원법 개정 후 불법 운영 처벌 기준</a></li>
+        <li><a href="https://domolaw.co.kr/legal-guide/4e65c933-c514-4470-90a1-326c98112d0f">법무법인 도모 — 교습정지 · 등록말소 행정처분</a></li>
+        <li><a href="https://uknowlaw.com/%ED%95%99%EC%9B%90-%EA%B5%90%EC%8A%B5%EB%B9%84-%EC%82%B0%EC%A0%95%EA%B3%BC-%EB%B0%98%ED%99%98-%EA%BC%AD-%EC%95%8C%EC%95%84%EC%95%BC-%ED%95%A0-%EB%B2%95%EC%A0%81-%EA%B8%B0%EC%A4%80%EA%B3%BC-%EC%8B%A4/">로앤택스 — 교습비 산정과 반환 실무</a></li>
+        <li><a href="https://help.academy.prompie.com/hc/ko/articles/360052138112">오늘학교 — 학원 교습비 책정 기준</a></li>
+        <li><a href="https://www.moleg.go.kr/lawinfo/makingInfo.mo?lawSeq=62941&amp;lawCd=0&amp;lawType=TYPE5&amp;mid=a10104010000">법제처 — 시행규칙 개정안 입법예고</a></li>
+        <li><a href="https://www.law.go.kr/%EB%B2%95%EB%A0%B9/%EC%99%B8%EA%B5%AD%EC%9D%B8%ED%95%99%EA%B5%90%EB%B0%8F%EC%99%B8%EA%B5%AD%EC%9D%B8%EC%9C%A0%EC%B9%98%EC%9B%90%EC%9D%98%EC%84%A4%EB%A6%BD%E3%86%8D%EC%9A%B4%EC%98%81%EC%97%90%EA%B4%80%ED%95%9C%EA%B7%9C%EC%A0%95">외국인학교 및 외국인유치원 설립 · 운영 규정</a></li>
+        <li><a href="https://casenote.kr/%EB%B2%95%EB%A0%B9/%EC%B4%88%C2%B7%EC%A4%91%EB%93%B1%EA%B5%90%EC%9C%A1%EB%B2%95/%EC%A0%9C60%EC%A1%B0%EC%9D%982">초·중등교육법 제60조의2 (외국인학교)</a></li>
+        <li><a href="https://www.nars.go.kr/fileDownload2.do?fileName=Report+177(Issues+and+Tasks+regarding+Foreigners%EF%BC%87+School%EF%BC%8C+Foreign+Education+Institute%EF%BC%8C+and+International+School).pdf&amp;doc_id=1L258PEksFA">국회입법조사처 — 외국인학교 · 국제학교 쟁점 (PDF)</a></li>
+        <li><a href="https://namu.wiki/w/%EC%99%B8%EA%B5%AD%EC%9D%B8%ED%95%99%EA%B5%90">나무위키 — 외국인학교</a></li>
+        <li><a href="https://easylaw.go.kr/CSP/CnpClsMain.laf?popMenu=ov&amp;csmSeq=1140&amp;ccfNo=3&amp;cciNo=1&amp;cnpClsNo=1">교습소 입지 및 시설기준 — ㎡당 0.3명 · 최대 9명</a></li>
+        <li><a href="https://office.jbedu.kr/jeonjuedu/M0104040201/">전주교육지원청 — 교습소 운영안내</a></li>
+        <li><a href="https://www.goegy.kr/goegy/cm/cntnts/cntntsView.do?mi=20293&amp;cntntsId=2402">고양교육지원청 — 교습소 설립안내</a></li>
+        <li><a href="https://dbedu.sen.go.kr/CMS/civilapp/civilapp02/civilapp0204/civilapp020402/index.html">서울동부교육지원청 — 교습소 설립</a></li>
+        <li><a href="https://dbedu.sen.go.kr/CMS/civilapp/civilapp02/civilapp0204/civilapp020401/index.html">서울동부교육지원청 — 학원 설립</a></li>
+        <li><a href="https://www.goept.kr/goept/cm/cntnts/cntntsView.do?mi=10335&amp;cntntsId=2074">평택교육지원청 — 설립 안내</a></li>
+        <li><a href="https://www.goeas.kr/goeas/cm/cntnts/cntntsView.do?mi=11566&amp;cntntsId=1532">안산교육지원청 — 학원설립 안내</a></li>
+        <li><a href="https://www.gpoe.kr/gpoe/cm/cntnts/cntntsView.do?mi=9293&amp;cntntsId=909">김포교육지원청 — 학원 · 교습소 · 개인과외</a></li>
+        <li><a href="https://www.goegm.kr/goegm/cm/cntnts/cntntsView.do?mi=5822&amp;cntntsId=3080">광명교육지원청 — 설립 · 운영 안내</a></li>
+        <li><a href="https://office.jbedu.kr/jbgse/M01050302/">군산교육지원청 — 학원 설립 · 운영 등록</a></li>
+        <li><a href="https://help-permit.blog/%ED%95%99%EC%9B%90-%EB%93%B1%EB%A1%9D%EA%B3%BC-%EA%B1%B4%EB%AC%BC-%EC%9A%A9%EB%8F%84-%EB%B3%80%EA%B2%BD-%EC%8B%9C%EC%9E%91-%EB%81%9D/">학원 등록과 건물 용도변경 실무 가이드</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>종착점 — 정부 창업 프로그램</h3>
+      <ul>
+        <li><a href="https://www.modoo.or.kr/">모두의 창업 프로젝트 공식</a></li>
+        <li><a href="https://www.bizinfo.go.kr/sii/siia/selectSIIA200Detail.do?pblancId=PBLN_000000000119979">모두의 창업 통합 모집공고 — 공고 3.26 · 마감 5.15</a></li>
+        <li><a href="https://www.mss.go.kr/site/smba/ex/bbs/View.do?cbIdx=86&amp;bcIdx=1065215&amp;parentSeq=1065215">중기부 — 국가창업시대 도약 발표</a></li>
+        <li><a href="https://www.newsis.com/view/NISX20260130_0003496774">뉴시스 — “누구나 도전하세요” 프로젝트 가동</a></li>
+        <li><a href="https://www.venturesquare.net/announcement/1068257">벤처스퀘어 — 통합 모집공고</a></li>
+        <li><a href="https://www.wellobiz.com/guest/insights/287">단계별 지원금 정리 (최대 10억)</a></li>
+        <li><a href="https://hope.raonkong.com/entry/%EB%AA%A8%EB%91%90%EC%9D%98-%EC%B0%BD%EC%97%85-%ED%94%84%EB%A1%9C%EC%A0%9D%ED%8A%B8-%EC%8B%A0%EC%B2%AD%EB%B0%A9%EB%B2%95">신청 방법 · 일정 · 선발과정 정리</a></li>
+        <li><a href="https://www.k-startup.go.kr/">K-Startup 창업진흥원</a></li>
+        <li><a href="https://www.k-startup.go.kr/edu/">창업에듀 — 온라인 창업교육</a></li>
+        <li><a href="https://www.challengek.org/">도전! K-스타트업</a></li>
+        <li><a href="https://www.kised.or.kr/menu.es?mid=a10206020000">창업진흥원 — 도전! K-스타트업 사업안내</a></li>
+        <li><a href="https://www.korea.kr/news/policyNewsView.do?newsId=148961590">정책브리핑 — 올해의 K-스타트업 (상금 5억)</a></li>
+        <li><a href="https://yeep.go.kr/main/main.do">YEEP — 온라인 창업체험교육 플랫폼 (무료)</a></li>
+        <li><a href="https://start.kosmes.or.kr/">청년창업사관학교 · 글로벌창업사관학교</a></li>
+        <li><a href="https://www.bizinfo.go.kr/web/lay1/bbs/S1T122C128/AS/74/view.do?pblancId=PBLN_000000000104047">청년창업사관학교 입교생 모집 공고</a></li>
+        <li><a href="https://www.bizinfo.go.kr/sii/siia/selectSIIA200Detail.do?pblancId=PBLN_000000000121096">학생 창업유망팀 300+ (2026)</a></li>
+        <li><a href="https://deep.dongguk.edu/">동국대 창업교육센터</a></li>
+        <li><a href="https://techcrunch.com/2025/09/24/y-combinator-launches-early-decision-for-students-who-want-to-graduate-first-build-later">TechCrunch — YC Early Decision 신설</a></li>
+        <li><a href="https://www.thevccorner.com/p/yc-w26-batch-complete-company-database">YC W26 배치 전체 DB</a></li>
+        <li><a href="https://tieshunroquerre.com/blog/yc-learnings">17세로 YC 를 거치며 배운 것</a></li>
+        <li><a href="https://jaredheyman.medium.com/on-the-new-y-combinator-3c28e548896c">“새로운 Y Combinator” — 창업자 연령 변화</a></li>
+        <li><a href="https://admissionsight.com/y-combinator/">YC 완전 가이드</a></li>
+        <li><a href="https://fortune.com/2025/09/08/yc-cofounder-gen-z-warning-high-school-not-time-to-start-startup-reddit-airbnb-dropbox">Fortune — YC 공동창업자 경고</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>수요 근거 — 신입채용 붕괴 · Micro M&amp;A</h3>
+      <ul>
+        <li><a href="https://www.autoapplymax.com/blog/entry-level-jobs-crisis-2026">2026 대졸 취업 위기 — 신입 채용 −73%</a></li>
+        <li><a href="https://blog.theinterviewguys.com/the-state-of-the-entry-level-job-collapse-2026-why-a-college-degree/">신입 일자리 붕괴 2026 — 학위는 더 이상 보험이 아니다</a></li>
+        <li><a href="https://www.metaintro.com/blog/new-grad-job-market-2026-ai-entry-level">Metaintro — 대졸 실업률 5.7%</a></li>
+        <li><a href="https://www.metaintro.com/blog/entry-level-roles-disappearing-2026-job-market">Metaintro — 신입 직군이 조용히 사라진다</a></li>
+        <li><a href="https://www.metaintro.com/blog/entry-level-jobs-ai-2026-college-graduates">Metaintro — 2026 대졸자에게 사라진 자리</a></li>
+        <li><a href="https://turboresume.ai/en/blog/is-ai-destroying-entry-level-jobs-2026/">AI 가 신입 일자리를 파괴하는가 — 2026 수치</a></li>
+        <li><a href="https://www.pin.com/blog/tech-job-market-report/">테크 채용 시장 리포트 2026</a></li>
+        <li><a href="https://www.marketbeat.com/articles/ai-is-dramatically-decreasing-entry-level-hiring-at-big-tech-companies-according-to-a-new-analysis-2025-05-28">빅테크 신입 채용 급감 분석</a></li>
+        <li><a href="https://aimultiple.com/ai-job-loss">AI 일자리 감소 — 전문가 예측 20+</a></li>
+        <li><a href="https://www.fastaijobs.com/career-hacks/ai-acquihire-map-2026">Acquihire Map 2026 — 빅테크 $20B+</a></li>
+        <li><a href="https://ff.co/ai-acquihires/">Founders Forum — MS · Google · Meta 의 acquihire</a></li>
+        <li><a href="https://www.forbes.com/sites/josipamajic/2025/07/15/why-acquihires-are-reshaping-silicon-valley-ai-investments/">Forbes — acquihire 가 실리콘밸리 투자를 재편한다</a></li>
+        <li><a href="https://medium.com/@svnkrmkr/the-reverse-acquihire-the-ai-startup-exit-nobody-explains-cc2d48ea81e7">리버스 acquihire — 아무도 설명 안 하는 exit</a></li>
+        <li><a href="https://kgi.georgetown.edu/wp-content/uploads/2026/01/Reverse-Acquihires-in-AI_Haekens_46.pdf">Georgetown — AI 리버스 acquihire 논문 (PDF)</a></li>
+        <li><a href="https://louislehotattorney.substack.com/p/what-an-acqui-hire-looks-like-for">변호사 관점 — 오늘의 AI acqui-hire 구조</a></li>
+        <li><a href="https://ctacquisitions.com/what-is-an-acquihire/">Acqui-hire 완전 가이드 2026 — 1인당 $1–5M 앵커</a></li>
+        <li><a href="https://microventures.com/the-ai-talent-war-ai-acquisitions">AI 인재 전쟁 — 인수 현황</a></li>
+        <li><a href="https://www.buildmvpfast.com/blog/ai-startup-acquisitions-2026-whos-buying-why">2026 AI 스타트업 인수 — 누가 왜 사는가</a></li>
+        <li><a href="https://www.thecodew.com/2026/07/ai-startup-acquisitions-2026-biggest.html">2026 최대 딜과 전략적 움직임</a></li>
+        <li><a href="https://aifundingtracker.com/openai-biggest-acquisitions/">OpenAI 2026 인수 목록 (io · Statsig · Astral)</a></li>
+        <li><a href="https://fi.co/insight/the-solo-unicorn-is-here-and-2026-is-the-window">Founder Institute — 솔로 유니콘의 시대</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>멘토 단가 (원가 산정 근거)</h3>
+      <ul>
+        <li><a href="https://expertopportunities.com/glg-review/">GLG 리뷰 — 전문가 시간당 수령 단가 구간</a></li>
+        <li><a href="https://expertnetworkcalls.com/91/glg-platform-review-expert-network-features-user-insights">GLG 플랫폼 리뷰</a></li>
+        <li><a href="https://cleverx.com/blog/best-expert-network-platforms-complete-comparison-guide/">전문가 네트워크 플랫폼 12개 비교 2026</a></li>
+        <li><a href="https://www.growthmentor.com/blog/expert-networks">전문가 네트워크 회사 18선</a></li>
+        <li><a href="https://www.fishbowlapp.com/post/whats-a-good-hourly-expert-rate-for-glg-alphasights-guideliint-etc-id-be-the-expert-i-said-500hr-should-i-ask-for-more">Fishbowl — 실제 전문가들의 단가 논의</a></li>
+        <li><a href="https://www.teamblind.com/post/expert-hourly-rate-for-acquisition-dd-nwew1ewx">Blind — 실사 자문 시간당 단가</a></li>
+        <li><a href="https://justinmckelvey.com/blog/fractional-cto-cost-hourly-rate">Fractional CTO 단가 2026 — 시간 · 월 단위</a></li>
+        <li><a href="https://www.empat.tech/blog/cto-as-a-service-cost">CTO as a Service 비용 구조</a></li>
+        <li><a href="https://truvisory.com/fractional-cto/fractional-cto-cost/">Fractional CTO 가격 가이드 2026</a></li>
+        <li><a href="https://albertosadde.com/fractional-cto">Fractional CTO — 요율과 채용 시점</a></li>
+        <li><a href="https://uxcontinuum.com/blog/startup-cto/fractional-cto-startups">Fractional CTO $2.5K–5K/월 vs 정규직 $310K</a></li>
+        <li><a href="https://arc.dev/hire-developers/fractional-ctos">Arc.dev — Fractional CTO 채용 시장</a></li>
+        <li><a href="https://algocentricdigital.com/blog/hire-a-fractional-cto-for-early-stage-startups-the-step-by-step-guide/">초기 스타트업 Fractional CTO 채용 가이드</a></li>
+        <li><a href="https://www.adriano-junior.com/startup-cto-consulting">스타트업 CTO 컨설팅 — 가격 · 플랫폼</a></li>
+        <li><a href="https://www.ziprecruiter.com/Salaries/Startup-Advisor-Salary">ZipRecruiter — Startup Advisor 시급</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>인증 · 크리덴셜 표준 · 회사구조</h3>
+      <ul>
+        <li><a href="https://digitalpromise.org/product-certifications/">Digital Promise — 제품 인증 개요</a></li>
+        <li><a href="https://digitalpromise.org/product-certifications/certified-products/">인증 획득 제품 목록</a></li>
+        <li><a href="https://digitalpromise.org/product-certifications/how-it-works/">인증 절차</a></li>
+        <li><a href="https://digitalpromise.org/product-certifications/frequently-asked-questions/">FAQ — 비용 · 심사 4주 · 2년 갱신</a></li>
+        <li><a href="https://digitalpromise.org/product-certifications/apply-to-earn/">신청하기</a></li>
+        <li><a href="https://digitalpromise.org/wp-content/uploads/2020/02/Product-Certification-Policies.pdf">인증 정책 (PDF)</a></li>
+        <li><a href="https://productcertifications.microcredentials.digitalpromise.org/explore/research-based-design-essa-tier-4-product-certific">Research-Based Design (ESSA Tier 4) 요건</a></li>
+        <li><a href="https://digitalpromise.org/product-certifications/evidence-based-edtech-essa-tier-3/">Evidence-Based Edtech (ESSA Tier 3) 요건</a></li>
+        <li><a href="https://digitalpromise.org/product-certifications/evidence-based-edtech-essa-tier-3-certified-products/">Tier 3 인증 제품</a></li>
+        <li><a href="https://digitalpromise.org/2024/01/29/aspiration-to-ecosystem-the-growth-of-digital-promises-product-certifications/">인증 생태계 성장 기록</a></li>
+        <li><a href="https://lxdresearch.com/how-to-get-essa-certified">LXD Research — ESSA 인증 받는 법</a></li>
+        <li><a href="https://lxdresearch.com/what-are-edtech-evidence-certifications">에듀테크 근거 인증이란</a></li>
+        <li><a href="https://edtechindex.org/articles/essa-iv-design-badges-understanding-the-blueprint-behind-edtech-tools">ESSA IV 디자인 배지 해설</a></li>
+        <li><a href="https://site.imsglobal.org/certifications/digital-promise">1EdTech — Digital Promise 인증</a></li>
+        <li><a href="https://www.virtualbadge.io/blog-articles/open-badges-3-0-what-is-the-status-in-2026">Open Badges 3.0 — 2026 현황</a></li>
+        <li><a href="https://www.accredible.com/blog/now-supporting-open-badge-3-0-and-w3c-verifiable-credentials">Accredible — OB3.0 + W3C VC 지원</a></li>
+        <li><a href="https://www.accredible.com/newsroom/accredible-launches-support-for-open-badge-3-0-and-w3c-verifiable-credentials">동 — 보도자료</a></li>
+        <li><a href="https://www.bcdiploma.com/en/blog/bcdiploma-earns-1edtech-open-badges-3-0-certification-strengthening-trust-in-digital-credentials">BCdiploma — OB3.0 발급자 인증</a></li>
+        <li><a href="https://www.pok.tech/en/digital-credentials/open-badge-3-0">POK — Open Badge 3.0 완전 가이드</a></li>
+        <li><a href="https://certopus.com/blog/open-badges-3">Certopus — OB3.0 표준 해설</a></li>
+        <li><a href="https://certopus.com/blog/open-badges-comparison">OB 3.0 vs 2.0 — 무엇이 바뀌었나</a></li>
+        <li><a href="https://sertifier.com/blog/micro-credentials-2026-guide/">마이크로 크리덴셜 2026 — 발급자 가이드</a></li>
+        <li><a href="https://www.1edtech.org/blog/the-non-profit-member-guided-goodness-of-1edtech">1EdTech Foundation — Type I 지원조직 구조</a></li>
+        <li><a href="https://www.sciencedirect.com/science/article/pii/S0738059325000707">philanthropic LLC 와 에듀테크 영향력 (논문)</a></li>
+        <li><a href="https://www.alliancemagazine.org/blog/how-can-philanthropy-catalyse-a-system-wide-change-in-edtech/">에듀테크의 시스템 변화와 자선자본</a></li>
+        <li><a href="https://saga.org/saga-education-is-now-an-edtech-nonprofit-heres-why-blog/">Saga Education — 비영리 전환 이유</a></li>
+        <li><a href="https://workforceedtech.org/partners/">Workforce EdTech — 파트너 생태계</a></li>
+        <li><a href="https://www.thomascmurray.com/blog/nonprofits">에듀테크를 지원하는 비영리 17선</a></li>
+        <li><a href="https://www.angellist.com/learn/delaware-c-corp">AngelList — Delaware C-Corp 이란</a></li>
+        <li><a href="https://binderr.com/marketplace/us/delaware-c-corp-formation-guide">외국인 창업자를 위한 Delaware C-Corp 설립</a></li>
+        <li><a href="https://binderr.com/marketplace/us/benefits-of-incorporating-a-company-in-delaware">Delaware 법인 설립의 이점</a></li>
+        <li><a href="https://erb-us.com/expanding-to-the-u-s-how-to-establish-your-startups-delaware-c-corp-subsidiary/">미국 진출 — Delaware 자회사 설립</a></li>
+        <li><a href="https://erb-us.com/incorporating-a-delaware-c-corporation-a-startups-guide/">Delaware C-Corp 설립 가이드</a></li>
+        <li><a href="https://profitjets.com/blog/indian-founders-registered-us-company-guide/">인도 창업자의 미국 법인 설립 2026</a></li>
+        <li><a href="https://founderreality.com/blog/believing-the-delaware-c-corp-is-default-narrative">반론 — “Delaware 가 기본값”이라는 서사</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>중국 · 실리콘밸리 (SV HQ 정보격차 조사)</h3>
+      <ul>
+        <li><a href="https://en.wikipedia.org/wiki/Squirrel_AI">Wikipedia — Squirrel AI</a></li>
+        <li><a href="https://squirrelai.us/about/">Squirrel AI US — 회사 소개</a></li>
+        <li><a href="https://www.scmp.com/tech/start-ups/article/3018297/chinese-education-unicorn-squirrel-ai-targets-foreign-markets-plans">SCMP — Squirrel AI 해외 진출</a></li>
+        <li><a href="https://hundred.org/en/innovations/squirrel-ai-learning">HundrED — Squirrel AI 혁신 사례</a></li>
+        <li><a href="https://pitchbook.com/profiles/company/230036-41">PitchBook — Squirrel AI 밸류에이션</a></li>
+        <li><a href="https://www.prnewswire.com/news-releases/squirrel-ai-learning-provides-answers-for-chinas-education-dilemmas-at-the-fire-of-innovation-hosted-by-geekpark-300721467.html">PR Newswire — Squirrel AI 전략 발표</a></li>
+        <li><a href="https://sites.google.com/view/learnerdatainstitute/activities/partners-data/squirrel-ai-learning-by-yixue">Learner Data Institute — Squirrel AI 연구 파트너십</a></li>
+        <li><a href="https://app.dealroom.co/companies/yixue_squirrel_ai/team">Dealroom — Yixue Squirrel AI 팀</a></li>
+        <li><a href="https://www.forbes.com/sites/annatong/2026/02/24/this-middle-school-dropout-built-his-ai-startup-in-china-now-hes-scaling-it-in-silicon-valley/">Forbes — 중졸 창업자, 중국에서 만들어 SV 로 확장</a></li>
+        <li><a href="https://restofworld.org/2026/chinese-ai-researchers-silicon-valley/">Rest of World — 실리콘밸리의 중국 AI 엔지니어</a></li>
+        <li><a href="https://restofworld.org/2026/china-tech-recruiting-teenagers-ai-shortage/">Rest of World — 중국 AI 인재 경쟁이 고등학교에서 시작된다</a></li>
+        <li><a href="https://marcellus.in/story/long-read-the-chinese-whiz-kids-of-silicon-valley/">실리콘밸리의 중국 신동들 (장문)</a></li>
+        <li><a href="https://eu.36kr.com/en/p/3756531885572615">36Kr — Gen Z AI 신동, Made in Guangdong</a></li>
+        <li><a href="https://www.forbes.com/sites/annatong/2026/08/05/silicon-valleys-other-china-problem-its-training-their-ai/">Forbes — 실리콘밸리의 또 다른 중국 문제</a></li>
+        <li><a href="https://www.techrepublic.com/article/news-silicon-valley-chinese-ai-debate/">TechRepublic — 중국 AI 를 둘러싼 논쟁</a></li>
+        <li><a href="https://aljazeera.com/economy/2025/11/13/chinas-ai-is-quietly-making-big-inroads-in-silicon-valley">Al Jazeera — 중국 AI 의 실리콘밸리 침투</a></li>
+        <li><a href="https://asiatimes.com/2026/08/cheap-chinese-ai-tokens-collide-with-deepening-sino-us-bloc-split/">Asia Times — 저가 중국 AI 토큰</a></li>
+        <li><a href="https://signalhub.substack.com/p/5-ai-tutors-from-china-tops-us-market">중국산 AI 튜터가 미국 시장 상위권</a></li>
+        <li><a href="https://theaicronicle.com/en/news/economics/chinese-ai-models-price-war-us-companies">중국 AI 모델 가격 전쟁</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>중국 사교육 규제 (双减) — 학술</h3>
+      <ul>
+        <li><a href="https://www.sciencedirect.com/science/article/abs/pii/S0738059324000117">双减 정책이 상업 과외 부문에 미친 영향</a></li>
+        <li><a href="https://journals.sagepub.com/doi/10.1177/20965311241265123">双减 정책 검토 — 약속과 과제</a></li>
+        <li><a href="https://www.mdpi.com/2071-1050/15/2/1437">중국 shadow education 과 규범적 거버넌스</a></li>
+        <li><a href="https://www.nature.com/articles/s41599-025-05966-7">双减 하 과외 교사의 직업 정체성 변화</a></li>
+        <li><a href="https://www.tandfonline.com/doi/full/10.1080/02680939.2025.2479151">双减 속 영어 과외 교사의 행위성 (Bourdieu 관점)</a></li>
+        <li><a href="https://www.sciencedirect.com/science/article/abs/pii/S1544612323000703">双减 정책과 교육 기업 가치</a></li>
+        <li><a href="https://doi.org/10.1108/QEA-01-2026-0018">双减 이 학력 격차 해소에 기여했는가</a></li>
+        <li><a href="https://ie.cscholar.com/article/view/1000412">双减 하 shadow education 의 전환 — 문헌 리뷰</a></li>
+      </ul>
+    </div>
+
+    <div class="arcgroup">
+      <h3>반면교사 — buildspace</h3>
+      <ul>
+        <li><a href="https://www.therunway.ventures/p/buildspace">$100M 꿈을 끝낸 번아웃 — 종료 분석</a></li>
+        <li><a href="https://eightception.com/buildspace-edtech-startup-case-study/">buildspace 흥망 케이스 스터디</a></li>
+        <li><a href="https://www.joshfinnie.com/blog/review-of-buildspace-nights-weekends/">Nights &amp; Weekends 참가 후기</a></li>
+        <li><a href="https://www.camhouser.com/a-review-of-buildspaces-nights-and-weekends-program/">프로그램 리뷰 (2)</a></li>
+        <li><a href="https://prithvibharadwaj.substack.com/p/the-buildspace-experience">참가자 경험기</a></li>
+        <li><a href="https://technaelogy.substack.com/p/buildspace-and-beyond">buildspace 이후</a></li>
+        <li><a href="https://newsletter.failory.com/p/hidden-struggles">Failory — 숨겨진 고전들</a></li>
+        <li><a href="https://incubatorlist.com/buildspace-nights-and-weekends">IncubatorList — 프로그램 정보</a></li>
+      </ul>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  (function () {
+    const tip = document.createElement('div');
+    tip.style.cssText = 'position:fixed;pointer-events:none;opacity:0;transition:opacity .1s;' +
+      'background:var(--ink);color:var(--ground);font-family:var(--body);font-size:12px;' +
+      'padding:6px 9px;border-radius:4px;z-index:50;max-width:260px;line-height:1.4;';
+    document.body.appendChild(tip);
+
+    document.querySelectorAll('.bar[title]').forEach(function (bar) {
+      const text = bar.getAttribute('title');
+      bar.removeAttribute('title');
+      const row = bar.closest('.row');
+      row.addEventListener('mousemove', function (e) {
+        tip.textContent = text;
+        tip.style.opacity = '1';
+        tip.style.left = Math.min(e.clientX + 14, window.innerWidth - 275) + 'px';
+        tip.style.top = (e.clientY + 16) + 'px';
+      });
+      row.addEventListener('mouseleave', function () { tip.style.opacity = '0'; });
+    });
+  })();
+</script>
