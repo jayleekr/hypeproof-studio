@@ -2,6 +2,12 @@
 
 export type LLMProvider = "gemini" | "anthropic" | "openai";
 
+// #545 — which vendor serves the Anthropic-native /v1/messages coach path.
+// "anthropic" = api.anthropic.com (default, prod today). "glm" = Z.AI's
+// Anthropic-compatible endpoint, reached with the SAME Messages protocol (no
+// translation). Extend this union to add another compatible vendor.
+export type MessagesUpstreamKind = "anthropic" | "glm";
+
 export interface Env {
   // Secrets (wrangler secret put — locally: worker/.dev.vars, gitignored)
   GEMINI_API_KEY?: string;           // default provider key (see resolveProvider)
@@ -15,6 +21,27 @@ export interface Env {
   // Switchable upstream LLM. Defaults to "gemini" when GEMINI_API_KEY is set.
   // Set "anthropic" / "openai" (with their key) to switch — peers, NOT fallback.
   LLM_PROVIDER?: LLMProvider;
+
+  // #545 — Anthropic-compatible upstream selector for the /v1/messages coach
+  // path (the Agent SDK gateway). Defaults to "anthropic" so prod is byte-for-
+  // byte unchanged until explicitly flipped. Unlike LLM_PROVIDER (which drives
+  // the /v1/chat translate.ts path for gemini/openai — those need BODY
+  // translation), this only swaps the UPSTREAM of the already-Anthropic-native
+  // Messages protocol to another vendor that speaks it verbatim (GLM/Z.AI et
+  // al.). No translation: same request shape, different base URL + key + model
+  // ids + auth style. See lib/messages-upstream.ts resolveMessagesUpstream.
+  //
+  // ⚠️ #424 warned "Anthropic-compatible" has 13 ways to break — the GLM
+  // branch's compat assumptions (auth header, beta flags, count_tokens, usage
+  // cache fields) are marked VERIFY-WITH-LIVE-KEY in messages-upstream.ts and
+  // MUST be checked against a real GLM key (#545) before any prod flip.
+  MESSAGES_UPSTREAM?: MessagesUpstreamKind;
+  // GLM (Z.AI) Anthropic-compatible endpoint credentials — used only when
+  // MESSAGES_UPSTREAM="glm". Base URL defaults to Z.AI's official endpoint;
+  // override to point at OpenRelay / FriendliAI / a region-pin proxy. The key
+  // is the token issued in #545 (`wrangler secret put GLM_API_KEY`).
+  GLM_API_KEY?: string;
+  GLM_ANTHROPIC_BASE_URL?: string; // default https://api.z.ai/api/anthropic/v1/messages
   // Override Anthropic endpoint URL — used to route through a region-pinned
   // proxy (e.g. hypeproof-sediment Fly NRT) when CF anycast egress hits an
   // Anthropic-blocked region (HK). Leave unset to call api.anthropic.com.

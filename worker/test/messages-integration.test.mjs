@@ -649,6 +649,61 @@ console.log("✓ messages: missing Anthropic key — sanitized 502, no upstream 
 }
 console.log("✓ messages: ANTHROPIC_PROXY_URL — sediment indirection honored");
 
+// --- #545 MESSAGES_UPSTREAM=glm — Anthropic-compatible upstream swap ----------
+// The Messages protocol is unchanged; only the transport envelope differs:
+// Z.AI base URL, Bearer auth (not x-api-key), NO anthropic-beta flags, and the
+// alias resolves to a glm-* id via GLM_MODEL_MAP. Does NOT need ANTHROPIC_API_KEY.
+{
+  const env = createMockEnv({ env: { MESSAGES_UPSTREAM: "glm", GLM_API_KEY: "glm-test-key" } });
+  await withMockUpstream(
+    () => Response.json(anthropicJsonBody({ text: "hi from glm" })),
+    async (calls) => {
+      const r = await app.fetch(messagesRequest(), env, makeCtx());
+      assert.equal(r.status, 200, "GLM upstream 200");
+      assert.equal(
+        calls[0].url,
+        "https://api.z.ai/api/anthropic/v1/messages",
+        "routed to Z.AI's Anthropic-compatible endpoint",
+      );
+      assert.equal(
+        calls[0].init.headers["authorization"],
+        "Bearer glm-test-key",
+        "GLM authenticates with Authorization: Bearer",
+      );
+      assert.equal(calls[0].init.headers["x-api-key"], undefined, "no x-api-key on the GLM path");
+      assert.equal(
+        calls[0].init.headers["anthropic-beta"],
+        undefined,
+        "no anthropic-beta sent to GLM (unknown flags may 400 — V2)",
+      );
+      const sentBody = JSON.parse(calls[0].init.body);
+      assert.equal(sentBody.model, "glm-5.2", "alias resolved to a GLM model id");
+      assert.equal(r.headers.get("x-hps-model"), "glm-5.2", "response advertises the GLM model");
+    },
+  );
+}
+console.log("✓ messages: MESSAGES_UPSTREAM=glm — Z.AI base + Bearer + no-beta + glm-5.2");
+
+// --- #545 MESSAGES_UPSTREAM=glm but GLM_API_KEY missing — fail-closed 502 -----
+{
+  const env = createMockEnv({ env: { MESSAGES_UPSTREAM: "glm" } });
+  let called = false;
+  await withMockUpstream(
+    () => {
+      called = true;
+      return Response.json(anthropicJsonBody({ text: "should not happen" }));
+    },
+    async () => {
+      const r = await app.fetch(messagesRequest(), env, makeCtx());
+      assert.equal(r.status, 502, "GLM selected without a key → 502 config error");
+      assert.equal(called, false, "no upstream call made without a key");
+      const j = await r.json();
+      assert.ok(!JSON.stringify(j).includes("GLM_API_KEY"), "env var name stays in logs, not the client");
+    },
+  );
+}
+console.log("✓ messages: MESSAGES_UPSTREAM=glm without GLM_API_KEY — sanitized 502, no call");
+
 // --- bad body: Anthropic-native 400 ------------------------------------------
 {
   const env = messagesEnv();

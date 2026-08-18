@@ -369,3 +369,21 @@ export function modelIdFor(alias: ModelAlias, provider: LLMProvider): string {
     case "anthropic": return MODEL_MAP[alias];
   }
 }
+
+// #545 — GLM (Z.AI) model ids for the Anthropic-compatible /v1/messages path
+// (used only when MESSAGES_UPSTREAM="glm"). Same alias names as MODEL_MAP so
+// profiles stay upstream-agnostic — the alias resolves to the SELECTED
+// upstream's id at request time (resolveMessagesModel takes the map).
+//
+// GLM-5.2 is the flagship pick (#545): flagship-class yet cheaper than Sonnet 5
+// ($1.4/$4.4 vs $2/$10 per 1M). No opus/haiku tier split on Z.AI, so all three
+// aliases point at glm-5.2 today — the fast alias intentionally does NOT drop to
+// a weaker/cheaper GLM tier (a classroom must not silently degrade mid-lesson;
+// mirrors callAnthropicResilient's "no model fallback" rule). `glm-5.2[1m]`
+// (full 1M context) is available if a long-context profile needs it — repin the
+// alias here, profiles untouched.
+export const GLM_MODEL_MAP: Record<ModelAlias, string> = {
+  "hypeproof-fast":    "glm-5.2",
+  "hypeproof-default": "glm-5.2",
+  "hypeproof-strong":  "glm-5.2",
+};

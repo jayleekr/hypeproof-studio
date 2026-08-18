@@ -45,6 +45,7 @@ import {
   type CoachContext,
 } from "../lib/translate";
 import { callAnthropic, countTokensUrl } from "../lib/anthropic";
+import { resolveMessagesUpstream } from "../lib/messages-upstream";
 import type { AnthropicRequest } from "../lib/translate";
 import { MODEL_MAP, type ModelAlias, type Profile } from "../profiles/types";
 import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../lib/chat-extract";
@@ -130,18 +131,27 @@ function decodeHeaderList(raw: string | null | undefined): string[] | undefined 
  *     escalate to opus unless the profile lists it — same trust model as
  *     resolveAlias on the /v1/chat path)
  */
-export function resolveMessagesModel(requested: unknown, profile: Profile): string {
+// `modelMap` selects the UPSTREAM's ids (#545): MODEL_MAP (claude-*) for the
+// Anthropic upstream, GLM_MODEL_MAP (glm-*) for GLM. The requested-model MATCH
+// still uses the Anthropic MODEL_MAP because the SDK (Claude Code) always emits
+// real claude ids regardless of upstream — but the RETURN is the selected
+// upstream's id for that alias. Default keeps the pre-#545 Anthropic behavior.
+export function resolveMessagesModel(
+  requested: unknown,
+  profile: Profile,
+  modelMap: Record<ModelAlias, string> = MODEL_MAP,
+): string {
   const aliases: ModelAlias[] = [profile.model.default];
   if (profile.model.fallback) aliases.push(profile.model.fallback);
   if (!aliases.includes("hypeproof-fast")) aliases.push("hypeproof-fast");
 
   if (typeof requested === "string" && requested.length > 0) {
     for (const a of aliases) {
-      if (requested === a || requested === MODEL_MAP[a]) return MODEL_MAP[a];
+      if (requested === a || requested === MODEL_MAP[a]) return modelMap[a];
     }
-    if (/^claude-.*haiku/.test(requested)) return MODEL_MAP["hypeproof-fast"];
+    if (/^claude-.*haiku/.test(requested)) return modelMap["hypeproof-fast"];
   }
-  return MODEL_MAP[profile.model.default];
+  return modelMap[profile.model.default];
 }
 
 /**
@@ -257,18 +267,21 @@ messages.post("/messages", async (c) => {
     return c.json(anthropicError(c, "invalid_request_error", "messages must be an array"), 400);
   }
 
-  // Anthropic-native route: this endpoint speaks the Messages protocol only,
-  // so it always uses the Anthropic key regardless of LLM_PROVIDER (which
-  // selects the /v1/chat translation target, not this passthrough).
-  const apiKey = env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) {
+  // This endpoint speaks the Anthropic Messages protocol only; the upstream
+  // that serves it is selectable (#545 — MESSAGES_UPSTREAM, default anthropic).
+  // LLM_PROVIDER is unrelated: that selects the /v1/chat translation target.
+  let upstreamCfg;
+  try {
+    upstreamCfg = resolveMessagesUpstream(env);
+  } catch (err) {
     // #257 — config prose (env var names, provider wiring) stays in logs.
-    console.error(`[${c.get("requestId")}] /v1/messages: ANTHROPIC_API_KEY is not set`);
+    console.error(`[${c.get("requestId")}] /v1/messages upstream config: ${String(err)}`);
     return c.json(
-      anthropicError(c, "api_error", "Anthropic upstream is not configured — contact the operator"),
+      anthropicError(c, "api_error", "LLM upstream is not configured — contact the operator"),
       502,
     );
   }
+  const apiKey = upstreamCfg.apiKey;
 
   const coach: CoachContext = {
     name: decodeHeader(c.req.header("x-hps-coach-name")),
@@ -309,7 +322,7 @@ messages.post("/messages", async (c) => {
   }
 
   const stream = raw.stream === true;
-  const modelLabel = resolveMessagesModel(raw.model, profile);
+  const modelLabel = resolveMessagesModel(raw.model, profile, upstreamCfg.modelMap);
 
   // 2-3. Enforced fields. Spread-first keeps unknown Messages-API fields
   // (metadata, tool_choice, thinking, …) flowing through; the enforced keys
@@ -361,8 +374,10 @@ messages.post("/messages", async (c) => {
   let upstream: Response;
   try {
     upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {
-      url: env.ANTHROPIC_PROXY_URL,
-      proxySecret: env.ANTHROPIC_PROXY_SECRET,
+      url: upstreamCfg.messagesUrl,
+      proxySecret: upstreamCfg.proxySecret,
+      authStyle: upstreamCfg.authStyle,
+      sendBeta: upstreamCfg.sendBeta,
       clientBeta: c.req.header("anthropic-beta"),
       beta: c.req.query("beta") === "true",
     });
@@ -568,15 +583,18 @@ messages.post("/messages/count_tokens", async (c) => {
     return c.json(anthropicError(c, "invalid_request_error", "messages must be an array"), 400);
   }
 
-  const apiKey = env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) {
+  let upstreamCfg;
+  try {
+    upstreamCfg = resolveMessagesUpstream(env);
+  } catch (err) {
     // #257 — config prose (env var names) stays in logs.
-    console.error(`[${c.get("requestId")}] /v1/messages/count_tokens: ANTHROPIC_API_KEY is not set`);
+    console.error(`[${c.get("requestId")}] /v1/messages/count_tokens upstream config: ${String(err)}`);
     return c.json(
-      anthropicError(c, "api_error", "Anthropic upstream is not configured — contact the operator"),
+      anthropicError(c, "api_error", "LLM upstream is not configured — contact the operator"),
       502,
     );
   }
+  const apiKey = upstreamCfg.apiKey;
 
   const coach: CoachContext = {
     name: decodeHeader(c.req.header("x-hps-coach-name")),
@@ -595,7 +613,7 @@ messages.post("/messages/count_tokens", async (c) => {
   // the count matches the request /v1/messages would actually send. The
   // count_tokens contract has no max_tokens/stream — strip them in case a
   // client blindly reuses a messages body (upstream 400s on unknown params).
-  const modelLabel = resolveMessagesModel(raw.model, profile);
+  const modelLabel = resolveMessagesModel(raw.model, profile, upstreamCfg.modelMap);
   const upstreamBody = {
     ...raw,
     model: modelLabel,
@@ -621,8 +639,10 @@ messages.post("/messages/count_tokens", async (c) => {
   let upstream: Response;
   try {
     upstream = await callAnthropic(strippedCount.body as unknown as AnthropicRequest, apiKey, {
-      url: countTokensUrl(env.ANTHROPIC_PROXY_URL),
-      proxySecret: env.ANTHROPIC_PROXY_SECRET,
+      url: countTokensUrl(upstreamCfg.messagesUrl),
+      proxySecret: upstreamCfg.proxySecret,
+      authStyle: upstreamCfg.authStyle,
+      sendBeta: upstreamCfg.sendBeta,
       clientBeta: c.req.header("anthropic-beta"),
       beta: c.req.query("beta") === "true",
     });

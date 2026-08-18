@@ -67,11 +67,21 @@ LLM_PROVIDER = "anthropic"
 # Tokyo — accepted by Anthropic). Passthrough proxy: same x-api-key, same
 # body. Unset to call api.anthropic.com directly.
 ANTHROPIC_PROXY_URL = "https://hypeproof-sediment.fly.dev/proxy/anthropic/v1/messages"
+# #545 — /v1/messages (Agent SDK coach path) upstream selector. LEFT UNSET so
+# prod stays on Anthropic (the default). Set MESSAGES_UPSTREAM = "glm" to route
+# the SAME Messages protocol to Z.AI's Anthropic-compatible endpoint (GLM-5.2,
+# flagship yet cheaper than Sonnet 5). Independent of LLM_PROVIDER above, which
+# only drives the /v1/chat translation path. Before flipping to "glm", verify
+# the compat unknowns marked [V1]-[V4] in src/lib/messages-upstream.ts against a
+# live GLM key (#545).
+#   MESSAGES_UPSTREAM = "glm"
+#   GLM_ANTHROPIC_BASE_URL = "https://api.z.ai/api/anthropic/v1/messages"  # optional override
 # Secrets — production: `wrangler secret put <NAME>`
 #   wrangler secret put GEMINI_API_KEY      # default provider key
 #   wrangler secret put HPS_SIGNING_SECRET
 #   wrangler secret put ANTHROPIC_API_KEY   # when LLM_PROVIDER=anthropic
 #   wrangler secret put OPENAI_API_KEY      # when LLM_PROVIDER=openai
+#   wrangler secret put GLM_API_KEY         # when MESSAGES_UPSTREAM=glm (#545)
 # Local dev: put them in worker/.dev.vars (gitignored). Fastest:
 #   bash scripts/dev-secrets.sh             # pulls Gemini key from ~/.env
 

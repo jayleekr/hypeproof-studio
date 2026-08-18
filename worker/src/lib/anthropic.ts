@@ -9,8 +9,13 @@
 
 import type { AnthropicRequest } from "./translate";
 
-const DEFAULT_URL = "https://api.anthropic.com/v1/messages";
+export const DEFAULT_URL = "https://api.anthropic.com/v1/messages";
 const API_VERSION = "2023-06-01";
+
+// #545 — Z.AI's Anthropic-compatible Messages endpoint (default GLM upstream).
+// Base is https://api.z.ai/api/anthropic; the Messages call is that + /v1/messages,
+// and countTokensUrl() appends /count_tokens the same way it does for Anthropic.
+export const GLM_DEFAULT_URL = "https://api.z.ai/api/anthropic/v1/messages";
 
 /**
  * Beta flag the worker always needs: without it the upstream response omits
@@ -68,18 +73,40 @@ export async function callAnthropic(
      * changes which request shape the upstream accepts, so we forward it.
      */
     beta?: boolean;
+    /**
+     * #545 — auth header format for the (possibly non-Anthropic) upstream.
+     * Anthropic uses `x-api-key` (default). Z.AI's Anthropic-compatible
+     * endpoint authenticates with `Authorization: Bearer <token>` (the
+     * ANTHROPIC_AUTH_TOKEN convention Claude Code uses), so the GLM upstream
+     * passes "bearer". Only the header changes — body/version/SSE are identical.
+     */
+    authStyle?: "x-api-key" | "bearer";
+    /**
+     * #545 — whether to send the `anthropic-beta` header + `?beta=true` at all.
+     * Anthropic-native: true (default) — we need prompt-caching + the client's
+     * context-management betas honored. Anthropic-COMPATIBLE upstreams (GLM)
+     * may 400 on unknown beta flags, so the resolver sets this false until the
+     * flags are verified against a live key (#424's 13-flag warning). When
+     * false, the beta header is omitted entirely and the ?beta=true query is
+     * NOT appended, regardless of `beta`.
+     */
+    sendBeta?: boolean;
   } = {},
 ): Promise<Response> {
+  const sendBeta = opts.sendBeta !== false; // default true (Anthropic-native)
   let url = opts.url ?? DEFAULT_URL;
-  if (opts.beta) url += (url.includes("?") ? "&" : "?") + "beta=true";
+  if (sendBeta && opts.beta) url += (url.includes("?") ? "&" : "?") + "beta=true";
   const headers: Record<string, string> = {
     "content-type": "application/json",
-    "x-api-key": apiKey,
     "anthropic-version": API_VERSION,
-    // Ours (prompt caching, required for cache usage fields) merged with the
-    // client's flags — the Agent SDK needs its own betas honored upstream.
-    "anthropic-beta": mergeAnthropicBeta(opts.clientBeta),
   };
+  // #545 — Anthropic wants x-api-key; GLM (Z.AI) wants Authorization: Bearer.
+  if (opts.authStyle === "bearer") headers["authorization"] = `Bearer ${apiKey}`;
+  else headers["x-api-key"] = apiKey;
+  // Ours (prompt caching, required for cache usage fields) merged with the
+  // client's flags — the Agent SDK needs its own betas honored upstream. Omit
+  // for compat upstreams that reject unknown beta flags (sendBeta=false).
+  if (sendBeta) headers["anthropic-beta"] = mergeAnthropicBeta(opts.clientBeta);
   // Sediment proxy (sediment#3eddd06, 2026-05-24) requires a shared secret on
   // /proxy/anthropic/* — without this header the proxy returns 403 and the
   // worker bubbles it up as a 502 to the client. The same fetch goes
