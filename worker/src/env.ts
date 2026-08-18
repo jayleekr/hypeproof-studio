@@ -1,12 +1,15 @@
 // Shared binding shape — keep in sync with wrangler.toml
 
-export type LLMProvider = "gemini" | "anthropic" | "openai";
+export type LLMProvider = "gemini" | "anthropic" | "openai" | "glm";
 
 export interface Env {
   // Secrets (wrangler secret put — locally: worker/.dev.vars, gitignored)
   GEMINI_API_KEY?: string;           // default provider key (see resolveProvider)
   ANTHROPIC_API_KEY?: string;        // peer — used when LLM_PROVIDER=anthropic
   OPENAI_API_KEY?: string;           // peer — used when LLM_PROVIDER=openai
+  // peer — used when LLM_PROVIDER=glm. Z.ai 의 Anthropic 호환 경로로 나간다
+  // (lib/glm.ts). 발급: https://z.ai/manage-apikey/apikey-list
+  GLM_API_KEY?: string;
   HPS_SIGNING_SECRET: string;
   HPS_ADMIN_PASSWORD?: string;       // used if Cloudflare Access not configured
 
@@ -55,6 +58,7 @@ export function resolveProvider(env: Env): ResolvedProvider {
   const gem = env.GEMINI_API_KEY?.trim();
   const ant = env.ANTHROPIC_API_KEY?.trim();
   const oai = env.OPENAI_API_KEY?.trim();
+  const glm = env.GLM_API_KEY?.trim();
 
   if (env.LLM_PROVIDER === "anthropic") {
     if (!ant) throw new Error("LLM_PROVIDER=anthropic but ANTHROPIC_API_KEY is not set");
@@ -68,11 +72,17 @@ export function resolveProvider(env: Env): ResolvedProvider {
     if (!oai) throw new Error("LLM_PROVIDER=openai but OPENAI_API_KEY is not set");
     return { provider: "openai", apiKey: oai };
   }
+  if (env.LLM_PROVIDER === "glm") {
+    if (!glm) throw new Error("LLM_PROVIDER=glm but GLM_API_KEY is not set");
+    return { provider: "glm", apiKey: glm };
+  }
   // No explicit provider → preserve historical default order.
+  // GLM 은 **일부러 이 순서에 없다.** 키를 넣었다는 이유만으로 수업 트래픽의 상류가
+  // 바뀌면 안 된다. GLM 을 쓰려면 LLM_PROVIDER=glm 을 명시한다.
   if (gem) return { provider: "gemini", apiKey: gem };
   if (ant) return { provider: "anthropic", apiKey: ant };
   if (oai) return { provider: "openai", apiKey: oai };
   throw new Error(
-    "no LLM key configured (set GEMINI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY in worker/.dev.vars)",
+    "no LLM key configured (set GEMINI_API_KEY / ANTHROPIC_API_KEY / OPENAI_API_KEY / GLM_API_KEY in worker/.dev.vars)",
   );
 }

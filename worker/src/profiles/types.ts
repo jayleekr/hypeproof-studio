@@ -362,10 +362,21 @@ export const OPENAI_MODEL_MAP: Record<ModelAlias, string> = {
   "hypeproof-strong":  "gpt-4o",
 };
 
+// GLM (Z.ai) model ids. 지금은 세 alias 가 모두 glm-5.2 를 가리킨다 — 5.2 가 플래그십이고
+// 계열 내 하위 모델을 쓸 이유가 아직 없다. GLM-5.3 은 2026-08-14 출시됐으나 일반
+// pay-as-you-go API 가 아직 "coming soon" 이라 여기에 못 넣는다 (hypeprooflab#545).
+// 5.3 의 per-token API 가 열리면 이 한 줄만 바꾸면 된다 — base model 이 같은 계열이다.
+export const GLM_MODEL_MAP: Record<ModelAlias, string> = {
+  "hypeproof-fast":    "glm-5.2",
+  "hypeproof-default": "glm-5.2",
+  "hypeproof-strong":  "glm-5.2",
+};
+
 export function modelIdFor(alias: ModelAlias, provider: LLMProvider): string {
   switch (provider) {
     case "gemini":    return GEMINI_MODEL_MAP[alias];
     case "openai":    return OPENAI_MODEL_MAP[alias];
+    case "glm":       return GLM_MODEL_MAP[alias];
     case "anthropic": return MODEL_MAP[alias];
   }
 }

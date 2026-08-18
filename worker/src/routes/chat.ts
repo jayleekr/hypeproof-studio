@@ -18,6 +18,7 @@ import { gateChatRequest } from "../lib/chat-gate";
 import { getProfile } from "../profiles";
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropicResilient } from "../lib/anthropic";
+import { glmUpstreamUrl } from "../lib/glm";
 import { callGeminiResilient } from "../lib/gemini";
 import { callOpenAI } from "../lib/openai";
 import {
@@ -400,6 +401,19 @@ chat.post("/chat/completions", async (c) => {
       if (stream) oBody.stream_options = { include_usage: true };
       modelLabel = oBody.model;
       upstream = await callOpenAI(oBody, apiKey);
+    } else if (provider === "glm") {
+      // GLM (Z.ai) — Anthropic 호환 경로라 **번역기와 스트림 처리를 그대로 재사용**한다.
+      // 새로 쓰는 것은 URL 하나뿐이다 (lib/glm.ts 에 실측 근거를 적어 뒀다).
+      //
+      // Anthropic 프록시/시크릿은 붙이지 않는다 — 그건 지역 차단된 api.anthropic.com
+      // 우회용이고 z.ai 에는 해당이 없다. 붙이면 프록시가 403 을 낸다.
+      //
+      // 캐시는 자동이 아니다: cache_control 을 명시해야 걸린다 (실측 81% 절감).
+      // 그 지시를 넣는 것은 translate() 쪽 일이라 이 wrapper 범위 밖이다 — #545.
+      const gBody = translate(body as any, profile, coach, "glm");
+      gBody.stream = stream;
+      modelLabel = gBody.model;
+      upstream = await callAnthropicResilient(gBody, apiKey, { url: glmUpstreamUrl() });
     } else {
       // anthropic — Messages API (different schema; transformStream handles it).
       // Route through the optional region-pinned proxy when set, otherwise
