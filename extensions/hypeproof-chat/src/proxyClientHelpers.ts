@@ -173,3 +173,54 @@ export function buildProxyHeaders(args: BuildHeadersArgs): Record<string, string
   }
   return headers;
 }
+
+// ── #580 — 스트림 청크의 토큰 usage 파싱 ────────────────────────────────────
+
+/** 요청 1건의 토큰 4종 — 스풀 usage 레코드로 가는 캐논 형태. */
+export interface ProxyStreamUsage {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadInputTokens: number;
+  cacheCreationInputTokens: number;
+}
+
+function chunkNumber(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
+}
+
+/**
+ * SSE 청크 하나에서 usage 를 뽑는다. 두 형태를 받는다:
+ * - `hps_usage` — 워커가 스트림 끝에 싣는 4종 전량 (Anthropic 업스트림 포함,
+ *   #580 worker additive 변경). 캐시 필드가 있는 유일한 소스라 우선한다.
+ * - `usage` — OpenAI 형식 (`prompt_tokens`/`completion_tokens`). Gemini/OpenAI
+ *   업스트림의 verbatim 최종 청크가 이 형태다. 캐시 정보 없음 → 0.
+ *
+ * usage 는 누적치가 아니라 최종치다 — 호출자는 스트림에서 **마지막으로 본
+ * 값 하나만** 기록해야 한다 (둘 다 오면 이중 계상 위험, proxyChat 참고).
+ */
+export function usageFromStreamChunk(chunk: unknown): ProxyStreamUsage | null {
+  const c = chunk as Record<string, unknown> | null;
+  if (!c || typeof c !== "object" || Array.isArray(c)) return null;
+  // 배열·원시값 usage 를 통과시키면 전 필드 0 인 "지어낸" 레코드가 된다 —
+  // plain object 만 받는다 (sdkCoachHelpers.extractSdkUsage 와 같은 가드).
+  const hps = c.hps_usage;
+  if (hps && typeof hps === "object" && !Array.isArray(hps)) {
+    const h = hps as Record<string, unknown>;
+    return {
+      inputTokens: chunkNumber(h.input_tokens),
+      outputTokens: chunkNumber(h.output_tokens),
+      cacheReadInputTokens: chunkNumber(h.cache_read_input_tokens),
+      cacheCreationInputTokens: chunkNumber(h.cache_creation_input_tokens),
+    };
+  }
+  const usage = c.usage;
+  if (!usage || typeof usage !== "object" || Array.isArray(usage)) return null;
+  const u = usage as Record<string, unknown>;
+  if (u.prompt_tokens === undefined && u.completion_tokens === undefined) return null;
+  return {
+    inputTokens: chunkNumber(u.prompt_tokens),
+    outputTokens: chunkNumber(u.completion_tokens),
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+  };
+}

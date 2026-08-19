@@ -50,6 +50,7 @@ import {
   sdkToolToActionRequest,
   seededSdkBinaryPath,
   type SdkActivity,
+  type SdkUsageEvent,
   type CoachToolAction,
   type SdkBinaryResolution,
   type SdkBinaryStat,
@@ -122,6 +123,11 @@ export interface SdkCoachArgs {
    * proxy path has no equivalent, and a caller that omits it loses nothing else.
    */
   onActivity?: (activity: SdkActivity) => void;
+  /**
+   * #580 — 토큰 usage 탭 (요청 단위 assistant usage / result 턴 합계).
+   * Optional: 스풀을 안 쓰는 호출자·테스트는 그대로 동작한다.
+   */
+  onUsage?: (u: SdkUsageEvent) => void;
   onCitations: (citations: Citation[]) => void;
   onAssetScore: (score: AssetScoreChunk) => void;
   /** Manual-approve gate. Resolves true to allow the tool. */
@@ -679,6 +685,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     },
     onDelta: args.onDelta,
     ...(args.onActivity ? { onActivity: args.onActivity } : {}),
+    ...(args.onUsage ? { onUsage: args.onUsage } : {}),
     stallMs,
     makeStallError: () => {
       // Developer-side signal — the student only ever sees the Korean line.

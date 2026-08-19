@@ -4,11 +4,13 @@ import {
   classifyProfileFailure,
   friendlyTransportMessage,
   profileNetworkFailure,
+  usageFromStreamChunk,
   PROFILE_ISSUER_TOKEN_FRIENDLY,
   TOKEN_EXPIRED_FRIENDLY,
   TOKEN_MISSING_FRIENDLY,
   type ProfileFailure,
-} from "./proxyClientHelpers";
+  type ProxyStreamUsage,
+} from "./proxyClientHelpers.ts";
 
 /**
  * Auth/session failures need different handling than generic errors:
@@ -146,6 +148,13 @@ interface ProxyChatArgs {
   onAssetScore?: (assetScore: AssetScoreChunk) => void;
   /** #278 Phase 3 — fires per streamed tool_use block (browser control loop). */
   onToolUse?: (block: ToolUseBlock) => void;
+  /**
+   * #580 — 이 호출 1건(= 워커로 나간 요청 1건)의 토큰 usage. 스트림이 정상
+   * 종료될 때 **한 번만** 발화한다 — usage 청크가 여러 번 보여도(업스트림
+   * verbatim + 워커 최종 청크) 마지막 값 하나만 쓴다. requestKey 는 워커의
+   * x-request-id 응답 헤더 (없으면 null → 스풀이 기록을 포기한다).
+   */
+  onUsage?: (u: ProxyStreamUsage & { requestKey: string | null; model: string | null }) => void;
   coachName?: string;
   coachPersonality?: string;
   /** #507 — 지금 떠 있는 라이브 서버 주소(없으면 생략). 워커가 문구를 만든다. */
@@ -168,6 +177,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
     onCitations,
     onAssetScore,
     onToolUse,
+    onUsage,
     coachName,
     coachPersonality,
     previewUrl,
@@ -231,7 +241,36 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
   let text = "";
   let finishReason: string | null = null;
   const toolUses: ToolUseBlock[] = [];
-  const result = (): ProxyChatResult => ({ finishReason, toolUses, text });
+  // #580 — 스트림에서 마지막으로 본 usage(최종치)와 그 청크의 model. 정상
+  // 종료 시 onUsage 로 한 번만 낸다. 에러/abort 로 던져지면 안 낸다 — 그 턴은
+  // turn_end(status:error) 로 남고, 서버 D1 기록이 남는다.
+  //
+  // requestKey 3단: 워커가 청크에 실은 hps_request_id → x-request-id 응답
+  // 헤더 → 로컬 생성 키. 로컬 키는 서버 로그와 조인이 안 되지만(`local-`
+  // 프리픽스로 표시), proxy 경로는 호출당 정확히 1회 발화가 구조적이라
+  // dedupe 목적으로는 안전하다 — 키가 없다고 usage 를 버리면 이 경로의
+  // 기록이 통째로 사라진다(리뷰 실측: 과거 스트리밍 200 엔 헤더가 없었다).
+  // 알려진 한계: 워커 request id 는 cf-ray 앞 8자(≈100ms 시간 버킷)라, 같은
+  // 세션의 두 요청이 같은 버킷에 떨어지면 뒤 레코드가 dedupe 로 조용히
+  // 빠진다. 채팅 케이던스(요청 간 수 초)에선 실질 0 — 클라가 병렬화되면
+  // 워커가 full ray 를 싣도록 바꿀 것.
+  let lastUsage: ProxyStreamUsage | null = null;
+  let usageModel: string | null = null;
+  let chunkRequestId: string | null = null;
+  // usageEmitted 는 미래의 비-return 호출부에 대한 벨트다 — 현재 두 호출부는
+  // 모두 `return result()` 라 구조적으로 1회다.
+  let usageEmitted = false;
+  const result = (): ProxyChatResult => {
+    if (onUsage && lastUsage && !usageEmitted) {
+      usageEmitted = true;
+      const requestKey =
+        chunkRequestId ??
+        res.headers.get("x-request-id") ??
+        `local-${crypto.randomUUID()}`;
+      onUsage({ ...lastUsage, requestKey, model: usageModel });
+    }
+    return { finishReason, toolUses, text };
+  };
 
   while (true) {
     const { value, done } = await reader.read();
@@ -250,6 +289,27 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
         if (j?.type === "asset_score" && isAssetScoreChunk(j) && onAssetScore) {
           onAssetScore(j);
           continue;
+        }
+        // #257/#580 — 워커의 mid-stream stream_error. 이전에는 조용히 무시돼
+        // 학생은 끊긴 응답을 정상처럼 봤고, 스풀은 그 턴을 ok 로 적었다.
+        // 던져서 보이게 한다 — 재시도 UX(retryMessage)와 turn_end(error)가
+        // 같이 맞는다.
+        if (j?.error?.type === "stream_error") {
+          throw new ProxyTransportError(
+            "앗, 응답이 중간에 끊겼어요. 다시 한 번 보내볼까요?",
+            typeof j.error.request_id === "string"
+              ? j.error.request_id
+              : res.headers.get("x-request-id") ?? undefined,
+          );
+        }
+        // #580 — usage 청크 (워커 hps_usage 또는 업스트림 OpenAI usage).
+        const streamUsage = usageFromStreamChunk(j);
+        if (streamUsage) {
+          lastUsage = streamUsage;
+          if (typeof j?.model === "string" && j.model) usageModel = j.model;
+        }
+        if (typeof j?.hps_request_id === "string" && j.hps_request_id) {
+          chunkRequestId = j.hps_request_id;
         }
         const c0 = j?.choices?.[0];
         const choice = c0?.delta;
@@ -275,7 +335,10 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
           onToolUse?.(block);
         }
         if (typeof c0?.finish_reason === "string") finishReason = c0.finish_reason;
-      } catch {
+      } catch (err) {
+        // stream_error 는 위에서 의도적으로 던진 것 — 삼키면 끊긴 응답이
+        // 정상처럼 끝난다. 나머지(깨진 JSON 라인)만 무시.
+        if (err instanceof ProxyTransportError) throw err;
         // ignore malformed line
       }
     }

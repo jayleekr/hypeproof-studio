@@ -690,6 +690,11 @@ chat.post("/chat/completions", async (c) => {
     "cache-control": "no-cache",
     "x-accel-buffering": "no",
     "x-hps-model": modelLabel,
+    // #580 — raw Response 반환은 request-id 미들웨어의 c.header() 를 우회한다
+    // (Hono 는 핸들러가 만든 Response 에 미들웨어 헤더를 합치지 않는다). 4xx
+    // (c.json) 경로에만 있던 x-request-id 를 스트리밍 200 에도 직접 싣는다 —
+    // 클라이언트 스풀의 usage requestKey 와 #64 신고 플로우가 이 값을 쓴다.
+    "x-request-id": c.get("requestId"),
   };
   if (fellBack) streamHeaders["x-hps-fallback"] = "1";
   return new Response(outStream, { headers: streamHeaders });
