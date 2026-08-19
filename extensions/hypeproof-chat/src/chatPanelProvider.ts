@@ -86,7 +86,12 @@ import {
   classifyTurnError,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
-import { SessionSpool, spoolIdentityFromToken, traceMsgToWorkflowRecord } from "./sessionSpool";
+import {
+  SessionSpool,
+  spoolIdentityFromToken,
+  traceMsgToWorkflowRecord,
+  type SpoolArtifactSource,
+} from "./sessionSpool";
 import type { ProxyStreamUsage } from "./proxyClientHelpers";
 
 /**
@@ -359,6 +364,31 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   getHistorySnapshot(): ChatMessage[] {
     return this.getHistory();
+  }
+
+  /**
+   * 수업 로그 봉인 직전에 작업 폴더의 실제 index.html 을 마지막 증거로 남긴다.
+   * 마지막 AI 응답 뒤 아이가 직접 파일을 고쳤다면 채팅 원문만으로는 그 변화가
+   * 사라진다. 실패/파일 없음은 업로드 자체를 막지 않는 fail-soft 경로다.
+   */
+  async captureFinalArtifactForSpool(): Promise<boolean> {
+    if (!this.spool?.currentSessionDir()) return false;
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    if (!root) return false;
+    try {
+      const target = vscode.Uri.joinPath(root, "index.html");
+      const bytes = await vscode.workspace.fs.readFile(target);
+      const content = Buffer.from(bytes).toString("utf8");
+      if (!/<html[\s>]/i.test(content) && !/<!doctype html/i.test(content)) return false;
+      this.spool.recordArtifactSnapshot({
+        source: "session_end",
+        path: "index.html",
+        content,
+      });
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -728,7 +758,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (!res.ok) return false;
       const html = await res.text();
       if (!/<!doctype html/i.test(html)) return false;
-      const ok = await this.revealBuilt(html);
+      const ok = await this.revealBuilt(html, { artifactSource: "prebuilt" });
       if (ok) this.lastPrebuiltWorld = id;
       return ok;
     } catch {
@@ -748,7 +778,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const buf = await vscode.workspace.fs.readFile(vscode.Uri.file(abs));
       const html = Buffer.from(buf).toString("utf8");
       if (!/<html[\s>]/i.test(html) && !/<!doctype html/i.test(html)) return;
-      await this.revealBuilt(html, { streamId });
+      await this.revealBuilt(html, { streamId, artifactSource: "assistant_tool" });
     } catch (e) {
       if (streamId) {
         this.postToolLog(streamId, { id: randomId(), icon: "🖼️", label: `미리보기 열기 실패: ${String(e).slice(0, 80)}`, state: "error" });
@@ -762,6 +792,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       streamId?: string;
       /** #580 — UI 는 그대로 두고 스풀 귀속만 필요한 호출자용 (브라우저 루프). */
       spoolTurnId?: string;
+      /** 같은 HTML이라도 사전 완성본과 학생/AI의 수정본을 구분한다. */
+      artifactSource?: SpoolArtifactSource;
     },
   ): Promise<boolean> {
     // #359 — structural guard: auto-repair the known comment-close typo, and
@@ -781,6 +813,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     if (checked.issues.length > 0) this.surfaceStructureIssues(checked, opts?.streamId);
     if (checked.blocked) return false;
+
+    const spoolTurn = opts?.streamId ?? opts?.spoolTurnId;
+    this.spool?.recordArtifactSnapshot({
+      ...(spoolTurn ? { turnId: spoolTurn } : {}),
+      source: opts?.artifactSource ?? (spoolTurn ? "assistant_response" : "manual_preview"),
+      path: "index.html",
+      content: checked.html,
+    });
 
     // 2026-08-17 Windows 실기기 — 코치가 "완성됐어요!" 라고 말한 **뒤에도** 화면이
     // 한참 비어 있었다. 스트림이 끝난 시점과 미리보기가 실제로 뜨는 시점 사이에
@@ -1253,7 +1293,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         void this.clearHistory();
         return;
       case "runCode":
-        void this.revealBuilt(msg.html);
+        void this.revealBuilt(msg.html, { artifactSource: "manual_preview" });
         return;
       case "previewReady":
         return;
@@ -1328,7 +1368,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           { id: randomId(), role: "user", content: text, createdAt: Date.now() },
           { id: aid, role: "assistant", content: reply, createdAt: Date.now() },
         ]);
-        void this.revealBuilt(lastGame);
+        void this.revealBuilt(lastGame, { artifactSource: "existing" });
         return;
       }
       // No game yet → fall through to the AI, which will guide them to make one.
@@ -1418,7 +1458,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (html === lastAttemptedHtml) return; // unchanged → don't re-warn
       lastAttemptedHtml = html;
       revealed = true; // optimistic — stop later chunks from re-revealing
-      void this.revealBuilt(html, { streamId }).then((ok) => {
+      void this.revealBuilt(html, { streamId, artifactSource: "assistant_response" }).then((ok) => {
         // #359 — a blocked (still-broken after repair) build didn't ship;
         // let a later, CORRECTED (different) HTML block in the same stream try.
         if (!ok) revealed = false;
@@ -1736,9 +1776,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // 신호를 먼저 본다. SDK 턴 합계가 있으면 같이 싣는다 — 요청 단위 usage
       // 레코드 합과의 대조군.
       const total = sdkTurnTotal.current;
+      const finalSpoolStatus = ctrl.signal.aborted ? "aborted" : spoolStatus;
+      if (assistantText.length > 0) {
+        this.spool?.recordResponse({
+          turnId: streamId,
+          status: finalSpoolStatus,
+          runtime: spoolRuntime,
+          text: assistantText,
+        });
+      }
       this.spool?.recordTurnEnd({
         turnId: streamId,
-        status: ctrl.signal.aborted ? "aborted" : spoolStatus,
+        status: finalSpoolStatus,
         runtime: spoolRuntime,
         ...(spoolErrorKind && !ctrl.signal.aborted ? { errorKind: spoolErrorKind } : {}),
         ...(total
@@ -1864,7 +1913,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           const iterHtml = extractRenderableHtml(result.text);
           // #580 — spoolTurnId 만 넘긴다: streamId 를 넘기면 logReveal 타임라인
           // 줄이 반복마다 생겨 UI 가 달라진다. 스풀 귀속만 얹는다.
-          if (iterHtml) await this.revealBuilt(iterHtml, { spoolTurnId: p.streamId });
+          if (iterHtml) {
+            await this.revealBuilt(iterHtml, {
+              spoolTurnId: p.streamId,
+              artifactSource: "assistant_response",
+            });
+          }
         }
         // Assistant tool_use turn (its text + tool_use blocks) — scratch only.
         const asstContent: unknown[] = [];

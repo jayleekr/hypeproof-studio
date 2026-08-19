@@ -1,6 +1,6 @@
 // #580 — 세션 로그 로컬 스풀. 앱 없이, 밀리초.
 //
-// 이 모듈은 질문 원문·토큰 usage·행동 이벤트를 디스크에 남긴다. 잘못 쓰면
+// 이 모듈은 질문·응답 원문·HTML 버전·토큰 usage·행동 이벤트를 디스크에 남긴다. 잘못 쓰면
 // 두 방향으로 죽는다: (a) 이벤트가 새거나 순서가 섞이면 분석이 조용히 틀리고,
 // (b) dedupe 가 깨지면 비용이 과대계상된다. 대조군을 양쪽으로 붙인다:
 //   양성 — 정상 이벤트는 한 파일에 순서대로, 스키마 버전과 함께 남아야 한다
@@ -17,6 +17,8 @@ const {
   SessionSpool,
   SPOOL_SCHEMA_VERSION,
   SPOOL_MAX_TEXT_CHARS,
+  SPOOL_MAX_RESPONSE_CHARS,
+  SPOOL_MAX_ARTIFACT_CHARS,
   resolveSpoolSessionsRoot,
   spoolIdentityFromToken,
 } = await import("../src/sessionSpool.ts");
@@ -55,6 +57,15 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-spool-"));
   const spool = makeSpool(root);
   spool.noteIdentity({ u: "kid01", c: "test-cohort", p: "prof-1" });
   spool.recordPrompt({ turnId: "t-1", runtime: "agent-sdk", text: "버튼 색 바꿔줘", imagesCount: 1 });
+  spool.recordResponse({
+    turnId: "t-1", runtime: "agent-sdk", status: "ok", text: "좋아요. 파란 버튼으로 바꿨어요.",
+  });
+  spool.recordArtifactSnapshot({
+    turnId: "t-1",
+    source: "assistant_response",
+    path: "/Users/kid/game/index.html",
+    content: "<!doctype html><html><button>시작</button></html>",
+  });
   spool.recordUsage({
     turnId: "t-1", source: "sdk", requestKey: "msg_A", model: "claude-sonnet-5",
     inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 400, cacheCreationInputTokens: 5,
@@ -72,14 +83,24 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-spool-"));
   assert.equal(rel[1], "session-1");
 
   const events = readEvents(dir);
-  assert.deepEqual(events.map((e) => e.type), ["prompt", "usage", "workflow", "turn_end"], "순서 보존");
+  assert.deepEqual(
+    events.map((e) => e.type),
+    ["prompt", "response", "artifact_snapshot", "usage", "workflow", "turn_end"],
+    "순서 보존",
+  );
   for (const e of events) {
     assert.equal(e.schema_version, SPOOL_SCHEMA_VERSION, "레코드마다 schema_version");
     assert.equal(e.ts, FIXED_NOW.toISOString(), "ts 는 ISO UTC");
   }
-  const [prompt, usage, wf, end] = events;
+  const [prompt, response, artifact, usage, wf, end] = events;
   assert.equal(prompt.text, "버튼 색 바꿔줘");
   assert.equal(prompt.images_count, 1);
+  assert.equal(response.text, "좋아요. 파란 버튼으로 바꿨어요.");
+  assert.equal(response.status, "ok");
+  assert.equal(artifact.source, "assistant_response");
+  assert.equal(artifact.path, "index.html", "전체 경로가 아니라 basename 만 기록");
+  assert.equal(artifact.mime_type, "text/html");
+  assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
   assert.equal(usage.request_key, "msg_A");
   assert.equal(usage.input_tokens, 100);
   assert.equal(usage.cache_read_input_tokens, 400);
@@ -191,13 +212,19 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-spool-"));
     turnId: "t-a", source: "sdk", requestKey: "msg_late", model: "m",
     inputTokens: 7, outputTokens: 3, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
   });
+  spool.recordResponse({
+    turnId: "t-a", runtime: "agent-sdk", status: "ok", text: "A에게 늦게 온 응답",
+  });
+  spool.recordArtifactSnapshot({
+    turnId: "t-a", source: "assistant_tool", path: "index.html", content: "<html>A</html>",
+  });
   spool.recordTurnEnd({ turnId: "t-a", status: "ok", runtime: "agent-sdk" });
   await spool.flush();
   const dirB = spool.currentSessionDir();
   const dirA = path.join(path.dirname(dirB), "session-1");
   assert.deepEqual(
     readEvents(dirA).map((e) => e.type),
-    ["prompt", "usage", "turn_end"],
+    ["prompt", "usage", "response", "artifact_snapshot", "turn_end"],
     "A 턴의 늦은 이벤트가 A 세션에 붙는다",
   );
   assert.deepEqual(readEvents(dirB).map((e) => e.type), ["prompt"], "B 세션은 오염되지 않는다");
@@ -216,6 +243,43 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-spool-"));
   assert.equal(long.text_original_chars, SPOOL_MAX_TEXT_CHARS + 500, "원래 길이");
   assert.equal(short.text_truncated, undefined, "안 잘린 레코드엔 표식 없음");
   console.log("✓ text 캡 — 절단 + text_truncated/text_original_chars 표식");
+}
+
+// ─── 응답·산출물 캡/중복 — 분석 근거는 남기되 단일 세션 폭주 방지 ─────────
+{
+  const spool = makeSpool(tmp());
+  spool.recordPrompt({ turnId: "t-1", runtime: "proxy", text: "게임 만들어줘" });
+  spool.recordResponse({
+    turnId: "t-1",
+    runtime: "proxy",
+    status: "aborted",
+    text: "응".repeat(SPOOL_MAX_RESPONSE_CHARS + 10),
+  });
+  const hugeHtml = "<html>" + "x".repeat(SPOOL_MAX_ARTIFACT_CHARS + 50) + "</html>";
+  spool.recordArtifactSnapshot({
+    turnId: "t-1", source: "assistant_response", path: "deep/path/index.html", content: hugeHtml,
+  });
+  // 자동 reveal + show-intent 가 같은 문서를 다시 열어도 스냅샷은 하나다.
+  spool.recordArtifactSnapshot({
+    turnId: "t-1", source: "existing", path: "index.html", content: hugeHtml,
+  });
+  // 내용이 바뀌면 새 버전이다.
+  spool.recordArtifactSnapshot({
+    turnId: "t-1", source: "session_end", path: "index.html", content: "<html>v2</html>",
+  });
+  await spool.flush();
+  const events = readEvents(spool.currentSessionDir());
+  const response = events.find((e) => e.type === "response");
+  const artifacts = events.filter((e) => e.type === "artifact_snapshot");
+  assert.equal(response.text.length, SPOOL_MAX_RESPONSE_CHARS);
+  assert.equal(response.text_truncated, true);
+  assert.equal(response.status, "aborted", "중단 전 실제로 보인 응답임을 구분");
+  assert.equal(artifacts.length, 2, "같은 전체 sha256 은 중복 저장하지 않는다");
+  assert.equal(artifacts[0].content.length, SPOOL_MAX_ARTIFACT_CHARS);
+  assert.equal(artifacts[0].content_truncated, true);
+  assert.ok(artifacts[0].content_bytes > SPOOL_MAX_ARTIFACT_CHARS, "UTF-8 원문 바이트 수 기록");
+  assert.notEqual(artifacts[0].sha256, artifacts[1].sha256, "변경본은 별도 버전");
+  console.log("✓ response/artifact — 명시적 절단 · 전체 해시 · 동일 버전 dedupe");
 }
 
 // ─── workflow payload 문자열 캡 — 웹뷰발 자유 텍스트 방어 ───────────────────
@@ -274,6 +338,10 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-spool-"));
     spool.recordUsage({
       turnId: "t-1", source: "proxy", requestKey: "r", model: "m",
       inputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0, cacheCreationInputTokens: 0,
+    });
+    spool.recordResponse({ turnId: "t-1", runtime: "proxy", status: "ok", text: "y" });
+    spool.recordArtifactSnapshot({
+      turnId: "t-1", source: "assistant_response", path: "index.html", content: "<html>x</html>",
     });
     spool.recordTurnEnd({ turnId: "t-1", status: "ok", runtime: "proxy" });
     await spool.flush(); // reject 하면 여기서 터진다
