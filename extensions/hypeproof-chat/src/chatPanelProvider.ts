@@ -744,6 +744,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  - default: the sandboxed iframe PreviewProvider (existing behavior).
    * Public so extension.ts (runLastCode) shares the same routing.
    */
+  /** 연속 저장 디바운스 타이머 (마지막 저장 뒤 한 번만 미리보기). */
+  private revealTimer: ReturnType<typeof setTimeout> | undefined;
+
   /** 지금 화면에 띄운 사전 완성 세상 id — 같은 세상을 다시 고르면 다시 받지 않는다. */
   private lastPrebuiltWorld: string | null = null;
 
@@ -1590,7 +1593,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             if (!a.isError && htmlWrites.has(a.id)) {
               const fp = htmlWrites.get(a.id)!;
               htmlWrites.delete(a.id);
-              void this.revealWrittenHtml(fp, streamId);
+              // 2026-08-19 — 연속 편집(MultiEdit 이전엔 Edit 5 번)마다 미리보기를
+              // 다시 열면 "미리보기를 열었어요" 가 다섯 줄 쌓이고 라이브서버도
+              // 그만큼 재오픈된다. 마지막 저장 뒤 한 번만 연다(디바운스).
+              if (this.revealTimer) clearTimeout(this.revealTimer);
+              this.revealTimer = setTimeout(() => {
+                this.revealTimer = undefined;
+                void this.revealWrittenHtml(fp, streamId);
+              }, 900);
             }
             break;
         }

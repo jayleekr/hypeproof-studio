@@ -109,7 +109,11 @@ export function isMinorTier(profile: ResolvedProfile): boolean {
 // are the SDK's CamelCase built-in tool names (sdk.d.ts `Options.tools`).
 // There is deliberately no shell mapping: no profile flag can grant Bash.
 const SDK_READ_TOOL_NAMES = ["Read", "Grep", "Glob"] as const;
-const SDK_WRITE_TOOL_NAMES = ["Write", "Edit"] as const;
+// 2026-08-19 — MultiEdit 추가. 아동 트랙은 "여러 곳을 한 번에" 고치는 일이 잦은데
+// (아이: "비 멈추고 제방 쌓고 점프 넣어줘") Edit 만 있으면 코치가 호출을 N 번으로
+// 쪼갠다 → 턴 소진(maxTurns)·왕복 지연·저장 N 번. 게이트의 WRITE_TOOLS 에는 이미
+// multiedit 이 있어 승인·workspace 봉쇄 정책은 그대로 적용된다.
+const SDK_WRITE_TOOL_NAMES = ["Write", "Edit", "MultiEdit"] as const;
 
 /**
  * Tell the coach where it actually is (#428).
@@ -375,7 +379,12 @@ export function buildSubagentDefinitions(
  * 미성년 6 은 건드리지 않는다 — 이건 성능이 아니라 대상 연령 경계다.
  */
 export function maxTurnsFor(profile: ResolvedProfile): number {
-  return isMinorTier(profile) ? 6 : 60;
+  // 2026-08-19 실기기 — 미성년 6 은 "대상 연령 경계"가 아니라 **편집 예산**이었다.
+  // 게스트의 세상 트랙에서 한 턴이 Read 1 + Edit 5 = 6 을 그대로 채우고
+  // "Reached maximum number of turns (6)" 로 죽었다(아이 화면엔 Edit ✓ 다섯 줄만
+  // 남고 마무리 말이 없다). 편집 루프에 필요한 예산으로 올린다 — 폭주 방어는
+  // 턴 수가 아니라 max_tokens 상한(워커, 아동 8k)과 스톨 감시가 한다.
+  return isMinorTier(profile) ? 20 : 60;
 }
 
 // ── SDK native binary resolution (#282 W4a, docs/sdk-bundling.md §5) ─────────

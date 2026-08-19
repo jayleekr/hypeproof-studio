@@ -37,7 +37,11 @@ function makeSession(root, day, sid, { meta = true, events = "e1\ne2\n", uploade
     const f = path.join(dir, "events.jsonl");
     fs.writeFileSync(f, events);
     if (!fresh) {
-      const t = new Date(Date.now() - UPLOAD_QUIESCENT_MS - 5 * 60 * 1000);
+      // 2026-08-19 — 실제 시계가 아니라 **테스트가 쓰는 FIXED_NOW** 기준으로 늙힌다.
+      // Date.now() 기준이면 정지 게이트가 (FIXED_NOW - 실제mtime) 를 보게 되어
+      // 실제 UTC 가 09:00 을 넘긴 뒤로는 음수가 되고, 모든 세션이 "너무 신선함"
+      // 으로 스킵돼 uploadAllPending 이 0 건을 돌려준다(매일 18:00 KST 이후 CI 적색).
+      const t = new Date(FIXED_NOW().getTime() - UPLOAD_QUIESCENT_MS - 5 * 60 * 1000);
       fs.utimesSync(f, t, t);
     }
   }
