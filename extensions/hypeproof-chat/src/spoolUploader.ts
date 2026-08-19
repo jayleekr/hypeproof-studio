@@ -23,6 +23,22 @@ export const MANIFEST_SCHEMA_VERSION = 1;
 /** 업로드 대상 파일 — 서버 allowlist(routes/logs.ts)와 정합. 순서가 곧 프로토콜. */
 const UPLOAD_FILES_IN_ORDER = ["session.meta.json", "events.jsonl"] as const;
 
+/**
+ * 서버 allowlist(routes/logs.ts ALLOWED_UPLOAD_FILENAMES)와의 드리프트 락
+ * 테스트용 — 클라가 올리는 파일명 전집합. 두 목록이 어긋나면 세션이 조용히
+ * 미완결로만 남는다(400 → manifest 미도달).
+ */
+export const CLIENT_UPLOAD_FILENAMES = [...UPLOAD_FILES_IN_ORDER, "manifest.json"];
+
+/**
+ * 정지(quiescence) 게이트 — events.jsonl 이 이 시간 안에 갱신된 세션은
+ * "아직 쓰는 중"으로 보고 건너뛴다. 같은 PC 의 **다른 창**이 소유한 활성
+ * 세션을 집어 올리는 것을 막는다(1회차 리뷰 F2: 거짓 manifest + 마커로
+ * 꼬리 영구 유실). 이 인스턴스가 방금 봉인한 세션은 allowFresh 로 예외 —
+ * 봉인 = 더 이상 쓰지 않는다는 자기 보증이다.
+ */
+export const UPLOAD_QUIESCENT_MS = 5 * 60 * 1000;
+
 export interface UploadableSession {
   dir: string;
   /** 날짜 디렉토리명 (yyyy-mm-dd) — R2 키의 <day> 조각. */
@@ -49,9 +65,16 @@ export interface SessionUploadResult {
  */
 export function scanUploadableSessions(
   root: string,
-  opts?: { currentSessionDir?: string | null },
+  opts?: {
+    currentSessionDir?: string | null;
+    /** 이 인스턴스가 방금 봉인한 디렉토리 — 정지 게이트 면제 (자기 보증). */
+    allowFresh?: readonly string[];
+    now?: () => Date;
+  },
 ): UploadableSession[] {
   const out: UploadableSession[] = [];
+  const nowMs = (opts?.now ?? (() => new Date()))().getTime();
+  const allowFresh = new Set(opts?.allowFresh ?? []);
   const days = readDirSafe(root);
   for (const day of days) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(day.name) || !day.isDirectory()) continue;
@@ -61,8 +84,11 @@ export function scanUploadableSessions(
       if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.name)) continue;
       const dir = path.join(dayDir, s.name);
       if (opts?.currentSessionDir && dir === opts.currentSessionDir) continue;
-      if (!fs.existsSync(path.join(dir, "events.jsonl"))) continue;
+      const eventsStat = statSafe(path.join(dir, "events.jsonl"));
+      if (!eventsStat) continue;
       if (fs.existsSync(path.join(dir, UPLOADED_MARKER))) continue;
+      // 정지 게이트 — 다른 창의 활성 세션 보호 (UPLOAD_QUIESCENT_MS 주석).
+      if (!allowFresh.has(dir) && nowMs - eventsStat.mtimeMs < UPLOAD_QUIESCENT_MS) continue;
       out.push({ dir, day: day.name, sessionId: s.name });
     }
   }
@@ -146,11 +172,29 @@ export async function uploadSession(args: UploadSessionArgs): Promise<SessionUpl
     }
   };
 
-  // 존재하는 파일만 순서대로 — meta 는 이론상 없을 수 있고(쓰기 실패 세션),
-  // events 는 스캔 조건이라 항상 있다.
-  const present = UPLOAD_FILES_IN_ORDER.filter((f) => fs.existsSync(path.join(session.dir, f)));
-  for (const name of present) {
-    const body = fs.readFileSync(path.join(session.dir, name));
+  // 파일 바이트를 **한 번만** 읽고, PUT 도 manifest 해시도 같은 버퍼에서
+  // 만든다 — 읽기 두 번 사이에 다른 프로세스가 append 하면 manifest 가
+  // "업로드된 적 없는 바이트"를 서술하는 거짓 완결이 된다(1회차 리뷰 F2).
+  // fs 읽기 실패(스캔과 읽기 사이 삭제 등)도 구조화 실패로 — throw 전파는
+  // REQ-Q11 계약 위반이다.
+  let entries: Array<{ name: string; body: Buffer }>;
+  try {
+    entries = UPLOAD_FILES_IN_ORDER
+      .filter((f) => fs.existsSync(path.join(session.dir, f)))
+      .map((name) => ({ name, body: fs.readFileSync(path.join(session.dir, name)) }));
+  } catch (err) {
+    return {
+      dir: session.dir, ok: false, keys, failedAt: "read",
+      status: 0, message: err instanceof Error ? err.message : String(err),
+    };
+  }
+  // events.jsonl 은 세션의 본체 — 스캔과 읽기 사이에 사라졌다면(다른 창의
+  // 스윕 등) 빈 manifest 로 "완결"을 주장하면 안 된다.
+  if (!entries.some((e) => e.name === "events.jsonl")) {
+    return { dir: session.dir, ok: false, keys, failedAt: "read", status: 0, message: "events.jsonl missing" };
+  }
+
+  for (const { name, body } of entries) {
     const contentType = name.endsWith(".jsonl") ? "application/x-ndjson" : "application/json";
     const r = await putFile(name, body, contentType);
     if (!r.ok) {
@@ -158,8 +202,18 @@ export async function uploadSession(args: UploadSessionArgs): Promise<SessionUpl
     }
   }
 
-  const { bytes } = buildManifest(session.dir, present, now);
-  const r = await putFile("manifest.json", bytes, "application/json");
+  const manifest = {
+    schema_version: MANIFEST_SCHEMA_VERSION,
+    session_id: session.sessionId,
+    created_at: now().toISOString(),
+    files: entries.map(({ name, body }) => ({
+      name,
+      bytes: body.length,
+      sha256: createHash("sha256").update(body).digest("hex"),
+    })),
+  };
+  const manifestBytes = Buffer.from(JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  const r = await putFile("manifest.json", manifestBytes, "application/json");
   if (!r.ok) {
     return { dir: session.dir, ok: false, keys, failedAt: "manifest.json", status: r.status, message: r.message };
   }
@@ -179,14 +233,38 @@ export async function uploadSession(args: UploadSessionArgs): Promise<SessionUpl
 /** 미업로드 세션 전부 순차 업로드. 하나가 실패해도 나머지는 계속 시도한다. */
 export async function uploadAllPending(
   root: string,
-  opts: Omit<UploadSessionArgs, "session"> & { currentSessionDir?: string | null },
+  opts: Omit<UploadSessionArgs, "session"> & {
+    currentSessionDir?: string | null;
+    allowFresh?: readonly string[];
+  },
 ): Promise<SessionUploadResult[]> {
-  const sessions = scanUploadableSessions(root, { currentSessionDir: opts.currentSessionDir });
+  const sessions = scanUploadableSessions(root, {
+    currentSessionDir: opts.currentSessionDir,
+    allowFresh: opts.allowFresh,
+    now: opts.now,
+  });
   const results: SessionUploadResult[] = [];
   for (const session of sessions) {
-    results.push(await uploadSession({ ...opts, session }));
+    try {
+      results.push(await uploadSession({ ...opts, session }));
+    } catch (err) {
+      // uploadSession 은 던지지 않는 계약이지만, 계약이 뚫려도 나머지 세션과
+      // 결과 안내는 살아야 한다 (belt-and-suspenders).
+      results.push({
+        dir: session.dir, ok: false, keys: [], failedAt: "unexpected",
+        status: 0, message: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
   return results;
+}
+
+function statSafe(p: string): fs.Stats | null {
+  try {
+    return fs.statSync(p);
+  } catch {
+    return null;
+  }
 }
 
 function readDirSafe(dir: string): fs.Dirent[] {

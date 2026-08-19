@@ -14,18 +14,29 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
 
-const { scanUploadableSessions, uploadSession, uploadAllPending, buildManifest, UPLOADED_MARKER } =
-  await import("../src/spoolUploader.ts");
+const {
+  scanUploadableSessions, uploadSession, uploadAllPending, buildManifest,
+  UPLOADED_MARKER, UPLOAD_QUIESCENT_MS,
+} = await import("../src/spoolUploader.ts");
 
 const FIXED_NOW = () => new Date("2026-08-19T09:00:00.000Z");
 const SID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const SID2 = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
 
-function makeSession(root, day, sid, { meta = true, events = "e1\ne2\n", uploaded = false } = {}) {
+// 기본은 "정지된" 세션 — events mtime 을 정지 게이트 밖(10분 전)으로 민다.
+// fresh: true 로 만들면 "아직 쓰는 중"(방금 mtime) 세션이 된다.
+function makeSession(root, day, sid, { meta = true, events = "e1\ne2\n", uploaded = false, fresh = false } = {}) {
   const dir = path.join(root, day, sid);
   fs.mkdirSync(dir, { recursive: true });
   if (meta) fs.writeFileSync(path.join(dir, "session.meta.json"), '{"schema_version":1}\n');
-  if (events !== null) fs.writeFileSync(path.join(dir, "events.jsonl"), events);
+  if (events !== null) {
+    const f = path.join(dir, "events.jsonl");
+    fs.writeFileSync(f, events);
+    if (!fresh) {
+      const t = new Date(Date.now() - UPLOAD_QUIESCENT_MS - 5 * 60 * 1000);
+      fs.utimesSync(f, t, t);
+    }
+  }
   if (uploaded) fs.writeFileSync(path.join(dir, UPLOADED_MARKER), "{}\n");
   return dir;
 }
@@ -59,6 +70,20 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-upl-"));
   assert.equal(found[0].day, "2026-08-18");
   assert.equal(found[0].sessionId, SID);
   console.log("✓ 스캔 — 마커·현재세션·형식불량 제외");
+}
+
+// ─── 정지 게이트 — 방금 쓰인 세션(다른 창의 활성 세션)은 건너뛴다 ────────────
+// (1회차 리뷰 F2: 살아있는 세션을 올리면 거짓 manifest + 마커로 꼬리 유실)
+{
+  const root = tmp();
+  const live = makeSession(root, "2026-08-19", SID, { fresh: true });   // 방금 mtime
+  makeSession(root, "2026-08-18", SID2);                                // 정지됨
+  const found = scanUploadableSessions(root);
+  assert.deepEqual(found.map((s) => s.sessionId), [SID2], "fresh 세션은 스캔에서 제외");
+  // 봉인된 세션은 allowFresh 로 면제 — 수업 끝 직후 오늘 세션이 올라가는 경로.
+  const withSealed = scanUploadableSessions(root, { allowFresh: [live] });
+  assert.deepEqual(withSealed.map((s) => s.sessionId).sort(), [SID, SID2].sort());
+  console.log("✓ 정지 게이트 — fresh 제외, 봉인(allowFresh)은 면제");
 }
 
 // ─── 양성 — 업로드 순서: meta → events → manifest(마지막), 마커 생성 ─────────
@@ -159,3 +184,21 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-upl-"));
 }
 
 console.log("spool-uploader.smoke.mjs — all green");
+
+// ─── fs 소실 — 스캔과 읽기 사이 삭제는 구조화 실패 (throw 전파 없음) ─────────
+{
+  const root = tmp();
+  const dir = makeSession(root, "2026-08-18", SID);
+  const [session] = scanUploadableSessions(root);
+  fs.rmSync(path.join(dir, "events.jsonl")); // 다른 창의 스윕이 지운 상황
+  const { fn, calls } = fakeFetch();
+  const r = await uploadSession({
+    session, baseUrl: "https://api.test/v1", token: "t.s", fetchFn: fn, now: FIXED_NOW,
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.failedAt, "read");
+  assert.match(r.message, /events\.jsonl missing/);
+  assert.equal(calls.length, 0, "빈 manifest 로 '완결'을 주장하지 않는다");
+  assert.ok(!fs.existsSync(path.join(dir, UPLOADED_MARKER)));
+  console.log("✓ fs 소실 — 구조화 실패, 거짓 완결 없음");
+}

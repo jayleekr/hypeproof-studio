@@ -36,6 +36,7 @@ app.use("/v1/messages", signingSecretGuard);
 app.use("/v1/messages/*", signingSecretGuard);
 app.use("/v1/profile", signingSecretGuard);
 app.use("/v1/trace/*", signingSecretGuard);
+app.use("/v1/logs/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
 
 // Friendly root → redirect to admin UI (which itself is access-gated)

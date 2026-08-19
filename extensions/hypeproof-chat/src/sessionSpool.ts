@@ -364,6 +364,31 @@ export class SessionSpool {
   }
 
   /**
+   * #596 — 현재 세션을 봉인한다: 이 세션은 여기서 완결이고, 다음 이벤트는
+   * 새 세션 디렉토리에서 시작한다(신원은 승계). 업로드 직전에 호출해서
+   * "오늘 지금까지"가 업로드 대상이 되게 한다 — 이게 없으면 활성-세션 제외
+   * 규칙 때문에 수업 끝 배너가 아무것도 못 올린다(1회차 리뷰 F1).
+   * 반환: 봉인된 세션 디렉토리 (봉인할 게 없으면 null). 큐를 통해 돌므로
+   * 앞서 큐에 든 이벤트가 전부 적힌 뒤에 봉인된다.
+   */
+  seal(): Promise<string | null> {
+    return new Promise((resolve) => {
+      this.enqueue(async () => {
+        if (!this.session) {
+          resolve(null);
+          return;
+        }
+        const dir = this.session.dir;
+        this.pendingIdentity = this.session.identity;
+        this.session = null;
+        resolve(dir);
+      });
+      // enqueue 의 catch 가 삼킨 경우에도 호출자가 영원히 걸리지 않게.
+      void this.queue.then(() => resolve(null));
+    });
+  }
+
+  /**
    * 총량 캡 집행 (#580 D7). 큐를 통해 돌므로 materialize 와 경합하지 않는다.
    * 보호 대상: 이 인스턴스의 현재 세션 + **오늘 날짜 디렉토리 전체** — 멀티
    * 윈도우에서 다른 창의 활성 세션을 알 방법이 없으므로 당일은 건드리지
@@ -494,6 +519,11 @@ export class SessionSpool {
       // materialize/후착에서 meta 가 실패했던 세션 — 조용히 회복 시도.
       await this.writeMeta(s, s.identity).catch((err) => this.warnOnce("meta", err));
     }
+    // #596 — 마커가 있는 디렉토리에 새 이벤트가 오면(피닝된 늦은 턴 등) 그
+    // 세션은 더 이상 "업로드 완결"이 아니다: 마커를 지워 다음 트리거가 전체를
+    // 다시 올리게 한다(R2 덮어쓰기 멱등). 안 지우면 마커 이후 꼬리가 R2 에
+    // 영영 도달하지 못하고, 3일 뒤 스윕이 유일본을 지운다(1회차 리뷰 F2).
+    await fs.promises.unlink(path.join(s.dir, UPLOADED_MARKER)).catch(() => undefined);
     const record = { schema_version: SPOOL_SCHEMA_VERSION, ts: this.now().toISOString(), ...fields };
     const line = JSON.stringify(record) + "\n";
     const file = path.join(s.dir, "events.jsonl");

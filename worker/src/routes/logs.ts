@@ -20,6 +20,10 @@
 // fail-closed 로 강제된다 — profile.analytics.upload_session_logs === true 인
 // 코호트만 통과. R2 턴 원문의 log_user_messages 와 같은 규율(기본 OFF,
 // 동의·보존정책 후 opt-in — wrangler.toml 주석의 기존 팀 결정).
+//
+// manifest 의 sha256 은 서버가 검증하지 않는다 — "완결"은 클라이언트 자기
+// 증명이고, 바이트 대조는 소비 계층(duckdb)의 몫이다. 여기서 검증하려면
+// events 본문을 다시 읽어 해시해야 해서 업로드 비용이 배가된다.
 
 import { Hono } from "hono";
 import type { Env } from "../env";
@@ -32,13 +36,25 @@ export const logs = new Hono<{ Bindings: Env }>();
 
 // 파일명 allowlist — 스풀 세션 디렉토리의 정식 산출물 3종만. 그 외(임시 파일,
 // 경로 문자 포함, 업로더 로컬 마커 등)는 전부 거부한다.
+//
+// 조회는 반드시 own-property 로: 평범한 객체 인덱싱은 `__proto__`·
+// `constructor`·`toString` 같은 프로토타입 키에 truthy 를 돌려줘서 allowlist
+// 와 크기 캡이 동시에 뚫린다 (리뷰 실증 — 4개 키 전부 200 으로 통과했다).
+//
+// events.jsonl 캡은 스풀 총량 캡(200MB)보다 한참 아래지만 세션 1개의 현실적
+// 최대치(프롬프트 20k자 캡 × 수백 턴)를 여유 있게 덮는 64MB — 캡에 걸린
+// 세션은 영영 업로드가 안 되는 무음 유실이 되므로 낮게 잡으면 안 된다.
 const ALLOWED_FILES: Record<string, { maxBytes: number; contentType: string }> = {
   "session.meta.json": { maxBytes: 64 * 1024, contentType: "application/json" },
-  "events.jsonl": { maxBytes: 8 * 1024 * 1024, contentType: "application/x-ndjson" },
+  "events.jsonl": { maxBytes: 64 * 1024 * 1024, contentType: "application/x-ndjson" },
   "manifest.json": { maxBytes: 256 * 1024, contentType: "application/json" },
 };
 
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+/** 클라이언트(spoolUploader)와의 드리프트 락 테스트용 — 두 목록은 같아야 한다. */
+export const ALLOWED_UPLOAD_FILENAMES = Object.keys(ALLOWED_FILES);
+
+// 시맨틱까지 조인 날짜만 (2026-13-99 금지 — 키 프리픽스에 쓰레기 산포 방지).
+const DAY_RE = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
 
 // 세션 1개 = put 3회. 재시도까지 감안해도 분당 60 은 넉넉하고, 폭주만 막는다.
 const UPLOAD_RATE_LIMIT = 60;
@@ -132,13 +148,18 @@ logs.put("/:sessionId/:filename", async (c) => {
   }
 
   // 7. 파라미터 검증 — 키에 들어가는 모든 조각은 형식이 고정돼 있다.
-  const sessionId = c.req.param("sessionId");
+  // sessionId 는 소문자로 정규화 — 클라는 항상 소문자 UUID 를 내지만, 대문자
+  // 요청이 같은 논리 세션을 다른 R2 프리픽스로 쪼개는 것을 막는다.
+  const sessionId = c.req.param("sessionId").toLowerCase();
   const filename = c.req.param("filename");
   const day = c.req.query("day") ?? "";
   if (!isUuid(sessionId)) {
     return c.json({ error: { message: "sessionId must be a uuid", type: "request" } }, 400);
   }
-  const spec = ALLOWED_FILES[filename];
+  // own-property 필수 — 헤더 주석 참고 (__proto__ 우회).
+  const spec = Object.prototype.hasOwnProperty.call(ALLOWED_FILES, filename)
+    ? ALLOWED_FILES[filename]
+    : undefined;
   if (!spec) {
     return c.json(
       { error: { message: "filename must be one of session.meta.json / events.jsonl / manifest.json", type: "request" } },

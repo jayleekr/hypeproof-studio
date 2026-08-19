@@ -140,4 +140,42 @@ function putReq(filename, { token = CANARY_TOKEN, sessionId = SID, day = DAY, bo
   console.log("✓ 멱등 — 재업로드는 같은 키 덮어쓰기");
 }
 
+// ─── 음성 — 프로토타입 키 파일명은 allowlist 를 못 뚫는다 (리뷰 실증 취약점) ──
+{
+  const env = canaryEnv();
+  for (const name of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+    const r = await app.fetch(putReq(name, { body: "x".repeat(1000) }), env, makeCtx());
+    assert.equal(r.status, 400, `${name} → 400 (own-property 가드)`);
+  }
+  assert.equal(env._r2Puts.length, 0, "R2 무기록");
+  console.log("✓ 음성 — __proto__/constructor 등 프로토타입 키 400");
+}
+
+// ─── 음성 — 시맨틱 불량 날짜 / 대문자 sessionId 정규화 ───────────────────────
+{
+  const env = canaryEnv();
+  for (const day of ["2026-13-01", "2026-00-10", "2026-01-32", "9999-99-99"]) {
+    assert.equal((await app.fetch(putReq("events.jsonl", { day }), env, makeCtx())).status, 400, day);
+  }
+  const rUpper = await app.fetch(putReq("events.jsonl", { sessionId: SID.toUpperCase() }), env, makeCtx());
+  assert.equal(rUpper.status, 200);
+  assert.match((await rUpper.json()).key, new RegExp(`/${SID}/`), "대문자 UUID → 소문자 키로 정규화");
+  console.log("✓ 음성/정규화 — 불량 날짜 400 · sessionId 소문자화");
+}
+
+// ─── 드리프트 락 — 클라 업로드 파일명 == 서버 allowlist ──────────────────────
+// (어긋나면 세션이 조용히 미완결로만 남는다 — 400 → manifest 미도달)
+{
+  const { ALLOWED_UPLOAD_FILENAMES } = await import("../src/routes/logs.ts");
+  const { CLIENT_UPLOAD_FILENAMES } = await import(
+    "../../extensions/hypeproof-chat/src/spoolUploader.ts"
+  );
+  assert.deepEqual(
+    [...CLIENT_UPLOAD_FILENAMES].sort(),
+    [...ALLOWED_UPLOAD_FILENAMES].sort(),
+    "클라가 올리는 파일명 집합과 서버 allowlist 가 일치해야 한다",
+  );
+  console.log("✓ 드리프트 락 — 클라·서버 파일명 집합 일치");
+}
+
 console.log("logs-upload.test.mjs — all green");

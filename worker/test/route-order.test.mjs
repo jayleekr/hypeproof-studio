@@ -69,6 +69,12 @@ console.log("✓ route-order: requestId middleware runs before routing (404 path
     ["/v1/messages/count_tokens", post("/v1/messages/count_tokens", { headers: auth })],
     ["/v1/profile", new Request("https://api.test/v1/profile", { headers: auth })],
     ["/v1/trace/event", post("/v1/trace/event", { headers: auth })],
+    [
+      "/v1/logs (upload)",
+      new Request("https://api.test/v1/logs/aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/events.jsonl?day=2026-08-19", {
+        method: "PUT", headers: auth, body: "x\n",
+      }),
+    ],
     ["/admin/cohorts", new Request("https://api.test/admin/cohorts")],
   ]) {
     const r = await app.fetch(req, createMockEnv({ secret: BAD_SECRET, environment: "production" }), makeCtx());
@@ -78,7 +84,7 @@ console.log("✓ route-order: requestId middleware runs before routing (404 path
   }
   void env;
 }
-console.log("✓ route-order: signingSecretGuard precedes /v1/chat, /v1/messages(+/count_tokens), /v1/profile, /v1/trace, /admin");
+console.log("✓ route-order: signingSecretGuard precedes /v1/chat, /v1/messages(+/count_tokens), /v1/profile, /v1/trace, /v1/logs, /admin");
 
 // --- 3. guard exemptions: health, report, HTML pages survive a broken secret -
 {

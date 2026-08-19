@@ -121,6 +121,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * 대화 기록이 경고로 덮인다. 능력 상실은 상태이지 사건이 아니다.
    */
   private fallbackNoticeShown = false;
+  /** #596 — 세션 종료 업로드 배너를 이번 활성화에 이미 냈는가 (토스트 스팸 방지). */
+  private sessionEndUploadOffered = false;
   /**
    * #476 — 개발자용 진단 채널. 이전에는 폴백이 `console.warn` 한 줄이었는데,
    * 확장에 `createOutputChannel` 이 **한 군데도 없어서** 그 줄은 어디에도 남지
@@ -1928,10 +1930,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // 자동 업로드가 아니라 **버튼 하나 있는 안내**만 낸다(#580 AC: 명시적
       // 액션 없이는 어떤 업로드도 없다). 코호트가 opt-in 하지 않았으면
       // 아무것도 띄우지 않는다 — 서버도 어차피 거부한다(fail closed).
+      // 활성화당 1회 — 수업 끝나고 재전송할 때마다 토스트가 쌓이면 두 번째
+      // 부터는 아무도 안 읽는다 (#476 폴백 공지와 같은 판단).
       if (
         err.kind === "session_window" &&
+        !this.sessionEndUploadOffered &&
         this.cachedProfile?.analytics?.upload_session_logs === true
       ) {
+        this.sessionEndUploadOffered = true;
         void vscode.window
           .showInformationMessage(
             "수업이 끝났어요 — 오늘 활동 기록을 남겨둘까요?",
