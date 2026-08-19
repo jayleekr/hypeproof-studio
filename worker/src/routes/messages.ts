@@ -337,12 +337,17 @@ messages.post("/messages", async (c) => {
     // 성인 트랙은 건드리지 않는다.
     ...(profile.minor_cohort === true
       ? {
-          output_config: { ...((raw as Record<string, unknown>).output_config as Record<string, unknown> | undefined), effort: "low" },
+          // 2026-08-20 — low → medium. low 는 씽킹 폭주(65k)를 막으려 급히 박은 값인데,
+          // 실기기에서 "맥락을 못 알아먹는다" 는 대가가 나왔다. 폭주 원인은 그 사이
+          // 구조로 제거됐다: 출력 상한 · MultiEdit · 좁은 Read · 엔진 분리(스프라이트가
+          // 파일에서 빠져 반복 패턴 재작성 자체가 불가능). 되돌릴 땐 low 로.
+          output_config: { ...((raw as Record<string, unknown>).output_config as Record<string, unknown> | undefined), effort: "medium" },
           // 2026-08-19 실기기 — "Claude's response exceeded the 32000 output token maximum":
           // 코치가 도트 스프라이트 맵(반복 패턴 줄) 덩어리를 다시 쓰다 반복 루프에 빠져
           // 한 응답에 32k+ 를 뱉었다(앞서 65k 턴도 같은 증상). 아동 트랙의 정상 턴은
           // Edit 몇 번(<3k)이라 8k 면 충분하고, 폭주는 1~2분 안에 끊긴다.
-          max_tokens: Math.min(typeof raw.max_tokens === "number" ? raw.max_tokens : 8000, 8000),
+          // medium 은 생각 토큰이 출력 예산을 같이 쓴다 — 8k 면 큰 편집이 중간에 잘린다.
+          max_tokens: Math.min(typeof raw.max_tokens === "number" ? raw.max_tokens : 12000, 12000),
         }
       : {}),
     // #384 — Claude Code CLI 2.x emits mid-conversation `role:"system"`
