@@ -50,6 +50,46 @@ export function renderEngine(): string {
   return ENGINE_JS;
 }
 
+/**
+ * 그 세상만의 엔진 (2026-08-20, 컨텍스트 오염 대책).
+ *
+ * 공용 engine.js 에는 9개 세상의 스프라이트가 전부 들어 있다(S_PENG 펭귄, S_ICE 얼음,
+ * S_RAC 너구리…). 작업 폴더 파일 목록은 코치에게 전달되므로, 코치가 그 파일을 한 번
+ * 읽으면 **남의 세상 이야기가 섞인다** — 실기기: 초코(강아지) 세상에서 점수판을
+ * 부탁했더니 얼음을 꺼냈다. 프롬프트로 "읽지 마라" 라고 막는 건 확률적이다.
+ *
+ * 그래서 파일 자체에서 없앤다: 이 세상 HTML 이 실제로 쓰는 `S_*` 만 남긴다.
+ * 남는 것은 엔진 함수 + 그 세상 그림뿐 — 읽어도 오염될 내용이 없다.
+ */
+export function renderEngineFor(id: string): string | null {
+  const html = renderWorld(id);
+  if (!html) return null;
+  const engine = ENGINE_JS;
+  const used = new Set<string>();
+  for (const m of html.matchAll(/\bS_[A-Z_]+/g)) if (m[0]) used.add(m[0]);
+  // 엔진 안에서 서로 참조하는 스프라이트도 함께 남긴다(예: 배열 안 다른 이름).
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const m of engine.matchAll(/^const (S_[A-Z_]+)=(.*)$/gm)) {
+      const name = m[1];
+      const body = m[2] ?? "";
+      if (!name || !used.has(name)) continue;
+      for (const r of body.matchAll(/\bS_[A-Z_]+/g)) {
+        const ref = r[0];
+        if (ref && !used.has(ref)) { used.add(ref); grew = true; }
+      }
+    }
+  }
+  const kept: string[] = [];
+  for (const lineText of engine.split("\n")) {
+    const decl = /^const (S_[A-Z_]+)=/.exec(lineText);
+    if (decl && decl[1] && !used.has(decl[1])) continue;
+    kept.push(lineText);
+  }
+  return kept.join("\n");
+}
+
 /** 자리표시자를 문제 상태 기본값으로 채운 완전한 HTML. 모르는 id 면 null. */
 export function renderWorld(id: string): string | null {
   const w = WORLDS.find((x) => x.id === id);

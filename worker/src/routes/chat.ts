@@ -27,7 +27,7 @@ import { callAnthropicResilient } from "../lib/anthropic";
 import { glmUpstreamUrl } from "../lib/glm";
 import { callGeminiResilient } from "../lib/gemini";
 import { callOpenAI } from "../lib/openai";
-import { listWorlds, renderWorld, renderEngine } from "../skeletons/kids-quest/worlds";
+import { listWorlds, renderWorld, renderEngine, renderEngineFor } from "../skeletons/kids-quest/worlds";
 import {
   extractTrialHeaders,
   lastUserMessageText,
@@ -116,6 +116,17 @@ chat.get("/health/deep", async (c) => {
 
 // GET /v1/worlds/:id — 게스트의 세상 사전 완성본 HTML (2026-08-19).
 // 학생 토큰이면 누구나. 코치가 만들 필요 없이 Studio 가 즉시 띄운다.
+// GET /v1/worlds/:id/engine.js — **그 세상만의** 엔진 (2026-08-20).
+// 공용본에는 9개 세상 스프라이트가 다 들어 있어, 코치가 읽으면 남의 세상이 섞인다
+// (실기기: 초코 세상에서 얼음). 이 경로는 그 세상이 쓰는 그림만 남겨 내려준다.
+chat.get("/worlds/:id/engine.js", async (c) => {
+  const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
+  if (!auth.ok) return c.json({ error: { message: auth.message, type: "auth", code: auth.code, request_id: c.get("requestId") } }, 401);
+  const js = renderEngineFor(c.req.param("id"));
+  if (!js) return c.json({ error: { message: "unknown world", type: "config", code: "unknown_world", request_id: c.get("requestId") } }, 404);
+  return new Response(js, { status: 200, headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" } });
+});
+
 // GET /v1/worlds/engine.js — 9개 세상이 공유하는 도트 엔진 + 스프라이트 (#629).
 // Studio 가 index.html 과 같은 폴더에 저장하고, 세상 HTML 이 <script src="engine.js"> 로 부른다.
 chat.get("/worlds/engine.js", async (c) => {
