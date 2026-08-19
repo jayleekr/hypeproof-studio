@@ -5,8 +5,7 @@
 // Studio 가 GET /v1/worlds/:id 로 받아 **즉시** 띄운다. 코치는 게스트 첫 대사만 한다.
 // 값의 정본은 curriculum/quests/WORLDS.md 와 각 스켈레톤 CONFIG 주석("문제 세상 N").
 import { getSkeletonsForTier } from "../index";
-// @ts-ignore — bundled as text by wrangler [[rules]] (globs **/*.js.txt)
-import engineJs from "./engine.js.txt";
+import { ENGINE_JS } from "./engineJs";
 
 export interface WorldDef {
   /** 스켈레톤 id (kq-*) */
@@ -45,7 +44,7 @@ export function listWorlds(): Array<Pick<WorldDef, "id" | "guest" | "emoji" | "c
  * 읽고 그 안을 고치다 생성이 폭주했다(#629). 이제 코치가 보는 파일은 세상 코드뿐이다.
  */
 export function renderEngine(): string {
-  return engineJs as unknown as string;
+  return ENGINE_JS;
 }
 
 /** 자리표시자를 문제 상태 기본값으로 채운 완전한 HTML. 모르는 id 면 null. */

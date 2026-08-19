@@ -3,7 +3,7 @@
 // Importing this module (for side effects) lets a plain `node
 // --experimental-strip-types` process import the worker's TypeScript source:
 //   - extensionless relative imports resolve to `.ts` (or `<dir>/index.ts`)
-//   - `.html` / `.md` / `.js.txt` imports resolve to `export default <file contents>`,
+//   - `.html` / `.md` imports resolve to `export default <file contents>`,
 //     mirroring wrangler's `[[rules]] type="Text"` rule in wrangler.toml.
 //
 // Import this FIRST (before any import that reaches src/) in every test file.
@@ -29,7 +29,7 @@ registerHooks({
     return nextResolve(specifier, context);
   },
   load(url, context, nextLoad) {
-    if (url.endsWith(".html") || url.endsWith(".md") || url.endsWith(".js.txt")) {
+    if (url.endsWith(".html") || url.endsWith(".md")) {
       const text = readFileSync(fileURLToPath(url), "utf8");
       return {
         format: "module",

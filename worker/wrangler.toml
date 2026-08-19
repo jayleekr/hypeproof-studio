@@ -53,7 +53,7 @@ bucket_name = "hps-traces"
 # Bundle .md and .html as static text imports
 [[rules]]
 type = "Text"
-globs = ["**/*.md", "**/*.html", "**/*.js.txt"]
+globs = ["**/*.md", "**/*.html"]
 fallthrough = true
 
 [vars]
