@@ -1,9 +1,9 @@
 ---
-name: hp-studio-hain7-report
-description: Analyze HP Studio classroom session.meta.json and events.jsonl logs to produce a survey-free, evidence-cited HAIN7-derived seven-capability observation profile and branded one-page PDF for a child, guardian, or instructor. Use when a user asks to score a game-making or prompt-based Studio lesson, generate an InBody-like HAIN7 Studio Signal report, compare a learner with a strictly matched local cohort, or batch a lesson log into a compact result sheet. Do not use it as a formal HAIN7 diagnostic, intelligence/personality test, clinical assessment, or national norm.
+name: hain7-report
+description: Analyze HP Studio classroom session.meta.json and events.jsonl logs to produce a survey-free, evidence-cited HAIN7-derived seven-capability observation profile and branded one-page PDF for a child, guardian, or instructor. Use when a user asks to score a game-making or prompt-based Studio lesson, generate an InBody-like HAIN7 Studio Signal report, compare a learner with a strictly matched local cohort, batch lesson logs into compact result sheets, or plan secure delivery by email, Kakao Alimtalk, SMS/LMS, or QR. Delivery is design-only until a provider adapter is explicitly implemented and approved. Do not use it as a formal HAIN7 diagnostic, intelligence/personality test, clinical assessment, or national norm.
 ---
 
-# HP Studio HAIN7 Signal
+# HAIN7 Report
 
 Generate one A4 page from what the learner actually did in HP Studio: prompts, visible AI responses, validation events, human actions, and artifact versions. Keep the seven HAIN7 constructs, but label the output as a **HAIN7-derived classroom observation profile**, never as the formal adult HAIN7 assessment.
 
@@ -15,9 +15,19 @@ Generate one A4 page from what the learner actually did in HP Studio: prompts, v
 - Missing telemetry or no clear opportunity is `NA`, not zero. Show evidence coverage separately from score.
 - Do not say “또래 대비,” show a percentile, or name a relative strength/gap unless the cohort gate in `references/input-schema.md` passes.
 - For real data from a child under 14, stop unless the context file records verified legal-guardian consent and a child-readable notice version. Synthetic examples are exempt.
-- Keep raw logs local. Put no full prompt, real name, contact detail, or raw HTML in the PDF.
+- Do not copy raw logs into chat, reports, or delivery providers. A hosted model runtime may transmit inspected excerpts to its provider, so use real child data only under an approved account, retention policy, and legal basis. Put no full prompt, real name, contact detail, or raw HTML in the PDF.
 
 Read `references/scoring-rubric.md` before scoring and `references/input-schema.md` before accepting a cohort or real child record. Read `references/methodology.md` when explaining validity, limitations, or rollout requirements.
+
+## Resolve the skill directory
+
+Never assume the current working directory. Resolve `<skill_dir>` to the absolute directory containing this `SKILL.md`, then call every script and example through that directory.
+
+- Claude Code: the command is `/hain7-report` and `${CLAUDE_SKILL_DIR}` points to the skill directory.
+- Codex: the command is `$hain7-report`; use the absolute skill path shown in the available-skills metadata.
+- Other Agent Skills runtimes: locate this `SKILL.md` and use its parent directory.
+
+Read `references/runtime-compatibility.md` when installing, packaging, or troubleshooting the skill in Codex or Claude. The Python scorer and rubric are the source of truth in every model runtime; never replace them with a model-specific free-form score.
 
 ## One-invocation workflow
 
@@ -28,13 +38,13 @@ Accept either a session directory containing `session.meta.json` and `events.jso
 Run a candidate pass without PDF:
 
 ```bash
-python3 scripts/hain7_signal.py \
+python3 "<skill_dir>/scripts/hain7_signal.py" \
   --input /path/to/session \
   --context /path/to/report-context.json \
   --analysis-output /path/to/hain7-analysis.json
 ```
 
-Use the bundled document/PDF Python runtime when the system Python lacks ReportLab.
+Use an approved Python runtime with ReportLab and a Korean font. If the dependency is missing, report it clearly and ask before any network installation; do not silently install packages.
 
 ### 2. Audit all 28 markers
 
@@ -76,7 +86,7 @@ Local same-condition cohorts require at least 30 complete records and are labele
 Apply the review and render:
 
 ```bash
-python3 scripts/hain7_signal.py \
+python3 "<skill_dir>/scripts/hain7_signal.py" \
   --input /path/to/session \
   --context /path/to/report-context.json \
   --cohort /path/to/cohort.json \
@@ -101,16 +111,29 @@ Render the PDF to PNG and visually inspect it before delivery. Reject extra page
 The packaged example is safe for design and pipeline testing:
 
 ```bash
-python3 scripts/hain7_signal.py \
-  --input examples/sample-session \
-  --context examples/sample-context.json \
-  --cohort examples/sample-cohort.json \
-  --review examples/sample-review.json \
+python3 "<skill_dir>/scripts/hain7_signal.py" \
+  --input "<skill_dir>/examples/sample-session" \
+  --context "<skill_dir>/examples/sample-context.json" \
+  --cohort "<skill_dir>/examples/sample-cohort.json" \
+  --review "<skill_dir>/examples/sample-review.json" \
   --analysis-output /tmp/hain7-demo-analysis.json \
   --pdf-output /tmp/hain7-studio-signal-demo.pdf
 ```
 
 Synthetic data may render without a review file, but the PDF must say `DEMO DATA`. Never use that cohort as a production comparison base.
+
+## Delivery extension is not implemented yet
+
+Read `references/delivery-options.md` when the user asks to send or distribute a report. This version contains the evaluated channel strategy and provider-neutral contract only; it has no email, Kakao, SMS, QR, credential, or network-sending code.
+
+Until a later implementation is reviewed:
+
+- do not send, upload, or claim delivery;
+- do not place the PDF or raw logs at a public URL;
+- recommend one branded, opaque, expiring report link shared across channels;
+- keep recipient contact data outside analysis JSON and PDFs;
+- require a recipient/channel/template/expiry preview and explicit human confirmation immediately before any future send;
+- use an idempotency key so retries cannot duplicate delivery.
 
 ## Outputs and failures
 

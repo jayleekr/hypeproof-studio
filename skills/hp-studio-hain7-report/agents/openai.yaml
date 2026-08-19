@@ -1,4 +1,0 @@
-interface:
-  display_name: "HP Studio HAIN7 Signal"
-  short_description: "수업 로그로 HAIN7 기반 1페이지 관찰 결과지를 만듭니다"
-  default_prompt: "$hp-studio-hain7-report 스킬로 HP Studio 수업 로그를 검토하고 증거 기반 7역량 1페이지 PDF를 생성해줘."
