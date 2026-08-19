@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh}
+  #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+  #guest .face{font-size:34px;line-height:1}
+  #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  #guest .bub b{color:#b8571e}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="guest"><div class="face" id="gface"></div><div class="bub" id="gsay"></div></div>
+<div id="bar"><b>마우스</b>나 <b>방향키</b>로 날기 · <b>스페이스</b>로 시작</div>
+<script>
+/* ══ CONFIG — 자리표시자. 코치가 처음 채운다. 기본값 = 이 세상의 문제 상태 ═══════ */
+const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🐝
+const GUEST_NAME='%%GUEST_NAME%%';     // 붕붕
+const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 꽃밭에 매연이 껴서 앞이 안 보여… 꽃도 다 시들어서 꿀이 안 나와…
+const PLAYER='%%PLAYER_EMOJI%%';       // 나는 것 (대개 게스트)
+const ITEM_A='%%ITEM_A%%';             // 모을 것. 문제 세상: 🥀 (시든 꽃 — 꿀 0). 피면 🌸 🌻
+const ITEM_B='%%ITEM_B%%';             // 방해꾼. 문제 세상: 🏭 (연기). 없애려면ㅤ''
+const SPEED=%%SPEED%%;                 // 나는 빠르기 1~10 (기본 5)
+const RATE=%%RATE%%;                   // 꽃이 얼마나 흩어졌나 1~10 (기본 6)
+const GOAL=%%GOAL%%;                   // 꿀 몇 개면 성공 (기본 8)
+const SPECIAL=%%SPECIAL%%;             // 제한 시간(초) 기본 30, 0=무제한
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #6b6b6b/#9a9a8a (매연 하늘)
+/* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
+   아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
+   지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
+const WORLD={
+  smog:true,      // 매연 — 화면이 뿌옇고 내 주변만 보인다
+  wilted:true,    // 꽃이 시들었다 — 🥀 는 모아도 꿀이 안 된다 (ITEM_A 를 산 꽃으로 바꾸면 false 로)
+  factory:true,   // 🏭 이 연기를 뿜는다 (ITEM_B)
+};
+/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
+document.getElementById('gface').textContent=GUEST_EMOJI;
+const say=s=>{document.getElementById('gsay').innerHTML=s;};
+say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
+let state='title',px,py,tx,ty,items=[],haz=[],got=0,t=0;const SUB=(WORLD.wilted?'꽃이 다 시들었다…':ITEM_A+' '+GOAL+'개 모으면 성공!')+(SPECIAL?' ('+SPECIAL+'초)':'');
+const mv=2+SPEED*0.7;
+function place(){items=[];const cx=W/2,cy=H/2,spread=0.15+RATE*0.085;for(let i=0;i<Math.max(GOAL,4);i++){const a=Math.random()*6.28,r=Math.random()*spread*Math.min(W,H)*0.9;items.push({x:Math.max(30,Math.min(W-30,cx+Math.cos(a)*r)),y:Math.max(70,Math.min(H-40,cy+Math.sin(a)*r))});}
+  haz=[];if(ITEM_B&&WORLD.factory)for(let i=0;i<3;i++)haz.push({x:Math.random()*W,y:70+Math.random()*(H-110),vx:(Math.random()-.5)*3,vy:(Math.random()-.5)*3});}
+function reset(){px=tx=W/2;py=ty=H/2;got=0;t=0;place();state='play';say('<b>'+GUEST_NAME+'</b>: 콜록… 가볼게');}
+addEventListener('mousemove',e=>{if(state==='play'){tx=e.clientX;ty=e.clientY;}});addEventListener('touchmove',e=>{if(state==='play'){tx=e.touches[0].clientX;ty=e.touches[0].clientY;}},{passive:true});
+addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();if(state==='play'){if(e.key==='ArrowLeft')tx-=40;if(e.key==='ArrowRight')tx+=40;if(e.key==='ArrowUp')ty-=40;if(e.key==='ArrowDown')ty+=40;}});
+addEventListener('click',()=>{if(state!=='play')reset();});
+function loop(){bg();
+  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
+  else{ if(state==='play'){t++;px+=(tx-px)*0.12*(mv/5);py+=(ty-py)*0.12*(mv/5);px=Math.max(20,Math.min(W-20,px));py=Math.max(60,Math.min(H-30,py));
+      for(let i=items.length-1;i>=0;i--){const it=items[i];if(Math.hypot(it.x-px,it.y-py)<32){items.splice(i,1);if(!WORLD.wilted)got++;else say('<b>'+GUEST_NAME+'</b>: 시들어서 꿀이 없어…');}}
+      haz.forEach(h=>{h.x+=h.vx;h.y+=h.vy;if(h.x<0||h.x>W)h.vx*=-1;if(h.y<60||h.y>H-30)h.vy*=-1;if(Math.hypot(h.x-px,h.y-py)<30){px=W/2;py=H/2;tx=px;ty=py;}});
+      const secs=Math.round(t/60);
+      if(got>=GOAL)report({got,goal:GOAL,secs,time:SPECIAL,spread:RATE},true,got+'/'+GOAL,'꿀 가득! 🍯 숨도 잘 쉬어져','');
+      else if((SPECIAL&&secs>=SPECIAL)||(!items.length&&WORLD.wilted))report({got,goal:GOAL,secs,time:SPECIAL,spread:RATE},false,got+'/'+GOAL,'',WORLD.wilted?'꽃이 다 시들어서 꿀이 하나도 없어…':'시간이… 너무 멀리 흩어져 있어');}
+    x.font='34px serif';x.textAlign='center';items.forEach(it=>x.fillText(ITEM_A,it.x,it.y));haz.forEach(h=>x.fillText(ITEM_B,h.x,h.y));x.font='44px serif';x.fillText(PLAYER,px,py);
+    if(WORLD.smog){const g=x.createRadialGradient(px,py,60,px,py,220);g.addColorStop(0,'rgba(120,120,110,0)');g.addColorStop(1,'rgba(120,120,110,.9)');x.fillStyle=g;x.fillRect(0,0,W,H);}
+    const secs=Math.round(t/60);txt('🍯 '+got+' / '+GOAL+(SPECIAL?'   ⏱ '+Math.max(0,SPECIAL-secs):''),42,26,'#ffd75b');
+    if(state==='over'){txt(document.title.startsWith('성공')?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#bbb');}}
+  requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>

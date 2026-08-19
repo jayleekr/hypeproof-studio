@@ -418,7 +418,7 @@ chat.post("/chat/completions", async (c) => {
       oBody.stream = stream;
       if (stream) oBody.stream_options = { include_usage: true };
       modelLabel = oBody.model;
-      upstream = await callOpenAI(oBody, apiKey);
+      upstream = await callOpenAI(oBody, apiKey, undefined, c.env.OPENAI_BASE_URL);
     } else if (provider === "glm") {
       // GLM (Z.ai) — Anthropic 호환 경로라 **번역기와 스트림 처리를 그대로 재사용**한다.
       // 새로 쓰는 것은 URL 하나뿐이다 (lib/glm.ts 에 실측 근거를 적어 뒀다).

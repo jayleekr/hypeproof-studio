@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh}
+  #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+  #guest .face{font-size:34px;line-height:1}
+  #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  #guest .bub b{color:#b8571e}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="guest"><div class="face" id="gface"></div><div class="bub" id="gsay"></div></div>
+<div id="bar"><b>스페이스</b> 또는 <b>화면 탭</b>으로 점프 · 집까지 가자</div>
+<script>
+/* ══ CONFIG — 자리표시자. 코치가 처음 채운다. 기본값 = 이 세상의 문제 상태 ═══════ */
+const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🐈
+const GUEST_NAME='%%GUEST_NAME%%';     // 나비
+const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 골목이 물에 잠겼어… 비는 계속 오고, 통나무가 떠내려와. 집에 못 가겠어…
+const PLAYER='%%PLAYER_EMOJI%%';       // 달리는 것 (대개 게스트)
+const ITEM_A='%%ITEM_A%%';             // 도착할 곳 (예: 🏠)
+const ITEM_B='%%ITEM_B%%';             // 넘어야 하는 것. 문제 세상: 🪵 (떠내려오는 통나무). 방벽이면 🧱
+const SPEED=%%SPEED%%;                 // 달리는 빠르기 1~10 (기본 4)
+const RATE=%%RATE%%;                   // 장애물이 얼마나 자주 1~10 (문제 세상 6)
+const GOAL=%%GOAL%%;                   // 몇 개 넘으면 집 (기본 15)
+const SPECIAL=%%SPECIAL%%;             // 밝기 0~10 (문제 세상 2 — 어두워서 앞이 안 보임)
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #1a2233/#334a66 (비 오는 밤)
+/* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
+   아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
+   지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
+const WORLD={
+  flood:true,     // 물이 차오른다 — 화면 아래에서 물이 올라오고, 나비 발까지 오면 잠긴다
+  rain:true,      // 비가 내린다 (화면 빗줄기)
+  floodSpeed:1,   // 물이 차오르는 빠르기 (0이면 안 올라옴)
+};
+/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
+document.getElementById('gface').textContent=GUEST_EMOJI;
+const say=s=>{document.getElementById('gsay').innerHTML=s;};
+say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
+let state='title',py,vy,obs=[],t=0,passed=0,hits=0,water=0;const SUB=(ITEM_B?ITEM_B+' 넘어서 ':'')+ITEM_A+' 까지 '+GOAL+'개 지나면 도착!';
+const runSpeed=3+SPEED*0.9,gap=Math.max(28,110-RATE*9),vis=0.25+SPECIAL*0.075,ground=()=>H-70;
+function reset(){py=ground();vy=0;obs=[];t=0;passed=0;hits=0;water=0;state='play';say('<b>'+GUEST_NAME+'</b>: 후… 가보자');}
+function jump(){if(state!=='play'){reset();return;}if(py>=ground()-1)vy=-13;}
+addEventListener('keydown',e=>{if(e.code==='Space')jump();});addEventListener('pointerdown',jump);
+function loop(){bg();
+  const wl=WORLD.flood?H-40-water:H+10;
+  if(WORLD.rain){x.strokeStyle='rgba(180,200,255,.5)';x.lineWidth=1;for(let i=0;i<60;i++){const rx=(i*137+t*4)%W,ry=(i*89+t*9)%H;x.beginPath();x.moveTo(rx,ry);x.lineTo(rx-3,ry+14);x.stroke();}}
+  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
+  else{ if(state==='play'){t++;vy+=0.7;py+=vy;if(py>ground()){py=ground();vy=0;}
+      if(WORLD.flood&&WORLD.floodSpeed>0)water=Math.min(H*0.5,water+0.035*WORLD.floodSpeed);
+      if(ITEM_B&&t%Math.round(gap)===0&&Math.random()<0.7)obs.push({x:W+30,y:ground(),hit:false});
+      for(let i=obs.length-1;i>=0;i--){const o=obs[i];o.x-=runSpeed;if(o.x<-40){obs.splice(i,1);passed++;continue;}
+        if(!o.hit&&Math.abs(o.x-90)<28&&py>ground()-30){o.hit=true;hits++;say('<b>'+GUEST_NAME+'</b>: 아야!');}}
+      if(WORLD.flood&&wl<py-10)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','콜록… 또 잠겼어. 물이 너무 많아…');
+      else if(hits>=3)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','부딪혀서 못 가겠어… 앞이 안 보여');
+      else if(passed>=GOAL)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},true,passed+'/'+GOAL,'집이다! 🏠 이제 젖지 않고 갈 수 있어','');}
+    x.fillStyle='rgba(0,0,0,.35)';x.fillRect(0,ground()+22,W,H);
+    x.font='36px serif';x.textAlign='center';obs.forEach(o=>{if(o.x<W*vis+90)x.fillText(ITEM_B,o.x,o.y+8);});
+    x.font='30px serif';x.fillText(ITEM_A,W-40,ground()+8);
+    x.font='42px serif';x.fillText(PLAYER,90,py+8);
+    if(SPECIAL<10){const g=x.createLinearGradient(90+W*vis*0.6,0,90+W*vis+40,0);g.addColorStop(0,'rgba(0,0,10,0)');g.addColorStop(1,'rgba(0,0,10,.92)');x.fillStyle=g;x.fillRect(0,0,W,H);}
+    if(WORLD.flood){x.fillStyle='rgba(40,110,200,.55)';x.beginPath();x.moveTo(0,wl);for(let i=0;i<=W;i+=20)x.lineTo(i,wl+Math.sin(i/30+t/8)*4);x.lineTo(W,H);x.lineTo(0,H);x.fill();}
+    txt(passed+' / '+GOAL+'   💥 '+hits+'/3',42,24,'#ffd75b');
+    if(state==='over'){txt(document.title.startsWith('성공')?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#bbb');}}
+  requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>

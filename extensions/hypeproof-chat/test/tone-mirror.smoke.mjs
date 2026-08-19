@@ -1,7 +1,7 @@
 // 톤 테이블은 두 곳에 산다 — 그 둘이 어긋나지 않게 잡는다.
 //
 // 왜 이 TC 가 있나 (2026-08-17 Windows 실기기):
-//   "내가 만든 미래" 커리큘럼이 `kids-world` tier 를 새로 썼는데, 톤 판정
+//   "내가 만든 미래" 커리큘럼이 `kids-world`(현 `kids-quest`) tier 를 새로 썼는데, 톤 판정
 //   (`appToneOf`)에 그 tier 가 없어서 **`game` 으로 떨어졌다.** 그 결과 앱이
 //   "게임 만드는 중"·"🎮 내 게임"·'채팅에서 "게임 만들어줘"라고 말해보세요'
 //   같은 문구를 띄웠다 — 그 커리큘럼은 **"게임" 프레임을 금지**한다
@@ -37,7 +37,7 @@ console.log("=== 1. tier → tone 매핑이 실제로 도는가 ===");
 const TIER_TO_TONE = [
   ["search-webapp", "search"],
   ["website", "site"],
-  ["kids-world", "world"],
+  ["kids-quest", "quest"],
   ["kids-basic", "game"],
   ["kids-rich", "game"],
   [undefined, "game"],
@@ -76,10 +76,10 @@ for (const [tone, labels] of Object.entries(TONE_LABELS)) {
 
 console.log("");
 console.log('=== 4. "게임" 프레임 금지 트랙에 게임 어휘가 새지 않는다 ===');
-t("world 톤 문구 어디에도 '게임'/🎮 이 없다", () => {
-  const world = JSON.stringify(TONE_LABELS.world);
-  assert.ok(!world.includes("게임"), `world 톤에 "게임" 이 있다: ${world}`);
-  assert.ok(!world.includes("🎮"), `world 톤에 🎮 가 있다: ${world}`);
+t("quest 톤 문구 어디에도 '게임'/🎮 이 없다", () => {
+  const world = JSON.stringify(TONE_LABELS.quest);
+  assert.ok(!world.includes("게임"), `quest 톤에 "게임" 이 있다: ${world}`);
+  assert.ok(!world.includes("🎮"), `quest 톤에 🎮 가 있다: ${world}`);
 });
 
 console.log("");
