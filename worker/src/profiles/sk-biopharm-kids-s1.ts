@@ -117,7 +117,11 @@ export const profile: Profile = {
         { text: "🐈 나비 세상에 가볼래", style: "good" },
         { text: "🐝 붕붕 세상에 가볼래", style: "good" },
         { text: "🐧 뽀로 세상에 가볼래", style: "good" },
-        { text: "다른 친구도 있어?", style: "good" },
+        { text: "🐁 찍찍 세상에 가볼래", style: "good" },
+        { text: "🐹 햄찌 세상에 가볼래", style: "good" },
+        { text: "🦜 앵무 세상에 가볼래", style: "good" },
+        { text: "🐿️ 도토 세상에 가볼래", style: "good" },
+        { text: "🦝 라쿤 세상에 가볼래", style: "good" },
       ],
       // 모두 명령형 — 질문형("...하면 어떻게 돼?")은 AI가 코드 대신 되묻게
       // 만들어 화면이 빈 채로 남는다. 1회차는 "말하면 바로 바뀐다" 체험이 핵심.

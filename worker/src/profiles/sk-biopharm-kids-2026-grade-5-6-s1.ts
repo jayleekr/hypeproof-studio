@@ -120,7 +120,11 @@ export const profile: Profile = {
         { text: "🐈 나비 세상에 가볼래", style: "good" },
         { text: "🐝 붕붕 세상에 가볼래", style: "good" },
         { text: "🐧 뽀로 세상에 가볼래", style: "good" },
-        { text: "다른 친구도 있어?", style: "good" },
+        { text: "🐁 찍찍 세상에 가볼래", style: "good" },
+        { text: "🐹 햄찌 세상에 가볼래", style: "good" },
+        { text: "🦜 앵무 세상에 가볼래", style: "good" },
+        { text: "🐿️ 도토 세상에 가볼래", style: "good" },
+        { text: "🦝 라쿤 세상에 가볼래", style: "good" },
       ],
       // 검증 → 고치기(Feedback Loop)를 굴리는 칩.
       // 2026-08-19 — 게스트에 묶이지 않는 문구만(실기기: 나비 세상에 붕붕·초코 예시가 떴다).

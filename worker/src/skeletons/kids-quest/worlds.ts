@@ -104,18 +104,13 @@ export function renderWorld(id: string): string | null {
 
 /** 아이의 말에서 세상을 고른다 — 칩 문구 그대로, 또는 게스트 이름/별칭 + 세상 표현. */
 export function matchWorld(text: string): WorldDef | null {
+  // 세상 전환은 **클릭만** (2026-08-20 결정). 칩 문구 그대로(이모지 유무)만 인식한다.
+  // 이름·별칭·"세상" 같은 말로 잡던 민감한 매칭은 버렸다 — "초코 세상에 다람쥐
+  // 데려와줘" 가 도토 세상으로 튀거나, "초코 세상에 불 대신 물" 이 초코 원본을 다시
+  // 받아 **아이가 고친 것을 덮어썼다**. 타이핑은 코치에게 간다(코치는 칩을 누르라고 한다).
   const t = text.trim();
-  const bare = t.replace(/[!?.\u2026~\s]/g, "");
-  // 1) 칩 그대로 · 이름만 · 이모지만 — 아이가 "도토!" 한 마디만 해도 잡는다.
-  //    2026-08-19 실측: 이름만 치면 MISS 라 사전완성본(0.45초 GET) 대신 코치가
-  //    직접 만들어 몇 분씩 걸렸다. 빠른 경로를 놓치는 것이 곧 느림이다.
   for (const w of WORLDS) {
     if (t === w.chip || t === w.chip.replace(/^\S+\s/, "")) return w;
-    if (bare === w.guest || bare === w.emoji || bare === w.emoji + w.guest) return w;
   }
-  // 2) 가겠다는 표현 + 이름·이모지·별칭 (별칭은 2글자 이상 — "쥐" 가 "다람쥐" 를 먹었다)
-  if (!/세상|가볼래|들어가|가보자|보여줘|만나볼래|얘기|한테|에게|고를래|할래/.test(t)) return null;
-  for (const w of WORLDS) if (t.includes(w.guest) || t.includes(w.emoji)) return w;
-  for (const w of WORLDS) if (w.aliases.some((a) => a.length >= 2 && t.includes(a))) return w;
   return null;
 }

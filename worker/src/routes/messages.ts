@@ -704,6 +704,12 @@ messages.post("/messages/count_tokens", async (c) => {
  * 성인 트랙은 건드리지 않는다(멀티페이지 제작은 앞 맥락이 실제로 필요하다).
  */
 export function trimMinorContext(text: string, maxChars = 8000): string {
+  // 2026-08-20 실기기 — 코치 답변에 "User: 맑은하늘이요" 가 그대로 찍혔다.
+  // Studio 가 히스토리를 `user: …` / `assistant: …` 로 접어 보내니 모델이 그 형식을
+  // 이어 쓴 것이다. 라벨을 대화가 아닌 표시로 바꾸면 흉내낼 형식이 사라진다.
+  text = text
+    .replace(/^user:\s/gm, "[아이] ")
+    .replace(/^assistant:\s/gm, "[코치] ");
   let out = text.replace(/```[a-zA-Z]*\n[\s\S]{400,}?```/g, "```\n[코드는 작업 폴더 index.html 에 있습니다 — 필요하면 Read 하세요]\n```");
   if (out.length > maxChars) out = "[앞부분 생략]\n" + out.slice(out.length - maxChars);
   return out;
