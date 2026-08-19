@@ -24,7 +24,6 @@
       ]
     },
     "sandbox": {
-      "file_write": true,
       "execute_shell": false,
       "mcp_tools_enabled": []
     },
@@ -106,6 +105,9 @@
         "enabled": true,
         "show_counter": false
       }
+    },
+    "browser_session": {
+      "mode": "safe"
     }
   },
   {

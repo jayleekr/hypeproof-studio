@@ -69,6 +69,13 @@ jobs:
       - name: Validate cohort profiles
         working-directory: worker
         run: npm run validate-profiles
+      # The step above proves the REAL profiles pass. This one proves the
+      # validator still detects what it claims to — the inner loop. Without it
+      # a guard can rot silently: #606 found the suite already red (a renamed
+      # check and a fixture stale against #306) while the real gate stayed green,
+      # and the #602 child upload_session_logs guard had no coverage at all.
+      - name: Validator self-test (fixtures)
+        run: bash worker/scripts/cohort-harness/test/run.sh
 
   extension-typecheck:
     name: extension / typecheck
