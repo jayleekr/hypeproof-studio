@@ -17,26 +17,27 @@
 <body>
 <canvas id="c"></canvas>
 <div id="guest"><div class="face" id="gface"></div><div class="bub" id="gsay"></div></div>
-<div id="bar"><b>←</b> 왼쪽 통 · <b>→</b> 오른쪽 통 (또는 화면 왼쪽/오른쪽 탭) · <b>스페이스</b>로 시작</div>
+<div id="bar"><b>←</b> 왼쪽 통 · <b>→</b> 오른쪽 통 (또는 화면 왼쪽/오른쪽 탭) · 못 건지면 물고기가 사라져요</div>
 <script>
 /* ══ CONFIG — 자리표시자. 코치가 처음 채운다. 기본값 = 이 세상의 문제 상태 ═══════ */
 const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🦝
 const GUEST_NAME='%%GUEST_NAME%%';     // 라쿤
-const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 냇물에 쓰레기가 너무 빨리 떠내려와… 캔·병이 막 섞여서 못 따라가겠어. 물고기들이 자꾸 사라져…
-const PLAYER='%%PLAYER_EMOJI%%';       // 분류하는 게스트
-const ITEM_A='%%ITEM_A%%';             // 왼쪽 통 (예: 🥫)
-const ITEM_B='%%ITEM_B%%';             // 오른쪽 통 (예: 🍾)
-const SPEED=%%SPEED%%;                 // 다음 것 오는 빠르기 1~10 (문제 세상 8)
-const RATE=%%RATE%%;                   // 헷갈리는 것 비율 0~10 (문제 세상 6)
-const GOAL=%%GOAL%%;                   // 몇 개 맞히면 성공 (기본 12)
+const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 냇물에 쓰레기가 자꾸 떠내려와… 캔은 왼쪽 통, 병은 오른쪽 통에 넣어야 하는데 너무 빨라. 못 건지면 물고기가 사라져…
+const PLAYER='%%PLAYER_EMOJI%%';       // 냇가에 선 게스트
+const ITEM_A='%%ITEM_A%%';             // 왼쪽 통에 넣을 것 (예: 🥫)
+const ITEM_B='%%ITEM_B%%';             // 오른쪽 통에 넣을 것 (예: 🍾)
+const SPEED=%%SPEED%%;                 // 쓰레기가 떠내려오는 빠르기 1~10 (문제 세상 8)
+const RATE=%%RATE%%;                   // 헷갈리는 것(쓰레기 아닌 것 🍎🍂) 비율 0~10 (문제 세상 6)
+const GOAL=%%GOAL%%;                   // 몇 개 건지면 성공 (기본 12)
 const SPECIAL=%%SPECIAL%%;             // 틀려도 되는 횟수 (문제 세상 2)
-const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #5a4a3a/#8a7a5a (흙탕 냇물)
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #5a4a3a/#8a7a5a (흙탕물)
 /* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
    아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
    지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
 const WORLD={
-  dirty:true,     // 냇물이 더럽다 — 틀리거나 놓칠 때마다 물고기(fish)가 하나 사라진다
-  fish:4,         // 냇물의 물고기 수 🐟
+  dirty:true,     // 냇물이 갈색이다 — 틀리거나 놓칠 때마다 물고기(fish)가 한 마리 사라진다
+  fish:4,         // 냇물에 사는 물고기 수 🐟 (아이가 늘리거나 지키게 바꿀 수 있다)
+  trashRate:1,    // 쓰레기 양 배수 (0 이면 안 온다)
 };
 /* ══ 엔진 ══════════════════════════════════════════════════════════════ */
 const cv=document.getElementById('c'),x=cv.getContext('2d');
@@ -47,25 +48,29 @@ say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
 function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
 function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
 function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.guest=GUEST_NAME;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
-const ODD=['🍎','🍌','🌰','🍂'];let state='title',cur=null,timer=0,t=0,ok_=0,bad=0,fly=null,fish=WORLD.fish;const wait=Math.max(25,150-SPEED*12);const SUB=ITEM_A+' 왼쪽 · '+ITEM_B+' 오른쪽 — '+GOAL+'개 맞히면 성공!';
-function spawn(){const r=Math.random();cur=r<RATE*0.05?ODD[Math.floor(Math.random()*ODD.length)]:(Math.random()<.5?ITEM_A:ITEM_B);timer=wait;}
-function reset(){t=0;ok_=0;bad=0;fly=null;fish=WORLD.fish;spawn();state='play';say('<b>'+GUEST_NAME+'</b>: 온다 온다… 이건 어디 통?');}
-function wrong(msg){bad++;if(WORLD.dirty)fish=Math.max(0,fish-1);say('<b>'+GUEST_NAME+'</b>: '+msg+(WORLD.dirty&&fish>=0?' 물고기가 또…':''));}
-function check(){if(ok_>=GOAL)report({ok:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},true,ok_+'개','냇물이 깨끗해졌어! 🐟 고마워','');
-  else if(bad>SPECIAL||(WORLD.dirty&&fish<=0))report({ok:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},false,ok_+'개','',fish<=0?'물고기가 다 사라졌어…':'너무 빨리 와서 못 따라가겠어…');
-  else setTimeout(()=>{if(state==='play'&&!cur)spawn();},400);}
-function pick(side){if(state!=='play'||!cur)return;const want=cur===ITEM_A?'L':cur===ITEM_B?'R':'N';if(want===side){ok_++;fly={e:cur,side,t:0};}else wrong(want==='N'?'그건 쓰레기가 아닌데?':want==='L'?'그건 왼쪽인데!':'그건 오른쪽인데!');cur=null;check();}
+const ODD=['🍎','🍂','🌰','🍌'];let state='title',cur=null,t=0,ok_=0,bad=0,fly=null,fish=WORLD.fish,swim=[];const SUB=ITEM_A+' 왼쪽 · '+ITEM_B+' 오른쪽 — '+GOAL+'개 건지면 성공!';
+const flow=1.2+SPEED*0.55;const riverY=()=>H*0.42,riverH=()=>H*0.26;
+function spawn(){if(WORLD.trashRate<=0){cur=null;return;}const r=Math.random();cur={e:r<RATE*0.05?ODD[Math.floor(Math.random()*ODD.length)]:(Math.random()<.5?ITEM_A:ITEM_B),x:-40,y:riverY()+riverH()*0.5};}
+function reset(){t=0;ok_=0;bad=0;fly=null;fish=WORLD.fish;swim=[];for(let i=0;i<fish;i++)swim.push({x:Math.random()*W,d:Math.random()<.5?1:-1,y:riverY()+20+Math.random()*(riverH()-40)});spawn();state='play';say('<b>'+GUEST_NAME+'</b>: 온다 온다… 이건 어디 통?');}
+function wrong(msg){bad++;if(WORLD.dirty&&fish>0){fish--;swim.pop();}say('<b>'+GUEST_NAME+'</b>: '+msg+(WORLD.dirty?' 물고기가 또 사라졌어…':''));}
+function check(){if(ok_>=GOAL)report({ok:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},true,ok_+'개','냇물이 깨끗해졌어! 🐟 물고기들이 돌아왔어, 고마워','');
+  else if(bad>SPECIAL||(WORLD.dirty&&fish<=0))report({ok:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},false,ok_+'개','',fish<=0?'물고기가 다 사라졌어…':'너무 빨리 떠내려와서 못 건지겠어…');
+  else setTimeout(()=>{if(state==='play'&&!cur)spawn();},300);}
+function pick(side){if(state!=='play'||!cur)return;const want=cur.e===ITEM_A?'L':cur.e===ITEM_B?'R':'N';if(want===side){ok_++;fly={e:cur.e,side,t:0,x:cur.x,y:cur.y};}else wrong(want==='N'?'그건 쓰레기가 아닌데?':want==='L'?'그건 왼쪽 통인데!':'그건 오른쪽 통인데!');cur=null;check();}
 addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();if(e.key==='ArrowLeft')pick('L');if(e.key==='ArrowRight')pick('R');});
-addEventListener('pointerdown',e=>{if(state!=='play'){reset();return;}if(e.clientY<H*0.4)return;pick(e.clientX<W/2?'L':'R');});
+addEventListener('pointerdown',e=>{if(state!=='play'){reset();return;}pick(e.clientX<W/2?'L':'R');});
 function loop(){bg();
+  const ry=riverY(),rh=riverH();
+  x.fillStyle=WORLD.dirty?'rgba(110,85,50,.85)':'rgba(70,150,230,.75)';x.fillRect(0,ry,W,rh);
+  x.strokeStyle='rgba(255,255,255,.25)';x.lineWidth=2;for(let i=0;i<6;i++){x.beginPath();const yy=ry+10+i*(rh/6);for(let X=0;X<=W;X+=16)x.lineTo(X,yy+Math.sin(X/40+t/10+i)*3);x.stroke();}
+  x.textAlign='center';x.font='30px serif';swim.forEach(f=>{if(state==='play'){f.x+=f.d*0.6;if(f.x<0||f.x>W)f.d*=-1;}x.save();x.translate(f.x,f.y);if(f.d>0)x.scale(-1,1);x.fillText('🐟',0,0);x.restore();});
   if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
-  else{if(state==='play'){t++;if(cur){timer--;if(timer<=0){const want=cur===ITEM_A?'L':cur===ITEM_B?'R':'N';if(want==='N')ok_++;else wrong('놓쳤다…');cur=null;check();}}}
-    x.fillStyle=WORLD.dirty?'rgba(90,70,40,.6)':'rgba(60,140,220,.5)';x.fillRect(0,H-40,W,40);x.font='22px serif';x.textAlign='center';for(let i=0;i<fish;i++)x.fillText('🐟',60+i*40,H-14);
-    x.font='70px serif';x.fillText('🗑️',W*0.2,H-70);x.fillText('🗑️',W*0.8,H-70);x.font='36px serif';x.fillText(ITEM_A,W*0.2,H-140);x.fillText(ITEM_B,W*0.8,H-140);
-    if(cur){x.font='80px serif';x.fillText(cur,W/2,H/2);x.fillStyle='#ffd75b';x.fillRect(W/2-100,H/2+40,200*Math.max(0,timer/wait),10);}
-    if(fly){fly.t++;const fx=W/2+(fly.side==='L'?-1:1)*W*0.3*Math.min(1,fly.t/15),fy=H/2+(H-70-H/2)*Math.min(1,fly.t/15);x.font='50px serif';x.fillText(fly.e,fx,fy);if(fly.t>15)fly=null;}
-    x.font='40px serif';x.fillText(PLAYER,W-50,H-60);txt('맞힘 '+ok_+' / '+GOAL+'   ✖ '+bad+'/'+SPECIAL,42,24,'#ffd75b');
-    if(state==='over'){txt(document.title.startsWith('성공')?'깨끗해졌다! 🎉':'…',H/2-90,Math.min(46,W/9));txt('스페이스바로 다시',H/2-50,18,'#bbb');}}
+  else{if(state==='play'){t++;if(cur){cur.x+=flow;if(cur.x>W+30){const want=cur.e===ITEM_A?'L':cur.e===ITEM_B?'R':'N';if(want==='N')ok_++;else wrong('놓쳤다…');cur=null;check();}}}
+    x.font='64px serif';x.fillText('🗑️',W*0.18,H-40);x.fillText('🗑️',W*0.82,H-40);x.font='34px serif';x.fillText(ITEM_A,W*0.18,H-105);x.fillText(ITEM_B,W*0.82,H-105);
+    if(cur){x.font='60px serif';x.fillText(cur.e,cur.x,cur.y+10);}
+    if(fly){fly.t++;const tx=fly.side==='L'?W*0.18:W*0.82,ty=H-60;const k=Math.min(1,fly.t/14);x.font='44px serif';x.fillText(fly.e,fly.x+(tx-fly.x)*k,fly.y+(ty-fly.y)*k);if(fly.t>14)fly=null;}
+    x.font='40px serif';x.fillText(PLAYER,W-50,ry-30);txt('건짐 '+ok_+' / '+GOAL+'   ✖ '+bad+'/'+SPECIAL+'   🐟 '+fish,42,24,'#ffd75b');
+    if(state==='over'){txt(document.title.startsWith('성공')?'깨끗해졌다! 🎉':'…',ry-70,Math.min(46,W/9));txt('스페이스바로 다시',ry-32,18,'#bbb');}}
   requestAnimationFrame(loop);}
 loop();
 </script>
