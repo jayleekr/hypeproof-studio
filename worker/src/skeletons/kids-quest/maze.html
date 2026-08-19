@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh}
+  #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+  #guest .face{font-size:34px;line-height:1}
+  #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  #guest .bub b{color:#b8571e}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="guest"><div class="face" id="gface"></div><div class="bub" id="gsay"></div></div>
+<div id="bar"><b>방향키</b> 또는 <b>화살표 탭</b>으로 한 칸씩 · <b>스페이스</b>로 시작</div>
+<script>
+/* ══ CONFIG — 자리표시자. 코치가 처음 채운다. 기본값 = 이 세상의 문제 상태 ═══════ */
+const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🐁
+const GUEST_NAME='%%GUEST_NAME%%';     // 찍찍
+const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 하수구가 너무 캄캄해… 웅덩이도 많고. 치즈까지 어떻게 가지…
+const PLAYER='%%PLAYER_EMOJI%%';       // 길을 찾는 것 (대개 게스트)
+const ITEM_A='%%ITEM_A%%';             // 목표 (예: 🧀)
+const ITEM_B='%%ITEM_B%%';             // 함정. 문제 세상: 💧 (웅덩이 — 밟으면 처음). 없애려면 ''
+const SPEED=%%SPEED%%;                 // 함정 개수 0~10 (문제 세상 6)
+const RATE=%%RATE%%;                   // 미로 크기 1~10 (문제 세상 5 = 13칸)
+const GOAL=%%GOAL%%;                   // 제한 시간(초) 기본 60, 0=무제한
+const SPECIAL=%%SPECIAL%%;             // 밝기 0~10 (문제 세상 1 = 내 옆칸만 보임)
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #111318/#23262f (하수구)
+/* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
+   아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
+   지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
+const WORLD={
+  dark:true,      // 캄캄하다 — SPECIAL(밝기)이 낮다. 불을 켜면 false 로 하고 SPECIAL 도 올린다
+  puddles:true,   // 웅덩이(ITEM_B)가 있다
+};
+/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
+document.getElementById('gface').textContent=GUEST_EMOJI;
+const say=s=>{document.getElementById('gsay').innerHTML=s;};
+say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
+const N=Math.max(5,Math.min(21,2*(Math.round(RATE)+1)+1));let state='title',grid,px,py,t=0,steps=0,traps=[];const SUB=ITEM_A+' 까지 가면 성공!'+(GOAL?' ('+GOAL+'초)':'');
+function carve(){grid=Array.from({length:N},()=>Array(N).fill(1));const st=[[1,1]];grid[1][1]=0;while(st.length){const [cx,cy]=st[st.length-1];const d=[[2,0],[-2,0],[0,2],[0,-2]].sort(()=>Math.random()-.5);let mv=false;for(const [dx,dy] of d){const nx=cx+dx,ny=cy+dy;if(nx>0&&ny>0&&nx<N-1&&ny<N-1&&grid[ny][nx]===1){grid[ny][nx]=0;grid[cy+dy/2][cx+dx/2]=0;st.push([nx,ny]);mv=true;break;}}if(!mv)st.pop();}
+  const onPath=new Set();{const q=[[1,1]],prev={'1,1':null};while(q.length){const [cx,cy]=q.shift();if(cx===N-2&&cy===N-2)break;for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){const nx=cx+dx,ny=cy+dy;if(grid[ny]&&grid[ny][nx]===0&&!((nx+','+ny) in prev)){prev[nx+','+ny]=[cx,cy];q.push([nx,ny]);}}}let c=[N-2,N-2];while(c){onPath.add(c[0]+','+c[1]);c=prev[c[0]+','+c[1]];}}
+  traps=[];let tries=0;while(WORLD.puddles&&ITEM_B&&traps.length<Math.max(0,SPEED)&&tries<500){tries++;const tx=1+2*Math.floor(Math.random()*((N-1)/2)),ty=1+2*Math.floor(Math.random()*((N-1)/2));if(grid[ty][tx]===0&&!onPath.has(tx+','+ty)&&!traps.some(q=>q[0]===tx&&q[1]===ty))traps.push([tx,ty]);}}
+function reset(){carve();px=1;py=1;t=0;steps=0;state='play';say('<b>'+GUEST_NAME+'</b>: 어… 어디가 어디지…');}
+function move(dx,dy){if(state!=='play')return;const nx=px+dx,ny=py+dy;if(grid[ny]&&grid[ny][nx]===0){px=nx;py=ny;steps++;if(traps.some(q=>q[0]===px&&q[1]===py)){px=1;py=1;say('<b>'+GUEST_NAME+'</b>: 첨벙! 처음부터…');}
+  if(px===N-2&&py===N-2)report({steps,secs:Math.round(t/60),size:N,traps:traps.length,light:SPECIAL},true,steps+'걸음','찾았다! 🧀 길이 보이니까 금방이네','');}}
+addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();if(e.key==='ArrowLeft')move(-1,0);if(e.key==='ArrowRight')move(1,0);if(e.key==='ArrowUp')move(0,-1);if(e.key==='ArrowDown')move(0,1);});
+addEventListener('pointerdown',e=>{if(state!=='play'){reset();return;}const cs=cell(),gx=(W-N*cs)/2,gy=60,dx=e.clientX-(gx+(px+.5)*cs),dy=e.clientY-(gy+(py+.5)*cs);if(Math.abs(dx)>Math.abs(dy))move(dx>0?1:-1,0);else move(0,dy>0?1:-1);});
+function cell(){return Math.floor(Math.min((W-20)/N,(H-100)/N));}
+function loop(){bg();
+  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
+  else{const cs=cell(),gx=(W-N*cs)/2,gy=60;if(state==='play')t++;const vis=(!WORLD.dark||SPECIAL>=10)?99:1+SPECIAL*0.7;
+    for(let y=0;y<N;y++)for(let X=0;X<N;X++){if(Math.hypot(X-px,y-py)>vis)continue;x.fillStyle=grid[y][X]?'rgba(20,20,40,.85)':'rgba(255,255,255,.18)';x.fillRect(gx+X*cs,gy+y*cs,cs-1,cs-1);}
+    x.font=Math.floor(cs*.7)+'px serif';x.textAlign='center';x.textBaseline='middle';
+    traps.forEach(q=>{if(Math.hypot(q[0]-px,q[1]-py)<=vis)x.fillText(ITEM_B,gx+(q[0]+.5)*cs,gy+(q[1]+.5)*cs);});
+    if(Math.hypot(N-2-px,N-2-py)<=vis)x.fillText(ITEM_A,gx+(N-1.5)*cs,gy+(N-1.5)*cs);x.fillText(PLAYER,gx+(px+.5)*cs,gy+(py+.5)*cs);x.textBaseline='alphabetic';
+    const secs=Math.round(t/60);txt(steps+'걸음'+(GOAL?'   ⏱ '+Math.max(0,GOAL-secs):''),42,24,'#ffd75b');
+    if(state==='play'&&GOAL&&secs>=GOAL)report({steps,secs,size:N,traps:traps.length,light:SPECIAL},false,steps+'걸음','','시간이 다 됐어… 너무 캄캄해서 못 찾겠어');
+    if(state==='over'){txt(document.title.startsWith('성공')?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#bbb');}}
+  requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>

@@ -8,7 +8,8 @@
 // Each probe is independent — one provider being down doesn't fail KV's check.
 
 import type { Env } from "../env.ts";
-import { resolveProvider } from "../env.ts";
+import { GLM_ANTHROPIC_URL } from "../lib/glm";
+import { resolveProvider, type LLMProvider } from "../env.ts";
 
 const PROBE_TIMEOUT_MS = 5000;
 
@@ -27,7 +28,8 @@ export interface DeepHealthResult {
     gemini?: ProbeResult;
     anthropic?: ProbeResult;
     openai?: ProbeResult;
-    active: "gemini" | "anthropic" | "openai" | "unknown";
+    glm?: ProbeResult;
+    active: LLMProvider | "unknown";
   };
   kv: ProbeResult;
   d1: ProbeResult;
@@ -73,6 +75,11 @@ export async function runDeepHealth(env: Env): Promise<DeepHealthResult> {
       probeOpenAI(env.OPENAI_API_KEY).then((r) => { out.providers.openai = r; }),
     );
   }
+  if (env.GLM_API_KEY) {
+    probes.push(
+      probeGlm(env.GLM_API_KEY).then((r) => { out.providers.glm = r; }),
+    );
+  }
   probes.push(probeKV(env).then((r) => { out.kv = r; }));
   probes.push(probeD1(env).then((r) => { out.d1 = r; }));
 
@@ -97,6 +104,30 @@ async function probeGemini(apiKey: string): Promise<ProbeResult> {
 }
 
 /** Anthropic via the configured proxy (when set) or direct. */
+/**
+ * GLM(Z.ai) 프로브. Anthropic 호환 경로라 요청 모양이 같고 **URL·키 헤더만 다르다.**
+ *
+ * 프로브를 같이 넣는 이유: 이게 없으면 LLM_PROVIDER=glm 일 때 activeProbe 가
+ * undefined 가 되어 헬스가 **거짓으로 unhealthy** 를 보고한다. 프로바이더를 늘리면
+ * 프로브도 같이 늘려야 한다는 것을 여기 적어 둔다.
+ */
+async function probeGlm(apiKey: string): Promise<ProbeResult> {
+  const r = await timedFetch(GLM_ANTHROPIC_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model: "glm-5.2",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "." }],
+    }),
+  });
+  return r;
+}
+
 async function probeAnthropic(apiKey: string, proxyUrl?: string, proxySecret?: string): Promise<ProbeResult> {
   // The proxy is transparent passthrough — we can hit its /v1/messages with a
   // tiny POST. Cheapest tokens model (haiku) keeps cost at ~$0/call when capped

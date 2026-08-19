@@ -12,12 +12,13 @@
 //   9. Log usage to Analytics Engine + D1
 
 import { Hono } from "hono";
-import { resolveProvider, type Env, type LLMProvider } from "../env";
+import { resolveProvider, providerKey, type Env, type LLMProvider } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
 import { getProfile } from "../profiles";
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropicResilient } from "../lib/anthropic";
+import { glmUpstreamUrl } from "../lib/glm";
 import { callGeminiResilient } from "../lib/gemini";
 import { callOpenAI } from "../lib/openai";
 import {
@@ -355,13 +356,25 @@ chat.post("/chat/completions", async (c) => {
     }
   }
 
-  // Pick the upstream LLM (switchable peers; default Gemini — see
-  // resolveProvider). translate / translateOpenAI both drop client
-  // system+tool messages — the trust model is identical either way.
+  // Pick the upstream LLM. 우선순위는 **프로필 → 배포 기본값** 이다.
+  //
+  // 쓰임새마다 맞는 모델이 다르다 — 아이들 수업은 싸고 빠른 쪽, 고위험 산출물은 비싸도
+  // 정확한 쪽. 배포 전체를 한 모델로 묶을 이유가 없어서, 프로필이 `model.provider` 를
+  // 선언하면 그 요청만 그쪽으로 나간다. 선언하지 않은 프로필은 지금까지와 똑같이
+  // LLM_PROVIDER 를 따른다 (기존 배포의 동작이 바뀌지 않는다).
+  //
+  // translate / translateOpenAI both drop client system+tool messages — the
+  // trust model is identical either way.
   let provider: LLMProvider;
   let apiKey: string;
   try {
-    ({ provider, apiKey } = resolveProvider(env));
+    const pinned = profile.model.provider;
+    if (pinned) {
+      provider = pinned;
+      apiKey = providerKey(env, pinned);
+    } else {
+      ({ provider, apiKey } = resolveProvider(env));
+    }
   } catch (err) {
     // #257 — config prose (env var names, provider wiring) stays in logs.
     console.error(`[${c.get("requestId")}] provider config error:`, err);
@@ -399,7 +412,20 @@ chat.post("/chat/completions", async (c) => {
       oBody.stream = stream;
       if (stream) oBody.stream_options = { include_usage: true };
       modelLabel = oBody.model;
-      upstream = await callOpenAI(oBody, apiKey);
+      upstream = await callOpenAI(oBody, apiKey, undefined, c.env.OPENAI_BASE_URL);
+    } else if (provider === "glm") {
+      // GLM (Z.ai) — Anthropic 호환 경로라 **번역기와 스트림 처리를 그대로 재사용**한다.
+      // 새로 쓰는 것은 URL 하나뿐이다 (lib/glm.ts 에 실측 근거를 적어 뒀다).
+      //
+      // Anthropic 프록시/시크릿은 붙이지 않는다 — 그건 지역 차단된 api.anthropic.com
+      // 우회용이고 z.ai 에는 해당이 없다. 붙이면 프록시가 403 을 낸다.
+      //
+      // 캐시는 자동이 아니다: cache_control 을 명시해야 걸린다 (실측 81% 절감).
+      // 그 지시를 넣는 것은 translate() 쪽 일이라 이 wrapper 범위 밖이다 — #545.
+      const gBody = translate(body as any, profile, coach, "glm");
+      gBody.stream = stream;
+      modelLabel = gBody.model;
+      upstream = await callAnthropicResilient(gBody, apiKey, { url: glmUpstreamUrl() });
     } else {
       // anthropic — Messages API (different schema; transformStream handles it).
       // Route through the optional region-pinned proxy when set, otherwise
