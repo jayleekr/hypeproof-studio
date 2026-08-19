@@ -65,6 +65,25 @@ export interface ResolvedProvider {
  * 키가 없으면 던진다 — 인증 없는 상류 호출을 조용히 하지 않는다. 프로필이 가리키는
  * 프로바이더의 키를 안 넣어두면 **그 프로필만** 502 가 되고 나머지는 정상이다.
  */
+/**
+ * **어느 프로바이더가 Anthropic 와이어 포맷으로 말하는가.**
+ *
+ * 프로바이더 이름과 응답 스키마는 1:1 이 아니다. GLM 은 z.ai 의 Anthropic 호환
+ * 엔드포인트로 나가므로 요청도 응답도 Anthropic 모양이다 — 이름만 보고 갈라내면
+ * OpenAI 분기로 떨어진다.
+ *
+ * 그렇게 떨어지면 조용히 틀린다. `usage.prompt_tokens` 를 찾는데 응답에는
+ * `usage.input_tokens` 가 오므로 **토큰이 0 으로 기록되고**(`?? 0`), 캐시 필드는
+ * 아예 읽히지 않는다. 스트리밍은 더 나빠서, Anthropic SSE 를 OpenAI 패스스루로
+ * 흘려보내 응답 자체가 계약과 달라진다.
+ *
+ * 그래서 판정을 한 곳에 모은다. 프로바이더를 추가할 때 물을 것은
+ * "이름이 뭔가" 가 아니라 **"어떤 와이어 포맷인가"** 다.
+ */
+export function speaksAnthropicWire(provider: LLMProvider): boolean {
+  return provider === "anthropic" || provider === "glm";
+}
+
 export function providerKey(env: Env, provider: LLMProvider): string {
   const key = {
     gemini: env.GEMINI_API_KEY,
