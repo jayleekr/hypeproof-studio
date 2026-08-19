@@ -1511,6 +1511,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         imagesCount: effectiveImages?.length ?? 0,
       });
       const onDelta = (delta: string) => {
+        if (pendingShown) clearPending();
         assistantText += delta;
         const t = this.turnTimelines.get(streamId);
         if (t) this.turnTimelines.set(streamId, timelineDelta(t, delta, Date.now()));
@@ -1539,7 +1540,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const toolLabels = new Map<string, string>();
       // SDK 턴에서 Write/Edit 된 .html 경로 (tool_use id → 절대경로) — tool_result 성공 시 미리보기.
       const htmlWrites = new Map<string, string>();
+      // "다음 행동을 만드는 중" 안내 줄 (도구 결과 → 다음 호출 사이의 침묵 구간).
+      let pendingShown = false;
+      const PENDING_ID = `pending-${streamId}`;
+      const clearPending = () => {
+        if (!pendingShown) return;
+        pendingShown = false;
+        this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고치는 중…", state: "done" });
+      };
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
+        clearPending();
         const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
           // #503 — a.at: SDK 가 실어 보낸 자기 시각. 영속화된 줄의 createdAt 이 된다.
           this.postToolLog(streamId, { id, icon, label, state, ...(a.at ? { at: a.at } : {}) });
@@ -1577,6 +1587,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             break;
           }
           case "tool_result":
+            // 2026-08-19 — 도구 결과와 다음 도구 호출 사이는 화면이 완전히 조용하다
+            // (호출은 완성돼야 한 덩어리로 온다). 실기기에서 그 구간이 수십 초~분
+            // 단위였고, 마지막 줄이 `Read(index.html) ✓` 라 "읽는 중" 으로 오해했다.
+            // 그 침묵을 살아있는 줄 하나로 메운다 — 다음 이벤트가 오면 사라진다.
+            pendingShown = true;
             // 실패는 라벨에 표시를 남긴다 — 아이콘만으로는 스크롤 지나가면
             // 사라진다. 실사용에서 Write 실패를 놓치고 "저장됐습니다"를 그대로
             // 믿었다(2026-07-26).
@@ -1590,6 +1605,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             );
             // 도구로 .html 을 성공적으로 썼으면 그 파일을 읽어 미리보기에 띄운다
             // (펜스 경로와 같은 revealBuilt — 저장·라이브서버·네이티브 탭까지 동일).
+            if (pendingShown) {
+              this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고치는 중…", state: "running" });
+            }
             if (!a.isError && htmlWrites.has(a.id)) {
               const fp = htmlWrites.get(a.id)!;
               htmlWrites.delete(a.id);
@@ -1764,6 +1782,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // in the webview; don't post streamEnd or commit the truncated turn
       // (parity with the proxy path, which throws on abort).
       if (!ctrl.signal.aborted) {
+        clearPending();
         void this.post({ type: "streamEnd", streamId });
         // #371 — persist the agent.md handoff fence, if the coach emitted one.
         // #503 — 히스토리를 굳히기 **전에** 기다린다. 이게 남기는 toolLog 줄도
