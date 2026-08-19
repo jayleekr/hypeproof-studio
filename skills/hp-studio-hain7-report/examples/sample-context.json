@@ -1,0 +1,26 @@
+{
+  "schema_version": "1.0",
+  "synthetic": true,
+  "participant": {
+    "display_id": "별빛-07",
+    "pseudonymous": true,
+    "age": 11,
+    "grade_band": "초등 5-6"
+  },
+  "lesson": {
+    "title": "나만의 우주 미로 게임",
+    "date": "2026-08-19",
+    "duration_minutes": 90,
+    "curriculum_id": "game-lab-v1",
+    "task_version": "maze-v1",
+    "duration_band": "80-100m",
+    "tool_version": "hp-studio-2026.8",
+    "language": "ko"
+  },
+  "privacy": {
+    "guardian_consent_verified": false,
+    "child_notice_version": "synthetic-demo",
+    "purpose": "pipeline_demo",
+    "correction_contact": "synthetic-demo"
+  }
+}

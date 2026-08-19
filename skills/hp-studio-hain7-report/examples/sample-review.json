@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "session_fingerprint": "8475289f36cc2dc3e16ac998ea6ed182469916fc5f662944f321f673ee6231a9",
+  "reviewer_type": "codex_assisted_demo",
+  "completed_at": "2026-08-19T16:30:00+09:00",
+  "reviewed_marker_ids": [
+    "TA1", "TA2", "TA3", "TA4",
+    "IN1", "IN2", "IN3", "IN4",
+    "CO1", "CO2", "CO3", "CO4",
+    "VE1", "VE2", "VE3", "VE4",
+    "DE1", "DE2", "DE3", "DE4",
+    "IT1", "IT2", "IT3", "IT4",
+    "OW1", "OW2", "OW3", "OW4"
+  ],
+  "overrides": []
+}
