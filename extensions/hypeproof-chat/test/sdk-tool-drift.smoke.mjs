@@ -29,7 +29,7 @@ const { isClassifiedSdkToolName, evaluateSdkToolUse } = await import("../src/sdk
 // The mechanical half of the fix: the not-granted gate flags a name the matrix
 // has never classified as `drift`, distinct from a routine profile denial.
 {
-  const adultRW = ["Read", "Grep", "Glob", "Write", "Edit"];
+  const adultRW = ["Read", "Grep", "Glob", "Write", "Edit", "MultiEdit"];
 
   // Classified names denied by policy are NOT drift (expected, high-volume).
   for (const name of ["Bash", "WebFetch", "Read", "Write", "Edit", "Agent"]) {
