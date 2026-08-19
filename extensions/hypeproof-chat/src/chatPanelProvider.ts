@@ -283,14 +283,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       (attempts > 1 ? ` · ${attempts}번째 시도` : "") +
       `\n위 결과를 게스트 목소리로 한 줄 반응한 뒤 아이에게 넘겨줘. 결과에 없는 숫자는 지어내지 마.`;
     this.pendingPageImage = null;
-    // 2026-08-19 실기기 — "친구가 해봤어요 — 아직."이 무슨 뜻인지 모르겠다는 피드백.
-    // 누가(게스트 이름) · 어떻게 됐고 · 다음에 뭐가 일어나는지 한 줄로.
-    const who = typeof result.guest === "string" && result.guest ? result.guest : "친구";
-    this.postPageNotice(
-      ok
-        ? `🎉 ${who}가 해봤어요 — 성공! 다음 말에 ${who}가 대답해요.`
-        : `💦 ${who}가 해봤어요 — 아직 잘 안 됐어요. 다음 말에 ${who}가 대답해요.`,
-    );
+    // 2026-08-19 실기기 — 알림 문구("친구가 해봤어요 — 아직")는 아이에게 소음이다.
+    // 아이는 방금 자기가 해봐서 결과를 알고, 다음 말에 게스트가 반응하면 충분하다.
+    // 알림 없이 조용히 다음 턴에만 붙인다.
   }
   /** Rounds since the last success (a success resets it). */
   private questAttempts = 0;
