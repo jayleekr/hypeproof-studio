@@ -5,6 +5,8 @@
 // Studio 가 GET /v1/worlds/:id 로 받아 **즉시** 띄운다. 코치는 게스트 첫 대사만 한다.
 // 값의 정본은 curriculum/quests/WORLDS.md 와 각 스켈레톤 CONFIG 주석("문제 세상 N").
 import { getSkeletonsForTier } from "../index";
+// @ts-ignore — bundled as text by wrangler [[rules]] (globs **/*.js.txt)
+import engineJs from "./engine.js.txt";
 
 export interface WorldDef {
   /** 스켈레톤 id (kq-*) */
@@ -35,6 +37,15 @@ export const WORLDS: WorldDef[] = [
 /** 클라이언트에 내려주는 목록 (html 없음). */
 export function listWorlds(): Array<Pick<WorldDef, "id" | "guest" | "emoji" | "chip" | "aliases">> {
   return WORLDS.map(({ id, guest, emoji, chip, aliases }) => ({ id, guest, emoji, chip, aliases }));
+}
+
+/**
+ * 공용 도트 엔진 + 스프라이트 (9개 세상이 같은 파일을 쓴다).
+ * 2026-08-19 — index.html 에서 떼어냈다: 코치가 매 턴 12KB(스프라이트 맵 포함)를
+ * 읽고 그 안을 고치다 생성이 폭주했다(#629). 이제 코치가 보는 파일은 세상 코드뿐이다.
+ */
+export function renderEngine(): string {
+  return engineJs as unknown as string;
 }
 
 /** 자리표시자를 문제 상태 기본값으로 채운 완전한 HTML. 모르는 id 면 null. */

@@ -44,14 +44,17 @@ const SLOTS = [
     }
     const found = new Set([...s.html.matchAll(/%%([A-Z_]+)%%/g)].map((m) => m[1]));
     for (const f of found) assert.ok(SLOTS.includes(f), `${s.id}: 규격 밖 자리표시자 %%${f}%%`);
-    assert.ok(s.html.includes("type:'hp:result'") || s.html.includes("r.type='hp:result'"), `${s.id}: hp:result 를 보낸다`);
-    assert.ok(s.html.includes("window.__hpLast=r"), `${s.id}: __hpLast 를 남긴다`);
     assert.ok(s.html.includes('id="guest"'), `${s.id}: 게스트 말풍선`);
     assert.ok(/const WORLD=\{/.test(s.html), `${s.id}: WORLD 블록`);
-    assert.ok(s.html.includes('r.world=Object.assign({},WORLD)'), `${s.id}: hp:result 에 world 동봉`);
+    assert.ok(s.html.includes('<script src="engine.js"></script>'), `${s.id}: 공용 엔진 참조`);
     assert.ok(!/게임/.test(s.html), `${s.id}: 화면 문구에 "게임" 없음`);
   }
   assert.equal(getSkeletonsForTier("kids-world").length, 0, "kids-world tier 는 사라졌다");
+  // #629 — 결과 통로(hp:result/__hpLast)는 공용 엔진에 한 번만 있다.
+  const { renderEngine } = await import("../src/skeletons/kids-quest/worlds.ts");
+  const eng = renderEngine();
+  assert.ok(eng.includes("r.type='hp:result'") && eng.includes("window.__hpLast=r"), "엔진이 결과를 보낸다");
+  assert.ok(/const S_CAT=/.test(eng), "엔진에 스프라이트가 있다");
   console.log("✓ 스켈레톤 9개 · 규격 동일 · hp:result/__hpLast · 게임 낱말 없음");
 }
 
@@ -130,6 +133,16 @@ console.log("kids-quest-prompt.test.mjs: all tests passed");
   assert.equal(r.status, 200, "worlds/kq-runner 200");
   const body = await r.text();
   assert.ok(body.includes("GUEST_NAME='나비'") && body.includes("flood:true"), "나비 세상 HTML");
+  // #629 — 엔진 분리: 세상 HTML 은 engine.js 를 부르고, 스프라이트는 세상 파일에 없다.
+  assert.ok(body.includes('<script src="engine.js"></script>'), "세상 HTML 이 공용 엔진을 부른다");
+  assert.ok(!/const S_[A-Z]+=/.test(body), "스프라이트 맵은 세상 파일에 없다");
+  assert.ok(body.length < 10_000, `세상 파일이 10KB 미만 (실제 ${body.length})`);
+  const re = await app.fetch(new Request("https://api.test/v1/worlds/engine.js", { headers: { authorization: `Bearer ${token}` } }), env, makeCtx());
+  assert.equal(re.status, 200, "worlds/engine.js 200");
+  const engine = await re.text();
+  assert.ok(/const S_CAT=/.test(engine) && /function report\(/.test(engine), "엔진에 스프라이트·report 가 있다");
+  const re401 = await app.fetch(new Request("https://api.test/v1/worlds/engine.js"), env, makeCtx());
+  assert.equal(re401.status, 401, "engine.js 도 토큰 필요");
   const r404 = await app.fetch(new Request("https://api.test/v1/worlds/nope", { headers: { authorization: `Bearer ${token}` } }), env, makeCtx());
   assert.equal(r404.status, 404, "unknown world 404");
   const r401 = await app.fetch(new Request("https://api.test/v1/worlds/kq-runner"), env, makeCtx());
