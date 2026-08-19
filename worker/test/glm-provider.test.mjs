@@ -16,6 +16,8 @@ import {
   makeCtx,
   withMockUpstream,
   anthropicJsonBody,
+  anthropicStreamBody,
+  sseResponse,
   COHORT,
   PROFILE,
   USER,
@@ -118,4 +120,78 @@ function chatRequest(prompt = "안녕") {
   console.log("✅ isolation: Anthropic 프록시 URL·시크릿이 glm 요청에 섞이지 않는다");
 }
 
-console.log("\n3/3 passed");
+// --- 4. 응답을 Anthropic 모양으로 읽는다 (회계) --------------------------------
+{
+  // 회귀: GLM 은 Anthropic 호환 경로로 나가는데 응답 파싱이 `provider === "anthropic"`
+  // 으로만 갈라져 있어서 OpenAI 분기로 떨어졌다. 거기서는 `usage.prompt_tokens` 를
+  // 찾는데 응답에는 `input_tokens` 가 오므로 `?? 0` 이 먹어서 **토큰이 0 으로 기록**되고,
+  // 캐시 필드는 읽히지도 않았다. 상류가 200 을 내고 본문도 멀쩡해서 조용히 틀렸다.
+  //
+  // 여기서는 usage_log INSERT 의 바인딩을 직접 본다 — 회계가 맞는지는 응답이 아니라
+  // 원장에 무엇이 들어갔는지로 판정해야 한다.
+  const env = { ...createMockEnv(), LLM_PROVIDER: "glm", GLM_API_KEY: "glm-test-key" };
+
+  await withMockUpstream(
+    () => new Response(
+      JSON.stringify(anthropicJsonBody({
+        text: "ok", tokensIn: 1234, tokensOut: 567, cacheRead: 2624, cacheCreate: 0,
+      })),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ),
+    async () => {
+      const r = await app.fetch(chatRequest(), env, makeCtx());
+      assert.equal(r.status, 200);
+      const j = await r.json();
+      assert.equal(j.usage.prompt_tokens, 1234, "입력 토큰이 0 으로 죽으면 안 된다");
+      assert.equal(j.usage.completion_tokens, 567, "출력 토큰이 0 으로 죽으면 안 된다");
+    },
+  );
+
+  const insert = env._dbCalls.find((c) => /INSERT INTO usage_log/.test(c.sql));
+  assert.ok(insert, "usage_log 에 기록돼야 한다");
+  // (session_id, cohort_id, user_id, profile_id, model, tokens_in, tokens_out,
+  //  cache_read, cache_write, latency_ms, status)
+  assert.equal(insert.bindings[5], 1234, "usage_log.tokens_in");
+  assert.equal(insert.bindings[6], 567, "usage_log.tokens_out");
+  assert.equal(
+    insert.bindings[7], 2624,
+    "usage_log.cache_read — GLM 이 캐시 필드를 안 준 것과 우리가 안 읽은 것은 다르다",
+  );
+
+  console.log("✅ accounting: glm 응답의 토큰·캐시가 usage_log 에 그대로 들어간다");
+}
+
+// --- 5. 스트리밍을 Anthropic 이벤트로 변환한다 --------------------------------
+{
+  // 같은 뿌리의 더 나쁜 증상. 스트림 선택도 `provider === "anthropic"` 이라
+  // GLM 의 Anthropic SSE 가 OpenAI 패스스루로 흘러나갔다 — 회계가 아니라
+  // **응답 계약 자체**가 깨진다. `/v1/chat/completions` 는 OpenAI 청크를 약속한다.
+  const env = { ...createMockEnv(), LLM_PROVIDER: "glm", GLM_API_KEY: "glm-test-key" };
+
+  const req = new Request("https://api.test/v1/chat/completions", {
+    method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${TOKEN}` },
+    body: JSON.stringify({
+      model: "hypeproof-default", stream: true,
+      messages: [{ role: "user", content: "안녕" }],
+    }),
+  });
+
+  await withMockUpstream(
+    () => sseResponse(anthropicStreamBody(["안", "녕"], { tokensIn: 42, tokensOut: 9 })),
+    async () => {
+      const r = await app.fetch(req, env, makeCtx());
+      assert.equal(r.status, 200);
+      const body = await r.text();
+      assert.match(body, /chat\.completion\.chunk/, "OpenAI 청크로 변환돼 나가야 한다");
+      assert.doesNotMatch(
+        body, /content_block_delta/,
+        "Anthropic 원본 이벤트가 클라이언트로 새면 안 된다",
+      );
+    },
+  );
+
+  console.log("✅ streaming: glm 의 Anthropic SSE 가 OpenAI 청크로 변환된다");
+}
+
+console.log("\n5/5 passed");

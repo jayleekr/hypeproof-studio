@@ -12,7 +12,13 @@
 //   9. Log usage to Analytics Engine + D1
 
 import { Hono } from "hono";
-import { resolveProvider, providerKey, type Env, type LLMProvider } from "../env";
+import {
+  resolveProvider,
+  providerKey,
+  speaksAnthropicWire,
+  type Env,
+  type LLMProvider,
+} from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
 import { getProfile } from "../profiles";
@@ -525,8 +531,8 @@ chat.post("/chat/completions", async (c) => {
     let cr = 0;
     let cc = 0;
     let finish = "stop";
-    if (provider === "anthropic") {
-      // Anthropic Messages API native shape
+    if (speaksAnthropicWire(provider)) {
+      // Anthropic Messages API native shape (anthropic + glm)
       text = (j.content ?? [])
         .filter((b: any) => b.type === "text")
         .map((b: any) => b.text)
@@ -658,10 +664,9 @@ chat.post("/chat/completions", async (c) => {
     }
   };
 
-  const outStream =
-    provider === "anthropic"
-      ? transformStream(upstream.body, modelLabel, onUsage, streamOptions)
-      : passThroughOpenAIStream(upstream.body, onUsage, streamOptions);
+  const outStream = speaksAnthropicWire(provider)
+    ? transformStream(upstream.body, modelLabel, onUsage, streamOptions)
+    : passThroughOpenAIStream(upstream.body, onUsage, streamOptions);
 
   const streamHeaders: Record<string, string> = {
     "content-type": "text/event-stream",
