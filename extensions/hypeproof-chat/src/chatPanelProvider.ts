@@ -283,7 +283,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       (attempts > 1 ? ` · ${attempts}번째 시도` : "") +
       `\n위 결과를 게스트 목소리로 한 줄 반응한 뒤 아이에게 넘겨줘. 결과에 없는 숫자는 지어내지 마.`;
     this.pendingPageImage = null;
-    this.postPageNotice(`${ok ? "🎉" : "💦"} 친구가 해봤어요 — ${ok ? "성공" : "아직"}. 코치에게 결과가 전해졌어요.`);
+    // 2026-08-19 실기기 — "친구가 해봤어요 — 아직."이 무슨 뜻인지 모르겠다는 피드백.
+    // 누가(게스트 이름) · 어떻게 됐고 · 다음에 뭐가 일어나는지 한 줄로.
+    const who = typeof result.guest === "string" && result.guest ? result.guest : "친구";
+    this.postPageNotice(
+      ok
+        ? `🎉 ${who}가 해봤어요 — 성공! 다음 말에 ${who}가 대답해요.`
+        : `💦 ${who}가 해봤어요 — 아직 잘 안 됐어요. 다음 말에 ${who}가 대답해요.`,
+    );
   }
   /** Rounds since the last success (a success resets it). */
   private questAttempts = 0;
