@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "session_id": "00000000-0000-4000-8000-000000000007",
+  "started_at": "2026-08-19T05:00:00.000Z",
+  "app_version": "2026.8-demo",
+  "platform": "synthetic",
+  "identity": {
+    "u": "synthetic-07",
+    "c": "demo-cohort",
+    "p": "game-lab-v1"
+  }
+}
