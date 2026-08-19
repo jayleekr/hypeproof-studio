@@ -39,6 +39,26 @@ jobs:
           asset_count="$(jq '.assets | length' source-release.json)"
           [[ "$asset_count" -gt 0 ]] || { echo "::error::source release has no assets"; exit 1; }
 
+          # #632 — 자산 "개수"만 보면 플랫폼 하나가 통째로 빠진 릴리즈도 통과한다.
+          # 2026-08-19 v0.1.47: Windows 빌드가 끝나기 전에 미러가 돌아 macOS zip 한 개만
+          # 발행됐고, install.ps1 이 fail-closed 로 "No Studio asset matched globs" 로 죽었다.
+          # 플랫폼별 필수 자산을 이름으로 확인한다 — 하나라도 없으면 발행하지 않는다.
+          # (플랫폼을 의도적으로 빼야 하면 ALLOW_PARTIAL=1 로 명시한다.)
+          names="$(jq -r '.assets[].name' source-release.json)"
+          missing=()
+          grep -qE '^HypeProof-Studio-darwin-arm64\.zip$'      <<<"$names" || missing+=("macOS zip")
+          grep -qE '^HypeProof\.StudioUserSetup-x64-.*\.exe$'  <<<"$names" || missing+=("Windows UserSetup exe")
+          grep -qE '^HypeProof\.StudioSetup-x64-.*\.exe$'      <<<"$names" || missing+=("Windows Setup exe")
+          grep -qE '^HypeProof\.Studio-win32-x64-.*\.zip$'     <<<"$names" || missing+=("Windows zip")
+          if [[ ${#missing[@]} -gt 0 ]]; then
+            if [[ "${ALLOW_PARTIAL:-0}" == "1" ]]; then
+              echo "::warning::partial mirror (ALLOW_PARTIAL=1): missing ${missing[*]}"
+            else
+              echo "::error::source release $TAG is missing: ${missing[*]} — 빌드가 다 끝난 뒤 다시 돌리세요 (#632)"
+              exit 1
+            fi
+          fi
+
       - name: Dry-run summary
         if: inputs.dry_run
         shell: bash
