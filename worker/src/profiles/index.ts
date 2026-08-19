@@ -3,6 +3,9 @@ import { profile as skBiopharmKidsS1 } from "./sk-biopharm-kids-s1.ts";
 import { profile as boahDentalTeaserS1 } from "./boah-dental-teaser-2026-s1.ts";
 import { profile as skBiopharmKids2026Grade56S1 } from "./sk-biopharm-kids-2026-grade-5-6-s1.ts";
 import { profile as boahDentalDirectorCopycloneS1 } from "./boah-dental-director-copyclone-2026-s1.ts";
+// GLM 평가 전용 쌍둥이 (hypeprooflab#549) — 원본 copyclone 과 provider 말고 동일.
+// dashboard_hidden, 실제 수업엔 안 쓴다(파일 헤더 참조).
+import { profile as boahDentalDirectorCopycloneGlmEvalS1 } from "./boah-dental-director-copyclone-glm-eval-2026-s1.ts";
 // Synthetic — CI-only gateway contract canary (#406). Empty roster, hidden
 // from the instructor console; see the file header for why it exists.
 import { profile as canarySdkContract } from "./canary-sdk-contract.ts";
@@ -13,6 +16,7 @@ const REGISTRY: Profile[] = [
   boahDentalTeaserS1,
   skBiopharmKids2026Grade56S1,
   boahDentalDirectorCopycloneS1,
+  boahDentalDirectorCopycloneGlmEvalS1,
   canarySdkContract,
 ];
 

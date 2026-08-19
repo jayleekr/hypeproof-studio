@@ -1851,8 +1851,12 @@ const TINY_PNG =
     !/^\s*until\s/m.test(publishMd),
     "publish-homepage: 끝나지 않는 until 루프를 가르치지 않는다",
   );
+  // hypeprooflab#549 — GLM 평가 쌍둥이는 원본 copyclone 을 spread 한 것이라 도구
+  // 세트가 동일하다(그래야 A/B 차이가 provider 하나로 고정된다). 성인 트랙(age 30-65)
+  // 이므로 이 아동-안전 불변식의 예외는 원본과 같다.
+  const ADULT_COPYCLONE_IDS = new Set([copyclone.id, "boah-dental-director-copyclone-glm-eval-2026-s1"]);
   for (const p of all) {
-    if (p.id !== copyclone.id) {
+    if (!ADULT_COPYCLONE_IDS.has(p.id)) {
       // 2026-08-11 — write 는 더 이상 copyclone 전용이 아니다. SK 아동 두 트랙이
       // 커리큘럼 변경으로 workspace read/write 를 갖는다. browser/subagents 는
       // 아래처럼 여전히 copyclone 전용.
