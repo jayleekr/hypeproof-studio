@@ -25,7 +25,19 @@ const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
 import { PreviewProvider, sanitizeQuestResult } from "./previewProvider";
-import { matchWorldRef, isGuestListRequest, guestListMessage } from "./chatPanelHelpers";
+import {
+  matchWorldRef,
+  isGuestListRequest,
+  guestListMessage,
+  WORLD_ARCHIVE_DIR,
+  worldArchiveFileName,
+  worldArchiveTitle,
+  shouldArchiveWorld,
+  worldEngineUrls,
+  openWorldNotice,
+  isWorldCohort,
+  openWorldKeyForCohort,
+} from "./chatPanelHelpers";
 import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
@@ -745,28 +757,63 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * Public so extension.ts (runLastCode) shares the same routing.
    */
   /**
-   * 다른 세상으로 갈아타기 전에 지금 index.html 을 보관한다 (`<제목>.html`).
-   * 같은 세상을 다시 고른 경우엔 보관하지 않는다 — 되돌리기 용도가 아니다.
+   * 새 세상을 index.html 에 쓰기 **전에** 지금 것을 '이전 세상/<제목>.html' 로 보관한다.
+   *
+   * 2026-08-20 (#649) — 예전엔 `lastPrebuiltWorld === nextId` 면 통째로 건너뛰었다.
+   * 그 규칙이 실제 사고를 냈다: "초코 세상에 불 대신 물" 이 초코 세상을 다시 받아
+   * 왔는데, 같은 세상이라 보관을 건너뛴 채 아이가 한참 고쳐 둔 index.html 을
+   * 덮어썼다. 이제 기준은 id 가 아니라 **내용**이다 — 지금 파일이 새로 쓸 HTML 과
+   * 다르면 같은 세상을 다시 눌렀더라도 항상 보관한다. 보관 실패가 세상 열기를
+   * 막지는 않는다(아이 화면이 먼저다).
    */
-  private async archiveCurrentWorld(nextId: string): Promise<void> {
-    if (this.lastPrebuiltWorld === nextId) return;
+  private async archiveCurrentWorld(nextHtml: string, streamId?: string): Promise<string | null> {
     const cwd = this.resolveCoachCwd();
-    if (!cwd) return;
+    if (!cwd) return null;
+    let html: string;
     try {
-      const cur = vscode.Uri.file(path.join(cwd, "index.html"));
-      const buf = await vscode.workspace.fs.readFile(cur);
-      const html = Buffer.from(buf).toString("utf8");
-      const title = (/<title>([^<]{1,40})<\/title>/.exec(html)?.[1] ?? "이전 세상")
-        .replace(/[\\/:*?"<>|]/g, "")
-        .trim();
-      await vscode.workspace.fs.writeFile(
-        vscode.Uri.file(path.join(cwd, `${title || "이전 세상"}.html`)),
-        buf,
-      );
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(cwd, "index.html")));
+      html = Buffer.from(bytes).toString("utf8");
     } catch {
-      /* 파일이 없으면 보관할 것도 없다 */
+      return null; // 파일이 없으면 보관할 것도 없다
+    }
+    if (!shouldArchiveWorld(html, nextHtml)) return null;
+    try {
+      const dir = vscode.Uri.file(path.join(cwd, WORLD_ARCHIVE_DIR));
+      await vscode.workspace.fs.createDirectory(dir);
+      let taken: string[] = [];
+      try {
+        taken = (await vscode.workspace.fs.readDirectory(dir)).map(([name]) => name);
+      } catch {
+        /* 방금 만든 빈 폴더 */
+      }
+      const name = worldArchiveFileName(worldArchiveTitle(html), taken);
+      // 2026-08-20 검토 — 원문 그대로 넣으면 보관본이 **열리지 않는다**: 세상 HTML 은
+      // `<script src="engine.js">` 를 상대경로로 부르는데 저장 위치가 '이전 세상/' 이라
+      // `이전 세상/engine.js` 를 찾다 404 → S_* ReferenceError → 검은 화면이었다.
+      // 게다가 엔진은 이제 세상마다 다르다(#644) — 폴더에 한 벌 복사해 두는 것으로도
+      // 부족하다. 그래서 보관본에는 그 세상의 엔진을 **인라인**해 자체로 완결시킨다.
+      const body = await this.inlineEngineIfNeeded(html);
+      await vscode.workspace.fs.writeFile(
+        vscode.Uri.file(path.join(cwd, WORLD_ARCHIVE_DIR, name)),
+        Buffer.from(body, "utf8"),
+      );
+      // 보관은 조용히 일어나면 없는 것과 같다 — 아이는 백업이 생긴 줄 모른 채
+      // "아까 그거 어디 갔어" 라고 묻는다. 턴 안에서 일어난 보관은 한 줄 남긴다.
+      if (streamId) {
+        this.postToolLog(streamId, {
+          id: randomId(),
+          icon: "📦",
+          label: `고치던 세상을 「${WORLD_ARCHIVE_DIR}」 폴더에 넣어 뒀어요 — ${name}`,
+          state: "done",
+        });
+      }
+      return name;
+    } catch (e) {
+      console.warn(`[world] 이전 세상 보관 실패: ${String(e).slice(0, 120)}`);
+      return null;
     }
   }
+
 
   /** 작업 폴더에 engine.js 저장 (세상 HTML 옆). 실패는 미리보기 인라인이 살린다. */
   private async saveEngineToWorkspace(js: string): Promise<void> {
@@ -793,14 +840,40 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   /** 연속 저장 디바운스 타이머 (마지막 저장 뒤 한 번만 미리보기). */
   private revealTimer: ReturnType<typeof setTimeout> | undefined;
 
-  /** 지금 화면에 띄운 사전 완성 세상 id — 같은 세상을 다시 고르면 다시 받지 않는다. */
-  private lastPrebuiltWorld: string | null = null;
+  /**
+   * 지금 화면에 띄운 사전 완성 세상 id. #649 이후로는 "다시 안 받는다" 는 뜻이
+   * 아니다(같은 세상 재클릭도 새로 받고, 그 전에 보관한다) — 웹뷰가 다시 붙었을 때
+   * 친구 스트립의 강조를 되살리는 데 쓴다.
+   */
+  private get lastPrebuiltWorld(): string | null {
+    return this.context.workspaceState.get<string>(openWorldKeyForCohort(this.activeCohortId), "") || null;
+  }
+  /**
+   * 2026-08-20 검토 — 메모리 필드였을 때는 창을 다시 열면(Reload Window·노트북을
+   * 닫았다 열기) index.html 은 아이가 고친 세상 그대로인데 앱만 "아무 세상도 안
+   * 열림" 으로 돌아갔다: 스트립 강조가 사라지고, 러너가 ✨ 로 달리고, Clear 뒤 첫
+   * 전송의 세상 안내도 영영 안 붙었다. 값은 id 하나라 저장 비용이 없다.
+   */
+  private set lastPrebuiltWorld(id: string | null) {
+    void this.context.workspaceState.update(openWorldKeyForCohort(this.activeCohortId), id ?? undefined);
+  }
+
+  /** revealPrebuiltWorld 재진입 가드 — 아이의 연타로 index.html 쓰기가 겹치면 안 된다. */
+  private worldOpening = false;
+
+  /** 이번에 보관한 파일 이름(있으면). 코치에게 "되돌릴 것이 여기 있다" 고 알리는 데 쓴다. */
+  private lastArchivedWorldFile: string | null = null;
 
   /**
    * 2026-08-19 — 워커의 사전 완성 세상(GET /v1/worlds/:id)을 받아 revealBuilt 로 띄운다.
    * 실패하면 false — 코치가 예전처럼 직접 만든다(느리지만 동작).
    */
   private async revealPrebuiltWorld(id: string, proxyUrl: string, token: string): Promise<boolean> {
+    // 2026-08-20 검토 — 아이가 친구 버튼을 연타하면(초코 누르고 1초 안에 나비)
+    // 이 함수가 겹쳐 돌아 보관·index.html 쓰기가 경합했다. 웹뷰의 pending 가드와
+    // 두 겹으로 막는다 — 두 번째 호출은 세상을 열지 않고 코치 턴으로 흘려보낸다.
+    if (this.worldOpening) return false;
+    this.worldOpening = true;
     try {
       const base = proxyUrl.replace(/\/$/, "");
       const res = await fetch(base + "/worlds/" + encodeURIComponent(id), {
@@ -809,21 +882,49 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (!res.ok) return false;
       const html = await res.text();
       if (!/<!doctype html/i.test(html)) return false;
-      // #629 — 세상 HTML 은 공용 엔진을 <script src="engine.js"> 로 부른다. 같은
-      // 폴더에 먼저 저장해야 라이브서버가 200 으로 내려준다. 코치는 이 파일을
-      // 읽지도 고치지도 않는다 — 스프라이트·도트 엔진이 여기 있다(#629).
-      const eng = await fetch(base + "/worlds/engine.js", {
-        headers: { authorization: `Bearer ${token}` },
-      });
-      if (eng.ok) await this.saveEngineToWorkspace(await eng.text());
-      // 2026-08-19 — index.html 은 매번 덮어쓴다. 다른 세상을 고르면 지금까지 고친
-      // 세상이 그대로 날아가므로, 덮어쓰기 전에 게스트 이름으로 보관해 둔다.
-      await this.archiveCurrentWorld(id);
-      const ok = await this.revealBuilt(html, { artifactSource: "prebuilt" });
-      if (ok) this.lastPrebuiltWorld = id;
-      return ok;
+      // #629 — 세상 HTML 은 엔진을 <script src="engine.js"> 로 부른다. 같은 폴더에
+      // 먼저 저장해야 라이브서버가 200 으로 내려준다.
+      //
+      // #644 (2026-08-20 실기기) — 이제 **그 세상 엔진**부터 받는다. 공용본에는 9개
+      // 세상 스프라이트가 전부 들어 있어서(S_PENG 펭귄·S_ICE 얼음…) 코치가 한 번
+      // 읽자 초코 세상에서 얼음 이야기가 나왔다. 세상별 엔진에는 그 세상 그림만
+      // 있으니 읽혀도 섞일 것이 없다. 404·실패면 공용으로 폴백한다 — 엔진이 없으면
+      // 화면 자체가 안 뜨고, 그건 오염보다 나쁘다.
+      //
+      // 2026-08-20 검토 — 두 후보가 **다 실패해도** 그냥 진행하던 자리다. 그러면
+      // index.html 만 새 세상으로 바뀌고 engine.js 는 이전 세상 것(또는 아예 없음)
+      // 이라, 새 HTML 이 부르는 S_* 상수가 undefined → ReferenceError → 검은 화면이
+      // 되는데 코치에게는 "이미 띄웠다" 고 알렸다(교실 와이파이가 끊기면 바로 이 길).
+      // 그래서 엔진을 **먼저** 확보하고, 못 받으면 아이 파일에 손대지 않고 false 를
+      // 돌려 코치 생성 경로에 넘긴다 — 느리지만 화면은 뜬다.
+      let engineJs: string | null = null;
+      for (const url of worldEngineUrls(base, id)) {
+        try {
+          const eng = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+          if (!eng.ok) continue;
+          engineJs = await eng.text();
+          break;
+        } catch {
+          /* 다음 후보(공용)로 — 여기서 던지면 세상 자체가 안 열린다 */
+        }
+      }
+      if (!engineJs) return false;
+      // 엔진 교체와 index.html 쓰기는 한 덩어리라 revealBuilt 가 순서를 통째로
+      // 소유한다: 옛 세상 보관(그 시점의 engine.js 를 인라인) → 새 엔진 저장 →
+      // 새 index.html 저장. 여기서 엔진을 먼저 갈아 끼우면 보관본에 **다음 세상의**
+      // 엔진이 인라인돼 스프라이트가 어긋나고, 구조 가드에 막히면(blocked)
+      // index.html 은 옛 세상인데 engine.js 만 새 세상인 상태가 남는다.
+      const ok = await this.revealBuilt(html, { artifactSource: "prebuilt", engineJs });
+      if (!ok) return false;
+      this.lastPrebuiltWorld = id;
+      // 웹뷰의 친구 스트립이 "지금 열린 세상"을 강조할 수 있게 알린다 (#649).
+      const w = this.cachedProfile?.worlds?.find((x) => x.id === id);
+      void this.post({ type: "worldOpened", id, guest: w?.guest ?? "", emoji: w?.emoji ?? "" });
+      return true;
     } catch {
       return false;
+    } finally {
+      this.worldOpening = false;
     }
   }
 
@@ -855,6 +956,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       spoolTurnId?: string;
       /** 같은 HTML이라도 사전 완성본과 학생/AI의 수정본을 구분한다. */
       artifactSource?: SpoolArtifactSource;
+      /**
+       * 이 HTML 과 한 짝인 세상 엔진(#644). 주면 **보관 뒤 · 저장 직전**에 갈아 끼운다
+       * — 순서가 뒤집히면 보관본에 다음 세상 엔진이 들어가고, 구조 가드에 막힌 경우
+       * index.html(옛 세상)과 engine.js(새 세상)가 어긋난 채 남는다.
+       */
+      engineJs?: string;
     },
   ): Promise<boolean> {
     // #359 — structural guard: auto-repair the known comment-close typo, and
@@ -897,6 +1004,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     };
 
     logReveal("running", "미리보기 여는 중");
+    // 2026-08-20 검토 — 작업 폴더의 index.html 을 실제로 덮어쓰는 지점은 여기 하나로
+    // 모인다(사전 완성 세상 · ▶ Run · "보여줘" · 코치 펜스). 보관을 revealPrebuiltWorld
+    // 안에만 두었더니 "보여줘"/▶ Run 이 히스토리의 **옛 펜스**로 아이가 고쳐 둔 파일을
+    // 보관 없이 덮었다 — #649 가 막은 손실이 다른 문으로 그대로 남아 있었다.
+    // 아이 트랙에서만 — 성인 작업 폴더에 '이전 세상' 폴더가 생기면 그게 더 이상하다.
+    // 내용이 같으면 shouldArchiveWorld 가 걸러 보관본이 쌓이지 않는다(코치 Edit 저장
+    // 경로는 파일 자신을 다시 쓰는 것이라 여기서 항상 걸러진다).
+    if (isWorldCohort(this.cachedProfile)) {
+      this.lastArchivedWorldFile = await this.archiveCurrentWorld(checked.html, opts?.streamId);
+    }
+    // 보관이 끝난 **뒤에** 엔진을 갈아 끼운다(보관본은 옛 엔진을 인라인해 간다).
+    if (opts?.engineJs !== undefined) await this.saveEngineToWorkspace(opts.engineJs);
     await this.saveGameToWorkspace(checked.html);
     if (this.isLiveServerPreview() && (await this.openInLiveServer())) {
       logReveal("done", "미리보기를 열었어요");
@@ -1483,17 +1602,40 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // 2026-08-19 — 게스트의 세상 사전 완성본. 아이가 게스트를 고르면 코치가 5KB 를
     // 만들 때까지 30~40초 기다리게 하지 않는다: 워커에서 채워진 HTML 을 받아 즉시
     // 저장·띄우고, 코치에게는 "이미 띄웠다 — 첫 대사만" 이라고 알린다.
+    let openedWorldThisTurn = false;
     {
       const world = matchWorldRef(text, profile?.worlds);
       if (world && token) {
+        this.lastArchivedWorldFile = null; // 이번 턴에 생긴 보관본만 코치에게 알린다
+
         const shown = await this.revealPrebuiltWorld(world.id, proxyUrl, token);
         if (shown) {
+          openedWorldThisTurn = true;
+          // 2026-08-20 검토 — 보관본('이전 세상/…')은 코치의 파일 목록에서 가려져 있어
+          // ("남의 세상" 오염 방지, #644) 아이가 "아까 초코 거 돌려줘" 라고 해도 코치가
+          // 경로를 몰랐다. 이번에 보관이 일어났을 때만 그 한 줄을 알려 준다 — 되돌리기
+          // 요청이 오면 그 파일을 Read 해서 index.html 로 되살릴 수 있다.
+          const archived = this.lastArchivedWorldFile
+            ? `직전에 고치던 세상은 '${WORLD_ARCHIVE_DIR}/${this.lastArchivedWorldFile}' 로 보관해 뒀다 — ` +
+              `아이가 되돌려 달라고 하면 그 파일을 Read 해서 index.html 에 되살려라. `
+            : "";
           userTextForModel =
             `[Studio 안내: 아이가 ${world.emoji} ${world.guest} 세상을 골랐고, Studio 가 그 세상(문제 상태 기본값)을 ` +
-            `이미 작업 폴더 index.html 에 저장하고 오른쪽 화면에 띄웠다. 코드나 파일 도구 없이 — ` +
+            `이미 작업 폴더 index.html 에 저장하고 오른쪽 화면에 띄웠다. ${archived}코드나 파일 도구 없이 — ` +
             `${world.guest}의 첫 대사 한 줄과 "한번 해보세요" 만 짧게 말해라. 이후 바꾸기 요청부터 index.html 을 Read 하고 고쳐라.]\n\n${userTextForModel}`;
         }
       }
+    }
+    // #644 (2026-08-20 실기기) — 대화를 지우면 코치의 기억만 비고, 오른쪽 화면의
+    // 세상은 그대로 떠 있다. 그 상태에서 아이가 "불 대신 물" 이라고 하면 코치는
+    // 무슨 세상인지 몰라 되묻거나 새 파일을 만들었다. 지운 뒤 첫 전송에만 열린 세상
+    // 한 줄을 모델 입력 앞에 얹어 기억을 채운다 — 아이 말풍선에는 붙지 않는다
+    // (히스토리에는 `text` 원문이 저장된다). 이번 턴에 세상을 연 경우는 위 안내가
+    // 이미 같은 말을 하므로 건너뛴다.
+    if (!openedWorldThisTurn && history.length === 0 && this.lastPrebuiltWorld) {
+      const open = profile?.worlds?.find((w) => w.id === this.lastPrebuiltWorld);
+      const notice = openWorldNotice(open);
+      if (notice) userTextForModel = `${notice}\n\n${userTextForModel}`;
     }
     // #278 Phase 2 — fold any queued page screenshot into this turn's images.
     const pageImage = this.pendingPageImage;
@@ -2324,6 +2466,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         update: this.availableUpdate,
       },
     });
+    // #649 — 웹뷰가 다시 붙으면(패널 숨김→표시, 리로드) 강조가 사라진다. 지금 열려
+    // 있는 세상을 한 번 더 알려 스트립의 aria-pressed 를 되살린다.
+    if (this.lastPrebuiltWorld) {
+      const w = profile?.worlds?.find((x) => x.id === this.lastPrebuiltWorld);
+      void this.post({
+        type: "worldOpened",
+        id: this.lastPrebuiltWorld,
+        guest: w?.guest ?? "",
+        emoji: w?.emoji ?? "",
+      });
+    }
   }
 
   // ---- #72: auto-update banner state ---------------------------------------
