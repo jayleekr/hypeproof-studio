@@ -25,7 +25,7 @@ const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
 import { PreviewProvider, sanitizeQuestResult } from "./previewProvider";
-import { matchWorldRef } from "./chatPanelHelpers";
+import { matchWorldRef, isGuestListRequest, guestListMessage } from "./chatPanelHelpers";
 import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
@@ -744,6 +744,30 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  - default: the sandboxed iframe PreviewProvider (existing behavior).
    * Public so extension.ts (runLastCode) shares the same routing.
    */
+  /**
+   * 다른 세상으로 갈아타기 전에 지금 index.html 을 보관한다 (`<제목>.html`).
+   * 같은 세상을 다시 고른 경우엔 보관하지 않는다 — 되돌리기 용도가 아니다.
+   */
+  private async archiveCurrentWorld(nextId: string): Promise<void> {
+    if (this.lastPrebuiltWorld === nextId) return;
+    const cwd = this.resolveCoachCwd();
+    if (!cwd) return;
+    try {
+      const cur = vscode.Uri.file(path.join(cwd, "index.html"));
+      const buf = await vscode.workspace.fs.readFile(cur);
+      const html = Buffer.from(buf).toString("utf8");
+      const title = (/<title>([^<]{1,40})<\/title>/.exec(html)?.[1] ?? "이전 세상")
+        .replace(/[\\/:*?"<>|]/g, "")
+        .trim();
+      await vscode.workspace.fs.writeFile(
+        vscode.Uri.file(path.join(cwd, `${title || "이전 세상"}.html`)),
+        buf,
+      );
+    } catch {
+      /* 파일이 없으면 보관할 것도 없다 */
+    }
+  }
+
   /** 작업 폴더에 engine.js 저장 (세상 HTML 옆). 실패는 미리보기 인라인이 살린다. */
   private async saveEngineToWorkspace(js: string): Promise<void> {
     const cwd = this.resolveCoachCwd();
@@ -792,6 +816,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         headers: { authorization: `Bearer ${token}` },
       });
       if (eng.ok) await this.saveEngineToWorkspace(await eng.text());
+      // 2026-08-19 — index.html 은 매번 덮어쓴다. 다른 세상을 고르면 지금까지 고친
+      // 세상이 그대로 날아가므로, 덮어쓰기 전에 게스트 이름으로 보관해 둔다.
+      await this.archiveCurrentWorld(id);
       const ok = await this.revealBuilt(html, { artifactSource: "prebuilt" });
       if (ok) this.lastPrebuiltWorld = id;
       return ok;
@@ -1409,6 +1436,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
       // No game yet → fall through to the AI, which will guide them to make one.
     }
+
+    // 2026-08-19 — "다른 친구도 있어?" 는 프로필의 worlds 로 즉시 답한다. LLM 한 턴
+    // (10~40초) 을 쓰던 자리다 — 목록은 이미 앱이 들고 있다.
+    if (isGuestListRequest(text) && (!images || images.length === 0)) {
+      const ws = this.cachedProfile?.worlds;
+      if (ws?.length) {
+        const shown = (this.cachedProfile?.ux?.suggestions?.initial ?? []).map((c) => c.text);
+        const reply = guestListMessage(ws, shown);
+        const uid = randomId();
+        const aid = randomId();
+        void this.post({ type: "streamStart", streamId: uid, messageId: aid });
+        void this.post({ type: "streamChunk", streamId: uid, delta: reply });
+        void this.post({ type: "streamEnd", streamId: uid });
+        await this.appendHistory([
+          { id: randomId(), role: "user", content: text, createdAt: Date.now() },
+          { id: aid, role: "assistant", content: reply, createdAt: Date.now() },
+        ]);
+        return;
+      }
+    }
+
 
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");

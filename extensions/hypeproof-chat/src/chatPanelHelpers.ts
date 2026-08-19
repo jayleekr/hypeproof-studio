@@ -531,7 +531,7 @@ export function resolveCoachRuntime(args: {
 }
 
 /** kids-quest 세상 정의 (워커 /v1/profile 의 worlds 항목). */
-export interface WorldRef { id: string; guest: string; emoji: string; chip: string; aliases: string[] }
+export interface WorldRef { id: string; guest: string; emoji: string; chip: string; aliases: string[]; line?: string }
 
 /**
  * 2026-08-19 — 아이의 말에서 사전 완성 세상을 고른다. 워커 worlds.ts 의 matchWorld 와
@@ -540,10 +540,39 @@ export interface WorldRef { id: string; guest: string; emoji: string; chip: stri
 export function matchWorldRef(text: string, worlds: readonly WorldRef[] | undefined): WorldRef | null {
   if (!worlds?.length) return null;
   const t = text.trim();
-  for (const w of worlds) if (t === w.chip || t === w.chip.replace(/^\S+\s/, "")) return w;
-  if (!/세상|가볼래|들어가|가보자|보여줘|만나볼래|얘기/.test(t)) return null;
-  for (const w of worlds) if (t.includes(w.guest) || t.includes(w.emoji) || w.aliases.some((a) => a && t.includes(a))) return w;
+  const bare = t.replace(/[!?.\u2026~\s]/g, "");
+  // 워커 worlds.ts 의 matchWorld 와 같은 규칙 (2026-08-19): 칩 그대로 · 이름만 ·
+  // 이모지만이면 바로 잡는다. 이 경로를 놓치면 사전완성본(0.45초 GET) 대신 코치가
+  // 직접 만들어 몇 분이 걸린다.
+  for (const w of worlds) {
+    if (t === w.chip || t === w.chip.replace(/^\S+\s/, "")) return w;
+    if (bare === w.guest || bare === w.emoji || bare === w.emoji + w.guest) return w;
+  }
+  if (!/세상|가볼래|들어가|가보자|보여줘|만나볼래|얘기|한테|에게|고를래|할래/.test(t)) return null;
+  for (const w of worlds) if (t.includes(w.guest) || t.includes(w.emoji)) return w;
+  // 별칭은 2글자 이상만 — "쥐" 가 "다람쥐" 를 먹었다.
+  for (const w of worlds) if (w.aliases.some((a) => a.length >= 2 && t.includes(a))) return w;
   return null;
+}
+
+/**
+ * "다른 친구도 있어?" 류 — 게스트 목록은 프로필에 이미 있다(worlds). LLM 한 턴을
+ * 쓰면 10~40초가 걸리는데, 아이가 기다릴 이유가 없다: 앱이 즉시 답한다.
+ */
+export function isGuestListRequest(text: string): boolean {
+  const t = text.trim();
+  if (t.length > 40) return false;
+  return /다른 (친구|애|동물)|또 (누구|다른)|누가 더|친구 (목록|더)|다른 세상/.test(t);
+}
+
+/** 게스트 목록 안내문 (앱이 바로 띄운다). */
+export function guestListMessage(worlds: readonly WorldRef[], shownChips: readonly string[] = []): string {
+  const shown = new Set(shownChips);
+  const rest = worlds.filter((w) => !shown.has(w.chip));
+  const list = (rest.length ? rest : worlds)
+    .map((w) => `- ${w.emoji} **${w.guest}** — ${w.line ?? "곤란한 일이 있대요"}`)
+    .join("\n");
+  return `네! 이런 친구들도 있어요 😊\n\n${list}\n\n누구 세상에 가볼까요?`;
 }
 
 /**
