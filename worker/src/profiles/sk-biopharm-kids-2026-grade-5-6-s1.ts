@@ -1,6 +1,6 @@
 import type { Profile } from "./types";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
-import systemPromptMd from "../prompts/sk-biopharm-kids-2026-grade-5-6-s1.md";
+import systemPromptMd from "../prompts/sk-biopharm-kids-quest-5-6.md";
 
 // SK바이오팜 가족 AI 창작 워크숍 — 초5·6학년 트랙 (v126, 4시간 단발).
 // 초3·4 트랙(sk-biopharm-kids-s1.ts)과 같은 7단계·두 레슨을 지나되 운전법이
@@ -16,7 +16,7 @@ import systemPromptMd from "../prompts/sk-biopharm-kids-2026-grade-5-6-s1.md";
 export const profile: Profile = {
   id: "sk-biopharm-kids-2026-grade-5-6-s1",
   version: 1,
-  display_name: "SK바이오팜 가족 AI 창작 워크숍 (5-6학년)",
+  display_name: "SK바이오팜 가족 AI 창작 워크숍 — 게스트 퀘스트 (5-6학년)",
   audience: {
     age_range: [11, 12],
     language: "ko",
@@ -30,11 +30,10 @@ export const profile: Profile = {
   },
   system_prompt: systemPromptMd as unknown as string,
   welcome: {
-    greeting_md: "안녕하세요! 오늘 같이 **규칙이 있는 게임**을 만들고, 직접 해보면서 더 좋게 고쳐봐요 🎮",
+    greeting_md: "안녕하세요! 문제투성이 세상에 사는 친구 아홉 명이 있어요.\n**누구 세상부터 가볼까요?** 🐕 초코 · 🐈 나비 · 🐝 붕붕 · 🐧 뽀로 · 🐁 찍찍 · 🐹 햄찌 · 🦜 앵무 · 🌻 해바 · 🦝 라쿤",
     example_prompts: [
-      "별을 모으는 점프 게임 — 점점 빨라지게 만들어줘",
-      "장애물을 피하는 게임, 점수 2배 구간이 있으면 좋겠어",
-      "시간이 갈수록 어려워지는 슈팅 게임",
+      "🐝 붕붕 세상에 가볼래",
+      "🐧 뽀로 세상에 가볼래",
     ],
   },
   sandbox: {
@@ -42,7 +41,7 @@ export const profile: Profile = {
     // 산출물은 확장이 ```html 펜스를 파싱해 workspace_root/index.html 로 쓴다
     // (revealBuilt → saveGameToWorkspace). 값과 무관하게 저장은 일어난다.
     file_write: true,
-    workspace_root: "~/HypeProofGames",
+    workspace_root: "~/HypeProofQuests",
     // 레거시 — 실제 셸 정책은 sdk_tools.shell 이 소유한다(#431). 미성년은
     // 워커가 proxy 로 고정하므로 파일·셸 도구가 도달할 런타임이 없다.
     execute_shell: false,
@@ -78,7 +77,7 @@ export const profile: Profile = {
     allowlist: [],
   },
   game: {
-    template_tier: "kids-rich",
+    template_tier: "kids-quest",   // 게스트 퀘스트 — kq-* 5개. "게임" 낱말을 쓰지 않는 tier.
   },
   publishing: {
     // 미성년 cohort 기본값: 로컬 미리보기만. 공개 퍼블리시는 부모 동의 + PII
@@ -109,36 +108,39 @@ export const profile: Profile = {
     coach: {
       naming_mode: "user_names_it",
       fallback_name: "코치",
-      naming_prompt_md: "같이 만들 코치의 **이름**을 지어주세요 🎮",
-      personality_prompt_md: "이 코치는 어떤 성격이면 좋겠어요? *(예: 까다로운 테스터, 차분한 동료. 건너뛰어도 괜찮아요)*",
+      naming_prompt_md: "같이 친구들을 도와줄 **AI 캐릭터의 이름**을 지어주세요 ✨",
+      personality_prompt_md: "이 친구는 어떤 성격이면 좋겠어요? *(예: 꼼꼼한 친구, 엉뚱한 친구. 건너뛰어도 괜찮아요)*",
       revisit_on_entry: false,
     },
     suggestions: {
       // 초5·6: 규칙·난이도·공정함이 들어간 good 칩 — 자율 입력을 유도하고,
       // 막연한 weak 칩으로 "구체화" 대비를 보여준다.
       initial: [
-        { text: "별을 모으는 점프 게임 — 점점 빨라지게", style: "good" },
-        { text: "장애물 피하기, 점수 2배 구간 추가", style: "good" },
-        { text: "시간이 갈수록 어려워지는 슈팅 게임", style: "good" },
-        { text: "그냥 멋진 게임 만들어줘", style: "weak", caption: "규칙·목표가 없으면 AI도 막연해요. 뭘·어떻게?" },
+        { text: "🐕 초코 세상에 가볼래", style: "good" },
+        { text: "🐈 나비 세상에 가볼래", style: "good" },
+        { text: "🐝 붕붕 세상에 가볼래", style: "good" },
+        { text: "🐧 뽀로 세상에 가볼래", style: "good" },
+        { text: "다른 친구도 있어?", style: "good" },
       ],
       // 검증 → 고치기(Feedback Loop)를 굴리는 칩.
       follow_up: [
-        { text: "너무 쉬운 것 같아 — 난이도를 더 올려줘", style: "good" },
-        { text: "점수 규칙이 공정하게 바꿔줘", style: "good" },
-        { text: "실패하면 다시 시작하는 화면 추가해줘", style: "good" },
+        { text: "매연을 걷어내고 꽃을 피워줘", style: "good" },
+        { text: "물은 두고 배를 띄워줘 — 통나무는 그대로", style: "good" },
+        { text: "해는 두고 그늘막을 쳐줘. 어떻게 될까?", style: "good" },
+        { text: "재밌게 해줘", style: "weak", caption: "뭘 바꿀지 말해줄래요? 속도·양·목표·시간 중 하나." },
       ],
     },
     hints: {
       short_input: {
         enabled: true,
         min_chars: 5,
-        message_md: "💭 조금 더 구체적으로 — *목표·규칙·난이도* 중 하나라도 정해볼래요?",
+        message_md: "💭 조금 더 구체적으로 — *뭘·얼마나·몇 개* 중 하나라도 정해볼래요?",
       },
+      // R24 — ✨ 자동 다듬기 버튼 폐지(3·4와 동일). 바꾸는 유일한 통로는 아이의 말.
       roll_input_button: {
-        enabled: true,
-        label: "✨ 한 번 더 다듬어보기",
-        probe_md: "좋아요! 한 가지만 더 — 이 게임이 **너무 쉽지도 어렵지도 않으려면** 뭘 정해야 할까요?",
+        enabled: false,
+        label: "",
+        probe_md: "",
       },
     },
     retry_button: {

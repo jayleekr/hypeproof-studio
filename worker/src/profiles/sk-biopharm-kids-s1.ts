@@ -1,13 +1,13 @@
 import type { Profile } from "./types";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
-import systemPromptMd from "../prompts/sk-biopharm-kids-world-3-4.md";
+import systemPromptMd from "../prompts/sk-biopharm-kids-quest-3-4.md";
 
 export const profile: Profile = {
   // id/cohort_id are unchanged for token + roster compatibility; the "-s1"
   // suffix is legacy (v126 made this a single-session workshop, not a series).
   id: "sk-biopharm-kids-2026-grade-3-4-s1",
   version: 1,
-  display_name: "SK바이오팜 가족 AI 창작 워크숍 — 내가 만든 미래 (3-4학년)",
+  display_name: "SK바이오팜 가족 AI 창작 워크숍 — 게스트 퀘스트 (3-4학년)",
   audience: {
     age_range: [8, 10],          // v126 분반: 초3·4 = 만 8~10세
     language: "ko",
@@ -21,11 +21,11 @@ export const profile: Profile = {
   },
   system_prompt: systemPromptMd as unknown as string,
   welcome: {
-    greeting_md: "안녕하세요! 오늘은 **내가 만든 미래**를 그려볼 거예요 ✨\n말로 그리면 비도 내리고 밤도 와요.",
+    greeting_md: "안녕하세요! 문제투성이 세상에 사는 친구 아홉 명이 있어요.\n**누구 세상부터 가볼까요?** 🐕 초코 · 🐈 나비 · 🐝 붕붕 · 🐧 뽀로 · 🐁 찍찍 · 🐹 햄찌 · 🦜 앵무 · 🌻 해바 · 🦝 라쿤",
     example_prompts: [
-      "미래의 우리 동네를 그려줘",
-      "우리 집 강아지가 사는 미래",
-      "눈이 내리는 미래의 학교",
+      "🐕 초코 세상에 가볼래",
+      "🐈 나비 세상에 가볼래",
+      "🐝 붕붕 세상에 가볼래",
     ],
   },
   sandbox: {
@@ -34,7 +34,7 @@ export const profile: Profile = {
     // (revealBuilt → saveGameToWorkspace). 값과 무관하게 저장은 일어난다.
     // 2026-08-10 에 이 필드를 보고 "파일 쓰기가 켜져 있다"고 오독한 사례가 있다.
     file_write: true,
-    workspace_root: "~/HypeProofFutures",
+    workspace_root: "~/HypeProofQuests",
     // 레거시 — 실제 셸 정책은 sdk_tools.shell 이 소유한다(#431). 이 트랙은
     // sdk_tools 자체를 두지 않는다: 미성년은 워커가 proxy 로 고정하므로
     // (chat.ts, REQ-O1 계열) 파일·셸 도구가 도달할 런타임이 없다.
@@ -71,7 +71,7 @@ export const profile: Profile = {
     allowlist: [],
   },
   game: {
-    template_tier: "kids-world",   // 미래 그리기 — 도트 월드 엔진(kw-world). 게임 tier 아님.
+    template_tier: "kids-quest",   // 게스트 퀘스트 — kq-* 5개. "게임" 낱말을 쓰지 않는 tier.
   },
   publishing: {
     // 단발 4시간 워크숍 — 로컬 미리보기(▶ Run)로 충분하고 chat-only
@@ -105,7 +105,7 @@ export const profile: Profile = {
     coach: {
       naming_mode: "user_names_it",
       fallback_name: "코치",
-      naming_prompt_md: "같이 게임 만들 친구의 **이름**을 지어주세요 🎮",
+      naming_prompt_md: "같이 친구들을 도와줄 **AI 캐릭터의 이름**을 지어주세요 ✨",
       personality_prompt_md: "이 친구는 어떤 친구예요? *(예: 친절한 친구, 엉뚱한 친구. 건너뛰어도 괜찮아요)*",
       revisit_on_entry: false,
     },
@@ -113,20 +113,20 @@ export const profile: Profile = {
       // 자세한 vs 막연한 대비. 자녀가 좋은 입력 모양을 패턴 매칭으로 학습.
       // 작은 스코프부터 → 자녀가 첫 시도에 성공 경험.
       initial: [
-        { text: "우리 집이 있는 미래 동네를 그려줘", style: "good" },
-        { text: "비가 내리는 밤의 미래 학교", style: "good" },
-        { text: "우리 강아지가 뛰어다니는 미래", style: "good" },
-        { text: "하늘을 나는 차가 있는 우리 동네", style: "good" },
-        { text: "멋있게 그려줘", style: "weak", caption: "뭐가 멋있어야 할지 모르겠어요. 뭐가 있는지 말해줄래요?" },
+        { text: "🐕 초코 세상에 가볼래", style: "good" },
+        { text: "🐈 나비 세상에 가볼래", style: "good" },
+        { text: "🐝 붕붕 세상에 가볼래", style: "good" },
+        { text: "🐧 뽀로 세상에 가볼래", style: "good" },
+        { text: "다른 친구도 있어?", style: "good" },
       ],
       // 모두 명령형 — 질문형("...하면 어떻게 돼?")은 AI가 코드 대신 되묻게
       // 만들어 화면이 빈 채로 남는다. 1회차는 "말하면 바로 바뀐다" 체험이 핵심.
       follow_up: [
-        { text: "여기에 비를 내리게 해줘", style: "good" },
-        { text: "밤이 오게 해줘", style: "good" },
-        { text: "우리 집 강아지를 넣어줘", style: "good" },
-        { text: "우리 아빠 차를 넣어줘 — 파란색이야", style: "good" },
-        { text: "학교 옆에 나무를 더 심어줘", style: "good" },
+        { text: "불덩이 대신 딸기 아이스크림이 떨어지게 해줘", style: "good" },
+        { text: "해를 구름으로 가려줘", style: "good" },
+        { text: "물을 빼고 방벽을 쌓아줘", style: "good" },
+        { text: "초코를 우리 집 강아지처럼 갈색으로 해줘", style: "good" },
+        { text: "재밌게 해줘", style: "weak", caption: "뭐가 재밌어야 할지 모르겠어요. 뭘 바꿀지 말해줄래요?" },
       ],
     },
     hints: {

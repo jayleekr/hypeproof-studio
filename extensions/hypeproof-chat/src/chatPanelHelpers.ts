@@ -125,17 +125,17 @@ export interface ProfileToneShape {
   game?: { template_tier?: string };
 }
 
-export type AppTone = "game" | "search" | "site" | "world";
+export type AppTone = "game" | "search" | "site" | "quest";
 
 /**
  * Pick the UI tone for hard-coded chat-panel labels.
  *
  * `search-webapp` tier (e.g. boah-dental teaser) → "search" tone (검색엔진 어휘).
  * `website` tier (보아치과 원장 copyclone) → "site" tone (웹사이트 어휘).
- * `kids-world` tier ("내가 만든 미래") → "world" tone (미래 어휘).
+ * `kids-quest` tier ("게스트 퀘스트") → "quest" tone (게스트를 돕는 어휘, "게임" 없음).
  * Anything else (kids-basic, etc.) → "game" tone — the legacy default.
  *
- * 2026-08-17 — kids-world 를 추가하기 전에는 이 함수가 `game` 으로 떨어뜨렸고,
+ * 2026-08-17 — kids-world(→ 08-19 kids-quest 로 교체) 를 추가하기 전에는 이 함수가 `game` 으로 떨어뜨렸고,
  * 그래서 "게임" 이라는 낱말이 UI 8곳(만드는 중 라벨·미리보기 제목·플레이스홀더·
  * show-intent 회신·about 카드 2줄·토큰 확인 문구·이모지)에 그대로 나왔다.
  * 그 커리큘럼은 **"게임" 프레임을 금지**한다("게임이라는 말을 먼저 꺼내지
@@ -149,24 +149,24 @@ export function appToneOf(profile: ProfileToneShape | null | undefined): AppTone
   const tier = profile?.game?.template_tier;
   if (tier === "search-webapp") return "search";
   if (tier === "website") return "site";
-  if (tier === "kids-world") return "world";
+  if (tier === "kids-quest") return "quest";
   return "game";
 }
 
 /** Hard-coded copy table keyed by tone. */
 export const TONE_LABELS = {
-  // "내가 만든 미래" 트랙. 산출물은 게임이 아니라 살아 움직이는 미래 그림이다.
-  // 진행 라벨은 "생각 중…" — 만드는 대상을 이름 붙이지 않는다(무엇을 만드는지는
-  // 아이가 정하는 것이고, 코치가 먼저 규정하면 그 자체가 프레임이 된다).
-  world: {
+  // "게스트 퀘스트" 트랙. 산출물은 게임이 아니라 게스트(초코·나비…)의 문제를
+  // 푸는 것이다. 진행 라벨은 "생각 중…" — 만드는 대상을 이름 붙이지 않는다
+  // (무엇을 만드는지는 아이가 정하는 것이고, 코치가 먼저 규정하면 프레임이 된다).
+  quest: {
     buildingLabel: "생각 중…",
     namingEmoji: "✨",
-    previewTitle: "✨ 내가 만든 미래",
-    previewPlaceholder: "여기에 미래가 나와요",
-    tokenConfirmTail: "같이 만들어봐요 ✨",
-    showIntentReply: "오른쪽 창에 띄웠어요! ✨ 한번 보세요.",
-    aboutTitle: "✨ 내가 만든 미래",
-    aboutSubtitle: '채팅에서 "미래의 우리 동네를 그려줘"라고 말해보세요!',
+    previewTitle: "✨ 친구를 도와주는 곳",
+    previewPlaceholder: "여기에 나와요 — 친구가 기다리고 있어요",
+    tokenConfirmTail: "같이 도와줘요 ✨",
+    showIntentReply: "오른쪽 창에 띄웠어요! ✨ 한번 해보세요.",
+    aboutTitle: "✨ 게스트 퀘스트",
+    aboutSubtitle: '채팅에서 "초코 얘기 들려줘"라고 말해보세요!',
   },
   game: {
     buildingLabel: "게임 만드는 중",

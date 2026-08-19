@@ -20,12 +20,35 @@ import { injectBaseHref, injectInnerCsp } from "./previewHtml";
  *  - `localResourceRoots` is the workspace folders ∪ the previewed file's
  *    parent dir only — webview refuses to serve anything outside that set.
  *  - Host message handler still routes ONLY `previewReady` +
- *    `preview_request_action`; the latter only acts on `append_artifact` and
- *    only after a modal confirm, writing to `workshop-output/` (#155).
+ *    `preview_request_action` + `preview_result`; the first of those two only
+ *    acts on `append_artifact` and only after a modal confirm, writing to
+ *    `workshop-output/` (#155). `preview_result` (kids-quest `hp:result`) never
+ *    touches disk — it is a plain-data event the chat panel folds into the
+ *    next turn's prompt (see ChatPanelProvider.attachQuestResult).
  *
  * If you weaken any of those, update test/csp-sandbox.smoke.mjs and
  * docs/studio-requirements.md REQ-D rows.
  */
+
+/**
+ * Keep only flat primitives (bool/number/short string) from an `hp:result`
+ * payload — the iframe is untrusted content, so nothing nested or long rides
+ * into the prompt. Exported for tests.
+ */
+export function sanitizeQuestResult(raw: unknown): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!raw || typeof raw !== "object") return out;
+  let n = 0;
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (k === "type") continue;
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,23}$/.test(k)) continue;
+    if (typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) out[k] = v;
+    else if (typeof v === "string") out[k] = v.slice(0, 40);
+    else continue;
+    if (++n >= 16) break;
+  }
+  return out;
+}
 
 export class PreviewProvider {
   private panel: vscode.WebviewPanel | undefined;
@@ -42,6 +65,12 @@ export class PreviewProvider {
     placeholder: "게임이 여기에 나와요",
     emoji: "🎮",
   };
+
+  // kids-quest — a skeleton's `finish()` posts `{type:"hp:result", ok, …}` to
+  // its parent. The shell forwards it as `preview_result`; we fan it out here
+  // so the chat panel can let the guest react to what the kid just did.
+  private readonly resultEmitter = new vscode.EventEmitter<Record<string, unknown>>();
+  readonly onResult = this.resultEmitter.event;
 
   constructor(private readonly _context: vscode.ExtensionContext) {}
 
@@ -125,6 +154,8 @@ export class PreviewProvider {
           }
         } else if (msg?.type === "preview_request_action") {
           void this.handlePreviewRequestAction(msg);
+        } else if (msg?.type === "preview_result") {
+          this.resultEmitter.fire(sanitizeQuestResult(msg.result));
         }
       });
       this.panel.onDidDispose(() => {
@@ -280,6 +311,9 @@ export class PreviewProvider {
             action: m.action,
             payload: m.payload ?? null,
           });
+        } else if (m.type === "hp:result") {
+          // kids-quest skeleton finished a round → let the coach/guest know.
+          vscode.postMessage({ type: "preview_result", result: m });
         }
         return;
       }

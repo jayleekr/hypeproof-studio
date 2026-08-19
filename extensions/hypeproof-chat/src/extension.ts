@@ -61,6 +61,8 @@ export async function activate(context: vscode.ExtensionContext) {
   const assetStatus = new AssetStatusBar();
   const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus);
   providerRef = provider;
+  // kids-quest — skeleton round result → next-turn context for the coach.
+  context.subscriptions.push(preview.onResult((r) => provider.attachQuestResult(r)));
 
   context.subscriptions.push(
     { dispose: () => liveServer.dispose() },
