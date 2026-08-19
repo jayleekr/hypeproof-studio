@@ -132,6 +132,8 @@ export interface ResolvedProfile {
   minor_cohort?: boolean;
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
+  /** kids-quest — 사전 완성 세상 목록 (GET /v1/worlds/:id 로 HTML). */
+  worlds?: Array<{ id: string; guest: string; emoji: string; chip: string; aliases: string[] }>;
   // #282 — provider-hosted tools the cohort profile opted into (sourced from the
   // worker, not inferred client-side). Drives which Agent SDK tools the coach may
   // use. Absent/false → the coach is chat-only for that capability.
