@@ -25,6 +25,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { decodeTokenPayloadUnverified } from "./chatPanelHelpers.ts";
+import { UPLOADED_MARKER } from "./spoolUploader.ts";
 
 export const SPOOL_SCHEMA_VERSION = 1;
 
@@ -45,6 +46,12 @@ const SEEN_REQUEST_KEYS_MAX = 2_000;
 
 /** 턴 → 세션 피닝 상한. 초과 시 오래된 피닝부터 잊는다(현재 세션으로 폴백). */
 const PINNED_TURNS_MAX = 100;
+
+/**
+ * #596 — 업로드 성공(마커 존재) 세션의 로컬 보존 기간. R2 에 완결본이 있고
+ * 며칠의 대조 여유만 남기면 되므로 짧다 (#580 AC 6 "성공 후 N일 정리").
+ */
+const UPLOADED_RETAIN_MS = 3 * 24 * 60 * 60 * 1000;
 
 export interface SpoolIdentity {
   /** 토큰 payload `u` — 코호트-로컬 핸들 (예: kid01). */
@@ -357,6 +364,31 @@ export class SessionSpool {
   }
 
   /**
+   * #596 — 현재 세션을 봉인한다: 이 세션은 여기서 완결이고, 다음 이벤트는
+   * 새 세션 디렉토리에서 시작한다(신원은 승계). 업로드 직전에 호출해서
+   * "오늘 지금까지"가 업로드 대상이 되게 한다 — 이게 없으면 활성-세션 제외
+   * 규칙 때문에 수업 끝 배너가 아무것도 못 올린다(1회차 리뷰 F1).
+   * 반환: 봉인된 세션 디렉토리 (봉인할 게 없으면 null). 큐를 통해 돌므로
+   * 앞서 큐에 든 이벤트가 전부 적힌 뒤에 봉인된다.
+   */
+  seal(): Promise<string | null> {
+    return new Promise((resolve) => {
+      this.enqueue(async () => {
+        if (!this.session) {
+          resolve(null);
+          return;
+        }
+        const dir = this.session.dir;
+        this.pendingIdentity = this.session.identity;
+        this.session = null;
+        resolve(dir);
+      });
+      // enqueue 의 catch 가 삼킨 경우에도 호출자가 영원히 걸리지 않게.
+      void this.queue.then(() => resolve(null));
+    });
+  }
+
+  /**
    * 총량 캡 집행 (#580 D7). 큐를 통해 돌므로 materialize 와 경합하지 않는다.
    * 보호 대상: 이 인스턴스의 현재 세션 + **오늘 날짜 디렉토리 전체** — 멀티
    * 윈도우에서 다른 창의 활성 세션을 알 방법이 없으므로 당일은 건드리지
@@ -374,9 +406,25 @@ export class SessionSpool {
     try {
       const today = localDateStamp(this.now());
       const sessions = await listSessionDirs(this.env.root);
+      // #596 — 업로드 성공 세션의 보존 정리 (#580 AC 6): 마커가 있고 보존
+      // 기간이 지난 세션은 캡과 무관하게 지운다. R2 에 완결본이 있으므로
+      // 로컬은 대조 여유분일 뿐이다. 현재 세션은 건드리지 않는다.
+      const nowMs = this.now().getTime();
+      const removed = new Set<string>();
+      for (const { dir } of sessions) {
+        if (this.session && dir === this.session.dir) continue;
+        const marker = await fs.promises
+          .stat(path.join(dir, UPLOADED_MARKER))
+          .catch(() => null);
+        if (marker && nowMs - marker.mtimeMs > UPLOADED_RETAIN_MS) {
+          await fs.promises.rm(dir, { recursive: true, force: true });
+          removed.add(dir);
+        }
+      }
       let total = 0;
       const sized: Array<{ dir: string; day: string; bytes: number; mtimeMs: number }> = [];
       for (const { dir, day } of sessions) {
+        if (removed.has(dir)) continue;
         // 세션 디렉토리는 평평하다(파일만) — 하위 디렉토리가 생기면(후속
         // manifest 등) dirSize 를 재귀로 바꿔야 한다.
         const info = await dirSize(dir);
@@ -470,6 +518,24 @@ export class SessionSpool {
     if (!s.metaWritten) {
       // materialize/후착에서 meta 가 실패했던 세션 — 조용히 회복 시도.
       await this.writeMeta(s, s.identity).catch((err) => this.warnOnce("meta", err));
+    }
+    // #596 — 마커가 있는 디렉토리에 새 이벤트가 오면(피닝된 늦은 턴 등) 그
+    // 세션은 더 이상 "업로드 완결"이 아니다: 마커를 지워 다음 트리거가 전체를
+    // 다시 올리게 한다(R2 덮어쓰기 멱등). 안 지우면 마커 이후 꼬리가 R2 에
+    // 영영 도달하지 못하고, 3일 뒤 스윕이 유일본을 지운다(1회차 리뷰 F2).
+    // ENOENT(마커 없음 — 대부분의 이벤트)는 정상. 그 외(win32 EPERM/EBUSY —
+    // renameWithRetry 가 존재하는 그 계열)는 한 번 물러났다 재시도하고, 그래도
+    // 실패하면 경고한다 — 조용히 남은 마커는 위 꼬리 유실로 직결된다(N5).
+    try {
+      await fs.promises.unlink(path.join(s.dir, UPLOADED_MARKER));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        await new Promise((r) => setTimeout(r, 100));
+        await fs.promises.unlink(path.join(s.dir, UPLOADED_MARKER)).catch((err2) => {
+          // 재시도가 ENOENT 면 그 사이 누가 지운 것 = 성공 — 경고 아님.
+          if ((err2 as NodeJS.ErrnoException)?.code !== "ENOENT") this.warnOnce("marker", err2);
+        });
+      }
     }
     const record = { schema_version: SPOOL_SCHEMA_VERSION, ts: this.now().toISOString(), ...fields };
     const line = JSON.stringify(record) + "\n";

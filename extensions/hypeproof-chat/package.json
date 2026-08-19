@@ -103,6 +103,10 @@
         "command": "hypeproof-chat.previewActiveFile",
         "title": "HypeProof: HTML 미리보기 (옆 패널)",
         "icon": "$(open-preview)"
+      },
+      {
+        "command": "hypeproof-chat.uploadSessionLogs",
+        "title": "HypeProof: 오늘 활동 기록 보내기"
       }
     ],
     "menus": {

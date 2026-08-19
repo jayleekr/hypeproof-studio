@@ -3,6 +3,7 @@ import type { Env } from "./env";
 import { chat } from "./routes/chat";
 import { messages } from "./routes/messages";
 import { trace } from "./routes/trace";
+import { logs } from "./routes/logs";
 import { admin } from "./routes/admin";
 import { report } from "./routes/report";
 import { runHeartbeat } from "./cron/heartbeat.ts";
@@ -35,6 +36,7 @@ app.use("/v1/messages", signingSecretGuard);
 app.use("/v1/messages/*", signingSecretGuard);
 app.use("/v1/profile", signingSecretGuard);
 app.use("/v1/trace/*", signingSecretGuard);
+app.use("/v1/logs/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
 
 // Friendly root → redirect to admin UI (which itself is access-gated)
@@ -69,6 +71,7 @@ app.route("/v1", chat);
 // same /v1 base; the chat router doesn't define /messages so no shadowing.
 app.route("/v1", messages);
 app.route("/v1/trace", trace);
+app.route("/v1/logs", logs);
 app.route("/v1/report", report);
 app.route("/admin", admin);
 

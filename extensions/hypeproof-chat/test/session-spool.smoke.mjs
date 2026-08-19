@@ -355,3 +355,64 @@ console.log("session-spool.smoke.mjs — all green");
   assert.equal(classifyTurnError(null), "unknown");
   console.log("✓ classifyTurnError — 덕 타이핑 분류, 산문 미유출");
 }
+
+// ─── #596 — 업로드 성공 세션 보존 정리 (마커 + 3일, 캡과 무관) ───────────────
+{
+  const root = tmp();
+  const mk = (day, sid, markerAgeDays) => {
+    const dir = path.join(root, day, sid);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "events.jsonl"), "x\n");
+    if (markerAgeDays !== null) {
+      const marker = path.join(dir, "uploaded.json");
+      fs.writeFileSync(marker, "{}\n");
+      const t = new Date(FIXED_NOW.getTime() - markerAgeDays * 24 * 3600 * 1000);
+      fs.utimesSync(marker, t, t);
+    }
+    return dir;
+  };
+  const oldUploaded = mk("2026-08-10", "11111111-1111-4111-8111-111111111111", 9);
+  const freshUploaded = mk("2026-08-18", "22222222-2222-4222-8222-222222222222", 1);
+  const neverUploaded = mk("2026-08-10", "33333333-3333-4333-8333-333333333333", null);
+  const spool = makeSpool(root); // 캡 기본 200MB — 캡 로직과 무관하게 정리돼야 함
+  await spool.sweepRetention();
+  assert.ok(!fs.existsSync(oldUploaded), "업로드 후 3일 지난 세션은 삭제");
+  assert.ok(fs.existsSync(freshUploaded), "3일 이내는 유지 (대조 여유)");
+  assert.ok(fs.existsSync(neverUploaded), "미업로드 세션은 캡 전까지 절대 삭제 안 함");
+  console.log("✓ #596 보존 — 업로드+3일 삭제 · 최근 유지 · 미업로드 보호");
+}
+
+// ─── #596 seal — 봉인은 세션을 완결시키고 신원을 승계한다 ────────────────────
+{
+  const spool = makeSpool(tmp());
+  spool.noteIdentity({ u: "kid01", c: "co" });
+  spool.recordPrompt({ turnId: "t-1", runtime: "proxy", text: "수업 마지막 질문" });
+  const sealed = await spool.seal();
+  assert.ok(sealed, "봉인된 디렉토리를 돌려준다");
+  assert.equal(spool.currentSessionDir(), null, "봉인 후 현재 세션 없음");
+  // 다음 이벤트는 새 세션 — 신원은 이어진다.
+  spool.recordPrompt({ turnId: "t-2", runtime: "proxy", text: "봉인 후 질문" });
+  await spool.flush();
+  const next = spool.currentSessionDir();
+  assert.notEqual(next, sealed, "새 세션 디렉토리");
+  assert.deepEqual(readMeta(next).user, { u: "kid01", c: "co" }, "신원 승계");
+  assert.deepEqual(readEvents(sealed).map((e) => e.text), ["수업 마지막 질문"]);
+  // 빈 스풀 봉인은 null.
+  const spool2 = makeSpool(tmp());
+  assert.equal(await spool2.seal(), null);
+  console.log("✓ #596 seal — 완결 + 신원 승계, 빈 스풀은 null");
+}
+
+// ─── #596 마커 무효화 — 마커 있는 세션에 새 이벤트가 오면 마커가 사라진다 ────
+// (마커가 남으면 그 뒤 꼬리가 R2 에 영영 못 가고 3일 뒤 스윕이 유일본을 지운다)
+{
+  const spool = makeSpool(tmp());
+  spool.recordPrompt({ turnId: "t-1", runtime: "proxy", text: "first" });
+  await spool.flush();
+  const dir = spool.currentSessionDir();
+  fs.writeFileSync(path.join(dir, "uploaded.json"), "{}\n"); // 업로더가 남긴 마커
+  spool.recordTurnEnd({ turnId: "t-1", status: "ok", runtime: "proxy" }); // 늦은 턴 이벤트
+  await spool.flush();
+  assert.ok(!fs.existsSync(path.join(dir, "uploaded.json")), "새 이벤트 → 마커 무효화 (재업로드 대상 복귀)");
+  console.log("✓ #596 마커 무효화 — 새 이벤트가 '완결' 주장을 철회시킨다");
+}

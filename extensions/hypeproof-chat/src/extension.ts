@@ -33,12 +33,15 @@ import {
 import { openBrowser, captureActivePage } from "./nativeBrowser";
 import { LiveServer } from "./liveServer";
 import { decideWorkspaceSwitch, isSameLocation } from "./workspaceRouting";
-import { SessionSpool, resolveSpoolSessionsRoot } from "./sessionSpool";
+import { SessionSpool, resolveSpoolSessionsRoot, spoolIdentityFromToken } from "./sessionSpool";
+import { uploadAllPending, scanUploadableSessions } from "./spoolUploader";
 import type { ResolvedProfile } from "./protocol";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
 let providerRef: ChatPanelProvider | null = null;
+/** #596 — 업로드 커맨드 재진입 락 (배너+팔레트 동시 클릭 → 이중 업로드 방지). */
+let uploadInFlight = false;
 
 export async function activate(context: vscode.ExtensionContext) {
   // Kill kid-hostile modals globally + persistently, regardless of whether a
@@ -74,14 +77,15 @@ export async function activate(context: vscode.ExtensionContext) {
   // 토큰은 env 아니면 그 파일로 온다 — 어느 쪽이 뚫렸든 게이트에 걸린다.
   // F5 개발 호스트는 기록하되 meta 에 `dev: true` 표식으로 걸러낼 수 있게 한다.
   const isTestRun = !!process.env.HPS_TEST_E2E || backdoors.testStateFileFound;
+  const spoolRoot = resolveSpoolSessionsRoot({
+    platform: process.platform,
+    homeDir: os.homedir(),
+    env: process.env as Record<string, string | undefined>,
+  });
   const spool = isTestRun
     ? undefined
     : new SessionSpool({
-        root: resolveSpoolSessionsRoot({
-          platform: process.platform,
-          homeDir: os.homedir(),
-          env: process.env as Record<string, string | undefined>,
-        }),
+        root: spoolRoot,
         appVersion: String(
           (context.extension.packageJSON as { version?: unknown } | undefined)?.version ?? "unknown",
         ),
@@ -94,6 +98,35 @@ export async function activate(context: vscode.ExtensionContext) {
     // 종료 시 큐에 남은 마지막 이벤트를 흘려보낸다 (best-effort — 크래시는
     // 라인 단위 append 가 감당한다).
     context.subscriptions.push({ dispose: () => void spool.flush() });
+    // #596 — 기동 시 잔여분 배너 (활성화당 1회). 세션 종료 배너는 proxy
+    // 런타임의 session_window 에만 걸리는데 주력 런타임은 agent-sdk 라(1회차
+    // 리뷰 F6) 그 경로만으론 도달이 안 된다 — 다음 기동에서 "안 보낸 기록"을
+    // 발견하면 버튼을 내민다. 업로드 자체는 여전히 클릭이 있어야만 일어난다.
+    const pendingTimer = setTimeout(() => {
+      void (async () => {
+        try {
+          const token = await context.secrets.get(TOKEN_KEY);
+          if (!token) return;
+          const pending = scanUploadableSessions(spoolRoot, {
+            currentSessionDir: spool.currentSessionDir(),
+            // 공용 PC(N2): 이 토큰 주인의 세션만 센다 — 남의 잔여분으로
+            // 배너를 울리면 남의 원문이 이 학생의 동의 아래 올라간다.
+            identity: spoolIdentityFromToken(token),
+          });
+          if (pending.length === 0) return;
+          const profile = await provider.ensureProfile();
+          if (profile?.analytics?.upload_session_logs !== true) return;
+          const pick = await vscode.window.showInformationMessage(
+            `지난 활동 기록 ${pending.length}개가 아직 안 보내졌어요 — 지금 보낼까요?`,
+            "기록 보내기",
+          );
+          if (pick === "기록 보내기") {
+            void vscode.commands.executeCommand("hypeproof-chat.uploadSessionLogs");
+          }
+        } catch { /* best-effort — 배너 실패가 활성화를 방해하면 안 된다 */ }
+      })();
+    }, 15_000);
+    context.subscriptions.push({ dispose: () => clearTimeout(pendingTimer) });
   }
   const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus, spool);
   providerRef = provider;
@@ -116,6 +149,92 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("hypeproof-chat.clearHistory", async () => {
       await provider.clearHistory();
       vscode.window.showInformationMessage("HypeProof Chat: conversation cleared.");
+    }),
+
+    // #596 — 세션 로그 업로드 (#580 업로드 계층). 항상 **명시적 액션**으로만
+    // 돈다: 이 커맨드(팔레트) 또는 세션 종료 감지/기동 시 잔여분 배너의 버튼.
+    //
+    // 순서가 본질이다: 먼저 현재 세션을 **봉인**(seal — 스풀이 다음 이벤트를
+    // 새 세션으로 돌림)하고, 봉인된 디렉토리는 정지 게이트 면제(allowFresh)로
+    // 업로드한다. 이게 없으면 "활성 세션 제외" 규칙 때문에 1일차 수업 끝
+    // 배너가 오늘 데이터를 하나도 못 올린다(1회차 리뷰 F1). 다른 창의 활성
+    // 세션은 정지 게이트(UPLOAD_QUIESCENT_MS)가 보호한다(F2).
+    vscode.commands.registerCommand("hypeproof-chat.uploadSessionLogs", async () => {
+      if (!spool) {
+        vscode.window.showInformationMessage("테스트 실행에서는 세션 기록을 남기지 않아요.");
+        return;
+      }
+      if (uploadInFlight) {
+        vscode.window.showInformationMessage("이미 기록을 보내는 중이에요 — 잠시만요.");
+        return;
+      }
+      // 락은 체크 직후 즉시 — 아래 await 들 사이에 두 번째 호출이 끼어들면
+      // 락이 장식이 된다 (2회차 리뷰 N4).
+      uploadInFlight = true;
+      try {
+        const token = await context.secrets.get(TOKEN_KEY);
+        if (!token) {
+          vscode.window.showInformationMessage("토큰을 먼저 넣어주세요 — 기록은 토큰의 수업으로 보내져요.");
+          return;
+        }
+        const profile = await provider.ensureProfile();
+        if (profile === null) {
+          // 확인 실패와 "기능 꺼짐"을 합치면 안 되고(#381), 원인을 단정하는
+          // 문구도 안 된다(verification.md 의 401 오독 사고) — 원인+다음
+          // 행동을 아는 쪽은 profileFailure 다.
+          vscode.window.showWarningMessage(
+            provider.profileFailure()?.friendly ??
+              "수업 정보를 확인하지 못했어요 — 잠시 후 다시 시도해주세요.",
+          );
+          return;
+        }
+        if (profile.analytics?.upload_session_logs !== true) {
+          // 서버도 어차피 거부한다(fail closed) — 여기서 미리 조용히 알린다.
+          vscode.window.showInformationMessage("이 수업은 기록 업로드를 사용하지 않아요.");
+          return;
+        }
+        const proxyUrl = vscode.workspace
+          .getConfiguration("hypeproofChat")
+          .get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+        await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: "오늘 활동 기록 보내는 중…" },
+          async () => {
+            // 시도 기록은 **봉인 전에, 이미 활동이 있던 세션에만** 남긴다.
+            // 봉인 후에 기록하면 이벤트 1개짜리 정크 세션이 실체화되고, 그게
+            // 다음 기동 배너의 "안 보낸 기록 1개"가 되어 신호가 죽는다(N3).
+            if (spool.currentSessionDir()) {
+              spool.recordWorkflow({ event: "logs_upload" });
+            }
+            const sealed = await spool.seal();
+            const results = await uploadAllPending(spoolRoot, {
+              baseUrl: proxyUrl,
+              token,
+              currentSessionDir: spool.currentSessionDir(),
+              // 공용 PC 방어(N2): 이 토큰의 신원과 meta 가 일치하는 세션만.
+              identity: spoolIdentityFromToken(token),
+              ...(sealed ? { allowFresh: [sealed] } : {}),
+            });
+            const ok = results.filter((r) => r.ok).length;
+            const fail = results.length - ok;
+            // 결과 집계는 스풀이 아니라 콘솔로 — 스풀에 남기면 봉인 직후의
+            // 빈 세션을 실체화해 정크 체인이 된다(N3).
+            console.log(`[spool-upload] sessions=${results.length} ok=${ok} fail=${fail}`);
+            if (results.length === 0) {
+              vscode.window.showInformationMessage("보낼 새 기록이 없어요.");
+            } else if (fail === 0) {
+              vscode.window.showInformationMessage(`활동 기록 ${ok}개 세션을 보냈어요!`);
+            } else {
+              const first = results.find((r) => !r.ok);
+              vscode.window.showWarningMessage(
+                `기록 ${ok}개는 보냈고 ${fail}개는 실패했어요 — 나중에 "오늘 활동 기록 보내기"를 다시 실행하면 이어서 보내요.` +
+                  (first?.message ? ` (${first.message})` : ""),
+              );
+            }
+          },
+        );
+      } finally {
+        uploadInFlight = false;
+      }
     }),
 
     vscode.commands.registerCommand("hypeproof-chat.setToken", async () => {

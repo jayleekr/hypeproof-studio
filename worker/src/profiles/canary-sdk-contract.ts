@@ -96,6 +96,10 @@ export const profile: Profile = {
   analytics: {
     log_user_messages: false,
     log_metadata: true,
+    // #596 — 카나리아는 업로드 계층의 양성 대조군이다. 실코호트는 전부
+    // 기본 OFF(동의 후 opt-in)이므로, 켜진 코호트가 하나는 있어야 통과
+    // 경로를 테스트로 고정할 수 있다.
+    upload_session_logs: true,
   },
   ux: {
     coach: {
