@@ -1036,7 +1036,12 @@ const TINY_PNG =
     assert.ok(/^<!doctype html>/i.test(h.trim()), `${where} starts with <!doctype html>`);
     assert.ok(/<\/html>\s*$/i.test(h.trim()), `${where} ends with </html>`);
     assert.ok(!/https?:\/\//i.test(h), `${where} no external http(s) URL`);
-    assert.ok(!/<script[^>]+src=/i.test(h), `${where} no external <script src>`);
+    // 2026-08-19 (#629) — 같은 폴더의 상대 경로 `engine.js` 는 허용한다(9개 세상이
+    // 공유하는 도트 엔진 + 스프라이트; Studio 가 index.html 옆에 저장한다).
+    // 금지 대상은 그대로 **외부 URL** 이다 — 교실 와이파이가 흔들리면 화면이 죽는다.
+    for (const m of h.matchAll(/<script[^>]+src=["\']([^"\']+)["\']/gi)) {
+      assert.ok(m[1] === "engine.js", `${where} no external <script src> (got ${m[1]})`);
+    }
     assert.ok(!/\bfetch\s*\(/.test(h), `${where} no network fetch()`);
     assert.ok(/%%[A-Z_]+%%/.test(h), `${where} retains %% placeholders for the model`);
 

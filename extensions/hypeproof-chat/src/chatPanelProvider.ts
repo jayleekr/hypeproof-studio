@@ -744,6 +744,28 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  - default: the sandboxed iframe PreviewProvider (existing behavior).
    * Public so extension.ts (runLastCode) shares the same routing.
    */
+  /** 작업 폴더에 engine.js 저장 (세상 HTML 옆). 실패는 미리보기 인라인이 살린다. */
+  private async saveEngineToWorkspace(js: string): Promise<void> {
+    const cwd = this.resolveCoachCwd();
+    if (!cwd) return;
+    try {
+      await vscode.workspace.fs.writeFile(vscode.Uri.file(path.join(cwd, "engine.js")), Buffer.from(js, "utf8"));
+    } catch { /* 폴백이 인라인으로 살린다 */ }
+  }
+
+  /** srcdoc 폴백용 — `<script src="engine.js">` 를 파일 내용으로 치환. */
+  private async inlineEngineIfNeeded(html: string): Promise<string> {
+    if (!html.includes('<script src="engine.js"></script>')) return html;
+    const cwd = this.resolveCoachCwd();
+    if (!cwd) return html;
+    try {
+      const buf = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(cwd, "engine.js")));
+      return html.replace('<script src="engine.js"></script>', `<script>\n${Buffer.from(buf).toString("utf8")}\n</script>`);
+    } catch {
+      return html;
+    }
+  }
+
   /** 연속 저장 디바운스 타이머 (마지막 저장 뒤 한 번만 미리보기). */
   private revealTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -756,11 +778,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private async revealPrebuiltWorld(id: string, proxyUrl: string, token: string): Promise<boolean> {
     try {
-      const url = proxyUrl.replace(/\/$/, "") + "/worlds/" + encodeURIComponent(id);
-      const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+      const base = proxyUrl.replace(/\/$/, "");
+      const res = await fetch(base + "/worlds/" + encodeURIComponent(id), {
+        headers: { authorization: `Bearer ${token}` },
+      });
       if (!res.ok) return false;
       const html = await res.text();
       if (!/<!doctype html/i.test(html)) return false;
+      // #629 — 세상 HTML 은 공용 엔진을 <script src="engine.js"> 로 부른다. 같은
+      // 폴더에 먼저 저장해야 라이브서버가 200 으로 내려준다. 코치는 이 파일을
+      // 읽지도 고치지도 않는다 — 스프라이트·도트 엔진이 여기 있다(#629).
+      const eng = await fetch(base + "/worlds/engine.js", {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      if (eng.ok) await this.saveEngineToWorkspace(await eng.text());
       const ok = await this.revealBuilt(html, { artifactSource: "prebuilt" });
       if (ok) this.lastPrebuiltWorld = id;
       return ok;
@@ -844,7 +875,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       logReveal("done", "미리보기를 열었어요");
       return true;
     }
-    void this.preview.show(checked.html);
+    // #629 — srcdoc 미리보기(폴백)는 상대경로 <script src="engine.js"> 를 못 읽는다.
+    // 라이브서버가 안 뜬 경우에만 타는 경로라 여기서만 엔진을 인라인으로 끼운다.
+    void this.preview.show(await this.inlineEngineIfNeeded(checked.html));
     logReveal("done", "미리보기를 열었어요");
     return true;
   }
