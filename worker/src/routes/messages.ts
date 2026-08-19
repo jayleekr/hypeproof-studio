@@ -327,7 +327,14 @@ messages.post("/messages", async (c) => {
     // adaptive+effort:low → 200(thinking 0), budget_tokens → 400(4.6 거부).
     // 성인 트랙은 건드리지 않는다.
     ...(profile.minor_cohort === true
-      ? { output_config: { ...((raw as Record<string, unknown>).output_config as Record<string, unknown> | undefined), effort: "low" } }
+      ? {
+          output_config: { ...((raw as Record<string, unknown>).output_config as Record<string, unknown> | undefined), effort: "low" },
+          // 2026-08-19 실기기 — "Claude's response exceeded the 32000 output token maximum":
+          // 코치가 도트 스프라이트 맵(반복 패턴 줄) 덩어리를 다시 쓰다 반복 루프에 빠져
+          // 한 응답에 32k+ 를 뱉었다(앞서 65k 턴도 같은 증상). 아동 트랙의 정상 턴은
+          // Edit 몇 번(<3k)이라 8k 면 충분하고, 폭주는 1~2분 안에 끊긴다.
+          max_tokens: Math.min(typeof raw.max_tokens === "number" ? raw.max_tokens : 8000, 8000),
+        }
       : {}),
     // #384 — Claude Code CLI 2.x emits mid-conversation `role:"system"`
     // messages (beta mid-conversation-system-2026-04-07). The classroom
