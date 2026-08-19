@@ -355,3 +355,29 @@ console.log("session-spool.smoke.mjs — all green");
   assert.equal(classifyTurnError(null), "unknown");
   console.log("✓ classifyTurnError — 덕 타이핑 분류, 산문 미유출");
 }
+
+// ─── #596 — 업로드 성공 세션 보존 정리 (마커 + 3일, 캡과 무관) ───────────────
+{
+  const root = tmp();
+  const mk = (day, sid, markerAgeDays) => {
+    const dir = path.join(root, day, sid);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "events.jsonl"), "x\n");
+    if (markerAgeDays !== null) {
+      const marker = path.join(dir, "uploaded.json");
+      fs.writeFileSync(marker, "{}\n");
+      const t = new Date(FIXED_NOW.getTime() - markerAgeDays * 24 * 3600 * 1000);
+      fs.utimesSync(marker, t, t);
+    }
+    return dir;
+  };
+  const oldUploaded = mk("2026-08-10", "11111111-1111-4111-8111-111111111111", 9);
+  const freshUploaded = mk("2026-08-18", "22222222-2222-4222-8222-222222222222", 1);
+  const neverUploaded = mk("2026-08-10", "33333333-3333-4333-8333-333333333333", null);
+  const spool = makeSpool(root); // 캡 기본 200MB — 캡 로직과 무관하게 정리돼야 함
+  await spool.sweepRetention();
+  assert.ok(!fs.existsSync(oldUploaded), "업로드 후 3일 지난 세션은 삭제");
+  assert.ok(fs.existsSync(freshUploaded), "3일 이내는 유지 (대조 여유)");
+  assert.ok(fs.existsSync(neverUploaded), "미업로드 세션은 캡 전까지 절대 삭제 안 함");
+  console.log("✓ #596 보존 — 업로드+3일 삭제 · 최근 유지 · 미업로드 보호");
+}

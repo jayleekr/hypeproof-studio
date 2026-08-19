@@ -1,6 +1,6 @@
 # Studio behavioral requirements
 
-> **Spec version:** v0.3.0
+> **Spec version:** v0.3.1
 > **Last reviewed:** 2026-08-19
 > **Live tracker:** [epic #200](https://github.com/jayleekr/hypeproof-studio/issues/200)
 > **Philosophy anchor:** [docs/seven-assets.md](./seven-assets.md) — 7 AI Native Assets; chat-panel features follow [METAPLAN §4.5](../METAPLAN.md).
@@ -331,3 +331,7 @@ PR — 이 도메인은 "각 PC 에 빠짐없이, 깨지지 않게 쌓인다"까
 | REQ-Q6 | 총량 캡 보존 정책 | 업로드 여부와 무관하게 스풀 총량 캡(200MB) 초과 시 오래된 세션부터 삭제. 보호 대상: 자기 세션 + **당일 날짜 디렉토리 전체**(멀티윈도우의 남의 활성 세션 보호). 빈 날짜 디렉토리 정리. activate 시 fire-and-forget, 큐 경유라 실체화와 경합하지 않는다 | U (`test/session-spool`) |
 | REQ-Q7 | 런타임 정직 표기 (no silent caps) | prompt 레코드는 턴이 향한 런타임을, turn_end 는 **실제로 돈** 런타임을 남긴다(SDK→proxy 폴백 반영 + `sdk_fallback` workflow 이벤트). usage 없는 턴의 비율과 원인이 데이터에서 정량으로 드러나야 한다. 실패 턴의 turn_end 에는 `error_kind` 분류값(`auth:missing`·`auth:session_inactive`·`transport`·`stall` 등 — 에러 원문 산문은 절대 기록하지 않는다)이 붙는다(첫 실기기 검증에서 걸린 공백). 테스트 런은 스풀을 만들지 않는다 — 게이트는 `HPS_TEST_E2E` env **와 `hps-test-state.json` 존재의 OR**(env 전파는 신뢰 불가 — REQ-A7 파일 백도어가 존재하는 이유; 오염에 필요한 토큰이 어느 채널로 오든 게이트에 걸린다). F5 개발 호스트는 meta 에 `dev: true` 로 표식된다 | E (기록 경로는 provider 안 — 후속 e2e 로 고정, 이 PR 은 코드 리뷰로만 확인) |
 | REQ-Q8 | 행동 이벤트 스키마는 #552 와 단일 | 웹뷰 trace 4종(trialStart/trialEnd/validationRun/humanAction)은 vscode-free 매퍼 `traceMsgToWorkflowRecord` 를 거쳐 스풀 `workflow` 레코드로 남는다(spool-then-forward — 워커 전송은 후속에 이 스풀을 읽는다). 필드명 정합은 워커 필드명 리터럴을 박은 드리프트 락 테스트가 고정한다. 스풀 turn_id(streamId)는 워커 trace 의 UUID 검증을 통과하도록 UUID 다. 호스트발 이벤트: `preview_reveal`(모든 reveal 경로 — 구조 가드에 막힌 reveal 은 기록하지 않는다), `sdk_fallback` | U (`test/trace-workflow-map`) |
+| REQ-Q9 | 업로드는 명시 트리거만 (#596) | 커맨드 팔레트("HypeProof: 오늘 활동 기록 보내기") 또는 **세션 종료 감지 배너**(chat 이 `session_window` 를 받으면 opt-in 코호트에 한해 "기록 보내기" 버튼 알림) — 버튼 클릭 없이는 어떤 업로드도 발생하지 않는다. 테스트 런(스풀 부재)·토큰 부재·opt-in 미설정이면 안내만 하고 아무것도 보내지 않는다. 현재 진행 중 세션은 제외(완결 세션만) | E (후속 — 트리거는 vscode 계층; 업로더 코어는 U) |
+| REQ-Q10 | 서버 업로드 게이트 (#596) | `PUT /v1/logs/<sessionId>/<filename>?day=` — **active-session 게이트 의도적 부재**(업로드는 수업 종료 후가 정상 경로; 토큰 만료가 시간 창을 대신함). opt-in `analytics.upload_session_logs` fail-closed(`upload_disabled` 403, canary 만 ON), roster·revocation·rate limit(60/60s)·파일명 allowlist 3종·파일별 크기 캡. **R2 키(`studio-logs/<c>/<u>/<day>/<sid>/<file>`)의 신원 프리픽스는 검증된 토큰에서 서버가 조립** — 경로 위조 불가 | R (`worker/test/logs-upload`) |
+| REQ-Q11 | manifest-last 완결 · 멱등 재시도 (#596) | 업로더는 meta → events → **manifest(sha256 목록) 마지막** 순서. 중간 실패 시 manifest 미전송 = 서버 기준 미완결 → 로컬 마커도 안 생겨 다음 트리거가 전체 재시도(R2 put 덮어쓰기 = 멱등). 네트워크 예외는 구조화 실패로 반환(throw 전파 없음), 부분 실패에도 나머지 세션은 계속 | U (`test/spool-uploader`) |
+| REQ-Q12 | 업로드 성공 세션의 로컬 정리 (#596, #580 AC6) | `uploaded.json` 마커 세션은 3일 뒤 스윕이 캡과 무관하게 삭제(R2 완결본 존재). **미업로드 세션은 총량 캡 전까지 절대 삭제하지 않는다** | U (`test/session-spool`) |

@@ -182,6 +182,9 @@ chat.get("/profile", async (c) => {
     welcome: profile.welcome,
     ux: profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
+    // #596 — 세션 로그 업로드 opt-in. 클라이언트는 이걸로 "기록 보내기" UI 를
+    // 낼지만 판단한다 — 강제는 어차피 PUT /v1/logs 가 서버에서 한다(fail closed).
+    analytics: { upload_session_logs: profile.analytics.upload_session_logs === true },
     preview: profile.preview,
     // #422 — the cohort's on-disk workspace folder. The chat extension opens
     // this folder on onboarding (and GitHub Pages publishing pushes it later).

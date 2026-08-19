@@ -254,6 +254,13 @@ export interface Profile {
   analytics: {
     log_user_messages: boolean;     // store message bodies (privacy)
     log_metadata: boolean;          // store token usage + timing
+    /**
+     * #596 — 학생 PC 의 세션 로그 스풀(#580)을 R2 로 업로드하는 것을 이
+     * 코호트에 허용하는가. 질문 원문이 PC 를 떠나는 지점이라 fail-closed:
+     * 생략/false = 서버가 업로드를 거부한다. 동의·보존정책이 선 코호트만
+     * true 로 켠다 (log_user_messages 와 같은 규율).
+     */
+    upload_session_logs?: boolean;
   };
   /**
    * Per-cohort UX behavior. Drives the in-app chat panel without changing

@@ -165,6 +165,8 @@ export interface ResolvedProfile {
   // "proxy"). Absent → proxy. The client ORs this with the machine-scoped
   // setting; either can select agent-sdk, and canUseTool still gates tools.
   coach_runtime?: "proxy" | "agent-sdk";
+  /** #596 — 세션 로그 업로드 opt-in. 클라는 UI 노출 판단에만 쓴다(강제는 서버). */
+  analytics?: { upload_session_logs?: boolean };
 }
 
 export interface UxConfig {

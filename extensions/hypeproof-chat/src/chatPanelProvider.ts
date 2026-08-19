@@ -1924,6 +1924,25 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         requestId: err.requestId,
         runbookUrl: err.runbookUrl,
       });
+      // #596 — 세션이 닫힌 순간이 "오늘 기록 보내기"의 자연스러운 트리거다.
+      // 자동 업로드가 아니라 **버튼 하나 있는 안내**만 낸다(#580 AC: 명시적
+      // 액션 없이는 어떤 업로드도 없다). 코호트가 opt-in 하지 않았으면
+      // 아무것도 띄우지 않는다 — 서버도 어차피 거부한다(fail closed).
+      if (
+        err.kind === "session_window" &&
+        this.cachedProfile?.analytics?.upload_session_logs === true
+      ) {
+        void vscode.window
+          .showInformationMessage(
+            "수업이 끝났어요 — 오늘 활동 기록을 남겨둘까요?",
+            "기록 보내기",
+          )
+          .then((pick) => {
+            if (pick === "기록 보내기") {
+              void vscode.commands.executeCommand("hypeproof-chat.uploadSessionLogs");
+            }
+          });
+      }
       // #381 — "wrong_role" (instructor token) also needs a different token,
       // so reopen the box. It is NOT deleted: only "expired" is provably dead.
       if (err.kind === "expired" || err.kind === "missing" || err.kind === "wrong_role") {

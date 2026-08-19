@@ -25,6 +25,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { decodeTokenPayloadUnverified } from "./chatPanelHelpers.ts";
+import { UPLOADED_MARKER } from "./spoolUploader.ts";
 
 export const SPOOL_SCHEMA_VERSION = 1;
 
@@ -45,6 +46,12 @@ const SEEN_REQUEST_KEYS_MAX = 2_000;
 
 /** 턴 → 세션 피닝 상한. 초과 시 오래된 피닝부터 잊는다(현재 세션으로 폴백). */
 const PINNED_TURNS_MAX = 100;
+
+/**
+ * #596 — 업로드 성공(마커 존재) 세션의 로컬 보존 기간. R2 에 완결본이 있고
+ * 며칠의 대조 여유만 남기면 되므로 짧다 (#580 AC 6 "성공 후 N일 정리").
+ */
+const UPLOADED_RETAIN_MS = 3 * 24 * 60 * 60 * 1000;
 
 export interface SpoolIdentity {
   /** 토큰 payload `u` — 코호트-로컬 핸들 (예: kid01). */
@@ -374,9 +381,25 @@ export class SessionSpool {
     try {
       const today = localDateStamp(this.now());
       const sessions = await listSessionDirs(this.env.root);
+      // #596 — 업로드 성공 세션의 보존 정리 (#580 AC 6): 마커가 있고 보존
+      // 기간이 지난 세션은 캡과 무관하게 지운다. R2 에 완결본이 있으므로
+      // 로컬은 대조 여유분일 뿐이다. 현재 세션은 건드리지 않는다.
+      const nowMs = this.now().getTime();
+      const removed = new Set<string>();
+      for (const { dir } of sessions) {
+        if (this.session && dir === this.session.dir) continue;
+        const marker = await fs.promises
+          .stat(path.join(dir, UPLOADED_MARKER))
+          .catch(() => null);
+        if (marker && nowMs - marker.mtimeMs > UPLOADED_RETAIN_MS) {
+          await fs.promises.rm(dir, { recursive: true, force: true });
+          removed.add(dir);
+        }
+      }
       let total = 0;
       const sized: Array<{ dir: string; day: string; bytes: number; mtimeMs: number }> = [];
       for (const { dir, day } of sessions) {
+        if (removed.has(dir)) continue;
         // 세션 디렉토리는 평평하다(파일만) — 하위 디렉토리가 생기면(후속
         // manifest 등) dirSize 를 재귀로 바꿔야 한다.
         const info = await dirSize(dir);

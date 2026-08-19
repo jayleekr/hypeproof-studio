@@ -34,6 +34,7 @@ import { openBrowser, captureActivePage } from "./nativeBrowser";
 import { LiveServer } from "./liveServer";
 import { decideWorkspaceSwitch, isSameLocation } from "./workspaceRouting";
 import { SessionSpool, resolveSpoolSessionsRoot } from "./sessionSpool";
+import { uploadAllPending } from "./spoolUploader";
 import type { ResolvedProfile } from "./protocol";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
@@ -74,14 +75,15 @@ export async function activate(context: vscode.ExtensionContext) {
   // 토큰은 env 아니면 그 파일로 온다 — 어느 쪽이 뚫렸든 게이트에 걸린다.
   // F5 개발 호스트는 기록하되 meta 에 `dev: true` 표식으로 걸러낼 수 있게 한다.
   const isTestRun = !!process.env.HPS_TEST_E2E || backdoors.testStateFileFound;
+  const spoolRoot = resolveSpoolSessionsRoot({
+    platform: process.platform,
+    homeDir: os.homedir(),
+    env: process.env as Record<string, string | undefined>,
+  });
   const spool = isTestRun
     ? undefined
     : new SessionSpool({
-        root: resolveSpoolSessionsRoot({
-          platform: process.platform,
-          homeDir: os.homedir(),
-          env: process.env as Record<string, string | undefined>,
-        }),
+        root: spoolRoot,
         appVersion: String(
           (context.extension.packageJSON as { version?: unknown } | undefined)?.version ?? "unknown",
         ),
@@ -116,6 +118,58 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("hypeproof-chat.clearHistory", async () => {
       await provider.clearHistory();
       vscode.window.showInformationMessage("HypeProof Chat: conversation cleared.");
+    }),
+
+    // #596 — 세션 로그 업로드 (#580 업로드 계층). 항상 **명시적 액션**으로만
+    // 돈다: 이 커맨드(팔레트) 또는 세션 종료 감지 배너의 버튼. 현재 진행 중인
+    // 세션은 제외 — 완결(비활성) 세션만 올리고, 활성 세션은 다음 트리거 몫이다.
+    vscode.commands.registerCommand("hypeproof-chat.uploadSessionLogs", async () => {
+      if (!spool) {
+        vscode.window.showInformationMessage("테스트 실행에서는 세션 기록을 남기지 않아요.");
+        return;
+      }
+      const token = await context.secrets.get(TOKEN_KEY);
+      if (!token) {
+        vscode.window.showInformationMessage("토큰을 먼저 넣어주세요 — 기록은 토큰의 수업으로 보내져요.");
+        return;
+      }
+      const profile = await provider.ensureProfile();
+      if (profile?.analytics?.upload_session_logs !== true) {
+        // 서버도 어차피 거부한다(fail closed) — 여기서 미리 조용히 알린다.
+        vscode.window.showInformationMessage("이 수업은 기록 업로드를 사용하지 않아요.");
+        return;
+      }
+      const proxyUrl = vscode.workspace
+        .getConfiguration("hypeproofChat")
+        .get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+      await vscode.window.withProgress(
+        { location: vscode.ProgressLocation.Notification, title: "오늘 활동 기록 보내는 중…" },
+        async () => {
+          const results = await uploadAllPending(spoolRoot, {
+            baseUrl: proxyUrl,
+            token,
+            currentSessionDir: spool.currentSessionDir(),
+          });
+          const ok = results.filter((r) => r.ok).length;
+          const fail = results.length - ok;
+          // 업로드 시도 자체도 행동 데이터다 — 현재 세션 스풀에 남긴다.
+          spool.recordWorkflow({
+            event: "logs_upload",
+            payload: { sessions: results.length, ok, fail },
+          });
+          if (results.length === 0) {
+            vscode.window.showInformationMessage("보낼 새 기록이 없어요.");
+          } else if (fail === 0) {
+            vscode.window.showInformationMessage(`활동 기록 ${ok}개 세션을 보냈어요!`);
+          } else {
+            const first = results.find((r) => !r.ok);
+            vscode.window.showWarningMessage(
+              `기록 ${ok}개는 보냈고 ${fail}개는 실패했어요 — 다음에 자동으로 다시 시도해요.` +
+                (first?.message ? ` (${first.message})` : ""),
+            );
+          }
+        },
+      );
     }),
 
     vscode.commands.registerCommand("hypeproof-chat.setToken", async () => {
