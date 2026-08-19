@@ -123,10 +123,11 @@ export const profile: Profile = {
         { text: "다른 친구도 있어?", style: "good" },
       ],
       // 검증 → 고치기(Feedback Loop)를 굴리는 칩.
+      // 2026-08-19 — 게스트에 묶이지 않는 문구만(실기기: 나비 세상에 붕붕·초코 예시가 떴다).
       follow_up: [
-        { text: "매연을 걷어내고 꽃을 피워줘", style: "good" },
-        { text: "물은 두고 배를 띄워줘 — 통나무는 그대로", style: "good" },
-        { text: "해는 두고 그늘막을 쳐줘. 어떻게 될까?", style: "good" },
+        { text: "문제는 그대로 두고 다른 방법으로 풀어줘", style: "good" },
+        { text: "방해하는 걸 없애줘. 어떻게 될까?", style: "good" },
+        { text: "시간을 줄여서 더 어렵게 해줘", style: "good" },
         { text: "재밌게 해줘", style: "weak", caption: "뭘 바꿀지 말해줄래요? 속도·양·목표·시간 중 하나." },
       ],
     },
