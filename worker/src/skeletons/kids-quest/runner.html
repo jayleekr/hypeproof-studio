@@ -47,7 +47,7 @@ const say=s=>{document.getElementById('gsay').innerHTML=s;};
 say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
 function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
 function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
-function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
+function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.guest=GUEST_NAME;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
 let state='title',py,vy,obs=[],t=0,passed=0,hits=0,water=0;const SUB=(ITEM_B?ITEM_B+' 넘어서 ':'')+ITEM_A+' 까지 '+GOAL+'개 지나면 도착!';
 const runSpeed=3+SPEED*0.9,gap=Math.max(28,110-RATE*9),vis=0.25+SPECIAL*0.075,ground=()=>H-70;
 function reset(){py=ground();vy=0;obs=[];t=0;passed=0;hits=0;water=0;state='play';say('<b>'+GUEST_NAME+'</b>: 후… 가보자');}
