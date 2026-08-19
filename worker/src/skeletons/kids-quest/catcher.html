@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <title>%%TITLE%%</title>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
-  #c{display:block;width:100vw;height:100vh}
+  html,body{margin:0;height:100%;overflow:hidden;background:#07091a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh;image-rendering:pixelated;image-rendering:crisp-edges}
   #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
   #guest .face{font-size:34px;line-height:1}
   #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
   #guest .bub b{color:#b8571e}
-  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
   #bar b{color:#ffd75b}
 </style>
 </head>
@@ -23,50 +23,82 @@
 const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🐕
 const GUEST_NAME='%%GUEST_NAME%%';     // 초코
 const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 헥헥… 마당이 너무 뜨거워. 시원한 게 하나도 안 떨어져. 불덩이만 떨어져…
-const PLAYER='%%PLAYER_EMOJI%%';       // 받는 것 (대개 게스트)
+const PLAYER='%%PLAYER_EMOJI%%';       // 받는 것 (🐕 면 도트 강아지, 다른 이모지면 그 이모지)
 const ITEM_A='%%ITEM_A%%';             // 받아먹을 시원한 것 — 문제 세상에선 없음 ''. 예: 🧊 🍦 💧
-const ITEM_B='%%ITEM_B%%';             // 피할 것. 문제 세상: 🔥
+const ITEM_B='%%ITEM_B%%';             // 피할 것. 문제 세상: 🔥 (도트 불덩이). 다른 이모지면 그 이모지
 const SPEED=%%SPEED%%;                 // 떨어지는 빠르기 1~10 (문제 세상 6)
 const RATE=%%RATE%%;                   // 얼마나 많이 1~10 (문제 세상 6)
 const GOAL=%%GOAL%%;                   // 몇 개 받으면 시원해지나 (기본 8)
 const SPECIAL=%%SPECIAL%%;             // 몇 번 맞으면 끝나나 (문제 세상 1)
-const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #ff6a00/#ffb347 (불볕)
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 하늘 위/아래 색. 문제 세상 기본: #ff6a00/#ffb347 (불볕)
 /* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
    아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
    지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
 const WORLD={
-  heat:true,      // 불볕 — 해가 이글거리고 땅이 갈라짐, 화면이 붉다
-  sun:true,       // 하늘에 🌞 가 떠 있다 (그늘 없음)
+  heat:true,      // 불볕 — 해가 이글거리고 땅이 갈라짐, 화면이 붉게 흔들린다
+  sun:true,       // 하늘에 해가 떠 있다 (그늘 없음). 구름으로 가리면 false + clouds:true
+  clouds:false,   // 구름
   cool:false,     // 시원한 것이 떨어지나 (ITEM_A 가 있으면 true 로)
 };
-/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
-const cv=document.getElementById('c'),x=cv.getContext('2d');
-let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
-document.getElementById('gface').textContent=GUEST_EMOJI;
-const say=s=>{document.getElementById('gsay').innerHTML=s;};
-say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
-function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
-function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+/* ══ 도트 엔진 — 320×180 저해상도에 그리고 픽셀 그대로 확대. 규칙: HUD 글자는 검은 외곽선,
+   플레이어는 밝은 몸+검은 외곽선(배경과 반대 명도), 오브젝트는 외곽선. ═══════════════════ */
+const PW=320,PH=180;const cv=document.getElementById('c'),ctx=cv.getContext('2d');const off=document.createElement('canvas');off.width=PW;off.height=PH;const x=off.getContext('2d');
+let W,H,SC=1,OX=0,OY=0;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;ctx.imageSmoothingEnabled=false;SC=Math.min(W/PW,H/PH);OX=(W-PW*SC)/2;OY=(H-PH*SC)/2;}fit();onresize=fit;
+const toPX=(cx,cy)=>({x:(cx-OX)/SC,y:(cy-OY)/SC});
+document.getElementById('gface').textContent=GUEST_EMOJI;const say=s=>{document.getElementById('gsay').innerHTML=s;};say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function sprite(map,sx,sy,pal,scale){scale=scale||1;for(let j=0;j<map.length;j++)for(let i=0;i<map[j].length;i++){const ch=map[j][i];if(ch==='.')continue;x.fillStyle=pal[ch]||pal['#']||'#000';x.fillRect(Math.round(sx+i*scale),Math.round(sy+j*scale),scale,scale);}}
+function emo(e,px,py,size){x.font=(size||14)+'px serif';x.textAlign='center';x.textBaseline='middle';x.fillText(e,px,py);x.textBaseline='alphabetic';}
+function skyGrad(){const g=x.createLinearGradient(0,0,0,PH);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,PW,PH);}
+function dither(y0,y1,c){x.fillStyle=c;for(let j=y0;j<y1;j+=2)for(let i=(j/2)%2;i<PW;i+=4)x.fillRect(i,j,1,1);}
+let seed=11;const rnd=()=>{seed=(seed*9301+49297)%233280;return seed/233280;};
+function txt(s,y,sz,c,cx){ctx.font='bold '+sz+'px sans-serif';ctx.textAlign='center';ctx.lineJoin='round';ctx.lineWidth=Math.max(3,sz/6);ctx.strokeStyle='rgba(0,0,0,.85)';ctx.strokeText(s,cx==null?W/2:cx,y);ctx.fillStyle=c||'#fff';ctx.fillText(s,cx==null?W/2:cx,y);}
 function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.guest=GUEST_NAME;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
-let state='title',score=0,lives=Math.max(1,SPECIAL),px,items=[],t=0;const SUB=(ITEM_A?ITEM_A+' '+GOAL+'개 받으면 성공!':'받을 게… 없다');
-const spawnEvery=Math.max(8,Math.round(60-RATE*5)),fall=1.2+SPEED*.55;
-function reset(){score=0;lives=Math.max(1,SPECIAL);items=[];t=0;px=W/2;state='play';say('<b>'+GUEST_NAME+'</b>: 헥헥… 해볼게…');}
-addEventListener('mousemove',e=>{if(state==='play')px=e.clientX;});addEventListener('touchmove',e=>{if(state==='play')px=e.touches[0].clientX;},{passive:true});
-addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();if(state==='play'){if(e.key==='ArrowLeft')px-=40;if(e.key==='ArrowRight')px+=40;}});
-addEventListener('click',()=>{if(state!=='play')reset();});
-function loop(){bg();
-  if(WORLD.sun){x.font='70px serif';x.textAlign='center';x.fillText('🌞',W-80,90);}
-  if(WORLD.heat){x.fillStyle='rgba(255,60,0,'+(0.10+0.05*Math.sin(t/10))+')';x.fillRect(0,0,W,H);x.strokeStyle='rgba(60,20,0,.5)';x.lineWidth=2;for(let i=0;i<8;i++){x.beginPath();x.moveTo(i*W/8+20,H-4);x.lineTo(i*W/8+50,H-30);x.stroke();}}
-  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
-  else{ if(state==='play'){t++;px=Math.max(30,Math.min(W-30,px));
-      if(t%spawnEvery===0){const good=ITEM_A&&Math.random()<(ITEM_B?0.65:1);items.push({x:30+Math.random()*(W-60),y:-20,e:good?ITEM_A:ITEM_B,bad:!good});}
-      for(let i=items.length-1;i>=0;i--){const it=items[i];it.y+=fall;if(it.y>H+20){items.splice(i,1);continue;}
-        if(it.y>H-58&&it.y<H-6&&Math.abs(it.x-px)<54){if(it.bad)lives--;else score++;items.splice(i,1);}}}
-    x.font='34px serif';x.textAlign='center';items.forEach(it=>x.fillText(it.e,it.x,it.y));x.font='46px serif';x.fillText(PLAYER,px,H-16);
-    txt((ITEM_A||'—')+' '+score+' / '+GOAL,42,26,'#ffd75b');x.textAlign='right';x.font='24px serif';x.fillText('❤️'.repeat(Math.max(0,Math.min(10,lives))),W-16,42);
-    if(state==='play'){if(ITEM_A&&score>=GOAL)report({score,goal:GOAL,lives,speed:SPEED,rate:RATE},true,score+'/'+GOAL,'시원해! 이제 낮잠 잘 수 있겠어 💤','');
-      else if(lives<=0)report({score,goal:GOAL,lives:0,speed:SPEED,rate:RATE},false,score+'/'+GOAL,'',ITEM_A?'앗 뜨거… 불덩이가 너무 많아':'앗 뜨거… 받을 건 하나도 없고 불덩이만…');}
-    if(state==='over'){txt(document.title.startsWith('성공')?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#bbb');}}
+function blit(){ctx.fillStyle='#07091a';ctx.fillRect(0,0,W,H);ctx.drawImage(off,Math.round(OX),Math.round(OY),Math.round(PW*SC),Math.round(PH*SC));}
+function titleHud(){txt(document.title,H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#ddd');}
+function overHud(win){txt(win?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#ddd');}
+const S_CAT=['..##....##......','..#@#..#@#......','..#@@@@@@#......','..#@o@@o@#......','..#@@@@@@#..##..','...#@@@@#..#@#..','.###@@@@####@#..','#@@@@@@@@@@@#...','#@@@@@@@@@@#....','.#@@@@@@@@@#....','..#@#....#@#....','..#@#....#@#....'];
+const S_DOG=['....####........','...#@@@@#.......','..#@o@@@@#####..','..#@@@@@@@@@@@#.','...#@@@@@@@@@@#.','...#@@@@@@@@@@#.','..#@@#@@@@#@@#..','..#@@#....#@@#..'];
+const S_BEE=['....ww..ww......','...wwww.wwww....','..#wwwwwwwww#...','.#@@#@@#@@#@@#..','#@o@#@@#@@#@@@#.','#@@@#@@#@@#@@@#.','.#@@#@@#@@#@@#..','..#@@@@@@@@@@#..','...##########...'];
+const S_PENG=['....######......','...#@@@@@@#.....','..#@w@ww@w@#....','..#@wowwow@#....','..#@@wyyw@@#....','.#@@@wwww@@@#...','#@#@wwwwww@#@#..','#@#@wwwwww@#@#..','.#@@wwwwww@@#...','..#@@wwww@@#....','...#yy##yy#.....'];
+const S_MOUSE=['.##......##.....','#@@#....#@@#....','#@@@####@@@#....','.#@@@@@@@@#.....','.#@o@@@@o@#.....','..#@@@@@@#......','..#@@@@@@#..#...','.#@@@@@@@@#.#...','.#@@@@@@@@##....','..########......'];
+const S_HAM=['..##....##......','.#@@#..#@@#.....','.#@@@##@@@#.....','#@o@@@@@@o@#....','#@@@@@@@@@@#....','#@@w@@@@w@@#....','.#@@@@@@@@#.....','..#@@@@@@#......','...#@##@#.......'];
+const S_PARROT=['....####........','...#@@@@#.......','..#@o@@@@#......','..#@@@@yy#......','..#@@@@@#.......','.#@@@@@@#.......','#@@@@@@@#.......','#@@@@@@#........','.#@@@@#.........','..#@@#..........','..#yy#..........','...##...........'];
+const S_FLOWER=['....####........','..##@@@@##......','.#@@#yy#@@#.....','.#@#yooy#@#.....','#@#yoooooy#@#...','#@#yoooooy#@#...','.#@#yooy#@#.....','.#@@#yy#@@#.....','..##@@@@##......','....####........','.....gg.........','..gg.gg.gg......','...gg#gg#.......','.....gg.........'];
+const S_RAC=['.##......##.....','#@@#....#@@#....','#@@@####@@@#....','.#@@@@@@@@#.....','#@#w@@@@w#@#....','#@#o####o#@#....','.#@@wwww@@#.....','..#@@@@@@#......','..#@@@@@@#......','...######.......'];
+const S_FISH=['...####.....','..#@@@@#.#..','.#@o@@@@##..','.#@@@@@@#...','..#@@@@#.#..','...####..#..'];
+const S_LOG=['.##########.','#@@@@@@@@@@#','#@@#@@@@#@@#','#@@@@@@@@@@#','.##########.'];
+const S_BRICK=['############','#..#..#..#..','############','.#..#..#..#.','############'];
+const S_HOUSE=['.......###.......','......#@@@#......','.....#@@@@@#.....','....#@@@@@@@#....','...#@@@@@@@@@#...','..#@@@@@@@@@@@#..','.#############.#.','.#$$$$$$$$$$$$$#.','.#$$##$$$$$##$$#.','.#$$##$$$$$##$$#.','.#$$$$$$###$$$$#.','.#$$$$$$#o#$$$$#.','.#$$$$$$#o#$$$$#.','.###############.'];
+const S_FIRE=['...#....','..#@#...','.#@o@#..','#@ooo@#.','#@ooo@#.','.#@o@#..','..#@#...'];
+const S_ICE=['##########','#wwwwwwww#','#w@@@@@@w#','#w@@@@@@w#','#wwwwwwww#','##########'];
+const S_MOLE=['..######..','.#@@@@@@#.','#@o@@@@o@#','#@@@ww@@@#','#@@@@@@@@#','.########.'];
+const S_TRASH=['.########.','##########','.#@#@#@#@.','.#@#@#@#@.','.#@#@#@#@.','.########.'];
+let state='title',score=0,lives=Math.max(1,SPECIAL),px=PW/2,items=[],t=0;const SUB=(ITEM_A?ITEM_A+' '+GOAL+'개 받으면 성공!':'받을 게… 없다');
+const spawnEvery=Math.max(8,Math.round(60-RATE*5)),fall=0.5+SPEED*0.22,GY=150;
+const cracks=Array.from({length:14},()=>({x:rnd()*PW,l:6+rnd()*14}));const fence=[];for(let i=0;i<PW;i+=9)fence.push(i);
+function reset(){score=0;lives=Math.max(1,SPECIAL);items=[];t=0;px=PW/2;state='play';say('<b>'+GUEST_NAME+'</b>: 헥헥… 해볼게…');}
+addEventListener('mousemove',e=>{if(state==='play')px=toPX(e.clientX,0).x;});addEventListener('touchmove',e=>{if(state==='play')px=toPX(e.touches[0].clientX,0).x;},{passive:true});
+addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();if(state==='play'){if(e.key==='ArrowLeft')px-=14;if(e.key==='ArrowRight')px+=14;}});addEventListener('click',()=>{if(state!=='play')reset();});
+function scene(){skyGrad();dither(20,90,'rgba(255,255,255,.08)');
+  if(WORLD.sun){x.fillStyle='#fff1a8';x.beginPath();x.arc(268,30,14,0,6.3);x.fill();x.fillStyle='#ffd23f';x.beginPath();x.arc(268,30,11,0,6.3);x.fill();x.strokeStyle='rgba(255,220,80,.5)';x.lineWidth=2;for(let a=0;a<6.3;a+=0.52){x.beginPath();x.moveTo(268+Math.cos(a+t/60)*18,30+Math.sin(a+t/60)*18);x.lineTo(268+Math.cos(a+t/60)*26,30+Math.sin(a+t/60)*26);x.stroke();}}
+  if(WORLD.clouds){x.fillStyle='#fff';[[60,28],[250,22],[160,40]].forEach(([cx,cy])=>{x.fillRect(cx-16,cy,32,8);x.fillRect(cx-8,cy-6,16,6);x.fillRect(cx-22,cy+3,44,4);});}
+  // 마당: 갈라진 땅 + 담장
+  x.fillStyle=WORLD.heat?'#c9863a':'#7cb85c';x.fillRect(0,GY+8,PW,PH-GY-8);x.fillStyle=WORLD.heat?'#a5682a':'#5f9a44';x.fillRect(0,GY+8,PW,3);
+  if(WORLD.heat){x.fillStyle='#7a4a1c';cracks.forEach(c=>{x.fillRect(Math.round(c.x),GY+14,1,c.l);x.fillRect(Math.round(c.x)+1,GY+14+c.l,c.l/2,1);});}
+  x.fillStyle='#5a3a1a';fence.forEach(f=>x.fillRect(f,GY-10,3,18));x.fillRect(0,GY-6,PW,2);x.fillRect(0,GY,PW,2);
+  if(WORLD.heat){x.fillStyle='rgba(255,80,0,'+(0.08+0.05*Math.sin(t/9))+')';x.fillRect(0,0,PW,PH);}
+  items.forEach(it=>{if(it.bad&&ITEM_B==='🔥')sprite(S_FIRE,it.x-8,it.y-7,{'#':'#7a1e00','@':'#ff6a00','o':'#ffe066'},2);else emo(it.e,it.x,it.y,16);});
+  if(PLAYER==='🐕')sprite(S_DOG,px-16,GY-8,{'#':'#2a1608','@':'#f7e7c6','o':'#1a1a1a'},2);else emo(PLAYER,px,GY+3,20);
+}
+function loop(){
+  if(state==='play'){t++;px=Math.max(10,Math.min(PW-10,px));
+    if(t%spawnEvery===0){const good=ITEM_A&&Math.random()<(ITEM_B?0.65:1);items.push({x:12+Math.random()*(PW-24),y:-8,e:good?ITEM_A:ITEM_B,bad:!good});}
+    for(let i=items.length-1;i>=0;i--){const it=items[i];it.y+=fall;if(it.y>PH){items.splice(i,1);continue;}if(it.y>GY-10&&it.y<GY+10&&Math.abs(it.x-px)<16){if(it.bad)lives--;else score++;items.splice(i,1);}}
+    if(ITEM_A&&score>=GOAL)report({score,goal:GOAL,lives,speed:SPEED,rate:RATE},true,score+'/'+GOAL,'시원해! 이제 낮잠 잘 수 있겠어 💤','');
+    else if(lives<=0)report({score,goal:GOAL,lives:0,speed:SPEED,rate:RATE},false,score+'/'+GOAL,'',ITEM_A?'앗 뜨거… 불덩이가 너무 많아':'앗 뜨거… 받을 건 하나도 없고 불덩이만…');}
+  else t++;
+  scene();blit();
+  if(state==='title')titleHud();else{txt((ITEM_A||'—')+' '+score+' / '+GOAL+'   ❤️'.repeat(Math.max(0,Math.min(5,lives))),48,24,'#ffd75b');if(state==='over')overHud(document.title.startsWith('성공'));}
   requestAnimationFrame(loop);}
 loop();
 </script>

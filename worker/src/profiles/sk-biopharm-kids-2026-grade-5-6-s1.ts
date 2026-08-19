@@ -30,7 +30,7 @@ export const profile: Profile = {
   },
   system_prompt: systemPromptMd as unknown as string,
   welcome: {
-    greeting_md: "안녕하세요! 문제투성이 세상에 사는 친구 아홉 명이 있어요.\n**누구 세상부터 가볼까요?** 🐕 초코 · 🐈 나비 · 🐝 붕붕 · 🐧 뽀로 · 🐁 찍찍 · 🐹 햄찌 · 🦜 앵무 · 🌻 해바 · 🦝 라쿤",
+    greeting_md: "안녕하세요! 문제투성이 세상에 사는 친구 아홉 명이 있어요.\n**누구 세상부터 가볼까요?** 🐕 초코 · 🐈 나비 · 🐝 붕붕 · 🐧 뽀로 · 🐁 찍찍 · 🐹 햄찌 · 🦜 앵무 · 🐿️ 도토 · 🦝 라쿤",
     example_prompts: [
       "🐝 붕붕 세상에 가볼래",
       "🐧 뽀로 세상에 가볼래",

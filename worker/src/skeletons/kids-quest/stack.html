@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <title>%%TITLE%%</title>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
-  #c{display:block;width:100vw;height:100vh}
+  html,body{margin:0;height:100%;overflow:hidden;background:#07091a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh;image-rendering:pixelated;image-rendering:crisp-edges}
   #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
   #guest .face{font-size:34px;line-height:1}
   #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
   #guest .bub b{color:#b8571e}
-  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
   #bar b{color:#ffd75b}
 </style>
 </head>
@@ -23,47 +23,77 @@
 const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🐧
 const GUEST_NAME='%%GUEST_NAME%%';     // 뽀로
 const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 집이 무너졌어… 얼음을 쌓는데 해가 너무 뜨거워서 쌓는 족족 녹아…
-const PLAYER='%%PLAYER_EMOJI%%';       // 옆에서 지켜보는 게스트
-const ITEM_A='%%ITEM_A%%';             // 쌓을 것. 문제 세상: 🧊 (녹는다). 예: 🧱 🪨
+const PLAYER='%%PLAYER_EMOJI%%';       // 옆에서 지켜보는 게스트 (🐧 면 도트 펭귄)
+const ITEM_A='%%ITEM_A%%';             // 쌓을 것. 문제 세상: 🧊 (도트 얼음, 녹는다). 🧱 이면 벽돌
 const ITEM_B='%%ITEM_B%%';             // 완성 지붕 (예: 🏠)
 const SPEED=%%SPEED%%;                 // 블록 좌우 빠르기 1~10 (기본 4)
 const RATE=%%RATE%%;                   // (미사용)
 const GOAL=%%GOAL%%;                   // 몇 층 (기본 8)
 const SPECIAL=%%SPECIAL%%;             // 삐뚤어도 봐주는 정도 0~10 (문제 세상 0)
-const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #ffb347/#7fb3d5 (뙤약볕)
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 하늘 위/아래 색. 문제 세상 기본: #ffb347/#7fb3d5 (뙤약볕)
 /* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
    아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
    지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
 const WORLD={
-  sun:true,       // ☀️ 가 머리 위 — 얼음이 녹는다
+  sun:true,       // 해가 머리 위 — 얼음이 녹는다
   melt:true,      // 쌓은 블록이 점점 작아진다 (해가 없어지거나 블록이 얼음이 아니면 false 로)
+  clouds:false,   // 구름
 };
-/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
-const cv=document.getElementById('c'),x=cv.getContext('2d');
-let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
-document.getElementById('gface').textContent=GUEST_EMOJI;
-const say=s=>{document.getElementById('gsay').innerHTML=s;};
-say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
-function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
-function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+/* ══ 도트 엔진 — 320×180 저해상도에 그리고 픽셀 그대로 확대. 규칙: HUD 글자는 검은 외곽선,
+   플레이어는 밝은 몸+검은 외곽선(배경과 반대 명도), 오브젝트는 외곽선. ═══════════════════ */
+const PW=320,PH=180;const cv=document.getElementById('c'),ctx=cv.getContext('2d');const off=document.createElement('canvas');off.width=PW;off.height=PH;const x=off.getContext('2d');
+let W,H,SC=1,OX=0,OY=0;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;ctx.imageSmoothingEnabled=false;SC=Math.min(W/PW,H/PH);OX=(W-PW*SC)/2;OY=(H-PH*SC)/2;}fit();onresize=fit;
+const toPX=(cx,cy)=>({x:(cx-OX)/SC,y:(cy-OY)/SC});
+document.getElementById('gface').textContent=GUEST_EMOJI;const say=s=>{document.getElementById('gsay').innerHTML=s;};say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function sprite(map,sx,sy,pal,scale){scale=scale||1;for(let j=0;j<map.length;j++)for(let i=0;i<map[j].length;i++){const ch=map[j][i];if(ch==='.')continue;x.fillStyle=pal[ch]||pal['#']||'#000';x.fillRect(Math.round(sx+i*scale),Math.round(sy+j*scale),scale,scale);}}
+function emo(e,px,py,size){x.font=(size||14)+'px serif';x.textAlign='center';x.textBaseline='middle';x.fillText(e,px,py);x.textBaseline='alphabetic';}
+function skyGrad(){const g=x.createLinearGradient(0,0,0,PH);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,PW,PH);}
+function dither(y0,y1,c){x.fillStyle=c;for(let j=y0;j<y1;j+=2)for(let i=(j/2)%2;i<PW;i+=4)x.fillRect(i,j,1,1);}
+let seed=11;const rnd=()=>{seed=(seed*9301+49297)%233280;return seed/233280;};
+function txt(s,y,sz,c,cx){ctx.font='bold '+sz+'px sans-serif';ctx.textAlign='center';ctx.lineJoin='round';ctx.lineWidth=Math.max(3,sz/6);ctx.strokeStyle='rgba(0,0,0,.85)';ctx.strokeText(s,cx==null?W/2:cx,y);ctx.fillStyle=c||'#fff';ctx.fillText(s,cx==null?W/2:cx,y);}
 function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.guest=GUEST_NAME;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
-const BH=44;let state='title',stack=[],cur,dir,t=0,fell=false;const SUB=ITEM_A+' '+GOAL+'층 쌓으면 완성!';
-const sp=1.5+SPEED*0.7,tol=8+SPECIAL*7;
-function reset(){stack=[{x:W/2,s:1}];cur={x:60};dir=1;t=0;fell=false;state='play';say('<b>'+GUEST_NAME+'</b>: 빨리 쌓아야 해…');}
-function drop(){if(state!=='play'){reset();return;}const last=stack[stack.length-1];if(Math.abs(cur.x-last.x)>tol+BH*0.5*last.s){fell=true;report({layers:stack.length-1,goal:GOAL,fell:true,speed:SPEED,tolerance:SPECIAL},false,(stack.length-1)+'층','','아… 무너졌어. 녹은 얼음 위엔 못 쌓겠어');return;}
-  stack.push({x:cur.x,s:1});cur={x:dir>0?60:W-60};dir*=-1;if(stack.length-1>=GOAL)report({layers:GOAL,goal:GOAL,fell:false,speed:SPEED,tolerance:SPECIAL},true,GOAL+'층','우와 집이다! 🏠 이제 안 녹아','');}
+function blit(){ctx.fillStyle='#07091a';ctx.fillRect(0,0,W,H);ctx.drawImage(off,Math.round(OX),Math.round(OY),Math.round(PW*SC),Math.round(PH*SC));}
+function titleHud(){txt(document.title,H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#ddd');}
+function overHud(win){txt(win?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#ddd');}
+const S_CAT=['..##....##......','..#@#..#@#......','..#@@@@@@#......','..#@o@@o@#......','..#@@@@@@#..##..','...#@@@@#..#@#..','.###@@@@####@#..','#@@@@@@@@@@@#...','#@@@@@@@@@@#....','.#@@@@@@@@@#....','..#@#....#@#....','..#@#....#@#....'];
+const S_DOG=['....####........','...#@@@@#.......','..#@o@@@@#####..','..#@@@@@@@@@@@#.','...#@@@@@@@@@@#.','...#@@@@@@@@@@#.','..#@@#@@@@#@@#..','..#@@#....#@@#..'];
+const S_BEE=['....ww..ww......','...wwww.wwww....','..#wwwwwwwww#...','.#@@#@@#@@#@@#..','#@o@#@@#@@#@@@#.','#@@@#@@#@@#@@@#.','.#@@#@@#@@#@@#..','..#@@@@@@@@@@#..','...##########...'];
+const S_PENG=['....######......','...#@@@@@@#.....','..#@w@ww@w@#....','..#@wowwow@#....','..#@@wyyw@@#....','.#@@@wwww@@@#...','#@#@wwwwww@#@#..','#@#@wwwwww@#@#..','.#@@wwwwww@@#...','..#@@wwww@@#....','...#yy##yy#.....'];
+const S_MOUSE=['.##......##.....','#@@#....#@@#....','#@@@####@@@#....','.#@@@@@@@@#.....','.#@o@@@@o@#.....','..#@@@@@@#......','..#@@@@@@#..#...','.#@@@@@@@@#.#...','.#@@@@@@@@##....','..########......'];
+const S_HAM=['..##....##......','.#@@#..#@@#.....','.#@@@##@@@#.....','#@o@@@@@@o@#....','#@@@@@@@@@@#....','#@@w@@@@w@@#....','.#@@@@@@@@#.....','..#@@@@@@#......','...#@##@#.......'];
+const S_PARROT=['....####........','...#@@@@#.......','..#@o@@@@#......','..#@@@@yy#......','..#@@@@@#.......','.#@@@@@@#.......','#@@@@@@@#.......','#@@@@@@#........','.#@@@@#.........','..#@@#..........','..#yy#..........','...##...........'];
+const S_FLOWER=['....####........','..##@@@@##......','.#@@#yy#@@#.....','.#@#yooy#@#.....','#@#yoooooy#@#...','#@#yoooooy#@#...','.#@#yooy#@#.....','.#@@#yy#@@#.....','..##@@@@##......','....####........','.....gg.........','..gg.gg.gg......','...gg#gg#.......','.....gg.........'];
+const S_RAC=['.##......##.....','#@@#....#@@#....','#@@@####@@@#....','.#@@@@@@@@#.....','#@#w@@@@w#@#....','#@#o####o#@#....','.#@@wwww@@#.....','..#@@@@@@#......','..#@@@@@@#......','...######.......'];
+const S_FISH=['...####.....','..#@@@@#.#..','.#@o@@@@##..','.#@@@@@@#...','..#@@@@#.#..','...####..#..'];
+const S_LOG=['.##########.','#@@@@@@@@@@#','#@@#@@@@#@@#','#@@@@@@@@@@#','.##########.'];
+const S_BRICK=['############','#..#..#..#..','############','.#..#..#..#.','############'];
+const S_HOUSE=['.......###.......','......#@@@#......','.....#@@@@@#.....','....#@@@@@@@#....','...#@@@@@@@@@#...','..#@@@@@@@@@@@#..','.#############.#.','.#$$$$$$$$$$$$$#.','.#$$##$$$$$##$$#.','.#$$##$$$$$##$$#.','.#$$$$$$###$$$$#.','.#$$$$$$#o#$$$$#.','.#$$$$$$#o#$$$$#.','.###############.'];
+const S_FIRE=['...#....','..#@#...','.#@o@#..','#@ooo@#.','#@ooo@#.','.#@o@#..','..#@#...'];
+const S_ICE=['##########','#wwwwwwww#','#w@@@@@@w#','#w@@@@@@w#','#wwwwwwww#','##########'];
+const S_MOLE=['..######..','.#@@@@@@#.','#@o@@@@o@#','#@@@ww@@@#','#@@@@@@@@#','.########.'];
+const S_TRASH=['.########.','##########','.#@#@#@#@.','.#@#@#@#@.','.#@#@#@#@.','.########.'];
+const BW=28,BH=11;let state='title',stack=[],cur,dir,t=0,fell=false;const SUB=ITEM_A+' '+GOAL+'층 쌓으면 완성!';
+const sp=0.5+SPEED*0.22,tol=3+SPECIAL*2.2,BASE=PH-24;
+function reset(){stack=[{x:PW/2,s:1}];cur={x:30};dir=1;t=0;fell=false;state='play';say('<b>'+GUEST_NAME+'</b>: 빨리 쌓아야 해…');}
+function drop(){if(state!=='play'){reset();return;}const last=stack[stack.length-1];if(Math.abs(cur.x-last.x)>tol+BW*0.5*last.s){fell=true;report({layers:stack.length-1,goal:GOAL,fell:true,speed:SPEED,tolerance:SPECIAL},false,(stack.length-1)+'층','','아… 무너졌어. 녹은 얼음 위엔 못 쌓겠어');return;}
+  stack.push({x:cur.x,s:1});cur={x:dir>0?30:PW-30};dir*=-1;if(stack.length-1>=GOAL)report({layers:GOAL,goal:GOAL,fell:false,speed:SPEED,tolerance:SPECIAL},true,GOAL+'층','우와 집이다! 🏠 이제 안 녹아','');}
 addEventListener('keydown',e=>{if(e.code==='Space')drop();});addEventListener('pointerdown',drop);
-function loop(){bg();
-  if(WORLD.sun){x.font='70px serif';x.textAlign='center';x.fillText('☀️',W/2,90);}
-  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
-  else{t++;if(state==='play'){cur.x+=sp*dir;if(cur.x<60||cur.x>W-60)dir*=-1;
-      if(WORLD.melt){stack.forEach((b,i)=>{if(i>0)b.s=Math.max(0.15,b.s-0.0015);});const tiny=stack.slice(1).some(b=>b.s<=0.2);if(tiny)report({layers:stack.length-1,goal:GOAL,fell:true,speed:SPEED,tolerance:SPECIAL},false,(stack.length-1)+'층','','다 녹아버렸어… 해가 너무 뜨거워');}}
-    const base=H-40;x.textAlign='center';let y=base;
-    stack.forEach((b,i)=>{x.font=Math.round(BH*b.s)+'px serif';x.fillText(ITEM_A,b.x,y);y-=BH*b.s;});
-    x.font=BH+'px serif';if(state==='play')x.fillText(ITEM_A,cur.x,y);if(state==='over'&&!fell)x.fillText(ITEM_B,stack[stack.length-1].x,y);
-    x.font='40px serif';x.fillText(PLAYER,W-70,base);
-    txt((stack.length-1)+' / '+GOAL+'층',42,28,'#ffd75b');
-    if(state==='over'){txt(document.title.startsWith('성공')?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#bbb');}}
+function block(bx,by,s,i){const w=Math.round(BW*s),h=Math.round(BH*s);if(ITEM_A==='🧊'){x.fillStyle='#1c4a7a';x.fillRect(Math.round(bx-w/2),by-h,w,h);x.fillStyle='#bfe9ff';x.fillRect(Math.round(bx-w/2)+1,by-h+1,w-2,h-2);x.fillStyle='#e9f8ff';x.fillRect(Math.round(bx-w/2)+2,by-h+2,Math.max(1,w-6),1);}else if(ITEM_A==='🧱'){x.fillStyle='#4a1a12';x.fillRect(Math.round(bx-w/2),by-h,w,h);x.fillStyle='#c85a48';x.fillRect(Math.round(bx-w/2)+1,by-h+1,w-2,h-2);x.fillStyle='#e8887a';x.fillRect(Math.round(bx-w/2)+1,by-Math.round(h/2),w-2,1);}else emo(ITEM_A,bx,by-h/2,Math.round(10*s)+2);}
+function scene(){skyGrad();dither(0,60,'rgba(255,255,255,.12)');
+  if(WORLD.sun){x.fillStyle='#fff1a8';x.beginPath();x.arc(PW/2,26,15,0,6.3);x.fill();x.fillStyle='#ffd23f';x.beginPath();x.arc(PW/2,26,12,0,6.3);x.fill();}
+  if(WORLD.clouds){x.fillStyle='#fff';[[PW/2,22],[70,30],[250,34]].forEach(([cx,cy])=>{x.fillRect(cx-16,cy,32,8);x.fillRect(cx-8,cy-6,16,6);});}
+  // 바다 + 얼음판
+  x.fillStyle='#2a6fd6';x.fillRect(0,BASE-2,PW,PH-BASE+2);x.fillStyle='#4f9dff';for(let i=0;i<PW;i+=8)x.fillRect(i,BASE-2+Math.round(Math.sin(i/10+t/12)),4,1);
+  x.fillStyle='#e9f8ff';x.fillRect(PW/2-40,BASE-3,80,5);x.fillStyle='#bfe9ff';x.fillRect(PW/2-40,BASE+1,80,2);
+  let y=BASE-3;stack.forEach((b,i)=>{block(b.x,y,b.s,i);y-=Math.round(BH*b.s);});
+  if(state==='play')block(cur.x,y,1,-1);if(state==='over'&&!fell){if(ITEM_B==='🏠')sprite(S_HOUSE,stack[stack.length-1].x-17,y-28,{'#':'#3a2a2a','@':'#c85a48','$':'#e8d9b5','o':'#ffd76a'},2);else emo(ITEM_B,stack[stack.length-1].x,y-8,16);}
+  if(PLAYER==='🐧')sprite(S_PENG,PW/2+56,BASE-25,{'#':'#0e0e1a','@':'#2b2b3d','w':'#ffffff','o':'#0e0e1a','y':'#ffb347'},2);else emo(PLAYER,PW/2+68,BASE-10,20);
+}
+function loop(){
+  t++;if(state==='play'){cur.x+=sp*dir;if(cur.x<30||cur.x>PW-30)dir*=-1;
+    if(WORLD.melt){stack.forEach((b,i)=>{if(i>0)b.s=Math.max(0.15,b.s-0.0015);});if(stack.slice(1).some(b=>b.s<=0.2))report({layers:stack.length-1,goal:GOAL,fell:true,speed:SPEED,tolerance:SPECIAL},false,(stack.length-1)+'층','','다 녹아버렸어… 해가 너무 뜨거워');}}
+  scene();blit();
+  if(state==='title')titleHud();else{txt((stack.length-1)+' / '+GOAL+'층',48,26,'#ffd75b');if(state==='over')overHud(document.title.startsWith('성공'));}
   requestAnimationFrame(loop);}
 loop();
 </script>

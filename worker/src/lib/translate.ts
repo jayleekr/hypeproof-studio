@@ -469,7 +469,7 @@ function buildCachedPrefix(profile: Profile, runtime: CoachRuntime = "proxy"): s
     previewContract,
     browserContract,
     skillsMd,
-    buildSkeletonLibrary(profile),
+    buildSkeletonLibrary(profile, runtime),
     degradedNotice,
   ].filter((s) => s && s.length > 0);
   return sections.join("\n\n");
@@ -679,10 +679,24 @@ export function translateOpenAI(
  * The skeleton library for this profile's tier, embedded in the cached system
  * prompt. The model MUST start from one of these, not invent structure.
  */
-function buildSkeletonLibrary(profile: Profile): string {
+function buildSkeletonLibrary(profile: Profile, runtime: CoachRuntime = "proxy"): string {
   const tier = profile.game?.template_tier ?? "kids-basic";
   const skels = getSkeletonsForTier(tier);
   if (skels.length === 0) return "";
+
+  // 2026-08-19 — kids-quest × agent-sdk: 세상은 이미 파일로 있다(사전 완성본을
+  // Studio 가 index.html 에 저장). 도트 엔진 9개(~110KB, ~36k 토큰)를 매 턴 프롬프트에
+  // 싣지 않고, 코치는 파일을 Read 해서 고친다. 프록시 런타임(파일 도구 없음)은 그대로.
+  if (tier === "kids-quest" && runtime === "sdk") {
+    return [
+      "# 게스트의 세상 — 파일로 있다",
+      "",
+      "아이가 게스트를 고르면 Studio 가 그 세상(문제 상태 기본값)을 작업 폴더 `index.html` 에 저장하고 화면에 띄웁니다(메시지 앞 `[Studio 안내: …]`).",
+      "바꾸기 요청이 오면 **`index.html` 을 Read 한 뒤** 아이 말대로 고쳐 **Write** 하세요(저장되면 Studio 가 자동으로 다시 띄웁니다). 파일 안에 `CONFIG`(자리표시자는 이미 채워짐)와 `WORLD={…}` 플래그, 그리고 도트 엔진이 있습니다 — 무엇이든 고쳐도 되지만 `#guest` 말풍선과 `report()` 는 지키고, 세상을 바꿨으면 `WORLD` 값을 맞춰 두세요(게스트가 `hp:result` 의 `world` 를 봅니다).",
+      "파일이 없으면(드묾) 아이에게 \"친구를 다시 골라줄래요?\" 하고 게스트 칩을 다시 누르게 하세요 — 처음부터 만들지 마세요.",
+      "절대 금지: 응답에서 `게임` 이라는 낱말. 이건 게스트가 사는 세상입니다.",
+    ].join("\n");
+  }
 
   const isSearchWebapp = tier === "search-webapp";
   const isKidsQuest = tier === "kids-quest";

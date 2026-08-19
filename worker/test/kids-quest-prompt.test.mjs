@@ -35,7 +35,7 @@ const SLOTS = [
   const skels = getSkeletonsForTier("kids-quest");
   assert.deepEqual(
     skels.map((s) => s.id).sort(),
-    ["kq-catcher", "kq-collect", "kq-maze", "kq-memory", "kq-runner", "kq-sort", "kq-stack", "kq-water", "kq-whack"],
+    ["kq-catcher", "kq-collect", "kq-jump", "kq-memory", "kq-run", "kq-runner", "kq-sort", "kq-stack", "kq-whack"],
     "kids-quest tier 에 kq-* 9개",
   );
   for (const s of skels) {
@@ -93,7 +93,7 @@ for (const profileId of PROFILES) {
       const body = JSON.parse(String(up.init.body));
       const sys = JSON.stringify(body.system ?? body.messages ?? body);
       assert.ok(sys.includes("게스트의 세상 스켈레톤 라이브러리"), `${profileId}: 라이브러리 인트로`);
-      for (const id of ["kq-catcher", "kq-runner", "kq-collect", "kq-stack", "kq-maze", "kq-whack", "kq-memory", "kq-water", "kq-sort"]) {
+      for (const id of ["kq-catcher", "kq-runner", "kq-collect", "kq-stack", "kq-run", "kq-whack", "kq-memory", "kq-jump", "kq-sort"]) {
         assert.ok(sys.includes(`스켈레톤: ${id}`), `${profileId}: ${id} 실림`);
       }
       assert.ok(sys.includes("초코") && sys.includes("뽀로") && sys.includes("라쿤"), `${profileId}: 게스트 9명 프롬프트`);
