@@ -319,6 +319,16 @@ messages.post("/messages", async (c) => {
   const upstreamBody = {
     ...raw,
     model: modelLabel,
+    // 2026-08-19 실기기(sk-biopharm 3·4, claude-sonnet-4-6) — 아이가 "도움닫기 점프"
+    // 같은 새 규칙을 말하면 SDK 코치의 적응형 씽킹이 한 턴에 65k 토큰까지 폭주해
+    // 10~17분 침묵 후 에러로 끝났다(스풀 실측 2회). 재시도 스톨 감시(240s)는
+    // 토큰이 흐르는 동안 안 끊는다. 미성년 코호트는 깊은 사고가 필요 없는
+    // 짧은 편집 루프라 effort=low 로 고정한다 — 이 게이트웨이에서 직접 확인:
+    // adaptive+effort:low → 200(thinking 0), budget_tokens → 400(4.6 거부).
+    // 성인 트랙은 건드리지 않는다.
+    ...(profile.minor_cohort === true
+      ? { output_config: { ...((raw as Record<string, unknown>).output_config as Record<string, unknown> | undefined), effort: "low" } }
+      : {}),
     // #384 — Claude Code CLI 2.x emits mid-conversation `role:"system"`
     // messages (beta mid-conversation-system-2026-04-07). The classroom
     // models this gateway pins reject that role even with the beta — every
