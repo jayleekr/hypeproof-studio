@@ -123,10 +123,13 @@ console.log("kids-quest-prompt.test.mjs: all tests passed");
     assert.ok(html && !/%%[A-Z_]+%%/.test(html), `${w.id}: 자리표시자 없이 렌더`);
     assert.ok(html.includes(`GUEST_NAME='${w.guest}'`), `${w.id}: 게스트 이름 채워짐`);
     assert.equal(matchWorld(w.chip)?.id, w.id, `${w.id}: 칩 문구 매칭`);
-    assert.equal(matchWorld(`${w.guest} 세상 가볼래`)?.id, w.id, `${w.id}: 이름+세상 매칭`);
+    assert.equal(matchWorld(w.chip.replace(/^\S+\s/, ""))?.id, w.id, `${w.id}: 이모지 없는 칩 문구`);
+    assert.equal(matchWorld(`${w.guest} 세상 가볼래`), null, `${w.id}: 자유 문장은 전환 안 함(클릭만)`);
   }
   assert.equal(matchWorld("안녕"), null, "무관한 말은 매칭 안 됨");
-  assert.equal(matchWorld("초코 색을 갈색으로 바꿔줘"), null, "세상 표현 없으면 매칭 안 됨(바꾸기 요청)");
+  assert.equal(matchWorld("초코 색을 갈색으로 바꿔줘"), null, "바꾸기 요청은 전환 아님");
+  assert.equal(matchWorld("초코 세상에 다람쥐 데려와줘"), null, "다른 세상 캐릭터 데려오기는 전환 아님 — 아이 작업을 덮어쓰지 않는다");
+  assert.equal(matchWorld("다람쥐"), null, "이름만 쳐도 전환 아님(클릭만)");
   const { token } = await issue({ u: USER, c: COHORT, p: PROFILES[0] }, 1, TEST_SECRET);
   const env = createMockEnv();
   const r = await app.fetch(new Request("https://api.test/v1/worlds/kq-runner", { headers: { authorization: `Bearer ${token}` } }), env, makeCtx());
