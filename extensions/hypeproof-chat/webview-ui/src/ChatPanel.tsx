@@ -184,16 +184,34 @@ export function ChatPanel(props: Props) {
       : (config?.coach?.name?.trim() || ux.coach.fallback_name || "코치");
 
   // Tone for hard-coded chat-panel labels — game (kids) vs search-webapp
-  // (보아치과 teaser) vs website (보아치과 원장 copyclone). Centralized in
-  // chatPanelHelpers (appToneOf/TONE_LABELS) but mirrored here so the webview
-  // stays vscode-free (chatPanelHelpers imports Node `Buffer`).
+  // (보아치과 teaser) vs website (보아치과 원장 copyclone) vs world
+  // ("내가 만든 미래"). Centralized in chatPanelHelpers (appToneOf/TONE_LABELS)
+  // but mirrored here so the webview stays vscode-free (chatPanelHelpers
+  // imports Node `Buffer`).
+  //
+  // ⚠ 이 미러가 어긋나면 화면에 틀린 낱말이 뜬다. 2026-08-17 실기기에서 kids-world(현 kids-quest)
+  // 트랙이 "게임 만드는 중" 을 띄웠다 — 그 커리큘럼은 "게임" 프레임을 금지한다.
+  // test/tone-mirror.smoke.mjs 가 두 곳의 일치를 강제한다. 톤을 추가하면 양쪽 다 고칠 것.
   const templateTier =
     (config?.profile as { game?: { template_tier?: string } } | undefined)?.game?.template_tier;
-  const appTone: "game" | "search" | "site" =
-    templateTier === "search-webapp" ? "search" : templateTier === "website" ? "site" : "game";
+  const appTone: "game" | "search" | "site" | "quest" =
+    templateTier === "search-webapp"
+      ? "search"
+      : templateTier === "website"
+        ? "site"
+        : templateTier === "kids-quest"
+          ? "quest"
+          : "game";
   const buildingLabel =
-    appTone === "search" ? "검색엔진 만드는 중" : appTone === "site" ? "웹사이트 만드는 중" : "게임 만드는 중";
-  const namingEmoji = appTone === "search" ? "🔍" : appTone === "site" ? "🌐" : "🎮";
+    appTone === "search"
+      ? "검색엔진 만드는 중"
+      : appTone === "site"
+        ? "웹사이트 만드는 중"
+        : appTone === "quest"
+          ? "생각 중…"
+          : "게임 만드는 중";
+  const namingEmoji =
+    appTone === "search" ? "🔍" : appTone === "site" ? "🌐" : appTone === "quest" ? "✨" : "🎮";
 
   // Show the kid-friendly naming card when: profile loaded, it asks the kid to
   // name the coach, and they haven't yet.
@@ -208,20 +226,8 @@ export function ChatPanel(props: Props) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, streaming]);
 
-  if ((needsNaming || forceNaming) && config?.profile) {
-    return (
-      <NamingCard
-        namingPromptMd={config.profile.ux.coach.naming_prompt_md}
-        personalityPromptMd={config.profile.ux.coach.personality_prompt_md}
-        fallbackName={config.profile.ux.coach.fallback_name}
-        emoji={namingEmoji}
-        onSave={(n, p) => {
-          props.onSaveCoach(n, p);
-          setForceNaming(false);
-        }}
-      />
-    );
-  }
+  // NOTE: 작명 카드로 빠지는 조기 return 은 **이 컴포넌트의 마지막 훅 아래**에 있다.
+  // 여기(훅 사이)에 두면 안 된다 — 아래 "훅 순서" 주석 참조.
 
   const submit = (text?: string) => {
     const value = (text ?? draft).trim();
@@ -320,6 +326,38 @@ export function ChatPanel(props: Props) {
   // #384 — drag a screenshot file from Finder/desktop straight onto the input.
   // Same attach path as paste. dragover must preventDefault so drop fires.
   const [dragActive, setDragActive] = useState(false);
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 훅 순서 — 이 아래로는 훅을 추가하지 말 것. 조기 return 이 여기 있다.
+  //
+  // 작명 카드는 `needsNaming` 이 true 일 때만 렌더된다. 이 return 이 훅들 **사이**
+  // 에 있으면 렌더마다 훅 개수가 달라져 React 가 크래시한다:
+  //
+  //   작명 전 (needsNaming=true)  → return → 훅 N개
+  //   아이가 이름 저장 → coach.configured=true
+  //   작명 후 (needsNaming=false) → 통과   → 훅 N+3개   ← React #310
+  //   (반대 방향 — config 지연 도착·`코치 이름 다시 짓기` → 훅 감소 → React #300)
+  //
+  // 작명 의식은 모든 학생이 반드시 통과하므로 이 전이는 정상 경로에서 100% 발생한다.
+  // 2026-08-10 실기기 세션에서 #300·#310 두 방향 모두 재현됐다 (2/2).
+  // ErrorBoundary 가 잡아 "화면을 그리다가 멈췄어요" 로 떨어지고 "다시 열기" 로만 복구된다.
+  //
+  // 새 훅이 필요하면 이 블록 **위**에 추가한다.
+  // ─────────────────────────────────────────────────────────────────────────
+  if ((needsNaming || forceNaming) && config?.profile) {
+    return (
+      <NamingCard
+        namingPromptMd={config.profile.ux.coach.naming_prompt_md}
+        personalityPromptMd={config.profile.ux.coach.personality_prompt_md}
+        fallbackName={config.profile.ux.coach.fallback_name}
+        emoji={namingEmoji}
+        onSave={(n, p) => {
+          props.onSaveCoach(n, p);
+          setForceNaming(false);
+        }}
+      />
+    );
+  }
   const handleDragOver = (e: React.DragEvent<HTMLElement>) => {
     if (!imagePasteEnabled) return;
     if (!Array.from(e.dataTransfer.items ?? []).some((it) => it.kind === "file")) return;
@@ -858,7 +896,7 @@ function MessageItem({
   ux: UxConfig;
   coachName: string;
   buildingLabel: string;
-  tone: "game" | "search" | "site";
+  tone: "game" | "search" | "site" | "quest";
   messages: ChatMessage[];
   /** #414 — an activity log is on screen, so the spinner must not invent stages. */
   hasActivity: boolean;
@@ -982,10 +1020,13 @@ function buildStageText(
   buildingLabel: string,
   content: string,
   fenceOpen: boolean,
-  tone: "game" | "search" | "site",
+  tone: "game" | "search" | "site" | "quest",
   hasActivity = false,
 ): string {
   if (fenceOpen) return "거의 다 됐어요";
+  // quest 트랙은 만드는 대상을 이름 붙이지 않는다 — 라벨 자체가 "생각 중…" 이고
+  // 하위 단계를 붙이면 다시 "무엇을" 만드는지 규정하게 된다.
+  if (tone === "quest") return buildingLabel;
   // Real signal present → say only what is certainly true.
   if (hasActivity) return buildingLabel;
   const len = content.length;
@@ -1010,7 +1051,7 @@ function AssistantContent({
   content: string;
   streaming: boolean;
   buildingLabel: string;
-  tone: "game" | "search" | "site";
+  tone: "game" | "search" | "site" | "quest";
   /** #414 — the tool/activity log below carries the real state of the turn. */
   hasActivity?: boolean;
 }) {

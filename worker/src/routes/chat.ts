@@ -12,12 +12,13 @@
 //   9. Log usage to Analytics Engine + D1
 
 import { Hono } from "hono";
-import { resolveProvider, type Env, type LLMProvider } from "../env";
+import { resolveProvider, providerKey, type Env, type LLMProvider } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
 import { getProfile } from "../profiles";
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropicResilient } from "../lib/anthropic";
+import { glmUpstreamUrl } from "../lib/glm";
 import { callGeminiResilient } from "../lib/gemini";
 import { callOpenAI } from "../lib/openai";
 import {
@@ -224,10 +225,23 @@ chat.get("/profile", async (c) => {
     // a profile mistake can never route a child to the file/exec-capable
     // runtime. Absent → proxy. The client still gates every tool via
     // canUseTool and honors the machine-scoped runtime setting.
-    coach_runtime:
-      profile.coach_runtime === "agent-sdk" && !isMinorCohort(profile)
-        ? "agent-sdk"
-        : "proxy",
+    // 2026-08-11 결정 — 미성년 코호트도 프로필이 명시적으로 opt-in 하면
+    // agent-sdk 에 도달한다. SK 아동 워크숍의 커리큘럼이 "코치가 워크스페이스의
+    // 파일을 읽고 고친다" 를 전제로 바뀌었고, 그러려면 파일 도구가 실행될
+    // 런타임이 필요하다. 이전에는 여기서 무조건 proxy 로 핀했다.
+    //
+    // **무엇이 바뀌지 않았는가 (중요):**
+    //   - 모더레이션 — 인바운드/아웃바운드 스크린은 isMinorCohort 로 그대로 돈다
+    //     (이 파일 322·513행, messages.ts 298·444행). 이 변경과 무관한 계층이다.
+    //   - 도구 범위 — shell·browser·subagents 는 아동 프로필에 여전히 없고
+    //     하네스가 hard fail 로 막는다. 열린 것은 read/write 뿐이다.
+    //   - 경로 봉쇄 + 승인 모달 — 모든 툴 호출은 canUseTool 을 지나고
+    //     워크스페이스 밖 경로는 거부된다(evaluateSdkToolUse).
+    //
+    // 즉 "미성년은 무조건 proxy" 가 아니라 "미성년은 프로필이 명시하지 않으면
+    // proxy" 로 바뀐 것이다. 프로필에 sdk_tools 를 두지 않은 아동 코호트는
+    // 이전과 동작이 완전히 같다.
+    coach_runtime: profile.coach_runtime === "agent-sdk" ? "agent-sdk" : "proxy",
   });
 });
 
@@ -342,13 +356,25 @@ chat.post("/chat/completions", async (c) => {
     }
   }
 
-  // Pick the upstream LLM (switchable peers; default Gemini — see
-  // resolveProvider). translate / translateOpenAI both drop client
-  // system+tool messages — the trust model is identical either way.
+  // Pick the upstream LLM. 우선순위는 **프로필 → 배포 기본값** 이다.
+  //
+  // 쓰임새마다 맞는 모델이 다르다 — 아이들 수업은 싸고 빠른 쪽, 고위험 산출물은 비싸도
+  // 정확한 쪽. 배포 전체를 한 모델로 묶을 이유가 없어서, 프로필이 `model.provider` 를
+  // 선언하면 그 요청만 그쪽으로 나간다. 선언하지 않은 프로필은 지금까지와 똑같이
+  // LLM_PROVIDER 를 따른다 (기존 배포의 동작이 바뀌지 않는다).
+  //
+  // translate / translateOpenAI both drop client system+tool messages — the
+  // trust model is identical either way.
   let provider: LLMProvider;
   let apiKey: string;
   try {
-    ({ provider, apiKey } = resolveProvider(env));
+    const pinned = profile.model.provider;
+    if (pinned) {
+      provider = pinned;
+      apiKey = providerKey(env, pinned);
+    } else {
+      ({ provider, apiKey } = resolveProvider(env));
+    }
   } catch (err) {
     // #257 — config prose (env var names, provider wiring) stays in logs.
     console.error(`[${c.get("requestId")}] provider config error:`, err);
@@ -386,7 +412,20 @@ chat.post("/chat/completions", async (c) => {
       oBody.stream = stream;
       if (stream) oBody.stream_options = { include_usage: true };
       modelLabel = oBody.model;
-      upstream = await callOpenAI(oBody, apiKey);
+      upstream = await callOpenAI(oBody, apiKey, undefined, c.env.OPENAI_BASE_URL);
+    } else if (provider === "glm") {
+      // GLM (Z.ai) — Anthropic 호환 경로라 **번역기와 스트림 처리를 그대로 재사용**한다.
+      // 새로 쓰는 것은 URL 하나뿐이다 (lib/glm.ts 에 실측 근거를 적어 뒀다).
+      //
+      // Anthropic 프록시/시크릿은 붙이지 않는다 — 그건 지역 차단된 api.anthropic.com
+      // 우회용이고 z.ai 에는 해당이 없다. 붙이면 프록시가 403 을 낸다.
+      //
+      // 캐시는 자동이 아니다: cache_control 을 명시해야 걸린다 (실측 81% 절감).
+      // 그 지시를 넣는 것은 translate() 쪽 일이라 이 wrapper 범위 밖이다 — #545.
+      const gBody = translate(body as any, profile, coach, "glm");
+      gBody.stream = stream;
+      modelLabel = gBody.model;
+      upstream = await callAnthropicResilient(gBody, apiKey, { url: glmUpstreamUrl() });
     } else {
       // anthropic — Messages API (different schema; transformStream handles it).
       // Route through the optional region-pinned proxy when set, otherwise

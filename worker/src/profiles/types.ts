@@ -36,6 +36,14 @@ export interface Profile {
   model: {
     default: ModelAlias;
     fallback?: ModelAlias;
+    /**
+     * 이 프로필만 다른 상류로 보낸다. 없으면 배포 기본값(LLM_PROVIDER)을 쓴다.
+     *
+     * 쓰임새마다 맞는 모델이 다르다 — 아이들 수업은 싸고 빠른 쪽, 고위험 산출물은
+     * 비싸도 정확한 쪽. 배포 전체를 한 모델로 묶을 이유가 없다.
+     * 여기에 적은 프로바이더의 키가 없으면 **이 프로필만** 502 가 된다 (나머지는 정상).
+     */
+    provider?: LLMProvider;
     /** Per-profile output-token ceiling used when the client omits max_tokens.
      *  Long-output profiles (e.g. website copyclone → full HTML) set this high so
      *  responses are not truncated at DEFAULT_MAX_TOKENS. Clamped to 1..16384. */
@@ -47,10 +55,32 @@ export interface Profile {
     example_prompts: string[];
   };
   sandbox: {
+    /**
+     * @deprecated 읽는 코드가 없다. 도구 정책의 canonical owner 는
+     * `sdk_tools.write` 다 (#282 P2 / ADR 0003). 이 필드는 그보다 앞선
+     * 시기의 잔재이며 값이 무엇이든 런타임에 아무 영향이 없다.
+     *
+     * **왜 지우지 않고 남겨 두는가:** 프로필 4종이 이미 값을 갖고 있어
+     * 일괄 제거는 별건이다. 그때까지 이 주석이 오독을 막는다 —
+     * 2026-08-10 에 실제로 두 사람(프로필 작성자·검증자)이 이 필드를
+     * 보고 "파일 쓰기가 켜져 있다"고 판단했다.
+     *
+     * **아동 코호트에서 산출물이 저장되는 진짜 경로:** 코치는 Write 도구가
+     * 없고(chat-only, L3 결정), 대신 확장이 코치의 ```html 펜스를 파싱해
+     * 워크스페이스 루트의 `index.html` 로 쓴다
+     * (`chatPanelProvider.ts` `revealBuilt()` → `saveGameToWorkspace()`).
+     * 즉 이 필드가 false 든 true 든 산출물은 저장된다.
+     */
     file_write: boolean;
+    /** 코호트 작업 폴더. 읽힘 — chat.ts 가 /v1/profile 로 내보내고 클라이언트가 폴더를 전환한다. */
     workspace_root?: string;
+    /**
+     * @deprecated 읽는 코드가 없다. 실제 셸 정책은 `sdk_tools.shell` 이
+     * 소유한다 (#431). 위 `file_write` 와 같은 잔재.
+     */
     execute_shell: boolean;
-    mcp_tools_enabled: string[];    // empty array = no tools
+    /** 읽힘 — translate.ts 가 클라이언트 tools 배열을 이 목록으로 필터한다. empty = no tools */
+    mcp_tools_enabled: string[];
   };
   preview: {
     type: "iframe" | "live_server";
@@ -85,7 +115,7 @@ export interface Profile {
    * not only pasted, and the coach drives the browser to clone it.
    */
   game: {
-    template_tier: "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website";
+    template_tier: "kids-quest" | "kids-basic" | "kids-rich" | "teen" | "pro-3d" | "search-webapp" | "website";
   };
   publishing: {
     enabled: boolean;
@@ -340,10 +370,21 @@ export const OPENAI_MODEL_MAP: Record<ModelAlias, string> = {
   "hypeproof-strong":  "gpt-4o",
 };
 
+// GLM (Z.ai) model ids. 지금은 세 alias 가 모두 glm-5.2 를 가리킨다 — 5.2 가 플래그십이고
+// 계열 내 하위 모델을 쓸 이유가 아직 없다. GLM-5.3 은 2026-08-14 출시됐으나 일반
+// pay-as-you-go API 가 아직 "coming soon" 이라 여기에 못 넣는다 (hypeprooflab#545).
+// 5.3 의 per-token API 가 열리면 이 한 줄만 바꾸면 된다 — base model 이 같은 계열이다.
+export const GLM_MODEL_MAP: Record<ModelAlias, string> = {
+  "hypeproof-fast":    "glm-5.2",
+  "hypeproof-default": "glm-5.2",
+  "hypeproof-strong":  "glm-5.2",
+};
+
 export function modelIdFor(alias: ModelAlias, provider: LLMProvider): string {
   switch (provider) {
     case "gemini":    return GEMINI_MODEL_MAP[alias];
     case "openai":    return OPENAI_MODEL_MAP[alias];
+    case "glm":       return GLM_MODEL_MAP[alias];
     case "anthropic": return MODEL_MAP[alias];
   }
 }

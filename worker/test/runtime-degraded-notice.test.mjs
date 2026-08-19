@@ -60,7 +60,16 @@ ok("**실제 프로덕션 프로필**(copyclone)로도 붙는다 — 합성 프�
   assert.equal(hasNotice(real, "sdk"), false);
 });
 
-ok("**실제 kids 프로필**에는 어느 라우트로도 안 붙는다 (8/22 SK 무영향)", () => {
+ok("**실제 kids 프로필** — 2026-08-11 부터 폴백 고지 대상이다", () => {
+  // 이전에는 "어느 라우트로도 안 붙는다" 였다. 아동 트랙이 proxy 고정이라
+  // 폴백이라는 상태 자체가 없었기 때문이다.
+  //
+  // 지금은 두 트랙 모두 sdk_tools(read/write) + coach_runtime: agent-sdk 를
+  // opt-in 한다. 그러면 폴백이 성립하고, **폴백했는데 코치가 파일을 다룰 수
+  // 있다고 믿으면** #476 이 기록한 그 오진("저장해주시겠어요?")이 아이에게
+  // 그대로 간다. 그래서 proxy 라우트에서는 붙어야 하고 sdk 라우트에서는
+  // 붙으면 안 된다 — 성인 코호트와 같은 계약이다.
+  //
   // id 는 파일명이 아니다 — 레지스트리에서 확인한 실제 값이다
   // (3-4 반은 파일이 `sk-biopharm-kids-s1.ts` 인데 id 는 `…-grade-3-4-s1`).
   for (const id of [
@@ -69,9 +78,16 @@ ok("**실제 kids 프로필**에는 어느 라우트로도 안 붙는다 (8/22 S
   ]) {
     const p = getProfile(id);
     assert.ok(p, `${id} 가 레지스트리에 있어야 한다`);
-    assert.equal(hasNotice(p, "proxy"), false, id);
-    assert.equal(hasNotice(p, "sdk"), false, id);
+    assert.equal(p.coach_runtime, "agent-sdk", `전제: ${id} 가 SDK 를 요청한다`);
+    assert.equal(hasNotice(p, "proxy"), true, `${id}: 폴백 시 능력 상실을 말해야 한다`);
+    assert.equal(hasNotice(p, "sdk"), false, `${id}: SDK 로 돌 때는 붙지 않는다`);
   }
+});
+
+ok("sdk_tools 를 opt-in 하지 않은 아동 코호트는 여전히 무관하다", () => {
+  // 회귀 가드 — 위 변경이 "모든 아동에게 붙는다" 로 번지지 않았는지.
+  const p = profile({ minor_cohort: true, coach_runtime: "agent-sdk", sdk_tools: {} });
+  assert.equal(hasNotice(p, "proxy"), false, "호스트 도구를 안 받으면 잃을 능력도 없다");
 });
 
 ok("read 만 준 코호트도 붙는다", () => {
@@ -98,12 +114,28 @@ ok("애초에 프록시로 설계된 코호트에는 안 붙는다", () => {
   assert.equal(hasNotice(profile({ coach_runtime: "proxy" }), "proxy"), false);
 });
 
-ok("미성년 코호트에는 안 붙는다 (degraded 가 아니라 설계다)", () => {
-  // 워커가 chat.ts 에서 미성년을 의도적으로 프록시에 고정한다.
-  assert.equal(hasNotice(profile({ minor_cohort: true }), "proxy"), false);
+ok("미성년이라는 이유만으로 빠지지 않는다 (2026-08-11 변경)", () => {
+  // 이전 계약: "미성년 코호트에는 안 붙는다 — degraded 가 아니라 설계다."
+  // 워커가 미성년을 무조건 프록시에 고정하던 시절의 규칙이다.
+  //
+  // 지금은 아동 코호트도 sdk_tools + coach_runtime 을 opt-in 할 수 있다
+  // (routes/chat.ts). opt-in 한 코호트가 폴백하면 그것은 설계가 아니라 실제
+  // 능력 상실이므로 고지 대상이다. 판정은 나이가 아니라 **호스트 도구를
+  // 받았는가**로 한다.
+  assert.equal(
+    hasNotice(profile({ minor_cohort: true }), "proxy"),
+    true,
+    "도구를 받은 아동 코호트는 폴백 시 고지 대상",
+  );
   assert.equal(
     hasNotice(profile({ audience: { age_range: [9, 12] } }), "proxy"),
+    true,
+  );
+  // 도구를 안 받았으면 나이와 무관하게 잃을 것이 없다.
+  assert.equal(
+    hasNotice(profile({ minor_cohort: true, sdk_tools: {} }), "proxy"),
     false,
+    "호스트 도구 없음 → 고지 없음",
   );
 });
 

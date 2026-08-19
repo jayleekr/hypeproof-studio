@@ -61,7 +61,7 @@ Single SVG → all platforms. Edit `vscodium-base/icons/stable/codium_cnl.svg` (
 
 ## Decision gates
 
-Each phase has a gate in METAPLAN. Do not proceed past a gate without confirming the listed criteria. If Phase 3 is not green by **2026-05-28**, trigger Plan B (Cline + Proxy fallback, METAPLAN §9).
+Each phase has a gate in METAPLAN. Do not proceed past a gate without confirming the listed criteria. Plan B (Cline + Proxy fallback) remains available as a fallback decision — see METAPLAN §9 for its criteria. It is not tied to a fixed date; evaluate it against the current phase gate.
 
 ## Detailed rules
 

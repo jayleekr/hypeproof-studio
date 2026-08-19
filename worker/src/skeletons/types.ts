@@ -11,6 +11,7 @@
 // skeletons, all the way to WebGL/Three.js 3D.
 
 export type SkeletonTier =
+  | "kids-quest"     // 게스트 퀘스트 트랙(초3~6): 게스트(NPC)의 문제를 푸는 5개 스켈레톤 — 룰은 전부 CONFIG 숫자, 결과는 hp:result 로 코치에게
   | "kids-basic"     // 초3-4 (9-10세): canvas 2D, 한 메커니즘, 큰 이모지, 명확한 조작
   | "kids-rich"      // 초5-6 (11-12세): 여러 메커니즘, 레벨/적, 파티클, 사운드
   | "teen"           // 중등+: 물리, 상태 많음, 저장, 좀 더 코드 노출 OK

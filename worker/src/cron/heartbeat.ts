@@ -10,7 +10,7 @@
 // state is the whole point.
 
 import type { Env } from "../env.ts";
-import { resolveProvider } from "../env.ts";
+import { resolveProvider, type LLMProvider } from "../env.ts";
 import { callAnthropic } from "../lib/anthropic.ts";
 import { callGemini } from "../lib/gemini.ts";
 import { callOpenAI } from "../lib/openai.ts";
@@ -32,7 +32,7 @@ export interface HeartbeatResult {
   ts: string;          // ISO
   ok: boolean;
   latency_ms: number;
-  provider: "gemini" | "anthropic" | "openai" | "unknown";
+  provider: LLMProvider | "unknown";
   status?: number;     // upstream HTTP status when reachable
   error?: string;      // short error string when !ok
   streak?: number;     // current fail streak after this attempt (only on fail)

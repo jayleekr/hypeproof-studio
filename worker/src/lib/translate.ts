@@ -421,7 +421,10 @@ function browserContractFor(profile: Profile, runtime: CoachRuntime): string {
 function degradedRuntimeNoticeFor(profile: Profile, runtime: CoachRuntime): string {
   if (runtime !== "proxy") return "";
   if (profile.coach_runtime !== "agent-sdk") return "";
-  if (isMinorCohort(profile)) return "";
+  // 2026-08-11 — 미성년 제외를 걷어낸다. 아동 코호트가 agent-sdk 를 opt-in 할 수
+  // 있게 된 뒤로는(chat.ts) 그쪽에도 폴백이 성립하고, 폴백했는데 코치가 파일을
+  // 다룰 수 있다고 믿으면 #476 이 기록한 그 오진("저장해주시겠어요?")이 아이에게
+  // 그대로 간다. opt-in 하지 않은 아동 프로필은 아래 grantsHostTools 에서 걸러진다.
   const t = profile.sdk_tools;
   const grantsHostTools = t?.read === true || t?.write === true || t?.shell === true;
   if (!grantsHostTools) return "";
@@ -516,6 +519,10 @@ export function translate(
   body: OpenAIRequest,
   profile: Profile,
   coach: CoachContext = {},
+  // Anthropic 스키마를 말하는 상류가 둘이다 — Anthropic 과 GLM(Z.ai 호환 경로).
+  // 스키마는 같고 **모델 id 만 다르므로** 프로바이더만 받아 alias 를 해석한다.
+  // translateOpenAI 가 gemini/openai 를 같은 방식으로 가르는 것과 대칭이다.
+  provider: "anthropic" | "glm" = "anthropic",
 ): AnthropicRequest {
   const msgs: AnthropicMessage[] = filterMessages(
     body,
@@ -526,7 +533,7 @@ export function translate(
     content: toAnthropicContent(t.content),
   }));
 
-  const model = modelIdFor(resolveAlias(body.model, profile), "anthropic");
+  const model = modelIdFor(resolveAlias(body.model, profile), provider);
 
   // System block: cached prefix + non-cached per-user coach tail.
   // Cached prefix = system prompt + the tier's skeleton library. Static per
@@ -678,11 +685,27 @@ function buildSkeletonLibrary(profile: Profile): string {
   if (skels.length === 0) return "";
 
   const isSearchWebapp = tier === "search-webapp";
+  const isKidsQuest = tier === "kids-quest";
 
-  // Tier-conditional intro — game tiers vs search-webapp use different framing.
-  // Mixing the game intro into a clinical workshop is what caused #141
-  // ("게임을 만드는 중" leak in dental responses).
-  const parts: string[] = isSearchWebapp
+  // Tier-conditional intro — game tiers vs search-webapp vs kids-quest use
+  // different framing. Mixing the game intro into a clinical workshop is what
+  // caused #141 ("게임을 만드는 중" leak in dental responses); the kids-quest
+  // curriculum bans the word "게임" outright (curriculum/quests/QUESTS.md).
+  const parts: string[] = isKidsQuest
+    ? [
+        "# 게스트의 세상 스켈레톤 라이브러리 (반드시 여기서 시작)",
+        "",
+        "아래는 게스트 9명이 사는 **문제투성이 세상**입니다. 각 스켈레톤은 그 게스트의 세상 자체입니다 — 문제가 화면에 보이고 기계적으로도 작동합니다(물이 차오르고, 꽃이 시들고, 해가 이글거립니다).",
+        "아이가 게스트를 고르면 그 `kq-*` 하나를 골라 `%%...%%` 자리표시자를 **문제 상태 기본값**(각 줄 주석의 \"문제 세상 N\")으로 채워 완전한 단일 HTML로 띄우세요. 아이가 먼저 겪어야 합니다.",
+        "- `%%TITLE%%` `%%GUEST_EMOJI%%` `%%GUEST_NAME%%` `%%GUEST_LINE%%`(게스트가 자기 세상을 말하는 첫 대사) · `%%PLAYER_EMOJI%%` · `%%ITEM_A%%` `%%ITEM_B%%` · `%%SPEED%%` `%%RATE%%` `%%GOAL%%` `%%SPECIAL%%`(숫자) · `%%BG_TOP%%` `%%BG_BOT%%`",
+        "- `WORLD = { … }` 블록이 이 세상의 문제 플래그입니다. 처음엔 그대로 둡니다.",
+        "",
+        "그 다음부터 아이가 말하면 **직전 HTML을 아이 말대로 무엇이든 고쳐 통째로** 다시 출력합니다 — CONFIG 값, `WORLD` 플래그, 오브젝트, 배경, 새 규칙, 새 코드 전부 허용. 아이가 말한 것은 반드시 화면에 있어야 합니다. 세상을 바꿨으면 `WORLD` 값을 맞춰 두세요(물을 뺐으면 `flood:false`) — 게스트가 `hp:result`의 `world`를 보고 반응합니다.",
+        "지키는 것 둘: `#guest` 말풍선(gface/gsay/say)과 `report()`(hp:result + world). 출력에 `%%` 문자가 남으면 안 됩니다. 외부 URL 금지.",
+        "절대 금지: 응답에서 `게임` 이라는 낱말을 쓰지 마세요. 이건 게스트가 사는 세상입니다.",
+        "",
+      ]
+    : isSearchWebapp
     ? [
         "# 검색 웹앱 스켈레톤 라이브러리 (반드시 사용)",
         "",

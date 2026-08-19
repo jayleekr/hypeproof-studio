@@ -57,7 +57,8 @@ publishing:
     - "공유해서"
     - "링크를 공유"
     - "URL을 공유"
-    - "전 세계"
+    # 앞에 한글이 붙으면 다른 낱말이다("이전 세계"·"직전 세계"). 경계를 준다.
+    - "re:(?<![가-힣])전[ ]?세계"
     - "퍼블리시"
   # If the same sentence/line also carries one of these deferral or negation
   # markers, the phrase is read as a future-session reference ("next time you'll
@@ -114,6 +115,10 @@ severity:
   child_missing_url_ban: fail
   child_age_range_required: fail
   child_browser_session_safe: fail
-  child_sdk_write: fail
+  # 2026-08-11 — child_sdk_write(쓰기 금지)를 걷어내고 배선 정합성 검사로 교체.
+  # 아동 트랙도 workspace read/write 를 갖는다. shell/browser/subagents 는 유지.
+  child_sdk_write_without_runtime: fail
   child_sdk_browser: fail
   child_sdk_subagents: fail
+  # 오독 방지용 — 진짜 권한이 아니라 죽은 필드라 warn. 값 정리는 별건(프로필 4종 일괄).
+  child_legacy_file_write: warn

@@ -223,4 +223,42 @@ console.log("\nAll show-intent smoke tests passed.");
   console.log("✅ abortAllStreams: 3 cases (empty, multi, throw-resilient)");
 }
 
+// ─── "아직 안 떴다" 는 재생성이 아니라 열기다 (REQ-M34, 2026-08-17 실기기) ──
+//
+// "완성된 거 안 보여" 는 명령이 아니라 **불평**이라 동사 패턴에 안 걸렸고,
+// 코치에게 넘어가 세계를 통째로 다시 그렸다 — 보려던 아이가 더 오래 기다렸다.
+// 프롬프트로 먼저 막아봤지만 트랙의 ⚠ 최상위 규칙("무조건 완전한 코드 출력")과
+// 충돌해서 졌다. 그래서 여기서 결정적으로 끊는다.
+//
+// **음성 대조군이 이 TC 의 핵심이다.** 이 판정이 너무 관대하면 아이가 원한
+// 수정이 조용히 사라진다 — 재생성보다 나쁜 실패다.
+{
+  const shouldOpen = [
+    "안 보여", "안보여", "안 보여요", "안 보이는데", "아직 안 보여", "안 나와",
+    "완성된 거 안 보여", "만든 거 안 보여", "그거 안 보여",
+    "미래 안 보여", "세계 안 보여", "화면 안 보여",
+    "어디 있어", "어디야", "미래 어디 있어", "그거 어디 있어",
+    "아직이야", "아직", "아직이에요",
+  ];
+  for (const t of shouldOpen) {
+    assert.equal(isShowIntent(t), true, `"${t}" 는 열기여야 한다 (다시 그리면 안 된다)`);
+  }
+
+  const shouldBuild = [
+    "글씨가 안 보여",        // 접두사 목록에 없다 — 진짜 수정 요청이다
+    "안 보이게 해줘",        // 숨겨달라는 것 — 정반대
+    "색깔 안 보여서 바꿔줘", // 수정 동사가 먼저 걸러낸다
+    "건물 안 보이게 지워줘",
+    "공원 어디에 만들어줘",  // 어디 + 생성 동사 — 수정 요청이다
+    "아직 안 만들었어?",    // 생성 동사가 먼저 걸러낸다
+    "비 내리게 해줘",
+    "별이 떨어지는 게임 보여줘",
+  ];
+  for (const t of shouldBuild) {
+    assert.equal(isShowIntent(t), false, `"${t}" 는 코치에게 가야 한다 (수정 요청이 사라지면 안 된다)`);
+  }
+
+  console.log(`✅ "안 보여" 계열: 양성 ${shouldOpen.length} · 음성 ${shouldBuild.length}`);
+}
+
 console.log("\nAll chatPanelHelpers smoke tests passed.");

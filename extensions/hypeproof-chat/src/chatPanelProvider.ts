@@ -24,7 +24,8 @@ import {
 const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
-import { PreviewProvider } from "./previewProvider";
+import { PreviewProvider, sanitizeQuestResult } from "./previewProvider";
+import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
@@ -80,6 +81,7 @@ import {
   AiDisclosureGate,
   COACH_DEGRADED_NOTICE,
   sdkFallbackLogLine,
+  resolveCoachRuntime,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 
@@ -257,6 +259,74 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.postPageNotice(
       `${withShot ? "🖼 화면과 내용을" : "📄 내용을"} 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
     );
+  }
+
+  /**
+   * kids-quest — a skeleton round ended (`hp:result`). Stash a one-line summary
+   * for the NEXT turn so the coach can react in the guest's voice to what the
+   * kid actually did, instead of guessing. Same consume-once channel as
+   * attachPageContext (#278): history keeps the kid's clean text; only the
+   * model sees the prepended line. Retries overwrite — the last round is the
+   * one the kid is talking about — but the attempt count is kept so "3번째
+   * 만에 성공" is visible to the coach.
+   */
+  attachQuestResult(result: Record<string, unknown>): void {
+    const ok = result.ok === true;
+    const attempts = ++this.questAttempts;
+    if (ok) this.questAttempts = 0;
+    const kv = Object.entries(result)
+      .filter(([k]) => k !== "ok")
+      .map(([k, v]) => `${k}=${String(v)}`)
+      .join(" ");
+    this.pendingPageContext =
+      `[게스트 결과] ${ok ? "성공" : "실패"} · ${kv}` +
+      (attempts > 1 ? ` · ${attempts}번째 시도` : "") +
+      `\n위 결과를 게스트 목소리로 한 줄 반응한 뒤 아이에게 넘겨줘. 결과에 없는 숫자는 지어내지 마.`;
+    this.pendingPageImage = null;
+    this.postPageNotice(`${ok ? "🎉" : "💦"} 친구가 해봤어요 — ${ok ? "성공" : "아직"}. 코치에게 결과가 전해졌어요.`);
+  }
+  /** Rounds since the last success (a success resets it). */
+  private questAttempts = 0;
+  /** JSON of the last pulled `__hpLast` — so a round is folded in once. */
+  private lastPulledQuestResult = "";
+
+  /**
+   * kids-quest, live_server path — the skeleton runs in the native browser tab
+   * (no parent window, so `hp:result` postMessage has nowhere to go). Every
+   * skeleton also leaves the last round on `window.__hpLast`; pull it over CDP
+   * right before a turn goes out. Cheap (one Runtime.evaluate) and pull-based,
+   * so "됐어?" always sees the freshest round. Silent on any failure — a
+   * missing result just means the coach says "한번 해보고 알려주세요".
+   */
+  private async pullQuestResultFromPreview(): Promise<void> {
+    if (this.cachedProfile?.game?.template_tier !== "kids-quest") return;
+    const tabs = vscode.window.browserTabs ?? [];
+    const tab =
+      this.mcpBrowser?.currentTab() ??
+      tabs.find((t) => /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(t.url ?? "")) ??
+      vscode.window.activeBrowserTab;
+    if (!tab) return;
+    let json = "";
+    try {
+      const session = await CdpSession.attach(tab);
+      try {
+        const res = await session.send(
+          "Runtime.evaluate",
+          { expression: "JSON.stringify(window.__hpLast || null)", returnByValue: true },
+          3_000,
+        );
+        json = typeof res?.result?.value === "string" ? res.result.value : "";
+      } finally {
+        await session.close();
+      }
+    } catch {
+      return;
+    }
+    if (!json || json === "null" || json === this.lastPulledQuestResult) return;
+    this.lastPulledQuestResult = json;
+    let parsed: unknown;
+    try { parsed = JSON.parse(json); } catch { return; }
+    this.attachQuestResult(sanitizeQuestResult(parsed));
   }
 
   /**
@@ -634,6 +704,26 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  - default: the sandboxed iframe PreviewProvider (existing behavior).
    * Public so extension.ts (runLastCode) shares the same routing.
    */
+  /**
+   * 2026-08-19 — SDK 코치가 Write/Edit 로 저장한 .html 을 미리보기에 띄운다.
+   * 파일을 읽어 revealBuilt 로 넘긴다(펜스 경로와 완전히 같은 저장·리빌 동작).
+   * 파일이 없거나 HTML 이 아니면 조용히 넘어간다 — 코치의 다음 말이 화면을
+   * 대신하지 않도록, 실패는 툴 로그 한 줄로만 남긴다.
+   */
+  private async revealWrittenHtml(filePath: string, streamId?: string): Promise<void> {
+    try {
+      const abs = path.isAbsolute(filePath) ? filePath : path.join(this.resolveCoachCwd() ?? "", filePath);
+      const buf = await vscode.workspace.fs.readFile(vscode.Uri.file(abs));
+      const html = Buffer.from(buf).toString("utf8");
+      if (!/<html[\s>]/i.test(html) && !/<!doctype html/i.test(html)) return;
+      await this.revealBuilt(html, { streamId });
+    } catch (e) {
+      if (streamId) {
+        this.postToolLog(streamId, { id: randomId(), icon: "🖼️", label: `미리보기 열기 실패: ${String(e).slice(0, 80)}`, state: "error" });
+      }
+    }
+  }
+
   async revealBuilt(html: string, opts?: { streamId?: string }): Promise<boolean> {
     // #359 — structural guard: auto-repair the known comment-close typo, and
     // refuse to reveal a still-broken document as if it succeeded. Returns
@@ -642,9 +732,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (checked.issues.length > 0) this.surfaceStructureIssues(checked, opts?.streamId);
     if (checked.blocked) return false;
 
+    // 2026-08-17 Windows 실기기 — 코치가 "완성됐어요!" 라고 말한 **뒤에도** 화면이
+    // 한참 비어 있었다. 스트림이 끝난 시점과 미리보기가 실제로 뜨는 시점 사이에
+    // 라이브서버 기동 + 탭 열기가 들어가는데, 그 구간에 아무 표시가 없어서
+    // 아이 눈에는 그냥 멈춘 것으로 보인다("완성된거 안보여").
+    //
+    // 그 공백을 타임라인 한 줄로 메운다. 실제로 뜨면 done, 실패하면 error 로
+    // 바뀌므로 "떴다고 말했는데 안 뜬" 상태가 화면에 남지 않는다(R0).
+    const revealLogId = randomId();
+    const logReveal = (state: "running" | "done" | "error", label: string): void => {
+      if (!opts?.streamId) return;
+      this.postToolLog(opts.streamId, { id: revealLogId, icon: "🖼️", label, state });
+    };
+
+    logReveal("running", "미리보기 여는 중");
     await this.saveGameToWorkspace(checked.html);
-    if (this.isLiveServerPreview() && (await this.openInLiveServer())) return true;
+    if (this.isLiveServerPreview() && (await this.openInLiveServer())) {
+      logReveal("done", "미리보기를 열었어요");
+      return true;
+    }
     void this.preview.show(checked.html);
+    logReveal("done", "미리보기를 열었어요");
     return true;
   }
 
@@ -1177,6 +1285,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #278 — consume any queued browser-page context for THIS turn only. The
     // user message stored in history keeps their clean text; only the model
     // sees the prepended page context.
+    // kids-quest — fold the latest round from the native preview tab (if any).
+    await this.pullQuestResultFromPreview();
     const pageContext = this.pendingPageContext;
     this.pendingPageContext = null;
     // #308 — the notice describes the queued context; once consumed, stop
@@ -1245,10 +1355,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // canUseTool and strips minor tools. Belt-and-suspenders: never honor a
       // profile agent-sdk request for a minor_cohort, even if the worker
       // somehow sent one.
+      // 판단은 resolveCoachRuntime (chatPanelHelpers) 가 소유한다 — 미성년 검사가
+      // 설정 경로에만 빠져 있던 비대칭을 고치면서 순수 함수로 뺐다. 대조군 포함
+      // 단위 테스트: test/coach-runtime.smoke.mjs
       const settingRuntime = cfg.get<"proxy" | "agent-sdk">("coachRuntime", "proxy");
-      const profileWantsSdk = profile?.coach_runtime === "agent-sdk" && profile?.minor_cohort !== true;
-      const runtime: "proxy" | "agent-sdk" =
-        settingRuntime === "agent-sdk" || profileWantsSdk ? "agent-sdk" : "proxy";
+      const runtime: "proxy" | "agent-sdk" = resolveCoachRuntime({
+        settingRuntime,
+        profileRuntime: profile?.coach_runtime,
+        minorCohort: profile?.minor_cohort,
+      });
       const onDelta = (delta: string) => {
         assistantText += delta;
         const t = this.turnTimelines.get(streamId);
@@ -1276,6 +1391,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // The webview replaces an entry wholesale by id, so a tool_result has to
       // re-send the label the tool_use showed — keep it per stream.
       const toolLabels = new Map<string, string>();
+      // SDK 턴에서 Write/Edit 된 .html 경로 (tool_use id → 절대경로) — tool_result 성공 시 미리보기.
+      const htmlWrites = new Map<string, string>();
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
         const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
           // #503 — a.at: SDK 가 실어 보낸 자기 시각. 영속화된 줄의 createdAt 이 된다.
@@ -1286,6 +1403,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             log(`think-${thinkingIndex}`, "💭", `Thinking… ${a.tokens} tokens`, "running");
             break;
           case "thinking":
+            // 2026-08-19 — 아동 코호트에는 코치의 속생각(영어 원문)을 그대로 보이지
+            // 않는다. "The user wants me to display the HTML file…" 이 아이 화면에
+            // 그대로 떴다(실기기, 게스트의 세상). 어른 트랙(#414)은 그대로.
+            if (profile?.minor_cohort === true) break;
             log(`think-${thinkingIndex}`, "💭", a.text, "done");
             thinkingIndex += 1;
             break;
@@ -1294,6 +1415,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // 남기면 "정상 · 상대경로 거부 · 워크스페이스 밖"이 같은 글자가 된다.
             const label = `${a.name}(${summarizeToolInput(a.name, a.input, 60, this.resolveCoachCwd())})`;
             toolLabels.set(a.id, label);
+            // 2026-08-19 — SDK 코치가 Write/Edit 로 .html 을 저장하면 그 결과가
+            // 화면에 떠야 한다. 이전에는 채팅의 ```html 펜스만 미리보기를 열어서,
+            // 코치가 도구로 파일을 고친 턴은 "다 됐어요"라고 말해도 화면이 안 바뀌고
+            // 코치가 "▶ 실행을 눌러라 / 127.0.0.1:포트 를 열어라"로 흘렀다
+            // (2026-08-19 실기기, 게스트의 세상 T1). 어떤 파일을 쓰는지 기억해 둔다.
+            {
+              const inp = a.input as { file_path?: unknown } | undefined;
+              const fp = typeof inp?.file_path === "string" ? inp.file_path : "";
+              if ((a.name === "Write" || a.name === "Edit" || a.name === "MultiEdit") && /\.html?$/i.test(fp)) {
+                htmlWrites.set(a.id, fp);
+              }
+            }
             log(a.id, "🔧", label, "running");
             break;
           }
@@ -1309,6 +1442,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 : (toolLabels.get(a.id) ?? ""),
               a.isError ? "error" : "done",
             );
+            // 도구로 .html 을 성공적으로 썼으면 그 파일을 읽어 미리보기에 띄운다
+            // (펜스 경로와 같은 revealBuilt — 저장·라이브서버·네이티브 탭까지 동일).
+            if (!a.isError && htmlWrites.has(a.id)) {
+              const fp = htmlWrites.get(a.id)!;
+              htmlWrites.delete(a.id);
+              void this.revealWrittenHtml(fp, streamId);
+            }
             break;
         }
       };

@@ -143,7 +143,17 @@ def find_promise_hits(prompt: str, rules: dict) -> list:
         if any(has_deferral[max(0, i - 1): i + 2]):
             continue
         for phrase in phrases:
-            if phrase in segment:
+            # `re:` 접두사는 정규식으로 취급한다. 한국어는 단어 경계가 없어
+            # 부분 문자열 매칭이 다른 낱말을 잡는다 — 2026-08-17 "내가 만든
+            # 미래" 커리큘럼에서 "이**전 세계** 전체를"(= 앞서 만든 세계)이
+            # 퍼블리싱 약속 "전 세계"로 오탐돼 CI 가 막혔다. 그 트랙은 "세계"가
+            # 핵심 어휘라 재발한다. 규칙을 느슨하게 하는 게 아니라 **경계를
+            # 주는** 방향으로 고친다 — "전 세계에 공개" 는 그대로 잡힌다.
+            if phrase.startswith("re:"):
+                if re.search(phrase[3:], segment):
+                    hits.append(phrase)
+                    break
+            elif phrase in segment:
                 hits.append(phrase)
                 break
     return hits
@@ -291,10 +301,24 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
         # the Agent SDK workspace write tools. (The schema has no exec flag at
         # all, so this check covers the only write-capable knob.)
         sdk_tools = p.get("sdk_tools") or {}
-        if sdk_tools.get("write") is True:
-            add(findings, rules, pid, "child_sdk_write",
-                "HARD FAIL: child cohort must not set sdk_tools.write=true "
-                "(minors never gain workspace write capability)")
+        # 2026-08-11 결정 — 아동 코호트의 workspace read/write 를 허용한다.
+        # 커리큘럼이 "코치가 워크스페이스 파일을 읽고 고친다" 를 전제로 바뀌었다.
+        # 이전 규칙은 "minors never gain workspace write capability" 였다.
+        #
+        # 함께 유지되는 안전 계층 (이 완화와 무관하게 그대로다):
+        #   - 인바운드/아웃바운드 모더레이션 (REQ-O2/O3, isMinorCohort)
+        #   - shell / browser / subagents 는 아래에서 여전히 HARD FAIL
+        #   - 모든 툴 호출은 canUseTool 승인 게이트 통과
+        #   - workspace_root 밖 경로는 evaluateSdkToolUse 가 거부
+        #
+        # 대신 배선이 반쪽인 상태를 잡는다 — write 를 열었는데 실행될 런타임이
+        # 없으면(coach_runtime 미지정 → 워커가 proxy) 코치는 도구가 있다고 믿은
+        # 채 실패한다. #476 이 기록한 오진 패턴이 그대로 아이에게 간다.
+        if sdk_tools.get("write") is True and p.get("coach_runtime") != "agent-sdk":
+            add(findings, rules, pid, "child_sdk_write_without_runtime",
+                "HARD FAIL: child cohort sets sdk_tools.write=true but coach_runtime "
+                "is not 'agent-sdk' — 도구를 열어놓고 실행할 런타임이 없다 "
+                "(워커가 proxy 로 내려주고 코치는 도구가 있다고 믿은 채 실패한다)")
         # #282 P2 slice 2 (#306/#318): a child cohort must not grant the
         # native-browser MCP tools either — outward navigation stays off for
         # minors until safe-session ships. When in doubt, deny for minors.
@@ -309,6 +333,17 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
             add(findings, rules, pid, "child_sdk_subagents",
                 "HARD FAIL: child cohort must not set sdk_tools.subagents=true "
                 "(minors get no SDK subagents until a pedagogy decision lands)")
+        # 2026-08-10 — `sandbox.file_write` 는 읽는 코드가 없는 레거시인데
+        # (도구 정책의 owner 는 sdk_tools), child 프로필에 true 로 남아 있어
+        # 실제로 두 사람이 "미성년도 파일 쓰기가 켜져 있다" 고 오독했다.
+        # 위 child_sdk_write 는 진짜 권한을 막고, 이 항목은 **오독을 막는다**.
+        # 산출물은 코치가 아니라 확장이 저장한다(revealBuilt → saveGameToWorkspace,
+        # workspace_root/index.html) — 이 필드와 무관하다.
+        if (p.get("sandbox") or {}).get("file_write") is True:
+            add(findings, rules, pid, "child_legacy_file_write",
+                "child cohort still carries legacy sandbox.file_write — 읽는 코드가 없다. "
+                "실제 쓰기 권한은 sdk_tools.write 가 소유한다(ADR 0003). 두 값이 어긋나면 "
+                "다음 사람이 오독하므로, 필드를 제거하고 정책은 sdk_tools 로만 표현할 것")
 
 
 def check_cohort_consistency(cohort_totals: dict, rules: dict, findings: list) -> None:

@@ -269,13 +269,16 @@ function chatRequest({ prompt = "안녕 코치", stream = false, headers = {} } 
   const j = await r.json();
   assert.equal(j.profile_id, PROFILE, "profile resolved from token payload");
   assert.ok(!("system_prompt" in j), "system_prompt never leaves the worker");
-  // #282 Phase 2 — sdk_tools is always present with explicit booleans, and a
-  // kids profile (no opt-in) normalizes to all-false (fail closed, minor-safe).
+  // #282 Phase 2 — sdk_tools is always present with explicit booleans.
+  // 2026-08-11 — SK 아동 트랙은 커리큘럼 변경으로 read/write 를 opt-in 했다.
+  // 나머지 셋은 여전히 false 로 정규화된다(absent → false, fail closed).
   assert.deepEqual(
     j.sdk_tools,
-    { read: false, write: false, browser: false, subagents: false, shell: false },
-    "kids profile exposes sdk_tools all-false (absent flags normalize to false)",
+    { read: true, write: true, browser: false, subagents: false, shell: false },
+    "kids profile: read/write opt-in, shell/browser/subagents 는 여전히 닫힘",
   );
+  assert.equal(j.coach_runtime, "agent-sdk", "아동 트랙도 프로필 opt-in 시 agent-sdk 를 받는다");
+  assert.equal(j.minor_cohort, true, "minor_cohort 는 그대로 true — 모더레이션 계층은 무관하게 유지");
 }
 
 // epic #431 — THE gap this suite existed to catch and didn't. The serializer in
