@@ -30,6 +30,8 @@ interface State {
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
+  /** #649 — 지금 열려 있는 세상 id. 친구 스트립이 이 버튼을 강조한다(aria-pressed). */
+  openWorldId: string | null;
 }
 
 type Action =
@@ -44,6 +46,7 @@ type Action =
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
   | { type: "streamStopped" }
+  | { type: "worldOpened"; id: string }
   | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
   | { type: "userSent"; text: string; images?: string[] };
 
@@ -62,6 +65,7 @@ const initialState: State = {
   pageNotice: null,
   aiNotice: null,
   stopNotice: null,
+  openWorldId: null,
 };
 
 function reducer(state: State, action: Action): State {
@@ -97,6 +101,8 @@ function reducer(state: State, action: Action): State {
     case "pageAttached":
       // #308 — inline notice; cleared on the next send (userSent) only.
       return { ...state, pageNotice: action.label };
+    case "worldOpened":
+      return { ...state, openWorldId: action.id };
     case "aiDisclosure":
       // #320 — session-start AI disclosure. The host gates when this arrives
       // (once per session + after clear); the webview just keeps it visible
@@ -177,6 +183,7 @@ export function App() {
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state, ...(msg.at ? { at: msg.at } : {}) } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
+        case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
         case "streamStopped": dispatch({ type: "streamStopped" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
@@ -252,6 +259,7 @@ export function App() {
         pageNotice={state.pageNotice}
         aiNotice={state.aiNotice}
         stopNotice={state.stopNotice}
+        openWorldId={state.openWorldId}
         streaming={!!state.streamId}
         streamingId={state.timeline.openId}
         error={state.error}

@@ -281,6 +281,10 @@ export type HostMessage =
   // a data URL to attach to the next turn — making "drag a screenshot in" work
   // WITH VS Code's drop behavior instead of fighting it. image_paste-gated.
   | { type: "attachImage"; dataUrl: string; name: string }
+  // #649 — 사전 완성 세상이 실제로 화면에 떴다. config 와 별개의 메시지인 이유:
+  // config 는 프로필이 바뀔 때만 오는데, 세상은 한 세션에서 여러 번 바뀐다.
+  // 웹뷰는 이걸로 친구 스트립의 "지금 열린 세상"을 강조한다(aria-pressed).
+  | { type: "worldOpened"; id: string; guest: string; emoji: string }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string }
