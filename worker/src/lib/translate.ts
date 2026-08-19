@@ -715,7 +715,8 @@ function buildSkeletonLibrary(profile: Profile, runtime: CoachRuntime = "proxy")
         "- `WORLD = { … }` 블록이 이 세상의 문제 플래그입니다. 처음엔 그대로 둡니다.",
         "",
         "그 다음부터 아이가 말하면 **직전 HTML을 아이 말대로 무엇이든 고쳐 통째로** 다시 출력합니다 — CONFIG 값, `WORLD` 플래그, 오브젝트, 배경, 새 규칙, 새 코드 전부 허용. 아이가 말한 것은 반드시 화면에 있어야 합니다. 세상을 바꿨으면 `WORLD` 값을 맞춰 두세요(물을 뺐으면 `flood:false`) — 게스트가 `hp:result`의 `world`를 보고 반응합니다.",
-        "지키는 것 둘: `#guest` 말풍선(gface/gsay/say)과 `report()`(hp:result + world). 출력에 `%%` 문자가 남으면 안 됩니다. 외부 URL 금지.",
+        "**`engine.js` 는 절대 읽지 마라** — 9개 세상이 공용으로 쓰는 그림·엔진이라 펭귄·얼음처럼 지금 세상과 무관한 것이 들어 있다. 읽으면 다른 세상 이야기가 섞인다(실기기: 초코 세상에서 얼음). 이전 세상 파일(`*.html`)도 마찬가지. 오직 `index.html`.",
+      "지키는 것 둘: `#guest` 말풍선(gface/gsay/say)과 `report()`(hp:result + world). 출력에 `%%` 문자가 남으면 안 됩니다. 외부 URL 금지.",
         "절대 금지: 응답에서 `게임` 이라는 낱말을 쓰지 마세요. 이건 게스트가 사는 세상입니다.",
         "",
       ]
