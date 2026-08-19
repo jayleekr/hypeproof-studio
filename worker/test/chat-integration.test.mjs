@@ -234,6 +234,9 @@ function chatRequest({ prompt = "안녕 코치", stream = false, headers = {} } 
       );
       assert.equal(r.status, 200, "streaming happy path → 200");
       assert.match(r.headers.get("content-type") ?? "", /text\/event-stream/);
+      // #580 — raw Response 반환은 미들웨어의 c.header() 를 우회하므로 스트림
+      // 핸들러가 직접 실어야 한다. 클라 스풀 requestKey + #64 신고 플로우 근거.
+      assert.ok(r.headers.get("x-request-id"), "스트리밍 200 에도 x-request-id 가 실린다");
       const text = await r.text(); // drives the transform stream to completion
       assert.match(text, /안녕! /, "first delta forwarded");
       assert.match(text, /시작해 볼까\?/, "second delta forwarded");

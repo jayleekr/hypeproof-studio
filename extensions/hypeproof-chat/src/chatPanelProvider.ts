@@ -85,6 +85,8 @@ import {
   resolveCoachRuntime,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
+import { SessionSpool, spoolIdentityFromToken, traceMsgToWorkflowRecord } from "./sessionSpool";
+import type { ProxyStreamUsage } from "./proxyClientHelpers";
 
 /**
  * 승인 모달 문구. `kind` 별로 무엇을 하려는지 한국어로 말하고, 확인 버튼도
@@ -176,6 +178,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private readonly preview: PreviewProvider,
     private readonly liveServer: LiveServer,
     private readonly assetScores?: AssetScoreSink,
+    /** #580 — 세션 로그 로컬 스풀. Optional: 테스트·구 호출자는 기록 없이 동작. */
+    private readonly spool?: SessionSpool,
   ) {}
 
   /**
@@ -749,11 +753,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  async revealBuilt(html: string, opts?: { streamId?: string }): Promise<boolean> {
+  async revealBuilt(
+    html: string,
+    opts?: {
+      streamId?: string;
+      /** #580 — UI 는 그대로 두고 스풀 귀속만 필요한 호출자용 (브라우저 루프). */
+      spoolTurnId?: string;
+    },
+  ): Promise<boolean> {
     // #359 — structural guard: auto-repair the known comment-close typo, and
     // refuse to reveal a still-broken document as if it succeeded. Returns
     // false when blocked so the streaming caller can let a corrected block retry.
     const checked = validateAndRepairHtml(html);
+    // #580 — "preview open" 은 #552 MVP 5종 중 하나. 모든 reveal 경로(스트림
+    // 자동 · ▶ Run · show-intent · 브라우저 루프)가 이 메서드로 모이므로 여기
+    // 한 곳에서 남긴다. 구조 가드 **뒤**에 — 막힌 reveal 은 화면에 안 떴는데
+    // 기록되면 "미리보기 열림"이 과대계상된다.
+    if (!checked.blocked) {
+      const spoolTurn = opts?.streamId ?? opts?.spoolTurnId;
+      this.spool?.recordWorkflow({
+        ...(spoolTurn ? { turnId: spoolTurn } : {}),
+        event: "preview_reveal",
+      });
+    }
     if (checked.issues.length > 0) this.surfaceStructureIssues(checked, opts?.streamId);
     if (checked.blocked) return false;
 
@@ -1251,16 +1273,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           `componentStack:\n${msg.componentStack}`,
         );
         return;
-      // Trace events are forwarded to the worker in a separate path; they
-      // never reach this switch in the current build (#9d, follow-up). Keep
-      // the cases listed so adding the forwarder doesn't break the exhaustive
-      // check below.
+      // #580 — trace 이벤트는 로컬 스풀에 먼저 남는다 (spool-then-forward).
+      // 워커 실시간 전송(#552, #9d follow-up)은 나중에 이 스풀을 읽어 보내면
+      // 되므로, 두 경로가 한 스키마를 공유한다. 매핑은 vscode-free 헬퍼
+      // (traceMsgToWorkflowRecord)가 소유하고, trace.ts 필드명 정합은
+      // test/trace-workflow-map.smoke.mjs 가 고정한다.
       case "traceTrialStart":
       case "traceTrialEnd":
       case "traceValidationRun":
       case "traceHumanAction":
+        this.spool?.recordWorkflow(traceMsgToWorkflowRecord(msg));
         return;
     }
+  }
+
+  /**
+   * #580 — proxy 경로 usage → 스풀 매핑. 단일턴과 브라우저 루프가 같은 모양을
+   * 두 번 인라인했던 것을 한 곳으로. 필드명이 SpoolUsageRecord 와 일치해서
+   * spread 로 끝난다.
+   */
+  private proxyUsageRecorder(turnId: string) {
+    return (u: ProxyStreamUsage & { requestKey: string | null; model: string | null }): void => {
+      this.spool?.recordUsage({ turnId, source: "proxy", ...u });
+    };
   }
 
   private async handleSend(
@@ -1338,7 +1373,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.pendingPageImage = null;
     const effectiveImages = pageImage ? [...(images ?? []), pageImage] : images;
 
-    const streamId = randomId();
+    // #580 — streamId 는 스풀의 turn_id 가 되고, 후속 spool-then-forward 가
+    // 워커 trace 로 재전송할 수 있어야 한다. 워커는 turn_id 를 UUID 로 강제
+    // 검증하므로(routes/trace.ts) randomId() 대신 UUID 를 쓴다.
+    const streamId = crypto.randomUUID();
     const messageId = randomId();
     const ctrl = new AbortController();
     this.activeStreams.set(streamId, ctrl);
@@ -1385,6 +1423,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     };
     // #173 — accumulate citations across the stream so they persist to history.
     const assistantCitations: import("./protocol").Citation[] = [];
+    // #580 — 이 턴의 스풀 기록 상태. spoolRuntime 은 SDK→proxy 폴백을 반영한
+    // **실제로 돈** 런타임이다 — usage 없는 턴의 원인을 정량화하려면 기록된
+    // 런타임이 실제와 일치해야 한다 (no silent caps).
+    let spoolRuntime: "proxy" | "agent-sdk" | null = null;
+    let spoolStatus: "ok" | "error" = "ok";
+    // holder 인 이유: 콜백 안에서의 재할당을 TS CFA 가 못 봐서, 평범한 let 은
+    // finally 시점에 null 로 좁혀진다.
+    const sdkTurnTotal: {
+      current: { usage: Record<string, unknown>; totalCostUsd: number | null } | null;
+    } = { current: null };
     try {
       // #282 Phase 1 — route to the Agent SDK coach behind the flag. Default
       // "proxy" keeps the exact existing single-turn behavior; "agent-sdk"
@@ -1403,6 +1451,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         settingRuntime,
         profileRuntime: profile?.coach_runtime,
         minorCohort: profile?.minor_cohort,
+      });
+      // #580 — 질문 원문 + 이 턴이 향하는 런타임을 스풀에 남긴다. 신원은 토큰
+      // payload(u·c·p)에서 온다; 토큰이 없으면 신원 없이도 기록한다 (어차피
+      // 아래 호출이 실패하고 turn_end(status:error) 로 남는다).
+      spoolRuntime = runtime;
+      this.spool?.noteIdentity(spoolIdentityFromToken(token));
+      this.spool?.recordPrompt({
+        turnId: streamId,
+        runtime,
+        text,
+        imagesCount: effectiveImages?.length ?? 0,
       });
       const onDelta = (delta: string) => {
         assistantText += delta;
@@ -1535,6 +1594,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           onDelta,
           onCitations,
           onAssetScore,
+          // #580 — 요청 1건의 usage (워커 hps_usage / 업스트림 usage 청크).
+          onUsage: this.proxyUsageRecorder(streamId),
         });
       if (runtime === "agent-sdk") {
         if (!profile) {
@@ -1579,6 +1640,25 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             stallTimeoutMs: cfg.get<number>("sdkStallTimeoutMs"),
             onDelta,
             onActivity,
+            // #580 — SDK 경로 usage: assistant 메시지가 요청 단위(같은 API 응답이
+            // 여러 메시지로 쪼개져 와도 requestKey dedupe 로 1건), result 메시지가
+            // 턴 합계(요청 단위 합의 대조군)로 turn_end 에 실린다.
+            onUsage: (u) => {
+              if (u.kind === "request") {
+                this.spool?.recordUsage({
+                  turnId: streamId,
+                  source: "sdk",
+                  requestKey: u.requestKey,
+                  model: u.model,
+                  inputTokens: u.usage.input_tokens,
+                  outputTokens: u.usage.output_tokens,
+                  cacheReadInputTokens: u.usage.cache_read_input_tokens,
+                  cacheCreationInputTokens: u.usage.cache_creation_input_tokens,
+                });
+              } else {
+                sdkTurnTotal.current = { usage: u.usage, totalCostUsd: u.totalCostUsd };
+              }
+            },
             onCitations,
             onAssetScore,
             // Map the SDK tool call → an accurate host ActionRequest so the
@@ -1609,6 +1689,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           // #476 — 안내는 이 리셋 **뒤에** 넣는다. 앞에 넣으면 방금 찍은 줄이
           // 같이 지워져 웹뷰에만 남고 히스토리에는 안 남는다(창을 다시 열면 사라짐).
           this.noteSdkFallback(err.message, streamId);
+          // #580 — 이 턴이 실제로 돈 런타임은 proxy 다. 폴백은 상태이지만
+          // 사건으로도 남긴다 — "usage 없는 턴이 왜 생겼나"를 정량화하는 근거.
+          spoolRuntime = "proxy";
+          this.spool?.recordWorkflow({
+            turnId: streamId,
+            event: "sdk_fallback",
+            payload: { reason: err.message },
+          });
           // #371 — fall back to the browser-loop-aware runtime, NOT bare proxy,
           // so a browser_control cohort (copyclone) still opens the browser when
           // the SDK binary isn't seeded.
@@ -1636,8 +1724,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         tryReveal(assistantText);
       }
     } catch (err) {
+      spoolStatus = "error";
       await this.handleSendError(err, streamId);
     } finally {
+      // #580 — 턴의 끝을 항상 남긴다. 사용자 중단(abort)도 catch 로 오므로
+      // 신호를 먼저 본다. SDK 턴 합계가 있으면 같이 싣는다 — 요청 단위 usage
+      // 레코드 합과의 대조군.
+      const total = sdkTurnTotal.current;
+      this.spool?.recordTurnEnd({
+        turnId: streamId,
+        status: ctrl.signal.aborted ? "aborted" : spoolStatus,
+        runtime: spoolRuntime,
+        ...(total
+          ? {
+              totalUsage: total.usage,
+              ...(total.totalCostUsd !== null ? { totalCostUsd: total.totalCostUsd } : {}),
+            }
+          : {}),
+      });
       this.activeStreams.delete(streamId);
       this.turnTimelines.delete(streamId);
     }
@@ -1735,6 +1839,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           onAssetScore: (s) => {
             lastAssetScore = s; // buffer; only the terminal turn is recorded
           },
+          // #580 — 브라우저 루프는 한 턴에 요청을 여러 번 낸다. 반복마다
+          // 요청 1건 = 레코드 1건 (requestKey 는 요청별 request id).
+          onUsage: this.proxyUsageRecorder(p.streamId),
         });
         if (result.toolUses.length === 0) break; // terminal turn → done
         if (iter >= maxIter) {
@@ -1749,7 +1856,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // fire here (browser loop path), so reveal explicitly per iteration.
         if (result.text) {
           const iterHtml = extractRenderableHtml(result.text);
-          if (iterHtml) await this.revealBuilt(iterHtml);
+          // #580 — spoolTurnId 만 넘긴다: streamId 를 넘기면 logReveal 타임라인
+          // 줄이 반복마다 생겨 UI 가 달라진다. 스풀 귀속만 얹는다.
+          if (iterHtml) await this.revealBuilt(iterHtml, { spoolTurnId: p.streamId });
         }
         // Assistant tool_use turn (its text + tool_use blocks) — scratch only.
         const asstContent: unknown[] = [];

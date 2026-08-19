@@ -1280,6 +1280,78 @@ export function extractSdkText(msg: Record<string, unknown>): string {
  * sdkCoach.ts wires makeFatalAuthError to ProxyAuthError with the SAME Korean
  * token copy the proxy path uses (TOKEN_EXPIRED_FRIENDLY, REQ-B5).
  */
+// ── #580 — SDK 스트림의 토큰 usage 추출 ─────────────────────────────────────
+//
+// 두 소스가 있다 (0.3.207 sdk.d.ts 로 확인):
+// - assistant 메시지: `message.usage` 가 Anthropic BetaUsage (요청 1건 단위).
+//   #503 실측 — SDK 는 API 응답 1개를 thinking/text/tool_use 여러 메시지로
+//   쪼개며 **같은 message.id·usage 를 복제**한다. 그래서 여기서는 뽑기만 하고,
+//   dedupe 는 소비자(SessionSpool.recordUsage, requestKey 기준)가 한다.
+// - result 메시지: `usage`(턴 합계) + `total_cost_usd`. 요청 단위 레코드 합의
+//   대조군으로 쓴다.
+
+/** 요청 1건의 토큰 4종 — provider 응답 필드명 그대로. */
+export interface SdkRequestUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens: number;
+  cache_creation_input_tokens: number;
+}
+
+export type SdkUsageEvent =
+  | { kind: "request"; requestKey: string; model: string | null; usage: SdkRequestUsage }
+  | { kind: "turn_total"; usage: Record<string, unknown>; totalCostUsd: number | null };
+
+function usageNumber(v: unknown): number {
+  return typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : 0;
+}
+
+/**
+ * SDK 메시지 1개에서 usage 이벤트를 뽑는다. usage 가 없는 메시지(스트림 이벤트,
+ * 시스템 안내 등)는 null. dedupe 키가 없는 assistant usage 도 null — 키 없이
+ * 기록하면 메시지 분할 복제 때문에 과대계상되고, 비용은 부풀리는 쪽이 더 나쁜
+ * 실패 방향이다(전량 원장은 서버 D1 에 있다).
+ */
+export function extractSdkUsage(msg: Record<string, unknown>): SdkUsageEvent | null {
+  const type = String(msg["type"] ?? "");
+  if (type === "assistant") {
+    const message = msg["message"] as Record<string, unknown> | undefined;
+    const usage = message?.["usage"];
+    // plain object 만 — 배열/원시값을 통과시키면 유효한 requestKey 를 단
+    // 전-필드-0 "지어낸" 레코드가 된다 (result 분기와 같은 가드).
+    if (!usage || typeof usage !== "object" || Array.isArray(usage)) return null;
+    const u = usage as Record<string, unknown>;
+    const id = message?.["id"];
+    const requestId = msg["request_id"];
+    const requestKey =
+      typeof id === "string" && id ? id : typeof requestId === "string" && requestId ? requestId : null;
+    if (!requestKey) return null;
+    const model = message?.["model"];
+    return {
+      kind: "request",
+      requestKey,
+      model: typeof model === "string" && model ? model : null,
+      usage: {
+        input_tokens: usageNumber(u["input_tokens"]),
+        output_tokens: usageNumber(u["output_tokens"]),
+        cache_read_input_tokens: usageNumber(u["cache_read_input_tokens"]),
+        cache_creation_input_tokens: usageNumber(u["cache_creation_input_tokens"]),
+      },
+    };
+  }
+  if (type === "result") {
+    const usage = msg["usage"];
+    if (!usage || typeof usage !== "object" || Array.isArray(usage)) return null;
+    const cost = msg["total_cost_usd"];
+    return {
+      kind: "turn_total",
+      usage: usage as Record<string, unknown>,
+      totalCostUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : null,
+    };
+  }
+  return null;
+}
+
 export interface SdkStreamHandlers {
   /** The caller's (user-stop) abort signal state. */
   isAborted: () => boolean;
@@ -1314,6 +1386,12 @@ export interface SdkStreamHandlers {
    * fresh budget instead of aborting.
    */
   isTurnBlocked?: () => boolean;
+  /**
+   * #580 — 토큰 usage 가 스트림에 실려 올 때마다 (assistant 요청 단위 /
+   * result 턴 합계) 호출된다. Optional: 기존 호출자·테스트는 그대로 동작한다.
+   * dedupe 는 소비자 몫 — extractSdkUsage 주석 참고.
+   */
+  onUsage?: (u: SdkUsageEvent) => void;
 }
 
 /**
@@ -1429,6 +1507,13 @@ export async function consumeSdkStream(
       // 범위 밖이라 손대지 않는다 — 사실만 남긴다.
       if (h.onActivity) {
         for (const activity of extractSdkActivity(msg)) h.onActivity(activity);
+      }
+      // #580 — usage 는 assistant(요청 단위) / result(턴 합계) 메시지에 실려
+      // 온다. result 는 아래에서 텍스트를 내지 않고 버려지므로, 추출은 분기
+      // 앞에서 한다.
+      if (h.onUsage) {
+        const usage = extractSdkUsage(msg);
+        if (usage) h.onUsage(usage);
       }
       const type = String(msg["type"] ?? "");
       if (type === "assistant" || type === "text" || type === "content_block_delta") {

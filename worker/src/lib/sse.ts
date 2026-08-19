@@ -98,6 +98,7 @@ export function transformStream(
         }
         if (state.truncated) enqueueTruncationNotice(controller, encoder, model, options);
         enqueueFinalChunk(controller, encoder, options);
+        enqueueUsageChunk(controller, encoder, model, usage, options.requestId);
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
         enqueueStreamError(controller, encoder, err, options.requestId);
@@ -187,6 +188,7 @@ export function passThroughOpenAIStream(
         }
         if (truncated) enqueueTruncationNotice(controller, encoder, modelSeen || "hypeproof", options);
         enqueueFinalChunk(controller, encoder, options);
+        enqueueUsageChunk(controller, encoder, modelSeen || "hypeproof", usage, options.requestId);
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
         enqueueStreamError(controller, encoder, err, options.requestId);
@@ -440,5 +442,51 @@ function enqueueFinalChunk(
 ) {
   const chunk = options.onBeforeDone?.();
   if (chunk === null || chunk === undefined) return;
+  controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
+}
+
+/**
+ * #580 — [DONE] 직전에 이 요청이 쓴 토큰 usage 를 클라이언트에 알린다.
+ * Anthropic 업스트림의 합성 스트림에는 usage 가 실릴 자리가 없어서, 클라이언트
+ * (Studio 로컬 스풀)가 요청 단위 토큰 기록을 남길 방법이 원천적으로 없었다.
+ *
+ * Additive 다: `choices: []` + `usage` 는 OpenAI `stream_options.include_usage`
+ * 의 표준 최종 청크 형태라 기존 파서(웹뷰·구버전 확장)는 delta 없음 → 그냥
+ * 지나간다. `hps_usage` 는 OpenAI usage 에 없는 캐시 필드까지 실은 전량이다.
+ * D1 usage_log 기록(onUsage 콜백)과 같은 accumulator 를 쓰므로 두 기록은
+ * 정의상 일치한다.
+ */
+function enqueueUsageChunk(
+  controller: ReadableStreamDefaultController<Uint8Array>,
+  encoder: TextEncoder,
+  model: string,
+  usage: StreamUsage,
+  requestId?: string,
+) {
+  // 업스트림이 usage 를 아예 안 준 스트림(비정상 종료 등)에서 0 값 청크를 내면
+  // "0 토큰 썼음"이라는 지어낸 데이터가 된다 — 없으면 없는 채로 둔다. 실요청의
+  // input_tokens 는 0 일 수 없으므로 all-zero = usage 미관측이다.
+  if (
+    usage.input_tokens === 0 && usage.output_tokens === 0 &&
+    usage.cache_read_input_tokens === 0 && usage.cache_creation_input_tokens === 0
+  ) {
+    return;
+  }
+  const chunk = {
+    id: "chatcmpl-hps-usage",
+    object: "chat.completion.chunk",
+    model,
+    choices: [],
+    usage: {
+      prompt_tokens: usage.input_tokens,
+      completion_tokens: usage.output_tokens,
+      total_tokens: usage.input_tokens + usage.output_tokens,
+    },
+    hps_usage: { ...usage },
+    // 클라이언트 스풀의 requestKey — 서버 로그·D1 과 조인 가능한 요청 id.
+    // 헤더(x-request-id)로도 나가지만, 청크에 실으면 헤더를 못 읽는/안 읽는
+    // 소비자도 같은 키를 얻는다.
+    ...(requestId ? { hps_request_id: requestId } : {}),
+  };
   controller.enqueue(encoder.encode(`data: ${JSON.stringify(chunk)}\n\n`));
 }

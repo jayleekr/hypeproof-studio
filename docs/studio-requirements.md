@@ -1,7 +1,7 @@
 # Studio behavioral requirements
 
-> **Spec version:** v0.2.0
-> **Last reviewed:** 2026-05-25
+> **Spec version:** v0.3.0
+> **Last reviewed:** 2026-08-19
 > **Live tracker:** [epic #200](https://github.com/jayleekr/hypeproof-studio/issues/200)
 > **Philosophy anchor:** [docs/seven-assets.md](./seven-assets.md) — 7 AI Native Assets; chat-panel features follow [METAPLAN §4.5](../METAPLAN.md).
 
@@ -314,3 +314,20 @@ Anthropic 미성년자 가이드(#282 의 2026-07-13 라이선싱 코멘트) 구
 |---|---|---|---|
 | REQ-P1 | Pages 프로비저닝을 기다린 뒤 워크플로를 올린다 (#500) | `gh api -X PUT .../pages -f build_type=workflow` 의 **2xx 는 접수 확인이지 준비 완료가 아니다** — 백엔드 프로비저닝은 비동기라, 곧바로 워크플로 파일을 올리면 push 로 실행이 걸리고 `actions/configure-pages@v5` 가 활성 Pages 환경을 못 찾아 `HttpError: Not Found` 로 죽는다(2026-07-28 실측: 3연속 실패 중 2건). GitHub UI 의 "Static HTML ▸ Configure" 버튼이 되는 이유도 기능이 아니라 **순서**다 — 프로비저닝이 끝난 뒤에 워크플로를 쓴다. 계약: ① PUT 후 `repos/{owner}/{repo}/pages` 의 `build_type` 이 `workflow` 로 보일 때까지 **끝나는 루프**(12회×5s, bash/PowerShell 양쪽 제공)로 대기 — 스킬 자신의 규칙대로 `until` 금지(끝나지 않는 루프는 수업을 세운다); ② 준비 확인 전에는 **워크플로를 올리지 않는다** — 올려봐야 실패한 빨간 실행 기록만 남는다; ③ 실패 표에 `configure-pages ▸ Not Found` 행을 두고 재실행(`workflow_dispatch`) 경로를 준다 | R (`worker/test/smoke.mjs` §profile-snapshot — **순서 판정**: 대기 표식이 워크플로 업로드보다 앞선다. 양성/음성 대조군으로 계측기 검증) |
 | REQ-P2 | `pages.yml` 재작성은 최신 `sha` 와 함께, 한 번에 (#500) | 이미 있는 파일을 `sha` 없이 PUT 하면 409 고, 브라우저 편집과 API 덮어쓰기를 번갈아 하면 내용이 중복·병합돼 **YAML 파싱 자체가 실패**한다(`This workflow graph cannot be shown` — 워크플로가 실패한 게 아니라 읽히지도 않은 것). 계약: ① 재업로드는 `contents/... --jq .sha` 로 최신 sha 를 받아 `-f sha=` 로 넘긴다; ② 한 파일을 두 통로(브라우저 편집 / `gh api`)로 번갈아 건드리지 않는다; ③ 이미 깨졌으면 부분 수정하지 말고 **전체를 한 번에** 다시 쓴다 | R (`worker/test/smoke.mjs` — 재업로드 절차에 sha 가 살아 있다) |
+
+## Q. 세션 로그 로컬 스풀 (#580 수집 계층)
+
+토큰 비용과 유저 행동을 의사결정 데이터로 만드는 수집 계층이다. 설계 결정과
+근거는 이슈 #580 의 "설계 확정 노트" 코멘트가 원본이다. 업로드 계층은 후속
+PR — 이 도메인은 "각 PC 에 빠짐없이, 깨지지 않게 쌓인다"까지만 계약한다.
+
+| ID | 요구사항 | 수용 기준 | Layer |
+|---|---|---|---|
+| REQ-Q1 | 단일 `events.jsonl` 스풀 | 세션 디렉토리(`<app-data>/logs/sessions/<로컬 yyyy-mm-dd>/<session-uuid>/`)에 prompt · usage · workflow · turn_end 가 **한 파일에 발생 순서대로** append 된다. 레코드마다 `schema_version` + ISO UTC `ts`. 파일 분할(원안의 3-파일)은 순서를 파일 경계에서 잃으므로 하지 않는다. prompt text 는 20k 자 캡 — 자르되 무성 절단은 금지: `text_truncated: true` + `text_original_chars` 를 같이 남긴다. workflow payload 의 문자열 값은 500자 캡(웹뷰발 자유 텍스트 방어) | U (`test/session-spool`) |
+| REQ-Q2 | 세션 = 활성화 1회 × 신원 1개 | 세션 id 는 **첫 이벤트에서** UUID 로 생성된다(게으른 실체화 — 채팅 없는 창은 아무것도 남기지 않는다). 신원(토큰 payload `u`·`c`·`p`)이 이벤트 적재 후 바뀌면 새 세션으로 회전한다(같은 PC 다른 학생 — 활성화 1회에 세션 여러 개 가능). 신원 후착은 세션 유지 + meta 갱신(`started_at` 보존, 디스크 쓰기 성공 후에만 메모리 커밋 — win32 rename 일시 실패가 영구 불일치가 되지 않게). **모든 상태 전이는 순서 보존 큐 안에서** 일어나고, 턴 단위 이벤트(usage·turn_end)는 그 턴의 prompt 가 적힌 세션에 피닝된다 — 회전을 가로질러 도착해도 남의 세션에 적히지 않는다 | U (`test/session-spool` 인터리빙·피닝 대조군) |
+| REQ-Q3 | usage 요청 단위 · 과대계상 금지 | 토큰 4종(input/output/cache read/cache write)이 요청 1건 = 레코드 1건. SDK 는 API 응답 1개를 여러 메시지로 쪼개며 같은 usage 를 복제하므로(#503 실측) `requestKey` dedupe 필수 — **SDK 경로에서 키(`message.id`/`request_id`) 없는 usage 는 기록하지 않는다**(비용은 부풀리는 쪽이 더 나쁜 실패; 전량 원장은 서버 D1 `usage_log`). proxy 경로는 호출당 정확히 1회 발화가 구조적이라 키 3단 폴백을 쓴다: 청크 `hps_request_id` → `x-request-id` 헤더 → `local-*` 생성 키(서버 조인 불가 표식). SDK result 의 턴 합계는 `turn_end.total_usage` 로 남아 요청 단위 합의 대조군이 된다 | U (`test/session-spool` + `test/sdk-usage-extract` + `test/proxy-chat-usage`) |
+| REQ-Q4 | 워커는 usage 를 스트림에 싣는다 | OpenAI 형 스트림 두 경로(Anthropic 합성 `transformStream` · Gemini/OpenAI `passThroughOpenAIStream`) 모두 [DONE] 직전에 `hps_usage`(4종 전량) + `hps_request_id` 청크를 낸다 — D1 기록과 **같은 accumulator** 라 두 기록은 정의상 일치. 스트리밍 200 응답에는 `x-request-id` 헤더도 직접 싣는다(raw Response 는 미들웨어 헤더를 우회한다 — 실측으로 발견된 갭). usage 미관측 스트림·mid-stream 실패는 0 값 청크를 지어내지 않는다(그 경우 D1 에만 남고 스풀엔 turn_end 사유가 남는다 — 의도된 비대칭). 구 클라이언트 파서는 이 청크를 무해하게 지나친다(OpenAI include_usage 형태) | R (`worker/test/sse-usage-chunk` + `worker/test/chat-integration`) |
+| REQ-Q5 | 스풀은 제품을 죽이지 않는다 | 모든 record\* 는 동기 시그니처 + 내부 순서 보존 큐. 쓰기 실패(권한·디스크)는 삼키고 **활성화당 사유별 1회** console 경고 — 채팅 경로로 예외가 전파되지 않는다. 세션 디렉토리가 밑에서 사라지면(다른 창의 스윕 등) 되살려 1회 재시도한다. 스트림 중 끊김(worker `stream_error`)은 이제 조용히 지나가지 않고 `ProxyTransportError` 로 표면화된다 — 학생에게 재시도 배너, 스풀에 turn_end(error) | U (`test/session-spool` + `test/proxy-chat-usage`) |
+| REQ-Q6 | 총량 캡 보존 정책 | 업로드 여부와 무관하게 스풀 총량 캡(200MB) 초과 시 오래된 세션부터 삭제. 보호 대상: 자기 세션 + **당일 날짜 디렉토리 전체**(멀티윈도우의 남의 활성 세션 보호). 빈 날짜 디렉토리 정리. activate 시 fire-and-forget, 큐 경유라 실체화와 경합하지 않는다 | U (`test/session-spool`) |
+| REQ-Q7 | 런타임 정직 표기 (no silent caps) | prompt 레코드는 턴이 향한 런타임을, turn_end 는 **실제로 돈** 런타임을 남긴다(SDK→proxy 폴백 반영 + `sdk_fallback` workflow 이벤트). usage 없는 턴의 비율과 원인이 데이터에서 정량으로 드러나야 한다. 테스트 런은 스풀을 만들지 않는다 — 게이트는 `HPS_TEST_E2E` env **와 `hps-test-state.json` 존재의 OR**(env 전파는 신뢰 불가 — REQ-A7 파일 백도어가 존재하는 이유; 오염에 필요한 토큰이 어느 채널로 오든 게이트에 걸린다). F5 개발 호스트는 meta 에 `dev: true` 로 표식된다 | E (기록 경로는 provider 안 — 후속 e2e 로 고정, 이 PR 은 코드 리뷰로만 확인) |
+| REQ-Q8 | 행동 이벤트 스키마는 #552 와 단일 | 웹뷰 trace 4종(trialStart/trialEnd/validationRun/humanAction)은 vscode-free 매퍼 `traceMsgToWorkflowRecord` 를 거쳐 스풀 `workflow` 레코드로 남는다(spool-then-forward — 워커 전송은 후속에 이 스풀을 읽는다). 필드명 정합은 워커 필드명 리터럴을 박은 드리프트 락 테스트가 고정한다. 스풀 turn_id(streamId)는 워커 trace 의 UUID 검증을 통과하도록 UUID 다. 호스트발 이벤트: `preview_reveal`(모든 reveal 경로 — 구조 가드에 막힌 reveal 은 기록하지 않는다), `sdk_fallback` | U (`test/trace-workflow-map`) |

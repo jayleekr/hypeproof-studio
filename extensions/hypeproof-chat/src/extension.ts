@@ -33,6 +33,7 @@ import {
 import { openBrowser, captureActivePage } from "./nativeBrowser";
 import { LiveServer } from "./liveServer";
 import { decideWorkspaceSwitch, isSameLocation } from "./workspaceRouting";
+import { SessionSpool, resolveSpoolSessionsRoot } from "./sessionSpool";
 import type { ResolvedProfile } from "./protocol";
 
 const TOKEN_KEY = "hypeproofChat.workshopToken";
@@ -54,12 +55,47 @@ export async function activate(context: vscode.ExtensionContext) {
   // Test-only backdoors. Reads from env vars (which Playwright may not always
   // propagate to the extension host) AND a JSON file in the user-data-dir as
   // a more reliable fallback.
-  await applyTestBackdoors(context);
+  const backdoors = await applyTestBackdoors(context);
 
   const preview = new PreviewProvider(context);
   const liveServer = new LiveServer();
   const assetStatus = new AssetStatusBar();
-  const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus);
+  // #580 — 세션 로그 로컬 스풀 (수집 계층). 세션 = 이 활성화 1회. 디렉토리는
+  // 첫 이벤트에서 게으르게 생기므로 채팅 없는 창은 아무것도 남기지 않는다.
+  //
+  // e2e 런은 스풀을 만들지 않는다: 스풀 루트는 의도적으로 user-data-dir 밖의
+  // 고정 경로라 e2e 의 fresh-user-data-dir 격리를 우회하는데, e2e 픽스처는
+  // 실코호트의 진짜 토큰을 프리시드하므로 합성 턴이 실학생 신원의 세션으로
+  // 실기기 스풀에 쌓인다 — 업로더가 생기는 순간 분석 오염이다.
+  //
+  // 게이트는 env + 테스트 상태 파일의 OR 다. env(HPS_TEST_E2E)는 확장 호스트
+  // 까지 전파가 "inconsistent" 하다고 이 파일 스스로 적어 놨고(REQ-A7 의
+  // 파일 백도어가 존재하는 이유), 오염이 성립하려면 토큰이 도달해야 하는데
+  // 토큰은 env 아니면 그 파일로 온다 — 어느 쪽이 뚫렸든 게이트에 걸린다.
+  // F5 개발 호스트는 기록하되 meta 에 `dev: true` 표식으로 걸러낼 수 있게 한다.
+  const isTestRun = !!process.env.HPS_TEST_E2E || backdoors.testStateFileFound;
+  const spool = isTestRun
+    ? undefined
+    : new SessionSpool({
+        root: resolveSpoolSessionsRoot({
+          platform: process.platform,
+          homeDir: os.homedir(),
+          env: process.env as Record<string, string | undefined>,
+        }),
+        appVersion: String(
+          (context.extension.packageJSON as { version?: unknown } | undefined)?.version ?? "unknown",
+        ),
+        os: { platform: process.platform, release: os.release(), arch: process.arch },
+        devHost: context.extensionMode === vscode.ExtensionMode.Development,
+      });
+  if (spool) {
+    // 총량 캡 집행 (#580 D7) — 활성화를 막지 않는 fire-and-forget, 실패는 삼킨다.
+    void spool.sweepRetention();
+    // 종료 시 큐에 남은 마지막 이벤트를 흘려보낸다 (best-effort — 크래시는
+    // 라인 단위 append 가 감당한다).
+    context.subscriptions.push({ dispose: () => void spool.flush() });
+  }
+  const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus, spool);
   providerRef = provider;
   // kids-quest — skeleton round result → next-turn context for the coach.
   context.subscriptions.push(preview.onResult((r) => provider.attachQuestResult(r)));
@@ -740,10 +776,13 @@ async function openWorkspaceFolder(
   return true;
 }
 
-async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<void> {
+async function applyTestBackdoors(
+  context: vscode.ExtensionContext,
+): Promise<{ testStateFileFound: boolean }> {
   // Source 1: env vars (works when Playwright passes them through to the
   // extension host, which is inconsistent across VS Code versions).
   let token = process.env.HPS_TEST_TOKEN;
+  let testStateFileFound = false;
   let coachName = process.env.HPS_TEST_COACH_NAME;
   let coachPersonality = process.env.HPS_TEST_COACH_PERSONALITY ?? "";
   let history: Array<{ id: string; role: "user" | "assistant" | "system"; content: string; createdAt: number }> | undefined;
@@ -759,6 +798,9 @@ async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<voi
     ];
     for (const f of candidates) {
       if (fs.existsSync(f)) {
+        // 파싱 성공 여부와 무관하게 "테스트 런" 표식이다 — #580 스풀 게이트가
+        // 이 플래그를 env 와 OR 로 쓴다 (파일은 env 보다 신뢰 가능한 채널).
+        testStateFileFound = true;
         const j = JSON.parse(fs.readFileSync(f, "utf8")) as {
           token?: string;
           coach?: { name?: string; personality?: string };
@@ -835,6 +877,7 @@ async function applyTestBackdoors(context: vscode.ExtensionContext): Promise<voi
   if (issuerToken && issuerToken.length > 0) {
     await context.secrets.store(ISSUER_TOKEN_KEY, issuerToken);
   }
+  return { testStateFileFound };
 }
 
 export function deactivate() {
