@@ -1,0 +1,16 @@
+{
+  "name": "hypeproof-studio-load-harness",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "23-way classroom load harness for the HypeProof Studio gateway. Zero external deps — Node 22+ only, same style as tests/rehearsal.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "selftest": "node --test selftest.mjs",
+    "control": "LOAD_WORKERS=1 LOAD_TURNS=8 node run.mjs",
+    "burst23": "LOAD_WORKERS=23 LOAD_ARRIVAL=burst LOAD_TURNS=8 node run.mjs",
+    "report": "node report.mjs"
+  }
+}
