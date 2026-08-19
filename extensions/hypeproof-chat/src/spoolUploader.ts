@@ -252,7 +252,9 @@ export async function uploadSession(args: UploadSessionArgs): Promise<SessionUpl
   if (!eventsNow || eventsNow.size !== (eventsUploaded?.body.length ?? -1)) {
     return {
       dir: session.dir, ok: true, keys,
-      message: "events grew during upload — 다음 트리거가 다시 올려요",
+      message: eventsNow
+        ? "events grew during upload — 다음 트리거가 다시 올려요"
+        : "events.jsonl vanished after upload — R2 본은 완결, 마커만 보류",
     };
   }
 

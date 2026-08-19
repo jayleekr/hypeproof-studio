@@ -531,9 +531,10 @@ export class SessionSpool {
     } catch (err) {
       if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
         await new Promise((r) => setTimeout(r, 100));
-        await fs.promises
-          .unlink(path.join(s.dir, UPLOADED_MARKER))
-          .catch((err2) => this.warnOnce("marker", err2));
+        await fs.promises.unlink(path.join(s.dir, UPLOADED_MARKER)).catch((err2) => {
+          // 재시도가 ENOENT 면 그 사이 누가 지운 것 = 성공 — 경고 아님.
+          if ((err2 as NodeJS.ErrnoException)?.code !== "ENOENT") this.warnOnce("marker", err2);
+        });
       }
     }
     const record = { schema_version: SPOOL_SCHEMA_VERSION, ts: this.now().toISOString(), ...fields };
