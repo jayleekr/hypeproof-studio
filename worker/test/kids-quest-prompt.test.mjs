@@ -152,3 +152,18 @@ console.log("kids-quest-prompt.test.mjs: all tests passed");
   assert.equal(pj.worlds?.length, 9, "profile.worlds 9개");
   console.log("✓ 사전 완성 세상 9개 렌더 · 매칭 · /v1/worlds/:id · profile.worlds");
 }
+
+// --- 4. 아동 컨텍스트 위생 — 코드 펜스 제거 · 길이 상한(뒤쪽 유지) -----------------
+{
+  const { trimMinorContext } = await import("../src/routes/messages.ts");
+  const long = "```html\n" + "<div>x</div>\n".repeat(200) + "```";
+  const t1 = trimMinorContext("앞말\n" + long + "\n뒷말");
+  assert.ok(!t1.includes("<div>x</div>"), "코드 본문은 빠진다");
+  assert.ok(t1.includes("index.html") && t1.includes("앞말") && t1.includes("뒷말"), "대화는 남는다");
+  const t2 = trimMinorContext("A".repeat(9000) + "최근질문", 8000);
+  assert.ok(t2.startsWith("[앞부분 생략]") && t2.endsWith("최근질문"), "뒤쪽(최근)을 남긴다");
+  assert.ok(t2.length <= 8000 + 20, "상한이 걸린다");
+  const short = "초코 세상에 가볼래";
+  assert.equal(trimMinorContext(short), short, "짧은 말은 그대로");
+  console.log("✓ 아동 컨텍스트 위생 — 펜스 제거·뒤쪽 유지·짧은 말 무변경");
+}

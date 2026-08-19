@@ -308,6 +308,15 @@ messages.post("/messages", async (c) => {
     }
   }
 
+
+  // #629 후속 — 아동 코호트: 접힌 대화 문자열이 매 턴 통째로 다시 온다. 코드 펜스를
+  // 걷어내고 길이를 묶는다(성인 트랙 무변경).
+  if (profile.minor_cohort === true && Array.isArray(raw.messages)) {
+    raw.messages = (raw.messages as Array<Record<string, unknown>>).map((m) =>
+      typeof m?.content === "string" ? { ...m, content: trimMinorContext(m.content) } : m,
+    );
+  }
+
   const stream = raw.stream === true;
   const modelLabel = resolveMessagesModel(raw.model, profile);
 
@@ -673,3 +682,24 @@ messages.post("/messages/count_tokens", async (c) => {
   c.header("x-hps-model", modelLabel);
   return c.json(j);
 });
+
+/**
+ * 아동 코호트 컨텍스트 위생 (2026-08-20, #629 후속).
+ *
+ * Studio 의 SDK 코치는 대화 전체를 문자열 하나로 접어 매 턴 다시 보낸다
+ * (extensions/hypeproof-chat/src/sdkCoach.ts — `history.map(...).join`), 상한은
+ * 항목 200개뿐이라 4시간 워크숍에서 계속 자란다. 실측(2026-08-19): 한 세션에서
+ * cache_read 가 11k → 15k 로 단조 증가했고, 세상 HTML 이 통째로 들어간 턴은
+ * 한 번에 52k 를 만들었다.
+ *
+ * 두 가지만 한다 — 둘 다 **정보 손실이 아니다**:
+ *  1. 히스토리 속 코드 펜스는 파일로 존재한다(작업 폴더 index.html). 본문 대신
+ *     "파일에 있다" 한 줄로 바꾼다. 코치는 필요하면 Read 한다.
+ *  2. 그래도 길면 **뒤쪽**(최근 대화 + 지금 질문)을 남긴다. 앞부분은 생략 표시.
+ * 성인 트랙은 건드리지 않는다(멀티페이지 제작은 앞 맥락이 실제로 필요하다).
+ */
+export function trimMinorContext(text: string, maxChars = 8000): string {
+  let out = text.replace(/```[a-zA-Z]*\n[\s\S]{400,}?```/g, "```\n[코드는 작업 폴더 index.html 에 있습니다 — 필요하면 Read 하세요]\n```");
+  if (out.length > maxChars) out = "[앞부분 생략]\n" + out.slice(out.length - maxChars);
+  return out;
+}
