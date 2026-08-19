@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh}
+  #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+  #guest .face{font-size:34px;line-height:1}
+  #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  #guest .bub b{color:#b8571e}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="guest"><div class="face" id="gface"></div><div class="bub" id="gsay"></div></div>
+<div id="bar"><b>스페이스</b>나 <b>화면 누르고 있기</b> = 물 주기 · 초록 칸에 머물기</div>
+<script>
+/* ══ CONFIG — 자리표시자. 코치가 처음 채운다. 기본값 = 이 세상의 문제 상태 ═══════ */
+const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🌻
+const GUEST_NAME='%%GUEST_NAME%%';     // 해바
+const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 가뭄이야… 해가 계속 떠서 물을 줘도 금방 말라. 물뿌리개도 너무 작아…
+const PLAYER='%%PLAYER_EMOJI%%';       // 물 받는 게스트
+const ITEM_A='%%ITEM_A%%';             // 주는 것 (예: 💧)
+const ITEM_B='%%ITEM_B%%';             // 해. 문제 세상: ☀️ (계속 떠 있음). 구름이면 ☁️
+const SPEED=%%SPEED%%;                 // 마르는 빠르기 1~10 (문제 세상 8)
+const RATE=%%RATE%%;                   // 물뿌리개 세기 1~10 (문제 세상 2)
+const GOAL=%%GOAL%%;                   // 딱 맞게 몇 초 (기본 20)
+const SPECIAL=%%SPECIAL%%;             // 적정 구간 폭 1~10 (문제 세상 2)
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #ffb347/#e0c080 (가뭄)
+/* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
+   아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
+   지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
+const WORLD={
+  drought:true,   // 가뭄 — 해(ITEM_B)가 계속 떠 있어 2.5배 빨리 마른다
+  shade:false,    // 그늘이 있나 (있으면 천천히 마름)
+};
+/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
+document.getElementById('gface').textContent=GUEST_EMOJI;
+const say=s=>{document.getElementById('gsay').innerHTML=s;};
+say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
+let state='title',lvl=50,pour=false,t=0,good=0;const dry=0.05+SPEED*0.05,flow=0.15+RATE*0.08,band=6+SPECIAL*4;const SUB='초록 칸에 '+GOAL+'초 머물면 성공!';
+function reset(){lvl=50;pour=false;t=0;good=0;state='play';say('<b>'+GUEST_NAME+'</b>: 물… 물…');}
+addEventListener('keydown',e=>{if(e.code==='Space'){if(state!=='play')reset();else pour=true;}});addEventListener('keyup',e=>{if(e.code==='Space')pour=false;});
+addEventListener('pointerdown',()=>{if(state!=='play')reset();else pour=true;});addEventListener('pointerup',()=>pour=false);
+function loop(){bg();
+  if(WORLD.drought){x.font='70px serif';x.textAlign='center';x.fillText(ITEM_B,W/2+130,90);}
+  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
+  else{const bx=W/2-40,by=110,bh=H-200;
+    if(state==='play'){t++;lvl-=dry*(WORLD.drought?2.5:1)*(WORLD.shade?0.5:1);if(pour)lvl+=flow;lvl=Math.max(0,Math.min(100,lvl));if(Math.abs(lvl-50)<=band)good++;
+      if(lvl<=0)report({goodSecs:Math.round(good/60),goal:GOAL,end:'dry',dry:SPEED,flow:RATE,band:SPECIAL},false,'말라버림','','말라버렸어… 해가 너무 뜨거워');
+      else if(lvl>=100)report({goodSecs:Math.round(good/60),goal:GOAL,end:'flood',dry:SPEED,flow:RATE,band:SPECIAL},false,'물바다','','콜록… 뿌리가 썩겠어. 너무 많아!');
+      else if(good/60>=GOAL)report({goodSecs:GOAL,goal:GOAL,end:'ok',dry:SPEED,flow:RATE,band:SPECIAL},true,GOAL+'초','활짝! 🌻 딱 맞았어, 고마워','');}
+    x.fillStyle='rgba(0,0,0,.35)';x.fillRect(bx,by,80,bh);x.fillStyle='rgba(80,220,120,.45)';x.fillRect(bx,by+bh*(1-(50+band)/100),80,bh*(2*band/100));x.fillStyle='#4f9dff';x.fillRect(bx,by+bh*(1-lvl/100),80,bh*lvl/100);
+    x.font='60px serif';x.textAlign='center';x.fillText(PLAYER,W/2+130,by+bh);if(pour&&state==='play'){x.font='30px serif';x.fillText(ITEM_A,W/2+130,by+bh-90-(t%20));}
+    txt('딱 맞게 '+Math.round(good/60)+' / '+GOAL+'초',42,24,'#ffd75b');
+    if(state==='over'){txt(document.title.startsWith('성공')?'활짝! 🎉':'…',H/2-10,Math.min(46,W/9),'#fff',W/2-200);txt('스페이스바로 다시',H/2+34,18,'#bbb',W/2-200);}}
+  requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>

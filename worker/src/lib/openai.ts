@@ -8,12 +8,23 @@ import type { OpenAIChatRequest } from "./translate";
 
 const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
 
+/**
+ * Dev-only override: `OPENAI_BASE_URL` (e.g. http://127.0.0.1:8790/v1) routes
+ * the OpenAI-shaped call to a local shim. Production never sets it — the
+ * default is the real endpoint. Same pattern as anthropic.ts countTokensUrl.
+ */
+export function openAIChatUrl(baseUrl?: string): string {
+  const b = baseUrl?.trim();
+  return b ? b.replace(/\/+$/, "") + "/chat/completions" : OPENAI_URL;
+}
+
 export async function callOpenAI(
   body: OpenAIChatRequest,
   apiKey: string,
   signal?: AbortSignal,
+  baseUrl?: string,
 ): Promise<Response> {
-  return fetch(OPENAI_URL, {
+  return fetch(openAIChatUrl(baseUrl), {
     method: "POST",
     signal,
     headers: {

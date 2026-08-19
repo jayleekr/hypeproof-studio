@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh}
+  #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+  #guest .face{font-size:34px;line-height:1}
+  #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  #guest .bub b{color:#b8571e}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="guest"><div class="face" id="gface"></div><div class="bub" id="gsay"></div></div>
+<div id="bar">불빛 순서를 보고 <b>똑같이 누르기</b> · <b>스페이스</b>로 시작</div>
+<script>
+/* ══ CONFIG — 자리표시자. 코치가 처음 채운다. 기본값 = 이 세상의 문제 상태 ═══════ */
+const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🦜
+const GUEST_NAME='%%GUEST_NAME%%';     // 앵무
+const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 숲이 너무 시끄러워… 노래 순서를 보여줘도 다른 게 막 깜빡여서 뭐가 진짜인지 모르겠어…
+const PLAYER='%%PLAYER_EMOJI%%';       // 노래하는 게스트
+const ITEM_A='%%ITEM_A%%';             // 단추 그림 (예: 🎵)
+const ITEM_B='%%ITEM_B%%';             // 단계 넘을 때 보상 (예: ⭐)
+const SPEED=%%SPEED%%;                 // 불빛 빠르기 1~10 (문제 세상 8)
+const RATE=%%RATE%%;                   // 단추 개수 2~6 (기본 4)
+const GOAL=%%GOAL%%;                   // 몇 단계까지 (기본 5)
+const SPECIAL=%%SPECIAL%%;             // 틀려도 되는 횟수 (기본 1)
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #1b2340/#3a4a80 (밤 숲)
+/* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
+   아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
+   지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
+const WORLD={
+  noise:true,     // 시끄럽다 — 순서 보여줄 때 엉뚱한 단추가 마구 깜빡인다
+  noiseLevel:3,   // 소음 세기 1~5
+};
+/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
+document.getElementById('gface').textContent=GUEST_EMOJI;
+const say=s=>{document.getElementById('gsay').innerHTML=s;};
+say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
+const K=Math.max(2,Math.min(6,Math.round(RATE)));const COL=['#ff5c5c','#4fd15c','#4f9dff','#ffd24f','#c26bff','#ff9a3c'];
+let state='title',seq=[],inp=[],lit=-1,noiseLit=-1,phase='show',t=0,level=0,mistakes=0;const tempo=Math.max(10,50-SPEED*4);const SUB=GOAL+'단계까지 외우면 성공!';
+function reset(){seq=[];level=0;mistakes=0;next();state='play';}
+function next(){seq.push(Math.floor(Math.random()*K));inp=[];phase='show';t=0;lit=-1;level=seq.length;say('<b>'+GUEST_NAME+'</b>: 잘 봐~ '+level+'단계!');}
+function pads(){const cs=Math.min((W-40)/K,H-160,180);return {cs,gx:(W-cs*K)/2,gy:H/2-cs/2};}
+function press(i){if(state!=='play'||phase!=='input')return;lit=i;t=0;inp.push(i);
+  if(seq[inp.length-1]!==i){mistakes++;say('<b>'+GUEST_NAME+'</b>: 앗, 거기 아니야… ('+mistakes+'번)');if(mistakes>SPECIAL){report({level,goal:GOAL,mistakes,pads:K,speed:SPEED,allowed:SPECIAL},false,level+'단계','','시끄러워서 못 외우겠어…');return;}inp=[];phase='show';t=0;return;}
+  if(inp.length===seq.length){if(seq.length>=GOAL){report({level,goal:GOAL,mistakes,pads:K,speed:SPEED,allowed:SPECIAL},true,level+'단계','노래 다 외웠다! 🎶 조용하니까 되네','');return;}say('<b>'+GUEST_NAME+'</b>: 맞아! '+ITEM_B);phase='wait';setTimeout(()=>{if(state==='play')next();},700);}}
+addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();const k=parseInt(e.key);if(k>=1&&k<=K)press(k-1);});
+addEventListener('pointerdown',e=>{if(state!=='play'){reset();return;}const {cs,gx,gy}=pads();if(e.clientY<gy||e.clientY>gy+cs)return;const i=Math.floor((e.clientX-gx)/cs);if(i>=0&&i<K)press(i);});
+function loop(){bg();
+  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
+  else{const {cs,gx,gy}=pads();t++;
+    if(state==='play'&&phase==='show'){const step=Math.floor(t/tempo);if(step<seq.length){lit=(t%tempo<tempo*0.6)?seq[step]:-1;noiseLit=(WORLD.noise&&Math.random()<0.08*WORLD.noiseLevel)?Math.floor(Math.random()*K):noiseLit;if(t%7===0)noiseLit=-1;}else{phase='input';lit=-1;noiseLit=-1;t=0;say('<b>'+GUEST_NAME+'</b>: 이제 네 차례!');}}
+    if(phase==='input'&&t>12)lit=-1;
+    for(let i=0;i<K;i++){x.fillStyle=COL[i];x.globalAlpha=(lit===i||noiseLit===i)?1:0.35;x.beginPath();x.roundRect(gx+i*cs+6,gy+6,cs-12,cs-12,16);x.fill();x.globalAlpha=1;x.font=Math.floor(cs*.4)+'px serif';x.textAlign='center';x.textBaseline='middle';x.fillText(ITEM_A,gx+(i+.5)*cs,gy+cs/2);x.textBaseline='alphabetic';}
+    if(WORLD.noise&&state==='play'&&phase==='show'){x.font='26px serif';for(let i=0;i<WORLD.noiseLevel;i++)x.fillText('💥',(i*173+t*3)%W,80+(i*61)%40);}
+    x.font='40px serif';x.fillText(PLAYER,W-50,H-40);txt(level+' / '+GOAL+'단계'+(SPECIAL?'   ✖ '+mistakes+'/'+SPECIAL:''),42,24,'#ffd75b');
+    if(state==='over'){txt(document.title.startsWith('성공')?'다 외웠다! 🎉':'…',gy-40,Math.min(46,W/9));txt('스페이스바로 다시',gy+cs+40,18,'#bbb');}}
+  requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>

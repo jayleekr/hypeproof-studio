@@ -7,6 +7,7 @@ export interface Env {
   GEMINI_API_KEY?: string;           // default provider key (see resolveProvider)
   ANTHROPIC_API_KEY?: string;        // peer — used when LLM_PROVIDER=anthropic
   OPENAI_API_KEY?: string;           // peer — used when LLM_PROVIDER=openai
+  OPENAI_BASE_URL?: string;          // dev-only — route OpenAI-shaped calls to a local shim (lib/openai.ts)
   // peer — used when LLM_PROVIDER=glm. Z.ai 의 Anthropic 호환 경로로 나간다
   // (lib/glm.ts). 발급: https://z.ai/manage-apikey/apikey-list
   GLM_API_KEY?: string;
