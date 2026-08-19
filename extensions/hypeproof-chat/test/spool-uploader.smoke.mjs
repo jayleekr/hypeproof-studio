@@ -23,8 +23,15 @@ const FIXED_NOW = () => new Date("2026-08-19T09:00:00.000Z");
 const SID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 const SID2 = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
 
-// 기본은 "정지된" 세션 — events mtime 을 정지 게이트 밖(10분 전)으로 민다.
-// fresh: true 로 만들면 "아직 쓰는 중"(방금 mtime) 세션이 된다.
+// 기본은 "정지된" 세션 — events mtime 을 정지 게이트 밖(FIXED_NOW 기준 10분 전)으로 민다.
+// fresh: true 로 만들면 "아직 쓰는 중"(FIXED_NOW 시점 mtime) 세션이 된다.
+//
+// mtime 은 반드시 **FIXED_NOW 기준**이어야 한다. 벽시계(Date.now())로 잡으면
+// 스캐너가 쓰는 시계(now: FIXED_NOW)와 어긋나, 실제 시각이
+// FIXED_NOW + UPLOAD_QUIESCENT_MS 를 지나는 순간 정지 게이트가 모든 세션을
+// 걸러내 이 파일이 영구히 실패한다. 실제로 그렇게 터졌다 —
+// 2026-08-19T09:05Z 부터 main 이 빨간 상태가 됐고, 원인 없는 커밋(#617)이
+// 범인으로 지목됐다. 시간 의존을 남기지 않는다.
 function makeSession(root, day, sid, { meta = true, events = "e1\ne2\n", uploaded = false, fresh = false } = {}) {
   const dir = path.join(root, day, sid);
   fs.mkdirSync(dir, { recursive: true });
@@ -36,10 +43,11 @@ function makeSession(root, day, sid, { meta = true, events = "e1\ne2\n", uploade
   if (events !== null) {
     const f = path.join(dir, "events.jsonl");
     fs.writeFileSync(f, events);
-    if (!fresh) {
-      const t = new Date(Date.now() - UPLOAD_QUIESCENT_MS - 5 * 60 * 1000);
-      fs.utimesSync(f, t, t);
-    }
+    const base = FIXED_NOW().getTime();
+    const t = fresh
+      ? new Date(base)                                        // 방금 쓰는 중 → 게이트에 걸린다
+      : new Date(base - UPLOAD_QUIESCENT_MS - 5 * 60 * 1000);  // 10분 전 → 게이트를 통과한다
+    fs.utimesSync(f, t, t);
   }
   if (uploaded) fs.writeFileSync(path.join(dir, UPLOADED_MARKER), "{}\n");
   return dir;
@@ -69,7 +77,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-upl-"));
   const current = makeSession(root, "2026-08-19", "cccccccc-dddd-4eee-8fff-000000000000");
   fs.mkdirSync(path.join(root, "2026-08-18", "not-a-uuid"), { recursive: true }); // 형식 불량
   fs.mkdirSync(path.join(root, "junk", SID), { recursive: true });                // 날짜 아님
-  const found = scanUploadableSessions(root, { currentSessionDir: current });
+  const found = scanUploadableSessions(root, { currentSessionDir: current, now: FIXED_NOW });
   assert.deepEqual(found.map((s) => s.dir), [ok]);
   assert.equal(found[0].day, "2026-08-18");
   assert.equal(found[0].sessionId, SID);
@@ -82,10 +90,10 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-upl-"));
   const root = tmp();
   const live = makeSession(root, "2026-08-19", SID, { fresh: true });   // 방금 mtime
   makeSession(root, "2026-08-18", SID2);                                // 정지됨
-  const found = scanUploadableSessions(root);
+  const found = scanUploadableSessions(root, { now: FIXED_NOW });
   assert.deepEqual(found.map((s) => s.sessionId), [SID2], "fresh 세션은 스캔에서 제외");
   // 봉인된 세션은 allowFresh 로 면제 — 수업 끝 직후 오늘 세션이 올라가는 경로.
-  const withSealed = scanUploadableSessions(root, { allowFresh: [live] });
+  const withSealed = scanUploadableSessions(root, { allowFresh: [live], now: FIXED_NOW });
   assert.deepEqual(withSealed.map((s) => s.sessionId).sort(), [SID, SID2].sort());
   console.log("✓ 정지 게이트 — fresh 제외, 봉인(allowFresh)은 면제");
 }
@@ -113,7 +121,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-upl-"));
   assert.deepEqual(r.keys, ["k-1", "k-2", "k-3"]);
   // 마커가 생겼고, 다시 스캔하면 안 잡힌다.
   assert.ok(fs.existsSync(path.join(dir, UPLOADED_MARKER)));
-  assert.deepEqual(scanUploadableSessions(root), []);
+  assert.deepEqual(scanUploadableSessions(root, { now: FIXED_NOW }), []);
   // manifest 내용 검증 — sha256 이 실제 바이트의 해시.
   const manifest = JSON.parse(Buffer.from(calls[2].body).toString("utf8"));
   const eventsEntry = manifest.files.find((f) => f.name === "events.jsonl");
@@ -140,7 +148,7 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-upl-"));
   assert.equal(r.message, "upstream busy");
   assert.equal(calls.length, 2, "실패 지점에서 멈춘다 — manifest 는 안 나갔다");
   assert.ok(!fs.existsSync(path.join(dir, UPLOADED_MARKER)), "마커 없음");
-  assert.equal(scanUploadableSessions(root).length, 1, "다음 트리거의 재시도 대상으로 남는다");
+  assert.equal(scanUploadableSessions(root, { now: FIXED_NOW }).length, 1, "다음 트리거의 재시도 대상으로 남는다");
   console.log("✓ 음성 — 중간 실패 시 manifest·마커 없음 (미완결 유지)");
 }
 
@@ -193,7 +201,7 @@ console.log("spool-uploader.smoke.mjs — all green");
 {
   const root = tmp();
   const dir = makeSession(root, "2026-08-18", SID);
-  const [session] = scanUploadableSessions(root);
+  const [session] = scanUploadableSessions(root, { now: FIXED_NOW });
   fs.rmSync(path.join(dir, "events.jsonl")); // 다른 창의 스윕이 지운 상황
   const { fn, calls } = fakeFetch();
   const r = await uploadSession({
@@ -213,9 +221,9 @@ console.log("spool-uploader.smoke.mjs — all green");
   const mine = makeSession(root, "2026-08-18", SID, { metaUser: { u: "kidA", c: "co" } });
   makeSession(root, "2026-08-17", SID2, { metaUser: { u: "kidB", c: "co" } });          // 남의 것
   makeSession(root, "2026-08-16", "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb", { metaUser: null }); // 익명
-  const all = scanUploadableSessions(root);
+  const all = scanUploadableSessions(root, { now: FIXED_NOW });
   assert.equal(all.length, 3, "필터 없으면 전부");
-  const filtered = scanUploadableSessions(root, { identity: { u: "kidA", c: "co" } });
+  const filtered = scanUploadableSessions(root, { identity: { u: "kidA", c: "co" }, now: FIXED_NOW });
   assert.deepEqual(filtered.map((s) => s.dir), [mine], "신원 일치분만 — 남의 것·익명(user:null) 제외");
   console.log("✓ N2 — 신원 필터: 남의 세션·익명 세션은 이 토큰으로 올리지 않는다");
 }
@@ -240,9 +248,9 @@ console.log("spool-uploader.smoke.mjs — all green");
   assert.match(r.message, /grew during upload/);
   // 방금 자란 세션은 정지 게이트가 (올바르게) 잠시 숨긴다 — 마커가 없으므로
   // 게이트가 풀리는 다음 트리거에서 다시 잡힌다. allowFresh 로 그걸 실증.
-  assert.equal(scanUploadableSessions(root).length, 0, "정지 게이트가 즉시 재잡기는 막는다");
+  assert.equal(scanUploadableSessions(root, { now: FIXED_NOW }).length, 0, "정지 게이트가 즉시 재잡기는 막는다");
   assert.equal(
-    scanUploadableSessions(root, { allowFresh: [dir] }).length, 1,
+    scanUploadableSessions(root, { allowFresh: [dir], now: FIXED_NOW }).length, 1,
     "마커가 없어 pending — 게이트만 풀리면 꼬리까지 다시 올라간다",
   );
   console.log("✓ N1 — 업로드 중 성장 감지 → 마커 보류, 재업로드 예약");
