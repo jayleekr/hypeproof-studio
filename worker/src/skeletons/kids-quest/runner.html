@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <title>%%TITLE%%</title>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
-  #c{display:block;width:100vw;height:100vh}
+  html,body{margin:0;height:100%;overflow:hidden;background:#07091a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh;image-rendering:pixelated;image-rendering:crisp-edges}
   #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
   #guest .face{font-size:34px;line-height:1}
   #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
   #guest .bub b{color:#b8571e}
-  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
   #bar b{color:#ffd75b}
 </style>
 </head>
@@ -23,56 +23,92 @@
 const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🐈
 const GUEST_NAME='%%GUEST_NAME%%';     // 나비
 const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 골목이 물에 잠겼어… 비는 계속 오고, 통나무가 떠내려와. 집에 못 가겠어…
-const PLAYER='%%PLAYER_EMOJI%%';       // 달리는 것 (대개 게스트)
+const PLAYER='%%PLAYER_EMOJI%%';       // 달리는 것 (🐈 면 도트 고양이, 다른 이모지면 그 이모지)
 const ITEM_A='%%ITEM_A%%';             // 도착할 곳 (예: 🏠)
-const ITEM_B='%%ITEM_B%%';             // 넘어야 하는 것. 문제 세상: 🪵 (떠내려오는 통나무). 방벽이면 🧱
+const ITEM_B='%%ITEM_B%%';             // 넘어야 하는 것. 문제 세상: 🪵 통나무 (도트). 🧱 이면 벽돌 방벽. 다른 이모지면 그 이모지
 const SPEED=%%SPEED%%;                 // 달리는 빠르기 1~10 (기본 4)
 const RATE=%%RATE%%;                   // 장애물이 얼마나 자주 1~10 (문제 세상 6)
 const GOAL=%%GOAL%%;                   // 몇 개 넘으면 집 (기본 15)
 const SPECIAL=%%SPECIAL%%;             // 밝기 0~10 (문제 세상 2 — 어두워서 앞이 안 보임)
-const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #1a2233/#334a66 (비 오는 밤)
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 하늘 위/아래 색. 문제 세상 기본: #0b1030/#1c2f63 (비 오는 밤)
 /* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
    아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
    지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
 const WORLD={
-  flood:true,     // 물이 차오른다 — 화면 아래에서 물이 올라오고, 나비 발까지 오면 잠긴다
-  rain:true,      // 비가 내린다 (화면 빗줄기)
-  floodSpeed:1,   // 물이 차오르는 빠르기 (0이면 안 올라옴)
+  flood:true,     // 물이 차오른다 — 나비 발까지 오면 잠긴다
+  rain:true,      // 비가 내린다
+  floodSpeed:1,   // 물 차오르는 빠르기 (0이면 안 올라옴)
+  lamps:false,    // 가로등 (켜면 주변이 밝아진다)
+  moon:true,      // 초승달
 };
-/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
-const cv=document.getElementById('c'),x=cv.getContext('2d');
-let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
-document.getElementById('gface').textContent=GUEST_EMOJI;
-const say=s=>{document.getElementById('gsay').innerHTML=s;};
-say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
-function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
-function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+/* ══ 도트 엔진 — 320×180 저해상도에 그리고 픽셀 그대로 확대. 규칙: HUD 글자는 검은 외곽선,
+   플레이어는 밝은 몸+검은 외곽선(배경과 반대 명도), 오브젝트는 외곽선. ═══════════════════ */
+const PW=320,PH=180;const cv=document.getElementById('c'),ctx=cv.getContext('2d');const off=document.createElement('canvas');off.width=PW;off.height=PH;const x=off.getContext('2d');
+let W,H,SC=1,OX=0,OY=0;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;ctx.imageSmoothingEnabled=false;SC=Math.min(W/PW,H/PH);OX=(W-PW*SC)/2;OY=(H-PH*SC)/2;}fit();onresize=fit;
+const toPX=(cx,cy)=>({x:(cx-OX)/SC,y:(cy-OY)/SC});
+document.getElementById('gface').textContent=GUEST_EMOJI;const say=s=>{document.getElementById('gsay').innerHTML=s;};say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function sprite(map,sx,sy,pal,scale){scale=scale||1;for(let j=0;j<map.length;j++)for(let i=0;i<map[j].length;i++){const ch=map[j][i];if(ch==='.')continue;x.fillStyle=pal[ch]||pal['#']||'#000';x.fillRect(Math.round(sx+i*scale),Math.round(sy+j*scale),scale,scale);}}
+function emo(e,px,py,size){x.font=(size||14)+'px serif';x.textAlign='center';x.textBaseline='middle';x.fillText(e,px,py);x.textBaseline='alphabetic';}
+function skyGrad(){const g=x.createLinearGradient(0,0,0,PH);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,PW,PH);}
+function dither(y0,y1,c){x.fillStyle=c;for(let j=y0;j<y1;j+=2)for(let i=(j/2)%2;i<PW;i+=4)x.fillRect(i,j,1,1);}
+let seed=11;const rnd=()=>{seed=(seed*9301+49297)%233280;return seed/233280;};
+function txt(s,y,sz,c,cx){ctx.font='bold '+sz+'px sans-serif';ctx.textAlign='center';ctx.lineJoin='round';ctx.lineWidth=Math.max(3,sz/6);ctx.strokeStyle='rgba(0,0,0,.85)';ctx.strokeText(s,cx==null?W/2:cx,y);ctx.fillStyle=c||'#fff';ctx.fillText(s,cx==null?W/2:cx,y);}
 function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.guest=GUEST_NAME;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
-let state='title',py,vy,obs=[],t=0,passed=0,hits=0,water=0;const SUB=(ITEM_B?ITEM_B+' 넘어서 ':'')+ITEM_A+' 까지 '+GOAL+'개 지나면 도착!';
-const runSpeed=3+SPEED*0.9,gap=Math.max(28,110-RATE*9),vis=0.25+SPECIAL*0.075,ground=()=>H-70;
-function reset(){py=ground();vy=0;obs=[];t=0;passed=0;hits=0;water=0;state='play';say('<b>'+GUEST_NAME+'</b>: 후… 가보자');}
-function jump(){if(state!=='play'){reset();return;}if(py>=ground()-1)vy=-13;}
+function blit(){ctx.fillStyle='#07091a';ctx.fillRect(0,0,W,H);ctx.drawImage(off,Math.round(OX),Math.round(OY),Math.round(PW*SC),Math.round(PH*SC));}
+function titleHud(){txt(document.title,H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#ddd');}
+function overHud(win){txt(win?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#ddd');}
+const S_CAT=['..##....##......','..#@#..#@#......','..#@@@@@@#......','..#@o@@o@#......','..#@@@@@@#..##..','...#@@@@#..#@#..','.###@@@@####@#..','#@@@@@@@@@@@#...','#@@@@@@@@@@#....','.#@@@@@@@@@#....','..#@#....#@#....','..#@#....#@#....'];
+const S_DOG=['....####........','...#@@@@#.......','..#@o@@@@#####..','..#@@@@@@@@@@@#.','...#@@@@@@@@@@#.','...#@@@@@@@@@@#.','..#@@#@@@@#@@#..','..#@@#....#@@#..'];
+const S_BEE=['....ww..ww......','...wwww.wwww....','..#wwwwwwwww#...','.#@@#@@#@@#@@#..','#@o@#@@#@@#@@@#.','#@@@#@@#@@#@@@#.','.#@@#@@#@@#@@#..','..#@@@@@@@@@@#..','...##########...'];
+const S_PENG=['....######......','...#@@@@@@#.....','..#@w@ww@w@#....','..#@wowwow@#....','..#@@wyyw@@#....','.#@@@wwww@@@#...','#@#@wwwwww@#@#..','#@#@wwwwww@#@#..','.#@@wwwwww@@#...','..#@@wwww@@#....','...#yy##yy#.....'];
+const S_MOUSE=['.##......##.....','#@@#....#@@#....','#@@@####@@@#....','.#@@@@@@@@#.....','.#@o@@@@o@#.....','..#@@@@@@#......','..#@@@@@@#..#...','.#@@@@@@@@#.#...','.#@@@@@@@@##....','..########......'];
+const S_HAM=['..##....##......','.#@@#..#@@#.....','.#@@@##@@@#.....','#@o@@@@@@o@#....','#@@@@@@@@@@#....','#@@w@@@@w@@#....','.#@@@@@@@@#.....','..#@@@@@@#......','...#@##@#.......'];
+const S_PARROT=['....####........','...#@@@@#.......','..#@o@@@@#......','..#@@@@yy#......','..#@@@@@#.......','.#@@@@@@#.......','#@@@@@@@#.......','#@@@@@@#........','.#@@@@#.........','..#@@#..........','..#yy#..........','...##...........'];
+const S_FLOWER=['....####........','..##@@@@##......','.#@@#yy#@@#.....','.#@#yooy#@#.....','#@#yoooooy#@#...','#@#yoooooy#@#...','.#@#yooy#@#.....','.#@@#yy#@@#.....','..##@@@@##......','....####........','.....gg.........','..gg.gg.gg......','...gg#gg#.......','.....gg.........'];
+const S_RAC=['.##......##.....','#@@#....#@@#....','#@@@####@@@#....','.#@@@@@@@@#.....','#@#w@@@@w#@#....','#@#o####o#@#....','.#@@wwww@@#.....','..#@@@@@@#......','..#@@@@@@#......','...######.......'];
+const S_FISH=['...####.....','..#@@@@#.#..','.#@o@@@@##..','.#@@@@@@#...','..#@@@@#.#..','...####..#..'];
+const S_LOG=['.##########.','#@@@@@@@@@@#','#@@#@@@@#@@#','#@@@@@@@@@@#','.##########.'];
+const S_BRICK=['############','#..#..#..#..','############','.#..#..#..#.','############'];
+const S_HOUSE=['.......###.......','......#@@@#......','.....#@@@@@#.....','....#@@@@@@@#....','...#@@@@@@@@@#...','..#@@@@@@@@@@@#..','.#############.#.','.#$$$$$$$$$$$$$#.','.#$$##$$$$$##$$#.','.#$$##$$$$$##$$#.','.#$$$$$$###$$$$#.','.#$$$$$$#o#$$$$#.','.#$$$$$$#o#$$$$#.','.###############.'];
+const S_FIRE=['...#....','..#@#...','.#@o@#..','#@ooo@#.','#@ooo@#.','.#@o@#..','..#@#...'];
+const S_ICE=['##########','#wwwwwwww#','#w@@@@@@w#','#w@@@@@@w#','#wwwwwwww#','##########'];
+const S_MOLE=['..######..','.#@@@@@@#.','#@o@@@@o@#','#@@@ww@@@#','#@@@@@@@@#','.########.'];
+const S_TRASH=['.########.','##########','.#@#@#@#@.','.#@#@#@#@.','.#@#@#@#@.','.########.'];
+const P={far:'#0d1638',mid:'#131f4d',win:'#ffd76a',win2:'#7fd0ff',lamp:'#ffe08a',water:'#2a6fd6',water2:'#4f9dff',foam:'#bfe3ff',rain:'#8fb8ff',ground:'#2a2a44',ground2:'#3b3b5c'};
+const bldFar=[],bldMid=[];for(let bx=0;bx<PW*2;){const w=14+Math.floor(rnd()*22),h=40+Math.floor(rnd()*70);bldFar.push({x:bx,w,h,win:Array.from({length:Math.floor(w/5)*Math.floor(h/7)},()=>rnd()<0.45)});bx+=w+2;}
+for(let bx=0;bx<PW*2;){const w=20+Math.floor(rnd()*30),h=25+Math.floor(rnd()*45);bldMid.push({x:bx,w,h,win:Array.from({length:Math.floor(w/6)*Math.floor(h/8)},()=>rnd()<0.35)});bx+=w+3;}
+const stars=Array.from({length:70},()=>({x:Math.floor(rnd()*PW),y:Math.floor(rnd()*80),b:rnd()}));const rain=Array.from({length:90},()=>({x:rnd()*PW,y:rnd()*PH,s:2+rnd()*2}));
+let state='title',py,vy,obs=[],t=0,passed=0,hits=0,water=0,scroll=0;const SUB=(ITEM_B?ITEM_B+' 넘어서 ':'')+ITEM_A+' 까지 '+GOAL+'개 지나면 도착!';
+const runSpeed=1+SPEED*0.28,gap=Math.max(28,110-RATE*9),vis=0.25+SPECIAL*0.075,GY=140,CX=60;
+function reset(){py=GY;vy=0;obs=[];t=0;passed=0;hits=0;water=0;scroll=0;state='play';say('<b>'+GUEST_NAME+'</b>: 후… 가보자');}
+function jump(){if(state!=='play'){reset();return;}if(py>=GY-0.5)vy=-4.6;}
 addEventListener('keydown',e=>{if(e.code==='Space')jump();});addEventListener('pointerdown',jump);
-function loop(){bg();
-  const wl=WORLD.flood?H-40-water:H+10;
-  if(WORLD.rain){x.strokeStyle='rgba(180,200,255,.5)';x.lineWidth=1;for(let i=0;i<60;i++){const rx=(i*137+t*4)%W,ry=(i*89+t*9)%H;x.beginPath();x.moveTo(rx,ry);x.lineTo(rx-3,ry+14);x.stroke();}}
-  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
-  else{ if(state==='play'){t++;vy+=0.7;py+=vy;if(py>ground()){py=ground();vy=0;}
-      if(WORLD.flood&&WORLD.floodSpeed>0)water=Math.min(H*0.5,water+0.035*WORLD.floodSpeed);
-      if(ITEM_B&&t%Math.round(gap)===0&&Math.random()<0.7)obs.push({x:W+30,y:ground(),hit:false});
-      for(let i=obs.length-1;i>=0;i--){const o=obs[i];o.x-=runSpeed;if(o.x<-40){obs.splice(i,1);passed++;continue;}
-        if(!o.hit&&Math.abs(o.x-90)<28&&py>ground()-30){o.hit=true;hits++;say('<b>'+GUEST_NAME+'</b>: 아야!');}}
-      if(WORLD.flood&&wl<py-10)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','콜록… 또 잠겼어. 물이 너무 많아…');
-      else if(hits>=3)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','부딪혀서 못 가겠어… 앞이 안 보여');
-      else if(passed>=GOAL)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},true,passed+'/'+GOAL,'집이다! 🏠 이제 젖지 않고 갈 수 있어','');}
-    x.fillStyle='rgba(0,0,0,.35)';x.fillRect(0,ground()+22,W,H);
-    x.font='36px serif';x.textAlign='center';obs.forEach(o=>{if(o.x<W*vis+90)x.fillText(ITEM_B,o.x,o.y+8);});
-    x.font='30px serif';x.fillText(ITEM_A,W-40,ground()+8);
-    x.font='42px serif';x.fillText(PLAYER,90,py+8);
-    if(SPECIAL<10){const g=x.createLinearGradient(90+W*vis*0.6,0,90+W*vis+40,0);g.addColorStop(0,'rgba(0,0,10,0)');g.addColorStop(1,'rgba(0,0,10,.92)');x.fillStyle=g;x.fillRect(0,0,W,H);}
-    if(WORLD.flood){x.fillStyle='rgba(40,110,200,.55)';x.beginPath();x.moveTo(0,wl);for(let i=0;i<=W;i+=20)x.lineTo(i,wl+Math.sin(i/30+t/8)*4);x.lineTo(W,H);x.lineTo(0,H);x.fill();}
-    txt(passed+' / '+GOAL+'   💥 '+hits+'/3',42,24,'#ffd75b');
-    if(state==='over'){txt(document.title.startsWith('성공')?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#bbb');}}
+function scene(){skyGrad();dither(60,120,'rgba(255,255,255,.06)');
+  stars.forEach(s=>{if(Math.floor(t/20+s.b*10)%3!==0){x.fillStyle=s.b>0.7?'#fff':'#9ab';x.fillRect(s.x,s.y,1,1);}});
+  if(WORLD.moon){x.fillStyle='#fff3c4';x.beginPath();x.arc(272,26,10,0,6.3);x.fill();x.fillStyle=BG[0];x.beginPath();x.arc(276,23,9,0,6.3);x.fill();}
+  bldFar.forEach(b=>{const bx=((b.x-scroll*0.15)%(PW*2)+PW*2)%(PW*2)-PW;if(bx>PW||bx+b.w<0)return;x.fillStyle=P.far;x.fillRect(Math.floor(bx),GY-b.h-30,b.w,b.h+30);let k=0;for(let j=GY-b.h-26;j<GY-34;j+=7)for(let i=2;i<b.w-3;i+=5){if(b.win[k++]&&Math.floor(t/40+k)%7!==0){x.fillStyle=k%3?P.win:P.win2;x.fillRect(Math.floor(bx)+i,j,2,3);}}});
+  bldMid.forEach(b=>{const bx=((b.x-scroll*0.4)%(PW*2)+PW*2)%(PW*2)-PW;if(bx>PW||bx+b.w<0)return;x.fillStyle=P.mid;x.fillRect(Math.floor(bx),GY-b.h-8,b.w,b.h+8);let k=0;for(let j=GY-b.h-4;j<GY-12;j+=8)for(let i=3;i<b.w-4;i+=6){if(b.win[k++]){x.fillStyle=P.win;x.fillRect(Math.floor(bx)+i,j,3,4);}}});
+  x.fillStyle=P.ground;x.fillRect(0,GY+8,PW,PH-GY-8);x.fillStyle=P.ground2;for(let i=-((scroll)%12);i<PW;i+=12)x.fillRect(i,GY+8,6,2);x.fillStyle='#0a0f2a';x.fillRect(0,GY+2,PW,6);
+  if(WORLD.lamps){for(let i=-((scroll*0.4)%110);i<PW;i+=110){x.fillStyle='#3a3a55';x.fillRect(i,GY-40,2,42);x.fillRect(i,GY-40,8,2);x.fillStyle=P.lamp;x.fillRect(i+7,GY-40,3,3);const rg=x.createRadialGradient(i+8,GY-38,2,i+8,GY-38,40);rg.addColorStop(0,'rgba(255,224,138,.35)');rg.addColorStop(1,'rgba(255,224,138,0)');x.fillStyle=rg;x.fillRect(i-35,GY-80,90,90);}}
+  if(ITEM_A==='🏠')sprite(S_HOUSE,PW-40,GY-26,{'#':'#3a2a2a','@':'#c85a48','$':'#e8d9b5','o':'#ffd76a'},2);else emo(ITEM_A,PW-22,GY-4,20);
+  obs.forEach(o=>{if(o.x>CX+PW*vis+30&&SPECIAL<10)return;if(ITEM_B==='🪵')sprite(S_LOG,o.x-12,GY-8,{'#':'#2a1608','@':'#b8763a'},2);else if(ITEM_B==='🧱')sprite(S_BRICK,o.x-12,GY-8,{'#':'#9a3b2f','.':'#c85a48'},2);else if(ITEM_B)emo(ITEM_B,o.x,GY-2,16);});
+  if(PLAYER==='🐈')sprite(S_CAT,CX-16,py-22,{'#':'#14141f','@':'#ffb347','o':'#14141f'},2);else emo(PLAYER,CX,py-2,20);
+  if(SPECIAL<10){const dg=x.createLinearGradient(CX+PW*vis*0.5,0,CX+PW*vis+30,0);dg.addColorStop(0,'rgba(3,4,16,0)');dg.addColorStop(1,'rgba(3,4,16,.93)');x.fillStyle=dg;x.fillRect(0,0,PW,PH);}
+  if(WORLD.rain){x.fillStyle=P.rain;rain.forEach(r=>{r.y+=r.s*2;r.x-=0.6;if(r.y>PH){r.y=-4;r.x=Math.random()*PW;}x.fillRect(Math.floor(r.x),Math.floor(r.y),1,3);});}
+  if(WORLD.flood){const wl=PH-14-water;x.fillStyle=P.water;x.fillRect(0,Math.floor(wl),PW,PH);x.fillStyle=P.water2;for(let i=0;i<PW;i+=6){x.fillRect(i,Math.floor(wl+Math.sin(i/12+t/9)*1.5),4,1);}x.fillStyle=P.foam;for(let i=3;i<PW;i+=17)x.fillRect(i,Math.floor(wl+Math.sin(i/9+t/7)*1.5),2,1);}
+}
+function loop(){
+  if(state==='play'){t++;scroll+=runSpeed;vy+=0.28;py+=vy;if(py>GY){py=GY;vy=0;}
+    if(WORLD.flood&&WORLD.floodSpeed>0)water=Math.min(PH*0.5,water+0.012*WORLD.floodSpeed);
+    if(ITEM_B&&t%Math.round(gap)===0&&Math.random()<0.7)obs.push({x:PW+20,hit:false});
+    for(let i=obs.length-1;i>=0;i--){const o=obs[i];o.x-=runSpeed;if(o.x<-20){obs.splice(i,1);passed++;continue;}if(!o.hit&&Math.abs(o.x-CX)<14&&py>GY-12){o.hit=true;hits++;say('<b>'+GUEST_NAME+'</b>: 아야!');}}
+    const wl=PH-14-water;
+    if(WORLD.flood&&wl<py-4)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','콜록… 또 잠겼어. 물이 너무 많아…');
+    else if(hits>=3)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','부딪혀서 못 가겠어… 앞이 안 보여');
+    else if(passed>=GOAL)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},true,passed+'/'+GOAL,'집이다! 🏠 이제 젖지 않고 갈 수 있어','');}
+  else t++;
+  scene();blit();
+  if(state==='title')titleHud();else{txt(passed+' / '+GOAL+'   💥 '+hits+'/3',48,24,'#ffd75b');if(state==='over')overHud(document.title.startsWith('성공'));}
   requestAnimationFrame(loop);}
 loop();
 </script>

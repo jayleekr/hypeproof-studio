@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <title>%%TITLE%%</title>
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
-  #c{display:block;width:100vw;height:100vh}
+  html,body{margin:0;height:100%;overflow:hidden;background:#07091a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh;image-rendering:pixelated;image-rendering:crisp-edges}
   #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
   #guest .face{font-size:34px;line-height:1}
   #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
   #guest .bub b{color:#b8571e}
-  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.55);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
   #bar b{color:#ffd75b}
 </style>
 </head>
@@ -23,54 +23,82 @@
 const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🦝
 const GUEST_NAME='%%GUEST_NAME%%';     // 라쿤
 const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 냇물에 쓰레기가 자꾸 떠내려와… 캔은 왼쪽 통, 병은 오른쪽 통에 넣어야 하는데 너무 빨라. 못 건지면 물고기가 사라져…
-const PLAYER='%%PLAYER_EMOJI%%';       // 냇가에 선 게스트
+const PLAYER='%%PLAYER_EMOJI%%';       // 냇가에 선 게스트 (🦝 면 도트 너구리)
 const ITEM_A='%%ITEM_A%%';             // 왼쪽 통에 넣을 것 (예: 🥫)
 const ITEM_B='%%ITEM_B%%';             // 오른쪽 통에 넣을 것 (예: 🍾)
 const SPEED=%%SPEED%%;                 // 쓰레기가 떠내려오는 빠르기 1~10 (문제 세상 8)
 const RATE=%%RATE%%;                   // 헷갈리는 것(쓰레기 아닌 것 🍎🍂) 비율 0~10 (문제 세상 6)
 const GOAL=%%GOAL%%;                   // 몇 개 건지면 성공 (기본 12)
 const SPECIAL=%%SPECIAL%%;             // 틀려도 되는 횟수 (문제 세상 2)
-const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #5a4a3a/#8a7a5a (흙탕물)
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 하늘 위/아래 색. 문제 세상 기본: #5a4a3a/#8a7a5a (흙탕물)
 /* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
    아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
    지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
 const WORLD={
   dirty:true,     // 냇물이 갈색이다 — 틀리거나 놓칠 때마다 물고기(fish)가 한 마리 사라진다
-  fish:4,         // 냇물에 사는 물고기 수 🐟 (아이가 늘리거나 지키게 바꿀 수 있다)
+  fish:4,         // 냇물에 사는 물고기 수 (아이가 늘리거나 지키게 바꿀 수 있다)
   trashRate:1,    // 쓰레기 양 배수 (0 이면 안 온다)
 };
-/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
-const cv=document.getElementById('c'),x=cv.getContext('2d');
-let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
-document.getElementById('gface').textContent=GUEST_EMOJI;
-const say=s=>{document.getElementById('gsay').innerHTML=s;};
-say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
-function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
-function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+/* ══ 도트 엔진 — 320×180 저해상도에 그리고 픽셀 그대로 확대. 규칙: HUD 글자는 검은 외곽선,
+   플레이어는 밝은 몸+검은 외곽선(배경과 반대 명도), 오브젝트는 외곽선. ═══════════════════ */
+const PW=320,PH=180;const cv=document.getElementById('c'),ctx=cv.getContext('2d');const off=document.createElement('canvas');off.width=PW;off.height=PH;const x=off.getContext('2d');
+let W,H,SC=1,OX=0,OY=0;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;ctx.imageSmoothingEnabled=false;SC=Math.min(W/PW,H/PH);OX=(W-PW*SC)/2;OY=(H-PH*SC)/2;}fit();onresize=fit;
+const toPX=(cx,cy)=>({x:(cx-OX)/SC,y:(cy-OY)/SC});
+document.getElementById('gface').textContent=GUEST_EMOJI;const say=s=>{document.getElementById('gsay').innerHTML=s;};say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function sprite(map,sx,sy,pal,scale){scale=scale||1;for(let j=0;j<map.length;j++)for(let i=0;i<map[j].length;i++){const ch=map[j][i];if(ch==='.')continue;x.fillStyle=pal[ch]||pal['#']||'#000';x.fillRect(Math.round(sx+i*scale),Math.round(sy+j*scale),scale,scale);}}
+function emo(e,px,py,size){x.font=(size||14)+'px serif';x.textAlign='center';x.textBaseline='middle';x.fillText(e,px,py);x.textBaseline='alphabetic';}
+function skyGrad(){const g=x.createLinearGradient(0,0,0,PH);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,PW,PH);}
+function dither(y0,y1,c){x.fillStyle=c;for(let j=y0;j<y1;j+=2)for(let i=(j/2)%2;i<PW;i+=4)x.fillRect(i,j,1,1);}
+let seed=11;const rnd=()=>{seed=(seed*9301+49297)%233280;return seed/233280;};
+function txt(s,y,sz,c,cx){ctx.font='bold '+sz+'px sans-serif';ctx.textAlign='center';ctx.lineJoin='round';ctx.lineWidth=Math.max(3,sz/6);ctx.strokeStyle='rgba(0,0,0,.85)';ctx.strokeText(s,cx==null?W/2:cx,y);ctx.fillStyle=c||'#fff';ctx.fillText(s,cx==null?W/2:cx,y);}
 function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.guest=GUEST_NAME;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
+function blit(){ctx.fillStyle='#07091a';ctx.fillRect(0,0,W,H);ctx.drawImage(off,Math.round(OX),Math.round(OY),Math.round(PW*SC),Math.round(PH*SC));}
+function titleHud(){txt(document.title,H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#ddd');}
+function overHud(win){txt(win?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#ddd');}
+const S_CAT=['..##....##......','..#@#..#@#......','..#@@@@@@#......','..#@o@@o@#......','..#@@@@@@#..##..','...#@@@@#..#@#..','.###@@@@####@#..','#@@@@@@@@@@@#...','#@@@@@@@@@@#....','.#@@@@@@@@@#....','..#@#....#@#....','..#@#....#@#....'];
+const S_DOG=['....####........','...#@@@@#.......','..#@o@@@@#####..','..#@@@@@@@@@@@#.','...#@@@@@@@@@@#.','...#@@@@@@@@@@#.','..#@@#@@@@#@@#..','..#@@#....#@@#..'];
+const S_BEE=['....ww..ww......','...wwww.wwww....','..#wwwwwwwww#...','.#@@#@@#@@#@@#..','#@o@#@@#@@#@@@#.','#@@@#@@#@@#@@@#.','.#@@#@@#@@#@@#..','..#@@@@@@@@@@#..','...##########...'];
+const S_PENG=['....######......','...#@@@@@@#.....','..#@w@ww@w@#....','..#@wowwow@#....','..#@@wyyw@@#....','.#@@@wwww@@@#...','#@#@wwwwww@#@#..','#@#@wwwwww@#@#..','.#@@wwwwww@@#...','..#@@wwww@@#....','...#yy##yy#.....'];
+const S_MOUSE=['.##......##.....','#@@#....#@@#....','#@@@####@@@#....','.#@@@@@@@@#.....','.#@o@@@@o@#.....','..#@@@@@@#......','..#@@@@@@#..#...','.#@@@@@@@@#.#...','.#@@@@@@@@##....','..########......'];
+const S_HAM=['..##....##......','.#@@#..#@@#.....','.#@@@##@@@#.....','#@o@@@@@@o@#....','#@@@@@@@@@@#....','#@@w@@@@w@@#....','.#@@@@@@@@#.....','..#@@@@@@#......','...#@##@#.......'];
+const S_PARROT=['....####........','...#@@@@#.......','..#@o@@@@#......','..#@@@@yy#......','..#@@@@@#.......','.#@@@@@@#.......','#@@@@@@@#.......','#@@@@@@#........','.#@@@@#.........','..#@@#..........','..#yy#..........','...##...........'];
+const S_FLOWER=['....####........','..##@@@@##......','.#@@#yy#@@#.....','.#@#yooy#@#.....','#@#yoooooy#@#...','#@#yoooooy#@#...','.#@#yooy#@#.....','.#@@#yy#@@#.....','..##@@@@##......','....####........','.....gg.........','..gg.gg.gg......','...gg#gg#.......','.....gg.........'];
+const S_RAC=['.##......##.....','#@@#....#@@#....','#@@@####@@@#....','.#@@@@@@@@#.....','#@#w@@@@w#@#....','#@#o####o#@#....','.#@@wwww@@#.....','..#@@@@@@#......','..#@@@@@@#......','...######.......'];
+const S_FISH=['...####.....','..#@@@@#.#..','.#@o@@@@##..','.#@@@@@@#...','..#@@@@#.#..','...####..#..'];
+const S_LOG=['.##########.','#@@@@@@@@@@#','#@@#@@@@#@@#','#@@@@@@@@@@#','.##########.'];
+const S_BRICK=['############','#..#..#..#..','############','.#..#..#..#.','############'];
+const S_HOUSE=['.......###.......','......#@@@#......','.....#@@@@@#.....','....#@@@@@@@#....','...#@@@@@@@@@#...','..#@@@@@@@@@@@#..','.#############.#.','.#$$$$$$$$$$$$$#.','.#$$##$$$$$##$$#.','.#$$##$$$$$##$$#.','.#$$$$$$###$$$$#.','.#$$$$$$#o#$$$$#.','.#$$$$$$#o#$$$$#.','.###############.'];
+const S_FIRE=['...#....','..#@#...','.#@o@#..','#@ooo@#.','#@ooo@#.','.#@o@#..','..#@#...'];
+const S_ICE=['##########','#wwwwwwww#','#w@@@@@@w#','#w@@@@@@w#','#wwwwwwww#','##########'];
+const S_MOLE=['..######..','.#@@@@@@#.','#@o@@@@o@#','#@@@ww@@@#','#@@@@@@@@#','.########.'];
+const S_TRASH=['.########.','##########','.#@#@#@#@.','.#@#@#@#@.','.#@#@#@#@.','.########.'];
 const ODD=['🍎','🍂','🌰','🍌'];let state='title',cur=null,t=0,ok_=0,bad=0,fly=null,fish=WORLD.fish,swim=[];const SUB=ITEM_A+' 왼쪽 · '+ITEM_B+' 오른쪽 — '+GOAL+'개 건지면 성공!';
-const flow=1.2+SPEED*0.55;const riverY=()=>H*0.42,riverH=()=>H*0.26;
-function spawn(){if(WORLD.trashRate<=0){cur=null;return;}const r=Math.random();cur={e:r<RATE*0.05?ODD[Math.floor(Math.random()*ODD.length)]:(Math.random()<.5?ITEM_A:ITEM_B),x:-40,y:riverY()+riverH()*0.5};}
-function reset(){t=0;ok_=0;bad=0;fly=null;fish=WORLD.fish;swim=[];for(let i=0;i<fish;i++)swim.push({x:Math.random()*W,d:Math.random()<.5?1:-1,y:riverY()+20+Math.random()*(riverH()-40)});spawn();state='play';say('<b>'+GUEST_NAME+'</b>: 온다 온다… 이건 어디 통?');}
+const flow=0.5+SPEED*0.2,RY=70,RH=52;
+function spawn(){if(WORLD.trashRate<=0){cur=null;return;}const r=Math.random();cur={e:r<RATE*0.05?ODD[Math.floor(Math.random()*ODD.length)]:(Math.random()<.5?ITEM_A:ITEM_B),x:-16,y:RY+RH*0.5};}
+function reset(){t=0;ok_=0;bad=0;fly=null;fish=WORLD.fish;swim=[];for(let i=0;i<fish;i++)swim.push({x:Math.random()*PW,d:Math.random()<.5?1:-1,y:RY+8+Math.random()*(RH-20)});spawn();state='play';say('<b>'+GUEST_NAME+'</b>: 온다 온다… 이건 어디 통?');}
 function wrong(msg){bad++;if(WORLD.dirty&&fish>0){fish--;swim.pop();}say('<b>'+GUEST_NAME+'</b>: '+msg+(WORLD.dirty?' 물고기가 또 사라졌어…':''));}
 function check(){if(ok_>=GOAL)report({ok:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},true,ok_+'개','냇물이 깨끗해졌어! 🐟 물고기들이 돌아왔어, 고마워','');
   else if(bad>SPECIAL||(WORLD.dirty&&fish<=0))report({ok:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},false,ok_+'개','',fish<=0?'물고기가 다 사라졌어…':'너무 빨리 떠내려와서 못 건지겠어…');
   else setTimeout(()=>{if(state==='play'&&!cur)spawn();},300);}
 function pick(side){if(state!=='play'||!cur)return;const want=cur.e===ITEM_A?'L':cur.e===ITEM_B?'R':'N';if(want===side){ok_++;fly={e:cur.e,side,t:0,x:cur.x,y:cur.y};}else wrong(want==='N'?'그건 쓰레기가 아닌데?':want==='L'?'그건 왼쪽 통인데!':'그건 오른쪽 통인데!');cur=null;check();}
 addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();if(e.key==='ArrowLeft')pick('L');if(e.key==='ArrowRight')pick('R');});
-addEventListener('pointerdown',e=>{if(state!=='play'){reset();return;}pick(e.clientX<W/2?'L':'R');});
-function loop(){bg();
-  const ry=riverY(),rh=riverH();
-  x.fillStyle=WORLD.dirty?'rgba(110,85,50,.85)':'rgba(70,150,230,.75)';x.fillRect(0,ry,W,rh);
-  x.strokeStyle='rgba(255,255,255,.25)';x.lineWidth=2;for(let i=0;i<6;i++){x.beginPath();const yy=ry+10+i*(rh/6);for(let X=0;X<=W;X+=16)x.lineTo(X,yy+Math.sin(X/40+t/10+i)*3);x.stroke();}
-  x.textAlign='center';x.font='30px serif';swim.forEach(f=>{if(state==='play'){f.x+=f.d*0.6;if(f.x<0||f.x>W)f.d*=-1;}x.save();x.translate(f.x,f.y);if(f.d>0)x.scale(-1,1);x.fillText('🐟',0,0);x.restore();});
-  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
-  else{if(state==='play'){t++;if(cur){cur.x+=flow;if(cur.x>W+30){const want=cur.e===ITEM_A?'L':cur.e===ITEM_B?'R':'N';if(want==='N')ok_++;else wrong('놓쳤다…');cur=null;check();}}}
-    x.font='64px serif';x.fillText('🗑️',W*0.18,H-40);x.fillText('🗑️',W*0.82,H-40);x.font='34px serif';x.fillText(ITEM_A,W*0.18,H-105);x.fillText(ITEM_B,W*0.82,H-105);
-    if(cur){x.font='60px serif';x.fillText(cur.e,cur.x,cur.y+10);}
-    if(fly){fly.t++;const tx=fly.side==='L'?W*0.18:W*0.82,ty=H-60;const k=Math.min(1,fly.t/14);x.font='44px serif';x.fillText(fly.e,fly.x+(tx-fly.x)*k,fly.y+(ty-fly.y)*k);if(fly.t>14)fly=null;}
-    x.font='40px serif';x.fillText(PLAYER,W-50,ry-30);txt('건짐 '+ok_+' / '+GOAL+'   ✖ '+bad+'/'+SPECIAL+'   🐟 '+fish,42,24,'#ffd75b');
-    if(state==='over'){txt(document.title.startsWith('성공')?'깨끗해졌다! 🎉':'…',ry-70,Math.min(46,W/9));txt('스페이스바로 다시',ry-32,18,'#bbb');}}
+addEventListener('pointerdown',e=>{if(state!=='play'){reset();return;}const p=toPX(e.clientX,0);pick(p.x<PW/2?'L':'R');});
+function scene(){skyGrad();
+  // 둑·풀
+  x.fillStyle=WORLD.dirty?'#7a6a3a':'#4f8a2f';x.fillRect(0,RY-14,PW,14);x.fillRect(0,RY+RH,PW,PH-RY-RH);x.fillStyle=WORLD.dirty?'#5a4a2a':'#3f6f24';for(let i=0;i<PW;i+=6){x.fillRect(i,RY-14,2,4);x.fillRect(i+3,RY+RH,2,4);}
+  x.fillStyle=WORLD.dirty?'#6e5533':'#2a6fd6';x.fillRect(0,RY,PW,RH);x.fillStyle=WORLD.dirty?'#8a6a40':'#4f9dff';for(let j=0;j<RH;j+=8)for(let i=-((t/2)%12);i<PW;i+=12)x.fillRect(Math.round(i+j),RY+j+Math.round(Math.sin(i/10+t/12)),6,1);
+  swim.forEach(f=>{if(state==='play'){f.x+=f.d*0.25;if(f.x<0||f.x>PW)f.d*=-1;}sprite(S_FISH,f.x-12,f.y-6,{'#':'#123','@':'#4fd1ff','o':'#123'},2);});
+  // 통 두 개
+  [[PW*0.18,ITEM_A],[PW*0.82,ITEM_B]].forEach(([bx,lab])=>{sprite(S_TRASH,bx-10,PH-30,{'#':'#333','@':'#8fa'},2);emo(lab,bx,PH-38,14);});
+  if(cur){emo(cur.e,cur.x,cur.y,18);}
+  if(fly){fly.t++;const tx=fly.side==='L'?PW*0.18:PW*0.82,ty=PH-22;const k=Math.min(1,fly.t/14);emo(fly.e,fly.x+(tx-fly.x)*k,fly.y+(ty-fly.y)*k,14);if(fly.t>14)fly=null;}
+  if(PLAYER==='🦝')sprite(S_RAC,PW-44,RY-14-22,{'#':'#1a1a1a','@':'#9a9a9a','o':'#111','w':'#f0f0f0'},2);else emo(PLAYER,PW-30,RY-24,20);
+}
+function loop(){
+  if(state==='play'){t++;if(cur){cur.x+=flow;if(cur.x>PW+16){const want=cur.e===ITEM_A?'L':cur.e===ITEM_B?'R':'N';if(want==='N')ok_++;else wrong('놓쳤다…');cur=null;check();}}}
+  else t++;
+  scene();blit();
+  if(state==='title')titleHud();else{txt('건짐 '+ok_+' / '+GOAL+'   ✖ '+bad+'/'+SPECIAL+'   🐟 '+fish,48,24,'#ffd75b');if(state==='over'){txt(document.title.startsWith('성공')?'깨끗해졌다! 🎉':'…',H*0.28,Math.min(46,W/9));txt('스페이스바로 다시',H*0.28+40,18,'#ddd');}}
   requestAnimationFrame(loop);}
 loop();
 </script>

@@ -14,13 +14,13 @@ import kqCollectHtml from "./kids-quest/collect.html";
 // @ts-ignore
 import kqStackHtml from "./kids-quest/stack.html";
 // @ts-ignore
-import kqMazeHtml from "./kids-quest/maze.html";
+import kqRunHtml from "./kids-quest/run.html";
 // @ts-ignore
 import kqWhackHtml from "./kids-quest/whack.html";
 // @ts-ignore
 import kqMemoryHtml from "./kids-quest/memory.html";
 // @ts-ignore
-import kqWaterHtml from "./kids-quest/water.html";
+import kqJumpHtml from "./kids-quest/jump.html";
 // @ts-ignore
 import kqSortHtml from "./kids-quest/sort.html";
 // @ts-ignore
@@ -33,7 +33,7 @@ const REGISTRY: Skeleton[] = [
   // 게스트(NPC)가 문제를 말하고, 아이가 스켈레톤을 골라 CONFIG(룰 숫자·오브젝트·
   // 배경)를 말로 바꾼다. 결과는 스켈레톤이 `hp:result` 로 부모창에 보내고 코치가
   // 게스트 목소리로 반응한다. 10개 모두 같은 자리표시자 규격(curriculum/quests/QUESTS.md).
-  // 핵심 조작이 서로 겹치지 않게 고른다: 받기·점프·모으기·쌓기·미로·반응·기억·조절·분류. (dodge 는 catcher 와 조작이 겹쳐 R39 에서 제거)
+  // 핵심 조작이 서로 겹치지 않게 고른다: 받기·횡스크롤 점프·모으기·쌓기·톱다운 달리기(쫓김)·반응·기억·수직 점프(두들점프)·분류. 전부 320×180 도트 엔진(R42). dodge·maze·water 는 겹치거나 심심해서 교체.
   {
     id: "kq-catcher",
     tier: "kids-quest",
@@ -71,13 +71,13 @@ const REGISTRY: Skeleton[] = [
     html: kqStackHtml as unknown as string,
   },
   {
-    id: "kq-maze",
+    id: "kq-run",
     tier: "kids-quest",
-    genre: "maze",
+    genre: "run",
     summary_ko:
-      "🐁 찍찍 · 길을 잃어 — 미로에서 방향키로 한 칸씩 목표(ITEM_A)까지 간다. 함정(ITEM_B) 밟으면 출발점. SPEED=함정 개수, RATE=미로 크기, GOAL=제한시간(0=무제한), SPECIAL=밝기(내 주변만 보임)",
-    tags: ["찍찍", "생쥐", "쥐", "미로", "길", "치즈", "헷갈려", "길찾기", "어두워", "함정"],
-    html: kqMazeHtml as unknown as string,
+      "🐁 찍찍 · 캄캄한 하수구 — 위에서 내려다보는 자동 달리기(3레인). ←→ 로 길 바꾸기, 스페이스로 웅덩이(ITEM_B) 점프, 뒤에서 물이 밀려온다. SPEED=뒤 물 빠르기, RATE=웅덩이·막힌 길 빈도, GOAL=미터, SPECIAL=밝기",
+    tags: ["찍찍", "생쥐", "쥐", "하수구", "달리기", "도망", "물", "웅덩이", "치즈", "어두워", "터널"],
+    html: kqRunHtml as unknown as string,
   },
   {
     id: "kq-whack",
@@ -98,13 +98,13 @@ const REGISTRY: Skeleton[] = [
     html: kqMemoryHtml as unknown as string,
   },
   {
-    id: "kq-water",
+    id: "kq-jump",
     tier: "kids-quest",
-    genre: "balance",
+    genre: "jump",
     summary_ko:
-      "🌻 해바 · 물을 딱 맞게 — 누르고 있으면 물이 차고 놓으면 마른다, 초록 구간에 GOAL초 머문다(조절). ITEM_B=가끔 나타나 더 빨리 마르게 하는 것. SPEED=마르는 빠르기, RATE=물 세기, SPECIAL=적정 구간 폭",
-    tags: ["해바", "해바라기", "꽃", "물", "물주기", "목말라", "썩어", "딱 맞게", "조절", "균형", "식물"],
-    html: kqWaterHtml as unknown as string,
+      "🐿️ 도토 · 부러진 나무 — 발판(가지)을 밟고 위로 튀어오른다(두들점프). ←→ 좌우, 부러지는 가지·바람·안개. SPEED=바람, RATE=발판 간격, GOAL=미터, SPECIAL=부러지는 발판 비율",
+    tags: ["도토", "다람쥐", "나무", "가지", "점프", "위로", "올라가기", "바람", "도토리", "부러져"],
+    html: kqJumpHtml as unknown as string,
   },
   {
     id: "kq-sort",
