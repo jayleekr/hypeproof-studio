@@ -523,7 +523,19 @@ export class SessionSpool {
     // 세션은 더 이상 "업로드 완결"이 아니다: 마커를 지워 다음 트리거가 전체를
     // 다시 올리게 한다(R2 덮어쓰기 멱등). 안 지우면 마커 이후 꼬리가 R2 에
     // 영영 도달하지 못하고, 3일 뒤 스윕이 유일본을 지운다(1회차 리뷰 F2).
-    await fs.promises.unlink(path.join(s.dir, UPLOADED_MARKER)).catch(() => undefined);
+    // ENOENT(마커 없음 — 대부분의 이벤트)는 정상. 그 외(win32 EPERM/EBUSY —
+    // renameWithRetry 가 존재하는 그 계열)는 한 번 물러났다 재시도하고, 그래도
+    // 실패하면 경고한다 — 조용히 남은 마커는 위 꼬리 유실로 직결된다(N5).
+    try {
+      await fs.promises.unlink(path.join(s.dir, UPLOADED_MARKER));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+        await new Promise((r) => setTimeout(r, 100));
+        await fs.promises
+          .unlink(path.join(s.dir, UPLOADED_MARKER))
+          .catch((err2) => this.warnOnce("marker", err2));
+      }
+    }
     const record = { schema_version: SPOOL_SCHEMA_VERSION, ts: this.now().toISOString(), ...fields };
     const line = JSON.stringify(record) + "\n";
     const file = path.join(s.dir, "events.jsonl");

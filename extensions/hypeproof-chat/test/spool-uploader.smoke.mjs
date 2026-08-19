@@ -28,7 +28,11 @@ const SID2 = "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff";
 function makeSession(root, day, sid, { meta = true, events = "e1\ne2\n", uploaded = false, fresh = false } = {}) {
   const dir = path.join(root, day, sid);
   fs.mkdirSync(dir, { recursive: true });
-  if (meta) fs.writeFileSync(path.join(dir, "session.meta.json"), '{"schema_version":1}\n');
+  if (meta) {
+    const user = arguments.length > 3 && arguments[3].metaUser !== undefined ? arguments[3].metaUser : undefined;
+    const body = user === undefined ? '{"schema_version":1}' : JSON.stringify({ schema_version: 1, user });
+    fs.writeFileSync(path.join(dir, "session.meta.json"), body + "\n");
+  }
   if (events !== null) {
     const f = path.join(dir, "events.jsonl");
     fs.writeFileSync(f, events);
@@ -201,4 +205,45 @@ console.log("spool-uploader.smoke.mjs — all green");
   assert.equal(calls.length, 0, "빈 manifest 로 '완결'을 주장하지 않는다");
   assert.ok(!fs.existsSync(path.join(dir, UPLOADED_MARKER)));
   console.log("✓ fs 소실 — 구조화 실패, 거짓 완결 없음");
+}
+
+// ─── N2 — 신원 필터: 이 토큰 주인의 세션만 (공용 PC 교차 업로드 방지) ─────────
+{
+  const root = tmp();
+  const mine = makeSession(root, "2026-08-18", SID, { metaUser: { u: "kidA", c: "co" } });
+  makeSession(root, "2026-08-17", SID2, { metaUser: { u: "kidB", c: "co" } });          // 남의 것
+  makeSession(root, "2026-08-16", "dddddddd-eeee-4fff-8aaa-bbbbbbbbbbbb", { metaUser: null }); // 익명
+  const all = scanUploadableSessions(root);
+  assert.equal(all.length, 3, "필터 없으면 전부");
+  const filtered = scanUploadableSessions(root, { identity: { u: "kidA", c: "co" } });
+  assert.deepEqual(filtered.map((s) => s.dir), [mine], "신원 일치분만 — 남의 것·익명(user:null) 제외");
+  console.log("✓ N2 — 신원 필터: 남의 세션·익명 세션은 이 토큰으로 올리지 않는다");
+}
+
+// ─── N1 — 업로드 중 events 가 자라면 마커를 쓰지 않는다 (꼬리 유실 방지) ──────
+{
+  const root = tmp();
+  const dir = makeSession(root, "2026-08-18", SID, { events: "e1\n" });
+  const { fn } = fakeFetch((call, n) => {
+    if (n === 3) {
+      // manifest PUT 도착 시점 = 업로드 도중 — 피닝된 늦은 턴이 append 한 상황.
+      fs.appendFileSync(path.join(dir, "events.jsonl"), "late-tail\n");
+    }
+    return { status: 200 };
+  });
+  const r = await uploadSession({
+    session: { dir, day: "2026-08-18", sessionId: SID },
+    baseUrl: "https://api.test/v1", token: "t.s", fetchFn: fn, now: FIXED_NOW,
+  });
+  assert.equal(r.ok, true, "R2 전송 자체는 성공");
+  assert.ok(!fs.existsSync(path.join(dir, UPLOADED_MARKER)), "크기 불일치 → 마커 미작성");
+  assert.match(r.message, /grew during upload/);
+  // 방금 자란 세션은 정지 게이트가 (올바르게) 잠시 숨긴다 — 마커가 없으므로
+  // 게이트가 풀리는 다음 트리거에서 다시 잡힌다. allowFresh 로 그걸 실증.
+  assert.equal(scanUploadableSessions(root).length, 0, "정지 게이트가 즉시 재잡기는 막는다");
+  assert.equal(
+    scanUploadableSessions(root, { allowFresh: [dir] }).length, 1,
+    "마커가 없어 pending — 게이트만 풀리면 꼬리까지 다시 올라간다",
+  );
+  console.log("✓ N1 — 업로드 중 성장 감지 → 마커 보류, 재업로드 예약");
 }

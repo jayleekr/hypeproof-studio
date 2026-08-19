@@ -252,8 +252,8 @@ When in doubt:
 ## Spec version policy
 
 Bump `Spec version` on:
-- A new domain section (e.g. M, N, …) → bump minor
-- New non-breaking REQ rows in an existing domain → bump patch (v0.2.0).
+- A new domain section (e.g. M, N, …) → bump minor (e.g. v0.2.0 → v0.3.0).
+- New non-breaking REQ rows in an existing domain → bump patch (e.g. v0.3.0 → v0.3.1).
 - A breaking contract change in a stable REQ (e.g. token now requires a new claim) → bump minor.
 - Editorial (typos, layer-column refinements, wording) → no bump.
 

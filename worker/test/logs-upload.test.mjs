@@ -165,6 +165,9 @@ function putReq(filename, { token = CANARY_TOKEN, sessionId = SID, day = DAY, bo
 
 // ─── 드리프트 락 — 클라 업로드 파일명 == 서버 allowlist ──────────────────────
 // (어긋나면 세션이 조용히 미완결로만 남는다 — 400 → manifest 미도달)
+// 주의: 이 크로스-패키지 import 는 extensions/hypeproof-chat/package.json 에
+// "type" 필드가 **없어서** 동작한다(Node 의 typeless-package ESM 재해석).
+// 그 패키지에 "type": "commonjs" 를 넣으면 여기가 깨진다 — 넣지 말 것.
 {
   const { ALLOWED_UPLOAD_FILENAMES } = await import("../src/routes/logs.ts");
   const { CLIENT_UPLOAD_FILENAMES } = await import(

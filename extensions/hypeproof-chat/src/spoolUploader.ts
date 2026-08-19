@@ -69,6 +69,13 @@ export function scanUploadableSessions(
     currentSessionDir?: string | null;
     /** 이 인스턴스가 방금 봉인한 디렉토리 — 정지 게이트 면제 (자기 보증). */
     allowFresh?: readonly string[];
+    /**
+     * 현재 토큰의 신원 — 주어지면 meta 의 user 가 **정확히 일치하는** 세션만
+     * 올린다. 공용 PC 에서 학생 B 의 클릭이 학생 A 의 원문을 B 의 프리픽스·
+     * B 의 코호트 동의 아래 올리는 것을 막는다(2회차 리뷰 N2). user:null
+     * (토큰 전 익명 세션)도 건너뛴다 — 귀속 없는 원문은 내보내지 않는다.
+     */
+    identity?: { u: string; c: string } | null;
     now?: () => Date;
   },
 ): UploadableSession[] {
@@ -89,10 +96,28 @@ export function scanUploadableSessions(
       if (fs.existsSync(path.join(dir, UPLOADED_MARKER))) continue;
       // 정지 게이트 — 다른 창의 활성 세션 보호 (UPLOAD_QUIESCENT_MS 주석).
       if (!allowFresh.has(dir) && nowMs - eventsStat.mtimeMs < UPLOAD_QUIESCENT_MS) continue;
+      if (opts?.identity) {
+        const user = readMetaUser(dir);
+        if (!user || user.u !== opts.identity.u || user.c !== opts.identity.c) continue;
+      }
       out.push({ dir, day: day.name, sessionId: s.name });
     }
   }
   return out;
+}
+
+/** session.meta.json 의 user — 없거나 깨졌으면 null (귀속 불가 = 업로드 제외). */
+function readMetaUser(dir: string): { u: string; c: string } | null {
+  try {
+    const meta = JSON.parse(fs.readFileSync(path.join(dir, "session.meta.json"), "utf8")) as {
+      user?: { u?: unknown; c?: unknown } | null;
+    };
+    const u = meta.user?.u;
+    const c = meta.user?.c;
+    return typeof u === "string" && typeof c === "string" ? { u, c } : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 파일 목록 + sha256 — 서버 쪽 무결성 검증과 부분 업로드 판별의 근거. */
@@ -218,6 +243,19 @@ export async function uploadSession(args: UploadSessionArgs): Promise<SessionUpl
     return { dir: session.dir, ok: false, keys, failedAt: "manifest.json", status: r.status, message: r.message };
   }
 
+  // 2회차 리뷰 N1 — 업로드(수 초)가 도는 사이 피닝된 늦은 턴이 events 에
+  // append 했을 수 있다. 그 상태로 마커를 쓰면 꼬리가 R2 에 없는 채 "완결"이
+  // 되고 3일 뒤 스윕이 유일본을 지운다. 크기가 달라졌으면 마커를 **쓰지
+  // 않는다** — 세션은 pending 으로 남아 다음 트리거가 전체를 다시 올린다(멱등).
+  const eventsUploaded = entries.find((e) => e.name === "events.jsonl");
+  const eventsNow = statSafe(path.join(session.dir, "events.jsonl"));
+  if (!eventsNow || eventsNow.size !== (eventsUploaded?.body.length ?? -1)) {
+    return {
+      dir: session.dir, ok: true, keys,
+      message: "events grew during upload — 다음 트리거가 다시 올려요",
+    };
+  }
+
   // 완결 — 로컬 마커. 마커 쓰기 실패는 치명이 아니다(다음 트리거가 같은
   // 내용을 다시 올릴 뿐, R2 는 멱등) — 결과에는 성공으로 남긴다.
   try {
@@ -236,11 +274,13 @@ export async function uploadAllPending(
   opts: Omit<UploadSessionArgs, "session"> & {
     currentSessionDir?: string | null;
     allowFresh?: readonly string[];
+    identity?: { u: string; c: string } | null;
   },
 ): Promise<SessionUploadResult[]> {
   const sessions = scanUploadableSessions(root, {
     currentSessionDir: opts.currentSessionDir,
     allowFresh: opts.allowFresh,
+    identity: opts.identity,
     now: opts.now,
   });
   const results: SessionUploadResult[] = [];
