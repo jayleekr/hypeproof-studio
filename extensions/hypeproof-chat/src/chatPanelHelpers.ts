@@ -529,3 +529,20 @@ export function resolveCoachRuntime(args: {
   }
   return "proxy";
 }
+
+/** kids-quest 세상 정의 (워커 /v1/profile 의 worlds 항목). */
+export interface WorldRef { id: string; guest: string; emoji: string; chip: string; aliases: string[] }
+
+/**
+ * 2026-08-19 — 아이의 말에서 사전 완성 세상을 고른다. 워커 worlds.ts 의 matchWorld 와
+ * 같은 규칙(칩 문구 그대로 / 게스트 이름·이모지·별칭 + 세상 표현). 순수 함수 — 테스트 가능.
+ */
+export function matchWorldRef(text: string, worlds: readonly WorldRef[] | undefined): WorldRef | null {
+  if (!worlds?.length) return null;
+  const t = text.trim();
+  for (const w of worlds) if (t === w.chip || t === w.chip.replace(/^\S+\s/, "")) return w;
+  if (!/세상|가볼래|들어가|가보자|보여줘|만나볼래|얘기/.test(t)) return null;
+  for (const w of worlds) if (t.includes(w.guest) || t.includes(w.emoji) || w.aliases.some((a) => a && t.includes(a))) return w;
+  return null;
+}
+

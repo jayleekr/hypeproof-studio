@@ -110,3 +110,32 @@ for (const profileId of PROFILES) {
 }
 
 console.log("kids-quest-prompt.test.mjs: all tests passed");
+
+// --- 3. 사전 완성 세상 — 9개 전부 렌더 · 자리표시자 0 · GET /v1/worlds/:id ---------------
+{
+  const { WORLDS, renderWorld, matchWorld } = await import("../src/skeletons/kids-quest/worlds.ts");
+  assert.equal(WORLDS.length, 9, "세상 9개");
+  for (const w of WORLDS) {
+    const html = renderWorld(w.id);
+    assert.ok(html && !/%%[A-Z_]+%%/.test(html), `${w.id}: 자리표시자 없이 렌더`);
+    assert.ok(html.includes(`GUEST_NAME='${w.guest}'`), `${w.id}: 게스트 이름 채워짐`);
+    assert.equal(matchWorld(w.chip)?.id, w.id, `${w.id}: 칩 문구 매칭`);
+    assert.equal(matchWorld(`${w.guest} 세상 가볼래`)?.id, w.id, `${w.id}: 이름+세상 매칭`);
+  }
+  assert.equal(matchWorld("안녕"), null, "무관한 말은 매칭 안 됨");
+  assert.equal(matchWorld("초코 색을 갈색으로 바꿔줘"), null, "세상 표현 없으면 매칭 안 됨(바꾸기 요청)");
+  const { token } = await issue({ u: USER, c: COHORT, p: PROFILES[0] }, 1, TEST_SECRET);
+  const env = createMockEnv();
+  const r = await app.fetch(new Request("https://api.test/v1/worlds/kq-runner", { headers: { authorization: `Bearer ${token}` } }), env, makeCtx());
+  assert.equal(r.status, 200, "worlds/kq-runner 200");
+  const body = await r.text();
+  assert.ok(body.includes("GUEST_NAME='나비'") && body.includes("flood:true"), "나비 세상 HTML");
+  const r404 = await app.fetch(new Request("https://api.test/v1/worlds/nope", { headers: { authorization: `Bearer ${token}` } }), env, makeCtx());
+  assert.equal(r404.status, 404, "unknown world 404");
+  const r401 = await app.fetch(new Request("https://api.test/v1/worlds/kq-runner"), env, makeCtx());
+  assert.equal(r401.status, 401, "no token 401");
+  const pr = await app.fetch(new Request("https://api.test/v1/profile", { headers: { authorization: `Bearer ${token}` } }), env, makeCtx());
+  const pj = await pr.json();
+  assert.equal(pj.worlds?.length, 9, "profile.worlds 9개");
+  console.log("✓ 사전 완성 세상 9개 렌더 · 매칭 · /v1/worlds/:id · profile.worlds");
+}

@@ -25,6 +25,7 @@ const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
 import { PreviewProvider, sanitizeQuestResult } from "./previewProvider";
+import { matchWorldRef } from "./chatPanelHelpers";
 import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
@@ -706,6 +707,28 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  - default: the sandboxed iframe PreviewProvider (existing behavior).
    * Public so extension.ts (runLastCode) shares the same routing.
    */
+  /** 지금 화면에 띄운 사전 완성 세상 id — 같은 세상을 다시 고르면 다시 받지 않는다. */
+  private lastPrebuiltWorld: string | null = null;
+
+  /**
+   * 2026-08-19 — 워커의 사전 완성 세상(GET /v1/worlds/:id)을 받아 revealBuilt 로 띄운다.
+   * 실패하면 false — 코치가 예전처럼 직접 만든다(느리지만 동작).
+   */
+  private async revealPrebuiltWorld(id: string, proxyUrl: string, token: string): Promise<boolean> {
+    try {
+      const url = proxyUrl.replace(/\/$/, "") + "/worlds/" + encodeURIComponent(id);
+      const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+      if (!res.ok) return false;
+      const html = await res.text();
+      if (!/<!doctype html/i.test(html)) return false;
+      const ok = await this.revealBuilt(html);
+      if (ok) this.lastPrebuiltWorld = id;
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * 2026-08-19 — SDK 코치가 Write/Edit 로 저장한 .html 을 미리보기에 띄운다.
    * 파일을 읽어 revealBuilt 로 넘긴다(펜스 경로와 완전히 같은 저장·리빌 동작).
@@ -1295,6 +1318,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // resurrecting it on webview remounts (webview clears its copy on userSent).
     this.pendingPageNotice = null;
     let userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
+    // 2026-08-19 — 게스트의 세상 사전 완성본. 아이가 게스트를 고르면 코치가 5KB 를
+    // 만들 때까지 30~40초 기다리게 하지 않는다: 워커에서 채워진 HTML 을 받아 즉시
+    // 저장·띄우고, 코치에게는 "이미 띄웠다 — 첫 대사만" 이라고 알린다.
+    {
+      const world = matchWorldRef(text, profile?.worlds);
+      if (world && token) {
+        const shown = await this.revealPrebuiltWorld(world.id, proxyUrl, token);
+        if (shown) {
+          userTextForModel =
+            `[Studio 안내: 아이가 ${world.emoji} ${world.guest} 세상을 골랐고, Studio 가 그 세상(문제 상태 기본값)을 ` +
+            `이미 작업 폴더 index.html 에 저장하고 오른쪽 화면에 띄웠다. 코드나 파일 도구 없이 — ` +
+            `${world.guest}의 첫 대사 한 줄과 "한번 해보세요" 만 짧게 말해라. 이후 바꾸기 요청부터 index.html 을 Read 하고 고쳐라.]\n\n${userTextForModel}`;
+        }
+      }
+    }
     // #278 Phase 2 — fold any queued page screenshot into this turn's images.
     const pageImage = this.pendingPageImage;
     this.pendingPageImage = null;

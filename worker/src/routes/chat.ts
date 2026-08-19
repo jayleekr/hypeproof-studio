@@ -27,6 +27,7 @@ import { callAnthropicResilient } from "../lib/anthropic";
 import { glmUpstreamUrl } from "../lib/glm";
 import { callGeminiResilient } from "../lib/gemini";
 import { callOpenAI } from "../lib/openai";
+import { listWorlds, renderWorld } from "../skeletons/kids-quest/worlds";
 import {
   extractTrialHeaders,
   lastUserMessageText,
@@ -112,6 +113,19 @@ chat.get("/health/deep", async (c) => {
 // indistinguishable. Codes mirror gateChatRequest so the two paths agree.
 // ---------------------------------------------------------------------------
 
+
+// GET /v1/worlds/:id — 게스트의 세상 사전 완성본 HTML (2026-08-19).
+// 학생 토큰이면 누구나. 코치가 만들 필요 없이 Studio 가 즉시 띄운다.
+chat.get("/worlds/:id", async (c) => {
+  const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
+  if (!auth.ok) return c.json({ error: { message: auth.message, type: "auth", code: auth.code, request_id: c.get("requestId") } }, 401);
+  const id = c.req.param("id");
+  let html: string | null = null;
+  try { html = renderWorld(id); } catch (e) { return c.json({ error: { message: String(e), type: "config", code: "world_render_failed", request_id: c.get("requestId") } }, 500); }
+  if (!html) return c.json({ error: { message: "unknown world", type: "config", code: "unknown_world", request_id: c.get("requestId") } }, 404);
+  return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+});
+
 chat.get("/profile", async (c) => {
   const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
   if (!auth.ok) {
@@ -174,6 +188,9 @@ chat.get("/profile", async (c) => {
     // Absent → the client keeps its legacy default. Exposing it here is what
     // lets the client stop hardcoding "~/HypeProofGames" for every cohort.
     workspace_root: profile.sandbox.workspace_root ?? null,
+    // 2026-08-19 — 게스트의 세상 사전 완성본 목록. kids-quest tier 에서만. 확장이
+    // 아이의 "🐕 초코 세상에 가볼래"를 이 목록으로 매칭해 GET /v1/worlds/:id 를 즉시 띄운다.
+    worlds: profile.game?.template_tier === "kids-quest" ? listWorlds() : undefined,
     // #278 — input capabilities, default off (minor-safe). Drives whether the
     // chat panel exposes "페이지를 코치에게" / image paste.
     input: {
