@@ -1289,6 +1289,12 @@ export function extractSdkText(msg: Record<string, unknown>): string {
 //   dedupe 는 소비자(SessionSpool.recordUsage, requestKey 기준)가 한다.
 // - result 메시지: `usage`(턴 합계) + `total_cost_usd`. 요청 단위 레코드 합의
 //   대조군으로 쓴다.
+//
+// 2026-08-19 실기기 실측(REQ-Q3 캐비앗): assistant usage 는 **스트림 시작
+// 시점 스냅샷**이다 — input/cache 3종은 정확하지만 output_tokens 는 아직
+// 1 인 초기값이었다(대조군: 같은 턴 result.usage.output_tokens=562). 분할
+// 복사본이 같은 스냅샷을 공유하므로 keep-last 로도 못 고친다. 턴의 output
+// 정답은 turn_end.total_usage, 요청 단위 전량 원장은 서버 D1 이다.
 
 /** 요청 1건의 토큰 4종 — provider 응답 필드명 그대로. */
 export interface SdkRequestUsage {
