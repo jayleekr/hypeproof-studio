@@ -83,6 +83,7 @@ import {
   COACH_DEGRADED_NOTICE,
   sdkFallbackLogLine,
   resolveCoachRuntime,
+  classifyTurnError,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 import { SessionSpool, spoolIdentityFromToken, traceMsgToWorkflowRecord } from "./sessionSpool";
@@ -1428,6 +1429,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // 런타임이 실제와 일치해야 한다 (no silent caps).
     let spoolRuntime: "proxy" | "agent-sdk" | null = null;
     let spoolStatus: "ok" | "error" = "ok";
+    let spoolErrorKind: string | undefined;
     // holder 인 이유: 콜백 안에서의 재할당을 TS CFA 가 못 봐서, 평범한 let 은
     // finally 시점에 null 로 좁혀진다.
     const sdkTurnTotal: {
@@ -1725,6 +1727,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
     } catch (err) {
       spoolStatus = "error";
+      spoolErrorKind = classifyTurnError(err);
       await this.handleSendError(err, streamId);
     } finally {
       // #580 — 턴의 끝을 항상 남긴다. 사용자 중단(abort)도 catch 로 오므로
@@ -1735,6 +1738,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         turnId: streamId,
         status: ctrl.signal.aborted ? "aborted" : spoolStatus,
         runtime: spoolRuntime,
+        ...(spoolErrorKind && !ctrl.signal.aborted ? { errorKind: spoolErrorKind } : {}),
         ...(total
           ? {
               totalUsage: total.usage,

@@ -314,6 +314,12 @@ export class SessionSpool {
     turnId: string;
     status: "ok" | "aborted" | "error";
     runtime: string | null;
+    /**
+     * 실패의 분류값 (에러 원문 산문이 아니라 `auth:missing`·`transport`·
+     * `stall` 같은 enum 성 문자열). status:"error" 만으로는 "usage 없는 턴"
+     * 의 원인 분석이 안 된다 — 첫 실기기 검증에서 바로 걸린 공백.
+     */
+    errorKind?: string;
     /** SDK result 메시지의 턴 합계 — 요청 단위 usage 레코드 합의 대조군. */
     totalUsage?: Record<string, unknown>;
     totalCostUsd?: number;
@@ -326,6 +332,7 @@ export class SessionSpool {
         turn_id: e.turnId,
         status: e.status,
         runtime: e.runtime,
+        ...(e.errorKind ? { error_kind: e.errorKind.slice(0, 100) } : {}),
         ...(e.totalUsage ? { total_usage: e.totalUsage } : {}),
         ...(typeof e.totalCostUsd === "number" ? { total_cost_usd: e.totalCostUsd } : {}),
       });

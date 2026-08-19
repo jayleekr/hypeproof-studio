@@ -328,3 +328,30 @@ const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "hps-spool-"));
 }
 
 console.log("session-spool.smoke.mjs — all green");
+
+// ─── error_kind — 실패 턴에 "왜"가 남는다 (첫 실기기 검증에서 걸린 공백) ─────
+{
+  const spool = makeSpool(tmp());
+  spool.recordTurnEnd({ turnId: "t-e", status: "error", runtime: "proxy", errorKind: "auth:missing" });
+  spool.recordTurnEnd({ turnId: "t-ok", status: "ok", runtime: "proxy" });
+  await spool.flush();
+  const [errEnd, okEnd] = readEvents(spool.currentSessionDir());
+  assert.equal(errEnd.error_kind, "auth:missing");
+  assert.equal(okEnd.error_kind, undefined, "성공 턴엔 키 자체가 없다");
+  console.log("✓ error_kind — 실패 분류값 기록, 성공 턴엔 부재");
+}
+
+// ─── classifyTurnError — 분류값만, 원문 산문 금지 ───────────────────────────
+{
+  const { classifyTurnError } = await import("../src/chatPanelHelpers.ts");
+  assert.equal(classifyTurnError({ kind: "session_inactive", friendly: "..." }), "auth:session_inactive");
+  assert.equal(classifyTurnError({ kind: "missing" }), "auth:missing");
+  assert.equal(classifyTurnError({ name: "CoachStallError" }), "stall");
+  assert.equal(classifyTurnError({ name: "AbortError" }), "aborted");
+  assert.equal(classifyTurnError({ requestId: undefined, message: "stream interrupted" }), "transport");
+  assert.equal(classifyTurnError(new TypeError("boom")), "TypeError");
+  assert.equal(classifyTurnError(new Error("아무 산문")), "error", "원문이 그대로 새지 않는다");
+  assert.equal(classifyTurnError("string"), "unknown");
+  assert.equal(classifyTurnError(null), "unknown");
+  console.log("✓ classifyTurnError — 덕 타이핑 분류, 산문 미유출");
+}

@@ -546,3 +546,21 @@ export function matchWorldRef(text: string, worlds: readonly WorldRef[] | undefi
   return null;
 }
 
+/**
+ * #580 — turn_end.error_kind 분류값. 에러 **원문(산문)은 절대 넣지 않는다**
+ * (임의 텍스트·PII 가 로그로 흘러드는 통로가 된다) — 분류만 남겨도 "usage
+ * 없는 턴"의 원인 분석(REQ-Q7)에는 충분하다. 덕 타이핑인 이유: 에러 클래스
+ * import 없이 플레인 Node 스모크로 검증하기 위해 (이 파일의 규율).
+ */
+export function classifyTurnError(err: unknown): string {
+  if (!err || typeof err !== "object") return "unknown";
+  const e = err as { name?: unknown; kind?: unknown; requestId?: unknown };
+  // ProxyAuthError — kind 가 원인 그 자체다 (missing/expired/session_inactive…).
+  if (typeof e.kind === "string" && e.kind) return `auth:${e.kind}`;
+  const name = typeof e.name === "string" ? e.name : "";
+  if (name === "CoachStallError") return "stall";
+  if (name === "AbortError") return "aborted";
+  // ProxyTransportError — requestId 프로퍼티가 시그니처 (값은 undefined 일 수 있음).
+  if ("requestId" in e) return "transport";
+  return name && name !== "Error" ? name.slice(0, 60) : "error";
+}
