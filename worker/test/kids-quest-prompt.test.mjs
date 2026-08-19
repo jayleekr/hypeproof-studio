@@ -167,3 +167,19 @@ console.log("kids-quest-prompt.test.mjs: all tests passed");
   assert.equal(trimMinorContext(short), short, "짧은 말은 그대로");
   console.log("✓ 아동 컨텍스트 위생 — 펜스 제거·뒤쪽 유지·짧은 말 무변경");
 }
+
+// --- 5. 세상별 엔진 — 남의 세상 스프라이트가 파일에 없다 (컨텍스트 오염 차단) --------
+{
+  const { WORLDS, renderEngineFor } = await import("../src/skeletons/kids-quest/worlds.ts");
+  const catcher = renderEngineFor("kq-catcher");
+  assert.ok(catcher.includes("S_DOG") && catcher.includes("S_FIRE"), "초코 세상은 자기 그림을 갖는다");
+  for (const alien of ["S_PENG", "S_ICE", "S_RAC", "S_PARROT", "S_BEE", "S_MOUSE"]) {
+    assert.ok(!catcher.includes(alien), `초코 엔진에 ${alien} 이 없다 (실기기: 초코 세상에서 얼음이 나왔다)`);
+  }
+  for (const w of WORLDS) {
+    const js = renderEngineFor(w.id);
+    assert.ok(js && js.includes("function report(") && js.length < 4000, `${w.id}: 엔진 유지 + 4KB 미만`);
+  }
+  assert.equal(renderEngineFor("nope"), null, "모르는 세상은 null");
+  console.log("✓ 세상별 엔진 — 자기 그림만, 남의 세상 없음, report 유지");
+}
