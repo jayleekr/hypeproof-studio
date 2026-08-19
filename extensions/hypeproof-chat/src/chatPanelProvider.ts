@@ -704,6 +704,26 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    *  - default: the sandboxed iframe PreviewProvider (existing behavior).
    * Public so extension.ts (runLastCode) shares the same routing.
    */
+  /**
+   * 2026-08-19 — SDK 코치가 Write/Edit 로 저장한 .html 을 미리보기에 띄운다.
+   * 파일을 읽어 revealBuilt 로 넘긴다(펜스 경로와 완전히 같은 저장·리빌 동작).
+   * 파일이 없거나 HTML 이 아니면 조용히 넘어간다 — 코치의 다음 말이 화면을
+   * 대신하지 않도록, 실패는 툴 로그 한 줄로만 남긴다.
+   */
+  private async revealWrittenHtml(filePath: string, streamId?: string): Promise<void> {
+    try {
+      const abs = path.isAbsolute(filePath) ? filePath : path.join(this.resolveCoachCwd() ?? "", filePath);
+      const buf = await vscode.workspace.fs.readFile(vscode.Uri.file(abs));
+      const html = Buffer.from(buf).toString("utf8");
+      if (!/<html[\s>]/i.test(html) && !/<!doctype html/i.test(html)) return;
+      await this.revealBuilt(html, { streamId });
+    } catch (e) {
+      if (streamId) {
+        this.postToolLog(streamId, { id: randomId(), icon: "🖼️", label: `미리보기 열기 실패: ${String(e).slice(0, 80)}`, state: "error" });
+      }
+    }
+  }
+
   async revealBuilt(html: string, opts?: { streamId?: string }): Promise<boolean> {
     // #359 — structural guard: auto-repair the known comment-close typo, and
     // refuse to reveal a still-broken document as if it succeeded. Returns
@@ -1371,6 +1391,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // The webview replaces an entry wholesale by id, so a tool_result has to
       // re-send the label the tool_use showed — keep it per stream.
       const toolLabels = new Map<string, string>();
+      // SDK 턴에서 Write/Edit 된 .html 경로 (tool_use id → 절대경로) — tool_result 성공 시 미리보기.
+      const htmlWrites = new Map<string, string>();
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
         const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
           // #503 — a.at: SDK 가 실어 보낸 자기 시각. 영속화된 줄의 createdAt 이 된다.
@@ -1381,6 +1403,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             log(`think-${thinkingIndex}`, "💭", `Thinking… ${a.tokens} tokens`, "running");
             break;
           case "thinking":
+            // 2026-08-19 — 아동 코호트에는 코치의 속생각(영어 원문)을 그대로 보이지
+            // 않는다. "The user wants me to display the HTML file…" 이 아이 화면에
+            // 그대로 떴다(실기기, 게스트의 세상). 어른 트랙(#414)은 그대로.
+            if (profile?.minor_cohort === true) break;
             log(`think-${thinkingIndex}`, "💭", a.text, "done");
             thinkingIndex += 1;
             break;
@@ -1389,6 +1415,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // 남기면 "정상 · 상대경로 거부 · 워크스페이스 밖"이 같은 글자가 된다.
             const label = `${a.name}(${summarizeToolInput(a.name, a.input, 60, this.resolveCoachCwd())})`;
             toolLabels.set(a.id, label);
+            // 2026-08-19 — SDK 코치가 Write/Edit 로 .html 을 저장하면 그 결과가
+            // 화면에 떠야 한다. 이전에는 채팅의 ```html 펜스만 미리보기를 열어서,
+            // 코치가 도구로 파일을 고친 턴은 "다 됐어요"라고 말해도 화면이 안 바뀌고
+            // 코치가 "▶ 실행을 눌러라 / 127.0.0.1:포트 를 열어라"로 흘렀다
+            // (2026-08-19 실기기, 게스트의 세상 T1). 어떤 파일을 쓰는지 기억해 둔다.
+            {
+              const inp = a.input as { file_path?: unknown } | undefined;
+              const fp = typeof inp?.file_path === "string" ? inp.file_path : "";
+              if ((a.name === "Write" || a.name === "Edit" || a.name === "MultiEdit") && /\.html?$/i.test(fp)) {
+                htmlWrites.set(a.id, fp);
+              }
+            }
             log(a.id, "🔧", label, "running");
             break;
           }
@@ -1404,6 +1442,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 : (toolLabels.get(a.id) ?? ""),
               a.isError ? "error" : "done",
             );
+            // 도구로 .html 을 성공적으로 썼으면 그 파일을 읽어 미리보기에 띄운다
+            // (펜스 경로와 같은 revealBuilt — 저장·라이브서버·네이티브 탭까지 동일).
+            if (!a.isError && htmlWrites.has(a.id)) {
+              const fp = htmlWrites.get(a.id)!;
+              htmlWrites.delete(a.id);
+              void this.revealWrittenHtml(fp, streamId);
+            }
             break;
         }
       };

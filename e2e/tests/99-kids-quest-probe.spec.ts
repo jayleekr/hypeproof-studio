@@ -60,6 +60,7 @@ test("kids-quest probe", async () => {
     }
     await win.waitForTimeout(6000);
     dump("T1 final: " + (await readAssistant()).text.slice(0, 500).replace(/\n/g, " ⏎ "));
+    { const c1 = await findChat(win); const sh = c1 ? ((await c1.fl.locator(".hps-shell").textContent()) ?? "") : ""; dump("T1 shell has 미리보기 열었어요: " + /미리보기를 열었어요/.test(sh) + " | Write/Edit: " + /Write\(|Edit\(/.test(sh)); }
     c = await findChat(win); if (!c) throw new Error("chat frame lost");
     const ta2 = c.fl.locator(".hps-input textarea").first();
     await ta2.fill("해봤는데 불덩이만 떨어져서 바로 끝났어"); await ta2.press("Enter");
@@ -89,6 +90,20 @@ test("kids-quest probe", async () => {
       await win.waitForTimeout(2500);
     }
     dump("T3 done, preview2=" + seenPreview2);
+    { const c1 = await findChat(win); const sh = c1 ? ((await c1.fl.locator(".hps-shell").textContent()) ?? "") : ""; const n = (sh.match(/미리보기를 열었어요/g) ?? []).length; dump("T3 shell 미리보기 열었어요 count: " + n + " | 실행 버튼/주소 언급: " + /▶ 실행|127\.0\.0\.1|실행 버튼/.test(sh)); }
+    // T4 — ask for the guest's verdict without having played: coach must not invent a result
+    c = await findChat(win); if (!c) throw new Error("chat frame lost 3");
+    const ta4 = c.fl.locator(".hps-input textarea").first();
+    await ta4.fill("초코야 어때? 됐어?"); await ta4.press("Enter");
+    const t3 = Date.now(); let last4 = "";
+    while (Date.now() - t3 < 60_000) {
+      const r = await readAssistant();
+      if (r.text !== last4 && r.text !== last3) { last4 = r.text; dump(`T4 assistant len=${r.text.length}: ${r.text.slice(0, 300).replace(/\n/g, " ⏎ ")}`); }
+      if (last4.length > 20 && !/생각하는 중/.test(last4)) break;
+      await win.waitForTimeout(2000);
+    }
+    const notice = await c.fl.locator(".hps-shell").textContent().catch(() => "");
+    dump("shell has 결과 notice: " + /친구가 해봤어요|게스트 결과/.test(notice ?? ""));
     try {
       const idx = fs.readFileSync(`${ctx.wsDir}/index.html`, "utf8");
       fs.writeFileSync("test-results/kq-probe-index.html", idx);
