@@ -1624,13 +1624,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // "다음 행동을 만드는 중" 안내 줄 (도구 결과 → 다음 호출 사이의 침묵 구간).
       let pendingShown = false;
       const PENDING_ID = `pending-${streamId}`;
+      // 도구 결과 ↔ 다음 도구 호출 사이는 스트림이 완전히 조용하다(호출은 완성돼야
+      // 한 덩어리로 온다). 실기기에서 그 구간이 3분이었고 마지막 줄이 `Read ✓` 라
+      // 아이도 어른도 "읽는 중" 으로 오해했다. 그 구간을 살아있는 한 줄로 메운다.
+      const showPending = () => {
+        if (pendingShown) return;
+        pendingShown = true;
+        this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고치는 중…", state: "running" });
+      };
       const clearPending = () => {
         if (!pendingShown) return;
         pendingShown = false;
-        this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고치는 중…", state: "done" });
+        this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고쳤어요", state: "done" });
       };
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
-        clearPending();
         const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
           // #503 — a.at: SDK 가 실어 보낸 자기 시각. 영속화된 줄의 createdAt 이 된다.
           this.postToolLog(streamId, { id, icon, label, state, ...(a.at ? { at: a.at } : {}) });
@@ -1640,6 +1647,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             log(`think-${thinkingIndex}`, "💭", `Thinking… ${a.tokens} tokens`, "running");
             break;
           case "thinking":
+            // 2026-08-20 — 생각도 "뭔가 하는 중" 이다. 아동은 속생각을 숨기므로(아래)
+            // 이 줄이 없으면 화면이 완전히 조용해진다 — 실기기에서 Read ✓ 뒤 3분 침묵.
+            showPending();
             // 2026-08-19 — 아동 코호트에는 코치의 속생각(영어 원문)을 그대로 보이지
             // 않는다. "The user wants me to display the HTML file…" 이 아이 화면에
             // 그대로 떴다(실기기, 게스트의 세상). 어른 트랙(#414)은 그대로.
@@ -1650,6 +1660,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           case "tool_use": {
             // 워크스페이스 루트를 넘겨 경로를 루트 기준으로 보여 준다. 파일명만
             // 남기면 "정상 · 상대경로 거부 · 워크스페이스 밖"이 같은 글자가 된다.
+            clearPending();
             const label = `${a.name}(${summarizeToolInput(a.name, a.input, 60, this.resolveCoachCwd())})`;
             toolLabels.set(a.id, label);
             // 2026-08-19 — SDK 코치가 Write/Edit 로 .html 을 저장하면 그 결과가
@@ -1668,11 +1679,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             break;
           }
           case "tool_result":
-            // 2026-08-19 — 도구 결과와 다음 도구 호출 사이는 화면이 완전히 조용하다
-            // (호출은 완성돼야 한 덩어리로 온다). 실기기에서 그 구간이 수십 초~분
-            // 단위였고, 마지막 줄이 `Read(index.html) ✓` 라 "읽는 중" 으로 오해했다.
-            // 그 침묵을 살아있는 줄 하나로 메운다 — 다음 이벤트가 오면 사라진다.
-            pendingShown = true;
             // 실패는 라벨에 표시를 남긴다 — 아이콘만으로는 스크롤 지나가면
             // 사라진다. 실사용에서 Write 실패를 놓치고 "저장됐습니다"를 그대로
             // 믿었다(2026-07-26).
@@ -1686,9 +1692,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             );
             // 도구로 .html 을 성공적으로 썼으면 그 파일을 읽어 미리보기에 띄운다
             // (펜스 경로와 같은 revealBuilt — 저장·라이브서버·네이티브 탭까지 동일).
-            if (pendingShown) {
-              this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고치는 중…", state: "running" });
-            }
+            showPending();
             if (!a.isError && htmlWrites.has(a.id)) {
               const fp = htmlWrites.get(a.id)!;
               htmlWrites.delete(a.id);
