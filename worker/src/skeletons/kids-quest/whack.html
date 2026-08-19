@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>%%TITLE%%</title>
+<style>
+  html,body{margin:0;height:100%;overflow:hidden;background:#0d0d1a;font-family:-apple-system,'Apple SD Gothic Neo',sans-serif;user-select:none}
+  #c{display:block;width:100vw;height:100vh}
+  #guest{position:fixed;top:12px;left:12px;right:12px;display:flex;gap:10px;align-items:flex-start;pointer-events:none}
+  #guest .face{font-size:34px;line-height:1}
+  #guest .bub{background:rgba(255,255,255,.94);color:#222;border-radius:14px;padding:8px 12px;font-size:14px;max-width:70vw;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+  #guest .bub b{color:#b8571e}
+  #bar{position:fixed;left:0;right:0;bottom:0;padding:10px 14px;background:rgba(0,0,0,.45);backdrop-filter:blur(6px);color:#fff;font-size:15px;text-align:center}
+  #bar b{color:#ffd75b}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="guest"><div class="face" id="gface"></div><div class="bub" id="gsay"></div></div>
+<div id="bar"><b>클릭</b> 또는 <b>탭</b>으로 콩! · <b>스페이스</b>로 시작</div>
+<script>
+/* ══ CONFIG — 자리표시자. 코치가 처음 채운다. 기본값 = 이 세상의 문제 상태 ═══════ */
+const GUEST_EMOJI='%%GUEST_EMOJI%%';   // 🐹
+const GUEST_NAME='%%GUEST_NAME%%';     // 햄찌
+const GUEST_LINE='%%GUEST_LINE%%';     // 게스트가 자기 세상을 말하는 첫 대사. 예: 텃밭에 두더지가 떼로 나와서 새싹을 다 먹어… 너무 많고 너무 빨라…
+const PLAYER='%%PLAYER_EMOJI%%';       // 지켜보는 게스트
+const ITEM_A='%%ITEM_A%%';             // 잡을 것. 문제 세상: 🐭
+const ITEM_B='%%ITEM_B%%';             // 잡으면 안 되는 것 (예: 🐝). 없애려면 ''
+const SPEED=%%SPEED%%;                 // 나왔다 들어가는 빠르기 1~10 (문제 세상 7)
+const RATE=%%RATE%%;                   // 한 번에 몇 마리 1~10 (문제 세상 4)
+const GOAL=%%GOAL%%;                   // 몇 마리 잡으면 성공 (기본 15)
+const SPECIAL=%%SPECIAL%%;             // 제한 시간(초) 기본 30, 0=무제한
+const BG=['%%BG_TOP%%','%%BG_BOT%%'];  // 배경 위/아래 색. 문제 세상 기본: #3a5a2c/#7fa86b (텃밭)
+/* ══ WORLD — 이 세상에 박힌 문제. 화면에 보이고 기계적으로도 작동한다. ═══════════
+   아이가 말하면 코치가 뭐든 바꾼다: 플래그를 끄고, 오브젝트를 바꾸고, 새 규칙·새 코드를 넣는다.
+   지키는 것 둘 — #guest 말풍선, report() (hp:result + world 동봉). 세상을 바꿨으면 WORLD 값도 맞춰 둔다(게스트가 그걸 본다). */
+const WORLD={
+  eat:true,       // 못 잡고 들어간 두더지가 새싹을 하나 먹는다 — 새싹이 0이면 끝
+  sprouts:5,      // 새싹 개수 🌱 (울타리를 치거나 새싹을 늘리면 여기 반영)
+};
+/* ══ 엔진 ══════════════════════════════════════════════════════════════ */
+const cv=document.getElementById('c'),x=cv.getContext('2d');
+let W,H;function fit(){W=cv.width=innerWidth;H=cv.height=innerHeight-46;}fit();onresize=fit;
+document.getElementById('gface').textContent=GUEST_EMOJI;
+const say=s=>{document.getElementById('gsay').innerHTML=s;};
+say('<b>'+GUEST_NAME+'</b>: '+GUEST_LINE);
+function bg(){const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,BG[0]);g.addColorStop(1,BG[1]);x.fillStyle=g;x.fillRect(0,0,W,H);}
+function txt(s,y,sz,c,xx){x.fillStyle=c||'#fff';x.font='bold '+sz+'px sans-serif';x.textAlign='center';x.fillText(s,xx==null?W/2:xx,y);}
+function report(r,ok,title,okSay,failSay){state='over';r.type='hp:result';r.ok=ok;r.world=Object.assign({},WORLD);r.n=(window.__hpLast?window.__hpLast.n:0)+1;window.__hpLast=r;try{parent.postMessage(r,'*');}catch(e){}document.title=(ok?'성공 ':'실패 ')+title;say('<b>'+GUEST_NAME+'</b>: '+(ok?okSay:failSay));}
+const COLS=3,ROWS=3;let state='title',holes=[],t=0,hit=0,miss=0,sprouts=WORLD.sprouts;const SUB=ITEM_A+' '+GOAL+'마리 잡으면 성공!'+(SPECIAL?' ('+SPECIAL+'초)':'');
+const stay=Math.max(20,120-SPEED*10);
+function reset(){holes=Array.from({length:COLS*ROWS},()=>({who:'',ttl:0}));t=0;hit=0;miss=0;sprouts=WORLD.sprouts;state='play';say('<b>'+GUEST_NAME+'</b>: 나온다, 나온다!');}
+function geo(){const cs=Math.min((W-40)/COLS,(H-170)/ROWS);return {cs,gx:(W-cs*COLS)/2,gy:100};}
+function end(ok){report({hit,miss,goal:GOAL,sprouts,secs:Math.round(t/60),speed:SPEED,atOnce:RATE,time:SPECIAL},ok,hit+'마리',ok?'새싹 지켰다! 🌱 고마워':'', sprouts<=0?'새싹이… 다 먹혔어…':'너무 빨라서 다 놓쳤어…');}
+addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();});
+addEventListener('pointerdown',e=>{if(state!=='play'){reset();return;}const {cs,gx,gy}=geo();const c=Math.floor((e.clientX-gx)/cs),r=Math.floor((e.clientY-gy)/cs);if(c<0||r<0||c>=COLS||r>=ROWS)return;const h=holes[r*COLS+c];if(!h.who)return;
+  if(h.who===ITEM_A){hit++;}else{miss++;say('<b>'+GUEST_NAME+'</b>: 앗, 그건 아니야!');}h.who='';h.ttl=0;if(hit>=GOAL)end(true);});
+function loop(){bg();
+  if(state==='title'){txt('%%TITLE%%',H/2-30,Math.min(56,W/8));txt(SUB,H/2+30,22,'#ffd75b');txt('스페이스바 또는 화면을 누르면 시작',H/2+68,18,'#bbb');}
+  else{const {cs,gx,gy}=geo();if(state==='play'){t++;const active=holes.filter(h=>h.who).length;
+      if(active<RATE&&t%Math.max(6,Math.round(stay/2))===0){const free=holes.filter(h=>!h.who);if(free.length){const h=free[Math.floor(Math.random()*free.length)];h.who=(ITEM_B&&Math.random()<0.25)?ITEM_B:ITEM_A;h.ttl=stay;}}
+      holes.forEach(h=>{if(h.who){h.ttl--;if(h.ttl<=0){if(h.who===ITEM_A&&WORLD.eat){sprouts--;say('<b>'+GUEST_NAME+'</b>: 앗, 새싹 하나 먹혔어!');}h.who='';}}});
+      const secs=Math.round(t/60);if(WORLD.eat&&sprouts<=0)end(false);else if(SPECIAL&&secs>=SPECIAL)end(false);}
+    x.textAlign='center';x.textBaseline='middle';x.font='28px serif';for(let i=0;i<sprouts;i++)x.fillText('🌱',40+i*36,74);
+    holes.forEach((h,i)=>{const c=i%COLS,r=Math.floor(i/COLS),cx=gx+(c+.5)*cs,cy=gy+(r+.5)*cs;x.fillStyle='rgba(0,0,0,.35)';x.beginPath();x.ellipse(cx,cy+cs*.25,cs*.35,cs*.15,0,0,6.3);x.fill();if(h.who){x.font=Math.floor(cs*.55)+'px serif';x.fillText(h.who,cx,cy);}});
+    x.font='40px serif';x.fillText(PLAYER,W-50,H-40);x.textBaseline='alphabetic';
+    const secs=Math.round(t/60);txt(ITEM_A+' '+hit+' / '+GOAL+(SPECIAL?'   ⏱ '+Math.max(0,SPECIAL-secs):''),42,24,'#ffd75b');
+    if(state==='over'){txt(document.title.startsWith('성공')?'해냈다! 🎉':'…',H/2-10,Math.min(50,W/9));txt('스페이스바로 다시',H/2+34,18,'#bbb');}}
+  requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>

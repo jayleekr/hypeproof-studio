@@ -6,22 +6,114 @@ import jumperHtml from "./kids-basic/jumper.html";
 // @ts-ignore
 import dodgeHtml from "./kids-basic/dodge.html";
 // @ts-ignore
-import worldHtml from "./kids-world/world.html";
+import kqCatcherHtml from "./kids-quest/catcher.html";
+// @ts-ignore
+import kqRunnerHtml from "./kids-quest/runner.html";
+// @ts-ignore
+import kqCollectHtml from "./kids-quest/collect.html";
+// @ts-ignore
+import kqStackHtml from "./kids-quest/stack.html";
+// @ts-ignore
+import kqMazeHtml from "./kids-quest/maze.html";
+// @ts-ignore
+import kqWhackHtml from "./kids-quest/whack.html";
+// @ts-ignore
+import kqMemoryHtml from "./kids-quest/memory.html";
+// @ts-ignore
+import kqWaterHtml from "./kids-quest/water.html";
+// @ts-ignore
+import kqSortHtml from "./kids-quest/sort.html";
 // @ts-ignore
 import dentalV1Html from "./search-webapp/dental-v1.html";
 // @ts-ignore
 import verdictCardHtml from "./search-webapp/verdict-card.html";
 
 const REGISTRY: Skeleton[] = [
-  // ─── kids-world tier — "내가 만든 미래" (SK 2026-08-22 워크숍 산출물) ───
+  // ─── kids-quest tier — 게스트 퀘스트 (SK 2026-08-22 워크숍 산출물) ─────────
+  // 게스트(NPC)가 문제를 말하고, 아이가 스켈레톤을 골라 CONFIG(룰 숫자·오브젝트·
+  // 배경)를 말로 바꾼다. 결과는 스켈레톤이 `hp:result` 로 부모창에 보내고 코치가
+  // 게스트 목소리로 반응한다. 10개 모두 같은 자리표시자 규격(curriculum/quests/QUESTS.md).
+  // 핵심 조작이 서로 겹치지 않게 고른다: 받기·점프·모으기·쌓기·미로·반응·기억·조절·분류. (dodge 는 catcher 와 조작이 겹쳐 R39 에서 제거)
   {
-    id: "kw-world",
-    tier: "kids-world",
-    genre: "living-world",
+    id: "kq-catcher",
+    tier: "kids-quest",
+    genre: "catcher",
     summary_ko:
-      "아이가 말로 묘사한 미래가 살아 움직이는 도트 세계 — 비·눈이 내리고 낮밤이 바뀌고 창문에 불이 켜진다. 집·빌딩·나무·가로등·차·이모지를 배치해 만든다",
-    tags: ["미래", "세계", "동네", "도시", "집", "학교", "비", "눈", "밤", "낮", "도트", "그리기", "만들기", "우리 동네", "2050"],
-    html: worldHtml as unknown as string,
+      "🐕 초코 · 더위 — 위에서 떨어지는 시원한 것(ITEM_A)을 받고 뜨거운 것(ITEM_B)은 피한다. SPECIAL=목숨(LIVES)",
+    tags: ["초코", "강아지", "더워", "덥다", "받기", "떨어지는", "시원한", "얼음", "아이스크림", "받아먹기"],
+    html: kqCatcherHtml as unknown as string,
+  },
+  {
+    id: "kq-runner",
+    tier: "kids-quest",
+    genre: "runner",
+    summary_ko:
+      "🐈 나비 · 밤이 무서워 — 어두운 길을 달리며 장애물(ITEM_B)을 점프로 넘어 집(ITEM_A)까지 간다. SPECIAL=밝기(LIGHT, 장애물이 보이는 거리)",
+    tags: ["나비", "고양이", "밤", "무서워", "어두워", "달리기", "점프", "집", "길", "가로등", "별"],
+    html: kqRunnerHtml as unknown as string,
+  },
+  {
+    id: "kq-collect",
+    tier: "kids-quest",
+    genre: "collect",
+    summary_ko:
+      "🐝 붕붕 · 꽃을 못 찾아 — 날아다니며 흩어진 것(ITEM_A)을 시간 안에 모은다. 방해꾼(ITEM_B). RATE=흩어짐, SPECIAL=제한시간(TIME초, 0=무제한)",
+    tags: ["붕붕", "꿀벌", "벌", "꽃", "꿀", "모으기", "찾기", "날기", "화단", "시간"],
+    html: kqCollectHtml as unknown as string,
+  },
+  {
+    id: "kq-stack",
+    tier: "kids-quest",
+    genre: "stack",
+    summary_ko:
+      "🐧 뽀로 · 집이 무너져 — 좌우로 움직이는 블록(ITEM_A)을 타이밍 맞춰 GOAL층 쌓는다. 완성하면 지붕(ITEM_B). SPECIAL=삐뚤어도 봐주는 정도(TOLERANCE)",
+    tags: ["뽀로", "펭귄", "얼음", "집", "쌓기", "블록", "무너져", "탑", "층", "타이밍"],
+    html: kqStackHtml as unknown as string,
+  },
+  {
+    id: "kq-maze",
+    tier: "kids-quest",
+    genre: "maze",
+    summary_ko:
+      "🐁 찍찍 · 길을 잃어 — 미로에서 방향키로 한 칸씩 목표(ITEM_A)까지 간다. 함정(ITEM_B) 밟으면 출발점. SPEED=함정 개수, RATE=미로 크기, GOAL=제한시간(0=무제한), SPECIAL=밝기(내 주변만 보임)",
+    tags: ["찍찍", "생쥐", "쥐", "미로", "길", "치즈", "헷갈려", "길찾기", "어두워", "함정"],
+    html: kqMazeHtml as unknown as string,
+  },
+  {
+    id: "kq-whack",
+    tier: "kids-quest",
+    genre: "whack",
+    summary_ko:
+      "🐹 햄찌 · 두더지가 새싹을 갉아먹어 — 구멍에서 나오는 것(ITEM_A)을 클릭으로 잡는다, 잡으면 안 되는 것(ITEM_B). SPEED=나왔다 들어가는 빠르기, RATE=한 번에 몇 마리, GOAL=몇 마리, SPECIAL=제한시간",
+    tags: ["햄찌", "햄스터", "두더지", "새싹", "잡기", "콩", "반응", "빨라", "클릭", "탭"],
+    html: kqWhackHtml as unknown as string,
+  },
+  {
+    id: "kq-memory",
+    tier: "kids-quest",
+    genre: "memory",
+    summary_ko:
+      "🦜 앵무 · 노래 순서를 잊어 — 불빛 순서를 보고 똑같이 누른다(순서 기억). SPEED=불빛 빠르기, RATE=단추 개수 2~6, GOAL=몇 단계까지, SPECIAL=틀려도 되는 횟수",
+    tags: ["앵무", "앵무새", "노래", "순서", "기억", "외우기", "따라하기", "잊어버려", "음악"],
+    html: kqMemoryHtml as unknown as string,
+  },
+  {
+    id: "kq-water",
+    tier: "kids-quest",
+    genre: "balance",
+    summary_ko:
+      "🌻 해바 · 물을 딱 맞게 — 누르고 있으면 물이 차고 놓으면 마른다, 초록 구간에 GOAL초 머문다(조절). ITEM_B=가끔 나타나 더 빨리 마르게 하는 것. SPEED=마르는 빠르기, RATE=물 세기, SPECIAL=적정 구간 폭",
+    tags: ["해바", "해바라기", "꽃", "물", "물주기", "목말라", "썩어", "딱 맞게", "조절", "균형", "식물"],
+    html: kqWaterHtml as unknown as string,
+  },
+  {
+    id: "kq-sort",
+    tier: "kids-quest",
+    genre: "sort",
+    summary_ko:
+      "🦝 라쿤 · 쓰레기가 섞여 — 나오는 것을 왼쪽 통(ITEM_A)/오른쪽 통(ITEM_B)으로 판단해 보낸다, 둘 다 아닌 건 기다린다(분류). SPEED=다음 것 오는 빠르기, RATE=헷갈리는 것 비율, GOAL=몇 개, SPECIAL=틀려도 되는 횟수",
+    tags: ["라쿤", "너구리", "쓰레기", "분리수거", "냇물", "캔", "병", "나누기", "고르기", "왼쪽", "오른쪽", "판단"],
+    html: kqSortHtml as unknown as string,
   },
   {
     id: "kb-catcher",

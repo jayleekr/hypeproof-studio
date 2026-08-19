@@ -24,7 +24,8 @@ import {
 const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
-import { PreviewProvider } from "./previewProvider";
+import { PreviewProvider, sanitizeQuestResult } from "./previewProvider";
+import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
@@ -258,6 +259,74 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.postPageNotice(
       `${withShot ? "🖼 화면과 내용을" : "📄 내용을"} 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
     );
+  }
+
+  /**
+   * kids-quest — a skeleton round ended (`hp:result`). Stash a one-line summary
+   * for the NEXT turn so the coach can react in the guest's voice to what the
+   * kid actually did, instead of guessing. Same consume-once channel as
+   * attachPageContext (#278): history keeps the kid's clean text; only the
+   * model sees the prepended line. Retries overwrite — the last round is the
+   * one the kid is talking about — but the attempt count is kept so "3번째
+   * 만에 성공" is visible to the coach.
+   */
+  attachQuestResult(result: Record<string, unknown>): void {
+    const ok = result.ok === true;
+    const attempts = ++this.questAttempts;
+    if (ok) this.questAttempts = 0;
+    const kv = Object.entries(result)
+      .filter(([k]) => k !== "ok")
+      .map(([k, v]) => `${k}=${String(v)}`)
+      .join(" ");
+    this.pendingPageContext =
+      `[게스트 결과] ${ok ? "성공" : "실패"} · ${kv}` +
+      (attempts > 1 ? ` · ${attempts}번째 시도` : "") +
+      `\n위 결과를 게스트 목소리로 한 줄 반응한 뒤 아이에게 넘겨줘. 결과에 없는 숫자는 지어내지 마.`;
+    this.pendingPageImage = null;
+    this.postPageNotice(`${ok ? "🎉" : "💦"} 친구가 해봤어요 — ${ok ? "성공" : "아직"}. 코치에게 결과가 전해졌어요.`);
+  }
+  /** Rounds since the last success (a success resets it). */
+  private questAttempts = 0;
+  /** JSON of the last pulled `__hpLast` — so a round is folded in once. */
+  private lastPulledQuestResult = "";
+
+  /**
+   * kids-quest, live_server path — the skeleton runs in the native browser tab
+   * (no parent window, so `hp:result` postMessage has nowhere to go). Every
+   * skeleton also leaves the last round on `window.__hpLast`; pull it over CDP
+   * right before a turn goes out. Cheap (one Runtime.evaluate) and pull-based,
+   * so "됐어?" always sees the freshest round. Silent on any failure — a
+   * missing result just means the coach says "한번 해보고 알려주세요".
+   */
+  private async pullQuestResultFromPreview(): Promise<void> {
+    if (this.cachedProfile?.game?.template_tier !== "kids-quest") return;
+    const tabs = vscode.window.browserTabs ?? [];
+    const tab =
+      this.mcpBrowser?.currentTab() ??
+      tabs.find((t) => /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(t.url ?? "")) ??
+      vscode.window.activeBrowserTab;
+    if (!tab) return;
+    let json = "";
+    try {
+      const session = await CdpSession.attach(tab);
+      try {
+        const res = await session.send(
+          "Runtime.evaluate",
+          { expression: "JSON.stringify(window.__hpLast || null)", returnByValue: true },
+          3_000,
+        );
+        json = typeof res?.result?.value === "string" ? res.result.value : "";
+      } finally {
+        await session.close();
+      }
+    } catch {
+      return;
+    }
+    if (!json || json === "null" || json === this.lastPulledQuestResult) return;
+    this.lastPulledQuestResult = json;
+    let parsed: unknown;
+    try { parsed = JSON.parse(json); } catch { return; }
+    this.attachQuestResult(sanitizeQuestResult(parsed));
   }
 
   /**
@@ -1196,6 +1265,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #278 — consume any queued browser-page context for THIS turn only. The
     // user message stored in history keeps their clean text; only the model
     // sees the prepended page context.
+    // kids-quest — fold the latest round from the native preview tab (if any).
+    await this.pullQuestResultFromPreview();
     const pageContext = this.pendingPageContext;
     this.pendingPageContext = null;
     // #308 — the notice describes the queued context; once consumed, stop
