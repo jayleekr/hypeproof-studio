@@ -23,6 +23,7 @@
 <p align="center">
   <a href="./METAPLAN.md">Build plan</a> ·
   <a href="./docs/seven-assets.md">7 AI Native Assets</a> ·
+  <a href="./skills/README.md">Agent skills</a> ·
   <a href="./docs/INSTALL.md">Install (workshop)</a> ·
   <a href="./docs/COHORT-AUTHORING.md">Authoring cohorts</a> ·
   <a href="./DEV-GUIDE.md">Dev guide</a>
@@ -132,6 +133,7 @@ and failure modes: [.claude/rules/build-pipeline.md](.claude/rules/build-pipelin
 | `worker/` | Cloudflare Worker — OpenAI-compatible proxy, per-cohort profiles, token auth. Production target. |
 | `proxy-poc/` | Python proxy from early iteration (superseded by `worker/`). |
 | `scripts/` | Build wrappers — `run-build.sh`, `dev-stack.sh`, `generate-platform-icons.sh`, `verify-branding.sh`. |
+| `skills/` | Public Agent Skills maintained with Studio, including the [`hain7-report`](./skills/hain7-report/) classroom observation report. |
 | `e2e/` | Playwright suite driving the built `.app`. |
 | `docs/` | INSTALL, COHORT-AUTHORING, 7 AI Native Assets, release guides. |
 | `METAPLAN.md` | Phased build plan — the source of truth. Cross-reference by §N. |
