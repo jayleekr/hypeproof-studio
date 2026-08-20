@@ -78,11 +78,11 @@ export const profile: Profile = {
     template_tier: "kids-quest",   // 게스트 퀘스트 — kq-* 5개. "게임" 낱말을 쓰지 않는 tier.
   },
   publishing: {
-    // 단발 4시간 워크숍 — 로컬 미리보기(▶ Run)로 충분하고 chat-only
-    // (sandbox.mcp_tools_enabled [])와 정합한다. 미성년 게임의 공개 퍼블리시는
-    // 부모 동의·PII 설계가 끝나기 전엔 켜지 않는다(smoke.mjs §4 불변식).
-    enabled: false,
-    strategy: "local_only",
+    // 2026-08-21 — 부모 동의 확보 + PII 설계 완료로 갤러리를 연다.
+    // A반(grade-5-6) 과 같은 판단이며, 같은 범위까지만 연다: `hypeproof_gallery`
+    // (noindex · 회차 격리 · 리포트는 암호 뒤). 공개 GitHub Pages 는 그대로 닫힘.
+    enabled: true,
+    strategy: "hypeproof_gallery",
   },
   assets_focus: [
     "intent_clarity",

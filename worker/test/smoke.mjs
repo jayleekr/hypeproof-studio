@@ -1709,14 +1709,26 @@ const TINY_PNG =
       p.analytics.log_user_messages, false,
       `profile ${p.id}: log_user_messages MUST default to false until consent + retention policy is in place (#9 policy decision)`,
     );
-    // Minors' cohorts (parent-coached kids) must not publish to public hosting
-    // until parental-consent + PII handling is designed — a public GitHub Pages
-    // of a child's game is a privacy exposure. Live SK biopharm 1회차 is chat-only
-    // and its system prompt tells the coach publishing isn't available yet.
+    // Minors' cohorts (parent-coached kids) must never publish to OPEN public
+    // hosting. This used to assert `enabled === false` outright; 2026-08-21 that
+    // became too blunt — parental consent was obtained and the gallery's PII
+    // design landed (noindex `/live/**`, per-room isolation, report behind a
+    // separate password), so those cohorts now publish to `hypeproof_gallery`.
+    //
+    // The invariant that still matters is the one the old comment actually named:
+    // **a public GitHub Pages of a child's game is a privacy exposure.** That
+    // surface is indexed, permanent, and outside our control — we cannot take it
+    // back. Our gallery is none of those. So the line moved from "may not publish"
+    // to "may not publish HERE", and it is still enforced.
+    //
+    // Adding a new strategy? Decide which side of this line it sits on before
+    // adding it to the allowlist. Defaulting a minors' cohort to a surface we
+    // cannot revoke is the failure this test exists to prevent.
+    const MINOR_SAFE_PUBLISH = new Set(["local_only", "hypeproof_gallery"]);
     if (p.audience.parent_coaching === true) {
-      assert.equal(
-        p.publishing.enabled, false,
-        `profile ${p.id}: minors' cohort MUST keep publishing.enabled=false until parental consent + PII handling is designed`,
+      assert.ok(
+        MINOR_SAFE_PUBLISH.has(p.publishing.strategy),
+        `profile ${p.id}: minors' cohort may only publish to ${[...MINOR_SAFE_PUBLISH].join(" / ")} — got "${p.publishing.strategy}" (open public hosting is not revocable)`,
       );
     }
   }
