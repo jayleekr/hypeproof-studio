@@ -96,6 +96,8 @@ import {
   sdkFallbackLogLine,
   resolveCoachRuntime,
   classifyTurnError,
+  pendingCloseLabel,
+  WRITE_TOOL_NAMES,
 } from "./chatPanelHelpers";
 import { buildChatPanelCsp } from "./cspBuilder";
 import {
@@ -1774,10 +1776,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         pendingShown = true;
         this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고치는 중…", state: "running" });
       };
+      // 이 턴에서 쓰기 도구가 **성공**한 적이 있는가. 안내 줄을 닫을 때
+      // "고쳤어요" 라고 적을 유일한 근거다 — 없으면 아이에게 거짓말이 된다(R0).
+      let wroteOk = false;
+      const writeToolIds = new Set<string>();
       const clearPending = () => {
         if (!pendingShown) return;
         pendingShown = false;
-        this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고쳤어요", state: "done" });
+        this.postToolLog(streamId, {
+          id: PENDING_ID,
+          icon: "✍️",
+          label: pendingCloseLabel(wroteOk),
+          state: "done",
+        });
       };
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
         const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
@@ -1813,7 +1824,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             {
               const inp = a.input as { file_path?: unknown } | undefined;
               const fp = typeof inp?.file_path === "string" ? inp.file_path : "";
-              if ((a.name === "Write" || a.name === "Edit" || a.name === "MultiEdit") && /\.html?$/i.test(fp)) {
+              const isWrite = (WRITE_TOOL_NAMES as readonly string[]).includes(a.name);
+              // 미리보기용(.html)과 별개로, "고쳤어요" 판정용은 **모든 쓰기 도구**를
+              // 센다 — engine.js 나 다른 파일을 고쳤어도 고친 것은 고친 것이다.
+              if (isWrite) writeToolIds.add(a.id);
+              if (isWrite && /\.html?$/i.test(fp)) {
                 htmlWrites.set(a.id, fp);
               }
             }
@@ -1832,6 +1847,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 : (toolLabels.get(a.id) ?? ""),
               a.isError ? "error" : "done",
             );
+            // 쓰기 도구가 **성공**했을 때만 "고쳤다" 의 근거가 선다. 실패했거나
+            // 애초에 쓰기가 아니었으면 안내 줄은 "생각했어요" 로 닫힌다.
+            if (!a.isError && writeToolIds.has(a.id)) wroteOk = true;
             // 도구로 .html 을 성공적으로 썼으면 그 파일을 읽어 미리보기에 띄운다
             // (펜스 경로와 같은 revealBuilt — 저장·라이브서버·네이티브 탭까지 동일).
             showPending();
