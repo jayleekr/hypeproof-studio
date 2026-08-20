@@ -267,6 +267,12 @@ export interface Profile {
      * true 로 켠다 (log_user_messages 와 같은 규율).
      */
     upload_session_logs?: boolean;
+    /**
+     * 미성년 코호트가 위 플래그를 켤 때의 동의 어서션 (하네스
+     * `child.upload_consent_key`). 검증이 아니라 **주장 기록**이다 — 누가
+     * 언제 동의를 확보했는지 문자열로 남긴다. 없으면 하네스가 HARD FAIL.
+     */
+    child_upload_consent?: string;
   };
   /**
    * Per-cohort UX behavior. Drives the in-app chat panel without changing

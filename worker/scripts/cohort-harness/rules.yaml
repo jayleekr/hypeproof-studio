@@ -91,6 +91,12 @@ child:
   # forbids public publishing for any parent_coaching cohort regardless of this
   # flag. (#267 item 4 — intended, confirmed in PR.)
   publish_consent_key: publishing.child_publish_consent
+  # Same escape-hatch pattern for session-log upload (#596 → 2026-08-21 갤러리
+  # 연동). upload_session_logs sends raw prompt text off-device, so the gate is
+  # a HARD FAIL by default; a truthy value at this dotted key downgrades it to
+  # WARN. Like publish_consent_key this is an ASSERTION, not verification —
+  # the validator cannot see consent forms. Record WHO/WHEN in the string.
+  upload_consent_key: analytics.child_upload_consent
   # A child cohort's system_prompt MUST contain this exact phrase (no external
   # URL fetches from generated code — a flaky room wifi must not break a game,
   # and it blocks accidental data exfil). See COHORT-AUTHORING.md §보안/가드레일.

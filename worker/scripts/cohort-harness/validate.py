@@ -280,9 +280,18 @@ def check_profile(p: dict, rules: dict, findings: list, seen_ids: set, cohort_to
         # #596 — upload_session_logs sends the SAME raw prompt text (the local
         # spool's events.jsonl) to R2. Same consent bar as log_user_messages.
         if analytics.get("upload_session_logs") is True:
-            add(findings, rules, pid, "child_upload_session_logs",
-                "HARD FAIL: child cohort must not set analytics.upload_session_logs=true "
-                "(uploads raw prompt text off-device; requires consent + retention policy first)")
+            # Same consent escape hatch as per_user_pages below: a truthy
+            # assertion flag downgrades FAIL → WARN. The flag records a claim,
+            # not proof — see rules.yaml `child.upload_consent_key`.
+            upload_consent = dotted_get(p, child_rules.get("upload_consent_key", ""))
+            if upload_consent:
+                add(findings, rules, pid, "child_upload_session_logs",
+                    f"child cohort uploads session logs (allowed via consent flag: {upload_consent!r})",
+                    severity="warn")
+            else:
+                add(findings, rules, pid, "child_upload_session_logs",
+                    "HARD FAIL: child cohort must not set analytics.upload_session_logs=true "
+                    "(uploads raw prompt text off-device; requires consent + retention policy first)")
         # #306 — a child cohort that ever opens the native browser must do so in
         # the hardened session. Enforce browser_session.mode="safe" regardless of
         # whether the native browser is wired today (defense-in-depth).

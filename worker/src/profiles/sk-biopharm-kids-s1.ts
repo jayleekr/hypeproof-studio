@@ -102,6 +102,9 @@ export const profile: Profile = {
   analytics: {
     log_user_messages: false,
     log_metadata: true,
+    // A반(grade-5-6)과 같은 결정 · 같은 동의 근거 — 그쪽 주석이 정본이다.
+    upload_session_logs: true,
+    child_upload_consent: "2026-08-21 shin_bro — SK바이오팜 8/22 회차, 보호자 사전설문으로 동의 확보",
   },
   ux: {
     // 단발 4h 초3·4 트랙. 두 레슨(생각 구체화 / 만들고-확인하고-고치기)을 자녀가

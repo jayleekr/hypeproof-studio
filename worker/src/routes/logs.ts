@@ -195,5 +195,38 @@ logs.put("/:sessionId/:filename", async (c) => {
     httpMetadata: { contentType: spec.contentType },
   });
 
+  // 10. lab 미러 (2026-08-21 갤러리 연동) — 같은 바이트를 lab 의
+  // `PUT /api/gallery/logs/…` 로 릴레이한다. lab 이 Supabase `session-logs`
+  // 버킷에 적재하고, 갤러리 학습 리포트 파이프라인이 그것을 읽는다.
+  //
+  // - **같은 Bearer 토큰을 그대로 넘긴다.** lab 은 이 워커의 `/v1/profile` 로
+  //   재검증한다 — 워커에 Supabase 자격증명을 넣지 않기 위한 구조다. lab 이
+  //   강사 토큰을 이 워커로 릴레이하는 기존 방향(boaMint)의 대칭이다.
+  // - **waitUntil + catch: 미러 실패는 업로드 실패가 아니다.** 정본 사본은 R2 에
+  //   이미 있다. 여기서 응답을 미러에 묶으면 lab 배포가 흔들릴 때마다 학생의
+  //   "기록 보내기" 가 실패로 보인다 — 그건 거짓말이다.
+  // - env.GALLERY_LOGS_BASE 미설정이면 통째로 건너뛴다(테스트·로컬 dev 스위치).
+  if (env.GALLERY_LOGS_BASE) {
+    const mirrorUrl =
+      `${env.GALLERY_LOGS_BASE.replace(/\/$/, "")}/api/gallery/logs/` +
+      `${sessionId}/${encodeURIComponent(filename)}?day=${day}`;
+    c.executionCtx.waitUntil(
+      fetch(mirrorUrl, {
+        method: "PUT",
+        headers: {
+          authorization: c.req.header("authorization") ?? "",
+          "content-type": spec.contentType,
+        },
+        body,
+      }).then((res) => {
+        if (!res.ok) {
+          console.error(`[${c.get("requestId")}] logs mirror ${res.status}: ${key}`);
+        }
+      }).catch((err) => {
+        console.error(`[${c.get("requestId")}] logs mirror failed: ${key}`, err);
+      }),
+    );
+  }
+
   return c.json({ ok: true, key });
 });
