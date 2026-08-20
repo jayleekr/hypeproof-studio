@@ -114,6 +114,11 @@ export const profile: Profile = {
     // 미성년 데이터 보호 불변식 — 동의/보존정책 전엔 절대 true 금지.
     log_user_messages: false,
     log_metadata: true,
+    // 2026-08-21 — 세션 스풀(아이 문답 원문) 업로드를 연다. 갤러리 학습 리포트의
+    // 원료다. log_user_messages(매 턴 실시간 덤프)와 다른 경로: 이쪽은 수업이
+    // 끝난 뒤 아이가 "기록 보내기" 버튼을 눌러야 올라간다.
+    upload_session_logs: true,
+    child_upload_consent: "2026-08-21 shin_bro — SK바이오팜 8/22 회차, 보호자 사전설문으로 동의 확보",
   },
   ux: {
     coach: {

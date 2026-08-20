@@ -62,6 +62,9 @@ ENVIRONMENT = "production"
 # NOT runtime fallback. Default = "gemini" when GEMINI_API_KEY is set.
 # Set to "anthropic" or "openai" (with their key) to switch.
 LLM_PROVIDER = "anthropic"
+# 세션 로그 미러 목적지 (env.ts GALLERY_LOGS_BASE 주석이 정본). lab 이 같은
+# Bearer 토큰을 재검증하고 Supabase `session-logs` 버킷에 적재한다.
+GALLERY_LOGS_BASE = "https://hypeproof-ai.xyz"
 # CF Workers anycast occasionally lands fetches on HKG, where Anthropic's geo
 # policy refuses. Route Anthropic calls through hypeproof-sediment (Fly NRT,
 # Tokyo — accepted by Anthropic). Passthrough proxy: same x-api-key, same

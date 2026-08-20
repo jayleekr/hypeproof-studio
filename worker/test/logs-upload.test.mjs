@@ -34,7 +34,6 @@ const DAY = "2026-08-19";
 const { token: CANARY_TOKEN } = await issue(
   { u: CANARY_USER, c: CANARY_COHORT, p: CANARY_PROFILE }, 1, TEST_SECRET,
 );
-const { token: DEFAULT_TOKEN } = await issue({ u: USER, c: COHORT, p: PROFILE }, 1, TEST_SECRET);
 
 /** canary 코호트 roster 만 시드 — active_session 은 일부러 안 만든다. */
 function canaryEnv() {
@@ -77,9 +76,18 @@ function putReq(filename, { token = CANARY_TOKEN, sessionId = SID, day = DAY, bo
 }
 
 // ─── 음성 — opt-in 없는 실코호트는 fail-closed 403 ──────────────────────────
+// 2026-08-21 — 대조군을 보아치과로 교체. 원래는 기본 코호트(SK 아동)였는데,
+// 갤러리 연동으로 그 코호트가 upload_session_logs:true 가 되면서 "opt-in 없는
+// 코호트" 라는 이 대조군의 전제 자체가 무너졌다(200 이 나와 이 테스트가 잡았다 —
+// 음성 대조군이 제 몫을 한 것). opt-in 게이트는 roster 검사보다 먼저라 보아
+// 코호트의 roster 를 시드하지 않아도 이 403 은 순수하게 플래그에서 나온다.
 {
-  const env = createMockEnv(); // 기본 코호트: 세션·roster 다 있음 — 그래도 거부
-  const r = await app.fetch(putReq("events.jsonl", { token: DEFAULT_TOKEN }), env, makeCtx());
+  const env = createMockEnv();
+  const { token: BOA_TOKEN } = await issue(
+    { u: "보아-테스트", c: "boah-dental-2026-a", p: "boah-dental-director-copyclone-2026-s1" },
+    1, TEST_SECRET,
+  );
+  const r = await app.fetch(putReq("events.jsonl", { token: BOA_TOKEN }), env, makeCtx());
   assert.equal(r.status, 403);
   const j = await r.json();
   assert.equal(j.error.type, "upload_disabled", "플래그 없는 코호트 = 서버가 거부");
@@ -179,6 +187,58 @@ function putReq(filename, { token = CANARY_TOKEN, sessionId = SID, day = DAY, bo
     "클라가 올리는 파일명 집합과 서버 allowlist 가 일치해야 한다",
   );
   console.log("✓ 드리프트 락 — 클라·서버 파일명 집합 일치");
+}
+
+// ─── 미러 (2026-08-21 갤러리 연동) — GALLERY_LOGS_BASE 설정 시 lab 으로 릴레이 ──
+{
+  const env = canaryEnv();
+  env.GALLERY_LOGS_BASE = "https://lab.example";
+  const calls = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return new Response("{}", { status: 200 });
+  };
+  try {
+    const ctx = makeCtx();
+    const r = await app.fetch(putReq("events.jsonl", { token: CANARY_TOKEN }), env, ctx);
+    assert.equal(r.status, 200);
+    await ctx.settle(); // waitUntil 로 등록된 미러가 여기서 돈다
+    assert.equal(calls.length, 1, "미러 fetch 정확히 1회");
+    assert.equal(
+      calls[0].url,
+      `https://lab.example/api/gallery/logs/${SID}/events.jsonl?day=${DAY}`,
+      "미러 URL — lab 라우트 계약과 일치",
+    );
+    assert.equal(
+      calls[0].init.headers.authorization,
+      `Bearer ${CANARY_TOKEN}`,
+      "같은 Bearer 토큰 릴레이 — lab 이 이것으로 재검증한다",
+    );
+    console.log("✓ 미러 — base 설정 시 같은 토큰·같은 계약으로 lab 릴레이");
+
+    // 음성: base 미설정이면 미러 fetch 가 없어야 한다 (테스트·로컬 dev 스위치).
+    calls.length = 0;
+    const env2 = canaryEnv();
+    const ctx2 = makeCtx();
+    const r2 = await app.fetch(putReq("events.jsonl", { token: CANARY_TOKEN }), env2, ctx2);
+    assert.equal(r2.status, 200);
+    await ctx2.settle();
+    assert.equal(calls.length, 0, "base 미설정 → 미러 없음");
+    console.log("✓ 미러 음성 — GALLERY_LOGS_BASE 미설정이면 바깥으로 나가지 않는다");
+
+    // 음성: 미러가 죽어도 학생 응답은 200 (실패 무해 규약).
+    globalThis.fetch = async () => { throw new Error("lab down"); };
+    const env3 = canaryEnv();
+    env3.GALLERY_LOGS_BASE = "https://lab.example";
+    const ctx3 = makeCtx();
+    const r3 = await app.fetch(putReq("events.jsonl", { token: CANARY_TOKEN }), env3, ctx3);
+    assert.equal(r3.status, 200, "미러 실패 != 업로드 실패");
+    await ctx3.settle();
+    console.log("✓ 미러 음성 — lab 이 죽어도 학생의 기록 보내기는 성공한다");
+  } finally {
+    globalThis.fetch = realFetch;
+  }
 }
 
 console.log("logs-upload.test.mjs — all green");
