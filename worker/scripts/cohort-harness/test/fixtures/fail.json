@@ -50,7 +50,8 @@
     },
     "analytics": {
       "log_user_messages": true,
-      "log_metadata": true
+      "log_metadata": true,
+      "upload_session_logs": true
     },
     "ux": {
       "coach": {
