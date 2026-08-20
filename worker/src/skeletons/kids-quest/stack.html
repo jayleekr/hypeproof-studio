@@ -45,8 +45,8 @@ const WORLD={
 const BW=28,BH=11;let state='title',stack=[],cur,dir,t=0,fell=false;const SUB=ITEM_A+' '+GOAL+'층 쌓으면 완성!';
 const sp=0.5+SPEED*0.22,tol=3+SPECIAL*2.2,BASE=PH-24;
 function reset(){stack=[{x:PW/2,s:1}];cur={x:30};dir=1;t=0;fell=false;state='play';say('<b>'+GUEST_NAME+'</b>: 빨리 쌓아야 해…');}
-function drop(){if(state!=='play'){reset();return;}const last=stack[stack.length-1];if(Math.abs(cur.x-last.x)>tol+BW*0.5*last.s){fell=true;report({layers:stack.length-1,goal:GOAL,fell:true,speed:SPEED,tolerance:SPECIAL},false,(stack.length-1)+'층','','아… 무너졌어. 녹은 얼음 위엔 못 쌓겠어');return;}
-  stack.push({x:cur.x,s:1});cur={x:dir>0?30:PW-30};dir*=-1;if(stack.length-1>=GOAL)report({layers:GOAL,goal:GOAL,fell:false,speed:SPEED,tolerance:SPECIAL},true,GOAL+'층','우와 집이다! 🏠 이제 안 녹아','');}
+function drop(){if(state!=='play'){reset();return;}const last=stack[stack.length-1];if(Math.abs(cur.x-last.x)>tol+BW*0.5*last.s){fell=true;report({w_sun:WORLD.sun,w_melt:WORLD.melt,layers:stack.length-1,goal:GOAL,fell:true,speed:SPEED,tolerance:SPECIAL},false,(stack.length-1)+'층','','아… 무너졌어. 녹은 얼음 위엔 못 쌓겠어');return;}
+  stack.push({x:cur.x,s:1});cur={x:dir>0?30:PW-30};dir*=-1;if(stack.length-1>=GOAL)report({w_sun:WORLD.sun,w_melt:WORLD.melt,layers:GOAL,goal:GOAL,fell:false,speed:SPEED,tolerance:SPECIAL},true,GOAL+'층','우와 집이다! 🏠 이제 안 녹아','');}
 addEventListener('keydown',e=>{if(e.code==='Space')drop();});addEventListener('pointerdown',drop);
 function block(bx,by,s,i){const w=Math.round(BW*s),h=Math.round(BH*s);if(ITEM_A==='🧊'){x.fillStyle='#1c4a7a';x.fillRect(Math.round(bx-w/2),by-h,w,h);x.fillStyle='#bfe9ff';x.fillRect(Math.round(bx-w/2)+1,by-h+1,w-2,h-2);x.fillStyle='#e9f8ff';x.fillRect(Math.round(bx-w/2)+2,by-h+2,Math.max(1,w-6),1);}else if(ITEM_A==='🧱'){x.fillStyle='#4a1a12';x.fillRect(Math.round(bx-w/2),by-h,w,h);x.fillStyle='#c85a48';x.fillRect(Math.round(bx-w/2)+1,by-h+1,w-2,h-2);x.fillStyle='#e8887a';x.fillRect(Math.round(bx-w/2)+1,by-Math.round(h/2),w-2,1);}else emo(ITEM_A,bx,by-h/2,Math.round(10*s)+2);}
 function scene(){skyGrad();dither(0,60,'rgba(255,255,255,.12)');
@@ -61,7 +61,7 @@ function scene(){skyGrad();dither(0,60,'rgba(255,255,255,.12)');
 }
 function loop(){
   t++;if(state==='play'){cur.x+=sp*dir;if(cur.x<30||cur.x>PW-30)dir*=-1;
-    if(WORLD.melt){stack.forEach((b,i)=>{if(i>0)b.s=Math.max(0.15,b.s-0.0015);});if(stack.slice(1).some(b=>b.s<=0.2))report({layers:stack.length-1,goal:GOAL,fell:true,speed:SPEED,tolerance:SPECIAL},false,(stack.length-1)+'층','','다 녹아버렸어… 해가 너무 뜨거워');}}
+    if(WORLD.melt){stack.forEach((b,i)=>{if(i>0)b.s=Math.max(0.15,b.s-0.0015);});if(stack.slice(1).some(b=>b.s<=0.2))report({w_sun:WORLD.sun,w_melt:WORLD.melt,layers:stack.length-1,goal:GOAL,fell:true,speed:SPEED,tolerance:SPECIAL},false,(stack.length-1)+'층','','다 녹아버렸어… 해가 너무 뜨거워');}}
   scene();blit();
   if(state==='title')titleHud();else{txt((stack.length-1)+' / '+GOAL+'층',48,26,'#ffd75b');if(state==='over')overHud(document.title.startsWith('성공'));}
   requestAnimationFrame(loop);}
