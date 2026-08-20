@@ -47,6 +47,11 @@ publishing:
     - per_user_github_pages
     - shared_repo
     - local_only
+    # 2026-08-21 — 우리 사이트의 `/live/**` 갤러리. noindex · 회차 코드로 격리 ·
+    # 학습 리포트는 암호 뒤. 공개 GitHub Pages 와 층위가 다르다(그쪽은 색인되고
+    # 영구적이며 회수 불가). 미성년 코호트에 열 수 있는 것은 여기까지다 —
+    # 그 선은 worker/test/smoke.mjs 의 MINOR_SAFE_PUBLISH 가 지킨다.
+    - hypeproof_gallery
   # Phrases in system_prompt that PROMISE active publishing/sharing in THIS
   # session. Only flagged when publishing.enabled is false — i.e. the prompt
   # tells the participant their work goes public but the profile says it won't.
@@ -86,6 +91,12 @@ child:
   # forbids public publishing for any parent_coaching cohort regardless of this
   # flag. (#267 item 4 — intended, confirmed in PR.)
   publish_consent_key: publishing.child_publish_consent
+  # Same escape-hatch pattern for session-log upload (#596 → 2026-08-21 갤러리
+  # 연동). upload_session_logs sends raw prompt text off-device, so the gate is
+  # a HARD FAIL by default; a truthy value at this dotted key downgrades it to
+  # WARN. Like publish_consent_key this is an ASSERTION, not verification —
+  # the validator cannot see consent forms. Record WHO/WHEN in the string.
+  upload_consent_key: analytics.child_upload_consent
   # A child cohort's system_prompt MUST contain this exact phrase (no external
   # URL fetches from generated code — a flaky room wifi must not break a game,
   # and it blocks accidental data exfil). See COHORT-AUTHORING.md §보안/가드레일.

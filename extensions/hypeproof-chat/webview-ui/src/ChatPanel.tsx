@@ -3,6 +3,7 @@ import type {
   ChatConfig,
   ChatMessage,
   Citation,
+  ResolvedProfile,
   SuggestionChip,
   UpdateOffer,
   UxConfig,
@@ -10,6 +11,14 @@ import type {
 import { postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
 import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
+import {
+  RUNNER_PHRASE_MS,
+  isRunnerCohort,
+  runnerFace,
+  runnerPhrase,
+  shouldShowRunner,
+  type RunnerFace,
+} from "./runner";
 
 interface Props {
   config: ChatConfig | null;
@@ -24,6 +33,15 @@ interface Props {
   pageNotice: string | null;           // #308 — "페이지를 코치에게" 인라인 안내
   aiNotice: string | null;             // #320 — AI disclosure at session start
   stopNotice: string | null;           // #497 — Stop 으로 턴이 끊겼음을 알리는 안내
+  /** #649 — 지금 열려 있는 세상 id (호스트의 worldOpened). 스트립 강조에만 쓴다. */
+  openWorldId: string | null;
+  /** "갤러리에 올리기" 진행 상태. null = 아직 안 눌렀다. */
+  publish:
+    | { state: "uploading" }
+    | { state: "done"; url: string }
+    | { state: "error"; message: string }
+    | null;
+  onPublish: () => void;
   streaming: boolean;
   /**
    * WHICH message is streaming, not just whether one is (#429). `streaming` is
@@ -165,10 +183,38 @@ export function ChatPanel(props: Props) {
   const [imgNote, setImgNote] = useState<string | null>(null);
   // #416 — the ONE message parked while a turn is running (null = none).
   const [queued, setQueued] = useState<string | null>(null);
+  /**
+   * #642/#649 (2026-08-20 검토) — 친구를 누른 순간부터 호스트가 streamStart 를
+   * 보내기까지의 **무방비 구간**. 그 사이 호스트는 세상 HTML + 엔진을 받아오고(왕복
+   * 두 번) 보관하고 index.html 을 쓴다 — 수백 ms ~ 수 초다. `streaming` 은 아직
+   * false 라 스트립은 다 살아 있고 러너도 접혀 있었다: 아이가 초코를 누른 직후 나비를
+   * 누르면 세상 열기가 겹쳤다(#642·#649 가 잡으려던 바로 그 증상).
+   */
+  const [worldPending, setWorldPending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   /** Previous `streaming` value — the flush must fire on the edge, not the state. */
   const prevStreamingRef = useRef(streaming);
+
+  // 호스트가 턴을 시작했으면(streamStart) 그때부터는 streaming 이 같은 일을 한다.
+  // 안전 타이머 — 세상 열기가 실패해 턴이 아예 안 시작되는 경우에도 버튼이 영영
+  // 잠기지는 않게(그러면 아이는 앱이 죽은 줄 안다).
+  useEffect(() => {
+    if (!worldPending) return;
+    if (streaming) {
+      setWorldPending(false);
+      return;
+    }
+    const t = setTimeout(() => setWorldPending(false), 20000);
+    // `return () => …` 로 쓰면 test/hook-order.smoke.mjs 의 정적 검사가 이 줄을
+    // **컴포넌트의 조기 return** 으로 읽어(아래 훅들을 전부 위반으로 센다) — 정리
+    // 함수는 이름을 붙여 돌려준다.
+    const cancel = () => clearTimeout(t);
+    return cancel;
+  }, [worldPending, streaming]);
+
+  /** 응답 중이거나 세상을 여는 중 — 친구 버튼과 러너는 같은 값을 본다. */
+  const busy = streaming || worldPending;
 
   const ux: UxConfig = config?.profile?.ux ?? DEFAULT_UX;
   // Image paste is a per-profile opt-in (website-copyclone). Default-off so
@@ -176,6 +222,21 @@ export function ChatPanel(props: Props) {
   // gate server-side, this just keeps the UI honest (no thumbnail, plain text
   // paste). Absent on older cached /v1/profile responses → treated as off.
   const imagePasteEnabled = config?.profile?.input?.image_paste === true;
+  // #649 — 세상 전환은 **클릭만**. 프로필에 worlds 가 실려 오는 코호트(kids-quest)
+  // 에서만, 작성란 바로 위에 친구 스트립을 늘 띄운다. 대화가 시작된 뒤에도 사라지지
+  // 않아야 한다 — 첫 화면 칩만 있던 v0.1.48 에서는 세상을 바꾸려면 타이핑밖에
+  // 길이 없었고, 그 타이핑이 아이가 고쳐 둔 세상을 덮어썼다.
+  const worlds: WorldChoice[] = config?.profile?.worlds ?? [];
+  /**
+   * 갤러리 버튼을 보일지. **코호트 프로필이 정한다** — 워커의
+   * `publishing.strategy` 가 `hypeproof_gallery` 일 때만.
+   *
+   * 미성년 코호트 기본값은 `local_only` 이고, 그 프로필에는 "공개 퍼블리시는
+   * 부모 동의 + PII 설계가 끝난 뒤에만 켠다" 는 결정이 주석으로 박혀 있다.
+   * 여기서 화면만 열어 봐야 서버가 403 으로 막으므로(fail closed), 이 판단은
+   * **아이에게 없는 버튼을 안 보여주기 위한 것**이지 보안 경계가 아니다.
+   */
+  const galleryEnabled = config?.profile?.publishing?.strategy === "hypeproof_gallery";
   // Fixed-naming cohorts (e.g. boah-dental) must NOT show a user-supplied
   // coach name carried over from a different cohort's user-data-dir (#140).
   const coachName =
@@ -386,6 +447,18 @@ export function ChatPanel(props: Props) {
     setTimeout(() => textareaRef.current?.focus(), 0);
   };
 
+  /**
+   * #649 — 친구 버튼: 칩 문구를 **그대로** 보낸다(호스트가 정확일치로만 세상을 연다).
+   * submit() 을 쓰지 않는 이유: submit 은 draft 를 비운다. 아이가 "불 대신 물" 을
+   * 적다가 친구를 누르면 적던 글이 소리 없이 사라진다 — 버튼은 세상만 바꾼다.
+   */
+  const handleWorldPick = (chip: string) => {
+    if (busy) return;
+    setWorldPending(true);
+    props.onSend(chip);
+    setRollExpand(null);
+  };
+
   const handleRollClick = () => {
     // Capture the current draft as the "first thought" and prompt expansion.
     setRollExpand({ original: draft.trim() });
@@ -411,10 +484,17 @@ export function ChatPanel(props: Props) {
     draft.length > 0 &&
     draft.trim().length < ux.hints.short_input.min_chars;
 
+  // 스트립이 같은 칩을 이미 들고 있으면 첫 화면 칩에서는 뺀다 — 같은 버튼이 두 벌
+  // 뜨면 아이가 "둘이 다른 것" 이라고 읽는다(2026-08-20 검토).
+  const stripChips = new Set(worlds.map((w) => w.chip));
+  const initialChips =
+    worlds.length > 0
+      ? ux.suggestions.initial.filter((c) => !stripChips.has(c.text))
+      : ux.suggestions.initial;
   const showInitialChips =
     messages.length === 0 &&
     !streaming &&
-    ux.suggestions.initial.length > 0;
+    initialChips.length > 0;
 
   // #503 — 타임라인 끝에 툴 줄이 올 수 있으므로 "마지막이 어시스턴트인가"를
   // 마지막 **말풍선** 기준으로 본다. 안 그러면 툴로 끝난 턴에서 후속 칩이 사라진다.
@@ -426,6 +506,14 @@ export function ChatPanel(props: Props) {
     ux.suggestions.follow_up.length > 0;
   // #414 — 이번 턴에 진짜 활동 로그가 떴으면 스피너가 가짜 단계를 지어내지 않는다.
   const turnHasActivity = hasActivityThisTurn(messages);
+
+  // #642 — 코치가 일하는 1~3분 동안 화면이 정적이면 아이는 고장으로 읽는다(2026-08-20
+  // 실기기). 아이 트랙에서만 작성란 위에 러너 바를 둔다. 판단은 전부 runner.ts(순수).
+  // 코호트가 맞으면 **턴이 없을 때도 접힌 채로 자리에** 있다 — 그래야 나타날 때와
+  // 사라질 때 둘 다 부드럽고, 작성란이 위아래로 튀지 않는다.
+  const runnerCohort = isRunnerCohort({ worldCount: worlds.length, tone: appTone });
+  const runnerRunning = shouldShowRunner({ streaming: busy, worldCount: worlds.length, tone: appTone });
+  const runnerWho = runnerFace(worlds, props.openWorldId);
 
   return (
     <div
@@ -442,6 +530,25 @@ export function ChatPanel(props: Props) {
           {coachName}
         </strong>
         <div className="hps-actions">
+          {/* Token 바로 **왼쪽**, 같은 크기. 헤더 버튼 스타일(.hps-header button)을
+              그대로 물려받고 색만 다르다 — 크기를 따로 주면 헤더 줄 높이가 이 버튼
+              하나 때문에 늘어난다.
+              Token·Clear·⚙ 는 설정 계열이고 이건 아이가 쓰는 조작이라, 그 묶음
+              앞에 세워 손이 먼저 닿는 자리에 둔다. */}
+          {galleryEnabled && props.openWorldId !== null && (
+            <button
+              className="hps-gallery-btn"
+              onClick={props.onPublish}
+              disabled={busy || props.publish?.state === "uploading"}
+              title="지금 만든 세상을 갤러리에 올려요"
+            >
+              {props.publish?.state === "uploading"
+                ? "올리는 중…"
+                : props.publish?.state === "done"
+                  ? "올렸어요 ✓"
+                  : "🖼️ 갤러리"}
+            </button>
+          )}
           <button onClick={props.onSetToken} title="Workshop token">
             {config?.hasToken ? "Token ✓" : "Token"}
           </button>
@@ -478,7 +585,7 @@ export function ChatPanel(props: Props) {
 
         {showInitialChips && (
           <ChipRack
-            chips={ux.suggestions.initial}
+            chips={initialChips}
             onPick={handleChip}
             label="이렇게 시작해볼까요? (탭하면 입력창에 들어가요)"
           />
@@ -550,6 +657,28 @@ export function ChatPanel(props: Props) {
       )}
 
       <footer className="hps-input-area">
+        {runnerCohort && <RunnerBar face={runnerWho} running={runnerRunning} />}
+        {/* 버튼은 헤더에 있고 여기는 **결과만** 나온다. 헤더 한 줄에는 링크도
+            실패 사유도 들어갈 자리가 없는데, 아이는 사라지는 안내를 못 읽는다 —
+            그래서 말할 것이 있을 때만 작성란 위에 한 줄로 남는다. */}
+        {props.publish && props.publish.state !== "uploading" && (
+          <GalleryNotice
+            publish={props.publish}
+            onOpenUrl={(url) => postToHost({ type: "openExternal", url })}
+          />
+        )}
+        {worlds.length > 0 && (
+          <WorldStrip
+            worlds={worlds}
+            openId={props.openWorldId}
+            disabled={busy}
+            /* 대화가 비어 있으면(첫 화면 · Clear 직후) 무엇을 누르라는 말이 다시
+               필요하다 — kids-quest 는 첫 화면 칩이 스트립과 겹쳐 통째로 빠지므로
+               이 한 줄이 유일한 지시문이다. */
+            showLabel={props.openWorldId === null || messages.length === 0}
+            onPick={handleWorldPick}
+          />
+        )}
         {shortHintVisible && (
           <div className="hps-hint" dangerouslySetInnerHTML={{
             __html: renderInlineMd(ux.hints.short_input.message_md),
@@ -694,6 +823,151 @@ export function ChatPanel(props: Props) {
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
+
+/** 프로필이 실어 보내는 세상 하나 (호스트 protocol 의 정의를 그대로 쓴다). */
+type WorldChoice = NonNullable<ResolvedProfile["worlds"]>[number];
+
+/**
+ * 발행 결과 한 줄. 버튼은 헤더에 있고(Token 옆) 여기는 **결과만** 말한다.
+ *
+ * 성공을 계속 띄워 두는 이유: 아이는 사라지는 안내를 못 읽는다. 링크가 남아
+ * 있어야 옆자리 친구에게, 부모에게 보여줄 수 있다. 세상을 바꾸면 App 의
+ * `worldOpened` 가 이 상태를 지운다 — 그때부터는 다른 세상 얘기라서다.
+ *
+ * 실패 문구는 자르지 않는다. "왜 안 됐는지"가 이 기능의 유일한 복구 단서다.
+ */
+function GalleryNotice({
+  publish,
+  onOpenUrl,
+}: {
+  publish: { state: "done"; url: string } | { state: "error"; message: string };
+  onOpenUrl: (url: string) => void;
+}) {
+  if (publish.state === "done") {
+    return (
+      <div className="hps-gallery-notice hps-gallery-done" role="status" aria-live="polite">
+        <span aria-hidden>🖼️</span> 갤러리에 올렸어요!{" "}
+        <button type="button" className="hps-gallery-link" onClick={() => onOpenUrl(publish.url)}>
+          보러 가기
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="hps-gallery-notice hps-gallery-error" role="status" aria-live="polite">
+      {publish.message}
+    </div>
+  );
+}
+
+/**
+ * #649 — 친구 스트립. 작성란 바로 위에 **항상** 있다(대화 중에도, 응답 중에도).
+ *
+ * 왜 버튼인가: 세상 전환을 말로도 받던 v0.1.47/48 에서 "초코 세상에 다람쥐 데려와줘"
+ * 가 도토 세상을 띄우고, "초코 세상에 불 대신 물" 이 초코 원본을 다시 받아 아이가
+ * 고쳐 둔 화면을 덮어썼다(2026-08-20 실기기). 이제 세상은 이 버튼으로만 바뀐다.
+ *
+ * 응답 중에는 비활성 — 그 사이 세상을 갈아치우면 지금 오고 있는 답이 남의 세상에
+ * 붙는다. 클릭은 칩 문구를 **그대로** 보낸다(호스트 matchWorldRef 가 정확일치로만
+ * 잡으므로 한 글자도 다듬지 않는다).
+ */
+function WorldStrip({
+  worlds,
+  openId,
+  disabled,
+  showLabel,
+  onPick,
+}: {
+  worlds: WorldChoice[];
+  openId: string | null;
+  disabled: boolean;
+  showLabel: boolean;
+  onPick: (chip: string) => void;
+}) {
+  return (
+    <div className="hps-worlds-wrap">
+      {/* 대화가 비어 있거나 아직 아무 세상도 안 열렸으면 한 줄 안내. 첫 화면 칩(같은
+          문구)은 스트립과 겹쳐서 숨겼으므로, 무엇을 누르라는 말은 여기 한 번은 있어야
+          한다. 2026-08-20 검토: 조건이 `openId === null` 뿐이라 **Clear 직후**에는
+          칩도 라벨도 없는 빈 첫 화면이 됐다. 화살표는 아래를 가리킨다 — 이 줄 바로
+          밑이 버튼이다(게스트 목록 답변의 문구와 방향을 맞춘다). */}
+      {showLabel && <div className="hps-worlds-label">👇 친구를 누르면 그 세상으로 가요</div>}
+      <div className="hps-worlds" role="group" aria-label="친구 고르기">
+        {worlds.map((w) => {
+          const open = w.id === openId;
+          return (
+            <button
+              key={w.id}
+              type="button"
+              className={`hps-world${open ? " hps-world-open" : ""}`}
+              aria-pressed={open}
+              /* 지금 열린 세상은 다시 누를 수 없다 (2026-08-20 검토). 재클릭은
+                 '처음 상태 원본을 다시 받아 index.html 을 덮는' 동작이라, 20분 고친
+                 세상이 한 번의 오조작으로 초기화된다 — 그리고 가장 눈에 띄는 색
+                 (button-background)이 하필 그 버튼이라 초3·4 의 첫 오조작 대상이다.
+                 보관본은 남지만 되돌리는 건 코치를 거쳐야 하는 일이다. */
+              disabled={disabled || open}
+              title={
+                open
+                  ? `${w.guest} 세상을 열어 뒀어요`
+                  : w.line
+                    ? `${w.guest} — ${w.line}`
+                    : `${w.guest} 세상으로 가기`
+              }
+              onClick={() => onPick(w.chip)}
+            >
+              <span className="hps-world-emoji" aria-hidden="true">{w.emoji}</span>
+              <span className="hps-world-name">{w.guest}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * #642 — 달리는 게스트. "Read ✓" 뒤 1~3분 정적이던 구간을 채운다(2026-08-20 실기기:
+ * 아이는 멈춘 화면을 고장으로 읽고 같은 말을 또 보냈다 — 턴이 겹친다).
+ *
+ * 왜 항상 렌더하고 클래스만 토글하나: 조건부로 붙였다 떼면 사라지는 순간이 뚝
+ * 끊기고 작성란이 40px 튀어 오른다. 접힌 상태(max-height:0)로 남겨 두면 CSS 가
+ * 양방향을 다 부드럽게 처리한다.
+ *
+ * 스크린리더에는 숨긴다(aria-hidden): 4초마다 바뀌는 문구를 live region 으로
+ * 읽어 주면 소음이 된다. 진행 상황의 접근 가능한 통로는 타임라인의 툴 로그
+ * ("✍️ 고치는 중…") 쪽이고, 이 바는 그 위에 얹은 시각 장치다.
+ */
+function RunnerBar({ face, running }: { face: RunnerFace; running: boolean }) {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    // 턴이 끝나면 타이머를 끄고 0 으로 되돌린다 — 다음 턴은 "세상을 고치는 중…"
+    // 부터 다시 시작해야 한다(이어서 "거의 다 됐어요…" 로 시작하면 거짓말이 된다).
+    if (!running) {
+      setElapsed(0);
+      return;
+    }
+    const startedAt = Date.now();
+    const timer = setInterval(() => setElapsed(Date.now() - startedAt), RUNNER_PHRASE_MS);
+    return () => clearInterval(timer);
+  }, [running]);
+
+  return (
+    <div className={`hps-runner${running ? " hps-runner-on" : ""}`} aria-hidden="true">
+      <div className="hps-runner-track">
+        {/* 먼지는 얼굴 뒤에 남는다 — CSS 의 row-reverse 가 순서를 뒤집는다.
+            prefers-reduced-motion 에서는 제자리에서 점 세 개만 깜빡인다. */}
+        <div className="hps-runner-go">
+          <span className="hps-runner-face">{face.emoji}</span>
+          <span className="hps-runner-dust" />
+          <span className="hps-runner-dust" />
+          <span className="hps-runner-dust" />
+        </div>
+      </div>
+      <span className="hps-runner-say">{runnerPhrase(elapsed, face.guest)}</span>
+    </div>
+  );
+}
 
 function NamingCard({
   namingPromptMd,

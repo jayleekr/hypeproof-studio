@@ -44,14 +44,17 @@ const SLOTS = [
     }
     const found = new Set([...s.html.matchAll(/%%([A-Z_]+)%%/g)].map((m) => m[1]));
     for (const f of found) assert.ok(SLOTS.includes(f), `${s.id}: 규격 밖 자리표시자 %%${f}%%`);
-    assert.ok(s.html.includes("type:'hp:result'") || s.html.includes("r.type='hp:result'"), `${s.id}: hp:result 를 보낸다`);
-    assert.ok(s.html.includes("window.__hpLast=r"), `${s.id}: __hpLast 를 남긴다`);
     assert.ok(s.html.includes('id="guest"'), `${s.id}: 게스트 말풍선`);
     assert.ok(/const WORLD=\{/.test(s.html), `${s.id}: WORLD 블록`);
-    assert.ok(s.html.includes('r.world=Object.assign({},WORLD)'), `${s.id}: hp:result 에 world 동봉`);
+    assert.ok(s.html.includes('<script src="engine.js"></script>'), `${s.id}: 공용 엔진 참조`);
     assert.ok(!/게임/.test(s.html), `${s.id}: 화면 문구에 "게임" 없음`);
   }
   assert.equal(getSkeletonsForTier("kids-world").length, 0, "kids-world tier 는 사라졌다");
+  // #629 — 결과 통로(hp:result/__hpLast)는 공용 엔진에 한 번만 있다.
+  const { renderEngine } = await import("../src/skeletons/kids-quest/worlds.ts");
+  const eng = renderEngine();
+  assert.ok(eng.includes("r.type='hp:result'") && eng.includes("window.__hpLast=r"), "엔진이 결과를 보낸다");
+  assert.ok(/const S_CAT=/.test(eng), "엔진에 스프라이트가 있다");
   console.log("✓ 스켈레톤 9개 · 규격 동일 · hp:result/__hpLast · 게임 낱말 없음");
 }
 
@@ -120,16 +123,29 @@ console.log("kids-quest-prompt.test.mjs: all tests passed");
     assert.ok(html && !/%%[A-Z_]+%%/.test(html), `${w.id}: 자리표시자 없이 렌더`);
     assert.ok(html.includes(`GUEST_NAME='${w.guest}'`), `${w.id}: 게스트 이름 채워짐`);
     assert.equal(matchWorld(w.chip)?.id, w.id, `${w.id}: 칩 문구 매칭`);
-    assert.equal(matchWorld(`${w.guest} 세상 가볼래`)?.id, w.id, `${w.id}: 이름+세상 매칭`);
+    assert.equal(matchWorld(w.chip.replace(/^\S+\s/, ""))?.id, w.id, `${w.id}: 이모지 없는 칩 문구`);
+    assert.equal(matchWorld(`${w.guest} 세상 가볼래`), null, `${w.id}: 자유 문장은 전환 안 함(클릭만)`);
   }
   assert.equal(matchWorld("안녕"), null, "무관한 말은 매칭 안 됨");
-  assert.equal(matchWorld("초코 색을 갈색으로 바꿔줘"), null, "세상 표현 없으면 매칭 안 됨(바꾸기 요청)");
+  assert.equal(matchWorld("초코 색을 갈색으로 바꿔줘"), null, "바꾸기 요청은 전환 아님");
+  assert.equal(matchWorld("초코 세상에 다람쥐 데려와줘"), null, "다른 세상 캐릭터 데려오기는 전환 아님 — 아이 작업을 덮어쓰지 않는다");
+  assert.equal(matchWorld("다람쥐"), null, "이름만 쳐도 전환 아님(클릭만)");
   const { token } = await issue({ u: USER, c: COHORT, p: PROFILES[0] }, 1, TEST_SECRET);
   const env = createMockEnv();
   const r = await app.fetch(new Request("https://api.test/v1/worlds/kq-runner", { headers: { authorization: `Bearer ${token}` } }), env, makeCtx());
   assert.equal(r.status, 200, "worlds/kq-runner 200");
   const body = await r.text();
   assert.ok(body.includes("GUEST_NAME='나비'") && body.includes("flood:true"), "나비 세상 HTML");
+  // #629 — 엔진 분리: 세상 HTML 은 engine.js 를 부르고, 스프라이트는 세상 파일에 없다.
+  assert.ok(body.includes('<script src="engine.js"></script>'), "세상 HTML 이 공용 엔진을 부른다");
+  assert.ok(!/const S_[A-Z]+=/.test(body), "스프라이트 맵은 세상 파일에 없다");
+  assert.ok(body.length < 10_000, `세상 파일이 10KB 미만 (실제 ${body.length})`);
+  const re = await app.fetch(new Request("https://api.test/v1/worlds/engine.js", { headers: { authorization: `Bearer ${token}` } }), env, makeCtx());
+  assert.equal(re.status, 200, "worlds/engine.js 200");
+  const engine = await re.text();
+  assert.ok(/const S_CAT=/.test(engine) && /function report\(/.test(engine), "엔진에 스프라이트·report 가 있다");
+  const re401 = await app.fetch(new Request("https://api.test/v1/worlds/engine.js"), env, makeCtx());
+  assert.equal(re401.status, 401, "engine.js 도 토큰 필요");
   const r404 = await app.fetch(new Request("https://api.test/v1/worlds/nope", { headers: { authorization: `Bearer ${token}` } }), env, makeCtx());
   assert.equal(r404.status, 404, "unknown world 404");
   const r401 = await app.fetch(new Request("https://api.test/v1/worlds/kq-runner"), env, makeCtx());
@@ -138,4 +154,35 @@ console.log("kids-quest-prompt.test.mjs: all tests passed");
   const pj = await pr.json();
   assert.equal(pj.worlds?.length, 9, "profile.worlds 9개");
   console.log("✓ 사전 완성 세상 9개 렌더 · 매칭 · /v1/worlds/:id · profile.worlds");
+}
+
+// --- 4. 아동 컨텍스트 위생 — 코드 펜스 제거 · 길이 상한(뒤쪽 유지) -----------------
+{
+  const { trimMinorContext } = await import("../src/routes/messages.ts");
+  const long = "```html\n" + "<div>x</div>\n".repeat(200) + "```";
+  const t1 = trimMinorContext("앞말\n" + long + "\n뒷말");
+  assert.ok(!t1.includes("<div>x</div>"), "코드 본문은 빠진다");
+  assert.ok(t1.includes("index.html") && t1.includes("앞말") && t1.includes("뒷말"), "대화는 남는다");
+  const t2 = trimMinorContext("A".repeat(9000) + "최근질문", 8000);
+  assert.ok(t2.startsWith("[앞부분 생략]") && t2.endsWith("최근질문"), "뒤쪽(최근)을 남긴다");
+  assert.ok(t2.length <= 8000 + 20, "상한이 걸린다");
+  const short = "초코 세상에 가볼래";
+  assert.equal(trimMinorContext(short), short, "짧은 말은 그대로");
+  console.log("✓ 아동 컨텍스트 위생 — 펜스 제거·뒤쪽 유지·짧은 말 무변경");
+}
+
+// --- 5. 세상별 엔진 — 남의 세상 스프라이트가 파일에 없다 (컨텍스트 오염 차단) --------
+{
+  const { WORLDS, renderEngineFor } = await import("../src/skeletons/kids-quest/worlds.ts");
+  const catcher = renderEngineFor("kq-catcher");
+  assert.ok(catcher.includes("S_DOG") && catcher.includes("S_FIRE"), "초코 세상은 자기 그림을 갖는다");
+  for (const alien of ["S_PENG", "S_ICE", "S_RAC", "S_PARROT", "S_BEE", "S_MOUSE"]) {
+    assert.ok(!catcher.includes(alien), `초코 엔진에 ${alien} 이 없다 (실기기: 초코 세상에서 얼음이 나왔다)`);
+  }
+  for (const w of WORLDS) {
+    const js = renderEngineFor(w.id);
+    assert.ok(js && js.includes("function report(") && js.length < 4000, `${w.id}: 엔진 유지 + 4KB 미만`);
+  }
+  assert.equal(renderEngineFor("nope"), null, "모르는 세상은 null");
+  console.log("✓ 세상별 엔진 — 자기 그림만, 남의 세상 없음, report 유지");
 }

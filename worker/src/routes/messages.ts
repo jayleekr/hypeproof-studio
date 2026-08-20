@@ -308,6 +308,15 @@ messages.post("/messages", async (c) => {
     }
   }
 
+
+  // #629 후속 — 아동 코호트: 접힌 대화 문자열이 매 턴 통째로 다시 온다. 코드 펜스를
+  // 걷어내고 길이를 묶는다(성인 트랙 무변경).
+  if (profile.minor_cohort === true && Array.isArray(raw.messages)) {
+    raw.messages = (raw.messages as Array<Record<string, unknown>>).map((m) =>
+      typeof m?.content === "string" ? { ...m, content: trimMinorContext(m.content) } : m,
+    );
+  }
+
   const stream = raw.stream === true;
   const modelLabel = resolveMessagesModel(raw.model, profile);
 
@@ -319,6 +328,28 @@ messages.post("/messages", async (c) => {
   const upstreamBody = {
     ...raw,
     model: modelLabel,
+    // 2026-08-19 실기기(sk-biopharm 3·4, claude-sonnet-4-6) — 아이가 "도움닫기 점프"
+    // 같은 새 규칙을 말하면 SDK 코치의 적응형 씽킹이 한 턴에 65k 토큰까지 폭주해
+    // 10~17분 침묵 후 에러로 끝났다(스풀 실측 2회). 재시도 스톨 감시(240s)는
+    // 토큰이 흐르는 동안 안 끊는다. 미성년 코호트는 깊은 사고가 필요 없는
+    // 짧은 편집 루프라 effort=low 로 고정한다 — 이 게이트웨이에서 직접 확인:
+    // adaptive+effort:low → 200(thinking 0), budget_tokens → 400(4.6 거부).
+    // 성인 트랙은 건드리지 않는다.
+    ...(profile.minor_cohort === true
+      ? {
+          // 2026-08-20 — low → medium. low 는 씽킹 폭주(65k)를 막으려 급히 박은 값인데,
+          // 실기기에서 "맥락을 못 알아먹는다" 는 대가가 나왔다. 폭주 원인은 그 사이
+          // 구조로 제거됐다: 출력 상한 · MultiEdit · 좁은 Read · 엔진 분리(스프라이트가
+          // 파일에서 빠져 반복 패턴 재작성 자체가 불가능). 되돌릴 땐 low 로.
+          output_config: { ...((raw as Record<string, unknown>).output_config as Record<string, unknown> | undefined), effort: "medium" },
+          // 2026-08-19 실기기 — "Claude's response exceeded the 32000 output token maximum":
+          // 코치가 도트 스프라이트 맵(반복 패턴 줄) 덩어리를 다시 쓰다 반복 루프에 빠져
+          // 한 응답에 32k+ 를 뱉었다(앞서 65k 턴도 같은 증상). 아동 트랙의 정상 턴은
+          // Edit 몇 번(<3k)이라 8k 면 충분하고, 폭주는 1~2분 안에 끊긴다.
+          // medium 은 생각 토큰이 출력 예산을 같이 쓴다 — 8k 면 큰 편집이 중간에 잘린다.
+          max_tokens: Math.min(typeof raw.max_tokens === "number" ? raw.max_tokens : 12000, 12000),
+        }
+      : {}),
     // #384 — Claude Code CLI 2.x emits mid-conversation `role:"system"`
     // messages (beta mid-conversation-system-2026-04-07). The classroom
     // models this gateway pins reject that role even with the beta — every
@@ -656,3 +687,30 @@ messages.post("/messages/count_tokens", async (c) => {
   c.header("x-hps-model", modelLabel);
   return c.json(j);
 });
+
+/**
+ * 아동 코호트 컨텍스트 위생 (2026-08-20, #629 후속).
+ *
+ * Studio 의 SDK 코치는 대화 전체를 문자열 하나로 접어 매 턴 다시 보낸다
+ * (extensions/hypeproof-chat/src/sdkCoach.ts — `history.map(...).join`), 상한은
+ * 항목 200개뿐이라 4시간 워크숍에서 계속 자란다. 실측(2026-08-19): 한 세션에서
+ * cache_read 가 11k → 15k 로 단조 증가했고, 세상 HTML 이 통째로 들어간 턴은
+ * 한 번에 52k 를 만들었다.
+ *
+ * 두 가지만 한다 — 둘 다 **정보 손실이 아니다**:
+ *  1. 히스토리 속 코드 펜스는 파일로 존재한다(작업 폴더 index.html). 본문 대신
+ *     "파일에 있다" 한 줄로 바꾼다. 코치는 필요하면 Read 한다.
+ *  2. 그래도 길면 **뒤쪽**(최근 대화 + 지금 질문)을 남긴다. 앞부분은 생략 표시.
+ * 성인 트랙은 건드리지 않는다(멀티페이지 제작은 앞 맥락이 실제로 필요하다).
+ */
+export function trimMinorContext(text: string, maxChars = 8000): string {
+  // 2026-08-20 실기기 — 코치 답변에 "User: 맑은하늘이요" 가 그대로 찍혔다.
+  // Studio 가 히스토리를 `user: …` / `assistant: …` 로 접어 보내니 모델이 그 형식을
+  // 이어 쓴 것이다. 라벨을 대화가 아닌 표시로 바꾸면 흉내낼 형식이 사라진다.
+  text = text
+    .replace(/^user:\s/gm, "[아이] ")
+    .replace(/^assistant:\s/gm, "[코치] ");
+  let out = text.replace(/```[a-zA-Z]*\n[\s\S]{400,}?```/g, "```\n[코드는 작업 폴더 index.html 에 있습니다 — 필요하면 Read 하세요]\n```");
+  if (out.length > maxChars) out = "[앞부분 생략]\n" + out.slice(out.length - maxChars);
+  return out;
+}

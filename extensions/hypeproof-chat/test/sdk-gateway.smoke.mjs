@@ -164,7 +164,7 @@ const {
   assert.deepEqual(options.settingSources, [], "REQ-M5: workspace settings cannot inject allow-rules");
   assert.deepEqual(options.tools, [], "REQ-M16: chat-only cohort disables ALL built-in tools (tools: [])");
   assert.equal(options.permissionMode, "default");
-  assert.equal(options.maxTurns, 6, "minor cohort keeps the tight loop bound");
+  assert.equal(options.maxTurns, 20, "minor cohort loop bound (2026-08-19: 6 → 20, 편집 예산)");
   assert.equal(options.env.ANTHROPIC_BASE_URL, "https://api.hypeproof-ai.xyz");
   assert.equal(options.env.ANTHROPIC_AUTH_TOKEN, "hps-token");
   assert.equal("ANTHROPIC_API_KEY" in options.env, false, "REQ-M13 holds through the full option build");
@@ -195,7 +195,7 @@ const {
   });
   assert.deepEqual(
     adultOptions.tools,
-    ["Read", "Grep", "Glob", "Write", "Edit"],
+    ["Read", "Grep", "Glob", "Write", "Edit", "MultiEdit"],
     "adult copyclone cohort: sdk_tools maps to the exact SDK tool names",
   );
   assert.deepEqual(adultOptions.allowedTools, [], "REQ-M5 holds for tooled cohorts too — no auto-approval");
@@ -225,7 +225,7 @@ const {
   });
   assert.deepEqual(
     browserOptions.tools,
-    ["Read", "Grep", "Glob", "Write", "Edit"],
+    ["Read", "Grep", "Glob", "Write", "Edit", "MultiEdit"],
     "REQ-M19: MCP names never leak into Options.tools (built-in base set only)",
   );
   assert.ok(!("mcpServers" in browserOptions), "mcpServers is host-bound — attached by sdkCoach, never by the pure builder");

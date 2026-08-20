@@ -30,6 +30,15 @@ interface State {
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
+  /** #649 — 지금 열려 있는 세상 id. 친구 스트립이 이 버튼을 강조한다(aria-pressed). */
+  openWorldId: string | null;
+  /**
+   * "갤러리에 올리기" 의 상태. `null` 이면 아직 안 눌렀다.
+   *
+   * 스트림 상태(`streamId`)와 **섞지 않는다.** 발행은 코치와 무관한 별개의
+   * 왕복이라, 하나로 묶으면 발행 중에 대화가 잠기거나 그 반대가 된다.
+   */
+  publish: { state: "uploading" } | { state: "done"; url: string } | { state: "error"; message: string } | null;
 }
 
 type Action =
@@ -44,6 +53,9 @@ type Action =
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
   | { type: "streamStopped" }
+  | { type: "worldOpened"; id: string }
+  | { type: "publishStart" }
+  | { type: "publishResult"; state: "uploading" | "done" | "error"; url?: string; message?: string }
   | { type: "streamError"; error: string; requestId?: string; runbookUrl?: string }
   | { type: "userSent"; text: string; images?: string[] };
 
@@ -62,6 +74,8 @@ const initialState: State = {
   pageNotice: null,
   aiNotice: null,
   stopNotice: null,
+  openWorldId: null,
+  publish: null,
 };
 
 function reducer(state: State, action: Action): State {
@@ -97,6 +111,16 @@ function reducer(state: State, action: Action): State {
     case "pageAttached":
       // #308 — inline notice; cleared on the next send (userSent) only.
       return { ...state, pageNotice: action.label };
+    case "worldOpened":
+      // 세상이 바뀌면 직전 발행 결과는 더 이상 이 세상 얘기가 아니다 — 지운다.
+      // (안 지우면 초코 세상을 열었는데 뽀로 세상의 "올렸어요" 링크가 남는다.)
+      return { ...state, openWorldId: action.id, publish: null };
+    case "publishStart":
+      return { ...state, publish: { state: "uploading" } };
+    case "publishResult":
+      if (action.state === "uploading") return { ...state, publish: { state: "uploading" } };
+      if (action.state === "done") return { ...state, publish: { state: "done", url: action.url ?? "" } };
+      return { ...state, publish: { state: "error", message: action.message ?? "올리지 못했어요." } };
     case "aiDisclosure":
       // #320 — session-start AI disclosure. The host gates when this arrives
       // (once per session + after clear); the webview just keeps it visible
@@ -177,6 +201,8 @@ export function App() {
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state, ...(msg.at ? { at: msg.at } : {}) } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
+        case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
+        case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
         case "streamStopped": dispatch({ type: "streamStopped" }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
@@ -252,6 +278,14 @@ export function App() {
         pageNotice={state.pageNotice}
         aiNotice={state.aiNotice}
         stopNotice={state.stopNotice}
+        openWorldId={state.openWorldId}
+        publish={state.publish}
+        onPublish={() => {
+          // 낙관적으로 uploading 을 먼저 켠다 — 호스트도 같은 값을 보내지만,
+          // 그 사이 연타를 막는 것은 이 즉시 반영이다.
+          dispatch({ type: "publishStart" });
+          postToHost({ type: "publishToGallery" });
+        }}
         streaming={!!state.streamId}
         streamingId={state.timeline.openId}
         error={state.error}

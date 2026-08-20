@@ -17,6 +17,7 @@ import { createHash } from "node:crypto";
 const {
   scanUploadableSessions, uploadSession, uploadAllPending, buildManifest,
   UPLOADED_MARKER, UPLOAD_QUIESCENT_MS,
+  uploadSessionSnapshot,
 } = await import("../src/spoolUploader.ts");
 
 const FIXED_NOW = () => new Date("2026-08-19T09:00:00.000Z");
@@ -37,7 +38,11 @@ function makeSession(root, day, sid, { meta = true, events = "e1\ne2\n", uploade
     const f = path.join(dir, "events.jsonl");
     fs.writeFileSync(f, events);
     if (!fresh) {
-      const t = new Date(Date.now() - UPLOAD_QUIESCENT_MS - 5 * 60 * 1000);
+      // 2026-08-19 — 실제 시계가 아니라 **테스트가 쓰는 FIXED_NOW** 기준으로 늙힌다.
+      // Date.now() 기준이면 정지 게이트가 (FIXED_NOW - 실제mtime) 를 보게 되어
+      // 실제 UTC 가 09:00 을 넘긴 뒤로는 음수가 되고, 모든 세션이 "너무 신선함"
+      // 으로 스킵돼 uploadAllPending 이 0 건을 돌려준다(매일 18:00 KST 이후 CI 적색).
+      const t = new Date(FIXED_NOW().getTime() - UPLOAD_QUIESCENT_MS - 5 * 60 * 1000);
       fs.utimesSync(f, t, t);
     }
   }
@@ -246,4 +251,38 @@ console.log("spool-uploader.smoke.mjs — all green");
     "마커가 없어 pending — 게이트만 풀리면 꼬리까지 다시 올라간다",
   );
   console.log("✓ N1 — 업로드 중 성장 감지 → 마커 보류, 재업로드 예약");
+}
+
+
+// ─── 스냅샷 (2026-08-21 갤러리 발행 연동) — 미완결이 계약이다 ────────────────
+{
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hps-snap-"));
+  const dir = path.join(root, "2026-08-21", "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "session.meta.json"), "{}");
+  fs.writeFileSync(path.join(dir, "events.jsonl"), '{"type":"prompt","text":"안녕"}\n');
+  const calls = [];
+  const fetchFn = async (url, init) => {
+    calls.push({ url: String(url), method: init.method });
+    return new Response(JSON.stringify({ key: "k" }), { status: 200 });
+  };
+  const r = await uploadSessionSnapshot({
+    session: { dir, day: "2026-08-21", sessionId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
+    baseUrl: "https://api.example/v1", token: "T", fetchFn,
+  });
+  assert.equal(r.ok, true);
+  assert.equal(calls.length, 2, "meta + events 딱 둘");
+  assert.ok(
+    !calls.some((c) => c.url.includes("manifest.json")),
+    "manifest 를 올리면 안 된다 — 진행 중 세션에 완결 도장을 찍는 것이다",
+  );
+  assert.ok(
+    !fs.existsSync(path.join(dir, "uploaded.json")),
+    "마커를 쓰면 안 된다 — 스캔이 이 세션을 건너뛰어 꼬리가 유실된다",
+  );
+  assert.equal(
+    scanUploadableSessions(root, { allowFresh: [dir] }).length, 1,
+    "스냅샷 뒤에도 pending — 수업 끝 완결 업로드가 같은 키를 덮으며 정본이 된다",
+  );
+  console.log("✓ 스냅샷 — meta+events 만, manifest·마커 없음, 완결 업로드 예약 유지");
 }
