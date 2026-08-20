@@ -1205,6 +1205,160 @@ def render_pdf(analysis: dict[str, Any], output: Path, font_path: str | None, fo
     os.replace(temp, output)
 
 
+
+def render_html(analysis: dict[str, Any], output: Path, force: bool) -> None:
+    """분석 결과를 **자립형 HTML 한 장**으로 낸다.
+
+    PDF 와 같은 내용을 낸다 — 다른 결론을 말하는 두 번째 리포트를 만들지 않는다.
+    다른 것은 그릇뿐이다:
+
+    - reportlab·한글 폰트가 필요 없다. PDF 경로는 학생 노트북에서 의존성 때문에
+      성립하지 않는다(실측: 이 개발기에도 reportlab 이 없다).
+    - 갤러리가 그대로 호스팅할 수 있다. 브라우저에서 인쇄하면 A4 한 장이다.
+
+    **자립형이어야 한다.** 외부 CSS·폰트·이미지를 부르지 않는다 — 갤러리는
+    엄격한 CSP 뒤에서 내보내고, 바깥으로 나가는 요청은 전부 막힌다.
+
+    **모든 값을 이스케이프한다.** 수업 제목·가명·증거 요약은 결국 세션 로그에서
+    온 문자열이고, 스킬은 로그를 **신뢰하지 않는 데이터**로 다룬다. 이스케이프를
+    빼면 로그 한 줄이 리포트에 스크립트를 심는 길이 된다.
+    """
+    from html import escape as esc
+
+    if output.exists() and not force:
+        raise SignalError(f"출력 파일이 이미 있습니다(--force 필요): {output}")
+
+    participant = analysis["participant"]
+    lesson = analysis["lesson"]
+    synthetic = bool(analysis["synthetic"])
+    summary = analysis["data_summary"]
+
+    def axis_card(axis: dict[str, Any]) -> str:
+        score = axis.get("score")
+        # 점수가 없는 축은 0 으로 그리지 않는다. `NA` 는 "못했다"가 아니라
+        # "볼 기회가 없었다"이고, 둘을 같은 칸에 그리면 리포트가 거짓말을 한다.
+        score_txt = "—" if score is None else f"{score}"
+        cov = axis.get("coverage")
+        cov_txt = "—" if cov is None else f"{round(float(cov) * 100)}%"
+        return f"""
+      <article class="axis">
+        <header>
+          <span class="axis-ko">{esc(str(axis.get('korean') or ''))}</span>
+          <span class="axis-en">{esc(str(axis.get('english') or ''))}</span>
+          <span class="band">{esc(str(axis.get('criterion_band') or '—'))}</span>
+        </header>
+        <p class="axis-desc">{esc(str(axis.get('description') or ''))}</p>
+        <p class="axis-copy"><b>잘한 것</b> {esc(str(axis.get('strength') or '—'))}</p>
+        <p class="axis-copy"><b>다음엔</b> {esc(str(axis.get('growth') or '—'))}</p>
+        <p class="axis-meta">점수 {esc(score_txt)} · 관찰 범위 {esc(cov_txt)} ·
+           증거 신뢰도 {esc(str(axis.get('evidence_confidence') or '—'))}</p>
+      </article>"""
+
+    axes_html = "".join(axis_card(a) for a in analysis["axes"].values())
+
+    def bullet_list(items: Iterable[dict[str, Any]], empty: str) -> str:
+        rows = [
+            f"<li><b>{esc(str(i.get('label') or ''))}</b> {esc(str(i.get('copy') or ''))}</li>"
+            for i in items
+        ]
+        return "<ul>" + ("".join(rows) if rows else f"<li class='empty'>{esc(empty)}</li>") + "</ul>"
+
+    insights = analysis.get("insights") or {}
+    warnings = analysis.get("warnings") or []
+    warn_html = (
+        "<ul class='warn'>" + "".join(f"<li>{esc(str(w))}</li>" for w in warnings) + "</ul>"
+        if warnings
+        else ""
+    )
+
+    badge = "데모 데이터" if synthetic else "수업 관찰 프로필"
+    review_status = (analysis.get("review") or {}).get("status", "unknown")
+
+    html = f"""<meta charset="utf-8">
+<title>{esc(str(participant.get('display_id') or ''))} · 수업 속 7가지 실행역량</title>
+<style>
+  :root {{
+    --ink:#1d1d1f; --muted:#6e6e73; --line:#d2d2d7; --bg:#f5f5f7; --accent:#0071e3;
+  }}
+  * {{ box-sizing:border-box }}
+  body {{
+    margin:0; padding:32px 20px; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",
+                "Noto Sans KR",system-ui,sans-serif;
+    line-height:1.6; -webkit-font-smoothing:antialiased;
+  }}
+  .sheet {{ max-width:820px; margin:0 auto; background:#fff; border:1px solid var(--line);
+            border-radius:18px; padding:32px 34px }}
+  .eyebrow {{ font-size:11px; letter-spacing:.18em; color:var(--muted); margin:0 0 6px }}
+  h1 {{ font-size:27px; margin:0 0 6px; letter-spacing:-.02em }}
+  .sub {{ color:var(--muted); font-size:13px; margin:0 }}
+  .badge {{ float:right; font-size:11px; font-weight:700; padding:4px 10px; border-radius:999px;
+            background:var(--accent); color:#fff }}
+  .meta {{ margin:18px 0 0; padding:12px 0; border-top:1px solid var(--line);
+           border-bottom:1px solid var(--line); font-size:12px; color:var(--muted) }}
+  .axes {{ display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px;
+           margin:22px 0 0 }}
+  .axis {{ border:1px solid var(--line); border-radius:14px; padding:14px 15px }}
+  .axis header {{ display:flex; align-items:baseline; gap:7px; flex-wrap:wrap; margin-bottom:6px }}
+  .axis-ko {{ font-weight:600 }}
+  .axis-en {{ font-size:11px; color:var(--muted) }}
+  .band {{ margin-left:auto; font-size:11px; padding:2px 8px; border-radius:999px;
+           background:var(--bg); color:var(--muted) }}
+  .axis-desc {{ font-size:12px; color:var(--muted); margin:0 0 8px }}
+  .axis-copy {{ font-size:12.5px; margin:0 0 5px }}
+  .axis-copy b {{ color:var(--accent); font-weight:600; margin-right:4px }}
+  .axis-meta {{ font-size:11px; color:var(--muted); margin:8px 0 0;
+                font-variant-numeric:tabular-nums }}
+  h2 {{ font-size:15px; margin:26px 0 8px }}
+  ul {{ margin:0; padding-left:18px; font-size:13px }}
+  li {{ margin:0 0 4px }}
+  li.empty {{ color:var(--muted); list-style:none; margin-left:-18px }}
+  .warn li {{ color:#a1560f }}
+  footer {{ margin-top:26px; padding-top:14px; border-top:1px solid var(--line);
+            font-size:11px; color:var(--muted) }}
+  @media print {{
+    body {{ background:#fff; padding:0 }}
+    .sheet {{ border:0; border-radius:0; padding:0 }}
+    @page {{ size:A4; margin:14mm }}
+  }}
+</style>
+<div class="sheet">
+  <span class="badge">{esc(badge)}</span>
+  <p class="eyebrow">HYPEPROOF · HAIN7 STUDIO SIGNAL</p>
+  <h1>수업 속 7가지 실행역량</h1>
+  <p class="sub">설문 없이, 실제 만들기 과정에서 관찰된 행동 신호</p>
+
+  <p class="meta">
+    {esc(str(participant.get('display_id') or ''))} ·
+    {esc(str(participant.get('grade_band') or ''))} ·
+    {esc(str(lesson.get('title') or ''))} ·
+    {esc(str(lesson.get('date') or ''))} ·
+    {esc(str(lesson.get('duration_minutes') or ''))}분 ·
+    프롬프트 {esc(str(summary.get('prompt_count', 0)))}회 ·
+    버전 {esc(str(summary.get('artifact_version_count', 0)))}개 ·
+    검토 {esc(str(review_status))}
+  </p>
+
+  <div class="axes">{axes_html}</div>
+
+  <h2>오늘 잘한 것</h2>
+  {bullet_list(insights.get('strengths') or [], '아직 뚜렷한 신호가 모이지 않았어요.')}
+
+  <h2>다음에 해볼 것</h2>
+  {bullet_list(insights.get('growth_priorities') or [], '다음 수업에서 더 살펴볼게요.')}
+
+  {('<h2>읽을 때 주의</h2>' + warn_html) if warn_html else ''}
+
+  <footer>
+    이 문서는 <b>HAIN7 기반 수업 관찰 프로필</b>이며 공식 HAIN7 진단·지능검사·성격검사·
+    임상평가가 아닙니다. 관찰된 행동만 기록하고 지능·성격·잠재력·종합 등수를 추정하지
+    않습니다. 관찰 기회가 없던 항목은 0점이 아니라 <b>—</b> 로 둡니다.
+  </footer>
+</div>
+"""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(html, encoding="utf-8")
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Generate an auditable HAIN7 Studio Signal profile.")
     parser.add_argument("--input", required=True, type=Path, help="Session directory, events.jsonl, or spool root")
@@ -1214,11 +1368,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--review", type=Path, help="Required complete 28-marker review for a real PDF")
     parser.add_argument("--analysis-output", type=Path, help="Auditable analysis JSON output")
     parser.add_argument("--pdf-output", type=Path, help="One-page PDF output")
+    parser.add_argument(
+        "--html-output",
+        type=Path,
+        help="Self-contained one-page HTML output (no reportlab/font needed)",
+    )
     parser.add_argument("--font", help="Korean TTF/TTC font path")
     parser.add_argument("--force", action="store_true", help="Explicitly overwrite output files")
     args = parser.parse_args(argv)
-    if not args.analysis_output and not args.pdf_output:
-        parser.error("--analysis-output 또는 --pdf-output 중 하나가 필요합니다.")
+    if not args.analysis_output and not args.pdf_output and not args.html_output:
+        parser.error("--analysis-output · --pdf-output · --html-output 중 하나가 필요합니다.")
     return args
 
 
@@ -1233,18 +1392,23 @@ def main(argv: list[str] | None = None) -> int:
         cohort = read_json(args.cohort.expanduser().resolve()) if args.cohort else None
         review = read_json(args.review.expanduser().resolve()) if args.review else None
         analysis = assemble_analysis(events, raw_events, meta, context, cohort, review)
-        if args.pdf_output and not context.get("synthetic") and analysis["review"]["status"] != "completed":
-            raise SignalError("실데이터 PDF는 28개 marker 검토가 완료된 --review 파일이 필요합니다.")
+        # HTML 도 PDF 와 **같은 게이트**를 받는다. 다르게 두면 HTML 이 28마커 검토를
+        # 우회하는 뒷문이 된다 — 그릇이 바뀌었다고 근거 요건이 바뀌지 않는다.
+        if (args.pdf_output or args.html_output) and not context.get("synthetic") and analysis["review"]["status"] != "completed":
+            raise SignalError("실데이터 리포트는 28개 marker 검토가 완료된 --review 파일이 필요합니다.")
         if args.analysis_output:
             write_json(args.analysis_output.expanduser().resolve(), analysis, args.force)
         if args.pdf_output:
             render_pdf(analysis, args.pdf_output.expanduser().resolve(), args.font, args.force)
+        if args.html_output:
+            render_html(analysis, args.html_output.expanduser().resolve(), args.force)
         print(
             json.dumps(
                 {
                     "ok": True,
                     "analysis_output": str(args.analysis_output.resolve()) if args.analysis_output else None,
                     "pdf_output": str(args.pdf_output.resolve()) if args.pdf_output else None,
+                    "html_output": str(args.html_output.resolve()) if args.html_output else None,
                     "synthetic": analysis["synthetic"],
                     "peer_comparison": analysis["peer_comparison"]["available"],
                     "marker_coverage": analysis["data_summary"]["marker_coverage"],
