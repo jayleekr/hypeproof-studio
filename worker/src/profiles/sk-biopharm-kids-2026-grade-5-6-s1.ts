@@ -84,10 +84,17 @@ export const profile: Profile = {
     template_tier: "kids-quest",   // 게스트 퀘스트 — kq-* 5개. "게임" 낱말을 쓰지 않는 tier.
   },
   publishing: {
-    // 미성년 cohort 기본값: 로컬 미리보기만. 공개 퍼블리시는 부모 동의 + PII
-    // 설계가 끝난 뒤에만 켠다.
-    enabled: false,
-    strategy: "local_only",
+    // 2026-08-21 — 부모 동의 확보 + PII 설계 완료로 갤러리를 연다.
+    //
+    // 여는 것은 `hypeproof_gallery` 까지다. 공개 GitHub Pages(`per_user_github_pages`)
+    // 는 여전히 미성년에게 열지 않는다 — 거기는 색인되고 영구적이며 우리가 회수할
+    // 수 없다. 갤러리는 `/live/**` 라 noindex 이고, 회차 코드로 격리되며, 학습
+    // 리포트는 암호 뒤에 따로 있다(게임만 링크로 바로 보인다).
+    //
+    // 화면에 나가는 것: 아이 이름 · 자리번호 · 만든 세상. 로그인은 없고 링크를
+    // 받은 사람은 볼 수 있다. 그 범위를 알고 연 것이다.
+    enabled: true,
+    strategy: "hypeproof_gallery",
   },
   assets_focus: [
     "intent_clarity",
