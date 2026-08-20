@@ -236,8 +236,66 @@ jobs:
       # ad-hoc (free, no certificate) turns that dead end into the recoverable
       # "unidentified developer" prompt. Also hard-fails the build if the seal is
       # still invalid, so a broken-signature artifact can never be released again.
-      - name: Re-sign .app (ad-hoc seal) + verify
+      # Stable signing identity (optional). Ad-hoc signatures are derived from
+      # bundle contents, so EVERY build gets a different code identity. macOS
+      # binds a keychain "Always Allow" grant to that identity, which is why the
+      # "HypeProof Studio wants to use your confidential information" dialog
+      # returns after every update: the extension stores the workshop token in
+      # SecretStorage → Electron safeStorage → keychain, and the new build is a
+      # stranger to the old grant.
+      #
+      # Importing one certificate and reusing it across releases fixes that: the
+      # identity stops changing, so the grant survives updates. Absent the
+      # secrets this step no-ops and sign-mac.sh falls back to ad-hoc — the PR is
+      # safe to merge before the secrets exist.
+      #
+      # The certificate can be self-signed (free; fixes the keychain prompt only)
+      # or a Developer ID (also removes the Gatekeeper "unidentified developer"
+      # step + enables notarization). Swapping one for the other is a secret
+      # change, not a workflow change.
+      # No `if:` guard — step-level `env` is not visible to `if`, and `secrets`
+      # in `if` is a footgun. The emptiness check lives in the script instead, so
+      # the step is a documented no-op until the secrets exist.
+      - name: Import signing certificate (optional)
+        id: signcert
         shell: bash
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MACOS_CERT_P12:-}" ]; then
+            echo "MACOS_CERT_P12 not set — skipping; sign-mac.sh will use ad-hoc."
+            exit 0
+          fi
+          KEYCHAIN="$RUNNER_TEMP/hps-signing.keychain-db"
+          KEYCHAIN_PW="$(uuidgen)"
+          printf '%s' "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security create-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security set-keychain-settings -lut 3600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PW" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "${MACOS_CERT_PASSWORD:-}" -T /usr/bin/codesign -A
+          # Without this, codesign blocks on an interactive "allow access?" that
+          # a headless runner can never answer.
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PW" "$KEYCHAIN" >/dev/null
+          # Prepend to the search list so codesign finds the identity, keeping
+          # the runner's existing keychains (login/System) usable.
+          EXISTING="$(security list-keychains -d user | sed 's/[[:space:]]*"//g')"
+          security list-keychains -d user -s "$KEYCHAIN" $EXISTING
+          rm -f "$RUNNER_TEMP/cert.p12"
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
+            | awk -F'"' '/"/{print $2; exit}')"
+          [ -n "$IDENTITY" ] || { echo "::error::certificate imported but no codesigning identity found"; exit 1; }
+          echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
+          echo "Signing identity ready."
+
+      - name: Re-sign .app + verify
+        shell: bash
+        env:
+          # Empty → sign-mac.sh falls back to ad-hoc (its documented default).
+          CODESIGN_IDENTITY: ${{ steps.signcert.outputs.identity || '-' }}
         run: bash scripts/sign-mac.sh
 
       # Post-build gate (build-pipeline.md says mandatory; was missing from CI
