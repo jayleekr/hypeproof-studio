@@ -125,6 +125,18 @@ for (const w of WORLDS) {
     if (dropped.length) bad(`${w.id}: 필터가 깃발을 버린다 — ${dropped.join(", ")}`);
     else ok(`${w.id}: 문제 깃발 값이 낱개로 도달 (${w.problem.join(", ")})`);
   }
+
+  // 5) 🔴 키 상한 — 필터는 16개까지만 통과시킨다(MAX_RESULT_KEYS). 스켈레톤 키 +
+  // engineJs 가 나중에 붙이는 5개(type·ok·guest·world·n)가 넘치면 **조용히 잘린다.**
+  // 무엇이 잘릴지는 객체 순서에 달려서 예측할 수 없다 — 넘치기 전에 걸러야 한다.
+  const full = Object.fromEntries([
+    ...[...sent].map((k) => [k, 1]),
+    ...OVERWRITTEN.map((k) => [k, true]),
+  ]);
+  const kept = sanitizeQuestResult(full);
+  const lost = Object.keys(full).filter((k) => k !== "type" && !(k in kept));
+  if (lost.length) bad(`${w.id}: 키가 상한(16)을 넘어 잘린다 — ${lost.join(", ")}`);
+  else ok(`${w.id}: 키 ${Object.keys(full).length - 1}개, 상한 안 (잘림 없음)`);
 }
 
 console.log(`\nTotals: PASS=${pass} FAIL=${fails.length}`);
