@@ -45,7 +45,7 @@ const WORLD={
 const COLS=3,ROWS=3;let state='title',holes=[],t=0,hit=0,miss=0,sprouts=WORLD.sprouts,pop=[];const SUB=ITEM_A+' '+GOAL+'마리 잡으면 성공!'+(SPECIAL?' ('+SPECIAL+'초)':'');
 const stay=Math.max(20,120-SPEED*10),CS=44,GX=PW/2-CS*1.5,GY0=42;
 function reset(){holes=Array.from({length:9},()=>({who:'',ttl:0,up:0}));t=0;hit=0;miss=0;sprouts=WORLD.sprouts;pop=[];state='play';say('<b>'+GUEST_NAME+'</b>: 나온다, 나온다!');}
-function end(ok){report({hit,miss,goal:GOAL,sprouts,secs:Math.round(t/60),speed:SPEED,atOnce:RATE,time:SPECIAL},ok,hit+'마리',ok?'새싹 지켰다! 🌱 고마워':'',sprouts<=0?'새싹이… 다 먹혔어…':'너무 빨라서 다 놓쳤어…');}
+function end(ok){report({w_eat:WORLD.eat,w_sprouts:WORLD.sprouts,hit,miss,goal:GOAL,sprouts,secs:Math.round(t/60),speed:SPEED,atOnce:RATE,time:SPECIAL},ok,hit+'마리',ok?'새싹 지켰다! 🌱 고마워':'',sprouts<=0?'새싹이… 다 먹혔어…':'너무 빨라서 다 놓쳤어…');}
 addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();});
 addEventListener('pointerdown',e=>{if(state!=='play'){reset();return;}const p=toPX(e.clientX,e.clientY);const c=Math.floor((p.x-GX)/CS),r=Math.floor((p.y-GY0)/CS);if(c<0||r<0||c>=COLS||r>=ROWS)return;const h=holes[r*COLS+c];if(!h.who)return;
   if(h.who===ITEM_A){hit++;pop.push({x:GX+(c+.5)*CS,y:GY0+(r+.5)*CS,t:0});}else{miss++;say('<b>'+GUEST_NAME+'</b>: 앗, 그건 아니야!');}h.who='';h.ttl=0;if(hit>=GOAL)end(true);});

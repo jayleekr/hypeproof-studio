@@ -49,8 +49,8 @@ function reset(){seq=[];level=0;mistakes=0;next();state='play';}
 function next(){seq.push(Math.floor(Math.random()*K));inp=[];phase='show';t=0;lit=-1;level=seq.length;say('<b>'+GUEST_NAME+'</b>: 잘 봐~ '+level+'단계!');}
 const PADW=Math.min(44,Math.floor((PW-40)/K)),PADY=PH/2-8,PADX=(PW-PADW*K)/2;
 function press(i){if(state!=='play'||phase!=='input')return;lit=i;t=0;inp.push(i);
-  if(seq[inp.length-1]!==i){mistakes++;say('<b>'+GUEST_NAME+'</b>: 앗, 거기 아니야… ('+mistakes+'번)');if(mistakes>SPECIAL){report({level,goal:GOAL,mistakes,pads:K,speed:SPEED,allowed:SPECIAL},false,level+'단계','','시끄러워서 못 외우겠어…');return;}inp=[];phase='show';t=0;return;}
-  if(inp.length===seq.length){if(seq.length>=GOAL){report({level,goal:GOAL,mistakes,pads:K,speed:SPEED,allowed:SPECIAL},true,level+'단계','노래 다 외웠다! 🎶 조용하니까 되네','');return;}say('<b>'+GUEST_NAME+'</b>: 맞아! '+ITEM_B);phase='wait';setTimeout(()=>{if(state==='play')next();},700);}}
+  if(seq[inp.length-1]!==i){mistakes++;say('<b>'+GUEST_NAME+'</b>: 앗, 거기 아니야… ('+mistakes+'번)');if(mistakes>SPECIAL){report({w_noise:WORLD.noise,level,goal:GOAL,mistakes,pads:K,speed:SPEED,allowed:SPECIAL},false,level+'단계','','시끄러워서 못 외우겠어…');return;}inp=[];phase='show';t=0;return;}
+  if(inp.length===seq.length){if(seq.length>=GOAL){report({w_noise:WORLD.noise,level,goal:GOAL,mistakes,pads:K,speed:SPEED,allowed:SPECIAL},true,level+'단계','노래 다 외웠다! 🎶 조용하니까 되네','');return;}say('<b>'+GUEST_NAME+'</b>: 맞아! '+ITEM_B);phase='wait';setTimeout(()=>{if(state==='play')next();},700);}}
 addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();const k=parseInt(e.key);if(k>=1&&k<=K)press(k-1);});
 addEventListener('pointerdown',e=>{if(state!=='play'){reset();return;}const p=toPX(e.clientX,e.clientY);if(p.y<PADY||p.y>PADY+PADW)return;const i=Math.floor((p.x-PADX)/PADW);if(i>=0&&i<K)press(i);});
 function scene(){skyGrad();

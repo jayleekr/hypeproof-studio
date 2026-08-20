@@ -30,25 +30,11 @@ import { injectBaseHref, injectInnerCsp } from "./previewHtml";
  * docs/studio-requirements.md REQ-D rows.
  */
 
-/**
- * Keep only flat primitives (bool/number/short string) from an `hp:result`
- * payload — the iframe is untrusted content, so nothing nested or long rides
- * into the prompt. Exported for tests.
- */
-export function sanitizeQuestResult(raw: unknown): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  if (!raw || typeof raw !== "object") return out;
-  let n = 0;
-  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-    if (k === "type") continue;
-    if (!/^[A-Za-z_][A-Za-z0-9_]{0,23}$/.test(k)) continue;
-    if (typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) out[k] = v;
-    else if (typeof v === "string") out[k] = v.slice(0, 40);
-    else continue;
-    if (++n >= 16) break;
-  }
-  return out;
-}
+// 결과지 정화는 순수 로직이라 questResultHelpers.ts 로 옮겼다 — vscode 를
+// import 하지 않는 파일이라야 앱 없이 테스트가 된다. 이 경계를 지나는 계약은
+// worker/test/quest-result-contract.test.mjs 가 고정한다.
+import { sanitizeQuestResult } from "./questResultHelpers";
+export { sanitizeQuestResult } from "./questResultHelpers";
 
 export class PreviewProvider {
   private panel: vscode.WebviewPanel | undefined;

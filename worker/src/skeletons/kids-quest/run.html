@@ -75,8 +75,8 @@ function loop(){
     if(rows.length&&rows[rows.length-1].y+dist*2>-40)rows.push(genRow(rows[rows.length-1].y-34));
     rows.forEach(r=>{const sy=r.y+dist*2;if(!r.done&&sy>MY-4&&sy<MY+6){r.done=true;r.items.forEach(it=>{if(it.l!==lane)return;if(it.kind==='wall'){speed=0.6;hits++;say('<b>'+GUEST_NAME+'</b>: 쿵! 막혔어…');}else if(!jumping){speed=0.9;say('<b>'+GUEST_NAME+'</b>: 첨벙… 미끄러워');}});}});
     if(WORLD.chase&&SPEED>0){waterY-=chase*0.6+(speed<1.2?0.5:0)-(speed>2?0.15:0);}else waterY=PH+40;
-    if(WORLD.chase&&waterY<MY+2)report({meters:Math.round(dist/5),goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,Math.round(dist/5)+'m','','콜록… 물에 잡혔어. 뒤가 너무 빨라…');
-    else if(dist/5>=GOAL)report({meters:GOAL,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},true,GOAL+'m','찾았다! 🧀 길이 보이니까 금방이네','');}
+    if(WORLD.chase&&waterY<MY+2)report({w_dark:WORLD.dark,w_chase:WORLD.chase,meters:Math.round(dist/5),goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,Math.round(dist/5)+'m','','콜록… 물에 잡혔어. 뒤가 너무 빨라…');
+    else if(dist/5>=GOAL)report({w_dark:WORLD.dark,w_chase:WORLD.chase,meters:GOAL,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},true,GOAL+'m','찾았다! 🧀 길이 보이니까 금방이네','');}
   else t++;
   scene();blit();
   if(state==='title')titleHud();else{txt(Math.min(GOAL,Math.round(dist/5))+' / '+GOAL+'m   💥 '+hits,48,24,'#ffd75b');if(state==='over')overHud(document.title.startsWith('성공'));}

@@ -73,9 +73,9 @@ function loop(){
     if(ITEM_B&&t%Math.round(gap)===0&&Math.random()<0.7)obs.push({x:PW+20,hit:false});
     for(let i=obs.length-1;i>=0;i--){const o=obs[i];o.x-=runSpeed;if(o.x<-20){obs.splice(i,1);passed++;continue;}if(!o.hit&&Math.abs(o.x-CX)<14&&py>GY-12){o.hit=true;hits++;say('<b>'+GUEST_NAME+'</b>: 아야!');}}
     const wl=PH-14-water;
-    if(WORLD.flood&&wl<py-4)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','콜록… 또 잠겼어. 물이 너무 많아…');
-    else if(hits>=3)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','부딪혀서 못 가겠어… 앞이 안 보여');
-    else if(passed>=GOAL)report({passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},true,passed+'/'+GOAL,'집이다! 🏠 이제 젖지 않고 갈 수 있어','');}
+    if(WORLD.flood&&wl<py-4)report({w_flood:WORLD.flood,passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','콜록… 또 잠겼어. 물이 너무 많아…');
+    else if(hits>=3)report({w_flood:WORLD.flood,passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},false,passed+'/'+GOAL,'','부딪혀서 못 가겠어… 앞이 안 보여');
+    else if(passed>=GOAL)report({w_flood:WORLD.flood,passed,goal:GOAL,hits,speed:SPEED,rate:RATE,light:SPECIAL},true,passed+'/'+GOAL,'집이다! 🏠 이제 젖지 않고 갈 수 있어','');}
   else t++;
   scene();blit();
   if(state==='title')titleHud();else{txt(passed+' / '+GOAL+'   💥 '+hits+'/3',48,24,'#ffd75b');if(state==='over')overHud(document.title.startsWith('성공'));}

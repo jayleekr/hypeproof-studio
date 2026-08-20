@@ -65,8 +65,8 @@ function loop(){
   if(state==='play'){t++;windT+=0.01;if(WORLD.wind)px+=Math.sin(windT)*windF*3;px=Math.max(8,Math.min(PW-8,px));vy+=0.16;const prevY=py;py+=vy;
     if(vy>0)plats.forEach(p=>{if(p.gone)return;if(px+7>p.x&&px-7<p.x+p.w&&prevY<=p.y+1&&py>=p.y-1){py=p.y;vy=p.leaf?-3.2:-4.4;if(p.brittle){p.gone=true;say('<b>'+GUEST_NAME+'</b>: 뚝! 부러졌어');}}});
     const targetCam=Math.max(camY,PH*0.55-py);camY=targetCam;let topY=Math.min(...plats.map(p=>p.y));while(topY>-camY-PH){topY-=gap;plats.push(mkPlat(topY));}const m=Math.max(0,Math.round(((PH-30)-py)/(gap*0.5)));if(m>best)best=m;
-    if(py+camY>PH+20)report({meters:best,goal:GOAL,wind:SPEED,gapLevel:RATE,brittle:SPECIAL},false,best+'m','','으악… 떨어졌어. 가지가 자꾸 부러져…');
-    else if(best>=GOAL)report({meters:GOAL,goal:GOAL,wind:SPEED,gapLevel:RATE,brittle:SPECIAL},true,GOAL+'m','도착! 🌰 이제 안 떨어져, 고마워','');}
+    if(py+camY>PH+20)report({w_brittle:WORLD.brittle,w_wind:WORLD.wind,meters:best,goal:GOAL,wind:SPEED,gapLevel:RATE,brittle:SPECIAL},false,best+'m','','으악… 떨어졌어. 가지가 자꾸 부러져…');
+    else if(best>=GOAL)report({w_brittle:WORLD.brittle,w_wind:WORLD.wind,meters:GOAL,goal:GOAL,wind:SPEED,gapLevel:RATE,brittle:SPECIAL},true,GOAL+'m','도착! 🌰 이제 안 떨어져, 고마워','');}
   else t++;
   scene();blit();
   if(state==='title')titleHud();else{txt(Math.min(GOAL,best)+' / '+GOAL+'m',48,24,'#ffd75b');if(state==='over')overHud(document.title.startsWith('성공'));}
