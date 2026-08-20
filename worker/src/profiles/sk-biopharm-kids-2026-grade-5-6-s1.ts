@@ -30,7 +30,11 @@ export const profile: Profile = {
   },
   system_prompt: systemPromptMd as unknown as string,
   welcome: {
-    greeting_md: "안녕하세요! 문제투성이 세상에 사는 친구 아홉 명이 있어요.\n**누구 세상부터 가볼까요?** 🐕 초코 · 🐈 나비 · 🐝 붕붕 · 🐧 뽀로 · 🐁 찍찍 · 🐹 햄찌 · 🦜 앵무 · 🐿️ 도토 · 🦝 라쿤",
+    // #649 (2026-08-20) — "누구 세상부터 가볼까요?" 였다. 이제 세상은 **버튼으로만**
+    // 열린다(앱 matchWorldRef · 워커 matchWorld 둘 다 칩 문구 정확일치만): 아이가
+    // 이름을 타이핑하면 세상이 안 열리고 그냥 코치 턴이 된다. 화면에서 가장 큰 글씨가
+    // 안 되는 길을 가리키면 안 되므로, 작성란 바로 위 친구 스트립을 가리킨다.
+    greeting_md: "안녕하세요! 문제투성이 세상에 사는 친구 아홉 명이 있어요.\n🐕 초코 · 🐈 나비 · 🐝 붕붕 · 🐧 뽀로 · 🐁 찍찍 · 🐹 햄찌 · 🦜 앵무 · 🐿️ 도토 · 🦝 라쿤\n**아래 친구 버튼을 눌러요 👇**",
     example_prompts: [
       "🐝 붕붕 세상에 가볼래",
       "🐧 뽀로 세상에 가볼래",
@@ -80,10 +84,17 @@ export const profile: Profile = {
     template_tier: "kids-quest",   // 게스트 퀘스트 — kq-* 5개. "게임" 낱말을 쓰지 않는 tier.
   },
   publishing: {
-    // 미성년 cohort 기본값: 로컬 미리보기만. 공개 퍼블리시는 부모 동의 + PII
-    // 설계가 끝난 뒤에만 켠다.
-    enabled: false,
-    strategy: "local_only",
+    // 2026-08-21 — 부모 동의 확보 + PII 설계 완료로 갤러리를 연다.
+    //
+    // 여는 것은 `hypeproof_gallery` 까지다. 공개 GitHub Pages(`per_user_github_pages`)
+    // 는 여전히 미성년에게 열지 않는다 — 거기는 색인되고 영구적이며 우리가 회수할
+    // 수 없다. 갤러리는 `/live/**` 라 noindex 이고, 회차 코드로 격리되며, 학습
+    // 리포트는 암호 뒤에 따로 있다(게임만 링크로 바로 보인다).
+    //
+    // 화면에 나가는 것: 아이 이름 · 자리번호 · 만든 세상. 로그인은 없고 링크를
+    // 받은 사람은 볼 수 있다. 그 범위를 알고 연 것이다.
+    enabled: true,
+    strategy: "hypeproof_gallery",
   },
   assets_focus: [
     "intent_clarity",
@@ -103,6 +114,11 @@ export const profile: Profile = {
     // 미성년 데이터 보호 불변식 — 동의/보존정책 전엔 절대 true 금지.
     log_user_messages: false,
     log_metadata: true,
+    // 2026-08-21 — 세션 스풀(아이 문답 원문) 업로드를 연다. 갤러리 학습 리포트의
+    // 원료다. log_user_messages(매 턴 실시간 덤프)와 다른 경로: 이쪽은 수업이
+    // 끝난 뒤 아이가 "기록 보내기" 버튼을 눌러야 올라간다.
+    upload_session_logs: true,
+    child_upload_consent: "2026-08-21 shin_bro — SK바이오팜 8/22 회차, 보호자 사전설문으로 동의 확보",
   },
   ux: {
     coach: {
@@ -120,7 +136,11 @@ export const profile: Profile = {
         { text: "🐈 나비 세상에 가볼래", style: "good" },
         { text: "🐝 붕붕 세상에 가볼래", style: "good" },
         { text: "🐧 뽀로 세상에 가볼래", style: "good" },
-        { text: "다른 친구도 있어?", style: "good" },
+        { text: "🐁 찍찍 세상에 가볼래", style: "good" },
+        { text: "🐹 햄찌 세상에 가볼래", style: "good" },
+        { text: "🦜 앵무 세상에 가볼래", style: "good" },
+        { text: "🐿️ 도토 세상에 가볼래", style: "good" },
+        { text: "🦝 라쿤 세상에 가볼래", style: "good" },
       ],
       // 검증 → 고치기(Feedback Loop)를 굴리는 칩.
       // 2026-08-19 — 게스트에 묶이지 않는 문구만(실기기: 나비 세상에 붕붕·초코 예시가 떴다).

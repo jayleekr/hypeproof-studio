@@ -133,7 +133,7 @@ export interface ResolvedProfile {
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
   /** kids-quest — 사전 완성 세상 목록 (GET /v1/worlds/:id 로 HTML). */
-  worlds?: Array<{ id: string; guest: string; emoji: string; chip: string; aliases: string[] }>;
+  worlds?: Array<{ id: string; guest: string; emoji: string; chip: string; aliases: string[]; line?: string }>;
   // #282 — provider-hosted tools the cohort profile opted into (sourced from the
   // worker, not inferred client-side). Drives which Agent SDK tools the coach may
   // use. Absent/false → the coach is chat-only for that capability.
@@ -216,6 +216,15 @@ export type WebviewMessage =
   | { type: "runCode"; html: string }       // from chat panel → host → preview
   | { type: "previewReady" }                // from preview webview only
   | { type: "openExternal"; url: string }   // #173 — citation chip click → host opens browser
+  /**
+   * "갤러리에 올리기" — 지금 열려 있는 세상을 lab 갤러리로 보낸다.
+   *
+   * 웹뷰는 **아무것도 실어 보내지 않는다.** 어떤 세상인지도, 누구 것인지도
+   * 호스트가 안다(열린 세상 id + 시크릿 저장소의 토큰 + 작업 폴더의 index.html).
+   * 웹뷰가 HTML 을 들고 있지 않은 것이 여기서는 오히려 규약이다 — 화면에 있는
+   * 것이 아니라 **디스크에 저장된 것**이 올라가야 한다.
+   */
+  | { type: "publishToGallery" }
   // Trace signals (#9). Webview fires; host forwards via POST /v1/trace/event.
   // The host-side HTTP forwarding lands in a follow-up — keep these in sync
   // with worker/src/routes/trace.ts TraceEvent union.
@@ -281,6 +290,23 @@ export type HostMessage =
   // a data URL to attach to the next turn — making "drag a screenshot in" work
   // WITH VS Code's drop behavior instead of fighting it. image_paste-gated.
   | { type: "attachImage"; dataUrl: string; name: string }
+  // #649 — 사전 완성 세상이 실제로 화면에 떴다. config 와 별개의 메시지인 이유:
+  // config 는 프로필이 바뀔 때만 오는데, 세상은 한 세션에서 여러 번 바뀐다.
+  // 웹뷰는 이걸로 친구 스트립의 "지금 열린 세상"을 강조한다(aria-pressed).
+  | { type: "worldOpened"; id: string; guest: string; emoji: string }
+  /**
+   * "갤러리에 올리기" 의 결과. `state` 가 셋인 이유: 업로드는 몇 초가 걸리고,
+   * 그 동안 아무 표시가 없으면 아이가 버튼을 계속 누른다(그리고 그건 서버
+   * 레이트리밋에 걸린다). 시작할 때 `uploading` 을 먼저 보낸다.
+   */
+  | {
+      type: "publishResult";
+      state: "uploading" | "done" | "error";
+      /** done 일 때 — 아이에게 그대로 보여줄 갤러리 주소. */
+      url?: string;
+      /** error 일 때 — 서버가 만든 한국어 문구. */
+      message?: string;
+    }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }
   | { type: "actionResult"; requestId: string; approved: boolean }
   | { type: "renderPreview"; html: string }
