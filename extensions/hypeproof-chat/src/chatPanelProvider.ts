@@ -9,6 +9,7 @@ import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoac
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
 import { extractTitle, publishWorld, resolveSiteBase } from "./galleryPublish";
+import { uploadSessionSnapshot } from "./spoolUploader";
 import {
   originOfUrl,
   planCoachBrowserTabs,
@@ -883,6 +884,30 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       return fail(result.message);
     }
     void this.post({ type: "publishResult", state: "done", url: result.url });
+
+    // 발행 성공 → 진행 중 세션의 로그 스냅샷을 **봉인 없이** 올린다 (2026-08-21,
+    // 운영 결정: 보호자 사전설문 동의 확보). 발행 시점의 "여기까지" 가 서버에
+    // 남아, 아이가 수업 끝 "기록 보내기" 를 놓쳐도 리포트 원료가 확보된다.
+    // manifest 를 안 올리므로 미완결 — 수업 끝 완결 업로드가 같은 키를 덮으며
+    // 정본이 된다 (uploadSessionSnapshot 헤더 주석이 정본).
+    //
+    // fire-and-forget: 게임은 이미 올라갔다. 스냅샷 실패를 아이 화면에 띄우지
+    // 않는다 — 콘솔에만 남기고, 완결 업로드 경로가 어차피 다시 덮는다.
+    if (sessionDir && sessionId && this.cachedProfile?.analytics?.upload_session_logs === true) {
+      const day = path.basename(path.dirname(sessionDir));
+      const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+      void uploadSessionSnapshot({
+        session: { dir: sessionDir, day, sessionId },
+        baseUrl: proxyUrl,
+        token,
+      }).then((r) => {
+        console.log(
+          r.ok
+            ? `[gallery] 로그 스냅샷 업로드 완료 (${r.keys.length}개 파일)`
+            : `[gallery] 로그 스냅샷 실패 (${r.failedAt}: ${r.message}) — 수업 끝 완결 업로드가 대신한다`,
+        );
+      });
+    }
   }
 
   /** 작업 폴더에 engine.js 저장 (세상 HTML 옆). 실패는 미리보기 인라인이 살린다. */
