@@ -953,7 +953,7 @@ def render_pdf(analysis: dict[str, Any], output: Path, font_path: str | None, fo
     font = "HPSans"
     bg = HexColor("#F5F2E9")
     ink = HexColor("#151515")
-    muted = HexColor("#6A6A62")
+    muted = HexColor("#595950")
     line = HexColor("#DDD8CA")
     white = HexColor("#FFFFFF")
     lime = HexColor("#CFFF47")
@@ -1002,15 +1002,15 @@ def render_pdf(analysis: dict[str, Any], output: Path, font_path: str | None, fo
         f"{participant['display_id']}  ·  {participant['grade_band']}  ·  {lesson['title']}  ·  "
         f"{lesson['date']}  ·  {lesson['duration_minutes']}분"
     )
-    text_at(565, 758, info, 7.8, ink, "right")
+    text_at(565, 758, info, 8.0, ink, "right")
 
     # Dashboard card
     c.setFillColor(white)
     c.roundRect(30, 496, 535, 239, 16, fill=1, stroke=0)
-    text_at(47, 713, "7-AXIS MAP", 7.4, muted)
+    text_at(47, 713, "이번 수업 역량 지도", 7.4, muted)
 
     # Radar chart
-    center_x, center_y, radius = 160.0, 610.0, 77.0
+    center_x, center_y, radius = 157.0, 610.0, 74.0
     axis_codes = list(AXES)
     angles = [math.pi / 2 + (2 * math.pi * index / len(axis_codes)) for index in range(len(axis_codes))]
     for level in range(1, 5):
@@ -1078,41 +1078,53 @@ def render_pdf(analysis: dict[str, Any], output: Path, font_path: str | None, fo
         c.setStrokeColor(ink)
         c.circle(x, y, 2.5, fill=1, stroke=1)
     for code, angle in zip(axis_codes, angles):
-        label_r = radius + 19
+        label_r = radius + 17
         x = center_x + label_r * math.cos(angle)
         y = center_y + label_r * math.sin(angle) - 2
-        text_at(x, y, analysis["axes"][code]["korean"], 6.8, ink, "center")
-    text_at(55, 515, "■ 이번 수업", 6.7, ink)
+        horizontal = math.cos(angle)
+        alignment = "left" if horizontal > 0.2 else "right" if horizontal < -0.2 else "center"
+        text_at(x, y, analysis["axes"][code]["korean"], 6.8, ink, alignment)
+    c.setFillColor(lime)
+    c.setStrokeColor(ink)
+    c.circle(57, 517, 2.4, fill=1, stroke=1)
+    text_at(64, 515, "이번 수업", 6.7, ink)
     if peer["available"]:
-        text_at(125, 515, "-- 동일조건 평균", 6.7, violet)
+        c.setStrokeColor(violet)
+        c.setLineWidth(1.1)
+        c.setDash(3, 2)
+        c.line(125, 518, 140, 518)
+        c.setDash()
+        text_at(146, 515, "같은 조건 평균", 6.7, violet)
     else:
         text_at(125, 515, "비교 규준 없음", 6.7, muted)
 
     # Insight stack
     insights = analysis["insights"]
-    text_at(302, 708, "관찰된 강점", 9.2, ink)
+    text_at(302, 708, "오늘 잘 드러난 힘", 9.2, ink)
     y = 687
     for item in insights["strengths"]:
         c.setFillColor(lime)
         c.circle(309, y + 2, 5, fill=1, stroke=0)
-        text_at(322, y, f"{item['label']}  {item['score']:.1f}", 8.4, ink)
-        wrapped(322, y - 14, item["copy"], 6.8, 220, 9.2, 2, muted)
+        text_at(322, y, f"{item['label']}  {item['score']:.1f}/4", 8.4, ink)
+        wrapped(322, y - 14, item["copy"], 7.0, 220, 9.4, 2, muted)
         y -= 54
-    text_at(302, 587, "다음 성장 포인트", 9.2, ink)
+    text_at(302, 587, "다음 수업에서 키울 힘", 9.2, ink)
     y = 566
     for item in insights["growth_priorities"]:
         c.setFillColor(violet_soft)
         c.circle(309, y + 2, 5, fill=1, stroke=0)
-        text_at(322, y, f"{item['label']}  {item['score']:.1f}", 8.4, ink)
-        wrapped(322, y - 14, item["copy"], 6.8, 220, 9.2, 2, muted)
+        text_at(322, y, f"{item['label']}  {item['score']:.1f}/4", 8.4, ink)
+        wrapped(322, y - 14, item["copy"], 7.0, 220, 9.4, 2, muted)
         y -= 54
 
     # Axis rows
     c.setFillColor(white)
     c.roundRect(30, 248, 535, 232, 16, fill=1, stroke=0)
     text_at(46, 459, "7가지 능력치", 9.2, ink)
-    text_at(347, 459, "이번 수업", 6.7, muted)
-    text_at(467, 459, "동일조건 위치", 6.7, muted)
+    coverage_label = f"이번 수업 · 근거 {analysis['data_summary']['marker_coverage'] * 100:.0f}%"
+    text_at(347, 459, coverage_label, 6.5, muted)
+    comparison_label = f"같은 조건* · n={peer['n']}" if peer["available"] else "비교 규준 없음"
+    text_at(545, 459, comparison_label, 6.5, muted, "right")
     row_y = 433
     for index, (code, axis) in enumerate(analysis["axes"].items()):
         if index:
@@ -1120,7 +1132,7 @@ def render_pdf(analysis: dict[str, Any], output: Path, font_path: str | None, fo
             c.setLineWidth(0.4)
             c.line(45, row_y + 12, 550, row_y + 12)
         text_at(46, row_y + 1, axis["korean"], 8.2, ink)
-        text_at(116, row_y + 1, axis["description"], 6.5, muted)
+        text_at(116, row_y + 1, axis["description"], 6.9, muted)
         bar_x, bar_y, bar_w, bar_h = 347, row_y, 90, 7
         c.setFillColor(bg)
         c.roundRect(bar_x, bar_y, bar_w, bar_h, 3.5, fill=1, stroke=0)
@@ -1151,7 +1163,7 @@ def render_pdf(analysis: dict[str, Any], output: Path, font_path: str | None, fo
     # Next challenge and evidence basis
     c.setFillColor(ink)
     c.roundRect(30, 119, 535, 113, 16, fill=1, stroke=0)
-    text_at(47, 210, "NEXT SESSION CHALLENGE", 7.2, lime)
+    text_at(47, 210, "다음 수업 10분 미션", 7.2, lime)
     wrapped(47, 186, insights["next_challenge"], 10.4, 500, 14, 2, white)
     data = analysis["data_summary"]
     text_at(47, 144, "증거 범위", 7.0, HexColor("#BEBEB8"))
