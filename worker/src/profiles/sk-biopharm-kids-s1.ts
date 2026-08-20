@@ -21,7 +21,11 @@ export const profile: Profile = {
   },
   system_prompt: systemPromptMd as unknown as string,
   welcome: {
-    greeting_md: "안녕하세요! 문제투성이 세상에 사는 친구 아홉 명이 있어요.\n**누구 세상부터 가볼까요?** 🐕 초코 · 🐈 나비 · 🐝 붕붕 · 🐧 뽀로 · 🐁 찍찍 · 🐹 햄찌 · 🦜 앵무 · 🐿️ 도토 · 🦝 라쿤",
+    // #649 (2026-08-20) — "누구 세상부터 가볼까요?" 였다. 이제 세상은 **버튼으로만**
+    // 열린다(앱 matchWorldRef · 워커 matchWorld 둘 다 칩 문구 정확일치만): 아이가
+    // 이름을 타이핑하면 세상이 안 열리고 그냥 코치 턴이 된다. 화면에서 가장 큰 글씨가
+    // 안 되는 길을 가리키면 안 되므로, 작성란 바로 위 친구 스트립을 가리킨다.
+    greeting_md: "안녕하세요! 문제투성이 세상에 사는 친구 아홉 명이 있어요.\n🐕 초코 · 🐈 나비 · 🐝 붕붕 · 🐧 뽀로 · 🐁 찍찍 · 🐹 햄찌 · 🦜 앵무 · 🐿️ 도토 · 🦝 라쿤\n**아래 친구 버튼을 눌러요 👇**",
     example_prompts: [
       "🐕 초코 세상에 가볼래",
       "🐈 나비 세상에 가볼래",
@@ -74,11 +78,11 @@ export const profile: Profile = {
     template_tier: "kids-quest",   // 게스트 퀘스트 — kq-* 5개. "게임" 낱말을 쓰지 않는 tier.
   },
   publishing: {
-    // 단발 4시간 워크숍 — 로컬 미리보기(▶ Run)로 충분하고 chat-only
-    // (sandbox.mcp_tools_enabled [])와 정합한다. 미성년 게임의 공개 퍼블리시는
-    // 부모 동의·PII 설계가 끝나기 전엔 켜지 않는다(smoke.mjs §4 불변식).
-    enabled: false,
-    strategy: "local_only",
+    // 2026-08-21 — 부모 동의 확보 + PII 설계 완료로 갤러리를 연다.
+    // A반(grade-5-6) 과 같은 판단이며, 같은 범위까지만 연다: `hypeproof_gallery`
+    // (noindex · 회차 격리 · 리포트는 암호 뒤). 공개 GitHub Pages 는 그대로 닫힘.
+    enabled: true,
+    strategy: "hypeproof_gallery",
   },
   assets_focus: [
     "intent_clarity",
@@ -98,6 +102,9 @@ export const profile: Profile = {
   analytics: {
     log_user_messages: false,
     log_metadata: true,
+    // A반(grade-5-6)과 같은 결정 · 같은 동의 근거 — 그쪽 주석이 정본이다.
+    upload_session_logs: true,
+    child_upload_consent: "2026-08-21 shin_bro — SK바이오팜 8/22 회차, 보호자 사전설문으로 동의 확보",
   },
   ux: {
     // 단발 4h 초3·4 트랙. 두 레슨(생각 구체화 / 만들고-확인하고-고치기)을 자녀가
@@ -117,7 +124,11 @@ export const profile: Profile = {
         { text: "🐈 나비 세상에 가볼래", style: "good" },
         { text: "🐝 붕붕 세상에 가볼래", style: "good" },
         { text: "🐧 뽀로 세상에 가볼래", style: "good" },
-        { text: "다른 친구도 있어?", style: "good" },
+        { text: "🐁 찍찍 세상에 가볼래", style: "good" },
+        { text: "🐹 햄찌 세상에 가볼래", style: "good" },
+        { text: "🦜 앵무 세상에 가볼래", style: "good" },
+        { text: "🐿️ 도토 세상에 가볼래", style: "good" },
+        { text: "🦝 라쿤 세상에 가볼래", style: "good" },
       ],
       // 모두 명령형 — 질문형("...하면 어떻게 돼?")은 AI가 코드 대신 되묻게
       // 만들어 화면이 빈 채로 남는다. 1회차는 "말하면 바로 바뀐다" 체험이 핵심.

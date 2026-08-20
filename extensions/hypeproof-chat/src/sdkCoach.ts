@@ -34,6 +34,7 @@ import {
   GATEWAY_AUTH_FAILED_FRIENDLY,
   GATEWAY_BAD_REQUEST_FRIENDLY,
 } from "./proxyClientHelpers";
+import { WORLD_ARCHIVE_DIR, filterCoachVisibleFiles } from "./chatPanelHelpers";
 import {
   buildSdkQueryOptions,
   consumeSdkStream,
@@ -209,7 +210,11 @@ function extensionDistDir(): string | undefined {
 const WORKSPACE_LISTING_MAX = 80;
 function listWorkspaceFiles(root?: string): string[] | undefined {
   if (!root) return undefined;
-  const SKIP = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__"]);
+  // '이전 세상/' 은 코치에게 숨긴다 (#649, 2026-08-20). 그 안에는 지나간 세상들의
+  // 전문이 들어 있어서, 목록에 뜨면 코치가 한 번 읽고 **남의 세상 이야기를 섞는다**
+  // — #629 에서 공용 engine.js 로 겪은 오염과 같은 종류다. 보관본은 아이 것이지
+  // 코치의 참고 자료가 아니다.
+  const SKIP = new Set(["node_modules", ".git", "dist", "build", ".next", "__pycache__", WORLD_ARCHIVE_DIR]);
   const out: string[] = [];
   const walk = (dir: string, rel: string, depth: number): void => {
     if (out.length >= WORKSPACE_LISTING_MAX || depth > 3) return;
@@ -231,6 +236,22 @@ function listWorkspaceFiles(root?: string): string[] | undefined {
   // 목록이 없다는 것과 "비어 있다"는 다르다. 전자는 undefined(블록 생략),
   // 후자는 빈 배열 → "아직 아무것도 만들지 않았다"로 표시된다.
   return out.sort();
+}
+
+/**
+ * 코치가 실제로 보는 목록 (#644, 2026-08-20).
+ *
+ * 아동 트랙에서는 index.html 하나만 남긴다 — engine.js(공용본이면 9개 세상 스프라이트가
+ * 다 들어 있다)·'이전 세상/' 보관본·루트에 남은 옛 세상 *.html 은 전부 **남의 세상**이라,
+ * 목록에 뜨는 순간 코치가 읽고 지금 세상과 섞는다(실기기: 초코 세상에서 얼음 이야기).
+ * 판정은 순수 함수(filterCoachVisibleFiles)가 소유한다 — 성인 트랙은 무변경.
+ */
+function coachVisibleWorkspaceFiles(
+  root: string | undefined,
+  profile: ResolvedProfile,
+): string[] | undefined {
+  const files = listWorkspaceFiles(root);
+  return files === undefined ? undefined : filterCoachVisibleFiles(files, profile);
 }
 
 /**
@@ -537,8 +558,8 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       // optionalDependency lookup runs (dev behavior, unchanged).
       pathToClaudeCodeExecutable: binary.path,
       // 코치가 "여기 뭐가 있지"를 툴로 묻지 않게 미리 준다. 실측에서 이 탐색이
-      // 한 턴의 80%를 먹었다.
-      workspaceFiles: listWorkspaceFiles(args.cwd),
+      // 한 턴의 80%를 먹었다. #644 — 아동 트랙은 여기서 index.html 하나로 좁힌다.
+      workspaceFiles: coachVisibleWorkspaceFiles(args.cwd, args.profile),
       // #507 — 떠 있는 라이브 서버 주소(없으면 생략). 코치가 미리보기 포트를
       // 추측하던 유일한 이유는 이 값이 컨텍스트에 없었기 때문이다.
       ...(args.previewUrl ? { previewUrl: args.previewUrl } : {}),

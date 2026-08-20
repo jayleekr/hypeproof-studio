@@ -155,6 +155,69 @@ export interface UploadSessionArgs {
 }
 
 /**
+ * 진행 중 세션의 **스냅샷** 업로드 — 갤러리 발행 순간의 "여기까지" (2026-08-21).
+ *
+ * `uploadSession` 과 결정적으로 다른 것: **봉인하지 않고, manifest 를 올리지
+ * 않고, uploaded 마커를 쓰지 않는다.** 전부 의도다:
+ *
+ * - 봉인하면 발행마다 세션이 조각난다 — 4시간 수업이 발행 횟수만큼 쪼개져
+ *   리포트의 세션 단위 증거 커버리지가 무너진다. 세션은 계속 이어진다.
+ * - manifest 는 "완결" 선언이다. 아직 쓰이는 중인 events 에 완결 도장을 찍으면
+ *   그 뒤의 턴들이 서버 기준 존재하지 않는 채로 스윕에 지워질 수 있다
+ *   (uploadSession 의 N1 방어가 막는 바로 그 사고). 스냅샷은 미완결로 남아,
+ *   수업 끝 "기록 보내기"(완결 업로드)가 같은 키를 **덮어쓰며** 정본이 된다.
+ * - 마커를 쓰면 스캔이 이 세션을 "보냈다"로 건너뛴다 — 꼬리 유실.
+ *
+ * 발행이 이미 성공한 뒤에 불리므로 실패는 조용히 구조화해 돌려준다 —
+ * 게임이 올라갔는데 로그 스냅샷 때문에 아이 화면에 실패를 띄우지 않는다.
+ */
+export async function uploadSessionSnapshot(args: UploadSessionArgs): Promise<SessionUploadResult> {
+  const { session } = args;
+  const fetchFn = args.fetchFn ?? fetch;
+  const base = args.baseUrl.replace(/\/$/, "");
+  const keys: string[] = [];
+
+  let entries: Array<{ name: string; body: Buffer }>;
+  try {
+    entries = UPLOAD_FILES_IN_ORDER
+      .filter((f) => fs.existsSync(path.join(session.dir, f)))
+      .map((name) => ({ name, body: fs.readFileSync(path.join(session.dir, name)) }));
+  } catch (err) {
+    return {
+      dir: session.dir, ok: false, keys, failedAt: "read",
+      status: 0, message: err instanceof Error ? err.message : String(err),
+    };
+  }
+  if (!entries.some((e) => e.name === "events.jsonl")) {
+    return { dir: session.dir, ok: false, keys, failedAt: "read", status: 0, message: "events.jsonl missing" };
+  }
+
+  for (const { name, body } of entries) {
+    const contentType = name.endsWith(".jsonl") ? "application/x-ndjson" : "application/json";
+    const url = `${base}/logs/${session.sessionId}/${name}?day=${session.day}`;
+    try {
+      const res = await fetchFn(url, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${args.token}`, "content-type": contentType },
+        body: body as unknown as RequestInit["body"],
+      });
+      if (!res.ok) {
+        return { dir: session.dir, ok: false, keys, failedAt: name, status: res.status, message: `HTTP ${res.status}` };
+      }
+      const j = (await res.json().catch(() => null)) as { key?: string } | null;
+      if (j?.key) keys.push(j.key);
+    } catch (err) {
+      return {
+        dir: session.dir, ok: false, keys, failedAt: name,
+        status: 0, message: err instanceof Error ? err.message : String(err),
+      };
+    }
+  }
+  // manifest 없음 · 마커 없음 — 헤더 주석 참고.
+  return { dir: session.dir, ok: true, keys };
+}
+
+/**
  * 세션 하나를 올린다: meta → events → (그 둘의 해시를 담은) manifest 순.
  * 어느 파일에서든 실패하면 거기서 멈춘다 — manifest 가 안 올라갔으므로
  * 서버 기준 미완결, 다음 트리거가 처음부터 다시 올린다(멱등).
