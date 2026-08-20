@@ -30,7 +30,7 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   // Adult copyclone cohort (read+write from the worker profile) → full file set.
   assert.deepEqual(
     permittedToolsFor(profile("website", { sdk_tools: { read: true, write: true } })),
-    ["Read", "Grep", "Glob", "Write", "Edit"],
+    ["Read", "Grep", "Glob", "Write", "Edit", "MultiEdit"],
     "adult read+write cohort gets the read set + write set (exact SDK tool names)",
   );
 
@@ -55,12 +55,12 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
   // SK 아동 트랙이 커리큘럼 변경으로 read/write 를 opt-in 했다.
   assert.deepEqual(
     permittedToolsFor(profile("kids-rich", { sdk_tools: { read: true, write: true } })),
-    ["Read", "Grep", "Glob", "Write", "Edit"],
+    ["Read", "Grep", "Glob", "Write", "Edit", "MultiEdit"],
     "아동 tier 도 프로필이 opt-in 하면 write 를 받는다",
   );
   assert.deepEqual(
     permittedToolsFor(profile(null, { sdk_tools: { write: true } })),
-    ["Write", "Edit"],
+    ["Write", "Edit", "MultiEdit"],
     "tier 불명이어도 프로필이 소유한다 — tier 로 추론하지 않는다",
   );
   // shell 은 여전히 프로필 게이트 전용이고 아동 프로필은 두지 않는다.
@@ -85,7 +85,7 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
     permittedToolsFor(
       profile("search-webapp", { sdk_tools: { read: true, write: true }, tools: { web_search: true } }),
     ),
-    ["Read", "Grep", "Glob", "Write", "Edit", "WebSearch", "WebFetch"],
+    ["Read", "Grep", "Glob", "Write", "Edit", "MultiEdit", "WebSearch", "WebFetch"],
   );
 
   // A minor cohort that did NOT opt in never gets WebSearch, even if its
@@ -116,16 +116,19 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
 
 // ─── maxTurnsFor — tight for minors, looser for the workshop ─────────────────
 {
-  assert.equal(maxTurnsFor(profile("kids-basic")), 6);
-  assert.equal(maxTurnsFor(profile("teen")), 6);
-  assert.equal(maxTurnsFor(profile(null)), 6, "unknown tier gets the tight minor cap");
+  // 2026-08-19 — 6 → 20. 게스트의 세상 트랙에서 Read 1 + Edit 5 로 6 을 채우고
+  // "Reached maximum number of turns (6)" 로 죽었다(실기기). 폭주 방어는 워커의
+  // max_tokens 상한(아동 8k)과 스톨 감시가 맡는다.
+  assert.equal(maxTurnsFor(profile("kids-basic")), 20);
+  assert.equal(maxTurnsFor(profile("teen")), 20);
+  assert.equal(maxTurnsFor(profile(null)), 20, "unknown tier gets the minor cap");
   // 20 → 60. 실측(2026-07-26)에서 멀티페이지 제작 한 요청이 툴 54회를 썼고 두 번
   // 연속 예산 소진으로 죽었다. 낭비(경로 탐색·중복 읽기)를 먼저 걷어낸 뒤 올렸다.
   // 잠정값 — 고친 코드로 재측정한 뒤 조정한다.
   assert.equal(maxTurnsFor(profile("search-webapp")), 60);
   assert.equal(maxTurnsFor(profile("website")), 60, "website copyclone gets the workshop cap");
   // 미성년 경계는 성능이 아니라 대상 연령 문제다 — 같이 올라가면 안 된다.
-  assert.equal(maxTurnsFor(profile("kids-basic")), 6, "미성년 상한은 그대로");
+  assert.equal(maxTurnsFor(profile("kids-basic")), 20, "미성년 상한은 성인과 별개로 유지");
 }
 
 // ─── isAbortError — user-stop parity across BOTH runtimes ─────────────────────
@@ -340,7 +343,7 @@ const profile = (tier, extra = {}) => ({ game: tier ? { template_tier: tier } : 
 {
   const ws = "/ws/student";
   const adultBrowser = [
-    "Read", "Grep", "Glob", "Write", "Edit",
+    "Read", "Grep", "Glob", "Write", "Edit", "MultiEdit",
     MCP_BROWSER_OPEN, MCP_BROWSER_SCREENSHOT, MCP_LIVE_PREVIEW_START,
   ];
   const evalTool = (toolName, input, permittedTools) =>

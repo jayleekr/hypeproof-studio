@@ -119,7 +119,13 @@ export interface Profile {
   };
   publishing: {
     enabled: boolean;
-    strategy: "per_user_github_pages" | "shared_repo" | "local_only";
+    /**
+     * `hypeproof_gallery` — 우리 사이트의 `/live/**` 갤러리. 검색에 안 걸리고
+     * (noindex) 회차 코드로 격리되며 학습 리포트는 암호 뒤에 따로 있다.
+     * 공개 GitHub Pages 와 **다른 층위**다: 거기는 색인되고 영구적이며 우리가
+     * 회수할 수 없다. 미성년 코호트에 열 수 있는 것은 전자까지다.
+     */
+    strategy: "per_user_github_pages" | "shared_repo" | "local_only" | "hypeproof_gallery";
     repo_template?: string;
     pages_branch?: string;
     shared_repo?: string;
@@ -261,6 +267,12 @@ export interface Profile {
      * true 로 켠다 (log_user_messages 와 같은 규율).
      */
     upload_session_logs?: boolean;
+    /**
+     * 미성년 코호트가 위 플래그를 켤 때의 동의 어서션 (하네스
+     * `child.upload_consent_key`). 검증이 아니라 **주장 기록**이다 — 누가
+     * 언제 동의를 확보했는지 문자열로 남긴다. 없으면 하네스가 HARD FAIL.
+     */
+    child_upload_consent?: string;
   };
   /**
    * Per-cohort UX behavior. Drives the in-app chat panel without changing

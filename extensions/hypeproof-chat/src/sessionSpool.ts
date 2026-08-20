@@ -1,8 +1,9 @@
 // #580 — 세션 로그 로컬 스풀 (수집 계층).
 //
-// Studio 를 지나가는 것들 — 질문 원문 · 요청 단위 토큰 usage · 행동 워크플로우 —
-// 을 각 PC 의 세션 디렉토리에 append-only JSONL 로 남긴다. 업로드 계층(후속 PR)
-// 이 이 디렉토리를 통째로 올린다. 결정과 근거: 이슈 #580 설계 확정 노트.
+// Studio 를 지나가는 것들 — 질문·응답 원문 · 실제 HTML 버전 · 요청 단위 토큰
+// usage · 행동 워크플로우 — 을 각 PC 의 세션 디렉토리에 append-only JSONL 로
+// 남긴다. 업로드 계층이 이 디렉토리를 통째로 올린다. 결정과 근거: 이슈 #580
+// 설계 확정 노트 + #604 HAIN7 Studio Signal.
 //
 //   <root>/<yyyy-mm-dd>/<session-uuid>/
 //     session.meta.json   누구(u·c·p) · 앱 버전 · OS · 시작 시각
@@ -24,6 +25,7 @@
 
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
 import { decodeTokenPayloadUnverified } from "./chatPanelHelpers.ts";
 import { UPLOADED_MARKER } from "./spoolUploader.ts";
 
@@ -38,11 +40,18 @@ export const SPOOL_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 /** prompt 레코드의 text 상한 — 붙여넣기 폭주가 스풀을 잠식하지 않게. */
 export const SPOOL_MAX_TEXT_CHARS = 20_000;
 
+/** AI 응답과 HTML 스냅샷 상한 — 큰 코드도 보존하되 단일 턴 폭주는 막는다. */
+export const SPOOL_MAX_RESPONSE_CHARS = 200_000;
+export const SPOOL_MAX_ARTIFACT_CHARS = 200_000;
+
 /** workflow payload 의 문자열 값 상한 (웹뷰발 자유 텍스트 방어). */
 const WORKFLOW_TEXT_CHARS = 500;
 
 /** requestKey dedupe 창. 세션 하나가 이걸 넘는 요청을 만들 일은 없다. */
 const SEEN_REQUEST_KEYS_MAX = 2_000;
+
+/** 같은 HTML을 자동 reveal/show-intent가 반복해도 한 세션에 한 번만 남긴다. */
+const SEEN_ARTIFACT_HASHES_MAX = 500;
 
 /** 턴 → 세션 피닝 상한. 초과 시 오래된 피닝부터 잊는다(현재 세션으로 폴백). */
 const PINNED_TURNS_MAX = 100;
@@ -210,7 +219,16 @@ interface SessionState {
   /** meta 가 디스크에 성공적으로 쓰였는가 — 실패 시 다음 쓰기에서 재시도. */
   metaWritten: boolean;
   seenRequestKeys: Set<string>;
+  seenArtifactHashes: Set<string>;
 }
+
+export type SpoolArtifactSource =
+  | "assistant_response"
+  | "assistant_tool"
+  | "prebuilt"
+  | "manual_preview"
+  | "existing"
+  | "session_end";
 
 export class SessionSpool {
   private readonly env: SpoolEnv;
@@ -288,6 +306,70 @@ export class SessionSpool {
         // 무성 절단 금지 — 잘렸으면 잘렸다고, 원래 몇 자였는지 남긴다.
         ...(clamped ? { text_truncated: true, text_original_chars: text.length } : {}),
         ...(e.imagesCount ? { images_count: e.imagesCount } : {}),
+      });
+    });
+  }
+
+  /**
+   * 아이가 본 AI 응답 원문. prompt 만 남기면 질문이 무엇을 채택·거절·수정한
+   * 것인지 재구성할 수 없어 HAIN7 증거 포인터가 성립하지 않는다. 성공 응답뿐
+   * 아니라 중단/오류 전까지 실제로 보인 부분도 status 와 함께 남긴다.
+   */
+  recordResponse(e: {
+    turnId: string;
+    runtime: string | null;
+    status: "ok" | "aborted" | "error";
+    text: string;
+  }): void {
+    this.enqueue(async () => {
+      const s = this.sessionForTurn(e.turnId) ?? (await this.materialize());
+      const text = typeof e.text === "string" ? e.text : "";
+      const clamped = text.length > SPOOL_MAX_RESPONSE_CHARS;
+      await this.writeEvent(s, {
+        type: "response",
+        turn_id: e.turnId,
+        runtime: e.runtime,
+        status: e.status,
+        text: clamped ? text.slice(0, SPOOL_MAX_RESPONSE_CHARS) : text,
+        ...(clamped ? { text_truncated: true, text_original_chars: text.length } : {}),
+      });
+    });
+  }
+
+  /**
+   * 실제로 미리보기/저장된 HTML 버전. 응답 코드와 최종 산출물이 다를 수 있어
+   * 별도 사건으로 남긴다. sha256 은 원문 전체 바이트 기준이고 content 는 상한
+   * 적용 후 저장한다. 같은 해시는 세션 안에서 한 번만 기록한다.
+   */
+  recordArtifactSnapshot(e: {
+    turnId?: string;
+    source: SpoolArtifactSource;
+    path: string;
+    content: string;
+  }): void {
+    this.enqueue(async () => {
+      const s = (e.turnId ? this.sessionForTurn(e.turnId) : null) ?? (await this.materialize());
+      const content = typeof e.content === "string" ? e.content : "";
+      const bytes = Buffer.from(content, "utf8");
+      const sha256 = createHash("sha256").update(bytes).digest("hex");
+      if (s.seenArtifactHashes.has(sha256)) return;
+      s.seenArtifactHashes.add(sha256);
+      if (s.seenArtifactHashes.size > SEEN_ARTIFACT_HASHES_MAX) {
+        const oldest = s.seenArtifactHashes.values().next().value;
+        if (oldest !== undefined) s.seenArtifactHashes.delete(oldest);
+      }
+      const clamped = content.length > SPOOL_MAX_ARTIFACT_CHARS;
+      await this.writeEvent(s, {
+        type: "artifact_snapshot",
+        ...(e.turnId ? { turn_id: e.turnId } : {}),
+        source: e.source,
+        // 전체 경로는 사용자명·폴더명을 누출한다. 평가에는 파일명만 필요하다.
+        path: path.basename(e.path).slice(0, 255),
+        mime_type: "text/html",
+        sha256,
+        content_bytes: bytes.length,
+        content: clamped ? content.slice(0, SPOOL_MAX_ARTIFACT_CHARS) : content,
+        ...(clamped ? { content_truncated: true, content_original_chars: content.length } : {}),
       });
     });
   }
@@ -486,6 +568,7 @@ export class SessionSpool {
       startedAt: now.toISOString(),
       metaWritten: false,
       seenRequestKeys: new Set(),
+      seenArtifactHashes: new Set(),
     };
     await fs.promises.mkdir(s.dir, { recursive: true });
     // meta 실패는 세션을 버릴 이유가 아니다 — 이벤트가 본체고, meta 는 다음

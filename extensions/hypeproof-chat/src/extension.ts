@@ -203,6 +203,9 @@ export async function activate(context: vscode.ExtensionContext) {
             // 봉인 후에 기록하면 이벤트 1개짜리 정크 세션이 실체화되고, 그게
             // 다음 기동 배너의 "안 보낸 기록 1개"가 되어 신호가 죽는다(N3).
             if (spool.currentSessionDir()) {
+              // 채팅 응답 속 코드가 아니라 수업 종료 시점의 실제 index.html 을
+              // 봉인한다. 아이가 마지막으로 직접 고친 부분도 결과 분석에 남는다.
+              await provider.captureFinalArtifactForSpool();
               spool.recordWorkflow({ event: "logs_upload" });
             }
             const sealed = await spool.seal();

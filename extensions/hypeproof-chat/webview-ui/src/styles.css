@@ -404,6 +404,205 @@ html, body, #root {
   font-size: 12px;
 }
 
+/* ---------- 친구(세상) 스트립 — #649 ----------
+   작성란 바로 위에 늘 떠 있는 가로 줄. 세상 전환은 이 버튼**만**으로 된다
+   (2026-08-20: 타이핑 매칭이 아이가 고쳐 둔 세상을 덮어쓴 사고 뒤 결정).
+   대비: 색은 전부 VS Code 토큰 쌍(input-background/foreground,
+   button-background/foreground)에서 가져온다 — 밝은 테마에서 밝은 배경에
+   밝은 글자가 되는 조합이 나오지 않는다. 손가락 표적은 최소 32px. */
+.hps-worlds-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.hps-worlds-label {
+  /* 12px — 첫 화면(첫 사용·Clear 직후)에서 이 줄이 아이가 받는 **유일한 지시문**이다.
+     11px 은 초3·4 에게 작았다(2026-08-20 검토). */
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground, #9aa0a6);
+}
+
+.hps-worlds {
+  display: flex;
+  flex-direction: row;
+  /* 줄바꿈으로 9명을 다 보인다. 한 줄 가로 스크롤로 두면 사이드바 폭(약 300px)에서
+     네댓 명이 잘려 나가고, 아이는 옆으로 미는 조작을 찾지 못한다 — 세상 전환이
+     클릭뿐인 지금, 안 보이는 친구는 없는 친구다. */
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 2px 0 4px;
+}
+
+.hps-world {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 5px 10px;
+  border-radius: 16px;
+  border: 1px solid var(--vscode-panel-border, #444);
+  background: var(--vscode-input-background, #2a2d2e);
+  color: var(--vscode-input-foreground, #eaeaea);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms, border-color 120ms, transform 120ms;
+}
+.hps-world:hover:not(:disabled) {
+  border-color: var(--vscode-focusBorder, #5b9bff);
+  transform: translateY(-1px);
+}
+.hps-world:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #5b9bff);
+  outline-offset: 1px;
+}
+/* 응답 중에는 못 누른다는 신호는 남기되 이름은 읽혀야 한다 — 아이 트랙의 한 턴은
+   1~3분이라 그 흐린 상태가 화면에 오래 머문다. 0.45 는 12px 본문에서 대비가
+   4.5:1 아래로 떨어졌다(2026-08-20 검토). */
+.hps-world:disabled:not(.hps-world-open) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+/* 지금 열린 세상 칩은 '못 누르는 버튼' 이 아니라 **상태 표시**다(재클릭이 세상을
+   초기화하므로 항상 disabled). 흐리게 만들면 아이가 1~3분 내내 보는 유일한
+   "나 지금 어디" 표시가 흐려진다 — 대비를 그대로 둔다. */
+.hps-world-open:disabled {
+  opacity: 1;
+  cursor: default;
+}
+/* 지금 열려 있는 세상. aria-pressed 와 짝 — 색만으로 알리지 않도록 테두리도 굵다. */
+.hps-world-open {
+  background: var(--vscode-button-background, #0e639c);
+  color: var(--vscode-button-foreground, #ffffff);
+  border-color: var(--vscode-focusBorder, #5b9bff);
+  font-weight: 600;
+}
+.hps-world-emoji { font-size: 15px; line-height: 1; }
+.hps-world-name { font-size: 12px; line-height: 1.2; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hps-world { transition: none; }
+  .hps-world:hover:not(:disabled) { transform: none; }
+}
+
+/* ---------- 달리는 게스트 — #642 ----------
+   2026-08-20 실기기: 코치가 "Read ✓" 를 찍은 뒤 1~3분 화면이 통째로 정적이라
+   아이는 고장으로 읽고(같은 말을 또 보내 턴이 겹쳤다) 옆의 어른도 멈춘 줄 알았다.
+   글자 한 줄로는 부족해서, 지금 열린 세상의 게스트가 작성란 위를 달린다.
+
+   대비: 카드는 editorWidget 토큰 쌍(배경↔글자)으로 칠한다 — editor-background 위에
+   한 겹 떠 있으면서 밝은 테마에서도 글자가 묻히지 않는다. 토큰이 없는 호스트에서만
+   foreground 로 내려간다.
+   접힘: 턴이 없을 때도 요소는 남고 높이만 0 이다. 붙였다 떼면 작성란이 40px 튄다. */
+.hps-runner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  height: 0;
+  padding: 0 10px;
+  /* 접혀 있는 동안 .hps-input-area 의 flex gap(6px)까지 상쇄한다 — 안 그러면
+     쓰지도 않는 6px 이 작성란 위에 늘 얹혀 있다. */
+  margin-bottom: -6px;
+  overflow: hidden;
+  opacity: 0;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: var(--vscode-editorWidget-foreground, var(--vscode-foreground, #ddd));
+  transition: height 180ms ease, opacity 180ms ease, margin-bottom 180ms ease;
+}
+.hps-runner-on {
+  height: 40px;
+  margin-bottom: 0;
+  opacity: 1;
+  background: var(--vscode-editorWidget-background, var(--vscode-input-background, #252526));
+  border-color: var(--vscode-panel-border, #444);
+}
+
+/* 접혀 있는 동안에는 프레임을 돌리지 않는다 — 보이지도 않는 애니메이션 셋이
+   턴 사이 내내 CPU 를 긁으면 노트북 팬이 도는 교실이 된다. */
+.hps-runner:not(.hps-runner-on) .hps-runner-go,
+.hps-runner:not(.hps-runner-on) .hps-runner-face,
+.hps-runner:not(.hps-runner-on) .hps-runner-dust {
+  animation-play-state: paused;
+}
+
+.hps-runner-track {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 48px;
+  /* 트랙 높이는 이모지(17px)가 -3px 튀어도 잘리지 않을 만큼 — overflow:hidden 이라
+     모자라면 머리 끝이 잘려 나간다. */
+  height: 26px;
+  overflow: hidden;
+}
+/* 트랙 폭만큼 움직인다: transform 의 100% 는 **자기 자신**의 폭이고, 이 요소는
+   inset:0 이라 트랙과 같은 폭이다(자바스크립트 측정 없이 끝에서 멈춘다). */
+.hps-runner-go {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: row-reverse;   /* 얼굴이 앞, 먼지가 뒤에 남는다 */
+  justify-content: flex-end;     /* row-reverse 에서 flex-end = 왼쪽 출발선 */
+  align-items: center;
+  gap: 4px;
+  animation: hps-runner-run 2.4s linear infinite;
+}
+.hps-runner-face {
+  font-size: 17px;
+  line-height: 1;
+  animation: hps-runner-hop 0.42s ease-in-out infinite;
+}
+.hps-runner-dust {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--vscode-descriptionForeground, #9aa0a6);
+  animation: hps-runner-puff 0.9s ease-out infinite;
+}
+.hps-runner-dust:nth-child(3) { animation-delay: 0.15s; }
+.hps-runner-dust:nth-child(4) { animation-delay: 0.3s; }
+
+.hps-runner-say {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes hps-runner-run {
+  0%   { transform: translateX(0);                     opacity: 0; }
+  12%  { opacity: 1; }
+  86%  { opacity: 1; }
+  100% { transform: translateX(calc(100% - 34px));     opacity: 0; }
+}
+@keyframes hps-runner-hop {
+  0%, 100% { transform: translateY(0)     rotate(-4deg); }
+  50%      { transform: translateY(-3px)  rotate(4deg); }
+}
+@keyframes hps-runner-puff {
+  0%   { opacity: 0.55; transform: translateY(0) scale(0.8); }
+  100% { opacity: 0;    transform: translateY(-3px) scale(1.4); }
+}
+@keyframes hps-runner-blink { 0%, 100% { opacity: 0.2; } 50% { opacity: 1; } }
+
+/* 이동은 끄고 얼굴은 제자리, 점 세 개만 깜빡인다 — 기다림은 여전히 보인다. */
+@media (prefers-reduced-motion: reduce) {
+  .hps-runner { transition: none; }
+  .hps-runner-go {
+    animation: none;
+    opacity: 1;
+    flex-direction: row;           /* 얼굴 다음에 점 — 흔한 '불러오는 중' 모양 */
+    justify-content: flex-start;
+  }
+  .hps-runner-face { animation: none; }
+  .hps-runner-dust { animation: hps-runner-blink 1.4s ease-in-out infinite; }
+}
+
 /* ---------- Input area ---------- */
 
 .hps-input-area {
@@ -848,4 +1047,56 @@ html, body, #root {
 }
 .hps-tool-done .hps-tool-mark {
   color: var(--vscode-charts-green, #4a4);
+}
+
+/* ── 갤러리에 올리기 ──────────────────────────────────────────────────────
+   버튼은 헤더의 Token 옆에 산다. **크기를 따로 주지 않는다** — `.hps-header button`
+   의 padding/font-size 를 그대로 물려받아야 헤더 줄 높이가 이 버튼 하나 때문에
+   늘어나지 않는다. 여기서 주는 것은 색뿐이다: 세상을 고르는 조작이 아니라
+   바깥으로 나가는 조작이라 나머지 헤더 버튼과 구분돼야 한다. */
+.hps-gallery-btn {
+  color: var(--vscode-textLink-foreground, #4daafc);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.hps-header button.hps-gallery-btn {
+  border-color: var(--vscode-textLink-foreground, #4daafc);
+}
+.hps-header button.hps-gallery-btn:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, #2a2d2e);
+}
+/* 올리는 중에도 문구가 읽혀야 한다 — 업로드는 수 초 걸리고, 그동안 이 라벨이
+   유일한 진행 표시다 (친구 칩의 0.6 과 같은 근거). */
+.hps-header button.hps-gallery-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 결과 한 줄 — 작성란 바로 위. 헤더에는 링크도 실패 사유도 들어갈 자리가 없다. */
+.hps-gallery-notice {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 4px 0 6px;
+}
+
+.hps-gallery-done {
+  color: var(--vscode-charts-green, #4ec9b0);
+}
+
+.hps-gallery-error {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.hps-gallery-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--vscode-textLink-foreground, #4daafc);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.hps-gallery-link:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #5b9bff);
+  outline-offset: 1px;
 }

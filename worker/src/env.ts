@@ -23,6 +23,13 @@ export interface Env {
   // proxy (e.g. hypeproof-sediment Fly NRT) when CF anycast egress hits an
   // Anthropic-blocked region (HK). Leave unset to call api.anthropic.com.
   ANTHROPIC_PROXY_URL?: string;
+  /**
+   * 세션 로그 미러 목적지 (lab 사이트 origin, 예: https://hypeproof-ai.xyz).
+   * 설정되면 PUT /v1/logs 가 R2 적재 후 같은 바이트를
+   * `<base>/api/gallery/logs/…` 로 릴레이한다(ctx.waitUntil, 실패 무해).
+   * 미설정 → 미러 없음 — 테스트·로컬 dev 가 바깥으로 fetch 하지 않게 하는 스위치다.
+   */
+  GALLERY_LOGS_BASE?: string;
   // Shared secret for the hypeproof-sediment proxy (sediment#3eddd06).
   // Sent as `X-Sediment-Proxy-Secret` to /proxy/anthropic/*; without it the
   // proxy returns 403 and the worker bubbles up 502. Local dev unset →
