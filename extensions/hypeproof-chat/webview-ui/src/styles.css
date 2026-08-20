@@ -1048,3 +1048,55 @@ html, body, #root {
 .hps-tool-done .hps-tool-mark {
   color: var(--vscode-charts-green, #4a4);
 }
+
+/* ── 갤러리에 올리기 ──────────────────────────────────────────────────────
+   버튼은 헤더의 Token 옆에 산다. **크기를 따로 주지 않는다** — `.hps-header button`
+   의 padding/font-size 를 그대로 물려받아야 헤더 줄 높이가 이 버튼 하나 때문에
+   늘어나지 않는다. 여기서 주는 것은 색뿐이다: 세상을 고르는 조작이 아니라
+   바깥으로 나가는 조작이라 나머지 헤더 버튼과 구분돼야 한다. */
+.hps-gallery-btn {
+  color: var(--vscode-textLink-foreground, #4daafc);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.hps-header button.hps-gallery-btn {
+  border-color: var(--vscode-textLink-foreground, #4daafc);
+}
+.hps-header button.hps-gallery-btn:hover:not(:disabled) {
+  background: var(--vscode-button-secondaryHoverBackground, #2a2d2e);
+}
+/* 올리는 중에도 문구가 읽혀야 한다 — 업로드는 수 초 걸리고, 그동안 이 라벨이
+   유일한 진행 표시다 (친구 칩의 0.6 과 같은 근거). */
+.hps-header button.hps-gallery-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* 결과 한 줄 — 작성란 바로 위. 헤더에는 링크도 실패 사유도 들어갈 자리가 없다. */
+.hps-gallery-notice {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 4px 0 6px;
+}
+
+.hps-gallery-done {
+  color: var(--vscode-charts-green, #4ec9b0);
+}
+
+.hps-gallery-error {
+  color: var(--vscode-errorForeground, #f48771);
+}
+
+.hps-gallery-link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--vscode-textLink-foreground, #4daafc);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.hps-gallery-link:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #5b9bff);
+  outline-offset: 1px;
+}

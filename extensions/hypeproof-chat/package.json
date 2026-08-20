@@ -194,6 +194,11 @@
           ],
           "scope": "machine",
           "description": "Actions that require explicit user approval before execution. 이 배열이 승인 정책의 단일 소스다 — 코드의 getConfiguration 폴백은 매니페스트 default 가 있는 한 절대 쓰이지 않는다(#499). writeFile 은 기본에서 제외(#464): 워크스페이스 밖 경로는 모달 없이 이미 거부되고, 실측에서 이 모달이 세션을 멈추거나 반사 승인을 훈련시켰다. 되돌리려면 \"writeFile\" 을 추가한다. Machine-scoped: a workspace cannot weaken the approval gate (e.g. clear it to auto-run shell/file writes)."
+        },
+        "hypeproofChat.siteBase": {
+          "type": "string",
+          "default": "https://hypeproof-ai.xyz",
+          "description": "HypeProof Lab 사이트 주소. '갤러리에 올리기'가 여기로 보냅니다. 로컬 개발 서버에 붙여 볼 때만 바꾸세요 (예: http://localhost:3000)."
         }
       }
     }

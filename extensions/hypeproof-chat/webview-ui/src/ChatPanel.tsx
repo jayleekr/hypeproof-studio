@@ -35,6 +35,13 @@ interface Props {
   stopNotice: string | null;           // #497 — Stop 으로 턴이 끊겼음을 알리는 안내
   /** #649 — 지금 열려 있는 세상 id (호스트의 worldOpened). 스트립 강조에만 쓴다. */
   openWorldId: string | null;
+  /** "갤러리에 올리기" 진행 상태. null = 아직 안 눌렀다. */
+  publish:
+    | { state: "uploading" }
+    | { state: "done"; url: string }
+    | { state: "error"; message: string }
+    | null;
+  onPublish: () => void;
   streaming: boolean;
   /**
    * WHICH message is streaming, not just whether one is (#429). `streaming` is
@@ -220,6 +227,16 @@ export function ChatPanel(props: Props) {
   // 않아야 한다 — 첫 화면 칩만 있던 v0.1.48 에서는 세상을 바꾸려면 타이핑밖에
   // 길이 없었고, 그 타이핑이 아이가 고쳐 둔 세상을 덮어썼다.
   const worlds: WorldChoice[] = config?.profile?.worlds ?? [];
+  /**
+   * 갤러리 버튼을 보일지. **코호트 프로필이 정한다** — 워커의
+   * `publishing.strategy` 가 `hypeproof_gallery` 일 때만.
+   *
+   * 미성년 코호트 기본값은 `local_only` 이고, 그 프로필에는 "공개 퍼블리시는
+   * 부모 동의 + PII 설계가 끝난 뒤에만 켠다" 는 결정이 주석으로 박혀 있다.
+   * 여기서 화면만 열어 봐야 서버가 403 으로 막으므로(fail closed), 이 판단은
+   * **아이에게 없는 버튼을 안 보여주기 위한 것**이지 보안 경계가 아니다.
+   */
+  const galleryEnabled = config?.profile?.publishing?.strategy === "hypeproof_gallery";
   // Fixed-naming cohorts (e.g. boah-dental) must NOT show a user-supplied
   // coach name carried over from a different cohort's user-data-dir (#140).
   const coachName =
@@ -513,6 +530,25 @@ export function ChatPanel(props: Props) {
           {coachName}
         </strong>
         <div className="hps-actions">
+          {/* Token 바로 **왼쪽**, 같은 크기. 헤더 버튼 스타일(.hps-header button)을
+              그대로 물려받고 색만 다르다 — 크기를 따로 주면 헤더 줄 높이가 이 버튼
+              하나 때문에 늘어난다.
+              Token·Clear·⚙ 는 설정 계열이고 이건 아이가 쓰는 조작이라, 그 묶음
+              앞에 세워 손이 먼저 닿는 자리에 둔다. */}
+          {galleryEnabled && props.openWorldId !== null && (
+            <button
+              className="hps-gallery-btn"
+              onClick={props.onPublish}
+              disabled={busy || props.publish?.state === "uploading"}
+              title="지금 만든 세상을 갤러리에 올려요"
+            >
+              {props.publish?.state === "uploading"
+                ? "올리는 중…"
+                : props.publish?.state === "done"
+                  ? "올렸어요 ✓"
+                  : "🖼️ 갤러리"}
+            </button>
+          )}
           <button onClick={props.onSetToken} title="Workshop token">
             {config?.hasToken ? "Token ✓" : "Token"}
           </button>
@@ -622,6 +658,15 @@ export function ChatPanel(props: Props) {
 
       <footer className="hps-input-area">
         {runnerCohort && <RunnerBar face={runnerWho} running={runnerRunning} />}
+        {/* 버튼은 헤더에 있고 여기는 **결과만** 나온다. 헤더 한 줄에는 링크도
+            실패 사유도 들어갈 자리가 없는데, 아이는 사라지는 안내를 못 읽는다 —
+            그래서 말할 것이 있을 때만 작성란 위에 한 줄로 남는다. */}
+        {props.publish && props.publish.state !== "uploading" && (
+          <GalleryNotice
+            publish={props.publish}
+            onOpenUrl={(url) => postToHost({ type: "openExternal", url })}
+          />
+        )}
         {worlds.length > 0 && (
           <WorldStrip
             worlds={worlds}
@@ -781,6 +826,39 @@ export function ChatPanel(props: Props) {
 
 /** 프로필이 실어 보내는 세상 하나 (호스트 protocol 의 정의를 그대로 쓴다). */
 type WorldChoice = NonNullable<ResolvedProfile["worlds"]>[number];
+
+/**
+ * 발행 결과 한 줄. 버튼은 헤더에 있고(Token 옆) 여기는 **결과만** 말한다.
+ *
+ * 성공을 계속 띄워 두는 이유: 아이는 사라지는 안내를 못 읽는다. 링크가 남아
+ * 있어야 옆자리 친구에게, 부모에게 보여줄 수 있다. 세상을 바꾸면 App 의
+ * `worldOpened` 가 이 상태를 지운다 — 그때부터는 다른 세상 얘기라서다.
+ *
+ * 실패 문구는 자르지 않는다. "왜 안 됐는지"가 이 기능의 유일한 복구 단서다.
+ */
+function GalleryNotice({
+  publish,
+  onOpenUrl,
+}: {
+  publish: { state: "done"; url: string } | { state: "error"; message: string };
+  onOpenUrl: (url: string) => void;
+}) {
+  if (publish.state === "done") {
+    return (
+      <div className="hps-gallery-notice hps-gallery-done" role="status" aria-live="polite">
+        <span aria-hidden>🖼️</span> 갤러리에 올렸어요!{" "}
+        <button type="button" className="hps-gallery-link" onClick={() => onOpenUrl(publish.url)}>
+          보러 가기
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="hps-gallery-notice hps-gallery-error" role="status" aria-live="polite">
+      {publish.message}
+    </div>
+  );
+}
 
 /**
  * #649 — 친구 스트립. 작성란 바로 위에 **항상** 있다(대화 중에도, 응답 중에도).

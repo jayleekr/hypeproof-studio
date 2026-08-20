@@ -8,6 +8,7 @@ import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelper
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
+import { extractTitle, publishWorld, resolveSiteBase } from "./galleryPublish";
 import {
   originOfUrl,
   planCoachBrowserTabs,
@@ -815,6 +816,75 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
 
+  /**
+   * "갤러리에 올리기" — 지금 세상을 lab 갤러리로 보낸다.
+   *
+   * ## 무엇을 올리나
+   *
+   * 채팅 화면의 마지막 HTML 이 아니라 **작업 폴더의 `index.html`** 이다. 아이는
+   * 코치를 거치지 않고 파일을 직접 고치기도 하고(그게 이 수업의 목표 중 하나다),
+   * 그렇게 고친 것이 올라가야 한다. `engine.js` 는 인라인해서 **한 장으로** 만든다
+   * — 갤러리는 파일 하나만 받고, 상대경로 `<script src="engine.js">` 는 거기서
+   * 404 가 된다 (`archiveCurrentWorld` 가 같은 이유로 같은 처리를 한다).
+   *
+   * ## 누구 것인지는 여기서 안 정한다
+   *
+   * 토큰만 보낸다. 이름·자리번호는 서버가 배부보드에서 찾는다 — 아이가 자기
+   * 이름을 다시 칠 일도, 남의 이름을 적을 여지도 없다.
+   *
+   * ## 실패를 삼키지 않는다
+   *
+   * 명시적으로 누른 버튼이라 결과가 화면에 보여야 한다. 서버가 만든 한국어 문구를
+   * 그대로 웹뷰로 넘긴다(`publishResult`). VS Code 토스트를 쓰지 않는 것은 통합
+   * 브라우저가 알림에 멈추기 때문이다(#308 과 같은 이유).
+   */
+  private async publishToGallery(): Promise<void> {
+    const fail = (message: string) =>
+      void this.post({ type: "publishResult", state: "error", message });
+
+    const worldId = this.lastPrebuiltWorld;
+    if (!worldId) return fail("먼저 친구를 눌러 세상을 열어주세요.");
+
+    const token = await this.context.secrets.get(TOKEN_KEY);
+    if (!token) return fail(TOKEN_MISSING_FRIENDLY);
+
+    const cwd = this.resolveCoachCwd();
+    if (!cwd) return fail("작업 폴더를 찾지 못했어요.");
+
+    let html: string;
+    try {
+      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(cwd, "index.html")));
+      html = Buffer.from(bytes).toString("utf8");
+    } catch {
+      return fail("아직 만든 세상이 없어요.");
+    }
+
+    void this.post({ type: "publishResult", state: "uploading" });
+
+    const body = await this.inlineEngineIfNeeded(html);
+    const cfg = vscode.workspace.getConfiguration("hypeproofChat");
+    // 스풀 세션 디렉토리 이름이 곧 session_id 다 (sessionSpool 이 그렇게 만든다).
+    // 스풀이 꺼져 있으면 null — 그래도 발행은 진행한다. 작품을 올리는 것이 로그를
+    // 잇는 것보다 우선이다.
+    const sessionDir = this.spool?.currentSessionDir() ?? null;
+    const sessionId = sessionDir ? path.basename(sessionDir) : null;
+
+    const result = await publishWorld({
+      siteBase: resolveSiteBase(cfg.get<string>("siteBase")),
+      token,
+      worldId,
+      title: extractTitle(body),
+      html: body,
+      sessionId,
+    });
+
+    if (!result.ok) {
+      console.error(`[gallery] 발행 실패 (${result.status}): ${result.message}`);
+      return fail(result.message);
+    }
+    void this.post({ type: "publishResult", state: "done", url: result.url });
+  }
+
   /** 작업 폴더에 engine.js 저장 (세상 HTML 옆). 실패는 미리보기 인라인이 살린다. */
   private async saveEngineToWorkspace(js: string): Promise<void> {
     const cwd = this.resolveCoachCwd();
@@ -1488,6 +1558,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (typeof msg.url === "string" && /^https?:\/\//i.test(msg.url)) {
           void vscode.env.openExternal(vscode.Uri.parse(msg.url));
         }
+        return;
+      case "publishToGallery":
+        void this.publishToGallery();
         return;
       case "webviewError":
         // S-04 (#48). Log to output channel so the trace survives a panel
