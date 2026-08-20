@@ -1,6 +1,19 @@
 name: mirror-release
 
 on:
+  # 릴리즈가 발행되면 자동으로 미러한다.
+  #
+  # 2026-08-21 — 여기가 수동뿐이라 v0.1.50 이 미러에 안 올라갔고, 그 결과
+  # (a) `install.sh` 가 미러의 latest(=0.1.49)를 받아 "이미 최신"으로 넘어가고
+  # (b) 앱 안 업데이트 배너도 같은 미러를 보므로 함께 조용했다.
+  # 설치도 넛지도 성공처럼 보이면서 아무도 새 빌드를 못 받았다 — 워크숍 당일에
+  # 핫픽스가 참가자에게 못 닿는 구조다.
+  #
+  # 자동화가 미뤄졌던 이유는 #632 다: 발행 직후엔 Windows 자산이 아직 안 올라와
+  # macOS 만 미러돼 install.ps1 이 fail-closed 로 죽었다. 그래서 트리거를 붙이되
+  # **자산이 다 모일 때까지 기다렸다가** 미러한다(아래 "Inspect source release").
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -15,7 +28,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: mirror-release-${{ inputs.tag }}
+  group: mirror-release-${{ inputs.tag || github.event.release.tag_name }}
   cancel-in-progress: false
 
 jobs:
@@ -25,42 +38,57 @@ jobs:
     env:
       SOURCE_REPO: ${{ github.repository }}
       TARGET_REPO: jayleekr/hypeproof-studio-releases
-      TAG: ${{ inputs.tag }}
-      DRY_RUN: ${{ inputs.dry_run }}
+      TAG: ${{ inputs.tag || github.event.release.tag_name }}
+      # 릴리즈 트리거는 항상 실제 발행이다 — dry run 은 수동 실행에만 있다.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || false }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MIRROR_RELEASE_PAT: ${{ secrets.MIRROR_RELEASE_PAT }}
     steps:
-      - name: Inspect source release
+      - name: Inspect source release (wait for every platform asset)
         shell: bash
+        # 릴리즈 발행 시각과 자산 업로드 완료 시각은 다르다. macOS 빌드가 먼저 끝나고
+        # Windows 가 뒤따르므로, 발행 직후에 검사하면 반쪽 릴리즈를 미러하게 된다(#632).
+        # 즉시 실패시키면 자동 트리거가 매번 죽으므로 **모일 때까지 기다린다.**
+        # 끝내 안 모이면 큰 소리로 실패한다 — 조용히 반쪽을 내보내지 않는다.
+        env:
+          # 맥+윈도우 빌드가 다 끝나는 데 걸리는 시간(각 1~2h)을 덮는다.
+          WAIT_TIMEOUT_MIN: "150"
+          POLL_SEC: "60"
         run: |
           set -euo pipefail
-          gh release view "$TAG" --repo "$SOURCE_REPO" --json tagName,name,body,assets,url > source-release.json
-          jq '{tagName, name, url, assets: [.assets[].name]}' source-release.json
-          asset_count="$(jq '.assets | length' source-release.json)"
-          [[ "$asset_count" -gt 0 ]] || { echo "::error::source release has no assets"; exit 1; }
+          deadline=$(( $(date +%s) + WAIT_TIMEOUT_MIN * 60 ))
+          attempt=0
+          while :; do
+            attempt=$(( attempt + 1 ))
+            gh release view "$TAG" --repo "$SOURCE_REPO" --json tagName,name,body,assets,url > source-release.json
+            names="$(jq -r '.assets[].name' source-release.json)"
+            missing=()
+            grep -qE '^HypeProof-Studio-darwin-arm64\.zip$'      <<<"$names" || missing+=("macOS zip")
+            grep -qE '^HypeProof\.StudioUserSetup-x64-.*\.exe$'  <<<"$names" || missing+=("Windows UserSetup exe")
+            grep -qE '^HypeProof\.StudioSetup-x64-.*\.exe$'      <<<"$names" || missing+=("Windows Setup exe")
+            grep -qE '^HypeProof\.Studio-win32-x64-.*\.zip$'     <<<"$names" || missing+=("Windows zip")
 
-          # #632 — 자산 "개수"만 보면 플랫폼 하나가 통째로 빠진 릴리즈도 통과한다.
-          # 2026-08-19 v0.1.47: Windows 빌드가 끝나기 전에 미러가 돌아 macOS zip 한 개만
-          # 발행됐고, install.ps1 이 fail-closed 로 "No Studio asset matched globs" 로 죽었다.
-          # 플랫폼별 필수 자산을 이름으로 확인한다 — 하나라도 없으면 발행하지 않는다.
-          # (플랫폼을 의도적으로 빼야 하면 ALLOW_PARTIAL=1 로 명시한다.)
-          names="$(jq -r '.assets[].name' source-release.json)"
-          missing=()
-          grep -qE '^HypeProof-Studio-darwin-arm64\.zip$'      <<<"$names" || missing+=("macOS zip")
-          grep -qE '^HypeProof\.StudioUserSetup-x64-.*\.exe$'  <<<"$names" || missing+=("Windows UserSetup exe")
-          grep -qE '^HypeProof\.StudioSetup-x64-.*\.exe$'      <<<"$names" || missing+=("Windows Setup exe")
-          grep -qE '^HypeProof\.Studio-win32-x64-.*\.zip$'     <<<"$names" || missing+=("Windows zip")
-          if [[ ${#missing[@]} -gt 0 ]]; then
+            if [[ ${#missing[@]} -eq 0 ]]; then
+              echo "모든 플랫폼 자산 확인 (시도 ${attempt}회)"
+              break
+            fi
             if [[ "${ALLOW_PARTIAL:-0}" == "1" ]]; then
               echo "::warning::partial mirror (ALLOW_PARTIAL=1): missing ${missing[*]}"
-            else
-              echo "::error::source release $TAG is missing: ${missing[*]} — 빌드가 다 끝난 뒤 다시 돌리세요 (#632)"
+              break
+            fi
+            if [[ "$(date +%s)" -ge "$deadline" ]]; then
+              echo "::error::$TAG 의 자산이 ${WAIT_TIMEOUT_MIN}분 안에 다 안 올라왔다 — 없는 것: ${missing[*]}"
+              echo "::error::빌드를 확인하고, 끝난 뒤 이 워크플로를 tag=$TAG dry_run=false 로 다시 돌리세요 (#632)"
               exit 1
             fi
-          fi
+            echo "대기 중 (시도 ${attempt}) — 아직 없음: ${missing[*]}"
+            sleep "$POLL_SEC"
+          done
+          jq '{tagName, name, url, assets: [.assets[].name]}' source-release.json
+
 
       - name: Dry-run summary
-        if: inputs.dry_run
+        if: env.DRY_RUN == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -68,7 +96,7 @@ jobs:
           jq -r '.assets[].name | "  - " + .' source-release.json
 
       - name: Mirror assets
-        if: ${{ !inputs.dry_run }}
+        if: env.DRY_RUN != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.MIRROR_RELEASE_PAT }}
@@ -145,7 +173,7 @@ jobs:
           gh release upload "$TAG" --repo "$TARGET_REPO" dist/* --clobber
 
       - name: Verify mirror
-        if: ${{ !inputs.dry_run }}
+        if: env.DRY_RUN != 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.MIRROR_RELEASE_PAT }}
