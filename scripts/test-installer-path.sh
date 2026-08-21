@@ -102,6 +102,39 @@ if (($new -split ';') -notcontains 'C:\Windows') {
 Write-Host 'PASS: 옛 구현은 winget 을 잃고, 현재 구현은 지킨다.'
 PS1
 
+# --- winget 소스 고정 ------------------------------------------------------
+# 기업망 TLS 검사에서 msstore 소스의 인증서 검증이 깨지면, 소스를 안 고른 winget
+# 은 그 소스 하나 때문에 명령 전체를 실패로 끝낸다(0x8a15005e). SK바이오팜
+# 2026-08-21 현장이 이것이었다. install 경로 **둘 다**(user scope, machine scope
+# 재시도) 소스가 고정돼 있어야 한다 -- 재시도에서 빠뜨리면 반만 고친 것이 된다.
+installs=$(grep -c "^\s*'install', '--id'\|& winget install --id" "$SCRIPT")
+pinned=$(grep -c "'--source', 'winget'\|--source winget" "$SCRIPT")
+if [ "$pinned" -lt "$installs" ]; then
+    echo "FAIL: winget install 경로 ${installs}개 중 ${pinned}개만 --source 가 고정됐다"
+    exit 1
+fi
+echo "PASS: winget install 경로 ${installs}개 전부 --source winget 고정"
+
+# --- 하드 요구 집합 --------------------------------------------------------
+# required=$true 는 "제품이 이것 없이 돌지 않는가" 만 뜻한다. 여기에 과하게
+# 표시하면 fail-closed doctor 가 멀쩡한 기기를 설치 실패로 만든다(같은 현장).
+for t in gh node python jq; do
+    if grep -qE "id='$t';.*required=\\\$true" "$SCRIPT"; then
+        echo "FAIL: '$t' 가 하드 요구로 표시됐다."
+        echo "  아동 트랙은 코치에게 셸을 주지 않아(execute_shell:false) 이 도구가 호출될 경로가 없다."
+        echo "  정말 필요해졌다면 프로필 쪽 근거를 먼저 확인하고 이 TC 를 같이 고쳐라."
+        exit 1
+    fi
+done
+for t in git curl; do
+    if ! grep -qE "id='$t';.*required=\\\$true" "$SCRIPT"; then
+        echo "FAIL: '$t' 는 하드 요구여야 한다 (git 은 Git Bash = POSIX shell 을 같이 깐다)."
+        exit 1
+    fi
+done
+echo "PASS: 하드 요구 = git·curl, 나머지는 optional"
+echo ''
+
 echo "test-installer-path: Update-ProcessPath 대조군"
 pwsh -NoProfile -File "$TMP" -ScriptPath "$SCRIPT"
 
