@@ -36,7 +36,10 @@ fi
 SCRIPT=scripts/install.ps1
 [ -f "$SCRIPT" ] || { echo "FAIL: $SCRIPT 없음"; exit 1; }
 
-TMP=$(mktemp -t hps-pathtest-XXXXXX).ps1
+# 임시 파일을 리포 안에 만든다. Git Bash for Windows 에서 `mktemp -t` 는 bash 식
+# 경로를 돌려주고 pwsh 는 그것을 작업 디렉토리로 오해해 경고를 뱉는다. 상대 경로로
+# 두면 bash 와 pwsh 가 같은 것을 가리킨다.
+TMP=.hps-pathtest.ps1
 trap 'rm -f "$TMP"' EXIT
 
 cat > "$TMP" <<'PS1'
@@ -103,13 +106,22 @@ echo "test-installer-path: Update-ProcessPath 대조군"
 pwsh -NoProfile -File "$TMP" -ScriptPath "$SCRIPT"
 
 # 문법 게이트 — 이 파일은 전 참가자가 실행한다. 파싱이 깨지면 설치가 전멸한다.
-pwsh -NoProfile -Command "
-\$errs = \$null
-[System.Management.Automation.Language.Parser]::ParseFile('$PWD/$SCRIPT', [ref]\$null, [ref]\$errs) | Out-Null
-if (\$errs -and \$errs.Count) {
-    Write-Host \"FAIL: 파싱 오류 \$(\$errs.Count) 건\"
-    \$errs | Select-Object -First 5 | ForEach-Object { Write-Host ('  line {0}: {1}' -f \$_.Extent.StartLineNumber, \$_.Message) }
+#
+# 경로는 **pwsh 가 직접 해석하게** 한다. bash 쪽에서 "$PWD/$SCRIPT" 로 조립하면
+# Git Bash for Windows 의 $PWD 가 `/d/a/...` 라 `D:\d\a\...` 가 되어 파일을 못 찾는다
+# (2026-08-21 CI 에서 실제로 이렇게 죽었다 — 계측기 결함이지 제품 결함이 아니었다).
+cat > "$TMP" <<'PS1'
+param([string]$ScriptPath)
+$full = (Resolve-Path -LiteralPath $ScriptPath).Path
+$errs = $null
+[System.Management.Automation.Language.Parser]::ParseFile($full, [ref]$null, [ref]$errs) | Out-Null
+if ($errs -and $errs.Count) {
+    Write-Host "FAIL: 파싱 오류 $($errs.Count) 건 ($full)"
+    $errs | Select-Object -First 5 | ForEach-Object {
+        Write-Host ('  line {0}: {1}' -f $_.Extent.StartLineNumber, $_.Message)
+    }
     exit 1
 }
 Write-Host 'PASS: install.ps1 파싱 0 오류'
-"
+PS1
+pwsh -NoProfile -File "$TMP" -ScriptPath "$SCRIPT"
