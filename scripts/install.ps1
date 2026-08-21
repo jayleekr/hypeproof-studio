@@ -152,12 +152,29 @@ $EMBEDDED_MANIFEST = [ordered]@{
         seed_script = 'seed-sdk-binary.ps1'
     }
     # REAL runtime tools only. Build-time-only tools are intentionally excluded.
+    # required 는 "**제품이 이것 없이 돌지 않는가**" 만 뜻한다. "있으면 좋다" 가
+    # 아니다. fail-closed doctor 가 이 플래그를 그대로 읽어 설치를 중단시키므로,
+    # 여기에 과하게 표시하면 **멀쩡히 쓸 수 있는 기기를 설치 실패로 만든다.**
+    #
+    # 2026-08-21 SK바이오팜 현장이 그 사고였다. gh·node·python·jq 가 사내망
+    # TLS 검사 때문에 winget 설치에 실패했고 doctor 가 "Setup incomplete" 를
+    # 냈는데, 정작 Studio·SDK·git 은 13대 전부 정상 설치돼 있었다. 즉 수업은
+    # 돌 수 있는 상태였는데 설치기가 아니라고 말한 것이다.
+    #
+    # 아동 트랙은 코치에게 셸을 주지 않는다 (프로필 execute_shell:false,
+    # sdk_tools: read/write 만). 그래서 이 네 도구는 수업 중 **호출될 경로 자체가
+    # 없다.** SDK 코치도 node 가 아니라 네이티브 claude.exe 를 띄운다.
+    #
+    # 하드 요구로 남는 것 (없으면 실제로 못 돈다):
+    #   git   Git Bash 를 함께 깔아 POSIX shell 요구를 충족시킨다
+    #   curl  다운로드 경로. Windows 10+ 기본 탑재
+    # 나머지는 optional -- doctor 가 경고는 하되 설치를 막지 않는다.
     tools = @(
         [ordered]@{ id='git';    winget='Git.Git';             cmd='git';     args='--version'; min='2.30'; required=$true;  post='' }
-        [ordered]@{ id='gh';     winget='GitHub.cli';          cmd='gh';      args='--version'; min='2.40'; required=$true;  post='gh_auth' }
-        [ordered]@{ id='node';   winget='OpenJS.NodeJS.LTS';   cmd='node';    args='--version'; min='18.0'; required=$true;  post='' }
-        [ordered]@{ id='python'; winget='Python.Python.3.11';  cmd='python';  args='--version'; min='3.11'; required=$true;  post='' }
-        [ordered]@{ id='jq';     winget='jqlang.jq';           cmd='jq';      args='--version'; min='1.6';  required=$true;  post='' }
+        [ordered]@{ id='gh';     winget='GitHub.cli';          cmd='gh';      args='--version'; min='2.40'; required=$false; post='gh_auth' }
+        [ordered]@{ id='node';   winget='OpenJS.NodeJS.LTS';   cmd='node';    args='--version'; min='18.0'; required=$false; post='' }
+        [ordered]@{ id='python'; winget='Python.Python.3.11';  cmd='python';  args='--version'; min='3.11'; required=$false; post='' }
+        [ordered]@{ id='jq';     winget='jqlang.jq';           cmd='jq';      args='--version'; min='1.6';  required=$false; post='' }
         [ordered]@{ id='curl';   winget='';                    cmd='curl';    args='--version'; min='';     required=$true;  post='preinstalled' }
     )
 }
@@ -458,16 +475,36 @@ function Get-GhHeaders {
 # ----------------------------------------------------------------------------
 function Install-WingetPackage {
     param([string]$id)
+    # `--source winget` 은 선택이 아니라 필수다.
+    #
+    # 소스를 안 고르면 winget 은 등록된 소스를 **전부** 뒤진다. 기업망에서 TLS 를
+    # 검사(SSL inspection)하면 msstore 소스의 인증서 고정이 깨지고, winget 은 그
+    # 소스 하나 때문에 명령 전체를 실패로 끝낸다 -- 정작 패키지는 winget 소스에
+    # 멀쩡히 있는데도:
+    #
+    #     Failed when searching source: msstore
+    #     0x8a15005e : The server certificate did not match any of the expected values.
+    #     The following packages were found among the working sources.
+    #     Please specify one of them using the --source option to proceed.
+    #       Node.js (LTS)  OpenJS.NodeJS.LTS  winget
+    #
+    # SK바이오팜 2026-08-21 현장이 정확히 이것이었다. 13대 중 6대에서 gh·node·
+    # python·jq 가 전부 실패했고, git 만 통과한 것은 이미 설치돼 있어 winget 을
+    # 타지 않았기 때문이다. 기기 차이가 아니라 **그 망에서 나가는 경로** 차이다.
+    #
+    # winget 이 스스로 알려준 해법("--source 로 지정하라")을 그대로 박아 둔다.
+    # 우리 매니페스트의 도구는 전부 커뮤니티 winget 소스에 있으므로 msstore 를
+    # 뒤질 이유가 애초에 없다.
     $wingetArgs = @(
-        'install', '--id', $id, '--exact',
+        'install', '--id', $id, '--exact', '--source', 'winget',
         '--accept-package-agreements', '--accept-source-agreements',
         '--silent', '--disable-interactivity',
         '--scope', 'user'
     )
-    # Name the cause when winget itself is gone. Without this the field sees four
-    # unrelated-looking "NOT FOUND" lines and reads it as four broken packages,
-    # which is what cost a day on 2026-08-21 -- the real fault was one missing
-    # PATH entry, reported four times in the wrong vocabulary.
+    # winget 자체가 사라졌을 때 원인을 이름 붙여 찍는다. 없으면 현장은 서로
+    # 무관해 보이는 "NOT FOUND" 네 줄을 보고 "패키지 4개가 깨졌다"로 읽는다 --
+    # 실제로는 원인 하나가 네 번 잘못된 어휘로 보고된 것이다. 2026-08-21 현장이
+    # 그 오독으로 반나절을 태웠다(그때의 진짜 원인은 위의 msstore 인증서였다).
     if (-not (Test-Command 'winget')) {
         Write-Err2 "winget is no longer resolvable on PATH - cannot install $id."
         Write-Info  'This is an installer fault, not a package fault. Re-run in a new terminal.'
@@ -479,8 +516,10 @@ function Install-WingetPackage {
     # winget: 0 ok; -1978335189 == already installed / no applicable update.
     if ($code -eq 0 -or $code -eq -1978335189) { return $true }
     # Retry without user scope (some packages are machine-scope only).
+    # --source winget 은 여기서도 유지한다. 뺐다가는 재시도가 다시 msstore 를
+    # 뒤져서, 첫 시도와 같은 인증서 오류로 죽는다.
     Write-Info "retry (machine scope) ..."
-    & winget install --id $id --exact --accept-package-agreements --accept-source-agreements --silent --disable-interactivity 2>&1 |
+    & winget install --id $id --exact --source winget --accept-package-agreements --accept-source-agreements --silent --disable-interactivity 2>&1 |
         ForEach-Object { Write-Host "      $_" -ForegroundColor DarkGray }
     return ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189)
 }
@@ -813,12 +852,13 @@ function Invoke-Doctor {
     Write-Head 'hps doctor - fail-closed manifest re-verification'
     Update-ProcessPath
     $fail = @()
+    $missingOptional = @()
 
     foreach ($tool in $manifest.tools) {
         $ver = Get-ToolVersion $tool
         if (-not $ver) {
             if ($tool.required) { $fail += "$($tool.id): NOT FOUND ($($tool.cmd) missing)" }
-            else { Write-Warn2 "$($tool.id): not found (optional)" }
+            else { $missingOptional += $tool.id; Write-Warn2 "$($tool.id): not found (optional)" }
             continue
         }
         if (-not (Test-VersionAtLeast $ver $tool.min)) {
@@ -892,7 +932,17 @@ function Invoke-Doctor {
 
     Write-Host ''
     if ($fail.Count -eq 0) {
-        Write-Host '==> doctor: ALL CHECKS PASSED' -ForegroundColor Green
+        # 빠진 optional 을 조용히 삼키지 않는다. "ALL CHECKS PASSED" 만 찍으면
+        # 없는 도구를 있는 것처럼 읽게 되고, 그건 이 설치기가 이미 한 번 저지른
+        # 실패다(#476 — 앱도 SDK 도 없는 기기가 초록을 받았다). 필수는 다 됐다는
+        # 것과 전부 깔렸다는 것은 다른 말이고, 화면에서도 달라야 한다.
+        if ($missingOptional.Count -gt 0) {
+            Write-Host ('==> doctor: REQUIRED CHECKS PASSED (optional missing: {0})' -f ($missingOptional -join ', ')) -ForegroundColor Green
+            Write-Info '수업 진행에는 문제가 없습니다 - 위 도구는 학생 트랙에서 쓰이지 않습니다.'
+            Write-Info '나중에 필요해지면 이 설치기를 다시 돌리면 됩니다(멱등).'
+        } else {
+            Write-Host '==> doctor: ALL CHECKS PASSED' -ForegroundColor Green
+        }
         return 0
     }
     Write-Host '==> doctor: FAILURES (fail-closed)' -ForegroundColor Red
