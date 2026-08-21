@@ -64,8 +64,8 @@ function loop(){
   if(state==='play'){t++;px=Math.max(10,Math.min(PW-10,px));
     if(t%spawnEvery===0){const good=ITEM_A&&Math.random()<(ITEM_B?0.65:1);items.push({x:12+Math.random()*(PW-24),y:-8,e:good?ITEM_A:ITEM_B,bad:!good});}
     for(let i=items.length-1;i>=0;i--){const it=items[i];it.y+=fall;if(it.y>PH){items.splice(i,1);continue;}if(it.y>GY-10&&it.y<GY+10&&Math.abs(it.x-px)<16){if(it.bad)lives--;else score++;items.splice(i,1);}}
-    if(ITEM_A&&score>=GOAL)report({score,goal:GOAL,lives,speed:SPEED,rate:RATE},true,score+'/'+GOAL,'시원해! 이제 낮잠 잘 수 있겠어 💤','');
-    else if(lives<=0)report({score,goal:GOAL,lives:0,speed:SPEED,rate:RATE},false,score+'/'+GOAL,'',ITEM_A?'앗 뜨거… 불덩이가 너무 많아':'앗 뜨거… 받을 건 하나도 없고 불덩이만…');}
+    if(ITEM_A&&score>=GOAL)report({w_heat:WORLD.heat,w_cool:WORLD.cool,score,goal:GOAL,lives,speed:SPEED,rate:RATE},true,score+'/'+GOAL,'시원해! 이제 낮잠 잘 수 있겠어 💤','');
+    else if(lives<=0)report({w_heat:WORLD.heat,w_cool:WORLD.cool,score,goal:GOAL,lives:0,speed:SPEED,rate:RATE},false,score+'/'+GOAL,'',ITEM_A?'앗 뜨거… 불덩이가 너무 많아':'앗 뜨거… 받을 건 하나도 없고 불덩이만…');}
   else t++;
   scene();blit();
   if(state==='title')titleHud();else{txt((ITEM_A||'—')+' '+score+' / '+GOAL+'   ❤️'.repeat(Math.max(0,Math.min(5,lives))),48,24,'#ffd75b');if(state==='over')overHud(document.title.startsWith('성공'));}

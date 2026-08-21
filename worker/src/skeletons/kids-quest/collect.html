@@ -64,8 +64,8 @@ function loop(){
     for(let i=items.length-1;i>=0;i--){const it=items[i];if(Math.hypot(it.x-px,it.y-py)<14){items.splice(i,1);if(!WORLD.wilted)got++;else say('<b>'+GUEST_NAME+'</b>: 시들어서 꿀이 없어…');}}
     haz.forEach(h=>{h.x+=h.vx;h.y+=h.vy;if(h.x<0||h.x>PW)h.vx*=-1;if(h.y<24||h.y>PH-16)h.vy*=-1;if(Math.hypot(h.x-px,h.y-py)<13){px=PW/2;py=PH/2;tx=px;ty=py;}});
     const secs=Math.round(t/60);
-    if(got>=GOAL)report({got,goal:GOAL,secs,time:SPECIAL,spread:RATE},true,got+'/'+GOAL,'꿀 가득! 🍯 숨도 잘 쉬어져','');
-    else if((SPECIAL&&secs>=SPECIAL)||(!items.length&&WORLD.wilted))report({got,goal:GOAL,secs,time:SPECIAL,spread:RATE},false,got+'/'+GOAL,'',WORLD.wilted?'꽃이 다 시들어서 꿀이 하나도 없어…':'시간이… 너무 멀리 흩어져 있어');}
+    if(got>=GOAL)report({w_smog:WORLD.smog,w_wilted:WORLD.wilted,got,goal:GOAL,secs,time:SPECIAL,spread:RATE},true,got+'/'+GOAL,'꿀 가득! 🍯 숨도 잘 쉬어져','');
+    else if((SPECIAL&&secs>=SPECIAL)||(!items.length&&WORLD.wilted))report({w_smog:WORLD.smog,w_wilted:WORLD.wilted,got,goal:GOAL,secs,time:SPECIAL,spread:RATE},false,got+'/'+GOAL,'',WORLD.wilted?'꽃이 다 시들어서 꿀이 하나도 없어…':'시간이… 너무 멀리 흩어져 있어');}
   else t++;
   scene();blit();
   if(state==='title')titleHud();else{const secs=Math.round(t/60);txt('🍯 '+got+' / '+GOAL+(SPECIAL?'   ⏱ '+Math.max(0,SPECIAL-secs):''),48,24,'#ffd75b');if(state==='over')overHud(document.title.startsWith('성공'));}

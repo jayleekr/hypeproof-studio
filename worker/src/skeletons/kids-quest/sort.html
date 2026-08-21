@@ -47,8 +47,8 @@ const flow=0.5+SPEED*0.2,RY=70,RH=52;
 function spawn(){if(WORLD.trashRate<=0){cur=null;return;}const r=Math.random();cur={e:r<RATE*0.05?ODD[Math.floor(Math.random()*ODD.length)]:(Math.random()<.5?ITEM_A:ITEM_B),x:-16,y:RY+RH*0.5};}
 function reset(){t=0;ok_=0;bad=0;fly=null;fish=WORLD.fish;swim=[];for(let i=0;i<fish;i++)swim.push({x:Math.random()*PW,d:Math.random()<.5?1:-1,y:RY+8+Math.random()*(RH-20)});spawn();state='play';say('<b>'+GUEST_NAME+'</b>: 온다 온다… 이건 어디 통?');}
 function wrong(msg){bad++;if(WORLD.dirty&&fish>0){fish--;swim.pop();}say('<b>'+GUEST_NAME+'</b>: '+msg+(WORLD.dirty?' 물고기가 또 사라졌어…':''));}
-function check(){if(ok_>=GOAL)report({ok:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},true,ok_+'개','냇물이 깨끗해졌어! 🐟 물고기들이 돌아왔어, 고마워','');
-  else if(bad>SPECIAL||(WORLD.dirty&&fish<=0))report({ok:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},false,ok_+'개','',fish<=0?'물고기가 다 사라졌어…':'너무 빨리 떠내려와서 못 건지겠어…');
+function check(){if(ok_>=GOAL)report({w_trashRate:WORLD.trashRate,w_fish:WORLD.fish,right:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},true,ok_+'개','냇물이 깨끗해졌어! 🐟 물고기들이 돌아왔어, 고마워','');
+  else if(bad>SPECIAL||(WORLD.dirty&&fish<=0))report({w_trashRate:WORLD.trashRate,w_fish:WORLD.fish,right:ok_,wrong:bad,fish,goal:GOAL,speed:SPEED,oddRatio:RATE,allowed:SPECIAL},false,ok_+'개','',fish<=0?'물고기가 다 사라졌어…':'너무 빨리 떠내려와서 못 건지겠어…');
   else setTimeout(()=>{if(state==='play'&&!cur)spawn();},300);}
 function pick(side){if(state!=='play'||!cur)return;const want=cur.e===ITEM_A?'L':cur.e===ITEM_B?'R':'N';if(want===side){ok_++;fly={e:cur.e,side,t:0,x:cur.x,y:cur.y};}else wrong(want==='N'?'그건 쓰레기가 아닌데?':want==='L'?'그건 왼쪽 통인데!':'그건 오른쪽 통인데!');cur=null;check();}
 addEventListener('keydown',e=>{if(e.code==='Space'&&state!=='play')reset();if(e.key==='ArrowLeft')pick('L');if(e.key==='ArrowRight')pick('R');});

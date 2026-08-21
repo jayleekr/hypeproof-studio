@@ -108,6 +108,16 @@ jobs:
         shell: bash
         run: bash scripts/test-installer-pipe.sh
 
+      # (c1) 회귀 TC — Update-ProcessPath 가 PATH 를 덮어써 winget 을 잃던 것.
+      # SK바이오팜 현장 13대 중 6대: git 만 깔리고 gh·node·python·jq 가 전부
+      # NOT FOUND. 갓 이미징한 프로필(User PATH 비어 있음)에서만 터져서 개발기와
+      # CI 에서는 늘 통과했다 — test-installer-pipe 와 같은 계열의 함정이다.
+      # 이 TC 는 pwsh 의 비Windows 동작으로 그 조건을 재현하므로 Windows 기기가
+      # 필요 없다. install.ps1 파싱 게이트도 같이 돈다(전 참가자가 실행하는 파일).
+      - name: Regression — installer does not lose winget from PATH
+        shell: bash
+        run: bash scripts/test-installer-path.sh
+
       - name: Smoke — skill shell assumptions
         run: |
           set -euo pipefail
