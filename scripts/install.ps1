@@ -349,10 +349,54 @@ function Add-ToUserPath {
 }
 
 # Refresh $env:Path from Machine+User so freshly-installed tools resolve.
+# Refresh $env:Path so a tool winget just installed becomes resolvable in THIS
+# process, without losing anything the process already had.
+#
+# The first version replaced $env:Path with registry Machine+User. Registry is
+# the authority for what was *just installed*, but it is NOT a superset of the
+# live process PATH: a freshly-imaged Windows profile can have an empty or short
+# User PATH while the process still inherits
+# %LOCALAPPDATA%\Microsoft\WindowsApps -- the directory that holds winget's
+# app-execution alias stub, which Resolve-ToolCommand explicitly depends on.
+#
+# Overwriting therefore deleted winget from PATH mid-run. Ensure-Tool calls this
+# after every install, so the damage landed right after the FIRST tool: git
+# (manifest order #1) installed fine, then `& winget` was unresolvable and
+# gh/node/python/jq all failed with "NOT FOUND". That is the SK Biopharm
+# 2026-08-21 field report -- 6 of 13 identically-imaged machines, always the
+# same four tools, always after git.
+#
+# So: union, never replace. Registry entries come first (a just-installed tool
+# must win over a stale inherited entry), then whatever the process already had.
+# WindowsApps is re-asserted explicitly because it is the one entry whose loss
+# breaks the installer's ability to install anything at all.
 function Update-ProcessPath {
-    $m = [Environment]::GetEnvironmentVariable('Path', 'Machine')
-    $u = [Environment]::GetEnvironmentVariable('Path', 'User')
-    $env:Path = (($m, $u) -join ';')
+    $sources = @(
+        [Environment]::GetEnvironmentVariable('Path', 'Machine'),
+        [Environment]::GetEnvironmentVariable('Path', 'User'),
+        $env:Path
+    )
+    if ($env:LOCALAPPDATA) {
+        # 문자열 결합으로 붙인다. Join-Path 는 PSDrive 를 해석하려 들어서 드라이브가
+        # 없는 호스트(예: 검증용 macOS pwsh)에서 던진다 -- PATH 를 고치는 함수가
+        # 스스로 던지는 것은 이 함수가 존재하는 이유와 정면으로 어긋난다.
+        $sources += ($env:LOCALAPPDATA.TrimEnd('\') + '\Microsoft\WindowsApps')
+    }
+
+    $seen = @{}
+    $out  = New-Object System.Collections.Generic.List[string]
+    foreach ($src in $sources) {
+        if (-not $src) { continue }
+        foreach ($p in $src.Split(';')) {
+            $t = $p.Trim()
+            if (-not $t) { continue }
+            $k = $t.TrimEnd('\').ToLowerInvariant()
+            if ($seen.ContainsKey($k)) { continue }
+            $seen[$k] = $true
+            $out.Add($t)
+        }
+    }
+    $env:Path = ($out -join ';')
 }
 
 # ----------------------------------------------------------------------------
@@ -420,6 +464,15 @@ function Install-WingetPackage {
         '--silent', '--disable-interactivity',
         '--scope', 'user'
     )
+    # Name the cause when winget itself is gone. Without this the field sees four
+    # unrelated-looking "NOT FOUND" lines and reads it as four broken packages,
+    # which is what cost a day on 2026-08-21 -- the real fault was one missing
+    # PATH entry, reported four times in the wrong vocabulary.
+    if (-not (Test-Command 'winget')) {
+        Write-Err2 "winget is no longer resolvable on PATH - cannot install $id."
+        Write-Info  'This is an installer fault, not a package fault. Re-run in a new terminal.'
+        return $false
+    }
     Write-Info "winget install $id ..."
     & winget @wingetArgs 2>&1 | ForEach-Object { Write-Host "      $_" -ForegroundColor DarkGray }
     $code = $LASTEXITCODE
