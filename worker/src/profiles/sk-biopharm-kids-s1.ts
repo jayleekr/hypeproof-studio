@@ -59,6 +59,14 @@ export const profile: Profile = {
   // 함께 유지되는 것: 인바운드/아웃바운드 모더레이션(REQ-O2/O3)은 이 플래그와
   // 무관하게 그대로 돈다. 모든 툴 호출은 canUseTool 승인 게이트를 지나고,
   // 워크스페이스(workspace_root) 밖 경로는 evaluateSdkToolUse 가 거부한다.
+  // 2026-08-22 — 코치의 웹 검색을 연다. 아이 산출물에 외부 자원을 끌어오는 것과는
+  // 다른 축이다: 인터넷 그림 파일은 여전히 프롬프트가 금지하고, 갤러리 CSP 가
+  // 발행 후를 막는다. 여기서 열리는 것은 **코치가 자료를 찾아 읽는 것**뿐이다.
+  //
+  // 알고 여는 것: 앱의 permittedToolsFor 는 WebSearch 와 WebFetch 를 **묶어서**
+  // 준다(쪼개려면 앱 재빌드). 검색은 승인 모달 없이 자동 실행되고, 스트리밍 턴의
+  // 아웃바운드 모더레이션을 지나지 않는다.
+  tools: { web_search: true },
   sdk_tools: { read: true, write: true },
   // 위 sdk_tools 가 실행될 런타임. 워커는 프로필이 명시적으로 요청할 때만
   // agent-sdk 를 내려준다(routes/chat.ts) — 미설정 아동 코호트는 proxy 그대로.
