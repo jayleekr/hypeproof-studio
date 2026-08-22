@@ -12,6 +12,10 @@ import previewEnvContractMd from "../prompts/_preview-env-contract.md";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import previewEnvContractLiveServerMd from "../prompts/_preview-env-contract-live-server.md";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import galleryPublishContractMd from "../prompts/_gallery-publish-contract.md";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
+import webSearchDisciplineMd from "../prompts/_web-search-discipline.md";
+// @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import browserControlContractProxyMd from "../prompts/_browser-control-contract-proxy.md";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
 import browserControlContractSdkMd from "../prompts/_browser-control-contract-sdk.md";
@@ -464,9 +468,27 @@ function buildCachedPrefix(profile: Profile, runtime: CoachRuntime = "proxy"): s
   // 셸 절차를 176줄에 걸쳐 가르치는데 그 앞에서 "셸이 없다"고 말하면, 뒤에 오는
   // 긴 절차가 앞의 한 문단을 덮는다. 마지막에 두어 정정이 마지막 말이 되게 한다.
   const degradedNotice = degradedRuntimeNoticeFor(profile, runtime);
+  // 발행 보존 계약 — 갤러리로 나가는 코호트에만 붙인다. 소유자는 `publishing.strategy`
+  // 이지 트랙이 아니다: 두 아동 트랙이 같은 조건을 공유하고, 다른 전략(local_only ·
+  // per_user_github_pages)은 보존 조건이 아예 다르다. 코호트 프롬프트에 넣지 않는
+  // 이유가 하나 더 있다 — 하네스가 재는 `system_prompt` 길이 밴드(9000자)에 5-6
+  // 트랙이 이미 붙어 있어서, 여기 넣으면 밴드를 넘기고 두 파일에 같은 문장을
+  // 복제하게 된다.
+  const galleryContract =
+    profile.publishing?.strategy === "hypeproof_gallery"
+      ? (galleryPublishContractMd as unknown as string)
+      : "";
+  // 검색 규율 — 도구를 쥐여 주는 것과 언제 쓰는지 가르치는 것은 다른 일이다. #614
+  // 부하 실측에서 교실의 병목은 동시성이 아니라 **출력 길이**였다: 검색이 턴마다
+  // 끼면 23명이 같이 느려진다. 코호트 프롬프트가 아니라 여기 두는 이유는 게이트가
+  // 트랙이 아니라 `tools.web_search` 이기 때문 — 켠 코호트만 이 문단을 받는다.
+  const searchDiscipline =
+    profile.tools?.web_search === true ? (webSearchDisciplineMd as unknown as string) : "";
   const sections = [
     profile.system_prompt,
     previewContract,
+    galleryContract,
+    searchDiscipline,
     browserContract,
     skillsMd,
     buildSkeletonLibrary(profile, runtime),

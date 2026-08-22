@@ -100,7 +100,11 @@ child:
   # A child cohort's system_prompt MUST contain this exact phrase (no external
   # URL fetches from generated code — a flaky room wifi must not break a game,
   # and it blocks accidental data exfil). See COHORT-AUTHORING.md §보안/가드레일.
-  required_prompt_phrase: "외부 URL 호출 금지"
+  # 2026-08-22 — 외부 주소 호출 자체는 허용으로 바뀌었다(갤러리 CSP 가 발행 후를
+  # 막고, 프롬프트는 "없어도 돌아가야 한다"로 가르친다). 아동 코호트에서 계속
+  # 금지하는 것은 **인터넷 그림 파일**이라 검사 문구도 그쪽으로 옮긴다. 규칙
+  # 자체는 child_missing_url_ban: fail 그대로 — 끄지 않고 대상만 바꾼 것이다.
+  required_prompt_phrase: "이미지 파일 다운로드 금지"
 
 # Per-check severity. "fail" → counts toward non-zero exit; "warn" → reported
 # but still passes. Flip a check's strictness here without editing validate.py.
