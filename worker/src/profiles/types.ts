@@ -360,11 +360,19 @@ export const ASSET_FOCUS = [
 export type AssetFocus = (typeof ASSET_FOCUS)[number];
 
 // Anthropic model ids (used when LLM_PROVIDER=anthropic).
-export const MODEL_MAP: Record<ModelAlias, string> = {
+//
+// `as const satisfies` on purpose (#687): the literal union below is what makes
+// MODEL_CAPS in routes/messages.ts exhaustive. Repinning an alias to a model
+// with no capability entry then fails TYPECHECK, instead of quietly reaching a
+// fail-closed branch and stripping effort in a live classroom.
+export const MODEL_MAP = {
   "hypeproof-fast":    "claude-haiku-4-5",
   "hypeproof-default": "claude-sonnet-4-6",
   "hypeproof-strong":  "claude-opus-4-7",
-};
+} as const satisfies Record<ModelAlias, string>;
+
+/** The Anthropic model ids this gateway can actually pin. */
+export type AnthropicModelId = (typeof MODEL_MAP)[ModelAlias];
 
 // Gemini model ids (default provider). Same alias names so profiles are
 // provider-agnostic — the alias resolves per-provider at request time.
