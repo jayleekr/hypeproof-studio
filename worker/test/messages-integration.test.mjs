@@ -928,4 +928,35 @@ console.log("✓ count_tokens: ANTHROPIC_PROXY_URL — sediment indirection hono
 }
 console.log("✓ count_tokens: bad json body — Anthropic-native 400");
 
+
+// ── #670 회귀: 미성년 출력 상한이 실제로 상류에 적용되는가 ──────────────────
+//
+// upstreamBody 리터럴에 `max_tokens` 가 두 번 있었다 — minor_cohort 스프레드
+// 안(12000 캡)과 그 아래 최상위(clampMaxTokens). JS 는 **뒤 키가 이기므로**
+// 미성년 캡이 죽은 코드였고, 아이들은 16384 로 돌았다. 타입체크는 스프레드가
+// 낀 중복을 오류로 보지 않아서 못 잡는다 — 그래서 상류로 나가는 값을 직접 잰다.
+//
+// 실측 근거(2026-08-22 SK 1회차): usage_log 에 tokens_out=16384 가 6명에게서
+// 나왔고, 그 호출들의 지연이 153~262초였다.
+{
+  const env = messagesEnv();
+  await withMockUpstream(
+    () => Response.json(anthropicJsonBody({ text: "hi" })),
+    async (calls) => {
+      const r = await app.fetch(
+        messagesRequest({ body: { max_tokens: 16384 } }),
+        env,
+        makeCtx(),
+      );
+      assert.equal(r.status, 200);
+      const sent = JSON.parse(calls[0].init.body);
+      assert.ok(
+        sent.max_tokens <= 12000,
+        `미성년 캡이 상류에 적용돼야 한다 — 실제로 나간 값: ${sent.max_tokens}`,
+      );
+    },
+  );
+}
+console.log("\u2713 #670: minor cohort max_tokens cap reaches upstream");
+
 console.log("All /v1/messages integration tests passed.");
