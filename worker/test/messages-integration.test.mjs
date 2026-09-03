@@ -29,6 +29,7 @@ const app = await bootApp();
 const { issue } = await import("../src/lib/tokens.ts");
 const { getProfile } = await import("../src/profiles/index.ts");
 const { MODEL_MAP } = await import("../src/profiles/types.ts");
+const { MINOR_EFFORT } = await import("../src/lib/model-caps.ts");
 const { token: TOKEN } = await issue({ u: USER, c: COHORT, p: PROFILE }, 1, TEST_SECRET);
 const AUTH = `Bearer ${TOKEN}`;
 
@@ -363,7 +364,18 @@ console.log("✓ messages: model policy — catalog clamp + haiku fast-pin");
       );
       const sent = JSON.parse(calls[0].init.body);
       assert.equal(sent.model, DEFAULT_ID, "model still clamped to the cohort catalog");
-      assert.equal("output_config" in sent, false, "#406: output_config stripped (400s the pinned model)");
+      // #687 — 예전에는 output_config 를 통째로 지웠고, 그래서 게이트웨이 자신의
+      // 미성년 effort 도 같이 죽었다. 이제 살아서 나간다.
+      //
+      // 이 해네스 코호트는 아동 프로필이라 **워커 정책이 클라이언트를 덮는다**:
+      // CLI 가 xhigh 를 보내도 미성년 주입이 medium 으로 바꾸고, 4.6 이 medium 을
+      // 받으므로 그대로 상류에 도달한다. 즉 이 한 줄이 #687 의 본체를 잰다 —
+      // 미성년 effort 정책이 실제로 적용되는가.
+      assert.deepEqual(
+        sent.output_config,
+        { effort: MINOR_EFFORT },
+        "#687: 미성년 effort 정책이 클라이언트 값을 덮고 상류까지 도달한다",
+      );
       assert.equal("context_management" in sent, false, "#406: context_management stripped");
       // Everything the pinned model DOES accept must survive — this strip is a
       // scalpel, not a whitelist. thinking{adaptive} 200s upstream, so it stays.
@@ -376,11 +388,12 @@ console.log("✓ #406: model-gated params stripped when the gateway pins the mod
 
 // --- #406 unit: the strip is keyed on the resolved model, not on override ---
 {
-  const { stripModelGatedParams } = await import("../src/routes/messages.ts");
+  const { stripModelGatedParams } = await import("../src/lib/model-caps.ts");
   const base = { model: DEFAULT_ID, tools: [], output_config: { effort: "xhigh" } };
   const r = stripModelGatedParams(base, DEFAULT_ID);
-  assert.deepEqual(r.dropped, ["output_config"], "dropped names reported for the log line");
-  assert.equal("output_config" in r.body, false);
+  assert.equal(r.dropped.length, 1, "what changed is reported for the log line");
+  assert.match(r.dropped[0], /xhigh→high/, "#687: 강등이 로그에 남는다");
+  assert.deepEqual(r.body.output_config, { effort: "high" }, "#687: 강등된 값이 남는다");
   assert.deepEqual(base.output_config, { effort: "xhigh" }, "input body not mutated");
   assert.deepEqual(r.body.tools, [], "untouched fields survive");
 

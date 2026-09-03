@@ -47,6 +47,8 @@ import {
 import { callAnthropic, countTokensUrl } from "../lib/anthropic";
 import type { AnthropicRequest } from "../lib/translate";
 import { MODEL_MAP, type ModelAlias, type Profile } from "../profiles/types";
+// #687 — 모델 수용 표와 정리기는 순수 모듈로 뺐다(플레인 Node 로 테스트 가능해야 한다).
+import { MINOR_EFFORT, stripModelGatedParams } from "../lib/model-caps";
 import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../lib/chat-extract";
 import { recordTurnIfOwned } from "../lib/storage";
 import { tapAnthropicStream } from "../lib/sse";
@@ -202,38 +204,27 @@ export function normalizeSystemRoleMessages(messages: unknown): unknown {
  *
  * Keyed on the RESOLVED model, not on "did we override it": the pinned model is
  * what upstream validates against, and a client that asked for our exact model
- * would 400 the same way. When a profile later pins a generation that does
- * support one of these, add its id to the param's `supportedBy` list — the
- * check then stops stripping for that model only.
+ * would 400 the same way.
+ *
+ * #687 — the first shape of this check was a per-PARAM allowlist
+ * (`{ param, supportedBy: [] }`). It was wrong twice over:
+ *
+ *  1. An empty `supportedBy` deleted the param for EVERY model — and empty was
+ *     ALSO what "nobody ever checked" looked like. The source could not tell
+ *     "verified unsupported" from "unverified". `verifiedBy` below fixes that.
+ *  2. The real constraint is per-LEVEL, not per-param. claude-sonnet-4-6 takes
+ *     output_config.effort at low|medium|high|max and 400s ONLY on xhigh (an
+ *     Opus-4.7-era level). The 2026-07-24 probe happened to send xhigh, and the
+ *     code generalised one bad LEVEL into a dead PARAM. Deleting the object also
+ *     deleted the gateway's own effort:"medium" for minors — so the minor effort
+ *     policy never reached upstream and the kids ran on the Sonnet 4.6 default
+ *     ("high") the whole time, including through the low→medium retune of
+ *     2026-08-20. Both tunings were argued over a channel that was never open.
+ *
+ * Hence: a per-MODEL capability table, and a sanitizer that edits INSIDE
+ * output_config (downgrade the level; keep `format`, which is API-wide) rather
+ * than nuking it.
  */
-const MODEL_GATED_PARAMS: readonly { param: string; supportedBy: readonly string[] }[] = [
-  // Effort control — newer-generation only. No classroom pin accepts it today.
-  { param: "output_config", supportedBy: [] },
-  // Server-side context editing (context-management beta). Same story.
-  { param: "context_management", supportedBy: [] },
-];
-
-/**
- * Drop the model-gated params the resolved model cannot accept. Pure; returns a
- * new body plus the names dropped so the caller can log them — an SDK bump that
- * introduces the NEXT such param must surface as a log line, not as another
- * silent classroom outage.
- */
-export function stripModelGatedParams(
-  body: Record<string, unknown>,
-  resolvedModel: string,
-): { body: Record<string, unknown>; dropped: string[] } {
-  const dropped: string[] = [];
-  let out = body;
-  for (const { param, supportedBy } of MODEL_GATED_PARAMS) {
-    if (!(param in body) || body[param] === undefined) continue;
-    if (supportedBy.includes(resolvedModel)) continue;
-    if (out === body) out = { ...body };
-    delete out[param];
-    dropped.push(param);
-  }
-  return { body: out, dropped };
-}
 
 messages.post("/messages", async (c) => {
   const env = c.env;
@@ -363,7 +354,14 @@ messages.post("/messages", async (c) => {
           // 실기기에서 "맥락을 못 알아먹는다" 는 대가가 나왔다. 폭주 원인은 그 사이
           // 구조로 제거됐다: 출력 상한 · MultiEdit · 좁은 Read · 엔진 분리(스프라이트가
           // 파일에서 빠져 반복 패턴 재작성 자체가 불가능). 되돌릴 땐 low 로.
-          output_config: { ...((raw as Record<string, unknown>).output_config as Record<string, unknown> | undefined), effort: "medium" },
+          // #687 — 이 값은 2026-09-03 까지 **상류에 도달한 적이 없다**(게이트가 통째로
+          // 지웠다). 그래서 위 low→medium 논의는 전부 닫힌 채널을 놓고 한 것이고,
+          // 아이들은 내내 Sonnet 4.6 기본값 "high" 로 돌았다. 이제 실제로 적용되므로
+          // **이번이 medium 의 첫 실전이다** — 다음 회차에서 관측하고 다시 판단할 것.
+          output_config: {
+            ...((raw as Record<string, unknown>).output_config as Record<string, unknown> | undefined),
+            effort: MINOR_EFFORT,
+          },
           // max_tokens 는 여기 두지 않는다 — 아래 `max_tokens: resolvedMaxTokens` 단일
           // 지점에서 정한다. 이 자리에 있던 캡이 그 아래 키에 덮여 죽어 있었다(#670).
         }
