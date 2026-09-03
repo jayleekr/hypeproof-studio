@@ -186,3 +186,78 @@ console.log("kids-quest-prompt.test.mjs: all tests passed");
   assert.equal(renderEngineFor("nope"), null, "모르는 세상은 null");
   console.log("✓ 세상별 엔진 — 자기 그림만, 남의 세상 없음, report 유지");
 }
+
+// --- 6. #682/#675 — 코치가 완료를 단정하지 않는다 -----------------------------------
+//
+// 2026-08-22 실기기: 코치가 67턴 중 66회 "다 됐어요" 라고 했다(다른 자리 53턴 중 48회).
+// 화면을 볼 수 없으면서다. 아이는 같은 요청을 5번 반복했고("아니, 아직도 안 밝아!!!"),
+// 다른 아이는 세상이 까맣게 죽은 걸 3번 신고한 끝에 포기했다.
+//
+// 원인이 중요하다 — **코치는 규칙을 어긴 게 아니라 시킨 대로 했다.** 프롬프트 73행이
+// `"다 됐어요"는 코드 뒤에`, 80행 ④가 `끝나면 "다 됐어요!" 한 줄` 이라고 지시하고
+// 있었다. 그래서 이 테스트의 핵심은 새 문장이 있는지가 아니라 **지시문이 사라졌는가** 다.
+// 경쟁하는 규칙을 얹는 것보다 지시를 지우는 쪽이 훨씬 확실한 지렛대다.
+{
+  const { readFileSync } = await import("node:fs");
+  const files = {
+    "3-4": "src/prompts/sk-biopharm-kids-quest-3-4.md",
+    "5-6": "src/prompts/sk-biopharm-kids-quest-5-6.md",
+  };
+  const md = Object.fromEntries(
+    Object.entries(files).map(([k, p]) => [k, readFileSync(new URL(`../${p}`, import.meta.url), "utf8")]),
+  );
+
+  const HEAD = "## 다 됐다고 말하지 않습니다";
+  for (const [track, s] of Object.entries(md)) {
+    // (a) 지시문이 없다 — 이게 하중을 받는 단언이다.
+    assert.ok(!/④끝나면 "다 됐어요!"/.test(s), `${track}: ④가 완료 문구를 더 이상 지시하지 않는다`);
+    assert.ok(
+      !/"다 됐어요"는 코드 \*\*뒤\*\*에/.test(s),
+      `${track}: 말의 순서가 완료 문구를 더 이상 지시하지 않는다`,
+    );
+
+    // (b) 살아남은 "다 됐어요" 는 전부 금지 문맥이어야 한다 — 잔존 지시를 잡는다.
+    for (const m of s.matchAll(/다 됐어요/g)) {
+      const after = s.slice(m.index, m.index + 60);
+      assert.ok(
+        /로 끝내지 마세요|라고 단정하지 마세요/.test(after),
+        `${track}: "다 됐어요" 가 금지 문맥 밖에 남아 있다 — …${after.slice(0, 40)}…`,
+      );
+    }
+
+    // (c) 새 절이 정확히 한 번.
+    assert.equal(s.split(HEAD).length - 1, 1, `${track}: 새 절이 정확히 한 번`);
+    assert.ok(s.includes("지금 화면에"), `${track}: 확인 부탁 문구`);
+    assert.ok(s.includes("손 들어서 불러 줄래요"), `${track}: 3회 반복 시 강사 호출`);
+
+    // (d) 양성 대조군 — 너무 많이 지우지 않았다 (verification.md §2: 지배적 실패 방향).
+    assert.ok(s.includes("[게스트 결과]"), `${track}: 결과 반응 규칙 유지`);
+    assert.ok(s.includes("report()"), `${track}: report() 계약 유지`);
+  }
+
+  // (e) 두 트랙이 바이트 동일 — 한쪽만 손보고 갈라지는 것을 막는다.
+  const cut = (s) => s.slice(s.indexOf(HEAD), s.indexOf("## 엔진 치트시트"));
+  assert.equal(cut(md["3-4"]), cut(md["5-6"]), "새 절이 두 트랙에서 바이트 동일");
+
+  console.log("✓ #682: 완료 단정 지시문 제거 + 확인 요청 규칙 (두 트랙 동일)");
+}
+
+// --- 7. #675 — 검색 턴이 화면에 착지해야 하고, 크기 상한이 있다 ---------------------
+{
+  const { readFileSync } = await import("node:fs");
+  const disc = readFileSync(new URL("../src/prompts/_web-search-discipline.md", import.meta.url), "utf8");
+  assert.ok(disc.includes("찾은 턴에도 화면은 바뀌어야"), "검색 턴 착지 의무");
+  assert.ok(disc.includes("검색 한 번 + 고치기 한두 곳"), "턴 크기 상한");
+
+  // 이 파일의 게이트는 트랙이 아니라 `tools.web_search` 다(translate.ts:486). 보아치과
+  // **성인** 코호트 둘도 이 문단을 받는다. 기존 본문은 이미 아동 어휘로 쓰여 있고(그건
+  // 별건 — 아래 이슈), 최소한 **새로 넣는 규칙이 그 부채를 키우지는 않게** 못 박는다.
+  const added = disc.slice(disc.indexOf("찾은 턴에도 화면은 바뀌어야"));
+  for (const kidWord of ["아이", "게스트", "세상"]) {
+    assert.ok(
+      !added.includes(kidWord),
+      `새 규칙에 아동 어휘 '${kidWord}' 가 없다 — 성인 코호트도 이 파일을 받는다`,
+    );
+  }
+  console.log("✓ #675: 검색 턴 착지 의무 + 크기 상한, 어휘 중립 유지");
+}
