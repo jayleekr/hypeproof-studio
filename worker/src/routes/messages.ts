@@ -320,6 +320,28 @@ messages.post("/messages", async (c) => {
   const stream = raw.stream === true;
   const modelLabel = resolveMessagesModel(raw.model, profile);
 
+  // 출력 상한 — **한 곳에서만** 정한다.
+  //
+  // #670: 이 값을 upstreamBody 리터럴 안에서 두 번 정하고 있었다. minor_cohort
+  // 스프레드 안에 12000 캡이 있었고, 그 아래 최상위에 `clampMaxTokens` 가 또
+  // 있었다. JS 객체 리터럴은 **뒤 키가 이기므로** 미성년 캡은 한 번도 적용된 적이
+  // 없다. 타입체크는 스프레드가 낀 중복 키를 오류로 보지 않아서 조용히 지나갔다.
+  //
+  // 결과(2026-08-22 SK 1회차 실측): 아이들이 12000 이 아니라 16384 로 돌았고,
+  // 6명이 정확히 그 천장에 붙었으며 그 호출들의 지연이 153~262초였다. 8/19 에
+  // 이 캡을 넣어 막으려 했던 "32000 output token maximum" 폭주가 사흘 뒤 그대로
+  // 재현된 것도 캡이 죽어 있었기 때문이다.
+  //
+  // 미성년 캡의 근거(8/19 실기기): 코치가 도트 스프라이트 맵 덩어리를 다시 쓰다
+  // 반복 루프에 빠져 한 응답에 32k+ 를 뱉었다. 아동 트랙의 정상 턴은 Edit 몇
+  // 번(<3k)이라 이 상한이면 충분하고, 폭주는 1~2분 안에 끊긴다. effort:"medium"
+  // 은 생각 토큰이 출력 예산을 같이 쓰므로 8k 면 큰 편집이 중간에 잘린다 — 그래서
+  // 12000 이다.
+  const MINOR_MAX_TOKENS = 12000;
+  const clamped = clampMaxTokens(raw.max_tokens, profile);
+  const resolvedMaxTokens =
+    profile.minor_cohort === true ? Math.min(clamped, MINOR_MAX_TOKENS) : clamped;
+
   // 2-3. Enforced fields. Spread-first keeps unknown Messages-API fields
   // (metadata, tool_choice, thinking, …) flowing through; the enforced keys
   // then override whatever the client sent. `system` is REPLACED, never
@@ -342,12 +364,8 @@ messages.post("/messages", async (c) => {
           // 구조로 제거됐다: 출력 상한 · MultiEdit · 좁은 Read · 엔진 분리(스프라이트가
           // 파일에서 빠져 반복 패턴 재작성 자체가 불가능). 되돌릴 땐 low 로.
           output_config: { ...((raw as Record<string, unknown>).output_config as Record<string, unknown> | undefined), effort: "medium" },
-          // 2026-08-19 실기기 — "Claude's response exceeded the 32000 output token maximum":
-          // 코치가 도트 스프라이트 맵(반복 패턴 줄) 덩어리를 다시 쓰다 반복 루프에 빠져
-          // 한 응답에 32k+ 를 뱉었다(앞서 65k 턴도 같은 증상). 아동 트랙의 정상 턴은
-          // Edit 몇 번(<3k)이라 8k 면 충분하고, 폭주는 1~2분 안에 끊긴다.
-          // medium 은 생각 토큰이 출력 예산을 같이 쓴다 — 8k 면 큰 편집이 중간에 잘린다.
-          max_tokens: Math.min(typeof raw.max_tokens === "number" ? raw.max_tokens : 12000, 12000),
+          // max_tokens 는 여기 두지 않는다 — 아래 `max_tokens: resolvedMaxTokens` 단일
+          // 지점에서 정한다. 이 자리에 있던 캡이 그 아래 키에 덮여 죽어 있었다(#670).
         }
       : {}),
     // #384 — Claude Code CLI 2.x emits mid-conversation `role:"system"`
@@ -366,7 +384,7 @@ messages.post("/messages", async (c) => {
     // (browserMcp.ts), not the worker-injected BROWSER_TOOLS. The browser
     // contract must describe the tools the coach actually holds here.
     system: buildAnthropicSystemBlocks(profile, coach, "sdk"),
-    max_tokens: clampMaxTokens(raw.max_tokens, profile),
+    max_tokens: resolvedMaxTokens,
     stream,
   } as unknown as AnthropicRequest;
 
