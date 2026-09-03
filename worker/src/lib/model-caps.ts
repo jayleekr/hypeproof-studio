@@ -24,6 +24,17 @@ type ModelCaps = {
   readonly effort: readonly EffortLevel[];
   /** `context_management` (context-management-2025-06-27 beta) accepted. */
   readonly contextManagement: boolean;
+  /**
+   * `temperature` / `top_p` / `top_k` accepted at a NON-DEFAULT value.
+   * 5세대(Opus 5, Sonnet 5)와 4.7/4.8 은 400 을 낸다. 4.6 이하는 받는다.
+   */
+  readonly sampling: boolean;
+  /**
+   * 이 모델이 받는 `thinking` 모양.
+   *  "budget"   — `{type:"enabled", budget_tokens:N}` 를 아직 받는다 (4.6 이하)
+   *  "adaptive" — adaptive/disabled 만. budget_tokens 는 400 (4.7+, 5세대)
+   */
+  readonly thinkingShape: "budget" | "adaptive";
   /** DATED evidence for the two flags above. Non-empty + dated, enforced by the lock test. */
   readonly verifiedBy: string;
 };
@@ -44,6 +55,8 @@ const MODEL_CAPS: Record<AnthropicModelId, ModelCaps> = {
   "claude-haiku-4-5": {
     effort: [],
     contextManagement: false,
+    sampling: true,
+    thinkingShape: "budget",
     verifiedBy:
       "2026-09-03 docs: effort is an Opus 4.5/4.6 + Sonnet 4.6 parameter; `max` errors on Haiku 4.5. " +
       "Reachable here via resolveMessagesModel's /claude-.*haiku/ fast pin (CLI aux calls).",
@@ -51,6 +64,8 @@ const MODEL_CAPS: Record<AnthropicModelId, ModelCaps> = {
   "claude-sonnet-4-6": {
     effort: ["low", "medium", "high", "max"],
     contextManagement: false,
+    sampling: true,
+    thinkingShape: "budget",
     verifiedBy:
       '2026-07-24 prod probe (same token+cohort): output_config{effort:"xhigh"} → 400. ' +
       "2026-09-03 docs: xhigh is new on Opus 4.7; the 4.6 ladder is low|medium|high|max, default high.",
@@ -58,6 +73,8 @@ const MODEL_CAPS: Record<AnthropicModelId, ModelCaps> = {
   "claude-opus-4-7": {
     effort: ["low", "medium", "high", "xhigh", "max"],
     contextManagement: false,
+    sampling: false,
+    thinkingShape: "adaptive",
     verifiedBy: "2026-09-03 docs: Opus 4.7 carries the full ladder incl. xhigh (introduced on 4.7).",
   },
 };
@@ -126,6 +143,43 @@ export function stripModelGatedParams(
   if ("context_management" in body && body.context_management !== undefined && !caps?.contextManagement) {
     delete mutate().context_management;
     dropped.push("context_management");
+  }
+
+  // --- 샘플링 파라미터 -------------------------------------------------------
+  // 4.7 세대부터 non-default temperature/top_p/top_k 는 400 이다. 우리는 이 값을
+  // 만들지 않지만 두 경로 모두 **클라이언트 것을 그대로 통과**시킨다
+  // (messages.ts 의 `...raw`, translate.ts:572). /v1/chat/completions 는 공개
+  // OpenAI 호환 엔드포인트라 아무 클라이언트나 temperature 를 보낼 수 있다.
+  // 지금 핀(4.6/haiku)에서는 sampling:true 라 **무동작**이고, 4.7+ 로 핀이
+  // 움직이는 순간 이 가드가 매 턴 400 을 막는다.
+  if (caps && !caps.sampling) {
+    for (const k of ["temperature", "top_p", "top_k"] as const) {
+      if (k in body && body[k] !== undefined) {
+        delete mutate()[k];
+        dropped.push(`${k} (${resolvedModel} rejects non-default sampling)`);
+      }
+    }
+  }
+
+  // --- thinking 모양 ---------------------------------------------------------
+  // `{type:"enabled", budget_tokens:N}` 는 4.7 세대부터 400 이다. 번들된 Claude
+  // Code CLI 가 무엇을 보내는지는 **관측된 바 없다** — messages-integration 의
+  // 픽스처는 손으로 쓴 것이고 실물과 대조된 적이 없다. 그래서 추측하지 않고
+  // 게이트웨이에서 정규화한다: 어느 모양이 오든 안전하다.
+  //
+  // 이 실패는 조용하다 — CLI 재시도 루프가 400 을 삼키고 아이는 "생각하는 중 ✨"
+  // 앞에서 무한정 기다린다. #384(role:"system") · #403 · #406 과 같은 부류다.
+  const th = body.thinking;
+  if (caps?.thinkingShape === "adaptive" && th && typeof th === "object" && !Array.isArray(th)) {
+    const t = th as Record<string, unknown>;
+    if (t.type === "enabled" || "budget_tokens" in t) {
+      const next: Record<string, unknown> = { type: "adaptive" };
+      if (typeof t.display === "string") next.display = t.display;
+      mutate().thinking = next;
+      dropped.push(
+        `thinking {type:"${String(t.type)}"${"budget_tokens" in t ? ", budget_tokens" : ""}} → adaptive`,
+      );
+    }
   }
 
   return { body: out, dropped };

@@ -386,6 +386,22 @@ messages.post("/messages", async (c) => {
     stream,
   } as unknown as AnthropicRequest;
 
+  // 번들 CLI 가 실제로 보내는 `thinking` 모양을 한 줄로 남긴다.
+  //
+  // 왜: 4.7 세대부터 `{type:"enabled", budget_tokens:N}` 는 400 이다. 핀을 그쪽으로
+  // 옮기려면 CLI 가 무엇을 보내는지 알아야 하는데, 지금 그걸 아는 사람이 없다 —
+  // messages-integration 의 픽스처는 손으로 쓴 것이고 실물과 대조된 적이 없다.
+  // 값은 안 찍는다(프라이버시·소음). 모양만 본다. 아래 정규화가 이미 안전망이지만,
+  // **관측 없이 핀을 옮기지 않기 위해** 남긴다(.claude/rules/verification.md 규칙 1).
+  const rawThinking = (raw as Record<string, unknown>).thinking;
+  if (rawThinking && typeof rawThinking === "object" && !Array.isArray(rawThinking)) {
+    const t = rawThinking as Record<string, unknown>;
+    console.log(
+      `[${c.get("requestId")}] #obs cli thinking shape: type=${JSON.stringify(t.type)} ` +
+        `budget_tokens=${"budget_tokens" in t} display=${JSON.stringify(t.display)}`,
+    );
+  }
+
   // #406 — the model is ours, so the model-gated params are ours too. Without
   // this every SDK turn 400s (see stripModelGatedParams).
   const stripped = stripModelGatedParams(

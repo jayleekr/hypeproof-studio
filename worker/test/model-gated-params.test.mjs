@@ -124,4 +124,55 @@ const STRONG = MODEL_MAP["hypeproof-strong"];   // claude-opus-4-7
   console.log("✓ 드리프트 락 — 핀 3개 모두 날짜 있는 근거를 갖는다");
 }
 
+
+// --- 8. 샘플링 파라미터 게이트 (4.7 세대부터 non-default 는 400) -------------------
+//
+// 우리는 이 값을 만들지 않지만 두 경로 모두 클라이언트 것을 그대로 통과시킨다
+// (messages.ts 의 `...raw`, translate.ts:572). /v1/chat/completions 는 공개 OpenAI
+// 호환 엔드포인트라 아무 클라이언트나 temperature 를 보낼 수 있다.
+{
+  const body = { temperature: 0.2, top_p: 0.9, top_k: 40 };
+  const now = stripModelGatedParams({ ...body }, DEFAULT);
+  assert.deepEqual(now.body, body, `${DEFAULT}: 4.6 은 샘플링을 받으므로 무동작이어야 한다`);
+  assert.deepEqual(now.dropped, [], "오늘 핀에서는 아무것도 안 바뀐다");
+
+  const strict = stripModelGatedParams({ ...body }, STRONG);
+  assert.equal(strict.body.temperature, undefined, `${STRONG}: temperature 제거`);
+  assert.equal(strict.body.top_p, undefined, "top_p 제거");
+  assert.equal(strict.body.top_k, undefined, "top_k 제거");
+  assert.equal(strict.dropped.length, 3, "셋 다 이름과 함께 보고된다");
+  console.log("✓ 샘플링 게이트 — 4.6 무동작, 4.7 에서 제거");
+}
+
+// --- 9. thinking 모양 정규화 (budget_tokens → adaptive) ---------------------------
+//
+// 번들 CLI 가 무엇을 보내는지 **관측된 바 없다**. 어느 모양이 와도 안전하도록
+// 게이트웨이에서 정규화한다. 실패하면 CLI 재시도 루프가 400 을 삼키고 아이는
+// "생각하는 중 ✨" 앞에서 무한정 기다린다 — #384·#403·#406 과 같은 부류다.
+{
+  const legacy = { thinking: { type: "enabled", budget_tokens: 10000 } };
+  const keep = stripModelGatedParams({ ...legacy }, DEFAULT);
+  assert.deepEqual(
+    keep.body.thinking,
+    legacy.thinking,
+    `${DEFAULT}: 4.6 은 budget_tokens 를 아직 받으므로 건드리지 않는다`,
+  );
+
+  const norm = stripModelGatedParams({ ...legacy }, STRONG);
+  assert.deepEqual(norm.body.thinking, { type: "adaptive" }, `${STRONG}: adaptive 로 정규화`);
+  assert.match(norm.dropped[0], /adaptive/, "정규화 사실이 로그에 남는다");
+
+  // display 는 보존한다 — 씽킹 표시 UX 를 바꾸지 않는다.
+  const withDisplay = stripModelGatedParams(
+    { thinking: { type: "enabled", budget_tokens: 1, display: "summarized" } },
+    STRONG,
+  );
+  assert.equal(withDisplay.body.thinking.display, "summarized", "display 는 보존된다");
+
+  // 이미 adaptive 면 무동작.
+  const already = stripModelGatedParams({ thinking: { type: "adaptive" } }, STRONG);
+  assert.deepEqual(already.dropped, [], "adaptive 는 손대지 않는다");
+  console.log("✓ thinking 정규화 — 4.6 무동작, 4.7 에서 adaptive 로");
+}
+
 console.log("All model-gated-param checks passed.");
