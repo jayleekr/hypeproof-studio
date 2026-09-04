@@ -62,6 +62,16 @@ deploy_freeze_check:
 # Branches are LOCAL and unpushed; nothing below is merged.
 results:
   batch_1_closed: 2026-09-04
+  decisions_2026_09_04:
+    by: Jay
+    L_moderation: "option (c) — decouple billing from health. Also settles B's mid-stream question."
+    K_priority: "pull ahead of batch 2 — live release defect"
+    merge_to_main: "deferred until all plan work is complete (Jay's decision 4)"
+    note: >-
+      Because main-merge is deferred, batch 2 cannot branch from main — every
+      task would stack on unmerged work and collide. Work proceeds from a LOCAL
+      integration branch (plan/integration = deploy-main + A + B + C). That is
+      workspace hygiene, not a release: nothing reaches main or origin.
   A:
     verdict: pass
     branch: plan/A-dev-channel
@@ -452,11 +462,7 @@ tasks:
     model: opus-5
     issue: null
     depends_on: [B]
-    human_gate: >-
-      Requires a decision that is not the implementation's to make: whether the
-      billing predicate and the board's health signal may keep sharing one
-      column. See `decision_required` below. Do not implement before it is
-      answered.
+    human_gate: null   # cleared 2026-09-04 — see `decision` below
     spec_section: "§3"
     files:
       - worker/src/routes/chat.ts
@@ -464,7 +470,23 @@ tasks:
       - worker/src/lib/analytics.ts
     machine_gate:
       - "cd worker && npx tsc --noEmit && npm test"
-    decision_required: >-
+    decision: >-
+      SETTLED 2026-09-04 by Jay: option (c). Decouple the predicates — bill on
+      "were tokens spent", judge health on status.
+
+      This also settles B's open question, which was raised as a separate
+      decision and turns out to be the same defect. Under (c) a mid-stream
+      interruption IS billed (tokens were genuinely spent upstream) and still
+      renders as a failure on the board (status 502). B currently excludes it
+      from billing; L reverts that half. Both answers become correct because
+      neither has to stand in for the other.
+
+      Consequences L must carry:
+        - USAGE_BILLABLE stops meaning "status < 400"
+        - mid-stream interruptions return to being billed
+        - outbound moderation blocks stop reading as healthy seats
+        - both moderation directions get tests; today neither is asserted
+    decision_required_was: >-
       `USAGE_BILLABLE = "status < 400"` makes one column answer two unrelated
       questions: "did we spend money" (billing) and "did this turn help the
       student" (the board). Outbound moderation is where they diverge, and the
@@ -542,6 +564,7 @@ tasks:
       is false on the path that is actually used today (workflow_dispatch).
 
   - id: K
+    priority: ahead-of-batch-2   # Jay 2026-09-04: a live release defect, not a refactor
     title: "auto-mirror trigger (#663) cannot fire — the v0.1.50 incident can recur"
     layer: v
     model: opus-5
