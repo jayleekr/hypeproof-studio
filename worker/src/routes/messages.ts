@@ -239,7 +239,7 @@ messages.post("/messages", async (c) => {
   // 1-5b. Same trust gates as /v1/chat/completions (shared module).
   const gate = await gateChatRequest(c);
   if (!gate.ok) return gate.response;
-  const { payload, profile, session } = gate;
+  const { payload, profile, session, module } = gate;
 
   // #684 — accounting declared above every failure exit, mirroring chat.ts.
   // The SDK route wrote the same literal `status: 200` on the success path
@@ -265,6 +265,9 @@ messages.post("/messages", async (c) => {
     cache_read,
     cache_create,
     latency_ms: Date.now() - startedAt,
+    // task H — the curriculum that produced this turn (lib/modules.ts).
+    module_version: module.version,
+    module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
     logChat(env, log);
@@ -273,6 +276,9 @@ messages.post("/messages", async (c) => {
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>
     record(mkLog(0, 0, 0, 0, status, error_kind));
+  // task H — same header contract as chat.ts (see the comment there).
+  c.header("x-hps-module", module.version);
+  if (module.fallback) c.header("x-hps-module-fallback", module.fallback.pinned);
 
   // Body
   let raw: Record<string, unknown>;
@@ -640,6 +646,8 @@ messages.post("/messages", async (c) => {
       "cache-control": "no-cache",
       "x-accel-buffering": "no",
       "x-hps-model": modelLabel,
+      "x-hps-module": module.version,
+      ...(module.fallback ? { "x-hps-module-fallback": module.fallback.pinned } : {}),
     },
   });
 });
