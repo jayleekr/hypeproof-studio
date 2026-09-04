@@ -383,10 +383,21 @@ tasks:
       - "Polls ~10s. No SSE, no Durable Objects."
       - "ZERO prompt text anywhere in the response or the page."
       - "Columns that need the task-E client release degrade to 'unknown', never to a false negative."
+      - "Derive seat state from `idle_ms` and the server `at`. NEVER read a client-computed state — see notes."
+
     notes: >-
       Privacy line is load-bearing: metadata only keeps this shippable under the
       existing basis. A 'recent question preview' column crosses PIPA Art.22-2
       territory for minor cohorts and blocks the whole feature.
+
+      THRESHOLDS LIVE HERE, NOT IN THE CLIENT. Task E originally shipped a
+      guessed 60s idle cut inside the extension — the one part of it riding the
+      slow train, and 4x off ClassAid's 240s. It was removed before release.
+      The standing rule (spec §1, "The second question the rule does not ask"):
+      a threshold on the slow train is a threshold you cannot calibrate. This
+      task owns the cut, derives it from the 2026-08-22 replay, and it lives on
+      the 30-second train so a correction costs 30 seconds rather than a
+      reinstall on every machine.
 
   - id: H
     title: "module distribution layer (curriculum + prompts out of the binary)"

@@ -49,6 +49,37 @@ cost means "put it in now, pull it out later" does not happen.
 If the answer is ambiguous, it is not one thing — it is two. Split it and run
 each half through again.
 
+### The second question the rule does not ask
+
+The three questions settle *where code goes*. They do not settle where a
+**number** goes, and that turned out to be a separate trap.
+
+> **A threshold on the slow train is a threshold you cannot calibrate.**
+
+Task E shipped correct code with one guessed constant — a 60 s idle cut — inside
+the client. Everything else it built rode the 30-second train; that one value
+rode the 1–2 hour train plus a reinstall on every machine. It was also placed
+there *before* the calibration that would settle it had been run, so the first
+time §4's replay derives the real cut, the client's answer starts contradicting
+the board's. Two numbers, both labelled "idle", one of them stale and
+unfixable for a week.
+
+It bought nothing: the value was derived entirely from inputs the client was
+already sending. **A derived value transmitted alongside its own inputs belongs
+on the side that can change fastest.**
+
+So before placing any constant, ask:
+
+- **Will this need to change based on data I do not have yet?** If yes, it may
+  not go in the App layer. Send the inputs; derive on the Service or Surface
+  side.
+- **Is it derivable from something already crossing the boundary?** If yes,
+  do not transmit it at all.
+
+This is why §4 says *derive, don't guess* — and the rule has teeth only if the
+derived value lives where a correction is cheap. Guessing is recoverable at 30
+seconds; guessing is close to permanent at a reinstall.
+
 ---
 
 ## 2. Currently in the wrong layer
