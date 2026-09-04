@@ -1,0 +1,85 @@
+# Product registry gate — docs/plan/vessel-and-modules.md §5.
+#
+# Enforces exactly two invariants and deliberately nothing more:
+#   1. a new top-level directory has a products.yaml entry
+#   2. every declared drift_lock exists AND is named in a test script
+#
+# Why (2) checks "is it wired" and not just "does it exist": this repo has
+# already shipped contract tests that were never added to `npm test` and so
+# never ran. A contract test that does not run is not a contract.
+#
+# What this workflow does NOT do: judge which layer something belongs in, or
+# whether a declared contract is well designed. Those are not machine-checkable.
+# The artifact of the admission process is that a human wrote the page — CI
+# only confirms the page exists and its claims are not empty.
+
+name: registry-check
+
+on:
+  pull_request:
+    paths:
+      - "products.yaml"
+      - "scripts/check-registry.py"
+      - "**/package.json"
+      - ".github/workflows/registry-check.yml"
+      # A new top-level directory is exactly what invariant 1 exists to catch,
+      # so this job must also run when the repo root changes shape.
+      - "*/**"
+  push:
+    branches: [main]
+    paths:
+      - "products.yaml"
+      - "scripts/check-registry.py"
+
+permissions:
+  contents: read
+
+jobs:
+  registry:
+    name: registry / gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # products.yaml claims directories inside the vscodium-base submodule's
+          # parent tree only; the submodule itself is never inspected, so skip
+          # the (large, slow) recursive checkout.
+          submodules: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyYAML
+        run: pip install --quiet pyyaml
+
+      - name: Check product registry
+        run: python3 scripts/check-registry.py
+
+      - name: Self-test the checker (negative controls)
+        # A checker that can only say OK is worthless. Prove both invariants
+        # actually fire before trusting the green above.
+        run: |
+          set -uo pipefail
+          fail() { echo "::error::registry checker self-test failed: $1"; exit 1; }
+
+          cp products.yaml /tmp/products.bak
+
+          # NC1 — an unregistered top-level directory must be rejected.
+          mkdir -p __nc_probe__
+          python3 scripts/check-registry.py >/dev/null 2>&1 \
+            && fail "NC1 passed: an unregistered top-level directory was accepted"
+          rmdir __nc_probe__
+
+          # NC2 — a drift_lock pointing at a missing file must be rejected.
+          sed -i 's|drift_lock: worker/test/.*|drift_lock: worker/test/__nc_missing__.mjs|' products.yaml
+          python3 scripts/check-registry.py >/dev/null 2>&1 \
+            && { cp /tmp/products.bak products.yaml; fail "NC2 passed: a missing drift_lock was accepted"; }
+          cp /tmp/products.bak products.yaml
+
+          # Positive control — the real registry must still be clean, so the
+          # negative controls above prove discrimination and not just noise.
+          python3 scripts/check-registry.py || fail "positive control regressed"
+
+          echo "self-test OK: both negative controls fire, positive control clean"

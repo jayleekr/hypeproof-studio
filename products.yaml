@@ -1,0 +1,111 @@
+# Product / module registry.
+#
+# One entry per thing that lives inside the Studio vessel. An entry is the
+# record that the four admission gates were answered — see
+# docs/plan/vessel-and-modules.md §5.
+#
+# Gates, and the field that records each:
+#   1. Layer declaration   -> layer, tag_prefix
+#   2. Contract            -> contract          (exactly one; a DATA FORMAT)
+#   3. Drift lock          -> drift_lock        (a test file that actually runs)
+#   4. Exit plan           -> exit_plan         (a doc, not "flip a flag")
+#
+# CI (.github/workflows/registry-check.yml) enforces exactly two things:
+#   - a new top-level directory has an entry here
+#   - every declared drift_lock file exists and is reachable from a test script
+#
+# Layer judgment and contract design are not things CI can evaluate. The
+# artifact of this process is that a human wrote the page.
+
+version: 1
+
+layers:
+  v: app        # Studio binary. Reinstall to reach. Most expensive layer.
+  w: service    # Worker runtime. Everyone, instantly.
+  c: surface    # Instructor surface (Chalk). Instructors only.
+  m: module     # Data. Distributed, not deployed.
+
+# Top-level directories that are NOT products. Anything at the repo root that is
+# neither listed here nor claimed by an entry below fails CI — that is the
+# "nothing slips in without passing the gates" check. Adding a name here is a
+# deliberate act: you are asserting it is infrastructure, not a tenant.
+non_product_directories:
+  - assets
+  - config
+  - docs
+  - e2e
+  - scripts
+  - skills
+  - tests
+  - vscodium-base      # submodule — upstream VSCodium fork
+  - proxy-poc          # pre-SDK proxy; superseded, kept for reference
+  - extensions         # container dir; the product is extensions/hypeproof-chat
+
+entries:
+  - name: hypeproof-chat
+    layer: v
+    tag_prefix: v
+    directory: extensions/hypeproof-chat
+    deploys_to: github-release
+    contract:
+      # The extension talks to the worker over the OpenAI-compatible and
+      # Anthropic-compatible HTTP surfaces. That is the format.
+      format: "HTTP — POST /v1/chat/completions, POST /v1/messages, GET /v1/profile"
+    drift_lock: worker/test/logs-upload.test.mjs
+    exit_plan: null          # TODO — the vessel itself; exit plan is n/a but say so explicitly
+    owner: jay
+    notes: >-
+      Grandfathered. Predates the gates. Listed so the registry describes
+      reality; exit_plan is intentionally null because this IS the vessel.
+
+  - name: worker
+    layer: w
+    tag_prefix: w
+    directory: worker
+    deploys_to: cloudflare://hypeproof-studio-api
+    contract:
+      format: "HTTP — see hypeproof-chat entry (same surface, other side)"
+    drift_lock: worker/test/quest-result-contract.test.mjs
+    exit_plan: null
+    owner: jay
+    notes: >-
+      Grandfathered. The runtime. Version identifier lands with plan task C.
+
+# ---------------------------------------------------------------------------
+# Planned entries. These are NOT yet admitted — they are here so the gates are
+# answered before the code lands, not after. Move them into `entries` in the
+# same PR that creates the directory.
+# ---------------------------------------------------------------------------
+
+planned:
+  - name: chalk
+    layer: c
+    tag_prefix: c
+    directory: chalk
+    deploys_to: cloudflare://hypeproof-chalk
+    plan_task: F
+    contract:
+      format: "read-only JSON — GET /admin/cohorts/:id/board"
+    drift_lock: chalk/test/board-contract.test.mjs
+    exit_plan: docs/exit/chalk.md
+    owner: jay
+    notes: >-
+      Gate 2 note: the ONE contract is the board read API. Instructor token
+      verification is shared with the worker, not reimplemented — a second,
+      divergent copy is a gate-2 failure, not a convenience.
+
+  - name: curriculum-modules
+    layer: m
+    tag_prefix: m
+    directory: modules
+    deploys_to: kv://modules
+    plan_task: H
+    contract:
+      format: schema/session-plan.v1.json
+    drift_lock: worker/test/module-schema.test.mjs
+    exit_plan: docs/exit/curriculum-modules.md
+    owner: jay
+    notes: >-
+      Same format Chalk writes and Studio reads — the single documented
+      Chalk<->Studio contact point. Gate 4 matters here: removing a module must
+      fall back to the last good version loudly, never to an empty prompt.
