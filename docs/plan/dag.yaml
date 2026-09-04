@@ -563,10 +563,47 @@ tasks:
       positive: >-
         Whatever remedy is chosen, a routed issue must demonstrably reach the
         solver without a human — or the file must stop claiming it does.
+      false_green: >-
+        autonomous-task-runner.yml has run exactly ONCE, ever: 2026-06-04T10:15Z,
+        workflow_dispatch by jayleekr, conclusion SUCCESS. That success is the
+        reason nobody looked — the routing step labels, comments, exits 0, and
+        nothing downstream starts. A green run that proves nothing.
+      scope_is_narrower_than_it_looks: >-
+        Only the `solver` mode is broken. `goal-comment` posts a /goal prompt for
+        a human to copy and deliberately contains no @claude, so it was never
+        meant to trigger anything; `verify-only` is a jq summary with no event
+        dependency. Two of three modes work as designed. The one mode whose
+        entire purpose is handoff is the one that cannot hand off.
+      why_K_fix_does_not_transfer: >-
+        claude-solver.yml has no workflow_dispatch trigger to dispatch to, and
+        its `authorize` job reads context.payload.sender.login and requires write
+        permission — the guard that stops mass-labeling from burning API budget.
+        A workflow_dispatch event has no payload.sender in that shape, so adding
+        the trigger makes authorize fail or need its own branch. Fixing this
+        means deciding what "authorized" means when the caller is a workflow,
+        not a person. Design question, not plumbing.
+      sweep_completeness: >-
+        Established over all 17 workflow files, two passes: every `on:` block
+        parsed to enumerate consumable events, and a producer grep for
+        gh issue/pr/release writes, git push/tag, github-script,
+        repository_dispatch and workflow run. Eight producer hits, each read.
+        Result: two LIVE instances (mirror — fixed by K; solver routing — this
+        task) and one LATENT in the Phase 6 upstream-sync placeholder, which is
+        still a 14-line stub. claude-solver.yml and main-guard.yml use
+        github-script read-only and emit no events.
     acceptance:
       - "No file claims automation it does not have (same rule as K)."
       - "If kept: a routed issue starts the solver, proven by an actual run."
       - "If removed: the removal says why, so it is not rebuilt in six months."
+    priority: >-
+      Below K. K was shipping the wrong build to participants; this is an
+      unattended path that never ran and has been invoked once in three months.
+    cheapest_honest_step: >-
+      Costs nothing and closes K's acceptance rule immediately: strip the
+      "Routed to Claude Solver" claim from autonomous-task-runner.yml:68 and
+      rename the step, so the file stops asserting automation it does not have.
+      Do this whether or not the capability is later rebuilt — the false claim
+      is the part that caused three months of nobody checking.
     notes: >-
       This is a pattern, not a bad commit, and that is the finding worth acting
       on. The rule was documented CORRECTLY in this repo on 2026-06-04, in
