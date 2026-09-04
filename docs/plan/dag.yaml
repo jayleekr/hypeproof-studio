@@ -356,9 +356,87 @@ tasks:
       are gone around 2026-11-20. Issues #670/#671/#675 currently stand on
       circumstantial evidence that lives in those files.
 
+  # ---------------------------------------------------------------------
+  # J and K were discovered by the evaluator for task A, not planned up front.
+  # A passed its own acceptance; these are gaps in what A was ASKED for.
+  # ---------------------------------------------------------------------
+
+  - id: J
+    title: "mirror-release publishes prereleases as stable — dev channel leaks"
+    layer: v
+    model: sonnet-5
+    issue: null
+    depends_on: [A]
+    human_gate: null
+    spec_section: "§6 stage 2"
+    files:
+      - .github/workflows/mirror-release.yml
+    machine_gate:
+      - "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/mirror-release.yml'))\""
+    control:
+      positive: >-
+        Mirroring a hyphenated tag creates the mirror release WITH --prerelease,
+        so the mirror's /releases/latest does not advertise it.
+      negative: >-
+        Mirroring a plain vX.Y.Z tag is byte-identical to today's behaviour.
+      reuse: >-
+        Use scripts/tag-is-prerelease.sh from task A — do not write a second
+        copy of the rule. A duplicated classifier is the drift this plan exists
+        to prevent.
+    acceptance:
+      - "mirror-release.yml propagates prerelease status from the source release."
+      - "install.sh / install.ps1 / the in-app update banner never see an -rc build."
+    notes: >-
+      Task A makes -rc invisible in the SOURCE repo. The mirror is a second
+      publish path with no prerelease handling (mirror-release.yml:171), and
+      install.sh, install.ps1 and updateChecker.ts all read the MIRROR's
+      /releases/latest. Without this, A's "dev channel reaches nobody" property
+      is false on the path that is actually used today (workflow_dispatch).
+
+  - id: K
+    title: "auto-mirror trigger (#663) cannot fire — the v0.1.50 incident can recur"
+    layer: v
+    model: opus-5
+    issue: null
+    depends_on: []
+    human_gate: >-
+      Verifying the fix requires cutting a real tag and watching whether the
+      mirror job fires. The orchestrator must not cut a release tag.
+    spec_section: null
+    files:
+      - .github/workflows/mirror-release.yml
+      - .github/workflows/build-mac.yml
+      - .github/workflows/build-windows.yml
+    machine_gate:
+      - "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/mirror-release.yml'))\""
+    control:
+      description: >-
+        The claim to disprove: "releases created with secrets.GITHUB_TOKEN do
+        not trigger further workflow runs, so `on: release: [published]` never
+        fires for our tag builds."
+      evidence_so_far: >-
+        `gh run list --workflow=mirror-release.yml` returns 12 runs, ALL
+        event=workflow_dispatch, none event=release. The trigger landed
+        2026-08-21 (d83f57c, #663); the newest tag v0.1.50 is the same day and
+        no tag has been cut since, so the fix has never actually been exercised.
+      positive: >-
+        After the fix, a tag build results in a mirror run with event=release
+        (or an equivalent path that demonstrably runs without a human).
+    acceptance:
+      - "Either the release is created with a PAT that can trigger workflows, or the mirror is invoked directly from the tag build, or the auto-claim is removed from the comments."
+      - "Whatever is chosen, the file must not claim automation it does not have."
+    notes: >-
+      #663's stated purpose was to stop a repeat of 2026-08-21, when v0.1.50
+      never reached the mirror and install.sh plus the in-app update banner both
+      silently reported 'already latest' — a workshop-day hotfix that reached
+      nobody. If the trigger cannot fire, that incident is still live AND the
+      team believes it is fixed, which is worse than a known gap.
+      MIRROR_RELEASE_PAT already exists as a secret; the source-release creation
+      in build-mac.yml:338 uses secrets.GITHUB_TOKEN.
+
 # Suggested parallel batches (informational — depends_on is authoritative)
 batches:
   - [A, B, C]
-  - [D, E, F]
-  - [G]
+  - [D, E, F, K]
+  - [G, J]
   - [H, I]
