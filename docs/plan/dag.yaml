@@ -283,7 +283,7 @@ tasks:
     layer: c
     model: opus-5
     issue: 674
-    depends_on: [B, F]
+    depends_on: [B, F, L]
     human_gate: >-
       Task B must be DEPLOYED to production before calibration is meaningful —
       the control replays real production D1 rows. The orchestrator stops and
@@ -391,6 +391,69 @@ tasks:
   # A passed its own acceptance; these are gaps in what A was ASKED for.
   # ---------------------------------------------------------------------
 
+  - id: L
+    title: "outbound-blocked turns render as healthy seats — #684 survives on one path"
+    layer: w
+    model: opus-5
+    issue: null
+    depends_on: [B]
+    human_gate: >-
+      Requires a decision that is not the implementation's to make: whether the
+      billing predicate and the board's health signal may keep sharing one
+      column. See `decision_required` below. Do not implement before it is
+      answered.
+    spec_section: "§3"
+    files:
+      - worker/src/routes/chat.ts
+      - worker/src/routes/messages.ts
+      - worker/src/lib/analytics.ts
+    machine_gate:
+      - "cd worker && npx tsc --noEmit && npm test"
+    decision_required: >-
+      `USAGE_BILLABLE = "status < 400"` makes one column answer two unrelated
+      questions: "did we spend money" (billing) and "did this turn help the
+      student" (the board). Outbound moderation is where they diverge, and the
+      two answers conflict. Options:
+        (a) outbound block writes a non-200 status, tokens retained on the row.
+            Board correct; those genuinely-spent tokens stop being billed.
+        (b) leave status 200, add a separate blocked/unusable signal in D1.
+            Needs a migration — the only option that keeps both answers right.
+        (c) decouple the predicates: bill on "tokens were spent", judge health
+            on status. No migration; changes what `USAGE_BILLABLE` means.
+      Recommendation: (c). The defect is the conflation, not either value.
+    control:
+      description: >-
+        The planted answer is the seat that must stop being invisible.
+      positive: >-
+        A turn blocked on the OUTBOUND path is distinguishable, in D1 alone,
+        from a turn that completed normally — without consulting Analytics
+        Engine, which is not the per-seat ledger.
+      negative: >-
+        Tokens genuinely spent upstream remain visible in the row and are not
+        silently zeroed to make the board look right.
+      also: >-
+        Inbound and outbound blocks render as the SAME seat state on the board.
+        The student experience is identical: "I typed something and the coach
+        refused me."
+    acceptance:
+      - "A seat whose every turn is outbound-blocked does not render as healthy."
+      - "The billing answer and the board answer are each independently correct."
+      - "Tests pin BOTH moderation directions — today neither is asserted."
+    notes: >-
+      Found by task B's evaluator, not by review. chat.ts:633 and
+      messages.ts:531 call record(mkLog(...)) with the default 200 BEFORE the
+      outbound screen, then return 400. Inbound calls recordFailure(400,
+      MODERATION_BLOCK).
+
+      Why this is worse than neutral: the outbound-blocked seat emits billable
+      200s at a normal cadence, so it looks MORE active than a quiet seat. An
+      instructor scanning for red walks straight past a child whose lesson is
+      completely broken. That is exactly the failure #684 exists to eliminate,
+      surviving on one of the two moderation paths.
+
+      MUST be settled before task G calibrates thresholds, or G will tune
+      against data in which one moderation direction is invisible.
+
   - id: J
     title: "mirror-release publishes prereleases as stable — dev channel leaks"
     layer: v
@@ -468,5 +531,6 @@ tasks:
 batches:
   - [A, B, C]
   - [D, E, F, K]
+  - [L]          # decision-gated; blocks G's calibration
   - [G, J]
   - [H, I]
