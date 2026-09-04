@@ -57,6 +57,61 @@ deploy_freeze_check:
     | jq '.live_sessions // 0'
   skip_tasks_when_nonzero: [A, C, D, F, H]
 
+# Durable verdicts. The orchestrator must not hold run state in context —
+# a session ends and takes its memory with it. Anything not written here is lost.
+# Branches are LOCAL and unpushed; nothing below is merged.
+results:
+  batch_1_closed: 2026-09-04
+  A:
+    verdict: pass
+    branch: plan/A-dev-channel
+    worktree: .claude/worktrees/agent-a55ba3c0ece4588b5
+    attempts: 1
+    evidence: >-
+      Evaluator mutated the predicate (`*-*) return 0` -> `return 1`) and the
+      committed harness then failed — the test exercises production code, not a
+      copy of the rule. Workflow lines replayed with `gh` stubbed: -rc tag puts
+      --prerelease in argv, plain tag is byte-identical to before.
+    spawned: [J, K]
+  B:
+    verdict: pass
+    branch: plan/B-usage-log-status
+    worktree: .claude/worktrees/agent-a5819ef2d4020e93a
+    attempts: 1
+    evidence: >-
+      Evaluator reconstructed the parent tree (git archive 473b898), dropped in
+      ONLY the new test, and got `0 !== 1` — the control genuinely fails on
+      pre-change code. Test imports the production SQL constants rather than
+      copies; failure rows seeded with 999 tokens so the billing filter cannot
+      pass by accident. d1-accounting.test.mjs byte-unchanged and green.
+    spawned: [L]
+    open_decision: >-
+      Mid-stream interruption is no longer billed. Those tokens WERE spent
+      upstream. Row keeps the numbers; only the predicate drops them. Real money
+      moves in one direction and nobody asked for that direction.
+  C:
+    verdict: pass
+    branch: plan/C-worker-version
+    worktree: .claude/worktrees/agent-ab8890ef7c15d487e
+    attempts: 2
+    attempt_1: >-
+      harness_missing — behaviour correct but the control existed only in a
+      scratch file. Also exposed a spec error of mine: the DAG said "health
+      payload" while naming `GET /`, which serves html.
+    evidence: >-
+      Attempt 2 mutation-tested three ways, all killed, including the case that
+      passes the positive assertion and fails only the negative. Hardcoded
+      `version: "0.1.0"` removed from /v1/health.
+
+# Merge picture, verified by `git merge-tree --write-tree f0b9cea d3b4f1f`
+# (base 473b898): exit 1, exactly one conflicted file.
+#   worker/src/routes/chat.ts  -> auto-merges CLEAN. Disjoint regions: C edits
+#     the ../env import and the GET /health handler; B edits the ../lib/analytics
+#     import and eleven hunks at line 348+ inside chat.post(). No shared state,
+#     no shared helper; neither test references the other's surface.
+#   worker/package.json        -> CONFLICT. Both append to the single-line
+#     `test` script. Resolution is concatenation.
+
 tasks:
   - id: A
     title: "dev channel — conditional --prerelease flag"
