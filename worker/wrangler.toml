@@ -81,6 +81,11 @@ GALLERY_LOGS_BASE = "https://hypeproof-ai.xyz"
 # Tokyo — accepted by Anthropic). Passthrough proxy: same x-api-key, same
 # body. Unset to call api.anthropic.com directly.
 ANTHROPIC_PROXY_URL = "https://hypeproof-sediment.fly.dev/proxy/anthropic/v1/messages"
+# Chalk — the instructor surface (/console, /issuer, cohort state reads) is a
+# SEPARATE Worker on the c* train (chalk/wrangler.toml, plan task F). This
+# Service only redirects /issuer and /console there. Deploy order on first
+# rollout: Chalk first, then this worker — see chalk/README.md.
+HPS_CHALK_ORIGIN = "https://chalk.hypeproof-ai.xyz"
 # Secrets — production: `wrangler secret put <NAME>`
 #   wrangler secret put GEMINI_API_KEY      # default provider key
 #   wrangler secret put HPS_SIGNING_SECRET
@@ -91,4 +96,4 @@ ANTHROPIC_PROXY_URL = "https://hypeproof-sediment.fly.dev/proxy/anthropic/v1/mes
 
 [env.dev]
 name = "hypeproof-studio-api-dev"
-vars = { ENVIRONMENT = "dev", LLM_PROVIDER = "gemini" }
+vars = { ENVIRONMENT = "dev", LLM_PROVIDER = "gemini", HPS_CHALK_ORIGIN = "http://localhost:8788" }

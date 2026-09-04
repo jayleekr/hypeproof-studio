@@ -27,8 +27,11 @@ export function adminPassword(devVarsPath) {
   }
 }
 
+// Reads the Service's admin cohort detail (session / paused / roster) with
+// Basic auth. NOT /state: that read moved to Chalk with plan task F and takes
+// an instructor Bearer only — the Basic path lives on GET /admin/cohorts/:id.
 export async function getCohortState(origin, password, cohortId) {
-  const r = await fetchJson(`${origin}/admin/cohorts/${cohortId}/state`, {
+  const r = await fetchJson(`${origin}/admin/cohorts/${cohortId}`, {
     headers: { authorization: basicAuthHeader(password) },
     allowNon2xx: true,
   });

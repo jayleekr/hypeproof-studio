@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'worker/**'
+      - 'chalk/**'
       - 'extensions/hypeproof-chat/**'
       - '.github/workflows/pr-ci.yml'
 
@@ -56,6 +57,49 @@ jobs:
         run: npm ci
       - name: Typecheck worker
         working-directory: worker
+        run: npm run typecheck
+
+  # Chalk (chalk/) — the instructor surface, its own Worker on the c* train
+  # (plan task F). It re-exports the Service's token verifier and its
+  # drift-lock test boots the Service app in-process, so both dependency
+  # trees are installed. `npm test` here includes the two task-F controls:
+  # instructor-auth-drift (one verifier, two workers) and deploy-isolation
+  # (a c* deploy cannot move the Service's version).
+  chalk-test:
+    name: chalk / test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: chalk/package-lock.json
+      - name: Install worker deps (shared auth module)
+        working-directory: worker
+        run: npm ci
+      - name: Install chalk deps
+        working-directory: chalk
+        run: npm ci
+      - name: Run chalk tests
+        working-directory: chalk
+        run: npm test
+
+  chalk-typecheck:
+    name: chalk / typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: chalk/package-lock.json
+      - name: Install chalk deps
+        working-directory: chalk
+        run: npm ci
+      - name: Typecheck chalk
+        working-directory: chalk
         run: npm run typecheck
 
   validate-profiles:

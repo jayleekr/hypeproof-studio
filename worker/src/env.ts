@@ -48,6 +48,11 @@ export interface Env {
   // field directly — so "unset" always renders as "unknown", never a crash
   // or an empty string (dag.yaml task C negative control; #206 precedent).
   HPS_WORKER_VERSION?: string;
+  // Origin of Chalk, the instructor surface (plan task F; its own Worker on
+  // the c* train). Only consulted by the /issuer and /console redirects in
+  // src/index.ts. Unset → resolveChalkOrigin() falls back to the production
+  // hostname; [env.dev] points it at a local `wrangler dev --port 8788`.
+  HPS_CHALK_ORIGIN?: string;
 
   // Bindings
   HPS_KV: KVNamespace;
@@ -110,6 +115,15 @@ export function speaksAnthropicWire(provider: LLMProvider): boolean {
 export function resolveWorkerVersion(env: Pick<Env, "HPS_WORKER_VERSION">): string {
   const v = env.HPS_WORKER_VERSION;
   return typeof v === "string" && v.trim().length > 0 ? v : "unknown";
+}
+
+// Task F — where the instructor surface lives. The Service knows Chalk by
+// hostname only (a pointer for two redirects), never by code: removing Chalk
+// means deleting the two redirect lines in src/index.ts (docs/exit/chalk.md).
+export const DEFAULT_CHALK_ORIGIN = "https://chalk.hypeproof-ai.xyz";
+export function resolveChalkOrigin(env: Pick<Env, "HPS_CHALK_ORIGIN">): string {
+  const v = env.HPS_CHALK_ORIGIN?.trim();
+  return v && v.length > 0 ? v.replace(/\/+$/, "") : DEFAULT_CHALK_ORIGIN;
 }
 
 export function providerKey(env: Env, provider: LLMProvider): string {

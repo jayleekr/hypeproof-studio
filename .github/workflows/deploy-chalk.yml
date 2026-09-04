@@ -1,0 +1,155 @@
+name: deploy-chalk
+
+# Surface-layer (c*) deploy train — docs/plan/vessel-and-modules.md §1, plan
+# task F. Deploys chalk/ (Worker `hypeproof-chalk`) and NOTHING else.
+#
+#   git tag c0.1.0 && git push origin c0.1.0      → real deploy
+#   workflow_dispatch (dry_run=true by default)    → tests + typecheck only
+#
+# The Service (worker/, w* tags, deploy-worker.yml) is a different artifact
+# on a different train. This workflow proves that on every real deploy: it
+# reads the Service's version (task C, GET /v1/health) before and after and
+# fails if it moved. chalk/test/deploy-isolation.test.mjs pins the static
+# side (no HPS_WORKER_VERSION here, deploy step in chalk/ only).
+#
+# Not subject to the live-class deploy freeze (task D): Chalk reaches
+# instructors only and never the participant runtime. Prefer not to deploy
+# mid-class anyway — the console is what the instructor is looking at.
+
+on:
+  push:
+    tags:
+      - "c[0-9]*"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag, or SHA to deploy"
+        required: false
+        default: "main"
+      dry_run:
+        description: "Run tests/typecheck but skip wrangler deploy"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-chalk-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      PROD_SERVICE: https://api.hypeproof-ai.xyz
+      PROD_CHALK: https://chalk.hypeproof-ai.xyz
+      # A tag push is always a real deploy; a dispatch honours its input.
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref }}
+          # Full history + tags so `git describe --tags --exact-match` can
+          # see the c* tag on HEAD.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: chalk/package-lock.json
+
+      # Chalk re-exports the Service's token verifier (chalk/src/shared.ts)
+      # and its drift-lock test boots the Service app in-process, so the
+      # Service's dependencies must be installed too. Nothing here deploys
+      # from worker/.
+      - name: Install worker dependencies (shared auth module + drift lock)
+        working-directory: worker
+        run: npm ci
+
+      - name: Install chalk dependencies
+        working-directory: chalk
+        run: npm ci
+
+      - name: Chalk tests
+        working-directory: chalk
+        run: npm test
+
+      - name: Chalk typecheck
+        working-directory: chalk
+        run: npm run typecheck
+
+      - name: Dry-run stop
+        if: env.DRY_RUN == 'true'
+        run: echo "dry_run=true; skipping wrangler deploy"
+
+      # Surface-layer release identifier, tag prefix c* (e.g. c0.1.0). Same
+      # rule as the Service's w* resolution: an exact c* tag on HEAD wins,
+      # anything else yields a real non-empty dev identifier; "unknown" is
+      # reserved for the var being unset entirely (local wrangler dev).
+      - name: Resolve chalk version
+        id: version
+        run: |
+          set -euo pipefail
+          tag="$(git describe --tags --exact-match 2>/dev/null || true)"
+          if [[ "$tag" =~ ^c[0-9] ]]; then
+            version="$tag"
+          else
+            version="c0.0.0-dev+$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Resolved chalk version: $version"
+
+      # Task F positive control, part 1: what is the Service running NOW.
+      - name: Record Service version before deploy
+        id: before
+        if: env.DRY_RUN != 'true'
+        run: |
+          set -uo pipefail
+          v="$(curl -sf "$PROD_SERVICE/v1/health" | jq -r '.version // empty' || true)"
+          echo "service_version=$v" >> "$GITHUB_OUTPUT"
+          echo "Service version before: ${v:-<unreachable>}"
+
+      - name: Deploy Chalk
+        if: env.DRY_RUN != 'true'
+        working-directory: chalk
+        env:
+          CHALK_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || { echo "::error::CLOUDFLARE_API_TOKEN is required"; exit 1; }
+          npx wrangler deploy --var "HPS_CHALK_VERSION:${CHALK_VERSION}"
+
+      - name: Verify Chalk
+        if: env.DRY_RUN != 'true'
+        env:
+          CHALK_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          body="$(curl -sf "$PROD_CHALK/health")"
+          echo "$body"
+          [[ "$(jq -r .service <<<"$body")" == "hypeproof-chalk" ]] || { echo "::error::/health is not chalk"; exit 1; }
+          [[ "$(jq -r .version <<<"$body")" == "$CHALK_VERSION" ]] || { echo "::error::deployed version != $CHALK_VERSION"; exit 1; }
+          # The console must load; a redirect loop or a 5xx here strands instructors.
+          [[ "$(curl -s -o /dev/null -w '%{http_code}' "$PROD_CHALK/console")" == "200" ]] || { echo "::error::/console not serving"; exit 1; }
+
+      # Task F positive control, part 2: the Service's version did not move.
+      # If it did, the split is cosmetic and this deploy must be treated as
+      # a Service deploy that bypassed deploy-worker.yml (and task D's freeze).
+      - name: Service version unchanged
+        if: env.DRY_RUN != 'true'
+        env:
+          BEFORE: ${{ steps.before.outputs.service_version }}
+        run: |
+          set -uo pipefail
+          after="$(curl -sf "$PROD_SERVICE/v1/health" | jq -r '.version // empty' || true)"
+          echo "Service version before=${BEFORE:-<unreachable>} after=${after:-<unreachable>}"
+          if [[ -z "$BEFORE" || -z "$after" ]]; then
+            echo "::warning::Service /v1/health unreachable on one side; the invariant could not be observed this run"
+            exit 0
+          fi
+          [[ "$BEFORE" == "$after" ]] || { echo "::error::Service version changed ($BEFORE -> $after) during a Chalk deploy — the trains are NOT independent"; exit 1; }
+          echo "OK — Service still at $after"

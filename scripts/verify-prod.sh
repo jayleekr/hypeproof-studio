@@ -13,7 +13,7 @@
 #   SKIP_CHAT=1 TOKEN=… bash …                        # profile-only L3
 #
 # Layer 3 takes a cohort token via the TOKEN env var. Mint one in advance:
-#   - via /issuer (instructor flow) on api.hypeproof-ai.xyz/issuer/, OR
+#   - via /issuer (instructor flow) on chalk.hypeproof-ai.xyz/issuer (Chalk, plan task F), OR
 #   - via local issue-token.ts with prod HPS_SIGNING_SECRET (privileged)
 
 set -euo pipefail

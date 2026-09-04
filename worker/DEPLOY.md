@@ -34,6 +34,10 @@ npx wrangler d1 execute hypeproof-studio --remote --file=schema.sql
 npx wrangler secret put GEMINI_API_KEY         # default provider (AIza...)
 npx wrangler secret put HPS_SIGNING_SECRET     # openssl rand -hex 32
 npx wrangler secret put HPS_ADMIN_PASSWORD     # dev fallback only; set Cloudflare Access in prod
+# The instructor surface (/console, /issuer, cohort state reads) is a SEPARATE
+# Worker since plan task F — chalk/ (chalk.hypeproof-ai.xyz, c* tags). It needs
+# the SAME HPS_SIGNING_SECRET: see chalk/README.md. Deploy Chalk BEFORE this
+# worker on the first rollout (this worker redirects /console there).
 # npx wrangler secret put ANTHROPIC_API_KEY    # when LLM_PROVIDER=anthropic in wrangler.toml
 # npx wrangler secret put OPENAI_API_KEY        # when LLM_PROVIDER=openai in wrangler.toml
 

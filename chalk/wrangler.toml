@@ -1,0 +1,68 @@
+# Chalk — the instructor surface. Surface layer, tag prefix c*
+# (docs/plan/vessel-and-modules.md §1; plan task F).
+#
+# A SEPARATE Worker from the Service (worker/wrangler.toml, name
+# hypeproof-studio-api). Same Cloudflare account, same KV namespace, same D1
+# database — different artifact, different deploy train. Deploying this never
+# touches the Service's version (chalk/test/deploy-isolation.test.mjs pins the
+# invariants; .github/workflows/deploy-chalk.yml observes it live).
+name = "hypeproof-chalk"
+main = "src/index.ts"
+compatibility_date = "2026-05-15"
+compatibility_flags = ["nodejs_compat"]
+account_id = "f1da7073b98021b4117c82a4a219eef0"
+
+# Custom domain — wrangler provisions DNS + cert in the hypeproof-ai.xyz zone
+# (same mechanism as api.hypeproof-ai.xyz). Hostname is a task-F decision the
+# spec did not settle; the Service's redirect target (HPS_CHALK_ORIGIN in
+# worker/wrangler.toml) must match this.
+routes = [{ pattern = "chalk.hypeproof-ai.xyz", custom_domain = true }]
+
+[observability]
+enabled = true
+
+# No [triggers] — Chalk has no cron. The heartbeat and D1 backup belong to the
+# Service; a Surface-layer worker must never grow a second scheduler.
+
+# KV: the SAME namespace the Service reads on the chat hot path
+# (cohort:<id>:roster / active_session / paused, revoked:<jti>). Chalk only
+# READS it; every write stays in the Service (worker/src/routes/admin.ts) and
+# reaches it through Chalk's forwarder (src/routes/forward.ts).
+[[kv_namespaces]]
+binding = "HPS_KV"
+id = "b70e51eb53674732b323484d7c3ed21a"
+preview_id = "558f72d8329c40a78b60f0bcb4c64910"
+
+# D1: the SAME database (usage_log, sessions). Unused by task F; bound now so
+# the live board (task G) reads usage_log from here without a config change.
+[[d1_databases]]
+binding = "HPS_DB"
+database_name = "hypeproof-studio"
+database_id = "2427207c-272e-4ecd-9d16-7a1dcc0fc741"
+
+# .html pages are bundled as text; .md because the shared profile registry
+# (worker/src/profiles) imports prompt markdown — Chalk never reads it, but
+# the bundler must resolve it. Plan task H removes this import on both sides.
+[[rules]]
+type = "Text"
+globs = ["**/*.md", "**/*.html"]
+fallthrough = true
+
+[vars]
+ENVIRONMENT = "production"
+# Where instructor WRITES are forwarded (session open/close, roster append,
+# student-token mint). Chalk never signs a token and never writes gate state.
+HPS_SERVICE_ORIGIN = "https://api.hypeproof-ai.xyz"
+# HPS_CHALK_VERSION is deliberately NOT set here — same rule as the Service's
+# HPS_WORKER_VERSION (task C). deploy-chalk.yml injects the c* tag per deploy
+# via `wrangler deploy --var HPS_CHALK_VERSION:<tag>`; unset (wrangler dev)
+# => GET /health reports "unknown", never a crash, never an empty string.
+#
+# Secrets — `npx wrangler secret put HPS_SIGNING_SECRET` with the SAME value
+# the Service uses. One HMAC key, two verifiers; a different value here makes
+# every instructor token read as "invalid signature" on this side only.
+# Local dev: chalk/.dev.vars (gitignored), copy the line from worker/.dev.vars.
+
+[env.dev]
+name = "hypeproof-chalk-dev"
+vars = { ENVIRONMENT = "dev", HPS_SERVICE_ORIGIN = "http://localhost:8787" }

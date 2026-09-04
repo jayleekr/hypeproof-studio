@@ -7,8 +7,9 @@
 //      (/v1/chat/*, /v1/profile, /v1/trace/*, /admin/*) and fails closed
 //      (503) in production on a bad secret
 //   3. the guard exemptions hold: /v1/health (ops probe) and /v1/report
-//      (REQ-H6 anonymous bug reporting) and the / + /issuer HTML pages
-//      still serve with a broken secret
+//      (REQ-H6 anonymous bug reporting) and the / HTML page still serve
+//      with a broken secret; /issuer + /console (moved to Chalk, plan task
+//      F) still answer with their redirect rather than the guard's 503
 //   4. both /v1 (chat) and /v1/trace prefixes route to their own routers —
 //      the /v1 mount does not shadow /v1/trace
 //
@@ -101,13 +102,32 @@ console.log("✓ route-order: signingSecretGuard precedes /v1/chat, /v1/messages
   assert.notEqual(report.status, 503, "/v1/report exempt (REQ-H6: bug reporting survives config breakage)");
   assert.notEqual(report.status, 404, "/v1/report is mounted");
 
-  for (const page of ["/", "/issuer", "/console"]) {
-    const r = await app.fetch(new Request(`https://api.test${page}`), badEnv(), makeCtx());
-    assert.equal(r.status, 200, `${page} HTML page serves without the guard`);
+  {
+    const r = await app.fetch(new Request("https://api.test/"), badEnv(), makeCtx());
+    assert.equal(r.status, 200, "/ HTML page serves without the guard");
     assert.match(r.headers.get("content-type") ?? "", /text\/html/);
   }
+
+  // Task F — the instructor pages are Chalk's now. The Service answers with a
+  // redirect to the Chalk origin (HPS_CHALK_ORIGIN, prod default when unset),
+  // path preserved, and stays outside the signing-secret guard: a broken
+  // secret must never strand an instructor on a 503 before they even reach
+  // the page. Location carries NO fragment so a `#t=<token>` link survives.
+  for (const page of ["/issuer", "/console"]) {
+    const r = await app.fetch(new Request(`https://api.test${page}#t=abc`), badEnv(), makeCtx());
+    assert.equal(r.status, 302, `${page} redirects to Chalk (not 503 — guard-exempt)`);
+    assert.equal(r.headers.get("location"), `https://chalk.hypeproof-ai.xyz${page}`, `${page} → prod Chalk origin by default`);
+    assert.ok(!(r.headers.get("location") ?? "").includes("#"), "Location has no fragment, so the browser re-attaches the token fragment");
+
+    const custom = await app.fetch(
+      new Request(`https://api.test${page}`),
+      createMockEnv({ secret: BAD_SECRET, environment: "production", env: { HPS_CHALK_ORIGIN: "http://localhost:8788/" } }),
+      makeCtx(),
+    );
+    assert.equal(custom.headers.get("location"), `http://localhost:8788${page}`, `${page} honours HPS_CHALK_ORIGIN (trailing slash trimmed)`);
+  }
 }
-console.log("✓ route-order: /v1/health, /v1/report, /, /issuer and /console stay reachable on bad secret");
+console.log("✓ route-order: /v1/health, /v1/report and / stay reachable on bad secret; /issuer + /console redirect to Chalk");
 
 // --- 4. /v1 mount does not shadow /v1/trace ----------------------------------
 {
