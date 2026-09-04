@@ -30,19 +30,35 @@ classifications:
   # a WRONG instrument means a human must decide what the criterion should be,
   # while a MISSING instrument is an unambiguous, cheap retry. Sending the
   # second case to a human stalls the loop for no reason.
-  harness_wrong: >-
-    the instrument/criterion measures the wrong thing -> do NOT touch the
-    product. Fix the criterion, block, ask human.
-  harness_missing: >-
-    the criterion is right but the instrument was never built (no committed,
-    wired-in test) -> retry the SAME task with an explicit instruction to add
-    the control and leave verified production behaviour alone.
+  # Split once after task C, then RE-split after task F. The first cut was
+  # wrong/missing, which is a description of the SYMPTOM. What actually decides
+  # the routing is the REMEDY: do I know what the fix is, or does someone have
+  # to decide what the criterion should be? Sort on that.
+  harness_fixable: >-
+    the criterion is right; the instrument is missing, or its implementation
+    does not measure what the criterion says -> the remedy is unambiguous.
+    Retry the SAME task with an explicit instruction to repair the instrument
+    and leave verified production behaviour alone. Both cases seen so far land
+    here: task C shipped correct behaviour with no committed control at all,
+    and task F's tamper fixture flipped a base64 character (which decodes to
+    the same bytes ~1 time in 16) instead of altering the signature. Routing
+    either to a human would have stalled the loop on a one-line fix.
+  harness_undecided: >-
+    the criterion ITSELF is wrong, or there is no agreement on what it should
+    assert -> do NOT touch the product and do NOT guess. Block and ask a human,
+    because the answer is a judgement about what "correct" means, not a repair.
   product: implementation is wrong -> retry with failure evidence appended
   spec: requirement was ambiguous -> block, ask human, DO NOT retry
   flake: nondeterministic -> re-run once
 
 # Rule of order, unchanged: rule out the instrument before blaming the product.
-# On 2026-07-25..27 the instrument was the cause 9 times out of 9.
+# On 2026-07-25..27 the instrument was the cause 9 times out of 9. Running this
+# plan, 2 of the 3 non-passing verdicts were instrument faults (C, F) and only
+# one was the product (H) — the ratio holds.
+#
+# Note on direction: F's broken fixture failed TOWARD red. That is the safe
+# direction and it is why it was caught at all. An instrument that fails toward
+# green reports a false pass and nothing downstream ever questions it.
 
 limits:
   max_attempts_per_task: 3
