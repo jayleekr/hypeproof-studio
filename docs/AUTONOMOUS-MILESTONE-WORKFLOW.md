@@ -27,8 +27,9 @@ loop. It is deliberately built around the existing repo sources of truth:
 
 3. **Execute**
    - For small code/docs/test work, use the issue -> branch -> tests -> PR flow.
-   - CI can route eligible issues to the existing Claude Solver by applying
-     `solver:ready`.
+   - CI **cannot** route issues to the Claude Solver. A human applies
+     `solver:ready` or mentions `@claude`; see "Removed: autonomous-task-runner"
+     below for why, and do not rebuild the CI path without reading it.
    - Interactive execution should use the `/goal` prompt below.
    - Runtime changes that affect the Worker, API, release artifacts, or shipped
      extension must include the relevant dispatch-only dry-run first and, when
@@ -84,11 +85,103 @@ behavior, installer artifacts, or release distribution, the goal run must also:
 ## CI Entry Points
 
 - `milestone-audit.yml`: scheduled/dispatch audit and optional task creation.
-- `autonomous-task-runner.yml`: dispatch-only task routing to solver or `/goal`
-  comment.
 - `mirror-release.yml`: dispatch-only release mirror sync to
   `jayleekr/hypeproof-studio-releases`.
 - `deploy-worker.yml`: dispatch-only Worker deploy with test and prod smoke.
 
 Keep deploy and mirror workflows dispatch-only until at least one successful
 operator dry-run is recorded in the relevant issue.
+
+## Removed: `autonomous-task-runner.yml` (2026-09-04)
+
+Deleted. This section exists so it is not rebuilt in six months. Read all of
+it, including the parts that argue against the deletion.
+
+### The mechanical reason the `solver` mode could never work
+
+GitHub does not raise workflow-triggering events for writes made with
+`secrets.GITHUB_TOKEN`. This is a platform anti-recursion rule, not a bug and
+not something a permissions change fixes.
+
+The router's `solver` mode did exactly two things: add the `solver:ready`
+label and post a comment, both via `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`.
+`claude-solver.yml` listens on `issues: [labeled]` and
+`issue_comment: [created]`. Both of the router's writes were therefore
+suppressed at the source. The handoff was impossible from the day it was
+written.
+
+Empirically confirmed before deleting: across the last 100 `claude-solver`
+runs the triggering actor was a human in every single case (jayleekr 44,
+J3llyBe4n 28, ico1036 11, +4 others). Zero runs by `github-actions[bot]`.
+The router never started the solver, not once.
+
+### The green run that hid it
+
+`autonomous-task-runner.yml` was invoked **once, ever**: 2026-06-04T10:15Z,
+`workflow_dispatch` by jayleekr, conclusion `success`. That success is why
+nobody looked. The routing step labelled the issue, posted "Routed to Claude
+Solver", and exited 0 — and nothing downstream started. A workflow can only
+observe that its own `gh` calls returned 0; it cannot observe that the event
+it intended to raise was swallowed. Treat "the routing workflow is green" as
+evidence of nothing.
+
+### What the deletion also took away — the honest cost
+
+Two of the three modes were **not** broken, and deleting the file removed
+them too:
+
+- `goal-comment` posted a ready-to-paste `/goal` prompt for a human to read.
+  It deliberately contained no `@claude`, so it was never meant to trigger
+  anything, and it worked as designed.
+- `verify-only` was a `jq` summary of the issue's state and labels. No event
+  dependency at all. It worked as designed.
+
+Only `solver` — the one mode whose entire purpose was an unattended handoff —
+was the broken one. The file was deleted whole rather than reduced to its two
+working modes because the whole thing had been dispatched once in three
+months; a two-mode convenience wrapper around `gh issue view` and
+`gh issue comment` was not worth a workflow file. **If either of those is
+wanted back, they are cheap and correct to rebuild.** That is not the part
+being warned against.
+
+### What must not be rebuilt without solving this first
+
+The `solver` mode. Naively re-adding it — or "fixing" it by giving
+`claude-solver.yml` a `workflow_dispatch` trigger — does not work either:
+`claude-solver.yml`'s `authorize` job reads `context.payload.sender.login`
+and requires that login to have write permission. That guard is what stops a
+mass-labeling accident from burning API budget. A `workflow_dispatch` event
+has no `payload.sender` in that shape, so the guard either fails or needs its
+own branch. Rebuilding CI-initiated solving therefore requires answering a
+design question first — *what does "authorized" mean when the caller is a
+workflow and not a person?* — and only then plumbing. Do not skip to the
+plumbing.
+
+The alternative that does work today, and is the real path: a human with
+write permission applies `solver:ready` or mentions `@claude`. That path is
+untouched by this removal.
+
+### The part that generalizes — read this before writing any workflow
+
+**The rule was already documented correctly in this repo**, on 2026-06-04, in
+`notify-release-published.yml`'s header:
+
+> "CI-created releases that use the default GITHUB_TOKEN do not trigger
+> recursive release workflows, so operators can use workflow_dispatch"
+
+That is the same rule, written down in this repo, three months before both
+`#663` and this router contradicted it. The knowledge existed, was correct,
+and did not travel. This has now been found three times (release mirror,
+`#663`, this router), which makes it a pattern rather than a bad commit.
+
+Before adding any workflow step that writes to GitHub (`gh issue edit`,
+`gh issue comment`, `gh pr create`, `gh release create`, `git push`,
+`github-script` mutations) with the intent of waking another workflow: check
+whether the token is `secrets.GITHUB_TOKEN`. If it is, the event will not be
+raised. Use a PAT/App token, a `workflow_dispatch`, or a
+`repository_dispatch` — or state plainly in the file that a human is required.
+
+A durable countermeasure is suggested but not yet scoped: a CI check that
+flags any workflow whose trigger events can only be raised by
+`GITHUB_TOKEN` writes elsewhere in the repo. The rule is mechanical and
+greppable.
