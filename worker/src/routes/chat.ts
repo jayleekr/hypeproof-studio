@@ -36,7 +36,13 @@ import {
 import { recordTurnIfOwned } from "../lib/storage";
 import { transformStream, passThroughOpenAIStream } from "../lib/sse";
 import { scoreTurnAssets } from "../lib/asset-scorer";
-import { logChat, persistUsage } from "../lib/analytics";
+import {
+  logChat,
+  persistUsage,
+  upstreamErrorKind,
+  ERROR_KIND,
+  type ChatLog,
+} from "../lib/analytics";
 import {
   isMinorCohort,
   screenText,
@@ -348,11 +354,53 @@ chat.post("/chat/completions", async (c) => {
   if (!gate.ok) return gate.response;
   const { payload, profile, session } = gate;
 
+  // #684 — accounting is declared HERE, above every failure exit, not down at
+  // the success path where it used to live.
+  //
+  // The old shape wrote `status: 200` as a literal and only ran on the happy
+  // path, so seven weeks of production (16,564 rows, 2026-07-14..08-23) held
+  // status=200 and nothing else, and a student whose every turn failed looked
+  // exactly like a student who never opened Studio. A row with a real status
+  // is the only thing that tells those two apart.
+  //
+  // `modelLabel` starts at the profile's declared model so a failure that dies
+  // before provider selection still attributes to something truthful; the
+  // upstream branches overwrite it with the id actually sent.
+  let modelLabel: string = profile.model.default;
+  const mkLog = (
+    tokens_in: number,
+    tokens_out: number,
+    cache_read: number,
+    cache_create: number,
+    status = 200,
+    error_kind: string | null = null,
+  ): ChatLog => ({
+    cohort_id: payload.c,
+    user_id: payload.u,
+    profile_id: profile.id,
+    model: modelLabel,
+    status,
+    error_kind,
+    tokens_in,
+    tokens_out,
+    cache_read,
+    cache_create,
+    latency_ms: Date.now() - startedAt,
+  });
+  const record = (log: ChatLog) => {
+    logChat(env, log);
+    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
+  };
+  /** #684 — a turn that never produced tokens. The row is the whole point. */
+  const recordFailure = (status: number, error_kind: string) =>
+    record(mkLog(0, 0, 0, 0, status, error_kind));
+
   // 6. Build the upstream request (with optional coach context from headers)
   let body: unknown;
   try {
     body = await c.req.json();
   } catch {
+    recordFailure(400, ERROR_KIND.BAD_REQUEST);
     return c.json({ error: { message: "bad json body", type: "request" } }, 400);
   }
   const coach: CoachContext = {
@@ -387,6 +435,11 @@ chat.post("/chat/completions", async (c) => {
         { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "inbound" },
         hit,
       );
+      // #684 — a blocked turn costs zero tokens but is NOT a non-event: a
+      // child hitting the filter repeatedly is exactly the seat an instructor
+      // needs to see. It has its own moderation datapoint (#320), but that
+      // dataset is not the per-seat ledger the board reads.
+      recordFailure(400, ERROR_KIND.MODERATION_BLOCK);
       return c.json(
         {
           error: {
@@ -423,6 +476,7 @@ chat.post("/chat/completions", async (c) => {
   } catch (err) {
     // #257 — config prose (env var names, provider wiring) stays in logs.
     console.error(`[${c.get("requestId")}] provider config error:`, err);
+    recordFailure(502, ERROR_KIND.CONFIG);
     return c.json(
       {
         error: {
@@ -437,7 +491,7 @@ chat.post("/chat/completions", async (c) => {
 
   const stream = (body as any)?.stream === true;
   let upstream: Response;
-  let modelLabel: string;
+  // modelLabel is hoisted above (#684) so failure rows still name a model.
   let fellBack = false;
   try {
     if (provider === "gemini") {
@@ -499,6 +553,12 @@ chat.post("/chat/completions", async (c) => {
     // #257 — translation/fetch errors can embed upstream URLs, header names,
     // or body shapes. Log full, return generic.
     console.error(`[${c.get("requestId")}] upstream call failed:`, err);
+    // #684 — fetch() threw, so there is NO upstream status to observe. The row
+    // records a synthetic 502 (our gateway could not reach upstream) rather
+    // than the 400 the client is handed: the column answers "what happened
+    // upstream", and calling a network outage a client error would repeat the
+    // original defect one layer down.
+    recordFailure(502, ERROR_KIND.UPSTREAM_UNREACHABLE);
     return c.json(
       { error: { message: "upstream request failed", type: "request", request_id: c.get("requestId") } },
       400,
@@ -511,6 +571,10 @@ chat.post("/chat/completions", async (c) => {
     // #257 — the upstream error body (provider prose, key hints, quota info)
     // goes to logs only; the client learns the status code + request_id.
     console.error(`[${c.get("requestId")}] upstream ${upstream.status}: ${text.slice(0, 500)}`);
+    // #684 — the REAL upstream status, before the 502 masking below. This is
+    // the row the instructor board reads; masking every 5xx as 502 here would
+    // throw away the only place the true status survives.
+    recordFailure(upstream.status, upstreamErrorKind(upstream.status));
     // #358 — pass a request-shaped 4xx through with its REAL status + sanitized
     // type so the webview can show a specific, friendly message (esp. 413 →
     // "이미지가 너무 커요") instead of the generic card. Raw upstream prose stays
@@ -538,28 +602,6 @@ chat.post("/chat/completions", async (c) => {
       502,
     );
   }
-
-  const mkLog = (
-    tokens_in: number,
-    tokens_out: number,
-    cache_read: number,
-    cache_create: number,
-  ) => ({
-    cohort_id: payload.c,
-    user_id: payload.u,
-    profile_id: profile.id,
-    model: modelLabel,
-    status: 200,
-    tokens_in,
-    tokens_out,
-    cache_read,
-    cache_create,
-    latency_ms: Date.now() - startedAt,
-  });
-  const record = (log: ReturnType<typeof mkLog>) => {
-    logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
-  };
 
   if (!stream) {
     // Non-streaming: normalize either provider's body to an OpenAI response.
@@ -659,12 +701,19 @@ chat.post("/chat/completions", async (c) => {
   //    (passthrough + usage tap); Anthropic events are transformed to OpenAI
   //    chunks.
   let streamedAssistantText = "";
+  // #684 — the "중단" case from the issue. The stream opened 200, so the client
+  // already has a status; the only place the gateway learns the turn actually
+  // died is this hook, which the SSE layer fires BEFORE onUsage.
+  let streamFailed = false;
   const streamOptions = {
     // #257 — lets the SSE layer emit a sanitized stream_error carrying the
     // request_id instead of raw internal prose.
     requestId: c.get("requestId"),
     onTextDelta: (delta: string) => {
       streamedAssistantText += delta;
+    },
+    onStreamError: () => {
+      streamFailed = true;
     },
     onBeforeDone: () => ({
       type: "asset_score",
@@ -677,7 +726,19 @@ chat.post("/chat/completions", async (c) => {
     cache_read_input_tokens: number;
     cache_creation_input_tokens: number;
   }) => {
-    record(mkLog(u.input_tokens, u.output_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens));
+    // Tokens produced before the break are KEPT on the row (they were really
+    // spent) — the success-only billing predicate is what excludes them, so
+    // the number stays queryable instead of being erased.
+    record(
+      mkLog(
+        u.input_tokens,
+        u.output_tokens,
+        u.cache_read_input_tokens,
+        u.cache_creation_input_tokens,
+        streamFailed ? 502 : 200,
+        streamFailed ? ERROR_KIND.STREAM_INTERRUPTED : null,
+      ),
+    );
     // #9c trace: streaming turn meta. response_chars=0 here — stream-body
     // capture (R2 turn_body) requires a stream tee + per-provider SSE parser
     // and is intentionally a follow-up; the meta still feeds Efficiency +

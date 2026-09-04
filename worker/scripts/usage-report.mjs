@@ -69,14 +69,24 @@ function buildSql({ days, by, cohort }) {
   const dim = DIMENSIONS[by];
   const where = [`created_at >= datetime('now', '-${days} days')`];
   if (cohort) where.push(`cohort_id = '${cohort}'`);
+  // #684 — usage_log now holds FAILED turns too (before #684 the table only
+  // ever held successes, so summing blindly was safe). This is the billing
+  // report: every token/cost/latency aggregate must count successes only, or
+  // the gateway starts billing its own upstream outages. `requests` therefore
+  // means *billable* turns; failures are reported separately as `errors`, and
+  // `requests + errors` is the number of attempts.
+  //
+  // Kept as a literal rather than importing lib/analytics.ts's USAGE_BILLABLE:
+  // this script is plain .mjs run by an operator with no TS loader.
+  const OK = "status < 400";
   return `
     SELECT ${dim} AS dim,
-           COUNT(*) AS requests,
-           SUM(tokens_in) AS tokens_in,
-           SUM(tokens_out) AS tokens_out,
-           SUM(cache_read) AS cache_read,
-           SUM(cache_write) AS cache_write,
-           CAST(ROUND(AVG(latency_ms)) AS INTEGER) AS avg_latency_ms,
+           SUM(CASE WHEN ${OK} THEN 1 ELSE 0 END) AS requests,
+           SUM(CASE WHEN ${OK} THEN tokens_in   ELSE 0 END) AS tokens_in,
+           SUM(CASE WHEN ${OK} THEN tokens_out  ELSE 0 END) AS tokens_out,
+           SUM(CASE WHEN ${OK} THEN cache_read  ELSE 0 END) AS cache_read,
+           SUM(CASE WHEN ${OK} THEN cache_write ELSE 0 END) AS cache_write,
+           CAST(ROUND(AVG(CASE WHEN ${OK} THEN latency_ms END)) AS INTEGER) AS avg_latency_ms,
            SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors
     FROM usage_log
     WHERE ${where.join(" AND ")}
@@ -100,7 +110,9 @@ function runQuery(sql) {
 
 const COLUMNS = [
   ["dim", "구분"],
-  ["requests", "요청"],
+  // #684 — 실패 턴도 행을 남기게 됐으므로 "요청" 이 무엇을 세는지 이름에 박는다.
+  // 성공 요청 + 오류 = 시도 횟수.
+  ["requests", "성공 요청"],
   ["tokens_in", "입력"],
   ["tokens_out", "출력"],
   ["cache_read", "캐시 읽기"],
