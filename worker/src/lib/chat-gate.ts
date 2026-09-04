@@ -21,8 +21,11 @@
 import type { Context } from "hono";
 import type { Env } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "./tokens";
-import { getProfile } from "../profiles";
 import type { Profile } from "../profiles/types";
+// dag task H — the profile is resolved WITH its curriculum module here, once,
+// so both LLM routes serve the same bytes and neither has to know a module
+// layer exists. lib/modules.ts explains the layer and the fallback chain.
+import { resolveProfile, type ModuleResolution } from "./modules";
 import {
   getActiveSession,
   getCohortPause,
@@ -33,7 +36,15 @@ import {
 } from "./kv";
 
 export type ChatGateResult =
-  | { ok: true; payload: TokenPayload; profile: Profile; session: ActiveSession }
+  | {
+      ok: true;
+      payload: TokenPayload;
+      /** Compiled profile with the pinned curriculum module applied (task H). */
+      profile: Profile;
+      session: ActiveSession;
+      /** Which curriculum produced this turn — goes on the usage row + x-hps-module. */
+      module: ModuleResolution;
+    }
   | { ok: false; response: Response };
 
 type GateContext = Context<{ Bindings: Env }>;
@@ -108,9 +119,11 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     c.header("x-token-legacy", "1");
   }
 
-  // 3. Profile
-  const profile = getProfile(payload.p);
-  if (!profile) {
+  // 3. Profile (+ its curriculum module — task H). A pinned module that is
+  // malformed cannot make a known profile unresolvable: resolveProfile falls
+  // back to the previous pin, then to the compiled text, and announces it.
+  const resolved = await resolveProfile(env, payload.p);
+  if (!resolved) {
     return {
       ok: false,
       response: c.json(
@@ -119,6 +132,7 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
       ),
     };
   }
+  const { profile, module } = resolved;
   // Sanity: token cohort must match profile cohort
   if (payload.c !== profile.session.cohort_id) {
     return {
@@ -195,5 +209,5 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     };
   }
 
-  return { ok: true, payload, profile, session };
+  return { ok: true, payload, profile, session, module };
 }

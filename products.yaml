@@ -97,6 +97,34 @@ entries:
       same fixtures through both workers. Until task H the profile registry is
       imported from worker/src/profiles for display names only.
 
+  - name: curriculum-module
+    layer: m
+    tag_prefix: m
+    # No directory of its own: the module is DATA in KV, not a tree in this
+    # repo. `worker/src/prompts/<cohort>.md` is the compiled-in FALLBACK copy
+    # of the same text (the floor the worker serves when nothing is pinned or
+    # the pin is unservable); the Module layer proper is what
+    # `worker/scripts/publish-module.ts` writes.
+    directory: worker/src/prompts
+    deploys_to: kv://HPS_KV/module:curriculum:<profile_id>:{v:<version>,pin}
+    contract:
+      # One JSON document shape, shared by the publisher and the worker
+      # (worker/src/lib/modules.ts makeModuleDoc / validateModuleDoc). The
+      # envelope is kind-agnostic; kind "session-design" (Chalk) reuses it.
+      format: "JSON — hps-module/1 {format, kind, profile_id, version m*, sha256, published_at, content:{system_prompt}}"
+    drift_lock: worker/test/module-distribution.test.mjs
+    exit_plan: >-
+      `npm run module -- unpin <profile>` for every profile returns the worker
+      to its compiled text with zero code change (that path is the tested
+      floor). Then delete worker/src/lib/modules.ts, the resolveProfile call in
+      lib/chat-gate.ts and routes/chat.ts /profile, the module_* fields on
+      ChatLog, and this entry. Nothing else knows the module exists.
+    owner: jay
+    notes: >-
+      dag task H. Curriculum is the experimental condition of philosophy §11's
+      loop; this is what gives it a name (`m2026.09.04-1`, or
+      `compiled:<hash>` before anything is published) on every turn record.
+
 # ---------------------------------------------------------------------------
 # Planned entries. These are NOT yet admitted — they are here so the gates are
 # answered before the code lands, not after. Move them into `entries` in the
@@ -104,18 +132,3 @@ entries:
 # ---------------------------------------------------------------------------
 
 planned:
-  - name: curriculum-modules
-    layer: m
-    tag_prefix: m
-    directory: modules
-    deploys_to: kv://modules
-    plan_task: H
-    contract:
-      format: schema/session-plan.v1.json
-    drift_lock: worker/test/module-schema.test.mjs
-    exit_plan: docs/exit/curriculum-modules.md
-    owner: jay
-    notes: >-
-      Same format Chalk writes and Studio reads — the single documented
-      Chalk<->Studio contact point. Gate 4 matters here: removing a module must
-      fall back to the last good version loudly, never to an empty prompt.
