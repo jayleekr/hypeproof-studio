@@ -52,7 +52,13 @@ import { MINOR_EFFORT, stripModelGatedParams } from "../lib/model-caps";
 import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../lib/chat-extract";
 import { recordTurnIfOwned } from "../lib/storage";
 import { tapAnthropicStream } from "../lib/sse";
-import { logChat, persistUsage } from "../lib/analytics";
+import {
+  logChat,
+  persistUsage,
+  upstreamErrorKind,
+  ERROR_KIND,
+  type ChatLog,
+} from "../lib/analytics";
 import { scrubToolResultSecrets } from "../lib/scrub-secrets";
 import {
   isMinorCohort,
@@ -235,6 +241,39 @@ messages.post("/messages", async (c) => {
   if (!gate.ok) return gate.response;
   const { payload, profile, session } = gate;
 
+  // #684 — accounting declared above every failure exit, mirroring chat.ts.
+  // The SDK route wrote the same literal `status: 200` on the success path
+  // only, so an SDK coach that failed every turn left no trace at all.
+  // `modelLabel` is overwritten with the clamped id once it is resolved.
+  let modelLabel: string = profile.model.default;
+  const mkLog = (
+    tokens_in: number,
+    tokens_out: number,
+    cache_read: number,
+    cache_create: number,
+    status = 200,
+    error_kind: string | null = null,
+  ): ChatLog => ({
+    cohort_id: payload.c,
+    user_id: payload.u,
+    profile_id: profile.id,
+    model: modelLabel,
+    status,
+    error_kind,
+    tokens_in,
+    tokens_out,
+    cache_read,
+    cache_create,
+    latency_ms: Date.now() - startedAt,
+  });
+  const record = (log: ChatLog) => {
+    logChat(env, log);
+    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
+  };
+  /** #684 — a turn that never produced tokens. The row is the whole point. */
+  const recordFailure = (status: number, error_kind: string) =>
+    record(mkLog(0, 0, 0, 0, status, error_kind));
+
   // Body
   let raw: Record<string, unknown>;
   try {
@@ -242,9 +281,11 @@ messages.post("/messages", async (c) => {
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
     raw = parsed as Record<string, unknown>;
   } catch {
+    recordFailure(400, ERROR_KIND.BAD_REQUEST);
     return c.json(anthropicError(c, "invalid_request_error", "bad json body"), 400);
   }
   if (!Array.isArray(raw.messages)) {
+    recordFailure(400, ERROR_KIND.BAD_REQUEST);
     return c.json(anthropicError(c, "invalid_request_error", "messages must be an array"), 400);
   }
 
@@ -255,6 +296,7 @@ messages.post("/messages", async (c) => {
   if (!apiKey) {
     // #257 — config prose (env var names, provider wiring) stays in logs.
     console.error(`[${c.get("requestId")}] /v1/messages: ANTHROPIC_API_KEY is not set`);
+    recordFailure(502, ERROR_KIND.CONFIG);
     return c.json(
       anthropicError(c, "api_error", "Anthropic upstream is not configured — contact the operator"),
       502,
@@ -295,6 +337,9 @@ messages.post("/messages", async (c) => {
         { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "inbound" },
         hit,
       );
+      // #684 — see chat.ts: a repeatedly-blocked seat must be visible in the
+      // per-seat ledger, not only in the moderation dataset.
+      recordFailure(400, ERROR_KIND.MODERATION_BLOCK);
       return c.json(anthropicError(c, "moderation_block", MODERATION_BLOCK_MESSAGE_KO), 400);
     }
   }
@@ -309,7 +354,7 @@ messages.post("/messages", async (c) => {
   }
 
   const stream = raw.stream === true;
-  const modelLabel = resolveMessagesModel(raw.model, profile);
+  modelLabel = resolveMessagesModel(raw.model, profile);   // hoisted for #684
 
   // 출력 상한 — **한 곳에서만** 정한다.
   //
@@ -433,6 +478,8 @@ messages.post("/messages", async (c) => {
     // #257 — fetch errors can embed upstream URLs or header names. Log full,
     // return generic.
     console.error(`[${c.get("requestId")}] upstream call failed:`, err);
+    // #684 — no upstream status exists (fetch threw). Synthetic 502.
+    recordFailure(502, ERROR_KIND.UPSTREAM_UNREACHABLE);
     return c.json(anthropicError(c, "api_error", "upstream request failed"), 502);
   }
 
@@ -441,6 +488,8 @@ messages.post("/messages", async (c) => {
     // #257 — the upstream error body (provider prose, key hints, quota info)
     // goes to logs only; the client learns the status code + request_id.
     console.error(`[${c.get("requestId")}] upstream ${upstream.status}: ${text.slice(0, 500)}`);
+    // #684 — the REAL upstream status, recorded before the 502 masking below.
+    recordFailure(upstream.status, upstreamErrorKind(upstream.status));
     if (isPassthrough4xx(upstream.status)) {
       // Request-shaped upstream 4xx → same status, sanitized body, so the
       // SDK fails fast instead of retrying a permanent error 10x.
@@ -456,29 +505,9 @@ messages.post("/messages", async (c) => {
   }
 
   // 6. Accounting — same usage_log/analytics rows as chat.ts, so workshop
-  // quota dashboards see SDK-coach traffic identically. (No #255 migration
-  // columns here — prod schema is not migrated yet.)
-  const mkLog = (
-    tokens_in: number,
-    tokens_out: number,
-    cache_read: number,
-    cache_create: number,
-  ) => ({
-    cohort_id: payload.c,
-    user_id: payload.u,
-    profile_id: profile.id,
-    model: modelLabel,
-    status: 200,
-    tokens_in,
-    tokens_out,
-    cache_read,
-    cache_create,
-    latency_ms: Date.now() - startedAt,
-  });
-  const record = (log: ReturnType<typeof mkLog>) => {
-    logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
-  };
+  // quota dashboards see SDK-coach traffic identically. mkLog/record/
+  // recordFailure are declared at the top of the handler (#684) so the
+  // failure exits above can use them too.
 
   if (!stream) {
     // 5. Non-streaming: verbatim JSON passthrough (native Anthropic shape —
@@ -543,13 +572,26 @@ messages.post("/messages", async (c) => {
   // 5. Streaming: verbatim Anthropic SSE passthrough. tapAnthropicStream only
   // peeks (usage + text-delta length); nothing is injected into the protocol.
   let responseChars = 0;
+  // #684 — the stream already answered 200, so a mid-flight death can only be
+  // learned from this hook (fired before onUsage). Tokens produced before the
+  // break stay on the row; the success-only billing predicate excludes them.
+  let streamFailed = false;
   const onUsage = (u: {
     input_tokens: number;
     output_tokens: number;
     cache_read_input_tokens: number;
     cache_creation_input_tokens: number;
   }) => {
-    record(mkLog(u.input_tokens, u.output_tokens, u.cache_read_input_tokens, u.cache_creation_input_tokens));
+    record(
+      mkLog(
+        u.input_tokens,
+        u.output_tokens,
+        u.cache_read_input_tokens,
+        u.cache_creation_input_tokens,
+        streamFailed ? 502 : 200,
+        streamFailed ? ERROR_KIND.STREAM_INTERRUPTED : null,
+      ),
+    );
     if (trial) {
       c.executionCtx.waitUntil(
         recordTurnIfOwned(
@@ -578,6 +620,9 @@ messages.post("/messages", async (c) => {
     requestId: c.get("requestId"),
     onTextDelta: (delta) => {
       responseChars += delta.length;
+    },
+    onStreamError: () => {
+      streamFailed = true;
     },
   });
 

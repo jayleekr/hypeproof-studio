@@ -27,6 +27,7 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
+import { USAGE_LAST_HOUR_SQL } from "../lib/analytics";
 import { issue, issueIssuer, verify, TokenError, type IssuerScope, type TokenPayload } from "../lib/tokens";
 
 // #257 — verify() failures surface curated TokenError prose only; anything
@@ -1090,19 +1091,24 @@ admin.get("/stats", async (c) => {
   // Last-hour aggregates from D1 usage_log.
   // SQLite datetime('now') is UTC; usage_log.created_at is UTC ISO8601 by
   // convention (we INSERT with datetime('now') / ISO8601 timestamps).
-  let lastHour = { messages: 0, errors: 0, tokens_in: 0, tokens_out: 0 };
+  //
+  // #684 — the query moved to lib/analytics.ts (USAGE_LAST_HOUR_SQL) so it
+  // sits next to the writer and the billing predicate, and so the control
+  // test executes the REAL query instead of a copy of its text. Two changes:
+  // token sums now filter to successful turns (failed turns write rows since
+  // #684 and must never be billed), and `requests` was added because
+  // `messages` now means "billable turns", not "rows".
+  let lastHour = { requests: 0, messages: 0, errors: 0, tokens_in: 0, tokens_out: 0 };
   try {
     const row = await c.env.HPS_DB
-      .prepare(
-        `SELECT
-            COUNT(*) AS messages,
-            SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
-            COALESCE(SUM(tokens_in), 0)  AS tokens_in,
-            COALESCE(SUM(tokens_out), 0) AS tokens_out
-         FROM usage_log
-         WHERE created_at > datetime('now', '-1 hour')`,
-      )
-      .first<{ messages: number; errors: number; tokens_in: number; tokens_out: number }>();
+      .prepare(USAGE_LAST_HOUR_SQL)
+      .first<{
+        requests: number;
+        messages: number;
+        errors: number;
+        tokens_in: number;
+        tokens_out: number;
+      }>();
     if (row) lastHour = row;
   } catch (err) {
     // D1 might be unset in some dev configs; surface but don't crash.

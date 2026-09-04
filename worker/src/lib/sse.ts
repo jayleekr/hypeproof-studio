@@ -26,6 +26,11 @@ export interface StreamTransformOptions {
   // #257 — correlates the sanitized client-facing stream_error with the full
   // server-side log line. Raw error prose never enters the SSE stream.
   requestId?: string;
+  // #684 — a stream that opened 200 and then died is a FAILED turn, but the
+  // status was already sent, so the route can only learn about it here. Fires
+  // before `onUsage` (which runs in the reader's finally block), so the route
+  // can flip the usage_log status before the row is written.
+  onStreamError?: (err: unknown) => void;
 }
 
 // #257 — mid-stream failures used to forward String(err) to the client, which
@@ -101,6 +106,7 @@ export function transformStream(
         enqueueUsageChunk(controller, encoder, model, usage, options.requestId);
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
+        options.onStreamError?.(err);   // #684 — before onUsage writes the row
         enqueueStreamError(controller, encoder, err, options.requestId);
       } finally {
         if (!usageEmitted) onUsage(usage);
@@ -191,6 +197,7 @@ export function passThroughOpenAIStream(
         enqueueUsageChunk(controller, encoder, modelSeen || "hypeproof", usage, options.requestId);
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
+        options.onStreamError?.(err);   // #684 — before onUsage writes the row
         enqueueStreamError(controller, encoder, err, options.requestId);
       } finally {
         if (!usageEmitted) onUsage(usage);
@@ -307,6 +314,7 @@ export function tapAnthropicStream(
           controller.enqueue(encoder.encode(buffer));
         }
       } catch (err) {
+        options.onStreamError?.(err);   // #684 — before onUsage writes the row
         enqueueAnthropicStreamError(controller, encoder, err, options.requestId);
       } finally {
         if (!usageEmitted) onUsage(usage);
