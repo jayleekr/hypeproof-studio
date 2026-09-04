@@ -24,7 +24,9 @@ function harness({ responses = [] } = {}) {
   let fn = null;
   let cleared = false;
   const logs = [];
+  const stoppedCalls = [];
   const pinger = startHeartbeat({
+    onStopped: () => stoppedCalls.push(Date.now()),
     send: async (ev) => {
       sent.push(ev);
       return responses.shift() ?? { ok: true, status: 200 };
@@ -44,6 +46,7 @@ function harness({ responses = [] } = {}) {
     pinger,
     sent,
     logs,
+    stoppedCalls,
     setIdle: (v) => (idle = v),
     isCleared: () => cleared,
     hasTimer: () => fn !== null,
@@ -86,6 +89,9 @@ function harness({ responses = [] } = {}) {
   await h.pinger.tick();
   assert.equal(h.sent.length, 1, "정지 후에는 더 보내지 않는다");
   assert.match(h.logs[0], /401/);
+  // 호스트가 참조를 놓을 수 있어야 한다 — 안 그러면 새 토큰을 붙여넣어도
+  // Studio 를 껐다 켜기 전까지 그 자리는 보드에서 영영 사라진다.
+  assert.equal(h.stoppedCalls.length, 1, "401 정지는 호스트에 통보된다");
 
   const g = harness({ responses: [{ ok: false, status: 403 }] });
   await g.pinger.tick(); // 실패 1회 → 다음 2틱 건너뜀
@@ -119,6 +125,7 @@ function harness({ responses = [] } = {}) {
   h.pinger.stop();
   await h.pinger.tick();
   assert.equal(h.sent.length, 0);
+  assert.equal(h.stoppedCalls.length, 1, "onStopped 는 두 번 불리지 않는다");
   console.log("✓ stop() 멱등");
 }
 

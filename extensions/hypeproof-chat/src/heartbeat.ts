@@ -97,6 +97,12 @@ export interface HeartbeatDeps {
   clearInterval: (handle: unknown) => void;
   /** Optional diagnostics sink (output channel in the host). */
   log?: (line: string) => void;
+  /**
+   * Called once when the pinger gives up for good (401). The host uses it to
+   * drop its reference, so that pasting a fresh token can start a new pinger —
+   * without it, a token expiry silently ends liveness until Studio restarts.
+   */
+  onStopped?: () => void;
 }
 
 /** Beyond this many consecutive failures the pinger gives up until restarted. */
@@ -155,6 +161,7 @@ export function startHeartbeat(
       if (stopped) return;
       stopped = true;
       deps.clearInterval(handle);
+      deps.onStopped?.();
     },
     tick,
   };

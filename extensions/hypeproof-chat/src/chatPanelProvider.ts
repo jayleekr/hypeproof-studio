@@ -646,7 +646,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
     const token = await this.context.secrets.get(TOKEN_KEY);
-    if (!token) return { ok: false, status: 401 };
+    // No token yet (the participant hasn't pasted one) is TRANSIENT, not a
+    // rejection — status 0 makes the pinger back off and retry rather than
+    // stopping for good.
+    if (!token) return { ok: false, status: 0 };
     const version = this.context.extension?.packageJSON?.version;
     try {
       const res = await fetch(`${proxyUrl.replace(/\/$/, "")}/trace/event`, {
@@ -673,13 +676,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       setInterval: (fn, ms) => setInterval(fn, ms),
       clearInterval: (h) => clearInterval(h as ReturnType<typeof setInterval>),
       log: (line) => this.logChannel?.appendLine(line),
+      onStopped: () => {
+        this.heartbeat = null;
+      },
     });
     this.context.subscriptions.push({ dispose: () => this.stopLiveness() });
   }
 
   stopLiveness(): void {
-    this.heartbeat?.stop();
+    const h = this.heartbeat;
     this.heartbeat = null;
+    h?.stop(); // onStopped nulls the field too — idempotent either way.
   }
 
   /**
