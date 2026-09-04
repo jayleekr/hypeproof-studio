@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Env } from "./env";
+import { resolveWorkerVersion, type Env } from "./env";
 import { chat } from "./routes/chat";
 import { messages } from "./routes/messages";
 import { trace } from "./routes/trace";
@@ -39,10 +39,19 @@ app.use("/v1/trace/*", signingSecretGuard);
 app.use("/v1/logs/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
 
-// Friendly root → redirect to admin UI (which itself is access-gated)
-app.get("/", () => {
+// Friendly root → redirect to admin UI (which itself is access-gated).
+// The canonical health payload is GET /v1/health (routes/chat.ts), whose
+// JSON `version` field reports the worker version (task C). This route
+// carries the same value as an x-hps-worker-version response header too —
+// a `curl -I /` answer for free — without touching the existing HTML body
+// or its guard-exemption contract (route-order.test.mjs asserts `/` stays
+// a 200 text/html page).
+app.get("/", (c) => {
   return new Response(adminHtml as unknown as string, {
-    headers: { "content-type": "text/html; charset=utf-8" },
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "x-hps-worker-version": resolveWorkerVersion(c.env),
+    },
   });
 });
 
