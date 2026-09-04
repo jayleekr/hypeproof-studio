@@ -8,7 +8,9 @@ Its own Cloudflare Worker (`hypeproof-chalk`, `chalk.hypeproof-ai.xyz`), Surface
 |---|---|---|
 | `GET /console` | instructor session console (#352) | page is public; its API calls carry the issuer Bearer |
 | `GET /issuer` | self-service student-token mint page | same |
+| `GET /board` | instructor live board page (#674) — every seat, one row each, 10 s polling | page is public; its API calls carry the issuer Bearer |
 | `GET /admin/cohorts/:id/state` | read-only cohort state the console renders | instructor issuer Bearer, any scope on the cohort |
+| `GET /admin/cohorts/:id/board` | live board JSON — seat verdicts + the thresholds that produced them | instructor issuer Bearer, any scope on the cohort |
 | `* /admin/*` (instructor writes) | session open/close, roster append, token mint — **forwarded** to the Service | Bearer only; Basic refused |
 | `GET /health` | `{ ok, service, version }` — the `c*` tag via `HPS_CHALK_VERSION` | none |
 
@@ -51,4 +53,24 @@ cd worker && npm ci      # shared auth module; the drift lock boots the Service 
 cd chalk  && npm ci && npm test && npm run typecheck
 ```
 
-`test/deploy-isolation.test.mjs` and `test/instructor-auth-drift.test.mjs` are the two task-F controls; `test/board-contract.test.mjs` is the registry drift lock (task G extends it with `/board`).
+`test/deploy-isolation.test.mjs` and `test/instructor-auth-drift.test.mjs` are the two task-F controls; `test/board-contract.test.mjs` is the registry drift lock (both `/state` and `/board`); `test/board-threshold.test.mjs` is task G's calibration replay.
+
+## The live board (task G, #674)
+
+Read `docs/plan/vessel-and-modules.md` §4 before changing a column. Four rules, none negotiable:
+
+1. **Every roster row is always rendered.** A quiet seat is the one you most want to see, and a "recent N rows" panel is exactly where it disappears. On 2026-08-22 two roster seats made *zero* calls all day and appear nowhere in `usage_log`.
+2. **First column is time-since-last-turn**, ahead of any performance number.
+3. **Readable in two seconds**, on a phone, while walking the room.
+4. **Zero prompt text.** Latency, counts, error class, elapsed time, an artifact-changed boolean. Nothing a participant wrote. PIPA Art. 22-2 (verified guardian consent under 14) is why this surface is shippable for minor cohorts at all — metadata only is the entire licence. A "recent question preview" column will be the most tempting feature here and it crosses that line.
+
+**The thresholds live here, not in the client** (spec §1). They are derived from the labelled 2026-08-22 session, documented with their distribution at the top of `src/lib/board-verdict.ts`, served in the `/board` response, and replayed by `test/board-threshold.test.mjs` — which runs the *production* SQL against a real SQLite loaded with the real rows, checks both controls, and then perturbs each threshold to prove a control can actually break.
+
+Two honest gaps, both rendered as **unknown** and announced in `degraded[]`, never as a false negative:
+
+| Column | Blocked on | Reads |
+|---|---|---|
+| `failures_*` | task B live in production, then set `HPS_ERROR_SIGNAL_FROM` | `null` until a non-2xx row exists or the var covers the window |
+| `heartbeat` | task E in a Studio release the seats actually run | `unknown` until a ping arrives |
+
+The seat set is the one thing §4 did not settle: `cohort:<id>:roster` is **cumulative** (340 ids in production). Pass `?seat_prefix=SK34-CM6YPX-` for the full batch — that is rule 1 in full. Without it the board shows only seats observed this session and says so.

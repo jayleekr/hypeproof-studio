@@ -97,4 +97,161 @@ for (const p of listProfiles().filter((p) => p.session.cohort_id === COHORT)) {
 }
 console.log("✓ board-contract: no member handles, no prompt text — operational metadata only");
 
-console.log("All board-contract tests passed (state; /board joins with task G).");
+// ===========================================================================
+// GET /admin/cohorts/:id/board — the live board (plan task G, issue #674).
+//
+// Same contract, same file: read-only cohort JSON under /admin/cohorts/:id/*,
+// operational metadata only, closed key set. The CALIBRATION of the numbers is
+// a separate concern and lives in board-threshold.test.mjs (it replays the real
+// 2026-08-22 session); what is pinned HERE is the SHAPE — because the shape is
+// what an old console page and a new Chalk deploy drift apart on.
+// ===========================================================================
+
+const { DatabaseSync } = await import("node:sqlite");
+const { d1Timestamp } = await import("../src/routes/board.ts");
+
+// A D1-shaped adapter over a real SQLite, so the route's SQL actually executes
+// rather than being answered by a stub that agrees with whatever it is sent.
+const sqlite = new DatabaseSync(":memory:");
+sqlite.exec(`CREATE TABLE usage_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, cohort_id TEXT, user_id TEXT,
+  profile_id TEXT, model TEXT, tokens_in INTEGER NOT NULL DEFAULT 0,
+  tokens_out INTEGER NOT NULL DEFAULT 0, cache_read INTEGER NOT NULL DEFAULT 0,
+  cache_write INTEGER NOT NULL DEFAULT 0, latency_ms INTEGER, status INTEGER NOT NULL,
+  created_at TEXT NOT NULL, trial_id TEXT)`);
+const d1 = {
+  prepare(sql) {
+    const stmt = sqlite.prepare(sql.replace(/\?\d/g, "?"));
+    let args = [];
+    return {
+      bind(...a) { args = a; return this; },
+      async all() { return { results: stmt.all(...args), success: true }; },
+    };
+  },
+};
+{
+  const ins = sqlite.prepare(
+    `INSERT INTO usage_log (cohort_id, user_id, model, tokens_in, tokens_out, latency_ms, status, created_at)
+     VALUES (?,?,?,?,?,?,?,?)`,
+  );
+  // Two seats calling steadily; the third roster member never calls at all.
+  for (let i = 0; i < 6; i++) {
+    for (const u of ["kim-cheolsu", "lee-younghee"]) {
+      ins.run(COHORT, u, "claude-sonnet-4-6", 5, 200, 4000, 200, d1Timestamp(now - i * 20_000));
+    }
+  }
+}
+const boardEnv = { ...env, HPS_DB: d1 };
+
+const bres = await chalk.fetch(
+  new Request(`https://chalk.test/admin/cohorts/${COHORT}/board`, {
+    headers: { authorization: `Bearer ${token}` },
+  }),
+  boardEnv,
+  { waitUntil() {}, passThroughOnException() {} },
+);
+assert.equal(bres.status, 200);
+const btext = await bres.text();
+const bbody = JSON.parse(btext);
+
+// --- closed key set ---------------------------------------------------------
+assert.deepEqual(
+  Object.keys(bbody).sort(),
+  ["degraded", "error_signal", "id", "now", "paused", "roster", "seats", "session", "thresholds", "window"],
+  "GET /admin/cohorts/:id/board — top-level keys are a closed set; a new column is a contract change and lands HERE first",
+);
+assert.ok(Number.isFinite(Date.parse(bbody.now)), "`now` is the SERVER clock — every age derives from it, never a client's");
+assert.deepEqual(Object.keys(bbody.roster).sort(), ["cohort_roster_size", "complete", "rendered", "source"]);
+assert.deepEqual(Object.keys(bbody.window).sort(), ["analysis_window_ms", "session_start"]);
+assert.deepEqual(
+  Object.keys(bbody.thresholds).sort(),
+  ["heartbeatStaleMs", "quietIdleMs", "slowingIdleMs", "stuckMeanWaitMs", "stuckMinCalls"],
+  "the thresholds are SERVED, not compiled into a client — that is what keeps them recalibratable in 30 s (spec §1)",
+);
+assert.ok(["observed", "unknown"].includes(bbody.error_signal));
+for (const s of bbody.seats) {
+  assert.deepEqual(
+    Object.keys(s).sort(),
+    [
+      "artifact_age_ms", "artifact_bytes", "calls_in_session", "calls_in_window",
+      "client_version", "failures_in_session", "failures_in_window", "heartbeat",
+      "heartbeat_age_ms", "idle_ms", "mean_latency_ms", "mean_wait_ms", "reasons",
+      "severity", "state", "user_id",
+    ],
+    "seat rows are a closed set — no free-text field can be smuggled in",
+  );
+  assert.ok(["alert", "watch", "ok"].includes(s.severity));
+  assert.ok(["absent", "failing", "quiet", "stuck", "slowing", "ok"].includes(s.state));
+}
+console.log("✓ board-contract: /board key set is closed (top level, thresholds, and every seat row)");
+
+// --- rule 1: every roster row, including the seat that never connected -------
+assert.equal(bbody.roster.source, "observed", "no seat_prefix falls back to observed, never to a guessed prefix");
+{
+  const withPrefix = await chalk.fetch(
+    new Request(`https://chalk.test/admin/cohorts/${COHORT}/board?seat_prefix=park-`, {
+      headers: { authorization: `Bearer ${token}` },
+    }),
+    boardEnv,
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  const pb = await withPrefix.json();
+  assert.equal(pb.roster.source, "prefix");
+  assert.equal(pb.roster.complete, true);
+  assert.deepEqual(pb.seats.map((s) => s.user_id), ["park-minsu"], "a roster seat with ZERO calls still occupies a row");
+  assert.equal(pb.seats[0].state, "absent");
+  assert.equal(pb.seats[0].idle_ms, null);
+}
+// …and observed-mode incompleteness is ANNOUNCED, never silent (§5).
+assert.ok(
+  bbody.degraded.some((d) => d.column === "roster"),
+  "observed mode cannot contain a seat that never connected — it must say so",
+);
+assert.equal(bbody.error_signal, "unknown", "all-200 rows cannot prove task B is live");
+assert.ok(bbody.degraded.some((d) => d.column === "failures"));
+assert.ok(bbody.degraded.some((d) => d.column === "heartbeat"));
+for (const s of bbody.seats) {
+  assert.equal(s.failures_in_window, null, "unknown renders as null, NEVER as 0");
+  assert.equal(s.heartbeat, "unknown");
+}
+console.log("✓ board-contract: rule 1 holds under seat_prefix; every degradation is announced, never a false negative");
+
+// --- auth: the shared door, no second implementation ------------------------
+for (const [hdrs, want] of [
+  [{}, 401],
+  [{ authorization: "Basic " + btoa("admin:whatever") }, 401],
+]) {
+  const r = await chalk.fetch(
+    new Request(`https://chalk.test/admin/cohorts/${COHORT}/board`, { headers: hdrs }),
+    boardEnv,
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(r.status, want, "the board opens with an instructor issuer token and nothing else");
+}
+{
+  const { token: other } = await issueIssuer(
+    { issuer: "elsewhere", scopes: [{ cohort: "some-other-cohort", profiles: [], max_hours: 6 }] },
+    24,
+    SECRET,
+  );
+  const r = await chalk.fetch(
+    new Request(`https://chalk.test/admin/cohorts/${COHORT}/board`, { headers: { authorization: `Bearer ${other}` } }),
+    boardEnv,
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+  assert.equal(r.status, 403, "an issuer not scoped to this cohort cannot read its board");
+}
+console.log("✓ board-contract: /board uses the shared instructor-auth door (401 without, 403 out of scope)");
+
+// --- privacy: metadata only, same rule as /state -----------------------------
+for (const p of listProfiles().filter((p) => p.session.cohort_id === COHORT)) {
+  const probe = p.system_prompt.trim().slice(40, 120);
+  assert.ok(!btext.includes(probe), `prompt text of ${p.id} must never appear on the board`);
+}
+assert.ok(
+  !/prompt|message|content|question|preview|body|text/i.test(Object.keys(bbody.seats[0] ?? {}).join(" ")),
+  "no seat field may be named after participant-authored content (spec §4 rule 4)",
+);
+console.log("✓ board-contract: zero prompt text — this is what keeps the board shippable for minor cohorts");
+
+console.log("All board-contract tests passed (state + board).");

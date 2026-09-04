@@ -47,4 +47,23 @@ export {
   type CohortPause,
 } from "../../worker/src/lib/kv.ts";
 
+// Liveness (task E) — READ side only. The Service writes these keys from
+// POST /v1/trace/event; the board reads them. `recordHeartbeat` /
+// `recordArtifactChange` are deliberately NOT imported: one writer per key.
+export {
+  getArtifact,
+  getHeartbeat,
+  LIVENESS_HB_PREFIX,
+  heartbeatKey,
+  artifactKey,
+  type ArtifactRecord,
+  type HeartbeatRecord,
+} from "../../worker/src/lib/liveness.ts";
+
+// The failure predicate, imported rather than retyped (task B's rule: "import
+// it; do not retype it"). The board's `failing` column and the Service's
+// /admin/stats `errors` column must mean the same thing, or the two surfaces
+// disagree about which seat is broken.
+export { USAGE_FAILED } from "../../worker/src/lib/analytics.ts";
+
 export { listProfiles } from "../../worker/src/profiles/index.ts";

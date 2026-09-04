@@ -53,6 +53,14 @@ ENVIRONMENT = "production"
 # Where instructor WRITES are forwarded (session open/close, roster append,
 # student-token mint). Chalk never signs a token and never writes gate state.
 HPS_SERVICE_ORIGIN = "https://api.hypeproof-ai.xyz"
+# HPS_ERROR_SIGNAL_FROM — deliberately UNSET until task B (#684, observed
+# usage_log.status) is deployed to production. Unset means the board renders
+# every failure column as "unknown"; setting it to B's deploy instant (ISO8601)
+# tells the board that rows from then on carry a real status, so a zero is a
+# real zero. Forgetting it costs an honest "unknown", never a false "fine" —
+# the direction is chosen so the safe answer is the default
+# (chalk/src/lib/board-verdict.ts resolveErrorSignal).
+# HPS_ERROR_SIGNAL_FROM = "2026-09-05T00:00:00Z"
 # HPS_CHALK_VERSION is deliberately NOT set here — same rule as the Service's
 # HPS_WORKER_VERSION (task C). deploy-chalk.yml injects the c* tag per deploy
 # via `wrangler deploy --var HPS_CHALK_VERSION:<tag>`; unset (wrangler dev)

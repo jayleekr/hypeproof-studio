@@ -18,6 +18,12 @@ export interface ChalkEnv {
   HPS_CHALK_VERSION?: string;
   // Service origin for forwarded instructor writes. Unset → production.
   HPS_SERVICE_ORIGIN?: string;
+  // ISO8601 instant at which task B (#684, observed usage_log.status) reached
+  // production. Rows at or after it carry a real status, so the board's failure
+  // columns mean something. UNSET => the board reports the failure columns as
+  // `unknown`, never as zero — the safe direction if an operator forgets to set
+  // it. See board-verdict.ts `resolveErrorSignal`.
+  HPS_ERROR_SIGNAL_FROM?: string;
 
   // Bindings (shared with the Service — read-only from Chalk's side)
   HPS_KV: KVNamespace;
