@@ -25,14 +25,25 @@ import { createHash } from "crypto";
  */
 export const HEARTBEAT_INTERVAL_MS = 45_000;
 
-/** Below this much idle time the seat reads as "active" on the board. */
-export const HEARTBEAT_IDLE_AFTER_MS = 60_000;
-
-export type HeartbeatState = "active" | "idle";
-
+/**
+ * The ping reports an **observation**, never a verdict.
+ *
+ * There is no `state: "active" | "idle"` here on purpose. Any such field needs
+ * an inactivity threshold, and §4 "Calibration — do not guess thresholds"
+ * requires that cut to be derived by replaying 2026-08-22 against the real
+ * 16,564 rows (ClassAid's 240 s is a sanity check on the result, not a
+ * substitute for measuring). That calibration has not been run yet — and this
+ * file rides the *slow* train: a constant baked in here reaches participants
+ * only through a Studio build plus a reinstall on every machine, while the
+ * board that derives the real cut redeploys in 30 seconds. A guessed threshold
+ * shipped here would sit stale and unfixable for a week, contradicting the
+ * board's own verdict with a second number also labelled "idle".
+ *
+ * So the threshold lives on the board, and this file sends `idle_ms`. The
+ * worker stamps `at`. Every verdict is derivable from those two at read time.
+ */
 export interface HeartbeatEvent {
   type: "heartbeat";
-  state: HeartbeatState;
   idle_ms: number;
 }
 
@@ -52,18 +63,14 @@ export type LivenessEvent = HeartbeatEvent | ArtifactChangedEvent;
  * reinstall), so only a test can hold them together.
  */
 export const CLIENT_LIVENESS_EVENT_KEYS = {
-  heartbeat: ["type", "state", "idle_ms"] as const,
+  heartbeat: ["type", "idle_ms"] as const,
   artifactChanged: ["type", "sha256", "bytes"] as const,
 };
-
-export function heartbeatState(idleMs: number): HeartbeatState {
-  return idleMs < HEARTBEAT_IDLE_AFTER_MS ? "active" : "idle";
-}
 
 /** Build the ping payload. `idleMs` is clamped: a clock skew must not send a negative. */
 export function buildHeartbeatEvent(idleMs: number): HeartbeatEvent {
   const idle = Number.isFinite(idleMs) && idleMs > 0 ? Math.round(idleMs) : 0;
-  return { type: "heartbeat", state: heartbeatState(idle), idle_ms: idle };
+  return { type: "heartbeat", idle_ms: idle };
 }
 
 /**

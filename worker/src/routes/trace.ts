@@ -19,14 +19,11 @@ import {
   type HumanActionKind,
 } from "../lib/storage.ts";
 import {
-  HEARTBEAT_STATES,
   isArtifactByteCount,
-  isHeartbeatState,
   isSha256Hex,
   recordArtifactChange,
   recordHeartbeat,
   sanitizeClientVersion,
-  type HeartbeatState,
 } from "../lib/liveness.ts";
 
 export const trace = new Hono<{ Bindings: Env }>();
@@ -56,7 +53,13 @@ export type TraceEvent =
   // can change outside a trial too. So they skip the trial-ownership gate
   // (there is nothing to own); the token + session + roster gate above is
   // what scopes them to a seat.
-  | { type: "heartbeat"; state: HeartbeatState; idle_ms?: number }
+  // No "active"/"idle" verdict on the wire. That threshold is uncalibrated
+  // (§4 "Calibration — do not guess thresholds") and a client-side verdict
+  // would be pinned into an app build while the board that derives the real
+  // cut redeploys in 30 seconds. The ping carries the observation; the board
+  // draws the line. `state` was also pure derivation from `idle_ms` — a
+  // computed value transmitted alongside its own input.
+  | { type: "heartbeat"; idle_ms?: number }
   | { type: "artifactChanged"; sha256: string; bytes: number };
 
 /**
@@ -70,7 +73,7 @@ export type TraceEvent =
  * `bytes` and `sha256` are the entire artifactChanged payload on purpose. If
  * you are about to add a field here, read §4 "Privacy" first.
  */
-export const HEARTBEAT_EVENT_KEYS = ["type", "state", "idle_ms"] as const;
+export const HEARTBEAT_EVENT_KEYS = ["type", "idle_ms"] as const;
 export const ARTIFACT_CHANGED_EVENT_KEYS = ["type", "sha256", "bytes"] as const;
 
 const VALID_OUTCOMES: ValidationOutcome[] = ["pass", "fail", "partial", "error"];
@@ -144,17 +147,13 @@ export function parseEvent(
       };
     }
     case "heartbeat": {
-      if (!isHeartbeatState(o.state)) {
-        return { ok: false, message: `state must be one of ${HEARTBEAT_STATES.join(",")}` };
-      }
       const idle = o.idle_ms;
       if (idle != null && !(typeof idle === "number" && Number.isFinite(idle) && idle >= 0)) {
         return { ok: false, message: "idle_ms must be a non-negative number" };
       }
-      return {
-        ok: true,
-        event: { type: "heartbeat", state: o.state, idle_ms: numOrUndef(idle) },
-      };
+      // idle_ms stays optional: a ping carrying nothing but its type still
+      // answers the question this event exists for — is this seat alive at all.
+      return { ok: true, event: { type: "heartbeat", idle_ms: numOrUndef(idle) } };
     }
     case "artifactChanged": {
       // sha256 + bytes ONLY. Never file content, never a filename — a
@@ -300,7 +299,6 @@ trace.post("/event", async (c) => {
         c.executionCtx.waitUntil(
           recordHeartbeat(env.HPS_KV, payload.c, payload.u, {
             at: new Date().toISOString(),
-            state: ev.state,
             idle_ms: ev.idle_ms,
             client_version: sanitizeClientVersion(c.req.header("x-hps-client-version")),
           }),

@@ -98,7 +98,7 @@ const livenessKeys = (env) => [...env._kv.keys()].filter((k) => k.startsWith("li
   const ctx = makeCtx();
   const before = Date.now();
   const r = await app.fetch(
-    traceRequest({ type: "heartbeat", state: "idle", idle_ms: 120_000 }, { headers: { "x-hps-client-version": "0.1.42" } }),
+    traceRequest({ type: "heartbeat", idle_ms: 120_000 }, { headers: { "x-hps-client-version": "0.1.42" } }),
     env,
     ctx,
   );
@@ -109,22 +109,26 @@ const livenessKeys = (env) => [...env._kv.keys()].filter((k) => k.startsWith("li
   const key = liveness.heartbeatKey(COHORT, USER);
   assert.deepEqual(livenessKeys(env), [key], "정확히 하나의 liveness 키");
   const rec = JSON.parse(env._kv.get(key));
-  assert.equal(rec.state, "idle");
+  // 저장 필드는 관측값뿐 — 판정("active"/"idle")은 여기 없다. 임계값은 보드가
+  // 실제 분포에서 유도하며(§4 "Calibration"), 그쪽은 30초 열차를 탄다.
+  assert.deepEqual(Object.keys(rec).sort(), ["at", "client_version", "idle_ms"]);
+  assert.equal(rec.state, undefined, "판정값은 저장되지 않는다");
   assert.equal(rec.idle_ms, 120_000);
   assert.equal(rec.client_version, "0.1.42");
   assert.ok(Date.parse(rec.at) >= before, "at 은 서버 시계 (클라가 미래로 못 간다)");
   assert.equal(env._dbCalls.length, 0, "하트비트는 D1 을 건드리지 않는다 (usage_log 는 청구 원장)");
 
-  // 헤더 없는 구버전 클라의 하트비트 — 200, client_version 만 비어 있다.
+  // 헤더도 idle_ms 도 없는 최소 핑 — 200, "이 자리는 살아 있다" 만 남는다.
   const env2 = createMockEnv();
   const ctx2 = makeCtx();
-  const r2 = await app.fetch(traceRequest({ type: "heartbeat", state: "active" }), env2, ctx2);
-  assert.equal(r2.status, 200, "버전 헤더 없는 하트비트도 200");
+  const r2 = await app.fetch(traceRequest({ type: "heartbeat" }), env2, ctx2);
+  assert.equal(r2.status, 200, "버전 헤더·idle_ms 없는 하트비트도 200");
   await ctx2.settle();
   const rec2 = JSON.parse(env2._kv.get(liveness.heartbeatKey(COHORT, USER)));
   assert.equal(rec2.client_version, undefined, "헤더 없으면 필드도 없다");
   assert.equal(rec2.idle_ms, undefined);
-  console.log("✓ 양성 — heartbeat 200 · 서버 시계 · 버전 헤더는 선택");
+  assert.ok(rec2.at, "그래도 '언제 살아 있었나' 는 남는다");
+  console.log("✓ 양성 — heartbeat 200 · 서버 시계 · 판정값 없음 · 버전 헤더는 선택");
 }
 
 // ─── 양성 — artifactChanged 200 + sha256/bytes 만 저장 ───────────────────────
@@ -153,9 +157,9 @@ const livenessKeys = (env) => [...env._kv.keys()].filter((k) => k.startsWith("li
     [{ type: "artifactChanged", sha256: SHA_A, bytes: -1 }, "음수 bytes"],
     [{ type: "artifactChanged", sha256: SHA_A, bytes: 1.5 }, "정수 아님"],
     [{ type: "artifactChanged", sha256: SHA_A, bytes: 1e12 }, "상한 초과"],
-    [{ type: "heartbeat" }, "state 누락"],
-    [{ type: "heartbeat", state: "vibing" }, "알 수 없는 state"],
-    [{ type: "heartbeat", state: "active", idle_ms: -5 }, "음수 idle_ms"],
+    [{ type: "heartbeat", idle_ms: -5 }, "음수 idle_ms"],
+    [{ type: "heartbeat", idle_ms: "곧" }, "문자열 idle_ms"],
+    [{ type: "heartbeat", idle_ms: {} }, "객체 idle_ms"],
   ]) {
     const ctx = makeCtx();
     const r = await app.fetch(traceRequest(body), env, ctx);
@@ -213,17 +217,17 @@ const livenessKeys = (env) => [...env._kv.keys()].filter((k) => k.startsWith("li
 // ─── 음성 — liveness 이벤트도 기존 게이트 전부를 통과해야 한다 ───────────────
 {
   const noSession = createMockEnv({ withSession: false });
-  const r1 = await app.fetch(traceRequest({ type: "heartbeat", state: "active" }), noSession, makeCtx());
+  const r1 = await app.fetch(traceRequest({ type: "heartbeat", idle_ms: 1000 }), noSession, makeCtx());
   assert.equal(r1.status, 403, "세션 없으면 하트비트도 403");
   assert.equal((await r1.json()).error.type, "session_inactive");
 
   const noRoster = createMockEnv({ withRoster: false });
-  const r2 = await app.fetch(traceRequest({ type: "heartbeat", state: "active" }), noRoster, makeCtx());
+  const r2 = await app.fetch(traceRequest({ type: "heartbeat", idle_ms: 1000 }), noRoster, makeCtx());
   assert.equal(r2.status, 403, "roster 밖이면 403");
 
   const env = createMockEnv();
   const r3 = await app.fetch(
-    traceRequest({ type: "heartbeat", state: "active" }, { auth: "Bearer garbage" }),
+    traceRequest({ type: "heartbeat", idle_ms: 1000 }, { auth: "Bearer garbage" }),
     env,
     makeCtx(),
   );
@@ -236,7 +240,7 @@ const livenessKeys = (env) => [...env._kv.keys()].filter((k) => k.startsWith("li
 {
   const puts = [];
   const kv = { async put(key, val, opts) { puts.push({ key, val, opts }); } };
-  await liveness.recordHeartbeat(kv, "c1", "u1", { at: "2026-09-04T00:00:00.000Z", state: "active" });
+  await liveness.recordHeartbeat(kv, "c1", "u1", { at: "2026-09-04T00:00:00.000Z", idle_ms: 0 });
   await liveness.recordArtifactChange(kv, "c1", "u1", { at: "2026-09-04T00:00:00.000Z", sha256: SHA_A, bytes: 1 });
   assert.equal(puts[0].key, "live:hb:c1:u1");
   assert.equal(puts[0].opts.expirationTtl, liveness.HEARTBEAT_TTL_SEC);
@@ -293,11 +297,15 @@ const livenessKeys = (env) => [...env._kv.keys()].filter((k) => k.startsWith("li
     );
   }
 
-  // 클라가 붙이는 상태 문자열 집합 == 워커가 받는 집합.
-  assert.deepEqual(
-    [client.heartbeatState(0), client.heartbeatState(10 ** 9)].sort(),
-    [...liveness.HEARTBEAT_STATES].sort(),
-    "state 어휘 일치",
+  // 판정값은 **양쪽 어디에도 없어야 한다.** 임계값은 §4 "Calibration — do not
+  // guess thresholds" 대상이고, 클라에 박히면 느린 열차(빌드+전원 재설치)에
+  // 실려 보드가 유도한 진짜 컷과 어긋난 채 일주일을 간다.
+  assert.equal(client.heartbeatState, undefined, "클라에 판정 함수가 없다");
+  assert.equal(client.HEARTBEAT_IDLE_AFTER_MS, undefined, "클라에 임계값 상수가 없다");
+  assert.equal(liveness.HEARTBEAT_STATES, undefined, "워커에도 상태 어휘가 없다");
+  assert.ok(
+    !HEARTBEAT_EVENT_KEYS.includes("state"),
+    "state 는 와이어 계약에서 빠졌다 (idle_ms 로부터 순수 유도되는 값이었다)",
   );
 
   // 그리고 실기기 경로 그대로 워커에 넣어 본다.

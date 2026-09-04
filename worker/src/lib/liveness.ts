@@ -16,12 +16,19 @@
 //   - usage_log is the billing ledger (§3). Heartbeats must never land there.
 //
 // Privacy (§4 "zero prompt text is what makes this shippable"): every field
-// here is operational metadata — a timestamp, a coarse state, a digest, a
+// here is operational metadata — a timestamp, an elapsed duration, a digest, a
 // byte count. No file content, no filename, no prompt text, ever.
-
-/** Coarse participant state. Deliberately two values — the board reads it in 2s. */
-export const HEARTBEAT_STATES = ["active", "idle"] as const;
-export type HeartbeatState = (typeof HEARTBEAT_STATES)[number];
+//
+// What this record deliberately does NOT hold: a derived "active"/"idle"
+// verdict. §4 "Calibration — do not guess thresholds" says the inactivity cut
+// must be derived by replaying 2026-08-22 against the real 16,564 rows, with
+// ClassAid's 240 s (arXiv 2602.06734) as a sanity check on the result rather
+// than a substitute for measuring it. A verdict computed on the client would
+// ride the slow train — a Studio build plus a reinstall on every machine —
+// while the board that derives the real cut rides the 30-second one. Two
+// numbers both labelled "idle", the stale one unfixable for a week. So the
+// wire carries only the observation (`idle_ms`) and the server's clock (`at`);
+// the verdict is the board's, computed at read time.
 
 /**
  * How long a heartbeat record survives without a refresh. Generously longer
@@ -44,7 +51,6 @@ export const LIVENESS_AF_PREFIX = "live:af:";
 export interface HeartbeatRecord {
   /** ISO timestamp the worker observed the ping (server clock — never the client's). */
   at: string;
-  state: HeartbeatState;
   /** ms since the participant last did anything in the panel, as the client sees it. */
   idle_ms?: number;
   /**
@@ -75,10 +81,6 @@ export function isArtifactByteCount(v: unknown): v is number {
   return (
     typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= ARTIFACT_MAX_BYTES
   );
-}
-
-export function isHeartbeatState(v: unknown): v is HeartbeatState {
-  return typeof v === "string" && (HEARTBEAT_STATES as readonly string[]).includes(v);
 }
 
 /**
