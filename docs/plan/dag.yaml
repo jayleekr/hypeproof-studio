@@ -1,0 +1,364 @@
+# Execution DAG for the "vessel and modules" plan.
+#
+# Read by the orchestrator prompt. The orchestrator MUST NOT infer ordering —
+# `depends_on` here is the only source of truth for sequence.
+#
+# Spec: docs/plan/vessel-and-modules.md  (sections referenced per task)
+#
+# Field contract
+#   layer         v* app | w* service | c* surface | m* module  (spec §1)
+#   model         implementer model. sonnet-5 | opus-5 | fable-5-1
+#   depends_on    task ids that must be plan:passed first
+#   human_gate    non-empty => orchestrator STOPS and reports. It may never
+#                 mark this satisfied itself.
+#   machine_gate  commands that must exit 0 before any model-judged eval runs
+#   control       the planted answer. Gate 2. Written BEFORE implementation.
+#   acceptance    prose criteria. Gate 3, judged by a fresh evaluator.
+#
+# Gate order is always: machine_gate -> control -> acceptance.
+# If machine_gate fails, do not spend a model on control/acceptance.
+
+version: 1
+spec: docs/plan/vessel-and-modules.md
+
+# Failure classification the evaluator must emit. Rule out `harness` FIRST —
+# on the 2026-07-25..27 review, 9 of 9 failures were the instrument, not the
+# product (.claude/rules/verification.md rule 6).
+classifications:
+  harness: instrument/test/criterion is wrong -> fix criterion, block, ask human
+  product: implementation is wrong -> retry with failure evidence appended
+  spec: requirement was ambiguous -> block, ask human, DO NOT retry
+  flake: nondeterministic -> re-run once
+
+limits:
+  max_attempts_per_task: 3
+  # Two identical failures stop the loop regardless of classification.
+  stop_on_repeated_identical_failure: 2
+
+# Global precondition checked every tick before any deploy-touching task.
+# Same rule as #676: never deploy into a live class.
+deploy_freeze_check:
+  command: >-
+    curl -sf -u "admin:$HPS_ADMIN_PASSWORD" https://api.hypeproof-ai.xyz/admin/stats
+    | jq '.live_sessions // 0'
+  skip_tasks_when_nonzero: [A, C, D, F, H]
+
+tasks:
+  - id: A
+    title: "dev channel — conditional --prerelease flag"
+    layer: v
+    model: sonnet-5
+    issue: null
+    depends_on: []
+    human_gate: null
+    spec_section: "§6 stage 2"
+    files:
+      - .github/workflows/build-mac.yml
+      - .github/workflows/build-windows.yml
+    machine_gate:
+      - "python3 -c \"import yaml,sys; yaml.safe_load(open('.github/workflows/build-mac.yml'))\""
+      - "python3 -c \"import yaml,sys; yaml.safe_load(open('.github/workflows/build-windows.yml'))\""
+    control:
+      description: >-
+        Tag-shape classifier must be exercised without cutting a real tag.
+        Extract the prerelease decision into a shell function or a tiny script
+        so it can be unit-tested.
+      positive: "TAG=v9.9.9-rc.1  => --prerelease present"
+      negative: "TAG=v9.9.9       => --prerelease absent"
+    acceptance:
+      - "A tag containing a hyphen publishes as a GitHub prerelease."
+      - "A plain vX.Y.Z tag behaves exactly as before (no behavior change)."
+      - "Both mac and windows workflows changed identically."
+    notes: >-
+      updateCheckerHelpers.ts:169 already skips draft/prerelease, and GitHub's
+      /releases/latest excludes prereleases by definition. This flag is the
+      only missing piece. Do not touch client code.
+
+  - id: B
+    title: "usage_log.status is a literal 200; failed turns write no row"
+    layer: w
+    model: opus-5
+    issue: 684
+    depends_on: []
+    human_gate: null
+    spec_section: "§3"
+    files:
+      - worker/src/routes/chat.ts
+      - worker/src/routes/messages.ts
+      - worker/src/lib/analytics.ts
+      - worker/test/d1-accounting.test.mjs
+    machine_gate:
+      - "cd worker && npx tsc --noEmit"
+      - "cd worker && npm test"
+    control:
+      description: >-
+        Integration test that forces an upstream 4xx. Today the row is never
+        created, so this test MUST fail before the change and pass after.
+      positive: >-
+        Upstream 4xx => a usage_log row EXISTS with status == the real upstream
+        status (not 200) and latency_ms populated.
+      negative: >-
+        Usage/quota aggregation queries count successes only — a failed row must
+        not be billed. d1-accounting.test.mjs holds that contract.
+    acceptance:
+      - "status column carries the observed upstream status, never a literal."
+      - "Failed turns produce a row (tokens may be 0) with a coarse error class."
+      - "Accounting queries changed to filter successes; no double-count."
+      - "No migration required — the column already exists and is nullable-safe."
+    notes: >-
+      Production evidence: SELECT status, COUNT(*) FROM usage_log GROUP BY status
+      returns 16,564 rows all status=200 across 2026-07-14..2026-08-23.
+      This touches the billing ledger. Read worker/test/d1-accounting.test.mjs first.
+
+  - id: C
+    title: "worker version identifier"
+    layer: w
+    model: sonnet-5
+    issue: null
+    depends_on: []
+    human_gate: null
+    spec_section: "§6 stage 2"
+    files:
+      - worker/wrangler.toml
+      - worker/src/index.ts
+      - .github/workflows/deploy-worker.yml
+    machine_gate:
+      - "cd worker && npx tsc --noEmit"
+      - "cd worker && npm test"
+    control:
+      positive: >-
+        With HPS_WORKER_VERSION=w2026.09.04-1 injected, GET / returns that exact
+        string in the health payload.
+      negative: >-
+        With the var unset, GET / still responds 200 (version reported as
+        'unknown' — never a crash, never an empty string).
+    acceptance:
+      - "Deploy injects the version from the w* tag."
+      - "GET / exposes it so 'what is running in prod' is answerable."
+      - "Value is also available to the board's diagnostics later (task G)."
+    notes: >-
+      scripts/resolve-version.sh resolves the APP version only (git tag ->
+      extension package.json). The worker has no version concept at all today.
+      Do not fold the worker into resolve-version.sh — separate trains.
+
+  - id: D
+    title: "enforce the live-session deploy freeze"
+    layer: w
+    model: opus-5
+    issue: 676
+    depends_on: [C]
+    human_gate: null
+    spec_section: "§6 stage 2"
+    files:
+      - .github/workflows/deploy-worker.yml
+      - .github/workflows/build-mac.yml
+      - .github/workflows/build-windows.yml
+    machine_gate:
+      - "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/deploy-worker.yml'))\""
+    control:
+      positive: "live_sessions == 0 => step exits 0, deploy proceeds."
+      negative: >-
+        live_sessions > 0 and override input not set => step exits non-zero with
+        a message naming the count.
+      also: >-
+        override_live_session == true => proceeds, and the override is recorded
+        with the worker version from task C.
+    acceptance:
+      - "Applies to the worker deploy AND to stable app tag builds."
+      - "dev-channel (-rc) tags are exempt — they reach nobody."
+      - "Override is an explicit workflow input, never a default."
+    notes: >-
+      #668 shipped one hour into a live class. The worker already knows session
+      state (getActiveSession) — ask it, don't maintain a separate calendar.
+
+  - id: E
+    title: "heartbeat + artifactChanged trace event"
+    layer: w
+    model: opus-5
+    issue: null
+    depends_on: []
+    human_gate: >-
+      Requires ONE Studio release to reach participants. The orchestrator stops
+      after the PR is merged and reports; it may not cut or verify the release.
+    spec_section: "§3, §4"
+    files:
+      - worker/src/routes/trace.ts
+      - worker/src/index.ts
+      - extensions/hypeproof-chat/src/chatPanelProvider.ts
+      - worker/test/
+    machine_gate:
+      - "cd worker && npx tsc --noEmit"
+      - "cd worker && npm test"
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        This spans two deploy targets with different cadences, so an old client
+        hitting a new worker is the NORMAL path, not an edge case.
+        A drift-lock test is mandatory (pattern: worker/test/logs-upload.test.mjs).
+      positive: >-
+        Request WITHOUT the heartbeat/version headers (i.e. an old client)
+        still returns 200 and behaves exactly as before.
+      negative: >-
+        Malformed artifactChanged payload is rejected 400 without affecting the
+        chat path.
+      drift_lock: "payload shape asserted identically on both client and worker side"
+    acceptance:
+      - "Extension pings every 30-60s independent of chat activity."
+      - "artifactChanged carries sha256 + bytes only — never file content."
+      - "Worker deployed first and backward compatible; app follows as -rc then stable."
+      - "A drift-lock test file exists and is listed in the package.json test script."
+    notes: >-
+      Ordering rule is absolute: worker first (backward compatible), then app.
+      Reversed, a new app calls an old worker and the expensive-to-roll-back
+      side breaks first.
+
+  - id: F
+    title: "split Chalk (instructor surface) into its own Cloudflare Worker"
+    layer: c
+    model: fable-5-1
+    issue: null
+    depends_on: []
+    human_gate: null
+    spec_section: "§1, §2"
+    files:
+      - chalk/
+      - worker/src/ui/console.html
+      - worker/src/index.ts
+      - .github/workflows/
+    machine_gate:
+      - "cd worker && npx tsc --noEmit && npm test"
+      - "cd chalk && npx tsc --noEmit && npm test"
+    control:
+      description: >-
+        The whole point is that the two artifacts become independent. Prove it.
+      positive: >-
+        Deploying chalk does NOT change the Service worker's version
+        (task C's identifier stays put).
+      negative: >-
+        The instructor issuer-token verification is NOT duplicated as a second
+        implementation — it is shared or re-exported, and a drift-lock test
+        asserts both sides accept/reject the same fixtures.
+    acceptance:
+      - "chalk/ has its own wrangler.toml and route; binds the same D1/KV."
+      - "/console moves there; participants are unaffected."
+      - "Tag prefix c* deploys only chalk."
+      - "No second, divergent copy of token verification."
+    notes: >-
+      Do this BEFORE task G. Building the board inside the Service worker and
+      moving it later costs a migration. This is the widest-blast-radius task
+      before H — hence fable-5-1.
+
+  - id: G
+    title: "instructor live board"
+    layer: c
+    model: opus-5
+    issue: 674
+    depends_on: [B, F]
+    human_gate: >-
+      Task B must be DEPLOYED to production before calibration is meaningful —
+      the control replays real production D1 rows. The orchestrator stops and
+      asks for confirmation that B is live.
+    spec_section: "§4"
+    files:
+      - chalk/src/routes/board.ts
+      - chalk/src/ui/board.html
+      - chalk/test/board-threshold.test.mjs
+    machine_gate:
+      - "cd chalk && npx tsc --noEmit && npm test"
+    control:
+      description: >-
+        Labelled ground truth exists. Extract threshold logic as a PURE function
+        over rows and replay the 2026-08-22 session before any live run.
+        This runs in milliseconds without the app.
+      positive: >-
+        Seats that were fine on 2026-08-22 all render green. Catches an
+        over-strict board — the failure mode that turns the board into noise
+        and gets the tab closed.
+      negative: >-
+        SK34-CM6YPX-12 renders red (3 turns in 15 min, 250s mean wait).
+        SK34-CM6YPX-01 and -06 render as quiet (11 min no activity).
+      derive: >-
+        Take the wait-time distribution from the real 16,564 rows. ClassAid's
+        240s inactivity threshold is a sanity check on the result, not a
+        substitute for measuring.
+    acceptance:
+      - "Every roster row is always rendered — absence is the primary signal."
+      - "First column is time-since-last-turn."
+      - "Opens with an instructor issuer token (today that path 401s)."
+      - "Polls ~10s. No SSE, no Durable Objects."
+      - "ZERO prompt text anywhere in the response or the page."
+      - "Columns that need the task-E client release degrade to 'unknown', never to a false negative."
+    notes: >-
+      Privacy line is load-bearing: metadata only keeps this shippable under the
+      existing basis. A 'recent question preview' column crosses PIPA Art.22-2
+      territory for minor cohorts and blocks the whole feature.
+
+  - id: H
+    title: "module distribution layer (curriculum + prompts out of the binary)"
+    layer: m
+    model: fable-5-1
+    issue: null
+    depends_on: [B, C, F]
+    human_gate: null
+    spec_section: "§2, §5"
+    files:
+      - worker/src/profiles/
+      - worker/src/prompts/
+      - worker/src/lib/
+    machine_gate:
+      - "cd worker && npx tsc --noEmit && npm test"
+    control:
+      description: >-
+        The silent failure here is cache invalidation, not a crash. Measure it.
+      positive: >-
+        After swapping a module version, usage.cache_read_input_tokens stays > 0
+        on the following request — the prompt cache prefix was NOT broken.
+      negative: >-
+        A malformed module is rejected and the cohort falls back to the last
+        good version, loudly (logged), never silently serving an empty prompt.
+      also: "Module version appears on the turn record so evidence is attributable."
+    acceptance:
+      - "Profiles/prompts load from KV/R2 at runtime, versioned as m*."
+      - "Updating curriculum requires no code deploy."
+      - "Session-design files (the Chalk contract) use the same module format."
+      - "Prompt cache strategy documented and measured, not assumed."
+    notes: >-
+      Rationale is not release hygiene — it is Lab operating-loop precondition.
+      Philosophy §18 warns against protecting existing Curriculum; compiling it
+      into the binary makes that protection the default. §11 needs evidence
+      attributable to a curriculum version.
+
+  - id: I
+    title: "studio-logs read path — arrival check and retrieval"
+    layer: c
+    model: opus-5
+    issue: 680
+    depends_on: [F]
+    human_gate: null
+    spec_section: "§3"
+    deadline: "2026-11-20"
+    files:
+      - chalk/src/routes/logs-admin.ts
+    machine_gate:
+      - "cd chalk && npx tsc --noEmit && npm test"
+    control:
+      positive: >-
+        Listing studio-logs/<cohort>/ against a known roster reports exactly the
+        seats with no upload. For 2026-08-22 that must be -01, -11, -12, -13, -14.
+      negative: "A cohort with no uploads returns an empty list, not an error."
+    acceptance:
+      - "List what arrived per seat: count, time, bytes."
+      - "Diff against roster to name seats that never uploaded."
+      - "Fetch one session's events.jsonl."
+      - "Read-only. Deletion is explicitly out of scope."
+    notes: >-
+      Deadline is real: R2 retention is 90 days, so the 1회차 (2026-08-22) logs
+      are gone around 2026-11-20. Issues #670/#671/#675 currently stand on
+      circumstantial evidence that lives in those files.
+
+# Suggested parallel batches (informational — depends_on is authoritative)
+batches:
+  - [A, B, C]
+  - [D, E, F]
+  - [G]
+  - [H, I]
