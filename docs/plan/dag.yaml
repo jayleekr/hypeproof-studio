@@ -531,6 +531,59 @@ tasks:
       MUST be settled before task G calibrates thresholds, or G will tune
       against data in which one moderation direction is invisible.
 
+  - id: M
+    title: "the autonomous task router has never once started the solver"
+    layer: v
+    model: opus-5
+    issue: null
+    depends_on: []
+    human_gate: >-
+      The remedy is a product decision, not an implementation one: fix the
+      router, delete it, or accept that a human typing @claude is the real path.
+      Do not implement before Jay picks one.
+    spec_section: null
+    files:
+      - .github/workflows/autonomous-task-runner.yml
+      - .github/workflows/claude-solver.yml
+    machine_gate:
+      - "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/autonomous-task-runner.yml'))\""
+    control:
+      description: >-
+        Third instance of the defect class task K was filed for, found while
+        evaluating K. Same mechanism, different pipeline.
+      evidence: >-
+        autonomous-task-runner.yml routes work using secrets.GITHUB_TOKEN: it
+        adds the `solver:ready` label and posts a comment. claude-solver.yml
+        fires on exactly `issues: [labeled]` and `issue_comment: [created]` —
+        both GITHUB_TOKEN-authored events, therefore both blocked.
+        Empirically: across the last 100 claude-solver runs the triggering actor
+        is a HUMAN in every single case (jayleekr 44, J3llyBe4n 28, ico1036 11,
+        +4 others). Zero runs by github-actions[bot]. The router has never
+        started the solver.
+      positive: >-
+        Whatever remedy is chosen, a routed issue must demonstrably reach the
+        solver without a human — or the file must stop claiming it does.
+    acceptance:
+      - "No file claims automation it does not have (same rule as K)."
+      - "If kept: a routed issue starts the solver, proven by an actual run."
+      - "If removed: the removal says why, so it is not rebuilt in six months."
+    notes: >-
+      This is a pattern, not a bad commit, and that is the finding worth acting
+      on. The rule was documented CORRECTLY in this repo on 2026-06-04, in
+      notify-release-published.yml's header:
+
+        "CI-created releases that use the default GITHUB_TOKEN do not trigger
+         recursive release workflows, so operators can use workflow_dispatch"
+
+      #663 contradicted it three months later, and autonomous-task-runner
+      contradicts it too. The knowledge existed, was written down, and did not
+      travel. A fix that only repairs the two known instances leaves the third
+      one to be written next quarter.
+
+      Suggested durable countermeasure (not yet scoped): a CI check that flags
+      any workflow whose trigger events can only be raised by GITHUB_TOKEN
+      writes elsewhere in the repo. The rule is mechanical and greppable.
+
   - id: J
     title: "mirror-release publishes prereleases as stable — dev channel leaks"
     layer: v
