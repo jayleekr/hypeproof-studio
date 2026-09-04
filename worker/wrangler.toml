@@ -58,6 +58,17 @@ fallthrough = true
 
 [vars]
 ENVIRONMENT = "production"
+# HPS_WORKER_VERSION is deliberately NOT set here. It is the Service-layer
+# release identifier (docs/plan/vessel-and-modules.md §1, tag prefix w*, e.g.
+# "w2026.09.04-1") and is injected per-deploy by
+# .github/workflows/deploy-worker.yml via
+# `wrangler deploy --var HPS_WORKER_VERSION:<resolved w* tag>` — a static
+# value here would go stale the moment it's set. Unset (local `wrangler dev`,
+# or a deploy that isn't tag-triggered) => src/index.ts's
+# resolveWorkerVersion() reports "unknown" on GET /, never a crash, never an
+# empty string (task C negative control; #206 is the app-side precedent).
+# Do NOT fold this into scripts/resolve-version.sh — that resolves the App
+# version (v* train, separate release cadence). See task C in dag.yaml.
 # Switchable upstream LLM (see resolveProvider in src/env.ts). 3-way peer —
 # NOT runtime fallback. Default = "gemini" when GEMINI_API_KEY is set.
 # Set to "anthropic" or "openai" (with their key) to switch.

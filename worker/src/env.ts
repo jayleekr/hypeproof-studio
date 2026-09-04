@@ -39,6 +39,15 @@ export interface Env {
   // best-effort fans a formatted embed into the #hypeproof-studio channel.
   // Unset → reports still persist to D1; only the side-effect is skipped.
   DISCORD_REPORT_WEBHOOK_URL?: string;
+  // Service-layer release identifier (docs/plan/vessel-and-modules.md §1,
+  // tag prefix w*, e.g. "w2026.09.04-1"). NOT declared in wrangler.toml's
+  // [vars] — deploy-worker.yml injects it per-deploy via
+  // `wrangler deploy --var HPS_WORKER_VERSION:<tag>` so it always reflects
+  // the exact tag that shipped. Unset locally (wrangler dev) by design.
+  // Read it through resolveWorkerVersion() (src/index.ts) — never read this
+  // field directly — so "unset" always renders as "unknown", never a crash
+  // or an empty string (dag.yaml task C negative control; #206 precedent).
+  HPS_WORKER_VERSION?: string;
 
   // Bindings
   HPS_KV: KVNamespace;
