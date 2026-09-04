@@ -235,14 +235,23 @@ console.log("✓ module: pin → served; re-pin → swapped within one memo wind
   const warns = [];
   console.warn = (...x) => warns.push(x.map(String).join(" "));
   let duringOutage;
+  let outageErrors;
   try {
-    duringOutage = await resolveProfile(env, PROFILE, Date.now() + PIN_MEMO_MS + 1);
+    ({ result: duringOutage, lines: outageErrors } = await captureErrors(() =>
+      resolveProfile(env, PROFILE, Date.now() + PIN_MEMO_MS + 1),
+    ));
   } finally {
     console.warn = realWarn;
     env.HPS_KV.get = realGet;
   }
   assert.equal(duringOutage.module.version, V1, "KV outage → last observed pin is served (no flap)");
   assert.equal(duringOutage.profile.system_prompt, TEXT_V1);
+  // …and (attempt 2) the outage is on the record, labelled as transport, not as a bad publish.
+  assert.equal(duringOutage.module.fallback?.cause, "transport");
+  assert.equal(duringOutage.module.fallback.pinned, V1);
+  assert.equal(outageErrors.length, 1);
+  assert.match(outageErrors[0], /TRANSPORT fault, not a bad publish/);
+  assert.equal(env._datapoints.filter((d) => d.blobs?.[0] === "module_fallback" && d.blobs?.[5] === "transport").length, 1);
   assert.equal(
     buildAnthropicSystemBlocks(duringOutage.profile, {}, "sdk")[0].text,
     buildAnthropicSystemBlocks(a.profile, {}, "sdk")[0].text,
@@ -299,7 +308,7 @@ console.log("✓ module: POSITIVE — prefix byte-stable per version, no version
   assert.equal(r2.module.fallback.pinned, V2);
   assert.match(r2.module.fallback.reason, /sha256 mismatch/);
   assert.equal(l2.length, 1);
-  assert.match(l2[0], /pinned m2026\.09\.04-2 is NOT servable \(sha256 mismatch/);
+  assert.match(l2[0], /pinned m2026\.09\.04-2 is NOT servable \(malformed: sha256 mismatch/);
   assert.match(l2[0], /serving m2026\.09\.04-1 instead/);
 
   // 5c. both bad → compiled.
@@ -311,15 +320,20 @@ console.log("✓ module: POSITIVE — prefix byte-stable per version, no version
   assert.equal(r3.module.fallback.pinned, V2);
   assert.equal(r3.profile.system_prompt, base.system_prompt);
 
-  // 5d. malformed PIN (not a version) → treated as unpinned, logged.
+  // 5d. malformed PIN (not a version) → compiled, AND as loud as a bad module
+  // (attempt 2): fallback on the record, cause bad_pin, datapoint.
   _resetModuleMemoForTests();
   const env4 = createMockEnv();
   env4._kv.set(modulePinKey("curriculum", PROFILE), JSON.stringify({ version: "latest" }));
   const { result: r4, lines: l4 } = await captureErrors(() => resolveProfile(env4, PROFILE));
   assert.equal(r4.module.source, "compiled");
-  assert.equal(r4.module.fallback, undefined);
+  assert.equal(r4.module.fallback?.cause, "bad_pin");
+  assert.match(r4.module.fallback.pinned, /latest/);
   assert.equal(l4.length, 1);
-  assert.match(l4[0], /pin is malformed/);
+  assert.match(l4[0], /pin record is malformed/);
+  const dp4 = env4._datapoints.find((d) => d.blobs?.[0] === "module_fallback");
+  assert.ok(dp4, "bad pin → module_fallback datapoint");
+  assert.equal(dp4.blobs[5], "bad_pin");
 
   // 5e. unparseable JSON at the doc key → rejected like any other bad doc.
   _resetModuleMemoForTests();
@@ -342,7 +356,6 @@ console.log("✓ module: POSITIVE — prefix byte-stable per version, no version
 }
 console.log("✓ module: NEGATIVE — bad pin → previous → compiled, one loud line + datapoint, sibling untouched");
 
-// ─── 6. end to end: the version is on the turn record, both routes ───────────
 const chatRequest = (over = {}) =>
   new Request("https://api.test/v1/chat/completions", {
     method: "POST",
@@ -356,6 +369,91 @@ const messagesRequest = () =>
     body: JSON.stringify({ model: "claude-mock", max_tokens: 64, messages: [{ role: "user", content: "안녕" }] }),
   });
 
+// ─── 5′. transport faults are loud AND distinguishable from bad publishes ─────
+{
+  // 5′a. warm pin, COLD doc memo, doc read throws → the last served module is
+  // served again (no flap to compiled), cause=transport, wording says so.
+  _resetModuleMemoForTests();
+  const env = createMockEnv();
+  seed(env, { pin: { version: V1, pinned_at: new Date().toISOString() }, docs: [await doc(V1, TEXT_V1), await doc(V2, TEXT_V2)] });
+  const first = await resolveProfile(env, PROFILE);
+  assert.equal(first.module.version, V1);
+  const prefixV1 = buildAnthropicSystemBlocks(first.profile, {}, "sdk")[0].text;
+  // Operator re-pins to V2; the isolate has never read V2's doc.
+  seed(env, { pin: { version: V2, previous: V1, pinned_at: new Date().toISOString() } });
+  const realGet = env.HPS_KV.get;
+  env.HPS_KV.get = async (key, fmt) => {
+    if (key.includes(":v:")) throw new Error("simulated KV outage on doc read");
+    return realGet(key, fmt);
+  };
+  const realWarn = console.warn;
+  console.warn = () => {};
+  let r, lines;
+  try {
+    ({ result: r, lines } = await captureErrors(() => resolveProfile(env, PROFILE, Date.now() + PIN_MEMO_MS + 1)));
+  } finally {
+    console.warn = realWarn;
+    env.HPS_KV.get = realGet;
+  }
+  assert.equal(r.module.version, V1, "doc read failed → the LAST SERVED module, not compiled");
+  assert.equal(r.module.source, "kv");
+  assert.equal(buildAnthropicSystemBlocks(r.profile, {}, "sdk")[0].text, prefixV1, "prefix bytes unchanged — no flap");
+  assert.equal(r.module.fallback?.cause, "transport");
+  assert.equal(r.module.fallback.pinned, V2);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /TRANSPORT fault, not a bad publish/);
+  assert.equal(lines[0].includes("NOT servable"), false, "a transport fault never reads as a bad publish");
+  const dp = env._datapoints.find((d) => d.blobs?.[0] === "module_fallback");
+  assert.equal(dp.blobs[5], "transport");
+  assert.equal(dp.blobs[2], V2);
+  // KV recovers: V2 is served, nothing memoised from the outage.
+  const after = await resolveProfile(env, PROFILE, Date.now() + 2 * PIN_MEMO_MS + 2);
+  assert.equal(after.module.version, V2);
+  assert.equal(after.module.fallback, undefined);
+
+  // 5′b. outage on a COLD isolate → compiled, cause transport, datapoint.
+  // (Only the module keys fail: the chat gate's session/roster reads share
+  // the namespace, and a truly total outage 500s at the gate before any
+  // module code runs — that path is not this task's.)
+  _resetModuleMemoForTests();
+  const env2 = createMockEnv();
+  const realGet2 = env2.HPS_KV.get;
+  env2.HPS_KV.get = async (key, fmt) => {
+    if (String(key).startsWith("module:")) throw new Error("simulated KV outage on module keys");
+    return realGet2(key, fmt);
+  };
+  console.warn = () => {};
+  let r2, l2;
+  try {
+    ({ result: r2, lines: l2 } = await captureErrors(() => resolveProfile(env2, PROFILE)));
+  } finally {
+    console.warn = realWarn;
+  }
+  assert.equal(r2.module.source, "compiled");
+  assert.equal(r2.module.fallback?.cause, "transport");
+  assert.equal(r2.module.fallback.pinned, "unknown");
+  assert.ok(r2.profile.system_prompt.length > CURRICULUM_MIN_CHARS, "never empty");
+  assert.equal(l2.length, 1);
+  assert.ok(env2._datapoints.some((d) => d.blobs?.[0] === "module_fallback" && d.blobs?.[5] === "transport"));
+
+  // 5′c. e2e: a transport-degraded turn carries x-hps-module-fallback and blob[6].
+  const ctx = makeCtx();
+  await withMockUpstream(
+    () => Response.json(openAIJsonBody({ content: "hi" })),
+    async () => {
+      const resp = await app.fetch(chatRequest(), env2, ctx);
+      assert.equal(resp.status, 200);
+      assert.equal(resp.headers.get("x-hps-module-fallback"), "unknown");
+      assert.match(resp.headers.get("x-hps-module"), /^compiled:/);
+    },
+  );
+  await ctx.settle();
+  const turn = env2._datapoints.find((d) => d.blobs?.[1] === PROFILE && d.blobs?.[0] === USER);
+  assert.equal(turn.blobs[6], "unknown");
+}
+console.log("✓ module: transport faults — last served module kept, cause=transport on record + datapoint, never 'bad publish'");
+
+// ─── 6. end to end: the version is on the turn record, both routes ───────────
 {
   // 6a. /v1/chat/completions (OpenAI-shape upstream): the system message the
   // upstream receives opens with the module text, the datapoint carries the

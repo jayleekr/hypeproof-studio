@@ -50,10 +50,13 @@ dataset = "hypeproof_studio"
 binding = "HPS_TRACES"
 bucket_name = "hps-traces"
 
-# Bundle .md and .html as static text imports
+# Bundle .md and .html as static text imports. .yaml: the cohort-harness
+# rules.yaml (scripts/cohort-harness/) is read by src/lib/harness-rules.ts so
+# the worker derives the child-cohort prompt rule from the SAME file CI's
+# validate.py enforces (dag task H attempt 2 — no second copy of the phrase).
 [[rules]]
 type = "Text"
-globs = ["**/*.md", "**/*.html"]
+globs = ["**/*.md", "**/*.html", "**/*.yaml"]
 fallthrough = true
 
 [vars]

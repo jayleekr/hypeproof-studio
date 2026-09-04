@@ -31,6 +31,15 @@
 //           not owned by one profile) and the pin model here is per-profile.
 //           Named here so nobody mistakes "not moved" for "not data".
 //
+//  ONE HARNESS RULE LIVES IN THE TEXT (attempt 2). The inventory above was one
+//  field too narrow: `child_missing_url_ban` asserts on the PROMPT, not on a
+//  profile key, so it left the binary with the prose. The serve-side validator
+//  now derives that requirement from the harness's own rules.yaml
+//  (lib/harness-rules.ts) and refuses a child-cohort module that lacks the
+//  phrase exactly like a checksum mismatch. The publisher runs the same check
+//  for fast feedback, but the WORKER check is the guarantee — anyone with
+//  wrangler can write the KV key directly.
+//
 // ─── Storage: KV, and why (decided independently of liveness.ts) ─────────────
 //
 //  The access pattern is: read on EVERY chat turn, write a few times per
@@ -84,9 +93,13 @@
 //  What would break caching SILENTLY, and what prevents it here:
 //   1. A version stamp inside the prefix. The version goes on the turn RECORD
 //      (usage_log analytics blob, x-hps-module header), never into the prompt.
-//   2. Prefix flapping: a transient KV failure falling back to compiled text
-//      for one request would alternate between two prefixes. The isolate memo
-//      keeps serving the last-known-good pin on a KV error instead.
+//   2. Prefix flapping on a transient KV fault. The isolate keeps the LAST
+//      SERVED module (`lastGood`) and serves it again on ANY transport failure
+//      — pin read or doc read — instead of dropping to the compiled text for
+//      one request. (Attempt 1 only covered the pin read; a warm pin with a
+//      cold doc memo fell straight through to compiled and raised the bad-
+//      publish alarm for a network fault.) A cold isolate with nothing served
+//      yet has no last-good and serves compiled — one PoP, until KV recovers.
 //   3. Cross-isolate divergence on fallback: if isolate A decides "bad module
 //      → previous" and isolate B decides "bad module → compiled", the cohort
 //      has two prefixes. The fallback chain is deterministic and driven by
@@ -101,13 +114,17 @@
 //                      the profile is affected; the class keeps running.
 //  Ignorant of content — the worker validates the ENVELOPE and, for kind
 //                      "curriculum", that `system_prompt` is a non-empty
-//                      string in a sane band. It does not read the prose.
-//                      Unknown fields are ignored (an older worker must accept
-//                      a newer publisher's doc).
-//  Announces loss    — a fallback is console.error'd on every pin refresh, an
-//                      Analytics Engine datapoint is written, and every turn
-//                      served under fallback carries both the served version
-//                      and the failed pin on its usage row and response header.
+//                      string in a sane band that satisfies the harness's
+//                      text-level rules for this cohort. It does not read the
+//                      prose. Unknown fields are ignored (an older worker must
+//                      accept a newer publisher's doc).
+//  Announces loss    — EVERY degraded state carries a `fallback` on the turn
+//                      record (usage blob[6] + x-hps-module-fallback), writes a
+//                      `module_fallback` Analytics datapoint with its CAUSE
+//                      (missing · malformed · bad_pin · transport), and logs
+//                      once per pin-refresh window. Bad pins and KV outages are
+//                      as loud as bad modules; a transport fault says so, so
+//                      nobody hunts a bad publish that does not exist.
 //                      Never an empty prompt: the compiled text is the floor.
 //
 // The second module kind, "session-design" (the Chalk contract), uses the same
@@ -115,6 +132,11 @@
 // differs. This worker consumes "curriculum" only.
 
 import { getProfile, type Profile } from "../profiles";
+import {
+  curriculumRequirementsFor,
+  checkCurriculumRequirements,
+  type CurriculumRequirements,
+} from "./harness-rules";
 
 export const MODULE_FORMAT = "hps-module/1";
 export type ModuleKind = "curriculum" | "session-design";
@@ -158,13 +180,31 @@ export interface ModulePin {
   by?: string;
 }
 
+/**
+ * Why a turn is not running on its pin.
+ *   missing    — the pinned version has no document at its key
+ *   malformed  — the document exists and the worker refused it (envelope,
+ *                checksum, band, or a harness text rule)
+ *   bad_pin    — the pin record itself is not a version
+ *   transport  — KV could not be read; the bytes served are the last known
+ *                good (or compiled on a cold isolate). NOT a bad publish.
+ */
+export type FallbackCause = "missing" | "malformed" | "bad_pin" | "transport";
+
+export interface ModuleFallback {
+  /** The pin that could not be honoured (a version, or the raw bad pin value). */
+  pinned: string;
+  reason: string;
+  cause: FallbackCause;
+}
+
 export interface ModuleResolution {
   kind: "curriculum";
   /** `m2026.09.04-1` when served from KV; `compiled:<12 hex>` otherwise. */
   version: string;
   source: "kv" | "compiled";
-  /** Present only when the pinned version could not be served. Loud on purpose. */
-  fallback?: { pinned: string; reason: string };
+  /** Present in every degraded state. Loud on purpose. */
+  fallback?: ModuleFallback;
 }
 
 export interface ResolvedProfile {
@@ -204,6 +244,19 @@ export function isModuleVersion(v: unknown): v is string {
   return typeof v === "string" && MODULE_VERSION_RE.test(v);
 }
 
+export interface ValidateExpect {
+  kind: ModuleKind;
+  profileId: string;
+  version?: string;
+  /**
+   * Text-level rules the harness would apply to this cohort's prompt
+   * (lib/harness-rules.ts curriculumRequirementsFor). Omitted = none, which is
+   * only correct for a non-child cohort; callers that have the profile MUST
+   * pass it. resolveProfile and the publisher both do.
+   */
+  requirements?: CurriculumRequirements;
+}
+
 /**
  * Validate a raw KV value as a module document for (kind, profileId).
  *
@@ -211,10 +264,7 @@ export function isModuleVersion(v: unknown): v is string {
  * field, because the person reading the log is the one who just published and
  * needs to know what to fix — not "invalid module".
  */
-export async function validateModuleDoc(
-  raw: unknown,
-  expect: { kind: ModuleKind; profileId: string; version?: string },
-): Promise<ModuleValidation> {
+export async function validateModuleDoc(raw: unknown, expect: ValidateExpect): Promise<ModuleValidation> {
   const bad = (reason: string): ModuleValidation => ({ ok: false, reason });
   if (!isRecord(raw)) return bad("document is not a JSON object");
   if (raw.format !== MODULE_FORMAT) {
@@ -254,6 +304,12 @@ export async function validateModuleDoc(
       return bad(`content.system_prompt is ${sp.length} chars; ceiling is ${CURRICULUM_MAX_CHARS}`);
     }
     if (sp.includes("\u0000")) return bad("content.system_prompt contains a NUL byte");
+    // The harness rule that lives in the text (attempt 2). Derived from
+    // rules.yaml, never hardcoded here.
+    if (expect.requirements) {
+      const violated = checkCurriculumRequirements(sp, expect.requirements);
+      if (violated) return bad(violated);
+    }
   }
   // "session-design" has no consumer in this worker yet; envelope-only.
 
@@ -307,7 +363,9 @@ export async function makeModuleDoc(input: {
 // version doc that validated is kept for the life of the isolate (immutable);
 // a version doc that FAILED is remembered for PIN_MEMO_MS so a bad publish is
 // not re-fetched on every turn, yet a hot-fix (republish + re-pin) still
-// propagates within a minute.
+// propagates within a minute. A transport failure is never memoised as a
+// verdict. `lastGood` is the last module actually served from KV, kept so a
+// transport fault serves the same bytes instead of flapping the prefix.
 
 type KvLike = Pick<KVNamespace, "get">;
 
@@ -316,20 +374,30 @@ interface PinMemo {
   pin: ModulePin | null;
   at: number;
 }
-type DocMemo = { ok: true; doc: ModuleDoc } | { ok: false; reason: string; at: number };
+type PinRead =
+  | { pin: ModulePin | null; transport?: false; badPin?: undefined }
+  | { pin: ModulePin | null; transport: true; badPin?: undefined }
+  | { pin: null; transport?: false; badPin: { raw: string; reason: string } };
+
+type DocMemo = { ok: true; doc: ModuleDoc } | { ok: false; cause: "missing" | "malformed"; reason: string; at: number };
+type DocRead = DocMemo | { ok: false; cause: "transport"; reason: string };
 
 const pinMemo = new Map<string, PinMemo>();
 const docMemo = new Map<string, DocMemo>();
 const compiledVersionMemo = new Map<string, string>();
-/** Last fallback we already shouted about, per profile — so the log line is once per refresh, not per turn. */
+const lastGood = new Map<string, ResolvedProfile>();
+/** Last fallback we already shouted about, per profile — once per refresh window, not per turn. */
 const announced = new Map<string, string>();
 
 export function _resetModuleMemoForTests(): void {
   pinMemo.clear();
   docMemo.clear();
   compiledVersionMemo.clear();
+  lastGood.clear();
   announced.clear();
 }
+
+const UNPARSEABLE = Symbol("unparseable");
 
 async function kvGetJson(kv: KvLike, key: string): Promise<unknown> {
   // KV returns the parsed value for "json"; the value may also arrive as a
@@ -341,53 +409,60 @@ async function kvGetJson(kv: KvLike, key: string): Promise<unknown> {
     v = await kv.get(key, "json");
   } catch (err) {
     // KV parses "json" itself and throws on a value that is not JSON. That is
-    // a MALFORMED module (memoise + announce), not a transport failure (retry).
-    if (err instanceof SyntaxError) return { __unparseable: true };
+    // a MALFORMED value (memoise + announce), not a transport failure (retry).
+    if (err instanceof SyntaxError) return UNPARSEABLE;
     throw err;
   }
   if (typeof v === "string") {
     try {
       return JSON.parse(v);
     } catch {
-      return { __unparseable: true };
+      return UNPARSEABLE;
     }
   }
   return v;
 }
 
-async function readPin(kv: KvLike, profileId: string, now: number): Promise<ModulePin | null> {
+async function readPin(kv: KvLike, profileId: string, now: number): Promise<PinRead> {
   const key = modulePinKey("curriculum", profileId);
   const memo = pinMemo.get(profileId);
-  if (memo && now - memo.at < PIN_MEMO_MS) return memo.pin;
+  if (memo && now - memo.at < PIN_MEMO_MS) return { pin: memo.pin };
   let raw: unknown;
   try {
     raw = await kvGetJson(kv, key);
   } catch (err) {
     // Transient KV failure. Keep serving what we last saw (prefix stability
-    // matters more than a 30 s-fresh pin) — and say so.
+    // matters more than a 30 s-fresh pin) — and say so, upstream, loudly.
     console.warn(`[module] KV read failed for ${key}; serving last observed pin`, err);
     if (memo) {
       pinMemo.set(profileId, { pin: memo.pin, at: now });
-      return memo.pin;
+      return { pin: memo.pin, transport: true };
     }
-    return null;
+    return { pin: null, transport: true };
   }
-  let pin: ModulePin | null = null;
-  if (raw != null) {
-    const v = validatePin(raw);
-    if (v.ok) pin = v.pin;
-    else console.error(`[module] ${key} is malformed (${v.reason}) — treating as unpinned`);
+  if (raw == null) {
+    pinMemo.set(profileId, { pin: null, at: now });
+    return { pin: null };
   }
-  pinMemo.set(profileId, { pin, at: now });
-  return pin;
+  const v = raw === UNPARSEABLE ? { ok: false as const, reason: "pin is not JSON" } : validatePin(raw);
+  if (!v.ok) {
+    // A bad pin is a bad publish, not "no pin" — it must be as loud as a bad
+    // module. Memoise as unpinned so the turn runs on compiled text.
+    pinMemo.set(profileId, { pin: null, at: now });
+    const rawStr = raw === UNPARSEABLE ? "<not json>" : JSON.stringify(raw).slice(0, 80);
+    return { pin: null, badPin: { raw: rawStr, reason: v.reason } };
+  }
+  pinMemo.set(profileId, { pin: v.pin, at: now });
+  return { pin: v.pin };
 }
 
 async function readDoc(
   kv: KvLike,
   profileId: string,
   version: string,
+  requirements: CurriculumRequirements,
   now: number,
-): Promise<DocMemo> {
+): Promise<DocRead> {
   const key = moduleDocKey("curriculum", profileId, version);
   const memo = docMemo.get(key);
   if (memo && (memo.ok || now - memo.at < PIN_MEMO_MS)) return memo;
@@ -396,15 +471,17 @@ async function readDoc(
     raw = await kvGetJson(kv, key);
   } catch (err) {
     console.warn(`[module] KV read failed for ${key}`, err);
-    // Do not memoise a transport failure as "bad module".
-    return memo ?? { ok: false, reason: "KV read failed", at: 0 };
+    // Never memoise a transport failure as a verdict about the module.
+    return { ok: false, cause: "transport", reason: `KV read failed for ${version}` };
   }
   let out: DocMemo;
   if (raw == null) {
-    out = { ok: false, reason: "no document at this key (published? typo in version?)", at: now };
+    out = { ok: false, cause: "missing", reason: "no document at this key (published? typo in version?)", at: now };
+  } else if (raw === UNPARSEABLE) {
+    out = { ok: false, cause: "malformed", reason: "document is not JSON", at: now };
   } else {
-    const v = await validateModuleDoc(raw, { kind: "curriculum", profileId, version });
-    out = v.ok ? { ok: true, doc: v.doc } : { ok: false, reason: v.reason, at: now };
+    const v = await validateModuleDoc(raw, { kind: "curriculum", profileId, version, requirements });
+    out = v.ok ? { ok: true, doc: v.doc } : { ok: false, cause: "malformed", reason: v.reason, at: now };
   }
   docMemo.set(key, out);
   return out;
@@ -425,26 +502,28 @@ export interface ModuleEnv {
   HPS_ANALYTICS?: Pick<AnalyticsEngineDataset, "writeDataPoint">;
 }
 
-function announceFallback(
-  env: ModuleEnv,
-  profileId: string,
-  pinned: string,
-  served: string,
-  reason: string,
-): void {
-  // Once per (profile, pinned, served) per isolate — i.e. once per pin refresh
-  // window, not once per turn. The per-turn signal is the usage row + header.
-  const sig = `${pinned}→${served}:${reason}`;
+function announceFallback(env: ModuleEnv, profileId: string, fb: ModuleFallback, served: string): void {
+  // Once per (profile, cause, pinned, served) per isolate — i.e. once per pin
+  // refresh window, not once per turn. The per-turn signal is the usage row
+  // (blob[5]/[6]) and the x-hps-module(-fallback) headers.
+  const sig = `${fb.cause}:${fb.pinned}→${served}:${fb.reason}`;
   if (announced.get(profileId) === sig) return;
   announced.set(profileId, sig);
-  console.error(
-    `[module] curriculum for ${profileId}: pinned ${pinned} is NOT servable (${reason}); ` +
-      `serving ${served} instead. Fix: publish a good version and re-pin, or \`npm run module -- pin ${profileId} <version>\`.`,
-  );
+  const line =
+    fb.cause === "transport"
+      ? `[module] curriculum for ${profileId}: KV unreachable (${fb.reason}); serving ${served} from isolate memory. ` +
+        `This is a TRANSPORT fault, not a bad publish — check KV/Cloudflare status, not the module.`
+      : fb.cause === "bad_pin"
+        ? `[module] curriculum for ${profileId}: pin record is malformed (${fb.reason}; raw ${fb.pinned}); ` +
+          `serving ${served}. Fix: \`npm run module -- pin ${profileId} <version>\` or \`unpin\`.`
+        : `[module] curriculum for ${profileId}: pinned ${fb.pinned} is NOT servable (${fb.cause}: ${fb.reason}); ` +
+          `serving ${served} instead. Fix: publish a good version and re-pin, or \`npm run module -- pin ${profileId} <version>\`.`;
+  console.error(line);
   try {
     env.HPS_ANALYTICS?.writeDataPoint({
       indexes: [profileId],
-      blobs: ["module_fallback", profileId, pinned, served, reason.slice(0, 200)],
+      // blobs: discriminator, profile, pinned, served, reason, CAUSE
+      blobs: ["module_fallback", profileId, fb.pinned, served, fb.reason.slice(0, 200), fb.cause],
       doubles: [1],
     });
   } catch {
@@ -455,12 +534,17 @@ function announceFallback(
 /**
  * The compiled profile with its curriculum module applied.
  *
- *   no pin              → compiled text, version `compiled:<hash>`
- *   pin → good doc      → module text, version = pin
- *   pin → bad doc       → pin.previous if good, else compiled; `fallback` set
+ *   no pin                      → compiled text, version `compiled:<hash>`, silent
+ *   pin → good doc              → module text, version = pin
+ *   pin → missing/malformed doc → pin.previous if good, else compiled; fallback set
+ *   bad pin record              → compiled; fallback cause bad_pin
+ *   KV unreachable              → last served module if any, else compiled;
+ *                                 fallback cause transport (says so)
  *
- * Returns null only when the profile id itself is unknown — module state can
- * never make a known profile disappear (closed on error).
+ * Every degraded row is announced (console.error once per refresh window +
+ * `module_fallback` datapoint) and carried on the turn record. Returns null
+ * only when the profile id itself is unknown — module state can never make a
+ * known profile disappear (closed on error).
  */
 export async function resolveProfile(
   env: ModuleEnv,
@@ -469,7 +553,9 @@ export async function resolveProfile(
 ): Promise<ResolvedProfile | null> {
   const base = getProfile(profileId);
   if (!base) return null;
-  const compiled = async (fallback?: ModuleResolution["fallback"]): Promise<ResolvedProfile> => ({
+  const requirements = curriculumRequirementsFor(base);
+
+  const compiled = async (fallback?: ModuleFallback): Promise<ResolvedProfile> => ({
     profile: base,
     module: {
       kind: "curriculum",
@@ -478,37 +564,70 @@ export async function resolveProfile(
       ...(fallback ? { fallback } : {}),
     },
   });
+  const withFallback = (r: ResolvedProfile, fallback: ModuleFallback): ResolvedProfile => ({
+    profile: r.profile,
+    module: { ...r.module, fallback },
+  });
+  /** A transport fault: same bytes as last time if we have them, never a flap. */
+  const degradedTransport = async (pinned: string, reason: string): Promise<ResolvedProfile> => {
+    const fb: ModuleFallback = { pinned, reason, cause: "transport" };
+    const prev = lastGood.get(profileId);
+    const out = prev ? withFallback(prev, fb) : await compiled(fb);
+    announceFallback(env, profileId, fb, out.module.version);
+    return out;
+  };
 
-  const pin = await readPin(env.HPS_KV, profileId, now);
-  if (!pin) return compiled();
+  const pinRead = await readPin(env.HPS_KV, profileId, now);
+  if (pinRead.badPin) {
+    const fb: ModuleFallback = { pinned: pinRead.badPin.raw, reason: pinRead.badPin.reason, cause: "bad_pin" };
+    const out = await compiled(fb);
+    announceFallback(env, profileId, fb, out.module.version);
+    return out;
+  }
+  const pin = pinRead.pin;
+  if (!pin) {
+    if (pinRead.transport) return degradedTransport(lastGood.get(profileId)?.module.version ?? "unknown", "pin read failed");
+    return compiled();
+  }
 
   const tryVersion = async (version: string) => {
-    const d = await readDoc(env.HPS_KV, profileId, version, now);
-    if (!d.ok) return { ok: false as const, reason: d.reason };
+    const d = await readDoc(env.HPS_KV, profileId, version, requirements, now);
+    if (!d.ok) return d;
     const content = d.doc.content as unknown as CurriculumContent;
-    return {
-      ok: true as const,
-      resolved: {
-        profile: { ...base, system_prompt: content.system_prompt },
-        module: { kind: "curriculum" as const, version, source: "kv" as const },
-      },
+    const resolved: ResolvedProfile = {
+      profile: { ...base, system_prompt: content.system_prompt },
+      module: { kind: "curriculum", version, source: "kv" },
     };
+    return { ok: true as const, resolved };
   };
 
   const cur = await tryVersion(pin.version);
-  if (cur.ok) return cur.resolved;
+  if (cur.ok) {
+    lastGood.set(profileId, cur.resolved);
+    if (pinRead.transport) {
+      // The doc was memoised, so the bytes are right — but say the pin read
+      // failed, or an outage that outlives the memo goes unseen.
+      const fb: ModuleFallback = { pinned: pin.version, reason: "pin read failed; served from isolate memory", cause: "transport" };
+      announceFallback(env, profileId, fb, pin.version);
+      return withFallback(cur.resolved, fb);
+    }
+    return cur.resolved;
+  }
+  if (cur.cause === "transport") return degradedTransport(pin.version, cur.reason);
 
+  // The pinned version is missing or malformed: a bad publish. Deterministic
+  // chain — previous (data in the pin), then compiled.
+  const fb: ModuleFallback = { pinned: pin.version, reason: cur.reason, cause: cur.cause };
   if (pin.previous && pin.previous !== pin.version) {
     const prev = await tryVersion(pin.previous);
     if (prev.ok) {
-      announceFallback(env, profileId, pin.version, pin.previous, cur.reason);
-      return {
-        ...prev.resolved,
-        module: { ...prev.resolved.module, fallback: { pinned: pin.version, reason: cur.reason } },
-      };
+      lastGood.set(profileId, prev.resolved);
+      announceFallback(env, profileId, fb, pin.previous);
+      return withFallback(prev.resolved, fb);
     }
+    if (prev.cause === "transport") return degradedTransport(pin.version, `${cur.reason}; previous ${pin.previous}: ${prev.reason}`);
   }
-  const out = await compiled({ pinned: pin.version, reason: cur.reason });
-  announceFallback(env, profileId, pin.version, out.module.version, cur.reason);
+  const out = await compiled(fb);
+  announceFallback(env, profileId, fb, out.module.version);
   return out;
 }

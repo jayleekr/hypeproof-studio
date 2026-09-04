@@ -25,6 +25,11 @@
 // it, this tool refuses to pin it. One format, one validator, one drift lock
 // (test/module-distribution.test.mjs).
 //
+// Child cohorts: the harness rule that lives in prompt text
+// (rules.yaml child.required_prompt_phrase, CI check child_missing_url_ban) is
+// applied here before any write AND by the worker at serve time — a module
+// that drops the phrase is refused on both sides (test/module-child-guard).
+//
 // Policy: versions are IMMUTABLE. `publish` refuses to overwrite an existing
 // version unless --force — a republish under the same name would make the
 // worker's per-isolate memo and prompt cache disagree about what a version is.
@@ -52,7 +57,7 @@ registerHooks({
     return nextResolve(specifier, context);
   },
   load(url, context, nextLoad) {
-    if (url.endsWith(".md") || url.endsWith(".html")) {
+    if (url.endsWith(".md") || url.endsWith(".html") || url.endsWith(".yaml")) {
       const text = readFileSync(fileURLToPath(url), "utf8");
       return { format: "module", shortCircuit: true, source: `export default ${JSON.stringify(text)};` };
     }
@@ -62,6 +67,10 @@ registerHooks({
 
 const modules = await import("../src/lib/modules.ts");
 const { getProfile } = await import("../src/profiles/index.ts");
+// The harness's text-level rules for this cohort (child.required_prompt_phrase),
+// derived from rules.yaml the same way the worker derives them. This is the
+// fast-feedback copy of the check; the WORKER's is the guarantee.
+const { curriculumRequirementsFor } = await import("../src/lib/harness-rules.ts");
 const {
   makeModuleDoc,
   validateModuleDoc,
@@ -194,7 +203,8 @@ async function buildDoc(pid: string, file: string, version: string): Promise<Mod
   const text = readFileSync(file, "utf8");
   const notes = typeof flags.get("notes") === "string" ? (flags.get("notes") as string) : undefined;
   const doc = await makeModuleDoc({ kind: KIND, profileId: pid, version, content: { system_prompt: text }, notes });
-  const v = await validateModuleDoc(doc, { kind: KIND, profileId: pid, version });
+  const requirements = curriculumRequirementsFor(getProfile(pid)!);
+  const v = await validateModuleDoc(doc, { kind: KIND, profileId: pid, version, requirements });
   if (!v.ok) die(`the worker would reject this document: ${v.reason}`);
   return doc;
 }
@@ -202,7 +212,8 @@ async function buildDoc(pid: string, file: string, version: string): Promise<Mod
 async function checkServable(pid: string, version: string): Promise<{ ok: true; doc: ModuleDoc } | { ok: false; reason: string }> {
   const raw = kvGet(moduleDocKey(KIND, pid, version));
   if (raw == null) return { ok: false, reason: "no document at this key" };
-  return validateModuleDoc(raw, { kind: KIND, profileId: pid, version });
+  const requirements = curriculumRequirementsFor(getProfile(pid)!);
+  return validateModuleDoc(raw, { kind: KIND, profileId: pid, version, requirements });
 }
 
 function readPin(pid: string): ModulePin | null {
