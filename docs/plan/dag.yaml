@@ -404,7 +404,14 @@ tasks:
     layer: m
     model: fable-5-1
     issue: null
-    depends_on: [B, C, F]
+    # F removed from depends_on 2026-09-04. It was orchestrator caution, not a
+    # real constraint: F's files (chalk/, worker/src/ui/, worker/src/index.ts)
+    # are disjoint from H's (worker/src/profiles/, prompts/). The one shared
+    # directory is worker/src/lib/, where F touches tokens.ts for shared auth
+    # and H needs new loader/cache code — different files. Serialising them
+    # delayed the single most structural task in the plan behind an unrelated
+    # one. Both now run in parallel.
+    depends_on: [B, C]
     human_gate: null
     spec_section: "§2, §5"
     files:
