@@ -137,6 +137,22 @@ results:
 #     no shared helper; neither test references the other's surface.
 #   worker/package.json        -> CONFLICT. Both append to the single-line
 #     `test` script. Resolution is concatenation.
+#
+# MERGE HAZARD, learned the hard way on task F (2026-09-04). Resolving that
+# conflict by UNION is wrong, and it fails silently until a suite runs.
+#
+# Union can only add entries; it cannot represent a DELETION. Task F moved
+# instructor-console.test.mjs from worker/test/ to chalk/test/ and correctly
+# dropped its line from worker's test script. The union resolution resurrected
+# that line, so the merged worker suite invoked a file that no longer existed:
+#     Error: Cannot find module .../worker/test/instructor-console.test.mjs
+# Both branches were individually green; only the merged tree was broken —
+# exactly the class of failure no per-task evaluator can catch.
+#
+# Correct resolution: take the union of entries, then REMOVE any whose file
+# does not exist in the merged tree. Better still, verify by running the suite
+# after every merge rather than trusting the resolution. Do this for G, which
+# will hit the same conflict.
 
 tasks:
   - id: A
