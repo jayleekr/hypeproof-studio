@@ -20,10 +20,18 @@
 //             On pre-fix code no row is created at all, so this MUST fail
 //             before the change.
 //   NEGATIVE  usage_log is also the billing ledger. Once failures write rows,
-//             usage aggregation must count successes only or failures get
-//             billed. Asserted by running the PRODUCTION aggregation SQL
-//             against a real SQLite database seeded with successes + failures
-//             — not by regex over the query text.
+//             usage aggregation must not bill turns that cost nothing.
+//             Asserted by running the PRODUCTION aggregation SQL against a
+//             real SQLite database seeded with successes + failures — not by
+//             regex over the query text.
+//
+// AMENDED by dag task L (settled by Jay 2026-09-04, option (c)): the billing
+// predicate is no longer "status < 400". B's negative control originally
+// asserted that NO failed row is ever billed, which conflated "did this turn
+// help the student" with "did upstream charge us". Those diverge on outbound
+// moderation and on mid-stream interruptions — turns that failed AND cost real
+// money. Billing now asks "were tokens spent"; health still asks about status.
+// The seeded rows below are unchanged; the expected numbers moved.
 //
 // Run: node --experimental-strip-types test/usage-log-status.test.mjs
 
@@ -283,12 +291,19 @@ function anthropicEnv(opts = {}) {
   console.log("✓ #684 messages: 200 turn unchanged");
 }
 
-// --- NEGATIVE CONTROL: failures must not be billed ---------------------------
+// --- NEGATIVE CONTROL: nothing unspent is billed -----------------------------
 //
 // This is the half of #684 that can quietly cost money. It runs the PRODUCTION
 // aggregation SQL (imported, not retyped) against a real SQLite database
-// holding one success and two failures. Asserting on the query TEXT would only
-// prove a string contains "status"; this proves the numbers.
+// holding one success and three failures. Asserting on the query TEXT would
+// only prove a string contains "status"; this proves the numbers.
+//
+// Task L amendment: two of the failure rows carry deliberately NON-ZERO token
+// columns, which under the old `status < 400` predicate meant "not billed".
+// Under (c) they ARE billed, because the columns say tokens were spent. That
+// is the intended behaviour — see the file header. What must still never
+// happen is billing a turn that spent nothing, which the fourth (zero-cost)
+// row and the assertion at the end of this block pin.
 {
   const { DatabaseSync } = await import("node:sqlite");
   const { USAGE_LAST_HOUR_SQL } = await import("../src/lib/analytics.ts");
@@ -310,36 +325,48 @@ function anthropicEnv(opts = {}) {
        (cohort_id, user_id, profile_id, model, tokens_in, tokens_out, cache_read, cache_write, latency_ms, status)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  // 1 billable success …
+  // 1 healthy turn …
   ins.run(COHORT, USER, PROFILE, "m", 100, 20, 7, 3, 900, 200);
-  // … and 2 failures that must NOT be billed. Non-zero token columns on the
-  // failure rows are deliberate: a filter that merely relies on failures
-  // carrying 0 tokens is not a filter, and would silently start billing the
-  // day a partial/streaming failure records real usage.
+  // … and 2 failures carrying NON-ZERO token columns. Deliberate: a predicate
+  // that merely relies on failures having 0 tokens is not a predicate. Under
+  // task L these ARE billed (the columns say upstream charged us) while still
+  // counting as errors on the board (status says the student got nothing).
   ins.run(COHORT, USER, PROFILE, "m", 999, 999, 999, 999, 120, 429);
   ins.run(COHORT, USER, PROFILE, "m", 999, 999, 999, 999, 50, 502);
+  // … and 1 failure that genuinely cost nothing. THIS is the row that must
+  // never be billed, and it is excluded by arithmetic rather than by status.
+  ins.run(COHORT, USER, PROFILE, "m", 0, 0, 0, 0, 30, 400);
 
   // 1. /admin/stats last-hour aggregate
   const stats = db.prepare(USAGE_LAST_HOUR_SQL).get();
-  assert.equal(Number(stats.tokens_in), 100, "/admin/stats bills successes only (tokens_in)");
-  assert.equal(Number(stats.tokens_out), 20, "/admin/stats bills successes only (tokens_out)");
-  assert.equal(Number(stats.errors), 2, "errors is no longer structurally zero");
-  assert.equal(Number(stats.messages), 1, "messages counts successful turns only");
-  assert.equal(Number(stats.requests), 3, "requests counts every attempt (success + failure)");
+  assert.equal(Number(stats.tokens_in), 2098, "/admin/stats bills spend (100 + 999 + 999)");
+  assert.equal(Number(stats.tokens_out), 2018, "/admin/stats bills spend (20 + 999 + 999)");
+  assert.equal(Number(stats.errors), 3, "errors is no longer structurally zero");
+  assert.equal(Number(stats.messages), 1, "messages counts HEALTHY turns only");
+  assert.equal(Number(stats.requests), 4, "requests counts every attempt (success + failure)");
 
   // 2. scripts/usage-report.mjs — the operator-facing billing report
   const rows = db.prepare(buildSql({ days: 30, by: "model", cohort: null })).all();
   assert.equal(rows.length, 1, "one model dimension");
   const r = rows[0];
-  assert.equal(Number(r.tokens_in), 100, "usage-report bills successes only (tokens_in)");
-  assert.equal(Number(r.tokens_out), 20, "usage-report bills successes only (tokens_out)");
-  assert.equal(Number(r.cache_read), 7, "usage-report bills successes only (cache_read)");
-  assert.equal(Number(r.cache_write), 3, "usage-report bills successes only (cache_write)");
-  assert.equal(Number(r.errors), 2, "failures are counted as errors");
-  assert.equal(Number(r.requests), 1, "requests = billable (successful) turns");
-  assert.equal(Number(r.avg_latency_ms), 900, "latency averaged over successes only");
+  assert.equal(Number(r.tokens_in), 2098, "usage-report bills spend (tokens_in)");
+  assert.equal(Number(r.tokens_out), 2018, "usage-report bills spend (tokens_out)");
+  assert.equal(Number(r.cache_read), 2005, "usage-report bills spend (cache_read: 7 + 999 + 999)");
+  assert.equal(Number(r.cache_write), 2001, "usage-report bills spend (cache_write: 3 + 999 + 999)");
+  assert.equal(Number(r.errors), 3, "failures are counted as errors");
+  assert.equal(Number(r.requests), 1, "requests = healthy turns");
+  assert.equal(Number(r.avg_latency_ms), 900, "latency averaged over healthy turns only");
+
+  // The zero-cost failure contributes nothing anywhere in the billing columns.
+  const { USAGE_BILLABLE } = await import("../src/lib/analytics.ts");
+  const unspent = db
+    .prepare(`SELECT COUNT(*) AS n FROM usage_log WHERE ${USAGE_BILLABLE} AND tokens_in = 0`)
+    .get();
+  assert.equal(Number(unspent.n), 0, "a turn that spent nothing is never billed");
   db.close();
-  console.log("✓ #684 accounting: failed rows are counted as errors and NEVER billed");
+  console.log(
+    "✓ #684/L accounting: failures count as errors; only turns that actually spent tokens are billed",
+  );
 }
 
 console.log("usage-log-status.test.mjs: all tests passed");

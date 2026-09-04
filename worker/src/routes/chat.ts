@@ -641,34 +641,45 @@ chat.post("/chat/completions", async (c) => {
       tin = j.usage?.prompt_tokens ?? 0;
       tout = j.usage?.completion_tokens ?? 0;
     }
-    const log = mkLog(tin, tout, cr, cc);
-    record(log);
     // #320 — outbound moderation, MINOR cohorts, non-stream only (REQ-O3).
-    // Usage was recorded above (the tokens were genuinely spent) but the
-    // blocked text never reaches the client and the trace turn body is not
+    // The blocked text never reaches the client and the trace turn body is not
     // persisted. Streaming outbound is the documented follow-up.
-    if (isMinorCohort(profile)) {
-      const hit = screenText(text);
-      if (hit) {
-        reportModerationHit(
-          env,
-          c.get("requestId"),
-          { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "outbound" },
-          hit,
-        );
-        return c.json(
-          {
-            error: {
-              message: MODERATION_BLOCK_MESSAGE_KO,
-              type: "moderation_block",
-              category: hit.category,
-              request_id: c.get("requestId"),
-            },
+    //
+    // The screen runs BEFORE the usage row is written (dag task L). It used to
+    // run after `record(mkLog(...))` with the default 200, so an outbound block
+    // wrote a healthy-looking 200 carrying real tokens: a child whose every
+    // turn was refused emitted normal-cadence 200s and rendered on the
+    // instructor board as one of the MORE active seats. That is the exact
+    // failure #684 exists to eliminate, surviving on one of the two moderation
+    // paths — the inbound path has always written 400/MODERATION_BLOCK.
+    //
+    // Both directions now write the same row shape, because the student
+    // experience is the same ("I typed something and the coach refused me").
+    // The tokens stay on the row and stay billable (USAGE_BILLABLE counts
+    // spend, not success) — they were genuinely charged by upstream, and
+    // zeroing them to make the board look right would falsify the ledger.
+    const outboundHit = isMinorCohort(profile) ? screenText(text) : null;
+    if (outboundHit) {
+      record(mkLog(tin, tout, cr, cc, 400, ERROR_KIND.MODERATION_BLOCK));
+      reportModerationHit(
+        env,
+        c.get("requestId"),
+        { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "outbound" },
+        outboundHit,
+      );
+      return c.json(
+        {
+          error: {
+            message: MODERATION_BLOCK_MESSAGE_KO,
+            type: "moderation_block",
+            category: outboundHit.category,
+            request_id: c.get("requestId"),
           },
-          400,
-        );
-      }
+        },
+        400,
+      );
     }
+    record(mkLog(tin, tout, cr, cc));
     // #9c trace: persist turn meta + optional R2 body. Fire-and-forget — must
     // not block the response. Skipped when client did not send trial headers.
     if (trial) {
@@ -737,9 +748,10 @@ chat.post("/chat/completions", async (c) => {
     cache_read_input_tokens: number;
     cache_creation_input_tokens: number;
   }) => {
-    // Tokens produced before the break are KEPT on the row (they were really
-    // spent) — the success-only billing predicate is what excludes them, so
-    // the number stays queryable instead of being erased.
+    // Tokens produced before the break are KEPT on the row: they were really
+    // spent, so they are really billed (USAGE_BILLABLE counts spend, not
+    // success — dag task L). The 502 is what makes the seat render as a
+    // failure on the board; the two answers no longer have to agree.
     record(
       mkLog(
         u.input_tokens,
