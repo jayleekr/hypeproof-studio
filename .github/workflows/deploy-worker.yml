@@ -15,6 +15,13 @@ on:
         description: "Run scripts/verify-prod.sh after deploy"
         type: boolean
         default: true
+      # dag.yaml task D / #676. Explicit, and never a default — the whole
+      # point is that deploying over a live class has to be a decision
+      # somebody made on purpose and left a record of.
+      override_live_session:
+        description: "Deploy even if a class is live (recorded in the job summary)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -82,6 +89,37 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Resolved worker version: $version"
+
+      # dag.yaml task D (#676) — the live-class deploy freeze.
+      #
+      # 2026-08-22: #668 deployed one hour into a live class. The rule against
+      # that existed only in prose, so nothing enforced it. This step asks the
+      # worker — which already tracks every cohort's ActiveSession — instead of
+      # maintaining a second calendar that only one of the two ever gets
+      # updated.
+      #
+      # Placed AFTER "Resolve worker version" on purpose: the override record
+      # carries task C's version, so afterwards the audit trail answers "what
+      # was deployed over a live class", not just "something was".
+      #
+      # Fails CLOSED — an unreachable API, a rejected credential, an unset
+      # secret or a garbage payload all block. Rationale lives in the header of
+      # scripts/check-live-sessions.mjs; the short version is that a check
+      # which fails open is indistinguishable in the log from a check that
+      # passed, so it looks like protection while providing none.
+      #
+      # Controls: node scripts/test-check-live-sessions.mjs (no class, no
+      # deploy, no network).
+      - name: Live-session deploy freeze (#676)
+        id: freeze
+        if: ${{ !inputs.dry_run }}
+        env:
+          HPS_API_BASE: ${{ env.PROD }}
+          HPS_FREEZE_OVERRIDE: ${{ inputs.override_live_session }}
+          HPS_FREEZE_CONTEXT: >-
+            worker ${{ steps.version.outputs.version }} from
+            ${{ inputs.ref }} @ ${{ github.sha }}, dispatched by ${{ github.actor }}
+        run: node scripts/check-live-sessions.mjs
 
       - name: Deploy Worker
         if: ${{ !inputs.dry_run }}

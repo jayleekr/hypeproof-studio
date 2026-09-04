@@ -24,6 +24,22 @@ jobs:
       - name: Regression — tag-is-prerelease positive + negative controls
         run: bash scripts/test-tag-is-prerelease.sh
 
+  live-session-freeze:
+    name: deploy-freeze / live-session controls
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # dag.yaml task D control (#676): the live-class freeze used by
+      # deploy-worker.yml / build-mac.yml / build-windows.yml must be
+      # exercisable with no live class and no real deploy. Fixtures + a
+      # planted clock; milliseconds, no network. Includes the fail-closed
+      # cases, which are the ones nobody would otherwise ever see run.
+      - name: Regression — live-session freeze positive/negative/override controls
+        run: node scripts/test-check-live-sessions.mjs
+
   worker-test:
     name: worker / test
     runs-on: ubuntu-latest
