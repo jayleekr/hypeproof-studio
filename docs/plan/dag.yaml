@@ -266,6 +266,30 @@ tasks:
       #668 shipped one hour into a live class. The worker already knows session
       state (getActiveSession) — ask it, don't maintain a separate calendar.
 
+      BLOCKING PRECONDITION, found 2026-09-04 while verifying D's own
+      integrator note. `HPS_ADMIN_PASSWORD` DOES NOT EXIST as a repo secret.
+      `gh api .../actions/secrets` returns total_count 8 and it is not among
+      them. The implementer flagged a weaker version of this ("if environment
+      scoping hides it from the build workflows"); the truth is it was never
+      created.
+
+      Consequence: D is fail-closed BY DESIGN and correct to be, so merging it
+      as-is would block every worker deploy and every stable tag build on the
+      first run — the freeze would query with a credential that does not exist
+      and, correctly, refuse. The implementer's control case C ("secret unset
+      -> BLOCKED (query_failed)") is not a hypothetical; it is the current
+      production state.
+
+      Do not merge D until the secret is created. This is a repo-settings
+      action, not a code change.
+
+      Corroborating, and a separate dead automation: admin-session.yml exists
+      to open/close a session from CI and hard-fails on an empty
+      HPS_ADMIN_PASSWORD (`[ -n "${PW:-}" ] || exit 1`). It has run twice, ever
+      — 2026-07-08 and 2026-07-24 — and BOTH FAILED. It has never once worked,
+      for the same reason. Fourth instance of an automation that exists,
+      appears wired, and cannot run.
+
   - id: E
     title: "heartbeat + artifactChanged trace event"
     layer: w
