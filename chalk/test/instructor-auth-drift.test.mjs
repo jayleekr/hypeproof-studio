@@ -86,7 +86,23 @@ const expired = await tokens.issueIssuer({ issuer: "drift-expired", scopes: [sco
 const foreignSecret = await tokens.issueIssuer({ issuer: "drift-foreign", scopes: [scoped] }, 24, "another-secret-0123456789abcdef");
 const revoked = await tokens.issueIssuer({ issuer: "drift-revoked", scopes: [scoped] }, 24, TEST_SECRET);
 await serviceEnv.HPS_KV.put(`revoked:${revoked.jti}`, JSON.stringify({ ts: new Date().toISOString(), reason: "drift fixture" }));
-const tampered = valid.token.slice(0, -1) + (valid.token.endsWith("A") ? "B" : "A");
+// Tampered signature — mutate a DECODED byte and re-encode. Flipping the last
+// base64url character does not work: the 43rd char of a 32-byte signature
+// carries only 2 significant bits, so for last chars A–D a "different"
+// character decodes to the SAME bytes and the token is not tampered at all
+// (measured: 2 red runs in 15). XOR of one bit in byte 0 always changes the
+// bytes; the assertions below fail loudly if this ever stops being a tamper.
+const b64uDecode = (s) => Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+const b64uEncode = (buf) => buf.toString("base64").replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_");
+const [validPayloadB64, validSigB64] = valid.token.split(".");
+const sigBytes = b64uDecode(validSigB64);
+assert.equal(sigBytes.length, 32, "sanity: HMAC-SHA256 signature is 32 bytes");
+const tamperedBytes = Buffer.from(sigBytes);
+tamperedBytes[0] ^= 0x01;
+assert.notEqual(Buffer.compare(tamperedBytes, sigBytes), 0, "tampered signature must differ from the original AFTER decoding");
+const tampered = `${validPayloadB64}.${b64uEncode(tamperedBytes)}`;
+assert.notEqual(Buffer.compare(b64uDecode(tampered.split(".")[1]), sigBytes), 0, "re-encoded tampered signature still decodes to different bytes");
+assert.notEqual(tampered, valid.token, "tampered token string differs from the valid one");
 
 const bearer = (t) => ({ authorization: `Bearer ${t}` });
 // { label, headers, expected, credential } — `credential:false` marks the
