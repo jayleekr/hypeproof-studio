@@ -25,10 +25,29 @@
 //
 // The distribution was taken from the NINE seats the spec labels "fine"
 // (-02 -03 -04 -05 -07 -08 -09 -10 -11), sampled every 10 s across the
-// post-break working window 01:45–03:00 UTC (n = 4,046 seat-samples). The
-// pre-break stretch is excluded on purpose: 00:52–01:40 is a class-wide break
-// during which every seat is idle simultaneously, so including it would inflate
-// the tail with an interval where "idle" is the correct state for everyone.
+// working window 01:45–03:00 UTC (n = 4,046 seat-samples).
+//
+// 00:52–01:40 is excluded. CORRECTED 2026-09-04 — an earlier version of this
+// comment said that stretch was "a class-wide break during which every seat is
+// idle simultaneously". That is FALSE, and the review that opened the window
+// rather than trusting the claim is the reason it is not still here:
+//     fine seats fully silent across 00:52–01:40:  1 / 9  (and -11 had not joined)
+//     fine-seat calls inside the window:           397
+//     seats working right through it:              -04 -07 -08 -10
+// The exclusion therefore removes REAL idle time, not an empty interval.
+//
+// It stands anyway, for two reasons that are true:
+//   1. Including it puts fine-seat p98 at 2,197 s (36 min). A 36-minute quiet
+//      cut cannot flag -01/-06's 11-minute idle — the negative control becomes
+//      unsatisfiable. The full-session distribution is not the distribution
+//      this threshold governs; calibrate on the working phase.
+//   2. The error direction is safe: excluding long idle LOWERS the cuts, so it
+//      can only make the board stricter, never produce a false negative.
+//
+// Worth naming because it is the sharpest lesson in this file: asserting what
+// a window contains without opening it is exactly the verification.md rule-1
+// failure, committed inside the function written to model rule 1. It cost
+// nothing only because the error direction happened to be safe.
 //
 //   idle (now − last call), fine seats     mean wait between calls, trailing 15 min
 //     p50    56 s                            p50     23.2 s
@@ -38,6 +57,19 @@
 //     p98   612 s   <- QUIET                 p99     96.7 s
 //     p99   692 s                            p99.9  170.4 s   <- STUCK
 //     max   872 s                            max    360.0 s
+//
+// MEASURED COST of these cuts, which the single-instant positive control cannot
+// see. Replaying the shipped thresholds across the whole 01:45–03:00 window,
+// three of the nine "fine" seats reach alert state:
+//     -02  01:54:50 → 01:57:20  (150 s, quiet)
+//     -05  01:52:30 → 01:55:00 · 02:37:40 → 02:39:30 · 02:55:30 → 03:00:00
+//     -08  02:36:40 → 02:39:40  (180 s, quiet)
+// ≈ 5 false "walk over there" alerts in 75 minutes. This is not a defect —
+// "fine" is a whole-day label and those seats genuinely idled past 10 minutes —
+// and it follows directly from p98 = 612 s (2 % of healthy time sits above the
+// quiet cut). It is the number an instructor will actually feel, so it is the
+// figure to watch in the first live session: if alert-minutes per healthy-seat
+// -hour run far above this, the quiet cut is too tight for a real room.
 //
 // Sanity check against ClassAid (arXiv 2602.06734), whose 240 s inactivity
 // threshold mimics instructor circulation. It does NOT transfer, in both
