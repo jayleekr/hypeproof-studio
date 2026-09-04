@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: write # create/upload the GitHub Release on tag builds
+  actions: write # dispatch mirror-release.yml after a tag build (see below)
 
 concurrency:
   group: build-mac-${{ github.event.inputs.ref || github.ref }}
@@ -353,3 +354,34 @@ jobs:
             --generate-notes --verify-tag $PRERELEASE_FLAG 2>/dev/null || true
           gh release upload "$TAG" \
             dist/HypeProof-Studio-darwin-arm64.zip --clobber
+
+      # dag.yaml task K — 미러가 자동으로 돌게 만드는 **실제** 경로.
+      #
+      # #663 은 mirror-release.yml 에 `on: release: [published]` 를 붙였지만
+      # 그 트리거는 여기서 절대 못 뜬다: 위 릴리즈를 만든 것이
+      # `secrets.GITHUB_TOKEN` 이고, GITHUB_TOKEN 이 일으킨 이벤트는 새 워크플로
+      # 런을 만들지 않는다(GitHub 문서 명시). 같은 저장소의
+      # notify-release-published.yml 이 2026-06-04 부터 같은 트리거를 달고 있었지만
+      # 그 뒤 발행된 36개 릴리즈 중 event=release 런은 0건이라는 것으로 관측 확인했다.
+      #
+      # `workflow_dispatch` 는 그 재귀 금지의 **명시적 예외**라 GITHUB_TOKEN 으로도
+      # 실제로 런을 만든다. 그래서 트리거에 기대지 않고 여기서 직접 부른다.
+      # PAT 불필요 — `actions: write` 만 있으면 된다(위 permissions).
+      #
+      # 맥에서만 부른다. 윈도우 자산은 mirror-release.yml 의 "Inspect source
+      # release" 대기 루프가 최대 150분 기다린다(#632). 양쪽에서 부르면 같은
+      # concurrency group 에 중복 런이 줄 서기만 한다.
+      - name: Trigger release mirror (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh workflow run mirror-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" \
+            -f tag="$TAG" \
+            -f dry_run=false
+          echo "mirror-release.yml 를 tag=$TAG dry_run=false 로 디스패치했다."
+          echo "미러 결과 확인: gh run list --workflow=mirror-release.yml"
