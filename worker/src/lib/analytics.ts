@@ -40,7 +40,13 @@ export interface ChatLog {
 export const ERROR_KIND = {
   /** Body was not valid JSON / not the expected shape. Never reached upstream. */
   BAD_REQUEST: "bad_request",
-  /** Gateway moderation blocked the turn before upstream (#320). Zero tokens. */
+  /**
+   * Gateway moderation blocked the turn (#320). Used for BOTH directions:
+   * inbound (screened before upstream — zero tokens) and outbound (screened
+   * after upstream answered — the tokens on the row were genuinely spent).
+   * The student experience is identical either way ("I typed something and
+   * the coach refused me"), so both render as the same seat state.
+   */
   MODERATION_BLOCK: "moderation_block",
   /** No usable LLM provider configured — our misconfiguration, not the student's. */
   CONFIG: "config",
@@ -62,27 +68,69 @@ export function upstreamErrorKind(status: number): ErrorKind {
 }
 
 /**
- * #684 — the billing predicate, in ONE place.
+ * The billing predicate, in ONE place. Import it; do not retype it.
  *
- * `usage_log` is the quota/billing ledger. Before #684 it only ever held
- * successful turns, so every aggregate could sum blindly. Now that failures
- * write rows, every token/cost aggregate MUST carry this predicate or the
- * gateway starts billing its own outages. Import it; do not retype it.
+ * MEANING (changed by dag task L, settled by Jay 2026-09-04 — option (c)):
+ * **"were tokens actually spent upstream"** — NOT "did the turn succeed".
+ *
+ * It used to be `status < 400`, which made one column answer two unrelated
+ * questions: *did we spend money* (billing) and *did this turn help the
+ * student* (the instructor board, #674). Outbound moderation is where the two
+ * answers diverge and conflict: the model already ran and charged us, but the
+ * child got nothing. Under the old predicate the only way to make the board
+ * honest (write a non-200 status) silently stopped billing real spend, and the
+ * only way to keep billing honest (leave status 200) rendered a completely
+ * broken seat as healthy.
+ *
+ * So the predicates are decoupled. Two independent questions, two independent
+ * columns:
+ *
+ *   billing -> USAGE_BILLABLE  (token columns: did upstream charge us)
+ *   health  -> USAGE_FAILED / USAGE_HEALTHY  (status: did the student get help)
+ *
+ * Consequences, deliberate:
+ *   - A mid-stream interruption (status 502, STREAM_INTERRUPTED) IS billed —
+ *     those tokens were genuinely spent — and still renders as a failure.
+ *   - An OUTBOUND moderation block (status 400, MODERATION_BLOCK) IS billed,
+ *     and stops reading as a healthy 200.
+ *   - Turns that never reached upstream (bad_request, config, inbound
+ *     moderation, upstream_unreachable) carry zero tokens, so they contribute
+ *     nothing to any billing aggregate — by arithmetic, not by a status
+ *     filter. Nothing is billed that was not spent.
+ *
+ * Written over the four token columns rather than a status range precisely so
+ * a failure that DID cost money cannot hide from the ledger.
  */
-export const USAGE_BILLABLE = "status < 400";
+export const USAGE_BILLABLE = "(tokens_in + tokens_out + cache_read + cache_write) > 0";
+
+/**
+ * The HEALTH predicates — the other half of the decoupling above. `status` is
+ * the observed outcome for the student, and answers the board's question only.
+ * Never use these to gate a token/cost aggregate, and never use
+ * USAGE_BILLABLE to decide whether a seat is doing fine.
+ */
+export const USAGE_FAILED = "status >= 400";
+export const USAGE_HEALTHY = "status < 400";
 
 /**
  * #684 — /admin/stats last-hour aggregate. Lives here (next to the writer and
- * the predicate) so tests can execute the REAL query instead of asserting on a
- * copy of its text.
+ * the predicates) so tests can execute the REAL query instead of asserting on
+ * a copy of its text.
  *
- * `requests` counts every attempt, `messages` counts billable (successful)
- * turns, `errors` is now a real number instead of a structural zero.
+ * Each column now answers exactly one question (dag task L):
+ *   requests  every attempt                        (no predicate)
+ *   messages  turns that actually helped a student (HEALTH -> USAGE_HEALTHY)
+ *   errors    turns that did not                   (HEALTH -> USAGE_FAILED)
+ *   tokens_*  what upstream charged us             (BILLING -> USAGE_BILLABLE)
+ *
+ * So `messages + errors == requests` still holds, while the token columns are
+ * free to include a failed-but-charged turn (outbound moderation block,
+ * mid-stream interruption) instead of quietly writing that spend off.
  */
 export const USAGE_LAST_HOUR_SQL = `SELECT
     COUNT(*) AS requests,
-    SUM(CASE WHEN ${USAGE_BILLABLE} THEN 1 ELSE 0 END) AS messages,
-    SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
+    SUM(CASE WHEN ${USAGE_HEALTHY} THEN 1 ELSE 0 END) AS messages,
+    SUM(CASE WHEN ${USAGE_FAILED} THEN 1 ELSE 0 END) AS errors,
     COALESCE(SUM(CASE WHEN ${USAGE_BILLABLE} THEN tokens_in  ELSE 0 END), 0) AS tokens_in,
     COALESCE(SUM(CASE WHEN ${USAGE_BILLABLE} THEN tokens_out ELSE 0 END), 0) AS tokens_out
  FROM usage_log

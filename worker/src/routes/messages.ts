@@ -529,22 +529,29 @@ messages.post("/messages", async (c) => {
       .filter((b) => b?.type === "text" && typeof b.text === "string")
       .map((b) => b.text as string)
       .join("");
-    record(mkLog(tin, tout, cr, cc));
     // #320 — outbound moderation, MINOR cohorts, non-stream only (REQ-O3).
-    // Usage stays recorded (tokens were spent); the blocked text never
-    // reaches the client and the trace turn body is not persisted.
-    if (isMinorCohort(profile)) {
-      const hit = screenText(text);
-      if (hit) {
-        reportModerationHit(
-          env,
-          c.get("requestId"),
-          { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "outbound" },
-          hit,
-        );
-        return c.json(anthropicError(c, "moderation_block", MODERATION_BLOCK_MESSAGE_KO), 400);
-      }
+    // The blocked text never reaches the client and the trace turn body is not
+    // persisted.
+    //
+    // Screened BEFORE the usage row is written (dag task L), mirroring
+    // chat.ts. The row used to be a default-200 with real tokens on it, so an
+    // SDK seat that was refused on every turn looked healthier than a quiet
+    // one on the instructor board. Now both moderation directions write
+    // 400/MODERATION_BLOCK — same student experience, same seat state — while
+    // the genuinely-spent tokens stay on the row AND stay billable
+    // (USAGE_BILLABLE counts spend, not success).
+    const outboundHit = isMinorCohort(profile) ? screenText(text) : null;
+    if (outboundHit) {
+      record(mkLog(tin, tout, cr, cc, 400, ERROR_KIND.MODERATION_BLOCK));
+      reportModerationHit(
+        env,
+        c.get("requestId"),
+        { cohort_id: payload.c, user_id: payload.u, profile_id: profile.id, direction: "outbound" },
+        outboundHit,
+      );
+      return c.json(anthropicError(c, "moderation_block", MODERATION_BLOCK_MESSAGE_KO), 400);
     }
+    record(mkLog(tin, tout, cr, cc));
     if (trial) {
       c.executionCtx.waitUntil(
         recordTurnIfOwned(
@@ -574,7 +581,8 @@ messages.post("/messages", async (c) => {
   let responseChars = 0;
   // #684 — the stream already answered 200, so a mid-flight death can only be
   // learned from this hook (fired before onUsage). Tokens produced before the
-  // break stay on the row; the success-only billing predicate excludes them.
+  // break stay on the row AND are billed (they were spent); the 502 is what
+  // makes the seat render as a failure. See lib/analytics.ts USAGE_BILLABLE.
   let streamFailed = false;
   const onUsage = (u: {
     input_tokens: number;
