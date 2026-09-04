@@ -13,6 +13,17 @@ permissions:
   contents: read
 
 jobs:
+  dev-channel-tag-classifier:
+    name: dev-channel / tag-is-prerelease
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # dag.yaml task A control: the --prerelease decision used by
+      # build-mac.yml / build-windows.yml must be testable without cutting a
+      # real tag. Runs in milliseconds, no build/app required.
+      - name: Regression — tag-is-prerelease positive + negative controls
+        run: bash scripts/test-tag-is-prerelease.sh
+
   worker-test:
     name: worker / test
     runs-on: ubuntu-latest

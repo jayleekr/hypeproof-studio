@@ -443,8 +443,16 @@ jobs:
             echo "::error::No Windows release assets found in dist/"
             exit 1
           fi
+          # dag.yaml task A / vessel-and-modules.md §6 stage 2: a hyphenated
+          # tag (v9.9.9-rc.1) is a dev-channel prerelease. The in-app updater
+          # (updateCheckerHelpers.ts:169) already skips draft/prerelease
+          # releases and GitHub's /releases/latest excludes them by
+          # definition — actually marking the release is the only missing
+          # piece. Decision lives in scripts/tag-is-prerelease.sh so it can be
+          # unit-tested without cutting a real tag (scripts/test-tag-is-prerelease.sh).
+          PRERELEASE_FLAG="$(bash scripts/tag-is-prerelease.sh "$TAG")"
           # build-mac.yml may have created the release for the same tag;
           # create-if-absent then clobber-upload is race-safe across both jobs.
           gh release create "$TAG" --title "HypeProof Studio $TAG" \
-            --generate-notes --verify-tag 2>/dev/null || true
+            --generate-notes --verify-tag $PRERELEASE_FLAG 2>/dev/null || true
           gh release upload "$TAG" "${assets[@]}" --clobber
