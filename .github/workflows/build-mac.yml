@@ -19,6 +19,16 @@ on:
         description: "Branch or tag to build"
         required: false
         default: "main"
+      # dag.yaml task D / #676. Only meaningful when dispatching against a
+      # stable TAG ref (`gh workflow run build-mac.yml --ref v0.1.20`), which
+      # is the one dispatch shape that actually publishes a Release. On the
+      # `push: tags` path below this context is empty, i.e. never overridden
+      # by default — an operator who really must ship a stable build over a
+      # live class has to come back and dispatch it deliberately.
+      override_live_session:
+        description: "Publish even if a class is live (stable tag refs only; recorded in the job summary)"
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -68,6 +78,33 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22.22.1"
+
+      # dag.yaml task D (#676) — live-class release freeze, fail-fast half.
+      #
+      # A stable `v*` tag publishes a non-prerelease Release, which the in-app
+      # update checker turns into a banner and mirror-release.yml propagates.
+      # Telling a room of participants to reinstall mid-class is the same
+      # failure #668 was: an interruption they did not ask for.
+      #
+      # `-rc` tags are EXEMPT. Task A made them prereleases, which the updater
+      # skips and /releases/latest excludes — they reach nobody by design, so
+      # freezing them buys nothing and would kill the dev channel during
+      # exactly the hours it is most needed. release-freeze-gate.sh reuses
+      # task A's scripts/tag-is-prerelease.sh for that call rather than
+      # re-deriving it.
+      #
+      # This copy runs before the 1–2 h build so a frozen release fails in
+      # seconds instead of burning two hours of macOS runner. The copy that
+      # actually protects the class is the pre-publish one further down — a
+      # class can start while the build is running.
+      - name: Live-session release freeze — pre-build (#676)
+        shell: bash
+        env:
+          HPS_ADMIN_PASSWORD: ${{ secrets.HPS_ADMIN_PASSWORD }}
+          HPS_FREEZE_OVERRIDE: ${{ inputs.override_live_session }}
+          HPS_FREEZE_CONTEXT: >-
+            macOS build of ${{ github.ref_name }} @ ${{ github.sha }} (pre-build gate)
+        run: bash scripts/release-freeze-gate.sh "$GITHUB_REF"
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -332,6 +369,26 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 14
+
+      # dag.yaml task D (#676) — the half that actually protects the class.
+      #
+      # The pre-build copy above only proves no class was running 1–2 h ago.
+      # This is the last moment before participants see anything: the next
+      # step publishes the Release (update banner) and the one after that
+      # dispatches the mirror. Re-ask here.
+      #
+      # A block here is not wasted work — the .app is already in the workflow
+      # artifact above, so after class the operator re-dispatches against the
+      # same tag ref and only the publish repeats.
+      - name: Live-session release freeze — pre-publish (#676)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          HPS_ADMIN_PASSWORD: ${{ secrets.HPS_ADMIN_PASSWORD }}
+          HPS_FREEZE_OVERRIDE: ${{ inputs.override_live_session }}
+          HPS_FREEZE_CONTEXT: >-
+            macOS release ${{ github.ref_name }} @ ${{ github.sha }} (pre-publish gate)
+        run: bash scripts/release-freeze-gate.sh "$GITHUB_REF"
 
       - name: Publish to GitHub Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')

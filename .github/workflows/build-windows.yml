@@ -7,6 +7,14 @@ on:
         description: "Branch or tag to build"
         required: false
         default: ""
+      # dag.yaml task D / #676 — mirror of build-mac.yml. Only meaningful
+      # when dispatching against a stable TAG ref, the one dispatch shape
+      # that publishes a Release. Empty (i.e. never overridden) on the
+      # `push: tags` path below.
+      override_live_session:
+        description: "Publish even if a class is live (stable tag refs only; recorded in the job summary)"
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -66,6 +74,22 @@ jobs:
           # not the floating "22.x", so Windows builds are reproducible against
           # the same toolchain as Mac.
           node-version: "22.22.1"
+
+      # dag.yaml task D (#676) — live-class release freeze, fail-fast half.
+      # Same contract as build-mac.yml: a stable `v*` tag publishes a
+      # non-prerelease Release, which the in-app updater turns into a banner
+      # in front of participants; `-rc` tags are exempt because task A made
+      # them prereleases that reach nobody. Fails CLOSED — see the header of
+      # scripts/check-live-sessions.mjs. Controls:
+      # `node scripts/test-check-live-sessions.mjs`.
+      - name: Live-session release freeze — pre-build (#676)
+        shell: bash
+        env:
+          HPS_ADMIN_PASSWORD: ${{ secrets.HPS_ADMIN_PASSWORD }}
+          HPS_FREEZE_OVERRIDE: ${{ inputs.override_live_session }}
+          HPS_FREEZE_CONTEXT: >-
+            Windows build of ${{ github.ref_name }} @ ${{ github.sha }} (pre-build gate)
+        run: bash scripts/release-freeze-gate.sh "$GITHUB_REF"
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -428,6 +452,21 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 14
+
+      # dag.yaml task D (#676) — the half that actually protects the class.
+      # The pre-build copy only proved no class was running 1–2 h ago; this is
+      # the last moment before the Release (and therefore the update banner)
+      # exists. The assets are already in the workflow artifact above, so a
+      # block here costs only the publish, not the build.
+      - name: Live-session release freeze — pre-publish (#676)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          HPS_ADMIN_PASSWORD: ${{ secrets.HPS_ADMIN_PASSWORD }}
+          HPS_FREEZE_OVERRIDE: ${{ inputs.override_live_session }}
+          HPS_FREEZE_CONTEXT: >-
+            Windows release ${{ github.ref_name }} @ ${{ github.sha }} (pre-publish gate)
+        run: bash scripts/release-freeze-gate.sh "$GITHUB_REF"
 
       - name: Publish to GitHub Release (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')
