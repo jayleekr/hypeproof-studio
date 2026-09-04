@@ -280,8 +280,30 @@ tasks:
       -> BLOCKED (query_failed)") is not a hypothetical; it is the current
       production state.
 
-      Do not merge D until the secret is created. This is a repo-settings
-      action, not a code change.
+      CORRECTION (measured by the evaluator, 2026-09-04). The orchestrator
+      first wrote "merging D would block every deploy". That overstated it.
+      Measured with the secret unset and an unroutable API base:
+
+        (a) worker deploy      -> BLOCKED exit 1, names the unset secret
+        (b) stable tag build   -> BLOCKED exit 1 at the PRE-BUILD gate, in
+                                  seconds, before the 1-2h runner
+        (c) -rc tag            -> EXIT 0. The exemption decides on the ref
+                                  string alone and returns before it ever
+                                  execs the checker. No credential touched.
+        (d) branch / non-tag   -> exempt, likewise no credential
+
+      So the dev channel is FULLY USABLE with the secret absent, and the
+      blast radius is bounded to the stable release path plus worker deploys.
+      D is safe to merge into the integration branch now; the secret must exist
+      before the first stable release, not before the merge.
+
+      Useful consequence for sequencing: the -rc tag that verifies K and J does
+      NOT depend on this secret, so those two human steps are independent and
+      can happen in either order.
+
+      Also confirmed: HPS_ADMIN_PASSWORD is already wired at job level in
+      deploy-worker.yml:39 (pre-existing, not added by D). Only the
+      repo-settings action remains — no code change is needed once it exists.
 
       Corroborating, and a separate dead automation: admin-session.yml exists
       to open/close a session from CI and hard-fails on an empty
