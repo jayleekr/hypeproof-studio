@@ -447,10 +447,27 @@ tasks:
     model: opus-5
     issue: 674
     depends_on: [B, F, L]
-    human_gate: >-
-      Task B must be DEPLOYED to production before calibration is meaningful —
-      the control replays real production D1 rows. The orchestrator stops and
-      asks for confirmation that B is live.
+    human_gate: null   # RETRACTED 2026-09-04 — the gate did not hold up
+    human_gate_RETRACTED: >-
+      I wrote "B must be DEPLOYED to production before calibration is
+      meaningful". Reasoning it through, that is wrong, and it was blocking the
+      destination task on a deploy deferred to the end of the plan.
+
+      The 2026-08-22 replay data was collected under the OLD code: every row
+      status=200, no failure rows, no heartbeats. What that data CAN calibrate
+      is exactly what the labelled ground truth covers — the *stuck* threshold
+      (seat -12, 250s mean wait) and the *quiet* threshold (-01 and -06, 11 min
+      of no activity). Those signals are present in it, and B changes neither.
+
+      What it cannot calibrate is *failing* and *no-heartbeat*. But those are
+      not threshold questions at all — they are presence questions ("are there
+      error rows", "has a ping arrived"). They need no distribution, so they
+      need no history.
+
+      So G proceeds now. The consequence to be honest about: the failing column
+      stays empty until B is live in production, and the heartbeat column until
+      E ships in an app release. Both must render as 'unknown', never as a
+      false negative — which is already an acceptance bullet.
     spec_section: "§4"
     files:
       - chalk/src/routes/board.ts
