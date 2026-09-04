@@ -71,6 +71,32 @@ entries:
     notes: >-
       Grandfathered. The runtime. Version identifier lands with plan task C.
 
+  - name: chalk
+    layer: c
+    tag_prefix: c
+    directory: chalk
+    deploys_to: cloudflare://hypeproof-chalk
+    admitted: 2026-09-04     # plan task F — moved from `planned` in the PR that created chalk/
+    contract:
+      # The ONE contract is read-only cohort JSON under GET /admin/cohorts/:id/*.
+      # /state is live (task F); /board joins it with task G in the SAME format
+      # and the SAME drift-lock file. Operational metadata only — no prompt
+      # text, no member handles (spec §4).
+      format: "read-only cohort JSON — GET /admin/cohorts/:id/state (+ /board with task G)"
+    drift_lock: chalk/test/board-contract.test.mjs
+    exit_plan: docs/exit/chalk.md
+    owner: jay
+    notes: >-
+      Gate 1: Surface — code, no local resources, consumed by instructors.
+      Gate 2: instructor WRITES (session open/close, roster append, token mint)
+      are NOT a Chalk contract — Chalk forwards them to the Service's existing
+      /admin/* HTTP surface as one more client of it (same as the hype-session
+      skill); the Service stays byte-identical on those paths. Instructor
+      token verification is RE-EXPORTED from worker/src/lib (chalk/src/shared.ts),
+      never reimplemented; chalk/test/instructor-auth-drift.test.mjs runs the
+      same fixtures through both workers. Until task H the profile registry is
+      imported from worker/src/profiles for display names only.
+
 # ---------------------------------------------------------------------------
 # Planned entries. These are NOT yet admitted — they are here so the gates are
 # answered before the code lands, not after. Move them into `entries` in the
@@ -78,22 +104,6 @@ entries:
 # ---------------------------------------------------------------------------
 
 planned:
-  - name: chalk
-    layer: c
-    tag_prefix: c
-    directory: chalk
-    deploys_to: cloudflare://hypeproof-chalk
-    plan_task: F
-    contract:
-      format: "read-only JSON — GET /admin/cohorts/:id/board"
-    drift_lock: chalk/test/board-contract.test.mjs
-    exit_plan: docs/exit/chalk.md
-    owner: jay
-    notes: >-
-      Gate 2 note: the ONE contract is the board read API. Instructor token
-      verification is shared with the worker, not reimplemented — a second,
-      divergent copy is a gate-2 failure, not a convenience.
-
   - name: curriculum-modules
     layer: m
     tag_prefix: m
