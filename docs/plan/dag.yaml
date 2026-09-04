@@ -585,11 +585,26 @@ tasks:
         The claim to disprove: "releases created with secrets.GITHUB_TOKEN do
         not trigger further workflow runs, so `on: release: [published]` never
         fires for our tag builds."
-      evidence_so_far: >-
-        `gh run list --workflow=mirror-release.yml` returns 12 runs, ALL
-        event=workflow_dispatch, none event=release. The trigger landed
-        2026-08-21 (d83f57c, #663); the newest tag v0.1.50 is the same day and
-        no tag has been cut since, so the fix has never actually been exercised.
+      evidence_RETRACTED: >-
+        The orchestrator's original evidence did not discriminate and should not
+        be reused. It argued from "all mirror-release runs are workflow_dispatch,
+        none are release". But d83f57c landed 2026-08-20T23:23Z and the newest
+        release v0.1.50 published 2026-08-20T16:26Z — the trigger arrived ~7h
+        AFTER the last release, and nothing has been released since. That run
+        list is exactly what you would see whether the trigger works or not.
+        Recorded here rather than deleted: the mistake was reasoning from an
+        absence without checking that the absence could distinguish anything.
+      evidence: >-
+        A natural control in the same repo, verified independently by the
+        evaluator against the GitHub API. `notify-release-published.yml` has
+        carried the IDENTICAL `release: [published]` trigger since
+        2026-06-04T10:31Z, state active, never modified. Since then: 36 releases
+        published, 36/36 authored by github-actions[bot] (GITHUB_TOKEN), and
+        that workflow's release-event runs = 0 (3 runs total, all dispatch).
+        mirror-release.yml itself: 42 runs, all dispatch, 0 release.
+        Three months, an active identical trigger, 36 chances, zero firings.
+        GitHub documents the rule: with the exception of workflow_dispatch and
+        repository_dispatch, GITHUB_TOKEN-triggered events do not create runs.
       positive: >-
         After the fix, a tag build results in a mirror run with event=release
         (or an equivalent path that demonstrably runs without a human).
