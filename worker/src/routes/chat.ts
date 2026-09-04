@@ -16,6 +16,7 @@ import {
   resolveProvider,
   providerKey,
   speaksAnthropicWire,
+  resolveWorkerVersion,
   type Env,
   type LLMProvider,
 } from "../env";
@@ -64,8 +65,18 @@ function isChatPassthrough4xx(status: number): status is keyof typeof CHAT_PASST
 
 export const chat = new Hono<{ Bindings: Env }>();
 
+// Task C (docs/plan/dag.yaml) — `version` used to be a hardcoded "0.1.0"
+// literal that never changed: the same defect class as #684 (task B), a
+// constant masquerading as an observation. resolveWorkerVersion() (../env)
+// reports the real w* tag injected at deploy, or "unknown" — never a crash,
+// never an empty string.
 chat.get("/health", (c) =>
-  c.json({ ok: true, service: "hypeproof-studio-api", version: "0.1.0", env: c.env.ENVIRONMENT }),
+  c.json({
+    ok: true,
+    service: "hypeproof-studio-api",
+    version: resolveWorkerVersion(c.env),
+    env: c.env.ENVIRONMENT,
+  }),
 );
 
 // Deep health probe (S-05 / #51). Live-tests every external dependency:

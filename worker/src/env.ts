@@ -101,6 +101,17 @@ export function speaksAnthropicWire(provider: LLMProvider): boolean {
   return provider === "anthropic" || provider === "glm";
 }
 
+// Task C (docs/plan/dag.yaml) — "what is running in prod" must always be
+// answerable, and must never crash or report an empty string when the var
+// is unset (negative control). Both GET / (index.ts, x-hps-worker-version
+// header) and GET /v1/health (routes/chat.ts, JSON `version` field) go
+// through this so they can never drift from each other or from #206's
+// app-side precedent. Never read env.HPS_WORKER_VERSION directly.
+export function resolveWorkerVersion(env: Pick<Env, "HPS_WORKER_VERSION">): string {
+  const v = env.HPS_WORKER_VERSION;
+  return typeof v === "string" && v.trim().length > 0 ? v : "unknown";
+}
+
 export function providerKey(env: Env, provider: LLMProvider): string {
   const key = {
     gemini: env.GEMINI_API_KEY,

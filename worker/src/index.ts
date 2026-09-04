@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Env } from "./env";
+import { resolveWorkerVersion, type Env } from "./env";
 import { chat } from "./routes/chat";
 import { messages } from "./routes/messages";
 import { trace } from "./routes/trace";
@@ -19,15 +19,6 @@ import issuerHtml from "./ui/issuer.html";
 import consoleHtml from "./ui/console.html";
 
 const app = new Hono<{ Bindings: Env; Variables: { requestId: string } }>();
-
-// Task C (docs/plan/dag.yaml) — "what is running in prod" must always be
-// answerable, and must never crash or report an empty string when the var
-// is unset (negative control). Never read env.HPS_WORKER_VERSION directly —
-// go through this so every caller gets the same fallback.
-export function resolveWorkerVersion(env: Pick<Env, "HPS_WORKER_VERSION">): string {
-  const v = env.HPS_WORKER_VERSION;
-  return typeof v === "string" && v.trim().length > 0 ? v : "unknown";
-}
 
 // S-07 (#49): stamp request_id on every request. Echoed in x-request-id
 // header + structured error body so operators can correlate user reports
@@ -49,11 +40,12 @@ app.use("/v1/logs/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
 
 // Friendly root → redirect to admin UI (which itself is access-gated).
-// Also doubles as the Service-layer health payload: the worker version
-// (task C) rides along as a response header so "what is running in prod"
-// is answerable with a plain `curl -I` — no separate endpoint, and no
-// change to the existing HTML body or its guard-exemption contract
-// (route-order.test.mjs asserts `/` stays a 200 text/html page).
+// The canonical health payload is GET /v1/health (routes/chat.ts), whose
+// JSON `version` field reports the worker version (task C). This route
+// carries the same value as an x-hps-worker-version response header too —
+// a `curl -I /` answer for free — without touching the existing HTML body
+// or its guard-exemption contract (route-order.test.mjs asserts `/` stays
+// a 200 text/html page).
 app.get("/", (c) => {
   return new Response(adminHtml as unknown as string, {
     headers: {
