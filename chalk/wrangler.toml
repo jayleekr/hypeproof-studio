@@ -40,6 +40,17 @@ binding = "HPS_DB"
 database_name = "hypeproof-studio"
 database_id = "2427207c-272e-4ecd-9d16-7a1dcc0fc741"
 
+# R2: the SAME bucket the Service writes session-log uploads into
+# (worker/wrangler.toml binding HPS_TRACES, bucket hps-traces). Chalk holds it
+# for the studio-logs READ path (#680, plan task I) and does LIST + GET only.
+# Deletion is explicitly out of scope for task I, and wrangler offers no
+# read-only R2 binding — the guarantee is enforced in code and asserted on the
+# source by chalk/test/logs-read-path.test.mjs, which fails if a put/delete
+# call ever appears in this worker.
+[[r2_buckets]]
+binding = "HPS_TRACES"
+bucket_name = "hps-traces"
+
 # .html pages are bundled as text; .md because the shared profile registry
 # (worker/src/profiles) imports prompt markdown — Chalk never reads it, but
 # the bundler must resolve it. Plan task H removes this import on both sides.
@@ -61,7 +72,14 @@ HPS_SERVICE_ORIGIN = "https://api.hypeproof-ai.xyz"
 # Secrets — `npx wrangler secret put HPS_SIGNING_SECRET` with the SAME value
 # the Service uses. One HMAC key, two verifiers; a different value here makes
 # every instructor token read as "invalid signature" on this side only.
-# Local dev: chalk/.dev.vars (gitignored), copy the line from worker/.dev.vars.
+# Local dev: chalk/.dev.vars (gitignored), copy the line from worker/.dev.vars.#
+# `npx wrangler secret put HPS_LOGS_OPERATOR_SECRET` — OPTIONAL, and left unset
+# on purpose. It is the break-glass credential for session-log RETRIEVAL only
+# (#680); unset means retrieval fails closed (503) unless Cloudflare Access
+# fronts the path, which is the intended production gate. It is NOT the
+# Service's HPS_ADMIN_PASSWORD and must never be set to that value — see the
+# access-control note at the top of src/routes/logs-admin.ts. Listing and roster
+# diff do not use it.
 
 [env.dev]
 name = "hypeproof-chalk-dev"
