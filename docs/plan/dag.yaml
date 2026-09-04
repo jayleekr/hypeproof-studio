@@ -606,6 +606,20 @@ tasks:
       - "No file claims automation it does not have (same rule as K)."
       - "If kept: a routed issue starts the solver, proven by an actual run."
       - "If removed: the removal says why, so it is not rebuilt in six months."
+    resolved_2026_09_04: >-
+      DECISION: delete the router (Jay).
+
+      One adjacent worry raised during implementation is CLOSED, negatively —
+      recorded so nobody "fixes" a working path later. The concern was that
+      `.claude/skills/report-ui/file-issue.sh` applies `solver:ready` via
+      `gh issue create --label`, and it was unclear whether labelling at
+      CREATION time emits `issues: labeled` or folds into `opened`.
+
+      It fires. Issue #669 was created 2026-08-22T03:17:17Z and a claude-solver
+      run with event=issues started 03:17:21Z — four seconds later. Across the
+      last 100 solver runs the split is issue_comment 45 / issues 55, so both
+      human paths work. report-ui's handoff is sound; it uses a personal token,
+      so the GITHUB_TOKEN suppression never applied to it.
     priority: >-
       Below K. K was shipping the wrong build to participants; this is an
       unattended path that never ran and has been invoked once in three months.
