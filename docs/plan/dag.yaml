@@ -25,10 +25,24 @@ spec: docs/plan/vessel-and-modules.md
 # on the 2026-07-25..27 review, 9 of 9 failures were the instrument, not the
 # product (.claude/rules/verification.md rule 6).
 classifications:
-  harness: instrument/test/criterion is wrong -> fix criterion, block, ask human
+  # Split after task C's first evaluation. The original taxonomy had one
+  # `harness` bucket, which conflated two cases with opposite remedies:
+  # a WRONG instrument means a human must decide what the criterion should be,
+  # while a MISSING instrument is an unambiguous, cheap retry. Sending the
+  # second case to a human stalls the loop for no reason.
+  harness_wrong: >-
+    the instrument/criterion measures the wrong thing -> do NOT touch the
+    product. Fix the criterion, block, ask human.
+  harness_missing: >-
+    the criterion is right but the instrument was never built (no committed,
+    wired-in test) -> retry the SAME task with an explicit instruction to add
+    the control and leave verified production behaviour alone.
   product: implementation is wrong -> retry with failure evidence appended
   spec: requirement was ambiguous -> block, ask human, DO NOT retry
   flake: nondeterministic -> re-run once
+
+# Rule of order, unchanged: rule out the instrument before blaming the product.
+# On 2026-07-25..27 the instrument was the cause 9 times out of 9.
 
 limits:
   max_attempts_per_task: 3
@@ -126,20 +140,36 @@ tasks:
       - "cd worker && npx tsc --noEmit"
       - "cd worker && npm test"
     control:
+      # CORRECTED after attempt 1. The original wording said "health payload"
+      # but named `GET /`, which serves admin.html (text/html) and is pinned by
+      # route-order.test.mjs. The health payload is `GET /v1/health`.
+      target: "GET /v1/health (JSON), worker/src/routes/chat.ts:67"
       positive: >-
-        With HPS_WORKER_VERSION=w2026.09.04-1 injected, GET / returns that exact
-        string in the health payload.
+        With HPS_WORKER_VERSION=w2026.09.04-1 injected, GET /v1/health returns
+        that exact string in its JSON `version` field.
       negative: >-
-        With the var unset, GET / still responds 200 (version reported as
-        'unknown' — never a crash, never an empty string).
+        With the var unset, GET /v1/health still responds 200 and reports
+        'unknown' — never a crash, never an empty string.
+      must_be_committed: >-
+        The control is a committed test wired into worker/package.json's test
+        script. A control reconstructed by hand and thrown away is not a control
+        — see the orphaned-test problem this plan already gates against.
     acceptance:
       - "Deploy injects the version from the w* tag."
-      - "GET / exposes it so 'what is running in prod' is answerable."
+      - "GET /v1/health reports it so 'what is running in prod' is answerable."
+      - "The hardcoded version literal is gone (see notes)."
+      - "GET / is untouched — its text/html contract stays as route-order.test.mjs pins it."
       - "Value is also available to the board's diagnostics later (task G)."
     notes: >-
       scripts/resolve-version.sh resolves the APP version only (git tag ->
       extension package.json). The worker has no version concept at all today.
       Do not fold the worker into resolve-version.sh — separate trains.
+
+      IMPORTANT: `GET /v1/health` already returns `version: "0.1.0"` — a
+      hardcoded literal, stale and never updated. That is the same defect class
+      as #684 (task B): a constant masquerading as an observation. Replacing it
+      is part of this task, not a side quest. Anyone who curl'd /v1/health to
+      ask "what is running in prod" has been reading a lie.
 
   - id: D
     title: "enforce the live-session deploy freeze"
