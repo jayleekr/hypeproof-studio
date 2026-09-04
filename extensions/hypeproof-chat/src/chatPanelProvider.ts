@@ -107,6 +107,12 @@ import {
   type SpoolArtifactSource,
 } from "./sessionSpool";
 import type { ProxyStreamUsage } from "./proxyClientHelpers";
+import {
+  ArtifactChangeGate,
+  startHeartbeat,
+  type HeartbeatPinger,
+  type LivenessEvent,
+} from "./heartbeat";
 
 /**
  * 승인 모달 문구. `kind` 별로 무엇을 하려는지 한국어로 말하고, 확인 버튼도
@@ -194,6 +200,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
   // x-request-id header on every response we can correlate against in tail.
   private lastRequestId: string | undefined;
+  /**
+   * Task E (docs/plan/dag.yaml) — liveness. `lastActivityAt` is bumped by any
+   * webview message; the pinger turns it into an idle_ms the instructor board
+   * can read. Deliberately NOT tied to the chat path: a seat that is reading,
+   * and a seat whose app died, are the two cases the board must tell apart.
+   */
+  private lastActivityAt = Date.now();
+  private heartbeat: HeartbeatPinger | null = null;
+  private readonly artifactGate = new ArtifactChangeGate();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -548,6 +563,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // settings the fork core patch reads (minor cohorts → persist:hp-safe).
         await this.applyBrowserSafety(p);
         this.activeCohortId = extractCohortIdUnverified(token) ?? null;
+        // Task E — a resolved profile means we have a usable token; start the
+        // chat-independent ping. Failures back off inside the pinger.
+        this.startLiveness();
         await this.migrateLegacyStateForActiveCohort();
         // Apply tone-appropriate labels to the preview panel (#159).
         const labels = labelsForProfile(p);
@@ -610,6 +628,71 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  // ── Task E — liveness (heartbeat + artifactChanged) ───────────────────────
+
+  /**
+   * POST one liveness event to the worker. Never throws and never surfaces to
+   * the participant: telemetry that can interrupt a kid mid-turn is worse than
+   * telemetry that is missing.
+   *
+   * `x-hps-client-version` is what lets the instructor board say "this seat is
+   * still on last week's build". It is optional on the worker side on purpose —
+   * the worker deploys in 30 seconds, the app takes 1–2 hours plus a reinstall,
+   * so an old client sending none of this is the normal path.
+   */
+  private async postLivenessEvent(
+    ev: LivenessEvent,
+  ): Promise<{ ok: boolean; status: number }> {
+    const cfg = vscode.workspace.getConfiguration("hypeproofChat");
+    const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+    const token = await this.context.secrets.get(TOKEN_KEY);
+    if (!token) return { ok: false, status: 401 };
+    const version = this.context.extension?.packageJSON?.version;
+    try {
+      const res = await fetch(`${proxyUrl.replace(/\/$/, "")}/trace/event`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          ...(typeof version === "string" && version ? { "x-hps-client-version": version } : {}),
+        },
+        body: JSON.stringify(ev),
+      });
+      return { ok: res.ok, status: res.status };
+    } catch {
+      return { ok: false, status: 0 };
+    }
+  }
+
+  /** Start the 45 s ping. Idempotent — a second call is a no-op. */
+  startLiveness(): void {
+    if (this.heartbeat) return;
+    this.heartbeat = startHeartbeat({
+      send: (ev) => this.postLivenessEvent(ev),
+      idleMs: () => Date.now() - this.lastActivityAt,
+      setInterval: (fn, ms) => setInterval(fn, ms),
+      clearInterval: (h) => clearInterval(h as ReturnType<typeof setInterval>),
+      log: (line) => this.logChannel?.appendLine(line),
+    });
+    this.context.subscriptions.push({ dispose: () => this.stopLiveness() });
+  }
+
+  stopLiveness(): void {
+    this.heartbeat?.stop();
+    this.heartbeat = null;
+  }
+
+  /**
+   * Report that the participant's artifact changed — a digest and a length,
+   * nothing else. Silent when the bytes are identical to the last report
+   * (see ArtifactChangeGate).
+   */
+  private emitArtifactChanged(content: string): void {
+    const ev = this.artifactGate.next(content);
+    if (!ev) return;
+    void this.postLivenessEvent(ev);
+  }
+
   private async saveGameToWorkspace(html: string): Promise<void> {
     const folders = vscode.workspace.workspaceFolders;
     if (!folders || folders.length === 0) return;
@@ -617,6 +700,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const root = folders[0].uri;
       const target = vscode.Uri.joinPath(root, "index.html");
       await vscode.workspace.fs.writeFile(target, Buffer.from(html, "utf8"));
+      // Task E — "the coach ran for four minutes; did anything change?"
+      this.emitArtifactChanged(html);
     } catch {
       // Non-fatal: preview still works even if the save fails.
     }
@@ -1496,6 +1581,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async handleMessage(msg: WebviewMessage): Promise<void> {
+    // Any message from the panel is evidence of a human. See `lastActivityAt`.
+    this.lastActivityAt = Date.now();
     switch (msg.type) {
       case "ready":
         await this.postConfig();

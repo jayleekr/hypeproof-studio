@@ -18,6 +18,16 @@ import {
   type ValidationOutcome,
   type HumanActionKind,
 } from "../lib/storage.ts";
+import {
+  HEARTBEAT_STATES,
+  isArtifactByteCount,
+  isHeartbeatState,
+  isSha256Hex,
+  recordArtifactChange,
+  recordHeartbeat,
+  sanitizeClientVersion,
+  type HeartbeatState,
+} from "../lib/liveness.ts";
 
 export const trace = new Hono<{ Bindings: Env }>();
 
@@ -39,7 +49,29 @@ export type TraceEvent =
       turn_id?: string;
       kind: HumanActionKind;
       diff_chars?: number;
-    };
+    }
+  // ── Task E (docs/plan/dag.yaml) — liveness, independent of chat ──────────
+  // Neither of these belongs to a trial: the whole point of the heartbeat is
+  // that it fires when the participant is NOT asking anything, and an artifact
+  // can change outside a trial too. So they skip the trial-ownership gate
+  // (there is nothing to own); the token + session + roster gate above is
+  // what scopes them to a seat.
+  | { type: "heartbeat"; state: HeartbeatState; idle_ms?: number }
+  | { type: "artifactChanged"; sha256: string; bytes: number };
+
+/**
+ * Drift lock (task E) — the exact key set the worker accepts for each of the
+ * two liveness events. The client half is
+ * `extensions/hypeproof-chat/src/heartbeat.ts` CLIENT_LIVENESS_EVENT_KEYS, and
+ * `worker/test/liveness-trace.test.mjs` asserts the two are identical. These
+ * ship on different release trains (worker: 30 s; app: 1–2 h + a reinstall),
+ * so nothing but a test keeps them honest.
+ *
+ * `bytes` and `sha256` are the entire artifactChanged payload on purpose. If
+ * you are about to add a field here, read §4 "Privacy" first.
+ */
+export const HEARTBEAT_EVENT_KEYS = ["type", "state", "idle_ms"] as const;
+export const ARTIFACT_CHANGED_EVENT_KEYS = ["type", "sha256", "bytes"] as const;
 
 const VALID_OUTCOMES: ValidationOutcome[] = ["pass", "fail", "partial", "error"];
 const VALID_KINDS: HumanActionKind[] = ["accept", "reject", "edit", "replace"];
@@ -110,6 +142,31 @@ export function parseEvent(
           diff_chars: numOrUndef(o.diff_chars),
         },
       };
+    }
+    case "heartbeat": {
+      if (!isHeartbeatState(o.state)) {
+        return { ok: false, message: `state must be one of ${HEARTBEAT_STATES.join(",")}` };
+      }
+      const idle = o.idle_ms;
+      if (idle != null && !(typeof idle === "number" && Number.isFinite(idle) && idle >= 0)) {
+        return { ok: false, message: "idle_ms must be a non-negative number" };
+      }
+      return {
+        ok: true,
+        event: { type: "heartbeat", state: o.state, idle_ms: numOrUndef(idle) },
+      };
+    }
+    case "artifactChanged": {
+      // sha256 + bytes ONLY. Never file content, never a filename — a
+      // participant-chosen filename is participant-authored text, and the
+      // board's whole legal footing (§4) is that it carries no such thing.
+      if (!isSha256Hex(o.sha256)) {
+        return { ok: false, message: "sha256 must be 64 lowercase hex chars" };
+      }
+      if (!isArtifactByteCount(o.bytes)) {
+        return { ok: false, message: "bytes must be a non-negative integer" };
+      }
+      return { ok: true, event: { type: "artifactChanged", sha256: o.sha256, bytes: o.bytes } };
     }
     default:
       return { ok: false, message: `unknown event type: ${t}` };
@@ -236,6 +293,29 @@ trace.post("/event", async (c) => {
           task_label: ev.task_label ?? null,
         });
         return c.json({ ok: true, trial_id });
+      }
+      case "heartbeat": {
+        // Server clock, not the client's — a laptop with a wrong clock must
+        // not be able to place itself in the future on the instructor board.
+        c.executionCtx.waitUntil(
+          recordHeartbeat(env.HPS_KV, payload.c, payload.u, {
+            at: new Date().toISOString(),
+            state: ev.state,
+            idle_ms: ev.idle_ms,
+            client_version: sanitizeClientVersion(c.req.header("x-hps-client-version")),
+          }),
+        );
+        return c.json({ ok: true });
+      }
+      case "artifactChanged": {
+        c.executionCtx.waitUntil(
+          recordArtifactChange(env.HPS_KV, payload.c, payload.u, {
+            at: new Date().toISOString(),
+            sha256: ev.sha256,
+            bytes: ev.bytes,
+          }),
+        );
+        return c.json({ ok: true });
       }
       case "trialEnd":
       case "validationRun":
