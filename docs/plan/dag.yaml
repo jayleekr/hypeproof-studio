@@ -395,6 +395,26 @@ tasks:
         The instructor issuer-token verification is NOT duplicated as a second
         implementation — it is shared or re-exported, and a drift-lock test
         asserts both sides accept/reject the same fixtures.
+    edge_protection_RESOLVED: >-
+      OBSERVED 2026-09-04, converting the implementer's stated inference into a
+      measurement. The open question was whether /admin/* is protected at the
+      Cloudflare edge (Zero Trust Access application or WAF rule) as well as in
+      worker code. If it were, Chalk's Worker-to-Worker forward would be a
+      different client than a browser, carry no Access session, and be answered
+      by Access before the worker ran — so on a class day the console would
+      load, show state, and every write button would fail. Worst possible shape.
+
+      Probed unauthenticated, read-only, four paths including the ones the
+      forwarder targets:
+        /admin/stats                          401 "Auth required"
+        /admin/cohorts                        401 "Auth required"
+        /admin/cohorts/<id>/state             401 "Auth required"
+        /admin/issuers                        401 "Auth required"
+      No 302, no Access login HTML, no cf-access-* headers, no cf-mitigated.
+      "Auth required" is the worker's own admin middleware body.
+
+      Conclusion: there is NO edge rule in front of /admin/*. The forwarder
+      works as tested and this is no longer a pre-deploy human step.
     acceptance:
       - "chalk/ has its own wrangler.toml and route; binds the same D1/KV."
       - "/console moves there; participants are unaffected."
