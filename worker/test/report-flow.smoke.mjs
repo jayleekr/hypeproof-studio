@@ -31,7 +31,7 @@ registerHooks({
     return nextResolve(specifier, context);
   },
   load(url, context, nextLoad) {
-    if (url.endsWith(".html") || url.endsWith(".md")) {
+    if (url.endsWith(".html") || url.endsWith(".md") || url.endsWith(".yaml")) {
       const text = readFileSync(fileURLToPath(url), "utf8");
       return {
         format: "module",

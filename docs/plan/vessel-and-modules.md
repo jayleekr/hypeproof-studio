@@ -224,9 +224,25 @@ Runs in milliseconds, no app required. See `.claude/rules/verification.md`.
 ### Privacy — zero prompt text is what makes this shippable
 
 PIPA Art. 22-2 requires verified guardian consent to process personal data of
-children under 14. That is why `analytics.upload_session_logs` is a hard
-validator failure for minor cohorts today — the sensitive payload is **prompt
-text**, and the lawful-collection procedure does not exist yet.
+children under 14. The sensitive payload is **prompt text**.
+
+**Correction (2026-09-04).** An earlier draft of this section said
+`analytics.upload_session_logs` is "a hard validator failure for minor cohorts"
+full stop. That is not what the harness does, and the difference matters.
+`validate.py:282-294` hard-fails a child cohort **only when no consent
+assertion is present**; a truthy `child.upload_consent_key` downgrades it to a
+warning. Both `sk-biopharm-kids-*` profiles set `upload_session_logs: true`
+today with `child_upload_consent: "2026-08-21 shin_bro — …보호자 사전설문으로
+동의 확보"`, so children's prompt text from the 2026-08-22 session is in R2 by
+design, not by accident.
+
+The harness is candid about what that flag is worth — its own comment reads
+*"The flag records a claim, not proof."*
+
+This makes the board's rule **more** load-bearing, not less. The reason to keep
+the board metadata-only is not that prompt text is unreachable; it is that the
+board must not depend on a free-text consent assertion being accurate. A
+metadata board is correct whether or not that claim holds.
 
 The board uses latency, token counts, error class, elapsed time, and an
 artifact-changed boolean. All operational metadata already collected under the

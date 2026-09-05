@@ -20,6 +20,15 @@ export interface ChatLog {
   // vocabulary (ERROR_KIND), never error prose: arbitrary upstream text is how
   // provider keys, URLs and student utterances leak into analytics (#257).
   error_kind?: string | null;
+  // dag task H — which curriculum module produced this turn. `m2026.09.04-1`
+  // when served from KV, `compiled:<hash>` otherwise (lib/modules.ts). This is
+  // the experimental condition philosophy §11's loop attributes evidence to.
+  // Analytics Engine blob only — usage_log has no column yet (a D1 migration
+  // is human-gated; see the task H report). Never null on a real turn.
+  module_version?: string | null;
+  // The pin that could NOT be served when `module_version` is a fallback;
+  // null/"" in the normal state. Makes a silent-degradation turn greppable.
+  module_fallback?: string | null;
 }
 
 /**
@@ -141,7 +150,17 @@ export function logChat(env: Env, l: ChatLog): void {
     indexes: [l.cohort_id],
     // blobs[4] (#684) — the failure class, "" on success. Analytics Engine is
     // schemaless, so this costs no migration on either store.
-    blobs: [l.user_id, l.profile_id, l.model, String(l.status), l.error_kind ?? ""],
+    // blobs[5]/[6] (task H) — served curriculum version, and the pin that
+    // failed if this turn ran under fallback ("" otherwise).
+    blobs: [
+      l.user_id,
+      l.profile_id,
+      l.model,
+      String(l.status),
+      l.error_kind ?? "",
+      l.module_version ?? "",
+      l.module_fallback ?? "",
+    ],
     doubles: [l.tokens_in, l.tokens_out, l.cache_read, l.cache_create, l.latency_ms],
   });
 }

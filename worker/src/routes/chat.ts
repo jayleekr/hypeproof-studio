@@ -22,7 +22,7 @@ import {
 } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
-import { getProfile } from "../profiles";
+import { resolveProfile } from "../lib/modules";
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropicResilient } from "../lib/anthropic";
 import { glmUpstreamUrl } from "../lib/glm";
@@ -193,8 +193,8 @@ chat.get("/profile", async (c) => {
       401,
     );
   }
-  const profile = getProfile(auth.payload.p);
-  if (!profile) {
+  const resolved = await resolveProfile(c.env, auth.payload.p);
+  if (!resolved) {
     return c.json(
       {
         error: {
@@ -207,9 +207,14 @@ chat.get("/profile", async (c) => {
       400,
     );
   }
+  const { profile, module } = resolved;
 
   return c.json({
     profile_id: profile.id,
+    // dag task H — which curriculum module this seat is running. Observability
+    // only (the prompt itself never leaves the worker): lets e2e/observe and
+    // the instructor tell "which curriculum" without a D1 query.
+    module: { version: module.version, source: module.source, fallback: module.fallback ?? null },
     display_name: profile.display_name,
     language: profile.audience.language,
     series_index: profile.session.series_index,
@@ -363,7 +368,7 @@ chat.post("/chat/completions", async (c) => {
   // LLM-serving routes enforce identical trust gates.
   const gate = await gateChatRequest(c);
   if (!gate.ok) return gate.response;
-  const { payload, profile, session } = gate;
+  const { payload, profile, session, module } = gate;
 
   // #684 — accounting is declared HERE, above every failure exit, not down at
   // the success path where it used to live.
@@ -397,6 +402,9 @@ chat.post("/chat/completions", async (c) => {
     cache_read,
     cache_create,
     latency_ms: Date.now() - startedAt,
+    // task H — the curriculum that produced this turn (lib/modules.ts).
+    module_version: module.version,
+    module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
     logChat(env, log);
@@ -405,6 +413,11 @@ chat.post("/chat/completions", async (c) => {
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>
     record(mkLog(0, 0, 0, 0, status, error_kind));
+  // task H — every response names its curriculum, so a spool/e2e can attribute
+  // without the ledger. Set once here for the c.json paths; the raw streaming
+  // Response below carries it explicitly (Hono does not merge c.header there).
+  c.header("x-hps-module", module.version);
+  if (module.fallback) c.header("x-hps-module-fallback", module.fallback.pinned);
 
   // 6. Build the upstream request (with optional coach context from headers)
   let body: unknown;
@@ -796,6 +809,8 @@ chat.post("/chat/completions", async (c) => {
     "cache-control": "no-cache",
     "x-accel-buffering": "no",
     "x-hps-model": modelLabel,
+    "x-hps-module": module.version,
+    ...(module.fallback ? { "x-hps-module-fallback": module.fallback.pinned } : {}),
     // #580 — raw Response 반환은 request-id 미들웨어의 c.header() 를 우회한다
     // (Hono 는 핸들러가 만든 Response 에 미들웨어 헤더를 합치지 않는다). 4xx
     // (c.json) 경로에만 있던 x-request-id 를 스트리밍 200 에도 직접 싣는다 —
