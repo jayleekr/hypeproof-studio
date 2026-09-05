@@ -21,6 +21,7 @@ on:
 
 permissions:
   contents: write # create/upload the GitHub Release on tag builds
+  actions: write # dispatch mirror-release.yml (#698 — see the dispatch step)
 
 # Match build-mac.yml: never cancel an in-flight release build, and serialize
 # runs for the same ref so a tag push + manual dispatch can't race on the
@@ -490,13 +491,39 @@ jobs:
           # piece. Decision lives in scripts/tag-is-prerelease.sh so it can be
           # unit-tested without cutting a real tag (scripts/test-tag-is-prerelease.sh).
           PRERELEASE_FLAG="$(bash scripts/tag-is-prerelease.sh "$TAG")"
-          # 미러 디스패치는 여기서 하지 않는다 — build-mac.yml 의
-          # "Trigger release mirror" 스텝 한 곳에서만 부른다(dag.yaml task K).
-          # 윈도우 자산이 늦게 올라오는 건 mirror-release.yml 의 대기 루프가
-          # 처리한다(#632). 여기서도 부르면 같은 concurrency group 에 중복 런이
-          # 줄 서기만 한다.
           # build-mac.yml may have created the release for the same tag;
           # create-if-absent then clobber-upload is race-safe across both jobs.
           gh release create "$TAG" --title "HypeProof Studio $TAG" \
             --generate-notes --verify-tag $PRERELEASE_FLAG 2>/dev/null || true
           gh release upload "$TAG" "${assets[@]}" --clobber
+
+      # #698 — dispatch the mirror from HERE TOO, not only from build-mac.
+      #
+      # task K put this on mac alone, reasoning that dispatching from both
+      # would queue duplicate runs in the same concurrency group and that the
+      # mirror's 150-minute wait loop (#632) already handles late Windows
+      # assets. That reasoning is sound about duplicates and wrong about
+      # failure: it assumed mac reaches this point.
+      #
+      # v0.0.0-rc.1 proved otherwise. build-mac died at "Import signing
+      # certificate" (#697), so Publish and Trigger were both skipped and the
+      # mirror never ran — the exact outage #663 was written to prevent, with
+      # the automation hanging off the one build that does code signing and so
+      # has the wider failure surface.
+      #
+      # A duplicate mirror run is cheap: the concurrency group serializes them
+      # and the second finds the work already done. An absent mirror run is
+      # what silently shipped nothing on 2026-08-21.
+      - name: Trigger release mirror (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh workflow run mirror-release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" \
+            -f tag="$TAG" \
+            -f dry_run=false
+          echo "mirror-release.yml 를 tag=$TAG dry_run=false 로 디스패치했다 (windows)."
