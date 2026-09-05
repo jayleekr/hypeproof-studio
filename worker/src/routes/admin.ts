@@ -7,7 +7,7 @@
 // Endpoints:
 //   GET    /admin/cohorts                       — list with status
 //   GET    /admin/cohorts/:id                   — detail (roster + active session)
-//   GET    /admin/cohorts/:id/state             — read-only console state; issuer Bearer OK (#352)
+//   (GET   /admin/cohorts/:id/state             — MOVED to Chalk, plan task F: chalk/src/routes/state.ts)
 //   POST   /admin/cohorts/:id/roster            — body: { users: string[] } (full replace)
 //   POST   /admin/cohorts/:id/roster/append     — body: { users: string[] } (server-side merge, #290)
 //   POST   /admin/cohorts/:id/session           — body: { profile_id, starts_at, ends_at }
@@ -27,16 +27,16 @@
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
-import { issue, issueIssuer, verify, TokenError, type IssuerScope, type TokenPayload } from "../lib/tokens";
-
-// #257 — verify() failures surface curated TokenError prose only; anything
-// else (crypto/config internals) is logged server-side, client gets a
-// generic message.
-function publicVerifyError(err: unknown, label: string): string {
-  if (err instanceof TokenError) return `invalid ${label} token: ${err.message}`;
-  console.error(`${label} token verify failed:`, err);
-  return `invalid ${label} token`;
-}
+import { USAGE_LAST_HOUR_SQL } from "../lib/analytics";
+import { issue, issueIssuer, verify, type IssuerScope } from "../lib/tokens";
+// Instructor-Bearer authorization is shared with Chalk (plan task F) — one
+// implementation, two workers. Never re-inline it here.
+import {
+  authorizeIssuerForCohort,
+  authorizeIssuerForSession,
+  isIssuerAllowedEndpoint,
+  publicVerifyError,
+} from "../lib/instructor-auth";
 import { postDiscordResolution } from "./report";
 import {
   endSession,
@@ -97,36 +97,12 @@ async function persistSessionStart(
   }
 }
 
-// Path-scoped issuer-Bearer exceptions. Each endpoint listed here re-verifies
-// the issuer token + checks scope inside its own handler. The middleware just
-// lets the request through gating so the handler can do the real check. All
-// other admin paths stay admin-only.
-function isIssuerAllowedEndpoint(path: string, method: string): boolean {
-  if (path === "/admin/tokens/issue" && method === "POST") return true;
-  // #167 — issuer-role tokens with can_start_session scope may start/end
-  // their scoped cohort's session without admin Basic auth.
-  if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/session$/.test(path)) return true;
-  if (method === "DELETE" && /^\/admin\/cohorts\/[^/]+\/session$/.test(path)) return true;
-  // #290 — scoped issuers may append to their cohort's roster and use the
-  // composite session open/close endpoints (self-service workshop ops).
-  if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/roster\/append$/.test(path)) return true;
-  if (method === "POST" && /^\/admin\/cohorts\/[^/]+\/session\/(open|close)$/.test(path)) return true;
-  // #352 — the instructor console reads cohort state (active session, pause,
-  // track display names) before any mutation. Read-only; any scope on the
-  // cohort qualifies (handler re-verifies via authorizeIssuerForCohort).
-  if (method === "GET" && /^\/admin\/cohorts\/[^/]+\/state$/.test(path)) return true;
-  // #295 — an admin-tier minter (issuer token with can_issue_issuers) may mint
-  // instructor issuers via Bearer. The handler re-verifies the token AND the
-  // capability; a Bearer minter still cannot create another admin-minter.
-  if (path === "/admin/issuers" && method === "POST") return true;
-  return false;
-}
-
 admin.use("*", async (c, next) => {
   // Cloudflare Access injects this header for authenticated requests.
   if (c.req.header("cf-access-authenticated-user-email")) return next();
 
-  // Path-scoped issuer-Bearer exception (see isIssuerAllowedEndpoint above).
+  // Path-scoped issuer-Bearer exception (lib/instructor-auth.ts
+  // isIssuerAllowedEndpoint — shared with Chalk's forwarder).
   if (isIssuerAllowedEndpoint(c.req.path, c.req.method)) {
     const ah = c.req.header("authorization") ?? "";
     if (/^Bearer\s+/i.test(ah)) return next();
@@ -191,50 +167,11 @@ admin.get("/cohorts/:id", async (c) => {
   return c.json({ id, roster, session, paused });
 });
 
-// #352 — read-only cohort state for the instructor console (/console).
-// Issuer Bearer with ANY scope on the cohort qualifies (no can_start_session:
-// a mint-only instructor must still SEE what's open before handing out
-// tokens). Admin Basic / CF Access also pass (authz === null). Unlike
-// GET /cohorts/:id this returns display names for the issuer's scoped
-// profiles, so the console renders human track cards instead of profile IDs,
-// and only roster_size (not member handles) — the console never needs names.
-admin.get("/cohorts/:id/state", async (c) => {
-  const cohortId = c.req.param("id");
-  const authz = await authorizeIssuerForCohort(c, cohortId);
-  if (authz instanceof Response) return authz;
-  const [session, roster, paused] = await Promise.all([
-    getActiveSession(c.env.HPS_KV, cohortId),
-    getRoster(c.env.HPS_KV, cohortId),
-    getCohortPause(c.env.HPS_KV, cohortId),
-  ]);
-  const scopedIds = authz?.scope.profiles ?? null;
-  // #384 — hide dashboard_hidden tracks from the console (session cards + mint
-  // dropdown both read this), and order by dashboard_order (lower first; absent
-  // sorts last, then registry order). Does not touch /v1/profile resolution.
-  const profiles = listProfiles()
-    .filter((p) => p.session.cohort_id === cohortId)
-    .filter((p) => scopedIds === null || scopedIds.includes(p.id))
-    .filter((p) => p.dashboard_hidden !== true)
-    .sort((a, b) => (a.dashboard_order ?? Number.MAX_SAFE_INTEGER) - (b.dashboard_order ?? Number.MAX_SAFE_INTEGER))
-    .map((p) => ({ id: p.id, display_name: p.display_name }));
-  return c.json({
-    id: cohortId,
-    now: new Date().toISOString(),
-    session,
-    roster_size: roster?.users.length ?? 0,
-    paused,
-    profiles,
-    // Server-authoritative caps so the console renders the same limits the
-    // mutation endpoints will enforce (null on the admin auth path).
-    scope: authz
-      ? {
-          can_start_session: authz.scope.can_start_session === true,
-          max_session_hours: authz.scope.max_session_hours ?? 4,
-          max_hours: authz.scope.max_hours ?? 12,
-        }
-      : null,
-  });
-});
+// GET /cohorts/:id/state (#352) lived here until plan task F. It is an
+// instructor READ, so it now belongs to Chalk (chalk/src/routes/state.ts) —
+// the Service keeps only the writes to the state the chat gate reads, plus
+// the operator (admin Basic / CF Access) surface. Operator callers that used
+// the Basic path read GET /cohorts/:id instead (same session/paused fields).
 
 // ---- kill-switch (S-12 / #47) ----------------------------------------------
 // Cohort-wide hard stop. Returns 503 from /v1/chat/completions until cleared.
@@ -734,97 +671,11 @@ admin.post("/cohorts/:id/roster/append", async (c) => {
 
 // ---- session start/end ------------------------------------------------------
 
-// #167 — when an issuer-role Bearer is presented to /cohorts/:id/session
-// (POST/DELETE), this helper does the same re-verify + scope check pattern
-// that /tokens/issue uses. Returns `null` if no Bearer was present (so the
-// caller knows the middleware admitted via Basic/CF Access). Throws a Response
-// (caught + returned) on Bearer-but-not-authorized cases.
-//
-// `requireProfileId`: when set, the matched scope must include this profile.
-// (start needs it; end does not — end just kills the current session).
-// #290 — issuer-Bearer gate for roster append: any scope on this cohort is
-// enough (no can_start_session needed — minting rights already imply the
-// minted student must be able to join the roster). Same null/Response/result
-// contract as authorizeIssuerForSession below.
-async function authorizeIssuerForCohort(
-  c: { env: Env; req: { header: (k: string) => string | undefined } },
-  cohortId: string,
-): Promise<{ scope: IssuerScope; payload: TokenPayload } | null | Response> {
-  const auth = c.req.header("authorization") ?? "";
-  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
-  if (!bearerMatch || !bearerMatch[1]) return null;
-
-  let payload: TokenPayload;
-  try {
-    payload = await verify(bearerMatch[1], c.env.HPS_SIGNING_SECRET);
-  } catch (err) {
-    return Response.json(
-      { error: publicVerifyError(err, "issuer") },
-      { status: 401 },
-    );
-  }
-  if (payload.role !== "issuer") {
-    return Response.json({ error: "token is not an issuer" }, { status: 403 });
-  }
-  const scope = (payload.scopes ?? []).find((s) => s.cohort === cohortId);
-  if (!scope) {
-    return Response.json(
-      { error: `issuer not scoped to cohort=${cohortId}` },
-      { status: 403 },
-    );
-  }
-  if (payload.jti) {
-    const rev = await isTokenRevoked(c.env.HPS_KV, payload.jti);
-    if (rev) return Response.json({ error: "issuer token revoked" }, { status: 401 });
-  }
-  return { scope, payload };
-}
-
-async function authorizeIssuerForSession(
-  c: { env: Env; req: { header: (k: string) => string | undefined } },
-  cohortId: string,
-  requireProfileId: string | null,
-): Promise<{ scope: IssuerScope; payload: TokenPayload } | null | Response> {
-  const auth = c.req.header("authorization") ?? "";
-  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
-  if (!bearerMatch || !bearerMatch[1]) return null;
-  const issuerToken = bearerMatch[1];
-
-  let payload: TokenPayload;
-  try {
-    payload = await verify(issuerToken, c.env.HPS_SIGNING_SECRET);
-  } catch (err) {
-    return Response.json(
-      { error: publicVerifyError(err, "issuer") },
-      { status: 401 },
-    );
-  }
-  if (payload.role !== "issuer") {
-    return Response.json({ error: "token is not an issuer" }, { status: 403 });
-  }
-  const scopes: IssuerScope[] = payload.scopes ?? [];
-  const scope = scopes.find(
-    (s) =>
-      s.cohort === cohortId &&
-      s.can_start_session === true &&
-      (requireProfileId === null || (s.profiles?.includes(requireProfileId) ?? false)),
-  );
-  if (!scope) {
-    return Response.json(
-      {
-        error: requireProfileId
-          ? `issuer not scoped for session start on (cohort=${cohortId}, profile=${requireProfileId}). scope needs can_start_session=true.`
-          : `issuer not scoped for session control on cohort=${cohortId}. scope needs can_start_session=true.`,
-      },
-      { status: 403 },
-    );
-  }
-  if (payload.jti) {
-    const rev = await isTokenRevoked(c.env.HPS_KV, payload.jti);
-    if (rev) return Response.json({ error: "issuer token revoked" }, { status: 401 });
-  }
-  return { scope, payload };
-}
+// #167 / #290 — the issuer-Bearer re-verify + scope helpers
+// (authorizeIssuerForCohort / authorizeIssuerForSession) moved to
+// lib/instructor-auth.ts with plan task F so Chalk can share them. Contract is
+// unchanged: null = no Bearer (middleware admitted Basic/CF Access), Response =
+// rejected, object = admitted issuer + matched scope.
 
 admin.post("/cohorts/:id/session", async (c) => {
   const cohortId = c.req.param("id");
@@ -1090,19 +941,24 @@ admin.get("/stats", async (c) => {
   // Last-hour aggregates from D1 usage_log.
   // SQLite datetime('now') is UTC; usage_log.created_at is UTC ISO8601 by
   // convention (we INSERT with datetime('now') / ISO8601 timestamps).
-  let lastHour = { messages: 0, errors: 0, tokens_in: 0, tokens_out: 0 };
+  //
+  // #684 — the query moved to lib/analytics.ts (USAGE_LAST_HOUR_SQL) so it
+  // sits next to the writer and the billing predicate, and so the control
+  // test executes the REAL query instead of a copy of its text. Two changes:
+  // token sums now filter to successful turns (failed turns write rows since
+  // #684 and must never be billed), and `requests` was added because
+  // `messages` now means "billable turns", not "rows".
+  let lastHour = { requests: 0, messages: 0, errors: 0, tokens_in: 0, tokens_out: 0 };
   try {
     const row = await c.env.HPS_DB
-      .prepare(
-        `SELECT
-            COUNT(*) AS messages,
-            SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,
-            COALESCE(SUM(tokens_in), 0)  AS tokens_in,
-            COALESCE(SUM(tokens_out), 0) AS tokens_out
-         FROM usage_log
-         WHERE created_at > datetime('now', '-1 hour')`,
-      )
-      .first<{ messages: number; errors: number; tokens_in: number; tokens_out: number }>();
+      .prepare(USAGE_LAST_HOUR_SQL)
+      .first<{
+        requests: number;
+        messages: number;
+        errors: number;
+        tokens_in: number;
+        tokens_out: number;
+      }>();
     if (row) lastHour = row;
   } catch (err) {
     // D1 might be unset in some dev configs; surface but don't crash.

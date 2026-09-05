@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>HypeProof — 강사 라이브 보드</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<!--
+  Instructor live board (plan task G, #674). Read this before changing a column:
+
+  · EVERY seat gets a row, always. A quiet seat is the one you most want to
+    see, and a "recent N rows" list is exactly where it disappears first.
+  · The FIRST column is time-since-last-turn. Ahead of every performance number.
+  · Two seconds, on a phone, while walking. Worst rows float to the top.
+  · ZERO prompt text. Not a preview column, not a truncated one, not a hover
+    tooltip. PIPA Art. 22-2 (verified guardian consent under 14) is why this
+    surface is shippable for minor cohorts at all — metadata only is the whole
+    licence. A "recent question preview" column is the most tempting feature
+    here and it crosses that line. Refuse it.
+-->
+<style>
+  :root {
+    --bg: #0f1115; --fg: #e6e8eb; --muted: #8a8f99; --line: #2a2e36;
+    --accent: #5b8def; --card: #1a1d24;
+    --ok: #4dbd84; --watch: #d9a441; --alert: #e0574c; --unknown: #6b7280;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px 12px 48px;
+    background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", "Pretendard", sans-serif;
+    line-height: 1.4;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 17px; margin: 0 0 2px; }
+  .sub { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  textarea, input {
+    width: 100%; padding: 9px 11px; font: inherit; font-size: 13px;
+    background: var(--card); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px;
+  }
+  textarea { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 11px; resize: vertical; }
+  label { display: block; font-size: 11px; color: var(--muted); margin: 8px 0 3px; }
+  button {
+    width: 100%; margin-top: 10px; padding: 11px;
+    border: 0; border-radius: 6px; cursor: pointer; font: inherit; font-weight: 600;
+    background: var(--accent); color: #fff;
+  }
+  button.ghost { background: transparent; color: var(--muted); border: 1px solid var(--line); font-weight: 400; }
+  fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin: 0 0 14px; }
+  legend { padding: 0 6px; color: var(--muted); font-size: 11px; }
+  .banner { padding: 10px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 10px; }
+  .banner.err { background: #3a1714; border: 1px solid #6b2622; color: #e6a19a; }
+  .banner.warn { background: #33280f; border: 1px solid #6b551f; color: #e0be70; }
+  .summary { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+  .pill {
+    padding: 6px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--line); background: var(--card); font-variant-numeric: tabular-nums;
+  }
+  .pill.alert { border-color: #6b2622; color: var(--alert); }
+  .pill.watch { border-color: #6b551f; color: var(--watch); }
+  .pill.ok { border-color: #1d4d38; color: var(--ok); }
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  th {
+    text-align: right; font-size: 10px; font-weight: 500; color: var(--muted);
+    padding: 0 6px 6px; text-transform: uppercase; letter-spacing: .04em; white-space: nowrap;
+  }
+  th:first-child, td:first-child { text-align: left; }
+  th.seat, td.seat { text-align: left; }
+  td { padding: 9px 6px; border-top: 1px solid var(--line); font-size: 13px; text-align: right; white-space: nowrap; }
+  tr.alert td { background: #26100e; }
+  tr.watch td { background: #241d0d; }
+  .idle { font-size: 17px; font-weight: 700; }
+  .idle.alert { color: var(--alert); }
+  .idle.watch { color: var(--watch); }
+  .idle.ok { color: var(--ok); }
+  .seat b { font-size: 14px; }
+  .state {
+    display: inline-block; font-size: 10px; padding: 2px 7px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: .05em; font-weight: 700;
+  }
+  .state.alert { background: #6b2622; color: #ffcfc9; }
+  .state.watch { background: #6b551f; color: #ffe6ac; }
+  .state.ok { background: #1d4d38; color: #b6e8ce; }
+  .u { color: var(--unknown); }
+  .foot { color: var(--muted); font-size: 11px; margin-top: 14px; }
+  .scroll { overflow-x: auto; }
+  @media (max-width: 520px) { .hide-s { display: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>강사 라이브 보드</h1>
+  <div class="sub">모든 좌석이 항상 한 줄씩. 조용한 좌석이 먼저 보입니다. 10초마다 갱신.</div>
+
+  <fieldset id="setup">
+    <legend>① 강사 issuer 토큰 · cohort</legend>
+    <textarea id="issuer" rows="3" placeholder="eyJjIgi… (강사 토큰)"></textarea>
+    <label for="cohort">cohort id</label>
+    <input id="cohort" placeholder="sk-biopharm-2026-a" autocapitalize="off" spellcheck="false">
+    <label for="prefix">좌석 prefix (비우면 <em>접속한 좌석만</em> 보입니다)</label>
+    <input id="prefix" placeholder="SK34-CM6YPX-" autocapitalize="off" spellcheck="false">
+    <button id="go">보드 열기 →</button>
+    <button class="ghost" id="forget" type="button">토큰 지우기</button>
+  </fieldset>
+
+  <div id="banners"></div>
+  <div id="summary" class="summary"></div>
+  <div class="scroll"><table id="tbl"></table></div>
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const POLL_MS = 10000;   // §4: polling. No SSE, no Durable Objects.
+
+// Paste normalization — same rule as /console and /issuer (issue #65).
+function sanitizeToken(raw) {
+  if (typeof raw !== "string") return "";
+  let s = raw.replace(/\s+/g, "").replace(/[​-‍﻿⁠]/g, "");
+  for (let i = 0; i < 8; i++) {
+    const before = s;
+    s = s.replace(/^["'`,\[\]\{\}\s]+/, "").replace(/["'`,\[\]\{\}\s]+$/, "");
+    if (s === before) break;
+  }
+  return s;
+}
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+// Two-second readability: an idle time is a shape, not a number to parse.
+function dur(ms) {
+  if (ms === null || ms === undefined) return null;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return s + "초";
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + "분";
+  return Math.floor(m / 60) + "시간 " + (m % 60) + "분";
+}
+const unk = '<span class="u">—</span>';
+
+const KEY = "hps_issuer_token";
+const CKEY = "hps_board_cohort";
+const PKEY = "hps_board_prefix";
+(function () {
+  const m = /[#&]t=([^&]+)/.exec(location.hash || "");
+  if (m) { $("issuer").value = sanitizeToken(decodeURIComponent(m[1])); history.replaceState(null, "", location.pathname + location.search); }
+  const q = new URLSearchParams(location.search);
+  if (!$("issuer").value && sessionStorage.getItem(KEY)) $("issuer").value = sessionStorage.getItem(KEY);
+  $("cohort").value = q.get("cohort") || sessionStorage.getItem(CKEY) || "";
+  $("prefix").value = q.get("seat_prefix") || sessionStorage.getItem(PKEY) || "";
+})();
+$("forget").onclick = () => {
+  sessionStorage.removeItem(KEY); $("issuer").value = "";
+  stop(); $("banners").innerHTML = $("summary").innerHTML = $("tbl").innerHTML = $("foot").innerHTML = "";
+};
+
+let timer = null;
+function stop() { if (timer) { clearInterval(timer); timer = null; } }
+
+function mapServerError(raw) {
+  const e = String(raw || "").toLowerCase();
+  if (e.includes("expired")) return "issuer 토큰이 만료됐어요. 재발급 받아주세요.";
+  if (e.includes("revoked")) return "이 토큰은 무효화됐어요.";
+  if (e.includes("not an issuer")) return "학생 토큰이 붙여넣어졌어요. 강사(issuer) 토큰이 필요해요.";
+  if (e.includes("not scoped")) return "이 토큰의 권한 범위 밖 cohort예요.";
+  if (e.includes("invalid signature") || e.includes("malformed")) return "토큰이 손상됐어요. 공백·따옴표 없이 다시 붙여넣어 주세요.";
+  return "오류: " + raw;
+}
+
+async function load() {
+  const token = sanitizeToken($("issuer").value);
+  const cohort = $("cohort").value.trim();
+  const prefix = $("prefix").value.trim();
+  if (!token || !cohort) { $("banners").innerHTML = '<div class="banner err">토큰과 cohort id를 채워주세요.</div>'; return; }
+  sessionStorage.setItem(KEY, token);
+  sessionStorage.setItem(CKEY, cohort);
+  sessionStorage.setItem(PKEY, prefix);
+
+  let url = "/admin/cohorts/" + encodeURIComponent(cohort) + "/board";
+  if (prefix) url += "?seat_prefix=" + encodeURIComponent(prefix);
+  let body;
+  try {
+    const res = await fetch(url, { headers: { authorization: "Bearer " + token } });
+    body = await res.json();
+    if (!res.ok) {
+      stop();
+      $("banners").innerHTML = '<div class="banner err">' + esc(mapServerError(body && (body.error && body.error.message || body.error))) + "</div>";
+      return;
+    }
+  } catch (e) {
+    $("banners").innerHTML = '<div class="banner err">보드를 불러오지 못했어요 (네트워크). 다시 시도 중…</div>';
+    return;
+  }
+  render(body);
+}
+
+function render(b) {
+  // Announce every lost capability. No silent fallback — a column that quietly
+  // reads "fine" because the data isn't there is the exact defect this plan
+  // spent seven tasks removing (spec §5, REQ-M30).
+  $("banners").innerHTML = (b.degraded || [])
+    .map((d) => '<div class="banner warn"><b>' + esc(d.column) + "</b> — " + esc(d.reason) + "</div>")
+    .join("");
+
+  const seats = b.seats || [];
+  const n = (sev) => seats.filter((s) => s.severity === sev).length;
+  $("summary").innerHTML =
+    '<span class="pill alert">주의 ' + n("alert") + "</span>" +
+    '<span class="pill watch">관찰 ' + n("watch") + "</span>" +
+    '<span class="pill ok">정상 ' + n("ok") + "</span>" +
+    '<span class="pill">좌석 ' + seats.length + "</span>";
+
+  const errUnknown = b.error_signal !== "observed";
+  const head =
+    "<tr><th class='seat'>좌석</th><th>마지막 턴</th><th>상태</th>" +
+    "<th class='hide-s'>평균 대기</th><th class='hide-s'>호출 15분</th>" +
+    "<th class='hide-s'>오류</th><th class='hide-s'>하트비트</th><th class='hide-s'>산출물</th></tr>";
+
+  const rows = seats.map((s) => {
+    const idle = dur(s.idle_ms);
+    return (
+      '<tr class="' + esc(s.severity) + '">' +
+      '<td class="seat"><b>' + esc(s.user_id) + "</b></td>" +
+      '<td><span class="idle ' + esc(s.severity) + '">' + (idle === null ? "없음" : esc(idle)) + "</span></td>" +
+      '<td><span class="state ' + esc(s.severity) + '">' + esc(s.state) + "</span></td>" +
+      "<td class='hide-s'>" + (s.mean_wait_ms === null ? unk : esc(dur(s.mean_wait_ms))) + "</td>" +
+      "<td class='hide-s'>" + s.calls_in_window + "</td>" +
+      "<td class='hide-s'>" + (errUnknown || s.failures_in_window === null ? unk : s.failures_in_window) + "</td>" +
+      "<td class='hide-s'>" + (s.heartbeat === "unknown" ? unk : esc(s.heartbeat)) + "</td>" +
+      "<td class='hide-s'>" + (s.artifact_age_ms === null ? unk : esc(dur(s.artifact_age_ms))) + "</td>" +
+      "</tr>"
+    );
+  });
+  $("tbl").innerHTML = head + rows.join("");
+
+  const th = b.thresholds || {};
+  $("foot").innerHTML =
+    "기준 · 조용함 ≥ " + Math.round((th.quietIdleMs || 0) / 60000) + "분 · 느려짐 ≥ " +
+    Math.round((th.slowingIdleMs || 0) / 60000) + "분 · 막힘 = 15분 평균 대기 ≥ " +
+    Math.round((th.stuckMeanWaitMs || 0) / 60000) + "분. " +
+    "명단 " + esc(b.roster && b.roster.source) + (b.roster && b.roster.complete ? " (전체)" : " (접속 좌석만)") +
+    " · 서버시각 " + esc(b.now) + " · <span class='u'>—</span> 는 <b>모름</b>이지 <b>이상 없음</b>이 아닙니다.";
+}
+
+$("go").onclick = () => { stop(); load(); timer = setInterval(load, POLL_MS); };
+if ($("issuer").value && $("cohort").value) $("go").click();
+</script>
+</body>
+</html>

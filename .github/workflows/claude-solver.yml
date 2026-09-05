@@ -29,6 +29,15 @@
 #     bots is filtered by `github.event.sender.type != 'Bot'`.
 #   - When budget is exceeded the action surfaces a comment + label flip
 #     (solver:stalled) — humans triage rather than blind retry.
+#
+# A HUMAN MUST START THIS. Do not add a CI step that labels or comments to
+# start it — GitHub raises no workflow-triggering events for writes made with
+# secrets.GITHUB_TOKEN, so both triggers above are suppressed at the source.
+# autonomous-task-runner.yml tried exactly that and never once started this
+# workflow; it was deleted 2026-09-04. Before rebuilding any CI-initiated
+# path, read docs/AUTONOMOUS-MILESTONE-WORKFLOW.md §"Removed:
+# autonomous-task-runner" — the blocker is the `authorize` job's design (what
+# "authorized" means when the caller is a workflow, not a person), not plumbing.
 
 name: Claude Solver
 on:

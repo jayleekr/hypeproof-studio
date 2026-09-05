@@ -1,0 +1,866 @@
+# Execution DAG for the "vessel and modules" plan.
+#
+# Read by the orchestrator prompt. The orchestrator MUST NOT infer ordering —
+# `depends_on` here is the only source of truth for sequence.
+#
+# Spec: docs/plan/vessel-and-modules.md  (sections referenced per task)
+#
+# Field contract
+#   layer         v* app | w* service | c* surface | m* module  (spec §1)
+#   model         implementer model. sonnet-5 | opus-5 | fable-5-1
+#   depends_on    task ids that must be plan:passed first
+#   human_gate    non-empty => orchestrator STOPS and reports. It may never
+#                 mark this satisfied itself.
+#   machine_gate  commands that must exit 0 before any model-judged eval runs
+#   control       the planted answer. Gate 2. Written BEFORE implementation.
+#   acceptance    prose criteria. Gate 3, judged by a fresh evaluator.
+#
+# Gate order is always: machine_gate -> control -> acceptance.
+# If machine_gate fails, do not spend a model on control/acceptance.
+
+version: 1
+spec: docs/plan/vessel-and-modules.md
+
+# Failure classification the evaluator must emit. Rule out `harness` FIRST —
+# on the 2026-07-25..27 review, 9 of 9 failures were the instrument, not the
+# product (.claude/rules/verification.md rule 6).
+classifications:
+  # Split after task C's first evaluation. The original taxonomy had one
+  # `harness` bucket, which conflated two cases with opposite remedies:
+  # a WRONG instrument means a human must decide what the criterion should be,
+  # while a MISSING instrument is an unambiguous, cheap retry. Sending the
+  # second case to a human stalls the loop for no reason.
+  # Split once after task C, then RE-split after task F. The first cut was
+  # wrong/missing, which is a description of the SYMPTOM. What actually decides
+  # the routing is the REMEDY: do I know what the fix is, or does someone have
+  # to decide what the criterion should be? Sort on that.
+  harness_fixable: >-
+    the criterion is right; the instrument is missing, or its implementation
+    does not measure what the criterion says -> the remedy is unambiguous.
+    Retry the SAME task with an explicit instruction to repair the instrument
+    and leave verified production behaviour alone. Both cases seen so far land
+    here: task C shipped correct behaviour with no committed control at all,
+    and task F's tamper fixture flipped a base64 character (which decodes to
+    the same bytes ~1 time in 16) instead of altering the signature. Routing
+    either to a human would have stalled the loop on a one-line fix.
+  harness_undecided: >-
+    the criterion ITSELF is wrong, or there is no agreement on what it should
+    assert -> do NOT touch the product and do NOT guess. Block and ask a human,
+    because the answer is a judgement about what "correct" means, not a repair.
+  product: implementation is wrong -> retry with failure evidence appended
+  spec: requirement was ambiguous -> block, ask human, DO NOT retry
+  flake: nondeterministic -> re-run once
+
+# Rule of order, unchanged: rule out the instrument before blaming the product.
+# On 2026-07-25..27 the instrument was the cause 9 times out of 9. Running this
+# plan, 2 of the 3 non-passing verdicts were instrument faults (C, F) and only
+# one was the product (H) — the ratio holds.
+#
+# Note on direction: F's broken fixture failed TOWARD red. That is the safe
+# direction and it is why it was caught at all. An instrument that fails toward
+# green reports a false pass and nothing downstream ever questions it.
+
+limits:
+  max_attempts_per_task: 3
+  # Two identical failures stop the loop regardless of classification.
+  stop_on_repeated_identical_failure: 2
+
+# Global precondition checked every tick before any deploy-touching task.
+# Same rule as #676: never deploy into a live class.
+deploy_freeze_check:
+  command: >-
+    curl -sf -u "admin:$HPS_ADMIN_PASSWORD" https://api.hypeproof-ai.xyz/admin/stats
+    | jq '.live_sessions // 0'
+  skip_tasks_when_nonzero: [A, C, D, F, H]
+
+# Durable verdicts. The orchestrator must not hold run state in context —
+# a session ends and takes its memory with it. Anything not written here is lost.
+# Branches are LOCAL and unpushed; nothing below is merged.
+results:
+  batch_1_closed: 2026-09-04
+  decisions_2026_09_04:
+    by: Jay
+    L_moderation: "option (c) — decouple billing from health. Also settles B's mid-stream question."
+    K_priority: "pull ahead of batch 2 — live release defect"
+    merge_to_main: "deferred until all plan work is complete (Jay's decision 4)"
+    note: >-
+      Because main-merge is deferred, batch 2 cannot branch from main — every
+      task would stack on unmerged work and collide. Work proceeds from a LOCAL
+      integration branch (plan/integration = deploy-main + A + B + C). That is
+      workspace hygiene, not a release: nothing reaches main or origin.
+  A:
+    verdict: pass
+    branch: plan/A-dev-channel
+    worktree: .claude/worktrees/agent-a55ba3c0ece4588b5
+    attempts: 1
+    evidence: >-
+      Evaluator mutated the predicate (`*-*) return 0` -> `return 1`) and the
+      committed harness then failed — the test exercises production code, not a
+      copy of the rule. Workflow lines replayed with `gh` stubbed: -rc tag puts
+      --prerelease in argv, plain tag is byte-identical to before.
+    spawned: [J, K]
+  B:
+    verdict: pass
+    branch: plan/B-usage-log-status
+    worktree: .claude/worktrees/agent-a5819ef2d4020e93a
+    attempts: 1
+    evidence: >-
+      Evaluator reconstructed the parent tree (git archive 473b898), dropped in
+      ONLY the new test, and got `0 !== 1` — the control genuinely fails on
+      pre-change code. Test imports the production SQL constants rather than
+      copies; failure rows seeded with 999 tokens so the billing filter cannot
+      pass by accident. d1-accounting.test.mjs byte-unchanged and green.
+    spawned: [L]
+    open_decision: >-
+      Mid-stream interruption is no longer billed. Those tokens WERE spent
+      upstream. Row keeps the numbers; only the predicate drops them. Real money
+      moves in one direction and nobody asked for that direction.
+  C:
+    verdict: pass
+    branch: plan/C-worker-version
+    worktree: .claude/worktrees/agent-ab8890ef7c15d487e
+    attempts: 2
+    attempt_1: >-
+      harness_missing — behaviour correct but the control existed only in a
+      scratch file. Also exposed a spec error of mine: the DAG said "health
+      payload" while naming `GET /`, which serves html.
+    evidence: >-
+      Attempt 2 mutation-tested three ways, all killed, including the case that
+      passes the positive assertion and fails only the negative. Hardcoded
+      `version: "0.1.0"` removed from /v1/health.
+
+# Merge picture, verified by `git merge-tree --write-tree f0b9cea d3b4f1f`
+# (base 473b898): exit 1, exactly one conflicted file.
+#   worker/src/routes/chat.ts  -> auto-merges CLEAN. Disjoint regions: C edits
+#     the ../env import and the GET /health handler; B edits the ../lib/analytics
+#     import and eleven hunks at line 348+ inside chat.post(). No shared state,
+#     no shared helper; neither test references the other's surface.
+#   worker/package.json        -> CONFLICT. Both append to the single-line
+#     `test` script. Resolution is concatenation.
+#
+# MERGE HAZARD, learned the hard way on task F (2026-09-04). Resolving that
+# conflict by UNION is wrong, and it fails silently until a suite runs.
+#
+# Union can only add entries; it cannot represent a DELETION. Task F moved
+# instructor-console.test.mjs from worker/test/ to chalk/test/ and correctly
+# dropped its line from worker's test script. The union resolution resurrected
+# that line, so the merged worker suite invoked a file that no longer existed:
+#     Error: Cannot find module .../worker/test/instructor-console.test.mjs
+# Both branches were individually green; only the merged tree was broken —
+# exactly the class of failure no per-task evaluator can catch.
+#
+# Correct resolution: take the union of entries, then REMOVE any whose file
+# does not exist in the merged tree. Better still, verify by running the suite
+# after every merge rather than trusting the resolution. Do this for G, which
+# will hit the same conflict.
+
+tasks:
+  - id: A
+    title: "dev channel — conditional --prerelease flag"
+    layer: v
+    model: sonnet-5
+    issue: null
+    depends_on: []
+    human_gate: null
+    spec_section: "§6 stage 2"
+    files:
+      - .github/workflows/build-mac.yml
+      - .github/workflows/build-windows.yml
+    machine_gate:
+      - "python3 -c \"import yaml,sys; yaml.safe_load(open('.github/workflows/build-mac.yml'))\""
+      - "python3 -c \"import yaml,sys; yaml.safe_load(open('.github/workflows/build-windows.yml'))\""
+    control:
+      description: >-
+        Tag-shape classifier must be exercised without cutting a real tag.
+        Extract the prerelease decision into a shell function or a tiny script
+        so it can be unit-tested.
+      positive: "TAG=v9.9.9-rc.1  => --prerelease present"
+      negative: "TAG=v9.9.9       => --prerelease absent"
+    acceptance:
+      - "A tag containing a hyphen publishes as a GitHub prerelease."
+      - "A plain vX.Y.Z tag behaves exactly as before (no behavior change)."
+      - "Both mac and windows workflows changed identically."
+    notes: >-
+      updateCheckerHelpers.ts:169 already skips draft/prerelease, and GitHub's
+      /releases/latest excludes prereleases by definition. This flag is the
+      only missing piece. Do not touch client code.
+
+  - id: B
+    title: "usage_log.status is a literal 200; failed turns write no row"
+    layer: w
+    model: opus-5
+    issue: 684
+    depends_on: []
+    human_gate: null
+    spec_section: "§3"
+    files:
+      - worker/src/routes/chat.ts
+      - worker/src/routes/messages.ts
+      - worker/src/lib/analytics.ts
+      - worker/test/d1-accounting.test.mjs
+    machine_gate:
+      - "cd worker && npx tsc --noEmit"
+      - "cd worker && npm test"
+    control:
+      description: >-
+        Integration test that forces an upstream 4xx. Today the row is never
+        created, so this test MUST fail before the change and pass after.
+      positive: >-
+        Upstream 4xx => a usage_log row EXISTS with status == the real upstream
+        status (not 200) and latency_ms populated.
+      negative: >-
+        Usage/quota aggregation queries count successes only — a failed row must
+        not be billed. d1-accounting.test.mjs holds that contract.
+    acceptance:
+      - "status column carries the observed upstream status, never a literal."
+      - "Failed turns produce a row (tokens may be 0) with a coarse error class."
+      - "Accounting queries changed to filter successes; no double-count."
+      - "No migration required — the column already exists and is nullable-safe."
+    notes: >-
+      Production evidence: SELECT status, COUNT(*) FROM usage_log GROUP BY status
+      returns 16,564 rows all status=200 across 2026-07-14..2026-08-23.
+      This touches the billing ledger. Read worker/test/d1-accounting.test.mjs first.
+
+  - id: C
+    title: "worker version identifier"
+    layer: w
+    model: sonnet-5
+    issue: null
+    depends_on: []
+    human_gate: null
+    spec_section: "§6 stage 2"
+    files:
+      - worker/wrangler.toml
+      - worker/src/index.ts
+      - .github/workflows/deploy-worker.yml
+    machine_gate:
+      - "cd worker && npx tsc --noEmit"
+      - "cd worker && npm test"
+    control:
+      # CORRECTED after attempt 1. The original wording said "health payload"
+      # but named `GET /`, which serves admin.html (text/html) and is pinned by
+      # route-order.test.mjs. The health payload is `GET /v1/health`.
+      target: "GET /v1/health (JSON), worker/src/routes/chat.ts:67"
+      positive: >-
+        With HPS_WORKER_VERSION=w2026.09.04-1 injected, GET /v1/health returns
+        that exact string in its JSON `version` field.
+      negative: >-
+        With the var unset, GET /v1/health still responds 200 and reports
+        'unknown' — never a crash, never an empty string.
+      must_be_committed: >-
+        The control is a committed test wired into worker/package.json's test
+        script. A control reconstructed by hand and thrown away is not a control
+        — see the orphaned-test problem this plan already gates against.
+    acceptance:
+      - "Deploy injects the version from the w* tag."
+      - "GET /v1/health reports it so 'what is running in prod' is answerable."
+      - "The hardcoded version literal is gone (see notes)."
+      - "GET / is untouched — its text/html contract stays as route-order.test.mjs pins it."
+      - "Value is also available to the board's diagnostics later (task G)."
+    notes: >-
+      scripts/resolve-version.sh resolves the APP version only (git tag ->
+      extension package.json). The worker has no version concept at all today.
+      Do not fold the worker into resolve-version.sh — separate trains.
+
+      IMPORTANT: `GET /v1/health` already returns `version: "0.1.0"` — a
+      hardcoded literal, stale and never updated. That is the same defect class
+      as #684 (task B): a constant masquerading as an observation. Replacing it
+      is part of this task, not a side quest. Anyone who curl'd /v1/health to
+      ask "what is running in prod" has been reading a lie.
+
+  - id: D
+    title: "enforce the live-session deploy freeze"
+    layer: w
+    model: opus-5
+    issue: 676
+    depends_on: [C]
+    human_gate: null
+    spec_section: "§6 stage 2"
+    files:
+      - .github/workflows/deploy-worker.yml
+      - .github/workflows/build-mac.yml
+      - .github/workflows/build-windows.yml
+    machine_gate:
+      - "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/deploy-worker.yml'))\""
+    control:
+      positive: "live_sessions == 0 => step exits 0, deploy proceeds."
+      negative: >-
+        live_sessions > 0 and override input not set => step exits non-zero with
+        a message naming the count.
+      also: >-
+        override_live_session == true => proceeds, and the override is recorded
+        with the worker version from task C.
+    acceptance:
+      - "Applies to the worker deploy AND to stable app tag builds."
+      - "dev-channel (-rc) tags are exempt — they reach nobody."
+      - "Override is an explicit workflow input, never a default."
+    notes: >-
+      #668 shipped one hour into a live class. The worker already knows session
+      state (getActiveSession) — ask it, don't maintain a separate calendar.
+
+      BLOCKING PRECONDITION, found 2026-09-04 while verifying D's own
+      integrator note. `HPS_ADMIN_PASSWORD` DOES NOT EXIST as a repo secret.
+      `gh api .../actions/secrets` returns total_count 8 and it is not among
+      them. The implementer flagged a weaker version of this ("if environment
+      scoping hides it from the build workflows"); the truth is it was never
+      created.
+
+      Consequence: D is fail-closed BY DESIGN and correct to be, so merging it
+      as-is would block every worker deploy and every stable tag build on the
+      first run — the freeze would query with a credential that does not exist
+      and, correctly, refuse. The implementer's control case C ("secret unset
+      -> BLOCKED (query_failed)") is not a hypothetical; it is the current
+      production state.
+
+      CORRECTION (measured by the evaluator, 2026-09-04). The orchestrator
+      first wrote "merging D would block every deploy". That overstated it.
+      Measured with the secret unset and an unroutable API base:
+
+        (a) worker deploy      -> BLOCKED exit 1, names the unset secret
+        (b) stable tag build   -> BLOCKED exit 1 at the PRE-BUILD gate, in
+                                  seconds, before the 1-2h runner
+        (c) -rc tag            -> EXIT 0. The exemption decides on the ref
+                                  string alone and returns before it ever
+                                  execs the checker. No credential touched.
+        (d) branch / non-tag   -> exempt, likewise no credential
+
+      So the dev channel is FULLY USABLE with the secret absent, and the
+      blast radius is bounded to the stable release path plus worker deploys.
+      D is safe to merge into the integration branch now; the secret must exist
+      before the first stable release, not before the merge.
+
+      Useful consequence for sequencing: the -rc tag that verifies K and J does
+      NOT depend on this secret, so those two human steps are independent and
+      can happen in either order.
+
+      Also confirmed: HPS_ADMIN_PASSWORD is already wired at job level in
+      deploy-worker.yml:39 (pre-existing, not added by D). Only the
+      repo-settings action remains — no code change is needed once it exists.
+
+      Corroborating, and a separate dead automation: admin-session.yml exists
+      to open/close a session from CI and hard-fails on an empty
+      HPS_ADMIN_PASSWORD (`[ -n "${PW:-}" ] || exit 1`). It has run twice, ever
+      — 2026-07-08 and 2026-07-24 — and BOTH FAILED. It has never once worked,
+      for the same reason. Fourth instance of an automation that exists,
+      appears wired, and cannot run.
+
+  - id: E
+    title: "heartbeat + artifactChanged trace event"
+    layer: w
+    model: opus-5
+    issue: null
+    depends_on: []
+    human_gate: >-
+      Requires ONE Studio release to reach participants. The orchestrator stops
+      after the PR is merged and reports; it may not cut or verify the release.
+    spec_section: "§3, §4"
+    files:
+      - worker/src/routes/trace.ts
+      - worker/src/index.ts
+      - extensions/hypeproof-chat/src/chatPanelProvider.ts
+      - worker/test/
+    machine_gate:
+      - "cd worker && npx tsc --noEmit"
+      - "cd worker && npm test"
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        This spans two deploy targets with different cadences, so an old client
+        hitting a new worker is the NORMAL path, not an edge case.
+        A drift-lock test is mandatory (pattern: worker/test/logs-upload.test.mjs).
+      positive: >-
+        Request WITHOUT the heartbeat/version headers (i.e. an old client)
+        still returns 200 and behaves exactly as before.
+      negative: >-
+        Malformed artifactChanged payload is rejected 400 without affecting the
+        chat path.
+      drift_lock: "payload shape asserted identically on both client and worker side"
+    acceptance:
+      - "Extension pings every 30-60s independent of chat activity."
+      - "artifactChanged carries sha256 + bytes only — never file content."
+      - "Worker deployed first and backward compatible; app follows as -rc then stable."
+      - "A drift-lock test file exists and is listed in the package.json test script."
+    notes: >-
+      Ordering rule is absolute: worker first (backward compatible), then app.
+      Reversed, a new app calls an old worker and the expensive-to-roll-back
+      side breaks first.
+
+  - id: F
+    title: "split Chalk (instructor surface) into its own Cloudflare Worker"
+    layer: c
+    model: fable-5-1
+    issue: null
+    depends_on: []
+    human_gate: null
+    spec_section: "§1, §2"
+    files:
+      - chalk/
+      - worker/src/ui/console.html
+      - worker/src/index.ts
+      - .github/workflows/
+    machine_gate:
+      - "cd worker && npx tsc --noEmit && npm test"
+      - "cd chalk && npx tsc --noEmit && npm test"
+    control:
+      description: >-
+        The whole point is that the two artifacts become independent. Prove it.
+      positive: >-
+        Deploying chalk does NOT change the Service worker's version
+        (task C's identifier stays put).
+      negative: >-
+        The instructor issuer-token verification is NOT duplicated as a second
+        implementation — it is shared or re-exported, and a drift-lock test
+        asserts both sides accept/reject the same fixtures.
+    edge_protection_RESOLVED: >-
+      OBSERVED 2026-09-04, converting the implementer's stated inference into a
+      measurement. The open question was whether /admin/* is protected at the
+      Cloudflare edge (Zero Trust Access application or WAF rule) as well as in
+      worker code. If it were, Chalk's Worker-to-Worker forward would be a
+      different client than a browser, carry no Access session, and be answered
+      by Access before the worker ran — so on a class day the console would
+      load, show state, and every write button would fail. Worst possible shape.
+
+      Probed unauthenticated, read-only, four paths including the ones the
+      forwarder targets:
+        /admin/stats                          401 "Auth required"
+        /admin/cohorts                        401 "Auth required"
+        /admin/cohorts/<id>/state             401 "Auth required"
+        /admin/issuers                        401 "Auth required"
+      No 302, no Access login HTML, no cf-access-* headers, no cf-mitigated.
+      "Auth required" is the worker's own admin middleware body.
+
+      Conclusion: there is NO edge rule in front of /admin/*. The forwarder
+      works as tested and this is no longer a pre-deploy human step.
+    acceptance:
+      - "chalk/ has its own wrangler.toml and route; binds the same D1/KV."
+      - "/console moves there; participants are unaffected."
+      - "Tag prefix c* deploys only chalk."
+      - "No second, divergent copy of token verification."
+    notes: >-
+      Do this BEFORE task G. Building the board inside the Service worker and
+      moving it later costs a migration. This is the widest-blast-radius task
+      before H — hence fable-5-1.
+
+  - id: G
+    title: "instructor live board"
+    layer: c
+    model: opus-5
+    issue: 674
+    depends_on: [B, F, L]
+    human_gate: null   # RETRACTED 2026-09-04 — the gate did not hold up
+    human_gate_RETRACTED: >-
+      I wrote "B must be DEPLOYED to production before calibration is
+      meaningful". Reasoning it through, that is wrong, and it was blocking the
+      destination task on a deploy deferred to the end of the plan.
+
+      The 2026-08-22 replay data was collected under the OLD code: every row
+      status=200, no failure rows, no heartbeats. What that data CAN calibrate
+      is exactly what the labelled ground truth covers — the *stuck* threshold
+      (seat -12, 250s mean wait) and the *quiet* threshold (-01 and -06, 11 min
+      of no activity). Those signals are present in it, and B changes neither.
+
+      What it cannot calibrate is *failing* and *no-heartbeat*. But those are
+      not threshold questions at all — they are presence questions ("are there
+      error rows", "has a ping arrived"). They need no distribution, so they
+      need no history.
+
+      So G proceeds now. The consequence to be honest about: the failing column
+      stays empty until B is live in production, and the heartbeat column until
+      E ships in an app release. Both must render as 'unknown', never as a
+      false negative — which is already an acceptance bullet.
+    spec_section: "§4"
+    files:
+      - chalk/src/routes/board.ts
+      - chalk/src/ui/board.html
+      - chalk/test/board-threshold.test.mjs
+    machine_gate:
+      - "cd chalk && npx tsc --noEmit && npm test"
+    control:
+      description: >-
+        Labelled ground truth exists. Extract threshold logic as a PURE function
+        over rows and replay the 2026-08-22 session before any live run.
+        This runs in milliseconds without the app.
+      positive: >-
+        Seats that were fine on 2026-08-22 all render green. Catches an
+        over-strict board — the failure mode that turns the board into noise
+        and gets the tab closed.
+      negative: >-
+        SK34-CM6YPX-12 renders red (3 turns in 15 min, 250s mean wait).
+        SK34-CM6YPX-01 and -06 render as quiet (11 min no activity).
+      derive: >-
+        Take the wait-time distribution from the real 16,564 rows. ClassAid's
+        240s inactivity threshold is a sanity check on the result, not a
+        substitute for measuring.
+    acceptance:
+      - "Every roster row is always rendered — absence is the primary signal."
+      - "First column is time-since-last-turn."
+      - "Opens with an instructor issuer token (today that path 401s)."
+      - "Polls ~10s. No SSE, no Durable Objects."
+      - "ZERO prompt text anywhere in the response or the page."
+      - "Columns that need the task-E client release degrade to 'unknown', never to a false negative."
+      - "Derive seat state from `idle_ms` and the server `at`. NEVER read a client-computed state — see notes."
+
+    notes: >-
+      Privacy line is load-bearing: metadata only keeps this shippable under the
+      existing basis. A 'recent question preview' column crosses PIPA Art.22-2
+      territory for minor cohorts and blocks the whole feature.
+
+      THRESHOLDS LIVE HERE, NOT IN THE CLIENT. Task E originally shipped a
+      guessed 60s idle cut inside the extension — the one part of it riding the
+      slow train, and 4x off ClassAid's 240s. It was removed before release.
+      The standing rule (spec §1, "The second question the rule does not ask"):
+      a threshold on the slow train is a threshold you cannot calibrate. This
+      task owns the cut, derives it from the 2026-08-22 replay, and it lives on
+      the 30-second train so a correction costs 30 seconds rather than a
+      reinstall on every machine.
+
+  - id: H
+    title: "module distribution layer (curriculum + prompts out of the binary)"
+    layer: m
+    model: fable-5-1
+    issue: null
+    # F removed from depends_on 2026-09-04. It was orchestrator caution, not a
+    # real constraint: F's files (chalk/, worker/src/ui/, worker/src/index.ts)
+    # are disjoint from H's (worker/src/profiles/, prompts/). The one shared
+    # directory is worker/src/lib/, where F touches tokens.ts for shared auth
+    # and H needs new loader/cache code — different files. Serialising them
+    # delayed the single most structural task in the plan behind an unrelated
+    # one. Both now run in parallel.
+    depends_on: [B, C]
+    human_gate: null
+    spec_section: "§2, §5"
+    files:
+      - worker/src/profiles/
+      - worker/src/prompts/
+      - worker/src/lib/
+    machine_gate:
+      - "cd worker && npx tsc --noEmit && npm test"
+    control:
+      description: >-
+        The silent failure here is cache invalidation, not a crash. Measure it.
+      positive: >-
+        After swapping a module version, usage.cache_read_input_tokens stays > 0
+        on the following request — the prompt cache prefix was NOT broken.
+      negative: >-
+        A malformed module is rejected and the cohort falls back to the last
+        good version, loudly (logged), never silently serving an empty prompt.
+      also: "Module version appears on the turn record so evidence is attributable."
+    acceptance:
+      - "Profiles/prompts load from KV/R2 at runtime, versioned as m*."
+      - "Updating curriculum requires no code deploy."
+      - "Session-design files (the Chalk contract) use the same module format."
+      - "Prompt cache strategy documented and measured, not assumed."
+    notes: >-
+      Rationale is not release hygiene — it is Lab operating-loop precondition.
+      Philosophy §18 warns against protecting existing Curriculum; compiling it
+      into the binary makes that protection the default. §11 needs evidence
+      attributable to a curriculum version.
+
+  - id: I
+    title: "studio-logs read path — arrival check and retrieval"
+    layer: c
+    model: opus-5
+    issue: 680
+    depends_on: [F]
+    human_gate: null
+    spec_section: "§3"
+    deadline: "2026-11-20"
+    files:
+      - chalk/src/routes/logs-admin.ts
+    machine_gate:
+      - "cd chalk && npx tsc --noEmit && npm test"
+    control:
+      positive: >-
+        Listing studio-logs/<cohort>/ against a known roster reports exactly the
+        seats with no upload. For 2026-08-22 that must be -01, -11, -12, -13, -14.
+      negative: "A cohort with no uploads returns an empty list, not an error."
+    acceptance:
+      - "List what arrived per seat: count, time, bytes."
+      - "Diff against roster to name seats that never uploaded."
+      - "Fetch one session's events.jsonl."
+      - "Read-only. Deletion is explicitly out of scope."
+    notes: >-
+      Deadline is real: R2 retention is 90 days, so the 1회차 (2026-08-22) logs
+      are gone around 2026-11-20. Issues #670/#671/#675 currently stand on
+      circumstantial evidence that lives in those files.
+
+  # ---------------------------------------------------------------------
+  # J and K were discovered by the evaluator for task A, not planned up front.
+  # A passed its own acceptance; these are gaps in what A was ASKED for.
+  # ---------------------------------------------------------------------
+
+  - id: L
+    title: "outbound-blocked turns render as healthy seats — #684 survives on one path"
+    layer: w
+    model: opus-5
+    issue: null
+    depends_on: [B]
+    human_gate: null   # cleared 2026-09-04 — see `decision` below
+    spec_section: "§3"
+    files:
+      - worker/src/routes/chat.ts
+      - worker/src/routes/messages.ts
+      - worker/src/lib/analytics.ts
+    machine_gate:
+      - "cd worker && npx tsc --noEmit && npm test"
+    decision: >-
+      SETTLED 2026-09-04 by Jay: option (c). Decouple the predicates — bill on
+      "were tokens spent", judge health on status.
+
+      This also settles B's open question, which was raised as a separate
+      decision and turns out to be the same defect. Under (c) a mid-stream
+      interruption IS billed (tokens were genuinely spent upstream) and still
+      renders as a failure on the board (status 502). B currently excludes it
+      from billing; L reverts that half. Both answers become correct because
+      neither has to stand in for the other.
+
+      Consequences L must carry:
+        - USAGE_BILLABLE stops meaning "status < 400"
+        - mid-stream interruptions return to being billed
+        - outbound moderation blocks stop reading as healthy seats
+        - both moderation directions get tests; today neither is asserted
+    decision_required_was: >-
+      `USAGE_BILLABLE = "status < 400"` makes one column answer two unrelated
+      questions: "did we spend money" (billing) and "did this turn help the
+      student" (the board). Outbound moderation is where they diverge, and the
+      two answers conflict. Options:
+        (a) outbound block writes a non-200 status, tokens retained on the row.
+            Board correct; those genuinely-spent tokens stop being billed.
+        (b) leave status 200, add a separate blocked/unusable signal in D1.
+            Needs a migration — the only option that keeps both answers right.
+        (c) decouple the predicates: bill on "tokens were spent", judge health
+            on status. No migration; changes what `USAGE_BILLABLE` means.
+      Recommendation: (c). The defect is the conflation, not either value.
+    control:
+      description: >-
+        The planted answer is the seat that must stop being invisible.
+      positive: >-
+        A turn blocked on the OUTBOUND path is distinguishable, in D1 alone,
+        from a turn that completed normally — without consulting Analytics
+        Engine, which is not the per-seat ledger.
+      negative: >-
+        Tokens genuinely spent upstream remain visible in the row and are not
+        silently zeroed to make the board look right.
+      also: >-
+        Inbound and outbound blocks render as the SAME seat state on the board.
+        The student experience is identical: "I typed something and the coach
+        refused me."
+    acceptance:
+      - "A seat whose every turn is outbound-blocked does not render as healthy."
+      - "The billing answer and the board answer are each independently correct."
+      - "Tests pin BOTH moderation directions — today neither is asserted."
+    notes: >-
+      Found by task B's evaluator, not by review. chat.ts:633 and
+      messages.ts:531 call record(mkLog(...)) with the default 200 BEFORE the
+      outbound screen, then return 400. Inbound calls recordFailure(400,
+      MODERATION_BLOCK).
+
+      Why this is worse than neutral: the outbound-blocked seat emits billable
+      200s at a normal cadence, so it looks MORE active than a quiet seat. An
+      instructor scanning for red walks straight past a child whose lesson is
+      completely broken. That is exactly the failure #684 exists to eliminate,
+      surviving on one of the two moderation paths.
+
+      MUST be settled before task G calibrates thresholds, or G will tune
+      against data in which one moderation direction is invisible.
+
+  - id: M
+    title: "the autonomous task router has never once started the solver"
+    layer: v
+    model: opus-5
+    issue: null
+    depends_on: []
+    human_gate: >-
+      The remedy is a product decision, not an implementation one: fix the
+      router, delete it, or accept that a human typing @claude is the real path.
+      Do not implement before Jay picks one.
+    spec_section: null
+    files:
+      - .github/workflows/autonomous-task-runner.yml
+      - .github/workflows/claude-solver.yml
+    machine_gate:
+      - "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/autonomous-task-runner.yml'))\""
+    control:
+      description: >-
+        Third instance of the defect class task K was filed for, found while
+        evaluating K. Same mechanism, different pipeline.
+      evidence: >-
+        autonomous-task-runner.yml routes work using secrets.GITHUB_TOKEN: it
+        adds the `solver:ready` label and posts a comment. claude-solver.yml
+        fires on exactly `issues: [labeled]` and `issue_comment: [created]` —
+        both GITHUB_TOKEN-authored events, therefore both blocked.
+        Empirically: across the last 100 claude-solver runs the triggering actor
+        is a HUMAN in every single case (jayleekr 44, J3llyBe4n 28, ico1036 11,
+        +4 others). Zero runs by github-actions[bot]. The router has never
+        started the solver.
+      positive: >-
+        Whatever remedy is chosen, a routed issue must demonstrably reach the
+        solver without a human — or the file must stop claiming it does.
+      false_green: >-
+        autonomous-task-runner.yml has run exactly ONCE, ever: 2026-06-04T10:15Z,
+        workflow_dispatch by jayleekr, conclusion SUCCESS. That success is the
+        reason nobody looked — the routing step labels, comments, exits 0, and
+        nothing downstream starts. A green run that proves nothing.
+      scope_is_narrower_than_it_looks: >-
+        Only the `solver` mode is broken. `goal-comment` posts a /goal prompt for
+        a human to copy and deliberately contains no @claude, so it was never
+        meant to trigger anything; `verify-only` is a jq summary with no event
+        dependency. Two of three modes work as designed. The one mode whose
+        entire purpose is handoff is the one that cannot hand off.
+      why_K_fix_does_not_transfer: >-
+        claude-solver.yml has no workflow_dispatch trigger to dispatch to, and
+        its `authorize` job reads context.payload.sender.login and requires write
+        permission — the guard that stops mass-labeling from burning API budget.
+        A workflow_dispatch event has no payload.sender in that shape, so adding
+        the trigger makes authorize fail or need its own branch. Fixing this
+        means deciding what "authorized" means when the caller is a workflow,
+        not a person. Design question, not plumbing.
+      sweep_completeness: >-
+        Established over all 17 workflow files, two passes: every `on:` block
+        parsed to enumerate consumable events, and a producer grep for
+        gh issue/pr/release writes, git push/tag, github-script,
+        repository_dispatch and workflow run. Eight producer hits, each read.
+        Result: two LIVE instances (mirror — fixed by K; solver routing — this
+        task) and one LATENT in the Phase 6 upstream-sync placeholder, which is
+        still a 14-line stub. claude-solver.yml and main-guard.yml use
+        github-script read-only and emit no events.
+    acceptance:
+      - "No file claims automation it does not have (same rule as K)."
+      - "If kept: a routed issue starts the solver, proven by an actual run."
+      - "If removed: the removal says why, so it is not rebuilt in six months."
+    resolved_2026_09_04: >-
+      DECISION: delete the router (Jay).
+
+      One adjacent worry raised during implementation is CLOSED, negatively —
+      recorded so nobody "fixes" a working path later. The concern was that
+      `.claude/skills/report-ui/file-issue.sh` applies `solver:ready` via
+      `gh issue create --label`, and it was unclear whether labelling at
+      CREATION time emits `issues: labeled` or folds into `opened`.
+
+      It fires. Issue #669 was created 2026-08-22T03:17:17Z and a claude-solver
+      run with event=issues started 03:17:21Z — four seconds later. Across the
+      last 100 solver runs the split is issue_comment 45 / issues 55, so both
+      human paths work. report-ui's handoff is sound; it uses a personal token,
+      so the GITHUB_TOKEN suppression never applied to it.
+    priority: >-
+      Below K. K was shipping the wrong build to participants; this is an
+      unattended path that never ran and has been invoked once in three months.
+    cheapest_honest_step: >-
+      Costs nothing and closes K's acceptance rule immediately: strip the
+      "Routed to Claude Solver" claim from autonomous-task-runner.yml:68 and
+      rename the step, so the file stops asserting automation it does not have.
+      Do this whether or not the capability is later rebuilt — the false claim
+      is the part that caused three months of nobody checking.
+    notes: >-
+      This is a pattern, not a bad commit, and that is the finding worth acting
+      on. The rule was documented CORRECTLY in this repo on 2026-06-04, in
+      notify-release-published.yml's header:
+
+        "CI-created releases that use the default GITHUB_TOKEN do not trigger
+         recursive release workflows, so operators can use workflow_dispatch"
+
+      #663 contradicted it three months later, and autonomous-task-runner
+      contradicts it too. The knowledge existed, was written down, and did not
+      travel. A fix that only repairs the two known instances leaves the third
+      one to be written next quarter.
+
+      Suggested durable countermeasure (not yet scoped): a CI check that flags
+      any workflow whose trigger events can only be raised by GITHUB_TOKEN
+      writes elsewhere in the repo. The rule is mechanical and greppable.
+
+  - id: J
+    title: "mirror-release publishes prereleases as stable — dev channel leaks"
+    layer: v
+    model: sonnet-5
+    issue: null
+    depends_on: [A]
+    human_gate: null
+    spec_section: "§6 stage 2"
+    files:
+      - .github/workflows/mirror-release.yml
+    machine_gate:
+      - "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/mirror-release.yml'))\""
+    control:
+      positive: >-
+        Mirroring a hyphenated tag creates the mirror release WITH --prerelease,
+        so the mirror's /releases/latest does not advertise it.
+      negative: >-
+        Mirroring a plain vX.Y.Z tag is byte-identical to today's behaviour.
+      reuse: >-
+        Use scripts/tag-is-prerelease.sh from task A — do not write a second
+        copy of the rule. A duplicated classifier is the drift this plan exists
+        to prevent.
+    acceptance:
+      - "mirror-release.yml propagates prerelease status from the source release."
+      - "install.sh / install.ps1 / the in-app update banner never see an -rc build."
+    notes: >-
+      Task A makes -rc invisible in the SOURCE repo. The mirror is a second
+      publish path with no prerelease handling (mirror-release.yml:171), and
+      install.sh, install.ps1 and updateChecker.ts all read the MIRROR's
+      /releases/latest. Without this, A's "dev channel reaches nobody" property
+      is false on the path that is actually used today (workflow_dispatch).
+
+  - id: K
+    priority: ahead-of-batch-2   # Jay 2026-09-04: a live release defect, not a refactor
+    title: "auto-mirror trigger (#663) cannot fire — the v0.1.50 incident can recur"
+    layer: v
+    model: opus-5
+    issue: null
+    depends_on: []
+    human_gate: >-
+      Verifying the fix requires cutting a real tag and watching whether the
+      mirror job fires. The orchestrator must not cut a release tag.
+    spec_section: null
+    files:
+      - .github/workflows/mirror-release.yml
+      - .github/workflows/build-mac.yml
+      - .github/workflows/build-windows.yml
+    machine_gate:
+      - "python3 -c \"import yaml; yaml.safe_load(open('.github/workflows/mirror-release.yml'))\""
+    control:
+      description: >-
+        The claim to disprove: "releases created with secrets.GITHUB_TOKEN do
+        not trigger further workflow runs, so `on: release: [published]` never
+        fires for our tag builds."
+      evidence_RETRACTED: >-
+        The orchestrator's original evidence did not discriminate and should not
+        be reused. It argued from "all mirror-release runs are workflow_dispatch,
+        none are release". But d83f57c landed 2026-08-20T23:23Z and the newest
+        release v0.1.50 published 2026-08-20T16:26Z — the trigger arrived ~7h
+        AFTER the last release, and nothing has been released since. That run
+        list is exactly what you would see whether the trigger works or not.
+        Recorded here rather than deleted: the mistake was reasoning from an
+        absence without checking that the absence could distinguish anything.
+      evidence: >-
+        A natural control in the same repo, verified independently by the
+        evaluator against the GitHub API. `notify-release-published.yml` has
+        carried the IDENTICAL `release: [published]` trigger since
+        2026-06-04T10:31Z, state active, never modified. Since then: 36 releases
+        published, 36/36 authored by github-actions[bot] (GITHUB_TOKEN), and
+        that workflow's release-event runs = 0 (3 runs total, all dispatch).
+        mirror-release.yml itself: 42 runs, all dispatch, 0 release.
+        Three months, an active identical trigger, 36 chances, zero firings.
+        GitHub documents the rule: with the exception of workflow_dispatch and
+        repository_dispatch, GITHUB_TOKEN-triggered events do not create runs.
+      positive: >-
+        After the fix, a tag build results in a mirror run with event=release
+        (or an equivalent path that demonstrably runs without a human).
+    acceptance:
+      - "Either the release is created with a PAT that can trigger workflows, or the mirror is invoked directly from the tag build, or the auto-claim is removed from the comments."
+      - "Whatever is chosen, the file must not claim automation it does not have."
+    notes: >-
+      #663's stated purpose was to stop a repeat of 2026-08-21, when v0.1.50
+      never reached the mirror and install.sh plus the in-app update banner both
+      silently reported 'already latest' — a workshop-day hotfix that reached
+      nobody. If the trigger cannot fire, that incident is still live AND the
+      team believes it is fixed, which is worse than a known gap.
+      MIRROR_RELEASE_PAT already exists as a secret; the source-release creation
+      in build-mac.yml:338 uses secrets.GITHUB_TOKEN.
+
+# Suggested parallel batches (informational — depends_on is authoritative)
+batches:
+  - [A, B, C]
+  - [D, E, F, K]
+  - [L]          # decision-gated; blocks G's calibration
+  - [G, J]
+  - [H, I]

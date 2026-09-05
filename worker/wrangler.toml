@@ -50,14 +50,28 @@ dataset = "hypeproof_studio"
 binding = "HPS_TRACES"
 bucket_name = "hps-traces"
 
-# Bundle .md and .html as static text imports
+# Bundle .md and .html as static text imports. .yaml: the cohort-harness
+# rules.yaml (scripts/cohort-harness/) is read by src/lib/harness-rules.ts so
+# the worker derives the child-cohort prompt rule from the SAME file CI's
+# validate.py enforces (dag task H attempt 2 — no second copy of the phrase).
 [[rules]]
 type = "Text"
-globs = ["**/*.md", "**/*.html"]
+globs = ["**/*.md", "**/*.html", "**/*.yaml"]
 fallthrough = true
 
 [vars]
 ENVIRONMENT = "production"
+# HPS_WORKER_VERSION is deliberately NOT set here. It is the Service-layer
+# release identifier (docs/plan/vessel-and-modules.md §1, tag prefix w*, e.g.
+# "w2026.09.04-1") and is injected per-deploy by
+# .github/workflows/deploy-worker.yml via
+# `wrangler deploy --var HPS_WORKER_VERSION:<resolved w* tag>` — a static
+# value here would go stale the moment it's set. Unset (local `wrangler dev`,
+# or a deploy that isn't tag-triggered) => src/index.ts's
+# resolveWorkerVersion() reports "unknown" on GET /, never a crash, never an
+# empty string (task C negative control; #206 is the app-side precedent).
+# Do NOT fold this into scripts/resolve-version.sh — that resolves the App
+# version (v* train, separate release cadence). See task C in dag.yaml.
 # Switchable upstream LLM (see resolveProvider in src/env.ts). 3-way peer —
 # NOT runtime fallback. Default = "gemini" when GEMINI_API_KEY is set.
 # Set to "anthropic" or "openai" (with their key) to switch.
@@ -70,6 +84,11 @@ GALLERY_LOGS_BASE = "https://hypeproof-ai.xyz"
 # Tokyo — accepted by Anthropic). Passthrough proxy: same x-api-key, same
 # body. Unset to call api.anthropic.com directly.
 ANTHROPIC_PROXY_URL = "https://hypeproof-sediment.fly.dev/proxy/anthropic/v1/messages"
+# Chalk — the instructor surface (/console, /issuer, cohort state reads) is a
+# SEPARATE Worker on the c* train (chalk/wrangler.toml, plan task F). This
+# Service only redirects /issuer and /console there. Deploy order on first
+# rollout: Chalk first, then this worker — see chalk/README.md.
+HPS_CHALK_ORIGIN = "https://chalk.hypeproof-ai.xyz"
 # Secrets — production: `wrangler secret put <NAME>`
 #   wrangler secret put GEMINI_API_KEY      # default provider key
 #   wrangler secret put HPS_SIGNING_SECRET
@@ -80,4 +99,4 @@ ANTHROPIC_PROXY_URL = "https://hypeproof-sediment.fly.dev/proxy/anthropic/v1/mes
 
 [env.dev]
 name = "hypeproof-studio-api-dev"
-vars = { ENVIRONMENT = "dev", LLM_PROVIDER = "gemini" }
+vars = { ENVIRONMENT = "dev", LLM_PROVIDER = "gemini", HPS_CHALK_ORIGIN = "http://localhost:8788" }

@@ -1,0 +1,23 @@
+{
+  "name": "hypeproof-chalk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker — Chalk, the instructor surface for HypeProof Studio (console, cohort reads, live board, studio-logs read path)",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev --port 8788",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "test": "node --experimental-strip-types test/instructor-console.test.mjs && node --experimental-strip-types test/instructor-auth-drift.test.mjs && node --experimental-strip-types --experimental-sqlite test/board-contract.test.mjs && node --experimental-strip-types --experimental-sqlite test/board-threshold.test.mjs && node --experimental-strip-types test/deploy-isolation.test.mjs && node --experimental-strip-types test/logs-read-path.test.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.12.34"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260801.1",
+    "typescript": "^5.4.0",
+    "wrangler": "^4.118.0"
+  }
+}

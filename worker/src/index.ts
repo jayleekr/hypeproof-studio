@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import type { Env } from "./env";
+import { resolveChalkOrigin, resolveWorkerVersion, type Env } from "./env";
 import { chat } from "./routes/chat";
 import { messages } from "./routes/messages";
 import { trace } from "./routes/trace";
@@ -13,10 +13,6 @@ import { signingSecretGuard } from "./middleware/signing-secret.ts";
 import { TokenError } from "./lib/tokens.ts";
 // @ts-ignore — bundled as text by wrangler rules.
 import adminHtml from "./ui/admin.html";
-// @ts-ignore — bundled as text by wrangler rules.
-import issuerHtml from "./ui/issuer.html";
-// @ts-ignore — bundled as text by wrangler rules.
-import consoleHtml from "./ui/console.html";
 
 const app = new Hono<{ Bindings: Env; Variables: { requestId: string } }>();
 
@@ -39,32 +35,34 @@ app.use("/v1/trace/*", signingSecretGuard);
 app.use("/v1/logs/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
 
-// Friendly root → redirect to admin UI (which itself is access-gated)
-app.get("/", () => {
+// Friendly root → redirect to admin UI (which itself is access-gated).
+// The canonical health payload is GET /v1/health (routes/chat.ts), whose
+// JSON `version` field reports the worker version (task C). This route
+// carries the same value as an x-hps-worker-version response header too —
+// a `curl -I /` answer for free — without touching the existing HTML body
+// or its guard-exemption contract (route-order.test.mjs asserts `/` stays
+// a 200 text/html page).
+app.get("/", (c) => {
   return new Response(adminHtml as unknown as string, {
-    headers: { "content-type": "text/html; charset=utf-8" },
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "x-hps-worker-version": resolveWorkerVersion(c.env),
+    },
   });
 });
 
-// Self-service issuer UI — instructor pastes their issuer token, mints
-// student tokens. NOT under /admin/* because the form needs to be reachable
-// without admin Basic auth; the POST it submits IS still authed (Bearer
-// issuer-token, scope-checked by the endpoint).
-app.get("/issuer", () => {
-  return new Response(issuerHtml as unknown as string, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
-});
-
-// #352 — instructor session console: open/close the cohort session on the
-// right track and bulk-mint student tokens, lecture-day proof. Same auth
-// model as /issuer: page is public, every API call it makes carries the
-// instructor's Bearer issuer token and is scope-checked server-side.
-app.get("/console", () => {
-  return new Response(consoleHtml as unknown as string, {
-    headers: { "content-type": "text/html; charset=utf-8" },
-  });
-});
+// Instructor pages moved to Chalk (plan task F, docs/plan/vessel-and-modules.md
+// §2): /issuer (self-service student-token mint, PR #61) and /console (#352
+// session console) are Surface-layer, c* train — an instructor-facing edit
+// must not ship inside this participant-runtime artifact. Bookmarked links
+// and KakaoTalk `#t=<issuer token>` links keep working: a 302 whose Location
+// carries no fragment makes the browser re-attach the original fragment
+// (RFC 7231 §7.1.2), so the token reaches Chalk's page without ever crossing
+// the wire. 302, not 301/308 — a cached permanent redirect would outlive a
+// future hostname change. Still guard-exempt (route-order.test.mjs).
+for (const page of ["/issuer", "/console"] as const) {
+  app.get(page, (c) => c.redirect(`${resolveChalkOrigin(c.env)}${page}`, 302));
+}
 
 app.route("/v1", chat);
 // #282 — Anthropic-native Agent SDK gateway (POST /v1/messages). Own router,

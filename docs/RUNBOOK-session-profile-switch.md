@@ -47,8 +47,10 @@ curl -s -u "admin:$PW" -X POST \
 ### 2. 상태 확인 (수업 중 아무 때나)
 
 ```bash
+# admin Basic 경로는 Service 의 cohort detail 로 읽는다 — /state 는 Chalk 로 옮겨져
+# 강사 Bearer 전용이 됐다 (plan task F, chalk.hypeproof-ai.xyz)
 curl -s -u "admin:$PW" \
-  "https://api.hypeproof-ai.xyz/admin/cohorts/$C/state" | jq '.session.profile_id, .roster_size'
+  "https://api.hypeproof-ai.xyz/admin/cohorts/$C" | jq '.session.profile_id, (.roster.users | length)'
 ```
 
 ### 3. 점심 — 트랙 전환

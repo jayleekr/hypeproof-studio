@@ -1,17 +1,44 @@
 name: mirror-release
 
+# 미러 저장소(jayleekr/hypeproof-studio-releases)로 릴리즈 자산을 복제한다.
+# `install.sh` · `scripts/install-win.ps1` · 앱 내 업데이트 배너(updateChecker.ts)가
+# **전부 이 미러의 /releases/latest** 를 읽는다. 여기가 비면 설치도 넛지도
+# "이미 최신"이라고 조용히 거짓말한다.
+#
+# 2026-08-21 — 이 워크플로가 수동뿐이라 v0.1.50 이 미러에 안 올라갔고, 그 결과
+# (a) `install.sh` 가 미러의 latest(=0.1.49)를 받아 "이미 최신"으로 넘어가고
+# (b) 앱 안 업데이트 배너도 같은 미러를 보므로 함께 조용했다.
+# 설치도 넛지도 성공처럼 보이면서 아무도 새 빌드를 못 받았다 — 워크숍 당일에
+# 핫픽스가 참가자에게 못 닿는 구조다.
+#
+# ── 자동화가 실제로 어디서 걸리는가 (트리거 목록을 믿지 마라) ──────────────
+# #663(d83f57c)은 아래 `release: [published]` 를 붙이고 "이제 자동으로 미러된다"
+# 고 적었다. **그 트리거는 우리 태그 빌드에서 뜰 수 없다.** 소스 릴리즈를 만드는
+# 것은 build-mac.yml / build-windows.yml 이고 둘 다 `secrets.GITHUB_TOKEN` 으로
+# `gh release create` 를 부른다. GITHUB_TOKEN 이 일으킨 이벤트는 새 워크플로 런을
+# 만들지 않는다 — GitHub 문서에 명시돼 있고, `workflow_dispatch` /
+# `repository_dispatch` 만 예외다.
+#
+# 짐작이 아니라 관측이다(.claude/rules/verification.md 규칙 1). 같은 저장소의
+# notify-release-published.yml 은 2026-06-04 부터 **똑같은** `release: [published]`
+# 트리거를 달고 main 에 active 상태로 있었다. 그 뒤 github-actions[bot] 이름으로
+# 릴리즈가 36개 발행됐지만 그 워크플로의 `event=release` 런은 **0건**이다.
+# (mirror-release 쪽 런 30여 건도 전부 event=workflow_dispatch 다.)
+#
+# 그래서 진짜 자동화 경로는 트리거가 아니라 **명시적 디스패치**다:
+#
+#   build-mac.yml 의 "Trigger release mirror" 스텝이 태그 빌드 끝에서
+#   `gh workflow run mirror-release.yml -f tag=$TAG -f dry_run=false` 를 부른다.
+#   workflow_dispatch 는 위 재귀 금지의 예외라 PAT 없이도 실제로 뜬다.
+#   맥에서만 부른다 — 윈도우 자산은 아래 대기 루프가 기다린다.
+#
+# 아래 `release: [published]` 는 **사람이 손으로 발행한 릴리즈**를 위한 보조
+# 경로로만 남긴다. 태그 빌드에서 이게 뜨리라고 기대하지 마라.
+#
+# 대기 루프가 필요한 이유는 #632 다: 발행 직후엔 Windows 자산이 아직 안 올라와
+# macOS 만 미러돼 install.ps1 이 fail-closed 로 죽었다. 그래서 미러는
+# **자산이 다 모일 때까지 기다렸다가** 쓴다(아래 "Inspect source release").
 on:
-  # 릴리즈가 발행되면 자동으로 미러한다.
-  #
-  # 2026-08-21 — 여기가 수동뿐이라 v0.1.50 이 미러에 안 올라갔고, 그 결과
-  # (a) `install.sh` 가 미러의 latest(=0.1.49)를 받아 "이미 최신"으로 넘어가고
-  # (b) 앱 안 업데이트 배너도 같은 미러를 보므로 함께 조용했다.
-  # 설치도 넛지도 성공처럼 보이면서 아무도 새 빌드를 못 받았다 — 워크숍 당일에
-  # 핫픽스가 참가자에게 못 닿는 구조다.
-  #
-  # 자동화가 미뤄졌던 이유는 #632 다: 발행 직후엔 Windows 자산이 아직 안 올라와
-  # macOS 만 미러돼 install.ps1 이 fail-closed 로 죽었다. 그래서 트리거를 붙이되
-  # **자산이 다 모일 때까지 기다렸다가** 미러한다(아래 "Inspect source release").
   release:
     types: [published]
   workflow_dispatch:
@@ -44,6 +71,10 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MIRROR_RELEASE_PAT: ${{ secrets.MIRROR_RELEASE_PAT }}
     steps:
+      # scripts/tag-is-prerelease.sh (task A) 를 쓰기 위해 체크아웃한다.
+      # 프리릴리즈 판정 규칙을 여기 다시 적지 않는다 — 사본이 곧 드리프트다.
+      - uses: actions/checkout@v4
+
       - name: Inspect source release (wait for every platform asset)
         shell: bash
         # 릴리즈 발행 시각과 자산 업로드 완료 시각은 다르다. macOS 빌드가 먼저 끝나고
@@ -60,7 +91,7 @@ jobs:
           attempt=0
           while :; do
             attempt=$(( attempt + 1 ))
-            gh release view "$TAG" --repo "$SOURCE_REPO" --json tagName,name,body,assets,url > source-release.json
+            gh release view "$TAG" --repo "$SOURCE_REPO" --json tagName,name,body,assets,url,isPrerelease > source-release.json
             names="$(jq -r '.assets[].name' source-release.json)"
             missing=()
             grep -qE '^HypeProof-Studio-darwin-arm64\.zip$'      <<<"$names" || missing+=("macOS zip")
@@ -84,8 +115,34 @@ jobs:
             echo "대기 중 (시도 ${attempt}) — 아직 없음: ${missing[*]}"
             sleep "$POLL_SEC"
           done
-          jq '{tagName, name, url, assets: [.assets[].name]}' source-release.json
+          jq '{tagName, name, url, isPrerelease, assets: [.assets[].name]}' source-release.json
 
+      # dag.yaml task J: 미러는 두 번째 발행 경로인데 프리릴리즈 개념이 없었다.
+      # 그대로 두면 `-rc` 빌드가 미러에 **stable** 로 올라가고, 미러의
+      # /releases/latest 를 읽는 install.sh · install-win.ps1 · 앱 업데이트
+      # 배너가 전부 그걸 정식 빌드로 참가자에게 내보낸다. 태스크 A 가 소스
+      # 저장소에서 `-rc` 를 감춰도 실제로 쓰이는 경로에서 새는 것이다.
+      #
+      # 판정 규칙은 scripts/tag-is-prerelease.sh 한 곳에만 있다(태스크 A).
+      # 소스 릴리즈가 이미 프리릴리즈로 표시돼 있으면 그것도 존중한다 —
+      # 사람이 손으로 표시한 경우까지 덮어쓰지 않기 위해서다.
+      - name: Resolve prerelease flag
+        shell: bash
+        run: |
+          set -euo pipefail
+          # shellcheck source=scripts/tag-is-prerelease.sh
+          . scripts/tag-is-prerelease.sh
+          flag=""
+          if is_prerelease_tag "$TAG"; then
+            flag="--prerelease"
+            echo "태그 $TAG 는 프리릴리즈(하이픈 접미사) — 미러에도 프리릴리즈로 올린다"
+          elif [[ "$(jq -r '.isPrerelease' source-release.json)" == "true" ]]; then
+            flag="--prerelease"
+            echo "소스 릴리즈 $TAG 가 프리릴리즈로 표시돼 있다 — 미러에도 그대로 전달한다"
+          else
+            echo "태그 $TAG 는 stable — 미러도 stable (오늘과 동일한 명령)"
+          fi
+          echo "PRERELEASE_FLAG=$flag" >> "$GITHUB_ENV"
 
       - name: Dry-run summary
         if: env.DRY_RUN == 'true'
@@ -93,6 +150,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "Would mirror $SOURCE_REPO@$TAG to $TARGET_REPO@$TAG"
+          echo "  prerelease flag: '${PRERELEASE_FLAG:-}' (빈 값이면 stable)"
           jq -r '.assets[].name | "  - " + .' source-release.json
 
       - name: Mirror assets
@@ -168,8 +226,12 @@ jobs:
           EOF
           sed -i '/^          /s/^          //' mirror-release-notes.md
           name="$(jq -r '.name // empty' source-release.json)"
-          gh release create "$TAG" --repo "$TARGET_REPO" --title "${name:-HypeProof Studio $TAG}" --notes-file mirror-release-notes.md 2>/dev/null || true
-          gh release edit "$TAG" --repo "$TARGET_REPO" --notes-file mirror-release-notes.md
+          # ${PRERELEASE_FLAG} 는 "Resolve prerelease flag" 스텝이 정한다.
+          # stable 이면 빈 문자열 → 아래 두 줄은 이전과 완전히 같은 명령이다.
+          # create 는 릴리즈가 이미 있으면 no-op 이므로 edit 에도 같이 건다 —
+          # 그래야 어느 경로로 만들어졌든 프리릴리즈 표시가 확정된다.
+          gh release create "$TAG" --repo "$TARGET_REPO" --title "${name:-HypeProof Studio $TAG}" --notes-file mirror-release-notes.md ${PRERELEASE_FLAG:-} 2>/dev/null || true
+          gh release edit "$TAG" --repo "$TARGET_REPO" --notes-file mirror-release-notes.md ${PRERELEASE_FLAG:-}
           gh release upload "$TAG" --repo "$TARGET_REPO" dist/* --clobber
 
       - name: Verify mirror
@@ -179,5 +241,14 @@ jobs:
           GH_TOKEN: ${{ secrets.MIRROR_RELEASE_PAT }}
         run: |
           set -euo pipefail
-          gh release view "$TAG" --repo "$TARGET_REPO" --json tagName,assets,url \
-            | jq '{tagName, url, assets: [.assets[].name]}'
+          gh release view "$TAG" --repo "$TARGET_REPO" --json tagName,assets,url,isPrerelease \
+            | jq '{tagName, url, isPrerelease, assets: [.assets[].name]}'
+          # 프리릴리즈여야 하는데 stable 로 올라갔으면 조용히 넘기지 않는다 —
+          # 그게 곧 참가자에게 -rc 빌드가 배포되는 상태다(task J).
+          if [[ -n "${PRERELEASE_FLAG:-}" ]]; then
+            actual="$(gh release view "$TAG" --repo "$TARGET_REPO" --json isPrerelease --jq .isPrerelease)"
+            [[ "$actual" == "true" ]] || {
+              echo "::error::$TAG 는 프리릴리즈인데 미러에 stable 로 올라갔다 — install.sh/업데이트 배너가 이걸 정식 빌드로 집는다"
+              exit 1
+            }
+          fi

@@ -39,6 +39,20 @@ export interface Env {
   // best-effort fans a formatted embed into the #hypeproof-studio channel.
   // Unset → reports still persist to D1; only the side-effect is skipped.
   DISCORD_REPORT_WEBHOOK_URL?: string;
+  // Service-layer release identifier (docs/plan/vessel-and-modules.md §1,
+  // tag prefix w*, e.g. "w2026.09.04-1"). NOT declared in wrangler.toml's
+  // [vars] — deploy-worker.yml injects it per-deploy via
+  // `wrangler deploy --var HPS_WORKER_VERSION:<tag>` so it always reflects
+  // the exact tag that shipped. Unset locally (wrangler dev) by design.
+  // Read it through resolveWorkerVersion() (src/index.ts) — never read this
+  // field directly — so "unset" always renders as "unknown", never a crash
+  // or an empty string (dag.yaml task C negative control; #206 precedent).
+  HPS_WORKER_VERSION?: string;
+  // Origin of Chalk, the instructor surface (plan task F; its own Worker on
+  // the c* train). Only consulted by the /issuer and /console redirects in
+  // src/index.ts. Unset → resolveChalkOrigin() falls back to the production
+  // hostname; [env.dev] points it at a local `wrangler dev --port 8788`.
+  HPS_CHALK_ORIGIN?: string;
 
   // Bindings
   HPS_KV: KVNamespace;
@@ -90,6 +104,26 @@ export interface ResolvedProvider {
  */
 export function speaksAnthropicWire(provider: LLMProvider): boolean {
   return provider === "anthropic" || provider === "glm";
+}
+
+// Task C (docs/plan/dag.yaml) — "what is running in prod" must always be
+// answerable, and must never crash or report an empty string when the var
+// is unset (negative control). Both GET / (index.ts, x-hps-worker-version
+// header) and GET /v1/health (routes/chat.ts, JSON `version` field) go
+// through this so they can never drift from each other or from #206's
+// app-side precedent. Never read env.HPS_WORKER_VERSION directly.
+export function resolveWorkerVersion(env: Pick<Env, "HPS_WORKER_VERSION">): string {
+  const v = env.HPS_WORKER_VERSION;
+  return typeof v === "string" && v.trim().length > 0 ? v : "unknown";
+}
+
+// Task F — where the instructor surface lives. The Service knows Chalk by
+// hostname only (a pointer for two redirects), never by code: removing Chalk
+// means deleting the two redirect lines in src/index.ts (docs/exit/chalk.md).
+export const DEFAULT_CHALK_ORIGIN = "https://chalk.hypeproof-ai.xyz";
+export function resolveChalkOrigin(env: Pick<Env, "HPS_CHALK_ORIGIN">): string {
+  const v = env.HPS_CHALK_ORIGIN?.trim();
+  return v && v.length > 0 ? v.replace(/\/+$/, "") : DEFAULT_CHALK_ORIGIN;
 }
 
 export function providerKey(env: Env, provider: LLMProvider): string {

@@ -16,10 +16,18 @@ argument_hint: "[open <track> | close | status | tokens <names…>] — track은
 
 # hype-session
 
-Instructor session ops against `https://api.hypeproof-ai.xyz` using the
-issuer token at `~/.hypeproof/issuer-token` (fallback: `HPS_ISSUER_TOKEN`).
-The instructor-facing tool is the web console (`/console`); this skill is
-for the operator driving Claude Code.
+Instructor session ops using the issuer token at `~/.hypeproof/issuer-token`
+(fallback: `HPS_ISSUER_TOKEN`). Two origins since plan task F split the
+instructor surface into its own Worker:
+
+- **writes** (session open/close, roster append, token mint) →
+  `https://api.hypeproof-ai.xyz` (the Service)
+- **reads** (`status`) → `https://chalk.hypeproof-ai.xyz` (Chalk; it also
+  serves `/console`, which forwards the same writes to the Service)
+
+The instructor-facing tool is the web console
+(`https://chalk.hypeproof-ai.xyz/console`); this skill is for the operator
+driving Claude Code.
 
 ## Iron rule: track is NEVER assumed
 
@@ -46,7 +54,8 @@ wrong session opened. Therefore:
 ## Actions
 
 ### status
-`GET /admin/cohorts/<cohort>/state` (issuer Bearer, #352) → report session
+`GET https://chalk.hypeproof-ai.xyz/admin/cohorts/<cohort>/state` (issuer
+Bearer, #352 — on Chalk, not the Service, since task F) → report session
 (track display name + ends_at as KST), roster_size, paused. If paused, flag
 loudly — students are blocked regardless of session.
 
