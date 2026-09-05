@@ -516,6 +516,14 @@ jobs:
       # what silently shipped nothing on 2026-08-21.
       - name: Trigger release mirror (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')
+        # shell: bash is REQUIRED here and is not decoration. This file's steps
+        # default to pwsh, and the body below was lifted from build-mac.yml,
+        # where bash is the default. Without this line pwsh parses `--repo` as a
+        # unary operator and the step dies with:
+        #   ParserError: Missing expression after unary operator '--'
+        # v0.0.0-rc.2 shipped exactly that: the release published and the mirror
+        # dispatch immediately failed.
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
