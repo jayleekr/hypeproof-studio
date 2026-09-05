@@ -61,7 +61,16 @@ concurrency:
 jobs:
   mirror:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # MUST cover WAIT_TIMEOUT_MIN below plus the mirroring work itself.
+    #
+    # This was 20 while the wait loop budgeted 150 — the loop could never reach
+    # a seventh of its own timeout, so the thing #632 added it for (surviving
+    # until BOTH platform builds finish, 1-2h each) was unreachable by design.
+    # v0.0.0-rc.3 hit it exactly: the run was cancelled at 20.3 minutes while
+    # waiting for a mac asset, and the mirror never happened.
+    #
+    # scripts/check-mirror-timeout.py asserts the two stay in that order.
+    timeout-minutes: 180
     env:
       SOURCE_REPO: ${{ github.repository }}
       TARGET_REPO: jayleekr/hypeproof-studio-releases
