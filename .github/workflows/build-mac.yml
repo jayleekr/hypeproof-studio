@@ -294,7 +294,10 @@ jobs:
       # No `if:` guard — step-level `env` is not visible to `if`, and `secrets`
       # in `if` is a footgun. The emptiness check lives in the script instead, so
       # the step is a documented no-op until the secrets exist.
-      - name: Import signing certificate (optional)
+      # NOT optional despite the historical name: this step exits 1 when a
+      # cert IS configured and unusable, which fails the whole release
+      # build. It is a documented no-op only when MACOS_CERT_P12 is unset.
+      - name: Import signing certificate (no-op when unconfigured)
         id: signcert
         shell: bash
         env:
@@ -323,11 +326,45 @@ jobs:
           EXISTING="$(security list-keychains -d user | sed 's/[[:space:]]*"//g')"
           security list-keychains -d user -s "$KEYCHAIN" $EXISTING
           rm -f "$RUNNER_TEMP/cert.p12"
-          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN" \
-            | awk -F'"' '/"/{print $2; exit}')"
-          [ -n "$IDENTITY" ] || { echo "::error::certificate imported but no codesigning identity found"; exit 1; }
+          # Print the identity list BEFORE selecting from it. The previous
+          # version captured find-identity into $(...) and threw the output
+          # away, so three failed release builds reported only "no codesigning
+          # identity found" and nothing about why. This one line names the
+          # reason (e.g. CSSMERR_TP_NOT_TRUSTED) in the log.
+          echo "--- identities in $KEYCHAIN ---"
+          security find-identity -p codesigning "$KEYCHAIN" || true
+          echo "-------------------------------"
+
+          # Select by SHA-1 hash, and deliberately WITHOUT `-v`.
+          #
+          # `-v` lists only identities whose chain validates. The cert #619
+          # loaded is SELF-SIGNED (see that PR: self-sign now, Developer ID
+          # later), and a self-signed cert's trust lives in the keychain's
+          # trust settings -- NOT inside the .p12. So the trust never travels
+          # to CI, find-identity -v returns nothing, and the step fails. It
+          # failed on its first-ever execution (rc.1) and had never run before
+          # that: 8716a28 added it seven hours after the last successful mac
+          # build, so there was no regression, only a step that never worked.
+          #
+          # codesign signs happily with an untrusted identity when it is named
+          # by hash, which is all #619 needs -- a STABLE identity so the
+          # keychain grant survives updates. Gatekeeper stays unsatisfied
+          # either way until notarization (#620); trust here buys nothing.
+          #
+          # When this is swapped for a real Developer ID cert, `-v` can come
+          # back -- but then the chain needs the Apple intermediate, which the
+          # runner images do not reliably preinstall
+          # (actions/runner-images#9167). Import it into $KEYCHAIN first:
+          #   curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer \
+          #     -o "$RUNNER_TEMP/di.cer" && security import "$RUNNER_TEMP/di.cer" -k "$KEYCHAIN"
+          IDENTITY="$(security find-identity -p codesigning "$KEYCHAIN" \
+            | awk '/^ *[0-9]+\)/{print $2; exit}')"
+          [ -n "$IDENTITY" ] || {
+            echo "::error::no codesigning identity in the keychain -- see the list above for the reason"
+            exit 1
+          }
           echo "identity=$IDENTITY" >> "$GITHUB_OUTPUT"
-          echo "Signing identity ready."
+          echo "Signing identity ready: $IDENTITY"
 
       - name: Re-sign .app + verify
         shell: bash
