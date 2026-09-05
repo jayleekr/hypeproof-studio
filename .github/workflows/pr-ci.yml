@@ -14,6 +14,20 @@ permissions:
   contents: read
 
 jobs:
+  workflow-shells:
+    name: workflows / windows shell
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install --quiet pyyaml
+      # A bash body on a Windows runner without `shell: bash` parses as
+      # PowerShell and dies on its first POSIX token. v0.0.0-rc.2 published a
+      # release and then failed exactly that way.
+      - run: python3 scripts/check-workflow-shells.py
+
   dev-channel-tag-classifier:
     name: dev-channel / tag-is-prerelease
     runs-on: ubuntu-latest
