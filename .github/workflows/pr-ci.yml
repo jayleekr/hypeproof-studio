@@ -27,6 +27,10 @@ jobs:
       # PowerShell and dies on its first POSIX token. v0.0.0-rc.2 published a
       # release and then failed exactly that way.
       - run: python3 scripts/check-workflow-shells.py
+      # #632 sized the mirror's asset wait for two 1-2h builds and then
+      # wrapped it in a 20-minute job. Both numbers looked deliberate;
+      # nobody compared them until v0.0.0-rc.3 was cancelled mid-wait.
+      - run: python3 scripts/check-mirror-timeout.py
 
   dev-channel-tag-classifier:
     name: dev-channel / tag-is-prerelease
