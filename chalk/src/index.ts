@@ -9,6 +9,9 @@
 //   GET /board                       — instructor live board page (#674)
 //   GET /admin/cohorts/:id/state     — read-only cohort state (issuer Bearer)   src/routes/state.ts
 //   GET /admin/cohorts/:id/board     — live board JSON (issuer Bearer)          src/routes/board.ts
+//   GET /admin/cohorts/:id/logs      — studio-logs arrival + roster diff (issuer)  src/routes/logs-admin.ts
+//   GET /admin/cohorts/:id/logs/:seat            — per-session rows (issuer)        src/routes/logs-admin.ts
+//   GET /admin/cohorts/:id/logs/:seat/:day/:session/:file — retrieval (OPERATOR)    src/routes/logs-admin.ts
 //   *   /admin/*  (instructor writes) — forwarded to the Service                  src/routes/forward.ts
 //
 // What is NOT here, on purpose: any write to session/roster/pause/revocation
@@ -22,6 +25,7 @@ import { makeErrorBody, requestId, signingSecretGuard } from "./middleware.ts";
 import { TokenError } from "./shared.ts";
 import { state } from "./routes/state.ts";
 import { board } from "./routes/board.ts";
+import { logsAdmin } from "./routes/logs-admin.ts";
 import { forwardInstructorWrite } from "./routes/forward.ts";
 // @ts-ignore — bundled as text by wrangler rules.
 import consoleHtml from "./ui/console.html";
@@ -58,6 +62,9 @@ app.get("/board", () => page(boardHtml));
 app.use("/admin/*", signingSecretGuard);
 app.route("/admin", state);
 app.route("/admin", board);
+// #680 — studio-logs read path. Mounted before the forwarder so these reads are
+// answered here and never proxied to the Service (which has no such route).
+app.route("/admin", logsAdmin);
 app.all("/admin/*", forwardInstructorWrite);
 
 app.notFound((c) =>

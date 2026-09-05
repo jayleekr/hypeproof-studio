@@ -7,7 +7,8 @@ CI checks exactly two things, and deliberately nothing more:
      listed in `non_product_directories`. This is the gate that stops something
      landing in the vessel without answering the four admission questions.
 
-  2. Every declared `drift_lock` file exists AND is named in a test script.
+  2. Every declared `drift_lock` file (plus any `drift_lock_extra`) exists
+     AND is named in a test script.
      Existence alone is not enough: this repo has already shipped tests that
      were never wired into `npm test` and therefore never ran (the issuer smoke
      tests). A contract test that does not run is not a contract.
@@ -117,16 +118,27 @@ def check(root: Path) -> list[str]:
         if not lock:
             problems.append(f"entry '{name}' declares no drift_lock (gate 3).")
             continue
-        lock_path = root / lock
-        if not lock_path.exists():
-            problems.append(f"entry '{name}': drift_lock '{lock}' does not exist.")
-            continue
-        basename = Path(lock).name
-        if basename not in scripts_blob and lock not in scripts_blob:
-            problems.append(
-                f"entry '{name}': drift_lock '{lock}' exists but is not named in any "
-                "package.json test script — it would never run."
-            )
+        # `drift_lock_extra` (optional list) holds additional lock files for an
+        # entry whose contract grew a second surface. Chalk uses it: one lock
+        # pins the cohort-state shape, another pins the studio-logs read path
+        # and its key layout against the write path's. Extras are held to the
+        # SAME two rules as the primary lock — a declared lock that does not
+        # exist, or exists but never runs, is not a contract.
+        extra = e.get("drift_lock_extra") or []
+        if not isinstance(extra, list):
+            problems.append(f"entry '{name}': drift_lock_extra must be a list of paths.")
+            extra = []
+        for lock_decl in [lock, *extra]:
+            lock_path = root / lock_decl
+            if not lock_path.exists():
+                problems.append(f"entry '{name}': drift_lock '{lock_decl}' does not exist.")
+                continue
+            basename = Path(lock_decl).name
+            if basename not in scripts_blob and lock_decl not in scripts_blob:
+                problems.append(
+                    f"entry '{name}': drift_lock '{lock_decl}' exists but is not named in any "
+                    "package.json test script — it would never run."
+                )
 
     # ---- registry hygiene: gates answered, layers valid --------------------
     layers = set((reg.get("layers") or {}).keys())

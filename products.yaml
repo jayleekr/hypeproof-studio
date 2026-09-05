@@ -8,11 +8,15 @@
 #   1. Layer declaration   -> layer, tag_prefix
 #   2. Contract            -> contract          (exactly one; a DATA FORMAT)
 #   3. Drift lock          -> drift_lock        (a test file that actually runs)
+#                             + drift_lock_extra  (optional list — same rules,
+#                               for an entry whose contract grew a second
+#                               surface; every one must exist AND run)
 #   4. Exit plan           -> exit_plan         (a doc, not "flip a flag")
 #
 # CI (.github/workflows/registry-check.yml) enforces exactly two things:
 #   - a new top-level directory has an entry here
-#   - every declared drift_lock file exists and is reachable from a test script
+#   - every declared drift_lock / drift_lock_extra file exists and is reachable
+#     from a test script
 #
 # Layer judgment and contract design are not things CI can evaluate. The
 # artifact of this process is that a human wrote the page.
@@ -79,11 +83,24 @@ entries:
     admitted: 2026-09-04     # plan task F — moved from `planned` in the PR that created chalk/
     contract:
       # The ONE contract is read-only cohort JSON under GET /admin/cohorts/:id/*.
-      # /state landed with task F, /board with task G — same format, same
-      # drift-lock file, still one contract. Operational metadata only — no
-      # prompt text, no member handles (spec §4).
-      format: "read-only cohort JSON — GET /admin/cohorts/:id/{state,board}"
+      # /state is live (task F); /logs joined it with task I; /board joins with
+      # task G in the SAME format. Operational metadata only — no prompt text,
+      # no member handles (spec §4).
+      #
+      # /logs is the ONE documented exception and it is scoped, not a loophole:
+      # the LISTING half stays metadata (seat ids, counts, timestamps, bytes)
+      # and keeps the issuer-token gate; the RETRIEVAL half returns a session
+      # file verbatim and is OPERATOR-ONLY (Cloudflare Access, or the dedicated
+      # HPS_LOGS_OPERATOR_SECRET — never the Service's admin password, never an
+      # instructor token). Reasoning: chalk/src/routes/logs-admin.ts header.
+      format: "read-only cohort JSON — GET /admin/cohorts/:id/{state,logs} (+ /board with task G); GET .../logs/:seat/:day/:session/:file returns the raw session file, operator-only"
     drift_lock: chalk/test/board-contract.test.mjs
+    # Second drift lock, added with plan task I (#680). board-contract pins
+    # /state; this pins /logs, the shared studio-logs key layout against the
+    # write path (worker/src/routes/logs.ts), the operator/instructor split,
+    # and that this worker contains no R2 put or delete.
+    drift_lock_extra:
+      - chalk/test/logs-read-path.test.mjs
     exit_plan: docs/exit/chalk.md
     owner: jay
     notes: >-

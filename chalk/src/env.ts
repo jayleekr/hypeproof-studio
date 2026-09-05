@@ -24,10 +24,26 @@ export interface ChalkEnv {
   // `unknown`, never as zero — the safe direction if an operator forgets to set
   // it. See board-verdict.ts `resolveErrorSignal`.
   HPS_ERROR_SIGNAL_FROM?: string;
+  /**
+   * Secret — #680 task I. Break-glass operator credential for session-log
+   * RETRIEVAL only (GET /admin/cohorts/:id/logs/:seat/:day/:session/:file),
+   * presented in the `x-hps-operator-secret` header. Deliberately NOT the
+   * Service's HPS_ADMIN_PASSWORD: that value is broadly held and would make
+   * every class-opener a reader of participants' verbatim question text.
+   * Unset => retrieval fails closed (503) unless Cloudflare Access fronts the
+   * path. Listing endpoints never consult it. See src/routes/logs-admin.ts.
+   */
+  HPS_LOGS_OPERATOR_SECRET?: string;
 
   // Bindings (shared with the Service — read-only from Chalk's side)
   HPS_KV: KVNamespace;
   HPS_DB: D1Database;
+  // The Service's log/trace bucket. Chalk holds it for the studio-logs READ
+  // path (#680) and touches nothing else under it. LIST + GET only — no put,
+  // no delete anywhere in this bundle (chalk/test/logs-read-path.test.mjs
+  // asserts that on the source). Wrangler has no read-only R2 binding, so the
+  // guarantee is code + test, not configuration.
+  HPS_TRACES: R2Bucket;
 }
 
 export const DEFAULT_SERVICE_ORIGIN = "https://api.hypeproof-ai.xyz";
