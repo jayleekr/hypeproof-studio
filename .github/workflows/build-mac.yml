@@ -425,9 +425,16 @@ jobs:
       # 실제로 런을 만든다. 그래서 트리거에 기대지 않고 여기서 직접 부른다.
       # PAT 불필요 — `actions: write` 만 있으면 된다(위 permissions).
       #
-      # 맥에서만 부른다. 윈도우 자산은 mirror-release.yml 의 "Inspect source
-      # release" 대기 루프가 최대 150분 기다린다(#632). 양쪽에서 부르면 같은
-      # concurrency group 에 중복 런이 줄 서기만 한다.
+      # #698 — 윈도우 빌드에서도 부른다. 원래는 맥에서만 불렀고 근거는 "양쪽에서
+      # 부르면 같은 concurrency group 에 중복 런이 줄 선다" 였다. 중복에 대해서는
+      # 맞는 말이지만 **실패**를 안 봤다 — 맥이 여기까지 온다고 가정한 것이다.
+      #
+      # v0.0.0-rc.1 에서 실제로 틀렸다. 맥이 서명 단계에서 죽어(#697) Publish 와
+      # 이 스텝이 둘 다 skipped 됐고 미러가 안 돌았다. #663 이 막으려던 그 사고이고,
+      # 하필 코드서명 때문에 실패 표면이 넓은 쪽에 자동화가 매달려 있었다.
+      #
+      # 중복 런은 싸다 — concurrency group 이 직렬화하고 두 번째는 할 일이 없다.
+      # 없는 런이 2026-08-21 에 조용히 아무것도 안 내보낸 그것이다.
       - name: Trigger release mirror (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')
         env:
