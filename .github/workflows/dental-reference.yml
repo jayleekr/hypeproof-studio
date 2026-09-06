@@ -4,6 +4,10 @@ on:
     paths:
       - 'docs/curriculum/dental-ownership/**'
       - 'e2e/dental-reference/**'
+      - 'e2e/chalk-authoring/**'
+      - 'chalk/**'
+      - 'worker/src/routes/authoring.ts'
+      - 'worker/src/lib/session-design.ts'
       - 'e2e/package*.json'
       - '.github/workflows/dental-reference.yml'
 permissions:
@@ -23,11 +27,19 @@ jobs:
         working-directory: e2e
       - run: npx playwright install --with-deps chromium
         working-directory: e2e
+      - run: npm ci
+        working-directory: worker
+      - run: npm ci
+        working-directory: chalk
+      - run: npm run test:chalk-authoring
+        working-directory: e2e
       - run: npm run test:dental-reference
         working-directory: e2e
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: dental-reference-evidence
-          path: e2e/test-results/dental-reference/
+          path: |
+            e2e/test-results/dental-reference/
+            e2e/test-results/chalk-authoring/
           retention-days: 14
