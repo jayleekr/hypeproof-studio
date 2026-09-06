@@ -3,20 +3,23 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Cloudflare Worker \u2014 OpenAI-compatible proxy + cohort admin for HypeProof Studio",
+  "description": "Cloudflare Worker — OpenAI-compatible proxy + cohort admin for HypeProof Studio",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "test": "node --experimental-strip-types test/smoke.mjs && node --experimental-strip-types test/chat-integration.test.mjs && node --experimental-strip-types test/messages-integration.test.mjs && node --experimental-strip-types test/route-order.test.mjs && node --experimental-strip-types test/d1-accounting.test.mjs && node --experimental-strip-types test/moderation.test.mjs && node --experimental-strip-types test/browser-contract.test.mjs && node --experimental-strip-types test/runtime-degraded-notice.test.mjs && node --experimental-strip-types test/issuer-lineage.test.mjs && node --experimental-strip-types test/glm-provider.test.mjs && node --experimental-strip-types test/per-profile-provider.test.mjs && node --experimental-strip-types test/kids-quest-prompt.test.mjs && node --experimental-strip-types test/sse-usage-chunk.test.mjs && node --experimental-strip-types test/logs-upload.test.mjs && node --experimental-strip-types test/quest-result-contract.test.mjs && node --experimental-strip-types test/upstream-body-dupe-keys.test.mjs && node --experimental-strip-types test/model-gated-params.test.mjs && node --experimental-strip-types test/usage-log-status.test.mjs && node --experimental-strip-types test/moderation-signal.test.mjs && node --experimental-strip-types test/usage-report.test.mjs && node --experimental-strip-types test/worker-version.test.mjs && node --experimental-strip-types test/liveness-trace.test.mjs && node --experimental-strip-types test/module-distribution.test.mjs && node --experimental-strip-types test/module-child-guard.test.mjs && npm run test:authoring",
+    "test": "node --experimental-strip-types test/smoke.mjs && node --experimental-strip-types test/chat-integration.test.mjs && node --experimental-strip-types test/messages-integration.test.mjs && node --experimental-strip-types test/route-order.test.mjs && node --experimental-strip-types test/d1-accounting.test.mjs && node --experimental-strip-types test/moderation.test.mjs && node --experimental-strip-types test/browser-contract.test.mjs && node --experimental-strip-types test/runtime-degraded-notice.test.mjs && node --experimental-strip-types test/issuer-lineage.test.mjs && node --experimental-strip-types test/glm-provider.test.mjs && node --experimental-strip-types test/per-profile-provider.test.mjs && node --experimental-strip-types test/kids-quest-prompt.test.mjs && node --experimental-strip-types test/sse-usage-chunk.test.mjs && node --experimental-strip-types test/logs-upload.test.mjs && node --experimental-strip-types test/quest-result-contract.test.mjs && node --experimental-strip-types test/upstream-body-dupe-keys.test.mjs && node --experimental-strip-types test/model-gated-params.test.mjs && node --experimental-strip-types test/usage-log-status.test.mjs && node --experimental-strip-types test/moderation-signal.test.mjs && node --experimental-strip-types test/usage-report.test.mjs && node --experimental-strip-types test/worker-version.test.mjs && node --experimental-strip-types test/liveness-trace.test.mjs && node --experimental-strip-types test/module-distribution.test.mjs && node --experimental-strip-types test/module-child-guard.test.mjs && npm run test:authoring && npm run test:dental-authoring",
     "typecheck": "tsc --noEmit",
     "dump-profiles": "node --experimental-strip-types scripts/dump-profiles.ts",
     "scaffold-profile": "node --experimental-strip-types scripts/scaffold-profile.ts",
     "module": "node --experimental-strip-types scripts/publish-module.ts",
     "validate-profiles": "node --experimental-strip-types scripts/dump-profiles.ts | python3 scripts/cohort-harness/validate.py",
     "test:authoring": "node --experimental-strip-types --experimental-sqlite test/authoring.test.mjs",
-    "test:authoring:d1": "node --experimental-strip-types test/authoring-d1.test.mjs"
+    "test:authoring:d1": "node --experimental-strip-types test/authoring-d1.test.mjs",
+    "courses:dental": "node --experimental-strip-types scripts/dental-authoring.mjs",
+    "demo:dental-authoring": "npm run courses:dental && node --experimental-strip-types --experimental-sqlite scripts/demo-dental-authoring.mjs",
+    "test:dental-authoring": "node --experimental-strip-types --experimental-sqlite test/dental-course-automation.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.34"

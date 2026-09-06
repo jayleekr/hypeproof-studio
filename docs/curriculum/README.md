@@ -33,3 +33,9 @@
   (`browser_read` / `click` / `screenshot`)로 제공한다. 큐시트 문구는 강사 머신
   기준으로 적힌 것으로 보이며, 회차 전에 정리가 필요하다.
 - 강사가 치는 문장과 그때 볼 것은 [`../runthrough-commands.md`](../runthrough-commands.md).
+
+## 신규 레벨별 강의 설계
+
+[dental-ownership](dental-ownership/README.md)는 2026-09-06 요청에 따른 별도 신규 원본이다.
+가상 강사 1명·수강생 레벨 1~5로 구성한 5강이며, 위 역사적 큐시트의 해석 사본이나 대체본이 아니다.
+`program.json`이 원본이고 `generated/`는 재생성 가능한 출력이다.
