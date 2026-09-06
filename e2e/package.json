@@ -10,7 +10,8 @@
     "test:ui": "playwright test --ui",
     "report": "playwright show-report",
     "test:dental-reference": "node dental-reference/run.mjs",
-    "test:chalk-authoring": "node --experimental-strip-types --experimental-sqlite chalk-authoring/run.mjs"
+    "test:chalk-authoring": "node --experimental-strip-types --experimental-sqlite chalk-authoring/run.mjs",
+    "test:preview-viewport": "node --experimental-strip-types preview-viewport/run.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

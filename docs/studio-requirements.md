@@ -375,4 +375,4 @@ REQ-A8 fixture isolation: both the environment flag and the existing user-data t
 
 | ID | Requirement | Acceptance | Layer |
 |---|---|---|---|
-| REQ-STUDIO-PREVIEW-WIDTH | Manually inspect active native preview at 390px or 1280px | Command selects CSS viewport width, verifies innerWidth, retains emulation until reset/tab close and restores actual panel size; no browser tab gives guidance | App, real Electron |
+| REQ-STUDIO-PREVIEW-WIDTH | Manually inspect local HTML at 390px or 1280px | Command opens the active local preview in a width-controlled iframe with two buttons and an original-page link; reports the actual child innerWidth. Missing/nonlocal preview gives guidance | App, real Electron |

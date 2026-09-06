@@ -83,6 +83,6 @@ Contract and storage decision: [ADR 0004](../adr/0004-chalk-authoring-storage.md
 |---|---|---|
 | REQ-STUDIO-DENTAL-REFERENCE | Browser evidence for all five levels with positive/negative controls; loopback release/backup simulation never reported as Studio or production execution. | e2e/dental-reference/run.mjs; docs/curriculum/dental-ownership/reference/README.md |
 
-`REQ-STUDIO-PREVIEW-WIDTH`: active native browser layout inspection via the existing App CDP channel, 390px/1280px/reset. This is manual visual verification and does not grant SDK tools or change Service profile policy.
+`REQ-STUDIO-PREVIEW-WIDTH`: local HTML layout inspection via the existing App live server, 390px/1280px/original. The shipped shell ignores CDP device metrics, so a same-origin iframe provides the CSS viewport. This is manual visual verification and does not grant SDK tools or change Service profile policy.
 
 Chalk authoring Surface: `REQ-STUDIO-CHALK-AUTHORING-UI`, `/authoring` form with Service-owned draft/version writes; browser contract in `e2e/chalk-authoring/run.mjs`. Support submission remains the existing GitHub workflow.

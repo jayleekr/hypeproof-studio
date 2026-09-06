@@ -4,6 +4,9 @@ on:
     paths:
       - 'docs/curriculum/dental-ownership/**'
       - 'e2e/dental-reference/**'
+      - 'e2e/preview-viewport/**'
+      - 'extensions/hypeproof-chat/src/liveServerHelpers.ts'
+      - 'extensions/hypeproof-chat/src/nativeBrowser.ts'
       - 'e2e/chalk-authoring/**'
       - 'chalk/**'
       - 'worker/src/routes/authoring.ts'
@@ -32,6 +35,8 @@ jobs:
       - run: npm ci
         working-directory: chalk
       - run: npm run test:chalk-authoring
+        working-directory: e2e
+      - run: npm run test:preview-viewport
         working-directory: e2e
       - run: npm run test:dental-reference
         working-directory: e2e
