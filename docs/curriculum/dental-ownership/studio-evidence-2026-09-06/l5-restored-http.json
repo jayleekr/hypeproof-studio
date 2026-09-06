@@ -1,0 +1,16 @@
+[
+  {
+    "url": "http://127.0.0.1:65128/l5/restored/index.html",
+    "status": 200,
+    "source_sha256": "181e0c19436804c3b8307922664a128475cb8f085c8546f9771ba4043c1cdc37",
+    "served_sha256": "ea133fa419680ab9584a9b779fd0b40ceb33d8fd97c4e2023e1a345a4f727ea8",
+    "live_reload_injection_verified": true
+  },
+  {
+    "url": "http://127.0.0.1:65128/l5/restored/careers.html",
+    "status": 200,
+    "source_sha256": "4b7c221081baa5b3abd378b51a1c7c4a7f6f897652fd7b14bb3ca026169c38ef",
+    "served_sha256": "e973d0dd06910f1462b91dc2646f97a36697ec4283230ed19676c9bedee20286",
+    "live_reload_injection_verified": true
+  }
+]
