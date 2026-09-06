@@ -8,7 +8,8 @@
     "test:headed": "playwright test --headed",
     "test:debug": "PWDEBUG=1 playwright test",
     "test:ui": "playwright test --ui",
-    "report": "playwright show-report"
+    "report": "playwright show-report",
+    "test:dental-reference": "node dental-reference/run.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

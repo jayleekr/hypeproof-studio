@@ -78,3 +78,7 @@ Contract and storage decision: [ADR 0004](../adr/0004-chalk-authoring-storage.md
 | ID | Acceptance criteria | Primary paths |
 |---|---|---|
 | REQ-STUDIO-DENTAL-AUTHORING | Five persona-specific course drafts compile through the Service schema, persist/reopen, and resume without overwriting instructor edits. Learning outcomes remain unassessed until observed. | docs/curriculum/dental-ownership/program.json; worker/scripts/dental-authoring.mjs; worker/test/dental-course-automation.test.mjs |
+
+| ID | Acceptance criteria | Primary paths |
+|---|---|---|
+| REQ-STUDIO-DENTAL-REFERENCE | Browser evidence for all five levels with positive/negative controls; loopback release/backup simulation never reported as Studio or production execution. | e2e/dental-reference/run.mjs; docs/curriculum/dental-ownership/reference/README.md |

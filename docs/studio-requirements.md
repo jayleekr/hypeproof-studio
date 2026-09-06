@@ -354,3 +354,11 @@ PR — 이 도메인은 "각 PC 에 빠짐없이, 깨지지 않게 쌓인다"까
 | REQ-STUDIO-DENTAL-AUTHORING | 레벨별 치과 홈페이지 강의 5개 생성·검증·초안 저장 | 각 레벨의 페르소나·목표·실습·독립 과제·증거를 원본에서 생성. Service 스키마 재사용. 실제 authoring 라우트 저장/재열기 확인, 재실행·중단 재개 시 기존 초안 보호. 학습 성공·수업 활성화 자동 선언 없음. | Module data + authoring tooling; R/U |
 
 [Source and execution](curriculum/dental-ownership/README.md) · `worker/test/dental-course-automation.test.mjs`.
+
+## Dental reference exercise evidence
+
+| ID | 요구사항 | 수용 기준 | Layer |
+|---|---|---|---|
+| REQ-STUDIO-DENTAL-REFERENCE | L1~L5 예제 결과물의 브라우저·운영 연습 근거 | 정상/오류 시안, 콘텐츠 변경·원본 복귀, HTTP 버전·링크 오류·복구, 채용 페이지, 백업 무결성·복원 검사를 실제 실행한다. Studio 학생 실행·공개 배포·학습 성과와 명확히 구분한다. | browser reference fixture, not App E2E |
+
+[Runbook](curriculum/dental-ownership/reference/README.md) · `e2e/dental-reference/run.mjs`.
