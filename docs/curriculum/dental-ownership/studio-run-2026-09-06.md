@@ -42,7 +42,7 @@
 
 | 강의·페르소나 | 상태 | 실제 수행 및 증거 |
 |---|---|---|
-| L1 Reviewer 박지훈 | PASS — 도움을 받은 합성 실습 | starter A/B 실제 화면 비교, 위치·정보 순서·모바일 문제 3개, 수정 요청 3건과 확인 기준. `l1-01/02-response.json`, `workspace/l1/{clinic-context,comparison,review,assessment}.md`, `l1-{a,b}-390.png` |
+| L1 Reviewer 박지훈 | PASS — 도움을 받은 합성 실습 | starter A/B 실제 화면 비교, 위치·정보 순서·모바일 문제 3개, 수정 요청 3건과 확인 기준. `l1-01/02/03/04-response.json`, `workspace/l1/{clinic-context,comparison,review,assessment}.md`, `l1-{a,b}-390.png` |
 | L2 Editor 이수진 | PASS — 도움을 받은 합성 실습 | Studio로 화요일 19시·10월 9일 공지·주차 FAQ 수정, 원본 복원, 다른 조건인 10월 16일 공지로 변경. `l2-01/02/03-response.json`, `workspace/l2/`, `l2-restore-evidence.json`, 수정/복원/독립 과제 화면 |
 | L3 Operator 최민석 | BLOCKED — 공개 배포·복구 | 로컬 Git/URL 정상·링크 오류·복구·다른 FAQ 변경·복구는 PASS. 승인된 공개 대상이 없어 공개 단계는 미실행. `l3-01/02-response.json`, `l3-commits.txt`, `l3-url-observations.jsonl`, `l3-http/`, `workspace/l3/` |
 | L4 Builder 정하린 | PASS — 도움을 받은 로컬 실습 | Studio가 L2 결과를 바탕으로 채용 페이지 제작, 5개 요구사항, 기존 디자인, 홈/시간표/채용 왕복, 390px·1280px. 역할 변경 독립 조건과 주석 가독성 수정도 다시 검사. `l4-01/02-response.json`, `l4-inspection.json`, `l4-careers-{390,1280}.png`, `workspace/l4/` |
@@ -52,6 +52,8 @@
 ### 화면·보존·복구의 독립 검사
 
 L1 최초 390px 비교는 관측자가 CDP로 폭을 맞춘 도움을 명시했다. A는 문서 폭 390px·18px 글자·시간표 y≈497, B는 문서 폭 1130px·11px 글자·시간표 y≈1081이었다. 강사용 reference 정답은 복사하지 않았다. L1 시작 파일만 제공했고 이후 페이지와 문서는 실제 Studio가 작성했다.
+
+L1 문서의 추가 검수에서 모델이 11px의 원인을 자동 축소로 설명하고 측정하지 않은 스크롤 횟수를 쓴 오류를 발견했다. 정상 API로 합성 세션을 다시 열고 같은 최종 번들의 Studio에서 CSS `font:11px/1.5`를 읽어 설명을 고쳤다. 수정 요청서의 교육용 표시 제거·실제 주소/지도 삽입 요구도 가상 정보와 미확인 표시 유지로 고쳤다. 원본 HTML 두 개의 starter 대비 해시는 불변이다. 추가 검수 화면은 [L1 수정](studio-evidence-2026-09-06/l1-correction-studio.png), 최종 문서는 [비교 설명](studio-evidence-2026-09-06/l1-final-assessment.md)·[수정 요청서](studio-evidence-2026-09-06/l1-final-review.md)다. 초기 문서는 로컬 `l1-before-final-review/`, 수정 요청과 실제 응답은 `l1-03/04`, 추가 관측은 `l1-correction-session.jsonl`로 보존한다. 화면 수치가 맞더라도 모델의 원인 설명과 문서 전체의 일관성은 별도 검수가 필요했다.
 
 L2 복원 시 source와 복원본 SHA256은 `93149908293d9733abbaf7c0d9963673a7d33b84e1ebe0914005c4b356e8e936`. 당시 `http://127.0.0.1:63064/l2/index.html` 응답은 200이었다. 실제 live server가 추가하는 reload 스크립트를 포함한 응답 SHA256은 `628ce893c71ff70a03ad007a2d87c0663fcb13ca00abeddb950aa692a70a8440`. 원본 파일과 주입된 HTTP 응답을 무조건 같은 해시로 비교한 초기 판정기를 고치고 실제 응답으로 재실행했다.
 
@@ -109,3 +111,5 @@ L3 공개 배포는 **BLOCKED**다. 사용자가 공개 전에 결과물·대상
 실제 강사/치과의사 수업, 시간 준수·독립 수행 점수, 운영 도메인 접근/소유권 복구, 일반 사용자 토큰 입력 UI, 새 전체 앱 릴리스는 NOT RUN이다. L5 도메인 접근 상실은 탁상 시뮬레이션이다.
 
 세션 종료 API 200, 발급 학생 토큰 revoke, `session: null`을 확인했다. 자신이 만든 앱·관측기·Service·Chalk를 종료하고 CDP/Service/Chalk/미리보기 포트의 listener가 없음을 확인했다. 기존 설치 앱·사용자 파일·다른 세션 프로세스는 정리 대상에서 제외했다.
+
+L1 추가 검수 세션도 정상 close/revoke 후 종료 상태를 확인하고 해당 앱·Service·관측기를 정리했다. 원본 HTML starter 대비 해시 불변을 다시 확인했다.
