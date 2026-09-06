@@ -63,6 +63,12 @@ Single SVG → all platforms. Edit `vscodium-base/icons/stable/codium_cnl.svg` (
 
 Each phase has a gate in METAPLAN. Do not proceed past a gate without confirming the listed criteria. Plan B (Cline + Proxy fallback) remains available as a fallback decision — see METAPLAN §9 for its criteria. It is not tied to a fixed date; evaluate it against the current phase gate.
 
+## Cross-tool development entry point
+
+[AGENTS.md](./AGENTS.md) indexes the shared conventions and scoped instructions.
+For Chalk authoring, follow its linked requirement and test documents; keep
+existing philosophy, autonomy, and verification rules in their canonical files.
+
 ## Detailed rules
 
 - [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md) — build failure modes, env vars, jq patterns
