@@ -50,3 +50,17 @@ New behavior gets a new `REQ-STUDIO-*` row before implementation is considered
 complete. Changed behavior updates the row and the test command in the same PR.
 Removed behavior is deleted from the table and called out in release notes if a
 member, instructor, or release owner could observe the change.
+
+## Chalk Authoring Proposal
+
+[Chalk authoring requirements](../requirements/chalk-authoring.md) contain the
+planned course-authoring scope. Their BASE/CH/WEB/ENV/RUN/CLS/EDU/REQ and architecture
+IDs are local to that document and retain the discussion's identifiers.
+They do not replace existing REQ-STUDIO-* or REQ-* behavior contracts.
+
+[Chalk test requirements](../testing/chalk-authoring.md) map those local IDs to
+T-01 through T-23. Implementation PRs must link the applicable row, update the
+canonical Studio behavior table when App behavior changes, and record actual
+execution evidence. Do not mark the whole proposal implemented when a single
+slice lands. Existing Chalk console/issuer/board are reusable implementations;
+their presence does not prove authoring, rehearsal, or student project access.
