@@ -136,20 +136,17 @@ const { evaluateSdkToolUse, permittedToolsFor, profileToAgentOptions, buildSdkQu
 // ─── describeCommandForApproval ──────────────────────────────────────────────
 {
   assert.equal(describeCommandForApproval("git status"), "git status");
-  assert.equal(
-    describeCommandForApproval("git   commit  -m   'x'"),
-    "git commit -m 'x'",
-    "whitespace collapsed for one-line display",
-  );
-
-  // Clipping keeps the TAIL: that is where the target path and the --force
-  // live. A trailing ellipsis would hide exactly what needs reviewing.
-  const long = "git push " + "a".repeat(400) + " --force";
-  const shown = describeCommandForApproval(long, 60);
-  assert.ok(shown.length <= 60, "respects max");
-  assert.ok(shown.startsWith("git push"), "head kept");
-  assert.ok(shown.endsWith("--force"), "tail kept — the dangerous part stays visible");
-  assert.ok(shown.includes("..."), "elision marked");
+  const multiline = "git   status\nprintf 'safe  text'\n";
+  assert.equal(describeCommandForApproval(multiline), multiline,
+    "preserve spacing and line boundaries for review");
+  const long = "echo " + "a".repeat(400) + "\nrm -rf /practice-only\n" + "echo " + "z".repeat(400);
+  assert.equal(describeCommandForApproval(long), long,
+    "a destructive operation in the middle must remain visible");
+  const secret = "ghp_" + "a".repeat(36);
+  const redacted = describeCommandForApproval(`echo start\nGH_TOKEN=${secret} gh api user\necho end`);
+  assert.ok(!redacted.includes(secret), "full detail still masks credentials");
+  assert.ok(redacted.includes("gh api user"));
+  assert.ok(redacted.endsWith("\necho end"));
 }
 
 // ─── scrubSecrets ────────────────────────────────────────────────────────────

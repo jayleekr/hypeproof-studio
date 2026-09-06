@@ -2514,8 +2514,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // never approve it for the rest of the session, and the whole point of
         // the strong confirm is that it stays interruptive.
         const pick = await vscode.window.showWarningMessage(
-          `⚠️ 되돌리기 어려운 명령이에요. 정말 실행할까요?\n\n${pretty}`,
-          { modal: true },
+          "⚠️ 되돌리기 어려운 명령이에요. 정말 실행할까요?",
+          { modal: true, detail: pretty },
           "실행",
           "취소",
         );
@@ -2525,8 +2525,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const REMEMBER = signature ? `항상 허용 (${signature})` : null;
       const buttons = REMEMBER ? ["실행", REMEMBER] : ["실행"];
       const pick = await vscode.window.showWarningMessage(
-        `코치가 명령을 실행하려고 해요:\n\n${pretty}`,
-        { modal: true },
+        "코치가 명령을 실행하려고 해요:",
+        { modal: true, detail: pretty },
         ...buttons,
       );
       if (pick === REMEMBER && signature) {
