@@ -364,3 +364,9 @@ PR — 이 도메인은 "각 PC 에 빠짐없이, 깨지지 않게 쌓인다"까
 [Runbook](curriculum/dental-ownership/reference/README.md) · `e2e/dental-reference/run.mjs`.
 
 REQ-A8 fixture isolation: both the environment flag and the existing user-data test-state file keep an explicitly opened practice folder. The activation verdict is shared with spool suppression and passed through onboarding and token changes (#713). Normal cohort switching remains unchanged.
+
+## Preview viewport inspection
+
+| ID | Requirement | Acceptance | Layer |
+|---|---|---|---|
+| REQ-STUDIO-PREVIEW-WIDTH | Manually inspect active native preview at 390px or 1280px | Command selects CSS viewport width, verifies innerWidth, retains emulation until reset/tab close and restores actual panel size; no browser tab gives guidance | App, real Electron |

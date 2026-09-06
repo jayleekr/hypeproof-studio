@@ -104,3 +104,54 @@ export async function captureActivePage(): Promise<PageContext | null> {
     return null;
   }
 }
+
+/** Manual layout inspection of the active page; no tool or network grant. */
+export function registerPreviewViewport(context: vscode.ExtensionContext): void {
+  // Keep the CDP session alive: emulation belongs to it and is reset on detach.
+  const sessions = new Map<vscode.BrowserTab, CdpSession>();
+  const release = async (tab: vscode.BrowserTab) => {
+    const session = sessions.get(tab);
+    sessions.delete(tab);
+    if (session) await session.close().catch(() => undefined);
+  };
+  context.subscriptions.push(
+    vscode.window.onDidCloseBrowserTab((tab) => { void release(tab); }),
+    { dispose: () => { for (const tab of sessions.keys()) void release(tab); } },
+    vscode.commands.registerCommand("hypeproof-chat.previewViewport", async () => {
+      const tab = vscode.window.activeBrowserTab;
+      if (!tab) {
+        void vscode.window.showWarningMessage("먼저 검수할 미리보기 탭을 열어주세요.");
+        return;
+      }
+      const choice = await vscode.window.showQuickPick([
+        { label: "모바일 390px", width: 390 },
+        { label: "데스크톱 1280px", width: 1280 },
+        { label: "실제 패널 크기로 복귀", width: 0 },
+      ], { title: "미리보기 화면 크기", placeHolder: "레이아웃 검수용 너비를 선택하세요" });
+      if (!choice) return;
+      let session = sessions.get(tab);
+      try {
+        if (!session) {
+          session = await CdpSession.attach(tab);
+          sessions.set(tab, session);
+          session.onDidClose(() => { if (sessions.get(tab) === session) sessions.delete(tab); });
+        }
+        if (choice.width === 0) {
+          await session.send("Emulation.clearDeviceMetricsOverride");
+          await release(tab);
+        } else {
+          await session.send("Emulation.setDeviceMetricsOverride", {
+            width: choice.width, height: 844, deviceScaleFactor: 1, mobile: false,
+          });
+          const result = await session.send("Runtime.evaluate", {
+            expression: "window.innerWidth", returnByValue: true,
+          });
+          if (result?.result?.value !== choice.width) throw new Error("선택한 너비가 적용되지 않았습니다.");
+        }
+      } catch (err) {
+        await release(tab);
+        void vscode.window.showErrorMessage(`미리보기 크기 변경 실패: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }),
+  );
+}

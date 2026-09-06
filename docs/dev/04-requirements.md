@@ -82,3 +82,5 @@ Contract and storage decision: [ADR 0004](../adr/0004-chalk-authoring-storage.md
 | ID | Acceptance criteria | Primary paths |
 |---|---|---|
 | REQ-STUDIO-DENTAL-REFERENCE | Browser evidence for all five levels with positive/negative controls; loopback release/backup simulation never reported as Studio or production execution. | e2e/dental-reference/run.mjs; docs/curriculum/dental-ownership/reference/README.md |
+
+`REQ-STUDIO-PREVIEW-WIDTH`: active native browser layout inspection via the existing App CDP channel, 390px/1280px/reset. This is manual visual verification and does not grant SDK tools or change Service profile policy.

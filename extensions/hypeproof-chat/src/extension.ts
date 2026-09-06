@@ -30,7 +30,7 @@ import {
   dismissVersion,
   currentBundleVersion,
 } from "./updateChecker";
-import { openBrowser, captureActivePage } from "./nativeBrowser";
+import { openBrowser, captureActivePage, registerPreviewViewport } from "./nativeBrowser";
 import { LiveServer } from "./liveServer";
 import { decideWorkspaceSwitch, isSameLocation } from "./workspaceRouting";
 import { SessionSpool, resolveSpoolSessionsRoot, spoolIdentityFromToken } from "./sessionSpool";
@@ -60,6 +60,7 @@ export async function activate(context: vscode.ExtensionContext) {
   // a more reliable fallback.
   const backdoors = await applyTestBackdoors(context);
 
+  registerPreviewViewport(context);
   const preview = new PreviewProvider(context);
   const liveServer = new LiveServer();
   const assetStatus = new AssetStatusBar();
