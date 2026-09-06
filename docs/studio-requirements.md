@@ -362,3 +362,5 @@ PR — 이 도메인은 "각 PC 에 빠짐없이, 깨지지 않게 쌓인다"까
 | REQ-STUDIO-DENTAL-REFERENCE | L1~L5 예제 결과물의 브라우저·운영 연습 근거 | 정상/오류 시안, 콘텐츠 변경·원본 복귀, HTTP 버전·링크 오류·복구, 채용 페이지, 백업 무결성·복원 검사를 실제 실행한다. Studio 학생 실행·공개 배포·학습 성과와 명확히 구분한다. | browser reference fixture, not App E2E |
 
 [Runbook](curriculum/dental-ownership/reference/README.md) · `e2e/dental-reference/run.mjs`.
+
+REQ-A8 fixture isolation: both the environment flag and the existing user-data test-state file keep an explicitly opened practice folder. The activation verdict is shared with spool suppression and passed through onboarding and token changes (#713). Normal cohort switching remains unchanged.

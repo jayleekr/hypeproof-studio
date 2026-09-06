@@ -293,7 +293,7 @@ export async function activate(context: vscode.ExtensionContext) {
         // cohort's folder (website vs game). If one is already open, no-op.
         // NOTE: this may reload the window; refreshConfig below still runs for
         // the already-open case.
-        if (await ensureWorkspace(profile, context)) {
+        if (await ensureWorkspace(profile, context, isTestRun)) {
           return; // window is reloading; post-reload activation continues onboarding
         }
       } else {
@@ -556,7 +556,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Auto-onboarding: close the default welcome editor, focus the chat panel,
   // prompt for a token if none stored, then prompt for coach name.
-  void autoOnboard(context, provider);
+  void autoOnboard(context, provider, isTestRun);
 
   // E2E backdoor for REQ-E1/E2 manual-approve modal. Fires a synthetic
   // actionRequest after the panel mounts and writes the approve/deny result
@@ -612,6 +612,7 @@ const FIRST_RUN_KEY = "hypeproofChat.didFirstRun";
 async function autoOnboard(
   context: vscode.ExtensionContext,
   provider: ChatPanelProvider,
+  isTestRun: boolean,
 ): Promise<void> {
   // 0. The workspace folder is now cohort-driven (#422): it is created/opened
   //    only AFTER the profile is resolved, so its name + starter match the
@@ -667,7 +668,7 @@ async function autoOnboard(
   //    folder is already open this is a no-op; otherwise it opens the
   //    profile-specified folder and the window reloads (post-reload activation
   //    finds the folder open and skips it).
-  if (await ensureWorkspace(profile, context)) {
+  if (await ensureWorkspace(profile, context, isTestRun)) {
     return; // window is reloading
   }
 
@@ -805,6 +806,7 @@ export function resolveWorkspaceRoot(raw: string): string | null {
 async function ensureWorkspace(
   profile?: ResolvedProfile | null,
   context?: vscode.ExtensionContext,
+  isTestRun = false,
 ): Promise<boolean> {
   let open: string[] = [];
   for (let i = 0; i < 10; i++) {
@@ -822,7 +824,8 @@ async function ensureWorkspace(
       openFolders: open,
       desiredRoot: profile?.workspace_root ? resolveWorkspaceRoot(profile.workspace_root) : null,
       lastAttemptedRoot: attempted,
-      isE2E: !!process.env.HPS_TEST_E2E,
+      // Reuse the env OR file fixture verdict from activation (same as spool).
+      isE2E: isTestRun,
       canonicalize: canonicalizeFsPath,
     });
     if (!decision.switch) {
