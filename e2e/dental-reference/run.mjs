@@ -28,7 +28,7 @@ const server=createServer((req,res)=>{
  if(body===undefined){res.writeHead(404);res.end('Not found');return;}
  res.writeHead(200,{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-practice-version':active});res.end(body);
 });
-const report={scope:'reference HTML + loopback HTTP release simulation; NOT Studio/Electron/LLM or public hosting',started_at:new Date().toISOString(),checks:[],events,studio:'blocked: desktop binary unavailable',student_scores:null,production_writes:0};
+const report={scope:'reference HTML + loopback HTTP release simulation; NOT Studio/Electron/LLM or public hosting',started_at:new Date().toISOString(),checks:[],events,studio:'not_run: this harness does not exercise Electron',student_scores:null,production_writes:0};
 let browser;let work;
 async function check(level,name,fn){const detail=await fn();report.checks.push({level,name,status:'passed',detail:detail??null});console.log(`PASS L${level} ${name}`);}
 function activate(version){assert.ok(snapshots[version]);active=version;events.push({action:'practice-activate',version,sha256:hash(snapshots[version]['index.html'])});}

@@ -96,3 +96,9 @@ Two honest gaps, both rendered as **unknown** and announced in `degraded[]`, nev
 | `heartbeat` | task E in a Studio release the seats actually run | `unknown` until a ping arrives |
 
 The seat set is the one thing §4 did not settle: `cohort:<id>:roster` is **cumulative** (340 ids in production). Pass `?seat_prefix=SK34-CM6YPX-` for the full batch — that is rule 1 in full. Without it the board shows only seats observed this session and says so.
+
+## Course drafts
+
+`/authoring` (linked from `/console`) imports `hps-authoring-batch/1` or an exported single course, edits teaching fields and ordered steps, and saves through the existing Service authoring contract (ADR 0004). Paste the instructor token and scope IDs; credentials stay in memory. A frozen version is inactive and unverified. A 409 preserves the local form; export before explicitly reloading the saved copy. GitHub request preparation is not receipt.
+
+Removal: remove the page route/import and console link; retain Service drafts and versions for export/recovery. No migration or participant-gate change is part of this Surface slice. Browser check: `npm --prefix e2e run test:chalk-authoring`.

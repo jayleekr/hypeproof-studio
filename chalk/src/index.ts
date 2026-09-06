@@ -33,6 +33,8 @@ import consoleHtml from "./ui/console.html";
 import issuerHtml from "./ui/issuer.html";
 // @ts-ignore — bundled as text by wrangler rules.
 import boardHtml from "./ui/board.html";
+// @ts-ignore — bundled as text by wrangler rules.
+import authoringHtml from "./ui/authoring.html";
 
 const app = new Hono<{ Bindings: ChalkEnv; Variables: { requestId: string } }>();
 
@@ -58,6 +60,7 @@ app.get("/", (c) => c.redirect("/console", 302));
 app.get("/console", () => page(consoleHtml));
 app.get("/issuer", () => page(issuerHtml));
 app.get("/board", () => page(boardHtml));
+app.get("/authoring", () => page(authoringHtml));
 
 app.use("/admin/*", signingSecretGuard);
 app.route("/admin", state);
