@@ -104,3 +104,27 @@ export async function captureActivePage(): Promise<PageContext | null> {
     return null;
   }
 }
+
+/** Open local HTML in a width-controlled iframe; the shipped shell ignores CDP emulation. */
+export function registerPreviewViewport(context: vscode.ExtensionContext, liveServer: import("./liveServer").LiveServer): void {
+  context.subscriptions.push(vscode.commands.registerCommand("hypeproof-chat.previewViewport", async () => {
+    const tab = vscode.window.activeBrowserTab;
+    const base = liveServer.currentUrl();
+    if (!tab || !base) {
+      void vscode.window.showWarningMessage("먼저 검수할 HTML 미리보기를 실행하세요.");
+      return;
+    }
+    try {
+      const current = new URL(tab.url);
+      if (current.origin !== new URL(base).origin) throw new Error("현재 작업 폴더의 로컬 미리보기에서 사용할 수 있습니다.");
+      const target = current.pathname === "/__hp_viewport"
+        ? current.searchParams.get("path") || "/index.html"
+        : current.pathname + current.search + current.hash;
+      const url = new URL("__hp_viewport", base);
+      url.searchParams.set("path", target);
+      await vscode.window.openBrowserTab(url.href, { viewColumn: vscode.ViewColumn.Beside });
+    } catch (err) {
+      void vscode.window.showErrorMessage(`화면 검수 열기 실패: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }));
+}

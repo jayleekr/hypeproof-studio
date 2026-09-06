@@ -30,7 +30,7 @@ import {
   dismissVersion,
   currentBundleVersion,
 } from "./updateChecker";
-import { openBrowser, captureActivePage } from "./nativeBrowser";
+import { openBrowser, captureActivePage, registerPreviewViewport } from "./nativeBrowser";
 import { LiveServer } from "./liveServer";
 import { decideWorkspaceSwitch, isSameLocation } from "./workspaceRouting";
 import { SessionSpool, resolveSpoolSessionsRoot, spoolIdentityFromToken } from "./sessionSpool";
@@ -62,6 +62,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   const preview = new PreviewProvider(context);
   const liveServer = new LiveServer();
+  registerPreviewViewport(context, liveServer);
   const assetStatus = new AssetStatusBar();
   // #580 — 세션 로그 로컬 스풀 (수집 계층). 세션 = 이 활성화 1회. 디렉토리는
   // 첫 이벤트에서 게으르게 생기므로 채팅 없는 창은 아무것도 남기지 않는다.

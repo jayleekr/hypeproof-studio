@@ -107,6 +107,11 @@
       {
         "command": "hypeproof-chat.uploadSessionLogs",
         "title": "HypeProof: 오늘 활동 기록 보내기"
+      },
+      {
+        "command": "hypeproof-chat.previewViewport",
+        "title": "HypeProof: 미리보기 화면 크기",
+        "icon": "$(device-mobile)"
       }
     ],
     "menus": {
@@ -120,6 +125,11 @@
           "command": "hypeproof-chat.sendPageToCoach",
           "when": "view == hypeproof-chat.panel && hypeproof-chat.pageContextEnabled",
           "group": "navigation@2"
+        },
+        {
+          "command": "hypeproof-chat.previewViewport",
+          "when": "view == hypeproof-chat.panel",
+          "group": "navigation@3"
         }
       ],
       "editor/title": [

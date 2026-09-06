@@ -85,6 +85,7 @@ export interface ServeResult {
  * 403 on traversal, 404 on miss. Pure + synchronous (real fs), no http/vscode.
  */
 export function serveStatic(root: string, urlPath: string): ServeResult {
+  if (urlPath.split("?")[0] === "/__hp_viewport") return serveViewport(root, urlPath);
   const resolved = resolveWithinRoot(root, urlPath);
   if (!resolved) {
     return { status: 403, contentType: "text/plain; charset=utf-8", body: Buffer.from("forbidden") };
@@ -109,4 +110,22 @@ export function serveStatic(root: string, urlPath: string): ServeResult {
   }
   const charset = type.startsWith("text/") || type === "image/svg+xml" ? "; charset=utf-8" : "";
   return { status: 200, contentType: type + charset, body: buf };
+}
+
+/** Local-only responsive inspection; reuse static serving and its containment guard. */
+function serveViewport(root: string, requestPath: string): ServeResult {
+  const bad = (status: number, message: string): ServeResult => ({ status, contentType: "text/plain; charset=utf-8", body: Buffer.from(message) });
+  const target = new URL(requestPath, "http://localhost").searchParams.get("path") || "";
+  if (!target.startsWith("/") || target.startsWith("//") || target.includes("\\")) return bad(400, "local page path required");
+  const url = new URL(target, "http://localhost");
+  if (url.origin !== "http://localhost" || url.pathname === "/__hp_viewport") return bad(400, "invalid preview target");
+  const file = serveStatic(root, target.split("#")[0]);
+  if (file.status !== 200) return file;
+  if (!file.contentType.startsWith("text/html")) return bad(400, "HTML preview required");
+  const attr = target.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const html = `<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>화면 크기 검수</title>
+<style>body{margin:0;background:#20242b;color:#eee;font:16px/1.5 system-ui}nav{position:sticky;left:0;top:0;padding:12px;max-width:100vw;box-sizing:border-box;background:#20242b}button,a{font:inherit;padding:8px;color:inherit;background:#344864;border:1px solid #8396b0;border-radius:4px}iframe{display:block;border:0;background:white;width:390px;height:844px}p{margin:8px 0}#status{font-weight:bold}</style>
+<nav><button data-width="390">모바일 390px</button> <button data-width="1280">데스크톱 1280px</button> <a id="original" href="${attr}">원본 크기로 열기</a><p id="status" role="status">페이지 로딩 중</p><small>CSS 화면 너비 검수 · 실제 휴대전화 검증은 별도입니다.</small></nav><iframe id="site" title="검수할 홈페이지" src="${attr}"></iframe>
+<script>const frame=document.getElementById('site');const status=document.getElementById('status');function report(){try{status.textContent='실제 페이지 너비 '+frame.contentWindow.innerWidth+'px';document.getElementById('original').href=frame.contentWindow.location.href;}catch{status.textContent='외부 페이지로 이동했습니다. 로컬 페이지로 돌아와 검수하세요.';}}frame.addEventListener('load',report);document.querySelectorAll('[data-width]').forEach(b=>b.addEventListener('click',()=>{frame.style.width=b.dataset.width+'px';requestAnimationFrame(report);}));</script></html>`;
+  return { status: 200, contentType: "text/html; charset=utf-8", body: Buffer.from(html) };
 }
