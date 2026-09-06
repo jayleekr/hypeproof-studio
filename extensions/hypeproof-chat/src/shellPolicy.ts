@@ -212,20 +212,12 @@ export function commandSignature(command: string): string | null {
 }
 
 /**
- * Human-readable one-liner for the approval modal. Long commands are clipped
- * in the MIDDLE — the tail of a shell command (the target path, the `--force`)
- * is where the danger lives, so a trailing ellipsis would hide exactly what
- * the participant needs to see.
+ * Reviewable command for the approval modal. Preserve the entire command and
+ * line breaks: an operation in the middle matters as much as its first/last
+ * word. Redact credentials before displaying it on a workshop projector.
  */
-export function describeCommandForApproval(command: string, max = 240): string {
-  // Scrub BEFORE clipping. A workshop runs on a projector: a command like
-  // `wrangler deploy --api-token ghp_…` would otherwise put a live credential
-  // on the wall, and in the activity log, for the rest of the session.
-  const c = scrubSecrets((command ?? "").trim()).replace(/\s+/g, " ");
-  if (c.length <= max) return c;
-  const head = Math.ceil((max - 3) * 0.6);
-  const tail = max - 3 - head;
-  return `${c.slice(0, head)}...${c.slice(c.length - tail)}`;
+export function describeCommandForApproval(command: string): string {
+  return scrubSecrets(command ?? "");
 }
 
 // ── Secret scrubbing ────────────────────────────────────────────────────────
