@@ -72,3 +72,9 @@ their presence does not prove authoring, rehearsal, or student project access.
 | REQ-STUDIO-AUTHORING-API | Scoped owner can save/reopen a draft with revision conflicts and freeze an immutable, inactive session-design document. | worker/src/routes/authoring.ts; worker/test/authoring.test.mjs |
 
 Contract and storage decision: [ADR 0004](../adr/0004-chalk-authoring-storage.md). This backend slice does not claim the full authoring UI or live classroom flow.
+
+### Dental course generation
+
+| ID | Acceptance criteria | Primary paths |
+|---|---|---|
+| REQ-STUDIO-DENTAL-AUTHORING | Five persona-specific course drafts compile through the Service schema, persist/reopen, and resume without overwriting instructor edits. Learning outcomes remain unassessed until observed. | docs/curriculum/dental-ownership/program.json; worker/scripts/dental-authoring.mjs; worker/test/dental-course-automation.test.mjs |

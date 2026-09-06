@@ -346,3 +346,11 @@ PR — 이 도메인은 "각 PC 에 빠짐없이, 깨지지 않게 쌓인다"까
 | REQ-STUDIO-AUTHORING-API | 강사 소유 초안 및 불변 버전 저장 | 타 강사·코호트·프로필 접근 차단, revision 충돌 검출, 중복 재시도 안전, 버전 원문 보존. 수업 활성화 없음. | R — in-process Service/SQLite and local D1 |
 
 [Contract](adr/0004-chalk-authoring-storage.md) · [Execution scope](testing/chalk-authoring.md).
+
+## Persona-led course authoring tooling
+
+| ID | 요구사항 | 수용 기준 | Layer |
+|---|---|---|---|
+| REQ-STUDIO-DENTAL-AUTHORING | 레벨별 치과 홈페이지 강의 5개 생성·검증·초안 저장 | 각 레벨의 페르소나·목표·실습·독립 과제·증거를 원본에서 생성. Service 스키마 재사용. 실제 authoring 라우트 저장/재열기 확인, 재실행·중단 재개 시 기존 초안 보호. 학습 성공·수업 활성화 자동 선언 없음. | Module data + authoring tooling; R/U |
+
+[Source and execution](curriculum/dental-ownership/README.md) · `worker/test/dental-course-automation.test.mjs`.
