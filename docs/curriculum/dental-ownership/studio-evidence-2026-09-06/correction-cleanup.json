@@ -1,0 +1,5 @@
+{
+  "close_http": 200,
+  "revoked": true,
+  "session_after_close": null
+}

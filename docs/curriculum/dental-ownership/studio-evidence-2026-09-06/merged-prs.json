@@ -1,0 +1,82 @@
+[
+  {
+    "headRefOid": "6e7991e2006cbe14dbdfa4db871a5fe5a4af8ad3",
+    "mergeCommit": {
+      "oid": "1a1bb732480345a42b5a36c655a3d91d861cc033"
+    },
+    "mergedAt": "2026-09-06T13:15:43Z",
+    "number": 704,
+    "state": "MERGED",
+    "url": "https://github.com/jayleekr/hypeproof-studio/pull/704"
+  },
+  {
+    "headRefOid": "19b06428645c1ec9b5012a1253c2a87f9a005323",
+    "mergeCommit": {
+      "oid": "78663ce6177a9f74556838eb6086862b2d860cfa"
+    },
+    "mergedAt": "2026-09-06T14:37:23Z",
+    "number": 706,
+    "state": "MERGED",
+    "url": "https://github.com/jayleekr/hypeproof-studio/pull/706"
+  },
+  {
+    "headRefOid": "7163c0e3d562fc48f74c799a1db1ac6b33cbf39f",
+    "mergeCommit": {
+      "oid": "c8464151531e16d72f2e635f1cc32a77058f126a"
+    },
+    "mergedAt": "2026-09-06T14:39:04Z",
+    "number": 708,
+    "state": "MERGED",
+    "url": "https://github.com/jayleekr/hypeproof-studio/pull/708"
+  },
+  {
+    "headRefOid": "de9bf7fdf011241183660df18c441db51190447e",
+    "mergeCommit": {
+      "oid": "057f51e46713409806a0e7058a38257218bdb7d4"
+    },
+    "mergedAt": "2026-09-06T14:40:34Z",
+    "number": 710,
+    "state": "MERGED",
+    "url": "https://github.com/jayleekr/hypeproof-studio/pull/710"
+  },
+  {
+    "headRefOid": "6685e53ccb1e672d2b8af9000eda96e0a8b11113",
+    "mergeCommit": {
+      "oid": "7213a289c7cb37b4047210af08740d24b76052f7"
+    },
+    "mergedAt": "2026-09-06T14:47:48Z",
+    "number": 714,
+    "state": "MERGED",
+    "url": "https://github.com/jayleekr/hypeproof-studio/pull/714"
+  },
+  {
+    "headRefOid": "7ecc539de38689711c126cd9abae6318b1df71d6",
+    "mergeCommit": {
+      "oid": "30e8be709fd4ca6b5660a49cc7ba38e2db1aa492"
+    },
+    "mergedAt": "2026-09-06T14:51:50Z",
+    "number": 716,
+    "state": "MERGED",
+    "url": "https://github.com/jayleekr/hypeproof-studio/pull/716"
+  },
+  {
+    "headRefOid": "fdb6dbc696b542e27e8b44da3f8b5ac9afa93625",
+    "mergeCommit": {
+      "oid": "b72bf949ccc51db56183d5bfbbf251838d3f3927"
+    },
+    "mergedAt": "2026-09-06T15:02:49Z",
+    "number": 717,
+    "state": "MERGED",
+    "url": "https://github.com/jayleekr/hypeproof-studio/pull/717"
+  },
+  {
+    "headRefOid": "e201dac020b38156b808ab347eb8cc069f319bf7",
+    "mergeCommit": {
+      "oid": "8df906d3d4086f554870842911571d818c972efb"
+    },
+    "mergedAt": "2026-09-06T15:19:05Z",
+    "number": 721,
+    "state": "MERGED",
+    "url": "https://github.com/jayleekr/hypeproof-studio/pull/721"
+  }
+]

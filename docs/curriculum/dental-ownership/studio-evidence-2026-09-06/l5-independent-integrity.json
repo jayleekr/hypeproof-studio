@@ -1,0 +1,26 @@
+{
+  "index.html": {
+    "site": "181e0c19436804c3b8307922664a128475cb8f085c8546f9771ba4043c1cdc37",
+    "backup": "181e0c19436804c3b8307922664a128475cb8f085c8546f9771ba4043c1cdc37",
+    "restored": "181e0c19436804c3b8307922664a128475cb8f085c8546f9771ba4043c1cdc37",
+    "l4": "181e0c19436804c3b8307922664a128475cb8f085c8546f9771ba4043c1cdc37"
+  },
+  "careers.html": {
+    "site": "4b7c221081baa5b3abd378b51a1c7c4a7f6f897652fd7b14bb3ca026169c38ef",
+    "backup": "4b7c221081baa5b3abd378b51a1c7c4a7f6f897652fd7b14bb3ca026169c38ef",
+    "restored": "4b7c221081baa5b3abd378b51a1c7c4a7f6f897652fd7b14bb3ca026169c38ef",
+    "l4": "4b7c221081baa5b3abd378b51a1c7c4a7f6f897652fd7b14bb3ca026169c38ef"
+  },
+  "bad-backup": {
+    "exit_code": 5,
+    "stdout": "[FAIL] 해시 불일치: index.html\n       기대값: 181e0c19436804c3b8307922664a128475cb8f085c8546f9771ba4043c1cdc37\n       실제값: 4889b0d53b7b9d0ff0d02de112b711299881a7e3c11f34f50bd40e146aca8517\n[OK]   careers.html\n\n검증 실패 (1/2개). 복원을 중단합니다.\n대상 경로에 파일을 쓰지 않았습니다.\n",
+    "stderr": "",
+    "target_created": false
+  },
+  "backup": {
+    "exit_code": 0,
+    "stdout": "[OK]   index.html\n[OK]   careers.html\n[복원] /tmp/hps-dental-20260906/workspace/l5/backup/index.html → /tmp/hps-dental-20260906/workspace/l5/observer-backup/index.html\n[복원] /tmp/hps-dental-20260906/workspace/l5/backup/careers.html → /tmp/hps-dental-20260906/workspace/l5/observer-backup/careers.html\n\n복원 완료: 2개 파일 → /tmp/hps-dental-20260906/workspace/l5/observer-backup\n",
+    "stderr": "",
+    "target_created": true
+  }
+}

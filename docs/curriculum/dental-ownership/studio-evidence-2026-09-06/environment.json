@@ -1,0 +1,25 @@
+{
+  "mode": "synthetic persona experiment; no learner scores",
+  "host": "15.7.4",
+  "architecture": "arm64",
+  "shell_version": "0.1.50",
+  "shell_commit": "3ba1a364144a2776f2e9cc28d26cbc16b15b78f8",
+  "integrated_code_sha": "8df906d3d4086f554870842911571d818c972efb",
+  "extension_sha256": "f9f9a17aaa04a7402bc4593ea695930c69dab7cf50d4746e7662b8d6b3929bca",
+  "program_sha256": "ab4ede9377427a380eab960d3c2656bedd1746aff54dec18cc7d1a5d350cb18f",
+  "practice_workspace": "/private/tmp/hps-dental-20260906/workspace",
+  "service_origin": "http://127.0.0.1:8797",
+  "chalk_origin": "http://127.0.0.1:8798",
+  "cdp_port": 9347,
+  "token_entry": "fixture file; actual Service-issued synthetic student token",
+  "production_writes": 0,
+  "extension_source_head": "e201dac020b38156b808ab347eb8cc069f319bf7",
+  "current_preview_origin": "http://127.0.0.1:65128",
+  "lesson_code_stages": {
+    "l1": "6685e53ccb1e672d2b8af9000eda96e0a8b11113; final viewport regression e201dac",
+    "l2": "6685e53; independent task d43c426467dce5746bad6e9bbcdb1c7db4839001; viewport regression fdb6dbc",
+    "l3": "d43c426467dce5746bad6e9bbcdb1c7db4839001",
+    "l4": "fdb6dbc696b542e27e8b44da3f8b5ac9afa93625",
+    "l5": "initial b72bf94 interrupted; successful rerun e201dac020b38156b808ab347eb8cc069f319bf7"
+  }
+}

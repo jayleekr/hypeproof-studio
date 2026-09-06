@@ -1,0 +1,12 @@
+{
+  "session_close_http_status": 200,
+  "ok": true,
+  "student_token_revoked": true,
+  "session_after_close": null,
+  "listeners_remaining": {
+    "9347": [],
+    "8797": [],
+    "8798": [],
+    "65128": []
+  }
+}
