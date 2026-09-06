@@ -64,3 +64,11 @@ canonical Studio behavior table when App behavior changes, and record actual
 execution evidence. Do not mark the whole proposal implemented when a single
 slice lands. Existing Chalk console/issuer/board are reusable implementations;
 their presence does not prove authoring, rehearsal, or student project access.
+
+### Authoring API slice
+
+| ID | Acceptance criteria | Primary paths |
+|---|---|---|
+| REQ-STUDIO-AUTHORING-API | Scoped owner can save/reopen a draft with revision conflicts and freeze an immutable, inactive session-design document. | worker/src/routes/authoring.ts; worker/test/authoring.test.mjs |
+
+Contract and storage decision: [ADR 0004](../adr/0004-chalk-authoring-storage.md). This backend slice does not claim the full authoring UI or live classroom flow.

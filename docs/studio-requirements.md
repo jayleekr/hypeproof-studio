@@ -338,3 +338,11 @@ PR — 이 도메인은 "각 PC 에 빠짐없이, 깨지지 않게 쌓인다"까
 | REQ-Q10 | 서버 업로드 게이트 (#596) | `PUT /v1/logs/<sessionId>/<filename>?day=` — **active-session 게이트 의도적 부재**(업로드는 수업 종료 후가 정상 경로; 토큰 만료가 시간 창을 대신함). opt-in `analytics.upload_session_logs` fail-closed(`upload_disabled` 403, canary 만 ON — validate.py 가 아동 코호트의 이 플래그를 HARD FAIL 로 막는다), roster·revocation·rate limit(60/60s)·파일명 allowlist 3종(**own-property 조회 필수** — `__proto__` 류 프로토타입 키가 allowlist 와 크기 캡을 동시에 뚫는 것을 리뷰가 실증)·파일별 크기 캡(events 64MB — 낮으면 큰 세션이 영영 못 올라가는 무음 유실)·day 시맨틱 검증·sessionId 소문자 정규화. `/v1/logs/*` 는 signingSecretGuard 뒤에 마운트. **R2 키(`studio-logs/<c>/<u>/<day>/<sid>/<file>`)의 신원 프리픽스는 검증된 토큰에서 서버가 조립** — 경로 위조 불가 | R (`worker/test/logs-upload`) |
 | REQ-Q11 | manifest-last 완결 · 멱등 재시도 (#596) | 업로더는 meta → events → **manifest(sha256 목록) 마지막** 순서이고, manifest 해시는 **업로드한 그 버퍼**에서 계산한다(파일 재읽기 금지 — 사이에 다른 프로세스가 append 하면 거짓 완결). 다른 창의 활성 세션은 **정지 게이트**(events mtime 5분)가 보호하고, 이 인스턴스가 봉인한 세션만 면제. 마커 있는 세션에 새 이벤트가 오면 스풀이 **마커를 무효화**해 재업로드 대상으로 되돌린다(꼬리 유실 방지). 중간 실패 시 manifest 미전송 = 미완결 → 다음 트리거 전체 재시도(멱등). 네트워크·fs 예외 모두 구조화 실패로 반환(throw 전파 없음), events 소실 시 빈 manifest 로 완결을 주장하지 않는다. manifest 의 sha256 은 서버가 검증하지 않는다 — 완결은 클라 자기증명, 바이트 대조는 소비 계층 몫 | U (`test/spool-uploader`) |
 | REQ-Q12 | 업로드 성공 세션의 로컬 정리 (#596, #580 AC6) | `uploaded.json` 마커 세션은 3일 뒤 스윕이 캡과 무관하게 삭제(R2 완결본 존재). **미업로드 세션은 총량 캡 전까지 절대 삭제하지 않는다** | U (`test/session-spool`) |
+
+## Chalk authoring API (Service slice)
+
+| ID | 요구사항 | 수용 기준 | Layer |
+|---|---|---|---|
+| REQ-STUDIO-AUTHORING-API | 강사 소유 초안 및 불변 버전 저장 | 타 강사·코호트·프로필 접근 차단, revision 충돌 검출, 중복 재시도 안전, 버전 원문 보존. 수업 활성화 없음. | R — in-process Service/SQLite and local D1 |
+
+[Contract](adr/0004-chalk-authoring-storage.md) · [Execution scope](testing/chalk-authoring.md).

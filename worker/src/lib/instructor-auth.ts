@@ -57,6 +57,8 @@ export function publicVerifyError(err: unknown, label: string): string {
 // Chalk consumes the SAME predicate as its forwarding allowlist: the set of
 // Service endpoints an instructor Bearer may reach is defined exactly once.
 export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
+  // Chalk authoring: handlers still enforce issuer identity, cohort/profile and owner.
+  if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+(?:\/versions\/[^/]+)?$/.test(path)) return true;
   if (path === "/admin/tokens/issue" && method === "POST") return true;
   // #167 — issuer-role tokens with can_start_session scope may start/end
   // their scoped cohort's session without admin Basic auth.

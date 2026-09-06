@@ -25,6 +25,7 @@
 //   GET    /admin/issuers?minted_by=<u>          — issuer mint-lineage query (admin only; #313)
 
 import { Hono } from "hono";
+import { authoring } from "./authoring";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
 import { USAGE_LAST_HOUR_SQL } from "../lib/analytics";
@@ -126,6 +127,8 @@ admin.use("*", async (c, next) => {
   }
   return c.json({ error: "admin not configured" }, 503);
 });
+
+admin.route("/", authoring);
 
 // ---- cohort list ------------------------------------------------------------
 

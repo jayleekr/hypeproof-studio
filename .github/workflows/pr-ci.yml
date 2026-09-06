@@ -76,6 +76,10 @@ jobs:
         working-directory: worker
         run: npm test
 
+      - name: Run authoring against local D1
+        working-directory: worker
+        run: npm run test:authoring:d1
+
   worker-typecheck:
     name: worker / typecheck
     runs-on: ubuntu-latest
