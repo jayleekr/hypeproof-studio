@@ -1,13 +1,13 @@
 # Chalk authoring test requirements
 
-Status: planned; every product test below is NOT RUN.
+Status: staged implementation. The original scenario table is the target plan; see the execution record below for implemented subsets.
 Requirement definitions: [Chalk authoring](../requirements/chalk-authoring.md).
 Existing verification policy: [testing](../dev/05-testing-requirements.md) and
 [verification rules](../../.claude/rules/verification.md).
 
 ## 테스트 REQ
 
-모든 항목의 현재 상태는 NOT RUN이다. 아래 합격 기준은 구현 후 검증할 조건이다.
+아래는 종단 시나리오 목표다. 부분 실행 결과는 하단 기록을 따른다.
 
 | Test ID | 제품 REQ | 조건 및 실행 | 합격 기준 | 검증 방식 |
 |---|---|---|---|---|
@@ -78,3 +78,12 @@ planned; no blanket PASS or inferred completion.
 P0 release requires all applicable P0 requirements (including ones without a
 dedicated T-* row yet) to have evidence. A documentation PR needs documentation
 validation only. A product PR must update actual test paths and results.
+
+## API slice execution record
+
+- `worker/test/authoring.test.mjs`: 19 checks passed locally on Node 24, real Service routing, signed tokens, and real SQLite. Covers owner/cohort/profile denial (T-01), draft save/reopen (T-02), incomplete freeze rejection (T-04), frozen document preservation (part of T-08), retry/conflict behavior (T-10/T-11), and existing admin reachability (T-21).
+- `chalk/test/authoring-forward.test.mjs`: passed locally; Service verdict and header filtering preserved for authoring GET/PUT.
+- Worker and Chalk existing test suites passed locally; typechecks passed.
+- `worker/test/authoring-d1.test.mjs`: local run BLOCKED by execution environment network-approval cancellation; an explicit CI step must pass before merge.
+- T-07 rehearsal invalidation, T-08 active-class version binding, actual UI and Electron flows, student participation, and production D1/deployment are NOT RUN and not implemented by this slice.
+- Contract and rollback: [ADR 0004](../adr/0004-chalk-authoring-storage.md). No full product requirement is inferred complete from these subsets.

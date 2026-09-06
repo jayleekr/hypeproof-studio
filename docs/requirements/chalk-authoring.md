@@ -91,3 +91,7 @@ consistency를 낙관적 잠금이나 수업 인스턴스 고정 보장으로 �
 
 Studio에서 Chalk에 접근하더라도 Chalk 웹 화면의 모바일 접근성을 유지한다.
 수업 생성이 운영 세션 개설·토큰 발급·외부 공개를 자동으로 수행하지 않는다.
+
+## Implementation progress
+
+The Service draft/frozen-version API is implemented in [ADR 0004](../adr/0004-chalk-authoring-storage.md). Chalk authoring UI, rehearsal, activation and student delivery remain planned. Freezing stores an unverified snapshot, not a deployable class.

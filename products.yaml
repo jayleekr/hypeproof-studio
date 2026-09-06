@@ -70,6 +70,8 @@ entries:
     contract:
       format: "HTTP — see hypeproof-chat entry (same surface, other side)"
     drift_lock: worker/test/quest-result-contract.test.mjs
+    drift_lock_extra:
+      - worker/test/authoring.test.mjs
     exit_plan: null
     owner: jay
     notes: >-
