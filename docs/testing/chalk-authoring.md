@@ -84,6 +84,10 @@ validation only. A product PR must update actual test paths and results.
 - `worker/test/authoring.test.mjs`: 19 checks passed locally on Node 24, real Service routing, signed tokens, and real SQLite. Covers owner/cohort/profile denial (T-01), draft save/reopen (T-02), incomplete freeze rejection (T-04), frozen document preservation (part of T-08), retry/conflict behavior (T-10/T-11), and existing admin reachability (T-21).
 - `chalk/test/authoring-forward.test.mjs`: passed locally; Service verdict and header filtering preserved for authoring GET/PUT.
 - Worker and Chalk existing test suites passed locally; typechecks passed.
-- `worker/test/authoring-d1.test.mjs`: local run BLOCKED by execution environment network-approval cancellation; an explicit CI step must pass before merge.
+- `worker/test/authoring-d1.test.mjs`: passed on the actual Mac with Node 24 on 2026-09-06; local workerd/D1 migration, CAS, immutable-version reopen and overwrite rejection. PR #706 CI worker/test also passed before merge.
 - T-07 rehearsal invalidation, T-08 active-class version binding, actual UI and Electron flows, student participation, and production D1/deployment are NOT RUN and not implemented by this slice.
 - Contract and rollback: [ADR 0004](../adr/0004-chalk-authoring-storage.md). No full product requirement is inferred complete from these subsets.
+
+## Chalk authoring surface slice (#712)
+
+`e2e/chalk-authoring/run.mjs` drives Chromium through Chalk HTTP forwarding to real Service routes and SQLite: Module draft import, form editing, save/reload, immutable version read, concurrent 409 with local edit preservation, 401/403 negative controls, mobile layout and no browser credential storage. Passed locally on Mac. This is instructor UI evidence, not student Electron or public deployment evidence. GitHub support links prepare a draft; receipt and assignment only exist after the instructor submits on GitHub.

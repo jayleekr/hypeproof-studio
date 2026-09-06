@@ -94,4 +94,4 @@ Studio에서 Chalk에 접근하더라도 Chalk 웹 화면의 모바일 접근성
 
 ## Implementation progress
 
-The Service draft/frozen-version API is implemented in [ADR 0004](../adr/0004-chalk-authoring-storage.md). Chalk authoring UI, rehearsal, activation and student delivery remain planned. Freezing stores an unverified snapshot, not a deployable class.
+The Service draft/frozen-version API is implemented in [ADR 0004](../adr/0004-chalk-authoring-storage.md). Chalk `/authoring` now covers file import, draft/step editing, save/reopen and frozen-version viewing. Rehearsal, activation and student delivery remain planned. Support requests open an unsubmitted GitHub draft; this does not implement an internal request queue. Freezing stores an unverified snapshot, not a deployable class.
