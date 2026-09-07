@@ -41,6 +41,8 @@ import manageHtml from "./ui/manage.html";
 import sharingHtml from "./ui/sharing.html";
 // @ts-ignore — bundled as text by wrangler rules.
 import startHtml from "./ui/start.html";
+// @ts-ignore — bundled as text by wrangler rules.
+import learnHtml from './ui/learn.html';
 
 const app = new Hono<{ Bindings: ChalkEnv; Variables: { requestId: string } }>();
 
@@ -70,6 +72,9 @@ app.get("/board", () => page(boardHtml));
 app.get("/authoring", () => page(authoringHtml));
 app.get("/manage", () => page(manageHtml));
 app.get("/sharing", () => page(sharingHtml));
+app.get('/learn', () => page(learnHtml));
+app.use('/v1/profile', signingSecretGuard);
+app.get('/v1/profile', forwardInstructorWrite);
 app.use("/v1/classroom/*", signingSecretGuard);
 app.all("/v1/classroom/*", forwardInstructorWrite);
 

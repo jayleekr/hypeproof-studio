@@ -30,7 +30,7 @@ env.HPS_DB = { prepare(sql) {
     async all(){return {success:true,results:query().all(...bindings)};},
   };
 }};
-const token = async (issuer, scopes=[{cohort,profiles:[profileId]}]) => (await issueIssuer({issuer,scopes},1,TEST_SECRET)).token;
+const token = async (issuer, scopes=[{cohort,profiles:[profileId]}]) => (await issueIssuer({issuer,scopes},48,TEST_SECRET)).token;
 const alice = await token('author-a'), bob=await token('author-b');
 const outsider=await token('outsider',[{cohort:'other',profiles:[profileId]}]);
 const student=(await issue({u:'student',c:cohort,p:profileId},1,TEST_SECRET)).token;
@@ -98,6 +98,37 @@ await check('T-08 later draft edit preserves frozen bytes; overwrite denied',asy
  assert.equal((await request(base+'/versions/m2026.09.06-1','PUT',{expected_revision:5})).status,409);
  assert.deepEqual((await request(base+'/versions/m2026.09.06-1','PUT',{expected_revision:4})).json.module,frozen);
 });
+await check('T-08/T-09 deliver immutable lesson only to registered students in a matching session',async()=>{
+ const {setRoster,startSession,revokeToken}=await import('../src/lib/kv.ts');
+ const delivery=base+'/versions/m2026.09.06-1/participants';
+ const body={user:'student',hours:1};
+ assert.equal((await request(delivery,'POST',body)).status,403);
+ await setRoster(env.HPS_KV,cohort,['student']);
+ await startSession(env.HPS_KV,cohort,{session_id:'synthetic-lesson',profile_id:profileId,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()});
+ assert.equal((await request(delivery,'POST',body,bob)).status,404);
+ assert.equal((await request(delivery,'POST',body,student)).status,403);
+ assert.equal((await request(delivery,'POST',{...body,user:'not-registered'})).status,403);
+ assert.equal((await request(delivery,'POST',{...body,hours:25})).status,400);
+ const r=await request(delivery,'POST',body);assert.equal(r.status,200,r.raw);
+ const received=await request('/v1/profile','GET',undefined,r.json.token);assert.equal(received.status,200,received.raw);
+ assert.deepEqual(received.json.lesson.content,frozen.content);assert.equal(received.json.lesson.version,frozen.version);
+ assert.equal(received.json.lesson.content.title,content.title); // draft already changed to new
+ const legacy=await request('/v1/profile','GET',undefined,student);assert.equal(legacy.status,200);assert.equal(legacy.json.lesson,undefined);
+ assert.deepEqual(received.json.sdk_tools,legacy.json.sdk_tools);
+ assert.equal(received.json.display_name,content.title);assert.match(received.json.welcome.greeting_md,/진료시간 수정/);
+ const {verify}=await import('../src/lib/tokens.ts');const claim=await verify(r.json.token,TEST_SECRET);
+ const bad=(await issue({u:'student',c:cohort,p:profileId,lesson:{...claim.lesson,sha256:'0'.repeat(64)}},1,TEST_SECRET)).token;
+ assert.equal((await request('/v1/profile','GET',undefined,bad)).status,409);
+ const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
+ const gate=credential=>gateChatRequest({env,req:{header:()=> 'Bearer '+credential},header(){},json:(body,status)=>Response.json(body,{status})});
+ const goodGate=await gate(r.json.token);assert.equal(goodGate.ok,true);assert.ok(goodGate.profile.system_prompt.includes(JSON.stringify(frozen.content)));
+ const plainGate=await gate(student);assert.equal(plainGate.ok,true);assert.deepEqual(goodGate.profile.sdk_tools,plainGate.profile.sdk_tools);
+ const badGate=await gate(bad);assert.equal(badGate.ok,false);assert.equal(badGate.response.status,409);
+
+ await revokeToken(env.HPS_KV,claim.jti,'synthetic revoke');
+ assert.equal((await request('/v1/profile','GET',undefined,r.json.token)).status,401);
+ assert.equal((await request(base+'/versions/m2099.01.01-1/participants','POST',body)).status,409);
+});
 await check('T-08 concurrent draft edit prevents freezing stale read',async()=>{
  beforeWrite=async()=>{db.prepare('UPDATE authoring_drafts SET revision=revision+1 WHERE course_id=?').run('site-1');};
  assert.equal((await request(base+'/versions/m2026.09.06-2','PUT',{expected_revision:5})).status,409);
@@ -114,7 +145,7 @@ await check('bounded body and malformed JSON fail without storing',async()=>{
  const r=await app.fetch(new Request('https://service.test'+base,{method:'PUT',headers:{authorization:`Bearer ${alice}`,'content-type':'application/json'},body:'{' }),env,makeCtx());assert.equal(r.status,400);
 });
 await check('T-01 revoked issuer cannot retrieve frozen content',async()=>{
- const revoked=await issueIssuer({issuer:'author-a',scopes:[{cohort,profiles:[profileId]}]},1,TEST_SECRET);
+ const revoked=await issueIssuer({issuer:'author-a',scopes:[{cohort,profiles:[profileId]}]},48,TEST_SECRET);
  const { revokeToken }=await import('../src/lib/kv.ts');await revokeToken(env.HPS_KV,revoked.jti,'test');
  assert.equal((await request(base+'/versions/m2026.09.06-1','GET',undefined,revoked.token)).status,401);
 });

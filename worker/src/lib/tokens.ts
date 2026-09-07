@@ -14,6 +14,8 @@
 // exp (transition window) — but cannot be individually revoked.
 
 export interface TokenPayload {
+  /** Instructor-selected immutable lesson. Never carries runtime capabilities. */
+  lesson?: { course_id: string; version: string; sha256: string };
   u: string;       // user id (cohort-local), e.g. "kid01"
   c: string;       // cohort id, e.g. "sk-biopharm-2026-a"
   p: string;       // profile id, e.g. "sk-biopharm-kids-2026-grade-3-4-s1"
@@ -252,6 +254,7 @@ function canonicalize(p: TokenPayload): string {
   if (p.role !== undefined) out.role = p.role;
   if (p.scopes !== undefined) out.scopes = p.scopes;
   if (p.can_issue_issuers !== undefined) out.can_issue_issuers = p.can_issue_issuers;
+  if (p.lesson !== undefined) out.lesson = p.lesson;
   return JSON.stringify(out);
 }
 

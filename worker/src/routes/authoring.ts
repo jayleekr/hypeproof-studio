@@ -6,6 +6,9 @@ import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-au
 import { getProfile } from "../profiles";
 import { isModuleVersion, makeModuleDoc, sha256Hex } from "../lib/modules";
 import { validateSessionDesign } from "../lib/session-design";
+import { readLesson } from '../lib/lesson-delivery';
+import { issue } from '../lib/tokens';
+import { getRoster, getActiveSession } from '../lib/kv';
 
 type Bindings = { Bindings: Env; Variables: { author: IssuerAuthz } };
 interface Draft { cohort_id: string; course_id: string; owner_id: string; profile_id: string; revision: number; content_json: string; request_id: string; request_hash: string; updated_at: string }
@@ -25,10 +28,32 @@ const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
   if (!validId(c.req.param("course")! ?? "")) return c.json({ error: "invalid course id" }, 400);
   return next();
 };
-for (const path of [root, root + "/versions/:version"]) {
+for (const path of [root, root + "/versions/:version", root + '/versions/:version/participants']) {
   authoring.use(path, authenticate);
   authoring.use(path, bodyLimit({ maxSize: 128 * 1024, onError: (c) => c.json({ error: "request too large" }, 413) }));
 }
+
+// Explicit delivery to an already registered student; never opens/replaces a session.
+authoring.post(root + '/versions/:version/participants', async c => {
+  const a = c.get('author'), cohort = c.req.param('cohort')!, course = c.req.param('course')!;
+  const b = await c.req.json().catch(() => null);
+  if (!b || typeof b.user !== 'string' || !validId(b.user) || b.user.length > 64 || !Number.isInteger(b.hours) || b.hours < 1 || b.hours > 24)
+    return c.json({ error: 'student ID and hours (1–24) required' }, 400);
+  if (b.hours > (a.scope.max_hours ?? 24) || Date.now() / 1000 + b.hours * 3600 > a.payload.exp)
+    return c.json({ error: 'duration exceeds instructor authorization' }, 403);
+  const d = await readDraft(c.env.HPS_DB, cohort, course);
+  if (!d || !owns(d, a)) return c.json({ error: 'course not found' }, 404);
+  const lesson = await readLesson(c.env, cohort, course, c.req.param('version')!, d.profile_id);
+  if (!lesson) return c.json({ error: 'valid frozen version required' }, 409);
+  const session = await getActiveSession(c.env.HPS_KV, cohort);
+  if (!session || session.profile_id !== d.profile_id || !Number.isFinite(Date.parse(session.starts_at)) || !Number.isFinite(Date.parse(session.ends_at)) || Date.parse(session.starts_at) > Date.now() || Date.parse(session.ends_at) <= Date.now())
+    return c.json({ error: 'open a matching practice session first' }, 403);
+  const roster = await getRoster(c.env.HPS_KV, cohort);
+  if (!roster?.users.includes(b.user)) return c.json({ error: 'register this student in the session console first' }, 403);
+  const ref = { course_id: course, version: lesson.version, sha256: lesson.sha256 };
+  const { token } = await issue({ u: b.user, c: cohort, p: d.profile_id, lesson: ref }, b.hours, c.env.HPS_SIGNING_SECRET);
+  return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal: 'not_run' });
+});
 
 async function readDraft(db: D1Database, cohort: string, course: string) {
   return db.prepare("SELECT * FROM authoring_drafts WHERE cohort_id=? AND course_id=?").bind(cohort, course).first<Draft>();

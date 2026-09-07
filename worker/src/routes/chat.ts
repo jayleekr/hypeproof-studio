@@ -23,6 +23,8 @@ import {
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
+import { resolveTokenLesson } from '../lib/lesson-delivery';
+import { isTokenRevoked, getRoster } from '../lib/kv';
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropicResilient } from "../lib/anthropic";
 import { glmUpstreamUrl } from "../lib/glm";
@@ -209,18 +211,32 @@ chat.get("/profile", async (c) => {
   }
   const { profile, module } = resolved;
 
+  let lesson = null;
+  if (auth.payload.lesson) {
+    c.header('cache-control', 'no-store');
+    if (auth.payload.jti && await isTokenRevoked(c.env.HPS_KV, auth.payload.jti)) return c.json({ error: { type: 'auth', code: 'revoked', message: '참여 코드가 폐기되었습니다.' } }, 401);
+    if (profile.session.cohort_id !== auth.payload.c || !(await getRoster(c.env.HPS_KV, auth.payload.c))?.users.includes(auth.payload.u))
+      return c.json({ error: { type: 'auth', code: 'not_in_roster', message: '수업 명단을 강사에게 확인하세요.' } }, 403);
+    lesson = await resolveTokenLesson(c.env, auth.payload);
+    if (!lesson) return c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 알려주세요.' } }, 409);
+  }
+
   return c.json({
+    ...(lesson ? { lesson } : {}),
     profile_id: profile.id,
     // dag task H — which curriculum module this seat is running. Observability
     // only (the prompt itself never leaves the worker): lets e2e/observe and
     // the instructor tell "which curriculum" without a D1 query.
     module: { version: module.version, source: module.source, fallback: module.fallback ?? null },
-    display_name: profile.display_name,
+    display_name: lesson?.content.title ?? profile.display_name,
     language: profile.audience.language,
     series_index: profile.session.series_index,
     series_total: profile.session.series_total,
     assets_focus: profile.assets_focus,
-    welcome: profile.welcome,
+    welcome: lesson ? {
+      greeting_md: `오늘 수업: ${lesson.content.title}\n목표: ${lesson.content.objective}\n내 수업에서 과제와 확인 기준을 읽고 시작하세요.`,
+      example_prompts: lesson.content.steps.slice(0, 3).map(s => `${s.instructions}\n확인 기준: ${s.acceptance}`),
+    } : profile.welcome,
     ux: profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
     // #596 — 세션 로그 업로드 opt-in. 클라이언트는 이걸로 "기록 보내기" UI 를

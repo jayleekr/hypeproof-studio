@@ -28,6 +28,7 @@ and test gates.
 | ID | Area | Acceptance criteria | Primary paths |
 |---|---|---|---|
 | REQ-STUDIO-AUTOONBOARD | first launch | workspace opens, trust suppressed, chat panel focused, token prompt shown when needed | `extension.ts`, `chatPanelProvider.ts` |
+| REQ-STUDIO-LESSON | course delivery | signed immutable lesson shown in chat and chosen task inserted into draft without automatic execution | `protocol.ts`, `ChatPanel.tsx`, `worker/src/routes/authoring.ts` |
 | REQ-STUDIO-AUTH | token/profile | invalid tokens are classified; raw JSON is never exposed to members | `proxyClient.ts`, `worker/src/routes` |
 | REQ-STUDIO-CHAT | streaming chat | Korean response streams within timeout; retry/cancel/history behave predictably | `proxyClient.ts`, `chatPanelProvider.ts` |
 | REQ-STUDIO-PREVIEW | generated artifact | last HTML opens in sandboxed preview and writes workspace `index.html` | `previewProvider.ts`, `cspBuilder.ts` |

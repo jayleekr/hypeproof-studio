@@ -91,3 +91,12 @@ validation only. A product PR must update actual test paths and results.
 ## Chalk authoring surface slice (#712)
 
 `e2e/chalk-authoring/run.mjs` drives Chromium through Chalk HTTP forwarding to real Service routes and SQLite: Module draft import, form editing, save/reload, immutable version read, concurrent 409 with local edit preservation, 401/403 negative controls, mobile layout and no browser credential storage. Passed locally on Mac. This is instructor UI evidence, not student Electron or public deployment evidence. GitHub support links prepare a draft; receipt and assignment only exist after the instructor submits on GitHub.
+
+## Version delivery (#739)
+
+- T-08/T-09: `worker/test/authoring.test.mjs` exercises signed frozen-version delivery, owner/student/roster/duration denial, legacy-token compatibility, draft-versus-version separation, checksum rejection and revoked-token denial. Tool permissions remain identical.
+- `e2e/chalk-authoring/run.mjs` now executes instructor mint → student `/learn` via actual Service routing/SQLite; 375/390/768/1280/1440px, keyboard hint, cleared credentials, 401 and changed-identity clearing.
+- `e2e/lesson-studio/mac.mjs`: actual installed Mac shell with development extension, synthetic signed credential and local Service. This checks lesson display and explicit task insertion; it does not claim LLM completion or a shipped binary.
+- Session-wide model/tool pinning, automated readiness/rehearsal evidence, all ADM/AT/DT acceptance and Windows actual-device testing remain outside this slice. Issuing another credential does not revoke existing credentials or replace the session.
+
+Execution on 2026-09-07: Worker/Chalk full suites, both typechecks, extension smoke suite/typecheck, webview build, local authoring/classroom D1, instructor/student browser flow and the actual Mac 0.1.51 test-copy navigation passed. Mac initially failed with a stale/rejected development extension; bundle hash assertions now reject that setup. Evidence paths: `/tmp/lesson-*.log` and `e2e/test-results/{chalk-authoring,lesson-studio}/`. These are local results; production delivery and a released App containing the lesson panel are separate gates.

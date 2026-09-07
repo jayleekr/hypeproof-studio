@@ -567,6 +567,26 @@ export function ChatPanel(props: Props) {
 
       {updateBanner}
 
+      {config?.profile?.lesson && (
+        <details className="hps-lesson">
+          <summary>내 수업 · {config.profile.lesson.content.title}</summary>
+          <p>버전 {config.profile.lesson.version} · {config.profile.lesson.content.duration_minutes}분</p>
+          <p>{config.profile.lesson.content.objective}</p>
+          <p>준비: {config.profile.lesson.content.prerequisites || '별도 선수 조건 없음'}</p>
+          <p>시작 자료: {config.profile.lesson.content.starter}</p>
+          {config.profile.lesson.content.steps.map((step, index) => (
+            <section key={step.id}>
+              <h2>{index + 1}. {step.title}</h2>
+              <p>{step.instructions}</p>
+              <details><summary>힌트 보기</summary><p>{step.hint || '별도 힌트 없음'}</p></details>
+              <p>확인 기준: {step.acceptance}</p>
+              <button type="button" disabled={streaming} onClick={() => handleChip({style: 'good', text: `수업: ${config.profile!.lesson!.content.title} (${config.profile!.lesson!.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`})}>채팅에 과제 넣기</button>
+            </section>
+          ))}
+          <p>과제를 확인하고 채팅으로 요청하세요. 열람만으로 실습이 완료되지는 않습니다.</p>
+        </details>
+      )}
+
       <div className="hps-messages" ref={scrollRef}>
         {props.aiNotice && (
           // #320 — AI disclosure (Anthropic Usage Policy / ToS §D.3). Compact
