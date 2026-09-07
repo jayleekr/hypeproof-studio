@@ -39,7 +39,7 @@ test("REQ-C7: webview crash → fallback shown → reload restores chat", async 
       `--user-data-dir=${userDataDir}`,
       `--extensions-dir=${path.join(userDataDir, "extensions")}`,
       "--disable-workspace-trust",
-      "--password-store=basic",
+      "--use-inmemory-secretstorage",
       "--disable-updates",
       "--skip-welcome",
       "--skip-release-notes",

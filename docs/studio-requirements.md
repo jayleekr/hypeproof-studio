@@ -395,3 +395,17 @@ menus and shortcuts remain available; this is not removal of all editor function
 
 Tests: `test/shell-brand.smoke.mjs`, `test/start-page.smoke.mjs`, `e2e/start-page/run.mjs`,
 `e2e/tests/27-hp-shell.spec.ts`. Screens: `e2e/start-page/hp-shell-evidence/`.
+
+### Automated Mac credential isolation (#728)
+
+Temporary Electron test profiles use `--use-inmemory-secretstorage`. A distinct
+user-data-dir and `--password-store=basic` alone do not prevent macOS safeStorage
+from accessing the shared app keychain item. The memory-only switch short-circuits
+OS encryption initialization; it is limited to test/preview launchers. Production
+SecretStorage remains encrypted and release signing remains certificate-based.
+Existing ad-hoc app keychain grants may require one normal macOS approval when
+migrating to the certificate-signed app; the application cannot grant that itself.
+No login password, keychain deletion or ACL widening is part of the fix.
+
+Playwright output is kept under `test-results/playwright` so normal runs do not
+remove separately collected observation bundles in `test-results/`.

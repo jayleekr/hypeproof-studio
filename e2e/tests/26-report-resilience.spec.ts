@@ -97,7 +97,7 @@ async function launchAt(port: number): Promise<Ctx> {
     args: [
       `--user-data-dir=${userDataDir}`,
       `--extensions-dir=${path.join(userDataDir, "extensions")}`,
-      "--disable-workspace-trust", "--password-store=basic",
+      "--disable-workspace-trust", "--use-inmemory-secretstorage",
       "--disable-updates", "--skip-welcome", "--skip-release-notes",
       "--no-sandbox", wsDir,
     ],

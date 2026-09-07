@@ -214,7 +214,7 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
       `--user-data-dir=${userDataDir}`,
       `--extensions-dir=${path.join(userDataDir, "extensions")}`,
       "--disable-workspace-trust",
-      "--password-store=basic",       // secrets stored in user-data-dir, not keychain
+      "--use-inmemory-secretstorage", // test credentials never touch the OS keychain
       "--disable-updates",
       "--skip-welcome",
       "--skip-release-notes",
