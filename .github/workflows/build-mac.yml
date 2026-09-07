@@ -241,6 +241,7 @@ jobs:
           OUT_DIR="vscodium-base/VSCode-darwin-arm64"
           APP="$(cd "$OUT_DIR" && ls -d *.app | head -1)"
           [ -n "$APP" ] || { echo "::error::no .app in $OUT_DIR"; ls -la "$OUT_DIR"; exit 1; }
+          node scripts/install-shell-brand.mjs "$OUT_DIR/$APP/Contents/Resources/app/out/media"
           PLIST="$OUT_DIR/$APP/Contents/Info.plist"
           HPS_VER="${HPS_VERSION:-$(bash scripts/resolve-version.sh)}"
           if [ -n "$HPS_VER" ] && [ -f "$PLIST" ]; then

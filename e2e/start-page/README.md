@@ -71,3 +71,31 @@ Final local result: extension typecheck and complete smoke suite PASS; built UI
 browser controls PASS; all five Electron launch/auth specs PASS (15.1s). The first
 Electron attempt exposed the positional-folder fixture defect; the full five-spec
 selection was rerun after correcting it. No full L1–L5 rerun is claimed here.
+
+## HP shell follow-up (#725)
+
+The forest/lime brand now extends into the workbench. Configuration defaults hide
+inherited navigation chrome while preserving user overrides. The HP canvas remains
+behind chat, and even closing every editor shows the HP watermark instead of Codium.
+File/settings controls remain available in the entry header. The normal settings
+surface in the tested shell is a modal editor (confirmed from its live DOM); the
+Electron test closes its explicit “Close Modal Editor (Escape)” control.
+
+`hp-shell-evidence/` contains the actual Mac start/empty-editor screenshots and
+observed shell state. PASS: complete extension smoke/typecheck, responsive browser
+controls, workflow-shell check, real Electron `27-hp-shell` (3.7s). The shell test
+uses a local health-only mock and no token preseed; it makes no authentication/LLM
+claim. Earlier #724 authentication evidence above remains separate.
+
+For an existing isolated Mac app copy, inject the rebuilt extension and `media/`,
+then apply the asset-only overlay before starting it:
+
+```sh
+node scripts/install-shell-brand.mjs '/path/to/copy.app/Contents/Resources/app/out/media'
+```
+
+The build workflows apply the same assets before Mac signing and before Windows
+compilation. Their full build/signing/installer paths were not run locally. This
+script is not a whole-app build and must not modify a signed installed app in place.
+The root submodule and installed app were preserved; rollback of the preview is
+restoring the previous copied extension/media. A source rollback is a normal revert.

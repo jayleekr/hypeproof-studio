@@ -8,6 +8,8 @@ export interface StartState {
 }
 export type StartRequest =
   | { type: "startReady" }
+  | { type: "openStudioFiles" }
+  | { type: "openStudioSettings" }
   | { type: "connectCourse"; token: string }
   | { type: "beginCourse" }
   | { type: "disconnectCourse" }

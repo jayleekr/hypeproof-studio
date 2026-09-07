@@ -13,6 +13,8 @@ try {
  const p=await browser.newPage({viewport:{width:1280,height:900}});const errors=[];p.on('pageerror',e=>errors.push(e.message));
  await p.addInitScript(()=>{window.sent=[];window.acquireVsCodeApi=()=>({postMessage:m=>{window.sent.push(m);if(m.type==='startReady')setTimeout(()=>window.dispatchEvent(new MessageEvent('message',{data:{type:'startState',state:{checking:false,version:'test'}}})),0);},getState:()=>undefined,setState:()=>{throw Error('credential state persistence forbidden');}});});
  await p.goto(`http://127.0.0.1:${server.address().port}`);await p.getByRole('heading',{name:'내 수업에 연결하기'}).waitFor();
+ await p.getByRole('button',{name:'파일',exact:true}).click();assert.equal(await p.evaluate(()=>window.sent.at(-1).type),'openStudioFiles');
+ await p.getByRole('button',{name:'설정',exact:true}).click();assert.equal(await p.evaluate(()=>window.sent.at(-1).type),'openStudioSettings');
  assert.equal(await p.getByText('나비',{exact:true}).count(),0);assert.equal(await p.locator('#course-code').getAttribute('type'),'password');
  const submit=p.getByRole('button',{name:'수업 확인하기'});assert.equal(await submit.isDisabled(),true);
  await p.locator('#course-code').fill('synthetic-not-a-secret');await submit.click();assert.equal(await p.locator('#course-code').inputValue(),'');

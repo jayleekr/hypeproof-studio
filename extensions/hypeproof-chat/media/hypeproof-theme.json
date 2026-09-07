@@ -1,0 +1,98 @@
+{
+  "$schema": "vscode://schemas/color-theme",
+  "name": "HypeProof Studio",
+  "type": "dark",
+  "colors": {
+    "foreground": "#F2F4E8",
+    "focusBorder": "#D5F279",
+    "selection.background": "#52603F",
+    "widget.border": "#35483A",
+    "editor.background": "#151D19",
+    "editor.foreground": "#F2F4E8",
+    "editorCursor.foreground": "#D5F279",
+    "editor.selectionBackground": "#405631",
+    "editor.lineHighlightBackground": "#202C24",
+    "editorLineNumber.foreground": "#73836E",
+    "editorGroupHeader.tabsBackground": "#151D19",
+    "editorGroup.border": "#35483A",
+    "tab.activeBackground": "#202C24",
+    "tab.activeForeground": "#F2F4E8",
+    "tab.inactiveBackground": "#151D19",
+    "tab.inactiveForeground": "#ACB9A5",
+    "tab.border": "#151D19",
+    "tab.activeBorderTop": "#D5F279",
+    "titleBar.activeBackground": "#151D19",
+    "titleBar.inactiveBackground": "#151D19",
+    "titleBar.activeForeground": "#ACB9A5",
+    "titleBar.inactiveForeground": "#73836E",
+    "titleBar.border": "#151D19",
+    "sideBar.background": "#18231C",
+    "sideBar.foreground": "#F2F4E8",
+    "sideBar.border": "#35483A",
+    "sideBarSectionHeader.background": "#202C24",
+    "panel.background": "#151D19",
+    "panel.border": "#35483A",
+    "statusBar.background": "#18231C",
+    "statusBar.foreground": "#ACB9A5",
+    "activityBar.background": "#151D19",
+    "activityBar.foreground": "#D5F279",
+    "button.background": "#D5F279",
+    "button.foreground": "#18231C",
+    "button.hoverBackground": "#E2FF92",
+    "button.secondaryBackground": "#2C3C2B",
+    "button.secondaryForeground": "#F2F4E8",
+    "input.background": "#18231C",
+    "input.foreground": "#F2F4E8",
+    "input.border": "#526448",
+    "input.placeholderForeground": "#ACB9A5",
+    "dropdown.background": "#202C24",
+    "dropdown.foreground": "#F2F4E8",
+    "list.activeSelectionBackground": "#354B2E",
+    "list.activeSelectionForeground": "#F2F4E8",
+    "list.hoverBackground": "#253526",
+    "textLink.foreground": "#D5F279",
+    "textLink.activeForeground": "#E2FF92",
+    "notifications.background": "#202C24",
+    "notifications.foreground": "#F2F4E8",
+    "badge.background": "#D5F279",
+    "badge.foreground": "#18231C",
+    "progressBar.background": "#D5F279",
+    "quickInput.background": "#202C24",
+    "terminal.background": "#151D19"
+  },
+  "tokenColors": [
+    {
+      "scope": [
+        "comment"
+      ],
+      "settings": {
+        "foreground": "#91A184"
+      }
+    },
+    {
+      "scope": [
+        "keyword",
+        "storage"
+      ],
+      "settings": {
+        "foreground": "#D5F279"
+      }
+    },
+    {
+      "scope": [
+        "string"
+      ],
+      "settings": {
+        "foreground": "#E4BC89"
+      }
+    },
+    {
+      "scope": [
+        "entity.name.function"
+      ],
+      "settings": {
+        "foreground": "#BBDCC7"
+      }
+    }
+  ]
+}
