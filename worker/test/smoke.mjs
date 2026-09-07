@@ -1880,7 +1880,18 @@ const TINY_PNG =
           `profile ${p.id}: sdk_tools.write=true 인데 coach_runtime 이 agent-sdk 가 아니다`,
         );
       }
-      assert.notEqual(p.sdk_tools?.browser, true, `profile ${p.id}: sdk_tools.browser reserved for the adult copyclone cohort in Phase 2`);
+      if (p.id === 'homepage-practice-s1') {
+        assert.ok(p.audience.age_range[0] >= 19);
+        assert.equal(p.audience.parent_coaching, false);
+        assert.equal(p.session.cohort_id, 'homepage-practice');
+        assert.notEqual(p.sandbox.workspace_root, copyclone.sandbox.workspace_root);
+        assert.equal(p.analytics.log_user_messages, false);
+        assert.equal(p.analytics.upload_session_logs, false);
+        assert.equal(p.publishing.enabled, false);
+        assert.ok(!p.skills.includes('publish-homepage'));
+      } else {
+        assert.notEqual(p.sdk_tools?.browser, true, `profile ${p.id}: sdk_tools.browser reserved for explicitly opted-in adult website tracks`);
+      }
       assert.notEqual(p.sdk_tools?.subagents, true, `profile ${p.id}: sdk_tools.subagents reserved for the adult copyclone cohort in P2 slice 3`);
     }
   }
