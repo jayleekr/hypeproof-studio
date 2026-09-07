@@ -325,37 +325,45 @@ export async function activate(context: vscode.ExtensionContext) {
     // here. checkForUpdates is also exposed as a command so the user can
     // manually trigger a check (Cmd+Shift+P).
     vscode.commands.registerCommand("hypeproof-chat.checkForUpdates", async () => {
-      const current = currentBundleVersion();
-      const info = await checkForUpdates(current);
-      if (info.available) {
-        provider.setAvailableUpdate({
-          version: info.version,
-          notes: info.notes,
-          releaseUrl: info.releaseUrl,
-          sizeBytes: info.sizeBytes,
-        });
-        vscode.window.showInformationMessage(
-          `새 버전 v${info.version} 발견. 채팅 패널 상단의 배너에서 설치할 수 있어요.`,
-        );
-      } else {
-        provider.setAvailableUpdate(null);
-        vscode.window.showInformationMessage(`현재 v${current} — 최신 버전입니다.`);
+      try {
+        const current = currentBundleVersion();
+        const info = await checkForUpdates(current);
+        if (info.available) {
+          provider.setAvailableUpdate({
+            version: info.version,
+            notes: info.notes,
+            releaseUrl: info.releaseUrl,
+            sizeBytes: info.sizeBytes,
+          });
+          vscode.window.showInformationMessage(
+            `새 버전 v${info.version} 발견. 채팅 패널 상단의 배너에서 설치할 수 있어요.`,
+          );
+        } else {
+          provider.setAvailableUpdate(null);
+          vscode.window.showInformationMessage(`현재 v${current} — 최신 버전입니다.`);
+        }
+      } catch (error) {
+        vscode.window.showWarningMessage(`업데이트를 확인하지 못했습니다. 잠시 후 다시 시도해주세요. ${(error as Error).message}`);
       }
     }),
 
     vscode.commands.registerCommand("hypeproof-chat.installUpdate", async () => {
-      // Re-fetch to be safe (the stored banner state might be stale).
-      const current = currentBundleVersion();
-      const info = await checkForUpdates(current);
-      if (!info.available) {
-        provider.setAvailableUpdate(null);
-        vscode.window.showInformationMessage("최신 버전이라 업데이트 안 해도 됩니다.");
-        return;
+      try {
+        // Re-fetch to be safe (the stored banner state might be stale).
+        const current = currentBundleVersion();
+        const info = await checkForUpdates(current);
+        if (!info.available) {
+          provider.setAvailableUpdate(null);
+          vscode.window.showInformationMessage("최신 버전이라 업데이트 안 해도 됩니다.");
+          return;
+        }
+        await runUpdate(info, {
+          context,
+          onUpdateScheduled: () => provider.setAvailableUpdate(null),
+        });
+      } catch (error) {
+        vscode.window.showErrorMessage(`업데이트를 완료하지 못했습니다. 현재 앱은 종료하지 않습니다. ${(error as Error).message}`);
       }
-      await runUpdate(info, {
-        context,
-        onUpdateScheduled: () => provider.setAvailableUpdate(null),
-      });
     }),
 
     vscode.commands.registerCommand("hypeproof-chat.dismissUpdate", async (version: string) => {
