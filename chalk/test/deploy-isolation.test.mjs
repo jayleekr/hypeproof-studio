@@ -61,7 +61,11 @@ assert.match(chalkWf, /Service version unchanged/, "the workflow observes the li
 assert.match(chalkWf, /\/v1\/health/, "…by reading GET /v1/health, task C's identifier");
 
 const workerWf = stripComments(read(".github/workflows/deploy-worker.yml"));
-assert.ok(!/chalk/i.test(workerWf), "deploy-worker.yml knows nothing of chalk");
+const serviceOnly = y => !/HPS_CHALK_VERSION|working-directory:\s*["']?chalk\b|(?:--cwd|--config)\s+["']?chalk\//i.test(y);
+assert.ok(serviceOnly(workerWf), "Service workflow never targets the Chalk artifact; a Service migration may be named chalk-authoring");
+assert.ok(serviceOnly('working-directory: worker\nrun: npx wrangler d1 execute db --file=migrations/0002-chalk-authoring.sql'));
+assert.equal(serviceOnly('working-directory: chalk\nrun: npx wrangler deploy'), false);
+assert.equal(serviceOnly('run: npx wrangler deploy --config chalk/wrangler.toml'), false);
 assert.ok(!/^\s*tags:/m.test(workerWf), "deploy-worker.yml has no tag trigger at all (dispatch only) — a c* tag cannot start it");
 
 // No other tag-triggered workflow can be started by a c* tag.

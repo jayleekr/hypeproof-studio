@@ -19,6 +19,17 @@ try {
  page.on('dialog',d=>d.accept());const errors=[];page.on('pageerror',e=>errors.push(e.message));
  const connect=async(p,token=local.token)=>{await p.goto(origin+'/authoring');await p.locator('#token').fill(token);await p.locator('#cohort').fill(local.cohort);await p.locator('#profile').fill(local.profileId);};
  const wait=async(text)=>{await page.locator('#status').filter({hasText:text}).waitFor();};
+ await page.goto(origin+'/start');
+ await page.getByRole('heading',{name:'첫 강의 준비하기'}).waitFor();
+ for(const width of [390,1280]){
+  await page.setViewportSize({width,height:844});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+  const guideOut=process.env.HPS_CHALK_AUTHORING_OUT||'test-results/chalk-authoring';mkdirSync(guideOut,{recursive:true});
+  await page.screenshot({path:guideOut+'/instructor-start-'+width+'.png',fullPage:true});
+ }
+ await page.getByRole('navigation').getByRole('link',{name:'수업 작성',exact:true}).click();
+ assert.ok(page.url().endsWith('/authoring'));
+ await page.setViewportSize({width:390,height:844});
  await connect(page);await page.locator('#import').setInputFiles(new URL('../../docs/curriculum/dental-ownership/generated/drafts.json',import.meta.url).pathname);await wait('강의를 선택한 뒤');await page.locator('#courses').selectOption('0');
  await page.locator('#title').fill('합성 강사 수정 제목');await page.locator('#save').click();await wait('저장했습니다. revision 1');
  await page.locator('#version').fill('m2026.09.06-1');await page.locator('#freeze').click();await wait('불변 버전을 저장');assert.match(await page.locator('#version-view').innerText(),/합성 강사 수정 제목/);

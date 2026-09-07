@@ -9,7 +9,14 @@ const mf = new Miniflare({modules:true,script:'export default {fetch(){return ne
 try {
  const app=await bootApp();const db=await mf.getD1Database('HPS_DB');
  const migration=readFileSync(new URL('../migrations/0002-chalk-authoring.sql',import.meta.url),'utf8').replace(/^--.*$/gm,'');
- for(const statement of migration.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+ // Both first deployment and repeat deployment must preserve course storage.
+ for(let pass=0;pass<2;pass++)for(const statement of migration.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+ const workflow=readFileSync(new URL('../../.github/workflows/deploy-worker.yml',import.meta.url),'utf8');
+ const freeze=workflow.indexOf('id: freeze');
+ const authoring=workflow.indexOf('--file=migrations/0002-chalk-authoring.sql');
+ const sharing=workflow.indexOf('--file=migrations/0003-classroom-sharing.sql');
+ const deploy=workflow.indexOf('- name: Deploy Worker');
+ assert.ok(freeze>=0&&authoring>freeze&&sharing>authoring&&deploy>sharing,'freeze → authoring → sharing → deploy');
  const env=createMockEnv({env:{HPS_DB:db}});
  const {issueIssuer}=await import('../src/lib/tokens.ts');
  const {listProfiles}=await import('../src/profiles/index.ts');
