@@ -37,7 +37,7 @@ function resolveAppBinary(): string {
 
 export const APP_BINARY = resolveAppBinary();
 
-export const TOKEN_FILE = "/tmp/hps-token.txt";
+export const TOKEN_FILE = process.env.HPS_E2E_TOKEN_FILE || "/tmp/hps-token.txt";
 
 export default async function globalSetup() {
   const errors: string[] = [];

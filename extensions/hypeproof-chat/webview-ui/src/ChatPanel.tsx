@@ -1,3 +1,4 @@
+import { DisconnectedChat } from "./StartPage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatConfig,
@@ -405,6 +406,7 @@ export function ChatPanel(props: Props) {
   //
   // 새 훅이 필요하면 이 블록 **위**에 추가한다.
   // ─────────────────────────────────────────────────────────────────────────
+  if (!config?.profile) return <DisconnectedChat open={props.onSetToken} />;
   if ((needsNaming || forceNaming) && config?.profile) {
     return (
       <NamingCard
@@ -526,7 +528,7 @@ export function ChatPanel(props: Props) {
         <div className="hps-shell-drop-overlay">여기에 놓으면 이미지가 첨부돼요 🖼</div>
       )}
       <header className="hps-header">
-        <strong title="이 친구 이름 바꾸기" onClick={() => setForceNaming(true)} className="hps-coach-name">
+        <strong title={ux.coach.naming_mode === "fixed" ? "이 수업의 코치" : "코치 이름 바꾸기"} onClick={() => { if (ux.coach.naming_mode !== "fixed") setForceNaming(true); }} className="hps-coach-name">
           {coachName}
         </strong>
         <div className="hps-actions">
@@ -549,8 +551,8 @@ export function ChatPanel(props: Props) {
                   : "🖼️ 갤러리"}
             </button>
           )}
-          <button onClick={props.onSetToken} title="Workshop token">
-            {config?.hasToken ? "Token ✓" : "Token"}
+          <button onClick={props.onSetToken} title="연결된 수업 확인 및 변경">
+            수업 연결
           </button>
           <button onClick={props.onClear} title="Clear conversation">Clear</button>
           <button onClick={props.onSettings} title="Open settings">⚙</button>

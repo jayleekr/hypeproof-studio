@@ -112,6 +112,11 @@
         "command": "hypeproof-chat.previewViewport",
         "title": "HypeProof: 미리보기 화면 크기",
         "icon": "$(device-mobile)"
+      },
+      {
+        "command": "hypeproof-chat.start",
+        "title": "HypeProof: 시작 화면",
+        "icon": "$(home)"
       }
     ],
     "menus": {

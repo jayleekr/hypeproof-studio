@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import { StartPage } from "./startPage";
 import { ChatPanelProvider } from "./chatPanelProvider";
 import { AssetStatusBar } from "./assetStatusBar";
 import {
@@ -9,9 +10,6 @@ import {
   appToneOf,
   TONE_LABELS,
   extractCohortIdUnverified,
-  sanitizeWorkshopToken,
-  looksLikeWorkshopToken,
-  looksLikeIssuerTokenUnverified,
   coachKeyForCohort,
   coachRitualDoneKeyForCohort,
   historyKeyForCohort,
@@ -19,7 +17,6 @@ import {
   LEGACY_COACH_RITUAL_DONE_KEY,
   LEGACY_HISTORY_KEY,
 } from "./chatPanelHelpers";
-import { PROFILE_ISSUER_TOKEN_FRIENDLY } from "./proxyClientHelpers";
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
 import { runMintStudentToken, ISSUER_TOKEN_KEY } from "./mintStudentToken";
@@ -44,16 +41,8 @@ let providerRef: ChatPanelProvider | null = null;
 let uploadInFlight = false;
 
 export async function activate(context: vscode.ExtensionContext) {
-  // Kill kid-hostile modals globally + persistently, regardless of whether a
-  // folder is already open this session. The setting lands in settings.json
-  // so every future launch is dialog-free. (Can't suppress the dialog for the
-  // current session if the folder opened before we activated, but it's a
-  // one-time click then never again.)
-  try {
-    await vscode.workspace
-      .getConfiguration("security.workspace.trust")
-      .update("enabled", false, vscode.ConfigurationTarget.Global);
-  } catch { /* ignore: read-only profile */ }
+  // Respect the existing workspace-trust setting. Changing it on activation
+  // forced a restart dialog over the first-run page.
 
   // Test-only backdoors. Reads from env vars (which Playwright may not always
   // propagate to the extension host) AND a JSON file in the user-data-dir as
@@ -131,6 +120,10 @@ export async function activate(context: vscode.ExtensionContext) {
   }
   const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus, spool);
   providerRef = provider;
+  const startPage = new StartPage(context, provider, async profile => {
+    return ensureWorkspace(profile, context, isTestRun);
+  });
+  context.subscriptions.push(vscode.commands.registerCommand("hypeproof-chat.start", () => startPage.show()));
   // kids-quest — skeleton round result → next-turn context for the coach.
   context.subscriptions.push(preview.onResult((r) => provider.attachQuestResult(r)));
 
@@ -241,88 +234,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
     }),
 
-    vscode.commands.registerCommand("hypeproof-chat.setToken", async () => {
-      const token = await vscode.window.showInputBox({
-        title: "선생님께 받은 토큰을 넣어주세요",
-        prompt: "Workshop token",
-        password: true,
-        ignoreFocusOut: true,
-        placeHolder: "eyJ... 로 시작하는 긴 문자열",
-      });
-      if (token === undefined) return;
-      // #427 — accept the token in whatever packaging it arrived in ("이름: 토큰"
-      // from the console's bulk copy, "Bearer …", a hard-wrapped relay). The old
-      // bare trim() left the packaging in place and the paste 401'd silently,
-      // with `password: true` hiding the evidence.
-      const clean = sanitizeWorkshopToken(token);
-      if (clean === "") {
-        await context.secrets.delete(TOKEN_KEY);
-        vscode.window.showInformationMessage("HypeProof Chat: token cleared.");
-        provider.invalidateProfile();
-        provider.refreshConfig();
-        return;
-      }
-      // #381 — an instructor token in the participant box is decidable offline
-      // (payload carries role: "issuer"). Say so BEFORE storing it and before
-      // the round trip: storing would leave the panel showing "Token ✓" for a
-      // token that can never chat. Diagnosis only — the shape check below is
-      // what all other tokens fall through to, and the server still decides.
-      if (looksLikeIssuerTokenUnverified(clean)) {
-        const retry = await vscode.window.showWarningMessage(
-          PROFILE_ISSUER_TOKEN_FRIENDLY,
-          "다시 입력",
-        );
-        if (retry === "다시 입력") {
-          await vscode.commands.executeCommand("hypeproof-chat.setToken");
-        }
-        return;
-      }
-      await context.secrets.store(TOKEN_KEY, clean);
-      provider.invalidateProfile();
-      // Re-fetch profile with the new token. The coach naming step is driven
-      // by the in-panel card (kid-friendly) — NOT a system input box. Once
-      // profile is fetched and pushed via postConfig, the webview shows the
-      // naming card itself when coach.configured is false. Do not call
-      // runCoachNamingRitual() here (it would block on a quickInput and
-      // prevent postConfig from reaching the webview).
-      const profile = await provider.ensureProfile();
-      if (profile) {
-        const tail = labelsForProfile(profile).tokenConfirmTail;
-        vscode.window.showInformationMessage(`토큰 확인 완료! ${tail}`);
-        // #422 — first launch has no workspace yet (we no longer create one
-        // before the cohort is known). Now that the profile resolved, open the
-        // cohort's folder (website vs game). If one is already open, no-op.
-        // NOTE: this may reload the window; refreshConfig below still runs for
-        // the already-open case.
-        if (await ensureWorkspace(profile, context, isTestRun)) {
-          return; // window is reloading; post-reload activation continues onboarding
-        }
-      } else {
-        // #427 — a rejected token used to be a dead end: the toast fired and the
-        // input box never came back, so the only way to retry was to know about
-        // the panel's Token button or the command palette entry. Hand the retry
-        // back directly. The user drives the loop, so it cannot spin.
-        provider.refreshConfig();
-        // Name the actual cause instead of one generic line. Precedence:
-        //   1. shape mismatch — decided locally, can only be a paste problem
-        //   2. the server's own answer (#381) — expired / instructor token /
-        //      unknown 회차 / server down / unreachable, each with its own copy
-        //   3. nothing to go on (no failure recorded) — say only that much
-        // Diagnosis only — never a gate, so a future token format can't be
-        // false-rejected client-side (the server decides).
-        const failure = provider.profileFailure();
-        const message = !looksLikeWorkshopToken(clean)
-          ? "붙여넣은 값이 토큰 형식이 아니에요. 이름이나 따옴표가 섞이지 않았는지 확인하고, eyJ… 로 시작하는 부분만 넣어주세요."
-          : (failure?.friendly ??
-            "토큰이 확인되지 않았어요. 선생님께 새 토큰을 받아주세요.");
-        const retry = await vscode.window.showWarningMessage(message, "다시 입력");
-        if (retry === "다시 입력") {
-          await vscode.commands.executeCommand("hypeproof-chat.setToken");
-        }
-        return;
-      }
-      provider.refreshConfig();
-    }),
+    vscode.commands.registerCommand("hypeproof-chat.setToken", () => startPage.show()),
 
     vscode.commands.registerCommand("hypeproof-chat.runLastCode", async () => {
       const html = provider.extractLastRenderableCode();
@@ -555,9 +467,8 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  // Auto-onboarding: close the default welcome editor, focus the chat panel,
-  // prompt for a token if none stored, then prompt for coach name.
-  void autoOnboard(context, provider, isTestRun);
+  // The start surface owns connection and explicit course entry.
+  void startPage.show();
 
   // E2E backdoor for REQ-E1/E2 manual-approve modal. Fires a synthetic
   // actionRequest after the panel mounts and writes the approve/deny result
@@ -606,76 +517,6 @@ async function maybeSynthesizeTestAction(
       JSON.stringify({ error: (err as Error).message, ts: Date.now() }),
     );
   }
-}
-
-const FIRST_RUN_KEY = "hypeproofChat.didFirstRun";
-
-async function autoOnboard(
-  context: vscode.ExtensionContext,
-  provider: ChatPanelProvider,
-  isTestRun: boolean,
-): Promise<void> {
-  // 0. The workspace folder is now cohort-driven (#422): it is created/opened
-  //    only AFTER the profile is resolved, so its name + starter match the
-  //    cohort (website vs game). That happens in the token paths below and in
-  //    the setToken success handler. We no longer create a hardcoded folder
-  //    here before we know the cohort.
-
-  const isFirstRun = !context.globalState.get<boolean>(FIRST_RUN_KEY);
-
-  if (isFirstRun) {
-    try {
-      await vscode.workspace
-        .getConfiguration("workbench")
-        .update("startupEditor", "none", vscode.ConfigurationTarget.Global);
-    } catch { /* ignore */ }
-    try {
-      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
-    } catch { /* ignore */ }
-    await context.globalState.update(FIRST_RUN_KEY, true);
-  }
-
-  // Reveal the chat container.
-  try {
-    await vscode.commands.executeCommand("workbench.view.extension.hypeproof-chat");
-    await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
-  } catch { /* ignore */ }
-
-  // 1. Token (if missing) — setToken itself re-fetches profile + runs the
-  //    naming ritual on success, so we can return early here.
-  const existing = await context.secrets.get(TOKEN_KEY);
-  if (!existing) {
-    await new Promise((r) => setTimeout(r, 400));
-    await vscode.commands.executeCommand("hypeproof-chat.setToken");
-    return;
-  }
-
-  // 2. Token exists — verify it actually works. A stale/expired token would
-  //    otherwise silently degrade the whole UX (no chips, no naming, default
-  //    "코치", raw 401 on first message). REQ-A5 / REQ-B3: show a friendly
-  //    warning toast so the kid knows what happened before the QuickInput
-  //    pops, then re-open setToken.
-  const profile = await provider.ensureProfile();
-  if (!profile) {
-    vscode.window.showWarningMessage(
-      "저장된 토큰이 유효하지 않은 것 같아요. 선생님께 토큰을 다시 받아주세요. 🔑",
-    );
-    await new Promise((r) => setTimeout(r, 400));
-    await vscode.commands.executeCommand("hypeproof-chat.setToken");
-    return;
-  }
-
-  // 3. Profile is valid — open the cohort's workspace folder (#422). If a
-  //    folder is already open this is a no-op; otherwise it opens the
-  //    profile-specified folder and the window reloads (post-reload activation
-  //    finds the folder open and skips it).
-  if (await ensureWorkspace(profile, context, isTestRun)) {
-    return; // window is reloading
-  }
-
-  // 4. Coach naming is now driven by an in-panel card (kid-friendly), not a
-  //    system input box. The webview shows it when coach.configured is false
-  //    and the profile requests user_names_it. Nothing to do here.
 }
 
 // Legacy fallback folder — used only when the profile carries no (or an
@@ -873,18 +714,6 @@ async function openWorkspaceFolder(
   dir: string,
   profile?: ResolvedProfile | null,
 ): Promise<boolean> {
-  // Disable the "Do you trust the authors of this folder?" modal BEFORE
-  // opening the folder. It's auto-created by us; a learner should never
-  // see a scary security dialog. Persisted to global settings so it sticks.
-  try {
-    await vscode.workspace
-      .getConfiguration("security.workspace.trust")
-      .update("enabled", false, vscode.ConfigurationTarget.Global);
-    await vscode.workspace
-      .getConfiguration("workbench")
-      .update("startupEditor", "none", vscode.ConfigurationTarget.Global);
-  } catch { /* ignore: read-only profile */ }
-
   try {
     fs.mkdirSync(dir, { recursive: true });
     const indexPath = path.join(dir, "index.html");
