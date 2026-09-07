@@ -99,6 +99,15 @@ export interface CoachInfo {
  * sides updated together.
  */
 export interface ResolvedProfile {
+  /** Immutable teaching content; capability policy remains in the profile. */
+  lesson?: {
+    course_id: string; version: string; sha256: string;
+    content: {
+      schema: 'hps-session-design/1'; title: string; audience: string;
+      duration_minutes: number; objective: string; prerequisites: string; starter: string;
+      steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string }>;
+    };
+  };
   profile_id: string;
   display_name: string;
   language: "ko" | "en";

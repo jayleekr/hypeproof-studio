@@ -1100,3 +1100,9 @@ html, body, #root {
   outline: 2px solid var(--vscode-focusBorder, #5b9bff);
   outline-offset: 1px;
 }
+.hps-lesson { margin: 8px 12px; padding: 12px; border: 1px solid var(--vscode-panel-border, #777); border-radius: 8px; font-size: 16px; max-height: 45vh; overflow: auto; flex-shrink: 0; }
+.hps-lesson p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.hps-lesson h2 { font-size: 22px; }
+.hps-lesson summary, .hps-lesson button { min-height: 44px; cursor: pointer; padding: 10px 4px; }
+.hps-lesson section { border-top: 1px solid var(--vscode-panel-border, #777); margin-top: 12px; }
+.hps-lesson :focus-visible { outline: 2px solid var(--vscode-focusBorder, #d6f59d); outline-offset: 2px; }

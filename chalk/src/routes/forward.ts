@@ -28,7 +28,8 @@ export async function forwardInstructorWrite(c: Ctx): Promise<Response> {
   const method = c.req.method.toUpperCase();
 
   const studentShare = (method === 'GET' && /^\/v1\/classroom\/shares(?:\/[^/]+\/audit)?$/.test(url.pathname)) || (method === 'POST' && /^\/v1\/classroom\/shares(?:\/[^/]+\/confirm)?$/.test(url.pathname)) || (method === 'DELETE' && /^\/v1\/classroom\/shares\/[^/]+$/.test(url.pathname));
-  if (!isIssuerAllowedEndpoint(url.pathname, method) && !studentShare) {
+  const studentProfile = method === 'GET' && url.pathname === '/v1/profile';
+  if (!isIssuerAllowedEndpoint(url.pathname, method) && !studentShare && !studentProfile) {
     return c.json(
       { error: { type: "not_found", message: "not an instructor endpoint", request_id: rid, path: url.pathname } },
       404,

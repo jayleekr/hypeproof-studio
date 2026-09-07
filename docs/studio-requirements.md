@@ -421,3 +421,9 @@ remove separately collected observation bundles in `test-results/`.
 [강사·관리자 요구사항](requirements/classroom-admin.md)은 ADM-01~14와 별도 선택적 공유 계약을 정의한다.
 [디자인 기준](requirements/classroom-design.md), [인수 테스트](testing/classroom-admin.md)를 함께 따른다.
 기존 metadata board와 operator-only 로그 조회 권한을 확대하지 않는다. 개별 구현 범위는 해당 문서의 상태표를 따른다.
+
+## Chalk lesson delivery
+
+| ID | Behavior | Acceptance / evidence |
+|---|---|---|
+| REQ-STUDIO-LESSON | Display the Service-resolved immutable lesson in the start page and chat; insert the selected task and acceptance criteria into the editable composer only on user action. | `worker/test/authoring.test.mjs`, `e2e/chalk-authoring/run.mjs`, `e2e/lesson-studio/mac.mjs`. No automatic task execution or policy grant. Legacy credentials show the existing profile. |

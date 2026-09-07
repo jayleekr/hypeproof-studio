@@ -21,7 +21,7 @@ try {
  const {issueIssuer}=await import('../src/lib/tokens.ts');
  const {listProfiles}=await import('../src/profiles/index.ts');
  const p=listProfiles().find(p=>p.session.cohort_id==='boah-dental-2026-a');
- const {token}=await issueIssuer({issuer:'d1-test',scopes:[{cohort:p.session.cohort_id,profiles:[p.id]}]},1,TEST_SECRET);
+ const {token}=await issueIssuer({issuer:'d1-test',scopes:[{cohort:p.session.cohort_id,profiles:[p.id]}]},48,TEST_SECRET);
  const path=`/admin/cohorts/${p.session.cohort_id}/authoring/d1-course`;
  const content={schema:'hps-session-design/1',title:'Website',audience:'Adults',duration_minutes:120,objective:'Edit',prerequisites:'',starter:'Static site',steps:[{id:'one',title:'Edit',instructions:'Edit hours',hint:'',acceptance:'Check mobile'}]};
  async function call(suffix='',method='GET',body){
@@ -36,5 +36,10 @@ try {
  assert.equal((await call('','PUT',save(2,'next'))).status,200);
  assert.deepEqual((await call('/versions/m2026.09.06-1')).body,frozen.body);
  assert.equal((await call('/versions/m2026.09.06-1','PUT',{expected_revision:3})).status,409);
+ const {setRoster,startSession}=await import('../src/lib/kv.ts');
+ await setRoster(env.HPS_KV,p.session.cohort_id,['synthetic-d1-student']);
+ await startSession(env.HPS_KV,p.session.cohort_id,{session_id:'synthetic-d1',profile_id:p.id,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()});
+ const delivered=await call('/versions/m2026.09.06-1/participants','POST',{user:'synthetic-d1-student',hours:1});assert.equal(delivered.status,200);
+ const response=await app.fetch(new Request('https://local.test/v1/profile',{headers:{authorization:'Bearer '+delivered.body.token}}),env,makeCtx());assert.equal(response.status,200);assert.deepEqual((await response.json()).lesson.content,content);
  console.log('PASS local workerd/D1: migration, create, concurrent CAS, immutable version, reopen, overwrite rejection');
 } finally { await mf.dispose(); }

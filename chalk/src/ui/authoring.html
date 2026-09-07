@@ -30,6 +30,12 @@
 <fieldset><legend>불변 버전</legend><label>버전 이름<input id="version" placeholder="m2026.09.06-1"></label>
 <button id="freeze" disabled>현재 저장본 버전 고정</button><button id="version-load">버전 확인</button>
 <pre id="version-view" aria-live="polite"></pre></fieldset>
+<fieldset><legend>학생에게 전달</legend>
+<p>세션 콘솔에서 연습 세션을 열고 학생을 등록한 뒤 발급하세요. 위에 입력한 확정 버전에 연결됩니다. 기존 참여 코드와 진행 중 수업은 바뀌지 않습니다.</p>
+<label>등록된 학생 ID<input id="student" autocomplete="off"></label><label>코드 유효 시간<input id="hours" type="number" min="1" max="24" value="4"></label>
+<button id="deliver">이 버전 참여 코드 발급</button><label>발급된 학생 참여 코드<input id="student-token" type="password" readonly autocomplete="off"></label><button id="copy-student">참여 코드 복사</button><button id="clear-student">발급 코드 지우기</button>
+<p id="delivery-status" role="status">미발급</p><a href="/learn" target="_blank" rel="noopener">학생 수업 화면에서 확인</a>
+</fieldset>
 <fieldset id="support"><legend>기능·지원 요청</legend>
 <label>작업 목적<textarea id="need"></textarea></label><label>필요 날짜<input id="needed" type="date"></label>
 <label>참고 링크<input id="reference" type="url" placeholder="https://…"></label>
@@ -42,7 +48,7 @@ const fields=['title','audience','duration_minutes','objective','prerequisites',
 let revision=null,bound=null,dirty=false,busy=false,pending=null,batch=[];
 const identity=()=>JSON.stringify(['cohort','profile','course'].map(k=>$(k).value.trim()));
 const status=text=>{$('status').textContent=text;};
-function controls(){const valid=bound===identity()&&revision!==null&&!busy;$('save').disabled=!valid;$('freeze').disabled=!valid||dirty||revision<1;for(const id of ['load','new','import','courses','version-load','token','cohort','profile','course','version','forget'])$(id).disabled=busy;document.querySelector('#editor fieldset').disabled=busy;}
+function controls(){const valid=bound===identity()&&revision!==null&&!busy;$('save').disabled=!valid;$('freeze').disabled=!valid||dirty||revision<1;for(const id of ['load','new','import','courses','version-load','token','cohort','profile','course','version','forget','deliver','student','hours'])$(id).disabled=busy;document.querySelector('#editor fieldset').disabled=busy;}
 function changed(){dirty=true;controls();}
 function discard(){return !dirty||confirm('저장하지 않은 편집을 바꿀까요? 필요한 내용은 먼저 내보내세요.');}
 function scope(){for(const k of ['cohort','profile','course'])if(!/^[a-zA-Z0-9_-]{1,128}$/.test($(k).value.trim()))throw Error('코호트·프로필·수업 ID를 확인하세요.');if(!$('token').value.trim())throw Error('강사 토큰을 입력하세요.');return '/admin/cohorts/'+encodeURIComponent($('cohort').value.trim())+'/authoring/'+encodeURIComponent($('course').value.trim());}
@@ -51,9 +57,13 @@ function content(){return {schema:'hps-session-design/1',...Object.fromEntries(f
 function render(c){for(const k of fields)$(k).value=c[k]??(k==='duration_minutes'?120:'');$('steps').replaceChildren();for(const s of c.steps||[])step(s);}
 async function call(path,method='GET',body){const r=await fetch(path,{method,redirect:'error',headers:{authorization:'Bearer '+$('token').value.trim(),'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const j=await r.json();if(!r.ok){const detail=typeof j.error==='string'?j.error:JSON.stringify(j.error||j);throw Error(`HTTP ${r.status}: ${detail}`+(r.status===409?' — 편집은 보존됐습니다. 내보낸 뒤 저장본을 다시 열어 비교하세요.':''));}return j;}
 async function run(fn){if(busy)return;busy=true;controls();try{await fn();}catch(e){status(e.message);}finally{busy=false;controls();}}
+$('deliver').onclick=()=>run(async()=>{const path=scope();$('student-token').value='';const d=await call(path+'/versions/'+encodeURIComponent($('version').value.trim())+'/participants','POST',{user:$('student').value.trim(),hours:Number($('hours').value)});$('student-token').value=d.token;$('delivery-status').textContent=d.user+' · '+d.lesson.version+' · 코드 만료 '+new Date(d.expires_at*1000).toLocaleString()+' · AI 세션 종료 '+new Date(d.session_ends_at).toLocaleString()+' · 리허설 미실행';status('참여 코드를 발급했습니다. 학생 화면과 Studio에서 확인하세요.');});
+$('copy-student').onclick=async()=>{if(!$('student-token').value)return;try{await navigator.clipboard.writeText($('student-token').value);$('delivery-status').textContent+=' · 복사했습니다';}catch{status('클립보드 접근이 거부됐습니다. 브라우저 권한을 확인하세요.');}};
+$('clear-student').onclick=()=>{$('student-token').value='';$('delivery-status').textContent='화면에서 지웠습니다. 이미 발급한 코드의 권한은 만료까지 유지됩니다.';};
+$('token').oninput=()=>{$('student-token').value='';$('version-view').textContent='';};
 $('editor').oninput=changed;
 for(const k of ['cohort','profile','course'])$(k).oninput=()=>{controls();status('대상이 바뀌었습니다. 새 초안 또는 저장된 초안을 선택하세요. 현재 편집은 보존됩니다.');};
-$('forget').onclick=()=>{$('token').value='';status('토큰을 지웠습니다. 편집 내용은 남아 있습니다.');};
+$('forget').onclick=()=>{$('token').value='';$('student-token').value='';status('토큰을 지웠습니다. 편집 내용은 남아 있습니다.');};
 $('new').onclick=()=>run(async()=>{scope();if(!discard())return;render({steps:[]});revision=0;bound=identity();pending=null;dirty=true;status('새 초안 — 아직 저장하지 않았습니다.');});
 $('import').onchange=()=>run(async()=>{const f=$('import').files[0];if(!f)return;if(f.size>1024*1024)throw Error('파일은 1 MiB 이하여야 합니다.');const j=JSON.parse(await f.text());const items=j.schema==='hps-authoring-batch/1'?j.courses:[j];if(!Array.isArray(items)||!items.length||items.some(x=>!x.course_id||x.content?.schema!=='hps-session-design/1'||!Array.isArray(x.content.steps)))throw Error('지원하는 강의 초안 파일이 아닙니다.');batch=items;$('courses').replaceChildren(new Option('가져올 강의를 선택하세요',''),...items.map((c,i)=>new Option(c.content.title,String(i))));status('강의를 선택한 뒤 편집하고 저장하세요.');});
 $('courses').onchange=()=>{if($('courses').value===''||!discard())return;const c=batch[Number($('courses').value)];$('course').value=c.course_id;render(c.content);revision=0;bound=identity();pending=null;dirty=true;status('가져온 초안 — 새 수업으로만 저장합니다. 기존 ID가 있으면 충돌로 보호합니다.');controls();};
