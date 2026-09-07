@@ -8,6 +8,10 @@ on:
       - 'extensions/hypeproof-chat/src/liveServerHelpers.ts'
       - 'extensions/hypeproof-chat/src/nativeBrowser.ts'
       - 'e2e/chalk-authoring/**'
+      - 'e2e/classroom/**'
+      - 'worker/src/routes/classroom.ts'
+      - 'worker/test/harness/classroom.mjs'
+      - 'worker/src/lib/lesson-delivery.ts'
       - 'chalk/**'
       - 'worker/src/routes/authoring.ts'
       - 'worker/src/lib/session-design.ts'
@@ -36,6 +40,8 @@ jobs:
         working-directory: chalk
       - run: npm run test:chalk-authoring
         working-directory: e2e
+      - run: npm run test:classroom
+        working-directory: e2e
       - run: npm run test:preview-viewport
         working-directory: e2e
       - run: npm run test:dental-reference
@@ -47,4 +53,5 @@ jobs:
           path: |
             e2e/test-results/dental-reference/
             e2e/test-results/chalk-authoring/
+            e2e/test-results/classroom/
           retention-days: 14

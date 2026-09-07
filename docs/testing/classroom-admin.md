@@ -50,3 +50,15 @@ npm --prefix chalk run typecheck
 최소 성인 강사 2명·학생 2명의 합성 계정으로 허용·거부 대조군을 실행하고 DT-* 실기를 수행한다.
 새 전체 앱 릴리스, 실제 학생 학습 효과, 아동 동의·관찰 모드 검증은 별도다.
 증거에는 Test ID, commit, 환경, 날짜, 결과, 관측/로그, 미실행 범위를 남긴다.
+
+## 실제 브라우저 실행 · #742
+
+2026-09-07 Mac/Chromium에서 `npm --prefix e2e run test:classroom`을 실행했다.
+`e2e/classroom/run.mjs`는 Chalk HTTP, 실제 Service 인증 및 SQLite를 연결한다.
+합성 강사/학생만 사용했다.
+
+- AT-02/03/05/07/14 일부: 명단 접두어로 무활동 학생 2명 표시, 동의 없음 거부, 공유, 메타데이터 목록, 개별 열람 감사, 피드백, 학생 확인, 철회 후 감사 cascade, 잘못된 인증.
+- DT-01/02/04/06 일부: 한 번 선택해 기록 열기, 375/390/768/1280/1440px, 긴 한국어, 실제 computed color로 컨트롤 경계 대비, 키보드 해결 확인, HTML 문자열 안전 렌더, 토큰 비영속.
+- 경계 대비 3:1 대조군이 기존 색에서 실패했고 수정 후 통과했다. 성공한 학생 연결이 계속 ‘연결 중’으로 표시되는 문제와 무신호 학생의 `absent`/내부 열 이름 노출도 수정했다.
+- 증거: `e2e/test-results/classroom/teacher-*.png`, `student-*.png`, `/tmp/classroom-browser*.log`. CI도 이 스크립트를 실행하고 화면을 보관한다.
+- 전체 AT/DT 합격을 뜻하지 않는다. 200% 브라우저 확대, 실제 Windows, 모든 경합·오프라인 조합과 운영 D1 삭제는 별도 검증이다. Node SQLite의 번호 매개변수는 기존 보드 테스트와 같은 위치 매개변수 방식으로 fixture에서 변환하며 실제 SQL/Service 정책은 변경하지 않았다.

@@ -8,7 +8,7 @@ export async function localClassroom(){
  const db=new DatabaseSync(':memory:');db.exec('PRAGMA foreign_keys=ON');db.exec(readFileSync(new URL('../../schema.sql',import.meta.url),'utf8'));
  const migration=readFileSync(new URL('../../migrations/0003-classroom-sharing.sql',import.meta.url),'utf8');db.exec(migration);db.exec(migration);
  let failure='';
- const binding={prepare(sql){let args=[];const q=()=>{if(failure&&sql.includes(failure))throw Error('injected storage failure');return db.prepare(sql);};return{bind(...a){args=a;return this;},async first(){return q().get(...args)??null;},async run(){const r=q().run(...args);return{success:true,meta:{changes:Number(r.changes)}};},async all(){return{success:true,results:q().all(...args)};}};}};
+ const binding={prepare(sql){let args=[];const params=()=>{const numbered=[...sql.matchAll(/\?(\d+)/g)];return numbered.length?numbered.map(m=>args[Number(m[1])-1]):args;};const q=()=>{if(failure&&sql.includes(failure))throw Error('injected storage failure');return db.prepare(sql.replace(/\?\d+/g,'?'));};return{bind(...a){args=a;return this;},async first(){return q().get(...params())??null;},async run(){const r=q().run(...params());return{success:true,meta:{changes:Number(r.changes)}};},async all(){return{success:true,results:q().all(...params())};}};}};
  const env=createMockEnv({withSession:false,withRoster:false,environment:'dev',env:{HPS_DB:binding}});
  const cohort='boah-dental-2026-a',profile='boah-dental-director-copyclone-2026-s1';
  await setRoster(env.HPS_KV,cohort,['student-a','student-b']);
