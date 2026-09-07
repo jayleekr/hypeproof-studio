@@ -39,6 +39,8 @@ import authoringHtml from "./ui/authoring.html";
 import manageHtml from "./ui/manage.html";
 // @ts-ignore — bundled as text by wrangler rules.
 import sharingHtml from "./ui/sharing.html";
+// @ts-ignore — bundled as text by wrangler rules.
+import startHtml from "./ui/start.html";
 
 const app = new Hono<{ Bindings: ChalkEnv; Variables: { requestId: string } }>();
 
@@ -62,6 +64,7 @@ app.get("/", (c) => c.redirect("/console", 302));
 // Service for writes). Outside the guard so a misconfigured secret shows a
 // page with a clear API error instead of a bare 503.
 app.get("/console", () => page(consoleHtml));
+app.get("/start", () => page(startHtml));
 app.get("/issuer", () => page(issuerHtml));
 app.get("/board", () => page(boardHtml));
 app.get("/authoring", () => page(authoringHtml));
