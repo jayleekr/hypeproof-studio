@@ -271,8 +271,9 @@ check("renderInstallerScript: includes expected anchors", () => {
   assert.ok(script.includes("xattr -dr com.apple.quarantine"), "missing quarantine strip");
   // Has reopen step
   assert.ok(script.includes('open "$OLD_APP"'), "missing reopen");
-  // Has backup-to-trash
-  assert.ok(script.includes("$HOME/.Trash"), "missing trash backup");
+  assert.ok(script.includes('BACKUP_PATH="$STAGE/previous.app"'), "missing same-volume backup");
+  assert.ok(script.includes('trap restore_on_exit EXIT'), "missing rollback trap");
+  assert.ok(!script.includes('rm -rf "$OLD_APP"'), "must never delete the existing app on backup failure");
 });
 
 check("renderInstallerScript: path with shell-sensitive chars stays escaped", () => {

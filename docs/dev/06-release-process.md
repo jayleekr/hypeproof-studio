@@ -41,6 +41,40 @@ of disallowed upstream branding strings. The release checklist in
 exact sequence. Release notes should summarize member-visible changes, known
 risks, validation evidence, and hotfix candidates.
 
+## In-App Updates
+
+Studio checks the public `jayleekr/hypeproof-studio-releases` stable release
+30 seconds after activation and every 24 hours afterwards. It does not silently
+install: the user starts the download and confirms restart. Dismissing a version
+suppresses its banner for seven days. Service/module deployments are separate
+from this App update path.
+
+The updater supports macOS arm64 and Windows x64. Release assets must carry the
+GitHub SHA-256 digest and expected byte size. Failed checks are not evidence that
+the installed version is current. Failed downloads must not reach the installer.
+See REQ-I1 through REQ-I13 and issue #730 for the contract and failure controls.
+
+Verification commands:
+
+```bash
+cd extensions/hypeproof-chat
+npm test
+npm run typecheck
+npm run build:extension
+cd webview-ui && npm run build
+cd ../../../e2e
+node update-check/run.mjs
+```
+
+The last command copies the installed macOS app into an isolated temporary
+directory, injects the built extension, and checks the update command against the
+public release API. It never installs an update. Platform CI executes macOS
+swap/rollback fixtures and the Windows PowerShell wrapper with a mocked installer.
+Neither replaces the release gate for an actual packaged-app upgrade/relaunch on
+each supported OS. A source-code merge does not update installed clients: a new
+App release and its public mirror are required. Older broken updater builds may
+still need a one-time manual reinstall (notably REQ-I10).
+
 ## Rollback
 
 Rollback means returning workshop members to the previous known-good app build

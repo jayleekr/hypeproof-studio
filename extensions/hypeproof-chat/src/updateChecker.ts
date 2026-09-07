@@ -17,8 +17,10 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as cp from "child_process";
+import { downloadVerifiedUpdate, fetchLatestRelease, trustedUpdateUrl } from "./updateTransport";
 import {
   compareVersions,
+  isUpdateVersion,
   parseLatestRelease,
   detectAppBundle,
   renderInstallerScript,
@@ -34,7 +36,6 @@ import {
   type UpdateInfo,
 } from "./updateCheckerHelpers";
 
-const RELEASES_API = "https://api.github.com/repos/jayleekr/hypeproof-studio-releases/releases/latest";
 const EXPECTED_BUNDLE_ID = "ai.hypeproof.studio";
 const CHECK_INTERVAL_MS = 24 * 3600 * 1000;
 const INITIAL_DELAY_MS = 30 * 1000;
@@ -51,39 +52,27 @@ export async function checkForUpdates(currentVersion: string): Promise<UpdateInf
   // yet, so skip the check entirely — no banner, no wrong-platform download
   // (the pre-#447 bug offered the 162 MB macOS zip as a "downgrade", #425/#438).
   const pickAsset = assetPickerForPlatform();
-  if (!pickAsset) return emptyInfo();
-  try {
-    const res = await fetch(RELEASES_API, {
-      headers: { accept: "application/vnd.github+json" },
-    });
-    if (!res.ok) {
-      console.warn(`[hypeproof-chat/update] releases API ${res.status}`);
-      return emptyInfo();
-    }
-    const release = (await res.json()) as GhRelease;
-    return parseLatestRelease(release, currentVersion, pickAsset);
-  } catch (err) {
-    console.warn(`[hypeproof-chat/update] check failed: ${(err as Error).message}`);
-    return emptyInfo();
+  if (!pickAsset) throw new Error("이 플랫폼은 앱 내 업데이트를 지원하지 않습니다.");
+  if (!isUpdateVersion(currentVersion)) throw new Error("현재 앱 버전을 확인할 수 없습니다.");
+  const release = await fetchLatestRelease() as GhRelease;
+  if (!release || !isUpdateVersion(release.tag_name) || !Array.isArray(release.assets)) {
+    throw new Error("업데이트 서버의 응답을 확인할 수 없습니다.");
   }
+  const info = parseLatestRelease(release, currentVersion, pickAsset);
+  if (compareVersions(release.tag_name, currentVersion) > 0 && !info.available && !release.prerelease && !release.draft) {
+    throw new Error("이 플랫폼의 새 설치 파일이 아직 준비되지 않았습니다.");
+  }
+  if (info.available && (!trustedUpdateUrl(info.downloadUrl) || !/^sha256:[a-f0-9]{64}$/i.test(info.digest ?? ""))) {
+    throw new Error("새 설치 파일의 출처 또는 검증 정보를 확인할 수 없습니다.");
+  }
+  return info;
 }
 
 /** The release-asset picker for the running OS, or null if we have no updater. */
 function assetPickerForPlatform(): AssetPicker | null {
-  if (process.platform === "darwin") return pickDarwinAsset;
-  if (process.platform === "win32") return pickWindowsInstaller;
+  if (process.platform === "darwin" && process.arch === "arm64") return pickDarwinAsset;
+  if (process.platform === "win32" && process.arch === "x64") return pickWindowsInstaller;
   return null;
-}
-
-function emptyInfo(): UpdateInfo {
-  return {
-    available: false,
-    version: "",
-    downloadUrl: "",
-    releaseUrl: "",
-    notes: "",
-    sizeBytes: 0,
-  };
 }
 
 export interface UpdateRunnerDeps {
@@ -103,6 +92,7 @@ const inflight = new Map<string, Promise<void>>();
 
 export function runUpdate(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<void> {
   if (!info.available) return Promise.resolve();
+  if (!assetPickerForPlatform()) return Promise.reject(new Error("Unsupported update platform"));
   const impl = process.platform === "win32" ? runUpdateWindows : runUpdateMac;
   return pickInflight(inflight, info.version, () => impl(info, deps));
 }
@@ -142,7 +132,7 @@ async function runUpdateMac(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<v
       const zipPath = path.join(workDir, "update.zip");
 
       progress.report({ message: "다운로드 중…" });
-      await downloadFile(info.downloadUrl, zipPath);
+      await downloadVerifiedUpdate(info, zipPath);
 
       progress.report({ message: "압축 풀기…" });
       cp.execSync(`unzip -q ${shellQuote(zipPath)} -d ${shellQuote(workDir)}`);
@@ -190,12 +180,10 @@ async function runUpdateMac(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<v
       );
       if (choice !== "재시작하고 업데이트") {
         vscode.window.showInformationMessage(
-          `설치 스크립트는 준비됐어요. 다음 재시작 때 적용하거나, 수동으로 실행: bash ${installerPath}`,
+          "업데이트를 보류했습니다. 설치하려면 업데이트 배너에서 다시 시작해주세요.",
         );
         return;
       }
-
-      deps.onUpdateScheduled?.();
 
       // 6. Spawn the installer detached + tell Studio to quit. Using
       // `setsid bash -c` would be ideal but macOS bash doesn't have setsid;
@@ -213,7 +201,9 @@ async function runUpdateMac(info: UpdateInfo, deps: UpdateRunnerDeps): Promise<v
         detached: true,
         stdio: "ignore",
       });
+      await waitForSpawn(child);
       child.unref();
+      deps.onUpdateScheduled?.();
 
       // 7. Quit Studio so the installer can replace the .app
       // 700ms delay so the toast renders + the user sees the modal close
@@ -286,7 +276,7 @@ async function runUpdateWindows(info: UpdateInfo, deps: UpdateRunnerDeps): Promi
       const exePath = path.join(workDir, installerName);
 
       progress.report({ message: "다운로드 중…" });
-      await downloadFile(info.downloadUrl, exePath);
+      await downloadVerifiedUpdate(info, exePath);
 
       // 2. Confirmation modal — the installer will close Studio, so warn first.
       const currentVersion = currentBundleVersion();
@@ -305,8 +295,6 @@ async function runUpdateWindows(info: UpdateInfo, deps: UpdateRunnerDeps): Promi
         );
         return;
       }
-
-      deps.onUpdateScheduled?.();
 
       // 3. Write a detached wrapper that waits for THIS app to fully exit, then
       // runs the installer. Installer flags mirror VS Code's win32 updater:
@@ -327,7 +315,7 @@ async function runUpdateWindows(info: UpdateInfo, deps: UpdateRunnerDeps): Promi
         renderWindowsUpdateWrapper({
           appProcessName: windowsAppProcessName(),
           installerPath: exePath,
-          installerArgs: ["/silent", "/mergetasks=runcode", `/LOG=${logPath}`],
+          installerArgs: ["/silent", "/mergetasks=runcode", `/LOG="${logPath}"`],
         }),
         "utf8",
       );
@@ -336,7 +324,9 @@ async function runUpdateWindows(info: UpdateInfo, deps: UpdateRunnerDeps): Promi
         ["-NoProfile", "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", wrapperPath],
         { detached: true, stdio: "ignore" },
       );
+      await waitForSpawn(child);
       child.unref();
+      deps.onUpdateScheduled?.();
 
       // 4. Quit Studio. The wrapper is already waiting for this exit; once the
       // app is gone it runs the installer (400ms so the modal closes first).
@@ -409,27 +399,11 @@ export function currentBundleVersion(appPath?: string): string {
   return "0.0.0";
 }
 
-/**
- * Streaming download with a 60s timeout per chunk. On failure, deletes the
- * partial file and re-throws.
- */
-async function downloadFile(url: string, dest: string): Promise<void> {
-  const res = await fetch(url, { redirect: "follow" });
-  if (!res.ok || !res.body) {
-    throw new Error(`download failed: HTTP ${res.status}`);
-  }
-  const fileHandle = fs.createWriteStream(dest);
-  try {
-    // @ts-ignore — node-fetch / undici body stream is async-iterable
-    for await (const chunk of res.body) {
-      fileHandle.write(chunk);
-    }
-  } finally {
-    fileHandle.end();
-  }
-  // Wait for flush — `close` callback may receive an arg, but Promise<void>
-  // expects a zero-arg resolver. Wrap so the types line up.
-  await new Promise<void>((r) => fileHandle.on("close", () => r()));
+function waitForSpawn(child: cp.ChildProcess): Promise<void> {
+  return new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("spawn", resolve);
+  });
 }
 
 function shellQuote(s: string): string {
@@ -452,7 +426,13 @@ export function scheduleUpdateChecks(deps: SchedulerDeps): vscode.Disposable {
 
   const run = async () => {
     if (disposed) return;
-    const info = await checkForUpdates(deps.currentVersion);
+    let info: UpdateInfo;
+    try {
+      info = await checkForUpdates(deps.currentVersion);
+    } catch (error) {
+      console.warn(`[hypeproof-chat/update] check failed: ${(error as Error).message}`);
+      return; // A failed check must not erase a previously confirmed update.
+    }
     if (disposed) return;
     if (!info.available) {
       deps.pushUpdateBanner(null);

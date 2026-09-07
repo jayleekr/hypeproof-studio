@@ -406,9 +406,14 @@ export function ChatPanel(props: Props) {
   //
   // 새 훅이 필요하면 이 블록 **위**에 추가한다.
   // ─────────────────────────────────────────────────────────────────────────
-  if (!config?.profile) return <DisconnectedChat open={props.onSetToken} />;
+  const updateBanner = config?.update ? (
+    <UpdateBanner offer={config.update} onInstall={props.onInstallUpdate} onDismiss={props.onDismissUpdate} />
+  ) : null;
+  if (!config?.profile) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
   if ((needsNaming || forceNaming) && config?.profile) {
     return (
+      <>
+      {updateBanner}
       <NamingCard
         namingPromptMd={config.profile.ux.coach.naming_prompt_md}
         personalityPromptMd={config.profile.ux.coach.personality_prompt_md}
@@ -419,6 +424,7 @@ export function ChatPanel(props: Props) {
           setForceNaming(false);
         }}
       />
+      </>
     );
   }
   const handleDragOver = (e: React.DragEvent<HTMLElement>) => {
@@ -559,13 +565,7 @@ export function ChatPanel(props: Props) {
         </div>
       </header>
 
-      {config?.update && (
-        <UpdateBanner
-          offer={config.update}
-          onInstall={props.onInstallUpdate}
-          onDismiss={props.onDismissUpdate}
-        />
-      )}
+      {updateBanner}
 
       <div className="hps-messages" ref={scrollRef}>
         {props.aiNotice && (
