@@ -61,7 +61,8 @@ cd extensions/hypeproof-chat
 npm test
 npm run typecheck
 npm run build:extension
-cd ../../e2e
+cd webview-ui && npm run build
+cd ../../../e2e
 node update-check/run.mjs
 ```
 

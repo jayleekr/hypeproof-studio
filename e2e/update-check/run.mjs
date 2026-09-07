@@ -28,6 +28,7 @@ try {
   const injected = join(appPath, 'Contents/Resources/app/extensions/hypeproof-chat/dist/extension.js');
   copyFileSync(source, injected);
   assert.deepEqual(readFileSync(injected), readFileSync(source));
+  execFileSync('/usr/bin/ditto', [join(root, 'extensions/hypeproof-chat/webview-ui/dist'), join(appPath, 'Contents/Resources/app/extensions/hypeproof-chat/webview-ui/dist')]);
   app = await electron.launch({
     executablePath: join(appPath, 'Contents/MacOS/HypeProof Studio'),
     args: [`--user-data-dir=${data}`, `--extensions-dir=${join(data, 'extensions')}`, '--use-inmemory-secretstorage', '--skip-welcome', '--skip-release-notes', '--disable-workspace-trust', '--folder-uri', pathToFileURL(join(data, 'workspace')).href],
@@ -51,6 +52,27 @@ try {
     throw error;
   }
   console.log('PASS real Electron update command:', await message.innerText());
+  if (/새 버전/.test(await message.innerText())) {
+    await win.keyboard.press('Escape');
+    await win.locator('.monaco-workbench .part.titlebar').first().click({ position: { x: 10, y: 10 }, force: true });
+    await win.keyboard.press('Meta+Shift+P');
+    await input.fill('>HypeProof Chat: Focus');
+    await win.waitForTimeout(300);
+    await win.keyboard.press('Enter');
+    const chat = win.frameLocator('iframe.webview.ready[src*="purpose=webviewView"]').first().frameLocator('#active-frame');
+    try {
+      await chat.locator('.hps-update-banner').waitFor({ timeout: 30_000 });
+    } catch (error) {
+      await win.screenshot({ path: join(report, 'update-banner-failed.png') });
+      console.error('frames:', win.frames().map(f => f.url()));
+      throw error;
+    }
+    await win.keyboard.press('Escape');
+    await win.screenshot({ path: join(report, 'update-banner.png') });
+    await chat.locator('.hps-update-banner-dismiss').click();
+    await chat.locator('.hps-update-banner').waitFor({ state: 'hidden' });
+    console.log('PASS real Electron update banner: visible, Later dismisses it without installation');
+  }
   await win.screenshot({ path: join(report, 'update-check.png') });
   console.log('NOT RUN: install/restart; this check never replaces the installed app.');
 } finally {

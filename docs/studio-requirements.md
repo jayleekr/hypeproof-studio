@@ -153,7 +153,7 @@ When in doubt:
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
 | REQ-I1 | 24h cadence + 30s initial | 활성화 30s 후 첫 체크, 이후 24h 마다 | U |
-| REQ-I2 | Banner gating | newer version + dismissals 에 없음 → 배너; 동일/구버전 → null | U |
+| REQ-I2 | Banner gating (#730) | newer version + dismissals 에 없음 → 배너; 동일/구버전 → null. 수업 미연결·작명 중에도 배너를 유지하며 토큰 없이 설치 확인/보류 가능 | U + E (`e2e/update-check/run.mjs`) |
 | REQ-I3 | Dismiss = 7일 silence | `dismissVersion` 후 동일 버전 배너 7일간 미노출 | U |
 | REQ-I4 | 설치 pipeline (#730) | 공개 릴리스 파일 크기·SHA-256 검증 → unzip → installer 준비 → 사용자 재시작 승인 → detached spawn 성공 확인 → 정상 quit. 보류하면 자동 적용을 약속하지 않는다. 실행 중인 앱은 교체하지 않는다 | U + M |
 | REQ-I5 | Free-disk 사전 체크 (≥1GB) | 1GB 미만 → 경고 토스트, 다운로드 skip | U |
