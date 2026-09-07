@@ -13,7 +13,8 @@
     "test:chalk-authoring": "node --experimental-strip-types --experimental-sqlite chalk-authoring/run.mjs",
     "test:preview-viewport": "node --experimental-strip-types preview-viewport/run.mjs",
     "test:start-page": "node start-page/run.mjs",
-    "test:lesson:mac": "node --experimental-strip-types --experimental-sqlite lesson-studio/mac.mjs"
+    "test:lesson:mac": "node --experimental-strip-types --experimental-sqlite lesson-studio/mac.mjs",
+    "test:classroom": "node --experimental-strip-types --experimental-sqlite classroom/run.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
