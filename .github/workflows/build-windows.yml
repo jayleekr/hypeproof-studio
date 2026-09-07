@@ -208,6 +208,10 @@ jobs:
           HPS_EXTENSION_BUNDLE_CONCURRENCY: "2"
         run: node scripts/limit-vscode-extension-build-concurrency.mjs
 
+      - name: Apply HP editor watermark before compilation
+        shell: bash
+        run: node scripts/install-shell-brand.mjs vscodium-base/vscode/src/vs/workbench/browser/parts/editor/media
+
       - name: Compile Windows source
         shell: bash
         working-directory: vscodium-base

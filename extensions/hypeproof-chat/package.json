@@ -216,6 +216,23 @@
           "description": "HypeProof Lab 사이트 주소. '갤러리에 올리기'가 여기로 보냅니다. 로컬 개발 서버에 붙여 볼 때만 바꾸세요 (예: http://localhost:3000)."
         }
       }
+    },
+    "themes": [
+      {
+        "label": "HypeProof Studio",
+        "uiTheme": "vs-dark",
+        "path": "./media/hypeproof-theme.json"
+      }
+    ],
+    "configurationDefaults": {
+      "workbench.colorTheme": "HypeProof Studio",
+      "workbench.activityBar.location": "hidden",
+      "window.commandCenter": false,
+      "workbench.layoutControl.enabled": false,
+      "workbench.statusBar.visible": false,
+      "workbench.editor.showIcons": false,
+      "workbench.editor.editorActionsLocation": "hidden",
+      "workbench.tips.enabled": false
     }
   },
   "scripts": {

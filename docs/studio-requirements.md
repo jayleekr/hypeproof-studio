@@ -378,3 +378,20 @@ REQ-A8 fixture isolation: both the environment flag and the existing user-data t
 | REQ-STUDIO-PREVIEW-WIDTH | Manually inspect local HTML at 390px or 1280px | Command opens the active local preview in a width-controlled iframe with two buttons and an original-page link; reports the actual child innerWidth. Missing/nonlocal preview gives guidance | App, real Electron |
 
 시작 화면 #723: `test/start-page.smoke.mjs`는 host 인증 오류/연결 보존/해제를, `e2e/start-page/run.mjs`는 빌드된 화면의 상태 전이와 390/768/1280px를 검증한다. 실제 Mac 관측은 `e2e/start-page/README.md` 참조.
+
+### HP shell defaults (#725)
+
+The built-in extension contributes the HypeProof Studio dark theme: forest `#151D19`,
+ivory `#F2F4E8`, proof lime `#D5F279`. Title bar, editor, sidebar, inputs, focus and
+selection use the same palette as the start page. Configuration defaults hide the
+activity rail, command center, layout controls, file tab icons and status bar;
+explicit user settings override these defaults. No global user settings are rewritten.
+
+Start-page “파일” opens Explorer and “설정” opens the native settings editor. Course
+entry keeps the HP canvas behind chat. The four upstream editor watermarks are
+replaced by an HP SVG before Mac signing / Windows compilation. A missing expected
+asset fails before any replacement. Standard file controls, tab-close affordances,
+menus and shortcuts remain available; this is not removal of all editor functionality.
+
+Tests: `test/shell-brand.smoke.mjs`, `test/start-page.smoke.mjs`, `e2e/start-page/run.mjs`,
+`e2e/tests/27-hp-shell.spec.ts`. Screens: `e2e/start-page/hp-shell-evidence/`.

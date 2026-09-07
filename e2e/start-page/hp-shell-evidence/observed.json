@@ -1,0 +1,15 @@
+{
+  "mac": "arm64",
+  "app": "existing Electron shell + rebuilt extension 0.1.5 + four HP watermark assets",
+  "activity_bar_visible": false,
+  "titlebar_background": "rgb(21, 29, 25)",
+  "file_explorer_opened": true,
+  "settings_modal_opened": true,
+  "electron_shell_test": "PASS after using observed modal close control",
+  "scope": "No authentication or LLM needed for shell test; local health-only mock, no token preseed",
+  "artifacts_sha256": {
+    "extensions/hypeproof-chat/dist/extension.js": "662f52a6bfa245d94d8b7c48f81da6557914f9d54f4d11de6464cc974c32241e",
+    "extensions/hypeproof-chat/media/hypeproof-theme.json": "44e49a9b066605d60472e3b5164836bfb87baf2edffc71f1538e60c0569579dd",
+    "assets/brand/hypeproof-watermark.svg": "f5321205081d44912b4f6c411a2937cccf59072e4b916df98d0579b5859b9729"
+  }
+}

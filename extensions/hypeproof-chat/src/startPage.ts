@@ -56,6 +56,10 @@ export class StartPage {
   private async handle(msg: StartRequest): Promise<void> {
     if (!msg || typeof msg !== "object") return;
     if (msg.type === "startReady") { await this.refresh(); return; }
+    if (msg.type === "openStudioFiles" || msg.type === "openStudioSettings") {
+      await vscode.commands.executeCommand(msg.type === "openStudioFiles" ? "workbench.view.explorer" : "workbench.action.openSettings");
+      return;
+    }
     if (this.busy) return;
     if (this.chat.hasActiveStream()) { this.error = "진행 중인 작업을 마치거나 중지한 후 수업을 변경하세요."; await this.refresh(); return; }
     if (msg.type === "openLocalFolder") {
@@ -79,7 +83,7 @@ export class StartPage {
       if (!p) { await this.refresh(); return; }
       this.error = undefined;
       if (await this.begin(p)) return; // folder switch reloads the window
-      this.panel?.dispose();
+      // Keep the HP canvas behind the coach instead of exposing the upstream watermark.
       await vscode.commands.executeCommand("workbench.view.extension.hypeproof-chat");
       await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
       this.chat.refreshConfig();

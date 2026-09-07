@@ -6,10 +6,10 @@ const require=createRequire(import.meta.url);
 const bundle=await build({entryPoints:[new URL('../src/startPage.ts',import.meta.url).pathname],bundle:true,platform:'node',format:'cjs',external:['vscode'],write:false});
 const profile={profile_id:'adult',display_name:'Adult practice',ux:{coach:{naming_mode:'fixed',fallback_name:'Coach'}},welcome:{},series_index:1,series_total:5};
 let stored='valid-old', busy=false, response='valid',writes=0;
-const states=[];
+const states=[];const commands=[];
 const ctx={secrets:{get:async()=>stored,store:async(_k,v)=>{stored=v;writes++;},delete:async()=>{stored=undefined;writes++;}},extension:{packageJSON:{version:'test'}},subscriptions:[]};
 const chat={ensureProfile:async()=>stored?.startsWith('valid')?profile:null,profileFailure:()=>null,invalidateProfile(){},refreshConfig(){},hasActiveStream:()=>busy,setConnectionChanging(v){this.changing=v;}};
-const vscode={workspace:{workspaceFolders:[],getConfiguration:()=>({get:()=> 'http://local/v1'})},window:{},commands:{}};
+const vscode={workspace:{workspaceFolders:[],getConfiguration:()=>({get:()=> 'http://local/v1'})},window:{},commands:{executeCommand:async id=>commands.push(id)}};
 const module={exports:{}};
 vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,require:id=>id==='vscode'?vscode:require(id),console,Buffer,AbortSignal,fetch:async()=>{
  if(response==='network')throw Error('connection refused');
@@ -27,3 +27,5 @@ assert.ok(!JSON.stringify(states).includes('valid-new'),'credential must never b
 console.log('PASS start-page host: 401/403/network/malformed preserve prior token; active chat blocks switch; valid token stored without echo');
 
 await page.handle({type:"disconnectCourse"});assert.equal(stored,undefined);assert.equal(states.at(-1).state.profile,undefined);assert.equal(chat.changing,false);
+
+await page.handle({type:"openStudioFiles"});await page.handle({type:"openStudioSettings"});assert.deepEqual(commands,["workbench.view.explorer","workbench.action.openSettings"]);
