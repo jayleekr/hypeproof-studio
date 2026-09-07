@@ -1,14 +1,9 @@
-// REQ-A5 (invalid stored token → re-prompt) + REQ-B3 (profile validation).
-//
-// Mock the /v1/profile endpoint to return 401. Launch with a preseeded
-// token. autoOnboard's profile probe should fail, show a warning, and
-// re-open the setToken QuickInput — proving the recovery path works.
-
 import { test, expect, _electron as electron } from "@playwright/test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as http from "node:http";
+import { startFrame } from "../fixtures/app";
 import { APP_BINARY, TOKEN_FILE } from "../fixtures/global-setup";
 
 async function startProfileMock(status: number): Promise<{ port: number; close: () => Promise<void> }> {
@@ -31,7 +26,7 @@ async function startProfileMock(status: number): Promise<{ port: number; close: 
   };
 }
 
-test("REQ-A5 + REQ-B3: stored token but /v1/profile 401 → re-prompt setToken", async () => {
+test("REQ-A5 + REQ-B3: stored token but /v1/profile 401 → inline connection error", async () => {
   const mock = await startProfileMock(401);
   const token = fs.readFileSync(TOKEN_FILE, "utf8").trim();
   const userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "hps-e2e-b3-"));
@@ -79,13 +74,10 @@ test("REQ-A5 + REQ-B3: stored token but /v1/profile 401 → re-prompt setToken",
   await win.waitForSelector(".monaco-workbench", { timeout: 30_000 });
 
   try {
-    // autoOnboard runs profile probe → 401 → warning toast + re-prompt setToken.
-    // The setToken QuickInput should appear with "Workshop token" prompt.
-    const tokenPrompt = win
-      .locator(".quick-input-widget")
-      .filter({ hasText: /Workshop token|선생님께 받은 토큰/i });
-    await expect(tokenPrompt).toBeVisible({ timeout: 30_000 });
-    await win.keyboard.press("Escape");
+    const start = await startFrame(win);
+    await expect(start.getByRole("alert")).toBeVisible({ timeout: 30_000 });
+    await expect(start.locator("#course-code")).toBeVisible();
+    await expect(win.locator(".quick-input-widget")).not.toBeVisible();
   } finally {
     try { await app.close(); } catch { /* ignore */ }
     try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch { /* ignore */ }

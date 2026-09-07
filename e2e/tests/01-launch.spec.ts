@@ -1,11 +1,5 @@
-// Smoke: app launches, workbench renders, autoOnboard does its job.
-//
-// Two flavors:
-//   - default launch (token pre-seeded) → expect chat webview to mount
-//   - cold launch (no token)            → expect setToken input box to appear
-
 import { test, expect } from "@playwright/test";
-import { launchApp, closeApp, chatFrame } from "../fixtures/app.ts";
+import { launchApp, closeApp, chatFrame, startFrame } from "../fixtures/app.ts";
 
 test("launches + chat panel mounts when token is pre-seeded", async () => {
   const ctx = await launchApp({
@@ -31,22 +25,14 @@ test("launches + chat panel mounts when token is pre-seeded", async () => {
   }
 });
 
-test("cold launch (no token) opens the setToken input box", async () => {
+test("cold launch opens the branded in-app connection form", async () => {
   const ctx = await launchApp({ preseedToken: false });
   try {
-    // autoOnboard waits 400ms after panel focus before firing setToken.
-    // The QuickInput shows both Korean title and English prompt; match
-    // either so renderer differences (line breaks, ARIA wrapping) don't
-    // false-negative. Bumped from 15s → 30s — issue #42 root cause was
-    // timing variance on cold first-launch (cache miss + workbench cold +
-    // extension activation + autoOnboard delay can pile up past 15s on a
-    // contended runner).
-    const tokenPrompt = ctx.win
-      .locator(".quick-input-widget")
-      .filter({ hasText: /Workshop token|선생님께 받은 토큰/i });
-    await expect(tokenPrompt).toBeVisible({ timeout: 30_000 });
-    await ctx.win.keyboard.press("Escape");
-  } finally {
-    await closeApp(ctx);
-  }
+    const start = await startFrame(ctx.win);
+    await expect(start.getByRole("heading", { name: "내 수업에 연결하기" })).toBeVisible();
+    await expect(start.locator("#course-code")).toHaveAttribute("type", "password");
+    await expect(start.getByRole("button", { name: "수업 확인하기" })).toBeDisabled();
+    await expect(start.locator("body")).not.toContainText("나비");
+    await expect(ctx.win.locator(".quick-input-widget")).not.toBeVisible();
+  } finally { await closeApp(ctx); }
 });

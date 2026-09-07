@@ -378,6 +378,7 @@ export async function fetchProfileResult(args: FetchProfileArgs): Promise<Profil
     res = await fetch(url, {
       method: "GET",
       headers: { authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(15_000),
     });
   } catch {
     // We never reached the server — the token is not the suspect.

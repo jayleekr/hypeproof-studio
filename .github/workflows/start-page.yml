@@ -1,0 +1,36 @@
+name: start-page
+on:
+  pull_request:
+    paths:
+      - 'assets/brand/**'
+      - 'extensions/hypeproof-chat/**'
+      - 'e2e/start-page/**'
+      - 'e2e/package*.json'
+      - '.github/workflows/start-page.yml'
+permissions:
+  contents: read
+jobs:
+  start-page-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: extensions/hypeproof-chat/webview-ui
+      - run: npm run build
+        working-directory: extensions/hypeproof-chat/webview-ui
+      - run: npm ci
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npm run test:start-page
+        working-directory: e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: start-page-evidence
+          path: e2e/test-results/start-page/
+          retention-days: 14

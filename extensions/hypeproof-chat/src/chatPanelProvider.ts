@@ -448,6 +448,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     view.onDidDispose(() => abortAllStreams(this.activeStreams));
   }
 
+  private connectionChanging = false;
+  setConnectionChanging(value: boolean): void { this.connectionChanging = value; }
+
+  hasActiveStream(): boolean { return this.activeStreams.size > 0; }
+
   refreshConfig() {
     void (async () => {
       await this.postConfig();
@@ -1590,6 +1595,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private async handleMessage(msg: WebviewMessage): Promise<void> {
     // Any message from the panel is evidence of a human. See `lastActivityAt`.
     this.lastActivityAt = Date.now();
+    if (this.connectionChanging && (msg.type === "sendMessage" || msg.type === "retryMessage")) {
+      void this.post({ type: "streamError", streamId: "connection", error: "수업 연결 확인이 끝난 뒤 다시 보내세요." });
+      return;
+    }
     switch (msg.type) {
       case "ready":
         await this.postConfig();
@@ -2775,7 +2784,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return this.view.webview.postMessage(msg);
   }
 
-  private renderHtml(webview: vscode.Webview, distDir: vscode.Uri): string {
+  renderHtml(webview: vscode.Webview, distDir: vscode.Uri): string {
     const indexPath = path.join(distDir.fsPath, "index.html");
     if (!fs.existsSync(indexPath)) {
       return /* html */ `<!doctype html><html><body style="font-family:sans-serif;padding:20px">

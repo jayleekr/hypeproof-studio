@@ -5,6 +5,7 @@ import { _electron as electron, type ElectronApplication, type Page } from "@pla
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { pathToFileURL } from "node:url";
 import { APP_BINARY, TOKEN_FILE } from "./global-setup";
 
 export interface AppContext {
@@ -27,6 +28,8 @@ export interface SeedHistoryTurn {
 export interface LaunchOptions {
   /** Pre-seed the workshop token into SecretStorage via env var (test backdoor). */
   preseedToken?: boolean;
+  /** Keep the entry surface open for onboarding assertions. */
+  stayOnStart?: boolean;
   /** Pre-seed coach name + personality so the naming ritual doesn't pop. */
   preseedCoach?: { name: string; personality?: string };
   /** Pre-seed chat history into workspaceState — bypass the LLM for tests
@@ -227,7 +230,7 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
             "--disable-backgrounding-occluded-windows",
           ]
         : []),
-      wsDir,                          // open this folder → no reload
+      "--folder-uri", pathToFileURL(wsDir).href, // explicit folder; Electron consumes positional args
     ],
     env,
     timeout: 30_000,
@@ -245,6 +248,10 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
   await hideAppAfterReady(app);
   await reportQuietState(app);
 
+  if (opts.preseedToken !== false && !opts.stayOnStart) {
+    const start = await startFrame(win);
+    await start.getByRole("button", { name: "수업 시작하기" }).click({ timeout: 30_000 });
+  }
   return { app, win, userDataDir, token, wsDir };
 }
 
@@ -309,9 +316,8 @@ export async function openChatContainer(win: Page): Promise<void> {
  * security iframe + an inner #active-frame.
  */
 export async function chatFrame(win: Page) {
-  // The chat sidebar webview renders before any editor-area preview panel,
-  // so the first webview iframe is the chat one. (Validated across 14 runs.)
-  const outerSel = "iframe.webview.ready";
+  // Match the actual sidebar purpose; the start editor may mount first.
+  const outerSel = 'iframe.webview.ready[src*="purpose=webviewView"]';
   await win.locator(outerSel).first().waitFor({ state: "attached", timeout: 20_000 });
   return win.frameLocator(outerSel).first().frameLocator("#active-frame");
 }
@@ -323,4 +329,11 @@ export async function previewFrame(win: Page) {
   // Preview opens after the chat webview, so it's the last one.
   await win.locator(outerSel).last().waitFor({ state: "attached", timeout: 20_000 });
   return win.frameLocator(outerSel).last().frameLocator("#active-frame");
+}
+
+/** Entry editor, before opening other editor webviews. */
+export async function startFrame(win: Page) {
+  const selector = 'iframe.webview.ready[src*="extensionId=hypeproof.hypeproof-chat"]:not([src*="purpose=webviewView"])';
+  await win.locator(selector).first().waitFor({ state: "attached", timeout: 30_000 });
+  return win.frameLocator(selector).first().frameLocator("#active-frame");
 }

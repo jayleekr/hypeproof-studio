@@ -19,7 +19,7 @@ if (typeof window.acquireVsCodeApi === "function") {
 
 export function postToHost(msg: WebviewMessage): void {
   if (api) api.postMessage(msg);
-  else console.warn("[hypeproof-chat] no vscode api — running outside webview?", msg);
+  else console.warn("[hypeproof-chat] no vscode api — running outside webview?", msg.type);
 }
 
 export function onHostMessage(handler: (m: HostMessage) => void): () => void {

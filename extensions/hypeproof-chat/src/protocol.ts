@@ -1,3 +1,4 @@
+import type { StartRequest, StartResponse } from "./startPageProtocol";
 // Shared message contract between extension host (Node) and webview (browser).
 // Import this file from both sides; do not redefine these types anywhere else.
 
@@ -200,6 +201,7 @@ export interface SuggestionChip {
 
 // Webview → Host
 export type WebviewMessage =
+  | StartRequest
   | { type: "ready" }
   | { type: "sendMessage"; text: string; history: ChatMessage[]; images?: string[] }
   | { type: "retryMessage"; prompt: string; history: ChatMessage[]; images?: string[] }
@@ -256,6 +258,7 @@ export type WebviewMessage =
 
 // Host → Webview
 export type HostMessage =
+  | StartResponse
   | { type: "config"; config: ChatConfig }
   | { type: "history"; messages: ChatMessage[] }
   | { type: "streamStart"; streamId: string; messageId: string }

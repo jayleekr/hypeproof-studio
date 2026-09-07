@@ -39,23 +39,23 @@ When in doubt:
 
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
-| REQ-A1 | 첫 실행 시 작업 폴더 자동 생성 | `~/HypeProofGames/index.html` 가 없으면 mkdir + starter HTML 작성, 단일-루트로 open | E |
-| REQ-A2 | Workspace trust 모달 영구 억제 | `security.workspace.trust.enabled=false` 가 첫 실행에 global settings 에 기록 | E |
-| REQ-A3 | autoOnboard 시퀀스 | 첫 실행 시 welcome editor 닫힘 → hypeproof-chat container 노출 → panel focus | E |
-| REQ-A4 | 토큰 없을 때 자동 prompt | 시크릿에 토큰 없으면 `setToken` quickInput 자동 호출 | E |
-| REQ-A5 | 저장된 토큰이 무효일 때 재-prompt | `/v1/profile` 호출 실패 시 시크릿은 유지 + `setToken` 재호출 | E |
+| REQ-A1 | 첫 수업 시작 시 작업 폴더 준비 | 사용자가 시작 화면에서 수업 시작을 누르면 profile workspace_root와 기존 workspace routing을 적용한다. 기존 파일을 보존한다 | E |
+| REQ-A2 | 사용자의 workspace trust 설정 보존 | 시작 및 폴더 생성 시 security.workspace.trust.enabled를 자동 변경하지 않는다 | E |
+| REQ-A3 | 브랜드 시작 화면 | 기존 편집기를 닫지 않고 시작 화면을 연다. 빈 창은 단일 편집 영역으로 정리한다 | E |
+| REQ-A4 | 토큰 없는 첫 실행 | 중립적인 시작 화면에서 참여 코드를 입력한다. QuickInput 자동 호출과 아동 코치 fallback 노출 없음 | U + E |
+| REQ-A5 | 저장된 연결 오류 | 원인별 오류와 재입력 화면을 제공하고 기존 시크릿은 보존한다 | U + E |
 | REQ-A6 | 코치 네이밍 카드 표시 조건 | `profile.ux.coach.naming_mode != "fixed"` + `coach.configured == false` 일 때만 webview 카드 렌더 | E |
 | REQ-A7 | 테스트 백도어 | `HPS_TEST_TOKEN` env / `hps-test-state.json` 파일 / 로컬-only `/tmp/hps-token.txt` 셋 다 동작 (prod proxyUrl 일 땐 dev backdoor 무시) | U |
-| REQ-A8 | 진입 시 코호트 폴더로 자동 전환 | 폴더가 이미 열려 있어도 프로필의 `workspace_root` 가 **다른** 곳을 가리키면 그쪽으로 창을 옮긴다. 이전 동작(폴더가 열려 있으면 무조건 no-op)은 VS Code 의 마지막-창 복원과 맞물려 고착을 만들었다: 한 번 `~/HypeProofGames` 가 열리면 이후 어떤 코호트 토큰도 폴더를 못 바꾸고, 코치 cwd 는 열린 폴더 우선(`resolveCoachCwd`)이라 성인 코호트가 아이들 게임 폴더에서 수업을 했다. 판정은 `decideWorkspaceSwitch` (pure): 열린 폴더 없음 → 최초 open 경로 · `workspace_root` 없음/상대경로 → 유지 · 이미 그 폴더(멀티루트면 루트 중 하나) → 유지 · e2e 런(`HPS_TEST_E2E`) → 유지(픽스처가 폴더를 소유, #42). 전환 후에는 리로드 뒤 토스트로 알린다 — 폴더가 조용히 바뀌면 학생은 "내 파일이 사라졌다"로 읽는다 | U (`test/workspace-routing`) |
+| REQ-A8 | 수업 시작 클릭 시 코호트 폴더로 전환 | 폴더가 이미 열려 있어도 프로필의 `workspace_root` 가 **다른** 곳을 가리키면 그쪽으로 창을 옮긴다. 이전 동작(폴더가 열려 있으면 무조건 no-op)은 VS Code 의 마지막-창 복원과 맞물려 고착을 만들었다: 한 번 `~/HypeProofGames` 가 열리면 이후 어떤 코호트 토큰도 폴더를 못 바꾸고, 코치 cwd 는 열린 폴더 우선(`resolveCoachCwd`)이라 성인 코호트가 아이들 게임 폴더에서 수업을 했다. 판정은 `decideWorkspaceSwitch` (pure): 열린 폴더 없음 → 최초 open 경로 · `workspace_root` 없음/상대경로 → 유지 · 이미 그 폴더(멀티루트면 루트 중 하나) → 유지 · e2e 런(`HPS_TEST_E2E`) → 유지(픽스처가 폴더를 소유, #42). 전환 후에는 리로드 뒤 토스트로 알린다 — 폴더가 조용히 바뀌면 학생은 "내 파일이 사라졌다"로 읽는다 | U (`test/workspace-routing`) |
 | REQ-A9 | 폴더 전환은 리로드 루프를 만들지 않는다 | 이 기능의 실패 모드는 "안 갈아탐"이 아니라 **무한 리로드**다 (`openFolder` → 리로드 → 재판정). 방어 2겹: ① 동일성 판정을 `path.relative(canon(a), canon(b)) === ""` 로 — win32 대소문자·드라이브 문자를 흡수해야 한다(실측: VS Code 는 `c:\…` 소문자로 주고 `os.homedir()` 는 `C:\…` 대문자라, 단순 문자열 비교였다면 **Windows 전 머신이 매 기동마다 리로드**했다). canonicalize 는 realpath 주입이라 심링크/리다이렉트된 홈도 흡수(#384); ② 전환 직전 목적지를 `hypeproofChat.workspaceSwitchAttempt`(globalState)에 기록하고, 리로드 후에도 그 폴더가 안 열렸으면 **재시도하지 않는다** — 열 수 없는 root 는 한 번만 실패한다. 착지(또는 포기) 시 마커를 지워 다음 코호트 변경이 실패한 재시도로 오인되지 않게 한다 | U (`test/workspace-routing`) |
 
 ## B. Token & profile
 
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
-| REQ-B1 | `setToken` happy path | input 받은 토큰 trim → `secrets.store(TOKEN_KEY)` → profile 재취득 → 성공 토스트 | E |
-| REQ-B2 | 빈 토큰 입력 → 시크릿 삭제 | 빈 문자열로 setToken 시 `secrets.delete` + "cleared" 토스트 + profile invalidate | E |
-| REQ-B3 | 토큰 검증을 `/v1/profile` 로 수행 | 200 + valid shape → 통과. 401/403/timeout → 경고 + 재-prompt 트리거 | E |
+| REQ-B1 | 수업 연결 happy path | 입력값 정리 → profile API 검증 → SecretStorage 저장 → 실제 수업·코치 확인 → 명시적 수업 시작 | U + E |
+| REQ-B2 | 명시적 연결 해제 | 연결 해제 버튼만 시크릿을 삭제한다. 빈 입력은 제출 불가. 파일과 대화 기록은 보존 | U |
+| REQ-B3 | 수업 연결 API 검증 | 200 + valid shape만 저장. 401/403/network/timeout은 원인별 인라인 오류이며 기존 연결을 유지 | U + E |
 | REQ-B4 | `hasToken` UI 상태 동기화 | secrets 변화 → `postConfig` → webview 헤더 pill 갱신 | E |
 | REQ-B5 | Auth error 분류 (4 sub) | 401/expired·missing → 재-prompt. 403/session_inactive·session_window·not_in_roster·mismatch → 친절한 토스트 (raw JSON 노출 금지) | U + R |
 | REQ-B6 | 첫 실행 토큰 실패는 **원인**을 말한다 (#381) | `fetchProfile()` 이 모든 실패를 `null` 로 뭉개서 만료·강사토큰·모르는 회차·서버다운·네트워크단절이 한 문장("확인이 안 돼요")으로 보였다 — 신규 참가자가 스스로 풀 방법이 없어 강사를 불러야만 했다. 계약: ① worker `GET /v1/profile` 의 **모든** 실패가 `error.code` 를 싣는다 — 401 `expired`/`malformed`/`signature`, issuer 토큰은 `wrong_role`(401, 기존엔 `p` 가 placeholder 라 400 "unknown profile" 로 떨어졌다), 모르는 프로필은 400 `unknown_profile`. `request_id` 동봉(#49); ② 클라이언트 `fetchProfileResult()` 가 `null` 대신 `ProfileFailure{reason,friendly,status,requestId}` 를 돌려주고 `classifyProfileFailure` 가 원인별 문장을 고른다. **401 이 `expired` 가 아니면 만료를 단정하지 않는다** (REQ-M13 이 태운 이틀); ③ 강사 토큰은 네트워크 이전에 로컬에서 판정(`looksLikeIssuerTokenUnverified` — payload `role:"issuer"` 또는 `__issuer__` placeholder). **진단 전용, 게이트 아님** — 저장도 하지 않고 재입력을 준다(저장하면 채팅 못 하는 토큰에 "Token ✓" 가 뜬다); ④ 붙여넣기 형식 오류(`looksLikeWorkshopToken` 불일치)가 서버 원인보다 우선 — 서버까지 못 간 실패다 | U (`test/profile-failure`) + R (`worker/test/chat-integration`) |
@@ -376,3 +376,5 @@ REQ-A8 fixture isolation: both the environment flag and the existing user-data t
 | ID | Requirement | Acceptance | Layer |
 |---|---|---|---|
 | REQ-STUDIO-PREVIEW-WIDTH | Manually inspect local HTML at 390px or 1280px | Command opens the active local preview in a width-controlled iframe with two buttons and an original-page link; reports the actual child innerWidth. Missing/nonlocal preview gives guidance | App, real Electron |
+
+시작 화면 #723: `test/start-page.smoke.mjs`는 host 인증 오류/연결 보존/해제를, `e2e/start-page/run.mjs`는 빌드된 화면의 상태 전이와 390/768/1280px를 검증한다. 실제 Mac 관측은 `e2e/start-page/README.md` 참조.

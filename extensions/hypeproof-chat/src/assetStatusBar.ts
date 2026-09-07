@@ -26,16 +26,18 @@ export class AssetStatusBar implements AssetScoreSink, vscode.Disposable {
       vscode.commands.registerCommand("hypeproof-chat.showAssetHistogram", () => this.showHistogram()),
     );
     this.refresh();
-    this.item.show();
+    // Show an activity signal after evidence arrives, not an empty score at startup.
   }
 
   recordAssetScore(score: AssetScoreChunk): void {
     this.scores = mergeAssetScores(this.scores, score.scores);
+    this.item.show();
     this.refresh();
   }
 
   resetAssetScores(): void {
     this.scores = emptyAssetScores();
+    this.item.hide();
     this.refresh();
   }
 
