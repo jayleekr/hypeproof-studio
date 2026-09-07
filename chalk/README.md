@@ -102,3 +102,12 @@ The seat set is the one thing §4 did not settle: `cohort:<id>:roster` is **cumu
 `/authoring` (linked from `/console`) imports `hps-authoring-batch/1` or an exported single course, edits teaching fields and ordered steps, and saves through the existing Service authoring contract (ADR 0004). Paste the instructor token and scope IDs; credentials stay in memory. A frozen version is inactive and unverified. A 409 preserves the local form; export before explicitly reloading the saved copy. GitHub request preparation is not receipt.
 
 Removal: remove the page route/import and console link; retain Service drafts and versions for export/recovery. No migration or participant-gate change is part of this Surface slice. Browser check: `npm --prefix e2e run test:chalk-authoring`.
+
+
+## Classroom management and voluntary sharing
+
+`/manage` combines the existing metadata board and a recipient-scoped list of voluntary shares. `/sharing` lets adult participants explicitly select prompt/response/tool-summary/result/verification text, name the instructor, choose expiry, review feedback, confirm resolution and withdraw. Credentials remain in page memory. There is no background capture of full conversations.
+
+The new `/v1/classroom/*` calls and `/admin/cohorts/:cohort/classroom/*` reads/writes are forwarded to the Service, which owns identity, D1 writes, expiry and audit. Existing `/board` is still metadata-only and existing raw `/logs` retrieval is still operator-only. Apply Service migration 0003 before exposing the new API; do not treat a Chalk or PRD deployment as Service deployment.
+
+Requirements/design/tests: `docs/requirements/classroom-admin.md`, `docs/requirements/classroom-design.md`, `docs/testing/classroom-admin.md`. Full session observation, minor-consent workflow, budgets and internal feature-request queue remain separate acceptance work.

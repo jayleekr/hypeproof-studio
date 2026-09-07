@@ -73,6 +73,7 @@ entries:
     drift_lock_extra:
       - worker/test/authoring.test.mjs
       - worker/test/dental-course-automation.test.mjs
+      - worker/test/classroom.test.mjs
     exit_plan: null
     owner: jay
     notes: >-
@@ -104,6 +105,7 @@ entries:
     # and that this worker contains no R2 put or delete.
     drift_lock_extra:
       - chalk/test/logs-read-path.test.mjs
+      - chalk/test/classroom.test.mjs
     exit_plan: docs/exit/chalk.md
     owner: jay
     notes: >-

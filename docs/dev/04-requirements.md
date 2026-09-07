@@ -86,3 +86,10 @@ Contract and storage decision: [ADR 0004](../adr/0004-chalk-authoring-storage.md
 `REQ-STUDIO-PREVIEW-WIDTH`: local HTML layout inspection via the existing App live server, 390px/1280px/original. The shipped shell ignores CDP device metrics, so a same-origin iframe provides the CSS viewport. This is manual visual verification and does not grant SDK tools or change Service profile policy.
 
 Chalk authoring Surface: `REQ-STUDIO-CHALK-AUTHORING-UI`, `/authoring` form with Service-owned draft/version writes; browser contract in `e2e/chalk-authoring/run.mjs`. Support submission remains the existing GitHub workflow.
+
+
+## Classroom administration
+
+- [ADM-01~14](../requirements/classroom-admin.md)
+- [DES-01~12](../requirements/classroom-design.md)
+- [AT/DT tests](../testing/classroom-admin.md)

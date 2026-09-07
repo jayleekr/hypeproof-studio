@@ -35,6 +35,10 @@ import issuerHtml from "./ui/issuer.html";
 import boardHtml from "./ui/board.html";
 // @ts-ignore — bundled as text by wrangler rules.
 import authoringHtml from "./ui/authoring.html";
+// @ts-ignore — bundled as text by wrangler rules.
+import manageHtml from "./ui/manage.html";
+// @ts-ignore — bundled as text by wrangler rules.
+import sharingHtml from "./ui/sharing.html";
 
 const app = new Hono<{ Bindings: ChalkEnv; Variables: { requestId: string } }>();
 
@@ -61,6 +65,10 @@ app.get("/console", () => page(consoleHtml));
 app.get("/issuer", () => page(issuerHtml));
 app.get("/board", () => page(boardHtml));
 app.get("/authoring", () => page(authoringHtml));
+app.get("/manage", () => page(manageHtml));
+app.get("/sharing", () => page(sharingHtml));
+app.use("/v1/classroom/*", signingSecretGuard);
+app.all("/v1/classroom/*", forwardInstructorWrite);
 
 app.use("/admin/*", signingSecretGuard);
 app.route("/admin", state);

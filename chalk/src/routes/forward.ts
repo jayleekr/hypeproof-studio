@@ -27,7 +27,8 @@ export async function forwardInstructorWrite(c: Ctx): Promise<Response> {
   const url = new URL(c.req.url);
   const method = c.req.method.toUpperCase();
 
-  if (!isIssuerAllowedEndpoint(url.pathname, method)) {
+  const studentShare = (method === 'GET' && /^\/v1\/classroom\/shares(?:\/[^/]+\/audit)?$/.test(url.pathname)) || (method === 'POST' && /^\/v1\/classroom\/shares(?:\/[^/]+\/confirm)?$/.test(url.pathname)) || (method === 'DELETE' && /^\/v1\/classroom\/shares\/[^/]+$/.test(url.pathname));
+  if (!isIssuerAllowedEndpoint(url.pathname, method) && !studentShare) {
     return c.json(
       { error: { type: "not_found", message: "not an instructor endpoint", request_id: rid, path: url.pathname } },
       404,
@@ -70,6 +71,7 @@ export async function forwardInstructorWrite(c: Ctx): Promise<Response> {
   // pages already map its error prose, and a 401/403 from the Service IS the
   // authorization decision — Chalk does not second-guess it.
   const out = new Headers({
+    "cache-control": "no-store",
     "content-type": upstream.headers.get("content-type") ?? "application/json; charset=utf-8",
     "x-request-id": rid,
     "x-hps-forwarded-to": new URL(origin).host,
