@@ -9,8 +9,9 @@
     "dev": "wrangler dev --port 8788",
     "deploy": "wrangler deploy",
     "tail": "wrangler tail",
-    "test": "node --experimental-strip-types test/instructor-console.test.mjs && node --experimental-strip-types test/instructor-auth-drift.test.mjs && node --experimental-strip-types --experimental-sqlite test/board-contract.test.mjs && node --experimental-strip-types --experimental-sqlite test/board-threshold.test.mjs && node --experimental-strip-types test/deploy-isolation.test.mjs && node --experimental-strip-types test/logs-read-path.test.mjs && node --experimental-strip-types test/authoring-forward.test.mjs",
-    "typecheck": "tsc --noEmit"
+    "test": "node --experimental-strip-types test/instructor-console.test.mjs && node --experimental-strip-types test/instructor-auth-drift.test.mjs && node --experimental-strip-types --experimental-sqlite test/board-contract.test.mjs && node --experimental-strip-types --experimental-sqlite test/board-threshold.test.mjs && node --experimental-strip-types test/deploy-isolation.test.mjs && node --experimental-strip-types test/logs-read-path.test.mjs && node --experimental-strip-types test/authoring-forward.test.mjs && npm run test:classroom",
+    "typecheck": "tsc --noEmit",
+    "test:classroom": "node --experimental-strip-types --experimental-sqlite test/classroom.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.34"

@@ -6,6 +6,7 @@ import { trace } from "./routes/trace";
 import { logs } from "./routes/logs";
 import { admin } from "./routes/admin";
 import { report } from "./routes/report";
+import { classroomStudent, purgeExpiredClassroomShares } from "./routes/classroom";
 import { runHeartbeat } from "./cron/heartbeat.ts";
 import { runD1Backup } from "./cron/d1-backup.ts";
 import { requestId, makeErrorBody } from "./middleware/request-id.ts";
@@ -33,6 +34,7 @@ app.use("/v1/messages/*", signingSecretGuard);
 app.use("/v1/profile", signingSecretGuard);
 app.use("/v1/trace/*", signingSecretGuard);
 app.use("/v1/logs/*", signingSecretGuard);
+app.use("/v1/classroom/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
 
 // Friendly root → redirect to admin UI (which itself is access-gated).
@@ -71,6 +73,7 @@ app.route("/v1", messages);
 app.route("/v1/trace", trace);
 app.route("/v1/logs", logs);
 app.route("/v1/report", report);
+app.route("/v1/classroom", classroomStudent);
 app.route("/admin", admin);
 
 app.notFound((c) =>
@@ -106,6 +109,7 @@ export default {
     ctx: ExecutionContext,
   ): Promise<void> {
     // Dispatch by cron pattern. Currently:
+    ctx.waitUntil(purgeExpiredClassroomShares(env).catch(() => console.error('classroom expiry cleanup unavailable')));
     //   "*/15 * * * *" → 15-min heartbeat (#45 / S-02)
     //   "0 17 * * *"   → D1 nightly backup to R2 at 17:00 UTC = 02:00 KST (#52 / S-06)
     if (controller.cron === "0 17 * * *") {

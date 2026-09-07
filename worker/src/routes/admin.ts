@@ -26,6 +26,7 @@
 
 import { Hono } from "hono";
 import { authoring } from "./authoring";
+import { classroomTeacher } from "./classroom";
 import type { Env } from "../env";
 import { listProfiles } from "../profiles";
 import { USAGE_LAST_HOUR_SQL } from "../lib/analytics";
@@ -129,6 +130,7 @@ admin.use("*", async (c, next) => {
 });
 
 admin.route("/", authoring);
+admin.route("/", classroomTeacher);
 
 // ---- cohort list ------------------------------------------------------------
 
