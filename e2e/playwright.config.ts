@@ -18,7 +18,7 @@ export default defineConfig({
 
   reporter: [["list"], ["html", { open: "never", outputFolder: "playwright-report" }]],
 
-  outputDir: "test-results",
+  outputDir: "test-results/playwright", // preserve separately collected observation evidence
 
   use: {
     trace: "retain-on-failure",

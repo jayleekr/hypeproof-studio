@@ -179,7 +179,7 @@ async function launchPointedAtMock(port: number): Promise<LaunchedCtx> {
       `--user-data-dir=${userDataDir}`,
       `--extensions-dir=${path.join(userDataDir, "extensions")}`,
       "--disable-workspace-trust",
-      "--password-store=basic",
+      "--use-inmemory-secretstorage",
       "--disable-updates",
       "--skip-welcome",
       "--skip-release-notes",

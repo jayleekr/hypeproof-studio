@@ -132,7 +132,7 @@ e2e/
 1. `launchApp()` mkdtemp's a fresh user-data-dir, writes a `settings.json` that points
    `hypeproofChat.proxyUrl` at `http://localhost:8787/v1` and disables welcome/telemetry.
 2. Spawns the .app via `@playwright/test`'s Electron driver — flags include
-   `--password-store=basic` so the secret store is file-based (writable from outside).
+   `--use-inmemory-secretstorage` so temporary test credentials stay in memory and never touch the macOS keychain. `--password-store=basic` does not provide that guarantee on macOS.
 3. The chat extension's `autoOnboard` immediately pops a quickInput box for the
    workshop token. The test types the token from `/tmp/hps-token.txt`.
 4. The chat panel's webview is a doubly-nested iframe (`iframe.webview.ready` →

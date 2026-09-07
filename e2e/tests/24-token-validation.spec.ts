@@ -54,7 +54,7 @@ test("REQ-A5 + REQ-B3: stored token but /v1/profile 401 → inline connection er
       `--user-data-dir=${userDataDir}`,
       `--extensions-dir=${path.join(userDataDir, "extensions")}`,
       "--disable-workspace-trust",
-      "--password-store=basic",
+      "--use-inmemory-secretstorage",
       "--disable-updates",
       "--skip-welcome",
       "--skip-release-notes",
