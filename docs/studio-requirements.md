@@ -51,6 +51,8 @@ When in doubt:
 
 ## B. Token & profile
 
+Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepage-practice` cohort and `~/HypeProofHomepagePractice` workspace. It explicitly enables existing website read/write/browser/shell tools with the existing approval gate; subagents, publishing, raw-message logging and session-log upload remain disabled. The profile smoke contract checks these boundaries. This does not automatically activate a saved Chalk course or renew credentials.
+
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
 | REQ-B1 | 수업 연결 happy path | 입력값 정리 → profile API 검증 → SecretStorage 저장 → 실제 수업·코치 확인 → 명시적 수업 시작 | U + E |
