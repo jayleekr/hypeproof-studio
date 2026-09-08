@@ -53,9 +53,9 @@ Other audited facts that constrain the contract:
   same two aliases are matched by name **or** by mapped id, plus a `claude-*haiku*`
   rule. Neither clamp needs editing for a lesson to narrow the set.
 - **`/v1/messages` force-appends `hypeproof-fast`** to the allowed set even when the
-  profile lists no fast fallback, for the CLI's auxiliary calls. It is route policy,
-  not cohort policy, and it is the one place the served set is wider than the profile
-  declares.
+  profile lists no fast fallback. It exists for the CLI's auxiliary calls, but the
+  route cannot tell an auxiliary request from a participant one, so it is available to
+  both. It is the one place the served set is wider than the profile declares.
 - **`/v1/messages` is Anthropic-only** and ignores both `LLM_PROVIDER` and
   `profile.model.provider`. Six of seven profiles run that route.
 - **The turn's actual model already ships three ways** and nothing reads two of them:
@@ -109,10 +109,38 @@ then enforce the lesson's set **with zero edits to either clamp**. A client send
 arbitrary id, another alias, or another lesson's grant still falls through to the
 served default; only the target of that fallthrough moves.
 
-One carve-out is named rather than silently inherited: `/v1/messages` keeps
-force-appending `hypeproof-fast`. It is declared an **auxiliary-call channel**, not a
-lesson candidate. Removing it would upgrade every CLI auxiliary call to the default
-model, which is the cost reason the route states for having it.
+One carve-out is named rather than silently inherited, and it is **wider than an
+auxiliary channel**: `/v1/messages` force-appends `hypeproof-fast`, and the request
+carries no purpose marker the Service could check, so an ordinary participant turn
+can use it too. The effective allowed set on that route is therefore
+
+    lesson.allowed ∪ { hypeproof-fast }   — always, whatever the lesson says
+
+Measured on a lesson narrowed to `{default}` (the narrowing that exposes it; a
+`{fast}` narrowing cannot):
+
+| request on `/v1/messages` | served |
+|---|---|
+| `hypeproof-default` | claude-sonnet-4-6 |
+| `hypeproof-strong` | claude-sonnet-4-6 (clamped) |
+| `hypeproof-fast` | **claude-haiku-4-5 — outside the lesson's set** |
+| `claude-3-5-haiku-20241022` | **claude-haiku-4-5 — any `claude-*haiku*` string** |
+| the same `hypeproof-fast` on `/v1/chat/completions` | claude-sonnet-4-6 (no such exception) |
+
+So this slice **does not** satisfy AE-25's "임의 모델 ID/alias로 우회할 수 없다" on the
+SDK route, and must not claim to. Two honest options for the implementation, neither
+decided here:
+
+- **Describe, do not pretend.** The served `model.allowed` includes fast on
+  agent-sdk seats, and the requirement row records that a lesson cannot exclude the
+  fast pin on that route today.
+- **Add the missing boundary.** A trusted request-purpose discriminator the Service
+  can verify — the auxiliary calls are the CLI's, not the participant's, so they are
+  distinguishable in principle but nothing distinguishes them today.
+
+Removing the force-append outright is not free: it would upgrade every CLI auxiliary
+call to the lesson's default model, which is the cost reason the route states for
+having it.
 
 ### 3. The app is told the seat's set, and reads the turn from headers it already gets
 
@@ -127,14 +155,34 @@ model: {
 ```
 
 `id` is the resolved upstream id. `label` is Service-owned display text, so the app
-never composes a model name from an alias. There is deliberately **no `provider`
-field**: the id already discloses the vendor and `x-hps-model` has shipped it since
-day one, so a separate key adds a policy decision without adding information.
+never composes a model name from an alias.
+
+`id` **does not** encode provenance, and the block must not be read as if it did.
+`/v1/messages` is Anthropic-pinned; `/v1/chat/completions` uses the deployment's
+effective provider; and an SDK-unavailable seat falls back from the first route to the
+second mid-session. One seat can therefore serve turns from two endpoints with two
+providers, so a seat-level id map is not evidence for either. AE-27 asks for the
+turn's *actual* provider and model, which means the implementation must either carry
+explicit endpoint/runtime provenance on the turn evidence, or show provider as
+**unknown** until that evidence exists. Guessing the vendor from the id's prefix is
+exactly the inference this paragraph forbids.
 
 There is deliberately **no "current turn" here**. This block is the *seat's* allowed
-set and default. The *turn's* actual model comes from `x-hps-model`, its substitution
-flag from `x-hps-fallback`, and its usage from the chunk the client already parses.
-The client work is reading two more headers where it already reads `x-request-id`.
+set and default.
+
+The turn's actual model reaches the host by **two different paths, and the slice must
+implement both**:
+
+- **Proxy route.** `x-hps-model`, `x-hps-fallback`, and the SSE usage chunk, read in
+  the proxy client where `x-request-id` is already read. Two headers, no new plumbing.
+- **Agent SDK route.** The proxy client is not involved at all — the SDK runs as a
+  subprocess and its model evidence arrives per request as an SDK usage event, which
+  the host already extracts and spools. Most profiles run this route, so a
+  proxy-header-only change would leave the majority of seats with no turn model.
+
+A single turn can also produce several SDK requests, including the CLI's auxiliary
+ones. Attribution has to say which request a model belongs to; "the model of the
+turn" is not well defined without it.
 
 **The app compares `id`, never `alias`.** This is not a style preference: on gemini
 and openai the default and strong aliases are the same id, and on GLM all three are,
@@ -162,11 +210,18 @@ shape rather than by a rule someone must remember.
 - **Auto and compare modes (AE-26 P1, AE-30, AE-31).** They need the candidate set,
   the role assignment, the material sent to each branch and a budget ledger settled
   first. None of those exist.
-- **A retirement or substitution ladder (AE-33's second half).** The only automatic
-  substitution in the codebase is Gemini's, and the module fallback ladder falls back
-  on bytes with no capability notion — so nothing today can silently swap a retired id
-  for a live one, which is the behavior AE-33 forbids. This slice freezes the *alias
-  set*; the id actually served is already recorded per turn.
+- **A frozen model *identity* (AE-33's first half) — recorded here as UNMET.** This
+  slice freezes the *alias set*, and an alias is not an identity. The alias→id maps are
+  compiled, so re-pinning one (or changing the deployment provider) silently moves
+  every already-frozen lesson to a different upstream model, with no new version and no
+  re-rehearsal. That is precisely the silent substitution AE-33 forbids, and it is a
+  path this ADR's earlier draft missed by looking only for a runtime fallback ladder.
+  The per-turn usage row records what was served *after the fact*; it is not the
+  contract AE-33 asks for. The minimum boundary the implementation must add: the frozen
+  version records the resolved id and the catalogue revision alongside the alias, a
+  changed pin invalidates the rehearsal for versions bound to it rather than silently
+  applying, and a new binding requires a new version. Designing that is the next E7
+  unit, not this one.
 - **A per-turn "which parameters were clamped" surface (AE-28's second half).** The
   parameter guard already returns exactly that list and logs it, but surfacing it needs
   a response field the Anthropic-shaped stream does not have. Also worth recording:
@@ -216,9 +271,13 @@ probe is measuring the narrowing rather than a clamp that always returns fast. T
 same holds on the OpenAI map: unnarrowed `hypeproof-strong` gives gpt-4o, narrowed
 `hypeproof-default` gives gpt-4o-mini.
 
-The auxiliary carve-out was measured too: a profile listing **no** fast fallback still
-resolves `hypeproof-fast` to claude-haiku-4-5 on `/v1/messages`. That is route policy,
-and the ADR keeps it deliberately.
+The fast exception was measured too, and the first measurement was too weak to see it
+properly: narrowing to `{fast}` makes the exception invisible, because fast is inside
+the set. Re-run against a `{default}` narrowing it is plain — `hypeproof-fast` and any
+`claude-*haiku*` string both escape the lesson's set on `/v1/messages`, while the same
+request is clamped on `/v1/chat/completions`. The table under Decision §2 is that run.
+The lesson generalises: a positive control that contains the thing under test cannot
+falsify it.
 
 The alias collapse that forces id-comparison was counted, not assumed:
 
@@ -244,6 +303,10 @@ is the test list below, which the implementation slice must carry.
 - **The existing "client cannot override to a non-fallback model" negative control**
   is re-pointed at a lesson-narrowed profile, so it also proves a lesson cannot be
   escaped with an alias string.
+- **The `{default}` counterexample as a standing control**, not only the `{fast}` case:
+  a lesson narrowed to `{default}` must still show fast being served on the SDK route
+  until a purpose boundary exists, so the test states the real behavior rather than the
+  one we would prefer.
 - **A control this repo does not have yet:** that the seat's served set and the turn's
   `x-hps-model` agree. The cheapest form is asserting, where the header's presence is
   already checked, that its value is one of the ids the same seat's profile lists.
