@@ -59,6 +59,9 @@ export function publicVerifyError(err: unknown, label: string): string {
 export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   if((method==='GET'||method==='DELETE')&&/^\/admin\/cohorts\/[^/]+\/native-trials\/[^/]+$/.test(path))return true;
   if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/models\/[^/]+$/.test(path)) return true;
+  // #748 — 같은 모양의 읽기 전용 카탈로그. 강사가 좁힐 수 있는 기능 목록을
+  // 컴파일된 프로필에서 파생해 돌려준다. Chalk 포워더도 이 목록을 그대로 쓴다.
+  if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/features\/[^/]+$/.test(path)) return true;
   if (method === 'POST' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/versions\/[^/]+\/participants$/.test(path)) return true;
   if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/classroom\/shares(?:\/[^/]+)?$/.test(path)) return true;
   // Chalk authoring: handlers still enforce issuer identity, cohort/profile and owner.

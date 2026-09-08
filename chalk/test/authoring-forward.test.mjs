@@ -8,7 +8,7 @@ const original=globalThis.fetch;
 let calls=[];
 globalThis.fetch=async(url,init)=>{calls.push({url,init});return Response.json({revision:1},{status:200});};
 try {
- for(const [method,suffix] of [['GET','/models/profile-1'],['GET',''],['PUT',''],['GET','/versions/m2026.09.06-1'],['PUT','/versions/m2026.09.06-1'],['POST','/versions/m2026.09.06-1/participants']]) {
+ for(const [method,suffix] of [['GET','/models/profile-1'],['GET','/features/profile-1'],['GET',''],['PUT',''],['GET','/versions/m2026.09.06-1'],['PUT','/versions/m2026.09.06-1'],['POST','/versions/m2026.09.06-1/participants']]) {
   const body=method!=='GET'?JSON.stringify({expected_revision:0}):undefined;
   const r=await chalk.fetch(new Request('https://chalk.test'+path+suffix,{method,body,headers:{authorization:'Bearer fixture','content-type':'application/json','cf-access-authenticated-user-email':'forged@example.test'}}),env,{});
   assert.equal(r.status,200);const call=calls.at(-1);assert.equal(call.url,'https://service.test'+path+suffix);assert.equal(call.init.method,method);
