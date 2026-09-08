@@ -89,8 +89,8 @@ Human Asset은 철학적/학습적 모델이고, Product Intent는 제품 설계
 
 | Product principle | 검증 가능한 행동 계약 | 검증 위치 |
 |---|---|---|
-| Useful work first / Minimum necessary intervention / Adapt, do not script | NAT-03; AE-01/02/36/41. 충분하면 실행, 부족할 때 필요한 질문 하나, 목표 변경·질문 건너뛰기 수용 | T04 분기; AE-T01/28/31 |
-| Human judgment stays visible | NAT-04/05/07; AE-07/08/09/27. 이름·역할·모델·실제 권한 분리, 제안과 채택 및 위임 결과의 주체 보존 | T07/09/15; AE-T05/06/19/25 |
+| Useful work first / Minimum necessary intervention / Adapt, do not script | NAT-03; AE-01/02/36/41. 충분하면 실행, 부족할 때 필요한 질문 하나, 목표 변경·질문 건너뛰기 수용 | T04 분기; AE-T01/28/33 |
+| Human judgment stays visible | NAT-04/05/07; AE-07/08/09/27. 이름·역할·모델·실제 권한 분리, 제안과 채택 및 위임 결과의 주체 보존 | T07/09/15; AE-T04/05/06/19/20/21/25 |
 | Learning is embedded / Evidence over claims | NAT-06/08/09; AE-24/34/42/43/44. 실제 출처·도움·미관찰을 구별하고 사람 피드백·전이를 따로 검증 | T11–18/25; AE-T18/26/34/37/38 |
 | Assets are hypotheses, not UI labels | NAT-08/09; AE-35/36/38. 필수 설문·자동 자산 점수 없이 필요한 판단을 작업 안에서 돕는다 | T04/17/18/25; AE-T27/28/30 |
 
