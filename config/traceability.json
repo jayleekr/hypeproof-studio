@@ -12,8 +12,11 @@
       ],
       "sources": [
         {
+          "path": "docs/PRODUCT-INTENT.md"
+        },
+        {
           "path": "docs/requirements/studio-native-trial.md",
-          "section": "## Intent"
+          "section": "## Product Intent와 체험 범위"
         }
       ]
     },

@@ -96,4 +96,10 @@ do not mark these unexecuted scenarios as passed.
 
 ## Personal trial UI acceptance
 
+The [T04 Product Intent branches](../testing/studio-native-trial-validation.md#t04-product-intent-분기)
+separate sufficient/ambiguous requests, skipping questions and changing goals.
+Provider contract checks do not score dialogue quality; review actual replies
+and pair tool/permission claims with host events. All added scenarios begin as
+NOT_RUN, and human learning remains T25.
+
 Use the [TUX matrix](../testing/studio-native-trial-ux.md) for personal trial buttons, keyboard/focus, loading/error/cancel states, observation scope changes and conditional update/recovery UI. `node e2e/trial-ux/run.mjs` exercises the built React UI with a controlled host bridge; it does not prove OS actions or live API success. Pair applicable cases with the [actual laptop flow](../testing/studio-native-trial-laptop.md), and record release artifact checks separately.
