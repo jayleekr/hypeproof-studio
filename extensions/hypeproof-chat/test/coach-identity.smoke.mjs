@@ -147,4 +147,19 @@ for (const literal of ["코치와 작업을 시작하세요", "코치와 계속 
 const stallSrc = readFileSync(new URL("../src/sdkCoachHelpers.ts", import.meta.url), "utf8");
 assert.doesNotMatch(codeOnly(stallSrc), /"코치 응답이 너무 오래 걸려요/, "stall copy comes from the shared module");
 
+// ─── 4. long-name layout: every sentence that carries a name can wrap ──
+// #746 feature B acceptance: a valid 40-character name is one unbreakable token,
+// and `word-break: keep-all` (right for Korean phrase breaks) then let it run past
+// the card — measured 1202px inside a 1140px window before the fix. Every rule that
+// renders a name must pair keep-all with overflow-wrap:anywhere.
+const startCss = readFileSync(new URL("../webview-ui/src/start.css", import.meta.url), "utf8");
+const rule = (selector) => {
+  const at = startCss.indexOf(selector + " {");
+  assert.notEqual(at, -1, `${selector} exists in start.css`);
+  return startCss.slice(at, startCss.indexOf("}", at));
+};
+for (const selector of [".studio-connect h2", ".studio-card-description", ".studio-process p", ".studio-primary", ".studio-disconnected p"]) {
+  assert.match(rule(selector), /overflow-wrap:\s*anywhere/, `${selector} lets an over-long name wrap`);
+}
+
 console.log("✅ coach-identity: parity, particles+copula, default-string locks, error copy, watcher pattern, static mirror check");

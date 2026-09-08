@@ -95,7 +95,8 @@
   font-size:11px;
   color:var(--studio-muted);
   margin:7px 0 0;
-  word-break:keep-all}
+  word-break:keep-all;
+  overflow-wrap:anywhere}
 .studio-connect {
   background:var(--studio-panel);
   border:1px solid #41453d;
@@ -121,12 +122,15 @@
   line-height:1.35;
   font-weight:550;
   letter-spacing:-.8px;
-  margin:0 0 12px}
+  margin:0 0 12px;
+  word-break:keep-all;
+  overflow-wrap:anywhere}
 .studio-card-description {
   font-size:13px;
   color:var(--studio-muted);
   margin:0 0 28px;
-  word-break:keep-all}
+  word-break:keep-all;
+  overflow-wrap:anywhere}
 .studio-connect label {
   display:block;
   font-size:12px;
@@ -155,10 +159,16 @@
   display:flex;
   align-items:center;
   justify-content:space-between;
+  gap:10px;
+  text-align:left;
   padding:13px 15px;
   font-size:13px!important;
   font-weight:650!important;
+  word-break:keep-all;
+  overflow-wrap:anywhere;
   transition:background .15s}
+.studio-primary>span {
+  flex:0 0 auto}
 .studio-primary:hover:enabled {
   background:#fff9ed}
 .studio-primary:disabled {
@@ -271,7 +281,9 @@
 .studio-disconnected p {
   font-size:13px;
   color:var(--studio-muted);
-  margin-bottom:26px}
+  margin-bottom:26px;
+  word-break:keep-all;
+  overflow-wrap:anywhere}
 
 @media(max-width:720px) {
   .studio-main {
