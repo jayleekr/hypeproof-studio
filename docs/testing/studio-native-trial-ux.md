@@ -86,3 +86,5 @@ HPS_QUIET_NO_HIDE=1 bash scripts/test-native-trial-laptop.sh
 사람 파일럿 T25는 별도다. 이 테스트의 합성 사용자 실행은 고객의 학습 효과나 독립 수행 능력을 입증하지 않는다. Windows CI 빌드와 Mac 실기기 검증도 서로 대신하지 않는다.
 
 `native-presentation.spec.ts`는 실제 코드 연결 뒤 중앙 대화로의 전환, Markdown·텍스트 전용 응답·실제 파일 미리보기·연결 화면 왕복 후 초안 보존을 확인한다. 위임 고민을 말한 합성 참가자의 후속 대화는 전송 결과와 의미 검토를 나눠 기록한다.
+
+대화 화면·Markdown·위임 목적 유지의 후속 실행은 [2026-09-08 대화 검증](studio-native-trial-conversation-2026-09-08.md)에 기록한다.
