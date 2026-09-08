@@ -38,7 +38,7 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
  const assertName=async(name)=>{
   const c=await frame('.hps-coach-name');await wait(async()=>await text(c,'.hps-coach-name')===name,'resolved header '+name);
   assert.equal(await c.evaluate("document.querySelector('.hps-coach-name').title"),'이 수업의 AI 이름: '+name);
-  await click(c,'.hps-coach-name');assert.equal(await c.evaluate("!!document.querySelector('.hps-naming-card')"),false);
+  await click(c,'.hps-coach-name');assert.equal(await c.evaluate("!!document.querySelector('.hps-naming')"),false);
   return c;
  };
  const connect=async(which)=>{
@@ -57,6 +57,9 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
   return assertName(cases[which].name);
  };
  try{
+  const entry=await frame('.studio-course');
+  assert.ok((await text(entry,'.studio-course')).includes(cases.a.name));
+  await click(entry,'.studio-primary');
   let chat=await assertName(cases.a.name);
   await shot('a-fixed-name');
   record('A1',{frozen_name:cases.a.name,draft_name:'초안에서만 바꾼 이름',lesson:cases.a.profile.lesson,authoring:'Service API; browser authoring is a separate run'});
