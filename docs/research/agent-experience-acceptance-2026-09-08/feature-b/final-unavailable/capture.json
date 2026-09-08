@@ -1,0 +1,39 @@
+{
+  "source_run": "e2e/test-results/agent-experience/20260908T170817Z-b-unavailable",
+  "submitted_product_sha": "dddd2b634534d5932b8616fa9692ffd3b335b253",
+  "verification_sha": "aa17532edd52a2e652d6c21d5dfd928e8efef20b",
+  "capture": "Electron capturePage; isolated app copy; original files unedited",
+  "review": "Codex opened every included screenshot on 2026-09-08. Bounded UI review; not a human learning or full accessibility result. See ../README.md",
+  "files": [
+    {
+      "file": "b-sdk-unavailable.png",
+      "sha256": "86d05597a01b6db3621082490b078aa93bcf031b98a628bb6c3e4751b5603554",
+      "bytes": 572171
+    },
+    {
+      "file": "environment.json",
+      "sha256": "ce29a6ac6cf93a1ece1cd77e8e574fe53d163ccff0c99f04754d7524f8e653ab",
+      "bytes": 1541
+    },
+    {
+      "file": "identity-result.json",
+      "sha256": "9dc3d8f92d010e587aa59d2b3da086ec33f2074d64a6bca8170444a400e493f8",
+      "bytes": 3761
+    },
+    {
+      "file": "surfaces-result.json",
+      "sha256": "bff60c1c5ba2da819e17017c3d7e9cabdbe0c0e1aa493f32e3b190574a0c54c5",
+      "bytes": 11048
+    },
+    {
+      "file": "api-evidence.json",
+      "sha256": "b43b015f6087c00327bd3c5754f0e347b5704e012cddafe8b4aba2c234984354",
+      "bytes": 204
+    },
+    {
+      "file": "gateway-evidence.json",
+      "sha256": "0c45bf7d33338903af86466f0d85e1b6e3ccb3bc15b104a07c4a91ecbb38511d",
+      "bytes": 92
+    }
+  ]
+}

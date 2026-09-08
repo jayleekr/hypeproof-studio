@@ -25,8 +25,9 @@ export async function prepareIdentity(local){
  return cases;
 }
 
-export async function verifyIdentity({app,window,findContext,cases,out,live,setFault,setZoom}){
+export async function verifyIdentity({app,window,findContext,cases,out,live,setFault,setZoom,surfaces}){
  const checks=[];
+ const composerChecks=[];
  const problems=[];
  const record=(id,detail)=>{checks.push({id,status:'PASS',...detail});writeFileSync(out+'/identity-result.json',JSON.stringify({status:'IN_PROGRESS',scope:'actual Mac app + local Service/SQLite; synthetic lessons',checks},null,2));};
  const wait=async(fn,label,ms=20000)=>{const end=Date.now()+ms;do{const result=await fn();if(result)return result;await window.waitForTimeout(250);}while(Date.now()<end);throw Error('Timed out: '+label);};
@@ -40,6 +41,13 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
   const c=await frame('.hps-coach-name');await wait(async()=>await text(c,'.hps-coach-name')===name,'resolved header '+name);
   assert.equal(await c.evaluate("document.querySelector('.hps-coach-name').title"),'이 수업의 AI 이름: '+name);
   await click(c,'.hps-coach-name');assert.equal(await c.evaluate("!!document.querySelector('.hps-naming')"),false);
+  const expected=name+'에게 보낼 메시지';
+  assert.equal(await c.evaluate("document.querySelector('.hps-input textarea').getAttribute('aria-label')"),expected);
+  const {result}=await c.send('Runtime.evaluate',{expression:"document.querySelector('.hps-input textarea')",contextId:c.contextId,returnByValue:false});
+  const {node}=await c.send('DOM.describeNode',{objectId:result.objectId});
+  const {nodes}=await c.send('Accessibility.getPartialAXTree',{backendNodeId:node.backendNodeId,fetchRelatives:false});
+  const textbox=nodes.find(n=>n.role?.value==='textbox');assert.ok(textbox&&!textbox.ignored,'composer is absent from the actual accessibility tree');assert.equal(textbox.name?.value,expected);
+  composerChecks.push({name,role:textbox.role.value,accessible_name:textbox.name.value,ignored:textbox.ignored});await c.send('Runtime.releaseObject',{objectId:result.objectId});
   return c;
  };
  const connect=async(which)=>{
@@ -54,12 +62,15 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
   assert.ok((await text(entry,'.studio-course')).includes(cases[which].name));
   // No screenshots during credential entry. React has removed that field here.
   assert.equal(await entry.evaluate("!!document.querySelector('#course-code')"),false);
+  await surfaces?.connected({entry,name:cases[which].name,key:which,shot,wait});
   await click(entry,'.studio-primary');
+  if(which==='long')await surfaces?.started({entry,name:cases[which].name,app,window,shot,wait,setZoom,key});
   return assertName(cases[which].name);
  };
  try{
   const entry=await frame('.studio-course');
   assert.ok((await text(entry,'.studio-course')).includes(cases.a.name));
+  await surfaces?.connected({entry,name:cases.a.name,key:'first',shot,wait});
   await click(entry,'.studio-primary');
   let chat=await assertName(cases.a.name);
   await shot('a-fixed-name');
@@ -106,6 +117,7 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
   setZoom(1);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-1)<0.01,'Studio normal zoom setting');
   chat=await connect('legacy');await shot('legacy-default-name');record('A4-legacy',{name:cases.legacy.name,width:await chat.evaluate('innerWidth'),document_width:await chat.evaluate('document.documentElement.scrollWidth')});
   chat=await connect('a');
+  await surfaces?.verify({app,window,chat,frame,connect,shot,wait,fill,key,text,click,cases});
   if(live)for(const mode of ['400','stall']){
    setFault(mode);const prompt='합성 '+mode+' 검수: 실패 후 이 요청과 수업 이름을 보존해 주세요.';
    await fill(chat,composer,prompt);await key(chat,'Enter','Enter',{windowsVirtualKeyCode:13});
@@ -119,6 +131,7 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
    if(mode==='400')assert.equal(await chat.evaluate("!!document.querySelector('.hps-error-banner')"),true,'failure was not disclosed');
    await shot('failure-'+mode);record('A6-'+mode,{identity_preserved:true,submitted_message_preserved:true,unsent_followup_preserved:true,synthetic_gateway_fault:true});setFault('none');
   }
+  record('A7-composer',{scope:'actual native webview accessibility tree; screen-reader speech NOT_RUN',checks:composerChecks});
   writeFileSync(out+'/identity-result.json',JSON.stringify({status:problems.length?'FAIL':'PASS_EXECUTED_CASES',scope:'actual Mac app + local Service/SQLite; synthetic lessons',checks,failures:problems,not_run:['history identity at time of execution','all AI naming surfaces','screen reader','Windows',...(!live?['actual answer','failure and Stop']:[])],visual_review:'PENDING separate screenshot inspection'},null,2));
   if(problems.length)process.exitCode=1;
   console.log(problems.length?'FAIL feature A viewport acceptance; remaining independent cases recorded':'PASS feature A executed checks; screenshot review and unexecuted scope remain separate');

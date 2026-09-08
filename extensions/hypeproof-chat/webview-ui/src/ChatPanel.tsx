@@ -12,6 +12,7 @@ import type {
 } from "../../src/protocol";
 import { postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
+import { composerLabel, copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
 import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
 import {
   RUNNER_PHRASE_MS,
@@ -239,12 +240,9 @@ export function ChatPanel(props: Props) {
    * **아이에게 없는 버튼을 안 보여주기 위한 것**이지 보안 경계가 아니다.
    */
   const galleryEnabled = config?.profile?.publishing?.strategy === "hypeproof_gallery";
-  // Fixed-naming cohorts (e.g. boah-dental) must NOT show a user-supplied
-  // coach name carried over from a different cohort's user-data-dir (#140).
-  const coachName =
-    ux.coach.naming_mode === "fixed"
-      ? (ux.coach.fallback_name || "코치")
-      : (config?.coach?.name?.trim() || ux.coach.fallback_name || "코치");
+  // #140 / #747 — one identity rule shared with the host (coachIdentity.ts):
+  // a fixed cohort or lesson name wins over any stored student name.
+  const coachName = resolveCoachIdentity(config?.coach, { ux }).name;
 
   // Tone for hard-coded chat-panel labels — game (kids) vs search-webapp
   // (보아치과 teaser) vs website (보아치과 원장 copyclone) vs world
@@ -588,7 +586,7 @@ export function ChatPanel(props: Props) {
         </details>
       )}
 
-      {config?.profile?.observation?.format === 'hps-observation/1' && <NativeObservationPanel scope={config.profile.observation.scope} />}
+      {config?.profile?.observation?.format === 'hps-observation/1' && <NativeObservationPanel scope={config.profile.observation.scope} coachName={coachName} />}
       {config?.profile?.profile_id === 'studio-native-trial' && config.profile.observation?.format !== 'hps-observation/1' && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}
 
       <div className="hps-messages" ref={scrollRef}>
@@ -751,7 +749,7 @@ export function ChatPanel(props: Props) {
         >
           <textarea
             ref={textareaRef}
-            aria-label="코치에게 보낼 메시지"
+            aria-label={composerLabel(coachName)}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onPaste={handlePaste}
@@ -1107,14 +1105,14 @@ function EmptyState({
       <p className="hps-empty-greeting">
         {showCoachIntro && (
           <>
-            안녕하세요! 저는 <strong>{coachName}</strong>예요.
+            안녕하세요! 저는 <strong>{coachName}</strong>{copulaParticle(coachName)}.
             {hasGreeting && <br />}
           </>
         )}
         {hasGreeting ? (
           <span dangerouslySetInnerHTML={{ __html: renderInlineMd(greetingMd) }} />
         ) : (
-          !showCoachIntro && <>안녕하세요! 저는 <strong>{coachName}</strong>예요.</>
+          !showCoachIntro && <>안녕하세요! 저는 <strong>{coachName}</strong>{copulaParticle(coachName)}.</>
         )}
       </p>
     </div>
