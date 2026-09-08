@@ -1,0 +1,13 @@
+Effort verification proxy evidence /Users/jaylee/CodeWorkspace/hypeproof-studio/e2e/test-results/effort-799/20260908T211826Z-proxy
+✓ E2E preflight: app, wrangler, token all present
+
+Running 2 tests using 1 worker
+
+(node:89193) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:89193) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 ../.claude/worktrees/effort-799/e2e/tests/native-effort.spec.ts:8:1 › delayed auxiliary requests remain with their original turn (3ms)
+  ✓  2 ../.claude/worktrees/effort-799/e2e/tests/native-effort.spec.ts:15:1 › course effort reaches the real model and survives UI transitions (27.7s)
+
+  2 passed (28.1s)

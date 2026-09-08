@@ -135,6 +135,10 @@ const MODEL_CAPS: Record<AnthropicModelId, ModelCaps> = {
 
 };
 
+export function supportedEffort(model: string): readonly EffortLevel[] {
+  return (MODEL_CAPS as Record<string, ModelCaps | undefined>)[model]?.effort ?? [];
+}
+
 /** Highest level at or below `requested` that the model accepts, else undefined. */
 function downgradeEffort(
   requested: string,

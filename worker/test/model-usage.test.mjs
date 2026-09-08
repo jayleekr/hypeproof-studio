@@ -8,7 +8,7 @@ const {getProfile}=await import('../src/profiles/index.ts');
 const {measureUsage,reserveModelRequest,finishModelRequest}=await import('../src/lib/model-usage.ts');
 const {modelBinding,lessonModelIsCurrent}=await import('../src/lib/lesson-model-policy.ts');
 const id='studio-model-practice', app=await bootApp();
-const db=new DatabaseSync(':memory:');db.exec(readFileSync(new URL('../migrations/0005-model-usage.sql',import.meta.url),'utf8'));
+const db=new DatabaseSync(':memory:');db.exec(readFileSync(new URL('../migrations/0006-model-usage.sql',import.meta.url),'utf8'));
 const env=createMockEnv({withSession:false,withRoster:false,env:{LLM_PROVIDER:'anthropic',ANTHROPIC_API_KEY:'synthetic-claude',OPENAI_API_KEY:'synthetic-gpt',GLM_API_KEY:'synthetic-glm',GEMINI_API_KEY:'synthetic-gemini',HPS_MODEL_PRACTICE_REQUEST_LIMIT:'100',HPS_ADMIN_PASSWORD:'synthetic-admin'}});
 const original=env.HPS_DB;
 env.HPS_DB={prepare(sql){if(!sql.includes('model_usage_requests'))return original.prepare(sql);let args=[];return {bind(...v){args=v;return this;},async run(){return {success:true,meta:{changes:Number(db.prepare(sql).run(...args).changes)}};},async first(){return db.prepare(sql).get(...args)??null;},async all(){return {success:true,results:db.prepare(sql).all(...args)};}};}};

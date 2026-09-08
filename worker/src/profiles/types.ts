@@ -36,6 +36,7 @@ export interface Profile {
    */
   minor_cohort?: boolean;
   model: {
+    effort?: import('../lib/model-effort').EffortPolicy;
     default: ModelKey;
     fallback?: ModelKey;
     /** Explicit, reviewed catalogue keys for this cohort. Omission preserves the legacy pair. */

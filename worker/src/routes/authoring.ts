@@ -1,6 +1,6 @@
 // Instructor authoring API. Service owns writes; Chalk forwards the same HTTP contract.
 import { FEATURE_LABELS, permittedFeatureKeys, validateFeatureSubset, featureBinding } from '../lib/lesson-feature-policy';
-import { validateModelSubset, modelBinding } from '../lib/lesson-model-policy';
+import { validateModelSubset, modelBinding, servedModelSelection } from '../lib/lesson-model-policy';
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
@@ -39,7 +39,7 @@ authoring.get(root + '/models/:profile', c => {
   const profile = getProfile(c.req.param('profile')!);
   if (!profile || profile.session.cohort_id !== c.req.param('cohort') || !c.get('author').scope.profiles.includes(profile.id))
     return c.json({ error: 'profile not permitted' }, 403);
-  try { return c.json({ ...modelBinding(c.env, profile), default: profile.model.default }); }
+  try { const selection=servedModelSelection(c.env,profile); if (!selection) throw new Error('unconfigured'); return c.json({ ...selection, effort: profile.model.effort, default: profile.model.default }); }
   catch { return c.json({ error: 'model provider is not configured' }, 409); }
 });
 

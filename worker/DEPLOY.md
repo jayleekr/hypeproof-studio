@@ -157,7 +157,7 @@ not auto-applied here — leave as a future tweak per cohort.
 
 ## Adult model comparison (#841)
 
-Apply the additive `migrations/0005-model-usage.sql` before deploying this feature;
+Apply the additive `migrations/0006-model-usage.sql` before deploying this feature;
 the guarded deploy workflow includes this idempotent step. Existing usage_log and
 classes are unchanged. The new hidden studio-model-practice profile stays closed
 until HPS_MODEL_PRACTICE_REQUEST_LIMIT is explicitly set (1..10000 attempts per
@@ -169,3 +169,14 @@ Rollback: previous Worker source 18281a9 remains compatible with the additive
 table. Preserve request evidence; do not drop tables or reset usage during rollback.
 Unknown/pending execution requires operator reconciliation before general admission
 is enabled; the follow-up budget/role UI is #800.
+
+## Course effort settings (#799)
+
+Apply additive `migrations/0005-request-settings.sql` before deploying the Service.
+The worker deploy workflow applies it idempotently. Then deploy Chalk and the App.
+`usage_request_settings` contains request-setting metadata only; `usage_log` remains
+the usage source. A missing table/write/read yields an unconfirmed UI receipt, never
+a successful-settings claim. Rollback keeps all data. Older Service builds do not
+accept the new frozen effort schema: stop issuing new effort lessons and restore the
+prior lesson/version before using an older Service. This does not change retention,
+pricing, raw-content logging or existing students' credentials.

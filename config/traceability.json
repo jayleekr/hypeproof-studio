@@ -208,6 +208,52 @@
       ]
     },
     {
+      "id": "ST-DES-COURSE-EFFORT",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/model-effort-and-course-usage.md",
+          "section": "## 수업 effort 구현 계약 (#799)"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-COURSE-EFFORT",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME",
+        "ST-DES-COURSE-EFFORT"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/lesson-effort.md"
+        },
+        {
+          "path": "worker/test/lesson-effort-policy.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/model-selection.smoke.mjs"
+        },
+        {
+          "path": "e2e/tests/native-effort.spec.ts"
+        },
+        {
+          "path": "e2e/chalk-authoring/run.mjs"
+        },
+        {
+          "path": "e2e/tests/native-effort-old-client.spec.ts"
+        },
+        {
+          "path": "worker/test/request-settings-d1.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-GPT-PRACTICE",
       "stage": "test",
       "owner": "jayleekr",

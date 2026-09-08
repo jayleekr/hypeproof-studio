@@ -1,0 +1,161 @@
+# Course effort evidence — 2026-09-08
+
+REQ-M40 / #799. Product code verified at `39f8b29`; exact commits, bundle digests,
+Node/platform and Service source digest are in each environment.json. The initial
+evidence-only commit was `a674bcd`; the integrated rerun is recorded below. All identities and lessons are synthetic; the
+upstream is the real Anthropic API. This is not production-class validation.
+
+| Run | Real API requests | Result |
+|---|---:|---|
+| [Agent SDK](agent-sdk/effort-result.json) | 22 | PASS: 9 models, 11 user turns including fixed course |
+| [Proxy](proxy/effort-result.json) | 11 | PASS: same cases through the proxy runtime |
+| [Untouched v0.1.56](old-client/old-client-result.json) | 2 | PASS: absent effort header receives frozen medium default |
+
+All 35 calls returned HTTP 200. API request shape and gateway request-setting records (synthetic SQLite binding)
+are independently compared; response text is not proof of the applied setting. Agent SDK emits an
+additional request in these cases. The grouping waits for observed pending calls
+and compares turn IDs, rather than assuming every late response belongs to the
+next user turn. This is not a complete billing/attempt ledger (#800).
+
+Real cases: Sonnet 4.6 low/high, Sonnet 5 medium, Opus 4.5 low, Opus 5 high,
+Opus 4.6 medium, Opus 4.7 low, Opus 4.8 high, unsupported Haiku 4.5 and Sonnet 4.5,
+and a second frozen course fixed to Sonnet 4.6 low. The Service mock/SQLite matrix
+also covers all 9 models × both routes × absent/low/medium plus denied values,
+fixed policy, duplicate persistence and cross-student/course denial. This does not
+claim all three effort levels were live-tested on every model or verify every tool.
+
+Both current-App runs use an isolated copy of the v0.1.56 Mac arm64 shell with the
+candidate extension injected. The update banner on that development copy is not a
+release result. The old-client control uses an unmodified v0.1.56 bundle. Production
+state and the installed personal app were not changed. Execution cwd is the primary
+clone's e2e directory. One isolated gateway ran at a time.
+
+The agent opened all final PNGs retained here and visually checked them: current
+App at 390 CSS px/200% and 1280px/100%, unsupported model detail, fixed model/effort,
+Chalk at 390/1280px and the old client. The JSON's original visual_review=PENDING is
+preserved as the runner output; this paragraph records the subsequent inspection.
+The composer test now checks the Send button is inside the short viewport.
+
+- [Student controls at 390px](agent-sdk/effort-390.png)
+- [Fixed course and applied request settings](agent-sdk/fixed-course.png)
+- [Unsupported model](agent-sdk/unsupported-model-record.png)
+- [Instructor selection](chalk-effort-390.png)
+
+Earlier failures are preserved in prior-runs: hidden-window screenshot timeout;
+late auxiliary responses incorrectly grouped by array position; an alias absent
+from the actual catalogue. A separate visual finding was the Send button being
+pushed below a 200% viewport; collapsed-card spacing and scroll reachability were
+fixed and the rerun explicitly verifies the button. Capturing the full Electron
+window fixed the clipped zoom screenshot. Quiet runs remain offscreen/nonfocusable;
+HPS_QUIET_NO_HIDE=1 avoids hidden-renderer capture stalls.
+
+Windows actual-device tests, screen-reader speech, production migration, released
+candidate App, instructor pilot, budget settlement and learning outcomes are NOT RUN.
+The existing requirements for full release/production adoption remain in force.
+SHA-256 of retained raw files is in sha256.json.
+
+
+## Integration with main #829
+
+After main added the separate GPT practice profile, the resolved candidate at
+`85c1c95e065f16991aefb5ee526558f50d753b3e` was rerun through all three paths.
+[SDK](after-main-829/agent-sdk/effort-result.json) 22 calls,
+[proxy](after-main-829/proxy/effort-result.json) 11 calls, and
+[untouched old App](after-main-829/old-client/old-client-result.json) 2 calls all
+returned HTTP 200 and passed the same setting/receipt controls. These 35 calls
+are additional to the 35 pre-integration calls above, not replacements.
+All nine retained rerun App PNGs and both Chalk effort PNGs were opened by the
+agent and visually inspected; the original runner review status is unchanged.
+
+Worker full tests (including GPT practice) and typecheck, Chalk browser flow,
+docs score 100/100, registry and native controls passed after integration.
+The extension code/bundles did not change in the main integration; the full
+extension tests, typecheck and builds from the first acceptance remain applicable.
+The GPT subscription persona generation was not repeated for this effort change;
+its existing evidence stays scoped to #829's own source.
+
+A separate [local workerd/D1 check](after-main-829/local-d1.txt) executed the
+production migration and request-settings functions: repeated migration preserves
+records, eight concurrent duplicate writes produce one row, nullable values are
+preserved, and each cohort/student/profile/course/version/hash/turn scope is
+isolated. Run `npm --prefix worker run test:effort:d1` to reproduce it. This does
+not imply production migration or billing settlement has run.
+
+The old-App rerun manifest truthfully records `dirty: true`: only the new local
+D1 test and its package/registry wiring were being added during that run.
+All three reruns have the same Service source digest
+`db600a140a53d69977b1cd0d5ccf8f0e2e55e54c4f1f3608bdbecf56e600ce58`.
+Until the next integration below, no runtime source or native acceptance spec
+changed after the #829 merge commit.
+
+
+## Integration with main #832 / #833
+
+Main's historical assistant-name preservation changes the host, protocol and
+webview shared with effort. The integrated source at
+`57deb0c15798a70b6b3bfca6af4686deb03a23b9` was rebuilt and rerun:
+[SDK](after-main-832/agent-sdk/effort-result.json) 22 real API calls and
+[proxy](after-main-832/proxy/effort-result.json) 11 calls all returned HTTP 200 and
+passed the outbound-setting/receipt comparisons. These 33 calls are additional
+to the previous two 35-call sets; failed earlier runs are not included in those
+counts. The full [extension tests, typecheck and builds](after-main-832/extension-checks.txt),
+including the new history-identity regression, passed before the native rerun.
+The exact rebuilt bundle hashes and clean source status are in both environment.json files.
+
+The agent opened all eight new PNGs and checked the 390 CSS px/200% and 1280px/100%
+composer, fixed course, and unsupported-model detail. The runner's original
+visual_review=PENDING is preserved; this records the subsequent inspection.
+The course name appears as 제작 파트너 in the header and assistant replies.
+The existing generic AI-coach notice remains visible; changing that copy is
+outside this effort change. No general naming or full UI acceptance is claimed.
+
+The Service source digest remains
+`db600a140a53d69977b1cd0d5ccf8f0e2e55e54c4f1f3608bdbecf56e600ce58`, identical to
+all after-main-829 runs. The untouched v0.1.56 control's two real requests and
+Worker/Chalk checks from that run therefore remain the compatibility evidence;
+no extra old-client API run or production migration is claimed. Main #833 changes
+persona verification, not effort runtime behavior. Its full persona pilot was not
+rerun by this effort task. Release and learning limits above still apply.
+
+
+## Integration with main #834
+
+Main moved the existing seat lock around both runtime paths and SDK fallback.
+The integrated source `28052a30e31a16709fba927f3130934ea8c9188d` preserves that
+lock plus the effort snapshot/headers. The full extension tests (including the
+updated seat-session test), typecheck and both builds passed; see
+[extension checks](after-main-834/extension-checks.txt).
+[SDK](after-main-834/agent-sdk/effort-result.json) 22 calls and
+[proxy](after-main-834/proxy/effort-result.json) 11 calls were rerun against the
+real API, all HTTP 200 with setting/receipt controls passing. All eight retained
+PNGs were opened and visually inspected by the agent; the runner's original
+visual_review value is preserved. These are 33 additional calls, separately
+retained from #832's run. The exact clean source and rebuilt bundle hashes are
+recorded in environment.json. The Service digest is still identical to the
+old-client control; no additional old-client or Worker/Chalk rerun is claimed.
+These native sequential turns do not independently prove concurrent-seat refusal;
+that is covered by the executed seat-session test. No release/pilot claim changes.
+
+
+## English effort labels — user feedback
+
+Source `b9aa52854a8f457ff4280f00040b6bd8494d1a2a` changes the App/Chalk
+control name to **Effort** and its level/receipt labels to **Low / Medium / High**.
+Wire values, capabilities, defaults, instructor policy and Service source are
+unchanged. The earlier screenshots remain accurate historical evidence of the
+Korean labels; use the following images for the current UI:
+
+- [Studio 390px / 200%](english-labels/agent-sdk/effort-390.png)
+- [Studio 1280px](english-labels/agent-sdk/effort-1280.png)
+- [Fixed Low with observed request settings](english-labels/agent-sdk/fixed-course.png)
+- [Chalk 390px](english-labels/effort-choice-390.png)
+- [Chalk 1280px](english-labels/effort-choice-1280.png)
+
+The webview/extension build and existing Chalk browser acceptance passed. The
+existing native SDK acceptance was rerun with the rebuilt shared UI and updated
+accessible label: 22 additional real API calls, all HTTP 200, setting/receipt
+comparisons and keyboard/draft/viewport checks PASS. All four new App PNGs and two
+Chalk PNGs were opened by the agent and visually inspected. Raw review flags stay
+unchanged. The proxy/old-client and local D1 evidence above remains scoped to its
+recorded source; no extra run of those paths is claimed for this wording change.
+This does not add GPT effort or additional provider levels. No deployment occurred.
