@@ -22,7 +22,7 @@ for(const persona of suite.personas.filter((p:any)=>!selected||selected.includes
    record.model=await selector.inputValue();
    const upstreamCount=()=>{const path=join(process.env.HPS_NATIVE_EVIDENCE_DIR!,'api-evidence.json');return existsSync(path)?JSON.parse(readFileSync(path,'utf8')).calls.length:0;};
    const fault=async(value:string)=>{
-    const response=await fetch('http://127.0.0.1:8787/__test/fault',{method:'POST',headers:{authorization:'Bearer '+ctx.token},body:value});
+    const response=await fetch(process.env.HPS_E2E_PROXY_URL!.replace(/\/v1\/?$/, '')+'/__test/fault',{method:'POST',headers:{authorization:'Bearer '+ctx.token},body:value});
     expect(response.status).toBe(204);
    };
    for(let index=0;index<persona.turns.length;index++){

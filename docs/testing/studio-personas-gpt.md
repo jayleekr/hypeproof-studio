@@ -20,7 +20,7 @@
 | P6 | 서버 오류와 재시도 | 503 표시, 실패 시 upstream 0회, 재시도 1회와 메시지 중복 없음 |
 
 자동 검사는 인증된 실제 UI 조작, 전송 종료, 오류 표시, 파일과 URL을 확인한다.
-의미는 저장된 원문을 사람이 검토해 PASS/FAIL과 근거를 남긴다. 오류 없는 응답만으로
+의미는 저장된 원문을 검토하고 검토 주체를 밝혀 PASS/FAIL과 근거를 남긴다. 오류 없는 응답만으로
 제품 의도 충족을 선언하지 않는다. T25의 실제 사람 파일럿은 별도다.
 
 ## 비용과 인증
@@ -28,6 +28,7 @@
 1. `npm --prefix worker run test:gpt-practice`: 네트워크 없이 정상·실패 대조군을 실행한다.
 2. 로컬 GPT 실습은 공식 `codex app-server`의 ChatGPT 로그인을 재사용한다.
    설치된 CLI의 `codex login status`, 실제 `account/read`, `model/list`와 응답으로 확인한다.
+   앱·플러그인·기존 MCP 도구는 이 자식 프로세스에서 끄고, 실제 도구 목록이 비어 있는지 확인한다.
    인증 파일과 토큰을 읽거나 Service에 복사하지 않는다. 로그인은 사용자가 공식 CLI에서 한다.
 3. Service는 기존 참여 코드·성인 프로필·roster·1시간 세션을 검사한다.
    `studio-gpt-practice`는 별도 일반 실습 코호트다. 기존 native trial grant는 사용하지 않는다.
@@ -45,8 +46,9 @@
 ## 실제 Mac 실행
 
 설치된 앱의 사본과 별도 user-data/workspace를 사용한다. 전체 앱 빌드는 하지 않는다.
-기존 `scripts/test-native-trial-laptop.sh`가 확장 코드를 빌드·복사하고 자체 Service(8787)를
-종료한다. 사용 중인 Service가 8787에 있으면 실행을 중단한다. 로그에 토큰을 출력하지 않는다.
+기존 `scripts/test-native-trial-laptop.sh`가 확장 코드를 빌드·복사하고 자체 Service를
+종료한다. 기본 포트 8787이 사용 중이면 실행을 중단하며 `HPS_NATIVE_PORT=8788`처럼
+비어 있는 별도 포트를 지정할 수 있다. 다른 프로세스를 종료하지 않는다. 로그에 토큰을 출력하지 않는다.
 
 ```bash
 HPS_NATIVE_PERSONAS=1 HPS_CODEX_REHEARSAL=1 HPS_NATIVE_FAULTS=1 \

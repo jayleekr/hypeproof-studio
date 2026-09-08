@@ -9,6 +9,8 @@ import {DatabaseSync} from 'node:sqlite';
 import { bootApp, createMockEnv, makeCtx } from './harness/index.mjs';
 const { issue, issueIssuer } = await import('../src/lib/tokens.ts');
 
+const port = Number(process.env.HPS_NATIVE_PORT || 8787);
+if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('invalid isolated gateway port');
 const codexMode = process.env.HPS_CODEX_REHEARSAL === '1';
 if (!codexMode && !process.env.ANTHROPIC_API_KEY) throw new Error('BLOCKED: ANTHROPIC_API_KEY is not configured in this test runner');
 const output = resolve(process.env.HPS_NATIVE_EVIDENCE_DIR || '../e2e/test-results/native-trial');
@@ -99,7 +101,7 @@ const server = createServer(async (req, res) => {
     const method = req.method || 'GET', ctx = makeCtx();
     // Isolated synthetic harness only: selected record evidence, never credentials.
     if(req.url==='/v1/observations/assess') writeFileSync(resolve(output,'observation-input.json'),Buffer.concat(chunks),{mode:0o600});
-    const request = new Request(`http://127.0.0.1:8787${req.url}`, { method, headers: req.headers, signal: cancellation.signal,
+    const request = new Request(`http://127.0.0.1:${port}${req.url}`, { method, headers: req.headers, signal: cancellation.signal,
       ...(['GET', 'HEAD'].includes(method) ? {} : { body: Buffer.concat(chunks) }) });
     let response = await app.fetch(request, env, ctx);
     if(process.env.HPS_NATIVE_FAULTS==='1'&&fault==='old-service'&&req.url==='/v1/profile'&&response.ok){const old=await response.json();delete old.observation;response=Response.json(old);}
@@ -111,7 +113,7 @@ const server = createServer(async (req, res) => {
     await ctx.settle();
   } catch { if (!res.headersSent) res.writeHead(500); res.end('isolated test gateway error'); }
 });
-server.listen(8787, '127.0.0.1', () => console.log('Isolated rehearsal gateway ready; '+(codexMode?'official Codex ChatGPT connection':'real Anthropic API')+'; synthetic storage'));
+server.listen(port, '127.0.0.1', () => console.log('Isolated rehearsal gateway ready; '+(codexMode?'official Codex ChatGPT connection':'real Anthropic API')+'; synthetic storage'));
 process.on('SIGTERM', () => server.close(() => {
  if(grantDb){writeFileSync(resolve(output,'grant-evidence.json'),JSON.stringify(grantDb.prepare('SELECT started_at,expires_at,request_limit,requests_used,lease_id IS NOT NULL AS busy FROM native_trials').all(),null,2));grantDb.close();}
  codex?.close();

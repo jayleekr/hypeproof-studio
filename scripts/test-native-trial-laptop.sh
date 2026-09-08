@@ -4,6 +4,9 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+GATEWAY_PORT="${HPS_NATIVE_PORT:-8787}"
+[[ "$GATEWAY_PORT" =~ ^[0-9]{1,5}$ ]] && (( 10#$GATEWAY_PORT >= 1024 && 10#$GATEWAY_PORT <= 65535 )) || { echo 'BLOCKED: HPS_NATIVE_PORT must be an integer from 1024 to 65535' >&2; exit 2; }
+export HPS_NATIVE_PORT="$GATEWAY_PORT"
 if [[ "$(uname -s)" != Darwin ]]; then
   echo 'BLOCKED: this rehearsal launches the macOS Studio app; run on the Mac laptop.' >&2
   exit 2
@@ -16,8 +19,8 @@ fi
 [[ -d "$SOURCE_APP/Contents" ]] || { echo 'BLOCKED: set HPS_APP_PATH to an installed Studio .app bundle.' >&2; exit 2; }
 [[ -f worker/.dev.vars ]] || { echo 'BLOCKED: worker/.dev.vars is missing; use the existing scripts/dev-secrets.sh setup.' >&2; exit 2; }
 node --env-file=worker/.dev.vars -e 'if (process.env.HPS_CODEX_REHEARSAL !== "1" && !process.env.ANTHROPIC_API_KEY) { console.error("BLOCKED: this SDK rehearsal requires ANTHROPIC_API_KEY in worker/.dev.vars"); process.exit(2) }'
-if curl --max-time 2 -fsS http://127.0.0.1:8787/v1/health >/dev/null 2>&1; then
-  echo 'BLOCKED: port 8787 already has a gateway. Stop your own dev stack first; this script will not kill it.' >&2
+if curl --max-time 2 -fsS "http://127.0.0.1:$GATEWAY_PORT/v1/health" >/dev/null 2>&1; then
+  echo "BLOCKED: port $GATEWAY_PORT already has a gateway. Set HPS_NATIVE_PORT to an unused test port; this script will not kill it." >&2
   exit 2
 fi
 
@@ -82,7 +85,7 @@ if [[ -n "${HPS_NATIVE_COMPAT_APP:-}" ]]; then
   export HPS_APP_PATH="$HPS_NATIVE_COMPAT_APP"
 fi
 export HPS_E2E_TOKEN_FILE="$NATIVE_TMP/token"
-export HPS_E2E_PROXY_URL='http://127.0.0.1:8787/v1'
+export HPS_E2E_PROXY_URL="http://127.0.0.1:$GATEWAY_PORT/v1"
 export HPS_NATIVE_LIVE=1
 export HPS_NATIVE_EVIDENCE_DIR="$ROOT/e2e/test-results/native-trial/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$HPS_NATIVE_EVIDENCE_DIR"
@@ -91,7 +94,7 @@ node --env-file=worker/.dev.vars --experimental-strip-types worker/test/native-t
 GATEWAY_PID=$!
 ready=0
 for attempt in {1..30}; do
-  if curl --max-time 2 -fsS http://127.0.0.1:8787/v1/health >/dev/null 2>&1; then ready=1; break; fi
+  if curl --max-time 2 -fsS "http://127.0.0.1:$GATEWAY_PORT/v1/health" >/dev/null 2>&1; then ready=1; break; fi
   if ! kill -0 "$GATEWAY_PID" 2>/dev/null; then break; fi
   sleep 1
 done
