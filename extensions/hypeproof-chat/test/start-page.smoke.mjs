@@ -8,7 +8,7 @@ const profile={profile_id:'adult',display_name:'Adult practice',ux:{coach:{namin
 let stored='valid-old', busy=false, response='valid',writes=0;
 const states=[];const commands=[];
 const ctx={secrets:{get:async()=>stored,store:async(_k,v)=>{stored=v;writes++;},delete:async()=>{stored=undefined;writes++;}},extension:{packageJSON:{version:'test'}},subscriptions:[]};
-const chat={ensureProfile:async()=>stored?.startsWith('valid')?profile:null,profileFailure:()=>null,invalidateProfile(){},refreshConfig(){},hasActiveStream:()=>busy,setConnectionChanging(v){this.changing=v;},coachDisplayName:p=>p?.ux?.coach?.fallback_name||'코치'};
+const chat={ensureProfile:async()=>stored?.startsWith('valid')?profile:null,profileFailure:()=>null,invalidateProfile(){},refreshConfig(){},hasActiveStream:()=>busy,setConnectionChanging(v){this.changing=v;},coachDisplayName:p=>p?.ux?.coach?.fallback_name||'코치',coachNameIsChosen:p=>p?.ux?.coach?.naming_mode==='fixed'};
 const vscode={workspace:{workspaceFolders:[],getConfiguration:()=>({get:()=> 'http://local/v1'})},window:{},commands:{executeCommand:async id=>commands.push(id)}};
 const module={exports:{}};
 vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,require:id=>id==='vscode'?vscode:require(id),console,Buffer,AbortSignal,fetch:async()=>{

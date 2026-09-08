@@ -49,6 +49,7 @@ import {
   browserApprovalTitle,
   coachDegradedNotice,
   pageAttachedNotice,
+  profileNotReadyNotice,
   shellApprovalTitle,
 } from "./coachIdentity.ts";
 import { CdpSession } from "./cdpSession";
@@ -665,6 +666,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   coachDisplayName(profile: ResolvedProfile | null = this.cachedProfile): string {
     return resolveCoach(this.getCoach(), profile).name;
+  }
+
+  /**
+   * #747 — true when the displayed name was actually chosen: fixed by the
+   * cohort/lesson, or named by this student. False means a `user_names_it`
+   * seat that has not been through the naming step, where the start page
+   * should describe the mode instead of showing the placeholder as a name.
+   */
+  coachNameIsChosen(profile: ResolvedProfile | null = this.cachedProfile): boolean {
+    return profile?.ux.coach.naming_mode === "fixed" || this.getCoach().configured;
   }
 
   /**
@@ -2235,7 +2246,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         });
       if (runtime === "agent-sdk") {
         if (!profile) {
-          throw new Error("코치 프로필을 아직 못 받았어요. 잠시 후 다시 시도해주세요.");
+          throw new Error(profileNotReadyNotice(this.coachDisplayName()));
         }
         if (!token) {
           throw new ProxyAuthError("missing", TOKEN_MISSING_FRIENDLY);
@@ -2246,6 +2257,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             token,
             model,
             profile,
+            // #747 — failure copy inside the SDK run names the same AI as the
+            // header and the approval modals.
+            coachName: this.coachDisplayName(profile),
             // The worker gateway (POST /v1/messages, #316) DROPS the client
             // `system` field and injects the cohort profile blocks server-side
             // (REQ-M10) — the tuned Korean prompt + classroom key never leave

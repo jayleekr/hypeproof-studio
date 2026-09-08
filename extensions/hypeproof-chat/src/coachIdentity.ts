@@ -48,24 +48,36 @@ export function resolveCoachIdentity(
 
 // ─── Korean particles ────────────────────────────────────────────────
 // A Hangul syllable (U+AC00..U+D7A3) has a final consonant (받침) when
-// (code − 0xAC00) % 28 ≠ 0. Names ending in anything else (Latin, digits,
-// emoji, closing quote/bracket) take the vowel form, which is how mixed-script
-// names are usually written. The last *letter* is used: a trailing closing
-// bracket or quote is skipped.
+// (code − 0xAC00) % 28 ≠ 0. Trailing punctuation, symbols and whitespace are
+// skipped so the last real letter or digit decides; digits use their
+// Sino-Korean reading; Latin and emoji finals keep the vowel form.
 
-function lastHangul(name: string): number | null {
+// Sino-Korean readings of the digits; those ending in a consonant take the
+// 받침 form. 0 영, 1 일, 3 삼, 6 육, 7 칠, 8 팔 → 받침; 2 이, 4 사, 5 오, 9 구 → none.
+const DIGIT_FINAL_CONSONANT: Record<string, boolean> = {
+  "0": true, "1": true, "2": false, "3": true, "4": false,
+  "5": false, "6": true, "7": true, "8": true, "9": false,
+};
+// Trailing decoration a student may type ("별똥별!", "별똥별 ✨", "코치(임시)") does not
+// decide the particle — the last letter or digit does. Latin and emoji finals keep
+// the vowel form: their Korean reading is ambiguous and a wrong 받침 reads worse.
+const TRAILING_DECORATION = /[\p{P}\p{S}\p{Cf}\s]/u;
+
+function lastMeaningful(name: string): string | null {
   const chars = [...name.trim()];
   for (let i = chars.length - 1; i >= 0; i--) {
-    const code = chars[i].codePointAt(0)!;
-    if (/[\s)\]}>"'`»”’]/u.test(chars[i])) continue;
-    if (code >= 0xac00 && code <= 0xd7a3) return code;
-    return null;
+    if (TRAILING_DECORATION.test(chars[i])) continue;
+    return chars[i];
   }
   return null;
 }
 const hasFinalConsonant = (name: string): boolean => {
-  const code = lastHangul(name);
-  return code !== null && (code - 0xac00) % 28 !== 0;
+  const ch = lastMeaningful(name);
+  if (ch === null) return false;
+  if (ch in DIGIT_FINAL_CONSONANT) return DIGIT_FINAL_CONSONANT[ch];
+  const code = ch.codePointAt(0)!;
+  if (code < 0xac00 || code > 0xd7a3) return false;
+  return (code - 0xac00) % 28 !== 0;
 };
 
 /** 주격 — 코치가 / 별똥별이 */
@@ -76,11 +88,14 @@ export const withParticle = (name: string): string => (hasFinalConsonant(name) ?
 export const topicParticle = (name: string): string => (hasFinalConsonant(name) ? "은" : "는");
 /** 목적격 — 코치를 / 별똥별을 */
 export const objectParticle = (name: string): string => (hasFinalConsonant(name) ? "을" : "를");
+/** 서술격 — 코치예요 / 별똥별이에요 */
+export const copulaParticle = (name: string): string => (hasFinalConsonant(name) ? "이에요" : "예요");
 
 export const asSubject = (name: string): string => `${name}${subjectParticle(name)}`;
 export const asCompanion = (name: string): string => `${name}${withParticle(name)}`;
 export const asTopic = (name: string): string => `${name}${topicParticle(name)}`;
 export const asObject = (name: string): string => `${name}${objectParticle(name)}`;
+export const asPredicate = (name: string): string => `${name}${copulaParticle(name)}`;
 
 // ─── Sentences that name the AI ───────────────────────────────────────
 // Kept here (not scattered) so a rename is one place and the default-name
@@ -124,3 +139,35 @@ export const startPageCopy = (name: string = DEFAULT_COACH_NAME) => ({
 /** Observation panel intro (webview). */
 export const observationIntro = (name: string): string =>
   `내가 요청한 내용과 ${name}·도구가 수행한 일을 나누어 확인합니다.`;
+
+/** First greeting in an empty chat — 저는 코치예요 / 저는 별똥별이에요. */
+export const coachIntroSentence = (name: string): string => `저는 ${asPredicate(name)}.`;
+
+// ─── Error / notice copy that names the AI (AE-07 "오류") ──────────────
+// Each keeps its previous wording for the default name, so the constant the
+// SDK error path throws (SDK_STALL_FRIENDLY) and the smoke tests that compare
+// it stay byte-identical. Gateway auth failure deliberately does NOT name the
+// AI (#760): a rejected participation code is about the code, not the AI.
+
+/** Stream produced nothing for the watchdog budget (#403). */
+export const stallNotice = (name: string = DEFAULT_COACH_NAME): string =>
+  `${name} 응답이 너무 오래 걸려요. 다시 한 번 보내주세요. 🕐`;
+
+/** The SDK runtime was selected before the resolved profile arrived. */
+export const profileNotReadyNotice = (name: string = DEFAULT_COACH_NAME): string =>
+  `${name} 프로필을 아직 못 받았어요. 잠시 후 다시 시도해주세요.`;
+
+/** Host prompt when the participant opens an image tab (#384). */
+export const imageAttachPrompt = (name: string, fileName: string): string =>
+  `🖼 방금 연 이미지 "${fileName}"를 ${name} 채팅에 붙일까요?`;
+
+/**
+ * Name-agnostic shape of every approval-modal title above. Observation tooling
+ * must separate a coach modal from a VS Code dialog WITHOUT keying on the name:
+ * the name is now per-lesson/per-student, so a literal "코치가 " prefix stops
+ * matching the moment an instructor renames the AI. `e2e/observe/watch.mjs`
+ * owns that classification; this pattern is the contract it should use, and
+ * test/coach-identity.smoke.mjs asserts every title matches it.
+ */
+export const APPROVAL_TITLE_PATTERN =
+  /(저장하|읽으|찾아보|맡기|입력하|실행하|열|작업을 하)려고 해요/;

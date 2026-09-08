@@ -12,7 +12,7 @@ import type {
 } from "../../src/protocol";
 import { postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
-import { resolveCoachIdentity } from "../../src/coachIdentity";
+import { copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
 import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
 import {
   RUNNER_PHRASE_MS,
@@ -1104,14 +1104,14 @@ function EmptyState({
       <p className="hps-empty-greeting">
         {showCoachIntro && (
           <>
-            안녕하세요! 저는 <strong>{coachName}</strong>예요.
+            안녕하세요! 저는 <strong>{coachName}</strong>{copulaParticle(coachName)}.
             {hasGreeting && <br />}
           </>
         )}
         {hasGreeting ? (
           <span dangerouslySetInnerHTML={{ __html: renderInlineMd(greetingMd) }} />
         ) : (
-          !showCoachIntro && <>안녕하세요! 저는 <strong>{coachName}</strong>예요.</>
+          !showCoachIntro && <>안녕하세요! 저는 <strong>{coachName}</strong>{copulaParticle(coachName)}.</>
         )}
       </p>
     </div>

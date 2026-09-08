@@ -65,6 +65,7 @@ export function StartPage() {
   </main>;
 }
 
-export function DisconnectedChat({ open }: { open: () => void }) {
-  return <main className="studio-disconnected"><Brand/><h1>시작할 준비가 됐나요?</h1><p>수업을 연결하면 이곳에서<br/>내 코치와 작업을 이어갈 수 있습니다.</p><button className="studio-primary" onClick={open}>시작 화면 열기 <span aria-hidden="true">↗</span></button></main>;
+export function DisconnectedChat({ open, coachName }: { open: () => void; coachName?: string }) {
+  const [lead1, lead2] = startPageCopy(coachName).disconnectedLead.split("\n");
+  return <main className="studio-disconnected"><Brand/><h1>시작할 준비가 됐나요?</h1><p>{lead1}<br/>{lead2}</p><button className="studio-primary" onClick={open}>시작 화면 열기 <span aria-hidden="true">↗</span></button></main>;
 }

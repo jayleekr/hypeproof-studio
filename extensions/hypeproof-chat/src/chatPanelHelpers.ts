@@ -235,9 +235,14 @@ export function sanitizeCoachInput(
   personality: string,
   fallbackName: string,
 ): { name: string; personality: string } {
+  // #747 — a stored name is spliced into native modal titles and notices, so
+  // strip control/format characters (line breaks, zero-width, bidi overrides)
+  // before the clamp: they can blank or reorder a modal title. Same rule the
+  // Service applies to an instructor-set lesson name (ADR-0005).
+  const strip = (s: string) => s.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, "").trim();
   return {
-    name: (name.trim() || fallbackName).slice(0, COACH_NAME_MAX),
-    personality: personality.trim().slice(0, COACH_PERSONALITY_MAX),
+    name: (strip(name) || fallbackName).slice(0, COACH_NAME_MAX),
+    personality: strip(personality).slice(0, COACH_PERSONALITY_MAX),
   };
 }
 
