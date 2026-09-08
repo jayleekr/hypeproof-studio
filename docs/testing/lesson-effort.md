@@ -21,3 +21,10 @@ Chromium), EFF-T02D local workerd/D1 PASS. EFF-T05 PASS: 9개 모델, SDK 22건�
 운영 코호트는 수정하지 않는다. primary clone의 e2e 디렉터리에서 실행하며 로그와
 스크린샷은 `e2e/test-results/effort-799/`에 보존한다. environment.json에 소스/번들
 해시를 기록한다. 스크린샷은 사람이 열어 본 뒤에만 시각 검수로 인정한다.
+
+
+영문 표기 변경 (`b9aa528`) 후: App/Chalk의 `Effort`와 `Low / Medium / High`를
+새 화면으로 확인했다. webview/extension 빌드, Chalk 기존 브라우저 검증,
+실제 App SDK 22건과 설정 기록 대조 PASS. 이전 한국어 스크린샷은 과거 증거로
+유지하며 [새 영문 화면](../research/agent-experience-acceptance-2026-09-08/course-effort/README.md#english-effort-labels--user-feedback)을 사용한다.
+전송값/Service 정책은 동일하며 proxy·구형 앱·D1 검증을 다시 실행했다고 주장하지 않는다.

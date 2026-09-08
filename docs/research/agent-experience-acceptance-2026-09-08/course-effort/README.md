@@ -135,3 +135,27 @@ recorded in environment.json. The Service digest is still identical to the
 old-client control; no additional old-client or Worker/Chalk rerun is claimed.
 These native sequential turns do not independently prove concurrent-seat refusal;
 that is covered by the executed seat-session test. No release/pilot claim changes.
+
+
+## English effort labels — user feedback
+
+Source `b9aa52854a8f457ff4280f00040b6bd8494d1a2a` changes the App/Chalk
+control name to **Effort** and its level/receipt labels to **Low / Medium / High**.
+Wire values, capabilities, defaults, instructor policy and Service source are
+unchanged. The earlier screenshots remain accurate historical evidence of the
+Korean labels; use the following images for the current UI:
+
+- [Studio 390px / 200%](english-labels/agent-sdk/effort-390.png)
+- [Studio 1280px](english-labels/agent-sdk/effort-1280.png)
+- [Fixed Low with observed request settings](english-labels/agent-sdk/fixed-course.png)
+- [Chalk 390px](english-labels/effort-choice-390.png)
+- [Chalk 1280px](english-labels/effort-choice-1280.png)
+
+The webview/extension build and existing Chalk browser acceptance passed. The
+existing native SDK acceptance was rerun with the rebuilt shared UI and updated
+accessible label: 22 additional real API calls, all HTTP 200, setting/receipt
+comparisons and keyboard/draft/viewport checks PASS. All four new App PNGs and two
+Chalk PNGs were opened by the agent and visually inspected. Raw review flags stay
+unchanged. The proxy/old-client and local D1 evidence above remains scoped to its
+recorded source; no extra run of those paths is claimed for this wording change.
+This does not add GPT effort or additional provider levels. No deployment occurred.

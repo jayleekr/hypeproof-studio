@@ -1,0 +1,4 @@
+(node:8090) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS Chalk model choice save/reopen/freeze; later fixed-model draft preserves original version
+PASS Chalk browser: import/edit/save/reopen/freeze, immutable version + AI name, concurrent 409 name/edit preservation, 401/403 preservation, request draft, mobile, no token storage
