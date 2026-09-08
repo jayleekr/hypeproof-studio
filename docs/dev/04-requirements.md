@@ -141,3 +141,15 @@ Detailed contract: [studio-trial](../requirements/studio-trial.md).
 - 수업 effort (#799): [REQ-M40](../studio-requirements.md), [설계와 경계](../design/model-effort-and-course-usage.md#수업-effort-구현-계약-799), [실행 범위](../testing/lesson-effort.md). 사용량·예산 #800의 완료와 구분한다.
 
 운영자 사용량 관측: REQ-L5 · [감사와 읽기 계약](../design/usage-observation-audit.md) · [검증](../testing/usage-observation.md). 예약/정산·역할별 예산은 #800 후속이며 미구현이다.
+
+
+## Candidate capability and pricing contracts
+
+Lab #777 → [Product Intent](../PRODUCT-INTENT.md) →
+[HC-01~08](../requirements/capability-model-contract.md) /
+[AB-01~18](../requirements/access-budget-settlement.md) →
+[설계](../design/access-budget-settlement.md) →
+[CA-T01~19 계획](../testing/capability-and-access.md) →
+[후속 Epic](../plan/capability-and-pricing-epics.md).
+이 행은 계획 범위다. 기존 7개 key, NAT/AE, REQ-L5/M40, MU 요구사항은 보존하며
+구독·통화 예산 구현이나 연구 타당화 완료를 주장하지 않는다.

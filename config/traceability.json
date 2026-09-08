@@ -374,6 +374,77 @@
           "path": "e2e/tests/native-models.spec.ts"
         }
       ]
+    },
+    {
+      "id": "ST-INT-CAPABILITY-ACCESS",
+      "stage": "intent",
+      "owner": "jayleekr",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/PRODUCT-INTENT.md",
+          "section": "## 후보 모델과 이용 권한에 대한 Intent"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CAPABILITY-CONTRACT",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-CAPABILITY-ACCESS"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/capability-model-contract.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-ACCESS-BUDGET",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-CAPABILITY-ACCESS",
+        "ST-REQ-STUDIO-SAFETY",
+        "ST-REQ-MODEL-USAGE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/access-budget-settlement.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-ACCESS-BUDGET",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/access-budget-settlement.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CAPABILITY-ACCESS",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-DES-ACCESS-BUDGET"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/capability-and-access.md"
+        }
+      ]
     }
   ]
 }

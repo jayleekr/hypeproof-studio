@@ -204,6 +204,10 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 
 ## L. Safety / observability
 
+후속 설계: [AB 이용권·예산·정산](requirements/access-budget-settlement.md)과
+[HC 후보 역량 해석 계약](requirements/capability-model-contract.md). 두 문서는 Lab #777 / #800의
+**계획 요구사항**이며 아래 구현된 REQ-L5나 기존 관측 schema의 완료 범위를 넓히지 않는다.
+
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
 | REQ-L1 | Chat webview CSP | `default-src 'none'` + nonce'd script-src + connect-src webview only | U (cspBuilder) |
