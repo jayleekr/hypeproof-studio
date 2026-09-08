@@ -6,10 +6,12 @@ import { CodexLocalClient } from '../../scripts/lib/codex-local-client.mjs';
 import { codexRehearsalResponse, validateCodexRequest } from './harness/codex-rehearsal.mjs';
 
 const body = { model:'gpt-5.6-luna', messages:[{role:'user',content:'합성 요청'}], stream:true };
-function protocol({account='chatgpt', turn='success', holdThread=false}={}) {
+function protocol({account='chatgpt', turn='success', holdThread=false, externalTools=false}={}) {
  const requests=[];let send,held;
- const client=new CodexLocalClient({spawnProcess(_exe,args,options){
+ const client=new CodexLocalClient({listMcpNames:()=>['synthetic-server'],spawnProcess(_exe,args,options){
   assert(args.includes('forced_login_method="chatgpt"'));
+  assert(args.includes('features.apps=false'));assert(args.includes('features.plugins=false'));
+  assert(args.includes('mcp_servers.synthetic-server={command="false",enabled=false}'));assert(args.includes('mcp_servers={}'));assert(args.includes('features.code_mode_host=false'));
   for(const key of ['OPENAI_API_KEY','CODEX_API_KEY','ANTHROPIC_API_KEY'])assert.equal(options.env[key],undefined);
   const proc=new EventEmitter();proc.stdout=new PassThrough();proc.stderr=new PassThrough();
   send=m=>proc.stdout.write(JSON.stringify(m)+'\n');
@@ -20,6 +22,7 @@ function protocol({account='chatgpt', turn='success', holdThread=false}={}) {
     const reply=result=>send({id:m.id,result});
     if(m.method==='initialize')reply({});
     else if(m.method==='account/read')reply({account:account?{type:account}:null});
+    else if(m.method==='mcpServerStatus/list')reply({data:externalTools?[{tools:{unexpected:{}}}]:[]});
     else if(m.method==='model/list')reply({data:[{model:'gpt-5.6-luna',displayName:'Luna'}]});
     else if(m.method==='thread/start'){
      assert.equal(m.params.ephemeral,true);assert.equal(m.params.sandbox,'read-only');
@@ -86,4 +89,8 @@ test('adapter consumer cancellation reaches provider',async()=>{
  let signal;const records=[];
  const response=codexRehearsalResponse({complete(args){signal=args.signal;return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(Error('codex_cancelled')),{once:true}));}},body,{record:r=>records.push(r)});
  await response.body.cancel();await new Promise(r=>setImmediate(r));assert.equal(signal.aborted,true);assert.equal(records[0].status,'failed');
+});
+
+test('unexpected connected external tools block generation before a thread starts',async()=>{
+ const p=protocol({externalTools:true});try{await assert.rejects(p.client.connect(),/tools_not_disabled/);assert(!p.requests.some(x=>x.method==='thread/start'));}finally{p.client.close();}
 });

@@ -71,6 +71,7 @@ globalThis.fetch = async (input, init) => {
     ...(init?.signal ? [init.signal] : []), AbortSignal.timeout(90000),
   ]) });
   calls.push({ origin: url.origin, path: url.pathname, status: response.status,
+    model: init?.body ? JSON.parse(init.body).model : null,
     request_id: response.headers.get('request-id'), elapsed_ms: Date.now() - start });
   writeFileSync(resolve(output, 'api-evidence.json'), JSON.stringify({ real_upstream: true, storage: 'synthetic-memory', calls }, null, 2));
   return response;

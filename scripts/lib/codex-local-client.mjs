@@ -1,21 +1,35 @@
 // Official Codex App Server client for local, subscription-backed rehearsals.
 // Credentials stay with Codex; this process never reads auth.json or tokens.
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+function configuredMcpNames(executable) {
+  try {
+    const rows = JSON.parse(execFileSync(executable, ['mcp', 'list', '--json'], { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'pipe'] }));
+    // Use names only; never copy server commands, env or credentials into args.
+    return rows.filter(row => row.enabled).map(row => row.name);
+  } catch { throw new Error('codex_mcp_inventory_unavailable'); }
+}
+
 export class CodexLocalClient {
-  constructor({ executable = 'codex', spawnProcess = spawn } = {}) {
+  constructor({ executable = 'codex', spawnProcess = spawn, listMcpNames = configuredMcpNames } = {}) {
+    const disabledMcp = listMcpNames(executable).flatMap(name => {
+      if (typeof name !== 'string' || !/^[a-zA-Z0-9_-]+$/.test(name)) throw new Error('codex_mcp_name_unsupported');
+      // A complete disabled entry also replaces plugin/injected transports.
+      // `enabled=false` alone is invalid for an injected server with no base transport.
+      return ['-c', 'mcp_servers.' + name + '={command="false",enabled=false}'];
+    });
     this.cwd = mkdtempSync(join(tmpdir(), 'hps-codex-text-'));
     const env = { ...process.env };
     for (const key of ['OPENAI_API_KEY', 'CODEX_API_KEY', 'ANTHROPIC_API_KEY']) delete env[key];
     this.proc = spawnProcess(executable, ['app-server', '--listen', 'stdio://',
       '-c', 'forced_login_method="chatgpt"', '-c', 'project_doc_max_bytes=0',
       '-c', 'features.shell_tool=false', '-c', 'features.apply_patch_freeform=false',
-      '-c', 'features.multi_agent=false', '-c', 'features.code_mode=false',
-      '-c', 'web_search="disabled"', '-c', 'mcp_servers={}'],
+      '-c', 'features.multi_agent=false', '-c', 'features.code_mode=false', '-c', 'features.code_mode_host=false',
+      '-c', 'web_search="disabled"', '-c', 'features.computer_use=false', '-c', 'features.apps=false', '-c', 'features.plugins=false', '-c', 'mcp_servers={}', ...disabledMcp],
     { cwd: this.cwd, env, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
     this.pending = new Map(); this.sequence = 0; this.active = null;
     this.proc.stderr.on('data', () => {}); // diagnostics can contain account/config data
@@ -73,9 +87,11 @@ export class CodexLocalClient {
     this.send({ method: 'initialized', params: {} });
     const account = await this.call('account/read', { refreshToken: false });
     if (account.account?.type !== 'chatgpt') throw new Error('codex_chatgpt_login_required');
+    const mcp = await this.call('mcpServerStatus/list', {});
+    if (mcp.data?.some(server => Object.keys(server.tools ?? {}).length > 0)) throw new Error('codex_tools_not_disabled');
     const list = await this.call('model/list', { includeHidden: false });
     this.models = list.data.map(m => ({ id: m.model, label: m.displayName }));
-    return { auth: 'chatgpt', models: this.models };
+    return { auth: 'chatgpt', models: this.models, external_tools: 0 };
   }
   async complete({ model, messages, signal, onDelta, maxOutputBytes = 24000 }) {
     if (this.busy) throw new Error('codex_busy');
