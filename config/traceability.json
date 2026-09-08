@@ -113,6 +113,33 @@
           "path": "docs/testing/studio-native-trial-results-2026-09-08.md"
         }
       ]
+    },
+    {
+      "id": "ST-REQ-COACH-RUNTIME",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## M. Agent SDK coach runtime (#282)"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-COACH-SESSION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/sdk-seat-session.smoke.mjs"
+        }
+      ]
     }
   ]
 }
