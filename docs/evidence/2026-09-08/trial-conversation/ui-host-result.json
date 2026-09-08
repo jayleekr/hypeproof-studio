@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "ids": [
+    "TUX-CHAT-08",
+    "TUX-HOST-01"
+  ],
+  "scope": "actual Mac confirmation/cancel/clear with synthetic conversation; files and observation preserved"
+}

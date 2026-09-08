@@ -1,4 +1,5 @@
 import {NativeObservationPanel} from './NativeObservationPanel';
+import { MarkdownText } from './MarkdownText';
 import { DisconnectedChat } from "./StartPage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -749,6 +750,7 @@ export function ChatPanel(props: Props) {
         >
           <textarea
             ref={textareaRef}
+            autoFocus
             aria-label={composerLabel(coachName)}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -1163,10 +1165,26 @@ function ChipRack({
 function ToolLine({ message }: { message: ChatMessage }) {
   const t = message.tool;
   if (!t) return null;
+  // This row is a waiting indicator, never evidence that a file was changed.
+  // Hide completed waits from old histories too; retain the stored timeline.
+  if (message.id.startsWith('pending-') && t.state === 'done') return null;
+  const thinking = /^think-\d+$/.test(message.id);
+  if (thinking && t.state === 'done') {
+    return (
+      <details className="hps-thinking-details">
+        <summary className="hps-tool-log-line hps-tool-done" aria-label="AI 처리 내용 보기">
+          <span className="hps-tool-icon">{t.icon}</span>
+          <span className="hps-tool-label">응답 준비</span>
+          <span className="hps-tool-mark">▾</span>
+        </summary>
+        <pre>{t.label}</pre>
+      </details>
+    );
+  }
   return (
     <div className={`hps-tool-log-line hps-tool-${t.state}`} role="status" aria-live="polite">
       <span className="hps-tool-icon">{t.icon}</span>
-      <span className="hps-tool-label">{t.label}</span>
+      <span className="hps-tool-label">{thinking ? '응답을 준비하는 중…' : t.label}</span>
       <span className="hps-tool-mark">
         {t.state === "running" ? "…" : t.state === "error" ? "⚠️" : "✓"}
       </span>
@@ -1363,7 +1381,7 @@ function AssistantContent({
     <>
       {segments.map((seg, i) => {
         if (seg.type === "text") {
-          return <span key={i} className="hps-prose">{seg.value}</span>;
+          return <MarkdownText key={i} text={seg.value} />;
         }
         if (seg.type === "code-open") {
           if (streaming) {

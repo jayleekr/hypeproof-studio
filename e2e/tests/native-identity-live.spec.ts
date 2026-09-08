@@ -10,7 +10,7 @@ test('individual codes isolate history and observation in the same actual worksp
   await input.fill('합성 첫 사용자 테스트야. SYNTHETIC-ALPHA-744를 짧게 확인해줘. 도구는 사용하지 마.');await input.press('Enter');
   await expect(chat.locator('.hps-btn-stop')).toBeVisible();await expect(chat.locator('.hps-btn-stop')).toHaveCount(0,{timeout:90000});
   const original=await chat.locator('.hps-messages').innerText();expect(original).toContain('SYNTHETIC-ALPHA-744');
-  const connect=async(code:string)=>{const entry=await startFrame(ctx.win);await entry.getByRole('button',{name:'다른 수업에 연결'}).click();await entry.getByLabel('수업 참여 코드',{exact:true}).fill(code);await entry.getByRole('button',{name:'수업 확인하기'}).click();await expect(entry.locator('.studio-course')).toBeVisible();await entry.getByRole('button',{name:'수업 시작하기'}).click();};
+  const connect=async(code:string)=>{await (await chatFrame(ctx.win)).getByRole('button',{name:'수업 연결',exact:true}).click();const entry=await startFrame(ctx.win);await entry.getByRole('button',{name:'다른 수업에 연결'}).click();await entry.getByLabel('수업 참여 코드',{exact:true}).fill(code);await entry.getByRole('button',{name:'수업 확인하기'}).click();await expect(entry.locator('.studio-course')).toBeVisible();await entry.getByRole('button',{name:'수업 시작하기'}).click();};
   await connect(readFileSync(process.env.HPS_E2E_TOKEN_FILE+'.alternate','utf8').trim());
   chat=await chatFrame(ctx.win);await expect(chat.locator('.hps-messages')).not.toContainText('SYNTHETIC-ALPHA-744');
   let panel=chat.locator('.hps-native-observation');await panel.locator('summary').first().click();await panel.getByRole('button',{name:'이 작업의 기록 확인'}).click();await expect(panel).toContainText('0건');
