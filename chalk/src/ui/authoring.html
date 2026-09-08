@@ -36,6 +36,12 @@
 <div id="model-allowed" aria-label="학생이 선택할 수 있는 모델"></div>
 <small>한 모델로 고정하면 답변과 보조 요청에 같은 모델을 사용합니다. 모델 변경은 새 버전을 고정하고 학생 조건으로 리허설한 뒤 배정하세요.</small>
 </fieldset>
+<fieldset id="effort-fields" disabled><legend>처리 수준</legend>
+<label>변경 범위<select id="effort-mode"><option value="inherit">코호트 기본값 사용</option><option value="fixed">강사 설정으로 고정</option><option value="choice">학생이 선택</option></select></label>
+<label>기본 처리 수준<select id="effort-default"></select></label>
+<div id="effort-allowed" aria-label="학생이 선택할 수 있는 처리 수준"></div>
+<small id="effort-help">먼저 수업 모델 목록을 불러오고 모델 사용 방식을 정하세요. 지원 모델에만 적용되며, 같은 설정이라도 모델마다 속도와 사용량이 다릅니다.</small>
+</fieldset>
 <button id="features-load" type="button">수업 기능 목록 불러오기</button>
 <p id="features-status">코호트가 이미 가진 기능 중에서 <strong>줄이기만</strong> 합니다. 여기서 새 권한이 생기지는 않습니다.</p>
 <fieldset id="features-fields" disabled>
@@ -69,13 +75,13 @@ let lessonModel, modelCatalogue, modelCatalogueScope;
 let lessonFeatures, featureCatalogue, featureCatalogueScope;
 const identity=()=>JSON.stringify(['cohort','profile','course'].map(k=>$(k).value.trim()));
 const status=text=>{$('status').textContent=text;};
-function controls(){$('models-fields').disabled=busy||modelCatalogueScope!==identity()||!modelCatalogue;$('features-fields').disabled=busy||featureCatalogueScope!==identity()||!featureCatalogue;const valid=bound===identity()&&revision!==null&&!busy;$('save').disabled=!valid;$('freeze').disabled=!valid||dirty||revision<1;for(const id of ['load','new','import','courses','version-load','token','cohort','profile','course','version','forget','deliver','student','hours','features-load'])$(id).disabled=busy;document.querySelector('#editor fieldset').disabled=busy;}
+function controls(){$('models-fields').disabled=busy||modelCatalogueScope!==identity()||!modelCatalogue;$('effort-fields').disabled=busy||modelCatalogueScope!==identity()||!modelCatalogue?.effort||!lessonModel;$('features-fields').disabled=busy||featureCatalogueScope!==identity()||!featureCatalogue;const valid=bound===identity()&&revision!==null&&!busy;$('save').disabled=!valid;$('freeze').disabled=!valid||dirty||revision<1;for(const id of ['load','new','import','courses','version-load','token','cohort','profile','course','version','forget','deliver','student','hours','features-load'])$(id).disabled=busy;document.querySelector('#editor fieldset').disabled=busy;}
 function changed(){dirty=true;controls();}
 function discard(){return !dirty||confirm('저장하지 않은 편집을 바꿀까요? 필요한 내용은 먼저 내보내세요.');}
 function scope(){for(const k of ['cohort','profile','course'])if(!/^[a-zA-Z0-9_-]{1,128}$/.test($(k).value.trim()))throw Error('코호트·프로필·수업 ID를 확인하세요.');if(!$('token').value.trim())throw Error('강사 토큰을 입력하세요.');return '/admin/cohorts/'+encodeURIComponent($('cohort').value.trim())+'/authoring/'+encodeURIComponent($('course').value.trim());}
 function step(data={id:'step-'+crypto.randomUUID().slice(0,8),title:'',instructions:'',hint:'',acceptance:''}){const f=document.createElement('fieldset');f.className='step';for(const [key,label] of Object.entries({id:'단계 ID',title:'단계 제목',instructions:'안내·실습',hint:'힌트',acceptance:'완료 기준'})){const l=document.createElement('label');l.textContent=label;const e=document.createElement(key==='id'||key==='title'?'input':'textarea');e.dataset.field=key;e.value=data[key]??'';l.append(e);f.append(l);}for(const [label,action] of [['위로',()=>f.previousElementSibling?.before(f)],['아래로',()=>f.nextElementSibling?.after(f)],['삭제',()=>f.remove()]]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{action();changed();};f.append(b);}$('steps').append(f);}
 function content(){const name=$('assistant_name').value.replace(/[\u200B-\u200D\uFEFF]/g,'').trim();return {schema:'hps-session-design/1',...Object.fromEntries(fields.map(k=>[k,k==='duration_minutes'?Number($(k).value):$(k).value])),steps:[...document.querySelectorAll('.step')].map(f=>Object.fromEntries([...f.querySelectorAll('[data-field]')].map(e=>[e.dataset.field,e.value]))),...(name?{assistant:{display_name:name}}:{}),...(lessonModel?{model:lessonModel}:{}),...(lessonFeatures?{features:lessonFeatures}:{})};}
-function render(c){lessonModel=c.model?{default:c.model.default,allowed:[...c.model.allowed]}:undefined;renderModels();lessonFeatures=c.features?{allowed:[...c.features.allowed]}:undefined;renderFeatures();for(const k of fields)$(k).value=c[k]??(k==='duration_minutes'?120:'');$('assistant_name').value=c.assistant?.display_name??'';$('steps').replaceChildren();for(const s of c.steps||[])step(s);}
+function render(c){lessonModel=c.model?{default:c.model.default,allowed:[...c.model.allowed],...(c.model.effort?{effort:structuredClone(c.model.effort)}:{})}:undefined;renderModels();lessonFeatures=c.features?{allowed:[...c.features.allowed]}:undefined;renderFeatures();for(const k of fields)$(k).value=c[k]??(k==='duration_minutes'?120:'');$('assistant_name').value=c.assistant?.display_name??'';$('steps').replaceChildren();for(const s of c.steps||[])step(s);}
 async function call(path,method='GET',body){const r=await fetch(path,{method,redirect:'error',headers:{authorization:'Bearer '+$('token').value.trim(),'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const j=await r.json();if(!r.ok){const detail=typeof j.error==='string'?j.error:JSON.stringify(j.error||j);const nameHint=r.status===400&&detail==='invalid session-design fields'&&$('assistant_name').value.trim()?' — 이 Service 버전은 수업별 AI 이름을 아직 받지 않습니다. 이름을 비우고 저장하거나 Service 배포 후 다시 시도하세요. 편집은 보존됐습니다.':'';throw Error(`HTTP ${r.status}: ${detail}`+(r.status===409?' — 편집은 보존됐습니다. 내보낸 뒤 저장본을 다시 열어 비교하세요.':'')+nameHint);}return j;}
 async function run(fn){if(busy)return;busy=true;controls();try{await fn();}catch(e){status(e.message);}finally{busy=false;controls();}}
 $('deliver').onclick=()=>run(async()=>{const path=scope();$('student-token').value='';const d=await call(path+'/versions/'+encodeURIComponent($('version').value.trim())+'/participants','POST',{user:$('student').value.trim(),hours:Number($('hours').value)});$('student-token').value=d.token;$('delivery-status').textContent=d.user+' · '+d.lesson.version+' · 코드 만료 '+new Date(d.expires_at*1000).toLocaleString()+' · AI 세션 종료 '+new Date(d.session_ends_at).toLocaleString()+' · 리허설 미실행';status('참여 코드를 발급했습니다. 학생 화면과 Studio에서 확인하세요.');});
@@ -97,18 +103,45 @@ function renderModels(){
   $('model-default').replaceChildren(...modelCatalogue.choices.map(m=>new Option(m.label,m.alias)));
   $('model-default').value=lessonModel?.default??modelCatalogue.default;
   $('model-allowed').replaceChildren(...modelCatalogue.choices.map(m=>{const label=document.createElement('label');const input=document.createElement('input');input.type='checkbox';input.value=m.alias;input.checked=lessonModel?.allowed.includes(m.alias)??true;label.append(input,document.createTextNode(m.label));return label;}));
-  modelModeVisibility();
+  modelModeVisibility();renderEffort();
 }
 function modelModeVisibility(){const mode=$('model-mode').value;$('model-default').disabled=mode==='inherit';$('model-allowed').hidden=mode!=='choice';}
 function modelChanged(){
   const mode=$('model-mode').value, selected=$('model-default').value;
   const allowed=[...$('model-allowed').querySelectorAll('input:checked')].map(x=>x.value);
   if(mode==='choice'&&!allowed.includes(selected)){const input=[...$('model-allowed').querySelectorAll('input')].find(x=>x.value===selected);if(input)input.checked=true;allowed.unshift(selected);}
-  lessonModel=mode==='inherit'?undefined:{default:selected,allowed:mode==='fixed'?[selected]:allowed};
-  modelModeVisibility();changed();
+  lessonModel=mode==='inherit'?undefined:{default:selected,allowed:mode==='fixed'?[selected]:allowed,...(lessonModel?.effort?{effort:lessonModel.effort}:{})};
+  modelModeVisibility();renderEffort();changed();
 }
 $('models-load').onclick=()=>run(async()=>{const catalog=await call(scope()+'/models/'+encodeURIComponent($('profile').value.trim()));modelCatalogue=catalog;modelCatalogueScope=identity();renderModels();$('models-status').textContent='사용 가능한 모델 '+catalog.choices.length+'개 · 모델 설정은 도구 권한을 바꾸지 않습니다.';});
 for(const id of ['model-mode','model-default','model-allowed'])$(id).onchange=modelChanged;
+
+const effortLabels={low:'빠르게',medium:'균형',high:'깊게'};
+function renderEffort(){
+  const enabled=modelCatalogueScope===identity()&&modelCatalogue?.effort&&lessonModel;
+  $('effort-fields').disabled=!enabled;
+  const policy=lessonModel?.effort;
+  $('effort-mode').value=policy?(policy.allowed.length===1?'fixed':'choice'):'inherit';
+  if(!enabled)return;
+  const levels=modelCatalogue.effort.allowed;
+  $('effort-default').replaceChildren(...levels.map(v=>new Option(effortLabels[v],v)));
+  $('effort-default').value=policy?.default??modelCatalogue.effort.default;
+  $('effort-allowed').replaceChildren(...levels.map(v=>{const l=document.createElement('label'),i=document.createElement('input');i.type='checkbox';i.value=v;i.checked=policy?.allowed.includes(v)??true;l.append(i,document.createTextNode(effortLabels[v]));return l;}));
+  effortVisibility();
+}
+function effortVisibility(){const mode=$('effort-mode').value;$('effort-default').disabled=mode==='inherit';$('effort-allowed').hidden=mode!=='choice';}
+function effortChanged(){
+  if(!lessonModel)return;
+  const mode=$('effort-mode').value,first=$('effort-default').value;
+  if(mode==='inherit')delete lessonModel.effort;
+  else{
+    const allowed=[...$('effort-allowed').querySelectorAll('input:checked')].map(x=>x.value);
+    if(!allowed.includes(first)){allowed.push(first);[...$('effort-allowed').querySelectorAll('input')].find(x=>x.value===first).checked=true;}
+    lessonModel.effort={default:first,allowed:mode==='fixed'?[first]:modelCatalogue.effort.allowed.filter(e=>allowed.includes(e))};
+  }
+  effortVisibility();changed();
+}
+for(const id of ['effort-mode','effort-default','effort-allowed'])$(id).onchange=effortChanged;
 
 // 기능 좁히기 — 모델 쪽과 같은 모양이지만 "기본값" 이 없다. 좁히기는 목록 하나로
 // 끝나고, 아무것도 고르지 않으면 채팅만 남는 수업이라는 뜻이다(빈 배열은 유효한

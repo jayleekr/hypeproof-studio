@@ -1,4 +1,4 @@
-import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice } from './modelSelection';
+import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice, selectedEffort, observedEffortResult, type SavedEffortChoice } from './modelSelection';
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
@@ -138,6 +138,28 @@ import {
 
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
+  private effortNotice?: string;
+  private effortScope?: string;
+  private effortResult?: import('./protocol').ChatConfig['effortResult'];
+  private effortTurn?: { id: string; url: string; token: string; scope: string };
+
+  private async refreshEffortResult(): Promise<void> {
+    const turn = this.effortTurn;
+    if (!turn) return;
+    let result: import('./protocol').ChatConfig['effortResult'] = {state:'unknown',requests:[]};
+    try {
+      const response = await fetch(`${turn.url.replace(/\/$/,'')}/request-settings/${encodeURIComponent(turn.id)}`, {
+        headers:{authorization:`Bearer ${turn.token}`}, signal:AbortSignal.timeout(5000),
+      });
+      if (response.ok) {
+        result = observedEffortResult(await response.json());
+      }
+    } catch { /* Retrieval cannot fail the conversation; unknown stays visible. */ }
+    if (this.effortTurn !== turn || await this.context.secrets.get(TOKEN_KEY) !== turn.token) return;
+    this.effortResult = result;
+    await this.postConfig();
+  }
+
   private nativeObservation: NativeObservationRecorder | null = null;
   private nativeHistoryScope: string | null = null;
   private profileGeneration=0;
@@ -1776,12 +1798,36 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           if (disclosure) void this.post({ type: "aiDisclosure", text: disclosure });
         }
         return;
+      case "refreshEffort":
+        await this.refreshEffortResult();
+        return;
+      case "selectEffort": {
+        const profile = await this.ensureProfile();
+        const cfg = vscode.workspace.getConfiguration('hypeproofChat');
+        const selection = availableModelSelection(profile,cfg.get<'proxy'|'agent-sdk'>('coachRuntime','proxy'));
+        if (profile && selection) {
+          const model = selectedModel(profile,selection,this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice'),cfg.get<string>('model','hypeproof-default'));
+          const effort = selectedEffort(profile,selection,model);
+          if (effort?.allowed.includes(msg.value)) {
+            await this.context.workspaceState.update('hps.effortChoice',{scope:modelSelectionScope(profile),model,value:msg.value});
+            this.effortNotice = '다음 요청부터 적용돼요';
+          }
+        }
+        await this.postConfig();
+        return;
+      }
       case "selectModel": {
         const profile = await this.ensureProfile();
         const cfg = vscode.workspace.getConfiguration('hypeproofChat');
         const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
         if (profile && selection?.choices.some(c => c.alias === msg.alias)) {
+          const previous = selectedModel(profile,selection,this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice'),cfg.get<string>('model','hypeproof-default'));
           await this.context.workspaceState.update('hps.modelChoice', { scope: modelSelectionScope(profile), alias: msg.alias });
+          if (previous !== msg.alias) {
+            await this.context.workspaceState.update('hps.effortChoice',undefined);
+            this.effortNotice = selection.choices.find(c=>c.alias===msg.alias)?.effort
+              ? '모델이 바뀌어 수업 기본 처리 수준을 사용해요' : '이 모델은 처리 수준 조절을 지원하지 않아요';
+          }
         }
         await this.postConfig();
         return;
@@ -1954,6 +2000,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
     const savedModel = this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice');
     if (profile && selection) model = selectedModel(profile, selection, savedModel, model);
+    const effort = profile && selection ? selectedEffort(profile,selection,model,this.context.workspaceState.get<SavedEffortChoice>('hps.effortChoice'))?.value : undefined;
     const { name: effectiveCoachName, personality: effectiveCoachPersonality } =
       resolveCoach(coach, profile);
 
@@ -2015,6 +2062,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // 워커 trace 로 재전송할 수 있어야 한다. 워커는 turn_id 를 UUID 로 강제
     // 검증하므로(routes/trace.ts) randomId() 대신 UUID 를 쓴다.
     const streamId = crypto.randomUUID();
+    if (token && profile && selection?.choices.some(c=>c.effort)) {
+      this.effortTurn = {id:streamId,url:proxyUrl,token,scope:modelSelectionScope(profile)};
+      this.effortResult = {state:'loading',requests:[]};
+      void this.postConfig();
+    }
     const observation = await this.prepareObservation(proxyUrl, token, profile);
     const recordObservation = (kind: import('./nativeObservationContract').ObservationKind, value: string, extra: Partial<import('./nativeObservationContract').ObservationEvent> = {}) => {
       if (!observation) return;
@@ -2262,6 +2314,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           await this.runBrowserLoop({
             proxyUrl,
             model,
+            effort,
             token,
             history,
             userText: userTextForModel,
@@ -2281,6 +2334,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         proxyChat({
           proxyUrl,
           model,
+          effort,
+          turnId: streamId,
           token,
           history,
           userText: userTextForModel,
@@ -2307,6 +2362,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         try {
           await runSdkCoach({
             gatewayUrl: proxyUrl,
+            effort,
+            turnId: streamId,
             token,
             model,
             profile,
@@ -2465,6 +2522,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             }
           : {}),
       });
+      if (this.effortTurn?.id === streamId) void this.refreshEffortResult().catch(() => { /* panel may have closed */ });
       this.activeStreams.delete(streamId);
       this.turnTimelines.delete(streamId);
     }
@@ -2523,6 +2581,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * the terminal (non-tool) turn only.
    */
   private async runBrowserLoop(p: {
+    effort?: import('./protocol').CourseEffort;
     proxyUrl: string;
     model: string;
     token: string | undefined;
@@ -2546,6 +2605,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         const result = await proxyChat({
           proxyUrl: p.proxyUrl,
           model: p.model,
+          effort: p.effort,
+          turnId: p.streamId,
           token: p.token,
           history: p.history,
           userText: p.userText,
@@ -2875,12 +2936,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
     const settingModel = cfg.get<string>('model', 'hypeproof-default');
     const model = profile && selection ? selectedModel(profile, selection, this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice'), settingModel) : settingModel;
+    const effort = profile && selection ? selectedEffort(profile,selection,model,this.context.workspaceState.get<SavedEffortChoice>('hps.effortChoice')) : undefined;
+    const effortScope = profile ? JSON.stringify([token, modelSelectionScope(profile)]) : undefined;
+    if (this.effortScope !== effortScope) {
+      this.effortScope = effortScope;
+      this.effortTurn = undefined; this.effortResult = undefined; this.effortNotice = undefined;
+    }
     await this.post({
       type: "config",
       config: {
         proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
         model,
         hasToken: !!token,
+        effort, effortNotice:this.effortNotice, effortResult:this.effortResult,
         coach: this.getCoach(),
         profile: profile ? { ...profile, model_selection: selection } : null,
         update: this.availableUpdate,

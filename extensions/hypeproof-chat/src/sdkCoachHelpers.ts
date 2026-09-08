@@ -904,6 +904,8 @@ export function sdkConfigDirFor(
 export function buildSdkGatewayEnv(
   baseEnv: Record<string, string | undefined>,
   args: {
+    effort?: "low" | "medium" | "high";
+    turnId?: string;
     proxyUrl: string;
     token: string;
     /** 작업 폴더 절대경로 — 워커가 `x-hps-workspace` 로 받아 시스템 블록에 넣는다. */
@@ -961,7 +963,15 @@ export function buildSdkGatewayEnv(
   // 개행으로 나누고 각 줄을 첫 `:` 에서 이름/값으로 가른다. 따라서 값 안에 개행이
   // 있으면 안 되고 — 파일 목록의 구분자는 퍼센트 인코딩해서 넘긴다. 한글 폴더명도
   // 같은 이유로 인코딩이 필요하다(HTTP 헤더는 바이트 안전해야 한다).
+  // Owned headers never inherit an ambient course choice or correlation ID.
+  const inheritedHeaders = (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n')
+    .filter(line => !/^\s*x-hps-(effort|turn-id)\s*:/i.test(line)).join('\n').trim();
+  if (inheritedHeaders) env.ANTHROPIC_CUSTOM_HEADERS = inheritedHeaders;
+  else delete env.ANTHROPIC_CUSTOM_HEADERS;
+  delete env.CLAUDE_CODE_EFFORT_LEVEL;
   const custom: string[] = [];
+  if (args.effort) custom.push(`x-hps-effort: ${args.effort}`);
+  if (args.turnId && /^[a-zA-Z0-9_-]{1,128}$/.test(args.turnId)) custom.push(`x-hps-turn-id: ${args.turnId}`);
   if (args.workspace?.trim()) {
     custom.push(`x-hps-workspace: ${encodeURIComponent(args.workspace.trim())}`);
   }
@@ -1001,6 +1011,8 @@ export function buildSdkGatewayEnv(
 export function buildSdkQueryOptions(
   agent: AgentCoachOptions,
   args: {
+    effort?: "low" | "medium" | "high";
+    turnId?: string;
     proxyUrl: string;
     token: string;
     cwd?: string;
@@ -1030,6 +1042,7 @@ export function buildSdkQueryOptions(
   return {
     systemPrompt: withWorkspaceContext(agent.systemPrompt, args.cwd, args.workspaceFiles),
     model: agent.model,
+    ...(args.effort ? {effort: args.effort} : {}),
     // Built-in base tool set ONLY — the mcp__hypeproof__* names never go here
     // (REQ-M19): Options.tools filters BUILT-INS; MCP tools are delivered via
     // mcpServers, which the orchestration layer attaches (host-bound instance)
@@ -1052,6 +1065,8 @@ export function buildSdkQueryOptions(
       : {}),
     env: buildSdkGatewayEnv(args.baseEnv, {
       proxyUrl: args.proxyUrl,
+      effort: args.effort,
+      turnId: args.turnId,
       token: args.token,
       ...(args.configDir ? { configDir: args.configDir } : {}),
       // 시스템 프롬프트 경로는 워커가 버리므로 헤더로 보낸다 (#431).

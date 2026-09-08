@@ -137,3 +137,5 @@ Detailed contract: [studio-trial](../requirements/studio-trial.md).
 ## Personal trial UI and UX (#758)
 
 `REQ-STUDIO-NATIVE-UX`: [TUX requirements](../requirements/studio-native-trial-ux.md) inventory every native trial control, conditional surface and host action. [UI acceptance tests](../testing/studio-native-trial-ux.md) distinguish React interaction, host contracts, actual Electron/API execution and release verification. Requirements are not executed results.
+
+- 수업 effort (#799): [REQ-M40](../studio-requirements.md), [설계와 경계](../design/model-effort-and-course-usage.md#수업-effort-구현-계약-799), [실행 범위](../testing/lesson-effort.md). 사용량·예산 #800의 완료와 구분한다.

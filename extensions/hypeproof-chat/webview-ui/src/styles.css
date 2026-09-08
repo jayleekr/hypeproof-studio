@@ -1166,3 +1166,12 @@ html, body, #root {
 .hps-model-selection select { min-width: 0; max-width: 100%; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, #666); border-radius: 4px; padding: 4px; font: inherit; }
 .hps-model-selection select:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
 .hps-model-selection small { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }
+
+.hps-effort { display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; font-size:12px; }
+.hps-effort:empty { display:none; }
+.hps-effort label { display:flex; align-items:center; gap:6px; }
+.hps-effort select { color:var(--vscode-foreground); background:var(--vscode-input-background); border:1px solid var(--vscode-input-border, currentColor); padding:3px 6px; max-width:100%; }
+.hps-effort small { flex:1 1 150px; overflow-wrap:anywhere; }
+.hps-effort details { flex:1 1 100%; min-width:0; overflow-wrap:anywhere; }
+.hps-effort summary { cursor:pointer; }
+.hps-effort ul { padding-left:20px; }

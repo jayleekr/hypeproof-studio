@@ -188,3 +188,11 @@ function makeHost({ live }) {
 }
 
 console.log("✓ #507: 라이브 서버 주소 — 순수 교정 + browser_open 배선 + 워커 전달 통로");
+
+// Course effort belongs to this request, never the ambient CLI environment.
+{
+ const env = buildSdkGatewayEnv({CLAUDE_CODE_EFFORT_LEVEL:'max',ANTHROPIC_CUSTOM_HEADERS:'x-hps-effort: high\nx-hps-turn-id: old\nx-test: retained'},
+   {proxyUrl:'https://gateway.example/v1',token:'synthetic',effort:'low',turnId:'turn-799'});
+ assert.equal(env.CLAUDE_CODE_EFFORT_LEVEL,undefined);
+ assert.equal(env.ANTHROPIC_CUSTOM_HEADERS,'x-test: retained\nx-hps-effort: low\nx-hps-turn-id: turn-799');
+}
