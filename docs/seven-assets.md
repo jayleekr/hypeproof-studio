@@ -1,39 +1,54 @@
 # HypeProof — 7 AI Native Assets
 
-> AI 시대, 인간이 모델과 함께 일하며 체득해야 할 본질 역량.
-> **이 문서가 canonical입니다. `docs/essence-v0.1.md`의 16 essence 체계는 폐기.**
+> 철학과 자산 정의의 정본은 [hypeprooflab/PHILOSOPHY.md](https://github.com/jayleekr/hypeprooflab/blob/main/PHILOSOPHY.md)다.
+> 이 문서는 Studio의 참조·구현 호환 인덱스다. `docs/essence-v0.1.md`의 16 essence 체계는 계속 폐기 상태다.
 
-Status: Canonical (v0.2)
+Status: Active product reference (upstream definitions delegated)
 Owner: Jay
-Date: 2026-05-23
-Replaces: `docs/essence-v0.1.md` (16 essences, deprecated)
+Date: 2026-09-08
+Verified upstream: [6845cdb4](https://github.com/jayleekr/hypeprooflab/blob/6845cdb4391273d16ed09419eee806b0c03c04f9/PHILOSOPHY.md)
+
+2026-09-08 철학의 §6이 자산 정의를, §7이 제품 역할을, §8~9가 교육철학 계보와
+AI Discontinuity를, §11이 연구 질문을 소유한다. 일곱 자산은 수정 가능한 연구 모델이며
+기능 사용·산출물 완성만으로 성장했다고 판정하지 않는다. 철학의 Human Assets와
+대외/Studio UI의 **7 AI Native Assets**는 같은 대상을 가리킨다(정본 §0).
+
+아래 절 번호·기존 이름·구현 키는 기존 REQ와 이벤트 참조의 호환성을 위해 유지한다.
+새 정의를 이곳에 복제하거나 코드의 enum·기록을 일괄 개명하지 않는다.
 
 ---
 
 ## 1. Taste
 
-AI가 아무리 많이 만들어줘도, 무엇이 좋은지 아는 사람이 좋은 결과를 낸다. AI 시대에 taste의 가치가 오히려 올라갔다.
+정본 §6: **TASTE · 보는 눈**. 기존 구현 키: `taste`.
 
 ## 2. Intent clarity
 
-AI를 켜기 전에 내가 뭘 원하는지 안다. 이게 없으면 아무리 좋은 AI도 나쁜 결과를 낸다. 프롬프트 기술이 아니라 자기 이해.
+정본 §6: **INTENT · 의도**. 기존 구현 키: `intent_clarity`.
 
 ## 3. Context design
 
-AI에게 무엇을 주느냐가 모든 것을 결정한다는 것. 기술이 아니라 설계 감각.
+정본 §6: **CONTEXT · 맥락**. 기존 구현 키: `context_design`.
 
 ## 4. Verification reflex
 
-AI 출력을 자동으로 검증하는 습관. 맹신도 불신도 아닌, 검증이 기본값.
+정본 §6: **VERIFY · 검증**. 기존 구현 키: `verification_reflex`.
 
 ## 5. Delegation judgment
 
-무엇을 AI에게 맡기고 무엇을 내가 할지 빠르게 판단하는 능력. 이게 없으면 AI에 끌려다닌다.
+정본 §6: **DELEGATE · 위임**. 기존 구현 키: `delegation_judgment`.
 
 ## 6. Iteration reflex
 
-완벽한 첫 결과를 기다리지 않는다. 빠른 V1 + 반복이 기본값.
+정본 §6: **ITERATE · 반복**. 기존 구현 키: `iteration_reflex`.
 
 ## 7. Ownership
 
-AI가 만들어줘도 "내 것"으로 만드는 것. 책임과 소유감.
+정본 §6: **OWNERSHIP · 주인의식**. 기존 구현 키: `ownership`.
+
+---
+
+제품 적용을 위한 제안과 증거: [수업별 Agent 경험 디자인](design/learning-agent-experience.md),
+[2026-09-08 경쟁 제품 비교·화면 관측](research/agent-experience-2026-09-08/README.md).
+동기화 근거: [2026-09-08 철학의 제품 적용 결정](design/philosophy-alignment-2026-09-08.md).
+기능별 채택·구현 여부는 연결된 요구사항과 실행 증거를 따른다.
