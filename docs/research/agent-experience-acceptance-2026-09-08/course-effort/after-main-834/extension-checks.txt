@@ -1,0 +1,809 @@
+
+> hypeproof-chat@0.1.5 test
+> for f in test/*.smoke.mjs; do echo "— $f"; node --experimental-strip-types "$f" || exit 1; done
+
+— test/absolutize-paths.smoke.mjs
+✓ 양성 대조군 — 상대경로는 워크스페이스 기준으로 절대화된다
+✓ 음성 대조군 — 절대경로·패턴·비경로 필드·비파일도구는 그대로 둔다
+✓ 탈출 경로 — 절대화는 하되 차단은 containment 단일 지점이 한다
+
+✓ absolutize-paths smoke 통과
+✓ displayPath — 정상/상대경로/워크스페이스밖이 서로 다르게 보인다
+(node:87822) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/agent-handoff.smoke.mjs
+All agent-handoff smoke tests passed.
+✓ #431: 중첩 코드펜스가 있는 인계 문서가 온전히 추출된다
+✓ 닫는 펜스 없는 절단도 건진다
+(node:87823) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/agentHandoff.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/ai-disclosure.smoke.mjs
+✓ #320: AI disclosure — policy copy + once-per-session gate (ready/remount/clear)
+(node:87824) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/app-tone.smoke.mjs
+✅ app-tone: 8 case groups passed
+(node:87825) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/asset-status.smoke.mjs
+ok empty asset status starts at 0/7
+ok asset status accumulates max scores and formats markers/histogram
+(node:87826) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/assetStatus.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/browser-control-helpers.smoke.mjs
+✓ safeNavigateUrl: http/https/file/localhost/bare-host allowed; js/data/vscode/paths rejected
+✓ quadCenter: averages the 4 corners; rejects malformed quads
+✓ buildAxSnapshot: interactive→[ref=eN]+backendId map, text context, ignored excluded
+✓ isSameBrowserUrl: 끝 슬래시·대소문자·빈 ?/# 은 같은 페이지, 경로/포트/query/hash 는 다른 페이지
+All browser-control-helpers smoke tests passed.
+✓ planCoachBrowserTabs: 슬롯당 하나 재사용 · 잉여만 정리 · 다른 슬롯 불간섭
+✓ 탭 누적 회귀: 8회 혼합 탐색 후에도 탭 2개 · 결과물 단독 탐색은 1개
+✓ #525: 앞세울 탭 고르기 — 세 조건 교집합, 애매하면 손대지 않는다
+(node:87827) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/browserControlHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/browser-mcp.smoke.mjs
+✓ #519: openPages — 열린 탭 전부와 비교(슬롯 2개), 미지원/실패는 예전 동작으로 폴백
+✓ #523: alreadyOpen — 열지 않되 매칭된 탭을 운전 대상으로 고정 + 상태 줄도 그 탭
+✓ #526: 슬롯이 하나뿐이라 밀려난 페이지를 결과가 숨기지 않는다 (슬롯 개수는 그대로)
+✓ #282 P2 s2: hypeproof browser MCP server — wiring + URL policy + vision screenshot + live preview
+✓ #415: 현재 페이지 인지 — 같은 URL 재오픈 차단 + 모든 결과에 브라우저 상태 한 줄
+(node:87828) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/browserMcp.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/browser-safety-helpers.smoke.mjs
+✓ mode=safe → safeSession true + allowlist passed through
+✓ mode=safe without allowlist → empty allowlist (local-only)
+✓ browse / unknown mode / missing / null → safeSession false, allowlist cleared
+✓ malformed allowlist entries dropped; non-array → empty
+All browser-safety-helpers smoke tests passed.
+(node:87829) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/browserSafetyHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/browser-tool-log.smoke.mjs
+✓ browserToolLogLine: per-tool icon+label, host extraction, truncation, unknown fallback
+All browser-tool-log smoke tests passed.
+(node:87830) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/cdp-session.smoke.mjs
+✓ CdpSession: handshake attaches to page target, page commands carry sessionId
+✓ CdpSession: attach rejects when no page target is present
+✓ CdpSession: a CDP error response rejects the send
+All cdp-session smoke tests passed.
+(node:87831) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/cdpSession.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/chat-timeline.smoke.mjs
+✓ 양성: 텍스트 → 툴 → 텍스트가 일어난 순서 그대로 남는다
+✓ 음성: 옛 두-배열 동작은 같은 판정기에서 떨어진다
+✓ 펜스 보류: 툴이 코드펜스를 쪼개지 않는다 (REQ-D2)
+✓ 미완성 펜스로 턴이 끝나도 툴 줄이 증발하지 않는다
+✓ 다음 턴이 시작돼도 직전 턴의 툴 줄이 남는다
+✓ Clear 는 대화와 툴 기록을 함께 비운다
+✓ 모델 히스토리에는 role:'tool' 이 섞이지 않는다
+✓ 내용 없는 말풍선은 남지 않는다
+✓ 인용은 말풍선이 닫힌 뒤 도착해도 붙는다
+✓ hasOpenFence / hasActivityThisTurn
+✓ 히스토리 상한: 툴 줄이 대화를 밀어내지 않는다
+All chat-timeline smoke tests passed.
+(node:87832) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatTimeline.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/clear-history.smoke.mjs
+PASS clear history: explicit confirmation, cancellation, duplicate, active-stream and identity-change protection
+— test/coach-fallback-notice.smoke.mjs
+  ✓ 무엇이 **안 되는지** 구체적으로 말한다
+  ✓ 무엇이 **여전히 되는지**도 말한다
+  ✓ 다음 행동을 준다 (무한 대기를 막는다)
+  ✓ 한 줄이다 (이슈가 '한 줄이면 충분'이라고 명시)
+  ✓ AI 고지(#320)와 다른 문구다 — 둘이 겹치면 하나가 묻힌다
+  ✓ 로그 줄이 사유를 **원문 그대로** 싣는다
+  ✓ 로그 줄에 타임스탬프가 있다 (교실에서 언제 떨어졌는지)
+  ✓ 로그 줄이 폴백임을 명시한다 (grep 가능한 표지)
+
+#476 coach-fallback-notice: 8 checks passed
+(node:87835) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/coach-identity.smoke.mjs
+✅ coach-identity: parity, particles+copula, default-string locks, error copy, watcher pattern, static mirror check
+(node:87836) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/coachIdentity.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/coach-runtime.smoke.mjs
+=== 미성년 — 프로필 opt-in 은 존중, 로컬 설정만으로는 못 넘는다 ===
+  ok   설정 agent-sdk + 프로필 proxy → proxy (이게 뚫려 있던 구멍)
+  ok   설정 proxy + 프로필 agent-sdk → agent-sdk (2026-08-11: 프로필 opt-in 존중)
+  ok   설정·프로필 둘 다 agent-sdk → agent-sdk
+  ok   둘 다 proxy → proxy
+
+=== 성인 — 기존 동작이 그대로여야 한다 (과잉 차단 방지) ===
+  ok   설정 agent-sdk → agent-sdk
+  ok   프로필 agent-sdk → agent-sdk (보아 원장 트랙)
+  ok   둘 다 proxy → proxy
+
+=== minor_cohort 미상 — 기존 동작을 깨지 않는다 ===
+  ok   minorCohort undefined + 설정 agent-sdk → agent-sdk (구 워커 응답 호환)
+  ok   프로필 없음 + 설정 proxy → proxy
+
+=== 회귀 가드 — 인라인 판단이 되살아나지 않았는가 ===
+  ok   chatPanelProvider 가 resolveCoachRuntime 를 쓴다
+  ok   옛 인라인 OR 판단이 남아 있지 않다
+
+PASS — resolveCoachRuntime 11건
+(node:87839) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/cohort-state.smoke.mjs
+✅ cohort-state: 4 case groups passed
+(node:87840) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/csp-sandbox.smoke.mjs
+✅ chat panel CSP: required directives + forbidden absent
+✅ preview shell CSP: inline-permissive, exfil gates closed, no nonce
+✅ preview iframe sandbox: 3 allowed, 9 forbidden tokens absent (incl. same-origin)
+✅ chat panel nonce propagates into script-src
+✅ builders are pure
+
+All CSP / sandbox smoke tests passed.
+(node:87841) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/cspBuilder.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/gallery-publish-gate.smoke.mjs
+gallery-publish-gate smoke OK
+(node:87842) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/galleryPublish.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/heartbeat.smoke.mjs
+✓ 간격 — 30~60초
+✓ 양성 — 채팅 없이도 핑 · 관측값만 싣고 판정은 보드에 맡긴다
+✓ 음성 — 401 영구정지 · 403 백오프 후 자가 부활
+✓ 음성 — 백오프 상한이 있어 완전 침묵으로 굳지 않는다
+✓ stop() 멱등
+✓ artifactChanged — 변경일 때만 · 다이제스트+길이만
+✓ idle_ms — 시계 역행/NaN 방어 · 관측값 단 하나
+heartbeat.smoke.mjs — all green
+(node:87843) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/heartbeat.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/history-identity.smoke.mjs
+history-identity smoke OK
+— test/hook-order.smoke.mjs
+=== 1. 하네스 검증 (계측기가 진짜로 잡는가) ===
+  ok   음성 대조군: 훅 사이의 조기 return 을 잡는다 (기대대로)
+  ok   양성 대조군: 훅 아래의 조기 return 은 통과한다 (너무 엄격하지 않다)
+
+=== 2. 실제 ChatPanel.tsx (REQ-F6) ===
+  ok   ChatPanel.tsx: 조기 return 이후의 훅 없음
+
+PASS — REQ-F6 훅 순서 정상
+— test/html-structure.smoke.mjs
+html-structure.smoke.mjs — all assertions passed
+(node:87846) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/htmlStructure.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/live-preview-url.smoke.mjs
+✓ #507: 라이브 서버 주소 — 순수 교정 + browser_open 배선 + 워커 전달 통로
+(node:87847) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/browserControlHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/live-server.smoke.mjs
+✓ resolveWithinRoot: normal paths under root, traversal/NUL/encoded rejected
+✓ injectLiveReload: SSE client injected before </body>, appended when absent
+✓ contentTypeFor: known extensions mapped, unknown → octet-stream
+✓ serveStatic: index fallback, css verbatim, dir→index, 404 miss, 403 traversal
+All live-server smoke tests passed.
+(node:87848) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/liveServerHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/manifest-security-scope.smoke.mjs
+manifest-security-scope.smoke: all assertions passed
+— test/mint-student-token.smoke.mjs
+✅ adminBaseFor: strips /v1 suffix + trailing slashes
+✅ mapMintError: 5 known + 1 fallthrough
+✅ validateInputs: happy path + 9 rejection branches
+(node:87850) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/mintStudentTokenHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✅ issuer scopes (#347): real-signer fixtures · 1→default · multi→undef · student→undef · profiles scoped
+✅ #347 guard: legacy scope.cohorts shape is not honoured
+
+5/5 smoke groups passed.
+— test/model-selection.smoke.mjs
+PASS model selection: scoped choice, fixed default, forbidden alias, old Service, runtime mismatch
+PASS effort: persisted selection never crosses model, course version, or allowed range
+(node:87851) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/modelSelection.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/native-observation.smoke.mjs
+PASS host recorder: role separation, policy approval, dedupe, restart and identity/program isolation
+PASS truncated records remain explicitly incomplete after reload
+PASS credentials removed before local observation persistence
+(node:87852) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/nativeObservationRecorder.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/pasted-images.smoke.mjs
+  ✓ PNG 붙여넣기(원본 경로)를 받는다
+  ✓ JPEG 축소본(#389 canvas.toDataURL)을 받는다
+  ✓ webp · gif 도 받는다
+  ✓ base64 안의 줄바꿈/공백을 흘려보내지 않는다
+  ✓ 이미지가 아닌 data URL 은 거절한다
+  ✓ base64 가 아닌 data URL 은 거절한다
+  ✓ data URL 이 아예 아니면 거절한다
+  ✓ 본문이 빈 data URL 은 거절한다
+  ✓ 파일명은 시각+순번이라 다음 턴이 이전 턴을 덮지 않는다
+  ✓ 한 자리 월/일/시/분/초를 0 으로 채운다
+  ✓ dedupe 는 같은 초 충돌에 다른 이름을 준다
+  ✓ 파일명에 경로 구분자가 들어갈 수 없다
+  ✓ 저장이 없으면 문구도 없다 (프롬프트를 공짜로 늘리지 않는다)
+  ✓ 문구에 상대경로와 작업폴더가 함께 들어간다
+  ✓ 문구가 '저장해 달라'는 되묻기를 명시적으로 막는다
+  ✓ 여러 장이면 전부 나열한다
+  ✓ 저장 성공/실패 라벨이 서로 구분된다
+
+#421 pasted-images: 17 checks passed
+(node:87853) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/pastedImages.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/preview-artifacts.smoke.mjs
+✅ applyPlaceholderDefaults: 5 case groups passed
+✅ preview-artifacts: 8 case groups passed
+(node:87854) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/previewArtifacts.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/preview-html.smoke.mjs
+✅ escapeHtmlAttribute: 6 dangerous chars encoded, no double-encoding
+✅ injectBaseHref: happy path (head exists, trailing slash forced, ordering correct)
+✅ injectBaseHref: no <head> → synthesizes head with base inside
+✅ injectBaseHref: bare fragment → prepends head
+✅ injectBaseHref: matches <head> regardless of case/attributes
+✅ injectBaseHref: HTML-attribute injection via baseHref blocked
+✅ injectBaseHref: backtick encoded (JS-context defense-in-depth)
+✅ injectBaseHref: trailing slash not duplicated
+✅ buildInnerCsp: inline+eval allowed, exfil gates closed
+✅ injectInnerCsp: happy path (meta is first head child, contents preserved)
+✅ injectInnerCsp: no head → synthesizes head with meta inside
+✅ injectInnerCsp: bare fragment → prepends head
+✅ injectInnerCsp: HTML-attribute injection via cspSource blocked
+
+All preview-html smoke tests passed.
+(node:87855) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/previewHtml.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/profile-failure.smoke.mjs
+profile-failure.smoke.mjs — all assertions passed
+(node:87856) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/proxyClientHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/proxy-chat-usage.smoke.mjs
+✓ 양성 — usage 1회 발화, 청크 rid 우선
+✓ 양성 — 헤더 폴백 · local-* 최종 폴백
+✓ 양성 — [DONE] 부재 종료 경로에서도 정확히 1회
+✓ 음성 — usage 없는 스트림은 무발화
+✓ 음성 — stream_error 는 던지고 usage 무발화
+proxy-chat-usage.smoke.mjs — all green
+(node:87857) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/proxyClient.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/proxy-client-asset-score.smoke.mjs
+ok proxyChat parses asset_score SSE chunks without disrupting deltas
+(node:87859) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/proxyClient.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/proxy-headers.smoke.mjs
+✅ baseline content-type + accept always set
+✅ token → Bearer authorization
+✅ missing token → no authorization (anonymous fallback)
+✅ empty token → no authorization
+✅ ASCII coach name passes through unchanged
+✅ Korean coach name URL-encoded byte-safe + round-trip
+✅ name with space + emoji round-trips byte-safe
+✅ empty/whitespace name → header absent
+✅ leading/trailing whitespace trimmed
+✅ personality with newline+tab+emoji byte-safe + round-trip
+✅ empty personality → header absent
+✅ all fields combined
+✅ every header value is RFC-7230-safe
+
+All proxy-header smoke tests passed.
+(node:87860) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/proxyClientHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/proxy-transport-friendly.smoke.mjs
+proxy-transport-friendly.smoke.mjs — all assertions passed
+(node:87861) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/proxyClientHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/proxy-usage-extract.smoke.mjs
+✓ 양성 — hps_usage 4종 전량
+✓ 양성 — OpenAI usage 청크
+✓ 음성 — delta·asset_score·툴 청크에서 usage 를 지어내지 않는다
+✓ 경계 — 문자열·음수·Infinity 는 0
+proxy-usage-extract.smoke.mjs — all green
+(node:87862) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/proxyClientHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/report-problem.smoke.mjs
+(node:87863) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/reportProblemHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✅ hashJti returns 16 hex chars
+✅ hashJti is deterministic (same input → same hash)
+✅ hashJti differs across inputs
+✅ extractJtiUnverified pulls jti from valid v2 token
+✅ extractJtiUnverified returns undefined for missing jti
+✅ extractJtiUnverified returns undefined for malformed token
+✅ extractJtiUnverified handles non-base64url chars gracefully
+✅ sanitizeRecentTurns takes last 3 messages
+✅ sanitizeRecentTurns truncates content > 2000 chars
+✅ sanitizeRecentTurns drops system messages
+✅ sanitizeRecentTurns on empty array → empty
+✅ sanitizeRecentTurns handles missing content
+
+12/12 passed
+— test/resolve-coach.smoke.mjs
+✅ resolveCoach: 11 cases passed
+(node:87864) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/runner-bar.smoke.mjs
+✓ 러너 표시 조건 9건
+✓ 문구 순환 24건
+✓ 러너 얼굴 6건
+✓ 배선·움직임 회귀 가드 20건
+— test/sdk-activity.smoke.mjs
+(node:87867) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✓ #414: sdk activity — thinking/tool_use/tool_result/thinking_tokens 를 순서대로, 텍스트·fast-fail·stall 무회귀
+[coach] SDK 종료 오류 subtype=error_max_turns
+✓ maxTurns 소진 — 우리 말 안내 · 정상 종료에는 안 붙음
+✓ 실패한 툴은 사유까지 · 성공은 안 붙임 · 빈 값은 undefined
+✓ #503: SDK 이벤트 시각(timestamp)을 활동에 실어 보낸다
+— test/sdk-binary.smoke.mjs
+sdk-binary.smoke: all assertions passed
+(node:87868) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/sdk-coach-helpers.smoke.mjs
+✓ #282: sdk-coach helpers — tool policy + SDK-tool→ActionRequest mapping + P2 policy matrix + browser MCP policy
+✓ #384: containment canonicalizer — symlinked roots pass, real escapes still deny
+✓ #457: browser_click/type 이 자기 kind 와 문구를 갖는다 (셸 폴백 아님)
+✓ 셸: 읽기 명령 자동 실행 · rm/mv/sudo/force-push 는 강한 확인 유지
+(node:87870) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/sdk-fastfail.smoke.mjs
+✓ #320: sdk fast-fail — 401/400 api_retry aborts within one event + proxy-path token copy
+(node:87872) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/sdk-gateway.smoke.mjs
+✓ #282: agent-sdk gateway wiring — base-URL derivation, env/key invariants, flag default, real SDK loadable
+(node:87874) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/sdk-result-drift.smoke.mjs
+[coach] SDK 종료 오류 subtype=error_during_execution
+[coach] SDK 종료 오류 subtype=error_max_turns
+[coach] SDK 종료 오류 subtype=error_max_budget_usd
+[coach] SDK 종료 오류 subtype=error_max_structured_output_retries
+[coach] SDK 종료 오류 subtype=error_unknown
+  (참고: 'text' 는 벤더 타입에 없다 — 방어 분기)
+  (참고: 'content_block_delta' 는 벤더 타입에 없다 — 방어 분기)
+[coach] SDK 종료 오류 subtype=success
+sdk-result-drift smoke OK
+(node:87875) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/sdk-seat-session.smoke.mjs
+sdk-seat-session smoke OK
+(node:87876) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/sdk-stall-watchdog.smoke.mjs
+(node:87877) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✓ #403: sdk stall watchdog — silent/retry-storm turns abort with a friendly retry message
+— test/sdk-subagents.smoke.mjs
+✓ permittedAgentToolsFor: profile-owned, === true only, minors always stripped
+✓ catalog: two read-only Korean subagents, no web/MCP/shell/write in any wishlist
+✓ buildSubagentDefinitions: intersection clamps drift both ways; tools always explicit
+✓ buildSdkQueryOptions: agents option rides the flag; minors stripped; allowedTools stays []
+✓ evaluateSdkToolUse: delegation asks, catalog-only, subagent calls face the same matrix
+✓ sdkToolToActionRequest: Agent/Task → delegateAgent with subagent + task in the modal copy
+sdk-subagents.smoke.mjs: all tests passed
+(node:87878) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/sdk-surface-drift.smoke.mjs
+  (참고: zod 는 직접 선언되지 않은 전이 의존성이다 — 브라우저 MCP 가 여기에 기댄다)
+sdk-surface-drift smoke OK
+— test/sdk-tool-drift.smoke.mjs
+✓ #375: SDK tool drift — denials flagged apart + installed SDK surface fully accounted for
+(node:87880) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/sdk-usage-extract.smoke.mjs
+✓ 양성 — assistant 요청 단위: 키·모델·토큰 4종
+✓ 양성 — result 턴 합계 + total_cost_usd
+✓ 음성 — 키 없는 assistant usage 는 null (uuid 로 대체하지 않는다)
+✓ 음성 — usage 없는/깨진 메시지 전부 null
+✓ 경계 — 문자열·음수·NaN 은 0, 모델 없으면 null
+sdk-usage-extract.smoke.mjs — all green
+(node:87881) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/sdk-vendor.smoke.mjs
+sdk-vendor.smoke: all assertions passed
+(node:87882) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/send-queue.smoke.mjs
+✓ #416: 응답 중 입력 — Enter 예약(1건 누적) · 턴 종료 엣지에서만 자동 전송 · Stop/취소는 draft 복원
+— test/session-spool.smoke.mjs
+(node:87884) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sessionSpool.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+✓ 양성 — 단일 events.jsonl, 순서·스키마·meta
+✓ 음성 — requestKey dedupe · 키 없는 usage 미기록 (과대계상 방지)
+✓ 신원 후착 — meta 갱신, 세션·started_at 유지
+✓ 신원 교체 — 세션 회전, 이전 파일 보존
+✓ 인터리빙 — flush 없는 신원 전이에도 프롬프트가 제 세션으로
+✓ 턴 피닝 — 회전 뒤 도착한 턴 이벤트도 프롬프트의 세션으로
+✓ text 캡 — 절단 + text_truncated/text_original_chars 표식
+✓ response/artifact — 명시적 절단 · 전체 해시 · 동일 버전 dedupe
+✓ workflow payload — 문자열 값 500자 캡
+✓ dev 표식 — devHost 런의 meta 에 dev: true
+✓ 보존 캡 — 오래된 세션 삭제, 현재 세션 보호
+✓ 음성 — 쓰기 실패 삼킴 (스풀은 제품을 죽이지 않는다)
+✓ spoolIdentityFromToken — u·c 필수, 깨진 토큰은 null
+✓ 스풀 루트 — darwin/win32(+APPDATA 폴백)/linux 고정 경로
+session-spool.smoke.mjs — all green
+✓ error_kind — 실패 분류값 기록, 성공 턴엔 부재
+✓ classifyTurnError — 덕 타이핑 분류, 산문 미유출
+✓ #596 보존 — 업로드+3일 삭제 · 최근 유지 · 미업로드 보호
+✓ #596 seal — 완결 + 신원 승계, 빈 스풀은 null
+✓ #596 마커 무효화 — 새 이벤트가 '완결' 주장을 철회시킨다
+— test/shell-brand.smoke.mjs
+PASS HP shell: missing asset leaves originals; all variants and repeated application; packaged theme/defaults
+— test/shell-policy.smoke.mjs
+✓ shell-policy smoke passed
+✓ 따옴표 살균 후 arg 패턴 — 읽기전용 통과 · 진짜 위험은 그대로 검출
+(node:87887) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/shellPolicy.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/show-intent.smoke.mjs
+✅ show-intent positives: 16 cases
+✅ create-intent negatives: 11 cases
+✅ Korean single-char trap (검색 not matching 색): 3 cases
+✅ length boundary at 14
+✅ trailing punctuation + whitespace tolerance
+✅ off-topic negatives: 5 cases
+
+All show-intent smoke tests passed.
+✅ clampHistory: 8 cases (empty, under/at/over cap, 250-clamp, defensive)
+✅ sanitizeCoachInput: trim + fallback + 40/200 clamp + Korean chars
+✅ abortAllStreams: 3 cases (empty, multi, throw-resilient)
+✅ "안 보여" 계열: 양성 19 · 음성 8
+
+All chatPanelHelpers smoke tests passed.
+(node:87889) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/spool-uploader.smoke.mjs
+✓ 스캔 — 마커·현재세션·형식불량 제외
+✓ 정지 게이트 — fresh 제외, 봉인(allowFresh)은 면제
+✓ 양성 — 순서·마커·manifest sha256
+✓ 음성 — 중간 실패 시 manifest·마커 없음 (미완결 유지)
+✓ 음성 — 네트워크 예외 → 구조화 실패 반환
+✓ uploadAllPending — 부분 실패에도 나머지 진행
+✓ buildManifest — 존재 파일만으로 성립
+spool-uploader.smoke.mjs — all green
+✓ fs 소실 — 구조화 실패, 거짓 완결 없음
+✓ N2 — 신원 필터: 남의 세션·익명 세션은 이 토큰으로 올리지 않는다
+✓ N1 — 업로드 중 성장 감지 → 마커 보류, 재업로드 예약
+✓ 스냅샷 — meta+events 만, manifest·마커 없음, 완결 업로드 예약 유지
+(node:87890) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/spoolUploader.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/start-page.smoke.mjs
+PASS start-page host: 401/403/network/malformed preserve prior token; active chat blocks switch; valid token stored without echo
+PASS start revalidation: expired cache blocked, duplicate ignored, success acknowledged, errors surfaced, credential retained
+— test/token-and-workspace.smoke.mjs
+✓ token-and-workspace smoke passed
+(node:87893) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/tone-mirror.smoke.mjs
+=== 1. tier → tone 매핑이 실제로 도는가 ===
+  ok   search-webapp → search
+  ok   website → site
+  ok   kids-quest → quest
+  ok   kids-basic → game
+  ok   kids-rich → game
+  ok   (없음) → game
+
+=== 2. 웹뷰 미러가 모든 tier 를 안다 ===
+  ok   웹뷰가 "search-webapp" 를 분기한다
+  ok   웹뷰가 "website" 를 분기한다
+  ok   웹뷰가 "kids-quest" 를 분기한다
+
+=== 3. 웹뷰 미러의 문구가 TONE_LABELS 와 일치한다 ===
+  ok   quest: buildingLabel "생각 중…"
+  ok   quest: namingEmoji ✨
+  ok   game: buildingLabel "게임 만드는 중"
+  ok   game: namingEmoji 🎮
+  ok   search: buildingLabel "검색엔진 만드는 중"
+  ok   search: namingEmoji 🔍
+  ok   site: buildingLabel "웹사이트 만드는 중"
+  ok   site: namingEmoji 🌐
+
+=== 4. "게임" 프레임 금지 트랙에 게임 어휘가 새지 않는다 ===
+  ok   quest 톤 문구 어디에도 '게임'/🎮 이 없다
+
+PASS — tone mirror 18건
+(node:87894) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/trace-workflow-map.smoke.mjs
+✓ 양성 — 4종 매핑 + 워커 필드명 드리프트 락
+✓ 음성 — optional 미지정 시 키 부재 (undefined 를 싣지 않는다)
+trace-workflow-map.smoke.mjs — all green
+(node:87895) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sessionSpool.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/update-checker.smoke.mjs
+✅ compareVersions: equal versions
+✅ compareVersions: a > b minor
+✅ compareVersions: a < b patch
+✅ compareVersions: a > b patch
+✅ compareVersions: a > b major
+✅ compareVersions: handles v prefix
+✅ compareVersions: strips pre-release tag for comparison
+✅ compareVersions: garbage returns 0 (no spurious update)
+✅ parseLatestRelease: newer release → available
+✅ parseLatestRelease: same version → not available
+✅ parseLatestRelease: #249 — stamped version == latest tag → not available
+✅ parseLatestRelease: older release → not available (e.g., rollback scenario)
+✅ parseLatestRelease: draft → not available
+✅ parseLatestRelease: prerelease → not available
+✅ parseLatestRelease: missing asset → not available
+✅ parseLatestRelease: null input → not available
+✅ pickWindowsInstaller: prefers the per-user Setup .exe
+✅ pickWindowsInstaller: falls back to system Setup when no UserSetup
+✅ pickWindowsInstaller: ignores the portable zip (never the installer)
+✅ pickDarwinAsset: never returns a Windows .exe
+✅ parseLatestRelease: win32 picker → resolves the UserSetup .exe download
+✅ parseLatestRelease: win32 picker + no installer asset → not available
+✅ parseLatestRelease: win32 picker still honors version gate (same version)
+✅ renderWindowsUpdateWrapper: waits for app exit BEFORE launching installer
+✅ renderWindowsUpdateWrapper: escapes single quotes in paths
+✅ renderWindowsUpdateWrapper: starts with a UTF-8 BOM (non-ASCII paths under PS 5.1)
+✅ renderWindowsUpdateWrapper: has a bounded wait (deadline), not an infinite loop
+✅ detectAppBundle: standard /Applications path
+✅ detectAppBundle: dev path with .app
+✅ detectAppBundle: nested Helper (Plugin) execPath → outermost app
+✅ detectAppBundle: doubly-nested helper (already-bloated install) → outermost app
+✅ detectAppBundle: non-.app path → null
+✅ detectAppBundle: path missing MacOS marker → null
+✅ detectAppBundle: empty input → null
+✅ renderInstallerScript: includes expected anchors
+✅ renderInstallerScript: path with shell-sensitive chars stays escaped
+✅ shouldShowBanner: not available → false
+✅ shouldShowBanner: available, never dismissed → true
+✅ shouldShowBanner: dismissed yesterday → false
+✅ shouldShowBanner: dismissed > 7 days ago → true (re-prompt)
+✅ shouldShowBanner: different version dismissed → still show
+
+41/41 passed
+(node:87896) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/updateCheckerHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/update-installer.smoke.mjs
+PASS real bash installer fixture: success
+PASS real bash installer fixture: running
+PASS real bash installer fixture: backup-fails
+PASS real bash installer fixture: install-fails
+PASS real bash installer fixture: stage-fails
+PASS real bash installer fixture: wrong-bundle
+(node:87897) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/updateCheckerHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/update-orchestration.smoke.mjs
+[hypeproof-chat/update] check failed: Update check failed: HTTP 429
+PASS actual update orchestrator: check failures, platform, version, assets, cadence, banner retention and disposal
+— test/update-runtime.smoke.mjs
+✅ hasFreeDisk: above/at/below default 1 GB threshold
+✅ hasFreeDisk: custom threshold
+✅ hasFreeDisk: defensive against NaN/Infinity/negative/non-number
+✅ MIN_FREE_DISK_BYTES = 1 GB exactly
+✅ pickInflight: first call invokes factory
+✅ pickInflight: 5 concurrent same-key → 1 factory call + cleanup
+✅ pickInflight: different keys → separate factory invocations
+✅ pickInflight: rejection clears inflight, next call re-invokes
+✅ pickInflight: sequential same-key → fresh invocation per round
+
+All update-runtime smoke tests passed.
+(node:88069) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/updateCheckerHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/update-transport.smoke.mjs
+(node:88070) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/updateTransport.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+PASS update transport: verified bytes, corruption/truncation/HTTP/timeout failures, cleanup, origin and existing-file guards
+— test/update-windows-wrapper.smoke.mjs
+NOT RUN: Windows PowerShell wrapper execution requires the Windows CI runner
+(node:88075) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/updateCheckerHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/workspace-header.smoke.mjs
+✓ 양성 — 작업 폴더 경로가 헤더로 실려 원형 그대로 복원된다
+✓ 한글 폴더명 — 인코딩되어 실리고 복원된다
+✓ 파일 목록 — 개행이 새지 않고 목록이 그대로 복원된다
+✓ 음성 — 값이 없으면 빈 헤더를 만들지 않는다
+✓ 기존 ANTHROPIC_CUSTOM_HEADERS 와 공존한다
+✓ 게이트웨이 라우팅·키 스크럽 회귀 없음
+
+✓ workspace-header smoke 통과
+✓ 동시 툴 실행 상한 — 기본 2 · 조절 가능 · 라우팅 회귀 없음
+✓ Read 라벨 — 읽은 구간 표기 · 전체 읽기는 접미사 없음
+(node:88076) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/sdkCoachHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/workspace-routing.smoke.mjs
+✅ 코호트가 다른 폴더를 지정하면 갈아탄다
+✅ 이미 코호트 폴더면 no-op (리로드 루프의 1차 방어선)
+✅ 프로필이 폴더를 지정하지 않으면 현재 폴더 유지
+✅ 열린 폴더가 없으면 전환이 아니라 최초 open 경로
+✅ 멀티루트에 이미 목적지가 있으면 단일루트로 접지 않는다
+✅ e2e 런에서는 픽스처가 연 폴더를 빼앗지 않는다 (#42)
+✅ 직전 시도가 실패했으면 같은 목적지를 재시도하지 않는다
+✅ 직전 시도와 다른 목적지면 (코호트 변경) 정상 전환
+✅ canonicalize(심링크/리다이렉트된 홈)로 같은 곳이면 갈아타지 않는다
+✅ 후행 구분자 차이는 같은 폴더다
+✅ 정말 다른 폴더는 다르다 (음성 대조군)
+✅ 상위/하위 관계는 같은 폴더가 아니다
+
+12/12 passed
+(node:88077) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/workspaceRouting.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/world-archive.smoke.mjs
+✓ 세상 보관 판단·이름 22건
+(node:88078) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/world-context.smoke.mjs
+✓ 세상 엔진 주소 — 세상별 우선 · 공용 폴백 4건
+✓ 코치에게 보이는 파일 — 아이 트랙은 index.html 하나 11건
+✓ Clear 뒤 열린 세상 안내 13건
+✓ 배선 회귀 가드 14건
+(node:88082) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+— test/world-match.smoke.mjs
+✓ matchWorldRef — 칩 정확일치만 9건
+✓ 타이핑 전환 차단 · 게스트 목록은 클릭 유도 12건
+✓ 칩 문구 원문 전달 계약 2건
+(node:88085) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/src/chatPanelHelpers.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/effort-799/extensions/hypeproof-chat/package.json.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> hypeproof-chat@0.1.5 typecheck
+> tsc --noEmit
+
+
+> hypeproof-chat@0.1.5 build
+> npm run build:webview && npm run build:extension
+
+
+> hypeproof-chat@0.1.5 build:webview
+> cd webview-ui && npm install && npm run build
+
+
+up to date, audited 158 packages in 1s
+
+103 packages are looking for funding
+  run `npm fund` for details
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+> hypeproof-chat-webview@0.1.2 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+[2Ktransforming...✓ 277 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html          0.38 kB │ gzip:   0.25 kB
+dist/assets/index.css   33.13 kB │ gzip:   6.86 kB
+dist/assets/index.js   347.11 kB │ gzip: 109.37 kB
+
+✓ built in 192ms
+
+> hypeproof-chat@0.1.5 build:extension
+> esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js
+
+
+  dist/extension.js  401.5kb
+
+⚡ Done in 10ms

@@ -116,3 +116,22 @@ Worker/Chalk checks from that run therefore remain the compatibility evidence;
 no extra old-client API run or production migration is claimed. Main #833 changes
 persona verification, not effort runtime behavior. Its full persona pilot was not
 rerun by this effort task. Release and learning limits above still apply.
+
+
+## Integration with main #834
+
+Main moved the existing seat lock around both runtime paths and SDK fallback.
+The integrated source `28052a30e31a16709fba927f3130934ea8c9188d` preserves that
+lock plus the effort snapshot/headers. The full extension tests (including the
+updated seat-session test), typecheck and both builds passed; see
+[extension checks](after-main-834/extension-checks.txt).
+[SDK](after-main-834/agent-sdk/effort-result.json) 22 calls and
+[proxy](after-main-834/proxy/effort-result.json) 11 calls were rerun against the
+real API, all HTTP 200 with setting/receipt controls passing. All eight retained
+PNGs were opened and visually inspected by the agent; the runner's original
+visual_review value is preserved. These are 33 additional calls, separately
+retained from #832's run. The exact clean source and rebuilt bundle hashes are
+recorded in environment.json. The Service digest is still identical to the
+old-client control; no additional old-client or Worker/Chalk rerun is claimed.
+These native sequential turns do not independently prove concurrent-seat refusal;
+that is covered by the executed seat-session test. No release/pilot claim changes.

@@ -14,7 +14,7 @@
 
 2026-09-08 실행 상태: Worker/Chalk/extension 전체 테스트와 typecheck, webview/extension
 빌드 PASS. EFF-T01–04 PASS (합성 사용자, 실제 Service 라우팅/SQLite, upstream mock 및
-Chromium), EFF-T02D local workerd/D1 PASS. EFF-T05 PASS: 9개 모델, SDK 22건·proxy 11건과 구형 v0.1.56 2건의 실제 API 요청, 고정 수업과 390/1280px·키보드·200% 입력 접근까지 대조했다. [원본 결과·스크린샷·실패 이력](../research/agent-experience-acceptance-2026-09-08/course-effort/README.md)을 보존한다. main #829 통합 후 같은 35건을 다시 실행해 통과했다. 이후 main #832/#833 통합 (`57deb0c`)에서 확장 전체 검사·빌드를 다시 실행하고 SDK 22건·proxy 11건을 재검증했다. Service 소스 해시가 같아 구형 앱 대조는 직전 결과를 유지한다. Windows 실제 기기,
+Chromium), EFF-T02D local workerd/D1 PASS. EFF-T05 PASS: 9개 모델, SDK 22건·proxy 11건과 구형 v0.1.56 2건의 실제 API 요청, 고정 수업과 390/1280px·키보드·200% 입력 접근까지 대조했다. [원본 결과·스크린샷·실패 이력](../research/agent-experience-acceptance-2026-09-08/course-effort/README.md)을 보존한다. main #829 통합 후 같은 35건을 다시 실행해 통과했다. 이후 main #832/#833 통합 (`57deb0c`)에서 확장 전체 검사·빌드를 다시 실행하고 SDK 22건·proxy 11건을 재검증했다. Service 소스 해시가 같아 구형 앱 대조는 직전 결과를 유지한다. main #834의 양쪽 런타임 잠금 통합 (`28052a3`) 후에도 확장 전체 검사·빌드와 SDK 22건·proxy 11건을 다시 실행해 통과했다. Windows 실제 기기,
 스크린리더 음성, 실제 강사 수업 파일럿, 배포본 인수는 NOT RUN.
 
 실제 앱은 출시본 v0.1.56의 격리 복사본에 이 브랜치 확장만 주입한다. 개인 앱/설정과
