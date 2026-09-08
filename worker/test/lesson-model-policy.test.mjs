@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import { localAuthoring } from './harness/dental-authoring.mjs';
 import { withMockUpstream } from './harness/index.mjs';
+const { MODEL_MAP } = await import('../src/profiles/types.ts');
 const { getProfile } = await import('../src/profiles/index.ts');
 const { modelBinding, lessonModelIsCurrent, applyLessonModel } = await import('../src/lib/lesson-model-policy.ts');
 const { resolveMessagesModel } = await import('../src/routes/messages.ts');
@@ -56,9 +57,10 @@ try {
         const expected=requested==='hypeproof-fast'&&mode==='choice'?'claude-haiku-4-5':'claude-sonnet-4-6';
         await withMockUpstream((_url,init)=>{
           const sent=JSON.parse(init.body);assert.equal(sent.model,expected);
+          if(runtime==='agent-sdk')assert.deepEqual(sent.thinking,expected==='claude-haiku-4-5'?undefined:{type:'adaptive'});
           return Response.json({id:'synthetic-message',type:'message',role:'assistant',model:sent.model,content:[{type:'text',text:'확인했습니다.'}],stop_reason:'end_turn',usage:{input_tokens:3,output_tokens:2}});
         },async calls=>{
-          const response=await request(endpoint,'POST',{model:requested,max_tokens:32,messages:[{role:'user',content:'영업시간을 확인해 주세요.'}],stream:false},token);
+          const response=await request(endpoint,'POST',{model:requested,...(runtime==='agent-sdk'?{thinking:{type:'adaptive'}}:{}),max_tokens:32,messages:[{role:'user',content:'영업시간을 확인해 주세요.'}],stream:false},token);
           assert.equal(response.status,200,JSON.stringify(response.json));assert.equal(response.headers.get('x-hps-model'),expected);assert.equal(calls.length,1);
         });
       }
@@ -67,6 +69,14 @@ try {
       assert.equal((await request(path,'PUT',save({default:'hypeproof-fast',allowed:['hypeproof-fast']},1))).status,200);
       assert.equal((await request('/v1/profile','GET',undefined,token)).json.model_selection.default,'hypeproof-default');
       const altered=structuredClone(frozenPolicy);altered.binding.choices[0].id='another-model';assert.equal(lessonModelIsCurrent(local.env,profile,altered),false);
+      const originalPin=MODEL_MAP['hypeproof-default'];
+      try {MODEL_MAP['hypeproof-default']='synthetic-pin-drift';assert.equal((await request('/v1/profile','GET',undefined,token)).status,409);}
+      finally {MODEL_MAP['hypeproof-default']=originalPin;}
+      if(runtime==='proxy'){
+        const provider=profile.model.provider;
+        try {profile.model.provider='gemini';assert.equal((await request('/v1/profile','GET',undefined,token)).status,409);}
+        finally {profile.model.provider=provider;}
+      }
       profile.coach_runtime=runtime==='proxy'?'agent-sdk':'proxy';
       assert.equal((await request('/v1/profile','GET',undefined,token)).status,409);
       profile.coach_runtime=runtime;
