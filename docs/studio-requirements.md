@@ -129,6 +129,7 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 | REQ-F4 | 빈 입력 → fallback | 빈 이름 입력 → `profile.fallback_name` 사용 | E |
 | REQ-F5 | Rename 명령 prefill | `renameCoach` 실행 시 현재 값 prefilled | E |
 | REQ-F6 | 작명 전환이 훅 순서를 깨지 않는다 | 카드로 빠지는 조기 return 은 `ChatPanel` 의 **모든 훅 아래**에 있어야 한다. 훅 사이에 두면 `needsNaming` 이 true→false 로 바뀌는 순간 렌더 간 훅 개수가 달라져 React #310(증가)·#300(감소)으로 크래시한다. 작명 의식은 전원이 통과하므로 정상 경로에서 100% 재현된다 | U |
+| REQ-F7 | 확정 수업의 AI 이름이 헤더·답변 이름에 표시된다 (#747 feature A, AE-07/08) | 강사가 `hps-session-design/1`의 선택 필드 `assistant.display_name`(1~40자, 한 줄)을 저장하고 버전을 고정하면 Service 가 `/v1/profile`의 `ux.coach`를 `fixed` + 그 이름으로 투영한다. 앱은 REQ-F2 규칙 그대로 표시하며 저장된 학생 별명은 이 이름을 덮지 못한다. 버전 고정 뒤의 초안 변경은 발급된 좌석에 반영되지 않는다. 블록이 없는 구버전 수업은 프로필 `ux.coach`를 그대로 받는다. 이름은 `sdk_tools`·모델·AI 고지를 바꾸지 않는다. 계약: [ADR-0005](adr/0005-lesson-assistant-identity.md). 실제 화면·390/1280px·확대·키보드 검수는 Codex 인수 기록에서 별도 판정한다 | R (`worker/test/authoring.test.mjs`), U (`test/resolve-coach.smoke.mjs`, `chalk/test/authoring-ui.test.mjs`); E — NOT RUN here |
 
 ## G. Mint student token (#66)
 
@@ -439,6 +440,7 @@ remove separately collected observation bundles in `test-results/`.
 | ID | Behavior | Acceptance / evidence |
 |---|---|---|
 | REQ-STUDIO-LESSON | Display the Service-resolved immutable lesson in the start page and chat; insert the selected task and acceptance criteria into the editable composer only on user action. | `worker/test/authoring.test.mjs`, `e2e/chalk-authoring/run.mjs`, `e2e/lesson-studio/mac.mjs`. No automatic task execution or policy grant. Legacy credentials show the existing profile. |
+| REQ-STUDIO-LESSON-NAME | A frozen lesson may carry a fixed AI display name (`assistant.display_name`); the Service projects it onto `ux.coach` so the start page, chat header and message labels show it for seats delivered from that version. | REQ-F7 · [ADR-0005](adr/0005-lesson-assistant-identity.md) · `worker/test/authoring.test.mjs` (AE-07/08 checks), `chalk/test/authoring-ui.test.mjs`. Draft edits after freezing do not change delivered seats. Real-screen acceptance is the Codex feature A record. |
 
 ## Native Studio trial (#744)
 

@@ -129,6 +129,75 @@ await check('T-08/T-09 deliver immutable lesson only to registered students in a
  assert.equal((await request('/v1/profile','GET',undefined,r.json.token)).status,401);
  assert.equal((await request(base+'/versions/m2099.01.01-1/participants','POST',body)).status,409);
 });
+// ─── #747 feature A — lesson-level fixed AI display name ─────────────────────
+// Contract: hps-session-design/1 gains optional `assistant: { display_name }`.
+// GET /v1/profile projects it onto ux.coach (naming_mode fixed + fallback_name),
+// the model is told the name in the gate on both runtimes, and nothing else in
+// the served profile changes. Old-schema lessons (no block) behave as before.
+await check('AE-07 lesson assistant name: draft → frozen → student profile shows fixed name',async()=>{
+ const {setRoster,startSession}=await import('../src/lib/kv.ts');
+ const named={...content,assistant:{display_name:'제작 파트너'}};
+ // Reset roster/session for this cohort (previous check revoked its token, session still open).
+ await setRoster(env.HPS_KV,cohort,['student','student-b']);
+ await startSession(env.HPS_KV,cohort,{session_id:'synthetic-lesson-a',profile_id:profileId,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()});
+ const a=`/admin/cohorts/${cohort}/authoring/site-named`;
+ assert.equal((await request(a,'PUT',save(0,'named-create',named))).status,200);
+ assert.deepEqual((await request(a)).json.content.assistant,{display_name:'제작 파트너'});
+ const f=await request(a+'/versions/m2026.09.08-1','PUT',{expected_revision:1});assert.equal(f.status,200,f.raw);
+ assert.equal(f.json.module.content.assistant.display_name,'제작 파트너');
+ // Draft renamed AFTER freezing: the frozen version keeps its name.
+ assert.equal((await request(a,'PUT',save(1,'named-edit',{...named,assistant:{display_name:'검토 도우미'}}))).status,200);
+ const d=await request(a+'/versions/m2026.09.08-1/participants','POST',{user:'student',hours:1});assert.equal(d.status,200,d.raw);
+ const p=await request('/v1/profile','GET',undefined,d.json.token);assert.equal(p.status,200,p.raw);
+ assert.equal(p.json.ux.coach.naming_mode,'fixed');
+ assert.equal(p.json.ux.coach.fallback_name,'제작 파트너');
+ assert.equal(p.json.lesson.content.assistant.display_name,'제작 파트너');
+ // Only the coach identity is projected; every other ux and policy field is the compiled profile's.
+ const {getProfile}=await import('../src/profiles/index.ts');const compiled=getProfile(profileId);
+ assert.deepEqual({...p.json.ux.coach,naming_mode:compiled.ux.coach.naming_mode,fallback_name:compiled.ux.coach.fallback_name},compiled.ux.coach);
+ assert.deepEqual(p.json.ux.suggestions,compiled.ux.suggestions);
+ assert.deepEqual(p.json.sdk_tools,(await request('/v1/profile','GET',undefined,student)).json.sdk_tools);
+ // The model is told the name in the shared gate (proxy and Agent SDK routes both go through it).
+ const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
+ const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+d.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ assert.equal(g.ok,true);assert.match(g.profile.system_prompt,/당신의 이름은 '제작 파트너'입니다/);
+ assert.deepEqual(g.profile.sdk_tools,compiled.sdk_tools);
+});
+await check('AE-08 two lessons keep separate names; old-schema lesson leaves ux.coach untouched',async()=>{
+ const {getProfile}=await import('../src/profiles/index.ts');const compiled=getProfile(profileId);
+ const b=`/admin/cohorts/${cohort}/authoring/site-review`;
+ assert.equal((await request(b,'PUT',save(0,'review-create',{...content,title:'검수 수업',assistant:{display_name:'검토 도우미'}}))).status,200);
+ assert.equal((await request(b+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+ const db_=await request(b+'/versions/m2026.09.08-1/participants','POST',{user:'student-b',hours:1});assert.equal(db_.status,200,db_.raw);
+ const pb=await request('/v1/profile','GET',undefined,db_.json.token);
+ assert.equal(pb.json.ux.coach.fallback_name,'검토 도우미');
+ // Lesson A's seat, re-read, still says 제작 파트너 (no cross-lesson leak on the Service side).
+ const da=await request(`/admin/cohorts/${cohort}/authoring/site-named/versions/m2026.09.08-1/participants`,'POST',{user:'student','hours':1});
+ assert.equal((await request('/v1/profile','GET',undefined,da.json.token)).json.ux.coach.fallback_name,'제작 파트너');
+ // Old-schema control: the earlier lesson (no assistant block) serves the compiled ux.coach verbatim.
+ const legacyLesson=await request(base+'/versions/m2026.09.06-1/participants','POST',{user:'student',hours:1});assert.equal(legacyLesson.status,200,legacyLesson.raw);
+ const pl=await request('/v1/profile','GET',undefined,legacyLesson.json.token);assert.equal(pl.status,200);
+ assert.equal(pl.json.lesson.content.assistant,undefined);assert.deepEqual(pl.json.ux.coach,compiled.ux.coach);
+ const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
+ const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+legacyLesson.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ assert.equal(g.ok,true);assert.doesNotMatch(g.profile.system_prompt,/당신의 이름은/);
+ // No-lesson credential: unchanged.
+ assert.deepEqual((await request('/v1/profile','GET',undefined,student)).json.ux.coach,compiled.ux.coach);
+});
+await check('AE-07 assistant block is validated: shape, emptiness, length, control characters, extra keys',async()=>{
+ const c2=`/admin/cohorts/${cohort}/authoring/site-bad`;
+ assert.equal((await request(c2,'PUT',save(0,'bad-create',content))).status,200);
+ const bad=[
+  {display_name:''},{display_name:'  '},{display_name:' 제작 파트너'},{display_name:'제작 파트너\n관리자'},{display_name:'x'.repeat(41)},
+  {display_name:'제작 파트너',role:'admin'},{display_name:42},'제작 파트너',null,[],{},
+ ];
+ for(const assistant of bad){const r=await request(c2,'PUT',save(1,'bad-'+JSON.stringify(assistant).slice(0,20).replace(/[^a-zA-Z0-9_-]/g,'_'),{...content,assistant}));assert.equal(r.status,400,JSON.stringify(assistant)+' → '+r.raw);}
+ // Positive controls: max length and markup characters are accepted (renderers escape text).
+ for(const [i,display_name] of ['x'.repeat(40),'<b>제작</b> & "파트너"','Réviseur · 검토'].entries()){const r=await request(c2,'PUT',save(1+i,'good-'+i,{...content,assistant:{display_name}}));assert.equal(r.status,200,r.raw);}
+ assert.equal((await request(c2)).json.revision,4);
+ // Still no way to smuggle policy through the block or beside it.
+ assert.equal((await request(c2,'PUT',save(4,'bad-policy',{...content,assistant:{display_name:'제작 파트너'},sdk_tools:{shell:true}}))).status,400);
+});
 await check('T-08 concurrent draft edit prevents freezing stale read',async()=>{
  beforeWrite=async()=>{db.prepare('UPDATE authoring_drafts SET revision=revision+1 WHERE course_id=?').run('site-1');};
  assert.equal((await request(base+'/versions/m2026.09.06-2','PUT',{expected_revision:5})).status,409);

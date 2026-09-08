@@ -25,6 +25,7 @@ import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
 import { resolveTokenLesson } from '../lib/lesson-delivery';
+import { lessonAssistantName } from '../lib/session-design';
 import { isTokenRevoked, getRoster } from '../lib/kv';
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropicResilient } from "../lib/anthropic";
@@ -224,6 +225,7 @@ chat.get("/profile", async (c) => {
     if (!lesson) return c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 알려주세요.' } }, 409);
   }
 
+  const assistantName = lessonAssistantName(lesson?.content);
   return c.json({
     ...(lesson ? { lesson } : {}),
     profile_id: profile.id,
@@ -241,7 +243,11 @@ chat.get("/profile", async (c) => {
       greeting_md: `오늘 수업: ${lesson.content.title}\n목표: ${lesson.content.objective}\n내 수업에서 과제와 확인 기준을 읽고 시작하세요.`,
       example_prompts: lesson.content.steps.slice(0, 3).map(s => `${s.instructions}\n확인 기준: ${s.acceptance}`),
     } : profile.observation?.enabled && c.req.header("x-hps-observation-format") !== "hps-observation/1" ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."} : profile.welcome,
-    ux: profile.ux,
+    // #747 feature A — a frozen lesson may fix the AI's display name for this
+    // seat. It is projected onto the existing ux.coach contract (fixed +
+    // fallback_name) so every app version shows it through the same
+    // fixed-name precedence; no new top-level key, no capability change.
+    ux: assistantName ? { ...profile.ux, coach: { ...profile.ux.coach, naming_mode: 'fixed', fallback_name: assistantName } } : profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
     // #596 — 세션 로그 업로드 opt-in. 클라이언트는 이걸로 "기록 보내기" UI 를
     // 낼지만 판단한다 — 강제는 어차피 PUT /v1/logs 가 서버에서 한다(fail closed).
