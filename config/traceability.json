@@ -376,6 +376,43 @@
       ]
     },
     {
+      "id": "ST-REQ-TRIAL-CONVERSATION",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE",
+        "ST-REQ-UX"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/trial-conversation-experience.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-TRIAL-CONVERSATION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-TRIAL-CONVERSATION",
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/trial-conversation-experience.md"
+        },
+        {
+          "path": "e2e/tests/native-trial-entry.spec.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/workspace-preparation.smoke.mjs"
+        },
+        {
+          "path": "worker/test/trial-entry.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-INT-CAPABILITY-ACCESS",
       "stage": "intent",
       "owner": "jayleekr",
