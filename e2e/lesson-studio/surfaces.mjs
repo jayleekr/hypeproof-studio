@@ -2,7 +2,7 @@
 // or approval results are injected. File-write approval is explicitly enabled
 // in this isolated test user's settings; it is not the product default.
 import assert from 'node:assert/strict';
-import {existsSync,readFileSync,writeFileSync} from 'node:fs';
+import {existsSync,readFileSync,writeFileSync,readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {APPROVAL_TITLE_PATTERN} from '../../extensions/hypeproof-chat/src/coachIdentity.ts';
 
@@ -28,6 +28,7 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
    await wait(()=>entry.evaluate(`document.querySelector('.studio-primary')?.textContent.includes(${JSON.stringify(name+'와 계속')})||document.querySelector('.studio-primary')?.textContent.includes(${JSON.stringify(name+'과 계속')})`),'named continue action');
    await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setBounds({width:1800,height:1000}));await window.waitForTimeout(400);
    const check=async label=>{
+    if(label==='zoom-200'){await entry.evaluate('window.scrollTo(0,0)');await window.waitForTimeout(300);await shot('b-continue-zoom-200-top');}
     await entry.evaluate("document.querySelector('.studio-primary').scrollIntoView({block:'center'})");
     const state=await entry.evaluate("({width:innerWidth,document_width:document.documentElement.scrollWidth,title:document.querySelector('#connect-title').textContent,button:document.querySelector('.studio-primary').textContent,overflow_elements:[...document.querySelectorAll('body *')].filter(e=>e.clientWidth>0&&e.scrollWidth>e.clientWidth+1&&getComputedStyle(e).overflowX==='visible').map(e=>({tag:e.tagName,class:e.className,width:e.clientWidth,scroll_width:e.scrollWidth})).slice(0,20)})");
     assert.ok(state.title.includes(name));assert.ok(state.button.includes(name));
@@ -70,10 +71,13 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
     if(degraded){
      await send('합성 검수입니다. 도구는 사용하지 말고 현재 이름으로 한 문장만 답하세요.');
      await wait(async()=>{if(await chat.evaluate(`document.body.textContent.includes(${JSON.stringify('지금 '+name+'는 파일 저장·명령 실행 도구 없이')})`))return true;if(!await chat.evaluate("!!document.querySelector('.hps-btn-stop')"))throw Error('SDK-unavailable turn ended without its notice');},'named SDK-unavailable notice',90000);
-     await finished();await shot('b-sdk-unavailable');
+     await finished();await window.waitForTimeout(300);
+     const noticeLayout=await chat.evaluate("(()=>{const e=[...document.querySelectorAll('.hps-tool-error .hps-tool-label')].find(e=>e.textContent.includes('스태프를 불러주세요'));if(!e)return null;return {text:e.textContent,width:e.clientWidth,scroll_width:e.scrollWidth,height:e.clientHeight,scroll_height:e.scrollHeight,white_space:getComputedStyle(e).whiteSpace};})()");
+     assert.ok(noticeLayout,'complete recovery instruction absent');assert.ok(noticeLayout.scroll_width<=noticeLayout.width+1&&noticeLayout.scroll_height<=noticeLayout.height+1,'recovery notice is clipped');
+     await shot('b-sdk-unavailable');
      assert.ok(gatewayCalls.some(c=>c.path==='/v1/chat/completions'),'fallback did not use actual proxy route');
      assert.ok(!gatewayCalls.some(c=>c.path==='/v1/messages'),'SDK request observed in unavailable fixture');
-     record('B4',{name,sdk_unavailable_fixture:true,proxy_route_observed:true,notice:await text(chat,'.hps-messages')});return;
+     record('B4',{name,sdk_unavailable_fixture:true,proxy_route_observed:true,notice:await text(chat,'.hps-messages'),noticeLayout});return;
     }
     const file=join(workspace,'flower-shop-hours.txt'),content='가상 꽃집 영업시간: 월–금 오전 10시–오후 6시';assert.equal(existsSync(file),false);
     const request=`가상 꽃집 홈페이지에 쓸 영업시간 안내 원문을 저장해 주세요. Write 도구로 ${file} 한 파일에 ${content} 한 줄만 쓰세요. 다른 파일·셸·브라우저는 사용하지 마세요. 승인이 거절되면 재시도나 다른 방법 없이 멈추고 거절됐다고 알려주세요.`;
@@ -93,6 +97,7 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
     await shot('b-observation');
     await chat.evaluate("[...document.querySelectorAll('.hps-native-observation details')].find(d=>d.querySelector('ol'))?.setAttribute('open','')");await window.waitForTimeout(300);
     await chat.evaluate("document.querySelector('.hps-native-observation ol')?.scrollIntoView({block:'start'})");await window.waitForTimeout(300);await shot('b-observation-records');record('B5',observation);
+    const workspaceEntries=readdirSync(workspace,{recursive:true}).sort();assert.deepEqual(workspaceEntries,['flower-shop-hours.txt']);record('B2-workspace-effects',{entries:workspaceEntries,content:readFileSync(file,'utf8')});
    }catch(e){failure=e.message;await shot('b-failure').catch(()=>{});throw e;}
    finally{completed=!failure;save();}
   },
