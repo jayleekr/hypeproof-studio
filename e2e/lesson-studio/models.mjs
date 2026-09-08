@@ -40,11 +40,12 @@ export async function verifyModels({app,window,findContext,cases,out,live,upstre
    const metrics=await chat.evaluate("({width:innerWidth,document_width:document.documentElement.scrollWidth,select_right:document.querySelector('.hps-model-selection select').getBoundingClientRect().right})");assert.equal(metrics.width,width);assert.equal(metrics.document_width,width);assert.ok(metrics.select_right<=width);record('width-'+width,{...metrics,zoom:factor});await shot('model-'+width);
   }
   await chat.evaluate("document.querySelector('.hps-model-selection select').focus()");
-  await key(chat,'ArrowDown',40);await key(chat,'Enter',13);
+  await key(chat,'ArrowDown',40);await window.waitForTimeout(200);await shot('model-keyboard-menu');await key(chat,'ArrowDown',40);await key(chat,'Enter',13);
   await wait(()=>chat.evaluate("document.querySelector('.hps-model-selection select').value==='hypeproof-fast'"),'keyboard choice');
-  const axDocument=await chat.send('DOM.getDocument');
-  const axNode=await chat.send('DOM.querySelector',{nodeId:axDocument.root.nodeId,selector:'.hps-model-selection select'});
-  const ax=(await chat.send('Accessibility.getPartialAXTree',{nodeId:axNode.nodeId,fetchRelatives:false})).nodes[0];
+  const {result:axObject}=await chat.send('Runtime.evaluate',{expression:"document.querySelector('.hps-model-selection select')",contextId:chat.contextId,returnByValue:false});
+  const {node:axNode}=await chat.send('DOM.describeNode',{objectId:axObject.objectId});
+  const ax=(await chat.send('Accessibility.getPartialAXTree',{backendNodeId:axNode.backendNodeId,fetchRelatives:false})).nodes[0];
+  await chat.send('Runtime.releaseObject',{objectId:axObject.objectId});
   assert.equal(ax.name.value,'대화 모델');assert.equal(ax.ignored,false);record('keyboard-and-accessible-name',{role:ax.role.value,name:ax.name.value,selected:'hypeproof-fast'});
   await choose(chat,'hypeproof-default');
   setZoom(2);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-2)<0.01,'200% zoom');await window.waitForTimeout(500);
