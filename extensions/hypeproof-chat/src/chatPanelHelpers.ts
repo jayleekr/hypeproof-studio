@@ -1,6 +1,8 @@
 // Pure helpers for the chat panel. Kept vscode-free so they can be unit-tested
 // under plain Node — mirrors mintStudentTokenHelpers.ts / reportProblemHelpers.ts.
 
+import { coachDegradedNotice, DEFAULT_COACH_NAME, resolveCoachIdentity } from "./coachIdentity.ts";
+
 export interface CoachStateForResolve {
   name: string;
   personality: string;
@@ -124,14 +126,9 @@ export function resolveCoach(
   profile: CoachProfileForResolve | null | undefined,
   defaultFallback = "코치",
 ): { name: string; personality: string } {
-  const naming = profile?.ux.coach.naming_mode;
-  const fallback = profile?.ux.coach.fallback_name || defaultFallback;
-
-  if (naming === "fixed") {
-    return { name: fallback, personality: "" };
-  }
-  const name = state?.name?.trim() || fallback;
-  const personality = state?.personality?.trim() ?? "";
+  // #747 — single rule shared with the webview (coachIdentity.ts). Kept as a
+  // named export so existing callers and resolve-coach.smoke.mjs are unchanged.
+  const { name, personality } = resolveCoachIdentity(state, profile, defaultFallback);
   return { name, personality };
 }
 
@@ -384,9 +381,7 @@ export class AiDisclosureGate {
  *     확인하기)은 프록시에서도 끝까지 된다 — 그걸 안 말하면 참가자가 수업을
  *     통째로 포기한다.
  */
-export const COACH_DEGRADED_NOTICE =
-  "지금 코치는 파일 저장·명령 실행 도구 없이 돌고 있어요 — 만들기와 미리보기는 그대로 되지만, " +
-  "저장소·배포는 이 상태에서 안 돼요. 스태프를 불러주세요.";
+export const COACH_DEGRADED_NOTICE = coachDegradedNotice(DEFAULT_COACH_NAME);
 
 /**
  * 개발자 로그 한 줄 (#476). `console.warn` 을 대신한다 — 확장에

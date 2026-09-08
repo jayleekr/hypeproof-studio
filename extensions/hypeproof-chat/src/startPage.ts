@@ -48,7 +48,7 @@ export class StartPage {
       error: this.error ?? (!p ? this.chat.profileFailure()?.friendly : undefined),
       version: this.context.extension.packageJSON.version,
       workspace: vscode.workspace.workspaceFolders?.[0]?.name,
-      ...(p ? { profile: { id: p.profile_id, name: p.lesson?.content.title ?? p.display_name,
+      ...(p ? { coachName: this.chat.coachDisplayName(p), profile: { id: p.profile_id, name: p.lesson?.content.title ?? p.display_name,
         coach: p.ux.coach.naming_mode === "fixed" ? p.ux.coach.fallback_name : "직접 이름 짓는 코치",
         series: p.lesson?.version ?? `${p.series_index} / ${p.series_total}`, workspace: p.workspace_root ?? "현재 작업 폴더" } } : {}),
     };

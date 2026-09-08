@@ -129,6 +129,7 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 | REQ-F4 | 빈 입력 → fallback | 빈 이름 입력 → `profile.fallback_name` 사용 | E |
 | REQ-F5 | Rename 명령 prefill | `renameCoach` 실행 시 현재 값 prefilled | E |
 | REQ-F6 | 작명 전환이 훅 순서를 깨지 않는다 | 카드로 빠지는 조기 return 은 `ChatPanel` 의 **모든 훅 아래**에 있어야 한다. 훅 사이에 두면 `needsNaming` 이 true→false 로 바뀌는 순간 렌더 간 훅 개수가 달라져 React #310(증가)·#300(감소)으로 크래시한다. 작명 의식은 전원이 통과하므로 정상 경로에서 100% 재현된다 | U |
+| REQ-F8 | AI 이름은 모든 화면 문장에서 하나다 (#747 feature B, AE-07 표시 일관성) | 헤더·답변 이름뿐 아니라 승인 모달(파일·읽기·검색·위임·입력·셸·브라우저·기타), SDK 저하 알림, 페이지 첨부 알림, 시작 화면 제목·설명·버튼·02단계, 관찰 패널 소개가 같은 resolved identity(`src/coachIdentity.ts`)를 쓴다. 호스트와 웹뷰가 같은 모듈을 import 하며 웹뷰의 손 복제 규칙은 없다. 조사(이/가·와/과·은/는·을/를)는 받침에 맞춘다. 기본 이름 "코치"일 때 모든 문장은 이전 문자열과 바이트 단위로 같다(기존 e2e 잠금 유지). AI 고지 문장은 이름과 무관하게 유지한다 | U (`test/coach-identity.smoke.mjs`: 동등성·조사·기본 문자열 잠금·정적 검사); E — 실제 화면은 Codex 인수 |
 
 ## G. Mint student token (#66)
 
