@@ -62,9 +62,13 @@ if(live)globalThis.fetch=async(input,init)=>{
  const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);
  if(url.origin!=='https://api.anthropic.com')return originalFetch(input,init);
  assert.ok(upstream.length<(surfaces||models?20:8),'live acceptance request budget exhausted');
- const r=await originalFetch(input,{...init,signal:AbortSignal.any([...(init?.signal?[init.signal]:[]),AbortSignal.timeout(90000)])});
- upstream.push({...(models?{model:JSON.parse(init.body).model}:{}),origin:url.origin,path:url.pathname,status:r.status,request_id:r.headers.get('request-id')});
- writeFileSync(out+'/api-evidence.json',JSON.stringify({real_upstream:true,calls:upstream},null,2));return r;
+ const entry={...(models?{model:JSON.parse(init.body).model}:{}),origin:url.origin,path:url.pathname,status:null,request_id:null};
+ upstream.push(entry); // Attribute at request start: auxiliary responses may finish after the user turn.
+ const save=()=>writeFileSync(out+'/api-evidence.json',JSON.stringify({real_upstream:true,calls:upstream},null,2));save();
+ try {
+  const r=await originalFetch(input,{...init,signal:AbortSignal.any([...(init?.signal?[init.signal]:[]),AbortSignal.timeout(90000)])});
+  entry.status=r.status;entry.request_id=r.headers.get('request-id');save();return r;
+ }catch(e){entry.status='transport_error';save();throw e;}
 };
 let fault='none';const gatewayCalls=[];
 const server=createServer(async(req,res)=>{try{const chunks=[];for await(const x of req)chunks.push(x);const body=Buffer.concat(chunks);

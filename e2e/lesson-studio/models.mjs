@@ -64,6 +64,7 @@ export async function verifyModels({app,window,findContext,cases,out,live,upstre
     if(switchDuring){await fill(chat,input,'진행 중 작성한 초안');await choose(chat,switchDuring);assert.ok((await chat.evaluate("document.querySelector('.hps-model-selection').textContent")).includes('다음 요청'));}
     await wait(()=>chat.evaluate("!document.querySelector('.hps-btn-stop')"),'turn complete',150000);
     assert.equal(await chat.evaluate("!!document.querySelector('.hps-error-banner')"),false);
+    await wait(()=>upstream.slice(apiStart).every(c=>c.status!==null),'all started provider requests settled',95000);
     const calls=upstream.slice(apiStart).filter(c=>c.path==='/v1/messages');
     const gateway=gatewayCalls.slice(gateStart).filter(c=>!c.path.includes('count_tokens'));
     assert.ok(calls.length>0&&calls.every(c=>c.status===200&&c.model===expected),'every upstream call must use the captured turn model');
