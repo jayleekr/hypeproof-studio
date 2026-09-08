@@ -22,7 +22,13 @@
   display:flex;
   align-items:center;
   justify-content:space-between;
-  gap:24px}
+  gap:24px;
+  /* #746 B6 — at 200% zoom a supported window becomes ~200 CSS px, where the
+     nowrap brand (188px) plus the nav no longer fit one row. Wrapping keeps both
+     reachable instead of pushing them outside the window. Pre-existing at any
+     such width; it is not the AI name that overflows here. */
+  flex-wrap:wrap;
+  row-gap:12px}
 .studio-brand {
   display:inline-flex;
   gap:12px;
@@ -30,7 +36,8 @@
   font-size:20px;
   font-weight:650;
   letter-spacing:-.6px;
-  white-space:nowrap}
+  white-space:nowrap;
+  min-width:0}
 .studio-brand img {
   display:block}
 .studio-brand-sub {
@@ -95,7 +102,8 @@
   font-size:11px;
   color:var(--studio-muted);
   margin:7px 0 0;
-  word-break:keep-all}
+  word-break:keep-all;
+  overflow-wrap:anywhere}
 .studio-connect {
   background:var(--studio-panel);
   border:1px solid #41453d;
@@ -121,12 +129,15 @@
   line-height:1.35;
   font-weight:550;
   letter-spacing:-.8px;
-  margin:0 0 12px}
+  margin:0 0 12px;
+  word-break:keep-all;
+  overflow-wrap:anywhere}
 .studio-card-description {
   font-size:13px;
   color:var(--studio-muted);
   margin:0 0 28px;
-  word-break:keep-all}
+  word-break:keep-all;
+  overflow-wrap:anywhere}
 .studio-connect label {
   display:block;
   font-size:12px;
@@ -155,10 +166,16 @@
   display:flex;
   align-items:center;
   justify-content:space-between;
+  gap:10px;
+  text-align:left;
   padding:13px 15px;
   font-size:13px!important;
   font-weight:650!important;
+  word-break:keep-all;
+  overflow-wrap:anywhere;
   transition:background .15s}
+.studio-primary>span {
+  flex:0 0 auto}
 .studio-primary:hover:enabled {
   background:#fff9ed}
 .studio-primary:disabled {
@@ -271,7 +288,9 @@
 .studio-disconnected p {
   font-size:13px;
   color:var(--studio-muted);
-  margin-bottom:26px}
+  margin-bottom:26px;
+  word-break:keep-all;
+  overflow-wrap:anywhere}
 
 @media(max-width:720px) {
   .studio-main {
@@ -315,6 +334,24 @@
 .studio-bottom>span:not(.studio-build) {
   width:100%;
   order:3}
+}
+
+/* #746 B6 — 200% zoom on a supported window lands here (a 440px window reads as
+   220 CSS px). Everything must stay inside the viewport and stay operable; the
+   wordmark may wrap rather than run off-screen. */
+@media(max-width:260px) {
+  .studio-top {
+  gap:10px}
+.studio-brand {
+  font-size:15px;
+  white-space:normal}
+.studio-nav {
+  gap:6px}
+.studio-nav button {
+  padding:6px 9px}
+.studio-start,.studio-disconnected {
+  padding-left:12px;
+  padding-right:12px}
 }
 
 @media(prefers-reduced-motion:reduce) {

@@ -1040,9 +1040,24 @@ html, body, #root {
 }
 .hps-tool-label {
   flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* #746 B4 — an ordinary tool row stays one compact line, but a notice the
+   participant has to ACT on (the SDK-degraded line ends in "스태프를 불러주세요")
+   was ellipsized with no way to expand, hiding its recovery instruction. Error
+   rows wrap instead. */
+.hps-tool-error {
+  align-items: flex-start;
+}
+.hps-tool-error .hps-tool-label {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 .hps-tool-mark {
   flex: 0 0 auto;

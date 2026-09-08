@@ -4,6 +4,8 @@ export interface StartState {
   started?: boolean;
   error?: string;
   profile?: { id: string; name: string; coach: string; series: string; workspace: string };
+  /** #747 — resolved AI display name for the connected seat; absent → "코치". */
+  coachName?: string;
   workspace?: string;
   version: string;
 }

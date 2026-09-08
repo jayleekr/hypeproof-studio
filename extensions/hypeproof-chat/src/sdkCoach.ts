@@ -35,6 +35,7 @@ import {
   GATEWAY_BAD_REQUEST_FRIENDLY,
 } from "./proxyClientHelpers";
 import { WORLD_ARCHIVE_DIR, filterCoachVisibleFiles } from "./chatPanelHelpers";
+import { stallNotice } from "./coachIdentity.ts";
 import {
   buildSdkQueryOptions,
   consumeSdkStream,
@@ -109,6 +110,11 @@ export interface SdkCoachArgs {
   history: { role: string; content: string }[];
   userText: string;
   signal: AbortSignal;
+  /**
+   * #747 — the AI's display name for this seat, so student-facing failure copy
+   * names the same AI as the header and the approval modals. Omitted → "코치".
+   */
+  coachName?: string;
   /** Workspace root for the SDK's file tools (Phase-2 tiers). */
   cwd?: string;
   /**
@@ -721,7 +727,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
         `[coach] SDK stream stalled: no progress for ${stallMs}ms — aborting the turn (#403). ` +
           `Likely a gateway retry storm (429/529/5xx) or a first turn that never produced a token.`,
       );
-      return new CoachStallError(status===429?'요청 한도에 도달해 응답을 받지 못했습니다. 잠시 후 다시 시도하거나 강사에게 체험 한도를 확인해 주세요. (429)':status&&status>=500?'AI 서비스 오류로 응답을 받지 못했습니다. 작업 파일은 보존돼 있습니다. ('+status+')':SDK_STALL_FRIENDLY);
+      return new CoachStallError(status===429?'요청 한도에 도달해 응답을 받지 못했습니다. 잠시 후 다시 시도하거나 강사에게 체험 한도를 확인해 주세요. (429)':status&&status>=500?'AI 서비스 오류로 응답을 받지 못했습니다. 작업 파일은 보존돼 있습니다. ('+status+')':stallNotice(args.coachName));
     },
     // Silence that is NOT a stall: an open modal, or a tool the SDK is still
     // running (one budget of slack after the decision — a long subagent gets

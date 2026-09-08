@@ -43,6 +43,15 @@ import {
   isWorldCohort,
   openWorldKeyForCohort,
 } from "./chatPanelHelpers";
+import {
+  approvalCopyFor,
+  approvalFallbackTitle,
+  browserApprovalTitle,
+  coachDegradedNotice,
+  pageAttachedNotice,
+  profileNotReadyNotice,
+  shellApprovalTitle,
+} from "./coachIdentity.ts";
 import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
@@ -97,7 +106,6 @@ import {
   extractCohortIdUnverified,
   browserToolLogLine,
   AiDisclosureGate,
-  COACH_DEGRADED_NOTICE,
   sdkFallbackLogLine,
   resolveCoachRuntime,
   classifyTurnError,
@@ -121,14 +129,11 @@ import {
  * 승인 모달 문구. `kind` 별로 무엇을 하려는지 한국어로 말하고, 확인 버튼도
  * 그 행동의 동사로 쓴다 — `Approve` 보다 `저장`/`위임`이 무엇을 승인하는지
  * 분명하다. 취소는 VS Code 가 항상 붙이므로 따로 만들지 않는다.
+ *
+ * #747 — the titles live in `coachIdentity.approvalCopyFor(name)` and are built
+ * from the resolved AI name (lesson-fixed, student-chosen, or "코치"). With the
+ * default name they are byte-identical to the previous literals here.
  */
-const APPROVAL_COPY: Record<string, { title: string; verb: string }> = {
-  writeFile: { title: "코치가 파일을 저장하려고 해요:", verb: "저장" },
-  readFile: { title: "코치가 파일을 읽으려고 해요:", verb: "읽기" },
-  webSearch: { title: "코치가 웹에서 찾아보려고 해요:", verb: "검색" },
-  delegateAgent: { title: "코치가 다른 에이전트에게 맡기려고 해요:", verb: "맡기기" },
-  browserType: { title: "코치가 페이지에 입력하려고 해요:", verb: "입력" },
-};
 
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
@@ -327,9 +332,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #308 — announce inline in the chat panel, NOT via a VS Code toast (a toast
     // pauses the integrated browser). The webview clears it on the next send.
     const withShot = !!this.pendingPageImage;
-    this.postPageNotice(
-      `${withShot ? "🖼 화면과 내용을" : "📄 내용을"} 코치에게 붙였어요 — ${ctx.title || ctx.url}. 이제 질문을 입력해 보내세요.`,
-    );
+    this.postPageNotice(pageAttachedNotice(this.coachDisplayName(), withShot, ctx.title || ctx.url));
   }
 
   /**
@@ -655,6 +658,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
+   * #747 — the AI's display name for THIS seat: the lesson/cohort-fixed name
+   * (ux.coach fixed precedence, #140 / ADR-0005), else the student's stored
+   * name, else "코치". Every host-side sentence that names the AI (approval
+   * modals, degraded notice, page-attach notice, start page) uses this, so a
+   * lesson called "제작 파트너" is "제작 파트너" everywhere, not only in the header.
+   */
+  coachDisplayName(profile: ResolvedProfile | null = this.cachedProfile): string {
+    return resolveCoach(this.getCoach(), profile).name;
+  }
+
+  /**
+   * #747 — true when the displayed name was actually chosen: fixed by the
+   * cohort/lesson, or named by this student. False means a `user_names_it`
+   * seat that has not been through the naming step, where the start page
+   * should describe the mode instead of showing the placeholder as a name.
+   */
+  coachNameIsChosen(profile: ResolvedProfile | null = this.cachedProfile): boolean {
+    return profile?.ux.coach.naming_mode === "fixed" || this.getCoach().configured;
+  }
+
+  /**
    * Save the latest game to the workspace root as index.html so it persists
    * and is GitHub-Pages-ready. No approval modal — this is the kid saving
    * their own game in their own workspace (the core flow), not an AI-initiated
@@ -801,7 +825,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.postToolLog(streamId, {
       id: randomId(),
       icon: "⚠️",
-      label: COACH_DEGRADED_NOTICE,
+      label: coachDegradedNotice(this.coachDisplayName()),
       state: "error",
     });
   }
@@ -2222,7 +2246,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         });
       if (runtime === "agent-sdk") {
         if (!profile) {
-          throw new Error("코치 프로필을 아직 못 받았어요. 잠시 후 다시 시도해주세요.");
+          throw new Error(profileNotReadyNotice(this.coachDisplayName()));
         }
         if (!token) {
           throw new ProxyAuthError("missing", TOKEN_MISSING_FRIENDLY);
@@ -2233,6 +2257,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             token,
             model,
             profile,
+            // #747 — failure copy inside the SDK run names the same AI as the
+            // header and the approval modals.
+            coachName: this.coachDisplayName(profile),
             // The worker gateway (POST /v1/messages, #316) DROPS the client
             // `system` field and injects the cohort profile blocks server-side
             // (REQ-M10) — the tuned Korean prompt + classroom key never leave
@@ -2666,7 +2693,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const buttons = REMEMBER ? ["실행", REMEMBER] : ["실행"];
       onPrompted?.();
     const pick = await vscode.window.showWarningMessage(
-        "코치가 명령을 실행하려고 해요:",
+        shellApprovalTitle(this.coachDisplayName()),
         { modal: true, detail: pretty },
         ...buttons,
       );
@@ -2698,7 +2725,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const buttons = REMEMBER ? ["열기", REMEMBER] : ["열기"];
       onPrompted?.();
     const pick = await vscode.window.showWarningMessage(
-        `코치가 브라우저를 열려고 해요:\n\n${url || req.description}`,
+        `${browserApprovalTitle(this.coachDisplayName())}\n\n${url || req.description}`,
         { modal: true },
         ...buttons,
       );
@@ -2773,8 +2800,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     //
     // 승인 게이트 자체는 유지한다(원장 결정 2026-07-27): 자기 결과물이 바뀌는
     // 순간마다 의식적으로 승인하는 것이 이 트랙의 위임 판단 훈련이다.
-    const { title, verb } = APPROVAL_COPY[req.kind] ?? {
-      title: "코치가 작업을 하려고 해요",
+    const coachName = this.coachDisplayName();
+    const { title, verb } = approvalCopyFor(coachName)[req.kind] ?? {
+      title: approvalFallbackTitle(coachName),
       verb: "허용",
     };
     onPrompted?.();
