@@ -54,6 +54,14 @@ member, instructor, or release owner could observe the change.
 
 ## Chalk Authoring Proposal
 
+Related proposal: [Learning Agent Experience requirements](../requirements/learning-agent-experience.md)
+connect competitive UI evidence to lesson-specific AI identity, chat, runtime
+policy, SDK lifecycle, browser verification, instructor operations and Computer Use.
+AE-01 through AE-24 are proposed acceptance goals, not implemented contracts.
+[The test plan](../testing/learning-agent-experience.md) and
+[six epics](../plan/learning-agent-experience-epics.md) retain that distinction.
+Existing Studio, Chalk authoring and classroom-admin requirements remain in force.
+
 [Chalk authoring requirements](../requirements/chalk-authoring.md) contain the
 planned course-authoring scope. Their BASE/CH/WEB/ENV/RUN/CLS/EDU/REQ and architecture
 IDs are local to that document and retain the discussion's identifiers.

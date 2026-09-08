@@ -85,3 +85,10 @@ an app rebuild. Record baseline failures separately from new findings without
 lowering the checker threshold. Preserve the verification rule's positive and
 negative controls for any new detector. No new test script should print PASS
 for a placeholder, skipped implementation, or missing external environment.
+
+## Learning Agent Experience Proposal
+
+[Proposed acceptance scenarios](../testing/learning-agent-experience.md) map
+AE-01 through AE-24 to real runtime, UI, permission, recovery and classroom
+verification. The dated competitive screenshots are research evidence; they
+do not mark these unexecuted scenarios as passed.
