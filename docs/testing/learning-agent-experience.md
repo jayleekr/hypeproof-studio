@@ -105,7 +105,7 @@ default/strong 요청이 sonnet으로 해석되는 정상 대조군도 함께 �
 | 기존 시나리오 | 계약을 구현할 때 확인할 추가 경계 |
 |---|---|
 | AE-T19 | `{fast}`뿐 아니라 `{default}` 고정 수업에서 직접 fast alias/raw haiku id 요청을 보낸다. 보조 호출의 신뢰 가능한 출처와 별도 허용/예산이 없다면 “단일 모델로 제한”했다고 표시하지 않는다. 단순 요청 문자열로 보조 호출을 가장할 수 없어야 함 |
-| AE-T20/21 | proxy는 응답 헤더·usage, SDK는 실제 `SdkUsageEvent`의 요청별 model을 관찰한다. SDK 호스트가 proxy 응답 헤더를 읽는다고 가정하지 않는다. 실행기·공급자·모델의 출처가 없으면 unknown; 여러 요청을 한 개 모델의 확정 근거로 합치지 않음 |
+| AE-T20/21 | proxy는 응답 헤더·usage, SDK는 실제 `SdkUsageEvent`의 요청별 model을 관찰한다. SDK 호스트가 proxy 응답 헤더를 읽는다고 가정하지 않는다. 실행기·공급자·모델의 출처가 없으면 unknown; 여러 요청을 한 개 모델의 확정 근거로 합치지 않음. 사용자가 “이 답변은 기본 Sonnet인가?”를 앱 안에서 확인할 수 있는지 검수한다. 입력창의 선택값이나 AI 자기소개가 아니라 해당 턴의 실제 사용 모델을 표시하고, 보조 요청의 모델과 구분한다 |
 | AE-T20/21 | SDK 부재로 proxy로 내려갈 때에도 수업의 provider/runtime/model 허용 교집합과 기능 제한을 다시 확인한다. 표시 id만으로 공급자나 도구 능력을 추정하지 않음 |
 | AE-T25 | 같은 frozen lesson을 유지한 채 alias map/catalog revision을 바꾸는 대조군을 포함한다. 실제 요청 없이 새 매핑을 과거 버전의 허용 모델이라고 재해석하지 않으며 저장된 provider/id/revision과 재리허설·새 버전 경계를 검수 |
 
