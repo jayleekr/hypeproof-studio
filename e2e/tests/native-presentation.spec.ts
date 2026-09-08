@@ -60,6 +60,7 @@ test('delegation concern remains the purpose after the learner names a presentat
   test.setTimeout(300000);
   const ctx = await launchApp({ preseedToken: true, stayOnStart: true });
   const out = process.env.HPS_NATIVE_EVIDENCE_DIR!;
+  const suffix = test.info().repeatEachIndex ? `-${test.info().repeatEachIndex}` : '';
   try {
     expect(await ctx.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every(w => !w.isFocusable()))).toBe(true);
     const start = await startFrame(ctx.win);
@@ -71,11 +72,15 @@ test('delegation concern remains the purpose after the learner names a presentat
       await input.press('Enter');
       await expect(chat.locator('.hps-btn-stop')).toBeVisible();
       await expect(chat.locator('.hps-btn-stop')).toHaveCount(0, { timeout: 120000 });
+      writeFileSync(join(out, `delegation${suffix}-transcript.txt`), await chat.locator('.hps-messages').innerText());
+      await expect(chat.locator('.hps-error-banner')).toHaveCount(0);
     }
-    await ctx.win.screenshot({ path: join(out, 'delegation-purpose.png') });
-    writeFileSync(join(out, 'delegation-transcript.txt'), await chat.locator('.hps-messages').innerText());
+    await ctx.win.screenshot({ path: join(out, `delegation${suffix}-purpose.png`) });
+    writeFileSync(join(out, `delegation${suffix}-transcript.txt`), await chat.locator('.hps-messages').innerText());
+    writeFileSync(join(out, `delegation${suffix}-files.json`), JSON.stringify(readdirSync(ctx.wsDir).filter(name => !name.startsWith('.'))));
+    if (existsSync(join(ctx.wsDir, 'index.html'))) writeFileSync(join(out, `delegation${suffix}-index.html`), readFileSync(join(ctx.wsDir, 'index.html')));
     // This test proves the real conversation completed. Semantic acceptance is
     // reviewed from the transcript, never inferred from a green transport test.
-    writeFileSync(join(out, 'delegation-results.json'), JSON.stringify({ transport: 'PASS', semantic_review: 'PENDING', scope: 'synthetic multi-turn participant; no human learning claim' }));
+    writeFileSync(join(out, `delegation${suffix}-results.json`), JSON.stringify({ transport: 'PASS', semantic_review: 'PENDING', scope: 'synthetic multi-turn participant; no human learning claim' }));
   } finally { await closeApp(ctx); }
 });

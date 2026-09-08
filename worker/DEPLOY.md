@@ -114,6 +114,7 @@ lesson field cannot read a frozen version carrying it and returns
 | Field | Introduced by | Do not roll the Service back below |
 |---|---|---|
 | `assistant.display_name` (ADR-0005) | #747 feature A | the first deploy that includes it, once any instructor has frozen a named version |
+| `model` with Service-produced binding (ADR-0006) | #792 | the first deploy supporting the field, after a model-configured lesson is frozen |
 
 Deploy order for a lesson-schema change: Service first, then Chalk. A newer
 Chalk against an older Service fails the draft save with

@@ -1,3 +1,4 @@
+import { servedModelSelection } from '../lib/lesson-model-policy';
 import {nativeObservationScope} from '../lib/native-observation-scope';
 // POST /v1/chat/completions
 //
@@ -229,6 +230,7 @@ chat.get("/profile", async (c) => {
   return c.json({
     ...(lesson ? { lesson } : {}),
     profile_id: profile.id,
+    model_selection: servedModelSelection(c.env, profile, lesson?.content.model),
     ...(profile.observation?.enabled ? { observation: { format: 'hps-observation/1', scope:observationScope } } : {}),
     // dag task H — which curriculum module this seat is running. Observability
     // only (the prompt itself never leaves the worker): lets e2e/observe and

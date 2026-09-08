@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "source": "https://github.com/jayleekr/hypeproof-studio/releases/tag/v0.1.55",
+  "public": "https://github.com/jayleekr/hypeproof-studio-releases/releases/tag/v0.1.55",
+  "published_at": "2026-09-08T18:20:46Z",
+  "assets": {
+    "HypeProof-Studio-darwin-arm64.zip": "sha256:73bfc4ec02ee19f39993ddc7b6685c020aeb1b1b2a007083544b0450b4fe3fc6",
+    "hypeproof-studio-tunnel.exe": "sha256:7897489f2798142647a41f899a60cb1d7d9d79009fee2ff261856247399615e5",
+    "HypeProof.Studio-win32-x64-1.116.06041.zip": "sha256:a7b6177e032f7a935c2b40bb4dddfb6954c319a68ff6a801fa6dac9baedf8127",
+    "HypeProof.Studio.exe": "sha256:d3d80313b61e618d0d9a692d0bd84637b8aaf9a82841554823268798905da88a",
+    "HypeProof.StudioSetup-x64-1.116.06041.exe": "sha256:34a6bd389008c69a04797a983d17d40c32d8098a44527ebd13413eb8722e70f8",
+    "HypeProof.StudioUserSetup-x64-1.116.06041.exe": "sha256:ce964fc32a86baeac3c8eb3beb189515f5259c27121f2634d9fa70aeb93d35d1",
+    "inno_updater.exe": "sha256:fc80e5a52742836414fe9f4dc702eaff9f438256aaad734fd4260e49d7e01d3e"
+  },
+  "mac_download_sha256": "73bfc4ec02ee19f39993ddc7b6685c020aeb1b1b2a007083544b0450b4fe3fc6"
+}

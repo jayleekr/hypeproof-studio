@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-08T17:41:14.422Z",
+  "scope": "production API; synthetic release-check participant",
+  "previous_probe": "profile passed; incorrect /v1/context probe returned 404; original test code revoked (401). Correct route read from observations.ts.",
+  "profile_status": 200,
+  "display_name": "Studio · 내 삶에 AI 더하기",
+  "profile_id": "studio-native-trial",
+  "context_status": 200,
+  "version": "w0.0.0-dev+189bc95",
+  "limits": {
+    "duration_ms": 3600000,
+    "request_limit": 40,
+    "input_bytes": 200000,
+    "output_tokens": 8192,
+    "request_timeout_ms": 60000
+  },
+  "revoked_status": 401
+}

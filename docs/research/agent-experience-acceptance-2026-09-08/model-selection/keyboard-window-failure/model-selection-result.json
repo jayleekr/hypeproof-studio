@@ -1,0 +1,45 @@
+{
+  "status": "FAIL",
+  "checks": [
+    {
+      "id": "selection",
+      "selected": "hypeproof-default",
+      "options": [
+        "Claude Sonnet 4.6",
+        "Claude Haiku 4.5",
+        "Claude Sonnet 5",
+        "Claude Sonnet 4.5",
+        "Claude Opus 5",
+        "Claude Opus 4.8",
+        "Claude Opus 4.7",
+        "Claude Opus 4.6",
+        "Claude Opus 4.5"
+      ],
+      "name": "제작 파트너"
+    },
+    {
+      "id": "width-390",
+      "width": 390,
+      "document_width": 390,
+      "select_right": 182.2421875,
+      "zoom": 2
+    },
+    {
+      "id": "width-1280",
+      "width": 1280,
+      "document_width": 1280,
+      "select_right": 182.4921875,
+      "zoom": 1
+    }
+  ],
+  "error": "Timed out: keyboard choice",
+  "scope": "actual Mac + local Service + synthetic lessons",
+  "live_model_requested": true,
+  "not_run": [
+    "Windows",
+    "screen reader speech",
+    "human learning",
+    "cross-provider transfer"
+  ],
+  "visual_review": "PENDING"
+}

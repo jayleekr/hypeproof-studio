@@ -84,3 +84,16 @@ existing philosophy, autonomy, and verification rules in their canonical files.
 - [.claude/rules/verification.md](.claude/rules/verification.md) — 관측 규율. **판정 기준을 세우기 전에 대상을 열어본다** · 대조군 먼저 · CI 초록은 아무것도 보장하지 않는다
 - [e2e/observe/README.md](e2e/observe/README.md) — 실사용 관측 도구. 큐시트는 강사가 채팅으로 몰고, 이건 그동안 무슨 일이 일어났는지 보는 용도
 - [docs/seven-assets.md](docs/seven-assets.md) — upstream philosophy reference and Studio asset compatibility index
+
+<!-- hype-pr-skill:start -->
+## Agent PR preparation
+
+For development through PR creation in this repository, read and use
+`.claude/skills/hype-pr/SKILL.md` (also discoverable at `.agents/skills/hype-pr/`).
+Inspect criteria links at task start; before creating a PR, record the agent's
+impact assessment and validation with `scripts/hype-pr/pr.py inspect` / `prepare`.
+Create through `scripts/hype-pr/pr.py create --preparation <receipt> --apply`.
+Fix stale/missing preparation instead of bypassing it with direct `gh pr create`.
+The common contract is `docs/AGENT-GUIDE.ko.md`; commands are in `docs/HYPE-PR.ko.md`.
+This adds no GitHub required check and does not grant human approval or merge authority.
+<!-- hype-pr-skill:end -->

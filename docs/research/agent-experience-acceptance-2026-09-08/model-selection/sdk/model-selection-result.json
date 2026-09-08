@@ -1,0 +1,362 @@
+{
+  "status": "PASS_EXECUTED_CASES",
+  "checks": [
+    {
+      "id": "selection",
+      "selected": "hypeproof-default",
+      "options": [
+        "Claude Sonnet 4.6",
+        "Claude Haiku 4.5",
+        "Claude Sonnet 5",
+        "Claude Sonnet 4.5",
+        "Claude Opus 5",
+        "Claude Opus 4.8",
+        "Claude Opus 4.7",
+        "Claude Opus 4.6",
+        "Claude Opus 4.5"
+      ],
+      "name": "제작 파트너"
+    },
+    {
+      "id": "width-390",
+      "width": 390,
+      "document_width": 390,
+      "select_right": 182.2421875,
+      "zoom": 2
+    },
+    {
+      "id": "width-1280",
+      "width": 1280,
+      "document_width": 1280,
+      "select_right": 182.4921875,
+      "zoom": 1
+    },
+    {
+      "id": "keyboard-events",
+      "focus": true,
+      "active": "SELECT",
+      "events": [],
+      "value": "hypeproof-fast"
+    },
+    {
+      "id": "keyboard-and-accessible-name",
+      "role": "combobox",
+      "name": "대화 모델",
+      "selected": "hypeproof-fast"
+    },
+    {
+      "id": "zoom-200",
+      "width": 640,
+      "scroll": 640,
+      "right": 182.2421875,
+      "bottom": 297.5,
+      "height": 409
+    },
+    {
+      "id": "draft-preserved",
+      "pass": true
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-sonnet-4-6",
+      "upstream": [
+        {
+          "model": "claude-sonnet-4-6",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQr2E3qHaUhqbneiaEa"
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQr2KFgjqXwGZ72SaHj"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-default"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-default"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-haiku-4-5",
+      "upstream": [
+        {
+          "model": "claude-haiku-4-5",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQrFci5Yix9rCCdwTxE"
+        },
+        {
+          "model": "claude-haiku-4-5",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQrFewRBHqBF54d26Um"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-fast"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-fast"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-sonnet-5",
+      "upstream": [
+        {
+          "model": "claude-sonnet-5",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQrRKcbbf1dwEgqE6bK"
+        },
+        {
+          "model": "claude-sonnet-5",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQrRS4S1bye1QgZFxFt"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-sonnet-5"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-sonnet-5"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-sonnet-4-5-20250929",
+      "upstream": [
+        {
+          "model": "claude-sonnet-4-5-20250929",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQrfRgLfE1MxNb1EhdP"
+        },
+        {
+          "model": "claude-sonnet-4-5-20250929",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQrfW9UsDAiWrRiinfS"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-sonnet-4-5-20250929"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-sonnet-4-5-20250929"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-opus-5",
+      "upstream": [
+        {
+          "model": "claude-opus-5",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQrwx6nmpk1zJVsmfcm"
+        },
+        {
+          "model": "claude-opus-5",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQrx8X8k2pHQmwbs4wu"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-opus-5"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-opus-5"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-opus-4-8",
+      "upstream": [
+        {
+          "model": "claude-opus-4-8",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQsCmLUkeiTFW3gzwTv"
+        },
+        {
+          "model": "claude-opus-4-8",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQsCs37Urw9gr68oA2R"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-opus-4-8"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-opus-4-8"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-opus-4-7",
+      "upstream": [
+        {
+          "model": "claude-opus-4-7",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQsPD8xc3V2NMJLf7kf"
+        },
+        {
+          "model": "claude-opus-4-7",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQsPBQPmmSgJMwo3C2j"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-strong"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-strong"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-opus-4-6",
+      "upstream": [
+        {
+          "model": "claude-opus-4-6",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQsaTZePbF1iXm99eF1"
+        },
+        {
+          "model": "claude-opus-4-6",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQsaVo2vUtABqQRXqP3"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-opus-4-6"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-opus-4-6"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-opus-4-5-20251101",
+      "upstream": [
+        {
+          "model": "claude-opus-4-5-20251101",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQsq787PRckgLs2Y517"
+        },
+        {
+          "model": "claude-opus-4-5-20251101",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQsqAbWkP3Si4b1Wo46"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-opus-4-5-20251101"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-opus-4-5-20251101"
+        }
+      ]
+    },
+    {
+      "id": "fixed-lesson",
+      "pass": true,
+      "previous_choice_not_inherited": true
+    }
+  ],
+  "scope": "actual Mac + local Service + synthetic lessons",
+  "live_model_requested": true,
+  "not_run": [
+    "Windows",
+    "screen reader speech",
+    "human learning",
+    "cross-provider transfer"
+  ],
+  "visual_review": "PENDING"
+}

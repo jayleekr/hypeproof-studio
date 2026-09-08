@@ -4,7 +4,7 @@ import {
   assessNativeObservation,
   getObservationRubric,
 } from "../lib/native-assessment";
-import { MODEL_MAP } from "../profiles/types";
+import { modelIdFor } from "../profiles/types";
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { gateChatRequest } from "../lib/chat-gate";
@@ -96,7 +96,7 @@ observations.post("/assess", async (c) => {
       await assessNativeObservation(
         c.env,
         gate.profile.id,
-        MODEL_MAP[gate.profile.model.default],
+        modelIdFor(gate.profile.model.default, 'anthropic'),
         batch,
         nativeTrialSignal(c.req.raw),
         (usage, status, version) => {
@@ -104,7 +104,7 @@ observations.post("/assess", async (c) => {
             cohort_id: gate.payload.c,
             user_id: gate.payload.u,
             profile_id: gate.profile.id,
-            model: MODEL_MAP[gate.profile.model.default],
+            model: modelIdFor(gate.profile.model.default, 'anthropic'),
             status,
             error_kind: status >= 400 ? "observation_failed" : null,
             tokens_in: usage.input_tokens ?? 0,
