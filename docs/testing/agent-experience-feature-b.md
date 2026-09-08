@@ -1,8 +1,9 @@
 # Epic #746 기능 B 인수 조건 — AI 이름 표시 일관성
 
-상태: **PLANNED / 실제 앱 NOT RUN**. 설계 `293d4b5`, AE-07/08·AE-T04/05의 후속 단위.
-Claude의 로컬 구현 커밋 `a32f86c`는 읽었지만 제출 PR/최종 SHA로 인수하지 않았다.
-이 문서는 구현 완료·실기 PASS가 아니다.
+상태: **실제 앱 PARTIAL / UI 차단 결함 수정 대기**. 설계 `293d4b5`, AE-07/08·AE-T04/05의 후속 단위.
+구현 #765 `2dfd99b`의 긴 이름 결함을 실제 앱에서 찾고 `ab92c2c`에서 재검수했다.
+원본 실패와 실제 SDK/승인/proxy 실행은 [기능 B 근거](../research/agent-experience-acceptance-2026-09-08/feature-b/README.md)에 보존했다.
+전체 B1–B6, E1 또는 학습 효과 PASS가 아니다.
 
 ## 인수할 사용자 행동
 
@@ -28,10 +29,15 @@ AI 고지에 “코치”가 일반명사로 남는다면 그 범위를 명시�
 ## 제출과 검수 경계
 
 - 구현 PR/정확한 SHA, base, A의 frozen-name 계약 의존성, 실제 단위 검사 결과가 필요하다.
-- 입력창 공통 수정은 `bb6efac` / [#762](https://github.com/jayleekr/hypeproof-studio/pull/762).
-  동일 `box-sizing` 선언을 B에 중복 합치지 않는다. 이미 반영했다면 통합 결과를 먼저 확인한다.
+- 입력창 공통 수정 `bb6efac`와 같은 선언은 #760으로 main에 병합되어 #762를 중복 종료했다.
+  B는 해당 main을 포함하며 동일 `box-sizing` 변경을 다시 만들지 않는다.
 - Codex는 기존 `e2e/lesson-studio`와 native acceptance 경로를 재사용한다. 실제 모달·작업 파일과
   Service/모델 요청을 관측하고, 합성 host event를 실제 승인 성공으로 바꾸지 않는다.
-- 전체 앱 재빌드·main 병합·배포 없이 검수 사본/합성 수업을 사용한다. 작업 중인 다른 세션의
+- 전체 앱 재빌드·배포 없이 검수 사본/합성 수업을 사용한다. 검수와 main 병합 여부는 구분한다. 작업 중인 다른 세션의
   앱/프로세스/폴더는 종료·수정하지 않는다.
-- 현재 결과: B1~B6 전부 NOT RUN. E7 실제 모델 표시·허용 선택 및 D0~D4/AE-T36은 별도 후속이다.
+- B1: 이름 전환/HTML 문자/기본 수업, 시작 전/후 안내 PASS. B2: 실제 저장 거절/허용 PASS.
+- B3: `pwd` 실제 자동 실행 확인. 기존 SDK 정책상 이 명령은 모달을 거치지 않으므로 일반 셸 승인 이름은 NOT_RUN. 브라우저·위임·모든 거부 조합도 NOT_RUN.
+- B4: SDK 두 경로 부재→실제 proxy 대화/이름이 포함된 제한 안내 PASS. 복구 안내의 말줄임은 시각 PARTIAL로 수정 대기.
+- B5: 실제 기록 18건과 user/approval/tool_result 구분, 평가 동의 false PASS. 상세 행의 화면 가독성은 재캡처 대기.
+- B6: 시작 후 1280/390px 이름 줄바꿈 PASS. 좁은 패널→200%의 실제 220px에서 상단 브랜드가 넘쳐 FAIL. Tab 도달 PASS. 전체 접근성 PASS 아님.
+- E7 실제 모델 표시·허용 선택 및 D0~D4/AE-T36은 별도 후속이다.

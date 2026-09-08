@@ -1,0 +1,34 @@
+{
+  "source_run": "e2e/test-results/agent-experience/20260908T165721Z-b-unavailable",
+  "submitted_product_sha": "ab92c2cfaaf516e6ad4aa6064a430feff45f9465",
+  "verification_sha": "c3708a300e0691c1c4b6a233e27976df252f2d9c",
+  "capture": "Electron capturePage; isolated app copy; original files unedited",
+  "review": "See ../README.md for later visual review and run adjudication; automatic result files are unmodified",
+  "files": [
+    {
+      "file": "environment.json",
+      "sha256": "53fc4b4f8eabac760d7e28e51e0cbd4b16727a94ebf1cf4a4821dd987b1a8b11",
+      "bytes": 1498
+    },
+    {
+      "file": "identity-result.json",
+      "sha256": "aa423ef72778ae86f1cf8f7bca17fd5bc9d12099d0b4278e8157213114a2e457",
+      "bytes": 3505
+    },
+    {
+      "file": "surfaces-result.json",
+      "sha256": "a87843b411a9df70f29d0ad164ea99aef0a1f94be96250972059724b32c66cb6",
+      "bytes": 10507
+    },
+    {
+      "file": "api-evidence.json",
+      "sha256": "efe7133745c9af429715aff43b7561576119d48a43d6a5a643ed5ba6e3cee682",
+      "bytes": 364
+    },
+    {
+      "file": "gateway-evidence.json",
+      "sha256": "5c84333765e05ac1f00eb0ed1e09dcdf216b2dcd6440b870e7562c91fb71168b",
+      "bytes": 149
+    }
+  ]
+}
