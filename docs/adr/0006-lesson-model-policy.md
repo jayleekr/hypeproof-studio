@@ -251,8 +251,8 @@ shape rather than by a rule someone must remember.
 
 ## The load-bearing claim, executed rather than reasoned
 
-"Both existing clamps enforce the lesson's set with zero clamp edits" is the claim
-the whole contract rests on, so it was run rather than argued. A throwaway probe
+The original claim that both clamps enforce the lesson's set with zero clamp edits
+was tested and is **false for a default-only SDK profile**, as the counterexample below shows. The first scratch probe
 built the profile the chat gate would return for a lesson narrowed to `{fast}` and
 called both clamps directly — `translate()` / `translateOpenAI()` for
 `/v1/chat/completions`, `resolveMessagesModel()` for `/v1/messages` — with no edit
@@ -290,8 +290,11 @@ The alias collapse that forces id-comparison was counted, not assumed:
 | openai | gpt-4o-mini / gpt-4o / gpt-4o | 2 |
 | glm | glm-5.2 / glm-5.2 / glm-5.2 | 1 |
 
-The probe was a scratch file and is not committed; the permanent form of these checks
-is the test list below, which the implementation slice must carry.
+The first probe was a scratch file. The default-only SDK counterexample is now
+reproducible in [model-policy-probe.mjs](../../e2e/lesson-studio/model-policy-probe.mjs),
+with [original results](../research/agent-experience-acceptance-2026-09-08/model-policy/default-only-counterexample.json)
+and [planned integration checks](../testing/learning-agent-experience.md). Pure resolver
+execution does not verify Service authorization, a frozen lesson or a provider request.
 
 ## Verification this slice must carry
 
@@ -324,13 +327,12 @@ is the test list below, which the implementation slice must carry.
 profile serializer, the validator's allowlist form, the chat gate's lesson
 application, and ADR-0005 itself.
 
-`#765` (feature B) is open and touches ten files under the Studio extension plus one
-line in the requirements doc. Implementation notes for the client half must therefore
-name **symbols, not line numbers**, in that subtree, and the AE-27 header reading
-belongs in the proxy client, which `#765` does not modify. The requirement rows this
-audit found stale (the `/v1/messages` force-append, the runtime-selection wording, and
-a settings count) are listed as follow-ups rather than edited here, so a live
-acceptance run on `#765` is not disturbed.
+`#765` (feature B) and `#788` (composer accessibility name) are merged, with native
+evidence in `#780` and `#791`. Client implementation notes should name **symbols,
+not line numbers**. AE-27 consumes proxy headers in the proxy client and SDK request
+usage through its separate host path; one cannot stand in for the other. The stale
+REQ-K1/M11/M14 rows were corrected by `#789`, integrated into this ADR PR. Runtime
+lesson model policy, identity pinning and the student picker remain unimplemented.
 
 ## Wording corrected alongside this ADR
 
