@@ -1,4 +1,5 @@
 // Instructor authoring API. Service owns writes; Chalk forwards the same HTTP contract.
+import { validateFeatureSubset, featureBinding } from '../lib/lesson-feature-policy';
 import { validateModelSubset, modelBinding } from '../lib/lesson-model-policy';
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -91,6 +92,11 @@ authoring.put(root, async (c) => {
     const bad = validateModelSubset(b.content.model, profile);
     if (bad) return c.json({ error: bad }, 403);
   }
+  if (b.content.features) {
+    if (b.content.features.binding) return c.json({ error: 'feature binding is produced by the Service at freeze' }, 400);
+    const bad = validateFeatureSubset(b.content.features, profile);
+    if (bad) return c.json({ error: bad }, 403);
+  }
   const content = JSON.stringify(b.content);
   const hash = await sha256Hex(JSON.stringify([b.expected_revision, b.profile_id, b.content]));
   const prior = await readDraft(c.env.HPS_DB, cohort, course);
@@ -137,6 +143,11 @@ authoring.put(root + "/versions/:version", async (c) => {
     if (!profile || validateModelSubset(content.model, profile)) return c.json({ error: 'model is not permitted by the cohort' }, 403);
     try { content.model.binding = modelBinding(c.env, profile, content.model); }
     catch { return c.json({ error: 'model provider is not configured' }, 409); }
+  }
+  if (content.features) {
+    const profile = getProfile(d.profile_id);
+    if (!profile || validateFeatureSubset(content.features, profile)) return c.json({ error: 'feature is not permitted by the cohort' }, 403);
+    content.features.binding = featureBinding(profile, content.features);
   }
   const module = await makeModuleDoc({ kind: "session-design", profileId: d.profile_id, version, content });
   // INSERT SELECT checks the revision at the write, not merely at the earlier read.

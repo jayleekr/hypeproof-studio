@@ -1,3 +1,4 @@
+import { validateLessonFeatures, type LessonFeaturePolicy } from './lesson-feature-policy.ts';
 import { validateLessonModel, type LessonModelPolicy } from './lesson-model-policy.ts';
 
 // Chalk authoring content v1. Data only: never grants tools or stores credentials.
@@ -20,6 +21,12 @@ export interface SessionDesign {
    */
   assistant?: { display_name: string };
   model?: LessonModelPolicy;
+  /**
+   * #748 (E2) — the features this lesson KEEPS out of what the compiled
+   * profile already granted. Narrowing only; see lesson-feature-policy.ts
+   * for where it is and is not a Service boundary.
+   */
+  features?: LessonFeaturePolicy;
 }
 
 /** Bounds for `assistant.display_name`: single line, trimmed, 1..40 UTF-16 code units. */
@@ -41,7 +48,7 @@ const MARK_STACK = /\p{M}{3,}/u;
 const LONE_SURROGATE = /\p{Cs}/u;
 
 const REQUIRED_KEYS = ["schema", "title", "audience", "duration_minutes", "objective", "prerequisites", "starter", "steps"];
-const OPTIONAL_KEYS = ["assistant", "model"];
+const OPTIONAL_KEYS = ["assistant", "model", "features"];
 const ALLOWED_KEYS = [...REQUIRED_KEYS, ...OPTIONAL_KEYS];
 
 const isObject = (x: unknown): x is Record<string, unknown> =>
@@ -105,6 +112,7 @@ export function validateSessionDesign(value: unknown, complete = false): string 
     }
   }
   if ('model' in value) { const bad = validateLessonModel(value.model); if (bad) return bad; }
+  if ('features' in value) { const bad = validateLessonFeatures(value.features); if (bad) return bad; }
   // Optional identity block: when present it must be exactly { display_name }.
   // An empty name is rejected rather than treated as "unset" — Chalk omits the
   // block instead, so a saved draft never carries an ambiguous blank.

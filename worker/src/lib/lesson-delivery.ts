@@ -1,4 +1,5 @@
 import { getProfile } from '../profiles';
+import { lessonFeaturesAreCurrent } from './lesson-feature-policy';
 import { lessonModelIsCurrent } from './lesson-model-policy';
 import type { Env } from '../env';
 import type { TokenPayload } from './tokens';
@@ -15,9 +16,13 @@ export async function readLesson(env: Env, cohort: string, course: string, versi
   const result = await validateModuleDoc(raw, { kind: 'session-design', profileId: profile });
   if (!result.ok || result.doc.version !== version || validateSessionDesign(result.doc.content, true)) return null;
   const content = result.doc.content as unknown as SessionDesign;
-  if (content.model) {
+  if (content.model || content.features) {
     const current = getProfile(profile);
-    if (!current || !lessonModelIsCurrent(env, current, content.model)) return null;
+    if (!current) return null;
+    if (content.model && !lessonModelIsCurrent(env, current, content.model)) return null;
+    // #748 — a profile whose grants shrank after the freeze closes the lesson
+    // rather than serving the wider set the instructor last saw.
+    if (content.features && !lessonFeaturesAreCurrent(current, content.features)) return null;
   }
   return { course_id: course, version, sha256: result.doc.sha256, content: result.doc.content as unknown as SessionDesign };
 }
