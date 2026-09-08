@@ -237,6 +237,91 @@ await check('AE-08 proxy route ignores a participant\'s coach headers on a lesso
   assert.match(sys2,/별이/);assert.doesNotMatch(sys2,/당신의 이름은/);
  });
 });
+// ─── #755 (ADR-0006) — a lesson narrows the models it allows ─────────────────
+// The contract is narrowing-only: every alias a lesson names must already be the
+// profile's default or fallback, so the block needs no new authority. Enforcement
+// is by rewriting the served profile, which makes BOTH existing clamps apply with
+// no clamp edit.
+await check('AE-25/26 lesson model policy: narrowing is accepted, widening is refused at save and at freeze',async()=>{
+ const {getProfile}=await import('../src/profiles/index.ts');const compiled=getProfile(profileId);
+ assert.deepEqual({d:compiled.model.default,f:compiled.model.fallback},{d:'hypeproof-default',f:'hypeproof-fast'},'control: the profile grants exactly these two');
+ const m=`/admin/cohorts/${cohort}/authoring/site-model`;
+ const withModel=(model)=>({...content,...(model?{model}:{})});
+ // Positive: narrowing to one of the granted aliases.
+ assert.equal((await request(m,'PUT',save(0,'model-create',withModel({default:'hypeproof-fast',allowed:['hypeproof-fast']})))).status,200);
+ assert.deepEqual((await request(m)).json.content.model,{default:'hypeproof-fast',allowed:['hypeproof-fast']});
+ // Negative: an alias the profile never granted, even though it is a real alias.
+ for(const [label,model] of [
+   ['strong is outside the grant',{default:'hypeproof-strong',allowed:['hypeproof-strong']}],
+   ['widening past the grant',{default:'hypeproof-default',allowed:['hypeproof-default','hypeproof-strong']}],
+   ['default not in allowed',{default:'hypeproof-fast',allowed:['hypeproof-default']}],
+   ['unknown alias',{default:'gpt-4o',allowed:['gpt-4o']}],
+   ['empty allowed',{default:'hypeproof-fast',allowed:[]}],
+   ['duplicate alias',{default:'hypeproof-fast',allowed:['hypeproof-fast','hypeproof-fast']}],
+   ['three aliases',{default:'hypeproof-fast',allowed:['hypeproof-fast','hypeproof-default','hypeproof-strong']}],
+   ['extra key',{default:'hypeproof-fast',allowed:['hypeproof-fast'],provider:'openai'}],
+ ]){
+  const r=await request(m,'PUT',save(1,'bad-model-'+label.replace(/[^a-z]/gi,''),withModel(model)));
+  assert.equal(r.status,400,label+' → '+r.raw);
+ }
+ // The draft still holds the accepted narrowing; nothing above was stored.
+ assert.deepEqual((await request(m)).json.content.model,{default:'hypeproof-fast',allowed:['hypeproof-fast']});
+ assert.equal((await request(m+'/versions/m2026.09.09-1','PUT',{expected_revision:1})).status,200);
+});
+await check('AE-25 both clamps enforce the lesson set, and the SDK route exception is served rather than hidden',async()=>{
+ const {setRoster,startSession}=await import('../src/lib/kv.ts');
+ await setRoster(env.HPS_KV,cohort,['student','student-b']);
+ await startSession(env.HPS_KV,cohort,{session_id:'synthetic-model',profile_id:profileId,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()});
+ const d=await request(`/admin/cohorts/${cohort}/authoring/site-model/versions/m2026.09.09-1/participants`,'POST',{user:'student',hours:1});
+ assert.equal(d.status,200,d.raw);
+ const p=await request('/v1/profile','GET',undefined,d.json.token);assert.equal(p.status,200,p.raw);
+ assert.equal(p.json.model.source,'lesson');
+ assert.equal(p.json.model.current.alias,'hypeproof-fast');
+ assert.deepEqual(p.json.model.allowed.map(a=>a.alias),['hypeproof-fast'],'a proxy seat serves exactly the lesson set');
+ assert.equal(p.json.model.route_exception,null);
+ // The gate narrows the profile, so both clamps follow with no clamp edit.
+ const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
+ const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+d.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ assert.equal(g.ok,true);
+ assert.deepEqual({d:g.profile.model.default,f:g.profile.model.fallback},{d:'hypeproof-fast',f:undefined});
+ const {translate}=await import('../src/lib/translate.ts');
+ const {resolveMessagesModel}=await import('../src/routes/messages.ts');
+ const {modelIdFor}=await import('../src/profiles/types.ts');
+ const FAST=modelIdFor('hypeproof-fast','anthropic'),DEFAULT=modelIdFor('hypeproof-default','anthropic');
+ const routeA=(requested)=>translate({model:requested,messages:[{role:'user',content:'hi'}]},g.profile,{name:null,personality:null}).model;
+ for(const requested of [undefined,'hypeproof-default','hypeproof-strong',DEFAULT,'gpt-4o'])
+  assert.equal(routeA(requested),FAST,'/v1/chat clamps '+requested+' to the lesson set');
+ for(const requested of ['hypeproof-default','hypeproof-strong',DEFAULT])
+  assert.equal(resolveMessagesModel(requested,g.profile),FAST,'/v1/messages clamps '+requested);
+ // Baseline control: a seat WITHOUT a lesson model block is untouched.
+ const legacy=await request(base+'/versions/m2026.09.06-1/participants','POST',{user:'student',hours:1});
+ assert.equal(legacy.status,200,legacy.raw);
+ const lp=await request('/v1/profile','GET',undefined,legacy.json.token);
+ assert.equal(lp.json.model.source,'profile');
+ assert.deepEqual(lp.json.model.allowed.map(a=>a.alias),['hypeproof-default','hypeproof-fast']);
+ const lg=await gateChatRequest({env,req:{header:()=> 'Bearer '+legacy.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ assert.equal(translate({model:'hypeproof-default',messages:[{role:'user',content:'hi'}]},lg.profile,{name:null,personality:null}).model,DEFAULT);
+});
+await check('AE-25 the {default} counterexample: /v1/messages still admits fast, and the served block says so',async()=>{
+ // ADR-0006's corrected claim. A {fast} narrowing hides this because fast is inside
+ // the set; {default} is the narrowing that exposes it. The route has no trusted
+ // request-purpose marker, so this is NOT an auxiliary-only channel.
+ const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
+ const {resolveMessagesModel}=await import('../src/routes/messages.ts');
+ const {translate}=await import('../src/lib/translate.ts');
+ const {modelIdFor}=await import('../src/profiles/types.ts');
+ const FAST=modelIdFor('hypeproof-fast','anthropic'),DEFAULT=modelIdFor('hypeproof-default','anthropic');
+ const m2=`/admin/cohorts/${cohort}/authoring/site-model-default`;
+ assert.equal((await request(m2,'PUT',save(0,'default-only',{...content,model:{default:'hypeproof-default',allowed:['hypeproof-default']}}))).status,200);
+ assert.equal((await request(m2+'/versions/m2026.09.09-2','PUT',{expected_revision:1})).status,200);
+ const d=await request(m2+'/versions/m2026.09.09-2/participants','POST',{user:'student-b',hours:1});assert.equal(d.status,200,d.raw);
+ const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+d.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ assert.equal(resolveMessagesModel('hypeproof-default',g.profile),DEFAULT);
+ assert.equal(resolveMessagesModel('hypeproof-strong',g.profile),DEFAULT,'strong is clamped');
+ assert.equal(resolveMessagesModel('hypeproof-fast',g.profile),FAST,'fast ESCAPES the lesson set on /v1/messages — the documented exception');
+ assert.equal(resolveMessagesModel('claude-3-5-haiku-20241022',g.profile),FAST,'any claude-*haiku* string escapes too');
+ assert.equal(translate({model:'hypeproof-fast',messages:[{role:'user',content:'hi'}]},g.profile,{name:null,personality:null}).model,DEFAULT,'/v1/chat has no such exception');
+});
 await check('T-08 concurrent draft edit prevents freezing stale read',async()=>{
  beforeWrite=async()=>{db.prepare('UPDATE authoring_drafts SET revision=revision+1 WHERE course_id=?').run('site-1');};
  assert.equal((await request(base+'/versions/m2026.09.06-2','PUT',{expected_revision:5})).status,409);

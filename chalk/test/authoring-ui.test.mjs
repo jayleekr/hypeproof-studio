@@ -15,11 +15,17 @@ assert.match(authoring, /\.\.\.\(name\?\{assistant:\{display_name:name\}\}:\{\}\
 assert.match(authoring, /\$\('assistant_name'\)\.value=c\.assistant\?\.display_name\?\?''/, 'render() restores the saved name and clears it for old-schema drafts');
 assert.match(authoring, /도구 권한·모델·AI 고지를 바꾸지 않습니다/, 'instructor copy states the name grants nothing');
 assert.match(authoring, /학생이 지은 이름 대신 이 이름이 고정됩니다/, 'instructor copy states a lesson name replaces student self-naming');
-assert.match(authoring, /이 Service 버전은 수업별 AI 이름을 아직 받지 않습니다/, 'old-Service 400 is explained when the AI name field is filled');
+assert.match(authoring, /이 Service 버전은 수업별 AI 이름 또는 모델 설정을 아직 받지 않습니다/, 'old-Service 400 is explained when either optional field is filled');
+assert.match(authoring, /<select id="model_policy">/, 'authoring form exposes the lesson model choice');
+assert.match(authoring, /\.\.\.\(model\?\{model:\{default:model,allowed:\[model\]\}\}:\{\}\)/, 'content() omits the model block unless the instructor narrowed');
+assert.match(authoring, /좁힐 수 있고, 넓힐 수는 없습니다/, 'instructor copy states narrowing-only');
+assert.match(authoring, /빠른 모델은 어떤 설정이든 남습니다/, 'instructor copy states the SDK route exception honestly');
 
 const learn = await page('/learn');
 assert.match(learn, /c\.assistant\?\.display_name/, 'learn page reads the optional block');
 assert.match(learn, /'이 수업의 AI 이름: '\+c\.assistant\.display_name\+' \(AI 도우미\)'/, 'learn page renders the name through textContent with the AI notice');
+assert.match(learn, /이 수업이 쓸 모델: /, 'learn page shows the lesson model choice');
+assert.match(learn, /실제로 어떤 모델이 답했는지는 Studio에서 확인하세요/, 'learn page does not claim the seat choice is the turn evidence');
 assert.doesNotMatch(learn, /innerHTML/, 'lesson text is never rendered as HTML');
 
 console.log('PASS authoring ui: AI name field round-trips, blank omitted, learn page shows name via textContent');

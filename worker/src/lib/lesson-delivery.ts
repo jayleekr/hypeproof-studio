@@ -1,7 +1,8 @@
 import type { Env } from '../env';
 import type { TokenPayload } from './tokens';
 import { isModuleVersion, validateModuleDoc } from './modules';
-import { validateSessionDesign, type SessionDesign } from './session-design';
+import { validateSessionDesign, lessonModelExceedsProfile, type SessionDesign } from './session-design';
+import { getProfile } from '../profiles';
 
 export async function readLesson(env: Env, cohort: string, course: string, version: string, profile: string) {
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(course) || !isModuleVersion(version)) return null;
@@ -12,6 +13,10 @@ export async function readLesson(env: Env, cohort: string, course: string, versi
   try { raw = JSON.parse(row.module_json); } catch { return null; }
   const result = await validateModuleDoc(raw, { kind: 'session-design', profileId: profile });
   if (!result.ok || result.doc.version !== version || validateSessionDesign(result.doc.content, true)) return null;
+  // #755 — re-check the narrowing rule on every read. A profile whose model grant
+  // shrank after this version was frozen must not keep serving the wider set;
+  // failing closed here surfaces as the existing 409 lesson_unavailable.
+  if (lessonModelExceedsProfile(result.doc.content as unknown as SessionDesign, getProfile(profile)?.model)) return null;
   return { course_id: course, version, sha256: result.doc.sha256, content: result.doc.content as unknown as SessionDesign };
 }
 

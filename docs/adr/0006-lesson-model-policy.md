@@ -1,6 +1,8 @@
 # A lesson narrows the models it allows; the app shows the set and the turn
 
-Status: Proposed (first unit of E7 [#755](https://github.com/jayleekr/hypeproof-studio/issues/755), epic [#746](https://github.com/jayleekr/hypeproof-studio/issues/746)).
+Status: Decision 1 and 2 implemented (lesson block, Service narrowing, served seat
+policy); Decision 3's client half and everything under "Not in this slice" remain
+proposed. First unit of E7 [#755](https://github.com/jayleekr/hypeproof-studio/issues/755), epic [#746](https://github.com/jayleekr/hypeproof-studio/issues/746)).
 Design input (docs branch PR [#753](https://github.com/jayleekr/hypeproof-studio/pull/753), pinned at `293d4b5`):
 [design §"멀티모델을 수업의 선택권으로 설계"](https://github.com/jayleekr/hypeproof-studio/blob/293d4b54b5bc418ab3b6e0adbd788386c08a7319/docs/design/learning-agent-experience.md),
 [multi-model research](https://github.com/jayleekr/hypeproof-studio/blob/293d4b54b5bc418ab3b6e0adbd788386c08a7319/docs/research/agent-experience-2026-09-08/multi-model.md),
@@ -295,6 +297,25 @@ reproducible in [model-policy-probe.mjs](../../e2e/lesson-studio/model-policy-pr
 with [original results](../research/agent-experience-acceptance-2026-09-08/model-policy/default-only-counterexample.json)
 and [planned integration checks](../testing/learning-agent-experience.md). Pure resolver
 execution does not verify Service authorization, a frozen lesson or a provider request.
+
+## What of this ADR is now built
+
+The Service half landed with the requirement row `REQ-STUDIO-LESSON-MODEL`:
+
+- the optional `model` block on `hps-session-design/1`, shape-checked in the schema
+  and subset-checked wherever the profile is in hand — at save, at freeze, and again
+  on every read, so a profile whose grant later shrinks fails closed;
+- the chat gate narrowing the served profile, which makes both clamps enforce the
+  lesson's set with no clamp edit;
+- `/v1/profile` serving the seat's allowed set, its default, the source, and
+  `route_exception` when the SDK route's fast admission widens it;
+- a Chalk field so an instructor can actually choose, with copy that states both the
+  narrowing-only rule and the fast exception.
+
+Still proposed, and deliberately not inferred from the above: the student-facing
+picker and the turn's actual-model display (Decision 3's client half), and every item
+under "Not in this slice" — in particular the frozen model *identity* recorded there
+as UNMET.
 
 ## Verification this slice must carry
 

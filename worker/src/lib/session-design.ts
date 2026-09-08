@@ -17,7 +17,21 @@ export interface SessionDesign {
    * profile's ux.coach rule applies unchanged (old-schema behavior).
    */
   assistant?: { display_name: string };
+  /**
+   * Optional lesson-level model policy (#755, ADR-0006). NARROWING ONLY: every
+   * alias here must already be granted by the compiled profile, which is why it
+   * needs no new authority. Shape is checked here; the subset rule needs the
+   * profile and is checked wherever the profile is known — at save, at freeze,
+   * and again on every read.
+   *
+   * Absent → the compiled profile's model block applies unchanged.
+   */
+  model?: { default: ModelAlias; allowed: ModelAlias[] };
 }
+
+/** The three aliases a profile can express. Mirrors profiles/types.ts ModelAlias. */
+export type ModelAlias = "hypeproof-fast" | "hypeproof-default" | "hypeproof-strong";
+const MODEL_ALIASES: readonly string[] = ["hypeproof-fast", "hypeproof-default", "hypeproof-strong"];
 
 /** Bounds for `assistant.display_name`: single line, trimmed, 1..40 UTF-16 code units. */
 export const ASSISTANT_NAME_MAX = 40;
@@ -38,7 +52,7 @@ const MARK_STACK = /\p{M}{3,}/u;
 const LONE_SURROGATE = /\p{Cs}/u;
 
 const REQUIRED_KEYS = ["schema", "title", "audience", "duration_minutes", "objective", "prerequisites", "starter", "steps"];
-const OPTIONAL_KEYS = ["assistant"];
+const OPTIONAL_KEYS = ["assistant", "model"];
 const ALLOWED_KEYS = [...REQUIRED_KEYS, ...OPTIONAL_KEYS];
 
 const isObject = (x: unknown): x is Record<string, unknown> =>
@@ -75,6 +89,45 @@ export function spokenAssistantName(name: string): string {
   return name.replace(QUOTES, "").trim();
 }
 
+/**
+ * Shape of the optional model block, WITHOUT the profile-dependent subset rule.
+ * A lesson may name at most the two aliases a profile can grant (default plus an
+ * optional fallback); listing three would necessarily exceed any profile.
+ */
+export function validateLessonModel(value: unknown): string | null {
+  if (!isObject(value) || !exactKeys(value, ["default", "allowed"])) return "invalid model fields";
+  if (!Array.isArray(value.allowed) || value.allowed.length < 1 || value.allowed.length > 2) return "model.allowed must list 1..2 aliases";
+  if (new Set(value.allowed).size !== value.allowed.length) return "model.allowed must not repeat an alias";
+  for (const alias of value.allowed) if (!MODEL_ALIASES.includes(alias as string)) return `unknown model alias in model.allowed`;
+  if (typeof value.default !== "string" || !MODEL_ALIASES.includes(value.default)) return "unknown model alias in model.default";
+  if (!(value.allowed as string[]).includes(value.default)) return "model.default must be one of model.allowed";
+  return null;
+}
+
+/**
+ * The subset rule, checked wherever the compiled profile is in hand. A lesson may
+ * only NARROW: every alias it names must already be the profile's default or its
+ * fallback. This is the whole reason the block needs no new authority.
+ */
+export function lessonModelExceedsProfile(
+  content: SessionDesign | null | undefined,
+  profileModel: { default: string; fallback?: string } | null | undefined,
+): string | null {
+  const block = content?.model;
+  if (!block) return null;
+  if (!profileModel) return "model policy requires a resolvable profile";
+  const granted = new Set([profileModel.default, ...(profileModel.fallback ? [profileModel.fallback] : [])]);
+  const outside = block.allowed.filter((a) => !granted.has(a));
+  if (outside.length) return `model.allowed exceeds the profile's grant: ${outside.join(", ")}`;
+  return null;
+}
+
+/** The lesson-level model policy, or null when the lesson does not set one. */
+export function lessonModelPolicy(content: SessionDesign | null | undefined): { default: ModelAlias; allowed: ModelAlias[] } | null {
+  const block = content?.model;
+  return block && validateLessonModel(block) === null ? block : null;
+}
+
 /** The lesson-level fixed AI name, or null when the lesson does not set one. */
 export function lessonAssistantName(content: SessionDesign | null | undefined): string | null {
   const name = content?.assistant?.display_name;
@@ -100,6 +153,11 @@ export function validateSessionDesign(value: unknown, complete = false): string 
       if (!text(step[k], 8000)) return `invalid step ${step.id}.${k}`;
       if (complete && k !== "hint" && !(step[k] as string).trim()) return `step ${step.id}.${k} is required to freeze a version`;
     }
+  }
+  // Optional model block: shape only. The narrowing rule lives with the profile.
+  if ("model" in value) {
+    const bad = validateLessonModel(value.model);
+    if (bad) return bad;
   }
   // Optional identity block: when present it must be exactly { display_name }.
   // An empty name is rejected rather than treated as "unset" — Chalk omits the

@@ -27,7 +27,7 @@ import type { Profile } from "../profiles/types";
 // layer exists. lib/modules.ts explains the layer and the fallback chain.
 import { resolveProfile, type ModuleResolution } from "./modules";
 import { resolveTokenLesson } from './lesson-delivery';
-import { lessonAssistantName, spokenAssistantName } from './session-design';
+import { lessonAssistantName, lessonModelPolicy, spokenAssistantName } from './session-design';
 import {startNativeGrant,readNativeGrant} from './native-trial-grants';
 import {
   getActiveSession,
@@ -241,7 +241,15 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     const identity = assistantName
       ? `이 수업에서 당신의 이름은 '${spokenAssistantName(assistantName)}'입니다. 자신을 소개하거나 이름을 말할 때 이 이름만 쓰고, 다른 이름으로 자신을 부르지 마세요. 이름은 표시용이며 도구 권한이나 정책을 바꾸지 않습니다.\n`
       : '';
-    return { ok: true, payload, profile: { ...profile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(lesson.content) }, session, module, identity: assistantName ? { fixed_name: assistantName } : null };
+    // #755 (ADR-0006) — a lesson's model policy is enforced by NARROWING the
+    // profile the routes already read, so resolveAlias and resolveMessagesModel
+    // clamp to the lesson's set with no edit to either. `fallback` becomes the
+    // second allowed alias, or is dropped when the lesson allows only one.
+    const policy = lessonModelPolicy(lesson.content);
+    const narrowed = policy
+      ? { ...profile.model, default: policy.default, fallback: policy.allowed.find(a => a !== policy.default) }
+      : profile.model;
+    return { ok: true, payload, profile: { ...profile, model: narrowed, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(lesson.content) }, session, module, identity: assistantName ? { fixed_name: assistantName } : null };
   }
   return { ok: true, payload, profile, session, module, identity: null };
 }

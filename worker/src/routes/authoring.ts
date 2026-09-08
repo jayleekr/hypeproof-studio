@@ -5,7 +5,7 @@ import type { Env } from "../env";
 import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-auth";
 import { getProfile } from "../profiles";
 import { isModuleVersion, makeModuleDoc, sha256Hex } from "../lib/modules";
-import { validateSessionDesign } from "../lib/session-design";
+import { validateSessionDesign, lessonModelExceedsProfile, type SessionDesign } from "../lib/session-design";
 import { readLesson } from '../lib/lesson-delivery';
 import { issue } from '../lib/tokens';
 import { getRoster, getActiveSession } from '../lib/kv';
@@ -77,6 +77,9 @@ authoring.put(root, async (c) => {
   const cohort = c.req.param("cohort")!, course = c.req.param("course")!, a = c.get("author");
   const profile = getProfile(b.profile_id);
   if (!profile || profile.session.cohort_id !== cohort || !a.scope.profiles.includes(b.profile_id)) return c.json({ error: "profile not permitted" }, 403);
+  // #755 — a lesson may only narrow the profile's model grant, never widen it.
+  const exceeds = lessonModelExceedsProfile(b.content as SessionDesign, profile.model);
+  if (exceeds) return c.json({ error: exceeds }, 400);
   const content = JSON.stringify(b.content);
   const hash = await sha256Hex(JSON.stringify([b.expected_revision, b.profile_id, b.content]));
   const prior = await readDraft(c.env.HPS_DB, cohort, course);
@@ -118,6 +121,9 @@ authoring.put(root + "/versions/:version", async (c) => {
   const content = JSON.parse(d.content_json);
   const invalid = validateSessionDesign(content,true);
   if (invalid) return c.json({ error: invalid }, 400);
+  // Re-checked at freeze: the draft's profile may have changed since the save.
+  const exceedsAtFreeze = lessonModelExceedsProfile(content, getProfile(d.profile_id)?.model);
+  if (exceedsAtFreeze) return c.json({ error: exceedsAtFreeze }, 400);
   const module = await makeModuleDoc({ kind: "session-design", profileId: d.profile_id, version, content });
   // INSERT SELECT checks the revision at the write, not merely at the earlier read.
   await c.env.HPS_DB.prepare(`INSERT INTO authoring_versions (cohort_id,course_id,version,source_revision,module_json)

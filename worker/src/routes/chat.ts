@@ -21,11 +21,12 @@ import {
   type Env,
   type LLMProvider,
 } from "../env";
+import { modelIdFor } from "../profiles/types";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
 import { resolveTokenLesson } from '../lib/lesson-delivery';
-import { lessonAssistantName } from '../lib/session-design';
+import { lessonAssistantName, lessonModelPolicy, type ModelAlias } from '../lib/session-design';
 import { isTokenRevoked, getRoster } from '../lib/kv';
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
 import { callAnthropicResilient } from "../lib/anthropic";
@@ -226,6 +227,51 @@ chat.get("/profile", async (c) => {
   }
 
   const assistantName = lessonAssistantName(lesson?.content);
+  // #755 (ADR-0006) — the SEAT's model policy: which aliases this seat may use and
+  // which one it gets by default. Additive and observability-shaped, like `module`;
+  // an app that does not know the key drops it.
+  //
+  // Compared by `id`, never by alias: on gemini and openai two aliases share an
+  // upstream id and on GLM all three do, so an alias-keyed display would announce
+  // a change where nothing changed.
+  //
+  // `id` carries NO provenance. /v1/messages is Anthropic-pinned while
+  // /v1/chat/completions uses the deployment provider, and an SDK-unavailable seat
+  // falls back between them mid-session — so the runtime that will serve a turn is
+  // not knowable here. The turn's own evidence (x-hps-model, the SDK usage event)
+  // is the only honest source for "what actually ran".
+  const modelPolicy = (() => {
+    const policy = lessonModelPolicy(lesson?.content);
+    const source = policy ? 'lesson' as const : 'profile' as const;
+    const allowed: ModelAlias[] = policy
+      ? policy.allowed
+      : [profile.model.default, ...(profile.model.fallback ? [profile.model.fallback] : [])];
+    const current = policy ? policy.default : profile.model.default;
+    // The route's own exception, served rather than hidden: /v1/messages admits
+    // hypeproof-fast whatever the lesson says, and it cannot tell an auxiliary
+    // call from a participant one. A seat that runs the SDK therefore really can
+    // reach fast; saying otherwise here would be a narrower claim than the route
+    // enforces (ADR-0006 §Decision 2).
+    const sdkSeat = profile.coach_runtime === 'agent-sdk';
+    const effective: ModelAlias[] = sdkSeat && !allowed.includes('hypeproof-fast')
+      ? [...allowed, 'hypeproof-fast']
+      : allowed;
+    let upstream: LLMProvider | null = null;
+    try { upstream = profile.model.provider ?? resolveProvider(c.env).provider; } catch { upstream = profile.model.provider ?? null; }
+    const describe = (alias: ModelAlias) => ({
+      alias,
+      id: upstream ? modelIdFor(alias, upstream) : null,
+      sdk_id: modelIdFor(alias, 'anthropic'),
+    });
+    return {
+      source,
+      current: describe(current),
+      allowed: effective.map(describe),
+      // True when the served set is wider than the lesson/profile asked for,
+      // because the SDK route adds fast unconditionally.
+      route_exception: effective.length > allowed.length ? 'sdk_fast_auxiliary' : null,
+    };
+  })();
   return c.json({
     ...(lesson ? { lesson } : {}),
     profile_id: profile.id,
@@ -335,6 +381,7 @@ chat.get("/profile", async (c) => {
     // proxy" 로 바뀐 것이다. 프로필에 sdk_tools 를 두지 않은 아동 코호트는
     // 이전과 동작이 완전히 같다.
     coach_runtime: profile.coach_runtime === "agent-sdk" ? "agent-sdk" : "proxy",
+    model: modelPolicy,
   });
 });
 
