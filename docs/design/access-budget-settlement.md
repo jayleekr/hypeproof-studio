@@ -25,7 +25,7 @@ flowchart TD
 
 가격은 Lab `web/src/lib/pricing.ts`에 위임한다. 기존 견적용 `SEAT_HOUR_COST`와
 `STUDIO_PASS_PRICING`의 예시·열린 결정을 복사해서 게이트 기본값으로 만들지 않는다.
-[상위 상품 Intent](https://github.com/jayleekr/hypeprooflab/issues/777)와 실제 source revision을
+[상위 상품 Intent 개정안](https://github.com/jayleekr/hypeprooflab/blob/630090a3808312af458d605ae64b5495dcd4d3ad/products/studio/access-and-pricing-intent.md)와 실제 source revision을
 채택 기록에 연결한다. 공개 가격표와 Service의 계약이 달라지면 게시를 중단하고 차이를 표시한다.
 
 ## 네 가지 서로 다른 기록

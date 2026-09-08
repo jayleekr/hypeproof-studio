@@ -2,7 +2,7 @@
 
 > Status: working product-intent layer
 > Accepted upstream inspected: [Lab 5c895a25](https://github.com/jayleekr/hypeprooflab/blob/5c895a256d01321b45ee7456c49f56de89cab2f4/PHILOSOPHY.md)
-> Proposed refinement: [Lab #777](https://github.com/jayleekr/hypeprooflab/issues/777), Human Capability Research. 개념 채택 전 제품 계약 초안이며 측정/UI migration 완료 아님.
+> Proposed refinement: [Lab #777 개정안 630090a3](https://github.com/jayleekr/hypeprooflab/blob/630090a3808312af458d605ae64b5495dcd4d3ad/PHILOSOPHY.md), Human Capability Research. 개념 채택 전 제품 계약 초안이며 측정/UI migration 완료 아님.
 > Downstream: [Studio behavior requirements](studio-requirements.md) and feature-specific specs
 
 [철학 개정 적용 기록](design/philosophy-alignment-2026-09-08.md)은 Lab 원본의 의미를
@@ -117,7 +117,7 @@ Judgment, Verify, Orchestrate, Adapt, Ownership은 이를 연구할 잠정 후�
 자원 안에서 여러 수업의 도움과 실행 범위를 조절할 수 있어야 한다.**
 
 상품 의도 INT-ACCESS-01~08의 원본은 Lab의
-[이용 권한·pricing Intent 개정안](https://github.com/jayleekr/hypeprooflab/issues/777)에 둔다.
+[이용 권한·pricing Intent 개정안](https://github.com/jayleekr/hypeprooflab/blob/630090a3808312af458d605ae64b5495dcd4d3ad/products/studio/access-and-pricing-intent.md)에 둔다.
 이 문서는 다음 제품 원칙으로 번역하며, 실제 금액은 Lab pricing.ts의 버전별 계약을 따른다.
 
 - 수업·구독이 겹쳐도 사용 출처를 명시하며 한 요청을 두 번 차감하거나 개인 비용으로 자동 전환하지 않는다.
