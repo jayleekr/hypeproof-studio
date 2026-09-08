@@ -6,7 +6,7 @@ import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
-import {mkdtempSync,mkdirSync,writeFileSync,realpathSync,readFileSync,unlinkSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,writeFileSync,realpathSync,readFileSync,unlinkSync,existsSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {resolve,dirname} from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
@@ -83,7 +83,14 @@ if(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'){
  manifest.submitted_product_sha=process.env.HPS_LESSON_PRODUCT_SHA||null;
  manifest.live_model_requested=live;
  manifest.identity_runner_sha256=createHash('sha256').update(readFileSync(new URL('./identity.mjs',import.meta.url))).digest('hex');
- if(surfaces){manifest.surface_runner_sha256=createHash('sha256').update(readFileSync(new URL('./surfaces.mjs',import.meta.url))).digest('hex');manifest.sdk_unavailable_fixture=process.env.HPS_LESSON_SDK_UNAVAILABLE==='1';}
+ if(surfaces){
+  manifest.surface_runner_sha256=createHash('sha256').update(readFileSync(new URL('./surfaces.mjs',import.meta.url))).digest('hex');
+  manifest.sdk_unavailable_fixture=process.env.HPS_LESSON_SDK_UNAVAILABLE==='1';
+  const sdk=process.env.HPS_APP_PATH.split('/Contents/MacOS/')[0]+'/Contents/Resources/app/extensions/hypeproof-chat/dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk';
+  manifest.bundled_sdk={present:existsSync(sdk+'/sdk.mjs')};
+  if(manifest.bundled_sdk.present){manifest.bundled_sdk.version=JSON.parse(readFileSync(sdk+'/package.json','utf8')).version;manifest.bundled_sdk.sha256=createHash('sha256').update(readFileSync(sdk+'/sdk.mjs')).digest('hex');}
+  assert.equal(manifest.bundled_sdk.present,!manifest.sdk_unavailable_fixture,'SDK fixture does not match the actual copied app');
+ }
  writeFileSync(out+'/environment.json',JSON.stringify(manifest,null,2));
 }
 const userDir=realpathSync(mkdtempSync(tmpdir()+'/hps-lesson-'));mkdirSync(userDir+'/User');mkdirSync(userDir+'/ws');
