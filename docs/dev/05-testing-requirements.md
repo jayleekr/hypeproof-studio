@@ -85,3 +85,7 @@ an app rebuild. Record baseline failures separately from new findings without
 lowering the checker threshold. Preserve the verification rule's positive and
 negative controls for any new detector. No new test script should print PASS
 for a placeholder, skipped implementation, or missing external environment.
+
+## Personal trial UI acceptance
+
+Use the [TUX matrix](../testing/studio-native-trial-ux.md) for personal trial buttons, keyboard/focus, loading/error/cancel states, observation scope changes and conditional update/recovery UI. `node e2e/trial-ux/run.mjs` exercises the built React UI with a controlled host bridge; it does not prove OS actions or live API success. Pair applicable cases with the [actual laptop flow](../testing/studio-native-trial-laptop.md), and record release artifact checks separately.

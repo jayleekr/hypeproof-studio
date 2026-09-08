@@ -109,6 +109,32 @@ test('native trial: enter code, use real API, create and revise an actual work f
       expect(readFileSync(second,'utf8')).toEqual(after);
       await ctx.win.screenshot({path:join(output,'reloaded.png')});
     }
+    if (process.env.HPS_NATIVE_UI === '1') {
+      const current = await chatFrame(ctx.win);
+      const beforeClear = await current.locator('.hps-messages').innerText();
+      await current.getByRole('button', { name: '대화 지우기', exact: true }).click();
+      const dialog = ctx.win.locator('.monaco-dialog-box').first();
+      await expect(dialog).toContainText('작업 파일과 내 작업 돌아보기');
+      await ctx.win.screenshot({ path: join(output, 'clear-confirmation.png') });
+      await ctx.win.keyboard.press('Escape');
+      await expect(dialog).not.toBeVisible();
+      expect(await current.locator('.hps-messages').innerText()).toBe(beforeClear);
+      await current.getByRole('button', { name: '대화 지우기', exact: true }).click();
+      await dialog.getByRole('button', { name: '대화 지우기', exact: true }).click();
+      await expect(dialog).not.toBeVisible();
+      await expect(current.locator('.hps-messages')).not.toContainText('handover-v1.md');
+      expect(readFileSync(first, 'utf8')).toEqual(before);
+      expect(readFileSync(second, 'utf8')).toEqual(after);
+      const panel = current.locator('.hps-native-observation');
+      if (await panel.getAttribute('open') === null) await panel.locator('summary').first().click();
+      await panel.getByRole('button', { name: '이 작업의 기록 확인' }).click();
+      await expect(panel).toContainText('합성 실행 정정');
+      await ctx.win.screenshot({ path: join(output, 'clear-complete-files-preserved.png') });
+      writeFileSync(join(output, 'ui-host-result.json'), JSON.stringify({
+        status: 'PASS', ids: ['TUX-CHAT-08', 'TUX-HOST-01'],
+        scope: 'actual Mac confirmation/cancel/clear with synthetic conversation; files and observation preserved',
+      }, null, 2));
+    }
     const api = JSON.parse(readFileSync(join(output, 'api-evidence.json'), 'utf8'));
     expect(api.calls.some((c: { status: number; path: string; request_id: string }) => c.status === 200 && c.path === '/v1/messages' && c.request_id)).toBe(true);
     writeFileSync(join(output, 'result.json'), JSON.stringify({

@@ -42,7 +42,7 @@ export function StartPage() {
       <section className="studio-connect" aria-labelledby="connect-title" aria-busy={state.checking}>
         <div className="studio-card-top"><span className="studio-step">GET STARTED</span><span className="studio-dot"/></div>
         <h2 id="connect-title">{state.profile && !editing ? (state.started ? "코치와 작업을 시작하세요" : "이 수업으로 시작할까요?") : "내 수업에 연결하기"}</h2>
-        <p className="studio-card-description">{state.profile && !editing ? (state.started ? "코치 채팅을 열었습니다. 채팅 입력창에 만들고 싶은 것을 적어주세요." : "수업과 코치를 확인한 뒤 작업을 시작하세요.") : "강사에게 받은 참여 코드를 붙여넣으세요. 연결할 수업을 먼저 확인할 수 있습니다."}</p>
+        <p className="studio-card-description">{state.profile && !editing ? (state.started ? "코치 채팅을 열었습니다. 채팅 입력창에 만들고 싶은 것을 적어주세요." : "수업과 코치를 확인한 뒤 작업을 시작하세요.") : "발급받은 참여 코드를 붙여넣으세요. 연결할 수업을 먼저 확인할 수 있습니다."}</p>
         {state.profile && !editing ? <>
           <div className="studio-course"><span className="studio-verified">연결된 수업</span><h3>{state.profile.name}</h3><dl><div><dt>코치</dt><dd>{state.profile.coach}</dd></div><div><dt>회차</dt><dd>{state.profile.series}</dd></div><div><dt>수업 작업 폴더</dt><dd>{state.profile.workspace}</dd></div></dl></div>
           <button className="studio-primary" disabled={state.checking} onClick={() => { setState(s => ({ ...s, checking: true, error: undefined })); postToHost({ type: "beginCourse" }); }}>{state.checking ? "수업 여는 중…" : state.started ? "코치와 계속 작업하기" : "수업 시작하기"} <span aria-hidden="true">↗</span></button>
@@ -56,7 +56,7 @@ export function StartPage() {
         </form>}
         <div aria-live="polite" role="status" className="studio-status">{state.checking ? "연결 정보를 확인하고 있습니다." : ""}</div>
         {state.error && <div className="studio-error" id="connection-error" role="alert">{state.error}{state.profile && <p>기존 수업 연결은 유지됩니다.</p>}</div>}
-        <div className="studio-card-footer">코드가 없다면 강사에게 참여 코드를 요청하세요.</div>
+        <div className="studio-card-footer">코드가 없다면 코드 발급 담당자에게 요청해 주세요.</div>
       </section>
     </div>
     <footer className="studio-bottom"><button onClick={() => postToHost({ type: "openLocalFolder" })}>작업 폴더 열기 <span aria-hidden="true">↗</span></button><span>{state.workspace ? `현재 폴더 · ${state.workspace}` : "내 파일은 내 작업 폴더에 남습니다."}</span><span className="studio-build">MAKE · VERIFY · OWN</span></footer>

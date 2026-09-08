@@ -14,10 +14,12 @@
     "test:preview-viewport": "node --experimental-strip-types preview-viewport/run.mjs",
     "test:start-page": "node start-page/run.mjs",
     "test:lesson:mac": "node --experimental-strip-types --experimental-sqlite lesson-studio/mac.mjs",
-    "test:classroom": "node --experimental-strip-types --experimental-sqlite classroom/run.mjs"
+    "test:classroom": "node --experimental-strip-types --experimental-sqlite classroom/run.mjs",
+    "test:trial-ux": "node trial-ux/run.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
+    "esbuild": "^0.28.2",
     "typescript": "^5.4.0"
   }
 }

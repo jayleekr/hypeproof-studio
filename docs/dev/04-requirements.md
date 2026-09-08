@@ -113,3 +113,7 @@ Detailed contract: [studio-trial](../requirements/studio-trial.md).
 
 [NAT-01–12](../requirements/studio-native-trial.md) define the product scope; [T01–25](../testing/studio-native-trial-validation.md) define acceptance tests.
 [Executed laptop evidence](../testing/studio-native-trial-results-2026-09-08.md) records real App/API results separately from synthetic and human validation.
+
+## Personal trial UI and UX (#758)
+
+`REQ-STUDIO-NATIVE-UX`: [TUX requirements](../requirements/studio-native-trial-ux.md) inventory every native trial control, conditional surface and host action. [UI acceptance tests](../testing/studio-native-trial-ux.md) distinguish React interaction, host contracts, actual Electron/API execution and release verification. Requirements are not executed results.
