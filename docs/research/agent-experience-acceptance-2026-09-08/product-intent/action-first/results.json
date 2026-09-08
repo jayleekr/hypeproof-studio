@@ -1,0 +1,15 @@
+{
+  "mode": "synthetic API experiment; not Electron or human validation",
+  "results": [
+    {
+      "id": "P1",
+      "status": "PASS",
+      "provider_request_id": "req_011CerHa2PDajFSytAH79qQQ"
+    },
+    {
+      "id": "P2",
+      "status": "PASS",
+      "provider_request_id": "req_011CerHcJpV8b73kfEwHwF9F"
+    }
+  ]
+}

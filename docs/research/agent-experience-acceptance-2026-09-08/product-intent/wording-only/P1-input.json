@@ -1,0 +1,17 @@
+{
+  "format": "hps-observation/1",
+  "scope": "synthetic-P1",
+  "session": "synthetic",
+  "program": "synthetic-persona-v1",
+  "events": [
+    {
+      "id": "P1-user",
+      "seq": 1,
+      "task": "P1",
+      "at": 1,
+      "kind": "user",
+      "text": "모르겠어. AI를 처음 써봐.",
+      "assistance": "unknown"
+    }
+  ]
+}
