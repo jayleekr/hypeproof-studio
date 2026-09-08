@@ -75,6 +75,45 @@ export function resolveSiteBase(configured: string | undefined | null): string {
   }
 }
 
+/**
+ * 아이에게 나가는 문구. 무엇이 잘못됐는지가 아니라 무엇이 사실인지를 말한다 —
+ * 이건 오류가 아니라 이 수업의 범위다. 정책 필드 이름을 노출하지 않는다.
+ */
+export const GALLERY_NOT_ALLOWED = "이 수업에서는 작품을 갤러리에 올리지 않아요.";
+
+/**
+ * #748 — 이 좌석이 갤러리에 올릴 수 있는가. 프로필이 정책의 소유자다.
+ *
+ * 왜 필요한가. 이 판단을 하는 곳이 **웹뷰의 버튼 하나뿐**이었고, 그마저도
+ * `publishing.strategy` 만 봤다. `publishing.enabled` 는 워커가 실어 보내기만
+ * 하고 **아무도 읽지 않는 값**이었다. 그리고 버튼은 유일한 도달 수단이 아니다 —
+ * 실제 발행은 웹뷰 메시지 `publishToGallery` 로 시작되므로 버튼을 거치지 않고도
+ * 여기까지 온다.
+ *
+ * 오늘 실제 노출은 없다. 등록된 프로필 다섯 개 전부에서 두 값이 일치한다
+ * (`enabled:false` ↔ `local_only`, `enabled:true` ↔ `hypeproof_gallery`).
+ * 그래서 이건 구멍을 막는 변경이 아니라 **두 값이 갈라지는 날을 대비한
+ * 이중화**이고, "가용성 ≠ 승인"(REQ-M16)을 발행 경로에도 적용하는 것이다.
+ *
+ * 사이트 라우트(`POST /api/gallery/publish`)가 토큰으로 코호트 opt-in 을
+ * 확인한다고 이 파일 상단 주석이 적고 있지만, 그 코드는 다른 저장소에 있어
+ * **여기서 확인하지 못했다.** 그러니 이 함수를 서버 게이트의 대체물로 읽지
+ * 마라 — 서버가 이미 막고 있다면 이건 두 번째 자물쇠일 뿐이고, 아니라면
+ * 이것이 유일한 자물쇠다. 어느 쪽인지 모른다는 사실 자체가 fail-closed 로
+ * 가야 할 이유다.
+ */
+export function galleryPublishAllowed(
+  publishing: { enabled?: boolean; strategy?: string } | null | undefined,
+): { ok: true } | { ok: false; message: string } {
+  // 프로필을 아직 못 받았으면 허가의 증거가 없다 — 없음은 허용이 아니다.
+  if (!publishing) return { ok: false, message: GALLERY_NOT_ALLOWED };
+  if (publishing.enabled !== true) return { ok: false, message: GALLERY_NOT_ALLOWED };
+  // 켜져 있어도 목적지가 갤러리가 아니면 이 경로가 아니다. 웹뷰가 버튼을
+  // 감추는 조건과 같은 값을 같은 방향으로 본다.
+  if (publishing.strategy !== "hypeproof_gallery") return { ok: false, message: GALLERY_NOT_ALLOWED };
+  return { ok: true };
+}
+
 export async function publishWorld(input: PublishInput): Promise<PublishResult> {
   const doFetch = input.fetchImpl ?? fetch;
   const url = `${input.siteBase.replace(/\/+$/, "")}/api/gallery/publish`;

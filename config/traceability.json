@@ -153,6 +153,33 @@
           "path": "worker/test/lesson-feature-policy.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-REQ-STUDIO-SAFETY",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## L. Safety / observability"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-PUBLISH-GATE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/gallery-publish-gate.smoke.mjs"
+        }
+      ]
     }
   ]
 }
