@@ -5,7 +5,7 @@ import systemPromptMd from "../prompts/sk-biopharm-kids-quest-3-4.md";
 export const profile: Profile = {
   // id/cohort_id are unchanged for token + roster compatibility; the "-s1"
   // suffix is legacy (v126 made this a single-session workshop, not a series).
-  id: "sk-biopharm-kids-2026-grade-3-4-s1",
+  id: "sk-biopharm-kids-2026-grade-3-4-s1",   // NOTE: id ≠ filename — getProfile keys on this
   version: 1,
   display_name: "SK바이오팜 가족 AI 창작 워크숍 — 게스트 퀘스트 (3-4학년)",
   audience: {

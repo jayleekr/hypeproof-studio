@@ -1,3 +1,5 @@
+import { crossProviderEnabled } from '../profiles/types';
+
 import { applyRequestEffort, EffortPolicyError, type EffortReceipt } from '../lib/model-effort';
 import { persistRequestSettings } from '../lib/request-settings';
 import {NATIVE_TRIAL_LIMITS} from '../lib/native-trial-grants';
@@ -303,9 +305,9 @@ messages.post("/messages", async (c) => {
   }
 
   // Explicit GPT profiles cannot be sent through the Anthropic SDK protocol.
-  if (profile.model.default in OPENAI_MODELS) {
+  if (crossProviderEnabled(profile) || profile.model.default in OPENAI_MODELS) {
     recordFailure(409, ERROR_KIND.BAD_REQUEST);
-    return c.json(anthropicError(c, 'invalid_request_error', 'This GPT connection requires /v1/chat/completions'), 409);
+    return c.json(anthropicError(c, 'invalid_request_error', 'This connection requires /v1/chat/completions'), 409);
   }
 
   // Anthropic-native route: this endpoint speaks the Messages protocol only,
@@ -718,6 +720,8 @@ messages.post("/messages/count_tokens", async (c) => {
   if (!Array.isArray(raw.messages)) {
     return c.json(anthropicError(c, "invalid_request_error", "messages must be an array"), 400);
   }
+
+  if (crossProviderEnabled(profile)) return c.json(anthropicError(c,'invalid_request_error','Use the model comparison chat connection'),409);
 
   const apiKey = env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) {

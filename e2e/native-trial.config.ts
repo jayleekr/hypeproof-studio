@@ -5,6 +5,7 @@ import base from './playwright.config';
 // screenshots in the spec are taken only after the password field is gone.
 const modes: [string, string | string[]][] = [
   ['HPS_TRIAL_ENTRY', 'native-trial-entry.spec.ts'],
+  ['HPS_MODEL_REHEARSAL', 'native-models.spec.ts'],
 
   ['HPS_EFFORT_OLD_CLIENT', 'native-effort-old-client.spec.ts'],
   ['HPS_NATIVE_EFFORT', 'native-effort.spec.ts'],

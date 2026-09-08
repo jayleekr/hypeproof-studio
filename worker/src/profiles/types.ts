@@ -43,6 +43,8 @@ export interface Profile {
     fallback?: ModelKey;
     /** Explicit, reviewed catalogue keys for this cohort. Omission preserves the legacy pair. */
     allowed?: ModelKey[];
+    /** Reviewed adult proxy catalogue; explicit model IDs select their provider. */
+    cross_provider?: boolean;
     /** Derived from a validated frozen lesson, never from client input. */
     lesson_locked?: boolean;
     /**
@@ -402,7 +404,21 @@ export const OPENAI_MODELS = {
   'gpt-5.6-sol': 'GPT-5.6 Sol',
 } as const;
 export type OpenAIModelId = keyof typeof OPENAI_MODELS;
-export type ModelKey = ModelAlias | AnthropicModelId | OpenAIModelId;
+export const GEMINI_MODELS = { 'gemini-2.5-flash': 'Gemini 2.5 Flash', 'gemini-3.5-flash': 'Gemini 3.5 Flash' } as const;
+export const GLM_MODELS = { 'glm-5.2': 'GLM 5.2' } as const;
+export type ModelKey = ModelAlias | AnthropicModelId | OpenAIModelId | keyof typeof GEMINI_MODELS | keyof typeof GLM_MODELS;
+
+export function explicitModelProvider(key: string): LLMProvider | undefined {
+  if (Object.hasOwn(ANTHROPIC_MODELS, key)) return 'anthropic';
+  if (Object.hasOwn(OPENAI_MODELS, key)) return 'openai';
+  if (Object.hasOwn(GEMINI_MODELS, key)) return 'gemini';
+  if (Object.hasOwn(GLM_MODELS, key)) return 'glm';
+}
+
+export function crossProviderEnabled(profile: Profile): boolean {
+  return profile.model.cross_provider === true && profile.coach_runtime === 'proxy'
+    && profile.minor_cohort === false && (profile.audience.age_range?.[0] ?? 0) >= 18;
+}
 
 export function permittedModelKeys(profile: Profile): ModelKey[] {
   return [...new Set([profile.model.default, ...(profile.model.allowed ?? (profile.model.fallback ? [profile.model.fallback] : []))])];
@@ -442,6 +458,10 @@ export const GLM_MODEL_MAP: Record<ModelAlias, string> = {
 };
 
 export function modelIdFor(key: ModelKey, provider: LLMProvider): string {
+  if (Object.hasOwn(GEMINI_MODELS, key) || Object.hasOwn(GLM_MODELS, key)) {
+    if (explicitModelProvider(key) !== provider) throw new Error('model is unavailable for this provider');
+    return key;
+  }
   if (Object.hasOwn(ANTHROPIC_MODELS, key)) {
     if (provider !== 'anthropic') throw new Error('model is unavailable for this provider');
     return key;

@@ -155,6 +155,21 @@ not auto-applied here — leave as a future tweak per cohort.
   / $7 out per cohort before prompt caching, which the skeleton library makes most of
 - Cloudflare: 6 × 50 = 300 req → well inside free tier
 
+## Adult model comparison (#841)
+
+Apply the additive `migrations/0006-model-usage.sql` before deploying this feature;
+the guarded deploy workflow includes this idempotent step. Existing usage_log and
+classes are unchanged. The new hidden studio-model-practice profile stays closed
+until HPS_MODEL_PRACTICE_REQUEST_LIMIT is explicitly set (1..10000 attempts per
+seat/session). No production number is supplied by this change. It is not a dollar
+or token spending cap. OpenAI, GLM, Gemini and Anthropic credentials stay in Worker
+Secrets; registering a key does not grant models to existing cohorts.
+
+Rollback: previous Worker source 18281a9 remains compatible with the additive
+table. Preserve request evidence; do not drop tables or reset usage during rollback.
+Unknown/pending execution requires operator reconciliation before general admission
+is enabled; the follow-up budget/role UI is #800.
+
 ## Course effort settings (#799)
 
 Apply additive `migrations/0005-request-settings.sql` before deploying the Service.

@@ -217,7 +217,7 @@
       "sources": [
         {
           "path": "docs/design/model-effort-and-course-usage.md",
-          "section": "## 수업 effort 구현 계약 (#799)"
+          "section": "## \uc218\uc5c5 effort \uad6c\ud604 \uacc4\uc57d (#799)"
         }
       ]
     },
@@ -339,6 +339,39 @@
       "sources": [
         {
           "path": "extensions/hypeproof-chat/test/history-identity.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-MODEL-USAGE",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/model-access-usage.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-MODEL-USAGE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODEL-USAGE",
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/model-access-usage.md"
+        },
+        {
+          "path": "worker/test/model-usage.test.mjs"
+        },
+        {
+          "path": "e2e/tests/native-models.spec.ts"
         }
       ]
     },
