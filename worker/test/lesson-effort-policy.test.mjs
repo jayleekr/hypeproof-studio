@@ -7,6 +7,7 @@ const {setRoster,startSession}=await import('../src/lib/kv.ts');
 const {ANTHROPIC_MODELS}=await import('../src/profiles/types.ts');
 const {validateEffortPolicy,applyRequestEffort}=await import('../src/lib/model-effort.ts');
 const {modelBinding}=await import('../src/lib/lesson-model-policy.ts');
+const {persistRequestSettings}=await import('../src/lib/request-settings.ts');
 const {verify,issue}=await import('../src/lib/tokens.ts');
 const local=await localAuthoring({profileId:'homepage-practice-s1'}),app=await bootApp();
 local.env.LLM_PROVIDER='anthropic';local.env.ANTHROPIC_API_KEY='synthetic-key';
@@ -75,6 +76,24 @@ try {
     }
     for(const invalid of ['high','max','xhigh','garbage']) await withMockUpstream(()=>{throw Error('forbidden request reached provider');},async calls=>{
       const result=await call(endpoint,'POST',request,token,{'x-hps-effort':invalid});assert.equal(result.status,403);assert.equal(calls.length,0);
+    });
+    const payload=await verify(token,local.env.HPS_SIGNING_SECRET);
+    const turn='duplicate-'+runtime,settingsId=crypto.randomUUID();
+    await Promise.all(Array.from({length:8},()=>persistRequestSettings(local.env,payload,turn,settingsId,'claude-sonnet-4-6',{requested:'low',applied:'low',reason:'selected'},200)));
+    assert.equal((await call('/v1/request-settings/'+turn,'GET',undefined,token)).json.requests.length,1,'duplicate persistence is idempotent');
+    const another=base+'fixed-'+runtime;
+    assert.equal((await call(another,'PUT',save({default:'hypeproof-default',allowed:['hypeproof-default'],effort:{default:'low',allowed:['low']}}))).status,200);
+    assert.equal((await call(another+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+    const fixed=(await call(another+'/versions/m2026.09.08-1/participants','POST',{user:'student',hours:1})).json.token;
+    assert.deepEqual((await call('/v1/request-settings/'+turn,'GET',undefined,fixed)).json.requests,[],'same student in another frozen course cannot read the old turn');
+    assert.deepEqual((await call('/v1/profile','GET',undefined,fixed)).json.model_selection.choices[0].effort,{default:'low',allowed:['low']});
+    await withMockUpstream((_url,init)=>{
+      assert.equal(JSON.parse(init.body).output_config.effort,'low');
+      return Response.json({content:[{type:'text',text:'fixed'}],usage:{input_tokens:1,output_tokens:1}});
+    },async calls=>{
+      assert.equal((await call(endpoint,'POST',request,fixed)).status,200,'old client on fixed course gets low');
+      assert.equal((await call(endpoint,'POST',request,fixed,{'x-hps-effort':'medium'})).status,403);
+      assert.equal(calls.length,1,'fixed policy cannot be widened');
     });
     const originalEffort=profile.model.effort;
     profile.model.effort={default:'low',allowed:['low']};
