@@ -25,7 +25,8 @@
     "test:trial": "node --experimental-strip-types --test test/trial-evidence.test.mjs",
     "test:native-trial": "node --experimental-strip-types --test test/native-trial.test.mjs && node --experimental-strip-types --test test/native-observation.test.mjs && node --experimental-strip-types --experimental-sqlite --test test/native-trial-grants.test.mjs",
     "test:native-trial:d1": "node --experimental-strip-types test/native-trial-d1.test.mjs",
-    "test:gpt-practice": "node --experimental-strip-types test/gpt-model-policy.test.mjs && node --test test/codex-rehearsal.test.mjs"
+    "test:gpt-practice": "node --experimental-strip-types test/gpt-model-policy.test.mjs && node --test test/codex-rehearsal.test.mjs",
+    "test:effort:d1": "node --experimental-strip-types test/request-settings-d1.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.34"

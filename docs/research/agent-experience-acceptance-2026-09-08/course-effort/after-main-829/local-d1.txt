@@ -1,0 +1,5 @@
+
+> hypeproof-studio-worker@0.1.0 test:effort:d1
+> node --experimental-strip-types test/request-settings-d1.test.mjs
+
+PASS local workerd/D1: migration repeat, concurrent duplicate write, nullable receipt and cohort/student/profile/course/version/hash/turn isolation

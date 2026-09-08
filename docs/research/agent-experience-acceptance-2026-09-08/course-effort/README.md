@@ -1,8 +1,8 @@
 # Course effort evidence — 2026-09-08
 
 REQ-M40 / #799. Product code verified at `39f8b29`; exact commits, bundle digests,
-Node/platform and Service source digest are in each environment.json. The later
-commit adds this evidence only. All identities and lessons are synthetic; the
+Node/platform and Service source digest are in each environment.json. The initial
+evidence-only commit was `a674bcd`; the integrated rerun is recorded below. All identities and lessons are synthetic; the
 upstream is the real Anthropic API. This is not production-class validation.
 
 | Run | Real API requests | Result |
@@ -53,3 +53,36 @@ Windows actual-device tests, screen-reader speech, production migration, release
 candidate App, instructor pilot, budget settlement and learning outcomes are NOT RUN.
 The existing requirements for full release/production adoption remain in force.
 SHA-256 of retained raw files is in sha256.json.
+
+
+## Integration with main #829
+
+After main added the separate GPT practice profile, the resolved candidate at
+`85c1c95e065f16991aefb5ee526558f50d753b3e` was rerun through all three paths.
+[SDK](after-main-829/agent-sdk/effort-result.json) 22 calls,
+[proxy](after-main-829/proxy/effort-result.json) 11 calls, and
+[untouched old App](after-main-829/old-client/old-client-result.json) 2 calls all
+returned HTTP 200 and passed the same setting/receipt controls. These 35 calls
+are additional to the 35 pre-integration calls above, not replacements.
+All nine retained rerun App PNGs and both Chalk effort PNGs were opened by the
+agent and visually inspected; the original runner review status is unchanged.
+
+Worker full tests (including GPT practice) and typecheck, Chalk browser flow,
+docs score 100/100, registry and native controls passed after integration.
+The extension code/bundles did not change in the main integration; the full
+extension tests, typecheck and builds from the first acceptance remain applicable.
+The GPT subscription persona generation was not repeated for this effort change;
+its existing evidence stays scoped to #829's own source.
+
+A separate [local workerd/D1 check](after-main-829/local-d1.txt) executed the
+production migration and request-settings functions: repeated migration preserves
+records, eight concurrent duplicate writes produce one row, nullable values are
+preserved, and each cohort/student/profile/course/version/hash/turn scope is
+isolated. Run `npm --prefix worker run test:effort:d1` to reproduce it. This does
+not imply production migration or billing settlement has run.
+
+The old-App rerun manifest truthfully records `dirty: true`: only the new local
+D1 test and its package/registry wiring were being added during that run.
+All three reruns have the same Service source digest
+`db600a140a53d69977b1cd0d5ccf8f0e2e55e54c4f1f3608bdbecf56e600ce58`.
+No runtime source or native acceptance spec changed after the merge commit.

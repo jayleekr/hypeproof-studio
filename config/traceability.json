@@ -247,6 +247,9 @@
         },
         {
           "path": "e2e/tests/native-effort-old-client.spec.ts"
+        },
+        {
+          "path": "worker/test/request-settings-d1.test.mjs"
         }
       ]
     },
