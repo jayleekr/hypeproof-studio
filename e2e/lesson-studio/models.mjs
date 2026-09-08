@@ -40,8 +40,10 @@ export async function verifyModels({app,window,findContext,cases,out,live,upstre
    for(let n=0;n<4;n++){const current=await chat.evaluate('innerWidth');if(current===width)break;await app.evaluate(({BrowserWindow},delta)=>{const w=BrowserWindow.getAllWindows()[0];w.setBounds({width:w.getBounds().width+delta});},Math.round((width-current)*factor));await window.waitForTimeout(200);}
    const metrics=await chat.evaluate("({width:innerWidth,document_width:document.documentElement.scrollWidth,select_right:document.querySelector('.hps-model-selection select').getBoundingClientRect().right})");assert.equal(metrics.width,width);assert.equal(metrics.document_width,width);assert.ok(metrics.select_right<=width);record('width-'+width,{...metrics,zoom:factor});await shot('model-'+width);
   }
-  await chat.evaluate("document.querySelector('.hps-model-selection select').focus()");
+  await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];w.show();w.focus();});
+  await chat.evaluate("window.focus();document.querySelector('.hps-model-selection select').focus();window.modelKeys=[];document.addEventListener('keydown',e=>window.modelKeys.push({key:e.key,target:e.target.tagName}));document.addEventListener('change',e=>window.modelKeys.push({change:e.target.value}));");
   await window.keyboard.press('Space');await window.waitForTimeout(200);await shot('model-keyboard-menu');await window.keyboard.press('ArrowDown');await window.keyboard.press('Enter');
+  record('keyboard-events',await chat.evaluate("({focus:document.hasFocus(),active:document.activeElement.tagName,events:window.modelKeys,value:document.querySelector('.hps-model-selection select').value})"));
   await wait(()=>chat.evaluate("document.querySelector('.hps-model-selection select').value==='hypeproof-fast'"),'keyboard choice');
   const {result:axObject}=await chat.send('Runtime.evaluate',{expression:"document.querySelector('.hps-model-selection select')",contextId:chat.contextId,returnByValue:false});
   const {node:axNode}=await chat.send('DOM.describeNode',{objectId:axObject.objectId});
