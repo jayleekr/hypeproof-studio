@@ -50,7 +50,7 @@ test('course effort reaches the real model and survives UI transitions', async (
       await model().selectOption(alias);
       if(selected) {await effort().selectOption(selected);await expect(effort()).toHaveValue(selected);}
       else await expect(effort()).toHaveCount(0);
-      const before = (()=>{try{return api().length;}catch{return 0;}})();
+      const previousTurns = new Set((()=>{try{return api().map((c:any)=>c.turn_id);}catch{return [];}})());
       await input().fill('합성 테스트야. 가상 꽃집 이름은 민트플라워. 도구 없이 이름만 답해 줘.');
       await input().press('Enter');await expect(chat.locator('.hps-btn-stop')).toBeVisible();
       if(switchDuring){await input().fill('진행 중 작성한 초안');await effort().selectOption('high');}
@@ -64,13 +64,18 @@ test('course effort reaches the real model and survives UI transitions', async (
         await details.getByRole('button',{name:'적용 기록 다시 확인'}).click();
         return await details.innerText();
       },{timeout:15000}).toContain('서버에서 확인된');
-      const calls=api().slice(before).filter((c:any)=>c.path==='/v1/messages');
+      await expect.poll(()=>api().filter((c:any)=>!previousTurns.has(c.turn_id)).every((c:any)=>c.status!==null),{timeout:95000}).toBe(true);
+      const calls=api().filter((c:any)=>!previousTurns.has(c.turn_id)&&c.path==='/v1/messages');
+      expect(new Set(calls.map((c:any)=>c.turn_id)).size).toBe(1);
       expect(calls.length).toBeGreaterThan(0);
       expect(calls.every((c:any)=>c.status===200&&c.model===expected&&c.effort===selected)).toBe(true);
       expect(calls.every((c:any)=>c.requested_effort===selected)).toBe(true);
       const turn=calls[0].turn_id;expect(typeof turn).toBe('string');
-      const r=await fetch(process.env.HPS_E2E_PROXY_URL+'/request-settings/'+turn,{headers:{authorization:'Bearer '+ctx.token}});
-      expect(r.status).toBe(200);const records=(await r.json()).requests;
+      let records:any[]=[];
+      await expect.poll(async()=>{
+        const r=await fetch(process.env.HPS_E2E_PROXY_URL+'/request-settings/'+turn,{headers:{authorization:'Bearer '+ctx.token}});
+        expect(r.status).toBe(200);records=(await r.json()).requests;return records.length;
+      },{timeout:15000}).toBe(calls.length);
       expect(records.length).toBe(calls.length);
       expect(records.every((r:any)=>r.model===expected&&r.applied===selected&&r.requested===selected)).toBe(true);
       checks.push({alias,selected,calls,records,next_request_only:switchDuring});save('IN_PROGRESS');

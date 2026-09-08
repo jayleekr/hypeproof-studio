@@ -83,13 +83,18 @@ globalThis.fetch = async (input, init) => {
   if (url.origin !== 'https://api.anthropic.com') throw new Error('unexpected upstream origin in isolated trial test');
   if (++attempts > 24) throw new Error('live rehearsal request budget exhausted (24); inspect the recorded failure before rerunning');
   const start = Date.now();
-  const response = await realFetch(input, { ...init, signal: AbortSignal.any([
-    ...(init?.signal ? [init.signal] : []), AbortSignal.timeout(90000),
-  ]) });
   const settings=effortRun?JSON.parse(init.body):undefined;
-  calls.push({ ...(settings?{model:settings.model,effort:settings.output_config?.effort??null,thinking:settings.thinking?.type??null,...requestContext.getStore()}:{}),origin: url.origin, path: url.pathname, status: response.status,
-    request_id: response.headers.get('request-id'), elapsed_ms: Date.now() - start });
-  writeFileSync(resolve(output, 'api-evidence.json'), JSON.stringify({ real_upstream: true, storage: effortRun?'synthetic-sqlite':'synthetic-memory', calls }, null, 2));
+  const call={...(settings?{model:settings.model,effort:settings.output_config?.effort??null,thinking:settings.thinking?.type??null,...requestContext.getStore()}:{}),origin:url.origin,path:url.pathname,status:null,request_id:null,elapsed_ms:null};
+  const saveCalls=()=>writeFileSync(resolve(output,'api-evidence.json'),JSON.stringify({real_upstream:true,storage:effortRun?'synthetic-sqlite':'synthetic-memory',calls},null,2));
+  calls.push(call);saveCalls();
+  let response;
+  try {
+    response = await realFetch(input, { ...init, signal: AbortSignal.any([
+      ...(init?.signal ? [init.signal] : []), AbortSignal.timeout(90000),
+    ]) });
+    call.status=response.status;call.request_id=response.headers.get('request-id');
+  } catch(e) {call.error='transport';throw e;}
+  finally {call.elapsed_ms=Date.now()-start;saveCalls();}
   return response;
 };
 const server = createServer(async (req, res) => {
