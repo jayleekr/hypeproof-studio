@@ -5,6 +5,8 @@
 [설계](../design/access-budget-settlement.md), [검증 계획](../testing/capability-and-access.md)을 연결한다.
 AB-*는 REQ-L5, AE-17/20/27/32, MU-03~08의 후속이며 기존 계약을 폐기하지 않는다.
 아래 행은 구현 완료나 실제 결제 정책 채택을 뜻하지 않는다.
+[CU-11~15](../design/trial-conversation-experience.md)의 App 이용 안내는 #847을 재사용하고,
+#856은 그 화면을 Service 계약·Chalk·운영자 예산 화면과 통합한다.
 
 ## 사용자 맥락
 

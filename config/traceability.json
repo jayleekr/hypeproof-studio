@@ -447,7 +447,8 @@
       "depends_on": [
         "ST-INT-CAPABILITY-ACCESS",
         "ST-REQ-STUDIO-SAFETY",
-        "ST-REQ-MODEL-USAGE"
+        "ST-REQ-MODEL-USAGE",
+        "ST-REQ-TRIAL-CONVERSATION"
       ],
       "sources": [
         {
