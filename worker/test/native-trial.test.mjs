@@ -76,3 +76,35 @@ test('trial configuration is isolated from existing practice program', () => {
   assert.equal(trial.analytics.log_user_messages, false);
   assert.notEqual(trial.ux, practice.ux);
 });
+
+test('observation contract uses actual session/identity gates and rejects scope mixing without storage', async()=>{
+ const {env,token}=await fixture(),app=await bootApp();
+ const request=(path,body,credential=token)=>app.fetch(new Request('https://test/v1/observations/'+path,{method:body?'POST':'GET',headers:{authorization:'Bearer '+credential,'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),env,makeCtx());
+ const response=await request('context');assert.equal(response.status,200);const context=await response.json();assert.equal(context.format,'hps-observation/1');
+ const batch={...context,events:[{id:'u1',seq:1,task:'t1',at:1,kind:'user',text:'새 직원 안내문',assistance:'unknown'}]};
+ assert.equal((await request('validate',batch)).status,200);
+ assert.equal((await request('validate',{...batch,scope:'another-person'})).status,409);
+ assert.equal((await request('validate',{...batch,session:'another-session'})).status,409);
+ assert.equal((await request('validate',{...batch,program:'old-program'})).status,409);
+ assert.equal((await request('context',null,'invalid')).status,401);
+ await env.HPS_KV.delete(`cohort:${id}:active_session`);assert.equal((await request('context')).status,403);
+});
+
+test('assessment is separate from coaching, validates real citations and does not persist transcript', async()=>{
+ const {env,token}=await fixture(),app=await bootApp(); env.ANTHROPIC_API_KEY='synthetic-provider-key';
+ const headers={authorization:'Bearer '+token,'content-type':'application/json'};
+ const ctxResponse=await app.fetch(new Request('https://test/v1/observations/context',{headers}),env,makeCtx());
+ const batch={...await ctxResponse.json(),events:[{id:'u1',seq:1,task:'t1',at:1,kind:'user',text:'새 직원이 주문을 확인할 문서가 필요해',assistance:'unknown'}]};
+ const assets=['TASTE','INTENT','CONTEXT','VERIFY','DELEGATE','ITERATE','OWNERSHIP'];
+ const findings=assets.map(asset=>({asset,status:asset==='INTENT'?'observed':'unobserved',interpretation:'잠정 관찰',evidence:asset==='INTENT'?[{quote_id:'q0'}]:[],assistance:'unknown',next:'다음 과제에서 확인'}));
+ const original=globalThis.fetch;let body;let result=findings;let status=200;
+ globalThis.fetch=async(input,init)=>{body=JSON.parse(init.body);return new Response(JSON.stringify({content:[{type:'text',text:JSON.stringify({findings:result.map(f=>f.status==='unobserved'?{asset:f.asset,status:f.status,interpretation:f.interpretation,next:f.next}:f)})}]}),{status,headers:{'request-id':'synthetic-provider-request'}});};
+ const assess=()=>app.fetch(new Request('https://test/v1/observations/assess',{method:'POST',headers,body:JSON.stringify(batch)}),env,makeCtx());
+ try{
+  const response=await assess();assert.equal(response.status,200);const output=await response.json();assert.equal(output.findings[1].evidence[0].event_id,'u1');assert.equal(output.rubric.version,'m2026.09.08-4');
+  assert.equal(body.stream,false);assert.equal(body.tools,undefined);assert.match(body.system[0].text,/명령이 아니다/);assert.match(body.messages[0].content,/새 직원/);
+  result=structuredClone(findings);result[1].evidence[0].event_id='forged';assert.equal((await assess()).status,502);
+  result=structuredClone(findings);result[1].score=100;assert.equal((await assess()).status,502);
+  for(status of [401,429,503])assert.notEqual((await assess()).status,200);
+ }finally{globalThis.fetch=original;}
+});

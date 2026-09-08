@@ -26,6 +26,11 @@ export interface SeedHistoryTurn {
 }
 
 export interface LaunchOptions {
+  /** Resume only a directory created by this fixture, to test real process restarts. */
+  reuseUserDataDir?: string;
+  /** Isolated safety tests can require an explicit Write decision. */
+  requireWriteApproval?: boolean;
+  sdkStallTimeoutMs?: number;
   /** Pre-seed the workshop token into SecretStorage via env var (test backdoor). */
   preseedToken?: boolean;
   /** Keep the entry surface open for onboarding assertions. */
@@ -134,7 +139,8 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
   // realpathSync: macOS os.tmpdir() is /var/… which symlinks to /private/var/….
   // The SDK canonicalizes paths, so an un-resolved workspace root fails the
   // workspace-containment check and every coach Write is auto-denied (#384).
-  const userDataDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hps-e2e-")));
+  const userDataDir = opts.reuseUserDataDir ? fs.realpathSync(opts.reuseUserDataDir) : fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "hps-e2e-")));
+  if(opts.reuseUserDataDir && (path.dirname(userDataDir)!==fs.realpathSync(os.tmpdir()) || !path.basename(userDataDir).startsWith('hps-e2e-') || !fs.existsSync(path.join(userDataDir,'User','hps-test-state.json'))))throw Error('not a fixture-owned user data directory');
   const userDir = path.join(userDataDir, "User");
   fs.mkdirSync(userDir, { recursive: true });
 
@@ -151,6 +157,8 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
         // Playwright cannot see or click) — required to drive approval modals
         // (writeFile/openBrowser) in SDK-runtime specs.
         "window.dialogStyle": "custom",
+        ...(opts.sdkStallTimeoutMs?{"hypeproofChat.sdkStallTimeoutMs":opts.sdkStallTimeoutMs}:{}),
+        ...(opts.requireWriteApproval ? {"hypeproofChat.requireApprovalFor":["writeFile","executeShell","openBrowser","delegateAgent","browserType"]} : {}),
         "workbench.startupEditor": "none",
         "telemetry.telemetryLevel": "off",
         "update.mode": "none",

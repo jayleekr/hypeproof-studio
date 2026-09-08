@@ -82,6 +82,9 @@ jobs:
       - name: Run classroom sharing against local D1
         working-directory: worker
         run: npm run test:classroom:d1
+      - name: Run individual trials against local D1
+        working-directory: worker
+        run: npm run test:native-trial:d1
 
   worker-typecheck:
     name: worker / typecheck

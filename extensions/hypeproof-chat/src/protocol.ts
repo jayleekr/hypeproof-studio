@@ -99,6 +99,7 @@ export interface CoachInfo {
  * sides updated together.
  */
 export interface ResolvedProfile {
+  observation?: { format: string; scope?: string };
   /** Immutable teaching content; capability policy remains in the profile. */
   lesson?: {
     course_id: string; version: string; sha256: string;
@@ -210,6 +211,10 @@ export interface SuggestionChip {
 
 // Webview → Host
 export type WebviewMessage =
+  | { type: 'observationOpen' }
+  | { type: 'observationCancel' }
+  | { type: 'observationAssess'; scope: string; eventIds: string[] }
+  | { type: 'observationCorrect'; scope: string; text: string }
   | StartRequest
   | { type: "ready" }
   | { type: "sendMessage"; text: string; history: ChatMessage[]; images?: string[] }
@@ -267,6 +272,7 @@ export type WebviewMessage =
 
 // Host → Webview
 export type HostMessage =
+  | { type: 'observationState'; assessedEventCount?: number; learningPath?: {title:string;url:string;reason:string} | null; batch: import('./nativeObservationContract').ObservationBatch | null; error: string | null; findings?: import('./nativeObservationContract').ObservationFinding[] }
   | StartResponse
   | { type: "config"; config: ChatConfig }
   | { type: "history"; messages: ChatMessage[] }

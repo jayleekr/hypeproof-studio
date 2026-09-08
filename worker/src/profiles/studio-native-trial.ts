@@ -4,14 +4,15 @@ import { profile as practice } from './homepage-practice-s1';
 // @ts-ignore — bundled as text by Wrangler, like existing cohort prompts.
 import prompt from '../prompts/studio-native-trial.md';
 
-// Native-app trial entry only. Observation API/UI and public self-service
-// issuance are not implemented by this profile; see its release gates.
+// Native trial runtime. Observation is opt-in; public self-service issuance
+// remains hidden until the documented release gates are satisfied.
 export const profile: Profile = {
   ...structuredClone(practice),
   id: 'studio-native-trial',
   version: 1,
   display_name: 'Studio · 내 업무로 AI 체험',
   dashboard_hidden: true, // not offered for customer issuance before live validation
+  observation: { enabled: true },
   system_prompt: prompt as unknown as string,
   coach_runtime: 'agent-sdk',
   model: { ...practice.model, max_tokens: 8192 },

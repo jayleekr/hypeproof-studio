@@ -1,3 +1,4 @@
+import {NATIVE_TRIAL_LIMITS} from '../lib/native-trial-grants';
 // POST /v1/messages — Anthropic Messages API-compatible gateway (#282).
 //
 // Worker-side foundation for the Agent SDK coach runtime (ADR 0003): the
@@ -45,6 +46,7 @@ import {
   type CoachContext,
 } from "../lib/translate";
 import { callAnthropic, countTokensUrl } from "../lib/anthropic";
+import {nativeTrialSignal} from '../middleware/native-trial-budget';
 import type { AnthropicRequest } from "../lib/translate";
 import { MODEL_MAP, type ModelAlias, type Profile } from "../profiles/types";
 // #687 — 모델 수용 표와 정리기는 순수 모듈로 뺐다(플레인 Node 로 테스트 가능해야 한다).
@@ -380,7 +382,7 @@ messages.post("/messages", async (c) => {
   // 은 생각 토큰이 출력 예산을 같이 쓰므로 8k 면 큰 편집이 중간에 잘린다 — 그래서
   // 12000 이다.
   const MINOR_MAX_TOKENS = 12000;
-  const clamped = clampMaxTokens(raw.max_tokens, profile);
+  const clamped = Math.min(clampMaxTokens(raw.max_tokens, profile), payload.native_trial ? NATIVE_TRIAL_LIMITS.output_tokens : Infinity);
   const resolvedMaxTokens =
     profile.minor_cohort === true ? Math.min(clamped, MINOR_MAX_TOKENS) : clamped;
 
@@ -475,6 +477,7 @@ messages.post("/messages", async (c) => {
   let upstream: Response;
   try {
     upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {
+      signal: nativeTrialSignal(c.req.raw),
       url: env.ANTHROPIC_PROXY_URL,
       proxySecret: env.ANTHROPIC_PROXY_SECRET,
       clientBeta: c.req.header("anthropic-beta"),
@@ -745,6 +748,7 @@ messages.post("/messages/count_tokens", async (c) => {
   let upstream: Response;
   try {
     upstream = await callAnthropic(strippedCount.body as unknown as AnthropicRequest, apiKey, {
+      signal: nativeTrialSignal(c.req.raw),
       url: countTokensUrl(env.ANTHROPIC_PROXY_URL),
       proxySecret: env.ANTHROPIC_PROXY_SECRET,
       clientBeta: c.req.header("anthropic-beta"),

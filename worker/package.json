@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Cloudflare Worker — OpenAI-compatible proxy + cohort admin for HypeProof Studio",
+  "description": "Cloudflare Worker \u2014 OpenAI-compatible proxy + cohort admin for HypeProof Studio",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
@@ -23,7 +23,8 @@
     "test:classroom": "node --experimental-strip-types --experimental-sqlite test/classroom.test.mjs",
     "test:classroom:d1": "node --experimental-strip-types --experimental-sqlite test/classroom-d1.test.mjs",
     "test:trial": "node --experimental-strip-types --test test/trial-evidence.test.mjs",
-    "test:native-trial": "node --experimental-strip-types --test test/native-trial.test.mjs"
+    "test:native-trial": "node --experimental-strip-types --test test/native-trial.test.mjs && node --experimental-strip-types --test test/native-observation.test.mjs && node --experimental-strip-types --experimental-sqlite --test test/native-trial-grants.test.mjs",
+    "test:native-trial:d1": "node --experimental-strip-types test/native-trial-d1.test.mjs"
   },
   "dependencies": {
     "hono": "^4.12.34"

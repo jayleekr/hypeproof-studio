@@ -1,3 +1,4 @@
+import {NativeObservationPanel} from './NativeObservationPanel';
 import { DisconnectedChat } from "./StartPage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -586,6 +587,9 @@ export function ChatPanel(props: Props) {
           <p>과제를 확인하고 채팅으로 요청하세요. 열람만으로 실습이 완료되지는 않습니다.</p>
         </details>
       )}
+
+      {config?.profile?.observation?.format === 'hps-observation/1' && <NativeObservationPanel />}
+      {config?.profile?.profile_id === 'studio-native-trial' && config.profile.observation?.format !== 'hps-observation/1' && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}
 
       <div className="hps-messages" ref={scrollRef}>
         {props.aiNotice && (

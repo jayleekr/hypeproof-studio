@@ -8,7 +8,7 @@ import { hasClosingTime } from '../native-trial-checks.mjs';
 test('native trial: enter code, use real API, create and revise an actual work file', async () => {
   test.skip(process.env.HPS_NATIVE_LIVE !== '1', 'isolated live runner only');
   test.setTimeout(480000);
-  const ctx = await launchApp({ preseedToken: false, stayOnStart: true, preseedCoach: { name: '코치' } });
+  let ctx = await launchApp({ preseedToken: false, stayOnStart: true, preseedCoach: { name: '코치' } });
   const output = resolve(process.env.HPS_NATIVE_EVIDENCE_DIR || 'test-results/native-trial');
   mkdirSync(output, { recursive: true });
   let stopped = false;
@@ -30,6 +30,9 @@ test('native trial: enter code, use real API, create and revise an actual work f
   })();
   try {
     const start = await startFrame(ctx.win);
+    await start.getByLabel('수업 참여 코드', { exact: true }).fill('synthetic-invalid-code');
+    await start.getByRole('button', { name: '수업 확인하기' }).click();
+    await expect(start.locator('.studio-error')).toBeVisible();
     await start.getByLabel('수업 참여 코드', { exact: true }).fill(ctx.token);
     await start.getByRole('button', { name: '수업 확인하기' }).click();
     await expect(start.locator('.studio-course')).toContainText('Studio · 내 업무로 AI 체험');
@@ -66,13 +69,54 @@ test('native trial: enter code, use real API, create and revise an actual work f
     expect(readFileSync(first, 'utf8')).toEqual(before);
     writeFileSync(join(output, 'handover-v2.md'), after);
     await ctx.win.screenshot({ path: join(output, 'revised.png') });
+    if(process.env.HPS_NATIVE_OBSERVATION==='1') {
+      const panel=chat.locator('.hps-native-observation');
+      await panel.locator('summary').first().click();
+      await panel.getByRole('button',{name:'이 작업의 기록 확인',exact:true}).click();
+      await expect(panel).toContainText('도움 사용 범위는 확인 전까지 미확인');
+      await panel.getByRole('checkbox').check();
+      await panel.getByRole('button',{name:'관찰 받기',exact:true}).click();
+      await expect(panel.locator('article')).toHaveCount(7,{timeout:70000});
+      await ctx.win.screenshot({path:join(output,'observation-results.png')});
+      writeFileSync(join(output,'observation-panel.txt'),await panel.innerText());
+      await expect(panel.getByRole('button',{name:'업무별 커리큘럼 살펴보기'})).toBeVisible();
+      await panel.getByRole('button',{name:'이 작업의 기록 확인',exact:true}).click();
+      await expect(panel.locator('article')).toHaveCount(7);
+      await panel.getByRole('textbox').fill('합성 실행 정정: 두 파일 비교는 코치가 수행했습니다. 사람이 독립적으로 검수했다고 볼 수 없습니다.');
+      await panel.getByRole('button',{name:'정정 기록 남기기'}).click();
+      await expect(panel).toContainText('합성 실행 정정');
+      await ctx.win.screenshot({path:join(output,'observations.png')});
+      const selected=JSON.parse(readFileSync(join(output,'observation-input.json'),'utf8'));
+      for(const kind of ['user','coach','tool_request','approval','tool_result','artifact','turn_end'])expect(selected.events.some((e:{kind:string})=>e.kind===kind)).toBe(true);
+      expect(selected.events.filter((e:{kind:string;actor:string})=>e.kind==='approval').every((e:{actor:string})=>e.actor==='policy')).toBe(true);
+      stopped=true;await approvals;
+      const savedDir=ctx.userDataDir;await ctx.app.close();
+      ctx=await launchApp({preseedToken:false,stayOnStart:true,preseedCoach:{name:'코치'},reuseUserDataDir:savedDir});
+      const entry=await startFrame(ctx.win);
+      // Test credentials intentionally use in-memory secret storage. Re-enter the
+      // same code after a real process restart, then inspect persisted workspaceState.
+      if(await entry.getByRole('button',{name:'다른 수업에 연결'}).isVisible().catch(()=>false))await entry.getByRole('button',{name:'다른 수업에 연결'}).click();
+      await entry.getByLabel('수업 참여 코드',{exact:true}).fill(ctx.token);
+      await entry.getByRole('button',{name:'수업 확인하기'}).click();
+      await expect(entry.locator('.studio-course')).toContainText('Studio · 내 업무로 AI 체험');
+      await entry.getByRole('button',{name:'수업 시작하기'}).click();
+      const reopened=await chatFrame(ctx.win),reloadedPanel=reopened.locator('.hps-native-observation');
+      await reloadedPanel.locator('summary').first().click();
+      await reloadedPanel.getByRole('button',{name:'이 작업의 기록 확인'}).click();
+      await expect(reloadedPanel).toContainText('합성 실행 정정');
+      await expect(reloadedPanel.locator('article')).toHaveCount(7);
+      expect(readFileSync(first,'utf8')).toEqual(before);
+      expect(readFileSync(second,'utf8')).toEqual(after);
+      await ctx.win.screenshot({path:join(output,'reloaded.png')});
+    }
     const api = JSON.parse(readFileSync(join(output, 'api-evidence.json'), 'utf8'));
     expect(api.calls.some((c: { status: number; path: string; request_id: string }) => c.status === 200 && c.path === '/v1/messages' && c.request_id)).toBe(true);
     writeFileSync(join(output, 'result.json'), JSON.stringify({
       entry: 'actual code entry', app: 'released shell with branch extension', upstream: 'real Anthropic',
       initial_file_created: true, revised_file_created: true, original_preserved: true,
-      human_asset_assessment: 'NOT IMPLEMENTED; synthetic driver behavior is not human learning evidence',
-      storage: 'synthetic in-memory bindings; no production cohort used',
+      human_asset_assessment: 'NOT_RUN; synthetic driver behavior is not human learning evidence',
+      observation: process.env.HPS_NATIVE_OBSERVATION==='1'?'PASS actual host records, real assessment, UI and correction':'NOT_RUN',
+      storage: process.env.HPS_NATIVE_MANAGED==='1'?'local SQLite grants and synthetic memory cohort bindings; no production state':'synthetic memory bindings; no production state',
     }, null, 2));
   } finally {
     stopped = true;

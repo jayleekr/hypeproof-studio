@@ -35,7 +35,7 @@ fi
 GATEWAY_PID=''
 cleanup() {
   if [[ -n "$GATEWAY_PID" ]]; then kill "$GATEWAY_PID" 2>/dev/null || true; wait "$GATEWAY_PID" 2>/dev/null || true; fi
-  rm -f "$NATIVE_TMP/token"
+  rm -f "$NATIVE_TMP/token" "$NATIVE_TMP/token.alternate"
   echo "Rehearsal copy and gateway log: $NATIVE_TMP"
 }
 trap cleanup EXIT
@@ -61,11 +61,17 @@ for (const file of ['dist/extension.js','webview-ui/dist/assets/index.js','webvi
   assert.equal(hash(process.env.HPS_APP_PATH+'/Contents/Resources/app/extensions/hypeproof-chat/'+file), hash('extensions/hypeproof-chat/'+file), 'stale rehearsal copy: '+file);
 }
 NODE
+# Explicit compatibility control: a preserved released app, never a baseline PASS.
+if [[ -n "${HPS_NATIVE_COMPAT_APP:-}" ]]; then
+  [[ "${HPS_NATIVE_FAULTS:-}" == 1 && "${HPS_NATIVE_CASE:-}" == old-client ]] || { echo 'compatibility app requires the old-client test' >&2; exit 2; }
+  export HPS_APP_PATH="$HPS_NATIVE_COMPAT_APP"
+fi
 export HPS_E2E_TOKEN_FILE="$NATIVE_TMP/token"
 export HPS_E2E_PROXY_URL='http://127.0.0.1:8787/v1'
 export HPS_NATIVE_LIVE=1
 export HPS_NATIVE_EVIDENCE_DIR="$ROOT/e2e/test-results/native-trial/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$HPS_NATIVE_EVIDENCE_DIR"
+node e2e/native-trial-manifest.mjs
 node --env-file=worker/.dev.vars --experimental-strip-types worker/test/native-trial-live-server.mjs > "$NATIVE_TMP/gateway.log" 2>&1 &
 GATEWAY_PID=$!
 ready=0

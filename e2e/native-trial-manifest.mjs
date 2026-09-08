@@ -1,0 +1,12 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {join} from 'node:path';
+const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
+const root=process.cwd(),app=process.env.HPS_APP_PATH;
+const product=JSON.parse(readFileSync(join(app,'Contents/Resources/app/product.json'),'utf8'));
+const names=execFileSync('git',['ls-files','-co','--exclude-standard','worker/src','docs/curriculum/studio-trial'],{encoding:'utf8'}).trim().split('\n').sort();
+const sourceHash=createHash('sha256');for(const name of [...new Set(names)])sourceHash.update(name+'\0').update(readFileSync(name));
+const extensionRoot=join(app,'Contents/Resources/app/extensions/hypeproof-chat');
+const bundles=Object.fromEntries(['dist/extension.js','webview-ui/dist/assets/index.js','webview-ui/dist/assets/index.css'].map(name=>[name,hash(readFileSync(join(extensionRoot,name)))]));
+writeFileSync(join(process.env.HPS_NATIVE_EVIDENCE_DIR,'environment.json'),JSON.stringify({at:new Date().toISOString(),code_sha:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),dirty:!!execFileSync('git',['status','--porcelain'],{encoding:'utf8'}).trim(),service_source_sha256:sourceHash.digest('hex'),app_version:product.version,app_source_sha:product.commit,extension_bundles_sha256:bundles,node:process.version,platform:process.platform,arch:process.arch,compatibility_control:!!process.env.HPS_NATIVE_COMPAT_APP,storage:'local test bindings; no production state'},null,2));

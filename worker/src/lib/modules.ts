@@ -139,8 +139,8 @@ import {
 } from "./harness-rules";
 
 export const MODULE_FORMAT = "hps-module/1";
-export type ModuleKind = "curriculum" | "session-design";
-export const MODULE_KINDS: readonly ModuleKind[] = ["curriculum", "session-design"];
+export type ModuleKind = "curriculum" | "session-design" | "observation-rubric";
+export const MODULE_KINDS: readonly ModuleKind[] = ["curriculum", "session-design", "observation-rubric"];
 
 /** `m2026.09.04-1` — the spec's m* prefix; `-n` disambiguates within a day. */
 export const MODULE_VERSION_RE = /^m\d{4}\.\d{2}\.\d{2}-\d{1,4}$/;

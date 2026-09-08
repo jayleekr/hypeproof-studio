@@ -132,7 +132,7 @@ export interface SdkCoachArgs {
   onCitations: (citations: Citation[]) => void;
   onAssetScore: (score: AssetScoreChunk) => void;
   /** Manual-approve gate. Resolves true to allow the tool. */
-  requestApproval: (action: CoachToolAction) => Promise<boolean>;
+  requestApproval: (action: CoachToolAction) => Promise<boolean | {approved: boolean; actor: 'user'|'policy'}>;
   /**
    * #282 P2 slice 2 — host capabilities behind the in-process "hypeproof" MCP
    * browser tools. Optional: when absent (or the profile doesn't grant
@@ -575,7 +575,10 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     // MCP server registration is conditional (see above); mcpServers stays
     // absent for ungranted cohorts, so the model never even sees the tools.
     ...(mcpServers ? { mcpServers } : {}),
-    canUseTool: async (name, input) => {
+    canUseTool: async (name, input, options) => {
+      const decision = (allowed: boolean, actor: 'user'|'policy' = 'policy') => {
+        args.onActivity?.({kind:'approval',id:options.toolUseID,name,input,allowed,actor,at:Date.now()});
+      };
       lastToolCallAt = Date.now();
       // 상대경로를 먼저 흡수한다. 벤더 SDK 의 파일 도구는 절대경로만 받으므로
       // (`sdk-tools.d.ts`: "must be absolute, not relative") `Read("agent.md")` 는
@@ -624,9 +627,11 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
         } else {
           console.warn(`[coach] tool denied: ${name} — ${verdict.reason}`);
         }
+        decision(false);
         return { behavior: "deny" as const, message: verdict.friendly };
       }
       if (verdict.decision === "allow") {
+        decision(true);
         return { behavior: "allow" as const, updatedInput: input };
       }
       // #415 — 이미 열려 있는 페이지를 다시 여는 browser_open 은 모달 없이
@@ -638,7 +643,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       if (name === MCP_BROWSER_OPEN && args.browserHost) {
         const { alreadyOpen } = await resolveAlreadyOpen(args.browserHost,
           (input as { url?: unknown } | undefined)?.url);
-        if (alreadyOpen) return { behavior: "allow" as const, updatedInput: input };
+        if (alreadyOpen) { decision(true); return { behavior: "allow" as const, updatedInput: input }; }
       }
       // #403 — the modal blocks the SDK stream for as long as the human takes
       // to decide. Mark the turn as human-blocked so the stall watchdog below
@@ -646,11 +651,13 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       awaitingUser += 1;
       let ok: boolean;
       try {
-        ok = await args.requestApproval({
+        const approval = await args.requestApproval({
           toolName: name,
           input,
           ...(verdict.destructive ? { destructive: true } : {}),
         });
+        ok = typeof approval === 'boolean' ? approval : approval.approved;
+        decision(ok, typeof approval === 'boolean' ? 'policy' : approval.actor);
       } finally {
         awaitingUser -= 1;
       }
@@ -708,13 +715,13 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
     ...(args.onActivity ? { onActivity: args.onActivity } : {}),
     ...(args.onUsage ? { onUsage: args.onUsage } : {}),
     stallMs,
-    makeStallError: () => {
+    makeStallError: (status) => {
       // Developer-side signal — the student only ever sees the Korean line.
       console.warn(
         `[coach] SDK stream stalled: no progress for ${stallMs}ms — aborting the turn (#403). ` +
           `Likely a gateway retry storm (429/529/5xx) or a first turn that never produced a token.`,
       );
-      return new CoachStallError(SDK_STALL_FRIENDLY);
+      return new CoachStallError(status===429?'요청 한도에 도달해 응답을 받지 못했습니다. 잠시 후 다시 시도하거나 강사에게 체험 한도를 확인해 주세요. (429)':status&&status>=500?'AI 서비스 오류로 응답을 받지 못했습니다. 작업 파일은 보존돼 있습니다. ('+status+')':SDK_STALL_FRIENDLY);
     },
     // Silence that is NOT a stall: an open modal, or a tool the SDK is still
     // running (one budget of slack after the decision — a long subagent gets
