@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import { localAuthoring } from './harness/dental-authoring.mjs';
 import { withMockUpstream } from './harness/index.mjs';
-const { MODEL_MAP } = await import('../src/profiles/types.ts');
+const { MODEL_MAP, ANTHROPIC_MODELS, modelIdFor } = await import('../src/profiles/types.ts');
 const { getProfile } = await import('../src/profiles/index.ts');
 const { modelBinding, lessonModelIsCurrent, applyLessonModel } = await import('../src/lib/lesson-model-policy.ts');
 const { resolveMessagesModel } = await import('../src/routes/messages.ts');
@@ -27,11 +27,12 @@ try {
   const cat=await request(base+'catalog/models/'+local.profileId);assert.equal(cat.status,200);assert.equal(cat.json.choices.length,2);
   assert.equal((await request(base+'catalog/models/missing')).status,403);
   for(const model of [
+    {default:'claude-sonnet-4-6',allowed:['claude-sonnet-4-6']},
+    {default:'claude-sonnet-5',allowed:['claude-sonnet-5']},
     {default:'hypeproof-strong',allowed:['hypeproof-strong']},
     {default:'hypeproof-default',allowed:['hypeproof-default','hypeproof-strong']},
   ])assert.equal((await request(base+'invalid','PUT',save(model))).status,403);
   for(const model of [
-    {default:'claude-sonnet-4-6',allowed:['claude-sonnet-4-6']},
     {default:'hypeproof-default',allowed:['hypeproof-fast']},
     {default:'hypeproof-default',allowed:['hypeproof-default'],binding:{}},
     {default:'hypeproof-default',allowed:['hypeproof-default','hypeproof-default']},
@@ -83,6 +84,31 @@ try {
       assert.equal((await request('/v1/profile','GET',undefined,token)).status,200);
     }
   }
+  const originalModel=profile.model;
+  try {
+    // The instructor may select versions only after the cohort has granted them.
+    profile.model={...profile.model,provider:'anthropic',allowed:['hypeproof-default','hypeproof-fast',...Object.keys(ANTHROPIC_MODELS).filter(x=>!['claude-sonnet-4-6','claude-haiku-4-5'].includes(x))]};
+    for(const runtime of ['proxy','agent-sdk']){
+      profile.coach_runtime=runtime;
+      const catalogue=await request(base+'versions/models/'+local.profileId);
+      assert.equal(catalogue.status,200);assert.equal(catalogue.json.choices.length,9);
+      const allowed=catalogue.json.choices.map(c=>c.alias),path=base+'expanded-'+runtime;
+      assert.equal((await request(path,'PUT',save({default:'claude-sonnet-5',allowed}))).status,200);
+      assert.equal((await request(path+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+      const invited=await request(path+'/versions/m2026.09.08-1/participants','POST',{user:'student',hours:1});
+      const endpoint=runtime==='proxy'?'/v1/chat/completions':'/v1/messages';
+      for(const key of allowed){
+        await withMockUpstream((_url,init)=>{
+          const sent=JSON.parse(init.body);assert.equal(sent.model,modelIdFor(key,'anthropic'));
+          return Response.json({id:'version-message',type:'message',role:'assistant',model:sent.model,content:[{type:'text',text:'민트플라워'}],stop_reason:'end_turn',usage:{input_tokens:3,output_tokens:2}});
+        },async()=>assert.equal((await request(endpoint,'POST',{model:key,max_tokens:32,messages:[{role:'user',content:'hello'}]},invited.json.token)).status,200));
+      }
+      // Instructor-fixed Sonnet 5 cannot be escalated to an Opus version by raw ID.
+      const fixed=applyLessonModel(profile,{default:'claude-sonnet-5',allowed:['claude-sonnet-5']});
+      assert.equal(resolveMessagesModel('claude-opus-5',fixed),'claude-sonnet-5');
+      assert.throws(()=>modelIdFor('claude-sonnet-5','gemini'),/unavailable/);
+    }
+  } finally {profile.model=originalModel;}
   assert.equal(resolveMessagesModel('hypeproof-fast',{...profile,model:{default:'hypeproof-default'}}),'claude-haiku-4-5','legacy fast exception preserved');
   console.log('PASS lesson model policy: scoped authoring, frozen bindings, actual routes with mock upstream, fixed/choice, runtime drift, legacy control');
 } finally {profile.coach_runtime=originalRuntime;local.close();}

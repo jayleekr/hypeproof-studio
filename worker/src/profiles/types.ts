@@ -36,8 +36,10 @@ export interface Profile {
    */
   minor_cohort?: boolean;
   model: {
-    default: ModelAlias;
-    fallback?: ModelAlias;
+    default: ModelKey;
+    fallback?: ModelKey;
+    /** Explicit, reviewed catalogue keys for this cohort. Omission preserves the legacy pair. */
+    allowed?: ModelKey[];
     /** Derived from a validated frozen lesson, never from client input. */
     lesson_locked?: boolean;
     /**
@@ -375,8 +377,25 @@ export const MODEL_MAP = {
   "hypeproof-strong":  "claude-opus-4-7",
 } as const satisfies Record<ModelAlias, string>;
 
-/** The Anthropic model ids this gateway can actually pin. */
-export type AnthropicModelId = (typeof MODEL_MAP)[ModelAlias];
+/** Reviewed version catalogue. Existing provider-neutral alias pins above stay unchanged.
+ * 2026-09-08: official model IDs + authenticated Models API; execution evidence in #792. */
+export const ANTHROPIC_MODELS = {
+  'claude-sonnet-5': 'Claude Sonnet 5',
+  'claude-sonnet-4-6': 'Claude Sonnet 4.6',
+  'claude-sonnet-4-5-20250929': 'Claude Sonnet 4.5',
+  'claude-opus-5': 'Claude Opus 5',
+  'claude-opus-4-8': 'Claude Opus 4.8',
+  'claude-opus-4-7': 'Claude Opus 4.7',
+  'claude-opus-4-6': 'Claude Opus 4.6',
+  'claude-opus-4-5-20251101': 'Claude Opus 4.5',
+  'claude-haiku-4-5': 'Claude Haiku 4.5',
+} as const;
+export type AnthropicModelId = keyof typeof ANTHROPIC_MODELS;
+export type ModelKey = ModelAlias | AnthropicModelId;
+
+export function permittedModelKeys(profile: Profile): ModelKey[] {
+  return [...new Set([profile.model.default, ...(profile.model.allowed ?? (profile.model.fallback ? [profile.model.fallback] : []))])];
+}
 
 // Gemini model ids (default provider). Same alias names so profiles are
 // provider-agnostic — the alias resolves per-provider at request time.
@@ -411,7 +430,12 @@ export const GLM_MODEL_MAP: Record<ModelAlias, string> = {
   "hypeproof-strong":  "glm-5.2",
 };
 
-export function modelIdFor(alias: ModelAlias, provider: LLMProvider): string {
+export function modelIdFor(key: ModelKey, provider: LLMProvider): string {
+  if (Object.hasOwn(ANTHROPIC_MODELS, key)) {
+    if (provider !== 'anthropic') throw new Error('model is unavailable for this provider');
+    return key;
+  }
+  const alias = key as ModelAlias;
   switch (provider) {
     case "gemini":    return GEMINI_MODEL_MAP[alias];
     case "openai":    return OPENAI_MODEL_MAP[alias];

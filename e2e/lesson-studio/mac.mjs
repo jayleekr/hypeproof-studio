@@ -89,7 +89,7 @@ if(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'){
  manifest.submitted_product_sha=process.env.HPS_LESSON_PRODUCT_SHA||null;
  manifest.live_model_requested=live;
  manifest.identity_runner_sha256=createHash('sha256').update(readFileSync(new URL('./identity.mjs',import.meta.url))).digest('hex');
- if(surfaces){
+ if(surfaces||models){
   manifest.surface_runner_sha256=createHash('sha256').update(readFileSync(new URL('./surfaces.mjs',import.meta.url))).digest('hex');
   manifest.sdk_unavailable_fixture=process.env.HPS_LESSON_SDK_UNAVAILABLE==='1';
   const sdk=process.env.HPS_APP_PATH.split('/Contents/MacOS/')[0]+'/Contents/Resources/app/extensions/hypeproof-chat/dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk';

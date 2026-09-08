@@ -48,7 +48,7 @@ import {
 import { callAnthropic, countTokensUrl } from "../lib/anthropic";
 import {nativeTrialSignal} from '../middleware/native-trial-budget';
 import type { AnthropicRequest } from "../lib/translate";
-import { MODEL_MAP, type ModelAlias, type Profile } from "../profiles/types";
+import { MODEL_MAP, modelIdFor, permittedModelKeys, type Profile } from "../profiles/types";
 // #687 — 모델 수용 표와 정리기는 순수 모듈로 뺐다(플레인 Node 로 테스트 가능해야 한다).
 import { MINOR_EFFORT, stripModelGatedParams } from "../lib/model-caps";
 import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../lib/chat-extract";
@@ -141,17 +141,16 @@ function decodeHeaderList(raw: string | null | undefined): string[] | undefined 
  *     resolveAlias on the /v1/chat path)
  */
 export function resolveMessagesModel(requested: unknown, profile: Profile): string {
-  const aliases: ModelAlias[] = [profile.model.default];
-  if (profile.model.fallback) aliases.push(profile.model.fallback);
+  const aliases = permittedModelKeys(profile);
   if (!profile.model.lesson_locked && !aliases.includes("hypeproof-fast")) aliases.push("hypeproof-fast");
 
   if (typeof requested === "string" && requested.length > 0) {
     for (const a of aliases) {
-      if (requested === a || requested === MODEL_MAP[a]) return MODEL_MAP[a];
+      if (requested === a || requested === modelIdFor(a, 'anthropic')) return modelIdFor(a, 'anthropic');
     }
     if (!profile.model.lesson_locked && /^claude-.*haiku/.test(requested)) return MODEL_MAP["hypeproof-fast"];
   }
-  return MODEL_MAP[profile.model.default];
+  return modelIdFor(profile.model.default, 'anthropic');
 }
 
 /**

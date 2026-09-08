@@ -37,6 +37,7 @@ type ModelCaps = {
   readonly thinkingShape: "budget" | "adaptive";
   /** Manual thinking support does not imply adaptive thinking support. */
   readonly adaptiveThinking: boolean;
+  readonly maxEffortWithoutThinking?: EffortLevel;
   /** DATED evidence for the two flags above. Non-empty + dated, enforced by the lock test. */
   readonly verifiedBy: string;
 };
@@ -82,6 +83,56 @@ const MODEL_CAPS: Record<AnthropicModelId, ModelCaps> = {
     adaptiveThinking: true,
     verifiedBy: "2026-09-03 docs: Opus 4.7 carries the full ladder incl. xhigh (introduced on 4.7).",
   },
+  "claude-opus-5": {
+    effort: ["low", "medium", "high", "xhigh", "max"],
+    contextManagement: false,
+    sampling: false,
+    thinkingShape: "adaptive",
+    adaptiveThinking: true,
+    maxEffortWithoutThinking: "high",
+    verifiedBy: "2026-09-08 official Models API capabilities; platform.claude.com/docs/en/models/opus-5/overview and build-with-claude/extended-thinking.",
+  },
+  "claude-sonnet-5": {
+    effort: ["low", "medium", "high", "xhigh", "max"],
+    contextManagement: false,
+    sampling: false,
+    thinkingShape: "adaptive",
+    adaptiveThinking: true,
+    verifiedBy: "2026-09-08 official Models API capabilities; platform.claude.com/docs/en/models/sonnet-5/overview and build-with-claude/extended-thinking.",
+  },
+  "claude-opus-4-8": {
+    effort: ["low", "medium", "high", "xhigh", "max"],
+    contextManagement: false,
+    sampling: false,
+    thinkingShape: "adaptive",
+    adaptiveThinking: true,
+    verifiedBy: "2026-09-08 official Models API capabilities; platform.claude.com/docs/en/models/opus-4-8/overview and build-with-claude/extended-thinking.",
+  },
+  "claude-opus-4-6": {
+    effort: ["low", "medium", "high", "max"],
+    contextManagement: false,
+    sampling: true,
+    thinkingShape: "budget",
+    adaptiveThinking: true,
+    verifiedBy: "2026-09-08 official Models API capabilities; platform.claude.com/docs/en/models/opus-4-6/overview and build-with-claude/extended-thinking.",
+  },
+  "claude-opus-4-5-20251101": {
+    effort: ["low", "medium", "high"],
+    contextManagement: false,
+    sampling: true,
+    thinkingShape: "budget",
+    adaptiveThinking: false,
+    verifiedBy: "2026-09-08 official Models API capabilities; platform.claude.com/docs/en/models/opus-4-5/overview and build-with-claude/extended-thinking.",
+  },
+  "claude-sonnet-4-5-20250929": {
+    effort: [],
+    contextManagement: false,
+    sampling: true,
+    thinkingShape: "budget",
+    adaptiveThinking: false,
+    verifiedBy: "2026-09-08 official Models API capabilities; platform.claude.com/docs/en/models/sonnet-4-5/overview and build-with-claude/extended-thinking.",
+  },
+
 };
 
 /** Highest level at or below `requested` that the model accepts, else undefined. */
@@ -113,7 +164,9 @@ export function stripModelGatedParams(
   resolvedModel: string,
 ): { body: Record<string, unknown>; dropped: string[] } {
   const caps = (MODEL_CAPS as Record<string, ModelCaps | undefined>)[resolvedModel];
-  const allowedEffort = caps?.effort ?? [];
+  const requestedThinking = body.thinking as { type?: string } | undefined;
+  const ceiling = requestedThinking?.type === 'disabled' ? caps?.maxEffortWithoutThinking : undefined;
+  const allowedEffort = (caps?.effort ?? []).filter(e => !ceiling || EFFORT_LADDER.indexOf(e) <= EFFORT_LADDER.indexOf(ceiling));
   const dropped: string[] = [];
   let out = body;
   const mutate = () => {
