@@ -41,11 +41,11 @@ export function StartPage() {
       </section>
       <section className="studio-connect" aria-labelledby="connect-title" aria-busy={state.checking}>
         <div className="studio-card-top"><span className="studio-step">GET STARTED</span><span className="studio-dot"/></div>
-        <h2 id="connect-title">{state.profile && !editing ? "이 수업으로 시작할까요?" : "내 수업에 연결하기"}</h2>
-        <p className="studio-card-description">{state.profile && !editing ? "수업과 코치를 확인한 뒤 작업을 시작하세요." : "강사에게 받은 참여 코드를 붙여넣으세요. 연결할 수업을 먼저 확인할 수 있습니다."}</p>
+        <h2 id="connect-title">{state.profile && !editing ? (state.started ? "코치와 작업을 시작하세요" : "이 수업으로 시작할까요?") : "내 수업에 연결하기"}</h2>
+        <p className="studio-card-description">{state.profile && !editing ? (state.started ? "코치 채팅을 열었습니다. 채팅 입력창에 만들고 싶은 것을 적어주세요." : "수업과 코치를 확인한 뒤 작업을 시작하세요.") : "강사에게 받은 참여 코드를 붙여넣으세요. 연결할 수업을 먼저 확인할 수 있습니다."}</p>
         {state.profile && !editing ? <>
           <div className="studio-course"><span className="studio-verified">연결된 수업</span><h3>{state.profile.name}</h3><dl><div><dt>코치</dt><dd>{state.profile.coach}</dd></div><div><dt>회차</dt><dd>{state.profile.series}</dd></div><div><dt>수업 작업 폴더</dt><dd>{state.profile.workspace}</dd></div></dl></div>
-          <button className="studio-primary" disabled={state.checking} onClick={() => postToHost({ type: "beginCourse" })}>수업 시작하기 <span aria-hidden="true">↗</span></button>
+          <button className="studio-primary" disabled={state.checking} onClick={() => { setState(s => ({ ...s, checking: true, error: undefined })); postToHost({ type: "beginCourse" }); }}>{state.checking ? "수업 여는 중…" : state.started ? "코치와 계속 작업하기" : "수업 시작하기"} <span aria-hidden="true">↗</span></button>
           <div className="studio-course-actions"><button className="studio-text-button" onClick={() => setEditing(true)} disabled={state.checking}>다른 수업에 연결</button><button className="studio-text-button" onClick={() => postToHost({ type: "disconnectCourse" })} disabled={state.checking}>연결 해제</button></div>
         </> : <form onSubmit={connect}>
           <label htmlFor="course-code">수업 참여 코드</label>

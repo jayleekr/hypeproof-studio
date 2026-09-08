@@ -121,3 +121,7 @@ const errBody = (code, type = "auth") =>
 }
 
 console.log("profile-failure.smoke.mjs — all assertions passed");
+
+assert.match(classifyProfileFailure(403,errBody('trial_expired')).friendly,/개인 체험 시간이 끝/);
+assert.equal(classifyProfileFailure(403,errBody('not_in_roster')).reason,'forbidden');
+assert.doesNotMatch(classifyProfileFailure(403,errBody('not_in_roster')).friendly,/시간이 끝/);

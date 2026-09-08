@@ -29,3 +29,23 @@ console.log('PASS start-page host: 401/403/network/malformed preserve prior toke
 await page.handle({type:"disconnectCourse"});assert.equal(stored,undefined);assert.equal(states.at(-1).state.profile,undefined);assert.equal(chat.changing,false);
 
 await page.handle({type:"openStudioFiles"});await page.handle({type:"openStudioSettings"});assert.deepEqual(commands,["workbench.view.explorer","workbench.action.openSettings"]);
+
+// Start revalidates cached cards and never enters after expiration.
+stored='valid-again'; let freshCalls=0, mode='expired', release;
+chat.ensureProfile=async force=>{if(!force)return profile;freshCalls++;if(mode==='waiting')await new Promise(r=>release=r);if(mode==='throw')throw Error('offline');return mode==='expired'?null:profile;};
+chat.profileFailure=()=>({friendly:'개인 체험 시간이 끝났습니다.'});
+const before=commands.length;
+await page.handle({type:'beginCourse'});
+assert.equal(freshCalls,1);assert.equal(commands.length,before);
+assert.equal(states.at(-1).state.profile,undefined);assert.match(states.at(-1).state.error,/시간이 끝/);
+assert.equal(stored,'valid-again');assert.equal(chat.changing,false);
+mode='waiting';const pending=page.handle({type:'beginCourse'});
+while(!release)await new Promise(r=>setTimeout(r,0));
+assert.equal(states.at(-1).state.checking,true);
+await page.handle({type:'beginCourse'});assert.equal(freshCalls,2,'duplicate start ignored');
+release();await pending;
+assert.deepEqual(commands.slice(before),['workbench.view.extension.hypeproof-chat','hypeproof-chat.panel.focus']);
+assert.equal(states.at(-1).state.started,true);assert.equal(states.at(-1).state.checking,false);
+mode='throw';await page.handle({type:'beginCourse'});
+assert.equal(states.at(-1).state.started,false);assert.equal(states.at(-1).state.checking,false);assert.match(states.at(-1).state.error,/열지 못/);assert.equal(stored,'valid-again');
+console.log('PASS start revalidation: expired cache blocked, duplicate ignored, success acknowledged, errors surfaced, credential retained');
