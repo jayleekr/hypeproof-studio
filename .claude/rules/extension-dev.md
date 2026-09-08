@@ -29,7 +29,7 @@ extensions/hypeproof-chat/
 
 ## Proxy contract
 
-Webview talks to the local HypeProof Proxy (`proxy-poc/proxy.py`). Endpoint is OpenAI-compatible (`/v1/chat/completions`, SSE streaming). Workshop token is supplied via the UI and stored in `secrets` (VS Code SecretStorage API) — never in plaintext settings.
+Webview talks to the Service (`worker/`, deployed at api.hypeproof-ai.xyz); `proxy-poc/` is the retired PoC. Endpoint is OpenAI-compatible (`/v1/chat/completions`, SSE streaming). Workshop token is supplied via the UI and stored in `secrets` (VS Code SecretStorage API) — never in plaintext settings.
 
 ## Things to avoid
 

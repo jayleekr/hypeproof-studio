@@ -60,7 +60,13 @@ export const profile: Profile = {
   version: 1,
   display_name: "...",
   audience: { age_range: [..], language: "ko"|"en", parent_coaching: bool },
-  model: { default: "hypeproof-fast"|"default"|"strong", fallback: ... },
+  model: {
+    default: "hypeproof-fast"|"hypeproof-default"|"hypeproof-strong",
+    fallback: same union (optional),
+    provider: "gemini"|"anthropic"|"openai"|"glm" (optional — pins the upstream for
+              /v1/chat/completions only; /v1/messages is always Anthropic),
+    max_tokens: 1..16384 (optional — what keeps long HTML answers from truncating),
+  },
   system_prompt: systemPromptMd as unknown as string,
   welcome: { greeting_md: "...", example_prompts: [...] },
   sandbox: {
@@ -169,7 +175,8 @@ HPS_SIGNING_SECRET=<secret> node --experimental-strip-types worker/scripts/issue
 ### Mastery week (s3)
 - `assets_focus: ["verification_reflex", "delegation_judgment", "taste"]`
 - mcp_tools_enabled: 일부 허용 (file_write 등)
-- "다중 모델" — 다른 model alias 활용 유도
+- "다중 모델" — **미구현.** 현재 clamp 는 프로필의 default·fallback 두 alias 만 받고
+  학생용 선택 UI 도 없다. 수업별 모델 정책은 E7(#755)/[ADR-0006](adr/0006-lesson-model-policy.md)
 - retry counter 강조 ("이번이 7번째 도전!")
 
 ### Transcendence week (s4)

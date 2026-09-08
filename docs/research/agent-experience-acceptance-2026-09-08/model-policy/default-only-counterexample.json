@@ -1,0 +1,33 @@
+{
+  "at": "2026-09-08T17:04:24.397Z",
+  "source_sha": "5eb3f7f6b4a1018190ca8268138338809efff689",
+  "dirty": false,
+  "source_file": "worker/src/routes/messages.ts",
+  "source_file_sha256": "093bfbb3eb7ab335b4ff4f25f25fa4fdc2750c7625cf7c8c0dae1973e01a9055",
+  "scope": "existing pure resolver; no Service auth/frozen lesson/provider request",
+  "profile": {
+    "model": {
+      "default": "hypeproof-default"
+    }
+  },
+  "results": [
+    {
+      "requested": "hypeproof-default",
+      "served": "claude-sonnet-4-6"
+    },
+    {
+      "requested": "hypeproof-fast",
+      "served": "claude-haiku-4-5"
+    },
+    {
+      "requested": "claude-any-haiku-example",
+      "served": "claude-haiku-4-5"
+    },
+    {
+      "requested": "hypeproof-strong",
+      "served": "claude-sonnet-4-6"
+    }
+  ],
+  "probe": "PASS counterexample reproduced",
+  "strict_single_model_contract": "NOT_ENFORCED by the existing resolver; fast requests have no trusted auxiliary-purpose check"
+}

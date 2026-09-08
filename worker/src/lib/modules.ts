@@ -311,7 +311,8 @@ export async function validateModuleDoc(raw: unknown, expect: ValidateExpect): P
       if (violated) return bad(violated);
     }
   }
-  // "session-design" has no consumer in this worker yet; envelope-only.
+  // "session-design" is envelope-only HERE; lib/lesson-delivery.ts validates its
+  // content with validateSessionDesign on every read.
 
   return { ok: true, doc: raw as unknown as ModuleDoc };
 }

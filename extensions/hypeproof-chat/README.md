@@ -31,7 +31,7 @@ See [.claude/rules/extension-dev.md](../../.claude/rules/extension-dev.md) for t
 ## Settings
 
 - `hypeproofChat.proxyUrl` — base URL of HypeProof Proxy (default `http://localhost:8787/v1`)
-- `hypeproofChat.model` — model id passed through
+- `hypeproofChat.model` — requested model alias; the Service clamps it to the cohort or lesson's allowed set (ADR-0006)
 - `hypeproofChat.requireApprovalFor` — list of action kinds that show a modal before executing
 
 ## Workshop token

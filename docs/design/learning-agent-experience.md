@@ -411,6 +411,16 @@ Computer Use를 “SDK 기능 켜기”로 처리하지 않는다. 제공자가 
 | [native trial 실행 기록](https://github.com/jayleekr/hypeproof-studio/blob/7f41c104d9201765a14d8030cca787b612d04794/docs/testing/studio-native-trial-results-2026-09-08.md) | 실제 Mac·모델·관찰 흐름과 개인 이용 한도에 대한 별도 증거 | 학급 예산·수업 전이·사람의 학습 효과. 체험 검증을 AE 테스트 PASS로 복사하지 않음 |
 | [classroom sharing](../requirements/classroom-admin.md) | 명시적 공유·수신자·감사·철회·학생 해결 확인 | Studio 작업과 원래 실행 근거 연결. 메타데이터 권한으로 원문을 열지 않음 |
 
+2026-09-08의 후속 구현 검수는 원 연구와 구분해 보존한다. [기능 B 실제 앱 기록](../research/agent-experience-acceptance-2026-09-08/feature-b/README.md)은
+긴 이름·좁은 패널·200% 확대·복구 안내의 실패와 수정을 보여 준다. 강사 설정은 문장/버튼/접근성
+이름까지 검수해야 하는 입력이다. [입력창의 실제 접근성 트리](../research/agent-experience-acceptance-2026-09-08/composer/README.md)는
+그중 이름 전달만 검증하며 스크린리더 발화나 전체 접근성의 증거는 아니다.
+같은 기록에서 답변 완료를 파일 변경 성공으로 표시하는 별도 결함도 확인했다.
+상태는 실제 효과를 설명하고, 사용자에게 해당 응답의 실제 모델을 확인할 수단을 제공해야 한다.
+[E7의 순수 resolver 반례와 인수 경계](../testing/learning-agent-experience.md)는
+기존 SDK fast 예외 때문에 수업의 선언만으로 엄격한 모델 제한이 성립하지 않음을 보여 준다.
+이 관찰을 설계에 반영하되, 모델 선택/정책 구현이나 사람의 학습 효과 완료로 바꾸지 않는다.
+
 새 통합의 외부 계약은 기존 resolved profile의 **수업 실행 binding** 한 곳으로 모은다.
 session-design/1은 현재 정확한 필드만 허용한다. 임의 capability 필드를 넣지 말고,
 새 schema revision과 구버전 소비자 처리·drift lock을 먼저 정의한다. 내부 상태/DB 선택은

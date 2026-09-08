@@ -72,7 +72,7 @@ ENVIRONMENT = "production"
 # empty string (task C negative control; #206 is the app-side precedent).
 # Do NOT fold this into scripts/resolve-version.sh — that resolves the App
 # version (v* train, separate release cadence). See task C in dag.yaml.
-# Switchable upstream LLM (see resolveProvider in src/env.ts). 3-way peer —
+# Switchable upstream LLM (see resolveProvider in src/env.ts). 4-way peer —
 # NOT runtime fallback. Default = "gemini" when GEMINI_API_KEY is set.
 # Set to "anthropic" or "openai" (with their key) to switch.
 LLM_PROVIDER = "anthropic"
