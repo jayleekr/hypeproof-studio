@@ -1,0 +1,123 @@
+{
+  "status": "PASS_EXECUTED_CASES",
+  "scope": "actual Mac app + local Service/SQLite; synthetic lessons",
+  "checks": [
+    {
+      "id": "A1",
+      "status": "PASS",
+      "frozen_name": "제작 파트너",
+      "draft_name": "초안에서만 바꾼 이름",
+      "lesson": {
+        "course_id": "identity-a",
+        "version": "m2026.09.08-1",
+        "sha256": "6bebe4ca2a46d92c69d77d1f7f78bf7fd711f50c35e6a0238ee422898d00e926",
+        "content": {
+          "schema": "hps-session-design/1",
+          "title": "합성 홈페이지 강의",
+          "audience": "성인 합성 사용자",
+          "duration_minutes": 60,
+          "objective": "화면을 검수하고 수정 이유를 설명한다",
+          "prerequisites": "",
+          "starter": "빈 연습 폴더",
+          "steps": [
+            {
+              "id": "create",
+              "title": "홈페이지 첫 화면",
+              "instructions": "가상 꽃집 홈페이지를 만들어 주세요.",
+              "hint": "영업시간을 구분하세요.",
+              "acceptance": "390px와 1280px에서 확인"
+            }
+          ],
+          "assistant": {
+            "display_name": "제작 파트너"
+          }
+        }
+      },
+      "authoring": "Service API; browser authoring is a separate run"
+    },
+    {
+      "id": "A2-header",
+      "status": "PASS",
+      "name": "제작 파트너",
+      "stored_alias": "연습 코치",
+      "fixed_title": true
+    },
+    {
+      "id": "A3-b-2",
+      "status": "PASS",
+      "name": "검토 도우미",
+      "model_tools_unchanged": true
+    },
+    {
+      "id": "A3-a-3",
+      "status": "PASS",
+      "name": "제작 파트너",
+      "model_tools_unchanged": true
+    },
+    {
+      "id": "A3-a-4",
+      "status": "PASS",
+      "name": "제작 파트너",
+      "model_tools_unchanged": true
+    },
+    {
+      "id": "A5-text",
+      "status": "PASS",
+      "literal": "<b>제작</b> & \"파트너\""
+    },
+    {
+      "id": "A5-width-390",
+      "status": "PASS",
+      "width": 390,
+      "document_width": 390,
+      "name": "긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름끝",
+      "title": "이 수업의 AI 이름: 긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름끝",
+      "name_width": 201.625,
+      "actions_right": 378,
+      "overlap": false,
+      "ellipsized": true,
+      "overflow_elements": []
+    },
+    {
+      "id": "A5-width-1280",
+      "status": "PASS",
+      "width": 1280,
+      "document_width": 1280,
+      "name": "긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름끝",
+      "title": "이 수업의 AI 이름: 긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름끝",
+      "name_width": 1091.625,
+      "actions_right": 1268,
+      "overlap": false,
+      "ellipsized": false,
+      "overflow_elements": []
+    },
+    {
+      "id": "A5-zoom-keyboard",
+      "status": "PASS",
+      "zoom": 2,
+      "focus": {
+        "tag": "BUTTON",
+        "text": "대화 지우기",
+        "visible": true
+      },
+      "full_name_keyboard_access": "NOT VERIFIED; header is a non-focusable strong element"
+    },
+    {
+      "id": "A4-legacy",
+      "status": "PASS",
+      "name": "코치",
+      "width": 679,
+      "document_width": 679
+    }
+  ],
+  "failures": [],
+  "not_run": [
+    "history identity at time of execution",
+    "all AI naming surfaces",
+    "screen reader",
+    "Windows",
+    "actual answer",
+    "failure and Stop"
+  ],
+  "visual_review": "PENDING separate screenshot inspection"
+}

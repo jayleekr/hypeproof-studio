@@ -1,0 +1,59 @@
+{
+  "real_upstream": true,
+  "calls": [
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerLcnfQ3hRUzWfYpd1y4"
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerLcngtBYUkCkjxBU3wY"
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerLd95j8ezZfcG3emwLd"
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerLdPcbNXjG1RCn2iyRm"
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerLdPQwHxiNcpfmbo1hk"
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerLdck873yLBaH3q3tTB"
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerLdtm2uqes3hNtPc6Wb"
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerLdtad9T4HKN8rfYD3W"
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerLe5kabzHa9wXPtXgJg"
+    }
+  ]
+}
