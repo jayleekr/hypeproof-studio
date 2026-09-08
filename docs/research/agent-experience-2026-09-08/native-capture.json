@@ -1,0 +1,38 @@
+[
+  {
+    "product": "HypeProof Studio",
+    "version": "0.1.51",
+    "commit": "d4db90498fce6c337823a4ce73cbe79c5e688b05",
+    "capturedAt": "2026-09-08T06:14:58.179Z",
+    "image": "studio-installed-entry.png",
+    "scope": "Installed macOS app; isolated empty account; no authenticated agent turn",
+    "viewport": {
+      "width": 1440,
+      "height": 944
+    },
+    "visibleText": "HypeProof Studio — comparison-project\nHypeProof Studio",
+    "sha256": "bba215365538bb728917e32e041580d67955d03bc94b4ef1007a7245ff0dacdf",
+    "imagePixels": {
+      "width": 2880,
+      "height": 1888
+    }
+  },
+  {
+    "product": "Cursor",
+    "version": "3.19.13",
+    "commit": "dd066f332fcea7382764400fde902f61920648d0",
+    "capturedAt": "2026-09-08T06:15:11.409Z",
+    "image": "cursor-installed-entry.png",
+    "scope": "Installed macOS app; isolated empty account; no authenticated agent turn",
+    "viewport": {
+      "width": 1000,
+      "height": 800
+    },
+    "visibleText": "comparison-project\nUpgrade to Pro\nNew Agent\n⇧\n⌘\nL\nShow Terminal\n⌘\nJ\nShow Files\n⇧\n⌘\nE\nSearch Files\n⌘\nP\nOpen Browser\n⇧\n⌘\nB\nMaximize Chat\n⌥\n⌘\nE\nAdd Folder\n⌥\n⌘\nA\nNew Agent\n\n\n\n\nPlan, search, build anything\nLog in\n⏎\nNew Agent\n⌘N\nCustomize\n No commit scored\n Agent Stats: 0/0 (0%)\n Tab Stats: 0/0 (0%)\nCursor\nThe best way to code with AI\nLog In\nSign Up\nCursor’s AI features require you to be logged in",
+    "sha256": "1b83433f8e3edd1c99f34cc4b950ecd67bf9ed997f43577c5aac38e42957c4d6",
+    "imagePixels": {
+      "width": 2000,
+      "height": 1600
+    }
+  }
+]

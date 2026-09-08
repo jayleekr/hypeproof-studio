@@ -1,0 +1,92 @@
+[
+  {
+    "id": "cursor-models-docs",
+    "file": "cursor-models-docs.png",
+    "capturedAt": "2026-09-08T12:29:50.109Z",
+    "kind": "official-page",
+    "requestedUrl": "https://cursor.com/help/models-and-usage/available-models",
+    "resolvedUrl": "https://cursor.com/help/models-and-usage/available-models",
+    "httpStatus": 200,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "scope": "Official documentation, not our authenticated product execution",
+    "sha256": "3a551a2a42b5e5e0837747271a8e0c6207621b5e581455fd27bc6b05f02958c0"
+  },
+  {
+    "id": "cursor-router-docs",
+    "file": "cursor-router-docs.png",
+    "capturedAt": "2026-09-08T12:29:51.763Z",
+    "kind": "official-page",
+    "requestedUrl": "https://cursor.com/help/models-and-usage/cursor-router",
+    "resolvedUrl": "https://cursor.com/help/models-and-usage/cursor-router",
+    "httpStatus": 200,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "scope": "Official documentation, not our authenticated product execution",
+    "sha256": "6509d831c66befc54f0f8b5e7d769ec8382b8f9894413618558eb4f9d84bdb8e"
+  },
+  {
+    "id": "vscode-models-docs",
+    "file": "vscode-models-docs.png",
+    "capturedAt": "2026-09-08T12:29:53.758Z",
+    "kind": "official-page",
+    "requestedUrl": "https://code.visualstudio.com/docs/agent-customization/language-models",
+    "resolvedUrl": "https://code.visualstudio.com/docs/agent-customization/language-models",
+    "httpStatus": 200,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "scope": "Official documentation, not our authenticated product execution",
+    "sha256": "af5c845ca76347bcbd05de9bbc12b57832276148de396157c9c7536141cc7f04"
+  },
+  {
+    "id": "vscode-model-picker-vendor",
+    "file": "vscode-model-picker-vendor.png",
+    "capturedAt": "2026-09-08T12:29:54.137Z",
+    "kind": "vendor-illustration",
+    "sourcePage": "https://code.visualstudio.com/docs/agent-customization/language-models",
+    "imageUrl": "https://code.visualstudio.com/assets/docs/agent-customization/language-models/model-dropdown-change-model-v2.png",
+    "alt": "Screenshot that shows the model picker in the Chat view.",
+    "originalPixels": {
+      "width": 939,
+      "height": 526
+    },
+    "scope": "Screenshot of an official vendor illustration; not our authenticated agent session",
+    "sha256": "ee68c5d953063e382f889f3237ab84f5e1b91dc113c341b9c54dd326c43143a5"
+  },
+  {
+    "id": "cascade-arena-docs",
+    "file": "cascade-arena-docs.png",
+    "capturedAt": "2026-09-08T12:29:55.552Z",
+    "kind": "official-page",
+    "requestedUrl": "https://docs.devin.ai/desktop/cascade/arena",
+    "resolvedUrl": "https://docs.devin.ai/desktop/cascade/arena",
+    "httpStatus": 200,
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "scope": "Official documentation, not our authenticated product execution",
+    "sha256": "f737afae3de372394591cb2aa73840f140d1dd95f4faff98bc23ad836327040e"
+  },
+  {
+    "id": "cascade-arena-vendor",
+    "file": "cascade-arena-vendor.png",
+    "capturedAt": "2026-09-08T12:29:55.750Z",
+    "kind": "vendor-illustration",
+    "sourcePage": "https://docs.devin.ai/desktop/cascade/arena",
+    "imageUrl": "https://mintcdn.com/cognitionai/hxeMffzXgF_RWx-U/desktop/assets/windsurf/cascade/proceed.png?w=1100&fit=max&auto=format&n=hxeMffzXgF_RWx-U&q=85&s=e9bf3f89c820477e60c22eaf773c44d3",
+    "alt": "",
+    "originalPixels": {
+      "width": 1024,
+      "height": 212
+    },
+    "scope": "Screenshot of an official vendor illustration; not our authenticated agent session",
+    "sha256": "e718ff6583d4b61131759a0a86e8ae822f9e4d47bae31b17618a5ce4474358a4"
+  }
+]
