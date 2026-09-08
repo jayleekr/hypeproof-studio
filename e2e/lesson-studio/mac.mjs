@@ -2,19 +2,23 @@
 // Synthetic only; no model completion is claimed by this navigation check.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {mkdtempSync,mkdirSync,writeFileSync,realpathSync,readFileSync,unlinkSync} from 'node:fs';
 import {tmpdir} from 'node:os';
-import {resolve} from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {resolve,dirname} from 'node:path';
+import {pathToFileURL,fileURLToPath} from 'node:url';
 import {_electron as electron} from '@playwright/test';
 import {localAuthoring} from '../../worker/test/harness/dental-authoring.mjs';
+const sourceRoot=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
+const sourceSha=execFileSync('git',['rev-parse','HEAD'],{cwd:sourceRoot,encoding:'utf8'}).trim();
+if(process.env.HPS_LESSON_EXPECT_SHA)assert.equal(sourceSha,process.env.HPS_LESSON_EXPECT_SHA,'candidate SHA differs from the handoff');
 if(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'){
  const appRoot=process.env.HPS_APP_PATH.split('/Contents/MacOS/')[0];
  for(const file of ['dist/extension.js','webview-ui/dist/assets/index.js','webview-ui/dist/assets/index.css']){
   const hash=p=>createHash('sha256').update(readFileSync(p)).digest('hex');
-  assert.equal(hash(appRoot+'/Contents/Resources/app/extensions/hypeproof-chat/'+file),hash(resolve('../extensions/hypeproof-chat/'+file)),'test app must contain the current '+file);
+  assert.equal(hash(appRoot+'/Contents/Resources/app/extensions/hypeproof-chat/'+file),hash(resolve(sourceRoot,'extensions/hypeproof-chat/'+file)),'test app must contain the current '+file);
  }
 }
 const local=await localAuthoring({profileId:'homepage-practice-s1'});
@@ -28,14 +32,25 @@ await call(base+'/versions/m2026.09.07-1','PUT',{expected_revision:1});
 const invite=await call(base+'/versions/m2026.09.07-1/participants','POST',{user:'synthetic-lesson-student',hours:1});
 const server=createServer(async(req,res)=>{try{const chunks=[];for await(const x of req)chunks.push(x);const body=Buffer.concat(chunks);const r=await local.fetcher(local.origin+req.url,{method:req.method,headers:req.headers,body:body.length?body:undefined});res.writeHead(r.status,Object.fromEntries(r.headers));res.end(Buffer.from(await r.arrayBuffer()));}catch{res.writeHead(500).end();}});
 let app;const sockets=[];
-const out=resolve('test-results/lesson-studio');mkdirSync(out,{recursive:true});
+const out=resolve(process.env.HPS_LESSON_EVIDENCE_DIR||'test-results/lesson-studio');mkdirSync(out,{recursive:true});
+// Reuse the existing native manifest; the source checkout can differ from the
+// primary launch cwd, but the loaded extension must match it above.
+if(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'){
+ execFileSync(process.execPath,[resolve(sourceRoot,'e2e/native-trial-manifest.mjs')],{cwd:sourceRoot,env:{...process.env,HPS_APP_PATH:process.env.HPS_APP_PATH.split('/Contents/MacOS/')[0],HPS_NATIVE_EVIDENCE_DIR:out}});
+ const manifest=JSON.parse(readFileSync(out+'/environment.json','utf8'));
+ manifest.execution_cwd=process.cwd();
+ manifest.lesson_contract_sha256=createHash('sha256').update(readFileSync(resolve(sourceRoot,'worker/src/lib/session-design.ts'))).digest('hex');
+ manifest.runner_sha256=createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex');
+ manifest.expected_candidate_sha=process.env.HPS_LESSON_EXPECT_SHA||null;
+ writeFileSync(out+'/environment.json',JSON.stringify(manifest,null,2));
+}
 const userDir=realpathSync(mkdtempSync(tmpdir()+'/hps-lesson-'));mkdirSync(userDir+'/User');mkdirSync(userDir+'/ws');
 try{
  server.listen(0,'127.0.0.1');await once(server,'listening');
  const proxy='http://127.0.0.1:'+server.address().port+'/v1';
  writeFileSync(userDir+'/User/settings.json',JSON.stringify({'hypeproofChat.proxyUrl':proxy,'window.dialogStyle':'custom','workbench.startupEditor':'none','update.mode':'none','telemetry.telemetryLevel':'off'}));
  writeFileSync(userDir+'/User/hps-test-state.json',JSON.stringify({token:invite.token,coach:{name:'연습 코치',personality:''}}),{mode:0o600});
- app=await electron.launch({executablePath:process.env.HPS_APP_PATH||'/Applications/HypeProof Studio.app/Contents/MacOS/HypeProof Studio',args:['--user-data-dir='+userDir,'--extensions-dir='+userDir+'/extensions',...(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'?[]:['--extensionDevelopmentPath='+resolve('../extensions/hypeproof-chat')]),'--disable-workspace-trust','--use-inmemory-secretstorage','--disable-updates','--skip-welcome','--skip-release-notes','--remote-debugging-port=9347','--folder-uri',pathToFileURL(userDir+'/ws').href],env:{...process.env,HPS_TEST_E2E:'1'},timeout:30000});
+ app=await electron.launch({executablePath:process.env.HPS_APP_PATH||'/Applications/HypeProof Studio.app/Contents/MacOS/HypeProof Studio',args:['--user-data-dir='+userDir,'--extensions-dir='+userDir+'/extensions',...(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'?[]:['--extensionDevelopmentPath='+resolve(sourceRoot,'extensions/hypeproof-chat')]),'--disable-workspace-trust','--use-inmemory-secretstorage','--disable-updates','--skip-welcome','--skip-release-notes','--remote-debugging-port=9347','--folder-uri',pathToFileURL(userDir+'/ws').href],env:{...process.env,HPS_TEST_E2E:'1'},timeout:30000});
  const window=await app.firstWindow();await window.waitForTimeout(5000);
  // Reuse observe's direct OOPIF/CDP approach; inspect every current frame.
  async function targets(){return (await (await fetch('http://127.0.0.1:9347/json/list')).json()).filter(x=>x.type==='iframe'&&x.url.includes('hypeproof-chat'));}
