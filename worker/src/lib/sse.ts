@@ -1,3 +1,5 @@
+import { measureUsage } from './model-usage';
+import type { LLMProvider } from '../env';
 // SSE forwarding: Anthropic's stream → OpenAI-format stream.
 //
 // We can't proxy raw bytes — Anthropic's events use a different JSON shape
@@ -21,7 +23,9 @@ interface ToolAccum {
 }
 
 export interface StreamTransformOptions {
+  usageProvider?: LLMProvider;
   onTextDelta?: (delta: string) => void;
+  onUsageReport?: (raw: Record<string, unknown>, model?: string) => void;
   onBeforeDone?: () => unknown | null | undefined;
   // #257 — correlates the sanitized client-facing stream_error with the full
   // server-side log line. Raw error prose never enters the SSE stream.
@@ -164,8 +168,14 @@ export function passThroughOpenAIStream(
         if (typeof delta === "string" && delta.length > 0) options.onTextDelta?.(delta);
         const u = ev?.usage;
         if (u) {
+          options.onUsageReport?.(u, modelSeen);
           if (typeof u.prompt_tokens === "number") usage.input_tokens = u.prompt_tokens;
           if (typeof u.completion_tokens === "number") usage.output_tokens = u.completion_tokens;
+          if (options.usageProvider) {
+            const m = measureUsage(options.usageProvider,u);
+            usage.input_tokens = m.tokens_in ?? 0; usage.output_tokens = m.tokens_out ?? 0;
+            usage.cache_read_input_tokens = m.cache_read ?? 0; usage.cache_creation_input_tokens = m.cache_write ?? 0;
+          }
         }
       } catch { /* keepalive / non-JSON — forwarded verbatim anyway */ }
     }
@@ -353,11 +363,13 @@ function processBlock(
   // Capture usage from message_start + message_delta
   if (event?.type === "message_start" && event.message?.usage) {
     const u = event.message.usage;
+    options.onUsageReport?.(u, event.message.model);
     if (typeof u.input_tokens === "number") usage.input_tokens = u.input_tokens;
     if (typeof u.cache_read_input_tokens === "number") usage.cache_read_input_tokens = u.cache_read_input_tokens;
     if (typeof u.cache_creation_input_tokens === "number") usage.cache_creation_input_tokens = u.cache_creation_input_tokens;
   }
   if (event?.type === "message_delta") {
+    if (event.usage) options.onUsageReport?.(event.usage);
     if (typeof event.usage?.output_tokens === "number") usage.output_tokens = event.usage.output_tokens;
     if (event.delta?.stop_reason === "max_tokens" && state) state.truncated = true;
   }

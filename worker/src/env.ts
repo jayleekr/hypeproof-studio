@@ -7,6 +7,8 @@ export interface Env {
   GEMINI_API_KEY?: string;           // historical default; production sets anthropic (wrangler.toml)
   ANTHROPIC_API_KEY?: string;        // peer — used when LLM_PROVIDER=anthropic
   OPENAI_API_KEY?: string;           // peer — used when LLM_PROVIDER=openai
+  /** Explicit operator opt-in. Per-seat attempts in the active model-practice session, 1..10000. No production default. */
+  HPS_MODEL_PRACTICE_REQUEST_LIMIT?: string;
   OPENAI_BASE_URL?: string;          // dev-only — route OpenAI-shaped calls to a local shim (lib/openai.ts)
   // peer — used when LLM_PROVIDER=glm. Z.ai 의 Anthropic 호환 경로로 나간다
   // (lib/glm.ts). 발급: https://z.ai/manage-apikey/apikey-list

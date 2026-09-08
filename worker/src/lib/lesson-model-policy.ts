@@ -1,8 +1,8 @@
 import { cohortEffort, effortForModel, validateEffortPolicy, type EffortPolicy } from './model-effort.ts';
 import { resolveProvider, type Env, type LLMProvider } from '../env.ts';
-import { MODEL_MAP, ANTHROPIC_MODELS, OPENAI_MODELS, modelIdFor, permittedModelKeys, type ModelKey, type Profile } from '../profiles/types.ts';
+import { MODEL_MAP, ANTHROPIC_MODELS, OPENAI_MODELS, GEMINI_MODELS, GLM_MODELS, explicitModelProvider, crossProviderEnabled, modelIdFor, permittedModelKeys, type ModelKey, type Profile } from '../profiles/types.ts';
 
-export interface ModelChoice { alias: ModelKey; id: string; label: string }
+export interface ModelChoice { alias: ModelKey; id: string; label: string; provider?: LLMProvider }
 export interface ModelBinding {
   revision: 'hps-model-selection/1';
   runtime: 'proxy' | 'agent-sdk';
@@ -17,7 +17,7 @@ export interface LessonModelPolicy {
   /** Service-produced at freeze; a draft cannot supply its own binding. */
   binding?: ModelBinding;
 }
-const aliases = [...Object.keys(MODEL_MAP), ...Object.keys(ANTHROPIC_MODELS), ...Object.keys(OPENAI_MODELS)];
+const aliases = [...Object.keys(MODEL_MAP), ...Object.keys(ANTHROPIC_MODELS), ...Object.keys(OPENAI_MODELS), ...Object.keys(GEMINI_MODELS), ...Object.keys(GLM_MODELS)];
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 
 export function validateLessonModel(value: unknown): string | null {
@@ -49,10 +49,12 @@ export function modelBinding(env: Env, profile: Profile, policy?: LessonModelPol
   // Alias synonyms are one actual choice. The original aliases still get validated by the Service.
   const seen = new Set<string>();
   const choices = ordered.flatMap(alias => {
-    const id = modelIdFor(alias, provider);
+    const selectedProvider = crossProviderEnabled(profile) ? explicitModelProvider(alias) ?? provider : provider;
+    const id = modelIdFor(alias, selectedProvider);
     if (seen.has(id)) return [];
     seen.add(id);
-    return [{ alias, id, label: ({ ...ANTHROPIC_MODELS, ...OPENAI_MODELS } as Record<string, string>)[id] ?? id }];
+    return [{ alias, id, label: ({ ...ANTHROPIC_MODELS, ...OPENAI_MODELS, ...GEMINI_MODELS, ...GLM_MODELS } as Record<string, string>)[id] ?? id,
+      ...(crossProviderEnabled(profile) ? { provider: selectedProvider } : {}) }];
   });
   return { revision: 'hps-model-selection/1', runtime, provider, choices,
     ...(policy?.effort ? { effort: { revision: 'hps-effort/1' as const,

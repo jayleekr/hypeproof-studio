@@ -9,6 +9,7 @@ import { profile as canarySdkContract } from "./canary-sdk-contract.ts";
 import { profile as homepagePractice } from "./homepage-practice-s1.ts";
 import { profile as nativeTrial } from "./studio-native-trial.ts";
 import { profile as gptPractice } from "./studio-gpt-practice.ts";
+import { profile as modelPractice } from "./studio-model-practice.ts";
 
 // All known profiles. Add new cohorts here.
 const REGISTRY: Profile[] = [
@@ -20,6 +21,7 @@ const REGISTRY: Profile[] = [
   homepagePractice,
   nativeTrial,
   gptPractice,
+  modelPractice,
 ];
 
 const BY_ID = new Map(REGISTRY.map((p) => [p.id, p]));

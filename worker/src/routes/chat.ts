@@ -1,3 +1,6 @@
+import { crossProviderEnabled, explicitModelProvider, permittedModelKeys } from '../profiles/types';
+import { measureUsage, reserveModelRequest, finishModelRequest } from '../lib/model-usage';
+
 import { applyRequestEffort, EffortPolicyError, type EffortReceipt } from '../lib/model-effort';
 import { persistRequestSettings, readRequestSettings, validTurnId } from '../lib/request-settings';
 import { servedModelSelection } from '../lib/lesson-model-policy';
@@ -32,9 +35,9 @@ import { resolveTokenLesson } from '../lib/lesson-delivery';
 import { lessonAssistantName } from '../lib/session-design';
 import { isTokenRevoked, getRoster } from '../lib/kv';
 import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
-import { callAnthropicResilient } from "../lib/anthropic";
+import { callAnthropic, callAnthropicResilient } from "../lib/anthropic";
 import { glmUpstreamUrl } from "../lib/glm";
-import { callGeminiResilient } from "../lib/gemini";
+import { callGemini, callGeminiResilient } from "../lib/gemini";
 import { callOpenAI } from "../lib/openai";
 import { listWorlds, renderWorld, renderEngine, renderEngineFor } from "../skeletons/kids-quest/worlds";
 import {
@@ -434,6 +437,14 @@ chat.post("/chat/completions", async (c) => {
   // before provider selection still attributes to something truthful; the
   // upstream branches overwrite it with the id actually sent.
   let modelLabel: string = profile.model.default;
+  const multi = crossProviderEnabled(profile);
+  let provider: LLMProvider;
+  let reserved = false;
+  const usageRequestId = c.get('requestId') + ':' + crypto.randomUUID();
+  let reportedUsage: Record<string, unknown> = {};
+  let returnedModel: string | null = null;
+  const requestSignal = multi ? AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(60000)]) : undefined;
+
   let effortReceipt: EffortReceipt | undefined;
   // Diagnostic IDs can share a CF-Ray prefix; settings need one unique ID per request.
   const settingsRequestId = crypto.randomUUID();
@@ -461,6 +472,18 @@ chat.post("/chat/completions", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    if (reserved) {
+      reserved = false;
+      const measurement = measureUsage(provider, reportedUsage, log.status < 400);
+      // Native and OpenAI cache fields have different inclusion semantics.
+      log.tokens_in = measurement.tokens_in ?? 0;
+      log.tokens_out = measurement.tokens_out ?? 0;
+      log.cache_read = measurement.cache_read ?? 0;
+      log.cache_create = measurement.cache_write ?? 0;
+      c.executionCtx.waitUntil(finishModelRequest(env, usageRequestId, log.status, returnedModel, measurement)
+        .catch(() => console.error('model usage settlement unavailable; reservation retained')));
+    }
+
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
     c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
@@ -545,10 +568,13 @@ chat.post("/chat/completions", async (c) => {
   //
   // translate / translateOpenAI both drop client system+tool messages — the
   // trust model is identical either way.
-  let provider: LLMProvider;
   let apiKey: string;
   try {
-    const pinned = profile.model.provider;
+    const requested = (body as any)?.model ?? profile.model.default;
+    if (multi && !permittedModelKeys(profile).includes(requested)) {
+      return c.json({error:{code:'model_not_allowed', message:'이 수업에서 허용한 모델을 선택해 주세요.'}},400);
+    }
+    const pinned = multi ? explicitModelProvider(requested) : profile.model.provider;
     if (pinned) {
       provider = pinned;
       apiKey = providerKey(env, pinned);
@@ -571,6 +597,20 @@ chat.post("/chat/completions", async (c) => {
     );
   }
 
+  if (multi) {
+    const limit = Number(env.HPS_MODEL_PRACTICE_REQUEST_LIMIT);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10000)
+      return c.json({error:{code:'model_practice_not_enabled', message:'모델 비교 실습의 이용 한도를 운영자가 설정해야 합니다.'}},503);
+    modelLabel = (body as any)?.model ?? profile.model.default;
+    try {
+      reserved = await reserveModelRequest(env, {request_id:usageRequestId,cohort_id:payload.c,user_id:payload.u,
+        session_id:session.session_id,provider,requested_model:modelLabel},limit);
+    } catch {
+      return c.json({error:{code:'usage_unavailable',message:'이용량을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.'}},503);
+    }
+    c.header('x-hps-usage-request-id',usageRequestId);
+    if (!reserved) return c.json({error:{code:'model_usage_limit',message:'실행 중인 작업이 있거나 이 수업의 요청 한도에 도달했습니다.'}},429);
+  }
   const stream = (body as any)?.stream === true;
   let upstream: Response;
   // modelLabel is hoisted above (#684) so failure rows still name a model.
@@ -584,7 +624,8 @@ chat.post("/chat/completions", async (c) => {
       gBody.stream = stream;
       if (stream) gBody.stream_options = { include_usage: true };
       // Retry transient 503s, then fall back to gemini-2.5-flash.
-      const g = await callGeminiResilient(gBody, apiKey);
+      const g = multi ? { response: await callGemini(gBody, apiKey, requestSignal), model:gBody.model, fellBack:false }
+        : await callGeminiResilient(gBody, apiKey);
       upstream = g.response;
       modelLabel = g.model;        // analytics + response reflect the real model
       fellBack = g.fellBack;
@@ -596,7 +637,7 @@ chat.post("/chat/completions", async (c) => {
       oBody.stream = stream;
       if (stream) oBody.stream_options = { include_usage: true };
       modelLabel = oBody.model;
-      upstream = await callOpenAI(oBody, apiKey, undefined, c.env.OPENAI_BASE_URL);
+      upstream = await callOpenAI(oBody, apiKey, requestSignal, c.env.OPENAI_BASE_URL);
     } else if (provider === "glm") {
       // GLM (Z.ai) — Anthropic 호환 경로라 **번역기와 스트림 처리를 그대로 재사용**한다.
       // 새로 쓰는 것은 URL 하나뿐이다 (lib/glm.ts 에 실측 근거를 적어 뒀다).
@@ -609,7 +650,7 @@ chat.post("/chat/completions", async (c) => {
       const gBody = translate(body as any, profile, coach, "glm");
       gBody.stream = stream;
       modelLabel = gBody.model;
-      upstream = await callAnthropicResilient(gBody, apiKey, { url: glmUpstreamUrl() });
+      upstream = await (multi ? callAnthropic : callAnthropicResilient)(gBody, apiKey, { url: glmUpstreamUrl(), signal: requestSignal });
     } else {
       // anthropic — Messages API (different schema; transformStream handles it).
       // Route through the optional region-pinned proxy when set, otherwise
@@ -631,7 +672,8 @@ chat.post("/chat/completions", async (c) => {
       // brings the prod (anthropic) path to parity. No model fallback here.
       const effective = applyRequestEffort(aBody as unknown as Record<string,unknown>, profile, modelLabel, c.req.header('x-hps-effort'));
       effortReceipt = effective.receipt;
-      upstream = await callAnthropicResilient(effective.body as unknown as typeof aBody, apiKey, {
+      upstream = await (multi ? callAnthropic : callAnthropicResilient)(effective.body as unknown as typeof aBody, apiKey, {
+        signal: requestSignal,
         url: env.ANTHROPIC_PROXY_URL,
         proxySecret: env.ANTHROPIC_PROXY_SECRET,
       });
@@ -696,7 +738,11 @@ chat.post("/chat/completions", async (c) => {
 
   if (!stream) {
     // Non-streaming: normalize either provider's body to an OpenAI response.
-    const j = (await upstream.json()) as any;
+    let j: any;
+    try { j = await upstream.json(); }
+    catch { recordFailure(502, ERROR_KIND.STREAM_INTERRUPTED); return c.json({error:{code:'invalid_upstream_response'}},502); }
+    reportedUsage = j.usage ?? {};
+    returnedModel = typeof j.model === 'string' ? j.model : null;
     let text = "";
     let tin = 0;
     let tout = 0;
@@ -759,6 +805,12 @@ chat.post("/chat/completions", async (c) => {
         400,
       );
     }
+    if (multi) {
+      const measured = measureUsage(provider,reportedUsage);
+      tin = measured.tokens_in ?? 0; tout = measured.tokens_out ?? 0;
+      cr = measured.cache_read ?? 0; cc = measured.cache_write ?? 0;
+      c.header('x-hps-usage-state',measured.state);
+    }
     record(mkLog(tin, tout, cr, cc));
     // #9c trace: persist turn meta + optional R2 body. Fire-and-forget — must
     // not block the response. Skipped when client did not send trial headers.
@@ -791,10 +843,12 @@ chat.post("/chat/completions", async (c) => {
       object: "chat.completion",
       model: modelLabel,
       choices: [{ index: 0, message: { role: "assistant", content: text }, finish_reason: finish }],
+      ...(multi ? { hps_usage: { input_tokens:tin,output_tokens:tout,cache_read_input_tokens:cr,cache_creation_input_tokens:cc,
+        measurement:measureUsage(provider,reportedUsage) } } : {}),
       usage: {
-        prompt_tokens: tin,
+        prompt_tokens: multi ? tin + cr + cc : tin,
         completion_tokens: tout,
-        total_tokens: tin + tout,
+        total_tokens: multi ? measureUsage(provider,reportedUsage).reported_total ?? tin + tout + cr + cc : tin + tout,
       },
     });
   }
@@ -811,6 +865,11 @@ chat.post("/chat/completions", async (c) => {
     // #257 — lets the SSE layer emit a sanitized stream_error carrying the
     // request_id instead of raw internal prose.
     requestId: c.get("requestId"),
+    usageProvider: multi ? provider : undefined,
+    onUsageReport: (raw: Record<string, unknown>, model?: string) => {
+      reportedUsage = {...reportedUsage,...raw};
+      if (model) returnedModel = model;
+    },
     onTextDelta: (delta: string) => {
       streamedAssistantText += delta;
     },
@@ -876,6 +935,7 @@ chat.post("/chat/completions", async (c) => {
     "cache-control": "no-cache",
     "x-accel-buffering": "no",
     "x-hps-model": modelLabel,
+    ...(multi ? { "x-hps-usage-request-id":usageRequestId } : {}),
     "x-hps-module": module.version,
     ...(module.fallback ? { "x-hps-module-fallback": module.fallback.pinned } : {}),
     // #580 — raw Response 반환은 request-id 미들웨어의 c.header() 를 우회한다
