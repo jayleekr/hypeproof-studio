@@ -114,12 +114,49 @@ tighter contract than the routes enforce. So the first slice states it plainly a
 **ships a negative-control test that asserts today's passthrough**, so this ADR cannot
 silently become wrong.
 
-The closing move exists and has a precedent — intersect the request's `tools` with
-the seat's granted names, the same shape the proxy route already applies to its own
-tool list. It changes behavior on every SDK seat and needs its own measurement, so it
-belongs in the follow-up PR the E2 plan already anticipates, not in the first slice.
-Until it lands, AE-09's "조작된 클라이언트 요청은 상위 deny를 확장하지 못한다" is **UNMET on
-the SDK route** and the requirement row must say so.
+Until something changes, AE-09's "조작된 클라이언트 요청은 상위 deny를 확장하지 못한다" is
+**UNMET on the SDK route** and the requirement row must say so.
+
+### Amendment, 2026-09-08 — the follow-up this section named does not close it
+
+The paragraph here originally said the closing move was to intersect the request's
+`tools` with the seat's granted names, and deferred that to a follow-up PR. That was
+wrong, and it was wrong in the direction this ADR exists to prevent: it named a
+mechanism that would have let a later PR claim Service enforcement it does not have.
+
+**On this route the Service never executes a tool.** The route's own header says so —
+"tools are DEFINED here but EXECUTED client-side by the SDK". Removing a name from the
+`tools` array only changes what the model is told it may propose. A modified client
+executes locally and never asks the Service at all, so the intersection is invisible to
+exactly the adversary AE-09 describes.
+
+What the intersection would actually buy is narrower and worth naming honestly: a
+**stale** client — an older build, or one holding a cached profile from before a
+narrowing — declares the un-narrowed set, and filtering stops the model proposing tools
+that seat should no longer use. That is robustness against our own rollout lag, not a
+boundary. It also carries a failure mode of its own: stripping a declaration while an
+earlier `tool_use` for it sits in the conversation may make the upstream reject the
+request, which is reachable by an ordinary student whose instructor narrows a lesson
+mid-course.
+
+So the honest statement of this route, replacing the deferral:
+
+- The Service enforces exactly four things on an agent-sdk seat — the trust gate
+  (token, revocation, profile, session, roster, cohort pause), system-prompt
+  replacement, the model clamp, and `max_tokens`/effort normalisation.
+- Tool policy and input filtering on this route are **client-integrity** properties,
+  not Service boundaries. They hold for the client we ship and fail with it.
+- A cohort that needs a Service-enforced tool or image boundary has one option today:
+  run the proxy route, where the worker composes the upstream tool array and filters
+  image blocks itself.
+
+That last point has a consequence nobody had written down: both registered child
+cohorts (`sk-biopharm-kids-s1`, `sk-biopharm-kids-2026-grade-5-6-s1`) set
+`coach_runtime: "agent-sdk"`, so they are on the route with neither enforcement. That
+follows from the 2026-08-11 decision to let a minor cohort opt into the file-capable
+runtime, and it is not by itself a mistake — the children's curriculum needs those
+tools. It does mean "the Service enforces tool and image policy for child seats" is not
+true today. Tracked in #811 for the image half.
 
 ## What each row gets
 
@@ -159,8 +196,9 @@ role checks scattered across the routes. That is its own unit.
   accepted as the legitimate chat-only narrowing.
 - **The passthrough control**, asserting today's truth: on `/v1/messages` a
   shell-narrowed seat's request that declares Bash still reaches the upstream
-  unchanged. When the follow-up closes it, this test flips and the requirement row
-  moves with it — that is the point of writing it now.
+  unchanged. Per the amendment above this is not a control waiting for a closure —
+  it is there so the route cannot start touching `tools` without this test failing
+  first and forcing a fresh judgment about what the requirement row may claim.
 - The `/v1/profile` call site gets its own test. The gate-only version of this change
   would pass every gate test and still ship inert.
 
