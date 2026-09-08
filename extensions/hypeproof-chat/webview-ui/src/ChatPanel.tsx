@@ -535,9 +535,8 @@ export function ChatPanel(props: Props) {
         <div className="hps-shell-drop-overlay">여기에 놓으면 이미지가 첨부돼요 🖼</div>
       )}
       <header className="hps-header">
-        <strong title={ux.coach.naming_mode === "fixed" ? "이 수업의 코치" : "코치 이름 바꾸기"} onClick={() => { if (ux.coach.naming_mode !== "fixed") setForceNaming(true); }} className="hps-coach-name">
-          {coachName}
-        </strong>
+        {ux.coach.naming_mode === "fixed" ? <strong title="이 수업의 코치">{coachName}</strong> :
+          <button title="코치 이름 바꾸기" onClick={() => setForceNaming(true)} className="hps-coach-name">{coachName}</button>}
         <div className="hps-actions">
           {/* Token 바로 **왼쪽**, 같은 크기. 헤더 버튼 스타일(.hps-header button)을
               그대로 물려받고 색만 다르다 — 크기를 따로 주면 헤더 줄 높이가 이 버튼
@@ -561,8 +560,8 @@ export function ChatPanel(props: Props) {
           <button onClick={props.onSetToken} title="연결된 수업 확인 및 변경">
             수업 연결
           </button>
-          <button onClick={props.onClear} title="Clear conversation">Clear</button>
-          <button onClick={props.onSettings} title="Open settings">⚙</button>
+          <button onClick={props.onClear} disabled={props.streaming} title="대화 기록 지우기">대화 지우기</button>
+          <button onClick={props.onSettings} title="설정" aria-label="설정">⚙</button>
         </div>
       </header>
 
@@ -588,7 +587,7 @@ export function ChatPanel(props: Props) {
         </details>
       )}
 
-      {config?.profile?.observation?.format === 'hps-observation/1' && <NativeObservationPanel />}
+      {config?.profile?.observation?.format === 'hps-observation/1' && <NativeObservationPanel scope={config.profile.observation.scope} />}
       {config?.profile?.profile_id === 'studio-native-trial' && config.profile.observation?.format !== 'hps-observation/1' && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}
 
       <div className="hps-messages" ref={scrollRef}>
@@ -751,6 +750,7 @@ export function ChatPanel(props: Props) {
         >
           <textarea
             ref={textareaRef}
+            aria-label="코치에게 보낼 메시지"
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onPaste={handlePaste}
@@ -1276,10 +1276,8 @@ function CitationRack({ citations }: { citations: Citation[] }) {
   return (
     <div className="hps-cit-rack" role="list" aria-label="검색 출처">
       {citations.map((c, i) => (
-        <button
-          key={`${c.url}-${i}`}
+        <span key={`${c.url}-${i}`} role="listitem"><button
           type="button"
-          role="listitem"
           className={`hps-cit-chip hps-cit-tier-${c.tier}`}
           onClick={() => postToHost({ type: "openExternal", url: c.url })}
           title={c.url}
@@ -1287,7 +1285,7 @@ function CitationRack({ citations }: { citations: Citation[] }) {
           <span className="hps-cit-index">[{i + 1}]</span>
           <span className="hps-cit-title">{c.title || c.domain}</span>
           <span className="hps-cit-domain">{c.domain}</span>
-        </button>
+        </button></span>
       ))}
     </div>
   );
@@ -1466,7 +1464,7 @@ function ErrorBanner({
   // Spot common transport-layer signals so the framing is honest about the
   // recovery path. We don't try to classify perfectly — just enough to pick
   // between "연결 끊김" (worth retrying) and "토큰/세션 문제" (강사에게).
-  const isAuth = /토큰|세션|강사|만료|등록|인가/.test(message);
+  const isAuth = /참여 코드|토큰|세션|강사|만료|등록|인가/.test(message);
   const isConn = /연결|네트워크|시간|타임아웃|중단|stream|interrupt|abort/i.test(message);
   const icon = isAuth ? "🔒" : isConn ? "🔌" : "⚠️";
   const title = isAuth ? "잠시 멈춰요" : isConn ? "연결이 끊겼어요" : "문제가 생겼어요";

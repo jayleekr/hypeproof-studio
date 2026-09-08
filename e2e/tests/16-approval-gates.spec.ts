@@ -35,6 +35,7 @@ interface GateCtx {
 async function launch(opts: {
   kind: "writeFile" | "executeShell";
   description: string;
+  destructive?: boolean;
   payload?: Record<string, unknown>;
   /**
    * 워크스페이스 폴더는 launch 안에서 만들어지므로 호출자가 미리 그 경로를 쓸 수
@@ -53,6 +54,7 @@ async function launch(opts: {
     JSON.stringify({
       "hypeproofChat.proxyUrl": "http://localhost:8787/v1",
       "workbench.startupEditor": "none",
+      "window.dialogStyle": "custom",
       "telemetry.telemetryLevel": "off",
       "update.mode": "none",
     }),
@@ -74,6 +76,7 @@ async function launch(opts: {
     HPS_TEST_SYNTH_ACTION: JSON.stringify({
       kind: opts.kind,
       description: opts.description,
+      destructive: opts.destructive,
       payload: opts.pathInWorkspace
         ? { ...opts.payload, path: path.join(wsDir, opts.pathInWorkspace) }
         : opts.payload,
@@ -124,29 +127,20 @@ async function modalCount(win: Page): Promise<number> {
   return win.locator(".monaco-dialog-box, .monaco-dialog, .dialog-shadow").count();
 }
 
-test("Tier 1: 파괴적 executeShell 은 사람을 기다린다 (조용히 실행되지 않는다)", async () => {
-  // 옛 이름은 "hard-denied without showing a modal" 이었다. 그 전제는 #431 에서
-  // 죽었다 — `sdk_tools.shell` 을 켠 코호트는 임의 명령을 받고, 모달이 게이트다.
-  // 파괴적 명령은 "실행 / 취소" 강한 확인이고 `항상 허용` 을 주지 않는다.
-  //
-  // 네이티브 다이얼로그라 클릭은 못 하지만, 게이트의 본질은 잴 수 있다:
-  // 아무도 누르지 않으면 settle 하지 않는다. 이게 깨지는 방향은 `rm -rf` 가
-  // 조용히 승인되는 것 하나뿐이다.
-  const ctx = await launch({
-    kind: "executeShell",
-    description: "rm -rf / (must never auto-approve)",
-  });
+test("Tier 1: destructive approval offers no always-allow and cancellation refuses", async () => {
+  // Approval-only hook: no command is executed, even if mistakenly approved.
+  const ctx = await launch({kind:'executeShell',description:'synthetic destructive classification',destructive:true,payload:{command:'rm -rf ./synthetic-delete-target'}});
   try {
-    let settled = false;
-    const deadline = Date.now() + 8_000;
-    while (Date.now() < deadline && !settled) {
-      settled = fs.existsSync(ctx.resultFile);
-      await new Promise((r) => setTimeout(r, 250));
-    }
-    expect(settled).toBe(false);
-  } finally {
-    await teardown(ctx);
-  }
+    const dialog=ctx.win.locator('.monaco-dialog-box').first();
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toContainText('되돌리기 어려운 명령');
+    await expect(dialog).not.toContainText('항상 허용');
+    expect(fs.existsSync(ctx.resultFile)).toBe(false);
+    await dialog.getByRole('button',{name:'취소',exact:true}).click();
+    const result=await readResult(ctx.resultFile);
+    expect(result.error).toBeUndefined();expect(result.approved).toBe(false);
+    if(process.env.HPS_NATIVE_EVIDENCE_DIR)fs.writeFileSync(path.join(process.env.HPS_NATIVE_EVIDENCE_DIR,'destructive-approval.json'),JSON.stringify({scope:'actual App approval-only synthetic action; no shell execution',approved:result.approved}));
+  } finally {await teardown(ctx);}
 });
 
 test("Tier 2: writeFile outside workspace is refused without modal", async () => {

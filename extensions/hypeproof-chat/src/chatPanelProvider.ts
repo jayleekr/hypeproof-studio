@@ -489,12 +489,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     })();
   }
 
+  private clearingHistory = false;
   async clearHistory(): Promise<void> {
-    await this.context.workspaceState.update(this.historyKey(), []);
-    this.assetScores?.resetAssetScores();
-    void this.post({ type: "history", messages: [] });
-    // #320 — a cleared conversation is a fresh session: disclose again (REQ-C14).
-    void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
+    if (this.clearingHistory || this.hasActiveStream()) return;
+    this.clearingHistory = true;
+    const key = this.historyKey();
+    try {
+      const choice = await vscode.window.showWarningMessage(
+        "이 대화 기록을 지울까요?",
+        { modal: true, detail: "채팅 기록은 되돌릴 수 없습니다. 작업 파일과 내 작업 돌아보기의 관찰 기록은 그대로 남습니다." },
+        "대화 지우기",
+      );
+      if (choice !== "대화 지우기" || this.hasActiveStream() || key !== this.historyKey()) return;
+      await this.context.workspaceState.update(key, []);
+      this.assetScores?.resetAssetScores();
+      void this.post({ type: "history", messages: [] });
+      // A cleared chat starts a new conversation, not a new trial allowance.
+      void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
+    } finally { this.clearingHistory = false; }
   }
 
   /** Force re-fetch on next config push (e.g. after token change). */
@@ -2593,7 +2605,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
-    const reason = err instanceof Error ? err.message : "앗, 문제가 생겼어요. 선생님을 불러주세요.";
+    const reason = err instanceof Error ? err.message : "문제가 발생했습니다. 운영 담당자에게 문의해 주세요.";
     const requestId = err instanceof ProxyTransportError ? err.requestId : undefined;
     if (requestId) this.lastRequestId = requestId;
     void this.post({ type: "streamError", streamId, error: reason, requestId });
