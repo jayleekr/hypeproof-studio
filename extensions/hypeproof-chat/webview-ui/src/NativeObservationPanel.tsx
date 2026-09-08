@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { postToHost, onHostMessage } from "./vscode";
 import type {
   ObservationBatch,
   ObservationFinding,
 } from "../../src/nativeObservationContract";
-export function NativeObservationPanel() {
+export function NativeObservationPanel({ scope }: { scope?: string }) {
+  const activeScope = useRef<string | null>(scope ?? null);
   const [assessedCount,setAssessedCount]=useState<number|undefined>();
   const [learningPath, setLearningPath] = useState<{
     title: string;
@@ -21,12 +22,20 @@ export function NativeObservationPanel() {
     () =>
       onHostMessage((msg) => {
         if (msg.type === "config") {
+          const nextScope = msg.config.profile?.observation?.scope ?? null;
+          if (nextScope === activeScope.current) return;
+          activeScope.current = nextScope;
+          setCorrection("");
+          setError(null);
+          setLearningPath(null);
+          setAssessedCount(undefined);
           setBatch(null);
           setFindings([]);
           setConsent(false);
           setBusy(false);
         }
         if (msg.type === "observationState") {
+          if (msg.batch && msg.batch.scope !== activeScope.current) return;
           setLearningPath(msg.learningPath ?? null);
           setAssessedCount(msg.assessedEventCount);
           setBatch(msg.batch);

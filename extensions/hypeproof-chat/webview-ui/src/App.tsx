@@ -269,7 +269,7 @@ export function App() {
   const hasLastUserPrompt = messages.some((m) => m.role === "user");
 
   return (
-    <ChatErrorBoundary>
+    <ChatErrorBoundary onReset={() => { setShouldCrash(false); postToHost({ type: "ready" }); }}>
       <CrashIfFlagged crash={shouldCrash} />
       <ChatPanel
         incomingImage={incomingImage}

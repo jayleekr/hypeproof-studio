@@ -8,9 +8,9 @@
  * surface the SAME sentences — never fork or reword one side.
  */
 export const TOKEN_EXPIRED_FRIENDLY =
-  "토큰이 만료됐어요. 선생님께 새 토큰을 받아서 다시 넣어주세요. 🔑";
+  "참여 코드가 만료되었습니다. 코드 발급 담당자에게 새 코드를 요청해 주세요.";
 export const TOKEN_MISSING_FRIENDLY =
-  "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑";
+  "참여 코드가 필요합니다. 코드 발급 담당자에게 받은 코드를 입력해 주세요.";
 
 /**
  * agent-sdk 경로 전용 (#320 수정). 프록시 경로는 게이트웨이가 준 `error.code`
@@ -24,11 +24,11 @@ export const TOKEN_MISSING_FRIENDLY =
  * 그래서 SDK 경로는 단정하지 않는 문장을 쓰고 kind 도 파괴적이지 않은 쪽을 쓴다.
  */
 export const GATEWAY_AUTH_FAILED_FRIENDLY =
-  "코치가 로그인에 실패했어요. 토큰을 다시 넣어보고, 그래도 같으면 선생님께 알려주세요. 🔑";
+  "참여 코드를 확인하지 못했습니다. 다시 입력해 보고, 문제가 계속되면 코드 발급 담당자에게 문의해 주세요.";
 
 /** 400 은 인증 문제가 아니다 — 토큰 얘기를 꺼내면 안 된다. */
 export const GATEWAY_BAD_REQUEST_FRIENDLY =
-  "요청이 게이트웨이에서 거절됐어요. 다시 보내보고, 계속 같으면 선생님께 알려주세요. 🛠️";
+  "요청을 처리하지 못했습니다. 다시 시도해 보고, 문제가 계속되면 운영 담당자에게 문의해 주세요.";
 
 /**
  * #358 — student-friendly copy for a 413 (payload too large), which in this
@@ -81,7 +81,7 @@ export interface ProfileFailure {
 }
 
 export const PROFILE_ISSUER_TOKEN_FRIENDLY =
-  "이건 선생님(강사)용 토큰이에요. 참가자용 토큰을 받아서 넣어주세요. 🎫";
+  "강사용 코드입니다. 코드 발급 담당자에게 참가자용 코드를 요청해 주세요.";
 /**
  * 401 that is not `expired`. Deliberately does NOT say "만료됐어요" — the same
  * mistake the SDK path made (see GATEWAY_AUTH_FAILED_FRIENDLY): a 401 can be a
@@ -89,11 +89,11 @@ export const PROFILE_ISSUER_TOKEN_FRIENDLY =
  * expiry sends everyone down the wrong road.
  */
 export const PROFILE_REJECTED_FRIENDLY =
-  "서버가 이 토큰을 받아주지 않았어요. 붙여넣은 값이 잘리지 않았는지 확인하고, 그래도 안 되면 선생님께 새 토큰을 받아주세요. 🔑";
+  "참여 코드를 확인할 수 없습니다. 코드 전체를 붙여넣었는지 확인하고, 문제가 계속되면 코드 발급 담당자에게 문의해 주세요.";
 export const PROFILE_UNKNOWN_COHORT_FRIENDLY =
-  "이 토큰이 가리키는 수업(회차)을 서버가 몰라요. 선생님께 이 화면을 그대로 알려주세요. 🗂️";
+  "참여 코드에 연결된 수업을 찾을 수 없습니다. 코드 발급 담당자에게 수업 정보를 확인해 주세요.";
 export const PROFILE_SERVER_FRIENDLY =
-  "서버가 지금 응답하지 못했어요. 잠시 뒤에 다시 넣어보고, 계속 같으면 선생님께 알려주세요. 🛠️";
+  "서버가 응답하지 않습니다. 잠시 후 다시 시도하고, 문제가 계속되면 운영 담당자에게 문의해 주세요.";
 export const PROFILE_NETWORK_FRIENDLY =
   "서버에 연결하지 못했어요. 인터넷 연결을 확인해주세요. 🌐";
 
@@ -127,7 +127,7 @@ export function classifyProfileFailure(status: number, bodyText: string): Profil
     return { ...base, reason: "rejected", friendly: PROFILE_REJECTED_FRIENDLY };
   }
   if (status === 403) {
-    if (code === "trial_expired") return { ...base, reason: "expired", friendly: "개인 체험 시간이 끝났습니다. 작업 파일은 그대로 남아 있습니다. 다시 체험하려면 운영자에게 새 체험을 요청해주세요." };
+    if (code === "trial_expired") return { ...base, reason: "expired", friendly: "개인 체험 시간이 끝났습니다. 작업 파일은 그대로 남아 있습니다. 다시 체험하려면 코드 발급 담당자에게 새 체험을 요청해 주세요." };
     return { ...base, reason: "forbidden", friendly: "이 수업에 참여할 권한이나 진행 중인 세션이 없습니다. 강사에게 참여 등록과 수업 상태를 확인해주세요." };
   }
   if (status === 400) {

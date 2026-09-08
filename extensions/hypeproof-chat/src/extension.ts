@@ -500,6 +500,7 @@ async function maybeSynthesizeTestAction(
     kind: "writeFile" | "executeShell";
     description: string;
     resultFile: string;
+    destructive?: boolean;
     payload?: Record<string, unknown>;
   };
   try {
@@ -516,6 +517,7 @@ async function maybeSynthesizeTestAction(
       requestId: `test-${Date.now()}`,
       kind: cfg.kind,
       description: cfg.description ?? "(test description)",
+      destructive: cfg.destructive,
       payload: cfg.payload ?? { test: true },
     });
     fs.writeFileSync(cfg.resultFile, JSON.stringify({ approved, ts: Date.now() }));
