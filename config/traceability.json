@@ -180,6 +180,19 @@
           "path": "extensions/hypeproof-chat/test/gallery-publish-gate.smoke.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-TEST-SDK-RESULT-DRIFT",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/sdk-result-drift.smoke.mjs"
+        }
+      ]
     }
   ]
 }
