@@ -1,0 +1,44 @@
+{
+  "source_run": "e2e/test-results/agent-experience/20260908T154830Z-feature-a",
+  "submitted_product_sha": "f7afd4a76171e3774ecf2410438ab5057772b036",
+  "verification_sha": "db615dee97e0d402eaf3b1b9e2d892ca471827fc",
+  "capture": "Electron BrowserWindow.webContents.capturePage; actual isolated installed-app copy; no image editing",
+  "review": "Codex visually inspected these seven images on 2026-09-08; this is not human learner acceptance",
+  "files": [
+    {
+      "file": "a-live-answer.png",
+      "sha256": "7961ced460b0022dd16adfb592af446f9635c73c710fde9d7b1ed534b02a290c",
+      "bytes": 523261
+    },
+    {
+      "file": "switch-b-3.png",
+      "sha256": "00c8b54f30fcf192b3292b7cca44be32803707081be17d5a6a472e980b9ddf38",
+      "bytes": 521972
+    },
+    {
+      "file": "long-name-390.png",
+      "sha256": "d59ea2a1a04177a9bbe16b3e4f5f2584b522d3b5bae9802865ef198044d7cad8",
+      "bytes": 596873
+    },
+    {
+      "file": "long-name-1280.png",
+      "sha256": "34f0bf358b176909944b0a5e833aeead246b39f3c76d8039d9181899a1d52383",
+      "bytes": 568458
+    },
+    {
+      "file": "long-name-zoom-200.png",
+      "sha256": "89031341855a40244fb72459b1b953796df48e8b4a4bbed40df7b50704618b59",
+      "bytes": 595654
+    },
+    {
+      "file": "failure-400.png",
+      "sha256": "a497f0b686f2aa0fce33915a65f45e4639b93fe26241a8d760ad1a9e7e24ecf4",
+      "bytes": 589645
+    },
+    {
+      "file": "failure-stall.png",
+      "sha256": "8f0cd5f83d871cdcd289e2861a76b940e85af4230f7f99456ebb36c8fcf68960",
+      "bytes": 586470
+    }
+  ]
+}
