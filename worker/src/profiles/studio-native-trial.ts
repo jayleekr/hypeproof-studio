@@ -24,17 +24,22 @@ export const profile: Profile = {
   tools: { web_search: true, max_uses: 2 },
   analytics: { log_user_messages: false, log_metadata: true, upload_session_logs: false },
   welcome: {
-    greeting_md: '지금 하는 일에서 작게 하나 만들어볼까요? 시작이 막막하면 아래 예시를 골라도 좋아요.',
-    example_prompts: ['내 업무를 설명하는 자료를 만들고 싶어', '여러 선택지를 비교해서 결정하고 싶어', '반복하는 일을 줄일 방법을 찾아보고 싶어'],
+    greeting_md:
+      '바로 만들기 전에, 먼저 지금 어떤 일을 해결하려는지 알아볼게요. 완벽하게 정리되어 있지 않아도 괜찮아요. 몇 번 대화하면서 필요한 걸 같이 명확하게 만들어봅니다.',
+    example_prompts: [
+      '해야 할 일은 있는데 어디서 시작할지 모르겠어',
+      '이미 하고 있는 일이 있는데 더 잘하고 싶어',
+      'AI에게 맡기고 싶은데 어디까지 맡겨야 할지 모르겠어',
+    ],
   },
   ux: {
     ...structuredClone(practice.ux),
     coach: { ...practice.ux.coach, naming_mode: 'fixed', fallback_name: '코치', naming_prompt_md: '', personality_prompt_md: '' },
     suggestions: {
       initial: [
-        { text: '내 업무를 설명하는 자료를 만들고 싶어', style: 'good', caption: '설명 자료' },
-        { text: '여러 선택지를 비교해서 결정하고 싶어', style: 'good', caption: '비교와 결정' },
-        { text: '반복하는 일을 줄일 방법을 찾아보고 싶어', style: 'good', caption: '반복 업무' },
+        { text: '해야 할 일은 있는데 어디서 시작할지 모르겠어', style: 'good', caption: '아직 막연한 일' },
+        { text: '이미 하고 있는 일이 있는데 더 잘하고 싶어', style: 'good', caption: '기존 일 개선' },
+        { text: 'AI에게 맡기고 싶은데 어디까지 맡겨야 할지 모르겠어', style: 'good', caption: '위임 범위' },
       ],
       follow_up: [],
     },
