@@ -12,7 +12,7 @@
 | Mac 코드 입력 → 실제 모델 → 파일 생성·수정 | PASS | `e2e/test-results/native-trial/20260908T153942Z/`: 실제 provider request ID, 입력/응답, 초기·수정 파일과 SHA |
 | Mac 관찰·정정·앱 재시작 | PASS | 같은 실행의 `observation-results.png`, `reloaded.png`; 실제 관찰 API와 보존 기록. 합성 사용자이며 학습 효과 검증은 아님 |
 | Mac 대화 삭제 취소·확정 | PASS | `clear-confirmation.png`, `clear-complete-files-preserved.png`, `ui-host-result.json`; 취소 시 대화 유지, 확정 후 파일·관찰 보존 |
-| Mac 호스트 추가 6개 | PASS 6 / FAIL 0 | `20260908T1547` 계열의 `native-trial` 실행 로그: 실제 승인 창 취소·작업 폴더 경계·설정 열기·오류 복구·격리된 신고 수신기. 승인-only 시료는 명령을 실제 실행하지 않음 |
+| Mac 호스트 추가 6개 | PASS 6 / FAIL 0 | `e2e/test-results/native-trial/20260908T154645Z/`와 해당 실행 로그: 실제 승인 창 취소·작업 폴더 경계·설정 열기·오류 복구·격리된 신고 수신기. 승인-only 시료는 명령을 실제 실행하지 않음 |
 | Worker / Chalk / extension | PASS | 각 전체 테스트와 typecheck. extension에는 삭제 확인·중복·진행 중 차단·신원 변경 대조군 및 공통 안내 용어 검사를 포함 |
 | 치과 authoring demo / reference browser | PASS | 기존 L1–L5 예제 검사. 실제 치과의사의 Studio 독립 수행 증거가 아님 |
 | 문서 검사 | PASS | `scripts/docs-harness/check.py --min-score 95`: 100/100 |
