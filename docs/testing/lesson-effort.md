@@ -10,7 +10,7 @@
 | EFF-T02D | 실제 local workerd/D1 migration 재실행·8개 동시 중복 쓰기·null·범위 격리 | `npm --prefix worker run test:effort:d1` |
 | EFF-T03 | 수업/모델 범위 선택 복원, 잘못된 기록은 미확인, SDK 전용 헤더 환경 격리 | extension `model-selection.smoke`, `live-preview-url.smoke` |
 | EFF-T04 | 강사 선택 범위 저장/재열기/동결, 이후 고정 초안과 버전 분리, 390/1280px | `HPS_CHALK_MODEL_SELECTION=1`으로 `e2e/chalk-authoring/run.mjs` |
-| EFF-T05 | 실제 App 선택·키보드·초안·실행중 변경·모델 전환·고정 수업·390/1280px/200%, 실제 API와 D1 설정 대조 | `HPS_NATIVE_EFFORT=1`으로 `e2e/native-trial.config.ts`; SDK와 `HPS_EFFORT_RUNTIME=proxy` 분리 |
+| EFF-T05 | 실제 App 선택·키보드·초안·실행중 변경·모델 전환·고정 수업·390/1280px/200%, 실제 API와 로컬 요청 설정 기록 대조 | `HPS_NATIVE_EFFORT=1`으로 `e2e/native-trial.config.ts`; SDK와 `HPS_EFFORT_RUNTIME=proxy` 분리 |
 
 2026-09-08 실행 상태: Worker/Chalk/extension 전체 테스트와 typecheck, webview/extension
 빌드 PASS. EFF-T01–04 PASS (합성 사용자, 실제 Service 라우팅/SQLite, upstream mock 및

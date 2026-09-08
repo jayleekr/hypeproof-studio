@@ -11,8 +11,8 @@ upstream is the real Anthropic API. This is not production-class validation.
 | [Proxy](proxy/effort-result.json) | 11 | PASS: same cases through the proxy runtime |
 | [Untouched v0.1.56](old-client/old-client-result.json) | 2 | PASS: absent effort header receives frozen medium default |
 
-All 35 calls returned HTTP 200. API request shape and D1 records are independently
-compared; response text is not proof of the applied setting. Agent SDK emits an
+All 35 calls returned HTTP 200. API request shape and gateway request-setting records (synthetic SQLite binding)
+are independently compared; response text is not proof of the applied setting. Agent SDK emits an
 additional request in these cases. The grouping waits for observed pending calls
 and compares turn IDs, rather than assuming every late response belongs to the
 next user turn. This is not a complete billing/attempt ledger (#800).
