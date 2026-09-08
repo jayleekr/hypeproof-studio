@@ -69,7 +69,7 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
     if(!live){record('B5-intro',{name,actual_service_profile:true});return;}
     if(degraded){
      await send('합성 검수입니다. 도구는 사용하지 말고 현재 이름으로 한 문장만 답하세요.');
-     await wait(()=>chat.evaluate(`document.body.textContent.includes(${JSON.stringify('지금 '+name+'는 파일 저장·명령 실행 도구 없이')})`),'named SDK-unavailable notice',90000);
+     await wait(async()=>{if(await chat.evaluate(`document.body.textContent.includes(${JSON.stringify('지금 '+name+'는 파일 저장·명령 실행 도구 없이')})`))return true;if(!await chat.evaluate("!!document.querySelector('.hps-btn-stop')"))throw Error('SDK-unavailable turn ended without its notice');},'named SDK-unavailable notice',90000);
      await finished();await shot('b-sdk-unavailable');
      assert.ok(gatewayCalls.some(c=>c.path==='/v1/chat/completions'),'fallback did not use actual proxy route');
      assert.ok(!gatewayCalls.some(c=>c.path==='/v1/messages'),'SDK request observed in unavailable fixture');
@@ -90,7 +90,9 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
     await wait(()=>chat.evaluate("document.querySelector('.hps-native-observation ol li')!==null"),'actual recorded events');
     const observation=await chat.evaluate("({intro:document.querySelector('.hps-native-observation > p').textContent,events:[...document.querySelectorAll('.hps-native-observation ol li')].map(e=>({kind:e.querySelector('strong').textContent,text:e.querySelector('pre').textContent})),consent:document.querySelector('.hps-native-observation input[type=checkbox]').checked})");
     assert.ok(observation.events.some(e=>e.kind.includes('user')));assert.ok(observation.events.some(e=>e.kind.includes('tool_result')));assert.ok(observation.events.some(e=>e.kind.includes('approval')));assert.equal(observation.consent,false);
-    await chat.evaluate("document.querySelectorAll('.hps-native-observation details').forEach(d=>d.open=true)");await shot('b-observation');record('B5',observation);
+    await shot('b-observation');
+    await chat.evaluate("[...document.querySelectorAll('.hps-native-observation details')].find(d=>d.querySelector('ol'))?.setAttribute('open','')");await window.waitForTimeout(300);
+    await chat.evaluate("document.querySelector('.hps-native-observation ol')?.scrollIntoView({block:'start'})");await window.waitForTimeout(300);await shot('b-observation-records');record('B5',observation);
    }catch(e){failure=e.message;await shot('b-failure').catch(()=>{});throw e;}
    finally{completed=!failure;save();}
   },

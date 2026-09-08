@@ -89,7 +89,11 @@ if(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'){
   const sdk=process.env.HPS_APP_PATH.split('/Contents/MacOS/')[0]+'/Contents/Resources/app/extensions/hypeproof-chat/dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk';
   manifest.bundled_sdk={present:existsSync(sdk+'/sdk.mjs')};
   if(manifest.bundled_sdk.present){manifest.bundled_sdk.version=JSON.parse(readFileSync(sdk+'/package.json','utf8')).version;manifest.bundled_sdk.sha256=createHash('sha256').update(readFileSync(sdk+'/sdk.mjs')).digest('hex');}
+  const bare=process.env.HPS_APP_PATH.split('/Contents/MacOS/')[0]+'/Contents/Resources/app/extensions/hypeproof-chat/node_modules/@anthropic-ai/claude-agent-sdk';
+  manifest.bare_sdk={present:existsSync(bare+'/sdk.mjs')};
+  if(manifest.bare_sdk.present){manifest.bare_sdk.version=JSON.parse(readFileSync(bare+'/package.json','utf8')).version;manifest.bare_sdk.sha256=createHash('sha256').update(readFileSync(bare+'/sdk.mjs')).digest('hex');}
   assert.equal(manifest.bundled_sdk.present,!manifest.sdk_unavailable_fixture,'SDK fixture does not match the actual copied app');
+  if(manifest.sdk_unavailable_fixture)assert.equal(manifest.bare_sdk.present,false,'bare SDK fallback must also be absent in this fixture');
  }
  writeFileSync(out+'/environment.json',JSON.stringify(manifest,null,2));
 }
