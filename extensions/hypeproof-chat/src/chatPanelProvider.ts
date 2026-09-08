@@ -12,7 +12,7 @@ import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelper
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
 import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
-import { extractTitle, publishWorld, resolveSiteBase } from "./galleryPublish";
+import { extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
 import { uploadSessionSnapshot } from "./spoolUploader";
 import {
   originOfUrl,
@@ -1050,6 +1050,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private async publishToGallery(): Promise<void> {
     const fail = (message: string) =>
       void this.post({ type: "publishResult", state: "error", message });
+
+    // #748 — 프로필이 발행 정책의 소유자다. 이 검사는 세상/토큰/폴더보다
+    // **먼저** 온다: 허용되지 않은 좌석에는 "세상을 열어주세요" 같은 다음 단계
+    // 안내를 주면 안 된다. 그건 하면 되는 일처럼 읽힌다.
+    const allowed = galleryPublishAllowed(this.cachedProfile?.publishing);
+    if (!allowed.ok) return fail(allowed.message);
 
     const worldId = this.lastPrebuiltWorld;
     if (!worldId) return fail("먼저 친구를 눌러 세상을 열어주세요.");

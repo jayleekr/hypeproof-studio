@@ -232,15 +232,23 @@ export function ChatPanel(props: Props) {
   // 길이 없었고, 그 타이핑이 아이가 고쳐 둔 세상을 덮어썼다.
   const worlds: WorldChoice[] = config?.profile?.worlds ?? [];
   /**
-   * 갤러리 버튼을 보일지. **코호트 프로필이 정한다** — 워커의
-   * `publishing.strategy` 가 `hypeproof_gallery` 일 때만.
+   * 갤러리 버튼을 보일지. **코호트 프로필이 정한다** — 워커의 `publishing` 이
+   * 켜져 있고(`enabled`) 목적지가 갤러리(`strategy`)일 때만.
    *
    * 미성년 코호트 기본값은 `local_only` 이고, 그 프로필에는 "공개 퍼블리시는
    * 부모 동의 + PII 설계가 끝난 뒤에만 켠다" 는 결정이 주석으로 박혀 있다.
    * 여기서 화면만 열어 봐야 서버가 403 으로 막으므로(fail closed), 이 판단은
    * **아이에게 없는 버튼을 안 보여주기 위한 것**이지 보안 경계가 아니다.
+   *
+   * #748 — 이전에는 `strategy` 만 봤다. `enabled` 는 워커가 실어 보내기만 하고
+   * 어디서도 읽지 않는 값이었다. 이제 호스트의 `galleryPublishAllowed` 와 **같은
+   * 두 값을 같은 방향으로** 본다. 손으로 미러링하는 이유는 REQ-M33 과 같다 —
+   * 웹뷰는 별도 vite 앱이라 확장 호스트 모듈을 import 하지 않는다. 두 쪽이
+   * 갈라지지 않도록 test/gallery-publish-gate.smoke.mjs 가 드리프트를 잠근다.
    */
-  const galleryEnabled = config?.profile?.publishing?.strategy === "hypeproof_gallery";
+  const publishing = config?.profile?.publishing;
+  const galleryEnabled =
+    publishing?.enabled === true && publishing?.strategy === "hypeproof_gallery";
   // #140 / #747 — one identity rule shared with the host (coachIdentity.ts):
   // a fixed cohort or lesson name wins over any stored student name.
   const coachName = resolveCoachIdentity(config?.coach, { ux }).name;
