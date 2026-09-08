@@ -1,0 +1,226 @@
+[
+  {
+    "id": "studio-react-completed-480",
+    "file": "studio-react-completed-480.png",
+    "capturedAt": "2026-09-08T06:17:59.401Z",
+    "viewport": {
+      "width": 480,
+      "height": 900
+    },
+    "kind": "react-fixture",
+    "sourceCommit": "52cb48a0aeef799c6b4909b164703996b60cac07",
+    "state": "completed; synthetic messages, no tools actually executed",
+    "errors": [],
+    "sha256": "17b92ee877c76700126d4f7868129faa0fe2d70c40aaa51f3173776a4df68150"
+  },
+  {
+    "id": "studio-react-lesson-480",
+    "file": "studio-react-lesson-480.png",
+    "capturedAt": "2026-09-08T06:17:59.475Z",
+    "viewport": {
+      "width": 480,
+      "height": 900
+    },
+    "kind": "react-fixture",
+    "sourceCommit": "52cb48a0aeef799c6b4909b164703996b60cac07",
+    "state": "lesson expanded",
+    "sha256": "6fab4c36c96cf5767be858392443217b54638eab67260fad4cf20ecde47e876e"
+  },
+  {
+    "id": "studio-react-running-queue-480",
+    "file": "studio-react-running-queue-480.png",
+    "capturedAt": "2026-09-08T06:17:59.549Z",
+    "viewport": {
+      "width": 480,
+      "height": 900
+    },
+    "kind": "react-fixture",
+    "sourceCommit": "52cb48a0aeef799c6b4909b164703996b60cac07",
+    "state": "running with queued follow-up",
+    "sha256": "f068aa9cbca1ffafde93aa1dd1664f5d02426804909d637a345c11fd2438176b"
+  },
+  {
+    "id": "studio-react-error-480",
+    "file": "studio-react-error-480.png",
+    "capturedAt": "2026-09-08T06:17:59.592Z",
+    "viewport": {
+      "width": 480,
+      "height": 900
+    },
+    "kind": "react-fixture",
+    "sourceCommit": "52cb48a0aeef799c6b4909b164703996b60cac07",
+    "state": "error after tool activity",
+    "sha256": "ac243122b791e34488fa6255ab25e2474b6e678003b9af96f861490ebaeaed65"
+  },
+  {
+    "id": "studio-react-inspection",
+    "kind": "render-observation",
+    "errors": [],
+    "metrics": {
+      "documentWidth": 486,
+      "viewport": 480,
+      "textSize": "13px",
+      "headerButtonSize": "11px",
+      "toolLabelSize": "12px"
+    }
+  },
+  {
+    "id": "cursor-browser-docs",
+    "file": "cursor-browser-docs.png",
+    "capturedAt": "2026-09-08T06:18:01.977Z",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "kind": "official-page",
+    "requestedUrl": "https://cursor.com/docs/agent/browser",
+    "resolvedUrl": "https://cursor.com/docs/agent/tools/browser",
+    "httpStatus": 200,
+    "scope": "Official documentation captured in a browser; vendor screenshots are not our authenticated product execution",
+    "sha256": "e9f8f985e0fd45dad1d3af30ca2e1dd2f3722562fbb2a849ef19d7c4abf93a35"
+  },
+  {
+    "id": "cursor-browser-docs-images",
+    "images": [
+      {
+        "alt": "MCP Configuration showing Browser Origin Allowlist settings with Add Origin button",
+        "src": "",
+        "width": 0,
+        "height": 0
+      },
+      {
+        "alt": "",
+        "src": "https://image.mux.com/SUtXsaFq4FV5xh5014P5wAU163tGojX4zoHQH009jWAbI/thumbnail.webp",
+        "width": 2048,
+        "height": 1186
+      }
+    ]
+  },
+  {
+    "id": "cursor-review-docs",
+    "file": "cursor-review-docs.png",
+    "capturedAt": "2026-09-08T06:18:03.826Z",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "kind": "official-page",
+    "requestedUrl": "https://cursor.com/docs/agent/agent-review",
+    "resolvedUrl": "https://cursor.com/docs/agent/agent-review",
+    "httpStatus": 200,
+    "scope": "Official documentation captured in a browser; vendor screenshots are not our authenticated product execution",
+    "sha256": "8eec52f7f7a430e52d794737717b3a05781c6cf11f7d70e4e928726ef0409591"
+  },
+  {
+    "id": "cursor-review-docs-images",
+    "images": []
+  },
+  {
+    "id": "vscode-browser-docs",
+    "file": "vscode-browser-docs.png",
+    "capturedAt": "2026-09-08T06:18:06.227Z",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "kind": "official-page",
+    "requestedUrl": "https://code.visualstudio.com/docs/agents/run/browser-tools",
+    "resolvedUrl": "https://code.visualstudio.com/docs/agents/run/browser-tools",
+    "httpStatus": 200,
+    "scope": "Official documentation captured in a browser; vendor screenshots are not our authenticated product execution",
+    "sha256": "e4dddabd4e53bef2019ba6527620a67639246be8452f573270191213441480b8"
+  },
+  {
+    "id": "vscode-browser-docs-images",
+    "images": [
+      {
+        "alt": "Diagram showing the browser feedback loop",
+        "src": "https://code.visualstudio.com/assets/docs/agents/browser-tools/browser-feedback-loop.png",
+        "width": 2324,
+        "height": 1390
+      },
+      {
+        "alt": "Follow us on X",
+        "src": "https://code.visualstudio.com/assets/icons/x-icon.svg",
+        "width": 1200,
+        "height": 1227
+      }
+    ]
+  },
+  {
+    "id": "cascade-docs",
+    "file": "cascade-docs.png",
+    "capturedAt": "2026-09-08T06:18:08.618Z",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "kind": "official-page",
+    "requestedUrl": "https://docs.windsurf.com/windsurf/cascade/cascade",
+    "resolvedUrl": "https://docs.devin.ai/desktop/cascade/cascade",
+    "httpStatus": 200,
+    "scope": "Official documentation captured in a browser; vendor screenshots are not our authenticated product execution",
+    "sha256": "9e4fda7d1d7fb990de14b1951fbb7ffa30e03140f853119180987f5887d60650"
+  },
+  {
+    "id": "cascade-docs-images",
+    "images": [
+      {
+        "alt": "dark logo",
+        "src": "https://mintcdn.com/cognitionai/FxQ7nXMRUlEte9xx/logo/devin-light.png?fit=max&auto=format&n=FxQ7nXMRUlEte9xx&q=85&s=934b3145a143dfd32339d13482b3d15f",
+        "width": 256,
+        "height": 256
+      },
+      {
+        "alt": "",
+        "src": "https://mintcdn.com/cognitionai/hxeMffzXgF_RWx-U/desktop/assets/windsurf/cascade/send-problems-to-cascade.png?w=1100&fit=max&auto=format&n=hxeMffzXgF_RWx-U&q=85&s=c1a0582051a2e9154895c45cd5578b86",
+        "width": 294,
+        "height": 113
+      },
+      {
+        "alt": "",
+        "src": "https://mintcdn.com/cognitionai/WE51TvKjsiyk1ZHl/desktop/assets/windsurf/windsurf-explain-fix.png?w=1100&fit=max&auto=format&n=WE51TvKjsiyk1ZHl&q=85&s=299a99bc8621775f6c2d5f8b41f80d3b",
+        "width": 824,
+        "height": 130
+      },
+      {
+        "alt": "",
+        "src": "https://mintcdn.com/cognitionai/hxeMffzXgF_RWx-U/desktop/assets/windsurf/cascade/auto-fix-lint.png?w=1100&fit=max&auto=format&n=hxeMffzXgF_RWx-U&q=85&s=9f8b23c31f54a16134130544d1de8d61",
+        "width": 543,
+        "height": 182
+      }
+    ]
+  },
+  {
+    "id": "replit-testing-docs",
+    "file": "replit-testing-docs.png",
+    "capturedAt": "2026-09-08T06:18:10.701Z",
+    "viewport": {
+      "width": 1440,
+      "height": 1000
+    },
+    "kind": "official-page",
+    "requestedUrl": "https://docs.replit.com/replitai/app-testing",
+    "resolvedUrl": "https://docs.replit.com/features/agent/app-testing",
+    "httpStatus": 200,
+    "scope": "Official documentation captured in a browser; vendor screenshots are not our authenticated product execution",
+    "sha256": "8e5247fe580c31cc1e7f6b15e2ce3391599fa02fa108d0fc73515528906d8f67"
+  },
+  {
+    "id": "replit-testing-docs-images",
+    "images": [
+      {
+        "alt": "App Testing take over interface showing Skip and Begin take over buttons with instructions for handling errors and CAPTCHAs",
+        "src": "https://mintcdn.com/replit/kVUdilkonY2o8_tu/images/replitai/app-testing-takeover.png?w=840&fit=max&auto=format&n=kVUdilkonY2o8_tu&q=85&s=8bb1b8290224c8652f9ecf7337255eef",
+        "width": 703,
+        "height": 272
+      },
+      {
+        "alt": "Interactive video replay interface showing the testing session with navigation controls",
+        "src": "https://mintcdn.com/replit/fq3p5W3K0mVwvlo1/images/replitai/app-testing-replay-photo.png?w=840&fit=max&auto=format&n=fq3p5W3K0mVwvlo1&q=85&s=d784b6c5a0bdb723fda722f78d3929bd",
+        "width": 703,
+        "height": 555
+      }
+    ]
+  }
+]
