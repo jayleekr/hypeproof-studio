@@ -10,7 +10,13 @@ import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
-import { sdkToolToActionRequest, isAbortError, summarizeToolInput } from "./sdkCoachHelpers";
+import {
+  coachSeatKeyFor,
+  isAbortError,
+  sdkToolToActionRequest,
+  summarizeToolInput,
+  withCoachSeatLock,
+} from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
 import { extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
 import { uploadSessionSnapshot } from "./spoolUploader";
@@ -2311,6 +2317,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           // #580 — 요청 1건의 usage (워커 hps_usage / 업스트림 usage 청크).
           onUsage: this.proxyUsageRecorder(streamId),
         });
+      // #749 — 한 좌석에 코치 턴은 동시에 하나만 돈다. 잠금은 런타임 **바깥**에
+      // 있어야 한다: 처음엔 `runSdkCoach` 안에 있었는데 그러면 proxy 코호트 전체가
+      // 무방비였고, SDK 가 `SdkUnavailableError` 로 떨어질 때 잠금이 먼저 풀린 뒤
+      // 폴백이 돌아 **막으려던 중복 턴이 다른 런타임에서 실행**됐다. 여기서 잡으면
+      // 두 경로와 폴백이 한 울타리 안에 들어온다.
+      //
+      // 좌석 키는 토큰·프로필에서 파생한다(토큰은 해시만 쓴다). 토큰이 없으면
+      // 어차피 아래에서 막히므로 잠금은 최선 노력으로 둔다.
+      await withCoachSeatLock(coachSeatKeyFor({ token: token ?? undefined, profile: profile ?? undefined }), async () => {
       if (runtime === "agent-sdk") {
         if (!profile) {
           throw new Error(profileNotReadyNotice(this.coachDisplayName()));
@@ -2427,6 +2442,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // #278 Phase 3 — browser loop for opted-in cohorts, else plain proxy.
         await runProxyRuntime();
       }
+      });
       // On user-initiated stop the cancelStream handler already ended the stream
       // in the webview; don't post streamEnd or commit the truncated turn
       // (parity with the proxy path, which throws on abort).
