@@ -192,6 +192,46 @@ shape rather than by a rule someone must remember.
   alias against the Anthropic map and calls Anthropic regardless of the profile's
   provider. They are real spend on real ids that no lesson policy governs.
 
+## The load-bearing claim, executed rather than reasoned
+
+"Both existing clamps enforce the lesson's set with zero clamp edits" is the claim
+the whole contract rests on, so it was run rather than argued. A throwaway probe
+built the profile the chat gate would return for a lesson narrowed to `{fast}` and
+called both clamps directly — `translate()` / `translateOpenAI()` for
+`/v1/chat/completions`, `resolveMessagesModel()` for `/v1/messages` — with no edit
+to either.
+
+| request under a lesson narrowed to `{fast}` | `/v1/chat` | `/v1/messages` |
+|---|---|---|
+| nothing | claude-haiku-4-5 | — |
+| `hypeproof-default` (the profile's own default) | claude-haiku-4-5 | claude-haiku-4-5 |
+| `hypeproof-strong` | claude-haiku-4-5 | claude-haiku-4-5 |
+| `claude-sonnet-4-6` (the raw id) | claude-haiku-4-5 | claude-haiku-4-5 |
+| `gpt-4o` (another provider's id) | claude-haiku-4-5 | — |
+| `hypeproof-fast` | claude-haiku-4-5 | claude-haiku-4-5 |
+
+Baseline controls on the unnarrowed profile still resolve to sonnet for default and
+strong, and to haiku for the fallback alias and for a raw `claude-*haiku*` id, so the
+probe is measuring the narrowing rather than a clamp that always returns fast. The
+same holds on the OpenAI map: unnarrowed `hypeproof-strong` gives gpt-4o, narrowed
+`hypeproof-default` gives gpt-4o-mini.
+
+The auxiliary carve-out was measured too: a profile listing **no** fast fallback still
+resolves `hypeproof-fast` to claude-haiku-4-5 on `/v1/messages`. That is route policy,
+and the ADR keeps it deliberately.
+
+The alias collapse that forces id-comparison was counted, not assumed:
+
+| provider | fast / default / strong | distinct ids |
+|---|---|---|
+| anthropic | claude-haiku-4-5 / claude-sonnet-4-6 / claude-opus-4-7 | 3 |
+| gemini | gemini-2.5-flash / gemini-3.5-flash / gemini-3.5-flash | 2 |
+| openai | gpt-4o-mini / gpt-4o / gpt-4o | 2 |
+| glm | glm-5.2 / glm-5.2 / glm-5.2 | 1 |
+
+The probe was a scratch file and is not committed; the permanent form of these checks
+is the test list below, which the implementation slice must carry.
+
 ## Verification this slice must carry
 
 - **Service, in the file that already locks lesson policy smuggling:** positive control
