@@ -32,8 +32,12 @@ export async function verifyModels({app,window,findContext,cases,out,live,upstre
   assert.equal(initial.selected,'hypeproof-default');assert.equal(initial.options.length,2);assert.equal(initial.name,'제작 파트너');record('selection',initial);
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setBounds({width:1800,height:1000}));await window.waitForTimeout(300);
   for(const width of [390,1280]){
-   for(let n=0;n<4;n++){const current=await chat.evaluate('innerWidth');if(current===width)break;await app.evaluate(({BrowserWindow},delta)=>{const w=BrowserWindow.getAllWindows()[0];w.setBounds({width:w.getBounds().width+delta});},width-current);await window.waitForTimeout(200);}
-   const metrics=await chat.evaluate("({width:innerWidth,document_width:document.documentElement.scrollWidth,select_right:document.querySelector('.hps-model-selection select').getBoundingClientRect().right})");assert.equal(metrics.width,width);assert.equal(metrics.document_width,width);assert.ok(metrics.select_right<=width);record('width-'+width,metrics);await shot('model-'+width);
+   // The actual editor window has a 400px minimum. Use Studio's real zoom
+   // setting for 390 CSS px; never bypass its minimum or emulate the webview.
+   const factor=width===390?2:1;
+   setZoom(factor);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-factor)<0.01,'viewport zoom');await window.waitForTimeout(300);
+   for(let n=0;n<4;n++){const current=await chat.evaluate('innerWidth');if(current===width)break;await app.evaluate(({BrowserWindow},delta)=>{const w=BrowserWindow.getAllWindows()[0];w.setBounds({width:w.getBounds().width+delta});},Math.round((width-current)*factor));await window.waitForTimeout(200);}
+   const metrics=await chat.evaluate("({width:innerWidth,document_width:document.documentElement.scrollWidth,select_right:document.querySelector('.hps-model-selection select').getBoundingClientRect().right})");assert.equal(metrics.width,width);assert.equal(metrics.document_width,width);assert.ok(metrics.select_right<=width);record('width-'+width,{...metrics,zoom:factor});await shot('model-'+width);
   }
   await chat.evaluate("document.querySelector('.hps-model-selection select').focus()");
   await key(chat,'ArrowDown',40);await key(chat,'Enter',13);
