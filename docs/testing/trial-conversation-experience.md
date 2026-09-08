@@ -53,3 +53,8 @@ Service/App 소스 base 18281a9 + 이 PR 변경. 원본 공개 앱의 검증으�
 각 실행에 앱 버전/소스 SHA/Service SHA/프로필/합성 사용자/뷰포트/요청/실제 응답/도구/파일
 해시/확인한 URL·커밋/스크린샷/PASS·FAIL·BLOCKED·NOT RUN/원인·재실행을 기록한다.
 인증값·개인정보·비공개 파일 내용은 공개 커밋에 넣지 않는다. 토큰 존재는 인증·접근 성공이 아니다.
+
+main의 #839 effort·#840 사용량 UI를 병합한 `ef9cd7096b4431f30484fbccee8786a509cf0807`에서도
+20260908T233625Z에 같은 3개 실제 Mac 시나리오를 다시 실행해 3 PASS(31.2초)를 확인했다.
+Worker 전체 테스트·typecheck, extension 전체 smoke·typecheck도 통과했다.
+이 결과 역시 공개 shell에 해당 extension을 주입한 격리 앱이며 공개 설치본 업데이트가 아니다.
