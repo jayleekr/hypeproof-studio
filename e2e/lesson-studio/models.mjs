@@ -22,7 +22,7 @@ export async function verifyModels({app,window,findContext,cases,out,live,upstre
  const record=(id,data)=>{checks.push({id,...data});save('IN_PROGRESS');};
  const wait=async(fn,label,ms=20000)=>{const until=Date.now()+ms;while(Date.now()<until){const x=await fn();if(x)return x;await window.waitForTimeout(200);}throw Error('Timed out: '+label);};
  const frame=s=>wait(()=>findContext(s),'frame '+s);
- const shot=async name=>{const png=await app.evaluate(async({BrowserWindow})=>(await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));writeFileSync(out+'/'+name+'.png',Buffer.from(png,'base64'));};
+ const shot=async name=>{await window.waitForTimeout(500);const png=await app.evaluate(async({BrowserWindow})=>(await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));writeFileSync(out+'/'+name+'.png',Buffer.from(png,'base64'));};
  const fill=(c,s,v)=>c.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(s)});const p=e.tagName==='TEXTAREA'?HTMLTextAreaElement.prototype:e.tagName==='SELECT'?HTMLSelectElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(p,'value').set.call(e,${JSON.stringify(v)});e.dispatchEvent(new Event(e.tagName==='SELECT'?'change':'input',{bubbles:true}));})()`);
  const choose=async(c,alias)=>{await fill(c,'select[aria-label="대화 모델"]',alias);await wait(()=>c.evaluate(`document.querySelector('select[aria-label="대화 모델"]').value===${JSON.stringify(alias)}`),'selected '+alias);await window.waitForTimeout(200);};
  const input='.hps-input textarea';
@@ -83,6 +83,7 @@ export async function verifyModels({app,window,findContext,cases,out,live,upstre
     if(choice.id==='claude-sonnet-5'||choice.id==='claude-opus-5')await shot(choice.id);
    }
   }
+  if(!live)await choose(chat,'hypeproof-fast');
   // Reconnect to a distinct frozen fixed-model lesson through the real onboarding form.
   await chat.evaluate("document.querySelector('.hps-actions button[title=\"연결된 수업 확인 및 변경\"]').click()");
   const start=await frame('.studio-start');await start.evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent==='다른 수업에 연결').click()");await wait(()=>start.evaluate("!!document.querySelector('#course-code')"),'code input');
