@@ -1,0 +1,23 @@
+// Read-only counterexample for ADR-0006. This calls existing pure resolvers;
+// it does not claim a lesson policy implementation or a provider execution.
+import '../../worker/test/harness/loader.mjs';
+import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+import {readFileSync,mkdirSync,writeFileSync} from 'node:fs';
+import {resolve,dirname} from 'node:path';
+import {fileURLToPath} from 'node:url';
+const {resolveMessagesModel}=await import('../../worker/src/routes/messages.ts');
+const {MODEL_MAP}=await import('../../worker/src/profiles/types.ts');
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
+const out=resolve(process.env.HPS_MODEL_POLICY_EVIDENCE_DIR||'test-results/model-policy');mkdirSync(out,{recursive:true});
+const narrowed={model:{default:'hypeproof-default'}};
+const requests=['hypeproof-default','hypeproof-fast','claude-any-haiku-example','hypeproof-strong'];
+const results=requests.map(requested=>({requested,served:resolveMessagesModel(requested,narrowed)}));
+assert.equal(results[0].served,MODEL_MAP['hypeproof-default']);
+assert.equal(results[1].served,MODEL_MAP['hypeproof-fast']);
+assert.equal(results[2].served,MODEL_MAP['hypeproof-fast']);
+assert.equal(results[3].served,MODEL_MAP['hypeproof-default']);
+const source='worker/src/routes/messages.ts';
+writeFileSync(out+'/results.json',JSON.stringify({at:new Date().toISOString(),source_sha:execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8'}).trim(),dirty:execFileSync('git',['status','--porcelain'],{cwd:root,encoding:'utf8'}).trim().length>0,source_file:source,source_file_sha256:createHash('sha256').update(readFileSync(resolve(root,source))).digest('hex'),scope:'existing pure resolver; no Service auth/frozen lesson/provider request',profile:narrowed,results,probe:'PASS counterexample reproduced',strict_single_model_contract:'NOT_ENFORCED by the existing resolver; fast requests have no trusted auxiliary-purpose check'},null,2)+'\n');
+console.log('PASS counterexample: a default-only profile still allows fast; no runtime policy implementation claimed');
