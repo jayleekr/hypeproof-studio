@@ -269,6 +269,7 @@ chat.get("/profile", async (c) => {
     // Absent → the client keeps its legacy default. Exposing it here is what
     // lets the client stop hardcoding "~/HypeProofGames" for every cohort.
     workspace_root: profile.sandbox.workspace_root ?? null,
+    ...(profile.workspace_start ? {workspace_start:profile.workspace_start} : {}),
     // 2026-08-19 — 게스트의 세상 사전 완성본 목록. kids-quest tier 에서만. 확장이
     // 아이의 "🐕 초코 세상에 가볼래"를 이 목록으로 매칭해 GET /v1/worlds/:id 를 즉시 띄운다.
     worlds: profile.game?.template_tier === "kids-quest" ? listWorlds() : undefined,

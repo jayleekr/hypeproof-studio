@@ -9,6 +9,7 @@ import prompt from '../prompts/studio-native-trial.md';
 export const profile: Profile = {
   ...structuredClone(practice),
   id: 'studio-native-trial',
+  workspace_start: 'empty',
   version: 1,
   display_name: 'Studio · 내 삶에 AI 더하기',
   dashboard_hidden: true, // not offered for customer issuance before live validation

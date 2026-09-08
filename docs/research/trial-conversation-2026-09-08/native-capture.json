@@ -1,0 +1,62 @@
+[
+  {
+    "file": "screenshots/cursor-connect-entry.png",
+    "kind": "APP",
+    "app": "Cursor",
+    "version": "3.19.13",
+    "platform": "macOS arm64",
+    "windowPoints": [
+      1018,
+      659
+    ],
+    "captureRegionPoints": [
+      321,
+      596,
+      240,
+      84
+    ],
+    "capturedAt": "2026-09-08T23:31:29.364913+00:00",
+    "sha256": "a22377d07b5a989001788fa4ba5a330605449e5920b6cdf971e43bd55fd85b9c",
+    "scope": "visible UI only; no authorization or settings mutation"
+  },
+  {
+    "file": "screenshots/cursor-account-plan.png",
+    "kind": "APP",
+    "app": "Cursor",
+    "version": "3.19.13",
+    "platform": "macOS arm64",
+    "windowPoints": [
+      1018,
+      659
+    ],
+    "captureRegionPoints": [
+      590,
+      130,
+      725,
+      560
+    ],
+    "capturedAt": "2026-09-08T23:31:29.375437+00:00",
+    "sha256": "b3bf8d72a370cefcb7e9826681a4ec6dd421f5924d0bc9f98b8281aa47c6f9b2",
+    "scope": "visible UI only; no authorization or settings mutation"
+  },
+  {
+    "file": "screenshots/cursor-git-prs.png",
+    "kind": "APP",
+    "app": "Cursor",
+    "version": "3.19.13",
+    "platform": "macOS arm64",
+    "windowPoints": [
+      1018,
+      659
+    ],
+    "captureRegionPoints": [
+      590,
+      130,
+      725,
+      560
+    ],
+    "capturedAt": "2026-09-08T23:31:29.382483+00:00",
+    "sha256": "25fe46e49e998f7cb1610912b4b6a01e070ffa14604522936cc1551b366c7b05",
+    "scope": "visible UI only; no authorization or settings mutation"
+  }
+]

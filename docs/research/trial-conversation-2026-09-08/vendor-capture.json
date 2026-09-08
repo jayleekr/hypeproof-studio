@@ -1,0 +1,29 @@
+[
+  {
+    "kind": "VENDOR",
+    "url": "https://prod.cursor.com/docs/integrations/github#setup",
+    "video": "https://prod.cursor.com/docs-static/images/bugbot/bugbot-install.mp4",
+    "seconds": 6,
+    "file": "screenshots/cursor-setup-vendor-6s.png",
+    "capturedAt": "2026-09-08T23:35:03.974Z",
+    "sha256": "39b4147c0ba659abde7ccb56dd91c4013325c3c117b985c466cf5849541055f2"
+  },
+  {
+    "kind": "VENDOR",
+    "url": "https://prod.cursor.com/docs/integrations/github#setup",
+    "video": "https://prod.cursor.com/docs-static/images/bugbot/bugbot-install.mp4",
+    "seconds": 12,
+    "file": "screenshots/cursor-setup-vendor-12s.png",
+    "capturedAt": "2026-09-08T23:35:04.070Z",
+    "sha256": "c3d79b1993d461bc86a88e9790ac58d40a0a91cb9e0ba1f951feb158fe1bf0f3"
+  },
+  {
+    "kind": "VENDOR",
+    "url": "https://prod.cursor.com/docs/integrations/github#setup",
+    "video": "https://prod.cursor.com/docs-static/images/bugbot/bugbot-install.mp4",
+    "seconds": 18,
+    "file": "screenshots/cursor-setup-vendor-18s.png",
+    "capturedAt": "2026-09-08T23:35:04.146Z",
+    "sha256": "bd3ea9648d916d2ed6d20432a2d49661879972c84e8b7664a8aacef682069861"
+  }
+]

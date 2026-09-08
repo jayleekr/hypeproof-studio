@@ -137,3 +137,9 @@ Detailed contract: [studio-trial](../requirements/studio-trial.md).
 ## Personal trial UI and UX (#758)
 
 `REQ-STUDIO-NATIVE-UX`: [TUX requirements](../requirements/studio-native-trial-ux.md) inventory every native trial control, conditional surface and host action. [UI acceptance tests](../testing/studio-native-trial-ux.md) distinguish React interaction, host contracts, actual Electron/API execution and release verification. Requirements are not executed results.
+
+## 체험 대화와 GitHub 연결 (#844)
+
+[CU-01~18 / GHX-01~12](../design/trial-conversation-experience.md)는 NAT/TUX/AE의 후속 수용 기준이다.
+[테스트 계획과 실행 기록](../testing/trial-conversation-experience.md), [화면 근거](../research/trial-conversation-2026-09-08/README.md)를 함께 유지한다.
+전체 구현 완료로 표시하지 않는다. #842의 목적별 빈 폴더 시작만 이번 구현 범위다.

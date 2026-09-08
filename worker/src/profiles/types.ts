@@ -7,6 +7,8 @@ import type { LLMProvider } from "../env.ts";
 export interface Profile {
   /** Explicit opt-in; observation does not grant any execution tools. */
   observation?: { enabled: boolean };
+  /** Empty starts wait for a task; absent preserves existing web curriculum. */
+  workspace_start?: 'empty' | 'html';
   id: string;
   version: number;
   display_name: string;

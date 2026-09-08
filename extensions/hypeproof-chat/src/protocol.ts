@@ -156,6 +156,7 @@ export interface ResolvedProfile {
   // the dental website cohort, "~/HypeProofGames" for kids). The extension opens
   // this folder on onboarding. Absent → the legacy default folder is used.
   workspace_root?: string | null;
+  workspace_start?: 'empty' | 'html';
   /** Optional input capabilities (default off). #278 / website-copyclone. */
   input?: { page_context?: boolean; image_paste?: boolean };
   /** #278 Phase 3 — coach's client-driven browser control loop (default off). */

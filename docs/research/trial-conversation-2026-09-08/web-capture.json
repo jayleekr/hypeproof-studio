@@ -1,0 +1,92 @@
+[
+  {
+    "id": "cursor-github-setup",
+    "kind": "DOC",
+    "url": "https://prod.cursor.com/docs/integrations/github#setup",
+    "finalUrl": "https://prod.cursor.com/docs/integrations/github#setup",
+    "httpStatus": 200,
+    "title": "GitHub | Cursor Docs",
+    "capturedAt": "2026-09-08T23:31:32.464Z",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "file": "screenshots/cursor-github-setup.png",
+    "sha256": "75ed03a5f40a3e74a6dfa3f9308bd108d89841928f12bc583f924a45842adfaf"
+  },
+  {
+    "id": "cursor-github-permissions",
+    "kind": "DOC",
+    "url": "https://prod.cursor.com/docs/integrations/github#permissions",
+    "finalUrl": "https://prod.cursor.com/docs/integrations/github#permissions",
+    "httpStatus": 200,
+    "title": "GitHub | Cursor Docs",
+    "capturedAt": "2026-09-08T23:31:34.045Z",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "file": "screenshots/cursor-github-permissions.png",
+    "sha256": "b21fc7fafb9c906590e581b6c2db48baa4ca0dd7aa6a43a9618d0308cd7d2c81"
+  },
+  {
+    "id": "cursor-github-recovery",
+    "kind": "DOC",
+    "url": "https://prod.cursor.com/docs/integrations/github#troubleshooting",
+    "finalUrl": "https://prod.cursor.com/docs/integrations/github#troubleshooting",
+    "httpStatus": 200,
+    "title": "GitHub | Cursor Docs",
+    "capturedAt": "2026-09-08T23:31:35.739Z",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "file": "screenshots/cursor-github-recovery.png",
+    "sha256": "c18d9394cb35728c06cd44c776a92d075b392af3fafe712ff5bbf8b203d117fd"
+  },
+  {
+    "id": "cursor-github-app",
+    "kind": "DOC",
+    "url": "https://github.com/apps/cursor",
+    "finalUrl": "https://github.com/apps/cursor",
+    "httpStatus": 200,
+    "title": "GitHub Apps - Cursor · GitHub",
+    "capturedAt": "2026-09-08T23:31:37.885Z",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "file": "screenshots/cursor-github-app.png",
+    "sha256": "99a50d188c5554f69ecf4975ee1deb79e87b9d5490d2e61ef6dd6e113ead8860"
+  },
+  {
+    "id": "cursor-usage-limits",
+    "kind": "DOC",
+    "url": "https://prod.cursor.com/help/models-and-usage/usage-limits",
+    "finalUrl": "https://prod.cursor.com/help/models-and-usage/usage-limits",
+    "httpStatus": 200,
+    "title": "Usage and limits | Cursor Docs",
+    "capturedAt": "2026-09-08T23:31:39.471Z",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "file": "screenshots/cursor-usage-limits.png",
+    "sha256": "f74b97d35fc1441aad3782679339c73a78d14a148454abac23cd05e6ec16d660"
+  },
+  {
+    "id": "claude-artifacts",
+    "kind": "DOC",
+    "url": "https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them",
+    "finalUrl": "https://support.claude.com/en/articles/9487310-what-are-artifacts-and-how-do-i-use-them",
+    "httpStatus": 200,
+    "title": "What are artifacts and how do I use them? | Claude Help Center",
+    "capturedAt": "2026-09-08T23:31:41.483Z",
+    "viewport": {
+      "width": 1280,
+      "height": 900
+    },
+    "file": "screenshots/claude-artifacts.png",
+    "sha256": "5200432c88f27e4a084838e41e5dfc6d642cdaa5d6159c68f44f69135d9981d2"
+  }
+]
