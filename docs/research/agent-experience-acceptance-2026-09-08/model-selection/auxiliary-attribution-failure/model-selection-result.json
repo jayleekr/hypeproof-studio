@@ -1,0 +1,159 @@
+{
+  "status": "FAIL",
+  "checks": [
+    {
+      "id": "selection",
+      "selected": "hypeproof-default",
+      "options": [
+        "Claude Sonnet 4.6",
+        "Claude Haiku 4.5",
+        "Claude Sonnet 5",
+        "Claude Sonnet 4.5",
+        "Claude Opus 5",
+        "Claude Opus 4.8",
+        "Claude Opus 4.7",
+        "Claude Opus 4.6",
+        "Claude Opus 4.5"
+      ],
+      "name": "제작 파트너"
+    },
+    {
+      "id": "width-390",
+      "width": 390,
+      "document_width": 390,
+      "select_right": 182.2421875,
+      "zoom": 2
+    },
+    {
+      "id": "width-1280",
+      "width": 1280,
+      "document_width": 1280,
+      "select_right": 182.4921875,
+      "zoom": 1
+    },
+    {
+      "id": "keyboard-events",
+      "focus": true,
+      "active": "SELECT",
+      "events": [],
+      "value": "hypeproof-fast"
+    },
+    {
+      "id": "keyboard-and-accessible-name",
+      "role": "combobox",
+      "name": "대화 모델",
+      "selected": "hypeproof-fast"
+    },
+    {
+      "id": "zoom-200",
+      "width": 640,
+      "scroll": 640,
+      "right": 182.2421875,
+      "bottom": 297.5,
+      "height": 409
+    },
+    {
+      "id": "draft-preserved",
+      "pass": true
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-sonnet-4-6",
+      "upstream": [
+        {
+          "model": "claude-sonnet-4-6",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQk2qLnwbEy95L2sUxW"
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQk5eGFSTACvaWquE4a"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-default"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-default"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-haiku-4-5",
+      "upstream": [
+        {
+          "model": "claude-haiku-4-5",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQkfC7yXymShaa89Ety"
+        },
+        {
+          "model": "claude-haiku-4-5",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQkezy3YuVRqiAbWpNp"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-fast"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "hypeproof-fast"
+        }
+      ]
+    },
+    {
+      "id": "actual-turn",
+      "expected_model": "claude-sonnet-5",
+      "upstream": [
+        {
+          "model": "claude-sonnet-5",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerQkpCbv8QrAL9VdNZWA"
+        }
+      ],
+      "gateway": [
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-sonnet-5"
+        },
+        {
+          "path": "/v1/messages",
+          "fault": "none",
+          "requested_model": "claude-sonnet-5"
+        }
+      ]
+    }
+  ],
+  "error": "every upstream call must use the captured turn model",
+  "scope": "actual Mac + local Service + synthetic lessons",
+  "live_model_requested": true,
+  "not_run": [
+    "Windows",
+    "screen reader speech",
+    "human learning",
+    "cross-provider transfer"
+  ],
+  "visual_review": "PENDING"
+}

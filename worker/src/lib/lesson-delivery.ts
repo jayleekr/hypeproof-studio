@@ -1,3 +1,5 @@
+import { getProfile } from '../profiles';
+import { lessonModelIsCurrent } from './lesson-model-policy';
 import type { Env } from '../env';
 import type { TokenPayload } from './tokens';
 import { isModuleVersion, validateModuleDoc } from './modules';
@@ -12,6 +14,11 @@ export async function readLesson(env: Env, cohort: string, course: string, versi
   try { raw = JSON.parse(row.module_json); } catch { return null; }
   const result = await validateModuleDoc(raw, { kind: 'session-design', profileId: profile });
   if (!result.ok || result.doc.version !== version || validateSessionDesign(result.doc.content, true)) return null;
+  const content = result.doc.content as unknown as SessionDesign;
+  if (content.model) {
+    const current = getProfile(profile);
+    if (!current || !lessonModelIsCurrent(env, current, content.model)) return null;
+  }
   return { course_id: course, version, sha256: result.doc.sha256, content: result.doc.content as unknown as SessionDesign };
 }
 

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {availableModelSelection,selectedModel,modelSelectionScope} from '../src/modelSelection.ts';
+const choices=[{alias:'hypeproof-default',id:'sonnet',label:'Sonnet'},{alias:'hypeproof-fast',id:'haiku',label:'Haiku'}];
+const profile={profile_id:'course',coach_runtime:'agent-sdk',lesson:{sha256:'version-a'},model_selection:{source:'lesson',runtime:'agent-sdk',provider:'anthropic',default:'hypeproof-default',choices}};
+const selection=availableModelSelection(profile,'proxy');assert.equal(selection,profile.model_selection);
+const saved={scope:modelSelectionScope(profile),alias:'hypeproof-fast'};
+assert.equal(selectedModel(profile,selection,saved,'hypeproof-default'),'hypeproof-fast');
+assert.equal(selectedModel(profile,selection,undefined,'hypeproof-fast'),'hypeproof-default','new frozen lesson starts at instructor default');
+assert.equal(selectedModel({...profile,lesson:{sha256:'version-b'}},selection,saved,'hypeproof-fast'),'hypeproof-default','new lesson does not inherit a previous choice');
+assert.equal(selectedModel(profile,selection,{...saved,alias:'hypeproof-strong'},'hypeproof-strong'),'hypeproof-default');
+const fixed={...selection,choices:[choices[0]]};assert.equal(selectedModel(profile,fixed,saved,'hypeproof-fast'),'hypeproof-default');
+assert.equal(availableModelSelection({...profile,minor_cohort:true},'agent-sdk'),undefined,'minor runtime gate cannot be widened by model selection');
+assert.equal(availableModelSelection(null,'proxy'),undefined);
+assert.equal(availableModelSelection({profile_id:'old'},'proxy'),undefined);
+assert.equal(availableModelSelection({...profile,coach_runtime:'proxy',model_selection:{...selection,source:'profile',runtime:'proxy'}},'agent-sdk'),undefined,'unsupported machine override does not advertise the wrong catalogue');
+console.log('PASS model selection: scoped choice, fixed default, forbidden alias, old Service, runtime mismatch');
