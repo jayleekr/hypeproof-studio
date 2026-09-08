@@ -60,3 +60,29 @@ App은 기존 인증·대화·파일 도구·관찰 경로를 재사용한다. S
 
 이 기록은 [앞선 전체 UX 보고서](studio-native-trial-ux-results-2026-09-08.md)의 후속이다.
 배포와 공개 앱 재검증 결과는 PR/릴리스 기록과 함께 갱신한다.
+
+## 머지와 서버 반영
+
+[#793](https://github.com/jayleekr/hypeproof-studio/pull/793)은 최신 head
+`c38d91d897d2852df61036c4f5bd5fade313f4b6`의 CI 17개 통과 후
+`189bc956a01236abb82ed69542d3cdb633a0fcc3`로 머지됐다. 리뷰 요청은 팀원에게
+유지했고 변경 요청 리뷰는 없었다. 보호 규칙을 우회하지 않았다.
+
+[Service 배포](https://github.com/jayleekr/hypeproof-studio/actions/runs/34258353895)는
+성공했다. `w0.0.0-dev+189bc95`, Cloudflare version
+`1d32a235-1823-4a08-b63b-c7b4717cddfe`다. 정상 live-session freeze에서 0을 확인했고
+SDK 요청 계약 검사가 통과했다. 공개 health와 합성 개인 체험의 profile/관찰 context는
+200, 검사 코드 폐기 뒤 profile은 401이었다. 표시 이름과 1시간/40회 제한을 확인했다.
+[API 결과](../evidence/2026-09-08/trial-conversation/production-api.json)는 응답 상태와
+공개 설정만 포함한다. 처음 잘못 요청한 `/v1/context`의 404는 검사기 오류이며,
+실제 경로 `/v1/observations/context`로 재검사했다. 두 합성 코드 모두 폐기했다.
+실제 참가자 상태는 변경하지 않았고 비활성 합성 roster 식별자만 남겼다.
+
+로컬 Service는 테스트 준비 중 `npm ci`가 실행 중인 wrangler의 의존성 경로를 교체해
+한 번 중단됐다. 앱을 종료하지 않고 같은 저장소·포트·자격증명으로 Service만 복구한 뒤
+health/profile 200을 확인했다. 실행 중인 Service가 사용하는 디렉터리에서는 의존성을
+재설치하지 않는다. 후속 앱 검증은 준비된 의존성과 배포 파일을 그대로 재사용한다.
+
+App v0.1.55는 위 merge SHA에서 빌드한다. 공개 파일과 실제 앱 재검증은 아래 출시
+기록에서 별도로 판정한다. 복구 시 기존 App v0.1.54와 작업 폴더를 보존하며, Service는
+이전 ref `fe6f7b5`의 정상 배포 절차를 사용한다.
