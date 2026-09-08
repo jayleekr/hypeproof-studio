@@ -7,7 +7,7 @@ Epic: #282
 ## Context
 
 The chat coach in `extensions/hypeproof-chat/` is, today, a single-turn
-chat-only client talking to `worker/` which proxies three LLM providers through
+chat-only client talking to `worker/` which proxies four LLM providers through
 an OpenAI-compatible shim. It has **no agentic loop, no tool-use, no subagents,
 and no MCP** — `mcp_tools_enabled` is a tool allowlist that `translate.ts`
 already enforces but that is empty (`[]`) in every current profile, so it is

@@ -6,8 +6,13 @@ Cloudflare Worker = HypeProof Studio's proxy + admin UI. Everything in this dire
 
 - Cloudflare account (any plan, free works for poc; Workers Paid $5/mo if you need >100k req/day or Analytics Engine SQL)
 - `wrangler` CLI (installed via `npm install` in this dir)
-- Gemini API key (default provider — https://aistudio.google.com/apikey).
-  Anthropic key if you switch `LLM_PROVIDER=anthropic` (a peer provider).
+- **Anthropic API key — required.** `/v1/messages` (the Agent SDK coach runtime,
+  which most profiles use) always calls Anthropic with `ANTHROPIC_API_KEY`,
+  regardless of `LLM_PROVIDER` or a profile's provider pin. The native-observation
+  assessor does too. A deployment without it cannot serve those paths.
+- A key for whichever provider `LLM_PROVIDER` names, for `/v1/chat/completions`:
+  Gemini (https://aistudio.google.com/apikey), OpenAI, or GLM. Production sets
+  `anthropic`, so the same key covers both routes; `[env.dev]` sets `gemini`.
 
 ## One-time setup
 
@@ -31,15 +36,16 @@ npx wrangler d1 create hypeproof-studio
 npx wrangler d1 execute hypeproof-studio --remote --file=schema.sql
 
 # 5. Set secrets (interactive — paste values when prompted)
-npx wrangler secret put GEMINI_API_KEY         # default provider (AIza...)
+npx wrangler secret put ANTHROPIC_API_KEY      # REQUIRED — /v1/messages always uses it
 npx wrangler secret put HPS_SIGNING_SECRET     # openssl rand -hex 32
 npx wrangler secret put HPS_ADMIN_PASSWORD     # dev fallback only; set Cloudflare Access in prod
 # The instructor surface (/console, /issuer, cohort state reads) is a SEPARATE
 # Worker since plan task F — chalk/ (chalk.hypeproof-ai.xyz, c* tags). It needs
 # the SAME HPS_SIGNING_SECRET: see chalk/README.md. Deploy Chalk BEFORE this
 # worker on the first rollout (this worker redirects /console there).
-# npx wrangler secret put ANTHROPIC_API_KEY    # when LLM_PROVIDER=anthropic in wrangler.toml
+# npx wrangler secret put GEMINI_API_KEY       # when LLM_PROVIDER=gemini (AIza...)
 # npx wrangler secret put OPENAI_API_KEY        # when LLM_PROVIDER=openai in wrangler.toml
+# npx wrangler secret put GLM_API_KEY           # when LLM_PROVIDER=glm (never picked implicitly)
 
 # Bug-report Discord webhook (#64): create a webhook in #hypeproof-studio →
 # Integrations → Webhooks, paste the URL. Optional — unset = D1 row only, no
@@ -133,9 +139,10 @@ After this, `/admin/*` and `/` are gated by Cloudflare login. The Worker still f
 | Workers req | 100k/day | $0.50 / 1M (Paid plan $5/mo base) |
 | KV reads | 100k/day | $0.50 / 1M |
 | D1 storage | 5 GB | $0.75 / GB/mo |
-| Gemini (default) | generous free tier | 2.5 Pro: ~$1.25 in / $10 out per 1M tok |
-| Anthropic (peer) | — | Sonnet 4.6: $3 in / $15 out per 1M tok (native prompt caching) |
+| Anthropic (production) | — | Sonnet 4.6: $3 in / $15 out per 1M tok (native prompt caching) |
+| Gemini (peer, `[env.dev]`) | generous free tier | pins are 2.5-flash / 3.5-flash; no alias points at 2.5 Pro any more |
 | OpenAI (peer) | — | gpt-4o: ~$2.5 in / $10 out per 1M tok (alias map in profiles/types.ts) |
+| GLM (peer, explicit only) | — | glm-5.2; all three aliases map to it |
 
 Prompt caching: Anthropic supports it natively (the few-KB skeleton library
 becomes cached reads after the first turn → cost ↓ + latency ↓). Gemini's
@@ -143,5 +150,6 @@ OpenAI-compatible endpoint does not cache. OpenAI cache behavior is GA but
 not auto-applied here — leave as a future tweak per cohort.
 
 1회차 estimate (6 kids × 8h × ~50 turns × 800 tokens average):
-- 6 × 50 × 1600 = 480k tokens — within Gemini free tier for a single cohort
+- 6 × 50 × 1600 = 480k tokens — at the production pin (Sonnet 4.6) roughly $1.4 in
+  / $7 out per cohort before prompt caching, which the skeleton library makes most of
 - Cloudflare: 6 × 50 = 300 req → well inside free tier

@@ -164,7 +164,7 @@
         "hypeproofChat.model": {
           "type": "string",
           "default": "hypeproof-default",
-          "description": "Model identifier sent to the proxy."
+          "description": "Requested model alias. The Service clamps it to the cohort or lesson's allowed set — an unlisted value becomes that set's default without notice."
         },
         "hypeproofChat.coachRuntime": {
           "type": "string",

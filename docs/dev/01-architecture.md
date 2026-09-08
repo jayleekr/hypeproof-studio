@@ -32,7 +32,7 @@ flowchart LR
   Member["Workshop member"] --> App["HypeProof Studio app"]
   App --> Ext["hypeproof-chat extension"]
   Ext --> Worker["Cloudflare Worker API"]
-  Worker --> Models["Anthropic / OpenAI / Gemini"]
+  Worker --> Models["Anthropic / OpenAI / Gemini / GLM"]
   Ext --> Workspace["~/HypeProofGames workspace"]
   Ext --> Preview["Sandboxed preview webview"]
   Maintainer["Release owner"] --> Scripts["build and branding scripts"]
