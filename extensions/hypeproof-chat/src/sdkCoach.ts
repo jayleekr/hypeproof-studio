@@ -48,11 +48,10 @@ import {
   resolveSdkModule,
   resolveZodModule,
   sdkBinaryMarkerPath,
+  coachSeatKeyFor,
   sdkConfigDirFor,
-  sdkSeatKeyFor,
   sdkToolToActionRequest,
   seededSdkBinaryPath,
-  withSdkSeatLock,
   type SdkActivity,
   type SdkUsageEvent,
   type CoachToolAction,
@@ -459,15 +458,18 @@ function abortError(): Error {
 /**
  * Run one coach turn on the Agent SDK. Mirrors proxyChat's contract so the
  * caller doesn't care which runtime produced the stream. Throws an AbortError
- * on cancellation (parity with proxyChat), SdkUnavailableError when the SDK
- * package is absent, and SdkConcurrentRunError (#749) when this seat is
- * already running a turn.
+ * on cancellation (parity with proxyChat) and SdkUnavailableError when the SDK
+ * package is absent.
+ *
+ * #749 — the seat lock is NOT taken here, and that is the fix. It was, which
+ * left the entire proxy runtime unguarded, and left this function's own
+ * SdkUnavailableError fallback unguarded too: the lock released as this threw,
+ * and the host then ran the duplicate turn on the proxy path. REQ-M37 claimed
+ * flatly that a seat runs one turn at a time, so the row was wider than the
+ * code. The host now holds `withCoachSeatLock` around the whole turn —
+ * both runtimes and the fallback inside one guard.
  */
 export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
-  return withSdkSeatLock(sdkSeatKeyFor(args), () => runSdkCoachTurn(args));
-}
-
-async function runSdkCoachTurn(args: SdkCoachArgs): Promise<void> {
   // Bridge the caller's signal to an SDK AbortController UP FRONT — before any
   // await — so a stop during loadSdk() still cancels. (addEventListener added
   // after the signal already fired would never run.)
@@ -550,7 +552,7 @@ async function runSdkCoachTurn(args: SdkCoachArgs): Promise<void> {
   // path is derived purely (sdkConfigDirFor); creating it is the host's job.
   // A failure here is not fatal: the CLI creates it itself, and pointing the
   // env at a not-yet-existing dir still keeps ~/.claude out of the picture.
-  const sdkConfigDir = sdkConfigDirFor(process.env, sdkSeatKeyFor(args));
+  const sdkConfigDir = sdkConfigDirFor(process.env, coachSeatKeyFor(args));
   try {
     fs.mkdirSync(sdkConfigDir, { recursive: true });
   } catch (err) {
