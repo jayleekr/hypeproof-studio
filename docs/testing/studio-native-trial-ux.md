@@ -10,7 +10,7 @@
 | TUX-CHAT-01~14 | 실제 React에서 전송·키보드·예약·이미지·코드·링크·오류 + 실제 호스트 전송/중지/삭제 | `e2e/trial-ux/run.mjs`, extension smoke, Electron 기록 |
 | TUX-OBS-01~10 | 실제 React에서 기록·동의·평가·정정·scope 전환 + 실제 평가 API/저장·재시작 | `e2e/trial-ux/run.mjs`, native observation 계약/실제 API, Electron 기록 |
 | TUX-COND-01~06 | 조건별 controlled host 이벤트로 실제 React 렌더 + 설치/복구 호스트 검증 | `e2e/trial-ux/run.mjs`, updater·error boundary smoke, 별도 앱 사본 |
-| TUX-HOST-01~08 | 실제 Electron·OS·파일시스템·로컬 신고 수신기 | `e2e/tests/native-trial-live.spec.ts` 및 해당 실제 앱 실행 기록 |
+| TUX-HOST-01~08 | 실제 Electron·OS·파일시스템·로컬 신고 수신기 | `e2e/tests/native-trial-live.spec.ts`, `native-entry-controls.spec.ts`, `native-approval-controls.spec.ts`, `native-browser-input.spec.ts`, `26-report-resilience.spec.ts` 및 실제 앱 실행 기록 |
 | TUX-A11Y-01~04 | 브라우저 DOM/키보드/viewport + 실제 앱 focus·늦은 응답·좁은 패널 | `e2e/trial-ux/run.mjs`, Electron 화면·입력 기록 |
 
 모의 호스트 응답과 합성 관찰 시료는 **UI 분기 검사**로 표시한다. 클릭 후 `postMessage`가 전달돼도 OS 창, API, 실제 파일 변경은 아직 검증하지 않은 것이다. 실행 보고서는 같은 ID라도 `browser`, `host contract`, `Electron`, `real API`, `release artifact` 범위를 나눠 기록한다. 보이지 않는 조건을 임의로 켠 호환성 시험은 기본 체험 버튼 전수 검사와 별도로 집계한다.
@@ -35,6 +35,30 @@ npm --prefix worker test
 npm --prefix worker run typecheck
 bash scripts/test-native-trial-laptop.sh
 ```
+
+추가 Mac 호스트 검사(합성 코드·별도 앱 사본):
+
+```bash
+HPS_NATIVE_MANAGED=1 HPS_NATIVE_HOST=1 bash scripts/test-native-trial-laptop.sh
+HPS_QUIET_NO_HIDE=1 HPS_NATIVE_MANAGED=1 HPS_NATIVE_EXTRA=1 bash scripts/test-native-trial-laptop.sh
+HPS_NATIVE_MANAGED=1 HPS_NATIVE_APPROVAL=1 bash scripts/test-native-trial-laptop.sh --grep 'real shell:'
+HPS_NATIVE_MANAGED=1 HPS_NATIVE_APPROVAL=1 bash scripts/test-native-trial-laptop.sh --grep 'real browser:'
+HPS_NATIVE_MANAGED=1 HPS_NATIVE_INPUT=1 bash scripts/test-native-trial-laptop.sh
+```
+
+이미 만든 검사 앱은 `HPS_NATIVE_REUSE_DIR`로 재사용할 수 있다. 스크립트가 현재 확장·webview 해시와 다르면 거절한다. `HPS_QUIET_NO_HIDE=1`은 창을 화면 밖에 표시하되 앱 전체를 숨기지 않게 해 네이티브 미리보기 캡처가 진행되도록 한다. Run 검사의 HTML은 합성 시료를 실제 모델 채팅으로 돌려받은 것으로, 학생의 독립 제작 결과가 아니다. 폴더 선택 검사는 VS Code의 simple dialog 설정에서 실행하며 macOS 시스템 파일 선택 창과 구분한다.
+
+공개 설치본 검사는 GitHub asset digest와 내려받은 ZIP의 SHA-256을 먼저 대조한 뒤 압축을 푼다. `HPS_NATIVE_REUSE_DIR`에 그 폴더, `HPS_APP_PATH`에 그 안의 앱을 지정한다. 다음 옵션은 앱 버전·코드 SHA·확장 버전을 확인하며 확장 주입을 허용하지 않는다. 기존 개발 사본을 넣으면 검사 시작 전에 실패해야 한다.
+
+```bash
+HPS_NATIVE_RELEASE_VERIFY=1 \
+HPS_NATIVE_RELEASE_VERSION=0.1.54 \
+HPS_NATIVE_RELEASE_SHA=9ebed633e5b1e94a514a3b0731758faf36fc4177 \
+HPS_NATIVE_MANAGED=1 HPS_NATIVE_UI=1 HPS_NATIVE_OBSERVATION=1 \
+HPS_QUIET_NO_HIDE=1 bash scripts/test-native-trial-laptop.sh
+```
+
+예약 테스트 호스트는 해당 앱의 resolver에서만 loopback으로 연결한다. 브라우저 열기·입력은 실제 SDK와 DOM 결과를 확인하되 공개 사이트 검증으로 집계하지 않는다. loopback 열기는 Studio 자체 LiveServer로 주소를 보정하므로 요청한 임의 포트와 최종 확인 URL을 구분한다.
 
 실제 앱 스크립트의 옵션·외부 요건은 [랩탑 실행 안내](studio-native-trial-laptop.md)를 따른다. 특정 옵션만 실행했으면 전체 앱 suite 통과로 보고하지 않는다. 이미 실행 중인 스크립트를 수정하지 않는다. 앱 전체 빌드를 로컬에서 자동 실행하지 않는다.
 

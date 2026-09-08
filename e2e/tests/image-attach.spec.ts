@@ -7,6 +7,8 @@
 
 import { test, expect, type FrameLocator } from "@playwright/test";
 import { launchApp, closeApp, chatFrame, openChatContainer, type AppContext } from "../fixtures/app.ts";
+import { writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 async function chatCf(win: import("@playwright/test").Page, timeoutMs = 40_000): Promise<FrameLocator> {
   const deadline = Date.now() + timeoutMs;
@@ -25,6 +27,7 @@ async function chatCf(win: import("@playwright/test").Page, timeoutMs = 40_000):
 // 1x1 PNG (base64) — injected as a File into paste/drop events.
 const PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+const SECOND_PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAIElEQVR4AezQoQ0AAADCMML/R/MBQSA3PVVrjLFC/XkCAAD//3Nn3qIAAAAGSURBVAMAEzgAFbNrw9wAAAAASUVORK5CYII=';
 
 test("image attach — paste and drag-drop both surface a thumbnail", async () => {
   test.setTimeout(300_000);
@@ -61,8 +64,31 @@ test("image attach — paste and drag-drop both surface a thumbnail", async () =
       const dt = new DataTransfer();
       dt.items.add(file);
       el.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt } as ClipboardEventInit));
-    }, PNG_B64);
+    }, SECOND_PNG_B64);
     await expect(cf.locator(".hps-attachment img"), "paste → second thumbnail appears").toHaveCount(2, { timeout: 15_000 });
+    await expect.poll(() => cf.locator('.hps-attachment img').evaluateAll(nodes => nodes.map(node => (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0))).toEqual([true, true]);
+    const sources = await cf.locator('.hps-attachment img').evaluateAll(nodes => nodes.map(node => (node as HTMLImageElement).src));
+    expect(sources[0]).not.toBe(sources[1]);
+    const draft = cf.locator('.hps-input textarea').first();
+    await draft.fill('이미지를 지워도 유지할 합성 초안');
+    if (process.env.HPS_NATIVE_EVIDENCE_DIR) await ctx.win.screenshot({ path: join(process.env.HPS_NATIVE_EVIDENCE_DIR, 'attached-images.png') });
+    const remove = cf.getByRole('button', { name: '이미지 제거', exact: true }).first();
+    const bounds = await remove.boundingBox();
+    expect(bounds).not.toBeNull();
+    // Synthetic file drag events also reach VS Code's outer drag shield.
+    // A real pointer move ends that shield before clicking, as in a user's
+    // drag/drop → move to remove sequence. Never bypass hit testing or invoke
+    // the React handler directly.
+    const point = { x: bounds!.x + bounds!.width / 2, y: bounds!.y + bounds!.height / 2 };
+    await ctx.win.mouse.move(1, 1);
+    await ctx.win.mouse.move(point.x, point.y);
+    await remove.click();
+    await expect(cf.locator('.hps-attachment img')).toHaveCount(1);
+    await expect(cf.locator('.hps-attachment img')).toHaveAttribute('src', sources[1]);
+    await cf.getByRole('button', { name: '이미지 제거', exact: true }).press('Enter');
+    await expect(cf.locator('.hps-attachment img')).toHaveCount(0);
+    await expect(draft).toHaveValue('이미지를 지워도 유지할 합성 초안');
+    if (process.env.HPS_NATIVE_EVIDENCE_DIR) writeFileSync(join(process.env.HPS_NATIVE_EVIDENCE_DIR, 'image-controls.json'), JSON.stringify({ status: 'PASS', scope: 'actual Electron webview; synthetic ClipboardEvent/DragEvent; OS clipboard untouched', decoded_images: 2, selected_image_removed: true, keyboard_remove: true, draft_preserved: true }));
 
     // eslint-disable-next-line no-console
     console.log("image attach OK — drop + paste both produced a thumbnail");
