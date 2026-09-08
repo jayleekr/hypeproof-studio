@@ -57,8 +57,10 @@ test('course effort reaches the real model and survives UI transitions', async (
       }
       const metrics=await effort().evaluate(e=>({width:innerWidth,scroll:document.documentElement.scrollWidth,right:e.getBoundingClientRect().right,bottom:e.getBoundingClientRect().bottom,height:innerHeight}));
       expect(metrics.width).toBe(width);expect(metrics.scroll).toBe(width);expect(metrics.right).toBeLessThanOrEqual(width);expect(metrics.bottom).toBeLessThanOrEqual(metrics.height);
+      const composer=await chat.locator('.hps-btn-send').evaluate(e=>({bottom:e.getBoundingClientRect().bottom,height:innerHeight}));
+      expect(composer.bottom).toBeLessThanOrEqual(composer.height);
       await shot('effort-'+width);
-      checks.push({viewport:metrics,zoom});save('IN_PROGRESS');
+      checks.push({viewport:metrics,composer,zoom});save('IN_PROGRESS');
     }
     const send = async (alias:string, selected:string|null, expected:string, switchDuring=false) => {
       if(await model().isEnabled())await model().selectOption(alias);else await expect(model()).toHaveValue(alias);
@@ -100,7 +102,7 @@ test('course effort reaches the real model and survives UI transitions', async (
     await send('claude-opus-4-5-20251101','low','claude-opus-4-5-20251101');
     await send('claude-opus-5','high','claude-opus-5');
     await send('claude-opus-4-6','medium','claude-opus-4-6');
-    await send('claude-opus-4-7','low','claude-opus-4-7');
+    await send('hypeproof-strong','low','claude-opus-4-7');
     await send('claude-opus-4-8','high','claude-opus-4-8');
     await send('hypeproof-fast',null,'claude-haiku-4-5');
     await send('claude-sonnet-4-5-20250929',null,'claude-sonnet-4-5-20250929');

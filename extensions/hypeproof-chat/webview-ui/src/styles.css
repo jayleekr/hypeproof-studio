@@ -1178,3 +1178,11 @@ html, body, #root {
 
 /* Many SDK requests must not push the composer out of the window. */
 .hps-effort details[open] { max-height:min(220px,35vh); overflow:auto; }
+
+/* At 200% zoom, collapsed course cards must leave room for the new controls. */
+.hps-shell:has(.hps-effort:not(:empty)) { overflow-y:auto; }
+.hps-shell:has(.hps-effort:not(:empty)) > .hps-input-area { flex-shrink:0; }
+@media (max-height:600px) {
+  .hps-shell:has(.hps-effort:not(:empty)) > details:not([open]) { margin:4px 12px; padding:4px 12px; }
+  .hps-shell:has(.hps-effort:not(:empty)) > .hps-lesson:not([open]) > summary { padding:0 4px; }
+}

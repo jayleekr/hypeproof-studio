@@ -5,7 +5,7 @@ export type ModelSelection = NonNullable<ResolvedProfile['model_selection']>;
 export interface SavedModelChoice { scope: string; alias: string }
 
 export function modelSelectionScope(profile: ResolvedProfile): string {
-  return JSON.stringify([profile.profile_id, profile.lesson?.sha256 ?? null, profile.model_selection]);
+  return JSON.stringify([profile.profile_id, profile.lesson?.sha256 ?? null, profile.model_selection, ...(profile.observation?.scope ? [profile.observation.scope] : [])]);
 }
 
 export function availableModelSelection(profile: ResolvedProfile | null, settingRuntime: 'proxy' | 'agent-sdk'): ModelSelection | undefined {

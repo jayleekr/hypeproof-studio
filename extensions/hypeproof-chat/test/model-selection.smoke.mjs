@@ -27,3 +27,9 @@ const recorded={request_id:'request',model:'claude-sonnet-5',requested:'low',app
 assert.equal(observedEffortResult({requests:[recorded],truncated:false}).state,'observed');
 for(const data of [null,{}, {requests:[],truncated:false},{requests:[{...recorded,applied:'max'}],truncated:false},{requests:[recorded]},{requests:[{...recorded,status:'200'}],truncated:false}])
  assert.equal(observedEffortResult(data).state,'unknown');
+
+// Reuse the Service's existing participant/session scope for the opted-in trial.
+const firstStudent={...profile,observation:{scope:'student-a-session'}};
+const otherStudent={...profile,observation:{scope:'student-b-session'}};
+assert.notEqual(modelSelectionScope(firstStudent),modelSelectionScope(otherStudent));
+assert.equal(selectedModel(otherStudent,selection,{scope:modelSelectionScope(firstStudent),alias:'hypeproof-fast'},'hypeproof-default'),'hypeproof-default');
