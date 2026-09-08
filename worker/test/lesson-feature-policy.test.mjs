@@ -22,7 +22,7 @@ import { withMockUpstream } from './harness/index.mjs';
 const { getProfile } = await import('../src/profiles/index.ts');
 const {
   FEATURE_KEYS, applyLessonFeatures, featureBinding,
-  lessonFeaturesAreCurrent, permittedFeatureKeys,
+  lessonFeaturesAreCurrent, permittedFeatureKeys, FEATURE_LABELS,
 } = await import('../src/lib/lesson-feature-policy.ts');
 const { setRoster, startSession } = await import('../src/lib/kv.ts');
 
@@ -76,6 +76,46 @@ try {
   // subagents, which makes it the useful negative case below.
   assert.deepEqual(permittedFeatureKeys(profile), ['read', 'write', 'shell', 'browser', 'web_search']);
   assert.ok(!permittedFeatureKeys(profile).includes('subagents'), 'the fixture must withhold one key to test the refusal');
+
+  // ── 강사에게 서빙되는 카탈로그는 같은 파생에서 나온다 ──────────────────
+  // 강사 화면이 고르는 목록과 Service 가 검증하는 목록이 다른 출처면, 화면에서
+  // 고를 수 있는데 저장이 403 나는 조합이 생긴다.
+  {
+    const cat = await request(base + 'catalog/features/' + local.profileId);
+    assert.equal(cat.status, 200, JSON.stringify(cat.json));
+    assert.deepEqual(cat.json.choices.map(c => c.key), permittedFeatureKeys(profile));
+    // 강사는 키가 아니라 이름을 본다. `subagents` 같은 날것이 화면에 뜨면 안 된다.
+    for (const choice of cat.json.choices) {
+      assert.equal(typeof choice.label, 'string');
+      assert.ok(choice.label.length > 0, `${choice.key} 에 이름이 없다`);
+      assert.notEqual(choice.label, choice.key, `${choice.key} 가 키 그대로 나간다`);
+    }
+    // 코호트가 안 준 기능은 목록에 아예 없다 — 고를 수 없는 것을 보여주지 않는다.
+    assert.ok(!cat.json.choices.some(c => c.key === 'subagents'));
+    // 없는 프로필은 403. 그런데 이것만으로는 범위 검사를 잰 것이 아니다 —
+    // `!profile` 한 줄만 있어도 통과한다. 그래서 **실재하지만 다른 코호트에 속한**
+    // 프로필로 한 번 더 묻는다. 이 좌석이 남의 반 카탈로그를 못 읽는다는 것이
+    // 재려던 성질이고, 앞의 단언만으로는 그게 사라져도 알 수 없다.
+    assert.equal((await request(base + 'catalog/features/missing')).status, 403);
+    // `canary-sdk-contract` 를 고른 것은 임의가 아니다. 범위 검사를 지웠을 때
+    // **실제로 200 이 나오는** 프로필이라 이 단언이 그 검사를 잰다. 처음에 고른
+    // `sk-biopharm-kids-s1` 은 다른 이유로 이미 막혀서, 검사를 지워도 403 이
+    // 그대로 나왔다 — 통과 쪽으로 틀린 계측기였다(변이로 잡았다).
+    assert.equal(
+      (await request(base + 'catalog/features/canary-sdk-contract')).status, 403,
+      '실재하는 다른 코호트의 프로필도 거절한다',
+    );
+  }
+
+  // ── 이름표는 카탈로그가 늘어나도 따라온다 ────────────────────────────────
+  // 위 단언들은 이 코호트가 **가진** 키만 본다. 그래서 카탈로그에 새 키가 생기고
+  // 이름표를 빠뜨려도 이 픽스처에서는 보이지 않는다. 목록 자체를 직접 잰다.
+  for (const key of FEATURE_KEYS) {
+    const label = FEATURE_LABELS[key];
+    assert.equal(typeof label, 'string', `${key} 에 이름표가 없다`);
+    assert.ok(label.trim().length > 0, `${key} 의 이름표가 비었다`);
+    assert.notEqual(label, key, `${key} 가 키 그대로 강사에게 나간다`);
+  }
 
   // ── A lesson may only narrow ──────────────────────────────────────────────
   // Asking for a key outside the catalogue is refused at save. This is the

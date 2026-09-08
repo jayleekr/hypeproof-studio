@@ -1,5 +1,5 @@
 // Instructor authoring API. Service owns writes; Chalk forwards the same HTTP contract.
-import { validateFeatureSubset, featureBinding } from '../lib/lesson-feature-policy';
+import { FEATURE_LABELS, permittedFeatureKeys, validateFeatureSubset, featureBinding } from '../lib/lesson-feature-policy';
 import { validateModelSubset, modelBinding } from '../lib/lesson-model-policy';
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -30,7 +30,7 @@ const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
   if (!validId(c.req.param("course")! ?? "")) return c.json({ error: "invalid course id" }, 400);
   return next();
 };
-for (const path of [root, root + "/models/:profile", root + "/versions/:version", root + '/versions/:version/participants']) {
+for (const path of [root, root + "/models/:profile", root + "/features/:profile", root + "/versions/:version", root + '/versions/:version/participants']) {
   authoring.use(path, authenticate);
   authoring.use(path, bodyLimit({ maxSize: 128 * 1024, onError: (c) => c.json({ error: "request too large" }, 413) }));
 }
@@ -41,6 +41,18 @@ authoring.get(root + '/models/:profile', c => {
     return c.json({ error: 'profile not permitted' }, 403);
   try { return c.json({ ...modelBinding(c.env, profile), default: profile.model.default }); }
   catch { return c.json({ error: 'model provider is not configured' }, 409); }
+});
+
+// #748 — 이 코호트가 실제로 가진 기능. 강사는 여기서 **줄이기만** 한다.
+// 별도 저장소가 아니라 컴파일된 프로필에서 파생하므로, 프로필이 바뀌면 다음
+// 호출부터 목록이 따라 움직인다 — 강사 화면이 이미 없는 기능을 계속 보여주는
+// 상태가 생기지 않는다.
+authoring.get(root + '/features/:profile', c => {
+  const profile = getProfile(c.req.param('profile')!);
+  if (!profile || profile.session.cohort_id !== c.req.param('cohort') || !c.get('author').scope.profiles.includes(profile.id))
+    return c.json({ error: 'profile not permitted' }, 403);
+  const catalogue = permittedFeatureKeys(profile);
+  return c.json({ choices: catalogue.map(key => ({ key, label: FEATURE_LABELS[key] })) });
 });
 
 // Explicit delivery to an already registered student; never opens/replaces a session.

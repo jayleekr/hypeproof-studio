@@ -44,6 +44,20 @@ import type { Profile } from '../profiles/types.ts';
 export const FEATURE_KEYS = ['read', 'write', 'shell', 'subagents', 'browser', 'web_search'] as const;
 export type FeatureKey = (typeof FEATURE_KEYS)[number];
 
+/**
+ * 강사에게 보이는 이름. 키 옆에 두는 이유는 하나 — 카탈로그가 늘어날 때 이름을
+ * 빠뜨리면 **여기서** 타입 오류가 나야지, 강사 화면에 `subagents` 라는 날것이
+ * 떠서는 안 된다. Chalk 는 이 목록을 받아 그리기만 한다.
+ */
+export const FEATURE_LABELS: Record<FeatureKey, string> = {
+  read: '파일 읽기',
+  write: '파일 쓰기·수정',
+  shell: '터미널 명령 실행',
+  subagents: '보조 에이전트',
+  browser: '브라우저 사용',
+  web_search: '웹 검색',
+};
+
 export interface FeatureBinding {
   revision: 'hps-feature-narrowing/1';
   runtime: 'proxy' | 'agent-sdk';
