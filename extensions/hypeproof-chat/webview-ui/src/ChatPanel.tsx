@@ -12,7 +12,7 @@ import type {
 } from "../../src/protocol";
 import { postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
-import { copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
+import { composerLabel, copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
 import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
 import {
   RUNNER_PHRASE_MS,
@@ -749,7 +749,7 @@ export function ChatPanel(props: Props) {
         >
           <textarea
             ref={textareaRef}
-            aria-label="코치에게 보낼 메시지"
+            aria-label={composerLabel(coachName)}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onPaste={handlePaste}
