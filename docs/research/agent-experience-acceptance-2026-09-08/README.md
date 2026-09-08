@@ -85,6 +85,7 @@ Service/SDK/계약 소스는 그대로이므로 이 재검수는 모델을 다�
 [200% 확대·Tab 포커스](width-fix/long-name-zoom-200.png)도 다시 열어 확인했다.
 현재 이름 전환·HTML 텍스트·기존 수업을 포함한 이 실행의 10개 검사는 통과했다.
 [환경](width-fix/environment.json), [결과](width-fix/identity-result.json), [이미지 해시](width-fix/capture.json).
+원 후보 SHA로 수정된 제품을 검수하려는 요청도 [실행 전 거부](width-fix/product-negative-control.json)했다.
 이것으로 전체 접근성·과거 정체성·학습 효과까지 완료하지 않는다.
 
 협업 관찰: 제품 후보가 오기 전에는 baseline과 인수 조건을 준비했고, 제출 후에는 정확한 SHA를
