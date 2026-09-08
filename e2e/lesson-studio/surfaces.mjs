@@ -81,7 +81,10 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
     await send(request+' 이번 요청에서는 저장을 허용할 예정입니다.');const allowed=await approve('저장','write','allow');
     assert.equal(readFileSync(file,'utf8').trim(),content);await shot('b-write-complete');record('B2-allow',{...allowed,file,content:readFileSync(file,'utf8'),write_approval:'explicit test setting; product default is automatic workspace write'});
     await send('가상 꽃집 작업 폴더의 위치를 확인하고 싶어요. Bash 도구로 pwd 명령을 한 번만 실행하세요. 파일 변경·다른 명령·브라우저는 사용하지 마세요.');
-    record('B3-shell',await approve('실행','shell','allow'));
+    await finished();
+    assert.equal(await chat.evaluate("!!document.querySelector('.hps-error-banner')"),false);
+    assert.ok((await text(chat,'.hps-messages')).includes('Bash(pwd)'));
+    record('B3-pwd',{policy:'evaluateSdkToolUse auto-allows non-destructive shell commands',actual_tool:'Bash(pwd)',named_shell_dialog:'NOT_RUN; this actual SDK path does not call the ordinary shell modal'});
     chat=await frame('.hps-native-observation');await click(chat,'.hps-native-observation > summary');
     await click(chat,'.hps-native-observation > button');
     await wait(()=>chat.evaluate("document.querySelector('.hps-native-observation ol li')!==null"),'actual recorded events');
