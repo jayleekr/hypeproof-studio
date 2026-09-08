@@ -1182,6 +1182,57 @@ export const SDK_MAX_TURNS_FRIENDLY =
   "\n\n---\n\n한 번에 할 수 있는 작업량을 다 썼어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
   "이어서 하려면 무엇을 더 할지 알려주세요 — 예: `이어서 계속해줘` 🔧";
 
+/**
+ * #749 — 나머지 종료 오류들. 벤더 SDK 는 `{type:"result"}` 를 **네 가지** 오류
+ * subtype 으로 낸다(`sdk.d.ts` 의 `SDKResultError`): 턴 예산, 실행 중 오류, 비용
+ * 예산, 구조화 출력 재시도 소진. 우리는 첫 번째만 처리하고 있었고, 나머지 셋은
+ * delta 도 안내도 없이 떨어졌다 — 학생 화면에는 **그냥 멈춘 턴**이 남는다.
+ *
+ * 바로 위 SDK_MAX_TURNS_FRIENDLY 주석이 그 실패를 이미 적어 뒀다("조용히 끝나면
+ * 안 된다"). 같은 실패가 넷 중 셋에 대해 열려 있었던 것뿐이다.
+ *
+ * 문구 규칙은 그 줄과 같다: **고장이 아니라 무슨 일이 있었는지**를 말하고, 지금까지
+ * 한 일이 남아 있다는 사실을 알려 주고, 다음 행동을 하나 준다. SDK 원문(영어)은
+ * 절대 그대로 내보내지 않는다.
+ */
+export const SDK_RESULT_ERROR_FRIENDLY: Record<string, string> = {
+  error_during_execution:
+    "\n\n---\n\n작업이 중간에 멈췄어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+    "무엇을 하려던 것인지 다시 알려주면 이어서 해볼게요 🔧",
+  error_max_budget_usd:
+    "\n\n---\n\n이번 작업에 쓸 수 있는 양을 다 썼어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+    "계속하려면 선생님께 알려주세요 🔧",
+  error_max_structured_output_retries:
+    "\n\n---\n\n답을 정리하는 데 계속 실패했어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+    "조금 더 작게 나눠서 다시 부탁해줄래요? 🔧",
+};
+
+/**
+ * 우리가 모르는 subtype 에 쓰는 줄. **열거로 끝내지 않는 이유가 이것이다** — SDK 가
+ * 다섯 번째를 추가하면 열거는 조용히 다시 뚫리지만, 이 폴백이 있으면 최악이라도
+ * 침묵 대신 안내가 나간다. 원인을 단정하지 않는 문구인 것도 의도적이다: 무엇이
+ * 일어났는지 모르는 상태에서 이름을 붙이면 그게 오진이 된다(REQ-M15 가 태운 이틀).
+ */
+export const SDK_RESULT_ERROR_FALLBACK =
+  "\n\n---\n\n작업이 끝까지 가지 못했어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+  "다시 한 번 부탁하거나, 무엇을 하려던 것인지 알려주세요 🔧";
+
+/**
+ * 이 `result` 가 학생에게 보여줄 종료 안내가 있는지. 없으면 null(정상 종료).
+ *
+ * `is_error` 를 함께 보는 이유: subtype 이름 규칙에만 기대면 SDK 가 규칙을 바꾸는
+ * 순간 다시 침묵한다. 둘 중 하나라도 오류를 가리키면 안내를 낸다.
+ */
+export function sdkResultNotice(msg: Record<string, unknown>): string | null {
+  if (String(msg["type"] ?? "") !== "result") return null;
+  const subtype = String(msg["subtype"] ?? "");
+  if (subtype === "error_max_turns") return SDK_MAX_TURNS_FRIENDLY;
+  const known = SDK_RESULT_ERROR_FRIENDLY[subtype];
+  if (known) return known;
+  const looksLikeError = subtype.startsWith("error") || msg["is_error"] === true;
+  return looksLikeError ? SDK_RESULT_ERROR_FALLBACK : null;
+}
+
 /** Sentinel for the watchdog leg of the stream/timer race. */
 const STALLED = Symbol("sdk-stream-stalled");
 
@@ -1654,13 +1705,16 @@ export async function consumeSdkStream(
         const delta = extractSdkText(msg);
         if (delta) h.onDelta(delta);
       }
-      // 턴 예산 소진은 조용히 끝나면 안 된다. SDK 는 `{type:"result",
-      // subtype:"error_max_turns"}` 로 알리는데, 예전에는 이 분기가 없어서 영어
-      // 원문이 그대로 학생에게 나갔다. 실패가 아니라 예산 소진임을, 그리고 한
-      // 일이 디스크에 남아 있음을 우리 말로 알려 준다.
-      if (type === "result" && msg["subtype"] === "error_max_turns") {
-        console.warn("[coach] maxTurns 소진 — 턴 예산을 다 쓰고 종료했다");
-        h.onDelta(SDK_MAX_TURNS_FRIENDLY);
+      // 종료 오류는 조용히 끝나면 안 된다. 예전에는 `error_max_turns` 분기가
+      // 아예 없어서 SDK 의 영어 원문이 그대로 학생에게 나갔고, 그 분기를 넣은
+      // 뒤에도 나머지 세 subtype 은 **아무것도 없이** 끝났다(#749). 실패가 아니라
+      // 무슨 일이 있었는지를, 그리고 한 일이 디스크에 남아 있음을 우리 말로
+      // 알려 준다. 판정은 sdkResultNotice 가 소유한다 — 미지 subtype 도 침묵
+      // 대신 폴백으로 떨어진다.
+      const notice = sdkResultNotice(msg);
+      if (notice) {
+        console.warn(`[coach] SDK 종료 오류 subtype=${String(msg["subtype"] ?? "(none)")}`);
+        h.onDelta(notice);
       }
       // Other message types (result / message_stop) are terminal — nothing to
       // emit; the caller posts streamEnd.
