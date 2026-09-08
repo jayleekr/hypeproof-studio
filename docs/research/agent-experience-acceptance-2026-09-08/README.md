@@ -7,6 +7,15 @@
 
 ## 무엇을 실행했는가
 
+최신 main 통합 결과는 [main-integration/capture.json](main-integration/capture.json)에
+별도 저장했다. 제품 `9d0a4ad`, 검수 `cca993d`, 실제 앱의 10개 실행 항목 PASS다.
+새 [390px](main-integration/long-name-390.png), [1280px](main-integration/long-name-1280.png),
+[200%/키보드 포커스](main-integration/long-name-zoom-200.png) 이미지를 직접 열어
+채팅 영역을 확인했다. 문서 폭은 390/1280, 이름과 버튼 겹침 없음. 200% 오른쪽 시작
+화면의 잘림은 전체 접근성 PASS에 포함하지 않는다. 실제 모델·실패/Stop 재실행은 없었다.
+같은 폭 수정은 #760으로 main에 포함되어 #762를 중복으로 닫았으며 아래 최초 결함·수정
+실행의 SHA와 이미지는 그대로 유지한다. 새로운 이미지 3장과 기존 10장은 다른 실행의 근거다.
+
 - 구현: [PR #759 / f7afd4a](https://github.com/jayleekr/hypeproof-studio/pull/759), base `fe6f7b5`.
 - 검수 코드: `db615dee97e0d402eaf3b1b9e2d892ca471827fc`. 제품 소스는 제출 SHA와 동일한지 실행 전에 대조했다.
 - 설계: [293d4b5 / PR #753](https://github.com/jayleekr/hypeproof-studio/pull/753), Lab 철학 `6845cdb4`.

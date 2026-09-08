@@ -4,6 +4,17 @@
 
 ## 기준과 담당
 
+최신 main 통합 재검수: 제품 `9d0a4ad011aba06be9bd1143c5aa2757a3d18555`,
+검수 `cca993d9c84d7b0ec2cfa4d1e260e8b37808785c`. 실제 Mac 앱/로컬 Service에서
+10개 실행 항목 PASS, 390/1280 문서 폭 일치. [원본 결과·새 화면 3장](../research/agent-experience-acceptance-2026-09-08/main-integration/capture.json)을 별도로 보존했다.
+세 이미지를 직접 열어 채팅 이름·겹침·포커스를 확인했다. 200% 오른쪽 시작 화면의
+잘림을 전체 접근성 PASS로 표시하지 않는다. 모델 응답·실패/Stop은 이번 UI 실행에 포함하지 않았다.
+이하 실제 모델 실행과 원래 폭 수정 기록은 당시 SHA의 증거다.
+
+#762의 동일한 폭 수정은 #760을 통해 main에 이미 포함되어 #762는 중복으로 닫았다.
+#761은 #759에 직접 연결한다. 통합 중 바뀐 이름 툴팁을 찾지 못한 TUX-CHAT-01 검사는
+실제 `strong.hps-coach-name`의 이름·전체 툴팁·수정 불가를 검사하도록 갱신했다.
+
 - 상위 [#746](https://github.com/jayleekr/hypeproof-studio/issues/746)의 두 세션 분담을 따른다.
 - 구현: [PR #759](https://github.com/jayleekr/hypeproof-studio/pull/759), 제출 `f7afd4a76171e3774ecf2410438ab5057772b036`, base `fe6f7b5`.
 - 검수 코드: `db615dee97e0d402eaf3b1b9e2d892ca471827fc`. 최초 baseline은 `6684bd1` (제품 base `7f41c104`).
