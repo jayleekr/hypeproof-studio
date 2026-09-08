@@ -1,6 +1,8 @@
 # Studio Agent 경험 경쟁 분석 · 2026-09-08
 
 상태: 관측 및 제안. 추적: [#746](https://github.com/jayleekr/hypeproof-studio/issues/746).
+철학 해석은 [Lab 2026-09-08 개정 적용](../../design/philosophy-alignment-2026-09-08.md)을 따른다.
+아래 코드/화면 관측은 당시 증거이며 철학 개정 후 재실행한 학습 검증으로 바꾸지 않는다.
 분석 소스: `origin/main`의 `52cb48a0aeef799c6b4909b164703996b60cac07`.
 설치 앱: Studio 0.1.51, Cursor 3.19.13, macOS arm64. 설치 앱과 main 소스는 같은 빌드가 아니다.
 
@@ -177,4 +179,4 @@ welcome 누락으로 실패했다. fixture를 실제 스키마에 맞춰 보완�
 [요구사항](../../requirements/learning-agent-experience.md) →
 [인수 시나리오](../../testing/learning-agent-experience.md) →
 [에픽·의존성](../../plan/learning-agent-experience-epics.md).
-7자산의 정의는 [canonical 원본](../../seven-assets.md)에만 둔다.
+7자산의 정의는 [Studio 참조 인덱스](../../seven-assets.md)가 연결하는 Lab 철학 정본에 둔다.

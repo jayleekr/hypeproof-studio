@@ -58,7 +58,7 @@ Related proposal: [Learning Agent Experience requirements](../requirements/learn
 connect competitive UI evidence to lesson-specific AI identity, chat, runtime
 policy, SDK lifecycle, browser verification, instructor operations, Computer Use
 and lesson-governed multi-model selection, routing and comparison.
-AE-01 through AE-42 are proposed acceptance goals, not implemented contracts.
+AE-01 through AE-44 are proposed acceptance goals, not implemented contracts.
 The refinement adds learner comparison, assistance transitions, verification
 freshness, separate completion states, post-class ownership, help triage,
 context exclusion on resume, and evidence-linked curriculum revision.
