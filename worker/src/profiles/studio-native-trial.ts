@@ -17,6 +17,7 @@ export const profile: Profile = {
   system_prompt: prompt as unknown as string,
   coach_runtime: 'agent-sdk',
   model: { ...practice.model, provider: 'anthropic', max_tokens: 8192,
+    effort: {default:'medium',allowed:['low','medium','high']},
     allowed: ['hypeproof-default', 'hypeproof-fast', 'claude-sonnet-5',
       'claude-sonnet-4-5-20250929', 'claude-opus-5', 'claude-opus-4-8',
       'hypeproof-strong', 'claude-opus-4-6', 'claude-opus-4-5-20251101'],

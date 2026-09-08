@@ -1,0 +1,41 @@
+
+> hypeproof-chat@0.1.5 build
+> npm run build:webview && npm run build:extension
+
+
+> hypeproof-chat@0.1.5 build:webview
+> cd webview-ui && npm install && npm run build
+
+
+up to date, audited 158 packages in 2s
+
+103 packages are looking for funding
+  run `npm fund` for details
+
+1 high severity vulnerability
+
+To address all issues, run:
+  npm audit fix
+
+Run `npm audit` for details.
+
+> hypeproof-chat-webview@0.1.2 build
+> tsc -b && vite build
+
+vite v8.0.16 building client environment for production...
+[2Ktransforming...✓ 277 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html          0.38 kB │ gzip:   0.25 kB
+dist/assets/index.css   33.13 kB │ gzip:   6.86 kB
+dist/assets/index.js   347.08 kB │ gzip: 109.35 kB
+
+✓ built in 277ms
+
+> hypeproof-chat@0.1.5 build:extension
+> esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js
+
+
+  dist/extension.js  401.5kb
+
+⚡ Done in 21ms

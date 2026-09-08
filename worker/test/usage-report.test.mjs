@@ -7,7 +7,7 @@
 //
 // D1 은 부르지 않는다 — 순수 함수만 검증한다.
 import assert from "node:assert/strict";
-import { parseArgs, validate, buildSql, toMarkdown } from "../scripts/usage-report.mjs";
+import { parseArgs, validate, buildSql, toMarkdown, parseQueryResult } from "../scripts/usage-report.mjs";
 
 // --- 1. 정상 경로 ------------------------------------------------------------
 {
@@ -71,19 +71,26 @@ import { parseArgs, validate, buildSql, toMarkdown } from "../scripts/usage-repo
   console.log("✅ 빈 결과가 '0' 으로 오해되지 않는다");
 }
 
-// --- 5. 캐시 적중률 ----------------------------------------------------------
+// --- 5. 공급자 불명 집계의 한계 ----------------------------------------------------------
 {
   const md = toMarkdown(
     [{
       dim: "claude-sonnet-4-6", requests: 10, tokens_in: 1000, tokens_out: 500,
-      cache_read: 3000, cache_write: 0, avg_latency_ms: 812, errors: 1,
+      cache_read: 3000, cache_write: 700, avg_latency_ms: 812, errors: 1,
     }],
     { days: 7, by: "model", cohort: null },
   );
-  // 3000 / (3000 + 1000) = 75%. "캐싱이 실제로 비용을 줄이고 있나" 에 답하는 줄이다.
-  assert.match(md, /적중률 75\.0%/);
+  assert.doesNotMatch(md, /적중률 [0-9.]+%/, "provider가 없는 혼합 집계에서 비율을 지어내지 않는다");
+  assert.match(md, /캐시 쓰기 700/);
+  assert.match(md, /원가와 전체 기록 여부는 미확인/);
+  assert.match(md, /미보고/);
   assert.match(md, /달러 환산은 하지 않습니다/, "단가의 두 번째 정본이 되면 안 된다");
-  console.log("✅ 캐시 적중률 · 달러 환산 안 함");
+  console.log("✅ 캐시 쓰기 합계 · 혼합 적중률 없음 · 원가/완전성 미확인");
 }
 
-console.log("\n5/5 passed");
+assert.deepEqual(parseQueryResult('banner\n[{"success":true,"results":[]}]'), []);
+assert.deepEqual(parseQueryResult('[{"success":true,"results":[{"dim":"synthetic"}]}]'), [{dim:'synthetic'}]);
+for (const raw of ['[]', '[{"success":false,"results":[]}]', '[{"success":true}]', '[{}]', 'garbage', '[not json]'])
+  assert.throws(() => parseQueryResult(raw), /usage query/);
+console.log("✅ 조회 실패를 빈 기록으로 변환하지 않는다");
+console.log("\n6/6 passed");

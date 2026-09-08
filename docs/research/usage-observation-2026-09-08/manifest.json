@@ -1,0 +1,24 @@
+{
+  "base_sha": "f259f24a6a56c8f83a89355277290be5278df372",
+  "scope": "local synthetic Hono/SQLite and real Chromium; no production or model calls",
+  "execution_cwd": "/Users/jaylee/CodeWorkspace/hypeproof-studio/e2e",
+  "source_files_sha256": {
+    "worker/src/ui/admin.html": "4fe48cea56715aae9ccce73e238d75cc52f7070a5a3ec85dd896a18ff3bca900",
+    "worker/src/lib/usage-observation.ts": "ad51358bdf15b5eeb484bf62d6b2aa1192c714095fa2c36e325b1b55b196d29c",
+    "worker/src/routes/admin.ts": "4336ffe80ef9cb640ad76758f5a8acbb8e74bd5d56904d801a084a357164eafc",
+    "worker/scripts/usage-report.mjs": "80b3de526b5489967a93574a7254140d473f37ea8b3ff2ed59801c42578f0a85",
+    "e2e/admin-usage/run.mjs": "6c83acb12a98b50552aad516fa67d2b64873da03a8a1f3b1ae4524545192fddc",
+    "worker/test/harness/usage-observation.mjs": "e9e6eee856fc02bb52ea30bd177315fe8007afca01cefdcaffd9e9723768821e",
+    "worker/test/usage-observation.test.mjs": "0186dc757fedfc399906c6e2296830b067d313a6c43e37e32960d2cd4f2eed8a",
+    "worker/test/usage-report.test.mjs": "67be1a0c0d0c0173bb3b58a7972e3981f1929944b4be465a7f8ddfc5ade1efef"
+  },
+  "evidence_files_sha256": {
+    "browser.txt": "69248523e91b6d127759108c06bd411f9b4c167067c443dfea344f3f961b3561",
+    "usage-1280.png": "c0ccc983d8896a83acf52cf7e3d8fa5f04f738a09030361e5ec47814f5b878a2",
+    "usage-390-scrolled.png": "82df2ce22fc61618f248b760bd24923e37e28f7317ed3f8b427c42ff2f74348e",
+    "usage-390.png": "62b9c887ec18069826efb41dc7d96289502d6ea6149125ffd5cbab89465293fb",
+    "usage-empty.png": "a5d5544f3511144111428b97d5d5ce73f715eb766928ef25fb2da7a36b31e0bb",
+    "usage-report.txt": "0be1be11a37edb9e4b45dca375637a613b79ada36341bdd792becd6ef3aa30b1",
+    "usage-unavailable.png": "e82e4d4bec3d47f9a81868e9b2c59dbfdddf9cfc8b6821578b1f8b3f218b0850"
+  }
+}

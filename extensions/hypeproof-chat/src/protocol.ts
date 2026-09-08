@@ -86,7 +86,15 @@ export interface AssetScoreChunk {
   scores: AssetScores;
 }
 
+export type CourseEffort = 'low' | 'medium' | 'high';
+export interface EffortRequestRecord {
+  request_id: string; model: string; requested: CourseEffort | null; applied: CourseEffort | null;
+  reason: 'selected' | 'course_default' | 'unsupported_model'; status: number; created_at: string;
+}
 export interface ChatConfig {
+  effort?: { value: CourseEffort; allowed: CourseEffort[] };
+  effortNotice?: string;
+  effortResult?: { state: 'loading' | 'observed' | 'unknown'; requests: EffortRequestRecord[]; truncated?: boolean };
   proxyUrl: string;
   model: string;
   hasToken: boolean;
@@ -121,7 +129,7 @@ export interface ResolvedProfile {
   model_selection?: {
     revision: 'hps-model-selection/1'; runtime: 'proxy' | 'agent-sdk'; provider: string;
     default: string; source: 'profile' | 'lesson';
-    choices: Array<{ alias: string; id: string; label: string }>;
+    choices: Array<{ alias: string; id: string; label: string; effort?: {default: CourseEffort; allowed: CourseEffort[]} }>;
   };
   observation?: { format: string; scope?: string };
   /** Immutable teaching content; capability policy remains in the profile. */
@@ -249,6 +257,8 @@ export type WebviewMessage =
   | StartRequest
   | { type: "ready" }
   | { type: "selectModel"; alias: string }
+  | { type: "selectEffort"; value: CourseEffort }
+  | { type: "refreshEffort" }
   | { type: "sendMessage"; text: string; history: ChatMessage[]; images?: string[] }
   | { type: "retryMessage"; prompt: string; history: ChatMessage[]; images?: string[] }
   | { type: "cancelStream"; streamId: string }

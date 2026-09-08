@@ -143,3 +143,7 @@ Detailed contract: [studio-trial](../requirements/studio-trial.md).
 [CU-01~18 / GHX-01~12](../design/trial-conversation-experience.md)는 NAT/TUX/AE의 후속 수용 기준이다.
 [테스트 계획과 실행 기록](../testing/trial-conversation-experience.md), [화면 근거](../research/trial-conversation-2026-09-08/README.md)를 함께 유지한다.
 전체 구현 완료로 표시하지 않는다. #842의 목적별 빈 폴더 시작만 이번 구현 범위다.
+
+- 수업 effort (#799): [REQ-M40](../studio-requirements.md), [설계와 경계](../design/model-effort-and-course-usage.md#수업-effort-구현-계약-799), [실행 범위](../testing/lesson-effort.md). 사용량·예산 #800의 완료와 구분한다.
+
+운영자 사용량 관측: REQ-L5 · [감사와 읽기 계약](../design/usage-observation-audit.md) · [검증](../testing/usage-observation.md). 예약/정산·역할별 예산은 #800 후속이며 미구현이다.

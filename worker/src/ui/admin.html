@@ -35,7 +35,10 @@
     .roster .chip { display: inline-block; padding: 2px 8px; margin: 2px; background: #2a2a3a;
                     border-radius: 10px; font-size: 11px; }
     .usage { margin-top: 12px; font-size: 12px; }
-    .usage table { width: 100%; border-collapse: collapse; }
+    .usage-scroll { overflow-x: auto; }
+    .usage-scroll:focus-visible { outline: 2px solid #9292ff; }
+    .usage .observation { line-height: 1.65; overflow-wrap: anywhere; }
+    .usage table { width: 100%; min-width: 780px; border-collapse: collapse; }
     .usage th, .usage td { text-align: left; padding: 4px 8px; border-bottom: 1px solid #2a2a3a; }
     .usage th { color: #888; font-weight: 500; font-size: 11px; }
     details { margin-top: 8px; }
@@ -137,9 +140,9 @@
             <button data-act="roster" data-cohort="${c.id}">Save roster</button>
           </details>
           <details>
-            <summary>Recent usage</summary>
-            <div class="usage" id="usage-${c.id}">click to load…</div>
-            <button class="secondary" data-act="load-usage" data-cohort="${c.id}">Reload</button>
+            <summary>최근 사용 기록</summary>
+            <div class="usage" id="usage-${c.id}" role="status" aria-live="polite">다시 불러오기를 누르면 최근 기록을 조회합니다.</div>
+            <button class="secondary" data-act="load-usage" data-cohort="${c.id}">다시 불러오기</button>
           </details>
         </div>
       `;
@@ -236,16 +239,29 @@
           toast(`Roster saved (${users.length})`);
           loadAll();
         } else if (act === "load-usage") {
-          const { usage } = await api(`/admin/cohorts/${encodeURIComponent(cohort)}/usage?limit=30`);
-          const rows = usage.map((u) =>
-            `<tr><td>${u.user_id}</td><td>${u.model}</td>
-              <td>${u.tokens_in}</td><td>${u.tokens_out}</td>
-              <td>${u.cache_read}</td><td>${u.latency_ms ?? "–"}ms</td>
-              <td>${u.status}</td><td>${u.created_at}</td></tr>`,
-          ).join("");
-          $(`usage-${cohort}`).innerHTML = rows
-            ? `<table><thead><tr><th>user</th><th>model</th><th>in</th><th>out</th><th>cache↓</th><th>lat</th><th>code</th><th>when</th></tr></thead><tbody>${rows}</tbody></table>`
-            : "<em>no usage yet</em>";
+          const box = $(`usage-${cohort}`);
+          box.textContent = "최근 사용 기록을 조회하고 있습니다…";
+          btn.disabled = true;
+          try {
+            const { usage, observation: o } = await api(`/admin/cohorts/${encodeURIComponent(cohort)}/usage?limit=30`);
+            if (!o || o.scope !== "recent_records" || !Array.isArray(usage)) throw new Error("관측 범위를 확인할 수 없습니다");
+            const esc = (v) => String(v ?? "—").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+            const t = o.totals;
+            const summary = `<div class="observation">
+              <p>조회 ${esc(fmtTime(o.fetched_at))} · 최근 ${esc(o.record_count)}개 기록${o.has_older_records ? " · 더 이전 기록 있음" : ""}</p>
+              <p>오류 ${esc(o.failed_records)}개 · 오류 중 토큰이 기록된 요청 ${esc(o.failed_with_tokens)}개 · 토큰 0으로 저장된 기록 ${esc(o.zero_token_records)}개 · 수업 세션 연결 없음 ${esc(o.unattributed_session_records)}개</p>
+              <p>이 범위의 저장값 — 입력 ${esc(t.tokens_in)} · 출력 ${esc(t.tokens_out)} · 캐시 읽기 ${esc(t.cache_read)} · 캐시 쓰기 ${esc(t.cache_write)}</p>
+              <p>원가 미확인 · 전체 사용량의 기록 여부 미확인<br>재시도·늦은 보고·저장 누락이 있을 수 있습니다. 토큰 0은 미보고일 수도 있습니다. 공급자별 필드 의미가 달라 이 합계를 비용·잔여 예산·캐시 적중률로 환산하지 않습니다.</p>
+            </div>`;
+            const rows = usage.map((u) =>
+              `<tr>${[u.user_id,u.model,u.tokens_in,u.tokens_out,u.cache_read,u.cache_write,u.latency_ms,u.status,u.created_at].map(v=>`<td>${esc(v)}</td>`).join("")}</tr>`).join("");
+            box.innerHTML = summary + (rows
+              ? `<p>표를 좌우로 스크롤하면 모든 항목을 볼 수 있습니다.</p><div class="usage-scroll" tabindex="0" role="region" aria-label="최근 사용 기록 표"><table><thead><tr><th>학생</th><th>기록된 모델</th><th>입력</th><th>출력</th><th>캐시 읽기</th><th>캐시 쓰기</th><th>지연(ms)</th><th>상태</th><th>기록 시각(UTC)</th></tr></thead><tbody>${rows}</tbody></table></div>`
+              : "<p>조회된 기록이 없습니다. 실제 사용량이 0이라는 뜻은 아닙니다.</p>");
+          } catch (err) {
+            box.textContent = "사용 기록을 확인할 수 없습니다. 다시 불러오세요.";
+            throw err;
+          } finally { btn.disabled = false; }
         }
       } catch (err) {
         toast("Error: " + err.message, true);

@@ -208,6 +208,52 @@
       ]
     },
     {
+      "id": "ST-DES-COURSE-EFFORT",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/model-effort-and-course-usage.md",
+          "section": "## 수업 effort 구현 계약 (#799)"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-COURSE-EFFORT",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME",
+        "ST-DES-COURSE-EFFORT"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/lesson-effort.md"
+        },
+        {
+          "path": "worker/test/lesson-effort-policy.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/model-selection.smoke.mjs"
+        },
+        {
+          "path": "e2e/tests/native-effort.spec.ts"
+        },
+        {
+          "path": "e2e/chalk-authoring/run.mjs"
+        },
+        {
+          "path": "e2e/tests/native-effort-old-client.spec.ts"
+        },
+        {
+          "path": "worker/test/request-settings-d1.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-GPT-PRACTICE",
       "stage": "test",
       "owner": "jayleekr",
@@ -227,6 +273,45 @@
         },
         {
           "path": "e2e/tests/native-personas.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-USAGE-OBSERVATION",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/usage-observation-audit.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-USAGE-OBSERVATION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY",
+        "ST-DES-USAGE-OBSERVATION"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/usage-observation.md"
+        },
+        {
+          "path": "worker/test/usage-observation.test.mjs"
+        },
+        {
+          "path": "worker/test/usage-report.test.mjs"
+        },
+        {
+          "path": "worker/test/usage-log-status.test.mjs"
+        },
+        {
+          "path": "e2e/admin-usage/run.mjs"
         }
       ]
     },

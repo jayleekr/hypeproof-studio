@@ -121,6 +121,8 @@ export interface ProxyChatResult {
 }
 
 interface ProxyChatArgs {
+  effort?: import('./protocol').CourseEffort;
+  turnId?: string;
   proxyUrl: string;
   model: string;
   token: string | undefined;
@@ -207,6 +209,8 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
   const url = proxyUrl.replace(/\/$/, "") + "/chat/completions";
   const headers = buildProxyHeaders({ token, coachName, coachPersonality, previewUrl });
 
+  if (args.effort) headers['x-hps-effort'] = args.effort;
+  if (args.turnId) headers['x-hps-turn-id'] = args.turnId;
   const res = await fetch(url, {
     method: "POST",
     headers,

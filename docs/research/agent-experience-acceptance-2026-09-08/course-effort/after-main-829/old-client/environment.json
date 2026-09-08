@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-08T21:01:16.459Z",
+  "verification_mode": "published-bundle-unmodified",
+  "code_sha": "85c1c95e065f16991aefb5ee526558f50d753b3e",
+  "dirty": true,
+  "service_source_sha256": "db600a140a53d69977b1cd0d5ccf8f0e2e55e54c4f1f3608bdbecf56e600ce58",
+  "app_version": "0.1.56",
+  "app_source_sha": "f5939d9cf6bbf42588eacd370e2faf9cde7c53bc",
+  "extension_bundles_sha256": {
+    "dist/extension.js": "a979637176442b386971dc5878c2b186aa567a4352743350f80f619fde5230c0",
+    "webview-ui/dist/assets/index.js": "4bcf85b361f49a6a6d8418f7e2ca529b75a459ce35a9b4ca61fdb7c85efae9d8",
+    "webview-ui/dist/assets/index.css": "6645f232c8cc2c491d1c0f00a274e4937f180c433b009484d715cc486705d83e"
+  },
+  "node": "v24.4.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "compatibility_control": false,
+  "storage": "local test bindings; no production state",
+  "execution_cwd": "/Users/jaylee/CodeWorkspace/hypeproof-studio/e2e"
+}
