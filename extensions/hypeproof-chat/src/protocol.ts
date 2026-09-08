@@ -107,6 +107,12 @@ export interface ResolvedProfile {
       schema: 'hps-session-design/1'; title: string; audience: string;
       duration_minutes: number; objective: string; prerequisites: string; starter: string;
       steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string }>;
+      /**
+       * #747 — optional lesson-level AI display name. Informational here: the
+       * Service already projects it onto `ux.coach` (fixed + fallback_name),
+       * which is what the header, message labels and start page render.
+       */
+      assistant?: { display_name: string };
     };
   };
   profile_id: string;

@@ -312,8 +312,11 @@ messages.post("/messages", async (c) => {
   }
 
   const coach: CoachContext = {
-    name: decodeHeader(c.req.header("x-hps-coach-name")),
-    personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+    // #747 — a lesson-fixed identity is instructor-set (already in the gated
+    // system_prompt); the client's headers are then ignored so a participant
+    // cannot re-title the AI or attach a personality on that seat.
+    name: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-name")),
+    personality: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-personality")),
     // #431 — 작업 폴더는 학생 머신마다 다르므로 프로필에 넣을 수 없고, 클라이언트
     // system 은 통째로 교체되므로 거기 실어 보낼 수도 없다. 헤더가 유일한 통로다.
     workspace: decodeHeader(c.req.header("x-hps-workspace")),
@@ -706,8 +709,11 @@ messages.post("/messages/count_tokens", async (c) => {
   }
 
   const coach: CoachContext = {
-    name: decodeHeader(c.req.header("x-hps-coach-name")),
-    personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+    // #747 — a lesson-fixed identity is instructor-set (already in the gated
+    // system_prompt); the client's headers are then ignored so a participant
+    // cannot re-title the AI or attach a personality on that seat.
+    name: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-name")),
+    personality: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-personality")),
     // #431 — 작업 폴더는 학생 머신마다 다르므로 프로필에 넣을 수 없고, 클라이언트
     // system 은 통째로 교체되므로 거기 실어 보낼 수도 없다. 헤더가 유일한 통로다.
     workspace: decodeHeader(c.req.header("x-hps-workspace")),
