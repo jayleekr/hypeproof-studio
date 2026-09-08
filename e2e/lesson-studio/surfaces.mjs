@@ -29,7 +29,8 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
    const send=async message=>{await fill(chat,composer,message);await key(chat,'Enter','Enter',{windowsVirtualKeyCode:13});await wait(()=>chat.evaluate("!!document.querySelector('.hps-btn-stop')"),'B turn started');};
    const finished=()=>wait(()=>chat.evaluate("!document.querySelector('.hps-btn-stop')"),'B turn finished',120000);
    const approve=async(label,kind,decision)=>{
-    const modal=window.locator('.monaco-dialog-box').first();await modal.waitFor({state:'visible',timeout:90000});
+    const modal=window.locator('.monaco-dialog-box').first();
+    await wait(async()=>{if(await modal.isVisible())return true;if(!await chat.evaluate("!!document.querySelector('.hps-btn-stop')")){const response=await text(chat,'.hps-messages');record(kind+'-no-approval',{status:'BLOCKED',response});throw Error(kind+' turn ended without an approval dialog');}},kind+' actual approval',90000);
     const body=await modal.innerText();assert.ok(body.includes(name),kind+' approval name');assert.ok(APPROVAL_TITLE_PATTERN.test(body),kind+' observer classification');
     const buttons=await modal.locator('button,.monaco-button').allTextContents();
     await shot('b-'+kind+'-'+decision);
@@ -50,12 +51,12 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
      assert.ok(!gatewayCalls.some(c=>c.path==='/v1/messages'),'SDK request observed in unavailable fixture');
      record('B4',{name,sdk_unavailable_fixture:true,proxy_route_observed:true,notice:await text(chat,'.hps-messages')});return;
     }
-    const file=join(workspace,'b-identity-proof.txt'),content='SYNTHETIC-B-IDENTITY';assert.equal(existsSync(file),false);
-    const request=`합성 파일 승인 검수입니다. Write 도구로 ${file} 한 파일에 ${content} 한 줄만 쓰세요. 다른 파일·셸·브라우저는 사용하지 마세요. 승인이 거절되면 재시도나 다른 방법 없이 멈추고 거절됐다고 알려주세요.`;
+    const file=join(workspace,'flower-shop-hours.txt'),content='가상 꽃집 영업시간: 월–금 오전 10시–오후 6시';assert.equal(existsSync(file),false);
+    const request=`가상 꽃집 홈페이지에 쓸 영업시간 안내 원문을 저장해 주세요. Write 도구로 ${file} 한 파일에 ${content} 한 줄만 쓰세요. 다른 파일·셸·브라우저는 사용하지 마세요. 승인이 거절되면 재시도나 다른 방법 없이 멈추고 거절됐다고 알려주세요.`;
     await send(request);const denied=await approve('저장','write','deny');assert.equal(existsSync(file),false);record('B2-deny',{...denied,file_exists:false});
     await send(request+' 이번 요청에서는 저장을 허용할 예정입니다.');const allowed=await approve('저장','write','allow');
     assert.equal(readFileSync(file,'utf8').trim(),content);await shot('b-write-complete');record('B2-allow',{...allowed,file,content:readFileSync(file,'utf8'),write_approval:'explicit test setting; product default is automatic workspace write'});
-    await send('합성 셸 승인 검수입니다. Bash 도구로 pwd 명령을 한 번만 실행하세요. 파일 변경·다른 명령·브라우저는 사용하지 마세요.');
+    await send('가상 꽃집 작업 폴더의 위치를 확인하고 싶어요. Bash 도구로 pwd 명령을 한 번만 실행하세요. 파일 변경·다른 명령·브라우저는 사용하지 마세요.');
     record('B3-shell',await approve('실행','shell','allow'));
     chat=await frame('.hps-native-observation');await click(chat,'.hps-native-observation > summary');
     await click(chat,'.hps-native-observation > button');
