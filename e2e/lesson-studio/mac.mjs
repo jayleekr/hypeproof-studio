@@ -1,5 +1,6 @@
 // Real installed Mac shell + development extension + local Service/SQLite.
-// Synthetic only; no model completion is claimed by this navigation check.
+// Synthetic lessons. Navigation makes no model claim; the opt-in identity/live
+// cases record their real provider requests separately.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
@@ -58,11 +59,12 @@ if(live)globalThis.fetch=async(input,init)=>{
  upstream.push({origin:url.origin,path:url.pathname,status:r.status,request_id:r.headers.get('request-id')});
  writeFileSync(out+'/api-evidence.json',JSON.stringify({real_upstream:true,calls:upstream},null,2));return r;
 };
-let fault='none';
+let fault='none';const gatewayCalls=[];
 const server=createServer(async(req,res)=>{try{const chunks=[];for await(const x of req)chunks.push(x);const body=Buffer.concat(chunks);
+ if(/^\/v1\/(messages|chat\/completions)/.test(req.url)){gatewayCalls.push({path:req.url.split('?')[0],fault});writeFileSync(out+'/gateway-evidence.json',JSON.stringify({calls:gatewayCalls},null,2));}
  if(fault!=='none'&&/^\/v1\/(messages|chat\/completions)/.test(req.url)){
   if(fault==='stall'){const timer=setTimeout(()=>res.end(),20000);res.on('close',()=>clearTimeout(timer));return;}
-  res.writeHead(503,{'content-type':'application/json'}).end(JSON.stringify({type:'error',error:{type:'api_error',message:'synthetic acceptance failure 503'}}));return;
+  const status=Number(fault);res.writeHead(status,{'content-type':'application/json'}).end(JSON.stringify({type:'error',error:{type:status===400?'invalid_request_error':'api_error',message:'synthetic acceptance failure '+status}}));return;
  }
  const r=await local.fetcher(local.origin+req.url,{method:req.method,headers:req.headers,body:body.length?body:undefined});res.writeHead(r.status,Object.fromEntries(r.headers));if(r.body)for await(const chunk of r.body)res.write(chunk);res.end();}catch{if(!res.headersSent)res.writeHead(500);res.end();}});
 let app;const sockets=[];
@@ -95,7 +97,7 @@ try{
  async function connect(t){const ws=new WebSocket(t.webSocketDebuggerUrl);sockets.push(ws);await new Promise(r=>ws.onopen=r);let id=0;const pending=new Map();ws.onmessage=e=>{const m=JSON.parse(e.data);if(pending.has(m.id)){const [r,j]=pending.get(m.id);pending.delete(m.id);m.error?j(Error(m.error.message)):r(m.result);}};const send=(method,params={})=>new Promise((r,j)=>{const n=++id;pending.set(n,[r,j]);ws.send(JSON.stringify({id:n,method,params}));});await send('Page.enable');const {frameTree}=await send('Page.getFrameTree');const frames=[frameTree,...(frameTree.childFrames||[])];const contexts=[];for(const f of frames){const x=await send('Page.createIsolatedWorld',{frameId:f.frame.id,worldName:'lesson-observer'});contexts.push(x.executionContextId);}return {send,contexts};}
  async function findContext(selector){for(const t of await targets()){const c=await connect(t);for(const contextId of c.contexts){const evaluate=async expression=>(await c.send('Runtime.evaluate',{expression,contextId,returnByValue:true,awaitPromise:true})).result?.value;if(await evaluate('!!document.querySelector('+JSON.stringify(selector)+')'))return {...c,evaluate};}}return null;}
  if(identity){
-  await verifyIdentity({app,window,findContext,cases,out,live,setFault:mode=>{fault=mode;}});
+  await verifyIdentity({app,window,findContext,cases,out,live,setFault:mode=>{fault=mode;},setZoom:factor=>{const path=userDir+'/User/settings.json';writeFileSync(path,JSON.stringify({...JSON.parse(readFileSync(path,'utf8')),'window.zoomLevel':Math.log(factor)/Math.log(1.2)}));}});
   if(live)assert.ok(upstream.some(c=>c.status===200),'no successful real provider request was recorded');
  }else{
  let found=false;

@@ -25,13 +25,13 @@ export async function prepareIdentity(local){
  return cases;
 }
 
-export async function verifyIdentity({app,window,findContext,cases,out,live,setFault}){
+export async function verifyIdentity({app,window,findContext,cases,out,live,setFault,setZoom}){
  const checks=[];
  const problems=[];
  const record=(id,detail)=>{checks.push({id,status:'PASS',...detail});writeFileSync(out+'/identity-result.json',JSON.stringify({status:'IN_PROGRESS',scope:'actual Mac app + local Service/SQLite; synthetic lessons',checks},null,2));};
  const wait=async(fn,label,ms=20000)=>{const end=Date.now()+ms;do{const result=await fn();if(result)return result;await window.waitForTimeout(250);}while(Date.now()<end);throw Error('Timed out: '+label);};
  const frame=selector=>wait(()=>findContext(selector),'frame '+selector);
- const shot=async name=>{await window.screenshot({path:out+'/'+name+'.png'});};
+ const shot=async name=>{const png=await app.evaluate(async({BrowserWindow})=>(await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));writeFileSync(out+'/'+name+'.png',Buffer.from(png,'base64'));};
  const text=(c,selector)=>c.evaluate('document.querySelector('+JSON.stringify(selector)+')?.textContent');
  const click=(c,selector)=>c.evaluate('document.querySelector('+JSON.stringify(selector)+')?.click()');
  const fill=async(c,selector,value)=>c.evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});const proto=e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;Object.getOwnPropertyDescriptor(proto,'value').set.call(e,${JSON.stringify(value)});e.dispatchEvent(new Event('input',{bubbles:true}));e.focus();})()`);
@@ -96,23 +96,28 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
    if(!passes)problems.push('A5-width-'+width);
    record('A5-width-'+width,{...metrics,status:passes?'PASS':'FAIL'});
   }
-  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));await window.waitForTimeout(500);
-  const zoom=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor());assert.equal(zoom,2);
+  // Use the real Studio setting so the workbench also relayouts. Calling
+  // Electron setZoomFactor alone bypasses VS Code's layout state.
+  setZoom(2);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-2)<0.01,'Studio 200% zoom setting');await window.waitForTimeout(500);
+  const zoom=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor());
   chat=await frame('.hps-coach-name');await chat.evaluate("document.querySelector('.hps-actions button').focus()");await key(chat,'Tab','Tab',{windowsVirtualKeyCode:9});
   const focus=await chat.evaluate("({tag:document.activeElement.tagName,text:document.activeElement.textContent,visible:document.activeElement.getBoundingClientRect().right<=innerWidth})");
   await shot('long-name-zoom-200');assert.equal(focus.tag,'BUTTON');assert.equal(focus.visible,true);record('A5-zoom-keyboard',{zoom,focus,full_name_keyboard_access:'NOT VERIFIED; header is a non-focusable strong element'});
-  await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
+  setZoom(1);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-1)<0.01,'Studio normal zoom setting');
   chat=await connect('legacy');await shot('legacy-default-name');record('A4-legacy',{name:cases.legacy.name,width:await chat.evaluate('innerWidth'),document_width:await chat.evaluate('document.documentElement.scrollWidth')});
   chat=await connect('a');
-  if(live)for(const mode of ['503','stall']){
+  if(live)for(const mode of ['400','stall']){
    setFault(mode);const prompt='합성 '+mode+' 검수: 실패 후 이 요청과 수업 이름을 보존해 주세요.';
    await fill(chat,composer,prompt);await key(chat,'Enter','Enter',{windowsVirtualKeyCode:13});
    await wait(()=>chat.evaluate("!!document.querySelector('.hps-btn-stop')"),'fault turn started');
+   const unsent='아직 보내지 않은 후속 입력 '+mode;await fill(chat,composer,unsent);
    if(mode==='stall')await click(chat,'.hps-btn-stop');
    await wait(()=>chat.evaluate("!document.querySelector('.hps-btn-stop')"),'fault turn stopped',45000);
    assert.equal(await text(chat,'.hps-coach-name'),cases.a.name);
    assert.ok((await text(chat,'.hps-messages')).includes(prompt),'submitted input disappeared');
-   await shot('failure-'+mode);record('A6-'+mode,{identity_preserved:true,submitted_message_preserved:true,composer:await chat.evaluate("document.querySelector('.hps-input textarea').value"),synthetic_gateway_fault:true});setFault('none');
+   const draft=await chat.evaluate("document.querySelector('.hps-input textarea').value");assert.equal(draft,unsent,'unsent follow-up input disappeared');
+   if(mode==='400')assert.equal(await chat.evaluate("!!document.querySelector('.hps-error-banner')"),true,'failure was not disclosed');
+   await shot('failure-'+mode);record('A6-'+mode,{identity_preserved:true,submitted_message_preserved:true,unsent_followup_preserved:true,synthetic_gateway_fault:true});setFault('none');
   }
   writeFileSync(out+'/identity-result.json',JSON.stringify({status:problems.length?'FAIL':'PASS_EXECUTED_CASES',scope:'actual Mac app + local Service/SQLite; synthetic lessons',checks,failures:problems,not_run:['history identity at time of execution','all AI naming surfaces','screen reader','Windows',...(!live?['actual answer','failure and Stop']:[])],visual_review:'PENDING separate screenshot inspection'},null,2));
   if(problems.length)process.exitCode=1;
