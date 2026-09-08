@@ -33,6 +33,7 @@ import { listProfiles, getProfile } from "../profiles";
 import {createNativeGrant,NATIVE_TRIAL_LIMITS} from "../lib/native-trial-grants";
 import { USAGE_LAST_HOUR_SQL } from "../lib/analytics";
 import { modelUsageSummary } from '../lib/model-usage';
+import { usageLimit, usageObservation, type StoredUsageRow } from '../lib/usage-observation';
 import { issue, issueIssuer, verify, type IssuerScope } from "../lib/tokens";
 // Instructor-Bearer authorization is shared with Chalk (plan task F) — one
 // implementation, two workers. Never re-inline it here.
@@ -1030,17 +1031,23 @@ admin.get("/stats", async (c) => {
 admin.get('/cohorts/:id/model-usage', async c => c.json(await modelUsageSummary(c.env,c.req.param('id'))));
 
 admin.get("/cohorts/:id/usage", async (c) => {
+  c.header('cache-control', 'no-store');
   const cohortId = c.req.param("id");
-  const limit = Math.min(Number(c.req.query("limit") ?? 50), 500);
-  const rs = await c.env.HPS_DB
-    .prepare(
-      `SELECT user_id, model, tokens_in, tokens_out, cache_read, latency_ms, status, created_at
-       FROM usage_log WHERE cohort_id = ?
-       ORDER BY id DESC LIMIT ?`,
-    )
-    .bind(cohortId, limit)
-    .all();
-  return c.json({ usage: rs.results });
+  const limit = usageLimit(c.req.query("limit"));
+  if (limit === null) return c.json({ error: 'limit must be an integer 1..500' }, 400);
+  try {
+    const rs = await c.env.HPS_DB.prepare(
+      `SELECT user_id, model, tokens_in, tokens_out, cache_read, cache_write,
+         CASE WHEN session_id IS NULL THEN 1 ELSE 0 END AS session_missing,
+         latency_ms, status, created_at
+       FROM usage_log WHERE cohort_id = ? ORDER BY id DESC LIMIT ?`,
+    ).bind(cohortId, limit + 1).all<StoredUsageRow>();
+    if (!rs.success || !Array.isArray(rs.results)) throw new Error('usage query failed');
+    const usage = rs.results.slice(0, limit);
+    return c.json({ usage, observation: usageObservation(usage, limit, rs.results.length > limit) });
+  } catch {
+    return c.json({ error: 'usage_unavailable' }, 503);
+  }
 });
 
 // ---- profiles (read-only) ---------------------------------------------------
