@@ -151,7 +151,7 @@ So the honest statement of this route, replacing the deferral:
   image blocks itself.
 
 That last point has a consequence nobody had written down: both registered child
-cohorts (`sk-biopharm-kids-s1`, `sk-biopharm-kids-2026-grade-5-6-s1`) set
+cohorts (`sk-biopharm-kids-2026-grade-3-4-s1`, `sk-biopharm-kids-2026-grade-5-6-s1`) set
 `coach_runtime: "agent-sdk"`, so they are on the route with neither enforcement. That
 follows from the 2026-08-11 decision to let a minor cohort opt into the file-capable
 runtime, and it is not by itself a mistake — the children's curriculum needs those
