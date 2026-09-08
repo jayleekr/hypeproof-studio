@@ -17,6 +17,7 @@ import type {
   AgentDefinition,
   Options as AgentSdkOptions,
 } from "@anthropic-ai/claude-agent-sdk";
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 // Explicit .ts specifiers: the leaf/pure-module graph must load under
 // `node --experimental-strip-types` (smoke tests) which resolves specifiers
@@ -743,6 +744,112 @@ export function anthropicBaseUrlFor(proxyUrl: string): string {
 export const SDK_CONFIG_DIR_NAME = "claude-config";
 
 /**
+ * #749 (AE-14) — the seat a CLI session belongs to: this student, on this
+ * cohort profile, under this frozen lesson version.
+ *
+ * Why it has to exist. The vendored CLI persists a full verbatim transcript of
+ * every turn (`persistSession` defaults on and we never set it), and it files
+ * those transcripts under a slug derived from `cwd` — which is the COHORT's
+ * shared workspace folder, identical for every student on the machine. So on a
+ * shared classroom PC one student's transcripts land in the same directory as
+ * the next student's, and none of the product's removal affordances reach them:
+ * "대화 지우기" clears workspaceState only. Measured 2026-09-08 on a dev
+ * machine: 65 project directories, ~10 MB, 15 transcript files for one workshop
+ * workspace.
+ *
+ * The seat is a directory-name discriminator, not an authenticator, which is
+ * why a truncated digest is enough. The token itself is never written — the
+ * same move `nativeHistoryScope` already makes for native-trial seats.
+ */
+export function sdkSeatKey(seat: {
+  profileId?: string;
+  lessonVersion?: string;
+  tokenDigest?: string;
+}): string {
+  const part = (value: string | undefined, fallback: string) => {
+    // A path segment on every platform we ship: Windows rejects most of what a
+    // profile id could legally contain, so allowlist rather than blocklist.
+    const safe = (value ?? "").trim().replace(/[^A-Za-z0-9._-]/g, "-").slice(0, 48);
+    return safe || fallback;
+  };
+  return [
+    part(seat.profileId, "profile"),
+    part(seat.lessonVersion, "nolesson"),
+    part(seat.tokenDigest, "anon"),
+  ].join("~");
+}
+
+/**
+ * #749 (AE-14) - the seat key for one coach run, derived from what the run
+ * already carries. The token is hashed here and never stored; only the digest
+ * reaches the filesystem.
+ */
+export function sdkSeatKeyFor(run: {
+  token?: string;
+  profile?: { profile_id?: string; lesson?: { version?: string } };
+}): string {
+  return sdkSeatKey({
+    profileId: run.profile?.profile_id,
+    lessonVersion: run.profile?.lesson?.version,
+    tokenDigest: run.token
+      ? createHash("sha256").update(run.token).digest("hex").slice(0, 12)
+      : undefined,
+  });
+}
+
+/**
+ * #749 (AE-14, 중복 실행 방지) - seats with a coach turn already in flight.
+ *
+ * Nothing prevented two concurrent SDK runs for one seat before this. Two runs
+ * share a workspace, a CLI config dir and one approval-modal queue, so they
+ * interleave file writes and either one's modal can answer the other's
+ * question. The webview disables Send while streaming, but that is a UI state,
+ * not a guard: the host keeps `activeStreams` as a Map keyed per stream and its
+ * send path never consults `hasActiveStream()` (that gates lesson change and
+ * history clear only), so a queued send, a second panel, or a host-side retry
+ * reaches the runtime directly.
+ *
+ * Keyed by seat, not globally: two cohorts open on one machine stay
+ * independent, and the same student's second turn is the case worth refusing.
+ */
+const seatsInFlight = new Set<string>();
+
+/** Which seats are mid-run right now. */
+export function sdkSeatsInFlight(): readonly string[] {
+  return [...seatsInFlight];
+}
+
+/**
+ * Refusal for a second concurrent turn on one seat. Deliberately NOT an
+ * SdkUnavailableError: that class means "fall back to the proxy", which would
+ * run the duplicate turn on the other runtime - the exact outcome this guard
+ * exists to prevent.
+ */
+export class SdkConcurrentRunError extends Error {
+  // A plain field, not a TS parameter property: the smoke tests load this
+  // module under `node --experimental-strip-types`, which rejects those.
+  readonly seatKey: string;
+  constructor(seatKey: string) {
+    super("이미 실행 중인 요청이 있어요. 끝나거나 중지한 뒤에 다시 보내주세요.");
+    this.name = "SdkConcurrentRunError";
+    this.seatKey = seatKey;
+  }
+}
+
+/** Hold the seat for the duration of `run`, refusing a concurrent second run. */
+export async function withSdkSeatLock<T>(seatKey: string, run: () => Promise<T>): Promise<T> {
+  if (seatsInFlight.has(seatKey)) throw new SdkConcurrentRunError(seatKey);
+  seatsInFlight.add(seatKey);
+  try {
+    return await run();
+  } finally {
+    // finally, not a release at the tail: an abort or a mid-stream throw must
+    // not leave the seat wedged for the rest of the session.
+    seatsInFlight.delete(seatKey);
+  }
+}
+
+/**
  * Where the coach's `claude` subprocess keeps ITS config — deliberately NOT the
  * user's `~/.claude` (REQ-M13).
  *
@@ -762,16 +869,25 @@ export const SDK_CONFIG_DIR_NAME = "claude-config";
  *
  * Pure (string derivation only); the caller creates the directory.
  */
-export function sdkConfigDirFor(baseEnv: Record<string, string | undefined>): string {
+export function sdkConfigDirFor(
+  baseEnv: Record<string, string | undefined>,
+  /**
+   * #749 — appended so one seat's CLI state cannot land in another's directory.
+   * Omitted → exactly the previous shared path, so a caller that has not been
+   * updated (and every existing test) behaves as before.
+   */
+  seatKey?: string,
+): string {
+  const seat = seatKey?.trim() ? `/${seatKey.trim()}` : "";
   // Windows: %APPDATA%\HypeProof-Studio\… (beside the seeded SDK binary).
   // macOS/Linux: ~/.hypeproof-studio/… — both sit with the rest of our per-user
   // state, so wiping a student's Studio data removes this with everything else.
   const appData = baseEnv.APPDATA?.trim();
-  if (appData) return `${appData}/HypeProof-Studio/${SDK_CONFIG_DIR_NAME}`;
+  if (appData) return `${appData}/HypeProof-Studio/${SDK_CONFIG_DIR_NAME}${seat}`;
   const home = baseEnv.HOME?.trim() || baseEnv.USERPROFILE?.trim();
-  if (home) return `${home}/.hypeproof-studio/${SDK_CONFIG_DIR_NAME}`;
+  if (home) return `${home}/.hypeproof-studio/${SDK_CONFIG_DIR_NAME}${seat}`;
   // No home at all (locked-down CI): a relative dir still beats inheriting ~/.claude.
-  return `.hypeproof-studio/${SDK_CONFIG_DIR_NAME}`;
+  return `.hypeproof-studio/${SDK_CONFIG_DIR_NAME}${seat}`;
 }
 
 /**

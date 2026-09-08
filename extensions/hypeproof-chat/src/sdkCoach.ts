@@ -49,8 +49,10 @@ import {
   resolveZodModule,
   sdkBinaryMarkerPath,
   sdkConfigDirFor,
+  sdkSeatKeyFor,
   sdkToolToActionRequest,
   seededSdkBinaryPath,
+  withSdkSeatLock,
   type SdkActivity,
   type SdkUsageEvent,
   type CoachToolAction,
@@ -455,10 +457,15 @@ function abortError(): Error {
 /**
  * Run one coach turn on the Agent SDK. Mirrors proxyChat's contract so the
  * caller doesn't care which runtime produced the stream. Throws an AbortError
- * on cancellation (parity with proxyChat) and SdkUnavailableError when the SDK
- * package is absent.
+ * on cancellation (parity with proxyChat), SdkUnavailableError when the SDK
+ * package is absent, and SdkConcurrentRunError (#749) when this seat is
+ * already running a turn.
  */
 export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
+  return withSdkSeatLock(sdkSeatKeyFor(args), () => runSdkCoachTurn(args));
+}
+
+async function runSdkCoachTurn(args: SdkCoachArgs): Promise<void> {
   // Bridge the caller's signal to an SDK AbortController UP FRONT — before any
   // await — so a stop during loadSdk() still cancels. (addEventListener added
   // after the signal already fired would never run.)
@@ -541,7 +548,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   // path is derived purely (sdkConfigDirFor); creating it is the host's job.
   // A failure here is not fatal: the CLI creates it itself, and pointing the
   // env at a not-yet-existing dir still keeps ~/.claude out of the picture.
-  const sdkConfigDir = sdkConfigDirFor(process.env);
+  const sdkConfigDir = sdkConfigDirFor(process.env, sdkSeatKeyFor(args));
   try {
     fs.mkdirSync(sdkConfigDir, { recursive: true });
   } catch (err) {
