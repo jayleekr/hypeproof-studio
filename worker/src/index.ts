@@ -34,6 +34,7 @@ app.use("/v1/messages", signingSecretGuard);
 // (#282 count_tokens passthrough) needs its own wildcard mount.
 app.use("/v1/messages/*", signingSecretGuard);
 app.use("/v1/profile", signingSecretGuard);
+app.use("/v1/request-settings/*", signingSecretGuard);
 app.use('/v1/observations/*', signingSecretGuard);
 app.use("/v1/trace/*", signingSecretGuard);
 app.use("/v1/logs/*", signingSecretGuard);

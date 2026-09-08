@@ -1,0 +1,138 @@
+{
+  "real_upstream": true,
+  "storage": "synthetic-sqlite",
+  "calls": [
+    {
+      "model": "claude-sonnet-4-6",
+      "effort": "low",
+      "thinking": null,
+      "turn_id": "3b882641-bf4c-4bb6-b4b0-2dc9dee26101",
+      "requested_effort": "low",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerduSUAec4krRMGZz1Xe",
+      "elapsed_ms": 1306
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "effort": "high",
+      "thinking": null,
+      "turn_id": "67eab224-ae0b-4463-954f-531cc83a5144",
+      "requested_effort": "high",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011Cerdub3rMspFXSNxaGEJP",
+      "elapsed_ms": 3499
+    },
+    {
+      "model": "claude-sonnet-5",
+      "effort": "medium",
+      "thinking": null,
+      "turn_id": "c1055a3f-23c6-4e00-b81b-144a65c5cc68",
+      "requested_effort": "medium",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerdutDy389psKfd2dYZB",
+      "elapsed_ms": 1199
+    },
+    {
+      "model": "claude-opus-4-5-20251101",
+      "effort": "low",
+      "thinking": null,
+      "turn_id": "243be4d3-7545-4046-b234-2c71ebe24258",
+      "requested_effort": "low",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerduzLZwdVbnQk6Uhc4t",
+      "elapsed_ms": 1224
+    },
+    {
+      "model": "claude-opus-5",
+      "effort": "high",
+      "thinking": null,
+      "turn_id": "102e8c4b-e3b7-4875-88b0-48f5ee5e1822",
+      "requested_effort": "high",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011Cerdv6QSimVpE2fEQXQnE",
+      "elapsed_ms": 1355
+    },
+    {
+      "model": "claude-opus-4-6",
+      "effort": "medium",
+      "thinking": null,
+      "turn_id": "b237c4bb-080d-43b7-87e8-6c8235eef702",
+      "requested_effort": "medium",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerdvJ2wEbcT329cMBdd1",
+      "elapsed_ms": 3444
+    },
+    {
+      "model": "claude-opus-4-7",
+      "effort": "low",
+      "thinking": null,
+      "turn_id": "9db98c66-a5ca-47c7-b4c3-78fc45005483",
+      "requested_effort": "low",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerdvbFn3bXoouX2wsyTb",
+      "elapsed_ms": 931
+    },
+    {
+      "model": "claude-opus-4-8",
+      "effort": "high",
+      "thinking": null,
+      "turn_id": "0601f1b8-83c7-4e3d-9ddc-c014d8c9f44e",
+      "requested_effort": "high",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerdvhN8jEvdD9Vi7LoCL",
+      "elapsed_ms": 1571
+    },
+    {
+      "model": "claude-haiku-4-5",
+      "effort": null,
+      "thinking": null,
+      "turn_id": "e9f086c1-5cad-4828-a81b-32e4dd2ad1db",
+      "requested_effort": null,
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerdvqeDcaQpLLDoVmftV",
+      "elapsed_ms": 599
+    },
+    {
+      "model": "claude-sonnet-4-5-20250929",
+      "effort": null,
+      "thinking": null,
+      "turn_id": "ecbccd62-c774-42b1-9044-ac54e5f56f8a",
+      "requested_effort": null,
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011Cerdvuc69NwfoaaUPhD7j",
+      "elapsed_ms": 1363
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "effort": "low",
+      "thinking": null,
+      "turn_id": "7510729d-b523-4a04-86a8-7d2b33c8e964",
+      "requested_effort": "low",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011Cerdw5A4d85YPkNyTLskn",
+      "elapsed_ms": 2173
+    }
+  ]
+}

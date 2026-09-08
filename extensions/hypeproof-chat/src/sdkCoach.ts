@@ -91,6 +91,8 @@ export class CoachStallError extends Error {
 }
 
 export interface SdkCoachArgs {
+  effort?: import('./protocol').CourseEffort;
+  turnId?: string;
   /**
    * The extension's proxyUrl setting (OpenAI-compat base ending in /v1).
    * ANTHROPIC_BASE_URL is DERIVED from it (the /v1 suffix stripped — the SDK
@@ -564,6 +566,8 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   const options: Options = {
     ...buildSdkQueryOptions(opts, {
       proxyUrl: args.gatewayUrl,
+      effort: args.effort,
+      turnId: args.turnId,
       token: args.token,
       cwd: args.cwd,
       baseEnv: process.env,

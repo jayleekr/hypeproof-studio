@@ -136,6 +136,11 @@ jobs:
         working-directory: worker
         run: npx wrangler d1 execute hypeproof-studio --remote --file=migrations/0004-native-trials.sql
 
+      - name: Apply additive request settings schema
+        if: ${{ !inputs.dry_run }}
+        working-directory: worker
+        run: npx wrangler d1 execute hypeproof-studio --remote --file=migrations/0005-request-settings.sql
+
       - name: Deploy Worker
         if: ${{ !inputs.dry_run }}
         working-directory: worker
