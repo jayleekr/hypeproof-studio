@@ -21,7 +21,7 @@ test('entry becomes the conversation; real Markdown response and file preview re
     await ctx.win.screenshot({ path: join(out, 'conversation-canvas.png') });
     const before = readdirSync(ctx.wsDir).sort();
     await input.fill('UI 렌더링 검사용 합성 응답이야. 도구나 파일을 사용하지 말고 아래 문장을 코드 블록 없이 그대로 답해줘.\n\n지금 **구체적인 일**을 골라주세요.\n\n- AI: 목차 초안\n- 나: 최종 판단');
-    await expect(chat.locator('.hps-img-strip')).toHaveCount(0);
+    await expect(chat.locator('.hps-attachments')).toHaveCount(0);
     await input.press('Enter');
     await expect(chat.locator('.hps-btn-stop')).toBeVisible();
     await expect(chat.locator('.hps-btn-stop')).toHaveCount(0, { timeout: 120000 });
@@ -31,7 +31,7 @@ test('entry becomes the conversation; real Markdown response and file preview re
     expect(readdirSync(ctx.wsDir).sort()).toEqual(before);
     await ctx.win.screenshot({ path: join(out, 'real-markdown-no-file-change.png') });
     await input.fill('별도 합성 파일·화면 검사야. 현재 작업 폴더에 index.html을 Write 도구로 만들어줘. 본문 제목은 "synthetic life preview"이고 배경은 밝은 크림색으로 해줘. 다른 파일이나 외부 서비스는 사용하지 마. 실제 학생 제작 증거는 아니야.');
-    await expect(chat.locator('.hps-img-strip')).toHaveCount(0);
+    await expect(chat.locator('.hps-attachments')).toHaveCount(0);
     await input.press('Enter');
     await expect(chat.locator('.hps-btn-stop')).toBeVisible();
     await expect(chat.locator('.hps-btn-stop')).toHaveCount(0, { timeout: 120000 });
@@ -67,7 +67,7 @@ test('delegation concern remains the purpose after the learner names a presentat
     const chat = await chatFrame(ctx.win), input = chat.getByRole('textbox', { name: '코치에게 보낼 메시지' });
     for (const text of ['AI에게 맡기고 싶은데 어디까지 맡겨야 할지 모르겠어', '피피티 만드는 일이야', '고객사에 발표할 가상의 예약관리 서비스 소개 PPT야']) {
       await input.fill(text);
-      await expect(chat.locator('.hps-img-strip')).toHaveCount(0);
+      await expect(chat.locator('.hps-attachments')).toHaveCount(0);
       await input.press('Enter');
       await expect(chat.locator('.hps-btn-stop')).toBeVisible();
       await expect(chat.locator('.hps-btn-stop')).toHaveCount(0, { timeout: 120000 });
