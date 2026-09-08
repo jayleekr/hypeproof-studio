@@ -206,6 +206,29 @@
           "path": "extensions/hypeproof-chat/test/sdk-surface-drift.smoke.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-TEST-GPT-PRACTICE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME",
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/studio-personas-gpt.md"
+        },
+        {
+          "path": "worker/test/gpt-model-policy.test.mjs"
+        },
+        {
+          "path": "worker/test/codex-rehearsal.test.mjs"
+        },
+        {
+          "path": "e2e/tests/native-personas.spec.ts"
+        }
+      ]
     }
   ]
 }
