@@ -1,0 +1,19 @@
+{
+  "real_upstream": true,
+  "calls": [
+    {
+      "model": "claude-sonnet-4-6",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerPXXBBuFL9hbJe7oMzc"
+    },
+    {
+      "model": "claude-haiku-4-5",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerPXr222ABp9YQPFabfq"
+    }
+  ]
+}

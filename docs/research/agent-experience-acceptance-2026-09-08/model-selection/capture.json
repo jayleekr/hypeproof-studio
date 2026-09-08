@@ -1,0 +1,295 @@
+{
+  "at": "2026-09-08T18:09:13.915516+00:00",
+  "raw_results_preserved": true,
+  "files": [
+    {
+      "path": "auxiliary-attribution-failure/api-evidence.json",
+      "sha256": "8fa7cb9cc5010516f3abc62f596d83448eb265cae5b28f5cfcbfdb71ac76823f",
+      "bytes": 1624
+    },
+    {
+      "path": "auxiliary-attribution-failure/environment.json",
+      "sha256": "94f83a981436cb747fa2cf0139320e22faa7d3d9a22b14939ba3ec5ab5577c32",
+      "bytes": 1944
+    },
+    {
+      "path": "auxiliary-attribution-failure/gateway-evidence.json",
+      "sha256": "5bb87173bc445979f3b04186b0376232f61c026409acbe643c3bd7536287c2b6",
+      "bytes": 915
+    },
+    {
+      "path": "auxiliary-attribution-failure/model-selection-result.json",
+      "sha256": "df0a4a32505f14f5279262ac6e6de33431fbaf4481984818feed42a8db97923d",
+      "bytes": 3817
+    },
+    {
+      "path": "chalk/model-choice-1280.png",
+      "sha256": "bfec8acd78c09ba5e5d09650b2cd56b9b3bf51e15af178783128ca35cc592e30",
+      "bytes": 55950,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "chalk/model-choice-390.png",
+      "sha256": "cdc7389f1ba1b8b28700af080e7ac159337c9f01b5bb7721ce05195579543602",
+      "bytes": 40525,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "chalk/run.log",
+      "sha256": "095eff52ca6f15905fe8dff40880794c9f15d9ae5585fbc79d0a9f5fb223dbc9",
+      "bytes": 446
+    },
+    {
+      "path": "editor-width-failure/environment.json",
+      "sha256": "393b69d4c53447a81c916c774e18bae2a60b96a5054734b095aa62542449fb27",
+      "bytes": 1512
+    },
+    {
+      "path": "editor-width-failure/model-selection-result.json",
+      "sha256": "b9ed8c752c277a0891df6a92348a3743ffcff49c52ffc06095a070f12caf9043",
+      "bytes": 541
+    },
+    {
+      "path": "fixed-visual/environment.json",
+      "sha256": "a40e3a6b34de7636d594c87cae8a63d3ea77bd2a6645315b34239b73fcf7c9bf",
+      "bytes": 1945
+    },
+    {
+      "path": "fixed-visual/model-fixed.png",
+      "sha256": "189554ad2cdd3ededb376ab1e9661c30ab54014ec3581acc84e6ec1ef9b7d448",
+      "bytes": 143690,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "fixed-visual/model-selection-result.json",
+      "sha256": "13f381facc996c307f4536156ddef4d21169bb5841bb1faab7ff7888adf31bdd",
+      "bytes": 1171
+    },
+    {
+      "path": "keyboard-first-failure/environment.json",
+      "sha256": "3ccb71f3209cded44b771a9b46fbb9939236dcf1a27eb1d4cd8689e7c4957df4",
+      "bytes": 1512
+    },
+    {
+      "path": "keyboard-first-failure/model-selection-result.json",
+      "sha256": "d8bca5f2df79da89f5cd13fa60895fb2b9c6d84282d9e7398939f329e8eae727",
+      "bytes": 792
+    },
+    {
+      "path": "keyboard-focused-failure/environment.json",
+      "sha256": "ac29e3975608177997ec53a82c3e4ad0735ded5c1eff263411d75d95d848befa",
+      "bytes": 1944
+    },
+    {
+      "path": "keyboard-focused-failure/model-failure.png",
+      "sha256": "34406273dff19fa15d2e52bda950c6c55fbc093cd1a62037aa3790c5a392a9e0",
+      "bytes": 152531,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "keyboard-focused-failure/model-selection-result.json",
+      "sha256": "27d254f707cbab570de1270095202096b621e40ec681ad9b806a74e7e8c5bb57",
+      "bytes": 1439
+    },
+    {
+      "path": "keyboard-second-failure/environment.json",
+      "sha256": "6b9600ea08315148e54899baa794ec878639eeba1d80599c6bd16290cc034d9b",
+      "bytes": 1512
+    },
+    {
+      "path": "keyboard-second-failure/model-selection-result.json",
+      "sha256": "d8bca5f2df79da89f5cd13fa60895fb2b9c6d84282d9e7398939f329e8eae727",
+      "bytes": 792
+    },
+    {
+      "path": "keyboard-window-failure/environment.json",
+      "sha256": "9800ce4dc7e2857adfde0e8fdbbff08bfb5be58a775ba24175b327d8a5bc2a74",
+      "bytes": 1944
+    },
+    {
+      "path": "keyboard-window-failure/model-selection-result.json",
+      "sha256": "1e2f532a00d57682921407413066abc243643d93338a3c2f4885768b79cd76f9",
+      "bytes": 981
+    },
+    {
+      "path": "layout-interference/environment.json",
+      "sha256": "8e7ddbcf02cf1805b92343674ac4b13f68d1aa67901b93f94c2a117ce140eba9",
+      "bytes": 1945
+    },
+    {
+      "path": "layout-interference/model-selection-result.json",
+      "sha256": "8e20cdf278311822661ca05b22333f8513676519ce1bd4e06b67889b3748bbe0",
+      "bytes": 1292
+    },
+    {
+      "path": "models-api-capabilities.json",
+      "sha256": "68d1991cc7c3698312cc0ba0f111b5eb9cec4ec0b430cae242e1edc3b65177a4",
+      "bytes": 14165
+    },
+    {
+      "path": "models-api-list.json",
+      "sha256": "0aa479b484d8045410caaa238d26fa111c1f786f3bb084b8c2dd22e0e1336c4b",
+      "bytes": 1020
+    },
+    {
+      "path": "proxy/api-evidence.json",
+      "sha256": "75c3e18426a0b51a37946b2fa20a826cfc1fb0c035ea9871ddaa0722b5f55ead",
+      "bytes": 1811
+    },
+    {
+      "path": "proxy/claude-opus-5.png",
+      "sha256": "00b41494b97f9e5e50484bcd0b52a035bbbf6716206ec45adba5201779c21391",
+      "bytes": 139259,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "proxy/environment.json",
+      "sha256": "0c94233e077acb7cf4b0e39ac25ef06885205b1283b5de3454aa84f79e5d23e7",
+      "bytes": 1940
+    },
+    {
+      "path": "proxy/gateway-evidence.json",
+      "sha256": "2018c6960871a938ea5f1b3f894d71628ec243115a5e1cacaf8a8f49f09e3dff",
+      "bytes": 1092
+    },
+    {
+      "path": "proxy/model-selection-result.json",
+      "sha256": "7701e12cf9fd36e66c1ad6dae511a26516823a4f5d9aae7fe4c968b9e9a299f8",
+      "bytes": 6090
+    },
+    {
+      "path": "proxy-first-pass/api-evidence.json",
+      "sha256": "7ca69874d855d5351292760a4492dc9d987b938b30bc240e39e9f53d565a0242",
+      "bytes": 435
+    },
+    {
+      "path": "proxy-first-pass/environment.json",
+      "sha256": "359178d4a0f518fc331833359aed08d4564bcac00f38040f1268ed3f76189789",
+      "bytes": 1508
+    },
+    {
+      "path": "proxy-first-pass/gateway-evidence.json",
+      "sha256": "ee9b9de02196b1007d7db21ebdeb2013520f78232adf0b183e3571721c8d9c09",
+      "bytes": 254
+    },
+    {
+      "path": "proxy-first-pass/model-selection-result.json",
+      "sha256": "9a166f6315d45ab95b1f667a27ebda3a7c6c230e1e35dd97036f120c53920170",
+      "bytes": 1899
+    },
+    {
+      "path": "sdk/api-evidence.json",
+      "sha256": "8739a16793ff59bdb29483a1d4cf41547cbd207250e4482441c85ca20dc5435b",
+      "bytes": 3578
+    },
+    {
+      "path": "sdk/claude-opus-5.png",
+      "sha256": "2a48881906a5d1df1168fa5ca8b6b6d4b29e161d6973c02c58dfaba16ffb93b9",
+      "bytes": 127243,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "sdk/claude-sonnet-5.png",
+      "sha256": "3164a5daca4e110caea26f5700f8f8383ab2d40ee9f9d05ed65cefdcfcf71180",
+      "bytes": 162927,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "sdk/environment.json",
+      "sha256": "32cad7b8176b8f297c703602f96955e86386520a084320e79932ba69c851e1f5",
+      "bytes": 1944
+    },
+    {
+      "path": "sdk/gateway-evidence.json",
+      "sha256": "5d45cfb34bd5893a28b2b9751feacc0e4fac6a65ec2f951332ac3d763856d09f",
+      "bytes": 2021
+    },
+    {
+      "path": "sdk/model-1280.png",
+      "sha256": "f51a491d96f07769fb77aa2493cf7ee82f6d3c4def79fbcfc33a633ee929d5c3",
+      "bytes": 152536,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "sdk/model-390.png",
+      "sha256": "7c80c19b0bb4545425c9038f1b83ac3822f26d2e6f3de8d67f5ed3d5621ebb39",
+      "bytes": 112541,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "sdk/model-fixed.png",
+      "sha256": "21ff2825ac86fd4a3f25fbe9fdb0f5a3ed33da30b0db8c0b309337470e9c3cb3",
+      "bytes": 30403,
+      "visual_review": "BAD_CAPTURE: blank transition; replaced by fixed-visual/model-fixed.png"
+    },
+    {
+      "path": "sdk/model-keyboard-selection.png",
+      "sha256": "9a7bd1cbc9e55bbbfecdd0c27f9f76125b9b3c14a28db8559b21877e4853112c",
+      "bytes": 152772,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "sdk/model-selection-result.json",
+      "sha256": "3feaed4cf3f9ddb529eed291ae51130f45d760c93459be65f03ea5d334574d51",
+      "bytes": 9218
+    },
+    {
+      "path": "sdk/model-switched-conversation.png",
+      "sha256": "14fcb30815e10fdc2ad6de6e52a1dc041e539542c95338f5e010926bab72c030",
+      "bytes": 159855,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "sdk/model-zoom-200.png",
+      "sha256": "51e3ed3ac16eb226c8d81582919156d05b427a735e2d67e334787e99981ce99d",
+      "bytes": 122324,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "sdk-first-pass/api-evidence.json",
+      "sha256": "4daf8e422eba104f09e909c69fa692cdcc9e7bf51effeed97f3e729909965311",
+      "bytes": 826
+    },
+    {
+      "path": "sdk-first-pass/environment.json",
+      "sha256": "27200031c4c3f2210806afca06462e32884102a6d8c2ec962ed1d4500192ed30",
+      "bytes": 1512
+    },
+    {
+      "path": "sdk-first-pass/gateway-evidence.json",
+      "sha256": "ec5029ad0c736f049b035162ab548848286194b2125d8ded655c16e720f32f63",
+      "bytes": 457
+    },
+    {
+      "path": "sdk-first-pass/model-selection-result.json",
+      "sha256": "1e30b1c0105a752e41a1e9bc2d5291da64b47faf07a74460f1ff31837d4a4516",
+      "bytes": 2589
+    },
+    {
+      "path": "sdk-haiku-failure/api-evidence.json",
+      "sha256": "ee6b08ef0b19063039744c3eca22c24990376e14b551c3c786c17aa02e49f27c",
+      "bytes": 631
+    },
+    {
+      "path": "sdk-haiku-failure/environment.json",
+      "sha256": "066f4b5766618811262d05981e875ddd0e458d92d3f4317910de8893074fb72e",
+      "bytes": 1512
+    },
+    {
+      "path": "sdk-haiku-failure/gateway-evidence.json",
+      "sha256": "ec5029ad0c736f049b035162ab548848286194b2125d8ded655c16e720f32f63",
+      "bytes": 457
+    },
+    {
+      "path": "sdk-haiku-failure/model-failure.png",
+      "sha256": "df0fc16b06c8ec6608be8edd9b9a65383953ec329ce6e376e8e7569be89069ea",
+      "bytes": 560063,
+      "visual_review": "OPENED: scope in README"
+    },
+    {
+      "path": "sdk-haiku-failure/model-selection-result.json",
+      "sha256": "02d30cebdcc203840620aa3840e91ce85f7e935bb5be04e4d23ad549ae0c200c",
+      "bytes": 1701
+    }
+  ]
+}

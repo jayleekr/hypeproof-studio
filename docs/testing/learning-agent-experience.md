@@ -19,7 +19,7 @@
 | AE-T09 | AE-13 | 제한된 편집 묶음 승인 후 파일 집합·origin·단계·기한·policy revision 변경. 원 범위만 재사용, 확대는 재평가, 공개/삭제 승인 재사용 불가 | 정책+Electron / NOT RUN |
 | AE-T10 | AE-14 | 20턴 대화 중 압축·앱 종료·네트워크 단절·중복 요청·정책 축소 후 재개. 목표/검수 기준 보존, 다른 학생 문맥 0, tool side effect 중복 0, 이전 grant 복원 0 | SDK+장애 주입 / NOT RUN |
 | AE-T11 | AE-15 | 파일 추가·수정·삭제, 수동 편집, SDK Edit, shell, subagent 변경 후 복구. 원래 파일 집합/해시 복원, 복구 전 상태 보존. 외부 배포/DB는 미복구로 표시 | 파일+실제 SDK / NOT RUN |
-| AE-T12 | AE-17 | 여러 학생/서브에이전트 동시 요청, 예약 직후 실패·취소·중복 정산·늦은 usage. 원자적 예약과 재시도 상한, 비용 미확인 표시, 특정 학생의 기아 없음 | Service+부하 / NOT RUN |
+| AE-T12 | AE-17 | 여러 학생/서브에이전트 동시 요청, 예약 직후 실패·취소·중복 정산·늦은 usage. 원자적 예약과 재시도 상한, 비용 미확인 표시, 캐시 이중 계산 방지·가격표 revision, 학생/강사/운영자 가시성·포함 한도와 실제 원가 구분, 한도 후 파일 보존, 특정 학생의 기아 없음 | Service+부하 / NOT RUN |
 | AE-T13 | AE-05/18 | 정상 대조 예제와 깨진 이미지·링크·JS 오류·390px overflow를 심은 예제 검사. 각 검사의 탐지/누락·화면·산출물 해시 기록, 정상 예제 오탐 없음 | Browser+산출물 / NOT RUN |
 | AE-T14 | AE-18/19 | 두 탭·리다이렉트·로그인 전후·DOM 세대 변경 중 클릭/타이핑, 수동 인계/재개. 잘못된 탭 실행 0, 오래된 선택자 차단, 외부 효과 승인, 다른 학생 쿠키 0 | Browser+호스트 / NOT RUN |
 | AE-T15 | AE-20/22 | 활동 없는 학생 포함 명단과 도움 요청 열람. 무신호는 unknown, 다른 수업 원문 불가, 명시적 공유·감사·철회·만료 계약 회귀 통과 | Chalk+Service / NOT RUN |
@@ -28,7 +28,7 @@
 | AE-T18 | AE-24 | 시연과 다른 공지 변경을 수행. 학생이 목표·선택 자료·위임 범위·검수/복구·도움 사용을 설명. 제출만으로 학습 통과 자동 판정 금지 | 관찰+강사 평가 / NOT RUN |
 | AE-T19 | AE-25/26 | 두 수업의 고정/허용 목록, 학생/강사/관리자 권한, 직접 model ID/alias 위조, SDK fast 보조 호출, 설정 버전 불일치. 허용 요청 성공·다른 수업/미허용 공급자 우회 0 | Service+Chalk+App / NOT RUN |
 | AE-T20 | AE-27 | 두 AI 이름과 여러 모델, 같은 ID의 두 alias, 강제 clamp, Auto/대체, usage 누락을 주입. 선택/실제 모델 구분, identity 유지, 다음 턴 적용 표시, 키보드 선택 가능, 미확인 비용을 0으로 표시하지 않음 | React+실제 응답 envelope / NOT RUN |
-| AE-T21 | AE-28 | 실제 허용 조합마다 text/vision/tools/effort/context·browser·OS 양/음성 대조. SDK의 비Anthropic 선택, 도구 없는 모델, 미지원 매개변수, 오래된 catalog를 명시적으로 처리. upstream 200만으로 실행 능력 PASS 금지 | Gateway+실제 모델/실행기 / NOT RUN |
+| AE-T21 | AE-28 | 실제 허용 조합마다 text/vision/tools/effort/context·browser·OS 양/음성 대조. SDK의 비Anthropic 선택, 도구 없는 모델, 미지원 매개변수, 오래된 catalog를 명시적으로 처리. 강사 effort 기본/상한·미지원 모델·실행 중/모델 전환의 실제 적용값과 이유 대조(#799). upstream 200만으로 실행 능력 PASS 금지 | Gateway+실제 모델/실행기 / NOT RUN |
 | AE-T22 | AE-29 | 실행 중 모델 변경 예약, 더 작은 문맥 모델, 공급자/실행기 전환·실패·복귀. 확인한 자료만 새 세션에 도착, 제외 자료/자격/grant 누출 0, 원본 보존, SDK session ID의 교차 재사용 0 | App+SDK+proxy / NOT RUN |
 | AE-T23 | AE-30 | Auto 후보 차단/예산 부족, 기존 Gemini 404/429/5xx, 스트림 도중 실패, 도구 완료 후 응답 유실. 승인된 후보만 사용, 재시도 상한과 실제 모델 기록, 불확실한 외부 효과 자동 중복 0 | 장애 주입+실행기 / NOT RUN |
 | AE-T24 | AE-31/32 | 같은 snapshot의 두 읽기 검토, 한 분기 지연/실패/취소, 여러 학생 동시 비교. 입력 해시·분기 provenance 보존, 쓰기 거부, 전체 비용 예약/정산, 타 학생 기아 없음. P2 편집은 별도로 브라우저/자격/파일 격리·채택 충돌 검증 | Service+App+격리 환경 / NOT RUN |

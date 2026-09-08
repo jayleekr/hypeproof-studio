@@ -481,3 +481,11 @@ Chalk 편집기·브라우저 검수 카드·Computer Use 어댑터는 각각 �
 
 이번 문서 수정으로 정책·개인정보 계약을 채택하거나 운영 기능을 켜지 않는다.
 구현 착수와 파일럿 확대의 구체 게이트는 [에픽의 전달 단계](../plan/learning-agent-experience-epics.md)를 따른다.
+
+### 모델 선택 실기에서 다음 설계로
+
+#792/#795의 [실제 실행 기록](../research/agent-experience-acceptance-2026-09-08/model-selection/README.md)은
+입력창의 다음 요청 전환·수업 고정과 Sonnet/Opus 5를 포함한 9개 모델의 대화 전환을 확인한다.
+모델 이름 수를 학습 성과로 취급하지 않는다. 강의료에 포함된 사용량과 effort의 제어는
+[별도 설계](model-effort-and-course-usage.md)와 #799/#800으로 연결했다. 강사는 수업 조건을
+준비하고 학생은 선택의 결과를 확인하며, 원가 절감을 학습자의 판단 점수로 쓰지 않는다.

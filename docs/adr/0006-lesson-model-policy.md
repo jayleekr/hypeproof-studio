@@ -1,6 +1,6 @@
-# A lesson narrows the models it allows; the app shows the set and the turn
+# A lesson narrows the models it allows; the app switches the next request
 
-Status: Proposed; implementation candidate #792 is under verification. The implementation decision below supersedes the original proposal sections.
+Status: Accepted for the bounded implementation #792 / #795; production activation and full E7 acceptance remain separate. The implementation decision below supersedes the original proposal sections.
 
 Original audit (first unit of E7 [#755](https://github.com/jayleekr/hypeproof-studio/issues/755), epic [#746](https://github.com/jayleekr/hypeproof-studio/issues/746)).
 Design input (docs branch PR [#753](https://github.com/jayleekr/hypeproof-studio/pull/753), pinned at `293d4b5`):
@@ -31,8 +31,12 @@ the contract is this small.
 The primary UI is an instructor-scoped model switch in the composer. Per-response
 model badges are not required. The existing usage records verify actual execution.
 
-- `session-design.model` contains `default` and 1–2 `allowed` aliases from the compiled
-  cohort's default/fallback set. Existing issuer authorization applies; students cannot edit it.
+- `session-design.model` contains `default` and a bounded `allowed` set from the compiled
+  cohort catalogue (explicit reviewed version keys or legacy aliases). Existing issuer authorization applies; students cannot edit it.
+- Version choices include Sonnet 4.5/4.6/5, Opus 4.5/4.6/4.7/4.8/5 and Haiku 4.5.
+  Only the adult `studio-native-trial` compiled profile opts into the expanded set.
+  Other cohorts retain their default/fallback pair. The three existing alias pins stay unchanged;
+  #690's all-cohort default migration and long-output/token-limit checks remain separate.
 - At freeze the Service adds `binding`: revision `hps-model-selection/1`, effective provider,
   runtime, and deduplicated alias/id/label choices. Drafts cannot submit their own binding.
   Every lesson read compares the frozen binding with the current pins/runtime/provider.
@@ -53,8 +57,8 @@ model badges are not required. The existing usage records verify actual executio
 - Chalk uses the existing authoring form and shared instructor forwarder; the new scoped
   catalogue read is `GET .../authoring/:course/models/:profile`.
 
-[Acceptance contract](../testing/lesson-model-selection.md). New Service precedes Chalk;
-freezing this optional field establishes the documented rollback floor. This candidate
+[Acceptance contract](../testing/lesson-model-selection.md), [actual evidence](../research/agent-experience-acceptance-2026-09-08/model-selection/README.md). New Service precedes Chalk;
+freezing this optional field establishes the documented rollback floor. This implementation
 adds no production deployment, automatic activation, provider transfer, Auto/compare,
 new auth/store, full capability matrix or enforced rehearsal workflow. Those parts of
 AE-25–34 remain separate work. The original audit and counterexample below describe

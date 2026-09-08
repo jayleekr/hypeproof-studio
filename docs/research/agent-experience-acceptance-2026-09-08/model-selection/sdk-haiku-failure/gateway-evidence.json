@@ -1,0 +1,24 @@
+{
+  "calls": [
+    {
+      "path": "/v1/messages",
+      "fault": "none",
+      "requested_model": "hypeproof-default"
+    },
+    {
+      "path": "/v1/messages",
+      "fault": "none",
+      "requested_model": "hypeproof-default"
+    },
+    {
+      "path": "/v1/messages",
+      "fault": "none",
+      "requested_model": "hypeproof-fast"
+    },
+    {
+      "path": "/v1/messages",
+      "fault": "none",
+      "requested_model": "hypeproof-fast"
+    }
+  ]
+}

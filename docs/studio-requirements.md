@@ -253,7 +253,7 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 
 ---
 
-| REQ-M36 | 수업 허용 모델 선택·전환 (#792) | 강사는 코호트 허용 부분집합과 기본값을 버전으로 고정한다. Service가 공급자·실행기·모델 ID를 binding에 보존하고 변경 시 이전 버전을 거부한다. 학생 입력창의 선택은 다음 요청부터 적용하며 입력·대화·파일을 보존한다. 새 수업 정책은 SDK fast 요청도 같은 집합으로 제한한다. 이름/모델 변경으로 도구 권한 확대 없음. 명시적 선택/고정 수업에서 SDK 부재 시 다른 실행기로 조용히 전환하지 않는다. 구형 수업의 기존 fallback은 유지. 답변마다 모델 배지는 필수 아님. | U (`model-selection.smoke`), Service (`lesson-model-policy.test`), [native/Chalk 인수](testing/lesson-model-selection.md) |
+| REQ-M36 | 수업 허용 모델 선택·전환 (#792) | Sonnet/Opus 버전(5 포함)과 Haiku의 검토된 카탈로그를 사용한다. 체험 프로필만 확장 목록을 허용하며 기존 alias 핀은 유지한다. 강사는 코호트 허용 부분집합과 기본값을 버전으로 고정한다. Service가 공급자·실행기·모델 ID를 binding에 보존하고 변경 시 이전 버전을 거부한다. 학생 입력창의 선택은 다음 요청부터 적용하며 입력·대화·파일을 보존한다. 새 수업 정책은 SDK fast 요청도 같은 집합으로 제한한다. 이름/모델 변경으로 도구 권한 확대 없음. 명시적 선택/고정 수업에서 SDK 부재 시 다른 실행기로 조용히 전환하지 않는다. 구형 수업의 기존 fallback은 유지. 답변마다 모델 배지는 필수 아님. | U (`model-selection.smoke`), Service (`lesson-model-policy.test`), [native/Chalk 인수](testing/lesson-model-selection.md) |
 
 ## How to update this doc
 

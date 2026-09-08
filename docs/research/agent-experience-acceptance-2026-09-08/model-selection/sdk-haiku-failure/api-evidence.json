@@ -1,0 +1,26 @@
+{
+  "real_upstream": true,
+  "calls": [
+    {
+      "model": "claude-sonnet-4-6",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerPKtVWS6FV5aWmY1MSo"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerPKtYEw4KuKtyn1Q6Hv"
+    },
+    {
+      "model": "claude-haiku-4-5",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 400,
+      "request_id": "req_011CerPLDjeDHdRWWtXmnMHy"
+    }
+  ]
+}
