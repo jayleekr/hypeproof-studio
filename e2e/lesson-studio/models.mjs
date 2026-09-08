@@ -42,14 +42,14 @@ export async function verifyModels({app,window,findContext,cases,out,live,upstre
   }
   await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];w.show();w.focus();});
   await chat.evaluate("window.focus();document.querySelector('.hps-model-selection select').focus();window.modelKeys=[];document.addEventListener('keydown',e=>window.modelKeys.push({key:e.key,target:e.target.tagName}));document.addEventListener('change',e=>window.modelKeys.push({change:e.target.value}));");
-  await window.keyboard.press('Space');await window.waitForTimeout(200);await shot('model-keyboard-menu');await window.keyboard.press('ArrowDown');await window.keyboard.press('Enter');
+  await window.keyboard.press('ArrowDown');await window.waitForTimeout(250);
   record('keyboard-events',await chat.evaluate("({focus:document.hasFocus(),active:document.activeElement.tagName,events:window.modelKeys,value:document.querySelector('.hps-model-selection select').value})"));
   await wait(()=>chat.evaluate("document.querySelector('.hps-model-selection select').value==='hypeproof-fast'"),'keyboard choice');
   const {result:axObject}=await chat.send('Runtime.evaluate',{expression:"document.querySelector('.hps-model-selection select')",contextId:chat.contextId,returnByValue:false});
   const {node:axNode}=await chat.send('DOM.describeNode',{objectId:axObject.objectId});
   const ax=(await chat.send('Accessibility.getPartialAXTree',{backendNodeId:axNode.backendNodeId,fetchRelatives:false})).nodes[0];
   await chat.send('Runtime.releaseObject',{objectId:axObject.objectId});
-  assert.equal(ax.name.value,'대화 모델');assert.equal(ax.ignored,false);record('keyboard-and-accessible-name',{role:ax.role.value,name:ax.name.value,selected:'hypeproof-fast'});
+  assert.equal(ax.name.value,'대화 모델');assert.equal(ax.ignored,false);record('keyboard-and-accessible-name',{role:ax.role.value,name:ax.name.value,selected:'hypeproof-fast'});await shot('model-keyboard-selection');
   await choose(chat,'hypeproof-default');
   setZoom(2);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-2)<0.01,'200% zoom');await window.waitForTimeout(500);
   const enlarged=await chat.evaluate("({width:innerWidth,scroll:document.documentElement.scrollWidth,right:document.querySelector('.hps-model-selection select').getBoundingClientRect().right,bottom:document.querySelector('.hps-model-selection select').getBoundingClientRect().bottom,height:innerHeight})");assert.equal(enlarged.scroll,enlarged.width);assert.ok(enlarged.right<=enlarged.width);assert.ok(enlarged.bottom<=enlarged.height);record('zoom-200',enlarged);await shot('model-zoom-200');
