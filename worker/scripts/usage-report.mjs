@@ -92,6 +92,9 @@ function buildSql({ days, by, cohort }) {
   const OK = "status < 400";
   return `
     SELECT ${dim} AS dim,
+           COUNT(*) AS records,
+           SUM(CASE WHEN NOT (${BILLABLE}) THEN 1 ELSE 0 END) AS zero_token_records,
+           SUM(CASE WHEN status >= 400 AND ${BILLABLE} THEN 1 ELSE 0 END) AS failed_with_tokens,
            SUM(CASE WHEN ${OK} THEN 1 ELSE 0 END) AS requests,
            SUM(CASE WHEN ${BILLABLE} THEN tokens_in   ELSE 0 END) AS tokens_in,
            SUM(CASE WHEN ${BILLABLE} THEN tokens_out  ELSE 0 END) AS tokens_out,
@@ -112,15 +115,27 @@ function runQuery(sql) {
     ["wrangler", "d1", "execute", DB, "--remote", "--json", "--command", sql],
     { encoding: "utf8", stdio: ["ignore", "pipe", "inherit"], maxBuffer: 16 * 1024 * 1024 },
   );
-  // wrangler 가 JSON 앞에 배너를 섞어 내는 판이 있어 첫 '[' 부터 파싱한다.
+  return parseQueryResult(raw);
+}
+
+function parseQueryResult(raw) {
+  // A successful empty query is different from a missing/failed query result.
+  // Never print raw tool output here: a failure may contain private context.
   const start = raw.indexOf("[");
-  if (start < 0) throw new Error(`unexpected wrangler output (no JSON array):\n${raw.slice(0, 500)}`);
-  const parsed = JSON.parse(raw.slice(start));
-  return parsed[0]?.results ?? [];
+  if (start < 0) throw new Error("usage query returned no result array");
+  let parsed;
+  try { parsed = JSON.parse(raw.slice(start)); }
+  catch { throw new Error("usage query returned invalid JSON"); }
+  if (!Array.isArray(parsed) || parsed.length !== 1 || parsed[0]?.success !== true
+    || !Array.isArray(parsed[0].results)) throw new Error("usage query did not confirm success");
+  return parsed[0].results;
 }
 
 const COLUMNS = [
   ["dim", "구분"],
+  ["records", "저장 기록"],
+  ["zero_token_records", "토큰 0 기록"],
+  ["failed_with_tokens", "오류 중 토큰 기록"],
   // #684 — 실패 턴도 행을 남기게 됐으므로 "요청" 이 무엇을 세는지 이름에 박는다.
   // 성공 요청 + 오류 = 시도 횟수.
   ["requests", "성공 요청"],
@@ -138,7 +153,7 @@ function toMarkdown(rows, { days, by, cohort }) {
 
   if (rows.length === 0) {
     // 빈 결과를 빈 표로 내면 "0 이다" 와 "안 돌았다" 가 구분되지 않는다.
-    return `${head}\n해당 기간에 기록이 **없습니다.** 쿼리는 정상 실행됐습니다.\n`;
+    return `${head}\n해당 기간에 기록이 **없습니다.** 쿼리는 정상 실행됐습니다. 실제 사용량·원가가 0이라는 뜻은 아닙니다.\n`;
   }
 
   const fmt = (v) => (typeof v === "number" ? v.toLocaleString("en-US") : (v ?? "—"));
@@ -154,22 +169,23 @@ function toMarkdown(rows, { days, by, cohort }) {
       tokens_in: a.tokens_in + (r.tokens_in ?? 0),
       tokens_out: a.tokens_out + (r.tokens_out ?? 0),
       cache_read: a.cache_read + (r.cache_read ?? 0),
+      cache_write: a.cache_write + (r.cache_write ?? 0),
+      errors: a.errors + (r.errors ?? 0),
     }),
-    { requests: 0, tokens_in: 0, tokens_out: 0, cache_read: 0 },
+    { requests: 0, tokens_in: 0, tokens_out: 0, cache_read: 0, cache_write: 0, errors: 0 },
   );
 
-  // 캐시 적중률은 "캐시가 실제로 비용을 줄이고 있나" 에 답하는 유일한 한 줄이다
-  // (#580 의 동기 중 하나). 분모는 캐시로 읽은 것 + 실제로 청구된 입력이다.
-  const cacheBase = total.cache_read + total.tokens_in;
-  const hitRate = cacheBase > 0 ? ((total.cache_read / cacheBase) * 100).toFixed(1) : "—";
-
+  // Historical rows lack provider/usage-schema identity. Never derive a mixed
+  // cache hit rate from fields whose inclusive/exclusive meanings differ.
   return [
     head,
     header,
     sep,
     body,
     "",
-    `**합계** — 요청 ${fmt(total.requests)} · 입력 ${fmt(total.tokens_in)} · 출력 ${fmt(total.tokens_out)} · 캐시 읽기 ${fmt(total.cache_read)} (적중률 ${hitRate}%)`,
+    `**저장값 합계** — 성공 ${fmt(total.requests)} · 오류 ${fmt(total.errors)} · 입력 ${fmt(total.tokens_in)} · 출력 ${fmt(total.tokens_out)} · 캐시 읽기 ${fmt(total.cache_read)} · 캐시 쓰기 ${fmt(total.cache_write)}`,
+    "",
+    "> 원가와 전체 기록 여부는 미확인입니다. 저장된 0에는 미보고가 섞일 수 있고, 재시도·보조 호출의 누락/중복을 이 집계로 확인할 수 없습니다. 공급자별 필드 의미가 달라 통합 캐시 적중률을 계산하지 않습니다.",
     "",
     "> 토큰 수만 냅니다. 달러 환산은 하지 않습니다 — 단가는 바뀌고, 여기서 곱하면 이 리포트가 단가의 두 번째 정본이 됩니다.",
     "",
@@ -189,4 +205,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   main();
 }
 
-export { parseArgs, validate, buildSql, toMarkdown };
+export { parseArgs, validate, buildSql, toMarkdown, parseQueryResult };

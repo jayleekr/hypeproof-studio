@@ -277,6 +277,45 @@
       ]
     },
     {
+      "id": "ST-DES-USAGE-OBSERVATION",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/usage-observation-audit.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-USAGE-OBSERVATION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY",
+        "ST-DES-USAGE-OBSERVATION"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/usage-observation.md"
+        },
+        {
+          "path": "worker/test/usage-observation.test.mjs"
+        },
+        {
+          "path": "worker/test/usage-report.test.mjs"
+        },
+        {
+          "path": "worker/test/usage-log-status.test.mjs"
+        },
+        {
+          "path": "e2e/admin-usage/run.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-COACH-NAMING",
       "stage": "requirement",
       "owner": "jayleekr",
