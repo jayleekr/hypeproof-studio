@@ -1218,6 +1218,31 @@ export const SDK_RESULT_ERROR_FALLBACK =
   "다시 한 번 부탁하거나, 무엇을 하려던 것인지 알려주세요 🔧";
 
 /**
+ * #749 — 길이 제한에 걸려 잘린 턴.
+ *
+ * 이 레포의 **1번 이슈**가 정확히 이것이었다: max_tokens 로 끊긴 응답이 학생에게
+ * "조용히 망가진 문서"로 도착했다(HTML 이 태그 중간에서 끊기고 `</html>` 이 없음).
+ * proxy 경로는 그때 고쳐졌다 — 워커의 `TRUNCATION_NOTICE` 가 스트림에 눈에 보이는
+ * 텍스트로 끼어든다.
+ *
+ * **agent-sdk 경로에는 그게 없다.** `/v1/messages` 는 Anthropic SSE 를 그대로
+ * 통과시키므로(라우트 헤더: "VERBATIM Anthropic SSE passthrough") 워커가 아무것도
+ * 끼워 넣지 않고, 클라이언트도 `stop_reason` 을 보지 않았다. 같은 1번 결함이 이
+ * 런타임에서는 열린 채였고, **지금 아동 코호트 둘이 이 런타임에 있다.**
+ *
+ * SDK 는 런 전체의 종료 이유를 result 메시지의 `stop_reason` 으로 싣는다
+ * (`sdk.d.ts` 의 `SDKResultSuccess`·`SDKResultError` 둘 다 `stop_reason: string | null`).
+ * 그래서 성공 result 여도 잘렸을 수 있다 — 오류 subtype 만 보면 놓친다.
+ *
+ * 문구는 워커와 **같은 사실 문장**을 쓰고 다음 행동만 런타임에 맞게 바꾼다. 같은
+ * 사건에 대해 경로마다 다른 말을 들으면 학생은 다른 사고라고 읽는다. 공유 문장은
+ * 스모크가 워커 소스와 대조해 드리프트를 막는다(webview 미러와 같은 규율).
+ */
+export const SDK_TRUNCATED_FRIENDLY =
+  "\n\n---\n⚠️ **응답이 길이 제한에 걸려 잘렸습니다 — 문서가 완성되지 않았어요.**\n" +
+  "\"더 간결하게 다시 만들어줘\" 라고 요청하거나, 만들던 파일을 열어 어디까지 됐는지 확인해 주세요.";
+
+/**
  * 이 `result` 가 학생에게 보여줄 종료 안내가 있는지. 없으면 null(정상 종료).
  *
  * `is_error` 를 함께 보는 이유: subtype 이름 규칙에만 기대면 SDK 가 규칙을 바꾸는
@@ -1226,6 +1251,9 @@ export const SDK_RESULT_ERROR_FALLBACK =
 export function sdkResultNotice(msg: Record<string, unknown>): string | null {
   if (String(msg["type"] ?? "") !== "result") return null;
   const subtype = String(msg["subtype"] ?? "");
+  // 잘림을 **먼저** 본다. 성공 result 에도 붙을 수 있고, 그때 학생에게 중요한
+  // 사실은 "왜 끝났나"가 아니라 "문서가 완성되지 않았다"이기 때문이다.
+  if (msg["stop_reason"] === "max_tokens") return SDK_TRUNCATED_FRIENDLY;
   if (subtype === "error_max_turns") return SDK_MAX_TURNS_FRIENDLY;
   const known = SDK_RESULT_ERROR_FRIENDLY[subtype];
   if (known) return known;

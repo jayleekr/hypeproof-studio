@@ -25,6 +25,7 @@ const {
   SDK_MAX_TURNS_FRIENDLY,
   SDK_RESULT_ERROR_FALLBACK,
   SDK_RESULT_ERROR_FRIENDLY,
+  SDK_TRUNCATED_FRIENDLY,
   consumeSdkStream,
   sdkResultNotice,
 } = await import("../src/sdkCoachHelpers.ts");
@@ -155,6 +156,59 @@ if (declared) {
     // 있으면 좋고, 없어도 방어 분기이므로 실패시키지 않는다. 상태만 남긴다.
     if (!src.includes(`'${t}'`)) console.log(`  (참고: '${t}' 는 벤더 타입에 없다 — 방어 분기)`);
   }
+}
+
+// ─── 6. 길이 제한에 걸려 잘린 턴 (#1 이 이 경로에서는 아직 열려 있었다) ────
+// proxy 경로는 워커의 TRUNCATION_NOTICE 가 스트림에 끼어들어 알려 준다.
+// agent-sdk 경로는 SSE 를 그대로 통과시키므로 아무도 끼워 넣지 않는다 — 학생은
+// 태그 중간에서 끊긴 문서를 받고 그게 완성본인 줄 안다. 그게 이 레포의 1번 이슈다.
+{
+  // 성공 result 에도 붙는다. 오류 subtype 만 보면 이 경우를 통째로 놓친다.
+  const cut = sdkResultNotice({ type: "result", subtype: "success", stop_reason: "max_tokens" });
+  assert.equal(cut, SDK_TRUNCATED_FRIENDLY, "성공으로 끝나도 잘렸으면 알려야 한다");
+  assert.match(cut, /완성되지 않았어요/, "문서가 미완성이라는 사실을 말해야 한다");
+
+  assert.equal(
+    await runResult({ type: "result", subtype: "success", stop_reason: "max_tokens" }),
+    SDK_TRUNCATED_FRIENDLY,
+    "스트림에서도 잘림 안내가 나가야 한다",
+  );
+
+  // 잘림 + 오류가 겹치면 **잘림을 낸다.** 학생에게 더 급한 사실은 왜 끝났는지가
+  // 아니라 산출물이 미완성이라는 것이다 — 모르면 깨진 파일을 완성본으로 제출한다.
+  // 안내를 두 개 쌓지 않는 것은 의도적이다.
+  assert.equal(
+    sdkResultNotice({ type: "result", subtype: "error_max_turns", stop_reason: "max_tokens" }),
+    SDK_TRUNCATED_FRIENDLY,
+    "겹치면 산출물 상태를 먼저 알린다",
+  );
+
+  // 음성 대조군 — 정상 종료 이유에는 붙지 않는다. 이게 없으면 "모든 result 에
+  // 잘림 안내를 붙이는" 구현이 위를 전부 통과한다.
+  for (const stop of ["end_turn", "stop_sequence", "tool_use", null, undefined]) {
+    assert.equal(
+      sdkResultNotice({ type: "result", subtype: "success", stop_reason: stop }),
+      null,
+      `정상 종료(${String(stop)})에 잘림 안내가 붙었다`,
+    );
+  }
+}
+
+// ─── 7. 두 경로가 같은 사건에 같은 말을 하는가 (드리프트 락) ────────────────
+// 같은 사건에 대해 경로마다 다른 문장을 들으면 학생은 다른 사고라고 읽는다.
+// 워커는 다른 패키지라 import 하지 않고 소스를 읽어 대조한다.
+{
+  const workerSse = readFileSync(
+    join(here, "..", "..", "..", "worker", "src", "lib", "sse.ts"),
+    "utf8",
+  );
+  const shared = "응답이 길이 제한에 걸려 잘렸습니다 — 문서가 완성되지 않았어요.";
+  assert.ok(workerSse.includes(shared), "워커의 TRUNCATION_NOTICE 가 이 사실 문장을 쓴다");
+  assert.ok(SDK_TRUNCATED_FRIENDLY.includes(shared), "SDK 경로도 같은 사실 문장을 쓴다");
+
+  // 다음 행동은 다르다 — proxy 쪽은 HTML 문서를, SDK 쪽은 파일을 만든다. 그
+  // 차이는 의도한 것이므로 여기서 같기를 요구하지 않는다.
+  assert.ok(!SDK_TRUNCATED_FRIENDLY.includes("</html>"), "SDK 경로 안내는 런타임에 맞는 행동을 준다");
 }
 
 console.log("sdk-result-drift smoke OK");
