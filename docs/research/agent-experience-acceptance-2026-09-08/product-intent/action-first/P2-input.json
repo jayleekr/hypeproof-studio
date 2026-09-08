@@ -1,0 +1,17 @@
+{
+  "format": "hps-observation/1",
+  "scope": "synthetic-P2",
+  "session": "synthetic",
+  "program": "synthetic-persona-v1",
+  "events": [
+    {
+      "id": "P2-user",
+      "seq": 1,
+      "task": "P2",
+      "at": 1,
+      "kind": "user",
+      "text": "회사 점심 메뉴를 정하려고 해. 예산 1만원, 채식 동료도 먹을 수 있는 도시락과 샐러드 두 안을 비교하는 표를 원해. 홈페이지는 필요 없어.",
+      "assistance": "unknown"
+    }
+  ]
+}

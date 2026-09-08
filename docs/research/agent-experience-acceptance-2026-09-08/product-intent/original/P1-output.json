@@ -1,0 +1,111 @@
+{
+  "coach": {
+    "request_id": "req_011CerHCoWyPULniJ9G3CWgJ",
+    "body": {
+      "model": "claude-sonnet-4-6",
+      "id": "msg_011CerHCpMppyYutCYGxwRQ5",
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "text",
+          "text": "괜찮아요. 처음이면 오히려 좋아요 — 이미 쓰던 습관이 없으니까요.\n\n한 가지만 물어볼게요.\n\n**지금 일하면서 가장 귀찮거나, 시간이 너무 많이 드는 일이 뭔가요?**\n\n크거나 거창하지 않아도 됩니다. \"매주 보고서 쓰는 게 힘들다\", \"이메일 답장을 어떻게 써야 할지 모르겠다\", \"정리해야 할 자료가 쌓여 있다\" — 뭐든 좋아요."
+        }
+      ],
+      "stop_reason": "end_turn",
+      "stop_sequence": null,
+      "stop_details": null,
+      "usage": {
+        "input_tokens": 2654,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 0
+        },
+        "output_tokens": 201,
+        "service_tier": "standard",
+        "inference_geo": "global"
+      }
+    }
+  },
+  "assessment": {
+    "findings": [
+      {
+        "asset": "TASTE",
+        "interpretation": "사용자가 AI 사용이 처음이라고 밝혔으며, 대안 선택이나 비교 근거가 관찰되지 않았다.",
+        "next": "구체적인 작업 목적을 말하고, 여러 방법 중 하나를 선택한 이유를 설명해 보세요.",
+        "status": "unobserved",
+        "evidence": [],
+        "assistance": "unknown"
+      },
+      {
+        "asset": "INTENT",
+        "interpretation": "'모르겠어. AI를 처음 써봐'라는 발화에서 현재 상태나 막막함은 드러나지만, 이번 작업의 명확한 목적·대상·완료 조건은 확인되지 않았다.",
+        "next": "이번에 AI로 해결하고 싶은 것이 무엇인지, 결과가 어떤 상태여야 끝났다고 볼 수 있는지 말해보세요.",
+        "status": "unobserved",
+        "evidence": [],
+        "assistance": "unknown"
+      },
+      {
+        "asset": "CONTEXT",
+        "interpretation": "필요한 자료를 선택하거나 부족한 정보를 다룬 사용자 행동이 관찰되지 않았다.",
+        "next": "작업에 필요한 배경 정보나 자료를 직접 가져오거나, 어떤 정보가 부족한지 설명해 보세요.",
+        "status": "unobserved",
+        "evidence": [],
+        "assistance": "unknown"
+      },
+      {
+        "asset": "VERIFY",
+        "interpretation": "검사 결과 해석, 오류 수정, 재검증 행동이 관찰되지 않았다.",
+        "next": "AI가 결과를 제시하면 직접 확인하고, 틀린 부분이 있으면 어디가 왜 틀렸는지 말해보세요.",
+        "status": "unobserved",
+        "evidence": [],
+        "assistance": "unknown"
+      },
+      {
+        "asset": "DELEGATE",
+        "interpretation": "AI에 맡길 범위와 사람이 직접 판단할 부분을 구분한 발화가 관찰되지 않았다.",
+        "next": "AI가 해도 되는 일과 본인이 직접 결정해야 할 부분을 구분해서 설명해 보세요.",
+        "status": "unobserved",
+        "evidence": [],
+        "assistance": "unknown"
+      },
+      {
+        "asset": "ITERATE",
+        "interpretation": "수정 이유와 결과물의 실제 변화가 함께 관찰되지 않았다.",
+        "next": "AI 결과를 받은 뒤 어떤 이유로 무엇을 고쳤는지, 고친 전후 차이를 보여주세요.",
+        "status": "unobserved",
+        "evidence": [],
+        "assistance": "unknown"
+      },
+      {
+        "asset": "OWNERSHIP",
+        "interpretation": "결과를 인수하거나 한계를 설명한 사용자 발화가 관찰되지 않았다.",
+        "next": "작업 결과가 나오면 이것을 본인의 것으로 쓸 수 있는지, 어떤 한계가 있는지 직접 판단해서 말해보세요.",
+        "status": "unobserved",
+        "evidence": [],
+        "assistance": "unknown"
+      }
+    ],
+    "rubric": {
+      "version": "m2026.09.08-4",
+      "sha256": "3991d19834407d8081ac74cb97f5f9c1cf875fa38fd71fb8fd0949376ac57fbd"
+    },
+    "provider_request_id": "req_011CerHDAZWDodzfZxcp7P6Q",
+    "usage": {
+      "input_tokens": 1868,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "cache_creation": {
+        "ephemeral_5m_input_tokens": 0,
+        "ephemeral_1h_input_tokens": 0
+      },
+      "output_tokens": 820,
+      "service_tier": "standard",
+      "inference_geo": "global"
+    },
+    "provenance": "host-reported; not device-attested",
+    "human_validation": "not_assessed"
+  }
+}

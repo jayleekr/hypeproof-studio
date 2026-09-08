@@ -444,6 +444,14 @@ remove separately collected observation bundles in `test-results/`.
 
 ## Native Studio trial (#744)
 
+[Product Intent](PRODUCT-INTENT.md)의 실제 업무 수행·판단 가시성·최소 개입 원칙을
+[NAT-03의 대화 분기](requirements/studio-native-trial.md#764에서-파생한-행동-계약)로 구현한다.
+명확한 요청은 즉시 진행하고, 정보가 부족할 때 필요한 질문 하나만 한다. 질문·성찰의
+건너뛰기, 위임과 권한의 분리, 제안과 인간 판단의 구별은 NAT-02~09/11을 함께 따른다.
+상위 REQ-STUDIO-CHAT을 확장하는 계약이며 별도 진단 상태 저장소를 요구하지 않는다.
+검증은 [T04 분기 및 T07/09/16/18](testing/studio-native-trial-validation.md#t04-product-intent-분기),
+사람 학습 효과는 T25로 분리한다. #764의 프롬프트 변경만으로 전체 PASS를 주장하지 않는다.
+
 | ID | Acceptance criteria | Implementation / verification |
 |---|---|---|
 | REQ-STUDIO-NATIVE-EVENTS | Host roles, task/session/program IDs and actual tool decisions survive replay; missing records are explicit and cannot be assessed. | nativeObservationRecorder.ts; worker/test/native-observation.test.mjs |

@@ -4,6 +4,12 @@
 
 이 문서는 HypeProof Studio의 `Product Intent`를 체험판 첫 진입 요구사항으로 번역한 feature spec이다.
 
+상태: #764의 설계 근거. 행동 계약의 원본은
+[NAT-03 및 연관 요구사항](requirements/studio-native-trial.md#764에서-파생한-행동-계약),
+수용 조건은 [T04 및 연관 검증](testing/studio-native-trial-validation.md#t04-product-intent-분기)이다.
+이 문서의 단계는 설명을 위한 예시이며 필수 진단 순서가 아니다. 질문·성찰을 건너뛰는
+경로도 같은 계약에 포함한다. 파일명은 기존 링크 호환을 위해 유지한다.
+
 ```text
 HypeProof Philosophy
   ↓
@@ -33,7 +39,7 @@ Observed evidence
 
 ## 파생된 Product Requirement
 
-현재 첫 화면은 결과물 유형을 먼저 제안한다.
+#764 이전 첫 화면은 결과물 유형을 먼저 제안했다.
 
 - 설명 자료 만들기
 - 선택지 비교하기

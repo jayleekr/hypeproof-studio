@@ -1,0 +1,103 @@
+{
+  "scope": "synthetic direct Anthropic API; no Studio/Agent SDK/tools/human learning execution",
+  "model": "claude-sonnet-4-6",
+  "dialogue_review": "Codex read complete P1/P2 coach responses and judged against T04; script PASS only validates API/assessment",
+  "runs": [
+    {
+      "name": "original",
+      "source_run": "e2e/test-results/agent-experience/20260908T162233Z-intent-p1-p2",
+      "verification_sha": "c2d2161ae60f77cc5ce1e2f507d363897fc32144",
+      "prompt_product_sha": "c966c0203e22a533d4128ecafdcb10e11ae5c369",
+      "prompt_sha256": "9bc4320e4974ef5d2c82f66726b888c50e7491b0a0bd0f83acae80ffdf5a298c",
+      "harness_sha256": "d932d4e1cd0252d57fba48dc5f6d902e9490118d76ff22546e90ec74e119becc",
+      "P1_first_question": "PASS",
+      "P2_first_action": "FAIL",
+      "files": [
+        {
+          "file": "original/P1-input.json",
+          "sha256": "5588e941648f0da4121d678a8341b13b54ac44f03e561f6f0225ca70bba79ab4"
+        },
+        {
+          "file": "original/P1-output.json",
+          "sha256": "524b2c755d66930e5113899161d78e209f9d40bcf400f9029daabb20a273cb32"
+        },
+        {
+          "file": "original/P2-input.json",
+          "sha256": "606a6d6c665c53b7caf603e08a69929e9f6c8f457dc4d5304ccd52866155347b"
+        },
+        {
+          "file": "original/P2-output.json",
+          "sha256": "2f18d81ffa8ac423cbbc323a367a2fcbc2c668931444ece14f199570a4155056"
+        },
+        {
+          "file": "original/results.json",
+          "sha256": "406cc7ea9d8a6078de5e271706180ce69a58f3e23a4a89a1491fa4bca52a4f69"
+        }
+      ]
+    },
+    {
+      "name": "wording-only",
+      "source_run": "e2e/test-results/agent-experience/20260908T162431Z-intent-p1-p2-fixed",
+      "verification_sha": "73efbfbeb7d797894bc1d03b81fac1288985166c",
+      "prompt_product_sha": "8a4929905605087498a4317db133eb340afc49d0",
+      "prompt_sha256": "f429ce2e53a686306d2423ff20aedd8058e93b21f1289a9fff044de2f465b5df",
+      "harness_sha256": "d932d4e1cd0252d57fba48dc5f6d902e9490118d76ff22546e90ec74e119becc",
+      "P1_first_question": "PASS",
+      "P2_first_action": "FAIL",
+      "files": [
+        {
+          "file": "wording-only/P1-input.json",
+          "sha256": "5588e941648f0da4121d678a8341b13b54ac44f03e561f6f0225ca70bba79ab4"
+        },
+        {
+          "file": "wording-only/P1-output.json",
+          "sha256": "1e17e4b8ce0cc9da4ff7dc51a3239d27ed6f4d6ed94f52ca3f2a697514c341d0"
+        },
+        {
+          "file": "wording-only/P2-input.json",
+          "sha256": "606a6d6c665c53b7caf603e08a69929e9f6c8f457dc4d5304ccd52866155347b"
+        },
+        {
+          "file": "wording-only/P2-output.json",
+          "sha256": "7825a4b0e875075336c33ac60fcf5a1909f7277eb4308692e0dab1f0ce26d43d"
+        },
+        {
+          "file": "wording-only/results.json",
+          "sha256": "58ec6a7f8dbf9cc4df12ee69985a634760560a8f1faadbabadabd0a55bf944ba"
+        }
+      ]
+    },
+    {
+      "name": "action-first",
+      "source_run": "e2e/test-results/agent-experience/20260908T162714Z-intent-action-first",
+      "verification_sha": "9457b15c6dd72c1aad634593f1e83d8f9716f9ce",
+      "prompt_product_sha": "25a944e5721b918e9de6123597edcdf344f5cc79",
+      "prompt_sha256": "9a2dd5d1c4b41e4b248e8c0ef99ddb96e2e1fe2ec2d26b3758e552b5cfdd90de",
+      "harness_sha256": "d932d4e1cd0252d57fba48dc5f6d902e9490118d76ff22546e90ec74e119becc",
+      "P1_first_question": "PASS",
+      "P2_first_action": "PASS",
+      "files": [
+        {
+          "file": "action-first/P1-input.json",
+          "sha256": "5588e941648f0da4121d678a8341b13b54ac44f03e561f6f0225ca70bba79ab4"
+        },
+        {
+          "file": "action-first/P1-output.json",
+          "sha256": "c8eac49416f0c11dae3d6891b502f78a9eb066ea61122367646ef1510a9b276b"
+        },
+        {
+          "file": "action-first/P2-input.json",
+          "sha256": "606a6d6c665c53b7caf603e08a69929e9f6c8f457dc4d5304ccd52866155347b"
+        },
+        {
+          "file": "action-first/P2-output.json",
+          "sha256": "288c11222fc5bbf341fa7542a5b46541f8aa6a04884f29e89428952d546e208d"
+        },
+        {
+          "file": "action-first/results.json",
+          "sha256": "a2cc1fdadfa5ec815e3b5b3bcb7061c3ed198d7d04e24643db9740c3c8db2ab5"
+        }
+      ]
+    }
+  ]
+}
