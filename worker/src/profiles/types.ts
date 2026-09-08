@@ -38,6 +38,8 @@ export interface Profile {
   model: {
     default: ModelAlias;
     fallback?: ModelAlias;
+    /** Derived from a validated frozen lesson, never from client input. */
+    lesson_locked?: boolean;
     /**
      * 이 프로필만 다른 상류로 보낸다. 없으면 배포 기본값(LLM_PROVIDER)을 쓴다.
      *

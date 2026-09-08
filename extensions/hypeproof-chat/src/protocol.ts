@@ -99,6 +99,11 @@ export interface CoachInfo {
  * sides updated together.
  */
 export interface ResolvedProfile {
+  model_selection?: {
+    revision: 'hps-model-selection/1'; runtime: 'proxy' | 'agent-sdk'; provider: string;
+    default: string; source: 'profile' | 'lesson';
+    choices: Array<{ alias: string; id: string; label: string }>;
+  };
   observation?: { format: string; scope?: string };
   /** Immutable teaching content; capability policy remains in the profile. */
   lesson?: {
@@ -223,6 +228,7 @@ export type WebviewMessage =
   | { type: 'observationCorrect'; scope: string; text: string }
   | StartRequest
   | { type: "ready" }
+  | { type: "selectModel"; alias: string }
   | { type: "sendMessage"; text: string; history: ChatMessage[]; images?: string[] }
   | { type: "retryMessage"; prompt: string; history: ChatMessage[]; images?: string[] }
   | { type: "cancelStream"; streamId: string }

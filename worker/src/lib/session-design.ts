@@ -1,3 +1,5 @@
+import { validateLessonModel, type LessonModelPolicy } from './lesson-model-policy.ts';
+
 // Chalk authoring content v1. Data only: never grants tools or stores credentials.
 export interface SessionDesign {
   schema: "hps-session-design/1";
@@ -17,6 +19,7 @@ export interface SessionDesign {
    * profile's ux.coach rule applies unchanged (old-schema behavior).
    */
   assistant?: { display_name: string };
+  model?: LessonModelPolicy;
 }
 
 /** Bounds for `assistant.display_name`: single line, trimmed, 1..40 UTF-16 code units. */
@@ -38,7 +41,7 @@ const MARK_STACK = /\p{M}{3,}/u;
 const LONE_SURROGATE = /\p{Cs}/u;
 
 const REQUIRED_KEYS = ["schema", "title", "audience", "duration_minutes", "objective", "prerequisites", "starter", "steps"];
-const OPTIONAL_KEYS = ["assistant"];
+const OPTIONAL_KEYS = ["assistant", "model"];
 const ALLOWED_KEYS = [...REQUIRED_KEYS, ...OPTIONAL_KEYS];
 
 const isObject = (x: unknown): x is Record<string, unknown> =>
@@ -101,6 +104,7 @@ export function validateSessionDesign(value: unknown, complete = false): string 
       if (complete && k !== "hint" && !(step[k] as string).trim()) return `step ${step.id}.${k} is required to freeze a version`;
     }
   }
+  if ('model' in value) { const bad = validateLessonModel(value.model); if (bad) return bad; }
   // Optional identity block: when present it must be exactly { display_name }.
   // An empty name is rejected rather than treated as "unset" — Chalk omits the
   // block instead, so a saved draft never carries an ambiguous blank.

@@ -681,6 +681,16 @@ export function ChatPanel(props: Props) {
       )}
 
       <footer className="hps-input-area">
+        {config.profile.model_selection && <div className="hps-model-selection">
+          <label>모델 <select aria-label="대화 모델" value={config.model}
+            disabled={config.profile.model_selection.choices.length === 1}
+            onChange={e => postToHost({ type: 'selectModel', alias: e.target.value })}>
+            {config.profile.model_selection.choices.map(c => <option key={c.id} value={c.alias}>{c.label}</option>)}
+          </select></label>
+          <small>{config.profile.model_selection.choices.length === 1
+            ? (config.profile.model_selection.source === 'lesson' ? '이 수업에서 고정한 모델' : '사용 가능한 모델 1개')
+            : streaming ? '변경하면 다음 요청부터 적용돼요' : '대화를 유지하며 모델을 바꿀 수 있어요'}</small>
+        </div>}
         {runnerCohort && <RunnerBar face={runnerWho} running={runnerRunning} />}
         {/* 버튼은 헤더에 있고 여기는 **결과만** 나온다. 헤더 한 줄에는 링크도
             실패 사유도 들어갈 자리가 없는데, 아이는 사라지는 안내를 못 읽는다 —

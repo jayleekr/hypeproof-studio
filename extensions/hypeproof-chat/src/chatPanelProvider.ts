@@ -1,3 +1,4 @@
+import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice } from './modelSelection';
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
@@ -1736,6 +1737,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           if (disclosure) void this.post({ type: "aiDisclosure", text: disclosure });
         }
         return;
+      case "selectModel": {
+        const profile = await this.ensureProfile();
+        const cfg = vscode.workspace.getConfiguration('hypeproofChat');
+        const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
+        if (profile && selection?.choices.some(c => c.alias === msg.alias)) {
+          await this.context.workspaceState.update('hps.modelChoice', { scope: modelSelectionScope(profile), alias: msg.alias });
+        }
+        await this.postConfig();
+        return;
+      }
       case "sendMessage":
         await this.handleSend(msg.text, msg.history, msg.images);
         return;
@@ -1895,12 +1906,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
-    const model = cfg.get<string>("model", "hypeproof-default");
+    let model = cfg.get<string>("model", "hypeproof-default");
     const token = await this.context.secrets.get(TOKEN_KEY);
     const coach = this.getCoach();
     // Fixed-naming cohorts must NOT inject a user-supplied coach name carried
     // over from a different cohort's user-data-dir into the LLM context (#140).
     const profile = await this.ensureProfile();
+    const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
+    const savedModel = this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice');
+    if (profile && selection) model = selectedModel(profile, selection, savedModel, model);
     const { name: effectiveCoachName, personality: effectiveCoachPersonality } =
       resolveCoach(coach, profile);
 
@@ -2042,7 +2056,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // 설정 경로에만 빠져 있던 비대칭을 고치면서 순수 함수로 뺐다. 대조군 포함
       // 단위 테스트: test/coach-runtime.smoke.mjs
       const settingRuntime = cfg.get<"proxy" | "agent-sdk">("coachRuntime", "proxy");
-      const runtime: "proxy" | "agent-sdk" = resolveCoachRuntime({
+      const runtime: "proxy" | "agent-sdk" = selection?.source === "lesson" ? selection.runtime : resolveCoachRuntime({
         settingRuntime,
         profileRuntime: profile?.coach_runtime,
         minorCohort: profile?.minor_cohort,
@@ -2325,6 +2339,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           });
         } catch (err) {
           if (!(err instanceof SdkUnavailableError)) throw err;
+          if (selection && (selection.source === 'lesson' || (profile && savedModel?.scope === modelSelectionScope(profile)))) throw new Error('선택한 모델의 실행 환경을 사용할 수 없습니다. Studio의 Agent SDK 설치를 확인하거나 강사에게 알려주세요. 대화와 작업은 보존됩니다.');
           // Pre-Phase-1: the SDK package isn't installed. Keep the classroom
           // working — fall back to the proxy runtime for this turn instead of
           // showing the student a technical error.
@@ -2818,14 +2833,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const token = await this.context.secrets.get(TOKEN_KEY);
     const profile = await this.ensureProfile();
+    const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
+    const settingModel = cfg.get<string>('model', 'hypeproof-default');
+    const model = profile && selection ? selectedModel(profile, selection, this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice'), settingModel) : settingModel;
     await this.post({
       type: "config",
       config: {
         proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
-        model: cfg.get<string>("model", "hypeproof-default"),
+        model,
         hasToken: !!token,
         coach: this.getCoach(),
-        profile,
+        profile: profile ? { ...profile, model_selection: selection } : null,
         update: this.availableUpdate,
       },
     });

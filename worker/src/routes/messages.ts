@@ -143,13 +143,13 @@ function decodeHeaderList(raw: string | null | undefined): string[] | undefined 
 export function resolveMessagesModel(requested: unknown, profile: Profile): string {
   const aliases: ModelAlias[] = [profile.model.default];
   if (profile.model.fallback) aliases.push(profile.model.fallback);
-  if (!aliases.includes("hypeproof-fast")) aliases.push("hypeproof-fast");
+  if (!profile.model.lesson_locked && !aliases.includes("hypeproof-fast")) aliases.push("hypeproof-fast");
 
   if (typeof requested === "string" && requested.length > 0) {
     for (const a of aliases) {
       if (requested === a || requested === MODEL_MAP[a]) return MODEL_MAP[a];
     }
-    if (/^claude-.*haiku/.test(requested)) return MODEL_MAP["hypeproof-fast"];
+    if (!profile.model.lesson_locked && /^claude-.*haiku/.test(requested)) return MODEL_MAP["hypeproof-fast"];
   }
   return MODEL_MAP[profile.model.default];
 }

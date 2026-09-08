@@ -58,6 +58,7 @@ export function publicVerifyError(err: unknown, label: string): string {
 // Service endpoints an instructor Bearer may reach is defined exactly once.
 export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   if((method==='GET'||method==='DELETE')&&/^\/admin\/cohorts\/[^/]+\/native-trials\/[^/]+$/.test(path))return true;
+  if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/models\/[^/]+$/.test(path)) return true;
   if (method === 'POST' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/versions\/[^/]+\/participants$/.test(path)) return true;
   if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/classroom\/shares(?:\/[^/]+)?$/.test(path)) return true;
   // Chalk authoring: handlers still enforce issuer identity, cohort/profile and owner.

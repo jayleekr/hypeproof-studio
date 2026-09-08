@@ -14,6 +14,9 @@ import {_electron as electron} from '@playwright/test';
 import {localAuthoring} from '../../worker/test/harness/dental-authoring.mjs';
 import {prepareIdentity,verifyIdentity} from './identity.mjs';
 import {surfaceAcceptance} from './surfaces.mjs';
+import {prepareModels,verifyModels} from './models.mjs';
+const models=process.env.HPS_LESSON_MODELS==='1';
+const modelRuntime=process.env.HPS_LESSON_MODEL_RUNTIME||'agent-sdk';
 const surfaces=process.env.HPS_LESSON_SURFACES==='1';
 const identity=surfaces||process.env.HPS_LESSON_IDENTITY==='1';
 const live=process.env.HPS_LESSON_LIVE==='1';
@@ -31,7 +34,8 @@ if(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'){
   assert.equal(hash(appRoot+'/Contents/Resources/app/extensions/hypeproof-chat/'+file),hash(resolve(sourceRoot,'extensions/hypeproof-chat/'+file)),'test app must contain the current '+file);
  }
 }
-const local=await localAuthoring({profileId:surfaces?'studio-native-trial':'homepage-practice-s1'});
+const local=await localAuthoring({profileId:surfaces||models?'studio-native-trial':'homepage-practice-s1'});
+if(models){const {getProfile}=await import('../../worker/src/profiles/index.ts');getProfile(local.profileId).coach_runtime=modelRuntime;} // isolated fixture runtime; recorded below
 // The navigation fixture only creates authoring tables. A real model turn also
 // records usage; use the repository's fresh schema, never a made-up table.
 if(live){
@@ -52,18 +56,19 @@ await call(base,'PUT',{profile_id:local.profileId,expected_revision:0,request_id
 await call(base+'/versions/m2026.09.07-1','PUT',{expected_revision:1});
 const invite=await call(base+'/versions/m2026.09.07-1/participants','POST',{user:'synthetic-lesson-student',hours:1});
 const cases=identity?await prepareIdentity(local):null;
+const modelCases=models?await prepareModels(local):null;
 const originalFetch=globalThis.fetch,upstream=[];
 if(live)globalThis.fetch=async(input,init)=>{
  const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);
  if(url.origin!=='https://api.anthropic.com')return originalFetch(input,init);
- assert.ok(upstream.length<(surfaces?20:8),'live acceptance request budget exhausted');
+ assert.ok(upstream.length<(surfaces||models?20:8),'live acceptance request budget exhausted');
  const r=await originalFetch(input,{...init,signal:AbortSignal.any([...(init?.signal?[init.signal]:[]),AbortSignal.timeout(90000)])});
- upstream.push({origin:url.origin,path:url.pathname,status:r.status,request_id:r.headers.get('request-id')});
+ upstream.push({...(models?{model:JSON.parse(init.body).model}:{}),origin:url.origin,path:url.pathname,status:r.status,request_id:r.headers.get('request-id')});
  writeFileSync(out+'/api-evidence.json',JSON.stringify({real_upstream:true,calls:upstream},null,2));return r;
 };
 let fault='none';const gatewayCalls=[];
 const server=createServer(async(req,res)=>{try{const chunks=[];for await(const x of req)chunks.push(x);const body=Buffer.concat(chunks);
- if(/^\/v1\/(messages|chat\/completions)/.test(req.url)){gatewayCalls.push({path:req.url.split('?')[0],fault});writeFileSync(out+'/gateway-evidence.json',JSON.stringify({calls:gatewayCalls},null,2));}
+ if(/^\/v1\/(messages|chat\/completions)/.test(req.url)){gatewayCalls.push({path:req.url.split('?')[0],fault,...(models?{requested_model:JSON.parse(body.toString()).model}: {})});writeFileSync(out+'/gateway-evidence.json',JSON.stringify({calls:gatewayCalls},null,2));}
  if(fault!=='none'&&/^\/v1\/(messages|chat\/completions)/.test(req.url)){
   if(fault==='stall'){const timer=setTimeout(()=>res.end(),20000);res.on('close',()=>clearTimeout(timer));return;}
   const status=Number(fault);res.writeHead(status,{'content-type':'application/json'}).end(JSON.stringify({type:'error',error:{type:status===400?'invalid_request_error':'api_error',message:'synthetic acceptance failure '+status}}));return;
@@ -79,6 +84,7 @@ if(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'){
  manifest.execution_cwd=process.cwd();
  manifest.lesson_contract_sha256=createHash('sha256').update(readFileSync(resolve(sourceRoot,'worker/src/lib/session-design.ts'))).digest('hex');
  manifest.runner_sha256=createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex');
+ if(models){manifest.synthetic_profile_runtime=modelRuntime;manifest.model_runner_sha256=createHash('sha256').update(readFileSync(new URL('./models.mjs',import.meta.url))).digest('hex');}
  manifest.expected_candidate_sha=process.env.HPS_LESSON_EXPECT_SHA||null;
  manifest.submitted_product_sha=process.env.HPS_LESSON_PRODUCT_SHA||null;
  manifest.live_model_requested=live;
@@ -102,7 +108,7 @@ try{
  server.listen(0,'127.0.0.1');await once(server,'listening');
  const proxy='http://127.0.0.1:'+server.address().port+'/v1';
  writeFileSync(userDir+'/User/settings.json',JSON.stringify({'hypeproofChat.proxyUrl':proxy,'window.dialogStyle':'custom','workbench.startupEditor':'none','update.mode':'none','telemetry.telemetryLevel':'off',...(surfaces?{'hypeproofChat.requireApprovalFor':['writeFile','executeShell','openBrowser','delegateAgent','browserType']}:{} )}));
- writeFileSync(userDir+'/User/hps-test-state.json',JSON.stringify({token:cases?.a.token||invite.token,coach:{name:'연습 코치',personality:''}}),{mode:0o600});
+ writeFileSync(userDir+'/User/hps-test-state.json',JSON.stringify({token:modelCases?.choice.token||cases?.a.token||invite.token,coach:{name:'연습 코치',personality:''}}),{mode:0o600});
  const appEnv=Object.fromEntries(Object.entries(process.env).filter(([key])=>!/(API_KEY|AUTH_TOKEN|SIGNING_SECRET|ADMIN_PASSWORD)/.test(key)));
  app=await electron.launch({executablePath:process.env.HPS_APP_PATH||'/Applications/HypeProof Studio.app/Contents/MacOS/HypeProof Studio',args:['--user-data-dir='+userDir,'--extensions-dir='+userDir+'/extensions',...(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'?[]:['--extensionDevelopmentPath='+resolve(sourceRoot,'extensions/hypeproof-chat')]),'--disable-workspace-trust','--use-inmemory-secretstorage','--disable-updates','--skip-welcome','--skip-release-notes','--remote-debugging-port=9347','--folder-uri',pathToFileURL(userDir+'/ws').href],env:{...appEnv,HPS_TEST_E2E:'1'},timeout:30000});
  const window=await app.firstWindow();await window.waitForTimeout(5000);
@@ -110,7 +116,8 @@ try{
  async function targets(){return (await (await fetch('http://127.0.0.1:9347/json/list')).json()).filter(x=>x.type==='iframe'&&x.url.includes('hypeproof-chat'));}
  async function connect(t){const ws=new WebSocket(t.webSocketDebuggerUrl);sockets.push(ws);await new Promise(r=>ws.onopen=r);let id=0;const pending=new Map();ws.onmessage=e=>{const m=JSON.parse(e.data);if(pending.has(m.id)){const [r,j]=pending.get(m.id);pending.delete(m.id);m.error?j(Error(m.error.message)):r(m.result);}};const send=(method,params={})=>new Promise((r,j)=>{const n=++id;pending.set(n,[r,j]);ws.send(JSON.stringify({id:n,method,params}));});await send('Page.enable');const {frameTree}=await send('Page.getFrameTree');const frames=[frameTree,...(frameTree.childFrames||[])];const contexts=[];for(const f of frames){const x=await send('Page.createIsolatedWorld',{frameId:f.frame.id,worldName:'lesson-observer'});contexts.push(x.executionContextId);}return {send,contexts};}
  async function findContext(selector){for(const t of await targets()){const c=await connect(t);for(const contextId of c.contexts){const evaluate=async expression=>(await c.send('Runtime.evaluate',{expression,contextId,returnByValue:true,awaitPromise:true})).result?.value;if(await evaluate('!!document.querySelector('+JSON.stringify(selector)+')'))return {...c,contextId,evaluate};}}return null;}
- if(identity){
+ if(models){await verifyModels({app,window,findContext,cases:modelCases,out,live,upstream,gatewayCalls});}
+ else if(identity){
   await verifyIdentity({app,window,findContext,cases,out,live:live&&!surfaces,surfaces:surfaces?surfaceAcceptance({out,workspace:userDir+'/ws',live,degraded:process.env.HPS_LESSON_SDK_UNAVAILABLE==='1',gatewayCalls}):undefined,setFault:mode=>{fault=mode;},setZoom:factor=>{const path=userDir+'/User/settings.json';writeFileSync(path,JSON.stringify({...JSON.parse(readFileSync(path,'utf8')),'window.zoomLevel':Math.log(factor)/Math.log(1.2)}));}});
   if(live)assert.ok(upstream.some(c=>c.status===200),'no successful real provider request was recorded');
  }else{

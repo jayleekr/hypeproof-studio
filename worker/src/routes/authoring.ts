@@ -1,4 +1,5 @@
 // Instructor authoring API. Service owns writes; Chalk forwards the same HTTP contract.
+import { validateModelSubset, modelBinding } from '../lib/lesson-model-policy';
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
@@ -28,10 +29,18 @@ const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
   if (!validId(c.req.param("course")! ?? "")) return c.json({ error: "invalid course id" }, 400);
   return next();
 };
-for (const path of [root, root + "/versions/:version", root + '/versions/:version/participants']) {
+for (const path of [root, root + "/models/:profile", root + "/versions/:version", root + '/versions/:version/participants']) {
   authoring.use(path, authenticate);
   authoring.use(path, bodyLimit({ maxSize: 128 * 1024, onError: (c) => c.json({ error: "request too large" }, 413) }));
 }
+
+authoring.get(root + '/models/:profile', c => {
+  const profile = getProfile(c.req.param('profile')!);
+  if (!profile || profile.session.cohort_id !== c.req.param('cohort') || !c.get('author').scope.profiles.includes(profile.id))
+    return c.json({ error: 'profile not permitted' }, 403);
+  try { return c.json({ ...modelBinding(c.env, profile), default: profile.model.default }); }
+  catch { return c.json({ error: 'model provider is not configured' }, 409); }
+});
 
 // Explicit delivery to an already registered student; never opens/replaces a session.
 authoring.post(root + '/versions/:version/participants', async c => {
@@ -77,6 +86,11 @@ authoring.put(root, async (c) => {
   const cohort = c.req.param("cohort")!, course = c.req.param("course")!, a = c.get("author");
   const profile = getProfile(b.profile_id);
   if (!profile || profile.session.cohort_id !== cohort || !a.scope.profiles.includes(b.profile_id)) return c.json({ error: "profile not permitted" }, 403);
+  if (b.content.model) {
+    if (b.content.model.binding) return c.json({ error: 'model binding is produced by the Service at freeze' }, 400);
+    const bad = validateModelSubset(b.content.model, profile);
+    if (bad) return c.json({ error: bad }, 403);
+  }
   const content = JSON.stringify(b.content);
   const hash = await sha256Hex(JSON.stringify([b.expected_revision, b.profile_id, b.content]));
   const prior = await readDraft(c.env.HPS_DB, cohort, course);
@@ -118,6 +132,12 @@ authoring.put(root + "/versions/:version", async (c) => {
   const content = JSON.parse(d.content_json);
   const invalid = validateSessionDesign(content,true);
   if (invalid) return c.json({ error: invalid }, 400);
+  if (content.model) {
+    const profile = getProfile(d.profile_id);
+    if (!profile || validateModelSubset(content.model, profile)) return c.json({ error: 'model is not permitted by the cohort' }, 403);
+    try { content.model.binding = modelBinding(c.env, profile, content.model); }
+    catch { return c.json({ error: 'model provider is not configured' }, 409); }
+  }
   const module = await makeModuleDoc({ kind: "session-design", profileId: d.profile_id, version, content });
   // INSERT SELECT checks the revision at the write, not merely at the earlier read.
   await c.env.HPS_DB.prepare(`INSERT INTO authoring_versions (cohort_id,course_id,version,source_revision,module_json)

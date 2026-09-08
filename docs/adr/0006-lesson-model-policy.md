@@ -1,6 +1,8 @@
 # A lesson narrows the models it allows; the app shows the set and the turn
 
-Status: Proposed (first unit of E7 [#755](https://github.com/jayleekr/hypeproof-studio/issues/755), epic [#746](https://github.com/jayleekr/hypeproof-studio/issues/746)).
+Status: Proposed; implementation candidate #792 is under verification. The implementation decision below supersedes the original proposal sections.
+
+Original audit (first unit of E7 [#755](https://github.com/jayleekr/hypeproof-studio/issues/755), epic [#746](https://github.com/jayleekr/hypeproof-studio/issues/746)).
 Design input (docs branch PR [#753](https://github.com/jayleekr/hypeproof-studio/pull/753), pinned at `293d4b5`):
 [design §"멀티모델을 수업의 선택권으로 설계"](https://github.com/jayleekr/hypeproof-studio/blob/293d4b54b5bc418ab3b6e0adbd788386c08a7319/docs/design/learning-agent-experience.md),
 [multi-model research](https://github.com/jayleekr/hypeproof-studio/blob/293d4b54b5bc418ab3b6e0adbd788386c08a7319/docs/research/agent-experience-2026-09-08/multi-model.md),
@@ -23,6 +25,40 @@ The rows this ADR serves, quoted so a main checkout can read them:
 This ADR decides the contract only. It is written from an audit of the code as of
 `feb1310`; the "What exists today" section is the audit's result and is the reason
 the contract is this small.
+
+## Implementation decision — #792
+
+The primary UI is an instructor-scoped model switch in the composer. Per-response
+model badges are not required. The existing usage records verify actual execution.
+
+- `session-design.model` contains `default` and 1–2 `allowed` aliases from the compiled
+  cohort's default/fallback set. Existing issuer authorization applies; students cannot edit it.
+- At freeze the Service adds `binding`: revision `hps-model-selection/1`, effective provider,
+  runtime, and deduplicated alias/id/label choices. Drafts cannot submit their own binding.
+  Every lesson read compares the frozen binding with the current pins/runtime/provider.
+  Drift returns `lesson_unavailable`; a new mapping requires a new frozen version.
+- The shared chat gate narrows the profile. **The SDK clamp is changed for explicit
+  frozen policies**: all requests, including auxiliary calls, obey the same allowed set.
+  There is no guessed auxiliary-purpose exemption. A fixed Sonnet lesson consequently
+  uses Sonnet for auxiliary calls too. Old lessons retain their existing fast exception.
+- A frozen policy binds one runtime. Sending it through another runtime is refused.
+  The App follows that binding; a machine setting cannot widen a minor cohort's runtime.
+- `/v1/profile.model_selection` serves the choice list. The existing host config carries
+  the requested selection. Workspace state retains one choice scoped to profile, frozen
+  lesson digest and catalogue; changing lessons restores that lesson's default.
+- The host captures the selection before each request. Changing the menu during a turn
+  affects the next request, without clearing input, history or workspace files.
+- When SDK is unavailable, an explicitly selected model or frozen policy is not silently
+  run through a different runtime. Existing unselected legacy fallback remains available.
+- Chalk uses the existing authoring form and shared instructor forwarder; the new scoped
+  catalogue read is `GET .../authoring/:course/models/:profile`.
+
+[Acceptance contract](../testing/lesson-model-selection.md). New Service precedes Chalk;
+freezing this optional field establishes the documented rollback floor. This candidate
+adds no production deployment, automatic activation, provider transfer, Auto/compare,
+new auth/store, full capability matrix or enforced rehearsal workflow. Those parts of
+AE-25–34 remain separate work. The original audit and counterexample below describe
+pre-#792 behavior and remain useful legacy controls.
 
 ## What exists today (audited, not assumed)
 
