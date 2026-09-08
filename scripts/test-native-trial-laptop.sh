@@ -17,6 +17,8 @@ if curl --max-time 2 -fsS http://127.0.0.1:8787/v1/health >/dev/null 2>&1; then
   exit 2
 fi
 
+node e2e/native-trial-checks.test.mjs
+if [[ -z "${HPS_NATIVE_REUSE_DIR:-}" ]]; then
 npm ci --prefix worker
 npm ci --prefix e2e
 npm ci --prefix extensions/hypeproof-chat
@@ -26,6 +28,10 @@ npm run build:extension --prefix extensions/hypeproof-chat
 bash scripts/seed-sdk-binary.sh
 
 NATIVE_TMP="$(mktemp -d "${TMPDIR:-/tmp}/hps-native-trial.XXXXXX")"
+else
+  NATIVE_TMP="$HPS_NATIVE_REUSE_DIR"
+  [[ -d "$NATIVE_TMP/HypeProof Studio.app/Contents" ]] || { echo 'BLOCKED: reusable test copy missing' >&2; exit 2; }
+fi
 GATEWAY_PID=''
 cleanup() {
   if [[ -n "$GATEWAY_PID" ]]; then kill "$GATEWAY_PID" 2>/dev/null || true; wait "$GATEWAY_PID" 2>/dev/null || true; fi
@@ -34,6 +40,7 @@ cleanup() {
 }
 trap cleanup EXIT
 trap 'exit 130' INT TERM
+if [[ -z "${HPS_NATIVE_REUSE_DIR:-}" ]]; then
 ditto "$SOURCE_APP" "$NATIVE_TMP/HypeProof Studio.app"
 NATIVE_EXT="$NATIVE_TMP/HypeProof Studio.app/Contents/Resources/app/extensions/hypeproof-chat"
 mkdir -p "$NATIVE_EXT/webview-ui"
@@ -42,8 +49,18 @@ ditto extensions/hypeproof-chat/webview-ui/dist "$NATIVE_EXT/webview-ui/dist"
 ditto extensions/hypeproof-chat/node_modules "$NATIVE_EXT/node_modules"
 ditto extensions/hypeproof-chat/media "$NATIVE_EXT/media"
 cp extensions/hypeproof-chat/package.json "$NATIVE_EXT/package.json"
+fi
 
 export HPS_APP_PATH="$NATIVE_TMP/HypeProof Studio.app"
+node --input-type=module <<'NODE'
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+import assert from 'node:assert/strict';
+for (const file of ['dist/extension.js','webview-ui/dist/assets/index.js','webview-ui/dist/assets/index.css','package.json']) {
+  const hash = p => createHash('sha256').update(readFileSync(p)).digest('hex');
+  assert.equal(hash(process.env.HPS_APP_PATH+'/Contents/Resources/app/extensions/hypeproof-chat/'+file), hash('extensions/hypeproof-chat/'+file), 'stale rehearsal copy: '+file);
+}
+NODE
 export HPS_E2E_TOKEN_FILE="$NATIVE_TMP/token"
 export HPS_E2E_PROXY_URL='http://127.0.0.1:8787/v1'
 export HPS_NATIVE_LIVE=1

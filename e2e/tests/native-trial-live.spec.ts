@@ -3,6 +3,7 @@ import { test, expect } from '@playwright/test';
 import { launchApp, closeApp, chatFrame, startFrame } from '../fixtures/app';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { hasClosingTime } from '../native-trial-checks.mjs';
 
 test('native trial: enter code, use real API, create and revise an actual work file', async () => {
   test.skip(process.env.HPS_NATIVE_LIVE !== '1', 'isolated live runner only');
@@ -19,7 +20,7 @@ test('native trial: enter code, use real API, create and revise an actual work f
         const box = ctx.win.locator('.monaco-dialog-box').first();
         if (await box.isVisible().catch(() => false)) {
           const copy = (await box.textContent()) || '';
-          const allowed = /restart to take effect/i.test(copy) ? /Cancel/i : /Approve|승인|허용/;
+          const allowed = /restart to take effect/i.test(copy) ? /^Cancel$/i : /^(저장|읽기|Approve|승인)$/;
           const button = box.locator('.monaco-button').filter({ hasText: allowed }).first();
           if (await button.isVisible().catch(() => false)) await button.click();
         }
@@ -40,26 +41,33 @@ test('native trial: enter code, use real API, create and revise an actual work f
     await input.waitFor({ state: 'visible', timeout: 60000 });
     await input.fill('가상 꽃집의 직원 인수인계 문서를 만들고 싶어. 대상은 새 직원이고 완료 조건은 영업시간과 주문 확인 절차가 들어가는 것이야. 영업시간은 오전 10시부터 오후 6시까지. 첫 문서는 handover-v1.md로 현재 작업 폴더에 실제 저장하고 다시 읽어 확인해줘. 브라우저, 외부 전송, 셸은 사용하지 말아줘. 파일 쓰기는 승인할게.');
     await input.press('Enter');
+    await expect(chat.locator('.hps-btn-stop')).toBeVisible();
     const first = join(ctx.wsDir, 'handover-v1.md');
     await expect.poll(() => existsSync(first), { timeout: 240000, intervals: [1000, 3000] }).toBe(true);
     const before = readFileSync(first, 'utf8');
+    expect(hasClosingTime(before, 18)).toBe(true);
     expect(before).toMatch(/10|열/);
     expect(before).toMatch(/주문/);
     writeFileSync(join(output, 'handover-v1.md'), before);
-    await expect(input).toBeEnabled({ timeout: 60000 });
+    await expect(chat.locator('.hps-btn-stop')).toHaveCount(0, { timeout: 180000 });
+    writeFileSync(join(output, 'initial-transcript.txt'), await chat.locator('.hps-messages').innerText());
     await input.fill('영업시간이 잘못됐어. 오후 7시 마감으로 바꾸고 주문 확인 절차는 유지해줘. 첫 파일은 그대로 두고 handover-v2.md로 저장해줘. 두 파일을 다시 읽어 차이를 확인하고, 실제로 확인한 것만 설명해줘.');
     await input.press('Enter');
+    await expect(chat.locator('.hps-btn-stop')).toBeVisible();
     const second = join(ctx.wsDir, 'handover-v2.md');
     await expect.poll(() => existsSync(second), { timeout: 180000, intervals: [1000, 3000] }).toBe(true);
+    await expect(chat.locator('.hps-btn-stop')).toHaveCount(0, { timeout: 180000 });
     const after = readFileSync(second, 'utf8');
-    expect(after).toMatch(/19|7시|일곱/);
+    writeFileSync(join(output, 'handover-v2.md'), after);
+    writeFileSync(join(output, 'revised-transcript.txt'), await chat.locator('.hps-messages').innerText());
+    expect(hasClosingTime(after, 19)).toBe(true);
     expect(after).toMatch(/주문/);
     expect(after).not.toEqual(before);
     expect(readFileSync(first, 'utf8')).toEqual(before);
     writeFileSync(join(output, 'handover-v2.md'), after);
     await ctx.win.screenshot({ path: join(output, 'revised.png') });
     const api = JSON.parse(readFileSync(join(output, 'api-evidence.json'), 'utf8'));
-    expect(api.calls.some((c: { status: number; path: string }) => c.status === 200 && c.path === '/v1/messages')).toBe(true);
+    expect(api.calls.some((c: { status: number; path: string; request_id: string }) => c.status === 200 && c.path === '/v1/messages' && c.request_id)).toBe(true);
     writeFileSync(join(output, 'result.json'), JSON.stringify({
       entry: 'actual code entry', app: 'released shell with branch extension', upstream: 'real Anthropic',
       initial_file_created: true, revised_file_created: true, original_preserved: true,
