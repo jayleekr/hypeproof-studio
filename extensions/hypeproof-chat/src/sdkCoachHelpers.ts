@@ -761,7 +761,7 @@ export const SDK_CONFIG_DIR_NAME = "claude-config";
  * why a truncated digest is enough. The token itself is never written — the
  * same move `nativeHistoryScope` already makes for native-trial seats.
  */
-export function sdkSeatKey(seat: {
+export function coachSeatKey(seat: {
   profileId?: string;
   lessonVersion?: string;
   tokenDigest?: string;
@@ -784,11 +784,11 @@ export function sdkSeatKey(seat: {
  * already carries. The token is hashed here and never stored; only the digest
  * reaches the filesystem.
  */
-export function sdkSeatKeyFor(run: {
+export function coachSeatKeyFor(run: {
   token?: string;
   profile?: { profile_id?: string; lesson?: { version?: string } };
 }): string {
-  return sdkSeatKey({
+  return coachSeatKey({
     profileId: run.profile?.profile_id,
     lessonVersion: run.profile?.lesson?.version,
     tokenDigest: run.token
@@ -800,22 +800,29 @@ export function sdkSeatKeyFor(run: {
 /**
  * #749 (AE-14, 중복 실행 방지) - seats with a coach turn already in flight.
  *
- * Nothing prevented two concurrent SDK runs for one seat before this. Two runs
- * share a workspace, a CLI config dir and one approval-modal queue, so they
- * interleave file writes and either one's modal can answer the other's
- * question. The webview disables Send while streaming, but that is a UI state,
- * not a guard: the host keeps `activeStreams` as a Map keyed per stream and its
- * send path never consults `hasActiveStream()` (that gates lesson change and
- * history clear only), so a queued send, a second panel, or a host-side retry
- * reaches the runtime directly.
+ * Nothing prevented two concurrent runs for one seat before this. Two runs
+ * share a workspace and one approval-modal queue, so they interleave file
+ * writes and either one's modal can answer the other's question. The webview
+ * disables Send while streaming, but that is a UI state, not a guard: the host
+ * keeps `activeStreams` as a Map keyed per stream and its send path never
+ * consults `hasActiveStream()` (that gates lesson change and history clear
+ * only), so a queued send, a second panel, or a host-side retry reaches the
+ * runtime directly.
  *
  * Keyed by seat, not globally: two cohorts open on one machine stay
  * independent, and the same student's second turn is the case worth refusing.
+ *
+ * NOT SDK-specific, despite living in this file. #749 first shipped the lock
+ * inside `runSdkCoach`, which left the whole proxy runtime — and the SDK's own
+ * `SdkUnavailableError` fallback, which runs the proxy path after the lock has
+ * already been released — with no guard at all, while REQ-M37 claimed flatly
+ * that a seat runs one turn at a time. The guard now wraps the runtime dispatch
+ * in the host so both paths and the fallback are covered, and the names say so.
  */
 const seatsInFlight = new Set<string>();
 
 /** Which seats are mid-run right now. */
-export function sdkSeatsInFlight(): readonly string[] {
+export function coachSeatsInFlight(): readonly string[] {
   return [...seatsInFlight];
 }
 
@@ -825,20 +832,24 @@ export function sdkSeatsInFlight(): readonly string[] {
  * run the duplicate turn on the other runtime - the exact outcome this guard
  * exists to prevent.
  */
-export class SdkConcurrentRunError extends Error {
+export class CoachConcurrentRunError extends Error {
   // A plain field, not a TS parameter property: the smoke tests load this
   // module under `node --experimental-strip-types`, which rejects those.
   readonly seatKey: string;
   constructor(seatKey: string) {
     super("이미 실행 중인 요청이 있어요. 끝나거나 중지한 뒤에 다시 보내주세요.");
-    this.name = "SdkConcurrentRunError";
+    this.name = "CoachConcurrentRunError";
     this.seatKey = seatKey;
   }
 }
 
-/** Hold the seat for the duration of `run`, refusing a concurrent second run. */
-export async function withSdkSeatLock<T>(seatKey: string, run: () => Promise<T>): Promise<T> {
-  if (seatsInFlight.has(seatKey)) throw new SdkConcurrentRunError(seatKey);
+/**
+ * Hold the seat for the duration of `run`, refusing a concurrent second run.
+ * Call this around the WHOLE turn — including any runtime fallback — not around
+ * one runtime, or the fallback escapes it.
+ */
+export async function withCoachSeatLock<T>(seatKey: string, run: () => Promise<T>): Promise<T> {
+  if (seatsInFlight.has(seatKey)) throw new CoachConcurrentRunError(seatKey);
   seatsInFlight.add(seatKey);
   try {
     return await run();

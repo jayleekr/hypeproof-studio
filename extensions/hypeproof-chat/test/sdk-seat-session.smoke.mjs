@@ -6,7 +6,7 @@
 //      one directory shared by everyone who uses the machine.
 //   2. One seat runs at most one coach turn at a time.
 //
-// Both are executed here, not pattern-matched: withSdkSeatLock is a real async
+// Both are executed here, not pattern-matched: withCoachSeatLock is a real async
 // function and the tests actually race it. The two source-level assertions at
 // the bottom exist only because a correct helper is worthless if the coach
 // forgets to call it.
@@ -22,16 +22,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 const {
   SDK_CONFIG_DIR_NAME,
-  SdkConcurrentRunError,
+  CoachConcurrentRunError,
   sdkConfigDirFor,
-  sdkSeatKey,
-  sdkSeatKeyFor,
-  sdkSeatsInFlight,
-  withSdkSeatLock,
+  coachSeatKey,
+  coachSeatKeyFor,
+  coachSeatsInFlight,
+  withCoachSeatLock,
 } = await import("../src/sdkCoachHelpers.ts");
 
 const seatOf = (token, profileId, lessonVersion) =>
-  sdkSeatKeyFor({
+  coachSeatKeyFor({
     token,
     profile: { profile_id: profileId, lesson: lessonVersion ? { version: lessonVersion } : undefined },
   });
@@ -155,12 +155,12 @@ const seatOf = (token, profileId, lessonVersion) =>
 // ─── sdkSeatKey composes the three parts it is given ────────────────────────
 {
   assert.equal(
-    sdkSeatKey({ profileId: "p", lessonVersion: "v", tokenDigest: "d" }),
+    coachSeatKey({ profileId: "p", lessonVersion: "v", tokenDigest: "d" }),
     "p~v~d",
     "the seat key is profile~lesson~digest",
   );
   assert.equal(
-    sdkSeatKey({ profileId: "p", tokenDigest: "d" }),
+    coachSeatKey({ profileId: "p", tokenDigest: "d" }),
     "p~nolesson~d",
     "a cohort with no frozen lesson still gets a stable seat",
   );
@@ -172,13 +172,13 @@ const seatOf = (token, profileId, lessonVersion) =>
   let release;
   const held = new Promise((r) => (release = r));
 
-  const first = withSdkSeatLock(seat, () => held);
-  assert.deepEqual(sdkSeatsInFlight(), [seat], "the seat is held while the turn runs");
+  const first = withCoachSeatLock(seat, () => held);
+  assert.deepEqual(coachSeatsInFlight(), [seat], "the seat is held while the turn runs");
 
   await assert.rejects(
-    () => withSdkSeatLock(seat, async () => "should not run"),
+    () => withCoachSeatLock(seat, async () => "should not run"),
     (err) => {
-      assert.ok(err instanceof SdkConcurrentRunError, "the refusal has its own class");
+      assert.ok(err instanceof CoachConcurrentRunError, "the refusal has its own class");
       assert.equal(err.seatKey, seat);
       // The student reads this. It has to say what to do, not name a subsystem.
       assert.match(err.message, /이미 실행 중인 요청/);
@@ -190,12 +190,12 @@ const seatOf = (token, profileId, lessonVersion) =>
 
   // The refused run never started: its body must not have executed.
   let ran = false;
-  await withSdkSeatLock(seat, async () => (ran = true)).catch(() => {});
+  await withCoachSeatLock(seat, async () => (ran = true)).catch(() => {});
   assert.equal(ran, false, "the refused run's body never executes");
 
   release("done");
   assert.equal(await first, "done", "the first turn still returns its value");
-  assert.deepEqual(sdkSeatsInFlight(), [], "the seat is released when the turn ends");
+  assert.deepEqual(coachSeatsInFlight(), [], "the seat is released when the turn ends");
 }
 
 // ─── Positive control: a DIFFERENT seat is never blocked ───────────────────
@@ -205,17 +205,17 @@ const seatOf = (token, profileId, lessonVersion) =>
 {
   let release;
   const held = new Promise((r) => (release = r));
-  const first = withSdkSeatLock("seat-a", () => held);
+  const first = withCoachSeatLock("seat-a", () => held);
 
   assert.equal(
-    await withSdkSeatLock("seat-b", async () => "ran"),
+    await withCoachSeatLock("seat-b", async () => "ran"),
     "ran",
     "another student's turn runs while the first is in flight",
   );
 
   release("a");
   await first;
-  assert.deepEqual(sdkSeatsInFlight(), []);
+  assert.deepEqual(coachSeatsInFlight(), []);
 }
 
 // ─── A failed turn releases the seat ───────────────────────────────────────
@@ -224,14 +224,14 @@ const seatOf = (token, profileId, lessonVersion) =>
 {
   const seat = "seat-throws";
   await assert.rejects(
-    () => withSdkSeatLock(seat, async () => { throw new Error("upstream died"); }),
+    () => withCoachSeatLock(seat, async () => { throw new Error("upstream died"); }),
     /upstream died/,
     "the turn's own error propagates unchanged",
   );
-  assert.deepEqual(sdkSeatsInFlight(), [], "a thrown turn still releases the seat");
+  assert.deepEqual(coachSeatsInFlight(), [], "a thrown turn still releases the seat");
 
   assert.equal(
-    await withSdkSeatLock(seat, async () => "recovered"),
+    await withCoachSeatLock(seat, async () => "recovered"),
     "recovered",
     "the seat accepts a new turn after a failure",
   );
@@ -242,17 +242,17 @@ const seatOf = (token, profileId, lessonVersion) =>
 {
   const seat = "seat-aborts";
   const abort = Object.assign(new Error("Aborted"), { name: "AbortError" });
-  await assert.rejects(() => withSdkSeatLock(seat, async () => { throw abort; }));
-  assert.deepEqual(sdkSeatsInFlight(), [], "an aborted turn still releases the seat");
+  await assert.rejects(() => withCoachSeatLock(seat, async () => { throw abort; }));
+  assert.deepEqual(coachSeatsInFlight(), [], "an aborted turn still releases the seat");
 }
 
 // ─── Sequential turns are never refused ────────────────────────────────────
 {
   const seat = "seat-sequential";
   for (let i = 0; i < 3; i++) {
-    assert.equal(await withSdkSeatLock(seat, async () => i), i, "turn after turn is fine");
+    assert.equal(await withCoachSeatLock(seat, async () => i), i, "turn after turn is fine");
   }
-  assert.deepEqual(sdkSeatsInFlight(), []);
+  assert.deepEqual(coachSeatsInFlight(), []);
 }
 
 // ─── The coach actually uses both ──────────────────────────────────────────
@@ -262,14 +262,32 @@ const seatOf = (token, profileId, lessonVersion) =>
 {
   const coach = readFileSync(join(here, "..", "src", "sdkCoach.ts"), "utf8");
 
-  assert.match(
+  // #749 후속 — 잠금은 이제 코치가 아니라 **호스트**가 잡는다. 코치 안에 두면
+  // proxy 코호트 전체가 무방비이고, SdkUnavailableError 폴백이 잠금 밖에서 돈다.
+  // 호출을 찾는다 — 이름만 언급하는 주석까지 잡으면 계약이 아니라 산문을 재게 된다.
+  assert.doesNotMatch(
     coach,
-    /withSdkSeatLock\(sdkSeatKeyFor\(args\)/,
-    "runSdkCoach wraps the turn in the seat lock",
+    /withCoachSeatLock\(/,
+    "코치는 스스로 잠그지 않는다 — 그러면 폴백이 울타리 밖으로 나간다",
   );
+
+  const host = readFileSync(join(here, "..", "src", "chatPanelProvider.ts"), "utf8");
+  assert.match(
+    host,
+    /await withCoachSeatLock\(coachSeatKeyFor\(\{ token: token \?\? undefined, profile: profile \?\? undefined \}\), async \(\) => \{/,
+    "호스트가 턴 전체를 좌석 잠금으로 감싼다",
+  );
+
+  // 그리고 그 잠금이 **런타임 분기 바깥**에 있어야 한다. 안쪽에 있으면 한 경로만
+  // 덮인다 — 그게 고치는 결함이다.
+  const lockAt = host.indexOf("await withCoachSeatLock(");
+  const sdkBranchAt = host.indexOf('if (runtime === "agent-sdk") {', lockAt);
+  const proxyElseAt = host.indexOf("// #278 Phase 3 — browser loop for opted-in cohorts", lockAt);
+  assert.ok(lockAt > 0 && sdkBranchAt > lockAt, "잠금이 SDK 분기보다 먼저 잡힌다");
+  assert.ok(proxyElseAt > lockAt, "proxy 분기도 잠금 안에 있다");
   assert.match(
     coach,
-    /sdkConfigDirFor\(process\.env,\s*sdkSeatKeyFor\(args\)\)/,
+    /sdkConfigDirFor\(process\.env,\s*coachSeatKeyFor\(args\)\)/,
     "the CLI config dir is scoped to the seat",
   );
   assert.doesNotMatch(
