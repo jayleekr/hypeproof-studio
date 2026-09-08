@@ -24,6 +24,30 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
    if(key==='html')assert.equal(await entry.evaluate("document.querySelectorAll('.studio-course b').length"),0,'name rendered as HTML');
    record('B1-'+key,{name,...state,status:fits?'PASS':'FAIL'});
   },
+  async started({entry,name,app,window,shot,wait,setZoom,key}){
+   await wait(()=>entry.evaluate(`document.querySelector('.studio-primary')?.textContent.includes(${JSON.stringify(name+'와 계속')})||document.querySelector('.studio-primary')?.textContent.includes(${JSON.stringify(name+'과 계속')})`),'named continue action');
+   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].setBounds({width:1800,height:1000}));await window.waitForTimeout(400);
+   const check=async label=>{
+    await entry.evaluate("document.querySelector('.studio-primary').scrollIntoView({block:'center'})");
+    const state=await entry.evaluate("({width:innerWidth,document_width:document.documentElement.scrollWidth,title:document.querySelector('#connect-title').textContent,button:document.querySelector('.studio-primary').textContent,overflow_elements:[...document.querySelectorAll('body *')].filter(e=>e.clientWidth>0&&e.scrollWidth>e.clientWidth+1&&getComputedStyle(e).overflowX==='visible').map(e=>({tag:e.tagName,class:e.className,width:e.clientWidth,scroll_width:e.scrollWidth})).slice(0,20)})");
+    assert.ok(state.title.includes(name));assert.ok(state.button.includes(name));
+    const fits=state.document_width<=state.width&&state.overflow_elements.length===0;if(!fits){failure='B started-page overflow: '+label;process.exitCode=1;}
+    await shot('b-continue-'+label);record('B6-continue-'+label,{...state,status:fits?'PASS':'FAIL'});
+   };
+   for(const width of [1280,390]){
+    for(let attempt=0;attempt<5;attempt++){
+     const current=await entry.evaluate('innerWidth');if(current===width)break;
+     const box=await window.locator('.part.sidebar').boundingBox();assert.ok(box);
+     await window.mouse.move(box.x+box.width,box.y+box.height/2);await window.mouse.down();await window.mouse.move(box.x+box.width+current-width,box.y+box.height/2,{steps:12});await window.mouse.up();await window.waitForTimeout(300);
+    }
+    assert.equal(await entry.evaluate('innerWidth'),width,'native start viewport differs from requested width');await check(String(width));
+   }
+   setZoom(2);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-2)<0.01,'B 200% zoom');await window.waitForTimeout(500);await check('zoom-200');
+   await entry.evaluate("document.querySelector('.studio-primary').focus()");await key(entry,'Tab','Tab',{windowsVirtualKeyCode:9});
+   const focus=await entry.evaluate("({tag:document.activeElement.tagName,text:document.activeElement.textContent,visible:document.activeElement.getBoundingClientRect().right<=innerWidth&&document.activeElement.getBoundingClientRect().bottom<=innerHeight})");
+   assert.equal(focus.tag,'BUTTON');assert.equal(focus.visible,true);record('B6-continue-keyboard',{zoom:2,focus});
+   setZoom(1);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-1)<0.01,'B normal zoom');
+  },
   async verify({app,window,chat,frame,shot,wait,fill,key,text,click,cases}){
    const name=cases.a.name, composer='.hps-input textarea';
    const send=async message=>{await fill(chat,composer,message);await key(chat,'Enter','Enter',{windowsVirtualKeyCode:13});await wait(()=>chat.evaluate("!!document.querySelector('.hps-btn-stop')"),'B turn started');};

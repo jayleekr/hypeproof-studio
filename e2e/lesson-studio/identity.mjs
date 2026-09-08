@@ -56,6 +56,7 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
   assert.equal(await entry.evaluate("!!document.querySelector('#course-code')"),false);
   await surfaces?.connected({entry,name:cases[which].name,key:which,shot,wait});
   await click(entry,'.studio-primary');
+  if(which==='long')await surfaces?.started({entry,name:cases[which].name,app,window,shot,wait,setZoom,key});
   return assertName(cases[which].name);
  };
  try{
