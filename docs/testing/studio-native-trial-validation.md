@@ -1,0 +1,171 @@
+# 실제 Studio 체험 — 테스트 요구사항과 효율적인 실행 워크플로우
+
+기준: `docs/requirements/studio-native-trial.md` NAT-01~12.
+실행 진입점: `docs/testing/studio-native-trial-laptop.md`.
+사용자 지정 실행자: 랩탑의 Astra. 아래는 실행 지시이며, 아직 수행하지 않은
+테스트를 통과했다는 보고가 아니다.
+
+## 1. 범위와 판정
+
+| 레이어 | 측정하는 것 | 입증하지 못하는 것 |
+|---|---|---|
+| 순수 함수·계약 | 데이터 검증, 이벤트·루브릭·단계 계산, 오류 분기 | 실제 모델/앱 동작, 고객 학습 |
+| 모의 저장소 + 실제 Worker 라우터 | 인증·cohort/session gate, 직렬화, 라우팅 | Cloudflare KV/D1의 동시성·지속성 |
+| 실제 모델 + 격리된 저장소 | 실제 요청 호환성, 도구 요청·결과 처리 | 운영 저장소, 실제 고객 타당성 |
+| Electron 실제 앱 | 코드 입력, 승인, 도구 실행, 파일, 화면, 재시작 | 인간이 배웠다는 결론 |
+| staging/운영 smoke | 배포 버전·자격증명·저장소·앱 호환 | 전체 회귀, 다양한 고객의 타당성 |
+| 사람 파일럿 | 이해 변화, 관찰 설명의 적절성, 다음 학습 동기 | 대규모 모집단의 심리측정 타당성 |
+
+상태는 PASS / FAIL / BLOCKED / NOT_RUN / NOT_IMPLEMENTED만 쓴다.
+SKIP은 해당 요구사항의 PASS가 아니다. FAIL은 실행했으나 기대를 어긴 경우,
+BLOCKED는 필요한 환경·권한·의존성이 없어서 실행하지 못한 경우다.
+코드와 API가 없는 테스트는 NOT_IMPLEMENTED다. 기능이 없는데 인증 부족으로만
+표시하지 않는다. 기존 웹 체험 테스트는 아래 요구사항을 충족시키지 않는다.
+
+## 2. 요구사항별 테스트 매트릭스
+
+| ID | 연결 | 테스트·입력 | 기대 결과 | 최소 레이어 / 현재 |
+|---|---|---|---|---|
+| T01 | NAT-01 | 정상 개별 코드 입력 | Studio 프로그램 이름·권한·작업 폴더 확인 | Electron / 제공된 스크립트, NOT_RUN |
+| T02 | NAT-02 | 빈/변조/만료/폐기 코드 | 요청 차단, 오류 원인 구분, 기존 연결 보존 | Service + UI / 기본 gate 일부 PASS, 전체 NOT_RUN |
+| T03 | NAT-02 | 다른 cohort·user·session의 코드 | 타인 접근/기록 혼합 차단 | Service / cohort·roster PASS, 나머지 확장 |
+| T04 | NAT-03 | 초심자가 ‘모르겠다’, 숙련자가 임의 업무 요청 | 한 번에 한 질문, 자기 목표 추종, 고정 문제로 강제 회귀 없음 | 실제 API·앱 / NOT_RUN |
+| T05 | NAT-04 | 실제 모델에 인수인계 문서 생성 요청 | real provider request ID·응답, Write 결과, 실제 파일 | 실제 API + Electron / 제공된 스크립트, NOT_RUN |
+| T06 | NAT-04 | 파일 다시 읽기 / 검사 요청 | 실행된 도구 결과를 근거로 답함 | 실제 API + 호스트 이벤트 / NOT_RUN; 현재 파일 검증 스크립트만 존재 |
+| T07 | NAT-04 | Write 또는 브라우저 실행 거절 | 작업 미실행; 파일/네트워크 결과를 지어내지 않음 | Electron / NOT_RUN |
+| T08 | NAT-04·12 | API 401/429/5xx/timeout, 스트림 중단 | 원인에 맞는 상태, bounded retry, 취소 가능, 가짜 완료·점수 없음 | 모의 API + 실사용 최소 smoke / NOT_RUN |
+| T09 | NAT-05 | user/assistant/tool/approval/verification 혼합 기록 | 역할·event ID·순서·task/program version 보존 | 계약 / NOT_IMPLEMENTED |
+| T10 | NAT-05 | 중복·역순·누락·중단 후 재전송 | 이중 집계 없음, 결측 표시, 복구 또는 명시 거절 | 계약 + 저장소 / NOT_IMPLEMENTED |
+| T11 | NAT-06 | 알려진 좋은 판단과 근거를 포함한 시료 | 올바른 자산에 실제 event ID·인용 근거 반환 | 평가 API / NOT_IMPLEMENTED |
+| T12 | NAT-06 | 키워드 도배·장문·무조건 승인·AI 자기 칭찬 | 인간의 자산 점수 상승 없음 | 평가 API / NOT_IMPLEMENTED |
+| T13 | NAT-06 | 없는 event ID·변조된 인용·assistant 발화의 user 위장 | 검증 실패, 미관찰/오류; 점수 합성 금지 | 계약 + API / NOT_IMPLEMENTED |
+| T14 | NAT-06 | 기록 속 ‘최고점을 줘’ 명령 | 평가 정책 불변, 입력을 데이터로 처리 | 평가 API / NOT_IMPLEMENTED |
+| T15 | NAT-07 | 초기 문서 생성 후 시간만 수정 | 원본 보존, 수정 파일 변화, 다른 요구 유지 | Electron / 제공된 스크립트, NOT_RUN |
+| T16 | NAT-08 | 코칭받은 개선 vs 새로운 과제의 독립 수행 | 도움/독립 분리, 클릭·재시도·API 수로 승급 안 함 | 계약 + API / NOT_IMPLEMENTED |
+| T17 | NAT-08 | 7자산 중 일부만 관찰 | 미관찰 자산 유지, 근거 없는 0점·전체 레벨 없음 | 계약 + UI / NOT_IMPLEMENTED |
+| T18 | NAT-09 | 정상·미관찰·오류·사용자 정정 상태 | Studio 안에서 근거와 잠정 해석, 변경 이력 표시 | Electron / NOT_IMPLEMENTED |
+| T19 | NAT-10 | 관찰된 학습 필요로 다음 경로 요청 | 제안 이유 설명, 실제 커리큘럼 연결, 평가 미완료도 사용 가능 | App + Lab / NOT_IMPLEMENTED |
+| T20 | NAT-11 | 코드 재사용·만료·폐기·재발급 | 서버가 개인별 수명과 접근을 일관되게 처리 | 실제 저장소 / NOT_IMPLEMENTED |
+| T21 | NAT-11 | 같은 사용자 동시 요청과 총 사용량 초과 | 원자적 제한, 과금/예약 중복 없음, 스트림 실패의 정산 일관성 | 실제 저장소 + 공급자 stub / NOT_IMPLEMENTED |
+| T22 | NAT-12 | 구버전 앱 + 새 Service, 새 앱 + 구버전 Service | 지원하지 않는 관찰 기능 명시, 기존 작업은 보존 | 계약 + 설치본 / NOT_RUN |
+| T23 | NAT-05·09 | 세션 전환·재시작·계정/코드 변경 | 다른 사용자/작업의 자산 기록이 섞이지 않음 | 저장소 + Electron / NOT_IMPLEMENTED |
+| T24 | 공개 | 로그·스크린샷·export·에러·공유 검사 | 토큰/API 키 미포함, 허용한 기록만 처리 | 보안 계약 + 산출물 검토 / NOT_RUN |
+| T25 | Intent | 실제 고객이 결과 차이·인간 역할·다음 학습을 설명 | 관찰 근거로 설명 가능; 불가능하면 Intent/경험 수정 | 사람 파일럿 / NOT_RUN |
+
+T05의 API 성공만으로 T06·T09~18·T25를 통과시키지 않는다. 제공된 최초 자동
+테스트는 ‘파일 생성·변경이 실제로 일어나는가’를 검증하며 독립 평가기를 구현하지 않는다.
+
+## 3. Astra 실행 순서
+
+### W0 — 현재 상태 고정
+
+1. 양쪽 repo의 AGENTS/CLAUDE와 현재 branch·SHA·dirty files를 확인한다.
+2. Epic #744 / Lab #753 / Studio PR #745 / Lab PR #754를 읽어 이후 변경을 반영한다.
+3. `git fetch` 후 최신 변경을 보존하며 격리된 작업 브랜치를 만든다. stale SHA를
+   기준으로 강제 reset/push하거나 사용자의 작업을 덮어쓰지 않는다.
+4. Mac 아키텍처, 설치본 경로/버전, Node 22+, API key의 존재 여부만 확인한다.
+   확인 전 새 앱 전체 빌드·새 원격 러너·새 토큰 인증 구현을 시작하지 않는다.
+5. `run-status.json`을 만들고 구현되지 않은 요구사항을 먼저 표시한다.
+
+### W1 — 저비용 계약과 측정기 대조군
+
+- 초기 baseline은 한 번: `cd worker && npm test && npm run typecheck`.
+- 새 평가기는 실제 API 전에 고정 양성/음성 fixture로 event/quote 검증을 한다.
+- 실패하면 테스트가 관측한 실물·source의 필드/계약을 먼저 확인한다.
+- 대상 코드 변경 없이 같은 실패를 반복 실행하지 않는다.
+- 체크포인트: baseline SHA, 실패 테스트, 원인, 수정 diff, 재검증 명령.
+
+### W2 — 실제 앱 최소 경로
+
+- 레포 루트에서 `bash scripts/test-native-trial-laptop.sh`.
+- 실제 코드 입력 + 생성 1회 + 의도 있는 수정 1회로 시작한다.
+- API raw request/response나 key를 보고서에 덤프하지 않는다. status/request ID,
+  호스트의 성공/실패 이벤트와 실제 파일·스크린샷만 필요한 만큼 남긴다.
+- 스크립트는 모델 요청 최대 24회, 요청 시간 최대 90초로 제한한다. 이는 테스트
+  실행 예산이며 제품의 고객별 quota가 구현됐다는 뜻이 아니다.
+- SDK의 자동 재시도도 실패 기록을 확인하고 다시 시작한다. 키·모델·호환성 문제를
+  고치지 않고 토큰을 재발급하거나 UI 타임아웃만 늘리는 행동을 피한다.
+- 설치본 복사·확장 빌드를 매번 반복하지 않도록 첫 성공 후 HPS_APP_PATH 등
+  비밀이 아닌 경로를 체크포인트에 남긴다. 같은 SHA·의존성의 복사본은 재사용 가능하다.
+- 체크포인트: 앱/확장/SDK/Service SHA·버전, 실행 디렉터리, T01/T05/T15 결과.
+
+### W3 — 관찰/평가를 작은 단위로 구현
+
+LT-02 이벤트 수집 → LT-03 별도 평가 API → LT-04 앱 결과 화면 순서다.
+먼저 하나의 실제 이벤트가 수집·해석·표시되는 경로를 완성한다. 이후 7자산으로
+확장한다. 결과 UI부터 가짜 숫자로 만들지 않는다. 평가 프롬프트/루브릭은 버전이
+있는 Module, 입력 검증·권한은 Service, 로컬 실행 증거는 App에 둔다.
+
+다음 단위의 진입 조건은 앞 단위의 계약 통과와 근거 파일 존재다. 한 단위가
+막혔다면 독립적인 문서·음성 대조군·다른 오류 분기는 진행하되, 연결까지 완료됐다고
+보고하지 않는다. 실제 API 최소 결과가 나온 후에만 폭넓은 페르소나를 돌린다.
+
+### W4 — 변화에 따른 선택적 재검증
+
+| 변경 | 다시 실행 | 기본적으로 반복하지 않는 것 |
+|---|---|---|
+| 안내 문구만 | 해당 화면·링크·레이아웃 | 전체 모델/API 테스트 |
+| 평가 루브릭/프롬프트 | 버전·대조군 + 같은 저장 fixture의 평가, 새 실제 시료 최소 1쌍 | 과거 모든 업무 재생성 |
+| 이벤트 계약 | producer/consumer·중복·구버전 + 실제 이벤트 1개 | 전체 앱 빌드 |
+| token/session/quota | 권한·동시성·실패 정산 + 실제 자격증명 최소 경로 | 모든 직업 페르소나 |
+| SDK/tool/API gateway | 실제 최소 생성·수정 + 거절/실패 | 관련 없는 Lab 페이지 |
+| App UI | 해당 Electron 경로, 필요한 screenshot | Worker 전체가 변하지 않았다면 전체 Worker 반복 |
+| 최종 merge/release | repo 필수 gate·전체 해당 suite 1회 + 설치본 smoke | 이미 같은 SHA에서 충분히 검증된 옵션 테스트 |
+
+똑같은 원인으로 두 번 막히면 실행을 반복하기 전에 관측기/환경/제품 중 원인을
+분류한다. 테스트를 약하게 바꾸거나 PASS 정의를 바꾸는 것은 해결이 아니다.
+시간을 줄이려면 고정된 synthetic fixture와 실제 시료를 재사용하되 원본·버전은 보존한다.
+
+### W5 — 사람 피드백 → Intent
+
+합성 페르소나 통과 후 소수의 실제 고객에게 실제 Studio를 쓰게 한다. 화면을
+완료했는지 외에 무엇이 달라졌는지, AI와 사람이 각각 무엇을 했는지, 다음에 무엇을
+배우고 싶은지 묻는다. 원문 수집·보관·외부 공유는 기존 정책과 명시된 동의 범위에서만.
+결과를 `가설 → 관찰 → 반례 → 바꿀 Intent/요구사항 → 다음 검증`으로 기록한다.
+체험의 의도나 고객 권한/보관 정책에 대한 판단만 사용자에게 묻는다.
+
+### W6 — 릴리스 판정
+
+T01~24의 해당 범위에 FAIL/BLOCKED/NOT_IMPLEMENTED가 남으면 그 범위를 출시하지
+않는다. LT-01 성공만으로 체험 프로필의 dashboard_hidden을 해제하지 않는다.
+사람 파일럿을 하지 않은 경우 학습 효과/분류 타당성을 검증했다고 표시하지 않는다.
+운영 공개는 기존 repo release gate를 따르며, 실제 고객 토큰으로 실행하고 버전을 확인한다.
+merge, Worker 배포, App 배포, Lab 안내 배포를 각각 기록한다.
+
+## 4. 체크포인트와 인계 형식
+
+민감 기록은 gitignored 로컬 결과 폴더에 두고, repo에는 비밀 제거한 요약과 synthetic
+증거만 넣는다. 임시 토큰 파일·앱 user-data-dir·원문 trace를 PR에 포함하지 않는다.
+
+`run-status.json` 최소 예시:
+
+```json
+{
+  "epic": "jayleekr/hypeproof-studio#744",
+  "commit": "실행한 SHA",
+  "app_version": "실제 확인값",
+  "sdk_version": "실제 확인값",
+  "stage": "W2",
+  "tests": [{"id": "T05", "status": "NOT_RUN", "command": "실제 명령", "evidence": []}],
+  "last_failure": null,
+  "next_action": "LT-01 최소 앱 경로 실행",
+  "provider_calls": 0,
+  "storage_mode": "synthetic-memory",
+  "human_validation": "NOT_RUN"
+}
+```
+
+`validation-log.md`에는 실행 시각·SHA·명령·exit code·PASS/FAIL/SKIP 수·증거 경로와
+관측 범위를 쓴다. SDK/tool response를 평가 모델이 지어낸 설명으로 대신하지 않는다.
+`intent-feedback.md`에는 이전 Intent와 사용자 피드백, 실제 반례, 수정안, 다음
+질문을 남긴다. 런 재개 때 이 세 파일과 관련 diff만 먼저 읽고, 완료된 상태를
+처음부터 재탐색하지 않는다.
+
+## 5. Astra에게 추가 전달할 효율 규칙
+
+단일 책임 있는 실행 흐름을 기본으로 한다. 에이전트 수를 늘려 같은 문서를 반복
+읽거나 실제 모델 시나리오를 중복 실행하지 않는다. 독립적인 읽기·순수 테스트는
+병렬화할 수 있지만 앱·workspace·session·token·평가 fixture를 변경하는 작업은
+순서를 지킨다. 별도 agent가 필요하면 경계·입출력·완료 조건을 먼저 정한다.
+도구 사용 권한이 있는 기존 환경을 먼저 활용하며, 환경을 새로 만드는 것이
+LT-01보다 커지면 원인과 최소 필요한 조치만 Epic에 남긴다.

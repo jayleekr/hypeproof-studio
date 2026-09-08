@@ -1880,10 +1880,10 @@ const TINY_PNG =
           `profile ${p.id}: sdk_tools.write=true 인데 coach_runtime 이 agent-sdk 가 아니다`,
         );
       }
-      if (p.id === 'homepage-practice-s1') {
+      if (p.id === 'homepage-practice-s1' || p.id === 'studio-native-trial') {
         assert.ok(p.audience.age_range[0] >= 19);
         assert.equal(p.audience.parent_coaching, false);
-        assert.equal(p.session.cohort_id, 'homepage-practice');
+        assert.equal(p.session.cohort_id, p.id === 'studio-native-trial' ? 'studio-native-trial' : 'homepage-practice');
         assert.notEqual(p.sandbox.workspace_root, copyclone.sandbox.workspace_root);
         assert.equal(p.analytics.log_user_messages, false);
         assert.equal(p.analytics.upload_session_logs, false);
