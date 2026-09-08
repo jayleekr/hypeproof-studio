@@ -136,7 +136,10 @@ try {
   await test('TUX-SP-10', 'Disconnected coach has start-page CTA', async p => { await btn(p, '시작 화면 열기').click(); await request(p, { type: 'setToken' }); await expect(draft(p)).toHaveCount(0); }, { profile: null });
   await test('TUX-CHAT-01', 'All three real profile suggestions fill and focus draft without sending', async p => {
     for (const chip of native.ux.suggestions.initial) { const button = p.getByRole('button', { name: new RegExp(chip.text) }); await button.click(); await expect(draft(p)).toHaveValue(chip.text); await expect(draft(p)).toBeFocused(); }
-    assert.equal(emitted(await requests(p), 'sendMessage').length, 0); await expect(p.getByTitle('이 수업의 코치', { exact: true })).toHaveText('코치');
+    assert.equal(emitted(await requests(p), 'sendMessage').length, 0);
+    const fixedName = p.locator('strong.hps-coach-name');
+    await expect(fixedName).toHaveText('코치');
+    await expect(fixedName).toHaveAttribute('title', '이 수업의 AI 이름: 코치');
     await expect(p.getByRole('button', { name: '코치 이름 바꾸기' })).toHaveCount(0);
   });
   await test('TUX-CHAT-02', 'Send rejects empty/space and sends trimmed text once', async p => {
