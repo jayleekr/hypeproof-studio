@@ -1,0 +1,28 @@
+{
+  "calls": [
+    {
+      "path": "/v1/messages",
+      "fault": "none"
+    },
+    {
+      "path": "/v1/messages",
+      "fault": "none"
+    },
+    {
+      "path": "/v1/messages",
+      "fault": "400"
+    },
+    {
+      "path": "/v1/messages",
+      "fault": "400"
+    },
+    {
+      "path": "/v1/messages",
+      "fault": "stall"
+    },
+    {
+      "path": "/v1/messages",
+      "fault": "stall"
+    }
+  ]
+}

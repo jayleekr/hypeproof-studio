@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "repository": "jayleekr/hypeproof-studio",
+  "coverage": "Bootstrap scope only; unregistered product areas are not claimed covered.",
+  "nodes": [
+    {
+      "id": "ST-INT-NATIVE",
+      "stage": "intent",
+      "owner": null,
+      "depends_on": [
+        "LAB-PRODUCT-ROLES"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/studio-native-trial.md",
+          "section": "## Intent"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-NATIVE",
+      "stage": "requirement",
+      "owner": null,
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/studio-native-trial.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-NATIVE",
+      "stage": "design",
+      "owner": null,
+      "depends_on": [
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/studio-native-trial.md",
+          "section": "## 접근 방식"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-UX",
+      "stage": "requirement",
+      "owner": null,
+      "depends_on": [
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/studio-native-trial-ux.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-START",
+      "stage": "implementation",
+      "owner": null,
+      "depends_on": [
+        "ST-DES-NATIVE",
+        "ST-REQ-UX"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/StartPage.tsx"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-NATIVE",
+      "stage": "test",
+      "owner": null,
+      "depends_on": [
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/studio-native-trial-validation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-UX",
+      "stage": "test",
+      "owner": null,
+      "depends_on": [
+        "ST-REQ-UX"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/studio-native-trial-ux.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-VAL-NATIVE",
+      "stage": "validation",
+      "owner": null,
+      "depends_on": [
+        "ST-TEST-NATIVE",
+        "ST-IMP-START"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/studio-native-trial-results-2026-09-08.md"
+        }
+      ]
+    }
+  ]
+}

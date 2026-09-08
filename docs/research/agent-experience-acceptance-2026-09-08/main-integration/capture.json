@@ -1,0 +1,34 @@
+{
+  "source_run": "e2e/test-results/agent-experience/20260908T161821Z-main-integration",
+  "submitted_product_sha": "9d0a4ad011aba06be9bd1143c5aa2757a3d18555",
+  "verification_sha": "cca993d9c84d7b0ec2cfa4d1e260e8b37808785c",
+  "capture": "Electron capturePage; isolated app copy; original images unedited",
+  "review": "Codex visually opened all three images on 2026-09-08; bounded chat layout/focus review only. Right-hand start-page clipping at 200% is not a full accessibility pass.",
+  "files": [
+    {
+      "file": "long-name-390.png",
+      "sha256": "bdab6f6e151a90b22d2f9000805cc0f2585d5d219ed18e37e89a1e678f9a44cd",
+      "bytes": 609045
+    },
+    {
+      "file": "long-name-1280.png",
+      "sha256": "db8c7595a8f0c3b8ed69ebc2c72723992eafb1abaa0b1d07a88ae65bf4a1131c",
+      "bytes": 582146
+    },
+    {
+      "file": "long-name-zoom-200.png",
+      "sha256": "81331c5da463c99989a8dcb1f6e6a6b05a5b0610851158b22a4161e2fc22dcf7",
+      "bytes": 590886
+    },
+    {
+      "file": "identity-result.json",
+      "sha256": "9dc3d8f92d010e587aa59d2b3da086ec33f2074d64a6bca8170444a400e493f8",
+      "bytes": 3761
+    },
+    {
+      "file": "environment.json",
+      "sha256": "879ebd7c628592b8ac16978ca6241f57acd47621674b508363ad68ed67d83bdb",
+      "bytes": 1325
+    }
+  ]
+}
