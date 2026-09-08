@@ -162,4 +162,14 @@ for (const selector of [".studio-connect h2", ".studio-card-description", ".stud
   assert.match(rule(selector), /overflow-wrap:\s*anywhere/, `${selector} lets an over-long name wrap`);
 }
 
+// The start page's top row and a name-bearing error notice must survive the
+// narrow + 200%-zoom condition B6 checks (a 440px window reads as 220 CSS px).
+assert.match(rule(".studio-top"), /flex-wrap:\s*wrap/, "the brand/nav row wraps instead of overflowing a very narrow window");
+assert.match(startCss, /@media\(max-width:260px\)/, "a very-narrow breakpoint exists for the 200%-zoom case");
+const chatCss = readFileSync(new URL("../webview-ui/src/styles.css", import.meta.url), "utf8");
+const errAt = chatCss.indexOf(".hps-tool-error .hps-tool-label {");
+assert.notEqual(errAt, -1, "error tool rows have their own label rule");
+const errRule = chatCss.slice(errAt, chatCss.indexOf("}", errAt));
+assert.match(errRule, /white-space:\s*normal/, "an error notice wraps instead of being ellipsized with no expand control");
+
 console.log("✅ coach-identity: parity, particles+copula, default-string locks, error copy, watcher pattern, static mirror check");
