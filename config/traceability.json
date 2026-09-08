@@ -140,6 +140,19 @@
           "path": "extensions/hypeproof-chat/test/sdk-seat-session.smoke.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-TEST-LESSON-FEATURES",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/lesson-feature-policy.test.mjs"
+        }
+      ]
     }
   ]
 }
