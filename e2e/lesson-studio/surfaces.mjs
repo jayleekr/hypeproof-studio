@@ -14,13 +14,15 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
   async connected({entry,name,key,shot,wait}){
    await wait(()=>entry.evaluate(`document.querySelector('.studio-connect')?.textContent.includes(${JSON.stringify(name)})`),'start page resolved name');
    const state=await entry.evaluate(`({course:document.querySelector('.studio-course')?.textContent,process:document.querySelector('.studio-process')?.textContent,description:document.querySelector('.studio-connect')?.textContent,width:innerWidth,document_width:document.documentElement.scrollWidth,credential_field:!!document.querySelector('#course-code')})`);
+   state.overflow_elements=await entry.evaluate("[...document.querySelectorAll('body *')].filter(e=>e.clientWidth>0&&e.scrollWidth>e.clientWidth+1&&getComputedStyle(e).overflowX==='visible').map(e=>({tag:e.tagName,class:e.className,width:e.clientWidth,scroll_width:e.scrollWidth})).slice(0,20)");
    assert.equal(state.credential_field,false);
    assert.ok(state.course.includes('AI 이름'));assert.ok(state.course.includes(name));assert.ok(state.process.includes(name));
    assert.ok(!state.process.includes('코치와 작은 시도부터')||name==='코치');
    if(['first','b','html','long','legacy'].includes(key))await shot('b-start-'+key);
-   assert.ok(state.document_width<=state.width,'B start-page horizontal overflow: '+key);
+   const fits=state.document_width<=state.width&&state.overflow_elements.length===0;
+   if(!fits){failure='B start-page overflow: '+key;process.exitCode=1;}
    if(key==='html')assert.equal(await entry.evaluate("document.querySelectorAll('.studio-course b').length"),0,'name rendered as HTML');
-   record('B1-'+key,{name,...state});
+   record('B1-'+key,{name,...state,status:fits?'PASS':'FAIL'});
   },
   async verify({app,window,chat,frame,shot,wait,fill,key,text,click,cases}){
    const name=cases.a.name, composer='.hps-input textarea';
