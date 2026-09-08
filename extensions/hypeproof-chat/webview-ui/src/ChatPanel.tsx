@@ -536,7 +536,7 @@ export function ChatPanel(props: Props) {
       )}
       <header className="hps-header">
         {ux.coach.naming_mode === "fixed"
-          ? <strong title={`이 수업의 AI 이름: ${coachName}`} className="hps-coach-name">{coachName}</strong>
+          ? <strong title="이 수업의 코치" className="hps-coach-name">{coachName}</strong>
           : <button title="코치 이름 바꾸기" onClick={() => setForceNaming(true)} className="hps-coach-name">{coachName}</button>}
         <div className="hps-actions">
           {/* Token 바로 **왼쪽**, 같은 크기. 헤더 버튼 스타일(.hps-header button)을
