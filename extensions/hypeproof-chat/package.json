@@ -164,7 +164,7 @@
         "hypeproofChat.model": {
           "type": "string",
           "default": "hypeproof-default",
-          "description": "Requested model alias. The Service clamps it to the cohort or lesson's allowed set — an unlisted value becomes that set's default without notice."
+          "description": "Requested model alias. The Service resolves it using the cohort policy. The Agent SDK route also permits the fast model; other unrecognized values use the default."
         },
         "hypeproofChat.coachRuntime": {
           "type": "string",

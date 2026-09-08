@@ -47,11 +47,12 @@ Other audited facts that constrain the contract:
   `default: hypeproof-default`, `fallback: hypeproof-fast`, and every request falls
   through to the deployment-level provider. `hypeproof-strong` is never a default or
   fallback anywhere; it exists only in the maps and in a negative-control test.
-- **Two clamps already enforce the profile's set.** On `/v1/chat/completions` a
+- **Two clamps resolve requests against the profile, with an SDK fast exception.** On `/v1/chat/completions` a
   requested model is matched by alias name against `model.default` and
   `model.fallback`; anything else silently becomes the default. On `/v1/messages` the
   same two aliases are matched by name **or** by mapped id, plus a `claude-*haiku*`
-  rule. Neither clamp needs editing for a lesson to narrow the set.
+  rule. Rewriting the profile changes their default and fallback, but does not remove
+  the SDK route's force-appended fast allowance described below.
 - **`/v1/messages` force-appends `hypeproof-fast`** to the allowed set even when the
   profile lists no fast fallback. It exists for the CLI's auxiliary calls, but the
   route cannot tell an auxiliary request from a participant one, so it is available to
@@ -94,7 +95,7 @@ name an alias the compiled profile does not already grant, so the issuer scope g
 no field, the participation token keeps its promise to carry no runtime capability,
 and the cohort harness remains the gate on what a profile may name at all.
 
-### 2. The Service enforces it by narrowing the profile, not by changing a clamp
+### 2. Narrow the profile; the SDK fast exception remains an unmet boundary
 
 The shared chat gate already returns a rewritten profile (that is how a frozen
 lesson's text and its AI name reach the model). It gains one more field in the same
@@ -104,10 +105,11 @@ spread:
 { ...profile, model: { ...profile.model, default: lessonDefault, fallback: lessonSecond } }
 ```
 
-Because both clamps read `profile.model.default` and `profile.model.fallback`, both
-then enforce the lesson's set **with zero edits to either clamp**. A client sending an
-arbitrary id, another alias, or another lesson's grant still falls through to the
-served default; only the target of that fallthrough moves.
+Because both clamps read `profile.model.default` and `profile.model.fallback`, the
+rewrite changes the default and fallback on both routes. The proxy route enforces
+the narrowed set. The SDK route still permits fast, so profile rewriting alone
+does not enforce the lesson's declared set there. Other unrecognized requests fall
+through to the served default; only the target of that fallthrough moves.
 
 One carve-out is named rather than silently inherited, and it is **wider than an
 auxiliary channel**: `/v1/messages` force-appends `hypeproof-fast`, and the request
@@ -142,7 +144,7 @@ Removing the force-append outright is not free: it would upgrade every CLI auxil
 call to the lesson's default model, which is the cost reason the route states for
 having it.
 
-### 3. The app is told the seat's set, and reads the turn from headers it already gets
+### 3. Show the seat's set and the actual request evidence from each runtime
 
 `GET /v1/profile` gains one additive key, shaped like the existing `module` key:
 
@@ -195,10 +197,10 @@ shape rather than by a rule someone must remember.
 | Pair | Behavior |
 |---|---|
 | Old frozen lesson (no block) + new Service | The optional key may be absent, exactly as for `assistant`. Served set is the compiled profile's; `source: "profile"`. |
-| New lesson (block) + new Service + old App | The unknown `model` key is dropped at the client's cast, like `module`, which the Service has sent unread since it was added. No render, no crash. |
+| New lesson (block) + new Service + old App | The old client does not consume the added `model` key, like the existing unread `module` key. A TypeScript cast does not remove fields at runtime. No model-policy UI is rendered. |
 | New Chalk + old Service | `PUT` draft returns `400 invalid session-design fields`; the edit is preserved. **Deploy the Service before Chalk**, as in ADR-0005. |
 | Named-model lesson frozen + Service rolled back below this change | Every read re-validates, the old allowlist rejects the block, and every seat delivered from that version gets `409 lesson_unavailable`. This is a **rollback floor** and takes a second row in the table in `worker/DEPLOY.md`. |
-| Client sends an out-of-set model string | Unchanged — both clamps already force the served default silently. Only the target moves. |
+| Client sends an out-of-set model string | Proxy: served default. SDK: fast remains accepted even outside the declared set; other unrecognized requests use the served default. This exception is not a strict lesson restriction. |
 | Credential with no lesson | Unchanged. |
 | `hypeproofChat.model` setting | Untouched. It stays a free-text string; the server clamp is what makes that harmless, and it continues to. |
 
