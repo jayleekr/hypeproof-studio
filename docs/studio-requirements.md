@@ -1,5 +1,18 @@
 # Studio behavioral requirements
 
+## Native trial revision — 2026-09-08
+
+`REQ-STUDIO-NATIVE-TRIAL`: a participant enters the existing Studio application
+with an individually scoped participation token and performs real work through
+the existing model gateway and SDK tools. Asset observations must cite participant
+decisions and executed outcomes; authored web choices and assistant keyword scores
+are not evidence of this requirement. [Intent, NAT-01–12 and release gates](requirements/studio-native-trial.md).
+
+Current implementation is profile registration plus existing gate contract tests
+(`worker/test/native-trial.test.mjs`). Real API/Electron validation and the separate
+observation API/UI remain incomplete. The profile stays hidden from issuance UI
+until those release gates are satisfied.
+
 > **Spec version:** v0.3.3
 > **Last reviewed:** 2026-08-19
 > **Live tracker:** [epic #200](https://github.com/jayleekr/hypeproof-studio/issues/200)

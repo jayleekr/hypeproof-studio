@@ -1,5 +1,9 @@
 # Public trial evidence contract
 
+> 2026-09-08 사용자 수정: 아래는 기존 선택형 프로토타입의 계약 기록이다.
+> 실제 공개 체험의 의도·요구사항은 [Studio 실제 작업 체험](studio-native-trial.md)이 우선한다.
+> 이 계약의 테스트 통과를 Studio 체험 또는 실제 API 기반 자산 측정 완료로 해석하지 않는다.
+
 > 작성일 2026-09-08 · 상태: 초안
 
 Product intent and UX requirements are delegated to `jayleekr/hypeprooflab:products/studio-trial/intent.md`, `design.md`, `requirements.md` (issue jayleekr/hypeprooflab#753). This repository implements R-04~09, R-15, R-17~18; it does not declare customer calibration complete.
