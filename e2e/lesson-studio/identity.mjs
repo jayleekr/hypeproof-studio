@@ -25,7 +25,7 @@ export async function prepareIdentity(local){
  return cases;
 }
 
-export async function verifyIdentity({app,window,findContext,cases,out,live,setFault,setZoom}){
+export async function verifyIdentity({app,window,findContext,cases,out,live,setFault,setZoom,surfaces}){
  const checks=[];
  const problems=[];
  const record=(id,detail)=>{checks.push({id,status:'PASS',...detail});writeFileSync(out+'/identity-result.json',JSON.stringify({status:'IN_PROGRESS',scope:'actual Mac app + local Service/SQLite; synthetic lessons',checks},null,2));};
@@ -54,12 +54,15 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
   assert.ok((await text(entry,'.studio-course')).includes(cases[which].name));
   // No screenshots during credential entry. React has removed that field here.
   assert.equal(await entry.evaluate("!!document.querySelector('#course-code')"),false);
+  await surfaces?.connected({entry,name:cases[which].name,key:which,shot,wait});
   await click(entry,'.studio-primary');
+  if(which==='long')await surfaces?.started({entry,name:cases[which].name,app,window,shot,wait,setZoom,key});
   return assertName(cases[which].name);
  };
  try{
   const entry=await frame('.studio-course');
   assert.ok((await text(entry,'.studio-course')).includes(cases.a.name));
+  await surfaces?.connected({entry,name:cases.a.name,key:'first',shot,wait});
   await click(entry,'.studio-primary');
   let chat=await assertName(cases.a.name);
   await shot('a-fixed-name');
@@ -106,6 +109,7 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
   setZoom(1);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-1)<0.01,'Studio normal zoom setting');
   chat=await connect('legacy');await shot('legacy-default-name');record('A4-legacy',{name:cases.legacy.name,width:await chat.evaluate('innerWidth'),document_width:await chat.evaluate('document.documentElement.scrollWidth')});
   chat=await connect('a');
+  await surfaces?.verify({app,window,chat,frame,connect,shot,wait,fill,key,text,click,cases});
   if(live)for(const mode of ['400','stall']){
    setFault(mode);const prompt='합성 '+mode+' 검수: 실패 후 이 요청과 수업 이름을 보존해 주세요.';
    await fill(chat,composer,prompt);await key(chat,'Enter','Enter',{windowsVirtualKeyCode:13});

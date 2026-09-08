@@ -1,0 +1,27 @@
+{
+  "at": "2026-09-08T16:50:11.126Z",
+  "code_sha": "282176608b9dff7b140a0a61d8f3fae5793d118d",
+  "dirty": false,
+  "service_source_sha256": "36449e3aa26000c32d0bcfb56008c02e2b2768935edc0d707705f27648cd9fc0",
+  "app_version": "0.1.51",
+  "app_source_sha": "d4db90498fce6c337823a4ce73cbe79c5e688b05",
+  "extension_bundles_sha256": {
+    "dist/extension.js": "48cfa8e407a3c4ac1d0cbbd663f1a7825fe3ad5b317d2de6ca7c723f90fe231d",
+    "webview-ui/dist/assets/index.js": "54c78ca8a7cc8c3aed4e172720fd5dedfe1948b840c20a961879f431f027a77b",
+    "webview-ui/dist/assets/index.css": "2cb21f571fa8406955bfe7bd04b10f3d9d0d1f0461588b9f9f083feb7e3403e4"
+  },
+  "node": "v24.4.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "compatibility_control": false,
+  "storage": "local test bindings; no production state",
+  "execution_cwd": "/Users/jaylee/CodeWorkspace/hypeproof-studio/e2e",
+  "lesson_contract_sha256": "6331185f64272270a6994ade054149d63a1f4b2b1eb66e6efdc281fd5d39d966",
+  "runner_sha256": "bacedfbc8f801df23a708e9051b71b6e4791b16766b40b6ef9181d75107a481b",
+  "expected_candidate_sha": "282176608b9dff7b140a0a61d8f3fae5793d118d",
+  "submitted_product_sha": "2dfd99baa773b3d51b760bbdabdf89dfc010ecd6",
+  "live_model_requested": true,
+  "identity_runner_sha256": "8be9215767897e44b080383be78ce4adc60e48590067ccf2c06a0c603bd81473",
+  "surface_runner_sha256": "da1a09280f59187b4248c26a21fbca252f7bb672a4e3709349c1fbf2dac30c2b",
+  "sdk_unavailable_fixture": false
+}

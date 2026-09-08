@@ -1,0 +1,49 @@
+{
+  "source_run": "e2e/test-results/agent-experience/20260908T170651Z-b-live",
+  "submitted_product_sha": "dddd2b634534d5932b8616fa9692ffd3b335b253",
+  "verification_sha": "aa17532edd52a2e652d6c21d5dfd928e8efef20b",
+  "capture": "Electron capturePage; isolated app copy; original files unedited",
+  "review": "Codex opened every included screenshot on 2026-09-08. Bounded UI review; not a human learning or full accessibility result. See ../README.md",
+  "files": [
+    {
+      "file": "b-continue-zoom-200-top.png",
+      "sha256": "e5f3aeba8bbb419ad941003e843ba2a508ffad1d9af9390fab7e351608fc54d2",
+      "bytes": 612707
+    },
+    {
+      "file": "b-continue-zoom-200.png",
+      "sha256": "0280969a7d5b4d8f96f1df75459dc2d0df877dbe4afb8d310148540b6decf8dd",
+      "bytes": 214257
+    },
+    {
+      "file": "b-observation-records.png",
+      "sha256": "e68801d74ca44270b5bc6b5f23197413b70160d57e3a61beeabf19badea8293c",
+      "bytes": 765561
+    },
+    {
+      "file": "environment.json",
+      "sha256": "03c07667c2578c5b7386604a6d23198ee5a6faa07481c4f04c72da939916476e",
+      "bytes": 1756
+    },
+    {
+      "file": "identity-result.json",
+      "sha256": "9dc3d8f92d010e587aa59d2b3da086ec33f2074d64a6bca8170444a400e493f8",
+      "bytes": 3761
+    },
+    {
+      "file": "surfaces-result.json",
+      "sha256": "b3df182fc881499c336e9166491b85111eea55ba4f92289b52bf61e37d561487",
+      "bytes": 15490
+    },
+    {
+      "file": "api-evidence.json",
+      "sha256": "dbef4076c7caac2b21525e6cbd50a791c74eb0efa15497d6c8bfc40b08ac6de7",
+      "bytes": 1484
+    },
+    {
+      "file": "gateway-evidence.json",
+      "sha256": "9e43aea736ef429d42518877c633a606970295bbe8284deade3ddd486c534ff5",
+      "bytes": 604
+    }
+  ]
+}
