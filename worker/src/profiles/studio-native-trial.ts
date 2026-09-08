@@ -10,7 +10,7 @@ export const profile: Profile = {
   ...structuredClone(practice),
   id: 'studio-native-trial',
   version: 1,
-  display_name: 'Studio · 내 업무로 AI 체험',
+  display_name: 'Studio · 내 삶에 AI 더하기',
   dashboard_hidden: true, // not offered for customer issuance before live validation
   observation: { enabled: true },
   system_prompt: prompt as unknown as string,

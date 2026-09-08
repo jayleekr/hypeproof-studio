@@ -7,7 +7,7 @@
 | ID 범위 | 최소 테스트 | 실제 결과를 확인할 위치 |
 |---|---|---|
 | TUX-SP-01~10 | 실제 React에서 입력·버튼·상태 분기 + Electron 연결/시작/폴더·패널 이동 | `e2e/trial-ux/run.mjs`, 기존 `e2e/tests/native-trial-live.spec.ts`, `startPage` 호스트 테스트 |
-| TUX-CHAT-01~14 | 실제 React에서 전송·키보드·예약·이미지·코드·링크·오류 + 실제 호스트 전송/중지/삭제 | `e2e/trial-ux/run.mjs`, extension smoke, Electron 기록 |
+| TUX-CHAT-01~16 | 실제 React에서 전송·키보드·예약·이미지·코드·링크·오류 + 실제 호스트 전송/중지/삭제 | `e2e/trial-ux/run.mjs`, extension smoke, Electron 기록 |
 | TUX-OBS-01~10 | 실제 React에서 기록·동의·평가·정정·scope 전환 + 실제 평가 API/저장·재시작 | `e2e/trial-ux/run.mjs`, native observation 계약/실제 API, Electron 기록 |
 | TUX-COND-01~06 | 조건별 controlled host 이벤트로 실제 React 렌더 + 설치/복구 호스트 검증 | `e2e/trial-ux/run.mjs`, updater·error boundary smoke, 별도 앱 사본 |
 | TUX-HOST-01~08 | 실제 Electron·OS·파일시스템·로컬 신고 수신기 | `e2e/tests/native-trial-live.spec.ts`, `native-entry-controls.spec.ts`, `native-approval-controls.spec.ts`, `native-browser-input.spec.ts`, `26-report-resilience.spec.ts` 및 실제 앱 실행 기록 |
@@ -44,6 +44,7 @@ HPS_QUIET_NO_HIDE=1 HPS_NATIVE_MANAGED=1 HPS_NATIVE_EXTRA=1 bash scripts/test-na
 HPS_NATIVE_MANAGED=1 HPS_NATIVE_APPROVAL=1 bash scripts/test-native-trial-laptop.sh --grep 'real shell:'
 HPS_NATIVE_MANAGED=1 HPS_NATIVE_APPROVAL=1 bash scripts/test-native-trial-laptop.sh --grep 'real browser:'
 HPS_NATIVE_MANAGED=1 HPS_NATIVE_INPUT=1 bash scripts/test-native-trial-laptop.sh
+HPS_QUIET_NO_HIDE=1 HPS_NATIVE_MANAGED=1 HPS_NATIVE_PRESENTATION=1 bash scripts/test-native-trial-laptop.sh
 ```
 
 이미 만든 검사 앱은 `HPS_NATIVE_REUSE_DIR`로 재사용할 수 있다. 스크립트가 현재 확장·webview 해시와 다르면 거절한다. `HPS_QUIET_NO_HIDE=1`은 창을 화면 밖에 표시하되 앱 전체를 숨기지 않게 해 네이티브 미리보기 캡처가 진행되도록 한다. Run 검사의 HTML은 합성 시료를 실제 모델 채팅으로 돌려받은 것으로, 학생의 독립 제작 결과가 아니다. 폴더 선택 검사는 VS Code의 simple dialog 설정에서 실행하며 macOS 시스템 파일 선택 창과 구분한다.
@@ -83,3 +84,5 @@ HPS_QUIET_NO_HIDE=1 bash scripts/test-native-trial-laptop.sh
 #758의 소스 확인에서 대화 즉시 삭제, 연결 변경 뒤 관찰의 일부 상태 잔류, 렌더 오류에서 복구 트리가 다시 실패할 수 있는 경로를 발견했다. 각각 TUX-CHAT-08/HOST-01, TUX-OBS-10/A11Y-04, TUX-COND-04에 연결한다. 수정 여부와 재실행 결과는 최종 실행 보고서에서 확인한다. 문서를 추가하거나 코드를 수정한 사실 자체는 PASS가 아니다.
 
 사람 파일럿 T25는 별도다. 이 테스트의 합성 사용자 실행은 고객의 학습 효과나 독립 수행 능력을 입증하지 않는다. Windows CI 빌드와 Mac 실기기 검증도 서로 대신하지 않는다.
+
+`native-presentation.spec.ts`는 실제 코드 연결 뒤 중앙 대화로의 전환, Markdown·텍스트 전용 응답·실제 파일 미리보기·연결 화면 왕복 후 초안 보존을 확인한다. 위임 고민을 말한 합성 참가자의 후속 대화는 전송 결과와 의미 검토를 나눠 기록한다.

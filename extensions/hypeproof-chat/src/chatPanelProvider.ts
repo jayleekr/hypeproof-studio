@@ -164,6 +164,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.observationWrites=this.observationWrites.then(async()=>{await this.context.workspaceState.update(key,value);}).catch(()=>{this.nativeObservationError='관찰 기록 저장에 실패했습니다.';});
   }
   private view?: vscode.WebviewView;
+  private editorChat?: vscode.WebviewPanel;
   private activeStreams = new Map<string, AbortController>();
   /**
    * #503 — 진행 중인 턴의 단일 타임라인(스트림 id 별). 웹뷰가 화면에 그리는 것과
@@ -477,7 +478,39 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     view.webview.html = this.renderHtml(view.webview, webviewDist);
 
     view.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg));
-    view.onDidDispose(() => abortAllStreams(this.activeStreams));
+    view.onDidDispose(() => {
+      if (this.view === view) this.view = undefined;
+      if (!this.editorChat) abortAllStreams(this.activeStreams);
+    });
+  }
+
+  /** Hand the entry canvas to the conversation instead of leaving a landing
+   * page beside a narrow sidebar. The same provider owns auth, history and tools. */
+  async openInEditor(entry: vscode.WebviewPanel): Promise<void> {
+    if (this.editorChat) {
+      this.editorChat.reveal(vscode.ViewColumn.One);
+      if (entry !== this.editorChat) entry.dispose();
+    } else {
+      this.editorChat = entry;
+      entry.title = 'AI와 작업';
+      const dist = vscode.Uri.joinPath(this.context.extensionUri, 'webview-ui', 'dist');
+      entry.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg));
+      entry.onDidDispose(() => {
+        if (this.editorChat === entry) {
+          this.editorChat = undefined;
+          abortAllStreams(this.activeStreams);
+        }
+      });
+      entry.webview.html = this.renderHtml(entry.webview, dist);
+      entry.reveal(vscode.ViewColumn.One);
+    }
+    await vscode.commands.executeCommand('workbench.action.closeSidebar');
+  }
+
+  focusEditor(): boolean {
+    if (!this.editorChat) return false;
+    this.editorChat.reveal(vscode.ViewColumn.One);
+    return true;
   }
 
   private connectionChanging = false;
@@ -1379,7 +1412,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // between the chat sidebar and the preview. ViewColumn.One fills the main
         // editor area so the layout is just: chat sidebar | preview.
         const opened = await vscode.window.openBrowserTab(url, {
-          viewColumn: vscode.ViewColumn.One,
+          viewColumn: this.editorChat ? vscode.ViewColumn.Two : vscode.ViewColumn.One,
           preserveFocus: true,
         });
         this.mcpBrowser.setTargetTab(opened);
@@ -1535,7 +1568,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // preserveFocus 는 그 활성화 자체를 막고, 포커스가 없어도 탭 핸들로 운전한다.
         const opened = await vscode.window.openBrowserTab(url, {
           viewColumn:
-            coachTabSlot(url) === "preview" ? vscode.ViewColumn.One : vscode.ViewColumn.Two,
+            this.editorChat ? vscode.ViewColumn.Two : coachTabSlot(url) === "preview" ? vscode.ViewColumn.One : vscode.ViewColumn.Two,
           preserveFocus: true,
         });
         this.mcpBrowser.setTargetTab(opened);
@@ -2097,12 +2130,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const showPending = () => {
         if (pendingShown) return;
         pendingShown = true;
-        this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고치는 중…", state: "running" });
+        this.postToolLog(streamId, { id: PENDING_ID, icon: "…", label: "다음 단계를 준비하는 중…", state: "running" });
       };
       const clearPending = () => {
         if (!pendingShown) return;
         pendingShown = false;
-        this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고쳤어요", state: "done" });
+        this.postToolLog(streamId, { id: PENDING_ID, icon: "…", label: "대기 종료", state: "done" });
       };
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
         if (observation && (a.kind==='tool_use' || a.kind==='approval')) {
@@ -2134,7 +2167,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         switch (a.kind) {
           case "thinking_tokens":
             // One entry that ticks in place; the completed block replaces it.
-            log(`think-${thinkingIndex}`, "💭", `Thinking… ${a.tokens} tokens`, "running");
+            log(`think-${thinkingIndex}`, "💭", `응답 준비 중 · ${a.tokens} 토큰`, "running");
             break;
           case "thinking":
             // 2026-08-20 — 생각도 "뭔가 하는 중" 이다. 아동은 속생각을 숨기므로(아래)
@@ -2943,8 +2976,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async post(msg: HostMessage): Promise<boolean | void> {
-    if (!this.view) return;
-    return this.view.webview.postMessage(msg);
+    const targets = [this.editorChat?.webview, this.view?.webview].filter((view): view is vscode.Webview => !!view);
+    if (!targets.length) return;
+    const results = await Promise.all(targets.map(view => view.postMessage(msg)));
+    return results.some(Boolean);
   }
 
   renderHtml(webview: vscode.Webview, distDir: vscode.Uri): string {

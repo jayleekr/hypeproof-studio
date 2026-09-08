@@ -4,6 +4,7 @@ import base from './playwright.config';
 // Code-entry secrets must not be captured in traces or videos. Explicit
 // screenshots in the spec are taken only after the password field is gone.
 const modes: [string, string | string[]][] = [
+  ['HPS_NATIVE_PRESENTATION', 'native-presentation.spec.ts'],
   ['HPS_NATIVE_INPUT', 'native-browser-input.spec.ts'],
   ['HPS_NATIVE_APPROVAL', 'native-approval-controls.spec.ts'],
   ['HPS_NATIVE_EXTRA', ['native-entry-controls.spec.ts', '26-report-resilience.spec.ts', 'image-attach.spec.ts']],
