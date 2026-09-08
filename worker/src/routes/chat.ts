@@ -25,6 +25,7 @@ import {
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { gateChatRequest } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
+import { applyLessonFeatures } from '../lib/lesson-feature-policy';
 import { resolveTokenLesson } from '../lib/lesson-delivery';
 import { lessonAssistantName } from '../lib/session-design';
 import { isTokenRevoked, getRoster } from '../lib/kv';
@@ -227,6 +228,14 @@ chat.get("/profile", async (c) => {
   }
 
   const assistantName = lessonAssistantName(lesson?.content);
+  // #748 (E2) — the SAME narrowing the chat gate applies, applied here too.
+  // This route does not run gateChatRequest for an ordinary lesson seat (only
+  // native_trial/observation seats) and discards the gate's rewritten profile
+  // even when it does. A gate-only change would pass every gate test and ship
+  // INERT on every SDK seat, because the client's tool policy is built from
+  // what THIS response says. `served` therefore replaces `profile` for the
+  // capability fields below; identity/session fields keep reading `profile`.
+  const served = lesson?.content.features ? applyLessonFeatures(profile, lesson.content.features) : profile;
   return c.json({
     ...(lesson ? { lesson } : {}),
     profile_id: profile.id,
@@ -272,8 +281,8 @@ chat.get("/profile", async (c) => {
     // #278 Phase 3 — the coach's browser control loop. The host runs the loop +
     // CDP executor only when enabled; max_iterations caps the loop.
     browser_control: {
-      enabled: profile.browser_control?.enabled === true,
-      max_iterations: profile.browser_control?.max_iterations ?? 8,
+      enabled: served.browser_control?.enabled === true,
+      max_iterations: served.browser_control?.max_iterations ?? 8,
     },
     // #306 — per-cohort hardened native-browser session. Minor cohorts send
     // mode="safe"; the Studio host maps it to hypeproof.browser.safeSession so
@@ -293,26 +302,26 @@ chat.get("/profile", async (c) => {
     // #282 — expose the cohort's provider-tool opt-in so the Studio Agent SDK
     // coach grants WebSearch only where the profile explicitly enabled it
     // (the profile owns tool policy; the client never infers it).
-    tools: { web_search: profile.tools?.web_search === true },
+    tools: { web_search: served.tools?.web_search === true },
     // #282 Phase 2 — Agent SDK workspace tools. Profile owns the policy
     // (ADR 0003); absent flags normalize to false (fail closed, minor-safe).
     sdk_tools: {
-      read: profile.sdk_tools?.read === true,
-      write: profile.sdk_tools?.write === true,
+      read: served.sdk_tools?.read === true,
+      write: served.sdk_tools?.write === true,
       // #282 P2 slice 2 — native-browser MCP tools (browser_open/screenshot/
       // live_preview). Adults only; minors stay false until safe-session
       // ships (#306/#318) — harness child_sdk_browser FAIL enforces it.
-      browser: profile.sdk_tools?.browser === true,
+      browser: served.sdk_tools?.browser === true,
       // #282 P2 slice 3 — read-only 코드리뷰어/리서처 subagents. Adults only;
       // minors stay false until a pedagogy decision lands — harness
       // child_sdk_subagents FAIL enforces it.
-      subagents: profile.sdk_tools?.subagents === true,
+      subagents: served.sdk_tools?.subagents === true,
       // epic #431 — shell. This serializer is the LAST hop: a profile can set
       // `shell: true` and it still never reaches the client unless it is listed
       // here, and the client's permittedToolsFor reads only what arrives. The
       // whole grant is inert without this line (found by probing prod after the
       // deploy — the profile said true, the API served four keys).
-      shell: profile.sdk_tools?.shell === true,
+      shell: served.sdk_tools?.shell === true,
     },
     // #371/#282 — profile-requested coach runtime. Only an ADULT cohort that
     // opts into sdk_tools may request "agent-sdk" (real file Read/Write/Edit →
