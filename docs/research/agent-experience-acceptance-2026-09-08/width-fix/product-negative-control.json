@@ -1,0 +1,8 @@
+{
+  "verification_sha": "0e49d7e985499ba3460c535578d5103577e5a6aa",
+  "expected_product_sha": "f7afd4a76171e3774ecf2410438ab5057772b036",
+  "actual_product_sha": "bb6efac52d53a2aec1e16aae9930ff21b608dccf",
+  "exit_code": 1,
+  "expected_rejection": true,
+  "scope": "product source mismatch rejected before app/provider startup"
+}

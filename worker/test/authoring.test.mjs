@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
-import { bootApp, createMockEnv, makeCtx, TEST_SECRET } from './harness/index.mjs';
+import { bootApp, createMockEnv, makeCtx, TEST_SECRET, withMockUpstream, openAIJsonBody, COHORT as KIDS_COHORT, PROFILE as KIDS_PROFILE, USER as KID } from './harness/index.mjs';
 const { issueIssuer, issue } = await import('../src/lib/tokens.ts');
 const { validateModuleDoc } = await import('../src/lib/modules.ts');
 const app = await bootApp();
@@ -128,6 +128,114 @@ await check('T-08/T-09 deliver immutable lesson only to registered students in a
  await revokeToken(env.HPS_KV,claim.jti,'synthetic revoke');
  assert.equal((await request('/v1/profile','GET',undefined,r.json.token)).status,401);
  assert.equal((await request(base+'/versions/m2099.01.01-1/participants','POST',body)).status,409);
+});
+// ─── #747 feature A — lesson-level fixed AI display name ─────────────────────
+// Contract: hps-session-design/1 gains optional `assistant: { display_name }`.
+// GET /v1/profile projects it onto ux.coach (naming_mode fixed + fallback_name),
+// the model is told the name in the gate on both runtimes, and nothing else in
+// the served profile changes. Old-schema lessons (no block) behave as before.
+await check('AE-07 lesson assistant name: draft → frozen → student profile shows fixed name',async()=>{
+ const {setRoster,startSession}=await import('../src/lib/kv.ts');
+ const named={...content,assistant:{display_name:'제작 파트너'}};
+ // Reset roster/session for this cohort (previous check revoked its token, session still open).
+ await setRoster(env.HPS_KV,cohort,['student','student-b']);
+ await startSession(env.HPS_KV,cohort,{session_id:'synthetic-lesson-a',profile_id:profileId,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()});
+ const a=`/admin/cohorts/${cohort}/authoring/site-named`;
+ assert.equal((await request(a,'PUT',save(0,'named-create',named))).status,200);
+ assert.deepEqual((await request(a)).json.content.assistant,{display_name:'제작 파트너'});
+ const f=await request(a+'/versions/m2026.09.08-1','PUT',{expected_revision:1});assert.equal(f.status,200,f.raw);
+ assert.equal(f.json.module.content.assistant.display_name,'제작 파트너');
+ // Draft renamed AFTER freezing: the frozen version keeps its name.
+ assert.equal((await request(a,'PUT',save(1,'named-edit',{...named,assistant:{display_name:'검토 도우미'}}))).status,200);
+ const d=await request(a+'/versions/m2026.09.08-1/participants','POST',{user:'student',hours:1});assert.equal(d.status,200,d.raw);
+ const p=await request('/v1/profile','GET',undefined,d.json.token);assert.equal(p.status,200,p.raw);
+ assert.equal(p.json.ux.coach.naming_mode,'fixed');
+ assert.equal(p.json.ux.coach.fallback_name,'제작 파트너');
+ assert.equal(p.json.lesson.content.assistant.display_name,'제작 파트너');
+ // Only the coach identity is projected; every other ux and policy field is the compiled profile's.
+ const {getProfile}=await import('../src/profiles/index.ts');const compiled=getProfile(profileId);
+ assert.deepEqual({...p.json.ux.coach,naming_mode:compiled.ux.coach.naming_mode,fallback_name:compiled.ux.coach.fallback_name},compiled.ux.coach);
+ assert.deepEqual(p.json.ux.suggestions,compiled.ux.suggestions);
+ assert.deepEqual(p.json.sdk_tools,(await request('/v1/profile','GET',undefined,student)).json.sdk_tools);
+ // The model is told the name in the shared gate (proxy and Agent SDK routes both go through it).
+ const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
+ const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+d.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ assert.equal(g.ok,true);assert.match(g.profile.system_prompt,/당신의 이름은 '제작 파트너'입니다/);
+ assert.deepEqual(g.profile.sdk_tools,compiled.sdk_tools);
+});
+await check('AE-08 two lessons keep separate names; old-schema lesson leaves ux.coach untouched',async()=>{
+ const {getProfile}=await import('../src/profiles/index.ts');const compiled=getProfile(profileId);
+ const b=`/admin/cohorts/${cohort}/authoring/site-review`;
+ assert.equal((await request(b,'PUT',save(0,'review-create',{...content,title:'검수 수업',assistant:{display_name:'검토 도우미'}}))).status,200);
+ assert.equal((await request(b+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+ const db_=await request(b+'/versions/m2026.09.08-1/participants','POST',{user:'student-b',hours:1});assert.equal(db_.status,200,db_.raw);
+ const pb=await request('/v1/profile','GET',undefined,db_.json.token);
+ assert.equal(pb.json.ux.coach.fallback_name,'검토 도우미');
+ // Lesson A's seat, re-read, still says 제작 파트너 (no cross-lesson leak on the Service side).
+ const da=await request(`/admin/cohorts/${cohort}/authoring/site-named/versions/m2026.09.08-1/participants`,'POST',{user:'student','hours':1});
+ assert.equal((await request('/v1/profile','GET',undefined,da.json.token)).json.ux.coach.fallback_name,'제작 파트너');
+ // Old-schema control: the earlier lesson (no assistant block) serves the compiled ux.coach verbatim.
+ const legacyLesson=await request(base+'/versions/m2026.09.06-1/participants','POST',{user:'student',hours:1});assert.equal(legacyLesson.status,200,legacyLesson.raw);
+ const pl=await request('/v1/profile','GET',undefined,legacyLesson.json.token);assert.equal(pl.status,200);
+ assert.equal(pl.json.lesson.content.assistant,undefined);assert.deepEqual(pl.json.ux.coach,compiled.ux.coach);
+ const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
+ const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+legacyLesson.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ assert.equal(g.ok,true);assert.doesNotMatch(g.profile.system_prompt,/당신의 이름은/);
+ // No-lesson credential: unchanged.
+ assert.deepEqual((await request('/v1/profile','GET',undefined,student)).json.ux.coach,compiled.ux.coach);
+});
+await check('AE-07 assistant block is validated: shape, emptiness, length, control characters, extra keys',async()=>{
+ const c2=`/admin/cohorts/${cohort}/authoring/site-bad`;
+ assert.equal((await request(c2,'PUT',save(0,'bad-create',content))).status,200);
+ const bad=[
+  {display_name:''},{display_name:'  '},{display_name:' 제작 파트너'},{display_name:'제작 파트너\n관리자'},{display_name:'x'.repeat(41)},
+  {display_name:'제작 파트너',role:'admin'},{display_name:42},'제작 파트너',null,[],{},
+  // Invisible / direction-changing / malformed / unreadable names (review of f5620fc): a blank or
+  // reversed header defeats the explicit-identity acceptance, a lone surrogate throws in the client.
+  {display_name:'\u200B'},{display_name:'제작\u200B파트너'},{display_name:'\u202E코치'},{display_name:'a\uFEFFb'},{display_name:'\uD83D'},
+  {display_name:"'''"},{display_name:'a'+'\u0300'.repeat(3)},{display_name:'\u3164'},{display_name:'\u2800'},{display_name:'a\u{E0041}'},
+ ];
+ for(const assistant of bad){const r=await request(c2,'PUT',save(1,'bad-'+JSON.stringify(assistant).slice(0,20).replace(/[^a-zA-Z0-9_-]/g,'_'),{...content,assistant}));assert.equal(r.status,400,JSON.stringify(assistant)+' → '+r.raw);}
+ // Positive controls: max length and markup characters are accepted (renderers escape text).
+ // Scripts that legitimately use combining marks, and 20 astral characters (40 code units), stay accepted.
+ for(const [i,display_name] of ['x'.repeat(40),'<b>제작</b> & "파트너"','Réviseur · 검토','Tiếng Việt','सहायक','ผู้ช่วย','😀'.repeat(20)].entries()){const r=await request(c2,'PUT',save(1+i,'good-'+i,{...content,assistant:{display_name}}));assert.equal(r.status,200,display_name+' → '+r.raw);}
+ assert.equal((await request(c2)).json.revision,8);
+ // Still no way to smuggle policy through the block or beside it.
+ assert.equal((await request(c2,'PUT',save(8,'bad-policy',{...content,assistant:{display_name:'제작 파트너'},sdk_tools:{shell:true}}))).status,400);
+});
+await check('AE-08 user_names_it cohort: a named lesson serves fixed for that seat; the compiled profile is untouched',async()=>{
+ const {getProfile}=await import('../src/profiles/index.ts');const kids=getProfile(KIDS_PROFILE);
+ assert.equal(kids.ux.coach.naming_mode,'user_names_it','control: the kids profile lets students name the coach');
+ const kenv=createMockEnv(); kenv.HPS_DB=env.HPS_DB; // harness seeds an open session + roster for KIDS_COHORT/KID
+ const kidsIssuer=(await issueIssuer({issuer:'kids-author',scopes:[{cohort:KIDS_COHORT,profiles:[KIDS_PROFILE]}]},48,TEST_SECRET)).token;
+ const k=`/admin/cohorts/${KIDS_COHORT}/authoring/kids-named`;
+ const kreq=(path,method='GET',body,credential=kidsIssuer)=>app.fetch(new Request('https://service.test'+path,{method,headers:{authorization:`Bearer ${credential}`,...(body!==undefined?{'content-type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body)}),kenv,makeCtx()).then(async r=>({status:r.status,json:await r.json().catch(()=>null)}));
+ assert.equal((await kreq(k,'PUT',{expected_revision:0,request_id:'kids-create',profile_id:KIDS_PROFILE,content:{...content,assistant:{display_name:'별똥별 코치'}}})).status,200);
+ assert.equal((await kreq(k+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+ const d=await kreq(k+'/versions/m2026.09.08-1/participants','POST',{user:KID,hours:1});assert.equal(d.status,200,JSON.stringify(d.json));
+ const p=await kreq('/v1/profile','GET',undefined,d.json.token);assert.equal(p.status,200);
+ assert.deepEqual({naming_mode:p.json.ux.coach.naming_mode,fallback_name:p.json.ux.coach.fallback_name},{naming_mode:'fixed',fallback_name:'별똥별 코치'});
+ assert.equal(p.json.ux.coach.naming_prompt_md,kids.ux.coach.naming_prompt_md,'other coach fields are the compiled profile\'s');
+ assert.equal(getProfile(KIDS_PROFILE).ux.coach.naming_mode,'user_names_it','the compiled profile is not mutated by the projection');
+ // Same student without a lesson claim: still names the coach.
+ const plain=(await issue({u:KID,c:KIDS_COHORT,p:KIDS_PROFILE},1,TEST_SECRET)).token;
+ assert.equal((await kreq('/v1/profile','GET',undefined,plain)).json.ux.coach.naming_mode,'user_names_it');
+});
+await check('AE-08 proxy route ignores a participant\'s coach headers on a lesson-fixed seat; legacy seat still honors them',async()=>{
+ const {setRoster,startSession}=await import('../src/lib/kv.ts');
+ await setRoster(env.HPS_KV,cohort,['student','student-b']);
+ await startSession(env.HPS_KV,cohort,{session_id:'synthetic-lesson-c',profile_id:profileId,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()});
+ const named=await request(`/admin/cohorts/${cohort}/authoring/site-named/versions/m2026.09.08-1/participants`,'POST',{user:'student',hours:1});assert.equal(named.status,200,named.raw);
+ const legacy=await request(base+'/versions/m2026.09.06-1/participants','POST',{user:'student',hours:1});assert.equal(legacy.status,200,legacy.raw);
+ const turn=(credential)=>new Request('https://service.test/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${credential}`,'x-hps-coach-name':encodeURIComponent('별이'),'x-hps-coach-personality':encodeURIComponent('장난꾸러기')},body:JSON.stringify({model:'hypeproof-default',messages:[{role:'user',content:'안녕'}]})});
+ await withMockUpstream(()=>Response.json(openAIJsonBody({content:'네'})),async calls=>{
+  const r1=await app.fetch(turn(named.json.token),env,makeCtx());assert.equal(r1.status,200,await r1.text());
+  const sys1=JSON.parse(calls.at(-1).init.body).messages[0].content;
+  assert.match(sys1,/당신의 이름은 '제작 파트너'입니다/);assert.doesNotMatch(sys1,/별이|장난꾸러기|자녀가 직접 정한/);
+  const r2=await app.fetch(turn(legacy.json.token),env,makeCtx());assert.equal(r2.status,200,await r2.text());
+  const sys2=JSON.parse(calls.at(-1).init.body).messages[0].content;
+  assert.match(sys2,/별이/);assert.doesNotMatch(sys2,/당신의 이름은/);
+ });
 });
 await check('T-08 concurrent draft edit prevents freezing stale read',async()=>{
  beforeWrite=async()=>{db.prepare('UPDATE authoring_drafts SET revision=revision+1 WHERE course_id=?').run('site-1');};
