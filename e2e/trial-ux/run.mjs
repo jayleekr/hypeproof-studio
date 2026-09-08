@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
+import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
@@ -14,8 +14,6 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const dist = path.join(repo, 'extensions/hypeproof-chat/webview-ui/dist');
 const out = path.resolve(process.env.HPS_TRIAL_UX_OUT || path.join(repo, 'e2e/test-results/trial-ux', new Date().toISOString().replace(/[:.]/g, '-')));
 await fs.mkdir(out, { recursive: true });
-const require = createRequire(path.join(repo, 'extensions/hypeproof-chat/webview-ui/package.json'));
-const { build } = require('esbuild');
 const bundled = await build({ entryPoints: [path.join(repo, 'worker/src/profiles/studio-native-trial.ts')], bundle: true, write: false, platform: 'node', format: 'esm', loader: { '.md': 'text' } });
 const { profile: sourceProfile } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
 const native = {
@@ -138,7 +136,8 @@ try {
   await test('TUX-SP-10', 'Disconnected coach has start-page CTA', async p => { await btn(p, '시작 화면 열기').click(); await request(p, { type: 'setToken' }); await expect(draft(p)).toHaveCount(0); }, { profile: null });
   await test('TUX-CHAT-01', 'All three real profile suggestions fill and focus draft without sending', async p => {
     for (const chip of native.ux.suggestions.initial) { const button = p.getByRole('button', { name: new RegExp(chip.text) }); await button.click(); await expect(draft(p)).toHaveValue(chip.text); await expect(draft(p)).toBeFocused(); }
-    assert.equal(emitted(await requests(p), 'sendMessage').length, 0); await expect(p.locator('.hps-coach-name')).toHaveText('코치');
+    assert.equal(emitted(await requests(p), 'sendMessage').length, 0); await expect(p.getByTitle('이 수업의 코치', { exact: true })).toHaveText('코치');
+    await expect(p.getByRole('button', { name: '코치 이름 바꾸기' })).toHaveCount(0);
   });
   await test('TUX-CHAT-02', 'Send rejects empty/space and sends trimmed text once', async p => {
     await expect(btn(p, 'Send')).toBeDisabled(); await draft(p).fill('  '); await expect(btn(p, 'Send')).toBeDisabled();
