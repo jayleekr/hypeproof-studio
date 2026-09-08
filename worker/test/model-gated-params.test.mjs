@@ -176,3 +176,17 @@ const STRONG = MODEL_MAP["hypeproof-strong"];   // claude-opus-4-7
 }
 
 console.log("All model-gated-param checks passed.");
+
+// #792 actual native failure: Haiku request retained Sonnet's adaptive mode.
+{
+  const body={thinking:{type:'adaptive'},messages:[{role:'user',content:'hello'}]};
+  const fast=stripModelGatedParams(body,FAST);
+  assert.equal(fast.body.thinking,undefined);
+  assert.deepEqual(fast.body.messages,body.messages);
+  assert.deepEqual(body.thinking,{type:'adaptive'},'input is not mutated');
+  assert.match(fast.dropped[0],/thinking.adaptive/);
+  for(const model of [DEFAULT,STRONG])assert.deepEqual(stripModelGatedParams(body,model).body.thinking,body.thinking);
+  const manual={thinking:{type:'enabled',budget_tokens:1024}};
+  assert.deepEqual(stripModelGatedParams(manual,FAST).body,manual);
+  console.log('PASS model switch thinking: Haiku adaptive removed, manual and Sonnet/Opus adaptive preserved');
+}

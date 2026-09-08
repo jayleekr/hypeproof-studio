@@ -35,6 +35,8 @@ type ModelCaps = {
    *  "adaptive" — adaptive/disabled 만. budget_tokens 는 400 (4.7+, 5세대)
    */
   readonly thinkingShape: "budget" | "adaptive";
+  /** Manual thinking support does not imply adaptive thinking support. */
+  readonly adaptiveThinking: boolean;
   /** DATED evidence for the two flags above. Non-empty + dated, enforced by the lock test. */
   readonly verifiedBy: string;
 };
@@ -57,15 +59,17 @@ const MODEL_CAPS: Record<AnthropicModelId, ModelCaps> = {
     contextManagement: false,
     sampling: true,
     thinkingShape: "budget",
+    adaptiveThinking: false,
     verifiedBy:
       "2026-09-03 docs: effort is an Opus 4.5/4.6 + Sonnet 4.6 parameter; `max` errors on Haiku 4.5. " +
-      "Reachable here via resolveMessagesModel's /claude-.*haiku/ fast pin (CLI aux calls).",
+      "2026-09-08 native #792: Haiku adaptive thinking returns API 400; manual only per platform.claude.com/docs/en/claude_api_primer.",
   },
   "claude-sonnet-4-6": {
     effort: ["low", "medium", "high", "max"],
     contextManagement: false,
     sampling: true,
     thinkingShape: "budget",
+    adaptiveThinking: true,
     verifiedBy:
       '2026-07-24 prod probe (same token+cohort): output_config{effort:"xhigh"} → 400. ' +
       "2026-09-03 docs: xhigh is new on Opus 4.7; the 4.6 ladder is low|medium|high|max, default high.",
@@ -75,6 +79,7 @@ const MODEL_CAPS: Record<AnthropicModelId, ModelCaps> = {
     contextManagement: false,
     sampling: false,
     thinkingShape: "adaptive",
+    adaptiveThinking: true,
     verifiedBy: "2026-09-03 docs: Opus 4.7 carries the full ladder incl. xhigh (introduced on 4.7).",
   },
 };
@@ -170,6 +175,14 @@ export function stripModelGatedParams(
   // 이 실패는 조용하다 — CLI 재시도 루프가 400 을 삼키고 아이는 "생각하는 중 ✨"
   // 앞에서 무한정 기다린다. #384(role:"system") · #403 · #406 과 같은 부류다.
   const th = body.thinking;
+  // #792: switching from Sonnet to Haiku keeps the CLI's adaptive request.
+  // Haiku accepts manual thinking, but not adaptive. Drop only the unsupported
+  // mode; do not invent a manual token budget or alter supported manual requests.
+  if (caps && !caps.adaptiveThinking && th && typeof th === 'object' && !Array.isArray(th)
+    && (th as Record<string, unknown>).type === 'adaptive') {
+    delete mutate().thinking;
+    dropped.push(`thinking.adaptive (${resolvedModel} does not support adaptive thinking)`);
+  }
   if (caps?.thinkingShape === "adaptive" && th && typeof th === "object" && !Array.isArray(th)) {
     const t = th as Record<string, unknown>;
     if (t.type === "enabled" || "budget_tokens" in t) {
