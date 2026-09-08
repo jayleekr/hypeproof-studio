@@ -214,3 +214,24 @@ test('report: failed local receiver surfaces failure without a success ID', asyn
     if (process.env.HPS_NATIVE_EVIDENCE_DIR) await ctx.win.screenshot({ path: path.join(process.env.HPS_NATIVE_EVIDENCE_DIR, 'report-failure.png') });
   } finally { await teardown(ctx); await mock.close(); }
 });
+
+test('report: explicit conversation opt-in and contact validation use only the local receiver', async () => {
+  const mock = await startMock();
+  const ctx = await launchAt(mock.port);
+  try {
+    await ctx.win.waitForTimeout(2500);
+    await runCommand(ctx.win, 'HypeProof Chat: 문제 신고하기');
+    await fillQuickInput(ctx.win, '합성 신고 동의 검사입니다. 실제 사용자 대화는 없습니다.');
+    await pickQuickPick(ctx.win, /최근 3개 대화 포함/);
+    await fillQuickInput(ctx.win, 'x'.repeat(201));
+    await expect(ctx.win.locator('.quick-input-widget')).toContainText('200자 이하');
+    expect(mock.received).toHaveLength(0);
+    await fillQuickInput(ctx.win, '  synthetic@example.invalid  ');
+    await expect.poll(() => mock.received.length).toBe(1);
+    expect(mock.received[0].include_recent_turns).toBe(true);
+    expect(mock.received[0].recent_turns).toEqual([]);
+    expect(mock.received[0].contact).toBe('synthetic@example.invalid');
+    await expect(ctx.win.locator('.notifications-toasts')).toContainText('rep_test_h6_ok');
+    if (process.env.HPS_NATIVE_EVIDENCE_DIR) fs.writeFileSync(path.join(process.env.HPS_NATIVE_EVIDENCE_DIR, 'report-opt-in.json'), JSON.stringify({ status: 'PASS', scope: 'actual report UI with isolated empty history and local receiver', opt_in: true, empty_history: true, contact_length_validation: true }));
+  } finally { await teardown(ctx); await mock.close(); }
+});
