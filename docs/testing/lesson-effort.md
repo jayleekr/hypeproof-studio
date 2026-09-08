@@ -13,7 +13,7 @@
 
 2026-09-08 실행 상태: Worker/Chalk/extension 전체 테스트와 typecheck, webview/extension
 빌드 PASS. EFF-T01–04 PASS (합성 사용자, 실제 Service 라우팅/SQLite, upstream mock 및
-Chromium). EFF-T05는 실행 준비 중이며 PASS로 간주하지 않는다. Windows 실제 기기,
+Chromium). EFF-T05 PASS: 9개 모델, SDK 22건·proxy 11건과 구형 v0.1.56 2건의 실제 API 요청, 고정 수업과 390/1280px·키보드·200% 입력 접근까지 대조했다. [원본 결과·스크린샷·실패 이력](../research/agent-experience-acceptance-2026-09-08/course-effort/README.md)을 보존한다. Windows 실제 기기,
 스크린리더 음성, 실제 강사 수업 파일럿, 배포본 인수는 NOT RUN.
 
 실제 앱은 출시본 v0.1.56의 격리 복사본에 이 브랜치 확장만 주입한다. 개인 앱/설정과
