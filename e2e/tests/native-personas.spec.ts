@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import { launchApp, closeApp, startFrame, chatFrame } from '../fixtures/app';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { hasClosingTime } from '../native-trial-checks.mjs';
 const suite=JSON.parse(readFileSync(new URL('../personas/trial-personas.json',import.meta.url),'utf8'));
 const codex=process.env.HPS_CODEX_REHEARSAL==='1';
 const selected=process.env.HPS_PERSONA_IDS?.split(',');
@@ -61,6 +62,19 @@ for(const persona of suite.personas.filter((p:any)=>!selected||selected.includes
      await expect.poll(getUrls).not.toHaveLength(0);const urls=await getUrls();const res=await fetch(urls[0]);expect(res.status).toBe(200);
      expect(await res.text()).toContain(index===0?'18:00':'19:00');
      record.turns[index].local_url=urls[0];
+     // The file watcher reloads later than the HTTP response. Read the actual
+     // native preview, not the chat code block or a fresh fetch of the file.
+     const visibleText=()=>ctx.app.evaluate(async ({webContents},url)=>{
+      const preview=webContents.getAllWebContents().find(w=>w.getURL()===url);
+      if(!preview)return '';
+      try{return await preview.executeJavaScript('document.body?.innerText ?? ""');}
+      catch{return '';} // navigation may replace the execution context
+     },urls[0]);
+     await expect.poll(async()=>hasClosingTime(await visibleText(),index===0?18:19),{timeout:15000}).toBe(true);
+     const previewText=await visibleText();
+     expect(previewText).toContain('봄빛');expect(previewText).toContain('계절의 꽃을 전합니다');expect(previewText).toContain('10:00');
+     if(index===1)expect(hasClosingTime(previewText,18)).toBe(false);
+     record.turns[index].preview_text=previewText;
      await ctx.win.screenshot({path:join(out,`preview-${index+1}.png`)});
     }
    }

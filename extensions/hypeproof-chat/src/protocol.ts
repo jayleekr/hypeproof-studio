@@ -35,6 +35,25 @@ export interface ChatMessage {
    * a screenshot is injected exactly once and never re-sent / persisted).
    */
   images?: string[];
+  /**
+   * #747 (AE-08) — 이 턴이 **실제로 어떤 이름으로 답했는지**.
+   *
+   * 없었을 때: 답변 줄이 전부 살아 있는 `coachName` 하나를 렌더했다
+   * (`ChatPanel.tsx` 의 `hps-msg-role`). 아동 코호트 둘 다 `user_names_it` 이라
+   * 아이가 수업 중간에 이름을 바꾸면 **그 전에 코치가 한 말까지 새 이름이 한
+   * 것으로 소급해서 다시 쓰였다.** 증거 기반 관찰을 표방하는 제품에서 기록이
+   * 스스로를 고치는 상태였다.
+   *
+   * 값의 정의는 "지금 화면에 뜬 이름" 이 아니라 **그 턴을 돌릴 때 런타임에
+   * 넘긴 바로 그 문자열** 이다 — SDK 경로는 `coachName`, proxy 경로는
+   * `x-hps-coach-name` 으로 나간 값과 같다. 턴 도중에 이름이 바뀌는 경우
+   * 모델이 자기를 뭐라고 알고 답했는지가 기록에 남아야 하기 때문이다.
+   *
+   * 없으면 살아 있는 이름으로 렌더한다 — 이 변경 이전에 쓰인 줄과 아직
+   * 스트리밍 중인 말풍선이 그 경로를 탄다. **백필하지 않는다.**
+   * `user`·`tool` 줄에는 절대 붙이지 않는다.
+   */
+  assistantName?: string;
 }
 
 /**

@@ -1267,7 +1267,12 @@ function MessageItem({
   return (
     <div className={`hps-msg hps-msg-${message.role}`}>
       <div className="hps-msg-role">
-        <span>{message.role === "user" ? "나" : coachName}</span>
+        {/*
+          * #747 (AE-08) — 저장된 이름이 있으면 **그것을** 쓴다. 없으면(이 변경
+          * 이전 줄, 아직 스트리밍 중인 말풍선) 살아 있는 이름으로 떨어진다.
+          * 여기서 다시 해석하면 이름을 바꾼 순간 과거가 따라 바뀐다.
+          */}
+        <span>{message.role === "user" ? "나" : message.assistantName ?? coachName}</span>
         {renderable && (
           <button
             className="hps-msg-run"

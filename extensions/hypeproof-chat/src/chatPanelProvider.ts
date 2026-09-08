@@ -1960,7 +1960,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         void this.post({ type: "streamEnd", streamId: uid });
         await this.appendHistory([
           { id: randomId(), role: "user", content: text, createdAt: Date.now() },
-          { id: aid, role: "assistant", content: reply, createdAt: Date.now() },
+          {
+            id: aid,
+            role: "assistant",
+            content: reply,
+            createdAt: Date.now(),
+            // #747 — 앱이 쓴 답변도 화면에는 코치 이름으로 붙는다. 나중에 이름이
+            // 바뀔 때 같이 끌려가지 않도록 여기서도 찍는다.
+            assistantName: this.coachDisplayName(),
+          },
         ]);
         void this.revealBuilt(lastGame, { artifactSource: "existing" });
         return;
@@ -1982,7 +1990,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         void this.post({ type: "streamEnd", streamId: uid });
         await this.appendHistory([
           { id: randomId(), role: "user", content: text, createdAt: Date.now() },
-          { id: aid, role: "assistant", content: reply, createdAt: Date.now() },
+          {
+            id: aid,
+            role: "assistant",
+            content: reply,
+            createdAt: Date.now(),
+            assistantName: this.coachDisplayName(),
+          },
         ]);
         return;
       }
@@ -2482,7 +2496,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.saveAgentMdIfPresent(assistantText, streamId);
         await this.appendHistory([
           { id: randomId(), role: "user", content: text, createdAt: Date.now() },
-          ...this.finishTurnItems(streamId, messageId, assistantText, assistantCitations),
+          ...this.finishTurnItems(
+            streamId,
+            messageId,
+            assistantText,
+            assistantCitations,
+            effectiveCoachName,
+          ),
         ]);
         // Fallback reveal in case the stream completed but the per-chunk
         // probe missed it (e.g. the closing ``` was in the very last delta).
@@ -2537,12 +2557,28 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * 타임라인이 없으면(호출 순서가 어긋난 경우) 기존과 똑같이 어시스턴트 한
    * 덩어리로 폴백한다 — 히스토리가 비는 것보다 낫다.
    */
+  /**
+   * #747 (AE-08) — 이 턴의 답변 줄에 **그 턴이 답한 이름**을 찍는다.
+   *
+   * 여기가 두 런타임의 공통 커밋 지점이라 한 곳만 고치면 된다. 찍는 값은
+   * `handleSend` 가 이미 계산해 런타임에 넘긴 `effectiveCoachName` 그대로다 —
+   * 렌더 시점에 다시 해석하면 이름이 바뀐 뒤 과거가 따라 바뀌는 지금 동작이
+   * 그대로 남는다.
+   *
+   * `chatTimeline.ts` 는 건드리지 않는다. vscode 없는 순수 모듈이라 정체성을
+   * 넣지 않고 **나가는 길에** 찍는다.
+   */
   private finishTurnItems(
     streamId: string,
     messageId: string,
     assistantText: string,
     citations: import("./protocol").Citation[],
+    assistantName?: string,
   ): ChatMessage[] {
+    const stamp = (items: ChatMessage[]): ChatMessage[] =>
+      assistantName
+        ? items.map((m) => (m.role === "assistant" ? { ...m, assistantName } : m))
+        : items;
     const t = this.turnTimelines.get(streamId);
     const fallback: ChatMessage[] = [
       {
@@ -2553,9 +2589,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         ...(citations.length > 0 ? { citations } : {}),
       },
     ];
-    if (!t) return fallback;
-    const items = timelineEnd(t, Date.now()).items;
-    if (items.length === 0) return assistantText ? fallback : [];
+    if (!t) return stamp(fallback);
+    const items = stamp(timelineEnd(t, Date.now()).items);
+    if (items.length === 0) return assistantText ? stamp(fallback) : [];
     if (citations.length === 0) return items;
     let lastAssistant = -1;
     for (let i = items.length - 1; i >= 0; i--) {

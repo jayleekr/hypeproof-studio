@@ -72,7 +72,7 @@ HTML Run 중심 P4는 GPT proxy 기능 검사이며 Claude 파일 도구 동등�
 GPT 전체 실행 코드는 `2493c968651d960a56005d33cf971de47bb7ef78`,
 Claude 비교는 `5ee63ea`, 포트 분리 재검사는 `7e2d639`다.
 환경 JSON에 실제 Service 소스 및 확장 번들의 SHA-256을 남겼다.
-원본 설치본 검증이나 새 공개 앱 릴리스 검증으로 분류하지 않는다.
+이 초기 6개 실행은 원본 설치본 검증으로 분류하지 않는다. 공개 v0.1.56 원본의 추가 검증은 아래에 구분했다.
 
 | 검사 | 결과 | 실제 근거 |
 |---|---|---|
@@ -118,6 +118,36 @@ Claude는 Haiku로 사용자 5턴에 upstream `/v1/messages` 10회를 사용했�
 기존 trial grant도 10회/40회, 종료 시 busy=0으로 기록됐다. Claude 청구 토큰·금액은
 이 fixture에서 측정하지 않았으므로 비용 0이나 추정 금액으로 보고하지 않는다.
 
+### 공개 원본 앱·배포 추가 검증 (#831)
+
+[#829](https://github.com/jayleekr/hypeproof-studio/pull/829)는 CI 17개 통과 후
+`78f322102462c344b7ec1c9f60c686af79cfbed9`로 머지했다.
+[Service 배포](https://github.com/jayleekr/hypeproof-studio/actions/runs/34277612112)는
+운영 세션 보호를 유지하고 production 검증과 SDK canary 계약까지 성공했다.
+운영 health의 버전은 `w0.0.0-dev+78f3221`, Cloudflare 버전은
+`1fef6446-45f0-48cd-82b4-ba1c857c7577`이다. 이 canary 검증 호출은 위 로컬 Claude 10회와 별도다.
+
+기존 공개 [v0.1.56](https://github.com/jayleekr/hypeproof-studio-releases/releases/tag/v0.1.56)을
+내려받아 원본 그대로 실행했다. 새 전체 앱 빌드는 하지 않았다.
+Mac ZIP의 SHA-256 `96d4cb31c3845370dc5ba8794a0bfd7682063579b0549bc94b4c19cfb9ad9526`은
+소스 릴리스와 공개 미러의 값에 일치했다. 앱 코드 SHA는 `f5939d9cf6bbf42588eacd370e2faf9cde7c53bc`다.
+
+- `20260908T205548Z`: 공개 원본 P2 모델 선택 PASS. P4 파일/URL은 성공했지만
+  캡처에는 이전 18:00이 남아 **화면 완료 증거는 무효**로 판단했다.
+- `20260908T205934Z`: 검사 코드 `6f49b02`에서 실제 native WebContents의 DOM이
+  기대 종료 시간이 될 때까지 기다리게 바꾸고 P4를 재실행했다. 기존 `hasClosingTime`
+  정상/오류 대조군을 먼저 실행했다. 화면은 18:00→19:00으로 실제 갱신되었고
+  `preview_text`, 최종 PNG, 파일, 독립 URL을 대조해 **PASS**로 확인했다.
+
+제품의 파일 감시 reload는 150ms 지연된다. 파일/새 HTTP 응답을 확인한 직후의
+캡처를 화면 완료로 잘못 간주한 것이 원인이며, 이 재검증에는 앱 제품 코드를 수정하지 않았다.
+추가 원본 앱 검사는 GPT 생성 5회/48,763토큰이고, 전체 앱 검사 누적은 41회다.
+기존 CLI 확인 1회는 별도다. 원본 결과와 무효 판정 근거를 삭제하거나 덮어쓰지 않았다.
+
+운영 시크릿 이름 목록에서도 OpenAI API 키 부재를 확인했다. 공개 GPT API 인수는
+[#830](https://github.com/jayleekr/hypeproof-studio/issues/830)에서 키 연결을 기다린다.
+이 공개 앱 검사의 GPT upstream 역시 로컬 Codex 구독 연결이므로 공개 API 검증은 아니다.
+
 ### 재현 기록
 
 `e2e/test-results/native-trial/` 및 Mac의
@@ -132,6 +162,8 @@ Claude는 Haiku로 사용자 5턴에 upstream `/v1/messages` 10회를 사용했�
 | `20260908T204611Z` | 외부 도구 제거 후 최종 GPT 6개 |
 | `20260908T204833Z` | 실제 Claude P1/P3 |
 | `20260908T204955Z` | 별도 포트에서 실제 GPT P6 |
+| `20260908T205548Z` | 공개 v0.1.56 P2 및 P4 초기 검사(화면 증거 무효) |
+| `20260908T205934Z` | DOM 완료 검사를 보강한 공개 v0.1.56 P4 재검증 |
 
 각 폴더의 `environment.json`, `api-evidence.json`, 페르소나별 `result.json`, PNG,
 P4 HTML을 확인한다. GPT 폴더의 `connection.json`은 인증 방식·모델 목록만 보존한다.

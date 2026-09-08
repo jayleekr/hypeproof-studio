@@ -275,6 +275,33 @@
           "path": "e2e/tests/native-personas.spec.ts"
         }
       ]
+    },
+    {
+      "id": "ST-REQ-COACH-NAMING",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## F. Coach naming"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-HISTORY-IDENTITY",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-NAMING"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/history-identity.smoke.mjs"
+        }
+      ]
     }
   ]
 }
