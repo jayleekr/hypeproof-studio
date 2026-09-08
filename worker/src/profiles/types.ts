@@ -392,7 +392,15 @@ export const ANTHROPIC_MODELS = {
   'claude-haiku-4-5': 'Claude Haiku 4.5',
 } as const;
 export type AnthropicModelId = keyof typeof ANTHROPIC_MODELS;
-export type ModelKey = ModelAlias | AnthropicModelId;
+// Explicit GPT choices; legacy provider-neutral pins remain unchanged.
+// Official model docs and local Codex model/list verified 2026-09-08 (#828).
+export const OPENAI_MODELS = {
+  'gpt-5.6-luna': 'GPT-5.6 Luna',
+  'gpt-5.6-terra': 'GPT-5.6 Terra',
+  'gpt-5.6-sol': 'GPT-5.6 Sol',
+} as const;
+export type OpenAIModelId = keyof typeof OPENAI_MODELS;
+export type ModelKey = ModelAlias | AnthropicModelId | OpenAIModelId;
 
 export function permittedModelKeys(profile: Profile): ModelKey[] {
   return [...new Set([profile.model.default, ...(profile.model.allowed ?? (profile.model.fallback ? [profile.model.fallback] : []))])];
@@ -434,6 +442,10 @@ export const GLM_MODEL_MAP: Record<ModelAlias, string> = {
 export function modelIdFor(key: ModelKey, provider: LLMProvider): string {
   if (Object.hasOwn(ANTHROPIC_MODELS, key)) {
     if (provider !== 'anthropic') throw new Error('model is unavailable for this provider');
+    return key;
+  }
+  if (Object.hasOwn(OPENAI_MODELS, key)) {
+    if (provider !== 'openai') throw new Error('model is unavailable for this provider');
     return key;
   }
   const alias = key as ModelAlias;

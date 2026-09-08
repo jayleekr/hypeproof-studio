@@ -18,6 +18,14 @@ export function openAIChatUrl(baseUrl?: string): string {
   return b ? b.replace(/\/+$/, "") + "/chat/completions" : OPENAI_URL;
 }
 
+// GPT reasoning families use max_completion_tokens; legacy 4o keeps max_tokens.
+// Do not send temperature with the default reasoning mode.
+export function openAIWireRequest(body: OpenAIChatRequest): Record<string, unknown> {
+  if (!/^gpt-[56](?:[.-]|$)/.test(body.model)) return { ...body };
+  const { max_tokens, temperature: _temperature, ...rest } = body;
+  return { ...rest, max_completion_tokens: max_tokens };
+}
+
 export async function callOpenAI(
   body: OpenAIChatRequest,
   apiKey: string,
@@ -31,6 +39,6 @@ export async function callOpenAI(
       "content-type": "application/json",
       authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(openAIWireRequest(body)),
   });
 }

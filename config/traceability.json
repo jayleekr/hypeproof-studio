@@ -249,6 +249,29 @@
           "path": "e2e/tests/native-effort-old-client.spec.ts"
         }
       ]
+    },
+    {
+      "id": "ST-TEST-GPT-PRACTICE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME",
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/studio-personas-gpt.md"
+        },
+        {
+          "path": "worker/test/gpt-model-policy.test.mjs"
+        },
+        {
+          "path": "worker/test/codex-rehearsal.test.mjs"
+        },
+        {
+          "path": "e2e/tests/native-personas.spec.ts"
+        }
+      ]
     }
   ]
 }

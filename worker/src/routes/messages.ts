@@ -50,7 +50,7 @@ import {
 import { callAnthropic, countTokensUrl } from "../lib/anthropic";
 import {nativeTrialSignal} from '../middleware/native-trial-budget';
 import type { AnthropicRequest } from "../lib/translate";
-import { MODEL_MAP, modelIdFor, permittedModelKeys, type Profile } from "../profiles/types";
+import { MODEL_MAP, OPENAI_MODELS, modelIdFor, permittedModelKeys, type Profile } from "../profiles/types";
 // #687 — 모델 수용 표와 정리기는 순수 모듈로 뺐다(플레인 Node 로 테스트 가능해야 한다).
 import { MINOR_EFFORT, stripModelGatedParams } from "../lib/model-caps";
 import { extractTrialHeaders, lastUserMessageText, type TrialHeaders } from "../lib/chat-extract";
@@ -300,6 +300,12 @@ messages.post("/messages", async (c) => {
   if (!Array.isArray(raw.messages)) {
     recordFailure(400, ERROR_KIND.BAD_REQUEST);
     return c.json(anthropicError(c, "invalid_request_error", "messages must be an array"), 400);
+  }
+
+  // Explicit GPT profiles cannot be sent through the Anthropic SDK protocol.
+  if (profile.model.default in OPENAI_MODELS) {
+    recordFailure(409, ERROR_KIND.BAD_REQUEST);
+    return c.json(anthropicError(c, 'invalid_request_error', 'This GPT connection requires /v1/chat/completions'), 409);
   }
 
   // Anthropic-native route: this endpoint speaks the Messages protocol only,

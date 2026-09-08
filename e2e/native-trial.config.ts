@@ -6,6 +6,7 @@ import base from './playwright.config';
 const modes: [string, string | string[]][] = [
   ['HPS_EFFORT_OLD_CLIENT', 'native-effort-old-client.spec.ts'],
   ['HPS_NATIVE_EFFORT', 'native-effort.spec.ts'],
+  ['HPS_NATIVE_PERSONAS', 'native-personas.spec.ts'],
   ['HPS_NATIVE_PRESENTATION', 'native-presentation.spec.ts'],
   ['HPS_NATIVE_INPUT', 'native-browser-input.spec.ts'],
   ['HPS_NATIVE_APPROVAL', 'native-approval-controls.spec.ts'],
