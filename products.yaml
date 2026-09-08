@@ -74,6 +74,8 @@ entries:
       - worker/test/authoring.test.mjs
       - worker/test/dental-course-automation.test.mjs
       - worker/test/classroom.test.mjs
+      - worker/test/native-observation.test.mjs
+      - worker/test/native-trial-grants.test.mjs
     exit_plan: null
     owner: jay
     notes: >-
@@ -150,6 +152,37 @@ entries:
       dag task H. Curriculum is the experimental condition of philosophy §11's
       loop; this is what gives it a name (`m2026.09.04-1`, or
       `compiled:<hash>` before anything is published) on every turn record.
+
+  - name: studio-trial
+    layer: m
+    tag_prefix: m
+    directory: docs/curriculum/studio-trial
+    deploys_to: static://hypeprooflab/studio/trial
+    contract:
+      format: "JSON — hps-trial/1 curriculum and structured observations"
+    drift_lock: worker/test/trial-evidence.test.mjs
+    exit_plan: docs/requirements/studio-trial.md
+    owner: jay
+    notes: >-
+      Static Module consumed by Lab through a commit-pinned export. Evaluation
+      policy is a portable Service library; no HTTP or cohort policy changes.
+
+  - name: native-observation-rubric
+    layer: m
+    tag_prefix: m
+    directory: null
+    deploys_to: kv://HPS_KV/module:observation-rubric:<profile_id>:{v:<version>,pin}
+    contract:
+      format: "JSON — hps-module/1, kind observation-rubric, content hps-observation-rubric/1"
+    drift_lock: worker/test/native-trial.test.mjs
+    exit_plan: >-
+      Disable observation on the Service profile and stop new native grants.
+      Remove rubric pins, the observation routes and the App panel/recorder in
+      their respective release trains. Preserve existing workspace files and
+      usage records; removing the rubric does not delete participant work or
+      erase trial accounting. No other profile consumes this module.
+    owner: jay
+
 
 # ---------------------------------------------------------------------------
 # Planned entries. These are NOT yet admitted — they are here so the gates are

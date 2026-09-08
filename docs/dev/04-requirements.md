@@ -94,3 +94,22 @@ Chalk authoring Surface: `REQ-STUDIO-CHALK-AUTHORING-UI`, `/authoring` form with
 - [ADM-01~14](../requirements/classroom-admin.md)
 - [DES-01~12](../requirements/classroom-design.md)
 - [AT/DT tests](../testing/classroom-admin.md)
+
+## Public trial
+
+| ID | Acceptance criteria | Primary paths |
+|---|---|---|
+| REQ-STUDIO-TRIAL-EVIDENCE | Versioned structured observations explain 7 assets; unknown and coached evidence never fabricate independent growth. | worker/src/lib/trial-evidence.ts; worker/test/trial-evidence.test.mjs |
+
+Detailed contract: [studio-trial](../requirements/studio-trial.md).
+
+## Native Studio trial (#744)
+
+| ID | Acceptance criteria | Implementation / verification |
+|---|---|---|
+| REQ-STUDIO-NATIVE-EVENTS | Host roles, task/session/program IDs and actual tool decisions survive replay; missing records are explicit and cannot be assessed. | nativeObservationRecorder.ts; worker/test/native-observation.test.mjs |
+| REQ-STUDIO-NATIVE-OBSERVATION | Seven provisional observations cite exact source events, retain unobserved assets and distinguish help; no numeric score or unsupported independence. | worker/src/routes/observations.ts; NativeObservationPanel.tsx; native-trial-live.spec.ts |
+| REQ-STUDIO-NATIVE-LIFETIME | Existing issuer flow grants a fixed individual window, attempt allowance and atomic concurrency; reissue cannot reset them. | native-trial-grants.ts; native-trial-grants.test.mjs; native-trial-d1.test.mjs |
+
+[NAT-01–12](../requirements/studio-native-trial.md) define the product scope; [T01–25](../testing/studio-native-trial-validation.md) define acceptance tests.
+[Executed laptop evidence](../testing/studio-native-trial-results-2026-09-08.md) records real App/API results separately from synthetic and human validation.

@@ -27,6 +27,7 @@ import type { Profile } from "../profiles/types";
 // layer exists. lib/modules.ts explains the layer and the fallback chain.
 import { resolveProfile, type ModuleResolution } from "./modules";
 import { resolveTokenLesson } from './lesson-delivery';
+import {startNativeGrant,readNativeGrant} from './native-trial-grants';
 import {
   getActiveSession,
   getCohortPause,
@@ -143,7 +144,17 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
   }
 
   // 4-5. Session window + roster
-  const session = await getActiveSession(env.HPS_KV, payload.c);
+  if(payload.native_trial){
+    const allowedRoster=await getRoster(env.HPS_KV,payload.c);
+    if(!allowedRoster?.users.includes(payload.u))return {ok:false,response:c.json({error:{type:"not_in_roster",message:"등록된 참가자가 아닙니다."}},403)};
+    if(await getCohortPause(env.HPS_KV,payload.c))return {ok:false,response:c.json({error:{type:"cohort_paused",message:"체험이 일시정지되었습니다."}},503)};
+    const grant=await readNativeGrant(env,payload);
+    if(!grant||grant.revoked)return {ok:false,response:c.json({error:{code:'trial_revoked_or_reissued',type:'auth',message:'폐기되었거나 새 코드로 교체된 체험 코드입니다.'}},401)};
+    if(grant.expires_at!==null&&grant.expires_at<=Date.now())return {ok:false,response:c.json({error:{code:'trial_expired',type:'session_window',message:'개인 체험 시간이 끝났습니다. 작업 파일은 그대로 보존됩니다.'}},403)};
+  }
+  const session = payload.native_trial
+    ? (profile.observation?.enabled ? await startNativeGrant(env,payload) : null)
+    : await getActiveSession(env.HPS_KV, payload.c);
   if (!session) {
     // #165 — student-facing copy is no longer a dead-end. The chat panel's
     // error banner pairs the `runbook_url` link below with this text, so the

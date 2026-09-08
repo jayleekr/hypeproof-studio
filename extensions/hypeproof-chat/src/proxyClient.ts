@@ -377,7 +377,7 @@ export async function fetchProfileResult(args: FetchProfileArgs): Promise<Profil
   try {
     res = await fetch(url, {
       method: "GET",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, "x-hps-observation-format": "hps-observation/1" },
       signal: AbortSignal.timeout(15_000),
     });
   } catch {

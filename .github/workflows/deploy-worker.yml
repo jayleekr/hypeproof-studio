@@ -131,6 +131,11 @@ jobs:
         working-directory: worker
         run: npx wrangler d1 execute hypeproof-studio --remote --file=migrations/0003-classroom-sharing.sql
 
+      - name: Apply additive native trial schema
+        if: ${{ !inputs.dry_run }}
+        working-directory: worker
+        run: npx wrangler d1 execute hypeproof-studio --remote --file=migrations/0004-native-trials.sql
+
       - name: Deploy Worker
         if: ${{ !inputs.dry_run }}
         working-directory: worker

@@ -1,5 +1,17 @@
 # Studio behavioral requirements
 
+## Native trial revision — 2026-09-08
+
+`REQ-STUDIO-NATIVE-TRIAL`: a participant enters the existing Studio application
+with an individually scoped participation token and performs real work through
+the existing model gateway and SDK tools. Asset observations must cite participant
+decisions and executed outcomes; authored web choices and assistant keyword scores
+are not evidence of this requirement. [Intent, NAT-01–12 and release gates](requirements/studio-native-trial.md).
+
+The native implementation includes host event capture, separate observation API/UI
+and individual trial grants. [Executed laptop evidence](testing/studio-native-trial-results-2026-09-08.md) records results and remaining release gates. The profile stays hidden
+from public issuance until the applicable gates are satisfied.
+
 > **Spec version:** v0.3.3
 > **Last reviewed:** 2026-08-19
 > **Live tracker:** [epic #200](https://github.com/jayleekr/hypeproof-studio/issues/200)
@@ -427,3 +439,14 @@ remove separately collected observation bundles in `test-results/`.
 | ID | Behavior | Acceptance / evidence |
 |---|---|---|
 | REQ-STUDIO-LESSON | Display the Service-resolved immutable lesson in the start page and chat; insert the selected task and acceptance criteria into the editable composer only on user action. | `worker/test/authoring.test.mjs`, `e2e/chalk-authoring/run.mjs`, `e2e/lesson-studio/mac.mjs`. No automatic task execution or policy grant. Legacy credentials show the existing profile. |
+
+## Native Studio trial (#744)
+
+| ID | Acceptance criteria | Implementation / verification |
+|---|---|---|
+| REQ-STUDIO-NATIVE-EVENTS | Host roles, task/session/program IDs and actual tool decisions survive replay; missing records are explicit and cannot be assessed. | nativeObservationRecorder.ts; worker/test/native-observation.test.mjs |
+| REQ-STUDIO-NATIVE-OBSERVATION | Seven provisional observations cite exact source events, retain unobserved assets and distinguish help; no numeric score or unsupported independence. | worker/src/routes/observations.ts; NativeObservationPanel.tsx; native-trial-live.spec.ts |
+| REQ-STUDIO-NATIVE-LIFETIME | Existing issuer flow grants a fixed individual window, attempt allowance and atomic concurrency; reissue cannot reset them. | native-trial-grants.ts; native-trial-grants.test.mjs; native-trial-d1.test.mjs |
+
+[NAT-01–12](requirements/studio-native-trial.md) define the product scope; [T01–25](testing/studio-native-trial-validation.md) define acceptance tests.
+[Executed laptop evidence](testing/studio-native-trial-results-2026-09-08.md) records real App/API results separately from synthetic and human validation.

@@ -5,6 +5,8 @@
 import type { LLMProvider } from "../env.ts";
 
 export interface Profile {
+  /** Explicit opt-in; observation does not grant any execution tools. */
+  observation?: { enabled: boolean };
   id: string;
   version: number;
   display_name: string;
