@@ -5,9 +5,9 @@ Strategic + phase plan: see [METAPLAN.md](./METAPLAN.md). Do not duplicate it he
 
 ## Product philosophy (READ BEFORE DESIGNING UX)
 
-This IDE exists to teach the **7 AI Native Assets** — the human capabilities needed when working with AI models. Every UX decision in the chat panel, welcome flow, manual-approve modals, and onboarding must serve one or more of these assets.
+Studio is a prepared environment where learners exercise and examine their agency, judgment and responsibility while working with AI. The **7 AI Native Assets** are the current research model, not established learning outcomes. Every UX decision in the chat panel, welcome flow, approval modals and onboarding must connect to observable learner behavior and a testable hypothesis.
 
-- Source of truth: [docs/seven-assets.md](./docs/seven-assets.md) — do **not** fork or paraphrase elsewhere
+- Philosophy and asset definitions: [hypeprooflab/PHILOSOPHY.md](https://github.com/jayleekr/hypeprooflab/blob/main/PHILOSOPHY.md). [docs/seven-assets.md](./docs/seven-assets.md) is the Studio reference and compatibility index, not a second definition. Do **not** fork the definitions elsewhere.
 - UX mapping: METAPLAN §4.5 (asset → concrete chat-panel feature)
 - Behavioral contract: [docs/studio-requirements.md](./docs/studio-requirements.md) — REQ-### rows across Studio behavior domains, with test-layer assignments. PR touching Studio behavior must update this doc.
 - Autonomy policy: [docs/AUTONOMY-MANDATE.md](./docs/AUTONOMY-MANDATE.md) — proceed/notify/confirm rules for workshop-risk work
@@ -76,4 +76,4 @@ existing philosophy, autonomy, and verification rules in their canonical files.
 - [.claude/rules/extension-dev.md](.claude/rules/extension-dev.md) — hypeproof-chat React webview
 - [.claude/rules/verification.md](.claude/rules/verification.md) — 관측 규율. **판정 기준을 세우기 전에 대상을 열어본다** · 대조군 먼저 · CI 초록은 아무것도 보장하지 않는다
 - [e2e/observe/README.md](e2e/observe/README.md) — 실사용 관측 도구. 큐시트는 강사가 채팅으로 몰고, 이건 그동안 무슨 일이 일어났는지 보는 용도
-- [docs/seven-assets.md](docs/seven-assets.md) — 7 AI Native Assets (canonical product philosophy, drives chat-panel UX)
+- [docs/seven-assets.md](docs/seven-assets.md) — upstream philosophy reference and Studio asset compatibility index
