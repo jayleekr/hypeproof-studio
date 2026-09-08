@@ -89,6 +89,6 @@ for a placeholder, skipped implementation, or missing external environment.
 ## Learning Agent Experience Proposal
 
 [Proposed acceptance scenarios](../testing/learning-agent-experience.md) map
-AE-01 through AE-24 to real runtime, UI, permission, recovery and classroom
-verification. The dated competitive screenshots are research evidence; they
+AE-01 through AE-34 to real runtime, UI, permission, recovery, classroom
+and multi-model verification. The dated competitive screenshots are research evidence; they
 do not mark these unexecuted scenarios as passed.

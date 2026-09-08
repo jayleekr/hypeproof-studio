@@ -15,6 +15,11 @@ Replit의 검사 재생·사용자 인계를 참고할 가치가 있다. Studio�
 권고: 채팅 이해 가능성 → 수업별 기능 정책 → SDK 세션·복구 → 브라우저 검증 →
 강사 운영 규모 확대 순으로 투자한다. Computer Use는 웹 밖 작업의 필요성이 증명된 수업에서 별도 실험한다.
 
+**멀티모델 보충:** [선택 UI·자동 라우팅·다른 모델 검토와 수업 운영 분석](multi-model.md)을
+별도 축으로 추가했다. 현재 /v1/chat의 네 공급자 경로와 Anthropic에 고정된 SDK 경로를
+구분하고, E7에서 고정/제한 선택→읽기 검토→자동 선택/인계→격리된 병렬 편집 순으로 제안한다.
+AI 이름/역할은 모델과 독립적으로 설정한다.
+
 ## 기존에 무엇이 있었나
 
 문서의 `Cursor/competitor/경쟁사` 검색과 GitHub 이슈 검색에서 **동일 과제·화면 상태·버전으로
@@ -45,6 +50,7 @@ Cursor의 독립 계정 환경은 로그인 화면에서 멈췄다. 기존 개�
 
 원본 이미지와 시각·버전·URL·SHA-256은 [web-capture.json](web-capture.json),
 [native-capture.json](native-capture.json), [reference-capture.json](reference-capture.json)에 있다.
+멀티모델 추가 자료는 [model-capture.json](model-capture.json)에 같은 방식으로 기록한다.
 본문과 코드 경로는 분석 커밋 기준이다. 외부 페이지는 캡처 시점 기준이며 계속 바뀔 수 있다.
 
 ## 화면에서 확인한 것
@@ -157,6 +163,7 @@ npm ci --prefix e2e
 node docs/research/agent-experience-2026-09-08/capture-native.mjs
 node docs/research/agent-experience-2026-09-08/capture-web.mjs
 node docs/research/agent-experience-2026-09-08/capture-references.mjs
+node docs/research/agent-experience-2026-09-08/capture-models.mjs
 ```
 
 worktree에서는 `HPS_CAPTURE_DEPS_ROOT`를 의존성이 설치된 primary clone으로 지정할 수 있다.

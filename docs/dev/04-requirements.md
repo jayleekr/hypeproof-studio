@@ -56,10 +56,11 @@ member, instructor, or release owner could observe the change.
 
 Related proposal: [Learning Agent Experience requirements](../requirements/learning-agent-experience.md)
 connect competitive UI evidence to lesson-specific AI identity, chat, runtime
-policy, SDK lifecycle, browser verification, instructor operations and Computer Use.
-AE-01 through AE-24 are proposed acceptance goals, not implemented contracts.
+policy, SDK lifecycle, browser verification, instructor operations, Computer Use
+and lesson-governed multi-model selection, routing and comparison.
+AE-01 through AE-34 are proposed acceptance goals, not implemented contracts.
 [The test plan](../testing/learning-agent-experience.md) and
-[six epics](../plan/learning-agent-experience-epics.md) retain that distinction.
+[seven epics](../plan/learning-agent-experience-epics.md) retain that distinction.
 Existing Studio, Chalk authoring and classroom-admin requirements remain in force.
 
 [Chalk authoring requirements](../requirements/chalk-authoring.md) contain the
