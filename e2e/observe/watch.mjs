@@ -21,6 +21,7 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { APPROVAL_TITLE_PATTERN } from "../../extensions/hypeproof-chat/src/coachIdentity.ts";
 
 // 출력·대상은 환경변수로 갈아끼운다. 기본값은 보아치과 원장 트랙 기준.
 const OUT = process.env.HPS_OBSERVE_OUT
@@ -123,9 +124,9 @@ const MODAL_SNAP = `JSON.stringify((() => {
   // 다이얼로그(파일 삭제 확인 등)까지 승인으로 세어 통계가 오염된다 — 실측에서
   // 원장이 index.html 을 지울 때 뜬 "Move to Trash" 가 [승인 1] 로 찍혔다.
   //
-  // 코치 모달은 우리가 문구를 소유하므로 접두사로 가른다(chatPanelProvider 의
-  // APPROVAL_COPY + 셸/브라우저 분기). 새 문구를 추가하면 여기도 같이 고쳐야 한다.
-  const isCoach = /코치가 .*(하려고|열려고|실행하려고|저장하려고|입력하려고) 해요|되돌리기 어려운 명령/.test(text);
+  // 수업 이름과 무관한 제품의 승인 제목 계약을 재사용한다. 일반 파일 삭제
+  // 다이얼로그는 이 패턴에 포함되지 않는다(제품 smoke의 음성 대조).
+  const isCoach = ${APPROVAL_TITLE_PATTERN}.test(text) || /되돌리기 어려운 명령/.test(text);
   return {
     open: true,
     coach: isCoach,
