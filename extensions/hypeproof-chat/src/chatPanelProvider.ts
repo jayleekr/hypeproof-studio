@@ -572,7 +572,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** Eager profile fetch — called by extension.ts on activation. */
-  async ensureProfile(): Promise<ResolvedProfile | null> {
+  async ensureProfile(forceRefresh = false): Promise<ResolvedProfile | null> {
+    if (forceRefresh) {
+      await this.profileFetchPromise;
+      this.cachedProfile = null;
+    }
     if (this.cachedProfile) return this.cachedProfile;
     if (this.profileFetchPromise) return this.profileFetchPromise;
 

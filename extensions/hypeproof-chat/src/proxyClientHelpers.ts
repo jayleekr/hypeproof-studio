@@ -63,6 +63,7 @@ export function friendlyTransportMessage(status: number): string | null {
 
 export type ProfileFailureReason =
   | "expired"        // 401 code=expired — the token aged out
+  | "forbidden"      // 403: permission or session gate
   | "issuer_token"   // 401 code=wrong_role — instructor token in the student box
   | "rejected"       // 401 anything else — server refused; cause NOT asserted
   | "unknown_cohort" // 400 code=unknown_profile — token points at no known 회차
@@ -124,6 +125,10 @@ export function classifyProfileFailure(status: number, bodyText: string): Profil
       return { ...base, reason: "issuer_token", friendly: PROFILE_ISSUER_TOKEN_FRIENDLY };
     }
     return { ...base, reason: "rejected", friendly: PROFILE_REJECTED_FRIENDLY };
+  }
+  if (status === 403) {
+    if (code === "trial_expired") return { ...base, reason: "expired", friendly: "개인 체험 시간이 끝났습니다. 작업 파일은 그대로 남아 있습니다. 다시 체험하려면 운영자에게 새 체험을 요청해주세요." };
+    return { ...base, reason: "forbidden", friendly: "이 수업에 참여할 권한이나 진행 중인 세션이 없습니다. 강사에게 참여 등록과 수업 상태를 확인해주세요." };
   }
   if (status === 400) {
     return { ...base, reason: "unknown_cohort", friendly: PROFILE_UNKNOWN_COHORT_FRIENDLY };

@@ -12,6 +12,7 @@ export class StartPage {
   private panel?: vscode.WebviewPanel;
   private busy = false;
   private error?: string;
+  private started = false;
   constructor(
     private context: vscode.ExtensionContext,
     private chat: ChatPanelProvider,
@@ -39,10 +40,11 @@ export class StartPage {
     this.context.subscriptions.push(panel);
   }
 
-  private async refresh(): Promise<void> {
-    const p = await this.chat.ensureProfile();
+  private async refresh(profile?: ResolvedProfile | null): Promise<void> {
+    const p = profile === undefined ? await this.chat.ensureProfile() : profile;
     const state: StartState = {
       checking: this.busy,
+      started: this.started && !!p,
       error: this.error ?? (!p ? this.chat.profileFailure()?.friendly : undefined),
       version: this.context.extension.packageJSON.version,
       workspace: vscode.workspace.workspaceFolders?.[0]?.name,
@@ -71,7 +73,7 @@ export class StartPage {
       this.busy = true; this.chat.setConnectionChanging(true);
       try {
         await this.context.secrets.delete(TOKEN_KEY);
-        this.chat.invalidateProfile(); this.error = undefined;
+        this.chat.invalidateProfile(); this.error = undefined; this.started = false;
         this.chat.refreshConfig();
       } finally {
         this.busy = false; this.chat.setConnectionChanging(false); await this.refresh();
@@ -79,14 +81,28 @@ export class StartPage {
       return;
     }
     if (msg.type === "beginCourse") {
-      const p = await this.chat.ensureProfile();
-      if (!p) { await this.refresh(); return; }
-      this.error = undefined;
-      if (await this.begin(p)) return; // folder switch reloads the window
-      // Keep the HP canvas behind the coach instead of exposing the upstream watermark.
-      await vscode.commands.executeCommand("workbench.view.extension.hypeproof-chat");
-      await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
-      this.chat.refreshConfig();
+      this.busy = true; this.started = false; this.error = undefined;
+      this.chat.setConnectionChanging(true);
+      let profile: ResolvedProfile | null = null;
+      try {
+        await this.refresh();
+        // A connected card is not proof that the session is still live.
+        profile = await this.chat.ensureProfile(true);
+        if (!profile) {
+          this.error = this.chat.profileFailure()?.friendly ?? "수업 연결을 확인할 수 없습니다. 참여 코드를 다시 확인해주세요.";
+          return;
+        }
+        if (await this.begin(profile)) return; // workspace switch reloads the window
+        await vscode.commands.executeCommand("workbench.view.extension.hypeproof-chat");
+        await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+        this.started = true;
+        this.chat.refreshConfig();
+      } catch {
+        this.error = "수업을 열지 못했습니다. 다시 시도해주세요. 작업 파일은 그대로 보존됩니다.";
+      } finally {
+        this.busy = false; this.chat.setConnectionChanging(false);
+        await this.refresh(profile);
+      }
       return;
     }
     if (msg.type !== "connectCourse" || typeof msg.token !== "string") return;
