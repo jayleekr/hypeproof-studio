@@ -85,4 +85,34 @@ The old-App rerun manifest truthfully records `dirty: true`: only the new local
 D1 test and its package/registry wiring were being added during that run.
 All three reruns have the same Service source digest
 `db600a140a53d69977b1cd0d5ccf8f0e2e55e54c4f1f3608bdbecf56e600ce58`.
-No runtime source or native acceptance spec changed after the merge commit.
+Until the next integration below, no runtime source or native acceptance spec
+changed after the #829 merge commit.
+
+
+## Integration with main #832 / #833
+
+Main's historical assistant-name preservation changes the host, protocol and
+webview shared with effort. The integrated source at
+`57deb0c15798a70b6b3bfca6af4686deb03a23b9` was rebuilt and rerun:
+[SDK](after-main-832/agent-sdk/effort-result.json) 22 real API calls and
+[proxy](after-main-832/proxy/effort-result.json) 11 calls all returned HTTP 200 and
+passed the outbound-setting/receipt comparisons. These 33 calls are additional
+to the previous two 35-call sets; failed earlier runs are not included in those
+counts. The full [extension tests, typecheck and builds](after-main-832/extension-checks.txt),
+including the new history-identity regression, passed before the native rerun.
+The exact rebuilt bundle hashes and clean source status are in both environment.json files.
+
+The agent opened all eight new PNGs and checked the 390 CSS px/200% and 1280px/100%
+composer, fixed course, and unsupported-model detail. The runner's original
+visual_review=PENDING is preserved; this records the subsequent inspection.
+The course name appears as 제작 파트너 in the header and assistant replies.
+The existing generic AI-coach notice remains visible; changing that copy is
+outside this effort change. No general naming or full UI acceptance is claimed.
+
+The Service source digest remains
+`db600a140a53d69977b1cd0d5ccf8f0e2e55e54c4f1f3608bdbecf56e600ce58`, identical to
+all after-main-829 runs. The untouched v0.1.56 control's two real requests and
+Worker/Chalk checks from that run therefore remain the compatibility evidence;
+no extra old-client API run or production migration is claimed. Main #833 changes
+persona verification, not effort runtime behavior. Its full persona pilot was not
+rerun by this effort task. Release and learning limits above still apply.
