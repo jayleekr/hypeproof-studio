@@ -77,6 +77,17 @@ async function test(id, title, fn, { surface = 'chat', profile = native, cfg = {
     else await host(p, { type: 'config', config: config(profile, cfg) });
     await fn(p);
     if (!expectedCrash) assert.deepEqual(errors, []);
+    // Check the final rendered state of every scenario, including pending,
+    // error and conditional controls. This does not claim a screen-reader audit.
+    for (const control of await p.locator('button, a[href], input, textarea, summary').all()) {
+      if (!await control.isVisible()) continue;
+      await expect(control).toHaveAccessibleName(/\S/);
+      if (await control.isEnabled()) {
+        expect(await control.evaluate(el => el.tabIndex)).toBeGreaterThanOrEqual(0);
+        await control.focus();
+        await expect(control).toBeFocused();
+      }
+    }
     assert.deepEqual(await p.evaluate(() => ({ local: localStorage.length, session: sessionStorage.length })), { local: 0, session: 0 });
     row.status = 'PASS';
   } catch (e) { row.error = e.stack; }

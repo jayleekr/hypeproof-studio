@@ -31,6 +31,9 @@ export interface LaunchOptions {
   /** Isolated safety tests can require an explicit Write decision. */
   requireWriteApproval?: boolean;
   sdkStallTimeoutMs?: number;
+  simpleFileDialog?: boolean;
+  /** Route reserved test hostnames to the fixture server without changing system DNS. */
+  hostResolverRules?: string;
   /** Pre-seed the workshop token into SecretStorage via env var (test backdoor). */
   preseedToken?: boolean;
   /** Keep the entry surface open for onboarding assertions. */
@@ -163,6 +166,7 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
         "telemetry.telemetryLevel": "off",
         "update.mode": "none",
         "workbench.tips.enabled": false,
+        ...(opts.simpleFileDialog ? { "files.simpleDialog.enable": true } : {}),
         "workbench.welcomePage.walkthroughs.openOnInstall": false,
       },
       null,
@@ -222,6 +226,7 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
       `--user-data-dir=${userDataDir}`,
       `--extensions-dir=${path.join(userDataDir, "extensions")}`,
       "--disable-workspace-trust",
+      ...(opts.hostResolverRules ? ["--host-resolver-rules=" + opts.hostResolverRules] : []),
       "--use-inmemory-secretstorage", // test credentials never touch the OS keychain
       "--disable-updates",
       "--skip-welcome",
