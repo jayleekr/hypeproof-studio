@@ -1,0 +1,166 @@
+{
+  "scope": "actual Mac app + local Service; synthetic lesson and workspace",
+  "checks": [
+    {
+      "id": "B1-first",
+      "status": "PASS",
+      "name": "제작 파트너",
+      "course": "연결된 수업합성 홈페이지 강의AI 이름제작 파트너회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial",
+      "process": "01목표 정하기무엇을 바꾸고 싶은가요?02함께 만들기제작 파트너와 작은 시도부터.03직접 검토하기결과를 확인하고 내 것으로.",
+      "description": "GET STARTED이 수업으로 시작할까요?수업과 제작 파트너를 확인한 뒤 작업을 시작하세요.연결된 수업합성 홈페이지 강의AI 이름제작 파트너회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial수업 시작하기 ↗다른 수업에 연결연결 해제코드가 없다면 코드 발급 담당자에게 요청해 주세요.",
+      "width": 1440,
+      "document_width": 1440,
+      "credential_field": false,
+      "overflow_elements": []
+    },
+    {
+      "id": "B1-b",
+      "status": "PASS",
+      "name": "검토 도우미",
+      "course": "연결된 수업합성 홈페이지 강의AI 이름검토 도우미회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial",
+      "process": "01목표 정하기무엇을 바꾸고 싶은가요?02함께 만들기검토 도우미와 작은 시도부터.03직접 검토하기결과를 확인하고 내 것으로.",
+      "description": "GET STARTED이 수업으로 시작할까요?수업과 검토 도우미를 확인한 뒤 작업을 시작하세요.연결된 수업합성 홈페이지 강의AI 이름검토 도우미회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial수업 시작하기 ↗다른 수업에 연결연결 해제코드가 없다면 코드 발급 담당자에게 요청해 주세요.",
+      "width": 1140,
+      "document_width": 1140,
+      "credential_field": false,
+      "overflow_elements": []
+    },
+    {
+      "id": "B1-a",
+      "status": "PASS",
+      "name": "제작 파트너",
+      "course": "연결된 수업합성 홈페이지 강의AI 이름제작 파트너회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial",
+      "process": "01목표 정하기무엇을 바꾸고 싶은가요?02함께 만들기제작 파트너와 작은 시도부터.03직접 검토하기결과를 확인하고 내 것으로.",
+      "description": "GET STARTED이 수업으로 시작할까요?수업과 제작 파트너를 확인한 뒤 작업을 시작하세요.연결된 수업합성 홈페이지 강의AI 이름제작 파트너회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial수업 시작하기 ↗다른 수업에 연결연결 해제코드가 없다면 코드 발급 담당자에게 요청해 주세요.",
+      "width": 1140,
+      "document_width": 1140,
+      "credential_field": false,
+      "overflow_elements": []
+    },
+    {
+      "id": "B1-a",
+      "status": "PASS",
+      "name": "제작 파트너",
+      "course": "연결된 수업합성 홈페이지 강의AI 이름제작 파트너회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial",
+      "process": "01목표 정하기무엇을 바꾸고 싶은가요?02함께 만들기제작 파트너와 작은 시도부터.03직접 검토하기결과를 확인하고 내 것으로.",
+      "description": "GET STARTED이 수업으로 시작할까요?수업과 제작 파트너를 확인한 뒤 작업을 시작하세요.연결된 수업합성 홈페이지 강의AI 이름제작 파트너회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial수업 시작하기 ↗다른 수업에 연결연결 해제코드가 없다면 코드 발급 담당자에게 요청해 주세요.",
+      "width": 1140,
+      "document_width": 1140,
+      "credential_field": false,
+      "overflow_elements": []
+    },
+    {
+      "id": "B1-html",
+      "status": "PASS",
+      "name": "<b>제작</b> & \"파트너\"",
+      "course": "연결된 수업합성 홈페이지 강의AI 이름<b>제작</b> & \"파트너\"회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial",
+      "process": "01목표 정하기무엇을 바꾸고 싶은가요?02함께 만들기<b>제작</b> & \"파트너\"와 작은 시도부터.03직접 검토하기결과를 확인하고 내 것으로.",
+      "description": "GET STARTED이 수업으로 시작할까요?수업과 <b>제작</b> & \"파트너\"를 확인한 뒤 작업을 시작하세요.연결된 수업합성 홈페이지 강의AI 이름<b>제작</b> & \"파트너\"회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial수업 시작하기 ↗다른 수업에 연결연결 해제코드가 없다면 코드 발급 담당자에게 요청해 주세요.",
+      "width": 1140,
+      "document_width": 1140,
+      "credential_field": false,
+      "overflow_elements": []
+    },
+    {
+      "id": "B1-long",
+      "status": "FAIL",
+      "name": "긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름끝",
+      "course": "연결된 수업합성 홈페이지 강의AI 이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름끝회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial",
+      "process": "01목표 정하기무엇을 바꾸고 싶은가요?02함께 만들기긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름끝과 작은 시도부터.03직접 검토하기결과를 확인하고 내 것으로.",
+      "description": "GET STARTED이 수업으로 시작할까요?수업과 긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름끝을 확인한 뒤 작업을 시작하세요.연결된 수업합성 홈페이지 강의AI 이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름긴이름끝회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial수업 시작하기 ↗다른 수업에 연결연결 해제코드가 없다면 코드 발급 담당자에게 요청해 주세요.",
+      "width": 1140,
+      "document_width": 1185,
+      "credential_field": false,
+      "overflow_elements": [
+        {
+          "tag": "DIV",
+          "class": "",
+          "width": 1140,
+          "scroll_width": 1185
+        },
+        {
+          "tag": "MAIN",
+          "class": "studio-start",
+          "width": 1140,
+          "scroll_width": 1185
+        },
+        {
+          "tag": "DIV",
+          "class": "studio-main",
+          "width": 1026,
+          "scroll_width": 1128
+        },
+        {
+          "tag": "SECTION",
+          "class": "studio-intro",
+          "width": 570,
+          "scroll_width": 585
+        },
+        {
+          "tag": "DIV",
+          "class": "studio-process",
+          "width": 570,
+          "scroll_width": 585
+        },
+        {
+          "tag": "DIV",
+          "class": "",
+          "width": 179,
+          "scroll_width": 390
+        },
+        {
+          "tag": "P",
+          "class": "",
+          "width": 179,
+          "scroll_width": 390
+        },
+        {
+          "tag": "SECTION",
+          "class": "studio-connect",
+          "width": 386,
+          "scroll_width": 489
+        },
+        {
+          "tag": "P",
+          "class": "studio-card-description",
+          "width": 330,
+          "scroll_width": 461
+        }
+      ]
+    },
+    {
+      "id": "B1-legacy",
+      "status": "PASS",
+      "name": "코치",
+      "course": "연결된 수업합성 홈페이지 강의AI 이름코치회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial",
+      "process": "01목표 정하기무엇을 바꾸고 싶은가요?02함께 만들기코치와 작은 시도부터.03직접 검토하기결과를 확인하고 내 것으로.",
+      "description": "GET STARTED이 수업으로 시작할까요?수업과 코치를 확인한 뒤 작업을 시작하세요.연결된 수업합성 홈페이지 강의AI 이름코치회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial수업 시작하기 ↗다른 수업에 연결연결 해제코드가 없다면 코드 발급 담당자에게 요청해 주세요.",
+      "width": 1120,
+      "document_width": 1120,
+      "credential_field": false,
+      "overflow_elements": []
+    },
+    {
+      "id": "B1-a",
+      "status": "PASS",
+      "name": "제작 파트너",
+      "course": "연결된 수업합성 홈페이지 강의AI 이름제작 파트너회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial",
+      "process": "01목표 정하기무엇을 바꾸고 싶은가요?02함께 만들기제작 파트너와 작은 시도부터.03직접 검토하기결과를 확인하고 내 것으로.",
+      "description": "GET STARTED이 수업으로 시작할까요?수업과 제작 파트너를 확인한 뒤 작업을 시작하세요.연결된 수업합성 홈페이지 강의AI 이름제작 파트너회차m2026.09.08-1수업 작업 폴더~/HypeProofTrial수업 시작하기 ↗다른 수업에 연결연결 해제코드가 없다면 코드 발급 담당자에게 요청해 주세요.",
+      "width": 1120,
+      "document_width": 1120,
+      "credential_field": false,
+      "overflow_elements": []
+    }
+  ],
+  "status": "FAIL",
+  "error": "locator.waitFor: Timeout 90000ms exceeded.\nCall log:\n\u001b[2m  - waiting for locator('.monaco-dialog-box').first() to be visible\u001b[22m\n",
+  "visual_review": "PENDING separate image inspection",
+  "not_run": [
+    "all eight approval kinds",
+    "Windows",
+    "screen reader",
+    "historical identity",
+    "human learning"
+  ]
+}

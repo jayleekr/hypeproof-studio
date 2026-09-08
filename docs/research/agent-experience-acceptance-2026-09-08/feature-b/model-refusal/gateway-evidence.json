@@ -1,0 +1,12 @@
+{
+  "calls": [
+    {
+      "path": "/v1/messages",
+      "fault": "none"
+    },
+    {
+      "path": "/v1/messages",
+      "fault": "none"
+    }
+  ]
+}

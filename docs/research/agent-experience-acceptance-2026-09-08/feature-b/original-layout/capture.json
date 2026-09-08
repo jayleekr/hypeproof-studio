@@ -1,0 +1,29 @@
+{
+  "source_run": "e2e/test-results/agent-experience/20260908T164552Z-feature-b",
+  "submitted_product_sha": "2dfd99baa773b3d51b760bbdabdf89dfc010ecd6",
+  "verification_sha": "62fb2693e2bcce918f1317f601e4db4f76db74f6",
+  "capture": "Electron capturePage; isolated app copy; original files unedited",
+  "review": "See ../README.md for later visual review and run adjudication; automatic result files are unmodified",
+  "files": [
+    {
+      "file": "b-start-long.png",
+      "sha256": "d6ddfd9f031c99b1992eb49ec00c4d52d9a4b41232c7045760d76eadca2b98c7",
+      "bytes": 747783
+    },
+    {
+      "file": "environment.json",
+      "sha256": "b2eb016fe6ea8534f82c414a227875a1e16db122246d0690e20efafef3ee88a9",
+      "bytes": 1455
+    },
+    {
+      "file": "identity-result.json",
+      "sha256": "6582f78b3b22fcfee9d0428dcb38a595a63d36cc8ae7a1083e5eff55d0d5cb29",
+      "bytes": 1969
+    },
+    {
+      "file": "surfaces-result.json",
+      "sha256": "8e1f241d31bd675d0d1a9ef37e0853dac3071beeb4ace2bf45b364e8352a135f",
+      "bytes": 4858
+    }
+  ]
+}

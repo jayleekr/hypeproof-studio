@@ -1,0 +1,17 @@
+{
+  "real_upstream": true,
+  "calls": [
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerKL8G2BfToQQhN36UF4"
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerKL8RCWNNANh71a348e"
+    }
+  ]
+}
