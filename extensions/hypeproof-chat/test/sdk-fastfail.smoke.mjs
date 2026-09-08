@@ -166,8 +166,8 @@ function handlers(overrides = {}) {
 // If someone rewords proxyClient's token copy without updating the shared
 // constants (or vice versa), this pins the contract.
 {
-  assert.equal(TOKEN_EXPIRED_FRIENDLY, "토큰이 만료됐어요. 선생님께 새 토큰을 받아서 다시 넣어주세요. 🔑");
-  assert.equal(TOKEN_MISSING_FRIENDLY, "토큰이 필요해요. 선생님께 받은 토큰을 넣어주세요. 🔑");
+  assert.equal(TOKEN_EXPIRED_FRIENDLY, "참여 코드가 만료되었습니다. 코드 발급 담당자에게 새 코드를 요청해 주세요.");
+  assert.equal(TOKEN_MISSING_FRIENDLY, "참여 코드가 필요합니다. 코드 발급 담당자에게 받은 코드를 입력해 주세요.");
 
   // The SDK path may not diagnose a cause it cannot observe.
   assert.ok(

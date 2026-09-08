@@ -1083,6 +1083,7 @@ const STALLED = Symbol("sdk-stream-stalled");
 // loop already renders.
 
 export type SdkActivity = (
+  | { kind: 'approval'; id: string; name: string; input: unknown; actor: 'user'|'policy'; allowed: boolean }
   /** Running token estimate while the model thinks (Claude Code's "✻ …" counter). */
   | { kind: "thinking_tokens"; tokens: number }
   /** A completed thinking block. Raw model text — NOT translated (it is usually English). */
@@ -1393,7 +1394,7 @@ export interface SdkStreamHandlers {
    * to a bare Error(SDK_STALL_FRIENDLY) so a caller can't accidentally turn a
    * stall into a silent hang by forgetting to wire it.
    */
-  makeStallError?: () => Error;
+  makeStallError?: (lastStatus?:number) => Error;
   /**
    * True while the turn is legitimately blocked OUTSIDE the stream: the
    * approve/deny modal is open (the student is reading it), or a tool the SDK
@@ -1432,6 +1433,7 @@ export async function consumeSdkStream(
   /** In-flight it.next(); kept across timer re-arms so it is never called twice. */
   let pending: Promise<IteratorResult<unknown>> | null = null;
   let progressAt = Date.now();
+  let lastRetryStatus: number | undefined;
   /**
    * The blocked state is only sampled when the budget expires, so a modal that
    * closes mid-window would otherwise leave the coach ~0ms to answer. One grace
@@ -1478,7 +1480,7 @@ export async function consumeSdkStream(
       // Nobody awaits `pending` after this throw and abortQuery() rejects it.
       pending.catch(() => {});
       h.abortQuery();
-      throw h.makeStallError?.() ?? new Error(SDK_STALL_FRIENDLY);
+      throw h.makeStallError?.(lastRetryStatus) ?? new Error(SDK_STALL_FRIENDLY);
     }
   };
 
@@ -1489,6 +1491,7 @@ export async function consumeSdkStream(
       // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
       if (h.isAborted()) throw h.makeAbortError();
       const msg = (step.value ?? {}) as Record<string, unknown>;
+      if(isSdkRetryEvent(msg)&&typeof msg.error_status==='number')lastRetryStatus=msg.error_status;
       const fatal = sdkFatalAuthStatus(msg);
       if (fatal !== null) {
         // Kill the subprocess's retry loop first, then surface the token error.

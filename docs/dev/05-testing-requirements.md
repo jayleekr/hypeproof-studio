@@ -93,3 +93,7 @@ AE-01 through AE-44 to 38 scenarios for real runtime, UI, permission, recovery,
 classroom and multi-model verification, assistance, evidence freshness and
 post-class ownership. The dated competitive screenshots are research evidence; they
 do not mark these unexecuted scenarios as passed.
+
+## Personal trial UI acceptance
+
+Use the [TUX matrix](../testing/studio-native-trial-ux.md) for personal trial buttons, keyboard/focus, loading/error/cancel states, observation scope changes and conditional update/recovery UI. `node e2e/trial-ux/run.mjs` exercises the built React UI with a controlled host bridge; it does not prove OS actions or live API success. Pair applicable cases with the [actual laptop flow](../testing/studio-native-trial-laptop.md), and record release artifact checks separately.

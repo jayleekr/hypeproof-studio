@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { resolveChalkOrigin, resolveWorkerVersion, type Env } from "./env";
 import { chat } from "./routes/chat";
 import { messages } from "./routes/messages";
+import { observations } from './routes/observations';
 import { trace } from "./routes/trace";
 import { logs } from "./routes/logs";
 import { admin } from "./routes/admin";
@@ -12,6 +13,7 @@ import { runD1Backup } from "./cron/d1-backup.ts";
 import { requestId, makeErrorBody } from "./middleware/request-id.ts";
 import { signingSecretGuard } from "./middleware/signing-secret.ts";
 import { TokenError } from "./lib/tokens.ts";
+import {nativeTrialBudget} from './middleware/native-trial-budget';
 // @ts-ignore — bundled as text by wrangler rules.
 import adminHtml from "./ui/admin.html";
 
@@ -32,10 +34,12 @@ app.use("/v1/messages", signingSecretGuard);
 // (#282 count_tokens passthrough) needs its own wildcard mount.
 app.use("/v1/messages/*", signingSecretGuard);
 app.use("/v1/profile", signingSecretGuard);
+app.use('/v1/observations/*', signingSecretGuard);
 app.use("/v1/trace/*", signingSecretGuard);
 app.use("/v1/logs/*", signingSecretGuard);
 app.use("/v1/classroom/*", signingSecretGuard);
 app.use("/admin/*", signingSecretGuard);
+for(const path of ['/v1/messages','/v1/messages/count_tokens','/v1/chat/completions','/v1/observations/assess'])app.use(path,nativeTrialBudget);
 
 // Friendly root → redirect to admin UI (which itself is access-gated).
 // The canonical health payload is GET /v1/health (routes/chat.ts), whose
@@ -70,6 +74,7 @@ app.route("/v1", chat);
 // #282 — Anthropic-native Agent SDK gateway (POST /v1/messages). Own router,
 // same /v1 base; the chat router doesn't define /messages so no shadowing.
 app.route("/v1", messages);
+app.route('/v1/observations', observations);
 app.route("/v1/trace", trace);
 app.route("/v1/logs", logs);
 app.route("/v1/report", report);

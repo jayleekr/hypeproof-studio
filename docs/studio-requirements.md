@@ -1,5 +1,17 @@
 # Studio behavioral requirements
 
+## Native trial revision — 2026-09-08
+
+`REQ-STUDIO-NATIVE-TRIAL`: a participant enters the existing Studio application
+with an individually scoped participation token and performs real work through
+the existing model gateway and SDK tools. Asset observations must cite participant
+decisions and executed outcomes; authored web choices and assistant keyword scores
+are not evidence of this requirement. [Intent, NAT-01–12 and release gates](requirements/studio-native-trial.md).
+
+The native implementation includes host event capture, separate observation API/UI
+and individual trial grants. [Executed laptop evidence](testing/studio-native-trial-results-2026-09-08.md) records results and remaining release gates. The profile stays hidden
+from public issuance until the applicable gates are satisfied.
+
 > **Spec version:** v0.3.3
 > **Last reviewed:** 2026-08-19
 > **Live tracker:** [epic #200](https://github.com/jayleekr/hypeproof-studio/issues/200)
@@ -39,7 +51,7 @@ When in doubt:
 
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
-| REQ-A1 | 첫 수업 시작 시 작업 폴더 준비 | 사용자가 시작 화면에서 수업 시작을 누르면 profile workspace_root와 기존 workspace routing을 적용한다. 기존 파일을 보존한다 | E |
+| REQ-A1 | 첫 수업 시작 시 작업 폴더 준비 | 시작 클릭마다 Service 인증·세션을 다시 확인한다. 만료/권한/연결 실패를 표시하고, 중복 시작을 막으며 성공 시 코치 진입 안내를 표시한다 (#756). 사용자가 시작 화면에서 수업 시작을 누르면 profile workspace_root와 기존 workspace routing을 적용한다. 기존 파일을 보존한다 | E |
 | REQ-A2 | 사용자의 workspace trust 설정 보존 | 시작 및 폴더 생성 시 security.workspace.trust.enabled를 자동 변경하지 않는다 | E |
 | REQ-A3 | 브랜드 시작 화면 | 기존 편집기를 닫지 않고 시작 화면을 연다. 빈 창은 단일 편집 영역으로 정리한다 | E |
 | REQ-A4 | 토큰 없는 첫 실행 | 중립적인 시작 화면에서 참여 코드를 입력한다. QuickInput 자동 호출과 아동 코치 fallback 노출 없음 | U + E |
@@ -427,3 +439,20 @@ remove separately collected observation bundles in `test-results/`.
 | ID | Behavior | Acceptance / evidence |
 |---|---|---|
 | REQ-STUDIO-LESSON | Display the Service-resolved immutable lesson in the start page and chat; insert the selected task and acceptance criteria into the editable composer only on user action. | `worker/test/authoring.test.mjs`, `e2e/chalk-authoring/run.mjs`, `e2e/lesson-studio/mac.mjs`. No automatic task execution or policy grant. Legacy credentials show the existing profile. |
+
+## Native Studio trial (#744)
+
+| ID | Acceptance criteria | Implementation / verification |
+|---|---|---|
+| REQ-STUDIO-NATIVE-EVENTS | Host roles, task/session/program IDs and actual tool decisions survive replay; missing records are explicit and cannot be assessed. | nativeObservationRecorder.ts; worker/test/native-observation.test.mjs |
+| REQ-STUDIO-NATIVE-OBSERVATION | Seven provisional observations cite exact source events, retain unobserved assets and distinguish help; no numeric score or unsupported independence. | worker/src/routes/observations.ts; NativeObservationPanel.tsx; native-trial-live.spec.ts |
+| REQ-STUDIO-NATIVE-LIFETIME | Existing issuer flow grants a fixed individual window, attempt allowance and atomic concurrency; reissue cannot reset them. | native-trial-grants.ts; native-trial-grants.test.mjs; native-trial-d1.test.mjs |
+
+[NAT-01–12](requirements/studio-native-trial.md) define the product scope; [T01–25](testing/studio-native-trial-validation.md) define acceptance tests.
+[Executed laptop evidence](testing/studio-native-trial-results-2026-09-08.md) records real App/API results separately from synthetic and human validation.
+
+## Personal trial interaction coverage (#758)
+
+| ID | Requirement | Verification |
+|---|---|---|
+| REQ-STUDIO-NATIVE-UX | [TUX controls](requirements/studio-native-trial-ux.md) define observable outcomes for trial entry, coaching, observations, updates and recovery. Preserve work on cancel; confirm conversation deletion; isolate observation state on identity changes; recover the actual chat tree after a render error. | [UI and host test matrix](testing/studio-native-trial-ux.md); built React browser suite, host tests and applicable actual Electron reruns |

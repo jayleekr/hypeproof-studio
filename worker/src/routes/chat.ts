@@ -1,3 +1,4 @@
+import {nativeObservationScope} from '../lib/native-observation-scope';
 // POST /v1/chat/completions
 //
 // Pipeline:
@@ -210,6 +211,8 @@ chat.get("/profile", async (c) => {
     );
   }
   const { profile, module } = resolved;
+  let observationScope:string|undefined;
+  if(auth.payload.native_trial||profile.observation?.enabled){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;observationScope=await nativeObservationScope(gate.payload,gate.session);c.header("cache-control","no-store");}
 
   let lesson = null;
   if (auth.payload.lesson) {
@@ -224,6 +227,7 @@ chat.get("/profile", async (c) => {
   return c.json({
     ...(lesson ? { lesson } : {}),
     profile_id: profile.id,
+    ...(profile.observation?.enabled ? { observation: { format: 'hps-observation/1', scope:observationScope } } : {}),
     // dag task H — which curriculum module this seat is running. Observability
     // only (the prompt itself never leaves the worker): lets e2e/observe and
     // the instructor tell "which curriculum" without a D1 query.
@@ -236,7 +240,7 @@ chat.get("/profile", async (c) => {
     welcome: lesson ? {
       greeting_md: `오늘 수업: ${lesson.content.title}\n목표: ${lesson.content.objective}\n내 수업에서 과제와 확인 기준을 읽고 시작하세요.`,
       example_prompts: lesson.content.steps.slice(0, 3).map(s => `${s.instructions}\n확인 기준: ${s.acceptance}`),
-    } : profile.welcome,
+    } : profile.observation?.enabled && c.req.header("x-hps-observation-format") !== "hps-observation/1" ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."} : profile.welcome,
     ux: profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
     // #596 — 세션 로그 업로드 opt-in. 클라이언트는 이걸로 "기록 보내기" UI 를

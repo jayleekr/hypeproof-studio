@@ -1,0 +1,283 @@
+[
+  {
+    "id": "P01",
+    "name": "AI 초심 운영자",
+    "approach": "direction",
+    "initial": [
+      "skip",
+      "skip",
+      "skip",
+      "skip",
+      "skip",
+      "skip",
+      "skip"
+    ],
+    "expectedLevels": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "expectedOverall": null
+  },
+  {
+    "id": "P02",
+    "name": "유창하지만 근거를 놓치는 기획자",
+    "approach": "making",
+    "initial": [
+      "b",
+      "c",
+      "c",
+      "a",
+      "c",
+      "a",
+      "a"
+    ],
+    "expectedLevels": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ],
+    "expectedOverall": null
+  },
+  {
+    "id": "P03",
+    "name": "코드 없이 조건을 정해 위임하는 관리자",
+    "approach": "flow",
+    "initial": [
+      "c",
+      "a",
+      "b",
+      "c",
+      "a",
+      "b",
+      "c"
+    ],
+    "expectedLevels": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "expectedOverall": 2
+  },
+  {
+    "id": "P04",
+    "name": "일부 조건을 보는 자원봉사 운영자",
+    "approach": "evidence",
+    "initial": [
+      "a",
+      "b",
+      "a",
+      "b",
+      "b",
+      "c",
+      "b"
+    ],
+    "expectedLevels": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "expectedOverall": 1
+  },
+  {
+    "id": "P05",
+    "name": "힌트로 선택을 고친 학습자",
+    "approach": "making",
+    "initial": [
+      "a",
+      "b",
+      "a",
+      "b",
+      "b",
+      "c",
+      "b"
+    ],
+    "coached": [
+      "c",
+      "a",
+      "b",
+      "c",
+      "a",
+      "b",
+      "c"
+    ],
+    "expectedLevels": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "expectedOverall": 1
+  },
+  {
+    "id": "P06",
+    "name": "새 상황에서도 조건을 적용한 실무자",
+    "approach": "flow",
+    "initial": [
+      "c",
+      "a",
+      "b",
+      "c",
+      "a",
+      "b",
+      "c"
+    ],
+    "transfer": [
+      "b",
+      "c",
+      "a",
+      "a",
+      "c",
+      "b",
+      "c"
+    ],
+    "expectedLevels": [
+      3,
+      3,
+      3,
+      3,
+      3,
+      3,
+      3
+    ],
+    "expectedOverall": 3
+  },
+  {
+    "id": "P07",
+    "name": "처음에는 확인했으나 새 상황에서 유보한 사람",
+    "approach": "evidence",
+    "initial": [
+      "c",
+      "a",
+      "b",
+      "c",
+      "a",
+      "b",
+      "c"
+    ],
+    "transfer": [
+      "skip",
+      "skip",
+      "skip",
+      "skip",
+      "skip",
+      "skip",
+      "skip"
+    ],
+    "expectedLevels": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "expectedOverall": 2
+  },
+  {
+    "id": "P08",
+    "name": "세 문항 뒤 중도 이탈",
+    "approach": "direction",
+    "initial": [
+      "c",
+      "a",
+      "b"
+    ],
+    "expectedLevels": [
+      2,
+      2,
+      2,
+      null,
+      null,
+      null,
+      null
+    ],
+    "expectedOverall": null
+  },
+  {
+    "id": "P09",
+    "name": "선택 위치만 복사한 사람",
+    "approach": "making",
+    "initial": [
+      "c",
+      "a",
+      "b",
+      "c",
+      "a",
+      "b",
+      "c"
+    ],
+    "transfer": [
+      "c",
+      "a",
+      "b",
+      "c",
+      "a",
+      "b",
+      "c"
+    ],
+    "expectedLevels": [
+      2,
+      2,
+      2,
+      2,
+      2,
+      3,
+      3
+    ],
+    "expectedOverall": 2
+  },
+  {
+    "id": "P10",
+    "name": "자산별 비대칭이 있는 사람",
+    "approach": "evidence",
+    "initial": [
+      "c",
+      "a",
+      "b",
+      "a",
+      "a",
+      "c",
+      "skip"
+    ],
+    "transfer": [
+      "b",
+      "a",
+      "a",
+      "a",
+      "b",
+      "b",
+      "c"
+    ],
+    "expectedLevels": [
+      3,
+      2,
+      3,
+      2,
+      2,
+      2,
+      2
+    ],
+    "expectedOverall": 2
+  }
+]

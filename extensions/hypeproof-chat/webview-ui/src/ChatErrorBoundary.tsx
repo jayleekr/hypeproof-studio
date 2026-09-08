@@ -15,6 +15,7 @@ import { postToHost } from "./vscode";
 
 interface Props {
   children: ReactNode;
+  onReset?: () => void;
 }
 
 interface State {
@@ -48,6 +49,7 @@ export class ChatErrorBoundary extends Component<Props, State> {
   private reload = (): void => {
     // Clearing state remounts children. If the error is in a sub-component
     // and only triggered by certain data, the new mount avoids it.
+    this.props.onReset?.();
     this.setState({ err: null });
   };
 

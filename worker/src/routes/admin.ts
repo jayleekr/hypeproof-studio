@@ -27,8 +27,10 @@
 import { Hono } from "hono";
 import { authoring } from "./authoring";
 import { classroomTeacher } from "./classroom";
+import {nativeTrials} from './native-trials';
 import type { Env } from "../env";
-import { listProfiles } from "../profiles";
+import { listProfiles, getProfile } from "../profiles";
+import {createNativeGrant,NATIVE_TRIAL_LIMITS} from "../lib/native-trial-grants";
 import { USAGE_LAST_HOUR_SQL } from "../lib/analytics";
 import { issue, issueIssuer, verify, type IssuerScope } from "../lib/tokens";
 // Instructor-Bearer authorization is shared with Chalk (plan task F) — one
@@ -131,6 +133,7 @@ admin.use("*", async (c, next) => {
 
 admin.route("/", authoring);
 admin.route("/", classroomTeacher);
+admin.route('/',nativeTrials);
 
 // ---- cohort list ------------------------------------------------------------
 
@@ -210,11 +213,12 @@ admin.delete("/cohorts/:id/pause", async (c) => {
 // is the only thing they unlock.
 
 admin.post("/tokens/issue", async (c) => {
-  type Body = { u?: string; c?: string; p?: string; hours?: number };
+  type Body = { u?: string; c?: string; p?: string; hours?: number; native_trial?: boolean };
   const body = (await c.req.json<Body>().catch(() => ({}))) as Body;
   const { u, c: cohort, p: profile } = body;
   const hours = Number.isFinite(body.hours) ? Number(body.hours) : 168;
 
+  if(body.native_trial!==undefined&&typeof body.native_trial!=="boolean")return c.json({error:"native_trial must be boolean"},400);
   // Field validation
   if (!u || typeof u !== "string" || u.length < 1 || u.length > 64) {
     return c.json({ error: "u (user handle) required (1-64 chars)" }, 400);
@@ -234,6 +238,7 @@ admin.post("/tokens/issue", async (c) => {
   // to detect which path was used + enforce scope on issuers.
   const auth = c.req.header("authorization") ?? "";
   const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
+  let grantOwner='admin';
   if (bearerMatch && bearerMatch[1]) {
     const issuerToken = bearerMatch[1];
     let issuerPayload;
@@ -245,6 +250,7 @@ admin.post("/tokens/issue", async (c) => {
     if (issuerPayload.role !== "issuer") {
       return c.json({ error: "token is not an issuer" }, 403);
     }
+    grantOwner=issuerPayload.u;
     const scopes = issuerPayload.scopes ?? [];
     const allowed = scopes.find(
       (s) => s.cohort === cohort && (s.profiles?.includes(profile) ?? false),
@@ -258,6 +264,7 @@ admin.post("/tokens/issue", async (c) => {
     if (allowed.max_hours && hours > allowed.max_hours) {
       return c.json({ error: `requested ${hours}h exceeds scope max ${allowed.max_hours}h` }, 403);
     }
+    if(body.native_trial && (!allowed.can_start_session || (allowed.max_session_hours??4)<1 || issuerPayload.exp < Math.floor(Date.now()/1000)+hours*3600))return c.json({error:'individual trial exceeds instructor session authority'},403);
     // OK — also revoke check the issuer itself (so a leaked issuer can be killed)
     if (issuerPayload.jti) {
       const rev = await isTokenRevoked(c.env.HPS_KV, issuerPayload.jti);
@@ -268,11 +275,17 @@ admin.post("/tokens/issue", async (c) => {
   // (else: the .use("*", ...) admin gate already enforced Basic auth — no extra check needed)
 
   // Mint the student token.
+  if(body.native_trial){
+    const selected=getProfile(profile);
+    if(!selected?.observation?.enabled||selected.session.cohort_id!==cohort)return c.json({error:'profile does not support individual trials'},400);
+    if(!(await getRoster(c.env.HPS_KV,cohort))?.users.includes(u))return c.json({error:'participant must be registered first'},403);
+  }
   const { token, jti } = await issue(
-    { u, c: cohort, p: profile },
+    { u, c: cohort, p: profile, ...(body.native_trial?{native_trial:true as const}:{}) },
     hours,
     c.env.HPS_SIGNING_SECRET,
   );
+  if(body.native_trial){try{await createNativeGrant(c.env,await verify(token,c.env.HPS_SIGNING_SECRET),grantOwner);}catch(error){if(error instanceof Error&&error.message==='trial_reissue_conflict')return c.json({error:'trial_reissue_conflict'},409);throw error;}}
   return c.json({
     ok: true,
     token,
@@ -281,6 +294,7 @@ admin.post("/tokens/issue", async (c) => {
     cohort,
     profile,
     hours,
+    ...(body.native_trial?{trial_limits:NATIVE_TRIAL_LIMITS}:{}),
     exp: Math.floor(Date.now() / 1000) + hours * 3600,
   });
 });

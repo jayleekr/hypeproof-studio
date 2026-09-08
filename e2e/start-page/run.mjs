@@ -26,6 +26,9 @@ try {
  await p.getByRole('button',{name:'다른 수업에 연결'}).click();await p.locator('#course-code').fill('second-attempt');await p.getByRole('button',{name:'수업 확인하기'}).click();
  await state({profile,error:'서버에 연결할 수 없습니다.'});await p.getByText('기존 수업 연결은 유지됩니다.').waitFor();await p.getByRole('button',{name:'기존 수업으로 돌아가기'}).click();
  await p.getByRole('button',{name:'수업 시작하기'}).click();assert.equal(await p.evaluate(()=>window.sent.at(-1).type),'beginCourse');
+ assert.equal(await p.getByRole('button',{name:'수업 여는 중…'}).isDisabled(),true);
+ await state({profile,started:true});await p.getByRole('heading',{name:'코치와 작업을 시작하세요'}).waitFor();await p.getByRole('button',{name:'코치와 계속 작업하기'}).waitFor();
+ await state({error:'개인 체험 시간이 끝났습니다.'});await p.getByRole('alert').waitFor();assert.equal(await p.getByRole('button',{name:'수업 시작하기'}).count(),0);
  await state({profile:{...profile,id:'kids-test',name:'어린이 만들기 수업',coach:'직접 이름 짓는 코치'}});await p.getByText('어린이 만들기 수업',{exact:true}).waitFor();
  await p.getByRole('button',{name:'연결 해제',exact:true}).click();assert.equal(await p.evaluate(()=>window.sent.at(-1).type),'disconnectCourse');
  await state({});

@@ -1,6 +1,9 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
+import {createHash} from 'node:crypto';
+import {NativeObservationRecorder} from './nativeObservationRecorder';
+import {OBSERVATION_FORMAT, validateFindings, type ObservationBatch} from './nativeObservationContract';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
@@ -129,6 +132,32 @@ const APPROVAL_COPY: Record<string, { title: string; verb: string }> = {
 
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
+  private nativeObservation: NativeObservationRecorder | null = null;
+  private nativeHistoryScope: string | null = null;
+  private profileGeneration=0;
+  private nativeObservationError: string | null = null;
+  private nativeLearningPath: {title:string;url:string;reason:string} | null = null;
+  private observationAssessment: AbortController | null = null;
+  private observationWrites: Promise<void> = Promise.resolve();
+  private async prepareObservation(proxyUrl: string, token: string | undefined, profile: ResolvedProfile | null) {
+    await this.observationWrites;
+    this.nativeObservation = null;
+    if (profile?.observation?.format !== OBSERVATION_FORMAT || !token) return null;
+    try {
+      const response = await fetch(proxyUrl.replace(/\/$/, '')+'/observations/context', {headers:{authorization:'Bearer '+token},signal:AbortSignal.timeout(5000)});
+      if (!response.ok) throw Error('observation_unavailable');
+      const context = await response.json() as Omit<ObservationBatch,'events'> & {learning_path?:{title:string;url:string;reason:string}};
+      this.nativeLearningPath=context.learning_path??null;
+      const key='hps.observation.1.'+context.scope+'.'+context.program;
+      this.nativeObservation = new NativeObservationRecorder(context, this.context.workspaceState.get(key));
+      this.nativeObservationError=null;
+      return this.nativeObservation;
+    } catch { this.nativeObservationError='관찰 기록을 연결하지 못했습니다. 기존 작업은 계속할 수 있습니다.'; return null; }
+  }
+  private persistObservation(recorder: NativeObservationRecorder) {
+    const value=recorder.snapshot(), key='hps.observation.1.'+value.scope+'.'+value.program;
+    this.observationWrites=this.observationWrites.then(async()=>{await this.context.workspaceState.update(key,value);}).catch(()=>{this.nativeObservationError='관찰 기록 저장에 실패했습니다.';});
+  }
   private view?: vscode.WebviewView;
   private activeStreams = new Map<string, AbortController>();
   /**
@@ -460,20 +489,37 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     })();
   }
 
+  private clearingHistory = false;
   async clearHistory(): Promise<void> {
-    await this.context.workspaceState.update(this.historyKey(), []);
-    this.assetScores?.resetAssetScores();
-    void this.post({ type: "history", messages: [] });
-    // #320 — a cleared conversation is a fresh session: disclose again (REQ-C14).
-    void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
+    if (this.clearingHistory || this.hasActiveStream()) return;
+    this.clearingHistory = true;
+    const key = this.historyKey();
+    try {
+      const choice = await vscode.window.showWarningMessage(
+        "이 대화 기록을 지울까요?",
+        { modal: true, detail: "채팅 기록은 되돌릴 수 없습니다. 작업 파일과 내 작업 돌아보기의 관찰 기록은 그대로 남습니다." },
+        "대화 지우기",
+      );
+      if (choice !== "대화 지우기" || this.hasActiveStream() || key !== this.historyKey()) return;
+      await this.context.workspaceState.update(key, []);
+      this.assetScores?.resetAssetScores();
+      void this.post({ type: "history", messages: [] });
+      // A cleared chat starts a new conversation, not a new trial allowance.
+      void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
+    } finally { this.clearingHistory = false; }
   }
 
   /** Force re-fetch on next config push (e.g. after token change). */
   invalidateProfile(): void {
+    this.profileGeneration++;
+    this.observationAssessment?.abort();
+    this.nativeObservation=null;
+    this.nativeLearningPath=null;
     this.cachedProfile = null;
     this.profileFetchPromise = null;
     this.lastProfileFailure = null;
     this.activeCohortId = null;
+    this.nativeHistoryScope = null;
     this.assetScores?.resetAssetScores();
   }
 
@@ -538,7 +584,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** Eager profile fetch — called by extension.ts on activation. */
-  async ensureProfile(): Promise<ResolvedProfile | null> {
+  async ensureProfile(forceRefresh = false): Promise<ResolvedProfile | null> {
+    if (forceRefresh) {
+      await this.profileFetchPromise;
+      this.cachedProfile = null;
+    }
     if (this.cachedProfile) return this.cachedProfile;
     if (this.profileFetchPromise) return this.profileFetchPromise;
 
@@ -550,8 +600,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       return null;
     }
 
+    const generation=this.profileGeneration;
     this.profileFetchPromise = fetchProfileResult({ proxyUrl, token }).then(
       async (r) => {
+        if(generation!==this.profileGeneration || await this.context.secrets.get(TOKEN_KEY)!==token)return null;
         // #381 — remember WHY, so the token-entry flow can say something the
         // participant can act on instead of one generic "확인이 안 돼요".
         this.lastProfileFailure = r.ok ? null : r.failure;
@@ -568,6 +620,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // settings the fork core patch reads (minor cohorts → persist:hp-safe).
         await this.applyBrowserSafety(p);
         this.activeCohortId = extractCohortIdUnverified(token) ?? null;
+        this.nativeHistoryScope=(p?.observation||this.activeCohortId==='studio-native-trial')?'native-'+(p?.observation?.scope??createHash('sha256').update(token).digest('hex')):null;
         // Task E — a resolved profile means we have a usable token; start the
         // chat-independent ping. Failures back off inside the pinger.
         this.startLiveness();
@@ -1600,6 +1653,44 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       return;
     }
     switch (msg.type) {
+      case 'observationCancel':
+        this.observationAssessment?.abort();
+        return;
+      case 'observationAssess':
+      case 'observationCorrect': {
+        const token=await this.context.secrets.get(TOKEN_KEY);
+        const proxy=vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1');
+        const recorder=await this.prepareObservation(proxy,token,await this.ensureProfile());
+        if(!recorder||recorder.batch.scope!==msg.scope){await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:null,error:'수업 연결이 바뀌었습니다. 기록을 다시 확인하세요.'});return;}
+        if(msg.type==='observationCorrect'){
+          if(typeof msg.text==='string'&&msg.text.trim()&&msg.text.length<=2000){recorder.record(crypto.randomUUID(),'correction',msg.text);this.persistObservation(recorder);await this.observationWrites;}
+          await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:recorder.snapshot(),error:null});return;
+        }
+        const snapshot=recorder.snapshot();
+        if(snapshot.incomplete||recorder.missing.length){await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:'빠진 기록이 있어 관찰을 요청할 수 없습니다. 작업 파일은 보존돼 있습니다.'});return;}
+        if(this.observationAssessment){await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:'이미 관찰 중입니다. 완료하거나 취소한 뒤 다시 요청하세요.'});return;}
+        if(JSON.stringify(msg.eventIds)!==JSON.stringify(snapshot.events.map(e=>e.id))){await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:'새 작업 기록이 추가됐습니다. 보낼 내용을 다시 확인해 주세요.'});return;}
+        const controller=new AbortController();this.observationAssessment=controller;
+        try{
+          const response=await fetch(proxy.replace(/\/$/,'')+'/observations/assess',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify(snapshot),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(65000)])});
+          if(!response.ok){const failure=await response.json() as {error?:{code?:string}};throw Error(/^[a-z_0-9]{1,80}$/.test(failure.error?.code??'')?failure.error!.code:'assessment_failed');}
+          const result=await response.json() as {findings:unknown};
+          const findings=validateFindings(result.findings,snapshot);
+          if(this.nativeObservation?.batch.scope!==snapshot.scope || await this.context.secrets.get(TOKEN_KEY)!==token)return;
+          await this.context.workspaceState.update('hps.observation.result.'+snapshot.scope+'.'+snapshot.program,{...result,at:Date.now(),event_ids:snapshot.events.map(e=>e.id)});
+          await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:null,findings,assessedEventCount:snapshot.events.length});
+        }catch(error){const code=error instanceof Error&&/^[a-z_0-9]{1,80}$/.test(error.message)?error.message:'assessment_failed';if(await this.context.secrets.get(TOKEN_KEY)===token)await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:controller.signal.aborted?'관찰을 취소했습니다. 작업과 기록은 보존돼 있습니다.':'관찰 결과를 확인하지 못했습니다. 작업과 기록은 보존돼 있습니다. ('+code+')'});}finally{if(this.observationAssessment===controller)this.observationAssessment=null;}
+        return;
+      }
+      case 'observationOpen': {
+        const token=await this.context.secrets.get(TOKEN_KEY);
+        const proxy=vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1');
+        const recorder=await this.prepareObservation(proxy,token,await this.ensureProfile());
+        const saved=recorder?this.context.workspaceState.get<{findings:unknown;event_ids:string[]}>('hps.observation.result.'+recorder.batch.scope+'.'+recorder.batch.program):undefined;
+        let findings;try{if(saved&&recorder&&saved.event_ids.every(id=>recorder.batch.events.some(e=>e.id===id)))findings=validateFindings(saved.findings,recorder.batch);}catch{this.nativeObservationError='이전 관찰 근거를 확인하지 못했습니다.';}
+        await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:recorder?.snapshot()??null,error:this.nativeObservationError,findings,assessedEventCount:saved?.event_ids.length});
+        return;
+      }
       case "ready":
         await this.postConfig();
         await this.postHistory();
@@ -1847,6 +1938,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // 워커 trace 로 재전송할 수 있어야 한다. 워커는 turn_id 를 UUID 로 강제
     // 검증하므로(routes/trace.ts) randomId() 대신 UUID 를 쓴다.
     const streamId = crypto.randomUUID();
+    const observation = await this.prepareObservation(proxyUrl, token, profile);
+    const recordObservation = (kind: import('./nativeObservationContract').ObservationKind, value: string, extra: Partial<import('./nativeObservationContract').ObservationEvent> = {}) => {
+      if (!observation) return;
+      try { observation.record(streamId,kind,value,extra);this.persistObservation(observation); }
+      catch { observation.batch.incomplete=true;this.persistObservation(observation);this.nativeObservationError='관찰 기록이 불완전합니다. 이 기록으로 수행 능력을 판단하지 않습니다.'; }
+    };
+    recordObservation('user',text);
+    const observationFiles = new Map<string,string>();
+    const observationCaptures: Promise<void>[] = [];
     const messageId = randomId();
     const ctrl = new AbortController();
     this.activeStreams.set(streamId, ctrl);
@@ -1981,6 +2081,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고쳤어요", state: "done" });
       };
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
+        if (observation && (a.kind==='tool_use' || a.kind==='approval')) {
+          try { observation.toolRequest(streamId,a.id,`${a.name}(${summarizeToolInput(a.name,a.input,300,this.resolveCoachCwd())})`); this.persistObservation(observation); }
+          catch { observation.batch.incomplete=true;this.persistObservation(observation);this.nativeObservationError='도구 요청 기록이 불완전합니다.'; }
+          const file=(a.input as {file_path?:unknown})?.file_path;
+          if (['Write','Edit','MultiEdit'].includes(a.name) && typeof file==='string') {
+            const absolute=path.resolve(this.resolveCoachCwd()??'',file);
+            if (isInsideWorkspace(absolute)) observationFiles.set(a.id,absolute);
+          }
+        }
+        if (a.kind==='approval') recordObservation('approval',a.actor==='user'?'사용자가 승인 창에서 선택했습니다.':'런타임 정책이 처리했습니다.',{tool_id:a.id,actor:a.actor,outcome:a.allowed?'allowed':'denied'});
+        if (a.kind==='tool_result') recordObservation('tool_result',a.isError?(a.reason??'도구 실패'):(toolLabels.get(a.id)??'도구 실행 완료'),{tool_id:a.id,outcome:a.isError?'error':'success'});
+        if (a.kind==='tool_result' && !a.isError && observationFiles.has(a.id)) {
+          const file=observationFiles.get(a.id)!;
+          observationCaptures.push((async()=>{
+            try {
+              if(!vscode.workspace.workspaceFolders?.length||!isInsideWorkspace(file))throw Error('artifact_outside_workspace');
+              const stat=await fs.promises.stat(file);
+              if(stat.size>20000) {if(observation){observation.batch.incomplete=true;this.persistObservation(observation);}this.nativeObservationError='큰 파일은 관찰 사본에서 제외했습니다.';return;}
+              const bytes=await fs.promises.readFile(file);
+              recordObservation('artifact',path.basename(file)+'\n'+bytes.toString('utf8'),{sha256:createHash('sha256').update(bytes).digest('hex')});
+            }catch {if(observation){observation.batch.incomplete=true;this.persistObservation(observation);}this.nativeObservationError='산출물 사본을 확인하지 못했습니다.';}
+          })());
+        }
         const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
           // #503 — a.at: SDK 가 실어 보낸 자기 시각. 영속화된 줄의 createdAt 이 된다.
           this.postToolLog(streamId, { id, icon, label, state, ...(a.at ? { at: a.at } : {}) });
@@ -2163,8 +2286,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             onAssetScore,
             // Map the SDK tool call → an accurate host ActionRequest so the
             // executeShell hard-deny and writeFile workspace-scope actually fire.
-            requestApproval: (action) =>
-              this.resolveActionApproval({ requestId: randomId(), ...sdkToolToActionRequest(action) }),
+            requestApproval: async (action) => {
+              let prompted = false;
+              const approved = await this.resolveActionApproval({ requestId: randomId(), ...sdkToolToActionRequest(action) }, () => { prompted = true; });
+              return {approved, actor: prompted ? 'user' as const : 'policy' as const};
+            },
             // #282 P2 slice 2 — native-browser capabilities for the hypeproof
             // MCP tools. Always passed; runSdkCoach registers the server only
             // when the profile grants sdk_tools.browser (minors never do).
@@ -2234,6 +2360,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // 레코드 합과의 대조군.
       const total = sdkTurnTotal.current;
       const finalSpoolStatus = ctrl.signal.aborted ? "aborted" : spoolStatus;
+      await Promise.all(observationCaptures);
+      if (assistantText) recordObservation('coach',assistantText);
+      recordObservation('turn_end',finalSpoolStatus,{outcome:ctrl.signal.aborted?'cancelled':spoolStatus==='ok'?'success':'error'});
+      await this.observationWrites;
       if (assistantText.length > 0) {
         this.spool?.recordResponse({
           turnId: streamId,
@@ -2475,7 +2605,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
       return;
     }
-    const reason = err instanceof Error ? err.message : "앗, 문제가 생겼어요. 선생님을 불러주세요.";
+    const reason = err instanceof Error ? err.message : "문제가 발생했습니다. 운영 담당자에게 문의해 주세요.";
     const requestId = err instanceof ProxyTransportError ? err.requestId : undefined;
     if (requestId) this.lastRequestId = requestId;
     void this.post({ type: "streamError", streamId, error: reason, requestId });
@@ -2501,7 +2631,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * Public so e2e tests can synthesize requests without spinning through the
    * streamed-assistant path.
    */
-  async resolveActionApproval(req: ActionRequest): Promise<boolean> {
+  async resolveActionApproval(req: ActionRequest, onPrompted?: () => void): Promise<boolean> {
     // Tier 1 — shell (epic #431). No longer a hard deny: a cohort that set
     // `sdk_tools.shell` gets arbitrary commands, and THIS modal is the gate.
     // Three shapes, in order of how much they interrupt:
@@ -2522,7 +2652,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // Deliberately NOT offering "항상 허용". Approving `rm -rf` once must
         // never approve it for the rest of the session, and the whole point of
         // the strong confirm is that it stays interruptive.
-        const pick = await vscode.window.showWarningMessage(
+        onPrompted?.();
+    const pick = await vscode.window.showWarningMessage(
           "⚠️ 되돌리기 어려운 명령이에요. 정말 실행할까요?",
           { modal: true, detail: pretty },
           "실행",
@@ -2533,7 +2664,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
       const REMEMBER = signature ? `항상 허용 (${signature})` : null;
       const buttons = REMEMBER ? ["실행", REMEMBER] : ["실행"];
-      const pick = await vscode.window.showWarningMessage(
+      onPrompted?.();
+    const pick = await vscode.window.showWarningMessage(
         "코치가 명령을 실행하려고 해요:",
         { modal: true, detail: pretty },
         ...buttons,
@@ -2564,7 +2696,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
       const REMEMBER = origin ? `이 사이트는 항상 허용 (${origin})` : null;
       const buttons = REMEMBER ? ["열기", REMEMBER] : ["열기"];
-      const pick = await vscode.window.showWarningMessage(
+      onPrompted?.();
+    const pick = await vscode.window.showWarningMessage(
         `코치가 브라우저를 열려고 해요:\n\n${url || req.description}`,
         { modal: true },
         ...buttons,
@@ -2644,6 +2777,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       title: "코치가 작업을 하려고 해요",
       verb: "허용",
     };
+    onPrompted?.();
     const pick = await vscode.window.showWarningMessage(
       `${title}\n\n${req.description}`,
       { modal: true },
@@ -2719,7 +2853,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private historyKey(): string {
-    return historyKeyForCohort(this.activeCohortId);
+    return historyKeyForCohort(this.nativeHistoryScope??this.activeCohortId);
   }
 
   private coachKey(): string {
@@ -2735,6 +2869,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async migrateLegacyStateForActiveCohort(): Promise<void> {
+    if(this.nativeHistoryScope)return; // Legacy cohort-wide history has no participant provenance.
     const bucket = stateBucketId(this.activeCohortId);
     if (!bucket) return;
 

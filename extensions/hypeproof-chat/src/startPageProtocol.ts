@@ -1,6 +1,7 @@
 /** Start-page messages contain presentation state, never saved credentials. */
 export interface StartState {
   checking: boolean;
+  started?: boolean;
   error?: string;
   profile?: { id: string; name: string; coach: string; series: string; workspace: string };
   workspace?: string;

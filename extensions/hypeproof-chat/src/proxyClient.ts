@@ -95,12 +95,12 @@ function classifyError(status: number, bodyText: string): ProxyAuthError | null 
       return new ProxyAuthError("session_window", serverMsg ?? "수업 시간이 끝났어요. 다음 시간에 다시 만나요.");
     }
     if (type === "not_in_roster") {
-      return new ProxyAuthError("not_in_roster", serverMsg ?? "등록이 안 됐어요. 선생님께 알려주세요.");
+      return new ProxyAuthError("not_in_roster", serverMsg ?? "참가 등록이 필요합니다. 코드 발급 담당자에게 문의해 주세요.");
     }
     if (type === "session_profile_mismatch") {
-      return new ProxyAuthError("other", serverMsg ?? "이 토큰은 다른 시간 거예요. 선생님께 새 토큰을 받아주세요.");
+      return new ProxyAuthError("other", serverMsg ?? "현재 수업 시간에 사용할 수 없는 참여 코드입니다. 코드 발급 담당자에게 확인해 주세요.");
     }
-    return new ProxyAuthError("other", serverMsg ?? "지금은 사용할 수 없어요. 선생님을 불러주세요.");
+    return new ProxyAuthError("other", serverMsg ?? "현재 이용할 수 없습니다. 운영 담당자에게 문의해 주세요.");
   }
   return null;
 }
@@ -228,7 +228,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
     // request_id is appended so the operator can DM a single string.
     throw new ProxyTransportError(
       friendlyTransportMessage(res.status) ??
-        "앗, 잠깐 문제가 생겼어요. 다시 한 번 해보거나 선생님을 불러주세요.",
+        "문제가 발생했습니다. 다시 시도하거나 운영 담당자에게 문의해 주세요.",
       rid,
     );
   }
@@ -377,7 +377,7 @@ export async function fetchProfileResult(args: FetchProfileArgs): Promise<Profil
   try {
     res = await fetch(url, {
       method: "GET",
-      headers: { authorization: `Bearer ${token}` },
+      headers: { authorization: `Bearer ${token}`, "x-hps-observation-format": "hps-observation/1" },
       signal: AbortSignal.timeout(15_000),
     });
   } catch {

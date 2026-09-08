@@ -7,6 +7,7 @@ import { profile as boahDentalDirectorCopycloneS1 } from "./boah-dental-director
 // from the instructor console; see the file header for why it exists.
 import { profile as canarySdkContract } from "./canary-sdk-contract.ts";
 import { profile as homepagePractice } from "./homepage-practice-s1.ts";
+import { profile as nativeTrial } from "./studio-native-trial.ts";
 
 // All known profiles. Add new cohorts here.
 const REGISTRY: Profile[] = [
@@ -16,6 +17,7 @@ const REGISTRY: Profile[] = [
   boahDentalDirectorCopycloneS1,
   canarySdkContract,
   homepagePractice,
+  nativeTrial,
 ];
 
 const BY_ID = new Map(REGISTRY.map((p) => [p.id, p]));

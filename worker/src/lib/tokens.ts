@@ -14,6 +14,8 @@
 // exp (transition window) — but cannot be individually revoked.
 
 export interface TokenPayload {
+  /** Server-backed individual grant, issued only through the existing issuer gate. */
+  native_trial?: true;
   /** Instructor-selected immutable lesson. Never carries runtime capabilities. */
   lesson?: { course_id: string; version: string; sha256: string };
   u: string;       // user id (cohort-local), e.g. "kid01"
@@ -255,6 +257,7 @@ function canonicalize(p: TokenPayload): string {
   if (p.scopes !== undefined) out.scopes = p.scopes;
   if (p.can_issue_issuers !== undefined) out.can_issue_issuers = p.can_issue_issuers;
   if (p.lesson !== undefined) out.lesson = p.lesson;
+  if (p.native_trial !== undefined) out.native_trial = p.native_trial;
   return JSON.stringify(out);
 }
 
