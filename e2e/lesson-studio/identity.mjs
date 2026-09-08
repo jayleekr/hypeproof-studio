@@ -27,6 +27,7 @@ export async function prepareIdentity(local){
 
 export async function verifyIdentity({app,window,findContext,cases,out,live,setFault}){
  const checks=[];
+ const problems=[];
  const record=(id,detail)=>{checks.push({id,status:'PASS',...detail});writeFileSync(out+'/identity-result.json',JSON.stringify({status:'IN_PROGRESS',scope:'actual Mac app + local Service/SQLite; synthetic lessons',checks},null,2));};
  const wait=async(fn,label,ms=20000)=>{const end=Date.now()+ms;do{const result=await fn();if(result)return result;await window.waitForTimeout(250);}while(Date.now()<end);throw Error('Timed out: '+label);};
  const frame=selector=>wait(()=>findContext(selector),'frame '+selector);
@@ -88,9 +89,12 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
     await window.mouse.move(box.x+box.width,box.y+box.height/2);await window.mouse.down();await window.mouse.move(box.x+box.width+width-current,box.y+box.height/2,{steps:12});await window.mouse.up();await window.waitForTimeout(300);
    }
    const metrics=await chat.evaluate(`(()=>{const n=document.querySelector('.hps-coach-name'),a=document.querySelector('.hps-actions'),r=n.getBoundingClientRect(),s=a.getBoundingClientRect();return {width:innerWidth,document_width:document.documentElement.scrollWidth,name:n.textContent,title:n.title,name_width:r.width,actions_right:s.right,overlap:r.right>s.left+1,ellipsized:n.scrollWidth>n.clientWidth};})()`);
+   metrics.overflow_elements=await chat.evaluate("[...document.querySelectorAll('body *')].filter(e=>e.getBoundingClientRect().width>0&&e.getBoundingClientRect().right>innerWidth+1).map(e=>({tag:e.tagName,class:e.className,right:e.getBoundingClientRect().right,width:e.getBoundingClientRect().width})).slice(0,12)");
    await shot('long-name-'+width);
-   assert.equal(metrics.width,width,'native chat viewport differs from requested width');assert.equal(metrics.overlap,false);assert.ok(metrics.actions_right<=metrics.width);assert.ok(metrics.document_width<=metrics.width);
-   record('A5-width-'+width,metrics);
+   assert.equal(metrics.width,width,'native chat viewport differs from requested width');
+   const passes=!metrics.overlap&&metrics.actions_right<=metrics.width&&metrics.document_width<=metrics.width;
+   if(!passes)problems.push('A5-width-'+width);
+   record('A5-width-'+width,{...metrics,status:passes?'PASS':'FAIL'});
   }
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(2));await window.waitForTimeout(500);
   const zoom=await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor());assert.equal(zoom,2);
@@ -98,7 +102,7 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
   const focus=await chat.evaluate("({tag:document.activeElement.tagName,text:document.activeElement.textContent,visible:document.activeElement.getBoundingClientRect().right<=innerWidth})");
   await shot('long-name-zoom-200');assert.equal(focus.tag,'BUTTON');assert.equal(focus.visible,true);record('A5-zoom-keyboard',{zoom,focus,full_name_keyboard_access:'NOT VERIFIED; header is a non-focusable strong element'});
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.setZoomFactor(1));
-  chat=await connect('legacy');await shot('legacy-default-name');record('A4-legacy',{name:cases.legacy.name});
+  chat=await connect('legacy');await shot('legacy-default-name');record('A4-legacy',{name:cases.legacy.name,width:await chat.evaluate('innerWidth'),document_width:await chat.evaluate('document.documentElement.scrollWidth')});
   chat=await connect('a');
   if(live)for(const mode of ['503','stall']){
    setFault(mode);const prompt='합성 '+mode+' 검수: 실패 후 이 요청과 수업 이름을 보존해 주세요.';
@@ -110,8 +114,9 @@ export async function verifyIdentity({app,window,findContext,cases,out,live,setF
    assert.ok((await text(chat,'.hps-messages')).includes(prompt),'submitted input disappeared');
    await shot('failure-'+mode);record('A6-'+mode,{identity_preserved:true,submitted_message_preserved:true,composer:await chat.evaluate("document.querySelector('.hps-input textarea').value"),synthetic_gateway_fault:true});setFault('none');
   }
-  writeFileSync(out+'/identity-result.json',JSON.stringify({status:'PASS_EXECUTED_CASES',scope:'actual Mac app + local Service/SQLite; synthetic lessons',checks,not_run:['history identity at time of execution','all AI naming surfaces','screen reader','Windows',...(!live?['actual answer','failure and Stop']:[])],visual_review:'PENDING separate screenshot inspection'},null,2));
-  console.log('PASS feature A executed checks; screenshot review and unexecuted scope remain separate');
+  writeFileSync(out+'/identity-result.json',JSON.stringify({status:problems.length?'FAIL':'PASS_EXECUTED_CASES',scope:'actual Mac app + local Service/SQLite; synthetic lessons',checks,failures:problems,not_run:['history identity at time of execution','all AI naming surfaces','screen reader','Windows',...(!live?['actual answer','failure and Stop']:[])],visual_review:'PENDING separate screenshot inspection'},null,2));
+  if(problems.length)process.exitCode=1;
+  console.log(problems.length?'FAIL feature A viewport acceptance; remaining independent cases recorded':'PASS feature A executed checks; screenshot review and unexecuted scope remain separate');
  }catch(error){
   await shot('identity-failure').catch(()=>{});
   writeFileSync(out+'/identity-result.json',JSON.stringify({status:'FAIL',checks,error:error.message,visual_review:'PENDING'},null,2));throw error;

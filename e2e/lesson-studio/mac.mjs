@@ -29,6 +29,13 @@ if(process.env.HPS_LESSON_BUNDLED_EXTENSION==='1'){
  }
 }
 const local=await localAuthoring({profileId:'homepage-practice-s1'});
+// The navigation fixture only creates authoring tables. A real model turn also
+// records usage; use the repository's fresh schema, never a made-up table.
+if(live){
+ local.db.exec(readFileSync(resolve(sourceRoot,'worker/schema.sql'),'utf8'));
+ local.db.prepare('INSERT INTO cohorts(id,display_name) VALUES (?,?)').run(local.cohort,'Synthetic acceptance');
+ local.db.prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES (?,?,?,?,?)').run('synthetic-lesson',local.cohort,local.profileId,new Date(Date.now()-1000).toISOString(),new Date(Date.now()+3600000).toISOString());
+}
 if(live){
  assert.ok(process.env.ANTHROPIC_API_KEY,'live acceptance requires the existing dev Anthropic key');
  Object.assign(local.env,{LLM_PROVIDER:'anthropic',ANTHROPIC_API_KEY:process.env.ANTHROPIC_API_KEY,OPENAI_API_KEY:undefined,ANTHROPIC_PROXY_URL:undefined});
