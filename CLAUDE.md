@@ -18,7 +18,7 @@ Use this traceability order for product decisions:
 - UX mapping: METAPLAN §4.5 (asset → concrete chat-panel feature)
 - Behavioral contract: [docs/studio-requirements.md](./docs/studio-requirements.md) — REQ-### rows across Studio behavior domains, with test-layer assignments. PR touching Studio behavior must update this doc.
 - Autonomy policy: [docs/AUTONOMY-MANDATE.md](./docs/AUTONOMY-MANDATE.md) — proceed/notify/confirm rules for workshop-risk work
-- When adding or changing a chat-panel feature: cite the Product Intent/principle and the relevant requirement. Also note which asset(s) the behavior may train or expose. If none of those links can be made, the feature is probably noise.
+- When adding or changing a chat-panel feature: cite the Product Intent/principle and the relevant requirement. Also note which asset(s) the behavior may train or expose. If none of those links can be made, the feature is probably noise
 
 ## Current phase
 
