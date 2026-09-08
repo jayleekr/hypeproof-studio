@@ -7,11 +7,18 @@ Strategic + phase plan: see [METAPLAN.md](./METAPLAN.md). Do not duplicate it he
 
 This IDE exists to teach the **7 AI Native Assets** — the human capabilities needed when working with AI models. Every UX decision in the chat panel, welcome flow, manual-approve modals, and onboarding must serve one or more of these assets.
 
-- Source of truth: [docs/seven-assets.md](./docs/seven-assets.md) — do **not** fork or paraphrase elsewhere
+Use this traceability order for product decisions:
+
+**Philosophy → Product Intent → Product Requirement → UX/runtime behavior → Evidence**
+
+`Product Intent` is a product-design layer and is **not** the same concept as the Human Asset `INTENT`.
+
+- Philosophy / assets source of truth: [docs/seven-assets.md](./docs/seven-assets.md) — do **not** fork or paraphrase elsewhere
+- Product-intent layer: [docs/PRODUCT-INTENT.md](./docs/PRODUCT-INTENT.md) — translates philosophy into product design principles
 - UX mapping: METAPLAN §4.5 (asset → concrete chat-panel feature)
 - Behavioral contract: [docs/studio-requirements.md](./docs/studio-requirements.md) — REQ-### rows across Studio behavior domains, with test-layer assignments. PR touching Studio behavior must update this doc.
 - Autonomy policy: [docs/AUTONOMY-MANDATE.md](./docs/AUTONOMY-MANDATE.md) — proceed/notify/confirm rules for workshop-risk work
-- When adding a new chat-panel feature: cite which asset(s) it embodies in the PR/commit. If you cannot, the feature is probably noise
+- When adding or changing a chat-panel feature: cite the Product Intent/principle and the relevant requirement. Also note which asset(s) the behavior may train or expose. If none of those links can be made, the feature is probably noise.
 
 ## Current phase
 
