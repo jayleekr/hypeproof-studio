@@ -137,3 +137,5 @@ Detailed contract: [studio-trial](../requirements/studio-trial.md).
 ## Personal trial UI and UX (#758)
 
 `REQ-STUDIO-NATIVE-UX`: [TUX requirements](../requirements/studio-native-trial-ux.md) inventory every native trial control, conditional surface and host action. [UI acceptance tests](../testing/studio-native-trial-ux.md) distinguish React interaction, host contracts, actual Electron/API execution and release verification. Requirements are not executed results.
+
+운영자 사용량 관측: REQ-L5 · [감사와 읽기 계약](../design/usage-observation-audit.md) · [검증](../testing/usage-observation.md). 예약/정산·역할별 예산은 #800 후속이며 미구현이다.

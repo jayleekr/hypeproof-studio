@@ -1,0 +1,19 @@
+✅ 정상 입력이 통과한다
+✅ 거부: 10종 (SQL 인젝션·allowlist 이탈·범위 초과)
+✅ SQL: 집계 전용 — 발화·본문·user_id 가 나가지 않는다
+✅ 빈 결과가 '0' 으로 오해되지 않는다
+✅ 캐시 쓰기 합계 · 혼합 적중률 없음 · 원가/완전성 미확인
+✅ 조회 실패를 빈 기록으로 변환하지 않는다
+
+6/6 passed
+✓ #684 chat: upstream 429 → usage_log row, status=429, latency populated
+✓ #684 chat: upstream 500 → usage_log row, status=500 (not the client-facing 502)
+✓ #684 messages: upstream 400 → usage_log row, status=400
+✓ #684 chat: upstream unreachable → usage_log row, status=502
+✓ #684 chat: mid-stream break → usage_log row, status=502
+✓ #684 chat: 200 turn unchanged (status 200, tokens intact)
+✓ #684 messages: 200 turn unchanged
+✓ #684/L accounting: failures count as errors; only turns that actually spent tokens are billed
+usage-log-status.test.mjs: all tests passed
+(node:83055) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
