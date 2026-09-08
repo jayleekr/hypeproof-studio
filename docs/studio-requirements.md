@@ -214,6 +214,11 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 
 ## M. Agent SDK coach runtime (#282)
 
+다중 공급자 성인 실습과 요청 한도는 [MU-01~08](requirements/model-access-usage.md),
+실제 실행 결과는 [모델·사용량 검증](testing/model-access-usage.md)에 연결한다.
+기존 SDK 수업의 모델·도구 권한을 넓히지 않으며 금액 예산은 #800 후속이다.
+
+
 > `hypeproofChat.coachRuntime = "agent-sdk"` 로 전환 시 코치를 Claude Agent SDK 위에서 구동. Phase 1: `@anthropic-ai/claude-agent-sdk` 가 실제 의존성으로 설치되어 있고(dev/extension-host 경로), worker 게이트웨이(`POST /v1/messages`, #316)로 라우팅된다. 아래 안전 계약은 pure helper 단위로 검증된다. Phase 2 부터 도구 정책의 canonical owner 는 **worker 프로필의 `sdk_tools`** 다 ([ADR 0003](adr/0003-agent-sdk-coach-runtime.md) / #283) — 클라이언트는 tier 로 파일 도구를 추론하지 않는다. 주의: SDK 는 플랫폼별 native `claude` 바이너리(~240 MB)를 optionalDependency 로 동반한다 — 패키징(.vsix/built-in)은 node_modules 를 포함하지 않으므로 그 경로에서는 REQ-M7 폴백이 동작하며, built-in 번들링 전략은 Phase-2+ 결정 사항이다.
 
 ### 두 런타임은 같지 않다 — 어디가 다른지 한 곳에서 (#749, 2026-09-08 감사)

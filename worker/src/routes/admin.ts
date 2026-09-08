@@ -32,6 +32,7 @@ import type { Env } from "../env";
 import { listProfiles, getProfile } from "../profiles";
 import {createNativeGrant,NATIVE_TRIAL_LIMITS} from "../lib/native-trial-grants";
 import { USAGE_LAST_HOUR_SQL } from "../lib/analytics";
+import { modelUsageSummary } from '../lib/model-usage';
 import { issue, issueIssuer, verify, type IssuerScope } from "../lib/tokens";
 // Instructor-Bearer authorization is shared with Chalk (plan task F) — one
 // implementation, two workers. Never re-inline it here.
@@ -1025,6 +1026,8 @@ admin.get("/stats", async (c) => {
 });
 
 // ---- recent usage -----------------------------------------------------------
+
+admin.get('/cohorts/:id/model-usage', async c => c.json(await modelUsageSummary(c.env,c.req.param('id'))));
 
 admin.get("/cohorts/:id/usage", async (c) => {
   const cohortId = c.req.param("id");

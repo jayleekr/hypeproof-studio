@@ -12,6 +12,8 @@ const { issue, issueIssuer } = await import('../src/lib/tokens.ts');
 const port = Number(process.env.HPS_NATIVE_PORT || 8787);
 if (!Number.isInteger(port) || port < 1024 || port > 65535) throw Error('invalid isolated gateway port');
 const codexMode = process.env.HPS_CODEX_REHEARSAL === '1';
+const modelMode = process.env.HPS_MODEL_REHEARSAL === '1';
+if(modelMode && codexMode) throw Error('choose one rehearsal backend');
 if (!codexMode && !process.env.ANTHROPIC_API_KEY) throw new Error('BLOCKED: ANTHROPIC_API_KEY is not configured in this test runner');
 const output = resolve(process.env.HPS_NATIVE_EVIDENCE_DIR || '../e2e/test-results/native-trial');
 mkdirSync(output, { recursive: true });
@@ -26,16 +28,23 @@ if (codexMode) {
 const { codexRehearsalResponse } = await import('./harness/codex-rehearsal.mjs');
 const env = createMockEnv({ withSession: false, withRoster: false, secret: signing, env: {
   LLM_PROVIDER: codexMode ? 'openai' : 'anthropic', ANTHROPIC_API_KEY: codexMode ? undefined : process.env.ANTHROPIC_API_KEY,
-  OPENAI_API_KEY: codexMode ? 'local-adapter-only' : undefined, ANTHROPIC_PROXY_URL: undefined,
+  OPENAI_API_KEY: codexMode ? 'local-adapter-only' : modelMode ? process.env.OPENAI_API_KEY : undefined, ANTHROPIC_PROXY_URL: undefined,
+  ...(modelMode ? {GLM_API_KEY:process.env.GLM_API_KEY,GEMINI_API_KEY:process.env.GEMINI_API_KEY,HPS_MODEL_PRACTICE_REQUEST_LIMIT:'12'} : {}),
   GALLERY_LOGS_BASE: undefined, HPS_ADMIN_PASSWORD: undefined,
 } });
-const now = Date.now(), id = codexMode ? 'studio-gpt-practice' : 'studio-native-trial';
+const now = Date.now(), id = modelMode ? 'studio-model-practice' : codexMode ? 'studio-gpt-practice' : 'studio-native-trial';
 await env.HPS_KV.put(`cohort:${id}:active_session`, JSON.stringify({ session_id: 'native-ci', profile_id: id,
   starts_at: new Date(now - 60000).toISOString(), ends_at: new Date(now + 3600000).toISOString() }));
 await env.HPS_KV.put(`cohort:${id}:roster`, JSON.stringify({ users: ['synthetic-adult',...(process.env.HPS_NATIVE_IDENTITY==='1'?['synthetic-other']:[])], updated_at: new Date(now).toISOString() }));
 const app = await bootApp();
 let token;
 let grantDb;
+let modelDb;
+if(modelMode){
+ modelDb=new DatabaseSync(':memory:');modelDb.exec(readFileSync(new URL('../migrations/0005-model-usage.sql',import.meta.url),'utf8'));
+ const original=env.HPS_DB;
+ env.HPS_DB={prepare(sql){if(!sql.includes('model_usage_requests'))return original.prepare(sql);let args=[];return {bind(...v){args=v;return this;},async first(){return modelDb.prepare(sql).get(...args)??null;},async run(){return {success:true,meta:{changes:Number(modelDb.prepare(sql).run(...args).changes)}};},async all(){return {success:true,results:modelDb.prepare(sql).all(...args)};}};}};
+}
 if(codexMode && process.env.HPS_NATIVE_MANAGED==='1') throw Error('GPT practice uses its normal separate cohort, not a native trial grant');
 if(process.env.HPS_NATIVE_MANAGED==='1') {
  grantDb=new DatabaseSync(':memory:');grantDb.exec(readFileSync(new URL('../migrations/0004-native-trials.sql',import.meta.url),'utf8'));
@@ -66,7 +75,7 @@ globalThis.fetch = async (input, init) => {
     if(++attempts>24) throw Error('live rehearsal request budget exhausted (24)');
     return codexRehearsalResponse(codex,JSON.parse(init.body),{signal:init.signal,record(row){calls.push(row);writeFileSync(resolve(output,'api-evidence.json'),JSON.stringify({real_upstream:true,provider:'codex-app-server',auth:'chatgpt',api_key_calls:0,storage:'synthetic-memory',calls},null,2));}});
   }
-  if (url.origin !== 'https://api.anthropic.com') throw new Error('unexpected upstream origin in isolated trial test');
+  if (!(modelMode ? ['https://api.anthropic.com','https://api.openai.com','https://api.z.ai','https://generativelanguage.googleapis.com'] : ['https://api.anthropic.com']).includes(url.origin)) throw new Error('unexpected upstream origin in isolated trial test');
   if (++attempts > 24) throw new Error('live rehearsal request budget exhausted (24); inspect the recorded failure before rerunning');
   const start = Date.now();
   const response = await realFetch(input, { ...init, signal: AbortSignal.any([
@@ -111,11 +120,13 @@ const server = createServer(async (req, res) => {
     if (response.body) for await (const chunk of response.body) res.write(chunk);
     res.end();
     await ctx.settle();
+    if(modelDb)writeFileSync(resolve(output,'model-usage.json'),JSON.stringify(modelDb.prepare('SELECT * FROM model_usage_requests').all(),null,2));
   } catch { if (!res.headersSent) res.writeHead(500); res.end('isolated test gateway error'); }
 });
 server.listen(port, '127.0.0.1', () => console.log('Isolated rehearsal gateway ready; '+(codexMode?'official Codex ChatGPT connection':'real Anthropic API')+'; synthetic storage'));
 process.on('SIGTERM', () => server.close(() => {
  if(grantDb){writeFileSync(resolve(output,'grant-evidence.json'),JSON.stringify(grantDb.prepare('SELECT started_at,expires_at,request_limit,requests_used,lease_id IS NOT NULL AS busy FROM native_trials').all(),null,2));grantDb.close();}
+ modelDb?.close();
  codex?.close();
  process.exit(0);
 }));
