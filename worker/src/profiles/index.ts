@@ -8,6 +8,7 @@ import { profile as boahDentalDirectorCopycloneS1 } from "./boah-dental-director
 import { profile as canarySdkContract } from "./canary-sdk-contract.ts";
 import { profile as homepagePractice } from "./homepage-practice-s1.ts";
 import { profile as nativeTrial } from "./studio-native-trial.ts";
+import { profile as gptPractice } from "./studio-gpt-practice.ts";
 
 // All known profiles. Add new cohorts here.
 const REGISTRY: Profile[] = [
@@ -18,6 +19,7 @@ const REGISTRY: Profile[] = [
   canarySdkContract,
   homepagePractice,
   nativeTrial,
+  gptPractice,
 ];
 
 const BY_ID = new Map(REGISTRY.map((p) => [p.id, p]));

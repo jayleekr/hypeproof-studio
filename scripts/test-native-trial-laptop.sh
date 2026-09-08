@@ -15,7 +15,7 @@ if [[ "${HPS_NATIVE_RELEASE_VERIFY:-}" == 1 && -z "${HPS_NATIVE_REUSE_DIR:-}" ]]
 fi
 [[ -d "$SOURCE_APP/Contents" ]] || { echo 'BLOCKED: set HPS_APP_PATH to an installed Studio .app bundle.' >&2; exit 2; }
 [[ -f worker/.dev.vars ]] || { echo 'BLOCKED: worker/.dev.vars is missing; use the existing scripts/dev-secrets.sh setup.' >&2; exit 2; }
-node --env-file=worker/.dev.vars -e 'if (!process.env.ANTHROPIC_API_KEY) { console.error("BLOCKED: this SDK rehearsal requires ANTHROPIC_API_KEY in worker/.dev.vars"); process.exit(2) }'
+node --env-file=worker/.dev.vars -e 'if (process.env.HPS_CODEX_REHEARSAL !== "1" && !process.env.ANTHROPIC_API_KEY) { console.error("BLOCKED: this SDK rehearsal requires ANTHROPIC_API_KEY in worker/.dev.vars"); process.exit(2) }'
 if curl --max-time 2 -fsS http://127.0.0.1:8787/v1/health >/dev/null 2>&1; then
   echo 'BLOCKED: port 8787 already has a gateway. Stop your own dev stack first; this script will not kill it.' >&2
   exit 2

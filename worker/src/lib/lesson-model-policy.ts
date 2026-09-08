@@ -1,5 +1,5 @@
 import { resolveProvider, type Env, type LLMProvider } from '../env.ts';
-import { MODEL_MAP, ANTHROPIC_MODELS, modelIdFor, permittedModelKeys, type ModelKey, type Profile } from '../profiles/types.ts';
+import { MODEL_MAP, ANTHROPIC_MODELS, OPENAI_MODELS, modelIdFor, permittedModelKeys, type ModelKey, type Profile } from '../profiles/types.ts';
 
 export interface ModelChoice { alias: ModelKey; id: string; label: string }
 export interface ModelBinding {
@@ -14,13 +14,13 @@ export interface LessonModelPolicy {
   /** Service-produced at freeze; a draft cannot supply its own binding. */
   binding?: ModelBinding;
 }
-const aliases = [...Object.keys(MODEL_MAP), ...Object.keys(ANTHROPIC_MODELS)];
+const aliases = [...Object.keys(MODEL_MAP), ...Object.keys(ANTHROPIC_MODELS), ...Object.keys(OPENAI_MODELS)];
 const object = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x);
 
 export function validateLessonModel(value: unknown): string | null {
   if (!object(value) || Object.keys(value).some(k => !['default', 'allowed', 'binding'].includes(k))) return 'invalid model fields';
   if (typeof value.default !== 'string' || !aliases.includes(value.default) || !Array.isArray(value.allowed)
-    || value.allowed.length < 1 || value.allowed.length > Object.keys(ANTHROPIC_MODELS).length || value.allowed.some(a => !aliases.includes(a))
+    || value.allowed.length < 1 || value.allowed.length > aliases.length || value.allowed.some(a => !aliases.includes(a))
     || new Set(value.allowed).size !== value.allowed.length || !value.allowed.includes(value.default)) return 'invalid model selection';
   if ('binding' in value && !object(value.binding)) return 'invalid model binding';
   return null;
@@ -44,7 +44,7 @@ export function modelBinding(env: Env, profile: Profile, policy?: LessonModelPol
     const id = modelIdFor(alias, provider);
     if (seen.has(id)) return [];
     seen.add(id);
-    return [{ alias, id, label: (ANTHROPIC_MODELS as Record<string, string>)[id] ?? id }];
+    return [{ alias, id, label: ({ ...ANTHROPIC_MODELS, ...OPENAI_MODELS } as Record<string, string>)[id] ?? id }];
   });
   return { revision: 'hps-model-selection/1', runtime, provider, choices };
 }
