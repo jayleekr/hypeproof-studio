@@ -13,9 +13,9 @@ import * as http from "node:http";
 import { APP_BINARY, TOKEN_FILE } from "../fixtures/global-setup";
 import { runCommand } from "../fixtures/app";
 
-interface ReceivedReport { description: string; profile_id?: string; contact?: string }
+interface ReceivedReport { description: string; profile_id?: string; contact?: string; include_recent_turns?: boolean; recent_turns?: unknown }
 
-async function startMock(): Promise<{ port: number; close: () => Promise<void>; received: ReceivedReport[] }> {
+async function startMock(reportStatus = 200): Promise<{ port: number; close: () => Promise<void>; received: ReceivedReport[] }> {
   const received: ReceivedReport[] = [];
   const server = http.createServer((req, res) => {
     res.setHeader("access-control-allow-origin", "*");
@@ -56,8 +56,8 @@ async function startMock(): Promise<{ port: number; close: () => Promise<void>; 
           received.push(parsed);
         } catch { /* ignore */ }
         res.setHeader("content-type", "application/json");
-        res.statusCode = 200;
-        res.end(JSON.stringify({ report_id: "rep_test_h6_ok" }));
+        res.statusCode = reportStatus;
+        res.end(JSON.stringify(reportStatus === 200 ? { report_id: "rep_test_h6_ok" } : { error: { message: 'synthetic receiver unavailable' } }));
       });
       return;
     }
@@ -162,8 +162,55 @@ test("REQ-H6: report path stays alive when chat is broken", async () => {
 
     const r = mock.received[0]!;
     expect(r.description).toContain("H6 e2e probe");
+    expect(r.include_recent_turns).toBe(false);
+    expect(r.recent_turns).toBeUndefined();
+    await expect(ctx.win.locator('.notifications-toasts')).toContainText('rep_test_h6_ok');
   } finally {
     await teardown(ctx);
     await mock.close();
   }
+});
+
+test('report: short description stays on input; Escape at each stage sends nothing', async () => {
+  const mock = await startMock();
+  const ctx = await launchAt(mock.port);
+  try {
+    await ctx.win.waitForTimeout(2500);
+    const picker = ctx.win.locator('.quick-input-widget');
+    for (let stage = 1; stage <= 3; stage++) {
+      await runCommand(ctx.win, 'HypeProof Chat: 문제 신고하기');
+      if (stage === 1) {
+        await fillQuickInput(ctx.win, '짧음');
+        await expect(picker).toContainText('10자 이상');
+      } else {
+        await fillQuickInput(ctx.win, '합성 신고 취소 테스트입니다. 외부로 전송하지 않습니다.');
+        await expect(picker).toContainText('최근 대화 첨부 여부');
+        if (stage === 3) {
+          await pickQuickPick(ctx.win, /포함하지 않기/);
+          await expect(picker).toContainText('연락처 (선택)');
+        }
+      }
+      await ctx.win.keyboard.press('Escape');
+      await expect(picker).not.toBeVisible();
+      expect(mock.received).toHaveLength(0);
+    }
+    if (process.env.HPS_NATIVE_EVIDENCE_DIR) fs.writeFileSync(path.join(process.env.HPS_NATIVE_EVIDENCE_DIR, 'report-cancellation.json'), JSON.stringify({ status: 'PASS', description_validation: true, cancelled_stages: [1, 2, 3], received: mock.received.length }));
+  } finally { await teardown(ctx); await mock.close(); }
+});
+
+test('report: failed local receiver surfaces failure without a success ID', async () => {
+  const mock = await startMock(503);
+  const ctx = await launchAt(mock.port);
+  try {
+    await ctx.win.waitForTimeout(2500);
+    await runCommand(ctx.win, 'HypeProof Chat: 문제 신고하기');
+    await fillQuickInput(ctx.win, '합성 신고 실패 테스트입니다. 로컬 수신기만 사용합니다.');
+    await pickQuickPick(ctx.win, /포함하지 않기/);
+    await fillQuickInput(ctx.win, 'synthetic@example.invalid');
+    await expect.poll(() => mock.received.length).toBe(1);
+    await expect(ctx.win.locator('.notifications-toasts')).toContainText('신고 전송 실패');
+    await expect(ctx.win.locator('.notifications-toasts')).not.toContainText('rep_test_h6_ok');
+    expect(mock.received[0].contact).toBe('synthetic@example.invalid');
+    if (process.env.HPS_NATIVE_EVIDENCE_DIR) await ctx.win.screenshot({ path: path.join(process.env.HPS_NATIVE_EVIDENCE_DIR, 'report-failure.png') });
+  } finally { await teardown(ctx); await mock.close(); }
 });
