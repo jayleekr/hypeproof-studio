@@ -36,10 +36,10 @@
 <div id="model-allowed" aria-label="학생이 선택할 수 있는 모델"></div>
 <small>한 모델로 고정하면 답변과 보조 요청에 같은 모델을 사용합니다. 모델 변경은 새 버전을 고정하고 학생 조건으로 리허설한 뒤 배정하세요.</small>
 </fieldset>
-<fieldset id="effort-fields" disabled><legend>처리 수준</legend>
+<fieldset id="effort-fields" disabled><legend>Effort</legend>
 <label>변경 범위<select id="effort-mode"><option value="inherit">코호트 기본값 사용</option><option value="fixed">강사 설정으로 고정</option><option value="choice">학생이 선택</option></select></label>
-<label>기본 처리 수준<select id="effort-default"></select></label>
-<div id="effort-allowed" aria-label="학생이 선택할 수 있는 처리 수준"></div>
+<label>기본 Effort<select id="effort-default"></select></label>
+<div id="effort-allowed" aria-label="학생이 선택할 수 있는 Effort"></div>
 <small id="effort-help">먼저 수업 모델 목록을 불러오고 모델 사용 방식을 정하세요. 지원 모델에만 적용되며, 같은 설정이라도 모델마다 속도와 사용량이 다릅니다.</small>
 </fieldset>
 <button id="features-load" type="button">수업 기능 목록 불러오기</button>
@@ -116,7 +116,7 @@ function modelChanged(){
 $('models-load').onclick=()=>run(async()=>{const catalog=await call(scope()+'/models/'+encodeURIComponent($('profile').value.trim()));modelCatalogue=catalog;modelCatalogueScope=identity();renderModels();$('models-status').textContent='사용 가능한 모델 '+catalog.choices.length+'개 · 모델 설정은 도구 권한을 바꾸지 않습니다.';});
 for(const id of ['model-mode','model-default','model-allowed'])$(id).onchange=modelChanged;
 
-const effortLabels={low:'빠르게',medium:'균형',high:'깊게'};
+const effortLabels={low:'Low',medium:'Medium',high:'High'};
 function renderEffort(){
   const enabled=modelCatalogueScope===identity()&&modelCatalogue?.effort&&lessonModel;
   $('effort-fields').disabled=!enabled;

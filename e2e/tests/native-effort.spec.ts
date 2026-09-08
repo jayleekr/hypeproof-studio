@@ -27,7 +27,7 @@ test('course effort reaches the real model and survives UI transitions', async (
   try {
     let chat = await chatFrame(ctx.win);
     const model = () => chat.getByRole('combobox',{name:'대화 모델',exact:true});
-    const effort = () => chat.getByRole('combobox',{name:'처리 수준',exact:true});
+    const effort = () => chat.getByRole('combobox',{name:'Effort',exact:true});
     const input = () => chat.locator('.hps-input textarea').first();
     await expect(effort()).toHaveValue('medium');
     await input().fill('아직 보내지 않은 꽃집 소개 초안');
