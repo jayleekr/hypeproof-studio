@@ -30,8 +30,8 @@ test('trial entry: real explorer, settings, folder cancellation, disconnect and 
     start = await startFrame(ctx.win);
     await start.getByRole('button', { name: '연결 해제', exact: true }).click();
     await expect(start.getByLabel('수업 참여 코드', { exact: true })).toBeVisible();
-    // Reveal the real disconnected sidebar without changing its connection.
-    await runCommand(ctx.win, 'View: Show HypeProof Chat');
+    // Reveal the existing disconnected conversation without changing its connection.
+    await runCommand(ctx.win, 'HypeProof Chat: Focus');
     await chat.getByRole('button', { name: /시작 화면 열기/ }).click();
     await expect(start.getByLabel('수업 참여 코드', { exact: true })).toBeVisible();
     await start.getByLabel('수업 참여 코드', { exact: true }).fill(ctx.token);

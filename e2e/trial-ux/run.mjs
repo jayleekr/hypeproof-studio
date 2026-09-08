@@ -199,6 +199,55 @@ try {
   await test('TUX-CHAT-12', 'Code disclosure toggles without executing code', async p => {
     await host(p, { type: 'history', messages: history }); await expect(p.locator('.hps-codepill-body')).toHaveCount(0); await p.locator('.hps-codepill-toggle').press('Enter'); await expect(p.locator('.hps-codepill-body')).toContainText('합성 초안'); await p.locator('.hps-codepill-toggle').press('Enter'); await expect(p.locator('.hps-codepill-body')).toHaveCount(0); assert.equal(emitted(await requests(p), 'runCode').length, 0);
   });
+  await test('TUX-CHAT-15', 'Markdown renders Korean emphasis, lists, tables and literal code', async p => {
+    const show = content => host(p, { type: 'history', messages: [{ ...history[1], citations: [], content }] });
+    await show('구체적인 일'); await expect(p.locator('.hps-prose strong')).toHaveCount(0);
+    await show('지금 **구체적인 일**이 무엇인가요?\n\n## 맡길 범위\n\n- 목차 초안\n- *최종 판단*\n\n| AI | 나 |\n| --- | --- |\n| 초안 | 검토 |\n\n`**원문 유지**`\n\n```text\n**코드 원문**\n```');
+    await expect(p.locator('.hps-prose strong')).toHaveText('구체적인 일');
+    await expect(p.locator('.hps-prose h2')).toHaveText('맡길 범위');
+    await expect(p.locator('.hps-prose li')).toHaveCount(2);
+    await expect(p.locator('.hps-prose table')).toContainText('검토');
+    await expect(p.locator('.hps-prose code')).toHaveText('**원문 유지**');
+    await p.locator('.hps-codepill-toggle').click();
+    await expect(p.locator('.hps-codepill-body')).toHaveText('**코드 원문**');
+  });
+  await test('TUX-CHAT-15B', 'Model HTML, image URLs and unsafe links never execute or fetch; safe links use the host', async p => {
+    const outside = [];
+    p.on('request', req => { if (!req.url().startsWith(url)) outside.push(req.url()); });
+    await host(p, { type: 'history', messages: [{ ...history[1], citations: [], content: '<img src="https://example.invalid/raw" onerror="window.markdownExecuted=true">\n\n![합성 이미지](https://example.invalid/pixel)\n\n[위험 링크](javascript:alert%281%29)\n\n[허용 링크](https://example.org/markdown)' }] });
+    await expect(p.locator('.hps-prose img, .hps-prose script')).toHaveCount(0);
+    await expect(p.locator('.hps-prose a')).toHaveCount(1);
+    await expect(p.getByText('위험 링크', { exact: true })).toBeVisible();
+    assert.equal(await p.evaluate(() => window.markdownExecuted), undefined);
+    assert.deepEqual(outside, []);
+    await p.getByRole('link', { name: '허용 링크' }).click();
+    await request(p, { type: 'openExternal', url: 'https://example.org/markdown' });
+    assert.deepEqual(outside, []);
+  });
+  await test('TUX-CHAT-15C', 'A split streaming emphasis becomes bold only when complete', async p => {
+    await host(p, { type: 'streamStart', streamId: 'md-stream', messageId: 'md-message' });
+    await host(p, { type: 'streamChunk', streamId: 'md-stream', delta: '지금 **구체적인' });
+    await expect(p.locator('.hps-prose strong')).toHaveCount(0);
+    await host(p, { type: 'streamChunk', streamId: 'md-stream', delta: ' 일**을 골라주세요.' });
+    await host(p, { type: 'streamEnd', streamId: 'md-stream' });
+    await expect(p.locator('.hps-prose strong')).toHaveText('구체적인 일');
+    await expect(p.locator('.hps-prose')).toHaveText('지금 구체적인 일을 골라주세요.');
+  });
+  await test('TUX-CHAT-16', 'Waiting completion is not a file-change claim; raw processing text is optional', async p => {
+    const tool = (id, label, state = 'done', icon = '🔧') => ({ id, role: 'tool', content: '', createdAt: 1, tool: { label, state, icon } });
+    await host(p, { type: 'history', messages: [tool('pending-synthetic', '고쳤어요'), tool('think-0', 'Synthetic processing detail in English', 'done', '💭'), tool('real-write', 'Write(index.html)'), tool('failed-write', 'Write(other.html) — 실패', 'error')] });
+    await expect(p.getByText('고쳤어요', { exact: true })).toHaveCount(0);
+    await expect(p.getByText('Synthetic processing detail in English', { exact: true })).not.toBeVisible();
+    await expect(p.locator('.hps-tool-log-line').filter({ hasText: 'Write(index.html)' })).toBeVisible();
+    await expect(p.locator('.hps-tool-error')).toContainText('실패');
+    const details = p.getByLabel('AI 처리 내용 보기');
+    await details.press('Enter'); await expect(p.getByText('Synthetic processing detail in English', { exact: true })).toBeVisible();
+    await details.press('Enter'); await expect(p.getByText('Synthetic processing detail in English', { exact: true })).not.toBeVisible();
+    await host(p, { type: 'history', messages: [tool('pending-synthetic', '다음 단계를 준비하는 중…', 'running', '…')] });
+    await expect(p.locator('.hps-tool-running')).toBeVisible();
+    await host(p, { type: 'history', messages: [tool('pending-synthetic', '대기 종료')] });
+    await expect(p.locator('.hps-tool-log-line')).toHaveCount(0);
+  });
   await test('TUX-CHAT-13', 'Citation emits exact external URL', async p => { await host(p, { type: 'history', messages: history }); await p.locator('.hps-cit-chip').click(); await request(p, { type: 'openExternal', url: 'https://example.org/source' }); });
   await test('TUX-CHAT-14', 'Error retry/report/close preserve draft and expose request/runbook', async p => {
     await host(p, { type: 'history', messages: history }); await draft(p).fill('작성 중인 문장');

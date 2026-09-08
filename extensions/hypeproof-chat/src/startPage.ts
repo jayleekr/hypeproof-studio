@@ -100,8 +100,10 @@ export class StartPage {
           return;
         }
         if (await this.begin(profile)) return; // workspace switch reloads the window
-        await vscode.commands.executeCommand("workbench.view.extension.hypeproof-chat");
-        await vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+        const entry = this.panel;
+        if (!entry) throw new Error('Entry page was closed');
+        await this.chat.openInEditor(entry);
+        if (this.panel === entry) this.panel = undefined;
         this.started = true;
         this.chat.refreshConfig();
       } catch {

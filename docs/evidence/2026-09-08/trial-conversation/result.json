@@ -1,0 +1,11 @@
+{
+  "entry": "actual code entry",
+  "app": "released shell with branch extension",
+  "upstream": "real Anthropic",
+  "initial_file_created": true,
+  "revised_file_created": true,
+  "original_preserved": true,
+  "human_asset_assessment": "NOT_RUN; synthetic driver behavior is not human learning evidence",
+  "observation": "PASS actual host records, real assessment, UI and correction",
+  "storage": "local SQLite grants and synthetic memory cohort bindings; no production state"
+}

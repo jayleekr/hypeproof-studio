@@ -56,8 +56,7 @@ export interface LaunchOptions {
  *   (a) `app.dock.hide()` — no bouncing dock icon.
  *   (b) move every BrowserWindow to (-4000,-4000) and `showInactive()` — the
  *       window stays *shown* (so the renderer is NOT occlusion-throttled and
- *       CDP waits stay stable) but is off every physical display and never
- *       steals focus. Hook `browser-window-created` so windows spawned after
+ *       CDP waits stay stable) but is off every physical display and not OS-focusable. Hook `browser-window-created` so windows spawned after
  *       launch (VS Code can recreate) get stashed too.
  *   (c) after the workbench is ready, `app.hide()` so macOS returns focus to
  *       whatever Jay was doing — UNLESS `HPS_QUIET_NO_HIDE=1`, the escape hatch
@@ -80,11 +79,15 @@ async function applyQuietMode(app: ElectronApplication): Promise<void> {
     type Win = {
       setPosition(x: number, y: number): void;
       showInactive?(): void;
+      setFocusable(focusable: boolean): void;
       once?(ev: string, cb: () => void): void;
       on?(ev: string, cb: () => void): void;
     };
     const stash = (w: Win) => {
       try {
+        // Off-screen alone does not prevent macOS from delivering real keys.
+        // CDP still drives DOM focus; the OS must never target this test window.
+        w.setFocusable(false);
         w.setPosition(-4000, -4000);
         w.showInactive?.();
       } catch {
@@ -329,10 +332,7 @@ export async function openChatContainer(win: Page): Promise<void> {
  * security iframe + an inner #active-frame.
  */
 export async function chatFrame(win: Page) {
-  // Match the actual sidebar purpose; the start editor may mount first.
-  const outerSel = 'iframe.webview.ready[src*="purpose=webviewView"]';
-  await win.locator(outerSel).first().waitFor({ state: "attached", timeout: 20_000 });
-  return win.frameLocator(outerSel).first().frameLocator("#active-frame");
+  return surfaceFrame(win, '.hps-shell', 'chat');
 }
 
 /** The game preview now lives in the editor area (a WebviewPanel). It is the
@@ -346,7 +346,23 @@ export async function previewFrame(win: Page) {
 
 /** Entry editor, before opening other editor webviews. */
 export async function startFrame(win: Page) {
-  const selector = 'iframe.webview.ready[src*="extensionId=hypeproof.hypeproof-chat"]:not([src*="purpose=webviewView"])';
-  await win.locator(selector).first().waitFor({ state: "attached", timeout: 30_000 });
-  return win.frameLocator(selector).first().frameLocator("#active-frame");
+  return surfaceFrame(win, '.studio-start', 'start');
+}
+
+/** Locate the rendered surface, whether it is in an editor or a sidebar. */
+async function surfaceFrame(win: Page, selector: string, name: string) {
+  const end = Date.now() + 30000;
+  do {
+    const frames = win.locator('iframe.webview.ready');
+    for (let i = 0; i < await frames.count(); i++) {
+      const frame = win.frameLocator('iframe.webview.ready').nth(i).frameLocator('#active-frame');
+      if (await frame.locator(selector).isVisible().catch(() => false)) {
+        const name = await frames.nth(i).getAttribute('name');
+        if (name && /^[a-zA-Z0-9_-]+$/.test(name)) return win.frameLocator(`iframe.webview.ready[name="${name}"]`).frameLocator('#active-frame');
+        return frame;
+      }
+    }
+    await win.waitForTimeout(150);
+  } while (Date.now() < end);
+  throw new Error(`Visible ${name} surface was not found`);
 }
