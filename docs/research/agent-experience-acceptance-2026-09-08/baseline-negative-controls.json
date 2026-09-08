@@ -1,0 +1,11 @@
+{
+  "wrong_candidate": {
+    "exit_code": 1,
+    "expected_rejection": true
+  },
+  "stale_bundle": {
+    "exit_code": 1,
+    "expected_rejection": true
+  },
+  "scope": "pre-launch provenance controls; no app or provider call"
+}
