@@ -16,7 +16,11 @@ const view=await request('/v1/profile');assert.equal(view.status,200);
 const delivered=await view.json();assert.equal(delivered.model_selection.provider,'openai');assert.equal(delivered.model_selection.runtime,'proxy');assert.equal(delivered.model_selection.choices.length,3);
 assert.equal((await request('/v1/profile',undefined,'invalid')).status,401);
 const outsider=await issue({u:'synthetic-outsider',c:id,p:id},1,TEST_SECRET);
-assert.equal((await request('/v1/profile',undefined,outsider.token)).status,403);
+// Profile discovery accepts a valid scoped token; execution also requires roster membership.
+await withMockUpstream(()=>{throw Error('outsider must never reach upstream');},async calls=>{
+ assert.equal((await request('/v1/chat/completions',{messages:[{role:'user',content:'synthetic outsider'}],stream:false},outsider.token)).status,403);
+ assert.equal(calls.length,0);
+});
 for(const model of ['gpt-5.6-luna','gpt-5.6-terra','gpt-5.6-sol','gpt-unknown','claude-opus-5']){
  const expected=profile.model.allowed.includes(model)?model:'gpt-5.6-luna';
  await withMockUpstream((url,init)=>{
