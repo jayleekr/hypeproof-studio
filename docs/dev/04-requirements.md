@@ -94,3 +94,11 @@ Chalk authoring Surface: `REQ-STUDIO-CHALK-AUTHORING-UI`, `/authoring` form with
 - [ADM-01~14](../requirements/classroom-admin.md)
 - [DES-01~12](../requirements/classroom-design.md)
 - [AT/DT tests](../testing/classroom-admin.md)
+
+## Public trial
+
+| ID | Acceptance criteria | Primary paths |
+|---|---|---|
+| REQ-STUDIO-TRIAL-EVIDENCE | Versioned structured observations explain 7 assets; unknown and coached evidence never fabricate independent growth. | worker/src/lib/trial-evidence.ts; worker/test/trial-evidence.test.mjs |
+
+Detailed contract: [studio-trial](../requirements/studio-trial.md).

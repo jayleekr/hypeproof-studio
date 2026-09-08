@@ -151,6 +151,20 @@ entries:
       loop; this is what gives it a name (`m2026.09.04-1`, or
       `compiled:<hash>` before anything is published) on every turn record.
 
+  - name: studio-trial
+    layer: m
+    tag_prefix: m
+    directory: docs/curriculum/studio-trial
+    deploys_to: static://hypeprooflab/studio/trial
+    contract:
+      format: "JSON — hps-trial/1 curriculum and structured observations"
+    drift_lock: worker/test/trial-evidence.test.mjs
+    exit_plan: docs/requirements/studio-trial.md
+    owner: jay
+    notes: >-
+      Static Module consumed by Lab through a commit-pinned export. Evaluation
+      policy is a portable Service library; no HTTP or cohort policy changes.
+
 # ---------------------------------------------------------------------------
 # Planned entries. These are NOT yet admitted — they are here so the gates are
 # answered before the code lands, not after. Move them into `entries` in the
