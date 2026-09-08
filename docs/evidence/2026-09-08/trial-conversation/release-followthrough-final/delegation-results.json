@@ -1,0 +1,6 @@
+{
+  "transport": "PASS",
+  "semantic_review": "PASS",
+  "scope": "NAT-03 delegation purpose and actual small draft only; synthetic user",
+  "basis": "실제 7장 목차와 AI/사람 역할을 제시. 뒤에 추가 질문 2개가 있어 질문 최소화 전체 판정은 하지 않음."
+}
