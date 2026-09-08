@@ -1,3 +1,4 @@
+import { prepareWorkspaceDirectory } from './workspacePreparation';
 import { imageAttachPrompt } from "./coachIdentity.ts";
 import * as vscode from "vscode";
 import * as fs from "fs";
@@ -726,11 +727,7 @@ async function openWorkspaceFolder(
   profile?: ResolvedProfile | null,
 ): Promise<boolean> {
   try {
-    fs.mkdirSync(dir, { recursive: true });
-    const indexPath = path.join(dir, "index.html");
-    if (!fs.existsSync(indexPath)) {
-      fs.writeFileSync(indexPath, starterIndexHtml(profile));
-    }
+    prepareWorkspaceDirectory(dir, !profile || profile.workspace_start === 'empty' ? 'empty' : 'html', () => starterIndexHtml(profile));
   } catch {
     return false;
   }

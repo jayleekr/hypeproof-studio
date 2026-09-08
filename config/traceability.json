@@ -16,7 +16,7 @@
         },
         {
           "path": "docs/requirements/studio-native-trial.md",
-          "section": "## Product Intent와 체험 범위"
+          "section": "## Product Intent\uc640 \uccb4\ud5d8 \ubc94\uc704"
         }
       ]
     },
@@ -43,7 +43,7 @@
       "sources": [
         {
           "path": "docs/requirements/studio-native-trial.md",
-          "section": "## 접근 방식"
+          "section": "## \uc811\uadfc \ubc29\uc2dd"
         }
       ]
     },
@@ -217,7 +217,7 @@
       "sources": [
         {
           "path": "docs/design/model-effort-and-course-usage.md",
-          "section": "## 수업 effort 구현 계약 (#799)"
+          "section": "## \uc218\uc5c5 effort \uad6c\ud604 \uacc4\uc57d (#799)"
         }
       ]
     },
@@ -372,6 +372,43 @@
         },
         {
           "path": "e2e/tests/native-models.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-TRIAL-CONVERSATION",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE",
+        "ST-REQ-UX"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/trial-conversation-experience.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-TRIAL-CONVERSATION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-TRIAL-CONVERSATION",
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/trial-conversation-experience.md"
+        },
+        {
+          "path": "e2e/tests/native-trial-entry.spec.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/workspace-preparation.smoke.mjs"
+        },
+        {
+          "path": "worker/test/trial-entry.test.mjs"
         }
       ]
     }

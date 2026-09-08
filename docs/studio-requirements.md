@@ -51,7 +51,7 @@ When in doubt:
 
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
-| REQ-A1 | 첫 수업 시작 시 작업 폴더 준비 | 시작 클릭마다 Service 인증·세션을 다시 확인한다. 만료/권한/연결 실패를 표시하고, 중복 시작을 막으며 성공 시 코치 진입 안내를 표시한다 (#756). 사용자가 시작 화면에서 수업 시작을 누르면 profile workspace_root와 기존 workspace routing을 적용한다. 기존 파일을 보존한다 | E |
+| REQ-A1 | 첫 수업 시작 시 작업 폴더 준비 | 시작 클릭마다 Service 인증·세션을 다시 확인한다. 만료/권한/연결 실패를 표시하고, 중복 시작을 막으며 성공 시 코치 진입 안내를 표시한다 (#756). 사용자가 시작 화면에서 수업 시작을 누르면 profile workspace_root와 기존 workspace routing을 적용한다. 기존 파일을 보존한다. `workspace_start: empty`인 일반 체험과 미확인 프로필은 폴더만 준비하며, 알려진 legacy 웹 수업만 시작 HTML을 생성한다 (#842). NAT-03에 따라 모호한 요청에는 불필요 파일 도구를 실행하지 않는다 | E + U (`workspace-preparation.smoke.mjs`, `native-trial-entry.spec.ts`) |
 | REQ-A2 | 사용자의 workspace trust 설정 보존 | 시작 및 폴더 생성 시 security.workspace.trust.enabled를 자동 변경하지 않는다 | E |
 | REQ-A3 | 브랜드 시작 화면 | 기존 편집기를 닫지 않고 시작 화면을 연다. 빈 창은 단일 편집 영역으로 정리한다 | E |
 | REQ-A4 | 토큰 없는 첫 실행 | 중립적인 시작 화면에서 참여 코드를 입력한다. QuickInput 자동 호출과 아동 코치 fallback 노출 없음 | U + E |
@@ -530,3 +530,5 @@ REQ-M27의 활동 원문 보존은 유지하되 기본 표시를 조정한다. �
 | ID | Requirement | Verification |
 |---|---|---|
 | REQ-STUDIO-NATIVE-UX | [TUX controls](requirements/studio-native-trial-ux.md) define observable outcomes for trial entry, coaching, observations, updates and recovery. Preserve work on cancel; confirm conversation deletion; isolate observation state on identity changes; recover the actual chat tree after a render error. | [UI and host test matrix](testing/studio-native-trial-ux.md); built React browser suite, host tests and applicable actual Electron reruns |
+
+체험 대화 후속 계획: [CU/GHX 요구사항과 #844 에픽](design/trial-conversation-experience.md). 전체 UI·GitHub 연결 구현을 의미하지 않으며 [실행/미실행](testing/trial-conversation-experience.md)을 구분한다.
