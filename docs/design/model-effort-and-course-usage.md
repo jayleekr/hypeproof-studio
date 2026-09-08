@@ -5,6 +5,15 @@
 정본 [Product Intent](../PRODUCT-INTENT.md)의 판단에 필요한 정보·최소 개입과
 [INT-AE-05/07](learning-agent-experience.md)을 AE-17/27/28/32에 연결한다.
 
+## 현재 구현에서 출발할 지점
+
+`worker/src/lib/analytics.ts`의 `usage_log`는 모델·입력/출력·캐시 읽기/쓰기·지연·상태를
+기록하며, 실패했어도 실제 토큰을 사용한 요청은 집계한다. `/admin/stats`와
+`/admin/cohorts/:id/usage`는 운영 조회 경로다. 확장의 `chatPanelProvider.ts`도 SDK/proxy
+사용량과 SDK가 보고한 턴 비용을 관측 기록에 남긴다. 현재 학생 ChatPanel에는 강의료에
+포함된 잔여 이용량 화면이 없다. 이 로그가 있다고 예약/정산·정확한 비용·역할별 예산 화면이
+완성된 것은 아니다. 저장 실패와 미확인 사용량, 가격표 revision부터 대조해야 한다.
+
 ## 결정 제안
 
 모델은 어떤 AI를 쓸지, effort는 지원 모델에서 한 요청에 들일 작업량을 조절한다.
