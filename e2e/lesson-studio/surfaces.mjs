@@ -7,8 +7,8 @@ import {join} from 'node:path';
 import {APPROVAL_TITLE_PATTERN} from '../../extensions/hypeproof-chat/src/coachIdentity.ts';
 
 export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
- const checks=[];let failure;
- const save=()=>writeFileSync(join(out,'surfaces-result.json'),JSON.stringify({scope:'actual Mac app + local Service; synthetic lesson and workspace',checks,status:failure?'FAIL':'IN_PROGRESS',error:failure,visual_review:'PENDING separate image inspection',not_run:['all eight approval kinds','Windows','screen reader','historical identity','human learning']},null,2));
+ const checks=[];let failure,completed=false;
+ const save=()=>writeFileSync(join(out,'surfaces-result.json'),JSON.stringify({scope:'actual Mac app + local Service; synthetic lesson and workspace',checks,status:failure?'FAIL':completed?'PASS_EXECUTED_CASES':'IN_PROGRESS',error:failure,visual_review:'PENDING separate image inspection',not_run:['all eight approval kinds','Windows','screen reader','historical identity','human learning']},null,2));
  const record=(id,detail)=>{checks.push({id,status:'PASS',...detail});save();};
  return {
   async connected({entry,name,key,shot,wait}){
@@ -18,6 +18,8 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
    assert.ok(state.course.includes('AI 이름'));assert.ok(state.course.includes(name));assert.ok(state.process.includes(name));
    assert.ok(!state.process.includes('코치와 작은 시도부터')||name==='코치');
    if(['first','b','html','long','legacy'].includes(key))await shot('b-start-'+key);
+   assert.ok(state.document_width<=state.width,'B start-page horizontal overflow: '+key);
+   if(key==='html')assert.equal(await entry.evaluate("document.querySelectorAll('.studio-course b').length"),0,'name rendered as HTML');
    record('B1-'+key,{name,...state});
   },
   async verify({app,window,chat,frame,shot,wait,fill,key,text,click,cases}){
@@ -60,7 +62,7 @@ export function surfaceAcceptance({out,workspace,live,degraded,gatewayCalls}){
     assert.ok(observation.events.some(e=>e.kind.includes('user')));assert.ok(observation.events.some(e=>e.kind.includes('tool_result')));assert.ok(observation.events.some(e=>e.kind.includes('approval')));assert.equal(observation.consent,false);
     await chat.evaluate("document.querySelectorAll('.hps-native-observation details').forEach(d=>d.open=true)");await shot('b-observation');record('B5',observation);
    }catch(e){failure=e.message;await shot('b-failure').catch(()=>{});throw e;}
-   finally{save();}
+   finally{completed=!failure;save();}
   },
  };
 }
