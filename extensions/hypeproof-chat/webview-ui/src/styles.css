@@ -675,6 +675,7 @@ html, body, #root {
   pointer-events: none;
 }
 .hps-input textarea {
+  box-sizing: border-box;
   width: 100%;
   resize: none;
   background: var(--vscode-input-background, #2a2d2e);
