@@ -21,7 +21,7 @@ export function EffortControl({config,post}:{config:ChatConfig;post:(m:WebviewMe
       {result?.state==='observed' && <>
         <p>서버에서 확인된 요청별 전송 설정입니다. 응답 내용의 정확성을 뜻하지 않습니다.</p>
         <ul>{result.requests.map(r=><li key={r.request_id}>
-          {config.profile?.model_selection?.choices.find(c=>c.id===r.model)?.label??r.model}: {r.applied?labels[r.applied]:'처리 수준 미지원'}
+          {config.profile?.model_selection?.choices.find(c=>c.id===r.model)?.label??r.model}: 요청 {r.requested?labels[r.requested]:'수업 기본값'} → 적용 {r.applied?labels[r.applied]:'처리 수준 미지원'}
           {r.reason==='course_default'?' · 수업 기본값':''}{r.status>=400?' · 요청 실패':''}
         </li>)}</ul>
         {result.truncated && <p>처음 100개 요청만 표시합니다.</p>}

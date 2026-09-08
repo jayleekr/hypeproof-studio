@@ -1175,3 +1175,6 @@ html, body, #root {
 .hps-effort details { flex:1 1 100%; min-width:0; overflow-wrap:anywhere; }
 .hps-effort summary { cursor:pointer; }
 .hps-effort ul { padding-left:20px; }
+
+/* Many SDK requests must not push the composer out of the window. */
+.hps-effort details[open] { max-height:min(220px,35vh); overflow:auto; }

@@ -244,6 +244,9 @@
         },
         {
           "path": "e2e/chalk-authoring/run.mjs"
+        },
+        {
+          "path": "e2e/tests/native-effort-old-client.spec.ts"
         }
       ]
     }
