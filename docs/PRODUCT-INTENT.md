@@ -1,8 +1,11 @@
 # HypeProof Studio — Product Intent
 
 > Status: working product-intent layer
-> Upstream: HypeProof Lab philosophy
-> Downstream: `docs/studio-requirements.md` and feature-specific specs
+> Upstream: [HypeProof Lab philosophy, 6845cdb4](https://github.com/jayleekr/hypeprooflab/blob/6845cdb4391273d16ed09419eee806b0c03c04f9/PHILOSOPHY.md)
+> Downstream: [Studio behavior requirements](studio-requirements.md) and feature-specific specs
+
+[철학 개정 적용 기록](design/philosophy-alignment-2026-09-08.md)은 Lab 원본의 의미를
+제품에 연결한다. 이 문서는 자산 정의나 Lab Mission을 새로 소유하지 않는다.
 
 ## 역할
 
@@ -77,3 +80,23 @@ Philosophy claim
 PR에서 Studio behavior를 변경할 때는 단순히 "어느 Human Asset인가"만 쓰지 말고, 가능하면 **어느 Product Intent를 구현하는지**와 관련 REQ를 함께 적는다.
 
 Human Asset은 철학적/학습적 모델이고, Product Intent는 제품 설계 판단의 중간 계층이며, Product Requirement는 검증 가능한 행동 계약이다.
+
+## 현재 요구사항으로의 추적
+
+아래는 기존 요구사항에 대한 매핑이다. 요구사항을 연결했다는 사실은 구현·실행·학습
+효과를 입증하지 않는다. NAT는 개인 체험의 동작, AE는 수업 Agent 경험의 계획을 소유한다.
+`INT-AE-*`는 기능별 설계 의도이며 이 상위 Product Intent를 대체하지 않는다.
+
+| Product principle | 검증 가능한 행동 계약 | 검증 위치 |
+|---|---|---|
+| Useful work first / Minimum necessary intervention / Adapt, do not script | NAT-03; AE-01/02/36/41. 충분하면 실행, 부족할 때 필요한 질문 하나, 목표 변경·질문 건너뛰기 수용 | T04 분기; AE-T01/28/31 |
+| Human judgment stays visible | NAT-04/05/07; AE-07/08/09/27. 이름·역할·모델·실제 권한 분리, 제안과 채택 및 위임 결과의 주체 보존 | T07/09/15; AE-T05/06/19/25 |
+| Learning is embedded / Evidence over claims | NAT-06/08/09; AE-24/34/42/43/44. 실제 출처·도움·미관찰을 구별하고 사람 피드백·전이를 따로 검증 | T11–18/25; AE-T18/26/34/37/38 |
+| Assets are hypotheses, not UI labels | NAT-08/09; AE-35/36/38. 필수 설문·자동 자산 점수 없이 필요한 판단을 작업 안에서 돕는다 | T04/17/18/25; AE-T27/28/30 |
+
+행동의 원본은 [NAT 요구사항](requirements/studio-native-trial.md),
+[AE 요구사항](requirements/learning-agent-experience.md)이며,
+[NAT 검증](testing/studio-native-trial-validation.md),
+[AE 검증](testing/learning-agent-experience.md)에서 실행 근거를 추적한다.
+[다음 구현 순서](plan/learning-agent-experience-epics.md#product-intent에서-다음-구현으로)는
+이 원칙을 채팅·강사 설정·SDK·Browser/Computer Use·멀티모델에 적용한다.
