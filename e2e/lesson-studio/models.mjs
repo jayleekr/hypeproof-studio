@@ -16,9 +16,9 @@ export async function prepareModels(local) {
  return cases;
 }
 
-export async function verifyModels({app,window,findContext,cases,out,live,upstream,gatewayCalls,setZoom}) {
+export async function verifyModels({app,window,findContext,cases,out,live,upstream,gatewayCalls,setZoom,layoutOnly=false}) {
  const checks=[];
- const save=(status,error)=>writeFileSync(out+'/model-selection-result.json',JSON.stringify({status,checks,error,scope:'actual Mac + local Service + synthetic lessons',live_model_requested:live,not_run:['Windows','screen reader speech','human learning','cross-provider transfer'],visual_review:'PENDING'},null,2));
+ const save=(status,error)=>writeFileSync(out+'/model-selection-result.json',JSON.stringify({status,checks,error,scope:'actual Mac + local Service + synthetic lessons',live_model_requested:live,not_run:[...(layoutOnly?['keyboard and AX in this layout-only run']:[]),'Windows','screen reader speech','human learning','cross-provider transfer'],visual_review:'PENDING'},null,2));
  const record=(id,data)=>{checks.push({id,...data});save('IN_PROGRESS');};
  const wait=async(fn,label,ms=20000)=>{const until=Date.now()+ms;while(Date.now()<until){const x=await fn();if(x)return x;await window.waitForTimeout(200);}throw Error('Timed out: '+label);};
  const frame=s=>wait(()=>findContext(s),'frame '+s);
@@ -40,6 +40,7 @@ export async function verifyModels({app,window,findContext,cases,out,live,upstre
    for(let n=0;n<4;n++){const current=await chat.evaluate('innerWidth');if(current===width)break;await app.evaluate(({BrowserWindow},delta)=>{const w=BrowserWindow.getAllWindows()[0];w.setBounds({width:w.getBounds().width+delta});},Math.round((width-current)*factor));await window.waitForTimeout(200);}
    const metrics=await chat.evaluate("({width:innerWidth,document_width:document.documentElement.scrollWidth,select_right:document.querySelector('.hps-model-selection select').getBoundingClientRect().right})");assert.equal(metrics.width,width);assert.equal(metrics.document_width,width);assert.ok(metrics.select_right<=width);record('width-'+width,{...metrics,zoom:factor});await shot('model-'+width);
   }
+  if(!layoutOnly){
   await app.evaluate(({BrowserWindow})=>{const w=BrowserWindow.getAllWindows()[0];w.show();w.focus();});
   await chat.evaluate("window.focus();document.querySelector('.hps-model-selection select').focus();window.modelKeys=[];document.addEventListener('keydown',e=>window.modelKeys.push({key:e.key,target:e.target.tagName}));document.addEventListener('change',e=>window.modelKeys.push({change:e.target.value}));");
   await window.keyboard.press('ArrowDown');await window.waitForTimeout(250);
@@ -54,6 +55,7 @@ export async function verifyModels({app,window,findContext,cases,out,live,upstre
   setZoom(2);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-2)<0.01,'200% zoom');await window.waitForTimeout(500);
   const enlarged=await chat.evaluate("({width:innerWidth,scroll:document.documentElement.scrollWidth,right:document.querySelector('.hps-model-selection select').getBoundingClientRect().right,bottom:document.querySelector('.hps-model-selection select').getBoundingClientRect().bottom,height:innerHeight})");assert.equal(enlarged.scroll,enlarged.width);assert.ok(enlarged.right<=enlarged.width);assert.ok(enlarged.bottom<=enlarged.height);record('zoom-200',enlarged);await shot('model-zoom-200');
   setZoom(1);await wait(async()=>Math.abs(await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0].webContents.getZoomFactor())-1)<0.01,'normal zoom');await window.waitForTimeout(300);
+  }
   await fill(chat,input,'아직 보내지 않은 초안');await choose(chat,'hypeproof-fast');assert.equal(await chat.evaluate("document.querySelector('.hps-input textarea').value"),'아직 보내지 않은 초안');await choose(chat,'hypeproof-default');record('draft-preserved',{pass:true});
   if(live){
    const send=async(prompt,expected,switchDuring,requestedAlias)=>{
