@@ -214,6 +214,34 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 
 > `hypeproofChat.coachRuntime = "agent-sdk"` 로 전환 시 코치를 Claude Agent SDK 위에서 구동. Phase 1: `@anthropic-ai/claude-agent-sdk` 가 실제 의존성으로 설치되어 있고(dev/extension-host 경로), worker 게이트웨이(`POST /v1/messages`, #316)로 라우팅된다. 아래 안전 계약은 pure helper 단위로 검증된다. Phase 2 부터 도구 정책의 canonical owner 는 **worker 프로필의 `sdk_tools`** 다 ([ADR 0003](adr/0003-agent-sdk-coach-runtime.md) / #283) — 클라이언트는 tier 로 파일 도구를 추론하지 않는다. 주의: SDK 는 플랫폼별 native `claude` 바이너리(~240 MB)를 optionalDependency 로 동반한다 — 패키징(.vsix/built-in)은 node_modules 를 포함하지 않으므로 그 경로에서는 REQ-M7 폴백이 동작하며, built-in 번들링 전략은 Phase-2+ 결정 사항이다.
 
+### 두 런타임은 같지 않다 — 어디가 다른지 한 곳에서 (#749, 2026-09-08 감사)
+
+같은 학생이 `coach_runtime` 에 따라 **다른 제품**을 쓴다. 그 차이를 매번 코드로 되짚느라
+2026-09-08 감사에서만 한 시간을 썼고, 그 사이 1번 이슈가 한쪽 경로에서 아직 안 고쳐진 채로
+발견됐다. 아래는 **길잡이 표**다 — 계약 자체는 각 행이 소유하고 여기서 반복하지 않는다
+(두 곳에 적으면 한쪽이 드리프트한다).
+
+**지금 아동 코호트 둘 다 `agent-sdk` 다** (`sk-biopharm-kids-s1`,
+`sk-biopharm-kids-2026-grade-5-6-s1`). 아래에서 "클라이언트" 라고 적힌 칸은 그 아이들에게
+Service 집행이 없다는 뜻이다.
+
+| 무엇 | proxy (`/v1/chat/completions`) | agent-sdk (`/v1/messages`) | 계약 |
+|---|---|---|---|
+| 도구 배열 | 워커가 **직접 만든다** | 클라이언트가 선언하고 **클라이언트가 실행한다** | REQ-M38, [ADR-0007](adr/0007-lesson-feature-binding.md) |
+| 수업 기능 좁히기 | 실제 경계 | 정상 클라이언트에만 유효 | REQ-M38 |
+| `web_search` · 브라우저 | 워커가 주입/생략 | 클라이언트 선언 | REQ-M38 |
+| 이미지 필터 (`input.image_paste`) | 워커가 거른다 | **없다** | [#811](https://github.com/jayleekr/hypeproof-studio/issues/811) (미해결) |
+| 잘림 안내 (max_tokens) | 워커가 끼워 넣는다 | 클라이언트가 낸다 (#749 이전엔 **없었다**) | REQ-M39 ⑥ |
+| 종료 오류 안내 | — | 클라이언트가 낸다 | REQ-M39 |
+| 모델 clamp | Service | Service (+ fast 예외) | REQ-M11, REQ-M36 |
+| system prompt | Service 교체 | Service 교체 | REQ-M10 |
+| 모더레이션 (미성년) | Service, 인바운드 | Service, 인바운드 | REQ-O2 — 아웃바운드 스트리밍은 **양쪽 다** 미구현이라 차이가 아니다 |
+| `asset_score` · citations | 워커가 주입 | **미주입** (배선만 있고 미구현) | REQ-M12 |
+
+**agent-sdk 좌석에서 Service 가 집행하는 것은 넷뿐이다**: 신뢰 게이트 · system prompt 교체 ·
+모델 clamp · `max_tokens`/effort 정규화. 나머지는 **클라이언트 무결성** 속성이다 —
+근거와 그 함의는 [ADR-0007 의 2026-09-08 amendment](adr/0007-lesson-feature-binding.md).
+
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
 | REQ-M1 | 프로필 → 도구 정책 매핑 (fail-closed) | `permittedToolsFor`: worker 프로필 `sdk_tools` 가 유일한 소스 — `read: true` → Read/Grep/Glob, `write: true` → Write/Edit. `sdk_tools` 부재/false → chat-only(`[]`), 워크숍 tier 라도 예외 없음 (tier 기반 추론 제거, #282 Phase 2) | U (`test/sdk-coach-helpers`) |
