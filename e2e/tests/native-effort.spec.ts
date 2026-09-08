@@ -3,6 +3,15 @@ import {launchApp, closeApp, chatFrame, startFrame} from '../fixtures/app';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
+const freshCalls = (calls:any[], previous:Set<unknown>) => calls.filter(c=>!previous.has(c.turn_id)&&c.path==='/v1/messages');
+
+test('delayed auxiliary requests remain with their original turn',()=>{
+  const old={turn_id:'old',path:'/v1/messages',effort:'low'}, current={turn_id:'current',path:'/v1/messages',effort:'high'};
+  expect(freshCalls([old,current,old],new Set(['old']))).toEqual([current]);
+  expect(freshCalls([old],new Set(['old']))).toEqual([]);
+  expect(freshCalls([old,current],new Set()).length).toBe(2);
+});
+
 test('course effort reaches the real model and survives UI transitions', async () => {
   test.setTimeout(900000);
   const ctx = await launchApp({preseedToken:true, preseedCoach:{name:'제작 파트너'}});
@@ -64,8 +73,8 @@ test('course effort reaches the real model and survives UI transitions', async (
         await details.getByRole('button',{name:'적용 기록 다시 확인'}).click();
         return await details.innerText();
       },{timeout:15000}).toContain('서버에서 확인된');
-      await expect.poll(()=>api().filter((c:any)=>!previousTurns.has(c.turn_id)).every((c:any)=>c.status!==null),{timeout:95000}).toBe(true);
-      const calls=api().filter((c:any)=>!previousTurns.has(c.turn_id)&&c.path==='/v1/messages');
+      await expect.poll(()=>freshCalls(api(),previousTurns).every((c:any)=>c.status!==null),{timeout:95000}).toBe(true);
+      const calls=freshCalls(api(),previousTurns);
       expect(new Set(calls.map((c:any)=>c.turn_id)).size).toBe(1);
       expect(calls.length).toBeGreaterThan(0);
       expect(calls.every((c:any)=>c.status===200&&c.model===expected&&c.effort===selected)).toBe(true);
