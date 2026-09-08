@@ -36,6 +36,10 @@ export class StartPage {
     panel.webview.html = this.chat.renderHtml(panel.webview, vscode.Uri.joinPath(this.context.extensionUri, "webview-ui", "dist"))
       .replace(/<html\b/, '<html data-surface="start"');
     panel.webview.onDidReceiveMessage((msg: StartRequest) => { void this.handle(msg); });
+    // #747 — the naming step happens in the chat panel; this tab is retained
+    // (retainContextWhenHidden), so re-read the identity whenever it comes back
+    // to the front instead of showing the name from before the rename.
+    panel.onDidChangeViewState(e => { if (e.webviewPanel.active) void this.refresh(); });
     panel.onDidDispose(() => { if (this.panel === panel) this.panel = undefined; });
     this.context.subscriptions.push(panel);
   }
@@ -48,8 +52,11 @@ export class StartPage {
       error: this.error ?? (!p ? this.chat.profileFailure()?.friendly : undefined),
       version: this.context.extension.packageJSON.version,
       workspace: vscode.workspace.workspaceFolders?.[0]?.name,
-      ...(p ? { profile: { id: p.profile_id, name: p.lesson?.content.title ?? p.display_name,
-        coach: p.ux.coach.naming_mode === "fixed" ? p.ux.coach.fallback_name : "직접 이름 짓는 코치",
+      ...(p ? { coachName: this.chat.coachDisplayName(p), profile: { id: p.profile_id, name: p.lesson?.content.title ?? p.display_name,
+        // #747 — the row is labelled "AI 이름", so it shows the name the rest of
+        // the card uses. A student-named cohort that has not been named yet
+        // describes the mode instead of showing the placeholder as a name.
+        coach: this.chat.coachNameIsChosen(p) ? this.chat.coachDisplayName(p) : "직접 이름 짓는 코치",
         series: p.lesson?.version ?? `${p.series_index} / ${p.series_total}`, workspace: p.workspace_root ?? "현재 작업 폴더" } } : {}),
     };
     await this.panel?.webview.postMessage({ type: "startState", state });

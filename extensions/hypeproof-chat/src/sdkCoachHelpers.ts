@@ -12,6 +12,7 @@
 
 // Type-only import — erased at build/strip time, so this file stays a leaf
 // module that Node can run standalone in the smoke tests.
+import { stallNotice } from "./coachIdentity.ts";
 import type {
   AgentDefinition,
   Options as AgentSdkOptions,
@@ -1051,8 +1052,7 @@ export const SDK_STREAM_STALL_MS = 240_000;
  * what to do, never shows a technical reason. Retrying is the real recovery —
  * the aborted turn leaves no server-side state behind.
  */
-export const SDK_STALL_FRIENDLY =
-  "코치 응답이 너무 오래 걸려요. 다시 한 번 보내주세요. 🕐";
+export const SDK_STALL_FRIENDLY = stallNotice();
 
 /**
  * 턴 예산을 다 썼을 때 학생이 보는 줄.

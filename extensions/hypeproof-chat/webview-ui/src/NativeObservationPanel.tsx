@@ -4,7 +4,8 @@ import type {
   ObservationBatch,
   ObservationFinding,
 } from "../../src/nativeObservationContract";
-export function NativeObservationPanel({ scope }: { scope?: string }) {
+import { DEFAULT_COACH_NAME, observationIntro } from "../../src/coachIdentity";
+export function NativeObservationPanel({ scope, coachName = DEFAULT_COACH_NAME }: { scope?: string; coachName?: string }) {
   const activeScope = useRef<string | null>(scope ?? null);
   const [assessedCount,setAssessedCount]=useState<number|undefined>();
   const [learningPath, setLearningPath] = useState<{
@@ -52,7 +53,7 @@ export function NativeObservationPanel({ scope }: { scope?: string }) {
     <details className="hps-native-observation">
       <summary>내 작업 돌아보기</summary>
       <p>
-        내가 요청한 내용과 코치·도구가 수행한 일을 나누어 확인합니다. 관찰은
+        {observationIntro(coachName)} 관찰은
         점수나 능력 인증이 아닙니다.
       </p>
       <button onClick={() => postToHost({ type: "observationOpen" })}>

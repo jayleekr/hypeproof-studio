@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { StartState } from "../../src/startPageProtocol";
 import { onHostMessage, postToHost } from "./vscode";
+import { startPageCopy } from "../../src/coachIdentity";
 import { Brand } from "./Brand";
 import "./start.css";
 
@@ -26,6 +27,7 @@ export function StartPage() {
     // A submitted credential is never retained in the document, VS Code state or storage.
     setToken("");
   };
+  const copy = startPageCopy(state.coachName);
   return <main className="studio-start">
     <header className="studio-top"><Brand/><nav className="studio-nav" aria-label="Studio 탐색"><button onClick={() => postToHost({ type: "openStudioFiles" })}>파일</button><button onClick={() => postToHost({ type: "openStudioSettings" })}>설정</button></nav></header>
     <div className="studio-main">
@@ -35,17 +37,17 @@ export function StartPage() {
         <p className="studio-lead">목표를 정하고, AI와 함께 만들고,<br className="studio-wide"/> 결과를 검토하는 나만의 작업 공간.</p>
         <div className="studio-process" aria-label="목표 정하기, 함께 만들기, 직접 검토하기">
           <div><span>01</span><strong>목표 정하기</strong><p>무엇을 바꾸고 싶은가요?</p></div>
-          <div><span>02</span><strong>함께 만들기</strong><p>코치와 작은 시도부터.</p></div>
+          <div><span>02</span><strong>함께 만들기</strong><p>{copy.stepTwo}</p></div>
           <div><span>03</span><strong>직접 검토하기</strong><p>결과를 확인하고 내 것으로.</p></div>
         </div>
       </section>
       <section className="studio-connect" aria-labelledby="connect-title" aria-busy={state.checking}>
         <div className="studio-card-top"><span className="studio-step">GET STARTED</span><span className="studio-dot"/></div>
-        <h2 id="connect-title">{state.profile && !editing ? (state.started ? "코치와 작업을 시작하세요" : "이 수업으로 시작할까요?") : "내 수업에 연결하기"}</h2>
-        <p className="studio-card-description">{state.profile && !editing ? (state.started ? "코치 채팅을 열었습니다. 채팅 입력창에 만들고 싶은 것을 적어주세요." : "수업과 코치를 확인한 뒤 작업을 시작하세요.") : "발급받은 참여 코드를 붙여넣으세요. 연결할 수업을 먼저 확인할 수 있습니다."}</p>
+        <h2 id="connect-title">{state.profile && !editing ? (state.started ? copy.startedTitle : "이 수업으로 시작할까요?") : "내 수업에 연결하기"}</h2>
+        <p className="studio-card-description">{state.profile && !editing ? (state.started ? copy.startedDescription : copy.confirmDescription) : "발급받은 참여 코드를 붙여넣으세요. 연결할 수업을 먼저 확인할 수 있습니다."}</p>
         {state.profile && !editing ? <>
-          <div className="studio-course"><span className="studio-verified">연결된 수업</span><h3>{state.profile.name}</h3><dl><div><dt>코치</dt><dd>{state.profile.coach}</dd></div><div><dt>회차</dt><dd>{state.profile.series}</dd></div><div><dt>수업 작업 폴더</dt><dd>{state.profile.workspace}</dd></div></dl></div>
-          <button className="studio-primary" disabled={state.checking} onClick={() => { setState(s => ({ ...s, checking: true, error: undefined })); postToHost({ type: "beginCourse" }); }}>{state.checking ? "수업 여는 중…" : state.started ? "코치와 계속 작업하기" : "수업 시작하기"} <span aria-hidden="true">↗</span></button>
+          <div className="studio-course"><span className="studio-verified">연결된 수업</span><h3>{state.profile.name}</h3><dl><div><dt>{copy.coachRowLabel}</dt><dd>{state.profile.coach}</dd></div><div><dt>회차</dt><dd>{state.profile.series}</dd></div><div><dt>수업 작업 폴더</dt><dd>{state.profile.workspace}</dd></div></dl></div>
+          <button className="studio-primary" disabled={state.checking} onClick={() => { setState(s => ({ ...s, checking: true, error: undefined })); postToHost({ type: "beginCourse" }); }}>{state.checking ? "수업 여는 중…" : state.started ? copy.continueButton : "수업 시작하기"} <span aria-hidden="true">↗</span></button>
           <div className="studio-course-actions"><button className="studio-text-button" onClick={() => setEditing(true)} disabled={state.checking}>다른 수업에 연결</button><button className="studio-text-button" onClick={() => postToHost({ type: "disconnectCourse" })} disabled={state.checking}>연결 해제</button></div>
         </> : <form onSubmit={connect}>
           <label htmlFor="course-code">수업 참여 코드</label>
@@ -63,6 +65,7 @@ export function StartPage() {
   </main>;
 }
 
-export function DisconnectedChat({ open }: { open: () => void }) {
-  return <main className="studio-disconnected"><Brand/><h1>시작할 준비가 됐나요?</h1><p>수업을 연결하면 이곳에서<br/>내 코치와 작업을 이어갈 수 있습니다.</p><button className="studio-primary" onClick={open}>시작 화면 열기 <span aria-hidden="true">↗</span></button></main>;
+export function DisconnectedChat({ open, coachName }: { open: () => void; coachName?: string }) {
+  const [lead1, lead2] = startPageCopy(coachName).disconnectedLead.split("\n");
+  return <main className="studio-disconnected"><Brand/><h1>시작할 준비가 됐나요?</h1><p>{lead1}<br/>{lead2}</p><button className="studio-primary" onClick={open}>시작 화면 열기 <span aria-hidden="true">↗</span></button></main>;
 }

@@ -1,3 +1,4 @@
+import { imageAttachPrompt } from "./coachIdentity.ts";
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
@@ -424,7 +425,7 @@ export async function activate(context: vscode.ExtensionContext) {
         if (!/\.(png|jpe?g|gif|webp)$/i.test(uri.fsPath)) continue;
         const name = uri.path.split("/").pop() ?? "이미지";
         const pick = await vscode.window.showInformationMessage(
-          `🖼 방금 연 이미지 "${name}"를 코치 채팅에 붙일까요?`,
+          imageAttachPrompt(provider.coachDisplayName(), name),
           "붙이기",
         );
         if (pick !== "붙이기") continue;
