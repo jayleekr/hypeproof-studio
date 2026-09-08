@@ -1,0 +1,32 @@
+[
+  {
+    "id": "cursor-browser-vendor-demo",
+    "file": "cursor-browser-vendor-demo.png",
+    "kind": "vendor-illustration",
+    "sourcePage": "https://cursor.com/docs/agent/tools/browser",
+    "imageUrl": "https://image.mux.com/SUtXsaFq4FV5xh5014P5wAU163tGojX4zoHQH009jWAbI/thumbnail.webp",
+    "scope": "Screenshot of a vendor-provided illustration, not our authenticated agent session",
+    "capturedAt": "2026-09-08T06:18:42.496Z",
+    "sha256": "23bd84569f582f37c3a82355c4d7986b8b6cc40c0302af6a569b666f352479cf"
+  },
+  {
+    "id": "replit-vendor-takeover",
+    "file": "replit-vendor-takeover.png",
+    "kind": "vendor-illustration",
+    "sourcePage": "https://docs.replit.com/features/agent/app-testing",
+    "imageUrl": "https://mintcdn.com/replit/kVUdilkonY2o8_tu/images/replitai/app-testing-takeover.png?w=840&fit=max&auto=format&n=kVUdilkonY2o8_tu&q=85&s=8bb1b8290224c8652f9ecf7337255eef",
+    "scope": "Screenshot of a vendor-provided illustration, not our authenticated agent session",
+    "capturedAt": "2026-09-08T06:18:42.708Z",
+    "sha256": "90995636b64f9f5fb73d348645a7ff3fb27d20af2382eb7c6a67a4e452f01080"
+  },
+  {
+    "id": "replit-vendor-replay",
+    "file": "replit-vendor-replay.png",
+    "kind": "vendor-illustration",
+    "sourcePage": "https://docs.replit.com/features/agent/app-testing",
+    "imageUrl": "https://mintcdn.com/replit/fq3p5W3K0mVwvlo1/images/replitai/app-testing-replay-photo.png?w=840&fit=max&auto=format&n=fq3p5W3K0mVwvlo1&q=85&s=d784b6c5a0bdb723fda722f78d3929bd",
+    "scope": "Screenshot of a vendor-provided illustration, not our authenticated agent session",
+    "capturedAt": "2026-09-08T06:18:42.906Z",
+    "sha256": "656034df879082800becaca877f7022a2624726e5e1d8de63fefbcea6982d9bd"
+  }
+]
