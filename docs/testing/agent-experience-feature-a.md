@@ -1,12 +1,13 @@
 # Epic #746 기능 A 인수·인계
 
-상태: 후보 인수 **FAIL — 입력창 6px 가로 넘침**. 이름 전달·실제 응답·오류/Stop 입력 보존은 아래 범위에서 확인. 2026-09-08.
+상태: 발견한 입력창 6px 가로 넘침을 수정·재검수했다. 기능 A는 아래 실행 범위에서 확인했으며 전체 AE-07/08은 PARTIAL이다. 2026-09-08.
 
 ## 기준과 담당
 
 - 상위 [#746](https://github.com/jayleekr/hypeproof-studio/issues/746)의 두 세션 분담을 따른다.
 - 구현: [PR #759](https://github.com/jayleekr/hypeproof-studio/pull/759), 제출 `f7afd4a76171e3774ecf2410438ab5057772b036`, base `fe6f7b5`.
 - 검수 코드: `db615dee97e0d402eaf3b1b9e2d892ca471827fc`. 최초 baseline은 `6684bd1` (제품 base `7f41c104`).
+- 입력창 수정: `bb6efac52d53a2aec1e16aae9930ff21b608dccf`; 재검수 코드 `939dab82e6fc7472d24fd9f1e94ce2fc64d1c7f1`.
 - 설계: [293d4b5](https://github.com/jayleekr/hypeproof-studio/commit/293d4b5), PR #753. Lab 철학 `6845cdb4`를 포함하며 기존 P0 30개를 유지한다.
 - Codex: 이 인수 문서, `e2e/lesson-studio/**`, 실제 화면·통합 판정. 브랜치 `chore/epic-746-review-a` (구현 #759를 base로 하는 검수 전용 PR).
 - Claude: Chalk/Service/extension 구현·기존 단위/계약 테스트·필요한 schema ADR. 구현 파일 담당은 이동하지 않았다.
@@ -56,12 +57,12 @@ AI 응답은 실제 Agent SDK→Anthropic이며, 오류 400과 응답 지연은 
 | A2 | PASS — 헤더·title·답변 라벨·실제 응답·AI 고지 | 모든 이름 표면·스크린리더는 미검증 |
 | A3 | PARTIAL — 같은 사용자의 A→B→A/동일 코드 재연결, 별명 우선순위, 권한 불변 | 앱 재시작·과거 정체성 보존은 미검증. 과거 답변 라벨이 현재 이름으로 바뀌는 것은 실제 관측 |
 | A4 | PARTIAL — 기존 수업 기본 이름 및 25개 Service 계약 검사 PASS | ADR의 구버전 앱/Service 표는 실제 조합을 실행한 결과가 아님 |
-| A5 | FAIL — 헤더는 정상이나 390/1280px에서 입력창 6px 초과 | 구현 담당에게 재현 전달. 200% 확대·Tab→Clear는 확인; 전체 키보드 동선/대비 판정 아님 |
+| A5 | 폭 수정 재검수 PASS — 390/1280px 문서 폭 일치, 넘친 요소 없음 | 200% 확대·Tab→Clear도 재확인; 전체 키보드 동선/대비 판정 아님 |
 | A6 | PARTIAL — 400/Stop에서 보낸 요청·미전송 후속 입력·현재 이름 보존 | 503 자동 복구·과거 실행 정체성은 미검증 |
 | D0~D4 전체/AE-T36 | NOT RUN | 실제 모델/도구/검수/복구/공유/재열기 연결 |
 
-다음 인계: Claude는 입력창 가로 넘침을 E1 UI 단위에서 수정하고 정확한 SHA를 제출한다.
-Codex는 같은 390/1280px 검사로 재검수한다. 기능 B의 승인·시작·관찰 등 이름 표면과 E7의
+다음 인계: Codex가 스타일 한 선언의 담당 이전을 먼저 기록하고 `bb6efac`로 수정·재검수했다.
+Claude의 B에는 동일 선언을 중복 적용하지 않도록 수정 SHA를 인계한다. 기능 B의 승인·시작·관찰 등 이름 표면과 E7의
 실제 모델 표시는 각 후보 제출 이후 별도 검수한다. 전체 AE-07/08 완료로 닫지 않는다.
 
 ## 재현 조건
@@ -88,5 +89,8 @@ node --env-file="$HPS_ACCEPT_PRIMARY/worker/.dev.vars" \
 ```
 
 원본 로그는 gitignored run 디렉터리에, 검토한 합성 화면·비밀 없는 요약은 위 증거 문서에 남긴다.
+수정 후 폭만 재현하려면 checkout/`HPS_LESSON_EXPECT_SHA`를 `939dab82e6fc7472d24fd9f1e94ce2fc64d1c7f1`,
+`HPS_LESSON_PRODUCT_SHA`를 `bb6efac52d53a2aec1e16aae9930ff21b608dccf`, `HPS_LESSON_LIVE=0`으로
+설정하고 그 checkout의 webview를 다시 빌드·주입한다. 실제 모델/400/Stop 결과는 원본 실행에 남아 있다.
 Service 키는 앱 자식 프로세스에서 제외한다. 원문 토큰/키·학생 데이터는 기록하지 않는다.
 디버그 포트 9347 충돌은 해당 실행을 시작하지 않고 해결한다. baseline 통과를 후보 기능 PASS로 쓰지 않는다.

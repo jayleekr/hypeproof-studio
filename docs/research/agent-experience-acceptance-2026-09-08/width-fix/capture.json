@@ -1,0 +1,24 @@
+{
+  "source_run": "e2e/test-results/agent-experience/20260908T155519Z-width-fix",
+  "submitted_product_sha": "bb6efac52d53a2aec1e16aae9930ff21b608dccf",
+  "verification_sha": "939dab82e6fc7472d24fd9f1e94ce2fc64d1c7f1",
+  "capture": "Electron capturePage; actual isolated installed-app copy; no editing",
+  "review": "Codex visually inspected these three images on 2026-09-08; no human learner acceptance",
+  "files": [
+    {
+      "file": "long-name-390.png",
+      "sha256": "52758036d58f46100d44ebe157aaa025bc8d23098df68f3603d600f8b999d608",
+      "bytes": 608806
+    },
+    {
+      "file": "long-name-1280.png",
+      "sha256": "50392bb6044d546ea461ce9619faca1c78e3ceb01f9bc4e841d694df5d4967a3",
+      "bytes": 581774
+    },
+    {
+      "file": "long-name-zoom-200.png",
+      "sha256": "4d9e87688af7a2ddccacdb1297c21558b90e33ffb1ff030b2728cf79c5d79137",
+      "bytes": 590207
+    }
+  ]
+}

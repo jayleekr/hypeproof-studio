@@ -1,6 +1,7 @@
 # Epic #746 실제 앱 검수 — 기능 A
 
-2026-09-08. **후보 `f7afd4a`의 종합 인수는 FAIL: 채팅 입력창이 6px 넘친다.**
+2026-09-08. **후보 `f7afd4a`에서 발견한 6px 넘침을 `bb6efac`에서 수정하고 실제 앱으로 재확인했다.**
+아래 원본 실패 증거는 유지한다. [수정 후 결과](#입력창-수정-재검수)는 390/1280px 모두 PASS다.
 고정 이름 전달·실제 모델 응답·수업 전환·오류/Stop 후 입력 보존은 아래 실행 범위에서 통과했다.
 이름 설정 전체, 전체 E1 또는 학습 효과가 검증됐다는 뜻은 아니다.
 
@@ -64,3 +65,30 @@ Electron zoom만 직접 바꾸던 runner를 Studio 설정 변경·native capture
 NOT RUN: 구버전 앱/새 Service 실기 조합(ADR 표만 검토), 앱 종료 후 재열기, 모든 이름 표면,
 스크린리더·Windows UX, Cursor 인증 후 동일 과제 비교, 다중 모델 실행, Browser/Computer Use,
 수업 전체 AE-T36, 실제 강사·학습자 리허설. 이 검수는 배포·머지 승인이 아니다.
+
+## 입력창 수정 재검수
+
+수정 `bb6efac52d53a2aec1e16aae9930ff21b608dccf`는 원 후보 위에
+`.hps-input textarea { box-sizing: border-box; }`만 추가한다. padding·border가
+`width: 100%`에 포함되면서 6px 초과가 사라진다. 판단 기준을 완화하지 않았다.
+
+검수 SHA `939dab82e6fc7472d24fd9f1e94ce2fc64d1c7f1`, run
+`e2e/test-results/agent-experience/20260908T155519Z-width-fix`.
+별도 앱 사본의 webview만 다시 빌드·주입하고 실제 Studio에서 재검수했다.
+Service/SDK/계약 소스는 그대로이므로 이 재검수는 모델을 다시 호출하지 않았다.
+
+| 실제 채팅 폭 | 수정 전 문서 폭 | 수정 후 문서 폭 | 넘친 요소 | 실제 화면 |
+|---|---|---|---|---|
+| 390px | 396px | 390px | 없음 | [수정 후 390px](width-fix/long-name-390.png) |
+| 1280px | 1286px | 1280px | 없음 | [수정 후 1280px](width-fix/long-name-1280.png) |
+
+[200% 확대·Tab 포커스](width-fix/long-name-zoom-200.png)도 다시 열어 확인했다.
+현재 이름 전환·HTML 텍스트·기존 수업을 포함한 이 실행의 10개 검사는 통과했다.
+[환경](width-fix/environment.json), [결과](width-fix/identity-result.json), [이미지 해시](width-fix/capture.json).
+이것으로 전체 접근성·과거 정체성·학습 효과까지 완료하지 않는다.
+
+협업 관찰: 제품 후보가 오기 전에는 baseline과 인수 조건을 준비했고, 제출 후에는 정확한 SHA를
+검수했다. 첫 실행에서 수업 시작·확대 측정·SQLite 범위를 보완하는 왕복이 있었다.
+CSS 담당 이전을 기록한 뒤 동일한 수정이 Claude 작업 트리에도 나타났다. 이슈 댓글 전달 지연이
+중복 수정의 원인이 될 수 있어 같은 선언을 두 번 합치지 않도록 수정 SHA를 공통으로 인계했다.
+다음 단위는 파일 담당 기록을 확인한 뒤 시작한다. 시간 절감·효율 개선 수치는 측정하지 않았다.
