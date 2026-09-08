@@ -88,6 +88,30 @@ P1 연구/사회적 교정 범위이며 기존 P0 30개 행의 게이트를 변�
 | AE-T37 | AE-43/34 | 같은 결과에 대한 AI 검토·허용된 인간 반론·무피드백을 구분. 학생의 수정/유지/둘 다 보류, 공유 거절·철회·만료·타 수업 접근을 확인. 출처 일치·권한 우회 0, 사람 없는 경우 social correction PASS 금지 | 기존 공유+관찰+사람 실습 / NOT RUN |
 | AE-T38 | AE-44/24/42 | AI 도움 조건과 초기 기준을 기록하고 다른 문제·후속 시점의 결함 탐지/오탐·확신·위임 이유를 관찰. 과제/순서/경험/접근성 지원을 기록하고 비교 불가·중단은 미확인. 더 빠른 산출물·AI 작성 설명만으로 판단 성장 PASS 금지 | 사전/후속 관찰+전이 연구 / NOT RUN |
 
+## E7 첫 계약 검토에서 확인한 경계 · 2026-09-08
+
+ADR-0006은 제안이며 수업 모델 정책 구현 완료가 아니다. 기존 clamp를 직접 실행한
+[반례 원본](../research/agent-experience-acceptance-2026-09-08/model-policy/default-only-counterexample.json)은
+검수 `5eb3f7f`의 깨끗한 checkout에서 생성했다. `model.default`만 있고 fallback이 없는
+프로필에서도 `hypeproof-fast`와 `claude-any-haiku-example` 요청은 `claude-haiku-4-5`로 해석됐다.
+default/strong 요청이 sonnet으로 해석되는 정상 대조군도 함께 실행했다.
+
+이는 **기존 순수 resolver의 반례 재현 PASS**이며 실제 확정 수업/인증/모델 요청이나 AE-T19
+통합 PASS가 아니다. 재현은 `node --experimental-strip-types e2e/lesson-studio/model-policy-probe.mjs`.
+기존 `worker/test/harness/loader.mjs`를 사용하고 공급자 API/운영 상태를 호출하지 않는다.
+
+다음 구현의 인수 시나리오는 기존 AE-T를 유지하며 아래 대조를 포함해야 한다. 전부 **PLANNED**다.
+
+| 기존 시나리오 | 계약을 구현할 때 확인할 추가 경계 |
+|---|---|
+| AE-T19 | `{fast}`뿐 아니라 `{default}` 고정 수업에서 직접 fast alias/raw haiku id 요청을 보낸다. 보조 호출의 신뢰 가능한 출처와 별도 허용/예산이 없다면 “단일 모델로 제한”했다고 표시하지 않는다. 단순 요청 문자열로 보조 호출을 가장할 수 없어야 함 |
+| AE-T20/21 | proxy는 응답 헤더·usage, SDK는 실제 `SdkUsageEvent`의 요청별 model을 관찰한다. SDK 호스트가 proxy 응답 헤더를 읽는다고 가정하지 않는다. 실행기·공급자·모델의 출처가 없으면 unknown; 여러 요청을 한 개 모델의 확정 근거로 합치지 않음 |
+| AE-T20/21 | SDK 부재로 proxy로 내려갈 때에도 수업의 provider/runtime/model 허용 교집합과 기능 제한을 다시 확인한다. 표시 id만으로 공급자나 도구 능력을 추정하지 않음 |
+| AE-T25 | 같은 frozen lesson을 유지한 채 alias map/catalog revision을 바꾸는 대조군을 포함한다. 실제 요청 없이 새 매핑을 과거 버전의 허용 모델이라고 재해석하지 않으며 저장된 provider/id/revision과 재리허설·새 버전 경계를 검수 |
+
+REQ-K1/M11/M14는 현재 구현의 설정·fast 예외·실제 런타임 선택을 명확히 하도록 정정했다.
+이 문서 보완은 AE 요구사항 44개·AE-T 38개나 P0 범위를 줄이지 않는다.
+
 ## 경쟁 비교 실험 프로토콜
 
 합성 홈페이지 A(정상), B(미리 심은 결함 4종)를 시작 파일 해시로 고정한다.
