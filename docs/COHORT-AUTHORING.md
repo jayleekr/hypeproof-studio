@@ -90,6 +90,10 @@ export const profile: Profile = {
       naming_prompt_md: "...",
       personality_prompt_md: "...",
       revisit_on_entry: bool,
+      // A frozen Chalk lesson with `assistant.display_name` overrides this block
+      // in the served /v1/profile as { naming_mode: "fixed", fallback_name } for
+      // seats delivered from that version (ADR-0005). The compiled profile is
+      // unchanged; the override is display-only.
     },
     suggestions: {
       initial: [
