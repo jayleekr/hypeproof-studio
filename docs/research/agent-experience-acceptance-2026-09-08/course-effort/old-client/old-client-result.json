@@ -1,0 +1,31 @@
+{
+  "status": "PASS",
+  "calls": [
+    {
+      "model": "claude-sonnet-4-6",
+      "effort": "medium",
+      "thinking": null,
+      "turn_id": null,
+      "requested_effort": null,
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011Cerdwo5D2x66AjUYZ5K36",
+      "elapsed_ms": 3365
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "effort": "medium",
+      "thinking": "adaptive",
+      "turn_id": null,
+      "requested_effort": null,
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011Cerdwo3UahNjuktnZP4v4",
+      "elapsed_ms": 1903
+    }
+  ],
+  "scope": "untouched v0.1.56 + new local Service + synthetic frozen effort course",
+  "visual_review": "PENDING"
+}

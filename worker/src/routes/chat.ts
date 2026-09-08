@@ -1,3 +1,5 @@
+import { applyRequestEffort, EffortPolicyError, type EffortReceipt } from '../lib/model-effort';
+import { persistRequestSettings, readRequestSettings, validTurnId } from '../lib/request-settings';
 import { servedModelSelection } from '../lib/lesson-model-policy';
 import {nativeObservationScope} from '../lib/native-observation-scope';
 // POST /v1/chat/completions
@@ -166,6 +168,18 @@ chat.get("/worlds/:id", async (c) => {
   try { html = renderWorld(id); } catch (e) { return c.json({ error: { message: String(e), type: "config", code: "world_render_failed", request_id: c.get("requestId") } }, 500); }
   if (!html) return c.json({ error: { message: "unknown world", type: "config", code: "unknown_world", request_id: c.get("requestId") } }, 404);
   return new Response(html, { status: 200, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
+});
+
+chat.get('/request-settings/:turn', async c => {
+  const gate = await gateChatRequest(c);
+  if (!gate.ok) return gate.response;
+  c.header('cache-control','no-store');
+  const turn = c.req.param('turn');
+  if (!validTurnId(turn)) return c.json({error:'invalid turn id'},400);
+  try {
+    const rows = await readRequestSettings(c.env,gate.payload,turn);
+    return c.json({requests:rows.results.slice(0,100),truncated:rows.results.length>100});
+  } catch { return c.json({error:'request settings unavailable'},503); }
 });
 
 chat.get("/profile", async (c) => {
@@ -420,6 +434,9 @@ chat.post("/chat/completions", async (c) => {
   // before provider selection still attributes to something truthful; the
   // upstream branches overwrite it with the id actually sent.
   let modelLabel: string = profile.model.default;
+  let effortReceipt: EffortReceipt | undefined;
+  // Diagnostic IDs can share a CF-Ray prefix; settings need one unique ID per request.
+  const settingsRequestId = crypto.randomUUID();
   const mkLog = (
     tokens_in: number,
     tokens_out: number,
@@ -444,6 +461,7 @@ chat.post("/chat/completions", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
     c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
   };
@@ -558,6 +576,9 @@ chat.post("/chat/completions", async (c) => {
   // modelLabel is hoisted above (#684) so failure rows still name a model.
   let fellBack = false;
   try {
+    if (provider !== "anthropic" && c.req.header("x-hps-effort") !== undefined) {
+      throw new EffortPolicyError("이 모델은 처리 수준 선택을 지원하지 않습니다.");
+    }
     if (provider === "gemini") {
       const gBody = translateOpenAI(body as any, profile, coach, "gemini");
       gBody.stream = stream;
@@ -608,12 +629,18 @@ chat.post("/chat/completions", async (c) => {
       // Biopharm class is absorbed invisibly instead of dying on a child's
       // screen. The gemini branch above already had callGeminiResilient; this
       // brings the prod (anthropic) path to parity. No model fallback here.
-      upstream = await callAnthropicResilient(aBody, apiKey, {
+      const effective = applyRequestEffort(aBody as unknown as Record<string,unknown>, profile, modelLabel, c.req.header('x-hps-effort'));
+      effortReceipt = effective.receipt;
+      upstream = await callAnthropicResilient(effective.body as unknown as typeof aBody, apiKey, {
         url: env.ANTHROPIC_PROXY_URL,
         proxySecret: env.ANTHROPIC_PROXY_SECRET,
       });
     }
   } catch (err) {
+    if (err instanceof EffortPolicyError) {
+      recordFailure(403, ERROR_KIND.BAD_REQUEST);
+      return c.json({error:{type:'permission_error',message:err.message,code:'effort_not_allowed'}},403);
+    }
     // #257 — translation/fetch errors can embed upstream URLs, header names,
     // or body shapes. Log full, return generic.
     console.error(`[${c.get("requestId")}] upstream call failed:`, err);

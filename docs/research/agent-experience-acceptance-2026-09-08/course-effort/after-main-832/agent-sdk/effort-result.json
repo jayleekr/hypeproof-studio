@@ -1,0 +1,606 @@
+{
+  "status": "PASS_EXECUTED_CASES",
+  "checks": [
+    {
+      "keyboard": "ArrowDown selects high",
+      "unsupported": "Haiku has no control",
+      "draft_preserved": true,
+      "model_change": "course default restored"
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "scroll": 390,
+        "right": 131.6484375,
+        "bottom": 285.5,
+        "height": 409
+      },
+      "composer": {
+        "bottom": 401,
+        "height": 409
+      },
+      "zoom": 2
+    },
+    {
+      "viewport": {
+        "width": 1280,
+        "scroll": 1280,
+        "right": 131.8984375,
+        "bottom": 758,
+        "height": 881
+      },
+      "composer": {
+        "bottom": 873,
+        "height": 881
+      },
+      "zoom": 1
+    },
+    {
+      "alias": "hypeproof-default",
+      "selected": "low",
+      "calls": [
+        {
+          "model": "claude-sonnet-4-6",
+          "effort": "low",
+          "thinking": null,
+          "turn_id": "6372f771-d3b4-4caa-83fc-d77bc9f7e438",
+          "requested_effort": "low",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfJtQszbMULCyQvkVwf",
+          "elapsed_ms": 2114
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "effort": "low",
+          "thinking": "adaptive",
+          "turn_id": "6372f771-d3b4-4caa-83fc-d77bc9f7e438",
+          "requested_effort": "low",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfJtUMVCXX3JxZdQ58o",
+          "elapsed_ms": 1340
+        }
+      ],
+      "records": [
+        {
+          "request_id": "73339974-d8ac-4ca6-9725-f481b6715e52",
+          "model": "claude-sonnet-4-6",
+          "requested": "low",
+          "applied": "low",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:27"
+        },
+        {
+          "request_id": "1412313a-f0a5-448d-a3a9-047ee36ccd6b",
+          "model": "claude-sonnet-4-6",
+          "requested": "low",
+          "applied": "low",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:28"
+        }
+      ],
+      "next_request_only": true
+    },
+    {
+      "alias": "hypeproof-default",
+      "selected": "high",
+      "calls": [
+        {
+          "model": "claude-sonnet-4-6",
+          "effort": "high",
+          "thinking": null,
+          "turn_id": "8e8a3fc2-a112-40b5-8cd4-c48ce377a8be",
+          "requested_effort": "high",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfK5zu2TACNaUEEtkm6",
+          "elapsed_ms": 3121
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "effort": "high",
+          "thinking": "adaptive",
+          "turn_id": "8e8a3fc2-a112-40b5-8cd4-c48ce377a8be",
+          "requested_effort": "high",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfK68LWmXcjGexpvrPR",
+          "elapsed_ms": 984
+        }
+      ],
+      "records": [
+        {
+          "request_id": "5d563152-c46d-4e8e-a47b-a6f54b1353e4",
+          "model": "claude-sonnet-4-6",
+          "requested": "high",
+          "applied": "high",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:30"
+        },
+        {
+          "request_id": "4467ba97-5c9c-447c-abc7-fc7a58ff5f7f",
+          "model": "claude-sonnet-4-6",
+          "requested": "high",
+          "applied": "high",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:32"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "alias": "claude-sonnet-5",
+      "selected": "medium",
+      "calls": [
+        {
+          "model": "claude-sonnet-5",
+          "effort": "medium",
+          "thinking": "disabled",
+          "turn_id": "25d0729c-1e6f-4c19-9e80-369bfe2d7fde",
+          "requested_effort": "medium",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfKQTeaLRoHyqyL5i9n",
+          "elapsed_ms": 1405
+        },
+        {
+          "model": "claude-sonnet-5",
+          "effort": "medium",
+          "thinking": "adaptive",
+          "turn_id": "25d0729c-1e6f-4c19-9e80-369bfe2d7fde",
+          "requested_effort": "medium",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfKR4N6aGfj1bB5oxcz",
+          "elapsed_ms": 1550
+        }
+      ],
+      "records": [
+        {
+          "request_id": "76baff9d-8e75-4f32-b7cb-8ba6fd4511ee",
+          "model": "claude-sonnet-5",
+          "requested": "medium",
+          "applied": "medium",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:34"
+        },
+        {
+          "request_id": "f72cc9a4-416f-4285-b661-b5a49287b46a",
+          "model": "claude-sonnet-5",
+          "requested": "medium",
+          "applied": "medium",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:35"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "alias": "claude-opus-4-5-20251101",
+      "selected": "low",
+      "calls": [
+        {
+          "model": "claude-opus-4-5-20251101",
+          "effort": "low",
+          "thinking": "disabled",
+          "turn_id": "700f743c-62c6-463f-9fdf-4c4b97c3d101",
+          "requested_effort": "low",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfKafZhigejnvwY18QD",
+          "elapsed_ms": 1128
+        },
+        {
+          "model": "claude-opus-4-5-20251101",
+          "effort": "low",
+          "thinking": "enabled",
+          "turn_id": "700f743c-62c6-463f-9fdf-4c4b97c3d101",
+          "requested_effort": "low",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfKaj35LbWpGw6Brwtx",
+          "elapsed_ms": 1791
+        }
+      ],
+      "records": [
+        {
+          "request_id": "d22050dd-54e4-4d4b-b9f8-ee8989c6965c",
+          "model": "claude-opus-4-5-20251101",
+          "requested": "low",
+          "applied": "low",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:37"
+        },
+        {
+          "request_id": "d1446276-9cb9-48d2-8abc-22160c8e75a6",
+          "model": "claude-opus-4-5-20251101",
+          "requested": "low",
+          "applied": "low",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:38"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "alias": "claude-opus-5",
+      "selected": "high",
+      "calls": [
+        {
+          "model": "claude-opus-5",
+          "effort": "high",
+          "thinking": null,
+          "turn_id": "43736944-1d11-4c14-ba1d-e8c06c6163c7",
+          "requested_effort": "high",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfKqX2eEabDmgzehio4",
+          "elapsed_ms": 2972
+        },
+        {
+          "model": "claude-opus-5",
+          "effort": "high",
+          "thinking": "adaptive",
+          "turn_id": "43736944-1d11-4c14-ba1d-e8c06c6163c7",
+          "requested_effort": "high",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfKqXn6PX7CM74cnw8U",
+          "elapsed_ms": 981
+        }
+      ],
+      "records": [
+        {
+          "request_id": "650fd66f-1be2-455a-89aa-b45f20e383f7",
+          "model": "claude-opus-5",
+          "requested": "high",
+          "applied": "high",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:40"
+        },
+        {
+          "request_id": "56d2e717-add5-4f1b-8194-c22d16372664",
+          "model": "claude-opus-5",
+          "requested": "high",
+          "applied": "high",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:42"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "alias": "claude-opus-4-6",
+      "selected": "medium",
+      "calls": [
+        {
+          "model": "claude-opus-4-6",
+          "effort": "medium",
+          "thinking": "disabled",
+          "turn_id": "7db920e1-eef6-4c5d-a0d3-57273d039d4f",
+          "requested_effort": "medium",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfL7mqVQ6SJ3jmYbZwV",
+          "elapsed_ms": 1677
+        },
+        {
+          "model": "claude-opus-4-6",
+          "effort": "medium",
+          "thinking": "adaptive",
+          "turn_id": "7db920e1-eef6-4c5d-a0d3-57273d039d4f",
+          "requested_effort": "medium",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfL7pofTvxKUguYfQ7h",
+          "elapsed_ms": 2677
+        }
+      ],
+      "records": [
+        {
+          "request_id": "45299709-5137-4be4-89d9-5ee7d273bf96",
+          "model": "claude-opus-4-6",
+          "requested": "medium",
+          "applied": "medium",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:45"
+        },
+        {
+          "request_id": "f7054a1c-5dde-4a87-b716-cf439f40dea4",
+          "model": "claude-opus-4-6",
+          "requested": "medium",
+          "applied": "medium",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:45"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "alias": "hypeproof-strong",
+      "selected": "low",
+      "calls": [
+        {
+          "model": "claude-opus-4-7",
+          "effort": "low",
+          "thinking": null,
+          "turn_id": "91ec851c-428d-4754-96f9-09edc3cf9fde",
+          "requested_effort": "low",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfLNh25F3gMGJBEPWNd",
+          "elapsed_ms": 1632
+        },
+        {
+          "model": "claude-opus-4-7",
+          "effort": "low",
+          "thinking": "adaptive",
+          "turn_id": "91ec851c-428d-4754-96f9-09edc3cf9fde",
+          "requested_effort": "low",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfLNoDJxGgX9nAme951",
+          "elapsed_ms": 985
+        }
+      ],
+      "records": [
+        {
+          "request_id": "4bf3aad6-c863-4954-963c-50238ff3adca",
+          "model": "claude-opus-4-7",
+          "requested": "low",
+          "applied": "low",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:47"
+        },
+        {
+          "request_id": "48ec494b-b2e7-48ad-9e37-05b248d26567",
+          "model": "claude-opus-4-7",
+          "requested": "low",
+          "applied": "low",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:48"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "alias": "claude-opus-4-8",
+      "selected": "high",
+      "calls": [
+        {
+          "model": "claude-opus-4-8",
+          "effort": "high",
+          "thinking": "disabled",
+          "turn_id": "746015a1-bfa8-4ccc-bac7-2037737aeb8a",
+          "requested_effort": "high",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfLZLE76unf56rA7Lnz",
+          "elapsed_ms": 1534
+        },
+        {
+          "model": "claude-opus-4-8",
+          "effort": "high",
+          "thinking": "adaptive",
+          "turn_id": "746015a1-bfa8-4ccc-bac7-2037737aeb8a",
+          "requested_effort": "high",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfLZ9p2NWCBdE8MygDS",
+          "elapsed_ms": 1910
+        }
+      ],
+      "records": [
+        {
+          "request_id": "c556f331-8ee0-4d86-9df6-63824a64210a",
+          "model": "claude-opus-4-8",
+          "requested": "high",
+          "applied": "high",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:50"
+        },
+        {
+          "request_id": "273852d6-03d7-4dc8-976d-fc7fd73a659b",
+          "model": "claude-opus-4-8",
+          "requested": "high",
+          "applied": "high",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:51"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "alias": "hypeproof-fast",
+      "selected": null,
+      "calls": [
+        {
+          "model": "claude-haiku-4-5",
+          "effort": null,
+          "thinking": null,
+          "turn_id": "5be4c21d-798e-45d7-a95a-979923f7eca8",
+          "requested_effort": null,
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfLmcQaMF1MZrR44jiS",
+          "elapsed_ms": 1249
+        },
+        {
+          "model": "claude-haiku-4-5",
+          "effort": null,
+          "thinking": null,
+          "turn_id": "5be4c21d-798e-45d7-a95a-979923f7eca8",
+          "requested_effort": null,
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfLmd9tzZpKxVdjTLsq",
+          "elapsed_ms": 758
+        }
+      ],
+      "records": [
+        {
+          "request_id": "6bed12a6-eecc-45a2-90b1-4b89f858e82a",
+          "model": "claude-haiku-4-5",
+          "requested": null,
+          "applied": null,
+          "reason": "unsupported_model",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:52"
+        },
+        {
+          "request_id": "3beb9c10-3b11-46d2-add9-16c3bed412e9",
+          "model": "claude-haiku-4-5",
+          "requested": null,
+          "applied": null,
+          "reason": "unsupported_model",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:53"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "alias": "claude-sonnet-4-5-20250929",
+      "selected": null,
+      "calls": [
+        {
+          "model": "claude-sonnet-4-5-20250929",
+          "effort": null,
+          "thinking": "disabled",
+          "turn_id": "1ebe5b1f-6063-465a-9843-fd86d8510d6b",
+          "requested_effort": null,
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfLwnbDnaaPvJ8wHLho",
+          "elapsed_ms": 1792
+        },
+        {
+          "model": "claude-sonnet-4-5-20250929",
+          "effort": null,
+          "thinking": "enabled",
+          "turn_id": "1ebe5b1f-6063-465a-9843-fd86d8510d6b",
+          "requested_effort": null,
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfLwzFMqBTJvdrrKb9Q",
+          "elapsed_ms": 1721
+        }
+      ],
+      "records": [
+        {
+          "request_id": "bb752254-7709-42dd-b6e3-4d08a4ddda66",
+          "model": "claude-sonnet-4-5-20250929",
+          "requested": null,
+          "applied": null,
+          "reason": "unsupported_model",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:56"
+        },
+        {
+          "request_id": "ae76e940-3759-412a-8707-229895b9a9b4",
+          "model": "claude-sonnet-4-5-20250929",
+          "requested": null,
+          "applied": null,
+          "reason": "unsupported_model",
+          "status": 200,
+          "created_at": "2026-09-08 21:12:59"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "alias": "hypeproof-default",
+      "selected": "low",
+      "calls": [
+        {
+          "model": "claude-sonnet-4-6",
+          "effort": "low",
+          "thinking": null,
+          "turn_id": "a30b4a67-226d-4d91-9e8d-321d34230556",
+          "requested_effort": "low",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfMRGpqfrDSgJGuusdV",
+          "elapsed_ms": 1698
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "effort": "low",
+          "thinking": "adaptive",
+          "turn_id": "a30b4a67-226d-4d91-9e8d-321d34230556",
+          "requested_effort": "low",
+          "origin": "https://api.anthropic.com",
+          "path": "/v1/messages",
+          "status": 200,
+          "request_id": "req_011CerfMR4fuXg9NijDucPeY",
+          "elapsed_ms": 1183
+        }
+      ],
+      "records": [
+        {
+          "request_id": "cdc7bfcd-a33f-4abd-b62f-9fe5c293db0c",
+          "model": "claude-sonnet-4-6",
+          "requested": "low",
+          "applied": "low",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:13:01"
+        },
+        {
+          "request_id": "8aaf37e2-b756-4efc-84af-2e1b83ef0c97",
+          "model": "claude-sonnet-4-6",
+          "requested": "low",
+          "applied": "low",
+          "reason": "selected",
+          "status": 200,
+          "created_at": "2026-09-08 21:13:02"
+        }
+      ],
+      "next_request_only": false
+    },
+    {
+      "fixed_course": "low, disabled, old receipt cleared"
+    }
+  ],
+  "runtime": "agent-sdk",
+  "scope": "actual Mac App + real Anthropic + synthetic frozen lessons/SQLite",
+  "visual_review": "PENDING"
+}

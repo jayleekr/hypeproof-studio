@@ -1,3 +1,5 @@
+import { applyRequestEffort, EffortPolicyError, type EffortReceipt } from '../lib/model-effort';
+import { persistRequestSettings } from '../lib/request-settings';
 import {NATIVE_TRIAL_LIMITS} from '../lib/native-trial-grants';
 // POST /v1/messages — Anthropic Messages API-compatible gateway (#282).
 //
@@ -247,6 +249,9 @@ messages.post("/messages", async (c) => {
   // only, so an SDK coach that failed every turn left no trace at all.
   // `modelLabel` is overwritten with the clamped id once it is resolved.
   let modelLabel: string = profile.model.default;
+  let effortReceipt: EffortReceipt | undefined;
+  // Diagnostic IDs can share a CF-Ray prefix; settings need one unique ID per request.
+  const settingsRequestId = crypto.randomUUID();
   const mkLog = (
     tokens_in: number,
     tokens_out: number,
@@ -271,6 +276,7 @@ messages.post("/messages", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
     c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
   };
@@ -475,6 +481,16 @@ messages.post("/messages", async (c) => {
         `— client asked for model ${JSON.stringify(raw.model)}, gateway pinned ${modelLabel}. ` +
         `If the SDK now needs these, repin the profile model instead of forwarding them.`,
     );
+  }
+
+  try {
+    const effective = applyRequestEffort(stripped.body, profile, modelLabel, c.req.header('x-hps-effort'));
+    stripped.body = effective.body;
+    effortReceipt = effective.receipt;
+  } catch (err) {
+    if (!(err instanceof EffortPolicyError)) throw err;
+    recordFailure(403, ERROR_KIND.BAD_REQUEST);
+    return c.json({error:{type:'permission_error',message:err.message,code:'effort_not_allowed'}},403);
   }
 
   // 4. Upstream call — same proxy indirection as chat.ts's anthropic branch.

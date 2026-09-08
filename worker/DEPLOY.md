@@ -154,3 +154,14 @@ not auto-applied here — leave as a future tweak per cohort.
 - 6 × 50 × 1600 = 480k tokens — at the production pin (Sonnet 4.6) roughly $1.4 in
   / $7 out per cohort before prompt caching, which the skeleton library makes most of
 - Cloudflare: 6 × 50 = 300 req → well inside free tier
+
+## Course effort settings (#799)
+
+Apply additive `migrations/0005-request-settings.sql` before deploying the Service.
+The worker deploy workflow applies it idempotently. Then deploy Chalk and the App.
+`usage_request_settings` contains request-setting metadata only; `usage_log` remains
+the usage source. A missing table/write/read yields an unconfirmed UI receipt, never
+a successful-settings claim. Rollback keeps all data. Older Service builds do not
+accept the new frozen effort schema: stop issuing new effort lessons and restore the
+prior lesson/version before using an older Service. This does not change retention,
+pricing, raw-content logging or existing students' credentials.
