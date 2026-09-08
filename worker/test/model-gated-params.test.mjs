@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 
 const { stripModelGatedParams, MINOR_EFFORT } = await import("../src/lib/model-caps.ts");
-const { MODEL_MAP } = await import("../src/profiles/types.ts");
+const { MODEL_MAP, ANTHROPIC_MODELS } = await import("../src/profiles/types.ts");
 
 const FAST = MODEL_MAP["hypeproof-fast"];       // claude-haiku-4-5
 const DEFAULT = MODEL_MAP["hypeproof-default"]; // claude-sonnet-4-6
@@ -115,7 +115,7 @@ const STRONG = MODEL_MAP["hypeproof-strong"];   // claude-opus-4-7
     !/supportedBy:\s*\[\s*\]/.test(src),
     "빈 supportedBy 가 돌아왔다 — 그건 '미확인'이지 '미지원'이 아니다",
   );
-  for (const id of Object.values(MODEL_MAP)) {
+  for (const id of Object.keys(ANTHROPIC_MODELS)) {
     const block = src.slice(src.indexOf(`"${id}": {`));
     const m = /verifiedBy:\s*([\s\S]{0,400}?),\n\s*\}/.exec(block);
     assert.ok(m, `${id}: MODEL_CAPS 항목에 verifiedBy 가 있어야 한다`);
@@ -176,3 +176,31 @@ const STRONG = MODEL_MAP["hypeproof-strong"];   // claude-opus-4-7
 }
 
 console.log("All model-gated-param checks passed.");
+
+// #792 actual native failure: Haiku request retained Sonnet's adaptive mode.
+{
+  const body={thinking:{type:'adaptive'},messages:[{role:'user',content:'hello'}]};
+  const fast=stripModelGatedParams(body,FAST);
+  assert.equal(fast.body.thinking,undefined);
+  assert.deepEqual(fast.body.messages,body.messages);
+  assert.deepEqual(body.thinking,{type:'adaptive'},'input is not mutated');
+  assert.match(fast.dropped[0],/thinking.adaptive/);
+  for(const model of [DEFAULT,STRONG])assert.deepEqual(stripModelGatedParams(body,model).body.thinking,body.thinking);
+  const manual={thinking:{type:'enabled',budget_tokens:1024}};
+  assert.deepEqual(stripModelGatedParams(manual,FAST).body,manual);
+  console.log('PASS model switch thinking: Haiku adaptive removed, manual and Sonnet/Opus adaptive preserved');
+}
+
+// Model generations differ even inside one family. These are policy counterexamples,
+// not evidence that a provider request or a native tool execution has passed.
+for (const id of ['claude-opus-5','claude-opus-4-8','claude-sonnet-5']) {
+  const r=stripModelGatedParams({thinking:{type:'enabled',budget_tokens:2048},temperature:0.3,output_config:{effort:'xhigh'}},id);
+  assert.deepEqual(r.body.thinking,{type:'adaptive'});assert.equal(r.body.temperature,undefined);assert.equal(r.body.output_config.effort,'xhigh');
+}
+for (const id of ['claude-sonnet-4-5-20250929','claude-opus-4-5-20251101']) {
+  const r=stripModelGatedParams({thinking:{type:'adaptive'},output_config:{effort:'max'}},id);
+  assert.equal(r.body.thinking,undefined);assert.equal(r.body.output_config?.effort,id.includes('opus')?'high':undefined);
+}
+assert.equal(stripModelGatedParams({thinking:{type:'disabled'},output_config:{effort:'max'}},'claude-opus-5').body.output_config.effort,'high');
+assert.equal(stripModelGatedParams({thinking:{type:'disabled'},output_config:{effort:'max'}},'claude-sonnet-5').body.output_config.effort,'max');
+console.log('PASS version-specific thinking, sampling and effort boundaries');

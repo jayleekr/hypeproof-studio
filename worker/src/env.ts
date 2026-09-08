@@ -4,7 +4,7 @@ export type LLMProvider = "gemini" | "anthropic" | "openai" | "glm";
 
 export interface Env {
   // Secrets (wrangler secret put — locally: worker/.dev.vars, gitignored)
-  GEMINI_API_KEY?: string;           // default provider key (see resolveProvider)
+  GEMINI_API_KEY?: string;           // historical default; production sets anthropic (wrangler.toml)
   ANTHROPIC_API_KEY?: string;        // peer — used when LLM_PROVIDER=anthropic
   OPENAI_API_KEY?: string;           // peer — used when LLM_PROVIDER=openai
   OPENAI_BASE_URL?: string;          // dev-only — route OpenAI-shaped calls to a local shim (lib/openai.ts)

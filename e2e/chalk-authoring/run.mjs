@@ -5,7 +5,8 @@ import { once } from 'node:events';
 import { readFileSync, mkdirSync } from 'node:fs';
 import { chromium } from '@playwright/test';
 import { localAuthoring } from '../../worker/test/harness/dental-authoring.mjs';
-const local=await localAuthoring();
+const models=process.env.HPS_CHALK_MODEL_SELECTION==='1';
+const local=await localAuthoring(models?{profileId:'studio-native-trial'}:{});
 const {default:chalk}=await import('../../chalk/src/index.ts');
 const {TEST_SECRET}=await import('../../worker/test/harness/index.mjs');
 const env={HPS_SIGNING_SECRET:TEST_SECRET,ENVIRONMENT:'dev',HPS_SERVICE_ORIGIN:local.origin};
@@ -31,9 +32,12 @@ try {
  assert.ok(page.url().endsWith('/authoring'));
  await page.setViewportSize({width:390,height:844});
  await connect(page);await page.locator('#import').setInputFiles(new URL('../../docs/curriculum/dental-ownership/generated/drafts.json',import.meta.url).pathname);await wait('강의를 선택한 뒤');await page.locator('#courses').selectOption('0');
- await page.locator('#title').fill('합성 강사 수정 제목');await page.locator('#assistant_name').fill('제작 파트너');await page.locator('#save').click();await wait('저장했습니다. revision 1');
+ await page.locator('#title').fill('합성 강사 수정 제목');await page.locator('#assistant_name').fill('제작 파트너');
+ if(models){await page.locator('#models-load').click();await page.locator('#models-status').filter({hasText:'사용 가능한 모델 9개'}).waitFor();await page.locator('#model-mode').selectOption('choice');await page.locator('#model-default').selectOption('claude-sonnet-5');for(const width of [390,1280]){await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));const out=process.env.HPS_CHALK_AUTHORING_OUT||'test-results/chalk-authoring';mkdirSync(out,{recursive:true});await page.locator('#models-load').locator('..').screenshot({path:out+'/model-choice-'+width+'.png'});}}
+ await page.locator('#save').click();await wait('저장했습니다. revision 1');
  await page.locator('#version').fill('m2026.09.06-1');await page.locator('#freeze').click();await wait('불변 버전을 저장');assert.match(await page.locator('#version-view').innerText(),/합성 강사 수정 제목/);assert.match(await page.locator('#version-view').innerText(),/제작 파트너/);
  await page.reload();await page.locator('#token').fill(local.token);await page.locator('#cohort').fill(local.cohort);await page.locator('#profile').fill(local.profileId);await page.locator('#course').fill('dental-ownership-l1');await page.locator('#load').click();await wait('revision 1');assert.equal(await page.locator('#title').inputValue(),'합성 강사 수정 제목');assert.equal(await page.locator('#assistant_name').inputValue(),'제작 파트너');
+ if(models){assert.equal(await page.locator('#model-mode').inputValue(),'choice');await page.locator('#models-load').click();await page.locator('#models-status').filter({hasText:'사용 가능한 모델 9개'}).waitFor();assert.equal(await page.locator('#model-default').inputValue(),'claude-sonnet-5');}
  // Real instructor delivery -> signed student credential -> student UI, using production SQLite routes.
  const {setRoster,startSession}=await import('../../worker/src/lib/kv.ts');
  await setRoster(local.env.HPS_KV,local.cohort,['synthetic-student']);
@@ -49,9 +53,12 @@ try {
  assert.equal(await learner.evaluate(()=>localStorage.length+sessionStorage.length),0);
  await learner.close();await page.locator('#clear-student').click();
  // Concurrent editor advances revision; original tab must preserve unsaved work on 409.
- const second=await browser.newPage();await connect(second);await second.locator('#course').fill('dental-ownership-l1');await second.locator('#load').click();await second.locator('#status').filter({hasText:'revision 1'}).waitFor();await second.locator('#title').fill('다른 편집 revision 2');await second.locator('#assistant_name').fill('초안 전용 새 이름');await second.locator('#save').click();await second.locator('#status').filter({hasText:'revision 2'}).waitFor();
+ const second=await browser.newPage();await connect(second);await second.locator('#course').fill('dental-ownership-l1');await second.locator('#load').click();await second.locator('#status').filter({hasText:'revision 1'}).waitFor();await second.locator('#title').fill('다른 편집 revision 2');await second.locator('#assistant_name').fill('초안 전용 새 이름');
+ if(models){await second.locator('#models-load').click();await second.locator('#models-status').filter({hasText:'사용 가능한 모델 9개'}).waitFor();await second.locator('#model-mode').selectOption('fixed');await second.locator('#model-default').selectOption('claude-opus-5');}
+ await second.locator('#save').click();await second.locator('#status').filter({hasText:'revision 2'}).waitFor();
  await page.locator('#title').fill('충돌 후 보존할 내용');await page.locator('#assistant_name').fill('충돌 뒤 남아야 할 이름');await page.locator('#save').click();await wait('HTTP 409');assert.equal(await page.locator('#title').inputValue(),'충돌 후 보존할 내용');assert.equal(await page.locator('#assistant_name').inputValue(),'충돌 뒤 남아야 할 이름');assert.equal(await page.locator('#freeze').isDisabled(),true);
  await page.locator('#version').fill('m2026.09.06-1');await page.locator('#version-load').click();await wait('불변 버전을 확인');assert.match(await page.locator('#version-view').innerText(),/합성 강사 수정 제목/);assert.match(await page.locator('#version-view').innerText(),/제작 파트너/);assert.equal(await page.locator('#title').inputValue(),'충돌 후 보존할 내용');assert.equal(await page.locator('#assistant_name').inputValue(),'충돌 뒤 남아야 할 이름');
+ if(models){const frozen=JSON.parse(await page.locator('#version-view').innerText());assert.equal(frozen.module.content.model.default,'claude-sonnet-5');assert.equal(frozen.module.content.model.allowed.length,9);assert.equal(frozen.module.content.model.binding.choices[0].id,'claude-sonnet-5');console.log('PASS Chalk model choice save/reopen/freeze; later fixed-model draft preserves original version');}
  // Authentication failure must not overwrite the form or be called an expiry.
  await page.locator('#token').fill('invalid');await page.locator('#load').click();await wait('HTTP 401');assert.equal(await page.locator('#title').inputValue(),'충돌 후 보존할 내용');assert.equal(await page.locator('#assistant_name').inputValue(),'충돌 뒤 남아야 할 이름');
  const {issue}=await import('../../worker/src/lib/tokens.ts');const student=(await issue({u:'synthetic-student',c:local.cohort,p:local.profileId},1,TEST_SECRET)).token;await page.locator('#token').fill(student);await page.locator('#load').click();await wait('HTTP 403');assert.equal(await page.locator('#title').inputValue(),'충돌 후 보존할 내용');assert.equal(await page.locator('#assistant_name').inputValue(),'충돌 뒤 남아야 할 이름');

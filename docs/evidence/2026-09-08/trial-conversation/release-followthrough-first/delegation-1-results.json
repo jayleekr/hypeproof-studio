@@ -1,0 +1,6 @@
+{
+  "transport": "PASS",
+  "semantic_review": "PASS",
+  "scope": "synthetic multi-turn participant; no human learning claim",
+  "basis": "AI/사람 역할 구분 후 슬라이드 10개 목차를 실제 제시하고 고객 문제와 가정 검토를 요청함. 파일 제작은 아직 실행하지 않은 제안으로 구분."
+}

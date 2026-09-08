@@ -1,0 +1,49 @@
+{
+  "calls": [
+    {
+      "path": "/v1/chat/completions",
+      "fault": "none",
+      "requested_model": "hypeproof-default"
+    },
+    {
+      "path": "/v1/chat/completions",
+      "fault": "none",
+      "requested_model": "hypeproof-fast"
+    },
+    {
+      "path": "/v1/chat/completions",
+      "fault": "none",
+      "requested_model": "claude-sonnet-5"
+    },
+    {
+      "path": "/v1/chat/completions",
+      "fault": "none",
+      "requested_model": "claude-sonnet-4-5-20250929"
+    },
+    {
+      "path": "/v1/chat/completions",
+      "fault": "none",
+      "requested_model": "claude-opus-5"
+    },
+    {
+      "path": "/v1/chat/completions",
+      "fault": "none",
+      "requested_model": "claude-opus-4-8"
+    },
+    {
+      "path": "/v1/chat/completions",
+      "fault": "none",
+      "requested_model": "hypeproof-strong"
+    },
+    {
+      "path": "/v1/chat/completions",
+      "fault": "none",
+      "requested_model": "claude-opus-4-6"
+    },
+    {
+      "path": "/v1/chat/completions",
+      "fault": "none",
+      "requested_model": "claude-opus-4-5-20251101"
+    }
+  ]
+}

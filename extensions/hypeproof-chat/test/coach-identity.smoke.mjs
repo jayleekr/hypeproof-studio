@@ -91,6 +91,7 @@ assert.equal(sp.startedDescription, "코치 채팅을 열었습니다. 채팅 �
 assert.equal(sp.confirmDescription, "수업과 코치를 확인한 뒤 작업을 시작하세요.");
 assert.equal(sp.stepTwo, "코치와 작은 시도부터.");
 assert.equal(id.observationIntro(D), "내가 요청한 내용과 코치·도구가 수행한 일을 나누어 확인합니다.");
+assert.equal(id.composerLabel(D), "코치에게 보낼 메시지");
 assert.equal(id.coachIntroSentence(D), "저는 코치예요.");
 assert.equal(sp.disconnectedLead, "수업을 연결하면 이곳에서\n내 코치와 작업을 이어갈 수 있습니다.");
 // Error copy: the stall constant keeps the exact string its own smoke tests and
@@ -108,6 +109,7 @@ assert.equal(id.startPageCopy("별똥별").startedTitle, "별똥별과 작업을
 assert.equal(id.startPageCopy("제작 파트너").confirmDescription, "수업과 제작 파트너를 확인한 뒤 작업을 시작하세요.");
 assert.equal(id.observationIntro("제작 파트너"), "내가 요청한 내용과 제작 파트너·도구가 수행한 일을 나누어 확인합니다.");
 assert.equal(id.coachIntroSentence("별똥별"), "저는 별똥별이에요.");
+assert.equal(id.composerLabel("제작 파트너"), "제작 파트너에게 보낼 메시지");
 assert.equal(id.stallNotice("제작 파트너").startsWith("제작 파트너 응답이"), true);
 assert.equal(id.profileNotReadyNotice("제작 파트너").startsWith("제작 파트너 프로필을"), true);
 assert.equal(id.imageAttachPrompt("별똥별", "a.png"), '🖼 방금 연 이미지 "a.png"를 별똥별 채팅에 붙일까요?');
@@ -141,6 +143,7 @@ for (const literal of ["코치가 파일을 저장하려고 해요", "코치가 
   assert.doesNotMatch(provider, new RegExp(literal), `provider no longer hardcodes "${literal}"`);
 }
 const startPage = readFileSync(new URL("../webview-ui/src/StartPage.tsx", import.meta.url), "utf8");
+assert.doesNotMatch(codeOnly(chatPanel), /"코치에게 보낼 메시지"/, "the composer label comes from the shared module");
 for (const literal of ["코치와 작업을 시작하세요", "코치와 계속 작업하기", "수업과 코치를 확인", "코치와 작은 시도부터", "내 코치와 작업을 이어갈"]) {
   assert.doesNotMatch(startPage, new RegExp(literal), `start page no longer hardcodes "${literal}"`);
 }

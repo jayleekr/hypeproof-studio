@@ -1,0 +1,8 @@
+{
+  "transport": "PASS",
+  "semantic_review": "FAIL",
+  "scope": "synthetic multi-turn participant; no human learning claim",
+  "purpose_preserved": true,
+  "concrete_draft": false,
+  "basis": "Actual final response separated AI and human roles but ended with a promise to create an outline; no outline or tool execution appeared. Transport success is insufficient."
+}

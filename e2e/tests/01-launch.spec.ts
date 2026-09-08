@@ -10,16 +10,13 @@ test("launches + chat panel mounts when token is pre-seeded", async () => {
     // (Window title is the workspace folder name once a folder is open, so
     // it's not a stable product check — rely on the chat panel instead.)
 
-    // Activity-bar container header
-    const header = ctx.win
-      .locator("h2, .composite.title")
-      .filter({ hasText: /HypeProof Chat/i })
-      .first();
-    await expect(header).toBeVisible({ timeout: 20_000 });
+    // Starting a connected course hands the entry canvas to the conversation.
+    await expect(ctx.win.locator(".part.sidebar")).not.toBeVisible();
 
     // Webview React shell mounts (proves the resource-URI rewrite works)
     const cf = await chatFrame(ctx.win);
     await expect(cf.locator(".hps-shell")).toBeVisible({ timeout: 25_000 });
+    await expect(cf.locator(".hps-header")).toBeVisible();
   } finally {
     await closeApp(ctx);
   }

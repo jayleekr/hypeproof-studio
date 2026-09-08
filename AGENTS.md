@@ -19,3 +19,16 @@ Inspect existing implementations before creating another store, validator, or
 authentication path. Declare planned behavior as planned; a documented test is
 not an executed test. Keep changes in a focused branch and PR following the dev
 guide. Do not change production state merely to validate documentation.
+
+<!-- hype-pr-skill:start -->
+## Agent PR preparation
+
+For development through PR creation in this repository, read and use
+`.claude/skills/hype-pr/SKILL.md` (also discoverable at `.agents/skills/hype-pr/`).
+Inspect criteria links at task start; before creating a PR, record the agent's
+impact assessment and validation with `scripts/hype-pr/pr.py inspect` / `prepare`.
+Create through `scripts/hype-pr/pr.py create --preparation <receipt> --apply`.
+Fix stale/missing preparation instead of bypassing it with direct `gh pr create`.
+The common contract is `docs/AGENT-GUIDE.ko.md`; commands are in `docs/HYPE-PR.ko.md`.
+This adds no GitHub required check and does not grant human approval or merge authority.
+<!-- hype-pr-skill:end -->

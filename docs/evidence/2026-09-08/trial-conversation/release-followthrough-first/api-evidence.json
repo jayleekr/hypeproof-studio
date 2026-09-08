@@ -1,0 +1,90 @@
+{
+  "real_upstream": true,
+  "storage": "synthetic-memory",
+  "calls": [
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRt437bMWbrQMe9f1hj",
+      "elapsed_ms": 1932
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRtMBk4uqLy5prxd9kX",
+      "elapsed_ms": 1911
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRtzvsH2NYLzvMdFdo9",
+      "elapsed_ms": 1914
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRuHdhjr282z75cxV1v",
+      "elapsed_ms": 1154
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRvcmAaFsBL7a2AhKh6",
+      "elapsed_ms": 1369
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRvuNJdURC8wKkb2kbk",
+      "elapsed_ms": 1873
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerS1wermvu1bWJHteYng",
+      "elapsed_ms": 1334
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerS24mVLx8eQzfQFCzmz",
+      "elapsed_ms": 2299
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerS2uDYFnBAB9X27zVZR",
+      "elapsed_ms": 1010
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerS334LEd8hcW4sMXpA5",
+      "elapsed_ms": 1426
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerS3vCMcCRXcG7Jmzq49",
+      "elapsed_ms": 1635
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerS4DUBF6KHFzo8mT8dE",
+      "elapsed_ms": 1807
+    }
+  ]
+}

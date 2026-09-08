@@ -1,0 +1,24 @@
+{
+  "status": "FAIL",
+  "checks": [
+    {
+      "id": "selection",
+      "selected": "hypeproof-default",
+      "options": [
+        "Claude Sonnet 4.6",
+        "Claude Haiku 4.5"
+      ],
+      "name": "제작 파트너"
+    }
+  ],
+  "error": "Expected values to be strictly equal:\n\n400 !== 390\n",
+  "scope": "actual Mac + local Service + synthetic lessons",
+  "live_model_requested": true,
+  "not_run": [
+    "Windows",
+    "screen reader speech",
+    "human learning",
+    "cross-provider transfer"
+  ],
+  "visual_review": "PENDING"
+}

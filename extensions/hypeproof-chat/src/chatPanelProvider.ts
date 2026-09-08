@@ -1,3 +1,4 @@
+import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice } from './modelSelection';
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
@@ -164,6 +165,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.observationWrites=this.observationWrites.then(async()=>{await this.context.workspaceState.update(key,value);}).catch(()=>{this.nativeObservationError='관찰 기록 저장에 실패했습니다.';});
   }
   private view?: vscode.WebviewView;
+  private editorChat?: vscode.WebviewPanel;
   private activeStreams = new Map<string, AbortController>();
   /**
    * #503 — 진행 중인 턴의 단일 타임라인(스트림 id 별). 웹뷰가 화면에 그리는 것과
@@ -477,7 +479,39 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     view.webview.html = this.renderHtml(view.webview, webviewDist);
 
     view.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg));
-    view.onDidDispose(() => abortAllStreams(this.activeStreams));
+    view.onDidDispose(() => {
+      if (this.view === view) this.view = undefined;
+      if (!this.editorChat) abortAllStreams(this.activeStreams);
+    });
+  }
+
+  /** Hand the entry canvas to the conversation instead of leaving a landing
+   * page beside a narrow sidebar. The same provider owns auth, history and tools. */
+  async openInEditor(entry: vscode.WebviewPanel): Promise<void> {
+    if (this.editorChat) {
+      this.editorChat.reveal(vscode.ViewColumn.One);
+      if (entry !== this.editorChat) entry.dispose();
+    } else {
+      this.editorChat = entry;
+      entry.title = 'AI와 작업';
+      const dist = vscode.Uri.joinPath(this.context.extensionUri, 'webview-ui', 'dist');
+      entry.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg));
+      entry.onDidDispose(() => {
+        if (this.editorChat === entry) {
+          this.editorChat = undefined;
+          abortAllStreams(this.activeStreams);
+        }
+      });
+      entry.webview.html = this.renderHtml(entry.webview, dist);
+      entry.reveal(vscode.ViewColumn.One);
+    }
+    await vscode.commands.executeCommand('workbench.action.closeSidebar');
+  }
+
+  focusEditor(): boolean {
+    if (!this.editorChat) return false;
+    this.editorChat.reveal(vscode.ViewColumn.One);
+    return true;
   }
 
   private connectionChanging = false;
@@ -1379,7 +1413,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // between the chat sidebar and the preview. ViewColumn.One fills the main
         // editor area so the layout is just: chat sidebar | preview.
         const opened = await vscode.window.openBrowserTab(url, {
-          viewColumn: vscode.ViewColumn.One,
+          viewColumn: this.editorChat ? vscode.ViewColumn.Two : vscode.ViewColumn.One,
           preserveFocus: true,
         });
         this.mcpBrowser.setTargetTab(opened);
@@ -1535,7 +1569,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // preserveFocus 는 그 활성화 자체를 막고, 포커스가 없어도 탭 핸들로 운전한다.
         const opened = await vscode.window.openBrowserTab(url, {
           viewColumn:
-            coachTabSlot(url) === "preview" ? vscode.ViewColumn.One : vscode.ViewColumn.Two,
+            this.editorChat ? vscode.ViewColumn.Two : coachTabSlot(url) === "preview" ? vscode.ViewColumn.One : vscode.ViewColumn.Two,
           preserveFocus: true,
         });
         this.mcpBrowser.setTargetTab(opened);
@@ -1736,6 +1770,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           if (disclosure) void this.post({ type: "aiDisclosure", text: disclosure });
         }
         return;
+      case "selectModel": {
+        const profile = await this.ensureProfile();
+        const cfg = vscode.workspace.getConfiguration('hypeproofChat');
+        const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
+        if (profile && selection?.choices.some(c => c.alias === msg.alias)) {
+          await this.context.workspaceState.update('hps.modelChoice', { scope: modelSelectionScope(profile), alias: msg.alias });
+        }
+        await this.postConfig();
+        return;
+      }
       case "sendMessage":
         await this.handleSend(msg.text, msg.history, msg.images);
         return;
@@ -1895,12 +1939,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
-    const model = cfg.get<string>("model", "hypeproof-default");
+    let model = cfg.get<string>("model", "hypeproof-default");
     const token = await this.context.secrets.get(TOKEN_KEY);
     const coach = this.getCoach();
     // Fixed-naming cohorts must NOT inject a user-supplied coach name carried
     // over from a different cohort's user-data-dir into the LLM context (#140).
     const profile = await this.ensureProfile();
+    const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
+    const savedModel = this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice');
+    if (profile && selection) model = selectedModel(profile, selection, savedModel, model);
     const { name: effectiveCoachName, personality: effectiveCoachPersonality } =
       resolveCoach(coach, profile);
 
@@ -2042,7 +2089,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // 설정 경로에만 빠져 있던 비대칭을 고치면서 순수 함수로 뺐다. 대조군 포함
       // 단위 테스트: test/coach-runtime.smoke.mjs
       const settingRuntime = cfg.get<"proxy" | "agent-sdk">("coachRuntime", "proxy");
-      const runtime: "proxy" | "agent-sdk" = resolveCoachRuntime({
+      const runtime: "proxy" | "agent-sdk" = selection?.source === "lesson" ? selection.runtime : resolveCoachRuntime({
         settingRuntime,
         profileRuntime: profile?.coach_runtime,
         minorCohort: profile?.minor_cohort,
@@ -2097,12 +2144,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const showPending = () => {
         if (pendingShown) return;
         pendingShown = true;
-        this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고치는 중…", state: "running" });
+        this.postToolLog(streamId, { id: PENDING_ID, icon: "…", label: "다음 단계를 준비하는 중…", state: "running" });
       };
       const clearPending = () => {
         if (!pendingShown) return;
         pendingShown = false;
-        this.postToolLog(streamId, { id: PENDING_ID, icon: "✍️", label: "고쳤어요", state: "done" });
+        this.postToolLog(streamId, { id: PENDING_ID, icon: "…", label: "대기 종료", state: "done" });
       };
       const onActivity = (a: import("./sdkCoachHelpers").SdkActivity) => {
         if (observation && (a.kind==='tool_use' || a.kind==='approval')) {
@@ -2134,7 +2181,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         switch (a.kind) {
           case "thinking_tokens":
             // One entry that ticks in place; the completed block replaces it.
-            log(`think-${thinkingIndex}`, "💭", `Thinking… ${a.tokens} tokens`, "running");
+            log(`think-${thinkingIndex}`, "💭", `응답 준비 중 · ${a.tokens} 토큰`, "running");
             break;
           case "thinking":
             // 2026-08-20 — 생각도 "뭔가 하는 중" 이다. 아동은 속생각을 숨기므로(아래)
@@ -2325,6 +2372,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           });
         } catch (err) {
           if (!(err instanceof SdkUnavailableError)) throw err;
+          if (selection && (selection.source === 'lesson' || (profile && savedModel?.scope === modelSelectionScope(profile)))) throw new Error('선택한 모델의 실행 환경을 사용할 수 없습니다. Studio의 Agent SDK 설치를 확인하거나 강사에게 알려주세요. 대화와 작업은 보존됩니다.');
           // Pre-Phase-1: the SDK package isn't installed. Keep the classroom
           // working — fall back to the proxy runtime for this turn instead of
           // showing the student a technical error.
@@ -2818,14 +2866,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const token = await this.context.secrets.get(TOKEN_KEY);
     const profile = await this.ensureProfile();
+    const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
+    const settingModel = cfg.get<string>('model', 'hypeproof-default');
+    const model = profile && selection ? selectedModel(profile, selection, this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice'), settingModel) : settingModel;
     await this.post({
       type: "config",
       config: {
         proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
-        model: cfg.get<string>("model", "hypeproof-default"),
+        model,
         hasToken: !!token,
         coach: this.getCoach(),
-        profile,
+        profile: profile ? { ...profile, model_selection: selection } : null,
         update: this.availableUpdate,
       },
     });
@@ -2943,8 +2994,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async post(msg: HostMessage): Promise<boolean | void> {
-    if (!this.view) return;
-    return this.view.webview.postMessage(msg);
+    const targets = [this.editorChat?.webview, this.view?.webview].filter((view): view is vscode.Webview => !!view);
+    if (!targets.length) return;
+    const results = await Promise.all(targets.map(view => view.postMessage(msg)));
+    return results.some(Boolean);
   }
 
   renderHtml(webview: vscode.Webview, distDir: vscode.Uri): string {

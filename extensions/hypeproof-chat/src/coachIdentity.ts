@@ -136,6 +136,14 @@ export const startPageCopy = (name: string = DEFAULT_COACH_NAME) => ({
   coachRowLabel: "AI 이름",
 });
 
+/**
+ * Accessible name of the message box. It addresses the same AI as the header, so
+ * it follows the resolved name rather than a fixed noun. With the default name it
+ * is byte-identical to the literal it replaced, so fixtures whose seat resolves to
+ * "코치" keep their expected accessible name.
+ */
+export const composerLabel = (name: string): string => `${name}에게 보낼 메시지`;
+
 /** Observation panel intro (webview). */
 export const observationIntro = (name: string): string =>
   `내가 요청한 내용과 ${name}·도구가 수행한 일을 나누어 확인합니다.`;

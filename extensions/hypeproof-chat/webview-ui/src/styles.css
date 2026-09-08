@@ -258,7 +258,25 @@ html, body, #root {
 
 /* ---------- Assistant content: code pill + progress ---------- */
 
-.hps-prose { white-space: pre-wrap; }
+.hps-prose { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+.hps-prose > :first-child { margin-top: 0; }
+.hps-prose > :last-child { margin-bottom: 0; }
+.hps-prose p { margin: 0 0 0.8em; }
+.hps-prose h1, .hps-prose h2, .hps-prose h3 { font-size: 1.15em; line-height: 1.4; margin: 1em 0 0.5em; }
+.hps-prose h4, .hps-prose h5, .hps-prose h6 { font-size: 1em; margin: 1em 0 0.5em; }
+.hps-prose ul, .hps-prose ol { padding-left: 1.6em; margin: 0.5em 0 0.8em; }
+.hps-prose li + li { margin-top: 0.3em; }
+.hps-prose li > p { margin-bottom: 0.3em; }
+.hps-prose a { color: var(--vscode-textLink-foreground); text-decoration: underline; }
+.hps-prose code { font-family: var(--vscode-editor-font-family, monospace); background: var(--vscode-textCodeBlock-background); padding: 0.1em 0.3em; border-radius: 3px; }
+.hps-prose pre { white-space: pre-wrap; }
+.hps-prose blockquote { margin: 0.8em 0; padding-left: 0.8em; border-left: 2px solid var(--vscode-textBlockQuote-border, #777); }
+.hps-markdown-table { max-width: 100%; overflow-x: auto; margin: 0.8em 0; }
+.hps-markdown-table table { border-collapse: collapse; width: 100%; }
+.hps-markdown-table th, .hps-markdown-table td { text-align: left; padding: 0.35em 0.6em; border: 1px solid var(--vscode-panel-border, #555); }
+.hps-thinking-details { margin: 4px 0; min-width: 0; }
+.hps-thinking-details summary { cursor: pointer; }
+.hps-thinking-details pre { margin: 0; padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 12px; opacity: 0.75; }
 
 .hps-code-progress {
   margin: 8px 0;
@@ -1141,3 +1159,10 @@ html, body, #root {
 .hps-native-observation :focus-visible { outline: 2px solid var(--vscode-focusBorder,#d6f59d); outline-offset:2px; }
 .hps-observation-compare { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr)); gap:12px; }
 .hps-observation-compare section { min-width:0; border:1px solid var(--vscode-panel-border,#777); padding:8px; }
+
+/* #792: the model switch stays with the composer and wraps in narrow panels. */
+.hps-model-selection { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-bottom: 8px; min-width: 0; }
+.hps-model-selection label { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; }
+.hps-model-selection select { min-width: 0; max-width: 100%; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, #666); border-radius: 4px; padding: 4px; font: inherit; }
+.hps-model-selection select:focus-visible { outline: 2px solid var(--vscode-focusBorder); outline-offset: 2px; }
+.hps-model-selection small { color: var(--vscode-descriptionForeground); overflow-wrap: anywhere; }

@@ -35,7 +35,7 @@ test('native trial: enter code, use real API, create and revise an actual work f
     await expect(start.locator('.studio-error')).toBeVisible();
     await start.getByLabel('수업 참여 코드', { exact: true }).fill(ctx.token);
     await start.getByRole('button', { name: '수업 확인하기' }).click();
-    await expect(start.locator('.studio-course')).toContainText('Studio · 내 업무로 AI 체험');
+    await expect(start.locator('.studio-course')).toContainText('Studio · 내 삶에 AI 더하기');
     await expect(start.locator('input[type=password]')).toHaveCount(0);
     await ctx.win.screenshot({ path: join(output, 'connected.png') });
     await start.getByRole('button', { name: '수업 시작하기' }).click();
@@ -98,7 +98,7 @@ test('native trial: enter code, use real API, create and revise an actual work f
       if(await entry.getByRole('button',{name:'다른 수업에 연결'}).isVisible().catch(()=>false))await entry.getByRole('button',{name:'다른 수업에 연결'}).click();
       await entry.getByLabel('수업 참여 코드',{exact:true}).fill(ctx.token);
       await entry.getByRole('button',{name:'수업 확인하기'}).click();
-      await expect(entry.locator('.studio-course')).toContainText('Studio · 내 업무로 AI 체험');
+      await expect(entry.locator('.studio-course')).toContainText('Studio · 내 삶에 AI 더하기');
       await entry.getByRole('button',{name:'수업 시작하기'}).click();
       const reopened=await chatFrame(ctx.win),reloadedPanel=reopened.locator('.hps-native-observation');
       await reloadedPanel.locator('summary').first().click();

@@ -1,0 +1,9 @@
+[
+  {
+    "started_at": 1788891211362,
+    "expires_at": 1788894802000,
+    "request_limit": 40,
+    "requests_used": 10,
+    "busy": 0
+  }
+]

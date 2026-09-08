@@ -4,7 +4,7 @@
 // prompt. We DO NOT honor any client-supplied "system" message — that would
 // let a workshop participant override the persona / safety constraints.
 
-import { modelIdFor, type Profile, type ModelAlias } from "../profiles/types.ts";
+import { modelIdFor, permittedModelKeys, type Profile, type ModelKey } from "../profiles/types.ts";
 import type { LLMProvider } from "../env.ts";
 import { getSkeletonsForTier } from "../skeletons/index.ts";
 // @ts-ignore — string import enabled via wrangler rules in wrangler.toml
@@ -885,12 +885,8 @@ function sanitizeForPrompt(s: string): string {
   return s.replace(/[\r\n]+/g, " ").replace(/["'`]/g, "").slice(0, 200);
 }
 
-function resolveAlias(requested: string | undefined, profile: Profile): ModelAlias {
-  // Client may request an alias; profile sets the default. The profile wins
-  // unless the client picked a profile-listed fallback.
-  if (requested === profile.model.default) return profile.model.default;
-  if (profile.model.fallback && requested === profile.model.fallback) return profile.model.fallback;
-  return profile.model.default;
+function resolveAlias(requested: string | undefined, profile: Profile): ModelKey {
+  return permittedModelKeys(profile).find(key => key === requested) ?? profile.model.default;
 }
 
 function clampInt(v: unknown, lo: number, hi: number, fallback: number): number {

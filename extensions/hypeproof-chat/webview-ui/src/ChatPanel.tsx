@@ -1,4 +1,5 @@
 import {NativeObservationPanel} from './NativeObservationPanel';
+import { MarkdownText } from './MarkdownText';
 import { DisconnectedChat } from "./StartPage";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -12,7 +13,7 @@ import type {
 } from "../../src/protocol";
 import { postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
-import { copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
+import { composerLabel, copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
 import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
 import {
   RUNNER_PHRASE_MS,
@@ -681,6 +682,29 @@ export function ChatPanel(props: Props) {
       )}
 
       <footer className="hps-input-area">
+        {config.profile.model_selection && <div className="hps-model-selection">
+          <label>모델 <select aria-label="대화 모델" value={config.model}
+            disabled={config.profile.model_selection.choices.length === 1}
+            onChange={e => postToHost({ type: 'selectModel', alias: e.target.value })}
+            onKeyDown={e => {
+              // Embedded Mac webviews can forward native select keys to the workbench.
+              // Keep version navigation in this control, including without a native popup.
+              if (e.altKey || e.ctrlKey || e.metaKey || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+              const choices = config.profile?.model_selection?.choices ?? [];
+              if (!choices.length) return;
+              const current = choices.findIndex(c => c.alias === config.model);
+              const next = e.key === 'Home' ? 0 : e.key === 'End' ? choices.length - 1
+                : Math.max(0, Math.min(choices.length - 1, current + (e.key === 'ArrowDown' ? 1 : -1)));
+              e.preventDefault(); e.stopPropagation();
+              if (choices[next]) postToHost({ type: 'selectModel', alias: choices[next].alias });
+            }}>
+
+            {config.profile.model_selection.choices.map(c => <option key={c.id} value={c.alias}>{c.label}</option>)}
+          </select></label>
+          <small>{config.profile.model_selection.choices.length === 1
+            ? (config.profile.model_selection.source === 'lesson' ? '이 수업에서 고정한 모델' : '사용 가능한 모델 1개')
+            : streaming ? '변경하면 다음 요청부터 적용돼요' : '대화를 유지하며 모델을 바꿀 수 있어요'}</small>
+        </div>}
         {runnerCohort && <RunnerBar face={runnerWho} running={runnerRunning} />}
         {/* 버튼은 헤더에 있고 여기는 **결과만** 나온다. 헤더 한 줄에는 링크도
             실패 사유도 들어갈 자리가 없는데, 아이는 사라지는 안내를 못 읽는다 —
@@ -749,7 +773,8 @@ export function ChatPanel(props: Props) {
         >
           <textarea
             ref={textareaRef}
-            aria-label="코치에게 보낼 메시지"
+            autoFocus
+            aria-label={composerLabel(coachName)}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onPaste={handlePaste}
@@ -1163,10 +1188,26 @@ function ChipRack({
 function ToolLine({ message }: { message: ChatMessage }) {
   const t = message.tool;
   if (!t) return null;
+  // This row is a waiting indicator, never evidence that a file was changed.
+  // Hide completed waits from old histories too; retain the stored timeline.
+  if (message.id.startsWith('pending-') && t.state === 'done') return null;
+  const thinking = /^think-\d+$/.test(message.id);
+  if (thinking && t.state === 'done') {
+    return (
+      <details className="hps-thinking-details">
+        <summary className="hps-tool-log-line hps-tool-done" aria-label="AI 처리 내용 보기">
+          <span className="hps-tool-icon">{t.icon}</span>
+          <span className="hps-tool-label">응답 준비</span>
+          <span className="hps-tool-mark">▾</span>
+        </summary>
+        <pre>{t.label}</pre>
+      </details>
+    );
+  }
   return (
     <div className={`hps-tool-log-line hps-tool-${t.state}`} role="status" aria-live="polite">
       <span className="hps-tool-icon">{t.icon}</span>
-      <span className="hps-tool-label">{t.label}</span>
+      <span className="hps-tool-label">{thinking ? '응답을 준비하는 중…' : t.label}</span>
       <span className="hps-tool-mark">
         {t.state === "running" ? "…" : t.state === "error" ? "⚠️" : "✓"}
       </span>
@@ -1363,7 +1404,7 @@ function AssistantContent({
     <>
       {segments.map((seg, i) => {
         if (seg.type === "text") {
-          return <span key={i} className="hps-prose">{seg.value}</span>;
+          return <MarkdownText key={i} text={seg.value} />;
         }
         if (seg.type === "code-open") {
           if (streaming) {

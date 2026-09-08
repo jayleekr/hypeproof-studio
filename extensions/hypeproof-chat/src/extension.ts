@@ -138,7 +138,7 @@ export async function activate(context: vscode.ExtensionContext) {
     // created on demand by PreviewProvider.show().
 
     vscode.commands.registerCommand("hypeproof-chat.focus", () => {
-      vscode.commands.executeCommand("hypeproof-chat.panel.focus");
+      if (!provider.focusEditor()) vscode.commands.executeCommand("hypeproof-chat.panel.focus");
     }),
 
     vscode.commands.registerCommand("hypeproof-chat.clearHistory", async () => {

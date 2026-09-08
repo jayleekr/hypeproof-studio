@@ -1,0 +1,61 @@
+{
+  "real_upstream": true,
+  "calls": [
+    {
+      "model": "claude-sonnet-4-6",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerQk2qLnwbEy95L2sUxW"
+    },
+    {
+      "model": "claude-sonnet-4-6",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerQk5eGFSTACvaWquE4a"
+    },
+    {
+      "model": "claude-haiku-4-5",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerQkfC7yXymShaa89Ety"
+    },
+    {
+      "model": "claude-haiku-4-5",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerQkezy3YuVRqiAbWpNp"
+    },
+    {
+      "model": "claude-sonnet-5",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerQkpCbv8QrAL9VdNZWA"
+    },
+    {
+      "model": "claude-sonnet-5",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerQkp98pJeS7gbAzW8Dq"
+    },
+    {
+      "model": "claude-sonnet-4-5-20250929",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerQkz7urjET8wz4nMV6Q"
+    },
+    {
+      "model": "claude-sonnet-4-5-20250929",
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerQkzC8EJj5fztf6Qfym"
+    }
+  ]
+}

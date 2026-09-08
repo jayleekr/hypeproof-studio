@@ -1,0 +1,24 @@
+{
+  "source_run": "e2e/test-results/agent-experience/20260908T171520Z-b-composer",
+  "submitted_product_sha": "f1808903c808e7a11338713914f6ec98ee0faef4",
+  "verification_sha": "d7289bdc01d9b51bbb96184365dc4d7560443254",
+  "capture": "Electron capturePage; isolated native app; original files unedited",
+  "review": "Codex opened a-fixed-name.png on 2026-09-08. Accessible-name PASS comes from actual CDP accessibility tree, not the screenshot. Screen-reader speech NOT_RUN.",
+  "files": [
+    {
+      "file": "environment.json",
+      "sha256": "2c2a09fad045e1385b1d169800cc9a5fc75ba88ee3b47c2083d4f1bf67b642d8",
+      "bytes": 1376
+    },
+    {
+      "file": "identity-result.json",
+      "sha256": "5d325b8c574996a4a3d20343ecabfed3cdddc0c401759aa96e1b206531551c35",
+      "bytes": 5649
+    },
+    {
+      "file": "a-fixed-name.png",
+      "sha256": "ec18fac0d7241442dd214dcf26b3dbf5dc972bbf48768fbebf92a0088bbbe4cf",
+      "bytes": 544782
+    }
+  ]
+}
