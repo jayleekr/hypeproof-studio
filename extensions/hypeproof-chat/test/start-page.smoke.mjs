@@ -46,6 +46,12 @@ await page.handle({type:'beginCourse'});assert.equal(freshCalls,2,'duplicate sta
 release();await pending;
 assert.deepEqual(commands.slice(before),['workbench.view.extension.hypeproof-chat','hypeproof-chat.panel.focus']);
 assert.equal(states.at(-1).state.started,true);assert.equal(states.at(-1).state.checking,false);
+response='invalid';await page.handle({type:'connectCourse',token:'invalid-replacement'});
+assert.equal(states.at(-1).state.started,true,'failed switch retains the original course state');
+response='valid';await page.handle({type:'connectCourse',token:'valid-replacement'});
+assert.equal(states.at(-1).state.started,false,'a verified replacement has not started yet');
+assert.equal(stored,'valid-replacement');
+stored='valid-again';
 mode='throw';await page.handle({type:'beginCourse'});
 assert.equal(states.at(-1).state.started,false);assert.equal(states.at(-1).state.checking,false);assert.match(states.at(-1).state.error,/열지 못/);assert.equal(stored,'valid-again');
 console.log('PASS start revalidation: expired cache blocked, duplicate ignored, success acknowledged, errors surfaced, credential retained');

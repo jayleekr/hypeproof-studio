@@ -131,6 +131,8 @@ export class StartPage {
         if (previous) await this.context.secrets.store(TOKEN_KEY, previous);
         else await this.context.secrets.delete(TOKEN_KEY);
         this.chat.invalidateProfile();
+      } else {
+        this.started = false;
       }
       this.chat.refreshConfig();
     } catch {

@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import vm from 'node:vm';
+import {createRequire} from 'node:module';
+const require=createRequire(import.meta.url);
+const bundle=await build({entryPoints:[new URL('../src/chatPanelProvider.ts',import.meta.url).pathname],bundle:true,platform:'node',format:'cjs',external:['vscode'],write:false});
+let choice,release,modalCount=0;
+const vscode={window:{showWarningMessage:async()=>{modalCount++;return choice==='wait'?new Promise(r=>release=r):choice;}}};
+const module={exports:{}};vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,require:id=>id==='vscode'?vscode:require(id),console,Buffer,process,setTimeout,clearTimeout,AbortSignal,URL,TextEncoder,TextDecoder});
+const clear=module.exports.ChatPanelProvider.prototype.clearHistory;
+let key='participant-a',streaming=false;const writes=[],posts=[];
+const host={historyKey:()=>key,hasActiveStream:()=>streaming,context:{workspaceState:{update:async(k,v)=>writes.push([k,v])}},post:async msg=>posts.push(msg),aiDisclosure:{noticeForHistoryClear:()=> 'AI notice'}};
+choice=undefined;await clear.call(host);assert.equal(writes.length,0,'cancel preserves history');
+choice='대화 지우기';await clear.call(host);assert.equal(writes.length,1);assert.equal(writes[0][0],'participant-a');assert.equal(posts[0].type,'history');
+streaming=true;const before=modalCount;await clear.call(host);assert.equal(modalCount,before,'cannot clear an active conversation');streaming=false;
+choice='wait';const pending=clear.call(host);await clear.call(host);assert.equal(modalCount,before+1,'duplicate opens no second dialog');key='participant-b';release('대화 지우기');await pending;assert.equal(writes.length,1,'identity change cannot clear either history');
+console.log('PASS clear history: explicit confirmation, cancellation, duplicate, active-stream and identity-change protection');

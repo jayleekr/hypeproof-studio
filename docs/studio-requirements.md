@@ -452,3 +452,9 @@ remove separately collected observation bundles in `test-results/`.
 
 [NAT-01–12](requirements/studio-native-trial.md) define the product scope; [T01–25](testing/studio-native-trial-validation.md) define acceptance tests.
 [Executed laptop evidence](testing/studio-native-trial-results-2026-09-08.md) records real App/API results separately from synthetic and human validation.
+
+## Personal trial interaction coverage (#758)
+
+| ID | Requirement | Verification |
+|---|---|---|
+| REQ-STUDIO-NATIVE-UX | [TUX controls](requirements/studio-native-trial-ux.md) define observable outcomes for trial entry, coaching, observations, updates and recovery. Preserve work on cancel; confirm conversation deletion; isolate observation state on identity changes; recover the actual chat tree after a render error. | [UI and host test matrix](testing/studio-native-trial-ux.md); built React browser suite, host tests and applicable actual Electron reruns |
