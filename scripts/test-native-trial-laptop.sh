@@ -9,6 +9,10 @@ if [[ "$(uname -s)" != Darwin ]]; then
   exit 2
 fi
 SOURCE_APP="${HPS_APP_PATH:-/Applications/HypeProof Studio.app}"
+if [[ "${HPS_NATIVE_RELEASE_VERIFY:-}" == 1 && -z "${HPS_NATIVE_REUSE_DIR:-}" ]]; then
+  echo 'BLOCKED: release verification requires HPS_NATIVE_REUSE_DIR containing the untouched published .app; injection is forbidden.' >&2
+  exit 2
+fi
 [[ -d "$SOURCE_APP/Contents" ]] || { echo 'BLOCKED: set HPS_APP_PATH to an installed Studio .app bundle.' >&2; exit 2; }
 [[ -f worker/.dev.vars ]] || { echo 'BLOCKED: worker/.dev.vars is missing; use the existing scripts/dev-secrets.sh setup.' >&2; exit 2; }
 node --env-file=worker/.dev.vars -e 'if (!process.env.ANTHROPIC_API_KEY) { console.error("BLOCKED: this SDK rehearsal requires ANTHROPIC_API_KEY in worker/.dev.vars"); process.exit(2) }'
@@ -56,7 +60,18 @@ node --input-type=module <<'NODE'
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import assert from 'node:assert/strict';
-for (const file of ['dist/extension.js','webview-ui/dist/assets/index.js','webview-ui/dist/assets/index.css','package.json']) {
+if (process.env.HPS_NATIVE_RELEASE_VERIFY === '1') {
+  // Download digest verification precedes this script. Never rebuild/inject a
+  // published bundle and then describe it as verification of that release.
+  assert.match(process.env.HPS_NATIVE_RELEASE_SHA ?? '', /^[0-9a-f]{40}$/);
+  assert.match(process.env.HPS_NATIVE_RELEASE_VERSION ?? '', /^\d+\.\d+\.\d+$/);
+  const product = JSON.parse(readFileSync(process.env.HPS_APP_PATH+'/Contents/Resources/app/product.json','utf8'));
+  const extension = JSON.parse(readFileSync(process.env.HPS_APP_PATH+'/Contents/Resources/app/extensions/hypeproof-chat/package.json','utf8'));
+  assert.equal(product.version, process.env.HPS_NATIVE_RELEASE_VERSION, 'wrong released app version');
+  assert.equal(product.commit, process.env.HPS_NATIVE_RELEASE_SHA, 'wrong released app source');
+  assert.equal(extension.version, process.env.HPS_NATIVE_RELEASE_VERSION, 'wrong bundled extension version');
+  console.log('Untouched release bundle identity verified: '+product.version+' @ '+product.commit);
+} else for (const file of ['dist/extension.js','webview-ui/dist/assets/index.js','webview-ui/dist/assets/index.css','package.json']) {
   const hash = p => createHash('sha256').update(readFileSync(p)).digest('hex');
   assert.equal(hash(process.env.HPS_APP_PATH+'/Contents/Resources/app/extensions/hypeproof-chat/'+file), hash('extensions/hypeproof-chat/'+file), 'stale rehearsal copy: '+file);
 }
@@ -83,4 +98,4 @@ done
 [[ "$ready" == 1 ]] || { echo "BLOCKED: gateway startup failed; inspect $NATIVE_TMP/gateway.log locally." >&2; exit 2; }
 cd e2e
 echo "Evidence: $HPS_NATIVE_EVIDENCE_DIR"
-npx playwright test --config=native-trial.config.ts --workers=1 --retries=0
+npx playwright test --config=native-trial.config.ts --workers=1 --retries=0 "$@"
