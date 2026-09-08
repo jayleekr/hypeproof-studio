@@ -1,0 +1,5 @@
+{
+  "status": "FAIL",
+  "basis": "SDK mid-response server error; actual error banner detected; no concrete draft completed",
+  "followup": "https://github.com/jayleekr/hypeproof-studio/issues/804"
+}

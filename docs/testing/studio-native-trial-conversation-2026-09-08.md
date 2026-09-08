@@ -86,3 +86,52 @@ health/profile 200을 확인했다. 실행 중인 Service가 사용하는 디렉
 App v0.1.55는 위 merge SHA에서 빌드한다. 공개 파일과 실제 앱 재검증은 아래 출시
 기록에서 별도로 판정한다. 복구 시 기존 App v0.1.54와 작업 폴더를 보존하며, Service는
 이전 ref `fe6f7b5`의 정상 배포 절차를 사용한다.
+
+## 공식 App v0.1.55 재검증
+
+Mac [빌드](https://github.com/jayleekr/hypeproof-studio/actions/runs/34258354238)와
+Windows [빌드·portable smoke](https://github.com/jayleekr/hypeproof-studio/actions/runs/34258354245)가
+성공했다. [공개 릴리스](https://github.com/jayleekr/hypeproof-studio-releases/releases/tag/v0.1.55)의
+파일 7개는 원본 릴리스와 SHA-256이 모두 일치한다. 필수 Mac zip·Windows zip·두 설치
+파일의 존재도 확인했다. 검사기는 처음 파일 수를 4개로 잘못 가정해 실패했으며, 실제
+필수 파일 존재와 전체 원본/공개 digest 동일성으로 수정했다. 배포 누락은 없었다.
+
+Mac ZIP SHA-256: `73bfc4ec02ee19f39993ddc7b6685c020aeb1b1b2a007083544b0450b4fe3fc6`.
+App/확장 버전 0.1.55, product commit `189bc956a01236abb82ed69542d3cdb633a0fcc3`,
+`codesign --verify --deep --strict` PASS. 서명 검사는 공증·조직 관리 단말 설치를
+입증하지 않는다. [공개 파일 근거](../evidence/2026-09-08/trial-conversation/public-release.json).
+다음 실행은 이 원본 파일에 확장을 주입하지 않고 별도 사용자 폴더에서 진행했다.
+
+| 실행 | 결과와 범위 |
+|---|---|
+| `20260908T181038Z` 화면 시나리오 | PASS: 중앙 대화, 실제 Markdown, 텍스트 응답의 파일 보존, 실제 Write, 옆 미리보기, 연결 화면 왕복 초안 |
+| 같은 실행의 위임 대화 | 전송 PASS / 의미 FAIL: 역할은 구분했지만 “목차를 만들어볼게요”로 종료. 실제 초안·도구 실행 없음. #803으로 수정 |
+| `20260908T181321Z` 기본 회귀 | PASS: 실제 API/파일 생성·수정/관찰·정정/앱 재시작/대화 삭제 취소·확인 |
+| `20260908T181613Z` 지침 수정 후 첫 반복 | FAIL: SDK `Server error mid-response` 및 UI 오류 배너. HTTP 200 스트림 시작만으로 완료로 보지 않음. #804로 추적 |
+| 같은 실행 두 번째 반복 | PASS: AI/사람 역할 구분, 실제 10장 목차, 고객 문제와 가정 확인. 파일 제작은 후속 제안이며 실행으로 집계하지 않음 |
+
+Service 지침은 “실행 약속” 대신 같은 응답의 작은 초안 또는 실제 도구 결과를 요구하도록
+보완했다. native 검사는 각 턴의 오류 배너도 확인하며, 전송과 의미 판정은 계속 분리한다.
+실제 재실행 원문은 `release-first`, `release-baseline`, `release-followthrough-first`에
+보존했다. 중단 원인의 업스트림 내부 사유는 미확인이다. 기존 다시 보내기 버튼의
+부분 결과·중복 부작용 복구 검증은 [#804](https://github.com/jayleekr/hypeproof-studio/issues/804)에 남긴다.
+
+로컬 `~/Library/Application Support/HypeProof/local-trial-744/releases/v0.1.55/`에
+같은 공식 앱을 보관하고 데스크톱 ‘HP 개인 체험 시작.command’의 다음 실행 대상을
+v0.1.55로 바꿨다. 기존 앱·대화·작업 폴더는 종료하거나 덮어쓰지 않았다. 이전 launcher와
+사용안내는 `.before-v0.1.55`로 보존했다. 현재 창은 이전 버전이므로 작업 저장·종료 뒤
+다음 실행부터 적용된다. 앱 갱신은 만료된 체험 코드를 갱신하거나 제한을 늘리지 않는다.
+
+최신 main의 #795 모델 선택 변경을 검토하고 통합한 Service 코드
+`e8f9d114a42cac760e4152f84fa08cd7a4e54f9e`에서 Worker 전체 test/typecheck가 다시
+통과했다 (`/tmp/hps-758-followthrough-final-worker.log`). App은 계속 원본 v0.1.55다.
+`20260908T182118Z`에서 같은 3턴을 별도 합성 작업 폴더로 두 번 재실행해 전송/오류
+검사 2 PASS, 수동 의미 검토도 두 시료의 위임 목적·작은 초안 기준 PASS였다. 각각
+7장/8장 목차를 실제 제공했다. 첫 시료는 초안 뒤 두 질문이 있어 ‘질문 최소화’ 전체
+수용 조건은 이 결과로 통과시키지 않는다. 둘째 시료는 인용 부호를 포함한 비표준
+강조 구문이 원문처럼 남았다. 앞서 일반 굵게/목록 검사가 통과한 것과 구분하며 모든
+모델 Markdown의 완벽한 표시를 주장하지 않는다.
+[최종 원문·화면·환경](../evidence/2026-09-08/trial-conversation/release-followthrough-final/).
+
+#803의 완료 범위는 실행 약속만 남던 응답의 작은 초안 제공과 관측 강화다.
+외부 모델 오류 #804, 사람 T25 및 기존 NOT_RUN은 별도로 남는다.

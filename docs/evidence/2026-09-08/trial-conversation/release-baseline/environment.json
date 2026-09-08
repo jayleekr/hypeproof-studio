@@ -1,0 +1,19 @@
+{
+  "at": "2026-09-08T18:13:21.810Z",
+  "verification_mode": "published-bundle-unmodified",
+  "code_sha": "189bc956a01236abb82ed69542d3cdb633a0fcc3",
+  "dirty": true,
+  "service_source_sha256": "9fe25886e7af3a7b35c7ffd212835d3a76122546cc54f3ee3a78602377976c36",
+  "app_version": "0.1.55",
+  "app_source_sha": "189bc956a01236abb82ed69542d3cdb633a0fcc3",
+  "extension_bundles_sha256": {
+    "dist/extension.js": "e0042f5b2fc4798aadbe17f07a70505e5caf996066441a378881d7836a762c11",
+    "webview-ui/dist/assets/index.js": "4c92be631ca8a70f0aa8989d8ae9793d1398170e3d97c61d7af69716591d71df",
+    "webview-ui/dist/assets/index.css": "4b75706d2bc528fea78662cab4481276cb05b227850b24c0132a1c7cfae30f7e"
+  },
+  "node": "v24.4.1",
+  "platform": "darwin",
+  "arch": "arm64",
+  "compatibility_control": false,
+  "storage": "local test bindings; no production state"
+}

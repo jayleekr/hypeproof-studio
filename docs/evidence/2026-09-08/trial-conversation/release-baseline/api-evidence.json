@@ -1,0 +1,76 @@
+{
+  "real_upstream": true,
+  "storage": "synthetic-memory",
+  "calls": [
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRfnZrfDU1sZB5X2H6Q",
+      "elapsed_ms": 1246
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRfuX4nSYD4cwvfpaEo",
+      "elapsed_ms": 3228
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRhkKj8rBHU6Devs2KS",
+      "elapsed_ms": 1574
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRhwLkzWYRjsrcFKqBv",
+      "elapsed_ms": 2159
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRifLcenShQXE1kLyqf",
+      "elapsed_ms": 1101
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRinNXhq4y8XECSJQaH",
+      "elapsed_ms": 1098
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRjD74sqzpXmbnmAAVh",
+      "elapsed_ms": 1385
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRkNAJo6PB4v7tf2kqm",
+      "elapsed_ms": 2279
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRkeNdAhq9nRwHp8njt",
+      "elapsed_ms": 1063
+    },
+    {
+      "origin": "https://api.anthropic.com",
+      "path": "/v1/messages",
+      "status": 200,
+      "request_id": "req_011CerRmCJkoiwTs6AZbbrpC",
+      "elapsed_ms": 36036
+    }
+  ]
+}
