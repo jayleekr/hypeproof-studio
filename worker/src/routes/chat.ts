@@ -454,8 +454,11 @@ chat.post("/chat/completions", async (c) => {
     return c.json({ error: { message: "bad json body", type: "request" } }, 400);
   }
   const coach: CoachContext = {
-    name: decodeHeader(c.req.header("x-hps-coach-name")),
-    personality: decodeHeader(c.req.header("x-hps-coach-personality")),
+    // #747 — a lesson-fixed identity is instructor-set (already in the gated
+    // system_prompt); the client's headers are then ignored so a participant
+    // cannot re-title the AI or attach a personality on that seat.
+    name: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-name")),
+    personality: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-personality")),
     // #507 — 프록시 경로의 브라우저 루프도 같은 주소를 알아야 한다. 클라이언트는
     // 주소만 보내고, 문구는 워커가 만든다(주입 통로가 되지 않게).
     previewUrl: decodeHeader(c.req.header("x-hps-preview-url")),

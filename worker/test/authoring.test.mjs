@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
-import { bootApp, createMockEnv, makeCtx, TEST_SECRET } from './harness/index.mjs';
+import { bootApp, createMockEnv, makeCtx, TEST_SECRET, withMockUpstream, openAIJsonBody, COHORT as KIDS_COHORT, PROFILE as KIDS_PROFILE, USER as KID } from './harness/index.mjs';
 const { issueIssuer, issue } = await import('../src/lib/tokens.ts');
 const { validateModuleDoc } = await import('../src/lib/modules.ts');
 const app = await bootApp();
@@ -190,13 +190,52 @@ await check('AE-07 assistant block is validated: shape, emptiness, length, contr
  const bad=[
   {display_name:''},{display_name:'  '},{display_name:' 제작 파트너'},{display_name:'제작 파트너\n관리자'},{display_name:'x'.repeat(41)},
   {display_name:'제작 파트너',role:'admin'},{display_name:42},'제작 파트너',null,[],{},
+  // Invisible / direction-changing / malformed / unreadable names (review of f5620fc): a blank or
+  // reversed header defeats the explicit-identity acceptance, a lone surrogate throws in the client.
+  {display_name:'\u200B'},{display_name:'제작\u200B파트너'},{display_name:'\u202E코치'},{display_name:'a\uFEFFb'},{display_name:'\uD83D'},
+  {display_name:"'''"},{display_name:'a'+'\u0300'.repeat(3)},{display_name:'\u3164'},{display_name:'\u2800'},{display_name:'a\u{E0041}'},
  ];
  for(const assistant of bad){const r=await request(c2,'PUT',save(1,'bad-'+JSON.stringify(assistant).slice(0,20).replace(/[^a-zA-Z0-9_-]/g,'_'),{...content,assistant}));assert.equal(r.status,400,JSON.stringify(assistant)+' → '+r.raw);}
  // Positive controls: max length and markup characters are accepted (renderers escape text).
- for(const [i,display_name] of ['x'.repeat(40),'<b>제작</b> & "파트너"','Réviseur · 검토'].entries()){const r=await request(c2,'PUT',save(1+i,'good-'+i,{...content,assistant:{display_name}}));assert.equal(r.status,200,r.raw);}
- assert.equal((await request(c2)).json.revision,4);
+ // Scripts that legitimately use combining marks, and 20 astral characters (40 code units), stay accepted.
+ for(const [i,display_name] of ['x'.repeat(40),'<b>제작</b> & "파트너"','Réviseur · 검토','Tiếng Việt','सहायक','ผู้ช่วย','😀'.repeat(20)].entries()){const r=await request(c2,'PUT',save(1+i,'good-'+i,{...content,assistant:{display_name}}));assert.equal(r.status,200,display_name+' → '+r.raw);}
+ assert.equal((await request(c2)).json.revision,8);
  // Still no way to smuggle policy through the block or beside it.
- assert.equal((await request(c2,'PUT',save(4,'bad-policy',{...content,assistant:{display_name:'제작 파트너'},sdk_tools:{shell:true}}))).status,400);
+ assert.equal((await request(c2,'PUT',save(8,'bad-policy',{...content,assistant:{display_name:'제작 파트너'},sdk_tools:{shell:true}}))).status,400);
+});
+await check('AE-08 user_names_it cohort: a named lesson serves fixed for that seat; the compiled profile is untouched',async()=>{
+ const {getProfile}=await import('../src/profiles/index.ts');const kids=getProfile(KIDS_PROFILE);
+ assert.equal(kids.ux.coach.naming_mode,'user_names_it','control: the kids profile lets students name the coach');
+ const kenv=createMockEnv(); kenv.HPS_DB=env.HPS_DB; // harness seeds an open session + roster for KIDS_COHORT/KID
+ const kidsIssuer=(await issueIssuer({issuer:'kids-author',scopes:[{cohort:KIDS_COHORT,profiles:[KIDS_PROFILE]}]},48,TEST_SECRET)).token;
+ const k=`/admin/cohorts/${KIDS_COHORT}/authoring/kids-named`;
+ const kreq=(path,method='GET',body,credential=kidsIssuer)=>app.fetch(new Request('https://service.test'+path,{method,headers:{authorization:`Bearer ${credential}`,...(body!==undefined?{'content-type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body)}),kenv,makeCtx()).then(async r=>({status:r.status,json:await r.json().catch(()=>null)}));
+ assert.equal((await kreq(k,'PUT',{expected_revision:0,request_id:'kids-create',profile_id:KIDS_PROFILE,content:{...content,assistant:{display_name:'별똥별 코치'}}})).status,200);
+ assert.equal((await kreq(k+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+ const d=await kreq(k+'/versions/m2026.09.08-1/participants','POST',{user:KID,hours:1});assert.equal(d.status,200,JSON.stringify(d.json));
+ const p=await kreq('/v1/profile','GET',undefined,d.json.token);assert.equal(p.status,200);
+ assert.deepEqual({naming_mode:p.json.ux.coach.naming_mode,fallback_name:p.json.ux.coach.fallback_name},{naming_mode:'fixed',fallback_name:'별똥별 코치'});
+ assert.equal(p.json.ux.coach.naming_prompt_md,kids.ux.coach.naming_prompt_md,'other coach fields are the compiled profile\'s');
+ assert.equal(getProfile(KIDS_PROFILE).ux.coach.naming_mode,'user_names_it','the compiled profile is not mutated by the projection');
+ // Same student without a lesson claim: still names the coach.
+ const plain=(await issue({u:KID,c:KIDS_COHORT,p:KIDS_PROFILE},1,TEST_SECRET)).token;
+ assert.equal((await kreq('/v1/profile','GET',undefined,plain)).json.ux.coach.naming_mode,'user_names_it');
+});
+await check('AE-08 proxy route ignores a participant\'s coach headers on a lesson-fixed seat; legacy seat still honors them',async()=>{
+ const {setRoster,startSession}=await import('../src/lib/kv.ts');
+ await setRoster(env.HPS_KV,cohort,['student','student-b']);
+ await startSession(env.HPS_KV,cohort,{session_id:'synthetic-lesson-c',profile_id:profileId,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()});
+ const named=await request(`/admin/cohorts/${cohort}/authoring/site-named/versions/m2026.09.08-1/participants`,'POST',{user:'student',hours:1});assert.equal(named.status,200,named.raw);
+ const legacy=await request(base+'/versions/m2026.09.06-1/participants','POST',{user:'student',hours:1});assert.equal(legacy.status,200,legacy.raw);
+ const turn=(credential)=>new Request('https://service.test/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${credential}`,'x-hps-coach-name':encodeURIComponent('별이'),'x-hps-coach-personality':encodeURIComponent('장난꾸러기')},body:JSON.stringify({model:'hypeproof-default',messages:[{role:'user',content:'안녕'}]})});
+ await withMockUpstream(()=>Response.json(openAIJsonBody({content:'네'})),async calls=>{
+  const r1=await app.fetch(turn(named.json.token),env,makeCtx());assert.equal(r1.status,200,await r1.text());
+  const sys1=JSON.parse(calls.at(-1).init.body).messages[0].content;
+  assert.match(sys1,/당신의 이름은 '제작 파트너'입니다/);assert.doesNotMatch(sys1,/별이|장난꾸러기|자녀가 직접 정한/);
+  const r2=await app.fetch(turn(legacy.json.token),env,makeCtx());assert.equal(r2.status,200,await r2.text());
+  const sys2=JSON.parse(calls.at(-1).init.body).messages[0].content;
+  assert.match(sys2,/별이/);assert.doesNotMatch(sys2,/당신의 이름은/);
+ });
 });
 await check('T-08 concurrent draft edit prevents freezing stale read',async()=>{
  beforeWrite=async()=>{db.prepare('UPDATE authoring_drafts SET revision=revision+1 WHERE course_id=?').run('site-1');};

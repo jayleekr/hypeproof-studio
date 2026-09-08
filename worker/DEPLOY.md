@@ -98,6 +98,21 @@ npx wrangler tail
 npx wrangler secret put GEMINI_API_KEY
 ```
 
+### Rollback floors
+
+Frozen Chalk lessons are re-validated on every read with the *current*
+`validateSessionDesign`. A Service older than the change that introduced a
+lesson field cannot read a frozen version carrying it and returns
+`409 lesson_unavailable` to every seat delivered from that version.
+
+| Field | Introduced by | Do not roll the Service back below |
+|---|---|---|
+| `assistant.display_name` (ADR-0005) | #747 feature A | the first deploy that includes it, once any instructor has frozen a named version |
+
+Deploy order for a lesson-schema change: Service first, then Chalk. A newer
+Chalk against an older Service fails the draft save with
+`400 invalid session-design fields` (the edit is preserved).
+
 ## Cloudflare Access (recommended for /admin/*)
 
 `wrangler` can't configure Access — do it once via the Cloudflare dashboard:

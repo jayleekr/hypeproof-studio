@@ -535,7 +535,7 @@ export function ChatPanel(props: Props) {
         <div className="hps-shell-drop-overlay">여기에 놓으면 이미지가 첨부돼요 🖼</div>
       )}
       <header className="hps-header">
-        <strong title={ux.coach.naming_mode === "fixed" ? "이 수업의 코치" : "코치 이름 바꾸기"} onClick={() => { if (ux.coach.naming_mode !== "fixed") setForceNaming(true); }} className="hps-coach-name">
+        <strong title={ux.coach.naming_mode === "fixed" ? `이 수업의 AI 이름: ${coachName}` : "코치 이름 바꾸기"} onClick={() => { if (ux.coach.naming_mode !== "fixed") setForceNaming(true); }} className="hps-coach-name">
           {coachName}
         </strong>
         <div className="hps-actions">

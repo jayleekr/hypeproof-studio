@@ -33,8 +33,16 @@ html, body, #root {
   cursor: pointer;
   border-bottom: 1px dashed transparent;
   transition: border-color 120ms;
+  /* #747 — a lesson may fix a 40-char name; keep the header one row at 390px.
+     The full name stays reachable through the title attribute. */
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hps-coach-name:hover { border-bottom-color: var(--vscode-foreground, #888); }
+.hps-actions { flex: 0 0 auto; }
 
 .hps-header button {
   background: transparent;
