@@ -1,10 +1,11 @@
 # 후보 역량·이용권·예산 인수 계획
 
-2026-09-08 · 상태: 미실행 테스트 계획 · Lab #777 / Studio #800.
+2026-09-08 · 상태: 제품 시험 단계별 실행, 전체 인수·연구 미완료 · Lab #777 / Studio #800.
 대상: [HC 계약](../requirements/capability-model-contract.md),
 [AB 계약](../requirements/access-budget-settlement.md).
 이 문서와 traceability node의 존재는 실행 결과가 아니다. 기존 #839/#840/#843 근거는 해당
 구현 범위에만 유효하며 새 금액 예산·구독 계약을 증명하지 않는다.
+P1~P5의 실제 실행 범위는 아래 기록과 [충족 현황](access-intent-fulfillment-2026-09-08.md)을 따른다.
 
 ## 제품 인수 시나리오
 
