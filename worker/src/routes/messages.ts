@@ -1,4 +1,5 @@
 import { crossProviderEnabled } from '../profiles/types';
+import { captureUsageCost } from '../lib/usage-costs';
 
 import { applyRequestEffort, EffortPolicyError, type EffortReceipt } from '../lib/model-effort';
 import { persistRequestSettings } from '../lib/request-settings';
@@ -254,6 +255,8 @@ messages.post("/messages", async (c) => {
   let effortReceipt: EffortReceipt | undefined;
   // Diagnostic IDs can share a CF-Ray prefix; settings need one unique ID per request.
   const settingsRequestId = crypto.randomUUID();
+  const usageRequestId=settingsRequestId;
+  let reportedUsage:Record<string,unknown>={},returnedModel:string|null=null,costComplete=false,costEnded=false;
   const mkLog = (
     tokens_in: number,
     tokens_out: number,
@@ -278,6 +281,10 @@ messages.post("/messages", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    c.executionCtx.waitUntil(captureUsageCost(env,usageRequestId,{usage:reportedUsage,model:returnedModel,
+      tier:typeof reportedUsage.service_tier==='string'?reportedUsage.service_tier:null,
+      region:typeof reportedUsage.inference_geo==='string'?reportedUsage.inference_geo:(env.HPS_USAGE_REGION??null),
+      complete:costComplete,ended:costEnded}).catch(()=>console.error('SDK cost evidence unavailable; unresolved reservation retained')));
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
     c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
@@ -502,6 +509,7 @@ messages.post("/messages", async (c) => {
   // e2e BLOCKER: dropping the header 400'd every SDK turn).
   let upstream: Response;
   try {
+    if(env.HPS_ACCESS_CONTRACTS==='enabled')c.header('x-hps-usage-request-id',usageRequestId);
     upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {
       signal: nativeTrialSignal(c.req.raw),
       url: env.ANTHROPIC_PROXY_URL,
@@ -548,14 +556,18 @@ messages.post("/messages", async (c) => {
     // 5. Non-streaming: verbatim JSON passthrough (native Anthropic shape —
     // the SDK client parses it directly), usage tapped from the body.
     const j = (await upstream.json()) as {
+      model?: string;
       content?: Array<{ type?: string; text?: string }>;
       usage?: {
         input_tokens?: number;
         output_tokens?: number;
         cache_read_input_tokens?: number;
         cache_creation_input_tokens?: number;
+        service_tier?: string;
+        inference_geo?: string;
       };
     };
+    reportedUsage=j.usage??{};returnedModel=typeof j.model==='string'?j.model:null;costComplete=true;costEnded=true;
     const tin = j.usage?.input_tokens ?? 0;
     const tout = j.usage?.output_tokens ?? 0;
     const cr = j.usage?.cache_read_input_tokens ?? 0;
@@ -660,6 +672,8 @@ messages.post("/messages", async (c) => {
   };
 
   const outStream = tapAnthropicStream(upstream.body, onUsage, {
+    onProtocolComplete:()=>{costComplete=true;costEnded=true;},
+    onUsageReport:(raw,model)=>{reportedUsage={...reportedUsage,...raw};if(model)returnedModel=model;},
     requestId: c.get("requestId"),
     onTextDelta: (delta) => {
       responseChars += delta.length;

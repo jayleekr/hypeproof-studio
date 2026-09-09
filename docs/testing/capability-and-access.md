@@ -65,3 +65,14 @@ CA-T19는 Lab 연구 프로토콜을 따른다. 후보별 구조 타당성, trai
 - 기존 `npm test`와 `npm run typecheck` PASS. 이 결과는 이용권 저장/조회 부분의 증거다.
 
 CA-T01/03/04/05/13/14의 위 API 부분만 실행했다. 개인 AI 실행·원가 정산·공용 예산·강사 배분 UI·실제 결제 sandbox·Mac 화면·실제 수업 관측과 사람 연구는 아직 이 기록의 PASS 범위가 아니다.
+
+
+## P2 실제 실행 기록 (#854)
+
+2026-09-08, Mac arm64 / Node 24.4.1, 합성 공급자 응답과 가격/환율. 실제 고객 결제/공급자 invoice 조회/운영 활성화 없음.
+
+- `npm run test:costs`: 실제 Hono/SQLite에서 기존 시도 ID 귀속, 중복/지연/역순 정산, job 비용 출처 불변, Anthropic TTL과 OpenAI inclusive cache/reasoning, 정수 ceil/FX/overflow, 미확인 원가, 도구 seconds meter, 미전송 증명 거부, invoice 조정 및 admin-only 권한 PASS. 실제 `/v1/chat/completions`의 공급자 응답 hook을 합성 upstream으로 실행하여 원가 1행 생성 확인.
+- `npm run test:costs:d1`: 실제 local D1에서 12개 중복 등록/보고가 시도·정산을 늘리지 않음, 역순 12개 snapshot 최신값, job 충돌 전체 rollback, 저장 후 ACK 소실 재전송 PASS.
+- 원가 snapshot이 부분 보고로 보정되면 예전 확정 금액을 그대로 유지하지 않는다. 금액 예산의 보수적 예약/초과 처리는 #855의 별도 검증이다.
+
+CA-T02/08/09/10의 원가 부분만 실행했다. 실제 SDK CLI fan-out, 전체 pre-dispatch 예산, 외부 공급자 청구 대조, 실제 수업/화면/사람 연구는 이 결과에 포함하지 않는다.

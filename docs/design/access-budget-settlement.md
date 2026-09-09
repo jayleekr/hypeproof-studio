@@ -155,3 +155,16 @@ SDK/proxy/이전 앱 모두 서버 게이트를 지나야 한다. 배포 gate는
 D1의 [batch transaction 의미](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch)를 사용해 이벤트·현재 계약·불변 기간을 함께 쓴다. 같은 기간의 수정은 transaction 전체가 실패한다. 원본 이벤트는 남고, 낮은 source_version은 현재 권한을 되돌리지 않는다. 판매/결제·강사 지급 처리는 이 API에서 발생하지 않는다.
 
 P1 되돌리기는 새 게시/계정 연결/계약 opt-in을 중지하는 것이다. 운영 금액 집행이 시작된 뒤 전역 플래그를 끄면 안 된다. 후속 P3에서는 새 유료 실행을 먼저 정지하고 이미 예약된 작업을 정산한 뒤 코드 변경을 되돌리는 별도 절차가 필요하다. additive 테이블이나 기존 기간/이벤트를 삭제하는 rollback은 없다.
+
+
+## P2 원가 관측과 보정
+
+`hps-usage-price/1`은 판매 상품과 독립적이다. `/admin/access/usage/prices`에서 exact digest 승인된 공급자 원가표만 운영 게시할 수 있다(`HPS_USAGE_APPROVED_PRICE_DIGESTS`). 새 승인 목록을 바꿔도 진행 중 시도는 원래 표를 읽는다. 합성 가격은 dev-only다. 정수 micro 단위의 meter별 ceil/최종 FX ceil은 계약에 표시되며, 실제 invoice 반올림 차이는 조정으로 보고한다.
+
+`/admin/access/usage/attempts`는 기존 시도 ID의 확인된 과거 귀속/시험 및 P3 전송 전 등록을 위한 서버 경로다. 일반 학생/강사는 쓸 수 없다. SDK와 proxy는 실제 완료 marker, 원시 사용량 중 whitelist된 수치, 실제 모델·tier·geo만 읽으며 응답 본문을 새 원장에 저장하지 않는다. 중도 EOF는 완료 marker로 간주하지 않는다.
+
+`/admin/access/usage/evidence`는 같은 실제 시도의 누적 snapshot version을 받는다. 동일 보고/ACK 소실 재시도는 한 번, 낮은 version은 현재값 변경 없이 이력만 남긴다. 기존 시도의 반환 모델·가격 정보가 보완되면 `provider-reconciliation`과 확인 참조/당시 가격 revision으로 새 증거를 추가한다. 현재 가격으로 과거 미확인 비용을 자동 확정하지 않는다. `/invoice-adjustments`는 청구 차이와 사유를 별도 저장한다. `/jobs/:id`는 최대 1000행과 잘림 여부, 기준 시각, 원가와 조정을 분리해 반환한다.
+
+공식 schema 근거(2026-09-08 조회): [Anthropic Messages usage](https://platform.claude.com/docs/en/api/messages/create), [Anthropic 가격 차원](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI Chat Completions usage/service tier](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create), [OpenAI 가격 차원](https://developers.openai.com/api/docs/pricing). 테스트의 요율·환율·상한은 합성 수치이고 실제 판매 가격/원가표가 아니다.
+
+신규 설치 schema에 빠져 있던 기존 migration 0006의 model_usage_requests 정의도 추가했다. 기존 migration은 수정하지 않았으며, 운영 반영은 기존 0006/0007 다음 0008을 적용한다. 가격 미상/지원하지 않는 meter를 무료로 해석하지 않는다.

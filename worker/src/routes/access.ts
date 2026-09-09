@@ -4,6 +4,7 @@ import { bearer, verify, issue, TokenError, type TokenPayload } from '../lib/tok
 import { getRoster, isTokenRevoked } from '../lib/kv';
 import { getProfile } from '../profiles';
 import { crossProviderEnabled } from '../profiles/types';
+import { publishUsagePrice, registerUsageAttempt, recordCostEvidence, recordInvoiceAdjustment, usageJobCosts } from '../lib/usage-costs';
 import { authorizeIssuerForCohort } from '../lib/instructor-auth';
 import { AccessError, accessEnabled, requireAccessEnabled, accessId, publishAccessPlan, applyAccessEvent,
   accountForToken, accessChoices, readAccessAccount, type AccessEvent } from '../lib/access-contracts';
@@ -63,6 +64,11 @@ accessAdmin.use('/access/*',async(c,next)=>{
 });
 accessAdmin.post('/access/plans',async c=>c.json(await publishAccessPlan(c.env,await c.req.json()),201));
 accessAdmin.post('/access/events',async c=>c.json(await applyAccessEvent(c.env,await c.req.json())));
+accessAdmin.post('/access/usage/prices',async c=>c.json(await publishUsagePrice(c.env,await c.req.json()),201));
+accessAdmin.post('/access/usage/attempts',async c=>c.json(await registerUsageAttempt(c.env,await c.req.json()),201));
+accessAdmin.post('/access/usage/evidence',async c=>c.json(await recordCostEvidence(c.env,await c.req.json())));
+accessAdmin.post('/access/usage/invoice-adjustments',async c=>{await recordInvoiceAdjustment(c.env,await c.req.json());return c.json({ok:true});});
+accessAdmin.get('/access/usage/jobs/:id',async c=>c.json(await usageJobCosts(c.env,c.req.param('id'))));
 accessAdmin.put('/access/accounts/:id',async c=>{
   const id=c.req.param('id'), body=await c.req.json();
   if (!accessId(id)||!accessId(body.user_id)||!accessId(body.profile_id)||typeof body.active!=='boolean') throw new AccessError('invalid_account');

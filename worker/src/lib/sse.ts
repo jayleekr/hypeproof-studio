@@ -26,6 +26,7 @@ export interface StreamTransformOptions {
   usageProvider?: LLMProvider;
   onTextDelta?: (delta: string) => void;
   onUsageReport?: (raw: Record<string, unknown>, model?: string) => void;
+  onProtocolComplete?: () => void;
   onBeforeDone?: () => unknown | null | undefined;
   // #257 — correlates the sanitized client-facing stream_error with the full
   // server-side log line. Raw error prose never enters the SSE stream.
@@ -149,6 +150,7 @@ export function passThroughOpenAIStream(
   // finish_reason === "length".
   let truncated = false;
   let modelSeen = "";
+  let tierSeen: string | undefined;
 
   const scanBlock = (block: string) => {
     let isDoneBlock = false;
@@ -157,18 +159,20 @@ export function passThroughOpenAIStream(
       if (!line.startsWith("data:")) continue;
       const data = line.slice(5).trim();
       if (data === "[DONE]") {
+        options.onProtocolComplete?.();
         isDoneBlock = true;
         continue;
       }
       try {
         const ev = JSON.parse(data);
         if (!modelSeen && typeof ev?.model === "string") modelSeen = ev.model;
+        if (typeof ev?.service_tier === 'string') tierSeen=ev.service_tier;
         if (ev?.choices?.[0]?.finish_reason === "length") truncated = true;
         const delta = ev?.choices?.[0]?.delta?.content;
         if (typeof delta === "string" && delta.length > 0) options.onTextDelta?.(delta);
         const u = ev?.usage;
         if (u) {
-          options.onUsageReport?.(u, modelSeen);
+          options.onUsageReport?.({...u,...(tierSeen?{service_tier:tierSeen}:{})}, modelSeen);
           if (typeof u.prompt_tokens === "number") usage.input_tokens = u.prompt_tokens;
           if (typeof u.completion_tokens === "number") usage.output_tokens = u.completion_tokens;
           if (options.usageProvider) {
@@ -282,6 +286,7 @@ export function tapAnthropicStream(
         const event = JSON.parse(data);
         if (event?.type === "message_start" && event.message?.usage) {
           const u = event.message.usage;
+          options.onUsageReport?.(u,event.message.model);
           if (typeof u.input_tokens === "number") usage.input_tokens = u.input_tokens;
           if (typeof u.cache_read_input_tokens === "number") {
             usage.cache_read_input_tokens = u.cache_read_input_tokens;
@@ -291,8 +296,10 @@ export function tapAnthropicStream(
           }
         }
         if (event?.type === "message_delta" && typeof event.usage?.output_tokens === "number") {
+          options.onUsageReport?.(event.usage);
           usage.output_tokens = event.usage.output_tokens;
         }
+        if (event?.type === 'message_stop') options.onProtocolComplete?.();
         if (event?.type === "content_block_delta" && event.delta?.type === "text_delta") {
           const delta = event.delta.text;
           if (typeof delta === "string" && delta.length > 0) options.onTextDelta?.(delta);
@@ -361,6 +368,7 @@ function processBlock(
   }
 
   // Capture usage from message_start + message_delta
+  if (event?.type === 'message_stop') options.onProtocolComplete?.();
   if (event?.type === "message_start" && event.message?.usage) {
     const u = event.message.usage;
     options.onUsageReport?.(u, event.message.model);

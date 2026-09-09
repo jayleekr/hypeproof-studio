@@ -523,6 +523,43 @@
           "path": "worker/test/access-contracts-d1.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-USAGE-COSTS",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-DES-ACCESS-BUDGET"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/usage-costs.ts"
+        },
+        {
+          "path": "worker/migrations/0008-usage-costs.sql"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-USAGE-COSTS",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-IMP-USAGE-COSTS"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/usage-costs.test.mjs"
+        },
+        {
+          "path": "worker/test/usage-costs-d1.test.mjs"
+        },
+        {
+          "path": "worker/test/sse-cost-receipts.test.mjs"
+        }
+      ]
     }
   ]
 }
