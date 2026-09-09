@@ -26,6 +26,7 @@
 
 import { Hono } from "hono";
 import { authoring } from "./authoring";
+import { accessAdmin } from './access';
 import { classroomTeacher } from "./classroom";
 import {nativeTrials} from './native-trials';
 import type { Env } from "../env";
@@ -134,6 +135,7 @@ admin.use("*", async (c, next) => {
 });
 
 admin.route("/", authoring);
+admin.route('/', accessAdmin);
 admin.route("/", classroomTeacher);
 admin.route('/',nativeTrials);
 

@@ -1,0 +1,34 @@
+import './harness/loader.mjs';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { Miniflare } from 'miniflare';
+import { accessHarness, syntheticPlan, syntheticEvent } from './harness/access.mjs';
+const { publishAccessPlan, applyAccessEvent, accessChoices }=await import('../src/lib/access-contracts.ts');
+const compatibilityDate=readFileSync(new URL('../wrangler.toml',import.meta.url),'utf8').match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];
+assert(compatibilityDate);
+const mf=new Miniflare({modules:true,compatibilityDate,d1Databases:['HPS_DB'],script:'export default {fetch(){return new Response("local access test")}}'});
+try {
+  const db=await mf.getD1Database('HPS_DB');
+  const sql=readFileSync(new URL('../migrations/0007-access-contracts.sql',import.meta.url),'utf8').replace(/--[^\n]*/g,'').split(';').map(s=>s.trim()).filter(Boolean);
+  const migrate=async()=>{for(const statement of sql)await db.prepare(statement).run();};
+  await migrate();
+  const h=await accessHarness(db),e=syntheticEvent(),p={c:h.cohort,u:'kid01',p:h.profile};
+  await Promise.all(Array.from({length:12},()=>publishAccessPlan(h.env,syntheticPlan())));
+  const saved=await Promise.all(Array.from({length:12},()=>applyAccessEvent(h.env,e)));
+  assert.equal(saved.filter(r=>r.applied).length,1);
+  assert.equal((await db.prepare('SELECT COUNT(*) n FROM access_periods').first()).n,1);
+  await migrate();assert.equal((await accessChoices(h.env,p)).length,1);
+  const variants=Array.from({length:12},(_,i)=>({...e,event_id:'version-'+(i+2),source_version:i+2,state:(i+2)===13?'suspended':'active'}));
+  await Promise.all(variants.reverse().map(v=>applyAccessEvent(h.env,v)));
+  assert.equal((await db.prepare('SELECT source_version FROM access_contracts').first()).source_version,13);
+  assert.equal((await accessChoices(h.env,p)).length,0);
+  await assert.rejects(applyAccessEvent(h.env,{...e,event_id:'bad-period',source_version:14,period:{...e.period,ends_at:e.period.ends_at+1000}}));
+  assert.equal((await db.prepare('SELECT source_version FROM access_contracts').first()).source_version,13,'batch rolled back');
+  assert.equal(await db.prepare("SELECT event_id FROM access_events WHERE event_id='bad-period'").first(),null);
+  const ending=syntheticEvent('ending');ending.period={id:'ending-old',starts_at:Date.now()-3600000,ends_at:Date.now()};
+  await applyAccessEvent(h.env,ending);assert.equal((await accessChoices(h.env,p)).length,0,'end is exclusive');
+  const renewal={...ending,event_id:'ending-v2',source_version:2,period:{id:'ending-new',starts_at:ending.period.ends_at,ends_at:ending.period.ends_at+3600000}};
+  await applyAccessEvent(h.env,renewal);assert.equal((await accessChoices(h.env,p)).length,1);
+  await applyAccessEvent(h.env,ending);assert.equal((await accessChoices(h.env,p))[0].contract.period.id,'ending-new');
+  console.log('PASS real local workerd/D1: 12-way duplicate and out-of-order events, atomic rollback, repeated migration, exclusive end, renewal and old-event replay');
+} finally {await mf.dispose();}

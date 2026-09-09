@@ -3,6 +3,10 @@
 export type LLMProvider = "gemini" | "anthropic" | "openai" | "glm";
 
 export interface Env {
+  /** Explicit opt-in; migrations and approved contracts must precede activation. */
+  HPS_ACCESS_CONTRACTS?: string;
+  /** Exact SHA-256 digests of approved sales publications; never provider prices. */
+  HPS_ACCESS_APPROVED_PLAN_DIGESTS?: string;
   // Secrets (wrangler secret put — locally: worker/.dev.vars, gitignored)
   GEMINI_API_KEY?: string;           // historical default; production sets anthropic (wrangler.toml)
   ANTHROPIC_API_KEY?: string;        // peer — used when LLM_PROVIDER=anthropic

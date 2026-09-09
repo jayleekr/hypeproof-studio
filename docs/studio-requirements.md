@@ -206,7 +206,8 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 
 후속 설계: [AB 이용권·예산·정산](requirements/access-budget-settlement.md)과
 [HC 후보 역량 해석 계약](requirements/capability-model-contract.md). 두 문서는 Lab #777 / #800의
-**계획 요구사항**이며 아래 구현된 REQ-L5나 기존 관측 schema의 완료 범위를 넓히지 않는다.
+후속 요구사항이다. #853의 이용권 게시·조회 계약부터 구현하며 각 단계의 실행 근거는
+[인수 기록](testing/capability-and-access.md)에 분리한다. 기존 관측 schema를 새 정산 완료로 간주하지 않는다.
 
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
@@ -216,6 +217,7 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 | REQ-L4 | 갤러리 발행은 프로필이 허가한 좌석에서만 (#748) | 발행 여부를 판단하는 곳이 **웹뷰 버튼 하나뿐**이었고, 그마저도 `publishing.strategy` 만 봤다. `publishing.enabled` 는 워커가 실어 보내기만 하고 **아무도 읽지 않는 값**이었다. 버튼은 유일한 도달 수단도 아니다 — 발행은 웹뷰 메시지 `publishToGallery` 로 시작하므로 버튼을 거치지 않고 호스트에 도달한다. 계약: ① 순수 판정기 `galleryPublishAllowed` 하나가 두 값을 **모두** 본다 — `enabled === true` **그리고** `strategy === 'hypeproof_gallery'`. truthy 는 true 가 아니고, 프로필이 아직 없으면 허가의 증거가 없으므로 거절한다(fail closed); ② 호스트는 세상·토큰·작업폴더 검사보다 **먼저** 묻는다 — 뒤에 두면 허용되지 않은 좌석이 "먼저 친구를 눌러 세상을 열어주세요" 를 보게 되고 그건 하면 되는 일처럼 읽힌다; ③ 웹뷰 버튼도 같은 두 값을 같은 방향으로 본다. 별도 vite 앱이라 호스트 모듈을 import 하지 않고 손으로 미러링하므로(REQ-M33 과 같은 이유) 스모크가 드리프트를 잠근다; ④ `hypeproofChat.siteBase` 는 `machine` 범위다 — 아이 작품이 실제로 올라가는 목적지를 프로젝트 폴더의 `.vscode/settings.json` 이 바꿀 수 있어서는 안 된다. `proxyUrl` 은 이미 machine 이었고 siteBase 만 window 로 남아 있었다. **오늘 실제 노출은 없다** — 등록된 프로필 다섯 개 전부에서 두 값이 일치한다(`enabled:false` ↔ `local_only`, `enabled:true` ↔ `hypeproof_gallery`). 이 행은 구멍을 막은 기록이 아니라 두 값이 갈라지는 날의 방향을 정한 기록이다. 사이트 라우트(`POST /api/gallery/publish`)가 토큰으로 코호트 opt-in 을 확인한다고 `galleryPublish.ts` 상단 주석이 적고 있으나 그 코드는 **다른 저장소에 있어 이 레포에서 확인하지 못했다** — 이 행을 서버 게이트의 대체물로 읽지 않는다 | U (`test/gallery-publish-gate.smoke.mjs`) |
 
 | REQ-L5 | 사용량 저장 기록과 확정 비용을 구분한다 (#800) | 운영자 최근 기록 조회는 범위·시각·캐시 쓰기·오류 중 토큰 기록·세션 미귀속을 표시한다. 빈 기록/조회 실패를 구분하고 실패 후 이전 숫자를 현재값처럼 유지하지 않는다. 미확인 보고/원가를 0이나 잔여 예산으로 확정하지 않는다. 학생·강사에게 운영자 조회 권한을 넓히지 않는다. CLI와 화면은 provider/스키마 없는 통합 캐시 적중률을 계산하지 않는다. | Service/SQLite (`usage-observation.test`), [실제 브라우저](testing/usage-observation.md) |
+| REQ-L6 | 가격 계약·개인/수업/기관 이용권을 서버에서 구분한다 (#853) | 불변 상품 revision과 검증된 계약 이벤트, UTC 기간, 개인 계정과 수업 좌석의 명시적 연결을 사용한다. 재발급/중복 갱신으로 지급을 반복하지 않는다. 담당 강사는 자기 수업 계약만 조회하며 가격·개인 계약 쓰기 권한은 없다. 미승인 상품 digest/운영 합성 계약/충돌/지원하지 않는 정책을 거부한다. 실행·금액 차감은 #854/#855 후속이다. | Service+SQLite `access-contracts.test`, 실제 로컬 D1 `access-contracts-d1.test` |
 
 
 ## M. Agent SDK coach runtime (#282)

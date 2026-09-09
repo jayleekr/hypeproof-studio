@@ -54,3 +54,14 @@ CA-T19는 Lab 연구 프로토콜을 따른다. 후보별 구조 타당성, trai
 포함형 판매 활성화는 별도로 확정된 상품 계약/가격 revision, 원가 계측·동시 예약·복구 근거,
 실제 수업의 분포와 운영 판단을 요구한다. 가격을 정하지 않아도 합성 검증은 가능하다.
 연구 타당화와 판매·결제 활성화는 서로의 완료 조건을 대신하지 않는다.
+
+
+## P1 실제 실행 기록 (#853)
+
+2026-09-08, Mac arm64 / Node 24.4.1. 합성 principal·가격 계약을 사용했고 운영 설정/결제는 변경하지 않았다.
+
+- `cd worker && npm run test:access`: 실제 Hono/기존 HMAC·issuer gate/SQLite를 통한 게시 충돌, 불완전 조건, 운영 합성 거부, exact digest 승인, 중복·역순·중지·재개, 기간 변경 rollback, 개인/수업/기관 격리, 자동 출처 선택 없음, 토큰 재발급/기능 미설정 회귀 PASS.
+- `cd worker && npm run test:access:d1`: 실제 local workerd/D1에서 12개 동시 동일 이벤트가 기간 1개만 생성, 12개 역순 revision의 최신값 유지, 전체 batch rollback, migration 반복, 끝 시각 배제, 갱신 후 옛 이벤트 재전송 PASS.
+- 기존 `npm test`와 `npm run typecheck` PASS. 이 결과는 이용권 저장/조회 부분의 증거다.
+
+CA-T01/03/04/05/13/14의 위 API 부분만 실행했다. 개인 AI 실행·원가 정산·공용 예산·강사 배분 UI·실제 결제 sandbox·Mac 화면·실제 수업 관측과 사람 연구는 아직 이 기록의 PASS 범위가 아니다.
