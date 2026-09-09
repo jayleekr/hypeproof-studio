@@ -1,6 +1,6 @@
 # 이용권·예산 배포와 포함형 활성화
 
-상태: P1~P5 구현/인수 후보, 운영 미활성. #800 / #857.
+상태: P1~P5 구현·인수, 운영 미활성. #800 / #857.
 [요구사항](../requirements/access-budget-settlement.md), [설계](../design/access-budget-settlement.md),
 [실제 인수와 집계](../research/budget-readiness-2026-09-08/README.md)를 따른다.
 **코드 배포, 포함형 상품 활성화, 실제 결제 연동은 각각 별도 상태다.**
@@ -46,7 +46,7 @@ node --experimental-strip-types scripts/verify-access-publication.mjs PLAN.json 
 
 ## 3. 코드 배포 순서
 
-1. 상위 철학/Intent와 계약 변경을 검토하고 의존 PR을 순서대로 반영한다. 현재 체인은 Lab #782, Studio #858 → #860(P1) → #861(P2) → #863(P3) → #866(P4) → #857의 P5 구현 PR이다. CI와 검토·채택 상태를 각각 확인한다.
+1. 상위 철학/Intent와 계약 변경을 검토하고 의존 PR을 순서대로 반영한다. 체인은 Lab #782, Studio #858 → #860(P1) → #861(P2) → #863(P3) → #866(P4) → #867(P5)이다. CI와 검토·채택 상태를 각각 확인한다. [충족 현황](../testing/access-intent-fulfillment-2026-09-08.md)으로 구현과 남은 운영 인수를 구분한다.
 2. 관련 Worker/Chalk/App 테스트, D1 계약 시험, 이 보고서의 후보 버전 인수를 확인한다. App은 후보 확장을 기존 셸의 격리 복사본에 넣어 검증했고, Windows 전체 릴리스 인수는 별도다.
 3. 기존 `deploy-worker` workflow를 사용한다. 기본 dry_run에서 테스트만 수행한다. 실제 배포는 기존 live-session freeze와 버전/승인 조건을 통과해야 한다. P5는 이 workflow에 additive 0007~0010 순서를 추가했다. 기존 데이터/테이블을 지우거나 schema.sql로 운영을 초기화하지 않는다.
 4. Service의 새 API를 먼저 준비하고 Chalk/App 후보를 해당 버전에 연결한다. `HPS_ACCESS_CONTRACTS` 및 승인 digest 미설정 상태에서는 포함형을 활성화하지 않는다. 단지 화면을 확인하려고 실제 수업을 required로 바꾸지 않는다.

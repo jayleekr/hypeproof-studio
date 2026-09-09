@@ -421,7 +421,8 @@
       "owner": "jayleekr",
       "depends_on": [
         "LAB-PRODUCT-ROLES",
-        "ST-INT-NATIVE"
+        "ST-INT-NATIVE",
+        "LAB-INT-ACCESS"
       ],
       "sources": [
         {
@@ -487,6 +488,9 @@
       "sources": [
         {
           "path": "docs/testing/capability-and-access.md"
+        },
+        {
+          "path": "docs/testing/access-intent-fulfillment-2026-09-08.md"
         }
       ]
     },

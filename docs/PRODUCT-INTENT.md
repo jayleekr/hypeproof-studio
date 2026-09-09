@@ -1,8 +1,7 @@
 # HypeProof Studio — Product Intent
 
 > Status: working product-intent layer
-> Accepted upstream inspected: [Lab 5c895a25](https://github.com/jayleekr/hypeprooflab/blob/5c895a256d01321b45ee7456c49f56de89cab2f4/PHILOSOPHY.md)
-> Proposed refinement: [Lab #777 개정안 ca2e97d0](https://github.com/jayleekr/hypeprooflab/blob/ca2e97d08ff1e737d5fab85ac47235a2391dd3e4/PHILOSOPHY.md), Human Capability Research. 개념 채택 전 제품 계약 초안이며 측정/UI migration 완료 아님.
+> Upstream merged: [Lab #782 · 1de0d9b8](https://github.com/jayleekr/hypeprooflab/blob/1de0d9b84ee51880ef9fcc70688b18c1afa4ac4e/PHILOSOPHY.md), Human Capability Research. 유지보수자의 이번 머지 승인으로 문서 기준을 연결했다. 후보 역량 타당화·측정/UI migration·판매 조건 확정은 별도다.
 > Downstream: [Studio behavior requirements](studio-requirements.md) and feature-specific specs
 
 [철학 개정 적용 기록](design/philosophy-alignment-2026-09-08.md)은 Lab 원본의 의미를
@@ -106,7 +105,7 @@ Human Asset은 철학적/학습적 모델이고, Product Intent는 제품 설계
 
 ## 후보 모델과 이용 권한에 대한 Intent
 
-Lab #777의 규범적 전제는 인간의 목적·판단·통제·책임을 보존한다는 것이다. Framing,
+Lab #782로 병합된 #777의 규범적 전제는 인간의 목적·판단·통제·책임을 보존한다는 것이다. Framing,
 Judgment, Verify, Orchestrate, Adapt, Ownership은 이를 연구할 잠정 후보이며 제품의 고정
 평가 목록이 아니다. 모델이 바뀌어도 실제 작업·판단의 출처·결과의 소유라는 의도는 유지한다.
 [HC-01~08](requirements/capability-model-contract.md)이 legacy evidence와 새 해석의 경계를 정한다.
@@ -117,7 +116,7 @@ Judgment, Verify, Orchestrate, Adapt, Ownership은 이를 연구할 잠정 후�
 자원 안에서 여러 수업의 도움과 실행 범위를 조절할 수 있어야 한다.**
 
 상품 의도 INT-ACCESS-01~08의 원본은 Lab의
-[이용 권한·pricing Intent 개정안](https://github.com/jayleekr/hypeprooflab/blob/ca2e97d08ff1e737d5fab85ac47235a2391dd3e4/products/studio/access-and-pricing-intent.md)에 둔다.
+[이용 권한·pricing Intent](https://github.com/jayleekr/hypeprooflab/blob/1de0d9b84ee51880ef9fcc70688b18c1afa4ac4e/products/studio/access-and-pricing-intent.md)에 둔다.
 이 문서는 다음 제품 원칙으로 번역하며, 실제 금액은 Lab pricing.ts의 버전별 계약을 따른다.
 
 - 수업·구독이 겹쳐도 사용 출처를 명시하며 한 요청을 두 번 차감하거나 개인 비용으로 자동 전환하지 않는다.
@@ -127,5 +126,6 @@ Judgment, Verify, Orchestrate, Adapt, Ownership은 이를 연구할 잠정 후�
 
 구현 계약은 [AB-01~18](requirements/access-budget-settlement.md),
 [설계](design/access-budget-settlement.md), [CA-T01~19](testing/capability-and-access.md),
-[실행 Epic](plan/capability-and-pricing-epics.md)으로 내려간다. 이 연결은 설계 상태이며
-가격·구독 결제·예산 집행·연구 타당화를 이미 적용했다는 뜻이 아니다.
+[실행 Epic](plan/capability-and-pricing-epics.md)으로 내려간다. P1~P5는 지원 범위의 이용권·원가·예산·역할별 화면을 구현하고 인수했다.
+[Intent·요구사항 충족 현황](testing/access-intent-fulfillment-2026-09-08.md)은 연결된 기준과
+실제로 확인한 행동을 구분한다. 이 구현은 판매 활성화·결제 연동·연구 타당화 완료를 뜻하지 않는다.
