@@ -17,7 +17,9 @@
     "test:classroom": "node --experimental-strip-types --experimental-sqlite classroom/run.mjs",
     "test:trial-ux": "node trial-ux/run.mjs",
     "test:budgets:browser": "node --experimental-strip-types --experimental-sqlite access-budgets/browser.mjs",
-    "test:budgets:mac": "node --experimental-strip-types --experimental-sqlite access-budgets/mac.mjs"
+    "test:budgets:mac": "node --experimental-strip-types --experimental-sqlite access-budgets/mac.mjs",
+    "test:budgets:sdk": "node --experimental-strip-types --experimental-sqlite access-budgets/sdk.mjs",
+    "test:budgets:live-sdk": "node --experimental-strip-types --experimental-sqlite access-budgets/live-sdk.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

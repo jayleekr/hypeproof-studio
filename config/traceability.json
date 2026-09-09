@@ -469,6 +469,9 @@
       "sources": [
         {
           "path": "docs/design/access-budget-settlement.md"
+        },
+        {
+          "path": "docs/operations/access-budget-release.md"
         }
       ]
     },
@@ -662,6 +665,27 @@
         },
         {
           "path": "e2e/access-budgets/fixture.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-BUDGET-RECOVERY",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-IMP-BUDGET-ADMISSION",
+        "ST-IMP-BUDGET-SURFACES"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/budget-recovery.test.mjs"
+        },
+        {
+          "path": "e2e/access-budgets/sdk.mjs"
+        },
+        {
+          "path": "e2e/access-budgets/live-sdk.mjs"
         }
       ]
     }

@@ -146,6 +146,17 @@ jobs:
         working-directory: worker
         run: npx wrangler d1 execute hypeproof-studio --remote --file=migrations/0005-request-settings.sql
 
+      # Additive preparation only. Applying schema does not publish a plan,
+      # approve rates or opt any class into paid admission.
+      - name: Apply additive access, cost and budget schemas
+        if: ${{ !inputs.dry_run }}
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          for migration in migrations/0007-access-contracts.sql migrations/0008-usage-costs.sql migrations/0009-budget-admission.sql migrations/0010-budget-surfaces.sql; do
+            npx wrangler d1 execute hypeproof-studio --remote --file="$migration"
+          done
+
       - name: Deploy Worker
         if: ${{ !inputs.dry_run }}
         working-directory: worker

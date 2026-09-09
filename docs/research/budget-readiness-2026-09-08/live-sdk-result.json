@@ -1,0 +1,43 @@
+{
+  "schema": "hps-controlled-live-sdk/1",
+  "checked_at": "2026-09-09T03:42:50.898Z",
+  "sdk_version": "0.3.207",
+  "pass": true,
+  "result": {
+    "subtype": "success",
+    "is_error": false
+  },
+  "provider": {
+    "status": 200,
+    "requested_model": "claude-sonnet-4-6",
+    "max_tokens": 256,
+    "protocol": "anthropic-messages",
+    "stream": true
+  },
+  "attempts": [
+    {
+      "execution_state": "ended",
+      "pricing_state": "priced",
+      "evidence_version": 1
+    }
+  ],
+  "receipts": [
+    {
+      "returned_model": "claude-sonnet-4-6",
+      "service_tier": "standard",
+      "region": "global",
+      "execution": "ended",
+      "complete": true,
+      "meters": {
+        "tokens:cache_read": 0,
+        "tokens:cache_write:1h": 0,
+        "tokens:cache_write:5m": 7217,
+        "tokens:input": 3,
+        "tokens:output": 11
+      },
+      "issues": []
+    }
+  ],
+  "pricing": "synthetic fixture; no monetary cost or invoice validation claimed",
+  "state": "isolated local SQLite; no production contract or class changes"
+}

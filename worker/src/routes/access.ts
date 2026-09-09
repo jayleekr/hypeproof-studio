@@ -9,7 +9,7 @@ import { crossProviderEnabled } from '../profiles/types';
 import { publishUsagePrice, registerUsageAttempt, recordCostEvidence, recordInvoiceAdjustment, usageJobCosts } from '../lib/usage-costs';
 import { authorizeIssuerForCohort } from '../lib/instructor-auth';
 import { AccessError, accessEnabled, requireAccessEnabled, accessId, publishAccessPlan, applyAccessEvent,
-  accountForToken, readAccessAccount, type AccessEvent } from '../lib/access-contracts';
+  accountForToken, readAccessAccount, accessDigest, type AccessEvent } from '../lib/access-contracts';
 
 type AccessContext = Context<{ Bindings: Env }>;
 /** Existing HMAC identity and roster, usable when paid execution/session has ended. */
@@ -138,9 +138,15 @@ accessAdmin.put('/access/accounts/:id/seats',async c=>{
   const id=c.req.param('id'),body=await c.req.json();
   if(!await readAccessAccount(c.env,id)||!accessId(body.cohort_id)||!accessId(body.user_id)) throw new AccessError('invalid_seat_link');
   if(!(await getRoster(c.env.HPS_KV,body.cohort_id))?.users.includes(body.user_id)) throw new AccessError('participant_unavailable',403);
-  await c.env.HPS_DB.prepare('INSERT INTO access_seats(cohort_id,user_id,account_id) VALUES (?,?,?) ON CONFLICT DO NOTHING').bind(body.cohort_id,body.user_id,id).run();
+  const previousSubject='subject:'+await accessDigest({cohort:body.cohort_id,user:body.user_id});
+  // Link identities before class budget initialization. Migrating a running
+  // class needs an explicit transfer contract; it cannot erase an old cap.
+  await c.env.HPS_DB.prepare(`INSERT INTO access_seats(cohort_id,user_id,account_id) SELECT ?,?,?
+    WHERE NOT EXISTS(SELECT 1 FROM budget_accounts WHERE (scope_kind='cohort' AND scope_id=?) OR (scope_kind='subject' AND scope_id=?))
+      AND NOT EXISTS(SELECT 1 FROM budget_reservations WHERE subject_key=?) ON CONFLICT DO NOTHING`)
+    .bind(body.cohort_id,body.user_id,id,body.cohort_id,previousSubject,previousSubject).run();
   const saved=await c.env.HPS_DB.prepare('SELECT account_id FROM access_seats WHERE cohort_id=? AND user_id=?').bind(body.cohort_id,body.user_id).first<{account_id:string}>();
-  if(saved?.account_id!==id) throw new AccessError('seat_link_conflict',409);
+  if(saved?.account_id!==id) throw new AccessError(saved?'seat_link_conflict':'seat_link_requires_budget_migration',409);
   return c.json({ok:true});
 });
 accessAdmin.put('/access/organizations/:id',async c=>{

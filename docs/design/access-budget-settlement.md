@@ -192,3 +192,9 @@ migration `0010-budget-surfaces.sql`은 issuer scope와 독립된 budget_delegat
 App은 host에서 기존 SecretStorage 토큰으로 Service를 호출하고 검증한 DTO만 React에 보낸다. 출처 선택은 명시적이며 토큰 변경 때 초기화하고, 진행 중인 작업의 선택 제어는 잠근다. SDK 환경의 기존 funding/turn/effort 헤더는 제거한 뒤 현재 턴 값을 넣는다. 토큰은 URL·브라우저 저장소·스크린샷에 넣지 않는다. 이용권을 선택한 후 패널을 자동 접지 않고, 좁은 화면/확대에서는 패널 안을 스크롤하여 작성란과 Send/Stop을 유지한다.
 
 [직접 촬영한 P4 화면과 검증 기록](../research/access-budget-acceptance-2026-09-08/README.md)은 수업 UI의 실제 사용 근거로 보존한다. 합성 수업/가격임을 표시하며 실제 운영 원가나 학습 결과로 사용하지 않는다. 초기 Mac 실행에서 설치된 구버전 확장이 우선 로드된 것을 확인하여 앱 복사본에 후보 확장을 넣고 artifact SHA-256을 대조한 뒤 재실행했다.
+
+## P5 신원 유지·복구와 배포
+
+계정 연결은 class budget/옛 subject cap·reservation이 만들어지기 전만 가능하며 INSERT의 SQL 조건에서 검사한다. 동일 link 재전송은 멱등이다. 연결 account가 inactive면 새 seat subject로 fallback하지 않는다. 위임 budget mutation은 revision과 현재 계약/기간의 active 조건을 같은 D1 transaction에서 확인한다. 옛 기간 정산은 별도 불변 period 귀속으로 유지된다.
+
+기존 deploy-worker workflow에 additive 0007~0010이 포함된다. 구현·인수·운영 관측의 경계와 활성화/rollback은 [운영 절차](../operations/access-budget-release.md)와 [P5 증거](../research/budget-readiness-2026-09-08/README.md)에 있다. 과금 시작 후 P3 이전 서버로 rollback하는 것은 지원하지 않는다. pause와 정산 경로를 보존하는 수정 릴리스를 사용한다.

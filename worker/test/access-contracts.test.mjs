@@ -76,7 +76,7 @@ try {
   await ok(q('/v1/access',{auth:instructor}),403);
   await ok(q('/v1/access',{auth:'Bearer invalid'}),401);
   const reissued='Bearer '+(await issue({u:'kid01',c:h.cohort,p:h.profile},1,TEST_SECRET)).token;
-  assert.equal((await ok(q('/v1/access',{auth:reissued}))).choices.length,1);
+  await ok(q('/v1/access',{auth:reissued}),403); // Revoked linked account cannot become an unlinked seat via token reissue.
   env.HPS_ACCESS_CONTRACTS=undefined;
   assert.equal((await ok(q('/v1/access',{auth:student}))).configured,false);
   await ok(q('/admin/cohorts'));
