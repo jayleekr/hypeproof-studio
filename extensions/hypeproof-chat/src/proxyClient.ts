@@ -123,6 +123,7 @@ export interface ProxyChatResult {
 interface ProxyChatArgs {
   effort?: import('./protocol').CourseEffort;
   turnId?: string;
+  fundingSource?: string;
   proxyUrl: string;
   model: string;
   token: string | undefined;
@@ -211,6 +212,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
 
   if (args.effort) headers['x-hps-effort'] = args.effort;
   if (args.turnId) headers['x-hps-turn-id'] = args.turnId;
+  if(args.fundingSource){if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(args.fundingSource))throw Error('invalid funding source');headers['x-hps-funding-source']=args.fundingSource;}
   const res = await fetch(url, {
     method: "POST",
     headers,

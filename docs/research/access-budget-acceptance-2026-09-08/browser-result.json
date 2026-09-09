@@ -1,0 +1,16 @@
+{
+  "pass": true,
+  "environment": "actual Chromium -> local Chalk -> local Service/HMAC/SQLite",
+  "synthetic": true,
+  "live_provider": false,
+  "checks": [
+    "390/1280",
+    "200% CSS page zoom",
+    "keyboard refresh",
+    "student cap and pause persisted",
+    "cross-class issuer denied",
+    "operator authenticated read",
+    "credentials absent from URL/storage/input after connect"
+  ],
+  "upstream_calls": 0
+}

@@ -1,6 +1,6 @@
 import { permittedFeatureKeys } from '../lib/lesson-feature-policy';
 import { resolveExecutionAccess, reserveBudgetAttempt, dispatchBudgetAttempt, budgetErrorResponse, type ExecutionAccess } from '../lib/budget-admission';
-import { AccessError } from '../lib/access-contracts';
+import { AccessError, accessDigest } from '../lib/access-contracts';
 import { crossProviderEnabled, explicitModelProvider, permittedModelKeys } from '../profiles/types';
 import { measureUsage, reserveModelRequest, finishModelRequest } from '../lib/model-usage';
 import { captureUsageCost } from '../lib/usage-costs';
@@ -261,6 +261,7 @@ chat.get("/profile", async (c) => {
   return c.json({
     ...(lesson ? { lesson } : {}),
     profile_id: profile.id,
+    ...(auth.payload.account?{access_identity:{kind:'account',scope:'account-'+await accessDigest(auth.payload.account)}}:{}),
     model_selection: servedModelSelection(c.env, profile, lesson?.content.model),
     ...(profile.observation?.enabled ? { observation: { format: 'hps-observation/1', scope:observationScope } } : {}),
     // dag task H — which curriculum module this seat is running. Observability
@@ -428,7 +429,8 @@ chat.post("/chat/completions", async (c) => {
   // LLM-serving routes enforce identical trust gates.
   const gate = await gateChatRequest(c);
   if (!gate.ok) return gate.response;
-  const { payload, profile, session, module } = gate;
+  const { payload, session, module } = gate;
+  let profile=gate.profile;
 
   // #684 — accounting is declared HERE, above every failure exit, not down at
   // the success path where it used to live.
@@ -447,6 +449,7 @@ chat.post("/chat/completions", async (c) => {
   let executionAccess:ExecutionAccess|null;
   try{executionAccess=await resolveExecutionAccess(env,payload,c.req.header('x-hps-funding-source'));}
   catch(error){return budgetErrorResponse(c,error);}
+  if(executionAccess)profile=applyLessonFeatures(profile,{allowed:permittedFeatureKeys(profile).filter(f=>f!=='web_search'&&executionAccess!.choice.plan.allowed.features.includes(f))});
   let provider: LLMProvider;
   let reserved = false;
   const usageRequestId = c.get('requestId') + ':' + crypto.randomUUID();

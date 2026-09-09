@@ -181,3 +181,14 @@ Service는 변환된 공급자 body에서 model/output/도구를 확인한 뒤 `
 가격의 bounds는 운영자가 명시적으로 검토한 최대 노출이며 프롬프트 문자 수로 추측한 토큰 수가 아니다. 출력 상한은 실제 outgoing max_tokens/max_completion_tokens로 제한한다. 누락/지원하지 않는 meter는 거부한다. 입력·캐시가 검토한 노출을 넘으면 실제 원가와 초과를 보존하므로 이 설정을 공급자 과금의 절대 상한이라고 표현하지 않는다. 공급자 tier/region은 승인된 가격에 맞춰 pin/확인한다. 원가와 과금 확정에 필요한 실제 공급자 검증은 P5의 별도 출시 조건이다.
 
 운영 API는 기존 admin 인증 아래 `/admin/access/budgets` 생성, `/children` 배정/상한, `/:id` 조회/수정이다. 실제 가격·전체/개인 슬롯·최대 노출 참조를 생략한 자동 활성화는 없다. HPS_ACCESS_CONTRACTS를 꺼도 기존 D1 예산 필수 수업은 닫힌다. 개인/명시된 이용권 요청도 거부한다. P1 이전 스키마의 미설정 수업만 legacy 동작을 유지하며, 네트워크/기타 DB 오류는 실행 거부다. 복구 때 먼저 해당 반을 중지한 뒤 활성 시도와 원가 증거를 확인한다.
+
+
+## P4 역할별 화면과 위임
+
+migration `0010-budget-surfaces.sql`은 issuer scope와 독립된 budget_delegations, 학생의 추가 허용 요청을 추가한다. Service `budget-views.ts`가 모든 읽기/위임 검사를 소유한다. 강사의 변경 경로는 `/admin/cohorts/:cohort/budgets[/children|/:id]`와 `budget-requests/:id`이며 `isIssuerAllowedEndpoint`의 같은 예외 목록을 Chalk가 소비한다. 별도 인증·서명·KV 쓰기를 Surface에 만들지 않는다. 한 반의 학생 계정 연결과 잔액은 묶어서 조회하여 학생 수만큼 인증/잔액 SQL 왕복을 늘리지 않는다.
+
+학생 `/v1/access`는 현재 연결에서 보유한 계약의 포함 단위와 자기 사용, 공유 잔여를 반환한다. 다른 사용자의 원가 행/원문, 판매자·payer·invoice·강사 위임은 반환하지 않는다. 사용 종료 후 열람과 신규 실행 가능 여부는 구분한다. 비용 view는 화면 갱신 시점의 관측이며 실행 승인/가격 견적을 대신하지 않는다. 원자적 판정은 매 공급자 시도에서 계속 적용한다.
+
+App은 host에서 기존 SecretStorage 토큰으로 Service를 호출하고 검증한 DTO만 React에 보낸다. 출처 선택은 명시적이며 토큰 변경 때 초기화하고, 진행 중인 작업의 선택 제어는 잠근다. SDK 환경의 기존 funding/turn/effort 헤더는 제거한 뒤 현재 턴 값을 넣는다. 토큰은 URL·브라우저 저장소·스크린샷에 넣지 않는다. 이용권을 선택한 후 패널을 자동 접지 않고, 좁은 화면/확대에서는 패널 안을 스크롤하여 작성란과 Send/Stop을 유지한다.
+
+[직접 촬영한 P4 화면과 검증 기록](../research/access-budget-acceptance-2026-09-08/README.md)은 수업 UI의 실제 사용 근거로 보존한다. 합성 수업/가격임을 표시하며 실제 운영 원가나 학습 결과로 사용하지 않는다. 초기 Mac 실행에서 설치된 구버전 확장이 우선 로드된 것을 확인하여 앱 복사본에 후보 확장을 넣고 artifact SHA-256을 대조한 뒤 재실행했다.

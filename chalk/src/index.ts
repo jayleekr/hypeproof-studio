@@ -1,3 +1,5 @@
+// @ts-ignore — bundled as text by wrangler rules.
+import budgetsHtml from './ui/budgets.html';
 // Chalk — the instructor surface (docs/plan/vessel-and-modules.md §1, layer
 // "Surface", tag prefix c*). Its own Cloudflare Worker (plan task F).
 //
@@ -71,6 +73,7 @@ app.get("/issuer", () => page(issuerHtml));
 app.get("/board", () => page(boardHtml));
 app.get("/authoring", () => page(authoringHtml));
 app.get("/manage", () => page(manageHtml));
+app.get("/budgets", () => page(budgetsHtml));
 app.get("/sharing", () => page(sharingHtml));
 app.get('/learn', () => page(learnHtml));
 app.use('/v1/profile', signingSecretGuard);

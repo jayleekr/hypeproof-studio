@@ -220,6 +220,7 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 | REQ-L6 | 가격 계약·개인/수업/기관 이용권을 서버에서 구분한다 (#853) | 불변 상품 revision과 검증된 계약 이벤트, UTC 기간, 개인 계정과 수업 좌석의 명시적 연결을 사용한다. 재발급/중복 갱신으로 지급을 반복하지 않는다. 담당 강사는 자기 수업 계약만 조회하며 가격·개인 계약 쓰기 권한은 없다. 미승인 상품 digest/운영 합성 계약/충돌/지원하지 않는 정책을 거부한다. 실행·금액 차감은 #854/#855 후속이다. | Service+SQLite `access-contracts.test`, 실제 로컬 D1 `access-contracts-d1.test` |
 | REQ-L7 | 실제 시도별 원가·미정산·조정 이력을 보존한다 (#854) | 기존 model_usage_requests ID에 작업/계약/기간/가격 revision을 연결한다. 실제 모델·protocol·등급·지역·캐시 TTL이 확인된 항목만 정수 micro 통화로 계산하며 미확인 합계를 0으로 만들지 않는다. 중복/늦은/역순 보고는 누적 snapshot revision으로 정산하고 원 증거를 보존한다. 공급자 청구 조정은 별도 이력이며 고객 결제·강사 지급을 일으키지 않는다. SDK/proxy 응답 수집 hook은 선행 예약 귀속을 소비하며 예약 집행은 #855다. | `usage-costs.test`, `usage-costs-d1.test`, `sse-cost-receipts.test` |
 | REQ-L8 | 이용 기간의 자원·동시 슬롯을 실행 전 함께 예약한다 (#855) | 공용 pool/배정 allocation/상한 cap을 구별한다. 명시된 이용권 하나에 실제 공급자 시도를 원자적으로 귀속·예약한 뒤 한 번 전송한다. 미확인은 예약 유지, 종료와 원가 확정을 구별, 초과는 음수 노출과 신규 중지로 처리한다. 개인 계정은 가짜 수업 없이 같은 집행 경로를 사용한다. | `budget-admission.test`, `budget-admission-d1.test` |
+| REQ-L9 | 학생·강사·운영자의 이용권과 예산 화면을 권한에 맞게 제공한다 (#856/#847) | 학생은 명시된 출처/기준 시각/자기 사용·예약·미확인을 보며 자동 전환하지 않는다. 강사는 담당 반과 별도 예산 위임의 교집합에서 배정·pause·요청 검토를 한다. 위임 취소와 동시 수정은 저장 transaction에서 확인한다. 운영자는 원가와 invoice 조정을 별도로 보고 복구 증거를 남긴다. | `budget-surfaces.test`, `budget-surfaces-d1.test`, Chalk `budgets.test`, `access-client.smoke`, `e2e/access-budgets` |
 
 
 ## M. Agent SDK coach runtime (#282)

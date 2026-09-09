@@ -1,0 +1,61 @@
+{
+  "pass": true,
+  "checks": [
+    {
+      "id": "no-automatic-source",
+      "pass": true
+    },
+    {
+      "id": "explicit-model-selection",
+      "model": "gpt-5.6-luna"
+    },
+    {
+      "id": "actual-width-390",
+      "zoom": 2,
+      "width": 390,
+      "scroll": 390,
+      "input_bottom": 371.25,
+      "height": 409
+    },
+    {
+      "id": "actual-width-1280",
+      "zoom": 1,
+      "width": 1280,
+      "scroll": 1280,
+      "input_bottom": 843,
+      "height": 881
+    },
+    {
+      "id": "actual-app-source-dispatch-settlement",
+      "used": 38,
+      "attempts": 1
+    },
+    {
+      "id": "exhaustion-no-fallback-files-and-composer-retained",
+      "pass": true
+    }
+  ],
+  "environment": "actual Mac shell with hash-verified candidate extension when HPS_BUDGET_BUNDLED=1; local Service/HMAC/SQLite; synthetic provider SSE",
+  "live_provider": false,
+  "upstream": [
+    {
+      "provider": "openai",
+      "model": "gpt-5.6-luna",
+      "request_state": 1
+    }
+  ],
+  "source_files": [
+    {
+      "path": "dist/extension.js",
+      "sha256": "d5b126269accd9831b1896cfd5194458e822c44e6584b24b58dcec2e4fc04262"
+    },
+    {
+      "path": "webview-ui/dist/assets/index.js",
+      "sha256": "38fffd7ad972ad60aff4e7e4dd5e30bf39880673a4ff749a876a6ad376a76aa5"
+    },
+    {
+      "path": "webview-ui/dist/assets/index.css",
+      "sha256": "653afc0178921a80256a6cc0056a7e5af8177742a1b070106554210eac2e6a62"
+    }
+  ]
+}

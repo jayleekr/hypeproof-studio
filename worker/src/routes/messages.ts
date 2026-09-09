@@ -1,4 +1,4 @@
-import { permittedFeatureKeys } from '../lib/lesson-feature-policy';
+import { permittedFeatureKeys, applyLessonFeatures } from '../lib/lesson-feature-policy';
 import { resolveExecutionAccess, reserveBudgetAttempt, dispatchBudgetAttempt, budgetErrorResponse, type ExecutionAccess } from '../lib/budget-admission';
 import { AccessError } from '../lib/access-contracts';
 import { finishModelRequest, measureUsage } from '../lib/model-usage';
@@ -249,10 +249,12 @@ messages.post("/messages", async (c) => {
   // 1-5b. Same trust gates as /v1/chat/completions (shared module).
   const gate = await gateChatRequest(c);
   if (!gate.ok) return gate.response;
-  const { payload, profile, session, module } = gate;
+  const { payload, session, module } = gate;
+  let profile=gate.profile;
   let executionAccess:ExecutionAccess|null;
   try{executionAccess=await resolveExecutionAccess(c.env,payload,c.req.header('x-hps-funding-source'));}
   catch(error){return budgetErrorResponse(c,error);}
+  if(executionAccess)profile=applyLessonFeatures(profile,{allowed:permittedFeatureKeys(profile).filter(f=>f!=='web_search'&&executionAccess!.choice.plan.allowed.features.includes(f))});
   let budgetReserved=false;
 
   // #684 — accounting declared above every failure exit, mirroring chat.ts.

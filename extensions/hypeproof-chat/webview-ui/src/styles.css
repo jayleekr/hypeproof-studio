@@ -1186,3 +1186,17 @@ html, body, #root {
   .hps-shell:has(.hps-effort:not(:empty)) > details:not([open]) { margin:4px 12px; padding:4px 12px; }
   .hps-shell:has(.hps-effort:not(:empty)) > .hps-lesson:not([open]) > summary { padding:0 4px; }
 }
+
+.hps-access { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--vscode-panel-border,#43564b); border-radius: 8px; font-size: 13px; }
+.hps-access summary { cursor: pointer; font-weight: 600; }
+.hps-access label { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
+.hps-access select,.hps-access input { width:100%; min-width:0; font:inherit; padding:8px; color:var(--vscode-input-foreground); background:var(--vscode-input-background); border:1px solid var(--vscode-input-border,#67806b); border-radius:5px; }
+.hps-access-resource { display:flex; flex-direction:column; gap:4px; padding:10px 0; border-top:1px solid var(--vscode-panel-border,#43564b); }
+.hps-access button { margin:8px 8px 0 0; white-space:normal; }
+.hps-access p,.hps-access span,.hps-access small { overflow-wrap:anywhere; }
+.hps-access-muted { color:var(--vscode-descriptionForeground,#bccabd); }
+.hps-access :focus-visible { outline:2px solid var(--vscode-focusBorder,#d4f783); outline-offset:3px; }
+.hps-access[open] { max-height: 30vh; overflow-y: auto; overscroll-behavior: contain; }
+.hps-access summary { position: sticky; top: 0; background: var(--vscode-editor-background,#18271f); }
+
+.hps-access-summary { display:block; font-weight:normal; margin-top:4px; }

@@ -602,6 +602,68 @@
           "path": "worker/test/harness/budgets.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-BUDGET-SURFACES",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-DES-ACCESS-BUDGET",
+        "ST-IMP-BUDGET-ADMISSION"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/budget-views.ts"
+        },
+        {
+          "path": "worker/migrations/0010-budget-surfaces.sql"
+        },
+        {
+          "path": "worker/src/ui/budgets-admin.html"
+        },
+        {
+          "path": "chalk/src/ui/budgets.html"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/accessClient.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/AccessControl.tsx"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-BUDGET-SURFACES",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-IMP-BUDGET-SURFACES"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/budget-surfaces.test.mjs"
+        },
+        {
+          "path": "worker/test/budget-surfaces-d1.test.mjs"
+        },
+        {
+          "path": "chalk/test/budgets.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/access-client.smoke.mjs"
+        },
+        {
+          "path": "e2e/access-budgets/browser.mjs"
+        },
+        {
+          "path": "e2e/access-budgets/mac.mjs"
+        },
+        {
+          "path": "e2e/access-budgets/fixture.mjs"
+        }
+      ]
     }
   ]
 }

@@ -107,11 +107,12 @@ export async function publishAccessPlan(env: Env, value: unknown): Promise<Acces
   if (saved?.digest !== digest) throw new AccessError('plan_revision_conflict', 409);
   return plan;
 }
-export async function readAccessPlan(env: Env, revision: string): Promise<AccessPlan> {
+export async function readAccessPlan(env: Env, revision: string, historical=false): Promise<AccessPlan> {
   const row = await env.HPS_DB.prepare('SELECT document,digest FROM access_plans WHERE revision=?').bind(revision).first<{document:string;digest:string}>();
   if (!row) throw new AccessError('plan_not_found', 404);
   const plan = validateAccessPlan(JSON.parse(row.document));
-  await assertPlanPublication(env,plan,row.digest);
+  if(await accessDigest(plan)!==row.digest)throw new AccessError('plan_integrity_failure',503);
+  if(!historical||plan.publication==='synthetic')await assertPlanPublication(env,plan,row.digest);
   return plan;
 }
 export interface AccessAccount { id: string; user_id: string; profile_id: string; active: number }
@@ -175,11 +176,11 @@ export async function applyAccessEvent(env: Env, value: unknown): Promise<{ appl
   return { applied: results[1]?.meta.changes === 1, event };
 }
 export interface AccessChoice { contract: AccessEvent; plan: AccessPlan }
-export async function accessChoices(env: Env, payload: TokenPayload, now = Date.now()): Promise<AccessChoice[]> {
+export async function accessChoices(env: Env, payload: TokenPayload, now = Date.now(), includeInactive=false): Promise<AccessChoice[]> {
   requireAccessEnabled(env);
   const account = await accountForToken(env,payload);
   const policies = payload.c ? await env.HPS_DB.prepare('SELECT allow_personal FROM access_course_policies WHERE cohort_id=?').bind(payload.c).first<{allow_personal:number}>() : null;
-  const rows = await env.HPS_DB.prepare(`SELECT DISTINCT c.document FROM access_contracts c WHERE c.state='active' AND (
+  const rows = await env.HPS_DB.prepare(`SELECT DISTINCT c.document FROM access_contracts c WHERE ${includeInactive?"1":"c.state='active'"} AND (
       (c.subject_kind='cohort' AND c.subject_id=? AND ?<>'') OR
       (c.subject_kind='account' AND c.subject_id=? AND ?=1) OR
       (c.subject_kind='organization' AND (EXISTS (SELECT 1 FROM access_org_cohorts x WHERE x.organization_id=c.subject_id AND x.cohort_id=? AND ?<>'')
@@ -188,8 +189,8 @@ export async function accessChoices(env: Env, payload: TokenPayload, now = Date.
   const choices: AccessChoice[] = [];
   for (const row of rows.results) {
     const contract: AccessEvent = JSON.parse(row.document);
-    if (contract.period.starts_at > now || contract.period.ends_at <= now) continue;
-    choices.push({contract,plan:await readAccessPlan(env,contract.plan_revision)});
+    if (!includeInactive && (contract.period.starts_at > now || contract.period.ends_at <= now)) continue;
+    choices.push({contract,plan:await readAccessPlan(env,contract.plan_revision,includeInactive)});
   }
   return choices;
 }

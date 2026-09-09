@@ -62,7 +62,8 @@ export async function initializeBudget(env:Env,value:unknown):Promise<BudgetRoot
   ];
   await env.HPS_DB.batch(statements);return readBudgetRoot(env,input.period_id);
 }
-export async function createBudgetChild(env:Env,value:unknown,actor:string):Promise<BudgetAccount>{
+export interface BudgetMutationGuard {sql:string;args:unknown[]}
+export async function createBudgetChild(env:Env,value:unknown,actor:string,authority?:BudgetMutationGuard):Promise<BudgetAccount>{
   requireAccessEnabled(env);
   check(obj(value)&&accessId(value.id)&&accessId(value.parent_id)&&integer(value.expected_parent_revision)&&value.expected_parent_revision>0&&['allocation','cap'].includes(value.kind)&&['cohort','subject'].includes(value.scope_kind)&&accessId(value.scope_id)&&slots(value.max_concurrent),'invalid_budget_child');
   validateBudgetLimits(value.limits);const input=value as BudgetChildInput,parent=await readBudgetAccount(env,input.parent_id);
@@ -71,7 +72,7 @@ export async function createBudgetChild(env:Env,value:unknown,actor:string):Prom
   const ancestors=await budgetAncestors(env,parent.id);check(ancestors.length<8,'budget_nesting_limit',409);
   const parentLimits=await budgetBalances(env,parent.id);
   check(parentLimits.length===Object.keys(input.limits).length&&parentLimits.every(l=>Object.hasOwn(input.limits,l.meter)),'budget_meter_set_mismatch');
-  const predicates:string[]=[],args:unknown[]=[];
+  const predicates:string[]=authority?[authority.sql]:[],args:unknown[]=authority?[...authority.args]:[];
   for(const [meter,amount]of Object.entries(input.limits)){
     predicates.push(`EXISTS(SELECT 1 FROM budget_account_balances WHERE account_id=? AND meter=? AND ${input.kind==='allocation'?'available':'granted'}>=?)`);
     args.push(parent.id,meter,amount);
@@ -82,16 +83,29 @@ export async function createBudgetChild(env:Env,value:unknown,actor:string):Prom
         AND ${predicates.join(' AND ')} THEN 1 ELSE 0 END)`)
       .bind(input.id,parent.period_id,parent.id,input.kind,input.scope_kind,input.scope_id,input.max_concurrent,parent.id,input.expected_parent_revision,...args),
     ...Object.entries(input.limits).map(([m,n])=>env.HPS_DB.prepare('INSERT INTO budget_limits(account_id,meter,granted) VALUES (?,?,?)').bind(input.id,m,n)),
+    ...(input.kind==='cap'?[
+      // A new period cap includes the subject's existing period attempts. It
+      // cannot reset usage merely because the teacher added the control later.
+      env.HPS_DB.prepare(`INSERT INTO budget_reservation_lines(request_id,account_id,meter,bound)
+        SELECT r.request_id,?,json_extract(j.value,'$.meter'),MAX(json_extract(j.value,'$.bound'))
+        FROM budget_reservations r JOIN budget_accounts root ON root.id=r.root_id JOIN usage_attempt_costs a ON a.request_id=r.request_id,
+          json_each(r.document,'$.lines') j
+        WHERE root.period_id=? AND (?<>'subject' OR r.subject_key=?) AND (?='' OR json_extract(a.document,'$.cohort_id')=?)
+        GROUP BY r.request_id,json_extract(j.value,'$.meter')`)
+        .bind(input.id,parent.period_id,input.scope_kind,input.scope_id,parent.scope_kind==='cohort'?parent.scope_id:input.scope_kind==='cohort'?input.scope_id:'',parent.scope_kind==='cohort'?parent.scope_id:input.scope_kind==='cohort'?input.scope_id:''),
+      env.HPS_DB.prepare('INSERT INTO budget_reservation_scopes(request_id,account_id) SELECT DISTINCT request_id,? FROM budget_reservation_lines WHERE account_id=?').bind(input.id,input.id),
+      env.HPS_DB.prepare('UPDATE budget_accounts SET guard=CASE WHEN NOT EXISTS(SELECT 1 FROM budget_account_balances WHERE account_id=? AND available<0) THEN 1 ELSE 0 END WHERE id=?').bind(input.id,input.id),
+    ]:[]),
     env.HPS_DB.prepare('UPDATE budget_accounts SET revision=revision+1 WHERE id=?').bind(parent.id),
     env.HPS_DB.prepare('INSERT INTO budget_changes(id,account_id,actor,document,created_at) VALUES (?,?,?,?,?)').bind(crypto.randomUUID(),input.id,actor,accessJson({kind:'created',input}),Date.now()),
   ]);
   return readBudgetAccount(env,input.id);
 }
-export async function updateBudgetAccount(env:Env,id:string,value:unknown,actor:string):Promise<BudgetAccount>{
+export async function updateBudgetAccount(env:Env,id:string,value:unknown,actor:string,authority?:BudgetMutationGuard):Promise<BudgetAccount>{
   requireAccessEnabled(env);check(obj(value)&&integer(value.expected_revision)&&value.expected_revision>0&&typeof value.paused==='boolean'&&slots(value.max_concurrent),'invalid_budget_update');
   validateBudgetLimits(value.limits);const input=value as BudgetUpdate,a=await readBudgetAccount(env,id),own=await budgetBalances(env,id);
   check(own.length===Object.keys(input.limits).length&&own.every(l=>Object.hasOwn(input.limits,l.meter)),'budget_meter_set_mismatch');
-  const conditions:string[]=[],args:unknown[]=[];
+  const conditions:string[]=authority?[authority.sql]:[],args:unknown[]=authority?[...authority.args]:[];
   for(const l of own){
     const desired=input.limits[l.meter]!;
     check(a.kind!=='pool'||desired===l.granted,'root_grant_is_contract_owned',403);

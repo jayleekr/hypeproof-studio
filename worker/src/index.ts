@@ -1,3 +1,5 @@
+// @ts-ignore — bundled HTML operator surface.
+import budgetsAdminHtml from './ui/budgets-admin.html';
 import { Hono } from "hono";
 import { resolveChalkOrigin, resolveWorkerVersion, type Env } from "./env";
 import { chat } from "./routes/chat";
@@ -52,6 +54,7 @@ for(const path of ['/v1/messages','/v1/messages/count_tokens','/v1/chat/completi
 // a `curl -I /` answer for free — without touching the existing HTML body
 // or its guard-exemption contract (route-order.test.mjs asserts `/` stays
 // a 200 text/html page).
+app.get("/operator/budgets", () => new Response(budgetsAdminHtml as string,{headers:{"content-type":"text/html; charset=utf-8","cache-control":"no-store"}}));
 app.get("/", (c) => {
   return new Response(adminHtml as unknown as string, {
     headers: {
