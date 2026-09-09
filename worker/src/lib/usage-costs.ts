@@ -238,6 +238,8 @@ export async function usageJobCosts(env:Env,id:string) {
 }
 export async function recordInvoiceAdjustment(env:Env,value:unknown):Promise<void> {
   requireAccessEnabled(env);check(object(value)&&keys(value,['id','request_id','invoice_ref','currency','amount_micro','reason'])&&accessId(value.id)&&accessId(value.request_id)&&typeof value.invoice_ref==='string'&&value.invoice_ref.length>0&&value.invoice_ref.length<=300&&/^[A-Z]{3}$/.test(value.currency)&&Number.isSafeInteger(value.amount_micro)&&typeof value.reason==='string'&&value.reason.length>0&&value.reason.length<=300,'invalid_invoice_adjustment');
+  const attempt=await env.HPS_DB.prepare('SELECT execution_state FROM usage_attempt_costs WHERE request_id=?').bind(value.request_id).first<{execution_state:string}>();
+  if(attempt?.execution_state==='not_sent'&&value.amount_micro!==0)throw new AccessError('invoice_execution_conflict',409);
   const digest=await accessDigest(value);
   await env.HPS_DB.prepare(`INSERT INTO usage_invoice_adjustments(id,request_id,invoice_ref,currency,amount_micro,reason,digest,created_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`)
     .bind(value.id,value.request_id,value.invoice_ref,value.currency,value.amount_micro,value.reason,digest,Date.now()).run();

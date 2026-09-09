@@ -1,3 +1,7 @@
+import { permittedFeatureKeys } from '../lib/lesson-feature-policy';
+import { resolveExecutionAccess, reserveBudgetAttempt, dispatchBudgetAttempt, budgetErrorResponse, type ExecutionAccess } from '../lib/budget-admission';
+import { AccessError } from '../lib/access-contracts';
+import { finishModelRequest, measureUsage } from '../lib/model-usage';
 import { crossProviderEnabled } from '../profiles/types';
 import { captureUsageCost } from '../lib/usage-costs';
 
@@ -246,6 +250,10 @@ messages.post("/messages", async (c) => {
   const gate = await gateChatRequest(c);
   if (!gate.ok) return gate.response;
   const { payload, profile, session, module } = gate;
+  let executionAccess:ExecutionAccess|null;
+  try{executionAccess=await resolveExecutionAccess(c.env,payload,c.req.header('x-hps-funding-source'));}
+  catch(error){return budgetErrorResponse(c,error);}
+  let budgetReserved=false;
 
   // #684 — accounting declared above every failure exit, mirroring chat.ts.
   // The SDK route wrote the same literal `status: 200` on the success path
@@ -281,13 +289,14 @@ messages.post("/messages", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    if(budgetReserved){budgetReserved=false;c.executionCtx.waitUntil(finishModelRequest(env,usageRequestId,log.status,returnedModel,measureUsage('anthropic',reportedUsage,log.status<400)).catch(()=>console.error('SDK usage finish unavailable')));}
     c.executionCtx.waitUntil(captureUsageCost(env,usageRequestId,{usage:reportedUsage,model:returnedModel,
       tier:typeof reportedUsage.service_tier==='string'?reportedUsage.service_tier:null,
       region:typeof reportedUsage.inference_geo==='string'?reportedUsage.inference_geo:(env.HPS_USAGE_REGION??null),
       complete:costComplete,ended:costEnded}).catch(()=>console.error('SDK cost evidence unavailable; unresolved reservation retained')));
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
+    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }));
   };
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>
@@ -509,6 +518,11 @@ messages.post("/messages", async (c) => {
   // e2e BLOCKER: dropping the header 400'd every SDK turn).
   let upstream: Response;
   try {
+    if(executionAccess){
+      await reserveBudgetAttempt(env,executionAccess,{request_id:usageRequestId,turn_id:c.req.header('x-hps-turn-id'),session_id:session.session_id,payload,
+        provider:'anthropic',model:modelLabel,runtime:'agent-sdk',features:permittedFeatureKeys(profile),effort:effortReceipt?.applied,protocol:'anthropic-messages',body:stripped.body});
+      budgetReserved=true;await dispatchBudgetAttempt(env,usageRequestId);
+    }
     if(env.HPS_ACCESS_CONTRACTS==='enabled')c.header('x-hps-usage-request-id',usageRequestId);
     upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {
       signal: nativeTrialSignal(c.req.raw),
@@ -518,6 +532,7 @@ messages.post("/messages", async (c) => {
       beta: c.req.query("beta") === "true",
     });
   } catch (err) {
+    if(err instanceof AccessError)return budgetErrorResponse(c,err);
     // #257 — fetch errors can embed upstream URLs or header names. Log full,
     // return generic.
     console.error(`[${c.get("requestId")}] upstream call failed:`, err);

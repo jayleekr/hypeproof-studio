@@ -32,8 +32,8 @@ export interface AccessEvent {
 }
 export class AccessError extends Error {
   code: string;
-  status: 400 | 401 | 403 | 404 | 409 | 503;
-  constructor(code: string, status: 400 | 401 | 403 | 404 | 409 | 503 = 400) { super(code); this.code=code; this.status=status; }
+  status: 400 | 401 | 403 | 404 | 409 | 429 | 503;
+  constructor(code: string, status: 400 | 401 | 403 | 404 | 409 | 429 | 503 = 400) { super(code); this.code=code; this.status=status; }
 }
 export function accessEnabled(env: Env): boolean { return env.HPS_ACCESS_CONTRACTS === 'enabled'; }
 export function requireAccessEnabled(env: Env): void {

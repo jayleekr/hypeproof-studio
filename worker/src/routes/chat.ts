@@ -1,3 +1,6 @@
+import { permittedFeatureKeys } from '../lib/lesson-feature-policy';
+import { resolveExecutionAccess, reserveBudgetAttempt, dispatchBudgetAttempt, budgetErrorResponse, type ExecutionAccess } from '../lib/budget-admission';
+import { AccessError } from '../lib/access-contracts';
 import { crossProviderEnabled, explicitModelProvider, permittedModelKeys } from '../profiles/types';
 import { measureUsage, reserveModelRequest, finishModelRequest } from '../lib/model-usage';
 import { captureUsageCost } from '../lib/usage-costs';
@@ -231,7 +234,8 @@ chat.get("/profile", async (c) => {
       400,
     );
   }
-  const { profile, module } = resolved;
+  let { profile, module } = resolved;
+  if(auth.payload.account){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;profile=gate.profile;c.header('cache-control','no-store');}
   let observationScope:string|undefined;
   if(auth.payload.native_trial||profile.observation?.enabled){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;observationScope=await nativeObservationScope(gate.payload,gate.session);c.header("cache-control","no-store");}
 
@@ -440,13 +444,16 @@ chat.post("/chat/completions", async (c) => {
   // upstream branches overwrite it with the id actually sent.
   let modelLabel: string = profile.model.default;
   const multi = crossProviderEnabled(profile);
+  let executionAccess:ExecutionAccess|null;
+  try{executionAccess=await resolveExecutionAccess(env,payload,c.req.header('x-hps-funding-source'));}
+  catch(error){return budgetErrorResponse(c,error);}
   let provider: LLMProvider;
   let reserved = false;
   const usageRequestId = c.get('requestId') + ':' + crypto.randomUUID();
   let reportedUsage: Record<string, unknown> = {};
   let returnedModel: string | null = null;
   let costComplete=false, costEnded=false;
-  const requestSignal = multi ? AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(60000)]) : undefined;
+  const requestSignal = (multi||executionAccess) ? AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(60000)]) : undefined;
 
   let effortReceipt: EffortReceipt | undefined;
   // Diagnostic IDs can share a CF-Ray prefix; settings need one unique ID per request.
@@ -493,7 +500,7 @@ chat.post("/chat/completions", async (c) => {
 
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: session.session_id }));
+    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }));
   };
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>
@@ -604,7 +611,7 @@ chat.post("/chat/completions", async (c) => {
     );
   }
 
-  if (multi) {
+  if (multi&&!executionAccess) {
     const limit = Number(env.HPS_MODEL_PRACTICE_REQUEST_LIMIT);
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10000)
       return c.json({error:{code:'model_practice_not_enabled', message:'모델 비교 실습의 이용 한도를 운영자가 설정해야 합니다.'}},503);
@@ -618,6 +625,13 @@ chat.post("/chat/completions", async (c) => {
     c.header('x-hps-usage-request-id',usageRequestId);
     if (!reserved) return c.json({error:{code:'model_usage_limit',message:'실행 중인 작업이 있거나 이 수업의 요청 한도에 도달했습니다.'}},429);
   }
+  const admit=async(wire:Record<string,any>,protocol:'anthropic-messages'|'openai-chat')=>{
+    if(!executionAccess)return;
+    await reserveBudgetAttempt(env,executionAccess,{request_id:usageRequestId,turn_id:c.req.header('x-hps-turn-id'),session_id:session.session_id,payload,
+      provider,model:wire.model,runtime:'proxy',features:permittedFeatureKeys(profile),effort:effortReceipt?.applied,protocol,body:wire});
+    reserved=true;c.header('x-hps-usage-request-id',usageRequestId);
+    await dispatchBudgetAttempt(env,usageRequestId);
+  };
   const stream = (body as any)?.stream === true;
   let upstream: Response;
   // modelLabel is hoisted above (#684) so failure rows still name a model.
@@ -630,6 +644,7 @@ chat.post("/chat/completions", async (c) => {
       const gBody = translateOpenAI(body as any, profile, coach, "gemini");
       gBody.stream = stream;
       if (stream) gBody.stream_options = { include_usage: true };
+      await admit(gBody,'openai-chat');
       // Retry transient 503s, then fall back to gemini-2.5-flash.
       const g = multi ? { response: await callGemini(gBody, apiKey, requestSignal), model:gBody.model, fellBack:false }
         : await callGeminiResilient(gBody, apiKey);
@@ -644,6 +659,7 @@ chat.post("/chat/completions", async (c) => {
       oBody.stream = stream;
       if (stream) oBody.stream_options = { include_usage: true };
       modelLabel = oBody.model;
+      await admit(oBody,'openai-chat');
       upstream = await callOpenAI(oBody, apiKey, requestSignal, c.env.OPENAI_BASE_URL);
     } else if (provider === "glm") {
       // GLM (Z.ai) — Anthropic 호환 경로라 **번역기와 스트림 처리를 그대로 재사용**한다.
@@ -657,7 +673,8 @@ chat.post("/chat/completions", async (c) => {
       const gBody = translate(body as any, profile, coach, "glm");
       gBody.stream = stream;
       modelLabel = gBody.model;
-      upstream = await (multi ? callAnthropic : callAnthropicResilient)(gBody, apiKey, { url: glmUpstreamUrl(), signal: requestSignal });
+      await admit(gBody,'anthropic-messages');
+      upstream = await (multi||executionAccess ? callAnthropic : callAnthropicResilient)(gBody, apiKey, { url: glmUpstreamUrl(), signal: requestSignal });
     } else {
       // anthropic — Messages API (different schema; transformStream handles it).
       // Route through the optional region-pinned proxy when set, otherwise
@@ -679,13 +696,15 @@ chat.post("/chat/completions", async (c) => {
       // brings the prod (anthropic) path to parity. No model fallback here.
       const effective = applyRequestEffort(aBody as unknown as Record<string,unknown>, profile, modelLabel, c.req.header('x-hps-effort'));
       effortReceipt = effective.receipt;
-      upstream = await (multi ? callAnthropic : callAnthropicResilient)(effective.body as unknown as typeof aBody, apiKey, {
+      await admit(effective.body,'anthropic-messages');
+      upstream = await (multi||executionAccess ? callAnthropic : callAnthropicResilient)(effective.body as unknown as typeof aBody, apiKey, {
         signal: requestSignal,
         url: env.ANTHROPIC_PROXY_URL,
         proxySecret: env.ANTHROPIC_PROXY_SECRET,
       });
     }
   } catch (err) {
+    if (err instanceof AccessError) return budgetErrorResponse(c,err);
     if (err instanceof EffortPolicyError) {
       recordFailure(403, ERROR_KIND.BAD_REQUEST);
       return c.json({error:{type:'permission_error',message:err.message,code:'effort_not_allowed'}},403);
@@ -945,7 +964,7 @@ chat.post("/chat/completions", async (c) => {
     "cache-control": "no-cache",
     "x-accel-buffering": "no",
     "x-hps-model": modelLabel,
-    ...(multi ? { "x-hps-usage-request-id":usageRequestId } : {}),
+    ...((multi||executionAccess) ? { "x-hps-usage-request-id":usageRequestId } : {}),
     "x-hps-module": module.version,
     ...(module.fallback ? { "x-hps-module-fallback": module.fallback.pinned } : {}),
     // #580 — raw Response 반환은 request-id 미들웨어의 c.header() 를 우회한다
