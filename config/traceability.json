@@ -409,6 +409,9 @@
         },
         {
           "path": "worker/test/trial-entry.test.mjs"
+        },
+        {
+          "path": "e2e/tests/native-trial-guidance.spec.ts"
         }
       ]
     },
