@@ -168,3 +168,16 @@ P1 되돌리기는 새 게시/계정 연결/계약 opt-in을 중지하는 것이
 공식 schema 근거(2026-09-08 조회): [Anthropic Messages usage](https://platform.claude.com/docs/en/api/messages/create), [Anthropic 가격 차원](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI Chat Completions usage/service tier](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create), [OpenAI 가격 차원](https://developers.openai.com/api/docs/pricing). 테스트의 요율·환율·상한은 합성 수치이고 실제 판매 가격/원가표가 아니다.
 
 신규 설치 schema에 빠져 있던 기존 migration 0006의 model_usage_requests 정의도 추가했다. 기존 migration은 수정하지 않았으며, 운영 반영은 기존 0006/0007 다음 0008을 적용한다. 가격 미상/지원하지 않는 meter를 무료로 해석하지 않는다.
+
+
+## P3 원자적 실행과 복구
+
+migration `0009-budget-admission.sql`은 budget accounts/limits/roots/runtime prices, reservation/lines/scopes와 수정 이력을 추가한다. 루트 생성은 immutable 계약의 included 자원만 사용하며 로그인을 새 지급으로 해석하지 않는다. 반 allocation은 상위 grant를 선배정하므로 하위 실제 사용을 상위 사용으로 다시 합산하지 않는다. 학생 cap은 배정 자원이 아닌 공유 사용 상한이며 전역 account cap을 여러 반에 적용할 수 있다.
+
+Service는 변환된 공급자 body에서 model/output/도구를 확인한 뒤 `usageAttemptStatements`와 자원/슬롯 예약을 같은 D1 batch에 넣는다. 현재 계약·기간·D1 계정 관계·코스/예산 revision·각 meter·동시 시도를 SQL에서 재확인한다. 하나라도 맞지 않으면 CHECK 제약이 전체 batch를 rollback한다. 기존 KV의 서명 폐기·roster·수업/pause 게이트는 전송 요청의 선행 확인이며 D1과 분산 transaction이라고 주장하지 않는다. 실제 전송 직전 reserved → sent CAS는 한 번만 성공한다. 예약 후 ACK 소실은 자동 재전송/반환하지 않는다.
+
+`budget_line_balances`는 최신 누적 원가 증거와 invoice adjustment에서 사용·예약·초과를 읽는다. 별도의 비용 delta 원장을 더하지 않으므로 중복 보고가 이중 차감되지 않는다. 실행 ended는 슬롯을 돌려주지만 누락된 원가는 예약을 유지한다. timeout/Stop/EOF는 종료 증명이 아니다. 운영자는 실제 공급자 확인 후 `/admin/access/usage/evidence`에 높은 revision의 종료·원가 증거를 보낸다. 미전송 취소는 reserved에 대한 execution-proof만 허용한다. 원가 초과는 음수 잔여로 보존하고 관련 기간의 새 실행을 막는다. 음수 invoice credit은 초과 부분을 unapplied_credit으로 표시하여 계약 포함량을 늘리지 않는다.
+
+가격의 bounds는 운영자가 명시적으로 검토한 최대 노출이며 프롬프트 문자 수로 추측한 토큰 수가 아니다. 출력 상한은 실제 outgoing max_tokens/max_completion_tokens로 제한한다. 누락/지원하지 않는 meter는 거부한다. 입력·캐시가 검토한 노출을 넘으면 실제 원가와 초과를 보존하므로 이 설정을 공급자 과금의 절대 상한이라고 표현하지 않는다. 공급자 tier/region은 승인된 가격에 맞춰 pin/확인한다. 원가와 과금 확정에 필요한 실제 공급자 검증은 P5의 별도 출시 조건이다.
+
+운영 API는 기존 admin 인증 아래 `/admin/access/budgets` 생성, `/children` 배정/상한, `/:id` 조회/수정이다. 실제 가격·전체/개인 슬롯·최대 노출 참조를 생략한 자동 활성화는 없다. HPS_ACCESS_CONTRACTS를 꺼도 기존 D1 예산 필수 수업은 닫힌다. 개인/명시된 이용권 요청도 거부한다. P1 이전 스키마의 미설정 수업만 legacy 동작을 유지하며, 네트워크/기타 DB 오류는 실행 거부다. 복구 때 먼저 해당 반을 중지한 뒤 활성 시도와 원가 증거를 확인한다.

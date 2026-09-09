@@ -76,3 +76,14 @@ CA-T01/03/04/05/13/14의 위 API 부분만 실행했다. 개인 AI 실행·원�
 - 원가 snapshot이 부분 보고로 보정되면 예전 확정 금액을 그대로 유지하지 않는다. 금액 예산의 보수적 예약/초과 처리는 #855의 별도 검증이다.
 
 CA-T02/08/09/10의 원가 부분만 실행했다. 실제 SDK CLI fan-out, 전체 pre-dispatch 예산, 외부 공급자 청구 대조, 실제 수업/화면/사람 연구는 이 결과에 포함하지 않는다.
+
+
+## P3 실제 실행 기록 (#855)
+
+2026-09-08, Mac arm64 / Node 24.4.1. 합성 가격·주체·공급자 응답이며 운영 데이터는 사용하지 않았다.
+
+- `npm run test:budgets`: 실제 Hono/HMAC/SQLite에서 proxy와 SDK의 전송 전 예약, 필수 출처가 없는 옛 클라이언트 거부, 공급자 1회 호출/정산, 개인의 수업 없는 실행, 공용 allocation/cap·token 재발급·job 출처 불변, 미확인/종료/미전송/중복/늦은 비용·음수 노출·credit, 역할/지원하지 않는 도구와 media 거부 PASS.
+- `npm run test:budgets:d1`: 실제 local workerd/D1에서 20명 동시 요청 중 10개 예산만 예약, 실패 시 job/시도도 rollback, 12개 동시 동일 원가 및 역순 snapshot, 배정 실패 rollback, pause revision 충돌, migration 반복 PASS.
+- 기존 Worker 회귀와 typecheck PASS. 테스트의 91 microUSD 견적·910 총액은 합성 유리수 요율에서 산출한 값이며 판매/공급자 운영 가격이 아니다.
+
+CA-T03/05/06/07/08/10/12/13의 위 Service 부분을 실행했다. SDK CLI 자체 fan-out, 실제 공급자 과금과 청구 대조, 강사/App 화면·실제 수업은 이 기록의 PASS 범위가 아니다. 실제 화면·복구·출시 판정은 P4/P5에서 이어진다.

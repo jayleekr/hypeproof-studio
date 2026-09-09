@@ -560,6 +560,48 @@
           "path": "worker/test/sse-cost-receipts.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-BUDGET-ADMISSION",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-DES-ACCESS-BUDGET",
+        "ST-IMP-ACCESS-CONTRACTS",
+        "ST-IMP-USAGE-COSTS"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/budgets.ts"
+        },
+        {
+          "path": "worker/src/lib/budget-admission.ts"
+        },
+        {
+          "path": "worker/migrations/0009-budget-admission.sql"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-BUDGET-ADMISSION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-IMP-BUDGET-ADMISSION"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/budget-admission.test.mjs"
+        },
+        {
+          "path": "worker/test/budget-admission-d1.test.mjs"
+        },
+        {
+          "path": "worker/test/harness/budgets.mjs"
+        }
+      ]
     }
   ]
 }

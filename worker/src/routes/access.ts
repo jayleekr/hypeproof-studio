@@ -1,3 +1,4 @@
+import { initializeBudget, createBudgetChild, updateBudgetAccount, readBudgetAccount, budgetBalances } from '../lib/budgets';
 import { Hono, type Context } from 'hono';
 import type { Env } from '../env';
 import { bearer, verify, issue, TokenError, type TokenPayload } from '../lib/tokens';
@@ -62,6 +63,10 @@ accessAdmin.use('/access/*',async(c,next)=>{
   }
   await next();
 });
+accessAdmin.post('/access/budgets',async c=>c.json(await initializeBudget(c.env,await c.req.json()),201));
+accessAdmin.post('/access/budgets/children',async c=>c.json(await createBudgetChild(c.env,await c.req.json(),'operator'),201));
+accessAdmin.put('/access/budgets/:id',async c=>c.json(await updateBudgetAccount(c.env,c.req.param('id'),await c.req.json(),'operator')));
+accessAdmin.get('/access/budgets/:id',async c=>c.json({account:await readBudgetAccount(c.env,c.req.param('id')),balances:await budgetBalances(c.env,c.req.param('id')),as_of:new Date().toISOString()}));
 accessAdmin.post('/access/plans',async c=>c.json(await publishAccessPlan(c.env,await c.req.json()),201));
 accessAdmin.post('/access/events',async c=>c.json(await applyAccessEvent(c.env,await c.req.json())));
 accessAdmin.post('/access/usage/prices',async c=>c.json(await publishUsagePrice(c.env,await c.req.json()),201));

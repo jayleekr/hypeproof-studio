@@ -1,3 +1,5 @@
+import { resolveExecutionAccess, budgetErrorResponse } from '../lib/budget-admission';
+import { AccessError } from '../lib/access-contracts';
 import { logChat, persistUsage } from "../lib/analytics";
 import { nativeTrialSignal } from "../middleware/native-trial-budget";
 import {
@@ -69,6 +71,8 @@ observations.post("/validate", async (c) => {
 observations.post("/assess", async (c) => {
   const gate = await gateChatRequest(c);
   if (!gate.ok) return gate.response;
+  try{if(await resolveExecutionAccess(c.env,gate.payload,c.req.header('x-hps-funding-source')))throw new AccessError('assessment_budget_not_supported',403);}
+  catch(error){return budgetErrorResponse(c,error);}
   if (!gate.profile.observation?.enabled)
     return c.json({ error: { code: "observation_unavailable" } }, 404);
   const raw = await c.req.text();

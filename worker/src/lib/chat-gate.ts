@@ -1,3 +1,5 @@
+import { accountForToken, requireAccessEnabled, AccessError } from './access-contracts';
+import { crossProviderEnabled } from '../profiles/types';
 // Shared pre-flight gate for LLM-serving routes (#282).
 //
 // POST /v1/chat/completions (OpenAI-compatible proxy) and POST /v1/messages
@@ -144,6 +146,18 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     };
   }
   const { profile, module } = resolved;
+  if(payload.account){
+    try{
+      requireAccessEnabled(env);await accountForToken(env,payload);
+      if(!crossProviderEnabled(profile)||payload.lesson||payload.native_trial)throw new AccessError('unsupported_personal_profile',403);
+      // An account execution context has no class/session row. The immutable
+      // paid period is selected and checked separately before every dispatch.
+      return {ok:true,payload,profile:{...profile,session:{...profile.session,cohort_id:''}},module,identity:null,
+        session:{session_id:'account:'+payload.account,profile_id:profile.id,starts_at:new Date(payload.iat*1000).toISOString(),ends_at:new Date(payload.exp*1000).toISOString()}};
+    }catch(error){
+      return{ok:false,response:c.json({error:{type:'access',code:error instanceof AccessError?error.code:'account_unavailable',message:'개인 이용권을 확인할 수 없습니다.'}},403)};
+    }
+  }
   // Sanity: token cohort must match profile cohort
   if (payload.c !== profile.session.cohort_id) {
     return {
