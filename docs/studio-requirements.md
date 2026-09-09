@@ -218,6 +218,7 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 
 | REQ-L5 | 사용량 저장 기록과 확정 비용을 구분한다 (#800) | 운영자 최근 기록 조회는 범위·시각·캐시 쓰기·오류 중 토큰 기록·세션 미귀속을 표시한다. 빈 기록/조회 실패를 구분하고 실패 후 이전 숫자를 현재값처럼 유지하지 않는다. 미확인 보고/원가를 0이나 잔여 예산으로 확정하지 않는다. 학생·강사에게 운영자 조회 권한을 넓히지 않는다. CLI와 화면은 provider/스키마 없는 통합 캐시 적중률을 계산하지 않는다. | Service/SQLite (`usage-observation.test`), [실제 브라우저](testing/usage-observation.md) |
 | REQ-L6 | 가격 계약·개인/수업/기관 이용권을 서버에서 구분한다 (#853) | 불변 상품 revision과 검증된 계약 이벤트, UTC 기간, 개인 계정과 수업 좌석의 명시적 연결을 사용한다. 재발급/중복 갱신으로 지급을 반복하지 않는다. 담당 강사는 자기 수업 계약만 조회하며 가격·개인 계약 쓰기 권한은 없다. 미승인 상품 digest/운영 합성 계약/충돌/지원하지 않는 정책을 거부한다. 실행·금액 차감은 #854/#855 후속이다. | Service+SQLite `access-contracts.test`, 실제 로컬 D1 `access-contracts-d1.test` |
+| REQ-L7 | 실제 시도별 원가·미정산·조정 이력을 보존한다 (#854) | 기존 model_usage_requests ID에 작업/계약/기간/가격 revision을 연결한다. 실제 모델·protocol·등급·지역·캐시 TTL이 확인된 항목만 정수 micro 통화로 계산하며 미확인 합계를 0으로 만들지 않는다. 중복/늦은/역순 보고는 누적 snapshot revision으로 정산하고 원 증거를 보존한다. 공급자 청구 조정은 별도 이력이며 고객 결제·강사 지급을 일으키지 않는다. SDK/proxy 응답 수집 hook은 선행 예약 귀속을 소비하며 예약 집행은 #855다. | `usage-costs.test`, `usage-costs-d1.test`, `sse-cost-receipts.test` |
 
 
 ## M. Agent SDK coach runtime (#282)

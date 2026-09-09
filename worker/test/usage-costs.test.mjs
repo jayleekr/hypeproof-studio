@@ -1,0 +1,103 @@
+import './harness/loader.mjs';
+import assert from 'node:assert/strict';
+import { accessHarness,syntheticPlan,syntheticEvent } from './harness/access.mjs';
+import { syntheticPrice,syntheticAttempt,syntheticEvidence,nativeRaw,openaiRaw } from './harness/usage-costs.mjs';
+const {normalizeCostUsage,computeUsageCost,validateUsagePrice,markUsageAttemptSent,registerUsageAttempt}=await import('../src/lib/usage-costs.ts');
+const h=await accessHarness(),q=h.request;
+const post=(path,body,auth)=>q('/admin/access/'+path,{method:'POST',body,auth});
+const ok=async(p,status=200)=>{const r=await p;assert.equal(r.status,status,r.text);return r.json;};
+try {
+  const plan=syntheticPlan(),contract=syntheticEvent(),price=syntheticPrice(),a=syntheticAttempt(contract,price);
+  await ok(post('plans',plan),201);await ok(post('events',contract));await ok(post('usage/prices',price),201);
+  await ok(post('usage/prices',{...price,rates:{...price.rates,'tokens:input':{numerator:999,denominator:1}}}),409);
+  await ok(post('usage/attempts',a),201);await ok(post('usage/attempts',a),201);
+  const e=syntheticEvidence(a,normalizeCostUsage(a.protocol,nativeRaw));
+  assert.equal((await ok(post('usage/evidence',e))).amount_micro,32);
+  assert.equal((await ok(post('usage/evidence',e))).applied,false);
+  await ok(post('usage/evidence',{...e,meters:{...e.meters,'tokens:output':100}}),409);
+  await ok(post('usage/evidence',{...e,id:'raw-body-leak',version:2,prompt:'must never persist'}),400);
+  const current=()=>h.db.prepare('SELECT * FROM usage_attempt_costs WHERE request_id=?').get(a.request_id);
+  const partial=syntheticEvidence(a,normalizeCostUsage(a.protocol,{input_tokens:10}),2);partial.complete=false;
+  assert.equal((await ok(post('usage/evidence',partial))).state,'partial');
+  assert.equal(current().pricing_state,'partial');assert.equal(current().amount_micro,10);
+  const late=syntheticEvidence(a,normalizeCostUsage(a.protocol,{...nativeRaw,output_tokens:4}),4);
+  assert.equal((await ok(post('usage/evidence',late))).amount_micro,38);
+  const stale=syntheticEvidence(a,normalizeCostUsage(a.protocol,nativeRaw),3);
+  assert.equal((await ok(post('usage/evidence',stale))).amount_micro,38,'returns current cost, never stale response');
+  assert.equal(current().evidence_version,4);
+  assert.equal(h.db.prepare('SELECT COUNT(*) n FROM usage_cost_evidence').get().n,4);
+  await ok(post('usage/attempts',{...a,request_id:'wrong-payer',contract_id:'other-contract'}),409);
+  await ok(post('usage/attempts',{...a,request_id:'cross-subject',subject_key:'other'}),409);
+  assert.equal(h.db.prepare('SELECT request_id FROM model_usage_requests WHERE request_id=?').get('cross-subject'),undefined,'all registration rows roll back');
+  console.log('PASS existing attempt identity, cumulative evidence revisions, duplicate/late ordering, no prompt storage and immutable job funding');
+
+  const openai=syntheticPrice('synthetic-openai','openai-chat');await ok(post('usage/prices',openai),201);
+  const b=syntheticAttempt(contract,openai,'attempt-2');await ok(post('usage/attempts',b),201);
+  const be=syntheticEvidence(b,normalizeCostUsage(b.protocol,openaiRaw));
+  assert.equal((await ok(post('usage/evidence',be))).amount_micro,38,'inclusive input caches and reasoning output counted once');
+  const fx={...price,revision:'fx-price',fx:{currency:'KRW',numerator:1300,denominator:1,revision:'synthetic-fx-1',source:'synthetic-only'}};
+  const fxCost=computeUsageCost(a,e,fx);assert.equal(fxCost.native_amount_micro,32);assert.equal(fxCost.amount_micro,41600);assert.equal(fxCost.fx_revision,'synthetic-fx-1');
+  const fractional=computeUsageCost(a,{...e,meters:{'tokens:cache_read':1}},price);assert.equal(fractional.amount_micro,1,'ceil at integer micro unit');
+  for(const broken of [{...price,rates:{'tokens:input':{numerator:1,denominator:0}}},{...price,bounds:{credits:1}},{...price,rounding:'guess'}])assert.throws(()=>validateUsagePrice(broken));
+  assert.throws(()=>computeUsageCost(a,{...e,meters:{'tokens:input':Number.MAX_SAFE_INTEGER}},{...price,rates:{'tokens:input':{numerator:2,denominator:1}}}),/cost_overflow/);
+  for(const overrides of [{returned_model:null},{service_tier:null},{region:null},{returned_model:'different-model'}])assert.equal(computeUsageCost(a,{...e,...overrides},price).state,'unpriced');
+  const noTTL=computeUsageCost(a,syntheticEvidence(a,normalizeCostUsage(a.protocol,{...nativeRaw,cache_creation:undefined})),price);assert.equal(noTTL.state,'partial');assert.equal(noTTL.amount_micro,18);
+  assert.equal(computeUsageCost(a,e,null).amount_micro,null);
+  const audio=normalizeCostUsage('openai-chat',{...openaiRaw,prompt_tokens_details:{...openaiRaw.prompt_tokens_details,audio_tokens:4}});assert.equal(audio.meters['tokens:input'],null);assert(audio.issues.includes('non_text_tokens'));
+  const nextPrice={...price,revision:'synthetic-next',rates:{...price.rates,'tokens:input':{numerator:100,denominator:1}}};await ok(post('usage/prices',nextPrice),201);assert.equal(current().amount_micro,38,'new prices do not rewrite history');
+  console.log('PASS Anthropic TTL/OpenAI inclusive cache, reasoning inclusion, integer ceil/FX, overflow, unknown dimensions and immutable historical price');
+
+  const tool=syntheticPrice('synthetic-tool','metered-tool'),t=syntheticAttempt(contract,tool,'tool-attempt');
+  await ok(post('usage/prices',tool),201);await ok(post('usage/attempts',t),201);
+  assert.equal((await ok(post('usage/evidence',syntheticEvidence(t,normalizeCostUsage('metered-tool',{meters:{'browser:seconds':3}}))))).amount_micro,21);
+  const unsent={...a,request_id:'unsent'};await ok(post('usage/attempts',unsent),201);
+  assert.equal(await markUsageAttemptSent(h.env,unsent.request_id),true);assert.equal(await markUsageAttemptSent(h.env,unsent.request_id),false);
+  await ok(post('usage/evidence',{...syntheticEvidence(unsent,{meters:{},issues:[]}),source:'execution-proof',execution:'not_sent'}),409);
+  const adjustment={id:'invoice-1',request_id:a.request_id,invoice_ref:'synthetic-invoice-ref',currency:'USD',amount_micro:2,reason:'synthetic invoice rounding difference'};
+  await ok(post('usage/invoice-adjustments',adjustment));await ok(post('usage/invoice-adjustments',adjustment));
+  await ok(post('usage/invoice-adjustments',{...adjustment,amount_micro:3}),409);
+  const view=await ok(q('/admin/access/usage/jobs/job-1'));assert.equal(view.attempts.length,4);assert.equal(view.adjustments.length,1);assert.equal(view.payment_effect,'none');assert.equal(view.historical_usage_log,'not-added');
+  await ok(post('usage/evidence',e,h.student),401);await ok(post('usage/prices',price,h.instructor),401);
+  console.log('PASS typed tool meter, no false not-sent proof, idempotent invoice adjustment and admin-only cost access');
+
+  const {accessDigest}=await import('../src/lib/access-contracts.ts');
+  const approvedPrice={...price,revision:'approved-historical',publication:'approved'};
+  h.env.HPS_USAGE_APPROVED_PRICE_DIGESTS=await accessDigest(approvedPrice);
+  await ok(post('usage/prices',approvedPrice),201);
+  const historical=syntheticAttempt(contract,approvedPrice,'historical-attempt','historical-job');
+  await ok(post('usage/attempts',historical),201);
+  h.env.HPS_USAGE_APPROVED_PRICE_DIGESTS='';
+  await ok(post('usage/attempts',{...historical,request_id:'unapproved-new'}),403);
+  assert.equal((await ok(post('usage/evidence',syntheticEvidence(historical,normalizeCostUsage(historical.protocol,nativeRaw))))).amount_micro,32,'old admitted attempt still settles against its original price');
+  const unknown={...syntheticAttempt(contract,price,'unknown-attempt','unknown-job'),price_revision:null};
+  await ok(post('usage/attempts',unknown),201);
+  const unknownEvidence=syntheticEvidence(unknown,normalizeCostUsage(unknown.protocol,nativeRaw));
+  assert.equal((await ok(post('usage/evidence',unknownEvidence))).amount_micro,null);
+  await ok(post('usage/evidence',{...unknownEvidence,id:'forged-reprice',version:2,reconciled_price_revision:price.revision}),400);
+  const corrected={...unknownEvidence,id:'verified-reprice',version:2,source:'provider-reconciliation',source_ref:'synthetic-verified-historical-rate',reconciled_price_revision:price.revision};
+  assert.equal((await ok(post('usage/evidence',corrected))).amount_micro,32);
+  assert.equal(h.db.prepare('SELECT price_revision FROM usage_attempt_costs WHERE request_id=?').get(unknown.request_id).price_revision,null,'original quote remains unknown');
+  console.log('PASS historical admitted rate survives approval-list rotation; unknown historical quote needs explicit verified reconciliation');
+
+  // Real Service chat route: the upstream stub binds the existing server-generated
+  // attempt for observation testing. P3 moves binding into atomic pre-dispatch admission.
+  const {withMockUpstream,TEST_SECRET}=await import('./harness/index.mjs');const {issue}=await import('../src/lib/tokens.ts');
+  const id='studio-model-practice';
+  h.db.prepare('INSERT INTO cohorts(id,display_name) VALUES (?,?)').run(id,'Synthetic class');
+  h.db.prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES (?,?,?,?,?)').run('route-session',id,id,new Date(Date.now()-1000).toISOString(),new Date(Date.now()+3600000).toISOString());
+  await h.env.HPS_KV.put(`cohort:${id}:roster`,JSON.stringify({users:['kid01']}));
+  await h.env.HPS_KV.put(`cohort:${id}:active_session`,JSON.stringify({session_id:'route-session',profile_id:id,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()}));
+  const routeContract=syntheticEvent('route-contract','cohort',id);await ok(post('events',routeContract));
+  h.env.OPENAI_API_KEY='synthetic-key';h.env.HPS_MODEL_PRACTICE_REQUEST_LIMIT='100';h.env.HPS_USAGE_REGION='global';
+  const auth='Bearer '+(await issue({u:'kid01',c:id,p:id},1,TEST_SECRET)).token;
+  let actual;
+  await withMockUpstream(async()=>{
+    const existing=h.db.prepare("SELECT * FROM model_usage_requests WHERE cohort_id=? AND state='pending'").get(id);
+    actual={...syntheticAttempt(routeContract,openai,existing.request_id,'route-job'),session_id:existing.session_id};
+    await registerUsageAttempt(h.env,actual);await markUsageAttemptSent(h.env,actual.request_id);
+    return Response.json({model:openai.model,service_tier:'default',choices:[{message:{content:'Synthetic cost observation'},finish_reason:'stop'}],usage:openaiRaw});
+  },async()=>{await ok(q('/v1/chat/completions',{method:'POST',auth,body:{model:openai.model,stream:false,messages:[{role:'user',content:'synthetic test'}]}}));});
+  const captured=await ok(q('/admin/access/usage/jobs/route-job'));assert.equal(captured.attempts[0].amount_micro,38);assert.equal(captured.attempts[0].pricing_state,'priced');
+  assert.equal(h.db.prepare('SELECT COUNT(*) n FROM usage_cost_evidence WHERE request_id=?').get(actual.request_id).n,1);
+  console.log('PASS actual /v1/chat provider-response capture into the existing request ID and cost evidence (synthetic upstream)');
+} finally {h.close();}

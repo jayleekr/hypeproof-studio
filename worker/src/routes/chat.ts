@@ -1,5 +1,6 @@
 import { crossProviderEnabled, explicitModelProvider, permittedModelKeys } from '../profiles/types';
 import { measureUsage, reserveModelRequest, finishModelRequest } from '../lib/model-usage';
+import { captureUsageCost } from '../lib/usage-costs';
 
 import { applyRequestEffort, EffortPolicyError, type EffortReceipt } from '../lib/model-effort';
 import { persistRequestSettings, readRequestSettings, validTurnId } from '../lib/request-settings';
@@ -444,6 +445,7 @@ chat.post("/chat/completions", async (c) => {
   const usageRequestId = c.get('requestId') + ':' + crypto.randomUUID();
   let reportedUsage: Record<string, unknown> = {};
   let returnedModel: string | null = null;
+  let costComplete=false, costEnded=false;
   const requestSignal = multi ? AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(60000)]) : undefined;
 
   let effortReceipt: EffortReceipt | undefined;
@@ -473,6 +475,10 @@ chat.post("/chat/completions", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    c.executionCtx.waitUntil(captureUsageCost(env,usageRequestId,{usage:reportedUsage,model:returnedModel,
+      tier:typeof reportedUsage.service_tier==='string'?reportedUsage.service_tier:null,
+      region:typeof reportedUsage.inference_geo==='string'?reportedUsage.inference_geo:(env.HPS_USAGE_REGION??null),
+      complete:costComplete,ended:costEnded}).catch(()=>console.error('cost evidence unavailable; unresolved reservation retained')));
     if (reserved) {
       reserved = false;
       const measurement = measureUsage(provider, reportedUsage, log.status < 400);
@@ -702,6 +708,7 @@ chat.post("/chat/completions", async (c) => {
   // 7. Upstream guard
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
+    costEnded=upstream.status>=400&&upstream.status<500;
     // #257 — the upstream error body (provider prose, key hints, quota info)
     // goes to logs only; the client learns the status code + request_id.
     console.error(`[${c.get("requestId")}] upstream ${upstream.status}: ${text.slice(0, 500)}`);
@@ -742,8 +749,9 @@ chat.post("/chat/completions", async (c) => {
     let j: any;
     try { j = await upstream.json(); }
     catch { recordFailure(502, ERROR_KIND.STREAM_INTERRUPTED); return c.json({error:{code:'invalid_upstream_response'}},502); }
-    reportedUsage = j.usage ?? {};
+    reportedUsage = {...(j.usage??{}),...(typeof j.service_tier==='string'?{service_tier:j.service_tier}:{})};
     returnedModel = typeof j.model === 'string' ? j.model : null;
+    costComplete=true;costEnded=true;
     let text = "";
     let tin = 0;
     let tout = 0;
@@ -863,6 +871,7 @@ chat.post("/chat/completions", async (c) => {
   // died is this hook, which the SSE layer fires BEFORE onUsage.
   let streamFailed = false;
   const streamOptions = {
+    onProtocolComplete:()=>{costComplete=true;costEnded=true;},
     // #257 — lets the SSE layer emit a sanitized stream_error carrying the
     // request_id instead of raw internal prose.
     requestId: c.get("requestId"),

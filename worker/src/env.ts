@@ -7,6 +7,10 @@ export interface Env {
   HPS_ACCESS_CONTRACTS?: string;
   /** Exact SHA-256 digests of approved sales publications; never provider prices. */
   HPS_ACCESS_APPROVED_PLAN_DIGESTS?: string;
+  /** Separately reviewed provider cost revisions, never the sales-price catalog. */
+  HPS_USAGE_APPROVED_PRICE_DIGESTS?: string;
+  /** Verified account/endpoint geography where the protocol does not report it. */
+  HPS_USAGE_REGION?: string;
   // Secrets (wrangler secret put — locally: worker/.dev.vars, gitignored)
   GEMINI_API_KEY?: string;           // historical default; production sets anthropic (wrangler.toml)
   ANTHROPIC_API_KEY?: string;        // peer — used when LLM_PROVIDER=anthropic
