@@ -42,7 +42,7 @@ Product decisions follow [Philosophy → Product Intent](../PRODUCT-INTENT.md) �
 existing requirement → UX/runtime behavior → observed evidence. Product Intent
 is distinct from the Human Asset `INTENT` and feature-level `INT-AE-*` identifiers.
 The trial entry contract refines [NAT-03](../requirements/studio-native-trial.md):
-act when sufficient, ask one necessary question when not, and support skipping
+act when sufficient, ask one necessary question per turn while uncertainty remains, and support skipping
 questions within existing permission limits. See T04 and linked NAT tests;
 do not introduce a second requirement or learner-state system for #764.
 
