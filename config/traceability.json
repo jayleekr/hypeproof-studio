@@ -486,6 +486,43 @@
           "path": "docs/testing/capability-and-access.md"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-ACCESS-CONTRACTS",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-DES-ACCESS-BUDGET"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/access-contracts.ts"
+        },
+        {
+          "path": "worker/src/routes/access.ts"
+        },
+        {
+          "path": "worker/migrations/0007-access-contracts.sql"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-ACCESS-CONTRACTS",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-IMP-ACCESS-CONTRACTS"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/access-contracts.test.mjs"
+        },
+        {
+          "path": "worker/test/access-contracts-d1.test.mjs"
+        }
+      ]
     }
   ]
 }

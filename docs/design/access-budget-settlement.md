@@ -1,6 +1,6 @@
 # Pricing에서 실행·정산까지의 설계
 
-2026-09-08 · 상태: 제안 · #800. [요구사항 AB-01~18](../requirements/access-budget-settlement.md).
+2026-09-08 · 상태: 단계별 구현 중 · #800. [요구사항 AB-01~18](../requirements/access-budget-settlement.md).
 Lab #777의 개념 개정안에 맞춘 제품 설계이며, 운영 가격·새 결제 서비스의 채택을 뜻하지 않는다.
 
 ## 철학에서 제품으로
@@ -142,3 +142,16 @@ BYO 또한 공급자의 현재 지원 방식·제품 조건과 실제 Studio 경
 초기 검증은 합성 계약과 별도 대상에서 한다. 기존 수업을 자동 이관하지 않는다. 적용 대상에서는
 SDK/proxy/이전 앱 모두 서버 게이트를 지나야 한다. 배포 gate는 [검증 계획](../testing/capability-and-access.md)과
 [Epic 순서](../plan/capability-and-pricing-epics.md)를 따른다.
+
+
+## P1 게시와 운영 경계
+
+1. Lab의 확정 상품을 `hps-access-plan/1` artifact로 작성하고 source commit·파일 SHA-256·PRICING_VERSION을 넣는다. 모델 공급자 단가와 견적용 시간 원가를 복사하지 않는다.
+2. `cd worker && node --experimental-strip-types scripts/verify-access-publication.mjs PLAN.json LAB_CHECKOUT`로 해당 commit의 원본 hash/version을 대조한다. 이 명령은 내용을 출력하거나 운영 설정을 바꾸지 않는다.
+3. 포함량·모델·갱신 등 상업 조건을 별도로 검토한 **정확한 artifact digest**만 `HPS_ACCESS_APPROVED_PLAN_DIGESTS`에 게시할 수 있다. source 검증 성공만으로 포함량이 승인되지는 않는다. 현재 승인 목록/판매 활성화는 추가하지 않았다.
+4. migration `0007-access-contracts.sql`을 기존 순서대로 적용하고 명시적 opt-in 뒤, 기존 admin 인증으로 `/admin/access/plans` 및 `/admin/access/events`에 게시한다. 이벤트는 확인된 계약/공급자 snapshot 참조와 단조 증가 source_version을 요구한다. 클라이언트 결제 성공 redirect는 신뢰하지 않는다.
+5. `/admin/access/accounts/:id`는 개인 계정을 기존 adult profile에 연결한다. `/token`은 기존 HMAC으로 짧은 계정 식별 토큰만 발급하며 이용량을 만들지 않는다. cohort-local 좌석 연결과 기관 소속은 admin-only다.
+
+D1의 [batch transaction 의미](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch)를 사용해 이벤트·현재 계약·불변 기간을 함께 쓴다. 같은 기간의 수정은 transaction 전체가 실패한다. 원본 이벤트는 남고, 낮은 source_version은 현재 권한을 되돌리지 않는다. 판매/결제·강사 지급 처리는 이 API에서 발생하지 않는다.
+
+P1 되돌리기는 새 게시/계정 연결/계약 opt-in을 중지하는 것이다. 운영 금액 집행이 시작된 뒤 전역 플래그를 끄면 안 된다. 후속 P3에서는 새 유료 실행을 먼저 정지하고 이미 예약된 작업을 정산한 뒤 코드 변경을 되돌리는 별도 절차가 필요하다. additive 테이블이나 기존 기간/이벤트를 삭제하는 rollback은 없다.

@@ -14,6 +14,8 @@
 // exp (transition window) — but cannot be individually revoked.
 
 export interface TokenPayload {
+  /** Stable personal account. c is empty; never fabricate a cohort for subscriptions. */
+  account?: string;
   /** Server-backed individual grant, issued only through the existing issuer gate. */
   native_trial?: true;
   /** Instructor-selected immutable lesson. Never carries runtime capabilities. */
@@ -235,7 +237,8 @@ export async function verify(token: string, secret: string): Promise<TokenPayloa
   }
 
   if (p.v !== 2) throw new TokenError(`unsupported token version: ${p.v}`, "version");
-  if (!p.u || !p.c || !p.p) throw new TokenError("missing required fields", "malformed");
+  if (!p.u || !p.p || (!p.c && !(typeof p.account === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(p.account) && p.c === '' && p.role !== 'issuer'))) throw new TokenError("missing required fields", "malformed");
+  if (p.account !== undefined && (p.c !== '' || p.role === 'issuer')) throw new TokenError("invalid account scope", "malformed");
   const now = Math.floor(Date.now() / 1000);
   if (typeof p.exp !== "number" || p.exp < now) throw new TokenError("token expired", "expired");
   return p;
@@ -258,6 +261,7 @@ function canonicalize(p: TokenPayload): string {
   if (p.can_issue_issuers !== undefined) out.can_issue_issuers = p.can_issue_issuers;
   if (p.lesson !== undefined) out.lesson = p.lesson;
   if (p.native_trial !== undefined) out.native_trial = p.native_trial;
+  if (p.account !== undefined) out.account = p.account;
   return JSON.stringify(out);
 }
 
