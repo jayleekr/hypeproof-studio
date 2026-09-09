@@ -43,7 +43,11 @@ const session = JSON.parse(await env.HPS_KV.get(sessionKey));
 await env.HPS_KV.put(sessionKey, JSON.stringify({ ...session, profile_id: PROFILE }));
 
 const app = await bootApp();
-const { token } = await issue({ u: USER, c: COHORT, p: PROFILE }, 2, signing);
+// 12h, per .claude/rules/verification.md: a verification seat that expires
+// mid-session sends the tester chasing a 401 that is not the bug they were
+// looking at. Local synthetic storage only — this seat reaches no classroom.
+const HOURS = Number(process.env.HPS_KIDS_HOURS || 12);
+const { token } = await issue({ u: USER, c: COHORT, p: PROFILE }, HOURS, signing);
 writeFileSync(process.env.HPS_KIDS_TOKEN_FILE || '/tmp/hpstest/token.kids', token, { mode: 0o600 });
 
 let attempts = 0;
