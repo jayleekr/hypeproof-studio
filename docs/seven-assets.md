@@ -3,15 +3,21 @@
 > 철학과 자산 정의의 정본은 [hypeprooflab/PHILOSOPHY.md](https://github.com/jayleekr/hypeprooflab/blob/main/PHILOSOPHY.md)다.
 > 이 문서는 Studio의 참조·구현 호환 인덱스다. `docs/essence-v0.1.md`의 16 essence 체계는 계속 폐기 상태다.
 
-Status: Active product reference (upstream definitions delegated)
+Status: Legacy implementation reference; #777 candidate-model adoption pending
 Owner: Jay
 Date: 2026-09-08
 Verified upstream: [6845cdb4](https://github.com/jayleekr/hypeprooflab/blob/6845cdb4391273d16ed09419eee806b0c03c04f9/PHILOSOPHY.md)
 
 2026-09-08 철학의 §6이 자산 정의를, §7이 제품 역할을, §8~9가 교육철학 계보와
-AI Discontinuity를, §11이 연구 질문을 소유한다. 일곱 자산은 수정 가능한 연구 모델이며
+AI Discontinuity를, §11이 연구 질문을 소유한다. 이는 위 pinned revision의 설명이다.
+[Lab #777](https://github.com/jayleekr/hypeprooflab/issues/777)은 기존 일곱 개를 Candidate Model 0으로
+두고 상위 Human Capability Research와 v1 후보를 제안한다. 개념 채택과 구현은 별도다.
+일곱 자산은 수정 가능한 연구 모델이며
 기능 사용·산출물 완성만으로 성장했다고 판정하지 않는다. 철학의 Human Assets와
-대외/Studio UI의 **7 AI Native Assets**는 같은 대상을 가리킨다(정본 §0).
+대외/Studio UI의 **7 AI Native Assets**는 그 역사적 revision에서 같은 대상을 가리킨다.
+새 용어를 이 호환 인덱스의 enum이나 과거 점수로 자동 이식하지 않는다.
+[새 측정 계약](requirements/capability-model-contract.md)과
+[채택 순서](plan/capability-and-pricing-epics.md)를 따른다.
 
 아래 절 번호·기존 이름·구현 키는 기존 REQ와 이벤트 참조의 호환성을 위해 유지한다.
 새 정의를 이곳에 복제하거나 코드의 enum·기록을 일괄 개명하지 않는다.

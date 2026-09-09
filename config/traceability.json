@@ -16,7 +16,7 @@
         },
         {
           "path": "docs/requirements/studio-native-trial.md",
-          "section": "## Product Intent\uc640 \uccb4\ud5d8 \ubc94\uc704"
+          "section": "## Product Intent와 체험 범위"
         }
       ]
     },
@@ -43,7 +43,7 @@
       "sources": [
         {
           "path": "docs/requirements/studio-native-trial.md",
-          "section": "## \uc811\uadfc \ubc29\uc2dd"
+          "section": "## 접근 방식"
         }
       ]
     },
@@ -217,7 +217,7 @@
       "sources": [
         {
           "path": "docs/design/model-effort-and-course-usage.md",
-          "section": "## \uc218\uc5c5 effort \uad6c\ud604 \uacc4\uc57d (#799)"
+          "section": "## 수업 effort 구현 계약 (#799)"
         }
       ]
     },
@@ -412,6 +412,78 @@
         },
         {
           "path": "e2e/tests/native-trial-guidance.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-INT-CAPABILITY-ACCESS",
+      "stage": "intent",
+      "owner": "jayleekr",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/PRODUCT-INTENT.md",
+          "section": "## 후보 모델과 이용 권한에 대한 Intent"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CAPABILITY-CONTRACT",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-CAPABILITY-ACCESS"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/capability-model-contract.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-ACCESS-BUDGET",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-CAPABILITY-ACCESS",
+        "ST-REQ-STUDIO-SAFETY",
+        "ST-REQ-MODEL-USAGE",
+        "ST-REQ-TRIAL-CONVERSATION"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/access-budget-settlement.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-ACCESS-BUDGET",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/access-budget-settlement.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CAPABILITY-ACCESS",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-REQ-ACCESS-BUDGET",
+        "ST-DES-ACCESS-BUDGET"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/capability-and-access.md"
         }
       ]
     }
