@@ -1,3 +1,4 @@
+import { fetchAccessView, sendBudgetRequest, accessProfile, type AccessState } from './accessClient';
 import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice, selectedEffort, observedEffortResult, type SavedEffortChoice } from './modelSelection';
 import * as vscode from "vscode";
 import * as path from "path";
@@ -168,6 +169,25 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   private nativeObservation: NativeObservationRecorder | null = null;
   private nativeHistoryScope: string | null = null;
+  private accessState:AccessState|undefined;
+  private accessScope:string|undefined;
+  private accessCheckedAt=0;
+  private accessLoad:Promise<void>|undefined;
+  private async loadAccess(force=false):Promise<void>{
+    const token=await this.context.secrets.get(TOKEN_KEY);
+    const scope=token?createHash('sha256').update(token).digest('hex'):undefined;
+    if(scope!==this.accessScope){this.accessScope=scope;this.accessState=undefined;this.accessCheckedAt=0;this.accessLoad=undefined;}
+    if(!token)return;
+    if(!force&&this.accessState&&Date.now()-this.accessCheckedAt<10000)return;
+    if(this.accessLoad)return this.accessLoad;
+    const proxy=vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1');
+    const selected=this.accessState?.selected;
+    const pending=(async()=>{try{const view=await fetchAccessView(proxy,token);if(await this.context.secrets.get(TOKEN_KEY)===token)this.accessState={status:'ready',view,selected:this.accessState?.selected??selected};}
+      catch{if(await this.context.secrets.get(TOKEN_KEY)===token)this.accessState={status:'unknown',selected,notice:'사용량 미확인 · 새로고침해 주세요.'};}
+      finally{if(this.accessScope===scope){this.accessCheckedAt=Date.now();this.accessLoad=undefined;}}})();
+    this.accessLoad=pending;return pending;
+  }
+
   private profileGeneration=0;
   private nativeObservationError: string | null = null;
   private nativeLearningPath: {title:string;url:string;reason:string} | null = null;
@@ -685,10 +705,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // settings the fork core patch reads (minor cohorts → persist:hp-safe).
         await this.applyBrowserSafety(p);
         this.activeCohortId = extractCohortIdUnverified(token) ?? null;
-        this.nativeHistoryScope=(p?.observation||this.activeCohortId==='studio-native-trial')?'native-'+(p?.observation?.scope??createHash('sha256').update(token).digest('hex')):null;
+        this.nativeHistoryScope=(p?.access_identity?.kind==='account')?p.access_identity.scope:(p?.observation||this.activeCohortId==='studio-native-trial')?'native-'+(p?.observation?.scope??createHash('sha256').update(token).digest('hex')):null;
         // Task E — a resolved profile means we have a usable token; start the
         // chat-independent ping. Failures back off inside the pinger.
-        this.startLiveness();
+        if(p?.access_identity?.kind!=='account')this.startLiveness();else this.stopLiveness();
         await this.migrateLegacyStateForActiveCohort();
         // Apply tone-appropriate labels to the preview panel (#159).
         const labels = labelsForProfile(p);
@@ -1804,6 +1824,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           if (disclosure) void this.post({ type: "aiDisclosure", text: disclosure });
         }
         return;
+      case 'refreshAccess':
+        await this.loadAccess(true);await this.postConfig();return;
+      case 'selectFunding':
+        await this.loadAccess();
+        if(!this.activeStreams.size&&this.accessState?.view?.choices.some(c=>c.id===msg.id&&c.active))this.accessState={...this.accessState,selected:msg.id,notice:'선택한 이용권을 다음 작업부터 사용합니다.'};
+        await this.postConfig();return;
+      case 'requestBudget':{
+        const token=await this.context.secrets.get(TOKEN_KEY),selected=this.accessState?.selected;
+        if(token&&selected){try{await sendBudgetRequest(vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'),token,selected,msg.note);await this.loadAccess(true);if(this.accessState)this.accessState.notice='강사에게 추가 사용 요청을 보냈습니다.';}catch(error){if(this.accessState)this.accessState.notice=error instanceof Error?error.message:'요청을 보내지 못했습니다.';}}
+        await this.postConfig();return;
+      }
       case "refreshEffort":
         await this.refreshEffortResult();
         return;
@@ -2016,7 +2047,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const coach = this.getCoach();
     // Fixed-naming cohorts must NOT inject a user-supplied coach name carried
     // over from a different cohort's user-data-dir into the LLM context (#140).
-    const profile = await this.ensureProfile();
+    const resolvedProfile = await this.ensureProfile();
+    await this.loadAccess();
+    const fundingSource=this.accessState?.selected;
+    const chosenAccess=this.accessState?.view?.choices.find(c=>c.id===fundingSource);
+    const profile=resolvedProfile?accessProfile(resolvedProfile,chosenAccess):null;
     const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
     const savedModel = this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice');
     if (profile && selection) model = selectedModel(profile, selection, savedModel, model);
@@ -2330,11 +2365,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // runProxy() drops the browser loop, so the coach only *narrates* "브라우저
       // 열게요" and never opens it (regression from the #380 SDK-runtime flip).
       const runProxyRuntime = async () => {
-        if (this.cachedProfile?.browser_control?.enabled) {
+        if (profile?.browser_control?.enabled) {
           await this.runBrowserLoop({
             proxyUrl,
             model,
             effort,
+            fundingSource,
+
             token,
             history,
             userText: userTextForModel,
@@ -2356,6 +2393,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           model,
           effort,
           turnId: streamId,
+            fundingSource,
+
           token,
           history,
           userText: userTextForModel,
@@ -2393,6 +2432,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             gatewayUrl: proxyUrl,
             effort,
             turnId: streamId,
+            fundingSource,
+
             token,
             model,
             profile,
@@ -2436,6 +2477,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
               if (u.kind === "request") {
                 this.spool?.recordUsage({
                   turnId: streamId,
+
                   source: "sdk",
                   requestKey: u.requestKey,
                   model: u.model,
@@ -2463,7 +2505,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             browserHost: this.buildBrowserMcpHost(),
           });
         } catch (err) {
-          if (!(err instanceof SdkUnavailableError)) throw err;
+          if (!(err instanceof SdkUnavailableError)||fundingSource) throw err;
           if (selection && (selection.source === 'lesson' || (profile && savedModel?.scope === modelSelectionScope(profile)))) throw new Error('선택한 모델의 실행 환경을 사용할 수 없습니다. Studio의 Agent SDK 설치를 확인하거나 강사에게 알려주세요. 대화와 작업은 보존됩니다.');
           // Pre-Phase-1: the SDK package isn't installed. Keep the classroom
           // working — fall back to the proxy runtime for this turn instead of
@@ -2487,6 +2529,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           spoolRuntime = "proxy";
           this.spool?.recordWorkflow({
             turnId: streamId,
+
             event: "sdk_fallback",
             payload: { reason: err.message },
           });
@@ -2541,6 +2584,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (assistantText.length > 0) {
         this.spool?.recordResponse({
           turnId: streamId,
+
           status: finalSpoolStatus,
           runtime: spoolRuntime,
           text: assistantText,
@@ -2560,6 +2604,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       });
       if (this.effortTurn?.id === streamId) void this.refreshEffortResult().catch(() => { /* panel may have closed */ });
       this.activeStreams.delete(streamId);
+      void this.loadAccess(true).then(()=>this.postConfig()).catch(()=>{});
       this.turnTimelines.delete(streamId);
     }
   }
@@ -2634,6 +2679,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private async runBrowserLoop(p: {
     effort?: import('./protocol').CourseEffort;
+    fundingSource?: string;
     proxyUrl: string;
     model: string;
     token: string | undefined;
@@ -2659,6 +2705,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           model: p.model,
           effort: p.effort,
           turnId: p.streamId,
+          fundingSource:p.fundingSource,
           token: p.token,
           history: p.history,
           userText: p.userText,
@@ -2982,6 +3029,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async postConfig(): Promise<void> {
+    await this.loadAccess();
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const token = await this.context.secrets.get(TOKEN_KEY);
     const profile = await this.ensureProfile();
@@ -3000,6 +3048,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
         model,
         hasToken: !!token,
+        access:this.accessState,
         effort, effortNotice:this.effortNotice, effortResult:this.effortResult,
         coach: this.getCoach(),
         profile: profile ? { ...profile, model_selection: selection } : null,

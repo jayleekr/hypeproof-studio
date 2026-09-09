@@ -92,6 +92,7 @@ export interface EffortRequestRecord {
   reason: 'selected' | 'course_default' | 'unsupported_model'; status: number; created_at: string;
 }
 export interface ChatConfig {
+  access?: import('./accessClient').AccessState;
   effort?: { value: CourseEffort; allowed: CourseEffort[] };
   effortNotice?: string;
   effortResult?: { state: 'loading' | 'observed' | 'unknown'; requests: EffortRequestRecord[]; truncated?: boolean };
@@ -126,6 +127,7 @@ export interface CoachInfo {
  * sides updated together.
  */
 export interface ResolvedProfile {
+  access_identity?:{kind:'account';scope:string};
   model_selection?: {
     revision: 'hps-model-selection/1'; runtime: 'proxy' | 'agent-sdk'; provider: string;
     default: string; source: 'profile' | 'lesson';
@@ -250,6 +252,9 @@ export interface SuggestionChip {
 
 // Webview → Host
 export type WebviewMessage =
+  | {type:'refreshAccess'}
+  | {type:'selectFunding';id:string}
+  | {type:'requestBudget';note:string}
   | { type: 'observationOpen' }
   | { type: 'observationCancel' }
   | { type: 'observationAssess'; scope: string; eventIds: string[] }

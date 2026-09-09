@@ -1,3 +1,4 @@
+import { AccessControl } from './AccessControl';
 import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
 import { MarkdownText } from './MarkdownText';
@@ -715,6 +716,7 @@ export function ChatPanel(props: Props) {
             : streaming ? '변경하면 다음 요청부터 적용돼요' : '대화를 유지하며 모델을 바꿀 수 있어요'}</small>
         </div>}
         <EffortControl config={config} post={postToHost} />
+        <AccessControl config={config} streaming={streaming} post={postToHost} />
         {runnerCohort && <RunnerBar face={runnerWho} running={runnerRunning} />}
         {/* 버튼은 헤더에 있고 여기는 **결과만** 나온다. 헤더 한 줄에는 링크도
             실패 사유도 들어갈 자리가 없는데, 아이는 사라지는 안내를 못 읽는다 —

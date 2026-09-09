@@ -28,7 +28,7 @@ try {
   const paused={...e,event_id:'paused',source_version:3,state:'suspended'};
   await ok(post('/admin/access/events',paused));
   await ok(post('/admin/access/events',{...e,event_id:'late-v2',source_version:2}));
-  assert.equal((await ok(q('/v1/access',{auth:student}))).choices.length,0);
+  assert.equal((await ok(q('/v1/access',{auth:student}))).choices[0].active,false,'suspended contract remains readable but cannot execute');
   await ok(post('/admin/access/events',{...e,event_id:'resume',source_version:4}));
   assert.equal((await ok(q('/v1/access',{auth:student}))).choices.length,1);
   assert.equal(h.db.prepare('SELECT COUNT(*) n FROM access_periods').get().n,1);

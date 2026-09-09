@@ -87,3 +87,16 @@ CA-T02/08/09/10의 원가 부분만 실행했다. 실제 SDK CLI fan-out, 전체
 - 기존 Worker 회귀와 typecheck PASS. 테스트의 91 microUSD 견적·910 총액은 합성 유리수 요율에서 산출한 값이며 판매/공급자 운영 가격이 아니다.
 
 CA-T03/05/06/07/08/10/12/13의 위 Service 부분을 실행했다. SDK CLI 자체 fan-out, 실제 공급자 과금과 청구 대조, 강사/App 화면·실제 수업은 이 기록의 PASS 범위가 아니다. 실제 화면·복구·출시 판정은 P4/P5에서 이어진다.
+
+
+## P4 실제 실행 기록 (#856 / #847)
+
+2026-09-08, Mac arm64 / Node 24.4.1. [스크린샷과 인수 근거](../research/access-budget-acceptance-2026-09-08/README.md).
+
+- `npm run test:budget-surfaces`: 실제 Hono/HMAC/SQLite에서 issuer 역할만으로 수정 거부, 위임 ceiling/반/학생 격리, CAS, 검토 요청의 예산 부여 없음, 위임 취소 후 mutation rollback, 종료 후 조회, 나중에 만든 cap의 기존 사용량 포함 PASS.
+- `npm run test:budget-surfaces:d1`: 실제 local workerd/D1에서 cap 기존 시도 귀속, 8개 동시 위임 갱신 중 1개 성공, grant/revoke 이력 각 1개, 위임 취소 후 예산 저장 rollback PASS.
+- Chalk `test:budgets`: 실제 Service 전달에서 위조 CF/funding 헤더 제거, 학생/Basic/운영 API 전달 거부 PASS. App `access-client.smoke`는 DTO 미확인 숫자·기능 교집합·SDK ambient funding 제거/주입 거부 PASS.
+- `e2e/access-budgets/browser.mjs`: 실제 Chromium → Chalk → Service/SQLite에서 390/1280·200% CSS page zoom, 키보드 새로고침, 학생 cap/pause 영속화, 다른 반 강사 거부, 운영자 인증 조회 PASS.
+- `e2e/access-budgets/mac.mjs`: 실제 Mac 앱 복사본에 후보 확장을 넣고 번들 hash 대조. 직접 출처/모델 선택, 작성 중 초안 보존, 390/1280 CSS px와 실제 앱 200% 확대, 합성 SSE의 예약→1회 전송→정산, 소진 후 호출·대체 출처 없음/기존 파일·작성란 보존 PASS.
+
+실제 공급자에 대한 CLI 보조 호출/청구 검증과 실제 수업 원가 분포는 P5 출시 판정이다. 화면에 보이는 합성 금액을 운영 포함량으로 채택하지 않는다.

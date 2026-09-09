@@ -58,6 +58,9 @@ export function publicVerifyError(err: unknown, label: string): string {
 // Service endpoints an instructor Bearer may reach is defined exactly once.
 export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/access$/.test(path)) return true;
+  if(method==='GET'&&/^\/admin\/cohorts\/[^/]+\/budgets$/.test(path))return true;
+  if(method==='POST'&&/^\/admin\/cohorts\/[^/]+\/budgets\/children$/.test(path))return true;
+  if(method==='PUT'&&/^\/admin\/cohorts\/[^/]+\/(?:budgets|budget-requests)\/[^/]+$/.test(path))return true;
   if((method==='GET'||method==='DELETE')&&/^\/admin\/cohorts\/[^/]+\/native-trials\/[^/]+$/.test(path))return true;
   if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/models\/[^/]+$/.test(path)) return true;
   // #748 — 같은 모양의 읽기 전용 카탈로그. 강사가 좁힐 수 있는 기능 목록을

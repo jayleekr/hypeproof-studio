@@ -1,3 +1,4 @@
+import { publishBudgetDelegation, delegatedBudgetMutation, classBudgetView, participantAccessView, requestBudgetHelp, resolveBudgetHelp } from '../lib/budget-views';
 import { initializeBudget, createBudgetChild, updateBudgetAccount, readBudgetAccount, budgetBalances } from '../lib/budgets';
 import { Hono, type Context } from 'hono';
 import type { Env } from '../env';
@@ -8,7 +9,7 @@ import { crossProviderEnabled } from '../profiles/types';
 import { publishUsagePrice, registerUsageAttempt, recordCostEvidence, recordInvoiceAdjustment, usageJobCosts } from '../lib/usage-costs';
 import { authorizeIssuerForCohort } from '../lib/instructor-auth';
 import { AccessError, accessEnabled, requireAccessEnabled, accessId, publishAccessPlan, applyAccessEvent,
-  accountForToken, accessChoices, readAccessAccount, type AccessEvent } from '../lib/access-contracts';
+  accountForToken, readAccessAccount, type AccessEvent } from '../lib/access-contracts';
 
 type AccessContext = Context<{ Bindings: Env }>;
 /** Existing HMAC identity and roster, usable when paid execution/session has ended. */
@@ -41,19 +42,16 @@ access.onError(errorHandler);
 access.get('/',async c => {
   const p = await accessPrincipal(c);
   if (!accessEnabled(c.env)) return c.json({schema:'hps-access-view/1',configured:false,as_of:new Date().toISOString(),choices:[]});
-  const choices = await accessChoices(c.env,p);
   c.header('cache-control','no-store');
-  return c.json({schema:'hps-access-view/1',configured:true,as_of:new Date().toISOString(),choices:choices.map(({contract,plan})=>({
-    id:contract.contract_id,period_id:contract.period.id,plan_revision:plan.revision,label:plan.label,
-    source_kind:contract.subject.kind,mode:plan.mode,starts_at:contract.period.starts_at,ends_at:contract.period.ends_at,
-    included:plan.included,allowed:plan.allowed,policy:plan.policy,cost_status:plan.mode==='byo'?'external_unknown':'unpriced',
-  })),selection_required:true});
+  return c.json(await participantAccessView(c.env,p));
 });
+
+access.post('/requests',async c=>{requireAccessEnabled(c.env);if((await c.req.text()).length>4096)throw new AccessError('access_document_too_large');const p=await accessPrincipal(c);return c.json(await requestBudgetHelp(c.env,p,await c.req.json()),201);});
 
 /** Mounted behind the existing admin gate. Issuers get only the scoped GET. */
 export const accessAdmin = new Hono<{Bindings:Env}>();
 accessAdmin.onError(errorHandler);
-for (const path of ['/access/*','/cohorts/:cohort/access']) accessAdmin.use(path,async(c,next)=>{requireAccessEnabled(c.env);c.header('cache-control','no-store');await next();});
+for (const path of ['/access/*','/cohorts/:cohort/access','/cohorts/:cohort/budgets','/cohorts/:cohort/budgets/*','/cohorts/:cohort/budget-requests/*']) accessAdmin.use(path,async(c,next)=>{requireAccessEnabled(c.env);c.header('cache-control','no-store');await next();});
 accessAdmin.use('/access/*',async(c,next)=>{
   if (c.req.method !== 'GET') {
     const text=await c.req.text();
@@ -62,6 +60,47 @@ accessAdmin.use('/access/*',async(c,next)=>{
     if(!body||typeof body!=='object'||Array.isArray(body))throw new AccessError('invalid_access_document');
   }
   await next();
+});
+for(const path of ['/cohorts/:cohort/budgets/*','/cohorts/:cohort/budget-requests/*'])accessAdmin.use(path,async(c,next)=>{
+  if(c.req.method!=='GET'){const raw=await c.req.text();if(raw.length>32768)throw new AccessError('access_document_too_large');}
+  await next();
+});
+accessAdmin.put('/access/budget-delegations',async c=>c.json(await publishBudgetDelegation(c.env,await c.req.json())));
+accessAdmin.get('/access/budget-roots',async c=>{
+  const rows=await c.env.HPS_DB.prepare('SELECT r.account_id,r.period_id,c.id contract_id,c.subject_kind,c.subject_id,c.state,p.starts_at,p.ends_at FROM budget_roots r JOIN access_periods p ON p.id=r.period_id JOIN access_contracts c ON c.id=p.contract_id ORDER BY p.starts_at DESC LIMIT 101').all();
+  return c.json({as_of:new Date().toISOString(),roots:rows.results.slice(0,100),truncated:rows.results.length>100});
+});
+accessAdmin.get('/access/budget-ledger/:id',async c=>{
+  const id=c.req.param('id');await readBudgetAccount(c.env,id);
+  const rows=await c.env.HPS_DB.prepare(`SELECT r.request_id,r.subject_key,r.created_at,a.job_id,a.price_revision,a.execution_state,a.evidence_version,a.pricing_state,a.amount_micro,a.currency,
+    json_extract(a.document,'$.provider') provider,json_extract(a.document,'$.requested_model') model,json_extract(r.document,'$.quote.amount_micro') reserved_quote,
+    (SELECT COALESCE(SUM(x.amount_micro),0) FROM usage_invoice_adjustments x WHERE x.request_id=r.request_id AND x.currency=a.currency) invoice_adjustment
+    FROM budget_reservations r JOIN usage_attempt_costs a ON a.request_id=r.request_id WHERE r.root_id=? ORDER BY r.created_at DESC,r.request_id LIMIT 101`).bind(id).all();
+  const audit=await c.env.HPS_DB.prepare('SELECT id,actor,document,created_at FROM budget_changes WHERE account_id=? ORDER BY created_at DESC LIMIT 101').bind(id).all();
+  return c.json({as_of:new Date().toISOString(),attempts:rows.results.slice(0,100),audit:audit.results.slice(0,100),truncated:rows.results.length>100||audit.results.length>100});
+});
+accessAdmin.get('/cohorts/:cohort/budgets',async c=>{
+  const cohort=c.req.param('cohort'),auth=await authorizeIssuerForCohort(c,cohort);if(auth instanceof Response)return auth;
+  return c.json(await classBudgetView(c.env,cohort,auth?.payload.u??null));
+});
+accessAdmin.post('/cohorts/:cohort/budgets/children',async c=>{
+  const cohort=c.req.param('cohort'),auth=await authorizeIssuerForCohort(c,cohort);if(auth instanceof Response)return auth;
+  const body=await c.req.json(),parent=await readBudgetAccount(c.env,body.parent_id);
+  if(body.scope_kind!=='subject')throw new AccessError('student_budget_only',403);
+  const view=await classBudgetView(c.env,cohort,auth?.payload.u??null);
+  if(!view.seats.some(s=>s.subject_key===body.scope_id))throw new AccessError('student_not_in_class',403);
+  const guard=await delegatedBudgetMutation(c.env,cohort,auth?.payload.u??null,parent,body,true);
+  return c.json(await createBudgetChild(c.env,body,auth?.payload.u??'operator',guard),201);
+});
+accessAdmin.put('/cohorts/:cohort/budgets/:id',async c=>{
+  const cohort=c.req.param('cohort'),auth=await authorizeIssuerForCohort(c,cohort);if(auth instanceof Response)return auth;
+  const body=await c.req.json(),target=await readBudgetAccount(c.env,c.req.param('id'));
+  const guard=await delegatedBudgetMutation(c.env,cohort,auth?.payload.u??null,target,body);
+  return c.json(await updateBudgetAccount(c.env,target.id,body,auth?.payload.u??'operator',guard));
+});
+accessAdmin.put('/cohorts/:cohort/budget-requests/:id',async c=>{
+  const cohort=c.req.param('cohort'),auth=await authorizeIssuerForCohort(c,cohort);if(auth instanceof Response)return auth;
+  return c.json(await resolveBudgetHelp(c.env,cohort,auth?.payload.u??null,c.req.param('id'),await c.req.json()));
 });
 accessAdmin.post('/access/budgets',async c=>c.json(await initializeBudget(c.env,await c.req.json()),201));
 accessAdmin.post('/access/budgets/children',async c=>c.json(await createBudgetChild(c.env,await c.req.json(),'operator'),201));
