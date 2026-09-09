@@ -100,3 +100,14 @@ CA-T03/05/06/07/08/10/12/13의 위 Service 부분을 실행했다. SDK CLI 자�
 - `e2e/access-budgets/mac.mjs`: 실제 Mac 앱 복사본에 후보 확장을 넣고 번들 hash 대조. 직접 출처/모델 선택, 작성 중 초안 보존, 390/1280 CSS px와 실제 앱 200% 확대, 합성 SSE의 예약→1회 전송→정산, 소진 후 호출·대체 출처 없음/기존 파일·작성란 보존 PASS.
 
 실제 공급자에 대한 CLI 보조 호출/청구 검증과 실제 수업 원가 분포는 P5 출시 판정이다. 화면에 보이는 합성 금액을 운영 포함량으로 채택하지 않는다.
+
+## P5 실제 실행 기록 (#857)
+
+2026-09-08 America/Chicago. [상세 결과와 한계](../research/budget-readiness-2026-09-08/README.md).
+
+- `test:budget-recovery` 및 `:d1`: Hono/SQLite와 실제 local D1에서 계정 중단/재활성화·late link 거부, 취소 후 stale admission/강사 mutation 거부, 중단 스트림 hold, 8개 동시 기간 초기화·중복 지연 정산, 옛 job의 새 기간 차감 방지 PASS.
+- `e2e test:budgets:sdk`: 실제 Agent SDK 0.3.207 CLI → local Service/SQLite, 합성 provider. 채팅 1시도, 429 재시도 2시도, 실제 로컬 Read 후 2시도가 각각 같은 job/명시적 이용권으로 정산 PASS. Read callback은 0회로 관측했으며 모든 도구 승인 게이트 인수라고 하지 않는다.
+- `e2e test:budgets:live-sdk`: 실제 SDK → local Service → 기존 공급자 프록시 → 실제 Sonnet 4.6 단일 요청(max_tokens 256), HTTP 200, model/tier/region/TTL별 usage 및 종료 수집 PASS. 요율은 합성이며 실제 금액/청구 대조 PASS가 아니다.
+- Worker 전체 테스트/typecheck, Chalk budget 전달/typecheck와 문서/registry/workflow 검증은 PR 증거에 실행 결과를 남긴다. 문서에 명령을 적었다는 이유로 실행한 것으로 간주하지 않는다.
+
+운영 D1에서 개인 식별자/본문 없는 aggregate SELECT를 수행했다. 최근 요청 9,638건과 캐시·상위 사용 분포를 기록했으나 실제 참석자/수업/실패·보조 호출·원가와 대조되지 않아 포함량 활성화 근거로 미완료다. P1~P5 제품 시험은 Lab #777의 사람 연구를 대신하지 않는다.

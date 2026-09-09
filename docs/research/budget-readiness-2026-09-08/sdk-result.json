@@ -1,0 +1,74 @@
+{
+  "schema": "hps-sdk-budget-acceptance/1",
+  "sdk_version": "0.3.207",
+  "provider": "synthetic",
+  "database": "actual Hono/SQLite",
+  "pass": true,
+  "results": [
+    {
+      "mode": "chat",
+      "pass": true,
+      "http": [
+        {
+          "path": "/",
+          "status": 200
+        },
+        {
+          "path": "/v1/messages",
+          "status": 200
+        }
+      ],
+      "attempts": 1,
+      "jobs": 1,
+      "spent_micro_synthetic": 32,
+      "held": 0,
+      "permission_calls": 0
+    },
+    {
+      "mode": "retry",
+      "pass": true,
+      "http": [
+        {
+          "path": "/",
+          "status": 200
+        },
+        {
+          "path": "/v1/messages",
+          "status": 429
+        },
+        {
+          "path": "/v1/messages",
+          "status": 200
+        }
+      ],
+      "attempts": 2,
+      "jobs": 1,
+      "spent_micro_synthetic": 32,
+      "held": 0,
+      "permission_calls": 0
+    },
+    {
+      "mode": "read",
+      "pass": true,
+      "http": [
+        {
+          "path": "/",
+          "status": 200
+        },
+        {
+          "path": "/v1/messages",
+          "status": 200
+        },
+        {
+          "path": "/v1/messages",
+          "status": 200
+        }
+      ],
+      "attempts": 2,
+      "jobs": 1,
+      "spent_micro_synthetic": 48,
+      "held": 0,
+      "permission_calls": 0
+    }
+  ]
+}

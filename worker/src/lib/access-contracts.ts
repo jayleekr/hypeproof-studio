@@ -125,8 +125,10 @@ export async function accountForToken(env: Env, payload: TokenPayload): Promise<
     if (!a || !a.active || a.user_id !== payload.u || a.profile_id !== payload.p || payload.c !== '') throw new AccessError('account_unavailable', 403);
     return a.id;
   }
-  const row = await env.HPS_DB.prepare(`SELECT a.id FROM access_seats s JOIN access_accounts a ON a.id=s.account_id
-    WHERE s.cohort_id=? AND s.user_id=? AND a.active=1`).bind(payload.c,payload.u).first<{id:string}>();
+  const row = await env.HPS_DB.prepare(`SELECT a.id,a.active FROM access_seats s JOIN access_accounts a ON a.id=s.account_id
+    WHERE s.cohort_id=? AND s.user_id=?`).bind(payload.c,payload.u).first<{id:string;active:number}>();
+  // A disabled linked identity must not become a fresh, unlinked budget subject.
+  if(row&&!row.active)throw new AccessError('account_unavailable',403);
   return row?.id ?? null;
 }
 export async function applyAccessEvent(env: Env, value: unknown): Promise<{ applied: boolean; event: AccessEvent }> {

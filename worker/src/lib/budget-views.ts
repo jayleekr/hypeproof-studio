@@ -25,7 +25,9 @@ export async function publishBudgetDelegation(env:Env,value:any):Promise<BudgetD
 async function delegationFor(env:Env,cohort:string,issuer:string,account:string){
   const d=await env.HPS_DB.prepare('SELECT * FROM budget_delegations WHERE account_id=? AND issuer_id=? AND cohort_id=? AND active=1').bind(account,issuer,cohort).first<BudgetDelegation>();
   if(!d)throw new AccessError('budget_delegation_required',403);
-  const guard:BudgetMutationGuard={sql:'EXISTS(SELECT 1 FROM budget_delegations WHERE account_id=? AND issuer_id=? AND cohort_id=? AND revision=? AND active=1)',args:[account,issuer,cohort,d.revision]};
+  const guard:BudgetMutationGuard={sql:`EXISTS(SELECT 1 FROM budget_delegations d JOIN budget_accounts a ON a.id=d.account_id
+    JOIN access_periods p ON p.id=a.period_id JOIN access_contracts c ON c.id=p.contract_id AND c.period_id=p.id
+    WHERE d.account_id=? AND d.issuer_id=? AND d.cohort_id=? AND d.revision=? AND d.active=1 AND c.state='active' AND p.starts_at<=? AND p.ends_at>?)`,args:[account,issuer,cohort,d.revision,Date.now(),Date.now()]};
   return{d,guard};
 }
 /** Called only after the existing issuer scope gate. The SQL guard is consumed
@@ -42,10 +44,12 @@ export async function delegatedBudgetMutation(env:Env,cohort:string,issuer:strin
 }
 const projectedAccount=(a:BudgetAccount)=>({id:a.id,parent_id:a.parent_id,kind:a.kind,scope_kind:a.scope_kind,scope_id:a.scope_id,revision:a.revision,paused:!!a.paused,max_concurrent:a.max_concurrent});
 export async function classBudgetView(env:Env,cohort:string,issuer:string|null){
-  const bases=await env.HPS_DB.prepare("SELECT * FROM budget_accounts WHERE scope_kind='cohort' AND scope_id=? ORDER BY period_id,id LIMIT 101").bind(cohort).all<BudgetAccount>();
+  const bases=await env.HPS_DB.prepare(`SELECT a.*,EXISTS(SELECT 1 FROM access_periods p JOIN access_contracts c ON c.id=p.contract_id AND c.period_id=p.id
+    WHERE p.id=a.period_id AND c.state='active' AND p.starts_at<=? AND p.ends_at>?) period_active
+    FROM budget_accounts a WHERE scope_kind='cohort' AND scope_id=? ORDER BY period_id,id LIMIT 101`).bind(Date.now(),Date.now(),cohort).all<BudgetAccount&{period_active:number}>();
   const rows=[];
   const roster=await getRoster(env.HPS_KV,cohort);
-  const links=await env.HPS_DB.prepare('SELECT s.user_id,s.account_id FROM access_seats s JOIN access_accounts a ON a.id=s.account_id AND a.active=1 WHERE s.cohort_id=?').bind(cohort).all<{user_id:string;account_id:string}>();
+  const links=await env.HPS_DB.prepare('SELECT user_id,account_id FROM access_seats WHERE cohort_id=?').bind(cohort).all<{user_id:string;account_id:string}>();
   const linked=new Map(links.results.map(s=>[s.user_id,s.account_id]));
   const seats=await Promise.all((roster?.users??[]).slice(0,500).map(async user=>({user_id:user,subject_key:'subject:'+await accessDigest(linked.has(user)?{account:linked.get(user)}:{cohort,user})})));
   for(const base of bases.results.slice(0,100)){
@@ -54,7 +58,7 @@ export async function classBudgetView(env:Env,cohort:string,issuer:string|null){
     const requests=await env.HPS_DB.prepare("SELECT id,user_id,note,state,resolution,created_at FROM budget_requests WHERE account_id=? ORDER BY created_at DESC LIMIT 101").bind(base.id).all();
     const allBalances=await env.HPS_DB.prepare(`SELECT b.* FROM budget_account_balances b WHERE b.account_id=? OR b.account_id IN (SELECT id FROM budget_accounts WHERE parent_id=? AND scope_kind='subject' ORDER BY id LIMIT 500)`).bind(base.id,base.id).all<import('./budgets').BudgetBalance>();
     for(const b of allBalances.results)for(const k of ['granted','available','spent','held','overrun','allocated','unresolved'] as const)if(!Number.isSafeInteger(b[k]))throw new AccessError('budget_aggregate_overflow',503);
-    rows.push({account:projectedAccount(base),balances:allBalances.results.filter(b=>b.account_id===base.id),can_edit:!issuer||!!d,
+    rows.push({account:projectedAccount(base),balances:allBalances.results.filter(b=>b.account_id===base.id),can_edit:!issuer||!!d&&!!base.period_active,
       delegation:d?{revision:d.revision,max_concurrent:d.max_concurrent,limits:JSON.parse(d.limits)}:null,
       children:children.results.slice(0,500).map(a=>({account:projectedAccount(a),balances:allBalances.results.filter(b=>b.account_id===a.id)})),requests:requests.results.slice(0,100),
       truncated:children.results.length>500||requests.results.length>100});

@@ -1,0 +1,88 @@
+{
+  "schema": "hps-budget-observation/1",
+  "source": "production D1, aggregate SELECT only; no participant identifiers or messages",
+  "observed_at_utc": "2026-09-09T03:25:53Z",
+  "window": {
+    "starts_at_utc": "2026-08-10T00:00:00Z",
+    "ends_before_utc": "2026-09-09T03:25:54Z"
+  },
+  "coverage": [
+    [
+      {
+        "requests": 16628,
+        "first_at": "2026-07-14 04:34:14",
+        "last_at": "2026-09-09 03:25:53",
+        "cohorts": 5,
+        "success": 16628,
+        "zero_recorded_tokens": 28
+      }
+    ],
+    [
+      {
+        "requests": 0,
+        "first_at": null,
+        "last_at": null,
+        "pending": null,
+        "missing_token_measurement": null
+      }
+    ]
+  ],
+  "distribution": [
+    [
+      {
+        "requests": 9638,
+        "input_tokens": 9080282,
+        "output_tokens": 7529574,
+        "cache_read_tokens": 216977647,
+        "cache_write_tokens": 17011558,
+        "recorded_input_output_p50": 307,
+        "recorded_input_output_p95": 10376,
+        "recorded_input_output_max": 28101,
+        "mean_latency_ms": 13468
+      }
+    ],
+    [
+      {
+        "seat_identifiers": 85,
+        "top_decile_share_of_recorded_input_output": 43.26
+      }
+    ],
+    [
+      {
+        "model": "claude-sonnet-4-6",
+        "requests": 9638,
+        "input_tokens": 9080282,
+        "output_tokens": 7529574,
+        "cache_read_tokens": 216977647,
+        "cache_write_tokens": 17011558
+      }
+    ]
+  ],
+  "query_evidence": [
+    {
+      "success": true,
+      "rows_read": 64820,
+      "rows_written": 0,
+      "changed_db": false
+    },
+    {
+      "success": true,
+      "rows_read": 26693,
+      "rows_written": 0,
+      "changed_db": false
+    },
+    {
+      "success": true,
+      "rows_read": 26267,
+      "rows_written": 0,
+      "changed_db": false
+    }
+  ],
+  "limits": [
+    "not a verified roster of actual learners or attended classes",
+    "legacy usage_log has no attempt/job relation or immutable prices",
+    "cache TTL and tool/container/storage costs not available",
+    "all recorded statuses are success; this does not establish zero failures",
+    "no provider invoice reconciliation or approved commercial terms"
+  ]
+}

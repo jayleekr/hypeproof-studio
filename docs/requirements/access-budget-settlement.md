@@ -98,3 +98,9 @@ SDK/proxy의 응답 hook은 선행 귀속된 시도에만 원가 증거를 기�
 Chalk `/budgets`는 기존 Service forwarder와 issuer scope를 사용한다. `budget_delegations`의 별도 담당 반/배정/ceiling/revision이 있어야 예산을 바꿀 수 있다. 위임 변경·학생 배분·pause는 이력을 남기고 동시 취소/수정이 저장을 막는다. 새 학생 cap을 나중에 만들어도 해당 기간의 이전 시도와 원가를 포함하므로 사용량을 초기화할 수 없다. 동시 실행 상한을 줄여도 이미 실행 중인 시도를 강제 종료하거나 비용을 반환하지 않는다.
 
 운영자 `/operator/budgets`는 기존 admin 인증을 통해 기간/배정, 공급자 시도·정산 상태, invoice adjustment와 변경 이력을 읽는다. 검토한 계약/위임/복구 문서를 확인한 뒤 기존 API로 저장한다. Chalk는 관리자 비밀번호와 운영자 원가 API를 전달하지 않는다. 실제 수업 분포가 검증되기 전 예상 소진 시각은 unavailable로 표시한다.
+
+## P5 구현·인수 범위 (#857)
+
+연결 계정 비활성화/토큰 재발급이 새 예산 주체를 만들지 않도록 거부하고, 수업 예산 초기화 후의 새 계정 연결은 명시적 이관이 필요하다. 강사 mutation에는 현재 계약·기간 활성 상태도 원자적으로 검사한다. 기존 deployment workflow에 additive 0007~0010을 연결했다.
+
+실제 D1에서 취소·미정산·동시 갱신·늦은 과거 정산을, 실제 pinned SDK에서 채팅·재시도·로컬 Read 후속 호출을 검증했다. 단일 실제 공급자 요청도 usage 수집까지 확인했다. [결과](../research/budget-readiness-2026-09-08/README.md)와 [활성화·복구 절차](../operations/access-budget-release.md)를 따른다. 운영 집계는 확보했지만 실수업 비용 분포·승인 상품/요율·공급자 청구 대조·결제 adapter는 아직 완료하지 않았다. 운영 활성화와 #857 전체 완료로 해석하지 않는다.
