@@ -117,6 +117,10 @@
         "command": "hypeproof-chat.start",
         "title": "HypeProof: 시작 화면",
         "icon": "$(home)"
+      },
+      {
+        "command": "hypeproof-chat.diagnoseVoiceCapability",
+        "title": "HypeProof: 음성 기능 진단 (개발용)"
       }
     ],
     "menus": {

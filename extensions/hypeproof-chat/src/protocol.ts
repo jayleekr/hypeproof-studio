@@ -252,6 +252,13 @@ export interface SuggestionChip {
 
 // Webview → Host
 export type WebviewMessage =
+  /**
+   * #897 (VO-01) — 음성 capability 프로브의 **원시 관측**. 판정을 담지 않는다:
+   * 웹뷰는 재고, 판정은 호스트의 voiceCapabilityHelpers 가 한다. 관측과 판정을
+   * 같은 곳에서 하면 "못 쟀다" 와 "재서 막혔다" 가 섞인다.
+   */
+  | { type: 'voiceCapabilityProbeResult'; probeId: string;
+      observations: import('./voiceCapabilityHelpers').VoiceProbeObservations }
   | {type:'refreshAccess'}
   | {type:'selectFunding';id:string}
   | {type:'requestBudget';note:string}
@@ -319,6 +326,8 @@ export type WebviewMessage =
 
 // Host → Webview
 export type HostMessage =
+  /** #897 (VO-01) — 프로브 실행 요청. 명령으로만 발생한다(활성화 시점 아님). */
+  | { type: 'probeVoiceCapability'; probeId: string }
   | { type: 'observationState'; assessedEventCount?: number; learningPath?: {title:string;url:string;reason:string} | null; batch: import('./nativeObservationContract').ObservationBatch | null; error: string | null; findings?: import('./nativeObservationContract').ObservationFinding[] }
   | StartResponse
   | { type: "config"; config: ChatConfig }

@@ -239,6 +239,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * 즉 사후에 "이 교실이 프록시로 돌았는가" 를 확인할 방법이 없었다.
    */
   private logChannel: vscode.OutputChannel | null = null;
+  /**
+   * #897 (VO-01) — 진행 중인 음성 capability 프로브. 명령당 하나이고, 응답이 오거나
+   * 타임아웃이면 지워진다. 웹뷰가 없거나 대답하지 않으면 **측정 안 됨**으로 끝나야
+   * 하므로(막혔다고 적으면 안 된다) 여기서 null 을 돌려준다.
+   */
+  private voiceProbes = new Map<string, (o: import("./voiceCapabilityHelpers").VoiceProbeObservations) => void>();
+
+  /** 진단 명령이 쓰는 표면. 웹뷰가 닫혀 있으면 null 을 돌려 측정 안 됨으로 남긴다. */
+  async probeVoiceCapability(
+    timeoutMs: number,
+  ): Promise<import("./voiceCapabilityHelpers").VoiceProbeObservations | null> {
+    if (!this.view) return null;
+    const probeId = randomId();
+    const observations = new Promise<import("./voiceCapabilityHelpers").VoiceProbeObservations | null>((resolve) => {
+      this.voiceProbes.set(probeId, resolve);
+      setTimeout(() => {
+        if (this.voiceProbes.delete(probeId)) resolve(null);
+      }, timeoutMs);
+    });
+    void this.post({ type: "probeVoiceCapability", probeId });
+    return observations;
+  }
+
+  /** 출력 채널 — 진단이 판정을 남길 자리. 폴백 공지(#476)와 같은 채널을 쓴다. */
+  voiceLogChannel(): vscode.OutputChannel {
+    this.logChannel ??= vscode.window.createOutputChannel("HypeProof Coach");
+    return this.logChannel;
+  }
   private cachedProfile: ResolvedProfile | null = null;
   private profileFetchPromise: Promise<ResolvedProfile | null> | null = null;
   /**
@@ -1878,6 +1906,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // 아직 못 받았어요").
         await this.handleSend(msg.prompt, msg.history, msg.images);
         return;
+      case "voiceCapabilityProbeResult": {
+        // #897 — 원시 관측을 기다리는 쪽에 넘긴다. 판정은 여기서 하지 않는다.
+        const pending = this.voiceProbes.get(msg.probeId);
+        if (pending) {
+          this.voiceProbes.delete(msg.probeId);
+          pending(msg.observations);
+        }
+        return;
+      }
       case "cancelStream":
         this.activeStreams.get(msg.streamId)?.abort();
         // #497 — abort() alone tells the webview NOTHING. handleSend and
