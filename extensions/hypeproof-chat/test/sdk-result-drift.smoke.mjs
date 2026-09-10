@@ -77,7 +77,9 @@ if (existsSync(dts)) {
   for (const subtype of subtypes) {
     const notice = sdkResultNotice({ type: "result", subtype, is_error: true });
     assert.ok(notice, `${subtype} 이 안내 없이 끝난다 — 학생에게는 그냥 멈춘 턴이다`);
-    assert.match(notice, /파일로 저장돼 있어요/, `${subtype}: 한 일이 남아 있다는 사실을 말해야 한다`);
+    // #968: this stream contains zero tool/file events. Failure is not proof of a save.
+    assert.doesNotMatch(notice, /파일로 저장돼 있어요/, `${subtype}: must not claim an unobserved save`);
+    assert.match(notice, /작업 파일을 확인해 주세요/, `${subtype}: offer a verifiable next step`);
     // SDK 원문(영어)이 새어나가면 참가자에게는 고장으로 보인다.
     assert.doesNotMatch(notice, /[A-Za-z]{6,}/, `${subtype}: 영어 원문/식별자가 학생 화면에 나가면 안 된다`);
 

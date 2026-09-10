@@ -92,6 +92,8 @@ export interface EffortRequestRecord {
   reason: 'selected' | 'course_default' | 'unsupported_model'; status: number; created_at: string;
 }
 export interface ChatConfig {
+  activity?: {id:string;name:string;kind?:'trial'|'personal'|'classroom';workspace:string;verified:boolean};
+  activityDraft?: import('./activityDraft').ActivityDraft;
   access?: import('./accessClient').AccessState;
   effort?: { value: CourseEffort; allowed: CourseEffort[] };
   effortNotice?: string;
@@ -127,6 +129,8 @@ export interface CoachInfo {
  * sides updated together.
  */
 export interface ResolvedProfile {
+  /** Server-verified identity; never an execution grant. */
+  activity_id?: string;
   /** Presentation only; derived from authenticated Service access, never grants authority. */
   activity_kind?: "trial" | "personal" | "classroom";
   access_identity?:{kind:'account';scope:string};
@@ -265,7 +269,8 @@ export interface SuggestionChip {
 }
 
 // Webview → Host
-export type WebviewMessage =
+export type WebviewMessage = (
+  | {type:'saveActivityDraft';activityId:string;draft:import('./activityDraft').ActivityDraft;nonce?:string}
   /**
    * #897 (VO-01) — 음성 capability 프로브의 **원시 관측**. 판정을 담지 않는다:
    * 웹뷰는 재고, 판정은 호스트의 voiceCapabilityHelpers 가 한다. 관측과 판정을
@@ -285,8 +290,8 @@ export type WebviewMessage =
   | { type: "selectModel"; alias: string }
   | { type: "selectEffort"; value: CourseEffort }
   | { type: "refreshEffort" }
-  | { type: "sendMessage"; text: string; history: ChatMessage[]; images?: string[] }
-  | { type: "retryMessage"; prompt: string; history: ChatMessage[]; images?: string[] }
+  | { type: "sendMessage"; activityId?:string; text: string; history: ChatMessage[]; images?: string[] }
+  | { type: "retryMessage"; activityId?:string; prompt: string; history: ChatMessage[]; images?: string[] }
   | { type: "cancelStream"; streamId: string }
   | { type: "requestAction"; action: ActionRequest }
   | { type: "openSettings" }
@@ -336,10 +341,13 @@ export type WebviewMessage =
       message: string;
       stack: string;
       componentStack: string;
-    };
+    }) & {activityId?:string};
 
 // Host → Webview
-export type HostMessage =
+export type HostMessage = (
+  | {type:'inputRejected';text:string;images?:string[]}
+  | {type:'activityFreeze';frozen:boolean;nonce?:string}
+  | {type:'activityDraftError';error:string}
   /** #897 (VO-01) — 프로브 실행 요청. 명령으로만 발생한다(활성화 시점 아님). */
   | { type: 'probeVoiceCapability'; probeId: string }
   | { type: 'observationState'; assessedEventCount?: number; learningPath?: {title:string;url:string;reason:string} | null; batch: import('./nativeObservationContract').ObservationBatch | null; error: string | null; findings?: import('./nativeObservationContract').ObservationFinding[] }
@@ -401,7 +409,7 @@ export type HostMessage =
   // Test-only: forces a React render-time throw so e2e can verify the
   // ChatErrorBoundary fallback path (REQ-C7). Only sent from the
   // host-side __test_crashWebview command which is itself env-gated.
-  | { type: "webviewTestCrash" };
+  | { type: "webviewTestCrash" }) & {activityId?:string};
 
 export interface ActionRequest {
   requestId: string;

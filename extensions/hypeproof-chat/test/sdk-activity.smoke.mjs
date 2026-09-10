@@ -309,7 +309,8 @@ console.log("✓ #414: sdk activity — thinking/tool_use/tool_result/thinking_t
       onDelta: (d) => deltas.push(d), stallMs: 0 },
   );
   const joined = deltas.join("");
-  assert.ok(joined.includes("파일로 저장돼 있어요"), "예산 소진을 우리 말로 알려야 한다");
+  assert.ok(joined.includes("작업 파일을 확인해 주세요"), "예산 소진에는 저장 여부 확인을 안내한다");
+  assert.ok(!joined.includes("파일로 저장돼 있어요"), "도구 실행 없이 저장을 단정하지 않는다");
   assert.ok(!joined.includes("Reached maximum"), "SDK 영어 원문이 그대로 나가면 안 된다");
   assert.equal(SDK_MAX_TURNS_FRIENDLY.includes("이어서"), true, "다음 행동을 제시해야 한다");
 
@@ -324,7 +325,7 @@ console.log("✓ #414: sdk activity — thinking/tool_use/tool_result/thinking_t
       abortQuery: () => {}, makeFatalAuthError: () => new Error("auth"),
       onDelta: (d) => ok.push(d), stallMs: 0 },
   );
-  assert.ok(!ok.join("").includes("파일로 저장돼 있어요"), "정상 종료에는 붙지 않아야 한다");
+  assert.ok(!ok.join("").includes("작업 파일을 확인해 주세요"), "정상 종료에는 붙지 않아야 한다");
   console.log("✓ maxTurns 소진 — 우리 말 안내 · 정상 종료에는 안 붙음");
 }
 

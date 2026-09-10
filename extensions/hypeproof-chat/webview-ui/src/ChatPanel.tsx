@@ -13,7 +13,7 @@ import type {
   UpdateOffer,
   UxConfig,
 } from "../../src/protocol";
-import { postToHost } from "./vscode";
+import { onHostMessage, postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
 import { composerLabel, copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
 import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
@@ -180,15 +180,40 @@ function userPromptBefore(messages: ChatMessage[], assistantId: string): string 
 
 export function ChatPanel(props: Props) {
   const { config, messages, streaming, streamingId, error, incomingImage } = props;
-  const [draft, setDraft] = useState("");
+  const [draft, setDraft] = useState(() => draftAfterStop(config?.activityDraft?.text ?? "", config?.activityDraft?.queued ?? null));
   const [composing, setComposing] = useState(false);
   const [rollExpand, setRollExpand] = useState<{ original: string } | null>(null);
   // Pasted-image attachments for the next turn (data URLs). `imgNote` surfaces
   // a brief reason when a paste is rejected (too big / too many).
-  const [pendingImages, setPendingImages] = useState<string[]>([]);
+  const [pendingImages, setPendingImages] = useState<string[]>(config?.activityDraft?.images ?? []);
   const [imgNote, setImgNote] = useState<string | null>(null);
   // #416 — the ONE message parked while a turn is running (null = none).
   const [queued, setQueued] = useState<string | null>(null);
+  const [frozen, setFrozen] = useState(false);
+  const [draftError, setDraftError] = useState<string | null>(null);
+  const snapshot = useRef({text:draft,images:pendingImages,queued});
+  snapshot.current = {text:draft,images:pendingImages,queued};
+  const activityId = config?.activity?.id;
+  const initialDraft = useRef(true);
+  useEffect(() => {
+    if (initialDraft.current) { initialDraft.current=false; return; }
+    if (activityId) postToHost({type:"saveActivityDraft",activityId,draft:{text:draft,images:pendingImages,queued}});
+  }, [activityId,draft,pendingImages,queued]);
+  useEffect(() => {
+    const off = onHostMessage(msg => {
+      if (!activityId || msg.activityId !== activityId) return;
+      if (msg.type === "inputRejected") {
+        setDraft(d => d === msg.text ? d : draftAfterStop(d,msg.text));
+        if (msg.images?.length) setPendingImages(images => [...new Set([...images,...msg.images!])]);
+      }
+      if (msg.type === "activityFreeze") {
+        setFrozen(msg.frozen);
+        if (msg.nonce) postToHost({type:"saveActivityDraft",activityId,draft:snapshot.current,nonce:msg.nonce});
+      }
+      if (msg.type === "activityDraftError") setDraftError(msg.error);
+    });
+    return off;
+  }, [activityId]);
   /**
    * #642/#649 (2026-08-20 검토) — 친구를 누른 순간부터 호스트가 streamStart 를
    * 보내기까지의 **무방비 구간**. 그 사이 호스트는 세상 HTML + 엔진을 받아오고(왕복
@@ -220,7 +245,8 @@ export function ChatPanel(props: Props) {
   }, [worldPending, streaming]);
 
   /** 응답 중이거나 세상을 여는 중 — 친구 버튼과 러너는 같은 값을 본다. */
-  const busy = streaming || worldPending;
+  const unavailable = frozen || (!!config?.activity && !config.activity.verified);
+  const busy = streaming || worldPending || unavailable;
 
   const ux: UxConfig = config?.profile?.ux ?? DEFAULT_UX;
   // Image paste is a per-profile opt-in (website-copyclone). Default-off so
@@ -303,7 +329,7 @@ export function ChatPanel(props: Props) {
 
   const submit = (text?: string) => {
     const value = (text ?? draft).trim();
-    if ((!value && pendingImages.length === 0) || streaming) return;
+    if ((!value && pendingImages.length === 0) || streaming || unavailable) return;
     props.onSend(value, pendingImages.length > 0 ? pendingImages : undefined);
     setDraft("");
     setPendingImages([]);
@@ -317,7 +343,7 @@ export function ChatPanel(props: Props) {
   useEffect(() => {
     const prev = prevStreamingRef.current;
     prevStreamingRef.current = streaming;
-    if (!shouldFlushQueue(prev, streaming, queued)) return;
+    if (unavailable || !shouldFlushQueue(prev, streaming, queued)) return;
     const text = queued as string;
     setQueued(null);
     submit(text);
@@ -419,10 +445,15 @@ export function ChatPanel(props: Props) {
   const updateBanner = config?.update ? (
     <UpdateBanner offer={config.update} onInstall={props.onInstallUpdate} onDismiss={props.onDismissUpdate} />
   ) : null;
-  if (!config?.profile) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
+  if (!config?.profile && !config?.activity) return <>{updateBanner}<DisconnectedChat open={props.onSetToken} /></>;
   if ((needsNaming || forceNaming) && config?.profile) {
     return (
       <>
+      {config?.activity && <div className="hps-activity-header" aria-label="현재 활동">
+        {config.activity.kind === "trial" ? "AI 체험" : config.activity.kind === "classroom" ? "수업" : "개인 작업"} · {config.activity.name}
+        {!config.activity.verified && <p role="status">연결을 확인하지 못했습니다. 저장된 기록을 볼 수 있으며, 다시 연결한 뒤 보낼 수 있습니다.</p>}
+      </div>}
+      {draftError && <p role="alert">{draftError}</p>}
       {updateBanner}
       <NamingCard
         namingPromptMd={config.profile.ux.coach.naming_prompt_md}
@@ -567,14 +598,19 @@ export function ChatPanel(props: Props) {
                   : "🖼️ 갤러리"}
             </button>
           )}
-          <button onClick={props.onSetToken} title="연결된 수업 확인 및 변경">
-            수업 연결
+          <button onClick={props.onSetToken} title="연결된 활동 확인 및 변경">
+            활동 변경
           </button>
           <button onClick={props.onClear} disabled={props.streaming} title="대화 기록 지우기">대화 지우기</button>
           <button onClick={props.onSettings} title="설정" aria-label="설정">⚙</button>
         </div>
       </header>
 
+      {config?.activity && <div className="hps-activity-header" aria-label="현재 활동">
+        {config.activity.kind === "trial" ? "AI 체험" : config.activity.kind === "classroom" ? "수업" : "개인 작업"} · {config.activity.name}
+        {!config.activity.verified && <p role="status">연결을 확인하지 못했습니다. 저장된 기록을 볼 수 있으며, 다시 연결한 뒤 보낼 수 있습니다.</p>}
+      </div>}
+      {draftError && <p role="alert">{draftError}</p>}
       {updateBanner}
 
       {config?.profile?.lesson && (
@@ -692,7 +728,7 @@ export function ChatPanel(props: Props) {
       )}
 
       <footer className="hps-input-area">
-        {config.profile.model_selection && <div className="hps-model-selection">
+        {config.profile?.model_selection && <div className="hps-model-selection">
           <label>모델 <select aria-label="대화 모델" value={config.model}
             disabled={config.profile.model_selection.choices.length === 1}
             onChange={e => postToHost({ type: 'selectModel', alias: e.target.value })}
@@ -786,6 +822,7 @@ export function ChatPanel(props: Props) {
           <textarea
             ref={textareaRef}
             autoFocus
+            readOnly={unavailable}
             aria-label={composerLabel(coachName)}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
@@ -801,7 +838,7 @@ export function ChatPanel(props: Props) {
               // Composing Hangul: Enter commits the syllable, it must never
               // send. Unchanged from before — typing mid-turn does not make the
               // IME any less load-bearing.
-              if (e.key !== "Enter" || e.shiftKey || isComposing) return;
+              if (e.key !== "Enter" || e.shiftKey || isComposing || unavailable) return;
               e.preventDefault();
               // Roll-expand owns Enter while it is open (idle-only flow).
               if (rollExpand && !streaming) {

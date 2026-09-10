@@ -1,3 +1,5 @@
+import { ActivityConnectionError, ActivityConnections, activityConnections } from './activityConnections';
+import { fetchProfileResult } from './proxyClient';
 import { prepareWorkspaceDirectory } from './workspacePreparation';
 import { imageAttachPrompt } from "./coachIdentity.ts";
 import * as vscode from "vscode";
@@ -43,6 +45,17 @@ let providerRef: ChatPanelProvider | null = null;
 let uploadInFlight = false;
 
 export async function activate(context: vscode.ExtensionContext) {
+  const connections = new ActivityConnections(context,
+    () => vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'),
+    () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath,
+    async token => {
+      const result = await fetchProfileResult({token,proxyUrl:vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1')});
+      if (!result.ok) throw new Error(result.failure.friendly);
+      return result.profile;
+    });
+  try { await connections.initialize(); }
+  catch { void vscode.window.showWarningMessage('저장된 활동을 읽지 못했습니다. 작업 파일은 보존됩니다. 참여 코드를 다시 입력해 주세요.'); }
+  context = connections.wrap();
   // Respect the existing workspace-trust setting. Changing it on activation
   // forced a restart dialog over the first-run page.
 
@@ -137,7 +150,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus, spool);
   providerRef = provider;
   const startPage = new StartPage(context, provider, async (profile, commit) => {
-    return ensureWorkspace(profile, context, isTestRun, commit);
+    return ensureWorkspace(profile, context, isTestRun && process.env.HPS_TEST_REAL_WORKSPACE !== "1", commit);
   });
   context.subscriptions.push(vscode.commands.registerCommand("hypeproof-chat.start", () => startPage.show()));
   // kids-quest — skeleton round result → next-turn context for the coach.
@@ -675,7 +688,7 @@ async function ensureWorkspace(
   profile?: ResolvedProfile | null,
   context?: vscode.ExtensionContext,
   isTestRun = false,
-  commit: () => Promise<void> = async () => {},
+  commit: (directory?: string) => Promise<void> = async () => {},
 ): Promise<boolean> {
   let open: string[] = [];
   for (let i = 0; i < 10; i++) {
@@ -710,20 +723,20 @@ async function ensureWorkspace(
       // with the window and is never seen.
       if (attempted && open.some((f) => isSameLocation(f, attempted, canonicalizeFsPath))) {
         vscode.window.showInformationMessage(
-          `작업 폴더를 수업에 맞는 곳으로 옮겼어요: ${path.basename(attempted)} 📁`,
+          `선택한 활동의 작업 폴더를 열었습니다: ${path.basename(attempted)}`,
         );
       }
       // The attempt marker has served its purpose (either we landed where we
       // meant to, or we deliberately gave up). Clear it so a LATER cohort change
       // is not mistaken for a failed retry of this one.
       await clearWorkspaceSwitchAttempt(context);
-      await commit();
+      await commit(open[0]);
       return false;
     }
     console.warn(`[workspace] cohort folder differs — switching ${decision.from} → ${decision.to}`);
     // Record BEFORE the reload: if the open fails we must not try again.
     await context?.globalState.update(WORKSPACE_SWITCH_ATTEMPT_KEY, decision.to);
-    try { return await openWorkspaceFolder(decision.to, profile, commit); }
+    try { return await openWorkspaceFolder(decision.to, profile, commit, context); }
     catch (error) { await clearWorkspaceSwitchAttempt(context); throw error; }
   }
 
@@ -731,7 +744,7 @@ async function ensureWorkspace(
   // and guarantees an absolute path (a relative workspace_root resolves to null).
   const resolved = profile?.workspace_root ? resolveWorkspaceRoot(profile.workspace_root) : null;
   const dir = resolved ?? path.join(os.homedir(), LEGACY_WORKSPACE_DIRNAME);
-  return await openWorkspaceFolder(dir, profile, commit);
+  return await openWorkspaceFolder(dir, profile, commit, context);
 }
 
 /**
@@ -746,14 +759,18 @@ async function ensureWorkspace(
 async function openWorkspaceFolder(
   dir: string,
   profile: ResolvedProfile | null | undefined,
-  commit: () => Promise<void>,
+  commit: (directory?: string) => Promise<void>,
+  context?: vscode.ExtensionContext,
 ): Promise<boolean> {
   try {
-    prepareWorkspaceDirectory(dir, !profile || profile.workspace_start === 'empty' ? 'empty' : 'html', () => starterIndexHtml(profile));
-  } catch {
+    const prepare=()=>prepareWorkspaceDirectory(dir, !profile || profile.workspace_start === 'empty' ? 'empty' : 'html', () => starterIndexHtml(profile));
+    const connections=context && activityConnections(context);
+    if(connections && profile)connections.prepare(dir,profile,prepare);else prepare();
+  } catch(error) {
+    if(error instanceof ActivityConnectionError)throw error;
     throw new Error('Activity workspace preparation failed');
   }
-  await commit();
+  await commit(dir);
 
   // Single-root open (clean Explorer). Reloads the window.
   await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir), {
@@ -842,7 +859,7 @@ async function applyTestBackdoors(
     // the naming ritual in front of a preseeded test (breaks preseedCoach on
     // the current extension). Writing the scoped keys directly here removes
     // that race. The cohort is read (unverified) from the seeded token.
-    const cohortId = extractCohortIdUnverified(token);
+    const cohortId = activityConnections(context)?.scope ?? extractCohortIdUnverified(token);
     if (cohortId) {
       await context.globalState.update(coachKeyForCohort(cohortId), coachInfo);
       await context.globalState.update(coachRitualDoneKeyForCohort(cohortId), true);
@@ -854,7 +871,7 @@ async function applyTestBackdoors(
   // with the same async migration race).
   if (history && history.length > 0) {
     await context.workspaceState.update(LEGACY_HISTORY_KEY, history);
-    const cohortId = extractCohortIdUnverified(token);
+    const cohortId = activityConnections(context)?.scope ?? extractCohortIdUnverified(token);
     if (cohortId) {
       await context.workspaceState.update(historyKeyForCohort(cohortId), history);
     }

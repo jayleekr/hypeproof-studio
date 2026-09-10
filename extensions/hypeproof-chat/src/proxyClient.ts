@@ -402,3 +402,18 @@ export async function fetchProfileResult(args: FetchProfileArgs): Promise<Profil
     return { ok: false, failure: classifyProfileFailure(res.status, "") };
   }
 }
+
+/** Validates current execution eligibility without issuing a model request. */
+export async function verifyActivity(args: FetchProfileArgs, expectedId: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(args.proxyUrl.replace(/\/$/, '') + '/activity', {
+      headers: {authorization:`Bearer ${args.token}`, 'x-hps-observation-format':'hps-observation/1'},
+      signal:AbortSignal.timeout(15_000),
+    });
+  } catch { throw new ProxyTransportError(profileNetworkFailure().friendly); }
+  if (!response.ok) throw new ProxyTransportError(classifyProfileFailure(response.status,await response.text()).friendly);
+  let body: {activity_id?:string};
+  try { body=await response.json() as {activity_id?:string}; } catch { throw new ProxyTransportError('서버의 활동 응답을 읽지 못했습니다. 다시 연결해 주세요.'); }
+  if (!expectedId || body.activity_id !== expectedId) throw new ProxyTransportError('활동 정보가 바뀌었습니다. 참여 코드를 다시 확인해 주세요.');
+}

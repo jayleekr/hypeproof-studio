@@ -29,6 +29,10 @@ const DEFAULT_APP_ROOT = path.join(
 function resolveAppBinary(): string {
   const override = process.env.HPS_APP_PATH?.trim();
   const root = override && override.length > 0 ? override : DEFAULT_APP_ROOT;
+  if (process.platform === 'win32') {
+    if (!override) throw new Error('Windows acceptance requires HPS_APP_PATH');
+    return root.toLowerCase().endsWith('.exe') ? root : path.join(root, 'HypeProof Studio.exe');
+  }
   // If they passed the binary directly, use it as-is; else append the standard
   // macOS bundle inner path.
   if (root.includes("/Contents/MacOS/")) return root;

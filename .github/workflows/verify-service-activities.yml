@@ -1,0 +1,88 @@
+name: Service compatibility with both Studio activities
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+    secrets:
+      HPS_ACCEPTANCE_ANTHROPIC_API_KEY:
+        required: true
+permissions:
+  contents: read
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      service_sha: ${{ steps.resolve.outputs.service_sha }}
+      app_sha: ${{ steps.resolve.outputs.app_sha }}
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --json tagName --jq .tagName)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "app_sha=$(git rev-parse "$tag^{commit}")" >> "$GITHUB_OUTPUT"
+          echo "service_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  compatibility:
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.service_sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.1'
+      - name: Prepare public App and test dependencies
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          ANTHROPIC_API_KEY: ${{ secrets.HPS_ACCEPTANCE_ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ANTHROPIC_API_KEY" || { echo 'BLOCKED missing acceptance credential'; exit 1; }
+          npm ci --prefix worker
+          npm ci --prefix e2e
+          mkdir -p "$RUNNER_TEMP/public-assets" "$RUNNER_TEMP/public-app" "$RUNNER_TEMP/service-evidence"
+          gh release download "$TAG" --dir "$RUNNER_TEMP/public-assets" --pattern '*.zip'
+      - if: runner.os == 'macOS'
+        shell: bash
+        run: ditto -xk "$RUNNER_TEMP/public-assets/HypeProof-Studio-darwin-arm64.zip" "$RUNNER_TEMP/public-app"
+      - if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $assets = @(Get-ChildItem "$env:RUNNER_TEMP/public-assets/*win32-x64*.zip")
+          if ($assets.Count -ne 1) { throw 'Expected one Windows package' }
+          Expand-Archive -LiteralPath $assets[0].FullName -DestinationPath "$env:RUNNER_TEMP/public-app"
+      - name: Exercise current public App against candidate Service
+        shell: bash
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.HPS_ACCEPTANCE_ANTHROPIC_API_KEY }}
+          SERVICE_SHA: ${{ needs.resolve.outputs.service_sha }}
+          APP_SHA: ${{ needs.resolve.outputs.app_sha }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          app="$RUNNER_TEMP/public-app"
+          if [[ "$RUNNER_OS" == macOS ]]; then app="$app/HypeProof Studio.app"; fi
+          node e2e/unified-release/run.mjs "$app" "$RUNNER_TEMP/public-assets" "$RUNNER_TEMP/service-evidence" "$SERVICE_SHA" "${TAG#v}" "$APP_SHA"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: service-activities-${{ matrix.os }}
+          path: ${{ runner.temp }}/service-evidence/
+          retention-days: 14

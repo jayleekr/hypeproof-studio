@@ -428,62 +428,32 @@ jobs:
             macOS release ${{ github.ref_name }} @ ${{ github.sha }} (pre-publish gate)
         run: bash scripts/release-freeze-gate.sh "$GITHUB_REF"
 
-      - name: Publish to GitHub Release (tag builds only)
+      - name: Upload draft candidate (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF#refs/tags/}"
-          # dag.yaml task A / vessel-and-modules.md §6 stage 2: a hyphenated
-          # tag (v9.9.9-rc.1) is a dev-channel prerelease. The in-app updater
-          # (updateCheckerHelpers.ts:169) already skips draft/prerelease
-          # releases and GitHub's /releases/latest excludes them by
-          # definition — actually marking the release is the only missing
-          # piece. Decision lives in scripts/tag-is-prerelease.sh so it can be
-          # unit-tested without cutting a real tag (scripts/test-tag-is-prerelease.sh).
           PRERELEASE_FLAG="$(bash scripts/tag-is-prerelease.sh "$TAG")"
-          # build-windows.yml may have created the release for the same tag;
-          # create-if-absent then clobber-upload is race-safe across both jobs.
-          gh release create "$TAG" --title "HypeProof Studio $TAG" \
+          gh release create "$TAG" --draft --title "HypeProof Studio $TAG" \
             --generate-notes --verify-tag $PRERELEASE_FLAG 2>/dev/null || true
-          gh release upload "$TAG" \
-            dist/HypeProof-Studio-darwin-arm64.zip --clobber
+          # Both builds may create the draft. Never replace bytes of a public release.
+          [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" == true ]] || { echo 'Refusing to overwrite a published release'; exit 1; }
+          shopt -s nullglob
+          assets=(dist/*.zip dist/*.exe)
+          (( ${#assets[@]} > 0 )) || exit 1
+          gh release upload "$TAG" "${assets[@]}"
 
-      # dag.yaml task K — 미러가 자동으로 돌게 만드는 **실제** 경로.
-      #
-      # #663 은 mirror-release.yml 에 `on: release: [published]` 를 붙였지만
-      # 그 트리거는 여기서 절대 못 뜬다: 위 릴리즈를 만든 것이
-      # `secrets.GITHUB_TOKEN` 이고, GITHUB_TOKEN 이 일으킨 이벤트는 새 워크플로
-      # 런을 만들지 않는다(GitHub 문서 명시). 같은 저장소의
-      # notify-release-published.yml 이 2026-06-04 부터 같은 트리거를 달고 있었지만
-      # 그 뒤 발행된 36개 릴리즈 중 event=release 런은 0건이라는 것으로 관측 확인했다.
-      #
-      # `workflow_dispatch` 는 그 재귀 금지의 **명시적 예외**라 GITHUB_TOKEN 으로도
-      # 실제로 런을 만든다. 그래서 트리거에 기대지 않고 여기서 직접 부른다.
-      # PAT 불필요 — `actions: write` 만 있으면 된다(위 permissions).
-      #
-      # #698 — 윈도우 빌드에서도 부른다. 원래는 맥에서만 불렀고 근거는 "양쪽에서
-      # 부르면 같은 concurrency group 에 중복 런이 줄 선다" 였다. 중복에 대해서는
-      # 맞는 말이지만 **실패**를 안 봤다 — 맥이 여기까지 온다고 가정한 것이다.
-      #
-      # v0.0.0-rc.1 에서 실제로 틀렸다. 맥이 서명 단계에서 죽어(#697) Publish 와
-      # 이 스텝이 둘 다 skipped 됐고 미러가 안 돌았다. #663 이 막으려던 그 사고이고,
-      # 하필 코드서명 때문에 실패 표면이 넓은 쪽에 자동화가 매달려 있었다.
-      #
-      # 중복 런은 싸다 — concurrency group 이 직렬화하고 두 번째는 할 일이 없다.
-      # 없는 런이 2026-08-21 에 조용히 아무것도 안 내보낸 그것이다.
-      - name: Trigger release mirror (tag builds only)
+      # workflow_dispatch is explicit because GITHUB_TOKEN release events do
+      # not trigger another workflow. Both builders dispatch; concurrency serializes.
+      - name: Trigger both-activity release acceptance
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
-          gh workflow run mirror-release.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" \
-            -f tag="$TAG" \
-            -f dry_run=false
-          echo "mirror-release.yml 를 tag=$TAG dry_run=false 로 디스패치했다."
-          echo "미러 결과 확인: gh run list --workflow=mirror-release.yml"
+          gh workflow run verify-unified-release.yml --repo "$GITHUB_REPOSITORY" \
+            -f tag="${GITHUB_REF#refs/tags/}"

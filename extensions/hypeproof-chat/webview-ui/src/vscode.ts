@@ -13,17 +13,23 @@ declare global {
 }
 
 let api: VSCodeApi | null = null;
+let activityId: string | undefined;
 if (typeof window.acquireVsCodeApi === "function") {
   api = window.acquireVsCodeApi();
 }
 
 export function postToHost(msg: WebviewMessage): void {
-  if (api) api.postMessage(msg);
+  if (api) api.postMessage(activityId && !msg.activityId ? {...msg,activityId} : msg);
   else console.warn("[hypeproof-chat] no vscode api — running outside webview?", msg.type);
 }
 
 export function onHostMessage(handler: (m: HostMessage) => void): () => void {
-  const listener = (ev: MessageEvent) => handler(ev.data as HostMessage);
+  const listener = (ev: MessageEvent) => {
+    const msg=ev.data as HostMessage;
+    if(msg.type==='config')activityId=msg.config.activity?.id;
+    else if(msg.activityId && msg.activityId!==activityId)return;
+    handler(msg);
+  };
   window.addEventListener("message", listener);
   return () => window.removeEventListener("message", listener);
 }

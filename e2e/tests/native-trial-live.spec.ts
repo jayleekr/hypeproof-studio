@@ -39,7 +39,7 @@ test('native trial: enter code, use real API, create and revise an actual work f
     await expect(start.locator('.studio-course')).toContainText('Studio · 내 삶에 AI 더하기');
     await expect(start.locator('input[type=password]')).toHaveCount(0);
     await ctx.win.screenshot({ path: join(output, 'connected.png') });
-    await start.getByRole('button', { name: /^(?:이어서 하기|수업 시작하기)$/ }).click();
+    await start.getByRole('button', { name: /^(?:이어서 하기|수업 시작하기|이 활동 시작하기)$/ }).click();
     const chat = await chatFrame(ctx.win);
     const input = chat.locator('.hps-input textarea').first();
     await input.waitFor({ state: 'visible', timeout: 60000 });
@@ -100,7 +100,7 @@ test('native trial: enter code, use real API, create and revise an actual work f
       await entry.getByLabel('수업 참여 코드',{exact:true}).fill(ctx.token);
       await entry.getByRole('button',{name: /^(?:코드 확인하기|수업 확인하기)$/}).click();
       await expect(entry.locator('.studio-course')).toContainText('Studio · 내 삶에 AI 더하기');
-      await entry.getByRole('button',{name: /^(?:이어서 하기|수업 시작하기)$/}).click();
+      await entry.getByRole('button',{name: /^(?:이어서 하기|수업 시작하기|이 활동 시작하기)$/}).click();
       const reopened=await chatFrame(ctx.win),reloadedPanel=reopened.locator('.hps-native-observation');
       await reloadedPanel.locator('summary').first().click();
       await reloadedPanel.getByRole('button',{name:'이 작업의 기록 확인'}).click();
@@ -139,7 +139,7 @@ test('native trial: enter code, use real API, create and revise an actual work f
     const api = JSON.parse(readFileSync(join(output, 'api-evidence.json'), 'utf8'));
     expect(api.calls.some((c: { status: number; path: string; request_id: string }) => c.status === 200 && c.path === '/v1/messages' && c.request_id)).toBe(true);
     writeFileSync(join(output, 'result.json'), JSON.stringify({
-      entry: 'actual code entry', app: 'released shell with branch extension', upstream: 'real Anthropic',
+      status: 'PASS', entry: 'actual code entry', app: process.env.HPS_SERVICE_ACCEPTANCE==='1'?'unchanged public App':'released shell with branch extension', upstream: 'real Anthropic',
       initial_file_created: true, revised_file_created: true, original_preserved: true,
       human_asset_assessment: 'NOT_RUN; synthetic driver behavior is not human learning evidence',
       observation: process.env.HPS_NATIVE_OBSERVATION==='1'?'PASS actual host records, real assessment, UI and correction':'NOT_RUN',

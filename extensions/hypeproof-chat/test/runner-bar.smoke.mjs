@@ -127,7 +127,7 @@ const WORLDS = [
   // 보관, index.html 쓰기) `streaming` 은 아직 false 다. 그 구간에 스트립이 살아
   // 있으면 아이의 연타로 세상 열기가 겹친다. 두 가드를 **같은 값**에 묶는다.
   assert.ok(
-    /const busy = streaming \|\| worldPending;/.test(panel),
+    /const busy = streaming \|\| worldPending \|\| unavailable;/.test(panel),
     "세상 여는 중을 응답 중과 같이 다루지 않는다",
   );
   assert.ok(

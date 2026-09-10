@@ -40,7 +40,7 @@ const env = createMockEnv({ withSession: false, withRoster: false, secret: signi
 const now = Date.now(), id = modelMode ? 'studio-model-practice' : codexMode ? 'studio-gpt-practice' : 'studio-native-trial';
 await env.HPS_KV.put(`cohort:${id}:active_session`, JSON.stringify({ session_id: 'native-ci', profile_id: id,
   starts_at: new Date(now - 60000).toISOString(), ends_at: new Date(now + 3600000).toISOString() }));
-await env.HPS_KV.put(`cohort:${id}:roster`, JSON.stringify({ users: ['synthetic-adult',...(process.env.HPS_NATIVE_IDENTITY==='1'?['synthetic-other']:[])], updated_at: new Date(now).toISOString() }));
+await env.HPS_KV.put(`cohort:${id}:roster`, JSON.stringify({ users: ['synthetic-adult',...((process.env.HPS_NATIVE_IDENTITY==='1'||process.env.HPS_UNIFIED_SWITCH==='1')?['synthetic-other']:[])], updated_at: new Date(now).toISOString() }));
 const app = await bootApp();
 let token;
 let grantDb;
@@ -87,13 +87,16 @@ if(process.env.HPS_NATIVE_MANAGED==='1') {
  const response=await app.fetch(new Request('http://local/admin/tokens/issue',{method:'POST',headers:{authorization:'Bearer '+issuer,'content-type':'application/json'},body:JSON.stringify({u:'synthetic-adult',c:id,p:id,hours:1,native_trial:true})}),env,makeCtx());
  if(response.status!==200)throw Error('synthetic issuer mint failed: '+response.status);
  token=(await response.json()).token;
- if(process.env.HPS_NATIVE_IDENTITY==='1'){
+ if(process.env.HPS_NATIVE_IDENTITY==='1'||process.env.HPS_UNIFIED_SWITCH==='1'){
   const alternate=await app.fetch(new Request('http://local/admin/tokens/issue',{method:'POST',headers:{authorization:'Bearer '+issuer,'content-type':'application/json'},body:JSON.stringify({u:'synthetic-other',c:id,p:id,hours:1,native_trial:true})}),env,makeCtx());
   if(alternate.status!==200)throw Error('alternate synthetic issuer mint failed');
   writeFileSync(process.env.HPS_E2E_TOKEN_FILE+'.alternate',(await alternate.json()).token,{mode:0o600});
  }
  await env.HPS_KV.delete(`cohort:${id}:active_session`);
-} else if(!effortRun) token=(await issue({u:'synthetic-adult',c:id,p:id},1,signing)).token;
+} else if(!effortRun) {
+ token=(await issue({u:'synthetic-adult',c:id,p:id},1,signing)).token;
+ if(process.env.HPS_UNIFIED_SWITCH==='1')writeFileSync(process.env.HPS_E2E_TOKEN_FILE+'.alternate',(await issue({u:'synthetic-other',c:id,p:id},1,signing)).token,{mode:0o600});
+}
 // File deliberately lives outside evidence; never print or upload it.
 writeFileSync(process.env.HPS_E2E_TOKEN_FILE || '/tmp/hps-native-trial-token', token, { mode: 0o600 });
 
@@ -109,11 +112,16 @@ globalThis.fetch = async (input, init) => {
     return codexRehearsalResponse(codex,JSON.parse(init.body),{signal:init.signal,record(row){calls.push(row);writeFileSync(resolve(output,'api-evidence.json'),JSON.stringify({real_upstream:true,provider:'codex-app-server',auth:'chatgpt',api_key_calls:0,storage:'synthetic-memory',calls},null,2));}});
   }
   if (!(modelMode ? ['https://api.anthropic.com','https://api.openai.com','https://api.z.ai','https://generativelanguage.googleapis.com'] : ['https://api.anthropic.com']).includes(url.origin)) throw new Error('unexpected upstream origin in isolated trial test');
-  if (++attempts > 24) throw new Error('live rehearsal request budget exhausted (24); inspect the recorded failure before rerunning');
+  if (++attempts > (process.env.HPS_UNIFIED_LIVE==='1'?8:24)) throw new Error('live rehearsal request budget exhausted (24); inspect the recorded failure before rerunning');
   const start = Date.now();
   const settings=init?.body?JSON.parse(init.body):undefined;
-  const call={model:settings?.model??null,...(effortRun&&settings?{effort:settings.output_config?.effort??null,thinking:settings.thinking?.type??null,...requestContext.getStore()}:{}),origin:url.origin,path:url.pathname,status:null,request_id:null,elapsed_ms:null};
-  const saveCalls=()=>writeFileSync(resolve(output,'api-evidence.json'),JSON.stringify({real_upstream:true,storage:effortRun?'synthetic-sqlite':'synthetic-memory',calls},null,2));
+  const call={model:settings?.model??null,...(process.env.HPS_UNIFIED_LIVE==='1'?{request:settings}:{}),...(effortRun&&settings?{effort:settings.output_config?.effort??null,thinking:settings.thinking?.type??null,...requestContext.getStore()}:{}),origin:url.origin,path:url.pathname,status:null,request_id:null,elapsed_ms:null};
+  const saveCalls=()=>{
+    const serialized=JSON.stringify({real_upstream:true,storage:effortRun?'synthetic-sqlite':'synthetic-memory',calls},null,2);
+    for(const secret of [token,process.env.ANTHROPIC_API_KEY,process.env.OPENAI_API_KEY,process.env.GLM_API_KEY])
+      if(secret&&serialized.includes(secret))throw Error('Credential found in candidate evidence; refusing to persist it');
+    writeFileSync(resolve(output,'api-evidence.json'),serialized,{mode:0o600});
+  };
   calls.push(call);saveCalls();
   let response;
   try {

@@ -31,6 +31,13 @@ jobs:
       # wrapped it in a 20-minute job. Both numbers looked deliberate;
       # nobody compared them until v0.0.0-rc.3 was cancelled mid-wait.
       - run: python3 scripts/check-mirror-timeout.py
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.22.1'
+      - name: Unified release verdict and launcher recovery controls
+        run: |
+          node e2e/unified-release/gate.test.mjs
+          node scripts/test-unified-launcher.mjs
 
   dev-channel-tag-classifier:
     name: dev-channel / tag-is-prerelease
