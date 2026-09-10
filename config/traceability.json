@@ -767,6 +767,33 @@
           "path": "worker/test/audio-refusal-contract.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-TEST-VOICE-LINKAGE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/voice-linkage-contract.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-VOICE-LINKAGE",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-TEST-VOICE-LINKAGE"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/voice-linkage-contract.ts"
+        }
+      ]
     }
   ]
 }
