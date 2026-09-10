@@ -120,10 +120,12 @@ export class StartPage {
           if (!this.panel || (candidate && !committed && this.candidate !== candidate)) throw new Error("Activity entry was cancelled");
           if (!candidate || committed) return;
           previous = await this.context.secrets.get(TOKEN_KEY);
+          if (!this.panel || this.candidate !== candidate) throw new Error("Activity entry was cancelled");
           await this.context.secrets.store(TOKEN_KEY, candidate.token);
           committed = true;
           this.chat.invalidateProfile();
           if (!await this.chat.ensureProfile(true)) throw new Error('connection validation failed');
+          if (!this.panel || this.candidate !== candidate) throw new Error("Activity entry was cancelled");
           this.candidate = undefined;
         };
         if (await this.begin(profile, commit)) return; // workspace switch reloads the window
