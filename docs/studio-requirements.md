@@ -563,3 +563,13 @@ REQ-M27의 활동 원문 보존은 유지하되 기본 표시를 조정한다. �
 | REQ-STUDIO-NATIVE-UX | [TUX controls](requirements/studio-native-trial-ux.md) define observable outcomes for trial entry, coaching, observations, updates and recovery. Preserve work on cancel; confirm conversation deletion; isolate observation state on identity changes; recover the actual chat tree after a render error. | [UI and host test matrix](testing/studio-native-trial-ux.md); built React browser suite, host tests and applicable actual Electron reruns |
 
 체험 대화 후속 계획: [CU/GHX 요구사항과 #844 에픽](design/trial-conversation-experience.md). 전체 UI·GitHub 연결 구현을 의미하지 않으며 [실행/미실행](testing/trial-conversation-experience.md)을 구분한다.
+
+## 체험·수업 공통 진입과 전환 (#915)
+
+[INT-US-01~04](design/unified-studio-experience.md)의 연속성과 책임 경계를
+[US-01~18](requirements/unified-studio-experience.md) 및 [US-T01~21](testing/unified-studio-experience.md)로 추적한다.
+활동 선택만으로 작업을 시작하지 않으며, 새 연결의 준비가 실패하면 기존 연결을 유지한다.
+요청 접수부터 인증·응답·기록 저장까지 전환과 이용권 선택을 막는 경계는 US-07/08/11의
+구현 일부다. 사용자가 작업의 대상과 비용 출처를 구분할 수 있어야 한다는 계약이며,
+책임 인식의 학습 효과를 입증한 것은 아니다. [후보·접수 대조 결과](testing/activity-candidate-917-evidence.md)는
+창 간 격리와 전체 공개 인수를 포함하지 않는다. 개별 US 행의 원본은 위 요구사항 표다.
