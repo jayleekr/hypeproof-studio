@@ -441,10 +441,25 @@ export const GEMINI_MODEL_MAP: Record<ModelAlias, string> = {
 // OpenAI model ids (third peer). Conservative GA-stable defaults; the team
 // can point any alias at a newer GA flagship (e.g. gpt-5*) with a one-line
 // edit here — profiles stay untouched.
+// 세 alias 가 모두 gpt-5.6-luna 를 가리킨다 — GLM_MODEL_MAP 과 같은 이유·같은 모양이다.
+//
+// 2026-09-10 정정: 이 표는 `gpt-4o-mini`/`gpt-4o` 를 가리키고 있었다. 바로 위
+// `OPENAI_MODELS` 는 2026-09-08 에 공식 문서 + `codex model/list` 로 대조한 gpt-5.6
+// 계열인데, alias 경로만 한 세대 전에 멈춰 있었다. 죽은 코드도 아니었다 —
+// `model.provider` 가 없는 프로필(아동·치과 코호트 등 여섯 개)은 env `LLM_PROVIDER` 로
+// 공급자가 결정되므로, `LLM_PROVIDER=openai` 인 환경(이 레포의 테스트 하네스 기본값)에서
+// `hypeproof-default` 가 실제로 `gpt-4o` 로 번역됐다. 프로덕션은
+// `LLM_PROVIDER=anthropic` 이라 노출되지 않았지만, openai 공급자 프로필을 하나 더
+// 추가하는 **자연스러운 변경**이 조용히 구세대 모델을 쓰게 만드는 상태였다.
+//
+// fast/default/strong 의 **구분은 OpenAI 쪽에 대해 아직 정해지지 않았다.** luna·terra·sol
+// 이라는 이름에서 강도 순서를 읽어낼 근거가 이 레포에 없고, 짐작해서 넣으면 그 짐작이
+// 계약처럼 굳는다. 그래서 증거가 있는 하나(`studio-gpt-practice` 가 선언한 기본값)로
+// 셋을 모두 모아둔다. 구분이 필요해지는 날 `OPENAI_MODELS` 를 보고 **명시적으로** 정한다.
 export const OPENAI_MODEL_MAP: Record<ModelAlias, string> = {
-  "hypeproof-fast":    "gpt-4o-mini",
-  "hypeproof-default": "gpt-4o",
-  "hypeproof-strong":  "gpt-4o",
+  "hypeproof-fast":    "gpt-5.6-luna",
+  "hypeproof-default": "gpt-5.6-luna",
+  "hypeproof-strong":  "gpt-5.6-luna",
 };
 
 // GLM (Z.ai) model ids. 지금은 세 alias 가 모두 glm-5.2 를 가리킨다 — 5.2 가 플래그십이고
