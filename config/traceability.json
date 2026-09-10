@@ -817,6 +817,36 @@
       ]
     },
     {
+      "id": "ST-REQ-VOICE-CONVERSATION",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/voice-conversation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-VOICE-CONVERSATION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CONVERSATION",
+        "ST-REQ-VOICE-CAPABILITY"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/voice-conversation.md"
+        },
+        {
+          "path": "e2e/voice-conversation/probe-lifecycle.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-INT-UNIFIED",
       "stage": "intent",
       "owner": "jayleekr",
