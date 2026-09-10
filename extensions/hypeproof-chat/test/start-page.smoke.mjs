@@ -5,14 +5,15 @@ import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const bundle=await build({entryPoints:[new URL('../src/startPage.ts',import.meta.url).pathname],bundle:true,platform:'node',format:'cjs',external:['vscode'],write:false});
 const profile={activity_kind:'trial',profile_id:'adult',display_name:'Adult practice',ux:{coach:{naming_mode:'fixed',fallback_name:'Coach'}},welcome:{},series_index:1,series_total:5};
-let releaseFetch;
+let releaseFetch, proxyUrl='http://local/v1', fetches=0;
 let stored='valid-old', active=false, response='valid', writes=0, starts=0, failPrepare=false, failStore=false, failResolved=false;
 const states=[],commands=[];
 const ctx={secrets:{get:async()=>stored,store:async(_k,v)=>{if(failStore)throw Error('storage unavailable');stored=v;writes++;},delete:async()=>{stored=undefined;writes++;}},extension:{packageJSON:{version:'test'}},subscriptions:[]};
 const chat={openInEditor:async()=>{starts++;},ensureProfile:async()=>failResolved?null:stored?.startsWith('valid')?profile:null,profileFailure:()=>null,invalidateProfile(){},refreshConfig(){},hasActiveStream:()=>active,setConnectionChanging(v){this.changing=v;},coachDisplayName:()=> 'Coach',coachNameIsChosen:()=>true};
-const vscode={workspace:{workspaceFolders:[],getConfiguration:()=>({get:()=> 'http://local/v1'})},window:{},commands:{executeCommand:async id=>commands.push(id)}};
+const vscode={workspace:{workspaceFolders:[],getConfiguration:()=>({get:()=> proxyUrl})},window:{},commands:{executeCommand:async id=>commands.push(id)}};
 const module={exports:{}};
 vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,require:id=>id==='vscode'?vscode:require(id),console,Buffer,AbortSignal,fetch:async()=>{
+ fetches++;
  if(response==='waiting')await new Promise(resolve=>releaseFetch=resolve);
  if(response==='network')throw Error('connection refused');
  if(response==='invalid')return new Response(JSON.stringify({error:{code:'signature'}}),{status:401});
@@ -50,3 +51,8 @@ await page.handle({type:'connectCourse',token:'valid-second'});response='valid';
 assert.equal(page.candidate.token,'valid-first','duplicate choice cannot overtake pending validation');
 assert.equal(stored,'valid-old');assert.equal(chat.changing,false);
 console.log('PASS candidate duplicate control: pending validation cannot be overtaken');
+
+const previousFetches=fetches;proxyUrl='https://other.invalid/v1';await page.handle({type:'beginCourse'});
+assert.equal(fetches,previousFetches,'candidate credential never forwarded to a different Service');
+assert.equal(stored,'valid-old');assert.equal(chat.changing,false);
+console.log('PASS candidate origin change rejected before credential forwarding');

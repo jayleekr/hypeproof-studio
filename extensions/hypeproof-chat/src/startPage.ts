@@ -13,7 +13,7 @@ export class StartPage {
   private busy = false;
   private error?: string;
   private started = false;
-  private candidate?: { token: string; profile: ResolvedProfile; previousConnected: boolean };
+  private candidate?: { token: string; profile: ResolvedProfile; proxyUrl: string; previousConnected: boolean };
   constructor(
     private context: vscode.ExtensionContext,
     private chat: ChatPanelProvider,
@@ -106,6 +106,7 @@ export class StartPage {
         // A connected card is not proof that the session is still live.
         if (candidate) {
           const proxyUrl = vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+          if (proxyUrl !== candidate.proxyUrl) throw new Error("Activity Service changed during confirmation");
           const result = await fetchProfileResult({ proxyUrl, token: candidate.token });
           if (!result.ok) { this.error = result.failure.friendly; return; }
           profile = result.profile;
@@ -164,7 +165,7 @@ export class StartPage {
         this.error = "수업 정보 응답을 읽지 못했습니다. 잠시 후 다시 연결하세요."; return;
       }
       // Preview only. Existing runtime and credential stay bound until workspace preparation succeeds.
-      this.candidate = { token, profile: p, previousConnected: !!await this.chat.ensureProfile() };
+      this.candidate = { token, profile: p, proxyUrl, previousConnected: !!await this.chat.ensureProfile() };
     } catch {
       this.error = "수업에 연결하지 못했습니다. 연결 상태를 확인하고 다시 시도하세요.";
     } finally {
