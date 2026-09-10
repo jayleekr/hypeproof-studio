@@ -325,3 +325,17 @@ test('record scope survives credential rotation and separates users',async()=>{
  assert.notEqual(await nativeObservationScope(p,session),await nativeObservationScope({...p,u:'other'},session));
  assert.notEqual(await nativeObservationScope(p,session),await nativeObservationScope(p,{...session,session_id:'new-grant'}));
 });
+
+// US-05: activity is authenticated presentation metadata, independent of App choice.
+test('profile labels an authorized native grant as trial without creating another grant', async () => {
+ const {db,env}=fixture();
+ try {
+  await env.HPS_KV.put('cohort:studio-native-trial:roster',JSON.stringify({users:['synthetic-person']}));
+  const token=await credential();await createNativeGrant(env,await verify(token,TEST_SECRET),'synthetic-instructor');
+  const app=await bootApp();
+  const response=await app.fetch(new Request('https://test/v1/profile',{headers:{authorization:'Bearer '+token}}),env,makeCtx());
+  assert.equal(response.status,200);assert.equal((await response.json()).activity_kind,'trial');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM native_trials').get().n,1);
+  assert.equal(db.prepare('SELECT requests_used FROM native_trials').get().requests_used,0);
+ } finally {db.close();}
+});

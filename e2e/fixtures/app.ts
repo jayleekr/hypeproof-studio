@@ -266,7 +266,7 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
 
   if (opts.preseedToken !== false && !opts.stayOnStart) {
     const start = await startFrame(win);
-    await start.getByRole("button", { name: "수업 시작하기" }).click({ timeout: 30_000 });
+    await start.getByRole("button", { name: /^(?:이어서 하기|수업 시작하기)$/ }).click({ timeout: 30_000 });
   }
   return { app, win, userDataDir, token, wsDir };
 }

@@ -52,7 +52,7 @@ export class StartPage {
       error: this.error ?? (!p ? this.chat.profileFailure()?.friendly : undefined),
       version: this.context.extension.packageJSON.version,
       workspace: vscode.workspace.workspaceFolders?.[0]?.name,
-      ...(p ? { coachName: this.chat.coachDisplayName(p), profile: { id: p.profile_id, name: p.lesson?.content.title ?? p.display_name,
+      ...(p ? { coachName: this.chat.coachDisplayName(p), profile: { kind: p.activity_kind, id: p.profile_id, name: p.lesson?.content.title ?? p.display_name,
         // #747 — the row is labelled "AI 이름", so it shows the name the rest of
         // the card uses. A student-named cohort that has not been named yet
         // describes the mode instead of showing the placeholder as a name.
@@ -70,7 +70,7 @@ export class StartPage {
       return;
     }
     if (this.busy) return;
-    if (this.chat.hasActiveStream()) { this.error = "진행 중인 작업을 마치거나 중지한 후 수업을 변경하세요."; await this.refresh(); return; }
+    if (this.chat.hasActiveStream()) { this.error = "진행 중인 작업을 마치거나 중지한 후 활동을 변경하세요."; await this.refresh(); return; }
     if (msg.type === "openLocalFolder") {
       const folders = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: "작업 폴더 열기" });
       if (folders?.[0]) await vscode.commands.executeCommand("vscode.openFolder", folders[0]);

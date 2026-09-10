@@ -30,15 +30,16 @@ test('native trial: enter code, use real API, create and revise an actual work f
   })();
   try {
     const start = await startFrame(ctx.win);
+    if (await start.getByRole('button', { name: '수업에 참여하기', exact: true }).isVisible()) await start.getByRole('button', { name: '수업에 참여하기', exact: true }).click();
     await start.getByLabel('수업 참여 코드', { exact: true }).fill('synthetic-invalid-code');
-    await start.getByRole('button', { name: '수업 확인하기' }).click();
+    await start.getByRole('button', { name: /^(?:코드 확인하기|수업 확인하기)$/ }).click();
     await expect(start.locator('.studio-error')).toBeVisible();
     await start.getByLabel('수업 참여 코드', { exact: true }).fill(ctx.token);
-    await start.getByRole('button', { name: '수업 확인하기' }).click();
+    await start.getByRole('button', { name: /^(?:코드 확인하기|수업 확인하기)$/ }).click();
     await expect(start.locator('.studio-course')).toContainText('Studio · 내 삶에 AI 더하기');
     await expect(start.locator('input[type=password]')).toHaveCount(0);
     await ctx.win.screenshot({ path: join(output, 'connected.png') });
-    await start.getByRole('button', { name: '수업 시작하기' }).click();
+    await start.getByRole('button', { name: /^(?:이어서 하기|수업 시작하기)$/ }).click();
     const chat = await chatFrame(ctx.win);
     const input = chat.locator('.hps-input textarea').first();
     await input.waitFor({ state: 'visible', timeout: 60000 });
@@ -95,11 +96,11 @@ test('native trial: enter code, use real API, create and revise an actual work f
       const entry=await startFrame(ctx.win);
       // Test credentials intentionally use in-memory secret storage. Re-enter the
       // same code after a real process restart, then inspect persisted workspaceState.
-      if(await entry.getByRole('button',{name:'다른 수업에 연결'}).isVisible().catch(()=>false))await entry.getByRole('button',{name:'다른 수업에 연결'}).click();
+      if(await entry.getByRole('button',{name: /^(?:다른 활동 선택|다른 수업에 연결)$/}).isVisible().catch(()=>false))await entry.getByRole('button',{name: /^(?:다른 활동 선택|다른 수업에 연결)$/}).click();if(await entry.getByRole('button',{name:'수업에 참여하기',exact:true}).isVisible())await entry.getByRole('button',{name:'수업에 참여하기',exact:true}).click();
       await entry.getByLabel('수업 참여 코드',{exact:true}).fill(ctx.token);
-      await entry.getByRole('button',{name:'수업 확인하기'}).click();
+      await entry.getByRole('button',{name: /^(?:코드 확인하기|수업 확인하기)$/}).click();
       await expect(entry.locator('.studio-course')).toContainText('Studio · 내 삶에 AI 더하기');
-      await entry.getByRole('button',{name:'수업 시작하기'}).click();
+      await entry.getByRole('button',{name: /^(?:이어서 하기|수업 시작하기)$/}).click();
       const reopened=await chatFrame(ctx.win),reloadedPanel=reopened.locator('.hps-native-observation');
       await reloadedPanel.locator('summary').first().click();
       await reloadedPanel.getByRole('button',{name:'이 작업의 기록 확인'}).click();

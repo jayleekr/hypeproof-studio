@@ -49,7 +49,7 @@ for (const scenario of cases) test(scenario.id, async () => {
   mkdirSync(out, { recursive: true });
   const record: any = { synthetic: true, semantic_review: 'PENDING', transport: 'RUNNING', turns: [] };
   try {
-    await (await startFrame(ctx.win)).getByRole('button', { name: '수업 시작하기' }).click();
+    await (await startFrame(ctx.win)).getByRole('button', { name: /^(?:이어서 하기|수업 시작하기)$/ }).click();
     const chat = await chatFrame(ctx.win);
     record.model = process.env.HPS_GUIDANCE_MODEL || 'claude-opus-5';
     await chat.getByRole('combobox', { name: '대화 모델' }).selectOption(record.model);

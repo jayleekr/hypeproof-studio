@@ -105,7 +105,8 @@ async function test(id, title, fn, { surface = 'chat', profile = native, cfg = {
 
 try {
   await test('TUX-SP-01', 'Code masking, whitespace disable, keyboard submission clears credential', async p => {
-    const input = p.locator('#course-code'), submit = btn(p, '수업 확인하기');
+    await btn(p, '수업에 참여하기').click();
+    const input = p.locator('#course-code'), submit = btn(p, '코드 확인하기');
     await expect(input).toHaveAttribute('type', 'password');
     await expect(submit).toBeDisabled(); await input.fill('   '); await expect(submit).toBeDisabled();
     await input.fill('synthetic-not-a-secret'); await input.press('Enter');
@@ -113,33 +114,34 @@ try {
     await expect(input).toHaveValue(''); await expect(input).toBeDisabled();
   }, { surface: 'start' });
   await test('TUX-SP-02', 'Connection pending prevents duplicate submit and announces progress', async p => {
-    await p.locator('#course-code').fill('synthetic'); await btn(p, '수업 확인하기').dblclick();
+    await btn(p, '수업에 참여하기').click();
+    await p.locator('#course-code').fill('synthetic'); await btn(p, '코드 확인하기').dblclick();
     await expect(p.locator('.studio-connect')).toHaveAttribute('aria-busy', 'true');
     assert.equal(emitted(await requests(p), 'connectCourse').length, 1);
-    await expect(btn(p, '수업 확인 중…')).toBeDisabled();
+    await expect(btn(p, '코드 확인 중…')).toBeDisabled();
   }, { surface: 'start' });
   await test('TUX-SP-03', 'Start and continue route to coach; begin pending disables course actions', async p => {
-    await startState(p, { profile: course }); await btn(p, '수업 시작하기').press('Enter');
+    await startState(p, { profile: course }); await btn(p, '이어서 하기').press('Enter');
     await request(p, { type: 'beginCourse' });
-    await expect(btn(p, '수업 여는 중…')).toBeDisabled(); await expect(btn(p, '다른 수업에 연결')).toBeDisabled(); await expect(btn(p, '연결 해제')).toBeDisabled();
+    await expect(btn(p, '활동 여는 중…')).toBeDisabled(); await expect(btn(p, '다른 활동 선택')).toBeDisabled(); await expect(btn(p, '연결 해제')).toBeDisabled();
     await startState(p, { profile: course, started: true }); await btn(p, '코치와 계속 작업하기').click();
     assert.equal(emitted(await requests(p), 'beginCourse').length, 2);
   }, { surface: 'start' });
   await test('TUX-SP-04', 'Change course focuses code and back restores old course', async p => {
-    await startState(p, { profile: course }); await btn(p, '다른 수업에 연결').click();
+    await startState(p, { profile: course }); await btn(p, '다른 활동 선택').click(); await btn(p, '수업에 참여하기').click();
     await expect(p.locator('#course-code')).toBeFocused(); await p.locator('#course-code').fill('unsubmitted-synthetic');
-    await btn(p, '기존 수업으로 돌아가기').click(); await expect(p.getByText(course.name, { exact: true })).toBeVisible();
+    await btn(p, '기존 활동으로 돌아가기').click(); await expect(p.getByText(course.name, { exact: true })).toBeVisible();
     assert.equal(emitted(await requests(p), 'connectCourse').length, 0);
   }, { surface: 'start' });
   await test('TUX-SP-05', 'Invalid code and expired trial permit recovery without stale begin', async p => {
-    await startState(p, { profile: course }); await btn(p, '다른 수업에 연결').click(); await p.locator('#course-code').fill('bad'); await btn(p, '수업 확인하기').click();
-    await startState(p, { profile: course, error: '인증에 실패했습니다.' }); await expect(p.getByRole('alert')).toContainText('기존 수업 연결은 유지됩니다.');
-    await btn(p, '기존 수업으로 돌아가기').click(); await expect(btn(p, '수업 시작하기')).toBeEnabled();
-    await startState(p, { error: '개인 체험 시간이 끝났습니다.' }); await expect(btn(p, '수업 시작하기')).toHaveCount(0); await expect(p.locator('#course-code')).toBeEnabled();
+    await startState(p, { profile: course }); await btn(p, '다른 활동 선택').click(); await btn(p, '수업에 참여하기').click(); await p.locator('#course-code').fill('bad'); await btn(p, '코드 확인하기').click();
+    await startState(p, { profile: course, error: '인증에 실패했습니다.' }); await expect(p.getByRole('alert')).toContainText('기존 활동 연결은 유지됩니다.');
+    await btn(p, '기존 활동으로 돌아가기').click(); await expect(btn(p, '이어서 하기')).toBeEnabled();
+    await startState(p, { error: '개인 체험 시간이 끝났습니다.' }); await expect(btn(p, '이어서 하기')).toHaveCount(0); await expect(p.locator('#course-code')).toBeEnabled();
   }, { surface: 'start' });
   await test('TUX-SP-06', 'Disconnect delegates host request and disconnected host state replaces course', async p => {
     await startState(p, { profile: course }); await btn(p, '연결 해제').click(); await request(p, { type: 'disconnectCourse' });
-    await startState(p, {}); await expect(p.locator('#course-code')).toBeVisible(); await expect(p.getByText(course.name, { exact: true })).toHaveCount(0);
+    await startState(p, {}); await expect(btn(p, 'AI 체험하기')).toBeVisible(); await expect(p.getByText(course.name, { exact: true })).toHaveCount(0);
   }, { surface: 'start' });
   for (const [id, label, type] of [['07', '파일', 'openStudioFiles'], ['08', '설정', 'openStudioSettings'], ['09', '작업 폴더 열기', 'openLocalFolder']]) {
     await test(`TUX-SP-${id}`, `${label}: keyboard action emits correct host request`, async p => { await btn(p, label).focus(); await expect(btn(p, label)).toBeFocused(); await btn(p, label).press('Enter'); await request(p, { type }); }, { surface: 'start' });
