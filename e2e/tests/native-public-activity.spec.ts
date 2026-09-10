@@ -5,6 +5,7 @@ import {launchApp,closeApp,startFrame,chatFrame} from '../fixtures/app';
 import {readFileSync,writeFileSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
 test('public Service activity creates and revises a synthetic file',async()=>{
+ test.skip(process.env.HPS_PUBLIC_ACTIVITY!=='1','approved public acceptance runner only');
  test.setTimeout(240000);
  const ctx=await launchApp({preseedToken:false,stayOnStart:true});
  const out=process.env.HPS_NATIVE_EVIDENCE_DIR!,trial=process.env.HPS_NATIVE_MANAGED==='1';

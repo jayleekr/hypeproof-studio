@@ -4,10 +4,12 @@ import {readFileSync,writeFileSync,mkdirSync,existsSync} from 'node:fs';
 import {join} from 'node:path';
 
 test('actual folder switch A to B to A preserves drafts and rejects a shared root',async()=>{
+ test.skip(process.env.HPS_UNIFIED_SWITCH!=='1','isolated activity runner only');
  test.setTimeout(process.env.HPS_UNIFIED_LIVE==='1'?300000:120000);
  const live=process.env.HPS_UNIFIED_LIVE==='1',managed=process.env.HPS_NATIVE_MANAGED==='1',turns:any[]=[];
  let ctx=await launchApp({preseedToken:false,stayOnStart:true,simpleFileDialog:true,persistentTestSecrets:true});
  const out=process.env.HPS_NATIVE_EVIDENCE_DIR!;
+ try{
  const storage=await ctx.app.evaluate(({app,safeStorage})=>({name:app.getName(),encrypted:safeStorage.isEncryptionAvailable()}));
  console.log('Synthetic storage:',storage);expect(storage.encrypted).toBe(true);
  const second=join(ctx.userDataDir,'activity-b');mkdirSync(second);
@@ -36,7 +38,6 @@ test('actual folder switch A to B to A preserves drafts and rejects a shared roo
   expect(readFileSync(join(root,'acceptance.md'),'utf8').trim()).toBe(marker);
   turns.push({prompt,reply:await chat.locator('.hps-msg-assistant').last().innerText(),tools:await chat.locator('.hps-tool-label').allTextContents()});
  };
- try{
   writeFileSync(join(ctx.wsDir,'original-a.txt'),'synthetic activity A');
   writeFileSync(join(second,'original-b.txt'),'synthetic activity B');
   await connect(ctx.token);await pick(ctx.wsDir);await begin();
