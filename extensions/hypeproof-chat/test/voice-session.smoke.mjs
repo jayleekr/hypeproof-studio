@@ -471,3 +471,62 @@ console.log("voice-session smoke OK — 결정 계층만, 기기 코드 아님 (
   assert.equal(starting.captureOpen, false);
   assert.equal(voiceTransition(starting, { type: 'transport_ready' }).state, 'muted');
 }
+
+// ─── §3c 음소거 의도 — Codex 회귀 블록이 못 잡던 세 칸 ──────────────────────
+// Codex 가 찾은 결함(재연결이 음소거를 해제한다)은 제 잘못이고 수정도 맞다. 그런데
+// 그 수정이 **테스트로 얼마나 보호되는지** 변이로 재보니 다섯 중 셋이 통과했다.
+// 위 회귀 블록의 단언들이 옳은 값을 확인하지만 **구별력이 없는 지점**이 있어서다:
+//
+//   `dropped.captureOpen`   → state 가 `connecting` 이라 CAPTURE_OPEN_STATES 에 없고,
+//                             `muteRequested` 와 무관하게 false 다.
+//   `recovered.captureOpen` → state 가 `muted` 라 역시 집합에 없다. 같은 이유로 무관.
+//   `transport_ready` 뒤 state → mute 가 항상 'muted' 를 돌려주도록 바꿔도 같은 값이 나온다.
+//
+// 즉 "옳은 값" 을 확인하는 것과 "그 값을 만드는 코드를 확인하는 것" 이 다르다.
+{
+  // (a) `muteRequested` 가 **캡처를 여는 상태에서도** 캡처를 막는다.
+  // `captureOpen = CAPTURE_OPEN_STATES.has(next) && !muteRequested` 의 뒷항이 사라지면
+  // 음소거한 아이의 마이크가 열린다. 현재 어떤 전이도 이 조합에 닿지 않으므로(전이가
+  // muted 로 보내준다) **합성 상태로** 전이 함수를 통과시켜 그 항을 직접 태운다.
+  const liveButMuted = { ...runVoiceEvents(open), muteRequested: true };
+  const afterEnd = voiceTransition(liveButMuted, { type: "user_speech_end" });
+  assert.equal(afterEnd.state, "preparing", "전이 자체가 막히면 이 단언의 대상이 사라진다");
+  assert.equal(
+    afterEnd.captureOpen, false,
+    "음소거 의도가 있는데 캡처가 열렸다 — captureOpen 의 !muteRequested 항이 사라졌다",
+  );
+  // 양성 대조군 — 같은 전이가 음소거 의도 **없이는** 캡처를 연다. 없으면 위 단언이
+  // "이 전이는 늘 닫힌다" 와 구별되지 않는다.
+  assert.equal(voiceTransition(runVoiceEvents(open), { type: "user_speech_end" }).captureOpen, true);
+
+  // (b) `connecting` 중 음소거는 **상태를 바꾸지 않는다** — 아직 듣고 있지 않으므로
+  // `muted` 라고 말하면 화면이 연결 중을 음소거로 그린다. 의도만 적어둔다.
+  const connectingMuted = runVoiceEvents([{ type: "start" }, { type: "mute" }]);
+  assert.equal(connectingMuted.state, "connecting", "연결 중 음소거가 상태를 muted 로 바꿨다");
+  assert.equal(connectingMuted.muteRequested, true, "의도가 기록되지 않았다");
+  assert.equal(connectingMuted.captureOpen, false);
+  // 그리고 **전이가 실제로 일어난다** — 상태만 보면 변이를 구별할 수 없으므로 세션 수로 본다.
+  const readyMuted = voiceTransition(connectingMuted, { type: "transport_ready" });
+  assert.equal(readyMuted.state, "muted");
+  assert.equal(readyMuted.listeningSessions, 1, "transport_ready 가 무시됐다 — mute 가 상태를 먼저 옮겼다");
+
+  // (c) 불변식이 음소거-캡처 모순을 **실제로** 잡는다. 잡지 못하면 (a) 의 보호가
+  // 한 겹뿐이고, 합성 상태를 만드는 미래 코드가 조용히 통과한다.
+  assert.throws(
+    () => assertVoiceInvariants({ ...runVoiceEvents(open), muteRequested: true, captureOpen: true }),
+    VoiceInvariantError,
+    "불변식이 mute_requested_with_capture_open 을 놓쳤다",
+  );
+  try {
+    assertVoiceInvariants({ ...runVoiceEvents(open), muteRequested: true, captureOpen: true });
+  } catch (err) {
+    assert.ok(
+      err.violations.some((v) => v.includes("mute_requested")),
+      `위반 사유에 단서가 없다: ${err.violations}`,
+    );
+  }
+  // 양성 대조군 — 음소거 의도만 있고 캡처가 닫혀 있으면 정상이다.
+  assertVoiceInvariants({ ...runVoiceEvents(open), muteRequested: true, captureOpen: false });
+}
+
+console.log("voice-session §3c OK — 음소거 의도가 재연결·상태·불변식 세 겹으로 잠겼다");
