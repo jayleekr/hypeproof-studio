@@ -5,7 +5,7 @@
 
 | 순서 | 이슈 | 요구/시험 범위 | 진입 및 종료 조건 |
 |---|---|---|---|
-| V0 | [#897](https://github.com/jayleekr/hypeproof-studio/issues/897) | VO-01–05 / VO-T01–05 | 현재 계측기의 수명 결함 수정 → 설치본 관측 → 후보 비교/통합 ADR. 계약과 미지원 조건을 고정한 뒤 인계 |
+| V0 | [#897](https://github.com/jayleekr/hypeproof-studio/issues/897) | VO-01–05 / VO-T01–05 | 계측기의 수명 결함 수정 검증(#929) → 설치본 관측 → 후보 비교/통합 ADR. 계약과 미지원 조건을 고정한 뒤 인계 |
 | V4 선행 | [#901](https://github.com/jayleekr/hypeproof-studio/issues/901) | VO-21–25 / VO-T21–25 | V0 계약에 맞춰 기존 인증·자금원·원장을 확장. 실제 유료 연결 전 지속 예산 집행·철회·보존 경계 확보 |
 | V1 | [#898](https://github.com/jayleekr/hypeproof-studio/issues/898) | VO-06–10 / VO-T06–10 | V0 이후 합성 세션 개발 가능. 유료 실행은 V4 필요. 실제 시작/끼어들기/종료/정정 인수 |
 | V2 | [#899](https://github.com/jayleekr/hypeproof-studio/issues/899) | VO-11–15 / VO-T11–15 | 기존 대화·결과물 revision 재사용. 음성/텍스트 왕복 후 저장·재개 검증 |
@@ -23,8 +23,8 @@ Codex: 이 세 문서, e2e 독립 재현·실기 인수, 증거 연결.
 
 ## 현재 다음 행동
 
-1. Claude: 늦은 마이크 권한 응답에도 track 해제 수정 및 SHA 인계.
-2. Codex: 같은 재현 테스트를 수정 SHA에서 재실행하고 실제 App 슬롯 인수 후 권한/오디오 관측.
+1. #929: 늦은 마이크 권한 해제와 재연결 중 음소거 보존을 수정하고 독립 합성 검증을 통과했다.
+2. Codex: 수정 포함 main에서 재현을 확인하고 실제 App 슬롯 인수 후 권한/오디오를 관측한다.
 3. V0 후보 비교와 통합 ADR을 고정하고 V4 비용 집행과 V1 합성 세션 작업을 분리해서 착수.
 
 공통 App 배포 정책은 [Product Intent](../PRODUCT-INTENT.md)와 기존 release 규칙을 따른다.

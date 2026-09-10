@@ -14,11 +14,17 @@ PASS/FAIL/BLOCKED/NOT RUN을 분리하고 사람 평가에서 근거가 부족�
 
 대상 코드 `928b7dd` (#904/#910/#914 포함). 전체 VO-T01–35는 아래 계획 상태를 유지한다.
 
-- **FAIL, 합성 소스 실행**: `node e2e/voice-conversation/probe-lifecycle.mjs`.
+- **수정 전 FAIL, 합성 소스 실행**: `node e2e/voice-conversation/probe-lifecycle.mjs`.
   Node 24.4.1에서 실제 voiceProbe.ts를 실행했다. 즉시 마이크 grant는 track ended로 통과했다.
   4000ms 타임아웃 이후 grant는 timeout 보고 뒤 track live로 남아 해제 단언에 실패했다.
   [Claude 수정 인계](https://github.com/jayleekr/hypeproof-studio/issues/897#issuecomment-5621701562).
   이 결과는 VO-T09 수명 관리의 선행 결함이며 실제 장치 재현 또는 VO-T09 전체 실행을 뜻하지 않는다.
+- **수정 후 PASS, 합성 소스 실행**: #929의 `c6a943b` 및 후속 `c0a2232`에서
+  동일한 `probe-lifecycle.mjs`를 독립 실행해 immediate → granted/ended,
+  late → timeout/ended를 확인했다. 제품 `voice-probe-lifecycle.smoke.mjs`도 독립 통과했다.
+  추가 검수에서 음소거 후 재연결이 캡처를 다시 여는 결함을 발견해 `c0a2232`에서
+  음소거 의도를 연결 상태와 분리했다. `voice-session.smoke.mjs`는 명시 해제 대조군,
+  재연결 중 해제, 시작 중 음소거를 포함해 통과했다. 모두 순수/합성 검증이다.
 - **NOT RUN, 실기**: macOS/Windows 오디오 왕복·권한 네 상태·종료/복귀.
   macOS는 공유 App 실행 슬롯 해제를 요청한 상태이고 Windows 실기 장치는 확보되지 않았다.
 - 기존 linkage validator는 모양/순서 계약이며 연결된 음성 세션 구현이 아니다.
