@@ -133,7 +133,19 @@ export interface ResolvedProfile {
   model_selection?: {
     revision: 'hps-model-selection/1'; runtime: 'proxy' | 'agent-sdk'; provider: string;
     default: string; source: 'profile' | 'lesson';
-    choices: Array<{ alias: string; id: string; label: string; effort?: {default: CourseEffort; allowed: CourseEffort[]} }>;
+    // `provider` 는 **cross-provider 코호트에서만** 실려 온다
+    // (`worker/src/lib/lesson-model-policy.ts:57` — `crossProviderEnabled(profile)` 일 때만 넣는다).
+    // 그 바깥에서는 상위 `provider` 필드 하나가 좌석 전체를 설명하므로 선택지별로 중복하지 않는다.
+    //
+    // 이 필드가 빠져 있던 동안 깨지는 것은 없었다 — 웹뷰는 `alias`/`label` 만 렌더한다.
+    // 문제는 **타입을 읽은 사람이 "서버는 provider 를 보내지 않는다" 고 결론낸다**는 것이고,
+    // 그러면 선택지에 공급자를 표시하려는 다음 변경이 이미 오고 있는 값을 못 보고 서버부터
+    // 고치려 든다. 서버가 보내는 것은 타입에 있어야 한다.
+    choices: Array<{
+      alias: string; id: string; label: string;
+      provider?: string;
+      effort?: {default: CourseEffort; allowed: CourseEffort[]};
+    }>;
   };
   observation?: { format: string; scope?: string };
   /** Immutable teaching content; capability policy remains in the profile. */

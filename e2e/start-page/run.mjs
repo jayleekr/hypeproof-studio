@@ -28,6 +28,9 @@ try {
  await state({error:'인증에 실패했습니다. 참여 코드를 다시 확인하세요.'});await p.getByRole('alert').waitFor();assert.equal(await p.locator('#course-code').isDisabled(),false);
  const profile={id:'adult-test',name:'성인 홈페이지 제작 실습',coach:'코치',series:'1 / 5',workspace:'~/Practice'};
  await state({profile});await p.getByRole('heading',{name:'이어서 시작할까요?'}).waitFor();assert.equal(await p.getByText(profile.name,{exact:true}).count(),1);
+ await state({profile,candidate:true,previousConnected:true});await p.getByRole('heading',{name:'이 활동으로 시작할까요?'}).waitFor();
+ await p.getByRole('button',{name:'선택 취소',exact:true}).click();assert.equal(await p.evaluate(()=>window.sent.at(-1).type),'cancelCandidate');
+ await state({profile});
  await p.getByRole('button',{name:'다른 활동 선택'}).click();await p.getByRole('button',{name:'수업에 참여하기',exact:true}).click();await p.locator('#course-code').fill('second-attempt');await p.getByRole('button',{name:'코드 확인하기'}).click();
  await state({profile,error:'서버에 연결할 수 없습니다.'});await p.getByText('기존 활동 연결은 유지됩니다.').waitFor();await p.getByRole('button',{name:'기존 활동으로 돌아가기'}).click();
  await p.getByRole('button',{name:'이어서 하기'}).click();assert.equal(await p.evaluate(()=>window.sent.at(-1).type),'beginCourse');

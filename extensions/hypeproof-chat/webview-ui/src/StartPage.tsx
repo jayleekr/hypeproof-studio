@@ -48,12 +48,12 @@ export function StartPage() {
       </section>
       <section className="studio-connect" aria-labelledby="connect-title" aria-busy={state.checking}>
         <div className="studio-card-top"><span className="studio-step">GET STARTED</span><span className="studio-dot"/></div>
-        <h2 id="connect-title">{showProfile ? (state.started ? copy.startedTitle : "이어서 시작할까요?") : entry === "trial" ? "내 삶에 AI 더하기" : entry === "classroom" ? "수업에 참여하기" : "어떻게 시작할까요?"}</h2>
-        <p className="studio-card-description">{showProfile ? (state.started ? copy.startedDescription : "연결된 활동을 확인한 뒤 이어서 시작하세요.") : entry === "trial" ? "일상의 고민부터 만들고 싶은 것까지, AI와 함께 시작해보세요. 지금은 발급받은 체험 코드가 필요합니다." : entry === "classroom" ? "발급받은 참여 코드로 수업을 확인하세요." : "혼자 AI를 체험하거나, 참여한 수업을 이어갈 수 있습니다."}</p>
+        <h2 id="connect-title">{showProfile ? (state.started ? copy.startedTitle : state.candidate ? "이 활동으로 시작할까요?" : "이어서 시작할까요?") : entry === "trial" ? "내 삶에 AI 더하기" : entry === "classroom" ? "수업에 참여하기" : "어떻게 시작할까요?"}</h2>
+        <p className="studio-card-description">{showProfile ? (state.started ? copy.startedDescription : state.candidate ? "작업 폴더를 준비한 뒤 연결합니다. 시작 전에는 기존 활동이 유지됩니다." : "연결된 활동을 확인한 뒤 이어서 시작하세요.") : entry === "trial" ? "일상의 고민부터 만들고 싶은 것까지, AI와 함께 시작해보세요. 지금은 발급받은 체험 코드가 필요합니다." : entry === "classroom" ? "발급받은 참여 코드로 수업을 확인하세요." : "혼자 AI를 체험하거나, 참여한 수업을 이어갈 수 있습니다."}</p>
         {state.profile && !editing ? <>
           <div className="studio-course"><span className="studio-verified">{activity}</span><h3>{state.profile.name}</h3><dl><div><dt>{copy.coachRowLabel}</dt><dd>{state.profile.coach}</dd></div>{state.profile.kind !== "trial" && state.profile.kind !== "personal" && <div><dt>회차</dt><dd>{state.profile.series}</dd></div>}<div><dt>작업 폴더</dt><dd>{state.profile.workspace}</dd></div></dl></div>
           <button className="studio-primary" disabled={state.checking} onClick={() => { setState(s => ({ ...s, checking: true, error: undefined })); postToHost({ type: "beginCourse" }); }}>{state.checking ? "활동 여는 중…" : state.started ? copy.continueButton : "이어서 하기"} <span aria-hidden="true">↗</span></button>
-          <div className="studio-course-actions"><button className="studio-text-button" onClick={() => { setEditing(true); setEntry(null); setToken(""); }} disabled={state.checking}>다른 활동 선택</button><button className="studio-text-button" onClick={() => postToHost({ type: "disconnectCourse" })} disabled={state.checking}>연결 해제</button></div>
+          <div className="studio-course-actions"><button className="studio-text-button" onClick={() => { setEditing(true); setEntry(null); setToken(""); }} disabled={state.checking}>다른 활동 선택</button><button className="studio-text-button" onClick={() => postToHost({ type: state.candidate ? "cancelCandidate" : "disconnectCourse" })} disabled={state.checking}>{state.candidate ? "선택 취소" : "연결 해제"}</button></div>
         </> : entry === null ? <div className="studio-entry-options">
           <button className="studio-primary" disabled={state.checking} onClick={() => choose("trial")}>AI 체험하기 <span aria-hidden="true">→</span></button>
           <button className="studio-primary studio-secondary" disabled={state.checking} onClick={() => choose("classroom")}>수업에 참여하기 <span aria-hidden="true">→</span></button>
@@ -67,7 +67,7 @@ export function StartPage() {
           <button className="studio-text-button" type="button" disabled={state.checking} onClick={() => { setEntry(null); setToken(""); }}>시작 방법 다시 선택</button>
         </form>}
         <div aria-live="polite" role="status" className="studio-status">{state.checking ? "연결 정보를 확인하고 있습니다." : ""}</div>
-        {state.error && <div className="studio-error" id="connection-error" role="alert">{state.error}{state.profile && <p>기존 활동 연결은 유지됩니다.</p>}</div>}
+        {state.error && <div className="studio-error" id="connection-error" role="alert">{state.error}{(state.previousConnected ?? (!state.candidate && !!state.profile)) && <p>기존 활동 연결은 유지됩니다.</p>}</div>}
         <div className="studio-card-footer">{entry === "trial" && !showProfile ? "체험 코드가 없다면 코드 발급 담당자에게 요청해 주세요. 공개 가입은 아직 지원하지 않습니다." : "참여 코드에 연결된 활동과 이용 조건이 적용됩니다."}</div>
       </section>
     </div>

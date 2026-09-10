@@ -1,7 +1,7 @@
 # 체험·수업 통합 구현 순서
 
 2026-09-10 · [Intent/Epic #915](https://github.com/jayleekr/hypeproof-studio/issues/915)
-제품 책임 Jay (`jayleekr`). 상태: Intent·요구사항 발행, 구현 착수 전.
+제품 책임 Jay (`jayleekr`). 상태: 공통 코드 진입 구현·로컬 검증, 활동 전환 경계 구현 중. 공개 전달은 미완료.
 [Intent/설계](../design/unified-studio-experience.md), [US 요구사항](../requirements/unified-studio-experience.md),
 [US 테스트](../testing/unified-studio-experience.md)가 원본이다. 이슈/PR은 ID와 실행 근거를 연결한다.
 

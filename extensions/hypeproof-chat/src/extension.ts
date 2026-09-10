@@ -136,8 +136,8 @@ export async function activate(context: vscode.ExtensionContext) {
   }
   const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus, spool);
   providerRef = provider;
-  const startPage = new StartPage(context, provider, async profile => {
-    return ensureWorkspace(profile, context, isTestRun);
+  const startPage = new StartPage(context, provider, async (profile, commit) => {
+    return ensureWorkspace(profile, context, isTestRun, commit);
   });
   context.subscriptions.push(vscode.commands.registerCommand("hypeproof-chat.start", () => startPage.show()));
   // kids-quest — skeleton round result → next-turn context for the coach.
@@ -675,6 +675,7 @@ async function ensureWorkspace(
   profile?: ResolvedProfile | null,
   context?: vscode.ExtensionContext,
   isTestRun = false,
+  commit: () => Promise<void> = async () => {},
 ): Promise<boolean> {
   let open: string[] = [];
   for (let i = 0; i < 10; i++) {
@@ -697,6 +698,11 @@ async function ensureWorkspace(
       canonicalize: canonicalizeFsPath,
     });
     if (!decision.switch) {
+      const desired = profile?.workspace_root ? resolveWorkspaceRoot(profile.workspace_root) : null;
+      if (!isTestRun && desired && !isSameLocation(open[0], desired, canonicalizeFsPath)) {
+        await clearWorkspaceSwitchAttempt(context);
+        throw new Error('Activity workspace is not the active root');
+      }
       console.info(`[workspace] staying in ${open[0]} — ${decision.reason}`);
       // We just came back from a switch we ordered. Say so: a folder that
       // silently changes underneath the learner reads as "my files are gone".
@@ -711,40 +717,43 @@ async function ensureWorkspace(
       // meant to, or we deliberately gave up). Clear it so a LATER cohort change
       // is not mistaken for a failed retry of this one.
       await clearWorkspaceSwitchAttempt(context);
+      await commit();
       return false;
     }
     console.warn(`[workspace] cohort folder differs — switching ${decision.from} → ${decision.to}`);
     // Record BEFORE the reload: if the open fails we must not try again.
     await context?.globalState.update(WORKSPACE_SWITCH_ATTEMPT_KEY, decision.to);
-    return await openWorkspaceFolder(decision.to, profile);
+    try { return await openWorkspaceFolder(decision.to, profile, commit); }
+    catch (error) { await clearWorkspaceSwitchAttempt(context); throw error; }
   }
 
   // Folder + starter are cohort-driven; legacy fallback keeps old cohorts intact
   // and guarantees an absolute path (a relative workspace_root resolves to null).
   const resolved = profile?.workspace_root ? resolveWorkspaceRoot(profile.workspace_root) : null;
   const dir = resolved ?? path.join(os.homedir(), LEGACY_WORKSPACE_DIRNAME);
-  return await openWorkspaceFolder(dir, profile);
+  return await openWorkspaceFolder(dir, profile, commit);
 }
 
 /**
  * Create `dir` (with the cohort's starter page if empty) and open it as the
  * single workspace root. Returns true when the open was issued — the window is
  * reloading and the caller must bail. Returns false if the folder could not be
- * created: we continue without a workspace rather than trapping the learner
- * (chat + preview still work).
+ * created: preparation now throws and entry retains the prior connection.
  *
  * Shared by BOTH entry paths (first open, and the cohort switch) so a switched
  * folder gets the same trust/startup-editor treatment as a freshly created one.
  */
 async function openWorkspaceFolder(
   dir: string,
-  profile?: ResolvedProfile | null,
+  profile: ResolvedProfile | null | undefined,
+  commit: () => Promise<void>,
 ): Promise<boolean> {
   try {
     prepareWorkspaceDirectory(dir, !profile || profile.workspace_start === 'empty' ? 'empty' : 'html', () => starterIndexHtml(profile));
   } catch {
-    return false;
+    throw new Error('Activity workspace preparation failed');
   }
+  await commit();
 
   // Single-root open (clean Explorer). Reloads the window.
   await vscode.commands.executeCommand("vscode.openFolder", vscode.Uri.file(dir), {
