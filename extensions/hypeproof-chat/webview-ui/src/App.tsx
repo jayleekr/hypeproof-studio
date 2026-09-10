@@ -12,6 +12,7 @@ import {
   type ToolEntry,
 } from "../../src/chatTimeline";
 import { onHostMessage, postToHost } from "./vscode";
+import { runVoiceCapabilityProbe } from "./voiceProbe";
 import { ChatPanel } from "./ChatPanel";
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
 
@@ -192,6 +193,18 @@ export function App() {
   useEffect(() => {
     const off = onHostMessage((msg: HostMessage) => {
       switch (msg.type) {
+        // #897 (VO-01) — 음성 capability 프로브. **원시 관측만** 돌려보내고 판정은
+        // 호스트가 한다. 화면에 아무것도 바꾸지 않는다 — 이건 계측기다.
+        case "probeVoiceCapability": {
+          // 정적 import 다. 동적 import 로 두면 이 청크가 이 웹뷰의 **첫** 코드 분할이
+          // 되는데, `script-src` 가 cspSource 를 허용하니 될 것 같다는 추론에 계측기를
+          // 걸 수는 없다. 2.6 kB 를 항상 싣는 쪽이 검증되지 않은 로딩 경로보다 싸다.
+          const probeId = msg.probeId;
+          void runVoiceCapabilityProbe().then((observations) => {
+            postToHost({ type: "voiceCapabilityProbeResult", probeId, observations });
+          });
+          break;
+        }
         case "config":      dispatch({ type: "config", config: msg.config }); break;
         case "history":     dispatch({ type: "history", messages: msg.messages }); break;
         case "streamStart": dispatch({ type: "streamStart", streamId: msg.streamId, messageId: msg.messageId }); break;

@@ -692,6 +692,33 @@
           "path": "e2e/access-budgets/live-sdk.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-REQ-VOICE-CAPABILITY",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## R. 음성 capability 계측 (#896 / #897 V0)"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-VOICE-CAPABILITY",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/voice-capability.smoke.mjs"
+        }
+      ]
     }
   ]
 }
