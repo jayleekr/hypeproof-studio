@@ -159,3 +159,12 @@ Lab #777 → [Product Intent](../PRODUCT-INTENT.md) →
 [후속 Epic](../plan/capability-and-pricing-epics.md).
 이 행은 계획 범위다. 기존 7개 key, NAT/AE, REQ-L5/M40, MU 요구사항은 보존하며
 구독·통화 예산 구현이나 연구 타당화 완료를 주장하지 않는다.
+
+
+## 하나의 Studio에서 체험·수업 이어가기 (#915)
+
+[INT-US-01~04](../design/unified-studio-experience.md#product-intent)는 한 설치본에서 시작·전환·보존하고
+같은 개선을 체험·수업에 전달하는 제품 의도다. [US-01~18](../requirements/unified-studio-experience.md)은
+기존 NAT/AE/AB/업데이트 계약에 연결된 수용 목표이며, [US-T01~21](../testing/unified-studio-experience.md)은
+모두 NOT RUN인 테스트 계획이다. [구현 이슈와 추적](../plan/unified-studio-experience.md)을 통해
+문서 발행·구현·실기 검증·공개 배포·사용자 적용을 구분한다. #912의 수동 체크리스트는 자동 gate 구현이 아니다.

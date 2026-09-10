@@ -839,6 +839,122 @@
           "path": "e2e/voice-conversation/probe-lifecycle.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-INT-UNIFIED",
+      "stage": "intent",
+      "owner": "jayleekr",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/unified-studio-experience.md",
+          "section": "## Product Intent"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-UNIFIED",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-UNIFIED",
+        "ST-REQ-NATIVE",
+        "ST-REQ-ACCESS-BUDGET"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/unified-studio-experience.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-UNIFIED",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/unified-studio-experience.md",
+          "section": "## UX와 상태 경계"
+        },
+        {
+          "path": "docs/design/unified-studio-experience.md",
+          "section": "## 배포와 계층"
+        },
+        {
+          "path": "docs/plan/unified-studio-experience.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-UNIFIED",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-DES-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/unified-studio-experience.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-UNIFIED-ENTRY",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-TEST-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/startPage.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/startPageProtocol.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/StartPage.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/start.css"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-UNIFIED-ENTRY",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-TEST-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "e2e/tests/native-unified-entry.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-VAL-UNIFIED-ENTRY",
+      "stage": "validation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-IMP-UNIFIED-ENTRY",
+        "ST-TEST-UNIFIED-ENTRY"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/unified-entry-916-evidence.md"
+        }
+      ]
     }
   ]
 }

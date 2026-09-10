@@ -8,7 +8,7 @@ for(const legacy of [false,true])test('ambiguous start without file tools: '+(le
  const seed='<!doctype html><html><body><h1>보존해야 하는 이전 작업</h1></body></html>';
  try{
   if(legacy)writeFileSync(join(ctx.wsDir,'index.html'),seed);
-  const start=await startFrame(ctx.win);await start.getByRole('button',{name:'수업 시작하기'}).click();
+  const start=await startFrame(ctx.win);await start.getByRole('button',{name: /^(?:이어서 하기|수업 시작하기)$/}).click();
   const chat=await chatFrame(ctx.win);await chat.getByRole('combobox',{name:'대화 모델'}).selectOption('claude-opus-5');
   const input=chat.getByRole('textbox',{name:/보낼 메시지/});const prompt='해야 할 일은 있는데 어디서 시작할지 모르겠어';await input.fill(prompt);await input.press('Enter');
   await expect(chat.locator('.hps-btn-stop')).toBeVisible();await expect(chat.locator('.hps-btn-stop')).toHaveCount(0,{timeout:120000});await expect(chat.locator('.hps-error-banner')).toHaveCount(0);
@@ -22,7 +22,7 @@ for(const legacy of [false,true])test('ambiguous start without file tools: '+(le
 test('explicit document then web request chooses its own file format',async()=>{
  test.setTimeout(300000);const ctx=await launchApp({preseedToken:true,stayOnStart:true});const out=join(process.env.HPS_NATIVE_EVIDENCE_DIR!,'formats');mkdirSync(out,{recursive:true});const turns:any[]=[];
  try{
-  const start=await startFrame(ctx.win);await start.getByRole('button',{name:'수업 시작하기'}).click();const chat=await chatFrame(ctx.win);
+  const start=await startFrame(ctx.win);await start.getByRole('button',{name: /^(?:이어서 하기|수업 시작하기)$/}).click();const chat=await chatFrame(ctx.win);
   await chat.getByRole('combobox',{name:'대화 모델'}).selectOption('hypeproof-fast');const input=chat.getByRole('textbox',{name:/보낼 메시지/});
   for(const [name,prompt] of [['walk.md','오늘 산책 준비물 3개를 짧은 Markdown 문서 walk.md로 저장해줘. 물, 운동화, 모자를 포함해줘.'],['index.html','이제 작은 웹페이지를 만들어줘. 제목은 산책 준비, 물·운동화·모자를 보여주는 index.html 파일을 저장해줘. 배포나 브라우저 열기는 하지마.']]){
    await input.fill(prompt);await input.press('Enter');await expect(chat.locator('.hps-btn-stop')).toBeVisible();await expect(chat.locator('.hps-btn-stop')).toHaveCount(0,{timeout:120000});await expect(chat.locator('.hps-error-banner')).toHaveCount(0);

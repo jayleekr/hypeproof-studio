@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import { createRequire } from 'node:module';
 const require=createRequire(import.meta.url);
 const bundle=await build({entryPoints:[new URL('../src/startPage.ts',import.meta.url).pathname],bundle:true,platform:'node',format:'cjs',external:['vscode'],write:false});
-const profile={profile_id:'adult',display_name:'Adult practice',ux:{coach:{naming_mode:'fixed',fallback_name:'Coach'}},welcome:{},series_index:1,series_total:5};
+const profile={activity_kind:'trial',profile_id:'adult',display_name:'Adult practice',ux:{coach:{naming_mode:'fixed',fallback_name:'Coach'}},welcome:{},series_index:1,series_total:5};
 let stored='valid-old', busy=false, response='valid',writes=0,editorStarts=0;
 const states=[];const commands=[];
 const ctx={secrets:{get:async()=>stored,store:async(_k,v)=>{stored=v;writes++;},delete:async()=>{stored=undefined;writes++;}},extension:{packageJSON:{version:'test'}},subscriptions:[]};
@@ -24,6 +24,7 @@ for(const failure of ['invalid','forbidden','network','malformed']){
 busy=true;response='valid';await page.handle({type:'connectCourse',token:'valid-new'});assert.equal(writes,0);busy=false;
 await page.handle({type:'connectCourse',token:'valid-new'});assert.equal(stored,'valid-new');assert.equal(writes,1);assert.ok(states.at(-1).state.profile);assert.equal(states.at(-1).state.error,undefined);
 // #747 — the resolved AI name travels with the state so start-page sentences match the chat header.
+assert.equal(states.at(-1).state.profile.kind,'trial');
 assert.equal(states.at(-1).state.coachName,'Coach');assert.equal(states.at(-1).state.profile.coach,'Coach');
 assert.ok(!JSON.stringify(states).includes('valid-new'),'credential must never be returned to webview');
 console.log('PASS start-page host: 401/403/network/malformed preserve prior token; active chat blocks switch; valid token stored without echo');

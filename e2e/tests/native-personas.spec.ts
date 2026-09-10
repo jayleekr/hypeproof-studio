@@ -16,7 +16,7 @@ for(const persona of suite.personas.filter((p:any)=>!selected||selected.includes
     backend:codex?'Codex ChatGPT / GPT practice':'Anthropic API / native trial',synthetic:true,transport:'RUNNING',semantic_review:'PENDING',turns:[]};
   try{
    expect(await ctx.app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().every(w=>!w.isFocusable()))).toBe(true);
-   const start=await startFrame(ctx.win);await start.getByRole('button',{name:'수업 시작하기'}).click();
+   const start=await startFrame(ctx.win);await start.getByRole('button',{name: /^(?:이어서 하기|수업 시작하기)$/}).click();
    const chat=await chatFrame(ctx.win), input=chat.getByRole('textbox',{name:/보낼 메시지/});
    const selector=chat.getByRole('combobox',{name:'대화 모델'});
    await selector.selectOption(codex?(persona.model??'gpt-5.6-luna'):'hypeproof-fast');
