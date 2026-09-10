@@ -874,6 +874,33 @@
           "path": "docs/testing/unified-studio-experience.md"
         }
       ]
+    },
+    {
+      "id": "ST-TEST-VOICE-SESSION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/voice-session.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-VOICE-SESSION",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-TEST-VOICE-SESSION"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/voiceSessionHelpers.ts"
+        }
+      ]
     }
   ]
 }
