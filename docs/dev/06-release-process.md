@@ -75,6 +75,42 @@ each supported OS. A source-code merge does not update installed clients: a new
 App release and its public mirror are required. Older broken updater builds may
 still need a one-time manual reinstall (notably REQ-I10).
 
+## Trial and classroom delivery
+
+Personal trial and classroom sessions use **one App artifact and one stable
+update channel**. Participation codes select the Service profile and access
+limits; they do not select a second App build. Publish each App release once to
+`hypeproof-studio-releases`, then verify both entry paths against that artifact.
+A successful mirror makes an update available; it does not replace a running
+installation or prove that the user has restarted into it.
+
+On macOS, ordinary and personal-trial shortcuts must resolve to
+`/Applications/HypeProof Studio.app`. A trial may keep separate user-data,
+extensions and workspace directories, but its regular shortcut must not pin an
+App under `releases/v*/`. Preserve those directories when updating. Explicitly
+label isolated App/Service copies used for development as local rehearsals.
+They are not evidence that a public release has reached the user.
+
+For every release report, record these separately for trial and classroom:
+
+- Public App tag, asset digest and source commit.
+- Actual executable path, product version/commit and bundled extension version
+  after restart. An old process remains old even if a newer file exists on disk.
+- Effective Service endpoint and `/v1/health` version; confirm the selected
+  profile using the existing authenticated API without logging the token.
+- Module version/pin, or compiled Service prompt revision when there is no pin.
+
+A Service deployment reaches both profiles using that Service; a local gateway
+continues serving its own code. App, Service and Module deployment remain
+separate under the layer plan. Do not rebuild App for a Service-only change or
+report a localhost result as public deployment. Reuse the existing App updater
+for verified download, backup and safe restart; do not add a trial updater.
+
+The release checklist requires both entry paths. If either is stale or untested,
+report delivery as incomplete with the missing path and action, rather than
+claiming that both were deployed. See NAT-01/12 and the
+[native trial laptop checks](../testing/studio-native-trial-laptop.md).
+
 ## Rollback
 
 Rollback means returning workshop members to the previous known-good app build

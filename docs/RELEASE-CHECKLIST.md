@@ -34,6 +34,17 @@ Use this before any release-cutting action. Source of truth for Phase 7 decision
 - [ ] Mirror release body is installer-facing, not a verbatim copy of the main
       repo engineering release notes.
 - [ ] Verify one-line installers resolve to the new release (test from a fresh shell)
+- [ ] Verify ordinary and personal-trial entry paths use the same released App
+      artifact/update channel. On macOS, both regular shortcuts resolve to
+      `/Applications/HypeProof Studio.app`; preserve separate user-data/workspaces.
+- [ ] After restart, record actual executable path, App version/commit and bundled
+      extension version for both paths. Merely staging/downloading is not delivery.
+- [ ] Record each path's Service health version, authenticated profile and Module
+      pin/compiled prompt revision. Label localhost rehearsals separately; never
+      count an old local gateway as the newly deployed public Service.
+- [ ] If either entry path has not passed, report that gap explicitly. Do not mark
+      trial and classroom delivery complete from mirror success alone. Follow
+      [the shared delivery contract](dev/06-release-process.md#trial-and-classroom-delivery).
 
 ## Endpoint / config change → re-cut
 
