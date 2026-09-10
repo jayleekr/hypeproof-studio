@@ -720,6 +720,9 @@
       "sources": [
         {
           "path": "extensions/hypeproof-chat/test/voice-capability.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/voice-probe-lifecycle.smoke.mjs"
         }
       ]
     },
