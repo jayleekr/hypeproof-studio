@@ -314,6 +314,9 @@ Service 집행이 없다는 뜻이다.
 
 ## R. 음성 capability 계측 (#896 / #897 V0)
 
+계획된 팝업 UX (#939): [VO-36–47](requirements/voice-conversation.md) · [VO-T36–47](testing/voice-conversation.md). 큰 패널/작은 컨트롤과 관측 기반 움직임은 요구사항이며 현재 구현 완료를 뜻하지 않는다.
+
+
 음성 전체 계획: [VO-01–35](requirements/voice-conversation.md) · [VO-T01–35 및 독립 검수](testing/voice-conversation.md) · [에픽 인계](plan/voice-conversation-epics.md). 아래 구현 계약과 전체 수용 기준의 완료 상태는 구분한다.
 
 V1 음소거 계약 보강 (#929): 사용자의 음소거 의도는 전송 재연결과 독립적으로 보존한다. 연결 복구는 명시적 음소거 해제를 대신하지 않으며, 연결 대기 중 음소거 해제도 transport_ready 이전에 캡처를 열지 않는다. 순수 결정 회귀: `voice-session.smoke.mjs`; 실제 기기 인수는 별도 미실행.
