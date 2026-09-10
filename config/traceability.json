@@ -939,6 +939,41 @@
       ]
     },
     {
+      "id": "ST-TEST-VOICE-POPUP",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-REQ-VOICE-CONVERSATION"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/voice-popup.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-VOICE-POPUP",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-REQ-VOICE-CONVERSATION",
+        "ST-TEST-VOICE-POPUP"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/voicePopupHelpers.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/VoicePanel.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/styles.css"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-OPERATOR-HEALTH-AUTH",
       "stage": "test",
       "owner": "jayleekr",
