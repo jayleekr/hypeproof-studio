@@ -971,6 +971,9 @@
         },
         {
           "path": "extensions/hypeproof-chat/webview-ui/src/start.css"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chatPanelProvider.ts"
         }
       ]
     },
@@ -1026,6 +1029,9 @@
       "sources": [
         {
           "path": "extensions/hypeproof-chat/test/start-page.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/pending-send.smoke.mjs"
         }
       ]
     },
