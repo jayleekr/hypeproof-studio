@@ -224,6 +224,30 @@ usage에서 세션별 known/partial 총원가와 p50/p95를 산출하고 사용 
 
 ## 팝업 UX 인수 — #939
 
+### #955 독립 컴포넌트 관측 (2026-09-10)
+
+대상 `562534c8d3b8dd066f47f25863bf4c1f5445391b` (이후 main `08bb339`로 병합).
+실제 VoicePanel.tsx와 styles.css를 esbuild로 번들하고 Chromium에서 합성 props로 실행했다.
+실제 마이크·전송·설치 Studio 인수가 아니며, 입력창 버튼 배선도 아직 없다.
+[관측 JSON](../research/voice-popup-955/observations.json) ·
+[큰 패널 캡처](../research/voice-popup-955/expanded.png) ·
+[좁은 화면 하단 캡처](../research/voice-popup-955/narrow-bottom.png).
+
+- PASS: 기존 voice-popup.smoke.mjs 독립 실행. 큰 패널의 Escape는 onDismiss('escape') 호출.
+- FAIL: 축소 버튼 focus → Enter 후 compact가 나타나지만 activeElement는 BODY.
+  compact 상태에서 Escape 콜백 없음. VO-T40/47의 부분 시나리오 실패.
+- FAIL: 320×640, finalTranscript에 ‘작업 내용을 함께 검토합니다. ’ 150회 입력 후
+  패널 맨 아래로 스크롤. 패널 y=42..516인데 종료 버튼 y=-1157..-1127로 사라진다.
+  상태도 사라진다. sticky 음소거/텍스트 전환은 보이는 대조군이다.
+- FAIL: prefers-reduced-motion:reduce와 meterView reduceMotion:true에서 inputLevel .1→.9.
+  중앙 막대 높이가 16.39→51.59px로 바뀌어 정적 상태 요구를 만족하지 못한다.
+- 렌더 콘솔 오류 0. 최초 검증 환경의 React 버전 혼합은 react/react-dom을 동일
+  webview 의존성으로 고정한 뒤 재실행했으며 제품 결함으로 세지 않았다.
+
+수정/재검증 추적: [#962](https://github.com/jayleekr/hypeproof-studio/issues/962).
+위는 부분 브라우저 관측이고 아래 전체 VO-T36–47 실기 수용 기준은 NOT RUN으로 유지한다.
+
+
 아래는 [VO-36–47](../requirements/voice-conversation.md#음성-대화-팝업-구체화--939-계획)의
 수용 시나리오다. 정적 와이어프레임 검사는 실제 UI/마이크 시험이 아니다.
 구현 시 기존 e2e/실기 하네스에 연결하고 제출 SHA·실제 App 버전과 증거를 남긴다.
