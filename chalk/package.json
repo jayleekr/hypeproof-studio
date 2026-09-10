@@ -15,7 +15,7 @@
     "test:budgets": "node --experimental-strip-types --experimental-sqlite test/budgets.test.mjs"
   },
   "dependencies": {
-    "hono": "^4.12.34"
+    "hono": "^4.13.5"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260801.1",
