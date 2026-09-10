@@ -1,3 +1,4 @@
+import { activityIdentity } from '../lib/activity-identity';
 import { permittedFeatureKeys } from '../lib/lesson-feature-policy';
 import { resolveExecutionAccess, reserveBudgetAttempt, dispatchBudgetAttempt, budgetErrorResponse, type ExecutionAccess } from '../lib/budget-admission';
 import { AccessError, accessDigest } from '../lib/access-contracts';
@@ -204,6 +205,14 @@ chat.get('/request-settings/:turn', async c => {
   } catch { return c.json({error:'request settings unavailable'},503); }
 });
 
+// Read-only execution preflight, using exactly the existing runtime authority gate.
+chat.get('/activity', async c => {
+  const gate = await gateChatRequest(c);
+  if (!gate.ok) return gate.response;
+  c.header('cache-control', 'no-store');
+  return c.json({ activity_id: await activityIdentity(gate.payload) });
+});
+
 chat.get("/profile", async (c) => {
   const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
   if (!auth.ok) {
@@ -275,6 +284,7 @@ chat.get("/profile", async (c) => {
   const served = lesson?.content.features ? applyLessonFeatures(profile, lesson.content.features) : profile;
   return c.json({
     ...(lesson ? { lesson } : {}),
+    activity_id: await activityIdentity(auth.payload),
     activity_kind: auth.payload.native_trial ? "trial" : auth.payload.account ? "personal" : "classroom",
     profile_id: profile.id,
     ...(auth.payload.account?{access_identity:{kind:'account',scope:'account-'+await accessDigest(auth.payload.account)}}:{}),

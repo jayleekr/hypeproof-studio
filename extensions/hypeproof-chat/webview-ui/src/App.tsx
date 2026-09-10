@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useState } from "react";
+import { useEffect, useReducer, useState, useRef } from "react";
 import type { AssetScoreChunk, ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
 import {
   emptyTimeline,
@@ -82,7 +82,7 @@ const initialState: State = {
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "config":
-      return { ...state, config: action.config };
+      return { ...(state.config?.activity?.id === action.config.activity?.id ? state : initialState), config: action.config };
     case "history":
       // 대화·툴·에러가 한 번에 갈린다. Clear 를 눌러도 직전 턴의 툴 호출 목록이
       // 화면에 남아 있었다(2026-07-27 실사용) — 이제 툴이 타임라인의 일부라
@@ -185,6 +185,7 @@ function reducer(state: State, action: Action): State {
 
 export function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
+  const scope = useRef<string | undefined>();
   const [shouldCrash, setShouldCrash] = useState(false);
   // #384 — image handed over from the host (an image opened in an editor tab).
   // nonce forces ChatPanel's effect to re-run even for the same dataUrl.
@@ -192,6 +193,10 @@ export function App() {
 
   useEffect(() => {
     const off = onHostMessage((msg: HostMessage) => {
+      if (msg.type === "config") {
+        if (scope.current !== msg.config.activity?.id) setIncomingImage(null);
+        scope.current = msg.config.activity?.id;
+      } else if (msg.activityId && msg.activityId !== scope.current) return;
       switch (msg.type) {
         // #897 (VO-01) — 음성 capability 프로브. **원시 관측만** 돌려보내고 판정은
         // 호스트가 한다. 화면에 아무것도 바꾸지 않는다 — 이건 계측기다.
@@ -241,14 +246,14 @@ export function App() {
     const hasImages = !!images && images.length > 0;
     if ((!trimmed && !hasImages) || state.streamId) return;
     dispatch({ type: "userSent", text: trimmed, images });
-    postToHost({ type: "sendMessage", text: trimmed, history: messages, images });
+    postToHost({ type: "sendMessage", activityId: state.config?.activity?.id, text: trimmed, history: messages, images });
   };
 
   const retry = (prompt: string) => {
     if (state.streamId) return;
     // Re-send the same user prompt to get a fresh assistant variant.
     dispatch({ type: "userSent", text: prompt });
-    postToHost({ type: "retryMessage", prompt, history: messages });
+    postToHost({ type: "retryMessage", activityId: state.config?.activity?.id, prompt, history: messages });
   };
 
   // S-04 (#48): "다시 보내기" on a stream error reuses the LAST user prompt
@@ -265,7 +270,7 @@ export function App() {
         // the in-memory message (single-shot, REQ-C11), which is exactly what a
         // same-session retry needs.
         const images = m.images && m.images.length > 0 ? m.images : undefined;
-        postToHost({ type: "retryMessage", prompt: m.content, history: messages, images });
+        postToHost({ type: "retryMessage", activityId: state.config?.activity?.id, prompt: m.content, history: messages, images });
         return;
       }
     }
@@ -285,6 +290,7 @@ export function App() {
     <ChatErrorBoundary onReset={() => { setShouldCrash(false); postToHost({ type: "ready" }); }}>
       <CrashIfFlagged crash={shouldCrash} />
       <ChatPanel
+        key={state.config?.activity?.id ?? "disconnected"}
         incomingImage={incomingImage}
         config={state.config}
         messages={messages}

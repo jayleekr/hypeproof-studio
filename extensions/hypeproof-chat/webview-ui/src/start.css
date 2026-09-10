@@ -380,3 +380,7 @@
 .studio-entry-options { display: grid; gap: 12px; }
 .studio-secondary { background: transparent; color: var(--studio-text); border-color: var(--studio-line); }
 .studio-secondary:hover:enabled { background: var(--studio-bg); }
+
+.studio-saved-activities button { display: block; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
+.studio-saved-activities small { display: block; font-size: .8em; opacity: .75; }
+.hps-activity-header { padding: 8px 16px; font-size: .9em; overflow-wrap: anywhere; }

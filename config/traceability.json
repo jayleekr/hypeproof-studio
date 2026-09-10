@@ -1114,6 +1114,201 @@
           "path": "worker/src/routes/chat.ts"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-ACTIVITY-BINDING",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-TEST-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/activityConnections.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/activityDraft.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/extension.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/protocol.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/proxyClient.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/App.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/ChatPanel.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/vscode.ts"
+        },
+        {
+          "path": "worker/src/lib/activity-identity.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-ACTIVITY-ISOLATION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-DES-ACTIVITY-BINDING"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/activity-connections.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/activity-draft.smoke.mjs"
+        },
+        {
+          "path": "worker/test/activity-identity.test.mjs"
+        },
+        {
+          "path": "e2e/tests/native-unified-switch.spec.ts"
+        },
+        {
+          "path": "e2e/trial-ux/run.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-UNIFIED-DELIVERY",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-TEST-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "scripts/unified-launcher.mjs"
+        },
+        {
+          "path": "scripts/check-unified-release.mjs"
+        },
+        {
+          "path": "e2e/unified-release/artifact.mjs"
+        },
+        {
+          "path": "e2e/unified-release/run.mjs"
+        },
+        {
+          "path": "e2e/unified-release/public.mjs"
+        },
+        {
+          "path": "e2e/unified-release/install-windows.mjs"
+        },
+        {
+          "path": ".github/workflows/build-mac.yml"
+        },
+        {
+          "path": ".github/workflows/build-windows.yml"
+        },
+        {
+          "path": ".github/workflows/mirror-release.yml"
+        },
+        {
+          "path": ".github/workflows/deploy-worker.yml"
+        },
+        {
+          "path": ".github/workflows/verify-unified-release.yml"
+        },
+        {
+          "path": ".github/workflows/verify-service-activities.yml"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-UNIFIED-DELIVERY",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-IMP-UNIFIED-DELIVERY"
+      ],
+      "sources": [
+        {
+          "path": "scripts/test-unified-launcher.mjs"
+        },
+        {
+          "path": "e2e/unified-release/gate.test.mjs"
+        },
+        {
+          "path": "e2e/tests/native-public-activity.spec.ts"
+        },
+        {
+          "path": "e2e/tests/native-trial-live.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-SDK-SAVE-EVIDENCE",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-TEST-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/sdkCoachHelpers.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-SDK-SAVE-EVIDENCE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-IMP-SDK-SAVE-EVIDENCE"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/sdk-result-drift.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sdk-activity.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-UNIFIED-DELIVERY",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "docs/dev/unified-release-and-migration.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-VAL-UNIFIED-COMPLETION",
+      "stage": "validation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-IMP-ACTIVITY-BINDING",
+        "ST-TEST-ACTIVITY-ISOLATION",
+        "ST-IMP-UNIFIED-DELIVERY",
+        "ST-TEST-UNIFIED-DELIVERY",
+        "ST-TEST-SDK-SAVE-EVIDENCE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/unified-completion-917-919-evidence.md"
+        }
+      ]
     }
   ]
 }

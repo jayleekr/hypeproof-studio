@@ -31,7 +31,7 @@ test('unified entry: choose without execution, authenticate existing code, start
     await start.getByRole('button', { name: '코드 확인하기' }).click();
     await expect(start.locator('.studio-course')).toBeVisible();
     await ctx.win.screenshot({ path: join(out, 'unified-connected.png') });
-    await start.getByRole('button', { name: '이어서 하기' }).click();
+    await start.getByRole('button', { name: '이 활동 시작하기' }).click();
     const chat = await chatFrame(ctx.win);
     await expect(chat.getByRole('textbox', { name: /보낼 메시지/ })).toBeVisible();
     expect(existsSync(join(ctx.wsDir, 'index.html'))).toBe(false);

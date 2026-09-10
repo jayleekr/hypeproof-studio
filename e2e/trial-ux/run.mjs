@@ -184,7 +184,7 @@ try {
     await host(p, { type: 'attachImage', dataUrl }); await expect(btn(p, '이미지 제거')).toBeVisible(); await btn(p, 'Send').click();
     await request(p, { type: 'sendMessage', text: '' }); assert.equal(emitted(await requests(p), 'sendMessage')[0].images.length, 1); await expect(btn(p, '이미지 제거')).toHaveCount(0);
   });
-  for (const [id, label, type] of [['07', '수업 연결', 'setToken'], ['08', '대화 지우기', 'clearHistory'], ['09', '설정', 'openSettings']]) {
+  for (const [id, label, type] of [['07', '활동 변경', 'setToken'], ['08', '대화 지우기', 'clearHistory'], ['09', '설정', 'openSettings']]) {
     await test(`TUX-CHAT-${id}`, `${label}: request delegates to host; Clear waits for host confirmation/result`, async p => {
       await host(p, { type: 'history', messages: history }); await btn(p, label).click(); await request(p, { type });
       if (type === 'clearHistory') { await expect(p.getByText(history[0].content, { exact: true })).toBeVisible(); await host(p, { type: 'history', messages: [] }); await expect(p.getByText(history[0].content, { exact: true })).toHaveCount(0); }
@@ -307,6 +307,31 @@ try {
       if(await button.isVisible())expect(await button.getAttribute('aria-label')||await button.innerText()||await button.getAttribute('title')).toBeTruthy();
     }
   });
+  await test('US-UI-DRAFT', 'Activity draft, attachment, queue restoration and freeze acknowledgment', async p => {
+    await expect(draft(p)).toHaveValue('예약한 합성 입력\n작성 중인 합성 입력');
+    assert.equal(emitted(await requests(p),'sendMessage').length,0,'restart must not auto-send queued work');
+    await draft(p).fill('저장할 합성 초안');
+    await host(p,{type:'activityFreeze',activityId:'activity-a',frozen:true,nonce:'flush-control'});
+    await expect(draft(p)).toHaveAttribute('readonly','');
+    await request(p,{type:'saveActivityDraft',activityId:'activity-a',nonce:'flush-control',draft:{text:'저장할 합성 초안',images:[],queued:null}});
+    await host(p,{type:'activityFreeze',activityId:'activity-a',frozen:false});
+    await expect(draft(p)).not.toHaveAttribute('readonly','');
+    await draft(p).fill('');
+    await host(p,{type:'inputRejected',activityId:'activity-a',text:'연결 거부 후 보존할 입력'});
+    await expect(draft(p)).toHaveValue('연결 거부 후 보존할 입력');
+    await host(p,{type:'config',config:config(native,{activity:{id:'activity-b',name:'합성 활동 B',kind:'classroom',workspace:'/synthetic/b',verified:true},activityDraft:{text:'B 초안',images:[],queued:null}})});
+    await host(p,{type:'streamChunk',activityId:'activity-a',delta:'다른 활동의 비밀 표식'});
+    await expect(draft(p)).toHaveValue('B 초안');
+    await expect(p.getByText('다른 활동의 비밀 표식')).toHaveCount(0);
+    await expect(p.getByLabel('현재 활동')).toContainText('합성 활동 B');
+  },{cfg:{activity:{id:'activity-a',name:'합성 활동 A',kind:'trial',workspace:'/synthetic/a',verified:true},activityDraft:{text:'작성 중인 합성 입력',images:[],queued:'예약한 합성 입력'}}});
+  await test('US-UI-OFFLINE', 'Offline activity keeps local history without permitting send', async p => {
+    await host(p,{type:'history',activityId:'activity-a',messages:history});
+    await expect(p.getByText('가상 안내 페이지를 만들어주세요.',{exact:true})).toBeVisible();
+    await expect(draft(p)).toHaveAttribute('readonly','');
+    await expect(p.getByRole('status').filter({hasText:'연결을 확인하지 못했습니다'})).toBeVisible();
+    assert.equal(emitted(await requests(p),'sendMessage').length,0);
+  },{profile:null,cfg:{activity:{id:'activity-a',name:'합성 활동 A',kind:'trial',workspace:'/synthetic/a',verified:false},activityDraft:{text:'보존한 입력',images:[],queued:null}}});
   await test('TUX-LAYOUT-01', 'Start surface 390/768/1280 has no horizontal overflow', async p => { for (const width of [390, 768, 1280]) { await p.setViewportSize({ width, height: 900 }); assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); await p.screenshot({ path: path.join(out, `start-${width}.png`), fullPage: true }); } }, { surface: 'start' });
   await test('TUX-LAYOUT-02', 'Chat + expanded observation 390/768/1280 has no horizontal overflow', async p => { await openObservation(p); await observe(p, { findings }); await p.getByText('보존된 산출물 비교', { exact: true }).click(); for (const width of [390, 768, 1280]) { await p.setViewportSize({ width, height: 900 }); assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); await p.screenshot({ path: path.join(out, `chat-${width}.png`), fullPage: true }); } });
 } finally {

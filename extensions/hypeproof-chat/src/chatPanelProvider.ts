@@ -1,3 +1,6 @@
+import { ActivityConnectionError, activityConnections } from './activityConnections';
+import { emptyActivityDraft, validActivityDraft } from './activityDraft';
+import { verifyActivity } from './proxyClient';
 import { fetchAccessView, sendBudgetRequest, accessProfile, type AccessState } from './accessClient';
 import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice, selectedEffort, observedEffortResult, type SavedEffortChoice } from './modelSelection';
 import * as vscode from "vscode";
@@ -556,8 +559,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     };
     view.webview.html = this.renderHtml(view.webview, webviewDist);
 
-    view.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg));
+    const sidebarWebview=view.webview;
+    view.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg, view.webview));
     view.onDidDispose(() => {
+      if (this.draftSource===sidebarWebview) this.draftSource=undefined;
       if (this.view === view) this.view = undefined;
       if (!this.editorChat) abortAllStreams(this.activeStreams);
     });
@@ -573,8 +578,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.editorChat = entry;
       entry.title = 'AI와 작업';
       const dist = vscode.Uri.joinPath(this.context.extensionUri, 'webview-ui', 'dist');
-      entry.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg));
+      entry.webview.onDidReceiveMessage((msg: WebviewMessage) => this.handleMessage(msg, entry.webview));
+      const editorWebview=entry.webview;
       entry.onDidDispose(() => {
+        if(this.draftSource===editorWebview)this.draftSource=undefined;
         if (this.editorChat === entry) {
           this.editorChat = undefined;
           abortAllStreams(this.activeStreams);
@@ -593,9 +600,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private connectionChanging = false;
-  setConnectionChanging(value: boolean): void { this.connectionChanging = value; }
+  private draftWrites: Promise<void> = Promise.resolve();
+  private draftSource?: vscode.Webview;
+  private draftFlush?: {nonce:string;source:vscode.Webview;resolve:()=>void;reject:(e:Error)=>void};
+  async setConnectionChanging(value: boolean): Promise<void> {
+    this.connectionChanging = value;
+    if (!activityConnections(this.context)) return;
+    await this.post({type:'activityFreeze',frozen:value});
+    if (!value) return;
+    const source=this.draftSource;
+    if (source) {
+      const nonce=crypto.randomUUID();
+      await new Promise<void>((resolve,reject)=>{
+        const timer=setTimeout(()=>{this.draftFlush=undefined;reject(new Error('입력 저장을 확인하지 못했습니다. 활동을 유지하고 다시 시도해 주세요.'));},8000);
+        this.draftFlush={nonce,source,resolve:()=>{clearTimeout(timer);this.draftFlush=undefined;resolve();},reject:e=>{clearTimeout(timer);this.draftFlush=undefined;reject(e);}};
+        void source.postMessage({type:'activityFreeze',frozen:true,nonce,activityId:activityConnections(this.context)?.scope});
+      });
+    }
+    await this.draftWrites;
+  }
 
-  hasActiveStream(): boolean { return this.pendingSends > 0 || this.activeStreams.size > 0; }
+  hasActiveStream(): boolean { return this.pendingSends > 0 || this.activeStreams.size > 0 || !!this.worldOpening || !!this.observationAssessment || (this.pendingApprovals?.size ?? 0) > 0; }
 
   refreshConfig() {
     void (async () => {
@@ -704,6 +729,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       await this.profileFetchPromise;
       this.cachedProfile = null;
     }
+    const connections=activityConnections(this.context);
+    if (connections && !connections.matchesService) return null;
     if (this.cachedProfile) return this.cachedProfile;
     if (this.profileFetchPromise) return this.profileFetchPromise;
 
@@ -722,7 +749,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // #381 — remember WHY, so the token-entry flow can say something the
         // participant can act on instead of one generic "확인이 안 돼요".
         this.lastProfileFailure = r.ok ? null : r.failure;
-        const p = r.ok ? r.profile : null;
+        let p = r.ok ? r.profile : null;
+        if (connections?.current && p) {
+          if (p.activity_id!==connections.current.serverId) p=null;
+          else p={...p,workspace_root:connections.current.workspace};
+        }
         this.cachedProfile = p;
         this.profileFetchPromise = null;
         // #278 — gate the "페이지를 코치에게" toolbar button to opted-in cohorts.
@@ -1787,11 +1818,33 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     await this.postConfig();
   }
 
-  private async handleMessage(msg: WebviewMessage): Promise<void> {
+  private async handleMessage(msg: WebviewMessage, source?: vscode.Webview): Promise<void> {
+    const connections=activityConnections(this.context);
+    if (connections && msg.activityId && msg.activityId!==connections.scope) return;
+    if (msg.type==='saveActivityDraft') {
+      if (!connections?.scope || msg.activityId!==connections.scope || !validActivityDraft(msg.draft)) return;
+      if (source && !msg.nonce) this.draftSource=source;
+      const key='hps.activity.draft.'+msg.activityId;
+      const save=this.draftWrites.then(()=>this.context.workspaceState.update(key,msg.draft));
+      this.draftWrites=save.catch(()=>{});
+      try {
+        await save;
+        if (msg.nonce && this.draftFlush?.nonce===msg.nonce && this.draftFlush.source===source) this.draftFlush.resolve();
+      } catch {
+        const error=new Error('입력을 저장하지 못했습니다. 기존 활동을 유지합니다.');
+        if (msg.nonce && this.draftFlush?.nonce===msg.nonce) this.draftFlush.reject(error);
+        await this.post({type:'activityDraftError',error:'입력을 저장하지 못했습니다. 활동을 바꾸기 전에 내용을 복사해 두세요.'});
+      }
+      return;
+    }
+    if (connections && (msg.type==='sendMessage'||msg.type==='retryMessage') && msg.activityId!==connections.scope) {
+      await this.post({type:'streamError',streamId:'connection',error:'활동이 바뀌었습니다. 현재 활동에서 요청을 다시 확인해 주세요.'});return;
+    }
     // Any message from the panel is evidence of a human. See `lastActivityAt`.
     this.lastActivityAt = Date.now();
     if (this.connectionChanging && (msg.type === "sendMessage" || msg.type === "retryMessage")) {
-      void this.post({ type: "streamError", streamId: "connection", error: "수업 연결 확인이 끝난 뒤 다시 보내세요." });
+      await this.post({type:"inputRejected",text:msg.type==="sendMessage"?msg.text:msg.prompt,images:msg.images});
+      void this.post({ type: "streamError", streamId: "connection", error: "활동 전환이 끝난 뒤 다시 보내세요. 입력은 초안에 남겨 두었습니다." });
       return;
     }
     switch (msg.type) {
@@ -2017,11 +2070,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     images?: string[],
   ): Promise<void> {
     this.pendingSends++;
+    let releaseActivity: (()=>void) | undefined;
+    let preflightComplete=false;
     try {
+    const connections=activityConnections(this.context);
+    if (connections) {
+      releaseActivity=connections.acquire();
+      const token=await connections.token();
+      await verifyActivity({token:token!,proxyUrl:connections.current!.service},connections.current!.serverId);
+    }
+    preflightComplete=true;
     // #503 — 웹뷰의 히스토리에는 이제 툴 줄(role:"tool")이 섞여 있다. 모델로
     // 나가는 경로는 여기 하나뿐이므로 초입에서 한 번 거른다. 아래쪽 프록시·SDK
     // 게이트웨이 호출은 user/assistant 만 아는 계약이다.
-    const history = modelHistory(rawHistory);
+    const history = modelHistory(activityConnections(this.context) ? this.getHistory() : rawHistory);
     // "Show me / open it / run it" — if the kid asks to see the game in plain
     // language and a game already exists, just open it. Don't make them hunt
     // for the ▶ Run button or burn an AI round-trip on a deflection. Skipped
@@ -2648,8 +2710,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       void this.loadAccess(true).then(()=>this.postConfig()).catch(()=>{});
       this.turnTimelines.delete(streamId);
     }
+    } catch (error) {
+      if (preflightComplete) throw error;
+      await this.post({type:"inputRejected",text,images});
+      await this.post({type:"streamError",streamId:"activity",error:error instanceof ActivityConnectionError || error instanceof ProxyTransportError ? error.message : "활동 연결 또는 작업 폴더를 확인하지 못했습니다. 연결 상태를 확인한 뒤 다시 보내 주세요."});
     } finally {
-      this.pendingSends--;
+      try { releaseActivity?.(); } finally { this.pendingSends--; }
     }
   }
 
@@ -3073,6 +3139,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async postConfig(): Promise<void> {
+    const activity=activityConnections(this.context)?.current;
+    const scope=activity?.id;
+    await this.draftWrites;
     await this.loadAccess();
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     const token = await this.context.secrets.get(TOKEN_KEY);
@@ -3086,12 +3155,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.effortScope = effortScope;
       this.effortTurn = undefined; this.effortResult = undefined; this.effortNotice = undefined;
     }
+    if (scope!==activityConnections(this.context)?.scope) return;
     await this.post({
       type: "config",
       config: {
         proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
         model,
         hasToken: !!token,
+        ...(activity ? {activity:{id:activity.id,name:activity.name,kind:activity.kind,workspace:activity.workspace,verified:!!profile},
+          activityDraft:this.context.workspaceState.get('hps.activity.draft.'+activity.id,emptyActivityDraft())} : {}),
         access:this.accessState,
         effort, effortNotice:this.effortNotice, effortResult:this.effortResult,
         coach: this.getCoach(),
@@ -3151,15 +3223,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private historyKey(): string {
-    return historyKeyForCohort(this.nativeHistoryScope??this.activeCohortId);
+    return historyKeyForCohort(activityConnections(this.context)?.scope ?? this.nativeHistoryScope??this.activeCohortId);
   }
 
   private coachKey(): string {
-    return coachKeyForCohort(this.activeCohortId);
+    return coachKeyForCohort(activityConnections(this.context)?.scope ?? this.activeCohortId);
   }
 
   private coachRitualDoneKey(): string {
-    return coachRitualDoneKeyForCohort(this.activeCohortId);
+    return coachRitualDoneKeyForCohort(activityConnections(this.context)?.scope ?? this.activeCohortId);
   }
 
   private getHistory(): ChatMessage[] {
@@ -3167,7 +3239,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async migrateLegacyStateForActiveCohort(): Promise<void> {
-    if(this.nativeHistoryScope)return; // Legacy cohort-wide history has no participant provenance.
+    if(activityConnections(this.context) || this.nativeHistoryScope)return; // Legacy cohort-wide history has no participant provenance.
     const bucket = stateBucketId(this.activeCohortId);
     if (!bucket) return;
 
@@ -3213,6 +3285,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private async post(msg: HostMessage): Promise<boolean | void> {
+    msg={...msg,activityId:msg.activityId ?? activityConnections(this.context)?.scope};
     const targets = [this.editorChat?.webview, this.view?.webview].filter((view): view is vscode.Webview => !!view);
     if (!targets.length) return;
     const results = await Promise.all(targets.map(view => view.postMessage(msg)));

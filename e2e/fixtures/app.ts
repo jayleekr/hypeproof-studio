@@ -32,6 +32,8 @@ export interface LaunchOptions {
   requireWriteApproval?: boolean;
   sdkStallTimeoutMs?: number;
   simpleFileDialog?: boolean;
+  /** Synthetic restart tests only: exercise real SecretStorage instead of renderer memory. */
+  persistentTestSecrets?: boolean;
   /** Route reserved test hostnames to the fixture server without changing system DNS. */
   hostResolverRules?: string;
   /** Pre-seed the workshop token into SecretStorage via env var (test backdoor). */
@@ -230,7 +232,7 @@ export async function launchApp(opts: LaunchOptions = { preseedToken: true }): P
       `--extensions-dir=${path.join(userDataDir, "extensions")}`,
       "--disable-workspace-trust",
       ...(opts.hostResolverRules ? ["--host-resolver-rules=" + opts.hostResolverRules] : []),
-      "--use-inmemory-secretstorage", // test credentials never touch the OS keychain
+      ...(opts.persistentTestSecrets ? [] : ["--use-inmemory-secretstorage"]), // default fixtures never touch the OS keychain
       "--disable-updates",
       "--skip-welcome",
       "--skip-release-notes",

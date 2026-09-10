@@ -473,7 +473,7 @@ jobs:
             Windows release ${{ github.ref_name }} @ ${{ github.sha }} (pre-publish gate)
         run: bash scripts/release-freeze-gate.sh "$GITHUB_REF"
 
-      - name: Publish to GitHub Release (tag builds only)
+      - name: Upload draft candidate (tag builds only)
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         env:
@@ -481,61 +481,24 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF#refs/tags/}"
-          shopt -s nullglob
-          assets=(dist/*.exe dist/*.zip)
-          if [ "${#assets[@]}" -eq 0 ]; then
-            echo "::error::No Windows release assets found in dist/"
-            exit 1
-          fi
-          # dag.yaml task A / vessel-and-modules.md §6 stage 2: a hyphenated
-          # tag (v9.9.9-rc.1) is a dev-channel prerelease. The in-app updater
-          # (updateCheckerHelpers.ts:169) already skips draft/prerelease
-          # releases and GitHub's /releases/latest excludes them by
-          # definition — actually marking the release is the only missing
-          # piece. Decision lives in scripts/tag-is-prerelease.sh so it can be
-          # unit-tested without cutting a real tag (scripts/test-tag-is-prerelease.sh).
           PRERELEASE_FLAG="$(bash scripts/tag-is-prerelease.sh "$TAG")"
-          # build-mac.yml may have created the release for the same tag;
-          # create-if-absent then clobber-upload is race-safe across both jobs.
-          gh release create "$TAG" --title "HypeProof Studio $TAG" \
+          gh release create "$TAG" --draft --title "HypeProof Studio $TAG" \
             --generate-notes --verify-tag $PRERELEASE_FLAG 2>/dev/null || true
-          gh release upload "$TAG" "${assets[@]}" --clobber
+          # Both builds may create the draft. Never replace bytes of a public release.
+          [[ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" == true ]] || { echo 'Refusing to overwrite a published release'; exit 1; }
+          shopt -s nullglob
+          assets=(dist/*.zip dist/*.exe)
+          (( ${#assets[@]} > 0 )) || exit 1
+          gh release upload "$TAG" "${assets[@]}"
 
-      # #698 — dispatch the mirror from HERE TOO, not only from build-mac.
-      #
-      # task K put this on mac alone, reasoning that dispatching from both
-      # would queue duplicate runs in the same concurrency group and that the
-      # mirror's 150-minute wait loop (#632) already handles late Windows
-      # assets. That reasoning is sound about duplicates and wrong about
-      # failure: it assumed mac reaches this point.
-      #
-      # v0.0.0-rc.1 proved otherwise. build-mac died at "Import signing
-      # certificate" (#697), so Publish and Trigger were both skipped and the
-      # mirror never ran — the exact outage #663 was written to prevent, with
-      # the automation hanging off the one build that does code signing and so
-      # has the wider failure surface.
-      #
-      # A duplicate mirror run is cheap: the concurrency group serializes them
-      # and the second finds the work already done. An absent mirror run is
-      # what silently shipped nothing on 2026-08-21.
-      - name: Trigger release mirror (tag builds only)
+      # workflow_dispatch is explicit because GITHUB_TOKEN release events do
+      # not trigger another workflow. Both builders dispatch; concurrency serializes.
+      - name: Trigger both-activity release acceptance
         if: startsWith(github.ref, 'refs/tags/v')
-        # shell: bash is REQUIRED here and is not decoration. This file's steps
-        # default to pwsh, and the body below was lifted from build-mac.yml,
-        # where bash is the default. Without this line pwsh parses `--repo` as a
-        # unary operator and the step dies with:
-        #   ParserError: Missing expression after unary operator '--'
-        # v0.0.0-rc.2 shipped exactly that: the release published and the mirror
-        # dispatch immediately failed.
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
-          gh workflow run mirror-release.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref "$(gh api "repos/$GITHUB_REPOSITORY" --jq .default_branch)" \
-            -f tag="$TAG" \
-            -f dry_run=false
-          echo "mirror-release.yml 를 tag=$TAG dry_run=false 로 디스패치했다 (windows)."
+          gh workflow run verify-unified-release.yml --repo "$GITHUB_REPOSITORY" \
+            -f tag="${GITHUB_REF#refs/tags/}"

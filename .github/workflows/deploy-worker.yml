@@ -31,7 +31,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.sha.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - id: sha
+        run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+  activity-compatibility:
+    needs: resolve
+    if: ${{ !inputs.dry_run }}
+    uses: ./.github/workflows/verify-service-activities.yml
+    with:
+      ref: ${{ needs.resolve.outputs.sha }}
+    secrets:
+      HPS_ACCEPTANCE_ANTHROPIC_API_KEY: ${{ secrets.HPS_ACCEPTANCE_ANTHROPIC_API_KEY }}
   deploy:
+    needs: [resolve, activity-compatibility]
+    if: ${{ always() && needs.resolve.result == 'success' && (inputs.dry_run || needs.activity-compatibility.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -41,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.ref }}
+          ref: ${{ needs.resolve.outputs.sha }}
           # Full history + tags — task C's version resolution below needs
           # `git describe --tags` to see w* tags, which the default shallow
           # (depth-1, no-tags) checkout would hide.

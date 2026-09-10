@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import vm from 'node:vm';
+import {createRequire} from 'node:module';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+const require=createRequire(import.meta.url);
+const source=`export {ChatPanelProvider} from './src/chatPanelProvider';export {ActivityConnections} from './src/activityConnections';export {validActivityDraft} from './src/activityDraft';`;
+const bundle=await build({stdin:{contents:source,resolveDir:new URL('..',import.meta.url).pathname},bundle:true,platform:'node',format:'cjs',external:['vscode'],write:false});
+const module={exports:{}};
+vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,require:id=>id==='vscode'?{}:require(id),process,console,URL,Buffer,crypto:globalThis.crypto,AbortSignal,TextEncoder,TextDecoder,setTimeout,clearTimeout});
+const {ActivityConnections,ChatPanelProvider,validActivityDraft}=module.exports;
+assert.equal(validActivityDraft({text:'valid',images:[],queued:null}),true);
+for(const bad of [{text:1,images:[],queued:null},{text:'',images:['https://external.invalid'],queued:null},{text:'',images:[],queued:{}},{text:'x'.repeat(200001),images:[],queued:null}])assert.equal(validActivityDraft(bad),false);
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'hps-draft-'));
+const states=new Map(),secrets=new Map();let fail=false;
+const raw={globalStorageUri:{fsPath:path.join(root,'storage')},workspaceState:{get:(k,d)=>states.has(k)?states.get(k):d,update:async(k,v)=>{if(fail)throw Error('synthetic write failure');states.set(k,v);}},secrets:{keys:async()=>[...secrets.keys()],get:async k=>secrets.get(k),store:async(k,v)=>secrets.set(k,v),delete:async k=>secrets.delete(k)}};
+try{
+ const connections=new ActivityConnections(raw,()=> 'https://synthetic.invalid/v1',()=>root,async()=>{});
+ await connections.commit('synthetic-credential',{activity_id:'a'.repeat(64),display_name:'Synthetic'},root);
+ const proto=ChatPanelProvider.prototype,events=[];
+ const host={context:connections.wrap(),draftWrites:Promise.resolve(),post:async msg=>events.push(msg)};
+ const draft={text:'합성 초안',images:['data:image/png;base64,c3ludGhldGlj'],queued:'다음 합성 요청'};
+ const source={postMessage:msg=>proto.handleMessage.call(host,{type:'saveActivityDraft',activityId:connections.scope,draft,nonce:msg.nonce},source)};
+ await proto.handleMessage.call(host,{type:'saveActivityDraft',activityId:connections.scope,draft},source);
+ await proto.setConnectionChanging.call(host,true);
+ assert.equal(host.connectionChanging,true);assert.deepEqual(states.get('hps.activity.draft.'+connections.scope),draft);
+ await proto.setConnectionChanging.call(host,false);assert.equal(host.connectionChanging,false);
+ await proto.handleMessage.call(host,{type:'saveActivityDraft',activityId:'other',draft:{...draft,text:'wrong'}},source);
+ assert.equal(states.get('hps.activity.draft.'+connections.scope).text,'합성 초안');
+ fail=true;await assert.rejects(()=>proto.setConnectionChanging.call(host,true),/입력을 저장하지 못했습니다/);fail=false;
+ await proto.setConnectionChanging.call(host,false);assert.equal(events.some(e=>e.type==='activityDraftError'),true);
+ console.log('PASS actual host draft flush: acknowledged text/images/queue, rejected stale activity, persistence failure blocks transition');
+}finally{fs.rmSync(root,{recursive:true,force:true});}

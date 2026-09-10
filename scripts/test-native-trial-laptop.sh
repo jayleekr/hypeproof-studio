@@ -43,6 +43,9 @@ GATEWAY_PID=''
 cleanup() {
   if [[ -n "$GATEWAY_PID" ]]; then kill "$GATEWAY_PID" 2>/dev/null || true; wait "$GATEWAY_PID" 2>/dev/null || true; fi
   rm -f "$NATIVE_TMP/token" "$NATIVE_TMP/token.alternate"
+  if [[ -n "${HPS_NATIVE_TEST_APP_NAME:-}" ]]; then
+    security delete-generic-password -s "$HPS_NATIVE_TEST_APP_NAME Safe Storage" >/dev/null 2>&1 || true
+  fi
   echo "Rehearsal copy and gateway log: $NATIVE_TMP"
 }
 trap cleanup EXIT
@@ -59,6 +62,26 @@ cp extensions/hypeproof-chat/package.json "$NATIVE_EXT/package.json"
 fi
 
 export HPS_APP_PATH="$NATIVE_TMP/HypeProof Studio.app"
+# A synthetic persistent-storage rehearsal must not access the user's existing
+# app encryption key. Keep real SecretStorage, with a distinct test app identity.
+if [[ "${HPS_NATIVE_ISOLATED_KEYCHAIN:-}" == 1 ]]; then
+  [[ "${HPS_NATIVE_RELEASE_VERIFY:-}" != 1 ]] || { echo 'BLOCKED: release identity cannot be rewritten' >&2; exit 2; }
+  export HPS_NATIVE_TEST_APP_NAME="HypeProof Studio Synthetic $(node -p 'crypto.randomUUID()')"
+  node --input-type=module <<'IDENTITY'
+import {readFileSync,writeFileSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+const root=process.env.HPS_APP_PATH+'/Contents',name=process.env.HPS_NATIVE_TEST_APP_NAME;
+for(const file of ['package.json','product.json']){
+ const path=root+'/Resources/app/'+file,data=JSON.parse(readFileSync(path,'utf8'));
+ if(file==='package.json')data.name=name;
+ else {data.nameShort=data.nameLong=name;data.darwinBundleIdentifier='ai.hypeproof.studio.synthetic';}
+ writeFileSync(path,JSON.stringify(data,null,2));
+}
+for(const [key,value] of [['CFBundleName','HypeProof Studio'],['CFBundleDisplayName','HypeProof Studio'],['CFBundleIdentifier','ai.hypeproof.studio']])
+ execFileSync('/usr/libexec/PlistBuddy',['-c','Set :'+key+' '+value,root+'/Info.plist']);
+execFileSync('/usr/bin/codesign',['--force','--sign','-','--preserve-metadata=entitlements,flags',process.env.HPS_APP_PATH],{stdio:'pipe'});
+IDENTITY
+fi
 node --input-type=module <<'NODE'
 import {readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';

@@ -1209,7 +1209,7 @@ export const SDK_STALL_FRIENDLY = stallNotice();
  * 일이 디스크에 남아 있다는 사실을 알려 주는 것이다.
  */
 export const SDK_MAX_TURNS_FRIENDLY =
-  "\n\n---\n\n한 번에 할 수 있는 작업량을 다 썼어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+  "\n\n---\n\n한 번에 할 수 있는 작업량을 다 썼어요. **저장된 변경이 있는지 작업 파일을 확인해 주세요.** " +
   "이어서 하려면 무엇을 더 할지 알려주세요 — 예: `이어서 계속해줘` 🔧";
 
 /**
@@ -1227,13 +1227,13 @@ export const SDK_MAX_TURNS_FRIENDLY =
  */
 export const SDK_RESULT_ERROR_FRIENDLY: Record<string, string> = {
   error_during_execution:
-    "\n\n---\n\n작업이 중간에 멈췄어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+    "\n\n---\n\n작업이 중간에 멈췄어요. **저장된 변경이 있는지 작업 파일을 확인해 주세요.** " +
     "무엇을 하려던 것인지 다시 알려주면 이어서 해볼게요 🔧",
   error_max_budget_usd:
-    "\n\n---\n\n이번 작업에 쓸 수 있는 양을 다 썼어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+    "\n\n---\n\n이번 작업에 쓸 수 있는 양을 다 썼어요. **저장된 변경이 있는지 작업 파일을 확인해 주세요.** " +
     "계속하려면 선생님께 알려주세요 🔧",
   error_max_structured_output_retries:
-    "\n\n---\n\n답을 정리하는 데 계속 실패했어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+    "\n\n---\n\n답을 정리하는 데 계속 실패했어요. **저장된 변경이 있는지 작업 파일을 확인해 주세요.** " +
     "조금 더 작게 나눠서 다시 부탁해줄래요? 🔧",
 };
 
@@ -1244,7 +1244,7 @@ export const SDK_RESULT_ERROR_FRIENDLY: Record<string, string> = {
  * 일어났는지 모르는 상태에서 이름을 붙이면 그게 오진이 된다(REQ-M15 가 태운 이틀).
  */
 export const SDK_RESULT_ERROR_FALLBACK =
-  "\n\n---\n\n작업이 끝까지 가지 못했어요. **여기까지 한 것은 파일로 저장돼 있어요.** " +
+  "\n\n---\n\n작업이 끝까지 가지 못했어요. **저장된 변경이 있는지 작업 파일을 확인해 주세요.** " +
   "다시 한 번 부탁하거나, 무엇을 하려던 것인지 알려주세요 🔧";
 
 /**

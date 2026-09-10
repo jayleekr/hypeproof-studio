@@ -1,5 +1,15 @@
 /** Start-page messages contain presentation state, never saved credentials. */
+export interface ActivitySummary {
+  ref: string;
+  id: string;
+  name: string;
+  kind?: 'trial' | 'personal' | 'classroom';
+  workspace: string;
+}
 export interface StartState {
+  activities?: ActivitySummary[];
+  legacyConnection?: boolean;
+  legacyHistory?: boolean;
   checking: boolean;
   started?: boolean;
   candidate?: boolean;
@@ -13,6 +23,9 @@ export interface StartState {
 }
 export type StartRequest =
   | { type: "startReady" }
+  | { type: "exportLegacyHistory" }
+  | { type: "selectActivity"; ref: string }
+  | { type: "chooseActivityFolder" }
   | { type: "openStudioFiles" }
   | { type: "openStudioSettings" }
   | { type: "connectCourse"; token: string }

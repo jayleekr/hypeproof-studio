@@ -1,7 +1,7 @@
 # 체험·수업 통합 수용 테스트
 
 2026-09-10 · [Intent/Epic #915](https://github.com/jayleekr/hypeproof-studio/issues/915)
-상태: 테스트 요구사항. 아래 **US-T01~21은 모두 NOT RUN**이다. 문서 검사·기존 단위 테스트의
+상태: 전체 수용은 미완료. 아래 US-T01~21의 전체 판정과 부분 실행은 구분한다. 문서 검사·기존 단위 테스트의
 통과를 이 시나리오의 PASS로 옮기지 않는다. 제품 책임 Jay (`jayleekr`).
 
 원본: [INT-US](../design/unified-studio-experience.md#product-intent),
@@ -85,10 +85,18 @@ PASS/FAIL/BLOCKED/NOT RUN 및 오류·재실행·복구 근거를 남긴다. 모
 - 복귀: 이전 App/Service/Module 대상과 데이터 호환성을 미리 확보한다. 복구 검사도
   실행 결과여야 하며 실제 운영 DB를 파괴적으로 되돌려 테스트하지 않는다.
 
-문서 발행 시 이 gate는 요구사항이다. 현행 워크플로가 강제한다고 주장하지 않는다.
+문서 발행 시 gate는 요구사항이었다. 후속 구현은 App/Service 워크플로에 필수 검사를 연결하지만, 그 코드의 머지는 실제 최종 패키지 인수 성공을 뜻하지 않는다.
 US-T21의 사람 관찰은 기술 release gate와 별도 채택 근거다. 사람 관찰 없이 기술 인수를
 보고할 수는 있지만 쉬운 전환/이해도/학습 효과를 검증했다고 쓰지 않는다.
 
 ## #916 P0 진입 구현 검사
 
 [실행 기록](unified-entry-916-evidence.md)은 공통 진입의 부분 검증이다. 위 US-T 행 전체 인수와 공개 배포 상태는 별도다.
+
+
+## 활동 저장·이행·릴리스 구현 후속
+
+[2026-09-10 실행 기록](unified-completion-917-919-evidence.md)에 각 부분 대조의
+PASS/BLOCKED/NOT RUN, 실제 Mac 화면 및 아직 없는 최종 패키지 인수를 기록했다.
+명령·CI 자격·실행기 복구는 [공통 릴리스 절차](../dev/unified-release-and-migration.md)를
+따른다. 위 표는 행 전체 인수 상태이며 부분 PASS로 자동 갱신하지 않는다.

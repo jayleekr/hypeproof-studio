@@ -1,7 +1,7 @@
 # 하나의 Studio에서 체험과 수업 이어가기
 
 2026-09-10 · [Intent/Epic #915](https://github.com/jayleekr/hypeproof-studio/issues/915)
-상태: Intent·설계 발행안. 신규 UX·전환·자동 릴리스 게이트는 구현 전이다.
+상태: Intent·설계 원본. 공통 진입·활동 저장·배포 게이트 구현과 부분 검증이 진행됐으며, 전체 수용/공개 전달은 [실행 기록](../testing/unified-completion-917-919-evidence.md)으로 구분한다.
 제품 책임: Jay (`jayleekr`). 기존 `products.yaml`의 App/Service owner `jay`에 연결한다.
 문서 작성자에게 새 권한을 부여하거나 기존 미지정 traceability owner를 일괄 변경하지 않는다.
 
