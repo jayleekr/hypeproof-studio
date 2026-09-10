@@ -46,13 +46,40 @@ async function probeMic(): Promise<{
   if (!md || typeof md.getUserMedia !== 'function') return { attempted: false };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // **늦게 허용된 마이크를 해제하기 위한 플래그.**
+  //
+  // 2026-09-10, Codex 독립 인수에서 FAIL 로 재현됐다: `Promise.race` 는 **패배한
+  // getUserMedia 요청을 취소하지 않는다.** 타임아웃이 이기면 이 함수는
+  // `outcome: 'timeout'` 을 돌려주고 끝나지만, 원래 요청은 살아 있다. 사용자가 4초
+  // 뒤에 권한 대화상자에서 "허용" 을 누르면 그 promise 가 **live track 을 가진
+  // stream 으로 resolve** 되고, 아무도 `stop()` 을 부르지 않는다.
+  //
+  // 결과가 단순한 누수보다 나쁘다: 보고서는 "마이크를 얻지 못했다" 고 적는데
+  // 실제로는 **마이크를 쥐고 있다.** 아이 노트북에서 OS 마이크 표시가 켜진 채로
+  // 남고, 제품의 어떤 화면도 그걸 설명하지 못한다. 이 파일 아래쪽에 "계측기가
+  // 마이크를 쥔 채로 남으면 그 자체가 사고다" 라고 적어둔 그 사고다 — 성공 경로만
+  // 막아뒀고 타임아웃 경로는 열려 있었다.
+  //
+  // 플래그를 `catch` 가 아니라 **타임아웃이 발사되는 순간** 세운다. catch 에서 세우면
+  // 거부와 catch 실행 사이에 늦은 resolve 가 끼어들 수 있고, 그 창에서 다시 샌다.
+  let raceLost = false;
   try {
     // 타임아웃을 두는 이유: 관문 중 하나가 **응답하지 않는** 형태로 막을 수 있고,
     // 그때 프로브가 영원히 매달리면 "측정 안 됨" 조차 남지 않는다.
+    const gum = md.getUserMedia({ audio: true });
+    // 늦게 도착한 stream 을 해제한다. 이 시점에 이미 보고서는 나갔으므로 **이 해제는
+    // 보고서에 나타나지 않는다** — 보고할 대상이 아니라 되돌릴 대상이다.
+    void gum.then(
+      (late) => { if (raceLost) for (const t of late.getTracks()) t.stop(); },
+      () => { /* 늦은 거부는 해제할 것이 없다 */ },
+    );
     const stream = await Promise.race([
-      md.getUserMedia({ audio: true }),
+      gum,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(Object.assign(new Error('probe timeout'), { name: 'ProbeTimeout' })), GUM_TIMEOUT_MS);
+        timer = setTimeout(() => {
+          raceLost = true;
+          reject(Object.assign(new Error('probe timeout'), { name: 'ProbeTimeout' }));
+        }, GUM_TIMEOUT_MS);
       }),
     ]);
     const tracks = stream.getAudioTracks();

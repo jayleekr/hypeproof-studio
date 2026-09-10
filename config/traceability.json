@@ -565,6 +565,9 @@
         },
         {
           "path": "worker/test/sse-cost-receipts.test.mjs"
+        },
+        {
+          "path": "worker/test/openai-usage-shape.test.mjs"
         }
       ]
     },
@@ -899,6 +902,19 @@
       "sources": [
         {
           "path": "extensions/hypeproof-chat/src/voiceSessionHelpers.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-OPERATOR-HEALTH-AUTH",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/deep-health-auth.test.mjs"
         }
       ]
     }
