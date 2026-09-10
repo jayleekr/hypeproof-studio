@@ -1001,6 +1001,47 @@
           "path": "docs/testing/unified-entry-916-evidence.md"
         }
       ]
+    },
+    {
+      "id": "ST-DES-ACTIVITY-BINDING",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "docs/adr/0008-activity-connection-boundaries.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-ACTIVITY-CANDIDATE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-DES-ACTIVITY-BINDING"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/start-page.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-VAL-ACTIVITY-CANDIDATE",
+      "stage": "validation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-IMP-UNIFIED-ENTRY",
+        "ST-TEST-ACTIVITY-CANDIDATE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/activity-candidate-917-evidence.md"
+        }
+      ]
     }
   ]
 }
