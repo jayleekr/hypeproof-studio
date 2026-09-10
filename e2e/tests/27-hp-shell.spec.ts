@@ -8,7 +8,7 @@ test('HP shell: native chrome hidden, HP navigation accessible, branded empty ed
   const ctx = await launchApp({ preseedToken: false });
   try {
     const start = await startFrame(ctx.win);
-    await expect(start.getByRole('heading', { name: '내 수업에 연결하기' })).toBeVisible();
+    await expect(start.getByRole('heading', { name: '어떻게 시작할까요?' })).toBeVisible();
     await expect(ctx.win.locator('.part.activitybar')).not.toBeVisible();
     await expect(ctx.win.locator('.part.statusbar')).not.toBeVisible();
     await expect(ctx.win.locator('.part.titlebar')).toHaveCSS('background-color', 'rgb(21, 29, 25)');

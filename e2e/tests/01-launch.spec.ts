@@ -26,9 +26,10 @@ test("cold launch opens the branded in-app connection form", async () => {
   const ctx = await launchApp({ preseedToken: false });
   try {
     const start = await startFrame(ctx.win);
-    await expect(start.getByRole("heading", { name: "내 수업에 연결하기" })).toBeVisible();
+    await expect(start.getByRole("heading", { name: "어떻게 시작할까요?" })).toBeVisible();
+    await start.getByRole("button", { name: "수업에 참여하기", exact: true }).click();
     await expect(start.locator("#course-code")).toHaveAttribute("type", "password");
-    await expect(start.getByRole("button", { name: "수업 확인하기" })).toBeDisabled();
+    await expect(start.getByRole("button", { name: "코드 확인하기" })).toBeDisabled();
     await expect(start.locator("body")).not.toContainText("나비");
     await expect(ctx.win.locator(".quick-input-widget")).not.toBeVisible();
   } finally { await closeApp(ctx); }

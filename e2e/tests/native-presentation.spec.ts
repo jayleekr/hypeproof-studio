@@ -11,7 +11,7 @@ test('entry becomes the conversation; real Markdown response and file preview re
     expect(await ctx.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every(w => !w.isFocusable()))).toBe(true);
     const start = await startFrame(ctx.win);
     await expect(start.locator('.studio-course')).toContainText('내 삶에 AI 더하기');
-    await start.getByRole('button', { name: '수업 시작하기' }).click();
+    await start.getByRole('button', { name: /^(?:이어서 하기|수업 시작하기)$/ }).click();
     const chat = await chatFrame(ctx.win);
     const input = chat.getByRole('textbox', { name: '코치에게 보낼 메시지' });
     await expect(input).toBeFocused();
@@ -64,7 +64,7 @@ test('delegation concern remains the purpose after the learner names a presentat
   try {
     expect(await ctx.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every(w => !w.isFocusable()))).toBe(true);
     const start = await startFrame(ctx.win);
-    await start.getByRole('button', { name: '수업 시작하기' }).click();
+    await start.getByRole('button', { name: /^(?:이어서 하기|수업 시작하기)$/ }).click();
     const chat = await chatFrame(ctx.win), input = chat.getByRole('textbox', { name: '코치에게 보낼 메시지' });
     for (const text of ['AI에게 맡기고 싶은데 어디까지 맡겨야 할지 모르겠어', '피피티 만드는 일이야', '고객사에 발표할 가상의 예약관리 서비스 소개 PPT야']) {
       await input.fill(text);

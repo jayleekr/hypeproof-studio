@@ -127,6 +127,8 @@ export interface CoachInfo {
  * sides updated together.
  */
 export interface ResolvedProfile {
+  /** Presentation only; derived from authenticated Service access, never grants authority. */
+  activity_kind?: "trial" | "personal" | "classroom";
   access_identity?:{kind:'account';scope:string};
   model_selection?: {
     revision: 'hps-model-selection/1'; runtime: 'proxy' | 'agent-sdk'; provider: string;

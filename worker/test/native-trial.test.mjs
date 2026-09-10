@@ -35,6 +35,7 @@ test('native trial resolves through the existing app profile API with real tool 
   assert.equal(response.status, 200);
   const body = await response.json();
   assert.equal(body.profile_id, id);
+  assert.equal(body.activity_kind, "classroom", "a classroom credential does not become a personal trial by profile name");
   assert.equal(body.coach_runtime, 'agent-sdk');
   assert.equal(body.sdk_tools.write, true);
   assert.equal(body.sdk_tools.read, true);

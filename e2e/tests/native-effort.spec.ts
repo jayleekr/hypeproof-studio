@@ -108,11 +108,11 @@ test('course effort reaches the real model and survives UI transitions', async (
     await send('claude-sonnet-4-5-20250929',null,'claude-sonnet-4-5-20250929');
     await shot('unsupported-model-record');
     await chat.getByRole('button',{name:'수업 연결',exact:true}).click();
-    const entry=await startFrame(ctx.win);await entry.getByRole('button',{name:'다른 수업에 연결'}).click();
+    const entry=await startFrame(ctx.win);await entry.getByRole('button',{name: /^(?:다른 활동 선택|다른 수업에 연결)$/}).click();if(await entry.getByRole('button',{name:'수업에 참여하기',exact:true}).isVisible())await entry.getByRole('button',{name:'수업에 참여하기',exact:true}).click();
     activeToken=readFileSync(process.env.HPS_E2E_TOKEN_FILE+'.fixed','utf8').trim();
     await entry.getByLabel('수업 참여 코드',{exact:true}).fill(activeToken);
-    await entry.getByRole('button',{name:'수업 확인하기'}).click();await expect(entry.locator('.studio-course')).toBeVisible();
-    await entry.getByRole('button',{name:'수업 시작하기'}).click();chat=await chatFrame(ctx.win);
+    await entry.getByRole('button',{name: /^(?:코드 확인하기|수업 확인하기)$/}).click();await expect(entry.locator('.studio-course')).toBeVisible();
+    await entry.getByRole('button',{name: /^(?:이어서 하기|수업 시작하기)$/}).click();chat=await chatFrame(ctx.win);
     await expect(effort()).toHaveValue('low');await expect(effort()).toBeDisabled();
     await expect(chat.locator('.hps-effort')).not.toContainText('서버에서 확인된');
     await send('hypeproof-default','low','claude-sonnet-4-6');

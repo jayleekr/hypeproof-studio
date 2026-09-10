@@ -275,6 +275,7 @@ chat.get("/profile", async (c) => {
   const served = lesson?.content.features ? applyLessonFeatures(profile, lesson.content.features) : profile;
   return c.json({
     ...(lesson ? { lesson } : {}),
+    activity_kind: auth.payload.native_trial ? "trial" : auth.payload.account ? "personal" : "classroom",
     profile_id: profile.id,
     ...(auth.payload.account?{access_identity:{kind:'account',scope:'account-'+await accessDigest(auth.payload.account)}}:{}),
     model_selection: servedModelSelection(c.env, profile, lesson?.content.model),
