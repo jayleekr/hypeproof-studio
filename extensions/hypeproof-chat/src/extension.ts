@@ -84,20 +84,26 @@ export async function activate(context: vscode.ExtensionContext) {
         os: { platform: process.platform, release: os.release(), arch: process.arch },
         devHost: context.extensionMode === vscode.ExtensionMode.Development,
       });
-  if (spool) {
-    // 총량 캡 집행 (#580 D7) — 활성화를 막지 않는 fire-and-forget, 실패는 삼킨다.
-    void spool.sweepRetention();
-    // 종료 시 큐에 남은 마지막 이벤트를 흘려보낸다 (best-effort — 크래시는
-    // 라인 단위 append 가 감당한다).
-      // #897 (VO-01) — 음성 capability 진단. **명령으로만** 돈다: core patch 후에는
+  // #897 (VO-01) — 음성 capability 진단. **명령으로만** 돈다: core patch 후에는
   // 이 경로가 OS 권한 프롬프트를 띄우므로 활성화 시점에 돌려서는 안 된다.
+  //
+  // 스풀 분기 **밖**에 둔다. #904 에서 이 등록이 `if (spool)` 안에 들어가 있었고,
+  // `spool` 은 테스트 런(`isTestRun`)이나 스풀 초기화 실패에서 undefined 라
+  // 그 조건에서 명령이 조용히 사라졌다. 진단 도구가 진단이 필요한 상황에서
+  // 없어지는 것은 도구가 없는 것보다 나쁘다.
   context.subscriptions.push(
     vscode.commands.registerCommand("hypeproof-chat.diagnoseVoiceCapability", async () => {
       const { diagnoseVoiceCapability } = await import("./voiceCapability");
       await diagnoseVoiceCapability(context, provider, provider.voiceLogChannel());
     }),
   );
-context.subscriptions.push({ dispose: () => void spool.flush() });
+
+  if (spool) {
+    // 총량 캡 집행 (#580 D7) — 활성화를 막지 않는 fire-and-forget, 실패는 삼킨다.
+    void spool.sweepRetention();
+    // 종료 시 큐에 남은 마지막 이벤트를 흘려보낸다 (best-effort — 크래시는
+    // 라인 단위 append 가 감당한다).
+    context.subscriptions.push({ dispose: () => void spool.flush() });
     // #596 — 기동 시 잔여분 배너 (활성화당 1회). 세션 종료 배너는 proxy
     // 런타임의 session_window 에만 걸리는데 주력 런타임은 agent-sdk 라(1회차
     // 리뷰 F6) 그 경로만으론 도달이 안 된다 — 다음 기동에서 "안 보낸 기록"을
