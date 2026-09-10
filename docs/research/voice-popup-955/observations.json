@@ -1,0 +1,116 @@
+{
+  "checks": {
+    "expandedEscapePositive": true,
+    "compactFocusRetained": false,
+    "reducedMotionStatic": false,
+    "closeVisibleAfterScroll": false
+  },
+  "layer": "Chromium actual component with synthetic props; no audio/App",
+  "compactFocus": {
+    "tag": "BODY",
+    "text": "합성 UI 인수 · 실제 마이크/설치앱 아님듣는 중음소거종료펼치기"
+  },
+  "compactEscape": [],
+  "expandedEscape": [
+    "escape"
+  ],
+  "reducedMotion": {
+    "low": [
+      13.96875,
+      15.296875,
+      16.390625,
+      15.296875,
+      13.96875
+    ],
+    "high": [
+      29.8125,
+      41.6875,
+      51.59375,
+      41.6875,
+      29.8125
+    ]
+  },
+  "narrow": {
+    "top": {
+      "panel": {
+        "top": 42,
+        "bottom": 516
+      },
+      "scrollHeight": 1684,
+      "clientHeight": 472,
+      "controls": [
+        {
+          "name": "음성 대화 축소",
+          "top": 55,
+          "bottom": 85,
+          "onscreen": true
+        },
+        {
+          "name": "음성 대화 종료",
+          "top": 55,
+          "bottom": 85,
+          "onscreen": true
+        },
+        {
+          "name": "음소거",
+          "top": 473,
+          "bottom": 503,
+          "onscreen": true
+        },
+        {
+          "name": "말 멈추기",
+          "top": 473,
+          "bottom": 503,
+          "onscreen": true
+        },
+        {
+          "name": "텍스트로 전환",
+          "top": 473,
+          "bottom": 503,
+          "onscreen": true
+        }
+      ]
+    },
+    "bottom": {
+      "panel": {
+        "top": 42,
+        "bottom": 516
+      },
+      "scrollHeight": 1684,
+      "clientHeight": 472,
+      "controls": [
+        {
+          "name": "음성 대화 축소",
+          "top": -1157,
+          "bottom": -1127,
+          "onscreen": false
+        },
+        {
+          "name": "음성 대화 종료",
+          "top": -1157,
+          "bottom": -1127,
+          "onscreen": false
+        },
+        {
+          "name": "음소거",
+          "top": 448,
+          "bottom": 478,
+          "onscreen": true
+        },
+        {
+          "name": "말 멈추기",
+          "top": 448,
+          "bottom": 478,
+          "onscreen": true
+        },
+        {
+          "name": "텍스트로 전환",
+          "top": 448,
+          "bottom": 478,
+          "onscreen": true
+        }
+      ]
+    }
+  },
+  "errors": []
+}
