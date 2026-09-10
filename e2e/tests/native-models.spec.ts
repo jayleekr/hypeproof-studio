@@ -11,7 +11,7 @@ test('adult model comparison: actual model picker, provider replies and usage re
  const results:any[]=[];
  const receipts=()=>existsSync(join(out,'model-usage.json'))?JSON.parse(readFileSync(join(out,'model-usage.json'),'utf8')):[];
  try {
-  const start=await startFrame(ctx.win);await start.getByRole('button',{name:'수업 시작하기'}).click();
+  const start=await startFrame(ctx.win);await start.getByRole('button',{name: /^(?:이어서 하기|수업 시작하기)$/}).click();
   const chat=await chatFrame(ctx.win),input=chat.getByRole('textbox',{name:/보낼 메시지/});
   const select=chat.getByRole('combobox',{name:'대화 모델'});
   await expect(select.locator('option')).toHaveCount(15);

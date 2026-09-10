@@ -874,6 +874,57 @@
           "path": "docs/testing/unified-studio-experience.md"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-UNIFIED-ENTRY",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-TEST-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/startPage.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/startPageProtocol.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/StartPage.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/start.css"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-UNIFIED-ENTRY",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED",
+        "ST-TEST-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "e2e/tests/native-unified-entry.spec.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-VAL-UNIFIED-ENTRY",
+      "stage": "validation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-IMP-UNIFIED-ENTRY",
+        "ST-TEST-UNIFIED-ENTRY"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/unified-entry-916-evidence.md"
+        }
+      ]
     }
   ]
 }

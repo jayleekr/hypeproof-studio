@@ -23,21 +23,22 @@ test('trial entry: real explorer, settings, folder cancellation, disconnect and 
     await expect(picker).not.toBeVisible();
     expect(readFileSync(marker, 'utf8')).toBe('synthetic existing work');
 
-    await start.getByRole('button', { name: '수업 시작하기' }).click();
+    await start.getByRole('button', { name: /^(?:이어서 하기|수업 시작하기)$/ }).click();
     const chat = await chatFrame(ctx.win);
     await expect(chat.getByRole('textbox', { name: '코치에게 보낼 메시지' })).toBeVisible();
     await chat.getByRole('button', { name: '수업 연결', exact: true }).click();
     start = await startFrame(ctx.win);
     await start.getByRole('button', { name: '연결 해제', exact: true }).click();
-    await expect(start.getByLabel('수업 참여 코드', { exact: true })).toBeVisible();
+    await expect(start.getByRole('button', { name: '수업에 참여하기', exact: true })).toBeVisible();
     // Reveal the existing disconnected conversation without changing its connection.
     await runCommand(ctx.win, 'HypeProof Chat: Focus');
     await chat.getByRole('button', { name: /시작 화면 열기/ }).click();
-    await expect(start.getByLabel('수업 참여 코드', { exact: true })).toBeVisible();
+    await expect(start.getByRole('button', { name: '수업에 참여하기', exact: true })).toBeVisible();
+    if (await start.getByRole('button', { name: '수업에 참여하기', exact: true }).isVisible()) await start.getByRole('button', { name: '수업에 참여하기', exact: true }).click();
     await start.getByLabel('수업 참여 코드', { exact: true }).fill(ctx.token);
-    await start.getByRole('button', { name: '수업 확인하기' }).click();
+    await start.getByRole('button', { name: /^(?:코드 확인하기|수업 확인하기)$/ }).click();
     await expect(start.locator('.studio-course')).toBeVisible();
-    await start.getByRole('button', { name: '수업 시작하기' }).click();
+    await start.getByRole('button', { name: /^(?:이어서 하기|수업 시작하기)$/ }).click();
     await expect(chat.getByRole('textbox', { name: '코치에게 보낼 메시지' })).toBeVisible();
     expect(readFileSync(marker, 'utf8')).toBe('synthetic existing work');
     await ctx.win.screenshot({ path: join(out, 'entry-reconnected.png') });
