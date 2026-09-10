@@ -51,3 +51,11 @@ credential 조회에 도달하지 않는다. 이 대조와 Extension 전체 smok
 - `e2e/test-results/native-trial/20260910T170409Z`: classroom.
 
 이 런은 진입 회귀이며, 지연 인증 잠금은 위 host 대조의 증거로 구분한다.
+
+main `eda79a5` (#942 모델 provider 타입·음소거 회귀) 반영 뒤 Extension 전체
+smoke/typecheck, 두 bundle 빌드, Mac 진입을 다시 검사했다. 모두 PASS:
+
+- `e2e/test-results/native-trial/20260910T171418Z`: trial.
+- `e2e/test-results/native-trial/20260910T171441Z`: classroom.
+
+각 environment.json의 실행 당시 SHA/번들 hash가 원본이며 이후 문서 커밋 SHA로 바꾸지 않는다.
