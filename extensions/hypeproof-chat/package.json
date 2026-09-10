@@ -154,6 +154,12 @@
           "when": "resourceExtname == .html || resourceExtname == .htm",
           "group": "navigation@5"
         }
+      ],
+      "commandPalette": [
+        {
+          "command": "hypeproof-chat.diagnoseVoiceCapability",
+          "when": "false"
+        }
       ]
     },
     "configuration": {

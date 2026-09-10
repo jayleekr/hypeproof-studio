@@ -164,8 +164,31 @@ const report = (o) => buildVoiceCapabilityReport({ ...base, ...o }, META);
   // 명령은 등록하되 학생용 UI 는 없다.
   const cmds = (manifest.contributes?.commands ?? []).map((c) => c.command);
   assert.ok(cmds.includes("hypeproof-chat.diagnoseVoiceCapability"), "진단 명령이 등록돼 있다");
-  const menus = JSON.stringify(manifest.contributes?.menus ?? {});
-  assert.doesNotMatch(menus, /diagnoseVoiceCapability/, "메뉴·툴바에 노출하지 않는다 — 학생이 누를 자리가 없어야 한다");
+  // 메뉴·툴바에 없다. 단, **그것만으로는 "누를 자리가 없다" 가 아니다.**
+  for (const key of ["view/title", "editor/title", "explorer/context"]) {
+    const entries = JSON.stringify(manifest.contributes?.menus?.[key] ?? []);
+    assert.doesNotMatch(entries, /diagnoseVoiceCapability/, `${key} 에 노출하지 않는다`);
+  }
+
+  // Command Palette 가 바로 그 자리다. #904 는 "메뉴에 없음" 을 근거로 학생에게
+  // 보이지 않는다고 적었는데, 기여된 명령은 **기본적으로 팔레트에 뜬다** — 아이가
+  // 팔레트를 열면 "음성 기능 진단" 이 그대로 보였다. 즉 이전 단언은 부재가 곧
+  // 노출을 만드는 메커니즘으로 비노출을 증명하고 있었다. 숨기는 문서화된 방법은
+  // `menus.commandPalette` 에 `when: "false"` 항목을 두는 것이다.
+  const palette = manifest.contributes?.menus?.commandPalette ?? [];
+  const hidden = palette.find((e) => e.command === "hypeproof-chat.diagnoseVoiceCapability");
+  assert.ok(hidden, "팔레트 항목이 선언돼 있어야 한다 — 선언이 없으면 기본값이 '보임' 이다");
+  assert.equal(hidden.when, "false", "팔레트에서 숨기려면 when 이 false 여야 한다");
+
+  // 등록이 조건 분기 안에 갇히지 않았는가. #904 에서 이 등록이 `if (spool)` 안에
+  // 들어가 스풀이 없는 런(`isTestRun`·스풀 초기화 실패)에서 명령이 조용히 사라졌다.
+  // 진단 도구가 진단이 필요한 상황에서 없어지는 것은 도구가 없는 것보다 나쁘다.
+  const ext = readFileSync(join(here, "..", "src", "extension.ts"), "utf8");
+  const regAt = ext.indexOf('registerCommand("hypeproof-chat.diagnoseVoiceCapability"');
+  assert.ok(regAt > 0, "명령 등록을 찾지 못했다");
+  const spoolAt = ext.indexOf("if (spool) {");
+  assert.ok(spoolAt > 0, "스풀 분기를 찾지 못했다 — 이 단언의 기준점이 사라졌다");
+  assert.ok(regAt < spoolAt, "명령 등록이 스풀 분기보다 앞에 있어야 한다 — 분기 안에 갇히면 안 된다");
 
   // 업로드 경로에 끼워넣지 않았다: 보고서는 로컬 전용이다.
   const spool = readFileSync(join(here, "..", "src", "spoolUploader.ts"), "utf8");

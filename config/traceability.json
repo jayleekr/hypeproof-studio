@@ -719,6 +719,81 @@
           "path": "extensions/hypeproof-chat/test/voice-capability.smoke.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-VOICE-CAPABILITY",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-TEST-VOICE-CAPABILITY"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/voiceCapabilityHelpers.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/voiceCapability.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/voiceProbe.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-VOICE-PREFLOW",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-IMP-VOICE-CAPABILITY"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/pre-voice-text-flow.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-VOICE-AUDIO-REFUSAL",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-IMP-BUDGET-ADMISSION"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/audio-refusal-contract.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-VOICE-LINKAGE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/voice-linkage-contract.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-VOICE-LINKAGE",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-TEST-VOICE-LINKAGE"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/voice-linkage-contract.ts"
+        }
+      ]
     }
   ]
 }
