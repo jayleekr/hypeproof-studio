@@ -30,7 +30,7 @@ US-1과 US-2의 계약 조사가 먼저다. US-4의 gate 설계/대조군은 독
 ## 추적과 완료 규칙
 
 ```text
-기존 Studio Product Intent (ST-INT-NATIVE)
+Lab 제품 전략 (LAB-PRODUCT-ROLES) + 기존 Studio Product Intent (ST-INT-NATIVE)
   → INT-US-01~04 (ST-INT-UNIFIED)
   → US-01~18 (ST-REQ-UNIFIED, 기존 NAT/AB 연결)
   → UX·배포 설계 (ST-DES-UNIFIED)

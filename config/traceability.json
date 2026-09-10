@@ -815,6 +815,7 @@
       "stage": "intent",
       "owner": "jayleekr",
       "depends_on": [
+        "LAB-PRODUCT-ROLES",
         "ST-INT-NATIVE"
       ],
       "sources": [

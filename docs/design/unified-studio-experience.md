@@ -7,6 +7,8 @@
 
 상위: [Product Intent](../PRODUCT-INTENT.md), [NAT](../requirements/studio-native-trial.md),
 [AE](../requirements/learning-agent-experience.md), [이용 권한 AB](../requirements/access-budget-settlement.md).
+제품 전략의 부모는 Lab [제품 라인업](https://github.com/jayleekr/hypeprooflab/blob/a4fe9be03dcb8890b42e1020dc4d357687f82acc/products/PRODUCT-LINEUP.md)의 Studio 사용자 제품 역할이다.
+새 체험 제품이나 별도 강사 제품을 만드는 Intent가 아니다.
 철학과 후보 역량 정의는 상위 문서가 참조하는 Lab 원본을 따른다. 여기의 Product Intent는
 Human Asset `INTENT`를 평가하는 검사나 강제 질문 절차가 아니다.
 
@@ -91,6 +93,10 @@ profile/session/usage 원장을 우선 확장한다. 사용자·활동 참조·�
 단일 활성 코드에서 복수 활동으로의 변경은 US-2에서 조사·ADR·계약 대조를 먼저 제출한다.
 
 ## 배포와 계층
+
+**체험과 수업은 서로 다른 제품 계층이 아니다.** 둘 다 같은 App·Service 기반에서 실행하는
+프로그램이며 안내·자료·코치 지침·이용 조건으로 구분한다. Chalk는 강사 제품으로서 별도 역할을
+유지한다. 개발용 별도 앱/서버를 체험의 필수 내부 계층으로 두지 않는다.
 
 | 계층 | 소유할 것 | 전달·검증 |
 |---|---|---|
