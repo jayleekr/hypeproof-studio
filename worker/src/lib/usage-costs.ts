@@ -174,7 +174,28 @@ export function normalizeCostUsage(protocol:UsagePrice['protocol'],raw:unknown):
       else if(value!==0)issues.push('unsupported_server_tool_meter');
     }
   }else{
-    const input=n(r.prompt_tokens),output=n(r.completion_tokens),read=n(r.prompt_tokens_details?.cached_tokens),write=n(r.prompt_tokens_details?.cache_write_tokens);
+    const input=n(r.prompt_tokens),output=n(r.completion_tokens);
+    // **부재는 미지가 아니라 0 이다** — 이 프로토콜에서는.
+    //
+    // 2026-09-10 측정: 실제 OpenAI Chat Completions usage 모양 셋 모두
+    // (`cached_tokens` 없음 / `cached_tokens` 만 / reasoning 포함) 에서 이 블록이
+    // `tokens:input`·`cache_read`·`cache_write` 를 **전부 null** 로 만들고
+    // `input_cache_split_unconfirmed` 를 달았다. 제대로 값이 나온 유일한 입력은
+    // 이 레포 자신의 fixture 였고, 거기에만 `cache_write_tokens` 가 있었다 — 그 필드는
+    // OpenAI 가 보내는 것이 아니다(레포 전체에서 fixture 와 이 줄 말고는 등장하지 않았다).
+    //
+    // `issues` 가 하나라도 있으면 상태가 `priced` 가 될 수 없으므로(아래 153행 규칙),
+    // 그 결과 **모든 openai-chat 턴이 입력 차원에서 영구히 정산되지 않았다.** 홀드는
+    // 남고 비용은 안 붙는다.
+    //
+    // 그래서 부재를 미지로 취급하지 않고 프로토콜 사실로 해석한다:
+    //   - `cached_tokens` 부재 = 캐시 히트 0 (미지가 아니라 **알려진 0**)
+    //   - cache-write 차원 자체가 없다 = 0. OpenAI 는 캐시 쓰기를 과금하지 않는다.
+    // 다만 **어떤 공급자가 그 필드를 보내면 그 값을 존중한다** — OpenAI 호환 표면을
+    // 쓰는 다른 공급자가 채워 보낼 수 있고, 그때 0 으로 덮어쓰면 과소 계량이 된다.
+    // 값이 있는데 숫자가 아니면 그건 진짜 미지이므로 null 로 두어 거절을 유도한다.
+    const read=r.prompt_tokens_details?.cached_tokens===undefined?0:n(r.prompt_tokens_details.cached_tokens);
+    const write=r.prompt_tokens_details?.cache_write_tokens===undefined?0:n(r.prompt_tokens_details.cache_write_tokens);
     const valid=input!==null&&read!==null&&write!==null&&read+write<=input;
     meters['tokens:input']=valid?input!-read!-write!:null;meters['tokens:output']=output;
     meters['tokens:cache_read']=valid?read:null;meters['tokens:cache_write']=valid?write:null;

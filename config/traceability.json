@@ -565,6 +565,9 @@
         },
         {
           "path": "worker/test/sse-cost-receipts.test.mjs"
+        },
+        {
+          "path": "worker/test/openai-usage-shape.test.mjs"
         }
       ]
     },
@@ -717,6 +720,9 @@
       "sources": [
         {
           "path": "extensions/hypeproof-chat/test/voice-capability.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/voice-probe-lifecycle.smoke.mjs"
         }
       ]
     },
@@ -872,6 +878,46 @@
       "sources": [
         {
           "path": "docs/testing/unified-studio-experience.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-VOICE-SESSION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/voice-session.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-VOICE-SESSION",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-TEST-VOICE-SESSION"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/voiceSessionHelpers.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-OPERATOR-HEALTH-AUTH",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/deep-health-auth.test.mjs"
         }
       ]
     },
