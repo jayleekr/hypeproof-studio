@@ -2,6 +2,8 @@
 export interface StartState {
   checking: boolean;
   started?: boolean;
+  candidate?: boolean;
+  previousConnected?: boolean;
   error?: string;
   profile?: { kind?: "trial" | "personal" | "classroom"; id: string; name: string; coach: string; series: string; workspace: string };
   /** #747 — resolved AI display name for the connected seat; absent → "코치". */
@@ -16,5 +18,6 @@ export type StartRequest =
   | { type: "connectCourse"; token: string }
   | { type: "beginCourse" }
   | { type: "disconnectCourse" }
+  | { type: "cancelCandidate" }
   | { type: "openLocalFolder" };
 export type StartResponse = { type: "startState"; state: StartState };

@@ -13,10 +13,11 @@ export class StartPage {
   private busy = false;
   private error?: string;
   private started = false;
+  private candidate?: { token: string; profile: ResolvedProfile; proxyUrl: string; previousConnected: boolean };
   constructor(
     private context: vscode.ExtensionContext,
     private chat: ChatPanelProvider,
-    private begin: (profile: ResolvedProfile) => Promise<boolean>,
+    private begin: (profile: ResolvedProfile, commit: () => Promise<void>) => Promise<boolean>,
   ) {}
 
   async show(): Promise<void> {
@@ -40,15 +41,17 @@ export class StartPage {
     // (retainContextWhenHidden), so re-read the identity whenever it comes back
     // to the front instead of showing the name from before the rename.
     panel.onDidChangeViewState(e => { if (e.webviewPanel.active) void this.refresh(); });
-    panel.onDidDispose(() => { if (this.panel === panel) this.panel = undefined; });
+    panel.onDidDispose(() => { if (this.panel === panel) { this.panel = undefined; this.candidate = undefined; } });
     this.context.subscriptions.push(panel);
   }
 
   private async refresh(profile?: ResolvedProfile | null): Promise<void> {
-    const p = profile === undefined ? await this.chat.ensureProfile() : profile;
+    const p = this.candidate?.profile ?? (profile === undefined ? await this.chat.ensureProfile() : profile);
     const state: StartState = {
       checking: this.busy,
-      started: this.started && !!p,
+      started: !this.candidate && this.started && !!p,
+      candidate: !!this.candidate,
+      previousConnected: this.candidate ? this.candidate.previousConnected : !!p,
       error: this.error ?? (!p ? this.chat.profileFailure()?.friendly : undefined),
       version: this.context.extension.packageJSON.version,
       workspace: vscode.workspace.workspaceFolders?.[0]?.name,
@@ -76,11 +79,14 @@ export class StartPage {
       if (folders?.[0]) await vscode.commands.executeCommand("vscode.openFolder", folders[0]);
       return;
     }
+    if (msg.type === "cancelCandidate") {
+      this.candidate = undefined; this.error = undefined; await this.refresh(); return;
+    }
     if (msg.type === "disconnectCourse") {
       this.busy = true; this.chat.setConnectionChanging(true);
       try {
         await this.context.secrets.delete(TOKEN_KEY);
-        this.chat.invalidateProfile(); this.error = undefined; this.started = false;
+        this.candidate = undefined; this.chat.invalidateProfile(); this.error = undefined; this.started = false;
         this.chat.refreshConfig();
       } finally {
         this.busy = false; this.chat.setConnectionChanging(false); await this.refresh();
@@ -88,18 +94,43 @@ export class StartPage {
       return;
     }
     if (msg.type === "beginCourse") {
-      this.busy = true; this.started = false; this.error = undefined;
+      const candidate = this.candidate;
+      const wasStarted = this.started;
+      let previous: string | undefined;
+      let committed = false;
+      this.busy = true; this.error = undefined;
       this.chat.setConnectionChanging(true);
       let profile: ResolvedProfile | null = null;
       try {
         await this.refresh();
         // A connected card is not proof that the session is still live.
-        profile = await this.chat.ensureProfile(true);
+        if (candidate) {
+          const proxyUrl = vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+          if (proxyUrl !== candidate.proxyUrl) throw new Error("Activity Service changed during confirmation");
+          const result = await fetchProfileResult({ proxyUrl, token: candidate.token });
+          if (!result.ok) { this.error = result.failure.friendly; return; }
+          profile = result.profile;
+          if (!profile?.profile_id || !profile.display_name || !profile.ux?.coach || !profile.welcome) throw new Error("Invalid activity profile");
+        } else profile = await this.chat.ensureProfile(true);
         if (!profile) {
           this.error = this.chat.profileFailure()?.friendly ?? "수업 연결을 확인할 수 없습니다. 참여 코드를 다시 확인해주세요.";
           return;
         }
-        if (await this.begin(profile)) return; // workspace switch reloads the window
+        const commit = async () => {
+          if (!this.panel || (candidate && !committed && this.candidate !== candidate)) throw new Error("Activity entry was cancelled");
+          if (!candidate || committed) return;
+          previous = await this.context.secrets.get(TOKEN_KEY);
+          if (!this.panel || this.candidate !== candidate) throw new Error("Activity entry was cancelled");
+          await this.context.secrets.store(TOKEN_KEY, candidate.token);
+          committed = true;
+          this.chat.invalidateProfile();
+          if (vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1") !== candidate.proxyUrl) throw new Error("Activity Service changed during confirmation");
+          if (!await this.chat.ensureProfile(true)) throw new Error('connection validation failed');
+          if (!this.panel || this.candidate !== candidate) throw new Error("Activity entry was cancelled");
+          this.candidate = undefined;
+        };
+        if (await this.begin(profile, commit)) return; // workspace switch reloads the window
+        await commit();
         const entry = this.panel;
         if (!entry) throw new Error('Entry page was closed');
         await this.chat.openInEditor(entry);
@@ -107,7 +138,14 @@ export class StartPage {
         this.started = true;
         this.chat.refreshConfig();
       } catch {
-        this.error = "수업을 열지 못했습니다. 다시 시도해주세요. 작업 파일은 그대로 보존됩니다.";
+        if (committed) {
+          if (previous) await this.context.secrets.store(TOKEN_KEY, previous);
+          else await this.context.secrets.delete(TOKEN_KEY);
+          this.chat.invalidateProfile();
+        }
+        this.candidate = this.panel ? candidate : undefined;
+        this.started = wasStarted;
+        this.error = "활동을 열지 못했습니다. 다시 시도해주세요. 작업 파일은 그대로 보존됩니다.";
       } finally {
         this.busy = false; this.chat.setConnectionChanging(false);
         await this.refresh(profile);
@@ -130,20 +168,8 @@ export class StartPage {
       if (!p?.profile_id || !p.display_name || !p.ux?.coach || !p.welcome) {
         this.error = "수업 정보 응답을 읽지 못했습니다. 잠시 후 다시 연결하세요."; return;
       }
-      // Validate before replacing a working connection. No credential echo or URL/state persistence.
-      const previous = await this.context.secrets.get(TOKEN_KEY);
-      await this.context.secrets.store(TOKEN_KEY, token);
-      this.chat.invalidateProfile();
-      const resolved = await this.chat.ensureProfile();
-      if (!resolved) {
-        this.error = this.chat.profileFailure()?.friendly ?? "수업 정보를 확인하지 못했습니다. 다시 시도하세요.";
-        if (previous) await this.context.secrets.store(TOKEN_KEY, previous);
-        else await this.context.secrets.delete(TOKEN_KEY);
-        this.chat.invalidateProfile();
-      } else {
-        this.started = false;
-      }
-      this.chat.refreshConfig();
+      // Preview only. Existing runtime and credential stay bound until workspace preparation succeeds.
+      this.candidate = { token, profile: p, proxyUrl, previousConnected: !!await this.chat.ensureProfile() };
     } catch {
       this.error = "수업에 연결하지 못했습니다. 연결 상태를 확인하고 다시 시도하세요.";
     } finally {
