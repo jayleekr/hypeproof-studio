@@ -1200,3 +1200,73 @@ html, body, #root {
 .hps-access summary { position: sticky; top: 0; background: var(--vscode-editor-background,#18271f); }
 
 .hps-access-summary { display:block; font-weight:normal; margin-top:4px; }
+
+/* #939 — 음성 대화 패널. 배치만 여기 있고 상태 판정은 voicePopupHelpers 가 한다.
+   패널이 **비모달**이라 작업 영역을 덮지 않는다(VO-40/47): 채팅 열 안에서 흐르고,
+   작은 컨트롤은 한 줄로 접힌다. 크기는 #940 의 시안값이며 실기 검증 전이다. */
+.hps-voice-panel {
+  display: flex; flex-direction: column; gap: 10px;
+  max-width: 480px; max-height: min(520px, 70vh); overflow-y: auto; overscroll-behavior: contain;
+  margin: 8px 12px; padding: 12px 14px;
+  border: 1px solid var(--vscode-widget-border, #3a3a3a); border-radius: 10px;
+  background: var(--vscode-editorWidget-background, #1e1e1e);
+}
+.hps-voice-panel:focus-visible,
+.hps-voice-panel :focus-visible { outline: 2px solid var(--vscode-focusBorder, #d4f783); outline-offset: 2px; }
+.hps-voice-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.hps-voice-head h2 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
+.hps-voice-head-buttons { display: flex; gap: 6px; flex-shrink: 0; }
+
+.hps-voice-status { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.hps-voice-meter { display: flex; align-items: center; gap: 5px; height: 60px; }
+.hps-voice-bar {
+  width: 7px; border-radius: 4px; background: var(--vscode-button-background, #5b5bff);
+  /* 높이는 관측된 레벨이 정한다. 관측이 없으면 인라인 값이 고정이라 아무 일도
+     일어나지 않는다 — 여기에 keyframes 를 넣으면 그것이 VO-38 의 가짜 움직임이다. */
+}
+/* 모션은 **허용된 경우에만** 켠다(`no-preference`). `reduce` 블록을 뒤에 새로
+   두지 않는 이유는 취향이 아니다: test/runner-bar.smoke.mjs 가 `lastIndexOf` 로
+   마지막 reduce 블록을 집어 러너 규칙을 확인하므로, 뒤에 하나 더 붙이면 멀쩡한
+   러너 검사가 이 블록을 읽고 실패한다(실제로 그렇게 한 번 깨뜨렸다). */
+@media (prefers-reduced-motion: no-preference) {
+  .hps-voice-bar { transition: height .1s linear; }
+}
+.hps-voice-meter:not(.hps-voice-meter-live) .hps-voice-bar { background: var(--vscode-descriptionForeground, #9aa0a6); }
+.hps-voice-status-text { margin: 0; font-size: 15px; font-weight: 600; text-align: center; overflow-wrap: anywhere; }
+.hps-voice-progress { margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground, #bccabd); }
+
+.hps-voice-resume { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; }
+.hps-voice-resume p { margin: 0; }
+.hps-voice-transcript { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.hps-voice-final, .hps-voice-partial { margin: 0; overflow-wrap: anywhere; }
+.hps-voice-partial { color: var(--vscode-descriptionForeground, #bccabd); }
+.hps-voice-partial-tag { font-size: 12px; }
+.hps-voice-reference { margin: 0; font-size: 12px; color: var(--vscode-descriptionForeground, #bccabd); overflow-wrap: anywhere; }
+
+/* 상태·음소거·종료는 스크롤 밖으로 사라지지 않는다 (VO-40/47). */
+.hps-voice-actions {
+  position: sticky; bottom: 0; display: flex; flex-wrap: wrap; gap: 8px;
+  padding-top: 8px; background: var(--vscode-editorWidget-background, #1e1e1e);
+}
+.hps-voice-actions button, .hps-voice-compact button, .hps-voice-head-buttons button, .hps-voice-resume button, .hps-voice-retry {
+  font: inherit; padding: 6px 12px; border-radius: 16px; cursor: pointer;
+  color: var(--vscode-button-secondaryForeground, #e1e1e1);
+  background: var(--vscode-button-secondaryBackground, #2a2d2e);
+  border: 1px solid var(--vscode-button-border, transparent);
+}
+.hps-voice-actions button:disabled { opacity: .5; cursor: default; }
+.hps-voice-to-text { color: var(--vscode-button-foreground, #fff) !important; background: var(--vscode-button-background, #5b5bff) !important; }
+.hps-voice-info { margin: 0; padding-left: 18px; font-size: 12px; color: var(--vscode-descriptionForeground, #bccabd); }
+.hps-voice-est { font-style: italic; }
+
+/* 작은 컨트롤 — 결과물을 읽는 영역을 가리지 않도록 한 줄로 접힌다. */
+.hps-voice-compact {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 8px 12px; padding: 8px 12px; border-radius: 20px;
+  background: var(--vscode-editorWidget-background, #1e1e1e);
+  border: 1px solid var(--vscode-widget-border, #3a3a3a);
+  font-size: 13px;
+}
+.hps-voice-compact-status { display: flex; align-items: center; gap: 6px; }
+.hps-voice-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--vscode-descriptionForeground, #9aa0a6); }
+.hps-voice-dot-on { background: var(--vscode-charts-red, #e05252); }
