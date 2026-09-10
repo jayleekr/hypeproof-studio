@@ -81,12 +81,35 @@ JTI="$(printf '%s' "$OPEN" | python3 -c 'import json,sys; print(json.load(sys.st
 [[ -n "$TOKEN" && -n "$JTI" ]] || die "session/open did not return a token (response: ${OPEN:0:300})"
 ok "canary session open"
 
+# 세션 개시가 200 을 줘도 **게이트가 바로 그것을 읽지는 못한다.** KV 는 최종 일관성이고
+# 이 레포의 관측값은 쓰기→읽기 지연 약 1~2초다. 그래서 개시 직후 바로 때리면
+# `403 session_inactive` 가 난다 — 2026-09-10 배포에서 실제로 그렇게 실패했다:
+# "✓ canary session open" 0.82초 뒤 여섯 하위 테스트가 전부 session_inactive.
+#
+# 고정 `sleep` 을 쓰지 않는다. 지연은 런마다 다르고, 짧으면 여전히 깨지고 길면 매 배포가
+# 느려진다. 대신 **게이트가 통과하는 것을 직접 확인**한다 — 토큰으로 `/v1/profile` 을
+# 폴링한다(verification.md 가 토큰을 의심할 때 쓰라고 적어둔 그 경로다).
+note "waiting for the session to become readable (KV is eventually consistent)"
+READY=""
+for attempt in $(seq 1 20); do
+  CODE="$(curl -sS -o /dev/null -w '%{http_code}' "$PROD/v1/profile" \
+    -H "Authorization: Bearer $TOKEN" 2>/dev/null || echo 000)"
+  if [[ "$CODE" == "200" ]]; then READY="$attempt"; break; fi
+  sleep 1
+done
+[[ -n "$READY" ]] && ok "session readable after ${READY}s" || die \
+  "session did not become readable within 20s (last /v1/profile status: $CODE). The session was opened, so this is a convergence or gating problem, not the SDK request shape."
+
 note "R7 — SDK request shape vs the live gateway"
 cd "$REPO_ROOT/tests/rehearsal" || die "rehearsal tests not found"
 TOKEN="$TOKEN" WORKER_URL="$PROD/v1" node --test 07-sdk-request-shape.test.mjs
 STATUS=$?
 
 if [[ $STATUS -ne 0 ]]; then
-  die "SDK request-shape contract FAILED — the gateway is rejecting what the Agent SDK actually sends. Every agent-sdk coach turn is 400ing (and the SDK hides it behind its retry loop, so students just see an endless spinner). See worker/src/routes/messages.ts MODEL_GATED_PARAMS."
+  # 원인을 **단정하지 않는다.** 이전 문구는 "게이트웨이가 SDK 본문을 거부한다 · 모든
+  # agent-sdk 턴이 400 이다 · MODEL_GATED_PARAMS 를 보라" 고 적었는데, 2026-09-10 의
+  # 실제 실패는 `403 session_inactive` 였다. 단정하는 문구는 다음 사람을 틀린 파일로
+  # 보낸다 — 이 레포는 그 비용을 이미 치렀다("토큰 만료" 배너가 이틀을 태웠다).
+  die "SDK request-shape contract FAILED (exit $STATUS). Read the TAP output above before concluding anything: a 400 points at the request shape the gateway accepts (worker/src/routes/messages.ts MODEL_GATED_PARAMS) and means agent-sdk turns are failing behind the SDK's retry loop, so students see an endless spinner; a 403 session_inactive instead means the canary session was not readable and this is a harness problem, not the contract."
 fi
 ok "SDK request-shape contract passed"
