@@ -312,6 +312,9 @@ Service 집행이 없다는 뜻이다.
 
 ## R. 음성 capability 계측 (#896 / #897 V0)
 
+음성 전체 계획: [VO-01–35](requirements/voice-conversation.md) · [VO-T01–35 및 독립 검수](testing/voice-conversation.md) · [에픽 인계](plan/voice-conversation-epics.md). 아래 구현 계약과 전체 수용 기준의 완료 상태는 구분한다.
+
+
 > 음성 **요구사항 초안**은 #896→#897~903 (VO-01~35) 이 소유한다. 이 절은 그 초안을
 > 복제하지 않고, 구현 쪽이 세운 **최소 통합 계약**만 적는다(#896 공통 경계: Claude =
 > 제품 구현·최소 계약/ADR). 초안과 이 절이 어긋나면 초안이 정본이다.
