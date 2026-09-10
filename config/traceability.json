@@ -737,6 +737,21 @@
         },
         {
           "path": "extensions/hypeproof-chat/webview-ui/src/voiceProbe.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/package.json"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chatPanelProvider.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/extension.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/protocol.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/App.tsx"
         }
       ]
     },
