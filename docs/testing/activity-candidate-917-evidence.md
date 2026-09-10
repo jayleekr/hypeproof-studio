@@ -12,7 +12,7 @@ credential을 저장한다. 준비 실패는 기존 폴더에서 새 활동을 �
 - Extension typecheck, webview/extension build, 전체 smoke: PASS.
 - Host 대조: 잘못된 서명/403/network/잘못된 profile, 진행 중 스트림,
   후보 취소, 폴더 준비 실패, SecretStorage 저장 실패, 저장 후 인증 실패,
-  확인 이후 만료, 정상 확정, 중복 확인 경쟁, 서버 origin 변경 시 전송 차단: PASS.
+  확인 이후 만료, 정상 확정, 중복 확인 경쟁, 서버 origin 변경 시 전송 차단, 시작 화면 종료 후 확정 차단: PASS.
 - 기존 시작 화면 브라우저 검사와 UI 회귀: PASS. 후보 상태와 선택 취소 메시지도 검사했다.
 - 실제 Mac 앱 사본에서 native grant와 일반 수업 credential을 각각 확인하고,
   후보 취소 → 코드 재입력 → 시작 → 실제 채팅 진입을 수행한다.
@@ -31,5 +31,5 @@ Mac fixture는 자기 workspace를 고정하므로 실제 OS의 폴더 이동·�
 
 ## 실제 Mac 런
 
-- `e2e/test-results/native-trial/20260910T163940Z`: trial PASS.
-- `e2e/test-results/native-trial/20260910T163948Z`: classroom PASS.
+- `e2e/test-results/native-trial/20260910T164241Z`: trial PASS.
+- `e2e/test-results/native-trial/20260910T164247Z`: classroom PASS.

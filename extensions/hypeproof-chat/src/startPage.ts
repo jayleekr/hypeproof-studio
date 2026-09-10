@@ -117,6 +117,7 @@ export class StartPage {
           return;
         }
         const commit = async () => {
+          if (!this.panel || (candidate && !committed && this.candidate !== candidate)) throw new Error("Activity entry was cancelled");
           if (!candidate || committed) return;
           previous = await this.context.secrets.get(TOKEN_KEY);
           await this.context.secrets.store(TOKEN_KEY, candidate.token);
@@ -139,7 +140,7 @@ export class StartPage {
           else await this.context.secrets.delete(TOKEN_KEY);
           this.chat.invalidateProfile();
         }
-        this.candidate = candidate;
+        this.candidate = this.panel ? candidate : undefined;
         this.started = wasStarted;
         this.error = "활동을 열지 못했습니다. 다시 시도해주세요. 작업 파일은 그대로 보존됩니다.";
       } finally {

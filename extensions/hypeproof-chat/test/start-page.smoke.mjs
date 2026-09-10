@@ -56,3 +56,12 @@ const previousFetches=fetches;proxyUrl='https://other.invalid/v1';await page.han
 assert.equal(fetches,previousFetches,'candidate credential never forwarded to a different Service');
 assert.equal(stored,'valid-old');assert.equal(chat.changing,false);
 console.log('PASS candidate origin change rejected before credential forwarding');
+
+proxyUrl='http://local/v1';response='waiting';releaseFetch=undefined;
+const closing=page.handle({type:'beginCourse'});
+while(!releaseFetch)await new Promise(r=>setTimeout(r,0));
+page.panel=undefined;page.candidate=undefined;response='valid';releaseFetch();await closing;
+assert.equal(stored,'valid-old','closing the entry before preparation completes must not commit');
+assert.equal(page.candidate,undefined);
+assert.equal(chat.changing,false);
+console.log('PASS closed entry cancels pending activation');
