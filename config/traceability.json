@@ -6,7 +6,7 @@
     {
       "id": "ST-INT-NATIVE",
       "stage": "intent",
-      "owner": null,
+      "owner": "jayleekr",
       "depends_on": [
         "LAB-PRODUCT-ROLES"
       ],
@@ -23,7 +23,7 @@
     {
       "id": "ST-REQ-NATIVE",
       "stage": "requirement",
-      "owner": null,
+      "owner": "jayleekr",
       "depends_on": [
         "ST-INT-NATIVE"
       ],
@@ -36,7 +36,7 @@
     {
       "id": "ST-DES-NATIVE",
       "stage": "design",
-      "owner": null,
+      "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-NATIVE"
       ],
@@ -50,7 +50,7 @@
     {
       "id": "ST-REQ-UX",
       "stage": "requirement",
-      "owner": null,
+      "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-NATIVE"
       ],
@@ -63,7 +63,7 @@
     {
       "id": "ST-IMP-START",
       "stage": "implementation",
-      "owner": null,
+      "owner": "jayleekr",
       "depends_on": [
         "ST-DES-NATIVE",
         "ST-REQ-UX"
@@ -77,7 +77,7 @@
     {
       "id": "ST-TEST-NATIVE",
       "stage": "test",
-      "owner": null,
+      "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-NATIVE"
       ],
@@ -90,7 +90,7 @@
     {
       "id": "ST-TEST-UX",
       "stage": "test",
-      "owner": null,
+      "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-UX"
       ],
@@ -103,7 +103,7 @@
     {
       "id": "ST-VAL-NATIVE",
       "stage": "validation",
-      "owner": null,
+      "owner": "jayleekr",
       "depends_on": [
         "ST-TEST-NATIVE",
         "ST-IMP-START"
@@ -1006,6 +1006,12 @@
         },
         {
           "path": "extensions/hypeproof-chat/webview-ui/src/start.css"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chatPanelProvider.ts"
+        },
+        {
+          "path": "worker/src/routes/chat.ts"
         }
       ]
     },
@@ -1061,6 +1067,9 @@
       "sources": [
         {
           "path": "extensions/hypeproof-chat/test/start-page.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/pending-send.smoke.mjs"
         }
       ]
     },
@@ -1075,6 +1084,34 @@
       "sources": [
         {
           "path": "docs/testing/activity-candidate-917-evidence.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-MODEL-USAGE",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODEL-USAGE",
+        "ST-TEST-MODEL-USAGE"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/profiles/types.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-OPERATOR-HEALTH-AUTH",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY",
+        "ST-TEST-OPERATOR-HEALTH-AUTH"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/chat.ts"
         }
       ]
     }
