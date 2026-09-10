@@ -107,24 +107,39 @@ chat.get("/health", (c) =>
 //   - operator console during 보아치과 티저 세션 (Jay polls)
 //   - manual `wrangler tail` smoke before deploy
 //
-// Auth: admin Basic, OR an internal "x-cron-trigger: true" header (set by
-// the scheduled() entry point — see worker/src/index.ts). This keeps the
-// endpoint cheap to call from cron without burning the chat token path.
+// Auth: admin Basic only. Operator surface — never a path the student app calls.
+//
+// **2026-09-10 — removed an unauthenticated bypass.** This handler used to accept
+// any request carrying `x-cron-trigger: true` in place of a credential, and the
+// comment claimed that header was "set by the scheduled() entry point". That
+// premise was false twice over:
+//
+//   1. A request header is supplied by whoever makes the request. It is never
+//      evidence of internal origin. `curl -H 'x-cron-trigger: true' …` was enough.
+//   2. Nothing ever sent it. `scheduled()` in worker/src/index.ts calls
+//      `runHeartbeat(env)` / `runD1Backup(env)` as plain functions — it makes no
+//      HTTP request to this route. A repo-wide grep for the header found exactly
+//      two hits, both inside the bypass itself. So it protected no caller while
+//      exposing every caller.
+//
+// What leaked: which providers are credentialed and their live status/latency,
+// KV and D1 health, and the Anthropic proxy hostname. Worse than disclosure —
+// each call makes the worker issue real probe requests to four upstream
+// providers, so an unauthenticated request amplified into four paid ones.
 chat.get("/health/deep", async (c) => {
-  // Lightweight auth: admin password OR internal cron flag. We deliberately
-  // don't accept session tokens here — this is operator-only, not a path the
-  // student app calls.
-  const cronFlag = c.req.header("x-cron-trigger") === "true";
-  if (!cronFlag) {
-    const want = c.env.HPS_ADMIN_PASSWORD;
-    if (!want) return c.json({ error: "admin not configured" }, 503);
-    const authz = c.req.header("authorization") ?? "";
-    const m = /^Basic\s+(.+)$/i.exec(authz);
-    if (!m || !m[1]) return c.json({ error: "auth required" }, 401);
-    const decoded = atob(m[1]);
-    const [, pass] = decoded.split(":", 2);
-    if (pass !== want) return c.json({ error: "auth required" }, 401);
+  const want = c.env.HPS_ADMIN_PASSWORD;
+  if (!want) return c.json({ error: "admin not configured" }, 503);
+  const authz = c.req.header("authorization") ?? "";
+  const m = /^Basic\s+(.+)$/i.exec(authz);
+  if (!m || !m[1]) return c.json({ error: "auth required" }, 401);
+  let pass: string | undefined;
+  try {
+    [, pass] = atob(m[1]).split(":", 2);
+  } catch {
+    // Malformed base64 — treat as a failed credential, not a 500.
+    return c.json({ error: "auth required" }, 401);
   }
+  if (pass !== want) return c.json({ error: "auth required" }, 401);
   const result = await runDeepHealth(c.env);
   return c.json(result, result.ok ? 200 : 503);
 });
