@@ -31,5 +31,5 @@ Mac fixture는 자기 workspace를 고정하므로 실제 OS의 폴더 이동·�
 
 ## 실제 Mac 런
 
-- `e2e/test-results/native-trial/20260910T164351Z`: trial PASS.
-- `e2e/test-results/native-trial/20260910T164358Z`: classroom PASS.
+- `e2e/test-results/native-trial/20260910T164546Z`: trial PASS.
+- `e2e/test-results/native-trial/20260910T164553Z`: classroom PASS.

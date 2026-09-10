@@ -124,6 +124,7 @@ export class StartPage {
           await this.context.secrets.store(TOKEN_KEY, candidate.token);
           committed = true;
           this.chat.invalidateProfile();
+          if (vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1") !== candidate.proxyUrl) throw new Error("Activity Service changed during confirmation");
           if (!await this.chat.ensureProfile(true)) throw new Error('connection validation failed');
           if (!this.panel || this.candidate !== candidate) throw new Error("Activity entry was cancelled");
           this.candidate = undefined;

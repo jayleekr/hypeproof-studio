@@ -700,6 +700,7 @@ async function ensureWorkspace(
     if (!decision.switch) {
       const desired = profile?.workspace_root ? resolveWorkspaceRoot(profile.workspace_root) : null;
       if (!isTestRun && desired && !isSameLocation(open[0], desired, canonicalizeFsPath)) {
+        await clearWorkspaceSwitchAttempt(context);
         throw new Error('Activity workspace is not the active root');
       }
       console.info(`[workspace] staying in ${open[0]} — ${decision.reason}`);
@@ -722,7 +723,8 @@ async function ensureWorkspace(
     console.warn(`[workspace] cohort folder differs — switching ${decision.from} → ${decision.to}`);
     // Record BEFORE the reload: if the open fails we must not try again.
     await context?.globalState.update(WORKSPACE_SWITCH_ATTEMPT_KEY, decision.to);
-    return await openWorkspaceFolder(decision.to, profile, commit);
+    try { return await openWorkspaceFolder(decision.to, profile, commit); }
+    catch (error) { await clearWorkspaceSwitchAttempt(context); throw error; }
   }
 
   // Folder + starter are cohort-driven; legacy fallback keeps old cohorts intact
