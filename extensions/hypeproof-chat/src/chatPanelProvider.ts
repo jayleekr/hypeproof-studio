@@ -215,6 +215,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private view?: vscode.WebviewView;
   private editorChat?: vscode.WebviewPanel;
   private activeStreams = new Map<string, AbortController>();
+  // A send owns its activity before its first authentication await, through persistence.
+  private pendingSends = 0;
   /**
    * #503 — 진행 중인 턴의 단일 타임라인(스트림 id 별). 웹뷰가 화면에 그리는 것과
    * **같은 순수 리듀서**로 만들어 그대로 영속화한다. 규칙이 두 벌이면 창을 다시
@@ -593,7 +595,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private connectionChanging = false;
   setConnectionChanging(value: boolean): void { this.connectionChanging = value; }
 
-  hasActiveStream(): boolean { return this.activeStreams.size > 0; }
+  hasActiveStream(): boolean { return this.pendingSends > 0 || this.activeStreams.size > 0; }
 
   refreshConfig() {
     void (async () => {
@@ -1856,7 +1858,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.loadAccess(true);await this.postConfig();return;
       case 'selectFunding':
         await this.loadAccess();
-        if(!this.activeStreams.size&&this.accessState?.view?.choices.some(c=>c.id===msg.id&&c.active))this.accessState={...this.accessState,selected:msg.id,notice:'선택한 이용권을 다음 작업부터 사용합니다.'};
+        if(!this.hasActiveStream()&&this.accessState?.view?.choices.some(c=>c.id===msg.id&&c.active))this.accessState={...this.accessState,selected:msg.id,notice:'선택한 이용권을 다음 작업부터 사용합니다.'};
         await this.postConfig();return;
       case 'requestBudget':{
         const token=await this.context.secrets.get(TOKEN_KEY),selected=this.accessState?.selected;
@@ -2014,6 +2016,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     rawHistory: ChatMessage[],
     images?: string[],
   ): Promise<void> {
+    this.pendingSends++;
+    try {
     // #503 — 웹뷰의 히스토리에는 이제 툴 줄(role:"tool")이 섞여 있다. 모델로
     // 나가는 경로는 여기 하나뿐이므로 초입에서 한 번 거른다. 아래쪽 프록시·SDK
     // 게이트웨이 호출은 user/assistant 만 아는 계약이다.
@@ -2643,6 +2647,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.activeStreams.delete(streamId);
       void this.loadAccess(true).then(()=>this.postConfig()).catch(()=>{});
       this.turnTimelines.delete(streamId);
+    }
+    } finally {
+      this.pendingSends--;
     }
   }
 
