@@ -62,6 +62,8 @@ export interface VoiceSession {
   readonly state: VoiceState;
   /** 캡처(마이크 track)가 열려 있는가. 화면 표시가 아니라 **자원 사실**이다. */
   readonly captureOpen: boolean;
+  /** 사용자 음소거 의도는 전송 재연결 상태와 독립적으로 보존한다. */
+  readonly muteRequested: boolean;
   /** 재생 대기/진행 중인 응답. 해제 시 반드시 비워야 한다. */
   readonly playbackQueued: boolean;
   /** 이 좌석에서 동시에 살아 있는 청취 세션 수. 1 을 넘으면 버그다 (VO-09). */
@@ -76,6 +78,7 @@ export function initialVoiceSession(): VoiceSession {
   return {
     state: 'idle',
     captureOpen: false,
+    muteRequested: false,
     playbackQueued: false,
     listeningSessions: 0,
     closeReason: null,
@@ -107,7 +110,7 @@ function ignore(s: VoiceSession, why: string): VoiceSession {
 /** 상태에 맞게 자원 플래그를 다시 유도한다 — 전이마다 손으로 적으면 어긋난다. */
 function settle(s: VoiceSession, next: VoiceState, patch: Partial<VoiceSession> = {}): VoiceSession {
   const merged = { ...s, ...patch, state: next };
-  const captureOpen = CAPTURE_OPEN_STATES.has(next) && next !== 'muted';
+  const captureOpen = CAPTURE_OPEN_STATES.has(next) && !merged.muteRequested;
   return {
     ...merged,
     captureOpen,
@@ -135,7 +138,7 @@ export function voiceTransition(s: VoiceSession, e: VoiceEvent): VoiceSession {
       if (s.state !== 'idle' && s.state !== 'closed' && s.state !== 'error') {
         return ignore(s, `start_ignored_in_${s.state}`);
       }
-      return settle(s, 'connecting', { closeReason: null, errorCode: null, listeningSessions: 0 });
+      return settle(s, 'connecting', { closeReason: null, errorCode: null, listeningSessions: 0, muteRequested: false });
 
     case 'transport_ready':
       if (s.state !== 'connecting') return ignore(s, `transport_ready_in_${s.state}`);
@@ -143,7 +146,7 @@ export function voiceTransition(s: VoiceSession, e: VoiceEvent): VoiceSession {
       // `connecting` → `transport_ready`)이 이 분기를 다시 지나가므로, `+1` 이면
       // 전송이 흔들릴 때마다 세션이 하나씩 쌓인다. 그게 VO-09 의
       // "재연결이 복수 청취 세션을 만들지 않는다" 가 막으려는 것이다.
-      return settle(s, 'listening', { listeningSessions: 1 });
+      return settle(s, s.muteRequested ? 'muted' : 'listening', { listeningSessions: 1 });
 
     case 'transport_dropped':
       // 복구 가능한 끊김. 캡처는 닫고(자원을 쥔 채 기다리지 않는다) 재생 큐는 버린다
@@ -154,7 +157,8 @@ export function voiceTransition(s: VoiceSession, e: VoiceEvent): VoiceSession {
       return settle(s, 'connecting', { playbackQueued: false });
 
     case 'user_speech_start':
-      if (s.state === 'muted') return ignore(s, 'speech_while_muted');
+      if (s.muteRequested) return ignore(s, 'speech_while_muted');
+      if (s.state === 'connecting') return ignore(s, 'speech_before_transport_ready');
       if (!LIVE_STATES.has(s.state)) return ignore(s, `speech_start_in_${s.state}`);
       return settle(s, 'listening');
 
@@ -175,11 +179,12 @@ export function voiceTransition(s: VoiceSession, e: VoiceEvent): VoiceSession {
       // 음소거는 캡처를 **실제로 닫는다**. 소프트 게이트(들어온 샘플을 버리기)로
       // 구현하면 OS 의 마이크 사용 표시가 켜진 채로 남고, 아이는 꺼졌다고 듣고도
       // 켜진 표시를 본다. 그 불일치 자체가 VO-06 위반이다.
-      return settle(s, 'muted', { playbackQueued: false });
+      return settle(s, s.state === 'connecting' ? 'connecting' : 'muted', { playbackQueued: false, muteRequested: true });
 
     case 'unmute':
+      if (s.state === 'connecting' && s.muteRequested) return settle(s, 'connecting', { muteRequested: false });
       if (s.state !== 'muted') return ignore(s, `unmute_in_${s.state}`);
-      return settle(s, 'listening');
+      return settle(s, 'listening', { muteRequested: false });
 
     case 'interrupt':
       // VO-07 — 재생 중이든 재생 직전(`preparing`)이든 끼어들기는 유효하다.
@@ -470,6 +475,7 @@ export class VoiceInvariantError extends Error {
  */
 export function assertVoiceInvariants(s: VoiceSession): void {
   const bad: string[] = [];
+  if (s.muteRequested && s.captureOpen) bad.push('mute_requested_with_capture_open');
   if (s.state === 'idle' && s.captureOpen) bad.push('idle_with_capture_open');
   if (s.state === 'connecting' && s.captureOpen) bad.push('connecting_with_capture_open');
   if (s.state === 'muted' && s.captureOpen) bad.push('muted_with_capture_open');

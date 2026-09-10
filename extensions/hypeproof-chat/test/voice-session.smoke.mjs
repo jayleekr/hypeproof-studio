@@ -451,3 +451,23 @@ const RESP = {
 }
 
 console.log("voice-session smoke OK — 결정 계층만, 기기 코드 아님 (VO-T06~T10 은 NOT RUN)");
+
+// Codex independent regression: transport recovery must not cancel explicit mute.
+{
+  const muted = runVoiceEvents([...open, { type: 'mute' }]);
+  const dropped = voiceTransition(muted, { type: 'transport_dropped' });
+  assert.equal(dropped.state, 'connecting');
+  assert.equal(voiceTransition(dropped, { type: 'user_speech_start' }).captureOpen, false);
+  const recovered = voiceTransition(dropped, { type: 'transport_ready' });
+  assert.equal(recovered.state, 'muted');
+  assert.equal(recovered.captureOpen, false, 'reconnection must not implicitly unmute');
+  assert.equal(recovered.listeningSessions, 1);
+  assert.equal(voiceTransition(recovered, { type: 'unmute' }).captureOpen, true);
+  const unmutedOffline = voiceTransition(dropped, { type: 'unmute' });
+  assert.equal(unmutedOffline.state, 'connecting');
+  assert.equal(unmutedOffline.captureOpen, false);
+  assert.equal(voiceTransition(unmutedOffline, { type: 'transport_ready' }).captureOpen, true);
+  const starting = runVoiceEvents([{ type: 'start' }, { type: 'mute' }]);
+  assert.equal(starting.captureOpen, false);
+  assert.equal(voiceTransition(starting, { type: 'transport_ready' }).state, 'muted');
+}
