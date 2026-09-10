@@ -55,3 +55,19 @@ US-T 행 전체는 정상·실패·실기·지원 조합을 모두 요구하므�
 옮기지 않는다. 특히 다른 정책의 강의 pin/예산, 실행 중 강제 종료, 실제 SDK resume와
 늦은 정산, 최종 서명 업데이트·운영 복귀는 아직 전체 인수하지 않았다.
 #916~919와 Epic은 이 결과만으로 닫지 않는다.
+
+## main 갱신 후 재실행
+
+`03e65f0` main(음성 UI와 canary 준비 검사 포함)을 받아 다시 빌드·검사했다.
+실기 검사 코드 SHA는 `8352170d70132eeb1fe5845703c8df8ef5ccfb26`이다.
+후속 문서 커밋과 이 실기 SHA를 구분한다.
+
+- 확장 전체 smoke/typecheck, UI/확장 build: PASS. 로그 `/tmp/hps-unified-final-{extension-test,types,ui-build,build}.log`.
+- 브라우저 49개: PASS. `trial-ux/2026-09-10T19-27-50-381Z/report.json`.
+- 실제 Mac 체험 전환·재시작: PASS (모델 미호출). `native-trial/20260910T192830Z`.
+- 실제 Mac 수업 전환·재시작: PASS (모델 미호출). `native-trial/20260910T192844Z`.
+- gate CLI 정상 exit 0, missing/tampered bytes/다른 공개 Service revision exit nonzero,
+  Windows installer receipt 누락 대조: PASS. 실제 Windows 실행은 여전히 NOT RUN.
+
+실기 폴더의 `environment.json`, `unified-switch.json`과 3개 화면 캡처가 근거다.
+실제 모델·최종 패키지·공개 전달의 BLOCKED/NOT RUN 상태는 바뀌지 않았다.
