@@ -1,6 +1,13 @@
 /** Start-page messages contain presentation state, never saved credentials. */
+export interface ActivitySummary {
+  ref: string;
+  id: string;
+  name: string;
+  kind?: 'trial' | 'personal' | 'classroom';
+  workspace: string;
+}
 export interface StartState {
-  activities?: import('./activityConnections').ActivitySummary[];
+  activities?: ActivitySummary[];
   legacyConnection?: boolean;
   legacyHistory?: boolean;
   checking: boolean;

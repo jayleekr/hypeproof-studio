@@ -3,17 +3,17 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type * as vscode from 'vscode';
 import type { ResolvedProfile } from './protocol';
+import type { ActivitySummary } from './startPageProtocol';
+export type { ActivitySummary } from './startPageProtocol';
 
 export class ActivityConnectionError extends Error {}
 export const ACTIVITY_TOKEN_KEY = 'hypeproofChat.workshopToken';
 const PREFIX = 'hps.activity.credential.';
 const ACTIVE = 'hps.activity.active';
-export interface ActivityRecord {
-  version: 1; ref: string; id: string; service: string; serverId: string;
-  name: string; kind?: 'trial' | 'personal' | 'classroom'; workspace: string;
+export interface ActivityRecord extends ActivitySummary {
+  version: 1; service: string; serverId: string;
   token: string; savedAt: number;
 }
-export type ActivitySummary = Pick<ActivityRecord, 'ref' | 'id' | 'name' | 'kind' | 'workspace'>;
 const digest = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 export function activityService(url: string): string {
   const u = new URL(url);
