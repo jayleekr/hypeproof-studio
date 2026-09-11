@@ -3,6 +3,9 @@ import { emptyActivityDraft, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
 import { fetchAccessView, sendBudgetRequest, accessProfile, type AccessState } from './accessClient';
 import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice, selectedEffort, observedEffortResult, type SavedEffortChoice } from './modelSelection';
+import { modelEchoVerdict, modelEchoNotice, describeModelEcho, type ModelEchoInput } from './modelEchoHelpers';
+/** 턴마다 달라지는 부분을 뺀 나머지 — `resolved` 는 응답이 오면 채운다. */
+type ModelEchoContext = Omit<ModelEchoInput, 'resolved'>;
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
@@ -149,6 +152,8 @@ import {
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private effortNotice?: string;
+  /** #897 H-13 — 이 턴에 모델 대체 안내를 이미 붙였나. 좌석당 턴은 하나다(REQ-M37 ③). */
+  private modelNoticeTurn?: string;
   private effortScope?: string;
   private effortResult?: import('./protocol').ChatConfig['effortResult'];
   private effortTurn?: { id: string; url: string; token: string; scope: string };
@@ -2058,9 +2063,29 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * 두 번 인라인했던 것을 한 곳으로. 필드명이 SpoolUsageRecord 와 일치해서
    * spread 로 끝난다.
    */
-  private proxyUsageRecorder(turnId: string) {
+  /**
+   * #897 H-13 — usage 를 기록하면서 **요청한 모델과 답한 모델이 다른지**도 본다.
+   *
+   * 2026-09-11 관측: 같은 요청에 다른 모델을 에코해도 화면 전체 innerText 가 완전히
+   * 같았다. `usage.model` 은 여기까지 왔지만 spool 로만 들어가고 학생에게는 한 글자도
+   * 도달하지 않았다 — 조용한 대체가 성공과 구별되지 않는 상태였다.
+   *
+   * 판정은 `modelEchoHelpers` 가 한다(명시 선택만 경고, 날짜 변형은 일치, 에코 없으면
+   * 판정 없음). 여기서는 그 결과를 턴 텍스트에 한 번만 붙인다 — 한 턴에 안내를 하나만
+   * 쌓는 것은 REQ-M39 ④ 와 같은 규칙이고, 브라우저 루프처럼 한 턴에 요청이 여러 번
+   * 나가는 경로에서 같은 문장이 반복되는 것을 구조적으로 막는다. 좌석당 코치 턴은
+   * 동시에 하나이므로(REQ-M37 ③) 턴 id 한 칸으로 충분하다.
+   */
+  private proxyUsageRecorder(turnId: string, echo?: ModelEchoContext, onNotice?: (text: string) => void) {
     return (u: ProxyStreamUsage & { requestKey: string | null; model: string | null }): void => {
       this.spool?.recordUsage({ turnId, source: "proxy", ...u });
+      if (!echo || !onNotice) return;
+      const verdict = modelEchoVerdict({ ...echo, resolved: u.model });
+      this.logChannel?.appendLine(`[model] ${describeModelEcho(verdict)}`);
+      const notice = modelEchoNotice(verdict);
+      if (!notice || this.modelNoticeTurn === turnId) return;
+      this.modelNoticeTurn = turnId;
+      onNotice(notice);
     };
   }
 
@@ -2467,9 +2492,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // SdkUnavailableError fallback MUST route here too; falling back to a bare
       // runProxy() drops the browser loop, so the coach only *narrates* "브라우저
       // 열게요" and never opens it (regression from the #380 SDK-runtime flip).
+      // #897 H-13 — 요청한 모델과 답한 모델을 대조할 문맥. **출처를 함께 넘기는 것이
+      // 요점이다**: 학생이 직접 고른 모델이 바뀐 것과 수업 기본값·구형 alias 가 서버에서
+      // 풀린 것은 다른 사건이고, 후자까지 경고하면 정상 동작이 매 턴 경고를 내 진짜
+      // 대체가 묻힌다. 두 proxy 경로(일반 전송·브라우저 루프)가 같은 값을 쓴다.
+      const modelEcho: ModelEchoContext = {
+        requestedAlias: model,
+        source: !selection ? 'unknown'
+          : profile && savedModel?.scope === modelSelectionScope(profile) ? 'explicit'
+          : selection.source === 'lesson' ? 'course_default' : 'legacy_alias',
+        choices: selection?.choices ?? [],
+        seatProvider: selection?.provider ?? null,
+      };
       const runProxyRuntime = async () => {
         if (profile?.browser_control?.enabled) {
           await this.runBrowserLoop({
+            modelEcho,
             proxyUrl,
             model,
             effort,
@@ -2512,7 +2550,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           onCitations,
           onAssetScore,
           // #580 — 요청 1건의 usage (워커 hps_usage / 업스트림 usage 청크).
-          onUsage: this.proxyUsageRecorder(streamId),
+          // #897 H-13 — 그 usage 의 `model` 이 요청과 다르면 학생에게 말한다.
+          // 출처를 함께 넘기는 것이 요점이다: 학생이 **직접 고른** 모델이 바뀐 것과
+          // 수업 기본값·구형 alias 가 서버에서 풀린 것은 다른 사건이고, 후자까지
+          // 경고하면 정상 동작이 매 턴 경고를 내 진짜 대체가 묻힌다.
+          onUsage: this.proxyUsageRecorder(streamId, modelEcho, onDelta),
         });
       // #749 — 한 좌석에 코치 턴은 동시에 하나만 돈다. 잠금은 런타임 **바깥**에
       // 있어야 한다: 처음엔 `runSdkCoach` 안에 있었는데 그러면 proxy 코호트 전체가
@@ -2802,6 +2844,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     coachPersonality: string;
     onDelta: (delta: string) => void;
     onCitations: (cites: import("./protocol").Citation[]) => void;
+    /** #897 H-13 — 한 턴에 요청이 여러 번 나가도 안내는 한 번이다(recorder 가 막는다). */
+    modelEcho?: ModelEchoContext;
   }): Promise<void> {
     const browser = new BrowserControl();
     const maxIter = this.cachedProfile?.browser_control?.max_iterations ?? 8;
@@ -2834,7 +2878,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           },
           // #580 — 브라우저 루프는 한 턴에 요청을 여러 번 낸다. 반복마다
           // 요청 1건 = 레코드 1건 (requestKey 는 요청별 request id).
-          onUsage: this.proxyUsageRecorder(p.streamId),
+          onUsage: this.proxyUsageRecorder(p.streamId, p.modelEcho, p.onDelta),
         });
         if (result.toolUses.length === 0) break; // terminal turn → done
         if (iter >= maxIter) {

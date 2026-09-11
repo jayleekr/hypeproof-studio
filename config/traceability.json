@@ -1105,6 +1105,33 @@
       ]
     },
     {
+      "id": "ST-TEST-MODEL-ECHO",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODEL-USAGE"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/model-echo.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-MODEL-ECHO",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODEL-USAGE",
+        "ST-TEST-MODEL-ECHO"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/modelEchoHelpers.ts"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-OPERATOR-HEALTH-AUTH",
       "stage": "implementation",
       "owner": "jayleekr",
