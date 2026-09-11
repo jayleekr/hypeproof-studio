@@ -5,7 +5,7 @@
 초록인 것은 selftest 가 고장났을 때도 똑같이 초록이다. 그래서 제품을 일부러 깨고
 **각 변이마다 FAIL 이 떠야 한다**고 요구한다.
 
-    python3 scripts/handoff/mutate_selftest.py      # 20/20 caught 여야 한다
+    python3 scripts/handoff/mutate_selftest.py      # 25/25 caught 여야 한다
 
 변이 명세를 shell 이 아니라 Python 에 두는 이유: 처음 shell + JSON 으로 넘겼을 때
 이중 이스케이프로 **3종이 적용조차 되지 않았다.** 적용되지 않은 변이는 요약만 보면
@@ -67,6 +67,20 @@ MUTATIONS = [
     ("M13 add drops the ref",
      '    new = Item(next_id(items), owner, clean_oneline(text, "text"), ref=clean_oneline(ref, "ref"))',
      '    new = Item(next_id(items), owner, clean_oneline(text, "text"), ref="")'),
+    ("M21 reassign does not change the owner",
+     '        upd = replace(cur, owner=owner, claim="")',
+     '        upd = replace(cur, owner=cur.owner, claim="")'),
+    ("M22 reassign keeps a stale claim",
+     '        upd = replace(cur, owner=owner, claim="")',
+     '        upd = replace(cur, owner=owner)'),
+    ("M23 reassign also clears done",
+     '        upd = replace(cur, owner=owner, claim="")',
+     '        upd = replace(cur, owner=owner, claim="", done=False)'),
+    ("M24 reassign without --owner allowed",
+     '        if owner is None:\n            raise Rejected("거부: reassign 에 --owner 가 있어야 한다.")',
+     '        if owner is None:\n            owner = cur.owner'),
+    ("M25 no-op reassign allowed",
+     '        if owner == cur.owner:', '        if False:'),
     ("M14 splice overwrites the whole body",
      '        return head + block + tail', '        return block'),
     ("M18 an update also clears every other claim",

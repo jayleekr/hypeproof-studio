@@ -40,6 +40,7 @@ Run:
   python3 scripts/handoff/handoff.py claim H-03 --by "codex (pane 2)"
   python3 scripts/handoff/handoff.py unclaim H-03
   python3 scripts/handoff/handoff.py edit H-03 [--text "…"] [--ref "#899"]
+  python3 scripts/handoff/handoff.py reassign H-03 --owner human
   python3 scripts/handoff/handoff.py done H-03 [--by claude]
   python3 scripts/handoff/handoff.py selftest        # 네트워크 없이 파싱 왕복 검증
 
@@ -287,6 +288,7 @@ def apply_update(
     by: str = "",
     text: str | None = None,
     ref: str | None = None,
+    owner: str | None = None,
     day: str = "",
 ) -> tuple[list[Item], Item]:
     by_id = {i.id: i for i in items}
@@ -301,6 +303,18 @@ def apply_update(
         upd = replace(cur, claim="")
     elif cmd == "done":
         upd = replace(cur, done=True, claim=f"{clean_claim(by)} 완료 · {day}" if by else "")
+    elif cmd == "reassign":
+        # **owner 를 고친다.** owner 는 "어떤 종류의 일인가" 라서 잘 안 바뀌지만, 처음에
+        # 잘못 분류한 것은 고칠 수 있어야 한다 — 2026-09-11 에 실제로 당했다: H-06
+        # (프로덕션 gemini 400 원인)을 codex 로 넣었는데, 첫 단계가 프로덕션 비밀 접근을
+        # 요구해서 **실기 관측이 아니라 사람 결정**이었다. 고칠 길이 없어서 본문에 변명을
+        # 적을 참이었다. 틀린 분류를 들고 있는 큐는 그 항목을 아무도 집지 않게 만든다.
+        if owner is None:
+            raise Rejected("거부: reassign 에 --owner 가 있어야 한다.")
+        if owner == cur.owner:
+            raise Rejected(f"거부: {item_id} 는 이미 owner={owner} 다. 바뀌는 것이 없다.")
+        # claim 은 지운다 — 종류가 바뀌면 들고 있던 쪽의 claim 은 더 이상 맞지 않다.
+        upd = replace(cur, owner=owner, claim="")
     elif cmd == "edit":
         # **내용만** 고친다. done·owner·id 는 건드리지 않는다 — 완료 이력을 글 고치다가
         # 뒤집는 사고를 막는다. 되돌리려면 해당 명령을 쓴다.
@@ -378,6 +392,22 @@ def selftest() -> int:
         try:
             fn()
         except Rejected:
+            return
+        fails.append(why)
+
+    def raises_saying(fn, needle, why):
+        """거부되는 것만으로는 부족한 경우 — **어느 규칙이 터졌는지**까지 본다.
+
+        `reassign` 에 `--owner` 가 없을 때 그냥 `cur.owner` 로 떨어지게 만드는 고장은,
+        그 다음의 "같은 owner 면 거부" 규칙에 걸려서 **여전히 거부된다.** 그래서 "거부됐다"
+        만 보는 단언은 그 고장을 통과시킨다(변이 M24 가 그래서 살아남았다). 값이 맞는
+        이유가 다른 경우를 가르려면 메시지를 봐야 한다.
+        """
+        try:
+            fn()
+        except Rejected as exc:
+            if needle not in str(exc):
+                fails.append(f"{why} (다른 이유로 거부됐다: {str(exc)[:80]})")
             return
         fails.append(why)
 
@@ -472,6 +502,23 @@ def selftest() -> int:
     raises(lambda: apply_update(base, "H-01", "edit"), "빈 edit 이 통과했다")
     raises(lambda: apply_update(base, "H-99", "unclaim"), "없는 id 가 통과했다")
 
+    # reassign: owner 를 고친다. 나머지는 **건드리지 않는다.** 검증 밖에 있는 명령은 없는
+    # 것과 같다(M13) — 그래서 명령을 추가할 때 같이 넣는다.
+    held = [Item("H-06", "codex", "무엇을", ref="#1", claim="codex 진행중"),
+            Item("H-02", "claude", "끝난 것", done=True, ref="#2")]
+    _, r = apply_update(held, "H-06", "reassign", owner="human")
+    check(r.owner == "human", f"owner 가 안 바뀌었다: {r.owner}")
+    check(r.claim == "", f"재분류가 claim 을 남겼다: {r.claim}")
+    check((r.text, r.ref, r.done) == ("무엇을", "#1", False), f"재분류가 내용을 건드렸다: {r}")
+    # 완료 항목도 완료인 채로 재분류된다 — 이력을 뒤집지 않는다.
+    _, r2 = apply_update(held, "H-02", "reassign", owner="codex")
+    check(r2.done is True and r2.owner == "codex", f"재분류가 완료 이력을 뒤집었다: {r2}")
+    raises_saying(lambda: apply_update(held, "H-06", "reassign"), "--owner 가 있어야",
+                  "--owner 없는 reassign 이 통과했다")
+    raises_saying(lambda: apply_update(held, "H-06", "reassign", owner="codex"), "이미 owner=",
+                  "같은 owner 로의 reassign 이 통과했다 — 바뀌는 것이 없는데 쓰기를 일으킨다")
+    check(parse_items(r.render())[0] == r, "재분류한 항목이 왕복에서 깨졌다")
+
     # **대상 하나만 바뀐다.** 2026-09-11 에 H-13 이 두 읽기 사이에 체크된 것을 보고
     # "내 `done H-12` 가 옆 항목을 건드렸나" 를 의심했는데, 그걸 가릴 단언이 selftest 에
     # 없어서 일회용 스크립트를 따로 써야 했다. 남의 세션을 의심하기 전에 내 도구를
@@ -483,7 +530,8 @@ def selftest() -> int:
                   Item("H-03", "human", "결정 대기", claim="human 검토중")]
     for cmd, kw in (("done", {"by": "claude", "day": "2026-09-11"}), ("done", {}),
                     ("claim", {"by": "x", "day": "2026-09-11"}), ("unclaim", {}),
-                    ("edit", {"text": "바뀐 글"}), ("edit", {"ref": "#9"})):
+                    ("edit", {"text": "바뀐 글"}), ("edit", {"ref": "#9"}),
+                    ("reassign", {"owner": "human"})):
         out, _ = apply_update(neighbours, "H-01", cmd, **kw)
         moved = [a.id for a, b in zip(out, neighbours) if a != b]
         check(moved == ["H-01"], f"{cmd}{kw} 가 대상 밖을 건드렸다: {moved}")
@@ -585,6 +633,10 @@ def main() -> int:
     pu = sub.add_parser("unclaim", help="들고 있던 것을 놓는다 (claim 취소)")
     pu.add_argument("id")
 
+    pr_ = sub.add_parser("reassign", help="owner 를 고친다 (처음 분류가 틀렸을 때)")
+    pr_.add_argument("id")
+    pr_.add_argument("--owner", choices=OWNERS, required=True)
+
     pe = sub.add_parser("edit", help="내용만 고친다 — done·owner 는 건드리지 않는다")
     pe.add_argument("id")
     pe.add_argument("--text")
@@ -635,9 +687,11 @@ def main() -> int:
                 by=getattr(a, "by", "") or "",
                 text=getattr(a, "text", None),
                 ref=getattr(a, "ref", None),
+                owner=getattr(a, "owner", None),
                 day=today(),
             )
-            label = {"done": "완료: ", "claim": "진행중: ", "unclaim": "놓음: ", "edit": "수정: "}[a.cmd]
+            label = {"done": "완료: ", "claim": "진행중: ", "unclaim": "놓음: ",
+                     "edit": "수정: ", "reassign": "재분류: "}[a.cmd]
         print(label + touched.render())
         save(a.repo, a.issue, body, digest, items, a.dry_run)
     except Rejected as exc:
