@@ -42,11 +42,37 @@ export interface AdmissionRequest {
   provider:string;model:string;runtime:'proxy'|'agent-sdk';effort?:string|null;
   protocol:'anthropic-messages'|'openai-chat';body:Record<string,any>;features?:string[];
 }
+/**
+ * Audio refusal, **independent of metering** (#901 V4 / REQ-R3 (6)).
+ *
+ * 2026-09-10 측정: 오디오 거절은 `reserveBudgetAttempt` 안에 있었고 그 호출이
+ * `if(executionAccess)` 아래였다. 즉 정책 미설정 + 자금원 헤더 없는 좌석에서는
+ * `/v1/messages` 가 `"audio":{"voice":"alloy","format":"pcm16"}` 를 **그대로 상류로
+ * 흘렸다.** 아동 코호트가 그 좌석에 있다.
+ *
+ * 그래서 오디오만 따로 떼어 계량 바깥에서도 돌게 한다. **오디오만**인 것이 중요하다 —
+ * `validateWire` 의 나머지 절반(이미지·문서·호스티드 툴 거절)은 계량 좌석의 노출 상한
+ * 계약이고, 그걸 같이 밖으로 내보내면 지금 이미지가 도는 계량 없는 좌석이 조용히 깨진다.
+ * 여기서 닫는 것은 "음성이 붙기 전에 오디오가 새어 나가지 않는다" 하나다.
+ */
+export function assertNoAudioWire(body:Record<string,any>):void{
+  if(body?.modalities?.some((m:unknown)=>m!=='text')||body?.audio)throw new AccessError('unbounded_execution_feature',403);
+  const visit=(value:any):void=>{
+    if(Array.isArray(value)){value.forEach(visit);return;}
+    if(!value||typeof value!=='object')return;
+    // 키 이름이 아니라 블록 타입으로 본다 — `{type:'input_audio', input_audio:{…}}` 를
+    // 다른 키에 담아 보내는 변형이 실제로 있었다(REQ-R3 (5) 의 센티널 검사와 같은 이유).
+    if(value.type==='input_audio')throw new AccessError('unbounded_media_or_tool',403);
+    Object.values(value).forEach(visit);
+  };
+  visit(body?.messages);
+}
 /** Validate the actual provider body, after lesson/profile transformations.
  * Bounds are an operator-reviewed maximum exposure, not a chars/token estimate.
  * Unmetered hosted tools/media cannot be smuggled into the paid gateway. */
 function validateWire(body:Record<string,any>,protocol:AdmissionRequest['protocol'],features:string[]):void{
-  if(body.modalities?.some((m:unknown)=>m!=='text')||body.audio||body.container||body.mcp_servers||body.context_management)
+  assertNoAudioWire(body);
+  if(body.container||body.mcp_servers||body.context_management)
     throw new AccessError('unbounded_execution_feature',403);
   for(const tool of body.tools??[]){
     const local=protocol==='openai-chat'?tool?.type==='function':!tool?.type||tool.type==='custom';
