@@ -2,9 +2,14 @@
 //
 // 왜 필요한가. 요구사항 초안은 "webview 오디오 입출력을 확인한다" 를 확인 절차로
 // 적었지만, 2026-09-10 설치본(0.1.51)의 번들 코어를 읽은 결과 webview 내부 iframe 의
-// Permissions-Policy allow 목록은 `clipboard-read`·`clipboard-write` 뿐이고
-// `microphone` 은 **0건**이다. 즉 `getUserMedia` 는 CSP 와 무관하게 그 단계에서
-// 거부된다. 그 상태에서 마이크 UI 를 만들면 허용·거부·장치없음·철회 네 상태가
+// Permissions-Policy allow 목록에 `microphone` 이 **0건**이고, Electron 메인 프로세스의
+// webview 권한 집합에도 `media` 가 없다(`out/main.js`). 즉 `getUserMedia` 는 지금 반드시
+// 거부된다 — 다만 **둘 중 어느 쪽이 거부하는지는 모른다.** 내부 iframe 은 same-origin 이라
+// (`allow-same-origin` + 같은 출처 `fake.html` 로 로드) allow 속성의 누락이 실제로 비활성화를
+// 뜻하는지 불확실하고, MDN 도 그 경우를 명확히 적지 않는다(2026-09-11 확인). 이전 주석은
+// "CSP 와 무관하게 그 단계에서 거부된다" 고 단정했는데 그건 증거 없는 인과 주장이었다.
+// 거부된다는 사실만으로 계측기의 근거는 충분하다. 그 상태에서 마이크 UI 를 만들면
+// 허용·거부·장치없음·철회 네 상태가
 // **전부 같은 거부로 수렴**하는 죽은 토글이 학생에게 나간다.
 //
 // 그래서 이 모듈은 기능이 아니라 **계측기**다. 이후 어떤 음성 코드도 capability 를

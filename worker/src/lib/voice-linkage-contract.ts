@@ -3,7 +3,7 @@
 // 왜 이 파일이 이 모양인가.
 //
 // 1) 아직 음성 세션은 **존재할 수 없다.** 2026-09-10 설치본의 webview iframe
-//    Permissions-Policy allow 목록은 `clipboard-read`·`clipboard-write` 뿐이고
+//    Permissions-Policy allow 목록에 `microphone` 이 0건이고
 //    `microphone` 은 0건이다(#904 / `voiceCapabilityHelpers.ts`). 그래서 이 계약은
 //    "돌아가는 기능의 명세"가 아니라 **앞으로 어떤 음성 코드도 식별자를 새로 만들지
 //    못하게 막는 잠금**이다.
