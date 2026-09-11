@@ -197,19 +197,22 @@ const refusal = (code, status = 403) => err =>
   } finally { h.close(); }
 }
 
-// ═══ 2b. 거절의 **범위** — 계량되지 않는 좌석에는 오디오 가드가 없다 ═══════════
+// ═══ 2b. 거절의 **범위** — 계량 없는 좌석도 오디오는 거절한다 (2026-09-11) ══════
 // §2 는 `required:true` 정책 + 자금원 헤더로, 즉 **계량되는 좌석**에서 403 을 재었다.
-// 그것만 두면 "게이트웨이가 오디오를 막는다" 로 읽힌다. 실제 가드는
-// `routes/messages.ts:523` 의 `if(executionAccess)` 안에 있으므로 그 밖에서는 없다.
 //
-// 2026-09-10 측정값(이 단언의 출처): 정책 미설정 + 자금원 헤더 없음으로 동일 좌석을
-// 때리면 text 200 / audio 200 / input_audio 200 이고, 상류로 나간 본문에
-// `"audio":{"voice":"alloy","format":"pcm16"}` 가 그대로 들어 있다.
+// 2026-09-10 측정: 그때는 가드가 `reserveBudgetAttempt` 안에만 있었고 그 호출이
+// `routes/messages.ts` 의 `if(executionAccess)` 아래였다. 그래서 정책 미설정 + 자금원
+// 헤더 없는 좌석은 text 200 / audio 200 / input_audio 200 이었고 상류로 나간 본문에
+// `"audio":{"voice":"alloy","format":"pcm16"}` 가 그대로 들어 있었다. 이 파일은 그
+// 사실을 "언젠가 가드가 계량 밖으로 옮겨지면 터지는" 단언으로 박아 뒀었다.
 //
-// 이 단언이 바라는 것은 통과가 아니라 **기록**이다. V4 에서 음성을 붙일 때 가드를
-// admission 밖(게이트 공통 경로)으로 옮기면 이 단언이 터진다 — 그때 터지는 것이
-// 정답이고, 머리말을 고치고 §2 를 확장하면 된다. 지금 이걸 안 적어두면 "이미 막고
-// 있다" 는 잘못된 안심이 인수 기록에 남는다.
+// **2026-09-11 그 단언이 터졌고, 터진 것이 정답이었다** (#901 V4 / REQ-R3 (6)).
+// `assertNoAudioWire` 가 계량 바깥으로 나왔다. 아래는 바뀐 사실을 다시 고정한다.
+//
+// 옮긴 것은 **오디오 절반뿐**이다. 이미지·문서·호스티드 툴 거절은 계량 좌석의 노출
+// 상한 계약으로 남는다 — 그래서 아래에 그 경계를 재는 대조군이 같이 있다. 그게 없으면
+// `validateWire` 를 통째로 밖으로 내보내 계량 없는 좌석의 이미지를 조용히 깨는 변경이
+// 이 절을 그대로 통과한다.
 {
   const profile = 'canary-sdk-contract', cohort = 'canary-internal';
   const h = await budgetHarness(undefined, { amount: 1000000, cohort });
@@ -227,42 +230,50 @@ const refusal = (code, status = 403) => err =>
     await withMockUpstream(
       () => Response.json({ model: price.model, content: [{ type: 'text', text: 'Synthetic' }], usage: nativeRaw }),
       async calls => {
-        // 대조군 — 이 좌석이 **정말 계량되지 않는다**. executionAccess 가 null 이라는
-        // 것을 간접(200)이 아니라 직접 확인한다. 이게 없으면 아래 200 들이 "계량되는데
-        // 그냥 통과했다" 와 구별되지 않는다.
+        // 전제 대조군 — 이 좌석이 **정말 계량되지 않는다**. 간접(상태 코드)이 아니라
+        // 직접 확인한다. 이게 없으면 아래 403 이 "계량되는 좌석이라 막혔다" 와 구별되지 않는다.
         const unmeteredAccess = await resolveExecutionAccess(h.env, { u: 'kid01', c: cohort, p: profile }, undefined);
         assert.equal(unmeteredAccess, null, '이 좌석이 계량된다면 §2b 의 전제가 틀렸다');
-        // 그리고 같은 헬퍼가 자금원을 주면 계량을 **찾아낸다** — 헬퍼가 항상 null 이
-        // 아님을 증명하는 양성 대조군.
+        // 같은 헬퍼가 자금원을 주면 계량을 찾아낸다 — 항상 null 이 아님을 보이는 양성 대조군.
         assert.notEqual(
           await resolveExecutionAccess(h.env, { u: 'kid01', c: cohort, p: profile }, h.contract.contract_id),
           null,
           'resolveExecutionAccess 가 항상 null 이다 — 계측기가 고장났다',
         );
 
+        // 양성 대조군 먼저 — 이 좌석/이 토큰/이 본문은 실제로 200 이고 상류를 부른다.
+        // 이게 없으면 "전부 403" 구현이 아래 단언들을 전부 통과한다.
         const before = calls.length;
         const ok = await h.request('/v1/messages', { auth, method: 'POST', body: base });
         assert.equal(ok.status, 200, ok.text);
+        assert.equal(calls.length, before + 1, '정상 텍스트 턴이 상류에 도달하지 않았다');
 
-        // 오디오 본문이 **거절되지 않고** 상류까지 간다. 오늘의 사실이다.
+        // 이제 오디오는 **계량 없이도** 거절된다. 그리고 상류를 부르지 않는다 —
+        // 거절이 업스트림 뒤에서 일어나면 이미 돈이 나간 뒤다.
         const audio = await h.request('/v1/messages', { auth, method: 'POST', body: { ...base, audio: { voice: 'alloy', format: 'pcm16' } } });
-        assert.equal(audio.status, 200, `계량 없는 좌석에서 오디오가 403 이 됐다 — 가드가 옮겨졌다면 머리말과 §2 를 고쳐라: ${audio.text}`);
-        assert.equal(calls.length, before + 2, '두 요청 모두 상류에 도달했다');
-        const forwarded = JSON.parse(calls[calls.length - 1].init.body);
-        assert.deepEqual(
-          forwarded.audio,
-          { voice: 'alloy', format: 'pcm16' },
-          'audio 키가 상류로 그대로 나간다 — 이 경로에 가드가 없다는 증거',
-        );
-
+        assert.equal(audio.status, 403, `계량 없는 좌석에서 오디오가 통과했다: ${audio.text}`);
         const nested = await h.request('/v1/messages', {
           auth, method: 'POST',
           body: { ...base, messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: 'AAAA', format: 'wav' } }] }] },
         });
-        assert.equal(nested.status, 200, `중첩 input_audio 도 계량 없는 좌석에서는 통과한다: ${nested.text}`);
+        assert.equal(nested.status, 403, `중첩 input_audio 가 계량 없는 좌석에서 통과했다: ${nested.text}`);
+        const modal = await h.request('/v1/messages', { auth, method: 'POST', body: { ...base, modalities: ['text', 'audio'] } });
+        assert.equal(modal.status, 403, `modalities 에 audio 가 있는데 통과했다: ${modal.text}`);
+        assert.equal(calls.length, before + 1, '거절된 요청이 상류를 불렀다 — 거절이 업스트림 뒤에 있다');
+
+        // **범위 대조군** — 옮긴 것은 오디오뿐이다. 계량 없는 좌석의 이미지는 그대로
+        // 통과해야 한다. 이 줄이 없으면 `validateWire` 전체를 밖으로 내보내 이미지를
+        // 조용히 깨는 변경이 위 단언들을 전부 통과한다(계량 좌석에서는 이미지가 원래
+        // 거절이므로 §2 도 그 변경을 못 잡는다).
+        const image = await h.request('/v1/messages', {
+          auth, method: 'POST',
+          body: { ...base, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }] }] },
+        });
+        assert.equal(image.status, 200, `계량 없는 좌석의 이미지가 막혔다 — 오디오만 옮겼어야 한다: ${image.text}`);
+        assert.equal(calls.length, before + 2, '이미지 턴이 상류에 도달하지 않았다');
       },
     );
-    console.log('PASS scope: 오디오 거절은 **계량되는 좌석 전용**이다 — 계량 없는 좌석은 audio 를 상류로 그대로 흘린다');
+    console.log('PASS scope: 오디오 거절은 이제 **계량과 무관**하다 — 계량 없는 좌석도 audio/input_audio/modalities 를 403 으로 막고, 이미지는 그대로 통과한다');
   } finally { h.close(); }
 }
 
