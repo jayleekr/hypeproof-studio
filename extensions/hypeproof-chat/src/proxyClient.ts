@@ -157,7 +157,9 @@ interface ProxyChatArgs {
    * verbatim + 워커 최종 청크) 마지막 값 하나만 쓴다. requestKey 는 워커의
    * x-request-id 응답 헤더 (없으면 null → 스풀이 기록을 포기한다).
    */
-  onUsage?: (u: ProxyStreamUsage & { requestKey: string | null; model: string | null }) => void;
+  onUsage?: (u: ProxyStreamUsage & { requestKey: string | null; model: string | null;
+    /** REQ-M42 — 워커가 '요청한 모델을 못 지켰다' 고 말했나. 치환일 때만 온다. */
+    serverSubstituted?: boolean; serverRequested?: string | null }) => void;
   coachName?: string;
   coachPersonality?: string;
   /** #507 — 지금 떠 있는 라이브 서버 주소(없으면 생략). 워커가 문구를 만든다. */
@@ -273,7 +275,16 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
         chunkRequestId ??
         res.headers.get("x-request-id") ??
         `local-${crypto.randomUUID()}`;
-      onUsage({ ...lastUsage, requestKey, model: usageModel });
+      // REQ-M42 — 워커는 **요청을 못 지켰을 때만** `x-hps-model-substituted` 를 싣는다.
+      // 그래서 부재를 "치환 아님" 으로 읽으면 안 된다(구형 워커와 구별되지 않는다).
+      // 있으면 `true` 로, 없으면 **아예 전달하지 않아** 판정 층이 정보 없음으로 다룬다.
+      const substituted = res.headers.get("x-hps-model-substituted") === "1";
+      onUsage({
+        ...lastUsage, requestKey, model: usageModel,
+        ...(substituted
+          ? { serverSubstituted: true, serverRequested: res.headers.get("x-hps-model-requested") }
+          : {}),
+      });
     }
     return { finishReason, toolUses, text };
   };

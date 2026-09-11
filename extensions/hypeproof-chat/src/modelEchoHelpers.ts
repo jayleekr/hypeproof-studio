@@ -56,6 +56,24 @@ export interface ModelEchoInput {
   readonly choices: readonly ModelChoice[];
   /** 좌석 전체의 공급자. 선택지별 provider 가 없을 때의 기본값이다. */
   readonly seatProvider?: string | null;
+  /**
+   * 서버가 "요청을 못 지켰다" 고 **직접 말했나** — 응답 헤더 `x-hps-model-substituted`
+   * (REQ-M42). 이게 없던 동안 클라이언트는 두 사건을 구별할 방법이 없었다:
+   *
+   *   요청 hypeproof-fast → 응답 gpt-5.6-luna    정상 alias 번역
+   *   요청 claude-opus-5  → 응답 gpt-5.6-luna    요청이 버려졌다
+   *
+   * 문자열 비교로는 둘 다 "다르다" 로 보인다. 그래서 아래 `!chosen` 분기는 안전한
+   * 쪽으로 **침묵**을 골랐고, 그 대가로 진짜 버려진 요청도 같이 조용해졌다. 서버가
+   * 말해 주면 그 교환이 사라진다.
+   *
+   * **헤더 부재는 '아니다' 가 아니다.** 워커는 치환일 때만 헤더를 싣기 때문에, 없음은
+   * "치환 아님" 과 "이 헤더를 모르는 구형 워커" 를 구별하지 못한다. 그래서 `true` 만
+   * 단정으로 쓰고 나머지는 **정보 없음**으로 둔다 — 없는 관측을 사실로 적지 않는다.
+   */
+  readonly serverSubstituted?: boolean;
+  /** 서버가 되돌려 준 요청 값 (`x-hps-model-requested`). 위생 필터에 걸리면 없다. */
+  readonly serverRequested?: string | null;
 }
 
 export type ModelEchoVerdict =
@@ -66,8 +84,14 @@ export type ModelEchoVerdict =
    * 측정하지 못한 것을 사실로 쓰지 않기 위한 갈래다.
    */
   | { readonly kind: 'unobserved'; readonly why: 'no_echo' | 'unknown_request' }
-  /** 기본값/legacy 를 서버가 구체 모델로 풀었다 — 정상 경로. */
-  | { readonly kind: 'server_resolved'; readonly resolved: string }
+  /**
+   * 기본값/legacy 를 서버가 구체 모델로 풀었다 — 정상 경로.
+   *
+   * `serverSubstituted` 가 붙은 경우는 다르다: 서버는 요청을 못 지켰다고 말했는데
+   * **학생이 고른 것이 아니었다**(수업 기본값·legacy). 학생에게 말할 일은 아니고
+   * (그 쪽은 수업 설정 문제다) 기록에는 남아야 한다.
+   */
+  | { readonly kind: 'server_resolved'; readonly resolved: string; readonly serverSubstituted?: true }
   /** 명시적으로 고른 모델이 아닌 것이 답했다. */
   | {
       readonly kind: 'substituted';
@@ -112,27 +136,47 @@ export function modelEchoVerdict(i: ModelEchoInput): ModelEchoVerdict {
 
   const chosen = i.choices.find(c => norm(c.alias) === norm(requested) || norm(c.id) === norm(requested));
   if (!chosen) {
-    // 허용 목록에 없는 alias — 구형 기본값 경로다. 서버 해석이 정상이므로 경고하지 않는다.
-    // 단 명시적 선택이었다고 주장할 근거도 없으므로 `server_resolved` 로 남긴다.
-    return { kind: 'server_resolved', resolved };
+    // 허용 목록에 없는 alias. 전에는 무조건 `server_resolved` 였다 — 구형 기본값 경로와
+    // **내 요청이 버려진 것**을 클라이언트가 구별할 수 없어서 안전한 쪽(침묵)을 골랐다.
+    // 서버가 말해 주면(REQ-M42) 구별된다: 학생이 직접 고른 것이 버려진 경우에만 말한다.
+    // (선택기 목록이 수업 재확정으로 바뀌면 고른 값이 허용 목록 밖일 수 있다.)
+    if (i.serverSubstituted === true && i.source === 'explicit') {
+      return substituted(i, i.serverRequested?.trim() || requested, undefined, resolved);
+    }
+    return { kind: 'server_resolved', resolved, ...(i.serverSubstituted === true ? { serverSubstituted: true as const } : {}) };
   }
 
   const { same, dated } = sameModel(chosen, resolved);
+  // **같은 모델이 답했다는 관측이 헤더보다 강하다.** 서버가 치환이라고 말했더라도
+  // 학생에게 "다른 모델이 답했다" 고 적으면 그게 더 나쁜 오류다. 불일치는 기록으로 남는다.
   if (same) return { kind: 'match', dated };
 
   // 다르다. 여기서 **출처가 판정을 가른다.**
-  if (i.source !== 'explicit') return { kind: 'server_resolved', resolved };
+  if (i.source !== 'explicit') {
+    return { kind: 'server_resolved', resolved, ...(i.serverSubstituted === true ? { serverSubstituted: true as const } : {}) };
+  }
 
+  return substituted(i, chosen.alias, chosen, resolved);
+}
+
+/** 대체 판정 한 곳. `chosen` 이 없으면(허용 목록 밖) 라벨·공급자를 **모른다**. */
+function substituted(
+  i: ModelEchoInput,
+  requested: string,
+  chosen: ModelChoice | undefined,
+  resolved: string,
+): ModelEchoVerdict {
   const answered = choiceFor(resolved, i.choices);
-  const requestedProvider = chosen.provider ?? i.seatProvider ?? null;
+  const requestedProvider = chosen ? chosen.provider ?? i.seatProvider ?? null : null;
   const answeredProvider = answered?.provider ?? (answered ? i.seatProvider ?? null : null);
   return {
     kind: 'substituted',
-    requested: chosen.alias,
-    requestedLabel: chosen.label ?? chosen.alias,
+    requested,
+    requestedLabel: chosen?.label ?? requested,
     resolved,
     // 응답 모델이 허용 목록 밖이면 공급자를 **모른다** — 모르는 것을 "바뀌었다" 로
-    // 적지 않는다. 목록 안이고 공급자가 다를 때만 공급자 변경으로 본다.
+    // 적지 않는다. 목록 안이고 공급자가 다를 때만 공급자 변경으로 본다. 요청 쪽이
+    // 목록 밖일 때도 같다 — 그 공급자를 모르므로 비교하지 않는다.
     providerChanged: !!(requestedProvider && answeredProvider && norm(requestedProvider) !== norm(answeredProvider)),
   };
 }
@@ -161,7 +205,12 @@ export function describeModelEcho(v: ModelEchoVerdict): string {
   switch (v.kind) {
     case 'match': return v.dated ? 'model=match(dated)' : 'model=match';
     case 'unobserved': return `model=unobserved(${v.why})`;
-    case 'server_resolved': return `model=server_resolved(${v.resolved})`;
+    case 'server_resolved':
+      // 서버가 치환이라고 말했는데 학생에게 말하지 않은 경우를 **기록에서는** 가른다.
+      // 수업 설정이 허용 밖 모델을 기본값으로 들고 있다는 신호다.
+      return v.serverSubstituted
+        ? `model=server_resolved(${v.resolved},server_substituted)`
+        : `model=server_resolved(${v.resolved})`;
     case 'substituted':
       return `model=substituted(${v.requested}->${v.resolved}${v.providerChanged ? ',provider_changed' : ''})`;
   }
