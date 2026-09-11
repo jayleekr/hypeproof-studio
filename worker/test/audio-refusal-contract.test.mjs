@@ -1,7 +1,7 @@
 // #897 V4 (#901) — 유료 게이트웨이의 **오디오 거절**을 이름 붙은 계약으로 고정한다.
 //
 // 왜 음성 코드가 하나도 없는 지금 쓰나:
-//   셰한 앱의 webview iframe allow 목록은 clipboard-read/clipboard-write 뿐이고
+//   셰한 앱의 webview iframe allow 목록에 microphone 이 0건이고
 //   "microphone" 이라는 문자열은 0번 나온다. 즉 **음성 세션은 아직 존재할 수 없다.**
 //   그런데 Service 는 이미 오디오를 거절한다(budget-admission validateWire,
 //   usage-costs normalizeCostUsage). 그 거절에 이름이 없어서, 나중에 음성을 붙이는
