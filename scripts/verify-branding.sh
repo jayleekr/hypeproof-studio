@@ -292,6 +292,31 @@ if [[ -f "$ICNS" ]]; then
   fi
 fi
 
+# 11. Webview inline-script CSP hash (#898). `pre/index.html` carries the SHA-256
+# of its own inline script inside its own CSP meta tag. Patch the script, forget
+# the hash, and Chromium refuses to execute it: the webview shell never builds its
+# content iframe and the chat and start pages come up BLANK with nothing in the UI
+# saying why.
+#
+# This is not hypothetical. Build run 34616771276 shipped exactly that — the build
+# SUCCEEDED, this very script passed, the artifact was produced, and the blank
+# screen only surfaced in device acceptance. A green gate meant nothing about
+# whether the app starts.
+echo
+echo "11. Webview inline-script CSP hash"
+CSP_CHECK="$(dirname "$0")/check-webview-csp-hash.py"
+if [[ -f "$CSP_CHECK" ]]; then
+  if python3 "$CSP_CHECK" --app "$APP" >/dev/null 2>&1; then
+    ok "Webview CSP hash matches its inline script"
+  else
+    # Re-run visibly so the operator sees both hashes and the fix.
+    python3 "$CSP_CHECK" --app "$APP" || true
+    bad "Webview inline-script CSP hash mismatch — the app would start with blank webviews"
+  fi
+else
+  warn "check-webview-csp-hash.py not found next to this script — CSP hash NOT verified"
+fi
+
 echo
 echo "Result: $PASS passed, $FAIL failed"
 exit $(( FAIL > 0 ? 1 : 0 ))
