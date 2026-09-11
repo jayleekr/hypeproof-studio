@@ -166,20 +166,27 @@ const base = (over = {}) => ({
 
   // 전송 경로가 **출처와 선택지를 실제로 넘기는가**. 이게 없으면 모든 턴이
   // unknown 으로 떨어져 경고가 영원히 안 뜬다(조용한 통과).
-  const anchor = "onUsage: this.proxyUsageRecorder(streamId, {";
-  assert.ok(host.includes(anchor), "전송 경로가 판정 문맥을 넘기지 않는다");
-  const sendSite = host.slice(host.indexOf(anchor));
-  // `indexOf` 가 -1 이면 `slice(0,-1)` 이 파일 나머지 전체가 되어 아래 필드 검사가
-  // **전부 공짜로 통과한다** — 변이 대조군이 이 구멍을 잡아냈다(2026-09-11). 그래서
-  // 끝 표식의 존재와 위치를 먼저 단언한다.
-  const end = sendSite.indexOf("}, onDelta)");
-  assert.ok(end > 0 && end < 600, "안내가 턴 텍스트로 나가는 경로(onDelta)가 끊겼다");
-  const args = sendSite.slice(0, end);
+  const decl = "const modelEcho: ModelEchoContext = {";
+  assert.ok(host.includes(decl), "전송 경로가 판정 문맥을 만들지 않는다");
+  const ctx = host.slice(host.indexOf(decl));
+  // `indexOf` 가 -1 이면 `slice(0,-1)` 이 파일 나머지 전체가 되어 아래 검사가 **전부
+  // 공짜로 통과한다** — 변이 대조군이 이 구멍을 잡아냈다(2026-09-11). 끝 표식의
+  // 존재와 위치를 먼저 단언한다.
+  const ctxEnd = ctx.indexOf("\n      };");
+  assert.ok(ctxEnd > 0 && ctxEnd < 600, "판정 문맥 선언을 찾지 못했다");
+  const args = ctx.slice(0, ctxEnd);
   for (const field of ["requestedAlias: model", "source:", "choices:", "seatProvider:"]) {
-    assert.ok(args.includes(field), `전송 경로가 ${field} 를 넘기지 않는다`);
+    assert.ok(args.includes(field), `판정 문맥이 ${field} 를 담지 않는다`);
   }
   assert.ok(args.includes("'explicit'") && args.includes("'course_default'") && args.includes("'legacy_alias'"),
     "출처 세 갈래를 구분하지 않는다 — 하나로 접으면 정상 해석까지 경고하거나 진짜 대체를 놓친다");
+
+  // proxy 경로는 둘이다: 일반 전송과 브라우저 루프. **둘 다** 문맥과 안내 경로를
+  // 넘겨야 한다 — 한쪽만 배선하면 그 경로에서는 대체가 영원히 조용하다.
+  for (const site of ["this.proxyUsageRecorder(streamId, modelEcho, onDelta)",
+                      "this.proxyUsageRecorder(p.streamId, p.modelEcho, p.onDelta)"]) {
+    assert.ok(host.includes(site), `proxy 경로 하나가 배선되지 않았다: ${site}`);
+  }
 }
 
 console.log("model-echo.smoke: ok");

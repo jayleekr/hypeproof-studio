@@ -2492,9 +2492,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // SdkUnavailableError fallback MUST route here too; falling back to a bare
       // runProxy() drops the browser loop, so the coach only *narrates* "브라우저
       // 열게요" and never opens it (regression from the #380 SDK-runtime flip).
+      // #897 H-13 — 요청한 모델과 답한 모델을 대조할 문맥. **출처를 함께 넘기는 것이
+      // 요점이다**: 학생이 직접 고른 모델이 바뀐 것과 수업 기본값·구형 alias 가 서버에서
+      // 풀린 것은 다른 사건이고, 후자까지 경고하면 정상 동작이 매 턴 경고를 내 진짜
+      // 대체가 묻힌다. 두 proxy 경로(일반 전송·브라우저 루프)가 같은 값을 쓴다.
+      const modelEcho: ModelEchoContext = {
+        requestedAlias: model,
+        source: !selection ? 'unknown'
+          : profile && savedModel?.scope === modelSelectionScope(profile) ? 'explicit'
+          : selection.source === 'lesson' ? 'course_default' : 'legacy_alias',
+        choices: selection?.choices ?? [],
+        seatProvider: selection?.provider ?? null,
+      };
       const runProxyRuntime = async () => {
         if (profile?.browser_control?.enabled) {
           await this.runBrowserLoop({
+            modelEcho,
             proxyUrl,
             model,
             effort,
@@ -2541,14 +2554,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           // 출처를 함께 넘기는 것이 요점이다: 학생이 **직접 고른** 모델이 바뀐 것과
           // 수업 기본값·구형 alias 가 서버에서 풀린 것은 다른 사건이고, 후자까지
           // 경고하면 정상 동작이 매 턴 경고를 내 진짜 대체가 묻힌다.
-          onUsage: this.proxyUsageRecorder(streamId, {
-            requestedAlias: model,
-            source: !selection ? 'unknown'
-              : profile && savedModel?.scope === modelSelectionScope(profile) ? 'explicit'
-              : selection.source === 'lesson' ? 'course_default' : 'legacy_alias',
-            choices: selection?.choices ?? [],
-            seatProvider: selection?.provider ?? null,
-          }, onDelta),
+          onUsage: this.proxyUsageRecorder(streamId, modelEcho, onDelta),
         });
       // #749 — 한 좌석에 코치 턴은 동시에 하나만 돈다. 잠금은 런타임 **바깥**에
       // 있어야 한다: 처음엔 `runSdkCoach` 안에 있었는데 그러면 proxy 코호트 전체가
@@ -2838,6 +2844,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     coachPersonality: string;
     onDelta: (delta: string) => void;
     onCitations: (cites: import("./protocol").Citation[]) => void;
+    /** #897 H-13 — 한 턴에 요청이 여러 번 나가도 안내는 한 번이다(recorder 가 막는다). */
+    modelEcho?: ModelEchoContext;
   }): Promise<void> {
     const browser = new BrowserControl();
     const maxIter = this.cachedProfile?.browser_control?.max_iterations ?? 8;
@@ -2870,7 +2878,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           },
           // #580 — 브라우저 루프는 한 턴에 요청을 여러 번 낸다. 반복마다
           // 요청 1건 = 레코드 1건 (requestKey 는 요청별 request id).
-          onUsage: this.proxyUsageRecorder(p.streamId),
+          onUsage: this.proxyUsageRecorder(p.streamId, p.modelEcho, p.onDelta),
         });
         if (result.toolUses.length === 0) break; // terminal turn → done
         if (iter >= maxIter) {
