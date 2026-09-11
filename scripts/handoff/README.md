@@ -33,13 +33,16 @@ python3 scripts/handoff/handoff.py done    H-01 --by claude
 # 내용만 고치기 (done·owner 는 건드리지 않는다)
 python3 scripts/handoff/handoff.py edit H-01 --text "…" --ref "#899"
 
+# 처음 분류가 틀렸을 때 owner 를 고친다
+python3 scripts/handoff/handoff.py reassign H-06 --owner human
+
 # 쓰지 않고 결과만 보기
 python3 scripts/handoff/handoff.py --dry-run add --owner claude --text "…"
 
 # 네트워크 없이 파싱·splice·명령 검증
 python3 scripts/handoff/handoff.py selftest
 
-# 그 selftest 가 진짜로 잡는지 (변이 20종)
+# 그 selftest 가 진짜로 잡는지 (변이 25종)
 python3 scripts/handoff/mutate_selftest.py
 ```
 
@@ -120,21 +123,25 @@ REST `repos/{repo}/issues/{n}` 를 쓴다 — **이 경로는 PR 도 돌려준�
 
 **`edit` 은 내용만 고친다.** `done`·`owner`·`id` 는 못 바꾼다. 글 고치다가 완료 이력을 뒤집는 사고를 막는다 — 되돌리려면 해당 명령(`done`/`unclaim`)을 쓴다.
 
+**`reassign` 은 그 예외다 — owner 만 고친다.** owner 는 "어떤 종류의 일인가" 라서 잘 안 바뀌지만 **처음 잘못 분류한 것은 고칠 수 있어야 한다.** 2026-09-11 에 당했다: H-06(프로덕션 gemini 400 원인)을 `codex` 로 넣었는데, 첫 단계가 **프로덕션 비밀 접근**을 요구해서 실기 관측이 아니라 **사람 결정**이었다. 고칠 길이 없어서 본문에 변명을 적을 참이었고, 틀린 분류를 든 항목은 **아무도 집지 않는다**. claim 은 함께 지운다 — 종류가 바뀌면 들고 있던 쪽의 claim 이 더 이상 맞지 않다. `done` 과 내용은 건드리지 않는다.
+
 ## selftest 를 믿을 근거 — 변이로 재 봤다
 
-대조군 없는 채점기는 신뢰하지 않는다([.claude/rules/verification.md](../../.claude/rules/verification.md)). 그래서 제품을 **일부러 20가지로 깨고** selftest 가 각각을 잡는지 쟀다:
+대조군 없는 채점기는 신뢰하지 않는다([.claude/rules/verification.md](../../.claude/rules/verification.md)). 그래서 제품을 **일부러 25가지로 깨고** selftest 가 각각을 잡는지 쟀다:
 
 ```
-python3 scripts/handoff/mutate_selftest.py   →  20/20 caught
+python3 scripts/handoff/mutate_selftest.py   →  25/25 caught
 ```
 
-세 번 **살아남았고 그게 요점이다**:
+네 번 **살아남았고 그게 요점이다**:
 
 - **M3 `edit` 이 `done` 을 True 로 덮어도 통과했다.** 단언을 *이미 완료된* 항목으로만 했기 때문이다 — 값이 맞는 이유가 달랐다(비판별 단언). 미완 항목으로도 재게 고쳤다.
 - **M13 `add` 가 `ref` 를 버려도 통과했다.** `apply_add` 를 selftest 가 **한 번도 돌리지 않고 있었다.** 검증 밖에 있는 명령은 없는 것과 같다.
 - **M18 한 항목을 고칠 때 남의 claim 을 전부 지워도 통과했다.** 이웃 시료가 claim 을 아무도 들고 있지 않아서 지우는 고장이 **아무것도 바꾸지 않았다.** 이웃 하나에 claim 을 들려서 다시 쟀다.
 
-셋 다 같은 병이다 — **값이 맞는 이유가 달랐다.** 시료를 고를 때 "이 고장이 났다면 이 시료에서 값이 달라지나" 를 먼저 물어야 한다.
+- **M24 `reassign` 이 `--owner` 없이도 통과했다.** 생략하면 현재 owner 로 떨어지는 고장인데, 그러면 바로 다음 "같은 owner 면 거부" 규칙에 걸려 **여전히 거부된다.** "거부됐다" 만 보는 단언은 그래서 통과한다 — 어느 규칙이 터졌는지까지 봐야 갈린다(`raises_saying`).
+
+넷 다 같은 병이다 — **값이 맞는 이유가 달랐다.** 시료와 단언을 고를 때 "이 고장이 났다면 여기서 값이 달라지나" 를 먼저 물어야 한다.
 
 첫 변이 실행에서는 **3종이 적용조차 되지 않았다**(shell + JSON 이중 이스케이프). 적용되지 않은 변이는 요약만 보면 "잡았다" 와 구별되지 않으므로, 변이 명세를 Python 으로 옮기고 **적용 실패를 별도로 보고**하게 했다. 잡힌 것이 FAIL 단언인지 예외로 죽은 것인지도 나눠 찍는다.
 
