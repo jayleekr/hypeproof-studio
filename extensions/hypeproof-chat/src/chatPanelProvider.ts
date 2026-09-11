@@ -2077,10 +2077,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * 동시에 하나이므로(REQ-M37 ③) 턴 id 한 칸으로 충분하다.
    */
   private proxyUsageRecorder(turnId: string, echo?: ModelEchoContext, onNotice?: (text: string) => void) {
-    return (u: ProxyStreamUsage & { requestKey: string | null; model: string | null }): void => {
+    return (u: ProxyStreamUsage & { requestKey: string | null; model: string | null;
+      serverSubstituted?: boolean; serverRequested?: string | null }): void => {
       this.spool?.recordUsage({ turnId, source: "proxy", ...u });
       if (!echo || !onNotice) return;
-      const verdict = modelEchoVerdict({ ...echo, resolved: u.model });
+      // REQ-M42 — 서버가 직접 말한 판정을 넘긴다. 문자열 비교만으로는 "alias 번역" 과
+      // "요청이 버려졌다" 가 구별되지 않아서 판정 층이 침묵을 골라야 했던 자리다.
+      const verdict = modelEchoVerdict({
+        ...echo, resolved: u.model,
+        ...(u.serverSubstituted === true
+          ? { serverSubstituted: true, serverRequested: u.serverRequested ?? null }
+          : {}),
+      });
       this.logChannel?.appendLine(`[model] ${describeModelEcho(verdict)}`);
       const notice = modelEchoNotice(verdict);
       if (!notice || this.modelNoticeTurn === turnId) return;
