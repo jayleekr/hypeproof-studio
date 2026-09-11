@@ -5,7 +5,7 @@
 초록인 것은 selftest 가 고장났을 때도 똑같이 초록이다. 그래서 제품을 일부러 깨고
 **각 변이마다 FAIL 이 떠야 한다**고 요구한다.
 
-    python3 scripts/handoff/mutate_selftest.py      # 17/17 caught 여야 한다
+    python3 scripts/handoff/mutate_selftest.py      # 20/20 caught 여야 한다
 
 변이 명세를 shell 이 아니라 Python 에 두는 이유: 처음 shell + JSON 으로 넘겼을 때
 이중 이스케이프로 **3종이 적용조차 되지 않았다.** 적용되지 않은 변이는 요약만 보면
@@ -69,6 +69,15 @@ MUTATIONS = [
      '    new = Item(next_id(items), owner, clean_oneline(text, "text"), ref="")'),
     ("M14 splice overwrites the whole body",
      '        return head + block + tail', '        return block'),
+    ("M18 an update also clears every other claim",
+     '    return [upd if i.id == item_id else i for i in items], upd',
+     '    return [upd if i.id == item_id else replace(i, claim="") for i in items], upd'),
+    ("M19 an update drops the items after the target",
+     '    return [upd if i.id == item_id else i for i in items], upd',
+     '    return [upd if i.id == item_id else i for i in items if i.id == item_id], upd'),
+    ("M20 an update marks every item done",
+     '    return [upd if i.id == item_id else i for i in items], upd',
+     '    return [upd if i.id == item_id else replace(i, done=True) for i in items], upd'),
 ]
 
 

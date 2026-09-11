@@ -39,7 +39,7 @@ python3 scripts/handoff/handoff.py --dry-run add --owner claude --text "…"
 # 네트워크 없이 파싱·splice·명령 검증
 python3 scripts/handoff/handoff.py selftest
 
-# 그 selftest 가 진짜로 잡는지 (변이 17종)
+# 그 selftest 가 진짜로 잡는지 (변이 20종)
 python3 scripts/handoff/mutate_selftest.py
 ```
 
@@ -122,16 +122,19 @@ REST `repos/{repo}/issues/{n}` 를 쓴다 — **이 경로는 PR 도 돌려준�
 
 ## selftest 를 믿을 근거 — 변이로 재 봤다
 
-대조군 없는 채점기는 신뢰하지 않는다([.claude/rules/verification.md](../../.claude/rules/verification.md)). 그래서 제품을 **일부러 17가지로 깨고** selftest 가 각각을 잡는지 쟀다:
+대조군 없는 채점기는 신뢰하지 않는다([.claude/rules/verification.md](../../.claude/rules/verification.md)). 그래서 제품을 **일부러 20가지로 깨고** selftest 가 각각을 잡는지 쟀다:
 
 ```
-python3 scripts/handoff/mutate_selftest.py   →  17/17 caught
+python3 scripts/handoff/mutate_selftest.py   →  20/20 caught
 ```
 
-두 번 **살아남았고 그게 요점이다**:
+세 번 **살아남았고 그게 요점이다**:
 
 - **M3 `edit` 이 `done` 을 True 로 덮어도 통과했다.** 단언을 *이미 완료된* 항목으로만 했기 때문이다 — 값이 맞는 이유가 달랐다(비판별 단언). 미완 항목으로도 재게 고쳤다.
 - **M13 `add` 가 `ref` 를 버려도 통과했다.** `apply_add` 를 selftest 가 **한 번도 돌리지 않고 있었다.** 검증 밖에 있는 명령은 없는 것과 같다.
+- **M18 한 항목을 고칠 때 남의 claim 을 전부 지워도 통과했다.** 이웃 시료가 claim 을 아무도 들고 있지 않아서 지우는 고장이 **아무것도 바꾸지 않았다.** 이웃 하나에 claim 을 들려서 다시 쟀다.
+
+셋 다 같은 병이다 — **값이 맞는 이유가 달랐다.** 시료를 고를 때 "이 고장이 났다면 이 시료에서 값이 달라지나" 를 먼저 물어야 한다.
 
 첫 변이 실행에서는 **3종이 적용조차 되지 않았다**(shell + JSON 이중 이스케이프). 적용되지 않은 변이는 요약만 보면 "잡았다" 와 구별되지 않으므로, 변이 명세를 Python 으로 옮기고 **적용 실패를 별도로 보고**하게 했다. 잡힌 것이 FAIL 단언인지 예외로 죽은 것인지도 나눠 찍는다.
 
