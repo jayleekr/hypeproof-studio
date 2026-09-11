@@ -472,6 +472,28 @@ def selftest() -> int:
     raises(lambda: apply_update(base, "H-01", "edit"), "빈 edit 이 통과했다")
     raises(lambda: apply_update(base, "H-99", "unclaim"), "없는 id 가 통과했다")
 
+    # **대상 하나만 바뀐다.** 2026-09-11 에 H-13 이 두 읽기 사이에 체크된 것을 보고
+    # "내 `done H-12` 가 옆 항목을 건드렸나" 를 의심했는데, 그걸 가릴 단언이 selftest 에
+    # 없어서 일회용 스크립트를 따로 써야 했다. 남의 세션을 의심하기 전에 내 도구를
+    # 배제할 수 있어야 한다(규칙 6). 이후로는 여기서 갈린다.
+    # 이웃 중 **하나는 claim 을 들고 있어야** 한다. 전부 비어 있으면 "남의 claim 을 지운다"
+    # 는 고장이 아무것도 바꾸지 않아 단언이 판별하지 못한다 — 변이 M18 이 그래서 살아남았다.
+    neighbours = [Item("H-01", "codex", "지켜져야 하는 것", ref="#1", claim="codex 진행중"),
+                  Item("H-02", "claude", "이미 끝난 것", done=True, claim="claude 완료 · 2026-09-10"),
+                  Item("H-03", "human", "결정 대기", claim="human 검토중")]
+    for cmd, kw in (("done", {"by": "claude", "day": "2026-09-11"}), ("done", {}),
+                    ("claim", {"by": "x", "day": "2026-09-11"}), ("unclaim", {}),
+                    ("edit", {"text": "바뀐 글"}), ("edit", {"ref": "#9"})):
+        out, _ = apply_update(neighbours, "H-01", cmd, **kw)
+        moved = [a.id for a, b in zip(out, neighbours) if a != b]
+        check(moved == ["H-01"], f"{cmd}{kw} 가 대상 밖을 건드렸다: {moved}")
+        check(len(out) == len(neighbours), f"{cmd} 가 항목 수를 바꿨다: {len(out)}")
+    # 그리고 블록을 통째로 다시 그려도 이웃이 그대로 돌아온다 — 렌더/파싱 경로까지 본다.
+    written, _ = apply_update(neighbours, "H-01", "done", by="claude", day="2026-09-11")
+    reread = {i.id: i for i in parse_items(render_block(written))}
+    for keep in neighbours[1:]:
+        check(reread[keep.id] == keep, f"쓰기 왕복에서 {keep.id} 가 변했다: {reread[keep.id]}")
+
     # ── ref 추출 ───────────────────────────────────────────────────────────
     R = "jayleekr/hypeproof-studio"
     check(refs_in("[#898](https://github.com/jayleekr/hypeproof-studio/issues/898#issuecomment-563)", R)
