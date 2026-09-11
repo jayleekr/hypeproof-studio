@@ -6,6 +6,7 @@ on:
       - 'extensions/hypeproof-chat/**'
       - 'e2e/start-page/**'
       - 'e2e/trial-ux/**'
+      - 'e2e/voice-conversation/**'
       - 'worker/src/profiles/**'
       - 'e2e/package*.json'
       - '.github/workflows/start-page.yml'
@@ -32,6 +33,8 @@ jobs:
         working-directory: e2e
       - run: npm run test:trial-ux
         working-directory: e2e
+      - run: npm run test:voice:popup
+        working-directory: e2e
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -39,4 +42,5 @@ jobs:
           path: |
             e2e/test-results/start-page/
             e2e/test-results/trial-ux/
+            e2e/test-results/voice-popup/
           retention-days: 14

@@ -949,6 +949,9 @@
       "sources": [
         {
           "path": "extensions/hypeproof-chat/test/voice-popup.smoke.mjs"
+        },
+        {
+          "path": "e2e/voice-conversation/popup-browser.mjs"
         }
       ]
     },
