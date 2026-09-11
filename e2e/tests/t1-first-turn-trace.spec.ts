@@ -21,7 +21,6 @@ import { test, expect, type FrameLocator, type Page } from "@playwright/test";
 import { launchApp, closeApp, openChatContainer, type AppContext } from "../fixtures/app.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { scoreDesignFloor } from "../scoring.ts";
 
 const ARTIFACT_DIR = "test-artifacts";
 function artifact(name: string, body: string): void {
@@ -174,7 +173,21 @@ test("T1 — 첫 턴 현미경: 생각·도구·성공·소요", async () => {
     const html = fs.existsSync(target)
       ? fs.readFileSync(target, "utf8")
       : (answer.match(/<!doctype html[\s\S]*?<\/html>/i)?.[0] ?? "");
-    const design = html ? scoreDesignFloor(html) : { passed: 0, total: 9, checks: [] as Array<[string, boolean]> };
+    // 디자인 품질바닥 점수는 **더 이상 매기지 않는다** (#938).
+    //
+    // 이 칸은 원래 `../scoring.ts` 의 `scoreDesignFloor` 가 채웠는데, 그 파일은
+    // 2026-07-27 에 루브릭 전체와 함께 **일부러** 지워졌다(#431 → #465, 9234f13:
+    // "큐시트는 강사가 채팅으로 몬다. 자동 스위트로 대신 돌리지 않기로 했다").
+    // 그때 이 스펙도 같이 지워졌다가 다음 날 #458(0da1568)에서 되살아났고, 그 과정에서
+    // `fixtures/workspace.ts` import 는 정리했지만 `scoring.ts` import 는 남았다.
+    // 그래서 이 파일은 **되살아난 순간부터 한 번도 수집된 적이 없고**, 그 하나가
+    // e2e 전체 수집을 막아 왔다.
+    //
+    // 채점기를 복원하지 않는 이유: 그건 폐기된 기준을 되살리는 결정이고 이 수정의
+    // 범위가 아니다. 대신 **측정하지 않았다고 적는다** — 예전 폴백은 산출물이 없으면
+    // `0/9` 를 찍어서 "재서 0점" 과 "안 쟀음" 을 같은 칸에 넣었다. 이 레포가 비싸게
+    // 배운 구분이다(REQ-R1 ③).
+    const design = { scored: false as const, note: "측정 안 함 (루브릭 폐기 #465)" };
 
     const tools = trace.filter((e) => e.icon.includes("🔧"));
     const thinks = trace.filter((e) => e.icon.includes("💭"));
@@ -196,7 +209,7 @@ test("T1 — 첫 턴 현미경: 생각·도구·성공·소요", async () => {
       `| 실패(⚠️) | ${errors.length} |`,
       `| 승인 모달 | ${approver.modals.length} |`,
       `| 산출물 | ${html ? html.length.toLocaleString() + "자" : "없음"} |`,
-      `| 디자인 품질바닥 | ${design.passed}/${design.total} |`,
+      `| 디자인 품질바닥 | ${design.note} |`,
       "",
       "## 시간축",
       "",
@@ -221,7 +234,7 @@ test("T1 — 첫 턴 현미경: 생각·도구·성공·소요", async () => {
       "",
       "## 디자인 품질바닥",
       "",
-      ...design.checks.map(([l, ok]) => `- ${ok ? "✅" : "❌"} ${l}`),
+      design.note + " — 이 관측은 시간축·도구·승인·산출물 유무만 기록한다.",
       "",
       "## 코치 답변",
       "",
@@ -235,7 +248,7 @@ test("T1 — 첫 턴 현미경: 생각·도구·성공·소요", async () => {
     console.log(`  활동 로그      ${trace.length} (🔧 ${tools.length} · 💭 ${thinks.length})`);
     console.log(`  실패           ${errors.length}`);
     console.log(`  승인 모달      ${approver.modals.length}`);
-    console.log(`  디자인 품질바닥 ${design.passed}/${design.total}`);
+    console.log(`  디자인 품질바닥 ${design.note}`);
     console.log(`  산출물         ${html ? html.length + "자" : "없음"}`);
     console.log(`────────────────────\n`);
     trace.forEach((e) => console.log(
