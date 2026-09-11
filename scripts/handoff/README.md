@@ -21,22 +21,29 @@ python3 scripts/handoff/handoff.py list --owner codex
 python3 scripts/handoff/handoff.py list --owner codex
 python3 scripts/handoff/handoff.py list --owner codex --json   # 기계가 읽을 때
 
-# 넘기기
+# 넘기기 (--ref 는 기본적으로 실제로 존재하는지 확인한다)
 python3 scripts/handoff/handoff.py add --owner codex \
   --text "패치된 빌드로 네 번째 관문 측정" --ref "[#898](url)"
 
-# 진행중 / 완료
-python3 scripts/handoff/handoff.py claim H-01 --by codex
-python3 scripts/handoff/handoff.py done  H-01
+# 들기 / 놓기 / 끝내기
+python3 scripts/handoff/handoff.py claim   H-01 --by "codex cli"
+python3 scripts/handoff/handoff.py unclaim H-01
+python3 scripts/handoff/handoff.py done    H-01 --by claude
+
+# 내용만 고치기 (done·owner 는 건드리지 않는다)
+python3 scripts/handoff/handoff.py edit H-01 --text "…" --ref "#899"
 
 # 쓰지 않고 결과만 보기
 python3 scripts/handoff/handoff.py --dry-run add --owner claude --text "…"
 
-# 네트워크 없이 파싱·splice 검증
+# 네트워크 없이 파싱·splice·명령 검증
 python3 scripts/handoff/handoff.py selftest
+
+# 그 selftest 가 진짜로 잡는지 (변이 17종)
+python3 scripts/handoff/mutate_selftest.py
 ```
 
-`--repo` / `--issue` 로 다른 이슈를 쓸 수 있다(기본값 `jayleekr/hypeproof-studio` #896).
+`--repo` / `--issue` 로 다른 이슈를 쓸 수 있다(기본값 `jayleekr/hypeproof-studio` #896). `--no-verify` 는 ref 존재 확인을 건너뛴다.
 
 ## 규칙
 
@@ -44,6 +51,64 @@ python3 scripts/handoff/handoff.py selftest
 - 여기엔 **한 줄만** 둔다. 상세는 `--ref` 가 가리키는 이슈 댓글에 있다. 큐가 토론 장소가 되면 다시 일곱 개를 읽는 상태로 돌아간다.
 - `human` owner 는 **결정 대기**를 뜻한다 — 에이전트가 스스로 정하면 안 되는 것(공급자 선택, 보안 범위 판단 등).
 - 블록은 도구가 관리한다. **손으로 고치지 않는다.**
+
+## owner 와 claim 은 다른 것이다
+
+동료 세션이 첫 판에서 짚은 것이고, 맞는 지적이었다.
+
+| 필드 | 뜻 | 수명 |
+|---|---|---|
+| `**owner**` | **어떤 종류의 일인가** — `claude` / `codex` / `human` | 거의 안 바뀐다 |
+| `_(…)_` claim | **지금 누가 들고 있나** + 언제부터 | 임시 |
+
+세션 이름을 `owner` 에 쓰면 금방 낡는다(그 세션은 사라지고 일은 남는다). 그래서 `--by` 는 **자유 문자열**이고 claim 에만 들어가며, **날짜가 자동으로 박힌다** — 2주 전 claim 은 보면 바로 낡은 것을 알 수 있다.
+
+`unclaim` 이 그 짝이다. 첫 판에는 없었고, 그래서 **잘못 찍은 claim 을 되돌릴 방법이 없었다** — 실제로 Codex 항목 하나에 "진행중" 을 잘못 찍어 놓고 지우지 못했다.
+
+## ref 는 ref 처럼 생겨야 한다 — 7/14 가 깨져 있었다
+
+항목 한 줄은 `text — ref` 로 쓴다. 그런데 **이 레포의 산문은 ` — ` 를 일상적으로 쓴다.** 첫 판은 "첫 번째 ` — ` 에서 자른다" 였고, 그래서 산문 뒷부분이 ref 필드로 새어 들어갔다:
+
+```
+쓴 것     VO-08 임계값 실측 — 한국어 발화의 오탐 비율 — [#898](…)
+읽은 것   text="VO-08 임계값 실측"  ref="한국어 발화의 오탐 비율 — [#898](…)"
+```
+
+**실제 큐 14건 중 7건이 그 상태였다.** 그런데 `list` 출력은 멀쩡해 보인다 — 렌더가 `text + " — " + ref` 로 다시 합치기 때문이다. `--json` 을 봐야 드러난다. 기계가 읽는 필드만 조용히 틀린 셈이다.
+
+이제 ref 는 **ref 모양의 꼬리**일 때만 ref 다: `#123` · `[…](…)` · `http…` · `owner/repo#123`. 산문은 이 모양이 아니므로 text 에 남는다. 고친 파서로 같은 14건을 다시 읽어 **위반 0건**을 확인했다(합성 fixture 아니라 실제 큐).
+
+### 한 사례가 아니라 불변식으로 막는다
+
+정규식을 다듬는 것만으로는 다음 입력에서 또 어긋난다. 그래서 **쓰기 직전마다 왕복을 단언한다** — 렌더한 것을 다시 읽어 같지 않으면 **쓰지 않는다**(`assert_roundtrip`). 알려진 한계도 이걸로 막힌다: text 가 ` — ` 뒤에 ref 모양 토막을 품으면 구분이 불가능한데, 조용히 쓰는 대신 거부하고 `--ref` 로 분리하라고 말한다.
+
+## ref 존재 확인
+
+`--ref "#984"` 를 적었는데 #984 가 그 PR 이 아니었던 적이 있다. 받는 쪽은 **그 번호를 열어 보고서야** 알게 된다. 그래서 `add`·`edit` 은 기본적으로 지목이 실제로 있는지 확인한다.
+
+REST `repos/{repo}/issues/{n}` 를 쓴다 — **이 경로는 PR 도 돌려준다**(확인하고 골랐다: PR #985 가 `pull_request != null` 로 응답). `gh issue view` 는 GraphQL Issue 조회라 PR 번호에서 실패하므로 쓰지 않는다. 크로스 레포(`jayleekr/vscodium#2`)도 처리한다.
+
+네트워크가 없거나 아직 안 만든 번호를 일부러 적을 때는 `--no-verify`.
+
+### 404 만 "없다" 다 — 첫 판은 그걸 구분하지 않았다
+
+첫 판은 `gh api` 의 **비정상 종료를 곧 "없다"** 로 읽었다. 그리고 바로 당했다: 같은 세션의 다른 감시 루프가 요청을 몰아쳐 GitHub 이 403 으로 막은 순간, **실재하는 #898 이 "존재하지 않는 지목" 으로 거부됐다.**
+
+```
+거부: 존재하지 않는 지목 — jayleekr/hypeproof-studio#898      ← #898 은 멀쩡하다
+```
+
+검증기가 **자기 고장을 제품 결함으로 보고한** 것이다. `.claude/rules/verification.md` 의 규칙 6(실패가 뜨면 계측기를 먼저 의심한다)과 "401 을 만료로 읽지 마라" 와 같은 계열이고, 하필 그 규칙을 지키라고 만든 도구에서 났다.
+
+이제 상태 코드를 본다(`gh api -i` 의 첫 줄):
+
+| 응답 | 판정 | 동작 |
+|---|---|---|
+| 2xx·3xx | 있다 | 통과 |
+| **404** | 없다 | **거부** |
+| 403 · 5xx · 응답 없음 | **판정 불가** | 경고만 찍고 **진행** |
+
+막지 않는 쪽을 택한 이유: 확인에 실패한 것은 ref 의 문제가 아니다. 거기서 막으면 GitHub 이 잠깐 느릴 때마다 멀쩡한 인계가 거부된다 — 그러면 다들 `--no-verify` 를 습관으로 붙이고 게이트는 사라진다.
 
 ## 설계에서 조심한 것
 
@@ -53,12 +118,28 @@ python3 scripts/handoff/handoff.py selftest
 
 **동시 쓰기.** 이 레포에는 세션이 여러 개 동시에 돈다. 쓰기 직전에 본문을 다시 읽어 내가 읽었던 해시와 다르면 **거부한다.** 덮어쓰면 남의 항목이 조용히 사라진다. 거부되면 그냥 다시 실행하면 된다 — 최신 상태에서 다시 시작한다.
 
-**selftest 가 실제로 버그를 잡았다.** 처음 왕복 단언을 리스트 동일성으로 썼는데 `render_block` 이 미완/완료로 재정렬해서 실패했다. 재정렬은 의도한 동작이므로 단언이 틀린 것이었고, **무엇이 보존되어야 하는지**(항목 집합과 각 필드, 그리고 미완이 완료보다 앞)로 고쳤다. 약하게 바꾸는 대신 정확하게 적었다.
+**`edit` 은 내용만 고친다.** `done`·`owner`·`id` 는 못 바꾼다. 글 고치다가 완료 이력을 뒤집는 사고를 막는다 — 되돌리려면 해당 명령(`done`/`unclaim`)을 쓴다.
 
-음성 대조군도 있다: 체크리스트처럼 보이지만 형식이 아닌 줄(`- [ ] 그냥 할 일`)은 항목으로 읽지 않는다. 그게 없으면 사람이 본문에 적은 아무 체크박스가 큐 항목이 된다.
+## selftest 를 믿을 근거 — 변이로 재 봤다
+
+대조군 없는 채점기는 신뢰하지 않는다([.claude/rules/verification.md](../../.claude/rules/verification.md)). 그래서 제품을 **일부러 17가지로 깨고** selftest 가 각각을 잡는지 쟀다:
+
+```
+python3 scripts/handoff/mutate_selftest.py   →  17/17 caught
+```
+
+두 번 **살아남았고 그게 요점이다**:
+
+- **M3 `edit` 이 `done` 을 True 로 덮어도 통과했다.** 단언을 *이미 완료된* 항목으로만 했기 때문이다 — 값이 맞는 이유가 달랐다(비판별 단언). 미완 항목으로도 재게 고쳤다.
+- **M13 `add` 가 `ref` 를 버려도 통과했다.** `apply_add` 를 selftest 가 **한 번도 돌리지 않고 있었다.** 검증 밖에 있는 명령은 없는 것과 같다.
+
+첫 변이 실행에서는 **3종이 적용조차 되지 않았다**(shell + JSON 이중 이스케이프). 적용되지 않은 변이는 요약만 보면 "잡았다" 와 구별되지 않으므로, 변이 명세를 Python 으로 옮기고 **적용 실패를 별도로 보고**하게 했다. 잡힌 것이 FAIL 단언인지 예외로 죽은 것인지도 나눠 찍는다.
+
+음성 대조군도 있다: 고치기 전 정규식으로는 ` — ` 케이스가 **실패해야 한다**는 단언이 selftest 안에 박혀 있다. 실패하지 않으면 그 검사는 아무것도 재고 있지 않다.
 
 ## 한계 — 숨기지 않는다
 
 - **Codex 가 이 명령을 돌린다는 보장이 없다.** 그쪽이 습관을 들여야 한다.
 - 큐는 **알림을 보내지 않는다.** 보려면 봐야 한다. Claude 쪽은 #896 댓글 모니터가 있어서 상태 변화를 감지하지만, 본문 변경은 댓글이 아니라 감지되지 않는다.
-- 감사 기록이 없다. 누가 언제 체크했는지는 이슈의 edit history 에만 남는다.
+- 감사 기록이 얕다. claim·done 에 날짜가 박히지만 **누가 언제 무엇을 고쳤는지의 전체 이력**은 이슈 edit history 에만 남는다.
+- ref 존재 확인은 **존재만** 본다. 번호가 실재하는 엉뚱한 이슈를 가리키는 것은 막지 못한다.
