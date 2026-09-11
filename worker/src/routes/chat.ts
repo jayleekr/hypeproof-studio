@@ -39,7 +39,7 @@ import { applyLessonFeatures } from '../lib/lesson-feature-policy';
 import { resolveTokenLesson } from '../lib/lesson-delivery';
 import { lessonAssistantName } from '../lib/session-design';
 import { isTokenRevoked, getRoster } from '../lib/kv';
-import { translate, translateOpenAI, type CoachContext } from "../lib/translate";
+import { translate, translateOpenAI, modelAnnouncement, type CoachContext } from "../lib/translate";
 import { callAnthropic, callAnthropicResilient } from "../lib/anthropic";
 import { glmUpstreamUrl } from "../lib/glm";
 import { callGemini, callGeminiResilient } from "../lib/gemini";
@@ -895,6 +895,13 @@ chat.post("/chat/completions", async (c) => {
     }
     c.header("x-hps-model", modelLabel);
     if (fellBack) c.header("x-hps-fallback", "1");
+    // 요청한 모델을 못 지켰으면 **말한다** — alias 번역과 요청 무시가 선에서 구별되지
+    // 않던 것이 #897 H-05 관측이다. 서빙 모델은 바꾸지 않는다.
+    const announce = modelAnnouncement((body as any)?.model, profile, modelLabel);
+    if (announce.substituted) {
+      c.header("x-hps-model-substituted", "1");
+      if (announce.requested) c.header("x-hps-model-requested", announce.requested);
+    }
     return c.json({
       id: j.id ?? "chatcmpl-hps",
       object: "chat.completion",
@@ -1003,5 +1010,11 @@ chat.post("/chat/completions", async (c) => {
     "x-request-id": c.get("requestId"),
   };
   if (fellBack) streamHeaders["x-hps-fallback"] = "1";
+  // 스트리밍에도 같이 싣는다. 한쪽만 실으면 "스트림이면 조용하다" 는 새 구멍이 된다.
+  const streamAnnounce = modelAnnouncement((body as any)?.model, profile, modelLabel);
+  if (streamAnnounce.substituted) {
+    streamHeaders["x-hps-model-substituted"] = "1";
+    if (streamAnnounce.requested) streamHeaders["x-hps-model-requested"] = streamAnnounce.requested;
+  }
   return new Response(outStream, { headers: streamHeaders });
 });

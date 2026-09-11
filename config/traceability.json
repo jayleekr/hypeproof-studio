@@ -1339,6 +1339,33 @@
           "path": "docs/testing/unified-completion-917-919-evidence.md"
         }
       ]
+    },
+    {
+      "id": "ST-TEST-MODEL-SUBSTITUTION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/model-substitution.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-MODEL-SUBSTITUTION",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME",
+        "ST-TEST-MODEL-SUBSTITUTION"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/translate.ts"
+        }
+      ]
     }
   ]
 }

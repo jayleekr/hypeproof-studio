@@ -889,6 +889,47 @@ function resolveAlias(requested: string | undefined, profile: Profile): ModelKey
   return permittedModelKeys(profile).find(key => key === requested) ?? profile.model.default;
 }
 
+// 요청한 모델을 **지키지 못했으면 말한다** (#897 H-05 관측).
+//
+// `resolveAlias` 는 코호트가 허용하지 않은 요청을 프로필 기본값으로 조용히 바꾼다.
+// 그 자체는 의도된 정책 집행이다 — 클라이언트가 수업 모델을 벗어나면 안 된다. 문제는
+// 그게 **선에 아무 흔적을 남기지 않는다**는 것이다: alias→모델 id 번역에서도 요청
+// 문자열과 응답 모델이 다르므로, "정상 번역" 과 "요청 무시" 가 와이어에서 똑같이 보인다.
+// 그래서 클라이언트가 `x-hps-model` 만으로는 둘을 구분할 수 없다 — Codex 의 H-05 부분
+// 관측이 그것이다("요청/응답 모델 불일치 시 기본 채팅 표시가 같음").
+//
+// 이 함수는 **무엇을 서빙할지 바꾸지 않는다.** 판정만 만든다. 모델 정책은 그대로다.
+// 같은 레포의 `x-hps-module-fallback`(REQ-B8 ④)과 같은 계열이다 — 저하를 막는 대신
+// **보이게** 한다.
+export interface ModelAnnouncement {
+  /** 요청이 지켜지지 않았다 */
+  substituted: boolean;
+  /** 헤더에 실어도 안전한 요청 값. 안전하지 않으면 **없다** (아래 주석 참고) */
+  requested?: string;
+}
+
+// 모델 이름이 응답 헤더로 되돌아가므로 **클라이언트가 준 문자열이 헤더 값이 된다.**
+// 그래서 실제 모델 id 가 쓰는 문자만 허용하고 길이를 묶는다.
+//
+// **무엇이 실제 위험인지 재 봤다** (걸러내기 빼고 돌려서 관측):
+//   model: "claude-opus-5\r\nX-Evil: 1"  →  턴이 **500** 으로 죽는다.
+//                                            주입된 헤더는 나가지 않는다.
+// 즉 플랫폼의 `Headers` 가 잘못된 값에서 throw 하므로 헤더 주입 자체는 막혀 있고,
+// 막히지 않는 것은 **가용성**이다 — 모델 문자열에 줄바꿈을 넣은 클라이언트가 자기
+// 턴을 못 쓰게 되고, 원인은 화면에 드러나지 않는다. 걸러내는 쪽이 맞다.
+const HEADER_SAFE_MODEL = /^[A-Za-z0-9._:@/-]{1,64}$/;
+
+export function modelAnnouncement(requested: unknown, profile: Profile, served: string): ModelAnnouncement {
+  if (typeof requested !== "string" || requested === "") return { substituted: false };
+  if ((permittedModelKeys(profile) as string[]).includes(requested)) return { substituted: false };
+  // 서빙 모델이 요청 문자열과 같으면 치환이 아니다 — 코호트가 alias 만 허용하는데
+  // 클라이언트가 그 alias 의 **구체 id** 를 보낸 경우가 그렇다. 같은 모델이 나간다.
+  if (requested === served) return { substituted: false };
+  // 안전하지 않은 문자열은 **되돌려 찍지 않는다.** 치환 사실은 그대로 알리고 이름만
+  // 생략한다 — 걸러낸 판을 echo 하면 실제로 무엇을 보냈는지 오해하게 만든다.
+  return HEADER_SAFE_MODEL.test(requested) ? { substituted: true, requested } : { substituted: true };
+}
+
 function clampInt(v: unknown, lo: number, hi: number, fallback: number): number {
   if (typeof v !== "number" || !Number.isFinite(v)) return fallback;
   const n = Math.floor(v);
