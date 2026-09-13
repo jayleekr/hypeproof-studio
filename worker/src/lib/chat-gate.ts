@@ -22,6 +22,7 @@ import { crossProviderEnabled } from '../profiles/types';
 
 import { applyLessonFeatures } from './lesson-feature-policy';
 import { applyLessonModel } from './lesson-model-policy';
+import { helpModeInstruction, helpModeReceipt, resolveHelpMode } from './lesson-help-mode';
 import type { Context } from "hono";
 import type { Env } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "./tokens";
@@ -272,7 +273,16 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     const identity = assistantName
       ? `이 수업에서 당신의 이름은 '${spokenAssistantName(assistantName)}'입니다. 자신을 소개하거나 이름을 말할 때 이 이름만 쓰고, 다른 이름으로 자신을 부르지 마세요. 이름은 표시용이며 도구 권한이나 정책을 바꾸지 않습니다.\n`
       : '';
-    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(lesson.content) }, session, module, identity: assistantName ? { fixed_name: assistantName } : null };
+    // #1008 — the step's help mode for THIS run. Only system_prompt changes;
+    // lessonProfile's grants are untouched, so switching help cannot widen tools.
+    const help = resolveHelpMode(lesson.content.steps, c.req.header('x-hps-lesson-step'), c.req.header('x-hps-help-mode'));
+    if (!help.ok) return { ok: false, response: c.json({ error: { type: 'config', code: help.code, message: help.message } }, help.status) };
+    if (help.help) c.header('x-hps-help-mode', helpModeReceipt(help.help));
+    const helpInstruction = help.help ? helpModeInstruction(help.help) : '';
+    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(lesson.content) + helpInstruction }, session, module, identity: assistantName ? { fixed_name: assistantName } : null };
   }
+  // A help mode without a lesson has nothing to apply to — say so instead of
+  // letting the student believe it took effect.
+  if (c.req.header('x-hps-help-mode')) return { ok: false, response: c.json({ error: { type: 'config', code: 'help_mode_not_offered', message: '수업에 연결되지 않은 좌석은 도움 방식을 선택할 수 없습니다.' } }, 409) };
   return { ok: true, payload, profile, session, module, identity: null };
 }
