@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 
-const { buildChatPanelCsp, buildPreviewShellCsp, PREVIEW_IFRAME_SANDBOX } =
+const { buildChatPanelCsp, buildPreviewShellCsp, PREVIEW_IFRAME_SANDBOX, PREVIEW_IFRAME_ALLOW } =
   await import("../src/cspBuilder.ts");
 
 const CSP_SOURCE = "vscode-webview://abc-123";
@@ -94,6 +94,29 @@ const NONCE = "n0nc3-test";
     );
   }
   console.log(`✅ preview iframe sandbox: 3 allowed, ${forbidden.length} forbidden tokens absent (incl. same-origin)`);
+}
+
+// ─── Preview iframe permissions — sensors denied explicitly (#992 H-22) ───
+// 마이크 패치 v3 의 게이트는 소유 확장 id 다. preview 패널도 같은 확장이 만들므로 preview
+// **셸**은 그 게이트 안에 있다. 그 안에서 AI 생성 HTML 을 돌리는 iframe 이 마이크·카메라를
+// 받지 못한다는 것을 사양 기본값에 맡기지 않고 속성으로 박는다.
+{
+  for (const feature of ["microphone", "camera"]) {
+    assert.match(PREVIEW_IFRAME_ALLOW, new RegExp(`\\b${feature} 'none'`),
+      `preview iframe must deny ${feature} explicitly (found: "${PREVIEW_IFRAME_ALLOW}")`);
+  }
+  // 음성 대조군 — "허용" 형태가 하나라도 섞이면 거절 선언이 무의미하다.
+  assert.doesNotMatch(PREVIEW_IFRAME_ALLOW, /microphone(?! 'none')/, "microphone must not be granted in any form");
+  assert.doesNotMatch(PREVIEW_IFRAME_ALLOW, /\*/, "no wildcard allowlist");
+
+  // 배선 — 상수만 있고 iframe 에 안 붙어 있으면 위 단언은 전부 공짜로 통과한다.
+  const { readFileSync } = await import("node:fs");
+  const provider = readFileSync(new URL("../src/previewProvider.ts", import.meta.url), "utf8");
+  const frame = provider.match(/<iframe id="frame"[^>]*>/);
+  assert.ok(frame, "preview frame element not found — the check below would pass vacuously");
+  assert.ok(frame[0].includes('allow="${PREVIEW_IFRAME_ALLOW}"'), `preview frame does not carry the deny list: ${frame[0]}`);
+  assert.ok(frame[0].includes('sandbox="${PREVIEW_IFRAME_SANDBOX}"'), "sandbox attribute lost while adding allow");
+  console.log("✅ preview iframe: microphone/camera denied explicitly and wired onto #frame");
 }
 
 // ─── Nonce uniqueness propagates (chat panel only — preview shell has no nonce)
