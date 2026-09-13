@@ -99,3 +99,21 @@ export function buildPreviewShellCsp(args: PreviewShellCspArgs): string {
  */
 export const PREVIEW_IFRAME_SANDBOX =
   "allow-scripts allow-pointer-lock allow-modals";
+
+/**
+ * Permissions Policy for the same untrusted preview iframe (#992 H-22).
+ *
+ * 마이크 패치 v3 는 바깥 webview 위임을 **소유 확장 id** 로 좁혔다. 그런데 preview 패널도
+ * `hypeproof-chat` 이 만든다(`extension.ts` → `PreviewProvider` → `createWebviewPanel`,
+ * `enableScripts: true`) — 즉 preview **셸 문서**는 그 게이트 안에 있다. 셸 안의 이 iframe 이
+ * AI 가 만든 HTML 이나 학생이 연 .html 을 돌린다.
+ *
+ * `allow` 속성이 없으면 opaque-origin 샌드박스 iframe 의 microphone 은 기본 allowlist('self')
+ * 에 걸리지 않아 막힐 **것으로 보인다**. 그러나 그건 사양 기본값에서 한 추론이고, 이 경로에서
+ * 실측한 적은 없다. 아이 화면에서 생성된 페이지가 마이크를 열 수 있는지를 기본값에 맡기지 않고
+ * **명시적으로 끈다** — 임베더 쪽 위임이 나중에 더 넓어져도 이 줄은 그대로 거절한다.
+ *
+ * 범위는 센서 둘뿐이다(microphone · camera). 오늘 preview 콘텐츠(kids-quest 세상, 생성 게임)에
+ * 둘을 쓰는 코드는 0건이다(검색으로 확인). 다른 기능까지 넓히지 않는다.
+ */
+export const PREVIEW_IFRAME_ALLOW = "microphone 'none'; camera 'none'";
