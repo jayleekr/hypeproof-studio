@@ -155,6 +155,19 @@
       ]
     },
     {
+      "id": "ST-TEST-LESSON-HELP-MODE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/lesson-help-mode.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-STUDIO-SAFETY",
       "stage": "requirement",
       "owner": "jayleekr",
