@@ -1,0 +1,1860 @@
+{
+  "version": 1,
+  "repository": "jayleekr/hypeproof-studio",
+  "scope": "Current member feature catalog requirement families plus independent course intent #1006. Baseline docs/studio-requirements.md remains an upstream behavioral contract, not a claim of whole-product fulfillment.",
+  "requirement_globs": [
+    "docs/requirements/*.md"
+  ],
+  "excluded": {
+    "docs/requirements/studio-trial.md": {
+      "reason": "선택형 웹 프로토타입의 역사 기록. 현재 실제 체험은 studio-native-trial.md가 대체하며 해당 문서를 원장에 포함한다.",
+      "sha256": "a34f930b06b151b00e47be9de64e0c9e5784a6610f8b6066995c80116fa6f24d"
+    }
+  },
+  "documents": [
+    {
+      "path": "docs/requirements/unified-studio-experience.md",
+      "ids": [
+        "US-01",
+        "US-02",
+        "US-03",
+        "US-04",
+        "US-05",
+        "US-06",
+        "US-07",
+        "US-08",
+        "US-09",
+        "US-10",
+        "US-11",
+        "US-12",
+        "US-13",
+        "US-14",
+        "US-15",
+        "US-16",
+        "US-17",
+        "US-18"
+      ],
+      "inline_prefixes": [],
+      "sha256": "02eae495fb5ca9f8461f2b6e1ff7371ae4cdce94d6553aa157691ac2198549cf",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/design/unified-studio-experience.md",
+      "test": "docs/testing/unified-completion-917-919-evidence.md"
+    },
+    {
+      "path": "docs/requirements/studio-native-trial.md",
+      "ids": [
+        "NAT-01",
+        "NAT-02",
+        "NAT-03",
+        "NAT-04",
+        "NAT-05",
+        "NAT-06",
+        "NAT-07",
+        "NAT-08",
+        "NAT-09",
+        "NAT-10",
+        "NAT-11",
+        "NAT-12"
+      ],
+      "inline_prefixes": [
+        "NAT"
+      ],
+      "sha256": "d8e3d7ff928993744c29c40cc94f6829033f70bf0eaf27deb92bb3a9fb77e093",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/requirements/studio-native-trial.md",
+      "test": "docs/testing/studio-native-trial-results-2026-09-08.md"
+    },
+    {
+      "path": "docs/requirements/learning-agent-experience.md",
+      "ids": [
+        "AE-01",
+        "AE-02",
+        "AE-03",
+        "AE-04",
+        "AE-05",
+        "AE-06",
+        "AE-07",
+        "AE-08",
+        "AE-09",
+        "AE-10",
+        "AE-11",
+        "AE-12",
+        "AE-13",
+        "AE-14",
+        "AE-15",
+        "AE-16",
+        "AE-17",
+        "AE-18",
+        "AE-19",
+        "AE-20",
+        "AE-21",
+        "AE-22",
+        "AE-23",
+        "AE-24",
+        "AE-25",
+        "AE-26",
+        "AE-27",
+        "AE-28",
+        "AE-29",
+        "AE-30",
+        "AE-31",
+        "AE-32",
+        "AE-33",
+        "AE-34",
+        "AE-35",
+        "AE-36",
+        "AE-37",
+        "AE-38",
+        "AE-39",
+        "AE-40",
+        "AE-41",
+        "AE-42",
+        "AE-43",
+        "AE-44"
+      ],
+      "inline_prefixes": [],
+      "sha256": "49dee46907aba828e12e2b321972eeb06458daebd4bc392949313a9d44526cd0",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/design/learning-agent-experience.md",
+      "test": "docs/testing/learning-agent-experience.md"
+    },
+    {
+      "path": "docs/requirements/voice-conversation.md",
+      "ids": [
+        "VO-01",
+        "VO-02",
+        "VO-03",
+        "VO-04",
+        "VO-05",
+        "VO-06",
+        "VO-07",
+        "VO-08",
+        "VO-09",
+        "VO-10",
+        "VO-11",
+        "VO-12",
+        "VO-13",
+        "VO-14",
+        "VO-15",
+        "VO-16",
+        "VO-17",
+        "VO-18",
+        "VO-19",
+        "VO-20",
+        "VO-21",
+        "VO-22",
+        "VO-23",
+        "VO-24",
+        "VO-25",
+        "VO-26",
+        "VO-27",
+        "VO-28",
+        "VO-29",
+        "VO-30",
+        "VO-31",
+        "VO-32",
+        "VO-33",
+        "VO-34",
+        "VO-35",
+        "VO-36",
+        "VO-37",
+        "VO-38",
+        "VO-39",
+        "VO-40",
+        "VO-41",
+        "VO-42",
+        "VO-43",
+        "VO-44",
+        "VO-45",
+        "VO-46",
+        "VO-47"
+      ],
+      "inline_prefixes": [],
+      "sha256": "a87be4ad9fe7799b6588c68930af1ed73a1c502bb67d02f311538fbdf3e33944",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/requirements/voice-conversation.md",
+      "test": "docs/testing/voice-conversation.md"
+    },
+    {
+      "path": "docs/requirements/model-access-usage.md",
+      "ids": [
+        "MU-01",
+        "MU-02",
+        "MU-03",
+        "MU-04",
+        "MU-05",
+        "MU-06",
+        "MU-07",
+        "MU-08"
+      ],
+      "inline_prefixes": [],
+      "sha256": "15f9fc189409562568f2fc9b64b3b69d5bb0c9c4cd04bddfcf50fbaa935cf667",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/design/model-effort-and-course-usage.md",
+      "test": "docs/testing/model-access-usage.md"
+    },
+    {
+      "path": "docs/requirements/access-budget-settlement.md",
+      "ids": [
+        "AB-01",
+        "AB-02",
+        "AB-03",
+        "AB-04",
+        "AB-05",
+        "AB-06",
+        "AB-07",
+        "AB-08",
+        "AB-09",
+        "AB-10",
+        "AB-11",
+        "AB-12",
+        "AB-13",
+        "AB-14",
+        "AB-15",
+        "AB-16",
+        "AB-17",
+        "AB-18"
+      ],
+      "inline_prefixes": [],
+      "sha256": "f94469c38ce9ede592af0d00e30302399b49860eb057227c8ef804e4005f6e77",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/design/access-budget-settlement.md",
+      "test": "docs/testing/access-intent-fulfillment-2026-09-08.md"
+    },
+    {
+      "path": "docs/requirements/chalk-authoring.md",
+      "ids": [
+        "ARC-01",
+        "ARC-02",
+        "AUTH-01",
+        "BASE-01",
+        "BASE-02",
+        "BASE-03",
+        "BASE-04",
+        "BASE-05",
+        "CH-01",
+        "CH-02",
+        "CH-03",
+        "CH-04",
+        "CH-05",
+        "CH-06",
+        "CH-07",
+        "CLS-01",
+        "CLS-02",
+        "CLS-03",
+        "CLS-04",
+        "CLS-05",
+        "EDU-01",
+        "EDU-02",
+        "EDU-03",
+        "EDU-04",
+        "EDU-05",
+        "ENV-01",
+        "ENV-02",
+        "ENV-03",
+        "ENV-04",
+        "ENV-05",
+        "ENV-06",
+        "ENV-07",
+        "REQ-01",
+        "REQ-02",
+        "REQ-03",
+        "REQ-04",
+        "RUN-01",
+        "RUN-02",
+        "RUN-03",
+        "RUN-04",
+        "RUN-05",
+        "SAVE-01",
+        "VER-01",
+        "VER-02",
+        "WEB-01",
+        "WEB-02",
+        "WEB-03",
+        "WEB-04",
+        "WEB-05",
+        "WEB-06",
+        "WEB-07",
+        "WEB-08",
+        "WEB-09"
+      ],
+      "inline_prefixes": [],
+      "sha256": "92a680c1cbbf428aaf5394ffbf835ac0cd52ea43c93155bf8fbc1fba71e95273",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/requirements/chalk-authoring.md",
+      "test": "docs/testing/chalk-authoring.md"
+    },
+    {
+      "path": "docs/requirements/classroom-admin.md",
+      "ids": [
+        "ADM-01",
+        "ADM-02",
+        "ADM-03",
+        "ADM-04",
+        "ADM-05",
+        "ADM-06",
+        "ADM-07",
+        "ADM-08",
+        "ADM-09",
+        "ADM-10",
+        "ADM-11",
+        "ADM-12",
+        "ADM-13",
+        "ADM-14"
+      ],
+      "inline_prefixes": [],
+      "sha256": "9e9412a4a21ea70a6577f831d5da4cc967c78dd4b4a1ede3517efe336ee611fb",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/requirements/classroom-admin.md",
+      "test": "docs/testing/classroom-admin.md"
+    },
+    {
+      "path": "docs/requirements/studio-native-trial-ux.md",
+      "ids": [
+        "TUX-A11Y-01",
+        "TUX-A11Y-02",
+        "TUX-A11Y-03",
+        "TUX-A11Y-04",
+        "TUX-CHAT-01",
+        "TUX-CHAT-02",
+        "TUX-CHAT-03",
+        "TUX-CHAT-04",
+        "TUX-CHAT-05",
+        "TUX-CHAT-06",
+        "TUX-CHAT-07",
+        "TUX-CHAT-08",
+        "TUX-CHAT-09",
+        "TUX-CHAT-10",
+        "TUX-CHAT-11",
+        "TUX-CHAT-12",
+        "TUX-CHAT-13",
+        "TUX-CHAT-14",
+        "TUX-CHAT-15",
+        "TUX-CHAT-16",
+        "TUX-COND-01",
+        "TUX-COND-02",
+        "TUX-COND-03",
+        "TUX-COND-04",
+        "TUX-COND-05",
+        "TUX-COND-06",
+        "TUX-COPY-01",
+        "TUX-HOST-01",
+        "TUX-HOST-02",
+        "TUX-HOST-03",
+        "TUX-HOST-04",
+        "TUX-HOST-05",
+        "TUX-HOST-06",
+        "TUX-HOST-07",
+        "TUX-HOST-08",
+        "TUX-OBS-01",
+        "TUX-OBS-02",
+        "TUX-OBS-03",
+        "TUX-OBS-04",
+        "TUX-OBS-05",
+        "TUX-OBS-06",
+        "TUX-OBS-07",
+        "TUX-OBS-08",
+        "TUX-OBS-09",
+        "TUX-OBS-10",
+        "TUX-SP-01",
+        "TUX-SP-02",
+        "TUX-SP-03",
+        "TUX-SP-04",
+        "TUX-SP-05",
+        "TUX-SP-06",
+        "TUX-SP-07",
+        "TUX-SP-08",
+        "TUX-SP-09",
+        "TUX-SP-10"
+      ],
+      "inline_prefixes": [
+        "TUX-COPY"
+      ],
+      "sha256": "132b7330688598a7ef665b2547cee76998b6ae4a7c2231e92eeef6800e551dbb",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/design/trial-conversation-experience.md",
+      "test": "docs/testing/studio-native-trial-ux.md"
+    },
+    {
+      "path": "docs/requirements/classroom-design.md",
+      "ids": [
+        "DES-01",
+        "DES-02",
+        "DES-03",
+        "DES-04",
+        "DES-05",
+        "DES-06",
+        "DES-07",
+        "DES-08",
+        "DES-09",
+        "DES-10",
+        "DES-11",
+        "DES-12"
+      ],
+      "inline_prefixes": [],
+      "sha256": "e34e2104cf87e62c29e4996e430066aedfe7fb3c769f0a259f5bff55cb2311a5",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/requirements/classroom-design.md",
+      "test": "docs/testing/classroom-admin.md"
+    },
+    {
+      "path": "docs/requirements/capability-model-contract.md",
+      "ids": [
+        "HC-01",
+        "HC-02",
+        "HC-03",
+        "HC-04",
+        "HC-05",
+        "HC-06",
+        "HC-07",
+        "HC-08"
+      ],
+      "inline_prefixes": [],
+      "sha256": "8ea74df86f789c8593cd6274c1e8d01ad1379ccdbae43796c2ac3092eea00456",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/design/philosophy-alignment-2026-09-08.md",
+      "test": "docs/testing/capability-and-access.md"
+    },
+    {
+      "path": "docs/requirements/independent-course.md",
+      "ids": [
+        "IC-01",
+        "IC-02",
+        "IC-03",
+        "IC-04",
+        "IC-05",
+        "IC-06",
+        "IC-07"
+      ],
+      "sha256": "a37e6962b46c19453fa3d1f74a40dd8ba9d2d345109047c6f13e46f8717a30c2",
+      "owner": "jayleekr",
+      "intent": "docs/PRODUCT-INTENT.md",
+      "design": "docs/requirements/independent-course.md",
+      "test": "docs/requirements/independent-course.md"
+    }
+  ],
+  "work_items": [
+    {
+      "id": "goal",
+      "title": "학생 목표와 수업 기준 보존",
+      "issue": 554,
+      "kind": "implementation",
+      "feature_ids": [
+        "work-with-ai",
+        "context-controls"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-01"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 목표/대화 저장을 조사하고 학생 목표 수정이 수업 기준을 지우지 않는 첫 PR을 구현한다.",
+      "design_delta": "수업 기준은 불변 revision, 학생 목표는 별도 수정 값. 화면 이동·재접속 시 두 값을 복원한다.",
+      "positive_control": "목표 변경 뒤 대화와 결과 화면에서 같은 새 목표와 원 수업 기준을 확인.",
+      "negative_control": "학생 수정으로 공통 기준 삭제·다른 수업 목표 복원·열람만으로 완료 기록 거부.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src",
+        "extensions/hypeproof-chat/webview-ui/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "context",
+      "title": "제외한 자료가 재개 문맥에 남지 않도록 집행",
+      "issue": 555,
+      "kind": "implementation",
+      "feature_ids": [
+        "context-controls"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-02",
+            "AE-41"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "실제 SDK resume payload에 이전 합성 표식이 남는 경로를 먼저 재현하고 자료 선택/재구성을 연결한다.",
+      "design_delta": "제외 목록을 파일·이전 메시지·요약·도구 결과에 적용한다. 배제를 보장하지 못하는 resume는 허용 자료로 새 세션을 구성한다.",
+      "positive_control": "포함 자료 B는 다음 요청에 남고 작업 목표는 유지.",
+      "negative_control": "제거 자료 A의 표식이 payload·요약·도구 재탐색에 남으면 실패. 과거 공급자 전송을 삭제했다고 표시하지 않음.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src/sdkCoach.ts",
+        "extensions/hypeproof-chat/src/sdkCoachHelpers.ts"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "help-modes",
+      "title": "단계별 도움 선택과 실제 모델 행동 연결",
+      "issue": 1008,
+      "kind": "implementation",
+      "feature_ids": [
+        "context-controls",
+        "configure-learning"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-10",
+            "AE-36"
+          ]
+        },
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "EDU-01",
+            "EDU-02"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 lesson binding에 도움 모드와 출처를 추가하는 좁은 schema/요청 PR부터 작성한다.",
+      "design_delta": "시연/힌트/함께 수정/직접 수행은 교수 전략이며 권한과 분리. 실행 중 변경은 다음 실행에 적용하고 입력 보존.",
+      "positive_control": "명확한 목표는 바로 수행, 모호한 목표는 다음 결정 하나만 질문.",
+      "negative_control": "도움 전환으로 도구 권한 확대·초안 소실·도움받은 수행의 독립 수행 표시 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "worker/src/lib/lesson-feature-policy.ts",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "approval-scope",
+      "title": "제한된 승인 묶음의 범위와 만료",
+      "issue": 563,
+      "kind": "design",
+      "feature_ids": [
+        "context-controls"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-13"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 항상 승인 규칙과 새 묶음 계약의 차이를 명시하고 정책 대조군을 만든다.",
+      "design_delta": "작업·파일 집합·origin·행위·만료·policy revision을 고정. 공개/파괴 작업은 기존 개별 승인 유지.",
+      "positive_control": "변경 없는 동일 범위는 승인 재사용.",
+      "negative_control": "파일 추가/origin/정책 변경·만료·공개 작업에서 묶음 재사용 거절.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/studio-requirements.md",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "session",
+      "title": "세션 압축·중복 실행·재개 경계",
+      "issue": 647,
+      "kind": "validation",
+      "feature_ids": [
+        "workspace-recovery",
+        "context-controls"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-14",
+            "AE-16"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "현재 SDK 세션 구현과 #807의 실기 범위를 읽고 20턴 압축/중단 대조에서 아직 미검증인 분기를 실행한다.",
+      "design_delta": "학생/수업/workspace 식별자와 policy revision을 재개 때 확인. 불명확한 외부 효과는 조회 전 재실행하지 않음.",
+      "positive_control": "동일 좌석 재개 시 목표·기준 보존, 새 정상 요청 성공.",
+      "negative_control": "타 좌석 문맥·이전 grant 복원·중복 부작용·구 SDK의 새 기능 오인 성공 거부.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src/sdkCoach.ts",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "recovery",
+      "title": "파일 집합 복구와 복구 전 상태 보존",
+      "issue": 673,
+      "kind": "implementation",
+      "feature_ids": [
+        "workspace-recovery"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-15"
+          ]
+        },
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "WEB-05"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "현재 checkpoint/backup을 조사하고 추가·수정·삭제와 수동 편집을 포함하는 로컬 복구부터 구현한다.",
+      "design_delta": "파일 manifest/hash를 복구 단위로 사용하고 복구 전 snapshot을 보존. 외부 DB·공개 배포 복구는 별도.",
+      "positive_control": "Read/Write/Edit/shell 뒤 지정 snapshot의 전체 파일 집합/해시 복원.",
+      "negative_control": "추적 밖 파일·삭제 파일·수동 편집을 누락하거나 외부 배포도 복구됐다고 표시하면 실패.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "review-validity",
+      "title": "현재 산출물 버전에 귀속된 검수",
+      "issue": 557,
+      "kind": "implementation",
+      "feature_ids": [
+        "workspace-recovery",
+        "review-results"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-05",
+            "AE-18",
+            "AE-19",
+            "AE-35",
+            "AE-37"
+          ]
+        },
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "WEB-06"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "브라우저 검사 결과에 파일 집합/기준/viewport/검사기 revision을 연결하고 오래된 합격 무효화를 첫 PR로 구현한다.",
+      "design_delta": "도구 성공·검사 통과·학생 채택은 별도 상태. 과거 증거를 보존하되 수정 뒤 재검사 필요 표시.",
+      "positive_control": "정상 페이지 통과와 무변경 증거 유지, 두 대안 모두 보류 가능.",
+      "negative_control": "깨진 이미지/링크/JS/390px 넘침을 탐지. 파일·기준·viewport 변경 뒤 옛 통과 표시 또는 잘못된 탭 조작은 실패.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src/browserMcp.ts",
+        "extensions/hypeproof-chat/webview-ui/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "export",
+      "title": "수업·AI 만료 후 선택 내보내기",
+      "issue": 553,
+      "kind": "implementation",
+      "feature_ids": [
+        "archive-export"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-39"
+          ]
+        },
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "BASE-05"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 export/local history를 재사용해 자격 만료 상태에서도 파일과 선택 기록을 내보내는 첫 PR을 만든다.",
+      "design_delta": "파일·목표·변경 이유·검수 근거를 선택 manifest로 내보내며 실행 자격/타인 자료를 제외.",
+      "positive_control": "오프라인·수업 종료 뒤 다른 폴더에 재열기와 수정 가능.",
+      "negative_control": "SDK 설정/합성 비밀/미선택 대화/다른 학생 파일 포함 금지. 호스팅 만료와 파일 소유 구분.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "model-routing",
+      "title": "Auto와 모델 전환의 문맥·실패 계약",
+      "issue": 1009,
+      "kind": "implementation",
+      "feature_ids": [
+        "model-comparison"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-25",
+            "AE-27",
+            "AE-28",
+            "AE-29",
+            "AE-30",
+            "AE-33"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "현재 picker/alias/substitution 구현을 재사용하고 수업 허용 후보 안의 명시적 Auto 정책과 실패 분기를 먼저 구현한다.",
+      "design_delta": "Auto와 장애 대체는 별도 정책. 실제 모델/실행기/능력·문맥 전달·원본 복귀·총비용 귀속을 보존.",
+      "positive_control": "허용된 동일 실행기 조합 하나에서 선택/실제 모델과 전달 자료 일치.",
+      "negative_control": "미허용 후보·은퇴 모델·예산 부족·스트림 중 실패 뒤 조용한 전환이나 외부 효과 중복 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "worker/src",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "model-review",
+      "title": "두 번째 모델의 읽기 전용 검토",
+      "issue": 1010,
+      "kind": "implementation",
+      "feature_ids": [
+        "model-comparison"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-31",
+            "AE-32",
+            "AE-34"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "같은 산출물 hash와 기준을 두 읽기 검토에 전달하고 한 분기 실패/취소 처리부터 구현한다.",
+      "design_delta": "편집자는 한 실행기. 분기 provenance·비용 예약·부분 결과·채택/보류 이유를 보존. 모델 합의는 정답이 아님.",
+      "positive_control": "정상·결함 예제에서 단일/이중 검토 탐지/오탐과 총비용 비교.",
+      "negative_control": "검토 분기 쓰기·타 학생 자격·무제한 재시도·실패 분기를 성공으로 병합 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "worker/src",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "lesson-settings",
+      "title": "강사 설정·확정 버전·학생 실행 바인딩",
+      "issue": 1011,
+      "kind": "implementation",
+      "feature_ids": [
+        "configure-learning"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-07",
+            "AE-08",
+            "AE-09",
+            "AE-12",
+            "AE-26"
+          ]
+        },
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "ENV-01",
+            "ENV-02",
+            "ENV-03",
+            "ENV-04",
+            "ENV-07"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 identity/model/features ADR과 구현을 읽고 교육자 설정부터 학생 profile까지 빠진 전달 한 경로를 구현한다.",
+      "design_delta": "이름·교수법·모델·도구·권한을 별도 값으로 고정. 확정 수업은 snapshot을 참조하며 교집합/deny를 유지.",
+      "positive_control": "두 수업의 서로 다른 이름/허용 모델이 각각 정상 적용.",
+      "negative_control": "타 수업/위조 단계/학생 API/구버전 새 capability 우회 거절. 이름 변경은 권한 확대 불가.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "chalk/src",
+        "worker/src/lib/lesson-feature-policy.ts",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "rehearsal",
+      "title": "학생 자격 리허설과 버전별 준비 증거",
+      "issue": 1012,
+      "kind": "implementation",
+      "feature_ids": [
+        "rehearse-validate"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-11"
+          ]
+        },
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "RUN-01",
+            "RUN-02",
+            "VER-02"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "현재 not_run/activated literal과 기존 authoring 저장을 확인하고 학생 자격 실행/증거 저장 경로를 구현한다.",
+      "design_delta": "강사 자격 없는 실행, 내용·템플릿·정책·도구·App/SDK hash에 증거 귀속. 준비/실행/인증/미지원 상태 분리.",
+      "positive_control": "학생 권한으로 정상 예제 실행 후 해당 revision만 준비 완료.",
+      "negative_control": "강사 전용 자격으로만 성공하는 예제 거부. 도구/내용 수정 뒤 옛 합격 재사용 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "chalk/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "operations",
+      "title": "원인별 도움과 학급 일시정지",
+      "issue": 751,
+      "kind": "implementation",
+      "feature_ids": [
+        "deliver-operate",
+        "keep-share"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-20",
+            "AE-21",
+            "AE-22",
+            "AE-40"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 보드/선택 공유를 재사용해 무신호와 알려진 원인별 다음 행동부터 연결한다.",
+      "design_delta": "전체 명단 유지, 원문 없이 도움 요청. 일시정지는 새 실행 admission에 적용하고 미적용 기기/진행 중 효과 구분.",
+      "positive_control": "정상 학생/무신호 학생 모두 보이며 학생이 해결 확인.",
+      "negative_control": "401/403/429/5xx를 모두 같은 원인으로 단정·원문 자동 공유·오프라인 기기에도 중지 완료 표시 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "chalk/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "feedback-loop",
+      "title": "사람 피드백과 다음 수업 초안 연결",
+      "issue": 1013,
+      "kind": "implementation",
+      "feature_ids": [
+        "feedback-improve",
+        "archive-export"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-42",
+            "AE-43"
+          ]
+        },
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "CH-05",
+            "EDU-03",
+            "EDU-04",
+            "EDU-05"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 observation/share/feedback을 참조하는 회고→새 초안 연결을 구현한다.",
+      "design_delta": "가설·도움 조건·출처·사람 반론·채택/보류 이유를 저장하며 기존 확정 수업은 불변.",
+      "positive_control": "선택 공유된 피드백에서 새 초안과 다음 리허설 근거를 연결.",
+      "negative_control": "공유 철회/만료/타 수업 접근 거부. AI 검토를 사람 피드백으로 표시하거나 누락을 독립 수행으로 채우지 않음.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "worker/src/lib/native-observation.ts",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "human-learning",
+      "title": "판단 변화·전이 연구 인수",
+      "issue": 1014,
+      "kind": "research",
+      "feature_ids": [
+        "judgment-evidence",
+        "feedback-improve"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-24",
+            "AE-44"
+          ]
+        }
+      ],
+      "depends_on": [
+        "feedback-loop"
+      ],
+      "next_action": "기술 인수와 구분해 과제/도움/순서/누락 조건을 고정한 뒤 사람 후속 관찰을 수행한다.",
+      "design_delta": "AI 대행·도움받은 수행·직접 수행을 비교하고 성장/무변화/약화/미확인을 모두 기록.",
+      "positive_control": "동의된 참여자의 새 과제와 후속 관찰에서 출처가 있는 판단 근거.",
+      "negative_control": "합성 결과·발화량·제출 완료를 학습 성장 PASS로 바꾸지 않음.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing/learning-agent-experience.md"
+      ],
+      "verification_inputs": [],
+      "gate": {
+        "reason": "실제 사람 참여·연구 조건 확정·후속 관측이 필요하다. fixture와 기록 형식은 feedback-loop에서 선행 가능."
+      }
+    },
+    {
+      "id": "computer-use",
+      "title": "격리 Computer Use 타당성 설계",
+      "issue": 752,
+      "kind": "design",
+      "feature_ids": [
+        "computer-use"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-23"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "웹/API 대안과 비교할 합성 과제·허용 앱·VM·자격/화면 경계·Stop 시나리오를 먼저 확정 가능한 실험 문서로 만든다.",
+      "design_delta": "개인 바탕화면 대신 격리 환경. 실행 단계는 승인된 과제/환경 확보 후 별도 packet으로 분리.",
+      "positive_control": "같은 과제의 웹/API/지정 앱 비교와 no-go도 유효한 결론.",
+      "negative_control": "일반 데스크톱 권한 확대·자동 fallback·동의 없는 화면 캡처 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/plan/learning-agent-experience-epics.md",
+        "docs/testing/learning-agent-experience.md"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "candidate-contract",
+      "title": "후보 모델 provenance와 legacy 호환",
+      "issue": 852,
+      "kind": "design",
+      "feature_ids": [
+        "judgment-evidence",
+        "feedback-improve"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/capability-model-contract.md",
+          "ids": [
+            "HC-01",
+            "HC-02",
+            "HC-03",
+            "HC-04",
+            "HC-05",
+            "HC-06",
+            "HC-07",
+            "HC-08"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "양쪽 observation validator와 legacy fixture를 감사하고 모델 revision/provenance 진화 계약을 작성한다.",
+      "design_delta": "정의·관측·해석·채택을 분리. 기존 키는 호환성을 유지하고 미확인은 unknown.",
+      "positive_control": "구 기록 왕복과 새 revision/출처 기록을 분리해 읽음.",
+      "negative_control": "새 이름/개수 채택만으로 자동 점수·독립 능력 인증·과거 증거 재분류 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "worker/src/lib/native-observation.ts",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "voice-897",
+      "title": "음성 V0 잔여 계약과 인수",
+      "issue": 897,
+      "kind": "validation",
+      "feature_ids": [
+        "voice-conversation"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/voice-conversation.md",
+          "ids": [
+            "VO-01",
+            "VO-02",
+            "VO-03",
+            "VO-04",
+            "VO-05"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "docs/plan/voice-conversation-epics.md와 해당 이슈의 기존 구현/기록을 대조하고 미충족 VO 행 하나를 첫 PR/검증 대상으로 선택한다.",
+      "design_delta": "발화·텍스트·도구 작업·오디오 재생·비용 출처를 같은 activity에 연결하되 각각의 상태와 승인 주체를 구분한다.",
+      "positive_control": "해당 VO-T 정상 경로와 기존 텍스트 경로가 같은 작업/결과로 이어짐.",
+      "negative_control": "중복/역순/중단/권한 철회/늦은 마이크 grant/한도/타 activity 이벤트에서 누출·중복 효과·허위 성공 0.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src",
+        "extensions/hypeproof-chat/webview-ui/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "voice-898",
+      "title": "음성 V1 잔여 계약과 인수",
+      "issue": 898,
+      "kind": "implementation",
+      "feature_ids": [
+        "voice-conversation"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/voice-conversation.md",
+          "ids": [
+            "VO-06",
+            "VO-07",
+            "VO-08",
+            "VO-09",
+            "VO-10",
+            "VO-36",
+            "VO-37",
+            "VO-38",
+            "VO-39",
+            "VO-40",
+            "VO-41",
+            "VO-42",
+            "VO-43"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "docs/plan/voice-conversation-epics.md와 해당 이슈의 기존 구현/기록을 대조하고 미충족 VO 행 하나를 첫 PR/검증 대상으로 선택한다.",
+      "design_delta": "발화·텍스트·도구 작업·오디오 재생·비용 출처를 같은 activity에 연결하되 각각의 상태와 승인 주체를 구분한다.",
+      "positive_control": "해당 VO-T 정상 경로와 기존 텍스트 경로가 같은 작업/결과로 이어짐.",
+      "negative_control": "중복/역순/중단/권한 철회/늦은 마이크 grant/한도/타 activity 이벤트에서 누출·중복 효과·허위 성공 0.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src",
+        "extensions/hypeproof-chat/webview-ui/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "voice-899",
+      "title": "음성 V2 잔여 계약과 인수",
+      "issue": 899,
+      "kind": "implementation",
+      "feature_ids": [
+        "voice-conversation"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/voice-conversation.md",
+          "ids": [
+            "VO-11",
+            "VO-12",
+            "VO-13",
+            "VO-14",
+            "VO-15",
+            "VO-45"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "docs/plan/voice-conversation-epics.md와 해당 이슈의 기존 구현/기록을 대조하고 미충족 VO 행 하나를 첫 PR/검증 대상으로 선택한다.",
+      "design_delta": "발화·텍스트·도구 작업·오디오 재생·비용 출처를 같은 activity에 연결하되 각각의 상태와 승인 주체를 구분한다.",
+      "positive_control": "해당 VO-T 정상 경로와 기존 텍스트 경로가 같은 작업/결과로 이어짐.",
+      "negative_control": "중복/역순/중단/권한 철회/늦은 마이크 grant/한도/타 activity 이벤트에서 누출·중복 효과·허위 성공 0.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src",
+        "extensions/hypeproof-chat/webview-ui/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "voice-900",
+      "title": "음성 V3 잔여 계약과 인수",
+      "issue": 900,
+      "kind": "implementation",
+      "feature_ids": [
+        "voice-conversation"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/voice-conversation.md",
+          "ids": [
+            "VO-16",
+            "VO-17",
+            "VO-18",
+            "VO-19",
+            "VO-20",
+            "VO-44"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "docs/plan/voice-conversation-epics.md와 해당 이슈의 기존 구현/기록을 대조하고 미충족 VO 행 하나를 첫 PR/검증 대상으로 선택한다.",
+      "design_delta": "발화·텍스트·도구 작업·오디오 재생·비용 출처를 같은 activity에 연결하되 각각의 상태와 승인 주체를 구분한다.",
+      "positive_control": "해당 VO-T 정상 경로와 기존 텍스트 경로가 같은 작업/결과로 이어짐.",
+      "negative_control": "중복/역순/중단/권한 철회/늦은 마이크 grant/한도/타 activity 이벤트에서 누출·중복 효과·허위 성공 0.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src",
+        "extensions/hypeproof-chat/webview-ui/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "voice-901",
+      "title": "음성 V4 잔여 계약과 인수",
+      "issue": 901,
+      "kind": "implementation",
+      "feature_ids": [
+        "voice-conversation"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/voice-conversation.md",
+          "ids": [
+            "VO-21",
+            "VO-22",
+            "VO-23",
+            "VO-24",
+            "VO-25",
+            "VO-46"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "docs/plan/voice-conversation-epics.md와 해당 이슈의 기존 구현/기록을 대조하고 미충족 VO 행 하나를 첫 PR/검증 대상으로 선택한다.",
+      "design_delta": "발화·텍스트·도구 작업·오디오 재생·비용 출처를 같은 activity에 연결하되 각각의 상태와 승인 주체를 구분한다.",
+      "positive_control": "해당 VO-T 정상 경로와 기존 텍스트 경로가 같은 작업/결과로 이어짐.",
+      "negative_control": "중복/역순/중단/권한 철회/늦은 마이크 grant/한도/타 activity 이벤트에서 누출·중복 효과·허위 성공 0.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src",
+        "extensions/hypeproof-chat/webview-ui/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "voice-902",
+      "title": "음성 V5 잔여 계약과 인수",
+      "issue": 902,
+      "kind": "validation",
+      "feature_ids": [
+        "voice-conversation"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/voice-conversation.md",
+          "ids": [
+            "VO-26",
+            "VO-27",
+            "VO-28",
+            "VO-29",
+            "VO-30",
+            "VO-47"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "docs/plan/voice-conversation-epics.md와 해당 이슈의 기존 구현/기록을 대조하고 미충족 VO 행 하나를 첫 PR/검증 대상으로 선택한다.",
+      "design_delta": "발화·텍스트·도구 작업·오디오 재생·비용 출처를 같은 activity에 연결하되 각각의 상태와 승인 주체를 구분한다.",
+      "positive_control": "해당 VO-T 정상 경로와 기존 텍스트 경로가 같은 작업/결과로 이어짐.",
+      "negative_control": "중복/역순/중단/권한 철회/늦은 마이크 grant/한도/타 activity 이벤트에서 누출·중복 효과·허위 성공 0.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src",
+        "extensions/hypeproof-chat/webview-ui/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "voice-903",
+      "title": "음성 V6 잔여 계약과 인수",
+      "issue": 903,
+      "kind": "research",
+      "feature_ids": [
+        "voice-conversation"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/voice-conversation.md",
+          "ids": [
+            "VO-31",
+            "VO-32",
+            "VO-33",
+            "VO-34",
+            "VO-35"
+          ]
+        }
+      ],
+      "depends_on": [
+        "voice-902",
+        "voice-901"
+      ],
+      "next_action": "docs/plan/voice-conversation-epics.md와 해당 이슈의 기존 구현/기록을 대조하고 미충족 VO 행 하나를 첫 PR/검증 대상으로 선택한다.",
+      "design_delta": "발화·텍스트·도구 작업·오디오 재생·비용 출처를 같은 activity에 연결하되 각각의 상태와 승인 주체를 구분한다.",
+      "positive_control": "해당 VO-T 정상 경로와 기존 텍스트 경로가 같은 작업/결과로 이어짐.",
+      "negative_control": "중복/역순/중단/권한 철회/늦은 마이크 grant/한도/타 activity 이벤트에서 누출·중복 효과·허위 성공 0.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src",
+        "extensions/hypeproof-chat/webview-ui/src",
+        "worker/src"
+      ],
+      "verification_inputs": [],
+      "gate": {
+        "reason": "사람 파일럿과 후속 재사용 관측은 V5 대상 환경 인수·V4 비용 통제·참여 정책 준비 뒤 진행."
+      }
+    },
+    {
+      "id": "course-create",
+      "title": "기존 고객 프로필 없는 새 강의 개설",
+      "issue": 1006,
+      "kind": "implementation",
+      "feature_ids": [
+        "design-session",
+        "configure-learning",
+        "deliver-operate"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/independent-course.md",
+          "ids": [
+            "IC-01",
+            "IC-02",
+            "IC-03",
+            "IC-04",
+            "IC-05",
+            "IC-06",
+            "IC-07"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "IC-01/02/03의 초안과 명시적 개설 계약부터 구현하고 #1005와 겹치는 변경을 먼저 대조한다.",
+      "design_delta": "불변 강의와 실행 템플릿·기관 범위·개설 operation을 분리. 승인된 기존 인증/명단/서명을 재사용.",
+      "positive_control": "합성 새 강의 생성·중복 개설 재시도·학생 코드 진입.",
+      "negative_control": "다른 기관 설정 잔존·정책 확대·기존 코드 변경·중복 session 생성 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "chalk/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "course-generation",
+      "title": "검수 가능한 수업 초안 생성과 재사용",
+      "issue": 1015,
+      "kind": "implementation",
+      "feature_ids": [
+        "design-session"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "CH-02",
+            "CH-03",
+            "CH-06",
+            "CH-07"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 Module authoring에서 예제/과제/검수 기준을 갖춘 생성 초안 한 종류를 저장·편집·확정하는 범위로 구현한다.",
+      "design_delta": "생성은 초안이며 사람이 확정. 학생별 예제 사본과 다음 기수 복제에서 학생 기록/자격 제외.",
+      "positive_control": "두 학생 독립 사본, 기본/확장 과제, 다음 기수 재편집.",
+      "negative_control": "생성 직후 자동 개설·원본 변경·다른 학생 자료 복제·필수 기준 없는 확정 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "chalk/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "support-request",
+      "title": "강사의 기능 요청과 실제 해결 확인",
+      "issue": 1016,
+      "kind": "implementation",
+      "feature_ids": [
+        "deliver-operate"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "REQ-01",
+            "REQ-02",
+            "REQ-03",
+            "REQ-04"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 지원 요청 저장 경로를 조사하고 수업/목적/참고/필요 날짜/상태/다음 조치를 연결한다.",
+      "design_delta": "기존 안내·선택 확장·기본 개발 분류와 이유를 보존. 처리 완료와 강사의 실제 해결 확인을 구분.",
+      "positive_control": "본인 요청 재열기·진행 상태·명시적인 미정 사유 표시.",
+      "negative_control": "다른 수업 요청 원문 접근·예상 날짜 추측·PR 병합만으로 해결 확인 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "chalk/src",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "extension-admission",
+      "title": "미등록 도구의 격리 시험과 수업 편입",
+      "issue": 1017,
+      "kind": "design",
+      "feature_ids": [
+        "configure-learning"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "ENV-05",
+            "ENV-06"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "현재 카탈로그 경계를 재사용해 후보 도구의 설치/실행/실패/제거 증거와 편입 판단 계약을 작성한다.",
+      "design_delta": "격리 시험→검토→불변 수업 버전의 명시적 편입. 실패 시 기존 수업 영향 없음.",
+      "positive_control": "검증된 후보만 해당 권한 범위에서 연결 시험 성공.",
+      "negative_control": "임의 MCP/플러그인 자동 설치·수업 복제 자격 포함·실패 뒤 권한 확대 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/adr/0007-lesson-feature-binding.md",
+        "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "publish-recovery",
+      "title": "공개 버전 복구와 웹앱 실행 범위",
+      "issue": 1018,
+      "kind": "design",
+      "feature_ids": [
+        "workspace-recovery"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "WEB-07",
+            "WEB-08",
+            "WEB-09"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "현재 publish 경로와 #718의 환경 대기를 읽고 정적 공개 복구와 의존성 있는 웹앱 지원 범위를 별도 계약으로 분리한다.",
+      "design_delta": "릴리스 artifact/원격 revision·URL 확인을 로컬 파일 복구와 구분. 웹앱은 검증한 템플릿만 admission.",
+      "positive_control": "통제된 대상의 공개 버전/자산을 재접속 확인, 설치/빌드 실패는 작업 보존.",
+      "negative_control": "미승인 production 배포·URL 존재만으로 현재 버전 성공·외부 DB까지 복구 주장 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing/chalk-authoring.md",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "acceptance-unified-studio-experience",
+      "title": "unified-studio-experience 기존 구현의 행별 인수 대조",
+      "issue": 919,
+      "kind": "validation",
+      "feature_ids": [
+        "start-resume"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/unified-studio-experience.md",
+          "ids": [
+            "US-01",
+            "US-02",
+            "US-03",
+            "US-04",
+            "US-05",
+            "US-06",
+            "US-07",
+            "US-08",
+            "US-09",
+            "US-10",
+            "US-11",
+            "US-12",
+            "US-13",
+            "US-14",
+            "US-15",
+            "US-16",
+            "US-17",
+            "US-18"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "연결된 검증 기록의 SHA/환경/개별 REQ를 현재 구현과 대조한다. 첫 미충족 행 하나를 실행하고 제품 결함과 계측 결함을 구분해 수정한다.",
+      "design_delta": "이미 구현된 저장소·API·UI는 재사용한다. 코드/합성/실기/운영/사람 결과를 별도 열로 기록하고 하위 조건을 포괄 완료 처리하지 않는다.",
+      "positive_control": "연결된 테스트 계획의 정상 입력에서 기대 상태/파일/API 결과 일치.",
+      "negative_control": "해당 계획의 타 수업/만료/중복/오프라인/긴 내용/누락 증거 대조. 닫힌 PR·테스트 파일만으로 전체 요구사항 PASS 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing",
+        "extensions/hypeproof-chat/src",
+        "worker/src",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "acceptance-studio-native-trial",
+      "title": "studio-native-trial 기존 구현의 행별 인수 대조",
+      "issue": 758,
+      "kind": "validation",
+      "feature_ids": [
+        "start-resume",
+        "work-with-ai",
+        "review-results",
+        "work-observations"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/studio-native-trial.md",
+          "ids": [
+            "NAT-01",
+            "NAT-02",
+            "NAT-03",
+            "NAT-04",
+            "NAT-05",
+            "NAT-06",
+            "NAT-07",
+            "NAT-08",
+            "NAT-09",
+            "NAT-10",
+            "NAT-11",
+            "NAT-12"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "연결된 검증 기록의 SHA/환경/개별 REQ를 현재 구현과 대조한다. 첫 미충족 행 하나를 실행하고 제품 결함과 계측 결함을 구분해 수정한다.",
+      "design_delta": "이미 구현된 저장소·API·UI는 재사용한다. 코드/합성/실기/운영/사람 결과를 별도 열로 기록하고 하위 조건을 포괄 완료 처리하지 않는다.",
+      "positive_control": "연결된 테스트 계획의 정상 입력에서 기대 상태/파일/API 결과 일치.",
+      "negative_control": "해당 계획의 타 수업/만료/중복/오프라인/긴 내용/누락 증거 대조. 닫힌 PR·테스트 파일만으로 전체 요구사항 PASS 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing",
+        "extensions/hypeproof-chat/src",
+        "worker/src",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "acceptance-studio-native-trial-ux",
+      "title": "studio-native-trial-ux 기존 구현의 행별 인수 대조",
+      "issue": 848,
+      "kind": "validation",
+      "feature_ids": [
+        "start-resume",
+        "work-with-ai",
+        "review-results",
+        "work-observations"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/studio-native-trial-ux.md",
+          "ids": [
+            "TUX-A11Y-01",
+            "TUX-A11Y-02",
+            "TUX-A11Y-03",
+            "TUX-A11Y-04",
+            "TUX-CHAT-01",
+            "TUX-CHAT-02",
+            "TUX-CHAT-03",
+            "TUX-CHAT-04",
+            "TUX-CHAT-05",
+            "TUX-CHAT-06",
+            "TUX-CHAT-07",
+            "TUX-CHAT-08",
+            "TUX-CHAT-09",
+            "TUX-CHAT-10",
+            "TUX-CHAT-11",
+            "TUX-CHAT-12",
+            "TUX-CHAT-13",
+            "TUX-CHAT-14",
+            "TUX-CHAT-15",
+            "TUX-CHAT-16",
+            "TUX-COND-01",
+            "TUX-COND-02",
+            "TUX-COND-03",
+            "TUX-COND-04",
+            "TUX-COND-05",
+            "TUX-COND-06",
+            "TUX-COPY-01",
+            "TUX-HOST-01",
+            "TUX-HOST-02",
+            "TUX-HOST-03",
+            "TUX-HOST-04",
+            "TUX-HOST-05",
+            "TUX-HOST-06",
+            "TUX-HOST-07",
+            "TUX-HOST-08",
+            "TUX-OBS-01",
+            "TUX-OBS-02",
+            "TUX-OBS-03",
+            "TUX-OBS-04",
+            "TUX-OBS-05",
+            "TUX-OBS-06",
+            "TUX-OBS-07",
+            "TUX-OBS-08",
+            "TUX-OBS-09",
+            "TUX-OBS-10",
+            "TUX-SP-01",
+            "TUX-SP-02",
+            "TUX-SP-03",
+            "TUX-SP-04",
+            "TUX-SP-05",
+            "TUX-SP-06",
+            "TUX-SP-07",
+            "TUX-SP-08",
+            "TUX-SP-09",
+            "TUX-SP-10"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "연결된 검증 기록의 SHA/환경/개별 REQ를 현재 구현과 대조한다. 첫 미충족 행 하나를 실행하고 제품 결함과 계측 결함을 구분해 수정한다.",
+      "design_delta": "이미 구현된 저장소·API·UI는 재사용한다. 코드/합성/실기/운영/사람 결과를 별도 열로 기록하고 하위 조건을 포괄 완료 처리하지 않는다.",
+      "positive_control": "연결된 테스트 계획의 정상 입력에서 기대 상태/파일/API 결과 일치.",
+      "negative_control": "해당 계획의 타 수업/만료/중복/오프라인/긴 내용/누락 증거 대조. 닫힌 PR·테스트 파일만으로 전체 요구사항 PASS 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing",
+        "extensions/hypeproof-chat/src",
+        "worker/src",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "acceptance-model-access-usage",
+      "title": "model-access-usage 기존 구현의 행별 인수 대조",
+      "issue": 830,
+      "kind": "validation",
+      "feature_ids": [
+        "models-usage"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/model-access-usage.md",
+          "ids": [
+            "MU-01",
+            "MU-02",
+            "MU-03",
+            "MU-04",
+            "MU-05",
+            "MU-06",
+            "MU-07",
+            "MU-08"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "연결된 검증 기록의 SHA/환경/개별 REQ를 현재 구현과 대조한다. 첫 미충족 행 하나를 실행하고 제품 결함과 계측 결함을 구분해 수정한다.",
+      "design_delta": "이미 구현된 저장소·API·UI는 재사용한다. 코드/합성/실기/운영/사람 결과를 별도 열로 기록하고 하위 조건을 포괄 완료 처리하지 않는다.",
+      "positive_control": "연결된 테스트 계획의 정상 입력에서 기대 상태/파일/API 결과 일치.",
+      "negative_control": "해당 계획의 타 수업/만료/중복/오프라인/긴 내용/누락 증거 대조. 닫힌 PR·테스트 파일만으로 전체 요구사항 PASS 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing",
+        "extensions/hypeproof-chat/src",
+        "worker/src",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "acceptance-access-budget-settlement",
+      "title": "access-budget-settlement 기존 구현의 행별 인수 대조",
+      "issue": 857,
+      "kind": "validation",
+      "feature_ids": [
+        "budget-settlement"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/access-budget-settlement.md",
+          "ids": [
+            "AB-01",
+            "AB-02",
+            "AB-03",
+            "AB-04",
+            "AB-05",
+            "AB-06",
+            "AB-07",
+            "AB-08",
+            "AB-09",
+            "AB-10",
+            "AB-11",
+            "AB-12",
+            "AB-13",
+            "AB-14",
+            "AB-15",
+            "AB-16",
+            "AB-17",
+            "AB-18"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "연결된 검증 기록의 SHA/환경/개별 REQ를 현재 구현과 대조한다. 첫 미충족 행 하나를 실행하고 제품 결함과 계측 결함을 구분해 수정한다.",
+      "design_delta": "이미 구현된 저장소·API·UI는 재사용한다. 코드/합성/실기/운영/사람 결과를 별도 열로 기록하고 하위 조건을 포괄 완료 처리하지 않는다.",
+      "positive_control": "연결된 테스트 계획의 정상 입력에서 기대 상태/파일/API 결과 일치.",
+      "negative_control": "해당 계획의 타 수업/만료/중복/오프라인/긴 내용/누락 증거 대조. 닫힌 PR·테스트 파일만으로 전체 요구사항 PASS 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing",
+        "extensions/hypeproof-chat/src",
+        "worker/src",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "acceptance-chalk-authoring",
+      "title": "chalk-authoring 기존 구현의 행별 인수 대조",
+      "issue": 732,
+      "kind": "validation",
+      "feature_ids": [
+        "design-session",
+        "deliver-operate"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "ARC-01",
+            "ARC-02",
+            "AUTH-01",
+            "BASE-01",
+            "BASE-02",
+            "BASE-03",
+            "BASE-04",
+            "CH-01",
+            "CH-04",
+            "CLS-01",
+            "CLS-02",
+            "CLS-03",
+            "CLS-04",
+            "CLS-05",
+            "RUN-03",
+            "RUN-04",
+            "RUN-05",
+            "SAVE-01",
+            "VER-01",
+            "WEB-01",
+            "WEB-02",
+            "WEB-03",
+            "WEB-04"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "연결된 검증 기록의 SHA/환경/개별 REQ를 현재 구현과 대조한다. 첫 미충족 행 하나를 실행하고 제품 결함과 계측 결함을 구분해 수정한다.",
+      "design_delta": "이미 구현된 저장소·API·UI는 재사용한다. 코드/합성/실기/운영/사람 결과를 별도 열로 기록하고 하위 조건을 포괄 완료 처리하지 않는다.",
+      "positive_control": "연결된 테스트 계획의 정상 입력에서 기대 상태/파일/API 결과 일치.",
+      "negative_control": "해당 계획의 타 수업/만료/중복/오프라인/긴 내용/누락 증거 대조. 닫힌 PR·테스트 파일만으로 전체 요구사항 PASS 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing",
+        "extensions/hypeproof-chat/src",
+        "worker/src",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "acceptance-classroom-admin",
+      "title": "classroom-admin 기존 구현의 행별 인수 대조",
+      "issue": 732,
+      "kind": "validation",
+      "feature_ids": [
+        "keep-share",
+        "feedback",
+        "deliver-operate"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/classroom-admin.md",
+          "ids": [
+            "ADM-01",
+            "ADM-02",
+            "ADM-03",
+            "ADM-04",
+            "ADM-05",
+            "ADM-06",
+            "ADM-07",
+            "ADM-08",
+            "ADM-09",
+            "ADM-10",
+            "ADM-11",
+            "ADM-12",
+            "ADM-13",
+            "ADM-14"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "연결된 검증 기록의 SHA/환경/개별 REQ를 현재 구현과 대조한다. 첫 미충족 행 하나를 실행하고 제품 결함과 계측 결함을 구분해 수정한다.",
+      "design_delta": "이미 구현된 저장소·API·UI는 재사용한다. 코드/합성/실기/운영/사람 결과를 별도 열로 기록하고 하위 조건을 포괄 완료 처리하지 않는다.",
+      "positive_control": "연결된 테스트 계획의 정상 입력에서 기대 상태/파일/API 결과 일치.",
+      "negative_control": "해당 계획의 타 수업/만료/중복/오프라인/긴 내용/누락 증거 대조. 닫힌 PR·테스트 파일만으로 전체 요구사항 PASS 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing",
+        "extensions/hypeproof-chat/src",
+        "worker/src",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "acceptance-classroom-design",
+      "title": "classroom-design 기존 구현의 행별 인수 대조",
+      "issue": 732,
+      "kind": "validation",
+      "feature_ids": [
+        "feedback",
+        "deliver-operate"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/classroom-design.md",
+          "ids": [
+            "DES-01",
+            "DES-02",
+            "DES-03",
+            "DES-04",
+            "DES-05",
+            "DES-06",
+            "DES-07",
+            "DES-08",
+            "DES-09",
+            "DES-10",
+            "DES-11",
+            "DES-12"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "연결된 검증 기록의 SHA/환경/개별 REQ를 현재 구현과 대조한다. 첫 미충족 행 하나를 실행하고 제품 결함과 계측 결함을 구분해 수정한다.",
+      "design_delta": "이미 구현된 저장소·API·UI는 재사용한다. 코드/합성/실기/운영/사람 결과를 별도 열로 기록하고 하위 조건을 포괄 완료 처리하지 않는다.",
+      "positive_control": "연결된 테스트 계획의 정상 입력에서 기대 상태/파일/API 결과 일치.",
+      "negative_control": "해당 계획의 타 수업/만료/중복/오프라인/긴 내용/누락 증거 대조. 닫힌 PR·테스트 파일만으로 전체 요구사항 PASS 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing",
+        "extensions/hypeproof-chat/src",
+        "worker/src",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "acceptance-learning-agent-experience",
+      "title": "learning-agent-experience 기존 구현의 행별 인수 대조",
+      "issue": 846,
+      "kind": "validation",
+      "feature_ids": [
+        "work-with-ai"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md",
+          "ids": [
+            "AE-03",
+            "AE-04",
+            "AE-06",
+            "AE-17",
+            "AE-38"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "연결된 검증 기록의 SHA/환경/개별 REQ를 현재 구현과 대조한다. 첫 미충족 행 하나를 실행하고 제품 결함과 계측 결함을 구분해 수정한다.",
+      "design_delta": "이미 구현된 저장소·API·UI는 재사용한다. 코드/합성/실기/운영/사람 결과를 별도 열로 기록하고 하위 조건을 포괄 완료 처리하지 않는다.",
+      "positive_control": "연결된 테스트 계획의 정상 입력에서 기대 상태/파일/API 결과 일치.",
+      "negative_control": "해당 계획의 타 수업/만료/중복/오프라인/긴 내용/누락 증거 대조. 닫힌 PR·테스트 파일만으로 전체 요구사항 PASS 금지.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "docs/testing",
+        "extensions/hypeproof-chat/src",
+        "worker/src",
+        "chalk/src"
+      ],
+      "verification_inputs": []
+    }
+  ]
+}
