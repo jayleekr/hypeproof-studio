@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import * as path from "node:path";
-import { buildPreviewShellCsp, PREVIEW_IFRAME_SANDBOX } from "./cspBuilder";
+import { buildPreviewShellCsp, PREVIEW_IFRAME_ALLOW, PREVIEW_IFRAME_SANDBOX } from "./cspBuilder";
 import { sanitizeArtifactEntry, ARTIFACT_FILES, applyPlaceholderDefaults } from "./previewArtifacts";
 import { injectBaseHref, injectInnerCsp } from "./previewHtml";
 
@@ -273,7 +273,7 @@ export class PreviewProvider {
     <div class="big">${this.labels.emoji}</div>
     <div>${this.labels.placeholder}</div>
   </div>
-  <iframe id="frame" style="display:none" sandbox="${PREVIEW_IFRAME_SANDBOX}" referrerpolicy="no-referrer"></iframe>
+  <iframe id="frame" style="display:none" sandbox="${PREVIEW_IFRAME_SANDBOX}" allow="${PREVIEW_IFRAME_ALLOW}" referrerpolicy="no-referrer"></iframe>
   <script>
     const vscode = acquireVsCodeApi();
     const frame = document.getElementById("frame");
