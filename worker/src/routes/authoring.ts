@@ -17,7 +17,11 @@ interface Draft { cohort_id: string; course_id: string; owner_id: string; profil
 interface Version { source_revision: number; module_json: string }
 const root = "/cohorts/:cohort/authoring/:course";
 const validId = (s: string) => /^[a-zA-Z0-9_-]{1,128}$/.test(s);
-const draftView = (d: Draft) => ({ course_id: d.course_id, profile_id: d.profile_id, revision: d.revision, content: JSON.parse(d.content_json), updated_at: d.updated_at });
+// #1006 IC-01 — an empty profile_id is a draft whose execution template is not
+// chosen yet. It saves and reopens, but cannot freeze or open; the reason is explicit.
+const openingBlockedBy = (d: Draft) => d.profile_id ? [] : ['template_required'];
+const draftView = (d: Draft) => ({ course_id: d.course_id, profile_id: d.profile_id || null, revision: d.revision, content: JSON.parse(d.content_json), updated_at: d.updated_at, opening_blocked_by: openingBlockedBy(d) });
+const TEMPLATE_REQUIRED = { error: 'select an execution template first', reason: 'template_required' };
 export const authoring = new Hono<Bindings>();
 
 const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
@@ -65,6 +69,7 @@ authoring.post(root + '/versions/:version/participants', async c => {
     return c.json({ error: 'duration exceeds instructor authorization' }, 403);
   const d = await readDraft(c.env.HPS_DB, cohort, course);
   if (!d || !owns(d, a)) return c.json({ error: 'course not found' }, 404);
+  if (!d.profile_id) return c.json(TEMPLATE_REQUIRED, 409);
   const lesson = await readLesson(c.env, cohort, course, c.req.param('version')!, d.profile_id);
   if (!lesson) return c.json({ error: 'valid frozen version required' }, 409);
   const session = await getActiveSession(c.env.HPS_KV, cohort);
@@ -81,7 +86,7 @@ async function readDraft(db: D1Database, cohort: string, course: string) {
   return db.prepare("SELECT * FROM authoring_drafts WHERE cohort_id=? AND course_id=?").bind(cohort, course).first<Draft>();
 }
 function owns(d: Draft, a: IssuerAuthz) {
-  return d.owner_id === a.payload.u && a.scope.profiles.includes(d.profile_id);
+  return d.owner_id === a.payload.u && (d.profile_id === '' || a.scope.profiles.includes(d.profile_id));
 }
 
 authoring.get(root, async (c) => {
@@ -97,6 +102,10 @@ authoring.put(root, async (c) => {
   const invalid = validateSessionDesign(b.content);
   if (invalid) return c.json({ error: invalid }, 400);
   const cohort = c.req.param("cohort")!, course = c.req.param("course")!, a = c.get("author");
+  if (b.profile_id === '') {
+    // Model/feature narrowing is relative to a template's grants; without one there is nothing to narrow.
+    if (b.content.model || b.content.features) return c.json(TEMPLATE_REQUIRED, 400);
+  } else {
   const profile = getProfile(b.profile_id);
   if (!profile || profile.session.cohort_id !== cohort || !a.scope.profiles.includes(b.profile_id)) return c.json({ error: "profile not permitted" }, 403);
   if (b.content.model) {
@@ -108,6 +117,7 @@ authoring.put(root, async (c) => {
     if (b.content.features.binding) return c.json({ error: 'feature binding is produced by the Service at freeze' }, 400);
     const bad = validateFeatureSubset(b.content.features, profile);
     if (bad) return c.json({ error: bad }, 403);
+  }
   }
   const content = JSON.stringify(b.content);
   const hash = await sha256Hex(JSON.stringify([b.expected_revision, b.profile_id, b.content]));
@@ -147,6 +157,7 @@ authoring.put(root + "/versions/:version", async (c) => {
     return c.json({ module: JSON.parse(existing.module_json), source_revision: existing.source_revision, rehearsal: "not_run", activated: false });
   }
   if (d.revision !== b.expected_revision) return c.json({ error: "revision conflict" }, 409);
+  if (!d.profile_id) return c.json(TEMPLATE_REQUIRED, 409);
   const content = JSON.parse(d.content_json);
   const invalid = validateSessionDesign(content,true);
   if (invalid) return c.json({ error: invalid }, 400);
