@@ -90,7 +90,11 @@ classEnv.HPS_DB.prepare = (sql) => {
 };
 for (const cohort of ['class-a', 'class-b', 'class-old', 'class-', 'class-none']) seat(classEnv, cohort, template.id, [`learner-${cohort}`]);
 const classRoutes = routes.filter(r => ['routes/access.ts', 'routes/trace.ts'].includes(r.site));
-const classToken = (cohort, user = `learner-${cohort}`) => token({ u: user, c: cohort, p: template.id });
+// Class seats always carry their opening's lesson (class admission requires it); unknown cohorts reuse course-a.
+const classToken = (cohort, user = `learner-${cohort}`) => {
+  const o = openings[cohort] ?? openings['class-a'];
+  return token({ u: user, c: cohort, p: template.id, lesson: { course_id: o.course_id, version: o.version, sha256: '0'.repeat(64) } });
+};
 
 for (const r of classRoutes) {
   await check(`one template, two openings: each class token passes on its own cohort — ${r.site}`, async () => {
@@ -106,6 +110,27 @@ for (const r of classRoutes) {
     }
   });
 }
+await check('opening version is enforced at lesson delivery: bound version passes, another version of the same course is refused (X2 P2)', async () => {
+  const lessonToken = (version) => token({ u: 'learner-class-a', c: 'class-a', p: template.id, lesson: { course_id: 'course-a', version, sha256: '0'.repeat(64) } });
+  // Bound version passes the cohort check and reaches lesson resolution (mock D1 has no frozen row → 409).
+  const bound = await call(classEnv, 'GET', '/v1/profile', await lessonToken(openings['class-a'].version));
+  assert.equal(bound.status, 409, bound.raw);
+  assert.equal(bound.json?.error?.code, 'lesson_unavailable');
+  // The template has observation enabled, so /v1/profile runs the chat gate first and refuses there.
+  const other = await call(classEnv, 'GET', '/v1/profile', await lessonToken('m2026.09.14-2'));
+  assert.equal(other.status, 401, other.raw);
+  assert.equal(other.json?.error?.code, 'opening_version_mismatch');
+  const gate = await call(classEnv, 'POST', '/v1/trace/event', await lessonToken('m2026.09.14-2'), '{}');
+  assert.equal(gate.status, 401, gate.raw);
+  assert.equal(gate.json?.error?.code, 'opening_version_mismatch');
+});
+await check('class token without a lesson reference is refused, not run on the bare template (X2 on #1037)', async () => {
+  const bare = await token({ u: 'learner-class-a', c: 'class-a', p: template.id });
+  const res = await call(classEnv, 'POST', '/v1/trace/event', bare, '{}');
+  assert.equal(res.status, 401, res.raw);
+  assert.equal(res.json?.error?.code, 'opening_lesson_required');
+  assert.equal((await call(classEnv, 'GET', '/v1/access', bare)).status, 403);
+});
 await check('rosters stay per opening: a class-a learner is not admitted to class-b', async () => {
   const res = await call(classEnv, 'GET', '/v1/access', await classToken('class-b', 'learner-class-a'));
   assert.equal(res.status, 403, res.raw);

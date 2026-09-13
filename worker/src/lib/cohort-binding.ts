@@ -28,7 +28,9 @@ export type CohortRejection =
   | 'cohort_mismatch'
   | 'opening_missing'
   | 'opening_profile_mismatch'
+  | 'opening_lesson_required'
   | 'opening_course_mismatch'
+  | 'opening_version_mismatch'
   | 'opening_revoked'
   | 'opening_expired'
   | 'template_not_reviewed';
@@ -53,8 +55,13 @@ export function decideCohort(
   if (profile.execution_template !== true) return { ok: false, reason: 'template_not_reviewed' };
   if (binding.revoked) return { ok: false, reason: 'opening_revoked' };
   if (!(now >= binding.starts_at && now < binding.ends_at)) return { ok: false, reason: 'opening_expired' };
-  // A class token may only carry this opening's course; another opening's lesson is refused.
-  if (payload.lesson && payload.lesson.course_id !== binding.course_id) return { ok: false, reason: 'opening_course_mismatch' };
+  // A class seat exists only to deliver the opening's bound course version. Without a lesson
+  // reference it would run the bare template, so it is refused (fail closed; X2 on #1037).
+  if (!payload.lesson) return { ok: false, reason: 'opening_lesson_required' };
+  // Only this opening's course AND its frozen version (VER-01): another opening's course,
+  // or another version of the same course, is refused before delivery.
+  if (payload.lesson.course_id !== binding.course_id) return { ok: false, reason: 'opening_course_mismatch' };
+  if (payload.lesson.version !== binding.version) return { ok: false, reason: 'opening_version_mismatch' };
   return { ok: true, lessonCohort: binding.template_cohort };
 }
 
