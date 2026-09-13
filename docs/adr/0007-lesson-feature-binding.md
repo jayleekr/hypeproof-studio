@@ -166,7 +166,7 @@ true today. Tracked in #811 for the image half.
 | AE-10 | PARTIAL | The 기능 half is fully served by the derived catalogue. 교수 전략 is not — see AE-36. |
 | AE-11 | UNMET | Rehearsal is a hard-coded literal. It needs a record, a student-condition credential, and an attribution of policy revision and app/SDK compatibility — three mechanisms, none of them a narrowing. |
 | AE-12 | PARTIAL | The projection removes the hazard for this block by construction: an old app cannot fail to honour a narrowing it never had to learn. A general capability handshake, and the split between "setting missing", "policy refused" and "runtime absent", is separate. |
-| AE-36 | UNMET | The four help modes have no representation at any layer. They need a per-step slot, a per-seat mutable state store, and a runtime carrier. |
+| AE-36 | PARTIAL (#1008, 2026-09-13) | Per-step slot and runtime carrier exist: a frozen step may carry `help: { default, allowed[] }`; the chat gate resolves `x-hps-lesson-step` + `x-hps-help-mode`, refuses modes outside the offer with a reason, changes only the system prompt, and returns an `x-hps-help-mode` receipt that always says `performance=unobserved`. Still missing: a per-seat stored selection (the App must resend the choice each run), the App/Chalk UI, and any real-model behavior evidence (AE-T28 NOT RUN). The step ID is a client-declared teaching pointer, not a verified transition — acceptable only because help widens nothing. |
 
 **Not expressible as a narrowing, needs new authority — do not fake it.** AE-09's
 역할 and 담당 수업: the issuer scope has no course dimension, ownership is a single
