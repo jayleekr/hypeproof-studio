@@ -100,3 +100,11 @@ validation only. A product PR must update actual test paths and results.
 - Session-wide model/tool pinning, automated readiness/rehearsal evidence, all ADM/AT/DT acceptance and Windows actual-device testing remain outside this slice. Issuing another credential does not revoke existing credentials or replace the session.
 
 Execution on 2026-09-07: Worker/Chalk full suites, both typechecks, extension smoke suite/typecheck, webview build, local authoring/classroom D1, instructor/student browser flow and the actual Mac 0.1.51 test-copy navigation passed. Mac initially failed with a stale/rejected development extension; bundle hash assertions now reject that setup. Evidence paths: `/tmp/lesson-*.log` and `e2e/test-results/{chalk-authoring,lesson-studio}/`. These are local results; production delivery and a released App containing the lesson panel are separate gates.
+
+## Simplified entry verification
+
+`npm --prefix e2e run test:chalk-simple` uses synthetic issuer credentials, the
+actual Chalk/Service routes and in-memory SQLite. It exercises server-verified
+choices, automatically named new drafts/versions, save/freeze/reopen, forged-token
+denial with edit preservation, no credential storage and 390/1280px layout.
+This is local evidence; production deployment and live classroom behavior are separate.
