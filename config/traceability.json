@@ -1704,6 +1704,467 @@
           "path": "docs/testing/measurement-core.md"
         }
       ]
+    },
+    {
+      "id": "ST-DES-UNIFIED-STUDIO-EXPERIENCE",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/unified-studio-experience.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-UNIFIED-STUDIO-EXPERIENCE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UNIFIED"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/unified-completion-917-919-evidence.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-STUDIO-NATIVE-TRIAL",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/studio-native-trial.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-STUDIO-NATIVE-TRIAL",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/studio-native-trial-results-2026-09-08.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-LEARNING-AGENT-EXPERIENCE",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/learning-agent-experience.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-LEARNING-AGENT-EXPERIENCE",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-LEARNING-AGENT-EXPERIENCE"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/learning-agent-experience.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-LEARNING-AGENT-EXPERIENCE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-LEARNING-AGENT-EXPERIENCE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/learning-agent-experience.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-VOICE-CONVERSATION",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CONVERSATION"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/voice-conversation.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-MODEL-ACCESS-USAGE",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODEL-USAGE"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/model-effort-and-course-usage.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-MODEL-ACCESS-USAGE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODEL-USAGE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/model-access-usage.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-ACCESS-BUDGET-SETTLEMENT",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/access-budget-settlement.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-ACCESS-BUDGET-SETTLEMENT",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-ACCESS-BUDGET"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/access-intent-fulfillment-2026-09-08.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-AUTHORING",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-authoring.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-AUTHORING",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-authoring.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-AUTHORING",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/chalk-authoring.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CLASSROOM-ADMIN",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/classroom-admin.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CLASSROOM-ADMIN",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CLASSROOM-ADMIN"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/classroom-admin.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CLASSROOM-ADMIN",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CLASSROOM-ADMIN"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/classroom-admin.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-STUDIO-NATIVE-TRIAL-UX",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UX"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/trial-conversation-experience.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-STUDIO-NATIVE-TRIAL-UX",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-UX"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/studio-native-trial-ux.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CLASSROOM-DESIGN",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/classroom-design.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CLASSROOM-DESIGN",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CLASSROOM-DESIGN"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/classroom-design.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CLASSROOM-DESIGN",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CLASSROOM-DESIGN"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/classroom-admin.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CAPABILITY-MODEL-CONTRACT",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/philosophy-alignment-2026-09-08.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CAPABILITY-MODEL-CONTRACT",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/capability-and-access.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-INDEPENDENT-COURSE",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/independent-course.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-INDEPENDENT-COURSE",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-INDEPENDENT-COURSE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/independent-course.md"
+        },
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-INDEPENDENT-COURSE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-INDEPENDENT-COURSE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/independent-course.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-WORK",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/plan/requirements-activation.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-WORK",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-WORK"
+      ],
+      "sources": [
+        {
+          "path": "config/requirement-work.json"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-WORK",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-WORK"
+      ],
+      "sources": [
+        {
+          "path": "scripts/next-work.py"
+        },
+        {
+          "path": "AGENTS.md"
+        },
+        {
+          "path": "CLAUDE.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-WORK",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-WORK"
+      ],
+      "sources": [
+        {
+          "path": "docs/plan/requirements-activation.md"
+        },
+        {
+          "path": ".github/workflows/requirement-work.yml"
+        }
+      ]
     }
   ]
 }

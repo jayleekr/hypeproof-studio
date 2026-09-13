@@ -68,6 +68,11 @@ Studio는 사용자의 사고를 대신 완성하는 것이 아니라, 필요한
 
 ## 요구사항 파생 규칙
 
+[요구사항 실행 원장](plan/requirements-activation.md)은 아래 연결을 실제 다음 작업까지
+확장한다. `config/requirement-work.json`에 현재 요구사항 전체 ID, 디자인·테스트,
+기존 이슈와 실행 단위를 기록하고 `python3 scripts/next-work.py`로 현재 상태를 확인한다.
+요구사항 문서/테스트 계획의 존재와 충족은 별개이며, 미등록·변경된 원문도 남은 분해 작업이다.
+
 새 Product Requirement는 가능하면 다음 추적성을 가진다.
 
 ```text
