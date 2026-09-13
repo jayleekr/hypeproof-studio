@@ -104,9 +104,12 @@ authoring.put(root, async (c) => {
   const cohort = c.req.param("cohort")!, course = c.req.param("course")!, a = c.get("author");
   const prior = await readDraft(c.env.HPS_DB, cohort, course);
   if (prior && !owns(prior, a)) return c.json({ error: "course not found" }, 404);
-  // #1006 IC-02 — a course created without a template is independent and stays so:
-  // it may bind only a reviewed execution template, never a customer profile, even
-  // one inside the issuer scope. Courses created on a customer profile keep that contract.
+  // #1006 IC-02 — a course with no template, or bound to a template that is still
+  // flagged as reviewed, is independent: it may bind only a reviewed execution template,
+  // never an unflagged profile, even one inside the issuer scope. Courses created on a
+  // customer profile keep that contract. Independence is inferred, not persisted: if a
+  // template loses its flag, drafts bound to it are reclassified as profile-bound and
+  // this check no longer applies to them (persisted binding: IC-B).
   const independent = prior ? prior.profile_id === '' || getProfile(prior.profile_id)?.execution_template === true : b.profile_id === '';
   if (b.profile_id === '') {
     // Model/feature narrowing is relative to a template's grants; without one there is nothing to narrow.

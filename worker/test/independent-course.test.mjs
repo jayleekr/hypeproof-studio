@@ -135,14 +135,20 @@ await check('IC-02 same cohort, in scope, but unreviewed profile cannot be bound
   assert.equal((await call(`/admin/cohorts/${cohort}/authoring/c-second`, 'PUT', save(1, 'second-bind-ok', template.id))).status, 200);
 });
 
-await check('KNOWN LIMIT (pinned, not a guarantee): de-reviewing a template does not re-classify drafts already bound to it', async () => {
+await check('KNOWN LIMIT (pins current weaker behavior, not a guarantee): de-reviewing a template reclassifies bound drafts as profile-bound and they then accept an unflagged in-scope profile', async () => {
   // Independence is inferred from the draft row (blank profile, or a currently reviewed template).
-  // After an admin removes the flag, an existing draft on that template reads as a profile-bound
-  // draft and keeps editing on it. Persisting template/policy revision belongs to the server-side
-  // opening binding (IC-B, #1006 X1 IC-ISOLATION-01). If this starts returning 403, update the PR/docs claim.
+  // Once the flag is removed, a draft bound to that template is reclassified as profile-bound, so the
+  // template_not_reviewed check is skipped: binding the now-unflagged in-scope profile succeeds, while a
+  // fresh independent draft is still refused the same profile (contrast below). Persisting the binding
+  // belongs to the server-side opening (IC-B, #1006 X1 IC-ISOLATION-01). If this starts returning 403,
+  // the limit is fixed: update the PR/docs claim and flip this check.
   template.execution_template = false;
-  try { assert.equal((await call(base, 'PUT', save(2, 'after-unreview', template.id))).status, 200); }
-  finally { template.execution_template = true; }
+  try {
+    assert.equal((await call(base, 'PUT', save(2, 'after-unreview', template.id))).status, 200);
+    const contrast = `/admin/cohorts/${cohort}/authoring/c-contrast`;
+    assert.equal((await call(contrast, 'PUT', save(0, 'contrast'))).status, 200);
+    assert.equal((await call(contrast, 'PUT', save(1, 'contrast-bind', template.id))).json?.reason, 'template_not_reviewed');
+  } finally { template.execution_template = true; }
 });
 
 console.log(`${passed} independent-course checks passed`);
