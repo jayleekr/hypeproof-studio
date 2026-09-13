@@ -1484,19 +1484,6 @@
       ]
     },
     {
-      "id": "ST-TEST-VOICE-CONVERSATION",
-      "stage": "test",
-      "owner": "jayleekr",
-      "depends_on": [
-        "ST-REQ-VOICE-CONVERSATION"
-      ],
-      "sources": [
-        {
-          "path": "docs/testing/voice-conversation.md"
-        }
-      ]
-    },
-    {
       "id": "ST-DES-MODEL-ACCESS-USAGE",
       "stage": "design",
       "owner": "jayleekr",
