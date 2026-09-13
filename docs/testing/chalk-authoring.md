@@ -102,14 +102,15 @@ These additions are acceptance criteria, not claims that those tests exist.
 
 ## Coverage and status
 
-The 23 scenarios cover the first vertical path and its highest-risk boundaries;
-they are not complete coverage of all 53 product requirements. Before an
-implementation slice is declared complete, link every changed requirement to an
-executable test or a named manual scenario. Untouched later requirements remain
-planned; no blanket PASS or inferred completion.
+The original T-01~23 cover the first vertical path and its highest-risk boundaries.
+T-24~46 add the previously unlinked requirements. With the classroom-admin AT/DT
+scenarios, all 79 authoring/admin/design requirement IDs now have a named scenario.
+This is design coverage only. Before an implementation slice is declared complete,
+link each applicable scenario to executable tests or actual manual evidence.
+Unexecuted requirements remain planned; no blanket PASS or inferred completion.
 
-P0 release requires all applicable P0 requirements (including ones without a
-dedicated T-* row yet) to have evidence. A documentation PR needs documentation
+P0 release requires all applicable P0 requirements and their scenarios to have
+evidence. A documentation PR needs documentation
 validation only. A product PR must update actual test paths and results.
 
 ## API slice execution record
