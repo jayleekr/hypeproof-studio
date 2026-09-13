@@ -30,12 +30,24 @@ const db = new DatabaseSync(':memory:');
 db.exec('PRAGMA foreign_keys=ON');
 db.exec(readFileSync(new URL('../migrations/0002-chalk-authoring.sql', import.meta.url), 'utf8'));
 const env = createMockEnv();
-env.HPS_DB = { prepare(sql) { let args = []; return {
-  bind(...a) { args = a; return this; },
-  async first() { return db.prepare(sql).get(...args) ?? null; },
-  async run() { const r = db.prepare(sql).run(...args); return { success: true, meta: { changes: Number(r.changes) } }; },
-  async all() { return { success: true, results: db.prepare(sql).all(...args) }; },
-}; } };
+let failMarkerWrite = false;
+env.HPS_DB = {
+  prepare(sql) { let args = []; return {
+    bind(...a) { args = a; return this; },
+    async first() { return db.prepare(sql).get(...args) ?? null; },
+    async run() {
+      if (failMarkerWrite && sql.includes('INSERT INTO authoring_independent_courses')) throw new Error('injected marker write failure');
+      const r = db.prepare(sql).run(...args); return { success: true, meta: { changes: Number(r.changes) } };
+    },
+    async all() { return { success: true, results: db.prepare(sql).all(...args) }; },
+  }; },
+  // Transactional like D1 batch: any statement failure rolls back the whole batch.
+  async batch(stmts) {
+    db.exec('BEGIN');
+    try { const out = []; for (const s of stmts) out.push(await s.run()); db.exec('COMMIT'); return out; }
+    catch (error) { db.exec('ROLLBACK'); throw error; }
+  },
+};
 
 const issuer = async (name, scopes) => (await issueIssuer({ issuer: name, scopes }, 48, TEST_SECRET)).token;
 const orgA = await issuer('org-a-lead', [{ cohort, profiles: [template.id] }]);
@@ -135,20 +147,55 @@ await check('IC-02 same cohort, in scope, but unreviewed profile cannot be bound
   assert.equal((await call(`/admin/cohorts/${cohort}/authoring/c-second`, 'PUT', save(1, 'second-bind-ok', template.id))).status, 200);
 });
 
-await check('KNOWN LIMIT (pins current weaker behavior, not a guarantee): de-reviewing a template reclassifies bound drafts as profile-bound and they then accept an unflagged in-scope profile', async () => {
-  // Independence is inferred from the draft row (blank profile, or a currently reviewed template).
-  // Once the flag is removed, a draft bound to that template is reclassified as profile-bound, so the
-  // template_not_reviewed check is skipped: binding the now-unflagged in-scope profile succeeds, while a
-  // fresh independent draft is still refused the same profile (contrast below). Persisting the binding
-  // belongs to the server-side opening (IC-B, #1006 X1 IC-ISOLATION-01). If this starts returning 403,
-  // the limit is fixed: update the PR/docs claim and flip this check.
+await check('IC-TEMPLATE-ADMISSION-01 lost eligibility (X2 r2): de-reviewed template blocks save and NEW freeze, keeps prior versions', async () => {
+  // Formerly pinned as a KNOWN LIMIT returning 200. Independence is now persisted at creation,
+  // so removing the flag cannot silently reclassify the course as profile-bound.
   template.execution_template = false;
   try {
-    assert.equal((await call(base, 'PUT', save(2, 'after-unreview', template.id))).status, 200);
-    const contrast = `/admin/cohorts/${cohort}/authoring/c-contrast`;
-    assert.equal((await call(contrast, 'PUT', save(0, 'contrast'))).status, 200);
-    assert.equal((await call(contrast, 'PUT', save(1, 'contrast-bind', template.id))).json?.reason, 'template_not_reviewed');
+    const before = row();
+    const saved = await call(base, 'PUT', save(2, 'after-unreview', template.id));
+    assert.equal(saved.status, 403, saved.raw);
+    assert.equal(saved.json.reason, 'template_not_reviewed');
+    assert.deepEqual(row(), before);
+    const reopened = await call(base);
+    assert.equal(reopened.json.independent, true);
+    assert.deepEqual(reopened.json.opening_blocked_by, ['template_not_reviewed']);
+    const fresh = await call(base + '/versions/m2026.09.13-2', 'PUT', { expected_revision: 2 });
+    assert.equal(fresh.status, 403, fresh.raw);
+    assert.equal(fresh.json.reason, 'template_not_reviewed');
+    assert.equal(db.prepare("SELECT count(*) n FROM authoring_versions WHERE version='m2026.09.13-2'").get().n, 0);
+    // Positive control (immutability): the version frozen while eligible is still readable and idempotent.
+    const prior = await call(base + '/versions/m2026.09.13-1');
+    assert.equal(prior.status, 200, prior.raw);
+    assert.equal(prior.json.module.profile_id, template.id);
+    assert.equal((await call(base + '/versions/m2026.09.13-1', 'PUT', { expected_revision: 2 })).status, 200);
   } finally { template.execution_template = true; }
+  // Positive control: re-reviewed template admits a new version again.
+  assert.equal((await call(base + '/versions/m2026.09.13-2', 'PUT', { expected_revision: 2 })).status, 200);
+});
+
+await check('IC-02 legacy course created on a customer profile keeps its contract (no marker, freeze 200)', async () => {
+  const legacyIssuer = await issuer('legacy-lead', [{ cohort: customer.session.cohort_id, profiles: [customer.id] }]);
+  const legacy = `/admin/cohorts/${customer.session.cohort_id}/authoring/c-legacy`;
+  const created = await call(legacy, 'PUT', save(0, 'legacy', customer.id), legacyIssuer);
+  assert.equal(created.status, 200, created.raw);
+  assert.equal(created.json.independent, false);
+  assert.deepEqual(created.json.opening_blocked_by, []);
+  assert.equal((await call(legacy + '/versions/m2026.09.13-1', 'PUT', { expected_revision: 1 }, legacyIssuer)).status, 200);
+  assert.equal(db.prepare("SELECT count(*) n FROM authoring_independent_courses WHERE course_id='c-legacy'").get().n, 0);
+});
+
+await check('IC-02 independent create is atomic: a failed marker write stores no draft and no marker', async () => {
+  const path = `/admin/cohorts/${cohort}/authoring/c-atomic`;
+  failMarkerWrite = true;
+  try { assert.ok((await call(path, 'PUT', save(0, 'atomic'))).status >= 500); }
+  finally { failMarkerWrite = false; }
+  assert.equal(db.prepare("SELECT count(*) n FROM authoring_drafts WHERE course_id='c-atomic'").get().n, 0);
+  assert.equal(db.prepare("SELECT count(*) n FROM authoring_independent_courses WHERE course_id='c-atomic'").get().n, 0);
+  // Retry of the same operation after recovery succeeds and is marked independent.
+  const retry = await call(path, 'PUT', save(0, 'atomic'));
+  assert.equal(retry.status, 200, retry.raw);
+  assert.equal(retry.json.independent, true);
 });
 
 console.log(`${passed} independent-course checks passed`);
