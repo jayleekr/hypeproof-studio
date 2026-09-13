@@ -12,7 +12,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { localAuthoring } from './harness/dental-authoring.mjs';
-import { withMockUpstream, TEST_SECRET } from './harness/index.mjs';
+import { withMockUpstream, anthropicStreamBody, TEST_SECRET } from './harness/index.mjs';
 const { getProfile } = await import('../src/profiles/index.ts');
 const { HELP_MODES, HELP_MODE_LABELS, resolveHelpMode, helpModeInstruction } = await import('../src/lib/lesson-help-mode.ts');
 const { validateSessionDesign } = await import('../src/lib/session-design.ts');
@@ -168,6 +168,45 @@ try {
     assert.equal(r.status, 200, JSON.stringify(r.json));
     assert.equal(r.receipt, 'mode=co_edit; source=student; step=one; performance=unobserved');
     assert.ok(systemText(r.upstream).includes("'함께 수정'"));
+  } finally {
+    profile.coach_runtime = originalRuntime;
+  }
+
+  // ── Streaming carries the same receipt (PR #1028 review) ─────────────────
+  // Both streaming paths return a raw Response with their own header object,
+  // which bypasses c.header() (chat.ts already notes this for x-request-id,
+  // #580). Streaming is the ordinary student path, so a receipt that exists
+  // only on JSON responses would be missing exactly where it matters.
+  const streamRun = async (token, headers, route, body) => {
+    let upstream = null;
+    const r = await withMockUpstream((_u, init) => {
+      upstream = JSON.parse(init.body);
+      return new Response(anthropicStreamBody(['확인했습니다.']), { headers: { 'content-type': 'text/event-stream' } });
+    }, () => local.fetcher(local.origin + route, {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    }));
+    const text = await r.text();
+    return { status: r.status, text, upstream, receipt: r.headers.get('x-hps-help-mode'), type: r.headers.get('content-type') };
+  };
+  {
+    const s = await streamRun(token, { 'x-hps-lesson-step': 'one', 'x-hps-help-mode': 'co_edit' }, '/v1/messages', { ...ask, stream: true });
+    assert.equal(s.status, 200, s.text);
+    assert.match(s.type ?? '', /text\/event-stream/, 'instrument: /v1/messages actually took the streaming path');
+    assert.ok(systemText(s.upstream).includes("'함께 수정'"), 'instrument: the instruction reached the provider on the stream');
+    assert.equal(s.receipt, 'mode=co_edit; source=student; step=one; performance=unobserved', 'agent-sdk stream carries the help receipt');
+    const none = await streamRun(token, { 'x-hps-lesson-step': 'two' }, '/v1/messages', { ...ask, stream: true });
+    assert.equal(none.status, 200);
+    assert.equal(none.receipt, null, 'control: no receipt on a stream without a resolved help');
+  }
+  profile.coach_runtime = 'proxy';
+  try {
+    const proxyToken = await seat('proxy-stream');
+    const s = await streamRun(proxyToken, { 'x-hps-lesson-step': 'one' }, '/v1/chat/completions', { max_tokens: 32, messages: ask.messages, stream: true });
+    assert.equal(s.status, 200, s.text);
+    assert.match(s.type ?? '', /text\/event-stream/, 'instrument: /v1/chat/completions actually took the streaming path');
+    assert.equal(s.receipt, 'mode=hint; source=lesson_default; step=one; performance=unobserved', 'proxy stream carries the help receipt');
   } finally {
     profile.coach_runtime = originalRuntime;
   }

@@ -59,6 +59,12 @@ export type ChatGateResult =
        * is instructor-set and already in system_prompt. null = profile rule.
        */
       identity: { fixed_name: string } | null;
+      /**
+       * #1008 — the `x-hps-help-mode` receipt, or null when no help resolved.
+       * Streaming routes return a raw Response that bypasses c.header(), so
+       * they must attach this themselves.
+       */
+      help: string | null;
     }
   | { ok: false; response: Response };
 
@@ -154,7 +160,7 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
       if(!crossProviderEnabled(profile)||payload.lesson||payload.native_trial)throw new AccessError('unsupported_personal_profile',403);
       // An account execution context has no class/session row. The immutable
       // paid period is selected and checked separately before every dispatch.
-      return {ok:true,payload,profile:{...profile,session:{...profile.session,cohort_id:''}},module,identity:null,
+      return {ok:true,payload,profile:{...profile,session:{...profile.session,cohort_id:''}},module,identity:null,help:null,
         session:{session_id:'account:'+payload.account,profile_id:profile.id,starts_at:new Date(payload.iat*1000).toISOString(),ends_at:new Date(payload.exp*1000).toISOString()}};
     }catch(error){
       return{ok:false,response:c.json({error:{type:'access',code:error instanceof AccessError?error.code:'account_unavailable',message:'개인 이용권을 확인할 수 없습니다.'}},403)};
@@ -279,10 +285,10 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     if (!help.ok) return { ok: false, response: c.json({ error: { type: 'config', code: help.code, message: help.message } }, help.status) };
     if (help.help) c.header('x-hps-help-mode', helpModeReceipt(help.help));
     const helpInstruction = help.help ? helpModeInstruction(help.help) : '';
-    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(lesson.content) + helpInstruction }, session, module, identity: assistantName ? { fixed_name: assistantName } : null };
+    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(lesson.content) + helpInstruction }, session, module, identity: assistantName ? { fixed_name: assistantName } : null, help: help.help ? helpModeReceipt(help.help) : null };
   }
   // A help mode without a lesson has nothing to apply to — say so instead of
   // letting the student believe it took effect.
   if (c.req.header('x-hps-help-mode')) return { ok: false, response: c.json({ error: { type: 'config', code: 'help_mode_not_offered', message: '수업에 연결되지 않은 좌석은 도움 방식을 선택할 수 없습니다.' } }, 409) };
-  return { ok: true, payload, profile, session, module, identity: null };
+  return { ok: true, payload, profile, session, module, identity: null, help: null };
 }
