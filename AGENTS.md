@@ -1,5 +1,10 @@
 # Repository instructions
 
+Before selecting more work or reporting that none remains, run
+`python3 scripts/next-work.py` and read [requirement execution](docs/plan/requirements-activation.md).
+It checks the current requirement inventory and GitHub work ownership. A completed
+`dag.yaml` or `HANDOFF.md` applies only to that plan. It is not a product-wide stop condition.
+
 Read [CLAUDE.md](CLAUDE.md) for existing project rules, then the documents below.
 This entry point does not replace the autonomy mandate, product philosophy, or
 release gates. Keep those rules in their existing canonical documents.
