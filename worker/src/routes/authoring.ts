@@ -102,12 +102,19 @@ authoring.put(root, async (c) => {
   const invalid = validateSessionDesign(b.content);
   if (invalid) return c.json({ error: invalid }, 400);
   const cohort = c.req.param("cohort")!, course = c.req.param("course")!, a = c.get("author");
+  const prior = await readDraft(c.env.HPS_DB, cohort, course);
+  if (prior && !owns(prior, a)) return c.json({ error: "course not found" }, 404);
+  // #1006 IC-02 — a course created without a template is independent and stays so:
+  // it may bind only a reviewed execution template, never a customer profile, even
+  // one inside the issuer scope. Courses created on a customer profile keep that contract.
+  const independent = prior ? prior.profile_id === '' || getProfile(prior.profile_id)?.execution_template === true : b.profile_id === '';
   if (b.profile_id === '') {
     // Model/feature narrowing is relative to a template's grants; without one there is nothing to narrow.
     if (b.content.model || b.content.features) return c.json(TEMPLATE_REQUIRED, 400);
   } else {
   const profile = getProfile(b.profile_id);
   if (!profile || profile.session.cohort_id !== cohort || !a.scope.profiles.includes(b.profile_id)) return c.json({ error: "profile not permitted" }, 403);
+  if (independent && profile.execution_template !== true) return c.json({ error: 'independent course requires a reviewed execution template', reason: 'template_not_reviewed' }, 403);
   if (b.content.model) {
     if (b.content.model.binding) return c.json({ error: 'model binding is produced by the Service at freeze' }, 400);
     const bad = validateModelSubset(b.content.model, profile);
@@ -121,8 +128,6 @@ authoring.put(root, async (c) => {
   }
   const content = JSON.stringify(b.content);
   const hash = await sha256Hex(JSON.stringify([b.expected_revision, b.profile_id, b.content]));
-  const prior = await readDraft(c.env.HPS_DB, cohort, course);
-  if (prior && !owns(prior, a)) return c.json({ error: "course not found" }, 404);
   if (prior && prior.request_id === b.request_id) {
     if (prior.request_hash !== hash) return c.json({ error: "request id reused with different content" }, 409);
     return c.json(draftView(prior));

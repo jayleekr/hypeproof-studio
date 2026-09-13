@@ -102,8 +102,8 @@ await check('IC-T02 direct API rejects student, other cohort, unscoped and forge
   const before = row();
   assert.equal((await call(base, 'PUT', save(1, 's', template.id), student)).status, 403);
   assert.equal((await call(base, 'PUT', save(1, 'o', template.id), otherCohort)).status, 403);
-  // Scope check precedes the owner lookup, so an unscoped template is refused before any draft is read.
-  assert.equal((await call(base, 'PUT', save(1, 'u', template.id), noTemplate)).status, 403);
+  // Owner lookup precedes the template check: a non-owner learns nothing about the course (404, like org B).
+  assert.equal((await call(base, 'PUT', save(1, 'u', template.id), noTemplate)).status, 404);
   assert.equal((await call(base, 'PUT', save(1, 'f', 'forged-template'))).status, 403);
   assert.equal((await call(base, 'PUT', save(1, 'x', customer.id))).status, 403);
   assert.deepEqual(row(), before);
@@ -118,6 +118,31 @@ await check('IC-01 selecting the scoped template makes the draft freezable; vers
   assert.equal(f.json.module.profile_id, template.id);
   assert.equal(f.json.activated, false);
   assert.equal((await call(base + '/versions/m2026.09.13-1', 'GET', undefined, orgB)).status, 404);
+});
+
+await check('IC-02 same cohort, in scope, but unreviewed profile cannot be bound to an independent course (X2 P2 on #1027)', async () => {
+  // The only distinction left is the reviewed-template flag: cohort and issuer scope both match.
+  template.execution_template = false;
+  try {
+    const fresh = `/admin/cohorts/${cohort}/authoring/c-second`;
+    assert.equal((await call(fresh, 'PUT', save(0, 'second'))).status, 200);
+    const onBlank = await call(fresh, 'PUT', save(1, 'second-bind', template.id));
+    assert.equal(onBlank.status, 403, onBlank.raw);
+    assert.equal(onBlank.json.reason, 'template_not_reviewed');
+    assert.equal(db.prepare("SELECT profile_id FROM authoring_drafts WHERE course_id='c-second'").get().profile_id, '');
+  } finally { template.execution_template = true; }
+  // Positive control: once reviewed again the same request shape succeeds.
+  assert.equal((await call(`/admin/cohorts/${cohort}/authoring/c-second`, 'PUT', save(1, 'second-bind-ok', template.id))).status, 200);
+});
+
+await check('KNOWN LIMIT (pinned, not a guarantee): de-reviewing a template does not re-classify drafts already bound to it', async () => {
+  // Independence is inferred from the draft row (blank profile, or a currently reviewed template).
+  // After an admin removes the flag, an existing draft on that template reads as a profile-bound
+  // draft and keeps editing on it. Persisting template/policy revision belongs to the server-side
+  // opening binding (IC-B, #1006 X1 IC-ISOLATION-01). If this starts returning 403, update the PR/docs claim.
+  template.execution_template = false;
+  try { assert.equal((await call(base, 'PUT', save(2, 'after-unreview', template.id))).status, 200); }
+  finally { template.execution_template = true; }
 });
 
 console.log(`${passed} independent-course checks passed`);
