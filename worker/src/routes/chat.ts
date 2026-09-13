@@ -37,6 +37,7 @@ import { gateChatRequest } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
 import { applyLessonFeatures } from '../lib/lesson-feature-policy';
 import { resolveTokenLesson } from '../lib/lesson-delivery';
+import { profileServesCohort } from '../lib/cohort-binding';
 import { lessonAssistantName } from '../lib/session-design';
 import { isTokenRevoked, getRoster } from '../lib/kv';
 import { translate, translateOpenAI, modelAnnouncement, type CoachContext } from "../lib/translate";
@@ -267,9 +268,10 @@ chat.get("/profile", async (c) => {
   if (auth.payload.lesson) {
     c.header('cache-control', 'no-store');
     if (auth.payload.jti && await isTokenRevoked(c.env.HPS_KV, auth.payload.jti)) return c.json({ error: { type: 'auth', code: 'revoked', message: '참여 코드가 폐기되었습니다.' } }, 401);
-    if (profile.session.cohort_id !== auth.payload.c || !(await getRoster(c.env.HPS_KV, auth.payload.c))?.users.includes(auth.payload.u))
+    const cohortDecision = await profileServesCohort(c.env, profile, auth.payload);
+    if (!cohortDecision.ok || !(await getRoster(c.env.HPS_KV, auth.payload.c))?.users.includes(auth.payload.u))
       return c.json({ error: { type: 'auth', code: 'not_in_roster', message: '수업 명단을 강사에게 확인하세요.' } }, 403);
-    lesson = await resolveTokenLesson(c.env, auth.payload);
+    lesson = await resolveTokenLesson(c.env, auth.payload, cohortDecision.lessonCohort);
     if (!lesson) return c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 알려주세요.' } }, 409);
   }
 

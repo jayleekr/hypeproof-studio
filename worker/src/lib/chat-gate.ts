@@ -31,6 +31,7 @@ import type { Profile } from "../profiles/types";
 // layer exists. lib/modules.ts explains the layer and the fallback chain.
 import { resolveProfile, type ModuleResolution } from "./modules";
 import { resolveTokenLesson } from './lesson-delivery';
+import { profileServesCohort } from './cohort-binding';
 import { lessonAssistantName, spokenAssistantName } from './session-design';
 import {startNativeGrant,readNativeGrant} from './native-trial-grants';
 import {
@@ -158,11 +159,12 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
       return{ok:false,response:c.json({error:{type:'access',code:error instanceof AccessError?error.code:'account_unavailable',message:'개인 이용권을 확인할 수 없습니다.'}},403)};
     }
   }
-  // Sanity: token cohort must match profile cohort
-  if (payload.c !== profile.session.cohort_id) {
+  // Token cohort must run on this profile: the compiled cohort, or a live class opening (#1006 IC-B).
+  const cohortDecision = await profileServesCohort(env, profile, payload);
+  if (!cohortDecision.ok) {
     return {
       ok: false,
-      response: c.json({ error: { message: "token cohort/profile mismatch", type: "auth" } }, 401),
+      response: c.json({ error: { message: "token cohort/profile mismatch", type: "auth", code: cohortDecision.reason } }, 401),
     };
   }
 
@@ -245,7 +247,7 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
   }
 
   if (payload.lesson) {
-    const lesson = await resolveTokenLesson(env, payload);
+    const lesson = await resolveTokenLesson(env, payload, cohortDecision.lessonCohort);
     if (!lesson) return { ok: false, response: c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 확인하세요.' } }, 409) };
     const modelPolicy = lesson.content.model;
     if (modelPolicy?.binding) {

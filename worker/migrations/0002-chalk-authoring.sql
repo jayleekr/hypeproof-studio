@@ -30,3 +30,21 @@ CREATE TABLE IF NOT EXISTS authoring_independent_courses (
   PRIMARY KEY (cohort_id, course_id),
   FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
 );
+-- #1006 IC-B: a class opened from a reviewed execution template. The class cohort id owns
+-- its own roster, session and pause keys. This row alone lets it run on the template profile.
+CREATE TABLE IF NOT EXISTS authoring_openings (
+  class_cohort TEXT PRIMARY KEY,
+  template_cohort TEXT NOT NULL,
+  profile_id TEXT NOT NULL,
+  course_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  owner_id TEXT NOT NULL,
+  operation_id TEXT NOT NULL,
+  request_hash TEXT NOT NULL,
+  starts_at INTEGER NOT NULL,
+  ends_at INTEGER NOT NULL,
+  revoked INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL,
+  UNIQUE (template_cohort, owner_id, operation_id),
+  FOREIGN KEY (template_cohort, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
+);
