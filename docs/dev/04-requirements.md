@@ -5,7 +5,7 @@ doc_type: requirements
 status: canonical
 owner: core
 version: 0.1.5
-last_reviewed: 2026-05-22
+last_reviewed: 2026-09-13
 audience: maintainers
 source_paths:
   - docs/studio-requirements.md
@@ -168,3 +168,16 @@ Lab #777 → [Product Intent](../PRODUCT-INTENT.md) →
 기존 NAT/AE/AB/업데이트 계약에 연결된 수용 목표이며, [US-T01~21](../testing/unified-studio-experience.md)은
 모두 NOT RUN인 테스트 계획이다. [구현 이슈와 추적](../plan/unified-studio-experience.md)을 통해
 문서 발행·구현·실기 검증·공개 배포·사용자 적용을 구분한다. #912의 수동 체크리스트는 자동 gate 구현이 아니다.
+
+## Measurement core and Jay dogfood
+
+| ID | Area | Acceptance criteria | Primary paths |
+|---|---|---|---|
+| REQ-STUDIO-MEASUREMENT-CORE | portable observation, evidence and review | Studio and both external hosts call the same core; new cards default to six model items; legacy evidence stays readable; Jay reviews and submits actual work with a local receipt and a follow-up improvement. Proposed, not yet implemented. | docs/requirements/measurement-core.md; docs/design/measurement-core.md; docs/testing/measurement-core.md |
+
+[INT-MC-01–03](../intents/measurement-core.md) →
+[MC-01–48](../requirements/measurement-core.md) →
+[MC-T01–24](../testing/measurement-core.md) →
+[implementation slices](../plan/measurement-core.md).
+Full app rebuild and remote team collection are not prerequisites for the first
+local dogfood. Actual host support and user acceptance require retained evidence.

@@ -1827,6 +1827,65 @@
           "path": ".github/workflows/requirement-work.yml"
         }
       ]
+    },
+    {
+      "id": "ST-INT-MEASUREMENT-CORE",
+      "stage": "intent",
+      "owner": "jayleekr",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE",
+        "ST-INT-CAPABILITY-ACCESS"
+      ],
+      "sources": [
+        {
+          "path": "docs/intents/measurement-core.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-MEASUREMENT-CORE",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-MEASUREMENT-CORE",
+        "ST-REQ-CAPABILITY-CONTRACT"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/measurement-core.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-MEASUREMENT-CORE",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MEASUREMENT-CORE"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/measurement-core.md"
+        },
+        {
+          "path": "docs/plan/measurement-core.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-MEASUREMENT-CORE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MEASUREMENT-CORE",
+        "ST-DES-MEASUREMENT-CORE"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/measurement-core.md"
+        }
+      ]
     }
   ]
 }

@@ -1,5 +1,18 @@
 # Studio behavioral requirements
 
+## Measurement core proposal — 2026-09-13
+
+`REQ-STUDIO-MEASUREMENT-CORE`: extract the existing observation/evidence/interpretation
+implementation into a common core consumed by Studio, Claude Code and Codex.
+Jay's real product work is the first use case, with local review, submission receipts
+and a follow-up improvement. New work uses the six-item model selected by Jay;
+legacy seven-item evidence remains readable in its original model.
+[Intent](intents/measurement-core.md), [MC-01–48 requirements](requirements/measurement-core.md),
+[MC-T01–24 validation](testing/measurement-core.md),
+[epic #1020](https://github.com/jayleekr/hypeproof-studio/issues/1020).
+Status: criteria proposed; runtime and human acceptance NOT RUN. Existing classroom
+policies and deployed legacy clients are unchanged by this documentation.
+
 ## Native trial revision — 2026-09-08
 
 `REQ-STUDIO-NATIVE-TRIAL`: a participant enters the existing Studio application

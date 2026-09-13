@@ -134,3 +134,14 @@ Judgment, Verify, Orchestrate, Adapt, Ownership은 이를 연구할 잠정 후�
 [실행 Epic](plan/capability-and-pricing-epics.md)으로 내려간다. P1~P5는 지원 범위의 이용권·원가·예산·역할별 화면을 구현하고 인수했다.
 [Intent·요구사항 충족 현황](testing/access-intent-fulfillment-2026-09-08.md)은 연결된 기준과
 실제로 확인한 행동을 구분한다. 이 구현은 판매 활성화·결제 연동·연구 타당화 완료를 뜻하지 않는다.
+
+## 공통 측정 코어와 Jay dogfood
+
+[INT-MC-01–03](intents/measurement-core.md)은 Studio의 관찰·근거·해석 기능을
+공통 코어로 분리해 Studio·Claude Code·Codex에서 실제 작업을 검토·제출하고
+다음 작업과 모델을 개선하려는 제품 의도다. Jay부터 사용한다.
+2026-09-13 Jay 결정으로 신규 작업의 기본은 6개 모델(Framing, Judgment,
+Orchestrate, Verify, Adapt, Ownership)이다. 기존 7개 기록을 보존하며 새 해석을
+별도 연결한다. 제품 채택을 연구 타당화 완료까지 미루지 않는다.
+[MC-01–48](requirements/measurement-core.md), [검증 계약](testing/measurement-core.md),
+[개발 순서](plan/measurement-core.md)로 연결한다. 문서는 구현·실사용 증거가 아니다.

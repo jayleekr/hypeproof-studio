@@ -5,6 +5,10 @@
 이 계약은 기존 NAT-08/09, AE-24/34/42~44와 hps-observation/1을 확장할 기준이다.
 새 rubric·점수·저장 schema가 이미 적용됐다는 뜻이 아니다.
 
+2026-09-13 Jay 결정: [공통 측정 코어](../intents/measurement-core.md)의 신규 작업은
+6개 모델(Framing, Judgment, Orchestrate, Verify, Adapt, Ownership)을 기본으로 개발한다.
+제품 채택과 연구 타당화는 분리한다. 기존 7개 데이터는 보존하고 새 해석을 연결한다.
+
 ## 요구사항
 
 | ID | 구현 전에 지킬 계약 | 검증 |
@@ -14,9 +18,9 @@
 | HC-03 | 원자료를 덮어쓰지 않고 버전별 interpretation을 연결한다. 기존 정정·철회·동의·만료·삭제 정책을 보존하며, 불변성이라는 이유로 삭제 의무를 제거하지 않는다. | CA-T16/17 |
 | HC-04 | 사람 발화/선택, AI 제안, 정책 기본값, 강사 개입을 actor provenance로 구분한다. AI가 작성한 목표·검수 문장을 학습자 독립 수행 증거로 저장하지 않는다. | CA-T15/18 |
 | HC-05 | `provisional / confirmed / needs_review / null`과 미관찰 이유를 유지한다. evidence별 confirmed와 후보 construct의 타당화 완료는 별개다. 빈 증거를 0점으로 채우지 않는다. | CA-T17/18 |
-| HC-06 | 화면은 evidence profile을 먼저 보여 주고 legacy/current candidate·도움 조건·평가 버전을 구분한다. 새 여섯 이름을 메뉴·성취 배지·영구 브랜드로 일괄 고정하지 않는다. | CA-T11/17 |
+| HC-06 | 화면은 evidence profile을 먼저 보여 주고 legacy/current candidate·도움 조건·평가 버전을 구분한다. 공통 코어의 새 작업 카드·해석은 여섯 모델을 기본으로 표시한다. 이름·항목은 모델 정의에서 읽어 개정 가능하게 하며, 과거 일곱 기록은 당시 모델로 표시한다. 표시를 검증된 성취 배지로 바꾸지 않는다. | CA-T11/17 |
 | HC-07 | 비용·유료 등급·모델 가격·반복 수·토큰량은 역량 등급이 아니다. 도구/모델/Effort/도움·자원 부족을 관측 조건으로 남겨 불가능했던 행동과 수행 실패를 구분한다. | CA-T15/18 |
-| HC-08 | 연구의 최소 construct audit를 통과한 정의만 새로운 측정 구현에 사용한다. 제품 동작 테스트와 human pilot/독립 평가·전이·유지 연구를 별도 판정한다. | CA-T18/19 |
+| HC-08 | Jay dogfood는 정의·행동 예·반례를 버전으로 명시한 여섯 모델로 관찰과 검토를 시작한다. 연구 audit를 제품의 모델 채택·사용 시작을 미루는 조건으로 삼지 않는다. 수치 평가 rubric의 활성화는 별도 audit를 요구하고, 제품 동작·human pilot·독립 평가·전이·유지 연구를 각각 판정한다. | CA-T18/19 |
 
 ## 기능별 Intent로의 번역
 
