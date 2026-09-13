@@ -48,6 +48,12 @@ state.get("/cohorts/:id/state", async (c) => {
     .filter((p) => p.dashboard_hidden !== true)
     .sort((a, b) => (a.dashboard_order ?? Number.MAX_SAFE_INTEGER) - (b.dashboard_order ?? Number.MAX_SAFE_INTEGER))
     .map((p) => ({ id: p.id, display_name: p.display_name }));
+  // #1006 IC-02 — reviewed neutral execution templates the admin put in this
+  // scope. Listed even when dashboard_hidden (they are authoring choices, not
+  // console session cards). Scope is the only grant; the flag never widens it.
+  const templates = listProfiles()
+    .filter((p) => p.execution_template === true && p.session.cohort_id === cohortId && scopedIds.includes(p.id))
+    .map((p) => ({ id: p.id, display_name: p.display_name, revision: p.version }));
   return c.json({
     id: cohortId,
     now: new Date().toISOString(),
@@ -55,6 +61,7 @@ state.get("/cohorts/:id/state", async (c) => {
     roster_size: roster?.users.length ?? 0,
     paused,
     profiles,
+    templates,
     // Server-authoritative caps so the console renders the same limits the
     // Service's mutation endpoints will enforce on the forwarded writes.
     scope: {
