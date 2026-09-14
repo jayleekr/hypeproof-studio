@@ -102,10 +102,13 @@ function citedEvent(events: Map<string, ObservationEvent>, ref: unknown): Observ
 /**
  * Resolves an explicit verification link to the artifact revision it checked (MC-14).
  *
- * Nothing is inferred from order alone: any success after an artifact is NOT a check
- * of it. The claim must name one request and its own executed result, in the same
- * task and tool call, and the checked revision is the last revision of the target's
- * task written before that request. Throws a named code on any mismatch.
+ * Nothing is inferred from order or from the claim's own wording: a success after an
+ * artifact is NOT a check of it, even when the claim names that command honestly.
+ * The claim must name one request and its own executed result (same task and tool
+ * call), and BOTH events must carry the checked artifact revision in `sha256` — set
+ * by the host adapter only when the tool actually took that revision as its input —
+ * equal to `target_artifact`. The revision must already exist when the check starts
+ * and must not change while it runs. Throws a named code on any mismatch.
  */
 export function resolveVerification(
   batch: ObservationBatch,
@@ -128,14 +131,15 @@ export function resolveVerification(
   check(result && result.kind === "tool_result", "missing_execution_evidence");
   check(result.task === request.task && result.tool_id === request.tool_id && result.seq > request.seq, "mismatched_verification_link");
   check(targetEvents.some((e) => e.task === request.task), "mismatched_verification_link");
+  // Machine-checkable binding: the request and the result both name the revision they checked.
+  check(typeof request.sha256 === "string", "unbound_verification_request");
+  check(typeof result.sha256 === "string", "unbound_verification_result");
+  check(request.sha256 === target && result.sha256 === target, "unverified_revision");
   check(result.outcome === "success", "failed_verification");
 
   const taskArtifacts = batch.events.filter((e) => e.kind === "artifact" && e.task === request.task);
-  const before = taskArtifacts.filter((e) => e.seq < request.seq);
-  const checked = before.at(-1)?.sha256;
-  // The target only exists after the check started: an earlier result reused for a newer revision.
-  check(before.some((e) => e.sha256 === target), "stale_verification");
-  check(checked === target, "unverified_revision");
+  // The bound revision did not exist yet when the check started.
+  check(taskArtifacts.some((e) => e.seq < request.seq && e.sha256 === target), "stale_verification");
   // The file changed while the check ran; the result is not about the named revision.
   check(!taskArtifacts.some((e) => e.seq > request.seq && e.seq < result.seq && e.sha256 !== target), "stale_verification");
   const current = taskArtifacts.at(-1)!.sha256!;

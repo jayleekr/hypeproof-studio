@@ -175,22 +175,30 @@ test("MC-T09 scores, levels and ranks are refused wherever they appear; the core
 
 // ── MC-T10 — verification is about a named revision, request and result ───────
 // Order alone proves nothing: every success below comes after artifact A, but only
-// the linked `npm test` call t1→r1 is a check of A. (A first draft accepted any
-// later success as a check of A, and a VERIFY claim with no target at all — X2
-// reproduced both on PR #1043 @ 990f7a8.)
+// a request/result pair that itself carries revision A (`sha256`, set by the host
+// when the tool took A as input) is a check of A. X2 reproduced on PR #1043 that
+// any later success (990f7a8), and then an honestly named unrelated command such as
+// `echo hello` (17543d2), was accepted as a check of A.
 const ev = (id, seq, kind, extra = {}) => ({ id, seq, task: "task-1", at: seq, kind, text: "", assistance: "unknown", ...extra });
 const verificationEvents = [
   ev("u1", 1, "user", { text: "새 직원이 주문을 확인할 문서가 필요해" }),
   ev("f1", 2, "artifact", { sha256: SHA_A, text: "order.md" }),
-  ev("t1", 3, "tool_request", { tool_id: "check-1", text: "Bash(npm test)" }),
-  ev("r1", 4, "tool_result", { tool_id: "check-1", outcome: "success", text: "all checks passed" }),
-  ev("t2", 5, "tool_request", { tool_id: "other-1", text: "Bash(ls)" }),
-  ev("r2", 6, "tool_result", { tool_id: "other-1", outcome: "success", text: "order.md" }),
-  ev("t3", 7, "tool_request", { tool_id: "check-2", text: "Bash(npm test)" }),
-  ev("r3", 8, "tool_result", { tool_id: "check-2", outcome: "error", text: "1 failing" }),
+  ev("t1", 3, "tool_request", { tool_id: "check-1", text: "Bash(npm test)", sha256: SHA_A }),
+  ev("r1", 4, "tool_result", { tool_id: "check-1", outcome: "success", text: "all checks passed", sha256: SHA_A }),
+  // X2 R2 control: unrelated command, honestly named, succeeds after A, bound to nothing.
+  ev("t2", 5, "tool_request", { tool_id: "other-1", text: "Bash(echo hello)" }),
+  ev("r2", 6, "tool_result", { tool_id: "other-1", outcome: "success", text: "hello" }),
+  ev("t3", 7, "tool_request", { tool_id: "check-2", text: "Bash(npm test)", sha256: SHA_A }),
+  ev("r3", 8, "tool_result", { tool_id: "check-2", outcome: "error", text: "1 failing", sha256: SHA_A }),
   ev("f2", 9, "artifact", { sha256: SHA_B, text: "order.md" }),
-  ev("t4", 10, "tool_request", { task: "task-2", tool_id: "check-3", text: "Bash(npm test)" }),
-  ev("r4", 11, "tool_result", { task: "task-2", tool_id: "check-3", outcome: "success", text: "all checks passed" }),
+  ev("t4", 10, "tool_request", { task: "task-2", tool_id: "check-3", text: "Bash(npm test)", sha256: SHA_A }),
+  ev("r4", 11, "tool_result", { task: "task-2", tool_id: "check-3", outcome: "success", text: "all checks passed", sha256: SHA_A }),
+  // Request bound to A, result bound to nothing.
+  ev("t6", 12, "tool_request", { tool_id: "check-5", text: "Bash(npm test)", sha256: SHA_A }),
+  ev("r6", 13, "tool_result", { tool_id: "check-5", outcome: "success", text: "all checks passed" }),
+  // Request bound to A, result reports B.
+  ev("t7", 14, "tool_request", { tool_id: "check-6", text: "Bash(npm test)", sha256: SHA_A }),
+  ev("r7", 15, "tool_result", { tool_id: "check-6", outcome: "success", text: "all checks passed", sha256: SHA_B }),
 ];
 const verificationBatch = (extra = []) => core.validateObservation({ ...batchCases.normal_chain(), events: [...verificationEvents, ...extra] }).batch;
 const link = (request_event_id, result_event_id, method = "npm test") => ({ method, request_event_id, result_event_id });
@@ -203,7 +211,7 @@ test("MC-T10 observed VERIFY needs the exact revision plus its own linked, execu
   assert.deepEqual(accepted.findings[0].verification, link("t1", "r1"));
   assert.deepEqual(core.resolveVerification(batch, SHA_A, link("t1", "r1")), { checked_revision: SHA_A, current_revision: SHA_B, current: false });
   // A fresh check of the current revision B is accepted and current.
-  const rechecked = verificationBatch([ev("t5", 12, "tool_request", { tool_id: "check-4", text: "Bash(npm test)" }), ev("r5", 13, "tool_result", { tool_id: "check-4", outcome: "success", text: "all checks passed" })]);
+  const rechecked = verificationBatch([ev("t5", 16, "tool_request", { tool_id: "check-4", text: "Bash(npm test)", sha256: SHA_B }), ev("r5", 17, "tool_result", { tool_id: "check-4", outcome: "success", text: "all checks passed", sha256: SHA_B })]);
   assert.deepEqual(core.resolveVerification(rechecked, SHA_B, link("t5", "r5")), { checked_revision: SHA_B, current_revision: SHA_B, current: true });
   assert.equal(core.validateInterpretation(verifyClaim(rechecked, { target_artifact: SHA_B, verification: link("t5", "r5") }), rechecked).findings.length, 1);
 });
@@ -213,8 +221,14 @@ test("MC-T10 unrelated success, missing target/request/result, mismatched call, 
   const refuse = (patch, code) => throwsCode(() => core.validateInterpretation(verifyClaim(batch, patch), batch), code);
   // X2 repro 1: an unrelated successful result after A, with no link to a check.
   refuse({ target_artifact: SHA_A }, "missing_verification_link");
-  // …and linked explicitly, it still does not name a verification method it ran.
+  // …linked with a method it never ran.
   refuse({ target_artifact: SHA_A, verification: link("t2", "r2") }, "unverified_method");
+  // X2 R2 repro: IDs, task, tool call and the real method all match, but the command
+  // never took revision A as input.
+  refuse({ target_artifact: SHA_A, verification: link("t2", "r2", "echo hello") }, "unbound_verification_request");
+  // Only one side bound, or the two sides disagree about the revision.
+  refuse({ target_artifact: SHA_A, verification: link("t6", "r6") }, "unbound_verification_result");
+  refuse({ target_artifact: SHA_A, verification: link("t7", "r7") }, "unverified_revision");
   // X2 repro 2: observed VERIFY with no target artifact.
   refuse({ verification: link("t1", "r1") }, "missing_target_artifact");
   refuse({}, "missing_target_artifact");
@@ -230,13 +244,20 @@ test("MC-T10 unrelated success, missing target/request/result, mismatched call, 
   refuse({ target_artifact: SHA_A, verification: link("t4", "r4") }, "mismatched_verification_link");
   // An executed but failed check.
   refuse({ target_artifact: SHA_A, verification: link("t3", "r3") }, "failed_verification");
-  // Stale reuse: the check of A claimed for the current revision B.
-  refuse({ target_artifact: SHA_B, verification: link("t1", "r1") }, "stale_verification");
+  // Stale reuse: the check bound to A claimed for the current revision B.
+  refuse({ target_artifact: SHA_B, verification: link("t1", "r1") }, "unverified_revision");
+  // A check bound to B that started before B existed.
+  const early = core.validateObservation({ ...batchCases.normal_chain(), events: [
+    ev("u1", 1, "user", { text: "새 직원" }), ev("f1", 2, "artifact", { sha256: SHA_A, text: "order.md" }),
+    ev("t1", 3, "tool_request", { tool_id: "check-1", text: "Bash(npm test)", sha256: SHA_B }),
+    ev("r1", 4, "tool_result", { tool_id: "check-1", outcome: "success", text: "ok", sha256: SHA_B }), ev("f2", 5, "artifact", { sha256: SHA_B, text: "order.md" }),
+  ] }).batch;
+  throwsCode(() => core.validateInterpretation(verifyClaim(early, { target_artifact: SHA_B, verification: link("t1", "r1") }), early), "stale_verification");
   // The file changed to B while the check ran, then back to A: not a check of A.
   const midCheck = core.validateObservation({ ...batchCases.normal_chain(), events: [
     ev("u1", 1, "user", { text: "새 직원" }), ev("f1", 2, "artifact", { sha256: SHA_A, text: "order.md" }),
-    ev("t1", 3, "tool_request", { tool_id: "check-1", text: "Bash(npm test)" }), ev("f2", 4, "artifact", { sha256: SHA_B, text: "order.md" }),
-    ev("r1", 5, "tool_result", { tool_id: "check-1", outcome: "success", text: "ok" }), ev("f3", 6, "artifact", { sha256: SHA_A, text: "order.md" }),
+    ev("t1", 3, "tool_request", { tool_id: "check-1", text: "Bash(npm test)", sha256: SHA_A }), ev("f2", 4, "artifact", { sha256: SHA_B, text: "order.md" }),
+    ev("r1", 5, "tool_result", { tool_id: "check-1", outcome: "success", text: "ok", sha256: SHA_A }), ev("f3", 6, "artifact", { sha256: SHA_A, text: "order.md" }),
   ] }).batch;
   throwsCode(() => core.validateInterpretation(verifyClaim(midCheck, { target_artifact: SHA_A, verification: link("t1", "r1") }), midCheck), "stale_verification");
   // A verification link is only meaningful on an observed VERIFY finding.
