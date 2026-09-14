@@ -495,6 +495,26 @@
       ]
     },
     {
+      "id": "ST-TEST-MEASUREMENT-CORE-UNIT1",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/measurement-core.test.mjs"
+        },
+        {
+          "path": "worker/test/fixtures/measurement-core/legacy-verdicts.json"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/measurement-core-shim.smoke.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-ACCESS-CONTRACTS",
       "stage": "implementation",
       "owner": "jayleekr",
