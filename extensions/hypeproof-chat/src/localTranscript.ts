@@ -67,7 +67,8 @@ function parseRows(rows: Array<{ row: any; line: number }>, host: ReviewHost, di
       exclusions.add('Host-injected instructions omitted'); continue;
     }
     sequence++;
-    if (plain.length > 20000 || sequence > 10000) { exclusions.add('Messages beyond the per-event or sequence limit omitted; this is partial evidence.'); continue; }
+    if (sequence > 10000) throw Error('session_message_limit_exceeded_select_a_shorter_transcript');
+    if (plain.length > 20000) { exclusions.add('Messages beyond the per-event size limit omitted; this is partial evidence.'); continue; }
     const at = Date.parse(r.timestamp);
     if (!Number.isFinite(at)) throw Error('missing_event_timestamp');
     const redacted = redactText(plain);

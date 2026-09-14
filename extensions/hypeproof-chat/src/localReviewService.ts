@@ -20,7 +20,7 @@ export class LocalReviewService {
       if (await this.store.read('deleted-sessions/' + sessionKey)) throw Error('task_deleted');
       const existing = await this.record.taskForSession(host, parsed.batch.session);
       const id = existing || 'task-' + parsed.digest.slice(0, 32);
-      const prior = existing ? await this.card(id) : undefined;
+      const prior = existing && await this.store.read('imports/' + id) ? await this.card(id) : undefined;
       if (prior?.source.digest === parsed.digest) return prior;
       if (await this.store.read('deleted/' + id)) throw Error('task_deleted');
       if (!(await this.store.read('tasks/' + id))) {

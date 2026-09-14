@@ -71,7 +71,8 @@ reject symlink files and require import confirmation. No LLM polling is involved
 Selected files up to 1 GiB are read sequentially over the initial byte range. The
 snapshot digest identifies that byte range. An unfinished final JSONL row is omitted
 with a visible limitation; malformed interior rows fail. Only the latest 500 eligible
-visible messages are included per snapshot. Oversized messages and unsupported data
+visible messages are included per snapshot. Sessions exceeding the core limit of
+10,000 visible messages fail explicitly instead of silently dropping newer work. Oversized messages and unsupported data
 remain excluded and disclosed. Earlier stored observations remain preserved.
 
 Reimporting a changed session updates its existing task with a new interpretation

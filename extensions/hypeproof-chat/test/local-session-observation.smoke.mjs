@@ -19,6 +19,12 @@ try {
  await writeFile(join(claudeDir,'claude.jsonl'),serialize([{timestamp:at,type:'user',sessionId:'claude-one',cwd:'/project',message:{role:'user',content:'Check the evidence'}}]));
  const sessions=await recentLocalSessions(root,'/project',Date.parse(at));assert.equal(sessions.length,2);assert.deepEqual(new Set(sessions.map(s=>s.host)),new Set(['codex','claude-code']));assert.ok(!JSON.stringify(sessions).includes('Compare the actual'));
  const streamed=await parseLocalTranscriptFile(join(dir,'one.jsonl'),'codex');assert.deepEqual(streamed,parseLocalTranscript(serialize(rows),'codex'));
+ const recovery = new LocalReviewService(join(root,'recovery'));
+ const originalWrite = recovery.store.write.bind(recovery.store); let failOnce = true;
+ recovery.store.write = async (key,value,options) => { if (key.startsWith('imports/') && failOnce) {failOnce=false;throw Error('simulated_disk_failure');} return originalWrite(key,value,options); };
+ await assert.rejects(recovery.import(serialize(rows),'codex','/project'), /simulated_disk_failure/);
+ const recovered = await new LocalReviewService(join(root,'recovery')).import(serialize(rows),'codex','/project');
+ assert.equal(recovered.observations.length,2);assert.equal((await recovery.record.records()).tasks.length,1);
  const service=new LocalReviewService(join(root,'storage'));const first=await service.import(serialize(rows),'codex','/project');
  assert.deepEqual(first.interpretation.versions.work_ai_models,['model-one']);
  await service.review(first.task.id,'FRAMING','correct','Asked for comparison',[first.observations[0].key]);
@@ -44,6 +50,7 @@ try {
  await assert.rejects(service.import(serialize([...nextRows,message('later')]),'codex','/project'),/task_deleted/);
  const many=[rows[0],...Array.from({length:502},(_,i)=>message('Message '+i))];
  const window=parseLocalTranscript(serialize(many),'codex');assert.equal(window.batch.events.length,500);assert.equal(window.batch.events[0].seq,3);assert.ok(window.exclusions.some(x=>x.includes('500')));
+ assert.throws(()=>parseLocalTranscript(serialize([rows[0], ...Array.from({length:10002},(_,i)=>message('Message '+i))]),'codex'), /session_message_limit_exceeded/);
  assert.throws(()=>parseLocalTranscript(serialize(rows)+'\n{bad\n'+JSON.stringify(message('later')),'codex'),/invalid_transcript_json/);
  console.log('PASS discovery, model changes, partial-tail/window limits, same-task refresh, evidence binding, preview invalidation, restart, improvement/follow-up, deletion');
 } finally {await rm(root,{recursive:true,force:true});}
