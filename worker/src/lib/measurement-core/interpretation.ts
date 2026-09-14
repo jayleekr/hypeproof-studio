@@ -28,8 +28,18 @@ export interface InterpretationFinding {
   review: ReviewState;
   /** Who moved it out of "unreviewed". Only the person, never the model. */
   reviewed_by?: "user";
-  /** Artifact revision a VERIFY claim is about (MC-14). */
+  /** Artifact revision a VERIFY claim is about (MC-14). Required when VERIFY is observed. */
   target_artifact?: string;
+  /** The executed check behind an observed VERIFY claim (MC-14). Required when VERIFY is observed. */
+  verification?: VerificationLink;
+}
+
+/** Names the exact request and executed result that checked `target_artifact`. */
+export interface VerificationLink {
+  /** How it was checked, quoted from the request event text (e.g. "npm test"). */
+  method: string;
+  request_event_id: string;
+  result_event_id: string;
 }
 
 export interface Interpretation {
@@ -89,15 +99,47 @@ function citedEvent(events: Map<string, ObservationEvent>, ref: unknown): Observ
   return e;
 }
 
-/** Latest artifact revision that a successful tool_result came after, and whether it is still current (MC-14). */
-export function verificationStatus(batch: ObservationBatch): { verified_revision: string | null; current_revision: string | null; current: boolean } {
-  let latest: string | null = null;
-  let verified: string | null = null;
-  for (const e of batch.events) {
-    if (e.kind === "artifact" && e.sha256) latest = e.sha256;
-    if (e.kind === "tool_result" && e.outcome === "success" && latest) verified = latest;
-  }
-  return { verified_revision: verified, current_revision: latest, current: verified !== null && verified === latest };
+/**
+ * Resolves an explicit verification link to the artifact revision it checked (MC-14).
+ *
+ * Nothing is inferred from order alone: any success after an artifact is NOT a check
+ * of it. The claim must name one request and its own executed result, in the same
+ * task and tool call, and the checked revision is the last revision of the target's
+ * task written before that request. Throws a named code on any mismatch.
+ */
+export function resolveVerification(
+  batch: ObservationBatch,
+  target: unknown,
+  link: unknown,
+): { checked_revision: string; current_revision: string; current: boolean } {
+  check(typeof target === "string" && target.length > 0, "missing_target_artifact");
+  const targetEvents = batch.events.filter((e) => e.kind === "artifact" && e.sha256 === target);
+  check(targetEvents.length > 0, "unknown_artifact");
+  check(
+    object(link) && keysWithin(link, ["method", "request_event_id", "result_event_id"]) &&
+      str(link.method) && str(link.request_event_id) && str(link.result_event_id),
+    "missing_verification_link",
+  );
+  const byId = new Map(batch.events.map((e) => [e.id, e]));
+  const request = byId.get(link.request_event_id);
+  check(request && request.kind === "tool_request", "invalid_verification_request");
+  check(request.text.includes(link.method), "unverified_method");
+  const result = byId.get(link.result_event_id);
+  check(result && result.kind === "tool_result", "missing_execution_evidence");
+  check(result.task === request.task && result.tool_id === request.tool_id && result.seq > request.seq, "mismatched_verification_link");
+  check(targetEvents.some((e) => e.task === request.task), "mismatched_verification_link");
+  check(result.outcome === "success", "failed_verification");
+
+  const taskArtifacts = batch.events.filter((e) => e.kind === "artifact" && e.task === request.task);
+  const before = taskArtifacts.filter((e) => e.seq < request.seq);
+  const checked = before.at(-1)?.sha256;
+  // The target only exists after the check started: an earlier result reused for a newer revision.
+  check(before.some((e) => e.sha256 === target), "stale_verification");
+  check(checked === target, "unverified_revision");
+  // The file changed while the check ran; the result is not about the named revision.
+  check(!taskArtifacts.some((e) => e.seq > request.seq && e.seq < result.seq && e.sha256 !== target), "stale_verification");
+  const current = taskArtifacts.at(-1)!.sha256!;
+  return { checked_revision: target, current_revision: current, current: current === target };
 }
 
 export function validateInterpretation(value: unknown, batch: ObservationBatch): Interpretation {
@@ -154,15 +196,13 @@ export function validateInterpretation(value: unknown, batch: ObservationBatch):
 
   const events = new Map(batch.events.map((e) => [e.id, e]));
   const artifacts = new Set(batch.events.filter((e) => e.kind === "artifact").map((e) => e.sha256));
-  const verification = verificationStatus(batch);
-  const executed = batch.events.some((e) => e.kind === "tool_result" && e.outcome === "success");
 
   // Findings: a subset is fine; not every capability has to be filled (MC-20).
   check(Array.isArray(value.findings) && value.findings.length <= keys.length, "invalid_findings");
   const seen = new Set<string>();
   for (const f of value.findings) {
     check(
-      object(f) && keysWithin(f, ["capability", "status", "claim", "evidence", "assistance", "review", "reviewed_by", "target_artifact"]),
+      object(f) && keysWithin(f, ["capability", "status", "claim", "evidence", "assistance", "review", "reviewed_by", "target_artifact", "verification"]),
       "invalid_finding",
     );
     check(keys.includes(String(f.capability)), "unknown_capability");
@@ -189,9 +229,11 @@ export function validateInterpretation(value: unknown, batch: ObservationBatch):
       check(typeof f.target_artifact === "string" && artifacts.has(f.target_artifact), "unknown_artifact");
     }
     if (f.capability === "VERIFY" && f.status === "observed") {
-      // A hash, a request or a claim is not an executed check (MC-14).
-      check(executed, "missing_execution_evidence");
-      if (f.target_artifact !== undefined) check(f.target_artifact === verification.verified_revision, "unverified_revision");
+      // A hash, a request, a claim or an unrelated success is not an executed check
+      // of this revision (MC-14): name the revision, the request and its result.
+      resolveVerification(batch, f.target_artifact, f.verification);
+    } else {
+      check(f.verification === undefined, "invalid_finding");
     }
   }
 
