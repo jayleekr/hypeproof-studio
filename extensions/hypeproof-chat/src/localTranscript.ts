@@ -18,14 +18,20 @@ export function parseLocalTranscript(raw: string, host: ReviewHost) {
   const models = new Set<string>();
   for (const { row: r, line } of rows) {
     if (!r || typeof r !== 'object') throw Error('invalid_transcript_record');
-    if (host === 'codex' && r.type === 'session_meta') { session = r.payload?.id; project = r.payload?.cwd; }
+    if (host === 'codex' && r.type === 'session_meta') {
+      if (session && session !== r.payload?.id) throw Error('mixed_sessions');
+      if (project && project !== r.payload?.cwd) throw Error('mixed_projects');
+      session = r.payload?.id; project = r.payload?.cwd;
+    }
     if (host === 'claude-code' && r.sessionId) {
       if (session && session !== r.sessionId) throw Error('mixed_sessions');
+      if (project && r.cwd && project !== r.cwd) throw Error('mixed_projects');
       session = r.sessionId; project = r.cwd || project;
     }
     if (typeof r.message?.model === 'string') models.add(r.message.model);
     let role: string | undefined, content: unknown;
     if (host === 'codex' && r.type === 'response_item' && r.payload?.type === 'message') {
+      if (r.payload.channel === 'analysis') { exclusions.add('Hidden reasoning omitted'); continue; }
       role = r.payload.role; content = r.payload.content;
     } else if (host === 'claude-code' && ['user', 'assistant'].includes(r.type) && !r.isMeta) {
       role = r.message?.role; content = r.message?.content;

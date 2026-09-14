@@ -1463,6 +1463,18 @@
         },
         {
           "path": "extensions/hypeproof-chat/webview-ui/src/localReview.css"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/startPage.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/startPageProtocol.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/StartPage.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/main.tsx"
         }
       ]
     },

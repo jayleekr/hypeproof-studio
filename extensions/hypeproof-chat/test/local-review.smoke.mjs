@@ -19,6 +19,10 @@ try {
  const service = new LocalReviewService(root);
  await assert.rejects(service.import(fixture('codex'),'codex','/other'), /project_mismatch/);
  assert.equal((await service.record.records()).tasks.length,0);
+ const hidden = JSON.stringify({ timestamp: at, type: 'response_item', payload: { type: 'message', role: 'assistant', channel: 'analysis', content: [{ type: 'output_text', text: 'private internal reasoning' }] } });
+ assert.equal(parseLocalTranscript(fixture('codex') + '\n' + hidden, 'codex').batch.events.length, 2);
+ assert.throws(() => parseLocalTranscript(fixture('codex') + '\n' + JSON.stringify({type:'session_meta',payload:{id:'different',cwd:'/project'}}),'codex'), /mixed_sessions/);
+ assert.throws(() => parseLocalTranscript(fixture('claude-code') + '\n' + JSON.stringify({type:'user',sessionId:'claude-one',cwd:'/other'}),'claude-code'), /mixed_projects/);
  const card = await service.import(fixture('codex'),'codex','/project');
  assert.equal(card.observations.length,2);
  assert.equal(card.interpretation.findings.length,6);

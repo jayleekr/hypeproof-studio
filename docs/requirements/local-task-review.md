@@ -7,10 +7,10 @@ of all three hosts or the Jay longitudinal dogfood acceptance.
 
 ## REQ-STUDIO-LOCAL-REVIEW
 
-From **My task reviews**, a person explicitly selects one Claude Code or Codex
+The Studio start page exposes **내 작업 검토**, opening **My task reviews**. A person explicitly selects one Claude Code or Codex
 JSONL message transcript for the open project and confirms import. Collection is
 off on first launch; no background scanner or host hook is installed. Different
-projects are rejected, and transcript contents never execute or grant access.
+projects and mixed-session transcripts are rejected, and transcript contents never execute or grant access.
 
 A private file-backed record survives restart. The card shows source messages,
 source digest and host, purpose and its confirmation state, all six capabilities,
