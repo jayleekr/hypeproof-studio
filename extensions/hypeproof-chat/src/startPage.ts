@@ -10,6 +10,18 @@ const entryError = (error:unknown) => error instanceof ActivityConnectionError |
   ? error.message : "활동을 열지 못했습니다. 다시 시도해 주세요. 기존 연결과 작업 파일은 보존됩니다.";
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
+/**
+ * 활동 분리 **이전**에 쌓인 대화 기록 키인가 (#960).
+ *
+ * 한 곳에 둔 이유: 같은 판정이 "내보내기 버튼을 보일까"(refresh)와 "무엇을 파일로
+ * 쓸까"(exportLegacyHistory) 두 곳에 복사돼 있었다. 갈라지면 버튼은 안 보이는데
+ * 내보내면 현재 활동 대화가 섞여 나가거나(또는 그 반대) 하고, 그 어긋남은 둘 다
+ * "통과" 로 보인다. 활동별 키는 끝이 64자리 hex 라 여기서 걸러낸다 — 그건 이미
+ * 활동에 묶여 있으므로 '이전 기록' 이 아니다.
+ */
+const isLegacyHistoryKey = (key: string): boolean =>
+  key === 'hypeproofChat.history' || (key.startsWith('hypeproofChat.history:') && !/:[a-f0-9]{64}$/.test(key));
+
 /** App entry surface; authentication and cohort authority remain in Service. */
 export class StartPage {
   private panel?: vscode.WebviewPanel;
@@ -53,7 +65,7 @@ export class StartPage {
     let activities: StartState['activities'];
     try { activities=await activityConnections(this.context)?.list(); }
     catch { this.error ??= "저장된 활동 목록을 읽지 못했습니다. 참여 코드를 다시 입력해 주세요."; }
-    const legacyHistory=this.context.workspaceState?.keys?.().some(key=>key==='hypeproofChat.history'||(key.startsWith('hypeproofChat.history:')&&!/:[a-f0-9]{64}$/.test(key)));
+    const legacyHistory=this.context.workspaceState?.keys?.().some(isLegacyHistoryKey);
     const state: StartState = {
       legacyConnection:await activityConnections(this.context)?.hasLegacyConnection(),
       legacyHistory,
@@ -83,7 +95,7 @@ export class StartPage {
       return;
     }
     if (msg.type==='exportLegacyHistory') {
-      const keys=this.context.workspaceState.keys().filter(key=>key==='hypeproofChat.history'||(key.startsWith('hypeproofChat.history:')&&!/:[a-f0-9]{64}$/.test(key)));
+      const keys=this.context.workspaceState.keys().filter(isLegacyHistoryKey);
       const file=await vscode.window.showSaveDialog({saveLabel:'이전 기록 저장',filters:{JSON:['json']}});
       if(file) {
         const backup={format:'hps-local-history-export/1',records:keys.map(key=>({source:key,messages:this.context.workspaceState.get(key,[])}))};
@@ -104,7 +116,11 @@ export class StartPage {
       this.busy = true;
       try {
         const record = await connections?.candidate(msg.ref);
-        if (!record) throw new Error('저장된 활동을 찾지 못했습니다.');
+        // ActivityConnectionError 여야 한다. 평범한 Error 는 entryError 가 일반 문구로
+        // 덮어써서, 여기 적힌 이유가 학생에게 **한 번도 도달하지 않는다**(#960 에서
+        // 테스트를 쓰다 발견). 저장 목록에서 고른 항목이 사라진 경우는 재시도가 아니라
+        // 다른 항목 선택이 답이므로 일반 문구보다 이 문장이 맞다.
+        if (!record) throw new ActivityConnectionError('저장된 활동을 찾지 못했습니다.');
         const result = await fetchProfileResult({proxyUrl:record.service,token:record.token});
         if (!result.ok) {this.error=result.failure.friendly; return;}
         this.candidate = {token:record.token,proxyUrl:record.service,profile:{...result.profile,workspace_root:record.workspace},workspace:record.workspace,previousConnected:!!connections?.current};

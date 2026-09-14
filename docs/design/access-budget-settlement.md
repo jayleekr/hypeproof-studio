@@ -167,6 +167,30 @@ P1 되돌리기는 새 게시/계정 연결/계약 opt-in을 중지하는 것이
 
 공식 schema 근거(2026-09-08 조회): [Anthropic Messages usage](https://platform.claude.com/docs/en/api/messages/create), [Anthropic 가격 차원](https://platform.claude.com/docs/en/about-claude/pricing), [OpenAI Chat Completions usage/service tier](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create), [OpenAI 가격 차원](https://developers.openai.com/api/docs/pricing). 테스트의 요율·환율·상한은 합성 수치이고 실제 판매 가격/원가표가 아니다.
 
+그 인용이 가리키는 **추출 규칙은 2026-09-10 에 바뀌었다 (#922 / #897 조사).** `openai-chat`
+정규화는 세 입력 차원을 모두 `prompt_tokens_details.cache_write_tokens` 에서 유도했는데,
+그 필드는 이 저장소 안에서 하네스 fixture 와 그것을 읽는 두 줄 말고는 등장하지 않는다. 부재 시
+`tokens:input`·`cache_read`·`cache_write` 가 전부 null 이 되고 `input_cache_split_unconfirmed`
+가 붙어, 사유가 하나라도 있으면 `priced` 가 될 수 없다는 규칙에 따라 **모든 openai-chat 턴이
+입력 차원에서 미정산으로 남았다.** 지금 규칙은 이렇다:
+
+- `cached_tokens` 부재 → 캐시 히트 **0** (미지 아님). cache-write 차원 부재 → **0**.
+- 공급자가 그 필드를 보내면 **그 값을 존중한다** — OpenAI 호환 표면을 쓰는 다른 공급자가 채울 수 있다.
+- 값이 있는데 숫자가 아니거나 세 차원의 합이 `prompt_tokens` 를 넘으면 **진짜 미지**이므로 null 로
+  두어 거절을 유도한다.
+- 오디오·이미지 토큰이 섞이면 입력 차원을 전부 null 로 돌린다 — 되살린 입력 경로가 비텍스트를
+  텍스트 단가로 태우지 않게 한다.
+
+`anthropic-messages` 에는 이 해석을 적용하지 않는다. 그쪽은 캐시 생성·읽기를 각각 보고하므로
+부재가 곧 미보고이고 partial 로 남는 것이 맞다. 프로토콜 하나의 사실을 다른 프로토콜로 옮기지 않는다.
+
+**이 절이 주장하지 않는 것**: 실제 OpenAI API 가 `cache_write_tokens` 를 보내지 않는다는 **확인이
+아니다.** 근거는 저장소 전체 검색이며, 이 저장소에는 `api.openai.com` 의 200 기록이 없다(유일한
+시도가 `429 credit_balance_exhausted`, #841). 위 규칙은 보내는 경우와 보내지 않는 경우 **양쪽에서
+모두 맞도록** 고른 것이고, 실제 응답 스키마 대조는 여전히 **미실행**이다 — `usage-observation-audit.md`
+가 "Responses 예제를 Chat Completions 추출기에 그대로 적용하지 말고 실제 응답 스키마를 대조해야
+한다" 고 적어둔 그 대조다. 요구 쪽 원본은 REQ-L10 이다.
+
 신규 설치 schema에 빠져 있던 기존 migration 0006의 model_usage_requests 정의도 추가했다. 기존 migration은 수정하지 않았으며, 운영 반영은 기존 0006/0007 다음 0008을 적용한다. 가격 미상/지원하지 않는 meter를 무료로 해석하지 않는다.
 
 

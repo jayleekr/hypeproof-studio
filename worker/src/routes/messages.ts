@@ -1,5 +1,5 @@
 import { permittedFeatureKeys, applyLessonFeatures } from '../lib/lesson-feature-policy';
-import { resolveExecutionAccess, reserveBudgetAttempt, dispatchBudgetAttempt, budgetErrorResponse, type ExecutionAccess } from '../lib/budget-admission';
+import { resolveExecutionAccess, reserveBudgetAttempt, dispatchBudgetAttempt, budgetErrorResponse, assertNoAudioWire, type ExecutionAccess } from '../lib/budget-admission';
 import { AccessError } from '../lib/access-contracts';
 import { finishModelRequest, measureUsage } from '../lib/model-usage';
 import { crossProviderEnabled } from '../profiles/types';
@@ -520,6 +520,10 @@ messages.post("/messages", async (c) => {
   // e2e BLOCKER: dropping the header 400'd every SDK turn).
   let upstream: Response;
   try {
+    // #901 V4 / REQ-R3 (6) — 오디오 거절은 **계량과 무관하다**. 예전에는 이 검사가
+    // `reserveBudgetAttempt` 안에만 있어서 계량 없는 좌석(정책 미설정·자금원 헤더 없음)이
+    // 오디오를 상류로 그대로 흘렸다(2026-09-10 실측). 음성이 붙기 전에 닫는다.
+    assertNoAudioWire(stripped.body as Record<string,unknown>);
     if(executionAccess){
       await reserveBudgetAttempt(env,executionAccess,{request_id:usageRequestId,turn_id:c.req.header('x-hps-turn-id'),session_id:session.session_id,payload,
         provider:'anthropic',model:modelLabel,runtime:'agent-sdk',features:permittedFeatureKeys(profile),effort:effortReceipt?.applied,protocol:'anthropic-messages',body:stripped.body});

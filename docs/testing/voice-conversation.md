@@ -248,6 +248,24 @@ usage에서 세션별 known/partial 총원가와 p50/p95를 산출하고 사용 
 위는 부분 브라우저 관측이고 아래 전체 VO-T36–47 실기 수용 기준은 NOT RUN으로 유지한다.
 
 
+### #962 컴포넌트 수정 재검증 (2026-09-11)
+
+`e2e/voice-conversation/popup-browser.mjs`는 실제 React 컴포넌트와 CSS를 Chromium에
+번들하고 합성 세션 props를 주입한다. 위 #955 실패 기록은 수정 전 관측으로 보존한다.
+
+- 기준선 `4cc1051`: 동일 회귀 검사에서 포커스/Escape, 상태·종료의 스크롤 가시성,
+  모션 감소의 정적 막대가 실패했다(exit 1). 큰 패널 Escape, 일반 모션, 미관측 정지는 통과했다.
+- 수정 후: 축소·펼치기 포커스와 Escape, 일반/감소 모션 및 미관측 레벨 대조군,
+  320×640 긴 전사 스크롤과 필수 컨트롤 가시성·콜백 등 13개 단언 PASS. 브라우저 오류 0.
+  모션 감소의 중앙 막대는 입력 .1→.9에서 12→12px, 일반 모드는 16.39→51.59px.
+- 실행: webview-ui에서 `npm ci`, e2e에서 `npm ci`와 `npx playwright install chromium` 후
+  `npm run test:voice:popup`. 결과는 `e2e/test-results/voice-popup/observations.json` 및
+  expanded/compact/narrow-bottom PNG. `start-page` CI도 실행하고 같은 증거를 업로드한다.
+- 좁은 화면 캡처에서 상태·종료·음소거가 남고 본문만 스크롤되는 것을 직접 확인했다.
+  이는 컴포넌트 부분 인수다. 실제 설치 App, Windows, 마이크·전송·음성 응답,
+  200% 확대와 전체 VO-T36–47 실기/사람 평가는 **NOT RUN**으로 유지한다.
+
+
 아래는 [VO-36–47](../requirements/voice-conversation.md#음성-대화-팝업-구체화--939-계획)의
 수용 시나리오다. 정적 와이어프레임 검사는 실제 UI/마이크 시험이 아니다.
 구현 시 기존 e2e/실기 하네스에 연결하고 제출 SHA·실제 App 버전과 증거를 남긴다.

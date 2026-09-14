@@ -41,6 +41,25 @@ python3 scripts/hype-pr/pr.py prepare --repo jayleekr/hypeprooflab --assessment 
 # 출력된 receipt path를 아래 create --preparation 에 전달한다.
 ```
 
+### `path_links`는 레지스트리를 닫지 않는다
+
+`inspect`의 `unmapped`에 뜬 파일을 assessment의 `path_links`로 연결하면 그 PR은 통과한다.
+그 연결은 **그 PR 한 건의 판단 기록**이고 `config/traceability.json`에는 들어가지 않는다.
+그래서 **다음에 같은 파일을 고치는 PR에서 또 `unmapped`로 뜬다** — 더 나쁜 경우, 그 파일만
+건드리는 변경은 "영향 노드 없음"으로 조용히 지나간다.
+
+영향 계산에 파일을 **영구히** 넣으려면 `config/traceability.json`에 노드를 추가해 그 파일을
+`sources`로 들게 한다(기존 요구·시험 노드에 붙이고, owner나 상위 단계를 발명하지 않는다).
+실제로 구별해 보려면 레지스트리에서 그 경로가 몇 번 나오는지 세어 본다 — `path_links`만
+썼다면 **0회**다.
+
+발견 경위: 2026-09-11, `worker/src/routes/messages.ts`가 어느 노드의 `sources`도 아니어서
+그 라우트의 분기 안에 살던 오디오 거절 구멍(REQ-R3 ⑥)이 영향 계산에 보이지 않았다. 같은 날
+레포 전체 사각지대를 쓸어 미매핑 92개 파일이 확인됐고, 그중 34개는 **요구 문서가 본문에서
+직접 이름을 부르는** 파일이다(#996). 범위 결정은 그 이슈에 있다. 레지스트리 자신이
+`coverage: "Bootstrap scope only…"`라고 적어 두었으므로 숫자 자체는 계약 위반이 아니다 —
+문제는 그 사실이 `inspect` 결과에서 보이지 않는다는 것이다.
+
 consumer 명령은 sibling Harness checkout 또는 `HYPEPROOF_HARNESS`로 정본 명령에 위임한다.
 Harness가 없으면 명시적으로 실패한다. 정책·엔진 복제나 fallback owner 명단은 없다.
 원격 기준 commit이 로컬에 없으면 `git fetch origin main` 후 다시 실행한다. source를 읽을 권한이

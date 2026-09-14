@@ -13,6 +13,14 @@ export interface Profile {
   version: number;
   display_name: string;
   /**
+   * #1006 IC-02 — a reviewed, institution-neutral execution template that a new
+   * course may select instead of a customer profile. Offered only to issuers
+   * whose scope already lists this profile; the flag never widens scope, models,
+   * tools or budgets. `version` is the template revision. No template is
+   * activated by default — activation is a separate admin decision.
+   */
+  execution_template?: boolean;
+  /**
    * Instructor console (/console) presentation. `dashboard_hidden` drops this
    * track from the console's session-open cards AND the token-mint dropdown
    * (does NOT affect /v1/profile resolution — a student token still resolves).
