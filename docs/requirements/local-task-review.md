@@ -98,3 +98,8 @@ validation are assigned to Bongho and Minhan in #1049. This provisional product
 slice does not claim their acceptance or a validated capability measure.
 
 Additional regression: `extensions/hypeproof-chat/test/local-session-observation.smoke.mjs`.
+
+The file adapter tracks key lengths while holding its writer lock to avoid rescanning
+the full store for every observation. The optional core storage usage hook preserves
+the existing capacity calculation. Record and receipt reads still read the durable
+file; they never return cached content. The index is discarded on lock release.
