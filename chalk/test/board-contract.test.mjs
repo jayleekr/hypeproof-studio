@@ -69,7 +69,7 @@ const body = JSON.parse(text);
 // --- closed key set ----------------------------------------------------------------
 assert.deepEqual(
   Object.keys(body).sort(),
-  ["id", "now", "paused", "profiles", "roster_size", "scope", "session"],
+  ["id", "now", "paused", "profiles", "roster_size", "scope", "session", "templates"],
   "GET /admin/cohorts/:id/state — top-level keys are a closed set",
 );
 assert.equal(body.id, COHORT);
@@ -82,6 +82,22 @@ for (const p of body.profiles) {
   assert.deepEqual(Object.keys(p).sort(), ["display_name", "id"], "profile rows carry id + display_name only");
 }
 assert.deepEqual(body.profiles.map((p) => p.id), [COPYCLONE], "dashboard_hidden track excluded even though the issuer is scoped to it");
+assert.deepEqual(body.templates, [], "no execution template is activated in the shipped registry (#1006)");
+{
+  // #1006 IC-02 — a template is listed only when flagged AND in the issuer's
+  // scope, including a dashboard_hidden track; rows carry id/display_name/revision.
+  const teaser = listProfiles().find((p) => p.id === TEASER);
+  teaser.execution_template = true;
+  const readState = async (scopeProfiles) => {
+    const { token: t } = await issueIssuer({ issuer: "template-check", scopes: [{ cohort: COHORT, profiles: scopeProfiles }] }, 1, SECRET);
+    const r = await chalk.fetch(new Request(`https://chalk.test/admin/cohorts/${COHORT}/state`, { headers: { authorization: `Bearer ${t}` } }), env, { waitUntil() {}, passThroughOnException() {} });
+    return r.json();
+  };
+  const scoped = await readState([COPYCLONE, TEASER]);
+  assert.deepEqual(scoped.templates, [{ id: TEASER, display_name: teaser.display_name, revision: teaser.version }]);
+  assert.deepEqual((await readState([COPYCLONE])).templates, [], "flag without scope grants nothing");
+  delete teaser.execution_template;
+}
 console.log("✓ board-contract: /state key set is closed and matches the documented shape");
 
 // --- privacy: metadata only ----------------------------------------------------------
