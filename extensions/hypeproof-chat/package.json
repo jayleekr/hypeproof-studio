@@ -121,6 +121,10 @@
       {
         "command": "hypeproof-chat.diagnoseVoiceCapability",
         "title": "HypeProof: 음성 기능 진단 (개발용)"
+      },
+      {
+        "command": "hypeproof-chat.localReview",
+        "title": "HypeProof: My task reviews"
       }
     ],
     "menus": {
@@ -139,6 +143,11 @@
           "command": "hypeproof-chat.previewViewport",
           "when": "view == hypeproof-chat.panel",
           "group": "navigation@3"
+        },
+        {
+          "command": "hypeproof-chat.localReview",
+          "when": "view == hypeproof-chat.panel",
+          "group": "navigation@4"
         }
       ],
       "editor/title": [

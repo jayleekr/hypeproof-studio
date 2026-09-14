@@ -587,3 +587,7 @@ REQ-M27의 활동 원문 보존은 유지하되 기본 표시를 조정한다. �
 실패했을 때 파일 저장을 관측하지 않았다면 저장 완료라고 안내하지 않는다 (#968).
 배포·이행은 [공통 릴리스 절차](dev/unified-release-and-migration.md)를 따르며
 양쪽 활동 검사 누락을 한쪽의 성공으로 보충하지 않는다.
+
+## Local task review (#1020)
+
+`REQ-STUDIO-LOCAL-REVIEW`: [Explicit local task review](requirements/local-task-review.md) connects selected Claude/Codex message evidence to private file storage, the six-capability card, human review revisions and an independently verified local submission receipt. Captured replay, automated installed-shell tests, public release and Jay acceptance remain distinct.

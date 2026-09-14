@@ -1416,6 +1416,75 @@
           "path": "worker/src/lib/translate.ts"
         }
       ]
+    },
+    {
+      "id": "ST-REQ-LOCAL-REVIEW",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE",
+        "ST-REQ-CAPABILITY-CONTRACT"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/local-task-review.md"
+        },
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## Local task review (#1020)"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-LOCAL-REVIEW",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-LOCAL-REVIEW"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/localRecordFile.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localReviewService.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localReviewPanel.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localTranscript.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localReviewProtocol.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/LocalReview.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/localReview.css"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-LOCAL-REVIEW",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-LOCAL-REVIEW",
+        "ST-IMP-LOCAL-REVIEW"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/local-record-file.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/local-review.smoke.mjs"
+        },
+        {
+          "path": "e2e/local-review/mac.mjs"
+        }
+      ]
     }
   ]
 }
