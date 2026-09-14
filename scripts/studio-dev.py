@@ -107,6 +107,12 @@ def settings_for(existing, service, branch):
 
 def build(repo, stage):
     ext = repo / 'extensions/hypeproof-chat'
+    # Bundlers resolve .js before .ts/.tsx. A previous emitting tsc run can
+    # silently shadow edited source; never package an ambiguous source tree.
+    for source in (ext / 'src', ext / 'webview-ui/src'):
+        for js in source.rglob('*.js'):
+            if js.with_suffix('.ts').exists() or js.with_suffix('.tsx').exists():
+                raise RuntimeError(f'Shadowed TypeScript source: {js}. Move the generated JavaScript out of src before building.')
     esbuild = ext / 'node_modules/.bin/esbuild'
     vite = ext / 'webview-ui/node_modules/vite/bin/vite.js'
     if not esbuild.exists() or not vite.exists():
@@ -147,7 +153,7 @@ def prepare(repo, base, state, service):
         raise RuntimeError('Development app opened during build; candidate left unapplied.')
     backup = None
     if app.exists():
-        backup = state / ('previous-' + uuid.uuid4().hex + '.app')
+        backup = state / ('previous-' + uuid.uuid4().hex + '.app.inactive')
         app.rename(backup)
     try:
         candidate.rename(app)
@@ -171,9 +177,17 @@ def prepare(repo, base, state, service):
     return app
 
 
-def launch(app, state):
+def launch(app, state, local_runtime=None):
     executable = plistlib.loads((app / 'Contents/Info.plist').read_bytes())['CFBundleExecutable']
     env = dict(os.environ)
+    # The launcher already has the developer shell environment. VS Code's
+    # second interactive-shell probe can hang on startup hooks.
+    env['VSCODE_CLI'] = '1'
+    for key in ('HPS_DEV_RUNTIME', 'HPS_DEV_PROVIDER', 'HPS_DEV_MODEL', 'HPS_DEV_EXECUTABLE'):
+        env.pop(key, None)
+    if local_runtime:
+        env.update(HPS_DEV_RUNTIME='1', HPS_DEV_PROVIDER=local_runtime['provider'],
+                   HPS_DEV_MODEL=local_runtime['model'], HPS_DEV_EXECUTABLE=local_runtime['executable'])
     # Never import the globally shared dev-stack token implicitly.
     env['HPS_DEV_TOKEN_FILE'] = str(state / 'local-participant-token.txt')
     with (state / 'app.log').open('a') as log:
@@ -200,6 +214,8 @@ def main():
     parser.add_argument('--base-app', type=Path, default=Path('/Applications/HypeProof Studio.app'))
     parser.add_argument('--state-dir', type=Path)
     parser.add_argument('--service', choices=['local', 'live'], default='local')
+    parser.add_argument('--provider', choices=['claude', 'codex', 'service'], default='claude',
+                        help='Development funding: local Claude Code subscription (default), Codex subscription, or Service API.')
     args = parser.parse_args()
     if platform.system() != 'Darwin' or platform.machine() != 'arm64':
         raise RuntimeError('This development launcher supports macOS arm64 only.')
@@ -224,10 +240,24 @@ def main():
                 previous = current
             time.sleep(1)
     else:
+        local_runtime = None
+        if args.provider != 'service':
+            if args.service != 'local':
+                raise ValueError('Local subscription mode requires --service local. Use --provider service for production Service.')
+            executable = shutil.which('claude' if args.provider == 'claude' else 'codex')
+            if not executable:
+                raise RuntimeError('Install and log in to ' + args.provider + ' first, or select --provider service.')
+            try:
+                checked = run(['node', REPO / 'scripts/local-runtime-probe.mjs', args.provider, executable], capture_output=True, text=True)
+            except subprocess.CalledProcessError as error:
+                raise RuntimeError((error.stderr or '').strip() or 'Local CLI login check failed.') from None
+            local_runtime = json.loads(checked.stdout)
+            local_runtime['executable'] = executable
+            print('Development connection: ' + local_runtime['label'] + ' / ' + local_runtime['model'], flush=True)
         with locked(state):
             app = prepare(REPO, args.base_app.resolve(), state, args.service)
             if args.action == 'run':
-                launch(app, state)
+                launch(app, state, local_runtime)
 
 
 if __name__ == '__main__':

@@ -12,6 +12,16 @@ dev = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dev)
 
 class DevLauncherTests(unittest.TestCase):
+    def test_rejects_generated_js_shadowing_edited_typescript(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);src=root/'extensions/hypeproof-chat/webview-ui/src';src.mkdir(parents=True)
+            (src/'WorkBrief.tsx').write_text('new UI')
+            (src/'WorkBrief.js').write_text('stale UI')
+            with patch.object(dev,'run') as run:
+                with self.assertRaisesRegex(RuntimeError,'Shadowed TypeScript'):
+                    dev.build(root,root/'stage')
+                run.assert_not_called()
+
     def test_forbids_source_and_installed_app_overlap(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
