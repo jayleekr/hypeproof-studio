@@ -515,6 +515,20 @@
       ]
     },
     {
+      "id": "ST-TEST-MEASUREMENT-CORE-UNIT2",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/measurement-core-local-record.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-ACCESS-CONTRACTS",
       "stage": "implementation",
       "owner": "jayleekr",

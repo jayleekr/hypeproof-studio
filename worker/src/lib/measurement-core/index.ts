@@ -12,3 +12,4 @@ export * from "./evidence.ts";
 export * from "./normalize.ts";
 export * from "./capability-models.ts";
 export * from "./interpretation.ts";
+export * from "./local-record.ts";
