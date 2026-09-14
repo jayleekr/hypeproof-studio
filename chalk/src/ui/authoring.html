@@ -192,7 +192,7 @@ $('connect').onclick=()=>run(async()=>{
  $('connection-status').textContent='연결되었습니다. '+settings.length+'개의 수업 설정을 사용할 수 있습니다.';
  if(settings.length===1){$('setting').value='0';applySetting();}
 });
-function applySetting(){const s=settings[Number($('setting').value)];if($('setting').value===''||!s)return;$('cohort').value=s.cohort;$('profile').value=s.profile;$('student-token').value='';$('completion').textContent='';controls();status('수업 설정을 선택했습니다. 새 강의를 만들거나 저장된 강의를 여세요.');}
+function applySetting(){const value=$('setting').value,s=value===''?undefined:settings[Number(value)];$('student-token').value='';$('completion').textContent='';$('version').value='';$('version-view').textContent='';if(!s){$('cohort').value='';$('profile').value='';controls();status('수업 설정을 비웠습니다. 설정을 다시 선택하거나 연결 정보를 직접 입력하세요. 현재 편집은 보존됩니다.');return;}$('cohort').value=s.cohort;$('profile').value=s.profile;controls();status('수업 설정을 선택했습니다. 새 강의를 만들거나 저장된 강의를 여세요.');}
 $('setting').onchange=applySetting;
 
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});

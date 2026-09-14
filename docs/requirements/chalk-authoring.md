@@ -103,5 +103,8 @@ The token payload is used only to discover candidate cohorts; the existing `/sta
 authorization remains authoritative. Course IDs are generated for new drafts and
 version IDs for freeze. Manual IDs, imports, AI policy and student delivery remain
 under optional details. Draft edits, conflict handling and inactive frozen versions
-keep the existing CH-01 / SAVE-01 / ARC-01 contract. This does not implement AI
+keep the existing CH-01 / SAVE-01 / ARC-01 contract. Clearing the displayed setting
+also clears its hidden cohort/profile binding and blocks create/save until a verified
+setting or manual target is selected, while preserving the in-progress curriculum.
+This does not implement AI
 generation, new cohort provisioning, persistent login or independent course storage.

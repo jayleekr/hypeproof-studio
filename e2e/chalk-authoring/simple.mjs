@@ -36,6 +36,11 @@ else{
  await page.locator('#starter').fill('사용자 인터뷰 질문 예시와 빈 관찰 노트');await page.locator('#audience').fill('초등 고학년');await page.locator('#objective').fill('사용자의 문제를 정의하고 결과를 직접 검증한다.');
  await page.locator('.step [data-field=title]').fill('사용자의 문제 확인');await page.locator('.step [data-field=instructions]').fill('사용자 한 명에게 불편한 점을 묻고 해결하려는 문제를 한 문장으로 적는다.');await page.locator('.step [data-field=acceptance]').fill('관찰한 사실과 자신의 추측을 나누어 설명한다.');
  const id=await page.locator('#course').inputValue();assert.match(id,/^course-[a-f0-9-]+$/);
+ // Clearing the visible setting must unbind the hidden target without discarding edits.
+ await page.locator('#setting').selectOption('');assert.equal(await page.locator('#cohort').inputValue(),'');assert.equal(await page.locator('#profile').inputValue(),'');assert.equal(await page.locator('#save').isEnabled(),false);assert.equal(await page.locator('#title').inputValue(),'AI 창업 첫 수업');
+ await page.locator('#new').click();await page.locator('#status').filter({hasText:'먼저 수업 설정을 선택하세요.'}).waitFor();assert.equal(await page.locator('#course').inputValue(),id);
+ // Selecting the same server-verified setting restores the binding and keeps the draft.
+ await page.locator('#setting').selectOption('0');assert.equal(await page.locator('#cohort').inputValue(),local.cohort);assert.equal(await page.locator('#profile').inputValue(),local.profileId);assert.equal(await page.locator('#title').inputValue(),'AI 창업 첫 수업');assert.equal(await page.locator('#save').isEnabled(),true);
  await page.locator('#save').click();await page.locator('#status').filter({hasText:'revision 1'}).waitFor();
  await page.locator('#freeze').click();await page.locator('#completion').filter({hasText:'강의가 확정되었습니다'}).waitFor();
  assert.match(await page.locator('#version').inputValue(),/^m\d{4}\.\d{2}\.\d{2}-1$/);
@@ -48,6 +53,6 @@ else{
  // Syntactically valid but forged credential must never produce trusted choices.
  const forged=local.token.slice(0,-10)+'AAAAAAAAAA';await page.locator('#token').fill(forged);await page.locator('#connect').click();await page.locator('#status').filter({hasText:'HTTP 401'}).waitFor();assert.equal(await page.locator('#setting-label').isVisible(),false);assert.equal(await page.locator('#cohort').inputValue(),'');assert.equal(await page.locator('#title').inputValue(),'수정한 강의');
  assert.equal(await page.evaluate(()=>localStorage.length+sessionStorage.length),0);assert.deepEqual(errors,[]);
- console.log('PASS: verified settings, automatic IDs, real SQLite save/freeze/reopen, fresh versions, forged token denial, edit preservation, mobile layout, no credential storage');
+ console.log('PASS: verified settings, cleared-setting target removal and edit preservation, automatic IDs, real SQLite save/freeze/reopen, fresh versions, forged token denial, mobile layout, no credential storage');
  }finally{if(browser)await browser.close();await new Promise(r=>server.close(r));globalThis.fetch=realFetch;local.close();}
 }

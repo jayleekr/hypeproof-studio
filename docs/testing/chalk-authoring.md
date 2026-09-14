@@ -106,5 +106,7 @@ Execution on 2026-09-07: Worker/Chalk full suites, both typechecks, extension sm
 `npm --prefix e2e run test:chalk-simple` uses synthetic issuer credentials, the
 actual Chalk/Service routes and in-memory SQLite. It exercises server-verified
 choices, automatically named new drafts/versions, save/freeze/reopen, forged-token
-denial with edit preservation, no credential storage and 390/1280px layout.
+denial with edit preservation, and the negative path where clearing a visible setting
+removes the hidden target and blocks create/save until the setting is reselected without
+discarding curriculum edits. It also checks no credential storage and 390/1280px layout.
 This is local evidence; production deployment and live classroom behavior are separate.
