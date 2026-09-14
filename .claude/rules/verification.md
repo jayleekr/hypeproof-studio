@@ -44,6 +44,38 @@
 
 "아마 이렇게 나올 것"으로 시작한 기준은 예외 없이 틀렸다.
 
+#### 1b. **범위 주장도 판정이다** — PR·패치 본문에 쓰는 문장에 똑같이 적용된다
+
+규칙 1 은 정규식·셀렉터에 관한 것으로 읽히기 쉽다. 그런데 **산문으로 쓴 범위 주장**이
+같은 실수에 더 취약하고, 값은 더 크다 — 사람이 그 문장을 읽고 보안 결정을 내린다.
+
+2026-09-11, 마이크 패치 v3 의 헤더와 PR 본문에 이렇게 썼다:
+
+> 앞으로 만들 `hypeproof-preview` → **구조적으로 범위 밖** (다른 확장 id)
+
+**틀렸다.** 미리보기 webview 는 아직 `hypeproof-chat` **안**에서 만들어진다
+(`previewProvider.ts:127`, `enableScripts: true`) — 같은 확장 id 라 게이트가 통과시킨다.
+METAPLAN 이 `hypeproof-preview` 를 별도 sprint 로 적어 둔 것을 보고 **구조에서 추론**했고
+출하되는 코드를 열어보지 않았다. Codex 가 실측으로 잡았다: **같은 확장의 시작 화면도
+`allowsFeature('microphone')` 이 true.** 승인을 요구한 표면이 webview 1개가 아니라 3개였고,
+그 틀린 숫자가 사람 결정(H-08) 앞에 이틀 놓여 있었다.
+
+**기계적 검사** — "X 는 범위 밖" 을 쓰기 전에 X 의 **생성 지점을 센다**:
+
+```bash
+# 이 확장이 실제로 만드는 webview 가 몇 개인가
+grep -rn "createWebviewPanel\|registerWebviewViewProvider" extensions/*/src/*.ts
+grep -rn "enableScripts" extensions/*/src/*.ts
+```
+
+30초다. 그리고 **"별도 sprint" 는 "별도 확장" 이 아니다** — 계획 문서의 미래형을 오늘의
+코드 구조로 읽지 않는다.
+
+같은 날 같은 형태를 한 번 더 했다: `path_links` 로 경로를 연결한 것과
+`config/traceability.json` 에 노드를 넣은 것을 구분하지 않고 "매핑했다" 고 말했다. 동료
+세션이 어느 쪽이냐고 물어서 **세어 봤고** 다행히 진짜 노드였다 — 맞은 것은 운이었다.
+`docs/HYPE-PR.ko.md` 에 그 함정을 적어 뒀다.
+
 ### 2. 실기기 런 전에 대조군을 돌린다
 
 순수 함수로 뽑아낼 수 있는 판정은 앱 없이 먼저 돌린다(밀리초). 대조군 두 종류가

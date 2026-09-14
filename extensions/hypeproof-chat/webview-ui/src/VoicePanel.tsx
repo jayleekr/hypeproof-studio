@@ -8,7 +8,7 @@
 // 이 파일이 **주장하지 않는 것**: 음성이 동작한다. 여기에는 `getUserMedia` 도
 // 오디오 재생도 없다 — 실제 연결은 UI-2(#898 V0 전송 ADR · #901 V4 예산) 이후다.
 // 그때까지 `voiceStartGate` 가 시작을 막으므로 학생에게 이 패널은 열리지 않는다.
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type KeyboardEvent } from "react";
 
 import {
   COMPACT_CONTROLS,
@@ -47,7 +47,7 @@ export interface VoicePanelProps {
 
 /** 미터 막대. 관측이 없으면(`level === null`) **정지한 모양**을 그린다 (VO-38). */
 function Meter({ meter }: { meter: MeterView }) {
-  const level = meter.level ?? 0;
+  const level = meter.animated ? (meter.level ?? 0) : 0;
   const bars = [0.45, 0.75, 1, 0.75, 0.45];
   return (
     <div
@@ -61,7 +61,7 @@ function Meter({ meter }: { meter: MeterView }) {
           key={i}
           className="hps-voice-bar"
           // 정지 상태의 높이는 **고정**이다. 관측 없이 흔들리면 그게 가짜 움직임이다.
-          style={{ height: `${12 + (meter.level === null ? 0 : level * weight * 44)}px` }}
+          style={{ height: `${12 + (level * weight * 44)}px` }}
         />
       ))}
     </div>
@@ -86,8 +86,15 @@ export function VoicePanel(props: VoicePanelProps) {
   // 패널이 열리면 포커스를 안으로 옮긴다. Escape 를 받으려면 포커스가 여기 있어야
   // 하고(VO-41), 키보드 사용자가 패널을 찾지 못하면 종료도 못 한다(VO-47).
   useEffect(() => {
-    if (popup.presentation === "expanded") panelRef.current?.focus();
+    if (popup.presentation !== "hidden") panelRef.current?.focus();
   }, [popup.presentation]);
+
+  const onPanelKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "Escape") return;
+    // 축소 상태에서도 Escape 는 종료다. 작업 영역의 키 입력은 가로채지 않는다.
+    e.stopPropagation();
+    props.onDismiss("escape");
+  };
 
   if (popup.presentation === "hidden") return null;
 
@@ -96,7 +103,7 @@ export function VoicePanel(props: VoicePanelProps) {
 
   if (popup.presentation === "compact") {
     return (
-      <div className="hps-voice-compact" role="region" aria-label={voicePanelTitle(props.coachName)}>
+      <div ref={panelRef} tabIndex={-1} onKeyDown={onPanelKeyDown} className="hps-voice-compact" role="region" aria-label={voicePanelTitle(props.coachName)}>
         <span className="hps-voice-compact-status">
           {/* 작은 컨트롤에서도 **캡처 상태**를 숨기지 않는다 (VO-40). */}
           <span className={`hps-voice-dot${session.captureOpen ? " hps-voice-dot-on" : ""}`} aria-hidden="true" />
@@ -129,12 +136,7 @@ export function VoicePanel(props: VoicePanelProps) {
       // **비모달**이다. 대화 중에도 작업 화면에 접근할 수 있어야 한다 (VO-40/47).
       aria-modal={false}
       aria-label={voicePanelTitle(props.coachName)}
-      onKeyDown={(e) => {
-        if (e.key !== "Escape") return;
-        // 축소는 별도 조작이다 — Escape 는 **종료**다 (VO-41).
-        e.stopPropagation();
-        props.onDismiss("escape");
-      }}
+      onKeyDown={onPanelKeyDown}
     >
       <header className="hps-voice-head">
         <h2>{voicePanelTitle(props.coachName)}</h2>
@@ -146,34 +148,47 @@ export function VoicePanel(props: VoicePanelProps) {
 
       <StatusBlock meter={meter} failure={props.failure} />
 
-      {popup.awaitingResume && (
-        <div className="hps-voice-resume" role="status">
-          <p>잠시 멈춰 뒀어요. 다시 시작하려면 눌러 주세요.</p>
-          <button type="button" onClick={props.onResume}>다시 시작</button>
+      <div className="hps-voice-body" tabIndex={0} aria-label="대화 전사와 세션 정보">
+        {popup.awaitingResume && (
+          <div className="hps-voice-resume" role="status">
+            <p>잠시 멈춰 뒀어요. 다시 시작하려면 눌러 주세요.</p>
+            <button type="button" onClick={props.onResume}>다시 시작</button>
+          </div>
+        )}
+
+        {props.failure?.offersRetry && (
+          <button type="button" className="hps-voice-retry" onClick={props.onRetry}>다시 시도</button>
+        )}
+
+        <div className="hps-voice-transcript">
+          {props.finalTranscript && <p className="hps-voice-final">{props.finalTranscript}</p>}
+          {props.partialTranscript && (
+            <p className="hps-voice-partial">
+              {props.partialTranscript}
+              {/* 미확정임을 **글자로** 말한다. 흐린 색만으로는 구분되지 않는다. */}
+              <span className="hps-voice-partial-tag"> · 아직 확정되지 않았어요</span>
+            </p>
+          )}
         </div>
-      )}
 
-      {props.failure?.offersRetry && (
-        <button type="button" className="hps-voice-retry" onClick={props.onRetry}>다시 시도</button>
-      )}
-
-      <div className="hps-voice-transcript">
-        {props.finalTranscript && <p className="hps-voice-final">{props.finalTranscript}</p>}
-        {props.partialTranscript && (
-          <p className="hps-voice-partial">
-            {props.partialTranscript}
-            {/* 미확정임을 **글자로** 말한다. 흐린 색만으로는 구분되지 않는다. */}
-            <span className="hps-voice-partial-tag"> · 아직 확정되지 않았어요</span>
+        {props.reference && (
+          <p className="hps-voice-reference">
+            참조: {props.reference.title}
+            {props.reference.revision ? ` · ${props.reference.revision}` : " · 버전 확인 안 됨"}
           </p>
         )}
-      </div>
 
-      {props.reference && (
-        <p className="hps-voice-reference">
-          참조: {props.reference.title}
-          {props.reference.revision ? ` · ${props.reference.revision}` : " · 버전 확인 안 됨"}
-        </p>
-      )}
+        <ul className="hps-voice-info">
+          {props.info.map((line) => (
+            <li key={line.label}>
+              {line.label}: {line.value}
+              {/* 예상값을 확정처럼 적지 않는다 (VO-46). */}
+              {line.certainty === "estimated" && <span className="hps-voice-est"> (예상)</span>}
+              {line.certainty === "unknown" && <span className="hps-voice-est"> (확인 안 됨)</span>}
+            </li>
+          ))}
+        </ul>
+      </div>
 
       <div className="hps-voice-actions">
         <button type="button" onClick={props.onToggleMute} aria-pressed={muted}>
@@ -186,17 +201,6 @@ export function VoicePanel(props: VoicePanelProps) {
           텍스트로 전환
         </button>
       </div>
-
-      <ul className="hps-voice-info">
-        {props.info.map((line) => (
-          <li key={line.label}>
-            {line.label}: {line.value}
-            {/* 예상값을 확정처럼 적지 않는다 (VO-46). */}
-            {line.certainty === "estimated" && <span className="hps-voice-est"> (예상)</span>}
-            {line.certainty === "unknown" && <span className="hps-voice-est"> (확인 안 됨)</span>}
-          </li>
-        ))}
-      </ul>
     </div>
   );
 }

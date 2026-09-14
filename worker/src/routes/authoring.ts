@@ -13,11 +13,22 @@ import { issue } from '../lib/tokens';
 import { getRoster, getActiveSession } from '../lib/kv';
 
 type Bindings = { Bindings: Env; Variables: { author: IssuerAuthz } };
-interface Draft { cohort_id: string; course_id: string; owner_id: string; profile_id: string; revision: number; content_json: string; request_id: string; request_hash: string; updated_at: string }
+interface Draft { cohort_id: string; course_id: string; owner_id: string; profile_id: string; revision: number; content_json: string; request_id: string; request_hash: string; updated_at: string; independent?: number }
 interface Version { source_revision: number; module_json: string }
 const root = "/cohorts/:cohort/authoring/:course";
 const validId = (s: string) => /^[a-zA-Z0-9_-]{1,128}$/.test(s);
-const draftView = (d: Draft) => ({ course_id: d.course_id, profile_id: d.profile_id, revision: d.revision, content: JSON.parse(d.content_json), updated_at: d.updated_at });
+// #1006 IC-01 — an empty profile_id is a draft whose execution template is not
+// chosen yet. It saves and reopens, but cannot freeze or open; the reason is explicit.
+// #1006 IC-02 — the single admission rule shared by save and new freeze. An independent
+// course (persisted marker) may use only a profile that is currently a reviewed execution
+// template; losing the flag blocks further binding and new versions, never prior versions.
+const reviewedTemplate = (id: string) => getProfile(id)?.execution_template === true;
+const templateAdmission = (independent: boolean, profileId: string) =>
+  independent && profileId !== '' && !reviewedTemplate(profileId) ? 'template_not_reviewed' : null;
+const openingBlockedBy = (d: Draft) => !d.profile_id ? ['template_required'] : templateAdmission(!!d.independent, d.profile_id) ? ['template_not_reviewed'] : [];
+const draftView = (d: Draft) => ({ course_id: d.course_id, profile_id: d.profile_id || null, independent: !!d.independent, revision: d.revision, content: JSON.parse(d.content_json), updated_at: d.updated_at, opening_blocked_by: openingBlockedBy(d) });
+const TEMPLATE_REQUIRED = { error: 'select an execution template first', reason: 'template_required' };
+const TEMPLATE_NOT_REVIEWED = { error: 'independent course requires a reviewed execution template', reason: 'template_not_reviewed' };
 export const authoring = new Hono<Bindings>();
 
 const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
@@ -65,6 +76,7 @@ authoring.post(root + '/versions/:version/participants', async c => {
     return c.json({ error: 'duration exceeds instructor authorization' }, 403);
   const d = await readDraft(c.env.HPS_DB, cohort, course);
   if (!d || !owns(d, a)) return c.json({ error: 'course not found' }, 404);
+  if (!d.profile_id) return c.json(TEMPLATE_REQUIRED, 409);
   const lesson = await readLesson(c.env, cohort, course, c.req.param('version')!, d.profile_id);
   if (!lesson) return c.json({ error: 'valid frozen version required' }, 409);
   const session = await getActiveSession(c.env.HPS_KV, cohort);
@@ -78,10 +90,11 @@ authoring.post(root + '/versions/:version/participants', async c => {
 });
 
 async function readDraft(db: D1Database, cohort: string, course: string) {
-  return db.prepare("SELECT * FROM authoring_drafts WHERE cohort_id=? AND course_id=?").bind(cohort, course).first<Draft>();
+  return db.prepare(`SELECT d.*, EXISTS(SELECT 1 FROM authoring_independent_courses m WHERE m.cohort_id=d.cohort_id AND m.course_id=d.course_id) AS independent
+    FROM authoring_drafts d WHERE d.cohort_id=? AND d.course_id=?`).bind(cohort, course).first<Draft>();
 }
 function owns(d: Draft, a: IssuerAuthz) {
-  return d.owner_id === a.payload.u && a.scope.profiles.includes(d.profile_id);
+  return d.owner_id === a.payload.u && (d.profile_id === '' || a.scope.profiles.includes(d.profile_id));
 }
 
 authoring.get(root, async (c) => {
@@ -97,8 +110,19 @@ authoring.put(root, async (c) => {
   const invalid = validateSessionDesign(b.content);
   if (invalid) return c.json({ error: invalid }, 400);
   const cohort = c.req.param("cohort")!, course = c.req.param("course")!, a = c.get("author");
+  const prior = await readDraft(c.env.HPS_DB, cohort, course);
+  if (prior && !owns(prior, a)) return c.json({ error: "course not found" }, 404);
+  // #1006 IC-02 — independence is decided once, at creation (no template, or a reviewed
+  // template), and persisted; it is never re-derived from a flag that can later change.
+  // Courses created on a customer profile have no marker and keep their existing contract.
+  const independent = prior ? !!prior.independent : b.profile_id === '' || reviewedTemplate(b.profile_id);
+  if (b.profile_id === '') {
+    // Model/feature narrowing is relative to a template's grants; without one there is nothing to narrow.
+    if (b.content.model || b.content.features) return c.json(TEMPLATE_REQUIRED, 400);
+  } else {
   const profile = getProfile(b.profile_id);
   if (!profile || profile.session.cohort_id !== cohort || !a.scope.profiles.includes(b.profile_id)) return c.json({ error: "profile not permitted" }, 403);
+  if (templateAdmission(independent, profile.id)) return c.json(TEMPLATE_NOT_REVIEWED, 403);
   if (b.content.model) {
     if (b.content.model.binding) return c.json({ error: 'model binding is produced by the Service at freeze' }, 400);
     const bad = validateModelSubset(b.content.model, profile);
@@ -109,23 +133,34 @@ authoring.put(root, async (c) => {
     const bad = validateFeatureSubset(b.content.features, profile);
     if (bad) return c.json({ error: bad }, 403);
   }
+  }
   const content = JSON.stringify(b.content);
   const hash = await sha256Hex(JSON.stringify([b.expected_revision, b.profile_id, b.content]));
-  const prior = await readDraft(c.env.HPS_DB, cohort, course);
-  if (prior && !owns(prior, a)) return c.json({ error: "course not found" }, 404);
   if (prior && prior.request_id === b.request_id) {
     if (prior.request_hash !== hash) return c.json({ error: "request id reused with different content" }, 409);
     return c.json(draftView(prior));
   }
   const now = new Date().toISOString();
-  const d = b.expected_revision === 0
-    ? await c.env.HPS_DB.prepare(`INSERT INTO authoring_drafts (cohort_id,course_id,owner_id,profile_id,revision,content_json,request_id,request_hash,updated_at)
+  let d: Draft | null;
+  if (b.expected_revision === 0) {
+    const insert = c.env.HPS_DB.prepare(`INSERT INTO authoring_drafts (cohort_id,course_id,owner_id,profile_id,revision,content_json,request_id,request_hash,updated_at)
         VALUES (?,?,?,?,1,?,?,?,?) ON CONFLICT(cohort_id,course_id) DO NOTHING RETURNING *`)
-        .bind(cohort,course,a.payload.u,b.profile_id,content,b.request_id,hash,now).first<Draft>()
-    : await c.env.HPS_DB.prepare(`UPDATE authoring_drafts SET profile_id=?,revision=revision+1,content_json=?,request_id=?,request_hash=?,updated_at=?
+        .bind(cohort,course,a.payload.u,b.profile_id,content,b.request_id,hash,now);
+    if (independent) {
+      // Draft and marker commit together (D1 batch is transactional); the marker SELECT only
+      // matches the row this request created, so a lost create race never marks another course.
+      await c.env.HPS_DB.batch([insert, c.env.HPS_DB.prepare(`INSERT INTO authoring_independent_courses (cohort_id,course_id)
+          SELECT cohort_id,course_id FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND owner_id=? AND request_id=? AND request_hash=? AND revision=1
+          ON CONFLICT(cohort_id,course_id) DO NOTHING`).bind(cohort,course,a.payload.u,b.request_id,hash)]);
+      const created = await readDraft(c.env.HPS_DB, cohort, course);
+      d = created && created.independent && created.revision === 1 && created.request_id === b.request_id && created.request_hash === hash ? created : null;
+    } else d = await insert.first<Draft>();
+  } else {
+    d = await c.env.HPS_DB.prepare(`UPDATE authoring_drafts SET profile_id=?,revision=revision+1,content_json=?,request_id=?,request_hash=?,updated_at=?
         WHERE cohort_id=? AND course_id=? AND owner_id=? AND revision=? RETURNING *`)
         .bind(b.profile_id,content,b.request_id,hash,now,cohort,course,a.payload.u,b.expected_revision).first<Draft>();
-  if (d) return c.json(draftView(d));
+  }
+  if (d) return c.json(draftView({ ...d, independent: independent ? 1 : 0 }));
   // Concurrent retry may have won the conditional write after our first read.
   const latest = await readDraft(c.env.HPS_DB, cohort, course);
   if (latest && owns(latest,a) && latest.request_id === b.request_id && latest.request_hash === hash) return c.json(draftView(latest));
@@ -147,6 +182,10 @@ authoring.put(root + "/versions/:version", async (c) => {
     return c.json({ module: JSON.parse(existing.module_json), source_revision: existing.source_revision, rehearsal: "not_run", activated: false });
   }
   if (d.revision !== b.expected_revision) return c.json({ error: "revision conflict" }, 409);
+  if (!d.profile_id) return c.json(TEMPLATE_REQUIRED, 409);
+  // Same admission as save. Runs after the `existing` branch above, so already frozen
+  // versions stay readable/idempotent; only a NEW version needs a still-reviewed template.
+  if (templateAdmission(!!d.independent, d.profile_id)) return c.json(TEMPLATE_NOT_REVIEWED, 403);
   const content = JSON.parse(d.content_json);
   const invalid = validateSessionDesign(content,true);
   if (invalid) return c.json({ error: invalid }, 400);

@@ -790,6 +790,22 @@
       ]
     },
     {
+      "id": "ST-IMP-ROUTE-MESSAGES",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-VOICE-CAPABILITY",
+        "ST-REQ-COACH-RUNTIME",
+        "ST-TEST-VOICE-AUDIO-REFUSAL",
+        "ST-TEST-LESSON-FEATURES"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/messages.ts"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-VOICE-LINKAGE",
       "stage": "test",
       "owner": "jayleekr",
@@ -949,6 +965,9 @@
       "sources": [
         {
           "path": "extensions/hypeproof-chat/test/voice-popup.smoke.mjs"
+        },
+        {
+          "path": "e2e/voice-conversation/popup-browser.mjs"
         }
       ]
     },
@@ -1098,6 +1117,33 @@
       "sources": [
         {
           "path": "worker/src/profiles/types.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-MODEL-ECHO",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODEL-USAGE"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/model-echo.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-MODEL-ECHO",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODEL-USAGE",
+        "ST-TEST-MODEL-ECHO"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/modelEchoHelpers.ts"
         }
       ]
     },
@@ -1307,6 +1353,33 @@
       "sources": [
         {
           "path": "docs/testing/unified-completion-917-919-evidence.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-MODEL-SUBSTITUTION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/model-substitution.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-MODEL-SUBSTITUTION",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME",
+        "ST-TEST-MODEL-SUBSTITUTION"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/translate.ts"
         }
       ]
     }
