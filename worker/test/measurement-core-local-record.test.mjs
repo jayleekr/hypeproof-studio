@@ -81,7 +81,7 @@ const interp = (b, patch = {}) => ({
   unclassified: [],
   ...patch,
 });
-const key = (id, session = "s1") => `observations/jay-local/${session}/${id}`;
+const key = (id, session = "s1", host = HOST) => `observations/${host}/jay-local/${session}/${id}`;
 
 // A task with one linked session, observations, an interpretation and a review.
 async function seeded(options = {}) {
@@ -90,7 +90,7 @@ async function seeded(options = {}) {
   await record.createTask({ id: "task-a", project: "hypeproof-studio", at: 1, purpose: { text: "주문 확인 문서", source: "issue", ref: "#1020" } });
   await record.linkSession("task-a", { host: HOST, session_id: "s1", by: "adapter_explicit", at: 1 });
   await record.appendObservations(HOST, batch());
-  await record.saveInterpretation("task-a", interp(batch()), batch());
+  await record.saveInterpretation("task-a", interp(batch()), batch(), HOST);
   const review = await record.reviewFinding("task-a", { interpretation: { id: "interp-1", revision: 1 }, capability: "FRAMING", action: "confirm", by: "user", at: 5 });
   const selection = (patch = {}) => ({
     id: "sub-1",
@@ -119,7 +119,7 @@ test("MC-T05 a provided purpose needs no re-entry; undecided purposes still allo
   await record.linkSession("undecided", { host: HOST, session_id: "s9", by: "user", at: 2 });
   const appended = await record.appendObservations(HOST, batch("s9"));
   assert.equal(appended.task, "undecided");
-  assert.equal((await record.saveInterpretation("undecided", interp(batch("s9")), batch("s9"))).id, "interp-1");
+  assert.equal((await record.saveInterpretation("undecided", interp(batch("s9")), batch("s9"), HOST)).id, "interp-1");
 });
 
 test("MC-T05 an AI-proposed purpose stays separate from Jay's confirmed or edited purpose", async () => {
@@ -167,7 +167,7 @@ test("MC-T06 a wrong attribution is reassigned by the person with history; dupli
   // A retried hook is a duplicate and keeps the user's reassignment.
   const again = await record.appendObservations(HOST, batch());
   assert.deepEqual([again.stored, again.duplicates], [0, 3]);
-  assert.equal(JSON.parse(store.data.get(`assignments/jay-local/s1/c1`)).task, "task-b");
+  assert.equal(JSON.parse(store.data.get(`assignments/${HOST}/jay-local/s1/c1`)).task, "task-b");
   // Same id, different content: refused, original kept.
   const changed = batch();
   changed.events[0] = { ...changed.events[0], text: "다른 내용" };
@@ -283,7 +283,7 @@ test("MC-T15 my records keep abandoned tasks, unreviewed findings, skipped impro
   assert.equal(mine.tasks[0].unreviewed_findings, 1);
   assert.equal(mine.improvements[0].choice, "skipped");
   assert.equal(mine.unassigned_observations, 2);
-  assert.deepEqual(mine.gaps, [{ scope: "jay-local", session: "s-gap", missing: [2], incomplete: false }]);
+  assert.deepEqual(mine.gaps, [{ host: HOST, scope: "jay-local", session: "s-gap", missing: [2], incomplete: false }]);
 });
 
 // ── MC-T17 — storage faults, retries and concurrency ──────────────────────────
@@ -374,7 +374,7 @@ test("MC-T18 known secrets and excluded paths are removed before storage and the
   // An interpretation must cite what was stored, not the unredacted copy.
   await record.createTask({ id: "task-a", project: "p", at: 1 });
   const cite = interp(secretBatch, { findings: [{ capability: "VERIFY", status: "insufficient_evidence", claim: "결과 확인 불가", evidence: [{ event_id: "r1", quote: "token" }], assistance: "unknown", review: "unreviewed" }] });
-  await throwsCode(() => record.saveInterpretation("task-a", cite, secretBatch), "evidence_mismatch");
+  await throwsCode(() => record.saveInterpretation("task-a", cite, secretBatch, HOST), "evidence_mismatch");
 });
 
 test("MC-T18 a review never edits the interpretation; only the person reviews, and corrections need text", async () => {
@@ -388,7 +388,7 @@ test("MC-T18 a review never edits the interpretation; only the person reviews, a
   await throwsCode(() => record.reviewFinding("task-a", { interpretation: { id: "interp-1", revision: 1 }, capability: "FRAMING", action: "correct", by: "user", at: 6 }), "invalid_review");
   await throwsCode(() => record.reviewFinding("task-a", { interpretation: { id: "interp-1", revision: 1 }, capability: "ADAPT", action: "confirm", by: "user", at: 6 }), "unknown_finding");
   // An interpretation revision is never overwritten.
-  await throwsCode(() => record.saveInterpretation("task-a", interp(batch(), { findings: [] }), batch()), "revision_exists");
+  await throwsCode(() => record.saveInterpretation("task-a", interp(batch(), { findings: [] }), batch(), HOST), "revision_exists");
 });
 
 test("MC-T18 deleting a task removes core-managed records only for that task and blocks reuse of its evidence", async () => {
@@ -405,12 +405,86 @@ test("MC-T18 deleting a task removes core-managed records only for that task and
   assert.deepEqual([...result.not_covered], ["host_original_records", "copies_exported_by_the_user"]);
   const remaining = [...store.data.keys()];
   assert.equal(remaining.some((k) => k.includes("/s1/") || k.startsWith("interpretations/task-a") || k.startsWith("receipts/") || k === "tasks/task-a"), false);
-  assert.equal(remaining.includes(key("u1", "s2")), true);
+  assert.equal(remaining.includes(key("u1", "s2", "codex")), true);
   assert.equal([...store.data.values()].some((v) => v.includes("새 직원이 주문을") && !v.includes('"session":"s2"')), false);
   // A retried hook cannot bring the deleted evidence back, and reinterpretation cannot cite it.
   const replay = await record.appendObservations(HOST, batch());
   assert.deepEqual([replay.stored, replay.refused_deleted], [0, 3]);
   await record.createTask({ id: "task-c", project: "hypeproof-studio", at: 13 });
-  await throwsCode(() => record.saveInterpretation("task-c", interp(batch(), { id: "interp-9" }), batch()), "deleted_evidence");
+  await throwsCode(() => record.saveInterpretation("task-c", interp(batch(), { id: "interp-9" }), batch(), HOST), "deleted_evidence");
   assert.deepEqual((await record.records()).deleted_tasks, ["task-a"]);
+});
+
+// ── X2 regressions on PR #1047 @ cf65f95 ──────────────────────────────────────
+test("MC-T06 the same scope, session and event id from two hosts are two attributable records", async () => {
+  const store = memoryStore();
+  const record = new core.LocalRecord(store);
+  const first = await record.appendObservations("claude", batch());
+  const second = await record.appendObservations("codex", batch());
+  assert.deepEqual([first.stored, second.stored, second.duplicates], [3, 3, 0]);
+  const keys = [...store.data.keys()].filter((k) => k.startsWith("observations/"));
+  assert.equal(keys.length, 6);
+  assert.deepEqual(new Set(keys.map((k) => JSON.parse(store.data.get(k)).host)), new Set(["claude", "codex"]));
+  // Control: a real retry from the same host is still a duplicate.
+  assert.equal((await record.appendObservations("codex", batch())).duplicates, 3);
+});
+
+test("MC-T13 the receiver re-validates the selection even when the digest was recomputed", async () => {
+  const { record, store, selection } = await seeded();
+  await record.createTask({ id: "task-b", project: "hypeproof-studio", at: 1 });
+  await record.linkSession("task-b", { host: "codex", session_id: "s2", by: "user", at: 1 });
+  await record.appendObservations("codex", batch("s2"));
+  const redigest = async (id, mutate) => {
+    const b = await record.buildSubmission(selection({ id }));
+    mutate(b.payload);
+    b.digest = await core.digestOf(b.payload);
+    return b;
+  };
+  await throwsCode(async () => record.submit(await redigest("sub-overlap", (p) => p.excluded.push({ ref: key("u1"), why: "제외" })), 10), "excluded_item_included");
+  const foreign = JSON.parse(store.data.get(key("u1", "s2", "codex")));
+  await throwsCode(async () => record.submit(await redigest("sub-foreign", (p) => p.observations.push(foreign)), 10), "foreign_item");
+  await throwsCode(async () => record.submit(await redigest("sub-altered", (p) => { p.observations[0] = { ...p.observations[0], event: { ...p.observations[0].event, text: "바꾼 내용" } }; }), 10), "payload_mismatch");
+  await throwsCode(async () => record.submit(await redigest("sub-dup", (p) => p.observations.push(p.observations[0])), 10), "duplicate_item");
+  await throwsCode(async () => record.submit(await redigest("sub-secret", (p) => { p.reason = "ghp_" + "Q".repeat(36); }), 10), "unredacted_secret");
+  assert.equal([...store.data.keys()].some((k) => k.startsWith("submissions/") || k.startsWith("receipts/")), false);
+  // Control: the unmodified bundle is accepted.
+  assert.equal((await record.submit(await record.buildSubmission(selection()), 11)).state, "accepted-local");
+});
+
+test("MC-T17 identical retries stay idempotent at exact quota, and after later edits", async () => {
+  const { record, store, selection } = await seeded();
+  const bundle = await record.buildSubmission(selection());
+  const receipt = await record.submit(bundle, 10);
+  const { bytes } = await record.usage();
+  const full = new core.LocalRecord(store, { maxBytes: bytes });
+  assert.deepEqual(await full.submit(structuredClone(bundle), 11), receipt);
+  // Duplicate hook delivery at quota is a duplicate, not a capacity failure.
+  assert.equal((await full.appendObservations(HOST, batch())).duplicates, 3);
+  // Control: new data at the same quota is refused.
+  await throwsCode(async () => full.submit(await record.buildSubmission(selection({ id: "sub-new" })), 12), "capacity_exceeded");
+  // A later reassignment does not turn the accepted retry into a refusal.
+  await record.createTask({ id: "task-b", project: "hypeproof-studio", at: 1 });
+  await record.reassignObservation(key("u1"), "task-b", { by: "user", reason: "다른 작업", at: 13 });
+  assert.deepEqual(await record.submit(structuredClone(bundle), 14), receipt);
+});
+
+test("MC-T18 known secrets in purpose, reasons and notes never reach storage", async () => {
+  const store = memoryStore();
+  const record = new core.LocalRecord(store);
+  const token = "ghp_" + "P".repeat(36);
+  const task = await record.createTask({ id: "t-secret", project: "p", at: 1, purpose: { text: `배포 토큰 ${token} 교체`, source: "user" } });
+  assert.deepEqual(task.purpose.exclusions, [{ kind: "github_token", count: 1 }]);
+  const edited = core.confirmPurpose(task, { by: "user", at: 2, text: `다시 ${token}` });
+  assert.deepEqual(edited.purpose.exclusions, [{ kind: "github_token", count: 1 }]);
+  await record.saveTask(core.setTaskStatus(edited, "paused", { by: "user", at: 3, reason: `중단 ${token}` }));
+  await record.linkSession("t-secret", { host: HOST, session_id: "s1", by: "user", at: 1 });
+  await record.appendObservations(HOST, batch());
+  await record.reassignObservation(key("c1"), "t-secret", { by: "user", reason: `사유 ${token}`, at: 4 });
+  assert.equal([...store.data.values()].some((v) => v.includes(token)), false);
+  assert.match(store.data.get("tasks/t-secret"), /\[excluded:github_token\]/);
+  // Controls: ordinary text and ids that merely contain "sk-" are unchanged.
+  assert.equal((await record.createTask({ id: "t-plain", project: "p", at: 1, purpose: { text: "주문 확인 문서", source: "user" } })).purpose.text, "주문 확인 문서");
+  const longId = "task-abcdefghijklmnopqrstuvwxyz";
+  await record.createTask({ id: longId, project: "p", at: 1 });
+  assert.equal(JSON.parse(store.data.get(`tasks/${longId}`)).id, longId);
 });

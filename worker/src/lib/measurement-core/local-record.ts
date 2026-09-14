@@ -53,8 +53,8 @@ export async function digestOf(value: unknown): Promise<string> {
 // Known formats only. This is not anonymisation; Jay still reviews before submitting.
 const SECRET_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
   ["private_key", /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g],
-  ["anthropic_key", /sk-ant-[A-Za-z0-9_-]{20,}/g],
-  ["openai_key", /sk-(?:proj-)?[A-Za-z0-9_-]{20,}/g],
+  ["anthropic_key", /\bsk-ant-[A-Za-z0-9_-]{20,}/g],
+  ["openai_key", /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}/g],
   ["github_token", /\bgh[pousr]_[A-Za-z0-9]{36,}\b/g],
   ["aws_access_key", /\bAKIA[0-9A-Z]{16}\b/g],
   ["bearer_token", /\bBearer\s+[A-Za-z0-9._~+/-]{20,}=*/g],
@@ -79,6 +79,14 @@ export function redactText(input: string): { text: string; exclusions: Exclusion
   return { text: out, exclusions };
 }
 
+/** redactText on every string of a JSON value (object keys are left as they are). */
+export function redactDeep<T>(value: T): T {
+  if (typeof value === "string") return redactText(value).text as T;
+  if (Array.isArray(value)) return value.map((v) => redactDeep(v)) as T;
+  if (isObj(value)) return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, redactDeep(v)])) as T;
+  return value;
+}
+
 function redactEvent(event: ObservationEvent, excludedPaths: readonly string[]): { event: ObservationEvent; exclusions: ExclusionNote[] } {
   const firstLine = event.text.split("\n", 1)[0] ?? "";
   if (["artifact", "tool_request", "tool_result"].includes(event.kind) && excludedPaths.some((p) => p.length > 0 && firstLine.includes(p))) {
@@ -99,6 +107,8 @@ export interface Purpose {
   source: PurposeSource;
   ref?: string;
   at: number;
+  /** Known secret formats removed from `text` before storage (MC-30). */
+  exclusions?: ExclusionNote[];
 }
 
 export interface Task {
@@ -125,7 +135,8 @@ export function createTask(input: { id: string; project: string; at: number; pur
   if (input.purpose !== undefined) {
     const p = input.purpose;
     check(isObj(p) && text(p.text) && ["user", "issue", "ai_proposed"].includes(String(p.source)), "invalid_purpose");
-    purpose = { text: p.text, source: p.source, ...(p.ref ? { ref: p.ref } : {}), at: input.at };
+    const r = redactText(p.text);
+    purpose = { text: r.text, source: p.source, ...(p.ref ? { ref: p.ref } : {}), at: input.at, ...(r.exclusions.length ? { exclusions: r.exclusions } : {}) };
   }
   return {
     format: LOCAL_RECORD_FORMAT,
@@ -146,8 +157,9 @@ export function confirmPurpose(task: Task, input: { by: "user"; at: number; text
   check(isObj(input) && input.by === "user", "purpose_confirmation_requires_user");
   const next = input.text ?? task.purpose?.text;
   check(text(next), "invalid_purpose");
-  const purpose: Purpose = { text: next, source: "user", at: input.at };
-  const change = task.purpose && next !== task.purpose.text ? "purpose_edited" : "purpose_confirmed";
+  const r = redactText(next);
+  const purpose: Purpose = { text: r.text, source: "user", at: input.at, ...(r.exclusions.length ? { exclusions: r.exclusions } : {}) };
+  const change = task.purpose && r.text !== task.purpose.text ? "purpose_edited" : "purpose_confirmed";
   return { ...task, purpose, purpose_state: "confirmed", purpose_history: [...task.purpose_history, purpose], history: [...task.history, { at: input.at, by: "user", change }] };
 }
 
@@ -252,11 +264,12 @@ export interface MyRecords {
   tasks: Array<{ id: string; project: string; status: TaskStatus; purpose_state: PurposeState; receipts: Receipt[]; interpretations: number; unreviewed_findings: number }>;
   improvements: Improvement[];
   unassigned_observations: number;
-  gaps: Array<{ scope: string; session: string; missing: number[]; incomplete: boolean }>;
+  gaps: Array<{ host: string; scope: string; session: string; missing: number[]; incomplete: boolean }>;
   deleted_tasks: string[];
 }
 
-const observationBase = (scope: string, session: string) => `observations/${enc(scope)}/${enc(session)}/`;
+/** Source-aware identity (MC-08/34): the same scope, session and event id from two hosts are two records. */
+const observationBase = (host: string, scope: string, session: string) => `observations/${enc(host)}/${enc(scope)}/${enc(session)}/`;
 const assignmentKey = (observationKey: string) => `assignments/${observationKey.slice("observations/".length)}`;
 const interpretationKey = (task: string, ref: { id: string; revision: number }) => `interpretations/${task}/${enc(ref.id)}@${ref.revision}`;
 const submissionKey = (ref: { id: string; revision: number }) => `submissions/${enc(ref.id)}@${ref.revision}`;
@@ -309,9 +322,19 @@ export class LocalRecord {
 
   /** false when `ifAbsent` found the key taken. Never evicts anything to make room. */
   async #write(key: string, value: unknown, ifAbsent: boolean): Promise<boolean> {
-    const raw = canonicalJson(value);
+    // Last line of MC-30: no known secret format reaches storage, whichever field carries it.
+    const raw = canonicalJson(redactDeep(value));
+    let existing: string | null;
+    try {
+      existing = await this.#store.read(key);
+    } catch {
+      throw new Error("storage_failure");
+    }
+    // An existing record answers an ifAbsent write before any quota check, so an identical
+    // retry stays idempotent when storage is full (MC-25/35). The port write itself stays atomic.
+    if (ifAbsent && existing !== null) return false;
     const { bytes } = await this.usage();
-    check(bytes + raw.length <= this.#maxBytes, "capacity_exceeded");
+    check(bytes - (existing?.length ?? 0) + raw.length <= this.#maxBytes, "capacity_exceeded");
     try {
       await this.#store.write(key, raw, { ifAbsent });
       return true;
@@ -386,7 +409,7 @@ export class LocalRecord {
     const { batch, missing } = validateObservation(value);
     const task = await this.taskForSession(host, batch.session);
     const deleted = await this.#deletedEvidence();
-    const base = observationBase(batch.scope, batch.session);
+    const base = observationBase(host, batch.scope, batch.session);
     let stored = 0;
     let duplicates = 0;
     let refusedDeleted = 0;
@@ -421,7 +444,7 @@ export class LocalRecord {
       const first: Assignment = { task, history: [{ from: null, to: task, by: "adapter_explicit", reason: task ? "session_link" : "no_session_link", at: raw.at }] };
       await this.#write(assignmentKey(key), first, true);
     }
-    await this.#write(`gaps/${enc(batch.scope)}/${enc(batch.session)}`, { scope: batch.scope, session: batch.session, missing, incomplete: batch.incomplete === true }, false);
+    await this.#write(`gaps/${enc(host)}/${enc(batch.scope)}/${enc(batch.session)}`, { host, scope: batch.scope, session: batch.session, missing, incomplete: batch.incomplete === true }, false);
     return { task, stored, duplicates, refused_deleted: refusedDeleted, exclusions, missing };
   }
 
@@ -440,11 +463,13 @@ export class LocalRecord {
   }
 
   // ── Interpretations and reviews (MC-15/20/22) ───────────────────────────────
-  async saveInterpretation(taskId: string, value: unknown, batchValue: unknown): Promise<Interpretation> {
+  /** `host` names the source whose stored observations the interpretation cites. */
+  async saveInterpretation(taskId: string, value: unknown, batchValue: unknown, host: string): Promise<Interpretation> {
+    check(text(host, 100), "invalid_host");
     await this.getTask(taskId);
     const { batch } = validateObservation(batchValue);
     const interpretation = validateInterpretation(value, batch);
-    const base = observationBase(batch.scope, batch.session);
+    const base = observationBase(host, batch.scope, batch.session);
     const cited = [...interpretation.findings.flatMap((f) => f.evidence), ...interpretation.unclassified.flatMap((u) => u.evidence)].map((r) => base + enc(r.event_id));
     const deleted = await this.#deletedEvidence();
     check(!cited.some((k) => deleted.has(k)), "deleted_evidence");
@@ -458,7 +483,7 @@ export class LocalRecord {
     if (interpretation.revision > 1) check(await this.#read(interpretationKey(taskId, { id: interpretation.id, revision: interpretation.revision - 1 })), "missing_previous_revision");
     const record: InterpretationRecord = { format: LOCAL_RECORD_FORMAT, kind: "interpretation", task: taskId, interpretation };
     const key = interpretationKey(taskId, interpretation);
-    if (!(await this.#write(key, record, true))) check(canonicalJson(await this.#read(key)) === canonicalJson(record), "revision_exists");
+    if (!(await this.#write(key, record, true))) check(canonicalJson(await this.#read(key)) === canonicalJson(redactDeep(record)), "revision_exists");
     return interpretation;
   }
 
@@ -495,6 +520,39 @@ export class LocalRecord {
   }
 
   // ── Submission and local receipt (MC-23/24/25) ──────────────────────────────
+  /** One selection validator for building and receiving: ownership, stored content, duplicates, exclusions. */
+  async #validatePayload(p: SubmissionPayload): Promise<void> {
+    check(Array.isArray(p.observations) && Array.isArray(p.interpretations) && Array.isArray(p.reviews) && Array.isArray(p.excluded), "corrupt_bundle");
+    check(p.excluded.every((e) => isObj(e) && text(e.ref, 500) && text(e.why, 500)), "invalid_exclusion");
+    const task = await this.getTask(p.task.id);
+    const included: string[] = [];
+    for (const o of p.observations) {
+      check(isObj(o) && typeof o.key === "string", "corrupt_bundle");
+      const stored = await this.#read<ObservationRecord>(o.key);
+      check(stored && (await this.#read<Assignment>(assignmentKey(o.key)))?.task === task.id, "foreign_item");
+      check(canonicalJson(stored) === canonicalJson(o), "payload_mismatch");
+      included.push(o.key);
+    }
+    for (const r of p.interpretations) {
+      check(isObj(r) && isObj(r.interpretation), "corrupt_bundle");
+      const k = interpretationKey(task.id, r.interpretation);
+      const stored = await this.#read<InterpretationRecord>(k);
+      check(stored?.task === task.id && r.task === task.id, "foreign_item");
+      check(canonicalJson(stored) === canonicalJson(r), "payload_mismatch");
+      included.push(k);
+    }
+    for (const r of p.reviews) {
+      check(isObj(r) && typeof r.key === "string", "corrupt_bundle");
+      const stored = await this.#read<Review>(r.key);
+      check(stored?.task === task.id, "foreign_item");
+      check(canonicalJson(stored) === canonicalJson(r), "payload_mismatch");
+      included.push(r.key);
+    }
+    check(new Set(included).size === included.length, "duplicate_item");
+    const excluded = new Set(p.excluded.map((e) => e.ref));
+    check(!included.some((k) => excluded.has(k)), "excluded_item_included");
+  }
+
   async buildSubmission(selection: {
     id: string;
     revision: number;
@@ -509,28 +567,17 @@ export class LocalRecord {
     check(isObj(selection) && ID.test(String(selection.id)) && Number.isSafeInteger(selection.revision) && selection.revision >= 1, "invalid_submission");
     const task = await this.getTask(selection.task);
     check(Array.isArray(selection.excluded) && selection.excluded.every((e) => isObj(e) && text(e.ref, 500) && text(e.why, 500)), "invalid_exclusion");
-    const excluded = new Set(selection.excluded.map((e) => e.ref));
-    const refs = [...selection.observations, ...selection.interpretations.map((i) => interpretationKey(task.id, i)), ...selection.reviews];
-    check(!refs.some((r) => excluded.has(r)), "excluded_item_included");
+    const load = async <T>(key: string): Promise<T> => {
+      const value = await this.#read<T>(key);
+      check(value, "foreign_item");
+      return value;
+    };
     const observations: ObservationRecord[] = [];
-    for (const key of selection.observations) {
-      check((await this.#read<Assignment>(assignmentKey(key)))?.task === task.id, "foreign_item");
-      const o = await this.#read<ObservationRecord>(key);
-      check(o, "foreign_item");
-      observations.push(o);
-    }
+    for (const key of selection.observations) observations.push(await load<ObservationRecord>(key));
     const interpretations: InterpretationRecord[] = [];
-    for (const ref of selection.interpretations) {
-      const r = await this.#read<InterpretationRecord>(interpretationKey(task.id, ref));
-      check(r?.task === task.id, "foreign_item");
-      interpretations.push(r);
-    }
+    for (const ref of selection.interpretations) interpretations.push(await load<InterpretationRecord>(interpretationKey(task.id, ref)));
     const reviews: Review[] = [];
-    for (const key of selection.reviews) {
-      const r = await this.#read<Review>(key);
-      check(r?.task === task.id, "foreign_item");
-      reviews.push(r);
-    }
+    for (const key of selection.reviews) reviews.push(await load<Review>(key));
     // Any task state can be submitted, incomplete and abandoned included (MC-23).
     const payload: SubmissionPayload = {
       format: LOCAL_RECORD_FORMAT,
@@ -539,14 +586,15 @@ export class LocalRecord {
       revision: selection.revision,
       parent: selection.revision > 1 ? { id: selection.id, revision: selection.revision - 1 } : null,
       task: { id: task.id, status: task.status, purpose: task.purpose, purpose_state: task.purpose_state },
-      ...(selection.reason ? { reason: selection.reason } : {}),
+      ...(selection.reason ? { reason: redactText(selection.reason).text } : {}),
       created_at: selection.at,
       destination: "local-inbox",
       observations,
       interpretations,
       reviews,
-      excluded: selection.excluded,
+      excluded: selection.excluded.map((e) => ({ ref: e.ref, why: redactText(e.why).text })),
     };
+    await this.#validatePayload(payload);
     return { format: LOCAL_RECORD_FORMAT, kind: "submission", payload, digest: await digestOf(payload) };
   }
 
@@ -558,6 +606,13 @@ export class LocalRecord {
     check(ID.test(String(payload.id)) && Number.isSafeInteger(payload.revision) && payload.revision >= 1 && isObj(payload.task), "corrupt_bundle");
     check((await digestOf(payload)) === digest, "corrupt_bundle");
     check(payload.destination === "local-inbox", "unsupported_destination");
+    // An identical retry of an accepted bundle returns its receipt, even if later edits
+    // (reassignment, quota) would refuse a new submission (MC-25/35).
+    const accepted = await this.#read<Receipt>(receiptKey(payload));
+    if (accepted && accepted.digest === digest) return accepted;
+    check(canonicalJson(redactDeep(payload)) === canonicalJson(payload), "unredacted_secret");
+    // Receiving validation: a caller can recompute the digest, so the selection itself is re-checked.
+    await this.#validatePayload(payload);
     if (payload.revision === 1) check(payload.parent === null, "corrupt_bundle");
     else
       check(
