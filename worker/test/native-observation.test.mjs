@@ -33,20 +33,19 @@ const findings = () =>
     assistance: "unknown",
     next: "다음 작업에서 확인",
   }));
-test("App and Service exact drift lock", () =>
-  assert.equal(
-    readFileSync(
-      new URL("../src/lib/native-observation.ts", import.meta.url),
-      "utf8",
-    ),
-    readFileSync(
-      new URL(
-        "../../extensions/hypeproof-chat/src/nativeObservationContract.ts",
-        import.meta.url,
-      ),
-      "utf8",
-    ),
-  ));
+// #1042: the former textual twin lock became a same-implementation lock. App and
+// Service no longer carry copies; both re-export the common measurement core.
+test("App and Service share one implementation (drift lock)", async () => {
+  const app = await import("../../extensions/hypeproof-chat/src/nativeObservationContract.ts");
+  assert.equal(app.validateObservation, validateObservation);
+  assert.equal(app.validateFindings, validateFindings);
+  assert.equal(app.OBSERVATION_FORMAT, OBSERVATION_FORMAT);
+  assert.equal(app.OBSERVATION_ASSETS, OBSERVATION_ASSETS);
+  // Code lines only — the shim's explanatory comment is allowed to say "function".
+  const appCode = readFileSync(new URL("../../extensions/hypeproof-chat/src/nativeObservationContract.ts", import.meta.url), "utf8")
+    .split("\n").map((l) => l.trim()).filter((l) => l && !l.startsWith("//"));
+  assert.ok(appCode.length > 0 && appCode.every((l) => l.startsWith("export * from ")), "the App contract file must not contain its own validator");
+});
 test("separate roles, reorder, idempotent resend, missing sequence", () => {
   const events = [
     e("u1", 1),

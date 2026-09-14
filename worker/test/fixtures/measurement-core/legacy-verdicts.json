@@ -1,0 +1,258 @@
+{
+  "captured_from": "worker/src/lib/native-observation.ts @ e3efbf398cfaa2d4677bd05ad06b1b9e79d376ef (pre-extraction)",
+  "batches": {
+    "normal_chain": {
+      "ok": true,
+      "order": [
+        "u1",
+        "c1",
+        "t1",
+        "a1",
+        "r1",
+        "f1"
+      ],
+      "missing": [],
+      "incomplete": false,
+      "observable": [
+        "TASTE",
+        "INTENT",
+        "CONTEXT",
+        "VERIFY",
+        "DELEGATE",
+        "OWNERSHIP"
+      ]
+    },
+    "duplicate_identical_resend": {
+      "ok": true,
+      "order": [
+        "u1",
+        "c1",
+        "t1",
+        "a1",
+        "r1",
+        "f1"
+      ],
+      "missing": [],
+      "incomplete": false,
+      "observable": [
+        "TASTE",
+        "INTENT",
+        "CONTEXT",
+        "VERIFY",
+        "DELEGATE",
+        "OWNERSHIP"
+      ]
+    },
+    "conflicting_duplicate_id": {
+      "ok": false,
+      "code": "conflicting_event"
+    },
+    "conflicting_sequence": {
+      "ok": false,
+      "code": "conflicting_sequence"
+    },
+    "gap_in_sequence": {
+      "ok": true,
+      "order": [
+        "u1",
+        "u3"
+      ],
+      "missing": [
+        2
+      ],
+      "incomplete": false,
+      "observable": [
+        "TASTE",
+        "INTENT",
+        "CONTEXT",
+        "DELEGATE",
+        "OWNERSHIP"
+      ]
+    },
+    "orphan_tool_result": {
+      "ok": false,
+      "code": "orphan_tool_event"
+    },
+    "approval_invalid_actor": {
+      "ok": false,
+      "code": "invalid_approval"
+    },
+    "artifact_bad_hash": {
+      "ok": false,
+      "code": "invalid_artifact"
+    },
+    "unsupported_old_format": {
+      "ok": false,
+      "code": "unsupported_observation"
+    },
+    "extra_field_rejected": {
+      "ok": false,
+      "code": "invalid_event"
+    },
+    "oversized_text": {
+      "ok": false,
+      "code": "invalid_event_text"
+    },
+    "too_many_events": {
+      "ok": false,
+      "code": "invalid_events"
+    },
+    "request_only_no_result": {
+      "ok": true,
+      "order": [
+        "u1",
+        "t1"
+      ],
+      "missing": [],
+      "incomplete": false,
+      "observable": [
+        "TASTE",
+        "INTENT",
+        "CONTEXT",
+        "DELEGATE",
+        "OWNERSHIP"
+      ]
+    },
+    "reversed_order": {
+      "ok": true,
+      "order": [
+        "u1",
+        "c1",
+        "t1",
+        "a1",
+        "r1",
+        "f1"
+      ],
+      "missing": [],
+      "incomplete": false,
+      "observable": [
+        "TASTE",
+        "INTENT",
+        "CONTEXT",
+        "VERIFY",
+        "DELEGATE",
+        "OWNERSHIP"
+      ]
+    },
+    "incomplete_flag": {
+      "ok": true,
+      "order": [
+        "u1"
+      ],
+      "missing": [],
+      "incomplete": true,
+      "observable": [
+        "TASTE",
+        "INTENT",
+        "CONTEXT",
+        "DELEGATE",
+        "OWNERSHIP"
+      ]
+    },
+    "two_artifact_revisions": {
+      "ok": true,
+      "order": [
+        "u1",
+        "c1",
+        "t1",
+        "a1",
+        "r1",
+        "f1",
+        "f2"
+      ],
+      "missing": [],
+      "incomplete": false,
+      "observable": [
+        "TASTE",
+        "INTENT",
+        "CONTEXT",
+        "VERIFY",
+        "DELEGATE",
+        "ITERATE",
+        "OWNERSHIP"
+      ]
+    }
+  },
+  "findings": {
+    "all_unobserved": {
+      "ok": true,
+      "statuses": [
+        "TASTE:unobserved",
+        "INTENT:unobserved",
+        "CONTEXT:unobserved",
+        "VERIFY:unobserved",
+        "DELEGATE:unobserved",
+        "ITERATE:unobserved",
+        "OWNERSHIP:unobserved"
+      ]
+    },
+    "intent_observed_user_quote": {
+      "ok": true,
+      "statuses": [
+        "TASTE:unobserved",
+        "INTENT:observed",
+        "CONTEXT:unobserved",
+        "VERIFY:unobserved",
+        "DELEGATE:unobserved",
+        "ITERATE:unobserved",
+        "OWNERSHIP:unobserved"
+      ]
+    },
+    "fabricated_quote": {
+      "ok": false,
+      "code": "fabricated_quote"
+    },
+    "missing_event_id": {
+      "ok": false,
+      "code": "fabricated_quote"
+    },
+    "assistant_only_citation": {
+      "ok": false,
+      "code": "missing_human_evidence"
+    },
+    "policy_approval_only_citation": {
+      "ok": false,
+      "code": "missing_human_evidence"
+    },
+    "score_field_rejected": {
+      "ok": false,
+      "code": "unsupported_score"
+    },
+    "unsupported_independence": {
+      "ok": false,
+      "code": "unsupported_independence"
+    },
+    "verify_without_execution": {
+      "ok": false,
+      "code": "missing_execution_evidence"
+    },
+    "iterate_single_revision": {
+      "ok": false,
+      "code": "missing_execution_evidence"
+    },
+    "iterate_two_revisions": {
+      "ok": true,
+      "statuses": [
+        "TASTE:unobserved",
+        "INTENT:unobserved",
+        "CONTEXT:unobserved",
+        "VERIFY:unobserved",
+        "DELEGATE:unobserved",
+        "ITERATE:observed",
+        "OWNERSHIP:unobserved"
+      ]
+    },
+    "six_findings_rejected": {
+      "ok": false,
+      "code": "invalid_findings"
+    },
+    "unobserved_with_evidence": {
+      "ok": false,
+      "code": "unobserved_with_evidence"
+    },
+    "duplicate_asset": {
+      "ok": false,
+      "code": "invalid_asset"
+    }
+  }
+}
