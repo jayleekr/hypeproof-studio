@@ -1,8 +1,14 @@
 # 측정 코어 검증 계약
 
-상태: **MC-T01–24 모두 NOT RUN**. 2026-09-13. Owner: jayleekr.
+상태: **MC-T01·T07–T12는 합성/소스 통합 PASS, MC-T02는 App/Worker 하위 범위만 PASS이며 전체는 NOT RUN, 나머지는 NOT RUN**. 2026-09-14. Owner: jayleekr.
 문서·링크 검사 성공은 아래 제품 시험을 실행했다는 뜻이 아니다.
 상위: [요구사항](../requirements/measurement-core.md), [설계](../design/measurement-core.md).
+
+## 현재 실행 기록 — 단위 1
+
+병합 SHA `ec66904b`(#1043)의 공통 코어와 합성 fixture를 대상으로 MC-T01과 MC-T07–T12를 실행해 PASS했다. X2는 이전 구현에서 실제 결과물과 무관한 성공 명령이 MC-T10을 통과하는 결함을 두 차례 재현했고, 최종 head `b32f8de`에서 request/result 양쪽의 관측된 `sha256`이 `target_artifact`와 일치해야 한다는 양성·음성 대조를 독립 재검증했다. 기존 30개 legacy 판정, 6개 기본 모델과 7개 legacy 모델 분리, 인용·actor·점수·revision·재해석 계약은 합성/소스 통합 범위에서 확인됐다.
+
+MC-T02는 Studio App과 Worker가 같은 함수 객체를 호출하고 호스트 API·네트워크 없는 프로세스에서 코어가 실행되는 하위 범위만 PASS다. Claude Code·Codex adapter는 아직 없으므로 세 wrapper 전체 integration은 **NOT RUN**이다. 현재 App recorder도 검사 request/result에 대상 revision을 기록하지 않아 실제 App 기록으로 observed VERIFY 해석을 만들 수 없다. MC-T03–06과 MC-T13–24, 실제 host·설치본·provider·Jay dogfood는 **NOT RUN**이다. MC-20의 삭제 요청된 근거 재사용 금지는 단위 1 구현에 포함되지 않았고 MC-T18에 남는다.
 
 ## 제품 검증 행렬
 
@@ -47,4 +53,4 @@
 
 각 구현 PR은 test ID, commit, host·core·adapter·schema/모델 revision, 환경, 실행 주체, 입력 출처, 기대/실제, PASS/FAIL/NOT RUN, 근거 위치, 미관찰 범위를 기록한다. 사용자 로그를 공개 저장소에 올리지 않고 공개 보고에는 가린 요약·비식별 fixture만 사용한다.
 
-현재 위 시험은 전부 NOT RUN이다. 기존 Studio 시험 결과는 해당 기존 기능에만 유효하다. 이 문서의 모든 P0 시험이 충족되고 Jay 실제 수용이 확인되어야 #1020의 첫 dogfood 완료를 판단한다.
+현재 실행 범위는 위 단위 1 기록에 한정한다. 기존 Studio 시험 결과는 해당 기존 기능에만 유효하다. 이 문서의 모든 P0 시험이 충족되고 Jay 실제 수용이 확인되어야 #1020의 첫 dogfood 완료를 판단한다.

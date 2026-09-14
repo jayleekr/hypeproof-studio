@@ -496,7 +496,7 @@
         "MC-48"
       ],
       "inline_prefixes": [],
-      "sha256": "7582ea0ba262581ffba8637b3deab5c024fe232b3590bd43a0b6d430f3e53f72",
+      "sha256": "ebb1f0d5760f70888b83044692ea7ea874cd984ab3eba0c680a487f4bd95fde2",
       "owner": "jayleekr",
       "intent": "docs/intents/measurement-core.md",
       "design": "docs/design/measurement-core.md",
@@ -1947,14 +1947,16 @@
         }
       ],
       "depends_on": [],
-      "next_action": "기존 App/Worker 관찰 validator·recorder·export를 파일 단위로 감사하고(MC-01), VS Code·네트워크 없이 호출되는 공통 코어를 추출해 Studio 현재 경로가 실제로 호출하게 한다. #852와 공동 추적한다.",
+      "next_action": "`ec66904b`의 공통 코어·App/Worker 공유 구현을 기준으로 App recorder가 검사 request/result에 대상 revision을 기록하게 연결하고, 삭제 요청된 근거를 재해석에서 재사용하지 않는 MC-20/MC-T18 계약을 구현한다. Claude Code·Codex adapter가 생기면 MC-T02의 세 wrapper 전체 integration을 별도 실행한다. #852와 공동 추적한다.",
       "design_delta": "관찰과 해석을 별도 revision으로 분리하고 model/definition/evaluator 버전을 기록한다. 기존 7개 키·A1–A5 값은 원형 보존, 6개 해석은 원근거에서 별도 생성한다.",
       "positive_control": "같은 정규화 입력에서 기존/신규 validator·export 판정이 일치하고, Studio 호출 경로가 공통 코어를 실제 실행한 증거(MC-T01/02/07–12).",
       "negative_control": "없는 근거 ID·불일치 인용·assistant 발화만으로 사람 행동 주장·완료 없는 요청의 성공 표시·7→6 자동 점수 변환이 통과하지 않는다.",
       "evidence_required": "제출 SHA·host/adapter/core/schema 버전·OS·실행 조건·명령·기대/관측·파일 hash. live-host / captured-replay / synthetic과 NOT RUN/BLOCKED, 합성/실기/사람 증거를 구분한다 (MC-38).",
       "implementation_paths": [
+        "worker/src/lib/measurement-core",
         "worker/src/lib/native-observation.ts",
-        "extensions/hypeproof-chat/src"
+        "worker/src/lib/native-evidence.ts",
+        "extensions/hypeproof-chat/src/nativeObservationContract.ts"
       ],
       "verification_inputs": []
     },

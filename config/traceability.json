@@ -499,8 +499,8 @@
       "stage": "test",
       "owner": "jayleekr",
       "depends_on": [
-        "ST-REQ-CAPABILITY-CONTRACT",
-        "ST-REQ-NATIVE"
+        "ST-REQ-MEASUREMENT-CORE",
+        "ST-DES-MEASUREMENT-CORE"
       ],
       "sources": [
         {

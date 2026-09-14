@@ -1,9 +1,9 @@
 # 공통 측정 코어 요구사항
 
-상태: 구현 전 계약 제안. 2026-09-13. Owner: jayleekr.
+상태: 계약 제안. 단위 1의 공통 코어 추출·App/Worker 재연결은 2026-09-14 `ec66904b`(#1043)에 병합됐고, 아래 실행 경계와 남은 범위는 검증 문서가 소유한다. Owner: jayleekr.
 상위: [INT-MC-01–03](../intents/measurement-core.md). 추적: [#1020](https://github.com/jayleekr/hypeproof-studio/issues/1020), [#1021](https://github.com/jayleekr/hypeproof-studio/issues/1021).
 
-각 행은 의도·출시 단계·관찰 가능한 수용 기준을 가진다. **P0도 현재 구현 완료를 뜻하지 않는다.** 테스트 ID의 상세와 실행 상태는 [검증 문서](../testing/measurement-core.md)가 소유한다. 설계상 잠정값은 실제 호스트 측정 후 근거와 함께 수정한다.
+각 행은 의도·출시 단계·관찰 가능한 수용 기준을 가진다. **P0나 단위 1 병합도 전체 구현 완료를 뜻하지 않는다.** 테스트 ID의 상세와 실행 상태는 [검증 문서](../testing/measurement-core.md)가 소유한다. 설계상 잠정값은 실제 호스트 측정 후 근거와 함께 수정한다.
 
 ## 용어와 완료의 구분
 

@@ -173,7 +173,7 @@ Lab #777 → [Product Intent](../PRODUCT-INTENT.md) →
 
 | ID | Area | Acceptance criteria | Primary paths |
 |---|---|---|---|
-| REQ-STUDIO-MEASUREMENT-CORE | portable observation, evidence and review | Studio and both external hosts call the same core; new cards default to six model items; legacy evidence stays readable; Jay reviews and submits actual work with a local receipt and a follow-up improvement. Proposed, not yet implemented. | docs/requirements/measurement-core.md; docs/design/measurement-core.md; docs/testing/measurement-core.md |
+| REQ-STUDIO-MEASUREMENT-CORE | portable observation, evidence and review | Studio and both external hosts call the same core; new cards default to six model items; legacy evidence stays readable; Jay reviews and submits actual work with a local receipt and a follow-up improvement. Unit 1 common-core extraction is merged at `ec66904b` with bounded synthetic/source-integration evidence; external adapters, local review/submission, and Jay dogfood remain. | docs/requirements/measurement-core.md; docs/design/measurement-core.md; docs/testing/measurement-core.md |
 
 [INT-MC-01–03](../intents/measurement-core.md) →
 [MC-01–48](../requirements/measurement-core.md) →
