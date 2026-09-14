@@ -420,7 +420,7 @@
         "HC-08"
       ],
       "inline_prefixes": [],
-      "sha256": "8ea74df86f789c8593cd6274c1e8d01ad1379ccdbae43796c2ac3092eea00456",
+      "sha256": "8472495804ec911fde700cbd747c7703bf5a206ae1250b5ae6d5c79cf25de647",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/design/philosophy-alignment-2026-09-08.md",
@@ -442,6 +442,65 @@
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/independent-course.md",
       "test": "docs/requirements/independent-course.md"
+    },
+    {
+      "path": "docs/requirements/measurement-core.md",
+      "ids": [
+        "MC-01",
+        "MC-02",
+        "MC-03",
+        "MC-04",
+        "MC-05",
+        "MC-06",
+        "MC-07",
+        "MC-08",
+        "MC-09",
+        "MC-10",
+        "MC-11",
+        "MC-12",
+        "MC-13",
+        "MC-14",
+        "MC-15",
+        "MC-16",
+        "MC-17",
+        "MC-18",
+        "MC-19",
+        "MC-20",
+        "MC-21",
+        "MC-22",
+        "MC-23",
+        "MC-24",
+        "MC-25",
+        "MC-26",
+        "MC-27",
+        "MC-28",
+        "MC-29",
+        "MC-30",
+        "MC-31",
+        "MC-32",
+        "MC-33",
+        "MC-34",
+        "MC-35",
+        "MC-36",
+        "MC-37",
+        "MC-38",
+        "MC-39",
+        "MC-40",
+        "MC-41",
+        "MC-42",
+        "MC-43",
+        "MC-44",
+        "MC-45",
+        "MC-46",
+        "MC-47",
+        "MC-48"
+      ],
+      "inline_prefixes": [],
+      "sha256": "7582ea0ba262581ffba8637b3deab5c024fe232b3590bd43a0b6d430f3e53f72",
+      "owner": "jayleekr",
+      "intent": "docs/intents/measurement-core.md",
+      "design": "docs/design/measurement-core.md",
+      "test": "docs/testing/measurement-core.md"
     }
   ],
   "work_items": [
@@ -1855,6 +1914,266 @@
         "chalk/src"
       ],
       "verification_inputs": []
+    },
+    {
+      "id": "measurement-core-extract",
+      "title": "측정 코어 추출·Studio 재연결·6개 모델 버전 계약",
+      "issue": 1020,
+      "kind": "implementation",
+      "feature_ids": [
+        "judgment-evidence",
+        "feedback-improve"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/measurement-core.md",
+          "ids": [
+            "MC-01",
+            "MC-02",
+            "MC-03",
+            "MC-09",
+            "MC-10",
+            "MC-11",
+            "MC-12",
+            "MC-13",
+            "MC-14",
+            "MC-15",
+            "MC-16",
+            "MC-17",
+            "MC-18",
+            "MC-19",
+            "MC-20"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "기존 App/Worker 관찰 validator·recorder·export를 파일 단위로 감사하고(MC-01), VS Code·네트워크 없이 호출되는 공통 코어를 추출해 Studio 현재 경로가 실제로 호출하게 한다. #852와 공동 추적한다.",
+      "design_delta": "관찰과 해석을 별도 revision으로 분리하고 model/definition/evaluator 버전을 기록한다. 기존 7개 키·A1–A5 값은 원형 보존, 6개 해석은 원근거에서 별도 생성한다.",
+      "positive_control": "같은 정규화 입력에서 기존/신규 validator·export 판정이 일치하고, Studio 호출 경로가 공통 코어를 실제 실행한 증거(MC-T01/02/07–12).",
+      "negative_control": "없는 근거 ID·불일치 인용·assistant 발화만으로 사람 행동 주장·완료 없는 요청의 성공 표시·7→6 자동 점수 변환이 통과하지 않는다.",
+      "evidence_required": "제출 SHA·host/adapter/core/schema 버전·OS·실행 조건·명령·기대/관측·파일 hash. live-host / captured-replay / synthetic과 NOT RUN/BLOCKED, 합성/실기/사람 증거를 구분한다 (MC-38).",
+      "implementation_paths": [
+        "worker/src/lib/native-observation.ts",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "measurement-local-review",
+      "title": "Jay 로컬 저장·작업 카드·검토·접수·내 기록",
+      "issue": 1020,
+      "kind": "implementation",
+      "feature_ids": [
+        "judgment-evidence",
+        "feedback-improve"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/measurement-core.md",
+          "ids": [
+            "MC-07",
+            "MC-08",
+            "MC-21",
+            "MC-22",
+            "MC-23",
+            "MC-24",
+            "MC-25",
+            "MC-26",
+            "MC-27",
+            "MC-28",
+            "MC-29",
+            "MC-30",
+            "MC-31",
+            "MC-32",
+            "MC-33",
+            "MC-34",
+            "MC-35"
+          ]
+        }
+      ],
+      "depends_on": [
+        "measurement-core-extract"
+      ],
+      "next_action": "공통 코어 위에 로컬 저장소와 task/session 분리를 만들고, 근거를 여는 작업 카드·정정·로컬 접수 receipt 경로를 연결한다.",
+      "design_delta": "자동 해석은 미검토 초안, 사용자 정정은 후속 revision. 완료 선언과 제출을 분리하고 로컬 전용·원격 전송 없음이 기본이다.",
+      "positive_control": "실제 작업의 카드에서 주장→근거 열람→정정→로컬 접수가 같은 submission ID/digest로 재현된다.",
+      "negative_control": "같은 ID의 다른 내용·저장 실패·손상 묶음·권한 없는 기록·측정 실패로 인한 본업 차단이 성공으로 표시되지 않는다.",
+      "evidence_required": "제출 SHA·host/adapter/core/schema 버전·OS·실행 조건·명령·기대/관측·파일 hash. live-host / captured-replay / synthetic과 NOT RUN/BLOCKED, 합성/실기/사람 증거를 구분한다 (MC-38).",
+      "implementation_paths": [],
+      "verification_inputs": []
+    },
+    {
+      "id": "measurement-claude-code-adapter",
+      "title": "Claude Code 얇은 어댑터·설치·진단·pause/uninstall",
+      "issue": 1020,
+      "kind": "implementation",
+      "feature_ids": [
+        "judgment-evidence",
+        "feedback-improve"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/measurement-core.md",
+          "ids": [
+            "MC-04",
+            "MC-06",
+            "MC-29",
+            "MC-33",
+            "MC-36",
+            "MC-37",
+            "MC-38"
+          ]
+        }
+      ],
+      "depends_on": [
+        "measurement-core-extract",
+        "measurement-local-review"
+      ],
+      "next_action": "기록된 실제 Claude Code 버전에서 설치·연결 진단·수집·검토·제출·중지·제거 경로를 local receipt까지 검증한다.",
+      "design_delta": "hook은 동기 네트워크·AI 분석을 기다리지 않고 로컬 큐로만 기록한다. 최초 설치는 수집 비활성, 등록 프로젝트만 수집한다.",
+      "positive_control": "실제 설치 버전에서 MC-T03/19/20 경로가 local receipt까지 통과한다.",
+      "negative_control": "미등록 프로젝트 수집·hook 신뢰 우회·중복 hook 재설치·지원 범위 밖 버전의 정상 연결 표시가 없다.",
+      "evidence_required": "제출 SHA·host/adapter/core/schema 버전·OS·실행 조건·명령·기대/관측·파일 hash. live-host / captured-replay / synthetic과 NOT RUN/BLOCKED, 합성/실기/사람 증거를 구분한다 (MC-38).",
+      "implementation_paths": [],
+      "verification_inputs": []
+    },
+    {
+      "id": "measurement-codex-adapter",
+      "title": "Codex 얇은 어댑터·설치·진단·교차 호스트 작업",
+      "issue": 1020,
+      "kind": "implementation",
+      "feature_ids": [
+        "judgment-evidence",
+        "feedback-improve"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/measurement-core.md",
+          "ids": [
+            "MC-05",
+            "MC-06",
+            "MC-08",
+            "MC-13",
+            "MC-29",
+            "MC-33",
+            "MC-36",
+            "MC-37",
+            "MC-38"
+          ]
+        }
+      ],
+      "depends_on": [
+        "measurement-claude-code-adapter"
+      ],
+      "next_action": "Codex CLI와 데스크톱 지원 여부를 각각 기록하고, 지원 표면에서 Claude Code와 같은 경로와 명시적 task 연결의 교차 호스트 이동을 검증한다.",
+      "design_delta": "교차 호스트 시각으로 인과 순서를 단정하지 않고, 같은 폴더라는 이유로 다른 작업을 자동 합치지 않는다.",
+      "positive_control": "지원을 선언한 표면에서 MC-T04/06/19/20이 통과하고 host 전환 작업이 하나의 task로 이어진다.",
+      "negative_control": "지원하지 않는 표면·버전의 정상 연결 표시·부모 요약만으로 하위 원본 생성·자동 task 병합이 없다.",
+      "evidence_required": "제출 SHA·host/adapter/core/schema 버전·OS·실행 조건·명령·기대/관측·파일 hash. live-host / captured-replay / synthetic과 NOT RUN/BLOCKED, 합성/실기/사람 증거를 구분한다 (MC-38).",
+      "implementation_paths": [],
+      "verification_inputs": []
+    },
+    {
+      "id": "measurement-jay-dogfood",
+      "title": "Jay 실제 사용·정정·후속 개선점 적용 검토",
+      "issue": 1020,
+      "kind": "validation",
+      "feature_ids": [
+        "judgment-evidence",
+        "feedback-improve"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/measurement-core.md",
+          "ids": [
+            "MC-38",
+            "MC-47",
+            "MC-48"
+          ]
+        }
+      ],
+      "depends_on": [
+        "measurement-claude-code-adapter",
+        "measurement-codex-adapter"
+      ],
+      "next_action": "Jay 실제 작업 최소 3건(두 외부 host 각각, 1건은 host 전환)에서 검토·제출과 후속 작업 1회 관찰을 기록한다(MC-T22).",
+      "design_delta": "준비된 시연·synthetic 데이터는 첫 사용 증거로 쓰지 않는다. 가치·부담·신뢰 판단은 Jay가 한다.",
+      "positive_control": "실패·정정·미확인 사례를 포함한 실제 작업 기록과 선택한 개선점의 후속 시도가 남는다.",
+      "negative_control": "시연·synthetic 데이터, 성공 사례만 선별한 기록, CI 통과를 dogfood 완료로 계상하지 않는다.",
+      "evidence_required": "제출 SHA·host/adapter/core/schema 버전·OS·실행 조건·명령·기대/관측·파일 hash. live-host / captured-replay / synthetic과 NOT RUN/BLOCKED, 합성/실기/사람 증거를 구분한다 (MC-38).",
+      "implementation_paths": [],
+      "verification_inputs": [],
+      "gate": {
+        "reason": "Jay의 실제 작업·참여가 필요하다. 에이전트가 대신할 수 없다."
+      }
+    },
+    {
+      "id": "measurement-team-rollout",
+      "title": "내부 멤버 온보딩·인증된 원격 제출·의무와 예외",
+      "issue": 1020,
+      "kind": "implementation",
+      "feature_ids": [
+        "judgment-evidence",
+        "feedback-improve"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/measurement-core.md",
+          "ids": [
+            "MC-39",
+            "MC-40",
+            "MC-41"
+          ]
+        }
+      ],
+      "depends_on": [
+        "measurement-jay-dogfood"
+      ],
+      "next_action": "Jay dogfood 판단 이후, 인증된 멤버·project 권한·동의 목적을 서버에서 검증하는 원격 제출과 접근·감사 정책을 설계한다.",
+      "design_delta": "로컬 자기신고 ID나 변조 가능한 접수 파일을 팀 권한·준수 증명으로 쓰지 않는다. 기존 Studio 학생/수업 데이터 정책은 바꾸지 않는다.",
+      "positive_control": "인증된 멤버의 원격 제출이 서버 검증 후 접수되고 본인 데이터 접근·감사 이력이 남는다(MC-T23).",
+      "negative_control": "다른 멤버 데이터 접근·로컬 파일로 권한 증명·원격 실패를 로컬 접수 실패와 혼동하는 경로가 없다.",
+      "evidence_required": "제출 SHA·host/adapter/core/schema 버전·OS·실행 조건·명령·기대/관측·파일 hash. live-host / captured-replay / synthetic과 NOT RUN/BLOCKED, 합성/실기/사람 증거를 구분한다 (MC-38).",
+      "implementation_paths": [],
+      "verification_inputs": [],
+      "gate": {
+        "reason": "P1: Jay dogfood 결과와 팀 운영 규칙·권한·데이터 정책 준비가 선행 조건이다."
+      }
+    },
+    {
+      "id": "measurement-asset-research",
+      "title": "Asset 연구 큐·반례 검토·모델 비교/개정/환류",
+      "issue": 1020,
+      "kind": "research",
+      "feature_ids": [
+        "judgment-evidence",
+        "feedback-improve"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/measurement-core.md",
+          "ids": [
+            "MC-42",
+            "MC-43",
+            "MC-44",
+            "MC-45",
+            "MC-46"
+          ]
+        }
+      ],
+      "depends_on": [
+        "measurement-jay-dogfood"
+      ],
+      "next_action": "검토된 사례와 실패·미분류·반례를 함께 연구 큐에 넣고, 모델 개정안의 비교 사례·보류 사례 설계를 준비한다.",
+      "design_delta": "제출량을 독립 표본 수로 세지 않고, 모델 변경은 지정 버전을 고정·되돌릴 수 있게 배포한다. 이름 변경과 연구 결과는 별도다.",
+      "positive_control": "개정안에 문제 사례·대안·예측·반례가 연결되고 고정 비교 사례와 보류 사례에서 검토된다(MC-T24).",
+      "negative_control": "7→6 명칭 변경만으로 개선 완료 처리·같은 사례로 개발과 검증·도구/난도 변화를 개인 향상으로 해석하지 않는다.",
+      "evidence_required": "제출 SHA·host/adapter/core/schema 버전·OS·실행 조건·명령·기대/관측·파일 hash. live-host / captured-replay / synthetic과 NOT RUN/BLOCKED, 합성/실기/사람 증거를 구분한다 (MC-38).",
+      "implementation_paths": [],
+      "verification_inputs": [],
+      "gate": {
+        "reason": "P2: Jay dogfood 기록과 반례 표본이 선행 조건이다."
+      }
     }
   ]
 }
