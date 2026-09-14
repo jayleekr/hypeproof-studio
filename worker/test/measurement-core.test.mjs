@@ -82,7 +82,7 @@ test("MC-T02 shim files carry no logic of their own", () => {
 
 test("MC-T02 core imports only its own files (no VS Code, Worker, Chalk, node or network modules)", () => {
   const files = readdirSync(CORE_DIR).filter((f) => f.endsWith(".ts"));
-  assert.deepEqual(files.sort(), ["capability-models.ts", "evidence.ts", "index.ts", "interpretation.ts", "legacy-observation.ts", "normalize.ts"]);
+  assert.deepEqual(files.sort(), ["capability-models.ts", "evidence.ts", "index.ts", "interpretation.ts", "legacy-observation.ts", "local-record.ts", "normalize.ts"]);
   for (const f of files) {
     const src = readFileSync(new URL(f, CORE_DIR), "utf8");
     const specs = [...src.matchAll(/(?:import|export)[^'"]*?from\s+["']([^"']+)["']/g)].map((m) => m[1]);
@@ -100,14 +100,16 @@ test("MC-T02 core runs in a bare process without network, credentials or host AP
     const core = await import(${JSON.stringify(new URL("index.ts", CORE_DIR).href)});
     const { batchCases } = await import(${JSON.stringify(new URL("./fixtures/measurement-core/legacy-cases.mjs", import.meta.url).href)});
     const { batch } = core.validateObservation(batchCases.normal_chain());
-    process.stdout.write(core.MEASUREMENT_CORE_VERSION + " " + batch.events.length);
+    // Local-record digests use the platform WebCrypto global, not a node module (#1020 unit 2).
+    const digest = await core.digestOf({ b: 1, a: [2] });
+    process.stdout.write(core.MEASUREMENT_CORE_VERSION + " " + batch.events.length + " " + (digest === await core.digestOf({ a: [2], b: 1 })) + " " + digest.slice(0, 7));
   `;
   const r = spawnSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", script], {
     env: { PATH: process.env.PATH ?? "" },
     encoding: "utf8",
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.equal(r.stdout, "measurement-core/0.1.0 6");
+  assert.equal(r.stdout, "measurement-core/0.1.0 6 true sha256:");
 });
 
 test("MC-T02 unsupported schema versions fail explicitly", () => {
