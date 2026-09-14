@@ -1475,6 +1475,9 @@
         },
         {
           "path": "extensions/hypeproof-chat/webview-ui/src/main.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localSessionDiscovery.ts"
         }
       ]
     },
@@ -1495,6 +1498,9 @@
         },
         {
           "path": "e2e/local-review/mac.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/local-session-observation.smoke.mjs"
         }
       ]
     }

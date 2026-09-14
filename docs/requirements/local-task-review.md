@@ -59,3 +59,48 @@ later slices. #1020 stays open.
 
 Execution evidence is recorded separately after each run. Public App release and
 human dogfood are not inferred from a development extension or a local test copy.
+
+## Session observation and improvement (#1049)
+
+The person can discover recent sessions for the open project on demand: Claude's
+matching project directory and Codex's last seven calendar days, limited to 30
+matching results and 1,000 candidate files. Discovery returns metadata, not message
+text. Explicit file selection remains available. Both paths check project identity,
+reject symlink files and require import confirmation. No LLM polling is involved.
+
+Selected files up to 1 GiB are read sequentially over the initial byte range. The
+snapshot digest identifies that byte range. An unfinished final JSONL row is omitted
+with a visible limitation; malformed interior rows fail. Only the latest 500 eligible
+visible messages are included per snapshot. Sessions exceeding the core limit of
+10,000 visible messages fail explicitly instead of silently dropping newer work. Oversized messages and unsupported data
+remain excluded and disclosed. Earlier stored observations remain preserved.
+
+Reimporting a changed session updates its existing task with a new interpretation
+revision and invalidates any submission preview. Prior evidence, human reviews and
+receipts remain unchanged. Deleted sessions cannot return through a newer snapshot.
+The observation summary shows message counts and recorded model/reasoning changes;
+counts are activity descriptions, not ability, success, time-on-task or growth.
+Model definitions render from the interpretation's recorded version.
+
+A reviewer sees each capability's criterion and counterexample and may select up
+to ten stored messages when writing an interpretation. The host validates every
+selected reference belongs to that task and persists references in the review note.
+This is human interpretation, not an automatic semantic assessment. Neither quoted
+AI claims nor choosing evidence establishes independent human performance.
+
+One chosen next action is saved through the existing core improvement API. Another
+task in the same project may record tried/not-tried/unknown and an observed result.
+The action and follow-up survive restart. They are local records and are explicitly
+not included in the current submission payload. A tried action without an observed
+result stays unconfirmed. Same-task or foreign-project follow-up is rejected.
+
+Research criteria, counterexamples, rater agreement, comparability and learning
+validation are assigned to Bongho and Minhan in #1049. This provisional product
+slice does not claim their acceptance or a validated capability measure.
+
+Additional regression: `extensions/hypeproof-chat/test/local-session-observation.smoke.mjs`.
+
+The file adapter tracks key lengths while holding its writer lock to avoid rescanning
+the full store for every observation. The optional core storage usage hook preserves
+the existing capacity calculation. Record and receipt reads still read the durable
+file; they never return cached content. The index is discarded on lock release.

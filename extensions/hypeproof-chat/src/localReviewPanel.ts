@@ -1,9 +1,10 @@
+import { homedir } from 'node:os';
+import { recentLocalSessions } from './localSessionDiscovery.ts';
 import * as vscode from 'vscode';
 import * as fs from 'node:fs/promises';
-import { constants } from 'node:fs';
 import { join } from 'node:path';
 import { LocalReviewService } from './localReviewService.ts';
-import { MAX_TRANSCRIPT_BYTES, parseLocalTranscript } from './localTranscript.ts';
+import { parseLocalTranscriptFile } from './localTranscript.ts';
 import type { LocalReviewRequest, LocalReviewState } from './localReviewProtocol.ts';
 
 export function registerLocalReview(context: vscode.ExtensionContext, render: (webview: vscode.Webview, dist: vscode.Uri) => string) {
@@ -12,8 +13,8 @@ export function registerLocalReview(context: vscode.ExtensionContext, render: (w
   let selected: string | undefined;
   let busy = false;
   const refresh = async (extra: Partial<LocalReviewState> = {}) => {
-    const tasks = (await service.record.records()).tasks;
-    await panel?.webview.postMessage({ type: 'localReviewState', tasks, storage: service.store.root,
+    const { tasks, improvements } = await service.record.records();
+    await panel?.webview.postMessage({ type: 'localReviewState', tasks, improvements, storage: service.store.root,
       ...(selected ? { card: await service.card(selected) } : {}), ...extra } satisfies LocalReviewState);
   };
   const handle = async (msg: LocalReviewRequest) => {
@@ -21,29 +22,32 @@ export function registerLocalReview(context: vscode.ExtensionContext, render: (w
     if (busy) return;
     busy = true;
     try {
-      if (msg.action === 'import') {
+      if (msg.action === 'import' || msg.action === 'recent') {
         if (!vscode.workspace.isTrusted) throw Error('Trust this workspace before importing a local transcript.');
         const project = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!project) throw Error('Open the task project folder before importing.');
-        const picked = await vscode.window.showOpenDialog({ canSelectMany: false, canSelectFolders: false, filters: { 'Task transcript': ['jsonl'] }, title: 'Select one task transcript from this project' });
-        if (!picked?.[0]) { await refresh(); return; }
-        const file = await fs.open(picked[0].fsPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-        let raw: string;
-        try {
-          const stat = await file.stat();
-          if (!stat.isFile() || stat.size > MAX_TRANSCRIPT_BYTES) throw Error('transcript_too_large');
-          raw = await file.readFile('utf8');
-        } finally { await file.close(); }
-        const parsed = parseLocalTranscript(raw, msg.host);
+        let path: string | undefined;
+        if (msg.action === 'recent') {
+          const sessions = (await recentLocalSessions(homedir(), project)).filter(s => s.host === msg.host);
+          const choice = await vscode.window.showQuickPick(sessions.map(s => ({ label: `${new Date(s.modified).toLocaleString()} · ${s.session}`, description: `${(s.bytes / 1048576).toFixed(1)} MiB`, detail: s.path, path: s.path })), { title: 'Recent sessions for this project', matchOnDetail: true, placeHolder: sessions.length ? 'Select a session snapshot to review locally' : 'No matching sessions found (Codex: last 7 days). Use Import to select a file.' });
+          path = choice?.path;
+        } else {
+          const picked = await vscode.window.showOpenDialog({ canSelectMany: false, canSelectFolders: false, filters: { 'Task transcript': ['jsonl'] }, title: 'Select one task transcript from this project' });
+          path = picked?.[0]?.fsPath;
+        }
+        if (!path) { await refresh(); return; }
+        const parsed = await parseLocalTranscriptFile(path, msg.host);
         if (await fs.realpath(parsed.project) !== await fs.realpath(project)) throw Error('transcript_project_mismatch');
         const decision = await vscode.window.showInformationMessage(`Import ${parsed.batch.events.length} messages from this ${msg.host} task into private local storage? Known secret formats are removed. Tools and hidden reasoning are omitted.`, { modal: true }, 'Import task');
         if (decision !== 'Import task') { await refresh(); return; }
-        selected = (await service.import(raw, msg.host, parsed.project)).task.id;
+        selected = (await service.importParsed(parsed, parsed.project)).task.id;
       } else if (msg.action === 'open') { await service.card(msg.task); selected = msg.task; }
       else if (msg.action !== 'load') {
         if (msg.task !== selected) throw Error('Select the task before editing it.');
         if (msg.action === 'purpose') await service.purpose(msg.task, msg.text);
-        else if (msg.action === 'review') await service.review(msg.task, msg.capability, msg.decision, msg.text);
+        else if (msg.action === 'review') await service.review(msg.task, msg.capability, msg.decision, msg.text, msg.evidence);
+        else if (msg.action === 'improvement') await service.improvement(msg.task, msg.text);
+        else if (msg.action === 'followUp') await service.followUp(msg.task, msg.improvement, msg.attempt, msg.observed);
         else if (msg.action === 'preview') { await refresh({ preview: await service.preview(msg.task, msg.includeEvidence) }); return; }
         else if (msg.action === 'submit') { await service.submit(msg.task, msg.digest); await refresh({ notice: 'Accepted in the local inbox. Receipt and stored bundle match.' }); return; }
         else if (msg.action === 'delete') {

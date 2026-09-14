@@ -591,3 +591,11 @@ REQ-M27의 활동 원문 보존은 유지하되 기본 표시를 조정한다. �
 ## Local task review (#1020)
 
 `REQ-STUDIO-LOCAL-REVIEW`: [Explicit local task review](requirements/local-task-review.md) connects selected Claude/Codex message evidence to private file storage, the six-capability card, human review revisions and an independently verified local submission receipt. Captured replay, automated installed-shell tests, public release and Jay acceptance remain distinct.
+
+### Local session observation (#1049)
+
+REQ-STUDIO-LOCAL-REVIEW now includes on-demand project-scoped recent-session
+selection, bounded streaming snapshots, model-condition observations, same-task
+snapshot revisions, source-linked manual interpretation, and persisted next-task
+improvement/follow-up. See `docs/requirements/local-task-review.md` for limits and
+acceptance. No automated semantic scoring, live capture or research validity claim.

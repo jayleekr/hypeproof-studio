@@ -8,8 +8,10 @@ import type { StoragePort } from '../../../worker/src/lib/measurement-core/local
  * Interrupted temporary writes are never listed as records. No network or eviction. */
 export class FileRecordStorage implements StoragePort {
   readonly root: string;
+  private sizes: Map<string, number> | undefined;
   constructor(root: string) { this.root = resolve(root); }
   async initialize() {
+    if (this.sizes) return;
     await fs.mkdir(this.root, { recursive: true, mode: 0o700 });
     const st = await fs.lstat(this.root);
     if (!st.isDirectory() || st.isSymbolicLink()) throw Error('unsafe_storage_directory');
@@ -45,12 +47,14 @@ export class FileRecordStorage implements StoragePort {
       if (options.ifAbsent) await fs.link(temp, target);
       else await fs.rename(temp, target);
       await this.syncDirectory();
+      this.sizes?.set(key, value.length);
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === 'EEXIST') throw Error('exists');
       throw e;
     } finally { await fs.unlink(temp).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
   }
   async list(prefix: string) {
+    if (this.sizes) return [...this.sizes.keys()].filter(k => k.startsWith(prefix)).sort();
     await this.initialize();
     const keys: string[] = [];
     for (const name of await fs.readdir(this.root)) {
@@ -62,8 +66,14 @@ export class FileRecordStorage implements StoragePort {
   }
   async remove(key: string) {
     await this.initialize();
-    try { await fs.unlink(this.file(key)); await this.syncDirectory(); }
+    try { await fs.unlink(this.file(key)); await this.syncDirectory(); this.sizes?.delete(key); }
     catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+  }
+  async usageBytes(): Promise<number> {
+    if (this.sizes) return [...this.sizes.values()].reduce((sum, n) => sum + n, 0);
+    let total = 0;
+    for (const key of await this.list('')) total += (await this.read(key))?.length || 0;
+    return total;
   }
   /** Fail closed on competing Studio windows. A crashed owner's lock can be recovered. */
   async exclusive<T>(fn: () => Promise<T>): Promise<T> {
@@ -79,7 +89,12 @@ export class FileRecordStorage implements StoragePort {
       await fs.rm(lock, { recursive: true });
       return this.exclusive(fn);
     }
-    try { await fs.writeFile(join(lock, 'pid'), String(process.pid), { mode: 0o600 }); return await fn(); }
-    finally { await fs.rm(lock, { recursive: true }); }
+    try {
+      await fs.writeFile(join(lock, 'pid'), String(process.pid), { mode: 0o600 });
+      const sizes = new Map<string, number>();
+      for (const key of await this.list('')) sizes.set(key, (await this.read(key))?.length || 0);
+      this.sizes = sizes;
+      return await fn();
+    } finally { this.sizes = undefined; await fs.rm(lock, { recursive: true }); }
   }
 }

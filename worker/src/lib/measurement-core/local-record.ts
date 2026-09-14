@@ -15,6 +15,8 @@ export const DEFAULT_LOCAL_MAX_BYTES = 256 * 1024 * 1024;
 export const DELETE_NOT_COVERED = ["host_original_records", "copies_exported_by_the_user"] as const;
 
 export interface StoragePort {
+  /** Optional exact character usage; must include durable writes and never cache receipt reads. */
+  usageBytes?(): Promise<number>;
   read(key: string): Promise<string | null>;
   /** Resolves only once durable. With `ifAbsent`, atomically rejects with Error("exists") if the key is taken. */
   write(key: string, value: string, options?: { ifAbsent?: boolean }): Promise<void>;
@@ -309,6 +311,10 @@ export class LocalRecord {
   }
 
   async usage(): Promise<{ bytes: number; max_bytes: number }> {
+    if (this.#store.usageBytes) {
+      try { return { bytes: await this.#store.usageBytes(), max_bytes: this.#maxBytes }; }
+      catch { throw new Error("storage_failure"); }
+    }
     let bytes = 0;
     for (const key of await this.#keys("")) {
       try {
