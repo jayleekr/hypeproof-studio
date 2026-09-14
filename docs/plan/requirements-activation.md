@@ -52,7 +52,7 @@ claimed/in_review는 다른 작업과 합류·검토, reconcile은 닫힘/오래
 | 단위 | 종류 | 이슈 |
 |---|---|---|
 | [학생 목표와 수업 기준 보존](#goal) | implementation | [#554](https://github.com/jayleekr/hypeproof-studio/issues/554) |
-| [제외한 자료가 재개 문맥에 남지 않도록 집행](#context) | implementation | [#555](https://github.com/jayleekr/hypeproof-studio/issues/555) |
+| [제외한 자료가 이후 모델 문맥에 남지 않도록 집행](#context) | implementation | [#555](https://github.com/jayleekr/hypeproof-studio/issues/555) |
 | [단계별 도움 선택과 실제 모델 행동 연결](#help-modes) | implementation | [#1008](https://github.com/jayleekr/hypeproof-studio/issues/1008) |
 | [제한된 승인 묶음의 범위와 만료](#approval-scope) | design | [#563](https://github.com/jayleekr/hypeproof-studio/issues/563) |
 | [세션 압축·중복 실행·재개 경계](#session) | validation | [#647](https://github.com/jayleekr/hypeproof-studio/issues/647) |
@@ -104,15 +104,15 @@ claimed/in_review는 다른 작업과 합류·검토, reconcile은 닫힘/오래
 
 <a id="context"></a>
 
-### 제외한 자료가 재개 문맥에 남지 않도록 집행
+### 제외한 자료가 이후 모델 문맥에 남지 않도록 집행
 
 - 이슈: [#555](https://github.com/jayleekr/hypeproof-studio/issues/555) · implementation
 - 요구사항: learning-agent-experience: AE-02, AE-41
-- 다음 행동: 실제 SDK resume payload에 이전 합성 표식이 남는 경로를 먼저 재현하고 자료 선택/재구성을 연결한다.
-- 디자인 변경: 제외 목록을 파일·이전 메시지·요약·도구 결과에 적용한다. 배제를 보장하지 못하는 resume는 허용 자료로 새 세션을 구성한다.
-- 양성 대조: 포함 자료 B는 다음 요청에 남고 작업 목표는 유지.
-- 음성 대조: 제거 자료 A의 표식이 payload·요약·도구 재탐색에 남으면 실패. 과거 공급자 전송을 삭제했다고 표시하지 않음.
-- 확인할 구현 경로: `extensions/hypeproof-chat/src/sdkCoach.ts`, `extensions/hypeproof-chat/src/sdkCoachHelpers.ts`
+- 다음 행동: 현재 매 턴 대화를 재전송하는 두 모델 경로에서 메모·텍스트 자료 A를 이후 문맥에서 제외하는 첫 수직 조각을 구현한다. 출처 없는 과거 문맥은 확인된 목표와 유지 자료로 재구성하고 그 경계를 표시한다.
+- 디자인 변경: 활동 범위의 호스트 소유 제외 상태를 입력 초안과 분리해 저장하고 SDK·proxy가 공유하는 대화 재생 경로와 UI에 적용한다. 첫 조각은 메모·텍스트만 지원하며 파일·페이지·이미지·자동 도구 읽기는 실제 집행 전까지 제외 가능하다고 표시하지 않는다. SDK resume 도입은 선행 조건이 아니다.
+- 양성 대조: 포함 자료 B와 확인된 작업 목표는 다음 요청과 재열기 뒤에도 유지.
+- 음성 대조: 제외한 메모·텍스트 자료 A의 표식이 이전 assistant 인용, 입력 초안 저장·전송, 예약 전송, 활동 재열기 뒤 두 모델 요청 경로에 남거나 다른 활동의 제외 상태가 바뀌면 실패. 지원하지 않는 자료 유형을 안전하게 제외됐다고 표시하거나 과거 공급자 전송을 삭제했다고 표시해도 실패.
+- 확인할 구현 경로: `extensions/hypeproof-chat/src/protocol.ts`, `extensions/hypeproof-chat/src/contextExclusion.ts`, `extensions/hypeproof-chat/src/chatTimeline.ts`, `extensions/hypeproof-chat/src/chatPanelProvider.ts`, `extensions/hypeproof-chat/src/sdkCoach.ts`, `extensions/hypeproof-chat/src/proxyClient.ts`, `extensions/hypeproof-chat/webview-ui/src/ChatPanel.tsx`
 
 <a id="help-modes"></a>
 
