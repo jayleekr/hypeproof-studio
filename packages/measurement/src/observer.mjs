@@ -13,11 +13,24 @@ const bounded=(v,max=200)=>typeof v==='string'?v.slice(0,max):null;
 const safeId=v=>bounded(v,200)?.replace(/[^a-zA-Z0-9_.:/-]/g,'_')||null;
 const emptyCoverage=()=>({records:0,eligible:0,omitted:0,hidden:0,malformed:0,unsupported:0,oversized:0,excerpted:0,redacted:0});
 const category=name=>/bash|exec|shell|terminal/i.test(name)?'shell':/write|edit|patch/i.test(name)?'file-change':/read|search|grep|glob/i.test(name)?'read':'other';
-function artifact(input,project,operation){
+function artifact(input,project,operation,roots=[]){
  const path=input?.file_path||input?.path;if(typeof path!=='string')return null;
- const rel=relative(project,resolve(project,path));if(!rel||isAbsolute(rel)||rel==='..'||rel.startsWith('../')||rel.includes('\\')||rel.length>300)return null;
+ const absolute=resolve(project,path),root=[project,...roots].sort((a,b)=>b.length-a.length).find(r=>absolute.startsWith(r+'/'));if(!root)return null;const rel=relative(root,absolute);if(!rel||isAbsolute(rel)||rel==='..'||rel.startsWith('../')||rel.includes('\\')||rel.length>300)return null;
  if(/(?:^|\/)(?:\.env(?:\.|$)|credentials|secrets|id_rsa|id_ed25519)/i.test(rel))return null;
  return {path:redactText(rel).text,digest:typeof input.content==='string'?'sha256:'+sha(input.content):null,operation};
+}
+function nativePatch(raw,project,roots=[]){
+ if(typeof raw!=='string'||!raw.startsWith('*** Begin Patch\n')||!raw.trimEnd().endsWith('*** End Patch'))return [];
+ const found=[];for(const line of raw.split('\n')){const m=/^\*\*\* (Add|Update|Delete) File: (.+)$/.exec(line);if(!m)continue;const a=artifact({path:m[2]},project,m[1]==='Add'?'write':m[1]==='Update'?'edit':'unknown',roots);if(a)found.push(a)}return found;
+}
+/** Exact host exec wrapper only; never search command stdout for exit-code prose. */
+function shellOutputRecords(value){
+ const items=Array.isArray(value)?value:[{type:'input_text',text:value}],found=[];
+ for(const item of items){if(!['text','input_text','output_text'].includes(item?.type)||typeof item.text!=='string')continue;let v;try{v=JSON.parse(item.text)}catch{continue}
+  if(!v||Array.isArray(v)||typeof v!=='object'||Object.keys(v).some(k=>!['chunk_id','wall_time_seconds','output','session_id','exit_code','original_token_count'].includes(k)))continue;
+  if(typeof v.chunk_id!=='string'||!Number.isFinite(v.wall_time_seconds)||typeof v.output!=='string'||(!Number.isSafeInteger(v.exit_code)&&!Number.isSafeInteger(v.session_id)))continue;
+  found.push({exit_code:Number.isSafeInteger(v.exit_code)?v.exit_code:null,status:Number.isSafeInteger(v.exit_code)?(v.exit_code===0?'success':'failure'):'running',interrupted:null,background:v.session_id});
+ }return found;
 }
 function outcome(value,error){
  let v=value;if(typeof v==='string'){try{v=JSON.parse(v)}catch{v=null}}
@@ -26,7 +39,7 @@ function outcome(value,error){
  return {status:interrupted?'interrupted':code!==null?(code===0?'success':'failure'):error===true?'failure':(v?.status==='running'||v?.backgroundTaskId||v?.isAsync===true)?'running':'unknown',exit_code:code,interrupted};
 }
 /** Pure local normalization. Raw commands, tool output, patches and thinking never enter events/state. */
-export function normalizeRecord(r,state,source,host,project){
+export function normalizeRecord(r,state,source,host,project,roots=[]){
  const events=[],coverage=emptyCoverage();coverage.records=1;
  if(r.type==='observer_malformed_record'){coverage.malformed=1;coverage.omitted=1;return {events,coverage};}
  const p=r.payload||{};
@@ -54,7 +67,7 @@ export function normalizeRecord(r,state,source,host,project){
   if(host==='codex'&&r.type==='response_item'){
    if(p.type==='reasoning'||p.channel==='analysis'){coverage.hidden++;return {events,coverage}}
    if(p.type==='message'){role=p.role;blocks=p.content||[]}
-   else if(['function_call','custom_tool_call'].includes(p.type))blocks=[{type:'tool_use',id:p.call_id,name:p.name,input:p.arguments}];
+   else if(['function_call','custom_tool_call'].includes(p.type))blocks=[{type:'tool_use',id:p.call_id,name:p.name,input:p.arguments??p.input}];
    else if(['function_call_output','custom_tool_call_output'].includes(p.type))blocks=[{type:'tool_result',tool_use_id:p.call_id,content:p.output}];
   }else if(host==='claude-code'&&['user','assistant'].includes(r.type)){
    if(r.isMeta){coverage.omitted++;return {events,coverage}}role=r.message?.role;
@@ -69,17 +82,17 @@ export function normalizeRecord(r,state,source,host,project){
     if(clean.text.length>OBSERVER_LIMITS.message)coverage.excerpted++;
     emit('message',role==='assistant'?'ai':delegated?'delegated':'human-unconfirmed',{message:{text:clean.text.slice(0,OBSERVER_LIMITS.message)}});
    }else if(b.type==='tool_use'){
-    const id=safeId(b.id);if(!id){coverage.unsupported++;continue}const name=safeId(b.name)||'unknown';let input=b.input;if(typeof input==='string'){try{input=JSON.parse(input)}catch{input=null}}
-    const a=artifact(input,project,/write/i.test(name)?'write':/edit|patch/i.test(name)?'edit':'read');
+    const id=safeId(b.id);if(!id){coverage.unsupported++;continue}const name=safeId(b.name)||'unknown';const rawInput=b.input;let input=b.input;if(typeof input==='string'){try{input=JSON.parse(input)}catch{input=null}}
+    const a=artifact(input,project,/write/i.test(name)?'write':/edit|patch/i.test(name)?'edit':'read',roots);const patches=/apply_patch/i.test(name)?nativePatch(rawInput,project,roots):[];
     if(Object.keys(state.calls).length>=500&&!state.calls[id])throw Error('pending_tool_limit');
-    state.calls[id]={name,category:category(name),task,model:state.model||null,artifact:a};
+    state.calls[id]={name,category:category(name),task,model:state.model||null,artifact:a,patches,patchDigest:patches.length?'sha256:'+sha(rawInput):null};
     emit('tool_call','ai',{tool:{call_id:id,name,category:category(name),status:'requested',exit_code:null,interrupted:null}});
    }else if(b.type==='tool_result'){
     let id=safeId(b.tool_use_id);if(!id){coverage.unsupported++;continue}const receiptCallId=id;const receiptCall=state.calls[id];state.background??={};const bg=safeId(r.toolUseResult?.task_id);if(bg&&state.background[bg])id=state.background[bg];const call=state.calls[id];const originalTask=task,originalModel=state.model;
     if(call){task=call.task;state.model=call.model}
-    const status=outcome(r.toolUseResult||b.content,b.is_error);const background=safeId(r.toolUseResult?.backgroundTaskId);if(background)state.background[background]=id;
-    emit('tool_result','ai',{tool:{call_id:id,name:call?.name||'unknown',category:call?.category||'other',...status}});
-    if(call?.artifact&&status.status!=='failure'&&status.status!=='interrupted')emit('artifact','ai',{artifact:call.artifact});
+    const shell=host==='codex'&&call?.category==='shell'?shellOutputRecords(b.content):[];const status=shell.length?(shell.some(x=>x.status==='running')?{status:'running',exit_code:null,interrupted:null}:shell.find(x=>x.status==='failure')||shell[0]):outcome(r.toolUseResult||b.content,b.is_error);const background=safeId(r.toolUseResult?.backgroundTaskId);if(background)state.background[background]=id;
+    for(const outcome of (shell.length?shell:[status]))emit('tool_result','ai',{tool:{call_id:id,name:call?.name||'unknown',category:call?.category||'other',status:outcome.status,exit_code:outcome.exit_code,interrupted:outcome.interrupted}});
+    if(status.status!=='failure'&&status.status!=='interrupted')for(const a of [call?.artifact,...(call?.patches||[])].filter(Boolean))emit('artifact','ai',{artifact:a});
     if(status.status!=='running'){delete state.calls[id];if(bg)delete state.background[bg];}
     if(receiptCallId!==id&&receiptCall){task=receiptCall.task;state.model=receiptCall.model;emit('tool_result','ai',{tool:{call_id:receiptCallId,name:receiptCall.name,category:receiptCall.category,status:'unknown',exit_code:null,interrupted:null}});delete state.calls[receiptCallId];}
     task=originalTask;state.model=originalModel;
@@ -115,8 +128,8 @@ export async function* observeFile(source,checkpoint=null,{maxBytes=32*1024*1024
     const before=structuredClone(state);const locator={line:state.line+1,from:lineStart,to:lineEnd,hash:'sha256:'+sha(raw)};
     let normalized;
     if(raw.length>2*1024*1024){normalized={events:[],coverage:{...emptyCoverage(),records:1,oversized:1,omitted:1}}}
-    else{let row;try{row=JSON.parse(raw.toString('utf8'))}catch{if(!raw.toString('utf8').trim()){row={type:'blank'}}else row={type:'observer_malformed_record'}};if(!row||typeof row!=='object'||Array.isArray(row))row={type:'observer_malformed_record'};normalized=normalizeRecord(row,state,locator,source.host,source.cwd)}
-    if(events.length+normalized.events.length>OBSERVER_LIMITS.events||Buffer.byteLength(JSON.stringify([...events,...normalized.events]))>OBSERVER_LIMITS.bytes-16384){state=before;if(state.offset>batchFrom){yield await flush();produced++;if(produced>=maxDeltas)return;} normalized=raw.length>2*1024*1024?normalized:normalizeRecord(JSON.parse(raw.toString('utf8')),state,locator,source.host,source.cwd);}
+    else{let row;try{row=JSON.parse(raw.toString('utf8'))}catch{if(!raw.toString('utf8').trim()){row={type:'blank'}}else row={type:'observer_malformed_record'}};if(!row||typeof row!=='object'||Array.isArray(row))row={type:'observer_malformed_record'};normalized=normalizeRecord(row,state,locator,source.host,source.cwd,source.artifactRoots||[])}
+    if(events.length+normalized.events.length>OBSERVER_LIMITS.events||Buffer.byteLength(JSON.stringify([...events,...normalized.events]))>OBSERVER_LIMITS.bytes-16384){state=before;if(state.offset>batchFrom){yield await flush();produced++;if(produced>=maxDeltas)return;} normalized=raw.length>2*1024*1024?normalized:normalizeRecord(JSON.parse(raw.toString('utf8')),state,locator,source.host,source.cwd,source.artifactRoots||[]);}
     if(normalized.events.length>OBSERVER_LIMITS.events)throw Error('observer_record_event_limit');
     events.push(...normalized.events);for(const k of Object.keys(coverage))coverage[k]+=normalized.coverage[k];state.offset=lineEnd;state.line++;lineStart=lineEnd;
    }
@@ -136,7 +149,7 @@ export async function discoverObserverSources(home,projects,{maxFiles=5000,maxDi
  await walk(join(home,'.codex','sessions'),'codex',4);
  for(const path of allowed.keys())await walk(join(home,'.claude','projects',path.replace(/[^a-zA-Z0-9]/g,'-')),'claude-code',3);
  const found=[],seen=new Set();for(const item of candidates){if(seen.has(item.path))continue;seen.add(item.path);const h=await open(item.path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const st=await h.stat();const cached=cache[item.path];const reuse=cached&&cached.inode===String(st.ino)&&cached.bytes===st.size&&cached.modified===st.mtimeMs;const data=reuse?Buffer.alloc(0):await readRange(h,0,Math.min(st.size,65536));let session=reuse?cached.session:null,cwd=reuse?cached.cwd:null,delegated=reuse?cached.delegated:false,agentId=reuse?cached.agentId:null;for(const l of data.toString('utf8').split('\n')){let r;try{r=JSON.parse(l)}catch{continue}if(item.host==='codex'&&r.type==='session_meta'){session=r.payload?.id;cwd=r.payload?.cwd;delegated=r.payload?.subagent_history_start_ordinal!=null;break}if(item.host==='claude-code'&&r.sessionId&&r.cwd){session=r.sessionId;cwd=r.cwd;delegated=!!r.isSidechain||!!r.agentId;agentId=safeId(r.agentId);break}}
-  if(typeof session!=='string'||typeof cwd!=='string')continue;cache[item.path]={session,cwd,delegated,agentId,inode:String(st.ino),bytes:st.size,modified:st.mtimeMs};let real;try{real=await realpath(cwd)}catch{continue}const p=allowed.get(real);if(p)found.push({...item,parentSession:session,session:item.host==='claude-code'&&delegated?session+':agent:'+(agentId||sha(item.path).slice(0,16)):session,cwd:real,project:p.id,delegated,bytes:st.size,modified:st.mtimeMs});
+  if(typeof session!=='string'||typeof cwd!=='string')continue;cache[item.path]={session,cwd,delegated,agentId,inode:String(st.ino),bytes:st.size,modified:st.mtimeMs};let real;try{real=await realpath(cwd)}catch{continue}const p=allowed.get(real);if(p)found.push({...item,parentSession:session,session:item.host==='claude-code'&&delegated?session+':agent:'+(agentId||sha(item.path).slice(0,16)):session,cwd:real,project:p.id,artifactRoots:[...allowed].filter(([,grant])=>grant.id===p.id).map(([path])=>path),delegated,bytes:st.size,modified:st.mtimeMs});
  }finally{await h.close()}}
  return found.sort((a,b)=>b.modified-a.modified||a.path.localeCompare(b.path));
 }
