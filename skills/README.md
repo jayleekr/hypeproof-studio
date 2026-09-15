@@ -1,27 +1,15 @@
 # HypeProof Agent Skills
 
-This directory is the public source of truth for Agent Skills maintained with
-HypeProof Studio. Concrete changes should arrive as reviewed pull requests so
-the scoring logic, examples, and runtime copies do not drift.
+This directory is the public source of truth for Agent Skills maintained with HypeProof Studio.
 
-## HAIN7 Report
+## Current measurement
 
-[`hain7-report`](./hain7-report/) turns an HP Studio lesson log into an
-evidence-cited, one-page classroom observation profile across seven capabilities.
-It works from the learner's prompts, actions, checks, and artifact versions—no
-separate survey is required.
+Use the [member measurement workbench](https://hypeproof-ai.xyz/members/studio/measurement) for current Codex and Claude Code work: review evidence, calculate six-capability research task indices, and record next actions. Its [versioned methodology](https://hypeproof-ai.xyz/members/studio/measurement/methodology) defines current rules. The `packages/measurement/` package supplies host capture and synchronization; it does not turn AI suggestions into human-reviewed scores.
 
-[![Synthetic HAIN7 Studio Signal preview](./hain7-report/examples/hain7-studio-signal-demo.png)](./hain7-report/examples/hain7-studio-signal-demo.png)
+## Historical HAIN7 reports — retired 2026-09-15
 
-- Open the [skill instructions](./hain7-report/SKILL.md).
-- Claude Code invokes the installed skill as `/hain7-report`; Codex uses
-  `$hain7-report`.
-- Keep the deterministic scorer, 28-marker rubric, cohort gates, and disclaimer
-  intact across runtimes.
-- Use only synthetic data in public issues and pull requests. Never upload a
-  child's raw session log, name, or contact information.
+[`hain7-report`](./hain7-report/) is retained only to replay or export an explicitly selected historical seven-axis record under its original rubric. It is not a recommended workflow for new measurements.
 
-Installation and portability details are in
-[`runtime-compatibility.md`](./hain7-report/references/runtime-compatibility.md).
-For improvements, open a GitHub issue describing the observed problem and submit
-a focused pull request with a synthetic regression case when possible.
+The CLI requires `--legacy-replay` and an exact session path, rejects `--latest`, and keeps existing overwrite safeguards. The flag declares archival intent; it does not authenticate the age of input. Preserve original records and label replayed output as historical. Never convert seven-axis scores into six-axis scores.
+
+Read the [historical instructions](./hain7-report/SKILL.md) and [runtime compatibility](./hain7-report/references/runtime-compatibility.md) for archival use. Public examples remain synthetic; never upload private learner logs in issues or PRs.
