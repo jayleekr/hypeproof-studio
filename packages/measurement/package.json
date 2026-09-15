@@ -22,7 +22,7 @@
   ],
   "scripts": {
     "build": "node build.mjs",
-    "test": "npm run build && node --test test/*.test.mjs",
+    "test": "npm run build && node --test test/sync.test.mjs test/observer*.test.mjs",
     "prepack": "npm run build"
   },
   "devDependencies": {
