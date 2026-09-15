@@ -587,3 +587,31 @@ REQ-M27의 활동 원문 보존은 유지하되 기본 표시를 조정한다. �
 실패했을 때 파일 저장을 관측하지 않았다면 저장 완료라고 안내하지 않는다 (#968).
 배포·이행은 [공통 릴리스 절차](dev/unified-release-and-migration.md)를 따르며
 양쪽 활동 검사 누락을 한쪽의 성공으로 보충하지 않는다.
+
+## Local task review (#1020)
+
+`REQ-STUDIO-LOCAL-REVIEW`: [Explicit local task review](requirements/local-task-review.md) connects selected Claude/Codex message evidence to private file storage, the six-capability card, human review revisions and an independently verified local submission receipt. Captured replay, automated installed-shell tests, public release and Jay acceptance remain distinct.
+
+### Local session observation (#1049)
+
+REQ-STUDIO-LOCAL-REVIEW now includes on-demand project-scoped recent-session
+selection, bounded streaming snapshots, model-condition observations, same-task
+snapshot revisions, source-linked manual interpretation, and persisted next-task
+improvement/follow-up. See `docs/requirements/local-task-review.md` for limits and
+acceptance. No automated semantic scoring, live capture or research validity claim.
+
+## Automatic host session sync (#1049)
+
+REQ-SS1: The standalone measurement package automatically queues project-scoped
+Codex/Claude visible-message snapshots to the member server after one connection.
+REQ-SS2: Offline retries, exact server receipts, authorized download/cursor recovery
+and a restartable local supervisor preserve evidence without requiring the Studio UI.
+REQ-SS3: Transfer remains unreviewed evidence, separate from manual app reviews,
+legacy-seven records, task outcomes and research validity.
+REQ-SS4: Both host tools can read server workbench results with the existing
+connection, preserving review/hold states without submitting reviews. Specific
+server deletion responses prevent recapture and unblock download races across restart.
+
+Contract: [SS-01–10](requirements/session-sync.md). Validation:
+`packages/measurement/test/sync.test.mjs`; production acceptance and installed
+supervisor observation must be recorded separately.

@@ -127,11 +127,27 @@ class Hain7SignalTests(unittest.TestCase):
         self.assertIsNone(markers["IT1"]["score"])
         self.assertIsNone(markers["OW2"]["score"])
 
+    def test_default_cli_rejects_before_reading_or_writing_records(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "analysis.json"
+            with self.assertRaises(SystemExit) as error:
+                hs.main(["--input", "/nonexistent", "--context", "/nonexistent",
+                         "--analysis-output", str(output)])
+            self.assertEqual(error.exception.code, 2)
+            self.assertFalse(output.exists())
+
+    def test_archival_cli_rejects_latest_selection(self) -> None:
+        with self.assertRaises(SystemExit) as error:
+            hs.parse_args(["--legacy-replay", "--latest", "--input", "/nonexistent",
+                           "--context", "/nonexistent", "--analysis-output", "/nonexistent"])
+        self.assertEqual(error.exception.code, 2)
+
     def test_cli_analysis_output_is_auditable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output = Path(temp_dir) / "analysis.json"
             code = hs.main(
                 [
+                    "--legacy-replay",
                     "--input",
                     str(SKILL_DIR / "examples" / "sample-session"),
                     "--context",

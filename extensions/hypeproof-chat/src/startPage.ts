@@ -89,6 +89,7 @@ export class StartPage {
 
   private async handle(msg: StartRequest): Promise<void> {
     if (!msg || typeof msg !== "object") return;
+    if (msg.type === "openLocalReview") { await vscode.commands.executeCommand("hypeproof-chat.localReview"); return; }
     if (msg.type === "startReady") { await this.refresh(); return; }
     if (msg.type === "openStudioFiles" || msg.type === "openStudioSettings") {
       await vscode.commands.executeCommand(msg.type === "openStudioFiles" ? "workbench.view.explorer" : "workbench.action.openSettings");

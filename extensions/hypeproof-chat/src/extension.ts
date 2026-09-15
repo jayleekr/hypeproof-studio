@@ -1,3 +1,4 @@
+import { registerLocalReview } from "./localReviewPanel";
 import { ActivityConnectionError, ActivityConnections, activityConnections } from './activityConnections';
 import { fetchProfileResult } from './proxyClient';
 import { prepareWorkspaceDirectory } from './workspacePreparation';
@@ -149,6 +150,7 @@ export async function activate(context: vscode.ExtensionContext) {
   }
   const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus, spool);
   providerRef = provider;
+  registerLocalReview(context, (webview, dist) => provider.renderHtml(webview, dist));
   const startPage = new StartPage(context, provider, async (profile, commit) => {
     return ensureWorkspace(profile, context, isTestRun && process.env.HPS_TEST_REAL_WORKSPACE !== "1", commit);
   });

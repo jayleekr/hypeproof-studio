@@ -133,7 +133,7 @@ and failure modes: [.claude/rules/build-pipeline.md](.claude/rules/build-pipelin
 | `worker/` | Cloudflare Worker — OpenAI-compatible proxy, per-cohort profiles, token auth. Production target. |
 | `proxy-poc/` | Python proxy from early iteration (superseded by `worker/`). |
 | `scripts/` | Build wrappers — `run-build.sh`, `dev-stack.sh`, `generate-platform-icons.sh`, `verify-branding.sh`. |
-| `skills/` | Public Agent Skills maintained with Studio, including the [`hain7-report`](./skills/hain7-report/) classroom observation report. |
+| `skills/` | Public Agent Skills and [current measurement guidance](./skills/README.md); HAIN7 is retained for historical replay only. |
 | `e2e/` | Playwright suite driving the built `.app`. |
 | `docs/` | INSTALL, COHORT-AUTHORING, 7 AI Native Assets, release guides. |
 | `METAPLAN.md` | Phased build plan — the source of truth. Cross-reference by §N. |

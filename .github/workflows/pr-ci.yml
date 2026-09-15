@@ -5,6 +5,7 @@ on:
   push:
     branches: [main]
     paths:
+      - 'packages/measurement/**'
       - 'worker/**'
       - 'chalk/**'
       - 'extensions/hypeproof-chat/**'
@@ -14,6 +15,23 @@ permissions:
   contents: read
 
 jobs:
+  measurement-package:
+    name: measurement / package and sync
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: packages/measurement/package-lock.json
+      - run: npm ci
+        working-directory: packages/measurement
+      - run: npm test
+        working-directory: packages/measurement
+      - run: npm pack
+        working-directory: packages/measurement
+
   workflow-shells:
     name: workflows / windows shell
     runs-on: ubuntu-latest

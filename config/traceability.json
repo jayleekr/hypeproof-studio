@@ -495,6 +495,40 @@
       ]
     },
     {
+      "id": "ST-TEST-MEASUREMENT-CORE-UNIT1",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/measurement-core.test.mjs"
+        },
+        {
+          "path": "worker/test/fixtures/measurement-core/legacy-verdicts.json"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/measurement-core-shim.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-MEASUREMENT-CORE-UNIT2",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/measurement-core-local-record.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-ACCESS-CONTRACTS",
       "stage": "implementation",
       "owner": "jayleekr",
@@ -1380,6 +1414,212 @@
       "sources": [
         {
           "path": "worker/src/lib/translate.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-LOCAL-REVIEW",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-NATIVE",
+        "ST-REQ-CAPABILITY-CONTRACT"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/local-task-review.md"
+        },
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## Local task review (#1020)"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-LOCAL-REVIEW",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-LOCAL-REVIEW"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/localRecordFile.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localReviewService.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localReviewPanel.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localTranscript.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localReviewProtocol.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/LocalReview.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/localReview.css"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/startPage.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/startPageProtocol.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/StartPage.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/main.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localSessionDiscovery.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-LOCAL-REVIEW",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-LOCAL-REVIEW",
+        "ST-IMP-LOCAL-REVIEW"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/local-record-file.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/local-review.smoke.mjs"
+        },
+        {
+          "path": "e2e/local-review/mac.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/local-session-observation.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/local-review-recovery.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-SESSION-SYNC",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-LOCAL-REVIEW"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/session-sync.md"
+        },
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## Automatic host session sync (#1049)"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-SESSION-SYNC",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-SESSION-SYNC"
+      ],
+      "sources": [
+        {
+          "path": "packages/measurement/src/sync.mjs"
+        },
+        {
+          "path": "packages/measurement/src/cli.mjs"
+        },
+        {
+          "path": "packages/measurement/src/adapters.ts"
+        },
+        {
+          "path": "packages/measurement/build.mjs"
+        },
+        {
+          "path": "packages/measurement/package.json"
+        },
+        {
+          "path": "packages/measurement/src/observer.mjs"
+        },
+        {
+          "path": "packages/measurement/src/observer-contract.mjs"
+        },
+        {
+          "path": "packages/measurement/README.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-SESSION-SYNC",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-SESSION-SYNC",
+        "ST-IMP-SESSION-SYNC"
+      ],
+      "sources": [
+        {
+          "path": "packages/measurement/test/sync.test.mjs"
+        },
+        {
+          "path": ".github/workflows/pr-ci.yml"
+        },
+        {
+          "path": "packages/measurement/test/observer.test.mjs"
+        },
+        {
+          "path": "packages/measurement/test/observer-sync.test.mjs"
+        },
+        {
+          "path": "packages/measurement/test/fixtures/observer-delta.json"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-HAIN7-RETIREMENT",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT"
+      ],
+      "sources": [
+        {
+          "path": "skills/README.md"
+        },
+        {
+          "path": "skills/hain7-report/SKILL.md"
+        },
+        {
+          "path": "skills/hain7-report/agents/openai.yaml"
+        },
+        {
+          "path": "skills/hain7-report/references/runtime-compatibility.md"
+        },
+        {
+          "path": "skills/hain7-report/scripts/hain7_signal.py"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-HAIN7-RETIREMENT",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-IMP-HAIN7-RETIREMENT"
+      ],
+      "sources": [
+        {
+          "path": "skills/hain7-report/scripts/test_hain7_signal.py"
         }
       ]
     }

@@ -4,28 +4,31 @@
 <style>
 :root{color-scheme:dark;font:16px/1.6 system-ui;background:#0f1115;color:#e6e8eb}body{max-width:900px;margin:auto;padding:24px}*{box-sizing:border-box}a{color:#9abaff}fieldset{border:1px solid #414854;border-radius:8px;padding:16px;margin:20px 0}label{display:block;margin:10px 0}input,textarea,select,button{font:inherit;border:1px solid #566071;border-radius:5px;padding:9px;background:#1a1d24;color:inherit;max-width:100%}input,textarea,select{display:block;width:100%}button{cursor:pointer;margin:5px 4px 5px 0;background:#274873}button:disabled{opacity:.5;cursor:default}textarea{min-height:85px}small{color:#b3bac5}#status{white-space:pre-wrap;padding:14px;background:#1a1d24}pre{white-space:pre-wrap;overflow-wrap:anywhere}summary{cursor:pointer}.row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1;min-width:180px}
 #model-allowed,#feature-allowed,#effort-allowed{display:grid;gap:8px}#model-allowed label,#feature-allowed label,#effort-allowed label{display:flex;align-items:center;gap:8px;margin:0}#model-allowed input,#feature-allowed input,#effort-allowed input{width:auto;margin:0}
+
+[hidden]{display:none!important}
+:root{color-scheme:light;background:#f5f5f1;color:#242c28;font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{max-width:960px;padding:36px 28px 80px}header{padding:36px 0 20px}header small{letter-spacing:.12em;color:#587265}h1{font-size:36px;letter-spacing:-.05em;margin:8px 0}header p,.muted,small{color:#69766d}a{color:#426e59}fieldset{background:white;border:1px solid #dce2da;border-radius:14px;padding:24px;margin:24px 0}legend{font-weight:650;padding:0 8px;color:#345b47}input,textarea,select{background:#fcfdfb;border:1px solid #cbd4c9;border-radius:8px;color:#242c28}input:focus,textarea:focus,select:focus{outline:2px solid #6b967f;outline-offset:2px}button{background:#2f5f48;border:0;border-radius:8px;padding:11px 18px;color:white}button:hover:enabled{background:#214a35}button:disabled{opacity:.4}details{margin:20px 0}summary{color:#586b5d;font-size:14px;padding:8px 0}#status{background:#eaf0e8;border-radius:8px;color:#3d604b;font-size:14px}.tools{border-bottom:1px solid #dce2da}.draft-actions{display:flex;align-items:center;gap:14px;flex-wrap:wrap}#editor>fieldset{padding:28px}#editor h2{font-size:21px;margin-bottom:4px}.step{background:#f8faf6}#completion{color:#2f6545;font-weight:600}nav{font-size:13px}pre{font-size:12px}#version-view:empty{display:none}@media(max-width:600px){body{padding:18px 16px 40px}h1{font-size:28px}fieldset,#editor>fieldset{padding:18px}.row>*{min-width:100%}header{padding-top:24px}}
 </style>
 <nav><a href="/console">세션 콘솔</a> · <a href="#support">기능·지원 요청</a></nav>
-<h1>수업 작성</h1><p>초안을 편집하고 저장한 뒤, 확정할 내용을 불변 버전으로 남깁니다. 버전 저장은 수업 시작이나 리허설 합격을 의미하지 않습니다.</p>
-<fieldset><legend>강사 연결</legend>
+<header><small>CHALK / 강의 설계</small><h1>가르칠 내용에 집중하세요.</h1><p>수업 설정을 선택하고 커리큘럼을 작성하세요.<br>강의와 버전의 식별번호는 자동으로 관리합니다.</p></header>
+<fieldset><legend>01 · 강사 연결</legend>
 <label>강사 토큰<input id="token" type="password" autocomplete="off"></label><small>이 화면 메모리에서만 사용합니다. URL이나 수업 파일에는 포함하지 않습니다.</small>
-<div class="row"><label>코호트 ID<input id="cohort" autocomplete="off"></label><label>프로필 ID<input id="profile" autocomplete="off"></label></div>
-<button id="forget">토큰 지우기</button>
+<button id="connect">사용 가능한 수업 설정 불러오기</button><p id="connection-status" role="status">강사 토큰을 연결하면 선택 가능한 수업 설정이 나옵니다.</p><label id="setting-label" hidden>수업 설정<select id="setting"><option value="">선택하세요</option></select></label><details><summary>연결 정보 직접 입력</summary><div class="row"><label>코호트 ID<input id="cohort" autocomplete="off"></label><label>프로필 ID<input id="profile" autocomplete="off"></label></div>
+</details><button id="forget">연결 해제</button>
 </fieldset>
-<fieldset><legend>초안 선택</legend>
+<section class="draft-actions"><button id="new">새 강의 만들기</button><small>기존 수업에는 영향을 주지 않습니다.</small></section>
+<details class="tools"><summary>저장한 강의 열기 · 파일 가져오기</summary><fieldset><legend>기존 강의</legend>
 <label>강의 초안 파일 가져오기<input id="import" type="file" accept=".json,application/json"></label>
 <label>가져온 강의<select id="courses"><option value="">강의 파일을 선택하세요</option></select></label>
-<label>수업 ID<input id="course" autocomplete="off"></label>
-<button id="new">새 초안 작성</button><button id="load">저장된 초안 열기</button>
-</fieldset>
+<label>수업 ID<input id="course" autocomplete="off"></label><small>새 강의는 자동 생성됩니다. 이전 강의를 열 때만 기존 ID를 사용하세요.</small>
+<button id="load">저장된 초안 열기</button></fieldset></details>
 <p id="status" role="status" aria-live="polite">초안을 선택하세요.</p>
-<form id="editor"><fieldset><legend>수업 내용</legend>
+<form id="editor"><fieldset><legend>02 · 커리큘럼</legend>
 <label>제목<input id="title" maxlength="200" required></label>
 <label>대상<textarea id="audience"></textarea></label>
 <label>시간(분)<input id="duration_minutes" type="number" min="1" max="480" value="120"></label>
 <label>목표<textarea id="objective"></textarea></label>
-<label>선수 조건<textarea id="prerequisites"></textarea></label>
-<label>시작 예제·자료<textarea id="starter"></textarea></label>
+<label>시작 예제·자료<textarea id="starter" placeholder="학생이 처음 열어볼 예제나 사용할 자료를 적어주세요."></textarea></label><details><summary>추가 자료 · AI 설정</summary><label>선수 조건<textarea id="prerequisites"></textarea></label>
+
 <label>이 수업의 AI 이름<input id="assistant_name" maxlength="40" autocomplete="off" placeholder="예: 제작 파트너"></label><small>학생 Studio의 헤더와 답변 이름에 그대로 표시됩니다(40자 이내, 한 줄). 비우면 코호트 기본 규칙(고정 이름 또는 학생이 직접 짓기)을 따르고, 이름을 넣으면 학생이 지은 이름 대신 이 이름이 고정됩니다. 이름은 도구 권한·모델·AI 고지를 바꾸지 않습니다. 버전을 고정한 뒤의 편집은 새 버전에만 적용됩니다.</small>
 <div class="card">
 <button id="models-load" type="button">수업 모델 목록 불러오기</button>
@@ -50,23 +53,22 @@
 <small>고른 기능만 이 수업에서 켜집니다. 나머지는 꺼집니다. 여기서 코호트에 없는 기능이 생기지는 않습니다. 브라우저는 실행 경로와 무관하게 하나로 묶여 있습니다.</small>
 </fieldset></div>
 
-<h2>단계</h2><div id="steps"></div><button id="add" type="button">단계 추가</button>
+</details><h2>수업 진행 순서</h2><p class="muted">각 활동에서 무엇을 하고, 무엇을 확인할지 적어주세요.</p><div id="steps"></div><button id="add" type="button">단계 추가</button>
 </fieldset><button id="save" type="submit" disabled>초안 저장</button><button id="export" type="button">편집 내용 내보내기</button></form>
-<fieldset><legend>불변 버전</legend><label>버전 이름<input id="version" placeholder="m2026.09.06-1"></label>
-<button id="freeze" disabled>현재 저장본 버전 고정</button><button id="version-load">버전 확인</button>
-<pre id="version-view" aria-live="polite"></pre></fieldset>
-<fieldset><legend>학생에게 전달</legend>
+<fieldset><legend>03 · 강의 확정</legend><p>저장한 커리큘럼을 확정합니다. 실제 수업 시작과 학생 초대는 별도입니다.</p><details><summary>버전 정보</summary><label>버전 이름<input id="version" placeholder="자동 생성"></label>
+<button id="version-load">버전 확인</button><pre id="version-view" aria-live="polite"></pre></details><button id="freeze" disabled>강의 확정</button><p id="completion" role="status"></p></fieldset>
+<details class="tools"><summary>학생 초대 · 참여 코드 발급</summary><fieldset><legend>학생에게 전달</legend>
 <p>세션 콘솔에서 연습 세션을 열고 학생을 등록한 뒤 발급하세요. 위에 입력한 확정 버전에 연결됩니다. 기존 참여 코드와 진행 중 수업은 바뀌지 않습니다.</p>
 <label>등록된 학생 ID<input id="student" autocomplete="off"></label><label>코드 유효 시간<input id="hours" type="number" min="1" max="24" value="4"></label>
 <button id="deliver">이 버전 참여 코드 발급</button><label>발급된 학생 참여 코드<input id="student-token" type="password" readonly autocomplete="off"></label><button id="copy-student">참여 코드 복사</button><button id="clear-student">발급 코드 지우기</button>
 <p id="delivery-status" role="status">미발급</p><a href="/learn" target="_blank" rel="noopener">학생 수업 화면에서 확인</a>
 </fieldset>
-<fieldset id="support"><legend>기능·지원 요청</legend>
+</details><details class="tools"><summary>지원 요청</summary><fieldset id="support"><legend>기능·지원 요청</legend>
 <label>작업 목적<textarea id="need"></textarea></label><label>필요 날짜<input id="needed" type="date"></label>
 <label>참고 링크<input id="reference" type="url" placeholder="https://…"></label>
 <label>재현·실제 오류·임시 대안<textarea id="repro"></textarea></label>
 <button id="request">GitHub 요청 초안 준비</button><p id="request-status">미접수 — 내용을 준비한 뒤 GitHub에서 직접 제출하세요. 참가자 정보와 인증정보를 넣지 마세요.</p><a id="request-link" hidden target="_blank" rel="noopener noreferrer">GitHub에서 확인하고 제출</a>
-</fieldset>
+</fieldset></details>
 <script>
 const $=id=>document.getElementById(id);
 const fields=['title','audience','duration_minutes','objective','prerequisites','starter'];
@@ -75,11 +77,11 @@ let lessonModel, modelCatalogue, modelCatalogueScope;
 let lessonFeatures, featureCatalogue, featureCatalogueScope;
 const identity=()=>JSON.stringify(['cohort','profile','course'].map(k=>$(k).value.trim()));
 const status=text=>{$('status').textContent=text;};
-function controls(){$('models-fields').disabled=busy||modelCatalogueScope!==identity()||!modelCatalogue;$('effort-fields').disabled=busy||modelCatalogueScope!==identity()||!modelCatalogue?.effort||!lessonModel;$('features-fields').disabled=busy||featureCatalogueScope!==identity()||!featureCatalogue;const valid=bound===identity()&&revision!==null&&!busy;$('save').disabled=!valid;$('freeze').disabled=!valid||dirty||revision<1;for(const id of ['load','new','import','courses','version-load','token','cohort','profile','course','version','forget','deliver','student','hours','features-load'])$(id).disabled=busy;document.querySelector('#editor fieldset').disabled=busy;}
-function changed(){dirty=true;controls();}
+function controls(){$('models-fields').disabled=busy||modelCatalogueScope!==identity()||!modelCatalogue;$('effort-fields').disabled=busy||modelCatalogueScope!==identity()||!modelCatalogue?.effort||!lessonModel;$('features-fields').disabled=busy||featureCatalogueScope!==identity()||!featureCatalogue;const valid=bound===identity()&&revision!==null&&!busy;$('save').disabled=!valid;$('freeze').disabled=!valid||dirty||revision<1;for(const id of ['load','new','import','courses','version-load','token','cohort','profile','course','version','forget','deliver','student','hours','features-load','connect','setting'])$(id).disabled=busy;document.querySelector('#editor fieldset').disabled=busy;}
+function changed(){dirty=true;$('completion').textContent='';controls();}
 function discard(){return !dirty||confirm('저장하지 않은 편집을 바꿀까요? 필요한 내용은 먼저 내보내세요.');}
 function scope(){for(const k of ['cohort','profile','course'])if(!/^[a-zA-Z0-9_-]{1,128}$/.test($(k).value.trim()))throw Error('코호트·프로필·수업 ID를 확인하세요.');if(!$('token').value.trim())throw Error('강사 토큰을 입력하세요.');return '/admin/cohorts/'+encodeURIComponent($('cohort').value.trim())+'/authoring/'+encodeURIComponent($('course').value.trim());}
-function step(data={id:'step-'+crypto.randomUUID().slice(0,8),title:'',instructions:'',hint:'',acceptance:''}){const f=document.createElement('fieldset');f.className='step';for(const [key,label] of Object.entries({id:'단계 ID',title:'단계 제목',instructions:'안내·실습',hint:'힌트',acceptance:'완료 기준'})){const l=document.createElement('label');l.textContent=label;const e=document.createElement(key==='id'||key==='title'?'input':'textarea');e.dataset.field=key;e.value=data[key]??'';l.append(e);f.append(l);}for(const [label,action] of [['위로',()=>f.previousElementSibling?.before(f)],['아래로',()=>f.nextElementSibling?.after(f)],['삭제',()=>f.remove()]]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{action();changed();};f.append(b);}$('steps').append(f);}
+function step(data={id:'step-'+crypto.randomUUID().slice(0,8),title:'',instructions:'',hint:'',acceptance:''}){const f=document.createElement('fieldset');f.className='step';for(const [key,label] of Object.entries({id:'단계 ID',title:'단계 제목',instructions:'안내·실습',hint:'힌트',acceptance:'완료 기준'})){const l=document.createElement('label');l.textContent=label;const e=document.createElement(key==='id'||key==='title'?'input':'textarea');e.dataset.field=key;e.value=data[key]??'';l.append(e);if(key==='id')l.hidden=true;f.append(l);}for(const [label,action] of [['위로',()=>f.previousElementSibling?.before(f)],['아래로',()=>f.nextElementSibling?.after(f)],['삭제',()=>f.remove()]]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{action();changed();};f.append(b);}$('steps').append(f);}
 function content(){const name=$('assistant_name').value.replace(/[\u200B-\u200D\uFEFF]/g,'').trim();return {schema:'hps-session-design/1',...Object.fromEntries(fields.map(k=>[k,k==='duration_minutes'?Number($(k).value):$(k).value])),steps:[...document.querySelectorAll('.step')].map(f=>Object.fromEntries([...f.querySelectorAll('[data-field]')].map(e=>[e.dataset.field,e.value]))),...(name?{assistant:{display_name:name}}:{}),...(lessonModel?{model:lessonModel}:{}),...(lessonFeatures?{features:lessonFeatures}:{})};}
 function render(c){lessonModel=c.model?{default:c.model.default,allowed:[...c.model.allowed],...(c.model.effort?{effort:structuredClone(c.model.effort)}:{})}:undefined;renderModels();lessonFeatures=c.features?{allowed:[...c.features.allowed]}:undefined;renderFeatures();for(const k of fields)$(k).value=c[k]??(k==='duration_minutes'?120:'');$('assistant_name').value=c.assistant?.display_name??'';$('steps').replaceChildren();for(const s of c.steps||[])step(s);}
 async function call(path,method='GET',body){const r=await fetch(path,{method,redirect:'error',headers:{authorization:'Bearer '+$('token').value.trim(),'content-type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const j=await r.json();if(!r.ok){const detail=typeof j.error==='string'?j.error:JSON.stringify(j.error||j);const nameHint=r.status===400&&detail==='invalid session-design fields'&&$('assistant_name').value.trim()?' — 이 Service 버전은 수업별 AI 이름을 아직 받지 않습니다. 이름을 비우고 저장하거나 Service 배포 후 다시 시도하세요. 편집은 보존됐습니다.':'';throw Error(`HTTP ${r.status}: ${detail}`+(r.status===409?' — 편집은 보존됐습니다. 내보낸 뒤 저장본을 다시 열어 비교하세요.':'')+nameHint);}return j;}
@@ -87,14 +89,14 @@ async function run(fn){if(busy)return;busy=true;controls();try{await fn();}catch
 $('deliver').onclick=()=>run(async()=>{const path=scope();$('student-token').value='';const d=await call(path+'/versions/'+encodeURIComponent($('version').value.trim())+'/participants','POST',{user:$('student').value.trim(),hours:Number($('hours').value)});$('student-token').value=d.token;$('delivery-status').textContent=d.user+' · '+d.lesson.version+' · 코드 만료 '+new Date(d.expires_at*1000).toLocaleString()+' · AI 세션 종료 '+new Date(d.session_ends_at).toLocaleString()+' · 리허설 미실행';status('참여 코드를 발급했습니다. 학생 화면과 Studio에서 확인하세요.');});
 $('copy-student').onclick=async()=>{if(!$('student-token').value)return;try{await navigator.clipboard.writeText($('student-token').value);$('delivery-status').textContent+=' · 복사했습니다';}catch{status('클립보드 접근이 거부됐습니다. 브라우저 권한을 확인하세요.');}};
 $('clear-student').onclick=()=>{$('student-token').value='';$('delivery-status').textContent='화면에서 지웠습니다. 이미 발급한 코드의 권한은 만료까지 유지됩니다.';};
-$('token').oninput=()=>{$('student-token').value='';$('version-view').textContent='';};
+$('token').oninput=()=>{clearConnection();};
 $('editor').oninput=changed;
-for(const k of ['cohort','profile','course'])$(k).oninput=()=>{controls();status('대상이 바뀌었습니다. 새 초안 또는 저장된 초안을 선택하세요. 현재 편집은 보존됩니다.');};
-$('forget').onclick=()=>{$('token').value='';$('student-token').value='';status('토큰을 지웠습니다. 편집 내용은 남아 있습니다.');};
-$('new').onclick=()=>run(async()=>{scope();if(!discard())return;render({steps:[]});revision=0;bound=identity();pending=null;dirty=true;status('새 초안 — 아직 저장하지 않았습니다.');});
+for(const k of ['cohort','profile','course'])$(k).oninput=()=>{$('version').value='';$('completion').textContent='';$('student-token').value='';controls();status('대상이 바뀌었습니다. 새 초안 또는 저장된 초안을 선택하세요. 현재 편집은 보존됩니다.');};
+$('forget').onclick=()=>{$('token').value='';clearConnection();status('연결을 해제했습니다. 편집 내용은 남아 있습니다.');};
+$('new').onclick=()=>run(async()=>{if(!$('cohort').value||!$('profile').value)throw Error('먼저 수업 설정을 선택하세요.');if(!discard())return;$('course').value='course-'+crypto.randomUUID();$('version').value='';$('completion').textContent='';scope();render({steps:[]});step();revision=0;bound=identity();pending=null;dirty=true;status('새 강의 — 커리큘럼을 작성하고 저장하세요.');$('title').focus();});
 $('import').onchange=()=>run(async()=>{const f=$('import').files[0];if(!f)return;if(f.size>1024*1024)throw Error('파일은 1 MiB 이하여야 합니다.');const j=JSON.parse(await f.text());const items=j.schema==='hps-authoring-batch/1'?j.courses:[j];if(!Array.isArray(items)||!items.length||items.some(x=>!x.course_id||x.content?.schema!=='hps-session-design/1'||!Array.isArray(x.content.steps)))throw Error('지원하는 강의 초안 파일이 아닙니다.');batch=items;$('courses').replaceChildren(new Option('가져올 강의를 선택하세요',''),...items.map((c,i)=>new Option(c.content.title,String(i))));status('강의를 선택한 뒤 편집하고 저장하세요.');});
-$('courses').onchange=()=>{if($('courses').value===''||!discard())return;const c=batch[Number($('courses').value)];$('course').value=c.course_id;render(c.content);revision=0;bound=identity();pending=null;dirty=true;status('가져온 초안 — 새 수업으로만 저장합니다. 기존 ID가 있으면 충돌로 보호합니다.');controls();};
-$('load').onclick=()=>run(async()=>{const path=scope();if(!discard())return;const d=await call(path);if(d.profile_id!==$('profile').value.trim())throw Error('저장본의 프로필이 선택한 프로필과 다릅니다.');render(d.content);revision=d.revision;bound=identity();dirty=false;pending=null;status('저장본을 열었습니다. revision '+revision);});
+$('courses').onchange=()=>{if($('courses').value===''||!discard())return;const c=batch[Number($('courses').value)];$('version').value='';$('completion').textContent='';$('student-token').value='';$('course').value=c.course_id;render(c.content);revision=0;bound=identity();pending=null;dirty=true;status('가져온 초안 — 새 수업으로만 저장합니다. 기존 ID가 있으면 충돌로 보호합니다.');controls();};
+$('load').onclick=()=>run(async()=>{const path=scope();if(!discard())return;const d=await call(path);if(d.profile_id!==$('profile').value.trim())throw Error('저장본의 프로필이 선택한 프로필과 다릅니다.');render(d.content);revision=d.revision;bound=identity();dirty=false;pending=null;$('version').value='';$('completion').textContent='';$('student-token').value='';status('저장본을 열었습니다. revision '+revision);});
 function renderModels(){
   const available=modelCatalogueScope===identity()&&modelCatalogue;
   $('models-fields').disabled=!available;
@@ -163,10 +165,35 @@ function featureChanged(){
 for(const id of ['feature-mode','feature-allowed'])$(id).onchange=featureChanged;
 $('features-load').onclick=()=>run(async()=>{const catalog=await call(scope()+'/features/'+encodeURIComponent($('profile').value.trim()));featureCatalogue=catalog;featureCatalogueScope=identity();renderFeatures();$('features-status').textContent='이 코호트가 가진 기능 '+catalog.choices.length+'개 · 고른 기능만 남고 나머지는 이 수업에서 꺼집니다. 새 권한은 생기지 않습니다.';});
 $('add').onclick=()=>{step();changed();};
-$('editor').onsubmit=e=>{e.preventDefault();run(async()=>{if(bound!==identity()||revision===null)throw Error('먼저 초안을 선택하세요.');const path=scope();const b={expected_revision:revision,profile_id:$('profile').value.trim(),content:content()};const signature=JSON.stringify([path,b]);if(pending?.signature!==signature)pending={signature,id:crypto.randomUUID()};const d=await call(path,'PUT',{...b,request_id:pending.id});revision=d.revision;dirty=false;pending=null;status('저장했습니다. revision '+revision);});};
-$('freeze').onclick=()=>run(async()=>{if(dirty||revision<1||bound!==identity())throw Error('편집을 먼저 저장하세요.');const d=await call(scope()+'/versions/'+encodeURIComponent($('version').value.trim()),'PUT',{expected_revision:revision});$('version-view').textContent=JSON.stringify(d,null,2);status('불변 버전을 저장했습니다. 리허설 미실행 · 수업 비활성');});
+$('editor').onsubmit=e=>{e.preventDefault();run(async()=>{if(bound!==identity()||revision===null)throw Error('먼저 초안을 선택하세요.');const path=scope();const b={expected_revision:revision,profile_id:$('profile').value.trim(),content:content()};const signature=JSON.stringify([path,b]);if(pending?.signature!==signature)pending={signature,id:crypto.randomUUID()};const d=await call(path,'PUT',{...b,request_id:pending.id});revision=d.revision;dirty=false;pending=null;$('version').value='';$('completion').textContent='';status('저장했습니다. revision '+revision);});};
+$('freeze').onclick=()=>run(async()=>{if(dirty||revision<1||bound!==identity())throw Error('편집을 먼저 저장하세요.');for(const [id,label] of [['title','제목'],['audience','대상'],['objective','목표'],['starter','시작 예제·자료']])if(!$(id).value.trim()){$(id).focus();throw Error(label+'를 작성하고 초안을 저장해주세요.');}if(!confirm('현재 저장한 커리큘럼을 확정할까요?'))return;if(!$('version').value)$('version').value='m'+new Date().toISOString().slice(0,10).replaceAll('-','.')+'-'+revision;const d=await call(scope()+'/versions/'+encodeURIComponent($('version').value.trim()),'PUT',{expected_revision:revision});$('version-view').textContent=JSON.stringify(d,null,2);status('불변 버전을 저장했습니다. 리허설 미실행 · 수업 비활성');$('completion').textContent='강의가 확정되었습니다. 커리큘럼을 저장했습니다. 수업을 시작하기 전에 학생 조건으로 리허설하세요.';});
 $('version-load').onclick=()=>run(async()=>{$('version-view').textContent=JSON.stringify(await call(scope()+'/versions/'+encodeURIComponent($('version').value.trim())),null,2);status('저장된 불변 버전을 확인했습니다. 초안 편집은 유지됩니다.');});
 $('export').onclick=()=>{const blob=new Blob([JSON.stringify({course_id:$('course').value.trim(),content:content()},null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='course-draft.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);};
 $('request').onclick=()=>{const url=new URL('https://github.com/jayleekr/hypeproof-studio/issues/new');url.searchParams.set('title','[강의 지원] '+$('course').value.trim());url.searchParams.set('body',`강의 ID: ${$('course').value.trim()}\n목적: ${$('need').value}\n필요 날짜: ${$('needed').value||'미정'}\n참고: ${$('reference').value}\n재현·오류·대안: ${$('repro').value}\n\n담당자: 미정 (접수 후 지정)\n다음 조치: 재현 확인 및 분류\n예상 일정: 미정 (범위 검토 필요)`);$('request-link').href=url.href;$('request-link').hidden=false;$('request-status').textContent='초안 준비됨 · 아직 미접수. GitHub에서 내용을 확인하고 제출한 뒤 해당 이슈에서 상태를 확인하세요.';};
+
+let settings=[];
+function clearConnection(){
+ $('completion').textContent='';settings=[];$('setting').replaceChildren(new Option('선택하세요',''));$('setting-label').hidden=true;
+ $('cohort').value='';$('profile').value='';$('student-token').value='';$('version-view').textContent='';
+ $('connection-status').textContent='강사 토큰을 연결하면 선택 가능한 수업 설정이 나옵니다.';
+ modelCatalogue=undefined;featureCatalogue=undefined;controls();
+}
+// Payload only discovers candidate cohort IDs. The existing server endpoint verifies
+// the signature, revocation and scope; only its returned profiles become choices.
+$('connect').onclick=()=>run(async()=>{
+ clearConnection();const token=$('token').value.trim();
+ let payload;try{const b=token.split('.')[0].replace(/-/g,'+').replace(/_/g,'/');payload=JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(b.padEnd(Math.ceil(b.length/4)*4,'=')),c=>c.charCodeAt(0))));}catch{throw Error('이슈어 토큰 형식을 확인하세요.');}
+ if(payload.role!=='issuer'||!Array.isArray(payload.scopes))throw Error('강사용 이슈어 토큰을 입력하세요.');
+ const ids=[...new Set(payload.scopes.map(s=>s.cohort))];
+ if(!ids.length||ids.length>100||ids.some(id=>typeof id!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(id)))throw Error('토큰의 수업 범위를 확인하세요.');
+ const found=[];for(const id of ids){const d=await call('/admin/cohorts/'+encodeURIComponent(id)+'/state');for(const p of d.profiles||[])found.push({cohort:id,profile:p.id,label:p.display_name});}
+ if(!found.length)throw Error('선택 가능한 수업 설정이 없습니다. 발급 담당자에게 확인하세요.');
+ settings=found;$('setting').replaceChildren(new Option('수업 설정을 선택하세요',''),...settings.map((s,i)=>new Option(s.label,String(i))));$('setting-label').hidden=false;
+ $('connection-status').textContent='연결되었습니다. '+settings.length+'개의 수업 설정을 사용할 수 있습니다.';
+ if(settings.length===1){$('setting').value='0';applySetting();}
+});
+function applySetting(){const value=$('setting').value,s=value===''?undefined:settings[Number(value)];$('student-token').value='';$('completion').textContent='';$('version').value='';$('version-view').textContent='';if(!s){$('cohort').value='';$('profile').value='';controls();status('수업 설정을 비웠습니다. 설정을 다시 선택하거나 연결 정보를 직접 입력하세요. 현재 편집은 보존됩니다.');return;}$('cohort').value=s.cohort;$('profile').value=s.profile;controls();status('수업 설정을 선택했습니다. 새 강의를 만들거나 저장된 강의를 여세요.');}
+$('setting').onchange=applySetting;
+
 window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
 </script></html>
