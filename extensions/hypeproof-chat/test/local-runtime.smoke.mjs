@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { workspaceTools } from "../src/localRuntime/tools.ts";
 import { localRuntimeConfig } from "../src/localRuntime/index.ts";
 import { startToolServer } from "../src/localRuntime/toolServer.mjs";
-import { subscriptionEnv } from "../src/localRuntime/process.mjs";
+import { jsonProcess, subscriptionEnv } from "../src/localRuntime/process.mjs";
 const root = await mkdtemp(join(tmpdir(), "studio-local-test-"));
 try {
   const cwd = join(root, "work");
@@ -105,9 +105,47 @@ try {
       CLAUDE_CODE_OAUTH_TOKEN: "secret",
       OPENAI_API_KEY: "secret",
       HPS_WORKSHOP_TOKEN: "secret",
+      // #1041 review 1: these passed the old `HPS_.*TOKEN` rule.
+      HPS_ADMIN_PASSWORD: "secret",
+      HPS_ISSUER_SECRET: "secret",
+      HPS_SIGNING_KEY: "secret",
+      GITHUB_TOKEN: "secret",
+      AWS_SECRET_ACCESS_KEY: "secret",
+      SOME_APIKEY: "secret",
     }),
     { HOME: "/home", PATH: "/bin" },
   );
+  // #1041 review 2: a CLI notice on stdout must not end the session, but a run
+  // that never delivers a `result` event must still fail.
+  const noisy = await jsonProcess(process.execPath, [
+    "-e",
+    "console.log('npm notice: update available'); console.log(JSON.stringify({ type: 'result', subtype: 'success' }))",
+  ]);
+  assert.equal(noisy.subtype, "success");
+  await assert.rejects(
+    jsonProcess(process.execPath, ["-e", "console.log('only a notice')"]),
+    /읽을 수 없습니다/,
+  );
+  await assert.rejects(
+    jsonProcess(process.execPath, ["-e", "process.exit(0)"]),
+    /결과를 보내지 않았습니다/,
+  );
+  // #1041 review 3: an abort must kill the whole group while the CLI still runs.
+  const groupAbort = new AbortController();
+  const marker = join(root, "orphan.txt");
+  const killed = jsonProcess(
+    process.execPath,
+    [
+      "-e",
+      `require('child_process').spawn(process.execPath, ['-e', "setTimeout(() => require('fs').writeFileSync(process.env.MARKER, 'leaked'), 1200)"], { detached: false, stdio: 'ignore', env: { ...process.env, MARKER: ${JSON.stringify(marker)} } }); setTimeout(() => {}, 10000)`,
+    ],
+    { signal: groupAbort.signal },
+  );
+  await new Promise((resolve) => setTimeout(resolve, 300));
+  groupAbort.abort();
+  await assert.rejects(killed, /중지/);
+  await new Promise((resolve) => setTimeout(resolve, 1500));
+  await assert.rejects(readFile(marker), /ENOENT/);
   const server = await startToolServer(
     tools.definitions,
     tools.call,
