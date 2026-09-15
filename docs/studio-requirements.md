@@ -599,3 +599,16 @@ selection, bounded streaming snapshots, model-condition observations, same-task
 snapshot revisions, source-linked manual interpretation, and persisted next-task
 improvement/follow-up. See `docs/requirements/local-task-review.md` for limits and
 acceptance. No automated semantic scoring, live capture or research validity claim.
+
+## Automatic host session sync (#1049)
+
+REQ-SS1: The standalone measurement package automatically queues project-scoped
+Codex/Claude visible-message snapshots to the member server after one connection.
+REQ-SS2: Offline retries, exact server receipts, authorized download/cursor recovery
+and a restartable local supervisor preserve evidence without requiring the Studio UI.
+REQ-SS3: Transfer remains unreviewed evidence, separate from manual app reviews,
+legacy-seven records, task outcomes and research validity.
+
+Contract: [SS-01–08](requirements/session-sync.md). Validation:
+`packages/measurement/test/sync.test.mjs`; production acceptance and installed
+supervisor observation must be recorded separately.
