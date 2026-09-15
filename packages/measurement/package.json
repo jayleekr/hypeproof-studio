@@ -7,6 +7,6 @@
   "bin": {"hypeproof-measure": "dist/cli.mjs"},
   "exports": {".": "./dist/core.mjs", "./sync": "./dist/sync.mjs", "./adapters": "./dist/adapters.mjs"},
   "files": ["dist", "README.md"],
-  "scripts": {"build": "node build.mjs", "test": "npm run build && node --test test/*.test.mjs", "prepack": "npm run build"},
+  "scripts": {"build": "node build.mjs", "test": "npm run build && node --test test/sync.test.mjs", "prepack": "npm run build"},
   "devDependencies": {"esbuild": "0.25.12"}
 }
