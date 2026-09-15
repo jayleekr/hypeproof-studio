@@ -46,8 +46,9 @@ export function normalizeRecord(r,state,source,host,project,roots=[]){
  if(host==='claude-code'&&state.sourceSession&&r.sessionId&&r.sessionId!==state.sourceSession)throw Error('mixed_sessions');
  let task=safeId(p.turn_id)||state.task||'unassigned';
  const at=typeof r.timestamp==='string'&&Number.isFinite(Date.parse(r.timestamp))?new Date(r.timestamp).toISOString():null;
+ const agentMessage=host==='codex'&&r.type==='response_item'&&p.type==='agent_message';
  const delegated=state.delegated||r.isSidechain===true||!!r.agentId;
- const emit=(kind,actor,data)=>events.push({id:sha(state.generation+':'+source.line+':'+events.length),task,at,kind,actor,model:state.model||null,source,...data});
+ const emit=(kind,actor,data)=>events.push({id:sha(state.generation+':'+source.line+':'+events.length),task,at,kind,actor,model:agentMessage?null:state.model||null,source,...data});
  if(host==='codex'&&r.type==='session_meta'){
   if(state.fork!=null&&source.line>1&&Number.isSafeInteger(r.ordinal)&&r.ordinal<state.fork){coverage.omitted++;return {events,coverage};}
   if(state.sourceSession&&p.id!==state.sourceSession)throw Error('mixed_sessions');
@@ -66,7 +67,8 @@ export function normalizeRecord(r,state,source,host,project,roots=[]){
   let role,blocks=[];
   if(host==='codex'&&r.type==='response_item'){
    if(p.type==='reasoning'||p.channel==='analysis'){coverage.hidden++;return {events,coverage}}
-   if(p.type==='message'){role=p.role;blocks=p.content||[]}
+   if(p.type==='message'){if(['developer','system'].includes(p.role)){coverage.omitted++;return {events,coverage};}role=p.role;blocks=p.content||[]}
+   else if(p.type==='agent_message'){role='assistant';blocks=p.content||[]}
    else if(['function_call','custom_tool_call'].includes(p.type))blocks=[{type:'tool_use',id:p.call_id,name:p.name,input:p.arguments??p.input}];
    else if(['function_call_output','custom_tool_call_output'].includes(p.type))blocks=[{type:'tool_result',tool_use_id:p.call_id,content:p.output}];
   }else if(host==='claude-code'&&['user','assistant'].includes(r.type)){
@@ -75,12 +77,12 @@ export function normalizeRecord(r,state,source,host,project,roots=[]){
    if(role==='user'&&blocks.some(b=>b.type==='text')&&!blocks.some(b=>b.type==='tool_result')){state.task=safeId(r.uuid)||task;task=state.task;}
   }
   for(const b of blocks){
-   if(['thinking','reasoning','redacted_thinking'].includes(b.type)){coverage.hidden++;continue}
+   if(['thinking','reasoning','redacted_thinking','encrypted_content'].includes(b.type)){coverage.hidden++;continue}
    if(['text','input_text','output_text'].includes(b.type)&&typeof b.text==='string'&&['user','assistant'].includes(role)){
     if(role==='user'&&/^\s*(# AGENTS\.md instructions|<environment_context>|<INSTRUCTIONS>|<system-reminder>|<skill>)/.test(b.text)){coverage.omitted++;continue}
     const clean=redactText(b.text);coverage.redacted+=clean.exclusions.length;
     if(clean.text.length>OBSERVER_LIMITS.message)coverage.excerpted++;
-    emit('message',role==='assistant'?'ai':delegated?'delegated':'human-unconfirmed',{message:{text:clean.text.slice(0,OBSERVER_LIMITS.message)}});
+    emit('message',agentMessage?'delegated':role==='assistant'?'ai':delegated?'delegated':'human-unconfirmed',{message:{text:clean.text.slice(0,OBSERVER_LIMITS.message)}});
    }else if(b.type==='tool_use'){
     const id=safeId(b.id);if(!id){coverage.unsupported++;continue}const name=safeId(b.name)||'unknown';const rawInput=b.input;let input=b.input;if(typeof input==='string'){try{input=JSON.parse(input)}catch{input=null}}
     const waits=typeof rawInput==='string'?[...rawInput.matchAll(/write_stdin\s*\(\s*\{[^}]*?["']?session_id["']?\s*:\s*(\d+)/g)].map(m=>m[1]):[];const waitFor=host==='codex'?(Number.isSafeInteger(input?.session_id)?'codex:'+input.session_id:waits.length===1?'codex:'+waits[0]:null):null;
@@ -97,7 +99,7 @@ export function normalizeRecord(r,state,source,host,project,roots=[]){
     if(status.status!=='running'){delete state.calls[id];if(bg)delete state.background[bg];}
     if(receiptCallId!==id&&receiptCall){task=receiptCall.task;state.model=receiptCall.model;emit('tool_result','ai',{tool:{call_id:receiptCallId,name:receiptCall.name,category:receiptCall.category,status:'unknown',exit_code:null,interrupted:null}});delete state.calls[receiptCallId];}
     task=originalTask;state.model=originalModel;
-   }else if(['image','image_url','document','tool_reference'].includes(b.type))coverage.omitted++;else coverage.unsupported++;
+   }else if(['image','input_image','image_url','document','tool_reference'].includes(b.type))coverage.omitted++;else coverage.unsupported++;
   }
  }
  coverage.eligible=events.length;if(!events.length&&!coverage.omitted&&!coverage.hidden)coverage.unsupported++;
