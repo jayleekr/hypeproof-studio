@@ -120,7 +120,7 @@ await check('T-08/T-09 deliver immutable lesson only to registered students in a
  const bad=(await issue({u:'student',c:cohort,p:profileId,lesson:{...claim.lesson,sha256:'0'.repeat(64)}},1,TEST_SECRET)).token;
  assert.equal((await request('/v1/profile','GET',undefined,bad)).status,409);
  const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
- const gate=credential=>gateChatRequest({env,req:{header:()=> 'Bearer '+credential},header(){},json:(body,status)=>Response.json(body,{status})});
+ const gate=credential=>gateChatRequest({env,req:{header:name=>name==='authorization'?'Bearer '+credential:undefined},header(){},json:(body,status)=>Response.json(body,{status})});
  const goodGate=await gate(r.json.token);assert.equal(goodGate.ok,true);assert.ok(goodGate.profile.system_prompt.includes(JSON.stringify(frozen.content)));
  const plainGate=await gate(student);assert.equal(plainGate.ok,true);assert.deepEqual(goodGate.profile.sdk_tools,plainGate.profile.sdk_tools);
  const badGate=await gate(bad);assert.equal(badGate.ok,false);assert.equal(badGate.response.status,409);
@@ -159,7 +159,7 @@ await check('AE-07 lesson assistant name: draft → frozen → student profile s
  assert.deepEqual(p.json.sdk_tools,(await request('/v1/profile','GET',undefined,student)).json.sdk_tools);
  // The model is told the name in the shared gate (proxy and Agent SDK routes both go through it).
  const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
- const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+d.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ const g=await gateChatRequest({env,req:{header:name=>name==='authorization'?'Bearer '+d.json.token:undefined},header(){},json:(body,status)=>Response.json(body,{status})});
  assert.equal(g.ok,true);assert.match(g.profile.system_prompt,/당신의 이름은 '제작 파트너'입니다/);
  assert.deepEqual(g.profile.sdk_tools,compiled.sdk_tools);
 });
@@ -179,7 +179,7 @@ await check('AE-08 two lessons keep separate names; old-schema lesson leaves ux.
  const pl=await request('/v1/profile','GET',undefined,legacyLesson.json.token);assert.equal(pl.status,200);
  assert.equal(pl.json.lesson.content.assistant,undefined);assert.deepEqual(pl.json.ux.coach,compiled.ux.coach);
  const {gateChatRequest}=await import('../src/lib/chat-gate.ts');
- const g=await gateChatRequest({env,req:{header:()=> 'Bearer '+legacyLesson.json.token},header(){},json:(body,status)=>Response.json(body,{status})});
+ const g=await gateChatRequest({env,req:{header:name=>name==='authorization'?'Bearer '+legacyLesson.json.token:undefined},header(){},json:(body,status)=>Response.json(body,{status})});
  assert.equal(g.ok,true);assert.doesNotMatch(g.profile.system_prompt,/당신의 이름은/);
  // No-lesson credential: unchanged.
  assert.deepEqual((await request('/v1/profile','GET',undefined,student)).json.ux.coach,compiled.ux.coach);
