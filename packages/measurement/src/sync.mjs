@@ -22,7 +22,7 @@ export function makeSnapshots(parsed,project) {
   const exclusions=[...clean.exclusions,'Automatic message snapshot; tool execution and artifacts are not captured.'];
   if(clean.conditions.length>100)exclusions.push('Only the latest 100 model conditions are included.');
   const make=events=>{
-    const payload={batch:{...clean.batch,scope:project,program:'hypeproof-measure/0.2.0',events},models:clean.models.slice(-100),conditions,exclusions,evidence:'captured-replay',interpretation_status:'unreviewed'};
+    const payload={batch:{...clean.batch,scope:project,program:'hypeproof-measure/0.2.1',events},models:clean.models.slice(-100),conditions,exclusions,evidence:'captured-replay',interpretation_status:'unreviewed'};
     return {format:'hps-session-sync/1',host:clean.host,project,session:clean.batch.session,digest:digestOf(payload),payload};
   };
   const chunks=[];let events=[];

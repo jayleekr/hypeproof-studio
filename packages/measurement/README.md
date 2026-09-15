@@ -13,7 +13,7 @@ Node 22+ is required. From a checkout of hypeproof-studio:
 cd packages/measurement
 npm ci
 npm pack
-npm install -g ./hypeproof-measurement-0.2.0.tgz
+npm install -g ./hypeproof-measurement-0.2.1.tgz
 hypeproof-measure projects --project /absolute/path/to/project
 ```
 
@@ -60,6 +60,9 @@ explicitly ask it to interpret your work; transfer does not itself run an evalua
 - Data scope: visible user and assistant messages, known-secret redaction, model
   conditions and explicit exclusions. No hidden reasoning, tool output, credentials
   or whole raw transcript upload. Redaction is not an anonymity guarantee.
+- Codex subagent copies: explicit `subagent_history_start_ordinal` excludes inherited
+  parent rows and model conditions. Delegated user-role input is labelled as automated
+  agent input, not direct human behavior. Unknown/missing boundaries are not guessed.
 - Discovery: Claude's project directory and Codex's latest seven calendar days.
   More than 1,000 candidate files is an explicit error. All matching sessions within
   that cap are considered, rather than the viewer's 30-result list.
@@ -102,3 +105,5 @@ Integration references (checked2026-09-15):
 
 This daemon reads the already-supported local transcript adapters. It intentionally
 does not overwrite Codex notify or Claude hooks, and works with sessions already open.
+
+Codex ordinal contract: https://github.com/openai/codex/blob/main/codex-rs/thread-store/src/local/thread_history_materialization.rs

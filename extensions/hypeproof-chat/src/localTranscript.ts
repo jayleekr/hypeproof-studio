@@ -31,11 +31,25 @@ function parseRows(rows: Array<{ row: any; line: number }>, host: ReviewHost, di
   const conditions: Array<{ line: number; at: string | null; model: string; reasoning: string | null }> = [];
   if (pendingTail) exclusions.add('Incomplete final JSONL record omitted; refresh after the writer finishes.');
   let sequence = 0;
+  let forkStart: number | undefined;
   for (const { row: r, line } of rows) {
     if (!r || typeof r !== 'object') throw Error('invalid_transcript_record');
+    // Paginated subagent rollouts contain a copied parent prefix. Use the host's
+    // explicit ordinal boundary, never timestamps (copied rows are re-stamped).
+    if (host === 'codex' && session && forkStart !== undefined) {
+      if (!Number.isSafeInteger(r.ordinal) || r.ordinal < 0) throw Error('invalid_fork_ordinal');
+      if (r.ordinal < forkStart) continue;
+    }
     if (host === 'codex' && r.type === 'session_meta') {
       if (session && session !== r.payload?.id) throw Error('mixed_sessions');
       if (project && project !== r.payload?.cwd) throw Error('mixed_projects');
+      if (!session && r.payload?.subagent_history_start_ordinal !== undefined) {
+        const start = r.payload.subagent_history_start_ordinal;
+        if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(r.ordinal) || start <= r.ordinal || !r.payload.forked_from_id) throw Error('invalid_fork_boundary');
+        forkStart = start;
+        exclusions.add('Inherited parent history omitted using the Codex subagent ordinal boundary.');
+        exclusions.add('Automated subagent session: user-role instructions are delegated input, not direct evidence of human behavior.');
+      }
       session = r.payload?.id; project = r.payload?.cwd;
     }
     if (host === 'claude-code' && r.sessionId) {
@@ -114,8 +128,8 @@ export async function parseLocalTranscriptFile(path: string, host: ReviewHost) {
       let r; try { r = JSON.parse(text); } catch { badLine = line; continue; }
       if (!r || typeof r !== 'object') throw Error('invalid_transcript_record');
       if (host === 'codex') {
-        if (r.type === 'session_meta') rows.push({ row: { type: r.type, payload: { id: r.payload?.id, cwd: r.payload?.cwd } }, line });
-        else if (r.type === 'turn_context') rows.push({ row: { type: r.type, timestamp: r.timestamp, payload: { model: r.payload?.model, effort: r.payload?.effort } }, line });
+        if (r.type === 'session_meta') rows.push({ row: { type: r.type, ordinal: r.ordinal, payload: { id: r.payload?.id, cwd: r.payload?.cwd, forked_from_id: r.payload?.forked_from_id, subagent_history_start_ordinal: r.payload?.subagent_history_start_ordinal } }, line });
+        else if (r.type === 'turn_context') rows.push({ row: { type: r.type, ordinal: r.ordinal, timestamp: r.timestamp, payload: { model: r.payload?.model, effort: r.payload?.effort } }, line });
         else if (r.type === 'response_item' && r.payload?.type === 'message') rows.push({ row: r.payload.channel === 'analysis' ? { ...r, payload: { ...r.payload, content: [] } } : r, line });
       } else if (['user', 'assistant'].includes(r.type)) rows.push({ row: r, line });
       else if (r.sessionId) rows.push({ row: { sessionId: r.sessionId, cwd: r.cwd }, line });
