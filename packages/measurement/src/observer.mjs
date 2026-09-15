@@ -75,12 +75,14 @@ export function normalizeRecord(r,state,source,host,project){
     state.calls[id]={name,category:category(name),task,model:state.model||null,artifact:a};
     emit('tool_call','ai',{tool:{call_id:id,name,category:category(name),status:'requested',exit_code:null,interrupted:null}});
    }else if(b.type==='tool_result'){
-    let id=safeId(b.tool_use_id);if(!id){coverage.unsupported++;continue}state.background??={};const bg=safeId(r.toolUseResult?.task_id);if(bg&&state.background[bg])id=state.background[bg];const call=state.calls[id];const originalTask=task,originalModel=state.model;
+    let id=safeId(b.tool_use_id);if(!id){coverage.unsupported++;continue}const receiptCallId=id;const receiptCall=state.calls[id];state.background??={};const bg=safeId(r.toolUseResult?.task_id);if(bg&&state.background[bg])id=state.background[bg];const call=state.calls[id];const originalTask=task,originalModel=state.model;
     if(call){task=call.task;state.model=call.model}
     const status=outcome(r.toolUseResult||b.content,b.is_error);const background=safeId(r.toolUseResult?.backgroundTaskId);if(background)state.background[background]=id;
     emit('tool_result','ai',{tool:{call_id:id,name:call?.name||'unknown',category:call?.category||'other',...status}});
     if(call?.artifact&&status.status!=='failure'&&status.status!=='interrupted')emit('artifact','ai',{artifact:call.artifact});
-    if(status.status!=='running'){delete state.calls[id];if(bg)delete state.background[bg];}task=originalTask;state.model=originalModel;
+    if(status.status!=='running'){delete state.calls[id];if(bg)delete state.background[bg];}
+    if(receiptCallId!==id&&receiptCall){task=receiptCall.task;state.model=receiptCall.model;emit('tool_result','ai',{tool:{call_id:receiptCallId,name:receiptCall.name,category:receiptCall.category,status:'unknown',exit_code:null,interrupted:null}});delete state.calls[receiptCallId];}
+    task=originalTask;state.model=originalModel;
    }else if(['image','image_url','document','tool_reference'].includes(b.type))coverage.omitted++;else coverage.unsupported++;
   }
  }
