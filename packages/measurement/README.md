@@ -32,7 +32,9 @@ Repeat `--project` to authorize multiple explicit roots in one connection. Their
 SHA-256 canonical paths are the server project IDs. A git worktree is a distinct
 root: include it explicitly. Connect verifies server-granted scopes before capture.
 Connection tokens expire after 30 days and can be revoked on the member page.
-Reconnect with a new token after draining outstanding uploads; no token is printed
+Changing owners isolates the previous outbox; it never transfers those records to
+a different account. Adding a project replays previously skipped server history.
+Reconnect with a new token to resume outstanding uploads for the same verified owner; no token is printed
 by status or stored in a launch command. Files are private to the OS account.
 
 `install-service` uses a macOS LaunchAgent: persists after terminal exit, restarts

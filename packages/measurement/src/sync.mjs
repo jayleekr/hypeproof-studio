@@ -51,12 +51,15 @@ export class SessionSync {
     // Probe before writing credentials. Server enforces membership, expiry and scope.
     const access=await this.request({server,token},'/api/measurement/snapshots?limit=1');
     if(!Array.isArray(access.projects)||scopes.some(p=>!access.projects.includes(p.id)))throw Error('project_not_granted');
+    if(typeof access.owner!=='string'||!/^[a-f0-9]{64}$/.test(access.owner))throw Error('invalid_server_owner');
     return this.store.exclusive(async()=>{
       const old=await this.read('config');
-      if(old && (old.server!==server||old.token!==token) && (await this.store.list('outbox/')).length)throw Error('pending_uploads_reconnect_refused');
-      // Token changes can change owner/scopes. Isolate cursors, receipts, inbox and scan cache.
-      const namespace=hash(server+'\n'+token);
-      const cfg={version:1,server,token,namespace,projects:scopes,enabled:true,interval_seconds:30};
+      // Verified owner, not rotating credentials, owns queued evidence. Other owners'
+      // queues remain isolated on disk and are never rebound to a different identity.
+      const namespace=hash(server+'\n'+access.owner);
+      const cfg={version:1,server,token,owner:access.owner,namespace,projects:scopes,enabled:true,interval_seconds:30};
+      // A scope expansion must replay history previously skipped under a narrower scope.
+      if(!old||old.namespace!==namespace||canonicalJson(old.projects)!==canonicalJson(scopes))await this.store.remove('cursor/'+namespace);
       await this.write('config',cfg);return {server,projects:scopes.map(({id,path})=>({id,path})),enabled:true};
     });
   }
@@ -100,6 +103,7 @@ export class SessionSync {
       for(const key of (await this.store.list('outbox/'+prefix)).slice(0,50)) {
         try {
           const snapshot=await this.read(key);
+          if(!config.projects.some(p=>p.id===snapshot.project)){error('upload',Error('queued_project_not_enabled'));continue;}
           const result=await this.request(config,'/api/measurement/snapshots',snapshot);
           if(result.receipt?.state!=='accepted-server'||result.receipt.digest!==snapshot.digest||typeof result.receipt.id!=='string')throw Error('invalid_server_receipt');
           const receiptKey=key.replace('outbox/','receipts/');
@@ -138,7 +142,7 @@ export class SessionSync {
       await this.write('status',status);return status;
     });
   }
-  async status(){const c=await this.read('config');return {configured:!!c,enabled:c?.enabled||false,server:c?.server,projects:c?.projects,last:await this.read('status')};}
+  async status(){const c=await this.read('config');const keys=await this.store.list('outbox/');return {configured:!!c,enabled:c?.enabled||false,server:c?.server,projects:c?.projects,isolated_pending:keys.filter(k=>!c||!k.startsWith('outbox/'+c.namespace+'/')).length,last:await this.read('status')};}
   async pause(){return this.store.exclusive(async()=>{const c=await this.read('config');if(c)await this.write('config',{...c,enabled:false});return {enabled:false};});}
   async records(){const c=await this.read('config');const rows=[];if(c)for(const key of await this.store.list('inbox/'+c.namespace+'/'))rows.push(await this.read(key));return rows;}
 }
