@@ -43,9 +43,9 @@ function parseRows(rows: Array<{ row: any; line: number }>, host: ReviewHost, di
     if (host === 'codex' && r.type === 'session_meta') {
       if (session && session !== r.payload?.id) throw Error('mixed_sessions');
       if (project && project !== r.payload?.cwd) throw Error('mixed_projects');
-      if (!session && r.payload?.subagent_history_start_ordinal !== undefined) {
+      if (!session && r.payload?.subagent_history_start_ordinal != null) {
         const start = r.payload.subagent_history_start_ordinal;
-        if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(r.ordinal) || start <= r.ordinal || !r.payload.forked_from_id) throw Error('invalid_fork_boundary');
+        if (!Number.isSafeInteger(start) || start < 0 || !Number.isSafeInteger(r.ordinal) || r.ordinal < 0) throw Error('invalid_fork_boundary');
         forkStart = start;
         exclusions.add('Inherited parent history omitted using the Codex subagent ordinal boundary.');
         exclusions.add('Automated subagent session: user-role instructions are delegated input, not direct evidence of human behavior.');

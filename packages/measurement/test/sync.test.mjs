@@ -122,6 +122,10 @@ test('Codex subagent ordinal boundary excludes inherited history and preserves c
  assert.ok(text.exclusions.some(x=>x.includes('not direct evidence of human behavior')));
  const cycle=await f.sync.tick();assert.equal(cycle.state,'connected');
  const child=f.rows.find(x=>x.snapshot.session==='child');assert.ok(child);assert.ok(!JSON.stringify(child).includes('Inherited parent message'));
+ const noParent=structuredClone(rows);delete noParent[0].payload.forked_from_id;
+ assert.deepEqual(parseLocalTranscript(noParent.map(JSON.stringify).join('\n'),'codex').batch,text.batch);
+ const emptyPrefix=[{ordinal:0,type:'session_meta',payload:{id:'empty-prefix',cwd:f.project,subagent_history_start_ordinal:0}},{ordinal:1,...msg('First child message.')}];
+ assert.equal(parseLocalTranscript(emptyPrefix.map(JSON.stringify).join('\n'),'codex').batch.events.length,1);
  const missing=structuredClone(rows);delete missing[6].ordinal;
  assert.throws(()=>parseLocalTranscript(missing.map(JSON.stringify).join('\n'),'codex'),/invalid_fork_ordinal/);
  const bad=structuredClone(rows);bad[0].payload.subagent_history_start_ordinal=-1;
