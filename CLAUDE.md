@@ -22,6 +22,12 @@ Use this traceability order for product decisions:
 
 ## Current phase
 
+For current work selection, run `python3 scripts/next-work.py` and follow
+[requirement execution](docs/plan/requirements-activation.md). The historical phase
+summary below and a completed plan do not exhaust Studio/Chalk requirements.
+Report ready, claimed, review, dependency, human/environment and reconciliation work
+separately. Missing discovery input means unknown, not "no development remains".
+
 **Phase 4–5 (chat panel + integrated build) — UX iteration in progress.** Per-cohort profile system live, Worker (`worker/`) + Studio extension (`extensions/hypeproof-chat/`) wired through `/v1/profile`. 1회차 (sk-biopharm-kids-s1) profile fully populated; 13 e2e tests passing locally against `wrangler dev`.
 
 Next milestones:
