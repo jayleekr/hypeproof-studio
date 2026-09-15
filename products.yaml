@@ -46,6 +46,26 @@ non_product_directories:
   - extensions         # container dir; the product is extensions/hypeproof-chat
 
 entries:
+  - name: measurement-host-package
+    layer: v
+    tag_prefix: measurement-v
+    directory: packages/measurement
+    deploys_to: npm-tarball
+    contract:
+      format: "JSON — hps-session-sync/1 with digest-bound accepted-server receipt"
+    drift_lock: packages/measurement/test/sync.test.mjs
+    exit_plan: >-
+      Run hypeproof-measure stop to unload its own launch agent, revoke its
+      member connection, then uninstall @hypeproof/measurement. Preserve the
+      private local records and immutable server snapshots for explicit member
+      retention decisions. Codex and Claude Code have no modified hooks or
+      configuration to undo; the Studio application is independent.
+    owner: jay
+    notes: >-
+      Local filesystem access requires the App layer, but this is a separately
+      installed Node package, not a Studio binary release. The measurement-v
+      prefix keeps its artifact separate from the Studio v release train.
+
   - name: hypeproof-chat
     layer: v
     tag_prefix: v

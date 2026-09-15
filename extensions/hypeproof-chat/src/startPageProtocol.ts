@@ -26,6 +26,7 @@ export type StartRequest =
   | { type: "exportLegacyHistory" }
   | { type: "selectActivity"; ref: string }
   | { type: "chooseActivityFolder" }
+  | { type: "openLocalReview" }
   | { type: "openStudioFiles" }
   | { type: "openStudioSettings" }
   | { type: "connectCourse"; token: string }
