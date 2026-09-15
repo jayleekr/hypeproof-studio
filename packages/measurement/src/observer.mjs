@@ -83,14 +83,15 @@ export function normalizeRecord(r,state,source,host,project,roots=[]){
     emit('message',role==='assistant'?'ai':delegated?'delegated':'human-unconfirmed',{message:{text:clean.text.slice(0,OBSERVER_LIMITS.message)}});
    }else if(b.type==='tool_use'){
     const id=safeId(b.id);if(!id){coverage.unsupported++;continue}const name=safeId(b.name)||'unknown';const rawInput=b.input;let input=b.input;if(typeof input==='string'){try{input=JSON.parse(input)}catch{input=null}}
+    const waits=typeof rawInput==='string'?[...rawInput.matchAll(/write_stdin\s*\(\s*\{[^}]*?["']?session_id["']?\s*:\s*(\d+)/g)].map(m=>m[1]):[];const waitFor=host==='codex'?(Number.isSafeInteger(input?.session_id)?'codex:'+input.session_id:waits.length===1?'codex:'+waits[0]:null):null;
     const a=artifact(input,project,/write/i.test(name)?'write':/edit|patch/i.test(name)?'edit':'read',roots);const patches=/apply_patch/i.test(name)?nativePatch(rawInput,project,roots):[];
     if(Object.keys(state.calls).length>=500&&!state.calls[id])throw Error('pending_tool_limit');
-    state.calls[id]={name,category:category(name),task,model:state.model||null,artifact:a,patches,patchDigest:patches.length?'sha256:'+sha(rawInput):null};
+    state.calls[id]={name,category:category(name),task,model:state.model||null,artifact:a,waitFor,patches,patchDigest:patches.length?'sha256:'+sha(rawInput):null};
     emit('tool_call','ai',{tool:{call_id:id,name,category:category(name),status:'requested',exit_code:null,interrupted:null}});
    }else if(b.type==='tool_result'){
-    let id=safeId(b.tool_use_id);if(!id){coverage.unsupported++;continue}const receiptCallId=id;const receiptCall=state.calls[id];state.background??={};const bg=safeId(r.toolUseResult?.task_id);if(bg&&state.background[bg])id=state.background[bg];const call=state.calls[id];const originalTask=task,originalModel=state.model;
+    let id=safeId(b.tool_use_id);if(!id){coverage.unsupported++;continue}const receiptCallId=id;const receiptCall=state.calls[id];state.background??={};const bg=safeId(r.toolUseResult?.task_id)||receiptCall?.waitFor;if(bg&&state.background[bg])id=state.background[bg];const call=state.calls[id];const originalTask=task,originalModel=state.model;
     if(call){task=call.task;state.model=call.model}
-    const shell=host==='codex'&&call?.category==='shell'?shellOutputRecords(b.content):[];const status=shell.length?(shell.some(x=>x.status==='running')?{status:'running',exit_code:null,interrupted:null}:shell.find(x=>x.status==='failure')||shell[0]):outcome(r.toolUseResult||b.content,b.is_error);const background=safeId(r.toolUseResult?.backgroundTaskId);if(background)state.background[background]=id;
+    const shell=host==='codex'&&call?.category==='shell'?shellOutputRecords(b.content):[];const status=shell.length?(shell.some(x=>x.status==='running')?{status:'running',exit_code:null,interrupted:null}:shell.find(x=>x.status==='failure')||shell[0]):outcome(r.toolUseResult||b.content,b.is_error);const background=safeId(r.toolUseResult?.backgroundTaskId);if(background)state.background[background]=id;for(const x of shell)if(x.status==='running'&&Number.isSafeInteger(x.background))state.background['codex:'+x.background]=id;
     for(const outcome of (shell.length?shell:[status]))emit('tool_result','ai',{tool:{call_id:id,name:call?.name||'unknown',category:call?.category||'other',status:outcome.status,exit_code:outcome.exit_code,interrupted:outcome.interrupted}});
     if(status.status!=='failure'&&status.status!=='interrupted')for(const a of [call?.artifact,...(call?.patches||[])].filter(Boolean))emit('artifact','ai',{artifact:a});
     if(status.status!=='running'){delete state.calls[id];if(bg)delete state.background[bg];}
