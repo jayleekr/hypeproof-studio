@@ -89,7 +89,7 @@ export class SessionSync {
   async tick() {
     return this.store.exclusive(async()=>{
       const config=await this.read('config');if(!config?.enabled)return {state:'disconnected'};
-      const cycleStarted=Date.now();const prefix=config.namespace+'/';const issues=[];let queued=0,uploaded=0,downloaded=0,unchanged=0,suppressed_sources=0,discarded_uploads=0,deleted_snapshots=0;
+      const prefix=config.namespace+'/';const issues=[];let queued=0,uploaded=0,downloaded=0,unchanged=0,suppressed_sources=0,discarded_uploads=0,deleted_snapshots=0;
       const error=(where,e)=>issues.push({where,code:safeCode(e)});
       const underQuota=async bytes=>{if((await this.store.usageBytes())*3+bytes>MAX_STORE)throw Error('local_storage_limit');};
       // Persist immutable deltas before advancing the complete-line checkpoint.
@@ -97,11 +97,16 @@ export class SessionSync {
       try{sources=await this.discover(this.home,config.projects,{cache});await this.write('observer-discovery/'+config.namespace,cache);}catch(e){error('discovery',e);}
       const rotation=await this.read('observer-rotation/'+config.namespace,{round:0,path:''});
       const sorted=[...sources].sort((a,b)=>a.path.localeCompare(b.path));const pivot=sorted.findIndex(s=>s.path>rotation.path);const rotated=pivot<0?sorted:[...sorted.slice(pivot),...sorted.slice(0,pivot)];
-      const recent=sources.slice(0,2);sources=rotation.round%2===0?[...recent,...rotated.filter(s=>!recent.some(r=>r.path===s.path))]:rotated;let lastVisited=rotation.path;
+      // Give each host a recent-source turn, even when one host has many newer files.
+      const recent=[...new Set(sources.map(s=>s.host))].map(host=>sources.find(s=>s.host===host));
+      if(Math.floor(rotation.round/2)%2)recent.reverse();
+      sources=rotation.round%2===0?[...recent,...rotated.filter(s=>!recent.some(r=>r.path===s.path))]:rotated;let lastVisited=rotation.path;
       let observed_events=0,source_bytes=0,deferred_sources=0;const blockedCapture=new Set();
       const captureAllowance=Math.max(0,50-(await this.store.list('outbox/'+prefix+'observer/')).length);
+      // Discovery has its own file/directory bounds; it cannot consume capture time.
+      const captureStarted=Date.now();
       for(const source of sources){
-        if(queued>=captureAllowance||source_bytes>=64*1024*1024||Date.now()-cycleStarted>=20000){deferred_sources++;continue;}
+        if(queued>=captureAllowance||source_bytes>=64*1024*1024||Date.now()-captureStarted>=20000){deferred_sources++;continue;}
         lastVisited=source.path;
         if(await this.read(suppressionKey(config.namespace,source))){suppressed_sources++;continue;}
         const sourceHash=hash(source.path),scanKey='observer-scan/'+prefix+sourceHash;let checkpoint=await this.read(scanKey);let changed=false;
