@@ -1,9 +1,13 @@
 ---
 name: hain7-report
-description: Analyze HP Studio classroom session.meta.json and events.jsonl logs to produce a survey-free, evidence-cited HAIN7-derived seven-capability observation profile and branded one-page PDF for a child, guardian, or instructor. Use when a user asks to score a game-making or prompt-based Studio lesson, generate an InBody-like HAIN7 Studio Signal report, compare a learner with a strictly matched local cohort, batch lesson logs into compact result sheets, or plan secure delivery by email, Kakao Alimtalk, SMS/LMS, or QR. Delivery is design-only until a provider adapter is explicitly implemented and approved. Do not use it as a formal HAIN7 diagnostic, intelligence/personality test, clinical assessment, or national norm.
+description: Replay or export an explicitly selected historical HAIN7 classroom record under its original seven-axis rubric. Retired for new measurement; use the six-capability member measurement workbench for current Codex and Claude Code work.
 ---
 
-# HAIN7 Report
+# HAIN7 Report — retired historical tool
+
+**Retired on 2026-09-15.** Do not select this skill for new scoring, new lesson assessment, or current capability improvement. Route those requests to [the member measurement workbench](https://hypeproof-ai.xyz/members/studio/measurement) and its versioned methodology. The current model has six capabilities; never convert historical seven-axis scores into six-axis scores.
+
+Continue below only when the user explicitly requests replay or export of an existing historical HAIN7 record (or the packaged synthetic regression example). Select its exact session path and pass `--legacy-replay`; automatic `--latest` selection is rejected. Preserve the original input and existing exports; write replay output to a new path and identify it as historical. The flag records explicit archival intent, not proof of record age.
 
 Generate one A4 page from what the learner actually did in HP Studio: prompts, visible AI responses, validation events, human actions, and artifact versions. Keep the seven HAIN7 constructs, but label the output as a **HAIN7-derived classroom observation profile**, never as the formal adult HAIN7 assessment.
 
@@ -33,12 +37,12 @@ Read `references/runtime-compatibility.md` when installing, packaging, or troubl
 
 ### 1. Resolve and validate input
 
-Accept either a session directory containing `session.meta.json` and `events.jsonl`, a direct `events.jsonl` path, or a spool root with `--latest`. Require a separate report context JSON. Do not manufacture age, grade, consent, lesson duration, or task version.
+Accept either a session directory containing `session.meta.json` and `events.jsonl`, a direct `events.jsonl` path, but not automatic selection from a spool root. Require a separate report context JSON. Do not manufacture age, grade, consent, lesson duration, or task version.
 
 Run a candidate pass without PDF:
 
 ```bash
-python3 "<skill_dir>/scripts/hain7_signal.py" \
+python3 "<skill_dir>/scripts/hain7_signal.py" --legacy-replay \
   --input /path/to/session \
   --context /path/to/report-context.json \
   --analysis-output /path/to/hain7-analysis.json
@@ -86,7 +90,7 @@ Local same-condition cohorts require at least 30 complete records and are labele
 Apply the review and render:
 
 ```bash
-python3 "<skill_dir>/scripts/hain7_signal.py" \
+python3 "<skill_dir>/scripts/hain7_signal.py" --legacy-replay \
   --input /path/to/session \
   --context /path/to/report-context.json \
   --cohort /path/to/cohort.json \
@@ -111,7 +115,7 @@ Render the PDF to PNG and visually inspect it before delivery. Reject extra page
 The packaged example is safe for design and pipeline testing:
 
 ```bash
-python3 "<skill_dir>/scripts/hain7_signal.py" \
+python3 "<skill_dir>/scripts/hain7_signal.py" --legacy-replay \
   --input "<skill_dir>/examples/sample-session" \
   --context "<skill_dir>/examples/sample-context.json" \
   --cohort "<skill_dir>/examples/sample-cohort.json" \

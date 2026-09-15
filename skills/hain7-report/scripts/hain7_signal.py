@@ -1360,7 +1360,8 @@ def render_html(analysis: dict[str, Any], output: Path, force: bool) -> None:
     output.write_text(html, encoding="utf-8")
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Generate an auditable HAIN7 Studio Signal profile.")
+    parser = argparse.ArgumentParser(description="Retired HAIN7 tool: explicitly selected historical replay only.")
+    parser.add_argument("--legacy-replay", action="store_true", help="Explicitly replay a historical HAIN7 record; never use for new measurement")
     parser.add_argument("--input", required=True, type=Path, help="Session directory, events.jsonl, or spool root")
     parser.add_argument("--latest", action="store_true", help="Choose the newest session below a spool root")
     parser.add_argument("--context", required=True, type=Path, help="Report context JSON")
@@ -1376,6 +1377,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--font", help="Korean TTF/TTC font path")
     parser.add_argument("--force", action="store_true", help="Explicitly overwrite output files")
     args = parser.parse_args(argv)
+    if not args.legacy_replay:
+        parser.error("HAIN7 is retired for new measurement. Use https://hypeproof-ai.xyz/members/studio/measurement; historical replay requires --legacy-replay.")
+    if args.latest:
+        parser.error("Historical replay requires an exact session path; --latest is retired.")
     if not args.analysis_output and not args.pdf_output and not args.html_output:
         parser.error("--analysis-output · --pdf-output · --html-output 중 하나가 필요합니다.")
     return args

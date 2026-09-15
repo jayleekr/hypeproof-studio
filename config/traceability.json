@@ -1565,6 +1565,45 @@
           "path": ".github/workflows/pr-ci.yml"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-HAIN7-RETIREMENT",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT"
+      ],
+      "sources": [
+        {
+          "path": "skills/README.md"
+        },
+        {
+          "path": "skills/hain7-report/SKILL.md"
+        },
+        {
+          "path": "skills/hain7-report/agents/openai.yaml"
+        },
+        {
+          "path": "skills/hain7-report/references/runtime-compatibility.md"
+        },
+        {
+          "path": "skills/hain7-report/scripts/hain7_signal.py"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-HAIN7-RETIREMENT",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CAPABILITY-CONTRACT",
+        "ST-IMP-HAIN7-RETIREMENT"
+      ],
+      "sources": [
+        {
+          "path": "skills/hain7-report/scripts/test_hain7_signal.py"
+        }
+      ]
     }
   ]
 }
