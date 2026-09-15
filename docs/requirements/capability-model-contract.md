@@ -40,3 +40,11 @@
 HC의 모델 버전·다른 검토 상태를 이 API가 이미 저장한다고 가정하지 않는다.
 형식 확장·역할 provenance·내보내기 호환은 #852에서 양쪽 validator와 실제 fixture를
 감사한 뒤 정의한다. A1–A5라는 문자열의 다른 테스트 case ID를 학습 rubric으로 오인하지 않는다.
+
+## HAIN7 retirement — 2026-09-15
+
+HC-09: HAIN7 is retired from new measurement and recommended agent workflows. New Codex/Claude measurement uses the member six-capability workbench and its versioned methodology. The old scorer, rubric, examples, and existing results remain available only for explicitly selected historical replay/export; no seven-to-six conversion or source overwrite occurs.
+
+The historical CLI must reject ordinary invocation before reading records or creating output. Archival invocation requires `--legacy-replay` and an exact session path; `--latest` is rejected. This declaration does not authenticate record age. Preserve existing output collision, review, consent, and missing-evidence gates.
+
+Verification: `python3 skills/hain7-report/scripts/test_hain7_signal.py` checks rejection without output, refusal of automatic latest selection, and explicit replay with the original rubric/evidence. The skill catalog and agent default prompt must route current work away from HAIN7. This retirement does not rename historical event enums or rewrite philosophical source definitions.

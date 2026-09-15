@@ -95,3 +95,16 @@ Studio에서 Chalk에 접근하더라도 Chalk 웹 화면의 모바일 접근성
 ## Implementation progress
 
 The Service draft/frozen-version API is implemented in [ADR 0004](../adr/0004-chalk-authoring-storage.md). Chalk `/authoring` now covers file import, draft/step editing, save/reopen and frozen-version viewing. Student delivery now signs a frozen course/version/content digest into a participant credential after checking owner, profile, roster and an open matching session. `/learn` and the Studio lesson panel display that snapshot; draft edits do not change an issued credential. Both LLM wire routes validate the same lesson digest and add its teaching content. A frozen lesson may now also NARROW two things the profile already granted: the model set (#795, [ADR 0006](../adr/0006-lesson-model-policy.md)) and the feature set (#748, [ADR 0007](../adr/0007-lesson-feature-binding.md)). Both are narrowing only, both are checked at save, at freeze and again on every read, and neither can grant anything the compiled profile withholds. `/authoring` offers each as a picker over a catalogue derived from that cohort's own profile. How far the feature narrowing is actually enforced differs by route and is stated in REQ-M38 rather than assumed here. Rehearsal evidence, settings pins and activation remain planned. Support requests open an unsubmitted GitHub draft; this does not implement an internal request queue. Freezing stores an unverified snapshot, not a deployable class.
+
+## Simplified instructor entry (local implementation)
+
+The instructor supplies a token and selects a server-returned profile display name.
+The token payload is used only to discover candidate cohorts; the existing `/state`
+authorization remains authoritative. Course IDs are generated for new drafts and
+version IDs for freeze. Manual IDs, imports, AI policy and student delivery remain
+under optional details. Draft edits, conflict handling and inactive frozen versions
+keep the existing CH-01 / SAVE-01 / ARC-01 contract. Clearing the displayed setting
+also clears its hidden cohort/profile binding and blocks create/save until a verified
+setting or manual target is selected, while preserving the in-progress curriculum.
+This does not implement AI
+generation, new cohort provisioning, persistent login or independent course storage.
