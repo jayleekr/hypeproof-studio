@@ -1,7 +1,7 @@
 import './harness/loader.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {Miniflare} from 'miniflare';
+import { createMiniflare } from './harness/miniflare.mjs';
 import {budgetHarness} from './harness/budgets.mjs';
 import {syntheticEvidence,nativeRaw} from './harness/usage-costs.mjs';
 const {budgetSubjectKey,createBudgetChild,readBudgetAccount,updateBudgetAccount,budgetBalances}=await import('../src/lib/budgets.ts');
@@ -9,7 +9,7 @@ const {publishBudgetDelegation,delegatedBudgetMutation}=await import('../src/lib
 const {reserveBudgetAttempt}=await import('../src/lib/budget-admission.ts');
 const {recordCostEvidence,normalizeCostUsage}=await import('../src/lib/usage-costs.ts');
 const compatibilityDate=readFileSync(new URL('../wrangler.toml',import.meta.url),'utf8').match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];
-const mf=new Miniflare({modules:true,compatibilityDate,d1Databases:['HPS_DB'],script:'export default {fetch(){return new Response("local budget surface test")}}'});
+const mf=createMiniflare({modules:true,compatibilityDate,d1Databases:['HPS_DB'],script:'export default {fetch(){return new Response("local budget surface test")}}'});
 try{
  const db=await mf.getD1Database('HPS_DB');
  for(const file of ['0006-model-usage.sql','0007-access-contracts.sql','0008-usage-costs.sql','0009-budget-admission.sql','0010-budget-surfaces.sql'])for(const sql of readFileSync(new URL('../migrations/'+file,import.meta.url),'utf8').replace(/--[^\n]*/g,'').split(';').map(x=>x.trim()).filter(Boolean))await db.prepare(sql).run();

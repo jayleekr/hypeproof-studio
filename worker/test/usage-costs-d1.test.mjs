@@ -1,13 +1,13 @@
 import './harness/loader.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {Miniflare} from 'miniflare';
+import { createMiniflare } from './harness/miniflare.mjs';
 import {accessHarness,syntheticPlan,syntheticEvent} from './harness/access.mjs';
 import {syntheticPrice,syntheticAttempt,syntheticEvidence,nativeRaw} from './harness/usage-costs.mjs';
 const {publishAccessPlan,applyAccessEvent}=await import('../src/lib/access-contracts.ts');
 const {publishUsagePrice,registerUsageAttempt,recordCostEvidence,normalizeCostUsage}=await import('../src/lib/usage-costs.ts');
 const compatibilityDate=readFileSync(new URL('../wrangler.toml',import.meta.url),'utf8').match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];assert(compatibilityDate);
-const mf=new Miniflare({modules:true,compatibilityDate,d1Databases:['HPS_DB'],script:'export default {fetch(){return new Response("local costs test")}}'});
+const mf=createMiniflare({modules:true,compatibilityDate,d1Databases:['HPS_DB'],script:'export default {fetch(){return new Response("local costs test")}}'});
 try{
   const db=await mf.getD1Database('HPS_DB');
   for(const file of ['0006-model-usage.sql','0007-access-contracts.sql','0008-usage-costs.sql']){

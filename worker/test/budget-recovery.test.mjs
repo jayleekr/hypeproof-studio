@@ -1,7 +1,7 @@
 import './harness/loader.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {Miniflare} from 'miniflare';
+import { createMiniflare } from './harness/miniflare.mjs';
 import {budgetHarness} from './harness/budgets.mjs';
 import {syntheticEvidence,nativeRaw} from './harness/usage-costs.mjs';
 const {applyAccessEvent,accountForToken,accessDigest}=await import('../src/lib/access-contracts.ts');
@@ -62,7 +62,7 @@ async function exercise(binding,label){
 if(!process.argv.includes('--d1'))await exercise(undefined,'SQLite/Hono');
 else{
  const date=readFileSync(new URL('../wrangler.toml',import.meta.url),'utf8').match(/^compatibility_date\s*=\s*"([^"]+)"/m)[1];
- const mf=new Miniflare({modules:true,compatibilityDate:date,d1Databases:['HPS_DB'],script:'export default {fetch(){return new Response("local recovery")}}'});
+ const mf=createMiniflare({modules:true,compatibilityDate:date,d1Databases:['HPS_DB'],script:'export default {fetch(){return new Response("local recovery")}}'});
  try{const db=await mf.getD1Database('HPS_DB');for(const f of ['0006-model-usage.sql','0007-access-contracts.sql','0008-usage-costs.sql','0009-budget-admission.sql','0010-budget-surfaces.sql'])for(const sql of readFileSync(new URL('../migrations/'+f,import.meta.url),'utf8').replace(/--[^\n]*/g,'').split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(sql).run();await exercise(db,'actual local D1');}
  finally{await mf.dispose();}
 }
