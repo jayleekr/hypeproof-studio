@@ -9,3 +9,11 @@ test('legacy queued snapshots still drain/import; new capture uses only delta en
 test('token rotation retains owner queue; owner change isolates it',async t=>{const f=await fixture(t);f.fail(true);await f.sync.tick();const c=await f.sync.read('config');f.token('y'.repeat(40));await f.sync.connect({server:f.origin,token:'y'.repeat(40),projects:[f.project]});assert.equal((await f.sync.read('config')).namespace,c.namespace);f.owner('c'.repeat(64));await f.sync.connect({server:f.origin,token:'y'.repeat(40),projects:[f.project]});assert.equal((await f.sync.status()).isolated_pending,1);f.fail(false);await f.sync.tick();assert.equal(f.rows.length,1)});
 
 test('failed deletion tombstone write retains pending evidence for safe retry',async t=>{const f=await fixture(t);f.fail(true);await f.sync.tick();f.fail(false);f.deleted(true);const write=f.sync.write.bind(f.sync);f.sync.write=async(key,v)=>{if(key.startsWith('suppressed/'))throw Error('synthetic_disk_failure');return write(key,v)};await assert.rejects(f.sync.tick(),/synthetic_disk_failure/);assert.equal((await f.sync.store.list('outbox/')).length,1);const s=new SessionSync({root:f.root,home:f.home});const x=await s.tick();assert.equal(x.discarded_uploads,1);assert.equal(x.pending,0)});
+
+// A large cold discovery must not consume the subsequent capture allowance.
+test('slow discovery still captures and uploads on the first cycle',async t=>{
+ const f=await fixture(t);const realNow=Date.now.bind(Date);let elapsed=0;
+ t.mock.method(Date,'now',()=>realNow()+elapsed);
+ const discover=f.sync.discover;f.sync.discover=async(...args)=>{const sources=await discover(...args);elapsed+=21000;return sources};
+ const x=await f.sync.tick();assert.equal(x.uploaded,1);assert.equal(x.observed_events,1);assert.equal(x.deferred_sources,0);assert.deepEqual(x.issues,[]);
+});

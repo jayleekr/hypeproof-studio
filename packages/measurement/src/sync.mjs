@@ -89,7 +89,7 @@ export class SessionSync {
   async tick() {
     return this.store.exclusive(async()=>{
       const config=await this.read('config');if(!config?.enabled)return {state:'disconnected'};
-      const cycleStarted=Date.now();const prefix=config.namespace+'/';const issues=[];let queued=0,uploaded=0,downloaded=0,unchanged=0,suppressed_sources=0,discarded_uploads=0,deleted_snapshots=0;
+      const prefix=config.namespace+'/';const issues=[];let queued=0,uploaded=0,downloaded=0,unchanged=0,suppressed_sources=0,discarded_uploads=0,deleted_snapshots=0;
       const error=(where,e)=>issues.push({where,code:safeCode(e)});
       const underQuota=async bytes=>{if((await this.store.usageBytes())*3+bytes>MAX_STORE)throw Error('local_storage_limit');};
       // Persist immutable deltas before advancing the complete-line checkpoint.
@@ -100,8 +100,10 @@ export class SessionSync {
       const recent=sources.slice(0,2);sources=rotation.round%2===0?[...recent,...rotated.filter(s=>!recent.some(r=>r.path===s.path))]:rotated;let lastVisited=rotation.path;
       let observed_events=0,source_bytes=0,deferred_sources=0;const blockedCapture=new Set();
       const captureAllowance=Math.max(0,50-(await this.store.list('outbox/'+prefix+'observer/')).length);
+      // Discovery has its own file/directory bounds; it cannot consume capture time.
+      const captureStarted=Date.now();
       for(const source of sources){
-        if(queued>=captureAllowance||source_bytes>=64*1024*1024||Date.now()-cycleStarted>=20000){deferred_sources++;continue;}
+        if(queued>=captureAllowance||source_bytes>=64*1024*1024||Date.now()-captureStarted>=20000){deferred_sources++;continue;}
         lastVisited=source.path;
         if(await this.read(suppressionKey(config.namespace,source))){suppressed_sources++;continue;}
         const sourceHash=hash(source.path),scanKey='observer-scan/'+prefix+sourceHash;let checkpoint=await this.read(scanKey);let changed=false;

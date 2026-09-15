@@ -1,6 +1,6 @@
 # HypeProof measurement package
 
-Codex and Claude Code → local observer → compact immutable event deltas → member server → evidence review. Version 0.3.0 captures execution evidence without sending whole transcripts or running a model. Existing historical snapshot readers and `results` remain compatible.
+Codex and Claude Code → local observer → compact immutable event deltas → member server → evidence review. Version 0.3.1 captures execution evidence without sending whole transcripts or running a model. Existing historical snapshot readers and `results` remain compatible.
 
 ## Connect once
 
@@ -10,7 +10,7 @@ Node 22+ is required:
 cd packages/measurement
 npm ci
 npm pack
-npm install -g ./hypeproof-measurement-0.3.0.tgz
+npm install -g ./hypeproof-measurement-0.3.1.tgz
 hypeproof-measure projects --project /absolute/path/to/project
 ```
 
@@ -53,7 +53,7 @@ Tool status uses explicit structured exit codes/interruption/error fields. Missi
 `hps-observer-delta/1` sends consecutive complete-line byte ranges with source hashes, stable event IDs, generation, sequence, predecessor digest and per-delta coverage. The exact portable contract and synthetic fixture are `src/observer-contract.mjs` and `test/fixtures/observer-delta.json`.
 
 - Each delta contains at most 250 events and 512KiB. Raw source files are capped at 1GiB; complete lines up to 16MiB are parsed locally, including large compaction bookkeeping. A complete line above that cap is omitted with an oversized count; an unfinished line buffer above 16MiB fails visibly. None of this increases the event excerpt or wire limits.
-- A cycle reads at most 64MiB of source ranges, at most 32MiB per source, and queues at most 50 deltas minus existing pending observer batches. Remaining sources are counted as deferred and resume next cycle. Cycles alternate recent-source priority with a persisted round-robin cursor for fair historical backfill; a 20-second capture budget is checked between sources.
+- A cycle reads at most 64MiB of source ranges, at most 32MiB per source, and queues at most 50 deltas minus existing pending observer batches. Remaining sources are counted as deferred and resume next cycle. Cycles alternate recent-source priority with a persisted round-robin cursor for fair historical backfill; a 20-second capture budget starts after discovery and is checked between sources. Cold discovery cannot consume that capture allowance.
 - Only appended complete lines are normalized. Partial tails wait for completion. An unchanged, fully scanned source requires no transcript content reads; discovery caches unchanged headers. File metadata and directory listings are still inspected.
 - Checkpoints persist task/model, pending calls, generation and source offset. Each immutable outbox record contains its checkpoint for crash recovery. Checkpoint advancement follows the durable queue write; upload order is per source/generation/sequence.
 - Inode changes, truncation, same-size rewrites, changed prefix or changed checkpoint-tail anchor start a new generation. This is append-log integrity checking, not a continuous whole-file audit: an in-place middle rewrite that preserves checked boundaries while appending can require an explicit rescan.
