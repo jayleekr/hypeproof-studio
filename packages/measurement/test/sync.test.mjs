@@ -93,3 +93,11 @@ test('owner change quarantines previous pending evidence instead of transferring
  assert.equal((await f.sync.status()).isolated_pending,2);
  assert.equal((await f.sync.store.list('outbox/'+old.namespace+'/')).length,2);
 });
+
+test('disabled project backlog cannot starve an active project upload',async t=>{
+ const f=await fixture(t);const c=await f.sync.read('config');
+ const snapshot=makeSnapshots(parseLocalTranscript(codex(f.project,'disabled'),'codex'),'c'.repeat(64))[0];
+ for(let i=0;i<50;i++)await f.sync.write('outbox/'+c.namespace+'/000'+String(i).padStart(3,'0'),snapshot);
+ const result=await f.sync.tick();assert.equal(result.uploaded,2);assert.equal(result.pending,50);
+ assert.equal(result.issues.find(i=>i.code==='queued_project_not_enabled').count,50);
+});

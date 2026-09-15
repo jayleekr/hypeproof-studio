@@ -100,10 +100,13 @@ export class SessionSync {
           }catch(e){error(source.host+':'+hash(source.session).slice(0,12),e);}
         }
       }
-      for(const key of (await this.store.list('outbox/'+prefix)).slice(0,50)) {
+      let attempted=0,disabledPending=0;
+      for(const key of await this.store.list('outbox/'+prefix)) {
         try {
           const snapshot=await this.read(key);
-          if(!config.projects.some(p=>p.id===snapshot.project)){error('upload',Error('queued_project_not_enabled'));continue;}
+          if(!config.projects.some(p=>p.id===snapshot.project)){disabledPending++;continue;}
+          if(attempted===50)break;
+          attempted++;
           const result=await this.request(config,'/api/measurement/snapshots',snapshot);
           if(result.receipt?.state!=='accepted-server'||result.receipt.digest!==snapshot.digest||typeof result.receipt.id!=='string')throw Error('invalid_server_receipt');
           const receiptKey=key.replace('outbox/','receipts/');
@@ -112,6 +115,7 @@ export class SessionSync {
           await this.store.remove(key);uploaded++;
         }catch(e){error('upload',e);break;}
       }
+      if(disabledPending)issues.push({where:'upload',code:'queued_project_not_enabled',count:disabledPending});
       // Import accepted records into a separate inbox. Never overwrite host transcripts.
       try {
         const cursorKey='cursor/'+config.namespace;
