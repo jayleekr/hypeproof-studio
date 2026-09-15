@@ -608,7 +608,10 @@ REQ-SS2: Offline retries, exact server receipts, authorized download/cursor reco
 and a restartable local supervisor preserve evidence without requiring the Studio UI.
 REQ-SS3: Transfer remains unreviewed evidence, separate from manual app reviews,
 legacy-seven records, task outcomes and research validity.
+REQ-SS4: Both host tools can read server workbench results with the existing
+connection, preserving review/hold states without submitting reviews. Specific
+server deletion responses prevent recapture and unblock download races across restart.
 
-Contract: [SS-01–08](requirements/session-sync.md). Validation:
+Contract: [SS-01–10](requirements/session-sync.md). Validation:
 `packages/measurement/test/sync.test.mjs`; production acceptance and installed
 supervisor observation must be recorded separately.
