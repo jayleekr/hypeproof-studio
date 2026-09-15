@@ -847,7 +847,13 @@ async function applyTestBackdoors(
   }
 
   if (token && token.length > 0) {
-    await context.secrets.store(TOKEN_KEY, token);
+    try {
+      await context.secrets.store(TOKEN_KEY, token);
+    } catch {
+      // A stale development seed must not prevent command registration or
+      // the normal participation screen from opening. Never log the token.
+      void vscode.window.showWarningMessage('개발용 참여 코드를 연결하지 못했습니다. 새 코드로 수업에 다시 참여해 주세요.');
+    }
   }
   if (coachName && coachName.length > 0) {
     const coachInfo = { name: coachName, personality: coachPersonality, configured: true };

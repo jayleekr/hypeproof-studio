@@ -1,3 +1,4 @@
+import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
@@ -2591,7 +2592,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // 좌석 키는 토큰·프로필에서 파생한다(토큰은 해시만 쓴다). 토큰이 없으면
       // 어차피 아래에서 막히므로 잠금은 최선 노력으로 둔다.
       await withCoachSeatLock(coachSeatKeyFor({ token: token ?? undefined, profile: profile ?? undefined }), async () => {
-      if (runtime === "agent-sdk") {
+      const local = localRuntimeConfig(vscode.env.appName, proxyUrl);
+      if (local) {
+        if (!profile) throw new Error(profileNotReadyNotice(this.coachDisplayName()));
+        if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
+        const cwd=this.resolveCoachCwd();
+        if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
+        const result=await runLocalCoach({config:local,profile,cwd,
+          history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
+          signal:ctrl.signal,onDelta,onActivity,
+          requestApproval:async action=>{
+            let prompted=false;
+            const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
+            return {approved,actor:prompted?'user':'policy'};
+          }});
+        sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
+      } else if (runtime === "agent-sdk") {
         if (!profile) {
           throw new Error(profileNotReadyNotice(this.coachDisplayName()));
         }
@@ -3226,19 +3242,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.effortTurn = undefined; this.effortResult = undefined; this.effortNotice = undefined;
     }
     if (scope!==activityConnections(this.context)?.scope) return;
+    const local=localRuntimeConfig(vscode.env.appName,cfg.get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'));
     await this.post({
       type: "config",
       config: {
         proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
-        model,
+        model:local?.model??model,
         hasToken: !!token,
         ...(activity ? {activity:{id:activity.id,name:activity.name,kind:activity.kind,workspace:activity.workspace,verified:!!profile},
           activityDraft:this.context.workspaceState.get('hps.activity.draft.'+activity.id,emptyActivityDraft())} : {}),
         access:this.accessState,
         effort, effortNotice:this.effortNotice, effortResult:this.effortResult,
         coach: this.getCoach(),
-        profile: profile ? { ...profile, model_selection: selection } : null,
-        update: this.availableUpdate,
+        profile: profile ? { ...profile, model_selection: local?localModelSelection(local):selection } : null,
+        update: local ? undefined : this.availableUpdate,
       },
     });
     // #649 — 웹뷰가 다시 붙으면(패널 숨김→표시, 리로드) 강조가 사라진다. 지금 열려

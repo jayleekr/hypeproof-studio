@@ -125,6 +125,10 @@
         {
           "path": "docs/studio-requirements.md",
           "section": "## M. Agent SDK coach runtime (#282)"
+        },
+        {
+          "path": "docs/dev/studio-dev.md",
+          "section": "## Local subscriptions"
         }
       ]
     },
@@ -273,6 +277,12 @@
         },
         {
           "path": "e2e/tests/native-personas.spec.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/local-runtime.smoke.mjs"
+        },
+        {
+          "path": "scripts/test-studio-dev.py"
         }
       ]
     },
