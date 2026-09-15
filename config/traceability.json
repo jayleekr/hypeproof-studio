@@ -1546,6 +1546,15 @@
         },
         {
           "path": "packages/measurement/package.json"
+        },
+        {
+          "path": "packages/measurement/src/observer.mjs"
+        },
+        {
+          "path": "packages/measurement/src/observer-contract.mjs"
+        },
+        {
+          "path": "packages/measurement/README.md"
         }
       ]
     },
@@ -1563,6 +1572,15 @@
         },
         {
           "path": ".github/workflows/pr-ci.yml"
+        },
+        {
+          "path": "packages/measurement/test/observer.test.mjs"
+        },
+        {
+          "path": "packages/measurement/test/observer-sync.test.mjs"
+        },
+        {
+          "path": "packages/measurement/test/fixtures/observer-delta.json"
         }
       ]
     },

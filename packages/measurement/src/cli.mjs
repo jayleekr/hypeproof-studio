@@ -39,6 +39,7 @@ try{
  }else if(command==='status'){print(await sync.status());
  }else if(command==='records'){
   const records=await sync.records();const id=one('id');print(id?records.find(r=>r.receipt.id===id)||null:records.map(r=>({id:r.receipt.id,host:r.snapshot.host,project:r.snapshot.project,session:r.snapshot.session,digest:r.snapshot.digest,messages:r.snapshot.payload.batch.events.length,state:r.receipt.state})));
+ }else if(command==='observations'){print(await sync.observations(one('id')));
  }else if(command==='results'){print(await sync.results(one('id')));
  }else if(command==='watch'){
   const abort=new AbortController();for(const sig of ['SIGINT','SIGTERM'])process.once(sig,()=>abort.abort());
@@ -46,6 +47,6 @@ try{
  }else if(command==='install-service'){await service();print({installed:true,label,interval_seconds:30,model_calls:0});
  }else if(command==='stop'){await service(true);print(await sync.pause());
  }else if(command==='help'){
-  console.log(`hypeproof-measure projects [--project PATH ...]\nhypeproof-measure connect --token-stdin [--server ORIGIN] --project PATH ...\nhypeproof-measure install-service   # macOS, persists across terminal exit/login\nhypeproof-measure sync              # one capture/upload/download cycle\nhypeproof-measure status\nhypeproof-measure records [--id RECEIPT_ID]\nhypeproof-measure results [--id SNAPSHOT_UUID]  # read server reviews/results; browser-only edits\nhypeproof-measure watch             # foreground supervisor on any Node platform\nhypeproof-measure stop              # remove this macOS service and pause capture\nAll commands accept --state DIRECTORY. Existing Codex/Claude sessions keep their own login and workflow. Configure your project scopes at https://hypeproof-ai.xyz/members/studio/measurement first.`);
+  console.log(`hypeproof-measure projects [--project PATH ...]\nhypeproof-measure connect --token-stdin [--server ORIGIN] --project PATH ...\nhypeproof-measure install-service   # macOS, persists across terminal exit/login\nhypeproof-measure sync              # one capture/upload/download cycle\nhypeproof-measure status\nhypeproof-measure records [--id RECEIPT_ID]\nhypeproof-measure observations [--id SESSION_UUID]  # captured activity/coverage\nhypeproof-measure results [--id SNAPSHOT_UUID]  # read server reviews/results; browser-only edits\nhypeproof-measure watch             # foreground supervisor on any Node platform\nhypeproof-measure stop              # remove this macOS service and pause capture\nAll commands accept --state DIRECTORY. Existing Codex/Claude sessions keep their own login and workflow. Configure your project scopes at https://hypeproof-ai.xyz/members/studio/measurement first.`);
  }else throw Error('unknown_command');
 }catch(e){print({error:/^[a-z_0-9]{1,100}$/.test(e.message)?e.message:'command_failed',...(e instanceof SyncHttpError ? {status:e.status,code:e.code} : {})});process.exitCode=1;}

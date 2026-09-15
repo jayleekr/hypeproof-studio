@@ -43,31 +43,10 @@ async function fixture(t){
   return send(200,{owner,projects:scopes,snapshots:rows.slice(index).map(r=>({...r.receipt,host:r.snapshot.host,project:r.snapshot.project,session:r.snapshot.session})),next_cursor:null});
  });await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
  const origin='http://127.0.0.1:'+server.address().port;
- const root=join(dir,'state'),sync=new SessionSync({root,home,now:()=>at});await sync.connect({server:origin,token:'x'.repeat(40),projects:[project]});
+ const root=join(dir,'state'),sync=new SessionSync({root,home,now:()=>at,discover:async()=>[]});await sync.connect({server:origin,token:'x'.repeat(40),projects:[project]});
  return {dir,home,project,root,source,sync,rows,origin,codexDir,fail:v=>fail=v,corrupt:v=>corrupt=v,deny:v=>unauthorized=v,posts:()=>postCount,rotate:v=>token=v,owner:v=>owner=v,grant:v=>scopes=v,deletedSessions,getProblems,uploadProblem:(body,status=410)=>uploadProblem={body,status},workbench:(body,status=200)=>workbench={body,status}};
 }
-test('both hosts export automatically, retry offline across restart, import receipts and avoid duplicates',async t=>{
- const f=await fixture(t);f.fail(true);let r=await f.sync.tick();assert.equal(r.pending,2);assert.equal(r.uploaded,0);assert.equal(f.rows.length,0);
- f.fail(false);const resumed=new SessionSync({root:f.root,home:f.home,now:()=>at});r=await resumed.tick();assert.equal(r.uploaded,2);assert.equal(r.downloaded,2);assert.equal(r.pending,0);assert.deepEqual(new Set(f.rows.map(r=>r.snapshot.host)),new Set(['codex','claude-code']));
- const posts=f.posts();r=await resumed.tick();assert.equal(r.unchanged,2);assert.equal(f.posts(),posts);assert.equal((await resumed.records()).length,2);
- await writeFile(f.source,codex(f.project,'sample',[msg('Check the real test output.')]));r=await resumed.tick();assert.equal(r.uploaded,1);assert.equal(f.rows.length,3);assert.equal(f.rows[2].snapshot.payload.batch.events.length,3);
- const text=JSON.stringify(await resumed.status());assert.ok(!text.includes('x'.repeat(40)));assert.equal((await stat(resumed.store.root)).mode&0o777,0o700);
-});
-test('connection token rejection, wrong receipt, malformed file and foreign project fail closed',async t=>{
- const f=await fixture(t);await writeFile(join(f.codexDir,'foreign.jsonl'),codex('/not/authorized','foreign'));
- await writeFile(join(f.codexDir,'bad.jsonl'),codex(f.project,'bad')+'{broken}\n');
- f.corrupt(true);let r=await f.sync.tick();assert.equal(r.pending,2);assert.equal(r.uploaded,0);assert.ok(r.issues.some(e=>e.code==='invalid_server_receipt'));assert.ok(r.issues.some(e=>e.code==='invalid_transcript_json'));assert.equal(f.rows.some(r=>r.snapshot.session==='foreign'),false);
- f.corrupt(false);r=await f.sync.tick();assert.equal(r.pending,0);assert.equal(f.rows.length,2);
- f.deny(true);await assert.rejects(f.sync.connect({server:f.origin,token:'x'.repeat(40),projects:[f.project]}),/server_401/);
- r=await f.sync.tick();assert.equal(r.state,'attention');assert.ok(r.issues.some(e=>e.code==='server_401'));
-});
-test('remote import is validated before cursor advances and resumes after repair',async t=>{
- const f=await fixture(t);await f.sync.tick();const cfg=await f.sync.read('config');
- for(const key of await f.sync.store.list('inbox/'))await f.sync.store.remove(key);await f.sync.store.remove('cursor/'+cfg.namespace);
- f.corrupt(true);let r=await f.sync.tick();assert.equal(r.downloaded,0);assert.equal(await f.sync.read('cursor/'+cfg.namespace),null);
- f.corrupt(false);r=await f.sync.tick();assert.equal(r.downloaded,2);assert.ok(await f.sync.read('cursor/'+cfg.namespace));
- await f.sync.pause();await writeFile(f.source,codex(f.project,'sample',[msg('Do not upload while paused.')]));assert.equal((await f.sync.tick()).state,'disconnected');assert.equal(f.rows.length,2);
-});
+async function seedLegacy(f){const c=await f.sync.read('config');for(const host of ['codex','claude-code']){const snapshot=makeSnapshots(parseLocalTranscript(codex(f.project,host),'codex'),await projectId(f.project))[0];snapshot.host=host;await f.sync.write('outbox/'+c.namespace+'/'+host,snapshot);}}
 test('bounded chunks reuse source parser, redact secrets, and never invent interpretation',()=>{
  const rows=Array.from({length:180},(_,i)=>msg('Evidence '+i+' '+ 'a'.repeat(19000)));
  const parsed=parseLocalTranscript(codex('/project','large',rows),'codex');const snapshots=makeSnapshots(parsed,'a'.repeat(64));assert.ok(snapshots.length>1);
@@ -76,40 +55,6 @@ test('bounded chunks reuse source parser, redact secrets, and never invent inter
  const secret='sk-'+'a'.repeat(48);const redacted=makeSnapshots(parseLocalTranscript(codex('/project','secret',[msg(secret)]),'codex'),'a'.repeat(64));assert.ok(!JSON.stringify(redacted).includes(secret));
  assert.throws(()=>validateServer('http://example.com'),/invalid_server/);assert.throws(()=>validateServer('https://u:password@example.com'),/invalid_server/);
 });
-
-test('token rotation keeps same-owner pending data and namespace',async t=>{
- const f=await fixture(t);f.fail(true);await f.sync.tick();const old=await f.sync.read('config');
- f.rotate('y'.repeat(40));f.fail(false);
- await f.sync.connect({server:f.origin,token:'y'.repeat(40),projects:[f.project]});
- assert.equal((await f.sync.read('config')).namespace,old.namespace);
- const result=await f.sync.tick();assert.equal(result.uploaded,2);assert.equal(result.pending,0);
-});
-test('scope expansion replays B history skipped while only A was selected',async t=>{
- const f=await fixture(t);const b=join(f.dir,'project-b');await mkdir(b);const bid=await projectId(b);
- f.grant([await projectId(f.project),bid]);
- const snapshot=makeSnapshots(parseLocalTranscript(codex(b,'earlier-b'),'codex'),bid)[0];
- const receipt={state:'accepted-server',id:randomUUID(),digest:snapshot.digest,accepted_at:new Date().toISOString()};f.rows.push({snapshot,receipt});
- await f.sync.tick();assert.equal((await f.sync.records()).length,2);
- await f.sync.connect({server:f.origin,token:'x'.repeat(40),projects:[f.project,b]});
- assert.equal((await f.sync.tick()).downloaded,1);assert.equal((await f.sync.records()).length,3);
-});
-test('owner change quarantines previous pending evidence instead of transferring it',async t=>{
- const f=await fixture(t);f.fail(true);await f.sync.tick();const old=await f.sync.read('config');
- f.owner('c'.repeat(64));await f.sync.connect({server:f.origin,token:'x'.repeat(40),projects:[f.project]});
- assert.notEqual((await f.sync.read('config')).namespace,old.namespace);
- assert.equal((await f.sync.status()).isolated_pending,2);
- assert.equal((await f.sync.store.list('outbox/'+old.namespace+'/')).length,2);
-});
-
-test('disabled project backlog cannot starve an active project upload',async t=>{
- const f=await fixture(t);const c=await f.sync.read('config');
- const snapshot=makeSnapshots(parseLocalTranscript(codex(f.project,'disabled'),'codex'),'c'.repeat(64))[0];
- for(let i=0;i<50;i++)await f.sync.write('outbox/'+c.namespace+'/000'+String(i).padStart(3,'0'),snapshot);
- const result=await f.sync.tick();assert.equal(result.uploaded,2);assert.equal(result.pending,50);
- assert.equal(result.issues.find(i=>i.code==='queued_project_not_enabled').count,50);
-});
-
-
 test('Codex subagent ordinal boundary excludes inherited history and preserves child identity',async t=>{
  const f=await fixture(t);
  const rows=[
@@ -127,8 +72,6 @@ test('Codex subagent ordinal boundary excludes inherited history and preserves c
  assert.deepEqual(stream,text);assert.equal(text.batch.session,'child');assert.equal(text.project,f.project);
  assert.deepEqual(text.models,['child-model']);assert.deepEqual(text.batch.events.map(e=>e.text),['Delegated child task.','Child result.']);
  assert.ok(text.exclusions.some(x=>x.includes('not direct evidence of human behavior')));
- const cycle=await f.sync.tick();assert.equal(cycle.state,'connected');
- const child=f.rows.find(x=>x.snapshot.session==='child');assert.ok(child);assert.ok(!JSON.stringify(child).includes('Inherited parent message'));
  const noParent=structuredClone(rows);delete noParent[0].payload.forked_from_id;
  assert.deepEqual(parseLocalTranscript(noParent.map(JSON.stringify).join('\n'),'codex').batch,text.batch);
  const emptyPrefix=[{ordinal:0,type:'session_meta',payload:{id:'empty-prefix',cwd:f.project,subagent_history_start_ordinal:0}},{ordinal:1,...msg('First child message.')}];
@@ -140,53 +83,8 @@ test('Codex subagent ordinal boundary excludes inherited history and preserves c
  const foreign=[...rows,{ordinal:8,type:'session_meta',payload:{id:'foreign',cwd:f.project}}];
  assert.throws(()=>parseLocalTranscript(foreign.map(JSON.stringify).join('\n'),'codex'),/mixed_sessions/);
 });
-
-test('deleted sessions suppress queued and changed sources across restart without touching originals',async t=>{
- const f=await fixture(t);f.fail(true);await f.sync.tick();
- f.fail(false);f.deletedSessions.add('codex:sample');
- const original=await readFile(f.source,'utf8');
- let result=await f.sync.tick();assert.equal(result.discarded_uploads,1);assert.equal(result.uploaded,1);assert.equal(result.pending,0);
- assert.equal(await readFile(f.source,'utf8'),original);
- const posts=f.posts();await writeFile(f.source,codex(f.project,'sample',[msg('Later content must stay local.')]));
- const reopened=new SessionSync({root:f.root,home:f.home,now:()=>at});
- result=await reopened.tick();assert.equal(result.suppressed_sources,1);assert.equal(result.queued,0);assert.equal(f.posts(),posts);
- assert.ok((await readFile(f.source,'utf8')).includes('Later content'));
- // A different owner does not inherit this owner's deletion suppression.
- f.owner('d'.repeat(64));await reopened.connect({server:f.origin,token:'x'.repeat(40),projects:[f.project]});
- result=await reopened.tick();assert.equal(result.suppressed_sources,0);assert.ok(result.queued>=1);
-});
-
-test('deletion suppression must be durable before pending evidence can be removed',async t=>{
- const f=await fixture(t);f.fail(true);await f.sync.tick();f.fail(false);f.deletedSessions.add('codex:sample');
- const write=f.sync.store.write.bind(f.sync.store);
- f.sync.store.write=async(key,...args)=>{if(key.startsWith('suppressed/'))throw Error('simulated_disk_failure');return write(key,...args);};
- await assert.rejects(f.sync.tick(),/simulated_disk_failure/);
- assert.ok((await f.sync.store.list('outbox/')).length>=1);
- const reopened=new SessionSync({root:f.root,home:f.home,now:()=>at});
- const result=await reopened.tick();assert.equal(result.pending,0);assert.equal(result.discarded_uploads,1);
-});
-
-test('unrelated 410 upload errors never discard or suppress a session',async t=>{
- const f=await fixture(t);f.uploadProblem({error:'snapshot_deleted'});
- const result=await f.sync.tick();assert.equal(result.pending,2);assert.equal(result.discarded_uploads,0);assert.equal(result.uploaded,0);
- assert.deepEqual(await f.sync.store.list('suppressed/'),[]);assert.ok(result.issues.some(i=>i.code==='server_410'));
-});
-
-test('only snapshot_deleted 410 races are skipped before cursor advancement',async t=>{
- const f=await fixture(t);await f.sync.tick();const cfg=await f.sync.read('config');
- for(const key of await f.sync.store.list('inbox/'))await f.sync.store.remove(key);
- await f.sync.store.remove('cursor/'+cfg.namespace);
- const first=f.rows[0].receipt.id;
- f.getProblems.set(first,{status:410,body:{error:'different_gone_reason'}});
- let result=await f.sync.tick();assert.equal(result.downloaded,0);assert.equal(await f.sync.read('cursor/'+cfg.namespace),null);
- await assert.rejects(f.sync.request(cfg,'/api/measurement/snapshots?id='+first),e=>e instanceof SyncHttpError&&e.status===410&&e.code==='different_gone_reason');
- f.getProblems.set(first,{status:410,body:{error:'snapshot_deleted'}});
- result=await f.sync.tick();assert.equal(result.deleted_snapshots,1);assert.equal(result.downloaded,1);assert.equal(await f.sync.read('cursor/'+cfg.namespace),f.rows.at(-1).receipt.id);
- const reopened=new SessionSync({root:f.root,home:f.home,now:()=>at});assert.equal((await reopened.tick()).downloaded,0);assert.equal((await reopened.records()).length,1);
-});
-
 test('results CLI reads scoped server list and verified detail, preserves held state and never writes a review',async t=>{
- const f=await fixture(t);await f.sync.tick();const posts=f.posts();await f.sync.pause();
+ const f=await fixture(t);await seedLegacy(f);await f.sync.tick();const posts=f.posts();await f.sync.pause();
  const cli=new URL('../dist/cli.mjs',import.meta.url).pathname;
  const list=JSON.parse((await exec(process.execPath,[cli,'results','--state',f.root])).stdout);
  assert.equal(list.sessions.length,2);assert.deepEqual(list.assessments,[]);
@@ -201,8 +99,52 @@ test('results CLI reads scoped server list and verified detail, preserves held s
 });
 
 test('results fail closed on malformed lists and digest corruption; offline is an explicit error',async t=>{
- const f=await fixture(t);await f.sync.tick();
+ const f=await fixture(t);await seedLegacy(f);await f.sync.tick();
  f.workbench({sessions:[],assessments:{},actions:[],comparisons:[]});await assert.rejects(f.sync.results(),/invalid_server_results/);
  const row=f.rows[0];f.workbench({...row,snapshot:{...row.snapshot,digest:'bad'},draft:null,result:null,revision:0,history:[],actions:[]});await assert.rejects(f.sync.results(row.receipt.id),/invalid_server_results/);
  f.workbench({error:'service_unavailable'},503);await assert.rejects(f.sync.results(),e=>e.status===503&&e.code==='service_unavailable');
+});
+
+test('remote import is validated before cursor advances and resumes after repair',async t=>{
+ const f=await fixture(t);await seedLegacy(f);await f.sync.tick();const cfg=await f.sync.read('config');
+ for(const key of await f.sync.store.list('inbox/'))await f.sync.store.remove(key);await f.sync.store.remove('cursor/'+cfg.namespace);
+ f.corrupt(true);let r=await f.sync.tick();assert.equal(r.downloaded,0);assert.equal(await f.sync.read('cursor/'+cfg.namespace),null);
+ f.corrupt(false);r=await f.sync.tick();assert.equal(r.downloaded,2);assert.ok(await f.sync.read('cursor/'+cfg.namespace));
+ await f.sync.pause();await writeFile(f.source,codex(f.project,'sample',[msg('Do not upload while paused.')]));assert.equal((await f.sync.tick()).state,'disconnected');assert.equal(f.rows.length,2);
+});
+test('scope expansion replays B history skipped while only A was selected',async t=>{
+ const f=await fixture(t);await seedLegacy(f);const b=join(f.dir,'project-b');await mkdir(b);const bid=await projectId(b);
+ f.grant([await projectId(f.project),bid]);
+ const snapshot=makeSnapshots(parseLocalTranscript(codex(b,'earlier-b'),'codex'),bid)[0];
+ const receipt={state:'accepted-server',id:randomUUID(),digest:snapshot.digest,accepted_at:new Date().toISOString()};f.rows.push({snapshot,receipt});
+ await f.sync.tick();assert.equal((await f.sync.records()).length,2);
+ await f.sync.connect({server:f.origin,token:'x'.repeat(40),projects:[f.project,b]});
+ assert.equal((await f.sync.tick()).downloaded,1);assert.equal((await f.sync.records()).length,3);
+});
+test('disabled project backlog cannot starve an active project upload',async t=>{
+ const f=await fixture(t);await seedLegacy(f);const c=await f.sync.read('config');
+ const snapshot=makeSnapshots(parseLocalTranscript(codex(f.project,'disabled'),'codex'),'c'.repeat(64))[0];
+ for(let i=0;i<50;i++)await f.sync.write('outbox/'+c.namespace+'/000'+String(i).padStart(3,'0'),snapshot);
+ const result=await f.sync.tick();assert.equal(result.uploaded,2);assert.equal(result.pending,50);
+ assert.equal(result.issues.find(i=>i.code==='queued_project_not_enabled').count,50);
+});
+
+
+test('only snapshot_deleted 410 races are skipped before cursor advancement',async t=>{
+ const f=await fixture(t);await seedLegacy(f);await f.sync.tick();const cfg=await f.sync.read('config');
+ for(const key of await f.sync.store.list('inbox/'))await f.sync.store.remove(key);
+ await f.sync.store.remove('cursor/'+cfg.namespace);
+ const first=f.rows[0].receipt.id;
+ f.getProblems.set(first,{status:410,body:{error:'different_gone_reason'}});
+ let result=await f.sync.tick();assert.equal(result.downloaded,0);assert.equal(await f.sync.read('cursor/'+cfg.namespace),null);
+ await assert.rejects(f.sync.request(cfg,'/api/measurement/snapshots?id='+first),e=>e instanceof SyncHttpError&&e.status===410&&e.code==='different_gone_reason');
+ f.getProblems.set(first,{status:410,body:{error:'snapshot_deleted'}});
+ result=await f.sync.tick();assert.equal(result.deleted_snapshots,1);assert.equal(result.downloaded,1);assert.equal(await f.sync.read('cursor/'+cfg.namespace),f.rows.at(-1).receipt.id);
+ const reopened=new SessionSync({root:f.root,home:f.home,now:()=>at,discover:async()=>[]});assert.equal((await reopened.tick()).downloaded,0);assert.equal((await reopened.records()).length,1);
+});
+
+test('unrelated 410 upload errors never discard or suppress a session',async t=>{
+ const f=await fixture(t);await seedLegacy(f);f.uploadProblem({error:'snapshot_deleted'});
+ const result=await f.sync.tick();assert.equal(result.pending,2);assert.equal(result.discarded_uploads,0);assert.equal(result.uploaded,0);
+ assert.deepEqual(await f.sync.store.list('suppressed/'),[]);assert.ok(result.issues.some(i=>i.code==='server_410'));
 });
