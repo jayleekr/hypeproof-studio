@@ -1,5 +1,6 @@
 import { validateLessonFeatures, type LessonFeaturePolicy } from './lesson-feature-policy.ts';
 import { validateLessonModel, type LessonModelPolicy } from './lesson-model-policy.ts';
+import { validateStepHelp, type StepHelpPolicy } from './lesson-help-mode.ts';
 
 // Chalk authoring content v1. Data only: never grants tools or stores credentials.
 export interface SessionDesign {
@@ -10,7 +11,11 @@ export interface SessionDesign {
   objective: string;
   prerequisites: string;
   starter: string;
-  steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string }>;
+  /**
+   * `help` (#1008, optional) — the help modes this step offers and its default.
+   * A teaching strategy, never a grant; see lesson-help-mode.ts.
+   */
+  steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string; help?: StepHelpPolicy }>;
   /**
    * Optional lesson-level AI identity (#747 feature A). When present, the
    * Service projects `display_name` onto the served `ux.coach` as a fixed
@@ -50,6 +55,7 @@ const LONE_SURROGATE = /\p{Cs}/u;
 const REQUIRED_KEYS = ["schema", "title", "audience", "duration_minutes", "objective", "prerequisites", "starter", "steps"];
 const OPTIONAL_KEYS = ["assistant", "model", "features"];
 const ALLOWED_KEYS = [...REQUIRED_KEYS, ...OPTIONAL_KEYS];
+const STEP_KEYS = ["id", "title", "instructions", "hint", "acceptance"];
 
 const isObject = (x: unknown): x is Record<string, unknown> =>
   !!x && typeof x === "object" && !Array.isArray(x);
@@ -103,13 +109,14 @@ export function validateSessionDesign(value: unknown, complete = false): string 
   if (!Array.isArray(value.steps) || value.steps.length > 30 || (complete && !value.steps.length)) return "steps must contain 1..30 items to freeze a version";
   const ids = new Set<string>();
   for (const step of value.steps) {
-    if (!isObject(step) || !exactKeys(step, ["id", "title", "instructions", "hint", "acceptance"])) return "invalid step fields";
+    if (!isObject(step) || !allowKeys(step, STEP_KEYS, [...STEP_KEYS, "help"])) return "invalid step fields";
     if (typeof step.id !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(step.id) || ids.has(step.id)) return "step ids must be unique";
     ids.add(step.id);
     for (const k of ["title", "instructions", "hint", "acceptance"]) {
       if (!text(step[k], 8000)) return `invalid step ${step.id}.${k}`;
       if (complete && k !== "hint" && !(step[k] as string).trim()) return `step ${step.id}.${k} is required to freeze a version`;
     }
+    if ("help" in step) { const bad = validateStepHelp(step.help); if (bad) return `step ${step.id}: ${bad}`; }
   }
   if ('model' in value) { const bad = validateLessonModel(value.model); if (bad) return bad; }
   if ('features' in value) { const bad = validateLessonFeatures(value.features); if (bad) return bad; }

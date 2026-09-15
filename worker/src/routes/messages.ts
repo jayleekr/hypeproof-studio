@@ -712,6 +712,8 @@ messages.post("/messages", async (c) => {
       "x-hps-model": modelLabel,
       "x-hps-module": module.version,
       ...(module.fallback ? { "x-hps-module-fallback": module.fallback.pinned } : {}),
+      // #1008 — the gate's c.header() receipt does not survive a raw Response.
+      ...(gate.help ? { "x-hps-help-mode": gate.help } : {}),
     },
   });
 });

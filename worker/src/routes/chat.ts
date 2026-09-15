@@ -1012,6 +1012,8 @@ chat.post("/chat/completions", async (c) => {
     "x-request-id": c.get("requestId"),
   };
   if (fellBack) streamHeaders["x-hps-fallback"] = "1";
+  // #1008 — the gate's c.header() receipt does not survive a raw Response.
+  if (gate.help) streamHeaders["x-hps-help-mode"] = gate.help;
   // 스트리밍에도 같이 싣는다. 한쪽만 실으면 "스트림이면 조용하다" 는 새 구멍이 된다.
   const streamAnnounce = modelAnnouncement((body as any)?.model, profile, modelLabel);
   if (streamAnnounce.substituted) {
