@@ -62,7 +62,7 @@ export function normalizeRecord(r,state,source,host,project,roots=[]){
  }else if(host==='codex'&&r.type==='event_msg'&&['task_started','task_complete','turn_aborted'].includes(p.type)){
   state.task=safeId(p.turn_id)||task;task=state.task;emit('lifecycle','host',{lifecycle:{state:{task_started:'started',task_complete:'completed',turn_aborted:'aborted'}[p.type]}});
  }else{
-  if((host==='codex'&&(['world_state','compacted','token_usage_record','inter_agent_communication_metadata'].includes(r.type)||(r.type==='event_msg'&&['token_count','item_completed','agent_message','thread_settings_applied'].includes(p.type))))||(host==='claude-code'&&['mode','worktree-state','bridge-session','file-history-snapshot','system','attachment','atis-latch','last-prompt','file-history-delta','queue-operation','pr-link','ai-title','relocated','cost-state','progress','summary'].includes(r.type))){coverage.omitted++;return {events,coverage};}
+  if((host==='codex'&&(['world_state','compacted','token_usage_record','inter_agent_communication_metadata'].includes(r.type)||(r.type==='event_msg'&&['token_count','item_completed','agent_message','thread_settings_applied'].includes(p.type))))||(host==='claude-code'&&['permission-mode','mode','worktree-state','bridge-session','file-history-snapshot','system','attachment','atis-latch','last-prompt','file-history-delta','queue-operation','pr-link','ai-title','relocated','cost-state','progress','summary'].includes(r.type))){coverage.omitted++;return {events,coverage};}
   if(host==='claude-code'&&typeof r.message?.model==='string'&&r.message.model!==state.model){state.model=bounded(r.message.model);emit('condition','host',{condition:{reasoning:null}})}
   let role,blocks=[];
   if(host==='codex'&&r.type==='response_item'){
