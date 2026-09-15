@@ -1,7 +1,7 @@
 import "./harness/loader.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { Miniflare } from "miniflare";
+import { createMiniflare } from "./harness/miniflare.mjs";
 import { createMockEnv, TEST_SECRET } from "./harness/index.mjs";
 const { issue, verify } = await import("../src/lib/tokens.ts");
 const {
@@ -15,7 +15,7 @@ const compatibilityDate = readFileSync(
   new URL("../wrangler.toml", import.meta.url),
   "utf8",
 ).match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];
-const mf = new Miniflare({
+const mf = createMiniflare({
   modules: true,
   script: 'export default {fetch(){return new Response("local trial test")}}',
   compatibilityDate,

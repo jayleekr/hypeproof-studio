@@ -1,11 +1,11 @@
 // Production SQL on local workerd/D1, alongside SQLite race/negative controls.
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { Miniflare } from 'miniflare';
+import { createMiniflare } from './harness/miniflare.mjs';
 import { bootApp, createMockEnv, makeCtx, TEST_SECRET } from './harness/index.mjs';
 const compatibilityDate = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8').match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];
 assert.ok(compatibilityDate, 'use the production Worker compatibility date');
-const mf = new Miniflare({modules:true,script:'export default {fetch(){return new Response("local test")}}',compatibilityDate,d1Databases:['HPS_DB']});
+const mf = createMiniflare({modules:true,script:'export default {fetch(){return new Response("local test")}}',compatibilityDate,d1Databases:['HPS_DB']});
 try {
  const app=await bootApp();const db=await mf.getD1Database('HPS_DB');
  const migration=readFileSync(new URL('../migrations/0002-chalk-authoring.sql',import.meta.url),'utf8').replace(/^--.*$/gm,'');
