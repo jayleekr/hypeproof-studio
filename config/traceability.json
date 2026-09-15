@@ -1503,6 +1503,65 @@
           "path": "extensions/hypeproof-chat/test/local-session-observation.smoke.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-REQ-SESSION-SYNC",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-LOCAL-REVIEW"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/session-sync.md"
+        },
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## Automatic host session sync (#1049)"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-SESSION-SYNC",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-SESSION-SYNC"
+      ],
+      "sources": [
+        {
+          "path": "packages/measurement/src/sync.mjs"
+        },
+        {
+          "path": "packages/measurement/src/cli.mjs"
+        },
+        {
+          "path": "packages/measurement/src/adapters.ts"
+        },
+        {
+          "path": "packages/measurement/build.mjs"
+        },
+        {
+          "path": "packages/measurement/package.json"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-SESSION-SYNC",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-SESSION-SYNC",
+        "ST-IMP-SESSION-SYNC"
+      ],
+      "sources": [
+        {
+          "path": "packages/measurement/test/sync.test.mjs"
+        },
+        {
+          "path": ".github/workflows/pr-ci.yml"
+        }
+      ]
     }
   ]
 }

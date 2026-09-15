@@ -1,0 +1,12 @@
+{
+  "name": "@hypeproof/measurement",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Project-scoped Codex and Claude Code evidence synchronization",
+  "engines": {"node": ">=22"},
+  "bin": {"hypeproof-measure": "dist/cli.mjs"},
+  "exports": {".": "./dist/core.mjs", "./sync": "./dist/sync.mjs", "./adapters": "./dist/adapters.mjs"},
+  "files": ["dist", "README.md"],
+  "scripts": {"build": "node build.mjs", "test": "npm run build && node --test test/sync.test.mjs", "prepack": "npm run build"},
+  "devDependencies": {"esbuild": "0.25.12"}
+}

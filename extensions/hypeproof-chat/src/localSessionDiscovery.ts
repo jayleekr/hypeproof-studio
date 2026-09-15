@@ -5,7 +5,7 @@ import type { ReviewHost } from './localReviewProtocol.ts';
 
 export interface LocalSession { path: string; host: ReviewHost; session: string; modified: number; bytes: number }
 /** On-demand metadata discovery, scoped to one project. No transcript text is returned. */
-export async function recentLocalSessions(home: string, project: string, now = Date.now()): Promise<LocalSession[]> {
+export async function recentLocalSessions(home: string, project: string, now = Date.now(), options: { all?: boolean } = {}): Promise<LocalSession[]> {
   const candidates: Array<{ path: string; host: ReviewHost }> = [];
   const list = async (dir: string, host: ReviewHost) => {
     try {
@@ -19,6 +19,7 @@ export async function recentLocalSessions(home: string, project: string, now = D
     const date = new Date(now - day * 86400000);
     await list(join(home, '.codex', 'sessions', String(date.getFullYear()), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')), 'codex');
   }
+  if (options.all && candidates.length > 1000) throw Error('session_discovery_limit');
   const found: LocalSession[] = [];
   for (const item of candidates.slice(-1000)) {
     const handle = await fs.open(item.path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -36,5 +37,6 @@ export async function recentLocalSessions(home: string, project: string, now = D
       if (typeof session === 'string' && session && typeof cwd === 'string' && resolve(cwd) === resolve(project)) found.push({ ...item, session, modified: stat.mtimeMs, bytes: stat.size });
     } finally { await handle.close(); }
   }
-  return found.sort((a, b) => b.modified - a.modified).slice(0, 30);
+  const sorted = found.sort((a, b) => b.modified - a.modified);
+  return options.all ? sorted : sorted.slice(0, 30);
 }
