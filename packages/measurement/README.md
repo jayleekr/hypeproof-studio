@@ -1,26 +1,21 @@
 # HypeProof measurement package
 
-Existing Codex and Claude Code sessions → project-scoped snapshots → HypeProof
-member server → verified local inbox. No Studio app, model API key, model polling,
-or manual export/import per task. This package bundles the existing shared core,
-transcript adapters and durable file store; it does not duplicate measurement logic.
+Codex and Claude Code → local observer → compact immutable event deltas → member server → evidence review. Version 0.3.0 captures execution evidence without sending whole transcripts or running a model. Existing historical snapshot readers and `results` remain compatible.
 
-## Install and connect once
+## Connect once
 
-Node 22+ is required. From a checkout of hypeproof-studio:
+Node 22+ is required:
 
 ```bash
 cd packages/measurement
 npm ci
 npm pack
-npm install -g ./hypeproof-measurement-0.2.2.tgz
+npm install -g ./hypeproof-measurement-0.3.0.tgz
 hypeproof-measure projects --project /absolute/path/to/project
 ```
 
-Open https://hypeproof-ai.xyz/members/studio/measurement with your member account.
-Create a connection for the displayed project IDs. A connection authorizes automatic
-transfer of that project's visible user/assistant messages. Save the token privately,
-then supply it on stdin (not a command argument, git file or chat message):
+Create a scoped connection at https://hypeproof-ai.xyz/members/studio/measurement.
+Store its token privately and pass it on stdin:
 
 ```bash
 hypeproof-measure connect --token-stdin --project /absolute/path/to/project < /private/path/connection-token
@@ -28,102 +23,45 @@ hypeproof-measure install-service
 hypeproof-measure status
 ```
 
-Repeat `--project` to authorize multiple explicit roots in one connection. Their
-SHA-256 canonical paths are the server project IDs. A git worktree is a distinct
-root: include it explicitly. Connect verifies server-granted scopes before capture.
-Connection tokens expire after 30 days and can be revoked on the member page.
-Changing owners isolates the previous outbox; it never transfers those records to
-a different account. Adding a project replays previously skipped server history.
-Reconnect with a new token to resume outstanding uploads for the same verified owner; no token is printed
-by status or stored in a launch command. Files are private to the OS account.
+Repeat `--project` for unrelated repositories. Registered Git worktrees sharing an authorized repository's common directory are included under that project's granted hash; unrelated directories are excluded. Exact selected roots keep their own hash. Discovery includes all available Codex dates and Claude project/subagent directories, bounded at 5,000 candidates and 10,000 directories. A limit produces an explicit error, not a silently shortened history.
 
-`install-service` uses a macOS LaunchAgent: persists after terminal exit, restarts
-on failure, starts again at login. It checks every 30 seconds, captures only changed
-files and retries failed delivery. On other Node platforms use `watch` under your
-existing process supervisor. This release does not install a Windows service.
+The existing macOS LaunchAgent runs one cycle every 30 seconds after the prior cycle finishes, survives terminal exit, and starts at login. Other platforms can run `watch` under their existing supervisor. No additional watcher, host hook, model call, or Windows service is installed. Tokens expire after 30 days; rotate via `connect`. Another owner's outstanding records remain isolated.
+
+## Use
 
 ```bash
-hypeproof-measure sync                 # one cycle; nonzero exit if attention needed
-hypeproof-measure records              # received server records, without raw text
-hypeproof-measure records --id ID      # explicit full server snapshot and receipt
-hypeproof-measure results             # current server review/results list (online)
-hypeproof-measure results --id UUID   # snapshot, receipt, draft/result and history
-hypeproof-measure stop                 # stop this service and pause capture
+hypeproof-measure sync                       # one bounded cycle
+hypeproof-measure status                     # counters, backlog, errors; no credentials
+hypeproof-measure observations               # online capture sessions/coverage
+hypeproof-measure observations --id UUID      # online captured task/activity detail
+hypeproof-measure results                    # saved review/results list
+hypeproof-measure results --id SNAPSHOT_UUID  # verified frozen review source + result
+hypeproof-measure records                    # historical imported snapshot receipts
+hypeproof-measure stop                       # stop service and pause collection
 ```
 
-The server imports snapshots automatically. The daemon also downloads authorized
-accepted snapshots into a separate inbox, validates digests and commits its cursor
-only after durable writes. It never injects records into prompts or edits original
-Codex/Claude transcripts. `records --id` is readable by either coding tool when you
-explicitly ask it to interpret your work; transfer does not itself run an evaluator.
+`observations` and `results` only read the server. They remain available while capture is paused. Offline or revoked access fails explicitly; no stale-result fallback or review write occurs. Open the member page to select a task, freeze its review source, review the evidence, and record an interpretation. Receipt acceptance proves transfer, not task success, independent human behavior, capability or improvement.
 
-Codex and Claude Code can both run `hypeproof-measure results` using the existing
-connection. The command reads `/api/measurement/workbench` with that token's server
-project scope and returns bounded JSON. A snapshot UUID returns its verified source,
-receipt, draft, result, revision, history and actions. Hold and review states are
-preserved; the command does not invent a score, activate an evaluator, or write a
-review. Human reviews are submitted in the authenticated browser. This explicit
-read is available while capture is paused; offline/revoked connections fail visibly
-instead of returning stale cached results. Tokens are never included in the output.
+## Local preprocessing and privacy
 
-When the server refuses ingestion with HTTP 410 `session_deleted`, the package
-durably suppresses that owner's host/project/session and removes its pending
-uploads. Changed originals and restarts cannot recreate that deleted session.
-Suppression does not affect other owners, hosts, projects or sessions, and never
-modifies original Codex/Claude transcripts. A download racing with deletion skips
-only HTTP 410 `snapshot_deleted` and advances the page cursor; other failures keep
-the cursor for retry. Previously downloaded offline inbox copies are not a server
-deletion feed. This update does not purge those pre-existing copies.
+The observer retains bounded, redacted visible-message excerpts (1,000 characters), model conditions, explicit turn lifecycle, paired tool call/results, and project-relative artifact references. Hidden reasoning is omitted completely. Full commands, environments, stdout/stderr, file contents and patch bodies remain local. Only their safe structural metadata or content digests may transfer. Known-secret redaction is not an anonymity guarantee; visible messages can still contain personal information. Artifact references describe the recorded operation, not proof that a file currently exists or has that version.
 
-## Contract and limits
+Tool status uses explicit structured exit codes/interruption/error fields. Missing execution codes stay `unknown`; assistant claims of success never become a passed test. Background results bind to the original call/task/model when the host supplies a linkage. Human-role input stays `human-unconfirmed`; Codex fork boundaries omit inherited parent content, and Claude sidechain records remain delegated. Unsupported host records, malformed complete lines, hidden content and deliberately clipped excerpts have separate coverage counters (`excerpted` differs from skipped `oversized` records). Known host bookkeeping is counted as intentionally omitted.
 
-- Data scope: visible user and assistant messages, known-secret redaction, model
-  conditions and explicit exclusions. No hidden reasoning, tool output, credentials
-  or whole raw transcript upload. Redaction is not an anonymity guarantee.
-- Codex subagent copies: explicit `subagent_history_start_ordinal` excludes inherited
-  parent rows and model conditions. Delegated user-role input is labelled as automated
-  agent input, not direct human behavior. Unknown/missing boundaries are not guessed.
-- Discovery: Claude's project directory and Codex's latest seven calendar days.
-  More than 1,000 candidate files is an explicit error. All matching sessions within
-  that cap are considered, rather than the viewer's 30-result list.
-- Parser: initial byte-range snapshot, max1GiB source, latest500 eligible messages,
-  max20,000characters/message and10,000visible messages/session. Oversized or corrupt
-  sources show errors; incomplete tail is disclosed. This is bounded captured replay,
-  not complete real-time event instrumentation. Unobserved history remains unknown.
-- At most100model conditions per snapshot; explicit exclusion if truncated.
-  Payloads are split below1.5MiB without dropping the selected events.
-- Durable outbox → immutable server snapshot → exact digest receipt. Lost responses
-  retry the same digest. Changed sources produce new snapshots; earlier snapshots
-  remain. No automatic expiry/eviction in this client; conservative256MiB local cap
-  stops growth visibly. Raw source paths stay local; message contents may name paths.
-- Authentication, authorization and revocation are enforced by the server for each
-  request. Credentials do not travel across HTTP redirects.
-- Source changes while offline are captured at each successful local poll, not every
-  keystroke. Sleep/offline capture gaps and more than500messages between captures
-  cannot be reconstructed. The source remains on the original host.
-- Imports remain `unreviewed`; `accepted-server` means durable server receipt, not
-  human consent to an interpretation, task success, capability score or growth.
-  Legacy seven-key data and six-model definitions remain separate.
+## Incremental transport and recovery
 
-The old local review app's optional manual submission is independent of this sync
-inbox. Historical app reviews/receipts are not silently uploaded by this connector.
+`hps-observer-delta/1` sends consecutive complete-line byte ranges with source hashes, stable event IDs, generation, sequence, predecessor digest and per-delta coverage. The exact portable contract and synthetic fixture are `src/observer-contract.mjs` and `test/fixtures/observer-delta.json`.
 
-## Verification
+- Each delta contains at most 250 events and 512KiB. Raw source files are capped at 1GiB; a line over 2MiB is omitted with an explicit oversized count; a line buffer over 16MiB fails visibly.
+- A cycle reads at most 64MiB of source ranges, at most 32MiB per source, and queues at most 50 deltas minus existing pending observer batches. Remaining sources are counted as deferred and resume next cycle. Cycles alternate recent-source priority with a persisted round-robin cursor for fair historical backfill; a 20-second capture budget is checked between sources.
+- Only appended complete lines are normalized. Partial tails wait for completion. An unchanged, fully scanned source requires no transcript content reads; discovery caches unchanged headers. File metadata and directory listings are still inspected.
+- Checkpoints persist task/model, pending calls, generation and source offset. Each immutable outbox record contains its checkpoint for crash recovery. Checkpoint advancement follows the durable queue write; upload order is per source/generation/sequence.
+- Inode changes, truncation, same-size rewrites, changed prefix or changed checkpoint-tail anchor start a new generation. This is append-log integrity checking, not a continuous whole-file audit: an in-place middle rewrite that preserves checked boundaries while appending can require an explicit rescan.
+- More than 500 unresolved calls fails explicitly. A task may remain unassigned when its host supplies no reliable task boundary; no task intent is invented.
+- SHA-256 digests bind canonical delta contents; matching `accepted-observer` receipts complete upload. Conflicts/offline errors retain the queue. New deltas are not downloaded back as duplicate full snapshots.
 
-```bash
-npm test
-```
+Version 0.2.x queued snapshots still upload to their original endpoint; accepted historical snapshots still import into the separate inbox with receipt/digest checks. Original transcripts are never overwritten. HTTP410 `session_deleted` durably suppresses all future capture for that owner's host/project/session before removing pending records. Only `snapshot_deleted` skips a historical download race; other errors remain visible. Existing local inbox/export/original copies are not purged by server deletion.
 
-Tests use both genuine host file shapes, an HTTP server and private temporary stores:
-offline retry/restart, idempotency, changed snapshots, project isolation, invalid
-receipts, corrupted import recovery, pause, redaction and chunk bounds.
-The production endpoint and actual installed supervisor require separate evidence.
+## Validation
 
-Integration references (checked2026-09-15):
-- Codex configuration: https://learn.chatgpt.com/docs/config-file/config-reference
-- Claude hooks: https://code.claude.com/docs/en/hooks
-
-This daemon reads the already-supported local transcript adapters. It intentionally
-does not overwrite Codex notify or Claude hooks, and works with sessions already open.
-
-Codex ordinal contract: https://github.com/openai/codex/blob/main/codex-rs/thread-store/src/local/thread_history_materialization.rs
+`npm test` covers append-only bytes, unchanged cycles, retries, checkpoint crash recovery, partial lines, malformed coverage, reset generations, fork/sidechain provenance, background calls, model binding, redaction, artifact bounds, real HTTP receipts, deletion suppression, historical compatibility and read-only results. No real private transcript is used in the committed fixtures.
