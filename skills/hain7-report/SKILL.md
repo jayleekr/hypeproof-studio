@@ -37,7 +37,7 @@ Read `references/runtime-compatibility.md` when installing, packaging, or troubl
 
 ### 1. Resolve and validate input
 
-Accept either a session directory containing `session.meta.json` and `events.jsonl`, a direct `events.jsonl` path, but not automatic selection from a spool root. Require a separate report context JSON. Do not manufacture age, grade, consent, lesson duration, or task version.
+Accept either an exact session directory containing `session.meta.json` and `events.jsonl` or a direct `events.jsonl` path. Do not select automatically from a spool root. Require a separate report context JSON. Do not manufacture age, grade, consent, lesson duration, or task version.
 
 Run a candidate pass without PDF:
 

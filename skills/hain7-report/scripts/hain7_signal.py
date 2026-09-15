@@ -1362,8 +1362,8 @@ def render_html(analysis: dict[str, Any], output: Path, force: bool) -> None:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Retired HAIN7 tool: explicitly selected historical replay only.")
     parser.add_argument("--legacy-replay", action="store_true", help="Explicitly replay a historical HAIN7 record; never use for new measurement")
-    parser.add_argument("--input", required=True, type=Path, help="Session directory, events.jsonl, or spool root")
-    parser.add_argument("--latest", action="store_true", help="Choose the newest session below a spool root")
+    parser.add_argument("--input", required=True, type=Path, help="Exact historical session directory or events.jsonl path")
+    parser.add_argument("--latest", action="store_true", help="Retired: automatic latest-session selection is rejected")
     parser.add_argument("--context", required=True, type=Path, help="Report context JSON")
     parser.add_argument("--cohort", type=Path, help="Optional strictly matched cohort JSON")
     parser.add_argument("--review", type=Path, help="Required complete 28-marker review for a real PDF")
