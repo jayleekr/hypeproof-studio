@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { SessionSync,projectId,digestOf,makeSnapshots,validateServer } from '../dist/sync.mjs';
-import { parseLocalTranscript } from '../dist/adapters.mjs';
+import { parseLocalTranscript,parseLocalTranscriptFile } from '../dist/adapters.mjs';
 const at=Date.now();
 const msg=(text,role='user')=>({type:'response_item',timestamp:new Date(at).toISOString(),payload:{type:'message',role,content:[{type:'input_text',text}]}});
 const codex=(project,session='sample',extra=[])=>[{type:'session_meta',payload:{id:session,cwd:project}},{type:'turn_context',timestamp:new Date(at).toISOString(),payload:{model:'test-model',effort:'medium'}},msg('Please verify both normal and empty input.'),msg('Checks passed (unverified claim).','assistant'),...extra].map(JSON.stringify).join('\n')+'\n';
@@ -100,4 +100,36 @@ test('disabled project backlog cannot starve an active project upload',async t=>
  for(let i=0;i<50;i++)await f.sync.write('outbox/'+c.namespace+'/000'+String(i).padStart(3,'0'),snapshot);
  const result=await f.sync.tick();assert.equal(result.uploaded,2);assert.equal(result.pending,50);
  assert.equal(result.issues.find(i=>i.code==='queued_project_not_enabled').count,50);
+});
+
+
+test('Codex subagent ordinal boundary excludes inherited history and preserves child identity',async t=>{
+ const f=await fixture(t);
+ const rows=[
+  {ordinal:0,type:'session_meta',payload:{id:'child',cwd:f.project,forked_from_id:'parent',subagent_history_start_ordinal:5}},
+  {ordinal:1,type:'session_meta',payload:{id:'parent',cwd:'/unselected-parent'}},
+  {ordinal:2,...msg('Inherited parent message must not transfer.')},
+  {ordinal:3,type:'turn_context',timestamp:new Date(at).toISOString(),payload:{model:'parent-model'}},
+  {ordinal:4,type:'event_msg',payload:{type:'task_started'}},
+  {ordinal:5,type:'turn_context',timestamp:new Date(at).toISOString(),payload:{model:'child-model'}},
+  {ordinal:6,...msg('Delegated child task.')},
+  {ordinal:7,...msg('Child result.','assistant')},
+ ];
+ const raw=rows.map(JSON.stringify).join('\n')+'\n';await writeFile(f.source,raw);
+ const text=parseLocalTranscript(raw,'codex'),stream=await parseLocalTranscriptFile(f.source,'codex');
+ assert.deepEqual(stream,text);assert.equal(text.batch.session,'child');assert.equal(text.project,f.project);
+ assert.deepEqual(text.models,['child-model']);assert.deepEqual(text.batch.events.map(e=>e.text),['Delegated child task.','Child result.']);
+ assert.ok(text.exclusions.some(x=>x.includes('not direct evidence of human behavior')));
+ const cycle=await f.sync.tick();assert.equal(cycle.state,'connected');
+ const child=f.rows.find(x=>x.snapshot.session==='child');assert.ok(child);assert.ok(!JSON.stringify(child).includes('Inherited parent message'));
+ const noParent=structuredClone(rows);delete noParent[0].payload.forked_from_id;
+ assert.deepEqual(parseLocalTranscript(noParent.map(JSON.stringify).join('\n'),'codex').batch,text.batch);
+ const emptyPrefix=[{ordinal:0,type:'session_meta',payload:{id:'empty-prefix',cwd:f.project,subagent_history_start_ordinal:0}},{ordinal:1,...msg('First child message.')}];
+ assert.equal(parseLocalTranscript(emptyPrefix.map(JSON.stringify).join('\n'),'codex').batch.events.length,1);
+ const missing=structuredClone(rows);delete missing[6].ordinal;
+ assert.throws(()=>parseLocalTranscript(missing.map(JSON.stringify).join('\n'),'codex'),/invalid_fork_ordinal/);
+ const bad=structuredClone(rows);bad[0].payload.subagent_history_start_ordinal=-1;
+ assert.throws(()=>parseLocalTranscript(bad.map(JSON.stringify).join('\n'),'codex'),/invalid_fork_boundary/);
+ const foreign=[...rows,{ordinal:8,type:'session_meta',payload:{id:'foreign',cwd:f.project}}];
+ assert.throws(()=>parseLocalTranscript(foreign.map(JSON.stringify).join('\n'),'codex'),/mixed_sessions/);
 });
