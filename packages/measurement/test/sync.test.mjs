@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
-import { SessionSync,projectId,digestOf,makeSnapshots,validateServer } from '../dist/sync.mjs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+const exec = promisify(execFile);
+import { SessionSync,projectId,digestOf,makeSnapshots,validateServer,SyncHttpError } from '../dist/sync.mjs';
 import { parseLocalTranscript,parseLocalTranscriptFile } from '../dist/adapters.mjs';
 const at=Date.now();
 const msg=(text,role='user')=>({type:'response_item',timestamp:new Date(at).toISOString(),payload:{type:'message',role,content:[{type:'input_text',text}]}});
@@ -18,26 +21,30 @@ async function fixture(t){
  const source=join(codexDir,'one.jsonl');await writeFile(source,codex(project));
  await writeFile(join(claudeDir,'one.jsonl'),JSON.stringify({type:'user',sessionId:'claude-one',cwd:project,timestamp:new Date(at).toISOString(),message:{role:'user',content:'Compare alternatives before choosing.'}})+'\n');
  const rows=[];let fail=false,corrupt=false,postCount=0,unauthorized=false,token='x'.repeat(40),owner='b'.repeat(64),scopes=[await projectId(project)];
+ const deletedSessions=new Set(),getProblems=new Map();let workbench=null,uploadProblem=null;
  const server=createServer(async(req,res)=>{
   res.setHeader('content-type','application/json');
   const send=(status,b)=>{res.writeHead(status);res.end(JSON.stringify(b));};
   if(unauthorized||req.headers.authorization!=='Bearer '+token)return send(401,{error:'unauthorized'});
   const u=new URL(req.url,'http://localhost');
   if(req.method==='POST'){
-   postCount++;if(fail)return send(503,{});
+   postCount++;if(fail)return send(503,{});if(uploadProblem)return send(uploadProblem.status,uploadProblem.body);
    let body='';for await(const c of req)body+=c;const snapshot=JSON.parse(body);
+   if(deletedSessions.has(snapshot.host+':'+snapshot.session))return send(410,{error:'session_deleted'});
    assert.equal(digestOf(snapshot.payload),snapshot.digest);
    let row=rows.find(r=>r.snapshot.digest===snapshot.digest&&r.snapshot.host===snapshot.host&&r.snapshot.project===snapshot.project&&r.snapshot.session===snapshot.session);
    if(!row){row={snapshot,receipt:{state:'accepted-server',id:randomUUID(),digest:snapshot.digest,accepted_at:new Date().toISOString()}};rows.push(row);}
    return send(200,{receipt:corrupt?{...row.receipt,digest:'bad'}:row.receipt});
   }
+  if(u.pathname==='/api/measurement/workbench'){if(workbench)return send(workbench.status,workbench.body);const row=rows.find(r=>r.receipt.id===u.searchParams.get('id'));return send(200,u.searchParams.has('id')?{...row,draft:{state:'draft'},result:{state:'held',reason:'insufficient_evidence'},revision:1,history:[{revision:1}],actions:[]}:{sessions:rows.map(r=>({...r.receipt,host:r.snapshot.host,project:r.snapshot.project,session:r.snapshot.session})),assessments:[],actions:[],comparisons:[]});}
+  if(u.searchParams.has('id')&&getProblems.has(u.searchParams.get('id'))){const problem=getProblems.get(u.searchParams.get('id'));return send(problem.status,problem.body);}
   if(u.searchParams.has('id')){const row=rows.find(r=>r.receipt.id===u.searchParams.get('id'));return send(200,corrupt?{...row,snapshot:{...row.snapshot,digest:'bad'}}:row);}
   const cursor=u.searchParams.get('cursor');const index=cursor?rows.findIndex(r=>r.receipt.id===cursor)+1:0;
   return send(200,{owner,projects:scopes,snapshots:rows.slice(index).map(r=>({...r.receipt,host:r.snapshot.host,project:r.snapshot.project,session:r.snapshot.session})),next_cursor:null});
  });await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(()=>{server.closeAllConnections();server.close();});
  const origin='http://127.0.0.1:'+server.address().port;
  const root=join(dir,'state'),sync=new SessionSync({root,home,now:()=>at});await sync.connect({server:origin,token:'x'.repeat(40),projects:[project]});
- return {dir,home,project,root,source,sync,rows,origin,codexDir,fail:v=>fail=v,corrupt:v=>corrupt=v,deny:v=>unauthorized=v,posts:()=>postCount,rotate:v=>token=v,owner:v=>owner=v,grant:v=>scopes=v};
+ return {dir,home,project,root,source,sync,rows,origin,codexDir,fail:v=>fail=v,corrupt:v=>corrupt=v,deny:v=>unauthorized=v,posts:()=>postCount,rotate:v=>token=v,owner:v=>owner=v,grant:v=>scopes=v,deletedSessions,getProblems,uploadProblem:(body,status=410)=>uploadProblem={body,status},workbench:(body,status=200)=>workbench={body,status}};
 }
 test('both hosts export automatically, retry offline across restart, import receipts and avoid duplicates',async t=>{
  const f=await fixture(t);f.fail(true);let r=await f.sync.tick();assert.equal(r.pending,2);assert.equal(r.uploaded,0);assert.equal(f.rows.length,0);
@@ -132,4 +139,70 @@ test('Codex subagent ordinal boundary excludes inherited history and preserves c
  assert.throws(()=>parseLocalTranscript(bad.map(JSON.stringify).join('\n'),'codex'),/invalid_fork_boundary/);
  const foreign=[...rows,{ordinal:8,type:'session_meta',payload:{id:'foreign',cwd:f.project}}];
  assert.throws(()=>parseLocalTranscript(foreign.map(JSON.stringify).join('\n'),'codex'),/mixed_sessions/);
+});
+
+test('deleted sessions suppress queued and changed sources across restart without touching originals',async t=>{
+ const f=await fixture(t);f.fail(true);await f.sync.tick();
+ f.fail(false);f.deletedSessions.add('codex:sample');
+ const original=await readFile(f.source,'utf8');
+ let result=await f.sync.tick();assert.equal(result.discarded_uploads,1);assert.equal(result.uploaded,1);assert.equal(result.pending,0);
+ assert.equal(await readFile(f.source,'utf8'),original);
+ const posts=f.posts();await writeFile(f.source,codex(f.project,'sample',[msg('Later content must stay local.')]));
+ const reopened=new SessionSync({root:f.root,home:f.home,now:()=>at});
+ result=await reopened.tick();assert.equal(result.suppressed_sources,1);assert.equal(result.queued,0);assert.equal(f.posts(),posts);
+ assert.ok((await readFile(f.source,'utf8')).includes('Later content'));
+ // A different owner does not inherit this owner's deletion suppression.
+ f.owner('d'.repeat(64));await reopened.connect({server:f.origin,token:'x'.repeat(40),projects:[f.project]});
+ result=await reopened.tick();assert.equal(result.suppressed_sources,0);assert.ok(result.queued>=1);
+});
+
+test('deletion suppression must be durable before pending evidence can be removed',async t=>{
+ const f=await fixture(t);f.fail(true);await f.sync.tick();f.fail(false);f.deletedSessions.add('codex:sample');
+ const write=f.sync.store.write.bind(f.sync.store);
+ f.sync.store.write=async(key,...args)=>{if(key.startsWith('suppressed/'))throw Error('simulated_disk_failure');return write(key,...args);};
+ await assert.rejects(f.sync.tick(),/simulated_disk_failure/);
+ assert.ok((await f.sync.store.list('outbox/')).length>=1);
+ const reopened=new SessionSync({root:f.root,home:f.home,now:()=>at});
+ const result=await reopened.tick();assert.equal(result.pending,0);assert.equal(result.discarded_uploads,1);
+});
+
+test('unrelated 410 upload errors never discard or suppress a session',async t=>{
+ const f=await fixture(t);f.uploadProblem({error:'snapshot_deleted'});
+ const result=await f.sync.tick();assert.equal(result.pending,2);assert.equal(result.discarded_uploads,0);assert.equal(result.uploaded,0);
+ assert.deepEqual(await f.sync.store.list('suppressed/'),[]);assert.ok(result.issues.some(i=>i.code==='server_410'));
+});
+
+test('only snapshot_deleted 410 races are skipped before cursor advancement',async t=>{
+ const f=await fixture(t);await f.sync.tick();const cfg=await f.sync.read('config');
+ for(const key of await f.sync.store.list('inbox/'))await f.sync.store.remove(key);
+ await f.sync.store.remove('cursor/'+cfg.namespace);
+ const first=f.rows[0].receipt.id;
+ f.getProblems.set(first,{status:410,body:{error:'different_gone_reason'}});
+ let result=await f.sync.tick();assert.equal(result.downloaded,0);assert.equal(await f.sync.read('cursor/'+cfg.namespace),null);
+ await assert.rejects(f.sync.request(cfg,'/api/measurement/snapshots?id='+first),e=>e instanceof SyncHttpError&&e.status===410&&e.code==='different_gone_reason');
+ f.getProblems.set(first,{status:410,body:{error:'snapshot_deleted'}});
+ result=await f.sync.tick();assert.equal(result.deleted_snapshots,1);assert.equal(result.downloaded,1);assert.equal(await f.sync.read('cursor/'+cfg.namespace),f.rows.at(-1).receipt.id);
+ const reopened=new SessionSync({root:f.root,home:f.home,now:()=>at});assert.equal((await reopened.tick()).downloaded,0);assert.equal((await reopened.records()).length,1);
+});
+
+test('results CLI reads scoped server list and verified detail, preserves held state and never writes a review',async t=>{
+ const f=await fixture(t);await f.sync.tick();const posts=f.posts();await f.sync.pause();
+ const cli=new URL('../dist/cli.mjs',import.meta.url).pathname;
+ const list=JSON.parse((await exec(process.execPath,[cli,'results','--state',f.root])).stdout);
+ assert.equal(list.sessions.length,2);assert.deepEqual(list.assessments,[]);
+ const id=f.rows[0].receipt.id;
+ const output=(await exec(process.execPath,[cli,'results','--id',id,'--state',f.root])).stdout;
+ const detail=JSON.parse(output);assert.equal(detail.receipt.id,id);assert.equal(detail.result.state,'held');assert.equal(detail.revision,1);assert.equal(detail.history.length,1);assert.ok(!output.includes('x'.repeat(40)));assert.equal(f.posts(),posts);
+ await assert.rejects(f.sync.results('../escape'),/invalid_snapshot_id/);
+ f.workbench({sessions:[],assessments:[],actions:[{note:'x'.repeat(40)}],comparisons:[],token:'x'.repeat(40)});
+ assert.equal(JSON.stringify(await f.sync.results()).includes('x'.repeat(40)),false);
+ f.workbench({error:'snapshot_deleted'},410);
+ await assert.rejects(exec(process.execPath,[cli,'results','--id',id,'--state',f.root]),e=>{const body=JSON.parse(e.stdout);return e.code===1&&body.status===410&&body.code==='snapshot_deleted'&&!e.stdout.includes('x'.repeat(40));});
+});
+
+test('results fail closed on malformed lists and digest corruption; offline is an explicit error',async t=>{
+ const f=await fixture(t);await f.sync.tick();
+ f.workbench({sessions:[],assessments:{},actions:[],comparisons:[]});await assert.rejects(f.sync.results(),/invalid_server_results/);
+ const row=f.rows[0];f.workbench({...row,snapshot:{...row.snapshot,digest:'bad'},draft:null,result:null,revision:0,history:[],actions:[]});await assert.rejects(f.sync.results(row.receipt.id),/invalid_server_results/);
+ f.workbench({error:'service_unavailable'},503);await assert.rejects(f.sync.results(),e=>e.status===503&&e.code==='service_unavailable');
 });

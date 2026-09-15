@@ -26,6 +26,18 @@ without printing credentials. Connection revocation/expiry is enforced server-si
 SS-08: Automatic collection creates unreviewed evidence only. It cannot assert
 human review, task success, ability, learning or growth. Legacy7data and six-model
 interpretations remain distinct. Existing manual-app reviews do not silently upload.
+SS-09: `hypeproof-measure results` reads the server workbench using the stored
+connection. An optional snapshot UUID reads its receipt, draft, result, revision,
+history and actions; the snapshot digest is verified. Results remain server-provided
+JSON with review/hold states intact. No model runs, accepted-review writes, or
+offline-cache fallback occur. Only the authenticated browser can submit a review.
+SS-10: Only HTTP410 `session_deleted` from snapshot ingestion suppresses that
+namespace/host/project/session. Persist suppression before removing queued uploads;
+later files, retries and restarts cannot recreate the deleted server session.
+Only HTTP410 `snapshot_deleted` during a download race skips that snapshot and
+allows page cursor advancement. Other errors retain pending work/cursor state.
+HTTP status and bounded error code remain distinct; credentials never appear in
+CLI output. Original host transcripts are never deleted or edited.
 
 ## Placement and validation
 
@@ -38,6 +50,9 @@ scorer or authentication implementation.
 and real local storage. Tests cover offline retry/restart, duplicate delivery,
 source updates, project isolation, malformed records/receipts, cursor recovery,
 pause and bounded redaction. CI builds/tests/packs the standalone package.
+The same suite covers server-deletion suppression across restart, failed suppression
+writes, specific versus unrelated 410 responses, cursor recovery, and the installed
+CLI's read-only results list/detail behavior with synthetic records.
 
 Production API acceptance and actual supervisor behavior are separate from these
 local tests. Record actual results on the delivery PR; do not mark human improvement

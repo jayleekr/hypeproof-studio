@@ -1,6 +1,6 @@
 {
   "name": "@hypeproof/measurement",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "type": "module",
   "description": "Project-scoped Codex and Claude Code evidence synchronization",
   "engines": {"node": ">=22"},

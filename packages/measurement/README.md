@@ -13,7 +13,7 @@ Node 22+ is required. From a checkout of hypeproof-studio:
 cd packages/measurement
 npm ci
 npm pack
-npm install -g ./hypeproof-measurement-0.2.1.tgz
+npm install -g ./hypeproof-measurement-0.2.2.tgz
 hypeproof-measure projects --project /absolute/path/to/project
 ```
 
@@ -46,6 +46,8 @@ existing process supervisor. This release does not install a Windows service.
 hypeproof-measure sync                 # one cycle; nonzero exit if attention needed
 hypeproof-measure records              # received server records, without raw text
 hypeproof-measure records --id ID      # explicit full server snapshot and receipt
+hypeproof-measure results             # current server review/results list (online)
+hypeproof-measure results --id UUID   # snapshot, receipt, draft/result and history
 hypeproof-measure stop                 # stop this service and pause capture
 ```
 
@@ -54,6 +56,24 @@ accepted snapshots into a separate inbox, validates digests and commits its curs
 only after durable writes. It never injects records into prompts or edits original
 Codex/Claude transcripts. `records --id` is readable by either coding tool when you
 explicitly ask it to interpret your work; transfer does not itself run an evaluator.
+
+Codex and Claude Code can both run `hypeproof-measure results` using the existing
+connection. The command reads `/api/measurement/workbench` with that token's server
+project scope and returns bounded JSON. A snapshot UUID returns its verified source,
+receipt, draft, result, revision, history and actions. Hold and review states are
+preserved; the command does not invent a score, activate an evaluator, or write a
+review. Human reviews are submitted in the authenticated browser. This explicit
+read is available while capture is paused; offline/revoked connections fail visibly
+instead of returning stale cached results. Tokens are never included in the output.
+
+When the server refuses ingestion with HTTP 410 `session_deleted`, the package
+durably suppresses that owner's host/project/session and removes its pending
+uploads. Changed originals and restarts cannot recreate that deleted session.
+Suppression does not affect other owners, hosts, projects or sessions, and never
+modifies original Codex/Claude transcripts. A download racing with deletion skips
+only HTTP 410 `snapshot_deleted` and advances the page cursor; other failures keep
+the cursor for retry. Previously downloaded offline inbox copies are not a server
+deletion feed. This update does not purge those pre-existing copies.
 
 ## Contract and limits
 

@@ -10,6 +10,13 @@ export const projectId = async path => hash(await realpath(path));
 const MAX_BODY=1536*1024;
 const MAX_STORE=256*1024*1024;
 const safeCode=e=>/^[a-z_0-9]{1,100}$/.test(e?.message||'')?e.message:'sync_operation_failed';
+const snapshotId = value => typeof value === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value);
+/** Only a bounded machine code is retained; never expose an error response body. */
+export class SyncHttpError extends Error {
+  constructor(status, code = null) { super('server_' + status); this.name = 'SyncHttpError'; this.status = status; this.code = code; }
+}
+const deletedResponse = (error, code) => error instanceof SyncHttpError && error.status === 410 && error.code === code;
+const suppressionKey = (namespace, source) => 'suppressed/' + namespace + '/' + hash(canonicalJson([source.host, source.project, source.session]));
 export function validateServer(server) {
   const u=new URL(server);
   if(u.username||u.password||u.search||u.hash||u.pathname!=='/'||
@@ -22,7 +29,7 @@ export function makeSnapshots(parsed,project) {
   const exclusions=[...clean.exclusions,'Automatic message snapshot; tool execution and artifacts are not captured.'];
   if(clean.conditions.length>100)exclusions.push('Only the latest 100 model conditions are included.');
   const make=events=>{
-    const payload={batch:{...clean.batch,scope:project,program:'hypeproof-measure/0.2.1',events},models:clean.models.slice(-100),conditions,exclusions,evidence:'captured-replay',interpretation_status:'unreviewed'};
+    const payload={batch:{...clean.batch,scope:project,program:'hypeproof-measure/0.2.2',events},models:clean.models.slice(-100),conditions,exclusions,evidence:'captured-replay',interpretation_status:'unreviewed'};
     return {format:'hps-session-sync/1',host:clean.host,project,session:clean.batch.session,digest:digestOf(payload),payload};
   };
   const chunks=[];let events=[];
@@ -65,23 +72,30 @@ export class SessionSync {
   }
   async request(config,path,body) {
     const response=await this.fetch(config.server+path,{method:body?'POST':'GET',redirect:'error',headers:{authorization:'Bearer '+config.token,...(body?{'content-type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(20000)});
-    if(!response.ok)throw Error('server_'+response.status);
     const declared=Number(response.headers.get('content-length'));
     if(declared>3*1024*1024)throw Error('server_response_too_large');
     const reader=response.body.getReader();let bytes=0;const chunks=[];
     while(true){const {done,value}=await reader.read();if(done)break;bytes+=value.length;if(bytes>3*1024*1024){await reader.cancel();throw Error('server_response_too_large');}chunks.push(Buffer.from(value));}
-    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    let payload;
+    try { payload=JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch { if(!response.ok)throw new SyncHttpError(response.status);throw Error('invalid_server_json'); }
+    if(!response.ok) {
+      const code=typeof payload?.error==='string' && /^[a-z_0-9]{1,100}$/.test(payload.error) && !payload.error.includes(config.token) ? payload.error : null;
+      throw new SyncHttpError(response.status,code);
+    }
+    return payload;
   }
   async tick() {
     return this.store.exclusive(async()=>{
       const config=await this.read('config');if(!config?.enabled)return {state:'disconnected'};
-      const prefix=config.namespace+'/';const issues=[];let queued=0,uploaded=0,downloaded=0,unchanged=0;
+      const prefix=config.namespace+'/';const issues=[];let queued=0,uploaded=0,downloaded=0,unchanged=0,suppressed_sources=0,discarded_uploads=0,deleted_snapshots=0;
       const error=(where,e)=>issues.push({where,code:safeCode(e)});
       const underQuota=async bytes=>{if((await this.store.usageBytes())*3+bytes>MAX_STORE)throw Error('local_storage_limit');};
       // Each source is independent. One malformed file never blocks another project/host.
       for(const project of config.projects) {
         let sources;try{sources=await recentLocalSessions(this.home,project.path,this.now(),{all:true});}catch(e){error(project.id,e);continue;}
         for(const source of sources) {
+          if(await this.read(suppressionKey(config.namespace,{host:source.host,project:project.id,session:source.session}))) {suppressed_sources++;continue;}
           const scanKey='scan/'+prefix+hash(source.path);
           const mark={bytes:source.bytes,modified:source.modified};
           if(canonicalJson(await this.read(scanKey))===canonicalJson(mark)){unchanged++;continue;}
@@ -102,8 +116,10 @@ export class SessionSync {
       }
       let attempted=0,disabledPending=0;
       for(const key of await this.store.list('outbox/'+prefix)) {
+        let snapshot;
         try {
-          const snapshot=await this.read(key);
+          snapshot=await this.read(key);
+          if(await this.read(suppressionKey(config.namespace,snapshot))) {await this.store.remove(key);discarded_uploads++;continue;}
           if(!config.projects.some(p=>p.id===snapshot.project)){disabledPending++;continue;}
           if(attempted===50)break;
           attempted++;
@@ -113,7 +129,14 @@ export class SessionSync {
           await this.write(receiptKey,result.receipt);
           if(canonicalJson(await this.read(receiptKey))!==canonicalJson(result.receipt))throw Error('receipt_write_failed');
           await this.store.remove(key);uploaded++;
-        }catch(e){error('upload',e);break;}
+        }catch(e){
+          if(deletedResponse(e,'session_deleted')) {
+            // Persist before removing queued evidence, so a crash cannot resurrect it.
+            await this.write(suppressionKey(config.namespace,snapshot),{host:snapshot.host,project:snapshot.project,session:snapshot.session,reason:'session_deleted',at:this.now()});
+            await this.store.remove(key);discarded_uploads++;continue;
+          }
+          error('upload',e);break;
+        }
       }
       if(disabledPending)issues.push({where:'upload',code:'queued_project_not_enabled',count:disabledPending});
       // Import accepted records into a separate inbox. Never overwrite host transcripts.
@@ -128,7 +151,9 @@ export class SessionSync {
             if(!config.projects.some(p=>p.id===item.project))continue;
             const key='inbox/'+prefix+item.id;
             if(await this.read(key))continue;
-            const record=await this.request(config,'/api/measurement/snapshots?id='+encodeURIComponent(item.id));
+            let record;
+            try { record=await this.request(config,'/api/measurement/snapshots?id='+encodeURIComponent(item.id)); }
+            catch(e) { if(deletedResponse(e,'snapshot_deleted')) {deleted_snapshots++;continue;}throw e; }
             const s=record.snapshot;
             if(s?.format!=='hps-session-sync/1'||s.digest!==item.digest||digestOf(s.payload)!==s.digest||s.project!==item.project||s.session!==item.session||!['codex','claude-code'].includes(s.host)||s.payload?.interpretation_status!=='unreviewed'||record.receipt?.state!=='accepted-server'||record.receipt.id!==item.id||record.receipt.digest!==s.digest)throw Error('invalid_server_snapshot');
             validateObservation(s.payload.batch);
@@ -142,11 +167,30 @@ export class SessionSync {
           if(!result.next_cursor||result.snapshots.length===0)break;
         }
       }catch(e){error('download',e);}
-      const status={state:issues.length?'attention':'connected',at:new Date(this.now()).toISOString(),queued,uploaded,downloaded,unchanged,pending:(await this.store.list('outbox/'+prefix)).length,issues};
+      const status={state:issues.length?'attention':'connected',at:new Date(this.now()).toISOString(),queued,uploaded,downloaded,unchanged,suppressed_sources,discarded_uploads,deleted_snapshots,pending:(await this.store.list('outbox/'+prefix)).length,issues};
       await this.write('status',status);return status;
     });
   }
   async status(){const c=await this.read('config');const keys=await this.store.list('outbox/');return {configured:!!c,enabled:c?.enabled||false,server:c?.server,projects:c?.projects,isolated_pending:keys.filter(k=>!c||!k.startsWith('outbox/'+c.namespace+'/')).length,last:await this.read('status')};}
   async pause(){return this.store.exclusive(async()=>{const c=await this.read('config');if(c)await this.write('config',{...c,enabled:false});return {enabled:false};});}
   async records(){const c=await this.read('config');const rows=[];if(c)for(const key of await this.store.list('inbox/'+c.namespace+'/'))rows.push(await this.read(key));return rows;}
+  /** Online, read-only server results. Never runs an evaluator or records a review. */
+  async results(id) {
+    if(id!==undefined&&!snapshotId(id))throw Error('invalid_snapshot_id');
+    const config=await this.read('config');if(!config)throw Error('connect_first');
+    const data=await this.request(config,'/api/measurement/workbench'+(id?'?id='+encodeURIComponent(id):''));
+    if(id) {
+      const s=data?.snapshot,r=data?.receipt;
+      if(s?.format!=='hps-session-sync/1'||!['codex','claude-code'].includes(s.host)||r?.id!==id||r.state!=='accepted-server'||r.digest!==s.digest||digestOf(s.payload)!==s.digest||s.payload?.batch?.session!==s.session||s.payload.batch.scope!==s.project||!Array.isArray(data.history)||!Array.isArray(data.actions)||!Number.isSafeInteger(data.revision)||data.revision<0||!('draft' in data)||!('result' in data))throw Error('invalid_server_results');
+      validateObservation(s.payload.batch);
+      return this.resultOutput(config,{snapshot:s,receipt:r,draft:data.draft,result:data.result,revision:data.revision,history:data.history,actions:data.actions});
+    }
+    if(!data||!['sessions','assessments','actions','comparisons'].every(key=>Array.isArray(data[key])))throw Error('invalid_server_results');
+    if(data.sessions.some(s=>!snapshotId(s?.id)||typeof s.project!=='string'||!['codex','claude-code'].includes(s.host)))throw Error('invalid_server_results');
+    return this.resultOutput(config,{sessions:data.sessions,assessments:data.assessments,actions:data.actions,comparisons:data.comparisons});
+  }
+  resultOutput(config,data) {
+    // Even a server echo or a quoted credential must not print this connection token.
+    return JSON.parse(JSON.stringify(data).replaceAll(config.token,'[REDACTED]'));
+  }
 }
