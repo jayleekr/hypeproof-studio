@@ -5,6 +5,7 @@ import type { Env } from '../env';
 import { bearer, verify, type TokenPayload } from '../lib/tokens';
 import { authorizeIssuerForCohort, type IssuerAuthz } from '../lib/instructor-auth';
 import { getProfile } from '../profiles';
+import { profileServesCohort } from '../lib/cohort-binding';
 import { getActiveSession, getRoster, isTokenRevoked } from '../lib/kv';
 import { scrubSecrets } from '../lib/scrub-secrets';
 import { isMinorCohort } from '../lib/moderation';
@@ -28,7 +29,7 @@ classroomStudent.use('*',async(c,next)=>{
  if(p.role==='issuer')return c.json({error:'student token required'},403);
  if(p.jti&&await isTokenRevoked(c.env.HPS_KV,p.jti))return c.json({error:'token revoked'},401);
  const profile=getProfile(p.p);
- if(!profile||profile.session.cohort_id!==p.c)return c.json({error:'profile/cohort mismatch'},403);
+ if(!profile||!(await profileServesCohort(c.env,profile,p)).ok)return c.json({error:'profile/cohort mismatch'},403);
  // Child sharing needs a separate verified-guardian-consent contract.
  if(isMinorCohort(profile))return c.json({error:'sharing unavailable for this profile'},403);
  const roster=await getRoster(c.env.HPS_KV,p.c);

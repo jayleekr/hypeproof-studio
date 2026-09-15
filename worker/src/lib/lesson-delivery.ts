@@ -28,10 +28,12 @@ export async function readLesson(env: Env, cohort: string, course: string, versi
 }
 
 /** A missing/broken signed lesson never falls back to another class or draft. */
-export async function resolveTokenLesson(env: Env, p: TokenPayload) {
+// `lessonCohort` is where the frozen versions live: the token cohort for legacy seats,
+// the template cohort for a class opening (#1006 IC-B, from profileServesCohort).
+export async function resolveTokenLesson(env: Env, p: TokenPayload, lessonCohort = p.c) {
   if (!p.lesson) return null;
   const ref = p.lesson;
   if (typeof ref.course_id !== 'string' || typeof ref.version !== 'string' || typeof ref.sha256 !== 'string') return null;
-  const lesson = await readLesson(env, p.c, ref.course_id, ref.version, p.p);
+  const lesson = await readLesson(env, lessonCohort, ref.course_id, ref.version, p.p);
   return lesson?.sha256 === ref.sha256 ? lesson : null;
 }

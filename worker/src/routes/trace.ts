@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { bearer, verify, TokenError } from "../lib/tokens.ts";
 import { getProfile } from "../profiles/index.ts";
+import { profileServesCohort } from "../lib/cohort-binding.ts";
 import { getActiveSession, getRoster, isSessionLive, bumpRateCounter } from "../lib/kv.ts";
 import {
   createTrial,
@@ -212,8 +213,9 @@ trace.post("/event", async (c) => {
   if (!profile) {
     return c.json({ error: { message: `unknown profile: ${payload.p}`, type: "config" } }, 400);
   }
-  if (payload.c !== profile.session.cohort_id) {
-    return c.json({ error: { message: "token cohort/profile mismatch", type: "auth" } }, 401);
+  const cohortDecision = await profileServesCohort(env, profile, payload);
+  if (!cohortDecision.ok) {
+    return c.json({ error: { message: "token cohort/profile mismatch", type: "auth", code: cohortDecision.reason } }, 401);
   }
 
   // 4-5. Session + roster

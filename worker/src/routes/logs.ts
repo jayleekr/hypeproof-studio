@@ -29,6 +29,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
 import { getProfile } from "../profiles";
+import { profileServesCohort } from "../lib/cohort-binding";
 import { getRoster, isTokenRevoked, bumpRateCounter } from "../lib/kv";
 import { isUuid } from "../lib/storage";
 
@@ -111,8 +112,9 @@ logs.put("/:sessionId/:filename", async (c) => {
   if (!profile) {
     return c.json({ error: { message: `unknown profile: ${payload.p}`, type: "config" } }, 400);
   }
-  if (payload.c !== profile.session.cohort_id) {
-    return c.json({ error: { message: "token cohort/profile mismatch", type: "auth" } }, 401);
+  const cohortDecision = await profileServesCohort(env, profile, payload);
+  if (!cohortDecision.ok) {
+    return c.json({ error: { message: "token cohort/profile mismatch", type: "auth", code: cohortDecision.reason } }, 401);
   }
 
   // 4. 코호트 opt-in — fail closed. 플래그 없는/false 코호트는 서버가 거부한다.
