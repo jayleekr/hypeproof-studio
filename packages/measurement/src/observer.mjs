@@ -128,9 +128,9 @@ export async function* observeFile(source,checkpoint=null,{maxBytes=32*1024*1024
     const raw=carry.subarray(0,newline+1);carry=carry.subarray(newline+1);const lineEnd=lineStart+raw.length;
     const before=structuredClone(state);const locator={line:state.line+1,from:lineStart,to:lineEnd,hash:'sha256:'+sha(raw)};
     let normalized;
-    if(raw.length>2*1024*1024){normalized={events:[],coverage:{...emptyCoverage(),records:1,oversized:1,omitted:1}}}
+    if(raw.length>16*1024*1024){normalized={events:[],coverage:{...emptyCoverage(),records:1,oversized:1,omitted:1}}}
     else{let row;try{row=JSON.parse(raw.toString('utf8'))}catch{if(!raw.toString('utf8').trim()){row={type:'blank'}}else row={type:'observer_malformed_record'}};if(!row||typeof row!=='object'||Array.isArray(row))row={type:'observer_malformed_record'};normalized=normalizeRecord(row,state,locator,source.host,source.cwd,source.artifactRoots||[])}
-    if(events.length+normalized.events.length>OBSERVER_LIMITS.events||Buffer.byteLength(JSON.stringify([...events,...normalized.events]))>OBSERVER_LIMITS.bytes-16384){state=before;if(state.offset>batchFrom){yield await flush();produced++;if(produced>=maxDeltas)return;} normalized=raw.length>2*1024*1024?normalized:normalizeRecord(JSON.parse(raw.toString('utf8')),state,locator,source.host,source.cwd,source.artifactRoots||[]);}
+    if(events.length+normalized.events.length>OBSERVER_LIMITS.events||Buffer.byteLength(JSON.stringify([...events,...normalized.events]))>OBSERVER_LIMITS.bytes-16384){state=before;if(state.offset>batchFrom){yield await flush();produced++;if(produced>=maxDeltas)return;} normalized=raw.length>16*1024*1024?normalized:normalizeRecord(JSON.parse(raw.toString('utf8')),state,locator,source.host,source.cwd,source.artifactRoots||[]);}
     if(normalized.events.length>OBSERVER_LIMITS.events)throw Error('observer_record_event_limit');
     events.push(...normalized.events);for(const k of Object.keys(coverage))coverage[k]+=normalized.coverage[k];state.offset=lineEnd;state.line++;lineStart=lineEnd;
    }
