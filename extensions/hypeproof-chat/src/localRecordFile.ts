@@ -79,9 +79,17 @@ export class FileRecordStorage implements StoragePort {
   async exclusive<T>(fn: () => Promise<T>): Promise<T> {
     await this.initialize();
     const lock = join(this.root, '.writer');
-    try { await fs.mkdir(lock, { mode: 0o700 }); }
+    // Publish the lock only after owner metadata exists. Atomic directory rename
+    // also replaces an empty legacy lock left by a crash before its pid write.
+    const candidate = join(this.root, '.writer-' + randomUUID());
+    await fs.mkdir(candidate, { mode: 0o700 });
+    try {
+      await fs.writeFile(join(candidate, 'pid'), String(process.pid), { mode: 0o600 });
+      await fs.rename(candidate, lock);
+    }
     catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+      await fs.rm(candidate, { recursive: true, force: true });
+      if (!['EEXIST', 'ENOTEMPTY'].includes((e as NodeJS.ErrnoException).code || '')) throw e;
       const owner = Number(await fs.readFile(join(lock, 'pid'), 'utf8').catch(() => '0'));
       if (!Number.isSafeInteger(owner) || owner <= 0) throw Error('storage_busy');
       try { process.kill(owner, 0); throw Error('storage_busy'); }
@@ -90,7 +98,6 @@ export class FileRecordStorage implements StoragePort {
       return this.exclusive(fn);
     }
     try {
-      await fs.writeFile(join(lock, 'pid'), String(process.pid), { mode: 0o600 });
       const sizes = new Map<string, number>();
       for (const key of await this.list('')) sizes.set(key, (await this.read(key))?.length || 0);
       this.sizes = sizes;

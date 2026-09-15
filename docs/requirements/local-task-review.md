@@ -104,3 +104,21 @@ The file adapter tracks key lengths while holding its writer lock to avoid resca
 the full store for every observation. The optional core storage usage hook preserves
 the existing capacity calculation. Record and receipt reads still read the durable
 file; they never return cached content. The index is discarded on lock release.
+
+## Receipt and interrupted-write recovery (#1020)
+
+Every preview is bound to the current task, imported evidence, interpretation and
+review revisions. A later edit, an older process changing those records, or an
+unbound preview left by an older version requires a new preview before submission.
+Already accepted receipts remain readable; unchanged repeated submissions keep the
+same receipt. Preview invalidation happens before a user edit is persisted, so a
+failed invalidation cannot report an error while leaving a newly edited task with a
+submittable old preview.
+
+The filesystem publishes a writer lock only after its owner metadata exists. An
+empty legacy lock from an interrupted initialization is replaced atomically; an
+active writer is still refused. The recovery contract is exercised by
+`extensions/hypeproof-chat/test/local-review-recovery.smoke.mjs`; Windows actual
+filesystem and installed-App acceptance remain NOT RUN. The test includes storage
+failure injection, cross-process stale state, old preview compatibility, successful
+receipt retries and active-writer exclusion.

@@ -1501,6 +1501,9 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/local-session-observation.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/local-review-recovery.smoke.mjs"
         }
       ]
     },
