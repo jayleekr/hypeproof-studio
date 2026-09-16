@@ -9,6 +9,10 @@
     "docs/requirements/studio-trial.md": {
       "reason": "선택형 웹 프로토타입의 역사 기록. 현재 실제 체험은 studio-native-trial.md가 대체하며 해당 문서를 원장에 포함한다.",
       "sha256": "a34f930b06b151b00e47be9de64e0c9e5784a6610f8b6066995c80116fa6f24d"
+    },
+    "docs/requirements/local-task-review.md": {
+      "reason": "#1020 로컬 검토 슬라이스의 서술형 계약. 자체 요구사항 번호 없이 measurement-core.md의 MC-07·MC-21–25·MC-27–32·MC-34–35를 구현 범위로 인용하므로, 원장은 그 상위 문서를 센다.",
+      "sha256": "84a4998d1f89c9b8fe6f217bdfa81c85590e8a8ff3e74d9c0d5519551dd1926c"
     }
   },
   "documents": [
@@ -285,7 +289,7 @@
         "WEB-09"
       ],
       "inline_prefixes": [],
-      "sha256": "92a680c1cbbf428aaf5394ffbf835ac0cd52ea43c93155bf8fbc1fba71e95273",
+      "sha256": "e90461fa4d1e6891220e4f70fc1a5f7b42ac4b3698686139b72f908b78017be6",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/chalk-authoring.md",
@@ -420,7 +424,7 @@
         "HC-08"
       ],
       "inline_prefixes": [],
-      "sha256": "8ea74df86f789c8593cd6274c1e8d01ad1379ccdbae43796c2ac3092eea00456",
+      "sha256": "d49605e7b33cc99c52caf47a0e8e68cb102e07fd97e58ac200d809846ad91b2a",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/design/philosophy-alignment-2026-09-08.md",
@@ -442,6 +446,92 @@
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/independent-course.md",
       "test": "docs/requirements/independent-course.md"
+    },
+    {
+      "path": "docs/requirements/measurement-core.md",
+      "ids": [
+        "MC-01",
+        "MC-02",
+        "MC-03",
+        "MC-04",
+        "MC-05",
+        "MC-06",
+        "MC-07",
+        "MC-08",
+        "MC-09",
+        "MC-10",
+        "MC-11",
+        "MC-12",
+        "MC-13",
+        "MC-14",
+        "MC-15",
+        "MC-16",
+        "MC-17",
+        "MC-18",
+        "MC-19",
+        "MC-20",
+        "MC-21",
+        "MC-22",
+        "MC-23",
+        "MC-24",
+        "MC-25",
+        "MC-26",
+        "MC-27",
+        "MC-28",
+        "MC-29",
+        "MC-30",
+        "MC-31",
+        "MC-32",
+        "MC-33",
+        "MC-34",
+        "MC-35",
+        "MC-36",
+        "MC-37",
+        "MC-38",
+        "MC-39",
+        "MC-40",
+        "MC-41",
+        "MC-42",
+        "MC-43",
+        "MC-44",
+        "MC-45",
+        "MC-46",
+        "MC-47",
+        "MC-48"
+      ],
+      "inline_prefixes": [],
+      "sha256": "7582ea0ba262581ffba8637b3deab5c024fe232b3590bd43a0b6d430f3e53f72",
+      "owner": "jayleekr",
+      "intent": "docs/intents/measurement-core.md",
+      "design": "docs/design/measurement-core.md",
+      "test": "docs/testing/measurement-core.md"
+    },
+    {
+      "path": "docs/requirements/session-sync.md",
+      "ids": [
+        "SS-01",
+        "SS-02",
+        "SS-03",
+        "SS-04",
+        "SS-05",
+        "SS-06",
+        "SS-07",
+        "SS-08",
+        "SS-09",
+        "SS-10",
+        "SS-11",
+        "SS-12",
+        "SS-13",
+        "SS-14"
+      ],
+      "inline_prefixes": [
+        "SS"
+      ],
+      "sha256": "2d28d3ac9bda627d5a41ea4e28d955046357c1694b5338f2f8cad1cd5f92c1c5",
+      "owner": "jayleekr",
+      "intent": "docs/intents/measurement-core.md",
+      "design": "docs/design/measurement-core.md",
+      "test": "docs/testing/measurement-core.md"
     }
   ],
   "work_items": [
@@ -1858,6 +1948,147 @@
         "extensions/hypeproof-chat/src",
         "worker/src",
         "chalk/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "measurement-core-dogfood",
+      "title": "측정 코어와 Jay 첫 사용 경로",
+      "issue": 1020,
+      "kind": "implementation",
+      "requirements": [
+        {
+          "path": "docs/requirements/measurement-core.md",
+          "ids": [
+            "MC-01",
+            "MC-02",
+            "MC-03",
+            "MC-04",
+            "MC-05",
+            "MC-06",
+            "MC-07",
+            "MC-08",
+            "MC-09",
+            "MC-10",
+            "MC-11",
+            "MC-12",
+            "MC-13",
+            "MC-14",
+            "MC-15",
+            "MC-16",
+            "MC-17",
+            "MC-18",
+            "MC-19",
+            "MC-20",
+            "MC-21",
+            "MC-22",
+            "MC-23",
+            "MC-24",
+            "MC-25",
+            "MC-26",
+            "MC-27",
+            "MC-28",
+            "MC-29",
+            "MC-30",
+            "MC-31",
+            "MC-32",
+            "MC-33",
+            "MC-34",
+            "MC-35",
+            "MC-36",
+            "MC-37",
+            "MC-38",
+            "MC-47",
+            "MC-48"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "단위 1·2(공통 코어 추출, 로컬 기록·검토·제출 접수)는 #1043·#1047로 머지됐다. 다음은 단위 3·4의 Claude Code·Codex 얇은 어댑터와 설치·진단, 그리고 Studio 재연결의 실제 호출 증거다.",
+      "design_delta": "호스트 독립 코어가 정규화·근거 연결·해석 검증을 소유하고, 어댑터는 호스트 사건만 옮긴다. 기존 7개 Asset 기록은 원래 키로 보존하고 새 해석은 6개 모델로 버전을 붙여 따로 생성한다.",
+      "positive_control": "실제 호스트 사건이 같은 코어를 거쳐 카드·근거·로컬 접수까지 이어지고, 같은 정규 입력이 세 호스트에서 같은 검증 결과를 낸다.",
+      "negative_control": "날조된 인용·AI 대필을 사람의 독립 판단으로 승격, 미관찰을 0점 처리, 7→6 자동 환산, 미지원 schema 통과를 모두 거부한다.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "worker/src/lib/measurement-core",
+        "packages/measurement/src",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "measurement-core-team-research",
+      "title": "원격 팀 수집과 Asset 연구 큐",
+      "issue": 1020,
+      "kind": "research",
+      "requirements": [
+        {
+          "path": "docs/requirements/measurement-core.md",
+          "ids": [
+            "MC-39",
+            "MC-40",
+            "MC-41",
+            "MC-42",
+            "MC-43",
+            "MC-44",
+            "MC-45",
+            "MC-46"
+          ]
+        }
+      ],
+      "depends_on": [
+        "measurement-core-dogfood"
+      ],
+      "gate": {
+        "reason": "P1·P2. Jay 첫 사용 수용(MC-47·48)과 팀 운영·데이터 정책 준비 전에는 착수하지 않는다."
+      },
+      "next_action": "Jay 첫 사용 수용이 확인된 뒤 인증·권한·운영 규칙과 연구 큐 설계를 착수한다.",
+      "design_delta": "원격 제출은 서버가 멤버·프로젝트 권한·수집 목적을 검증하고, 로컬 접수와 원격 접수를 분리한다.",
+      "positive_control": "인증된 멤버의 제출만 접수되고, 연구 큐에 반례·미분류가 사례와 함께 남는다.",
+      "negative_control": "타인 데이터 접근·위조 로컬 접수·제출량을 독립 표본으로 세는 집계를 거부한다.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "worker/src",
+        "packages/measurement/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "session-sync",
+      "title": "호스트 세션 자동 동기화",
+      "issue": 1049,
+      "kind": "implementation",
+      "requirements": [
+        {
+          "path": "docs/requirements/session-sync.md",
+          "ids": [
+            "SS-01",
+            "SS-02",
+            "SS-03",
+            "SS-04",
+            "SS-05",
+            "SS-06",
+            "SS-07",
+            "SS-08",
+            "SS-09",
+            "SS-10",
+            "SS-11",
+            "SS-12",
+            "SS-13",
+            "SS-14"
+          ]
+        }
+      ],
+      "depends_on": [
+        "measurement-core-dogfood"
+      ],
+      "next_action": "packages/measurement의 CLI·어댑터·관측기로 Codex·Claude Code 세션을 내보내고 멤버 서버로 동기화하는 경로를 실제 호스트에서 검증한다.",
+      "design_delta": "Studio 바이너리 없이 설치되는 Node 패키지가 공통 코어와 어댑터를 노출하고, 서버가 승인한 프로젝트 해시만 수집한다.",
+      "positive_control": "선택한 프로젝트의 세션이 증분으로 동기화되고, 같은 세션 재시도가 중복을 만들지 않는다.",
+      "negative_control": "승인되지 않은 프로젝트 경로 수집, 호스트 자격증명 변경, 삭제된 기록의 재수집을 거부한다.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "packages/measurement/src"
       ],
       "verification_inputs": []
     }
