@@ -37,6 +37,39 @@ Existing verification policy: [testing](../dev/05-testing-requirements.md) and
 
 ## 구현 순서와 각 단계의 종료 기준
 
+### 누락된 요구사항의 인수 시나리오 (2026-09-13, #1007)
+
+아래 T-24~46은 새로 발현한 인수 계획이며 전부 **NOT RUN**이다.
+기존 79개 작성·관리·디자인 요구 중 테스트 연결이 없던 23개를 다룬다.
+각 실행은 제출·실제 App/Service/수업 revision, 기대/관측과 근거를 기록한다.
+합성·로컬 검사는 실제 설치본·운영 활성화·인간 학습 효과의 PASS가 아니다.
+
+| Test ID | 제품 REQ | 조건 및 실행 | 합격 기준 | 검증 방식 |
+|---|---|---|---|---|
+| T-24 | BASE-02 | 강사 조건으로 초안→설정→학생 리허설→확정 수업 현황까지 이동하고 각 단계 실패를 주입 | 같은 수업 revision으로 연결; 미실행 리허설을 준비 완료로 표시하지 않고 입력/확정본 보존 | Chalk+Service E2E |
+| T-25 | BASE-03 | 새 지원 기기의 학생이 기본 홈페이지 실습 시작·수정·검수·저장을 UI로 수행; 실행 의존성 하나 제거 | 명령어/설정 파일 편집 없이 정상 완료; 환경 부재는 지원되는 복구 안내, 몰래 성공 처리 금지 | 실제 App+관찰 |
+| T-26 | BASE-04 | 안내·예제·도구·지침·완료 기준을 저장/재열기/확정하고 필수 항목 하나씩 삭제 | 전 항목과 순서 복원; 누락 위치 표시·확정 차단·기존 확정본 불변 | API+상태 전이 |
+| T-27 | CH-02 | 충분한 목표/자료로 홈페이지 수업 초안 생성, 예제나 검수 기준 누락·생성 중단 재현 | 편집 가능한 초안에 예제/실습/검수 항목 존재; 누락/부분 생성은 미완 표시, 자동 개설 없음 | 실제 모델+Chalk |
+| T-28 | CH-05 | 선택 기록 A로 초안 생성, 기록 B 미선택·A 공유 철회 후 재시도 | A 출처를 보존한 초안을 강사가 직접 확정; B/철회 기록 재전송·자동 확정 없음 | 권한+실제 모델 |
+| T-29 | CH-06 | 기본/확장 과제 편집·순서 변경·학생 진입, 확장 과제만 실패 | 기본과 확장 조건/완료 상태 분리; 확장 실패가 기본 결과 삭제나 허위 전체 완료를 만들지 않음 | API+UI |
+| T-30 | CH-07 | 학생 기록·합성 자격을 포함한 이전 기수에서 새 기수 복제 | 수업 자료/구성만 복제, 새 ID; 학생 원문/명단/자격/사용량 미포함, 원 기수 불변 | API+저장소 대조 |
+| T-31 | WEB-08 | 통제된 공개 대상에서 v1→v2→v1 복구, 인증 실패·배포 중 응답 유실 | 실제 재접속한 파일/자산이 선택한 revision; 미확인/실패를 복구 완료로 표시하지 않고 이전 대상 보존 | 승인된 외부 연동 E2E |
+| T-32 | WEB-09 | 지원 템플릿 설치→빌드→실행, lock 불일치·의존성/빌드 오류·실행 포트 충돌 | 검증된 템플릿만 실행, 단계별 오류/복구 제공·파일 보존; 임의 템플릿 지원 성공 주장 없음 | 격리 설치+App |
+| T-33 | ENV-04 | 학생 A/B 자격으로 실행·예제 복제·내보내기, B 자격/공유 폴더로 우회 시도 | A/B 정상 작업 분리; 복제에 자격 없음, 타 학생 자격 재사용·접근 거부 | API+파일+SDK |
+| T-34 | ENV-05 | 검토된 플러그인/MCP 연결 시험 후 확정 버전에 편입, 시험 실패/버전 변경 | 시험한 권한/버전만 편입; 실패·미검토 버전 자동 활성화 없음 | 격리 통합 |
+| T-35 | ENV-06 | 미등록 도구 후보를 격리 시험·제거하고 수업 편입 요청 | 시험 기록과 검토 결정 분리; 시험 중 운영 수업/학생 자격 접근 없음, 미승인 편입 차단 | 격리 환경+검토 |
+| T-36 | RUN-02 | 정상 준비와 실행/자료/도구/인증 누락을 각각 재현 | 각각 원인·기준시각·다음 행동 표시; 하나의 ping 성공으로 전체 준비 완료 금지 | Service+Chalk |
+| T-37 | RUN-04 | 지원/미지원 OS·앱, 연결 끊김, AI 한도/권한 거부 학생을 동일 명단에 둠 | 지원·연결·AI 가능 상태를 분리, 신호 없는 학생 unknown; 누락 학생을 명단에서 숨기지 않음 | 플랫폼+운영 보드 |
+| T-38 | RUN-05 | 수정 중 네트워크/실행 환경 실패 후 재시도·복구 | 파일/입력/현재 연결 보존, 복구 가능 다음 행동; 조용한 데이터 초기화·중복 외부 실행 없음 | 장애 주입+App |
+| T-39 | CLS-03 | 학생 산출물의 파일/위치/revision에 피드백하고 이후 파일 수정/삭제 | 원 위치·버전 근거 유지, 현재 위치 불일치는 명시; 다른 파일/새 버전에 조용히 재부착 금지 | 공유 API+UI |
+| T-40 | CLS-04 | 학생이 범위를 승인한 강사 수정, 거부·철회·만료·수정 대상 변경 대조 | 허용 범위만 수정, 변경 이력/복구 전 snapshot 보존; 승인 없는 수정과 확대 거부 | 권한+실제 App |
+| T-41 | CLS-05 | 선택 결과 A로 공동 리뷰, 결과 B 미선택·A 철회/만료·타 수업 접근 | A만 허용된 대상에게 표시; B/철회 자료·원문 자동 공개 없음 | 공유 API+Chalk |
+| T-42 | EDU-01 | 단계별 목적·선택·검수 과제를 보며 작업, 충분한 기존 목표/모호한 목표 대조 | 필요한 판단을 안내하고 이미 명확한 목표는 재설문 없이 진행; 과제 열람/AI 문장을 인간 선택으로 기록하지 않음 | 실제 모델+App |
+| T-43 | EDU-02 | 힌트→함께 수행→독립 시도 전환과 실행 중 변경, 다른 수업 도움 설정 주입 | 다음 실행의 도움 방식·출처가 일치, 입력 보존; 권한 확대·타 수업 지침 혼입 없음 | 실제 모델+정책 |
+| T-44 | EDU-05 | 직접/도움받은/전문가 위임의 근거 있는 사례와 출처 없는 사례를 비교 | 도움 조건과 판단 주체를 구분; 미관찰은 unknown, AI 설명/제출 수를 자립 등급으로 승격하지 않음 | 합성 기록+사람 검토 |
+| T-45 | REQ-03 | 같은 요청을 기존 안내/선택 확장/기본 개발로 분류하고 이유 수정, 권한 없는 변경 시도 | 요청자에게 분류·이유·다음 행동 표시; 권한 없는 변경 거부, 분류가 개발 완료 표시를 만들지 않음 | API+UI |
+| T-46 | REQ-04 | 수정 후보를 강사가 요청 당시 예제로 재실행해 해결/미해결 판정, 예제/버전 불일치 대조 | 실제 대상 revision과 강사 확인 기록 연결; PR 병합/다른 예제 통과만으로 해결 완료 금지 | 강사 인수 |
+
 1. PR 1 — 저장 및 권한 계약: 기존 모델 확인 후 초안/버전/리허설 상태 추가. T-01/02/04/07/08/10/11/21 통과.
 2. PR 2 — Chalk 작성 화면: 홈페이지 수업 생성, 예제·단계 편집, 준비 상태, 버전 확정 UI. 학생 간 예제 격리 T-03 포함.
 3. PR 3 — Studio 진입 및 리허설: 학생 권한 실행, 환경 검사, 기존 참여 흐름 연결. T-05/06/09/22/23 통과.
@@ -69,14 +102,15 @@ These additions are acceptance criteria, not claims that those tests exist.
 
 ## Coverage and status
 
-The 23 scenarios cover the first vertical path and its highest-risk boundaries;
-they are not complete coverage of all 53 product requirements. Before an
-implementation slice is declared complete, link every changed requirement to an
-executable test or a named manual scenario. Untouched later requirements remain
-planned; no blanket PASS or inferred completion.
+The original T-01~23 cover the first vertical path and its highest-risk boundaries.
+T-24~46 add the previously unlinked requirements. With the classroom-admin AT/DT
+scenarios, all 79 authoring/admin/design requirement IDs now have a named scenario.
+This is design coverage only. Before an implementation slice is declared complete,
+link each applicable scenario to executable tests or actual manual evidence.
+Unexecuted requirements remain planned; no blanket PASS or inferred completion.
 
-P0 release requires all applicable P0 requirements (including ones without a
-dedicated T-* row yet) to have evidence. A documentation PR needs documentation
+P0 release requires all applicable P0 requirements and their scenarios to have
+evidence. A documentation PR needs documentation
 validation only. A product PR must update actual test paths and results.
 
 ## API slice execution record

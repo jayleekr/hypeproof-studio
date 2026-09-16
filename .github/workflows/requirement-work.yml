@@ -1,0 +1,34 @@
+name: Requirement work coverage
+on:
+  pull_request:
+    paths:
+      - 'docs/requirements/**'
+      - 'config/requirement-work.json'
+      - 'scripts/next-work.py'
+      - '.github/workflows/requirement-work.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/requirements/**'
+      - 'config/requirement-work.json'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/checkout@v4
+        with:
+          repository: jayleekr/hypeproof-harness
+          ref: 539560f1c85ba6d644241b998c159806d2cca617
+          path: .work-discovery-harness
+          persist-credentials: false
+      - name: Detect missing or changed requirements and unassigned work
+        env:
+          HYPEPROOF_HARNESS: ${{ github.workspace }}/.work-discovery-harness
+        run: python scripts/next-work.py --check
