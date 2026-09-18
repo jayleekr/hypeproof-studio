@@ -1987,6 +1987,15 @@
         },
         {
           "path": "worker/test/classroom-ops-d1.test.mjs"
+        },
+        {
+          "path": "chalk/src/ui/manage.html"
+        },
+        {
+          "path": "chalk/test/classroom-ops.test.mjs"
+        },
+        {
+          "path": "e2e/classroom/ops.mjs"
         }
       ]
     },

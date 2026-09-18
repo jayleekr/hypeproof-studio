@@ -117,3 +117,12 @@ npm --prefix chalk run typecheck
 - `npm --prefix worker run test:classroom-ops:d1`(로컬 workerd/D1): migration 재실행, 3개 동시 명단 저장 중 1개만 전체 적용, 같은 ticket 4개 동시 connect 중 1개만 성공, 좌석 상태 CAS. 운영 D1 증거가 아니다.
 - 회귀: `npm --prefix worker test`, `npm --prefix worker run typecheck`, `npm --prefix chalk test`, `npm --prefix chalk run typecheck` 모두 exit 0.
 - 이 단계에서 NOT RUN: App의 실제 연결·다중 창 lease(AT-21/23 App 계층), Chalk 브라우저 화면(AT-16/18 browser), 100명 부하·KV 지연·학교망(AT-25/34), 구버전 설치 앱(AT-32 real app), staging D1(AT-33).
+
+### R1 Chalk 화면 · 2026-09-18
+
+대상: 기존 `chalk/src/ui/manage.html`의 ‘원격 수업 운영’ 패널(새 대시보드 없음). Chalk는 기존 forwarder만 사용한다.
+
+- `npm --prefix chalk run test:classroom-ops`: 페이지 스크립트 계약(토큰·ticket 비영속, textContent 렌더), run/status/pairing forwarding, 위조 헤더 제거, capability 없는 강사 403, 앱 경로(`/v1/classroom/ops/*`)와 미등록 action은 Service로 전달되지 않음.
+- `npm --prefix e2e run test:classroom-ops`(Mac/Chromium, 합성 계정): AT-16 browser — 무신호 좌석 포함 회차 명단 전부 표시·누적 roster 좌석 제외, 명단 오류 시 입력 보존. AT-18 browser — 401을 만료로 표시하지 않고 앱이 보고한 원인과 다음 조치 표시, 확인된 차단만 빨간 글자, 승인 대기는 오류 아님, stale 신호는 회색 ‘확인 불가’로 강등. AT-15 — 발급 문구가 연결 완료를 주장하지 않음. DES — 키보드만으로 좌석 열기·코드 발급, 포커스 이동, 대비 4.5:1 실측, 375/390/768/1280/1440px 무넘침, 44px 대상, 연결 해제 시 ticket 제거. 화면은 `e2e/test-results/classroom/ops-*.png`.
+- 회귀: `npm --prefix chalk test`, 기존 `npm --prefix e2e run test:classroom` PASS.
+- NOT RUN: 200% 확대, 실제 Windows 브라우저, 공통 장애 묶음의 30명 이상 화면, 실제 Studio 앱이 보낸 신호.
