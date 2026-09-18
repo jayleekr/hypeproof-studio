@@ -1,0 +1,91 @@
+{
+  "schema": "hps-demo-fixture/1",
+  "id": "dental-field-cuesheet",
+  "title": "치과 현장 큐시트 — 관문 차단 시연",
+  "demo_notice": "데모용 복제다. 운영 데이터가 아니고 실적으로 인용할 수 없다. 실제 진행한 수업의 정본이라고 단정하지 않는다 — 이 큐시트가 그 회차의 실행 문서였다는 연결이 문서로 확정되지 않았다. 산출물 목록은 설계상 만들기로 한 것이며 제출 실적이 아니다 — 이 회차의 실측 입력(참가자 제출물·완주율·산출물 목록)이 0건이다(hypeprooflab products/workshop-result-report/engagements/dental-2026-07-29/README.md:18). 참가자 실명 없음. 내부 담당자 호칭 1건은 [담당자]로 치환했다.",
+  "source": {
+    "path": "hypeproof_kids_edu: kids_edu_vault/wiki/specs/track-b/boa-dental-ai-homepage-cuesheet-20260706-spec.md",
+    "kind": "2시간 외부 공유용 큐시트. 상위 커리큘럼과 진행자 스크립트는 붙이지 않았다 — 그 스크립트는 다른 수업(직원 대상 50분)의 문서다",
+    "status": "status: active 정본. 다만 ip_owner·scope 필드가 문서에 없고 type 값이 커리큘럼 스키마 enum 밖이다",
+    "ip_owner": "unverified — 정산이 별개 법인을 경유한다는 기록이 있어 우리 것으로 단독 표기하지 않는다",
+    "source_rev": "hypeproof_kids_edu@89e50e2"
+  },
+  "conversion_notes": [
+    "원문 구간은 7개다. 마지막 2분 구간을 앞에 묶지 않았다.",
+    "완료 기준·선행 조건·강사 금지가 원문에 없다. **비어 있는 그대로 두었다 — 채우지 않았다.** 비어 있는 것이 이 시연의 핵심이다.",
+    "수업 수준에도 목표(objective) 절과 선행 조건 절이 없다. 그대로 비웠다.",
+    "시간은 전부 '19:00-19:10' 형식의 시각 문자열이고 분 정수 필드가 없다. duration_minutes 120은 시각에서 계산한 값이며 원문에 없다.",
+    "증거물은 6번 구간만 명확하다. 3·4·5는 본문에 초안·루브릭이 언급되나 필드로 지목되지 않아 넣지 않았다. 1·2·7은 없다.",
+    "이 문서는 관문이 존재하기 전에 쓰였고 그 규격을 만족하도록 요구받은 적이 없다. '이 수업이 나쁘다'로 읽으면 사실과 다르다."
+  ],
+  "expect": {
+    "blocked": true,
+    "shape_error": true,
+    "note": "완료 기준·선행 조건·목표가 원문에 없어 그대로 비웠다. 형태 검증이 먼저 막고, 관문은 7개 단계 전부의 완료 기준 부재와 선행 조건 부재를 짚는다."
+  },
+  "courses": [
+    {
+      "course_id": "dental-field-cuesheet",
+      "content": {
+        "schema": "hps-session-design/1",
+        "title": "치과 AI 홈페이지 실습 큐시트",
+        "audience": "치과원장 11명. 메인강사 1명과 보조강사 5명이 운영하며 보조강사 1명당 수강생 2명을 담당한다",
+        "duration_minutes": 120,
+        "objective": "",
+        "prerequisites": "",
+        "starter": "사전 준비물(운영진 기준): 완성 데모 · HypeProof Studio 등록 플로우 · 배포 스킬(Cloudflare, GitHub Pages) · 디자인 스킬 · Playwright MCP",
+        "steps": [
+          {
+            "id": "g1-demo",
+            "title": "19:00-19:10 완성 데모",
+            "instructions": "• 완성 홈페이지 시연\n• 제작 채팅 로그 시연\n• 오늘 만들 결과물 안내: 홈페이지, 배포 URL, GitHub 저장소, agent.md\n• 전체 흐름 안내: URL 초안 → 병원 컨텍스트 → 큐레이션 → 루브릭 → 될 때까지 자동 개선 → 최종안 고정",
+            "hint": "",
+            "acceptance": ""
+          },
+          {
+            "id": "g2-setup",
+            "title": "19:10-19:30 세팅",
+            "instructions": "• HypeProof Studio 설치\n• 학생 등록\n• 토큰 입력\n• 채팅 테스트\n• GitHub 가입\n• GitHub 소개: 코드 저장, 홈페이지 배포, AI agent 인수인계\n• 2인 1조 배치",
+            "hint": "",
+            "acceptance": ""
+          },
+          {
+            "id": "g3-reference",
+            "title": "19:30-19:45 Reference First",
+            "instructions": "• 제작 화면 기준으로 실습 시작\n• 참고 홈페이지 URL만 넣고 1차 초안 생성\n• 참고 URL이 없는 경우 데모 병원 주소 사용\n• 본인 치과 홈페이지 1차 초안 생성\n\n핵심: URL만 줘도 AI는 빠르게 초안을 만든다. 결과는 참고 사이트의 분위기를 따라가지만, 우리 병원의 맥락은 아직 부족하다.",
+            "hint": "",
+            "acceptance": ""
+          },
+          {
+            "id": "g4-context",
+            "title": "19:45-20:05 Context Engineering",
+            "instructions": "• 1차 초안에 병원 컨텍스트 추가\n• URL만 넣은 결과와 컨텍스트를 자세히 넣은 결과 비교\n• 본인 치과 컨텍스트 입력: 어필 포인트, 밀고 싶은 진료, 주요 환자층, 병원의 톤, 첫 화면 인상, 빼고 싶은 표현\n• 보조강사가 좋은 컨텍스트 사례 2-3개 수집\n• best-case 큐레이션: *[담당자] 작성 예정\n\n핵심: 대충 URL만 넣었을 때와 병원 컨텍스트를 자세히 알려줬을 때의 결과 차이를 체감한다.",
+            "hint": "",
+            "acceptance": ""
+          },
+          {
+            "id": "g5-loop",
+            "title": "20:05-20:35 Loop Engineering",
+            "instructions": "• 홈페이지 평가 루브릭 작성\n• Playwright MCP로 화면 검사\n• 루브릭 미달 항목 확인\n• AI에게 수정 지시\n• 다시 검사\n• 루브릭을 만족할 때까지 검사와 수정을 반복\n• 보조강사가 좋은 루브릭/자동 개선 사례 2-3개 수집\n• best-case 큐레이션: *[담당자] 작성 예정\n\n핵심: 루브릭을 정의하고, 그 기준을 만족할 때까지 AI가 계속 검사하고 고치게 한다. 핵심은 될 때까지 반복시키는 것이다.",
+            "hint": "",
+            "acceptance": ""
+          },
+          {
+            "id": "g6-freeze",
+            "title": "20:35-20:58 최종안 고정",
+            "instructions": "• 홈페이지 최종안 저장\n• 배포 URL 생성\n• GitHub 저장소에 지금까지 작업한 내용 업로드\n• agent.md 인수인계 문서 업로드\n제출 증거: 홈페이지 · 배포 URL · GitHub 저장소 · agent.md (설계상 만들기로 한 것)",
+            "hint": "",
+            "acceptance": ""
+          },
+          {
+            "id": "g7-check",
+            "title": "20:58-21:00 결과물 확인",
+            "instructions": "• 홈페이지 확인\n• 배포 URL 확인\n• GitHub 저장소 확인\n• agent.md 확인",
+            "hint": "",
+            "acceptance": ""
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -22,7 +22,9 @@ const report = files.map(file => {
   const fx = JSON.parse(readFileSync(new URL(file, dir), 'utf8'));
   const courses = fx.courses.map(c => {
     const shape = validateSessionDesign(c.content, true);
-    const findings = shape ? [] : checkLessonPedagogy(c.content);
+    // 형태 검증에서 막혀도 관문 판정은 계산해 보인다 — 무엇을 채워야 하는지가 거기 있고,
+    // checkLessonPedagogy 는 freeze 전용이 아니다.
+    const findings = checkLessonPedagogy(c.content);
     return {
       course_id: c.course_id,
       title: c.content.title,
@@ -48,9 +50,11 @@ if (asJson) {
     if (r.resolves) console.log(`해소 대상: \`${r.resolves}\``);
     console.log();
     for (const c of r.courses) {
-      if (c.shape_error) { console.log(`- **${c.course_id}** — 형태 검증 실패: ${c.shape_error}\n`); continue; }
-      const mark = c.blocked ? '⛔ 차단' : '✅ 통과';
+      const mark = c.shape_error ? '⛔ 형태 검증에서 먼저 막힘' : c.blocked ? '⛔ 관문 차단' : '✅ 통과';
       console.log(`### ${mark} — ${c.title} (\`${c.course_id}\`, ${c.steps}단계)`);
+      if (c.shape_error) {
+        console.log(`형태 검증: **${c.shape_error}** — 관문에 도달하기 전에 막힌다. 아래는 관문을 따로 돌린 판정이다.`);
+      }
       if (!c.findings.length) { console.log('판정 없음.\n'); continue; }
       for (const f of c.findings) {
         const kind = f.skipped ? LABEL.skip : LABEL[f.severity];
@@ -61,7 +65,7 @@ if (asJson) {
       console.log();
     }
   }
-  const blocked = report.flatMap(r => r.courses).filter(c => c.blocked).length;
+  const blocked = report.flatMap(r => r.courses).filter(c => c.blocked || c.shape_error).length;
   const total = report.flatMap(r => r.courses).length;
   console.log(`---\n수업 ${total}개 중 ${blocked}개 차단 · 픽스처 ${files.length}개.`);
   console.log('`미확인`은 통과가 아니다 — 스키마에 칸이 없어 검사하지 못한 것이다.');

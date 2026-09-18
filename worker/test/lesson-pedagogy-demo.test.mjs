@@ -43,14 +43,18 @@ for (const [file, fx] of loaded) {
   });
 }
 
-// ── 시료가 진짜 수업인지 먼저 확인한다 ──────────────────────────────────────
-// 형태 검증을 통과하지 못하는 물건이면 관문 판정은 의미가 없다. freeze 경로에서도
-// validateSessionDesign 이 먼저 돌고 관문은 그 뒤다.
+// ── 형태 검증은 관문보다 먼저다 ─────────────────────────────────────────────
+// freeze 경로는 validateSessionDesign 이 먼저 돌고 관문은 그 뒤다. 원문에 완료 기준과
+// 목표가 아예 없는 자료는 **관문에 도달하기 전에** 형태 검증에서 막힌다 — 그 사실을
+// 숨기지 않고 픽스처가 `expect.shape_error` 로 선언하게 한다. 관문 판정은 순수 함수로
+// 따로 계산한다(그 함수는 freeze 전용이 아니다).
 for (const [file, fx] of loaded) {
-  check(`${file}: 모든 수업이 확정 가능한 형태다`, () => {
+  const want = fx.expect.shape_error === true;
+  check(`${file}: 형태 검증 결과가 선언과 같다 (shape_error=${want})`, () => {
     for (const c of fx.courses) {
-      assert.equal(validateSessionDesign(c.content, true), null,
-        `${c.course_id}: ${validateSessionDesign(c.content, true)}`);
+      const err = validateSessionDesign(c.content, true);
+      if (want) assert.ok(err, `${c.course_id}: 형태 오류를 선언했는데 통과했다`);
+      else assert.equal(err, null, `${c.course_id}: ${err}`);
     }
   });
 }
