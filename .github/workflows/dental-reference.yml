@@ -40,6 +40,13 @@ jobs:
         working-directory: chalk
       - run: npm run test:chalk-authoring
         working-directory: e2e
+      # 같은 폴더인데 목록에 없어서 안 돌던 둘. simple.mjs 는 실제로 #1115 에 깨진 채
+      # 머지됐다. 추가 비용은 로컬 실측 3초 남짓이고, 무거운 chromium 설치는 이 잡이
+      # 이미 치르고 있다. 이 폴더에 러너를 새로 만들면 여기에 한 줄을 더해야 돈다.
+      - run: npm run test:chalk-simple
+        working-directory: e2e
+      - run: npm run test:chalk-step-keys
+        working-directory: e2e
       - run: npm run test:classroom
         working-directory: e2e
       - run: npm run test:preview-viewport
