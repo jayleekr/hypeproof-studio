@@ -23,7 +23,7 @@ try {
  const p=listProfiles().find(p=>p.session.cohort_id==='boah-dental-2026-a');
  const {token}=await issueIssuer({issuer:'d1-test',scopes:[{cohort:p.session.cohort_id,profiles:[p.id]}]},48,TEST_SECRET);
  const path=`/admin/cohorts/${p.session.cohort_id}/authoring/d1-course`;
- const content={schema:'hps-session-design/1',title:'Website',audience:'Adults',duration_minutes:120,objective:'Edit',prerequisites:'',starter:'Static site',steps:[{id:'one',title:'Edit',instructions:'Edit hours',hint:'',acceptance:'Check mobile'}]};
+ const content={schema:'hps-session-design/1',title:'Website',audience:'Adults',duration_minutes:120,objective:'Edit',prerequisites:'No coding experience required',starter:'Static site',steps:[{id:'one',title:'Edit',instructions:'Edit hours',hint:'',acceptance:'Check mobile'}]};
  async function call(suffix='',method='GET',body){
   const r=await app.fetch(new Request('https://local.test'+path+suffix,{method,headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:body?JSON.stringify(body):undefined}),env,makeCtx());
   return {status:r.status,body:await r.json()};
@@ -34,7 +34,10 @@ try {
  assert.deepEqual(rs.map(r=>r.status).sort(),[200,409]);
  const frozen=await call('/versions/m2026.09.06-1','PUT',{expected_revision:2});assert.equal(frozen.status,200);assert.equal(frozen.body.activated,false);
  assert.equal((await call('','PUT',save(2,'next'))).status,200);
- assert.deepEqual((await call('/versions/m2026.09.06-1')).body,frozen.body);
+ // `pedagogy`는 확정 시점의 판정이며 저장된 버전의 일부가 아니다 — D1에 들어가지 않으므로
+ // read-back 응답에 없는 것이 맞다 (#1114). 빠뜨린 필드가 아니다. 나머지는 그대로 대조한다.
+ const {pedagogy:_frozenVerdict,...frozenStored}=frozen.body;
+ assert.deepEqual((await call('/versions/m2026.09.06-1')).body,frozenStored);
  assert.equal((await call('/versions/m2026.09.06-1','PUT',{expected_revision:3})).status,409);
  const {setRoster,startSession}=await import('../src/lib/kv.ts');
  await setRoster(env.HPS_KV,p.session.cohort_id,['synthetic-d1-student']);

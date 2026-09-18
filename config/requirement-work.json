@@ -2091,6 +2091,36 @@
         "packages/measurement/src"
       ],
       "verification_inputs": []
+    },
+    {
+      "id": "lesson-pedagogy-gate",
+      "title": "확정 시점 교육 원칙 판정",
+      "issue": 1114,
+      "kind": "implementation",
+      "feature_ids": [
+        "design-session"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "BASE-04",
+            "CH-04",
+            "VER-01"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "확정 시점에 교육 원칙 판정을 걸고, 차단 사유와 다음 행동을 강사에게 돌려준다. 규칙 정본은 커리큘럼 위키이며 복사하지 않고 조항 ID만 인용한다.",
+      "design_delta": "권한이 아니라 설계 속성이므로 확정 1회만 검사한다. 읽기 시점 재검사 없음. fail은 422로 막고 warn은 확정을 진행하되 판정을 응답에 싣는다.",
+      "positive_control": "실제 저작본(dental-ownership L1~L5, 30단계)이 차단되지 않는다.",
+      "negative_control": "완료 기준·선행 조건·증거물을 하나씩 비웠을 때 그 검사만 깨어난다. 차단된 확정은 버전 행을 남기지 않고, 형태 검증이 관문보다 먼저다.",
+      "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
+      "implementation_paths": [
+        "worker/src/lib",
+        "worker/src/routes"
+      ],
+      "verification_inputs": []
     }
   ]
 }
