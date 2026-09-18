@@ -15,6 +15,18 @@ on:
       - 'chalk/**'
       - 'worker/src/routes/authoring.ts'
       - 'worker/src/lib/session-design.ts'
+      # 아래는 이 잡의 브라우저 시험이 실제로 지나는데 필터에 빠져 있던 것들이다.
+      # 빠져 있으면 그 파일만 고친 PR 에서는 시험이 돌지 않는다 — #1115 가 걸린 것은
+      # 그 PR 이 authoring.ts 도 함께 고쳐서였고, lesson-pedagogy.ts 만 고쳤으면 안 돌았다.
+      - 'worker/src/lib/lesson-pedagogy.ts'
+      - 'worker/src/lib/lesson-feature-policy.ts'
+      - 'worker/src/lib/lesson-model-policy.ts'
+      - 'worker/src/lib/lesson-help-mode.ts'
+      - 'worker/src/lib/modules.ts'
+      - 'worker/src/routes/admin.ts'
+      # 러너 자신이 쓰는 하네스. 이것이 빠져 있으면 하네스를 고쳤을 때 시험이
+      # 자기도 모르게 다른 것을 재게 된다.
+      - 'worker/test/harness/dental-authoring.mjs'
       - 'e2e/package*.json'
       - '.github/workflows/dental-reference.yml'
 permissions:
