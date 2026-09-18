@@ -261,10 +261,21 @@ workbench 다이얼로그용이라 이 모달에는 해당되지 않는다. **OS
   `handleProtocolUrl(): not handled` 로 떨어진다(관측함). **위 3번(다중 창 수신)과 "링크가
   확장까지 닿는가"는 이 방법으로는 못 잰다** — 실제 브라우저 클릭이 필요하다.
 - **함정 — `--extensionDevelopmentPath` 로 확장을 얹으려면 `engines.vscode` 를 `^0.1.0` 류로
-  적어야 한다.** 이 앱은 `vscode.version` 으로 HypeProof 릴리스 버전(`0.1.56`)을 돌려주므로
-  `^1.x` 는 semver 에서 떨어지고, `*` 도 *"not specific enough … For vscode versions before
-  1.0.0"* 로 거부된다(둘 다 관측함). 관련: **#741** — 그 이슈는 **수정 코드 대신 기존 built-in
-  이 로드돼 검증을 오인할 수 있다**고 경고한다. **확장이 실렸는지를 먼저 확인하고 판정한다.**
+  적어야 한다.** `^1.x` 는 떨어지고, `*` 도 *"not specific enough … For vscode versions before
+  1.0.0"* 로 거부된다(둘 다 관측함). 관련: **#741**.
+  **버전 게이트가 둘이고 서로 다른 값을 본다** — 헷갈리기 쉬우니 적어 둔다(출하본에서 직접 확인):
+
+  | 읽는 곳 | 값 | 출하 v0.1.56 |
+  |---|---|---|
+  | 확장 engines 호환 검사 (#741 이 걸리는 곳) | `product.json.version` | **`0.1.56`** |
+  | `vscode.version` API (내장 확장이 semver 게이트에 쓰는 값) | `package.json.version` | **`1.116.06042`** |
+
+  두 값은 **#361 에서 의도적으로 갈라 놓은 것**이다(`scripts/apply-product-overrides.sh` 주석).
+  그래서 `product.json.version` 을 되돌려 engines 를 푸는 것은 **#206**(빈/어긋난 버전 →
+  인앱 업데이터 무한루프)을 되살린다. #741 을 고칠 사람이 볼 자리다.
+
+  그리고 #741 은 **수정 코드 대신 기존 built-in 이 로드돼 검증을 오인할 수 있다**고 경고한다.
+  **확장이 실렸는지를 먼저 확인하고 판정한다.**
 - `--open-url` 은 rc=0 이면서 인스턴스에 안 닿은 적이 있다. **원인은 아직 모른다.**
 
 **셋 다 첫 회차를 막지 않는다.**

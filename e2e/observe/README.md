@@ -82,3 +82,12 @@ esbuild 가 일부 문자를 `\uXXXX` 로 이스케이프해서 거짓 음성이
 
 **`/json/list` 가 느릴 수 있다.** 45초까지 걸린 적이 있다. 짧은 타임아웃으로
 재시도하면 "무응답"으로 오판한다 — 관측기는 그래서 계속 재시도한다.
+
+## 리허설 링크 확인 (사람이 한 번 누른다)
+
+`rehearsal-link-check.html` 을 열고 버튼 둘을 순서대로 누른다. 절차와 각 결과의 뜻은
+[`rehearsal-link-check.ko.md`](rehearsal-link-check.ko.md) 에 있다.
+
+기계로 잴 수 없는 것만 남겨 둔 확인이다 — 합성으로 밀어 넣은 프로토콜 URL 은
+`handleProtocolUrl(): not handled` 로 떨어져서 확장까지 가지 않는다(관측함).
+**1번(대조군)을 건너뛰면 2번의 "아무 일도 안 났다" 를 읽을 수 없다.**

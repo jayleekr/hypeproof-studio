@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>리허설 링크 확인</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+         max-width: 40rem; margin: 0 auto; padding: 2rem 1rem; }
+  h1 { font-size: 1.4rem; }
+  .card { border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
+          border-radius: 10px; padding: 1rem 1.25rem; margin: 1.25rem 0; }
+  .n { font-weight: 700; }
+  a.btn { display: inline-block; padding: .6rem 1rem; border-radius: 8px;
+          background: #2b5fd9; color: #fff; text-decoration: none; font-weight: 600; }
+  code { background: color-mix(in srgb, currentColor 10%, transparent);
+         padding: .1rem .35rem; border-radius: 4px; font-size: .9em; }
+  .note { font-size: .92rem; opacity: .85; }
+  ul { padding-left: 1.2rem; }
+</style>
+</head>
+<body>
+<h1>리허설 링크 확인 — 두 번 누르면 끝납니다</h1>
+
+<p>순서대로 <strong>1번 먼저</strong> 눌러 주세요. 1번은 계측기가 제대로 도는지 보는
+<strong>대조군</strong>이라, 1번 결과 없이는 2번 결과를 읽을 수 없습니다.</p>
+
+<p class="note">⚠️ 브라우저가 먼저 <em>"HypeProof Studio을(를) 여시겠습니까?"</em> 같은 창을
+띄울 수 있습니다. <strong>그건 브라우저 것이고 우리가 보려는 것이 아닙니다.</strong> 열기를
+누르고 <strong>그다음에 무엇이 나오는지</strong>를 봐 주세요. (다만 그 브라우저 창이 떴다는
+사실 자체는 알려 주세요 — 강사가 겪을 단계가 하나 느는 것이라 그것도 결과입니다.)</p>
+
+<div class="card">
+  <p><span class="n">1번 — 대조군.</span> 여기서는 <strong>확인 창이 떠야 정상</strong>입니다.
+  <em>"An external application wants to open …"</em> 같은 경고가 나옵니다.</p>
+  <p><a class="btn" href="hypeproof-studio://file/tmp">1번 누르기 (대조군)</a></p>
+  <p class="note">눌러서 경고가 나오면 <strong>아니오 / No</strong>를 눌러 주세요. 실수로
+  열려도 <code>/tmp</code> 폴더가 열릴 뿐이라 해는 없습니다. 창이 열리면 닫으시면 됩니다.</p>
+</div>
+
+<div class="card">
+  <p><span class="n">2번 — 본 판정.</span> 여기서는 <strong>확인 창이 안 떠야 정상</strong>입니다.
+  (아무 일도 안 나거나, 앱 안에 작은 알림이 하나 뜰 수 있습니다.)</p>
+  <p><a class="btn" href="hypeproof-studio://hypeproof.hypeproof-chat/rehearse?ticket=TESTTICKET0123456789">2번 누르기 (리허설 링크)</a></p>
+  <p class="note">이 티켓은 <strong>가짜</strong>입니다. 수업이 열릴 리 없고, 열리면 안 됩니다.
+  여기서 보려는 것은 <strong>링크가 앱까지 가는지</strong>와 <strong>확인 창이 붙는지</strong>
+  둘뿐입니다.</p>
+</div>
+
+<h2 style="font-size:1.1rem">무엇을 알려 주시면 되나</h2>
+<ul>
+  <li>1번에서 <strong>경고 창이 떴는지</strong> (예/아니오)</li>
+  <li>2번에서 <strong>확인 창이 떴는지</strong> (예/아니오)</li>
+  <li>2번에서 <strong>그 밖에 무엇이 보였는지</strong> — 앱이 앞으로 나왔는지, 알림이 떴는지,
+      정말 아무 일도 없었는지</li>
+  <li>창이 여러 개 열려 있었다면 <strong>어느 창</strong>이 반응했는지</li>
+  <li>창이 떴다면 <strong>화면 사진</strong> 한 장</li>
+</ul>
+
+<p class="note">자세한 절차와 각 결과가 무슨 뜻인지는 같은 폴더의
+<code>rehearsal-link-check.ko.md</code> 에 있습니다.</p>
+</body>
+</html>
