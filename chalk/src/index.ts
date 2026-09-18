@@ -7,7 +7,6 @@ import budgetsHtml from './ui/budgets.html';
 //   GET /health                      — { ok, service, version } (c* tag via HPS_CHALK_VERSION)
 //   GET /                            — instructor home (#1145): every screen, including the missing ones
 //   GET /shell.css                   — the one shared stylesheet
-//   GET /shell.js                    — one sessionStorage key for the instructor code (no network calls)
 //   GET /readiness|/rehearsal|/environment|/requests|/access — placeholders: layout + "개발 필요" + the issue that owns it
 //   GET /console                     — instructor session console (#352)
 //   GET /issuer                      — self-service student-token mint page
@@ -50,8 +49,6 @@ import startHtml from "./ui/start.html";
 import learnHtml from './ui/learn.html';
 // @ts-ignore — bundled as text by wrangler rules (see wrangler.toml Text globs).
 import shellCss from './ui/shell.css';
-// @ts-ignore — bundled as text by wrangler rules (Text globs include .js here).
-import shellJs from './ui/shell.js';
 import { SOON, homePage, placeholderPage } from './ui/screens.ts';
 
 const app = new Hono<{ Bindings: ChalkEnv; Variables: { requestId: string } }>();
@@ -86,13 +83,6 @@ app.get("/", () => page(homePage()));
 app.get("/shell.css", () =>
   new Response(shellCss as string, {
     headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300" },
-  }),
-);
-// Binds the instructor code to ONE sessionStorage key across screens (#1145 A-3).
-// It sends nothing anywhere — there is no fetch in it, and chalk/test pins that.
-app.get("/shell.js", () =>
-  new Response(shellJs as string, {
-    headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=300" },
   }),
 );
 for (const screen of SOON) {

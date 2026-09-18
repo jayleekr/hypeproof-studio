@@ -59,7 +59,7 @@ bucket_name = "hps-traces"
 # it is served as its own route and pulled in with <link>.
 [[rules]]
 type = "Text"
-globs = ["**/*.md", "**/*.html", "**/*.css", "src/ui/*.js"]
+globs = ["**/*.md", "**/*.html", "**/*.css"]
 fallthrough = true
 
 [vars]
