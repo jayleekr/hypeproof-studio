@@ -2057,6 +2057,18 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/evidence-snapshot.smoke.mjs"
+        },
+        {
+          "path": "worker/src/routes/classroom-reports.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-report.ts"
+        },
+        {
+          "path": "worker/migrations/0016-classroom-report-jobs.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-reports.test.mjs"
         }
       ]
     },
