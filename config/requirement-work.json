@@ -236,6 +236,7 @@
       "ids": [
         "ARC-01",
         "ARC-02",
+        "ARC-03",
         "AUTH-01",
         "BASE-01",
         "BASE-02",
@@ -289,7 +290,7 @@
         "WEB-09"
       ],
       "inline_prefixes": [],
-      "sha256": "e90461fa4d1e6891220e4f70fc1a5f7b42ac4b3698686139b72f908b78017be6",
+      "sha256": "383447eca6bfb79417e3c3f49b85b251c32c6c5de3d482bbded472af14073433",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/chalk-authoring.md",
@@ -937,6 +938,35 @@
       "implementation_paths": [
         "chalk/src",
         "worker/src"
+      ],
+      "verification_inputs": []
+    },
+    {
+      "id": "rehearsal-entry",
+      "title": "리허설 진입 — 교환권 링크로 앱에서 연다",
+      "issue": 1132,
+      "kind": "implementation",
+      "feature_ids": [
+        "rehearse-validate"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/chalk-authoring.md",
+          "ids": [
+            "ARC-03"
+          ]
+        }
+      ],
+      "depends_on": [
+        "rehearsal"
+      ],
+      "next_action": "hypeproof-chat 에 onUri 활성화와 registerUriHandler 를 등록하고(현재 0건), 링크가 나르는 일회용 교환권을 Service 에 제출해 받은 학생 조건 자격으로 기존 connectCourse 진입 경로에 연결한다.",
+      "design_delta": "수업 신원은 (cohort_id, course_id, version)+sha256 넷이고 참여 코드는 신원이 아니라 자격증명이다. 링크는 교환권 하나만 나르고 좌표·자격증명을 URL 에 노출하지 않는다. 교환은 서버가 하며 강사 전용 권한을 실행에 싣지 않는다.",
+      "positive_control": "유효한 교환권 링크 한 번으로 그 수업에 진입하고 좌표 넷이 일치한다. 열린 세션 없이도 시작된다.",
+      "negative_control": "이미 쓴 교환권·만료된 교환권·내용이 바뀌어 sha256 이 어긋난 교환권을 각각 거부한다. 두 번 제출되면 한 번만 통과한다. 링크가 강사 권한을 나르지 않는다.",
+      "evidence_required": "실기기에서 링크를 눌러 관측한 화면과 이벤트. 확장 UriHandler 경로에 확인 다이얼로그가 뜨는지는 미관측이므로 구현 전 관측 결과를 먼저 기록한다. URL·로그·webview 저장소에 교환권이 남지 않는 것을 확인한다.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/src"
       ],
       "verification_inputs": []
     },
