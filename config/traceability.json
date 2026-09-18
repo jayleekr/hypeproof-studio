@@ -199,6 +199,33 @@
       ]
     },
     {
+      "id": "ST-TEST-WORLD-CONTRACT",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/world-contract.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-WORLD-CONTRACT",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY",
+        "ST-TEST-WORLD-CONTRACT"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/htmlStructure.ts"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-SDK-RESULT-DRIFT",
       "stage": "test",
       "owner": "jayleekr",
