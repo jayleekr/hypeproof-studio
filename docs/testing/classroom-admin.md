@@ -92,6 +92,17 @@ npm --prefix chalk run typecheck
 | AT-33 | ADM-01~14 | fresh DB vs 현행+새 migration, 기능별 canary→flag rollback, 미완 job | schema 동등·기존 데이터 불변·pending TTL/보존·delivery 중지·receipt 조회 가능 | local+staging D1 |
 | AT-34 | ADM-02/09/10/13 | 100명×2h, 20% 단절/재접속, 동시 강사2·bulk30·학교 TLS proxy, 5폭/200%/키보드 | p95 목표·상태시각·명단 보존, 교차학생 노출/중복 부작용/파일손실 0, 대비·포커스·오류문구 | load+OS/browser pilot |
 
+2026-09-18 보강 기준([PRD 절](../requirements/classroom-admin.md#추가-설계-기준--복구와-코칭의-분리-2026-09-18-보강))의 인수 행이다. 아래도 실행 기록에 적힌 범위만 실행된 것이다.
+
+| Test ID | 제품 REQ | 조건 / 깨뜨릴 가정 | 합격 기준 | 실행 계층 |
+|---|---|---|---|---|
+| AT-35 | ADM-05/10 | 복구 capability만 있는 강사의 질문 전송, coach만 있는 강사의 reset, 정답·코드·파일 경로를 담은 질문, 기술 장애 좌석에 질문 없이 바로 복구 | capability 상호 비대체, 코칭 조치가 파일·대화·입력 불변, 본문 비밀 마스킹, 복구가 코칭 단계에 막히지 않음, 표시됨≠읽음 | Service+App+browser |
+| AT-36 | ADM-02/04/07 | actor·source_state 미지정/위조, simulated 근거, 변경 전후 digest, 강사 confirmed/disputed, 로그 도착만 있는 좌석 | 미지정은 unverified, simulated가 real로 승격되지 않음, 강사 확인이 발송 승인·학습 완료로 읽히지 않음, 새 저장소 0 | Service+browser |
+| AT-37 | ADM-09/13 | 근거 0건 학생·조용한 학생·느린 학생·프롬프트만 있는 학생 | 0점/미달/빨간색 0건, `아직 충분히 보지 못함` 표기, 활동량→능력 추론 0 | core+browser |
+| AT-38 | ADM-06/13 | 단일 수업 입력, 누적 회차 입력, 점수 필드가 있는 legacy 입력 | 관찰→근거→판단 변화→다음 실험 구성, 단일 수업에서 성장 패턴 서술 0, 점수·순위·의존도 전면 노출 0, legacy 7축 산출 불변 | core+runner fixtures |
+| AT-39 | ADM-05 | 학생 작업 중 질문/확인 지점 수신, 같은 근거 재입력 요구 | 모달·평가 팝업 0, 작업 문맥 유지, 닫기/나중에 보기 가능, 재입력 강제 0 | App 실기 |
+| DT-07 | DES-01/05/11 | §14 토큰 조합, 기술 장애 있는/없는 학생 상세, 집계 표기 | 실측 대비 기준 충족, 패널당 주요 CTA 1개, 장애 시 복구가 주요·마무리는 보조, 집계가 평가 지표로 읽히지 않음 | 실제 브라우저 |
+
 실기 gate는 Windows/macOS 각각 앱 release/build hash, Service/Chalk SHA, DB·profile/lesson revision, Test ID, 재현 명령, 기대/관측, screenshot/receipt hash, 실행자·날짜를 남긴다. 지원 안 하는 OS·죽은 host·네트워크 없는 PC에서 원격 복구 성공을 주장하지 않는다. 실제 발송 시험은 승인된 테스트 수신자로 provider sandbox 또는 지정 계정에서만 하고 합성 adapter 성공과 구분한다.
 
 ## 2026-09-18 설계 작업의 기반 검증

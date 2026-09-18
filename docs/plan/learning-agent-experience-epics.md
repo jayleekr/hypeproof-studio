@@ -242,6 +242,8 @@ Lab 철학 개정안을 HC 측정 계약과 #800의 수업/구독/기관 이용�
 | R6 | 수신자 승인·이메일 adapter·보호 링크·전달 원장 (#751) | Service report-delivery routes/lib, existing private storage/auth, Chalk approval UI | AT-31. provider sandbox, unknown send 재조정, 실제 발송은 운영 승인된 계정·수신자만 |
 | R7 | 회귀/부하·Mac/Windows·성인 canary→30명 pilot·100명 synthetic | 기존 worker/chalk/extension/e2e 테스트, 운영/릴리스 문서 | AT-32~34·기존 suite·실기 기준. 아동 자동 수집은 동의 인수 뒤 별도 활성화 |
 
+2026-09-18 보강 기준은 새 단계를 만들지 않고 기존 단계에 얹는다: 복구/코칭 분리와 코칭 조치 2종(`coach` capability)·학생 화면 비차단 알림은 R2/R3의 명령 계약 위(AT-35/39), 출처(`actor`·`source_state`·전후 digest·강사 확인 상태)는 R1의 관측 envelope 확장(AT-36), §14 토큰·CTA 우선순위·집계 표기는 R1~R3의 Chalk 패널(DT-07), 근거 부족 표기와 관찰·성장 보고서 구성은 R5(AT-37/38). 문서의 GlobalBuddy·6주·고정 도움 순서는 예시이며 구현에 넣지 않는다.
+
 R1→R2→R3, R1→R4→R5→R6, 통합→R7. 보고서 경로를 별도 구현해도 공통 신원/명단/동의 계약은 R0/R1을 따른다. 단계별 vertical slice를 완료하고 실제 실행 증거를 남긴 후 다음 단계로 이동한다. 합성 dry-run은 운영 계정·발송 provider 미정과 무관하게 진행한다. 한 번에 전체 프로그램 재작성·일괄 production 배포하지 않는다.
 
 ### 예상 작업량과 비용 결정
