@@ -221,3 +221,54 @@ export async function sha256Hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+// ── commands (R2) ───────────────────────────────────────────────────────────
+// The allowlist IS the protocol. There is no shell, URL, VS Code command id or
+// file path anywhere in it, and `args` is a closed, per-action object.
+
+export const COMMAND_TTL_MS = 120_000;
+export const LEASE_TAKEOVER_MS = STALE_AFTER_MS;
+export const MAX_COMMAND_TARGETS = MAX_SEATS;
+export interface CommandSpec { capability: OpsCapability; flag: OpsFlag; mutating: boolean; maxTargets: number; runMs: number }
+export const COMMAND_ACTIONS: Record<string, CommandSpec> = {
+  retry_diagnostics: { capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 20_000 },
+  refresh_connection: { capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 30_000 },
+  restart_preview: { capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 30_000 },
+};
+export const REASON_CODES = ['student_request', 'blocked_error', 'no_signal', 'preview_broken', 'class_management', 'other'] as const;
+export const TARGET_OPEN_STATES = ['queued', 'leased', 'accepted', 'running'] as const;
+export const TARGET_TERMINAL_STATES = ['succeeded', 'failed', 'rejected', 'expired', 'cancelled', 'outcome_unknown', 'unsupported', 'not_connected'] as const;
+export type TargetState = (typeof TARGET_OPEN_STATES)[number] | (typeof TARGET_TERMINAL_STATES)[number];
+/** States a device may report. `leased`, `expired`, `cancelled` and `not_connected` are the Service's alone. */
+export const RECEIPT_STATES = ['accepted', 'running', 'succeeded', 'failed', 'rejected', 'outcome_unknown', 'unsupported'] as const;
+const ORDER: Record<string, number> = { queued: 0, leased: 1, accepted: 2, running: 3 };
+export const isTerminal = (s: string) => (TARGET_TERMINAL_STATES as readonly string[]).includes(s);
+
+/** Forward only. A terminal state is final: a late or replayed receipt can never rewrite an outcome. */
+export function nextTargetState(current: string, reported: string): { ok: true; state: string } | { ok: false; reason: 'terminal' | 'backwards' | 'not_leased' | 'unknown_state' } {
+  if (!(RECEIPT_STATES as readonly string[]).includes(reported)) return { ok: false, reason: 'unknown_state' };
+  if (isTerminal(current)) return { ok: false, reason: 'terminal' };
+  if (current === 'queued') return { ok: false, reason: 'not_leased' };
+  if (!isTerminal(reported) && ORDER[reported]! <= ORDER[current]!) return { ok: false, reason: 'backwards' };
+  return { ok: true, state: reported };
+}
+
+export interface Receipt { command_id: string; lease_generation: number; connection_epoch: number; state: string; result_code: string; observed_at: number }
+export function validateReceipt(r: unknown): Verdict<Receipt> {
+  if (!r || typeof r !== 'object' || Array.isArray(r)) return bad('receipt must be an object');
+  const o = r as Record<string, unknown>;
+  if (!exactKeys(o, ['command_id', 'lease_generation', 'connection_epoch', 'state', 'result_code', 'observed_at'])) return bad('unsupported receipt field');
+  if (typeof o.command_id !== 'string' || !UUIDISH_RE.test(o.command_id)) return bad('command_id');
+  if (!Number.isSafeInteger(o.lease_generation) || !Number.isSafeInteger(o.connection_epoch) || !Number.isSafeInteger(o.observed_at)) return bad('generation, epoch and observed_at');
+  if (!oneOf(RECEIPT_STATES, o.state)) return bad('state');
+  const code = o.result_code === undefined ? '' : o.result_code;
+  if (typeof code !== 'string' || (code !== '' && !CODE_RE.test(code))) return bad('result_code');
+  return { ok: true, value: { command_id: o.command_id, lease_generation: o.lease_generation as number, connection_epoch: o.connection_epoch as number, state: o.state, result_code: code, observed_at: o.observed_at as number } };
+}
+
+/** `done` is only ever true when every target has a final outcome; `all_succeeded` never rounds up. */
+export function summarize(targets: Array<{ state: string }>) {
+  const by: Record<string, number> = {}; for (const t of targets) by[t.state] = (by[t.state] ?? 0) + 1;
+  const done = targets.every((t) => isTerminal(t.state));
+  return { total: targets.length, by_state: by, done, all_succeeded: done && targets.length > 0 && targets.every((t) => t.state === 'succeeded'), unconfirmed: targets.filter((t) => !isTerminal(t.state) || t.state === 'outcome_unknown').length };
+}

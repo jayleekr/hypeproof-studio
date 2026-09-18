@@ -21,6 +21,7 @@ import {
   RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
   newPairingTicket, normalizeTicket, parseFlags, parseLesson, pollAfterMs, sha256Hex, shouldApply, signalOf,
   stepDisposition, validateEvent, type OpsCapability, type SeatState,
+  COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
 } from '../lib/classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -188,12 +189,14 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
   const auth = await teacher(c, 'observe'); if (auth instanceof Response) return auth;
   const run = await loadRun(c, auth); if (run instanceof Response) return run;
   const now = Date.now(), db = c.env.HPS_DB;
+  await settleOverdueRun(db, run.class_run_id, now);
   const rows = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,s.student_id,l.state_json,l.revision AS state_revision,l.last_received_at,
  (SELECT count(*) FROM ops_grants p WHERE p.class_run_id=s.class_run_id AND p.seat_id=s.seat_id AND p.seat_revision=s.seat_revision AND p.kind='pairing' AND p.state='issued' AND p.expires_at>?) AS pairing_open,
  (SELECT g.id||'|'||g.state||'|'||g.connection_epoch||'|'||g.expires_at FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' ORDER BY g.created_at DESC LIMIT 1) AS conn,
- (SELECT t.jti||'|'||t.expires_at FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS token
+ (SELECT t.jti||'|'||t.expires_at FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS token,
+ (SELECT c.action||'|'||ct.state||'|'||ct.result_code||'|'||ct.updated_at||'|'||ct.command_id FROM ops_command_targets ct JOIN ops_commands c ON c.id=ct.command_id WHERE ct.class_run_id=s.class_run_id AND ct.seat_id=s.seat_id AND ct.seat_revision=s.seat_revision ORDER BY ct.updated_at DESC LIMIT 1) AS last_command
  FROM class_run_seats s LEFT JOIN ops_latest_state l ON l.class_run_id=s.class_run_id AND l.seat_id=s.seat_id AND l.seat_revision=s.seat_revision
- WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; pairing_open: number; conn: string | null; token: string | null }>;
+ WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; pairing_open: number; conn: string | null; token: string | null; last_command: string | null }>;
   const seats = rows.map((r) => {
     let state: SeatState = {}; try { state = JSON.parse(r.state_json ?? '{}'); } catch { state = {}; }
     const [grantId, connState, epoch, connExpires] = (r.conn ?? '|||').split('|');
@@ -209,6 +212,8 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
       attention, reason, state_revision: r.state_revision ?? 0,
       connection: grantId ? { grant_id: grantId, state: connected ? 'active' : connState === 'active' ? 'expired' : connState, epoch: Number(epoch) } : null,
       token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: reported === undefined ? 'unknown' : reported === issueId ? 'matches_issue' : 'other_token' } : null,
+      // The latest instructor action on this seat, in ledger terms: queued is not done.
+      last_command: r.last_command ? (([action, state, result_code, updated_at, command_id]) => ({ action, state, result_code, updated_at: Number(updated_at), command_id }))(r.last_command.split('|')) : null,
       activation: slot('activation'), step: slot('step'), runtime: slot('runtime'), error: slot('error'), upload: slot('upload'), sample: slot('sample'),
     };
   });
@@ -216,6 +221,7 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
   const count = (f: (s: (typeof seats)[number]) => boolean) => seats.filter(f).length;
   return c.json({
     schema_version: OPS_SCHEMA_VERSION, now, stale_after_ms: STALE_AFTER_MS, viewer: auth.payload.u,
+    actions: Object.entries(COMMAND_ACTIONS).map(([action, a]) => ({ action, capability: a.capability, mutating: a.mutating, enabled: parseFlags(run.flags_json)[a.flag], held: (auth.scope.ops ?? []).includes(a.capability) })),
     run: { class_run_id: run.class_run_id, profile_id: run.profile_id, roster_revision: run.roster_revision, flags: parseFlags(run.flags_json), lesson: parseLesson(run.lesson_json), starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at },
     // Scope note for the UI: this is the run snapshot, not the cumulative cohort roster.
     roster: { source: 'class_run_seats', total: seats.length },
@@ -299,11 +305,16 @@ classroomOpsApp.post('/sync', async (c) => {
     sample = s;
   }
 
+  const receiptsIn: unknown[] = b.receipts === undefined ? [] : b.receipts;
+  if (!Array.isArray(receiptsIn) || receiptsIn.length > 50) return c.json({ error: 'receipts[] ≤ 50', reason: 'batch_limit' }, 400);
+
   let device = await db.prepare('SELECT first_seen_at,last_seen_at,contiguous_seq FROM ops_device_connections WHERE grant_id=? AND app_instance_id=? AND boot_id=?').bind(g.id, b.app_instance_id, b.boot_id).first<{ first_seen_at: number; last_seen_at: number; contiguous_seq: number }>();
   const stmts = [];
   if (!device) {
     device = { first_seen_at: now, last_seen_at: 0, contiguous_seq: 0 };
-    stmts.push(db.prepare("INSERT INTO ops_device_connections(grant_id,app_instance_id,boot_id,protocol,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING").bind(g.id, b.app_instance_id, b.boot_id, OPS_PROTOCOL, now, now));
+    // A window that did not do the pairing itself (second window, restart) declares what it can run here.
+    const caps = Array.isArray(b.capabilities) && b.capabilities.length <= 32 && b.capabilities.every((x: unknown) => typeof x === 'string' && /^[a-z_]{1,48}$/.test(x)) ? b.capabilities : [];
+    stmts.push(db.prepare("INSERT INTO ops_device_connections(grant_id,app_instance_id,boot_id,protocol,capabilities_json,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING").bind(g.id, b.app_instance_id, b.boot_id, OPS_PROTOCOL, JSON.stringify(caps), now, now));
   }
   const lesson = parseLesson(g.lesson_json);
   const existing = new Map<number, string>();
@@ -355,9 +366,160 @@ classroomOpsApp.post('/sync', async (c) => {
     // Another window of the same seat won the state CAS. Its events are stored; the board catches up on the next sync.
     if (stateWrite && stateWrite.meta?.changes === 0) return c.json({ error: 'seat state changed concurrently; resend', reason: 'state_conflict', poll_after_ms: 1000 }, 409);
   }
+  // Command authority is unknown if this exchange fails: the device gets no commands and keeps its receipts.
+  type Exchange = { commands: Array<Record<string, unknown>>; receipt_acks: Array<{ command_id: string; state: string; proceed: boolean; reason: string }>; lease: 'owner' | 'observer' | 'unknown' };
+  let exchange: Exchange = { commands: [], receipt_acks: [], lease: 'unknown' };
+  if (parseFlags(g.flags_json).ops_commands || receiptsIn.length) {
+    try { exchange = await commandExchange(db, g, b.app_instance_id, receiptsIn, now, parseFlags(g.flags_json).ops_commands); }
+    catch (err) { console.error('ops command exchange failed:', err); exchange = { commands: [], receipt_acks: [], lease: 'unknown' }; }
+  }
   return c.json({
     schema_version: OPS_SCHEMA_VERSION, server_time: now, connection_epoch: g.connection_epoch,
     ack: { boot_id: b.boot_id, contiguous_seq: ack.contiguous, missing: ack.missing }, quarantined, rejected,
-    commands: [], poll_after_ms: poll,
+    commands: exchange.commands, receipt_acks: exchange.receipt_acks, lease: exchange.lease, poll_after_ms: exchange.commands.length ? 1000 : poll,
   });
+});
+
+// ── commands (R2) ───────────────────────────────────────────────────────────
+
+type TargetRow = { command_id: string; class_run_id: string; seat_id: string; seat_revision: number; grant_id: string; connection_epoch: number; mutating: number; state: string; result_code: string; lease_generation: number; lease_instance: string; expires_at: number; updated_at: number };
+
+/** Lazy expiry: nothing here runs on a timer, so every read settles overdue targets first. */
+function settleOverdue(db: Db, where: string, args: unknown[], now: number) {
+  return [
+    db.prepare(`UPDATE ops_command_targets SET state='expired',result_code='ttl',updated_at=? WHERE ${where} AND state IN ('queued','leased') AND expires_at<=?`).bind(now, ...args, now),
+    // Started but never reported back: the outcome is unknown, and that is what the board says.
+    db.prepare(`UPDATE ops_command_targets SET state='outcome_unknown',result_code='no_receipt',updated_at=? WHERE ${where} AND state IN ('accepted','running') AND expires_at+60000<=?`).bind(now, ...args, now),
+  ];
+}
+
+async function commandExchange(db: Db, g: GrantRow, instance: string, receiptsIn: unknown[], now: number, deliver: boolean) {
+  // Seat execution lease: one window per seat may run commands; the others only observe.
+  let lease = await db.prepare('SELECT app_instance_id,generation,renewed_at FROM ops_seat_leases WHERE grant_id=?').bind(g.id).first<{ app_instance_id: string; generation: number; renewed_at: number }>();
+  if (!lease) {
+    await db.prepare('INSERT INTO ops_seat_leases(grant_id,app_instance_id,generation,renewed_at) VALUES(?,?,1,?) ON CONFLICT(grant_id) DO NOTHING').bind(g.id, instance, now).run();
+    lease = await db.prepare('SELECT app_instance_id,generation,renewed_at FROM ops_seat_leases WHERE grant_id=?').bind(g.id).first();
+  } else if (lease.app_instance_id !== instance && now - lease.renewed_at > LEASE_TAKEOVER_MS) {
+    const took = await db.prepare('UPDATE ops_seat_leases SET app_instance_id=?,generation=generation+1,renewed_at=? WHERE grant_id=? AND generation=? RETURNING generation').bind(instance, now, g.id, lease.generation).first<{ generation: number }>();
+    if (took) lease = { app_instance_id: instance, generation: took.generation, renewed_at: now };
+  } else if (lease.app_instance_id === instance && now - lease.renewed_at >= 45_000) {
+    await db.prepare('UPDATE ops_seat_leases SET renewed_at=? WHERE grant_id=? AND app_instance_id=?').bind(now, g.id, instance).run();
+  }
+  const owner = lease?.app_instance_id === instance;
+  const scope = 'class_run_id=? AND seat_id=?', scopeArgs = [g.class_run_id, g.seat_id];
+  await db.batch([
+    ...settleOverdue(db, scope, scopeArgs, now),
+    // Addressed to an earlier login generation or device: never deliverable, so say so now.
+    db.prepare(`UPDATE ops_command_targets SET state='expired',result_code='epoch_stale',updated_at=? WHERE ${scope} AND state IN ('queued','leased') AND (grant_id<>? OR connection_epoch<>?)`).bind(now, ...scopeArgs, g.id, g.connection_epoch),
+  ]);
+
+  const receipt_acks: Array<{ command_id: string; state: string; proceed: boolean; reason: string }> = [];
+  for (const raw of receiptsIn) {
+    const v = validateReceipt(raw);
+    if (!v.ok) { receipt_acks.push({ command_id: String((raw as any)?.command_id ?? '').slice(0, 64), state: '', proceed: false, reason: 'schema' }); continue; }
+    const r = v.value, t = await db.prepare('SELECT * FROM ops_command_targets WHERE command_id=? AND class_run_id=? AND seat_id=?').bind(r.command_id, g.class_run_id, g.seat_id).first<TargetRow>();
+    const refuse = (reason: string, state = t?.state ?? '') => receipt_acks.push({ command_id: r.command_id, state, proceed: false, reason });
+    if (!t || t.grant_id !== g.id) { refuse('not_found'); continue; }
+    // Replay of the recorded outcome is fine; anything else after the end is refused and changes nothing.
+    if (isTerminal(t.state)) { receipt_acks.push({ command_id: r.command_id, state: t.state, proceed: false, reason: t.state === r.state ? 'recorded' : 'terminal' }); continue; }
+    if (r.connection_epoch !== g.connection_epoch || r.connection_epoch !== t.connection_epoch) { refuse('epoch_stale'); continue; }
+    if (r.lease_generation !== t.lease_generation || t.lease_instance !== instance || !owner) { refuse('lease_lost'); continue; }
+    const step = nextTargetState(t.state, r.state);
+    if (!step.ok) { refuse(step.reason); continue; }
+    const saved = await db.prepare('UPDATE ops_command_targets SET state=?,result_code=?,receipt_json=?,updated_at=? WHERE command_id=? AND seat_id=? AND state=? AND lease_generation=? RETURNING state').bind(step.state, r.result_code, JSON.stringify({ observed_at: r.observed_at, received_at: now, instance }), now, t.command_id, t.seat_id, t.state, t.lease_generation).first<{ state: string }>();
+    if (!saved) { refuse('changed'); continue; }
+    if (isTerminal(step.state)) await audit(db, g.class_run_id, g.seat_id, 'device', g.device_registration_id ?? g.id, 'command_' + step.state, { command_id: t.command_id, result_code: r.result_code }, now).run();
+    // `accepted` is the device asking "may I still run this?" — answered from the primary, right now.
+    receipt_acks.push({ command_id: r.command_id, state: step.state, proceed: step.state === 'accepted' || step.state === 'running', reason: '' });
+  }
+
+  let commands: Array<Record<string, unknown>> = [];
+  if (deliver && owner && lease) {
+    await db.prepare(`UPDATE ops_command_targets SET state='leased',lease_generation=?,lease_instance=?,updated_at=? WHERE ${scope} AND grant_id=? AND connection_epoch=? AND state='queued' AND expires_at>?`).bind(lease.generation, instance, now, ...scopeArgs, g.id, g.connection_epoch, now).run();
+    // A lost response is healed here: a target this window already leased is simply handed over again.
+    const rows = ((await db.prepare(`SELECT t.command_id,t.lease_generation,t.expires_at,t.connection_epoch,c.action,c.args_json,c.created_at FROM ops_command_targets t JOIN ops_commands c ON c.id=t.command_id WHERE t.class_run_id=? AND t.seat_id=? AND t.grant_id=? AND t.state='leased' AND t.lease_instance=? AND t.lease_generation=? AND t.expires_at>? ORDER BY c.created_at LIMIT 10`).bind(g.class_run_id, g.seat_id, g.id, instance, lease.generation, now).all()).results ?? []) as Array<{ command_id: string; lease_generation: number; expires_at: number; connection_epoch: number; action: string; args_json: string; created_at: number }>;
+    commands = rows.map((r) => ({ schema_version: OPS_SCHEMA_VERSION, command_id: r.command_id, action: r.action, args: JSON.parse(r.args_json), lease_generation: r.lease_generation, connection_epoch: r.connection_epoch, issued_at: r.created_at,
+      // Relative, so a wrong device clock cannot stretch the window; the device counts it down monotonically.
+      start_within_ms: r.expires_at - now, run_within_ms: COMMAND_ACTIONS[r.action]?.runMs ?? 0 }));
+  }
+  return { commands, receipt_acks, lease: owner ? 'owner' as const : 'observer' as const };
+}
+
+classroomOpsTeacher.post(root + '/commands', async (c) => {
+  const b = await json(c), spec = typeof b?.action === 'string' ? COMMAND_ACTIONS[b.action] : undefined;
+  // Unknown actions are refused before any authority question: there is no generic "run this" to authorize.
+  const auth = await teacher(c, spec?.capability ?? 'command'); if (auth instanceof Response) return auth;
+  if (!spec) return c.json({ error: 'action is not in the allowlist', reason: 'action_not_allowed', allowed: Object.keys(COMMAND_ACTIONS) }, 400);
+  const run = await loadRun(c, auth); if (run instanceof Response) return run;
+  if (!parseFlags(run.flags_json)[spec.flag]) return c.json({ error: 'commands are off for this run', reason: spec.flag + '_disabled' }, 403);
+  if (!b || !UUIDISH_RE.test(b.idempotency_key ?? '') || !Array.isArray(b.targets) || !b.targets.length || b.targets.length > spec.maxTargets || b.targets.some((x: unknown) => typeof x !== 'string' || !ID_RE.test(x)) || new Set(b.targets).size !== b.targets.length || !(REASON_CODES as readonly string[]).includes(b.reason_code) || !Number.isInteger(b.expected_roster_revision)) return c.json({ error: 'idempotency_key, unique targets[], reason_code and expected_roster_revision required' }, 400);
+  if (b.args !== undefined && (typeof b.args !== 'object' || b.args === null || Array.isArray(b.args) || Object.keys(b.args).length)) return c.json({ error: 'this action takes no arguments', reason: 'args_not_allowed' }, 400);
+  if (b.expected_roster_revision !== run.roster_revision) return c.json({ error: 'roster changed; reload before acting', reason: 'revision_conflict', roster_revision: run.roster_revision }, 409);
+  const db = c.env.HPS_DB, now = Date.now(), targets = [...b.targets].sort();
+  const payloadHash = await sha256Hex(JSON.stringify([b.action, targets, b.reason_code, run.roster_revision]));
+  const prior = await db.prepare('SELECT id,payload_hash FROM ops_commands WHERE class_run_id=? AND idempotency_key=?').bind(run.class_run_id, b.idempotency_key).first<{ id: string; payload_hash: string }>();
+  if (prior) return prior.payload_hash === payloadHash ? c.json(await commandView(db, run.class_run_id, prior.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
+  const recent = await db.prepare('SELECT count(*) AS n FROM ops_commands WHERE class_run_id=? AND created_at>?').bind(run.class_run_id, now - 60_000).first<{ n: number }>();
+  if ((recent?.n ?? 0) >= 60) return c.json({ error: 'too many commands in the last minute', reason: 'rate_limited' }, 429, { 'retry-after': '30' });
+  const seats = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,(SELECT g.id||'|'||g.connection_epoch FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' AND g.state='active' AND g.expires_at>? ORDER BY g.created_at DESC LIMIT 1) AS conn,
+ (SELECT d.capabilities_json FROM ops_device_connections d JOIN ops_grants g2 ON g2.id=d.grant_id LEFT JOIN ops_seat_leases l ON l.grant_id=d.grant_id WHERE g2.class_run_id=s.class_run_id AND g2.seat_id=s.seat_id AND g2.seat_revision=s.seat_revision AND g2.kind='connection' AND g2.state='active' ORDER BY (l.app_instance_id=d.app_instance_id) DESC,d.last_seen_at DESC LIMIT 1) AS caps
+ FROM class_run_seats s WHERE s.class_run_id=? AND s.replaced_at IS NULL`).bind(now, run.class_run_id).all()).results ?? []) as Array<{ seat_id: string; seat_revision: number; conn: string | null; caps: string | null }>;
+  const unknown = targets.filter((t) => !seats.some((s) => s.seat_id === t));
+  if (unknown.length) return c.json({ error: 'targets outside this run', reason: 'seat_not_found', seats: unknown.slice(0, 20) }, 404);
+  await settleOverdueRun(db, run.class_run_id, now);
+  const id = crypto.randomUUID(), expires = now + COMMAND_TTL_MS;
+  const stmts = [
+    db.prepare('INSERT INTO ops_commands(id,class_run_id,cohort_id,action,args_json,payload_hash,idempotency_key,issued_by,issuer_jti,reason_code,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, run.class_run_id, run.cohort_id, b.action, '{}', payloadHash, b.idempotency_key, auth.payload.u, auth.payload.jti ?? null, b.reason_code, now, expires),
+    audit(db, run.class_run_id, '', 'instructor', auth.payload.u, 'command_enqueued', { command_id: id, action: b.action, targets: targets.slice(0, 50), reason_code: b.reason_code }, now),
+  ];
+  for (const t of targets) {
+    const s = seats.find((x) => x.seat_id === t)!; const [grantId, epoch] = (s.conn ?? '|').split('|');
+    let caps: string[] = []; try { caps = JSON.parse(s.caps ?? '[]'); } catch { caps = []; }
+    // Decided before anything is sent, per target: a seat that cannot receive this is not left "pending".
+    const state = !grantId ? 'not_connected' : !caps.includes('commands') || !caps.includes(b.action) ? 'unsupported' : 'queued';
+    // A seat that already has a state-changing command in flight is reported busy instead of failing the whole batch.
+    stmts.push(db.prepare(`INSERT INTO ops_command_targets(command_id,class_run_id,seat_id,seat_revision,grant_id,connection_epoch,mutating,state,result_code,expires_at,updated_at)
+ SELECT ?,?,?,?,?,?,?,CASE WHEN ?=1 AND ?='queued' AND EXISTS(SELECT 1 FROM ops_command_targets x WHERE x.class_run_id=? AND x.seat_id=? AND x.mutating=1 AND x.state IN ('queued','leased','accepted','running')) THEN 'rejected' ELSE ? END,
+ CASE WHEN ?=1 AND ?='queued' AND EXISTS(SELECT 1 FROM ops_command_targets x WHERE x.class_run_id=? AND x.seat_id=? AND x.mutating=1 AND x.state IN ('queued','leased','accepted','running')) THEN 'seat_busy' ELSE '' END,?,?`).bind(id, run.class_run_id, t, s.seat_revision, grantId || '', Number(epoch) || 0, spec.mutating ? 1 : 0, spec.mutating ? 1 : 0, state, run.class_run_id, t, state, spec.mutating ? 1 : 0, state, run.class_run_id, t, expires, now));
+  }
+  // Command, audit and every target commit together or not at all.
+  try { await db.batch(stmts); }
+  catch (err) {
+    const again = await db.prepare('SELECT id,payload_hash FROM ops_commands WHERE class_run_id=? AND idempotency_key=?').bind(run.class_run_id, b.idempotency_key).first<{ id: string; payload_hash: string }>();
+    if (again) return again.payload_hash === payloadHash ? c.json(await commandView(db, run.class_run_id, again.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
+    console.error('ops command enqueue failed:', err); return c.json({ error: 'command not recorded; nothing was sent', reason: 'storage' }, 503);
+  }
+  // 202: recorded and queued. Not delivered, not started, not done.
+  return c.json(await commandView(db, run.class_run_id, id, now), 202);
+});
+
+const settleOverdueRun = (db: Db, runId: string, now: number) => db.batch(settleOverdue(db, 'class_run_id=?', [runId], now));
+
+async function commandView(db: Db, runId: string, id: string, now: number) {
+  const cmd = await db.prepare('SELECT id,action,reason_code,issued_by,created_at,expires_at,cancelled_at FROM ops_commands WHERE id=? AND class_run_id=?').bind(id, runId).first<Record<string, unknown>>();
+  if (!cmd) return null;
+  const targets = ((await db.prepare('SELECT seat_id,state,result_code,lease_generation,connection_epoch,receipt_json,updated_at FROM ops_command_targets WHERE command_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<{ seat_id: string; state: string; result_code: string; lease_generation: number; connection_epoch: number; receipt_json: string; updated_at: number }>;
+  return { command: cmd, now, summary: summarize(targets), targets: targets.map((t) => { let receipt = {}; try { receipt = JSON.parse(t.receipt_json); } catch { receipt = {}; } return { seat_id: t.seat_id, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt }; }) };
+}
+
+classroomOpsTeacher.get(root + '/commands/:id', async (c) => {
+  const auth = await teacher(c, 'observe'); if (auth instanceof Response) return auth;
+  const run = await loadRun(c, auth); if (run instanceof Response) return run;
+  const now = Date.now(); await settleOverdueRun(c.env.HPS_DB, run.class_run_id, now);
+  const view = await commandView(c.env.HPS_DB, run.class_run_id, c.req.param('id')!, now);
+  return view ? c.json(view) : c.json({ error: 'command not found' }, 404);
+});
+
+// Cancel stops delivery. It cannot recall what a device already started — those targets keep reporting.
+classroomOpsTeacher.delete(root + '/commands/:id', async (c) => {
+  const auth = await teacher(c, 'command'); if (auth instanceof Response) return auth;
+  const run = await loadRun(c, auth); if (run instanceof Response) return run;
+  const db = c.env.HPS_DB, now = Date.now(), id = c.req.param('id')!;
+  if (!(await db.prepare('SELECT id FROM ops_commands WHERE id=? AND class_run_id=?').bind(id, run.class_run_id).first())) return c.json({ error: 'command not found' }, 404);
+  await db.batch([
+    db.prepare('UPDATE ops_commands SET cancelled_at=COALESCE(cancelled_at,?) WHERE id=?').bind(now, id),
+    db.prepare("UPDATE ops_command_targets SET state='cancelled',result_code='instructor_cancelled',updated_at=? WHERE command_id=? AND state IN ('queued','leased')").bind(now, id),
+    audit(db, run.class_run_id, '', 'instructor', auth.payload.u, 'command_cancelled', { command_id: id }, now),
+  ]);
+  return c.json(await commandView(db, run.class_run_id, id, now));
 });
