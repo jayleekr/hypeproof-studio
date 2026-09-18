@@ -174,6 +174,7 @@ export async function activate(context: vscode.ExtensionContext) {
     runtimeGeneration: () => provider.opsRuntimeGeneration(),
     newGeneration: () => provider.opsNewGeneration(),
     setHold: (hold) => provider.opsSetHold(hold),
+    readSpool: () => provider.opsReadSpool(),
     recoverPreview: async () => {
       const probe = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(4000) })).status < 500; } catch { return false; } };
       const r = await liveServer.recover(probe);
@@ -199,6 +200,7 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("hypeproof-chat.classroomConnect", () => classroomOps.connectInteractively()),
     vscode.commands.registerCommand("hypeproof-chat.classroomDisconnect", () => classroomOps.disconnectInteractively()),
     vscode.commands.registerCommand("hypeproof-chat.classroomNotes", () => classroomOps.showCoachingNotes()),
+    vscode.commands.registerCommand("hypeproof-chat.classroomCollectionConsent", () => classroomOps.collectionConsentInteractively()),
 
     vscode.commands.registerCommand("hypeproof-chat.clearHistory", async () => {
       await provider.clearHistory();
