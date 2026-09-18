@@ -5,7 +5,9 @@ import budgetsHtml from './ui/budgets.html';
 //
 // Routes:
 //   GET /health                      — { ok, service, version } (c* tag via HPS_CHALK_VERSION)
-//   GET /                            — 302 → /console
+//   GET /                            — instructor home (#1145): every screen, including the missing ones
+//   GET /shell.css                   — the one shared stylesheet
+//   GET /readiness|/rehearsal|/environment|/requests|/access — placeholders: layout + "개발 필요" + the issue that owns it
 //   GET /console                     — instructor session console (#352)
 //   GET /issuer                      — self-service student-token mint page
 //   GET /board                       — instructor live board page (#674)
@@ -45,6 +47,9 @@ import sharingHtml from "./ui/sharing.html";
 import startHtml from "./ui/start.html";
 // @ts-ignore — bundled as text by wrangler rules.
 import learnHtml from './ui/learn.html';
+// @ts-ignore — bundled as text by wrangler rules (see wrangler.toml Text globs).
+import shellCss from './ui/shell.css';
+import { SOON, homePage, placeholderPage } from './ui/screens.ts';
 
 const app = new Hono<{ Bindings: ChalkEnv; Variables: { requestId: string } }>();
 
@@ -62,7 +67,29 @@ app.get("/health", (c) =>
 const page = (html: unknown) =>
   new Response(html as string, { headers: { "content-type": "text/html; charset=utf-8" } });
 
-app.get("/", (c) => c.redirect("/console", 302));
+// `/` is the instructor HOME (#1145 A-1), not a bounce to the session console.
+// It used to 302 to /console, which dropped a first-time instructor straight into
+// an in-session operations screen. The home lists every screen INCLUDING the ones
+// that do not exist yet — the five real-cohort incidents behind #1145 were all
+// "state looked different from what it was", and a surface that hides its own
+// holes is the same failure in slower motion.
+//
+// Home and the placeholder pages ask for no credential and call nothing. They are
+// rendered from one table (src/ui/screens.ts) so the home cannot claim a screen
+// exists while the screen itself says "개발 필요".
+app.get("/", () => page(homePage()));
+// One stylesheet for every screen that has been moved onto the shared shell.
+// authoring.html is deliberately NOT on it yet (weekly demo) — see shell.css.
+app.get("/shell.css", () =>
+  new Response(shellCss as string, {
+    headers: { "content-type": "text/css; charset=utf-8", "cache-control": "public, max-age=300" },
+  }),
+);
+for (const screen of SOON) {
+  if (screen.state.kind !== "soon") continue;
+  const html = placeholderPage(screen);
+  app.get(screen.state.path, () => page(html));
+}
 // Pages are public; every API call they make carries the instructor's Bearer
 // issuer token and is scope-checked server-side (here for reads, in the
 // Service for writes). Outside the guard so a misconfigured secret shows a

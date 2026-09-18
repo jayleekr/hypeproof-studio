@@ -1,0 +1,126 @@
+/* Chalk 공통 껍데기 — 머리글·메뉴·카드·버튼 한 벌 (#1145 A-2).
+ *
+ * 왜 CSS 파일 하나를 라우트로 내보내나:
+ *   화면 아홉은 wrangler 의 Text 규칙으로 **정적 텍스트**로 번들된다. 텍스트에는
+ *   무엇도 주입할 수 없으므로 "공통 한 벌"을 각 파일 안에 넣으면 아홉 벌이 된다.
+ *   그래서 한 벌을 여기 두고 `/shell.css` 로 내보내 각 화면이 <link> 로 받는다.
+ *
+ * 계보: board·console·issuer 의 CSS 변수 계열로 통일한다. 나머지 여섯은 변수가
+ *   없어 값을 화면마다 다시 써야 하고, 그러면 좁은 화면 대응을 한 곳에서 못 잡는다.
+ *
+ * ⚠️ authoring.html 은 아직 이 한 벌을 쓰지 않는다 — 위클리 데모가 그 화면이라
+ *   건드리지 않았다. 즉 **지금은 두 벌이다.** 데모 다음 날 첫 작업으로 합류시킨다.
+ */
+
+.shell-page {
+  --bg: #0f1115;
+  --card: #171a21;
+  --fg: #e8eaed;
+  --muted: #9aa0aa;
+  --line: #2a2f3a;
+  --accent: #6ea8fe;
+  --ok: #5fd08a;
+  --warn: #e7b955;
+  --soon: #7c8596;
+  --radius: 10px;
+  --gutter: 16px;
+}
+
+@media (prefers-color-scheme: light) {
+  .shell-page:not([data-theme="dark"]) {
+    --bg: #f7f8fa; --card: #ffffff; --fg: #1b1f27; --muted: #5b6270;
+    --line: #dfe3ea; --accent: #2d6cdf; --ok: #1f8a4c; --warn: #9a6b00; --soon: #7a8292;
+  }
+}
+
+.shell-page * { box-sizing: border-box; }
+
+body.shell-page {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.6 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+.shell-page .wrap { max-width: 860px; margin: 0 auto; padding: 0 var(--gutter) 56px; }
+
+/* 머리글 — 아홉 화면이 각자 다른 <nav> 를 들고 있던 자리를 대신한다.
+ *
+ * ⚠️ 이 블록만은 .shell-page 바깥에서도 산다. 기존 화면 일곱은 자기 색과 자기
+ * 배경을 이미 가지고 있어서, 이 파일이 :root 에 팔레트를 깔면 링크를 거는
+ * 순간 화면이 다시 칠해진다. 그래서 팔레트는 .shell-page 로 내리고 머리글은
+ * 자기 색을 스스로 들고 다닌다 — 밝은 화면에도 어두운 화면에도 붙는다.
+ */
+.shell-head {
+  --shell-line: #dfe3ea;
+  --shell-muted: #5b6270;
+  --shell-accent: #2d6cdf;
+  border-bottom: 1px solid var(--shell-line);
+  margin: 0 0 20px;
+  padding: 14px 0 10px;
+}
+@media (prefers-color-scheme: dark) {
+  .shell-head { --shell-line: #2a2f3a; --shell-muted: #9aa0aa; --shell-accent: #6ea8fe; }
+}
+.shell-head .brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.shell-head .brand a { color: inherit; font-weight: 700; text-decoration: none; font-size: 17px; }
+.shell-head .brand span { color: var(--shell-muted); font-size: 13px; }
+.shell-nav { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; }
+.shell-nav a { color: var(--shell-accent); text-decoration: none; font-size: 14px; }
+.shell-nav a:hover { text-decoration: underline; }
+.shell-nav a[aria-current="page"] { color: inherit; font-weight: 600; }
+
+.shell-page h1 { font-size: 22px; margin: 18px 0 6px; }
+.shell-page h2 { font-size: 16px; margin: 28px 0 10px; color: var(--muted); font-weight: 600; }
+.shell-page p.lede { color: var(--muted); margin: 0 0 18px; }
+
+/* 카드 격자 — 좁은 화면에서 한 줄, 넓어지면 두 줄. */
+.shell-page .grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 620px) { .shell-page .grid { grid-template-columns: 1fr 1fr; } }
+
+.shell-page .card {
+  display: block;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  color: inherit;
+  text-decoration: none;
+}
+.shell-page a.card:hover { border-color: var(--accent); }
+.shell-page .card .t { font-weight: 600; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.shell-page .card .d { color: var(--muted); font-size: 13.5px; margin-top: 4px; }
+
+.shell-page .tag {
+  font-size: 11.5px; font-weight: 600; letter-spacing: .02em;
+  border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px;
+  color: var(--muted); white-space: nowrap;
+}
+.shell-page .tag.ok { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 45%, var(--line)); }
+.shell-page .tag.student { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.shell-page .tag.soon { color: var(--soon); }
+
+.shell-page .card.soon { border-style: dashed; }
+.shell-page .card.soon .t { color: var(--soon); }
+
+.shell-page .note {
+  border: 1px solid var(--line); border-left: 3px solid var(--warn);
+  border-radius: var(--radius); background: var(--card);
+  padding: 12px 14px; margin: 18px 0; font-size: 13.5px; color: var(--muted);
+}
+.shell-page .note strong { color: var(--fg); }
+
+.shell-page .shell-foot {
+  margin-top: 34px; padding-top: 14px; border-top: 1px solid var(--line);
+  color: var(--muted); font-size: 13px;
+}
+.shell-page .shell-foot a { color: var(--accent); }
+
+/* 빈 자리 화면 — 레이아웃과 제목만 있고 내용이 없다는 것을 보이는 자리. */
+.shell-page .soon-body { border: 1px dashed var(--line); border-radius: var(--radius); padding: 22px 18px; }
+.shell-page .soon-body .big { color: var(--soon); font-weight: 700; font-size: 15px; }
+.shell-page .soon-body dl { margin: 16px 0 0; }
+.shell-page .soon-body dt { color: var(--muted); font-size: 12.5px; margin-top: 12px; }
+.shell-page .soon-body dd { margin: 2px 0 0; }
+.shell-page .soon-body dd a { color: var(--accent); }

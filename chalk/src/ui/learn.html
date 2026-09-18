@@ -1,8 +1,14 @@
 <!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>내 수업 · HypeProof</title>
+<link rel="stylesheet" href="/shell.css">
 <style>
 :root{color-scheme:dark;font:16px/1.65 system-ui;background:#10251f;color:#f1f5ed}*{box-sizing:border-box}body{max-width:840px;margin:auto;padding:24px}h1{font-size:28px}h2{font-size:22px}a{color:#d6f59d}input,button,summary{font:inherit;min-height:44px}input,button{border:1px solid #9ab19f;border-radius:8px;padding:10px;background:#19382e;color:inherit;max-width:100%}input{display:block;width:100%}button{cursor:pointer;margin:12px 8px 12px 0}button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible{outline:3px solid #d6f59d;outline-offset:3px}label{display:block}article{border-top:1px solid #9ab19f;margin-top:24px;padding-top:20px}p,pre{white-space:pre-wrap;overflow-wrap:anywhere}small{font-size:14px}summary{cursor:pointer}#status{padding:12px;background:#19382e}nav{display:flex;gap:20px;flex-wrap:wrap}nav a{padding:10px 0}
 </style>
+<header class="shell-head">
+  <div class="brand"><a href="/">HypeProof Chalk</a> <span>강사·강의 제작자를 위한 화면</span></div>
+  <nav class="shell-nav"><a href="/">홈</a><a href="/console">세션 콘솔</a><a href="/authoring">수업 작성</a><a href="/manage">강사 관리</a><a href="/board">라이브 보드</a><a href="/issuer">참여 코드 발급</a><a href="/start">처음이라면</a></nav>
+</header>
+
 <nav aria-label="이동"><a href="/start">강사 안내</a><a href="/sharing">도움 요청·피드백</a></nav>
 <h1>내 수업</h1><p>강사가 전달한 참여 코드로 확정된 과제와 확인 기준을 엽니다. 실제 제작은 Studio에서 진행합니다.</p>
 <form id="connect"><label for="token">학생 참여 코드</label><input id="token" type="password" autocomplete="off" required><button id="open">수업 열기</button><button id="forget" type="button">연결 지우기</button></form>
