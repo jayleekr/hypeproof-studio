@@ -156,3 +156,15 @@ npm --prefix chalk run typecheck
 - `npm --prefix e2e run test:classroom-ops`: 브라우저→Chalk→Service←실제 기기 클라이언트 코드(in-process)로 단일 조치 성공과 결과 코드 표시, 일괄 조치의 `전달 가능/기기 연결 없음` 사전 표시, 미확정 상태에서 ‘모두 완료’ 미표시.
 - 회귀: worker/chalk `npm test`·typecheck, 확장 `npm test`·typecheck·`build:extension`, 기존 `test:classroom` e2e 모두 exit 0.
 - **NOT RUN (BLOCKED: 실제 앱·OS 필요):** host 실행기 3종의 실제 Studio 동작(실제 preview 서버 복구·profile 재확인), 실제 프로세스 kill 후 저널 복구, 다중 창 lease 인계(150초), Windows, 클라이언트 시계 왜곡 실기. `refresh_connection`의 토큰 재발급·기기 전달은 미구현(현재는 기존 토큰 재검증만).
+
+### R3 보존형 reset·중지·일시정지 · 2026-09-18
+
+- `worker/test/classroom-ops-control.test.mjs`(8 PASS + OFF 대조 1): AT-19/20 reset은 별도 `reset` capability·대상 1명·인자 없음, 강사 2명 동시 reset 시 1건만 진행·다른 1건은 `seat_busy`, 상태 변경 명령 진행 중에도 읽기 전용 진단은 가능, `outcome_unknown`은 성공으로 합산되지 않음. AT-24 양성 대조(일시정지 전 두 경로 입장) → `/v1/chat/completions`·`/v1/messages` 새 요청만 `class_paused` 503, profile·공유 등 다른 경로 불변, CAS와 `pause` capability, 미적용 범위 명시, 기기별 applied/pending/unknown. AT-25 control 조회 실패는 채팅을 막지 않음(fail-open은 의도된 선택이며 기존 KV kill switch가 비상 정지로 남는다). AT-32 스위치 OFF면 잔류 control 행이 아무것도 멈추지 못함.
+- 확장 `test/runtime-reset.smoke.mjs`(5 PASS): 동결→중지 확인→보존 manifest 영속→새 generation→보존 대조→probe→해제 순서, 입력 미저장·중지 미확인·보존 I/O 실패·디스크 부족·스풀 미flush 시 generation 불변·입력 해제, 보존 불일치 보고, deadline 경과 시 변경 전 중단, crash postcondition, 원격 경로 소스에 `clearHistory(`·파일 삭제·history 비우기·셸·동적 VS Code command가 없음을 소스 검사로 고정.
+- **NOT RUN (BLOCKED: 실제 Mac/Windows Studio 필요) — AT-22/24의 핵심:** 실행 중인 실제 SDK 턴·도구 프로세스의 중지 확인, 미저장 draft가 있는 실제 webview 동결, 실제 디스크 부족, reset 뒤 같은 파일로의 실제 재연결, SDK 로컬 tool admission에 대한 일시정지 적용(현재 App은 새 send만 hold하며 진행 중 도구 호출은 막지 않는다), 구버전 설치 앱. 단위시험은 순서와 거절 규칙만 증명한다.
+
+### 보강 기준(복구·코칭 분리, 출처, 근거 부족, §14) · 2026-09-18
+
+- `worker/test/classroom-ops-coaching.test.mjs`(5 PASS): AT-35 `coach`와 `command/reset` capability 상호 비대체, 복구는 코칭 단계 없이 즉시 접수, 코드 fence·마크업·세미콜론 끝 코드·300자 초과·추가 필드 거부, 비밀 마스킹 후 저장, 감사에 본문 미기록, 대상 좌석 기기에만 전달, `succeeded`의 결과 코드는 `shown`. AT-36 actor·source_state 이벤트별 보존, 미지정=`unverified`, 학생 원문·파일명 필드 거부, 전후 digest 비교, 확인 상태 CAS·`coach` capability·발송 승인/학습 완료 아님 명시·step 불변, 새 근거 저장소 0(검토 상태 테이블만 추가). AT-37 근거 0건 좌석은 `observed:0`이며 blocked 아님, 상태 응답에 score/rank/grade/percent/dependency 문자열 0.
+- `npm --prefix e2e run test:classroom-ops`(Mac/Chromium): DT-07 패널당 주요 CTA 1개(장애 좌석=`진단 다시 실행`, 정상 좌석=`질문 보내기`), §14 토큰 computed color 일치와 대비 실측(본문·muted·주의·차단·unknown ≥4.5:1 on `#202C24`, 주요 CTA 글자 ≥4.5:1, 컨트롤 경계 ≥3:1), `운영 집계(학생 평가 아님)` 표기, 평가성 단어 0. AT-35 코드 질문 거부 시 입력 보존·학생 기기 미전달, 정상 질문은 학생 기기 실행기에 본문 전달·학생 작업 불변. AT-36 가상 근거 주의색 표기·`근거 확인` 후에도 step 불변. R3 reset 인라인 확인(대상 명시·포커스 이동·Enter)과 보존 결과 문구, 일시정지 범위 고지와 기기 적용 집계.
+- **NOT RUN:** AT-39(실제 Studio에서 질문·확인 지점이 작업 문맥을 가리지 않는지 — 현재 구현은 비모달 알림 + `강사가 보낸 질문·확인 지점 보기` 명령이며 실기 미확인), App이 실제 학습 행동에서 `evidence` 이벤트를 내보내는 연결(빌더·계약·Service 저장만 있음; 어떤 행동이 어떤 근거인지는 선택한 커리큘럼 계약에 따라 정해야 하므로 추측으로 연결하지 않았다), AT-38(R5에서 실행), 200% 확대.
