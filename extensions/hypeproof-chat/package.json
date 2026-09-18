@@ -133,6 +133,10 @@
       {
         "command": "hypeproof-chat.classroomDisconnect",
         "title": "HypeProof: 수업 연결 끊기"
+      },
+      {
+        "command": "hypeproof-chat.classroomNotes",
+        "title": "HypeProof: 강사가 보낸 질문·확인 지점 보기"
       }
     ],
     "menus": {
