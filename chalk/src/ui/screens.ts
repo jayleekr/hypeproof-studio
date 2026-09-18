@@ -13,7 +13,7 @@
 export type ScreenState =
   | { kind: "ready"; path: string }        // 실제로 동작하는 화면
   | { kind: "student"; path: string }      // 학생 화면 — 강사는 확인용으로만 연다
-  | { kind: "external" }                   // 다른 제품에 있다 (주소 미확인 시 링크 없음)
+  | { kind: "external"; href?: string }    // 다른 제품에 있다 (주소를 모르면 href 없이 사실만 적는다)
   | { kind: "soon"; path: string };        // 자리만 있고 내용이 없다
 
 export interface Screen {
@@ -99,6 +99,17 @@ export const SOON: Screen[] = [
       "지금 어디까지 갔는지, 누가 보고 있는지, 언제쯤인지 — 모르면 강사는 다시 물어보는 수밖에 없다.",
   },
   {
+    title: "단건 코드 발급",
+    desc: "배부 보드를 거치지 않고 학생 한 명에게 참여 코드를 바로 발급한다.",
+    state: { kind: "soon", path: "/mint" },
+    issues: [1145],
+    missing:
+      "API 는 있으나 화면이 없다. 발급 위젯 컴포넌트가 lab 저장소에 존재하는데 어디에서도 불러 쓰지 않아 " +
+      "강사가 브라우저로 도달할 방법이 없다. «아직 배포 전»이 아니라 만들어 놓고 연결하지 않은 것이며, " +
+      "이 저장소의 검사에서 우리가 센 것과 같은 모양이다 — 있는데 아무도 부르지 않는다. " +
+      "Chalk 의 «토큰 발급» 화면은 살아 있으니 지금 필요하면 그쪽을 쓴다.",
+  },
+  {
     title: "내 강사 코드",
     desc: "강사 코드를 어디서 받고 만료되면 어떻게 갱신하는지.",
     state: { kind: "soon", path: "/access" },
@@ -113,11 +124,30 @@ export const SOON: Screen[] = [
 /** 다른 제품에 있는 것. A 단계에서는 옮기지 않고 사실만 적는다. */
 export const ELSEWHERE: Screen[] = [
   {
-    title: "방 열기 · 배부 보드",
+    title: "배부 보드 — 치과 회차",
     desc:
-      "실제 회차에서 쓴 운영 도구는 lab 쪽에 있다. Chalk 로 옮길지는 아직 정하지 않았다. " +
-      "주소를 확인하지 못해 링크를 걸지 않았다.",
-    state: { kind: "external" },
+      "실제 회차에서 쓴 운영 화면. 강사 위젯(수업 시작·종료, 코드 발급)과 학생용 «내 토큰 받기»가 한 화면에 있다. " +
+      "로그인 불필요 · 강사 코드를 붙여넣어야 발급 가능.",
+    state: { kind: "external", href: "https://hypeproof-ai.xyz/live/boa" },
+  },
+  {
+    title: "배부 보드 — SK 회차",
+    desc: "같은 화면. A/B 분반이라 트랙 선택이 붙는다. 로그인 불필요 · 강사 코드를 붙여넣어야 발급 가능.",
+    state: { kind: "external", href: "https://hypeproof-ai.xyz/live/sk-biofarm" },
+  },
+  {
+    title: "배부 보드 — 회차 목록",
+    desc:
+      "⚠️ 회차마다 전용 주소다. 범용 «수업 열기» 화면이 없어서, 새 회차를 열려면 페이지를 하나 더 만들어야 하는 구조로 보인다. " +
+      "목록에서 자기 회차를 못 찾았다면 잘못 온 것이 아니라 아직 만들어지지 않은 것이다.",
+    state: { kind: "external", href: "https://hypeproof-ai.xyz/live" },
+  },
+  {
+    title: "강사 콘솔 (멤버)",
+    desc:
+      "성격이 다르다 — 발급 화면이 아니라 학생 진행 모니터링·피드백용이고, 멤버 로그인을 쓰며 강사 코드를 쓰지 않는다. " +
+      "2026-09-04 신설 이후 회차가 없어 아직 실사용 기록이 없다.",
+    state: { kind: "external", href: "https://hypeproof-ai.xyz/members/instructor" },
   },
 ];
 
@@ -136,6 +166,14 @@ const NAV: Array<[string, string]> = [
   ["/start", "처음이라면"],
 ];
 
+/**
+ * 기존 화면 일곱에 그대로 붙여 넣는 머리글. **같은 markup 이어야 한다** —
+ * chalk/test/instructor-console.test.mjs 가 아홉 중 여덟에서 이 문자열을 찾는다.
+ * (authoring.html 만 빠져 있고, 그것도 시험이 이유와 함께 고정한다.)
+ */
+export const SHELL_HEAD_MARK = '<header class="shell-head">';
+export const SHELL_LINK = '<link rel="stylesheet" href="/shell.css">';
+
 function head(title: string, current: string): string {
   const nav = NAV.map(
     ([href, label]) =>
@@ -147,7 +185,7 @@ function head(title: string, current: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)} · HypeProof Chalk</title>
 <link rel="stylesheet" href="/shell.css">
-<body>
+<body class="shell-page">
 <div class="wrap">
 <header class="shell-head">
   <div class="brand"><a href="/">HypeProof Chalk</a> <span>강사·강의 제작자를 위한 화면</span></div>
@@ -169,7 +207,11 @@ function card(s: Screen): string {
     : s.state.kind === "external" ? '<span class="tag">다른 제품</span>'
     : '<span class="tag soon">개발 필요</span>';
   const inner = `<div class="t">${esc(s.title)} ${tag}</div><div class="d">${esc(s.desc)}</div>`;
-  if (s.state.kind === "external") return `<div class="card">${inner}</div>`;
+  if (s.state.kind === "external") {
+    return s.state.href
+      ? `<a class="card" href="${s.state.href}" rel="noreferrer">${inner}</a>`
+      : `<div class="card">${inner}</div>`;
+  }
   const cls = s.state.kind === "soon" ? "card soon" : "card";
   return `<a class="${cls}" href="${s.state.path}">${inner}</a>`;
 }
