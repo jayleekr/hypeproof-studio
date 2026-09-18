@@ -48,6 +48,8 @@ interface Props {
     | { state: "error"; message: string }
     | null;
   onPublish: () => void;
+  /** #607 — 상시 "기록 보내기". opt-in 코호트에서만 렌더된다. */
+  onUploadLogs: () => void;
   streaming: boolean;
   /**
    * WHICH message is streaming, not just whether one is (#429). `streaming` is
@@ -277,6 +279,17 @@ export function ChatPanel(props: Props) {
   const publishing = config?.profile?.publishing;
   const galleryEnabled =
     publishing?.enabled === true && publishing?.strategy === "hypeproof_gallery";
+  /**
+   * #607 — 기록 보내기 진입점. opt-in 한 수업에서만 **렌더 자체를 한다**.
+   * 꺼진 수업에서 업로드를 권하는 UI 를 띄우지 않는 것은 배너(#596)와 같은
+   * 규율이다 — 서버도 fail closed 로 거절하지만, 그건 아이가 누른 **뒤**다.
+   *
+   * 판정 입력은 호스트 커맨드(`extension.ts` 의 uploadSessionLogs)와 같은
+   * 한 값이고, 같은 방향(`=== true`)으로 본다. 웹뷰는 별도 vite 앱이라 호스트
+   * 모듈을 import 하지 않으므로(갤러리 게이트와 같은 이유) 드리프트는
+   * test/session-upload-entrypoint.smoke.mjs 가 잠근다.
+   */
+  const uploadLogsEnabled = config?.profile?.analytics?.upload_session_logs === true;
   // #140 / #747 — one identity rule shared with the host (coachIdentity.ts):
   // a fixed cohort or lesson name wins over any stored student name.
   const coachName = resolveCoachIdentity(config?.coach, { ux }).name;
@@ -596,6 +609,15 @@ export function ChatPanel(props: Props) {
                 : props.publish?.state === "done"
                   ? "올렸어요 ✓"
                   : "🖼️ 갤러리"}
+            </button>
+          )}
+          {uploadLogsEnabled && (
+            <button
+              className="hps-upload-btn"
+              onClick={props.onUploadLogs}
+              title="오늘 한 활동 기록을 선생님께 보내요"
+            >
+              📮 기록 보내기
             </button>
           )}
           <button onClick={props.onSetToken} title="연결된 활동 확인 및 변경">

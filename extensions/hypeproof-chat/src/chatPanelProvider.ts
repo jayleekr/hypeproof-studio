@@ -2038,6 +2038,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "publishToGallery":
         void this.publishToGallery();
         return;
+      // #607 — 패널의 상시 "기록 보내기". 업로드 로직을 여기서 다시 쓰지 않는다:
+      // 팔레트 커맨드와 **같은 커맨드**를 부른다. 재진입 락(uploadInFlight)도
+      // 토큰·opt-in 게이트도 봉인 순서도 그 안에 하나만 있어야 한다(REQ-Q9) —
+      // 여기서 갈라지면 버튼과 팔레트가 서로 다른 규칙을 갖게 된다.
+      case "uploadSessionLogs":
+        void vscode.commands.executeCommand("hypeproof-chat.uploadSessionLogs");
+        return;
       case "webviewError":
         // S-04 (#48). Log to output channel so the trace survives a panel
         // reload; don't crash the host.
