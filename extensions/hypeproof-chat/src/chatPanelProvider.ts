@@ -26,6 +26,13 @@ import {
   withCoachSeatLock,
 } from "./sdkCoachHelpers";
 import { commandSignature, describeCommandForApproval } from "./shellPolicy";
+import {
+  captureCheckpoint,
+  listCheckpoints,
+  restoreCheckpoint,
+  notCoveredNotice,
+  type CheckpointManifest,
+} from "./workspaceCheckpoint";
 import { extractTitle, galleryPublishAllowed, publishWorld, resolveSiteBase } from "./galleryPublish";
 import { uploadSessionSnapshot } from "./spoolUploader";
 import {
@@ -319,6 +326,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * 세션 한정, 저장하지 않는다. 오리진 단위라 다른 사이트는 다시 묻는다.
    */
   private readonly approvedBrowserOrigins = new Set<string>();
+  /**
+   * #673 — 이번 턴에 이미 복구 지점을 뜬 턴 id. 한 턴에서 코치가 Edit 을 다섯 번
+   * 하더라도 되돌릴 자리는 **그 턴 이전** 하나다. 턴마다 다섯 벌을 쌓으면 목록이
+   * 읽을 수 없어지고("어느 게 아까 거지"), 되돌리기가 한 번에 안 끝난다.
+   */
+  private readonly checkpointedTurns = new Set<string>();
   /** #457 — SDK 경로의 검사 도구용 CDP 실행기. 첫 사용 때 만든다. */
   private mcpBrowser?: BrowserControl;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
@@ -2603,7 +2616,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           signal:ctrl.signal,onDelta,onActivity,
           requestApproval:async action=>{
             let prompted=false;
-            const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
+            const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;},streamId);
             return {approved,actor:prompted?'user':'policy'};
           }});
         sdkTurnTotal.current={usage:{local_provider:local.provider,model:result.model,reported_usage:result.usage},totalCostUsd:null};
@@ -2683,7 +2696,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // executeShell hard-deny and writeFile workspace-scope actually fire.
             requestApproval: async (action) => {
               let prompted = false;
-              const approved = await this.resolveActionApproval({ requestId: randomId(), ...sdkToolToActionRequest(action) }, () => { prompted = true; });
+              const approved = await this.resolveActionApproval({ requestId: randomId(), ...sdkToolToActionRequest(action) }, () => { prompted = true; }, streamId);
               return {approved, actor: prompted ? 'user' as const : 'policy' as const};
             },
             // #282 P2 slice 2 — native-browser capabilities for the hypeproof
@@ -3068,7 +3081,112 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * Public so e2e tests can synthesize requests without spinning through the
    * streamed-assistant path.
    */
-  async resolveActionApproval(req: ActionRequest, onPrompted?: () => void): Promise<boolean> {
+  /**
+   * #673 — 복구 지점 저장소. 작업 폴더 **밖**(확장 globalStorage)에 둔다.
+   *
+   * 폴더 안에 두면 코치가 그것도 고칠 수 있고(셸이 있는 좌석), 아이가 지울 수 있고,
+   * 복구 계획이 자기 자신을 되돌리려 든다. 백업을 백업 대상 안에 두지 않는다.
+   */
+  private checkpointStore(): string | null {
+    const dir = this.context.globalStorageUri?.fsPath;
+    if (!dir) return null;
+    return path.join(dir, "checkpoints");
+  }
+
+  /**
+   * #673 — 코치가 파일을 건드리기 **전에** 지금 폴더를 뜬다.
+   *
+   * 여기가 그 지점인 이유: 쓰기 도구는 전부 `canUseTool` 의 "ask" 로 떨어지고
+   * (evaluateSdkToolUse Gate 3 — "writes ALWAYS ask"), 두 런타임(SDK·로컬 개발
+   * 실행기)이 그 승인을 모두 `resolveActionApproval` 로 보낸다. SDK 는 이 함수가
+   * resolve 될 때까지 도구를 실행하지 않으므로, 여기서 뜬 것은 **반드시** 쓰기
+   * 이전 상태다.
+   *
+   * `archiveCurrentWorld` 를 고쳐서 될 일이 아니었다: 그건 되읽기 시점에 돌고,
+   * 그때는 이미 파일이 바뀌어 있어 diff 조건이 정확히 침묵한다(#673 본문).
+   *
+   * 실패는 삼키되 조용히 삼키지 않는다 — 콘솔에 남기고 턴은 계속한다. 백업을 못
+   * 떴다고 아이의 작업을 막는 것은 더 나쁜 교환이다.
+   */
+  private captureTurnCheckpoint(turnId?: string): CheckpointManifest | null {
+    const key = turnId ?? `adhoc-${Date.now()}`;
+    if (this.checkpointedTurns.has(key)) return null;
+    const root = this.resolveCoachCwd();
+    const store = this.checkpointStore();
+    if (!root || !store) return null;
+    this.checkpointedTurns.add(key);
+    try {
+      return captureCheckpoint({ root, store, reason: "before_turn" });
+    } catch (e) {
+      console.warn(`[checkpoint] 복구 지점 저장 실패: ${String(e).slice(0, 160)}`);
+      return null;
+    }
+  }
+
+  /**
+   * #673 — "방금 것 되돌리기". 명령과 패널 버튼이 같은 곳으로 온다.
+   *
+   * 확인 모달은 **무엇이 바뀌는지와 무엇이 안 바뀌는지**를 함께 보여 준다. 후자가
+   * 이 화면의 핵심이다: 갤러리나 웹사이트에 이미 올라간 것은 그대로 남는데, 화면이
+   * "전부 되돌렸어요" 로 읽히면 아이는 복구됐다고 믿고 그 위에 계속 쌓는다.
+   */
+  async restoreWorkspaceCheckpoint(): Promise<void> {
+    const root = this.resolveCoachCwd();
+    const store = this.checkpointStore();
+    if (!root || !store) {
+      void vscode.window.showWarningMessage("작업 폴더를 찾지 못했어요.");
+      return;
+    }
+    const points = listCheckpoints(store, root);
+    if (points.length === 0) {
+      void vscode.window.showInformationMessage(
+        "아직 되돌릴 저장점이 없어요. 저장점은 코치가 파일을 고치기 직전에 자동으로 만들어져요.",
+      );
+      return;
+    }
+    const picked = await vscode.window.showQuickPick(
+      points.map((p) => ({
+        label: p.label,
+        description: `파일 ${p.files.length}개${p.skipped.length ? ` · 담기지 않은 파일 ${p.skipped.length}개` : ""}`,
+        detail: new Date(p.createdAt).toLocaleString("ko-KR"),
+        id: p.id,
+      })),
+      { title: "어느 때로 되돌릴까요?", placeHolder: "가장 위가 가장 최근이에요" },
+    );
+    if (!picked) return;
+
+    const confirm = await vscode.window.showWarningMessage(
+      `「${picked.label}」 상태로 되돌릴까요?`,
+      {
+        modal: true,
+        detail:
+          `지금 파일은 되돌리기 직전 저장점으로 남겨 두니까, 이것도 다시 되돌릴 수 있어요.\n\n${notCoveredNotice()}`,
+      },
+      "되돌리기",
+    );
+    if (confirm !== "되돌리기") return;
+
+    let result;
+    try {
+      result = restoreCheckpoint({ root, store, id: picked.id });
+    } catch (e) {
+      void vscode.window.showErrorMessage(`되돌리지 못했어요: ${String(e).slice(0, 160)}`);
+      return;
+    }
+    if (!result.ok) void vscode.window.showWarningMessage(result.message);
+    else void vscode.window.showInformationMessage(result.message);
+  }
+
+  async resolveActionApproval(req: ActionRequest, onPrompted?: () => void, turnId?: string): Promise<boolean> {
+    // #673 — 되돌릴 자리를 먼저 만든다. 파일을 바꾸는 종류에만, 턴당 한 번.
+    // 승인 판정보다 앞이라 거부된 턴에도 저장점이 하나 생기는데, 그게 맞는
+    // 방향이다: 이 턴은 폴더를 건드리려 했고, 되돌릴 자리가 있어서 손해 볼 것이
+    // 없다. 반대 방향(승인 뒤에 뜨기)은 셸처럼 모달 없이 통과하는 경로에서
+    // 순서가 뒤집힐 여지를 남긴다.
+    if (req.kind === "writeFile" || req.kind === "executeShell") {
+      this.captureTurnCheckpoint(turnId);
+    }
+
     // Tier 1 — shell (epic #431). No longer a hard deny: a cohort that set
     // `sdk_tools.shell` gets arbitrary commands, and THIS modal is the gate.
     // Three shapes, in order of how much they interrupt:

@@ -76,6 +76,11 @@
         "title": "HypeProof Chat: Run Last Code in Preview"
       },
       {
+        "command": "hypeproof-chat.restoreCheckpoint",
+        "title": "HypeProof: 방금 것 되돌리기",
+        "icon": "$(discard)"
+      },
+      {
         "command": "hypeproof-chat.renameCoach",
         "title": "HypeProof Chat: 코치 이름 다시 짓기"
       },
@@ -148,6 +153,11 @@
           "command": "hypeproof-chat.localReview",
           "when": "view == hypeproof-chat.panel",
           "group": "navigation@4"
+        },
+        {
+          "command": "hypeproof-chat.restoreCheckpoint",
+          "when": "view == hypeproof-chat.panel",
+          "group": "navigation@5"
         }
       ],
       "editor/title": [
