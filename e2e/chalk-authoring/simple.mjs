@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+// ⚠️ **PR CI 는 이 러너를 부르지 않는다.** .github/workflows/pr-ci.yml 에 브라우저 잡이 없어
+// e2e/chalk-authoring/* 는 전부 사람이 로컬에서 돌려야 한다. 실제로 #1115 가 이 파일을
+// 깨뜨린 것이 머지 시점에 안 잡히고 열흘 뒤 다른 작업 중에 발견됐다. 저작 화면을 바꾸면
+// 여기를 직접 돌려라: npm --prefix e2e run test:chalk-simple
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {mkdirSync} from 'node:fs';
@@ -34,6 +38,11 @@ else{
  assert.equal(await page.locator('#cohort').isVisible(),false);
  await page.locator('#new').click();await page.locator('#title').fill('AI 창업 첫 수업');
  await page.locator('#starter').fill('사용자 인터뷰 질문 예시와 빈 관찰 노트');await page.locator('#audience').fill('초등 고학년');await page.locator('#objective').fill('사용자의 문제를 정의하고 결과를 직접 검증한다.');
+ // #1115 교육 원칙 관문이 선수 조건을 **확정의 필수 조건**으로 만들었다. 이 러너가 만드는
+ // 수업도 그 요구를 만족해야 한다 — 검사를 무르게 하는 것이 아니라 시료를 현실에 맞추는 것이다.
+ // 이 칸은 '추가 자료 · AI 설정' details 안이라 기본으로 접혀 있어 먼저 펼친다.
+ await page.locator('details').evaluateAll(es=>es.forEach(e=>e.open=true));
+ await page.locator('#prerequisites').fill('코딩 경험 불필요. 빈 관찰 노트만 준비한다.');
  await page.locator('.step [data-field=title]').fill('사용자의 문제 확인');await page.locator('.step [data-field=instructions]').fill('사용자 한 명에게 불편한 점을 묻고 해결하려는 문제를 한 문장으로 적는다.');await page.locator('.step [data-field=acceptance]').fill('관찰한 사실과 자신의 추측을 나누어 설명한다.');
  const id=await page.locator('#course').inputValue();assert.match(id,/^course-[a-f0-9-]+$/);
  // Clearing the visible setting must unbind the hidden target without discarding edits.

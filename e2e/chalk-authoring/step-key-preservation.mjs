@@ -15,6 +15,9 @@
 // 메모리 SQLite 하네스다. origin 이 실행 중에 계산되므로 환경변수로 운영을 가리킬 수 없다.
 //
 //   npm --prefix e2e run test:chalk-step-keys
+//
+// ⚠️ **PR CI 는 이 러너를 부르지 않는다**(브라우저 잡이 없다). 저작 화면을 바꾸면 사람이
+// 직접 돌려야 한다 — 이 결함이 처음 새어 나간 경로가 정확히 그것이었다.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
