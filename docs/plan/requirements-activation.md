@@ -63,6 +63,7 @@ claimed/in_review는 다른 작업과 합류·검토, reconcile은 닫힘/오래
 | [두 번째 모델의 읽기 전용 검토](#model-review) | implementation | [#1010](https://github.com/jayleekr/hypeproof-studio/issues/1010) |
 | [강사 설정·확정 버전·학생 실행 바인딩](#lesson-settings) | implementation | [#1011](https://github.com/jayleekr/hypeproof-studio/issues/1011) |
 | [학생 자격 리허설과 버전별 준비 증거](#rehearsal) | implementation | [#1012](https://github.com/jayleekr/hypeproof-studio/issues/1012) |
+| [리허설 진입 — 교환권 링크로 앱에서 연다](#rehearsal-entry) | implementation | [#1132](https://github.com/jayleekr/hypeproof-studio/issues/1132) |
 | [원인별 도움과 학급 일시정지](#operations) | implementation | [#751](https://github.com/jayleekr/hypeproof-studio/issues/751) |
 | [사람 피드백과 다음 수업 초안 연결](#feedback-loop) | implementation | [#1013](https://github.com/jayleekr/hypeproof-studio/issues/1013) |
 | [판단 변화·전이 연구 인수](#human-learning) | research | [#1014](https://github.com/jayleekr/hypeproof-studio/issues/1014) |
@@ -233,6 +234,22 @@ claimed/in_review는 다른 작업과 합류·검토, reconcile은 닫힘/오래
 - 양성 대조: 학생 권한으로 정상 예제 실행 후 해당 revision만 준비 완료.
 - 음성 대조: 강사 전용 자격으로만 성공하는 예제 거부. 도구/내용 수정 뒤 옛 합격 재사용 금지.
 - 확인할 구현 경로: `chalk/src`, `worker/src`
+- 어디서 도는가: **Studio(앱)**. 강사의 로그인·로컬 도구가 성공을 대신하지 않는다(RUN-01·ARC-03, #1131).
+  리허설은 수업을 열기 전에 하는 일이므로 **열린 세션을 요구하지 않는다.**
+
+<a id="rehearsal-entry"></a>
+
+### 리허설 진입 — 교환권 링크로 앱에서 연다
+
+- 이슈: [#1132](https://github.com/jayleekr/hypeproof-studio/issues/1132) · implementation
+- 선행 결정: [#1131](https://github.com/jayleekr/hypeproof-studio/issues/1131) 식별자 계약
+- 요구사항: chalk-authoring: ARC-03
+- 다음 행동: hypeproof-chat 에 `onUri` 활성화와 `registerUriHandler` 를 등록하고(현재 0건), 링크가 나르는 일회용 교환권을 Service 에 제출해 받은 학생 조건 자격으로 기존 `connectCourse` 진입 경로에 연결한다.
+- 디자인 변경: 수업 신원은 `(cohort_id, course_id, version)`+`sha256` 넷이고 **참여 코드는 신원이 아니라 자격증명이다.** 링크는 교환권 하나만 나르고 좌표·자격증명을 URL 에 노출하지 않는다. 교환은 서버가 하며 강사 전용 권한을 실행에 싣지 않는다.
+- 양성 대조: 유효한 교환권 링크 한 번으로 그 수업에 진입하고 좌표 넷이 일치한다. 열린 세션 없이도 시작된다.
+- 음성 대조: 이미 쓴 교환권·만료된 교환권·`sha256` 이 어긋난 교환권을 각각 거부한다. 두 번 제출되면 **한 번만 통과한다.** 링크가 강사 권한을 나르지 않는다.
+- 확인할 구현 경로: `extensions/hypeproof-chat/src`
+- 미관측: 확장 UriHandler 경로에 확인 다이얼로그가 뜨는지 **실행으로 확인한 적이 없다.** 구현 전 실기기 관측이 선행한다.
 
 <a id="operations"></a>
 

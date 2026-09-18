@@ -1909,6 +1909,22 @@
       ]
     },
     {
+      "id": "ST-DES-REHEARSAL-ENTRY",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/rehearsal-entry-failure-paths.md"
+        },
+        {
+          "path": "e2e/observe/rehearsal-link-check.ko.md"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-CHALK-AUTHORING",
       "stage": "test",
       "owner": "jayleekr",

@@ -393,9 +393,9 @@ Computer Use를 “SDK 기능 켜기”로 처리하지 않는다. 제공자가 
 
 | 레이어 | 소유할 것 | 재사용 및 계약 경계 |
 |---|---|---|
-| App | 기존 채팅/모델 선택 표시, local filesystem/browser/SDK 실행, 승인·중지, 로컬 복구 | 기존 ChatPanel·sdkCoach·browserMcp. 수업 내용/임계값을 바이너리에 고정하지 않음 |
+| App | 기존 채팅/모델 선택 표시, local filesystem/browser/SDK 실행, 승인·중지, 로컬 복구, **학생 조건 리허설 실행과 교환권 수신** | 기존 ChatPanel·sdkCoach·browserMcp. 수업 내용/임계값을 바이너리에 고정하지 않음 |
 | Service | 인증·배정·정책·모델 카탈로그/해석·예산·실행 자격·버전 binding | 기존 profile/authoring/classroom API와 공급자 번역기 확장. 새로운 로그인·정책 저장소를 먼저 만들지 않음 |
-| Surface | 기능/모델 템플릿 편집·학생 조건 리허설·운영 현황·예외 처리 | Chalk authoring/board/classroom 및 #732 재사용 |
+| Surface | 기능/모델 템플릿 편집·운영 현황·예외 처리, 그리고 **리허설을 App에서 여는 교환권 링크 발급** | Chalk authoring/board/classroom 및 #732 재사용. **학생 조건 리허설의 실행은 App이 소유한다**(ARC-03·RUN-01) |
 | Module | 목적·과제·교수 전략·검수 기준·필요 기능/모델 사용 방식의 참조 | 기존 hps-module/1·session-design 진화. 콘텐츠 자체는 권한을 부여하지 않음 |
 
 ### 현재 구현을 출발점으로 삼는다
