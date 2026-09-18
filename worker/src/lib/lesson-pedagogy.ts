@@ -228,8 +228,11 @@ export function checkLessonPedagogy(content: SessionDesign): PedagogyFinding[] {
     skipped: true,
     message:
       '단계별 시간이 스키마에 없어 수업 시간과의 정합을 확인하지 못했습니다. 통과가 아니라 미확인입니다.',
+    // 강사가 읽는 문구다. 필드명·이슈 번호 같은 내부 표기를 넣지 않는다 — 화면이 이 문장을
+    // 그대로 낸다. 조항이 정한 허용 오차(±10분)는 남긴다: 임계값이 문구에서 사라지면
+    // 사람이 그것을 제품이 정한 값으로 오해한다(lesson-pedagogy.test.mjs 가 고정한다).
     remedy:
-      `단계 시간 검사를 켜려면 steps[]에 시간 필드가 필요합니다. 칸이 생기면 ±${DURATION_TOLERANCE_MIN}분으로 판정합니다. 필드 추가는 저작 화면의 미확인 필드 보존(#1036)이 먼저입니다.`,
+      `단계마다 걸리는 시간을 적을 칸이 아직 없습니다. 칸이 생기면 단계 시간의 합을 수업 시간과 ±${DURATION_TOLERANCE_MIN}분 안에서 맞춰 판정합니다.`,
     source: SRC_DURATION,
   });
 

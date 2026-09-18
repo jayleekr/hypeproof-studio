@@ -71,3 +71,58 @@ assert.match(authoring, /도움 방식 설정 있음 — 이 화면에서는 편
 // element 를 옮기는 것이라 원본이 다른 단계로 옮겨붙지 않는다. 배열 인덱스로 묶으면 둘 다 깨진다.
 assert.ok(!/stepOrigin\s*=\s*\[\]/.test(authoring), '원본을 인덱스 배열로 들고 있으면 순서 변경에서 어긋난다');
 console.log('authoring-ui: 모르는 단계 키 보존 장치 정적 락 통과 (#1036)');
+
+// #1114 관문 — 확정 판정을 **화면에 그리는** 부분의 정적 락.
+// Service 가 계산한 목록을 옮겨 그릴 뿐이고 여기서 판정하지 않는다. 그 경계를 테스트가
+// 지킨다: 새 fetch·새 라우트·상태 쓰기가 없어야 하고, 서버 문자열은 textContent 로만
+// 들어가야 한다(이 화면은 어디서도 innerHTML 을 쓰지 않는다).
+assert.match(authoring, /<div id="verdict" role="status" aria-live="polite" hidden><\/div><\/fieldset>/,
+  '판정 표시 자리는 접힌 "버전 정보" 바깥, 확정 버튼 아래에 있어야 한다 — 펼쳐야 보이면 안 된다');
+assert.match(authoring, /err\.status=r\.status;err\.body=j;throw err;/,
+  'call() 이 실패 응답의 구조화된 본문을 에러에 실어야 화면이 판정을 그릴 수 있다');
+assert.match(authoring, /if\(Array\.isArray\(e\.body\?\.findings\)\)renderVerdict\(e\.body\.findings,true\)/,
+  '확정이 막히면 판정 목록 전체를 그린다 — 막은 항목만이 아니라 함께 온 것까지');
+assert.match(authoring, /renderVerdict\(d\.pedagogy,false\);\}\);/,
+  '경고만 있어 확정된 경우에도 판정을 그린다');
+assert.match(authoring, /무엇을 채우면 열리나 — \$\{f\.remedy\}/,
+  'remedy 가 화면 문구로 나와야 한다 — 이 작업의 목적이다');
+assert.match(authoring, /확정을 멈췄습니다 — 먼저 채울 것이/, '차단 문구는 강사가 읽을 말이어야 한다');
+assert.match(authoring, /확정했습니다 — 다음에 채우면 좋을 것이/, '성공 문구도 마찬가지');
+assert.match(authoring, /확인하지 못한 항목 —/, 'skip 은 통과가 아니라 미확인으로 따로 보인다');
+assert.match(authoring, /const VERDICT_LABEL=\{fail:'막힘',warn:'권고'\}/,
+  'severity 키를 그대로 노출하지 않고 읽을 말로 옮긴다');
+assert.match(authoring, /clearVerdict\(\);try\{await fn\(\)/,
+  '다른 동작을 시작하면 이전 판정을 지운다 — 남은 판정이 현재 상태로 읽히면 안 된다');
+// 계층 경계: 판정을 그리는 코드가 새 요청을 만들지 않는다.
+const verdictFn = authoring.slice(authoring.indexOf('function renderVerdict'), authoring.indexOf("async function call(path"));
+for (const forbidden of ['fetch(', 'localStorage', 'sessionStorage', 'innerHTML']) {
+  assert.ok(!verdictFn.includes(forbidden), `renderVerdict 는 ${forbidden} 을 쓰지 않는다 — 그리기만 한다`);
+}
+console.log('authoring-ui: 관문 판정 렌더링 정적 락 통과 — 그리기만 하고 판정하지 않는다');
+// #1130 — **관문이 필수로 만든 칸은 접힌 곳 안에 있으면 안 된다.**
+//
+// 이 시험이 있는 이유: 선수 조건이 `<details>` 안에 있어서 강사가 펼치지 않으면 확정이
+// 422 로 막히는데 화면은 그 칸이 어디 있는지 알려주지 않았다. **사람보다 기계가 먼저
+// 걸렸다** — e2e/chalk-authoring/simple.mjs 가 정확히 그 함정에 빠졌고(#1128 에서 수정),
+// 원인을 찾던 중 대조군이 오염돼 맞는 가설을 한 번 기각할 뻔했다. 오염된 이유가 우연이
+// 아니라 화면 구조 자체였다.
+//
+// **문구가 아니라 구조를 본다.** summary 텍스트에 기대면 문구를 고칠 때마다 깨진다.
+// 대신 그 칸 앞의 `<details>`/`</details>` 를 세어 중첩 깊이를 구한다 — 원인을 찾을 때
+// 실제로 쓴 계산과 같다.
+const detailsDepthAt = (html, needle) => {
+  const i = html.indexOf(needle);
+  assert.ok(i > 0, `${needle} 를 찾지 못했다`);
+  const before = html.slice(0, i);
+  return (before.match(/<details\b/g) ?? []).length - (before.match(/<\/details>/g) ?? []).length;
+};
+// 관문이 확정의 필수 조건으로 요구하는 칸. 여기 더할 때는 관문도 함께 본다.
+for (const field of ['id="prerequisites"']) {
+  assert.equal(detailsDepthAt(authoring, field), 0,
+    `${field} 는 접힌 영역 밖에 있어야 한다 — 관문이 필수로 만든 칸이다`);
+}
+// 대조군: 접힌 채로 두는 것이 맞는 선택 설정은 실제로 접혀 있어야 한다.
+// (이 줄이 없으면 위 검사는 "details 가 아예 없다"로도 통과한다.)
+assert.ok(detailsDepthAt(authoring, 'id="assistant_name"') > 0,
+  '선택 설정은 접힌 채로 둔다 — 대조군이 없으면 위 검사가 헛돈다');
+console.log('authoring-ui: 필수 칸이 접힌 곳 밖에 있다 (#1130)');
