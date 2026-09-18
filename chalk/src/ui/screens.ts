@@ -163,6 +163,7 @@ const NAV: Array<[string, string]> = [
   ["/authoring", "수업 작성"],
   ["/manage", "강사 관리"],
   ["/board", "라이브 보드"],
+  ["/issuer", "참여 코드 발급"],
   ["/start", "처음이라면"],
 ];
 
