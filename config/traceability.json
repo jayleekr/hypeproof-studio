@@ -1996,6 +1996,15 @@
         },
         {
           "path": "e2e/classroom/ops.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomOps.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomOpsHost.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops.smoke.mjs"
         }
       ]
     },

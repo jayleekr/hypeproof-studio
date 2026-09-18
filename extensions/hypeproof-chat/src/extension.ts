@@ -1,6 +1,7 @@
 import { registerLocalReview } from "./localReviewPanel";
 import { ActivityConnectionError, ActivityConnections, activityConnections } from './activityConnections';
 import { fetchProfileResult } from './proxyClient';
+import { ClassroomOpsHost } from './classroomOpsHost';
 import { prepareWorkspaceDirectory } from './workspacePreparation';
 import { imageAttachPrompt } from "./coachIdentity.ts";
 import * as vscode from "vscode";
@@ -158,6 +159,9 @@ export async function activate(context: vscode.ExtensionContext) {
   // kids-quest — skeleton round result → next-turn context for the coach.
   context.subscriptions.push(preview.onResult((r) => provider.attachQuestResult(r)));
 
+  const classroomOps = new ClassroomOpsHost(context, () => provider.opsRuntime(), (line) => console.log(line));
+  provider.opsObserver = classroomOps;
+  void classroomOps.resume();
   context.subscriptions.push(
     { dispose: () => liveServer.dispose() },
     assetStatus,
@@ -170,6 +174,10 @@ export async function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand("hypeproof-chat.focus", () => {
       if (!provider.focusEditor()) vscode.commands.executeCommand("hypeproof-chat.panel.focus");
     }),
+
+    // #751 — remote classroom operations: learner-initiated, status-only, droppable.
+    vscode.commands.registerCommand("hypeproof-chat.classroomConnect", () => classroomOps.connectInteractively()),
+    vscode.commands.registerCommand("hypeproof-chat.classroomDisconnect", () => classroomOps.disconnectInteractively()),
 
     vscode.commands.registerCommand("hypeproof-chat.clearHistory", async () => {
       await provider.clearHistory();
