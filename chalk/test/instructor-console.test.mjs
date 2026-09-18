@@ -145,6 +145,52 @@ await check("each placeholder page says 개발 필요 and points at the issue th
   }
 });
 
+// --- A-2 / A-3: 한 벌이 실제로 한 벌인가 --------------------------------------
+// 화면은 정적 텍스트로 번들된다. "공통"을 각 파일에 넣으면 아홉 벌이 되므로
+// 한 벌을 라우트로 내보내고 각 화면이 <link>/<script> 로 받는다. 그 링크가
+// 빠진 화면은 겉보기엔 멀쩡하고 혼자만 옛 모양으로 남는다 — 여기서 잡는다.
+const SHELL_PAGES = ["/console", "/board", "/issuer", "/manage", "/budgets", "/sharing", "/learn", "/start"];
+
+await check("공통 껍데기를 받는 화면 여덟이 전부 링크를 들고 있다", async () => {
+  for (const path of SHELL_PAGES) {
+    const { text } = await fetchOnce(path);
+    assert.ok(text.includes('href="/shell.css"'), `${path} 가 한 벌을 받는다`);
+    assert.ok(text.includes('class="shell-head"'), `${path} 에 공통 머리글이 있다`);
+  }
+});
+
+// 🔴 경계: 저작 화면은 이번 주 시연에 쓰여서 일부러 뺐다. **빠진 것이 실수가
+// 아니라 결정**임을 여기서 고정한다. 합류시키는 날 이 검사가 먼저 빨개진다.
+await check("대조 — 저작 화면만 아직 한 벌 밖에 있다 (의도된 예외)", async () => {
+  const { text } = await fetchOnce("/authoring");
+  assert.ok(!text.includes('href="/shell.css"'), "시연 전까지 건드리지 않는다");
+  assert.ok(!text.includes('class="shell-head"'));
+  assert.match(text, /가르칠 내용에 집중하세요/, "대조: 화면 자체는 그대로다");
+});
+
+await check("강사 코드를 모으는 스크립트는 강사 관리·예산 둘만 받는다", async () => {
+  for (const path of ["/manage", "/budgets"]) {
+    const { text } = await fetchOnce(path);
+    assert.ok(text.includes('src="/shell.js"'), `${path} 가 받는다`);
+  }
+  const { text } = await fetchOnce("/authoring");
+  assert.ok(!text.includes('src="/shell.js"'), "저작 화면은 아직 아니다");
+});
+
+await check("shell.js 는 자격증명을 어디로도 보내지 않는다", async () => {
+  const { status, text, contentType } = await fetchOnce("/shell.js");
+  assert.equal(status, 200);
+  assert.match(contentType, /javascript/);
+  assert.ok(text.includes("hps_issuer_token"), "세 화면이 이미 쓰던 열쇠와 같은 것");
+  // 부정 대조: 이 파일에 네트워크·영구 저장이 생기면 검토 대상이 달라진다.
+  // 주석은 걷어내고 본다 — 이 파일은 "localStorage 가 아니다" 라고 **설명**하고 있고,
+  // 처음 이 검사를 썼을 때 그 문장에 스스로 걸렸다. 걸린 것 자체는 검사가 산다는 뜻이다.
+  const code = text.replace(/^[ \t]*\/\/.*$/gm, "");
+  assert.doesNotMatch(code, /fetch\(|XMLHttpRequest|localStorage|document\.cookie/,
+    "sessionStorage 외의 보관·전송이 들어오면 여기서 막는다");
+  assert.match(text, /localStorage/, "대조: 주석 제거 전에는 실제로 등장한다 — 걸러내기가 vacuous 하지 않다");
+});
+
 await check("the shared stylesheet is served as CSS", async () => {
   const { status, text, contentType } = await fetchOnce("/shell.css");
   assert.equal(status, 200);
