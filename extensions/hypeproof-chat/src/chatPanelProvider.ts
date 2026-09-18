@@ -630,6 +630,36 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   /** #751 — metadata-only observer for remote classroom operations; null unless the learner connected. */
   opsObserver: import("./classroomOpsHost").ClassroomOpsObserver | null = null;
+  // #751 R3 — why new AI runs are held. Local editing, saving, Stop and export never consult this.
+  private opsHold: "paused" | "stop_unconfirmed" | null = null;
+  private opsGeneration = 0;
+  opsSetHold(hold: "paused" | "stop_unconfirmed" | null): void { this.opsHold = hold; }
+  opsRuntimeGeneration(): number { return this.opsGeneration; }
+  /** Ask every running turn and pending approval to end. Entries leave the maps through their normal finally paths — that is the confirmation. */
+  opsRequestStop(): void {
+    for (const [streamId, ctrl] of [...this.activeStreams]) { try { ctrl.abort(); } catch { /* best-effort */ } void this.post({ type: "streamStopped", streamId }); }
+    for (const resolve of [...this.pendingApprovals.values()]) resolve(false);
+    this.observationAssessment?.abort();
+  }
+  /** Freeze + confirmed draft save, reusing the activity-switch path. */
+  async opsFreezeInput(frozen: boolean): Promise<void> { await this.setConnectionChanging(frozen); }
+  /** Digests only — the conversation itself never leaves this process. Reads; never writes or clears. */
+  async opsPreservation(): Promise<{ history_count: number; history_sha256: string; draft_sha256: string | null; spool_session: string | null; spool_flushed: boolean }> {
+    const history = this.getHistory();
+    const scope = activityConnections(this.context)?.scope;
+    const draft = scope ? this.context.workspaceState.get<unknown>("hps.activity.draft." + scope) : undefined;
+    const digest = (v: unknown) => createHash("sha256").update(JSON.stringify(v)).digest("hex");
+    let flushed = true;
+    try { await this.spool?.flush(); } catch { flushed = false; }
+    const dir = this.spool?.currentSessionDir() ?? null;
+    return { history_count: history.length, history_sha256: digest(history), draft_sha256: draft === undefined ? null : digest(draft), spool_session: dir ? path.basename(dir) : null, spool_flushed: flushed };
+  }
+  /** New execution generation on the same files: cached runtime handles are dropped, nothing stored is touched. */
+  async opsNewGeneration(): Promise<number> {
+    // Reached only after the stop was confirmed, so there is no run state to force-clear here.
+    await this.ensureProfile(true);
+    return ++this.opsGeneration;
+  }
   /** #751 — approval wait is reported as such, never as a failure or as "running". */
   opsRuntime(): { idleMs: number; status: "idle" | "running" | "waiting_approval" } {
     const status = (this.pendingApprovals?.size ?? 0) > 0 ? "waiting_approval" : this.hasActiveStream() ? "running" : "idle";
@@ -1859,6 +1889,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     // Any message from the panel is evidence of a human. See `lastActivityAt`.
     this.lastActivityAt = Date.now();
+    if (this.opsHold && (msg.type === "sendMessage" || msg.type === "retryMessage")) {
+      // #751 — only a NEW AI run is held; the typed text goes back into the box, nothing is lost.
+      await this.post({type:"inputRejected",text:msg.type==="sendMessage"?msg.text:msg.prompt,images:msg.images});
+      void this.post({ type: "streamError", streamId: "connection", error: this.opsHold === "paused" ? "강사가 새 AI 실행을 잠시 멈췄습니다. 입력은 그대로 남겨 두었고, 파일 편집·저장·내보내기는 계속 할 수 있습니다." : "이전 AI 실행이 끝났는지 확인하지 못해 새 실행을 잠시 막았습니다. 입력은 그대로 남겨 두었습니다. 강사에게 알려 주세요." });
+      return;
+    }
     if (this.connectionChanging && (msg.type === "sendMessage" || msg.type === "retryMessage")) {
       await this.post({type:"inputRejected",text:msg.type==="sendMessage"?msg.text:msg.prompt,images:msg.images});
       void this.post({ type: "streamError", streamId: "connection", error: "활동 전환이 끝난 뒤 다시 보내세요. 입력은 초안에 남겨 두었습니다." });

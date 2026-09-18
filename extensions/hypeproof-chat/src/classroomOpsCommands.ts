@@ -25,9 +25,9 @@ export interface ExecutorResult { ok: boolean; code: string }
 export interface Executor {
   /** True when the action changes learner-visible state; such an action is never auto-retried. */
   mutating: boolean;
-  run(signal: AbortSignal): Promise<ExecutorResult>;
+  run(signal: AbortSignal, command: CommandEnvelope): Promise<ExecutorResult>;
   /** Did the effect already happen? Consulted only after a crash between `running` and the final receipt. */
-  postcondition?(): Promise<"done" | "not_done" | "unknown">;
+  postcondition?(command: CommandEnvelope): Promise<"done" | "not_done" | "unknown">;
 }
 
 interface JournalEntry {
@@ -73,7 +73,7 @@ export class CommandRunner {
       // state === "running": the effect may or may not have happened. Look; never redo.
       const ex = this.deps.executors[e.envelope.action];
       let verdict: "done" | "not_done" | "unknown" = "unknown";
-      try { verdict = (await ex?.postcondition?.()) ?? "unknown"; } catch { verdict = "unknown"; }
+      try { verdict = (await ex?.postcondition?.(e.envelope)) ?? "unknown"; } catch { verdict = "unknown"; }
       if (verdict === "done") this.finish(e, "succeeded", "recovered_postcondition");
       else if (verdict === "not_done" && ex && !ex.mutating) this.finish(e, "failed", "interrupted");
       else this.finish(e, "outcome_unknown", "interrupted");
@@ -139,7 +139,7 @@ export class CommandRunner {
     const abort = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined, timedOut = false;
     try {
       const result = await Promise.race([
-        ex.run(abort.signal),
+        ex.run(abort.signal, c),
         new Promise<ExecutorResult>((resolve) => { timer = setTimeout(() => { timedOut = true; abort.abort(); resolve({ ok: false, code: "timeout" }); }, Math.max(1000, c.run_within_ms)); }),
       ]);
       // A timed-out state-changing action may still have landed: that is unknown, not failed.
