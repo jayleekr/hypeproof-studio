@@ -34,7 +34,10 @@ try {
  assert.deepEqual(rs.map(r=>r.status).sort(),[200,409]);
  const frozen=await call('/versions/m2026.09.06-1','PUT',{expected_revision:2});assert.equal(frozen.status,200);assert.equal(frozen.body.activated,false);
  assert.equal((await call('','PUT',save(2,'next'))).status,200);
- assert.deepEqual((await call('/versions/m2026.09.06-1')).body,frozen.body);
+ // `pedagogy`는 확정 시점의 판정이며 저장된 버전의 일부가 아니다 — D1에 들어가지 않으므로
+ // read-back 응답에 없는 것이 맞다 (#1114). 빠뜨린 필드가 아니다. 나머지는 그대로 대조한다.
+ const {pedagogy:_frozenVerdict,...frozenStored}=frozen.body;
+ assert.deepEqual((await call('/versions/m2026.09.06-1')).body,frozenStored);
  assert.equal((await call('/versions/m2026.09.06-1','PUT',{expected_revision:3})).status,409);
  const {setRoster,startSession}=await import('../src/lib/kv.ts');
  await setRoster(env.HPS_KV,p.session.cohort_id,['synthetic-d1-student']);
