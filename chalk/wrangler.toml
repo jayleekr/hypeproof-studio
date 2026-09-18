@@ -54,9 +54,12 @@ bucket_name = "hps-traces"
 # .html pages are bundled as text; .md because the shared profile registry
 # (worker/src/profiles) imports prompt markdown — Chalk never reads it, but
 # the bundler must resolve it. Plan task H removes this import on both sides.
+# .css for src/ui/shell.css — the one shared stylesheet (#1145). Pages are
+# bundled as STATIC text, so a "common shell" cannot be injected into them;
+# it is served as its own route and pulled in with <link>.
 [[rules]]
 type = "Text"
-globs = ["**/*.md", "**/*.html"]
+globs = ["**/*.md", "**/*.html", "**/*.css"]
 fallthrough = true
 
 [vars]

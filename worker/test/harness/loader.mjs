@@ -3,8 +3,14 @@
 // Importing this module (for side effects) lets a plain `node
 // --experimental-strip-types` process import the worker's TypeScript source:
 //   - extensionless relative imports resolve to `.ts` (or `<dir>/index.ts`)
-//   - `.html` / `.md` / `.yaml` imports resolve to `export default <file contents>`,
-//     mirroring wrangler's `[[rules]] type="Text"` rule in wrangler.toml.
+//   - `.html` / `.md` / `.yaml` / `.css` imports resolve to `export default <file
+//     contents>`, mirroring wrangler's `[[rules]] type="Text"` rule in wrangler.toml.
+//
+// The list here must track the Text globs in BOTH wrangler.toml files. `.css`
+// arrived with chalk/src/ui/shell.css (#1145): pages are bundled as static text,
+// so a shared stylesheet cannot be injected into them and is served as its own
+// route instead. A glob added there and forgotten here fails as
+// ERR_UNKNOWN_FILE_EXTENSION at import time, not as a wrong answer.
 //
 // Import this FIRST (before any import that reaches src/) in every test file.
 
@@ -29,7 +35,7 @@ registerHooks({
     return nextResolve(specifier, context);
   },
   load(url, context, nextLoad) {
-    if (url.endsWith(".html") || url.endsWith(".md") || url.endsWith(".yaml")) {
+    if (url.endsWith(".html") || url.endsWith(".md") || url.endsWith(".yaml") || url.endsWith(".css")) {
       const text = readFileSync(fileURLToPath(url), "utf8");
       return {
         format: "module",
