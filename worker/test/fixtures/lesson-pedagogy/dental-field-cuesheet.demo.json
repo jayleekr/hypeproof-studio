@@ -25,10 +25,10 @@
   },
   "courses": [
     {
-      "course_id": "dental-field-cuesheet",
+      "course_id": "demo-dental-field-cuesheet",
       "content": {
         "schema": "hps-session-design/1",
-        "title": "치과 AI 홈페이지 실습 큐시트",
+        "title": "[데모] 치과 AI 홈페이지 실습 큐시트",
         "audience": "치과원장 11명. 메인강사 1명과 보조강사 5명이 운영하며 보조강사 1명당 수강생 2명을 담당한다",
         "duration_minutes": 120,
         "objective": "",

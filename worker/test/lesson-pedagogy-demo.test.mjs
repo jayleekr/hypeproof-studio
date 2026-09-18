@@ -41,6 +41,22 @@ for (const [file, fx] of loaded) {
     assert.ok(Array.isArray(fx.courses) && fx.courses.length, 'courses 필요');
     assert.equal(typeof fx.expect?.blocked, 'boolean', 'expect.blocked 필요 — 정답을 심고 시작한다');
   });
+
+  // 고지가 봉투 바깥(demo_notice)에만 있으면 **content 만 복사해 붙이는 순간 따라가지 않는다.**
+  // session-design 은 엄격한 키 화이트리스트라 마커 필드를 넣을 자리가 없다. 스키마 변경 없이
+  // 저장되는 레코드에 표시를 남길 수 있는 자리는 둘뿐이고 둘 다 쓴다:
+  //   course_id  — D1 의 기본키(authoring_drafts/authoring_versions)에 그대로 남고 모든 조회 경로에 보인다
+  //   title      — 확정본 content 안에 남아 화면과 학생 전달 경로까지 따라간다
+  // 접두사를 떼면 여기서 실패한다. 무심코 지우는 것을 막는 것이 이 검사의 전부다.
+  check(`${file}: 데모 표시가 저장될 레코드에도 남는다`, () => {
+    for (const c of fx.courses) {
+      assert.ok(c.course_id.startsWith('demo-'),
+        `course_id 는 demo- 로 시작해야 한다 (D1 기본키에 남는 유일한 표시): ${c.course_id}`);
+      assert.ok(c.content.title.startsWith('[데모]'),
+        `title 은 [데모] 로 시작해야 한다 (content 안에 남는 유일한 표시): ${c.content.title}`);
+      assert.ok(c.content.title.length <= 200, 'title 은 200자 이내여야 확정된다');
+    }
+  });
 }
 
 // ── 형태 검증은 관문보다 먼저다 ─────────────────────────────────────────────

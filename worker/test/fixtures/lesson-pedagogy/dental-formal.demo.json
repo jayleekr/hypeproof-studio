@@ -16,10 +16,10 @@
   },
   "courses": [
     {
-      "course_id": "dental-ownership-l1",
+      "course_id": "demo-dental-ownership-l1",
       "content": {
         "schema": "hps-session-design/1",
-        "title": "L1. 우리 치과 홈페이지, 무엇을 고칠지 판단하기",
+        "title": "[데모] L1. 우리 치과 홈페이지, 무엇을 고칠지 판단하기",
         "audience": "박지훈 원장 (가상): 홈페이지를 업체에 맡기고 수정은 메신저로 요청한다. 코드는 열어본 적이 없다. 목표: 시안을 고르고 업체에 정확하게 수정 요청하기",
         "duration_minutes": 120,
         "objective": "모바일 시안 2개를 비교해 3가지 수정 요청과 확인 기준을 작성한다.",
@@ -72,10 +72,10 @@
       }
     },
     {
-      "course_id": "dental-ownership-l2",
+      "course_id": "demo-dental-ownership-l2",
       "content": {
         "schema": "hps-session-design/1",
-        "title": "L2. 진료시간·공지·FAQ를 직접 수정하기",
+        "title": "[데모] L2. 진료시간·공지·FAQ를 직접 수정하기",
         "audience": "이수진 원장 (가상): 홈페이지의 문제는 설명할 수 있지만 진료시간 수정도 업체를 기다린다. 목표: 진료시간·공지·FAQ를 직접 바꾸기",
         "duration_minutes": 120,
         "objective": "예제 사이트의 콘텐츠 3건을 변경하고 모바일 검수와 원본 복원을 수행한다.",
@@ -128,10 +128,10 @@
       }
     },
     {
-      "course_id": "dental-ownership-l3",
+      "course_id": "demo-dental-ownership-l3",
       "content": {
         "schema": "hps-session-design/1",
-        "title": "L3. 수정한 홈페이지를 검수하고 되돌리기",
+        "title": "[데모] L3. 수정한 홈페이지를 검수하고 되돌리기",
         "audience": "최민석 원장 (가상): 콘텐츠 수정은 가능하지만 배포와 장애 대응은 업체에 맡긴다. 목표: 검수한 변경만 반영하고 문제가 생기면 되돌리기",
         "duration_minutes": 120,
         "objective": "연습 환경에 변경을 반영하고 심은 링크 오류를 발견해 이전 버전으로 복구한다.",
@@ -184,10 +184,10 @@
       }
     },
     {
-      "course_id": "dental-ownership-l4",
+      "course_id": "demo-dental-ownership-l4",
       "content": {
         "schema": "hps-session-design/1",
-        "title": "L4. 우리 치과 디자인으로 채용 페이지 만들기",
+        "title": "[데모] L4. 우리 치과 디자인으로 채용 페이지 만들기",
         "audience": "정하린 원장 (가상): 기존 홈페이지는 수정·운영하며 채용 페이지를 새로 만들고 싶다. 목표: 목적이 분명한 새 페이지 한 장 만들기",
         "duration_minutes": 120,
         "objective": "요구사항 5개를 기준으로 정적 채용 페이지를 만들고 기존 사이트와 연결해 검수한다.",
@@ -240,10 +240,10 @@
       }
     },
     {
-      "course_id": "dental-ownership-l5",
+      "course_id": "demo-dental-ownership-l5",
       "content": {
         "schema": "hps-session-design/1",
-        "title": "L5. 홈페이지 운영을 직접 통제하고 필요한 일은 맡기기",
+        "title": "[데모] L5. 홈페이지 운영을 직접 통제하고 필요한 일은 맡기기",
         "audience": "윤도현 원장 (가상): 여러 페이지를 운영하며 업체·호스팅·도메인 책임이 나뉘어 있다. 목표: 전체 운영 구조를 파악하고 장애·변경·위임을 결정하기",
         "duration_minutes": 120,
         "objective": "도메인·저장소·배포·복구 책임을 정리하고 모의 장애 2건의 대응·위임 계획을 검증한다.",

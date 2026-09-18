@@ -25,10 +25,10 @@
   },
   "courses": [
     {
-      "course_id": "sk-family-runbook-2026-08-22",
+      "course_id": "demo-sk-family-runbook-2026-08-22",
       "content": {
         "schema": "hps-session-design/1",
-        "title": "임직원 자녀 AI 교육 런북 — 가족 워크숍 1회차",
+        "title": "[데모] 임직원 자녀 AI 교육 런북 — 가족 워크숍 1회차",
         "audience": "임직원 자녀와 보호자 페어. 오전 초3·4, 오후 초5·6. 아동 10~13명 규모",
         "duration_minutes": 240,
         "objective": "아이가 문제를 찾아낸다 · 무엇을 만들지 자기 말로 진술한다 · 안 통한 지시를 고쳐 말한다 · 만든 것을 남에게 설명한다",
