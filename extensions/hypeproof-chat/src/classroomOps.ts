@@ -14,6 +14,7 @@
 
 export const OPS_SCHEMA_VERSION = 1;
 export const OPS_PROTOCOL = 1;
+/** Base capability. The host appends "commands" plus each action it registered an executor for. */
 export const OPS_CLIENT_CAPABILITIES = ["observe"] as const;
 export const SYNC_TIMEOUT_MS = 4000;
 export const BACKOFF_STEPS_MS = [5000, 10000, 20000, 60000] as const;
@@ -189,7 +190,7 @@ export class OpsOutbox {
 export interface SyncResponse {
   status: number;
   /** Parsed JSON body when there was one. */
-  body?: { reason?: string; poll_after_ms?: number; connection_epoch?: number; ack?: { boot_id: string; contiguous_seq: number; missing: Array<[number, number]> }; commands?: unknown[] };
+  body?: { reason?: string; poll_after_ms?: number; connection_epoch?: number; ack?: { boot_id: string; contiguous_seq: number; missing: Array<[number, number]> }; commands?: unknown[]; receipt_acks?: unknown[] };
   retryAfterSec?: number;
 }
 export interface SyncDeps {
@@ -206,6 +207,10 @@ export interface SyncDeps {
   /** 401: the connection is gone for good — the host drops the credential and asks to pair again. */
   onDisconnected(reason: string): void;
   onEpoch?(epoch: number): void;
+  /** Declared on every sync: a window that did not pair itself still says what it can run. */
+  capabilities?: string[];
+  /** R2 command ledger. Absent → this client observes only. */
+  commands?: { pendingReceipts(): unknown[]; onAcks(acks: unknown[]): Promise<boolean>; onCommands(cmds: unknown[]): Promise<void> };
 }
 export interface OpsSyncLoop { stop(): void; tick(): Promise<void>; nudge(): void; readonly state: "running" | "stopped"; }
 
@@ -221,13 +226,19 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
     let next = pollMs;
     try {
       const events = deps.outbox.batch();
-      const r = await deps.post({ schema_version: OPS_SCHEMA_VERSION, app_instance_id: deps.appInstanceId, boot_id: deps.outbox.bootId, events, sample: { ...deps.sample(), observed_at: deps.now() } }, SYNC_TIMEOUT_MS);
+      const r = await deps.post({ schema_version: OPS_SCHEMA_VERSION, app_instance_id: deps.appInstanceId, boot_id: deps.outbox.bootId, events, sample: { ...deps.sample(), observed_at: deps.now() }, ...(deps.capabilities ? { capabilities: deps.capabilities } : {}), ...(deps.commands ? { receipts: deps.commands.pendingReceipts() } : {}) }, SYNC_TIMEOUT_MS);
       if (r.status === 200 && r.body?.ack) {
         failures = 0;
         await deps.outbox.acked(r.body.ack.boot_id, r.body.ack.contiguous_seq);
         if (typeof r.body.poll_after_ms === "number") pollMs = Math.min(Math.max(r.body.poll_after_ms, 1000), 120000);
         if (typeof r.body.connection_epoch === "number") deps.onEpoch?.(r.body.connection_epoch);
         next = deps.outbox.pending ? 1000 : pollMs;
+        if (deps.commands) {
+          // Epoch first, then the Service's answers, then new work: a command never runs on a stale epoch or an unanswered ask.
+          const ran = await deps.commands.onAcks(r.body.receipt_acks ?? []);
+          await deps.commands.onCommands(r.body.commands ?? []);
+          if (ran || deps.commands.pendingReceipts().length) next = 1000;
+        }
       } else if (r.status === 401) {
         deps.log?.(`[ops] connection closed by the Service (${r.body?.reason ?? "401"}) — stopping`);
         loop.stop(); deps.onDisconnected(r.body?.reason ?? "ops_credential_invalid"); return;

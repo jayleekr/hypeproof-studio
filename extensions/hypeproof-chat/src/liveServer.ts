@@ -59,6 +59,20 @@ export class LiveServer {
     return this.server ? this.baseUrl : undefined;
   }
 
+  /**
+   * #751 — bring the preview back for the SAME root without touching any file.
+   * A healthy server only gets a reload push (its port, and so every open
+   * preview URL, stays valid). A dead one is started again; the OS picks a new
+   * port, which the caller must report instead of claiming the old tab works.
+   */
+  async recover(probe: (url: string) => Promise<boolean>): Promise<{ state: "no_preview" | "reloaded" | "restarted"; url?: string }> {
+    const root = this.root;
+    if (!root) return { state: "no_preview" };
+    if (this.server && this.baseUrl && (await probe(this.baseUrl))) { this.reload(); return { state: "reloaded", url: this.baseUrl }; }
+    const url = await this.start(root);
+    return { state: "restarted", url };
+  }
+
   /** Push a reload to all connected browser pages. */
   reload(): void {
     for (const res of this.sseClients) {
