@@ -306,6 +306,18 @@ export type WebviewMessage = (
   | { type: "previewReady" }                // from preview webview only
   | { type: "openExternal"; url: string }   // #173 — citation chip click → host opens browser
   /**
+   * #607 — 채팅 패널의 상시 "기록 보내기" 버튼. 배너를 지나친 학생의 재진입점이
+   * 명령 팔레트뿐이었고, 초등학생 코호트는 팔레트를 쓰지 못한다 — opt-in 한
+   * 수업에서는 기능이 있는데 도달 수단이 없었다.
+   *
+   * 웹뷰는 **아무 판단도 하지 않는다.** 이 메시지는 기존 커맨드
+   * `hypeproof-chat.uploadSessionLogs` 를 부르는 한 줄이고, 토큰·프로필
+   * opt-in·재진입 락·봉인 순서는 전부 그 커맨드 안에 그대로 있다(REQ-Q9).
+   * 그래서 버튼을 안 보는 좌석이 이 메시지를 직접 보내도 결과는 같다 —
+   * 커맨드가 fail closed 로 거절한다.
+   */
+  | { type: "uploadSessionLogs" }
+  /**
    * "갤러리에 올리기" — 지금 열려 있는 세상을 lab 갤러리로 보낸다.
    *
    * 웹뷰는 **아무것도 실어 보내지 않는다.** 어떤 세상인지도, 누구 것인지도

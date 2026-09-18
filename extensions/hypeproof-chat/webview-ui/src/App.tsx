@@ -316,6 +316,7 @@ export function App() {
         onRetryLast={retryLast}
         onDismissError={dismissError}
         onCancel={cancel}
+        onUploadLogs={() => postToHost({ type: "uploadSessionLogs" })}
         onClear={() => postToHost({ type: "clearHistory" })}
         onSetToken={() => postToHost({ type: "setToken" })}
         onSettings={() => postToHost({ type: "openSettings" })}
