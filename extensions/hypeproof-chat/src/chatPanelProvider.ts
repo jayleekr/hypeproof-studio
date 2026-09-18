@@ -1393,7 +1393,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // #359 — structural guard: auto-repair the known comment-close typo, and
     // refuse to reveal a still-broken document as if it succeeded. Returns
     // false when blocked so the streaming caller can let a corrected block retry.
-    const checked = validateAndRepairHtml(html);
+    //
+    // #671 — on the kids-quest track the same chokepoint also checks that what
+    // the coach wrote is still a *world* (guest bubble, filled placeholders, no
+    // external subresource, result channel). Gated on the cohort: an adult
+    // copyclone page has none of those by design.
+    const checked = validateAndRepairHtml(html, {
+      worldContract: isWorldCohort(this.cachedProfile),
+    });
     // #580 — "preview open" 은 #552 MVP 5종 중 하나. 모든 reveal 경로(스트림
     // 자동 · ▶ Run · show-intent · 브라우저 루프)가 이 메서드로 모이므로 여기
     // 한 곳에서 남긴다. 구조 가드 **뒤**에 — 막힌 reveal 은 화면에 안 떴는데

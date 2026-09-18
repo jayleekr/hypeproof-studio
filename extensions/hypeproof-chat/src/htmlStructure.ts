@@ -17,6 +17,15 @@
 //
 // Design decisions (#359): auto-repair + block-and-warn on residual breakage;
 // disclaimer is warn-only.
+//
+// #671 — the structural check above says nothing about whether a *world* is
+// still a world. The kids-quest contract ("지키는 것 둘 — #guest 말풍선,
+// report()") lived only as prose in the system prompt
+// (worker/src/lib/translate.ts) and as a BUILD-TIME test over the untouched
+// skeletons (worker/test/kids-quest-prompt.test.mjs). Nothing looked at what
+// the coach actually wrote. `checkWorldContract` closes that, and it is opt-in
+// per cohort: an adult copyclone page has no report()/#guest and must never be
+// judged by this contract.
 
 export interface HtmlStructureResult {
   /** Input HTML, possibly auto-repaired. Callers should render THIS, not the input. */
@@ -38,7 +47,16 @@ export interface HtmlStructureResult {
  * that would render broken. No legal/medical-ad checks (removed per product
  * decision: the coach builds freely, legal review is the publisher's).
  */
-export function validateAndRepairHtml(input: string): HtmlStructureResult {
+export function validateAndRepairHtml(
+  input: string,
+  opts?: {
+    /**
+     * #671 — also apply the kids-quest world contract. Callers pass
+     * `isWorldCohort(profile)`; every other cohort is unaffected.
+     */
+     worldContract?: boolean;
+  },
+): HtmlStructureResult {
   if (typeof input !== "string" || input.length === 0) {
     return { html: input, repaired: false, blocked: false, issues: [] };
   }
@@ -62,7 +80,16 @@ export function validateAndRepairHtml(input: string): HtmlStructureResult {
   if (scriptUnbalanced) {
     issues.push("<script>와 </script> 짝이 맞지 않습니다.");
   }
-  const blocked = commentUnterminated || scriptUnbalanced;
+  let blocked = commentUnterminated || scriptUnbalanced;
+
+  // 3. World contract (#671) — opt-in per cohort, and only worth running on a
+  // document that is structurally sound (a swallowed <script> already explains
+  // every missing-element finding below).
+  if (opts?.worldContract === true && !blocked) {
+    const contract = checkWorldContract(html);
+    issues.push(...contract.issues);
+    blocked = blocked || contract.blocked;
+  }
 
   return { html, repaired, blocked, issues };
 }
@@ -154,4 +181,117 @@ export function repairCommentCloseTypo(html: string): string {
     i = open + 4;
   }
   return out;
+}
+
+// ── #671 world contract ──────────────────────────────────────────────────────
+//
+// Severity is decided by what the shipped engine actually does, not by how
+// important the rule sounds (.claude/rules/verification.md rule 1 — open the
+// thing before writing the criterion):
+//
+//   #gface / #gsay missing → engine.js runs
+//     `document.getElementById('gface').textContent = GUEST_EMOJI;`
+//     at TOP LEVEL (worker/src/skeletons/kids-quest/engineJs.ts). A missing
+//     element throws a TypeError there, so the engine never finishes loading
+//     and every later <script> that needs its globals dies with it. The child
+//     gets a black screen — exactly the 2026-08-22 15:54 incident shape.
+//     → BLOCK.
+//
+//   %%SLOT%% left over → the skeleton spends placeholders inside JS
+//     (`const SPEED=%%SPEED%%;`), so a leftover is a syntax error that kills
+//     the whole inline script, not merely ugly text. → BLOCK.
+//
+//   external http(s) subresource → minor cohorts preview through live_server,
+//     which serves raw bytes with NO CSP (liveServer.ts). The iframe fallback's
+//     buildInnerCsp would have dropped `https:` here; this path has nothing.
+//     → BLOCK.
+//
+//   report() call missing → the engine still loads and the world still renders;
+//     only the result channel (hp:result) goes quiet. Refusing to show a world
+//     the child can actually play would be worse than the defect. → WARN.
+//
+// The asymmetry is deliberate. A false positive here refuses a working world,
+// which is the failure direction this repo has been wrong in before, so only
+// the certain-death rules block.
+
+export interface WorldContractResult {
+  /** Human-readable notes (Korean). Empty when the contract holds. */
+  issues: string[];
+  /** A certain-death violation — caller must NOT reveal this document. */
+  blocked: boolean;
+}
+
+/** Subresource elements: a URL here is fetched. `<a href>` is navigation, not a fetch. */
+const SUBRESOURCE_TAGS = "script|img|link|iframe|source|video|audio|embed|object";
+
+/**
+ * Check coach-written world HTML against the kids-quest contract. Pure, and
+ * never throws: unexpected input yields a clean result so this can only ever
+ * ADD safety.
+ */
+export function checkWorldContract(html: string): WorldContractResult {
+  if (typeof html !== "string" || html.length === 0) {
+    return { issues: [], blocked: false };
+  }
+
+  const issues: string[] = [];
+  let blocked = false;
+
+  // 1. Guest bubble — engine.js dereferences both of these at load time.
+  const missingIds = ["gface", "gsay"].filter((id) => !hasElementId(html, id));
+  if (missingIds.length > 0) {
+    issues.push(
+      `게스트 말풍선(#${missingIds.join(", #")})이 없어졌습니다 — 이 상태로는 세상이 통째로 안 뜹니다.`,
+    );
+    blocked = true;
+  }
+
+  // 2. Unfilled placeholders — a syntax error inside the world's own script.
+  const leftovers = [...new Set((html.match(/%%[A-Z_]{2,}%%/g) ?? []))];
+  if (leftovers.length > 0) {
+    issues.push(`자리표시자가 채워지지 않았습니다: ${leftovers.slice(0, 3).join(", ")}`);
+    blocked = true;
+  }
+
+  // 3. External subresources — no CSP on the live_server path.
+  const external = externalSubresources(html);
+  if (external.length > 0) {
+    issues.push(`바깥 인터넷 주소를 불러오려 합니다: ${external.slice(0, 2).join(", ")}`);
+    blocked = true;
+  }
+
+  // 4. Result channel — advisory (see severity note above).
+  if (!/\breport\s*\(/.test(stripComments(html))) {
+    issues.push("결과 보고(report)가 사라져 게스트가 반응하지 못합니다.");
+  }
+
+  return { issues, blocked };
+}
+
+/** `id="gface"`, `id='gface'` and bare `id=gface` all count. */
+export function hasElementId(html: string, id: string): boolean {
+  return new RegExp(`\\bid\\s*=\\s*(?:"${id}"|'${id}'|${id}(?=[\\s/>]))`, "i").test(html);
+}
+
+/** http(s) URLs in a fetched `src`/`href` on a subresource element. */
+export function externalSubresources(html: string): string[] {
+  const found: string[] = [];
+  const re = new RegExp(`<(?:${SUBRESOURCE_TAGS})\\b[^>]*>`, "gi");
+  for (const tag of html.match(re) ?? []) {
+    const m = tag.match(/\b(?:src|href)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i);
+    const url = m?.[1] ?? m?.[2] ?? m?.[3];
+    if (url && /^https?:\/\//i.test(url.trim())) found.push(url.trim());
+  }
+  return [...new Set(found)];
+}
+
+/**
+ * Drop comment bodies so a commented-out `report(...)` does not read as a live
+ * call. Deliberately coarse — it only feeds the advisory check above.
+ */
+function stripComments(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/(^|[\s;{}()])\/\/[^\n]*/g, "$1 ");
 }
