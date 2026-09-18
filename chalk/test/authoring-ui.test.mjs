@@ -50,3 +50,24 @@ assert.match(learn, /'이 수업의 AI 이름: '\+c\.assistant\.display_name\+' 
 assert.doesNotMatch(learn, /innerHTML/, 'lesson text is never rendered as HTML');
 
 console.log('PASS authoring ui: AI name round-trips, feature narrowing is opt-in and omitted when inheriting, learn page renders via textContent');
+
+// #1036 — 저장 때 **화면이 모르는 단계 키를 버리지 않는다**.
+// step() 이 5개 칸만 그리고 content() 가 그 칸들로만 단계를 다시 만들던 탓에, 제목만
+// 고쳐 저장해도 steps[].help 가 조용히 사라졌다. 앞으로 단계에 칸을 넓힐 때마다(금지 항목·
+// 시간·증거물) 같은 경로로 데이터가 사라지므로 칸을 넓히기 전에 이것이 먼저다.
+// 실제 왕복은 e2e/chalk-authoring/step-key-preservation.mjs 가 브라우저→저장소로 확인한다.
+// 여기서는 그 장치가 화면에 실제로 실려 있는지를 정적으로 고정한다.
+assert.match(authoring, /const stepOrigin=new WeakMap\(\);/,
+  '원본 단계 객체를 fieldset 에 묶어 두는 장치가 있어야 한다');
+assert.match(authoring, /f\.className='step';stepOrigin\.set\(f,data\);/,
+  'step() 이 그리는 순간 원본을 묶는다 — 나중에 묶으면 import 경로에서 놓친다');
+assert.match(authoring, /\{\.\.\.\(stepOrigin\.get\(f\)\?\?\{\}\),\.\.\.Object\.fromEntries\(\[\.\.\.f\.querySelectorAll\('\[data-field\]'\)\]/,
+  'content() 는 원본 위에 그린 칸을 덮어써야 한다 — 그린 칸만으로 다시 만들면 안 된다');
+assert.match(authoring, /if\(data\.help\)\{const n=document\.createElement\('p'\);n\.className='step-note';/,
+  '도움 방식이 있는 단계에 읽기 전용 표시를 낸다');
+assert.match(authoring, /도움 방식 설정 있음 — 이 화면에서는 편집할 수 없고 저장 시 유지됩니다/,
+  '표시 문구는 편집 불가와 보존을 함께 말한다');
+// WeakMap 이어야 하는 이유: 단계를 지우면 그 키도 함께 사라지고, 순서 변경은 같은
+// element 를 옮기는 것이라 원본이 다른 단계로 옮겨붙지 않는다. 배열 인덱스로 묶으면 둘 다 깨진다.
+assert.ok(!/stepOrigin\s*=\s*\[\]/.test(authoring), '원본을 인덱스 배열로 들고 있으면 순서 변경에서 어긋난다');
+console.log('authoring-ui: 모르는 단계 키 보존 장치 정적 락 통과 (#1036)');

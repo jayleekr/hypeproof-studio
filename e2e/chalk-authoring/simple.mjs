@@ -1,4 +1,13 @@
 import assert from 'node:assert/strict';
+// 이 러너는 자동 검사가 돈다 — `.github/workflows/dental-reference.yml` 의 `reference-browser`
+// 잡이 chromium 을 깔고 **명시된 스크립트만** 부른다.
+//
+// ⚠️ **폴더에 있다고 자동으로 도는 것이 아니다.** 이 폴더의 러너 중 무엇이 검사 대상인지는
+// 그 워크플로에 적힌 목록이 전부다. 새 러너를 여기 만들면 **거기 한 줄을 더해야** 돈다.
+// 실제로 그 목록에 빠져 있던 `simple.mjs` 가 #1115 에 깨진 채로 머지됐고 열흘 뒤에 발견됐다.
+// 그때 조사한 사람은 반대로 `pr-ci.yml` 만 보고 "이 계열은 아예 안 돈다"고 단정했는데 그것도
+// 틀렸다 — 절반은 이미 돌고 있었다. **어디까지가 검사 대상인지 한 곳에 안 적혀 있는 것이
+// 양쪽 오해의 같은 원인이다.**
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {mkdirSync} from 'node:fs';
@@ -34,6 +43,11 @@ else{
  assert.equal(await page.locator('#cohort').isVisible(),false);
  await page.locator('#new').click();await page.locator('#title').fill('AI 창업 첫 수업');
  await page.locator('#starter').fill('사용자 인터뷰 질문 예시와 빈 관찰 노트');await page.locator('#audience').fill('초등 고학년');await page.locator('#objective').fill('사용자의 문제를 정의하고 결과를 직접 검증한다.');
+ // #1115 교육 원칙 관문이 선수 조건을 **확정의 필수 조건**으로 만들었다. 이 러너가 만드는
+ // 수업도 그 요구를 만족해야 한다 — 검사를 무르게 하는 것이 아니라 시료를 현실에 맞추는 것이다.
+ // 이 칸은 '추가 자료 · AI 설정' details 안이라 기본으로 접혀 있어 먼저 펼친다.
+ await page.locator('details').evaluateAll(es=>es.forEach(e=>e.open=true));
+ await page.locator('#prerequisites').fill('코딩 경험 불필요. 빈 관찰 노트만 준비한다.');
  await page.locator('.step [data-field=title]').fill('사용자의 문제 확인');await page.locator('.step [data-field=instructions]').fill('사용자 한 명에게 불편한 점을 묻고 해결하려는 문제를 한 문장으로 적는다.');await page.locator('.step [data-field=acceptance]').fill('관찰한 사실과 자신의 추측을 나누어 설명한다.');
  const id=await page.locator('#course').inputValue();assert.match(id,/^course-[a-f0-9-]+$/);
  // Clearing the visible setting must unbind the hidden target without discarding edits.
