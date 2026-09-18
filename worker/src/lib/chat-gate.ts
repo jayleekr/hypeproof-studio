@@ -1,3 +1,4 @@
+import { CLASS_PAUSED_MESSAGE, readRunControl } from './classroom-ops-control';
 import { accountForToken, requireAccessEnabled, AccessError } from './access-contracts';
 import { crossProviderEnabled } from '../profiles/types';
 // Shared pre-flight gate for LLM-serving routes (#282).
@@ -251,6 +252,14 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
         503,
       ),
     };
+  }
+
+  // 5c. #751 — instructor "pause new runs" for this class run. Only NEW model
+  // requests are refused here; a request already streaming is not cut, and
+  // nothing local (files, save, Stop, export) depends on this gate.
+  const control = await readRunControl(env, session.session_id);
+  if (control?.paused) {
+    return { ok: false, response: c.json({ error: { message: CLASS_PAUSED_MESSAGE, type: 'class_paused', control_revision: control.control_revision } }, 503) };
   }
 
   if (payload.lesson) {

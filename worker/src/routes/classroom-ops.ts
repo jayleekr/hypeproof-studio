@@ -16,6 +16,7 @@ import { bearer, signOpsCredential, verifyOpsCredential } from '../lib/tokens';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { bumpRateCounter, getActiveSession, getRoster } from '../lib/kv';
 import { readLesson } from '../lib/lesson-delivery';
+import { readRunControl } from '../lib/classroom-ops-control';
 import {
   ID_RE, MAX_SEATS, MAX_SYNC_BYTES, MAX_SYNC_EVENTS, OPS_FLAGS, OPS_PROTOCOL, OPS_SCHEMA_VERSION, PAIRING_TTL_MS,
   RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
@@ -197,6 +198,7 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
  (SELECT c.action||'|'||ct.state||'|'||ct.result_code||'|'||ct.updated_at||'|'||ct.command_id FROM ops_command_targets ct JOIN ops_commands c ON c.id=ct.command_id WHERE ct.class_run_id=s.class_run_id AND ct.seat_id=s.seat_id AND ct.seat_revision=s.seat_revision ORDER BY ct.updated_at DESC LIMIT 1) AS last_command
  FROM class_run_seats s LEFT JOIN ops_latest_state l ON l.class_run_id=s.class_run_id AND l.seat_id=s.seat_id AND l.seat_revision=s.seat_revision
  WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; pairing_open: number; conn: string | null; token: string | null; last_command: string | null }>;
+  const control = await readRunControl(c.env, run.class_run_id) ?? { paused: false, control_revision: 0 };
   const seats = rows.map((r) => {
     let state: SeatState = {}; try { state = JSON.parse(r.state_json ?? '{}'); } catch { state = {}; }
     const [grantId, connState, epoch, connExpires] = (r.conn ?? '|||').split('|');
@@ -210,6 +212,7 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
       seat_id: r.seat_id, seat_revision: r.seat_revision, student_id: r.student_id,
       entry_stage: entryStage(inputs), signal: signalOf(inputs.last_received_at, now), last_received_at: r.last_received_at,
       attention, reason, state_revision: r.state_revision ?? 0,
+      control_applied: !connected || signalOf(inputs.last_received_at, now) !== 'fresh' || state.sample?.value.control_revision === undefined ? 'unknown' : state.sample.value.control_revision === control.control_revision ? 'applied' : 'pending',
       connection: grantId ? { grant_id: grantId, state: connected ? 'active' : connState === 'active' ? 'expired' : connState, epoch: Number(epoch) } : null,
       token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: reported === undefined ? 'unknown' : reported === issueId ? 'matches_issue' : 'other_token' } : null,
       // The latest instructor action on this seat, in ledger terms: queued is not done.
@@ -226,6 +229,9 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
     // Scope note for the UI: this is the run snapshot, not the cumulative cohort roster.
     roster: { source: 'class_run_seats', total: seats.length },
     counts: { total: seats.length, blocked: count((s) => s.attention === 'blocked'), caution: count((s) => s.attention === 'caution'), unknown: count((s) => s.attention === 'unknown'), not_connected: count((s) => !s.connection || s.connection.state !== 'active'), runtime_ready: count((s) => s.entry_stage === 'runtime_ready') },
+    // Server admission is applied the moment `control` is saved. Device-side tool admission is per seat:
+    // applied / not yet / unknown (old app or no signal) are different answers.
+    control: { ...control, devices: { applied: count((s) => s.control_applied === 'applied'), pending: count((s) => s.control_applied === 'pending'), unknown: count((s) => s.control_applied === 'unknown') } },
     incidents: commonIncidents(seats), seats, seat_history: history,
   });
 });
@@ -301,7 +307,7 @@ classroomOpsApp.post('/sync', async (c) => {
   let sample: Record<string, unknown> | null = null;
   if (b.sample !== undefined) {
     const s = b.sample;
-    if (!s || typeof s !== 'object' || Object.keys(s).some((k) => !['idle_ms', 'runtime_status', 'observed_at'].includes(k)) || !Number.isSafeInteger(s.idle_ms) || s.idle_ms < 0 || (s.runtime_status !== undefined && !(RUNTIME_STATUSES as readonly string[]).includes(s.runtime_status)) || !Number.isSafeInteger(s.observed_at)) return c.json({ error: 'sample carries idle_ms, runtime_status and observed_at only', reason: 'schema' }, 400);
+    if (!s || typeof s !== 'object' || Object.keys(s).some((k) => !['idle_ms', 'runtime_status', 'observed_at', 'control_revision'].includes(k)) || (s.control_revision !== undefined && !(Number.isSafeInteger(s.control_revision) && s.control_revision >= 0)) || !Number.isSafeInteger(s.idle_ms) || s.idle_ms < 0 || (s.runtime_status !== undefined && !(RUNTIME_STATUSES as readonly string[]).includes(s.runtime_status)) || !Number.isSafeInteger(s.observed_at)) return c.json({ error: 'sample carries idle_ms, runtime_status, control_revision and observed_at only', reason: 'schema' }, 400);
     sample = s;
   }
 
@@ -350,8 +356,8 @@ classroomOpsApp.post('/sync', async (c) => {
   }
   const ack = contiguousAck(device.contiguous_seq, [...new Set([...existing.keys(), ...stored])].filter((s) => s > device!.contiguous_seq).sort((x, y) => x - y));
   // Unchanged, recently written state is not rewritten: the 5 s poll must not become a 5 s D1 write.
-  const due = !carried || now - latest!.last_received_at >= 45_000;
-  if (sample && (due || changed)) { state.sample = { boot_seen_at: device.first_seen_at, seq: 0, observed_at: sample.observed_at as number, received_at: now, actor: 'system', value: { idle_ms: sample.idle_ms, ...(sample.runtime_status ? { runtime_status: sample.runtime_status } : {}) } }; changed = true; }
+  const due = !carried || now - latest!.last_received_at >= 45_000 || (sample?.control_revision !== undefined && sample.control_revision !== state.sample?.value.control_revision);
+  if (sample && (due || changed)) { state.sample = { boot_seen_at: device.first_seen_at, seq: 0, observed_at: sample.observed_at as number, received_at: now, actor: 'system', value: { idle_ms: sample.idle_ms, ...(sample.runtime_status ? { runtime_status: sample.runtime_status } : {}), ...(sample.control_revision !== undefined ? { control_revision: sample.control_revision } : {}) } }; changed = true; }
   if (changed || due) {
     stmts.push(carried
       ? db.prepare('UPDATE ops_latest_state SET state_json=?,revision=revision+1,last_received_at=?,grant_id=? WHERE class_run_id=? AND seat_id=? AND revision=?').bind(JSON.stringify(state), now, g.id, g.class_run_id, g.seat_id, latest!.revision)
@@ -376,7 +382,9 @@ classroomOpsApp.post('/sync', async (c) => {
   return c.json({
     schema_version: OPS_SCHEMA_VERSION, server_time: now, connection_epoch: g.connection_epoch,
     ack: { boot_id: b.boot_id, contiguous_seq: ack.contiguous, missing: ack.missing }, quarantined, rejected,
-    commands: exchange.commands, receipt_acks: exchange.receipt_acks, lease: exchange.lease, poll_after_ms: exchange.commands.length ? 1000 : poll,
+    commands: exchange.commands, receipt_acks: exchange.receipt_acks, lease: exchange.lease,
+    // The device applies this to its own new-run admission and reports the revision it applied.
+    control: await readRunControl(c.env, g.class_run_id) ?? { paused: false, control_revision: 0 }, poll_after_ms: exchange.commands.length ? 1000 : poll,
   });
 });
 
@@ -522,4 +530,32 @@ classroomOpsTeacher.delete(root + '/commands/:id', async (c) => {
     audit(db, run.class_run_id, '', 'instructor', auth.payload.u, 'command_cancelled', { command_id: id }, now),
   ]);
   return c.json(await commandView(db, run.class_run_id, id, now));
+});
+
+// ── class-run control (R3): pause / resume new runs ─────────────────────────
+// Not a device command: the Service's own chat/messages admission enforces it from
+// the D1 primary (lib/chat-gate.ts). Devices additionally hold their local tool
+// admission and report the revision they applied.
+classroomOpsTeacher.put(root + '/control', async (c) => {
+  const auth = await teacher(c, 'pause'); if (auth instanceof Response) return auth;
+  const run = await loadRun(c, auth); if (run instanceof Response) return run;
+  if (!parseFlags(run.flags_json).ops_commands) return c.json({ error: 'commands are off for this run', reason: 'ops_commands_disabled' }, 403);
+  const b = await json(c), now = Date.now(), db = c.env.HPS_DB;
+  if (!b || typeof b.paused !== 'boolean' || !Number.isInteger(b.expected_control_revision)) return c.json({ error: 'paused and expected_control_revision required' }, 400);
+  const prior = await db.prepare('SELECT control_revision FROM class_run_control WHERE class_run_id=?').bind(run.class_run_id).first<{ control_revision: number }>();
+  if ((prior?.control_revision ?? 0) !== b.expected_control_revision) return c.json({ error: 'another instructor changed this; reload', reason: 'revision_conflict', control_revision: prior?.control_revision ?? 0 }, 409);
+  const next = b.expected_control_revision + 1;
+  const results = await db.batch([
+    prior
+      ? db.prepare('UPDATE class_run_control SET paused=?,control_revision=?,updated_by=?,updated_at=? WHERE class_run_id=? AND control_revision=?').bind(b.paused ? 1 : 0, next, auth.payload.u, now, run.class_run_id, b.expected_control_revision)
+      : db.prepare('INSERT INTO class_run_control(class_run_id,cohort_id,paused,control_revision,updated_by,updated_at) VALUES(?,?,?,?,?,?) ON CONFLICT(class_run_id) DO NOTHING').bind(run.class_run_id, run.cohort_id, b.paused ? 1 : 0, next, auth.payload.u, now),
+    db.prepare("INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,'','instructor',?,?,?,? WHERE (SELECT control_revision FROM class_run_control WHERE class_run_id=?)=? AND (SELECT updated_by FROM class_run_control WHERE class_run_id=?)=? AND (SELECT updated_at FROM class_run_control WHERE class_run_id=?)=?").bind(run.class_run_id, auth.payload.u, b.paused ? 'new_runs_paused' : 'new_runs_resumed', JSON.stringify({ control_revision: next }), now, run.class_run_id, next, run.class_run_id, auth.payload.u, run.class_run_id, now),
+  ]);
+  if (results[0]?.meta?.changes !== 1) return c.json({ error: 'another instructor changed this; reload', reason: 'revision_conflict' }, 409);
+  return c.json({
+    paused: b.paused, control_revision: next,
+    applies_to: 'new AI requests of this class run, enforced by the Service now',
+    // Said up front so the instructor does not read "paused" as "everything stopped".
+    not_applied_to: ['requests already running', 'local file editing, saving, Stop and export', 'devices that are offline or on an app without this feature until they report the revision'],
+  });
 });

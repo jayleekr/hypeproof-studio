@@ -677,3 +677,13 @@ CREATE TABLE IF NOT EXISTS ops_seat_leases (
  generation INTEGER NOT NULL DEFAULT 1,
  renewed_at INTEGER NOT NULL
 );
+
+-- ── migrations/0013-classroom-ops-control.sql (remote classroom operations R3, #751) ──
+CREATE TABLE IF NOT EXISTS class_run_control (
+ class_run_id TEXT PRIMARY KEY,
+ cohort_id TEXT NOT NULL,
+ paused INTEGER NOT NULL DEFAULT 0,
+ control_revision INTEGER NOT NULL DEFAULT 0,
+ updated_by TEXT NOT NULL,
+ updated_at INTEGER NOT NULL
+);

@@ -30,6 +30,8 @@ export async function localOps({ enabled = true, binding } = {}) {
   const guarded = { prepare(sql) { const st = inner.prepare(sql); if (!(failure && sql.includes(failure))) return st; const boom = () => { throw Error('injected storage failure'); }; return { bind() { return this; }, _run: boom, run: async () => boom(), first: async () => boom(), all: async () => boom() }; }, batch: (s) => inner.batch(s) };
   const env = createMockEnv({ withSession: false, withRoster: false, environment: 'dev', adminPassword: 'pw', env: { HPS_DB: guarded, ...(enabled ? { HPS_CLASSROOM_OPS: 'enabled' } : {}) } });
   const cohort = 'boah-dental-2026-a', profile = 'boah-dental-director-copyclone-2026-s1', run = 'ops-test-run';
+  // Mirror what persistSessionStart writes, so usage rows attribute to the run like production.
+  if (db) { db.prepare('INSERT OR IGNORE INTO cohorts(id,display_name) VALUES(?,?)').run(cohort, cohort); db.prepare('INSERT OR IGNORE INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES(?,?,?,?,?)').run(run, cohort, profile, new Date(Date.now() - 60000).toISOString(), new Date(Date.now() + 3600000).toISOString()); }
   await setRoster(env.HPS_KV, cohort, ['student-a', 'student-b', 'student-c', 'legacy-test-seat']);
   await startSession(env.HPS_KV, cohort, { session_id: run, profile_id: profile, starts_at: new Date(Date.now() - 60000).toISOString(), ends_at: new Date(Date.now() + 3600000).toISOString() });
   const teacher = async (name = 'teacher-a', ops = OPS_ALL, c = cohort, profiles = [profile]) => (await issueIssuer({ issuer: name, scopes: [{ cohort: c, profiles, ...(ops ? { ops } : {}) }] }, 1, TEST_SECRET)).token;

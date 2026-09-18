@@ -234,6 +234,10 @@ export const COMMAND_ACTIONS: Record<string, CommandSpec> = {
   retry_diagnostics: { capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 20_000 },
   refresh_connection: { capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 30_000 },
   restart_preview: { capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 30_000 },
+  // R3. State-changing: one in flight per seat, never auto-retried, and `reset_runtime` is one learner at a time.
+  // Neither clears history, deletes files, resets credentials or reboots anything — the device contract forbids it.
+  cancel_current_run: { capability: 'command', flag: 'ops_commands', mutating: true, maxTargets: MAX_SEATS, runMs: 20_000 },
+  reset_runtime: { capability: 'reset', flag: 'ops_commands', mutating: true, maxTargets: 1, runMs: 60_000 },
 };
 export const REASON_CODES = ['student_request', 'blocked_error', 'no_signal', 'preview_broken', 'class_management', 'other'] as const;
 export const TARGET_OPEN_STATES = ['queued', 'leased', 'accepted', 'running'] as const;
