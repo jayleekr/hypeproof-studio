@@ -32,6 +32,7 @@ import { classroomOpsTeacher, recordTokenIssue, revokeOpsGrantsForIssuer } from 
 import { OPS_CAPABILITIES } from "../lib/classroom-ops";
 import { classroomCollectOperator, classroomCollectTeacher } from "./classroom-collect";
 import { classroomReportsTeacher } from "./classroom-reports";
+import { classroomDeliveryOperator, classroomDeliveryTeacher } from "./classroom-delivery";
 import {nativeTrials} from './native-trials';
 import type { Env } from "../env";
 import { listProfiles, getProfile } from "../profiles";
@@ -144,6 +145,8 @@ admin.route("/", classroomTeacher);
 admin.route("/", classroomOpsTeacher);
 admin.route("/", classroomCollectTeacher);
 admin.route("/", classroomReportsTeacher);
+admin.route("/", classroomDeliveryTeacher);
+admin.route("/", classroomDeliveryOperator);
 // Operator-only (admin auth): deliberately absent from isIssuerAllowedEndpoint.
 admin.route("/", classroomCollectOperator);
 admin.route('/',nativeTrials);
