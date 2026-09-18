@@ -178,3 +178,11 @@ npm --prefix chalk run typecheck
 - 브라우저 e2e: ‘수업 마무리’가 주요 CTA가 아님, dry-run 결과의 전체 명단·사유·R2 0, 동의 후 실제 요청은 `요청함 · 기록 미도착`.
 - 회귀: worker/chalk/확장 `npm test`·typecheck·build, D1 시험(0011~0015 재실행) exit 0. route-registry 검사가 새 라우트 미등록을 잡아 traceability에 등록했다.
 - **NOT RUN:** 실제 R2·운영 D1, 실제 spool 디렉터리와 수업 중 활성 파일, 실제 오프라인 복귀, 공용 PC에서 이전 사용자 spool 비수집 실기(AT-23), 종료 후 24시간 창의 운영값(정책 확정 전 production 비활성), 삭제 요청 시 R2 snapshot·runner cache·링크까지의 연쇄 삭제(현재는 tombstone으로 재생성만 막는다), 로컬 snapshot 사본의 보존 기간(기존 spool 보존 결정에 따름).
+
+### R5 평가 초안·runner·검수 큐 · 2026-09-18
+
+대상: `worker/migrations/0016-classroom-report-jobs.sql`, `worker/src/lib/classroom-report.ts`(공통 측정 코어의 capability model·finding status·score/변환 거부를 그대로 사용), `routes/classroom-reports.ts`, `scripts/classroom-report-runner.mjs`, Chalk 검수 목록. 회차 flag `ops_reports` 기본 OFF. 서술 평가기는 기본 OFF이며 미설정 시 초안은 전 역량 ‘아직 충분히 보지 못함’이다.
+
+- `worker/test/classroom-ops-reports.test.mjs`(5 PASS): AT-29 검증된 입력에서만 job 생성·입력 없는 학생은 `missing`(0점 아님)·재실행 시 중복 0, 신규 6모델과 legacy 7축은 같은 입력이어도 별도 job/버전이며 변환 key·다른 모델 초안·legacy 필드 혼입은 quarantine, 근거 quote가 검증된 본인 입력에 없으면(다른 학생·AI 문장) quarantine, 근거 없는 observed 거부, score/rank key 거부, legacy는 fingerprint 필수·28 marker review 미완이면 승인 불가. AT-30 runner capability는 배치 단위(학생 연결·타 배치·승인 불가), lease 만료 후 takeover 시 옛 generation 결과 폐기, 완료 job 재결과 거부, 한 학생 격리가 다른 학생을 막지 않음, runner 스크립트는 같은 lease API 사용·평가기 예외 시 그 job만 failed·credential/경로 미로그. AT-37/38 보고서 구성이 `관찰된 행동→판단이 바뀐 과정→아직 충분히 보지 못함→다음 실험`이고 단일 수업에는 `최근 반복된 패턴` 없음(근거 있는 수업 2회 이상에서만), 제목·항목에 점수·순위·의존도·퍼센트 0, coverage가 complete가 아니면 ‘본 범위’ 절이 앞에 옴, 방법/세부 데이터는 별도 `method`. 검수는 열람 감사 실패 시 본문 비반환, 승인은 읽은 draft digest에 결속(CAS), `승인≠발송 승인` 명시.
+- 회귀는 아래 R6/R7 기록의 전체 실행에 포함.
+- **NOT RUN:** 실제 Mac에서의 장시간 runner·절전 복귀, legacy `skills/hain7-report` 엔진을 evaluator로 연결한 실제 PDF·지면 QA(이번 구현은 계약과 격리만; 엔진 호출 adapter는 미작성), LLM 서술 평가기(운영자가 evaluator version·호출 한도를 정하기 전 OFF), 누적 회차 패턴의 실제 서술, Chalk 검수 화면 브라우저 인수.
