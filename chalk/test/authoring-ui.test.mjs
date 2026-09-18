@@ -99,3 +99,30 @@ for (const forbidden of ['fetch(', 'localStorage', 'sessionStorage', 'innerHTML'
   assert.ok(!verdictFn.includes(forbidden), `renderVerdict 는 ${forbidden} 을 쓰지 않는다 — 그리기만 한다`);
 }
 console.log('authoring-ui: 관문 판정 렌더링 정적 락 통과 — 그리기만 하고 판정하지 않는다');
+// #1130 — **관문이 필수로 만든 칸은 접힌 곳 안에 있으면 안 된다.**
+//
+// 이 시험이 있는 이유: 선수 조건이 `<details>` 안에 있어서 강사가 펼치지 않으면 확정이
+// 422 로 막히는데 화면은 그 칸이 어디 있는지 알려주지 않았다. **사람보다 기계가 먼저
+// 걸렸다** — e2e/chalk-authoring/simple.mjs 가 정확히 그 함정에 빠졌고(#1128 에서 수정),
+// 원인을 찾던 중 대조군이 오염돼 맞는 가설을 한 번 기각할 뻔했다. 오염된 이유가 우연이
+// 아니라 화면 구조 자체였다.
+//
+// **문구가 아니라 구조를 본다.** summary 텍스트에 기대면 문구를 고칠 때마다 깨진다.
+// 대신 그 칸 앞의 `<details>`/`</details>` 를 세어 중첩 깊이를 구한다 — 원인을 찾을 때
+// 실제로 쓴 계산과 같다.
+const detailsDepthAt = (html, needle) => {
+  const i = html.indexOf(needle);
+  assert.ok(i > 0, `${needle} 를 찾지 못했다`);
+  const before = html.slice(0, i);
+  return (before.match(/<details\b/g) ?? []).length - (before.match(/<\/details>/g) ?? []).length;
+};
+// 관문이 확정의 필수 조건으로 요구하는 칸. 여기 더할 때는 관문도 함께 본다.
+for (const field of ['id="prerequisites"']) {
+  assert.equal(detailsDepthAt(authoring, field), 0,
+    `${field} 는 접힌 영역 밖에 있어야 한다 — 관문이 필수로 만든 칸이다`);
+}
+// 대조군: 접힌 채로 두는 것이 맞는 선택 설정은 실제로 접혀 있어야 한다.
+// (이 줄이 없으면 위 검사는 "details 가 아예 없다"로도 통과한다.)
+assert.ok(detailsDepthAt(authoring, 'id="assistant_name"') > 0,
+  '선택 설정은 접힌 채로 둔다 — 대조군이 없으면 위 검사가 헛돈다');
+console.log('authoring-ui: 필수 칸이 접힌 곳 밖에 있다 (#1130)');
