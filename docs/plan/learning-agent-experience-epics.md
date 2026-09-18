@@ -227,7 +227,7 @@ Lab 철학 개정안을 HC 측정 계약과 #800의 수업/구독/기관 이용�
 
 ## E5 원격 수업 운영 구현 순서 · 2026-09-18
 
-사용자가 요청한 다수 PC 수업 관제의 PRD는 [기존 classroom-admin 확장](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18), UX는 [기존 classroom-design](../requirements/classroom-design.md), 인수는 [AT-15~34](../testing/classroom-admin.md#remote-classroom-tests)다. 본 절은 실행 분해이며 기존 #751/#732/#673/#647/#1020을 재사용한다. 전체 연구/계획 정리는 완료해도 기능은 미구현이다. 현재 `next-work`의 ready는 작업 가능성이지 요구 충족 판정이 아니다.
+사용자가 요청한 다수 PC 수업 관제의 PRD는 [기존 classroom-admin 확장](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18), UX는 [기존 classroom-design](../requirements/classroom-design.md), 인수는 [AT-15~34](../testing/classroom-admin.md#remote-classroom-tests)다. 본 절은 실행 분해이며 기존 #751/#732/#673/#647/#1020을 재사용한다. 2026-09-18 기준 R0~R7의 Service·Chalk·확장 구현과 합성 계정 검증이 stacked branch(`feat/751-ops-r1-service` … `feat/751-ops-r7-regression`)에 있다. 모든 기능은 기본 OFF이고 실기·운영 gate는 열지 않았다(테스트 문서 실행 기록 참고). 현재 `next-work`의 ready는 작업 가능성이지 요구 충족 판정이 아니다.
 
 ### 의존성과 PR 크기
 

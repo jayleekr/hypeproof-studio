@@ -67,7 +67,7 @@ npm --prefix chalk run typecheck
 
 ## 원격 수업 운영 인수 계획 · 2026-09-18
 
-[확장 PRD](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18)의 계약을 검사한다. 아래 **AT-15~34는 모두 NOT RUN**이다. 이전 classroom test PASS를 새 원격 기능의 증거로 재사용하지 않는다. 합성 강사 A/B·학생 A/B·다른 반·구버전 앱·동일 PC 다른 사용자·다중 창을 고정 fixture로 둔다. 시간·fault·동시 요청을 제어하고 양성/음성 대조를 같은 환경에서 실행한다.
+[확장 PRD](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18)의 계약을 검사한다. 아래 표는 인수 **계획**이다. 실행된 범위는 하단 ‘원격 운영 실행 기록’에만 있으며, 거기 없는 계층(실제 Mac/Windows Studio·SDK·학교망·운영 D1/R2·실제 발송)은 **NOT RUN**이다. 이전 classroom test PASS를 새 원격 기능의 증거로 재사용하지 않는다. 합성 강사 A/B·학생 A/B·다른 반·구버전 앱·동일 PC 다른 사용자·다중 창을 고정 fixture로 둔다. 시간·fault·동시 요청을 제어하고 양성/음성 대조를 같은 환경에서 실행한다.
 
 | Test ID | 제품 REQ | 조건 / 깨뜨릴 가정 | 합격 기준 | 실행 계층 |
 |---|---|---|---|---|
@@ -193,3 +193,10 @@ npm --prefix chalk run typecheck
 
 - `worker/test/classroom-ops-delivery.test.mjs`(7 PASS): AT-31 수신자는 운영자 import만(강사 Bearer 불가, 회차 명단 밖·갤러리 인물 거부, 형제는 별도 행, 강사에게는 마스킹), 보내지 않는 학생도 사유와 함께 표시, 승인은 표시된 scope hash에 결속·검수 권한과 발송 권한 분리, 발신 계정 미설정 시 live 거부·dry-run은 외부 발송 0, 승인 뒤 수신자 주소 변경/새 보고서 승인 → `approval_stale`로 발송 0, 원장 행을 adapter 호출 전에 기록, timeout=`send_unknown`이며 재요청해도 재발송 0, 운영자가 provider 확인 근거와 함께 resolve, `provider_accepted`≠`delivered`, 중복 webhook 흡수, 늦은 accepted가 delivered를 되돌리지 않음, 열람(opened) 상태 없음, 메시지에는 불투명 링크만, 링크는 no-store·만료·철회·조회 감사·token 미저장(hash만), 거절은 `failed`.
 - **NOT RUN / 운영 gate:** 실제 발신 계정·provider sandbox·실제 수신자, 반송/전달 webhook의 provider 서명 검증(현재 이벤트 수신은 운영자 인증 경로), Kakao/SMS, QR, PDF 첨부·지면 QA, 링크 열람자의 수신자 본인 확인, Chalk 발송 화면 브라우저 인수.
+
+### R7 회귀·rollback·합성 부하 · 2026-09-18
+
+- `worker/test/classroom-ops-regression.test.mjs`(4 PASS): AT-32 전역 스위치 OFF에서 신규 경로 23개 전부 404, 기존 토큰 발급·`/v1/profile`·45초 heartbeat(`/v1/trace/event`)·선택 공유·토큰 폐기 동작 유지, 신규 테이블 25개 행 0. 스위치 ON·회차 flag 전부 OFF(기본)에서 pairing·명령·일시정지·회수 각각 거부. AT-33 commands flag rollback 시 즉시 전달 중지·대기 명령은 TTL 만료·완료 receipt와 audit 조회 가능·관측은 계속. AT-25/34 **합성**: 100좌석×12 poll, 20% 단절 후 복귀, 30좌석 일괄 진단, 강사 2명 동시 조회 — 매 조회 명단 100석 유지, 좌석 간 명령/이벤트 교차 0, 12 poll 동안 상태 쓰기 20회(이벤트가 있던 좌석만; 무변화 poll은 쓰기 0), 이 Mac의 Node+SQLite에서 sync p95 13.8ms·status p95 1.4ms.
+- 위 수치는 Workers CPU·D1 지연·학교망이 아니다. PRD의 p95 15초/10초/채팅 +5% 목표는 **측정되지 않았다.**
+- 최종 회귀(스택 끝, Mac arm64, Node 22.22.1): `npm --prefix worker test`, worker typecheck, `test:classroom-ops:d1`, `test:classroom:d1`, `npm --prefix chalk test`·typecheck, 확장 `npm test`·typecheck·`build:extension`, `npm --prefix e2e run test:classroom`·`test:classroom-ops` 모두 exit 0.
+- **NOT RUN (R7의 실기 gate 전부):** 실제 Windows/macOS Studio 빌드·설치(전체 build는 CLAUDE.md상 별도 승인 필요), 구버전 v0.1.56 설치 앱과의 혼재, staging/운영 D1 migration 0011~0017 적용, 학교망 1곳·TLS proxy, 100명 실부하와 기존 채팅 p95 비교, 성인 canary→30명 pilot, 200% 확대·Windows 브라우저.
