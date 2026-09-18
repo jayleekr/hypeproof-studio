@@ -16,8 +16,15 @@
 //
 //   npm --prefix e2e run test:chalk-step-keys
 //
-// ⚠️ **PR CI 는 이 러너를 부르지 않는다**(브라우저 잡이 없다). 저작 화면을 바꾸면 사람이
-// 직접 돌려야 한다 — 이 결함이 처음 새어 나간 경로가 정확히 그것이었다.
+// 이 러너는 자동 검사가 돈다 — `.github/workflows/dental-reference.yml` 의 `reference-browser`
+// 잡이 chromium 을 깔고 **명시된 스크립트만** 부른다.
+//
+// ⚠️ **폴더에 있다고 자동으로 도는 것이 아니다.** 이 폴더의 러너 중 무엇이 검사 대상인지는
+// 그 워크플로에 적힌 목록이 전부다. 새 러너를 여기 만들면 **거기 한 줄을 더해야** 돈다.
+// 실제로 그 목록에 빠져 있던 `simple.mjs` 가 #1115 에 깨진 채로 머지됐고 열흘 뒤에 발견됐다.
+// 그때 조사한 사람은 반대로 `pr-ci.yml` 만 보고 "이 계열은 아예 안 돈다"고 단정했는데 그것도
+// 틀렸다 — 절반은 이미 돌고 있었다. **어디까지가 검사 대상인지 한 곳에 안 적혀 있는 것이
+// 양쪽 오해의 같은 원인이다.**
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
