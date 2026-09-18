@@ -47,6 +47,17 @@ assert.equal(seen.u,'https://synthetic.invalid/v1/rehearsal/redeem');
 assert(!seen.u.includes(TICKET),'교환권이 URL 에 실렸다');
 assert.equal(JSON.parse(seen.init.body).ticket,TICKET);
 
+// 멱등 창(#1131 §2.1) — 같은 교환권을 다시 내면 서버가 붙여 둔 같은 자격을 돌려준다.
+// 앱은 그것을 첫 교환과 똑같이 취급해야 한다. 재시도를 앱이 막으면 네트워크가 한 번
+// 튄 강사가 수업 직전에 링크를 영영 못 쓴다. 여기서 고정해 두는 이유다.
+let calls=0;
+const idem=async()=>redeemRehearsalTicket({proxyUrl:'https://synthetic.invalid/v1',ticket:TICKET,
+  fetchImpl:async()=>{calls++;return{ok:true,status:200,json:async()=>({token:'same-student-token'})};}});
+const first=await idem(), second=await idem();
+assert.deepEqual(first,{ok:true,token:'same-student-token'});
+assert.deepEqual(second,first,'같은 교환권 재제출이 첫 교환과 다르게 취급됐다');
+assert.equal(calls,2,'앱이 재시도를 삼켜 Service 에 내지 않았다');
+
 // 서버에 닿지 못한 것을 교환권 탓으로 읽지 않는다.
 const net=await redeemRehearsalTicket({proxyUrl:'https://synthetic.invalid/v1',ticket:TICKET,
   fetchImpl:async()=>{throw new Error('offline');}});
