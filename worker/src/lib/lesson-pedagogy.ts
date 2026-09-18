@@ -263,7 +263,8 @@ export function blockingPedagogyFindings(findings: readonly PedagogyFinding[]): 
 //    아동·청소년을 전제로 쓰였는데 studio의 실제 범위에는 성인 전문직 수업(치과의사
 //    홈페이지 과정)이 있다. 지금 켜면 성인 수업이 아동용 조항에 걸려 통째로 막힌다.
 //    `audience` 문자열만으로는 부족하고 명시적 층 구분 값이 필요하다 — 정확도 문제가
-//    아니라 정합성 문제다. (CR-EDU-08 "교육 원칙을 공통층/대상별층 2층으로 분리")
+//    아니라 정합성 문제다. (커리큘럼 위키 쪽 요구 `CR-EDU-08` "교육 원칙을 공통층/
+//    대상별층 2층으로 분리" — **studio 레지스트리에는 없는 ID다.** 이 repo에서 찾지 말 것.)
 //
 // 새 필드가 생겨야 열리는 것들(우선순위 순): steps[].prohibited_moves[] (관문2-4,
 // 유일한 "필수. 없으면 미완성" 항목) · steps[].duration_min + session.duration_min
