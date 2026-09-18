@@ -3,6 +3,8 @@
 export type LLMProvider = "gemini" | "anthropic" | "openai" | "glm";
 
 export interface Env {
+  /** #751 — remote classroom operations. 'enabled' opts in; migration 0011 must precede activation. Per-run flags still default OFF. */
+  HPS_CLASSROOM_OPS?: string;
   /** Explicit opt-in; migrations and approved contracts must precede activation. */
   HPS_ACCESS_CONTRACTS?: string;
   /** Exact SHA-256 digests of approved sales publications; never provider prices. */

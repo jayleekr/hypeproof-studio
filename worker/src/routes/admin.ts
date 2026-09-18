@@ -28,6 +28,8 @@ import { Hono } from "hono";
 import { authoring } from "./authoring";
 import { accessAdmin } from './access';
 import { classroomTeacher } from "./classroom";
+import { classroomOpsTeacher, recordTokenIssue, revokeOpsGrantsForIssuer } from "./classroom-ops";
+import { OPS_CAPABILITIES } from "../lib/classroom-ops";
 import {nativeTrials} from './native-trials';
 import type { Env } from "../env";
 import { listProfiles, getProfile } from "../profiles";
@@ -137,6 +139,7 @@ admin.use("*", async (c, next) => {
 admin.route("/", authoring);
 admin.route('/', accessAdmin);
 admin.route("/", classroomTeacher);
+admin.route("/", classroomOpsTeacher);
 admin.route('/',nativeTrials);
 
 // ---- cohort list ------------------------------------------------------------
@@ -289,6 +292,10 @@ admin.post("/tokens/issue", async (c) => {
     hours,
     c.env.HPS_SIGNING_SECRET,
   );
+  // #751 — issuance metadata (never the token) so the board can tell "issued"
+  // from "verified by the app". No-op unless the operations switch is on; a
+  // ledger failure must not fail the mint.
+  await recordTokenIssue(c.env, { jti, cohort, student: u, profile, issuedBy: grantOwner, hours });
   if(body.native_trial){try{await createNativeGrant(c.env,await verify(token,c.env.HPS_SIGNING_SECRET),grantOwner);}catch(error){if(error instanceof Error&&error.message==='trial_reissue_conflict')return c.json({error:'trial_reissue_conflict'},409);throw error;}}
   return c.json({
     ok: true,
@@ -329,6 +336,15 @@ admin.post("/tokens/revoke", async (c) => {
     },
     ttl,
   );
+  // #751 — KV revocation can lag other locations by a minute. Operations
+  // grants minted under this issuer are revoked in the D1 primary, and the
+  // response only says ok once that commit succeeded. Retrying is idempotent.
+  try {
+    await revokeOpsGrantsForIssuer(c.env, body.jti);
+  } catch (err) {
+    console.error("ops grant revocation failed:", err);
+    return c.json({ ok: false, jti: body.jti, kv_revoked: true, error: "operations grants not revoked — retry this revocation" }, 500);
+  }
   return c.json({ ok: true, jti: body.jti, record: rev, ttl_seconds: ttl });
 });
 
@@ -466,11 +482,18 @@ admin.post("/issuers", async (c) => {
         return c.json({ error: `scope.max_session_hours must be an integer 1..${MAX_SESSION_HOURS}` }, 400);
       }
     }
+    // #751 — operations capabilities are opt-in and allowlisted; an unknown
+    // name is a 400, never silently dropped into a broader grant.
+    const ops = (s as { ops?: unknown }).ops;
+    if (ops !== undefined && (!Array.isArray(ops) || ops.length > OPS_CAPABILITIES.length || ops.some((o) => !(OPS_CAPABILITIES as readonly unknown[]).includes(o)) || new Set(ops).size !== ops.length)) {
+      return c.json({ error: `scope.ops must be a unique subset of [${OPS_CAPABILITIES.join(", ")}]` }, 400);
+    }
     scopes.push({
       cohort: s.cohort,
       profiles: s.profiles,
       max_hours: maxHours,
       ...(canStart ? { can_start_session: true, max_session_hours: maxSession } : {}),
+      ...(Array.isArray(ops) && ops.length ? { ops: ops as string[] } : {}),
     });
   }
 
@@ -496,6 +519,7 @@ admin.post("/issuers", async (c) => {
           if (m.can_start_session !== true) return false;
           if ((s.max_session_hours ?? 4) > (m.max_session_hours ?? 4)) return false;
         }
+        if (!(s.ops ?? []).every((o) => m.ops?.includes(o) ?? false)) return false;
         return true;
       });
       if (!covered) {

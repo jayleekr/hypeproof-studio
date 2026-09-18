@@ -1964,6 +1964,33 @@
       ]
     },
     {
+      "id": "ST-IMP-CLASSROOM-OPS",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CLASSROOM-ADMIN",
+        "ST-DES-CLASSROOM-ADMIN",
+        "ST-TEST-CLASSROOM-ADMIN"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/classroom-ops.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-ops.ts"
+        },
+        {
+          "path": "worker/migrations/0011-classroom-ops.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-d1.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-DES-STUDIO-NATIVE-TRIAL-UX",
       "stage": "design",
       "owner": "jayleekr",

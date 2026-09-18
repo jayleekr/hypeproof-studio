@@ -1,0 +1,363 @@
+// Remote classroom operations (#751, R1): run roster snapshot, pairing,
+// operations connection, observation sync and the instructor status read.
+//
+// Boundaries (docs/requirements/classroom-admin.md, 2026-09-18 section):
+//  - The Service owns every write. Chalk only forwards.
+//  - Authority is read from the D1 primary on every request: grant state,
+//    seat binding, epoch and the per-run flag. KV liveness is not consulted.
+//  - Nothing here reads session logs, prompts or files, and no response
+//    carries a student token or a pairing ticket after the mint response.
+//  - A 2xx from /sync means "stored and acked up to `ack.contiguous_seq`".
+//    It never means a command ran or that the evidence is complete.
+import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import type { Env } from '../env';
+import { bearer, signOpsCredential, verifyOpsCredential } from '../lib/tokens';
+import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
+import { bumpRateCounter, getActiveSession, getRoster } from '../lib/kv';
+import { readLesson } from '../lib/lesson-delivery';
+import {
+  ID_RE, MAX_SEATS, MAX_SYNC_BYTES, MAX_SYNC_EVENTS, OPS_FLAGS, OPS_PROTOCOL, OPS_SCHEMA_VERSION, PAIRING_TTL_MS,
+  RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
+  newPairingTicket, normalizeTicket, parseFlags, parseLesson, pollAfterMs, sha256Hex, shouldApply, signalOf,
+  stepDisposition, validateEvent, type OpsCapability, type SeatState,
+} from '../lib/classroom-ops';
+
+type Db = Env['HPS_DB'];
+type TeacherEnv = { Bindings: Env; Variables: { teacher: IssuerAuthz } };
+type RunRow = { class_run_id: string; cohort_id: string; profile_id: string; flags_json: string; lesson_json: string; roster_revision: number; starts_at: number; ends_at: number; ended_at?: string | null };
+type SeatRow = { seat_id: string; seat_revision: number; student_id: string };
+type GrantRow = { id: string; kind: string; class_run_id: string; cohort_id: string; profile_id: string; seat_id: string; seat_revision: number; student_id: string; state: string; connection_epoch: number; device_registration_id: string | null; expires_at: number; issuer_id: string; issuer_jti: string | null };
+
+export const opsEnabled = (env: Env) => env.HPS_CLASSROOM_OPS === 'enabled';
+const json = async (c: any) => { try { return await c.req.json(); } catch { return null; } };
+const audit = (db: Db, run: string, seat: string, actorKind: string, actorId: string, action: string, detail: unknown, at: number) =>
+  db.prepare('INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) VALUES(?,?,?,?,?,?,?)').bind(run, seat, actorKind, actorId, action, JSON.stringify(detail), at);
+
+// ── hooks called from routes/admin.ts ───────────────────────────────────────
+
+export async function recordTokenIssue(env: Env, t: { jti: string; cohort: string; student: string; profile: string; issuedBy: string; hours: number }): Promise<void> {
+  if (!opsEnabled(env)) return;
+  const at = Date.now();
+  try {
+    await env.HPS_DB.batch([
+      env.HPS_DB.prepare('INSERT OR IGNORE INTO ops_token_issues(jti,cohort_id,student_id,profile_id,issued_by,issued_at,expires_at) VALUES(?,?,?,?,?,?,?)').bind(t.jti, t.cohort, t.student, t.profile, t.issuedBy, at, at + t.hours * 3_600_000),
+      // A re-issued learning token is a new login generation for that student:
+      // commands addressed to the old epoch must not run afterwards.
+      env.HPS_DB.prepare("UPDATE ops_grants SET connection_epoch=connection_epoch+1,revision=revision+1 WHERE kind='connection' AND state='active' AND cohort_id=? AND student_id=?").bind(t.cohort, t.student),
+    ]);
+  } catch (err) {
+    console.error('ops token issue ledger unavailable:', err);
+  }
+}
+
+/** Throws on storage failure: the caller must not report the revocation as complete. */
+export async function revokeOpsGrantsForIssuer(env: Env, issuerJti: string): Promise<void> {
+  if (!opsEnabled(env)) return;
+  await env.HPS_DB.prepare("UPDATE ops_grants SET state='revoked',revoked_at=?,revoked_reason='issuer_revoked',revision=revision+1 WHERE issuer_jti=? AND state IN ('issued','active')").bind(Date.now(), issuerJti).run();
+}
+
+// ── instructor surface (/admin/cohorts/:cohort/classroom/runs/…) ────────────
+
+export const classroomOpsTeacher = new Hono<TeacherEnv>();
+const root = '/cohorts/:cohort/classroom/runs/:run';
+const limit = bodyLimit({ maxSize: MAX_SYNC_BYTES, onError: (c) => c.json({ error: 'request too large' }, 413) });
+classroomOpsTeacher.use(root, limit);
+classroomOpsTeacher.use(root + '/*', limit);
+
+async function teacher(c: any, capability: OpsCapability): Promise<IssuerAuthz | Response> {
+  c.header('cache-control', 'no-store');
+  if (!opsEnabled(c.env)) return c.json({ error: 'classroom operations are not enabled', reason: 'ops_disabled' }, 404);
+  if (!ID_RE.test(c.req.param('cohort')) || !ID_RE.test(c.req.param('run'))) return c.json({ error: 'invalid cohort or run id' }, 400);
+  const auth = await authorizeIssuerForOps(c, c.req.param('cohort'), capability);
+  if (auth instanceof Response) return auth;
+  if (!auth) return c.json({ error: 'instructor Bearer required' }, 401);
+  return auth;
+}
+async function loadRun(c: any, auth: IssuerAuthz): Promise<RunRow | Response> {
+  const run = await c.env.HPS_DB.prepare('SELECT o.*,s.ended_at FROM class_run_ops o LEFT JOIN sessions s ON s.id=o.class_run_id WHERE o.class_run_id=? AND o.cohort_id=?').bind(c.req.param('run'), c.req.param('cohort')).first() as RunRow | null;
+  if (!run) return c.json({ error: 'class run not configured', reason: 'run_not_found' }, 404);
+  if (!auth.scope.profiles.includes(run.profile_id)) return c.json({ error: 'issuer not scoped to this run profile', reason: 'profile_scope' }, 403);
+  return run;
+}
+
+// PUT — create or revise the run: flags, pinned lesson and the seat snapshot.
+classroomOpsTeacher.put(root, async (c) => {
+  const auth = await teacher(c, 'manage'); if (auth instanceof Response) return auth;
+  const cohort = c.req.param('cohort')!, runId = c.req.param('run')!, b = await json(c), now = Date.now();
+  if (!b || !Number.isInteger(b.expected_roster_revision) || !Array.isArray(b.seats) || b.seats.length > MAX_SEATS) return c.json({ error: `expected_roster_revision and seats[] (≤${MAX_SEATS}) required` }, 400);
+  const seats = new Map<string, string>(), students = new Set<string>();
+  for (const s of b.seats) {
+    if (!s || !ID_RE.test(s.seat_id) || !ID_RE.test(s.student_id) || seats.has(s.seat_id) || students.has(s.student_id)) return c.json({ error: 'each seat needs a unique seat_id and student_id' }, 400);
+    seats.set(s.seat_id, s.student_id); students.add(s.student_id);
+  }
+  const flags: Record<string, boolean> = {};
+  if (b.flags !== undefined) {
+    if (!b.flags || typeof b.flags !== 'object' || Object.keys(b.flags).some((k) => !(OPS_FLAGS as readonly string[]).includes(k) || typeof b.flags[k] !== 'boolean')) return c.json({ error: `flags must be booleans within [${OPS_FLAGS.join(', ')}]` }, 400);
+    Object.assign(flags, b.flags);
+  }
+  if (b.lesson !== undefined && (!b.lesson || !ID_RE.test(b.lesson.course_id) || typeof b.lesson.version !== 'string' || Object.keys(b.lesson).some((k) => !['course_id', 'version'].includes(k)))) return c.json({ error: 'lesson needs course_id and version only; steps come from the frozen version' }, 400);
+  // The run is an existing class session, never a second calendar.
+  const active = await getActiveSession(c.env.HPS_KV, cohort);
+  const session = active?.session_id === runId ? { profile_id: active.profile_id, starts_at: active.starts_at, ends_at: active.ends_at }
+    : await c.env.HPS_DB.prepare('SELECT profile_id,starts_at,ends_at FROM sessions WHERE id=? AND cohort_id=?').bind(runId, cohort).first<{ profile_id: string; starts_at: string; ends_at: string }>();
+  if (!session) return c.json({ error: 'no class session with this id in the cohort', reason: 'session_not_found' }, 404);
+  if (!auth.scope.profiles.includes(session.profile_id)) return c.json({ error: 'issuer not scoped to this run profile', reason: 'profile_scope' }, 403);
+  // Seats come from the cohort roster; a run cannot invent a student.
+  const roster = await getRoster(c.env.HPS_KV, cohort);
+  const outside = [...students].filter((u) => !roster?.users.includes(u));
+  if (outside.length) return c.json({ error: 'students missing from the cohort roster', reason: 'not_in_roster', students: outside.slice(0, 20) }, 409);
+
+  // Step ids are read from the frozen authoring version, never from the request:
+  // a board step must be one the confirmed lesson actually defines.
+  let lesson: unknown = {};
+  if (b.lesson !== undefined) {
+    const frozen = await readLesson(c.env, cohort, b.lesson.course_id, b.lesson.version, session.profile_id);
+    if (!frozen) return c.json({ error: 'no confirmed lesson version with this id for the run profile', reason: 'lesson_not_found' }, 409);
+    lesson = { course_id: frozen.course_id, version: frozen.version, sha256: frozen.sha256, steps: frozen.content.steps.map((x) => x.id) };
+  }
+  const db = c.env.HPS_DB, prior = await db.prepare('SELECT * FROM class_run_ops WHERE class_run_id=?').bind(runId).first() as RunRow | null;
+  if (prior && prior.cohort_id !== cohort) return c.json({ error: 'run belongs to another cohort' }, 409);
+  if ((prior?.roster_revision ?? 0) !== b.expected_roster_revision) return c.json({ error: 'roster changed; reload before saving', reason: 'revision_conflict', roster_revision: prior?.roster_revision ?? 0 }, 409);
+  const current = ((await db.prepare('SELECT seat_id,seat_revision,student_id FROM class_run_seats WHERE class_run_id=? AND replaced_at IS NULL').bind(runId).all()).results ?? []) as SeatRow[];
+  const next = b.expected_roster_revision + 1, writer = crypto.randomUUID(), who = auth.payload.u;
+  const mergedFlags = { ...parseFlags(prior?.flags_json), ...flags };
+  const lessonJson = b.lesson === undefined ? (prior?.lesson_json ?? '{}') : JSON.stringify(lesson);
+  // Every later statement is conditional on this writer winning the CAS:
+  // D1 batches are atomic but a zero-row UPDATE does not abort them.
+  const won = '(SELECT roster_writer FROM class_run_ops WHERE class_run_id=?)=?';
+  const stmts = [prior
+    ? db.prepare('UPDATE class_run_ops SET roster_revision=?,roster_writer=?,flags_json=?,lesson_json=?,profile_id=?,starts_at=?,ends_at=?,updated_at=? WHERE class_run_id=? AND roster_revision=?').bind(next, writer, JSON.stringify(mergedFlags), lessonJson, session.profile_id, Date.parse(session.starts_at), Date.parse(session.ends_at), now, runId, b.expected_roster_revision)
+    : db.prepare('INSERT INTO class_run_ops(class_run_id,cohort_id,profile_id,flags_json,lesson_json,roster_revision,roster_writer,starts_at,ends_at,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(class_run_id) DO NOTHING').bind(runId, cohort, session.profile_id, JSON.stringify(mergedFlags), lessonJson, next, writer, Date.parse(session.starts_at), Date.parse(session.ends_at), who, now, now)];
+  const changes: Array<{ seat_id: string; from?: string; to?: string }> = [];
+  for (const old of current) {
+    const to = seats.get(old.seat_id);
+    if (to === old.student_id) continue;
+    changes.push({ seat_id: old.seat_id, from: old.student_id, to });
+    stmts.push(db.prepare(`UPDATE class_run_seats SET replaced_at=?,replaced_reason=? WHERE class_run_id=? AND seat_id=? AND seat_revision=? AND ${won}`).bind(now, to ? 'student_changed' : 'seat_removed', runId, old.seat_id, old.seat_revision, runId, writer));
+    // The previous student's grants, pending tickets and board state never pass to the next one.
+    stmts.push(db.prepare(`UPDATE ops_grants SET state='revoked',revoked_at=?,revoked_reason='seat_replaced',revision=revision+1 WHERE class_run_id=? AND seat_id=? AND seat_revision=? AND state IN ('issued','active') AND ${won}`).bind(now, runId, old.seat_id, old.seat_revision, runId, writer));
+  }
+  for (const [seatId, student] of seats) {
+    const old = current.find((x) => x.seat_id === seatId);
+    if (old?.student_id === student) continue;
+    if (!old) changes.push({ seat_id: seatId, to: student });
+    stmts.push(db.prepare(`INSERT INTO class_run_seats(class_run_id,seat_id,seat_revision,student_id,roster_revision,changed_by,created_at) SELECT ?,?,COALESCE((SELECT MAX(seat_revision) FROM class_run_seats WHERE class_run_id=? AND seat_id=?),0)+1,?,?,?,? WHERE ${won}`).bind(runId, seatId, runId, seatId, student, next, who, now, runId, writer));
+  }
+  stmts.push(db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,'','instructor',?,'run_configured',?,? WHERE ${won}`).bind(runId, who, JSON.stringify({ roster_revision: next, flags: mergedFlags, changes: changes.slice(0, 50) }), now, runId, writer));
+  try { await db.batch(stmts); } catch (err) { console.error('ops run configure failed:', err); return c.json({ error: 'run not saved; nothing was applied', reason: 'storage' }, 503); }
+  const saved = await db.prepare('SELECT roster_revision,roster_writer FROM class_run_ops WHERE class_run_id=?').bind(runId).first<{ roster_revision: number; roster_writer: string }>();
+  if (saved?.roster_writer !== writer) return c.json({ error: 'roster changed; reload before saving', reason: 'revision_conflict', roster_revision: saved?.roster_revision ?? 0 }, 409);
+  return c.json({ class_run_id: runId, roster_revision: next, flags: mergedFlags, seats: seats.size, changes }, prior ? 200 : 201);
+});
+
+// POST pairings — one single-use ticket for one seat at the current roster revision.
+classroomOpsTeacher.post(root + '/pairings', async (c) => {
+  const auth = await teacher(c, 'manage'); if (auth instanceof Response) return auth;
+  const run = await loadRun(c, auth); if (run instanceof Response) return run;
+  if (!parseFlags(run.flags_json).ops_observe) return c.json({ error: 'observation is off for this run', reason: 'ops_observe_disabled' }, 403);
+  const b = await json(c), now = Date.now();
+  if (!b || !ID_RE.test(b.seat_id) || !Number.isInteger(b.roster_revision)) return c.json({ error: 'seat_id and roster_revision required' }, 400);
+  if (b.roster_revision !== run.roster_revision) return c.json({ error: 'roster changed; reload before pairing', reason: 'revision_conflict', roster_revision: run.roster_revision }, 409);
+  const seat = await c.env.HPS_DB.prepare('SELECT seat_id,seat_revision,student_id FROM class_run_seats WHERE class_run_id=? AND seat_id=? AND replaced_at IS NULL').bind(run.class_run_id, b.seat_id).first<SeatRow>();
+  if (!seat) return c.json({ error: 'seat is not in this run', reason: 'seat_not_found' }, 404);
+  const open = await c.env.HPS_DB.prepare("SELECT count(*) AS n FROM ops_grants WHERE class_run_id=? AND kind='pairing' AND state='issued' AND expires_at>?").bind(run.class_run_id, now).first<{ n: number }>();
+  if ((open?.n ?? 0) >= MAX_SEATS * 2) return c.json({ error: 'too many open pairing tickets' }, 429);
+  const ticket = newPairingTicket(), id = crypto.randomUUID(), expires = now + PAIRING_TTL_MS;
+  await c.env.HPS_DB.batch([
+    // A new ticket supersedes the seat's unused ones: one paper slip per seat is live at a time.
+    c.env.HPS_DB.prepare("UPDATE ops_grants SET state='revoked',revoked_at=?,revoked_reason='superseded',revision=revision+1 WHERE class_run_id=? AND seat_id=? AND kind='pairing' AND state='issued'").bind(now, run.class_run_id, seat.seat_id),
+    c.env.HPS_DB.prepare("INSERT INTO ops_grants(id,kind,class_run_id,cohort_id,profile_id,seat_id,seat_revision,student_id,secret_hash,state,issuer_id,issuer_jti,created_at,expires_at) VALUES(?,'pairing',?,?,?,?,?,?,?,'issued',?,?,?,?)").bind(id, run.class_run_id, run.cohort_id, run.profile_id, seat.seat_id, seat.seat_revision, seat.student_id, await sha256Hex(normalizeTicket(ticket)), auth.payload.u, auth.payload.jti ?? null, now, expires),
+    audit(c.env.HPS_DB, run.class_run_id, seat.seat_id, 'instructor', auth.payload.u, 'pairing_issued', { grant_id: id, expires_at: expires }, now),
+  ]);
+  return c.json({ pairing_id: id, seat_id: seat.seat_id, ticket, expires_at: expires, single_use: true }, 201);
+});
+
+classroomOpsTeacher.delete(root + '/grants/:grant', async (c) => {
+  const auth = await teacher(c, 'manage'); if (auth instanceof Response) return auth;
+  const run = await loadRun(c, auth); if (run instanceof Response) return run;
+  const now = Date.now();
+  const r = await c.env.HPS_DB.prepare("UPDATE ops_grants SET state='revoked',revoked_at=?,revoked_reason='instructor_revoked',revision=revision+1 WHERE id=? AND class_run_id=? AND state IN ('issued','active') RETURNING id,seat_id").bind(now, c.req.param('grant'), run.class_run_id).first<{ id: string; seat_id: string }>();
+  if (!r) return c.json({ error: 'grant not found or already closed' }, 404);
+  await audit(c.env.HPS_DB, run.class_run_id, r.seat_id, 'instructor', auth.payload.u, 'grant_revoked', { grant_id: r.id }, now).run();
+  return c.json({ revoked: true, grant_id: r.id });
+});
+
+// GET status — the whole run roster in one read, silent seats included.
+classroomOpsTeacher.get(root + '/status', async (c) => {
+  const auth = await teacher(c, 'observe'); if (auth instanceof Response) return auth;
+  const run = await loadRun(c, auth); if (run instanceof Response) return run;
+  const now = Date.now(), db = c.env.HPS_DB;
+  const rows = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,s.student_id,l.state_json,l.revision AS state_revision,l.last_received_at,
+ (SELECT count(*) FROM ops_grants p WHERE p.class_run_id=s.class_run_id AND p.seat_id=s.seat_id AND p.seat_revision=s.seat_revision AND p.kind='pairing' AND p.state='issued' AND p.expires_at>?) AS pairing_open,
+ (SELECT g.id||'|'||g.state||'|'||g.connection_epoch||'|'||g.expires_at FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' ORDER BY g.created_at DESC LIMIT 1) AS conn,
+ (SELECT t.jti||'|'||t.expires_at FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS token
+ FROM class_run_seats s LEFT JOIN ops_latest_state l ON l.class_run_id=s.class_run_id AND l.seat_id=s.seat_id AND l.seat_revision=s.seat_revision
+ WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; pairing_open: number; conn: string | null; token: string | null }>;
+  const seats = rows.map((r) => {
+    let state: SeatState = {}; try { state = JSON.parse(r.state_json ?? '{}'); } catch { state = {}; }
+    const [grantId, connState, epoch, connExpires] = (r.conn ?? '|||').split('|');
+    const connected = connState === 'active' && Number(connExpires) > now;
+    const [issueId, tokenExpires] = (r.token ?? '|').split('|');
+    const inputs = { pairing_issued: r.pairing_open > 0, connected, token_issued: !!issueId, state, last_received_at: connected ? r.last_received_at : null, grant_revoked: connState === 'revoked' };
+    const { attention, reason } = attentionOf(inputs, now);
+    const slot = (k: keyof SeatState) => state[k] ? { ...state[k]!.value, observed_at: state[k]!.observed_at, received_at: state[k]!.received_at, actor: state[k]!.actor } : null;
+    const reported = state.activation?.value.token_jti;
+    return {
+      seat_id: r.seat_id, seat_revision: r.seat_revision, student_id: r.student_id,
+      entry_stage: entryStage(inputs), signal: signalOf(inputs.last_received_at, now), last_received_at: r.last_received_at,
+      attention, reason, state_revision: r.state_revision ?? 0,
+      connection: grantId ? { grant_id: grantId, state: connected ? 'active' : connState === 'active' ? 'expired' : connState, epoch: Number(epoch) } : null,
+      token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: reported === undefined ? 'unknown' : reported === issueId ? 'matches_issue' : 'other_token' } : null,
+      activation: slot('activation'), step: slot('step'), runtime: slot('runtime'), error: slot('error'), upload: slot('upload'), sample: slot('sample'),
+    };
+  });
+  const history = (await db.prepare('SELECT seat_id,seat_revision,student_id,replaced_at,replaced_reason,changed_by FROM class_run_seats WHERE class_run_id=? AND replaced_at IS NOT NULL ORDER BY replaced_at DESC LIMIT 100').bind(run.class_run_id).all()).results ?? [];
+  const count = (f: (s: (typeof seats)[number]) => boolean) => seats.filter(f).length;
+  return c.json({
+    schema_version: OPS_SCHEMA_VERSION, now, stale_after_ms: STALE_AFTER_MS, viewer: auth.payload.u,
+    run: { class_run_id: run.class_run_id, profile_id: run.profile_id, roster_revision: run.roster_revision, flags: parseFlags(run.flags_json), lesson: parseLesson(run.lesson_json), starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at },
+    // Scope note for the UI: this is the run snapshot, not the cumulative cohort roster.
+    roster: { source: 'class_run_seats', total: seats.length },
+    counts: { total: seats.length, blocked: count((s) => s.attention === 'blocked'), caution: count((s) => s.attention === 'caution'), unknown: count((s) => s.attention === 'unknown'), not_connected: count((s) => !s.connection || s.connection.state !== 'active'), runtime_ready: count((s) => s.entry_stage === 'runtime_ready') },
+    incidents: commonIncidents(seats), seats, seat_history: history,
+  });
+});
+
+// ── app surface (/v1/classroom/ops/…) ───────────────────────────────────────
+
+export const classroomOpsApp = new Hono<{ Bindings: Env }>();
+classroomOpsApp.use('*', limit);
+classroomOpsApp.use('*', async (c, next) => {
+  c.header('cache-control', 'no-store');
+  if (!opsEnabled(c.env)) return c.json({ error: 'classroom operations are not enabled', reason: 'ops_disabled' }, 404);
+  return next();
+});
+
+const instanceOk = (b: any) => b && UUIDISH_RE.test(b.app_instance_id ?? '') && UUIDISH_RE.test(b.boot_id ?? '');
+
+classroomOpsApp.post('/connect', async (c) => {
+  const b = await json(c), now = Date.now();
+  if (!instanceOk(b) || typeof b.ticket !== 'string' || b.ticket.length > 64 || !Number.isInteger(b.protocol)) return c.json({ error: 'ticket, app_instance_id, boot_id and protocol required' }, 400);
+  const caps = Array.isArray(b.capabilities) && b.capabilities.length <= 32 && b.capabilities.every((x: unknown) => typeof x === 'string' && /^[a-z_]{1,48}$/.test(x)) ? b.capabilities : [];
+  const version = typeof b.app_version === 'string' && /^[A-Za-z0-9_.+-]{1,64}$/.test(b.app_version) ? b.app_version : '';
+  const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
+  if (!(await bumpRateCounter(c.env.HPS_KV, `opsconnect:${ip}`, 30, 60)).allowed) return c.json({ error: 'too many pairing attempts', reason: 'rate_limited' }, 429, { 'retry-after': '60' });
+  const db = c.env.HPS_DB, hash = await sha256Hex(normalizeTicket(b.ticket));
+  // Single use under concurrency: only one UPDATE can move issued → used.
+  const pairing = await db.prepare("UPDATE ops_grants SET state='used',used_at=?,revision=revision+1 WHERE secret_hash=? AND kind='pairing' AND state='issued' AND expires_at>? RETURNING *").bind(now, hash, now).first<GrantRow>();
+  // One answer for unknown, reused, expired and superseded tickets: no oracle.
+  if (!pairing) return c.json({ error: 'pairing ticket is not valid', reason: 'ticket_invalid' }, 403);
+  const run = await db.prepare('SELECT o.*,s.ended_at FROM class_run_ops o LEFT JOIN sessions s ON s.id=o.class_run_id WHERE o.class_run_id=?').bind(pairing.class_run_id).first<RunRow>();
+  const seat = await db.prepare('SELECT seat_id FROM class_run_seats WHERE class_run_id=? AND seat_id=? AND seat_revision=? AND replaced_at IS NULL').bind(pairing.class_run_id, pairing.seat_id, pairing.seat_revision).first();
+  if (!run || !seat || !parseFlags(run.flags_json).ops_observe) return c.json({ error: 'pairing ticket is not valid', reason: 'ticket_invalid' }, 403);
+  const id = crypto.randomUUID(), device = crypto.randomUUID(), expires = Math.min(run.ends_at + 3_600_000, now + 12 * 3_600_000);
+  await db.batch([
+    // A new device for the seat ends the old one: the epoch only moves forward.
+    db.prepare("UPDATE ops_grants SET state='revoked',revoked_at=?,revoked_reason='device_replaced',revision=revision+1 WHERE class_run_id=? AND seat_id=? AND kind='connection' AND state='active'").bind(now, run.class_run_id, pairing.seat_id),
+    db.prepare("INSERT INTO ops_grants(id,kind,class_run_id,cohort_id,profile_id,seat_id,seat_revision,student_id,state,connection_epoch,device_registration_id,parent_grant_id,issuer_id,issuer_jti,created_at,expires_at) SELECT ?,'connection',?,?,?,?,?,?,'active',COALESCE((SELECT MAX(connection_epoch) FROM ops_grants WHERE class_run_id=? AND seat_id=? AND kind='connection'),0)+1,?,?,?,?,?,?").bind(id, run.class_run_id, run.cohort_id, run.profile_id, pairing.seat_id, pairing.seat_revision, pairing.student_id, run.class_run_id, pairing.seat_id, device, pairing.id, pairing.issuer_id, pairing.issuer_jti, now, expires),
+    db.prepare('INSERT INTO ops_device_connections(grant_id,app_instance_id,boot_id,protocol,capabilities_json,app_version,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?,?)').bind(id, b.app_instance_id, b.boot_id, b.protocol, JSON.stringify(caps), version, now, now),
+    audit(db, run.class_run_id, pairing.seat_id, 'device', device, 'device_connected', { grant_id: id, protocol: b.protocol, app_version: version }, now),
+  ]);
+  const grant = await db.prepare('SELECT connection_epoch FROM ops_grants WHERE id=?').bind(id).first<{ connection_epoch: number }>();
+  return c.json({
+    credential: await signOpsCredential(id, c.env.HPS_SIGNING_SECRET), grant_id: id, device_registration_id: device,
+    class_run_id: run.class_run_id, seat_id: pairing.seat_id, connection_epoch: grant?.connection_epoch ?? 1, expires_at: expires,
+    protocol: OPS_PROTOCOL, server_capabilities: ['observe'], lesson: parseLesson(run.lesson_json),
+    poll_after_ms: pollAfterMs({ starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at }, now),
+    // What this credential is for — shown to the student by the app.
+    allows: ['status_report', 'own_command_receipts'], denies: ['ai_requests', 'log_bodies', 'other_seats'],
+  }, 201);
+});
+
+classroomOpsApp.post('/sync', async (c) => {
+  const credential = bearer(c.req.header('authorization'));
+  const grantId = credential ? await verifyOpsCredential(credential, c.env.HPS_SIGNING_SECRET) : null;
+  if (!grantId) return c.json({ error: 'operations credential required', reason: 'ops_credential_invalid' }, 401);
+  const db = c.env.HPS_DB, now = Date.now();
+  const g = await db.prepare(`SELECT g.*,o.flags_json,o.lesson_json,o.starts_at AS run_starts,o.ends_at AS run_ends,s.ended_at AS run_ended,
+ (SELECT 1 FROM class_run_seats x WHERE x.class_run_id=g.class_run_id AND x.seat_id=g.seat_id AND x.seat_revision=g.seat_revision AND x.replaced_at IS NULL) AS seat_live
+ FROM ops_grants g JOIN class_run_ops o ON o.class_run_id=g.class_run_id LEFT JOIN sessions s ON s.id=g.class_run_id WHERE g.id=? AND g.kind='connection'`).bind(grantId).first<GrantRow & { flags_json: string; lesson_json: string; run_starts: number; run_ends: number; run_ended: string | null; seat_live: number | null }>();
+  if (!g) return c.json({ error: 'operations credential required', reason: 'ops_credential_invalid' }, 401);
+  if (g.state !== 'active') return c.json({ error: 'operations connection was closed', reason: 'ops_grant_revoked' }, 401);
+  if (g.expires_at <= now) return c.json({ error: 'operations connection expired', reason: 'ops_grant_expired' }, 401);
+  if (!g.seat_live) return c.json({ error: 'seat was reassigned', reason: 'seat_replaced' }, 403);
+  const poll = pollAfterMs({ starts_at: g.run_starts, ends_at: g.run_ends, ended: !!g.run_ended }, now);
+  if (!parseFlags(g.flags_json).ops_observe) return c.json({ error: 'observation is off for this run', reason: 'ops_observe_disabled', poll_after_ms: 60000 }, 403);
+
+  const b = await json(c);
+  if (!instanceOk(b) || b.schema_version !== OPS_SCHEMA_VERSION) return c.json({ error: 'schema_version, app_instance_id and boot_id required', reason: 'schema' }, 400);
+  const raw: unknown[] = b.events === undefined ? [] : b.events;
+  if (!Array.isArray(raw) || raw.length > MAX_SYNC_EVENTS) return c.json({ error: `events[] ≤ ${MAX_SYNC_EVENTS}`, reason: 'batch_limit' }, 400);
+  const seqs: number[] = [];
+  for (const e of raw) { const s = (e as any)?.seq; if (!Number.isSafeInteger(s) || s < 1 || seqs.includes(s)) return c.json({ error: 'each event needs a unique positive seq', reason: 'schema' }, 400); seqs.push(s); }
+  if (seqs.length && Math.max(...seqs) - Math.min(...seqs) >= 1000) return c.json({ error: 'seq range too wide for one batch', reason: 'batch_limit' }, 400);
+  let sample: Record<string, unknown> | null = null;
+  if (b.sample !== undefined) {
+    const s = b.sample;
+    if (!s || typeof s !== 'object' || Object.keys(s).some((k) => !['idle_ms', 'runtime_status', 'observed_at'].includes(k)) || !Number.isSafeInteger(s.idle_ms) || s.idle_ms < 0 || (s.runtime_status !== undefined && !(RUNTIME_STATUSES as readonly string[]).includes(s.runtime_status)) || !Number.isSafeInteger(s.observed_at)) return c.json({ error: 'sample carries idle_ms, runtime_status and observed_at only', reason: 'schema' }, 400);
+    sample = s;
+  }
+
+  let device = await db.prepare('SELECT first_seen_at,last_seen_at,contiguous_seq FROM ops_device_connections WHERE grant_id=? AND app_instance_id=? AND boot_id=?').bind(g.id, b.app_instance_id, b.boot_id).first<{ first_seen_at: number; last_seen_at: number; contiguous_seq: number }>();
+  const stmts = [];
+  if (!device) {
+    device = { first_seen_at: now, last_seen_at: 0, contiguous_seq: 0 };
+    stmts.push(db.prepare("INSERT INTO ops_device_connections(grant_id,app_instance_id,boot_id,protocol,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?) ON CONFLICT DO NOTHING").bind(g.id, b.app_instance_id, b.boot_id, OPS_PROTOCOL, now, now));
+  }
+  const lesson = parseLesson(g.lesson_json);
+  const existing = new Map<number, string>();
+  // Everything stored above the cursor feeds both duplicate detection and the
+  // ack: a late event that fills a hole must see the seqs already waiting past it.
+  const stored_ = async (sql: string, ...args: unknown[]) => { for (const r of ((await db.prepare(sql).bind(g.id, b.boot_id, ...args).all()).results ?? []) as Array<{ seq: number; payload_hash: string }>) existing.set(r.seq, r.payload_hash); };
+  if (seqs.length) {
+    await stored_('SELECT seq,payload_hash FROM ops_events WHERE grant_id=? AND boot_id=? AND seq>? ORDER BY seq LIMIT 1000', device.contiguous_seq);
+    if (Math.min(...seqs) <= device.contiguous_seq) await stored_('SELECT seq,payload_hash FROM ops_events WHERE grant_id=? AND boot_id=? AND seq BETWEEN ? AND ? LIMIT 1000', Math.min(...seqs), device.contiguous_seq);
+  }
+  const latest = await db.prepare('SELECT seat_revision,grant_id,revision,state_json,last_received_at FROM ops_latest_state WHERE class_run_id=? AND seat_id=?').bind(g.class_run_id, g.seat_id).first<{ seat_revision: number; grant_id: string; revision: number; state_json: string; last_received_at: number }>();
+  // Board state never crosses a seat reassignment: a new binding starts empty.
+  let state: SeatState = {}; const carried = latest && latest.seat_revision === g.seat_revision;
+  if (carried) { try { state = JSON.parse(latest!.state_json); } catch { state = {}; } }
+  let changed = false; const quarantined: number[] = [], rejected: Array<{ seq: number; error: string }> = [], stored: number[] = [];
+  for (const e of raw) {
+    const seq = (e as any).seq as number, v = validateEvent(e);
+    // A malformed event still consumes its seq so the cursor can move, but its content is not kept.
+    const hash = v.ok ? await sha256Hex(`${v.value.kind}:${v.value.actor}:${v.value.observed_at}:${canonicalPayload(v.value.payload)}`) : 'rejected_schema';
+    if (existing.has(seq)) {
+      if (existing.get(seq) !== hash) { quarantined.push(seq); stmts.push(audit(db, g.class_run_id, g.seat_id, 'system', 'sync', 'event_conflict', { grant_id: g.id, boot_id: b.boot_id, seq }, now)); continue; }
+    } else {
+      const disposition = !v.ok ? 'rejected_schema' : v.value.kind === 'step' ? stepDisposition(v.value.payload, lesson) : 'applied';
+      if (!v.ok) rejected.push({ seq, error: v.error });
+      stmts.push(db.prepare('INSERT INTO ops_events(grant_id,boot_id,seq,event_id,class_run_id,seat_id,kind,actor,payload_json,payload_hash,disposition,observed_at,received_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING').bind(g.id, b.boot_id, seq, v.ok ? v.value.event_id : '', g.class_run_id, g.seat_id, v.ok ? v.value.kind : 'rejected', v.ok ? v.value.actor : 'unknown', v.ok ? JSON.stringify(v.value.payload) : '{}', hash, disposition, v.ok ? v.value.observed_at : 0, now));
+      stored.push(seq);
+      if (v.ok && disposition !== 'applied') quarantined.push(seq);
+      if (!v.ok || disposition !== 'applied') continue;
+    }
+    if (!v.ok) continue;
+    if (v.value.kind === 'step' && stepDisposition(v.value.payload, lesson) !== 'applied') continue;
+    if (shouldApply(state[v.value.kind], device.first_seen_at, seq)) { state[v.value.kind] = { boot_seen_at: device.first_seen_at, seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, value: v.value.payload }; changed = true; }
+  }
+  const ack = contiguousAck(device.contiguous_seq, [...new Set([...existing.keys(), ...stored])].filter((s) => s > device!.contiguous_seq).sort((x, y) => x - y));
+  // Unchanged, recently written state is not rewritten: the 5 s poll must not become a 5 s D1 write.
+  const due = !carried || now - latest!.last_received_at >= 45_000;
+  if (sample && (due || changed)) { state.sample = { boot_seen_at: device.first_seen_at, seq: 0, observed_at: sample.observed_at as number, received_at: now, actor: 'system', value: { idle_ms: sample.idle_ms, ...(sample.runtime_status ? { runtime_status: sample.runtime_status } : {}) } }; changed = true; }
+  if (changed || due) {
+    stmts.push(carried
+      ? db.prepare('UPDATE ops_latest_state SET state_json=?,revision=revision+1,last_received_at=?,grant_id=? WHERE class_run_id=? AND seat_id=? AND revision=?').bind(JSON.stringify(state), now, g.id, g.class_run_id, g.seat_id, latest!.revision)
+      : db.prepare('INSERT INTO ops_latest_state(class_run_id,seat_id,seat_revision,grant_id,state_json,last_received_at) VALUES(?,?,?,?,?,?) ON CONFLICT(class_run_id,seat_id) DO UPDATE SET seat_revision=excluded.seat_revision,grant_id=excluded.grant_id,revision=ops_latest_state.revision+1,state_json=excluded.state_json,last_received_at=excluded.last_received_at').bind(g.class_run_id, g.seat_id, g.seat_revision, g.id, JSON.stringify(state), now));
+    stmts.push(db.prepare('UPDATE ops_device_connections SET last_seen_at=?,contiguous_seq=MAX(contiguous_seq,?) WHERE grant_id=? AND app_instance_id=? AND boot_id=?').bind(now, ack.contiguous, g.id, b.app_instance_id, b.boot_id));
+  }
+  if (stmts.length) {
+    let results;
+    // No ack without a durable write: the client keeps the events and retries.
+    try { results = await db.batch(stmts); } catch (err) { console.error('ops sync store failed:', err); return c.json({ error: 'observations not stored; retry', reason: 'storage', poll_after_ms: poll }, 503); }
+    const stateWrite = carried && (changed || due) ? results[results.length - 2] : null;
+    // Another window of the same seat won the state CAS. Its events are stored; the board catches up on the next sync.
+    if (stateWrite && stateWrite.meta?.changes === 0) return c.json({ error: 'seat state changed concurrently; resend', reason: 'state_conflict', poll_after_ms: 1000 }, 409);
+  }
+  return c.json({
+    schema_version: OPS_SCHEMA_VERSION, server_time: now, connection_epoch: g.connection_epoch,
+    ack: { boot_id: b.boot_id, contiguous_seq: ack.contiguous, missing: ack.missing }, quarantined, rejected,
+    commands: [], poll_after_ms: poll,
+  });
+});
