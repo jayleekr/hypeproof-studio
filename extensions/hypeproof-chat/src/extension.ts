@@ -8,6 +8,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { StartPage } from "./startPage";
+import { registerRehearsalUriHandler } from "./rehearsalEntry";
 import { ChatPanelProvider } from "./chatPanelProvider";
 import { AssetStatusBar } from "./assetStatusBar";
 import {
@@ -155,6 +156,12 @@ export async function activate(context: vscode.ExtensionContext) {
     return ensureWorkspace(profile, context, isTestRun && process.env.HPS_TEST_REAL_WORKSPACE !== "1", commit);
   });
   context.subscriptions.push(vscode.commands.registerCommand("hypeproof-chat.start", () => startPage.show()));
+  // #1132 — 브라우저에서 누른 리허설 링크를 받는 자리. 링크는 교환권 하나만
+  // 나르고(ARC-03), 좌표·자격증명은 Service 가 붙든다.
+  registerRehearsalUriHandler(context, {
+    proxyUrl: () => vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
+    connectWithToken: token => startPage.connectWithToken(token),
+  });
   // kids-quest — skeleton round result → next-turn context for the coach.
   context.subscriptions.push(preview.onResult((r) => provider.attachQuestResult(r)));
 
