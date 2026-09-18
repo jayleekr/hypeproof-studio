@@ -267,6 +267,14 @@ export async function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand("hypeproof-chat.setToken", () => startPage.show()),
 
+    // #673 — "방금 것 되돌리기". 2026-08-22 1회차 오후, 코치가 index.html 을
+    // 제자리 Edit 으로 깨뜨린 자리의 아이에게 돌아갈 길이 없었다. 저장점은 코치가
+    // 파일을 건드리기 직전에 자동으로 생기고(chatPanelProvider.captureTurnCheckpoint),
+    // 이 명령이 그 목록에서 고르게 한다. 강사가 자리에 와서 누르는 것도 같은 문이다.
+    vscode.commands.registerCommand("hypeproof-chat.restoreCheckpoint", async () => {
+      await provider.restoreWorkspaceCheckpoint();
+    }),
+
     vscode.commands.registerCommand("hypeproof-chat.runLastCode", async () => {
       const html = provider.extractLastRenderableCode();
       if (!html) {

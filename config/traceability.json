@@ -1777,6 +1777,46 @@
       ]
     },
     {
+      "id": "ST-REQ-WORKSPACE-RECOVERY",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-LEARNING-AGENT-EXPERIENCE"
+      ],
+      "sources": [
+        {
+          "path": "docs/studio-requirements.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-WORKSPACE-RECOVERY",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-WORKSPACE-RECOVERY"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/workspaceCheckpoint.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-WORKSPACE-RECOVERY",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-WORKSPACE-RECOVERY",
+        "ST-IMP-WORKSPACE-RECOVERY"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/workspace-checkpoint.smoke.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-DES-LEARNING-AGENT-EXPERIENCE",
       "stage": "design",
       "owner": "jayleekr",
