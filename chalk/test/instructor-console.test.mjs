@@ -10,6 +10,8 @@
 // Run: node --experimental-strip-types chalk/test/instructor-console.test.mjs
 
 import assert from "node:assert/strict";
+import { SOON } from "../src/ui/screens.ts";
+const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // Same loader the Service tests use (extensionless .ts + .html/.md as text).
 import "../../worker/test/harness/loader.mjs";
 
@@ -106,10 +108,56 @@ await check("GET /issuer serves the student-token mint page", async () => {
   assert.match(contentType, /text\/html/);
 });
 
-await check("GET / redirects to /console", async () => {
-  const { status, headers } = await fetchOnce("/");
-  assert.equal(status, 302);
-  assert.equal(headers.get("location"), "/console");
+// #1145 — `/` is the instructor HOME now, not a 302 to /console. The redirect
+// dropped a first-time instructor into an in-session operations screen.
+await check("GET / serves the instructor home, no redirect", async () => {
+  const { status, text, contentType } = await fetchOnce("/");
+  assert.equal(status, 200, "no longer a 302");
+  assert.match(contentType, /text\/html/);
+  assert.match(text, /강사 홈/);
+  assert.match(text, /지금 쓸 수 있는 화면/);
+  assert.match(text, /아직 없는 것/, "the home shows what does NOT exist");
+});
+
+// The point of the home is an honest list. If it ever renders only the working
+// screens, the surface hides its own holes — the failure #1145 exists to stop.
+await check("home lists every placeholder, and each one links to its own page", async () => {
+  const { text } = await fetchOnce("/");
+  for (const screen of SOON) {
+    assert.match(text, new RegExp(escapeRe(screen.title)), `home names ${screen.title}`);
+    assert.ok(text.includes(`href="${screen.state.path}"`), `home links ${screen.state.path}`);
+  }
+  assert.ok(text.includes("개발 필요"), "placeholders are labelled, not silently omitted");
+});
+
+await check("each placeholder page says 개발 필요 and points at the issue that owns it", async () => {
+  for (const screen of SOON) {
+    const { status, text, contentType } = await fetchOnce(screen.state.path);
+    assert.equal(status, 200, `${screen.state.path} serves`);
+    assert.match(contentType, /text\/html/);
+    assert.match(text, /개발 필요/, `${screen.state.path} is honest about being empty`);
+    for (const n of screen.issues ?? []) {
+      assert.ok(text.includes(`/issues/${n}`), `${screen.state.path} links #${n}`);
+    }
+    // 부정 대조: a placeholder must not grow inputs or calls. The moment one does,
+    // it is a real screen and must be reviewed as one.
+    assert.doesNotMatch(text, /<input|<form|fetch\(/, `${screen.state.path} collects nothing`);
+  }
+});
+
+await check("the shared stylesheet is served as CSS", async () => {
+  const { status, text, contentType } = await fetchOnce("/shell.css");
+  assert.equal(status, 200);
+  assert.match(contentType, /text\/css/);
+  assert.match(text, /--accent:/, "the CSS-variable lineage, not a second set of hardcoded values");
+});
+
+// 대조군: /console still works. The home is an addition, not a replacement — the
+// links instructors already have must not break.
+await check("control — /console is unchanged and still reachable directly", async () => {
+  const { status, text } = await fetchOnce("/console");
+  assert.equal(status, 200);
+  assert.match(text, /강사 세션 콘솔/);
 });
 
 await check("GET /health reports the c* version verbatim, 'unknown' when unset", async () => {
