@@ -11,7 +11,8 @@ export const OPS_PROTOCOL = 1;
 export const OPS_FLAGS = ['ops_observe', 'ops_commands', 'ops_collect', 'ops_reports', 'ops_delivery'] as const;
 export type OpsFlag = (typeof OPS_FLAGS)[number];
 /** Issuer-scope capabilities. Absent on every issuer minted before this landed — new authority is opt-in. */
-export const OPS_CAPABILITIES = ['observe', 'manage', 'command', 'reset', 'pause', 'collect', 'review', 'deliver'] as const;
+/** `coach` is deliberately separate from `command`/`reset`: fixing a PC and guiding a learner are different authorities. */
+export const OPS_CAPABILITIES = ['observe', 'manage', 'command', 'reset', 'pause', 'coach', 'collect', 'review', 'deliver'] as const;
 export type OpsCapability = (typeof OPS_CAPABILITIES)[number];
 
 /** Every ops_* timestamp is unix milliseconds (token expiries included, converted at the edge). */
@@ -30,7 +31,14 @@ export const UUIDISH_RE = /^[A-Za-z0-9-]{8,64}$/;
 const CODE_RE = /^[a-z0-9_.-]{1,64}$/;
 const VERSION_RE = /^[A-Za-z0-9_.+-]{1,64}$/;
 
-export const ACTORS = ['human', 'ai', 'tool', 'operator', 'system', 'unknown'] as const;
+/** Who did it. `human`/`operator` are accepted from early clients and read as student/teacher. */
+export const ACTORS = ['student', 'ai', 'teacher', 'external_user', 'tool', 'system', 'unknown'] as const;
+const ACTOR_ALIASES: Record<string, (typeof ACTORS)[number]> = { human: 'student', operator: 'teacher' };
+/** What kind of ground the evidence stands on. Absent means `unverified` — never `real`. */
+export const SOURCE_STATES = ['real', 'simulated', 'self_reported', 'unverified'] as const;
+export const EVIDENCE_TYPES = ['intent', 'criterion', 'action', 'decision', 'change', 'ownership'] as const;
+export const REVIEW_STATES = ['unreviewed', 'confirmed', 'disputed'] as const;
+const SHA256_RE = /^[a-f0-9]{64}$/;
 export const ACTIVATION_STAGES = ['token_verified', 'token_rejected', 'class_entered', 'runtime_ready', 'runtime_failed'] as const;
 export const STEP_STATUSES = ['not_started', 'in_progress', 'submitted', 'reviewed', 'free_activity'] as const;
 export const RUNTIME_STATUSES = ['idle', 'running', 'waiting_approval', 'waiting_user', 'error'] as const;
@@ -44,7 +52,7 @@ export const ERROR_CLASSES = [
 export type ErrorClass = (typeof ERROR_CLASSES)[number];
 /** Shared-cause classes: many seats at once means one incident, not N broken PCs. */
 export const COMMON_CAUSE_CLASSES: readonly ErrorClass[] = ['provider_rate_limit', 'provider_5xx', 'network', 'class_not_open', 'budget_limit'];
-export const EVENT_KINDS = ['activation', 'step', 'runtime', 'error', 'upload'] as const;
+export const EVENT_KINDS = ['activation', 'step', 'runtime', 'error', 'upload', 'evidence'] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
 export interface LessonPin { course_id: string; version: string; steps: string[] }
@@ -91,6 +99,15 @@ export function validatePayload(kind: EventKind, p: unknown): Verdict<Record<str
     if (o.cleared !== undefined && typeof o.cleared !== 'boolean') return bad('error.cleared');
     return { ok: true, value: o };
   }
+  if (kind === 'evidence') {
+    // Provenance only. The learner's own words stay on the device / in the existing consented share — never on the board.
+    if (!exactKeys(o, ['evidence_type', 'source_state', 'step_id', 'artifact_before', 'artifact_after'])) return bad('unsupported evidence field');
+    if (!oneOf(EVIDENCE_TYPES, o.evidence_type)) return bad('evidence.evidence_type');
+    if (o.source_state !== undefined && !oneOf(SOURCE_STATES, o.source_state)) return bad('evidence.source_state');
+    if (o.step_id !== undefined && (typeof o.step_id !== 'string' || !ID_RE.test(o.step_id))) return bad('evidence.step_id');
+    for (const k of ['artifact_before', 'artifact_after']) if (o[k] !== undefined && (typeof o[k] !== 'string' || !SHA256_RE.test(o[k] as string))) return bad('evidence.' + k);
+    return { ok: true, value: { ...o, source_state: o.source_state ?? 'unverified' } };
+  }
   if (!exactKeys(o, ['status', 'snapshot_revision'])) return bad('unsupported upload field');
   if (!oneOf(UPLOAD_STATUSES, o.status)) return bad('upload.status');
   if (o.snapshot_revision !== undefined && !(Number.isInteger(o.snapshot_revision) && (o.snapshot_revision as number) >= 0)) return bad('upload.snapshot_revision');
@@ -105,7 +122,7 @@ export function validateEvent(e: unknown): Verdict<OpsEvent> {
   if (!Number.isSafeInteger(o.seq) || (o.seq as number) < 1) return bad('seq');
   if (!Number.isSafeInteger(o.observed_at) || (o.observed_at as number) < 0) return bad('observed_at');
   if (!oneOf(EVENT_KINDS, o.kind)) return bad('kind');
-  const actor = o.actor === undefined ? 'unknown' : o.actor;
+  const actor = o.actor === undefined ? 'unknown' : ACTOR_ALIASES[o.actor as string] ?? o.actor;
   if (!oneOf(ACTORS, actor)) return bad('actor');
   const payload = validatePayload(o.kind, o.payload);
   if (!payload.ok) return payload;
@@ -229,15 +246,33 @@ export async function sha256Hex(s: string): Promise<string> {
 export const COMMAND_TTL_MS = 120_000;
 export const LEASE_TAKEOVER_MS = STALE_AFTER_MS;
 export const MAX_COMMAND_TARGETS = MAX_SEATS;
-export interface CommandSpec { capability: OpsCapability; flag: OpsFlag; mutating: boolean; maxTargets: number; runMs: number }
+export interface CommandSpec { capability: OpsCapability; flag: OpsFlag; mutating: boolean; maxTargets: number; runMs: number; /** Closed argument schema; absent → the action takes none. */ args?: (a: Record<string, unknown>) => Verdict<Record<string, unknown>>; kind: 'recovery' | 'coaching' }
+/**
+ * A coaching message is a question or a pointer — not an answer. Code fences, markup and
+ * long text have no place in it; the bound keeps "send the fixed code" out of the contract.
+ */
+const coachText = (v: unknown, max: number): string | null => typeof v === 'string' && v.trim().length > 0 && v.length <= max && !/```|<\/?[a-zA-Z]|[{};]\s*$/m.test(v) ? v.trim() : null;
+const questionArgs = (a: Record<string, unknown>): Verdict<Record<string, unknown>> => {
+  if (!exactKeys(a, ['text'])) return bad('send_question takes text only');
+  const text = coachText(a.text, 300); return text ? { ok: true, value: { text } } : bad('text must be a plain question of at most 300 characters');
+};
+const checkpointArgs = (a: Record<string, unknown>): Verdict<Record<string, unknown>> => {
+  if (!exactKeys(a, ['step_id', 'note'])) return bad('mark_checkpoint takes step_id and note only');
+  if (a.step_id !== undefined && (typeof a.step_id !== 'string' || !ID_RE.test(a.step_id))) return bad('step_id');
+  const note = a.note === undefined ? '' : coachText(a.note, 200); if (note === null) return bad('note must be plain text of at most 200 characters');
+  return { ok: true, value: { ...(a.step_id ? { step_id: a.step_id } : {}), ...(note ? { note } : {}) } };
+};
 export const COMMAND_ACTIONS: Record<string, CommandSpec> = {
-  retry_diagnostics: { capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 20_000 },
-  refresh_connection: { capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 30_000 },
-  restart_preview: { capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 30_000 },
+  retry_diagnostics: { kind: 'recovery', capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 20_000 },
+  refresh_connection: { kind: 'recovery', capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 30_000 },
+  restart_preview: { kind: 'recovery', capability: 'command', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 30_000 },
   // R3. State-changing: one in flight per seat, never auto-retried, and `reset_runtime` is one learner at a time.
   // Neither clears history, deletes files, resets credentials or reboots anything — the device contract forbids it.
-  cancel_current_run: { capability: 'command', flag: 'ops_commands', mutating: true, maxTargets: MAX_SEATS, runMs: 20_000 },
-  reset_runtime: { capability: 'reset', flag: 'ops_commands', mutating: true, maxTargets: 1, runMs: 60_000 },
+  cancel_current_run: { kind: 'recovery', capability: 'command', flag: 'ops_commands', mutating: true, maxTargets: MAX_SEATS, runMs: 20_000 },
+  reset_runtime: { kind: 'recovery', capability: 'reset', flag: 'ops_commands', mutating: true, maxTargets: 1, runMs: 60_000 },
+  // Coaching. Changes no file, conversation or input on the learner's side; `succeeded` means "shown", not "read".
+  send_question: { kind: 'coaching', capability: 'coach', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 15_000, args: questionArgs },
+  mark_checkpoint: { kind: 'coaching', capability: 'coach', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 15_000, args: checkpointArgs },
 };
 export const REASON_CODES = ['student_request', 'blocked_error', 'no_signal', 'preview_broken', 'class_management', 'other'] as const;
 export const TARGET_OPEN_STATES = ['queued', 'leased', 'accepted', 'running'] as const;
