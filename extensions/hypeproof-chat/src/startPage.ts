@@ -226,7 +226,20 @@ export class StartPage {
       return;
     }
     if (msg.type !== "connectCourse" || typeof msg.token !== "string") return;
-    const token = sanitizeWorkshopToken(msg.token);
+    await this.connectToken(msg.token);
+  }
+
+  /**
+   * #1132 — 리허설 링크로 들어온 학생 조건 자격을 기존 참여 경로에 그대로 태운다.
+   * 화면을 먼저 띄우므로 강사는 어떤 수업이 열리는지 보고 나서 진행한다.
+   */
+  async connectWithToken(raw: string): Promise<void> {
+    await this.show();
+    await this.connectToken(raw);
+  }
+
+  private async connectToken(raw: string): Promise<void> {
+    const token = sanitizeWorkshopToken(raw);
     if (!token) { this.error = "수업 참여 코드를 입력하세요."; await this.refresh(); return; }
     if (looksLikeIssuerTokenUnverified(token)) {
       this.error = "강사용 코드입니다. 수강생 참여 코드를 입력하세요."; await this.refresh(); return;
