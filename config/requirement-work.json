@@ -2120,7 +2120,18 @@
         "worker/src/lib",
         "worker/src/routes"
       ],
-      "verification_inputs": []
+      "verification_inputs": [
+        "worker/src/lib/lesson-pedagogy.ts",
+        "worker/src/routes/authoring.ts",
+        "worker/test/lesson-pedagogy.test.mjs",
+        "worker/test/lesson-pedagogy-demo.test.mjs",
+        "worker/test/fixtures/lesson-pedagogy/dental-field-cuesheet.demo.json",
+        "worker/test/fixtures/lesson-pedagogy/dental-field-cuesheet-gate.demo.json",
+        "worker/test/fixtures/lesson-pedagogy/dental-field-cuesheet-resolved.demo.json",
+        "worker/test/fixtures/lesson-pedagogy/dental-formal.demo.json",
+        "worker/test/fixtures/lesson-pedagogy/sk-family-runbook.demo.json",
+        "e2e/chalk-authoring/pedagogy-demo.mjs"
+      ]
     }
   ]
 }
