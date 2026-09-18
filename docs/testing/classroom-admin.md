@@ -62,3 +62,45 @@ npm --prefix chalk run typecheck
 - 경계 대비 3:1 대조군이 기존 색에서 실패했고 수정 후 통과했다. 성공한 학생 연결이 계속 ‘연결 중’으로 표시되는 문제와 무신호 학생의 `absent`/내부 열 이름 노출도 수정했다.
 - 증거: `e2e/test-results/classroom/teacher-*.png`, `student-*.png`, `/tmp/classroom-browser*.log`. CI도 이 스크립트를 실행하고 화면을 보관한다.
 - 전체 AT/DT 합격을 뜻하지 않는다. 200% 브라우저 확대, 실제 Windows, 모든 경합·오프라인 조합과 운영 D1 삭제는 별도 검증이다. Node SQLite의 번호 매개변수는 기존 보드 테스트와 같은 위치 매개변수 방식으로 fixture에서 변환하며 실제 SQL/Service 정책은 변경하지 않았다.
+
+<a id="remote-classroom-tests"></a>
+
+## 원격 수업 운영 인수 계획 · 2026-09-18
+
+[확장 PRD](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18)의 계약을 검사한다. 아래 **AT-15~34는 모두 NOT RUN**이다. 이전 classroom test PASS를 새 원격 기능의 증거로 재사용하지 않는다. 합성 강사 A/B·학생 A/B·다른 반·구버전 앱·동일 PC 다른 사용자·다중 창을 고정 fixture로 둔다. 시간·fault·동시 요청을 제어하고 양성/음성 대조를 같은 환경에서 실행한다.
+
+| Test ID | 제품 REQ | 조건 / 깨뜨릴 가정 | 합격 기준 | 실행 계층 |
+|---|---|---|---|---|
+| AT-15 | ADM-01/02/07 | 미등록·pairing 만료/재사용·발급만 성공·앱검증 실패·runtime 정상 | 발급≠활성화, 미등록 unknown, ticket 1회, 교차 좌석/수업 위조 거부 | Service+D1+App |
+| AT-16 | ADM-01/02/11 | 15개 run 명단, 누적 roster 340개, 무활동 2명, 교체 좌석 | 현재 수업 명단 전부 표시·누적 테스트 좌석 제외·변경 이력, 신호 없는 학생 누락 0 | DB+Chalk browser |
+| AT-17 | ADM-02/04/11 | step event 중복/역순/구버전·lesson v1 중 v2 발행·자유 활동 | lesson/step/revision 일치, 서버 수신시각과 source 시각 분리, 완료 추정 0 | contract+App UI |
+| AT-18 | ADM-02/09 | 401 expired/signature, session_closed/roster_missing, approval 대기, network, provider 공통 장애, 휴식 | 정확한 사유·다음 조치, 확인된 차단만 빨간 글자, 무신호 회색, 공통 장애 묶음 | calibration+browser |
+| AT-19 | ADM-07/10 | 학생/다른 강사/폐기 issuer/direct API/forged scope·action/임의 path·shell | 서버/클라이언트 allowlist·scope 모두 차단, 토큰·프롬프트 로그 노출 0 | Service+host negative |
+| AT-20 | ADM-05/10 | 강사 2명 동시 reset, duplicate key 같은/다른 payload, response loss | CAS 1개 효과, 같은 key 기존 결과/다른 payload 409, queued를 성공 표기 안 함 | real D1 concurrent |
+| AT-21 | ADM-07/10 | lease 만료·옛 epoch·새 로그인·재기동 후 지연 명령·클라이언트 시간 왜곡 | 잘못된 세대/기기/활동에 실행 0, TTL 이후 실행 0, 이전 결과 replay만 | host crash/fault |
+| AT-22 | ADM-05/10 | reset 중 실행중 SDK·tool·unsaved draft·디스크 부족·보존 실패·중지 timeout | 보존 후 새 generation, 파일/대화/증거 손실 0, 중지/보존 불확실하면 실행 보류 | 실제 Mac/Windows |
+| AT-23 | ADM-01/07/10 | 토큰 교체 전후 동시 창·공용 PC 사용자 교체·상위 issuer 폐기 | current lease owner만 실행, old grant 폐기, 비밀 교사 UI 비노출, 타인 spool 수집 0 | App+Service+D1 |
+| AT-24 | ADM-10/11 | class pause→두 chat 경로·SDK tool admission, 이미 실행 중·offline·구버전, Service 실패 | 새 실행 정책 실제 적용, 진행중 효과·미적용 표시, local 저장/Stop/export 유지 | real SDK/proxy+OS |
+| AT-25 | ADM-02/08/09 | 관제 API 5xx·KV 지연 60초·D1 장애·프록시 차단·수업30/100명 | metadata 장애로 채팅 중단 없음, 명령 authority 불명은 보류, bounded backoff, 기존 대화 p95 증가≤5% | fault+load |
+| AT-26 | ADM-03/07/14 | 동의 없음/만료/철회/기존 profile flag만 true·아동 동의 없는 일괄수집 | 서버 저장/원문전달 없음, 학생별 사유, 명단 행 유지, 기존 수동 업로드 불변 | Service+consent fixture |
+| AT-27 | ADM-03/13 | R2 PUT 성공 뒤 DB 실패·manifest-only·hash mismatch·active file 변화·seq gap/중복/역순 | verified receipt 전 complete 없음, immutable revision, outbox로 재조정·혼입 quarantine | local R2+D1+uploader |
+| AT-28 | ADM-13/14 | 수업 종료 뒤 offline 복귀·AI token 만료·collection grant 유효/만료·삭제 tombstone | 유효한 본인 snapshot만 회수, AI 권한 확장 0, late input 별 revision, 삭제 기록 재생성 0 | clock+App+API |
+| AT-29 | ADM-06/13 | 신규6/legacy7 혼재·입력 없음·AI 문장만 존재·다른 학생 evidence·review 누락 | 모델/version 분리·근거 없는 점수 부여 0건·NA/보류·별도 입력 hash; 기존 HAIN7 28marker 경계 유지 | core+runner fixtures |
+| AT-30 | ADM-07/13/14 | Mac runner 종료/lease takeover·동일 job 재전달·timeout·한 학생 손상 | 동일 digest 중복산출 제어, stale runner overwrite 0, 부분 재개, 타 학생 계속 | runner+DB fault |
+| AT-31 | ADM-07/13/14 | 갤러리 비공식 대상·형제·recipient 변경·승인 뒤 PDF 변경·send timeout/duplicate webhook·링크 철회 | 원본 명단 매핑, 승인 hash 불일치 차단, send_unknown 자동 재발송 0, accepted≠delivered, 원문 공개 0 | send adapter sandbox |
+| AT-32 | ADM-01~14 | feature flag 전부 OFF와 v0.1.56/실제 배포 클라이언트, 신규 API 구형 요청 | 기존 입장/채팅/저장/preview/업로드/board/선택공유 모두 동작, strict validator 호환 | regression+real app |
+| AT-33 | ADM-01~14 | fresh DB vs 현행+새 migration, 기능별 canary→flag rollback, 미완 job | schema 동등·기존 데이터 불변·pending TTL/보존·delivery 중지·receipt 조회 가능 | local+staging D1 |
+| AT-34 | ADM-02/09/10/13 | 100명×2h, 20% 단절/재접속, 동시 강사2·bulk30·학교 TLS proxy, 5폭/200%/키보드 | p95 목표·상태시각·명단 보존, 교차학생 노출/중복 부작용/파일손실 0, 대비·포커스·오류문구 | load+OS/browser pilot |
+
+실기 gate는 Windows/macOS 각각 앱 release/build hash, Service/Chalk SHA, DB·profile/lesson revision, Test ID, 재현 명령, 기대/관측, screenshot/receipt hash, 실행자·날짜를 남긴다. 지원 안 하는 OS·죽은 host·네트워크 없는 PC에서 원격 복구 성공을 주장하지 않는다. 실제 발송 시험은 승인된 테스트 수신자로 provider sandbox 또는 지정 계정에서만 하고 합성 adapter 성공과 구분한다.
+
+## 2026-09-18 설계 작업의 기반 검증
+
+대상: main `75fe6e4`, Mac arm64. runtime 코드는 변경하지 않았다. 기존 baseline을 실행해 새 설계가 의존할 환경을 확인했다.
+
+- Node 22.22.1에서 Worker/Chalk/extension 각각 `npm test` 및 `npm run typecheck` PASS(exit 0). 초기 Node 24 wrapper의 zsh 예약변수 오류는 수정하고 요구 버전에서 재실행했다.
+- extension `build:extension`과 webview `build` 완료(Node 24.15.0). 전체 VSCodium 앱 빌드는 하지 않았다.
+- `npm --prefix e2e run test:classroom`: PASS, 합성 계정의 consent 음성 대조·공유/피드백/학생 확인/철회·5폭·키보드·인증/비영속 토큰. 실제 설치 Studio/Windows/production 검증은 아님.
+- `python3 scripts/docs-harness/check.py --min-score 95`, `python3 scripts/next-work.py --check`: 문서 변경 후 각각 100/100 PASS, 14문서·358요구사항 무결성 PASS. 구현 충족 검사가 아니다.
+- 제품 registry 검사 PASS(`.git/remote-classroom-evidence/check-env/bin/python scripts/check-registry.py`, 격리 PyYAML 환경). 변경 문서 로컬 링크 172개·코드블록·`git diff --check` PASS.
+- 새 AT-15~34 및 운영 부하·원격제어·실제 수업·평가·발송은 NOT RUN이다. 설계 완료와 기능 구현 완료를 구분한다.

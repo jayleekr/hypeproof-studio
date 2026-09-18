@@ -628,3 +628,19 @@ server deletion responses prevent recapture and unblock download races across re
 Contract: [SS-01–10](requirements/session-sync.md). Validation:
 `packages/measurement/test/sync.test.mjs`; production acceptance and installed
 supervisor observation must be recorded separately.
+
+
+## Remote classroom operations proposal — 2026-09-18
+
+The [existing classroom ADM contract](requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18)
+extends token activation, run-scoped progress, bounded remote commands, preserving
+runtime reset, evidence collection and report delivery. It reuses ADM-01–14;
+[AT-15–34](testing/classroom-admin.md#remote-classroom-tests) are NOT RUN.
+App host code owns local observations and allowlisted actions; Chalk displays
+and forwards; Service owns authority and durable command/job receipts. Preserve
+REQ-A/B onboarding, REQ-Q spool ownership/retention and existing activity/runtime
+boundaries. Remote reset must not call clearHistory or erase learner files.
+Automatic collection requires the new explicit consent/grant contract; this
+proposal does not relax existing manual-upload or operator-only log access.
+New reports follow MC-17/19; legacy HAIN7 stays a separate versioned adapter.
+Implementation phases and rollback are in [E5](plan/learning-agent-experience-epics.md#remote-classroom-delivery).

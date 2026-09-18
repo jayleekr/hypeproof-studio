@@ -181,3 +181,14 @@ Lab #777 → [Product Intent](../PRODUCT-INTENT.md) →
 [implementation slices](../plan/measurement-core.md).
 Full app rebuild and remote team collection are not prerequisites for the first
 local dogfood. Actual host support and user acceptance require retained evidence.
+
+
+## Remote classroom operations design
+
+2026-09-18 proposal: [ADM-01–14 detailed remote operations contract](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18),
+[existing DES screen criteria](../requirements/classroom-design.md),
+[AT-15–34 acceptance plan](../testing/classroom-admin.md#remote-classroom-tests),
+[E5 delivery sequence](../plan/learning-agent-experience-epics.md#remote-classroom-delivery).
+This extends the existing #751/#732 work and covers activation, whole-class state,
+command receipts, preserving reset and collection/report/delivery jobs. New
+behavior is planned; existing baseline tests do not mark these scenarios passed.
