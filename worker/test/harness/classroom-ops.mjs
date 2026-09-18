@@ -29,6 +29,8 @@ export async function localOps({ enabled = true, binding } = {}) {
   // D1 fails at execution, not at prepare(): the injected fault does the same.
   const guarded = { prepare(sql) { const st = inner.prepare(sql); if (!(failure && sql.includes(failure))) return st; const boom = () => { throw Error('injected storage failure'); }; return { bind() { return this; }, _run: boom, run: async () => boom(), first: async () => boom(), all: async () => boom() }; }, batch: (s) => inner.batch(s) };
   const env = createMockEnv({ withSession: false, withRoster: false, environment: 'dev', adminPassword: 'pw', env: { HPS_DB: guarded, ...(enabled ? { HPS_CLASSROOM_OPS: 'enabled' } : {}) } });
+  // In-memory R2: put/get/list, with the same "object first, row second" failure window as production.
+  const r2 = new Map(); env.HPS_TRACES = { async put(key, value) { if (failure === 'R2 put') throw Error('injected R2 failure'); r2.set(key, value instanceof ArrayBuffer ? value.slice(0) : new TextEncoder().encode(String(value)).buffer); }, async get(key) { const v = r2.get(key); return v ? { arrayBuffer: async () => v, text: async () => new TextDecoder().decode(v) } : null; }, async list({ prefix = '' } = {}) { return { objects: [...r2.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })) }; } };
   const cohort = 'boah-dental-2026-a', profile = 'boah-dental-director-copyclone-2026-s1', run = 'ops-test-run';
   // Mirror what persistSessionStart writes, so usage rows attribute to the run like production.
   if (db) { db.prepare('INSERT OR IGNORE INTO cohorts(id,display_name) VALUES(?,?)').run(cohort, cohort); db.prepare('INSERT OR IGNORE INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES(?,?,?,?,?)').run(run, cohort, profile, new Date(Date.now() - 60000).toISOString(), new Date(Date.now() + 3600000).toISOString()); }
@@ -66,5 +68,5 @@ export async function localOps({ enabled = true, binding } = {}) {
   const command = (action, targets, extra = {}, token) => request(base + '/commands', 'POST', { action, targets, idempotency_key: crypto.randomUUID(), reason_code: 'blocked_error', expected_roster_revision: 1, ...extra }, token);
   const receipt = (cmd, state, result_code = '') => ({ command_id: cmd.command_id, lease_generation: cmd.lease_generation, connection_epoch: cmd.connection_epoch, state, result_code, observed_at: Date.now() });
   const sync = (credential, events = [], n = 1, extra = {}) => request('/v1/classroom/ops/sync', 'POST', { schema_version: 1, app_instance_id: instance(n).app_instance_id, boot_id: instance(n).boot_id, capabilities: instance(n).capabilities, events, ...extra }, credential);
-  return { app, env, db, cohort, profile, run, base, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, command, receipt, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
+  return { r2, app, env, db, cohort, profile, run, base, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, command, receipt, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
 }

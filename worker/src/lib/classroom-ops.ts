@@ -274,6 +274,8 @@ export const COMMAND_ACTIONS: Record<string, CommandSpec> = {
   send_question: { kind: 'coaching', capability: 'coach', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 15_000, args: questionArgs },
   mark_checkpoint: { kind: 'coaching', capability: 'coach', flag: 'ops_commands', mutating: false, maxTargets: MAX_SEATS, runMs: 15_000, args: checkpointArgs },
 };
+/** Issued only by the Service as part of a collection batch. It is not in COMMAND_ACTIONS, so no instructor request can name it or its arguments. */
+export const SERVICE_ISSUED_ACTIONS: Record<string, { runMs: number }> = { retry_evidence_upload: { runMs: 120_000 } };
 export const REASON_CODES = ['student_request', 'blocked_error', 'no_signal', 'preview_broken', 'class_management', 'other'] as const;
 export const TARGET_OPEN_STATES = ['queued', 'leased', 'accepted', 'running'] as const;
 export const TARGET_TERMINAL_STATES = ['succeeded', 'failed', 'rejected', 'expired', 'cancelled', 'outcome_unknown', 'unsupported', 'not_connected'] as const;
