@@ -1,0 +1,54 @@
+name: classroom-ops
+# Browser layer of remote classroom operations (#751): the real Chalk pages, the built Studio
+# webview and the real ops host against the in-process Service. Synthetic accounts only; the
+# evaluator and mail provider are replaced at their transport seams. This is NOT evidence of a
+# real Studio app, SDK, school network, D1/R2, model or mailbox.
+on:
+  pull_request:
+    paths:
+      - 'chalk/**'
+      - 'worker/**'
+      - 'extensions/hypeproof-chat/**'
+      - 'scripts/classroom-*.mjs'
+      - 'e2e/classroom/**'
+      - 'e2e/package*.json'
+      - '.github/workflows/classroom-ops.yml'
+permissions:
+  contents: read
+jobs:
+  classroom-browser:
+    name: classroom / browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: worker
+      - run: npm ci
+        working-directory: chalk
+      - run: npm ci
+        working-directory: extensions/hypeproof-chat/webview-ui
+      - run: npm run build
+        working-directory: extensions/hypeproof-chat/webview-ui
+      - run: npm ci
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npm run test:classroom
+        working-directory: e2e
+      - run: npm run test:classroom-ops
+        working-directory: e2e
+      - run: npm run test:classroom-ops-roster
+        working-directory: e2e
+      - run: npm run test:classroom-report
+        working-directory: e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: classroom-ops-evidence
+          path: |
+            e2e/test-results/classroom-ops-roster/
+            e2e/test-results/classroom-report/
