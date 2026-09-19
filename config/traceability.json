@@ -1970,7 +1970,8 @@
       "depends_on": [
         "ST-REQ-CLASSROOM-ADMIN",
         "ST-DES-CLASSROOM-ADMIN",
-        "ST-TEST-CLASSROOM-ADMIN"
+        "ST-TEST-CLASSROOM-ADMIN",
+        "ST-REQ-CLASSROOM-DESIGN"
       ],
       "sources": [
         {
@@ -2038,6 +2039,12 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/runtime-reset.smoke.mjs"
+        },
+        {
+          "path": "worker/migrations/0014-classroom-ops-evidence-review.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-coaching.test.mjs"
         }
       ]
     },

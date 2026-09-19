@@ -198,6 +198,7 @@ export async function activate(context: vscode.ExtensionContext) {
     // #751 — remote classroom operations: learner-initiated, status-only, droppable.
     vscode.commands.registerCommand("hypeproof-chat.classroomConnect", () => classroomOps.connectInteractively()),
     vscode.commands.registerCommand("hypeproof-chat.classroomDisconnect", () => classroomOps.disconnectInteractively()),
+    vscode.commands.registerCommand("hypeproof-chat.classroomNotes", () => classroomOps.showCoachingNotes()),
 
     vscode.commands.registerCommand("hypeproof-chat.clearHistory", async () => {
       await provider.clearHistory();

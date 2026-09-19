@@ -25,6 +25,8 @@ export interface ExecutorResult { ok: boolean; code: string }
 export interface Executor {
   /** True when the action changes learner-visible state; such an action is never auto-retried. */
   mutating: boolean;
+  /** Closed argument check. Absent → the action takes no arguments at all. */
+  acceptsArgs?(args: Record<string, unknown>): boolean;
   run(signal: AbortSignal, command: CommandEnvelope): Promise<ExecutorResult>;
   /** Did the effect already happen? Consulted only after a crash between `running` and the final receipt. */
   postcondition?(command: CommandEnvelope): Promise<"done" | "not_done" | "unknown">;
@@ -101,7 +103,7 @@ export class CommandRunner {
       if (!c || typeof c.command_id !== "string" || this.state.entries.some((e) => e.envelope.command_id === c.command_id)) continue; // re-delivery
       const entry: JournalEntry = { envelope: c, state: "accepted", result_code: "", observed_at: this.deps.now(), settled: false, proceed: false };
       if (!this.deps.executors[c.action]) this.finish(entry, "unsupported", "unknown_action");
-      else if (c.args && Object.keys(c.args).length) this.finish(entry, "rejected", "args_not_allowed");
+      else if (c.args && Object.keys(c.args).length && !this.deps.executors[c.action]!.acceptsArgs?.(c.args)) this.finish(entry, "rejected", "args_not_allowed");
       else if (c.connection_epoch !== this.deps.epoch()) this.finish(entry, "rejected", "epoch_stale");
       else this.received.set(c.command_id, this.deps.monotonic());
       this.state.entries.push(entry); changed = true;
@@ -135,7 +137,7 @@ export class CommandRunner {
     const ex = this.deps.executors[c.action]!;
     this.running = true; this.finish(e, "running", "");
     await this.save(); // journal first: a crash from here on is recoverable without re-running
-    this.deps.notify?.(`강사가 ‘${c.action}’ 조치를 요청해 실행합니다.`);
+    if (ex.mutating) this.deps.notify?.(`강사가 ‘${c.action}’ 조치를 요청해 실행합니다.`);
     const abort = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined, timedOut = false;
     try {
       const result = await Promise.race([
