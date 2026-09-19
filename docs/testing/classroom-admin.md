@@ -291,4 +291,15 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 **코드는 있으나 실제 환경에서 NOT RUN:** 실제 macOS/Windows Studio에서의 단계 버튼·SDK fallback·reset·업로드 재개, 학교망, staging/운영 D1(0018 포함)·R2 삭제, 실제 Anthropic 호출로 만든 초안의 품질과 비용, Resend 계정·sandbox·실수신·실제 webhook, 실제 보호자 메일 클라이언트에서의 링크·PDF.
 
-**아직 코드가 없는 것(환경 대기가 아님):** 보고서의 누적 회차 ‘최근 반복된 패턴’ 본문 생성(현재는 검수자가 작성한다는 안내만), PDF의 메일 첨부(링크만 보냄), Kakao/SMS·QR, 링크 열람자의 본인 확인, 단계의 ‘강사 확인(reviewed)’ 입력 UI, 브라우저 e2e의 PR CI 편입, `refresh_connection`을 통한 토큰 원격 전달(하지 않기로 함 — 재발급은 기존 학생 초대 화면), 보존 기간 자동 실행(기간이 운영 결정으로 남아 cron을 두지 않음).
+**2026-09-20 후속 보강(같은 브랜치):** 앞 문장의 “아직 코드가 없는 것” 중 단계의 강사 확인 입력, 브라우저 e2e의 PR CI 편입, 보존 기간 자동 실행, 링크 열람자 확인은 구현했다(아래). 누적 패턴 본문·PDF 첨부·Kakao/SMS·QR·열람자 본인 인증은 [후속 범위](../requirements/classroom-admin.md#이번-인수-범위와-후속-범위-2026-09-20)로 분리했고 **이번 관제·단일 회차 보고서 인수의 합격 조건이 아니다.**
+
+- **평가 큐 정체(Codex 후속 재현)** `classroom-ops-evaluator.test.mjs` +6(총 13): OFF→ON에서 이전 `evaluator=none` 작업은 `superseded`, 학생당 평가 1회, 반복 호출 중복 0; Codex 재현 그대로(두 학생 각 1회, `more`가 끝남); evaluator 버전 변경 시 평가된 초안은 그대로 두고 미평가 작업만 재준비; legacy 7축이 앞에 있어도 Service가 lease하지 않음; 두 호출자 동시 실행은 서로 다른 job; 503은 그 작업만 30초→2분 쉬고(fake clock) 3회째 `failed`; runner는 선언한 종류만 받는다. 재현 스크립트(`.git/remote-classroom-evidence/review-20260919/followup-evaluator.mjs`) 재실행 결과 provider 호출 2회·정체 없음.
+- **강사 reviewed** `classroom-ops-coaching.test.mjs` +1: 진행 중 단계는 확인 불가(`step_not_submitted`), `observe`만 가진 강사 거부, 두 강사 동시 확인은 200/409, 오래된 revision 거부, 다음 단계는 ‘확인 전’. 브라우저 왕복에서 `결과를 확인했어요` → 행에 `(강사 확인함)`.
+- **보존 자동 실행** `classroom-ops-erasure.test.mjs` +3(총 6): 기간 미설정·잘못된 값 6종·전역 스위치 OFF는 무동작, 기간만 설정은 dry-run, 기한 전(fake clock) 대상 0, enforce에서 R2 장애 주입 → `started/content_delete_failed` → 다음 tick이 완료, 재실행 무해, tick 상한, 15분 tick은 실행하지 않고 일일 tick만 실행.
+- **링크 열람자 확인** `classroom-ops-delivery.test.mjs` +1(총 8)과 기존 링크 시험 갱신: GET은 질문만(보고서 내용 없음), 오답 403·남은 횟수, 구분자 섞인 정답 허용, 5회째 영구 잠금(정답도 404), 값 없는 수신자는 live 발송 제외·원장 0행, 승인 뒤 값 변경은 `approval_stale`, 잘못된 형식 4종 거부, DB·감사에 값 원문 없음. 브라우저에서 질문 → 오답 → 정답 → 보고서.
+- **PR CI** `.github/workflows/classroom-ops.yml`: 브라우저 e2e 4종. 확장 의존성을 숨긴 상태(CI와 같은 설치 집합)에서 로컬 통과를 확인했다. **GitHub에서의 첫 실행 결과는 PR 생성 뒤 확인한다.**
+- **격리 Mac host** `e2e/classroom/mac-devhost.mjs`([README](../../e2e/classroom/README.md)): `prepare`를 실제 실행 — 설치된 v0.1.16 앱은 변경되지 않았고, 복사본의 번들 4개 해시가 현재 빌드와 일치, 복사본 ad-hoc 서명 검증 통과. **`launch`(GUI 실행)와 실기 관찰은 하지 않았다.** 설치된 v0.1.16을 실행한 결과를 이 기능의 검증으로 기록하지 않는다.
+
+최종 회귀(2026-09-20, 이 브랜치 끝): worker test·typecheck, `test:classroom-ops:d1`(0011~0021), chalk test·typecheck, 확장 test·typecheck·build, e2e 4종, `next-work --check`, docs harness, `check-registry`, `check-workflow-shells` — 결과는 PR 본문의 검증 절에 HEAD와 함께 적는다.
+
+**아직 코드가 없는 것(환경 대기가 아님):** 위 후속 범위 표의 5개 항목.
