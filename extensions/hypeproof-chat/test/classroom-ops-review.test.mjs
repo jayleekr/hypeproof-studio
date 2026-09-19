@@ -102,3 +102,12 @@ test('F4 a step signal exists only for the learner\'s explicit action on a step 
   assert.equal(lessonStepSignal(null, { stepId: 'build', status: 'submitted' }), null, 'no confirmed lesson → no step is reported (the board shows unknown)');
   assert.equal(evidencePayload('change', {}).source_state, 'unverified', 'an unstated source is never reported as real');
 });
+
+test('F4 observers fire without awaiting: concurrent adds are persisted one after another, in order, and none is lost', async () => {
+  let active = 0, overlapped = false, saved = null;
+  const store = { load: async () => null, save: async (s) => { if (active++) overlapped = true; await new Promise((r) => setTimeout(r, 2)); saved = structuredClone(s); active--; } };
+  const box = await OpsOutbox.open(store, 'review-grant', 'review-boot', () => 1, () => crypto.randomUUID());
+  await Promise.all(Array.from({ length: 8 }, (_, i) => box.add('runtime', { status: i % 2 ? 'idle' : 'running' })));
+  assert.equal(overlapped, false, 'two saves never run at once (a shared temp file would be renamed away under the second)');
+  assert.deepEqual(saved.events.map((e) => e.seq), [1, 2, 3, 4, 5, 6, 7, 8]);
+});

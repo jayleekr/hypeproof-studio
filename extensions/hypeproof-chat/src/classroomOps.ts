@@ -181,6 +181,9 @@ export class OpsOutbox {
   private store: OutboxStore;
   private now: () => number;
   private uuid: () => string;
+  /** Writes are serialized: observers fire `add()` without awaiting, and two saves racing on one temp file lose an event. */
+  private chain: Promise<unknown> = Promise.resolve();
+  private persist(): Promise<void> { const next = this.chain.then(() => this.store.save(this.state)); this.chain = next.catch(() => undefined); return next; }
   // Explicit fields: the smoke tests load this file with Node's type stripping, which has no parameter properties.
   private constructor(store: OutboxStore, state: OutboxState, now: () => number, uuid: () => string) { this.store = store; this.state = state; this.now = now; this.uuid = uuid; }
 
@@ -203,9 +206,9 @@ export class OpsOutbox {
 
   /** Persisted before it is ever sent. Returns false when the cap refused it. */
   async add(kind: OpsEventKind, payload: Record<string, unknown>, actor: OpsActor = "system"): Promise<boolean> {
-    if (this.state.events.length >= OUTBOX_CAP) { this.state.refused++; await this.store.save(this.state); return false; }
+    if (this.state.events.length >= OUTBOX_CAP) { this.state.refused++; await this.persist(); return false; }
     this.state.events.push({ event_id: this.uuid(), seq: this.state.next_seq++, observed_at: this.now(), kind, actor, payload });
-    await this.store.save(this.state);
+    await this.persist();
     return true;
   }
 
@@ -225,7 +228,7 @@ export class OpsOutbox {
     if (bootId !== this.state.boot_id || !Number.isSafeInteger(contiguousSeq)) return 0;
     const before = this.state.events.length;
     this.state.events = this.state.events.filter((e) => e.seq > contiguousSeq);
-    if (this.state.events.length !== before) await this.store.save(this.state);
+    if (this.state.events.length !== before) await this.persist();
     return before - this.state.events.length;
   }
 }
