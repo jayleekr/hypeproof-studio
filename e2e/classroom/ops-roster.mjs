@@ -122,15 +122,22 @@ try {
 
   // ── real send is its own, confirmed step ──
   await page.getByRole('button', { name: '근거 확인하고 내용 승인' }).click(); await page.locator('#ops-reports-state').filter({ hasText: '검수 결과를 저장했습니다' }).waitFor();
-  assert.equal((await local.request('/admin/classroom/recipients', 'POST', { class_run_id: local.run, source_ref: 'synthetic-import', recipients: [{ student_id: 'student-01', recipient_ref: 'guardian-01', channel: 'email', address: 'guardian01@example.invalid' }] }, null, { authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') })).status, 201);
+  assert.equal((await local.request('/admin/classroom/recipients', 'POST', { class_run_id: local.run, source_ref: 'synthetic-import', recipients: [{ student_id: 'student-01', recipient_ref: 'guardian-01', channel: 'email', address: 'guardian01@example.invalid', viewer_check: { kind: 'phone_last4', value: '4821' } }] }, null, { authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') })).status, 201);
   Object.assign(local.env, { HPS_DELIVERY_PROVIDER: 'resend', RESEND_API_KEY: 'synthetic-not-a-key', HPS_DELIVERY_FROM: 'HypeProof <reports@example.invalid>', HPS_PUBLIC_BASE_URL: 'https://service.example.invalid' }); const mails = []; setResendFetch(async (_u, init) => { mails.push(JSON.parse(init.body)); return Response.json({ id: 'resend-e2e-000001' }); });
   await page.locator('#ops-recipients-go').click(); await page.locator('#ops-delivery-state').filter({ hasText: '보낼 메시지 1건' }).waitFor(); assert.match(await page.locator('#ops-delivery-list').innerText(), /g\*\*\*@example\.invalid/, 'the address is masked for the instructor');
   assert.equal(await page.locator('#ops-send-go').isDisabled(), true, 'nothing can be sent before approval'); await page.locator('#ops-approve-go').click(); await page.locator('#ops-delivery-state').filter({ hasText: '아직 아무것도 보내지 않았습니다' }).waitFor(); assert.equal(mails.length, 0);
   await page.locator('#ops-send-go').click(); assert.match(await page.locator('#ops-send-summary').innerText(), /회수할 수 없습니다/); assert.equal(mails.length, 0, 'asking is not sending'); await page.locator('#ops-send-yes').click();
   await page.locator('#ops-delivery-state').filter({ hasText: /발송 요청 1건 · 제공자 접수 1 · 접수는 전달이 아닙니다/ }).waitFor(); assert.equal(mails.length, 1); assert.deepEqual(mails[0].to, ['guardian01@example.invalid']);
+  // What the guardian meets: the link asks for the agreed value first; the report only opens with it.
+  { const link = mails[0].text.match(/https:\/\/service\.example\.invalid(\/v1\/classroom\/report-links\/[A-Za-z0-9-]+)/)[1], reader = await browser.newPage({ viewport: { width: 390, height: 800 } });
+    await reader.route('https://service.test/**', async (route) => { const q = route.request(), r = await local.app.fetch(new Request(q.url(), { method: q.method(), headers: q.headers(), ...(q.postData() ? { body: q.postData() } : {}) }), local.env, { waitUntil() {} }); await route.fulfill({ status: r.status, headers: Object.fromEntries(r.headers), body: Buffer.from(await r.arrayBuffer()) }); });
+    await reader.goto('https://service.test' + link); assert.match(await reader.locator('label').innerText(), /보호자 휴대전화 번호 끝 4자리/); assert.equal(await reader.getByText('예약 버튼이 모바일에서').count(), 0, 'nothing of the report before the check');
+    await reader.locator('#check').fill('0000'); await reader.keyboard.press('Enter'); await reader.locator('[role=alert]').filter({ hasText: '남은 시도 4회' }).waitFor();
+    await reader.locator('#check').fill('4821'); await reader.keyboard.press('Enter'); await reader.getByRole('heading', { name: '이번 수업에서 관찰된 행동' }).waitFor(); assert.match(await reader.locator('blockquote').first().innerText(), /예약 버튼이 모바일에서/);
+    await reader.screenshot({ path: path.join(out, 'reader-after-check.png') }); await reader.close(); }
   await page.locator('#ops-send-go').evaluate((b) => { b.disabled = false; }); await page.locator('#ops-send-go').click(); await page.locator('#ops-send-yes').click(); await page.locator('#ops-delivery-list').filter({ hasText: '다시 보내지 않음' }).waitFor(); assert.equal(mails.length, 1, 'pressing send again sends nothing again');
   assert.deepEqual(errors, []); await page.screenshot({ path: path.join(out, 'finish-and-send.png'), fullPage: true });
-  ok('chalk: approval ≠ send; real send needs its own confirmation; accepted ≠ delivered; a second press sends nothing');
+  ok('chalk: approval ≠ send; real send needs its own confirmation; accepted ≠ delivered; the reader passes the viewer check; a second press sends nothing');
   await host.disconnectInteractively();
   console.log(`${n} roster/round-trip checks passed → ${out}`);
 } finally { setEvaluatorTransport(undefined); setResendFetch(undefined); globalThis.fetch = realFetch; await browser?.close(); chalkServer.close(); webviewServer.close(); local.close(); }
