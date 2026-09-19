@@ -1922,6 +1922,33 @@
       ]
     },
     {
+      "id": "ST-IMP-REHEARSAL-TICKET",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/rehearsal-ticket.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-REHEARSAL-TICKET",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-IMP-REHEARSAL-TICKET"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/rehearsal-ticket.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-CLASSROOM-ADMIN",
       "stage": "requirement",
       "owner": "jayleekr",
