@@ -23,7 +23,7 @@ import {
   RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
   newPairingTicket, normalizeTicket, parseFlags, parseLesson, pollAfterMs, sha256Hex, shouldApply, signalOf,
   stepDisposition, validateEvent, type OpsCapability, type SeatState,
-  REVIEW_STATES, COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
+  REVIEW_STATES, SERVICE_ISSUED_ACTIONS, COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
 } from '../lib/classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -477,7 +477,7 @@ async function commandExchange(db: Db, g: GrantRow, instance: string, receiptsIn
     const rows = ((await db.prepare(`SELECT t.command_id,t.lease_generation,t.expires_at,t.connection_epoch,c.action,c.args_json,c.created_at FROM ops_command_targets t JOIN ops_commands c ON c.id=t.command_id WHERE t.class_run_id=? AND t.seat_id=? AND t.grant_id=? AND t.state='leased' AND t.lease_instance=? AND t.lease_generation=? AND t.expires_at>? ORDER BY c.created_at LIMIT 10`).bind(g.class_run_id, g.seat_id, g.id, instance, lease.generation, now).all()).results ?? []) as Array<{ command_id: string; lease_generation: number; expires_at: number; connection_epoch: number; action: string; args_json: string; created_at: number }>;
     commands = rows.map((r) => ({ schema_version: OPS_SCHEMA_VERSION, command_id: r.command_id, action: r.action, args: JSON.parse(r.args_json), lease_generation: r.lease_generation, connection_epoch: r.connection_epoch, issued_at: r.created_at,
       // Relative, so a wrong device clock cannot stretch the window; the device counts it down monotonically.
-      start_within_ms: r.expires_at - now, run_within_ms: COMMAND_ACTIONS[r.action]?.runMs ?? 0 }));
+      start_within_ms: r.expires_at - now, run_within_ms: COMMAND_ACTIONS[r.action]?.runMs ?? SERVICE_ISSUED_ACTIONS[r.action]?.runMs ?? 0 }));
   }
   return { commands, receipt_acks, lease: owner ? 'owner' as const : 'observer' as const };
 }

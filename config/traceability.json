@@ -2045,6 +2045,24 @@
         },
         {
           "path": "worker/test/classroom-ops-coaching.test.mjs"
+        },
+        {
+          "path": "worker/src/routes/classroom-collect.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-collect.ts"
+        },
+        {
+          "path": "worker/migrations/0015-classroom-collection.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-collect.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/evidenceSnapshot.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-snapshot-device.test.mjs"
         }
       ]
     },
