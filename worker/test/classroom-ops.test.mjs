@@ -196,15 +196,48 @@ try {
     assert.ok(!dump.includes('hpsops1.')); assert.ok(!dump.includes(credential.split('.')[2])); assert.ok(!/[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{40,}/.test(dump));
   });
   await check('AT-33 slice: fresh schema.sql equals the previous schema plus migration 0011, and the migration is re-runnable', async () => {
-    const { DatabaseSync } = await import('node:sqlite'); const { readFileSync } = await import('node:fs'); const { execFileSync } = await import('node:child_process');
+    const { DatabaseSync } = await import('node:sqlite'); const { readFileSync } = await import('node:fs');
     const shape = (d) => JSON.stringify(d.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all().map((r) => [r.type, r.name, (r.sql ?? '').replace(/\s+/g, ' ')]));
     const migration = readFileSync(new URL('../migrations/0011-classroom-ops.sql', import.meta.url), 'utf8');
-    const before = execFileSync('git', ['show', '75fe6e4:worker/schema.sql'], { encoding: 'utf8' });
+    // Checked-in copy of schema.sql as it was before 0011: no git, no pinned SHA, works in a shallow CI checkout.
+    const before = readFileSync(new URL('./fixtures/schema-pre-0011.sql', import.meta.url), 'utf8');
     const upgraded = new DatabaseSync(':memory:'); upgraded.exec(before); upgraded.exec("INSERT INTO cohorts(id,display_name) VALUES('c','c')"); upgraded.exec(migration); upgraded.exec(migration);
     const fresh = new DatabaseSync(':memory:'); fresh.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
     assert.equal(shape(upgraded), shape(fresh)); assert.equal(upgraded.prepare('SELECT count(*) n FROM cohorts').get().n, 1);
     assert.ok(!/\b(DROP|ALTER|DELETE|UPDATE)\b/i.test(migration.replace(/^--.*$/gm, '').replace(/ON DELETE CASCADE/g, '')));
     upgraded.close(); fresh.close();
+  });
+  await check('review #1120: one NAT address pairs 100 seats, only failed tickets spend the rate budget', async () => {
+    const nat = await localOps(); try {
+      await nat.freeze(); const seats = Array.from({ length: 100 }, (_, i) => ({ seat_id: `S${i + 1}`, student_id: `student-${i + 1}` }));
+      const { setRoster } = await import('../src/lib/kv.ts'); await setRoster(nat.env.HPS_KV, nat.cohort, seats.map((x) => x.student_id));
+      assert.equal((await nat.configure(seats)).status, 201);
+      for (const seat of seats) { const r = await nat.pair(seat.seat_id, 1); assert.equal(r.conn.status, 201, `${seat.seat_id}: ${r.conn.raw}`); }
+      const guess = () => nat.request('/v1/classroom/ops/connect', 'POST', { ticket: 'AAAA-BBBB-CCCC', ...nat.instance(1) }, null);
+      for (let i = 0; i < 30; i++) assert.equal((await guess()).status, 403);
+      const limited = await guess(); assert.equal(limited.status, 429); assert.equal(limited.json.reason, 'rate_limited');
+      // A valid ticket is refused too while the address is blocked: the guesser cannot keep probing.
+      const p = await nat.request(nat.base + '/pairings', 'POST', { seat_id: 'S1', roster_revision: 1 });
+      assert.equal((await nat.request('/v1/classroom/ops/connect', 'POST', { ticket: p.json.ticket, ...nat.instance(2) }, null)).status, 429);
+    } finally { nat.close(); }
+  });
+  await check('review #1120: a failed epoch advance is reported, never hidden, and never fails the mint', async () => {
+    const e = await localOps(); try {
+      await e.freeze(); assert.equal((await e.configure([{ seat_id: 'A1', student_id: 'student-a' }])).status, 201); await e.pair('A1', 1);
+      const okMint = await e.request('/admin/tokens/issue', 'POST', { u: 'student-a', c: e.cohort, p: e.profile, hours: 2 }); assert.deepEqual(okMint.json.ops, { epoch_advanced: true });
+      e.fail('connection_epoch=connection_epoch+1');
+      const mint = await e.request('/admin/tokens/issue', 'POST', { u: 'student-a', c: e.cohort, p: e.profile, hours: 2 }); e.fail(null);
+      assert.equal(mint.status, 200, mint.raw); assert.ok(mint.json.token); assert.deepEqual(mint.json.ops, { epoch_advanced: false });
+    } finally { e.close(); }
+  });
+  await check('review #1120: the ack cursor advances for a batch of rejected events without a state write', async () => {
+    const k = await localOps(); try {
+      await k.freeze(); assert.equal((await k.configure([{ seat_id: 'A1', student_id: 'student-a' }])).status, 201); const cred = (await k.pair('A1', 1)).conn.json.credential;
+      assert.equal((await k.sync(cred, [k.event(1, 'runtime', { status: 'ready' })])).status, 200);
+      const r = await k.sync(cred, [k.event(2, 'runtime', { status: 'ready', secret: 'x' }), k.event(3, 'runtime', { status: 'ready', secret: 'y' })]);
+      assert.equal(r.status, 200, r.raw); assert.equal(r.json.ack.contiguous_seq, 3); assert.equal(r.json.rejected.length, 2);
+      assert.equal(k.db.prepare('SELECT contiguous_seq n FROM ops_device_connections').get().n, 3, 'stored cursor follows the acked stream');
+    } finally { k.close(); }
   });
   console.log(`${count} remote classroom operations controls passed`);
 } finally { f.close(); }
