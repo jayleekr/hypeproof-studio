@@ -653,6 +653,7 @@ export function ChatPanel(props: Props) {
           setCurrentStepId(step.id);
           const lesson = config?.profile?.lesson;
           if (!lesson) return;
+          postToHost({ type: 'lessonStep', stepId: step.id, status: 'in_progress' });
           handleChip({
             style: 'good',
             text: `수업: ${lesson.content.title} (${lesson.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`,
@@ -707,7 +708,10 @@ export function ChatPanel(props: Props) {
               // catch the eye first. Emphasize both and "what to do now" becomes two things.
               className="hp-cta-quiet"
               disabled={!learning.complete.ok}
-              onClick={() => postToHost({ type: "submitTask", task: learning.task })}
+              onClick={() => {
+                if (currentStepId) postToHost({ type: 'lessonStep', stepId: currentStepId, status: 'submitted' });
+                postToHost({ type: "submitTask", task: learning.task });
+              }}
             >
               이 과제 완료하기
             </button>

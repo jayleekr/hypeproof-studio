@@ -376,6 +376,8 @@ export type WebviewMessage = (
   // Trace signals (#9). Webview fires; host forwards via POST /v1/trace/event.
   // The host-side HTTP forwarding lands in a follow-up — keep these in sync
   // with worker/src/routes/trace.ts TraceEvent union.
+  // #751 F4 — explicit learner step action in the lesson panel (never inferred from chat volume).
+  | { type: "lessonStep"; stepId: string; status: "in_progress" | "submitted" }
   | { type: "traceTrialStart"; taskLabel?: string }
   | { type: "traceTrialEnd"; trialId: string }
   | {
