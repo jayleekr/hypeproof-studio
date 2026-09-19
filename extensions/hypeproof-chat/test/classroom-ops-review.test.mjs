@@ -47,3 +47,30 @@ test('F2 a late control response cannot restore the disconnected instructor hold
   const f = await pendingSync(); f.loop.stop();
   assert.equal((await f.finish()).controls, 0);
 });
+
+// ── added with the fix: re-pairing and a command that is already running ──
+test('F2 re-pairing: a response addressed to the previous connection cannot act once a new connection is running', async () => {
+  const old = await pendingSync(), fresh = await pendingSync();
+  old.loop.stop(); // what the host does when the learner pairs again
+  assert.deepEqual(await old.finish(), { executions: 0, controls: 0 }, 'the previous connection is void');
+  try { assert.deepEqual(await fresh.finish(), { executions: 1, controls: 1 }, 'the new connection works normally'); }
+  finally { fresh.loop.stop(); }
+});
+test('F2 mid-run disconnect: the running action is asked to stop, and its result is reported as unknown — not as stopped or failed', async () => {
+  let aborted = false, release;
+  const command = { schema_version: 1, command_id: 'review-running', action: 'reset_runtime', args: {}, lease_generation: 1, connection_epoch: 3, issued_at: 1, start_within_ms: 120000, run_within_ms: 60000 };
+  const runner = new CommandRunner({
+    executors: { reset_runtime: { mutating: true, run: (signal) => new Promise((resolve) => { release = resolve; signal.addEventListener('abort', () => { aborted = true; resolve({ ok: false, code: 'aborted' }); }); }) } },
+    journal: memory(), now: () => 1, monotonic: () => 1, epoch: () => 3,
+  });
+  await runner.recover(); await runner.onCommands([command]);
+  const running = runner.onAcks([{ command_id: command.command_id, state: 'accepted', proceed: true, reason: '' }]);
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(runner.pendingReceipts()[0].state, 'running', 'precondition: the effect has started');
+  runner.close(); await running; void release;
+  assert.equal(aborted, true, 'a stop was requested');
+  const receipt = runner.pendingReceipts()[0];
+  assert.deepEqual([receipt.state, receipt.result_code], ['outcome_unknown', 'connection_closed'], 'a state-changing action that was interrupted is unknown, never assumed undone');
+  await runner.onCommands([{ ...command, command_id: 'review-after-close' }]);
+  assert.equal(runner.pendingReceipts().length, 1, 'a closed runner accepts nothing new');
+});
