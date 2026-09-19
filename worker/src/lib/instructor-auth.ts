@@ -66,6 +66,10 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   // #748 — 같은 모양의 읽기 전용 카탈로그. 강사가 좁힐 수 있는 기능 목록을
   // 컴파일된 프로필에서 파생해 돌려준다. Chalk 포워더도 이 목록을 그대로 쓴다.
   if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/features\/[^/]+$/.test(path)) return true;
+  // #1151 — 확정을 누르기 전에 무엇이 막는지 묻는 읽기 전용 점검. 위 카탈로그 둘과
+  // 같은 모양이다: GET 이고, 저장하지 않으며, 핸들러가 issuer 신원·코호트·소유자를
+  // 그대로 다시 검사한다. Chalk 포워더도 이 목록을 그대로 쓴다.
+  if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/assessment$/.test(path)) return true;
   if (method === 'POST' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/versions\/[^/]+\/participants$/.test(path)) return true;
   if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/classroom\/shares(?:\/[^/]+)?$/.test(path)) return true;
   // Chalk authoring: handlers still enforce issuer identity, cohort/profile and owner.
