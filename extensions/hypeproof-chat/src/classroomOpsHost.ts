@@ -7,6 +7,7 @@ import * as vscode from "vscode";
 import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import * as path from "path";
+import { CommandRunner, type Executor, type JournalState } from "./classroomOpsCommands";
 import {
   ChangeGate, OPS_CLIENT_CAPABILITIES, OPS_PROTOCOL, OpsOutbox, activationPayload, classifyFailure, errorPayload,
   runtimePayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
@@ -15,6 +16,15 @@ import {
 const CREDENTIAL_KEY = "hypeproof.classroomOps.credential";
 const META_KEY = "hypeproof.classroomOps.connection";
 interface ConnectionMeta { grant_id: string; class_run_id: string; seat_id: string; expires_at: number; poll_after_ms: number }
+
+/** The only things a remote command may touch. No shell, no file access, no history, no arbitrary VS Code command. */
+export interface ClassroomOpsActions {
+  hasActiveRun(): boolean;
+  /** Re-verify the stored learning token against the Service without changing panel state. */
+  probeProfile(): Promise<{ ok: boolean; status?: number; code?: string; requestId?: string; network?: boolean; noToken?: boolean }>;
+  refreshProfile(): Promise<boolean>;
+  recoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; healthy: boolean }>;
+}
 
 /** What the chat provider is allowed to tell this adapter. No message text, no paths. */
 export interface ClassroomOpsObserver {
@@ -32,9 +42,38 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   private readonly context: vscode.ExtensionContext;
   private readonly runtime: () => { idleMs: number; status: RuntimeStatus };
   private readonly log: (line: string) => void;
+  private readonly actions: ClassroomOpsActions;
+  private epoch = 0;
+  private token = "";
 
-  constructor(context: vscode.ExtensionContext, runtime: () => { idleMs: number; status: RuntimeStatus }, log: (line: string) => void) {
-    this.context = context; this.runtime = runtime; this.log = log;
+  constructor(context: vscode.ExtensionContext, runtime: () => { idleMs: number; status: RuntimeStatus }, actions: ClassroomOpsActions, log: (line: string) => void) {
+    this.context = context; this.runtime = runtime; this.actions = actions; this.log = log;
+  }
+
+  /** R2 low-risk set. Each is read-only or re-connects something that already exists. */
+  private executors(): Record<string, Executor> {
+    return {
+      retry_diagnostics: { mutating: false, run: async () => {
+        let reachable = false;
+        try { reachable = (await fetch(`${this.base()}/health`, { signal: AbortSignal.timeout(4000) })).ok; } catch { reachable = false; }
+        if (!reachable) return { ok: true, code: "service_unreachable" };
+        const p = await this.actions.probeProfile();
+        if (p.noToken) return { ok: true, code: "no_token" };
+        this.profileResult(p, this.token);
+        return { ok: true, code: p.ok ? "token_ok" : p.network ? "profile_network" : `profile_${p.status ?? 0}` };
+      } },
+      refresh_connection: { mutating: false, run: async () => {
+        // Never under a running turn: a refresh must not disturb work in progress.
+        if (this.actions.hasActiveRun()) return { ok: false, code: "busy_active_run" };
+        return (await this.actions.refreshProfile()) ? { ok: true, code: "profile_verified" } : { ok: false, code: "profile_not_verified" };
+      } },
+      restart_preview: { mutating: false, run: async () => {
+        const r = await this.actions.recoverPreview();
+        if (r.state === "no_preview") return { ok: false, code: "no_preview" };
+        // A restarted server has a new port: say so rather than claim the open tab recovered.
+        return r.healthy ? { ok: true, code: r.state === "reloaded" ? "preview_reloaded" : "preview_restarted_new_url" } : { ok: false, code: "preview_unhealthy" };
+      } },
+    };
   }
 
   private base(): string {
@@ -64,7 +103,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     try {
       res = await fetch(`${this.base()}/classroom/ops/connect`, {
         method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10000),
-        body: JSON.stringify({ ticket, app_instance_id: this.appInstanceId, boot_id: randomUUID(), protocol: OPS_PROTOCOL, capabilities: OPS_CLIENT_CAPABILITIES, app_version: this.version() }),
+        body: JSON.stringify({ ticket, app_instance_id: this.appInstanceId, boot_id: randomUUID(), protocol: OPS_PROTOCOL, capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(this.executors())], app_version: this.version() }),
       });
     } catch {
       void vscode.window.showWarningMessage("서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 같은 코드로 다시 시도하세요."); return;
@@ -102,7 +141,20 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       load: async () => { try { return JSON.parse(await fs.readFile(file, "utf8")) as OutboxState; } catch { return null; } },
       save: async (s) => { const tmp = `${file}.${process.pid}.tmp`; await fs.writeFile(tmp, JSON.stringify(s), "utf8"); await fs.rename(tmp, file); },
     }, meta.grant_id, randomUUID(), () => Date.now(), randomUUID);
+    const executors = this.executors(), journalFile = path.join(dir, `classroom-ops-journal-${meta.grant_id}.json`);
+    const runner = new CommandRunner({
+      executors, monotonic: () => performance.now(), now: () => Date.now(), epoch: () => this.epoch, log: this.log,
+      journal: {
+        load: async () => { try { return JSON.parse(await fs.readFile(journalFile, "utf8")) as JournalState; } catch { return null; } },
+        save: async (s) => { const tmp = `${journalFile}.${process.pid}.tmp`; await fs.writeFile(tmp, JSON.stringify(s), "utf8"); await fs.rename(tmp, journalFile); },
+      },
+      // The learner always sees that an instructor acted; their own Stop and files are untouched.
+      notify: (line) => void vscode.window.showInformationMessage(line),
+    });
+    await runner.recover();
     this.loop = startOpsSync({
+      capabilities: ["observe", "commands", ...Object.keys(executors)], onEpoch: (e) => { this.epoch = e; },
+      commands: runner as unknown as NonNullable<Parameters<typeof startOpsSync>[0]["commands"]>,
       post: (body, timeoutMs) => this.post(credential, body, timeoutMs), outbox: this.outbox, appInstanceId: this.appInstanceId,
       sample: () => { const r = this.runtime(); const changed = this.runtimeGate.next(r.status); if (changed) void this.outbox?.add("runtime", runtimePayload(changed)); return { idle_ms: Math.max(0, Math.round(r.idleMs)), runtime_status: r.status }; },
       now: () => Date.now(), random: Math.random, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
@@ -125,6 +177,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   // ── observations from the chat provider ──
 
   profileResult(r: { ok: boolean; status?: number; code?: string; requestId?: string; network?: boolean }, token: string): void {
+    this.token = token || this.token;
     if (!this.outbox) return;
     const id = tokenIdentityUnverified(token);
     if (r.ok) {

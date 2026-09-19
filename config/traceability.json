@@ -2005,6 +2005,24 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/classroom-ops.smoke.mjs"
+        },
+        {
+          "path": "worker/migrations/0012-classroom-ops-commands.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-commands.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-device.test.mjs"
+        },
+        {
+          "path": "worker/test/fixtures/schema-pre-0011.sql"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomOpsCommands.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-commands.smoke.mjs"
         }
       ]
     },

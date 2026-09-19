@@ -11,8 +11,7 @@ let f;
 try {
   const db = await mf.getD1Database('HPS_DB');
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run(); };
-  await apply(readFileSync(new URL('../migrations/0011-classroom-ops.sql', import.meta.url), 'utf8'));
-  await apply(readFileSync(new URL('../migrations/0011-classroom-ops.sql', import.meta.url), 'utf8'));
+  for (let i = 0; i < 2; i++) for (const m of ['0011-classroom-ops', '0012-classroom-ops-commands']) await apply(readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), 'utf8'));
   await db.prepare('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, cohort_id TEXT, profile_id TEXT, starts_at TEXT, ends_at TEXT, ended_at TEXT)').run();
   f = await localOps({ binding: db });
   const seats = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }];
@@ -35,5 +34,10 @@ try {
   for (const [i, r] of race.entries()) if (r.status === 409) assert.equal((await f.sync(credential, [], n)).status, 200, 'resend after conflict ' + i);
   assert.equal((await db.prepare('SELECT count(*) AS n FROM ops_events').first()).n, 4);
   const s = await f.request(f.base + '/status'); assert.equal(s.status, 200, s.raw); assert.equal(s.json.seats.length, live.length);
-  console.log('PASS actual local workerd/D1: re-runnable migration 0011, atomic roster CAS, single-use pairing under 4 parallel connects, state CAS, one-read status');
+  // R2 on real D1: same idempotency key in parallel records one command; one window leases it.
+  assert.equal((await f.configure(live.map((id) => ({ seat_id: id, student_id: id === 'B1' ? 'student-c' : id === 'A1' ? 'student-a' : 'student-b' })), 1, { lesson: undefined, flags: { ops_commands: true } })).status, 200);
+  const key = crypto.randomUUID(), enq = await Promise.all([1, 2, 3, 4].map(() => f.command('retry_diagnostics', [seat], { expected_roster_revision: 2, idempotency_key: key })));
+  assert.deepEqual(enq.map((r) => r.status).sort(), [200, 200, 200, 202], enq.map((r) => r.raw).join()); assert.equal((await db.prepare('SELECT count(*) AS n FROM ops_commands').first()).n, 1);
+  const windows = await Promise.all([n, 8, 9].map((w) => f.sync(credential, [], w))); assert.equal(windows.filter((r) => r.json?.commands?.length === 1).length, 1, 'exactly one window receives the command'); assert.equal(windows.filter((r) => r.json?.lease === 'owner').length, 1);
+  console.log('PASS actual local workerd/D1: re-runnable migration 0011, atomic roster CAS, single-use pairing under 4 parallel connects, state CAS, one-read status, idempotent parallel enqueue, single lease owner');
 } finally { f?.close(); await mf.dispose(); }

@@ -159,7 +159,21 @@ export async function activate(context: vscode.ExtensionContext) {
   // kids-quest — skeleton round result → next-turn context for the coach.
   context.subscriptions.push(preview.onResult((r) => provider.attachQuestResult(r)));
 
-  const classroomOps = new ClassroomOpsHost(context, () => provider.opsRuntime(), (line) => console.log(line));
+  const classroomOps = new ClassroomOpsHost(context, () => provider.opsRuntime(), {
+    hasActiveRun: () => provider.hasActiveStream(),
+    probeProfile: async () => {
+      const token = await context.secrets.get(TOKEN_KEY);
+      if (!token) return { ok: false, noToken: true };
+      const r = await fetchProfileResult({ token, proxyUrl: vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1") });
+      return r.ok ? { ok: true } : { ok: false, status: r.failure.status, code: r.failure.reason === "expired" ? "expired" : undefined, requestId: r.failure.requestId, network: r.failure.reason === "network" };
+    },
+    refreshProfile: async () => !!(await provider.ensureProfile(true)),
+    recoverPreview: async () => {
+      const probe = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(4000) })).status < 500; } catch { return false; } };
+      const r = await liveServer.recover(probe);
+      return { state: r.state, healthy: r.url ? await probe(r.url) : false };
+    },
+  }, (line) => console.log(line));
   provider.opsObserver = classroomOps;
   void classroomOps.resume();
   context.subscriptions.push(

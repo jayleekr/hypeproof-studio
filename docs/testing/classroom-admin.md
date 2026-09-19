@@ -134,3 +134,14 @@ npm --prefix chalk run typecheck
 - `node --experimental-strip-types test/classroom-ops.smoke.mjs`(5 PASS): payload builder ↔ Service validator drift lock(양성·음성 대조), 안전하지 않은 문자열 제거, 401을 만료로 승격하지 않는 분류, outbox의 전송 전 영속·contiguous ack로만 삭제·재시작 후 seq 연속·다른 grant 비상속·상한 도달 시 명시적 거부, sync의 ack 없는 2xx 무삭제·5→10→20→60초 backoff·single-flight·Service 지정 주기·401 영구 중지·Retry-After·기능 OFF 시 저빈도·±20% jitter.
 - 회귀: 확장 `npm test`(전체 smoke)·`npm run typecheck`·`npm run build:extension` exit 0. 신고 메타의 `studio_version`은 상수 대신 설치된 package 버전을 쓴다.
 - **NOT RUN (BLOCKED: 실제 앱 필요):** 설치된 Studio에서의 코드 입력→연결→보드 반영, 재시작 후 outbox 재개, 다중 창, Windows, 학교망 TLS proxy, 45초 heartbeat와의 병합(현재는 기존 heartbeat를 그대로 두고 sync를 추가로 보낸다 — 중복 제거는 실측 뒤). 단계(step) 이벤트는 builder와 Service 계약만 있고 App의 수업 단계 UI 연결은 아직 없다.
+
+### R2 명령 원장과 저위험 조치 · 2026-09-18
+
+대상: `worker/migrations/0012-classroom-ops-commands.sql`, Service의 enqueue/조회/취소와 sync 안의 lease·receipt 교환, App `classroomOpsCommands.ts`(허용목록 실행기·실행 전 재확인·저널 우선·crash 복구)와 host 실행기 3종(`retry_diagnostics`, `refresh_connection`, `restart_preview`), Chalk 좌석별/선택 좌석 조치. 허용목록 밖 action·인자·임의 셸/URL/VS Code command/경로는 계약에 없다. 별도 OS agent 없음.
+
+- `npm --prefix worker run test:classroom-ops`(명령 12 PASS 포함): AT-19 flag OFF·capability 없음·학생·타 cohort·비허용 action 6종·인자 3종 거부와 원장 무기록. AT-20 202=queued이며 성공 아님, 대상별 `queued/unsupported/not_connected` 사전 판정, 같은 key 재전송은 기존 명령·다른 payload 409, 동일 key 3중 동시 요청 1건 기록, enqueue+audit 원자성(감사 실패 시 명령·대상 0건), 취소는 미시작 대상만. AT-21 lease owner 창만 수신·다른 창은 observer, 응답 유실 시 재전달, 잘못된 generation/epoch/좌석/역행 상태/자유 문자열 receipt 거부, terminal 결과 불변, TTL 경과 시 `expired`+proceed=false, 시작 후 무영수증은 `outcome_unknown`. AT-23 토큰 재발급·기기 재pairing 뒤 옛 epoch 명령 미전달(`epoch_stale`). AT-25 명령 권한 조회 실패 시 명령 0건 전달·관측 ack는 유지. AT-33 fresh schema = 이전 + 0011 + 0012.
+- `npm --prefix worker run test:classroom-ops:d1`(로컬 workerd/D1): 같은 idempotency key 4중 동시 enqueue → 명령 1건, 3개 창 동시 sync → lease owner 1·명령 수신 1.
+- 확장 `test/classroom-ops-commands.smoke.mjs`(5 PASS): 미등록 action=unsupported, 인자/epoch 거절, proceed 전 실행 0, 실행 전 `running` 저널 영속, 반복 proceed 재실행 0, monotonic 시작 창(벽시계 역행 무시), Service가 expired라 하면 미실행, mutating timeout=`outcome_unknown`, 예외 문자열 비노출, crash 복구는 postcondition만 보고 재실행 0, 실제 Service 원장과의 queued→leased→accepted→running→succeeded·응답 2회 유실·이중 실행 0.
+- `npm --prefix e2e run test:classroom-ops`: 브라우저→Chalk→Service←실제 기기 클라이언트 코드(in-process)로 단일 조치 성공과 결과 코드 표시, 일괄 조치의 `전달 가능/기기 연결 없음` 사전 표시, 미확정 상태에서 ‘모두 완료’ 미표시.
+- 회귀: worker/chalk `npm test`·typecheck, 확장 `npm test`·typecheck·`build:extension`, 기존 `test:classroom` e2e 모두 exit 0.
+- **NOT RUN (BLOCKED: 실제 앱·OS 필요):** host 실행기 3종의 실제 Studio 동작(실제 preview 서버 복구·profile 재확인), 실제 프로세스 kill 후 저널 복구, 다중 창 lease 인계(150초), Windows, 클라이언트 시계 왜곡 실기. `refresh_connection`의 토큰 재발급·기기 전달은 미구현(현재는 기존 토큰 재검증만).

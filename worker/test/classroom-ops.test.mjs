@@ -195,18 +195,6 @@ try {
     const dump = ['ops_grants', 'ops_audit', 'ops_events', 'ops_latest_state', 'ops_token_issues'].map((t) => JSON.stringify(f.db.prepare('SELECT * FROM ' + t).all())).join('\n');
     assert.ok(!dump.includes('hpsops1.')); assert.ok(!dump.includes(credential.split('.')[2])); assert.ok(!/[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{40,}/.test(dump));
   });
-  await check('AT-33 slice: fresh schema.sql equals the previous schema plus migration 0011, and the migration is re-runnable', async () => {
-    const { DatabaseSync } = await import('node:sqlite'); const { readFileSync } = await import('node:fs');
-    const shape = (d) => JSON.stringify(d.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all().map((r) => [r.type, r.name, (r.sql ?? '').replace(/\s+/g, ' ')]));
-    const migration = readFileSync(new URL('../migrations/0011-classroom-ops.sql', import.meta.url), 'utf8');
-    // Checked-in copy of schema.sql as it was before 0011: no git, no pinned SHA, works in a shallow CI checkout.
-    const before = readFileSync(new URL('./fixtures/schema-pre-0011.sql', import.meta.url), 'utf8');
-    const upgraded = new DatabaseSync(':memory:'); upgraded.exec(before); upgraded.exec("INSERT INTO cohorts(id,display_name) VALUES('c','c')"); upgraded.exec(migration); upgraded.exec(migration);
-    const fresh = new DatabaseSync(':memory:'); fresh.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
-    assert.equal(shape(upgraded), shape(fresh)); assert.equal(upgraded.prepare('SELECT count(*) n FROM cohorts').get().n, 1);
-    assert.ok(!/\b(DROP|ALTER|DELETE|UPDATE)\b/i.test(migration.replace(/^--.*$/gm, '').replace(/ON DELETE CASCADE/g, '')));
-    upgraded.close(); fresh.close();
-  });
   await check('review #1120: one NAT address pairs 100 seats, only failed tickets spend the rate budget', async () => {
     const nat = await localOps(); try {
       await nat.freeze(); const seats = Array.from({ length: 100 }, (_, i) => ({ seat_id: `S${i + 1}`, student_id: `student-${i + 1}` }));
