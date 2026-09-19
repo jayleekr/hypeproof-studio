@@ -13,7 +13,7 @@ import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth'
 import { ID_RE, parseFlags, sha256Hex, type OpsCapability } from '../lib/classroom-ops';
 import { composeReport, modelById } from '../lib/classroom-report';
 import { REPORT_PAGE_CSP, renderReportHtml } from '../lib/classroom-report-html';
-import { APPROVAL_TTL_MS, EMAIL_RE, LINK_TTL_MS, TEMPLATE_RE, deliveryKey, dryRunAdapter, maskAddress, nextDeliveryState, type DeliveryAdapter } from '../lib/classroom-delivery';
+import { APPROVAL_TTL_MS, EMAIL_RE, LINK_TTL_MS, MAX_VIEWER_ATTEMPTS, TEMPLATE_RE, VIEWER_CHECK_KINDS, VIEWER_CHECK_PROMPT, deliveryKey, dryRunAdapter, maskAddress, nextDeliveryState, sameHash, viewerCheckHash, type DeliveryAdapter, type ViewerCheckKind } from '../lib/classroom-delivery';
 import { EMAIL_TEMPLATES, resendAdapter, resendConfigured, resendEventKind, verifySvix } from '../lib/classroom-delivery-resend';
 import { opsEnabled } from './classroom-ops';
 
@@ -53,10 +53,14 @@ classroomDeliveryOperator.post('/classroom/recipients', async (c) => {
   if (!b || !ID_RE.test(b.class_run_id) || typeof b.source_ref !== 'string' || !/^[A-Za-z0-9_.:-]{4,128}$/.test(b.source_ref) || !Array.isArray(b.recipients) || !b.recipients.length || b.recipients.length > 400) return c.json({ error: 'class_run_id, source_ref and recipients[] required' }, 400);
   const seats = new Set((((await db.prepare('SELECT student_id FROM class_run_seats WHERE class_run_id=? AND replaced_at IS NULL').bind(b.class_run_id).all()).results ?? []) as Array<{ student_id: string }>).map((r) => r.student_id));
   for (const r of b.recipients) if (!r || !seats.has(r.student_id) || !ID_RE.test(r.recipient_ref ?? '') || r.channel !== 'email' || !EMAIL_RE.test(r.address ?? '')) return c.json({ error: 'each recipient needs a run student_id, recipient_ref, channel=email and a valid address', reason: 'recipient_invalid' }, 400);
+  // The viewer check is agreed with the recipient out of band and arrives with the list. It is hashed here and never stored, logged or echoed.
+  for (const r of b.recipients) if (r.viewer_check !== undefined && (!r.viewer_check || !Object.hasOwn(VIEWER_CHECK_KINDS, r.viewer_check.kind) || typeof r.viewer_check.value !== 'string' || !VIEWER_CHECK_KINDS[r.viewer_check.kind as ViewerCheckKind].test(r.viewer_check.value.trim()))) return c.json({ error: 'viewer_check needs kind (phone_last4 | birth_mmdd | passphrase) and a value of that shape', reason: 'viewer_check_invalid' }, 400);
+  const checks = []; for (const r of b.recipients) if (r.viewer_check) { const salt = crypto.randomUUID(), hash = await viewerCheckHash(c.env.HPS_SIGNING_SECRET, salt, r.viewer_check.kind, r.viewer_check.value); checks.push(db.prepare('INSERT INTO classroom_recipient_checks(class_run_id,student_id,recipient_ref,kind,salt,check_hash,revision,updated_at) VALUES(?,?,?,?,?,?,1,?) ON CONFLICT(class_run_id,student_id,recipient_ref) DO UPDATE SET kind=excluded.kind,salt=excluded.salt,check_hash=excluded.check_hash,revision=classroom_recipient_checks.revision+1,updated_at=excluded.updated_at').bind(b.class_run_id, r.student_id, r.recipient_ref, r.viewer_check.kind, salt, hash, now)); }
   // Siblings sharing one guardian are separate rows: the unit is (child, recipient), never the address.
   await db.batch([...b.recipients.map((r: any) => db.prepare('INSERT INTO classroom_recipients(class_run_id,student_id,recipient_ref,channel,address,revision,source_ref,imported_by,imported_at) VALUES(?,?,?,?,?,1,?,?,?) ON CONFLICT(class_run_id,student_id,recipient_ref) DO UPDATE SET address=excluded.address,channel=excluded.channel,source_ref=excluded.source_ref,imported_at=excluded.imported_at,revision=CASE WHEN classroom_recipients.address<>excluded.address THEN classroom_recipients.revision+1 ELSE classroom_recipients.revision END').bind(b.class_run_id, r.student_id, r.recipient_ref, r.channel, r.address, b.source_ref, 'operator', now)),
-    audit(db, b.class_run_id, 'operator', 'operator', 'recipients_imported', { count: b.recipients.length, source_ref: b.source_ref }, now)]);
-  return c.json({ imported: b.recipients.length }, 201);
+    ...checks,
+    audit(db, b.class_run_id, 'operator', 'operator', 'recipients_imported', { count: b.recipients.length, viewer_checks: checks.length, source_ref: b.source_ref }, now)]);
+  return c.json({ imported: b.recipients.length, viewer_checks: checks.length }, 201);
 });
 // Manual entry by an operator who looked the message up at the provider (admin auth). Signed provider callbacks have their own route below.
 classroomDeliveryOperator.post('/classroom/delivery-events', async (c) => {
@@ -82,8 +86,9 @@ async function teacher(c: any, capability: OpsCapability): Promise<{ auth: Issue
 }
 /** What would be sent, to whom — recomputed from live rows every time, so an approval can be checked against reality. */
 async function currentScope(db: Db, batchId: string, runId: string, channel: string, template: string) {
-  const rows = ((await db.prepare("SELECT j.id AS job_id,j.student_id,j.draft_digest,r.recipient_ref,r.revision AS recipient_revision,r.address FROM classroom_report_jobs j JOIN classroom_recipients r ON r.class_run_id=j.class_run_id AND r.student_id=j.student_id AND r.channel=? WHERE j.batch_id=? AND j.class_run_id=? AND j.state='approved' AND j.input_revision=(SELECT MAX(x.input_revision) FROM classroom_report_jobs x WHERE x.batch_id=j.batch_id AND x.student_id=j.student_id AND x.capability_model=j.capability_model) ORDER BY j.student_id,r.recipient_ref").bind(channel, batchId, runId).all()).results ?? []) as Array<{ job_id: string; student_id: string; draft_digest: string; recipient_ref: string; recipient_revision: number; address: string }>;
-  const hash = await sha256Hex(JSON.stringify([channel, template, rows.map((r) => [r.job_id, r.draft_digest, r.recipient_ref, r.recipient_revision])]));
+  const rows = ((await db.prepare("SELECT j.id AS job_id,j.student_id,j.draft_digest,r.recipient_ref,r.revision AS recipient_revision,r.address,COALESCE(k.revision,0) AS check_revision FROM classroom_report_jobs j JOIN classroom_recipients r ON r.class_run_id=j.class_run_id AND r.student_id=j.student_id AND r.channel=? LEFT JOIN classroom_recipient_checks k ON k.class_run_id=r.class_run_id AND k.student_id=r.student_id AND k.recipient_ref=r.recipient_ref WHERE j.batch_id=? AND j.class_run_id=? AND j.state='approved' AND j.input_revision=(SELECT MAX(x.input_revision) FROM classroom_report_jobs x WHERE x.batch_id=j.batch_id AND x.student_id=j.student_id AND x.capability_model=j.capability_model) ORDER BY j.student_id,r.recipient_ref").bind(channel, batchId, runId).all()).results ?? []) as Array<{ job_id: string; student_id: string; draft_digest: string; recipient_ref: string; recipient_revision: number; address: string; check_revision: number }>;
+  // A changed or removed viewer check is a changed delivery: the approval no longer matches.
+  const hash = await sha256Hex(JSON.stringify([channel, template, rows.map((r) => [r.job_id, r.draft_digest, r.recipient_ref, r.recipient_revision, r.check_revision])]));
   return { rows, hash };
 }
 classroomDeliveryTeacher.get(root + '/recipients', async (c) => {
@@ -92,7 +97,7 @@ classroomDeliveryTeacher.get(root + '/recipients', async (c) => {
   const s = await currentScope(c.env.HPS_DB, t.batch.id, t.run.class_run_id, 'email', template);
   const approved = new Set(s.rows.map((r) => r.student_id)), all = ((await c.env.HPS_DB.prepare("SELECT student_id,state FROM classroom_report_jobs WHERE batch_id=?").bind(t.batch.id).all()).results ?? []) as Array<{ student_id: string; state: string }>;
   // Addresses are masked for instructors. Learners with no approved report or no imported recipient are listed, not dropped.
-  return c.json({ scope_hash: s.hash, channel: 'email', template_revision: template, will_send: s.rows.map((r) => ({ student_id: r.student_id, recipient_ref: r.recipient_ref, address: maskAddress(r.address), recipient_revision: r.recipient_revision, report_digest: r.draft_digest })), not_sending: [...new Set(all.map((j) => j.student_id))].filter((u) => !approved.has(u)).map((u) => ({ student_id: u, reason: all.some((j) => j.student_id === u && j.state === 'approved') ? 'no_approved_recipient' : 'no_approved_report' })), expected_messages: s.rows.length });
+  return c.json({ scope_hash: s.hash, channel: 'email', template_revision: template, will_send: s.rows.map((r) => ({ student_id: r.student_id, recipient_ref: r.recipient_ref, address: maskAddress(r.address), recipient_revision: r.recipient_revision, report_digest: r.draft_digest, viewer_check: r.check_revision ? 'set' : 'missing' })), live_send_blocked: s.rows.filter((r) => !r.check_revision).length, not_sending: [...new Set(all.map((j) => j.student_id))].filter((u) => !approved.has(u)).map((u) => ({ student_id: u, reason: all.some((j) => j.student_id === u && j.state === 'approved') ? 'no_approved_recipient' : 'no_approved_report' })), expected_messages: s.rows.length });
 });
 classroomDeliveryTeacher.post(root + '/approve', async (c) => {
   const t = await teacher(c, 'review'); if (t instanceof Response) return t; const b = await json(c), now = Date.now(), db = c.env.HPS_DB;
@@ -120,6 +125,8 @@ classroomDeliveryTeacher.post(root + '/deliver', async (c) => {
   if (adapter.id === 'resend' && !EMAIL_TEMPLATES[ap.template_revision]) return c.json({ error: 'this template revision is not a reviewed email template', reason: 'template_unknown', templates: Object.keys(EMAIL_TEMPLATES) }, 409);
   const results = [];
   for (const r of s.rows) {
+    // A report leaves for a real address only if the reader will have to prove more than possession of the link.
+    if (adapter.external && !r.check_revision) { results.push({ student_id: r.student_id, recipient_ref: r.recipient_ref, state: 'not_sent_viewer_check_missing' }); continue; }
     // One logical message (lib/classroom-delivery.ts deliveryKey). The same message again is a replay; a sibling is not.
     const key = await deliveryKey({ class_run_id: t.run.class_run_id, batch_id: t.batch.id, job_id: r.job_id, student_id: r.student_id, draft_digest: r.draft_digest, recipient_ref: r.recipient_ref, recipient_revision: r.recipient_revision, channel: ap.channel, template_revision: ap.template_revision, live: adapter.external });
     // Ledger first. Only the writer that created the row may call the adapter: retries and replays find the row and stop.
@@ -140,7 +147,7 @@ classroomDeliveryTeacher.post(root + '/deliver', async (c) => {
     results.push({ student_id: r.student_id, recipient_ref: r.recipient_ref, state });
   }
   await audit(db, t.run.class_run_id, 'instructor', t.auth.payload.u, b.dry_run ? 'delivery_dry_run' : 'delivery_requested', { approval_id: ap.id, adapter: adapter.id, messages: results.length }, now).run();
-  return c.json({ adapter: adapter.id, external_sends: adapter.external ? results.filter((r) => !r.replay).length : 0, results, note: 'provider_accepted is not delivered; delivered is not read' }, 202);
+  return c.json({ adapter: adapter.id, external_sends: adapter.external ? results.filter((r) => !r.replay && r.state !== 'not_sent_viewer_check_missing').length : 0, results, note: 'provider_accepted is not delivered; delivered is not read' }, 202);
 });
 classroomDeliveryTeacher.get(root + '/deliveries', async (c) => {
   const t = await teacher(c, 'review'); if (t instanceof Response) return t;
@@ -164,22 +171,44 @@ classroomDeliveryTeacher.delete(root + '/deliveries/:key/link', async (c) => {
 
 // ── protected link (bearer of an opaque, short-lived token). It proves possession of the message, not who the reader is. ──
 export const classroomReportLinks = new Hono<{ Bindings: Env }>();
-classroomReportLinks.get('/:token', async (c) => {
+const NOT_AVAILABLE = 'this link is not available. Ask the class operator for a new one.';
+const checkPage = (prompt: string, message: string, status: number) => new Response(`<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>수업 관찰 보고서 열기</title><style>:root{color-scheme:dark}body{margin:0;background:#151D19;color:#F2F4E8;font:1rem/1.7 system-ui,-apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}main{max-width:28rem;margin:0 auto;padding:2rem 1.25rem}form{background:#202C24;border-radius:.75rem;padding:1.25rem}label{display:block;margin-bottom:.5rem}input{width:100%;font:inherit;color:inherit;background:#1A241E;border:1px solid #8A9A86;border-radius:.45rem;padding:.7rem;min-height:44px}button{margin-top:1rem;width:100%;font:inherit;font-weight:600;min-height:44px;border-radius:.45rem;border:1px solid #D5F279;background:#D5F279;color:#151D19;cursor:pointer}:focus-visible{outline:.2rem solid #D5F279;outline-offset:.15rem}.msg{color:#E6A373}p{color:#B9C2B0}</style></head><body><main><h1>수업 관찰 보고서</h1><form method="post" autocomplete="off"><label for="check">${prompt}</label><input id="check" name="check" inputmode="${/자리/.test(prompt) ? 'numeric' : 'text'}" required autofocus>${message ? `<p class="msg" role="alert">${message}</p>` : ''}<button type="submit">보고서 열기</button></form><p>이 확인은 메일이 다른 사람에게 전달됐을 때 보고서를 보호하기 위한 것입니다. 값을 모르면 수업 운영자에게 문의하세요.</p></main></body></html>`, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'content-security-policy': REPORT_PAGE_CSP, 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex' } });
+async function openLink(c: any, supplied: string | null): Promise<Response> {
   c.header('cache-control', 'no-store'); c.header('referrer-policy', 'no-referrer');
   if (!opsEnabled(c.env)) return c.json({ error: 'not found' }, 404);
-  const db = c.env.HPS_DB, now = Date.now(), token = c.req.param('token');
+  const db: Db = c.env.HPS_DB, now = Date.now(), token = c.req.param('token'), wantsJson = c.req.query('format') === 'json';
   const link = /^[A-Za-z0-9-]{40,80}$/.test(token) ? await db.prepare('SELECT * FROM classroom_report_links WHERE token_hash=?').bind(await sha256Hex(token)).first<Record<string, any>>() : null;
-  // One answer for unknown, expired and revoked.
-  if (!link || link.revoked_at || link.expires_at <= now) return c.json({ error: 'this link is not available. Ask the class operator for a new one.' }, 404);
+  // One answer for unknown, expired, revoked and locked.
+  if (!link || link.revoked_at || link.expires_at <= now) return c.json({ error: NOT_AVAILABLE }, 404);
   const job = await db.prepare("SELECT * FROM classroom_report_jobs WHERE id=? AND state='approved'").bind(link.job_id).first<Record<string, any>>();
-  if (!job) return c.json({ error: 'this link is not available. Ask the class operator for a new one.' }, 404);
-  await db.batch([db.prepare('UPDATE classroom_report_links SET views=views+1 WHERE id=?').bind(link.id), audit(db, link.class_run_id, 'recipient', link.recipient_ref, 'report_link_viewed', { link_id: link.id }, now)]);
-  const obj = await c.env.HPS_TRACES.get(`classroom-reports/${job.cohort_id}/${job.class_run_id}/${job.student_id}/${job.id}/draft.json`); if (!obj) return c.json({ error: 'this link is not available. Ask the class operator for a new one.' }, 404);
+  if (!job) return c.json({ error: NOT_AVAILABLE }, 404);
+  const check = await db.prepare('SELECT kind,salt,check_hash FROM classroom_recipient_checks WHERE class_run_id=? AND student_id=? AND recipient_ref=?').bind(link.class_run_id, link.student_id, link.recipient_ref).first<{ kind: ViewerCheckKind; salt: string; check_hash: string }>();
+  if (check) {
+    const tries = await db.prepare('SELECT failed,locked_at FROM classroom_link_attempts WHERE link_id=?').bind(link.id).first<{ failed: number; locked_at: number | null }>();
+    if (tries?.locked_at) return c.json({ error: NOT_AVAILABLE }, 404);
+    const prompt = VIEWER_CHECK_PROMPT[check.kind] ?? VIEWER_CHECK_PROMPT.passphrase;
+    if (supplied === null) return wantsJson ? c.json({ error: 'viewer check required', reason: 'viewer_check_required', kind: check.kind }, 401) : checkPage(prompt, '', 200);
+    if (!sameHash(await viewerCheckHash(c.env.HPS_SIGNING_SECRET, check.salt, check.kind, supplied.slice(0, 128)), check.check_hash)) {
+      const failed = (tries?.failed ?? 0) + 1, locked = failed >= MAX_VIEWER_ATTEMPTS;
+      await db.batch([db.prepare('INSERT INTO classroom_link_attempts(link_id,failed,locked_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(link_id) DO UPDATE SET failed=excluded.failed,locked_at=excluded.locked_at,updated_at=excluded.updated_at').bind(link.id, failed, locked ? now : null, now), audit(db, link.class_run_id, 'recipient', link.recipient_ref, locked ? 'report_link_locked' : 'report_link_check_failed', { link_id: link.id, failed }, now)]);
+      if (locked) return c.json({ error: NOT_AVAILABLE }, 404);
+      return wantsJson ? c.json({ error: 'viewer check did not match', reason: 'viewer_check_failed', attempts_left: MAX_VIEWER_ATTEMPTS - failed }, 403) : checkPage(prompt, `확인 값이 맞지 않습니다. 남은 시도 ${MAX_VIEWER_ATTEMPTS - failed}회. 모두 틀리면 이 주소는 닫히고 새 주소를 받아야 합니다.`, 403);
+    }
+  }
+  await db.batch([db.prepare('UPDATE classroom_report_links SET views=views+1 WHERE id=?').bind(link.id), audit(db, link.class_run_id, 'recipient', link.recipient_ref, 'report_link_viewed', { link_id: link.id, viewer_check: check ? 'passed' : 'not_configured' }, now)]);
+  const obj = await c.env.HPS_TRACES.get(`classroom-reports/${job.cohort_id}/${job.class_run_id}/${job.student_id}/${job.id}/draft.json`); if (!obj) return c.json({ error: NOT_AVAILABLE }, 404);
   const report = composeReport(JSON.parse(await obj.text()), { class_runs_with_evidence: 1, coverage: job.input_coverage, model: modelById(job.capability_model)! });
   // A person opens this in a browser: they get a page. `?format=json` keeps the data form for tools; both are the same composeReport().
-  if (c.req.query('format') === 'json') return c.json({ report });
+  if (wantsJson) return c.json({ report });
   const run = await db.prepare('SELECT starts_at FROM class_run_ops WHERE class_run_id=?').bind(link.class_run_id).first<{ starts_at: number }>();
   return new Response(renderReportHtml(report, { student_label: job.student_id, class_label: `${new Date(run?.starts_at ?? job.created_at).toISOString().slice(0, 10)} 수업`, approved_at: job.updated_at, expires_at: link.expires_at }), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'content-security-policy': REPORT_PAGE_CSP, 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex' } });
+}
+// GET never carries the check (it would land in URLs, history and logs): it asks. POST answers — a form from the page, or JSON from a tool.
+classroomReportLinks.get('/:token', (c) => openLink(c, null));
+classroomReportLinks.post('/:token', async (c) => {
+  const type = c.req.header('content-type') ?? ''; let value = '';
+  try { if (type.includes('application/json')) { const b = await c.req.json(); value = typeof b?.check === 'string' ? b.check : ''; } else { const f = await c.req.parseBody(); value = typeof f.check === 'string' ? f.check : ''; } } catch { value = ''; }
+  return openLink(c, value);
 });
 
 // ── signed provider callbacks (no admin session: the signature over the raw body IS the authentication) ──

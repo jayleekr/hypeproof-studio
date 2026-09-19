@@ -2144,6 +2144,9 @@
         },
         {
           "path": "worker/migrations/0019-classroom-report-attempts.sql"
+        },
+        {
+          "path": "worker/migrations/0020-classroom-viewer-check.sql"
         }
       ]
     },

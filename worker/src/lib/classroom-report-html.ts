@@ -10,7 +10,7 @@
 //   - The same HTML prints to PDF (A4, light paper palette) — scripts/classroom-report-pdf.mjs.
 import type { DraftEvidence, ReportSection } from './classroom-report';
 
-export const REPORT_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+export const REPORT_PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const ACTOR: Record<string, string> = { student: '학생이 직접 쓴 말', ai: 'AI의 응답', teacher: '강사의 말', external_user: '다른 사람의 말', tool: '도구의 출력', system: '시스템 기록', unknown: '누구의 말인지 확인되지 않음' };
 const SOURCE: Record<string, string> = { real: '실제 수업 중', simulated: '가상 사례(연습)', self_reported: '학생의 자기 보고', unverified: '' };
@@ -54,6 +54,6 @@ footer{color:var(--muted);font-size:.9rem;margin-top:2rem}.print-only{display:no
 <header><h1>수업 관찰 보고서</h1><p>${esc(meta.student_label)} · ${esc(meta.class_label)}</p><p>이 보고서는 ${m.scope === 'cumulative' ? '여러 수업의 기록에서' : '이번 수업 한 번의 기록에서'} 실제로 관찰된 행동과 그 근거를 적은 것입니다. 점수나 순위가 아니며, 강사가 근거를 확인한 뒤 보냈습니다.</p></header>
 ${report.sections.map(sectionHtml).join('\n')}
 ${method}
-<footer><p>이 주소를 가진 사람은 누구나 이 보고서를 볼 수 있습니다. 다른 사람에게 전달하지 마세요.${meta.expires_at ? ` ${esc(date(meta.expires_at))}까지 열립니다.` : ''} 내용에 고칠 점이 있으면 수업 운영자에게 알려 주세요.</p></footer>
+<footer><p>이 주소와 확인 값을 아는 사람은 이 보고서를 볼 수 있습니다. 다른 사람에게 전달하지 마세요.${meta.expires_at ? ` ${esc(date(meta.expires_at))}까지 열립니다.` : ''} 내용에 고칠 점이 있으면 수업 운영자에게 알려 주세요.</p></footer>
 </main></body></html>`;
 }
