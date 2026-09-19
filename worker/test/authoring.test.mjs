@@ -35,7 +35,7 @@ const alice = await token('author-a'), bob=await token('author-b');
 const outsider=await token('outsider',[{cohort:'other',profiles:[profileId]}]);
 const student=(await issue({u:'student',c:cohort,p:profileId},1,TEST_SECRET)).token;
 const base=`/admin/cohorts/${cohort}/authoring/site-1`;
-const content={schema:'hps-session-design/1',title:'진료시간 수정',audience:'치과의사',duration_minutes:120,objective:'진료시간을 수정하고 검수한다',prerequisites:'',starter:'정적 홈페이지 예제',steps:[{id:'edit',title:'시간 변경',instructions:'진료시간을 변경하세요',hint:'',acceptance:'모바일에서 확인'}]};
+const content={schema:'hps-session-design/1',title:'진료시간 수정',audience:'치과의사',duration_minutes:120,objective:'진료시간을 수정하고 검수한다',prerequisites:'코딩 경험 불필요. 예제 폴더 사본 제공',starter:'정적 홈페이지 예제',steps:[{id:'edit',title:'시간 변경',instructions:'진료시간을 변경하세요',hint:'',acceptance:'모바일에서 확인'}]};
 const save=(revision,id,data=content)=>({expected_revision:revision,request_id:id,profile_id:profileId,content:data});
 async function request(path=base,method='GET',body,credential=alice) {
  const headers={authorization:`Bearer ${credential}`};
