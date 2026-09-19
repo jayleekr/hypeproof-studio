@@ -2075,6 +2075,21 @@
         },
         {
           "path": "worker/test/classroom-ops-reports.test.mjs"
+        },
+        {
+          "path": "worker/src/routes/classroom-delivery.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-delivery.ts"
+        },
+        {
+          "path": "worker/migrations/0017-classroom-delivery.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-delivery.test.mjs"
+        },
+        {
+          "path": "scripts/classroom-report-runner.mjs"
         }
       ]
     },
