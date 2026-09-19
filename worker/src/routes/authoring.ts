@@ -164,7 +164,10 @@ authoring.get(root + "/assessment", async (c) => {
      * **뺐다는 사실을 숨기지 않는다** — 비어 있으면 통과가 아니라 미확인이다.
      */
     not_checked: content.model
-      ? [{ check: 'model_provider_binding', message: '모델 공급자 설정은 확정할 때 확인합니다. 통과가 아니라 미확인입니다.' }]
+      // 문구는 관문의 skip 판정과 **같은 문법**을 쓴다("…확인하지 못했습니다.
+      // 통과가 아니라 미확인입니다"). 두 화면이 미확인을 다르게 부르면 강사가
+      // 다른 것으로 읽는다.
+      ? [{ check: 'model_provider_binding', message: '모델 공급자 설정은 여기서 확인하지 못했습니다. 확정할 때 확인합니다 — 통과가 아니라 미확인입니다.' }]
       : [],
   });
 });
@@ -254,8 +257,11 @@ authoring.put(root + "/versions/:version", async (c) => {
   // 없다. 여기서 바뀐 것은 **어디서 불리나**뿐이고, 상태코드·reason·문구는 그대로다.
   const assessed = assessDraft({ profileId: d.profile_id, independent: !!d.independent, content });
   const blocked = assessed.findings[0];
-  // 기능 정책 판정만 모델 **바인딩** 뒤에 온다 — 기존 순서가 그랬다. 그 순서를 지키지
-  // 않으면 모델 공급자 미설정(409)이 나야 할 좌석이 기능 정책(403)을 먼저 보게 된다.
+  // ⚠️ **이 두 토막을 한 줄로 합치지 마라.** 기능 정책 판정만 모델 **바인딩** 뒤에
+  // 온다 — 리팩터링 전 코드가 그 순서였다. 보기 좋게 `findings[0]` 하나로 모으면
+  // 모델 공급자 미설정(409)이 나야 할 좌석이 기능 정책(403)을 먼저 보게 되고,
+  // 그것은 "판정 내용을 바꾸지 않는다"는 이 작업의 조건을 깬다(#1151).
+  // 모양을 위해 순서를 바꾸는 것이 리팩터링에서 제일 흔한 사고다.
   if (blocked && blocked.check !== 'feature_policy') return c.json(blocked.body, blocked.status);
   if (content.model) {
     // 바인딩은 판정이 아니라 **저장될 값을 만드는 부수효과**이고 c.env 를 읽는다.
