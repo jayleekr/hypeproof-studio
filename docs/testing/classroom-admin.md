@@ -200,3 +200,16 @@ npm --prefix chalk run typecheck
 - 위 수치는 Workers CPU·D1 지연·학교망이 아니다. PRD의 p95 15초/10초/채팅 +5% 목표는 **측정되지 않았다.**
 - 최종 회귀(스택 끝, Mac arm64, Node 22.22.1): `npm --prefix worker test`, worker typecheck, `test:classroom-ops:d1`, `test:classroom:d1`, `npm --prefix chalk test`·typecheck, 확장 `npm test`·typecheck·`build:extension`, `npm --prefix e2e run test:classroom`·`test:classroom-ops` 모두 exit 0.
 - **NOT RUN (R7의 실기 gate 전부):** 실제 Windows/macOS Studio 빌드·설치(전체 build는 CLAUDE.md상 별도 승인 필요), 구버전 v0.1.56 설치 앱과의 혼재, staging/운영 D1 migration 0011~0017 적용, 학교망 1곳·TLS proxy, 100명 실부하와 기존 채팅 p95 비교, 성인 canary→30명 pilot, 200% 확대·Windows 브라우저.
+
+### 리뷰 반영과 CI 실패 수정 · 2026-09-19
+
+[#1119](https://github.com/jayleekr/hypeproof-studio/pull/1119)~[#1121](https://github.com/jayleekr/hypeproof-studio/pull/1121) 리뷰(JinyongShin)와 GitHub CI 실패를 스택 아래에서부터 고치고 위 브랜치로 merge했다. 2026-09-18 기록의 "exit 0"은 로컬 결과였고 CI에서는 재현되지 않았다.
+
+- **CI `worker / test`:** AT-33 시험이 `git show 75fe6e4:worker/schema.sql`에 기대 얕은 checkout에서 실패했다. 0011 이전 schema를 `worker/test/fixtures/schema-pre-0011.sql`로 체크인했다. main이 `schema.sql`을 바꾸면 이 fixture를 같이 갱신해야 시험이 통과한다.
+- **CI `extension / smoke`:** 확장 smoke 2개가 worker harness(hono)를 import해 extension job에서 `ERR_MODULE_NOT_FOUND`였다. 기기↔Service 왕복은 `worker/test/classroom-ops-device.test.mjs`, `classroom-ops-snapshot-device.test.mjs`로 옮겼다. `worker/node_modules`를 숨긴 상태에서 확장 ops smoke 3개 exit 0을 확인했다.
+- **`/connect` rate limit:** 실패한 시도만 센다. 같은 주소에서 100좌석 연속 페어링 201, 잘못된 티켓 30회 뒤 429(유효 티켓도 차단 중에는 429).
+- **epoch·cursor·ticket:** 토큰 재발급의 epoch 증가를 best-effort batch에서 분리하고 실패를 응답 `ops.epoch_advanced=false`로 드러낸다(발급 자체는 막지 않음, AT-32). 상태 쓰기가 없는 거부 배치에서도 ack cursor를 저장한다. 티켓 생성의 modulo 편향을 제거했다.
+- **main 병합에서 드러난 회귀:** 교육 원칙 관문(#1115)이 합성 수업 확정을 `pedagogy_blocked`로 막았다. 합성 lesson에 선행 조건·제출 증거를 채웠다. 제품 코드 변경은 없다.
+- **문서:** operations 음성 대조를 `requirement-work.json`과 `requirements-activation.md`에서 같은 문장으로 맞췄다(눈으로 대조). 작업 머신 경로·비공개 금고 경로 제거, flag 저장소(D1) 명시. 실수로 포함됐던 `docs/ui-concepts/` PNG 11개를 추적에서 제거했다.
+- 재실행(스택 끝 `93da3b1` 기준 + 이 기록, Mac arm64, Node 22.22.1): worker test·typecheck, `test:classroom-ops:d1`, chalk test·typecheck, 확장 test·typecheck, e2e `test:classroom`·`test:classroom-ops`, `next-work --check`, docs harness, `check-registry` 모두 exit 0. 중간 브랜치는 그 PR이 건드린 계층만 재실행했다.
+- **NOT RUN은 그대로다:** 실제 Mac/Windows Studio·SDK·학교망·운영 D1/R2·실제 발송. NAT 시험은 in-process KV이며 Cloudflare KV의 eventual consistency에서는 차단 시점이 늦을 수 있다.
