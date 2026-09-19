@@ -243,7 +243,7 @@ claimed/in_review는 다른 작업과 합류·검토, reconcile은 닫힘/오래
 - 다음 행동: 2026-09-18 [원격 운영 PRD](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18)와 [R0~R7](learning-agent-experience-epics.md#remote-classroom-delivery)을 따라 현재 회차 명단·pairing·활성화·단계·오류 관측의 첫 수직 경로부터 구현한다.
 - 디자인 변경: 전체 명단·activation·단계와 D1 command CAS/lease/epoch/receipt, 보존형 reset, 동의된 immutable 수집, 공통 측정/legacy adapter, 승인된 수신자·delivery outbox를 R0~R7로 분해한다. 일시정지는 새 실행 admission에 적용하고 미적용 기기/진행 중 효과를 구분한다.
 - 양성 대조: 정상 학생/무신호 학생 모두 보이며 학생이 해결 확인.
-- 음성 대조: 401/403/429/5xx를 모두 같은 원인으로 단정·원문 자동 공유·오프라인 기기에도 중지 완료 표시 금지.
+- 음성 대조: 발급을 활성화로 표시·무신호 정상화·401/403/429/5xx를 모두 같은 원인으로 단정·타 학생 제어/원문·중복 reset·미검수 발송·provider 수락을 전달 완료로 표시 금지.
 - 확인할 구현 경로: `chalk/src`, `worker/src`, `extensions/hypeproof-chat/src`, `packages/measurement`
 
 <a id="feedback-loop"></a>
