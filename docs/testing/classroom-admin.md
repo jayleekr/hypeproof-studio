@@ -67,7 +67,7 @@ npm --prefix chalk run typecheck
 
 ## 원격 수업 운영 인수 계획 · 2026-09-18
 
-[확장 PRD](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18)의 계약을 검사한다. 아래 **AT-15~34는 모두 NOT RUN**이다. 이전 classroom test PASS를 새 원격 기능의 증거로 재사용하지 않는다. 합성 강사 A/B·학생 A/B·다른 반·구버전 앱·동일 PC 다른 사용자·다중 창을 고정 fixture로 둔다. 시간·fault·동시 요청을 제어하고 양성/음성 대조를 같은 환경에서 실행한다.
+[확장 PRD](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18)의 계약을 검사한다. 아래 표는 인수 **계획**이다. 실행된 범위는 하단 ‘원격 운영 실행 기록’에만 있으며, 거기 없는 계층(실제 Mac/Windows Studio·SDK·학교망·운영 D1/R2·실제 발송)은 **NOT RUN**이다. 이전 classroom test PASS를 새 원격 기능의 증거로 재사용하지 않는다. 합성 강사 A/B·학생 A/B·다른 반·구버전 앱·동일 PC 다른 사용자·다중 창을 고정 fixture로 둔다. 시간·fault·동시 요청을 제어하고 양성/음성 대조를 같은 환경에서 실행한다.
 
 | Test ID | 제품 REQ | 조건 / 깨뜨릴 가정 | 합격 기준 | 실행 계층 |
 |---|---|---|---|---|
@@ -193,3 +193,23 @@ npm --prefix chalk run typecheck
 
 - `worker/test/classroom-ops-delivery.test.mjs`(7 PASS): AT-31 수신자는 운영자 import만(강사 Bearer 불가, 회차 명단 밖·갤러리 인물 거부, 형제는 별도 행, 강사에게는 마스킹), 보내지 않는 학생도 사유와 함께 표시, 승인은 표시된 scope hash에 결속·검수 권한과 발송 권한 분리, 발신 계정 미설정 시 live 거부·dry-run은 외부 발송 0, 승인 뒤 수신자 주소 변경/새 보고서 승인 → `approval_stale`로 발송 0, 원장 행을 adapter 호출 전에 기록, timeout=`send_unknown`이며 재요청해도 재발송 0, 운영자가 provider 확인 근거와 함께 resolve, `provider_accepted`≠`delivered`, 중복 webhook 흡수, 늦은 accepted가 delivered를 되돌리지 않음, 열람(opened) 상태 없음, 메시지에는 불투명 링크만, 링크는 no-store·만료·철회·조회 감사·token 미저장(hash만), 거절은 `failed`.
 - **NOT RUN / 운영 gate:** 실제 발신 계정·provider sandbox·실제 수신자, 반송/전달 webhook의 provider 서명 검증(현재 이벤트 수신은 운영자 인증 경로), Kakao/SMS, QR, PDF 첨부·지면 QA, 링크 열람자의 수신자 본인 확인, Chalk 발송 화면 브라우저 인수.
+
+### R7 회귀·rollback·합성 부하 · 2026-09-18
+
+- `worker/test/classroom-ops-regression.test.mjs`(4 PASS): AT-32 전역 스위치 OFF에서 신규 경로 23개 전부 404, 기존 토큰 발급·`/v1/profile`·45초 heartbeat(`/v1/trace/event`)·선택 공유·토큰 폐기 동작 유지, 신규 테이블 25개 행 0. 스위치 ON·회차 flag 전부 OFF(기본)에서 pairing·명령·일시정지·회수 각각 거부. AT-33 commands flag rollback 시 즉시 전달 중지·대기 명령은 TTL 만료·완료 receipt와 audit 조회 가능·관측은 계속. AT-25/34 **합성**: 100좌석×12 poll, 20% 단절 후 복귀, 30좌석 일괄 진단, 강사 2명 동시 조회 — 매 조회 명단 100석 유지, 좌석 간 명령/이벤트 교차 0, 12 poll 동안 상태 쓰기 20회(이벤트가 있던 좌석만; 무변화 poll은 쓰기 0), 이 Mac의 Node+SQLite에서 sync p95 13.8ms·status p95 1.4ms.
+- 위 수치는 Workers CPU·D1 지연·학교망이 아니다. PRD의 p95 15초/10초/채팅 +5% 목표는 **측정되지 않았다.**
+- 최종 회귀(스택 끝, Mac arm64, Node 22.22.1): `npm --prefix worker test`, worker typecheck, `test:classroom-ops:d1`, `test:classroom:d1`, `npm --prefix chalk test`·typecheck, 확장 `npm test`·typecheck·`build:extension`, `npm --prefix e2e run test:classroom`·`test:classroom-ops` 모두 exit 0.
+- **NOT RUN (R7의 실기 gate 전부):** 실제 Windows/macOS Studio 빌드·설치(전체 build는 CLAUDE.md상 별도 승인 필요), 구버전 v0.1.56 설치 앱과의 혼재, staging/운영 D1 migration 0011~0017 적용, 학교망 1곳·TLS proxy, 100명 실부하와 기존 채팅 p95 비교, 성인 canary→30명 pilot, 200% 확대·Windows 브라우저.
+
+### 리뷰 반영과 CI 실패 수정 · 2026-09-19
+
+[#1119](https://github.com/jayleekr/hypeproof-studio/pull/1119)~[#1121](https://github.com/jayleekr/hypeproof-studio/pull/1121) 리뷰(JinyongShin)와 GitHub CI 실패를 스택 아래에서부터 고치고 위 브랜치로 merge했다. 2026-09-18 기록의 "exit 0"은 로컬 결과였고 CI에서는 재현되지 않았다.
+
+- **CI `worker / test`:** AT-33 시험이 `git show 75fe6e4:worker/schema.sql`에 기대 얕은 checkout에서 실패했다. 0011 이전 schema를 `worker/test/fixtures/schema-pre-0011.sql`로 체크인했다. main이 `schema.sql`을 바꾸면 이 fixture를 같이 갱신해야 시험이 통과한다.
+- **CI `extension / smoke`:** 확장 smoke 2개가 worker harness(hono)를 import해 extension job에서 `ERR_MODULE_NOT_FOUND`였다. 기기↔Service 왕복은 `worker/test/classroom-ops-device.test.mjs`, `classroom-ops-snapshot-device.test.mjs`로 옮겼다. `worker/node_modules`를 숨긴 상태에서 확장 ops smoke 3개 exit 0을 확인했다.
+- **`/connect` rate limit:** 실패한 시도만 센다. 같은 주소에서 100좌석 연속 페어링 201, 잘못된 티켓 30회 뒤 429(유효 티켓도 차단 중에는 429).
+- **epoch·cursor·ticket:** 토큰 재발급의 epoch 증가를 best-effort batch에서 분리하고 실패를 응답 `ops.epoch_advanced=false`로 드러낸다(발급 자체는 막지 않음, AT-32). 상태 쓰기가 없는 거부 배치에서도 ack cursor를 저장한다. 티켓 생성의 modulo 편향을 제거했다.
+- **main 병합에서 드러난 회귀:** 교육 원칙 관문(#1115)이 합성 수업 확정을 `pedagogy_blocked`로 막았다. 합성 lesson에 선행 조건·제출 증거를 채웠다. 제품 코드 변경은 없다.
+- **문서:** operations 음성 대조를 `requirement-work.json`과 `requirements-activation.md`에서 같은 문장으로 맞췄다(눈으로 대조). 작업 머신 경로·비공개 금고 경로 제거, flag 저장소(D1) 명시. 실수로 포함됐던 `docs/ui-concepts/` PNG 11개를 추적에서 제거했다.
+- 재실행(스택 끝 `93da3b1` 기준 + 이 기록, Mac arm64, Node 22.22.1): worker test·typecheck, `test:classroom-ops:d1`, chalk test·typecheck, 확장 test·typecheck, e2e `test:classroom`·`test:classroom-ops`, `next-work --check`, docs harness, `check-registry` 모두 exit 0. 중간 브랜치는 그 PR이 건드린 계층만 재실행했다.
+- **NOT RUN은 그대로다:** 실제 Mac/Windows Studio·SDK·학교망·운영 D1/R2·실제 발송. NAT 시험은 in-process KV이며 Cloudflare KV의 eventual consistency에서는 차단 시점이 늦을 수 있다.
