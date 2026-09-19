@@ -12,6 +12,7 @@ import type { Env } from '../env';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { ID_RE, parseFlags, sha256Hex, type OpsCapability } from '../lib/classroom-ops';
 import { composeReport, modelById } from '../lib/classroom-report';
+import { REPORT_PAGE_CSP, renderReportHtml } from '../lib/classroom-report-html';
 import { APPROVAL_TTL_MS, EMAIL_RE, LINK_TTL_MS, TEMPLATE_RE, deliveryKey, dryRunAdapter, maskAddress, nextDeliveryState, type DeliveryAdapter } from '../lib/classroom-delivery';
 import { opsEnabled } from './classroom-ops';
 
@@ -146,5 +147,9 @@ classroomReportLinks.get('/:token', async (c) => {
   if (!job) return c.json({ error: 'this link is not available. Ask the class operator for a new one.' }, 404);
   await db.batch([db.prepare('UPDATE classroom_report_links SET views=views+1 WHERE id=?').bind(link.id), audit(db, link.class_run_id, 'recipient', link.recipient_ref, 'report_link_viewed', { link_id: link.id }, now)]);
   const obj = await c.env.HPS_TRACES.get(`classroom-reports/${job.cohort_id}/${job.class_run_id}/${job.student_id}/${job.id}/draft.json`); if (!obj) return c.json({ error: 'this link is not available. Ask the class operator for a new one.' }, 404);
-  return c.json({ report: composeReport(JSON.parse(await obj.text()), { class_runs_with_evidence: 1, coverage: job.input_coverage, model: modelById(job.capability_model)! }) });
+  const report = composeReport(JSON.parse(await obj.text()), { class_runs_with_evidence: 1, coverage: job.input_coverage, model: modelById(job.capability_model)! });
+  // A person opens this in a browser: they get a page. `?format=json` keeps the data form for tools; both are the same composeReport().
+  if (c.req.query('format') === 'json') return c.json({ report });
+  const run = await db.prepare('SELECT starts_at FROM class_run_ops WHERE class_run_id=?').bind(link.class_run_id).first<{ starts_at: number }>();
+  return new Response(renderReportHtml(report, { student_label: job.student_id, class_label: `${new Date(run?.starts_at ?? job.created_at).toISOString().slice(0, 10)} 수업`, approved_at: job.updated_at, expires_at: link.expires_at }), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'content-security-policy': REPORT_PAGE_CSP, 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex' } });
 });
