@@ -2126,6 +2126,21 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/classroom-ops-expiry-review.test.mjs"
+        },
+        {
+          "path": "worker/src/lib/classroom-report-html.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-delivery-resend.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-provider.test.mjs"
+        },
+        {
+          "path": "scripts/classroom-report-pdf.mjs"
+        },
+        {
+          "path": "e2e/classroom/report-page.mjs"
         }
       ]
     },

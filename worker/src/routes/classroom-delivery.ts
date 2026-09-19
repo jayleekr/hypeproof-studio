@@ -14,6 +14,7 @@ import { ID_RE, parseFlags, sha256Hex, type OpsCapability } from '../lib/classro
 import { composeReport, modelById } from '../lib/classroom-report';
 import { REPORT_PAGE_CSP, renderReportHtml } from '../lib/classroom-report-html';
 import { APPROVAL_TTL_MS, EMAIL_RE, LINK_TTL_MS, TEMPLATE_RE, deliveryKey, dryRunAdapter, maskAddress, nextDeliveryState, type DeliveryAdapter } from '../lib/classroom-delivery';
+import { EMAIL_TEMPLATES, resendAdapter, resendConfigured, resendEventKind, verifySvix } from '../lib/classroom-delivery-resend';
 import { opsEnabled } from './classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -22,6 +23,28 @@ const audit = (db: Db, run: string, kind: string, id: string, action: string, de
 // Test seam: a sandbox adapter can be registered; production has none until an operator configures a provider.
 const adapters = new Map<string, DeliveryAdapter>([[dryRunAdapter.id, dryRunAdapter]]);
 export const registerDeliveryAdapter = (a: DeliveryAdapter) => adapters.set(a.id, a);
+/** Test seam only: the transport of the live adapter. Production uses global fetch. */
+let resendFetch: typeof fetch | undefined;
+export const setResendFetch = (f: typeof fetch | undefined) => { resendFetch = f; };
+/** The live adapter exists only when the provider, its key, a sender and the public origin are ALL configured. */
+const liveAdapter = (env: Env): DeliveryAdapter | undefined => (env.HPS_DELIVERY_PROVIDER === 'resend' ? (resendConfigured(env) ? resendAdapter(env, resendFetch) : undefined) : adapters.get(env.HPS_DELIVERY_PROVIDER ?? ''));
+
+/**
+ * Apply one provider event to the ledger. Forward-only (nextDeliveryState), so a late `sent` after `delivered` changes
+ * nothing, and an event for a send whose HTTP answer was lost (`send_unknown`) settles it through the delivery_key tag.
+ */
+async function applyProviderEvent(db: Db, e: { event_id: string; message_id: string; kind: 'accepted' | 'delivered' | 'bounced'; delivery_key?: string }, now: number) {
+  const fresh = await db.prepare('INSERT INTO classroom_delivery_events(provider_event_id,provider_message_id,kind,received_at) VALUES(?,?,?,?) ON CONFLICT DO NOTHING RETURNING provider_event_id').bind(e.event_id, e.message_id, e.kind, now).first();
+  if (!fresh) return { duplicate: true as const };
+  let d = await db.prepare('SELECT delivery_key,state FROM classroom_report_deliveries WHERE provider_message_id=?').bind(e.message_id).first<{ delivery_key: string; state: string }>();
+  if (!d && e.delivery_key) {
+    // Only a send that is genuinely unresolved may be claimed by its key; a row that already has another message id is left alone.
+    d = await db.prepare("UPDATE classroom_report_deliveries SET provider_message_id=?,detail='settled_by_provider_event',updated_at=? WHERE delivery_key=? AND provider_message_id='' AND state IN ('send_unknown','sending') RETURNING delivery_key,state").bind(e.message_id, now, e.delivery_key).first<{ delivery_key: string; state: string }>();
+  }
+  const next = d ? nextDeliveryState(d.state, e.kind) : null;
+  if (d && next) await db.prepare('UPDATE classroom_report_deliveries SET state=?,updated_at=? WHERE delivery_key=? AND state=?').bind(next, now, d.delivery_key, d.state).run();
+  return { duplicate: false as const, applied: !!next, state: next ?? d?.state ?? 'unmatched' };
+}
 
 export const classroomDeliveryOperator = new Hono<{ Bindings: Env }>();
 classroomDeliveryOperator.post('/classroom/recipients', async (c) => {
@@ -35,17 +58,13 @@ classroomDeliveryOperator.post('/classroom/recipients', async (c) => {
     audit(db, b.class_run_id, 'operator', 'operator', 'recipients_imported', { count: b.recipients.length, source_ref: b.source_ref }, now)]);
   return c.json({ imported: b.recipients.length }, 201);
 });
-// Provider callbacks. Shared-secret header; duplicates are absorbed by the event id.
+// Manual entry by an operator who looked the message up at the provider (admin auth). Signed provider callbacks have their own route below.
 classroomDeliveryOperator.post('/classroom/delivery-events', async (c) => {
   if (!opsEnabled(c.env)) return c.json({ error: 'classroom operations are not enabled', reason: 'ops_disabled' }, 404);
   const b = await json(c), now = Date.now(), db = c.env.HPS_DB;
   if (!b || !/^[A-Za-z0-9_.:-]{4,128}$/.test(b.provider_event_id ?? '') || !/^[A-Za-z0-9_.:-]{4,128}$/.test(b.provider_message_id ?? '') || !['accepted', 'delivered', 'bounced'].includes(b.kind)) return c.json({ error: 'provider_event_id, provider_message_id and kind required' }, 400);
-  const fresh = await db.prepare('INSERT INTO classroom_delivery_events(provider_event_id,provider_message_id,kind,received_at) VALUES(?,?,?,?) ON CONFLICT DO NOTHING RETURNING provider_event_id').bind(b.provider_event_id, b.provider_message_id, b.kind, now).first();
-  if (!fresh) return c.json({ duplicate: true });
-  const d = await db.prepare('SELECT delivery_key,state FROM classroom_report_deliveries WHERE provider_message_id=?').bind(b.provider_message_id).first<{ delivery_key: string; state: string }>();
-  const next = d ? nextDeliveryState(d.state, b.kind) : null;
-  if (d && next) await db.prepare('UPDATE classroom_report_deliveries SET state=?,updated_at=? WHERE delivery_key=? AND state=?').bind(next, now, d.delivery_key, d.state).run();
-  return c.json({ applied: !!next, state: next ?? d?.state ?? 'unmatched' });
+  const r = await applyProviderEvent(db, { event_id: b.provider_event_id, message_id: b.provider_message_id, kind: b.kind }, now);
+  return c.json(r.duplicate ? { duplicate: true } : { applied: r.applied, state: r.state });
 });
 
 export const classroomDeliveryTeacher = new Hono<{ Bindings: Env }>();
@@ -95,15 +114,24 @@ classroomDeliveryTeacher.post(root + '/deliver', async (c) => {
   if (ap.expires_at <= now) return c.json({ error: 'approval expired; approve again', reason: 'approval_expired' }, 409);
   const s = await currentScope(db, t.batch.id, t.run.class_run_id, ap.channel, ap.template_revision);
   if (s.hash !== ap.scope_hash) return c.json({ error: 'a report or recipient changed after approval; nothing was sent', reason: 'approval_stale' }, 409);
-  const adapter = b.dry_run ? dryRunAdapter : adapters.get(c.env.HPS_DELIVERY_PROVIDER ?? '');
+  const adapter = b.dry_run ? dryRunAdapter : liveAdapter(c.env);
   if (!adapter) return c.json({ error: 'no live delivery account is configured; only dry_run is available', reason: 'delivery_provider_not_configured' }, 409);
+  // A live send needs reviewed wording: an unknown template revision is refused before anything is written.
+  if (adapter.id === 'resend' && !EMAIL_TEMPLATES[ap.template_revision]) return c.json({ error: 'this template revision is not a reviewed email template', reason: 'template_unknown', templates: Object.keys(EMAIL_TEMPLATES) }, 409);
   const results = [];
   for (const r of s.rows) {
     // One logical message (lib/classroom-delivery.ts deliveryKey). The same message again is a replay; a sibling is not.
     const key = await deliveryKey({ class_run_id: t.run.class_run_id, batch_id: t.batch.id, job_id: r.job_id, student_id: r.student_id, draft_digest: r.draft_digest, recipient_ref: r.recipient_ref, recipient_revision: r.recipient_revision, channel: ap.channel, template_revision: ap.template_revision, live: adapter.external });
     // Ledger first. Only the writer that created the row may call the adapter: retries and replays find the row and stop.
     const mine = await db.prepare("INSERT INTO classroom_report_deliveries(delivery_key,batch_id,class_run_id,student_id,recipient_ref,job_id,report_digest,recipient_revision,channel,template_revision,approval_id,adapter,state,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'sending',1,?,?) ON CONFLICT(delivery_key) DO NOTHING RETURNING delivery_key").bind(key, t.batch.id, t.run.class_run_id, r.student_id, r.recipient_ref, r.job_id, r.draft_digest, r.recipient_revision, ap.channel, ap.template_revision, ap.id, adapter.id, now, now).first();
-    if (!mine) { const prior = await db.prepare('SELECT state FROM classroom_report_deliveries WHERE delivery_key=?').bind(key).first<{ state: string }>(); results.push({ student_id: r.student_id, recipient_ref: r.recipient_ref, state: prior?.state, replay: true }); continue; }
+    if (!mine) {
+      const prior = await db.prepare('SELECT state,link_id FROM classroom_report_deliveries WHERE delivery_key=?').bind(key).first<{ state: string; link_id: string }>();
+      // `failed` means the provider definitely did not take it (validation, auth, rate limit): that one message may be tried again,
+      // by the single writer that wins this CAS. Everything else — accepted, delivered, and above all send_unknown — is a replay.
+      const retry = prior?.state === 'failed' ? await db.prepare("UPDATE classroom_report_deliveries SET state='sending',attempts=attempts+1,approval_id=?,updated_at=? WHERE delivery_key=? AND state='failed' RETURNING link_id").bind(ap.id, now, key).first<{ link_id: string }>() : null;
+      if (!retry) { results.push({ student_id: r.student_id, recipient_ref: r.recipient_ref, state: prior?.state, replay: true }); continue; }
+      if (retry.link_id) await db.prepare('UPDATE classroom_report_links SET revoked_at=? WHERE id=? AND revoked_at IS NULL').bind(now, retry.link_id).run(); // the token of the failed attempt was never delivered
+    }
     const token = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, ''), linkId = crypto.randomUUID();
     await db.prepare('INSERT INTO classroom_report_links(id,token_hash,job_id,class_run_id,student_id,recipient_ref,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)').bind(linkId, await sha256Hex(token), r.job_id, t.run.class_run_id, r.student_id, r.recipient_ref, now, now + LINK_TTL_MS).run();
     let out; try { out = await adapter.send({ to: r.address, link: `/v1/classroom/report-links/${token}`, template_revision: ap.template_revision, idempotency_key: key }); } catch { out = { status: 'unknown' as const }; }
@@ -152,4 +180,22 @@ classroomReportLinks.get('/:token', async (c) => {
   if (c.req.query('format') === 'json') return c.json({ report });
   const run = await db.prepare('SELECT starts_at FROM class_run_ops WHERE class_run_id=?').bind(link.class_run_id).first<{ starts_at: number }>();
   return new Response(renderReportHtml(report, { student_label: job.student_id, class_label: `${new Date(run?.starts_at ?? job.created_at).toISOString().slice(0, 10)} 수업`, approved_at: job.updated_at, expires_at: link.expires_at }), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'referrer-policy': 'no-referrer', 'content-security-policy': REPORT_PAGE_CSP, 'x-content-type-options': 'nosniff', 'x-robots-tag': 'noindex' } });
+});
+
+// ── signed provider callbacks (no admin session: the signature over the raw body IS the authentication) ──
+export const classroomDeliveryWebhooks = new Hono<{ Bindings: Env }>();
+classroomDeliveryWebhooks.post('/resend', async (c) => {
+  c.header('cache-control', 'no-store');
+  if (!opsEnabled(c.env) || !c.env.RESEND_WEBHOOK_SECRET) return c.json({ error: 'not found' }, 404);
+  const raw = await c.req.text(), now = Date.now();
+  if (raw.length > 256 * 1024) return c.json({ error: 'too large' }, 413);
+  const verdict = await verifySvix(c.env.RESEND_WEBHOOK_SECRET, { id: c.req.header('svix-id'), timestamp: c.req.header('svix-timestamp'), signature: c.req.header('svix-signature') }, raw, now);
+  if (verdict !== 'ok') return c.json({ error: 'signature not accepted', reason: verdict }, verdict === 'stale' ? 400 : 401);
+  let body: { type?: unknown; data?: { email_id?: unknown; tags?: unknown } } | null = null; try { body = JSON.parse(raw); } catch { body = null; }
+  const kind = resendEventKind(body?.type), id = body?.data?.email_id;
+  // Anything that is not a delivery state (opened, clicked, complained, domain events…) is acknowledged and ignored.
+  if (!kind || typeof id !== 'string' || !/^[A-Za-z0-9_-]{8,128}$/.test(id)) return c.json({ ignored: true });
+  const tags = body?.data?.tags, tag = Array.isArray(tags) ? (tags as Array<{ name?: unknown; value?: unknown }>).find((x) => x?.name === 'delivery_key')?.value : tags && typeof tags === 'object' ? (tags as Record<string, unknown>).delivery_key : undefined;
+  const r = await applyProviderEvent(c.env.HPS_DB, { event_id: 'resend:' + c.req.header('svix-id'), message_id: id, kind, ...(typeof tag === 'string' && /^[a-f0-9]{64}$/.test(tag) ? { delivery_key: tag } : {}) }, now);
+  return c.json(r.duplicate ? { duplicate: true } : { applied: r.applied, state: r.state });
 });
