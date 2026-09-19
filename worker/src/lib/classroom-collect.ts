@@ -12,40 +12,119 @@ export const UPLOAD_GRACE_MS = 24 * 3_600_000;
 export const ITEM_STATES = ['consent_missing', 'guardian_consent_missing', 'withdrawn', 'not_connected', 'requested', 'uploading', 'verified', 'incomplete', 'quarantined'] as const;
 
 export interface ManifestFile { name: string; bytes: number; sha256: string }
-export interface SnapshotManifest { schema: string; files: ManifestFile[] }
-export type Coverage = 'complete' | 'gaps' | 'sequence_unavailable';
+/**
+ * What the device says this snapshot IS. The Service never trusts it on its own: every
+ * field is compared with the grant, the batch, the consent and the bytes it holds.
+ * Schema /2 requires it. Schema /1 (no binding) is accepted only when the spool metadata
+ * itself names this class run — the current run is never assumed for an unbound record.
+ */
+export interface SnapshotBinding {
+  class_run_id: string; batch_id: string; seat_id: string; spool_session_id: string;
+  student: { u: string; c: string; p: string };
+  /** The confirmed lesson this App was bound to, or null for a run without a pinned lesson. */
+  activity: { course_id: string; version: string } | null;
+  consent: { purpose: string; notice_version: string };
+  /** Declared extent of events.jsonl. `final_line_sha256` names the last confirmed event. */
+  range: { lines: number; from_ts: string; to_ts: string; final_line_sha256: string; first_seq?: number; last_seq?: number };
+}
+export interface SnapshotManifest { schema: string; files: ManifestFile[]; binding?: SnapshotBinding }
+export type Coverage = 'complete' | 'gaps' | 'sequence_unavailable' | 'damaged' | 'range_unknown';
+export const SNAPSHOT_SCHEMA_V2 = 'hps-classroom-snapshot/2';
+const ID = /^[A-Za-z0-9_.:-]{1,128}$/, TS = /^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/;
+const str = (v: unknown, re = ID) => typeof v === 'string' && re.test(v);
+
+function validateBinding(v: unknown): SnapshotBinding | null {
+  const b = v as SnapshotBinding; if (!b || typeof b !== 'object') return null;
+  if (![b.class_run_id, b.batch_id, b.seat_id, b.spool_session_id].every((x) => str(x)) || !b.student || ![b.student.u, b.student.c, b.student.p].every((x) => str(x))) return null;
+  if (b.activity !== null && !(b.activity && str(b.activity.course_id) && str(b.activity.version))) return null;
+  if (!b.consent || !str(b.consent.purpose) || !str(b.consent.notice_version)) return null;
+  const r = b.range; if (!r || !Number.isSafeInteger(r.lines) || r.lines < 1 || !str(r.from_ts, TS) || !str(r.to_ts, TS) || !str(r.final_line_sha256, /^[a-f0-9]{64}$/)) return null;
+  if ((r.first_seq === undefined) !== (r.last_seq === undefined) || (r.first_seq !== undefined && (!Number.isSafeInteger(r.first_seq) || !Number.isSafeInteger(r.last_seq) || r.first_seq! < 1 || r.last_seq! < r.first_seq!))) return null;
+  return b;
+}
 
 export function validateManifest(m: unknown): { ok: true; value: SnapshotManifest } | { ok: false; error: string } {
   if (!m || typeof m !== 'object') return { ok: false, error: 'manifest must be an object' };
   const o = m as Record<string, unknown>;
-  if (o.schema !== SNAPSHOT_SCHEMA || !Array.isArray(o.files) || !o.files.length || o.files.length > Object.keys(SNAPSHOT_FILES).length) return { ok: false, error: 'schema and files[] required' };
+  if ((o.schema !== SNAPSHOT_SCHEMA && o.schema !== SNAPSHOT_SCHEMA_V2) || !Array.isArray(o.files) || !o.files.length || o.files.length > Object.keys(SNAPSHOT_FILES).length) return { ok: false, error: 'schema and files[] required' };
   const seen = new Set<string>();
   for (const f of o.files as Array<Record<string, unknown>>) {
     if (!f || typeof f.name !== 'string' || !(f.name in SNAPSHOT_FILES) || seen.has(f.name) || !Number.isSafeInteger(f.bytes) || typeof f.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(f.sha256)) return { ok: false, error: 'each file needs an allowed name, bytes and sha256' };
     seen.add(f.name);
   }
   if (!seen.has('events.jsonl')) return { ok: false, error: 'events.jsonl is required' };
-  return { ok: true, value: { schema: SNAPSHOT_SCHEMA, files: o.files as ManifestFile[] } };
+  // Identity lives in the spool metadata, not in the event lines: without it nothing can be attributed.
+  if (!seen.has('session.meta.json')) return { ok: false, error: 'session.meta.json is required' };
+  let binding: SnapshotBinding | undefined;
+  if (o.schema === SNAPSHOT_SCHEMA_V2) { const b = validateBinding(o.binding); if (!b) return { ok: false, error: 'schema /2 needs a complete binding' }; binding = b; }
+  else if (o.binding !== undefined) return { ok: false, error: 'binding requires schema /2' };
+  return { ok: true, value: { schema: o.schema as string, files: o.files as ManifestFile[], ...(binding ? { binding } : {}) } };
+}
+
+export interface SnapshotOwner { student: string; cohort: string; profile: string; class_run_id: string; batch_id: string; seat_id: string; purpose: string; notice_version: string; activity: { course_id: string; version: string } | null; run_starts_at: number; upload_until: number }
+/**
+ * Who and what a snapshot belongs to, decided from the spool metadata the Service holds
+ * and the device's binding. Returns '' when it is this learner's record of this class run,
+ * otherwise the reason it must be held apart from collection and evaluation.
+ */
+export function attributionProblem(metaText: string, binding: SnapshotBinding | undefined, owner: SnapshotOwner): string {
+  let meta: Record<string, any>; try { meta = JSON.parse(metaText); } catch { return 'metadata_invalid'; }
+  const user = meta?.user;
+  // No identity in the record: it is not assumed to be the learner who happens to hold this seat now.
+  if (!user || typeof user !== 'object' || typeof user.u !== 'string' || typeof user.c !== 'string' || typeof user.p !== 'string') return 'identity_unbound';
+  if (user.u !== owner.student) return 'foreign_student';
+  if (user.c !== owner.cohort) return 'foreign_cohort';
+  if (user.p !== owner.profile) return 'foreign_profile';
+  if (typeof meta.session_id !== 'string' || !meta.session_id) return 'metadata_invalid';
+  if (!binding) return meta.session_id === owner.class_run_id ? '' : 'run_unbound';
+  if (binding.student.u !== owner.student || binding.student.c !== owner.cohort || binding.student.p !== owner.profile) return 'foreign_student';
+  if (binding.class_run_id !== owner.class_run_id || binding.batch_id !== owner.batch_id) return 'foreign_run';
+  if (binding.seat_id !== owner.seat_id) return 'foreign_seat';
+  if (binding.spool_session_id !== meta.session_id) return 'binding_mismatch';
+  if (binding.consent.purpose !== owner.purpose || binding.consent.notice_version !== owner.notice_version) return 'consent_scope_mismatch';
+  if (JSON.stringify(binding.activity ?? null) !== JSON.stringify(owner.activity ?? null)) return 'foreign_activity';
+  // The declared extent has to sit inside this class run's window: an earlier session on the same PC is another activity.
+  const from = Date.parse(binding.range.from_ts), to = Date.parse(binding.range.to_ts);
+  if (!(from <= to) || from < owner.run_starts_at - 3_600_000 || to > owner.upload_until) return 'outside_run_window';
+  return '';
 }
 
 /**
- * Behavioural coverage is a separate answer from byte integrity. A legacy spool has
- * no seq: that is reported as `sequence_unavailable`, never invented and never "complete".
- * Also rejects a line that names another owner — one learner's file must not carry another's events.
+ * Behavioural coverage is a separate answer from byte integrity.
+ *  - A line that is not a JSON event is never skipped into "complete": the record is `damaged`.
+ *  - A legacy spool has no seq: `sequence_unavailable`, never invented.
+ *  - Sequenced events are `complete` only against a DECLARED start and end whose final event
+ *    the Service can see; a contiguous tail alone proves nothing about what came before it.
+ * Also flags a line that names another owner — one learner's file must not carry another's events.
  */
-export function eventCoverage(jsonl: string, owner: { student: string }): { coverage: Coverage; lines: number; foreign: boolean } {
-  const seqs: number[] = []; let lines = 0, foreign = false, unsequenced = 0;
+export function eventCoverage(jsonl: string, owner: { student: string }, range?: SnapshotBinding['range']): { coverage: Coverage; lines: number; foreign: boolean; malformed: number; range_problem: string } {
+  const seqs: number[] = []; let lines = 0, foreign = false, unsequenced = 0, malformed = 0, firstTs = '', lastTs = '';
   for (const raw of jsonl.split('\n')) {
     if (!raw.trim()) continue; lines++;
-    let e: Record<string, unknown>; try { e = JSON.parse(raw); } catch { continue; }
+    let e: Record<string, unknown> | null = null; try { e = JSON.parse(raw); } catch { e = null; }
+    if (!e || typeof e !== 'object' || Array.isArray(e)) { malformed++; continue; }
     const who = e.user ?? e.u ?? e.student_id;
     if (typeof who === 'string' && who !== owner.student) foreign = true;
+    if (typeof e.ts === 'string') { firstTs ||= e.ts; lastTs = e.ts; }
     if (Number.isSafeInteger(e.seq)) seqs.push(e.seq as number); else unsequenced++;
   }
-  if (!seqs.length || unsequenced) return { coverage: 'sequence_unavailable', lines, foreign };
+  let range_problem = '';
+  if (range) {
+    if (range.lines !== lines) range_problem = 'line_count_mismatch';
+    else if (firstTs && (range.from_ts !== firstTs || range.to_ts !== lastTs)) range_problem = 'declared_extent_mismatch';
+  }
+  if (malformed) return { coverage: 'damaged', lines, foreign, malformed, range_problem };
+  if (!seqs.length || unsequenced) return { coverage: 'sequence_unavailable', lines, foreign, malformed, range_problem };
   const sorted = [...seqs].sort((a, b) => a - b);
-  const contiguous = sorted.every((s, i) => i === 0 || s === sorted[i - 1]! + 1) && new Set(sorted).size === sorted.length;
-  return { coverage: contiguous ? 'complete' : 'gaps', lines, foreign };
+  const contiguous = sorted.every((s, i) => i === 0 || s === sorted[i - 1]! + 1);
+  if (!contiguous) return { coverage: 'gaps', lines, foreign, malformed, range_problem };
+  if (!range || range.first_seq === undefined) return { coverage: 'range_unknown', lines, foreign, malformed, range_problem };
+  const bounded = range.first_seq === sorted[0] && range.last_seq === sorted[sorted.length - 1];
+  return { coverage: bounded && !range_problem ? 'complete' : 'gaps', lines, foreign, malformed, range_problem: range_problem || (bounded ? '' : 'declared_seq_mismatch') };
+}
+export async function finalLineSha(jsonl: string): Promise<string> {
+  const last = jsonl.split('\n').filter((l) => l.trim()).pop() ?? '';
+  return sha256Bytes(new TextEncoder().encode(last).buffer as ArrayBuffer);
 }
 
 export async function sha256Bytes(b: ArrayBuffer): Promise<string> {

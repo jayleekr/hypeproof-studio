@@ -12,7 +12,7 @@ import type { Env } from '../env';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { ID_RE, parseFlags, sha256Hex, type OpsCapability } from '../lib/classroom-ops';
 import { composeReport, modelById } from '../lib/classroom-report';
-import { APPROVAL_TTL_MS, EMAIL_RE, LINK_TTL_MS, TEMPLATE_RE, dryRunAdapter, maskAddress, nextDeliveryState, type DeliveryAdapter } from '../lib/classroom-delivery';
+import { APPROVAL_TTL_MS, EMAIL_RE, LINK_TTL_MS, TEMPLATE_RE, deliveryKey, dryRunAdapter, maskAddress, nextDeliveryState, type DeliveryAdapter } from '../lib/classroom-delivery';
 import { opsEnabled } from './classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -98,7 +98,8 @@ classroomDeliveryTeacher.post(root + '/deliver', async (c) => {
   if (!adapter) return c.json({ error: 'no live delivery account is configured; only dry_run is available', reason: 'delivery_provider_not_configured' }, 409);
   const results = [];
   for (const r of s.rows) {
-    const key = await sha256Hex([r.draft_digest, r.recipient_ref, r.recipient_revision, ap.channel, ap.template_revision, adapter.external ? 'live' : 'dry'].join('|'));
+    // One logical message (lib/classroom-delivery.ts deliveryKey). The same message again is a replay; a sibling is not.
+    const key = await deliveryKey({ class_run_id: t.run.class_run_id, batch_id: t.batch.id, job_id: r.job_id, student_id: r.student_id, draft_digest: r.draft_digest, recipient_ref: r.recipient_ref, recipient_revision: r.recipient_revision, channel: ap.channel, template_revision: ap.template_revision, live: adapter.external });
     // Ledger first. Only the writer that created the row may call the adapter: retries and replays find the row and stop.
     const mine = await db.prepare("INSERT INTO classroom_report_deliveries(delivery_key,batch_id,class_run_id,student_id,recipient_ref,job_id,report_digest,recipient_revision,channel,template_revision,approval_id,adapter,state,attempts,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,'sending',1,?,?) ON CONFLICT(delivery_key) DO NOTHING RETURNING delivery_key").bind(key, t.batch.id, t.run.class_run_id, r.student_id, r.recipient_ref, r.job_id, r.draft_digest, r.recipient_revision, ap.channel, ap.template_revision, ap.id, adapter.id, now, now).first();
     if (!mine) { const prior = await db.prepare('SELECT state FROM classroom_report_deliveries WHERE delivery_key=?').bind(key).first<{ state: string }>(); results.push({ student_id: r.student_id, recipient_ref: r.recipient_ref, state: prior?.state, replay: true }); continue; }

@@ -8,14 +8,15 @@ let count = 0; async function check(name, fn) { await fn(); count++; console.log
 const f = await localOps(); const seats = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }, { seat_id: 'A3', student_id: 'student-c' }];
 const sha = (s) => createHash('sha256').update(s).digest('hex'); const admin = { authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') };
 const put = (cred, batch, rev, name, body) => f.app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${batch}/${rev}/${name}`, { method: 'PUT', headers: { authorization: 'Bearer ' + cred }, body }), f.env, { waitUntil() {} }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => null) }));
-const seal = (cred, batch, rev, files) => f.request(`/v1/classroom/ops/collect/snapshots/${batch}/${rev}/seal`, 'POST', { schema: 'hps-classroom-snapshot/1', files }, cred);
+// Sealed the way the App does it: schema /2 with the binding from the App's own freezer. `files` overrides the claimed hashes.
+const seal = (conn, batch, rev, ev, files) => f.request(`/v1/classroom/ops/collect/snapshots/${batch}/${rev}/seal`, 'POST', f.sealBody(conn, batch, ev, { files }), conn.credential);
 const consent = (cred, yes = true, notice = 'notice-v1') => f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: yes, purpose: 'class_report', notice_version: notice }, cred);
 const batch = (extra = {}, token) => f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: 1, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false, ...extra }, token);
-const events = (n, user = 'student-a', from = 1) => Array.from({ length: n }, (_, i) => JSON.stringify({ seq: from + i, type: 'prompt', user })).join('\n') + '\n'; const meta = JSON.stringify({ session: 's1' });
+const events = (n, user = 'student-a', from = 1) => Array.from({ length: n }, (_, i) => JSON.stringify({ seq: from + i, type: 'prompt', user })).join('\n') + '\n'; let meta = ''; // real-shaped spool metadata of the connection under test: identity lives here, not in the event lines
 const manifest = (ev, m = meta) => [{ name: 'session.meta.json', bytes: Buffer.byteLength(m), sha256: sha(m) }, { name: 'events.jsonl', bytes: Buffer.byteLength(ev), sha256: sha(ev) }];
 try {
   await f.freeze(); assert.equal((await f.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true } })).status, 201);
-  const a1 = (await f.pair('A1', 1, 1)).conn.json, a2 = (await f.pair('A2', 1, 2)).conn.json;
+  const a1 = (await f.pair('A1', 1, 1)).conn.json, a2 = (await f.pair('A2', 1, 2)).conn.json; meta = f.metaFor(a1);
   await check('AT-26 no consent → every learner stays on the batch with a reason, nothing is requested or stored; the profile upload flag is not consent', async () => {
     assert.equal((await batch({}, await f.teacher('fixer', ['observe', 'command']))).status, 403);
     const b = await batch(); assert.equal(b.status, 201, b.raw); assert.deepEqual(b.json.items.map((i) => [i.seat_id, i.state]), [['A1', 'consent_missing'], ['A2', 'consent_missing'], ['A3', 'consent_missing']]); assert.deepEqual([b.json.summary.roster, b.json.summary.held, b.json.summary.verified], [3, 3, 0]);
@@ -33,23 +34,23 @@ try {
     assert.equal((await put(a1.credential, b1.batch.id, 1, 'notes.txt', 'x')).status, 400); assert.equal((await put(await f.student('student-a'), b1.batch.id, 1, 'events.jsonl', 'x')).status, 401, 'the learning token is not a collection credential');
   });
   await check('AT-27 PUT 200 is not complete; manifest-only, hash mismatch and a changed file are refused; a verified receipt comes only from re-hashed bytes', async () => {
-    const ev = events(5); assert.equal((await seal(a1.credential, b1.batch.id, 1, manifest(ev))).json.reason, 'manifest_only');
+    const ev = events(5); assert.equal((await seal(a1, b1.batch.id, 1, ev)).json.reason, 'manifest_only');
     assert.equal((await put(a1.credential, b1.batch.id, 1, 'session.meta.json', meta)).status, 201); assert.equal((await put(a1.credential, b1.batch.id, 1, 'events.jsonl', ev)).status, 201);
     let v = (await f.request(f.base + '/report-batches/' + b1.batch.id)).json; assert.deepEqual([v.items[0].state, v.summary.verified, v.items[0].receipt_id], ['uploading', 0, '']);
     assert.equal((await put(a1.credential, b1.batch.id, 1, 'events.jsonl', ev)).json.retry, true); assert.equal((await put(a1.credential, b1.batch.id, 1, 'events.jsonl', ev + events(1, 'student-a', 6))).json.reason, 'revision_immutable', 'the active file moved on → new revision, not an overwrite');
-    const lie = manifest(ev); lie[1].sha256 = sha('something else'); const bad = await seal(a1.credential, b1.batch.id, 1, lie); assert.deepEqual([bad.status, bad.json.reason], [422, 'hash_mismatch']);
+    const lie = manifest(ev); lie[1].sha256 = sha('something else'); const bad = await seal(a1, b1.batch.id, 1, ev, lie); assert.deepEqual([bad.status, bad.json.reason], [422, 'hash_mismatch']);
     v = (await f.request(f.base + '/report-batches/' + b1.batch.id)).json; assert.deepEqual([v.items[0].state, v.items[0].reason, v.summary.verified], ['incomplete', 'hash_mismatch', 0]); assert.equal(f.db.prepare('SELECT count(*) n FROM classroom_job_outbox').get().n, 0);
-    const okr = await seal(a1.credential, b1.batch.id, 1, manifest(ev)); assert.equal(okr.status, 201, okr.raw); assert.deepEqual([okr.json.integrity, okr.json.coverage, okr.json.input_revision], ['verified', 'complete', 1]);
-    assert.equal((await seal(a1.credential, b1.batch.id, 1, manifest(ev))).json.replay, true); assert.equal((await put(a1.credential, b1.batch.id, 1, 'session.meta.json', meta)).json.reason, 'revision_sealed');
+    const okr = await seal(a1, b1.batch.id, 1, ev); assert.equal(okr.status, 201, okr.raw); assert.deepEqual([okr.json.integrity, okr.json.coverage, okr.json.input_revision], ['verified', 'complete', 1]);
+    assert.equal((await seal(a1, b1.batch.id, 1, ev)).json.replay, true); assert.equal((await put(a1.credential, b1.batch.id, 1, 'session.meta.json', meta)).json.reason, 'revision_sealed');
     assert.equal(f.db.prepare('SELECT count(*) n FROM classroom_job_outbox').get().n, 1, 'one job per verified input, replays included');
     const view = await f.request(f.base + '/report-batches/' + b1.batch.id); assert.ok(!view.raw.includes('"type":"prompt"') && !view.raw.includes('session'), 'the instructor view carries states and digests, never content');
   });
   await check('AT-27 integrity and coverage are different answers: gaps, duplicates and legacy logs without seq are verified bytes but not complete; another learner\'s events are quarantined', async () => {
     const gap = events(2) + events(2, 'student-a', 5); for (const [name, body] of [['session.meta.json', meta], ['events.jsonl', gap]]) await put(a1.credential, b1.batch.id, 2, name, body);
-    const g = await seal(a1.credential, b1.batch.id, 2, manifest(gap)); assert.deepEqual([g.json.integrity, g.json.coverage, g.json.input_revision], ['verified', 'gaps', 2]);
+    const g = await seal(a1, b1.batch.id, 2, gap); assert.deepEqual([g.json.integrity, g.json.coverage, g.json.input_revision], ['verified', 'gaps', 2]);
     assert.equal(f.db.prepare('SELECT count(*) n FROM classroom_job_outbox').get().n, 2, 'a late revision is a new input, not a silent replacement');
-    const legacy = '{"type":"prompt"}\n{"type":"turn_end"}\n'; for (const [name, body] of [['session.meta.json', meta], ['events.jsonl', legacy]]) await put(a1.credential, b1.batch.id, 3, name, body); assert.equal((await seal(a1.credential, b1.batch.id, 3, manifest(legacy))).json.coverage, 'sequence_unavailable');
-    const mixed = events(2) + events(1, 'student-b', 3); for (const [name, body] of [['session.meta.json', meta], ['events.jsonl', mixed]]) await put(a1.credential, b1.batch.id, 4, name, body); const q = await seal(a1.credential, b1.batch.id, 4, manifest(mixed)); assert.deepEqual([q.status, q.json.state], [422, 'quarantined']);
+    const legacy = '{"type":"prompt"}\n{"type":"turn_end"}\n'; for (const [name, body] of [['session.meta.json', meta], ['events.jsonl', legacy]]) await put(a1.credential, b1.batch.id, 3, name, body); assert.equal((await seal(a1, b1.batch.id, 3, legacy)).json.coverage, 'sequence_unavailable');
+    const mixed = events(2) + events(1, 'student-b', 3); for (const [name, body] of [['session.meta.json', meta], ['events.jsonl', mixed]]) await put(a1.credential, b1.batch.id, 4, name, body); const q = await seal(a1, b1.batch.id, 4, mixed); assert.deepEqual([q.status, q.json.state], [422, 'quarantined']);
     const v = (await f.request(f.base + '/report-batches/' + b1.batch.id)).json; assert.equal(v.summary.verified_complete_coverage, 0);
   });
   await check('AT-27 R2 write succeeded but the row did not: reported as an orphan by reconcile, never counted as collected', async () => {
@@ -62,7 +63,7 @@ try {
   await check('AT-28 after class: the learning token is gone, the upload-only window still takes the learner\'s own snapshot, grants nothing else, and closes', async () => {
     const b3 = (await batch()).json; f.db.prepare("UPDATE ops_grants SET expires_at=1 WHERE id=?").run(a2.grant_id); // class over: the connection's normal life ended
     assert.equal((await f.sync(a2.credential, [], 2)).status, 401, 'no status reporting, no commands after expiry');
-    const ev = events(3, 'student-b'); assert.equal((await put(a2.credential, b3.batch.id, 1, 'session.meta.json', meta)).status, 201); assert.equal((await put(a2.credential, b3.batch.id, 1, 'events.jsonl', ev)).status, 201); assert.equal((await seal(a2.credential, b3.batch.id, 1, manifest(ev))).status, 201);
+    const ev = events(3, 'student-b'); meta = f.metaFor(a2); assert.equal((await put(a2.credential, b3.batch.id, 1, 'session.meta.json', meta)).status, 201); assert.equal((await put(a2.credential, b3.batch.id, 1, 'events.jsonl', ev)).status, 201); assert.equal((await seal(a2, b3.batch.id, 1, ev)).status, 201);
     assert.equal((await f.request('/v1/chat/completions', 'POST', { messages: [] }, a2.credential)).status, 401); assert.equal((await put(a2.credential, b1.batch.id, 9, 'events.jsonl', events(1))).status, 404, 'not another learner\'s batch item');
     f.db.prepare('UPDATE classroom_collect_batches SET upload_until=1 WHERE id=?').run(b3.batch.id); assert.equal((await put(a2.credential, b3.batch.id, 2, 'events.jsonl', ev)).json.reason, 'upload_window_closed');
     f.db.prepare('UPDATE class_run_ops SET ends_at=1').run(); assert.equal((await put(a2.credential, b3.batch.id, 2, 'events.jsonl', ev)).status, 401);

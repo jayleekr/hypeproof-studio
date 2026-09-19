@@ -302,6 +302,8 @@ classroomOpsApp.post('/connect', async (c) => {
     credential: await signOpsCredential(id, c.env.HPS_SIGNING_SECRET), grant_id: id, device_registration_id: device,
     class_run_id: run.class_run_id, seat_id: pairing.seat_id, connection_epoch: grant?.connection_epoch ?? 1, expires_at: expires,
     protocol: OPS_PROTOCOL, server_capabilities: ['observe'], lesson: parseLesson(run.lesson_json),
+    // What a collected snapshot must be bound to (review F1). The app copies these, it never invents them.
+    student: { u: pairing.student_id, c: pairing.cohort_id, p: pairing.profile_id }, run: { starts_at: run.starts_at, ends_at: run.ends_at },
     poll_after_ms: pollAfterMs({ starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at }, now),
     // What this credential is for — shown to the student by the app.
     allows: ['status_report', 'own_command_receipts'], denies: ['ai_requests', 'log_bodies', 'other_seats'],
