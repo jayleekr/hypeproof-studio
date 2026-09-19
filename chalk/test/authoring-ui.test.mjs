@@ -125,4 +125,29 @@ for (const field of ['id="prerequisites"']) {
 // (이 줄이 없으면 위 검사는 "details 가 아예 없다"로도 통과한다.)
 assert.ok(detailsDepthAt(authoring, 'id="assistant_name"') > 0,
   '선택 설정은 접힌 채로 둔다 — 대조군이 없으면 위 검사가 헛돈다');
-console.log('authoring-ui: 필수 칸이 접힌 곳 밖에 있다 (#1130)');
+// #1012 RUN-01 — 리허설 상태는 **서버가 말하는 것**이어야 한다. 예전에는 이 화면이
+// `리허설 미실행` 이라는 글자를 두 곳에 직접 들고 있었고, 서버가 무엇을 주든 그대로
+// 찍었다(화면이 판정을 지어냈다). 그 문구를 아무 시험도 잡고 있지 않아서 거짓말이
+// 오래 남을 수 있었다 — 그래서 여기서 잠근다.
+{
+  // 1) 두 자리 모두 서버 값을 읽는다.
+  assert.match(authoring, /\$\('delivery-status'\)\.textContent=[^;]*\+rehearsalLabel\(d\.rehearsal\);/,
+    '참여 코드 발급 줄이 서버의 rehearsal 을 읽는다');
+  assert.match(authoring, /status\('불변 버전을 저장했습니다\. '\+rehearsalLabel\(d\.rehearsal\)\+' · 수업 비활성'\);/,
+    '확정 줄이 서버의 rehearsal 을 읽는다');
+
+  // 2) 판정 글자는 **표 하나**에만 있다. 표 밖에 같은 글자가 또 있으면 그게 거짓말이
+  //    시작되는 자리다(옛 하드코딩이 정확히 그 모양이었다).
+  const labelTable = /const REHEARSAL_LABEL=\{[^}]*\};/.exec(authoring);
+  assert.ok(labelTable, '리허설 표시 문구는 한 표에 모아 둔다');
+  const outside = authoring.replace(labelTable[0], '');
+  assert.ok(!/'리허설 (미실행|통과|실패)'/.test(outside),
+    '표 밖에 리허설 판정 문구가 하드코딩돼 있으면 안 된다');
+
+  // 3) 모르는 값·없는 값을 **통과로도 미실행으로도** 읽지 않는다. 관문·준비 점검이
+  //    쓰는 말과 같은 문법이어야 강사가 같은 것으로 읽는다.
+  assert.match(authoring, /const rehearsalLabel=v=>REHEARSAL_LABEL\[v\]\?\?'리허설 상태 미확인';/,
+    '모르는 상태는 미확인이다 — 빈칸을 통과로 읽지 않는다');
+}
+
+console.log('authoring-ui: 필수 칸이 접힌 곳 밖에 있다 (#1130) · 리허설 표시는 서버 값이다 (#1012)');
