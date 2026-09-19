@@ -123,10 +123,10 @@ export const evidencePayload = (type: EvidenceType, o: { sourceState?: SourceSta
 });
 
 /** jti/exp are not secrets; the token itself never enters this module. */
-export function tokenIdentityUnverified(token: string): { jti?: string; exp?: number } {
+export function tokenIdentityUnverified(token: string): { jti?: string; exp?: number; u?: string; c?: string } {
   try {
     const p = JSON.parse(Buffer.from(token.split(".")[0] ?? "", "base64url").toString("utf8"));
-    return { jti: typeof p.jti === "string" ? p.jti : undefined, exp: typeof p.exp === "number" ? p.exp : undefined };
+    return { ...(typeof p.jti === "string" ? { jti: p.jti } : {}), ...(typeof p.exp === "number" ? { exp: p.exp } : {}), ...(typeof p.u === "string" ? { u: p.u } : {}), ...(typeof p.c === "string" ? { c: p.c } : {}) };
   } catch {
     return {};
   }
@@ -229,7 +229,7 @@ export interface SyncDeps {
   /** Declared on every sync: a window that did not pair itself still says what it can run. */
   capabilities?: string[];
   /** R2 command ledger. Absent → this client observes only. */
-  commands?: { pendingReceipts(): unknown[]; onAcks(acks: unknown[]): Promise<boolean>; onCommands(cmds: unknown[]): Promise<void> };
+  commands?: { pendingReceipts(): unknown[]; onAcks(acks: unknown[]): Promise<boolean>; onCommands(cmds: unknown[]): Promise<void>; /** The connection ended: nothing new may start, a running action is told to stop. */ close?(): void };
 }
 export interface OpsSyncLoop { stop(): void; tick(): Promise<void>; nudge(): void; readonly state: "running" | "stopped"; }
 
@@ -246,9 +246,13 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
     try {
       const events = deps.outbox.batch();
       const r = await deps.post({ schema_version: OPS_SCHEMA_VERSION, app_instance_id: deps.appInstanceId, boot_id: deps.outbox.bootId, events, sample: { ...deps.sample(), observed_at: deps.now() }, ...(deps.capabilities ? { capabilities: deps.capabilities } : {}), ...(deps.commands ? { receipts: deps.commands.pendingReceipts() } : {}) }, SYNC_TIMEOUT_MS);
+      // The learner disconnected (or re-paired) while this request was in flight. Whatever it carries — a pause,
+      // an approval to run, new commands — was addressed to a connection that no longer exists: drop all of it.
+      if (stopped) return;
       if (r.status === 200 && r.body?.ack) {
         failures = 0;
         await deps.outbox.acked(r.body.ack.boot_id, r.body.ack.contiguous_seq);
+        if (stopped) return;
         if (typeof r.body.poll_after_ms === "number") pollMs = Math.min(Math.max(r.body.poll_after_ms, 1000), 120000);
         if (typeof r.body.connection_epoch === "number") deps.onEpoch?.(r.body.connection_epoch);
         if (r.body.control && typeof r.body.control.paused === "boolean") deps.onControl?.(r.body.control);
@@ -256,6 +260,7 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
         if (deps.commands) {
           // Epoch first, then the Service's answers, then new work: a command never runs on a stale epoch or an unanswered ask.
           const ran = await deps.commands.onAcks(r.body.receipt_acks ?? []);
+          if (stopped) return;
           await deps.commands.onCommands(r.body.commands ?? []);
           if (ran || deps.commands.pendingReceipts().length) next = 1000;
         }
@@ -278,11 +283,12 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
     } finally {
       inflight = false;
     }
+    if (stopped) return;
     schedule(jitter(next, deps.random));
   };
 
   const loop: OpsSyncLoop = {
-    stop() { stopped = true; if (handle !== null) deps.clearTimeout(handle); handle = null; },
+    stop() { if (!stopped) deps.commands?.close?.(); stopped = true; if (handle !== null) deps.clearTimeout(handle); handle = null; },
     tick,
     /** A step/error/result should not wait out a 30 s prepare poll. */
     nudge() { if (!stopped && !inflight) schedule(0); },
