@@ -102,7 +102,8 @@ export function composeReport(draft: Draft, ctx: { class_runs_with_evidence: num
   const observed = draft.findings.filter((f) => f.status === 'observed'), rest = draft.findings.filter((f) => f.status !== 'observed'), changed = observed.filter((f) => f.change);
   const sections: ReportSection[] = [
     { title: '이번 수업에서 관찰된 행동', items: observed.map((f) => ({ label: label(f.capability), text: f.claim, evidence: f.evidence, ...(f.assistance ? { assistance: f.assistance } : {}) })), note: observed.length ? undefined : `이번 수업 기록에서는 ${NOT_YET_SEEN}.` },
-    { title: '판단이 바뀐 과정', items: changed.map((f) => ({ label: label(f.capability), text: `${f.change!.before} → ${f.change!.after}`, evidence: f.evidence })), note: changed.length ? undefined : '이번 수업 기록에서 판단을 바꾼 장면은 관찰되지 않았습니다. 바꾸지 않은 것이 문제라는 뜻은 아닙니다.' },
+// The quotes behind a changed judgement are already shown with the observed behaviour above; repeating them here only makes the page longer.
+    { title: '판단이 바뀐 과정', items: changed.map((f) => ({ label: label(f.capability), text: `${f.change!.before} → ${f.change!.after}` })), note: changed.length ? undefined : '이번 수업 기록에서 판단을 바꾼 장면은 관찰되지 않았습니다. 바꾸지 않은 것이 문제라는 뜻은 아닙니다.' },
     { title: NOT_YET_SEEN, items: rest.map((f) => ({ label: label(f.capability), text: NOT_YET_SEEN })), note: '점수나 미달이 아닙니다. 이번 기록에 그 행동을 볼 장면이 없었다는 뜻입니다.' },
     { title: '다음에 실험해볼 것', items: draft.next_experiment ? [{ text: draft.next_experiment }] : [], note: draft.next_experiment ? undefined : '다음 실험은 검수자가 학생과 함께 정합니다.' },
   ];

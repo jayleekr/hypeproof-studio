@@ -97,7 +97,7 @@ test('F3 two siblings with identical reports each receive one logical delivery; 
   })).status, 200);
   assert.equal((await f.request('/admin/classroom/recipients', 'POST', {
     class_run_id: f.run, source_ref: 'synthetic-review', recipients: seats.map((s) => ({
-      student_id: s.student_id, recipient_ref: 'same-guardian', channel: 'email', address: 'guardian@example.invalid',
+      student_id: s.student_id, recipient_ref: 'same-guardian', channel: 'email', address: 'guardian@example.invalid', viewer_check: { kind: 'phone_last4', value: '4821' }, // a live send needs the link viewer check (2026-09-20)
     })),
   }, null, { authorization: 'Basic ' + Buffer.from('x:pw').toString('base64') })).status, 201);
   const scope = (await f.request(f.B + '/recipients?template_revision=review-v1')).json;
