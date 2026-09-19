@@ -14,6 +14,7 @@ import { validateSessionDesign } from "../lib/session-design";
 import { assessDraft, reviewedTemplate, templateAdmission, TEMPLATE_REQUIRED, TEMPLATE_NOT_REVIEWED } from "../lib/draft-assessment";
 import { readLesson } from '../lib/lesson-delivery';
 import { issue } from '../lib/tokens';
+import { newTicket, ticketKey, rehearsalSeat, encodeStoredTicket, REHEARSAL_TICKET_TTL_SECONDS } from '../lib/rehearsal-ticket';
 import { getRoster, getActiveSession } from '../lib/kv';
 
 type Bindings = { Bindings: Env; Variables: { author: IssuerAuthz } };
@@ -42,7 +43,7 @@ const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
 };
 // 인증·본문 제한은 **경로를 손으로 나열**해서 건다. 새 라우트를 여기 등록하지 않으면
 // `c.get("author")` 가 undefined 라 핸들러가 500 으로 죽는다(실제로 그렇게 났다).
-for (const path of [root, root + "/assessment", root + "/models/:profile", root + "/features/:profile", root + "/versions/:version", root + '/versions/:version/participants']) {
+for (const path of [root, root + "/assessment", root + "/models/:profile", root + "/features/:profile", root + "/versions/:version", root + '/versions/:version/participants', root + '/versions/:version/rehearsal-tickets']) {
   authoring.use(path, authenticate);
   authoring.use(path, bodyLimit({ maxSize: 128 * 1024, onError: (c) => c.json({ error: "request too large" }, 413) }));
 }
@@ -118,6 +119,50 @@ async function readRehearsal(db: D1Database, cohort: string, course: string, ver
     return 'not_run';
   }
 }
+
+// 리허설 교환권 발급 (#1131, C-1). **Router 결정 · Jay 검토 전** — 확정 계약이 아니다.
+//
+// `participants`(바로 위)와 나란히 두지만 **로스터·열린 세션을 요구하지 않는다.**
+// 그게 이 경로가 따로 있는 이유다: #1131 이 "강사가 리허설하려고 자기를 운영
+// 로스터에 넣는 것은 데이터 오염이다" 라고 그 경로를 줄 번호까지 찍어 막았다.
+// 뚫는 것이 아니라 **지나가지 않는다** — 권한은 로스터 멤버십이 아니라 강사
+// 스코프(`authenticate` + `owns`)가 판정하고, 그건 "이 수업을 만든 사람인가" 를
+// 직접 묻는 것이라 더 약하지 않다.
+//
+// 응답에 **토큰을 담지 않는다.** 강사가 받는 것은 교환권 하나뿐이고 자격은 앱이
+// 교환할 때 나온다. 좌표도 자격증명도 링크에 실리지 않는다(`ARC-02`).
+authoring.post(root + '/versions/:version/rehearsal-tickets', async c => {
+  const a = c.get('author'), cohort = c.req.param('cohort')!, course = c.req.param('course')!;
+  const b = await c.req.json().catch(() => null);
+  const hours = b?.hours ?? 4;
+  if (!Number.isInteger(hours) || hours < 1 || hours > 24)
+    return c.json({ error: 'hours (1-24) required' }, 400);
+  if (hours > (a.scope.max_hours ?? 24) || Date.now() / 1000 + hours * 3600 > a.payload.exp)
+    return c.json({ error: 'duration exceeds instructor authorization' }, 403);
+  const d = await readDraft(c.env.HPS_DB, cohort, course);
+  if (!d || !owns(d, a)) return c.json({ error: 'course not found' }, 404);
+  if (!d.profile_id) return c.json(TEMPLATE_REQUIRED, 409);
+  const lesson = await readLesson(c.env, cohort, course, c.req.param('version')!, d.profile_id);
+  if (!lesson) return c.json({ error: 'valid frozen version required' }, 409);
+  // 좌표는 **넷**이다. sha256 을 빼면 내용이 바뀐 뒤 옛 교환권이 통과해서 VER-02
+  // (변경 시 합격 무효화)가 깨진다 — resolveTokenLesson 이 불일치를 거부하는 것이
+  // 그 집행 지점이고, 앱의 content_changed/sha256_mismatch 가 여기 대응한다.
+  const ref = { course_id: course, version: lesson.version, sha256: lesson.sha256 };
+  // 좌석 접두사와 클레임은 한 함수가 같이 낸다 — 두 곳에서 조립하면 갈린다.
+  const seat = rehearsalSeat(a.payload.u);
+  const { token } = await issue({ u: seat.u, c: cohort, p: d.profile_id, lesson: ref, rehearsal: seat.rehearsal }, hours, c.env.HPS_SIGNING_SECRET);
+  const ticket = newTicket();
+  // 키는 교환권의 **해시**다 — 저장소를 덤프해도 쓸 수 있는 표가 나오지 않는다.
+  // 만료는 애플리케이션이 재지 않고 저장소가 지운다: 코드는 잊을 수 있어도 TTL 은 안 잊는다.
+  await c.env.HPS_KV.put(await ticketKey(ticket), encodeStoredTicket(token), { expirationTtl: REHEARSAL_TICKET_TTL_SECONDS });
+  return c.json({
+    ticket,
+    seat: seat.u,
+    lesson: ref,
+    expires_at: Math.floor(Date.now() / 1000) + REHEARSAL_TICKET_TTL_SECONDS,
+    credential_expires_at: Math.floor(Date.now() / 1000) + hours * 3600,
+  });
+});
 
 async function readDraft(db: D1Database, cohort: string, course: string) {
   return db.prepare(`SELECT d.*, EXISTS(SELECT 1 FROM authoring_independent_courses m WHERE m.cohort_id=d.cohort_id AND m.course_id=d.course_id) AS independent
