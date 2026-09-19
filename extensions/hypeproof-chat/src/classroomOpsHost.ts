@@ -13,7 +13,7 @@ import { removeFrozenCopy } from "./evidenceSnapshotStore";
 import { resetPostcondition, runPreservingReset, stopAndConfirm, type Preservation, type ResetManifest, type ResetSteps } from "./runtimeReset";
 import {
   ChangeGate, OPS_CLIENT_CAPABILITIES, OPS_PROTOCOL, OpsOutbox, activationPayload, classifyFailure, errorPayload,
-  runtimePayload, uploadPayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
+  evidencePayload, runtimePayload, stepPayload, turnObservations, uploadPayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
 } from "./classroomOps";
 
 const CREDENTIAL_KEY = "hypeproof.classroomOps.credential";
@@ -46,6 +46,12 @@ export interface ClassroomOpsActions {
 export interface ClassroomOpsObserver {
   profileResult(r: { ok: boolean; status?: number; code?: string; requestId?: string; network?: boolean }, token: string): void;
   traceResult(status: number): void;
+  /** A turn finished in the real runtime path. No text, only what happened. */
+  turnResult(t: import("./classroomOps").TurnOutcome): void;
+  /** The learner's own, explicit step action in the lesson panel. Never inferred from chat volume or an AI "done". */
+  lessonStep(lessonVersion: string, stepId: string, status: "in_progress" | "submitted"): void;
+  /** A real change to the learner's artifact, as digests only. */
+  artifactChanged(before: string | undefined, after: string, stepId?: string): void;
 }
 
 export class ClassroomOpsHost implements ClassroomOpsObserver {
@@ -326,7 +332,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     if (!live()) { runner.close(); return; } // disconnected while the journal was being read
     this.runner = runner;
     this.loop = startOpsSync({
-      capabilities: ["observe", "commands", ...Object.keys(executors)], onEpoch: (e) => { if (live()) this.epoch = e; },
+      capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(executors)], onEpoch: (e) => { if (live()) this.epoch = e; },
       commands: runner as unknown as NonNullable<Parameters<typeof startOpsSync>[0]["commands"]>,
       post: (body, timeoutMs) => this.post(credential, body, timeoutMs), outbox: this.outbox, appInstanceId: this.appInstanceId,
       sample: () => { const r = this.runtime(); const changed = this.runtimeGate.next(r.status); if (changed) void this.outbox?.add("runtime", runtimePayload(changed)); return { idle_ms: Math.max(0, Math.round(r.idleMs)), runtime_status: r.status, control_revision: this.controlRevision }; },
@@ -370,6 +376,31 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       if (cls !== "network" && this.activationGate.next(`rejected:${cls}`)) void this.outbox.add("activation", activationPayload("token_rejected", { reason: cls, httpStatus: r.status }));
       if (this.errorGate.next(`${cls}:${r.status}`)) void this.outbox.add("error", errorPayload(cls, { code: r.status ? `http_${r.status}` : undefined, requestId: r.requestId, blocking: cls !== "network" }));
     }
+    this.loop?.nudge();
+  }
+
+  turnResult(t: import("./classroomOps").TurnOutcome): void {
+    if (!this.outbox) return;
+    let added = false;
+    for (const o of turnObservations(t)) {
+      const gate = o.kind === "activation" ? this.activationGate : this.errorGate;
+      // Reported on change, not per turn. "cleared" shares its key with the profile check so the two do not echo each other.
+      if (gate.next(o.payload.cleared ? "clear" : JSON.stringify(o.payload))) { void this.outbox.add(o.kind, o.payload, o.actor); added = true; }
+    }
+    if (added) this.loop?.nudge();
+  }
+  private currentStep = "";
+  lessonStep(lessonVersion: string, stepId: string, status: "in_progress" | "submitted"): void {
+    if (!this.outbox || !/^[A-Za-z0-9_.:+-]{1,64}$/.test(lessonVersion) || !/^[A-Za-z0-9_-]{1,128}$/.test(stepId)) return;
+    this.currentStep = stepId;
+    void this.outbox.add("step", stepPayload(lessonVersion, status, stepId), "student");
+    // "I finished this step" is the learner's own statement: self-reported, not a verified completion.
+    if (status === "submitted") void this.outbox.add("evidence", evidencePayload("decision", { sourceState: "self_reported", stepId }), "student");
+    this.loop?.nudge();
+  }
+  artifactChanged(before: string | undefined, after: string, stepId?: string): void {
+    if (!this.outbox || before === after) return;
+    void this.outbox.add("evidence", evidencePayload("change", { sourceState: "real", stepId: stepId ?? (this.currentStep || undefined), before, after }), "ai");
     this.loop?.nudge();
   }
 

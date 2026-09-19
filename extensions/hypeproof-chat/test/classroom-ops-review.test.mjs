@@ -74,3 +74,31 @@ test('F2 mid-run disconnect: the running action is asked to stop, and its result
   await runner.onCommands([{ ...command, command_id: 'review-after-close' }]);
   assert.equal(runner.pendingReceipts().length, 1, 'a closed runner accepts nothing new');
 });
+
+// ── F4: what the App reports comes from what it observed, and only that ──
+import { turnObservations, evidencePayload } from '../src/classroomOps.ts';
+import { lessonStepSignal } from '../src/chatPanelHelpers.ts';
+const kinds = (list) => list.map((o) => [o.kind, o.payload.stage ?? o.payload.class, o.payload.blocking ?? null, o.payload.cleared ?? false]);
+test('F4 turn outcomes: first completed turn is runtime_ready, SDK fallback is a non-blocking sdk_not_ready, a later success clears', () => {
+  assert.deepEqual(kinds(turnObservations({ ok: true, runtime: 'agent-sdk' })), [['activation', 'runtime_ready', null, false], ['error', 'unknown', false, true]]);
+  assert.deepEqual(kinds(turnObservations({ ok: true, runtime: 'proxy', sdkFallback: true })), [['error', 'sdk_not_ready', false, false], ['activation', 'runtime_ready', null, false]], 'the turn went on: not red, and not "cleared" either');
+  assert.deepEqual(kinds(turnObservations({ ok: true, toolFailed: true })), [['activation', 'runtime_ready', null, false], ['error', 'tool_not_ready', false, false]]);
+});
+test('F4 a failed turn names the observed cause; an unrecognised one stays unknown and a Stop is not a fault', () => {
+  assert.deepEqual(kinds(turnObservations({ ok: false, errorKind: 'auth:expired' })), [['error', 'auth_expired', true, false]]);
+  assert.deepEqual(kinds(turnObservations({ ok: false, errorKind: 'auth:session_inactive', status: 403, code: 'session_inactive' })), [['error', 'class_not_open', true, false]]);
+  assert.deepEqual(kinds(turnObservations({ ok: false, errorKind: 'transport' })), [['error', 'network', true, false]]);
+  assert.deepEqual(kinds(turnObservations({ ok: false, errorKind: 'stall' })), [['error', 'unknown', true, false], ['activation', 'runtime_failed', null, false]], 'never upgraded to a guess');
+  assert.equal(turnObservations({ ok: false, errorKind: 'stall' })[0].payload.code, 'stall');
+  assert.deepEqual(turnObservations({ ok: false, aborted: true, errorKind: 'aborted' }), [], 'the learner pressing Stop is their decision');
+  // 401 without the Service's own code is a rejection, not an expiry (2026-07-28).
+  assert.deepEqual(kinds(turnObservations({ ok: false, status: 401 })), [['error', 'auth_rejected', true, false]]);
+});
+test('F4 a step signal exists only for the learner\'s explicit action on a step of the confirmed lesson', () => {
+  const lesson = { version: 'm2026.09.18-1', content: { steps: [{ id: 'intro' }, { id: 'build' }] } };
+  assert.deepEqual(lessonStepSignal(lesson, { stepId: 'build', status: 'in_progress' }), { lesson_version: 'm2026.09.18-1', step_id: 'build', status: 'in_progress', source_state: 'real' });
+  assert.equal(lessonStepSignal(lesson, { stepId: 'build', status: 'submitted' }).source_state, 'self_reported', '"I finished" is the learner\'s statement, not a verified completion');
+  for (const bad of [{ stepId: 'not-in-lesson', status: 'submitted' }, { stepId: 'build', status: 'reviewed' }, { stepId: 'build', status: 'done' }, { stepId: 7, status: 'submitted' }]) assert.equal(lessonStepSignal(lesson, bad), null, JSON.stringify(bad));
+  assert.equal(lessonStepSignal(null, { stepId: 'build', status: 'submitted' }), null, 'no confirmed lesson → no step is reported (the board shows unknown)');
+  assert.equal(evidencePayload('change', {}).source_state, 'unverified', 'an unstated source is never reported as real');
+});

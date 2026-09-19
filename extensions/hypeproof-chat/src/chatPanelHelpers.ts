@@ -794,3 +794,17 @@ export const WRITE_TOOL_NAMES = ["Write", "Edit", "MultiEdit"] as const;
 export function pendingCloseLabel(wroteOk: boolean): string {
   return wroteOk ? "고쳤어요" : "생각했어요";
 }
+
+/**
+ * #751 F4 — turn the lesson panel's message into a step signal, or nothing.
+ * Only a step of the CONFIRMED lesson this profile carries counts, and only the two statuses a learner can state
+ * themselves. "submitted" is the learner's own statement (self-reported); nothing here infers completion.
+ */
+export function lessonStepSignal(
+  lesson: { version: string; content: { steps: Array<{ id: string }> } } | null | undefined,
+  msg: { stepId?: unknown; status?: unknown },
+): { lesson_version: string; step_id: string; status: "in_progress" | "submitted"; source_state: "real" | "self_reported" } | null {
+  if (!lesson || typeof msg.stepId !== "string" || (msg.status !== "in_progress" && msg.status !== "submitted")) return null;
+  const step = lesson.content.steps.find((x) => x.id === msg.stepId);
+  return step ? { lesson_version: lesson.version, step_id: step.id, status: msg.status, source_state: msg.status === "submitted" ? "self_reported" : "real" } : null;
+}

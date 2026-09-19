@@ -15,7 +15,8 @@
 export const OPS_SCHEMA_VERSION = 1;
 export const OPS_PROTOCOL = 1;
 /** Base capability. The host appends "commands" plus each action it registered an executor for. */
-export const OPS_CLIENT_CAPABILITIES = ["observe"] as const;
+/** `observe_*` say WHAT this build reports from its real runtime path. A board must show a missing one as "unknown", never as "nothing happened". */
+export const OPS_CLIENT_CAPABILITIES = ["observe", "observe_step", "observe_runtime", "observe_evidence"] as const;
 export const SYNC_TIMEOUT_MS = 4000;
 export const BACKOFF_STEPS_MS = [5000, 10000, 20000, 60000] as const;
 export const MAX_BATCH_EVENTS = 100;
@@ -121,6 +122,33 @@ export const evidencePayload = (type: EvidenceType, o: { sourceState?: SourceSta
   ...(o.before && /^[a-f0-9]{64}$/.test(o.before) ? { artifact_before: o.before } : {}),
   ...(o.after && /^[a-f0-9]{64}$/.test(o.after) ? { artifact_after: o.after } : {}),
 });
+
+/**
+ * What a finished turn tells the board (review F4). Only what the App actually observed:
+ *  - the first turn that completes is the evidence that the runtime works (`runtime_ready`);
+ *  - an SDK that could not start and fell back is `sdk_not_ready`, non-blocking because the turn went on;
+ *  - a failed turn names its observed cause; an unrecognised one stays `unknown` — never upgraded to a guess;
+ *  - a later successful turn clears the error. Token counts, clicks and message volume are never read here.
+ */
+export interface TurnOutcome { ok: boolean; aborted?: boolean; runtime?: "agent-sdk" | "proxy"; sdkFallback?: boolean; errorKind?: string; status?: number; code?: string; requestId?: string; toolFailed?: boolean }
+export function turnObservations(t: TurnOutcome): Array<{ kind: "activation" | "error"; actor: OpsActor; payload: Record<string, unknown> }> {
+  if (t.aborted) return []; // the learner pressed Stop: that is their decision, not a fault
+  const out: Array<{ kind: "activation" | "error"; actor: OpsActor; payload: Record<string, unknown> }> = [];
+  if (t.sdkFallback) out.push({ kind: "error", actor: "system", payload: errorPayload("sdk_not_ready", { code: "sdk_fallback", blocking: false }) });
+  if (t.ok) {
+    out.push({ kind: "activation", actor: "system", payload: activationPayload("runtime_ready") });
+    if (t.toolFailed) out.push({ kind: "error", actor: "tool", payload: errorPayload("tool_not_ready", { code: "tool_error", blocking: false }) });
+    else if (!t.sdkFallback) out.push({ kind: "error", actor: "system", payload: errorPayload("unknown", { blocking: false, cleared: true }) });
+    return out;
+  }
+  const kind = t.errorKind ?? "";
+  const cls: OpsErrorClass = kind.startsWith("auth:") || t.status !== undefined
+    ? classifyFailure({ status: t.status ?? (kind.startsWith("auth:") ? 401 : undefined), code: t.code ?? (kind.startsWith("auth:") ? kind.slice(5) : undefined) })
+    : kind === "transport" ? "network" : "unknown";
+  out.push({ kind: "error", actor: "system", payload: errorPayload(cls, { code: safeCode(kind.replace(/[^a-z0-9_.-]/gi, "_").toLowerCase()) ?? undefined, requestId: t.requestId, blocking: true }) });
+  if (cls === "unknown" && !kind.startsWith("auth:")) out.push({ kind: "activation", actor: "system", payload: activationPayload("runtime_failed") });
+  return out;
+}
 
 /** jti/exp are not secrets; the token itself never enters this module. */
 export function tokenIdentityUnverified(token: string): { jti?: string; exp?: number; u?: string; c?: string } {
