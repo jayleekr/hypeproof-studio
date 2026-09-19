@@ -38,19 +38,28 @@ const audit = (db: Db, run: string, seat: string, actorKind: string, actorId: st
 
 // ── hooks called from routes/admin.ts ───────────────────────────────────────
 
-export async function recordTokenIssue(env: Env, t: { jti: string; cohort: string; student: string; profile: string; issuedBy: string; hours: number }): Promise<void> {
-  if (!opsEnabled(env)) return;
+export async function recordTokenIssue(env: Env, t: { jti: string; cohort: string; student: string; profile: string; issuedBy: string; hours: number }): Promise<{ epoch_advanced: boolean } | null> {
+  if (!opsEnabled(env)) return null;
   const at = Date.now();
+  // A re-issued learning token is a new login generation for that student:
+  // commands addressed to the old epoch must not run afterwards. This is an
+  // invariant, so it is written on its own (not inside the best-effort ledger
+  // batch) and its failure is REPORTED to the caller. It still must not fail the
+  // mint: an operations outage may never block the existing class path (AT-32).
+  let epoch_advanced = false;
+  for (let attempt = 0; attempt < 2 && !epoch_advanced; attempt++) {
+    try {
+      await env.HPS_DB.prepare("UPDATE ops_grants SET connection_epoch=connection_epoch+1,revision=revision+1 WHERE kind='connection' AND state='active' AND cohort_id=? AND student_id=?").bind(t.cohort, t.student).run();
+      epoch_advanced = true;
+    } catch (err) { console.error('ops connection epoch NOT advanced on token re-issue:', err); }
+  }
   try {
-    await env.HPS_DB.batch([
-      env.HPS_DB.prepare('INSERT OR IGNORE INTO ops_token_issues(jti,cohort_id,student_id,profile_id,issued_by,issued_at,expires_at) VALUES(?,?,?,?,?,?,?)').bind(t.jti, t.cohort, t.student, t.profile, t.issuedBy, at, at + t.hours * 3_600_000),
-      // A re-issued learning token is a new login generation for that student:
-      // commands addressed to the old epoch must not run afterwards.
-      env.HPS_DB.prepare("UPDATE ops_grants SET connection_epoch=connection_epoch+1,revision=revision+1 WHERE kind='connection' AND state='active' AND cohort_id=? AND student_id=?").bind(t.cohort, t.student),
-    ]);
+    // Issuance metadata is best-effort: losing it only degrades the board's "issued" column.
+    await env.HPS_DB.prepare('INSERT OR IGNORE INTO ops_token_issues(jti,cohort_id,student_id,profile_id,issued_by,issued_at,expires_at) VALUES(?,?,?,?,?,?,?)').bind(t.jti, t.cohort, t.student, t.profile, t.issuedBy, at, at + t.hours * 3_600_000).run();
   } catch (err) {
     console.error('ops token issue ledger unavailable:', err);
   }
+  return { epoch_advanced };
 }
 
 /** Throws on storage failure: the caller must not report the revocation as complete. */
@@ -253,16 +262,21 @@ classroomOpsApp.post('/connect', async (c) => {
   if (!instanceOk(b) || typeof b.ticket !== 'string' || b.ticket.length > 64 || !Number.isInteger(b.protocol)) return c.json({ error: 'ticket, app_instance_id, boot_id and protocol required' }, 400);
   const caps = Array.isArray(b.capabilities) && b.capabilities.length <= 32 && b.capabilities.every((x: unknown) => typeof x === 'string' && /^[a-z_]{1,48}$/.test(x)) ? b.capabilities : [];
   const version = typeof b.app_version === 'string' && /^[A-Za-z0-9_.+-]{1,64}$/.test(b.app_version) ? b.app_version : '';
-  const ip = c.req.header('cf-connecting-ip') ?? 'unknown';
-  if (!(await bumpRateCounter(c.env.HPS_KV, `opsconnect:${ip}`, 30, 60)).allowed) return c.json({ error: 'too many pairing attempts', reason: 'rate_limited' }, 429, { 'retry-after': '60' });
+  // Only FAILED attempts spend the budget. A computer lab shares one NAT address,
+  // so counting every request would lock out a class that pairs at the same time;
+  // a learner succeeds once and costs nothing, a ticket guesser fails every time.
+  const rateKey = `opsconnect:${c.req.header('cf-connecting-ip') ?? 'unknown'}`;
+  const blocked = await c.env.HPS_KV.get<{ n: number; resetAt: number }>(rateKey, 'json');
+  if (blocked && blocked.resetAt > now && blocked.n >= 30) return c.json({ error: 'too many pairing attempts', reason: 'rate_limited' }, 429, { 'retry-after': '60' });
+  const invalid = async () => { await bumpRateCounter(c.env.HPS_KV, rateKey, 30, 60, now); return c.json({ error: 'pairing ticket is not valid', reason: 'ticket_invalid' }, 403); };
   const db = c.env.HPS_DB, hash = await sha256Hex(normalizeTicket(b.ticket));
   // Single use under concurrency: only one UPDATE can move issued → used.
   const pairing = await db.prepare("UPDATE ops_grants SET state='used',used_at=?,revision=revision+1 WHERE secret_hash=? AND kind='pairing' AND state='issued' AND expires_at>? RETURNING *").bind(now, hash, now).first<GrantRow>();
   // One answer for unknown, reused, expired and superseded tickets: no oracle.
-  if (!pairing) return c.json({ error: 'pairing ticket is not valid', reason: 'ticket_invalid' }, 403);
+  if (!pairing) return invalid();
   const run = await db.prepare('SELECT o.*,s.ended_at FROM class_run_ops o LEFT JOIN sessions s ON s.id=o.class_run_id WHERE o.class_run_id=?').bind(pairing.class_run_id).first<RunRow>();
   const seat = await db.prepare('SELECT seat_id FROM class_run_seats WHERE class_run_id=? AND seat_id=? AND seat_revision=? AND replaced_at IS NULL').bind(pairing.class_run_id, pairing.seat_id, pairing.seat_revision).first();
-  if (!run || !seat || !parseFlags(run.flags_json).ops_observe) return c.json({ error: 'pairing ticket is not valid', reason: 'ticket_invalid' }, 403);
+  if (!run || !seat || !parseFlags(run.flags_json).ops_observe) return invalid();
   const id = crypto.randomUUID(), device = crypto.randomUUID(), expires = Math.min(run.ends_at + 3_600_000, now + 12 * 3_600_000);
   await db.batch([
     // A new device for the seat ends the old one: the epoch only moves forward.
@@ -363,6 +377,9 @@ classroomOpsApp.post('/sync', async (c) => {
       ? db.prepare('UPDATE ops_latest_state SET state_json=?,revision=revision+1,last_received_at=?,grant_id=? WHERE class_run_id=? AND seat_id=? AND revision=?').bind(JSON.stringify(state), now, g.id, g.class_run_id, g.seat_id, latest!.revision)
       : db.prepare('INSERT INTO ops_latest_state(class_run_id,seat_id,seat_revision,grant_id,state_json,last_received_at) VALUES(?,?,?,?,?,?) ON CONFLICT(class_run_id,seat_id) DO UPDATE SET seat_revision=excluded.seat_revision,grant_id=excluded.grant_id,revision=ops_latest_state.revision+1,state_json=excluded.state_json,last_received_at=excluded.last_received_at').bind(g.class_run_id, g.seat_id, g.seat_revision, g.id, JSON.stringify(state), now));
     stmts.push(db.prepare('UPDATE ops_device_connections SET last_seen_at=?,contiguous_seq=MAX(contiguous_seq,?) WHERE grant_id=? AND app_instance_id=? AND boot_id=?').bind(now, ack.contiguous, g.id, b.app_instance_id, b.boot_id));
+  } else if (ack.contiguous > device.contiguous_seq) {
+    // The cursor belongs to the event stream: a batch of only rejected/quarantined events still advances it.
+    stmts.push(db.prepare('UPDATE ops_device_connections SET contiguous_seq=MAX(contiguous_seq,?) WHERE grant_id=? AND app_instance_id=? AND boot_id=?').bind(ack.contiguous, g.id, b.app_instance_id, b.boot_id));
   }
   if (stmts.length) {
     let results;

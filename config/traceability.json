@@ -2013,6 +2013,12 @@
           "path": "worker/test/classroom-ops-commands.test.mjs"
         },
         {
+          "path": "worker/test/classroom-ops-device.test.mjs"
+        },
+        {
+          "path": "worker/test/fixtures/schema-pre-0011.sql"
+        },
+        {
           "path": "extensions/hypeproof-chat/src/classroomOpsCommands.ts"
         },
         {

@@ -252,7 +252,7 @@ P0에는 신규 화면 서버·DO·Queue·상시 container를 필수 도입하�
 
 ### 배포와 롤백
 
-독립 기능 flag `ops_observe`, `ops_commands`, `ops_collect`, `ops_reports`, `ops_delivery`는 회차별 기본 OFF. 구버전 protocol/capability unknown은 기존 수업 경로만 제공한다. Service additive schema→호환 API→Chalk→새 App canary→단일 회차 관측→단일 학생 저위험 조치→reset→batch→delivery 순서로 켠다. live-session freeze와 기존 release 절차를 지키며 release 버전/BUILD_ID를 검증한다.
+독립 기능 flag `ops_observe`, `ops_commands`, `ops_collect`, `ops_reports`, `ops_delivery`는 회차별 기본 OFF. 저장소는 KV가 아니라 D1이다: 회차 행(`class_run_ops.flags_json`)에 두고 요청마다 D1 primary에서 읽으므로 flag를 끄면 다음 요청부터 신규 enqueue·수집·발송이 거부된다(전파 지연 상한 = 진행 중이던 요청 1회). 전역 스위치 `HPS_CLASSROOM_OPS`는 배포 설정이라 끄는 데 재배포가 필요하므로 rollback 1순위는 회차 flag다. 학급 일시정지는 같은 이유로 D1 control revision을 쓴다. 구버전 protocol/capability unknown은 기존 수업 경로만 제공한다. Service additive schema→호환 API→Chalk→새 App canary→단일 회차 관측→단일 학생 저위험 조치→reset→batch→delivery 순서로 켠다. live-session freeze와 기존 release 절차를 지키며 release 버전/BUILD_ID를 검증한다.
 
 rollback은 먼저 delivery/collect/commands 신규 enqueue를 끄고 관측을 축소한다. pending 명령은 취소/TTL 만료, 수행 중 명령은 결과 확인, job은 retry 보류 후 receipt·미처리 목록 유지. 구버전 Service로 돌아가야 하면 신규 client는 unsupported로 강등하며 학습 경로를 유지한다. 앱 rollback은 기존 updater/설치 경로를 따르고 학생 workspace/spool/history를 삭제하지 않는다. schema drop·원본 삭제·보존 변경을 rollback과 섞지 않는다. 보고서·원격 기능 canary 실패가 기존 chat 운영을 중단시키지 않도록 별도 flag와 timeout을 검사한다.
 
@@ -260,7 +260,7 @@ rollback은 먼저 delivery/collect/commands 신규 enqueue를 끄고 관측을 
 
 ### 로컬 인수인계
 
-- checkout: `/Users/locolor/Documents/Claude/hypeproof/hypeproof-studio`, 설계 branch `docs/remote-classroom-operations-20260918`, 기준 main `75fe6e4`.
+- 설계 branch `docs/remote-classroom-operations-20260918`, 작성 당시 기준 main `75fe6e4`. 작업 머신의 checkout 경로는 저장소에 남기지 않는다.
 - 기존 main은 355 commit fast-forward로 갱신. untracked `docs/ui-concepts/` 보존. 로컬 기존 tag `v0.1.40` 충돌은 강제 덮어쓰지 않았고 main 갱신과 분리했다.
 - `vscodium-base`는 main이 지정한 `8b9b01df...`로 초기화했으며 임의 bump 없음. 공통 Harness도 clean main을 `a664e1b`로 fast-forward해 `next-work` 실행 가능.
 - Node 22.22.1 설치, 기본 Node 24 설정은 변경하지 않음. 작업 터미널에서 `source ~/.nvm/nvm.sh && nvm use 22.22.1` 사용. worker/chalk/extension/webview/e2e lockfile 기반 의존성 설치 완료.
