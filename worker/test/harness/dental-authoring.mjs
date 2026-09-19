@@ -12,7 +12,10 @@ export async function localAuthoring({profileId: requestedProfile} = {}) {
   if(!profileId) throw new Error('Dental profile missing');
   const db=new DatabaseSync(':memory:');
   db.exec('PRAGMA foreign_keys=ON');
-  db.exec(readFileSync(new URL('../../migrations/0002-chalk-authoring.sql',import.meta.url),'utf8'));
+  // 마이그레이션은 파일명으로 명시해서 읽는다 — 새 파일을 만들고 여기 등록하지
+  // 않으면 시험이 옛 스키마로 돌면서 **통과한다.** 초록인데 아무것도 안 본 상태다.
+  for (const file of ['0002-chalk-authoring.sql','0011-rehearsal-evidence.sql'])
+    db.exec(readFileSync(new URL('../../migrations/'+file,import.meta.url),'utf8'));
   const binding={prepare(sql){let args=[];return {
     bind(...a){args=a;return this;},
     async first(){return db.prepare(sql).get(...args)??null;},
