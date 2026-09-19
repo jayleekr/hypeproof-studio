@@ -2143,6 +2143,12 @@
           "path": "e2e/classroom/report-page.mjs"
         },
         {
+          "path": "worker/src/lib/classroom-erasure.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-erasure.test.mjs"
+        },
+        {
           "path": "worker/migrations/0019-classroom-report-attempts.sql"
         },
         {

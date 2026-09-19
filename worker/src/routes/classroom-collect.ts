@@ -18,6 +18,7 @@ import { getProfile } from '../profiles';
 import { isMinorCohort } from '../lib/moderation';
 import { COMMAND_TTL_MS, ID_RE, UUIDISH_RE, parseFlags, parseLesson, sha256Hex } from '../lib/classroom-ops';
 import { CONSENT_BASES, PURPOSES, SNAPSHOT_FILES, UPLOAD_GRACE_MS, attributionProblem, eventCoverage, finalLineSha, sha256Bytes, snapshotKey, validateManifest } from '../lib/classroom-collect';
+import { eraseLearnerCollection } from '../lib/classroom-erasure';
 import { opsEnabled } from './classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -42,6 +43,22 @@ classroomCollectOperator.post('/classroom/consents', async (c) => {
     audit(c.env.HPS_DB, b.class_run_id, '', 'operator', 'operator', 'guardian_consent_recorded', { consent_id: id, student_id: b.student_id, notice_version: b.notice_version }, now),
   ]);
   return c.json({ consent_id: id }, 201);
+});
+
+// The operator withdraws for a learner (a guardian asked), or applies the retention period to a finished run.
+// `retention_days` is an operations decision: there is no default, the caller states it, and `dry_run` shows what would go.
+classroomCollectOperator.post('/classroom/erasures', async (c) => {
+  if (!opsEnabled(c.env)) return c.json({ error: 'classroom operations are not enabled', reason: 'ops_disabled' }, 404);
+  const b = await json(c), now = Date.now(), db = c.env.HPS_DB;
+  if (!b || !ID_RE.test(b.class_run_id) || !['withdrawn', 'retention'].includes(b.reason) || typeof b.dry_run !== 'boolean' || (b.reason === 'withdrawn' && !ID_RE.test(b.student_id ?? '')) || (b.reason === 'retention' && (!Number.isInteger(b.retention_days) || b.retention_days < 1 || b.retention_days > 3650))) return c.json({ error: 'class_run_id, reason (withdrawn+student_id | retention+retention_days) and dry_run required' }, 400);
+  const run = await db.prepare('SELECT cohort_id,ends_at FROM class_run_ops WHERE class_run_id=?').bind(b.class_run_id).first<{ cohort_id: string; ends_at: number }>();
+  if (!run) return c.json({ error: 'class run not found' }, 404);
+  if (b.reason === 'retention' && run.ends_at + b.retention_days * 86_400_000 > now) return c.json({ error: 'the retention period of this run has not ended', reason: 'retention_not_due', due_at: run.ends_at + b.retention_days * 86_400_000 }, 409);
+  const students = b.reason === 'withdrawn' ? [b.student_id as string] : (((await db.prepare('SELECT DISTINCT i.student_id FROM classroom_collect_items i JOIN classroom_collect_batches x ON x.id=i.batch_id WHERE x.class_run_id=?').bind(b.class_run_id).all()).results ?? []) as Array<{ student_id: string }>).map((r) => r.student_id);
+  if (b.dry_run) return c.json({ dry_run: true, students: students.length });
+  const results = []; for (const student_id of students) results.push({ student_id, ...(await eraseLearnerCollection(c.env, { class_run_id: b.class_run_id, cohort_id: run.cohort_id, student_id }, b.reason, { kind: 'operator', id: 'operator' }, now)) });
+  if (b.reason === 'withdrawn') await db.prepare('UPDATE classroom_consents SET revoked_at=? WHERE class_run_id=? AND student_id=? AND revoked_at IS NULL').bind(now, b.class_run_id, b.student_id).run();
+  return c.json({ erased: results, note: 'copies already delivered to a recipient are not recalled' });
 });
 
 // ── learner device (operations credential) ──
@@ -74,7 +91,9 @@ classroomCollectApp.post('/consent', async (c) => {
       db.prepare("UPDATE classroom_collect_items SET state='withdrawn',reason='withdrawn',updated_at=? WHERE student_id=? AND batch_id IN (SELECT id FROM classroom_collect_batches WHERE class_run_id=?) AND state NOT IN ('verified')").bind(now, g.student_id, g.class_run_id),
       audit(db, g.class_run_id, g.seat_id, 'student', g.student_id, 'collection_consent_withdrawn', { purpose: b.purpose }, now),
     ]);
-    return c.json({ consent: false, note: 'nothing further will be collected for this class; copies already delivered cannot be recalled' });
+    // Withdrawal reaches what was already collected: snapshots, drafts, links and queued work go; the content-free record stays.
+    const erased = await eraseLearnerCollection(c.env, { class_run_id: g.class_run_id, cohort_id: g.cohort_id, student_id: g.student_id }, 'withdrawn', { kind: 'student', id: g.student_id }, now);
+    return c.json({ consent: false, erased, note: 'nothing further will be collected for this class; what the Service held was removed and report links were closed. Copies already delivered to a recipient cannot be recalled.' });
   }
   // Past its normal expiry this credential only finishes an upload that was already authorized: no new consent, no new scope.
   if (g.expires_at <= now) return c.json({ error: 'this connection can only finish an upload that was already requested', reason: 'upload_only' }, 403);
