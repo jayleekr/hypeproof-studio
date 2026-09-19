@@ -16,7 +16,7 @@ async function delivered(t) {
   await f.request(B + '/jobs', 'POST', {}); const runner = (await f.request(B + '/runner-grants', 'POST', {})).json.runner_credential, keys = CANDIDATE_CAPABILITY_V1.capabilities.map((c) => c.key);
   for (let i = 0; i < 2; i++) { const j = (await f.request('/v1/classroom/ops/runner/claim', 'POST', {}, runner)).json.job; await f.request(`/v1/classroom/ops/runner/jobs/${j.id}/result`, 'POST', { lease_generation: j.lease_generation, draft: { format: 'hps-classroom-report-draft/1', versions: { capability_model: { id: CANDIDATE_CAPABILITY_V1.id, revision: 1 }, rubric: 'unknown', evaluator: 'none', renderer_revision: 'observation-report/1' }, findings: [{ capability: keys[0], status: 'observed', claim: 'c', evidence: [{ event_id: 'e1', quote: words }] }, ...keys.slice(1).map((capability) => ({ capability, status: 'unobserved', claim: '', evidence: [] }))], next_experiment: '' } }, runner); }
   for (const j of (await f.request(B + '/reports')).json.jobs) await f.request(B + `/reports/${j.id}/review`, 'PUT', { decision: 'approve', expected_revision: j.revision, draft_digest: j.draft_digest });
-  await f.request('/admin/classroom/recipients', 'POST', { class_run_id: f.run, source_ref: 'synthetic-import', recipients: seats.map((s) => ({ student_id: s.student_id, recipient_ref: 'guardian-' + s.seat_id, channel: 'email', address: s.seat_id.toLowerCase() + '@example.invalid' })) }, null, admin);
+  await f.request('/admin/classroom/recipients', 'POST', { class_run_id: f.run, source_ref: 'synthetic-import', recipients: seats.map((s) => ({ student_id: s.student_id, recipient_ref: 'guardian-' + s.seat_id, channel: 'email', address: s.seat_id.toLowerCase() + '@example.invalid', viewer_check: { kind: 'phone_last4', value: '4821' } })) }, null, admin);
   const sent = [], id = 'erasure-adapter-' + crypto.randomUUID(); registerDeliveryAdapter({ id, external: true, send: async (m) => { sent.push(m); return { status: 'accepted', provider_message_id: 'synthetic-' + sent.length }; } }); f.env.HPS_DELIVERY_PROVIDER = id;
   const scope = (await f.request(B + '/recipients?template_revision=t1')).json, approval = (await f.request(B + '/approve', 'POST', { template_revision: 't1', channel: 'email', scope_hash: scope.scope_hash })).json.approval_id;
   assert.equal((await f.request(B + '/deliver', 'POST', { approval_id: approval, dry_run: false })).status, 202);
@@ -26,11 +26,11 @@ async function delivered(t) {
 
 test('withdrawal removes the learner\'s stored words, drafts and links — for that learner only — and keeps a content-free record', async (t) => {
   const f = await delivered(t), linkA = f.sent.find((m) => m.to.startsWith('a1')).link, linkB = f.sent.find((m) => m.to.startsWith('a2')).link;
-  assert.equal(f.holds(words).length, 4, 'precondition: two snapshots and two drafts hold the words'); assert.equal((await f.request(linkA, 'GET', undefined, null)).status, 200);
+  assert.equal(f.holds(words).length, 4, 'precondition: two snapshots and two drafts hold the words'); const openWith = (l) => f.request(l + '?format=json', 'POST', { check: '4821' }, null); assert.equal((await openWith(linkA)).status, 200);
   const w = await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: false, purpose: 'class_report', notice_version: 'notice-v1' }, f.conns[0].credential);
   assert.equal(w.status, 200, w.raw); assert.deepEqual(w.json.erased, { snapshot_objects: 2, report_objects: 1, links_revoked: 1, jobs_closed: 1, outbox_cancelled: 0, deliveries_already_sent: 1 }); assert.match(w.json.note, /cannot be recalled/);
   assert.deepEqual(f.holds(words).map((k) => k.includes('/student-b/')), [true, true], 'only the other learner\'s objects remain');
-  assert.equal((await f.request(linkA, 'GET', undefined, null)).status, 404, 'the mail already sent now opens nothing'); assert.equal((await f.request(linkB, 'GET', undefined, null)).status, 200);
+  assert.equal((await openWith(linkA)).status, 404, 'the mail already sent now opens nothing, even with the right check'); assert.equal((await openWith(linkB)).status, 200);
   const jobs = (await f.request(f.B + '/reports')).json.jobs; assert.deepEqual(jobs.map((j) => [j.student_id, j.state, j.draft_digest === '']), [['student-a', 'withdrawn', true], ['student-b', 'approved', false]]);
   assert.equal((await f.request(f.B + '/reports/' + jobs[0].id)).json.draft, null, 'a reviewer can no longer open the withdrawn draft');
   // What stays is content-free: states, ids, digests, and the audit of the erasure itself.
