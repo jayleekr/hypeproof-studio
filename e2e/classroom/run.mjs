@@ -13,7 +13,7 @@ let browser;
 try{
  server.listen(0,'127.0.0.1');await once(server,'listening');const origin='http://127.0.0.1:'+server.address().port;
  browser=await chromium.launch();const student=await browser.newPage();const teacher=await browser.newPage();const errors=[];for(const p of [student,teacher])p.on('pageerror',e=>errors.push(e.message));
- await student.goto(origin+'/sharing');assert.equal(await student.locator('#consent').isChecked(),false);
+ await student.goto(origin+'/student/sharing');assert.equal(await student.locator('#consent').isChecked(),false);
  await student.locator('#token').fill(local.studentToken);await student.locator('#login button').first().click();await student.getByText('공유 중인 기록이 없습니다.').waitFor();await student.locator('#status').filter({hasText:'연결됨'}).waitFor();
  assert.equal(await student.locator('#token').inputValue(),'');
  await student.locator('#recipient').fill('teacher-a');await student.locator('#prompt').fill('합성 질문 <img src=x onerror="window.injected=true">');await student.locator('#verification').fill('390px에서 버튼 위치를 확인했습니다.');

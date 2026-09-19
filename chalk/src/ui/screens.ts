@@ -44,12 +44,12 @@ export const STUDENT: Screen[] = [
   {
     title: "내 수업",
     desc: "학생이 참여 코드로 확정된 과제와 확인 기준을 여는 화면.",
-    state: { kind: "student", path: "/learn" },
+    state: { kind: "student", path: "/student/learn" },
   },
   {
     title: "강사에게 공유",
     desc: "학생이 질문·결과물을 강사에게 보내는 화면. 제목의 '강사에게'는 받는 사람이지 쓰는 사람이 아니다 — 강사가 받은 것을 보는 곳은 「강사 관리」다.",
-    state: { kind: "student", path: "/sharing" },
+    state: { kind: "student", path: "/student/sharing" },
   },
 ];
 

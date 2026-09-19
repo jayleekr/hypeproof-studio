@@ -22,7 +22,7 @@ Do not claim the API is deployed because the PRD page is reachable.
    gh workflow run deploy-chalk.yml --repo jayleekr/hypeproof-studio --ref main -f ref=REVIEWED_MERGE_SHA -F dry_run=false
    ```
 
-4. Verify `/manage` and `/sharing` serve HTML. An unauthenticated GET to
+4. Verify `/manage` and `/student/sharing` serve HTML. An unauthenticated GET to
    `https://api.hypeproof-ai.xyz/v1/classroom/shares` must be 401 and contain no content.
    Use approved synthetic adult participant/instructor credentials to exercise create,
    designated read, unrelated-teacher denial, feedback, student confirmation, audit and withdrawal.

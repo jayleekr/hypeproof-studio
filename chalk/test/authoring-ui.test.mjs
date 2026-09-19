@@ -44,7 +44,7 @@ assert.match(authoring, /브라우저는 실행 경로와 무관하게 하나로
 assert.match(authoring, /label\.append\(input,document\.createTextNode\(f\.label\)\)/, 'feature labels render as text, never HTML');
 assert.doesNotMatch(authoring, /feature-allowed'\)\.innerHTML/, 'the feature list is never built by innerHTML');
 
-const learn = await page('/learn');
+const learn = await page('/student/learn');
 assert.match(learn, /c\.assistant\?\.display_name/, 'learn page reads the optional block');
 assert.match(learn, /'이 수업의 AI 이름: '\+c\.assistant\.display_name\+' \(AI 도우미\)'/, 'learn page renders the name through textContent with the AI notice');
 assert.doesNotMatch(learn, /innerHTML/, 'lesson text is never rendered as HTML');

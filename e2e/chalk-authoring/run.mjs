@@ -44,7 +44,7 @@ try {
  await startSession(local.env.HPS_KV,local.cohort,{session_id:'synthetic-lesson',profile_id:local.profileId,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()});
  await page.locator('#version').fill('m2026.09.06-1');await page.locator('#student').fill('synthetic-student');await page.locator('#hours').fill('1');await page.locator('#deliver').click();await wait('참여 코드를 발급');
  const lessonToken=await page.locator('#student-token').inputValue();assert.ok(lessonToken);
- const learner=await browser.newPage();await learner.goto(origin+'/learn');await learner.locator('#token').fill(lessonToken);await learner.locator('#open').click();await learner.locator('#status').filter({hasText:'지정한 버전을 열었습니다'}).waitFor();
+ const learner=await browser.newPage();await learner.goto(origin+'/student/learn');await learner.locator('#token').fill(lessonToken);await learner.locator('#open').click();await learner.locator('#status').filter({hasText:'지정한 버전을 열었습니다'}).waitFor();
  assert.match(await learner.locator('#lesson').innerText(),/합성 강사 수정 제목/);
  assert.equal(await learner.locator('#token').inputValue(),'');
  for(const width of [375,390,768,1280,1440]){await learner.setViewportSize({width,height:900});assert.ok(await learner.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));const out=process.env.HPS_CHALK_AUTHORING_OUT||'test-results/chalk-authoring';mkdirSync(out,{recursive:true});await learner.screenshot({path:out+'/student-lesson-'+width+'.png',fullPage:true});}
