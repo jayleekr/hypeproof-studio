@@ -2014,6 +2014,12 @@
           "path": "worker/test/classroom-ops-commands.test.mjs"
         },
         {
+          "path": "worker/test/classroom-ops-device.test.mjs"
+        },
+        {
+          "path": "worker/test/fixtures/schema-pre-0011.sql"
+        },
+        {
           "path": "extensions/hypeproof-chat/src/classroomOpsCommands.ts"
         },
         {
@@ -2056,7 +2062,7 @@
           "path": "extensions/hypeproof-chat/src/evidenceSnapshot.ts"
         },
         {
-          "path": "extensions/hypeproof-chat/test/evidence-snapshot.smoke.mjs"
+          "path": "worker/test/classroom-ops-snapshot-device.test.mjs"
         },
         {
           "path": "worker/src/routes/classroom-reports.ts"

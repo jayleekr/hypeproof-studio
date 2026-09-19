@@ -59,7 +59,7 @@ const student = (await issue({ u: 'learner', c: cohort, p: template.id }, 1, TES
 const course = 'c-5b0f2a0e-1d7e-4c1e-9d55-0a1b2c3d4e5f';
 const base = `/admin/cohorts/${cohort}/authoring/${course}`;
 const content = { schema: 'hps-session-design/1', title: '첫 창업 아이디어 검증', audience: '예비 창업자', duration_minutes: 90,
-  objective: '고객 문제 가설을 세우고 인터뷰 질문을 만든다', prerequisites: '', starter: '빈 작업 폴더',
+  objective: '고객 문제 가설을 세우고 인터뷰 질문을 만든다', prerequisites: '사전 지식 불필요', starter: '빈 작업 폴더',
   steps: [{ id: 'problem', title: '문제 가설', instructions: '해결하고 싶은 고객 문제를 한 문장으로 쓰세요', hint: '', acceptance: '문제·대상·상황이 모두 있다' }] };
 const save = (revision, id, profile_id = '', data = content) => ({ expected_revision: revision, request_id: id, profile_id, content: data });
 async function call(path, method = 'GET', body, credential = orgA) {
