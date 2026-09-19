@@ -76,7 +76,8 @@ const keysWithin = (v: Record<string, unknown>, allowed: readonly string[]) => O
 // it appears (MC-19), and so is any trace of arithmetic legacy conversion (MC-17).
 const SCORE_KEYS = ["score", "scores", "level", "points", "rank", "percentile", "grade"];
 const CONVERSION_KEYS = ["derived_from_legacy", "legacy_scores", "converted_from", "legacy_mapping"];
-function forbidKeys(value: unknown): void {
+/** Exported for the classroom report queue (#751 R5): the same refusal, not a second list. */
+export function forbidKeys(value: unknown): void {
   if (Array.isArray(value)) return value.forEach(forbidKeys);
   if (!object(value)) return;
   for (const [k, v] of Object.entries(value)) {
