@@ -104,3 +104,16 @@ npm --prefix chalk run typecheck
 - `python3 scripts/docs-harness/check.py --min-score 95`, `python3 scripts/next-work.py --check`: 문서 변경 후 각각 100/100 PASS, 14문서·358요구사항 무결성 PASS. 구현 충족 검사가 아니다.
 - 제품 registry 검사 PASS(`.git/remote-classroom-evidence/check-env/bin/python scripts/check-registry.py`, 격리 PyYAML 환경). 변경 문서 로컬 링크 172개·코드블록·`git diff --check` PASS.
 - 새 AT-15~34 및 운영 부하·원격제어·실제 수업·평가·발송은 NOT RUN이다. 설계 완료와 기능 구현 완료를 구분한다.
+
+## 원격 운영 실행 기록
+
+아래는 실제로 실행한 범위만 적는다. 표의 AT 행 전체 합격을 뜻하지 않으며 App·브라우저·실기·운영 D1은 해당 계층이 실행될 때까지 NOT RUN이다.
+
+### R0/R1 Service · 2026-09-18
+
+대상: `worker/migrations/0011-classroom-ops.sql`, `worker/src/lib/classroom-ops.ts`, `worker/src/routes/classroom-ops.ts`, 기존 `instructor-auth.ts`·`tokens.ts`·`admin.ts` 확장. Mac arm64, Node 22.22.1, 합성 강사 2·학생 3·다른 cohort. 전역 스위치 `HPS_CLASSROOM_OPS`와 회차별 flag는 기본 OFF이며 production에는 설정하지 않았다.
+
+- `npm --prefix worker run test:classroom-ops`(SQLite, 16 PASS): AT-15 발급≠활성화·ticket 1회/만료/대체/교차 좌석, AT-16 회차 명단 snapshot·누적 roster 제외·CAS·무신호 좌석 표시, AT-17 확정 authoring 버전에서 읽은 step만 고정(초안·요청 본문의 steps 거부)·중복/역순/충돌 재전송/미등록 step/자유 활동, AT-18 원인 분류·확인된 차단만 blocked·stale은 unknown, AT-19 opt-in ops capability·학생/타 cohort/타 profile/위조 scope·credential↔학생 토큰 상호 거부, AT-23 기기 교체·토큰 재발급 epoch·좌석 교체 시 이전 상태 비노출·issuer 폐기의 D1 commit, AT-25 무변화 poll 무쓰기·저장 실패 시 ack 없음·배치 상한·flag rollback, AT-32 스위치 OFF 시 신규 경로 404와 기존 발급/공유 동작, AT-33 fresh schema = 이전 schema + 0011·재실행 가능·기존 행 불변.
+- `npm --prefix worker run test:classroom-ops:d1`(로컬 workerd/D1): migration 재실행, 3개 동시 명단 저장 중 1개만 전체 적용, 같은 ticket 4개 동시 connect 중 1개만 성공, 좌석 상태 CAS. 운영 D1 증거가 아니다.
+- 회귀: `npm --prefix worker test`, `npm --prefix worker run typecheck`, `npm --prefix chalk test`, `npm --prefix chalk run typecheck` 모두 exit 0.
+- 이 단계에서 NOT RUN: App의 실제 연결·다중 창 lease(AT-21/23 App 계층), Chalk 브라우저 화면(AT-16/18 browser), 100명 부하·KV 지연·학교망(AT-25/34), 구버전 설치 앱(AT-32 real app), staging D1(AT-33).
