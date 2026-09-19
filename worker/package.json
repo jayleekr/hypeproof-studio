@@ -42,7 +42,8 @@
     "test:budget-surfaces": "node --experimental-strip-types --experimental-sqlite test/budget-surfaces.test.mjs",
     "test:budget-surfaces:d1": "node --experimental-strip-types --experimental-sqlite test/budget-surfaces-d1.test.mjs",
     "test:budget-recovery": "node --experimental-strip-types --experimental-sqlite test/budget-recovery.test.mjs",
-    "test:budget-recovery:d1": "node --experimental-strip-types --experimental-sqlite test/budget-recovery.test.mjs --d1"
+    "test:budget-recovery:d1": "node --experimental-strip-types --experimental-sqlite test/budget-recovery.test.mjs --d1",
+    "test:classroom-ops:review": "node --experimental-strip-types --experimental-sqlite --test test/classroom-ops-review.test.mjs"
   },
   "dependencies": {
     "hono": "^4.13.7"

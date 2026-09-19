@@ -269,3 +269,18 @@ rollback은 먼저 delivery/collect/commands 신규 enqueue를 끄고 관측을 
 - `check-registry`용 격리 Python/PyYAML은 `.git/remote-classroom-evidence/check-env/`에 준비했다. 전역 Python 환경은 변경하지 않았다.
 - 전체 VSCodium build·새 앱 설치·production deploy·실수업 토큰 발급·실제 발송은 하지 않았다. full build는 CLAUDE.md의 별도 승인/10~20GB 조건이며 당시 여유 공간 약16GB라 이번 소스·확장 개발 세팅과 구분한다.
 - 검증 결과와 실제 제한은 [테스트 문서](../testing/classroom-admin.md#2026-09-18-설계-작업의-기반-검증)에 남긴다. 다음 구현자는 여기서 시작하고 원격 main 변동과 #751 등의 현재 claim을 다시 확인한다.
+
+### R0~R7 구현 후 수정 인계 · 2026-09-19
+
+독립 검토 기준 `1432b27`에는 [P1 5건·P2 2건과 수정 인수](../testing/classroom-admin.md#remote-classroom-review-20260919)가 남아 있다. R5/R6의 evaluator/renderer/provider 및 App 관측 연결은 코드 미완성이므로 운영 계정 대기나 실기 NOT RUN에 포함해 숨기지 않는다. 새 에픽/PRD를 만들지 않고 #751의 원격 운영 범위와 #1020의 측정 소유권을 유지한다.
+
+진행 순서:
+
+1. 현재 main·스택 PR·작업 중 변경을 확인한다. `next-work`에서 operations는 2026-09-19 확인 시 in_review이며 #1119~1127/#1129/#1165가 연결돼 있다. 기존 리뷰와 PR 경계를 먼저 읽고 최신 코드에도 아래 문제가 남는지 확인한다. 준비 브랜치 `test/751-ops-review-regressions`의 테스트/문서만 이어받으며 다른 사람의 작업을 reset/덮어쓰기 하지 않는다.
+2. R0/R2/R4/R6의 F1/F2/F3/F5부터 수정한다. 수집 신원·명령 취소·발송 dedupe·만료 후 scoped upload를 코드 계약으로 확정하고 applied migration을 바꾸지 않는다. 새 스키마가 필요하면 additive migration과 old-client 처리를 함께 만든다.
+3. R1의 F4와 R4/R5의 F6/F7을 실제 App 신호/근거 계약에 연결한다. 상태를 관측할 수 없는 구현에는 해당 capability/준비 완료 표시를 켜지 않는다. UI 표시 시험과 실제 신호 발행 시험을 구분한다.
+4. R5/R6에서 수집→job→실제 평가 adapter→검수→승인→renderer/전달을 연결한다. API 계약이나 emptyDraft만으로 멈추지 않는다. 계정 없이 가능한 adapter·서명 검증·UI·합성 통합 시험을 끝낸다. 발송 공급자는 기존 설정/정책을 우선 재사용하고, 없다면 후보와 비용·보존·webhook/idempotency 근거를 기록한 뒤 한 adapter만 구현한다. 실제 계정/수신자는 임의로 만들거나 발송하지 않는다.
+5. 기존 관리 화면에 UX 철학을 적용한다. 학습을 앞에, 관측은 뒤에 두고 질문/확인 지점 코칭과 기술 복구를 분리한다. 실제/가상 출처, 학생의 결정권, 미관찰≠저점수, forest/lime 토큰, 화면 기준 주요 CTA 하나를 유지한다. GlobalBuddy·6주·고정 도움 순서는 예시로만 취급한다. 30좌석 목록과 오른쪽 상세의 실제 탐색을 확인한다.
+6. R7에서 새 실패 테스트를 모두 통과시켜 기본 CI에 편입하고 기존 입장·토큰·모델·SDK·preview·저장·업로드·공유·예산 회귀를 검사한다. 외부 계정이 필요한 검증과 실제 Mac/Windows/학교망은 상태·해제 조건을 정확히 기록한다. 최종 변경은 저장소 PR 규칙에 맞춰 나누되 운영 flag는 기본 OFF로 유지한다.
+
+인계 브랜치는 제품 코드를 수정하지 않는다. 테스트 실행/추적에 쓰는 package scripts와 traceability만 보강했으며 실패 테스트를 포함한 준비 커밋을 그대로 완료 PR로 병합하는 것은 종료 조건이 아니다. 새 계약 때문에 fixture를 고칠 때는 해당 양성·음성 시나리오를 보존하고 정상 spool/기기 흐름까지 검증한다. 모의 검증만으로 실제 수업 인수를 완료 처리하지 않는다.
