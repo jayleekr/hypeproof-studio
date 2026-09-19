@@ -87,8 +87,37 @@ authoring.post(root + '/versions/:version/participants', async c => {
   if (!roster?.users.includes(b.user)) return c.json({ error: 'register this student in the session console first' }, 403);
   const ref = { course_id: course, version: lesson.version, sha256: lesson.sha256 };
   const { token } = await issue({ u: b.user, c: cohort, p: d.profile_id, lesson: ref }, b.hours, c.env.HPS_SIGNING_SECRET);
-  return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal: 'not_run' });
+  return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal: await readRehearsal(c.env.HPS_DB, cohort, course, lesson.version) });
 });
+
+/**
+ * 이 버전에 대해 서버가 아는 리허설 상태. 증거 행이 없으면 `not_run` 이다.
+ *
+ * **저장된 사실만 돌려준다.** 예전에는 네 군데가 각각 `'not_run'` 이라는 상수를
+ * 실어 보냈고, 실제로 리허설을 돌려도 응답은 똑같았다 — 화면이 아니라 서버가
+ * 거짓말을 하고 있었다(#1012, RUN-01·VER-02).
+ *
+ * **VER-02 는 여기서 코드로 지켜지는 게 아니라 스키마 모양으로 성립한다.** 증거는
+ * (cohort, course, version) 에 매달리고 확정된 버전은 불변이므로, 내용이 바뀌면
+ * 그것은 새 버전이고 새 버전에는 증거 행이 없다 → 자동으로 `not_run`. 무효화를
+ * 수행하는 코드가 없다는 것이 이 설계의 요점이다.
+ *
+ * 테이블이 없을 때(마이그레이션 전)는 `not_run` 으로 떨어진다. 배포는
+ * 마이그레이션을 먼저 적용하므로 정상 경로에서는 일어나지 않지만, 만약 일어난다면
+ * **수업 중 저작 API 전체가 500 이 되는 것보다 "증거 없음" 이 낫다** — 그리고
+ * 그것은 오보가 아니라 사실이다(증거가 실제로 없다). 이 방향은
+ * authoring-rehearsal.test.mjs 가 테이블을 지우고 고정한다.
+ */
+async function readRehearsal(db: D1Database, cohort: string, course: string, version: string): Promise<string> {
+  try {
+    const row = await db.prepare(
+      "SELECT status FROM authoring_version_rehearsals WHERE cohort_id=? AND course_id=? AND version=?",
+    ).bind(cohort, course, version).first<{ status: string }>();
+    return row?.status ?? 'not_run';
+  } catch {
+    return 'not_run';
+  }
+}
 
 async function readDraft(db: D1Database, cohort: string, course: string) {
   return db.prepare(`SELECT d.*, EXISTS(SELECT 1 FROM authoring_independent_courses m WHERE m.cohort_id=d.cohort_id AND m.course_id=d.course_id) AS independent
@@ -180,7 +209,7 @@ authoring.put(root + "/versions/:version", async (c) => {
   if (existing) {
     if (!a.scope.profiles.includes(JSON.parse(existing.module_json).profile_id)) return c.json({ error: "profile not permitted" }, 403);
     if (existing.source_revision !== b.expected_revision) return c.json({ error: "version already frozen" }, 409);
-    return c.json({ module: JSON.parse(existing.module_json), source_revision: existing.source_revision, rehearsal: "not_run", activated: false });
+    return c.json({ module: JSON.parse(existing.module_json), source_revision: existing.source_revision, rehearsal: await readRehearsal(c.env.HPS_DB, cohort, course, version), activated: false });
   }
   if (d.revision !== b.expected_revision) return c.json({ error: "revision conflict" }, 409);
   if (!d.profile_id) return c.json(TEMPLATE_REQUIRED, 409);
@@ -218,7 +247,9 @@ authoring.put(root + "/versions/:version", async (c) => {
   if (!saved || saved.source_revision !== b.expected_revision) return c.json({ error: "revision or version conflict" }, 409);
   // 확정은 됐지만 남은 판정이 있으면 함께 보낸다. 비어 있지 않은 목록은 전부 warn/skip이다
   // (fail이 있었다면 위에서 422로 끝났다). 확정을 성공으로 보고하면서 미확인을 숨기지 않는다.
-  return c.json({ module: JSON.parse(saved.module_json), source_revision: saved.source_revision, rehearsal: "not_run", activated: false, pedagogy });
+  // 방금 만든 버전이므로 증거 행이 있을 수 없다 — 그래도 상수로 쓰지 않고 같은
+  // 경로로 읽는다. 상수를 하나라도 남기면 그 자리가 다음에 또 거짓말을 한다.
+  return c.json({ module: JSON.parse(saved.module_json), source_revision: saved.source_revision, rehearsal: await readRehearsal(c.env.HPS_DB, cohort, course, version), activated: false, pedagogy });
 });
 
 authoring.get(root + "/versions/:version", async (c) => {
@@ -230,5 +261,5 @@ authoring.get(root + "/versions/:version", async (c) => {
   // A subsequent profile change must not expose a version outside current scope.
   const module = JSON.parse(v.module_json);
   if (!c.get("author").scope.profiles.includes(module.profile_id)) return c.json({ error: "profile not permitted" }, 403);
-  return c.json({ module, source_revision: v.source_revision, rehearsal: "not_run", activated: false });
+  return c.json({ module, source_revision: v.source_revision, rehearsal: await readRehearsal(c.env.HPS_DB, d.cohort_id, d.course_id, c.req.param("version")!), activated: false });
 });

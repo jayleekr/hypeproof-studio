@@ -8,15 +8,24 @@ assert.ok(compatibilityDate, 'use the production Worker compatibility date');
 const mf = createMiniflare({modules:true,script:'export default {fetch(){return new Response("local test")}}',compatibilityDate,d1Databases:['HPS_DB']});
 try {
  const app=await bootApp();const db=await mf.getD1Database('HPS_DB');
- const migration=readFileSync(new URL('../migrations/0002-chalk-authoring.sql',import.meta.url),'utf8').replace(/^--.*$/gm,'');
+ // 0011 은 0002 가 만든 authoring_versions 를 참조하므로 순서대로 적용한다.
+ const migrations=['0002-chalk-authoring.sql','0011-rehearsal-evidence.sql']
+   .map(f=>readFileSync(new URL('../migrations/'+f,import.meta.url),'utf8').replace(/^--.*$/gm,''));
  // Both first deployment and repeat deployment must preserve course storage.
- for(let pass=0;pass<2;pass++)for(const statement of migration.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
+ // 배포는 모든 마이그레이션 파일을 **매번** 다시 실행한다. 두 바퀴가 그 회귀를 잡는다 —
+ // `ALTER TABLE ... ADD COLUMN` 이었다면 두 번째 바퀴에서 duplicate column 으로 죽는다.
+ for(let pass=0;pass<2;pass++)for(const migration of migrations)
+   for(const statement of migration.split(';').map(s=>s.trim()).filter(Boolean))await db.prepare(statement).run();
  const workflow=readFileSync(new URL('../../.github/workflows/deploy-worker.yml',import.meta.url),'utf8');
  const freeze=workflow.indexOf('id: freeze');
  const authoring=workflow.indexOf('--file=migrations/0002-chalk-authoring.sql');
  const sharing=workflow.indexOf('--file=migrations/0003-classroom-sharing.sql');
  const deploy=workflow.indexOf('- name: Deploy Worker');
+ // 리허설 증거 테이블은 **배포보다 먼저** 만들어져야 한다 — 새 코드가 그것을 읽는다.
+ // 순서가 뒤집히면 배포 직후 잠깐 동안 모든 버전이 증거 없음으로 보인다.
+ const rehearsal=workflow.indexOf('--file=migrations/0011-rehearsal-evidence.sql');
  assert.ok(freeze>=0&&authoring>freeze&&sharing>authoring&&deploy>sharing,'freeze → authoring → sharing → deploy');
+ assert.ok(rehearsal>freeze&&deploy>rehearsal,'rehearsal evidence schema is applied before the Worker deploy');
  const env=createMockEnv({env:{HPS_DB:db}});
  const {issueIssuer}=await import('../src/lib/tokens.ts');
  const {listProfiles}=await import('../src/profiles/index.ts');

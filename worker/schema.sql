@@ -166,6 +166,27 @@ CREATE TABLE IF NOT EXISTS authoring_versions (
   PRIMARY KEY (cohort_id, course_id, version),
   FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
 );
+-- #1012 VER-02: a frozen version's rehearsal evidence. Kept in its own table so the
+-- migration stays idempotent (SQLite has no ADD COLUMN IF NOT EXISTS) and so a new
+-- version simply has no row — absence is what invalidates stale evidence.
+-- Must stay byte-identical to migrations/0011-rehearsal-evidence.sql: authoring.test.mjs
+-- compares the fresh-install schema against the migrated one for every authoring_% table.
+CREATE TABLE IF NOT EXISTS authoring_version_rehearsals (
+  cohort_id TEXT NOT NULL,
+  course_id TEXT NOT NULL,
+  version TEXT NOT NULL,
+  -- `not_run` is NEVER stored. Absence already means "not run", and two shapes for
+  -- one state is how a reader ends up asking the wrong question. One state, one shape.
+  status TEXT NOT NULL CHECK (status <> 'not_run' AND length(status) > 0),
+  -- When the rehearsal that produced this row ran (ISO-8601 UTC).
+  ran_at TEXT NOT NULL,
+  -- What was observed. The writing path owns this shape and the read path does not
+  -- parse it, so adding fields there cannot break freeze or deliver responses.
+  evidence_json TEXT NOT NULL,
+  PRIMARY KEY (cohort_id, course_id, version),
+  FOREIGN KEY (cohort_id, course_id, version)
+    REFERENCES authoring_versions(cohort_id, course_id, version)
+);
 -- #1006 IC-02: a course created independent of customer profiles. Written in the same
 -- batch as the draft insert; absence means a profile-bound course. Safe to re-apply.
 CREATE TABLE IF NOT EXISTS authoring_independent_courses (
