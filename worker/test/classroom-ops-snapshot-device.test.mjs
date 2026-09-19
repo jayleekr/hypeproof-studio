@@ -1,9 +1,11 @@
 // #751 R4 — device snapshot uploader against the REAL Service collection routes
 // (in-process, SQLite + in-memory R2). Not a real spool directory, a real offline
-// laptop or real R2.
+// laptop or real R2. Lives in the Service suite because it needs the Service's
+// dependencies, which the extension CI job does not install; the device module
+// under test imports only node built-ins.
 import assert from "node:assert/strict";
-import { uploadSnapshot } from "../src/evidenceSnapshot.ts";
-import { localOps } from "../../../worker/test/harness/classroom-ops.mjs";
+import { localOps } from "./harness/classroom-ops.mjs";
+import { uploadSnapshot } from "../../extensions/hypeproof-chat/src/evidenceSnapshot.ts";
 let n = 0; const ok = (name) => { n++; console.log("  ✓ " + name); };
 const f = await localOps();
 try {
@@ -50,4 +52,4 @@ try {
     ok("verification failure, nothing recorded and withdrawal are reported as such; nothing is stored after withdrawal");
   }
 } finally { f.close(); }
-console.log(`evidence-snapshot.smoke: ${n} checks passed`);
+console.log(`classroom-ops-snapshot-device: ${n} checks passed`);
