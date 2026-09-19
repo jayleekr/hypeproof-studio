@@ -19,6 +19,9 @@ import { parseFlags, sha256Hex, type OpsCapability } from '../lib/classroom-ops'
 import { snapshotKey } from '../lib/classroom-collect';
 import { LEASE_MS, RENDERER_REVISION, composeReport, modelById, validateDraft } from '../lib/classroom-report';
 import { DEFAULT_CAPABILITY_MODEL } from '../lib/measurement-core/index.ts';
+import { evaluateInput, evaluatorConfig, rubricVersion, type Transport } from '../lib/classroom-evaluator';
+import { getProfile } from '../profiles';
+import { modelIdFor } from '../profiles/types';
 import { opsEnabled } from './classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -43,24 +46,91 @@ async function teacher(c: any, capability: OpsCapability): Promise<{ auth: Issue
   return { auth, run, batch };
 }
 
-// Turn verified inputs (outbox) into jobs. Learners without a verified input get an explicit `missing` job — absence is not a zero.
-classroomReportsTeacher.post(root + '/jobs', async (c) => {
-  const t = await teacher(c, 'collect'); if (t instanceof Response) return t; const { auth, run, batch } = t, b = (await json(c)) ?? {}, now = Date.now(), db = c.env.HPS_DB;
-  const model = modelById(b.capability_model ?? DEFAULT_CAPABILITY_MODEL.id), rubric = b.rubric ?? 'unknown', evaluator = b.evaluator ?? 'none';
-  if (!model || !VERSION_RE.test(rubric) || !VERSION_RE.test(evaluator)) return c.json({ error: 'capability_model must be a registered model id; rubric and evaluator are version strings', reason: 'versions_invalid' }, 400);
+/** Test seam only: replaces the provider call. Production never sets it. */
+let evaluatorTransport: Transport | undefined;
+export const setEvaluatorTransport = (t: Transport | undefined) => { evaluatorTransport = t; };
+const profileModel = (profileId: string): string | undefined => { try { const p = getProfile(profileId); return p ? modelIdFor(p.model.default, 'anthropic') : undefined; } catch { return undefined; } };
+
+/**
+ * Verified inputs (the collection outbox) → jobs. Idempotent: the job key pins student + run + input digest + model/rubric/
+ * evaluator/renderer, so a second click, a restart or two tabs create nothing twice. Learners without a verified input get an
+ * explicit `missing` job — absence is not a zero.
+ */
+async function createJobs(db: Db, run: Record<string, any>, batch: Record<string, any>, v: { model: { id: string; revision: number }; rubric: string; evaluator: string }, now: number): Promise<{ inputs: number; without_input: number }> {
   const pending = ((await db.prepare("SELECT id,payload_json FROM classroom_job_outbox WHERE kind='report_input' AND state='pending' ORDER BY id LIMIT 500").all()).results ?? []) as Array<{ id: number; payload_json: string }>;
   const stmts = []; let created = 0;
   for (const o of pending) {
     const p = JSON.parse(o.payload_json); if (p.batch_id !== batch.id) continue;
-    const key = await sha256Hex([p.student_id, run.class_run_id, p.manifest_digest, model.id, model.revision, rubric, evaluator, RENDERER_REVISION].join('|'));
-    stmts.push(db.prepare("INSERT INTO classroom_report_jobs(id,job_key,batch_id,class_run_id,cohort_id,student_id,input_manifest_digest,input_revision,snapshot_revision,input_coverage,capability_model,rubric,evaluator,renderer_revision,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,?) ON CONFLICT(job_key) DO NOTHING").bind(crypto.randomUUID(), key, batch.id, run.class_run_id, run.cohort_id, p.student_id, p.manifest_digest, p.input_revision, p.snapshot_revision, p.coverage, model.id, rubric, evaluator, RENDERER_REVISION, now, now));
+    const key = await sha256Hex([p.student_id, run.class_run_id, p.manifest_digest, v.model.id, v.model.revision, v.rubric, v.evaluator, RENDERER_REVISION].join('|'));
+    stmts.push(db.prepare("INSERT INTO classroom_report_jobs(id,job_key,batch_id,class_run_id,cohort_id,student_id,input_manifest_digest,input_revision,snapshot_revision,input_coverage,capability_model,rubric,evaluator,renderer_revision,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,?) ON CONFLICT(job_key) DO NOTHING").bind(crypto.randomUUID(), key, batch.id, run.class_run_id, run.cohort_id, p.student_id, p.manifest_digest, p.input_revision, p.snapshot_revision, p.coverage, v.model.id, v.rubric, v.evaluator, RENDERER_REVISION, now, now));
     stmts.push(db.prepare("UPDATE classroom_job_outbox SET state='processed',processed_at=? WHERE id=?").bind(now, o.id)); created++;
   }
   const without = ((await db.prepare("SELECT student_id,state FROM classroom_collect_items WHERE batch_id=? AND state<>'verified'").bind(batch.id).all()).results ?? []) as Array<{ student_id: string; state: string }>;
-  for (const w of without) { const key = await sha256Hex([w.student_id, run.class_run_id, 'no-input', batch.id].join('|')); stmts.push(db.prepare("INSERT INTO classroom_report_jobs(id,job_key,batch_id,class_run_id,cohort_id,student_id,input_manifest_digest,input_revision,snapshot_revision,input_coverage,capability_model,rubric,evaluator,renderer_revision,state,reason,created_at,updated_at) VALUES(?,?,?,?,?,?,'',0,0,'none',?,?,?,?,'missing',?,?,?) ON CONFLICT(job_key) DO NOTHING").bind(crypto.randomUUID(), key, batch.id, run.class_run_id, run.cohort_id, w.student_id, model.id, rubric, evaluator, RENDERER_REVISION, w.state, now, now)); }
-  stmts.push(audit(db, run.class_run_id, 'instructor', auth.payload.u, 'report_jobs_created', { batch_id: batch.id, capability_model: model.id, inputs: created, without_input: without.length }, now));
-  await db.batch(stmts);
+  for (const w of without) { const key = await sha256Hex([w.student_id, run.class_run_id, 'no-input', batch.id].join('|')); stmts.push(db.prepare("INSERT INTO classroom_report_jobs(id,job_key,batch_id,class_run_id,cohort_id,student_id,input_manifest_digest,input_revision,snapshot_revision,input_coverage,capability_model,rubric,evaluator,renderer_revision,state,reason,created_at,updated_at) VALUES(?,?,?,?,?,?,'',0,0,'none',?,?,?,?,'missing',?,?,?) ON CONFLICT(job_key) DO NOTHING").bind(crypto.randomUUID(), key, batch.id, run.class_run_id, run.cohort_id, w.student_id, v.model.id, v.rubric, v.evaluator, RENDERER_REVISION, w.state, now, now)); }
+  if (stmts.length) await db.batch(stmts);
+  return { inputs: created, without_input: without.length };
+}
+classroomReportsTeacher.post(root + '/jobs', async (c) => {
+  const t = await teacher(c, 'collect'); if (t instanceof Response) return t; const { auth, run, batch } = t, b = (await json(c)) ?? {}, now = Date.now(), db = c.env.HPS_DB;
+  const model = modelById(b.capability_model ?? DEFAULT_CAPABILITY_MODEL.id), rubric = b.rubric ?? 'unknown', evaluator = b.evaluator ?? 'none';
+  if (!model || !VERSION_RE.test(rubric) || !VERSION_RE.test(evaluator)) return c.json({ error: 'capability_model must be a registered model id; rubric and evaluator are version strings', reason: 'versions_invalid' }, 400);
+  const made = await createJobs(db, run, batch, { model, rubric, evaluator }, now);
+  await audit(db, run.class_run_id, 'instructor', auth.payload.u, 'report_jobs_created', { batch_id: batch.id, capability_model: model.id, ...made }, now).run();
   return c.json(await queueView(db, batch.id), 201);
+});
+
+/** Store a validated result on a leased job. One learner's broken draft is isolated; every other job keeps going. */
+async function saveResult(env: Env, job: Job, generation: number, v: ReturnType<typeof validateDraft> | { ok: false; state: 'failed'; reason: string }, actor: { kind: string; id: string }, now: number) {
+  const db = env.HPS_DB; let digest = '', summary = {};
+  if (v.ok) { const body = JSON.stringify(v.draft); digest = await sha256Hex(body); await env.HPS_TRACES.put(draftKey(job), body, { httpMetadata: { contentType: 'application/json' } }); summary = { observed: v.draft.findings.filter((f) => f.status === 'observed').length, not_yet_seen: v.draft.findings.filter((f) => f.status !== 'observed').length }; }
+  const saved = await db.prepare("UPDATE classroom_report_jobs SET state=?,reason=?,draft_digest=?,summary_json=?,lease_expires_at=0,revision=revision+1,updated_at=? WHERE id=? AND state='leased' AND lease_generation=? RETURNING state").bind(v.state, v.reason, digest, JSON.stringify(summary), now, job.id, generation).first<{ state: string }>();
+  if (!saved) return null;
+  await audit(db, job.class_run_id, actor.kind, actor.id, 'report_draft_' + v.state, { job_id: job.id, reason: v.reason, draft_digest: digest }, now).run();
+  return { state: v.state, reason: v.reason, draft_digest: digest, ok: v.ok };
+}
+/**
+ * Evaluate ONE leased job inside the Service: verified input → evaluator adapter → validateDraft → review queue.
+ * The learner's words never leave the Service for this. A provider failure releases the job back to the queue (bounded
+ * attempts) instead of inventing a draft; an unconfigured evaluator is reported as exactly that.
+ */
+async function evaluateLeased(env: Env, job: Job, profileId: string, actor: { kind: string; id: string }, now: number) {
+  const db = env.HPS_DB, cfg = evaluatorConfig(env, profileModel(profileId)), model = modelById(job.capability_model);
+  const release = (reason: string) => db.prepare("UPDATE classroom_report_jobs SET state='queued',reason=?,lease_expires_at=0,updated_at=? WHERE id=? AND state='leased' AND lease_generation=?").bind(reason, now, job.id, job.lease_generation).run();
+  if (!cfg) { await release('evaluator_not_configured'); return { state: 'queued', reason: 'evaluator_not_configured', ok: false }; }
+  // The job is pinned to an evaluator/rubric. This Service evaluates only jobs pinned to what it actually runs.
+  if (!model || job.evaluator !== cfg.id || job.rubric !== rubricVersion(model)) { await release('evaluator_mismatch'); return { state: 'queued', reason: 'evaluator_mismatch', ok: false }; }
+  if (model.status === 'legacy') { await release('legacy_engine_required'); return { state: 'queued', reason: 'legacy_engine_required', ok: false }; }
+  const input = await env.HPS_TRACES.get(snapshotKey(job.cohort_id, job.class_run_id, job.student_id, job.batch_id, job.snapshot_revision, 'events.jsonl'));
+  if (!input) return saveResult(env, job, job.lease_generation, { ok: false, state: 'failed', reason: 'input_missing' }, actor, now);
+  const text = await input.text();
+  try {
+    const out = await evaluateInput(env, cfg, model, job, text, evaluatorTransport);
+    await audit(db, job.class_run_id, 'system', 'evaluator', 'report_evaluated', { job_id: job.id, evaluator: cfg.id, analysis_ai_model: out.analysis_ai_model, usage: out.usage }, now).run();
+    return saveResult(env, job, job.lease_generation, validateDraft(out.draft, job, text), actor, now);
+  } catch (err) {
+    const code = String((err as Error)?.message ?? 'evaluator_failed').replace(/[^a-z0-9_]/g, '').slice(0, 48) || 'evaluator_failed';
+    // Transient provider trouble: back to the queue, at most 3 leases. After that it is a visible failure, not a silent loop.
+    if (job.lease_generation < 3 && /^evaluator_provider_(429|5\d\d)$/.test(code)) { await release(code); return { state: 'queued', reason: code, ok: false }; }
+    return saveResult(env, job, job.lease_generation, { ok: false, state: 'failed', reason: code }, actor, now);
+  }
+}
+const claimNext = (db: Db, batchId: string, owner: string, now: number) => db.prepare("UPDATE classroom_report_jobs SET state='leased',lease_owner=?,lease_generation=lease_generation+1,lease_expires_at=?,updated_at=? WHERE id=(SELECT id FROM classroom_report_jobs WHERE batch_id=? AND (state='queued' OR (state='leased' AND lease_expires_at<=?)) ORDER BY created_at LIMIT 1) RETURNING *").bind(owner, now + LEASE_MS, now, batchId, now).first<Job>();
+
+/**
+ * "수업 마무리" drives this: one bounded unit of work per call — verified receipts → jobs (deduplicated) → claim ONE job →
+ * evaluate → review queue. The page calls it until `more` is false; closing the page, going offline or a restart loses
+ * nothing (jobs and leases live in D1) and repeating it creates nothing twice. It never approves and never sends.
+ */
+classroomReportsTeacher.post(root + '/advance', async (c) => {
+  const t = await teacher(c, 'collect'); if (t instanceof Response) return t; const { auth, run, batch } = t, now = Date.now(), db = c.env.HPS_DB;
+  const model = DEFAULT_CAPABILITY_MODEL, cfg = evaluatorConfig(c.env, profileModel(run.profile_id));
+  const made = await createJobs(db, run, batch, { model, rubric: cfg ? rubricVersion(model) : 'unknown', evaluator: cfg ? cfg.id : 'none' }, now);
+  let step: Record<string, unknown> | null = null;
+  if (cfg) { const job = await claimNext(db, batch.id, 'advance:' + auth.payload.u, now); if (job) step = { job_id: job.id, ...(await evaluateLeased(c.env, job, run.profile_id, { kind: 'instructor', id: auth.payload.u }, now)) }; }
+  const view = await queueView(db, batch.id), waiting = (view.jobs as Array<Record<string, any>>).filter((j) => j.state === 'queued' || j.state === 'leased'), uploading = await db.prepare("SELECT count(*) AS n FROM classroom_collect_items WHERE batch_id=? AND state IN ('requested','uploading')").bind(batch.id).first<{ n: number }>();
+  return c.json({ ...view, created: made, step, evaluator: cfg ? { id: cfg.id, configured: true } : { configured: false, reason: 'evaluator_not_configured' },
+    // `more` = calling again can make progress right now. Uploads still arriving are reported separately: the page keeps polling for them.
+    more: !!cfg && waiting.some((j) => !['evaluator_mismatch', 'legacy_engine_required'].includes(j.reason) && !(j.state === 'leased' && j.lease_expires_at > now)), uploads_pending: uploading?.n ?? 0 });
 });
 
 async function queueView(db: Db, batchId: string) {
@@ -127,7 +197,7 @@ classroomReportsRunner.use('*', async (c, next) => {
 classroomReportsRunner.post('/claim', async (c) => {
   const db = c.env.HPS_DB, now = Date.now(), batch = c.get('batch'), runner = c.get('runner');
   // Expired leases return to the queue with a new generation: whatever the old runner sends later is refused.
-  const job = await db.prepare("UPDATE classroom_report_jobs SET state='leased',lease_owner=?,lease_generation=lease_generation+1,lease_expires_at=?,updated_at=? WHERE id=(SELECT id FROM classroom_report_jobs WHERE batch_id=? AND (state='queued' OR (state='leased' AND lease_expires_at<=?)) ORDER BY created_at LIMIT 1) RETURNING *").bind(runner, now + LEASE_MS, now, batch, now).first<Job>();
+  const job = await claimNext(db, batch, runner, now);
   if (!job) return c.json({ job: null });
   return c.json({ job: { id: job.id, student_id: job.student_id, lease_generation: job.lease_generation, lease_ms: LEASE_MS, capability_model: job.capability_model, rubric: job.rubric, evaluator: job.evaluator, renderer_revision: job.renderer_revision, input: { manifest_digest: job.input_manifest_digest, coverage: job.input_coverage, files: ['session.meta.json', 'events.jsonl'] } } });
 });
@@ -143,14 +213,18 @@ classroomReportsRunner.post('/jobs/:job/heartbeat', async (c) => {
   await c.env.HPS_DB.prepare('UPDATE classroom_report_jobs SET lease_expires_at=?,updated_at=? WHERE id=? AND lease_generation=?').bind(Date.now() + LEASE_MS, Date.now(), job.id, job.lease_generation).run(); return c.json({ lease_ms: LEASE_MS });
 });
 classroomReportsRunner.post('/jobs/:job/result', bodyLimit({ maxSize: 512 * 1024 }), async (c) => {
-  const b = await json(c), job = await leased(c, b?.lease_generation), now = Date.now(), db = c.env.HPS_DB; if (!job) return c.json({ error: 'no live lease on this job; result discarded', reason: 'lease_lost' }, 409);
+  const b = await json(c), job = await leased(c, b?.lease_generation), now = Date.now(); if (!job) return c.json({ error: 'no live lease on this job; result discarded', reason: 'lease_lost' }, 409);
   const input = await c.env.HPS_TRACES.get(snapshotKey(job.cohort_id, job.class_run_id, job.student_id, job.batch_id, job.snapshot_revision, 'events.jsonl'));
   const v = b?.failed ? ({ ok: false, state: 'failed', reason: /^[a-z_]{1,48}$/.test(b.failed) ? b.failed : 'runner_failed' } as const) : validateDraft(b?.draft, job, input ? await input.text() : '');
-  let digest = '', summary = {};
-  if (v.ok) { const body = JSON.stringify(v.draft); digest = await sha256Hex(body); await c.env.HPS_TRACES.put(draftKey(job), body, { httpMetadata: { contentType: 'application/json' } }); summary = { observed: v.draft.findings.filter((f) => f.status === 'observed').length, not_yet_seen: v.draft.findings.filter((f) => f.status !== 'observed').length }; }
-  // One learner's broken draft is isolated; every other job of the batch keeps going.
-  const saved = await db.prepare("UPDATE classroom_report_jobs SET state=?,reason=?,draft_digest=?,summary_json=?,lease_expires_at=0,revision=revision+1,updated_at=? WHERE id=? AND state='leased' AND lease_generation=? RETURNING state").bind(v.state, v.reason, digest, JSON.stringify(summary), now, job.id, job.lease_generation).first<{ state: string }>();
+  const saved = await saveResult(c.env, job, job.lease_generation, v, { kind: 'runner', id: c.get('runner') }, now);
   if (!saved) return c.json({ error: 'lease changed while saving; result discarded', reason: 'lease_lost' }, 409);
-  await audit(db, job.class_run_id, 'runner', c.get('runner'), 'report_draft_' + v.state, { job_id: job.id, reason: v.reason, draft_digest: digest }, now).run();
-  return c.json({ state: v.state, reason: v.reason, draft_digest: digest }, v.ok ? 201 : 422);
+  return c.json({ state: saved.state, reason: saved.reason, draft_digest: saved.draft_digest }, saved.ok ? 201 : 422);
+});
+// The restricted runner can also ask the Service to evaluate the job it holds: the input never leaves the Service.
+classroomReportsRunner.post('/jobs/:job/evaluate', async (c) => {
+  const b = await json(c), job = await leased(c, b?.lease_generation), now = Date.now(); if (!job) return c.json({ error: 'no live lease on this job', reason: 'lease_lost' }, 409);
+  const run = await c.env.HPS_DB.prepare('SELECT profile_id FROM class_run_ops WHERE class_run_id=?').bind(job.class_run_id).first<{ profile_id: string }>();
+  const r = await evaluateLeased(c.env, job, run?.profile_id ?? '', { kind: 'runner', id: c.get('runner') }, now);
+  if (!r) return c.json({ error: 'lease changed while saving; result discarded', reason: 'lease_lost' }, 409);
+  return c.json(r, r.ok ? 201 : r.state === 'queued' ? 409 : 422);
 });
