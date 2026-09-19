@@ -2162,6 +2162,12 @@
         },
         {
           "path": "worker/migrations/0020-classroom-viewer-check.sql"
+        },
+        {
+          "path": "e2e/classroom/mac-devhost.mjs"
+        },
+        {
+          "path": "e2e/classroom/README.md"
         }
       ]
     },
