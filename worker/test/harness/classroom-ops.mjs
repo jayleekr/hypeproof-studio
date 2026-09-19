@@ -2,6 +2,7 @@
 // SQLite with transactional batch. Two teachers, two students, another cohort.
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { bootApp, createMockEnv, makeCtx, TEST_SECRET } from './index.mjs';
 // Node SQLite binds positionally; the existing board SQL uses ?N, so numbered
 // parameters are mapped here exactly as harness/classroom.mjs does. SQL is unchanged.
@@ -68,5 +69,24 @@ export async function localOps({ enabled = true, binding } = {}) {
   const command = (action, targets, extra = {}, token) => request(base + '/commands', 'POST', { action, targets, idempotency_key: crypto.randomUUID(), reason_code: 'blocked_error', expected_roster_revision: 1, ...extra }, token);
   const receipt = (cmd, state, result_code = '') => ({ command_id: cmd.command_id, lease_generation: cmd.lease_generation, connection_epoch: cmd.connection_epoch, state, result_code, observed_at: Date.now() });
   const sync = (credential, events = [], n = 1, extra = {}) => request('/v1/classroom/ops/sync', 'POST', { schema_version: 1, app_instance_id: instance(n).app_instance_id, boot_id: instance(n).boot_id, capabilities: instance(n).capabilities, events, ...extra }, credential);
-  return { r2, app, env, db, cohort, profile, run, base, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, command, receipt, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
+  // A snapshot the way the real App issues it (review F1): real-shaped spool metadata, and the binding produced by the
+  // App's own freezer from the connect response. Tests never hand-write a binding.
+  const { freezeSnapshot } = await import('../../../extensions/hypeproof-chat/src/evidenceSnapshot.ts');
+  const enc = (t) => new TextEncoder().encode(t), hex = (t) => createHash('sha256').update(t).digest('hex');
+  // The App freezes a copy once and keeps its binding; the fixture freezes at a fixed instant so a re-seal is the same manifest.
+  const opts_now = (conn) => conn.run.ends_at;
+  const metaFor = (conn, over = {}) => JSON.stringify({ schema_version: 1, session_id: 'spool-' + conn.grant_id, user: conn.student, app_version: '0.1.56', os: 'synthetic', started_at: new Date(conn.run.starts_at).toISOString(), ...over });
+  function sealBody(conn, batchId, eventsText, { meta = metaFor(conn), files, consent = { purpose: 'class_report', notice_version: 'notice-v1' } } = {}) {
+    const scope = { grant_id: conn.grant_id, class_run_id: conn.class_run_id, seat_id: conn.seat_id, student: conn.student, activity: conn.lesson ? { course_id: conn.lesson.course_id, version: conn.lesson.version } : null, run: conn.run };
+    const frozen = freezeSnapshot([{ name: 'session.meta.json', data: enc(meta) }, { name: 'events.jsonl', data: enc(eventsText) }], scope, batchId, consent, opts_now(conn));
+    if (!frozen.ok) throw Error('the App would not send this: ' + frozen.code);
+    return { schema: 'hps-classroom-snapshot/2', files: files ?? [{ name: 'session.meta.json', bytes: Buffer.byteLength(meta), sha256: hex(meta) }, { name: 'events.jsonl', bytes: Buffer.byteLength(eventsText), sha256: hex(eventsText) }], binding: frozen.binding };
+  }
+  /** PUT both files and seal, as the device uploader does. */
+  async function uploadSnapshotAs(conn, batchId, revision, eventsText, opts = {}) {
+    const meta = opts.meta ?? metaFor(conn);
+    for (const [name, body] of [['session.meta.json', meta], ['events.jsonl', eventsText]]) { const r = await app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${batchId}/${revision}/${name}`, { method: 'PUT', headers: { authorization: 'Bearer ' + conn.credential }, body }), env, makeCtx()); if (!r.ok) return { status: r.status, json: await r.json() }; }
+    return request(`/v1/classroom/ops/collect/snapshots/${batchId}/${revision}/seal`, 'POST', sealBody(conn, batchId, eventsText, { ...opts, meta }), conn.credential);
+  }
+  return { r2, app, env, db, cohort, profile, run, base, metaFor, sealBody, uploadSnapshotAs, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, command, receipt, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
 }

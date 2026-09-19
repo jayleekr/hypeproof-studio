@@ -1960,6 +1960,15 @@
       "sources": [
         {
           "path": "docs/testing/classroom-admin.md"
+        },
+        {
+          "path": "worker/test/classroom-ops-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-expiry-review.test.mjs"
         }
       ]
     },

@@ -191,6 +191,8 @@ export function ChatPanel(props: Props) {
   const [queued, setQueued] = useState<string | null>(null);
   const [frozen, setFrozen] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
+  // #751 F4 — what the learner said about each lesson step in this panel. Their statement, not a grade.
+  const [lessonSteps, setLessonSteps] = useState<Record<string, 'in_progress' | 'submitted'>>({});
   const snapshot = useRef({text:draft,images:pendingImages,queued});
   snapshot.current = {text:draft,images:pendingImages,queued};
   const activityId = config?.activity?.id;
@@ -626,7 +628,9 @@ export function ChatPanel(props: Props) {
               <p>{step.instructions}</p>
               <details><summary>힌트 보기</summary><p>{step.hint || '별도 힌트 없음'}</p></details>
               <p>확인 기준: {step.acceptance}</p>
-              <button type="button" disabled={streaming} onClick={() => handleChip({style: 'good', text: `수업: ${config.profile!.lesson!.content.title} (${config.profile!.lesson!.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`})}>채팅에 과제 넣기</button>
+              <button type="button" disabled={streaming} onClick={() => { postToHost({type: 'lessonStep', stepId: step.id, status: 'in_progress'}); setLessonSteps(prev => ({...prev, [step.id]: prev[step.id] === 'submitted' ? 'submitted' : 'in_progress'})); handleChip({style: 'good', text: `수업: ${config.profile!.lesson!.content.title} (${config.profile!.lesson!.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`}); }}>채팅에 과제 넣기</button>
+              {/* The learner decides when a step is done. It is recorded as their own statement, not as a verified result. */}
+              <button type="button" className="hps-lesson-done" aria-pressed={lessonSteps[step.id] === 'submitted'} disabled={lessonSteps[step.id] === 'submitted'} onClick={() => { postToHost({type: 'lessonStep', stepId: step.id, status: 'submitted'}); setLessonSteps(prev => ({...prev, [step.id]: 'submitted'})); }}>{lessonSteps[step.id] === 'submitted' ? '마쳤다고 표시함 · 강사 확인 전' : '이 단계를 마쳤어요'}</button>
             </section>
           ))}
           <p>과제를 확인하고 채팅으로 요청하세요. 열람만으로 실습이 완료되지는 않습니다.</p>

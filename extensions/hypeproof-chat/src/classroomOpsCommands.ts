@@ -63,6 +63,8 @@ export class CommandRunner {
   private state: JournalState = { entries: [] };
   private received = new Map<string, number>();
   private running = false;
+  private closed = false;
+  private current: AbortController | null = null;
   private deps: RunnerDeps;
   constructor(deps: RunnerDeps) { this.deps = deps; }
 
@@ -92,12 +94,21 @@ export class CommandRunner {
     await this.deps.journal.save(this.state);
   }
 
+  /**
+   * The connection this runner served is gone (learner disconnected, re-paired, seat replaced, credential expired).
+   * Nothing may START from here on. An action that is already running is asked to stop; whether its effect landed is
+   * a separate question, answered by its receipt (`outcome_unknown` for a state-changing action), never assumed.
+   */
+  close(): void { this.closed = true; this.current?.abort(); }
+  get isClosed(): boolean { return this.closed; }
+
   /** Receipts the Service has not acknowledged yet. Sent on every sync until it does. */
   pendingReceipts(): Receipt[] {
     return this.state.entries.filter((e) => !e.settled).slice(0, 50).map((e) => ({ command_id: e.envelope.command_id, lease_generation: e.envelope.lease_generation, connection_epoch: e.envelope.connection_epoch, state: e.state, result_code: e.result_code, observed_at: e.observed_at }));
   }
 
   async onCommands(cmds: CommandEnvelope[]): Promise<void> {
+    if (this.closed) return;
     let changed = false;
     for (const c of cmds) {
       if (!c || typeof c.command_id !== "string" || this.state.entries.some((e) => e.envelope.command_id === c.command_id)) continue; // re-delivery
@@ -113,6 +124,7 @@ export class CommandRunner {
 
   /** Returns true when something ran, so the caller can sync the result promptly. */
   async onAcks(acks: ReceiptAck[]): Promise<boolean> {
+    if (this.closed) return false;
     let ran = false;
     for (const a of acks) {
       const e = this.state.entries.find((x) => x.envelope.command_id === a.command_id);
@@ -125,7 +137,7 @@ export class CommandRunner {
       }
     }
     await this.save();
-    for (const e of this.state.entries) if (e.state === "accepted" && e.proceed && !this.running) { await this.execute(e); ran = true; }
+    for (const e of this.state.entries) if (e.state === "accepted" && e.proceed && !this.running && !this.closed) { await this.execute(e); ran = true; }
     return ran;
   }
 
@@ -135,10 +147,13 @@ export class CommandRunner {
     if (started === undefined || this.deps.monotonic() - started > c.start_within_ms) { this.finish(e, "rejected", "start_window_closed"); await this.save(); return; }
     if (c.connection_epoch !== this.deps.epoch()) { this.finish(e, "rejected", "epoch_stale"); await this.save(); return; }
     const ex = this.deps.executors[c.action]!;
+    // Checked again at the last moment before any effect: saving the journal above may have outlived the connection.
+    if (this.closed) { this.finish(e, "rejected", "connection_closed"); await this.save(); return; }
     this.running = true; this.finish(e, "running", "");
     await this.save(); // journal first: a crash from here on is recoverable without re-running
+    if (this.closed) { this.running = false; this.finish(e, "rejected", "connection_closed"); await this.save(); return; }
     if (ex.mutating) this.deps.notify?.(`강사가 ‘${c.action}’ 조치를 요청해 실행합니다.`);
-    const abort = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined, timedOut = false;
+    const abort = new AbortController(); this.current = abort; let timer: ReturnType<typeof setTimeout> | undefined, timedOut = false;
     try {
       const result = await Promise.race([
         ex.run(abort.signal, c),
@@ -146,13 +161,15 @@ export class CommandRunner {
       ]);
       // A timed-out state-changing action may still have landed: that is unknown, not failed.
       // (The abort may make the executor answer first; the deadline, not the answer's wording, decides.)
-      if (!result.ok && timedOut && ex.mutating) this.finish(e, "outcome_unknown", "timeout");
+      // Stopped because the connection closed mid-run: a stop was REQUESTED; for a state-changing action the result is unknown.
+      if (!result.ok && this.closed && !timedOut) this.finish(e, ex.mutating ? "outcome_unknown" : "failed", "connection_closed");
+      else if (!result.ok && timedOut && ex.mutating) this.finish(e, "outcome_unknown", "timeout");
       else this.finish(e, result.ok ? "succeeded" : "failed", result.code);
     } catch (err) {
       this.deps.log?.(`[ops] ${c.action} threw: ${(err as Error)?.name ?? "error"}`);
       this.finish(e, ex.mutating ? "outcome_unknown" : "failed", "executor_error");
     } finally {
-      if (timer) clearTimeout(timer); this.running = false; await this.save();
+      if (timer) clearTimeout(timer); this.running = false; this.current = null; await this.save();
     }
   }
 }

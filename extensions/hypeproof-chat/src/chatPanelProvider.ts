@@ -124,6 +124,7 @@ import {
   sdkFallbackLogLine,
   resolveCoachRuntime,
   classifyTurnError,
+  lessonStepSignal,
   pendingCloseLabel,
   WRITE_TOOL_NAMES,
 } from "./chatPanelHelpers";
@@ -630,6 +631,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   /** #751 — metadata-only observer for remote classroom operations; null unless the learner connected. */
   opsObserver: import("./classroomOpsHost").ClassroomOpsObserver | null = null;
+  private opsLastArtifact: string | undefined;
   // #751 R3 — why new AI runs are held. Local editing, saving, Stop and export never consult this.
   private opsHold: "paused" | "stop_unconfirmed" | null = null;
   private opsGeneration = 0;
@@ -1462,6 +1464,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       path: "index.html",
       content: checked.html,
     });
+    // #751 F4 — a real change to the artifact, reported to the class board as digests only (never the HTML).
+    { const after = createHash("sha256").update(checked.html, "utf8").digest("hex"); this.opsObserver?.artifactChanged(this.opsLastArtifact, after); this.opsLastArtifact = after; }
 
     // 2026-08-17 Windows 실기기 — 코치가 "완성됐어요!" 라고 말한 **뒤에도** 화면이
     // 한참 비어 있었다. 스트림이 끝난 시점과 미리보기가 실제로 뜨는 시점 사이에
@@ -2105,6 +2109,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // 되므로, 두 경로가 한 스키마를 공유한다. 매핑은 vscode-free 헬퍼
       // (traceMsgToWorkflowRecord)가 소유하고, trace.ts 필드명 정합은
       // test/trace-workflow-map.smoke.mjs 가 고정한다.
+      // #751 F4 — the learner's own step action in the lesson panel. Only a step of the CONFIRMED lesson this profile
+      // carries is accepted; the record stays in the local spool first, then goes to the class board as ids only.
+      case "lessonStep": {
+        const signal = lessonStepSignal(this.cachedProfile?.lesson, msg);
+        if (!signal) return;
+        this.spool?.recordWorkflow({ event: "lesson_step", payload: signal });
+        this.opsObserver?.lessonStep(signal.lesson_version, signal.step_id, signal.status);
+        return;
+      }
       case "traceTrialStart":
       case "traceTrialEnd":
       case "traceValidationRun":
@@ -2375,6 +2388,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     let spoolRuntime: "proxy" | "agent-sdk" | null = null;
     let spoolStatus: "ok" | "error" = "ok";
     let spoolErrorKind: string | undefined;
+    let opsSdkFallback = false;
+    let opsFailure: { status?: number; code?: string; requestId?: string } = {};
     // holder 인 이유: 콜백 안에서의 재할당을 TS CFA 가 못 봐서, 평범한 let 은
     // finally 시점에 null 로 좁혀진다.
     const sdkTurnTotal: {
@@ -2764,6 +2779,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           // #476 — 안내는 이 리셋 **뒤에** 넣는다. 앞에 넣으면 방금 찍은 줄이
           // 같이 지워져 웹뷰에만 남고 히스토리에는 안 남는다(창을 다시 열면 사라짐).
           this.noteSdkFallback(err.message, streamId);
+          opsSdkFallback = true;
           // #580 — 이 턴이 실제로 돈 런타임은 proxy 다. 폴백은 상태이지만
           // 사건으로도 남긴다 — "usage 없는 턴이 왜 생겼나"를 정량화하는 근거.
           spoolRuntime = "proxy";
@@ -2810,8 +2826,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     } catch (err) {
       spoolStatus = "error";
       spoolErrorKind = classifyTurnError(err);
+      { const e = err as { status?: unknown; kind?: unknown; requestId?: unknown }; opsFailure = { ...(typeof e?.status === "number" ? { status: e.status } : {}), ...(typeof e?.kind === "string" ? { code: e.kind } : {}), ...(typeof e?.requestId === "string" ? { requestId: e.requestId } : {}) }; }
       await this.handleSendError(err, streamId);
     } finally {
+      // #751 F4 — what actually happened to this turn, from the real runtime path. No text leaves here.
+      this.opsObserver?.turnResult({ ok: spoolStatus === "ok", aborted: ctrl.signal.aborted, runtime: spoolRuntime === "agent-sdk" ? "agent-sdk" : "proxy", sdkFallback: opsSdkFallback, ...(spoolErrorKind ? { errorKind: spoolErrorKind } : {}), ...opsFailure });
       // #580 — 턴의 끝을 항상 남긴다. 사용자 중단(abort)도 catch 로 오므로
       // 신호를 먼저 본다. SDK 턴 합계가 있으면 같이 싣는다 — 요청 단위 usage
       // 레코드 합과의 대조군.

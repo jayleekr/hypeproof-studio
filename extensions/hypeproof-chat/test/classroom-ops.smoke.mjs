@@ -17,7 +17,7 @@ let id = 0; const uuid = () => `event-${String(++id).padStart(8, "0")}`;
   for (const kind of Object.keys(ops.CLIENT_OPS_PAYLOAD_KEYS)) assert.equal(svc.validatePayload(kind, { ...samples[kind][0], extra_field: "x" }).ok, false);
   // Unsafe text never reaches a payload: it is dropped, not sent.
   const e = ops.errorPayload("unknown", { code: "/Users/kid/내 파일.html", requestId: "학생이 쓴 글", blocking: true }); assert.deepEqual(Object.keys(e).sort(), ["blocking", "class"]);
-  assert.deepEqual([...ops.OPS_CLIENT_CAPABILITIES], ["observe"]); assert.equal(ops.OPS_SCHEMA_VERSION, svc.OPS_SCHEMA_VERSION);
+  assert.deepEqual([...ops.OPS_CLIENT_CAPABILITIES], ["observe", "observe_step", "observe_runtime", "observe_evidence"], "review F4: the build declares what it reports from its real runtime path"); assert.equal(ops.OPS_SCHEMA_VERSION, svc.OPS_SCHEMA_VERSION);
   ok("payload builders match the Service allowlist; unsafe strings are dropped");
 }
 // ── cause classification: a bare 401 is never "expired" ──
