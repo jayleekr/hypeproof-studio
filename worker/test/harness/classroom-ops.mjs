@@ -46,8 +46,8 @@ export async function localOps({ enabled = true, binding } = {}) {
   const base = `/admin/cohorts/${cohort}/classroom/runs/${run}`;
   // The pinned lesson is a real frozen authoring version, drafted and confirmed through the existing API.
   const lesson = { course_id: 'ops-course', version: 'm2026.09.18-1' };
-  const step = (id) => ({ id, title: id, instructions: '합성 단계', hint: '', acceptance: '합성 기준' });
-  const design = (ids) => ({ schema: 'hps-session-design/1', title: '합성 수업', audience: '합성 사용자', duration_minutes: 60, objective: '원격 운영 시험', prerequisites: '', starter: '연습 폴더', steps: ids.map(step) });
+  const step = (id) => ({ id, title: id, instructions: '합성 단계\n제출 증거: ' + id + '.md', hint: '', acceptance: '합성 기준' });
+  const design = (ids) => ({ schema: 'hps-session-design/1', title: '합성 수업', audience: '합성 사용자', duration_minutes: 60, objective: '원격 운영 시험', prerequisites: '코딩 경험 불필요', starter: '연습 폴더', steps: ids.map(step) });
   async function freeze(course = lesson.course_id, version = lesson.version, ids = ['intro', 'build', 'review']) {
     const a = `/admin/cohorts/${cohort}/authoring/${course}`;
     const saved = await request(a, 'PUT', { profile_id: profile, request_id: crypto.randomUUID(), expected_revision: 0, content: design(ids) });
