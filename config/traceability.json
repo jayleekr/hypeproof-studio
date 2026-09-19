@@ -1987,6 +1987,24 @@
         },
         {
           "path": "worker/test/classroom-ops-d1.test.mjs"
+        },
+        {
+          "path": "chalk/src/ui/manage.html"
+        },
+        {
+          "path": "chalk/test/classroom-ops.test.mjs"
+        },
+        {
+          "path": "e2e/classroom/ops.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomOps.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomOpsHost.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops.smoke.mjs"
         }
       ]
     },

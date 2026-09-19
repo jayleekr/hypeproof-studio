@@ -628,6 +628,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     await this.draftWrites;
   }
 
+  /** #751 — metadata-only observer for remote classroom operations; null unless the learner connected. */
+  opsObserver: import("./classroomOpsHost").ClassroomOpsObserver | null = null;
+  /** #751 — approval wait is reported as such, never as a failure or as "running". */
+  opsRuntime(): { idleMs: number; status: "idle" | "running" | "waiting_approval" } {
+    const status = (this.pendingApprovals?.size ?? 0) > 0 ? "waiting_approval" : this.hasActiveStream() ? "running" : "idle";
+    return { idleMs: Date.now() - this.lastActivityAt, status };
+  }
   hasActiveStream(): boolean { return this.pendingSends > 0 || this.activeStreams.size > 0 || !!this.worldOpening || !!this.observationAssessment || (this.pendingApprovals?.size ?? 0) > 0; }
 
   refreshConfig() {
@@ -757,6 +764,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // #381 — remember WHY, so the token-entry flow can say something the
         // participant can act on instead of one generic "확인이 안 돼요".
         this.lastProfileFailure = r.ok ? null : r.failure;
+        this.opsObserver?.profileResult(r.ok ? { ok: true } : { ok: false, status: r.failure.status, code: r.failure.reason === "expired" ? "expired" : undefined, requestId: r.failure.requestId, network: r.failure.reason === "network" }, token);
         let p = r.ok ? r.profile : null;
         if (connections?.current && p) {
           if (p.activity_id!==connections.current.serverId) p=null;
@@ -894,6 +902,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         },
         body: JSON.stringify(ev),
       });
+      this.opsObserver?.traceResult(res.status);
       return { ok: res.ok, status: res.status };
     } catch {
       return { ok: false, status: 0 };
