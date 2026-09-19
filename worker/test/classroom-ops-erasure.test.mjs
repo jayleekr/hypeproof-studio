@@ -58,3 +58,35 @@ test('operator erasure: a guardian\'s instruction for one child, and retention f
   assert.equal(f.db.prepare("SELECT count(*) n FROM classroom_report_jobs WHERE state<>'withdrawn'").get().n, 0); assert.equal(f.db.prepare('SELECT count(*) n FROM classroom_report_links WHERE revoked_at IS NULL').get().n, 0);
   assert.deepEqual((await E({ class_run_id: f.run, reason: 'retention', retention_days: 90, dry_run: false })).json.erased.map((x) => x.snapshot_objects), [0, 0], 'running it again is harmless');
 });
+
+// ── scheduled retention: OFF by default, dry-run before enforce, fake clock, interrupted erasures are retried ──
+const { runClassroomRetention, retentionConfig } = await import('../src/lib/classroom-erasure.ts');
+const DAY = 86_400_000;
+test('retention is OFF unless a period is set; an invalid period switches it off instead of being guessed; a period alone only reports', async (t) => {
+  const f = await delivered(t), future = Date.now() + 400 * DAY;
+  assert.deepEqual(retentionConfig(f.env), { mode: 'off', days: null }); assert.deepEqual(await runClassroomRetention(f.env, future), { mode: 'off', days: null, due_runs: 0, due_learners: 0, erased: 0, failed: 0, remaining: 0 });
+  for (const bad of ['0', '-5', '30.5', 'ninety', '99999', ' 30']) { f.env.HPS_CLASSROOM_RETENTION_DAYS = bad; f.env.HPS_CLASSROOM_RETENTION = 'enforce'; const r = await runClassroomRetention(f.env, future); assert.deepEqual([r.mode, r.problem, r.erased], ['off', 'retention_days_invalid', 0], bad); }
+  assert.equal(f.holds(words).length, 4, 'nothing was deleted by any of the above');
+  f.env.HPS_CLASSROOM_RETENTION_DAYS = '90'; delete f.env.HPS_CLASSROOM_RETENTION;
+  assert.deepEqual(await runClassroomRetention(f.env, Date.now() + 30 * DAY), { mode: 'dry-run', days: 90, due_runs: 0, due_learners: 0, erased: 0, failed: 0, remaining: 0 }, 'before the period ends nothing is even due');
+  assert.deepEqual(await runClassroomRetention(f.env, future), { mode: 'dry-run', days: 90, due_runs: 1, due_learners: 2, erased: 0, failed: 0, remaining: 2 }); assert.equal(f.holds(words).length, 4, 'a dry run reports and deletes nothing');
+  f.env.HPS_CLASSROOM_RETENTION = 'enforce'; delete f.env.HPS_CLASSROOM_OPS; assert.equal((await runClassroomRetention(f.env, future)).mode, 'off', 'the global operations switch gates it too');
+});
+test('retention enforce: due runs only, bounded per tick, an interrupted erasure is retried and finished, running again is harmless', async (t) => {
+  const f = await delivered(t), future = Date.now() + 400 * DAY; Object.assign(f.env, { HPS_CLASSROOM_RETENTION_DAYS: '90', HPS_CLASSROOM_RETENTION: 'enforce' });
+  const realDelete = f.env.HPS_TRACES.delete; let broken = true; f.env.HPS_TRACES.delete = async (k) => { if (broken && k.includes('/student-b/')) throw Error('injected R2 outage'); return realDelete(k); };
+  const first = await runClassroomRetention(f.env, future, 50); assert.deepEqual([first.due_learners, first.erased, first.failed, first.remaining], [2, 1, 1, 1]);
+  assert.deepEqual(f.db.prepare('SELECT student_id,state,attempts,last_error FROM classroom_erasure_log ORDER BY student_id').all().map((r) => ({ ...r })), [{ student_id: 'student-a', state: 'done', attempts: 1, last_error: '' }, { student_id: 'student-b', state: 'started', attempts: 1, last_error: 'content_delete_failed' }]);
+  assert.ok(f.holds(words).every((k) => k.includes('/student-b/')), 'student-a is gone; student-b\'s content is still there and known to be'); assert.equal(f.db.prepare("SELECT count(*) n FROM classroom_report_links WHERE revoked_at IS NULL").get().n, 0, 'but nothing of it can be opened any more');
+  broken = false; const second = await runClassroomRetention(f.env, future + DAY, 50); assert.deepEqual([second.due_learners, second.erased, second.failed, second.remaining], [1, 1, 0, 0]); assert.equal(f.holds(words).length, 0);
+  assert.deepEqual(await runClassroomRetention(f.env, future + 2 * DAY, 50), { mode: 'enforce', days: 90, due_runs: 0, due_learners: 0, erased: 0, failed: 0, remaining: 0 }, 'a finished run is never selected again');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM ops_audit WHERE action='collection_erased'").get().n, 2, 'one audit row per learner, not one per tick');
+});
+test('retention rides the existing daily cron and nothing else: the 15-minute tick does not run it, and the per-tick bound leaves the rest for the next day', async (t) => {
+  const f = await delivered(t); Object.assign(f.env, { HPS_CLASSROOM_RETENTION_DAYS: '1', HPS_CLASSROOM_RETENTION: 'enforce' }); f.db.prepare('UPDATE class_run_ops SET ends_at=?').run(Date.now() - 2 * DAY);
+  const { default: worker } = await import('../src/index.ts'), pending = [], ctx = { waitUntil: (p) => pending.push(Promise.resolve(p).catch(() => {})) , passThroughOnException() {} };
+  await worker.scheduled({ cron: '*/15 * * * *', scheduledTime: Date.now() }, f.env, ctx); await Promise.all(pending); assert.equal(f.holds(words).length, 4, 'the heartbeat tick leaves classroom data alone');
+  pending.length = 0; await worker.scheduled({ cron: '0 17 * * *', scheduledTime: Date.now() }, f.env, ctx); await Promise.all(pending); assert.equal(f.holds(words).length, 0, 'the daily tick applied the configured period');
+  const g = await delivered(t); Object.assign(g.env, { HPS_CLASSROOM_RETENTION_DAYS: '1', HPS_CLASSROOM_RETENTION: 'enforce' });
+  const bounded = await runClassroomRetention(g.env, Date.now() + 10 * DAY, 1); assert.deepEqual([bounded.erased, bounded.remaining], [1, 1]);
+});

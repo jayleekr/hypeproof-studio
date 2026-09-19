@@ -2158,6 +2158,9 @@
           "path": ".github/workflows/classroom-ops.yml"
         },
         {
+          "path": "worker/migrations/0021-classroom-erasure-log.sql"
+        },
+        {
           "path": "worker/migrations/0020-classroom-viewer-check.sql"
         }
       ]

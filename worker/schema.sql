@@ -928,3 +928,16 @@ CREATE TABLE IF NOT EXISTS classroom_link_attempts (
  locked_at INTEGER,
  updated_at INTEGER NOT NULL
 );
+-- ── migrations/0021-classroom-erasure-log.sql (remote classroom operations, erasure progress, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_erasure_log (
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ reason TEXT NOT NULL,
+ state TEXT NOT NULL,
+ attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT '',
+ started_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(class_run_id,student_id)
+);
+CREATE INDEX IF NOT EXISTS classroom_erasure_log_state ON classroom_erasure_log(state,updated_at);

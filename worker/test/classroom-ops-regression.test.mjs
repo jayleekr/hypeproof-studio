@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { performance } from 'node:perf_hooks';
 import { localOps } from './harness/classroom-ops.mjs';
 let count = 0; async function check(name, fn) { await fn(); count++; console.log('PASS ' + name); }
-const OPS_TABLES = ['class_run_ops', 'class_run_seats', 'ops_grants', 'ops_device_connections', 'ops_latest_state', 'ops_events', 'ops_audit', 'ops_token_issues', 'ops_commands', 'ops_command_targets', 'ops_seat_leases', 'class_run_control', 'ops_event_reviews', 'classroom_consents', 'classroom_collect_batches', 'classroom_collect_items', 'classroom_snapshots', 'classroom_job_outbox', 'classroom_collect_tombstones', 'classroom_report_jobs', 'classroom_recipients', 'classroom_delivery_approvals', 'classroom_report_deliveries', 'classroom_report_links', 'classroom_delivery_events', 'classroom_snapshot_bindings', 'classroom_report_job_attempts', 'classroom_recipient_checks', 'classroom_link_attempts'];
+const OPS_TABLES = ['class_run_ops', 'class_run_seats', 'ops_grants', 'ops_device_connections', 'ops_latest_state', 'ops_events', 'ops_audit', 'ops_token_issues', 'ops_commands', 'ops_command_targets', 'ops_seat_leases', 'class_run_control', 'ops_event_reviews', 'classroom_consents', 'classroom_collect_batches', 'classroom_collect_items', 'classroom_snapshots', 'classroom_job_outbox', 'classroom_collect_tombstones', 'classroom_report_jobs', 'classroom_recipients', 'classroom_delivery_approvals', 'classroom_report_deliveries', 'classroom_report_links', 'classroom_delivery_events', 'classroom_snapshot_bindings', 'classroom_report_job_attempts', 'classroom_recipient_checks', 'classroom_link_attempts', 'classroom_erasure_log'];
 {
   const off = await localOps({ enabled: false });
   try {
