@@ -2149,6 +2149,9 @@
           "path": "worker/test/classroom-ops-erasure.test.mjs"
         },
         {
+          "path": "e2e/classroom/ops-roster.mjs"
+        },
+        {
           "path": "worker/migrations/0019-classroom-report-attempts.sql"
         },
         {
