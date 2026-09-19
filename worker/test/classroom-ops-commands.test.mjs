@@ -115,7 +115,7 @@ try {
   await check('AT-33 slice: fresh schema.sql equals the previous schema plus migrations 0011–0017; all re-runnable and additive', async () => {
     const { DatabaseSync } = await import('node:sqlite'); const { readFileSync } = await import('node:fs');
     const shape = (d) => JSON.stringify(d.prepare("SELECT type,name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all().map((r) => [r.type, r.name, (r.sql ?? '').replace(/\s+/g, ' ')]));
-    const m = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding'].map((n) => readFileSync(new URL(`../migrations/${n}.sql`, import.meta.url), 'utf8'));
+    const m = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts'].map((n) => readFileSync(new URL(`../migrations/${n}.sql`, import.meta.url), 'utf8'));
     const upgraded = new DatabaseSync(':memory:'); upgraded.exec(readFileSync(new URL('./fixtures/schema-pre-0011.sql', import.meta.url), 'utf8')); for (const sql of [...m, ...m]) upgraded.exec(sql);
     const fresh = new DatabaseSync(':memory:'); fresh.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8')); assert.equal(shape(upgraded), shape(fresh));
     for (const sql of m) assert.ok(!/\b(DROP|ALTER|DELETE|UPDATE)\b/i.test(sql.replace(/^--.*$/gm, '').replace(/ON DELETE CASCADE/g, ''))); upgraded.close(); fresh.close();

@@ -27,8 +27,13 @@ export function emptyDraft(job) {
 
 export async function runOnce({ service, credential, evaluate, legacyEvaluate, fetchImpl = fetch, log = console.log }) {
   const call = async (path, init = {}) => { const r = await fetchImpl(service.replace(/\/$/, '') + '/v1/classroom/ops/runner' + path, { ...init, headers: { authorization: 'Bearer ' + credential, 'content-type': 'application/json', ...(init.headers ?? {}) } }); return r; };
-  const claimed = await (await call('/claim', { method: 'POST', body: '{}' })).json();
-  if (!claimed.job) return { claimed: false };
+  // Say what this runner can run: a job it cannot run is never handed to it, so it cannot sit in front of the others.
+  const claimed = await (await call('/claim', { method: 'POST', body: JSON.stringify({ can: { service: true, legacy: !!legacyEvaluate, local: !!evaluate } }) })).json();
+  if (!claimed.job) {
+    const w = claimed.waiting;
+    if (w?.queued) log(`no runnable job: ${w.queued} queued` + (w.needs_local_evaluator ? ` · ${w.needs_local_evaluator} pinned to no Service evaluator (${w.service_evaluator_configured ? 'run “수업 마무리/이어가기” to re-prepare them' : 'the Service evaluator is NOT configured'}; or pass --evaluator)` : '') + (w.needs_legacy_engine ? ` · ${w.needs_legacy_engine} legacy (pass --legacy-hain7)` : '') + (w.needs_service_evaluator ? ` · ${w.needs_service_evaluator} need the Service evaluator (not configured)` : '') + (w.paused ? ` · ${w.paused} paused for retry` : ''));
+    return { claimed: false, waiting: w };
+  }
   const job = claimed.job, gen = job.lease_generation;
   const beat = setInterval(() => void call(`/jobs/${job.id}/heartbeat`, { method: 'POST', body: JSON.stringify({ lease_generation: gen }) }).catch(() => undefined), Math.floor(job.lease_ms / 3));
   try {
@@ -59,5 +64,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   if (!service || !credential) { console.error('usage: HPS_RUNNER_CREDENTIAL=… node --experimental-strip-types scripts/classroom-report-runner.mjs --service <url> [--evaluator <module>] [--once]'); process.exit(2); }
   const evaluate = arg('--evaluator') ? (await import(new URL(arg('--evaluator'), `file://${process.cwd()}/`).href)).evaluate : undefined;
   const legacyEvaluate = arg('--legacy-hain7') ? (await import('./classroom-legacy-hain7.mjs')).legacyEvaluator({ context: arg('--legacy-hain7'), review: arg('--legacy-review') }) : undefined;
-  for (;;) { const r = await runOnce({ service, credential, evaluate, legacyEvaluate }); if (process.argv.includes('--once')) break; if (!r.claimed) await new Promise((res) => setTimeout(res, 15000)); }
+  for (;;) { const r = await runOnce({ service, credential, evaluate, legacyEvaluate }); if (process.argv.includes('--once')) break; // Nothing claimed, or a job that went back to the queue unfinished (it is paused server-side): wait instead of spinning.
+    if (!r.claimed || r.state === 'queued') await new Promise((res) => setTimeout(res, 15000)); }
 }

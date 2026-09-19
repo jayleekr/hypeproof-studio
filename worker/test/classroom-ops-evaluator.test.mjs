@@ -69,7 +69,7 @@ test('R5 a provider that cites what is not in the catalog, or only the AI, never
 test('R5 provider trouble returns the job to the queue (bounded), then fails visibly; other learners keep going', async (t) => {
   const f = await fixture(t), calls = []; let n = 0;
   setEvaluatorTransport(async (request, signal) => (++n <= 3 ? new Response('busy', { status: 503 }) : careful(calls)(request, signal)));
-  const states = []; for (let i = 0; i < 6; i++) { const r = await f.advance(); states.push([r.json.step?.state, r.json.step?.reason]); if (!r.json.more) break; }
+  const states = []; for (let i = 0; i < 8; i++) { const r = await f.advance(); states.push([r.json.step?.state, r.json.step?.reason]); f.db.prepare('UPDATE classroom_report_job_attempts SET next_attempt_at=1').run(); /* fake clock: every pause is over */ if (!r.json.more && !r.json.retry_after_ms) break; }
   const jobs = (await f.request(f.B + '/reports')).json.jobs.map((j) => j.state).sort();
   assert.ok(states.some(([s, reason]) => s === 'queued' && reason === 'evaluator_provider_503'), 'a transient failure is not a draft and not a terminal failure');
   assert.ok(jobs.includes('partial'), JSON.stringify({ states, jobs })); assert.ok(jobs.every((s) => ['partial', 'failed'].includes(s)), 'nothing is left silently looping');
@@ -88,4 +88,67 @@ test('R5 contract: the catalog is verbatim and provenance-tagged; a secret-beari
   const draft = draftFromSelections({ findings: [{ capability: 'FRAMING', status: 'observed', claim: 'c', evidence: [{ quote_id: 'q0' }], assistance: 'assisted' }, { capability: 'FRAMING', status: 'observed', claim: 'duplicate', evidence: [{ quote_id: 'q2' }], assistance: 'unknown' }], next_experiment: 'x' }, CANDIDATE_CAPABILITY_V1, { rubric: 'r', evaluator: 'e' }, built);
   assert.deepEqual(draft.findings.map((f) => f.capability), CANDIDATE_CAPABILITY_V1.capabilities.map((c) => c.key)); assert.equal(draft.findings[0].claim, 'c');
   assert.match(systemPrompt(CANDIDATE_CAPABILITY_V1), /점수·등급·순위/);
+});
+
+// ── follow-up review (Codex, 2026-09-19): a job that cannot run must not block the jobs behind it ──
+const jobsOf = (f) => f.db.prepare("SELECT student_id,state,evaluator,rubric,capability_model,reason,lease_generation,draft_digest<>'' AS drafted FROM classroom_report_jobs WHERE state<>'missing' ORDER BY created_at,student_id").all().map((r) => ({ ...r }));
+test('queue: evaluator OFF → ON. The earlier evaluator=none job is closed as superseded (never rewritten), each learner is evaluated once, repeats add nothing', async (t) => {
+  const f = await fixture(t, { configured: false, inputs: [record] }); await f.advance();
+  assert.deepEqual(jobsOf(f).map((j) => [j.student_id, j.state, j.evaluator]), [['student-a', 'queued', 'none']]);
+  f.env.HPS_CLASSROOM_EVALUATOR = 'service-anthropic'; f.env.ANTHROPIC_API_KEY = 'synthetic-not-a-key'; const calls = []; setEvaluatorTransport(careful(calls));
+  const late = (await f.pair('A2', 1, 2)).conn.json; await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: true, purpose: 'class_report', notice_version: 'notice-v1' }, late.credential);
+  assert.equal((await f.uploadSnapshotAs(late, f.batch, 1, record)).status, 404, 'precondition: a learner who was not asked by this batch cannot upload into it');
+  const steps = []; for (let i = 0; i < 4; i++) { const r = await f.advance(); steps.push([r.json.step?.state ?? null, r.json.more, r.json.reprepared]); }
+  assert.deepEqual(steps, [['partial', false, 1], [null, false, 0], [null, false, 0], [null, false, 0]]); assert.equal(calls.length, 1);
+  const jobs = jobsOf(f); assert.deepEqual(jobs.map((j) => [j.state, j.evaluator, j.drafted]), [['superseded', 'none', 0], ['partial', EVALUATOR_REVISION, 1]]);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM ops_audit WHERE action='report_jobs_reprepared'").get().n, 1, 'the re-preparation is on the audit trail');
+});
+test('queue: Codex reproduction — a=none job first, evaluator configured, b arrives. Both are evaluated once; a is not retried forever', async (t) => {
+  const f = await localOps(); t.after(() => { setEvaluatorTransport(undefined); f.close(); });
+  await f.freeze(); await f.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true, ops_reports: true } });
+  const a = (await f.pair('A1', 1, 1)).conn.json, b = (await f.pair('A2', 1, 2)).conn.json; for (const c of [a, b]) await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: true, purpose: 'class_report', notice_version: 'notice-v1' }, c.credential);
+  const batch = (await f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: 1, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false })).json.batch.id, advance = () => f.request(f.base + '/report-batches/' + batch + '/advance', 'POST', {});
+  await f.uploadSnapshotAs(a, batch, 1, record); await advance();
+  f.env.HPS_CLASSROOM_EVALUATOR = 'service-anthropic'; f.env.ANTHROPIC_API_KEY = 'synthetic-not-a-key'; const calls = []; setEvaluatorTransport(careful(calls)); await f.uploadSnapshotAs(b, batch, 1, record);
+  const more = []; for (let i = 0; i < 5; i++) more.push((await advance()).json.more);
+  assert.deepEqual(more, [true, false, false, false, false]); assert.equal(calls.length, 2, 'one evaluation per learner');
+  assert.deepEqual(jobsOf(f).filter((j) => j.state !== 'superseded').map((j) => [j.student_id, j.state, j.lease_generation]).sort(), [['student-a', 'partial', 1], ['student-b', 'partial', 1]]);
+});
+test('queue: an evaluator/rubric VERSION change re-prepares only never-evaluated jobs; a draft that exists is not re-evaluated or overwritten', async (t) => {
+  const f = await fixture(t), calls = []; setEvaluatorTransport(careful(calls)); await f.advance(); // student-a evaluated under the current version
+  const before = jobsOf(f); assert.deepEqual(before.map((j) => j.state).sort(), ['partial', 'queued']);
+  // Simulate the older pin on both rows (as if the Service had moved from :0 to :1 since they were created).
+  f.db.prepare("UPDATE classroom_report_jobs SET evaluator='service-anthropic:0',job_key=job_key||':v0'").run(); /* rows as an older Service version would have created them: their key pins that version */ const digest = f.db.prepare("SELECT draft_digest d FROM classroom_report_jobs WHERE state='partial'").get().d;
+  for (let i = 0; i < 3; i++) await f.advance();
+  const after = jobsOf(f); assert.equal(calls.length, 2, 'only the never-evaluated learner is evaluated under the new version');
+  assert.deepEqual(after.map((j) => [j.state, j.evaluator]).sort(), [['partial', 'service-anthropic:0'], ['partial', EVALUATOR_REVISION], ['superseded', 'service-anthropic:0']].sort());
+  assert.equal(f.db.prepare("SELECT draft_digest d FROM classroom_report_jobs WHERE evaluator='service-anthropic:0' AND state='partial'").get().d, digest, 'the existing draft and its version pin are untouched');
+});
+test('queue: a legacy seven-axis job in front does not block six-capability jobs, and is never evaluated by the Service path', async (t) => {
+  const f = await fixture(t), calls = []; setEvaluatorTransport(careful(calls));
+  assert.equal((await f.request(f.B + '/jobs', 'POST', { capability_model: 'legacy-seven-assets', rubric: 'hain7-studio-signal-1.0.0', evaluator: 'hain7-replay' })).status, 201);
+  f.db.prepare("UPDATE classroom_report_jobs SET created_at=1 WHERE capability_model='legacy-seven-assets'").run(); // oldest in the queue
+  let last; for (let i = 0; i < 4; i++) last = (await f.advance()).json;
+  assert.equal(calls.length, 0, 'the verified inputs were consumed by the legacy jobs; nothing six-capability exists to evaluate'); assert.deepEqual([last.more, last.needs_other_engine], [false, 2]);
+  assert.ok(jobsOf(f).every((j) => j.capability_model === 'legacy-seven-assets' && j.state === 'queued' && j.lease_generation === 0), 'the Service never leased a job it cannot run');
+});
+test('queue: provider trouble pauses THAT job (30 s, 2 min, …) — the next learner runs now; two callers never evaluate the same job; after 3 tries it fails visibly', async (t) => {
+  const f = await fixture(t), calls = []; let failFor = 'first';
+  setEvaluatorTransport(async (request, signal) => { calls.push(request); if (failFor === 'first' && calls.length === 1) return new Response('busy', { status: 503 }); if (failFor === 'always') return new Response('busy', { status: 503 }); return careful([])(request, signal); });
+  const [x, y] = await Promise.all([f.advance(), f.advance()]); // two tabs / two runners at once
+  const states = [x.json.step?.state, y.json.step?.state].sort(); assert.deepEqual(states, ['partial', 'queued'], 'one paused on 503, the other learner evaluated — by different callers, different jobs');
+  const third = (await f.advance()).json; assert.deepEqual([third.step, third.more], [null, false]); assert.ok(third.retry_after_ms > 0 && third.retry_after_ms <= 30_000, 'the page is told when to come back instead of spinning: ' + third.retry_after_ms);
+  assert.equal(calls.length, 2); const paused = f.db.prepare('SELECT job_id,attempts,next_attempt_at,last_reason FROM classroom_report_job_attempts').get(); assert.deepEqual([paused.attempts, paused.last_reason], [1, 'evaluator_provider_503']);
+  // fake clock: move the pause into the past, keep failing → 2 min pause, then a visible failure on the third try
+  failFor = 'always'; const due = () => f.db.prepare('UPDATE classroom_report_job_attempts SET next_attempt_at=1').run();
+  due(); assert.equal((await f.advance()).json.step.reason, 'evaluator_provider_503'); const second = f.db.prepare('SELECT attempts,next_attempt_at n FROM classroom_report_job_attempts').get(); assert.equal(second.attempts, 2); assert.ok(second.n - Date.now() > 100_000, 'the second pause is longer than the first');
+  due(); const final = (await f.advance()).json; assert.deepEqual([final.step.state, final.step.reason, final.more, final.retry_after_ms], ['failed', 'evaluator_provider_503', false, null]);
+  assert.deepEqual(jobsOf(f).map((j) => j.state).sort(), ['failed', 'partial']);
+});
+test('queue: the restricted runner is only handed what it said it can run', async (t) => {
+  const f = await fixture(t, { configured: false, inputs: [record] }); await f.request(f.B + '/jobs', 'POST', {}); // evaluator=none job
+  const runner = (await f.request(f.B + '/runner-grants', 'POST', {})).json.runner_credential, claim = (can) => f.request('/v1/classroom/ops/runner/claim', 'POST', can ? { can } : {}, runner);
+  assert.equal((await claim({ service: true, legacy: false, local: false })).json.job, null, 'no Service evaluator configured → a service-only runner gets nothing, and does not spin on it');
+  assert.equal((await claim({ service: false, legacy: true, local: false })).json.job, null);
+  const got = (await claim({ service: true, legacy: false, local: true })).json.job; assert.equal(got.evaluator, 'none', 'a runner with its own evaluator takes the job pinned to no Service evaluator');
 });

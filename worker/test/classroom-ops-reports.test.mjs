@@ -88,9 +88,10 @@ try {
     f.db.prepare("UPDATE classroom_report_jobs SET state='queued',reason='',lease_owner='',lease_expires_at=0,draft_digest='' WHERE state<>'missing' AND capability_model='candidate-capability-v1'").run();
     const fetchImpl = (url, init) => f.app.fetch(new Request(String(url).replace('https://runner.test', 'https://service.test'), init), f.env, { waitUntil() {} }); const lines = [];
     const drafts = () => [...f.r2.keys()].filter((k) => k.endsWith('/draft.json')).length, before = drafts();
-    const a = await runOnce({ service: 'https://runner.test', credential: runner, fetchImpl, log: (l) => lines.push(l) }); assert.deepEqual([a.claimed, a.status, a.state, a.reason], [true, 409, 'queued', 'evaluator_not_configured']);
+    // No Service evaluator and no local one: the runner is NOT handed the job (so it cannot spin on it or block others), and it is told why work waits.
+    const a = await runOnce({ service: 'https://runner.test', credential: runner, fetchImpl, log: (l) => lines.push(l) }); assert.equal(a.claimed, false); assert.deepEqual([a.waiting.needs_local_evaluator > 0, a.waiting.service_evaluator_configured], [true, false]); assert.match(lines.join('\n'), /the Service evaluator is NOT configured/);
     assert.equal(drafts(), before, 'no draft was written'); const reviewer = await f.teacher('reviewer', ['observe', 'review']);
-    const waiting = (await f.request(B + '/reports', 'GET', undefined, reviewer)).json.jobs.find((j) => j.id === a.job); assert.deepEqual([waiting.state, waiting.reason, waiting.draft_digest], ['queued', 'evaluator_not_configured', '']);
+    const waiting = (await f.request(B + '/reports', 'GET', undefined, reviewer)).json.jobs.filter((j) => j.capability_model === 'candidate-capability-v1' && j.state === 'queued'); assert.ok(waiting.length > 0 && waiting.every((j) => j.draft_digest === '' && j.lease_owner === ''), 'still queued, never leased, no empty draft');
     const b = await runOnce({ service: 'https://runner.test', credential: runner, fetchImpl, log: (l) => lines.push(l), evaluate: async () => { throw new Error('boom /Users/x'); } }); assert.deepEqual([b.state, b.status], ['failed', 422]);
     assert.ok(!lines.join().includes(runner) && !lines.join().includes('/Users'));
     // A locally supplied evaluator that finds nothing is an honest "not seen yet" — and it is reviewed like any draft.
@@ -110,10 +111,12 @@ try {
     // An analysis with no learner evidence maps to "not seen yet" on all seven axes; and nothing can smuggle a 7→6 conversion in.
     const none = legacyDraftFromAnalysis({ axes: {}, evidence_index: [], session_fingerprint: 'a'.repeat(64), review: { status: 'complete' } }, { rubric: 'r', evaluator: 'e' }, '', 'observation-report/1'); assert.ok(none.findings.every((x) => x.status === 'unobserved')); assert.equal(none.legacy.marker_review_complete, true);
     assert.equal(validateDraft({ ...draft, derived_from_legacy: true }, { capability_model: 'legacy-seven-assets', rubric: 'hain7-studio-signal-1.0.0', evaluator: 'hain7-replay', input_coverage: 'sequence_unavailable' }, sample).reason, 'legacy_conversion');
-    // Without the adapter a legacy job fails as "engine not configured"; it is never evaluated by the six-capability path.
+    // Without the adapter a legacy job is not handed out at all; it is never evaluated by the six-capability path.
     f.db.prepare("UPDATE classroom_report_jobs SET state='queued',reason='',lease_owner='',lease_expires_at=0,draft_digest='',created_at=1 WHERE capability_model='legacy-seven-assets'").run();
     const fetchImpl = (url, init) => f.app.fetch(new Request(String(url).replace('https://runner.test', 'https://service.test'), init), f.env, { waitUntil() {} });
-    const r = await runOnce({ service: 'https://runner.test', credential: runner, fetchImpl, log: () => {} }); assert.deepEqual([r.state, r.reason], ['failed', 'legacy_engine_not_configured']);
+    f.db.prepare("UPDATE classroom_report_jobs SET state='approved' WHERE state='queued' AND capability_model<>'legacy-seven-assets'").run(); // leave only the legacy job waiting
+    const r = await runOnce({ service: 'https://runner.test', credential: runner, fetchImpl, log: () => {} }); assert.equal(r.claimed, false, 'a runner without the legacy engine is never handed a legacy job'); assert.ok(r.waiting.needs_legacy_engine >= 1);
+    assert.equal(f.db.prepare("SELECT state FROM classroom_report_jobs WHERE capability_model='legacy-seven-assets' ORDER BY created_at LIMIT 1").get().state, 'queued', 'it waits for the right engine instead of being failed or evaluated by the wrong one');
   });
   console.log(`${count} remote classroom report controls passed`);
 } finally { f.close(); }

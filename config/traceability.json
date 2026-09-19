@@ -2141,6 +2141,9 @@
         },
         {
           "path": "e2e/classroom/report-page.mjs"
+        },
+        {
+          "path": "worker/migrations/0019-classroom-report-attempts.sql"
         }
       ]
     },

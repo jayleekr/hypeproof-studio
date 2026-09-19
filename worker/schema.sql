@@ -902,3 +902,11 @@ CREATE TABLE IF NOT EXISTS classroom_snapshot_bindings (
  created_at INTEGER NOT NULL,
  PRIMARY KEY(batch_id,student_id,revision)
 );
+-- ── migrations/0019-classroom-report-attempts.sql (remote classroom operations, report job retry pacing, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_report_job_attempts (
+ job_id TEXT PRIMARY KEY,
+ attempts INTEGER NOT NULL DEFAULT 0,
+ next_attempt_at INTEGER NOT NULL DEFAULT 0,
+ last_reason TEXT NOT NULL DEFAULT '',
+ updated_at INTEGER NOT NULL
+);
