@@ -16,8 +16,8 @@ import { bearer, verifyOpsCredential } from '../lib/tokens';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { getProfile } from '../profiles';
 import { isMinorCohort } from '../lib/moderation';
-import { COMMAND_TTL_MS, ID_RE, UUIDISH_RE, parseFlags, sha256Hex } from '../lib/classroom-ops';
-import { CONSENT_BASES, PURPOSES, SNAPSHOT_FILES, UPLOAD_GRACE_MS, eventCoverage, sha256Bytes, snapshotKey, validateManifest } from '../lib/classroom-collect';
+import { COMMAND_TTL_MS, ID_RE, UUIDISH_RE, parseFlags, parseLesson, sha256Hex } from '../lib/classroom-ops';
+import { CONSENT_BASES, PURPOSES, SNAPSHOT_FILES, UPLOAD_GRACE_MS, attributionProblem, eventCoverage, finalLineSha, sha256Bytes, snapshotKey, validateManifest } from '../lib/classroom-collect';
 import { opsEnabled } from './classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -46,16 +46,17 @@ classroomCollectOperator.post('/classroom/consents', async (c) => {
 
 // ── learner device (operations credential) ──
 export const classroomCollectApp = new Hono<{ Bindings: Env; Variables: { grant: Grant } }>();
-type Grant = { id: string; class_run_id: string; cohort_id: string; profile_id: string; seat_id: string; seat_revision: number; student_id: string; state: string; expires_at: number; flags_json: string; run_ends: number };
+type Grant = { id: string; class_run_id: string; cohort_id: string; profile_id: string; seat_id: string; seat_revision: number; student_id: string; state: string; expires_at: number; flags_json: string; lesson_json: string; run_starts: number; run_ends: number };
 classroomCollectApp.use('*', async (c, next) => {
   c.header('cache-control', 'no-store');
   if (!opsEnabled(c.env)) return c.json({ error: 'classroom operations are not enabled', reason: 'ops_disabled' }, 404);
   const credential = bearer(c.req.header('authorization')), id = credential ? await verifyOpsCredential(credential, c.env.HPS_SIGNING_SECRET) : null;
-  const g = id ? await c.env.HPS_DB.prepare("SELECT g.*,o.flags_json,o.ends_at AS run_ends FROM ops_grants g JOIN class_run_ops o ON o.class_run_id=g.class_run_id WHERE g.id=? AND g.kind='connection'").bind(id).first<Grant>() : null;
+  const g = id ? await c.env.HPS_DB.prepare("SELECT g.*,o.flags_json,o.lesson_json,o.starts_at AS run_starts,o.ends_at AS run_ends FROM ops_grants g JOIN class_run_ops o ON o.class_run_id=g.class_run_id WHERE g.id=? AND g.kind='connection'").bind(id).first<Grant>() : null;
   if (!g) return c.json({ error: 'operations credential required', reason: 'ops_credential_invalid' }, 401);
   const now = Date.now();
   // Upload-only afterlife: past the grant's normal expiry this credential may still finish uploading the
-  // learner's OWN requested snapshot until the batch window closes. It can do nothing else (sync refuses it).
+  // learner's OWN snapshot for a batch that asked for it BEFORE the expiry (new batches skip expired grants),
+  // until the batch window closes. It can withdraw consent; it cannot give new consent, sync or take commands.
   if (g.state !== 'active') return c.json({ error: 'operations connection was closed', reason: 'ops_grant_revoked' }, 401);
   if (g.expires_at <= now && now > g.run_ends + UPLOAD_GRACE_MS) return c.json({ error: 'operations connection expired', reason: 'ops_grant_expired' }, 401);
   if (!parseFlags(g.flags_json).ops_collect) return c.json({ error: 'collection is off for this run', reason: 'ops_collect_disabled' }, 403);
@@ -75,6 +76,8 @@ classroomCollectApp.post('/consent', async (c) => {
     ]);
     return c.json({ consent: false, note: 'nothing further will be collected for this class; copies already delivered cannot be recalled' });
   }
+  // Past its normal expiry this credential only finishes an upload that was already authorized: no new consent, no new scope.
+  if (g.expires_at <= now) return c.json({ error: 'this connection can only finish an upload that was already requested', reason: 'upload_only' }, 403);
   const profile = getProfile(g.profile_id);
   // A child profile can never opt itself in. Fail closed when the profile is unknown.
   if (!profile || isMinorCohort(profile)) return c.json({ error: 'a verified guardian consent is required for this class', reason: 'guardian_consent_required' }, 403);
@@ -132,19 +135,34 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   const m = validateManifest(await json(c)); if (!m.ok) return c.json({ error: m.error, reason: 'manifest_invalid' }, 400);
   const snap = await db.prepare('SELECT state,receipt_id,manifest_digest,integrity,coverage FROM classroom_snapshots WHERE batch_id=? AND student_id=? AND revision=?').bind(item.batch_id, g.student_id, revision).first<Record<string, string>>();
   if (!snap) return c.json({ error: 'nothing was uploaded for this revision', reason: 'manifest_only' }, 409);
-  const digest = await sha256Hex(JSON.stringify(m.value.files.map((f) => [f.name, f.bytes, f.sha256]).sort()));
+  // The binding is part of what was sealed: the same bytes under another binding are another manifest.
+  const digest = await sha256Hex(JSON.stringify([m.value.files.map((f) => [f.name, f.bytes, f.sha256]).sort(), m.value.binding ?? null]));
   if (snap.state === 'sealed') return snap.manifest_digest === digest ? c.json({ receipt_id: snap.receipt_id, manifest_digest: digest, integrity: snap.integrity, coverage: snap.coverage, replay: true }) : c.json({ error: 'this revision is sealed with a different manifest', reason: 'revision_sealed' }, 409);
   // Re-hash what the Service actually holds. The device's claim is only what it is compared against.
-  let coverage = 'sequence_unavailable', problem = '';
+  let coverage = 'sequence_unavailable', problem = '', malformed = 0, metaText = '', sessionId = '';
   for (const f of m.value.files) {
     const obj = await c.env.HPS_TRACES.get(snapshotKey(g.cohort_id, g.class_run_id, g.student_id, item.batch_id, revision, f.name));
     if (!obj) { problem = 'file_missing'; break; }
     const bytes = await obj.arrayBuffer();
     if (bytes.byteLength !== f.bytes || (await sha256Bytes(bytes)) !== f.sha256) { problem = 'hash_mismatch'; break; }
-    if (f.name === 'events.jsonl') { const cov = eventCoverage(new TextDecoder().decode(bytes), { student: g.student_id }); if (cov.foreign) { problem = 'foreign_events'; break; } coverage = cov.coverage; }
+    if (f.name === 'session.meta.json') metaText = new TextDecoder().decode(bytes);
+    if (f.name === 'events.jsonl') {
+      const text = new TextDecoder().decode(bytes), range = m.value.binding?.range, cov = eventCoverage(text, { student: g.student_id }, range);
+      if (cov.foreign) { problem = 'foreign_events'; break; }
+      // The declared final event must be the one the Service sees last; a different tail is another extent.
+      if (range && (cov.range_problem === 'line_count_mismatch' || cov.range_problem === 'declared_extent_mismatch' || range.final_line_sha256 !== (await finalLineSha(text)))) { problem = 'range_mismatch'; break; }
+      coverage = cov.coverage; malformed = cov.malformed;
+    }
+  }
+  // Identity lives in the spool metadata. A record of another learner, cohort, profile, class run or activity —
+  // or one that names nobody — is held apart; it never becomes this seat's verified report input.
+  if (!problem) {
+    const lesson = parseLesson(g.lesson_json);
+    problem = attributionProblem(metaText, m.value.binding, { student: g.student_id, cohort: g.cohort_id, profile: g.profile_id, class_run_id: g.class_run_id, batch_id: item.batch_id, seat_id: g.seat_id, purpose: item.purpose, notice_version: item.notice_version, activity: lesson ? { course_id: lesson.course_id, version: lesson.version } : null, run_starts_at: g.run_starts, upload_until: item.upload_until });
+    if (!problem) sessionId = String(JSON.parse(metaText).session_id);
   }
   if (problem) {
-    const state = problem === 'foreign_events' ? 'quarantined' : 'incomplete';
+    const state = ['file_missing', 'hash_mismatch'].includes(problem) ? 'incomplete' : 'quarantined';
     await db.batch([
       db.prepare("UPDATE classroom_collect_items SET state=?,reason=?,updated_at=? WHERE batch_id=? AND seat_id=? AND state<>'verified'").bind(state, problem, now, item.batch_id, item.seat_id),
       audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_' + state, { batch_id: item.batch_id, revision, problem }, now),
@@ -157,6 +175,7 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
     db.prepare("UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading'").bind(digest, coverage, receipt, now, item.batch_id, g.student_id, revision),
     // A later verified revision is a NEW input revision. It never silently replaces what a report was built from.
     db.prepare("UPDATE classroom_collect_items SET state='verified',reason='',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=?").bind(digest, coverage, receipt, inputRevision, now, item.batch_id, item.seat_id),
+    db.prepare('INSERT INTO classroom_snapshot_bindings(batch_id,student_id,revision,class_run_id,cohort_id,profile_id,seat_id,grant_id,consent_id,spool_session_id,attribution,activity_json,range_json,malformed_lines,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING').bind(item.batch_id, g.student_id, revision, g.class_run_id, g.cohort_id, g.profile_id, g.seat_id, g.id, item.consent_id ?? '', sessionId, m.value.binding ? 'bound' : 'metadata_run', JSON.stringify(m.value.binding?.activity ?? null), JSON.stringify(m.value.binding?.range ?? null), malformed, now),
     db.prepare("INSERT INTO classroom_job_outbox(kind,dedupe_key,payload_json,created_at) VALUES('report_input',?,?,?) ON CONFLICT(kind,dedupe_key) DO NOTHING").bind(`${item.batch_id}:${g.student_id}:${digest}`, JSON.stringify({ batch_id: item.batch_id, class_run_id: g.class_run_id, student_id: g.student_id, snapshot_revision: revision, input_revision: inputRevision, manifest_digest: digest, coverage }), now),
     audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage }, now),
   ]);
@@ -194,8 +213,8 @@ classroomCollectTeacher.post(root, bodyLimit({ maxSize: 16 * 1024 }), async (c) 
   const prior = await db.prepare('SELECT id FROM classroom_collect_batches WHERE class_run_id=? AND idempotency_key=?').bind(run.class_run_id, b.idempotency_key).first<{ id: string }>();
   if (prior) return c.json(await batchView(db, run.class_run_id, prior.id), 200);
   // The batch is the class-run roster snapshot — never the gallery, never "whoever uploaded something".
-  const seats = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,s.student_id,(SELECT g.id||'|'||g.connection_epoch FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' AND g.state='active' ORDER BY g.created_at DESC LIMIT 1) AS conn,
- (SELECT 1 FROM classroom_collect_tombstones t WHERE t.class_run_id=s.class_run_id AND t.student_id=s.student_id) AS withdrawn FROM class_run_seats s WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(run.class_run_id).all()).results ?? []) as Array<{ seat_id: string; seat_revision: number; student_id: string; conn: string | null; withdrawn: number | null }>;
+  const seats = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,s.student_id,(SELECT g.id||'|'||g.connection_epoch FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' AND g.state='active' AND g.expires_at>?2 ORDER BY g.created_at DESC LIMIT 1) AS conn,
+ (SELECT 1 FROM classroom_collect_tombstones t WHERE t.class_run_id=s.class_run_id AND t.student_id=s.student_id) AS withdrawn FROM class_run_seats s WHERE s.class_run_id=?1 AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(run.class_run_id, now).all()).results ?? []) as Array<{ seat_id: string; seat_revision: number; student_id: string; conn: string | null; withdrawn: number | null }>;
   const profile = getProfile(run.profile_id), minor = !profile || isMinorCohort(profile), id = crypto.randomUUID(), commandId = crypto.randomUUID();
   const stmts = [db.prepare('INSERT INTO classroom_collect_batches(id,class_run_id,cohort_id,profile_id,roster_revision,purpose,notice_version,dry_run,idempotency_key,created_by,created_at,upload_until) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, run.class_run_id, run.cohort_id, run.profile_id, run.roster_revision, b.purpose, b.notice_version, b.dry_run ? 1 : 0, b.idempotency_key, auth.payload.u, now, Math.max(run.ends_at, now) + UPLOAD_GRACE_MS)];
   const ask: typeof seats = [];
