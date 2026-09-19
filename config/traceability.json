@@ -2023,6 +2023,21 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/classroom-ops-commands.smoke.mjs"
+        },
+        {
+          "path": "worker/migrations/0013-classroom-ops-control.sql"
+        },
+        {
+          "path": "worker/src/lib/classroom-ops-control.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-control.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/runtimeReset.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/runtime-reset.smoke.mjs"
         }
       ]
     },

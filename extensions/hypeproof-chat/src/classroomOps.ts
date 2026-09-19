@@ -190,7 +190,7 @@ export class OpsOutbox {
 export interface SyncResponse {
   status: number;
   /** Parsed JSON body when there was one. */
-  body?: { reason?: string; poll_after_ms?: number; connection_epoch?: number; ack?: { boot_id: string; contiguous_seq: number; missing: Array<[number, number]> }; commands?: unknown[]; receipt_acks?: unknown[] };
+  body?: { reason?: string; poll_after_ms?: number; connection_epoch?: number; ack?: { boot_id: string; contiguous_seq: number; missing: Array<[number, number]> }; commands?: unknown[]; receipt_acks?: unknown[]; control?: { paused: boolean; control_revision: number } };
   retryAfterSec?: number;
 }
 export interface SyncDeps {
@@ -198,7 +198,9 @@ export interface SyncDeps {
   post(body: unknown, timeoutMs: number): Promise<SyncResponse>;
   outbox: OpsOutbox;
   appInstanceId: string;
-  sample(): { idle_ms: number; runtime_status?: RuntimeStatus };
+  sample(): { idle_ms: number; runtime_status?: RuntimeStatus; control_revision?: number };
+  /** R3 — the run's pause state, to be applied to local new-run admission. Absent on an older Service. */
+  onControl?(control: { paused: boolean; control_revision: number }): void;
   now(): number;
   random(): number;
   setTimeout(fn: () => void, ms: number): unknown;
@@ -232,6 +234,7 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
         await deps.outbox.acked(r.body.ack.boot_id, r.body.ack.contiguous_seq);
         if (typeof r.body.poll_after_ms === "number") pollMs = Math.min(Math.max(r.body.poll_after_ms, 1000), 120000);
         if (typeof r.body.connection_epoch === "number") deps.onEpoch?.(r.body.connection_epoch);
+        if (r.body.control && typeof r.body.control.paused === "boolean") deps.onControl?.(r.body.control);
         next = deps.outbox.pending ? 1000 : pollMs;
         if (deps.commands) {
           // Epoch first, then the Service's answers, then new work: a command never runs on a stale epoch or an unanswered ask.
