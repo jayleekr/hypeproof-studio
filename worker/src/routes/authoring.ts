@@ -8,7 +8,10 @@ import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-au
 import { getProfile } from "../profiles";
 import { isModuleVersion, makeModuleDoc, sha256Hex } from "../lib/modules";
 import { validateSessionDesign } from "../lib/session-design";
-import { checkLessonPedagogy, blockingPedagogyFindings } from "../lib/lesson-pedagogy";
+// #1151 — 확정 직전 판정은 이 모듈 하나가 소유한다. 확정 경로와 읽기 전용 점검
+// 경로가 **같은 함수**를 부른다. 두 번째 구현이 생기면 강사가 "점검은 초록인데
+// 확정은 막히는" 화면을 보게 된다.
+import { assessDraft, reviewedTemplate, templateAdmission, TEMPLATE_REQUIRED, TEMPLATE_NOT_REVIEWED } from "../lib/draft-assessment";
 import { readLesson } from '../lib/lesson-delivery';
 import { issue } from '../lib/tokens';
 import { getRoster, getActiveSession } from '../lib/kv';
@@ -23,13 +26,8 @@ const validId = (s: string) => /^[a-zA-Z0-9_-]{1,128}$/.test(s);
 // #1006 IC-02 — the single admission rule shared by save and new freeze. An independent
 // course (persisted marker) may use only a profile that is currently a reviewed execution
 // template; losing the flag blocks further binding and new versions, never prior versions.
-const reviewedTemplate = (id: string) => getProfile(id)?.execution_template === true;
-const templateAdmission = (independent: boolean, profileId: string) =>
-  independent && profileId !== '' && !reviewedTemplate(profileId) ? 'template_not_reviewed' : null;
 const openingBlockedBy = (d: Draft) => !d.profile_id ? ['template_required'] : templateAdmission(!!d.independent, d.profile_id) ? ['template_not_reviewed'] : [];
 const draftView = (d: Draft) => ({ course_id: d.course_id, profile_id: d.profile_id || null, independent: !!d.independent, revision: d.revision, content: JSON.parse(d.content_json), updated_at: d.updated_at, opening_blocked_by: openingBlockedBy(d) });
-const TEMPLATE_REQUIRED = { error: 'select an execution template first', reason: 'template_required' };
-const TEMPLATE_NOT_REVIEWED = { error: 'independent course requires a reviewed execution template', reason: 'template_not_reviewed' };
 export const authoring = new Hono<Bindings>();
 
 const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
@@ -42,7 +40,9 @@ const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
   if (!validId(c.req.param("course")! ?? "")) return c.json({ error: "invalid course id" }, 400);
   return next();
 };
-for (const path of [root, root + "/models/:profile", root + "/features/:profile", root + "/versions/:version", root + '/versions/:version/participants']) {
+// 인증·본문 제한은 **경로를 손으로 나열**해서 건다. 새 라우트를 여기 등록하지 않으면
+// `c.get("author")` 가 undefined 라 핸들러가 500 으로 죽는다(실제로 그렇게 났다).
+for (const path of [root, root + "/assessment", root + "/models/:profile", root + "/features/:profile", root + "/versions/:version", root + '/versions/:version/participants']) {
   authoring.use(path, authenticate);
   authoring.use(path, bodyLimit({ maxSize: 128 * 1024, onError: (c) => c.json({ error: "request too large" }, 413) }));
 }
@@ -133,6 +133,45 @@ authoring.get(root, async (c) => {
   return c.json(draftView(d));
 });
 
+/**
+ * 확정을 **누르기 전에** 무엇이 막는지 돌려준다 (#1151, RUN-02).
+ *
+ * 읽기다 — 아무것도 저장하지 않고 초안도 고치지 않는다. 확정 경로와 **같은
+ * `assessDraft`** 를 부르므로 두 화면이 갈라질 수 없다. 새 라우트가 판정을 다시
+ * 구현하면 확정이 바뀔 때 이쪽이 안 따라오고, 강사는 "점검은 초록인데 확정은
+ * 막히는" 화면을 보게 된다 — 판정이 없는 것보다 나쁜 실패다.
+ *
+ * 권한은 다른 저작 경로와 같다: issuer Bearer + 이 강의의 소유 확인. 없는 강의와
+ * 남의 강의는 똑같이 404 다(존재 여부를 흘리지 않는다).
+ */
+authoring.get(root + "/assessment", async (c) => {
+  const d = await readDraft(c.env.HPS_DB, c.req.param("cohort")!, c.req.param("course")!);
+  if (!d || !owns(d, c.get("author"))) return c.json({ error: "course not found" }, 404);
+  const content = JSON.parse(d.content_json);
+  const assessed = assessDraft({ profileId: d.profile_id, independent: !!d.independent, content });
+  return c.json({
+    revision: d.revision,
+    blocked: assessed.findings.length > 0,
+    // 확정 경로가 내보낼 본문을 그대로 펼친다 — 화면이 같은 문구를 쓴다.
+    findings: assessed.findings.map(f => ({ check: f.check, ...f.body })),
+    // 막지 않는 판정(warn·skip)도 같이 준다. 통과를 보고하면서 미확인을 숨기지 않는다.
+    // 형태 검증 전에 멈췄으면 계산 자체를 안 했으므로 null 이다.
+    pedagogy: assessed.pedagogy,
+    /**
+     * **이 화면이 대신 봐 줄 수 없는 것.** 모델 공급자 설정은 확정 경로에서
+     * `modelBinding(c.env, …)` 이 시도할 때만 드러난다(409). 여기서 읽으면 점검이
+     * 환경을 읽게 되고 "저장하지 않는다"는 약속 바깥으로 나간다. 그래서 빼되,
+     * **뺐다는 사실을 숨기지 않는다** — 비어 있으면 통과가 아니라 미확인이다.
+     */
+    not_checked: content.model
+      // 문구는 관문의 skip 판정과 **같은 문법**을 쓴다("…확인하지 못했습니다.
+      // 통과가 아니라 미확인입니다"). 두 화면이 미확인을 다르게 부르면 강사가
+      // 다른 것으로 읽는다.
+      ? [{ check: 'model_provider_binding', message: '모델 공급자 설정은 여기서 확인하지 못했습니다. 확정할 때 확인합니다 — 통과가 아니라 미확인입니다.' }]
+      : [],
+  });
+});
+
 authoring.put(root, async (c) => {
   let b: any;
   try { b = await c.req.json(); } catch { return c.json({ error: "invalid JSON" }, 400); }
@@ -212,31 +251,31 @@ authoring.put(root + "/versions/:version", async (c) => {
     return c.json({ module: JSON.parse(existing.module_json), source_revision: existing.source_revision, rehearsal: await readRehearsal(c.env.HPS_DB, cohort, course, version), activated: false });
   }
   if (d.revision !== b.expected_revision) return c.json({ error: "revision conflict" }, 409);
-  if (!d.profile_id) return c.json(TEMPLATE_REQUIRED, 409);
-  // Same admission as save. Runs after the `existing` branch above, so already frozen
-  // versions stay readable/idempotent; only a NEW version needs a still-reviewed template.
-  if (templateAdmission(!!d.independent, d.profile_id)) return c.json(TEMPLATE_NOT_REVIEWED, 403);
   const content = JSON.parse(d.content_json);
-  const invalid = validateSessionDesign(content,true);
-  if (invalid) return c.json({ error: invalid }, 400);
-  // 교육 원칙 관문 v0. 형태 검증(위)을 통과한 뒤 설계를 본다. fail이 하나라도 있으면
-  // 확정을 막고 판정 목록 전체를 돌려준다 — 강사가 무엇을 채우면 열리는지 알아야 하므로
-  // 막은 항목만이 아니라 warn·skip까지 함께 보낸다. warn만 있으면 확정은 진행되고
-  // 같은 목록이 성공 응답에 실린다. 400/403/409와 겹치지 않도록 422를 쓴다.
-  const pedagogy = checkLessonPedagogy(content);
-  if (blockingPedagogyFindings(pedagogy).length)
-    return c.json({ error: '수업 설계가 교육 원칙 검사를 통과하지 못했습니다', reason: 'pedagogy_blocked', findings: pedagogy }, 422);
+  // #1151 — 템플릿·형태·교육 원칙·모델/기능 정책 판정은 assessDraft 하나가 소유한다.
+  // 읽기 전용 점검 경로(GET …/assessment)가 같은 함수를 부르므로 두 화면이 갈라질 수
+  // 없다. 여기서 바뀐 것은 **어디서 불리나**뿐이고, 상태코드·reason·문구는 그대로다.
+  const assessed = assessDraft({ profileId: d.profile_id, independent: !!d.independent, content });
+  const blocked = assessed.findings[0];
+  // ⚠️ **이 두 토막을 한 줄로 합치지 마라.** 기능 정책 판정만 모델 **바인딩** 뒤에
+  // 온다 — 리팩터링 전 코드가 그 순서였다. 보기 좋게 `findings[0]` 하나로 모으면
+  // 모델 공급자 미설정(409)이 나야 할 좌석이 기능 정책(403)을 먼저 보게 되고,
+  // 그것은 "판정 내용을 바꾸지 않는다"는 이 작업의 조건을 깬다(#1151).
+  // 모양을 위해 순서를 바꾸는 것이 리팩터링에서 제일 흔한 사고다.
+  if (blocked && blocked.check !== 'feature_policy') return c.json(blocked.body, blocked.status);
   if (content.model) {
-    const profile = getProfile(d.profile_id);
-    if (!profile || validateModelSubset(content.model, profile)) return c.json({ error: 'model is not permitted by the cohort' }, 403);
+    // 바인딩은 판정이 아니라 **저장될 값을 만드는 부수효과**이고 c.env 를 읽는다.
+    // 그래서 판정 모듈 밖, 확정 경로에만 있다(점검은 아무것도 저장하지 않는다).
+    const profile = getProfile(d.profile_id)!;
     try { content.model.binding = modelBinding(c.env, profile, content.model); }
     catch { return c.json({ error: 'model provider is not configured' }, 409); }
   }
+  if (blocked) return c.json(blocked.body, blocked.status);
   if (content.features) {
-    const profile = getProfile(d.profile_id);
-    if (!profile || validateFeatureSubset(content.features, profile)) return c.json({ error: 'feature is not permitted by the cohort' }, 403);
+    const profile = getProfile(d.profile_id)!;
     content.features.binding = featureBinding(profile, content.features);
   }
+  const pedagogy = assessed.pedagogy ?? [];
   const module = await makeModuleDoc({ kind: "session-design", profileId: d.profile_id, version, content });
   // INSERT SELECT checks the revision at the write, not merely at the earlier read.
   await c.env.HPS_DB.prepare(`INSERT INTO authoring_versions (cohort_id,course_id,version,source_revision,module_json)
