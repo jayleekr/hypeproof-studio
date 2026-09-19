@@ -93,6 +93,10 @@ try {
   assert.equal(await row('S01').getAttribute('aria-current'), 'true'); assert.match(await page.locator('#ops-evidence').innerText(), /학생 자기보고/);
   assert.equal(await page.locator('button.primary:visible').count(), 1, 'one primary CTA on the screen'); assert.ok(await page.evaluate(() => { const l = document.getElementById('ops-seats'); return l.scrollHeight > l.clientHeight; }), 'the 30-seat list scrolls inside its own region');
   await page.screenshot({ path: path.join(out, 'wide-1440.png') });
+  // reviewed: the instructor records that they looked at the step the learner said they finished. The learner's status stays as reported.
+  assert.match(await row('S01').innerText(), /build · 제출함 \(학생 자기보고 · 강사 확인 전\)/); await page.getByRole('button', { name: '결과를 확인했어요' }).click();
+  await page.locator('#ops-detail-status').filter({ hasText: '확인 상태를 저장했습니다' }).waitFor(); await row('S01').getByText(/build · 제출함 \(강사 확인함\)/).waitFor();
+  assert.equal(await page.getByRole('button', { name: '결과를 확인했어요' }).isDisabled(), true); assert.match(await page.locator('#ops-evidence').innerText(), /점수·수업 완료·발송 승인이 아닙니다/);
   await page.keyboard.press('Escape'); assert.equal(await page.locator('#ops-detail').isHidden(), true); assert.equal(await page.evaluate(() => document.activeElement?.closest('.ops-seat')?.dataset.seat), 'S01');
   for (const [name, viewport, scale] of [['laptop-1024', { width: 1024, height: 700 }, 1], ['zoom-200', { width: 720, height: 450 }, 2], ['phone-390', { width: 390, height: 800 }, 1]]) {
     const p = await browser.newPage({ viewport, deviceScaleFactor: scale }); await p.goto(origin + '/manage'); await p.locator('#token').fill(local.teacherToken); await p.locator('#cohort').fill(local.cohort); await p.locator('#connect button').first().click(); await p.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await p.locator('#ops-check').click(); await p.locator('#ops-seats .ops-seat').nth(29).waitFor();
@@ -103,7 +107,7 @@ try {
     for (const b of await p.locator('#ops-detail button:visible').all()) { const box = await b.boundingBox(); assert.ok(box.height >= 44, name + ': 44px targets'); }
     await p.screenshot({ path: path.join(out, name + '.png') }); await p.locator('#ops-backdrop').click({ position: { x: 5, y: 5 } }).catch(() => p.keyboard.press('Escape')); assert.equal(await p.locator('#ops-detail').isHidden(), true); await p.close();
   }
-  ok('chalk: side pane when wide, drawer at 1024 / 200 % zoom / 390, keyboard open-close, focus return, 44px targets');
+  ok('chalk: side pane when wide, reviewed input, drawer at 1024 / 200 % zoom / 390, keyboard open-close, focus return, 44px targets');
 
   // ── "수업 마무리" once → collected from the real host → evaluated → waiting for review. Nothing is approved or sent. ──
   await host.collectionConsentInteractively(); // the adult learner agrees in the app (modal stub answers "동의")
