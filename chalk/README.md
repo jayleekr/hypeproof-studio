@@ -106,7 +106,7 @@ Removal: remove the page route/import and console link; retain Service drafts an
 
 ## Classroom management and voluntary sharing
 
-`/manage` combines the existing metadata board and a recipient-scoped list of voluntary shares. `/sharing` lets adult participants explicitly select prompt/response/tool-summary/result/verification text, name the instructor, choose expiry, review feedback, confirm resolution and withdraw. Credentials remain in page memory. There is no background capture of full conversations.
+`/manage` combines the existing metadata board and a recipient-scoped list of voluntary shares. `/student/sharing` (old `/sharing` redirects) lets adult participants explicitly select prompt/response/tool-summary/result/verification text, name the instructor, choose expiry, review feedback, confirm resolution and withdraw. Credentials remain in page memory. There is no background capture of full conversations.
 
 The new `/v1/classroom/*` calls and `/admin/cohorts/:cohort/classroom/*` reads/writes are forwarded to the Service, which owns identity, D1 writes, expiry and audit. Existing `/board` is still metadata-only and existing raw `/logs` retrieval is still operator-only. Apply Service migration 0003 before exposing the new API; do not treat a Chalk or PRD deployment as Service deployment.
 

@@ -101,8 +101,15 @@ app.get("/board", () => page(boardHtml));
 app.get("/authoring", () => page(authoringHtml));
 app.get("/manage", () => page(manageHtml));
 app.get("/budgets", () => page(budgetsHtml));
-app.get("/sharing", () => page(sharingHtml));
-app.get('/learn', () => page(learnHtml));
+// BASE-01 — 수강생 화면은 /student/ 평면에 둔다. 강사 화면과 주소가 섞여 있으면
+// 메뉴에서 빼도 같은 평면으로 읽히고, 무엇보다 링크를 거는 쪽이 역할을 구분하지
+// 않게 된다. 옛 주소는 **리다이렉트로 살려 둔다** — authoring.html 이 /learn 을
+// 걸고 있는데 그 화면은 시연 중이라 건드리지 않기로 했고(#1145), 문서·외부 링크도
+// 끊지 않는다. 표시 평면의 분리이지 권한 분리가 아니다: 권한은 Service 가 소유한다(ARC-01).
+app.get("/student/sharing", () => page(sharingHtml));
+app.get("/student/learn", () => page(learnHtml));
+app.get("/sharing", (c) => c.redirect("/student/sharing", 301));
+app.get("/learn", (c) => c.redirect("/student/learn", 301));
 app.use('/v1/profile', signingSecretGuard);
 app.get('/v1/profile', forwardInstructorWrite);
 app.use("/v1/classroom/*", signingSecretGuard);

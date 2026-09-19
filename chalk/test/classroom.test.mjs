@@ -8,7 +8,7 @@ globalThis.fetch=async(url,init)=>{calls.push({url,init});return f.app.fetch(new
 const base=`/admin/cohorts/${f.cohort}/classroom/shares`;
 async function request(path,method='GET',body,token=f.teacherToken){return chalk.fetch(new Request('https://chalk.test'+path,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json','cf-access-authenticated-user-email':'forged@example.test','x-hps-operator-secret':'not-forwarded'},body:body===undefined?undefined:JSON.stringify(body)}),env,{waitUntil(){}});}
 try{
- for(const file of ['manage','sharing']){
+ for(const file of ['manage','student/sharing']){
   const r=await request('/'+file);assert.equal(r.status,200);const html=await r.text();assert.match(html,/lang="ko"/);const script=html.match(/<script>([\s\S]*?)<\/script>/)?.[1];assert.ok(script);new Script(script);
   assert.ok(!/localStorage|sessionStorage|\.innerHTML\s*=|insertAdjacentHTML|document\.cookie/.test(script));assert.match(script,/textContent/);assert.match(script,/AbortController/);assert.match(html,/focus-visible/);assert.match(html,/role="status"/);
  }

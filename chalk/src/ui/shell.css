@@ -124,3 +124,23 @@ body.shell-page {
 .shell-page .soon-body dt { color: var(--muted); font-size: 12.5px; margin-top: 12px; }
 .shell-page .soon-body dd { margin: 2px 0 0; }
 .shell-page .soon-body dd a { color: var(--accent); }
+
+/* 수강생 화면 머리글 (BASE-01). 강사 머리글과 **다른 모양이어야 한다** —
+   학생이 강사 도구 메뉴를 보지 않는 것이 이 규칙의 값이고, 색만 같고 메뉴가
+   다르면 같은 평면으로 읽힌다. 왼쪽 띠로 소속을 다르게 표시한다. */
+.student-head {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 0 12px 12px; margin-bottom: 14px;
+  border-left: 3px solid var(--shell-accent, #6ea8fe);
+  --shell-muted: #9aa0aa; --shell-accent: #6ea8fe;
+}
+.student-head .brand { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.student-head .brand strong { font-size: 17px; }
+.student-head .brand span { color: var(--shell-muted); font-size: 13px; }
+.student-nav { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+.student-nav a { color: var(--shell-accent); text-decoration: none; font-size: 14px; }
+.student-nav a:hover { text-decoration: underline; }
+.student-nav a[aria-current="page"] { color: inherit; font-weight: 600; }
+/* 이 화면이 누구 것인지 화면에 적는다 — 강사가 확인용으로 열었을 때도 읽힌다. */
+.student-note { font-size: 13px; color: var(--shell-muted, #9aa0aa); margin: 0 0 16px; }
+.student-note a { color: var(--shell-accent, #6ea8fe); }

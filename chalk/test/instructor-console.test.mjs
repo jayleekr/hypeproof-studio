@@ -149,13 +149,50 @@ await check("each placeholder page says 개발 필요 and points at the issue th
 // 화면은 정적 텍스트로 번들된다. "공통"을 각 파일에 넣으면 아홉 벌이 되므로
 // 한 벌을 라우트로 내보내고 각 화면이 <link>/<script> 로 받는다. 그 링크가
 // 빠진 화면은 겉보기엔 멀쩡하고 혼자만 옛 모양으로 남는다 — 여기서 잡는다.
-const SHELL_PAGES = ["/console", "/board", "/issuer", "/manage", "/budgets", "/sharing", "/learn", "/start"];
+const SHELL_PAGES = ["/console", "/board", "/issuer", "/manage", "/budgets", "/start"];
+const STUDENT_PAGES = ["/student/learn", "/student/sharing"];
 
-await check("공통 껍데기를 받는 화면 여덟이 전부 링크를 들고 있다", async () => {
+await check("공통 껍데기를 받는 강사 화면 여섯이 전부 링크를 들고 있다", async () => {
   for (const path of SHELL_PAGES) {
     const { text } = await fetchOnce(path);
     assert.ok(text.includes('href="/shell.css"'), `${path} 가 한 벌을 받는다`);
     assert.ok(text.includes('class="shell-head"'), `${path} 에 공통 머리글이 있다`);
+  }
+});
+
+// --- BASE-01: 역할이 화면과 주소에서 갈린다 -----------------------------------
+// 강사 머리글이 학생 화면에 붙어 있었다. 스타일시트는 한 벌이 맞지만 **메뉴는
+// 한 벌이면 안 된다** — 학생이 「수업 작성」·「참여 코드 발급」을 보는 순간 그
+// 화면은 학생 것이 아니다.
+await check("수강생 화면은 한 벌 스타일시트를 받되 강사 머리글을 쓰지 않는다", async () => {
+  for (const path of STUDENT_PAGES) {
+    const { text } = await fetchOnce(path);
+    assert.ok(text.includes('href="/shell.css"'), `${path} 도 한 벌을 받는다`);
+    assert.ok(text.includes('class="student-head"'), `${path} 에 수강생 머리글이 있다`);
+    // 부정 대조 — 강사 껍데기와 강사 도구 링크가 한 줄도 없어야 한다.
+    assert.ok(!text.includes('class="shell-head"'), `${path} 에 강사 머리글이 없다`);
+    for (const tool of ['href="/console"', 'href="/authoring"', 'href="/manage"', 'href="/board"', 'href="/issuer"']) {
+      assert.ok(!text.includes(tool), `${path} 에 강사 도구 링크(${tool})가 없다`);
+    }
+    // 이 화면이 누구 것인지 화면에 적혀 있다.
+    assert.match(text, /수강생용/, `${path} 가 누구 화면인지 말한다`);
+  }
+});
+
+await check("옛 주소는 끊지 않고 새 평면으로 보낸다", async () => {
+  for (const [from, to] of [["/learn", "/student/learn"], ["/sharing", "/student/sharing"]]) {
+    const { status, headers } = await fetchOnce(from);
+    assert.equal(status, 301, `${from} 은 영구 이동이다`);
+    assert.equal(headers.get("location"), to, `${from} → ${to}`);
+  }
+});
+
+// 대조 — 강사 화면에는 학생 화면 링크가 메뉴로 들어가지 않는다(확인용 진입은 홈뿐).
+await check("강사 공통 메뉴에 수강생 화면이 없다", async () => {
+  for (const path of SHELL_PAGES) {
+    const { text } = await fetchOnce(path);
+    const nav = text.slice(text.indexOf('class="shell-nav"'), text.indexOf("</nav>"));
+    assert.ok(!nav.includes("/student/"), `${path} 메뉴에 수강생 화면이 없다`);
   }
 });
 
