@@ -18,6 +18,13 @@ export interface TokenPayload {
   account?: string;
   /** Server-backed individual grant, issued only through the existing issuer gate. */
   native_trial?: true;
+  /**
+   * 강사가 자기 수업을 미리 도는 좌석 (#1131, C-1). 운영 로스터의 자리가 아니다.
+   * `u` 의 `rehearsal-` 접두사와 **쌍**이고 둘은 `lib/rehearsal-ticket.ts`
+   * `rehearsalSeat()` 한 곳에서 같이 만들어진다. 접두사는 사람이 읽고 이 클레임은
+   * 코드가 읽는다 — 권한 판정은 **항상 이쪽**이다.
+   */
+  rehearsal?: true;
   /** Instructor-selected immutable lesson. Never carries runtime capabilities. */
   lesson?: { course_id: string; version: string; sha256: string };
   u: string;       // user id (cohort-local), e.g. "kid01"
@@ -261,6 +268,7 @@ function canonicalize(p: TokenPayload): string {
   if (p.can_issue_issuers !== undefined) out.can_issue_issuers = p.can_issue_issuers;
   if (p.lesson !== undefined) out.lesson = p.lesson;
   if (p.native_trial !== undefined) out.native_trial = p.native_trial;
+  if (p.rehearsal !== undefined) out.rehearsal = p.rehearsal;
   if (p.account !== undefined) out.account = p.account;
   return JSON.stringify(out);
 }
