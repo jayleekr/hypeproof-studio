@@ -8,6 +8,7 @@ import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-au
 import { getProfile } from "../profiles";
 import { isModuleVersion, makeModuleDoc, sha256Hex } from "../lib/modules";
 import { validateSessionDesign } from "../lib/session-design";
+import { checkLessonPedagogy, blockingPedagogyFindings } from "../lib/lesson-pedagogy";
 import { readLesson } from '../lib/lesson-delivery';
 import { issue } from '../lib/tokens';
 import { getRoster, getActiveSession } from '../lib/kv';
@@ -189,6 +190,13 @@ authoring.put(root + "/versions/:version", async (c) => {
   const content = JSON.parse(d.content_json);
   const invalid = validateSessionDesign(content,true);
   if (invalid) return c.json({ error: invalid }, 400);
+  // 교육 원칙 관문 v0. 형태 검증(위)을 통과한 뒤 설계를 본다. fail이 하나라도 있으면
+  // 확정을 막고 판정 목록 전체를 돌려준다 — 강사가 무엇을 채우면 열리는지 알아야 하므로
+  // 막은 항목만이 아니라 warn·skip까지 함께 보낸다. warn만 있으면 확정은 진행되고
+  // 같은 목록이 성공 응답에 실린다. 400/403/409와 겹치지 않도록 422를 쓴다.
+  const pedagogy = checkLessonPedagogy(content);
+  if (blockingPedagogyFindings(pedagogy).length)
+    return c.json({ error: '수업 설계가 교육 원칙 검사를 통과하지 못했습니다', reason: 'pedagogy_blocked', findings: pedagogy }, 422);
   if (content.model) {
     const profile = getProfile(d.profile_id);
     if (!profile || validateModelSubset(content.model, profile)) return c.json({ error: 'model is not permitted by the cohort' }, 403);
@@ -208,7 +216,9 @@ authoring.put(root + "/versions/:version", async (c) => {
     .bind(version,JSON.stringify(module),cohort,course,a.payload.u,b.expected_revision).run();
   const saved = await c.env.HPS_DB.prepare("SELECT source_revision,module_json FROM authoring_versions WHERE cohort_id=? AND course_id=? AND version=?").bind(cohort,course,version).first<Version>();
   if (!saved || saved.source_revision !== b.expected_revision) return c.json({ error: "revision or version conflict" }, 409);
-  return c.json({ module: JSON.parse(saved.module_json), source_revision: saved.source_revision, rehearsal: "not_run", activated: false });
+  // 확정은 됐지만 남은 판정이 있으면 함께 보낸다. 비어 있지 않은 목록은 전부 warn/skip이다
+  // (fail이 있었다면 위에서 422로 끝났다). 확정을 성공으로 보고하면서 미확인을 숨기지 않는다.
+  return c.json({ module: JSON.parse(saved.module_json), source_revision: saved.source_revision, rehearsal: "not_run", activated: false, pedagogy });
 });
 
 authoring.get(root + "/versions/:version", async (c) => {

@@ -212,8 +212,10 @@ export function contiguousAck(cursor: number, storedAscending: number[]): { cont
 const TICKET_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
 /** Typed or scanned once within ten minutes; ambiguous glyphs (0/O, 1/I/L, U) are left out. */
 export function newPairingTicket(random: (n: number) => Uint8Array = (n) => crypto.getRandomValues(new Uint8Array(n))): string {
-  const bytes = random(12); let out = '';
-  for (const b of bytes) out += TICKET_ALPHABET[b % TICKET_ALPHABET.length];
+  // Rejection sampling: `b % length` would favour the first 256 % length characters.
+  const limit = 256 - (256 % TICKET_ALPHABET.length); let out = '';
+  for (let round = 0; out.length < 12 && round < 64; round++) for (const b of random(16)) if (b < limit && out.length < 12) out += TICKET_ALPHABET[b % TICKET_ALPHABET.length];
+  if (out.length < 12) throw new Error('pairing ticket entropy source exhausted');
   return `${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8, 12)}`;
 }
 export const normalizeTicket = (t: string) => t.toUpperCase().replace(/[^0-9A-Z]/g, '');

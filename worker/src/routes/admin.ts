@@ -295,7 +295,7 @@ admin.post("/tokens/issue", async (c) => {
   // #751 — issuance metadata (never the token) so the board can tell "issued"
   // from "verified by the app". No-op unless the operations switch is on; a
   // ledger failure must not fail the mint.
-  await recordTokenIssue(c.env, { jti, cohort, student: u, profile, issuedBy: grantOwner, hours });
+  const opsIssue = await recordTokenIssue(c.env, { jti, cohort, student: u, profile, issuedBy: grantOwner, hours });
   if(body.native_trial){try{await createNativeGrant(c.env,await verify(token,c.env.HPS_SIGNING_SECRET),grantOwner);}catch(error){if(error instanceof Error&&error.message==='trial_reissue_conflict')return c.json({error:'trial_reissue_conflict'},409);throw error;}}
   return c.json({
     ok: true,
@@ -306,6 +306,8 @@ admin.post("/tokens/issue", async (c) => {
     profile,
     hours,
     ...(body.native_trial?{trial_limits:NATIVE_TRIAL_LIMITS}:{}),
+    // Present only when the operations switch is on. false = old-epoch commands were NOT fenced off; re-issue or re-pair.
+    ...(opsIssue ? { ops: opsIssue } : {}),
     exp: Math.floor(Date.now() / 1000) + hours * 3600,
   });
 });
