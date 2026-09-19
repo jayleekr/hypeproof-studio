@@ -2143,10 +2143,31 @@
           "path": "e2e/classroom/report-page.mjs"
         },
         {
+          "path": "worker/src/lib/classroom-erasure.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-erasure.test.mjs"
+        },
+        {
+          "path": "e2e/classroom/ops-roster.mjs"
+        },
+        {
           "path": "worker/migrations/0019-classroom-report-attempts.sql"
         },
         {
+          "path": ".github/workflows/classroom-ops.yml"
+        },
+        {
+          "path": "worker/migrations/0021-classroom-erasure-log.sql"
+        },
+        {
           "path": "worker/migrations/0020-classroom-viewer-check.sql"
+        },
+        {
+          "path": "e2e/classroom/mac-devhost.mjs"
+        },
+        {
+          "path": "e2e/classroom/README.md"
         }
       ]
     },

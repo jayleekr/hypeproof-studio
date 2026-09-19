@@ -70,7 +70,8 @@ try {
   });
   await check('AT-28 withdrawal leaves a tombstone: a late device outbox cannot recreate the record, and the batch row stays with its reason', async () => {
     f.db.prepare('UPDATE class_run_ops SET ends_at=?').run(Date.now() + 3600000); const before = f.r2.size; const b4 = (await batch()).json;
-    assert.equal((await consent(a1.credential, false)).status, 200); assert.equal((await put(a1.credential, b4.batch.id, 1, 'events.jsonl', events(1))).json.reason, 'withdrawn'); assert.equal(f.r2.size, before);
+    assert.equal((await consent(a1.credential, false)).status, 200); assert.ok(f.r2.size < before && ![...f.r2.keys()].some((k) => k.includes('/student-a/')), 'withdrawal also removes what was already collected from this learner');
+    const after = f.r2.size; assert.equal((await put(a1.credential, b4.batch.id, 1, 'events.jsonl', events(1))).json.reason, 'withdrawn'); assert.equal(f.r2.size, after, 'and a late device upload stores nothing');
     const b5 = (await batch()).json; assert.deepEqual([b5.items[0].seat_id, b5.items[0].state], ['A1', 'withdrawn']); assert.equal(b5.summary.roster, 3);
   });
   await check('AT-26 a child class cannot consent with a tap: only an operator-recorded verified guardian consent counts, and an instructor cannot record one', async () => {

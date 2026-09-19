@@ -261,3 +261,45 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 | 기존 학생 목록과 원격 목록 중복, 선택 상세가 긴 화면 하단 | 기존 관리 화면 안에서 중복 정리·목록+오른쪽 상세(좁은 폭은 drawer 등), 화면 기준 주요 CTA 하나 | 30좌석·공통 장애·키보드·200%·5개 폭에서 실제 렌더. forest/lime, 코칭/복구 분리, 도움받은 수행 출처 유지 |
 
 실제 macOS/Windows Studio·SDK 중지/복구, 학교망, staging/운영 D1/R2, 실제 평가 공급자 호출·메일 발송은 이번 인계에서도 **NOT RUN**이다. mock/브라우저/타입검사로 이 행을 PASS로 바꾸지 않는다. 코드로 가능한 부분은 계정 대기와 분리해 끝내고, 운영 활성화에 필요한 결정만 마지막에 남긴다.
+
+### 검토 결함 수정과 미완 기능 보강의 실행 기록 · 2026-09-19
+
+브랜치 `fix/751-ops-review-f1-f7`(R7 끝 `1432b27` + 준비 커밋 `115d4d3` 위). 이 기록 직전 HEAD `dcc2332`, Mac arm64, Node 22.22.1. 인계 시 15건 중 4 PASS / 11 FAIL이던 review 시험은 **기대값을 바꾸지 않고** 전부 통과하며, 빠져 있던 대조군을 더해 worker 25건·확장 14건이 됐다. 두 묶음은 worker `test:classroom-ops`와 확장 기본 `npm test`에 편입돼 PR CI의 `worker / test`·`extension / smoke`에서 항상 실행된다.
+
+| 결함 | 수정 | 실행한 시험 (모두 exit 0) |
+|---|---|---|
+| F1 | App `freezeSnapshot` + manifest `/2` binding, Service 귀속 대조, migration 0018 | 다른 u/c/p 3건, 다른 회차·활동·활동 없음·동의 범위·좌석·spool session, 수업 창 밖 기록, 신원 없는 기록, 회차 귀속 없는 레거시, metadata 없는 manifest, 자기 기록 양성 대조군. 기기 쪽: 공유 PC(`identity_mismatch`)·신원 없음·수업 전 이벤트 제외·다른 grant의 복사본 |
+| F2 | sync 응답 폐기, `CommandRunner.close()`, host 연결 generation | 늦은 proceed 0회·늦은 pause 0회·정상 1회, 재연결 뒤 이전 응답 무효, 실행 도중 해제 → 중지 요청 + `outcome_unknown(connection_closed)` |
+| F3 | `deliveryKey` | 형제자매 2건·재시도 0건, key 단위: 다른 회차의 같은 recipient_ref·정정 주소·개정 보고서·dry/live |
+| F4 | 수업 패널 단계 버튼, `turnObservations`, 산출물 digest, capability 선언, status `observes` | 단위 3건 + 브라우저 왕복(아래) |
+| F5 | upload-only 재개, grant 결속 state | 정상 만료 재개·명시적 해제·공유 PC·24시간 경과·Service 거부(철회) 1회 기록 후 미재시도 |
+| F6 | 사건별 디코딩 원문 대조, actor/source_state | 없는 event_id·다른 사건 인용·따옴표/줄바꿈 양성, AI·강사·가상 사례 단독 근거 거부, 맥락 인용 허용, 초안의 화자 바꿔 적기 거부, 레거시 line/turn locator |
+| F7 | `damaged`·`range_unknown`·extent 대조 | 깨진 행, 비객체 JSON, 선언 없는 연속 꼬리, 선언 시작/끝 불일치, 행 수 불일치, 마지막 사건 불일치, 레거시 유지 |
+
+보강한 기능과 그 시험:
+
+- **평가 adapter·자동 연결** `worker/test/classroom-ops-evaluator.test.mjs`(7): 미설정은 `evaluator_not_configured`(초안 0건), `advance` 반복에도 학생당 provider 호출 1회·job 중복 0, 학생 입력 없는 기록은 호출 없이 전부 `아직 충분히 보지 못함`, 카탈로그 밖 인용·AI 단독 근거는 초안이 되지 않음, 503은 큐 복귀 후 가시적 실패, runner의 Service 내 평가. provider는 전송 seam에서 대체했다 — **실제 모델의 관찰 품질 검증이 아니다.**
+- **legacy HAIN7 adapter**: 기존 Python 엔진을 실제로 실행(`--legacy-replay`, 엔진의 sample session). 7축 유지, score/band 미반입, 학생 발화만 근거, 28-marker 검수 없으면 `marker_review_missing`.
+- **읽기 화면·PDF** `e2e test:classroom-report`: 실제 Chromium 1280/360/200%. 악성 인용 미실행, 가로 스크롤 없음, 키보드로 세부 열기, 대비(본문 ≥7, 보조 ≥4.5), 같은 페이지에서 A4 PDF 2쪽 생성을 눈으로도 확인(한글·밝은 지면·방법 절 인쇄).
+- **메일 adapter·webhook** `classroom-ops-provider.test.mjs`(5): Svix 공개 테스트 벡터, 응답별 accepted/unknown/rejected 매핑, 검수된 문안만 live 발송, 확정 실패만 재시도, 서명 불일치·재생·중복·역순(delivered 뒤 sent)·opened 무시, delivery_key tag로 `send_unknown` 확정, 다른 message id를 가진 행은 가로챌 수 없음, 미설정은 dry-run만.
+- **철회·보존** `classroom-ops-erasure.test.mjs`(3): 철회 시 해당 학생의 snapshot·초안·링크만 사라지고 다른 학생은 유지, 남는 행에 학생 원문 없음, 늦은 기기 재전송·`수업 마무리` 재실행·새 batch·새 발송에서 제외, 운영자 1명 철회·보존 기간(기본값 없음·기한 전 거부·재실행 무해).
+- **Chalk 목록+상세·왕복** `e2e test:classroom-ops-roster`(6): 빌드된 webview의 실제 클릭 → provider의 단계 매핑 → **실제 ClassroomOpsHost**(vscode만 bundle 경계에서 stub) → 실제 Service → 실제 Chalk. 30좌석, 공통 장애(30%=9석), 구버전 앱 `확인 불가`, 기존 목록과 중복 제거, 1440 측면 패널·1024/200%/390 drawer, 키보드 열기/닫기·포커스 복귀, 44px, 화면 기준 주요 CTA 1개, `수업 마무리` 1회 → 실제 host 업로드 → 평가 → 검수 대기(재실행 중복 0), 승인≠발송·실제 발송 확인 단계·재클릭 재발송 0.
+  - 이 왕복 시험이 **실제 결함 1건**을 잡았다: 관측 훅이 동시에 outbox에 저장하면 임시 파일 rename 경합으로 사건이 사라졌다. 저장을 직렬화했고 대조군을 추가했다.
+- 기존 시험의 계약 변경: `수집/보고서/발송/기기 snapshot` fixture를 App의 실제 freezer를 쓰는 발급 경로로 바꿨다(시나리오는 보존). runner 시험의 "평가기 없으면 전부 not seen yet 초안"은 검토 지적대로 **잘못된 기대**여서 `evaluator_not_configured`로 바꿨다. 철회 시험은 "이미 수집한 것도 지워진다"로 강화했다.
+
+최종 회귀(이 브랜치 끝): `npm --prefix worker test`·typecheck, `test:classroom-ops:d1`(migration 0011~0018 재실행), `npm --prefix chalk test`·typecheck, 확장 `npm test`·typecheck, e2e `test:classroom`·`test:classroom-ops`·`test:classroom-ops-roster`·`test:classroom-report`, `next-work --check`, docs harness, `check-registry` — **실행 결과: 전부 exit 0**, 확장 `build:extension`도 exit 0(2026-09-19, 문서 커밋 직전 작업 트리 기준). 브라우저 e2e 4종은 PR CI에 없다(로컬 실행).
+
+**코드는 있으나 실제 환경에서 NOT RUN:** 실제 macOS/Windows Studio에서의 단계 버튼·SDK fallback·reset·업로드 재개, 학교망, staging/운영 D1(0018 포함)·R2 삭제, 실제 Anthropic 호출로 만든 초안의 품질과 비용, Resend 계정·sandbox·실수신·실제 webhook, 실제 보호자 메일 클라이언트에서의 링크·PDF.
+
+**2026-09-20 후속 보강(같은 브랜치):** 앞 문장의 “아직 코드가 없는 것” 중 단계의 강사 확인 입력, 브라우저 e2e의 PR CI 편입, 보존 기간 자동 실행, 링크 열람자 확인은 구현했다(아래). 누적 패턴 본문·PDF 첨부·Kakao/SMS·QR·열람자 본인 인증은 [후속 범위](../requirements/classroom-admin.md#이번-인수-범위와-후속-범위-2026-09-20)로 분리했고 **이번 관제·단일 회차 보고서 인수의 합격 조건이 아니다.**
+
+- **평가 큐 정체(Codex 후속 재현)** `classroom-ops-evaluator.test.mjs` +6(총 13): OFF→ON에서 이전 `evaluator=none` 작업은 `superseded`, 학생당 평가 1회, 반복 호출 중복 0; Codex 재현 그대로(두 학생 각 1회, `more`가 끝남); evaluator 버전 변경 시 평가된 초안은 그대로 두고 미평가 작업만 재준비; legacy 7축이 앞에 있어도 Service가 lease하지 않음; 두 호출자 동시 실행은 서로 다른 job; 503은 그 작업만 30초→2분 쉬고(fake clock) 3회째 `failed`; runner는 선언한 종류만 받는다. 재현 스크립트(`.git/remote-classroom-evidence/review-20260919/followup-evaluator.mjs`) 재실행 결과 provider 호출 2회·정체 없음.
+- **강사 reviewed** `classroom-ops-coaching.test.mjs` +1: 진행 중 단계는 확인 불가(`step_not_submitted`), `observe`만 가진 강사 거부, 두 강사 동시 확인은 200/409, 오래된 revision 거부, 다음 단계는 ‘확인 전’. 브라우저 왕복에서 `결과를 확인했어요` → 행에 `(강사 확인함)`.
+- **보존 자동 실행** `classroom-ops-erasure.test.mjs` +3(총 6): 기간 미설정·잘못된 값 6종·전역 스위치 OFF는 무동작, 기간만 설정은 dry-run, 기한 전(fake clock) 대상 0, enforce에서 R2 장애 주입 → `started/content_delete_failed` → 다음 tick이 완료, 재실행 무해, tick 상한, 15분 tick은 실행하지 않고 일일 tick만 실행.
+- **링크 열람자 확인** `classroom-ops-delivery.test.mjs` +1(총 8)과 기존 링크 시험 갱신: GET은 질문만(보고서 내용 없음), 오답 403·남은 횟수, 구분자 섞인 정답 허용, 5회째 영구 잠금(정답도 404), 값 없는 수신자는 live 발송 제외·원장 0행, 승인 뒤 값 변경은 `approval_stale`, 잘못된 형식 4종 거부, DB·감사에 값 원문 없음. 브라우저에서 질문 → 오답 → 정답 → 보고서.
+- **PR CI** `.github/workflows/classroom-ops.yml`: 브라우저 e2e 4종. 확장 의존성을 숨긴 상태(CI와 같은 설치 집합)에서 로컬 통과를 확인했다. **GitHub에서의 첫 실행 결과는 PR 생성 뒤 확인한다.**
+- **격리 Mac host** `e2e/classroom/mac-devhost.mjs`([README](../../e2e/classroom/README.md)): `prepare`를 실제 실행 — 설치된 v0.1.16 앱은 변경되지 않았고, 복사본의 번들 4개 해시가 현재 빌드와 일치, 복사본 ad-hoc 서명 검증 통과. **`launch`(GUI 실행)와 실기 관찰은 하지 않았다.** 설치된 v0.1.16을 실행한 결과를 이 기능의 검증으로 기록하지 않는다.
+
+최종 회귀(2026-09-20, 이 브랜치 끝): worker test·typecheck, `test:classroom-ops:d1`(0011~0021), chalk test·typecheck, 확장 test·typecheck·build, e2e 4종, `next-work --check`, docs harness, `check-registry`, `check-workflow-shells` — 결과는 PR 본문의 검증 절에 HEAD와 함께 적는다.
+
+**아직 코드가 없는 것(환경 대기가 아님):** 위 후속 범위 표의 5개 항목.

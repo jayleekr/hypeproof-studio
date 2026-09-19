@@ -17,6 +17,7 @@ import { classroomReportsRunner } from "./routes/classroom-reports";
 import { classroomDeliveryWebhooks, classroomReportLinks } from "./routes/classroom-delivery";
 import { runHeartbeat } from "./cron/heartbeat.ts";
 import { runD1Backup } from "./cron/d1-backup.ts";
+import { runClassroomRetention } from "./lib/classroom-erasure";
 import { requestId, makeErrorBody } from "./middleware/request-id.ts";
 import { signingSecretGuard } from "./middleware/signing-secret.ts";
 import { TokenError } from "./lib/tokens.ts";
@@ -138,6 +139,13 @@ export default {
     //   "*/15 * * * *" → 15-min heartbeat (#45 / S-02)
     //   "0 17 * * *"   → D1 nightly backup to R2 at 17:00 UTC = 02:00 KST (#52 / S-06)
     if (controller.cron === "0 17 * * *") {
+      // #751 — classroom retention rides the same daily tick. It is a no-op unless a period is configured, and only reports
+      // (dry-run) unless enforcement is switched on as well. A failure here never affects the backup below.
+      ctx.waitUntil(
+        runClassroomRetention(env, Date.now())
+          .then((r) => { if (r.mode !== "off" || r.problem) console.log("classroom-retention", JSON.stringify(r)); })
+          .catch((err) => console.error("classroom-retention crashed:", err)),
+      );
       ctx.waitUntil(
         runD1Backup(env)
           .then((r) => console.log("d1-backup", JSON.stringify({
