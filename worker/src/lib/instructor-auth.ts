@@ -71,6 +71,15 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   // 그대로 다시 검사한다. Chalk 포워더도 이 목록을 그대로 쓴다.
   if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/assessment$/.test(path)) return true;
   if (method === 'POST' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/versions\/[^/]+\/participants$/.test(path)) return true;
+  // #1131 C-1 — 리허설 교환권 발급. `participants`(바로 위)와 같은 모양이고, 핸들러가
+  // issuer 신원·코호트·소유자를 그대로 다시 검사한다. Chalk 포워더도 이 목록을 그대로 쓴다.
+  //
+  // **이 줄이 처음에 빠져 있었다** (#1164 → #1187 에서 발견). 라우트도 핸들러도 멀쩡했고
+  // 단위 시험도 초록이었는데, 강사 Bearer 로 부르면 핸들러에 닿기 전에 admin 미들웨어가
+  // 503 `admin not configured` 를 냈다 — 기능이 설정된 것처럼 보이면서 죽어 있었다.
+  // 시험이 authoring.ts 의 **안쪽** 경로 목록만 소스에서 정규식으로 읽고, 실제 HTTP 를
+  // 타지 않아서 못 봤다. rehearsal-ticket.test.mjs 의 6번 절이 이제 진짜로 부른다.
+  if (method === 'POST' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/versions\/[^/]+\/rehearsal-tickets$/.test(path)) return true;
   if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/classroom\/shares(?:\/[^/]+)?$/.test(path)) return true;
   // Chalk authoring: handlers still enforce issuer identity, cohort/profile and owner.
   if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+(?:\/versions\/[^/]+)?$/.test(path)) return true;

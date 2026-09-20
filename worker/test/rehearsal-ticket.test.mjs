@@ -146,6 +146,73 @@ console.log("=== 5. 라우트가 인증 목록에 등록돼 있다 (빠뜨리면
   check(!/token[,:]/.test(body.slice(body.indexOf("return c.json"))), "응답에 토큰을 담지 않는다 — 교환권만 나간다");
 }
 
+// ---------------------------------------------------------------------------
+console.log("");
+console.log("=== 6. 실제로 HTTP 로 부를 수 있다 (소스를 읽지 말고 불러 본다) ===");
+// ---------------------------------------------------------------------------
+// 🔴 이 절이 왜 생겼나. 5번 절은 `authoring.ts` 의 **소스를 정규식으로 읽어서**
+// 라우트가 안쪽 인증 목록에 있는지 봤고 초록이었다. 그런데 강사 Bearer 로 실제로
+// 부르면 **503 `admin not configured`** 가 났다 — 바깥 admin 미들웨어의 허용 목록
+// (`lib/instructor-auth.ts` `isIssuerAllowedEndpoint`)에 이 경로가 없었기 때문이다.
+// 관문이 둘인데 하나만 보고 "등록됐다" 고 판정한 것이다.
+//
+// 소스를 읽어 판정하는 검사는 **자기가 안 보는 층을 모른다.** 그래서 여기서는
+// 짐작하지 않고 **앱을 띄워 진짜로 부른다.** 다음에 새 경로가 또 한쪽 목록에만
+// 등록되면 5번은 통과하고 여기서 걸린다.
+//
+// 같은 이유로 `#1187` 의 관문도 여기에 기대고 있다: 강사가 리허설을 **하러 가는 길**이
+// 막히면 참여 코드 관문을 아무도 영원히 풀 수 없다. 그 길이 열려 있다는 것은
+// 소스가 아니라 응답이 말해야 한다.
+{
+  const { localAuthoring } = await import("./harness/dental-authoring.mjs");
+  const local = await localAuthoring({});
+  const COURSE = "ticket-http-course";
+  const base = `/admin/cohorts/${local.cohort}/authoring/${COURSE}`;
+  const VERSION = "m2026.09.21-1";
+  const content = {
+    schema: "hps-session-design/1", title: "교환권 HTTP", audience: "성인",
+    duration_minutes: 120, objective: "교환권 경로가 실제로 열려 있다",
+    prerequisites: "코딩 경험 불필요", starter: "정적 사이트",
+    steps: [{ id: "one", title: "한 단계", instructions: "제출 증거: index.html", hint: "", acceptance: "열리는지 확인" }],
+  };
+  const call = async (suffix, method, body, headers = {}) => {
+    const r = await local.fetcher(local.origin + base + suffix, {
+      method,
+      headers: { authorization: `Bearer ${local.token}`, "content-type": "application/json", ...headers },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: r.status, body: await r.json().catch(() => null) };
+  };
+  try {
+    check((await call("", "PUT", { expected_revision: 0, request_id: "create", profile_id: local.profileId, content })).status === 200,
+      "준비: 초안이 저장된다");
+    check((await call("/versions/" + VERSION, "PUT", { expected_revision: 1 })).status === 200,
+      "준비: 버전이 확정된다");
+
+    // 양성 대조군 — **강사 issuer Bearer 하나로** 교환권이 나온다. CF Access 도,
+    // admin 비밀번호도 없이. 이게 실제 강사가 가진 것의 전부다.
+    const issued = await call("/versions/" + VERSION + "/rehearsal-tickets", "POST", { hours: 1 });
+    check(issued.status === 200, `강사 Bearer 로 교환권이 발급된다 (받은 것: ${issued.status} ${JSON.stringify(issued.body)})`);
+    check(typeof issued.body?.ticket === "string" && issued.body.ticket.length > 0, "응답에 교환권이 있다");
+    check(issued.body?.token === undefined, "…그리고 토큰은 없다 (ARC-02)");
+    check(issued.body?.lesson?.version === VERSION, "좌표가 요청한 버전을 가리킨다");
+
+    // 음성 대조군 — Bearer 가 없으면 열리지 않는다. 위의 200 이 "아무나 되는"
+    // 상태여서 나온 것이 아니라는 것을 잰다.
+    const anon = await call("/versions/" + VERSION + "/rehearsal-tickets", "POST", { hours: 1 }, { authorization: "" });
+    check(anon.status !== 200, `자격 없이는 열리지 않는다 (${anon.status})`);
+
+    // 그리고 **허용 목록 자체**를 직접 묻는다 — Chalk 포워더가 같은 함수를 쓰므로
+    // 이 한 줄이 Chalk 경로도 같이 잠근다(`chalk/src/routes/forward.ts`).
+    const { isIssuerAllowedEndpoint } = await import("../src/lib/instructor-auth.ts");
+    const probe = `/admin/cohorts/${local.cohort}/authoring/${COURSE}/versions/${VERSION}/rehearsal-tickets`;
+    check(isIssuerAllowedEndpoint(probe, "POST"), "허용 목록이 이 경로를 POST 로 통과시킨다");
+    check(!isIssuerAllowedEndpoint(probe, "GET"), "…GET 은 아니다 (음성 대조군: 검사가 무조건 true 가 아니다)");
+  } finally {
+    local.close();
+  }
+}
+
 console.log("");
 if (failed === 0) {
   console.log("PASS rehearsal-ticket: 좌석 표시 두 겹 · 해시 키 · 토큰만 보관 · 로스터 무관.");
