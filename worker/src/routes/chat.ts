@@ -37,6 +37,7 @@ import { gateChatRequest } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
 import { applyLessonFeatures } from '../lib/lesson-feature-policy';
 import { resolveTokenLesson } from '../lib/lesson-delivery';
+import { recordRehearsalTurn } from '../lib/rehearsal-evidence';
 import { profileServesCohort } from '../lib/cohort-binding';
 import { lessonAssistantName } from '../lib/session-design';
 import { isTokenRevoked, getRoster } from '../lib/kv';
@@ -531,7 +532,13 @@ chat.post("/chat/completions", async (c) => {
 
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }));
+    // #1186 — 리허설 좌석의 턴이면, 그 턴이 `usage_log` 에 **앉은 뒤에** 증거를 다시 도출한다.
+    // 순서가 핵심이다: 집계가 이번 턴을 못 보면 **마지막 턴의 오류가 증거에 안 들어간다** —
+    // 실패로 끝난 리허설이 초록으로 남는다. 그래서 병렬이 아니라 `.then()` 이다.
+    c.executionCtx.waitUntil(
+      persistUsage(env, { ...log, session_id: payload.account?null:session.session_id })
+        .then(() => recordRehearsalTurn(env, payload, gate.lesson)),
+    );
   };
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>

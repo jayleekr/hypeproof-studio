@@ -65,6 +65,14 @@ export type ChatGateResult =
        * they must attach this themselves.
        */
       help: string | null;
+      /**
+       * #1186 — 이 턴이 어느 확정 버전을 돌렸나. **게이트가 이미 풀어 놓은 값**이라
+       * (`resolveTokenLesson`) 라우트가 다시 조회하지 않게 여기 실어 보낸다.
+       * `cohort` 는 토큰의 `c` 가 아니라 **확정 버전이 사는 코호트**(`lessonCohort`) 다 —
+       * `readRehearsal()` 이 묻는 것과 같은 값이어야 증거가 읽히는 자리에 앉는다.
+       * 수업에 연결되지 않은 좌석은 null.
+       */
+      lesson: { cohort: string; course_id: string; version: string } | null;
     }
   | { ok: false; response: Response };
 
@@ -160,7 +168,9 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
       if(!crossProviderEnabled(profile)||payload.lesson||payload.native_trial)throw new AccessError('unsupported_personal_profile',403);
       // An account execution context has no class/session row. The immutable
       // paid period is selected and checked separately before every dispatch.
-      return {ok:true,payload,profile:{...profile,session:{...profile.session,cohort_id:''}},module,identity:null,help:null,
+      // 개인 이용권 경로는 수업 좌석이 아니다 — 확정 버전도 리허설도 없다(위에서
+      // payload.lesson 을 403 으로 막는다). lesson: null 이 그 사실이다.
+      return {ok:true,payload,profile:{...profile,session:{...profile.session,cohort_id:''}},module,identity:null,help:null,lesson:null,
         session:{session_id:'account:'+payload.account,profile_id:profile.id,starts_at:new Date(payload.iat*1000).toISOString(),ends_at:new Date(payload.exp*1000).toISOString()}};
     }catch(error){
       return{ok:false,response:c.json({error:{type:'access',code:error instanceof AccessError?error.code:'account_unavailable',message:'개인 이용권을 확인할 수 없습니다.'}},403)};
@@ -285,10 +295,10 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     if (!help.ok) return { ok: false, response: c.json({ error: { type: 'config', code: help.code, message: help.message } }, help.status) };
     if (help.help) c.header('x-hps-help-mode', helpModeReceipt(help.help));
     const helpInstruction = help.help ? helpModeInstruction(help.help) : '';
-    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(lesson.content) + helpInstruction }, session, module, identity: assistantName ? { fixed_name: assistantName } : null, help: help.help ? helpModeReceipt(help.help) : null };
+    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(lesson.content) + helpInstruction }, session, module, identity: assistantName ? { fixed_name: assistantName } : null, help: help.help ? helpModeReceipt(help.help) : null, lesson: { cohort: cohortDecision.lessonCohort, course_id: lesson.course_id, version: lesson.version } };
   }
   // A help mode without a lesson has nothing to apply to — say so instead of
   // letting the student believe it took effect.
   if (c.req.header('x-hps-help-mode')) return { ok: false, response: c.json({ error: { type: 'config', code: 'help_mode_not_offered', message: '수업에 연결되지 않은 좌석은 도움 방식을 선택할 수 없습니다.' } }, 409) };
-  return { ok: true, payload, profile, session, module, identity: null, help: null };
+  return { ok: true, payload, profile, session, module, identity: null, help: null, lesson: null };
 }

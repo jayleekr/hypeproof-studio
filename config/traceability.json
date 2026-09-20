@@ -1949,6 +1949,33 @@
       ]
     },
     {
+      "id": "ST-IMP-REHEARSAL-EVIDENCE",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/rehearsal-evidence.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-REHEARSAL-EVIDENCE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-IMP-REHEARSAL-EVIDENCE"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/rehearsal-evidence.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-CLASSROOM-ADMIN",
       "stage": "requirement",
       "owner": "jayleekr",
