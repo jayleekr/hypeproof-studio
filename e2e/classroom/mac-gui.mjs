@@ -34,9 +34,11 @@ const sdk = manifest.agent_sdk?.vendored === true && manifest.agent_sdk.binary &
 
 const steps = [], result = { schema: 'hps-classroom-mac-gui/1', started_at: new Date().toISOString(), source_sha: head, prepared_extension_sha: manifest.extension.source_sha, shell: manifest.shell, agent_sdk: sdk ? { version: manifest.agent_sdk.version, sdk_mjs_sha256: manifest.agent_sdk.sdk_mjs_sha256, binary_sha256: manifest.agent_sdk.binary.sha256, binary_via: 'HPS_SDK_BINARY', js_source: manifest.agent_sdk.source } : null,
   real: ['Studio shell process (isolated copy)', 'extension host + webview', 'command palette + notifications', ...(sdk ? ['Agent SDK ' + manifest.agent_sdk.version + ' + native claude binary'] : []), 'HTTP → Service router + SQLite', 'ops sync loop + command runner', 'workspace files'],
+  observations: ['The extension\'s startup update check reads the PUBLIC release feed and showed "새 버전 v0.1.56" in this old-shell copy. It is a read-only request; this runner never clicks it, and nothing was installed.',
+    'With a persistent provider 5xx the real Agent SDK CLI retried for more than 90 s without any board signal; the instructor only hears of it when the 240 s stall watchdog ends the turn.'],
   synthetic: ['accounts', 'lesson', 'model provider (scripted at api.anthropic.com)', 'in-memory R2', 'in-memory secret storage'], steps };
 const save = (status, error) => writeFileSync(path.join(out, 'result.json'), JSON.stringify({ ...result, status, ...(error ? { error } : {}), finished_at: new Date().toISOString() }, null, 2));
-const PLAN = ['token', 'connect', 'step', 'reviewed', 'error', 'resolved', 'reset', 'reconnect', 'disconnect'];
+const PLAN = ['token', 'connect', 'step', 'reviewed', 'error', 'resolved', 'stop', 'reset', 'reconnect', 'disconnect'];
 const record = (id, data) => { steps.push({ id, status: 'PASS', ...data }); console.log('PASS ' + id); save('IN_PROGRESS'); };
 
 // ── Service: real router + SQLite, synthetic class run ──
@@ -62,6 +64,7 @@ globalThis.fetch = async (input, init) => {
   assert.equal(url.origin, 'https://api.anthropic.com', 'unexpected outbound request from the Service: ' + url.origin);
   const body = JSON.parse(init.body), mode = provider; providerCalls.push({ mode, model: body.model, stream: body.stream === true, tools: (body.tools ?? []).length });
   if (mode === '500') return Response.json({ type: 'error', error: { type: 'api_error', message: 'synthetic provider failure' } }, { status: 500 });
+  if (mode === '400') return Response.json({ type: 'error', error: { type: 'invalid_request_error', message: 'synthetic provider refusal' } }, { status: 400 });
   if (mode === 'stall') return new Promise((_, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
   const text = 'SYNTHETIC-PROVIDER-ANSWER 확인할 조건을 먼저 적어 보세요.';
   return body.stream ? sse(body.model, text) : Response.json({ id: 'synthetic', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text }], stop_reason: 'end_turn', usage: { input_tokens: 12, output_tokens: 9 } });
@@ -127,12 +130,15 @@ try {
 
   // 4 — the instructor confirms that submitted step (same API the Chalk detail pane calls)
   const ref = s3.step.review?.ref ?? s3.step.ref; assert.ok(ref, 'a submitted step exposes a review ref: ' + JSON.stringify(s3.step));
-  const reviewed = await local.request(`${local.base}/evidence/${ref}`, 'PUT', { state: 'reviewed', expected_revision: s3.step.review?.revision ?? 0 }); assert.ok([200, 201].includes(reviewed.status), reviewed.raw);
-  const s4 = await seat(); assert.equal(s4.step.status, 'submitted', 'the device\'s own report is not rewritten'); assert.equal(s4.step.review.state, 'reviewed');
+  const reviewed = await local.request(`${local.base}/evidence/${ref}`, 'PUT', { state: 'confirmed', expected_revision: s3.step.review?.revision ?? 0 }); assert.ok([200, 201].includes(reviewed.status), reviewed.raw);
+  const s4 = await seat(); assert.equal(s4.step.status, 'submitted', 'the device\'s own report is not rewritten'); assert.equal(s4.step.review.state, 'confirmed');
   record('reviewed', { step_status_from_device: s4.step.status, review: s4.step.review, note: 'instructor action sent through the Service API; the Chalk page itself is covered by the browser e2e in CI' });
 
   // 5 — a real turn fails at the provider → the board shows a technical fault, the learner sees a retry message
-  provider = '500'; const before = providerCalls.length; await say(chat, '예약 버튼이 모바일에서 눌리는지 확인하고 싶어요');
+  // A 400 fails fast. (Observed in the first run of this file: on a persistent 5xx the real CLI keeps retrying and the board hears
+  // nothing until the stall watchdog — hypeproofChat.sdkStallTimeoutMs, 240 s by default — ends the turn. That wait is product
+  // behaviour, recorded in result.observations, and is not what this step measures.)
+  provider = '400'; const before = providerCalls.length; await say(chat, '예약 버튼이 모바일에서 눌리는지 확인하고 싶어요');
   const s5 = await wait(async () => { const s = await seat(); return s?.error && s.error.blocking === true && !s.error.cleared ? s : null; }, 'blocking fault on the board', 90000); await shot('05-error');
   record('error', { provider_calls: providerCalls.length - before, attention: s5.attention, reason: s5.reason, activation: s5.activation, error: s5.error, runtime_used: providerCalls.slice(before).map((c) => ({ stream: c.stream, tools: c.tools })) });
 
@@ -142,14 +148,23 @@ try {
   const s6 = await wait(async () => { const s = await seat(); return s?.error?.cleared === true || (s?.error && s.error.blocking === false) ? s : null; }, 'fault cleared on the board', 60000); await shot('06-resolved');
   record('resolved', { attention: s6.attention, reason: s6.reason, activation: s6.activation, error: s6.error, answered_by: sdk ? 'agent-sdk runtime (vendored SDK + native binary) against the scripted provider' : 'proxy runtime against the scripted provider' });
 
+  // 6b — the instructor stops a turn that is really running in the SDK (the provider never answers)
+  const commandDone = async (id, ms = 90000) => wait(async () => { const v = (await local.request(local.base + '/commands/' + id)).json; const t = (v.targets ?? [])[0]; return t && !['queued', 'leased', 'accepted', 'running'].includes(t.state) ? t : null; }, 'command receipt', ms);
+  provider = 'stall'; const stalledAt = providerCalls.length; await say(chat, '이 요청은 응답이 오지 않는 동안 강사가 멈춥니다'); await wait(() => providerCalls.length > stalledAt, 'the turn reached the provider', 60000);
+  assert.ok(await chat.evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Stop')"), 'the learner sees a running turn'); await shot('06b-running');
+  const stopCmd = await local.command('cancel_current_run', ['A1']); assert.ok([201, 202].includes(stopCmd.status), stopCmd.raw); const stopped = await commandDone(stopCmd.json.command_id ?? stopCmd.json.command?.id);
+  assert.deepEqual([stopped.state, stopped.result_code], ['succeeded', 'run_stopped'], JSON.stringify(stopped)); await wait(() => chat.evaluate("![...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Stop')"), 'the running turn ended on screen'); await shot('06c-stopped');
+  const stopNotice = (await toasts()).find((t) => t.includes('조치를 요청해')); provider = 'ok';
+  record('stop', { receipt: { state: stopped.state, result_code: stopped.result_code }, learner_notice: stopNotice ?? null, note: 'a real SDK turn, stopped by the instructor\'s command while the scripted provider withheld its answer' });
+
   // 7 — preserving reset: conversation, files and the record survive; a new runtime generation starts
   const messagesBefore = await chat.evaluate("document.body.textContent.includes('예약 버튼이 모바일에서')&&document.body.textContent.includes('SYNTHETIC-PROVIDER-ANSWER')"), filesBefore = workHashes(); assert.ok(messagesBefore);
   const cmd = await local.command('reset_runtime', ['A1']); assert.ok([201, 202].includes(cmd.status), cmd.raw); const commandId = cmd.json.command_id ?? cmd.json.command?.id;
-  const done = await wait(async () => { const v = (await local.request(local.base + '/commands/' + commandId)).json; const t = (v.targets ?? [])[0]; return t && !['queued', 'leased', 'accepted', 'running'].includes(t.state) ? t : null; }, 'reset receipt', 90000); await shot('07-after-reset');
+  const done = await commandDone(commandId); await shot('07-after-reset'); const resetNotice = (await toasts()).find((t) => t.includes('AI 세션 다시 시작'));
   assert.equal(done.state, 'succeeded', JSON.stringify(done)); assert.deepEqual(workHashes(), filesBefore, 'workspace files are byte-identical');
   assert.ok(await chat.evaluate("document.body.textContent.includes('예약 버튼이 모바일에서')&&document.body.textContent.includes('SYNTHETIC-PROVIDER-ANSWER')"), 'the conversation is still on screen');
   await say(chat, '초기화 뒤에도 이어서 질문합니다'); await wait(() => chat.evaluate("(document.body.textContent.match(/SYNTHETIC-PROVIDER-ANSWER/g)||[]).length>=2"), 'a turn works after the reset', 90000);
-  record('reset', { receipt: { state: done.state, result_code: done.result_code }, files: filesBefore, conversation_kept: true, turn_after_reset: true });
+  record('reset', { receipt: { state: done.state, result_code: done.result_code }, learner_notice: resetNotice ?? null, files: filesBefore, conversation_kept: true, turn_after_reset: true });
 
   // 8 — reconnect: a new one-time code replaces the connection; the old one cannot act
   const again = (await local.request(local.base + '/pairings', 'POST', { seat_id: 'A1', roster_revision: 1 })).json; const grantBefore = (await seat()).connection?.grant_id ?? null;
