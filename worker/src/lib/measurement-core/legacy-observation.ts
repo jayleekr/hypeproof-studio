@@ -1,8 +1,45 @@
-// hps-observation/1: App/Service data contract (legacy seven-Asset findings).
-// Moved verbatim from worker/src/lib/native-observation.ts (#1042). App and Service
-// both import this one file; behaviour is pinned to the pre-extraction verdicts in
-// worker/test/fixtures/measurement-core/legacy-verdicts.json (MC-T01).
+// hps-observation/1 and /2: App/Service data contract.
+//
+// /1 was moved verbatim from worker/src/lib/native-observation.ts (#1042). App and
+// Service both import this one file; /1 behaviour is pinned to the pre-extraction
+// verdicts in worker/test/fixtures/measurement-core/legacy-verdicts.json (MC-T01)
+// and must reproduce them byte for byte.
+//
+// /2 (P1-A; SX-44–SX-48) is a SUPERSET handled in this same file, because a second
+// validator is exactly what SX-48 forbids. `validateObservation()` looks at
+// `format` and applies either the /1 rules or "/1 + the /2 rules". A /1 batch stays
+// valid, is not upgraded, and a /2 batch is never downgraded — the batch comes back
+// carrying the format it arrived with. Which one a cohort sends is decided by the
+// profile's `observation.format`, not here.
+//
+// The /2 table (kinds, enums, per-kind required fields, defaults) lives in
+// ./learning-events.ts so the gates and the session-design schema read the same
+// list. This file stays the one place that decides whether a batch is valid.
+import {
+  ARTIFACT_REF_KEYS,
+  EVIDENCE_TYPES,
+  LEARNING_EVENT_KEYS,
+  LEARNING_EVENT_KINDS,
+  LEARNING_EVENT_SPEC,
+  LEARNING_OUTCOMES,
+  OBSERVATION_ACTORS,
+  REF_KEYS,
+  SOURCE_KINDS,
+  SOURCE_STATES,
+  forbidPersonalMetrics,
+  isHumanEvidence,
+  isLearningEventKind,
+  type EvidenceType,
+  type LearningEventKind,
+  type ObservationActor,
+  type SourceKind,
+  type SourceState,
+} from "./learning-events.ts";
+
 export const OBSERVATION_FORMAT = "hps-observation/1";
+export const OBSERVATION_FORMAT_V2 = "hps-observation/2";
+export const OBSERVATION_FORMATS = [OBSERVATION_FORMAT, OBSERVATION_FORMAT_V2] as const;
+export type ObservationFormat = (typeof OBSERVATION_FORMATS)[number];
 export const OBSERVATION_ASSETS = [
   "TASTE",
   "INTENT",
@@ -13,15 +50,19 @@ export const OBSERVATION_ASSETS = [
   "OWNERSHIP",
 ] as const;
 export type ObservationAsset = (typeof OBSERVATION_ASSETS)[number];
-export type ObservationKind =
-  | "user"
-  | "coach"
-  | "tool_request"
-  | "approval"
-  | "tool_result"
-  | "artifact"
-  | "turn_end"
-  | "correction";
+/** /1 kinds. Preserved exactly; the eight learning kinds are a separate layer (SX-47). */
+export const LEGACY_OBSERVATION_KINDS = [
+  "user",
+  "coach",
+  "tool_request",
+  "approval",
+  "tool_result",
+  "artifact",
+  "turn_end",
+  "correction",
+] as const;
+export type LegacyObservationKind = (typeof LEGACY_OBSERVATION_KINDS)[number];
+export type ObservationKind = LegacyObservationKind | LearningEventKind;
 export interface ObservationEvent {
   id: string;
   seq: number;
@@ -30,13 +71,33 @@ export interface ObservationEvent {
   kind: ObservationKind;
   text: string;
   tool_id?: string;
-  outcome?: "allowed" | "denied" | "success" | "error" | "cancelled";
-  actor?: "user" | "policy";
+  outcome?: "allowed" | "denied" | "success" | "error" | "cancelled" | "match" | "mismatch" | "unknown";
+  /** /1 carries `user` | `policy`; /2 widens the enum without remapping either value (SX-44). */
+  actor?: ObservationActor;
   sha256?: string;
   assistance: "unknown" | "assisted" | "independent";
+  // ── /2 only (SX-44). Absent on every /1 event, which is why /1 is untouched. ──
+  context?: { week: number; step_id: string; task: string; module_version: string };
+  evidence_type?: EvidenceType;
+  source_kind?: SourceKind;
+  /** Fixed when stored (SX-46). A change is a new `correction` event, never an edit. */
+  source_state?: SourceState;
+  /** The student's own words. Only on an event the student authored. */
+  student_text?: string;
+  artifact_before?: string;
+  artifact_after?: string;
+  criterion_ref?: string;
+  turn_ref?: string;
+  result_ref?: string;
+  evidence_refs?: string[];
+  provenance?: { who: string; when: string; where: string };
+  /** A coach-proposed criterion the student accepted: the coach's event id (design rule 4). */
+  adopted_from?: string;
+  decision?: { from: string; to: string };
+  next_experiment?: string;
 }
 export interface ObservationBatch {
-  format: typeof OBSERVATION_FORMAT;
+  format: ObservationFormat;
   scope: string;
   session: string;
   program: string;
@@ -58,14 +119,106 @@ const str = (v: unknown, n = 200): v is string =>
 function check(ok: unknown, code: string): asserts ok {
   if (!ok) throw new Error(code);
 }
+
+// ── /2 field checks ───────────────────────────────────────────────────────────
+// Only ever reached for a /2 batch. Every refusal is named: a student reading
+// "invalid event" learns nothing, and a host cannot tell a typo from a policy.
+
+const shapeOf = (v: unknown, keys: readonly string[], max = 200): boolean =>
+  object(v) && Object.keys(v).length === keys.length && keys.every((k) => str(v[k], max));
+
+/** Is this /2 field present and well-formed? Presence is the caller's question. */
+function fieldOk(e: Record<string, unknown>, field: string): boolean {
+  switch (field) {
+    case "context":
+      return (
+        object(e.context) &&
+        shapeOf({ step_id: e.context.step_id, task: e.context.task, module_version: e.context.module_version }, ["step_id", "task", "module_version"]) &&
+        Object.keys(e.context).length === 4 &&
+        Number.isSafeInteger(e.context.week) &&
+        Number(e.context.week) >= 1
+      );
+    case "provenance":
+      return shapeOf(e.provenance, ["who", "when", "where"]);
+    case "decision":
+      return shapeOf(e.decision, ["from", "to"], 500);
+    case "evidence_refs":
+      return Array.isArray(e.evidence_refs) && e.evidence_refs.length >= 1 && e.evidence_refs.length <= 8 && e.evidence_refs.every((r) => str(r));
+    case "outcome":
+      return (LEARNING_OUTCOMES as readonly string[]).includes(String(e.outcome));
+    case "student_text":
+    case "next_experiment":
+      return str(e[field], 2000);
+    case "source_state":
+      return (SOURCE_STATES as readonly string[]).includes(String(e.source_state));
+    case "artifact_before":
+    case "artifact_after":
+      return typeof e[field] === "string" && /^[a-f0-9]{64}$/.test(String(e[field]));
+    default:
+      return str(e[field]);
+  }
+}
+
+/**
+ * The /2 rules for one event. `/1` events inside a /2 batch pass through this with
+ * nothing to check — the new fields are all absent on them.
+ */
+function checkLearningFields(e: Record<string, unknown>): void {
+  const kind = String(e.kind);
+  const learning = isLearningEventKind(kind);
+
+  if (e.actor !== undefined) check((OBSERVATION_ACTORS as readonly string[]).includes(String(e.actor)), "invalid_actor");
+  if (learning) check((OBSERVATION_ACTORS as readonly string[]).includes(String(e.actor)), "invalid_actor");
+
+  // SX-45 — AI text is never recorded as the student's. The one exception is the
+  // quote in `external_feedback_received`, whose own required-field row names
+  // `student_text` while its default actor is `external_user`; the student typed
+  // that quote in. Every other actor, on every kind, is refused by name.
+  if (e.student_text !== undefined) {
+    check(fieldOk(e, "student_text"), "invalid_learning_event");
+    const quoting = kind === "external_feedback_received" && e.actor === "external_user";
+    check(e.actor === "user" || quoting, "ai_text_as_student");
+  }
+
+  if (e.evidence_type !== undefined) check((EVIDENCE_TYPES as readonly string[]).includes(String(e.evidence_type)), "invalid_evidence_type");
+  if (e.source_kind !== undefined) check((SOURCE_KINDS as readonly string[]).includes(String(e.source_kind)), "invalid_source_kind");
+  if (e.source_state !== undefined) check(fieldOk(e, "source_state"), "invalid_source_state");
+  if (e.context !== undefined) check(fieldOk(e, "context"), "invalid_context");
+  if (e.provenance !== undefined) check(fieldOk(e, "provenance"), "invalid_provenance");
+
+  // SX-46 — `real` is not a word a host gets to write on its own: it takes either
+  // provenance (who/when/where) or an executed result bound to the revision.
+  if (e.source_state === "real") check(e.provenance !== undefined || e.result_ref !== undefined, "missing_provenance");
+
+  if (!learning) return;
+  const spec = LEARNING_EVENT_SPEC[kind as LearningEventKind];
+  check(e.evidence_type !== undefined, "invalid_evidence_type");
+  if (spec.evidence_type) check(e.evidence_type === spec.evidence_type, "invalid_evidence_type");
+  for (const field of spec.required) {
+    if (field === "source_state") {
+      // No default for this kind: the student picks, and nothing is filled in for them.
+      check(e.source_state !== undefined, "missing_source_state");
+      continue;
+    }
+    if (field === "student_text" && e.actor !== "user" && kind !== "external_feedback_received") {
+      // A learning event someone else authored (SX-45 keeps an actor=ai decision
+      // recordable) has no student_text at all; its own words stay in `text`.
+      check(str(e.text, 20000), "invalid_learning_event");
+      continue;
+    }
+    check(e[field] !== undefined && fieldOk(e, field), "invalid_learning_event");
+  }
+}
+
 export function validateObservation(value: unknown): {
   batch: ObservationBatch;
   missing: number[];
 } {
   check(
-    object(value) && value.format === OBSERVATION_FORMAT,
+    object(value) && (OBSERVATION_FORMATS as readonly string[]).includes(String(value.format)),
     "unsupported_observation",
   );
+  const v2 = value.format === OBSERVATION_FORMAT_V2;
   check(
     str(value.scope) && str(value.session) && str(value.program),
     "invalid_scope",
@@ -80,24 +233,27 @@ export function validateObservation(value: unknown): {
   );
   const ids = new Map<string, ObservationEvent>(),
     seqs = new Map<number, string>();
+  const allowedKeys = [
+    "id",
+    "seq",
+    "task",
+    "at",
+    "kind",
+    "text",
+    "tool_id",
+    "outcome",
+    "actor",
+    "sha256",
+    "assistance",
+    ...(v2 ? LEARNING_EVENT_KEYS : []),
+  ];
   for (const e of value.events) {
+    // A personal score has no place in an observed event either; named before the
+    // key allowlist so the refusal says what it is instead of "unknown field".
+    if (v2) forbidPersonalMetrics(e);
     check(
       object(e) &&
-        Object.keys(e).every((k) =>
-          [
-            "id",
-            "seq",
-            "task",
-            "at",
-            "kind",
-            "text",
-            "tool_id",
-            "outcome",
-            "actor",
-            "sha256",
-            "assistance",
-          ].includes(k),
-        ) &&
+        Object.keys(e).every((k) => allowedKeys.includes(k)) &&
         str(e.id) &&
         str(e.task) &&
         Number.isSafeInteger(e.seq) &&
@@ -107,16 +263,8 @@ export function validateObservation(value: unknown): {
       "invalid_event",
     );
     check(
-      [
-        "user",
-        "coach",
-        "tool_request",
-        "approval",
-        "tool_result",
-        "artifact",
-        "turn_end",
-        "correction",
-      ].includes(String(e.kind)),
+      (LEGACY_OBSERVATION_KINDS as readonly string[]).includes(String(e.kind)) ||
+        (v2 && (LEARNING_EVENT_KINDS as readonly string[]).includes(String(e.kind))),
       "invalid_kind",
     );
     check(
@@ -125,6 +273,7 @@ export function validateObservation(value: unknown): {
         ["unknown", "assisted", "independent"].includes(String(e.assistance)),
       "invalid_event_text",
     );
+    if (v2) checkLearningFields(e);
     if (["tool_request", "approval", "tool_result"].includes(String(e.kind)))
       check(str(e.tool_id), "missing_tool_id");
     if (e.kind === "approval")
@@ -165,9 +314,26 @@ export function validateObservation(value: unknown): {
     if (e.kind === "tool_result" || e.kind === "approval")
       check(requests.has(e.task + ":" + e.tool_id), "orphan_tool_event");
   }
+  if (v2) {
+    // A reference names something that is in this batch, or it names nothing.
+    // Order is not required: a criterion may be written after the test that cites
+    // it, and the gates are what care about order.
+    const artifacts = new Set(events.filter((e) => e.kind === "artifact").map((e) => e.sha256));
+    for (const e of events) {
+      for (const key of REF_KEYS) {
+        const ref = e[key];
+        if (ref !== undefined) check(ids.has(String(ref)), "orphan_ref");
+      }
+      for (const ref of e.evidence_refs ?? []) check(ids.has(ref), "orphan_ref");
+      for (const key of ARTIFACT_REF_KEYS) {
+        const ref = e[key];
+        if (ref !== undefined) check(artifacts.has(String(ref)), "unknown_artifact");
+      }
+    }
+  }
   return {
     batch: {
-      format: OBSERVATION_FORMAT,
+      format: value.format as ObservationFormat,
       scope: value.scope,
       session: value.session,
       program: value.program,
@@ -225,7 +391,9 @@ export function validateFindings(
       );
       const e = events.get(ref.event_id);
       check(e && e.text.includes(ref.quote), "fabricated_quote");
-      if (e.kind === "user" || e.kind === "correction") human = true;
+      // Same predicate as interpretation.ts, one definition (learning-events.ts).
+      // For a /1 event it answers exactly what `kind ∈ {user, correction}` did.
+      if (isHumanEvidence(e)) human = true;
       if (f.assistance === "independent")
         check(e.assistance === "independent", "unsupported_independence");
     }

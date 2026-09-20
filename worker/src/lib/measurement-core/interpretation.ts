@@ -6,6 +6,7 @@
 // explicit (possibly "unknown"), and nothing here produces a number.
 import type { ObservationBatch, ObservationEvent } from "./legacy-observation.ts";
 import { capabilityModel } from "./capability-models.ts";
+import { isAdoptedFromCoach, isHumanEvidence } from "./learning-events.ts";
 
 export const INTERPRETATION_FORMAT = "hps-interpretation/1";
 
@@ -74,6 +75,12 @@ const keysWithin = (v: Record<string, unknown>, allowed: readonly string[]) => O
 
 // Anything that looks like a personal score, level or ranking is refused wherever
 // it appears (MC-19), and so is any trace of arithmetic legacy conversion (MC-17).
+// `learning-events.ts` refuses the same seven names inside a /2 event and keeps its
+// own copy on purpose: this walk also refuses CONVERSION_KEYS and the per-key order
+// between the two lists is part of this function's behaviour. The two copies are
+// locked by a test that drives both refusals from one key list
+// (worker/test/learning-events.test.mjs), not by a shared export — the core
+// deliberately exports nothing whose name reads like a score (MC-T09).
 const SCORE_KEYS = ["score", "scores", "level", "points", "rank", "percentile", "grade"];
 const CONVERSION_KEYS = ["derived_from_legacy", "legacy_scores", "converted_from", "legacy_mapping"];
 function forbidKeys(value: unknown): void {
@@ -144,6 +151,28 @@ export function resolveVerification(
   check(!taskArtifacts.some((e) => e.seq > request.seq && e.seq < result.seq && e.sha256 !== target), "stale_verification");
   const current = taskArtifacts.at(-1)!.sha256!;
   return { checked_revision: target, current_revision: current, current: current === target };
+}
+
+/**
+ * Which of a finding's cited events are a criterion the coach proposed and the
+ * student accepted (design "관측 이벤트와 필드" rule 4).
+ *
+ * The student did submit the string, so this is not a refusal — the validator
+ * accepts the finding. It is what lets an interpretation, or a reviewer, leave the
+ * claim at `insufficient_evidence` instead of reading an adopted sentence as the
+ * student's own judgment. Nothing here guesses: it reads the `adopted_from` marker
+ * the host wrote, or it returns nothing.
+ */
+export function adoptedEvidence(batch: ObservationBatch, finding: { evidence?: unknown }): string[] {
+  const events = new Map(batch.events.map((e) => [e.id, e]));
+  const refs = Array.isArray(finding.evidence) ? finding.evidence : [];
+  const out: string[] = [];
+  for (const ref of refs) {
+    if (!object(ref) || typeof ref.event_id !== "string") continue;
+    const e = events.get(ref.event_id);
+    if (e && isAdoptedFromCoach(e) && !out.includes(e.id)) out.push(e.id);
+  }
+  return out;
 }
 
 export function validateInterpretation(value: unknown, batch: ObservationBatch): Interpretation {
@@ -222,8 +251,10 @@ export function validateInterpretation(value: unknown, batch: ObservationBatch):
     for (const ref of f.evidence) {
       const e = citedEvent(events, ref);
       // Only the person's own messages count as human behaviour. An assistant
-      // message, a policy approval or a tool result never does (MC-10).
-      if (e.kind === "user" || e.kind === "correction") human = true;
+      // message, a policy approval or a tool result never does (MC-10). /2 adds the
+      // student's own learning events and keeps actor=ai out (design rule 3); the
+      // predicate has one definition, in learning-events.ts.
+      if (isHumanEvidence(e)) human = true;
       if (f.assistance === "independent") check(e.assistance === "independent", "unsupported_independence");
     }
     if (f.status === "observed") check(human, "missing_human_evidence");
