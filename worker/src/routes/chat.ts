@@ -68,6 +68,7 @@ import {
   MODERATION_BLOCK_MESSAGE_KO,
 } from "../lib/moderation";
 import { runDeepHealth } from "../cron/health.ts";
+import { servedObservationFormat } from "../lib/measurement-core/legacy-observation.ts";
 
 // #358 — request-shaped upstream 4xx that /v1/chat passes through with its REAL
 // status + a sanitized OpenAI-shaped error `type`, instead of masking it as a
@@ -291,7 +292,28 @@ chat.get("/profile", async (c) => {
     profile_id: profile.id,
     ...(auth.payload.account?{access_identity:{kind:'account',scope:'account-'+await accessDigest(auth.payload.account)}}:{}),
     model_selection: servedModelSelection(c.env, profile, lesson?.content.model),
-    ...(profile.observation?.enabled ? { observation: { format: 'hps-observation/1', scope:observationScope } } : {}),
+    // The format is the cohort's to declare (design §관측 이벤트와 필드). It used
+    // to be hardcoded to /1 here, which meant a seat could never be served /2 —
+    // so the learning events, the completion gate and the Evidence drawer were
+    // all built and all unreachable. That is exactly the failure the comment
+    // above warns about: every gate test passed and the feature shipped INERT.
+    //
+    // `servedObservationFormat` also DOWNGRADES: `x-hps-observation-format` is
+    // the client telling us what its bundled validator understands, and an
+    // older app that only knows /1 would reject a /2 batch outright. Serving a
+    // cohort's /2 to that app would break observation for it entirely, so the
+    // cohort's declaration is a ceiling, not an order.
+    ...(profile.observation?.enabled
+      ? {
+          observation: {
+            format: servedObservationFormat(
+              profile.observation.format,
+              c.req.header("x-hps-observation-format"),
+            ),
+            scope: observationScope,
+          },
+        }
+      : {}),
     // dag task H — which curriculum module this seat is running. Observability
     // only (the prompt itself never leaves the worker): lets e2e/observe and
     // the instructor tell "which curriculum" without a D1 query.

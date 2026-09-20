@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isLearningEventKind } from "../../../worker/src/lib/measurement-core/learning-events.ts";
 import {
   OBSERVATION_FORMAT,
   validateObservation,
@@ -34,6 +35,14 @@ export class NativeObservationRecorder {
     text: string,
     extra: Partial<ObservationEvent> = {},
   ) {
+    // SX-45 rule 2 — learning kinds are made by the webview-form handler and by
+    // nothing else. Splitting `recordLearningEvent()` out was necessary but NOT
+    // sufficient: this signature still accepts every /2 kind, and `extra` is
+    // spread BEFORE the fixed fields, so a coach-stream caller passing
+    // `{actor:"user", student_text}` would write AI prose as the student's own.
+    // Today no caller does that — but "no caller does" is a convention, and the
+    // requirement asks for a rule. So it is a rule.
+    if (isLearningEventKind(kind)) throw Error("learning_kind_needs_form");
     if (this.batch.events.length >= 500) {
       this.batch.incomplete = true;
       throw Error("observation_capacity");

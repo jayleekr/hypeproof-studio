@@ -1975,10 +1975,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           stepEvidenceType: step?.evidence as never,
         });
         // 거절은 조용히 삼키지 않는다 — 학생이 적은 것이 사라지면 다시 적지 않는다.
-        if (!made.ok) { this.nativeObservationError = '남긴 내용을 저장하지 못했습니다 ('+made.code+'). 다시 한 번 눌러 주세요.'; }
+        if (!made.ok) { this.nativeObservationError = '남긴 내용을 저장하지 못했어요 ('+made.code+'). 다시 한 번 눌러 주세요.'; }
         else {
           try { recorder.recordLearningEvent(made.event); this.persistObservation(recorder); this.nativeObservationError = null; }
-          catch (error) { this.nativeObservationError = '남긴 내용을 저장하지 못했습니다 ('+(error as Error).message+').'; }
+          catch (error) { this.nativeObservationError = '남긴 내용을 저장하지 못했어요 ('+(error as Error).message+').'; }
         }
         await this.postLearningState();
         return;

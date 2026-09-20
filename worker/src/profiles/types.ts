@@ -5,8 +5,18 @@
 import type { LLMProvider } from "../env.ts";
 
 export interface Profile {
-  /** Explicit opt-in; observation does not grant any execution tools. */
-  observation?: { enabled: boolean };
+  /**
+   * Explicit opt-in; observation does not grant any execution tools.
+   *
+   * `format` picks which observation contract this cohort's seats are served
+   * (design §관측 이벤트와 필드: "프로필 observation.format 이 어느 쪽을 쓸지 정한다").
+   * Absent means `hps-observation/1` — every cohort that existed before this
+   * field keeps its exact behaviour. `hps-observation/2` is the superset that
+   * carries the eight learning kinds, and it is what makes the completion gate
+   * and the Evidence drawer reachable at all: with no cohort declaring it, the
+   * client never builds a /2 recorder and those screens never render.
+   */
+  observation?: { enabled: boolean; format?: "hps-observation/1" | "hps-observation/2" };
   /** Empty starts wait for a task; absent preserves existing web curriculum. */
   workspace_start?: 'empty' | 'html';
   id: string;

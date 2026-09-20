@@ -39,6 +39,7 @@ const {
   NUMERIC_PATTERNS,
   ALLOWED_NUMERIC,
   DENIAL_MARKERS,
+  auditPrimaryCta,
   auditRegionText,
   parseCssCustomProperties,
 } = await import("./sx-audit.mjs");
@@ -362,7 +363,41 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   } else {
     const { chatPanelProps } = await import("./sx-screen-fixtures.mjs");
 
-    const chat = visibleText(await renderComponent("ChatPanel", chatPanelProps()));
+    const chatHtml = await renderComponent("ChatPanel", chatPanelProps());
+    const chat = visibleText(chatHtml);
+
+    // SX-51 · 루브릭 G — 강조 버튼은 화면에 **하나**다.
+    //
+    // 이 단언이 없어서 P1 에서 둘이 됐다(영역 A 의 첫 action + "이 과제 완료하기").
+    // 텍스트 덤프에는 class 가 남지 않으므로 **마크업**을 센다. 강조가 둘이면
+    // "지금 할 것" 이 둘이 되고, 그게 SX-01 이 막으려는 것이다.
+    const primary = auditPrimaryCta(chatHtml);
+    assert.equal(primary.ok, true, `작업 화면의 Primary CTA 가 ${primary.count}개다`);
+
+    // 양성 대조군 — 규칙이 "0개" 를 요구하는 것이 아님을 보인다. 하나는 있어야 한다.
+    assert.equal(primary.count, 1, "강조 버튼이 하나도 없다 — 학생이 어디를 눌러야 할지 모른다");
+
+    // 음성 대조군 — 세는 규칙이 정말 세는지. 심은 마크업이 걸려야 한다.
+    assert.equal(auditPrimaryCta('<button class="hp-cta-primary">A</button><button class="a hp-cta-primary b">B</button>').ok, false);
+    assert.equal(auditPrimaryCta('<button class="hp-cta-quiet">A</button>').count, 0);
+
+    // 위 렌더는 영역 D(완료 CTA + 서랍)를 **포함하지 않는다** — 그 영역은 호스트가
+    // 보낸 `learningState` 가 있어야 그려지고 SSR 은 `useEffect` 를 돌리지 않는다.
+    // 그래서 "화면에 강조가 하나" 는 지금 렌더로는 D 를 빼고 센 값이다.
+    // 정직하게 **소스를 정적으로** 한 번 더 센다. class 가 리터럴이라 셀 수 있다.
+    const chatSource = readFileSync(new URL("../webview-ui/src/ChatPanel.tsx", import.meta.url), "utf8");
+    const sourcePrimary = chatSource.match(/className="hp-cta-primary"/g)?.length ?? 0;
+    assert.equal(
+      sourcePrimary,
+      0,
+      `ChatPanel 이 Primary CTA 를 ${sourcePrimary}개 직접 그린다 — 강조 자리는 영역 A(MissionHeader)가 갖는다`,
+    );
+    const headerSource = readFileSync(new URL("../webview-ui/src/MissionHeader.tsx", import.meta.url), "utf8");
+    assert.equal(
+      headerSource.match(/hp-cta-primary/g)?.length,
+      1,
+      "영역 A 의 강조 버튼이 하나가 아니다",
+    );
     // 규칙 4 — 빈 렌더를 감사하면 무엇이든 통과한다. 무엇이 렌더됐는지 먼저 확인한다.
     assert.ok(chat.length >= 200, `ChatPanel 렌더가 ${chat.length}자다: ${JSON.stringify(chat.slice(0, 200))}`);
     assert.ok(chat.includes("AI가 만든 걸 내가 확인했나?"), "작업 화면에 미션 문장이 없다");

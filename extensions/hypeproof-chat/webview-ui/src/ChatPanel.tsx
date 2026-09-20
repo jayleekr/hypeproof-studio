@@ -3,6 +3,7 @@ import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
 import { MissionHeader } from './MissionHeader';
 import { EvidenceDrawer } from './EvidenceDrawer';
+import { isObservationFormat } from '../../src/nativeObservationContract';
 import { MarkdownText } from './MarkdownText';
 import { DisconnectedChat } from "./StartPage";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -685,7 +686,11 @@ export function ChatPanel(props: Props) {
                 판정은 호스트가 했고 여기서는 그리기만 한다. */}
             <button
               type="button"
-              className="hp-cta-primary"
+              // **Primary 가 아니다.** 강조 버튼은 화면에 하나이고 그 자리는 영역 A 의
+              // "지금 할 행동" 이 갖는다(SX-01·SX-51). 완료는 그 행동들을 다 한 **뒤에**
+              // 누르는 것이라 눈에 먼저 들어올 이유가 없다. 둘 다 강조하면 "지금 할 것"
+              // 이 둘이 된다.
+              className="hp-cta-quiet"
               disabled={!learning.complete.ok}
               onClick={() => postToHost({ type: "submitTask", task: learning.task })}
             >
@@ -717,8 +722,12 @@ export function ChatPanel(props: Props) {
         </section>
       )}
 
-      {config?.profile?.observation?.format === 'hps-observation/1' && <NativeObservationPanel scope={config.profile.observation.scope} coachName={coachName} />}
-      {config?.profile?.profile_id === 'studio-native-trial' && config.profile.observation?.format !== 'hps-observation/1' && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}
+      {/* 두 줄 다 원래 `=== 'hps-observation/1'` 로 못박혀 있었다. `/2` 가 열리는
+          순간 (a) 관찰 패널이 사라지고 (b) 서랍이 멀쩡히 동작하는 화면 옆에
+          "관찰을 지원하지 않습니다" 가 같이 떴다. 판정 기준은 "관찰이 켜져 있나"
+          이지 "어느 버전인가" 가 아니다. */}
+      {isObservationFormat(config?.profile?.observation?.format) && <NativeObservationPanel scope={config!.profile!.observation!.scope} coachName={coachName} />}
+      {config?.profile?.profile_id === 'studio-native-trial' && !isObservationFormat(config.profile.observation?.format) && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}
 
       <div className="hps-messages" ref={scrollRef}>
         {props.aiNotice && (

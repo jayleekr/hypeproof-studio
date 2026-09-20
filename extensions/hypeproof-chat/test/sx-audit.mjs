@@ -212,6 +212,25 @@ export function isDenialSentence(sentence) {
  *        빈 문자열을 감사하는 계측기는 무엇이든 통과시킨다).
  * @returns {{ok: boolean, findings: Array<{kind: string, rule: string, match: string, index: number, label: string}>, exempt: Array, masked: Array, length: number}}
  */
+/**
+ * SX-51 · 루브릭 G — 한 화면의 Primary CTA 는 **하나**다.
+ *
+ * 이 규칙이 없어서 P1 에서 둘이 됐다(`MissionHeader` 의 첫 action 과 `ChatPanel` 의
+ * "이 과제 완료하기"). 감사기가 텍스트만 보고 있었기 때문에 보이지 않았다 — 강조
+ * 버튼이 둘이면 "지금 할 것" 이 둘이 되고, 그것이 SX-01 이 막으려는 것이다.
+ *
+ * 렌더된 **마크업**을 센다. 텍스트 덤프에는 class 가 남지 않는다.
+ */
+export function countPrimaryCta(html) {
+  return String(html ?? "").match(/class="[^"]*\bhp-cta-primary\b/g)?.length ?? 0;
+}
+
+/** 하나 이하인가. 초과분과 함께 돌려준다. */
+export function auditPrimaryCta(html) {
+  const count = countPrimaryCta(html);
+  return { ok: count <= 1, count };
+}
+
 export function auditRegionText(text, opts = {}) {
   const { region = "work", minLength = 1 } = opts;
   const source = typeof text === "string" ? text : "";

@@ -189,6 +189,25 @@ test("SX-15 with no change_requested there is nothing to re-verify", () => {
   assert.equal(gate("draft_then_criterion").verification.state, "none");
 });
 
+test("SX-45 human evidence reads actor, and the /1 rule it widened is no longer identical", () => {
+  // 심은 결함 #15(평가자) — `isHumanEvidence` 의 actor 가드를 지워도 스위트 전체가
+  // 초록이었다. 그 가드는 "AI 가 쓴 글은 학생 행동이 아니다" 의 마지막 방어선이고
+  // 검사가 없었다. 동시에 이 함수는 `/1` 의 규칙을 **넓힌** 것이라, `/1` 이 허용하던
+  // 이벤트가 이제 human 이 아니게 되는 자리가 있다. 그 사실도 여기 못 박는다.
+  assert.equal(core.isHumanEvidence({ kind: "user" }), true, "학생 발화가 human 이 아니다");
+  assert.equal(core.isHumanEvidence({ kind: "correction" }), true, "정정이 human 이 아니다");
+  assert.equal(core.isHumanEvidence({ kind: "coach" }), false, "코치 발화가 human 으로 셌다");
+
+  // actor 가드 — 이 두 줄이 없으면 위 세 줄은 전부 통과하면서 가드는 죽어 있다.
+  assert.equal(core.isHumanEvidence({ kind: "user", actor: "ai" }), false, "AI 가 쓴 user 이벤트가 human 으로 셌다");
+  assert.equal(core.isHumanEvidence({ kind: "user", actor: "policy" }), false, "정책이 만든 이벤트가 human 으로 셌다");
+  assert.equal(core.isHumanEvidence({ kind: "user", actor: "user" }), true, "학생이 낸 것이 막혔다");
+
+  // 학습 kind 는 actor=user 일 때만 human 이다.
+  assert.equal(core.isHumanEvidence({ kind: "criterion_set", actor: "user" }), true);
+  assert.equal(core.isHumanEvidence({ kind: "criterion_set", actor: "ai" }), false);
+});
+
 test("SX-15/AE-37 a confirmation stops covering the work once the criterion or the revision moves", () => {
   // 확인 자체는 진짜로 있었던 일이다. 그래서 **지우지 않고** 보존한 채 상태만 내린다
   // ("이전 증거는 보존한다"). 지우면 학생이 한 확인이 없었던 일이 된다.

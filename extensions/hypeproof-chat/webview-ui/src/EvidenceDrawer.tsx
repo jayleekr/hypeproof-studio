@@ -10,6 +10,7 @@ import {
   decisionReason,
   filterBySourceKind,
   groupByEvidenceType,
+  normalizeSourceState,
   partitionBySourceState,
   provenanceLine,
   shortRevision,
@@ -257,13 +258,18 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
  * 라벨을 빠뜨리게 되고, 그것이 SX-21 이 금지하는 "라벨 없는 외부 반응" 이다.
  */
 function renderRow(row: EvidenceRowView) {
-  const amber = AMBER_STATES.includes(row.source_state);
+  // **한 번만 정규화하고 셋 다 그 값을 쓴다.** 원래는 `amber` 와 `data-source-state`
+  // 가 원값을, 라벨만 정규화 값을 썼다. 호스트를 거치지 않는 경로가 생겨 모르는
+  // 문자열이 들어오면 마크업은 그 문자열을, 라벨은 "아직 확인 전" 을 말하게 된다 —
+  // 같은 줄이 두 가지로 읽히는 것이 SX-21 이 막으려는 바로 그것이다.
+  const state = normalizeSourceState(row.source_state);
+  const amber = AMBER_STATES.includes(state);
   return (
     <li
       key={row.id}
       className={amber ? "hp-evidence-row hp-amber" : "hp-evidence-row"}
       // 색뿐이면 색맹인 학생과 흑백 인쇄에서 구분이 사라진다. 마크업에도 남긴다.
-      data-source-state={row.source_state}
+      data-source-state={state}
     >
       <p className="hp-evidence-text">
         {row.evidence_type === "decision" ? decisionReason(row) : row.text}
@@ -271,7 +277,7 @@ function renderRow(row: EvidenceRowView) {
       <p className="hp-evidence-meta">
         <span>{SOURCE_KIND_LABELS[row.source_kind] ?? SOURCE_KIND_LABELS.none}</span>
         <span>{provenanceLine(row)}</span>
-        <span className="hp-evidence-state">{sourceStateLabel(row.source_state)}</span>
+        <span className="hp-evidence-state">{sourceStateLabel(state)}</span>
       </p>
       {row.adopted_from && <p className="hp-evidence-adopted">코치가 제안한 문장을 받아서 적었어요</p>}
     </li>

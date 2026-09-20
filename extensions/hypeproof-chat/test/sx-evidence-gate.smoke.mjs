@@ -75,13 +75,62 @@ const COMPLETION = [
 
 {
   // 코치가 쓴 기대 조건(actor=ai)은 게이트를 통과하지 못한다.
+  //
+  // **이 시료에 `student_text` 가 반드시 있어야 한다.** 처음엔 없이 썼는데,
+  // `satisfiesGate()` 는 텍스트 절에서 먼저 false 를 내므로 **actor 절이 한 번도
+  // 실행되지 않았다.** 단언은 초록인데 재는 것이 없었다 — `isStudentAuthored` 절을
+  // 통째로 지워도 스위트 전체가 초록이었다(평가자 F-2). 텍스트를 채워야 actor 절만
+  // 남는다. 검증기는 이 이벤트를 `ai_text_as_student` 로 거절하지만, `satisfiesGate`
+  // 는 순수 함수라 직접 부를 수 있고 여기서 재려는 것이 바로 그 절이다.
   seq = 0;
   const state = learningState({
     task: TASK,
-    events: [ev("criterion_set", { actor: "ai", context: CTX, evidence_type: "criterion", source_state: "self_reported" }), aiDraft()],
+    events: [
+      ev("criterion_set", {
+        actor: "ai",
+        student_text: "코치가 대신 적어 준 기대 조건",
+        context: CTX,
+        evidence_type: "criterion",
+        source_state: "self_reported",
+      }),
+      aiDraft(),
+    ],
     completion: [COMPLETION[0]],
   });
   assert.equal(state.complete.ok, false, "코치가 쓴 기대 조건이 학생 것으로 집계됐다 (SX-45)");
+}
+
+{
+  // `student_text` 칸이 **아예 없는** kind 에서는 actor 절이 유일한 방어다.
+  // 강사는 `learning.completion` 에서 8종 중 아무거나 고를 수 있으므로 이 경로가
+  // 실제로 쓰인다. 위 시료만으로는 이 자리가 덮이지 않는다.
+  seq = 0;
+  const byCoach = ev("test_observed", {
+    actor: "ai",
+    criterion_ref: "cs1",
+    artifact_after: "a".repeat(64),
+    outcome: "match",
+    context: CTX,
+    evidence_type: "action",
+    source_state: "self_reported",
+  });
+  const state = learningState({
+    task: TASK,
+    events: [criterion(), byCoach],
+    completion: [{ id: "c2", event: "test_observed", label: "직접 시험하기" }],
+  });
+  assert.equal(state.complete.ok, false, "코치가 '확인했다' 고 한 것이 학생의 확인으로 집계됐다");
+
+  // 양성 대조군 — 같은 이벤트를 학생이 냈으면 통과한다. 막고 있는 것이 kind 가
+  // 아니라 **actor** 임을 보인다.
+  seq = 0;
+  const byStudent = { ...byCoach, actor: "user" };
+  const ok = learningState({
+    task: TASK,
+    events: [criterion(), byStudent],
+    completion: [{ id: "c2", event: "test_observed", label: "직접 시험하기" }],
+  });
+  assert.equal(ok.complete.ok, true, "학생이 직접 확인했는데 막혔다 — 너무 엄격하다");
 }
 
 {
@@ -390,6 +439,58 @@ const COMPLETION = [
     /invalid_learning_event/,
     "검증기는 빈 근거 목록을 받아 준다 — 그렇다면 호스트 쪽 거절이 과잉 엄격이다",
   );
+}
+
+// ── 7. SX-45 규칙 2 를 **규칙으로** 강제한다 (record() 경로) ────────────────
+//
+// P1-B 에서 `recordLearningEvent()` 를 `record()` 와 나눠 두고 "폼 제출만 학습
+// 이벤트를 만든다" 고 PR 본문에 적었다. **나눠 둔 것이 막은 것은 아니었다** —
+// `record()` 는 `/2` 의 모든 kind 를 받고, `extra` 를 고정 필드보다 **먼저** 펼치므로
+// 코치 스트림 콜백이 `{actor:"user", student_text}` 를 넘기면 AI 가 쓴 글이 학생의
+// 학습 이벤트로 저장됐다. "오늘 아무도 그렇게 부르지 않는다" 는 관습이지 규칙이 아니다.
+
+{
+  const { NativeObservationRecorder } = await import("../src/nativeObservationRecorder.ts");
+  const context = { format: "hps-observation/2", scope: "s", session: "sess", program: "p" };
+  const make = () => new NativeObservationRecorder(context);
+
+  // 음성: 코치 스트림 경로가 학습 kind 를 만들려 하면 이름을 붙여 거절한다.
+  assert.throws(
+    () => make().record(TASK, "criterion_set", "코치가 대신 적는다"),
+    /learning_kind_needs_form/,
+    "코치 스트림이 학습 이벤트를 만들 수 있다 (SX-45 규칙 2)",
+  );
+
+  // 음성: actor 와 student_text 를 실어 보내도 마찬가지다. 이것이 실제 위험 경로다.
+  assert.throws(
+    () =>
+      make().record(TASK, "criterion_set", "코치가 대신 적는다", {
+        actor: "user",
+        student_text: "코치가 대신 적는다",
+        context: CTX,
+        evidence_type: "criterion",
+        source_state: "self_reported",
+      }),
+    /learning_kind_needs_form/,
+    "AI 가 쓴 글이 actor=user 학습 이벤트로 저장됐다 (루브릭 C5)",
+  );
+
+  // 양성 대조군 둘 — 막고 있는 것이 `record()` 자체가 아니라 **학습 kind** 임을 보인다.
+  const legacy = make();
+  legacy.record(TASK, "coach", "코치가 한 말");
+  legacy.record(TASK, "artifact", "index.html", { sha256: "a".repeat(64) });
+  assert.equal(legacy.batch.events.length, 2, "기존 kind 까지 막혔다 — 너무 엄격하다");
+
+  // 양성: 폼 경로는 그대로 열려 있다. 규칙이 기능을 죽이지 않았다는 증거다.
+  const form = make();
+  const made = learningEventRequest(
+    { kind: "criterion_set", student_text: "버튼을 누르면 이름이 보인다" },
+    { ...CTX, sender: "webview-form" },
+  );
+  assert.equal(made.ok, true);
+  form.recordLearningEvent(made.event);
+  assert.equal(form.batch.events.length, 1, "폼 경로까지 막혔다");
+  assert.equal(form.batch.events[0].actor, "user");
 }
 
 console.log("sx-evidence-gate: OK");

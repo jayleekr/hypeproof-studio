@@ -294,8 +294,19 @@ export const AMBER_STATES: readonly string[] = ["simulated"];
  * 이 화면이 할 수 있는 가장 나쁜 실수다(SX-46).
  */
 export function sourceStateLabel(state: unknown): string {
+  return SOURCE_STATE_LABELS[normalizeSourceState(state)]!;
+}
+
+/**
+ * 모르는 값·빈 값을 `unverified` 로 떨어뜨린다.
+ *
+ * 라벨·Amber 판정·`data-source-state` 가 **전부 이 함수를 지나야** 한 줄이 두 가지로
+ * 읽히지 않는다. 라벨만 정규화하고 나머지가 원값을 쓰면, 모르는 문자열이 들어왔을 때
+ * 마크업은 그 문자열을 말하고 화면은 "아직 확인 전" 을 말한다.
+ */
+export function normalizeSourceState(state: unknown): string {
   const key = typeof state === "string" ? state : "";
-  return SOURCE_STATE_LABELS[key] ?? SOURCE_STATE_LABELS.unverified!;
+  return Object.prototype.hasOwnProperty.call(SOURCE_STATE_LABELS, key) ? key : "unverified";
 }
 
 /**

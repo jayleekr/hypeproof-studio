@@ -3,7 +3,17 @@
 // /1 was moved verbatim from worker/src/lib/native-observation.ts (#1042). App and
 // Service both import this one file; /1 behaviour is pinned to the pre-extraction
 // verdicts in worker/test/fixtures/measurement-core/legacy-verdicts.json (MC-T01)
-// and must reproduce them byte for byte.
+// and must reproduce them byte for byte **for that corpus**.
+//
+// That claim is narrower than it first reads, and the difference matters.
+// /2 widened the human-evidence rule from `kind ∈ {user, correction}` to
+// `isHumanEvidence()`, which ALSO reads `actor`. /1 never constrained `actor`
+// outside `approval`, so a valid /1 event like `{kind:"user", actor:"policy"}`
+// is accepted by the old rule and refused by the new one. The golden corpus
+// carries no such event, so the fixtures stay byte-identical while the RULE has
+// moved. The direction is the one SX-45 wants (AI prose is not the student's),
+// but saying "byte for byte" without this paragraph is a scope claim wider than
+// its evidence.
 //
 // /2 (P1-A; SX-44–SX-48) is a SUPERSET handled in this same file, because a second
 // validator is exactly what SX-48 forbids. `validateObservation()` looks at
@@ -412,3 +422,43 @@ export function validateFindings(
   }
   return value as ObservationFinding[];
 }
+
+/**
+ * Which observation contract one seat is actually served (SX-44~48, P1 F-1).
+ *
+ * Two inputs, both of which can say "only /1":
+ *   - `declared` — what the cohort's profile asks for. Absent means /1, so every
+ *     cohort that existed before the field keeps its exact behaviour.
+ *   - `client` — the `x-hps-observation-format` header, i.e. what the app build
+ *     in front of us can parse. An older Studio bundles a validator that has
+ *     never heard of /2 and rejects such a batch outright, so serving it /2
+ *     would break observation for that seat completely.
+ *
+ * The cohort's declaration is therefore a **ceiling, not an order**: /2 is
+ * served only when both sides can carry it.
+ *
+ * `/v1/profile` and `/observations/context` both call this, which is the whole
+ * point — if they computed it separately the client could build a /2 recorder
+ * and then be handed a /1 context, and every learning event would be dropped
+ * with `observation_format` while the screen looked fine.
+ */
+export function servedObservationFormat(
+  declared: string | undefined,
+  client: string | undefined,
+): ObservationFormat {
+  const wants = declared === OBSERVATION_FORMAT_V2;
+  const canParse = client === OBSERVATION_FORMAT_V2;
+  return wants && canParse ? OBSERVATION_FORMAT_V2 : OBSERVATION_FORMAT;
+}
+
+/**
+ * Is this a contract the app knows how to record against?
+ *
+ * The screen's question is "is observation on for this seat", not "which
+ * version is it". Two places used to ask `=== "hps-observation/1"`, so the
+ * moment a cohort was served /2 the observation panel vanished and a
+ * "this connection does not support observation" notice appeared next to a
+ * perfectly working Evidence drawer.
+ */
+export const isObservationFormat = (value: unknown): value is ObservationFormat =>
+  (OBSERVATION_FORMATS as readonly string[]).includes(String(value));

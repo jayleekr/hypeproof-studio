@@ -213,6 +213,21 @@ if (!status.available) {
   assert.ok(/class="[^"]*hp-amber/.test(html), "가상 줄에 표시 class 가 없다");
   assert.ok(/data-source-state="simulated"/.test(html), "가상 표시가 색뿐이다 — 마크업에 남지 않았다");
   assert.ok(/data-source-state="real"/.test(html), "실제 줄에도 상태가 마크업에 있어야 한다");
+
+  // F-9 — 모르는 값이 와도 **마크업과 라벨이 같은 말을 한다.** 원래는 라벨만
+  // 정규화하고 `data-source-state` 와 amber 는 원값을 써서, 한 줄이 두 가지로
+  // 읽힐 수 있었다.
+  const odd = await renderComponent("EvidenceDrawer", {
+    open: true,
+    rows: [row({ id: "x1", source_state: "이런_값은_없다", text: "출처를 모르는 말" })],
+    verification: { state: "none", source_state: "unverified", line: "아직 고쳐 달라고 한 것이 없어요" },
+    onSubmit: () => {},
+    onToggle: () => {},
+  });
+  assert.ok(!/data-source-state="이런_값은_없다"/.test(odd), "모르는 값이 마크업에 그대로 새어 나갔다");
+  assert.ok(/data-source-state="unverified"/.test(odd), "모르는 값이 unverified 로 떨어지지 않았다");
+  assert.ok(visibleText(odd).includes(SOURCE_STATE_LABELS.unverified), "라벨과 마크업이 다른 말을 한다");
+  assert.ok(!/data-source-state="real"/.test(odd), "모르는 값이 real 로 승격됐다");
   // 실제에는 그 표시가 붙지 않는다.
   assert.ok(!/data-source-state="simulated"[^>]*>[^<]*실제로/.test(html));
 
