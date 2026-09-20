@@ -196,13 +196,13 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
         if (this.actions.hasActiveRun()) return { ok: false, code: "busy_active_run" };
         return (await this.actions.refreshProfile()) ? { ok: true, code: "profile_verified" } : { ok: false, code: "profile_not_verified" };
       } },
-      cancel_current_run: { mutating: true, run: async () => {
+      cancel_current_run: { mutating: true, label: "지금 실행 중인 작업 멈추기", run: async () => {
         const stopped = await stopAndConfirm({ requestStop: () => this.actions.requestStop(), isStopped: () => !this.actions.hasActiveRun(), wait: (ms) => new Promise((r) => setTimeout(r, ms)) });
         // An unconfirmed stop holds NEW runs only. What already happened outside is not undone, and is not claimed to be.
         this.stopUnconfirmed = !stopped; this.applyHold();
         return stopped ? { ok: true, code: "run_stopped" } : { ok: false, code: "stop_unconfirmed" };
       } },
-      reset_runtime: { mutating: true,
+      reset_runtime: { mutating: true, label: "AI 세션 다시 시작 (대화와 파일은 그대로)",
         run: async (signal, command) => {
           const r = await runPreservingReset(command.command_id, this.resetSteps(command.command_id), signal);
           if (r.code === "stop_unconfirmed") { this.stopUnconfirmed = true; this.applyHold(); }
