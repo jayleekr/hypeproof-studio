@@ -17,7 +17,7 @@ import { bearer, signOpsCredential, verifyOpsCredential } from '../lib/tokens';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { parseFlags, sha256Hex, type OpsCapability } from '../lib/classroom-ops';
 import { snapshotKey } from '../lib/classroom-collect';
-import { LEASE_MS, RENDERER_REVISION, composeReport, modelById, validateDraft } from '../lib/classroom-report';
+import { LEASE_MS, RENDERER_REVISION, composeReport, draftKey, draftPrefix, modelById, validateDraft } from '../lib/classroom-report';
 import { DEFAULT_CAPABILITY_MODEL } from '../lib/measurement-core/index.ts';
 import { evaluateInput, evaluatorConfig, rubricVersion, type Transport } from '../lib/classroom-evaluator';
 import { getProfile } from '../profiles';
@@ -28,7 +28,6 @@ type Db = Env['HPS_DB'];
 type Job = { id: string; job_key: string; batch_id: string; class_run_id: string; cohort_id: string; student_id: string; input_manifest_digest: string; input_revision: number; snapshot_revision: number; input_coverage: string; capability_model: string; rubric: string; evaluator: string; renderer_revision: string; state: string; reason: string; lease_owner: string; lease_generation: number; lease_expires_at: number; draft_digest: string; summary_json: string; revision: number };
 const json = async (c: any) => { try { return await c.req.json(); } catch { return null; } };
 const audit = (db: Db, run: string, kind: string, id: string, action: string, detail: unknown, at: number) => db.prepare("INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) VALUES(?,'',?,?,?,?,?)").bind(run, kind, id, action, JSON.stringify(detail), at);
-const draftKey = (j: Job) => `classroom-reports/${j.cohort_id}/${j.class_run_id}/${j.student_id}/${j.id}/draft.json`;
 const VERSION_RE = /^[A-Za-z0-9_.:+-]{1,64}$/;
 
 export const classroomReportsTeacher = new Hono<{ Bindings: Env }>();
@@ -79,12 +78,44 @@ classroomReportsTeacher.post(root + '/jobs', async (c) => {
   return c.json(await queueView(db, batch.id), 201);
 });
 
-/** Store a validated result on a leased job. One learner's broken draft is isolated; every other job keeps going. */
+/**
+ * Store a validated result on a leased job. One learner's broken draft is isolated; every other job keeps going.
+ *
+ * R2 and D1 do not share a transaction, so the order is: ask D1 → write the body → let D1 DECIDE → undo the body if D1 said no.
+ *   - D1 decides with one statement: the lease generation is still the live one AND the learner has no withdrawal tombstone.
+ *     A result that arrives after a withdrawal, an erasure or a re-claim therefore never becomes a draft.
+ *   - The body is written under this generation's own key (see draftKey), so undoing it cannot touch a draft that another
+ *     generation committed, and a late write cannot replace one.
+ *   - The check before the write only saves work; it is not the guarantee. A write that was already in flight when the
+ *     learner withdrew is removed right here. If this process dies between the write and the removal, the object is one
+ *     the erasure ledger re-checks after the write window has closed (lib/classroom-erasure.ts, `settled`).
+ */
+const liveLease = " state='leased' AND lease_generation=?2 AND NOT EXISTS (SELECT 1 FROM classroom_collect_tombstones t WHERE t.class_run_id=classroom_report_jobs.class_run_id AND t.student_id=classroom_report_jobs.student_id)";
+async function discardBody(env: Env, job: Job, key: string, actor: { kind: string; id: string }, now: number) {
+  try { await env.HPS_TRACES.delete(key); }
+  catch { // Content-free note; the object itself is found again by prefix (erasure re-check, or the next stored result of this job).
+    await audit(env.HPS_DB, job.class_run_id, actor.kind, actor.id, 'report_draft_discard_failed', { job_id: job.id }, now).run().catch(() => {});
+    console.error('classroom reports: a discarded draft body could not be removed yet', job.id);
+  }
+}
+/** The learner withdrew while this job was leased: the job ends here. It is not re-queued, so their words are not read or sent to a provider again. */
+const WITHDRAWN = { state: 'withdrawn', reason: 'withdrawn', draft_digest: '', ok: false } as const;
+const closeIfWithdrawn = (db: Db, job: Job, generation: number, now: number) => db.prepare("UPDATE classroom_report_jobs SET state='withdrawn',reason='withdrawn',draft_digest='',summary_json='{}',lease_expires_at=0,revision=revision+1,updated_at=?3 WHERE id=?1 AND state='leased' AND lease_generation=?2 AND EXISTS (SELECT 1 FROM classroom_collect_tombstones t WHERE t.class_run_id=classroom_report_jobs.class_run_id AND t.student_id=classroom_report_jobs.student_id) RETURNING id").bind(job.id, generation, now).first();
 async function saveResult(env: Env, job: Job, generation: number, v: ReturnType<typeof validateDraft> | { ok: false; state: 'failed'; reason: string }, actor: { kind: string; id: string }, now: number) {
-  const db = env.HPS_DB; let digest = '', summary = {};
-  if (v.ok) { const body = JSON.stringify(v.draft); digest = await sha256Hex(body); await env.HPS_TRACES.put(draftKey(job), body, { httpMetadata: { contentType: 'application/json' } }); summary = { observed: v.draft.findings.filter((f) => f.status === 'observed').length, not_yet_seen: v.draft.findings.filter((f) => f.status !== 'observed').length }; }
-  const saved = await db.prepare("UPDATE classroom_report_jobs SET state=?,reason=?,draft_digest=?,summary_json=?,lease_expires_at=0,revision=revision+1,updated_at=? WHERE id=? AND state='leased' AND lease_generation=? RETURNING state").bind(v.state, v.reason, digest, JSON.stringify(summary), now, job.id, generation).first<{ state: string }>();
-  if (!saved) return null;
+  const db = env.HPS_DB; let digest = '', summary = {}, key = '';
+  if (v.ok) {
+    if (!(await db.prepare(`SELECT 1 FROM classroom_report_jobs WHERE id=?1 AND${liveLease}`).bind(job.id, generation).first())) return (await closeIfWithdrawn(db, job, generation, now)) ? WITHDRAWN : null;
+    const body = JSON.stringify(v.draft); digest = await sha256Hex(body); key = draftKey(job, generation);
+    await env.HPS_TRACES.put(key, body, { httpMetadata: { contentType: 'application/json' } });
+    summary = { observed: v.draft.findings.filter((f) => f.status === 'observed').length, not_yet_seen: v.draft.findings.filter((f) => f.status !== 'observed').length };
+  }
+  let saved: { state: string } | null = null;
+  try { saved = await db.prepare(`UPDATE classroom_report_jobs SET state=?3,reason=?4,draft_digest=?5,summary_json=?6,lease_expires_at=0,revision=revision+1,updated_at=?7 WHERE id=?1 AND${liveLease} RETURNING state`).bind(job.id, generation, v.state, v.reason, digest, JSON.stringify(summary), now).first<{ state: string }>(); }
+  catch (err) { if (key) await discardBody(env, job, key, actor, now); throw err; }
+  if (!saved) { if (key) await discardBody(env, job, key, actor, now); return (await closeIfWithdrawn(db, job, generation, now)) ? WITHDRAWN : null; }
+  if (key) { // Bodies left by earlier generations of this job (a lease that died after its write) are not the draft: remove them.
+    try { for (const o of (await env.HPS_TRACES.list({ prefix: draftPrefix(job), limit: 100 })).objects) if (o.key !== key) await env.HPS_TRACES.delete(o.key); } catch { /* found again at erasure */ }
+  }
   await audit(db, job.class_run_id, actor.kind, actor.id, 'report_draft_' + v.state, { job_id: job.id, reason: v.reason, draft_digest: digest }, now).run();
   return { state: v.state, reason: v.reason, draft_digest: digest, ok: v.ok };
 }
@@ -104,6 +135,7 @@ async function evaluateLeased(env: Env, job: Job, profileId: string, actor: { ki
   // The job is pinned to an evaluator/rubric. This Service evaluates only jobs pinned to what it actually runs.
   if (!model || job.evaluator !== cfg.id || job.rubric !== rubricVersion(model)) { await release('evaluator_mismatch'); return { state: 'queued', reason: 'evaluator_mismatch', ok: false }; }
   if (model.status === 'legacy') { await release('legacy_engine_required'); return { state: 'queued', reason: 'legacy_engine_required', ok: false }; }
+  if (await closeIfWithdrawn(db, job, job.lease_generation, now)) return WITHDRAWN;
   const input = await env.HPS_TRACES.get(snapshotKey(job.cohort_id, job.class_run_id, job.student_id, job.batch_id, job.snapshot_revision, 'events.jsonl'));
   if (!input) return saveResult(env, job, job.lease_generation, { ok: false, state: 'failed', reason: 'input_missing' }, actor, now);
   const text = await input.text();
@@ -205,7 +237,7 @@ classroomReportsTeacher.get(root + '/reports/:job', async (c) => {
   if (!job.draft_digest) return c.json({ id: job.id, student_id: job.student_id, state: job.state, reason: job.reason, draft: null });
   // Fail closed: the view is recorded before the learner's words leave.
   await audit(c.env.HPS_DB, t.run.class_run_id, 'instructor', t.auth.payload.u, 'report_draft_viewed', { job_id: job.id, draft_digest: job.draft_digest }, now).run();
-  const obj = await c.env.HPS_TRACES.get(draftKey(job)); if (!obj) return c.json({ error: 'draft body is missing', reason: 'draft_missing' }, 409);
+  const obj = await c.env.HPS_TRACES.get(draftKey(job, job.lease_generation)); if (!obj) return c.json({ error: 'draft body is missing', reason: 'draft_missing' }, 409);
   const draft = JSON.parse(await obj.text()), model = modelById(job.capability_model)!;
   const cumulative = await c.env.HPS_DB.prepare("SELECT count(DISTINCT class_run_id) AS n FROM classroom_report_jobs WHERE cohort_id=? AND student_id=? AND state IN ('review_required','approved','partial')").bind(job.cohort_id, job.student_id).first<{ n: number }>();
   return c.json({ id: job.id, student_id: job.student_id, state: job.state, reason: job.reason, revision: job.revision, draft_digest: job.draft_digest, input: { manifest_digest: job.input_manifest_digest, revision: job.input_revision, coverage: job.input_coverage }, report: composeReport(draft, { class_runs_with_evidence: cumulative?.n ?? 1, coverage: job.input_coverage, model }) });
@@ -242,7 +274,9 @@ classroomReportsRunner.post('/claim', async (c) => {
   const b = (await json(c)) ?? {}, run = await db.prepare('SELECT profile_id FROM class_run_ops WHERE class_run_id=?').bind(c.get('run')).first<{ profile_id: string }>();
   const cfg = evaluatorConfig(c.env, profileModel(run?.profile_id ?? '')), want = b.can && typeof b.can === 'object' ? b.can : { service: true, legacy: true, local: true };
   const can: Runnable = { service: want.service && cfg ? { evaluator: cfg.id, rubric: rubricVersion(DEFAULT_CAPABILITY_MODEL), model: DEFAULT_CAPABILITY_MODEL.id } : null, legacy: want.legacy === true, local: want.local === true };
-  const job = await claimNext(db, batch, runner, now, can);
+  // A learner who withdrew is never handed to a runner: their leased job is closed instead and the next one is tried.
+  let job = await claimNext(db, batch, runner, now, can);
+  for (let i = 0; job && i < 50 && (await closeIfWithdrawn(db, job, job.lease_generation, now)); i++) job = await claimNext(db, batch, runner, now, can);
   if (!job) {
     // Nothing for THIS runner. Say why work may still be waiting, so an operator sees "not configured" instead of an idle runner.
     const waiting = ((await db.prepare("SELECT j.capability_model,j.evaluator,COALESCE(a.next_attempt_at,0) AS next_at FROM classroom_report_jobs j LEFT JOIN classroom_report_job_attempts a ON a.job_id=j.id WHERE j.batch_id=? AND j.state='queued'").bind(batch).all()).results ?? []) as Array<{ capability_model: string; evaluator: string; next_at: number }>;
@@ -251,7 +285,7 @@ classroomReportsRunner.post('/claim', async (c) => {
   }
   return c.json({ job: { id: job.id, student_id: job.student_id, lease_generation: job.lease_generation, lease_ms: LEASE_MS, capability_model: job.capability_model, rubric: job.rubric, evaluator: job.evaluator, renderer_revision: job.renderer_revision, input: { manifest_digest: job.input_manifest_digest, coverage: job.input_coverage, files: ['session.meta.json', 'events.jsonl'] } } });
 });
-const leased = (c: any, generation: unknown) => c.env.HPS_DB.prepare("SELECT * FROM classroom_report_jobs WHERE id=? AND batch_id=? AND state='leased' AND lease_owner=? AND lease_generation=? AND lease_expires_at>?").bind(c.req.param('job'), c.get('batch'), c.get('runner'), Number(generation), Date.now()).first() as Promise<Job | null>;
+const leased = (c: any, generation: unknown) => c.env.HPS_DB.prepare("SELECT * FROM classroom_report_jobs WHERE id=? AND batch_id=? AND state='leased' AND lease_owner=? AND lease_generation=? AND lease_expires_at>? AND NOT EXISTS (SELECT 1 FROM classroom_collect_tombstones t WHERE t.class_run_id=classroom_report_jobs.class_run_id AND t.student_id=classroom_report_jobs.student_id)").bind(c.req.param('job'), c.get('batch'), c.get('runner'), Number(generation), Date.now()).first() as Promise<Job | null>;
 classroomReportsRunner.get('/jobs/:job/input/:file', async (c) => {
   const job = await leased(c, c.req.query('generation')); if (!job) return c.json({ error: 'no live lease on this job', reason: 'lease_lost' }, 409);
   if (!['session.meta.json', 'events.jsonl'].includes(c.req.param('file'))) return c.json({ error: 'not an input file' }, 400);
@@ -268,7 +302,7 @@ classroomReportsRunner.post('/jobs/:job/result', bodyLimit({ maxSize: 512 * 1024
   const v = b?.failed ? ({ ok: false, state: 'failed', reason: /^[a-z_]{1,48}$/.test(b.failed) ? b.failed : 'runner_failed' } as const) : validateDraft(b?.draft, job, input ? await input.text() : '');
   const saved = await saveResult(c.env, job, job.lease_generation, v, { kind: 'runner', id: c.get('runner') }, now);
   if (!saved) return c.json({ error: 'lease changed while saving; result discarded', reason: 'lease_lost' }, 409);
-  return c.json({ state: saved.state, reason: saved.reason, draft_digest: saved.draft_digest }, saved.ok ? 201 : 422);
+  return c.json({ state: saved.state, reason: saved.reason, draft_digest: saved.draft_digest }, saved.ok ? 201 : saved.state === 'withdrawn' ? 409 : 422);
 });
 // The restricted runner can also ask the Service to evaluate the job it holds: the input never leaves the Service.
 classroomReportsRunner.post('/jobs/:job/evaluate', async (c) => {
@@ -276,5 +310,5 @@ classroomReportsRunner.post('/jobs/:job/evaluate', async (c) => {
   const run = await c.env.HPS_DB.prepare('SELECT profile_id FROM class_run_ops WHERE class_run_id=?').bind(job.class_run_id).first<{ profile_id: string }>();
   const r = await evaluateLeased(c.env, job, run?.profile_id ?? '', { kind: 'runner', id: c.get('runner') }, now);
   if (!r) return c.json({ error: 'lease changed while saving; result discarded', reason: 'lease_lost' }, 409);
-  return c.json(r, r.ok ? 201 : r.state === 'queued' ? 409 : 422);
+  return c.json(r, r.ok ? 201 : r.state === 'queued' || r.state === 'withdrawn' ? 409 : 422);
 });

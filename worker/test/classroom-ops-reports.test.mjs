@@ -87,7 +87,7 @@ try {
     const { runOnce, emptyDraft } = await import('../../scripts/classroom-report-runner.mjs'); assert.throws(() => emptyDraft({ capability_model: 'made-up' }));
     f.db.prepare("UPDATE classroom_report_jobs SET state='queued',reason='',lease_owner='',lease_expires_at=0,draft_digest='' WHERE state<>'missing' AND capability_model='candidate-capability-v1'").run();
     const fetchImpl = (url, init) => f.app.fetch(new Request(String(url).replace('https://runner.test', 'https://service.test'), init), f.env, { waitUntil() {} }); const lines = [];
-    const drafts = () => [...f.r2.keys()].filter((k) => k.endsWith('/draft.json')).length, before = drafts();
+    const drafts = () => [...f.r2.keys()].filter((k) => /\/draft\.g\d+\.json$/.test(k)).length, before = drafts();
     // No Service evaluator and no local one: the runner is NOT handed the job (so it cannot spin on it or block others), and it is told why work waits.
     const a = await runOnce({ service: 'https://runner.test', credential: runner, fetchImpl, log: (l) => lines.push(l) }); assert.equal(a.claimed, false); assert.deepEqual([a.waiting.needs_local_evaluator > 0, a.waiting.service_evaluator_configured], [true, false]); assert.match(lines.join('\n'), /the Service evaluator is NOT configured/);
     assert.equal(drafts(), before, 'no draft was written'); const reviewer = await f.teacher('reviewer', ['observe', 'review']);

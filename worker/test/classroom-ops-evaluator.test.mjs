@@ -26,8 +26,9 @@ async function fixture(t, { configured = true, inputs = [record, record] } = {})
   const conns = []; for (let i = 0; i < inputs.length; i++) { const c = (await f.pair(seats[i].seat_id, 1, i + 1)).conn.json; conns.push(c); assert.equal((await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: true, purpose: 'class_report', notice_version: 'notice-v1' }, c.credential)).status, 201); }
   const batch = (await f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: 1, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false })).json.batch.id;
   for (let i = 0; i < inputs.length; i++) assert.equal((await f.uploadSnapshotAs(conns[i], batch, 1, inputs[i])).status, 201);
-  return { ...f, batch, B: f.base + '/report-batches/' + batch, advance: () => f.request(f.base + '/report-batches/' + batch + '/advance', 'POST', {}) };
+  return { ...f, conns, batch, B: f.base + '/report-batches/' + batch, advance: () => f.request(f.base + '/report-batches/' + batch + '/advance', 'POST', {}) };
 }
+const fixtureWithConns = (t, inputs = [record, record]) => fixture(t, { inputs });
 /** A stand-in provider that behaves like a careful one: it picks the learner's own first excerpt for FRAMING. */
 const careful = (calls) => async (request) => { calls.push(request); const catalog = JSON.parse(request.messages[0].content).evidence_catalog, own = catalog.find((q) => q.basis);
   return Response.json({ content: [{ type: 'text', text: JSON.stringify({ findings: [{ capability: 'FRAMING', status: 'observed', claim: '확인할 조건을 먼저 정함', evidence: [{ quote_id: own.quote_id }], assistance: 'independent' }, { capability: 'JUDGMENT', status: 'unobserved' }], next_experiment: '다음에는 확인 조건을 두 개 적어 보기' }) }], usage: { input_tokens: 10, output_tokens: 5 } }); };
@@ -47,7 +48,7 @@ test('R5 "수업 마무리" path: receipts → one job per learner → evaluated
   const jobs = (await f.request(f.B + '/reports')).json.jobs;
   assert.deepEqual(jobs.map((j) => [j.state, j.evaluator, j.rubric, j.summary.observed, j.summary.not_yet_seen]), Array(2).fill(['partial', EVALUATOR_REVISION, rubricVersion(CANDIDATE_CAPABILITY_V1), 1, CANDIDATE_CAPABILITY_V1.capabilities.length - 1]));
   assert.ok(jobs.every((j) => j.state !== 'approved'), 'evaluation never approves; review stays a human act');
-  const draft = JSON.parse(new TextDecoder().decode([...f.r2.entries()].find(([k]) => k.endsWith('/draft.json'))[1]));
+  const draft = JSON.parse(new TextDecoder().decode([...f.r2.entries()].find(([k]) => /\/draft\.g\d+\.json$/.test(k))[1]));
   assert.deepEqual(draft.findings[0].evidence, [{ locator: { line: 1, turn_id: 't1' }, quote: '예약 버튼이 모바일에서 눌리는지 먼저 확인하고 싶어요', actor: 'student', source_state: 'unverified' }], 'legacy locator + verified provenance, verbatim quote');
   assert.equal(draft.findings[0].assistance, 'independent'); assert.ok(!JSON.stringify(draft).match(/score|rank|level|percentile/));
   // The provider saw the rubric that already exists (capability definitions), and no raw metadata.
@@ -151,4 +152,52 @@ test('queue: the restricted runner is only handed what it said it can run', asyn
   assert.equal((await claim({ service: true, legacy: false, local: false })).json.job, null, 'no Service evaluator configured → a service-only runner gets nothing, and does not spin on it');
   assert.equal((await claim({ service: false, legacy: true, local: false })).json.job, null);
   const got = (await claim({ service: true, legacy: false, local: true })).json.job; assert.equal(got.evaluator, 'none', 'a runner with its own evaluator takes the job pinned to no Service evaluator');
+});
+
+// ── a result that arrives late (#751, 2026-09-20 review) ──
+// R2 and D1 share no transaction. These tests hold the provider or the R2 write at a barrier — never a sleep — and
+// let the other party finish first. What must hold: D1 decides, a refused body does not stay, and nobody else's draft is touched.
+const sha = async (buf) => Buffer.from(await crypto.subtle.digest('SHA-256', buf)).toString('hex');
+const reportObjects = (f, student) => [...f.r2.keys()].filter((k) => k.startsWith('classroom-reports/') && k.includes(`/${student}/`));
+function barrier() { let open, reached; const gate = new Promise((r) => { open = r; }), hit = new Promise((r) => { reached = r; }); return { gate, hit, open: () => open(), reached: () => reached() }; }
+/** Blocks the FIRST draft write until released; every later write goes straight through. The write itself still lands. */
+function holdFirstDraftPut(f) { const b = barrier(), put = f.env.HPS_TRACES.put; let held = false;
+  f.env.HPS_TRACES.put = async (key, value, opts) => { if (!held && key.startsWith('classroom-reports/')) { held = true; b.reached(); await b.gate; } return put(key, value, opts); }; return b; }
+const withdraw = (f, conn) => f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: false, purpose: 'class_report', notice_version: 'notice-v1' }, conn.credential);
+
+test('late result: the learner withdraws while the provider is still answering — nothing is stored for them, the job ends, the next learner is unaffected', async (t) => {
+  const f = await fixtureWithConns(t), calls = [], b = barrier(), answer = careful(calls);
+  setEvaluatorTransport(async (req) => { if (!calls.length) { const r = answer(req); b.reached(); await b.gate; return r; } return answer(req); });
+  const first = f.advance(); await b.hit; assert.equal((await withdraw(f, f.conns[0])).status, 200); b.open();
+  const r = await first; assert.equal(r.status, 200, r.raw); assert.deepEqual([r.json.step.state, r.json.step.reason], ['withdrawn', 'withdrawn']);
+  assert.deepEqual(reportObjects(f, 'student-a'), [], 'the late answer did not become an object');
+  let more = r.json.more; for (let i = 0; more && i < 5; i++) more = (await f.advance()).json.more;
+  const jobs = (await f.request(f.B + '/reports')).json.jobs; assert.deepEqual(jobs.map((j) => [j.student_id, j.state, j.draft_digest === '']), [['student-a', 'withdrawn', true], ['student-b', 'partial', false]]);
+  assert.equal(calls.length, 2, 'the withdrawn learner is not sent to the provider again'); const kept = reportObjects(f, 'student-b'); assert.equal(kept.length, 1);
+  assert.equal(await sha(f.r2.get(kept[0])), jobs[1].draft_digest, 'the other learner has exactly the draft that was committed');
+});
+test('late result: the withdrawal lands while the body is being written — D1 refuses the result and the body that was just written is removed', async (t) => {
+  const f = await fixtureWithConns(t), calls = []; setEvaluatorTransport(careful(calls)); const b = holdFirstDraftPut(f);
+  const first = f.advance(); await b.hit; assert.equal((await withdraw(f, f.conns[0])).status, 200); b.open();
+  const r = await first; assert.equal(r.json.step.state, 'withdrawn'); assert.deepEqual(reportObjects(f, 'student-a'), [], 'the write landed and was undone');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM ops_audit WHERE action LIKE 'report_draft_%' AND detail_json LIKE '%student-a%'").get().n, 0);
+});
+test('late result: a lease that expired and was re-claimed — the stale writer cannot replace or delete the draft the new generation committed', async (t) => {
+  const f = await fixtureWithConns(t, [record]), calls = []; setEvaluatorTransport(careful(calls)); const b = holdFirstDraftPut(f);
+  const stale = f.advance(); await b.hit; f.db.prepare("UPDATE classroom_report_jobs SET lease_expires_at=1 WHERE state='leased'").run();
+  const fresh = await f.advance(); assert.equal(fresh.json.step.state, 'partial'); const committed = reportObjects(f, 'student-a'); assert.deepEqual(committed.map((k) => k.slice(-13)), ['draft.g2.json']);
+  b.open(); const late = await stale; assert.equal(late.status, 200); assert.equal(late.json.step.state, undefined, 'the stale lease stored nothing');
+  assert.deepEqual(reportObjects(f, 'student-a'), committed, 'generation 1 wrote its own object and removed it again');
+  const job = (await f.request(f.B + '/reports')).json.jobs[0]; assert.equal(await sha(f.r2.get(committed[0])), job.draft_digest);
+  const opened = await f.request(f.B + '/reports/' + job.id); assert.equal(opened.status, 200, opened.raw); assert.equal(opened.json.draft_digest, job.draft_digest); assert.ok(opened.json.report.sections.length > 0, 'the reviewer opens the committed draft');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM ops_audit WHERE action='report_draft_partial'").get().n, 1, 'one stored result, not two');
+});
+test('late result: the removal itself fails — the request still answers, a content-free note is kept, and the next stored result of the job clears the leftover', async (t) => {
+  const f = await fixtureWithConns(t, [record]), calls = []; setEvaluatorTransport(careful(calls)); const b = holdFirstDraftPut(f), del = f.env.HPS_TRACES.delete;
+  const stale = f.advance(); await b.hit; f.db.prepare("UPDATE classroom_report_jobs SET state='queued',lease_expires_at=0 WHERE state='leased'").run(); // the lease is gone, nobody has re-claimed yet
+  f.env.HPS_TRACES.delete = async () => { throw Error('synthetic R2 unavailable'); }; b.open();
+  const late = await stale; assert.equal(late.status, 200, late.raw); assert.equal(reportObjects(f, 'student-a').length, 1, 'precondition: the leftover exists');
+  const note = f.db.prepare("SELECT detail_json FROM ops_audit WHERE action='report_draft_discard_failed'").get(); assert.ok(note && !note.detail_json.includes('예약'), 'the note holds ids only');
+  f.env.HPS_TRACES.delete = del; const again = await f.advance(); assert.equal(again.json.step.state, 'partial');
+  assert.deepEqual(reportObjects(f, 'student-a').map((k) => k.slice(-13)), ['draft.g2.json'], 'only the committed generation is left');
 });

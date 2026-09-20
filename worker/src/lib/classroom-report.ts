@@ -5,6 +5,14 @@ import { CAPABILITY_MODELS, capabilityModel, forbidKeys, type CapabilityModel } 
 
 export const RENDERER_REVISION = 'observation-report/1';
 export const LEASE_MS = 5 * 60_000;
+/**
+ * Where a draft body lives. One object per LEASE GENERATION, never one per job: a writer whose lease was lost (expired and
+ * re-claimed, or the learner withdrew) can then only ever touch its own object. It cannot overwrite the draft another
+ * generation committed, and discarding its late write cannot delete that draft either. The committed body is the one
+ * named by the job row's `lease_generation` — a job is never leased again once a result is stored.
+ */
+export const draftPrefix = (j: { cohort_id: string; class_run_id: string; student_id: string; id: string }) => `classroom-reports/${j.cohort_id}/${j.class_run_id}/${j.student_id}/${j.id}/`;
+export const draftKey = (j: { cohort_id: string; class_run_id: string; student_id: string; id: string }, generation: number) => `${draftPrefix(j)}draft.g${generation}.json`;
 export const NOT_YET_SEEN = '아직 충분히 보지 못함';
 export const JOB_STATES = ['queued', 'leased', 'missing', 'partial', 'quarantined', 'draft', 'review_required', 'approved', 'failed'] as const;
 export const modelById = (id: string): CapabilityModel | undefined => CAPABILITY_MODELS.find((m) => m.id === id);
