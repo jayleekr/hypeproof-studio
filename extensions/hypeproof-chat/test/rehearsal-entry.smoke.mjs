@@ -47,9 +47,10 @@ assert.equal(seen.u,'https://synthetic.invalid/v1/rehearsal/redeem');
 assert(!seen.u.includes(TICKET),'교환권이 URL 에 실렸다');
 assert.equal(JSON.parse(seen.init.body).ticket,TICKET);
 
-// 멱등 창(#1131 §2.1) — 같은 교환권을 다시 내면 서버가 붙여 둔 같은 자격을 돌려준다.
-// 앱은 그것을 첫 교환과 똑같이 취급해야 한다. 재시도를 앱이 막으면 네트워크가 한 번
-// 튄 강사가 수업 직전에 링크를 영영 못 쓴다. 여기서 고정해 두는 이유다.
+// 계층 규율 — 재제출의 허용 여부는 **Service 가 정한다**(재제출 정책 자체는 아직 미정이고
+// 서버 쪽 작업에서 정해진다). 앱이 할 일은 받은 대로 내고 받은 대로 여는 것뿐이다.
+// 앱이 "이미 냈다" 고 스스로 판단해 막으면 같은 판정이 두 곳에 생기고 둘이 갈린다(ARC-01).
+// 그리고 네트워크가 한 번 튄 강사가 수업 직전에 링크를 영영 못 쓴다. 여기서 고정해 둔다.
 let calls=0;
 const idem=async()=>redeemRehearsalTicket({proxyUrl:'https://synthetic.invalid/v1',ticket:TICKET,
   fetchImpl:async()=>{calls++;return{ok:true,status:200,json:async()=>({token:'same-student-token'})};}});
