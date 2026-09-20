@@ -1,30 +1,34 @@
-// 디자인 토큰의 대조와, 렌더 DOM 감사 계측기의 **자기 검증** — 계측기가 계측기를 잰다.
+// Checking the design tokens against the doc, and the **self-verification** of the render DOM
+// audit instrument — the instrument measuring the instrument.
 //
-// 요구: SX-49~54(디자인 토큰/표현 규칙) · SX-35(금지 라벨 6개) · SX-43(관찰 패널) · SX-59(7자산 N/7 제거).
-// 계약: docs/testing/studio-learning-experience.md §렌더 DOM 감사 계측기.
-//       판정 규율: .claude/rules/verification.md 규칙 1·2·3·4.
+// Requirements: SX-49~54 (design tokens / presentation rules) · SX-35 (6 banned labels) ·
+// SX-43 (observation panel) · SX-59 (remove the 7-asset N/7).
+// Contract: docs/testing/studio-learning-experience.md §렌더 DOM 감사 계측기.
+//       Decision discipline: .claude/rules/verification.md rules 1·2·3·4.
 //
-// 왜 이 TC 가 있나 (실제 사건 두 건):
+// Why this TC exists (two real incidents):
 //
-//   1) 2026-07-25~27, 사흘 동안 계측기가 **열다섯 번 틀렸고 그중 9건이 전부**
-//      "관측 대상을 확인하지 않고 짐작해서 판정 기준을 세웠다" 였다. 9건 모두
-//      *실패* 쪽으로 틀려서 드러났다. 통과 쪽으로 틀렸다면 거짓 초록이 그대로
-//      보고됐을 것이다. 그래서 이 파일은 **양성 대조군을 먼저** 둔다 — 너무
-//      엄격한 계측기를 잡는 쪽이 핵심이다.
+//   1) 2026-07-25~27: over three days the instrument was **wrong fifteen times, and 9 of
+//      those were all** "wrote the criterion by guessing, without checking the thing being
+//      measured". All 9 were wrong toward *failure*, which is why they surfaced. Had they
+//      been wrong toward passing, a false green would have been reported as is. So this file
+//      puts the **positive controls first** — catching an instrument that is too strict is
+//      the key part.
 //
-//   2) memory "Korean regex single-char trap": 맨 /색/ 이 "검색" 을 물었다.
-//      같은 함정이 여기 실제로 있다. "점수" 는 오늘 출하되는 화면에 **두 번**
-//      나오는데 둘 다 *표시*가 아니라 *부정*이다 —
+//   2) memory "Korean regex single-char trap": a bare /색/ matched "검색". The same trap is
+//      actually here. "점수" appears **twice** on today's shipped screens and both are
+//      *denials*, not *displays* —
 //        webview-ui/src/NativeObservationPanel.tsx:57  "관찰은 점수나 능력 인증이 아닙니다."
 //        webview-ui/src/LocalReview.tsx:41             "대화량은 역량 점수가 아닙니다."
-//      이 두 문장은 올바른 카피다. 계측기가 이걸 물면 제품이 아니라 계측기가
-//      틀린 것이고, 멀쩡한 문장을 지우러 가게 된다. 그래서 **두 문장을 원문
-//      그대로** 양성 대조군에 박아 둔다.
+//      Both sentences are correct copy. If the instrument bites them, it is the instrument
+//      that is wrong, not the product, and someone goes off to delete perfectly good
+//      sentences. So **both sentences are pinned verbatim** into the positive controls.
 //
-//   3) 같은 이유로 "3주차" 와 "남은 단계 2" 도 양성 대조군이다. 검증 문서가
-//      "이걸 수치로 잡으면 계측기 결함" 이라고 명시한다.
+//   3) For the same reason "3주차" and "남은 단계 2" are positive controls too. The
+//      verification doc states outright that flagging these as numerals is an instrument
+//      defect.
 //
-// 대조군이 하나라도 틀리면 그 실행의 모든 감사 결과는 무효다(검증 문서).
+// If even one control is wrong, every audit result from that run is void (verification doc).
 //
 // Run: node --experimental-strip-types test/sx-audit.smoke.mjs
 
@@ -39,14 +43,15 @@ const {
   NUMERIC_PATTERNS,
   ALLOWED_NUMERIC,
   DENIAL_MARKERS,
+  auditPrimaryCta,
   auditRegionText,
   parseCssCustomProperties,
 } = await import("./sx-audit.mjs");
 
 const { rendererStatus, renderComponent, visibleText } = await import("./sx-render.mjs");
 
-// 오늘 실제로 출하되는 문자열. 위 파일들에서 그대로 옮겼다(복사가 아니라 인용이며,
-// 렌더 대조군이 같은 문장을 실제 렌더 결과에서 다시 확인한다).
+// Strings that actually ship today. Taken verbatim from the files above (a quotation, not a
+// copy — the render control re-checks the same sentence against the real render output).
 const REAL_DENIAL_OBSERVATION =
   "내가 요청한 내용과 코치·도구가 수행한 일을 나누어 확인합니다. 관찰은 점수나 능력 인증이 아닙니다.";
 const REAL_DENIAL_LOCAL_REVIEW =
@@ -56,9 +61,10 @@ const REAL_OBSERVATION_COUNT_LINE =
 
 const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.match)}@${f.index}`).join(", ");
 
-// ─── 디자인 토큰 (SX-49 ~ SX-54) ─────────────────────────────────────
-// 값의 정본은 설계 문서다. 그래서 기대값을 여기에 적지 않고 **설계 문서를 읽어서**
-// tokens.css 와 대조한다. 둘 중 하나만 바뀌면 이 블록이 잡는다.
+// ─── Design tokens (SX-49 ~ SX-54) ───────────────────────────────────
+// The design doc is canonical for the values. So the expected values are not written here —
+// the **design doc is read** and checked against tokens.css. If only one of the two changes,
+// this block catches it.
 {
   const designDoc = readFileSync(
     new URL("../../../docs/design/studio-learning-experience.md", import.meta.url),
@@ -87,15 +93,17 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   console.log(`ok 토큰: tokens.css 의 ${Object.keys(fromFile[":root"]).length}개 값이 설계 문서와 일치한다`);
 }
 
-// start.css 는 별칭이어야 하고, 별칭의 대상 값이 **이 변경 전의 리터럴과 같아야** 한다.
-// 그래야 "렌더 색은 그대로다" 가 주장이 아니라 검사가 된다.
+// start.css must be aliases, and each alias target's value must be **the same as the literal
+// before this change**. That is what turns "the rendered colors are unchanged" from a claim
+// into a check.
 {
   const startCss = readFileSync(new URL("../webview-ui/src/start.css", import.meta.url), "utf8");
   const block = parseCssCustomProperties(startCss)[".studio-start,.studio-disconnected"];
   assert.ok(block, ".studio-start,.studio-disconnected 블록을 찾지 못했다");
 
-  // 왼쪽은 별칭 대상, 오른쪽은 2026-09-20 이 변경 직전 start.css 의 리터럴
-  // (git show HEAD:extensions/hypeproof-chat/webview-ui/src/start.css 로 확인).
+  // Left is the alias target, right is the literal in start.css immediately before this
+  // 2026-09-20 change (confirmed with
+  // git show HEAD:extensions/hypeproof-chat/webview-ui/src/start.css).
   const ALIASES = {
     "--studio-bg": ["--hp-bg", "#151D19"],
     "--studio-panel": ["--hp-panel", "#202C24"],
@@ -118,7 +126,7 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   console.log("ok 토큰: start.css 의 --studio-* 6개가 --hp-* 별칭이고 값이 변경 전과 같다");
 }
 
-// ─── 규칙 목록이 문서와 같은 것을 본다 ────────────────────────────────
+// ─── Check that the rule lists match the docs ─────────────────────────
 {
   const labels = BANNED_LABELS.map((r) => r.label);
   for (const expected of ["개선 필요", "낮음", "높음", "상위 N%", "역량 부족", "AI 활용 고수", "성장 점수"]) {
@@ -137,7 +145,7 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   console.log("ok 규칙 목록이 요구·검증 문서의 목록과 같다");
 }
 
-// ─── 양성 대조군 — 정상 시료가 통과해야 한다 (너무 엄격한 계측기를 잡는다) ──
+// ─── Positive controls — a good sample must pass (catches an instrument that is too strict) ──
 {
   const clean = [
     "3주차 · 미션: 사용자 한 명에게 직접 물어보고 문제 한 줄을 확정한다",
@@ -188,7 +196,8 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
 {
   const r = auditRegionText("2026-09-20 오후 3:05 · 12개 저장됨", { region: "work" });
   assert.equal(r.ok, true, `날짜·시각·N개 카운트가 걸렸다: ${describe(r)}`);
-  // 아래 둘은 `bare_number` 규칙 추가 직후 실제 ChatPanel 렌더에서 걸린 정상 문자열이다.
+  // The two below are normal strings that the real ChatPanel render got flagged on right
+  // after the `bare_number` rule was added.
   const ord = auditRegionText("이번 단계 안내 · 1. 기대 조건\n3주차 · Underlying Magic", { region: "work" });
   assert.equal(ord.ok, true, `목록 번호를 수치로 잡았다 → 계측기가 너무 엄격하다: ${describe(ord)}`);
   const ver = auditRegionText("Underlying Magic · 버전 m2026.09.20-1 · 120분", { region: "work" });
@@ -196,7 +205,7 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   console.log("ok 양성: 날짜·시각·N개 카운트 · 목록 번호 · 모듈 버전은 허용 수치다");
 }
 
-// ─── 음성 대조군 — 나쁜 시료가 각각 실패해야 한다 (너무 관대한 계측기를 잡는다) ──
+// ─── Negative controls — each bad sample must fail (catches an instrument that is too lax) ──
 {
   const negatives = [
     ["검증 점수 62점", "score_word"],
@@ -212,8 +221,8 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
     ["코호트 랭킹", "ranking"],
     ["B등급", "grade_word"],
     ["52.5 / 100", "ratio_hundred"],
-    // 2026-09-20 평가 D-3 에서 잡힌 구멍. 규칙을 더했으면 대조군도 같이 더한다 —
-    // 대조군 없는 규칙은 돌고 있는지 알 방법이 없다.
+    // A hole caught in the 2026-09-20 evaluation, D-3. If a rule is added, a control is added
+    // with it — with no control there is no way to know whether a rule is running at all.
     ["레벨 3", "level"],
     ["Lv 7", "level"],
     ["★★★☆☆", "stars"],
@@ -231,7 +240,7 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   console.log(`ok 음성: ${negatives.length}개 시료가 각각 제 규칙으로 실패한다`);
 }
 
-// ─── 심은 정답 — 라벨 6개를 심고 정확히 6건을 세는지 ─────────────────────
+// ─── Planted answer — plant 6 labels and check it counts exactly 6 ──────
 {
   const planted = "개선 필요 · 낮음 · 상위 10% · 역량 부족 · AI 활용 고수 · 성장 점수";
   const r = auditRegionText(planted, { region: "work" });
@@ -250,7 +259,7 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   console.log("ok 심은 정답: 라벨 6개를 심으면 정확히 6건을 센다 (겹치는 규칙은 중복 계수하지 않는다)");
 }
 
-// ─── 규칙 4 가드 — 빈 문자열을 감사하면 항상 ok 가 나온다 ────────────────
+// ─── Rule 4 guard — auditing an empty string always comes back ok ───────
 {
   const r = auditRegionText("", { minLength: 40 });
   assert.equal(r.ok, false, "빈 영역이 통과했다 — 아무것도 재지 않은 초록이다");
@@ -262,19 +271,22 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   console.log("ok 규칙 4: 빈/공백/비문자열 영역은 통과가 아니라 empty_region 실패다");
 }
 
-// ─── 제품이 실제로 출하했던 문자열을 잡는가 (계측기가 현실을 읽는다) ──────
+// ─── Does it catch a string the product actually shipped (the instrument reads reality) ──
 //
-// 이 시료는 `src/assetStatus.ts` 의 `formatAssetStatusText(emptyAssetScores())` 가
-// 2026-09-20 이전에 상태바에 그리던 **실물**이다. SX-59 가 지우라고 한 바로 그 문자열.
+// This sample is the **real thing** that `formatAssetStatusText(emptyAssetScores())` in
+// `src/assetStatus.ts` drew in the status bar before 2026-09-20. The exact string SX-59 says
+// to delete.
 //
-// 리터럴로 고정한 이유. 이 블록을 `await import("../src/assetStatus.ts")` 로 쓰면
-// SX-59 를 구현하는 순간(= 그 모듈 삭제) 이 테스트가 빨개진다. 그러면 **결함을
-// 계측 대상으로 삼은 초록 테스트가 그 결함의 수정을 막는다** — 이 저장소가 #904→#910
-// 에서 이미 한 번 당한 형태다. 부재를 지키는 검사는 부재할 것을 import 하지 않는다.
+// Why it is pinned as a literal. If this block were written as
+// `await import("../src/assetStatus.ts")`, this test would go red the moment SX-59 is
+// implemented (= that module is deleted). Then **a green test that took the defect as its
+// measurement target blocks the fix for that defect** — a shape this repo already suffered
+// once, in #904→#910. A check that guards an absence does not import the thing that is
+// supposed to be absent.
 //
-// 모듈이 아직 살아 있는 동안에는 리터럴이 실물과 같은지도 같이 본다. 모듈이 사라지면
-// 그 대조는 건너뛰되 **조용히 넘어가지 않고** 사라졌다고 찍는다. 리터럴 시료 자체는
-// 영구 음성 대조군으로 남는다.
+// While the module is still alive, it also checks that the literal matches the real thing. If
+// the module is gone, that comparison is skipped — but **not silently**: it prints that the
+// module is gone. The literal sample itself stays as a permanent negative control.
 {
   const SHIPPED_STATUS_BAR = "$(graph) 7자산 0/7  · Taste  · Intent  · Context  · Verify  · Deleg  · Iter  · Own";
   const r = auditRegionText(SHIPPED_STATUS_BAR, { region: "work" });
@@ -287,7 +299,7 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
     const mod = await import("../src/assetStatus.ts");
     live = mod.formatAssetStatusText(mod.emptyAssetScores());
   } catch {
-    live = null;   // SX-59 구현 후의 정상 상태.
+    live = null;   // The normal state after SX-59 is implemented.
   }
   if (live === null) {
     console.log("ok 현실 대조군: 리터럴 시료를 잡는다 · src/assetStatus.ts 는 이미 제거됐다 (SX-59 완료)");
@@ -301,10 +313,10 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   }
 }
 
-// ─── 건너뛰기 자체의 대조군 — CI 경로가 정말 '의존성 없음'으로 떨어지는가 ──
-// 아래 렌더 블록은 react 가 없으면 건너뛴다. 건너뛰기가 조용한 통과가 되지 않게,
-// react 가 없는 루트(확장 루트에는 react 를 설치하지 않는다)에 대해 같은 함수를
-// 돌려서 available=false · reason="webview-deps-missing" 임을 먼저 확인한다.
+// ─── A control for the skip itself — does the CI path really fall through as 'no deps' ──
+// The render block below skips when react is absent. So the skip does not become a silent
+// pass, the same function is first run against a root with no react (the extension root does
+// not install react) to confirm available=false · reason="webview-deps-missing".
 {
   const { createRequire } = await import("node:module");
   const extensionRequire = createRequire(new URL("../package.json", import.meta.url));
@@ -315,9 +327,9 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   console.log("ok 건너뛰기 대조군: react 없는 루트에서 reason='webview-deps-missing' 으로 떨어진다");
 }
 
-// ─── 렌더 대조군 — 실제 컴포넌트 렌더 결과를 감사한다 ─────────────────────
-// 규칙 4 의 실물 판: 조용히 빈 렌더가 "깨끗함" 으로 통과하지 못하게, 길이와
-// 알려진 부분 문자열을 함께 단언한다.
+// ─── Render control — audit the real component render output ────────────
+// Rule 4 applied to the real thing: so a silently empty render cannot pass as "clean", the
+// length and a known substring are asserted alongside it.
 {
   const status = rendererStatus();
   if (status.available) {
@@ -349,12 +361,12 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   }
 }
 
-// ─── 실제 작업 화면과 진입 화면을 감사한다 (2026-09-20 평가 D-1) ─────────
+// ─── Audit the real work screen and entry screen (2026-09-20 evaluation, D-1) ─────────
 //
-// 여기까지의 렌더 대조군은 `NativeObservationPanel` 하나뿐이었다. 그런데 C1 이
-// 말하는 "작업 중 화면" 의 본체는 `ChatPanel`(코치 rail)이고 홈은 그 안의
-// Mission header 다. 그 둘을 렌더하지 않으면 C1 의 통과 근거가 렌더가 아니라
-// 소스 grep 이 된다 — 조건부 분기를 놓치는 바로 그 방식이다.
+// Up to here the render control was `NativeObservationPanel` alone. But the body of the
+// "working screen" C1 talks about is `ChatPanel` (the coach rail), and home is the Mission
+// header inside it. Without rendering those two, C1's basis for passing is a source grep
+// rather than a render — the exact method that misses conditional branches.
 {
   const status = rendererStatus();
   if (!status.available) {
@@ -362,8 +374,43 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   } else {
     const { chatPanelProps } = await import("./sx-screen-fixtures.mjs");
 
-    const chat = visibleText(await renderComponent("ChatPanel", chatPanelProps()));
-    // 규칙 4 — 빈 렌더를 감사하면 무엇이든 통과한다. 무엇이 렌더됐는지 먼저 확인한다.
+    const chatHtml = await renderComponent("ChatPanel", chatPanelProps());
+    const chat = visibleText(chatHtml);
+
+    // SX-51 · rubric G — there is **one** emphasized button on a screen.
+    //
+    // Without this assertion P1 ended up with two (region A's first action + "이 과제 완료하기").
+    // A text dump does not keep the class, so the **markup** is counted. Two emphasized
+    // buttons means two "do this now"s, and that is what SX-01 exists to prevent.
+    const primary = auditPrimaryCta(chatHtml);
+    assert.equal(primary.ok, true, `작업 화면의 Primary CTA 가 ${primary.count}개다`);
+
+    // Positive control — shows the rule does not demand "zero". There must be one.
+    assert.equal(primary.count, 1, "강조 버튼이 하나도 없다 — 학생이 어디를 눌러야 할지 모른다");
+
+    // Negative control — does the counting rule actually count. Planted markup must be caught.
+    assert.equal(auditPrimaryCta('<button class="hp-cta-primary">A</button><button class="a hp-cta-primary b">B</button>').ok, false);
+    assert.equal(auditPrimaryCta('<button class="hp-cta-quiet">A</button>').count, 0);
+
+    // The render above does **not include** region D (completion CTA + drawer) — that region
+    // is only drawn when the host has sent `learningState`, and SSR does not run `useEffect`.
+    // So "one emphasis on the screen" is, with this render, a count taken with D excluded.
+    // Be honest about it and count once more **statically over the source**. The class is a
+    // literal, so it can be counted.
+    const chatSource = readFileSync(new URL("../webview-ui/src/ChatPanel.tsx", import.meta.url), "utf8");
+    const sourcePrimary = chatSource.match(/className="hp-cta-primary"/g)?.length ?? 0;
+    assert.equal(
+      sourcePrimary,
+      0,
+      `ChatPanel 이 Primary CTA 를 ${sourcePrimary}개 직접 그린다 — 강조 자리는 영역 A(MissionHeader)가 갖는다`,
+    );
+    const headerSource = readFileSync(new URL("../webview-ui/src/MissionHeader.tsx", import.meta.url), "utf8");
+    assert.equal(
+      headerSource.match(/hp-cta-primary/g)?.length,
+      1,
+      "영역 A 의 강조 버튼이 하나가 아니다",
+    );
+    // Rule 4 — auditing an empty render passes anything. Check what was rendered first.
     assert.ok(chat.length >= 200, `ChatPanel 렌더가 ${chat.length}자다: ${JSON.stringify(chat.slice(0, 200))}`);
     assert.ok(chat.includes("AI가 만든 걸 내가 확인했나?"), "작업 화면에 미션 문장이 없다");
     assert.ok(chat.includes("기대 조건"), "작업 화면에 단계 action 이 없다");
@@ -376,7 +423,8 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
     const startAudit = auditRegionText(start, { region: "work", minLength: 200 });
     assert.equal(startAudit.ok, true, `진입 화면(StartPage) 이 감사에 걸렸다: ${describe(startAudit)}`);
 
-    // 음성 대조군 — 이 두 화면의 감사가 살아 있는가. 강사가 쓴 미션에 점수를 심는다.
+    // Negative control — is the audit of these two screens alive. Plant a score in the
+    // mission the instructor wrote.
     const planted = visibleText(await renderComponent("ChatPanel", chatPanelProps({
       config: {
         ...chatPanelProps().config,

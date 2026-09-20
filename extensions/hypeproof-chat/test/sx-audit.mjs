@@ -1,37 +1,42 @@
-// 렌더 DOM 감사 계측기 — 순수 판정 함수. DOM 없음, React 없음, vscode 없음.
+// Render DOM audit instrument — pure decision functions. No DOM, no React, no vscode.
 //
-// 요구: SX-35(금지 라벨 6개) · SX-43(관찰 레이어) · SX-51(숫자 카드) · SX-59(7자산 N/7 제거).
-// 계약의 정본: docs/testing/studio-learning-experience.md §렌더 DOM 감사 계측기.
-//   금지 문자열 목록의 정본은 요구 문서 SX-35·SX-59 다. 이 파일은 그 목록을 집행만 한다.
-// 판정 규율: .claude/rules/verification.md — 특히 규칙 1(판정 기준을 세우기 전에 대상을
-//   열어본다)과 규칙 2(대조군 없는 채점기는 신뢰하지 않는다). 대조군은 test/sx-audit.smoke.mjs.
+// Requirements: SX-35 (6 banned labels) · SX-43 (observation layer) · SX-51 (number cards) ·
+//   SX-59 (remove the 7-asset N/7).
+// Canonical contract: docs/testing/studio-learning-experience.md §렌더 DOM 감사 계측기.
+//   The canonical banned-string list lives in the requirement doc, SX-35·SX-59. This file
+//   only enforces that list.
+// Decision discipline: .claude/rules/verification.md — especially rule 1 (open the thing you
+//   are measuring before you write the criterion) and rule 2 (never trust a scorer without
+//   controls). The controls are in test/sx-audit.smoke.mjs.
 //
-// 설계 결정 세 가지와 그 근거:
+// Three design decisions and why:
 //
-//   (1) 허용 수치는 "마스킹" 으로 처리한다. 허용 패턴에 걸린 구간을 같은 길이의
-//       제어 문자로 덮은 뒤 금지 수치를 찾는다. 길이를 보존하므로 findings 의
-//       index 가 원문 좌표 그대로다. 검증 문서가 "3주차"·"남은 단계 2" 를 수치로
-//       잡는 것을 계측기 결함이라고 못박았기 때문에, 허용은 예외 처리가 아니라
-//       스캔 전 단계여야 한다.
+//   (1) Allowed numerals are handled by "masking". Spans matched by an allow pattern are
+//       covered with control characters of the same length, then the banned numerals are
+//       searched for. Length is preserved, so a finding's index stays in original-text
+//       coordinates. The verification doc nails down that flagging "3주차" / "남은 단계 2"
+//       as a numeral is an instrument defect, so allowing must be a pre-scan stage, not
+//       exception handling after the fact.
 //
-//   (2) "점수"·"등급" 은 **부정문 면제**가 있는 soft 규칙이다. 오늘 출하되는 화면에
-//       "점수" 가 두 번 나오는데 둘 다 표시가 아니라 부정이다:
+//   (2) "점수" / "등급" are soft rules with a **denial exemption**. "점수" appears twice on
+//       today's shipped screens and both are denials, not displays:
 //         webview-ui/src/NativeObservationPanel.tsx:57 "관찰은 점수나 능력 인증이 아닙니다."
 //         webview-ui/src/LocalReview.tsx:41            "대화량은 역량 점수가 아닙니다."
-//       memory "Korean regex single-char trap" 이 같은 형태로 이미 한 번 물렸다
-//       (맨 /색/ 이 "검색" 을 잡았다). 그래서 면제는 **문장 단위**로 판정하고,
-//       면제된 건은 버리지 않고 `exempt` 로 돌려준다 — 왜 통과했는지 설명할 수
-//       없는 통과는 통과가 아니다.
+//       The memory "Korean regex single-char trap" records getting bitten by exactly this
+//       shape once already (a bare /색/ matched "검색"). So the exemption is decided **per
+//       sentence**, and exempted hits are not discarded — they come back in `exempt`. A pass
+//       you cannot explain is not a pass.
 //
-//   (3) 맨 "상위" 규칙은 **싣지 않는다**(harness_undecided). "상위" 는 한국어 낱말의
-//       부분 문자열로 흔하다 — 이 저장소 자체에 "최상위 규칙"(chatPanelHelpers.ts:298),
-//       "최상위 type"(sdkCoachHelpers.ts:1744), "상위 provider 필드"(protocol.ts:142)가
-//       있다. 대신 랭킹 표시로만 좁힌다: 숫자를 동반한 "상위 N(%/위/명/등)" 과
-//       "상위 랭킹/순위". 좁힌 사실은 RANK_PATTERNS 주석과 보고서에 남긴다.
+//   (3) A bare "상위" rule is **not shipped** (harness_undecided). "상위" is a common
+//       substring of Korean words — this repo itself has "최상위 규칙"
+//       (chatPanelHelpers.ts:298), "최상위 type" (sdkCoachHelpers.ts:1744) and
+//       "상위 provider 필드" (protocol.ts:142). Narrow it to ranking displays instead:
+//       "상위 N(%/위/명/등)" with a number, and "상위 랭킹/순위". The narrowing is recorded
+//       in the RANK_PATTERNS comment and in the report.
 
-// ─── 규칙 표 ─────────────────────────────────────────────────────────────
-// 모두 raw 원문을 스캔한다(마스킹된 텍스트가 아니라). 부정문 면제 없음.
-/** SX-35 금지 라벨. "낮음 / 높음" 은 요구 문서에서 한 라벨이라 두 행으로 편다. */
+// ─── Rule table ──────────────────────────────────────────────────────────
+// All of these scan the raw source text (not the masked text). No denial exemption.
+/** SX-35 banned labels. "낮음 / 높음" is one label in the requirement doc, so it is split into two rows. */
 export const BANNED_LABELS = [
   { id: "improvement_needed", label: "개선 필요", re: /개선\s*필요/g },
   { id: "low", label: "낮음", re: /낮음/g },
@@ -42,23 +47,24 @@ export const BANNED_LABELS = [
   { id: "growth_score", label: "성장 점수", re: /성장\s*점수/g },
 ];
 
-/** 작업 화면 금지 문자열 중 부정문 면제가 필요 없는 것들(고유한 제품 라벨). */
+/** Banned work-screen strings that need no denial exemption (unique product labels). */
 export const BANNED_STRINGS = [
   { id: "seven_assets", label: "7자산", re: /7\s*자산/g },
   { id: "ai_dependence", label: "AI 의존도", re: /AI\s*의존도/g },
   { id: "ranking", label: "랭킹", re: /랭킹/g },
 ];
 
-/** 부정문 면제가 있는 낱말 규칙. 같은 문장에 부정 표지가 있으면 면제된다. */
+/** Word rules with a denial exemption. Exempted when the same sentence carries a denial marker. */
 export const SOFT_STRINGS = [
   { id: "score_word", label: "점수", re: /점수/g },
-  // 검증 문서는 "등급" 을 수치 목록에 적었지만 숫자가 없는 낱말이므로 여기서 집행한다.
+  // The verification doc lists "등급" under the numeral rules, but it is a word with no number,
+  // so it is enforced here.
   { id: "grade_word", label: "등급", re: /등급/g },
 ];
 
 /**
- * 랭킹 표시. 맨 "상위" 는 싣지 않는다 — 위 (3) 참고. 마스킹된 텍스트를 스캔하므로
- * "상위 3주차" 같은 허용 수치와는 붙지 않는다.
+ * Ranking displays. A bare "상위" is not shipped — see (3) above. These scan the masked text,
+ * so they never latch onto an allowed numeral such as "상위 3주차".
  */
 export const RANK_PATTERNS = [
   { id: "top_rank", label: "상위 N(%/위/명/등)", re: /상위\s*\d+(?:\.\d+)?\s*[%위명등]?/g },
@@ -66,37 +72,41 @@ export const RANK_PATTERNS = [
 ];
 
 /**
- * 금지 수치. **마스킹된 텍스트**를 스캔한다.
- * ratio_hundred 는 계획 문서 docs/plan/ux-dag.yaml P0-B 의 음성 대조군("52.5 / 100")이
- * 요구한다. 분모를 6·7·10·100 으로 좁힌 이유는 아래 ALLOWED_NUMERIC 주석에 있다.
+ * Banned numerals. These scan the **masked text**.
+ * ratio_hundred is required by the negative control ("52.5 / 100") in the plan doc
+ * docs/plan/ux-dag.yaml P0-B. Why the denominator is narrowed to 6·7·10·100 is in the
+ * ALLOWED_NUMERIC comment below.
  */
 export const NUMERIC_PATTERNS = [
   { id: "points", label: "\\d+점", re: /\d+(?:\.\d+)?\s*점/g },
   { id: "percent", label: "\\d+%", re: /\d+(?:\.\d+)?\s*%/g },
   { id: "ratio_small", label: "\\d+/7 · \\d+/6", re: /\d+(?:\.\d+)?\s*\/\s*[67](?!\d)/g },
   { id: "ratio_hundred", label: "\\d+/10 · \\d+/100", re: /\d+(?:\.\d+)?\s*\/\s*(?:100|10)(?!\d)/g },
-  // 2026-09-20 평가에서 잡힌 구멍. 위 넷은 **단위가 붙은** 수치만 본다. 그래서
-  // `레벨 3` · `Lv 3` · `★★★☆☆` · 단위 없는 맨숫자 `0.82` 가 전부 통과했다.
-  // 점수를 화면에 넣는 가장 쉬운 방법이 바로 그것들이라 규칙을 더한다.
+  // A hole caught in the 2026-09-20 evaluation. The four rules above only look at numerals
+  // that carry a **unit**. So `레벨 3` · `Lv 3` · `★★★☆☆` and the bare, unitless number
+  // `0.82` all passed. Those are the easiest way to put a score on the screen, so the rules
+  // below are added.
   { id: "level", label: "레벨 N · Lv N", re: /(?:레벨|등급|Lv\.?|LEVEL)\s*\d+/gi },
   { id: "stars", label: "별점 ★☆", re: /[★☆✦✧]{3,}/g },
   {
     id: "bare_number",
     label: "단위 없는 맨숫자",
-    // 마스킹 뒤에 남은 숫자다. 허용 수치(주차·남은 단계·날짜·시각·N건/개)는 이미
-    // 제어 문자로 덮였으므로, 여기까지 살아남은 숫자는 설명이 붙지 않은 숫자다.
-    // 한글·영문에 붙은 숫자(GPT-4, 3주차 같은 형태)는 경계 조건으로 제외한다.
+    // Numbers left over after masking. The allowed numerals (week, steps left, date, clock
+    // time, N건/N개) are already covered with control characters, so a number that survives
+    // this far is a number with no explanation attached. Numbers glued to Hangul or Latin
+    // letters (shapes like GPT-4 or 3주차) are excluded by the boundary conditions.
     re: /(?<![\w가-힣])\d+(?:\.\d+)?(?![\w가-힣])/g,
   },
 ];
 
 /**
- * 허용 수치. 금지 수치를 찾기 전에 같은 길이로 덮는다.
+ * Allowed numerals. Covered with an equal-length mask before the banned numerals are searched.
  *
- * 분모가 일반형(\d+/\d+)이 아닌 이유: 그러면 "9/20" 같은 날짜형이 점수로 잡힌다.
- * 반대로 날짜를 일반형(\d{1,2}/\d{1,2})으로 허용하면 "7자산 4/7" 이 날짜로 면제된다.
- * 둘 다 틀리므로 두 문서가 이름을 댄 분모(6·7·10·100)로만 좁혔다. 일반형 슬래시
- * 비율은 harness_undecided 로 남긴다(보고서에 기록).
+ * Why the denominator is not the general form (\d+/\d+): that would flag a date shape like
+ * "9/20" as a score. Conversely, allowing dates in the general form (\d{1,2}/\d{1,2}) would
+ * exempt "7자산 4/7" as a date. Both are wrong, so it is narrowed to only the denominators the
+ * two docs name (6·7·10·100). The general slash ratio is left as harness_undecided (recorded
+ * in the report).
  */
 export const ALLOWED_NUMERIC = [
   { id: "week", label: "\\d+주차", re: /\d+\s*주차/g },
@@ -105,22 +115,26 @@ export const ALLOWED_NUMERIC = [
   { id: "date_ko", label: "날짜(9월 20일)", re: /\d{4}\s*년|\d{1,2}\s*월\s*\d{1,2}\s*일|\d{1,2}\s*월(?=\s|$)|\d{1,2}\s*일(?=\s|$)/g },
   { id: "time_clock", label: "시각(3:05)", re: /(?:오전|오후)?\s*\d{1,2}\s*:\s*\d{2}(?:\s*:\s*\d{2})?/g },
   { id: "time_ko", label: "시각(3시 5분)", re: /\d+\s*시간|\d+\s*시(?!\S)|\d+\s*분(?!\S)|\d+\s*초(?!\S)|\d+\s*일째/g },
-  // SX-43: 관찰 패널의 "N건" 은 기록 범위 설명으로 남는다. 진행률이 아니다.
+  // SX-43: the observation panel's "N건" stays as a description of the record's scope.
+  // It is not a progress rate.
   { id: "count_ko", label: "N건 · N개", re: /\d+\s*건|\d+\s*개(?!선)|\d+\s*번째|\d+\s*명(?!\s*중)/g },
-  // 아래 둘은 `bare_number` 규칙을 넣은 **직후** 실제 ChatPanel 렌더가 걸려서 추가했다.
-  // 둘 다 점수가 아니라 제품의 정상 문자열이다. "너무 엄격한 계측기" 쪽 오류이고,
-  // 검증 문서가 양성 대조군을 핵심이라고 적은 이유가 이것이다.
-  //   1. 목록 번호 — "이번 단계 안내 · 1. 기대 조건" 의 `1.`
-  //   2. 모듈 버전 — "버전 m2026.09.20-1" 의 뒷자리 `-1`.
-  //      패턴은 짐작하지 않고 `worker/src/lib/modules.ts:146` 의 MODULE_VERSION_RE 를 읽어서 맞췄다.
+  // The two below were added because the real ChatPanel render got flagged **immediately**
+  // after the `bare_number` rule went in. Both are normal product strings, not scores. This is
+  // an error on the "instrument too strict" side, and it is exactly why the verification doc
+  // calls the positive control the key one.
+  //   1. List numbering — the `1.` in "이번 단계 안내 · 1. 기대 조건"
+  //   2. Module version — the trailing `-1` in "버전 m2026.09.20-1".
+  //      The pattern was not guessed: it was matched by reading MODULE_VERSION_RE at
+  //      `worker/src/lib/modules.ts:146`.
   { id: "module_version", label: "모듈 버전 m2026.09.20-1", re: /m\d{4}\.\d{2}\.\d{2}-\d{1,4}/g },
   { id: "ordinal", label: "목록 번호 N.", re: /(?:^|[\n·]\s*)\d+\.(?=\s)/gm },
 ];
 
 /**
- * 숫자 주차(4주 가격 · 5주 GTM · 6주 지표)에서만 **추가로** 허용하는 수치(SX-51).
- * `region: "metric"` 일 때 ALLOWED_NUMERIC 에 얹힌다. 점수·등급·별점·퍼센트는
- * 여기 없다 — 지표 주차라고 해서 사람을 점수로 부르는 것이 허용되지는 않는다.
+ * Numerals allowed **in addition** only in the number weeks (week 4 pricing · week 5 GTM ·
+ * week 6 metrics) — SX-51. Stacked on top of ALLOWED_NUMERIC when `region: "metric"`.
+ * Scores, grades, star ratings and percentages are not here — a metrics week does not make
+ * it acceptable to call a person by a score.
  */
 export const METRIC_WEEK_NUMERIC = [
   { id: "money", label: "금액", re: /[$₩€£]\s?\d+(?:[,.]\d+)*|\d+(?:[,.]\d+)*\s*(?:원|달러|USD|KRW)/gi },
@@ -129,7 +143,7 @@ export const METRIC_WEEK_NUMERIC = [
   { id: "ratio_metric", label: "전환·재방문 비율", re: /\d+(?:\.\d+)?\s*배/g },
 ];
 
-/** 같은 문장에 이 중 하나가 있으면 soft 규칙은 면제된다. */
+/** If the same sentence contains one of these, the soft rules are exempted. */
 export const DENIAL_MARKERS = [
   /아닙니다/,
   /아니다/,
@@ -166,8 +180,8 @@ function* matchesOf(rule, haystack) {
 }
 
 /**
- * 허용 수치 구간을 같은 길이의 제어 문자로 덮는다. 길이를 보존하므로 이후 스캔의
- * index 가 원문 좌표와 일치한다.
+ * Covers allowed-numeral spans with control characters of the same length. Length is preserved,
+ * so indices from the later scans line up with original-text coordinates.
  */
 export function maskAllowedNumerals(source, allow = ALLOWED_NUMERIC) {
   const chars = source.split("");
@@ -181,7 +195,7 @@ export function maskAllowedNumerals(source, allow = ALLOWED_NUMERIC) {
   return { masked: chars.join(""), spans };
 }
 
-/** index 를 포함하는 문장(문장 경계 문자 사이)을 돌려준다. */
+/** Returns the sentence containing `index` (between sentence-boundary characters). */
 export function sentenceAt(source, index) {
   let start = Math.max(0, Math.min(index, source.length - 1));
   while (start > 0 && !SENTENCE_BOUNDARY.has(source[start - 1])) start -= 1;
@@ -195,23 +209,47 @@ export function isDenialSentence(sentence) {
 }
 
 /**
- * 한 영역의 본문 텍스트를 감사한다.
+ * Audits the body text of one region.
  *
- * @param {string} text  렌더된 **텍스트**(마크업이 아니라). sx-render.mjs 의 visibleText 로 뽑는다.
+ * @param {string} text  the rendered **text** (not the markup). Extract it with visibleText
+ *        from sx-render.mjs.
  * @param {object} [opts]
  * @param {"work"|"metric"|"label-only"} [opts.region="work"]
- *        work       — 금지 라벨 + 금지 문자열 + 랭킹 + soft 낱말 + 금지 수치 전부.
- *        metric     — SX-51 이 허용하는 숫자 주차(가격·GTM·지표)의 Work canvas.
- *                     수치 규칙을 **끄지 않는다.** 2026-09-20 평가 지적(D-3): 통째로 끄면
- *                     지표 주차에 진짜 점수 카드가 들어와도 안 잡힌다. 대신 그 주차가
- *                     정당하게 쓰는 형태(금액·인원·기간·비율)만 허용 목록에 더하고
- *                     점수·등급·별점·맨숫자는 그대로 잡는다.
- *        label-only — 금지 라벨만. 아직 영역 분리가 확정되지 않은 화면에 쓴다.
+ *        work       — banned labels + banned strings + ranking + soft words + banned
+ *                     numerals, all of them.
+ *        metric     — the Work canvas of the number weeks SX-51 allows (pricing · GTM ·
+ *                     metrics). It does **not** turn the numeral rules off. Finding from the
+ *                     2026-09-20 evaluation (D-3): turning them off wholesale means a real
+ *                     score card landing in a metrics week goes uncaught. Instead, only the
+ *                     shapes those weeks legitimately use (money · headcount · period ·
+ *                     ratio) are added to the allow list, and scores, grades, star ratings
+ *                     and bare numbers are still caught.
+ *        label-only — banned labels only. Used on screens whose region split is not settled yet.
  * @param {number} [opts.minLength=1]
- *        이 길이 미만이면 empty_region 으로 실패한다(verification.md 규칙 4:
- *        빈 문자열을 감사하는 계측기는 무엇이든 통과시킨다).
+ *        below this length it fails as empty_region (verification.md rule 4: an instrument
+ *        that audits an empty string passes anything).
  * @returns {{ok: boolean, findings: Array<{kind: string, rule: string, match: string, index: number, label: string}>, exempt: Array, masked: Array, length: number}}
  */
+/**
+ * SX-51 · rubric G — a screen has **one** Primary CTA.
+ *
+ * Without this rule P1 ended up with two (the first action in `MissionHeader` and
+ * "이 과제 완료하기" in `ChatPanel`). It was invisible because the auditor was only looking at
+ * text — two emphasized buttons means two "do this now"s, and that is what SX-01 exists to
+ * prevent.
+ *
+ * Counts the rendered **markup**. A text dump does not keep the class.
+ */
+export function countPrimaryCta(html) {
+  return String(html ?? "").match(/class="[^"]*\bhp-cta-primary\b/g)?.length ?? 0;
+}
+
+/** Is it one or fewer. Returns the count along with the verdict. */
+export function auditPrimaryCta(html) {
+  const count = countPrimaryCta(html);
+  return { ok: count <= 1, count };
+}
+
 export function auditRegionText(text, opts = {}) {
   const { region = "work", minLength = 1 } = opts;
   const source = typeof text === "string" ? text : "";
@@ -233,7 +271,7 @@ export function auditRegionText(text, opts = {}) {
     return { ok: false, findings, exempt, masked: [], length: source.length };
   }
 
-  // metric 주차는 허용 수치 목록이 넓다 — 규칙을 끄는 것이 아니라 허용을 넓힌다.
+  // A metric week has a wider allow list — widen what is allowed, do not turn rules off.
   const allow = region === "metric" ? [...ALLOWED_NUMERIC, ...METRIC_WEEK_NUMERIC] : ALLOWED_NUMERIC;
   const { masked, spans } = maskAllowedNumerals(source, allow);
   const accepted = [];
@@ -257,8 +295,8 @@ export function auditRegionText(text, opts = {}) {
     }
   };
 
-  // 순서가 곧 우선순위다. 라벨이 먼저 자리를 잡으면 겹치는 낱말·수치 규칙은
-  // 중복 계수하지 않는다 ("성장 점수" 는 1건이지 2건이 아니다).
+  // Order is priority. Once a label has taken its span, overlapping word and numeral rules do
+  // not double-count it ("성장 점수" is 1 finding, not 2).
   scan(BANNED_LABELS, "banned_label", source);
   if (region !== "label-only") {
     scan(BANNED_STRINGS, "banned_string", source);
@@ -272,9 +310,9 @@ export function auditRegionText(text, opts = {}) {
 }
 
 /**
- * CSS 에서 선택자별 custom property 만 뽑는다(중첩 규칙 없음 — 이 저장소의 토큰
- * 파일과 설계 문서의 코드 블록은 평평한 규칙만 쓴다).
- * SX-49 의 "토큰 값은 설계 문서가 소유한다" 를 기계적으로 대조하기 위한 순수 함수다.
+ * Extracts only the custom properties, per selector, out of CSS (no nested rules — this repo's
+ * token file and the design doc's code block use flat rules only).
+ * A pure function for mechanically checking SX-49's "the design doc owns the token values".
  */
 export function parseCssCustomProperties(css) {
   const stripped = String(css ?? "").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -296,7 +334,7 @@ export function parseCssCustomProperties(css) {
   return blocks;
 }
 
-/** 여러 영역을 한 번에. 영역 이름을 finding 에 붙여 어디서 나왔는지 남긴다. */
+/** Several regions at once. Tags each finding with the region name so its origin is recorded. */
 export function auditRegions(regions, opts = {}) {
   const findings = [];
   const exempt = [];

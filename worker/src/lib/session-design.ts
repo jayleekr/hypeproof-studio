@@ -18,11 +18,12 @@ export interface SessionDesign {
    */
   steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string; help?: StepHelpPolicy } & StepLearningFields>;
   /**
-   * SX-55~58 (optional) — 주차·미션·완료 조건·관찰 항목·금지 목록. 6주 커리큘럼은
-   * 이 칸을 채운 **데이터 파일 여섯 개**이고 코드 상수가 아니다(SX-56). 키가 없으면
-   * 오늘의 동작과 완전히 같다. 교수 데이터일 뿐 어떤 권한도 주지 않는다 — 코치
-   * 프롬프트는 이미 수업 content 전체를 직렬화해 싣는다(chat-gate.ts).
-   * 정의와 검증: learning-design.ts.
+   * SX-55~58 (optional) — week, mission, completion conditions, observation items,
+   * forbidden list. The 6-week curriculum is **six data files** filling this slot,
+   * not a code constant (SX-56). Absent key → behaviour is exactly today's. It is
+   * teaching data only and grants nothing — the coach prompt already serializes the
+   * whole lesson content and carries it (chat-gate.ts).
+   * Definition and validation: learning-design.ts.
    */
   learning?: LearningBlock;
   /**

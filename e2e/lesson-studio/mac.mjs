@@ -130,8 +130,9 @@ try{
   for(const t of await targets()){
    const c=await connect(t);
    for(const contextId of c.contexts){const evaluate=async expression=>(await c.send('Runtime.evaluate',{expression,contextId,returnByValue:true})).result?.value;
-    // P0-C: 수업 카드는 `.hp-rail-lesson` 이 되었고, 과제를 채팅에 넣는 버튼은 미션 헤더의
-    // 단일 Primary CTA(`.hp-cta-primary`)로 옮겼다 — 한 화면에 강조 버튼 하나(SX-04).
+    // P0-C: the lesson card became `.hp-rail-lesson`, and the button that inserts the task
+    // into the chat moved to the mission header's single Primary CTA (`.hp-cta-primary`) —
+    // one emphasized button per screen (SX-04).
     const has=await evaluate("!!document.querySelector('.hp-rail-lesson')");
     if(has){assert.match(await evaluate("document.querySelector('.hp-rail-lesson').textContent"),/합성 홈페이지 강의/);await evaluate("document.querySelector('.hp-rail-lesson').open=true;document.querySelector('.hp-cta-primary').click()");await window.waitForTimeout(300);const draft=await evaluate("document.querySelector('textarea')?.value");assert.match(draft,/가상 꽃집/);assert.match(draft,/390px와 1280px/);await window.screenshot({path:out+'/mac-lesson.png'});writeFileSync(out+'/result.json',JSON.stringify({pass:true,scope:'actual Mac shell; local Service and signed synthetic token; lesson rendered and task inserted, LLM not run',user_data_dir:userDir,profile:local.profileId,version:invite.lesson.version},null,2));found=true;break;}
     await evaluate("[...document.querySelectorAll('button')].find(b=>b.textContent.includes('수업 시작하기'))?.click()");

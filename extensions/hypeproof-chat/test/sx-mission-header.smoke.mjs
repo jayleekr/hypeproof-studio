@@ -1,22 +1,25 @@
-// SX-01 ~ SX-05 — 학생 홈은 "오늘의 작업" 이다. Mission header 의 판정.
+// SX-01 ~ SX-05 — the student home is "today's work". Judging the mission header.
 // Run: node --experimental-strip-types test/sx-mission-header.smoke.mjs
 //
-// 왜 이 파일이 있나. "첫 화면 5초 안에 지금 할 것을 말할 수 있다"(SX-T01)는 사람이
-// 판정하는 행이지만, 그 앞에 기계가 먼저 배제할 수 있는 것이 있다: **미션 문장이
-// 화면에서 가장 큰 활자인가**, **강조 버튼이 하나인가**, **변화 기록이 action 보다
-// 아래에 있고 작은가**, 그리고 **어디에도 점수·등급이 없는가**.
-// 사람 판정이 남는 것은 문장 자체가 모호한 경우이고, 그건 spec 문제다.
+// Why this file exists. "can say what to do now within 5 seconds of the first screen"
+// (SX-T01) is a row a human judges, but there is something a machine can rule out
+// first: **is the mission sentence the largest type on screen**, **is there exactly one
+// emphasized button**, **is the growth record below the actions and smaller**, and
+// **is there a score or grade anywhere**.
+// What is left to human judgment is a sentence that is itself ambiguous, and that is a
+// spec problem.
 //
-// 판정 대상은 **실제 렌더 결과**다(verification.md 규칙 1). 소스 grep 으로는 조건부
-// 분기를 놓친다. 시료는 실제 세션 설계 파일(worker/test/fixtures/session-design/
-// week-3.json)이다 — 화면이 읽는 그 데이터로 판정한다.
+// What gets judged is the **actual render result** (verification.md rule 1). A source
+// grep misses conditional branches. The sample is a real session-design file
+// (worker/test/fixtures/session-design/week-3.json) — we judge on the same data the
+// screen reads.
 
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { auditRegionText } from "./sx-audit.mjs";
 import { rendererStatus, renderComponent, visibleText } from "./sx-render.mjs";
-// 순수 판정은 `.ts` 에 있다 — `.tsx` 는 --experimental-strip-types 가 못 읽는다
-// (JSX 는 스트립되지 않는다). 컴포넌트 자체는 아래 렌더 계측기로 본다.
+// The pure judgments live in `.ts` — --experimental-strip-types cannot read `.tsx`
+// (JSX is not stripped). The component itself is seen through the render instrument below.
 import { MAX_ACTIONS, actionsFrom, stepsRemaining } from "../webview-ui/src/missionHeaderLogic.ts";
 
 const week3 = JSON.parse(
@@ -34,21 +37,21 @@ const homeProps = {
   activity: { label: "수업", name: "GlobalBuddy", verified: true },
 };
 
-// ─── 순수 함수 — 앱 없이 밀리초에 돈다 ────────────────────────────────────
+// ─── Pure functions — they run in milliseconds with no app ────────────────
 {
   const steps = week3.steps;
   assert.equal(steps.length, 6, "3주차 시료의 단계 수가 바뀌었다 — 아래 기대값을 갱신하라");
 
-  // SX-02 — 중앙 action 은 1~3개다. 6단계짜리 설계에서도 3을 넘지 않는다.
+  // SX-02 — the central actions are 1–3. Even a 6-step design never exceeds 3.
   assert.equal(actionsFrom(steps, null).length, MAX_ACTIONS);
   assert.equal(actionsFrom(steps, "expect")[0].id, "expect");
   assert.equal(actionsFrom(steps, "retest").length, 1, "마지막 단계에서는 남은 만큼만 보인다");
   assert.deepEqual(actionsFrom([], null), [], "단계가 없으면 action 도 없다");
 
-  // 알 수 없는 단계 id 는 첫 단계로 떨어진다. 빈 화면이 되지 않는다.
+  // An unknown step id falls back to the first step. It never becomes an empty screen.
   assert.equal(actionsFrom(steps, "없는단계")[0].id, steps[0].id);
 
-  // "남은 단계" 는 위치이지 진행률이 아니다 — 완료를 세지 않는다(P1 이 센다).
+  // "steps remaining" is a position, not a progress rate — it does not count completions (P1 does).
   assert.equal(stepsRemaining(steps, null), 6);
   assert.equal(stepsRemaining(steps, "fix"), 2);
   assert.equal(stepsRemaining([], null), 0);
@@ -57,7 +60,7 @@ const homeProps = {
 
 const status = rendererStatus();
 if (!status.available) {
-  // 조용히 통과시키지 않는다. 무엇을 못 쟀는지 말하고 끝낸다.
+  // Do not pass silently. Say what could not be measured, then stop.
   console.log(`NOT RUN 렌더 판정 — ${status.detail}`);
   console.log("PASS sx-mission-header: 순수 함수만 판정했다 (렌더 계측기 사용 불가)");
   process.exit(0);
@@ -67,36 +70,37 @@ const html = await renderComponent("MissionHeader", homeProps);
 const text = visibleText(html);
 
 {
-  // 규칙 4 — 빈 렌더를 판정하면 무엇이든 통과한다. 길이와 알려진 문장을 먼저 본다.
+  // Rule 4 — judging an empty render passes anything. Check the length and a known sentence first.
   assert.ok(text.length >= 60, `렌더 텍스트가 ${text.length}자다: ${JSON.stringify(text)}`);
   assert.ok(text.includes(week3.learning.mission), "미션 문장이 렌더되지 않았다");
   console.log(`ok 렌더 가드: ${text.length}자, 미션 문장 포함`);
 }
 
 {
-  // SX-01 — 첫 화면의 제목은 미션 문장 그 자체다. 활동 이름도 점수도 아니다.
+  // SX-01 — the first screen's heading is the mission sentence itself. Not the activity name, not a score.
   const h1 = /<h1[^>]*>([\s\S]*?)<\/h1>/.exec(html);
   assert.ok(h1, "h1 이 없다 — 가장 큰 활자가 무엇인지 판정할 수 없다");
   assert.equal(visibleText(h1[1]), week3.learning.mission);
   assert.equal((html.match(/<h1\b/g) ?? []).length, 1, "h1 이 둘 이상이면 무엇이 가장 큰지 모호하다");
-  // 활동 줄은 접근 라벨을 유지해야 한다. 자리를 옮기는 것과 라벨을 잃는 것은 다르다 —
-  // 2026-09-20 CI 의 실제 브라우저 검사(US-UI-DRAFT)가 `getByLabel('현재 활동')` 에서
-  // 끊겨서 잡혔고, 여기 로컬 검사에는 그 단언이 없었다. 이제 있다.
+  // The activity line must keep its accessible label. Moving it is not the same as
+  // losing the label — on 2026-09-20 CI's real-browser check (US-UI-DRAFT) broke at
+  // `getByLabel('현재 활동')` and caught it, and this local check had no such
+  // assertion. Now it does.
   assert.match(html, /aria-label="현재 활동"/, "활동 줄의 접근 라벨이 없다");
   assert.ok(text.includes("GlobalBuddy"), "활동 이름이 렌더되지 않았다");
   console.log("ok SX-01: 첫 제목(h1)이 미션 문장이고 하나뿐이다 · 활동 줄은 접근 라벨을 유지한다");
 }
 
 {
-  // SX-04 — 강조 버튼(Primary)은 정확히 하나다.
+  // SX-04 — there is exactly one emphasized (Primary) button.
   const primaries = (html.match(/class="[^"]*\bhp-cta-primary\b[^"]*"/g) ?? []).length;
   assert.equal(primaries, 1, `Primary CTA 가 ${primaries}개다`);
   console.log("ok SX-04: Primary CTA 가 정확히 1개다");
 }
 
 {
-  // SX-03 — 변화 기록 진입은 링크 하나이고, action 보다 **아래**에 있으며
-  // Primary 스타일을 쓰지 않는다. 위치는 마크업 순서로 판정한다.
+  // SX-03 — the growth-record entry is a single link, sits **below** the actions, and
+  // does not use the Primary style. Position is judged by markup order.
   const growthAt = html.indexOf("hp-mission-growth");
   const actionsAt = html.indexOf("hp-mission-actions");
   assert.ok(growthAt > 0, "변화 기록 진입이 없다");
@@ -109,7 +113,7 @@ const text = visibleText(html);
 }
 
 {
-  // SX-59 / SX-51 — 홈에 점수·등급·배지·금지 라벨이 없다. 허용 수치는 주차와 남은 단계뿐.
+  // SX-59 / SX-51 — no score, grade, badge or forbidden label on the home. The only allowed numbers are the week and the steps remaining.
   const r = auditRegionText(text, { region: "work", minLength: 60 });
   assert.equal(r.ok, true, `홈 렌더가 감사에 걸렸다: ${JSON.stringify(r.findings)}`);
   assert.ok(text.includes("3주차"), "주차 표기가 사라졌다 — 허용 수치 대조군이 무의미해진다");
@@ -118,7 +122,7 @@ const text = visibleText(html);
 }
 
 {
-  // SX-50 — 완료 조건은 아이콘 + 문구다. 색을 지워도 읽힌다.
+  // SX-50 — the completion conditions are icon + wording. They still read with the color removed.
   for (const item of week3.learning.completion) {
     assert.ok(text.includes(item.text), `완료 조건이 빠졌다: ${item.text}`);
   }
@@ -128,14 +132,14 @@ const text = visibleText(html);
   console.log("ok SX-50: 완료 조건이 아이콘+문구이고, 근거 없는 ✓ 가 없다");
 }
 
-// ─── 음성 대조군 — 계측기가 실제로 무언가를 센다 ─────────────────────────
+// ─── Negative controls — the instrument actually counts something ─────────
 {
-  // (a) Primary 가 둘인 시료는 SX-04 판정에서 실패해야 한다.
+  // (a) A sample with two Primaries must fail the SX-04 judgment.
   const twoPrimaries = html.replace('class="hp-cta-quiet"', 'class="hp-cta-primary"');
   const primaries = (twoPrimaries.match(/class="[^"]*\bhp-cta-primary\b[^"]*"/g) ?? []).length;
   assert.equal(primaries, 2, "음성 시료를 만들지 못했다 — hp-cta-quiet 이 렌더되지 않았다");
 
-  // (b) 미션이 없는 설계는 빈 헤더가 아니라 없다고 말한다(SX-01 부정).
+  // (b) A design with no mission says so instead of rendering an empty header (SX-01 negative).
   const { learning, ...withoutLearning } = week3;
   const bare = await renderComponent("MissionHeader", {
     ...homeProps,
@@ -145,11 +149,11 @@ const text = visibleText(html);
   assert.ok(bareText.includes("미션이 정해지지 않았습니다"), bareText);
   assert.doesNotMatch(bareText, /주차/, "learning 이 없는데 주차를 지어냈다");
 
-  // (c) 수업이 아예 없어도 헤더는 무엇인가를 말한다.
+  // (c) Even with no lesson at all, the header says something.
   const none = visibleText(await renderComponent("MissionHeader", { ...homeProps, lesson: null }));
   assert.ok(none.includes("아직 연결된 수업이 없습니다"), none);
 
-  // (d) 금지 라벨을 심은 미션은 감사에 걸려야 한다 — 이 화면의 감사가 살아 있다.
+  // (d) A mission with a planted forbidden label must trip the audit — this screen's audit is alive.
   const planted = await renderComponent("MissionHeader", {
     ...homeProps,
     lesson: { ...lesson, content: { ...week3, learning: { ...week3.learning, mission: "검증 점수 62점 · 개선 필요" } } },
@@ -159,15 +163,17 @@ const text = visibleText(html);
   console.log("ok 음성 대조군 4종: Primary 2개 · 미션 없음 · 수업 없음 · 심은 금지 라벨");
 }
 
-// ─── 사람이 눈으로 볼 대리물 (2026-09-20 평가 D-8) ────────────────────────
+// ─── A stand-in for a human to look at (2026-09-20 evaluation, D-8) ───────
 //
-// 루브릭 C 는 "첫 화면에서 가장 큰 활자가 과제 문장인가" 를 **스크린샷으로 대리 판정**
-// 하라고 적었다. 앱 빌드는 사용자 승인 사항이라 이 세션은 스크린샷을 만들 수 없다.
-// 대신 렌더 결과를 토큰과 함께 HTML 로 떨궈 사람이 브라우저로 열어 보게 한다.
+// Rubric C said to judge "is the largest type on the first screen the task sentence"
+// **by proxy, from a screenshot**. An app build is a user-approval matter, so this
+// session cannot produce a screenshot. Instead we drop the render result together with
+// the tokens as HTML, so a human can open it in a browser.
 //
-// **이것은 실기 증거가 아니다.** `docs/testing/studio-learning-experience.md`
-// §실기 증거 규칙의 세 라벨 중 `synthetic` 이다 — 합성 시료를 서버 렌더한 것이고,
-// 실제 앱의 레이아웃·폰트·VS Code 테마가 아니다. 파일 첫 줄에 그 라벨을 박는다.
+// **This is not real-device evidence.** Of the three labels in
+// `docs/testing/studio-learning-experience.md` §실기 증거 규칙 it is `synthetic` — a
+// server render of a synthetic sample, not the real app's layout, fonts or VS Code
+// theme. That label is stamped on the file's first line.
 {
   const { mkdirSync, writeFileSync } = await import("node:fs");
   const out = new URL("../../../e2e/test-results/sx-screens/", import.meta.url);

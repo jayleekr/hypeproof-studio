@@ -1,22 +1,24 @@
-// 렌더 계측기 — 실제 webview 컴포넌트를 정적 HTML 로 렌더해서 **렌더된 텍스트**를 돌려준다.
+// Render instrument — renders the real webview components to static HTML and hands back the
+// **rendered text**.
 //
-// 왜 소스를 읽지 않고 렌더하나 (.claude/rules/verification.md 규칙 1):
-//   "화면에 금지 문자열이 없다" 는 주장을 소스 grep 으로 판정하면, 조건부로만
-//   렌더되는 분기·템플릿 조립·상수 참조를 전부 놓친다. 판정 기준을 세우기 전에
-//   **판정 대상(렌더 결과)** 을 연다. docs/plan/ux-dag.yaml P0-B 의 수용 기준도
+// Why we render instead of reading the source (.claude/rules/verification.md rule 1):
+//   Judge the claim "the screen has no forbidden string" by grepping the source and you miss
+//   every conditionally rendered branch, every assembled template, every constant reference.
+//   Open **the subject of the verdict (the render output)** before setting the criterion.
+//   The acceptance criterion in docs/plan/ux-dag.yaml P0-B says the same:
 //   "The instrument reads real component render output, not a copy of the strings".
 //
-// 어떻게:
-//   test/clear-history.smoke.mjs · test/start-page.smoke.mjs 의 관용을 그대로 쓴다 —
-//   esbuild 로 한 번들을 만들고 vm.runInNewContext 로 돌린다. 다른 점은 resolveDir 이
-//   webview-ui 라는 것뿐이다. react / react-dom / react/jsx-runtime 이 거기 있기 때문이다.
+// How:
+//   The same idiom as test/clear-history.smoke.mjs · test/start-page.smoke.mjs — build one
+//   bundle with esbuild and run it under vm.runInNewContext. The only difference is that
+//   resolveDir is webview-ui, because react / react-dom / react/jsx-runtime live there.
 //
-// 알려진 한계 (보고서에도 남김):
-//   CI 의 `npm ci --omit=optional` 은 **확장 의존성만** 설치한다
-//   (.github/workflows/pr-ci.yml extension-test 잡). webview-ui/node_modules 는 없다.
-//   그래서 react 가 없으면 rendererStatus() 가 reason:"webview-deps-missing" 을 돌려주고
-//   호출자가 그 사실을 **드러내고** 건너뛴다. 조용히 통과시키지 않는다. 순수 텍스트
-//   대조군과 빈 영역 가드(auditRegionText 의 empty_region)는 CI 에서도 그대로 돈다.
+// Known limitation (also recorded in the report):
+//   CI's `npm ci --omit=optional` installs **only the extension's dependencies**
+//   (.github/workflows/pr-ci.yml extension-test job). There is no webview-ui/node_modules.
+//   So when react is missing, rendererStatus() returns reason:"webview-deps-missing" and the
+//   caller skips while **surfacing** that fact. It does not silently pass. The pure text
+//   controls and the empty-region guard (auditRegionText's empty_region) still run in CI.
 
 import vm from "node:vm";
 import { build } from "esbuild";
@@ -27,30 +29,33 @@ const webviewDir = new URL("../webview-ui/", here);
 const nodeRequire = createRequire(import.meta.url);
 const webviewRequire = createRequire(new URL("package.json", webviewDir));
 
-/** 렌더할 수 있는 실제 컴포넌트. 경로는 webview-ui 기준. */
+/** The real components we can render. Paths are relative to webview-ui. */
 export const COMPONENTS = {
-  // 호스트 브리지 없이 그대로 렌더된다: useEffect 는 SSR 에서 돌지 않고,
-  // src/vscode.ts 는 모듈 최상위에서 `window.acquireVsCodeApi` 를 보기만 한다
-  // (window 스텁을 주면 undefined 로 떨어진다).
+  // Renders as-is without the host bridge: useEffect does not run under SSR, and
+  // src/vscode.ts only looks at `window.acquireVsCodeApi` at module top level
+  // (given the window stub it falls through to undefined).
   NativeObservationPanel: { from: "./src/NativeObservationPanel.tsx", exportName: "NativeObservationPanel" },
-  // 영역 A(SX-01~05). 호스트 브리지 없이 렌더된다 — 콜백은 props 로 주입받고
-  // 모듈 최상위에서 vscode API 를 만지지 않는다.
+  // Region A (SX-01~05). Renders without the host bridge — callbacks are injected as props
+  // and it does not touch the vscode API at module top level.
   MissionHeader: { from: "./src/MissionHeader.tsx", exportName: "MissionHeader" },
-  // 작업 화면 본체(코치 rail)와 진입 화면. C1 이 말하는 "작업 중 화면" 은 이것이다 —
-  // 2026-09-20 평가에서 "감사기가 정작 작업 화면을 렌더하지 않는다" 로 지적됐다.
-  // 둘 다 호스트 브리지 없이 렌더된다: `src/vscode.ts` 는 모듈 최상위에서
-  // `window.acquireVsCodeApi` 를 **읽기만** 하고(window 스텁을 주면 undefined),
-  // useEffect 는 SSR 에서 돌지 않는다.
+  // The work screen itself (the coach rail) and the entry screen. This is what C1 means by
+  // "the screen during work" — the 2026-09-20 review flagged it as "the auditor does not
+  // actually render the work screen". Both render without the host bridge: `src/vscode.ts`
+  // only **reads** `window.acquireVsCodeApi` at module top level (undefined given the window
+  // stub), and useEffect does not run under SSR.
   ChatPanel: { from: "./src/ChatPanel.tsx", exportName: "ChatPanel" },
   StartPage: { from: "./src/StartPage.tsx", exportName: "StartPage" },
+  // Region D (SX-17~24). Lives on props alone — it draws the `learningState.evidence` the
+  // host sent, and does not recompute the gate.
+  EvidenceDrawer: { from: "./src/EvidenceDrawer.tsx", exportName: "EvidenceDrawer" },
 };
 
 /**
- * react / react-dom 이 webview-ui 에 설치돼 있는지. 추측하지 않고 resolve 해 본다.
+ * Whether react / react-dom are installed under webview-ui. We resolve rather than guess.
  *
- * `resolve` 를 주입할 수 있게 열어 둔 이유: CI 경로(react 없는 루트)를 **이 함수
- * 자체로** 재현해 보기 위해서다. 대조군이 건너뛴다고 말할 때 정말 그 이유로
- * 건너뛰는지 확인하지 않으면, 건너뛰기가 조용한 통과가 된다(규칙 4).
+ * Why `resolve` is left injectable: so the CI path (a root without react) can be reproduced
+ * **through this function itself**. If we never check that a skip really happens for the
+ * reason it claims, the skip turns into a silent pass (rule 4).
  */
 export function rendererStatus(resolve = (id) => webviewRequire.resolve(id)) {
   for (const id of ["react", "react/jsx-runtime", "react-dom/server"]) {
@@ -95,17 +100,17 @@ async function loadBundle() {
     platform: "node",
     format: "cjs",
     jsx: "automatic",
-    // 컴포넌트가 끌고 오는 자산. vite 는 css 를 별도 파일로, svg 를 URL 로 다루지만
-    // 여기서는 **텍스트로 삼키면 그만**이다 — 우리가 보는 것은 렌더된 글자이지
-    // 스타일이 아니다. 이걸 주지 않으면 StartPage 가 `./start.css` 에서 멎는다.
+    // Assets the components drag in. vite treats css as a separate file and svg as a URL,
+    // but here **swallowing them as text is enough** — what we look at is the rendered
+    // letters, not the styling. Without this, StartPage stalls on `./start.css`.
     loader: { ".css": "text", ".svg": "text", ".png": "dataurl" },
     define: { "process.env.NODE_ENV": '"production"' },
     write: false,
     logLevel: "silent",
   });
 
-  // webview 코드가 모듈 최상위에서 만지는 것만 준다. 호스트 브리지는 주지 않는다 —
-  // 브리지 없이도 렌더되는지가 이 계측기가 확인하려는 사실이다.
+  // Give only what the webview code touches at module top level. No host bridge — whether
+  // it renders without the bridge is the very fact this instrument is checking.
   const windowStub = { addEventListener() {}, removeEventListener() {}, postMessage() {} };
   const module = { exports: {} };
   const context = {
@@ -132,7 +137,7 @@ async function loadBundle() {
   return compiled;
 }
 
-/** 실제 컴포넌트를 정적 HTML 로 렌더한다. */
+/** Renders the real component to static HTML. */
 export async function renderComponent(name, props = {}) {
   const api = await loadBundle();
   return api.render(name, props);
@@ -160,8 +165,9 @@ function decodeEntities(value) {
 }
 
 /**
- * 마크업에서 **보이는 텍스트**만 뽑는다. 블록 요소 경계는 줄바꿈이 된다 —
- * 문장 단위 부정문 면제(sx-audit.mjs)가 옆 요소의 문장과 섞이지 않게 하려는 것이다.
+ * Pulls only the **visible text** out of the markup. Block element boundaries become
+ * newlines — so the sentence-scoped negation exemption (sx-audit.mjs) does not blend with
+ * the sentence in the neighboring element.
  */
 export function visibleText(html) {
   const stripped = String(html ?? "")
@@ -177,7 +183,7 @@ export function visibleText(html) {
     .join("\n");
 }
 
-/** 렌더 + 텍스트 추출을 한 번에. */
+/** Render + text extraction in one step. */
 export async function renderVisibleText(name, props = {}) {
   return visibleText(await renderComponent(name, props));
 }

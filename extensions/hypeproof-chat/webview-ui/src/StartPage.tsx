@@ -56,10 +56,11 @@ export function StartPage() {
           {state.candidate && <button className="studio-text-button" disabled={state.checking} onClick={() => postToHost({type:"chooseActivityFolder"})}>다른 작업 폴더 선택</button>}
           <div className="studio-course-actions"><button className="studio-text-button" onClick={() => { setEditing(true); setEntry(null); setToken(""); }} disabled={state.checking}>다른 활동 선택</button><button className="studio-text-button" onClick={() => postToHost({ type: state.candidate ? "cancelCandidate" : "disconnectCourse" })} disabled={state.checking}>{state.candidate ? "선택 취소" : "연결 해제"}</button></div>
         </> : entry === null ? <div className="studio-entry-options" role="group" aria-label="시작 방법 고르기">
-          {/* SX-04 — 이 둘은 **동급 선택**이다. 예전에는 둘 다 Lime Primary 였고,
-              그러면 한 화면에 강조 버튼이 둘이다. 요구가 이 화면을 이름으로 지목해
-              "선택지 목록으로 그리고 둘 다 Primary 로 그리지 않는다" 고 적었다.
-              고른 뒤 나오는 "코드 확인하기" 가 이 흐름의 유일한 Primary 다. */}
+          {/* SX-04 — these two are **peer choices**. They both used to be Lime Primary,
+              which puts two emphasized buttons on one screen. The requirement names this
+              screen explicitly and writes "draw it as a list of options and do not draw
+              both as Primary". The "코드 확인하기" that appears after choosing is the only
+              Primary in this flow. */}
           <button className="studio-choice" disabled={state.checking} onClick={() => choose("trial")}>AI 체험하기 <span aria-hidden="true">→</span></button>
           <button className="studio-choice" disabled={state.checking} onClick={() => choose("classroom")}>수업에 참여하기 <span aria-hidden="true">→</span></button>
           {state.profile && <button className="studio-text-button" onClick={() => setEditing(false)}>기존 활동으로 돌아가기</button>}

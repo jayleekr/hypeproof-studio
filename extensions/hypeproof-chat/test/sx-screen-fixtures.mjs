@@ -1,13 +1,15 @@
-// 실제 화면을 렌더하는 데 필요한 최소 시료.
+// The minimum fixtures needed to render the real screens.
 //
-// 왜 따로 두나. 2026-09-20 평가가 이렇게 지적했다: 감사 계측기가 `MissionHeader` 와
-// `NativeObservationPanel` 둘만 렌더하고, **C1 이 말하는 "작업 중 화면" 의 본체인
-// `ChatPanel` 과 홈인 `StartPage` 는 렌더도 감사도 되지 않는다.** 그 말이 맞았다.
-// 판정을 소스 grep 에 기대면 조건부 분기를 놓친다(verification.md 규칙 1).
+// Why keep them separate. The 2026-09-20 evaluation pointed this out: the audit
+// instrument renders only `MissionHeader` and `NativeObservationPanel`, and
+// **`ChatPanel` — the body of what C1 calls the "작업 중 화면" — and the home
+// screen `StartPage` are neither rendered nor audited.** That was right.
+// Leaning the judgement on a source grep misses conditional branches
+// (verification.md rule 1).
 //
-// 수업 데이터는 **지어내지 않는다** — 실제 세션 설계 파일
-// `worker/test/fixtures/session-design/week-N.json` 을 읽는다. 화면이 읽는 그 데이터로
-// 판정해야 판정이 실물에 붙는다.
+// Lesson data is **not made up** — it reads the real session-design file
+// `worker/test/fixtures/session-design/week-N.json`. Judging on the same data the
+// screen reads is what makes the judgement stick to the real thing.
 
 import { readFileSync } from "node:fs";
 
@@ -19,7 +21,7 @@ export function weekFixture(n) {
 
 export const noop = () => {};
 
-/** `/v1/profile` 이 실제로 돌려주는 모양의 최소 부분집합. */
+/** The minimum subset of the shape `/v1/profile` actually returns. */
 export function resolvedProfile(week = 3, over = {}) {
   const content = weekFixture(week);
   return {
@@ -55,7 +57,7 @@ export function chatConfig(week = 3, over = {}) {
   };
 }
 
-/** `ChatPanel` 의 25개 prop 중 렌더에 필요한 것 전부. 콜백은 전부 no-op 이다. */
+/** All of `ChatPanel`'s 25 props that rendering needs. Every callback is a no-op. */
 export function chatPanelProps(over = {}) {
   return {
     config: chatConfig(),
