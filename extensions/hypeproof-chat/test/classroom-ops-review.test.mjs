@@ -111,3 +111,13 @@ test('F4 observers fire without awaiting: concurrent adds are persisted one afte
   assert.equal(overlapped, false, 'two saves never run at once (a shared temp file would be renamed away under the second)');
   assert.deepEqual(saved.events.map((e) => e.seq), [1, 2, 3, 4, 5, 6, 7, 8]);
 });
+
+// Seen in the real Mac window (2026-09-20): the learner was told “강사가 ‘reset_runtime’ 조치를…”. A wire id is not a sentence.
+test('the learner is told what is happening in words, not the wire id; an action without a label still says something', async () => {
+  const lines = [], run = async (action, executor) => { let saved = null; const r = new CommandRunner({ executors: { [action]: executor }, journal: { load: async () => saved, save: async (s) => { saved = structuredClone(s); } }, monotonic: () => 0, now: () => 1000, epoch: () => 1, notify: (l) => lines.push(l) });
+    await r.recover(); const c = { schema_version: 1, command_id: 'c-' + action, action, args: {}, lease_generation: 1, connection_epoch: 1, issued_at: 0, start_within_ms: 60000, run_within_ms: 5000 };
+    await r.onCommands([c]); await r.onAcks([{ command_id: c.command_id, state: 'accepted', proceed: true, reason: 'ok' }]); };
+  await run('reset_runtime', { mutating: true, label: 'AI 세션 다시 시작 (대화와 파일은 그대로)', run: async () => ({ ok: true, code: 'reset_ok' }) });
+  await run('unlabelled_action', { mutating: true, run: async () => ({ ok: true, code: 'ok' }) }); await run('send_question', { mutating: false, label: '질문', run: async () => ({ ok: true, code: 'shown' }) });
+  assert.deepEqual(lines, ['강사가 ‘AI 세션 다시 시작 (대화와 파일은 그대로)’ 조치를 요청해 실행합니다.', '강사가 ‘unlabelled_action’ 조치를 요청해 실행합니다.'], 'only state-changing actions announce themselves');
+});
