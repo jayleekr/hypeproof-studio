@@ -2240,6 +2240,68 @@
         },
         {
           "path": ".claude/evals/STUDIO_UX_EVAL.md"
+        },
+        {
+          "path": "worker/test/session-design-learning.test.mjs"
+        },
+        {
+          "path": "worker/test/learning-prompt.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-audit.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-audit.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-render.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-screen-fixtures.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-copy-lint.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-copy-lint.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-legacy-score-removed.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-mission-header.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-SX-P0",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-SX",
+        "ST-REQ-SX"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/learning-design.ts"
+        },
+        {
+          "path": "worker/src/lib/learning-prompt.ts"
+        },
+        {
+          "path": "worker/src/lib/session-design.ts"
+        },
+        {
+          "path": "worker/src/lib/chat-gate.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/MissionHeader.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/missionHeaderLogic.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/tokens.css"
         }
       ]
     }
