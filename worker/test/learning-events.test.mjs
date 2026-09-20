@@ -189,6 +189,40 @@ test("SX-15 with no change_requested there is nothing to re-verify", () => {
   assert.equal(gate("draft_then_criterion").verification.state, "none");
 });
 
+test("SX-15/AE-37 a confirmation stops covering the work once the criterion or the revision moves", () => {
+  // 확인 자체는 진짜로 있었던 일이다. 그래서 **지우지 않고** 보존한 채 상태만 내린다
+  // ("이전 증거는 보존한다"). 지우면 학생이 한 확인이 없었던 일이 된다.
+  const moved = gate("criterion_changed_after_confirm");
+  assert.equal(moved.verification.state, "needs_recheck", "기대 조건이 바뀌었는데 확인이 그대로 유효하다");
+  assert.deepEqual(moved.verification.missing.map((m) => m.code), ["criterion_moved"]);
+  assert.equal(moved.verification.previous?.event_id, "rc1", "이전 확인이 보존되지 않았다");
+  assert.equal(moved.verification.previous?.criterion_ref, "cs1");
+
+  const rebuilt = gate("artifact_changed_after_confirm");
+  assert.equal(rebuilt.verification.state, "needs_recheck", "산출물이 또 바뀌었는데 확인이 그대로 유효하다");
+  assert.deepEqual(rebuilt.verification.missing.map((m) => m.code), ["artifact_moved"]);
+  assert.equal(rebuilt.verification.previous?.event_id, "rc1");
+
+  // 코치가 기대 조건을 **제안**한 것은 학생이 생각을 바꾼 것이 아니다.
+  // actor 를 안 보면 코치가 말할 때마다 학생의 확인이 무효가 된다.
+  const suggested = gate("coach_criterion_after_confirm");
+  assert.equal(suggested.verification.state, "confirmed", "코치의 제안 한 줄이 학생의 확인을 무효로 만들었다");
+
+  // 양성 대조군 — 아무것도 움직이지 않았으면 확인은 확인으로 남는다.
+  const still = gate("retest_same_criterion");
+  assert.equal(still.verification.state, "confirmed", "움직인 것이 없는데 재확인을 요구한다 — 너무 엄격하다");
+  assert.equal(still.verification.previous, undefined, "확인 상태에서는 previous 가 필요 없다");
+});
+
+test("SX-15 부정 — 프리뷰 열람과 도구 실행 횟수는 재확인이 아니다", () => {
+  const clicks = gate("clicks_without_retest");
+  assert.equal(clicks.verification.state, "unconfirmed", "버튼을 누른 것만으로 검증이 기록됐다");
+  assert.deepEqual(clicks.verification.missing.map((m) => m.code), ["missing_retest"]);
+  // 대조군: 같은 도구 이벤트에 retest_confirmed 하나만 더하면 통과한다 —
+  // 막고 있는 것이 "도구 이벤트" 가 아니라 "재확인 선언의 부재" 임을 보인다.
+  assert.equal(gate("retest_with_executed_result").verification.state, "confirmed");
+});
+
 test("SX-14/15 the gate result is computed every time and never stored", () => {
   const events = accept(F.gateCases.retest_same_criterion).events;
   const snapshot = structuredClone(events);

@@ -19,6 +19,7 @@ import {
   type EvidenceType,
   type LearningEventKind,
   type ObservationActor,
+  type PreviousVerification,
   type SourceKind,
   type SourceState,
 } from "../../../worker/src/lib/measurement-core/learning-events.ts";
@@ -45,6 +46,11 @@ export interface EvidenceRow {
   provenance: { who: string; when: string; where: string } | null;
   /** 코치 제안을 채택한 경우 그 코치 이벤트 id (설계 §관측 이벤트와 필드 규칙 4). */
   adopted_from: string | null;
+  /** SX-16 — 변경 전후 보기가 쓰는 칸. `artifact` 이벤트만 `sha256` 을 갖는다. */
+  sha256: string | null;
+  artifact_before: string | null;
+  artifact_after: string | null;
+  criterion_ref: string | null;
 }
 
 export interface LearningStatePayload {
@@ -55,7 +61,13 @@ export interface LearningStatePayload {
   complete: { ok: boolean; reasons: string[]; missing: GateMiss[] };
   /** 세션 설계가 이 과제에 완료 조건을 **선언했는가**. 선언이 없다는 사실도 화면에 보인다. */
   declared: boolean;
-  verification: { state: GatesResult["verification"]["state"]; source_state: SourceState; line: string };
+  verification: {
+    state: GatesResult["verification"]["state"];
+    source_state: SourceState;
+    line: string;
+    /** AE-37 — 재확인이 필요해져도 **이전 확인은 남는다.** 지우면 없었던 일이 된다. */
+    previous?: PreviousVerification;
+  };
   evidence: EvidenceRow[];
 }
 
@@ -98,6 +110,9 @@ const VERIFICATION_LINES: Record<GatesResult["verification"]["state"], string> =
   none: "아직 고쳐 달라고 한 것이 없어요",
   unconfirmed: "아직 같은 조건으로 다시 확인하지 않음",
   confirmed: "같은 조건으로 다시 확인했어요",
+  // AE-37 — 확인은 있었다. 그 뒤에 기대 조건이나 산출물이 움직여서 지금 화면을
+  // 덮지 못할 뿐이다. "확인 안 했어요" 와 다른 문장이어야 학생이 구분할 수 있다.
+  needs_recheck: "확인한 뒤에 달라진 것이 있어요. 다시 한 번 봐 주세요",
 };
 
 function rowOf(event: ObservationEvent): EvidenceRow {
@@ -114,6 +129,10 @@ function rowOf(event: ObservationEvent): EvidenceRow {
     source_state: (event.source_state as SourceState | undefined) ?? "unverified",
     provenance: event.provenance ?? null,
     adopted_from: typeof event.adopted_from === "string" ? event.adopted_from : null,
+    sha256: typeof event.sha256 === "string" ? event.sha256 : null,
+    artifact_before: typeof event.artifact_before === "string" ? event.artifact_before : null,
+    artifact_after: typeof event.artifact_after === "string" ? event.artifact_after : null,
+    criterion_ref: typeof event.criterion_ref === "string" ? event.criterion_ref : null,
   };
 }
 
@@ -147,6 +166,7 @@ export function learningState(input: {
       state: verdict.verification.state,
       source_state: verdict.verification.source_state,
       line: VERIFICATION_LINES[verdict.verification.state],
+      ...(verdict.verification.previous ? { previous: verdict.verification.previous } : {}),
     },
     evidence: mine
       .filter((e) => DRAWER_KINDS.has(e.kind))

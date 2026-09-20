@@ -1349,3 +1349,20 @@ html, body, #root {
 .hp-evidence-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 0; font-size: 12px; color: var(--hp-muted); }
 .hp-evidence-adopted { margin: 2px 0 0; font-size: 12px; color: var(--hp-muted); }
 .hp-evidence :focus-visible { outline: 2px solid var(--hp-accent); outline-offset: 2px; }
+
+/* SX-15·16 (P1-C) — 이전 확인과 변경 전후 보기. */
+.hp-evidence-previous { margin: 0 0 10px; font-size: 12px; color: var(--hp-muted); }
+.hp-evidence-diff { margin: 0 0 12px; border: 1px solid var(--hp-line); border-radius: 6px; padding: 8px; }
+.hp-evidence-diff summary { min-height: 44px; cursor: pointer; padding: 10px 4px; font-size: 13px; }
+.hp-evidence-diff-criterion { margin: 0 0 8px; font-size: 13px; overflow-wrap: anywhere; }
+.hp-evidence-diff-note { margin: 0; font-size: 13px; color: var(--hp-muted); }
+/* 좁은 폭에서는 위아래로 쌓인다 — 사이드바 폭에서 두 열은 둘 다 못 읽는다. */
+.hp-evidence-compare { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 720px) { .hp-evidence-compare { grid-template-columns: 1fr 1fr; } }
+.hp-evidence-compare h5 { margin: 0 0 4px; font-size: 12px; color: var(--hp-muted); font-weight: 600; }
+.hp-evidence-compare pre {
+  margin: 0; padding: 8px; max-height: 180px; overflow: auto;
+  background: var(--hp-bg); border: 1px solid var(--hp-line); border-radius: 6px;
+  white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px;
+}
+.hp-evidence-compare small { color: var(--hp-muted); font-size: 11px; }

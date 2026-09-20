@@ -4,10 +4,12 @@ import {
   PROVENANCE_FIELDS,
   SOURCE_KIND_LABELS,
   UNRECORDED,
+  beforeAfterOf,
   decisionReason,
   filterBySourceKind,
   groupByEvidenceType,
   provenanceLine,
+  shortRevision,
   type EvidenceRowView,
 } from "./evidenceDrawerLogic";
 import type { SourceKind } from "../../../../worker/src/lib/measurement-core/learning-events.ts";
@@ -26,7 +28,12 @@ import type { SourceKind } from "../../../../worker/src/lib/measurement-core/lea
 export interface EvidenceDrawerProps {
   open: boolean;
   rows: EvidenceRowView[];
-  verification: { state: string; source_state: string; line: string };
+  verification: {
+    state: string;
+    source_state: string;
+    line: string;
+    previous?: { event_id: string; criterion_ref?: string; artifact_after?: string; source_state: string };
+  };
   /** 폼 제출. 호스트의 `learningEventRequest` 가 actor·context 를 채운다. */
   onSubmit: (draft: { kind: string } & Record<string, unknown>) => void;
   onToggle: (open: boolean) => void;
@@ -65,6 +72,44 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
 
       {/* SX-15 — 재확인 줄. 호스트가 계산해 보낸 문장을 그대로 그린다. */}
       <p className="hp-evidence-verify">{verification.line}</p>
+      {/* AE-37 — 재확인이 필요해져도 **이전 확인은 지우지 않는다.** 학생이 실제로
+          한 확인이고, 지우면 없었던 일이 된다. */}
+      {verification.previous && (
+        <p className="hp-evidence-previous">
+          이전에 확인한 것: {shortRevision(verification.previous.artifact_after ?? "")} 판
+        </p>
+      )}
+
+      {/* SX-16 — 변경 전후 보기. AI 초안 · 학생 수정본 · 그때의 기대 조건을 함께 연다. */}
+      {beforeAfterOf(rows).map((pair) => (
+        <details key={pair.id} className="hp-evidence-diff">
+          <summary>변경 전후 보기</summary>
+          {pair.criterionText ? (
+            <p className="hp-evidence-diff-criterion">그때의 기대 조건: {pair.criterionText}</p>
+          ) : (
+            <p className="hp-evidence-diff-criterion">그때 적어 둔 기대 조건이 없어요</p>
+          )}
+          <div className="hp-evidence-compare">
+            <section>
+              <h5>AI 초안</h5>
+              {pair.before ? (
+                <>
+                  <pre>{pair.before.text || "본문 없음"}</pre>
+                  <small>{shortRevision(pair.before.sha256)} 판</small>
+                </>
+              ) : (
+                // 빈 비교를 만들지 않는다(SX-16 부정 조건).
+                <p className="hp-evidence-diff-note">{pair.note}</p>
+              )}
+            </section>
+            <section>
+              <h5>내가 바꾼 것</h5>
+              <pre>{pair.after.text || "본문 없음"}</pre>
+              <small>{shortRevision(pair.after.sha256)} 판</small>
+            </section>
+          </div>
+        </details>
+      ))}
 
       <form
         className="hp-evidence-form"

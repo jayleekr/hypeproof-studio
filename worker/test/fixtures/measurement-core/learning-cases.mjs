@@ -246,4 +246,91 @@ export const gateCases = {
     ev("r1", 7, "tool_result", { tool_id: "check-1", outcome: "success", text: "all checks passed", sha256: SHA_B }),
     learn("rc1", 8, "retest_confirmed", "action", { criterion_ref: "cs1", artifact_after: SHA_B, outcome: "match", result_ref: "r1" }),
   ]),
+  /**
+   * P1-C / AE-37 — 확인이 끝난 **뒤에 기대 조건이 바뀐다.**
+   * 확인은 진짜로 있었던 일이므로 지우지 않고, 상태만 "재확인 필요" 로 간다.
+   */
+  criterion_changed_after_confirm: () => v2([
+    ...gateCases.retest_same_criterion().events,
+    learn("cs2", 7, "criterion_set", "criterion", said("글씨가 작아도 3초 안에 읽힌다")),
+  ]),
+  /**
+   * P1-C / AE-37 — 확인이 끝난 **뒤에 산출물이 또 바뀐다.**
+   * 확인은 그 시점의 개정본에 묶여 있었으므로 지금 개정본을 덮지 못한다.
+   */
+  artifact_changed_after_confirm: () => v2([
+    ...gateCases.retest_same_criterion().events,
+    ev("f3", 7, "artifact", { sha256: SHA_C, text: "menu.html" }),
+  ]),
+  /**
+   * P1-C / SX-15 부정 — 프리뷰를 열고 도구를 돌린 것만으로는 재확인이 되지 않는다.
+   * `retest_confirmed` 가 없으면 아무리 많이 눌러도 "수정 후 미확인" 이다.
+   */
+  clicks_without_retest: () => v2([
+    ...gateCases.change_without_retest().events,
+    ev("t1", 6, "tool_request", { tool_id: "check-1", text: "Bash(open preview)", sha256: SHA_B }),
+    ev("r1", 7, "tool_result", { tool_id: "check-1", outcome: "success", text: "opened", sha256: SHA_B }),
+    ev("t2", 8, "tool_request", { tool_id: "check-2", text: "Bash(open preview)", sha256: SHA_B }),
+    ev("r2", 9, "tool_result", { tool_id: "check-2", outcome: "success", text: "opened", sha256: SHA_B }),
+  ]),
+  /**
+   * P1-C / SX-15 부정 — 확인 뒤에 **코치가** 기대 조건을 제안한다.
+   * 학생이 생각을 바꾼 것이 아니므로 재확인을 요구하지 않는다. actor 를 안 보면
+   * 코치가 말 한 마디 할 때마다 학생의 확인이 무효가 된다.
+   */
+  coach_criterion_after_confirm: () => v2([
+    ...gateCases.retest_same_criterion().events,
+    ev("cs_ai", 7, "criterion_set", {
+      actor: "ai", context: CONTEXT, evidence_type: "criterion", source_state: "self_reported",
+      text: "글씨가 작아도 3초 안에 읽히면 어떨까요",
+    }),
+  ]),
+  /**
+   * P1-C / SX-16 — **두 번 고쳤다.** 변경마다 쌍이 하나씩 나와야 한다.
+   * 마지막 하나로 뭉뚱그리면 첫 번째 판단이 없었던 일이 된다.
+   */
+  two_changes: () => v2([
+    ev("u1", 1, "user", { text: "급식 메뉴 화면 만들어 줘" }),
+    learn("cs1", 2, "criterion_set", "criterion", said("첫 화면에서 오늘 메뉴가 3초 안에 보인다")),
+    ev("f1", 3, "artifact", { sha256: SHA_A, text: "menu.html v1" }),
+    learn("cr1", 4, "change_requested", "change", {
+      ...said("메뉴를 맨 위로 올려 주세요"), criterion_ref: "cs1", artifact_before: SHA_A, turn_ref: "u1",
+    }),
+    ev("f2", 5, "artifact", { sha256: SHA_B, text: "menu.html v2" }),
+    learn("rc1", 6, "retest_confirmed", "action", { criterion_ref: "cs1", artifact_after: SHA_B, outcome: "match" }),
+    learn("cr2", 7, "change_requested", "change", {
+      ...said("글씨도 키워 주세요"), criterion_ref: "cs1", artifact_before: SHA_B, turn_ref: "u1",
+    }),
+    ev("f3", 8, "artifact", { sha256: SHA_C, text: "menu.html v3" }),
+    learn("rc2", 9, "retest_confirmed", "action", { criterion_ref: "cs1", artifact_after: SHA_C, outcome: "match" }),
+  ]),
+  /**
+   * P1-C / SX-16 — 고쳐 달라고 해 놓고 **확인하지 않은 채 또 고쳐 달라고 한다.**
+   * 첫 변경에는 짝지을 확인이 없다. 두 번째 확인을 첫 변경 것으로 끌어오면
+   * 학생이 보지도 않은 개정본을 "확인했다" 로 그리게 된다.
+   */
+  change_then_change: () => v2([
+    ev("u1", 1, "user", { text: "급식 메뉴 화면 만들어 줘" }),
+    learn("cs1", 2, "criterion_set", "criterion", said("첫 화면에서 오늘 메뉴가 3초 안에 보인다")),
+    ev("f1", 3, "artifact", { sha256: SHA_A, text: "menu.html v1" }),
+    learn("cr1", 4, "change_requested", "change", {
+      ...said("메뉴를 맨 위로"), criterion_ref: "cs1", artifact_before: SHA_A, turn_ref: "u1",
+    }),
+    ev("f2", 5, "artifact", { sha256: SHA_B, text: "menu.html v2" }),
+    learn("cr2", 6, "change_requested", "change", {
+      ...said("글씨도 키워 주세요"), criterion_ref: "cs1", artifact_before: SHA_B, turn_ref: "u1",
+    }),
+    ev("f3", 7, "artifact", { sha256: SHA_C, text: "menu.html v3" }),
+    learn("rc2", 8, "retest_confirmed", "action", { criterion_ref: "cs1", artifact_after: SHA_C, outcome: "match" }),
+  ]),
+  /**
+   * P1-C / SX-16 부정 — 학생 수정본만 있고 **AI 초안이 없다.**
+   * 빈 비교를 만들지 않고 "AI 초안 없음" 으로 남겨야 한다.
+   */
+  after_without_before: () => v2([
+    ev("u1", 1, "user", { text: "내가 직접 만들어 볼게" }),
+    learn("cs1", 2, "criterion_set", "criterion", said("버튼을 누르면 이름이 보인다")),
+    ev("f1", 3, "artifact", { sha256: SHA_B, text: "menu.html" }),
+    learn("rc1", 4, "retest_confirmed", "action", { criterion_ref: "cs1", artifact_after: SHA_B, outcome: "match" }),
+  ]),
 };

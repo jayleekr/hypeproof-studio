@@ -217,11 +217,31 @@ export interface GatesInput {
   completion?: readonly { id: string; event: LearningEventKind }[];
 }
 
+/**
+ * A confirmation that happened and is kept even after it stops covering the work
+ * (AE-37 "이전 증거는 보존한다"). Deleting it would make a check the student really
+ * ran into something that never happened.
+ */
+export interface PreviousVerification {
+  event_id: string;
+  criterion_ref?: string;
+  artifact_after?: string;
+  source_state: SourceState;
+}
+
 export interface GatesResult {
   /** SX-14. `ok=false` disables the 완료 CTA and `missing` is what the screen lists. */
   complete: { ok: boolean; missing: GateMiss[] };
-  /** SX-15. */
-  verification: { state: "none" | "unconfirmed" | "confirmed"; source_state: SourceState; missing: GateMiss[] };
+  /**
+   * SX-15. `needs_recheck` is AE-37: the confirmation was real, but the expectation
+   * or the revision moved under it, so it no longer covers what is on screen now.
+   */
+  verification: {
+    state: "none" | "unconfirmed" | "confirmed" | "needs_recheck";
+    source_state: SourceState;
+    missing: GateMiss[];
+    previous?: PreviousVerification;
+  };
 }
 
 /**
@@ -280,13 +300,53 @@ function verificationGate(events: ObservationEvent[]): GatesResult["verification
   // 1. same criterion id. A retest against a different expectation is not this one.
   const sameCriterion = retests.filter((e) => criterion !== undefined && e.criterion_ref === criterion);
   if (!sameCriterion.length) return unconfirmed({ code: "criterion_mismatch", ...(criterion ? { ref: criterion } : {}) });
-  // 2. bound to the artifact that exists after the change, not the one before it.
-  const bound = sameCriterion.filter((e) => latest !== undefined && e.artifact_after === latest);
+  // 2. bound to the revision that was current **when the retest was made**, not to
+  //    the one before the change.
+  //
+  //    Comparing against today's latest revision instead would conflate two
+  //    different things: a retest that never matched any post-change revision
+  //    (`stale_artifact` — it checked the old copy) and a retest that was correct
+  //    at the time and has since been overtaken (`needs_recheck` — AE-37). The
+  //    first is a mistake; the second is ordinary progress, and telling a student
+  //    the second is the first would be wrong.
+  const latestBefore = (seq: number) => after.filter((e) => e.seq < seq).at(-1)?.sha256;
+  const bound = sameCriterion.filter((e) => {
+    const current = latestBefore(e.seq);
+    return current !== undefined && e.artifact_after === current;
+  });
   if (!bound.length) return unconfirmed({ code: "stale_artifact", ...(latest ? { ref: latest } : {}) });
   // 3. real only when an executed result is bound to that revision; otherwise the
   //    student says so and it stays self_reported.
-  const real = bound.some((e) => hasBoundResult(events, e));
-  return { state: "confirmed", source_state: real ? "real" : "self_reported", missing: [] };
+  const confirming = bound.find((e) => hasBoundResult(events, e)) ?? bound[bound.length - 1]!;
+  const real = hasBoundResult(events, confirming);
+  const source_state: SourceState = real ? "real" : "self_reported";
+
+  // 4. AE-37 — the confirmation was real, but does it still cover what is on screen?
+  //    A criterion written after it means the student is now asking a different
+  //    question; an artifact written after it means the answer was about an older
+  //    revision. Either way the state drops to `needs_recheck` and the confirmation
+  //    is **kept** in `previous`: it happened, and erasing it would be a lie in the
+  //    other direction.
+  const previous: PreviousVerification = {
+    event_id: confirming.id,
+    ...(typeof confirming.criterion_ref === "string" ? { criterion_ref: confirming.criterion_ref } : {}),
+    ...(typeof confirming.artifact_after === "string" ? { artifact_after: confirming.artifact_after } : {}),
+    source_state,
+  };
+  const movedCriterion = events.find((e) => e.kind === "criterion_set" && isStudentAuthored(e) && e.seq > confirming.seq);
+  if (movedCriterion) {
+    return { state: "needs_recheck", source_state: "unverified", missing: [{ code: "criterion_moved", ref: movedCriterion.id }], previous };
+  }
+  const movedArtifact = after.find((e) => e.seq > confirming.seq);
+  if (movedArtifact) {
+    return {
+      state: "needs_recheck",
+      source_state: "unverified",
+      missing: [{ code: "artifact_moved", ...(typeof movedArtifact.sha256 === "string" ? { ref: movedArtifact.sha256 } : {}) }],
+      previous,
+    };
+  }
+  return { state: "confirmed", source_state, missing: [] };
 }
 
 /**

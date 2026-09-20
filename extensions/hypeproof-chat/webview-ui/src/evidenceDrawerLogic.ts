@@ -25,6 +25,11 @@ export interface EvidenceRowView {
   source_state: string;
   provenance: { who: string; when: string; where: string } | null;
   adopted_from: string | null;
+  /** SX-16 — 변경 전후 보기가 쓰는 칸. */
+  sha256?: string | null;
+  artifact_before?: string | null;
+  artifact_after?: string | null;
+  criterion_ref?: string | null;
 }
 
 /**
@@ -157,3 +162,100 @@ export function decisionReason(row: Pick<EvidenceRowView, "text" | "actor">): st
   const text = typeof row.text === "string" ? row.text.trim() : "";
   return text.length > 0 ? text : "이유 미기록";
 }
+
+// ── SX-16 변경 전후 보기 ─────────────────────────────────────────────────────
+
+/** AI 초안이 없을 때 붙는 주석. **빈 비교를 만들지 않는다**(SX-16 부정 조건). */
+export const NO_AI_DRAFT = "AI 초안 없음";
+
+export interface ArtifactSide {
+  id: string;
+  sha256: string;
+  /** 보존된 본문. 없으면 빈 문자열이고 화면은 "본문 없음" 으로 그린다. */
+  text: string;
+  actor: string;
+}
+
+export interface BeforeAfterPair {
+  id: string;
+  /** AI 초안. 없으면 null 이고 `note` 가 그 사실을 말한다. */
+  before: ArtifactSide | null;
+  after: ArtifactSide;
+  /** 그때 적용된 기대 조건 원문. 없으면 빈 문자열. */
+  criterionText: string;
+  criterionId: string | null;
+  note: string | null;
+}
+
+/**
+ * 변경 하나마다 전후 한 쌍 (SX-16).
+ *
+ * **쌍의 기준은 `change_requested` 다.** SX-16 이 이름으로 부르는 두 칸이
+ * `artifact_before` 와 `artifact_after` 이고, 앞의 것은 변경 요청이, 뒤의 것은 그
+ * 뒤의 확인(`retest_confirmed`/`test_observed`)이 들고 있다. 산출물 목록에서
+ * 앞뒤로 **인접한 것**을 골라 쌍을 만들지 않는다 — 처음에 그렇게 썼고, 그러면
+ * 학생이 아직 아무것도 고치지 않은 상태(코치 초안을 그냥 한 번 확인한 것)까지
+ * "변경 전후" 로 그려 버린다. 데이터가 이미 무엇이 before 인지 말하고 있는데
+ * 위치로 짐작할 이유가 없다(verification.md 규칙 1).
+ *
+ * 변경이 세 번이면 쌍도 셋이다. 마지막 하나로 뭉뚱그리면 앞의 두 판단은 없었던
+ * 일이 된다.
+ *
+ * 변경 요청이 **한 번도 없었던** 과제에서 확인만 있으면, AI 초안이 아예 없었던
+ * 것이다. 그때만 `before: null` + "AI 초안 없음" 이고, 빈 비교를 만들지 않는다
+ * (SX-16 부정 조건).
+ */
+export function beforeAfterOf(rows: readonly EvidenceRowView[]): BeforeAfterPair[] {
+  const ordered = [...rows].sort((a, b) => a.at - b.at);
+  const bySha = new Map<string, EvidenceRowView>();
+  for (const r of ordered) if (r.kind === "artifact" && typeof r.sha256 === "string") bySha.set(r.sha256, r);
+  const criterionText = (id: string | null | undefined) =>
+    (id && ordered.find((r) => r.id === id)?.text) || "";
+
+  const side = (row: EvidenceRowView | undefined): ArtifactSide | null =>
+    row && typeof row.sha256 === "string"
+      ? { id: row.id, sha256: row.sha256, text: row.text ?? "", actor: row.actor }
+      : null;
+
+  const isCheck = (r: EvidenceRowView) => r.kind === "retest_confirmed" || r.kind === "test_observed";
+  const changes = ordered.filter((r) => r.kind === "change_requested" && typeof r.artifact_before === "string");
+  const pairs: BeforeAfterPair[] = [];
+
+  for (const change of changes) {
+    // 이 변경 **뒤**의 첫 확인이 그 변경의 결과를 가리킨다. 그 뒤의 변경에 딸린
+    // 확인을 끌어오지 않도록 다음 변경 앞에서 멈춘다.
+    const next = changes.find((c) => c.at > change.at);
+    const check = ordered.find(
+      (r) => isCheck(r) && r.at > change.at && (!next || r.at < next.at) && typeof r.artifact_after === "string",
+    );
+    if (!check) continue;
+    const after = side(bySha.get(String(check.artifact_after)));
+    if (!after) continue;
+    const before = side(bySha.get(String(change.artifact_before)));
+    pairs.push({
+      id: check.id,
+      before,
+      after,
+      criterionText: criterionText(check.criterion_ref ?? change.criterion_ref),
+      criterionId: (check.criterion_ref ?? change.criterion_ref) ?? null,
+      note: before ? null : NO_AI_DRAFT,
+    });
+  }
+  if (pairs.length > 0) return pairs;
+
+  // 변경 요청이 한 번도 없었다. 확인만 있다면 AI 초안이 없었던 과제다.
+  const solo = ordered.find((r) => isCheck(r) && typeof r.artifact_after === "string");
+  const after = solo && side(bySha.get(String(solo.artifact_after)));
+  if (!solo || !after) return [];
+  return [{
+    id: solo.id,
+    before: null,
+    after,
+    criterionText: criterionText(solo.criterion_ref),
+    criterionId: solo.criterion_ref ?? null,
+    note: NO_AI_DRAFT,
+  }];
+}
+
+/** 화면에 쓰는 개정본 표시. 64자 16진수는 학생에게 아무 의미가 없다. */
+export const shortRevision = (sha256: string) => String(sha256).slice(0, 7);
