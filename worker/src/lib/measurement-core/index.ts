@@ -7,6 +7,7 @@
 // compiles these files without Cloudflare or VS Code types.
 export const MEASUREMENT_CORE_VERSION = "measurement-core/0.1.0";
 
+export * from "./learning-events.ts";
 export * from "./legacy-observation.ts";
 export * from "./evidence.ts";
 export * from "./normalize.ts";
