@@ -1,0 +1,159 @@
+/**
+ * D 영역(Evidence drawer) 의 순수 판정 (SX-17·18·20·22·23).
+ *
+ * `.tsx` 가 아니라 `.ts` 인 이유는 `MissionHeader`/`missionHeaderLogic` 과 같다 —
+ * `node --experimental-strip-types` 는 JSX 를 스트립하지 못한다. 컴포넌트는
+ * 렌더 계측기로 보고, 규칙은 여기서 직접 부른다.
+ *
+ * 여기에 **해석이 없다.** 서랍은 무엇이 있었는지만 보여 준다(SX-17 부정 조건:
+ * "drawer 가 해석·점수를 포함하면 실패"). 해석은 E 회고와 F 변화 기록의 몫이다.
+ */
+import type {
+  EvidenceType,
+  SourceKind,
+} from "../../../../worker/src/lib/measurement-core/learning-events.ts";
+
+/** 서랍이 다루는 근거 한 줄. 호스트가 `learningState.evidence` 로 내려보낸 모양 그대로다. */
+export interface EvidenceRowView {
+  id: string;
+  kind: string;
+  evidence_type: EvidenceType | null;
+  at: number;
+  text: string;
+  actor: string;
+  source_kind: SourceKind;
+  source_state: string;
+  provenance: { who: string; when: string; where: string } | null;
+  adopted_from: string | null;
+}
+
+/**
+ * SX-18 의 여섯 종류. 순서는 설계 §관측 이벤트와 필드의 표 순서다.
+ *
+ * 라벨에 숫자를 쓰지 않는다. "근거 3종" 같은 문구는 개수 세기를 부르고, 개수는
+ * 곧 점수로 읽힌다.
+ */
+export const EVIDENCE_TYPE_LABELS: Record<EvidenceType, string> = {
+  intent: "무엇을 하려 했나",
+  criterion: "기대 조건",
+  action: "직접 해 본 것",
+  decision: "고른 이유",
+  change: "고쳐 달라고 한 것",
+  ownership: "내가 맡은 몫",
+};
+
+/** 종류를 모르는 근거가 가는 자리. 여섯 중 하나로 **추정하지 않는다**. */
+export const UNTYPED_LABEL = "종류 미기록";
+
+/**
+ * 학생이 비워 둔 출처 칸에 저장하는 값.
+ *
+ * `/2` 검증기는 `provenance` 에 `{who,when,where}` 세 칸이 **모두 비어 있지 않을 것**을
+ * 요구한다(`legacy-observation.ts` `shapeOf`). 그런데 SX-20 은 미입력을 "출처 미기록"
+ * 으로 남기라고 한다. 빈 문자열을 보내면 배치 전체가 거절되고, 아무 말이나 지어
+ * 넣으면 SX-20 이 금지한 "추정으로 채우기" 가 된다.
+ *
+ * 그래서 **기록되지 않았다는 사실 자체를 기록한다.** 지어낸 출처가 아니므로 추정이
+ * 아니고, 화면에서는 `provenanceLine` 이 빈 칸과 똑같이 다룬다. 스키마를 넓히는
+ * 쪽이 옳은지는 사람이 정할 일이고 STATE.md 개정 제안에 올려 둔다.
+ */
+export const UNRECORDED = "미기록";
+
+export const SOURCE_KIND_LABELS: Record<SourceKind, string> = {
+  link: "링크",
+  article: "기사",
+  policy: "학교 규정",
+  interview: "인터뷰",
+  test: "직접 시험",
+  none: "종류 없음",
+};
+
+export interface ProvenanceField {
+  key: "who" | "when" | "where";
+  label: string;
+}
+
+/**
+ * SX-22 — 종류마다 필요한 출처 칸이 다르다.
+ *
+ * 인터뷰는 **누가·언제**, 규정은 **문서명(어디)·조항**이 필요하다. 전부 같은 칸을
+ * 요구하면 "URL 만으로 규정으로 분류" 하는 길이 열린다(SX-22 부정 조건).
+ * 칸 이름은 `provenance{who,when,where}` 셋으로 고정돼 있고(스키마는 P1-A 에서
+ * 닫혔다), 라벨만 종류에 맞게 바꾼다.
+ */
+export const PROVENANCE_FIELDS: Record<SourceKind, readonly ProvenanceField[]> = {
+  link: [{ key: "where", label: "주소" }],
+  article: [
+    { key: "where", label: "매체·제목" },
+    { key: "when", label: "언제 나온 글인가" },
+  ],
+  policy: [
+    { key: "where", label: "문서명" },
+    { key: "who", label: "조항" },
+  ],
+  interview: [
+    { key: "who", label: "누가 말했나 (화자)" },
+    { key: "when", label: "언제" },
+  ],
+  test: [{ key: "when", label: "언제 해 봤나" }],
+  none: [
+    { key: "who", label: "누가" },
+    { key: "when", label: "언제" },
+    { key: "where", label: "어떤 상황에서" },
+  ],
+};
+
+/**
+ * SX-20 — 출처 한 줄. 비어 있으면 "출처 미기록" 이고, 추정으로 채우지 않는다.
+ *
+ * 일부만 적힌 경우 적어 준 것은 그대로 보여 주고 빠진 것이 있다는 사실을 함께
+ * 말한다. 셋 중 둘만 있는 것을 완성된 출처처럼 보여 주면 나중에 그 근거의 무게를
+ * 잘못 읽게 된다.
+ */
+export function provenanceLine(row: Pick<EvidenceRowView, "provenance">): string {
+  const p = row.provenance;
+  if (!p) return "출처 미기록";
+  const parts = [p.who, p.when, p.where].map((v) => (typeof v === "string" ? v.trim() : ""));
+  // `UNRECORDED` 는 저장된 값이지 적힌 값이 아니다. 화면에서는 빈 칸과 같이 다룬다.
+  const filled = parts.filter((v) => v.length > 0 && v !== UNRECORDED);
+  if (filled.length === 0) return "출처 미기록";
+  if (filled.length < 3) return `${filled.join(" · ")} (나머지 미기록)`;
+  return filled.join(" · ");
+}
+
+export interface EvidenceGroup {
+  type: EvidenceType | null;
+  label: string;
+  rows: EvidenceRowView[];
+}
+
+/** SX-18 — 종류별로 나눈다. 종류가 없는 것은 `type: null` 묶음으로 **남겨 둔다**. */
+export function groupByEvidenceType(rows: readonly EvidenceRowView[]): EvidenceGroup[] {
+  const order: (EvidenceType | null)[] = [...(Object.keys(EVIDENCE_TYPE_LABELS) as EvidenceType[]), null];
+  return order.map((type) => ({
+    type,
+    label: type === null ? UNTYPED_LABEL : EVIDENCE_TYPE_LABELS[type],
+    rows: rows.filter((r) => (r.evidence_type ?? null) === type),
+  }));
+}
+
+/** SX-22 — 목록을 종류로 거른다. `null` 은 필터 없음이지 "종류 없음" 이 아니다. */
+export function filterBySourceKind(
+  rows: readonly EvidenceRowView[],
+  kind: SourceKind | null,
+): EvidenceRowView[] {
+  if (kind === null) return [...rows];
+  return rows.filter((r) => r.source_kind === kind);
+}
+
+/**
+ * SX-23 — 선택 이유 한 줄.
+ *
+ * 비어 있으면 "이유 미기록" 으로 남는다. 코치가 쓴 문장(actor≠user)은 학생의
+ * 이유로 보여 주지 않는다 — 그러면 AI 가 대신 채운 것이 학생 판단으로 집계된다.
+ */
+export function decisionReason(row: Pick<EvidenceRowView, "text" | "actor">): string {
+  if (row.actor !== "user") return "이유 미기록 (학생이 쓴 문장이 아님)";
+  const text = typeof row.text === "string" ? row.text.trim() : "";
+  return text.length > 0 ? text : "이유 미기록";
+}

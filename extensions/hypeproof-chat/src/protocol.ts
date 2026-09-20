@@ -309,6 +309,22 @@ export type WebviewMessage = (
   | {type:'selectFunding';id:string}
   | {type:'requestBudget';note:string}
   | { type: 'observationOpen' }
+  /**
+   * SX-45 규칙 2 — 학습 이벤트는 **웹뷰 폼 제출**만 만든다. 호스트는 이 메시지를
+   * 받은 자리에서만 `learningEventRequest(..., {sender:"webview-form"})` 를 부르고,
+   * 코치 스트림 콜백에서는 부르지 않는다. `actor` 와 `context` 는 웹뷰가 보내지
+   * 않는다 — 보내도 호스트가 버린다.
+   */
+  | { type: 'learningEvent'; draft: { kind: string } & Record<string, unknown>; stepId?: string }
+  /** D 서랍 열림 상태. 보기 상태이므로 웹뷰가 소유하고, 호스트는 기록만 한다. */
+  | { type: 'learningDrawer'; open: boolean }
+  /**
+   * SX-14 — "완료" 를 눌렀다. **웹뷰의 disabled 는 근거가 아니다**: 호스트가
+   * `acceptSubmit()` 으로 게이트를 다시 판정하고, 통과하지 못하면 거절한다.
+   * 요구 문서의 부정 조건("키보드나 API 직접 호출로 완료를 보내도 거부한다")이
+   * 바로 이 재판정을 말한다.
+   */
+  | { type: 'submitTask'; task: string }
   | { type: 'observationCancel' }
   | { type: 'observationAssess'; scope: string; eventIds: string[] }
   | { type: 'observationCorrect'; scope: string; text: string }
@@ -378,6 +394,12 @@ export type HostMessage = (
   /** #897 (VO-01) — 프로브 실행 요청. 명령으로만 발생한다(활성화 시점 아님). */
   | { type: 'probeVoiceCapability'; probeId: string }
   | { type: 'observationState'; assessedEventCount?: number; learningPath?: {title:string;url:string;reason:string} | null; batch: import('./nativeObservationContract').ObservationBatch | null; error: string | null; findings?: import('./nativeObservationContract').ObservationFinding[] }
+  /**
+   * SX-14·15·17 — 호스트가 계산한 학습 상태. **웹뷰는 이것을 다시 계산하지 않는다**
+   * (설계 §정보 구조 "호스트·웹뷰·워커의 경계"). 완료 CTA 비활성도 `complete.ok` 를
+   * 그대로 그린다. 게이트 결과는 저장하지 않으므로 이 메시지는 매번 새로 계산된 값이다.
+   */
+  | { type: 'learningState'; state: import('./learningStateHelpers').LearningStatePayload }
   | StartResponse
   | { type: "config"; config: ChatConfig }
   | { type: "history"; messages: ChatMessage[] }

@@ -2,6 +2,7 @@ import { AccessControl } from './AccessControl';
 import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
 import { MissionHeader } from './MissionHeader';
+import { EvidenceDrawer } from './EvidenceDrawer';
 import { MarkdownText } from './MarkdownText';
 import { DisconnectedChat } from "./StartPage";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -14,6 +15,7 @@ import type {
   UpdateOffer,
   UxConfig,
 } from "../../src/protocol";
+import type { LearningStatePayload } from "../../src/learningStateHelpers";
 import { onHostMessage, postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
 import { composerLabel, copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
@@ -193,10 +195,15 @@ export function ChatPanel(props: Props) {
   const [frozen, setFrozen] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
   // SX-01/SX-02 — 지금 보고 있는 단계. **보기 상태**다. 완료 판정이 아니다.
-  // 설계는 호스트가 과제 상태 기계를 갖고 `learningState` 로 내려보내라고 한다
-  // (§정보 구조 "호스트·웹뷰·워커의 경계", SX-55). 그것은 학습 이벤트가 생기는
-  // P1-B 의 일이고, 그때 이 useState 는 호스트가 보낸 값으로 바뀐다.
   const [currentStepId, setCurrentStepId] = useState<string | null>(null);
+  /**
+   * SX-14·15·17 — 호스트가 계산해 보낸 학습 상태. **여기서 다시 계산하지 않는다.**
+   * null 이면 이 연결이 학습 이벤트를 쓰지 않는 것(`hps-observation/2` 아님)이고,
+   * 그때는 D 영역을 그리지 않는다 — 빈 서랍을 그려 두면 눌러도 아무 일이 없다.
+   */
+  const [learning, setLearning] = useState<LearningStatePayload | null>(null);
+  /** 서랍 열림은 **보기 상태**라 웹뷰가 갖는다. 기본은 닫힘(SX-17). */
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const snapshot = useRef({text:draft,images:pendingImages,queued});
   snapshot.current = {text:draft,images:pendingImages,queued};
   const activityId = config?.activity?.id;
@@ -220,6 +227,14 @@ export function ChatPanel(props: Props) {
     });
     return off;
   }, [activityId]);
+  // SX-14·15·17 — 호스트가 보낸 학습 상태를 그대로 받는다. 활동 id 로 거르지 않는
+  // 이유: 게이트는 **과제** 단위이고 호스트가 이미 그 과제의 이벤트만 넣어 보낸다.
+  useEffect(() => {
+    const off = onHostMessage((msg) => {
+      if (msg.type === "learningState") setLearning(msg.state);
+    });
+    return off;
+  }, []);
   /**
    * #642/#649 (2026-08-20 검토) — 친구를 누른 순간부터 호스트가 streamStart 를
    * 보내기까지의 **무방비 구간**. 그 사이 호스트는 세상 HTML + 엔진을 받아오고(왕복
@@ -659,6 +674,48 @@ export function ChatPanel(props: Props) {
           </details>
         );
       })()}
+
+      {/* 영역 D — 완료 게이트와 Evidence drawer (SX-14·17). 호스트가 `learningState`
+          를 보낼 때만 그린다. 안 보내는 연결(학습 이벤트를 쓰지 않는 프로필)에서
+          빈 서랍을 그려 두면 눌러도 아무 일이 없는 장식이 된다. */}
+      {learning && (
+        <section className="hp-evidence-region" aria-label="근거와 완료">
+          <div className="hp-complete">
+            {/* SX-14 — 비활성 사유가 **버튼 옆에** 보인다. 우회 버튼은 없다.
+                판정은 호스트가 했고 여기서는 그리기만 한다. */}
+            <button
+              type="button"
+              className="hp-cta-primary"
+              disabled={!learning.complete.ok}
+              onClick={() => postToHost({ type: "submitTask", task: learning.task })}
+            >
+              이 과제 완료하기
+            </button>
+            {!learning.complete.ok && (
+              <ul className="hp-complete-why">
+                {learning.complete.reasons.map((reason) => (
+                  <li key={reason}>☐ {reason}</li>
+                ))}
+              </ul>
+            )}
+            {!learning.declared && (
+              <p className="hp-complete-note">이 단계는 따로 정해 둔 완료 조건이 없어요.</p>
+            )}
+          </div>
+          <EvidenceDrawer
+            open={drawerOpen}
+            rows={learning.evidence}
+            verification={learning.verification}
+            // 단계 id 는 **보기 상태**라 여기서 온다. 호스트는 그것이 이 수업의
+            // 단계인지 확인한 뒤에만 쓴다 — 웹뷰가 보낸 값을 그대로 믿지 않는다.
+            onSubmit={(draft) => postToHost({ type: "learningEvent", draft, stepId: currentStepId ?? undefined })}
+            onToggle={(open) => {
+              setDrawerOpen(open);
+              postToHost({ type: "learningDrawer", open });
+            }}
+          />
+        </section>
+      )}
 
       {config?.profile?.observation?.format === 'hps-observation/1' && <NativeObservationPanel scope={config.profile.observation.scope} coachName={coachName} />}
       {config?.profile?.profile_id === 'studio-native-trial' && config.profile.observation?.format !== 'hps-observation/1' && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}

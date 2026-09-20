@@ -43,6 +43,9 @@ export const COMPONENTS = {
   // useEffect 는 SSR 에서 돌지 않는다.
   ChatPanel: { from: "./src/ChatPanel.tsx", exportName: "ChatPanel" },
   StartPage: { from: "./src/StartPage.tsx", exportName: "StartPage" },
+  // 영역 D(SX-17~24). props 로만 산다 — 호스트가 보낸 `learningState.evidence` 를
+  // 그리고, 게이트를 다시 계산하지 않는다.
+  EvidenceDrawer: { from: "./src/EvidenceDrawer.tsx", exportName: "EvidenceDrawer" },
 };
 
 /**

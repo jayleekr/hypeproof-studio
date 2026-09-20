@@ -12,7 +12,8 @@ import * as path from "path";
 import * as fs from "fs";
 import {createHash} from 'node:crypto';
 import {NativeObservationRecorder} from './nativeObservationRecorder';
-import {OBSERVATION_FORMAT, validateFindings, type ObservationBatch} from './nativeObservationContract';
+import {OBSERVATION_FORMATS, validateFindings, type ObservationBatch} from './nativeObservationContract';
+import {acceptSubmit, learningEventRequest, learningState, type CompletionItem} from './learningStateHelpers';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
@@ -40,6 +41,10 @@ import {
 // 수 없어서(BrowserTab 에 show()/reveal() 없음) 이 경로를 쓴다. `openEditorAtIndex`
 // 는 **활성 그룹**에서 0-based 인덱스로 연다(코어 editorCommands.ts) — 그래서 그룹
 // 활성화가 먼저다.
+/** `/1` 키는 글자 그대로 유지하고 `/2` 만 다른 칸을 쓴다. 위 주석 참조. */
+const observationKey = (b: {format?: string; scope: string; program: string}) =>
+  'hps.observation.'+(b.format === 'hps-observation/2' ? '2' : '1')+'.'+b.scope+'.'+b.program;
+
 const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
@@ -203,25 +208,89 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private nativeLearningPath: {title:string;url:string;reason:string} | null = null;
   private observationAssessment: AbortController | null = null;
   private observationWrites: Promise<void> = Promise.resolve();
+  /**
+   * 저장 키에 포맷을 넣는다.
+   *
+   * `/1` 키는 글자 그대로 유지된다(기존 저장본이 그대로 열린다). `/2` 는 다른 칸을
+   * 쓴다 — 같은 칸을 쓰면 `/1` 로 저장된 배치를 `/2` 컨텍스트로 열게 되고, 그때
+   * `recordLearningEvent()` 가 `observation_format` 으로 막히면서 **설정은 맞는데
+   * 학습 이벤트만 조용히 안 쌓이는** 상태가 된다.
+   */
   private async prepareObservation(proxyUrl: string, token: string | undefined, profile: ResolvedProfile | null) {
     await this.observationWrites;
     this.nativeObservation = null;
-    if (profile?.observation?.format !== OBSERVATION_FORMAT || !token) return null;
+    // P1 — `/1` 과 `/2` 둘 다 받는다. 어느 쪽을 쓸지는 프로필이 정한다
+    // (설계 §관측 이벤트와 필드 "프로필 observation.format 이 어느 쪽을 쓸지 정한다").
+    if (!OBSERVATION_FORMATS.includes(profile?.observation?.format as never) || !token) return null;
     try {
       const response = await fetch(proxyUrl.replace(/\/$/, '')+'/observations/context', {headers:{authorization:'Bearer '+token},signal:AbortSignal.timeout(5000)});
       if (!response.ok) throw Error('observation_unavailable');
       const context = await response.json() as Omit<ObservationBatch,'events'> & {learning_path?:{title:string;url:string;reason:string}};
       this.nativeLearningPath=context.learning_path??null;
-      const key='hps.observation.1.'+context.scope+'.'+context.program;
+      const key=observationKey(context);
       this.nativeObservation = new NativeObservationRecorder(context, this.context.workspaceState.get(key));
       this.nativeObservationError=null;
       return this.nativeObservation;
     } catch { this.nativeObservationError='관찰 기록을 연결하지 못했습니다. 기존 작업은 계속할 수 있습니다.'; return null; }
   }
   private persistObservation(recorder: NativeObservationRecorder) {
-    const value=recorder.snapshot(), key='hps.observation.1.'+value.scope+'.'+value.program;
+    const value=recorder.snapshot(), key=observationKey(value);
     this.observationWrites=this.observationWrites.then(async()=>{await this.context.workspaceState.update(key,value);}).catch(()=>{this.nativeObservationError='관찰 기록 저장에 실패했습니다.';});
   }
+  /** D 서랍 열림. 보기 상태이므로 판정에 쓰지 않는다. */
+  private learningDrawerOpen = false;
+
+  /** `/2` 를 쓰는 연결에서만 학습 이벤트를 만든다. 아니면 null 이고 D 영역이 안 그려진다. */
+  private async currentLearningRecorder(): Promise<NativeObservationRecorder | null> {
+    const token = await this.context.secrets.get(TOKEN_KEY);
+    const proxy = vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1');
+    const recorder = await this.prepareObservation(proxy, token, await this.ensureProfile());
+    return recorder?.batch.format === 'hps-observation/2' ? recorder : null;
+  }
+
+  /**
+   * 설계 §과제 흐름 상태 기계 — `task-<module sha256 앞 16자>-<activity id 앞 8자>`.
+   * 같은 폴더라는 이유로 합치지 않는다(MC-08).
+   */
+  private learningTaskId(lessonSha: string | undefined, activityId: string | undefined) {
+    return 'task-' + String(lessonSha ?? '').slice(0,16) + '-' + String(activityId ?? '').slice(0,8);
+  }
+
+  /**
+   * 완료 조건. 세션 설계가 선언하지 않았으면 **빈 목록**이고, 그 사실이
+   * `learningState.declared=false` 로 화면까지 간다. 여기서 기본값을 지어내지 않는다.
+   */
+  private learningCompletion(profile: ResolvedProfile | null): CompletionItem[] {
+    const rows = profile?.lesson?.content?.learning?.completion ?? [];
+    return rows.map(r => ({ id: r.id, event: r.event as CompletionItem['event'], label: r.text }));
+  }
+
+  /**
+   * 웹뷰가 보낸 단계 id 를 **확인한 뒤에** 쓴다. 이 수업의 단계가 아니면 첫 단계로
+   * 떨어뜨린다 — 웹뷰가 보낸 문자열이 그대로 `context.step_id` 에 저장되면 나중에
+   * 어느 단계의 근거인지 알 수 없게 된다.
+   */
+  private learningStep(profile: ResolvedProfile | null, wanted: string | undefined) {
+    const steps = profile?.lesson?.content?.steps ?? [];
+    return steps.find(s => s.id === wanted) ?? steps[0];
+  }
+
+  /** 호스트가 계산해 웹뷰로 내려보내는 학습 상태. 저장하지 않고 매번 계산한다. */
+  private async postLearningState() {
+    const recorder = await this.currentLearningRecorder();
+    if (!recorder) return;
+    const profile = await this.ensureProfile();
+    const task = this.learningTaskId(profile?.lesson?.sha256, activityConnections(this.context)?.current?.id);
+    await this.post({
+      type: 'learningState',
+      state: learningState({
+        task,
+        events: recorder.batch.events,
+        completion: this.learningCompletion(profile),
+      }),
+    });
+  }
+
   private view?: vscode.WebviewView;
   private editorChat?: vscode.WebviewPanel;
   private activeStreams = new Map<string, AbortController>();
@@ -1890,9 +1959,56 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:recorder?.snapshot()??null,error:this.nativeObservationError,findings,assessedEventCount:saved?.event_ids.length});
         return;
       }
+      case 'learningEvent': {
+        // SX-45 규칙 2 — 학습 이벤트가 만들어지는 **유일한** 자리다. 코치 스트림
+        // 콜백(`recordObservation`)은 이 함수를 부르지 않는다.
+        const recorder = await this.currentLearningRecorder();
+        if (!recorder) { await this.postLearningState(); return; }
+        const profile = await this.ensureProfile();
+        const step = this.learningStep(profile, msg.stepId);
+        const made = learningEventRequest(msg.draft, {
+          week: Number(profile?.lesson?.content?.learning?.week ?? 1),
+          step_id: step?.id ?? '',
+          task: this.learningTaskId(profile?.lesson?.sha256, activityConnections(this.context)?.current?.id),
+          module_version: String(profile?.lesson?.version ?? ''),
+          sender: 'webview-form',
+          stepEvidenceType: step?.evidence as never,
+        });
+        // 거절은 조용히 삼키지 않는다 — 학생이 적은 것이 사라지면 다시 적지 않는다.
+        if (!made.ok) { this.nativeObservationError = '남긴 내용을 저장하지 못했습니다 ('+made.code+'). 다시 한 번 눌러 주세요.'; }
+        else {
+          try { recorder.recordLearningEvent(made.event); this.persistObservation(recorder); this.nativeObservationError = null; }
+          catch (error) { this.nativeObservationError = '남긴 내용을 저장하지 못했습니다 ('+(error as Error).message+').'; }
+        }
+        await this.postLearningState();
+        return;
+      }
+      case 'learningDrawer':
+        // 보기 상태다. 호스트는 기록만 하고 판정에 쓰지 않는다.
+        this.learningDrawerOpen = msg.open;
+        return;
+      case 'submitTask': {
+        // SX-14 부정 조건 — 웹뷰의 disabled 는 근거가 아니다. 같은 게이트를 다시 돌린다.
+        const recorder = await this.currentLearningRecorder();
+        const completion = this.learningCompletion(await this.ensureProfile());
+        const verdict = acceptSubmit({
+          task: msg.task,
+          events: recorder?.batch.events ?? [],
+          completion,
+        });
+        if (!verdict.ok) {
+          this.nativeObservationError = '아직 완료할 수 없어요: ' + verdict.reasons.join(' · ');
+          await this.postLearningState();
+          return;
+        }
+        this.nativeObservationError = null;
+        await this.postLearningState();
+        return;
+      }
       case "ready":
         await this.postConfig();
         await this.postHistory();
+        await this.postLearningState();
         // #308 — flush the pending inline notice. The webview may have just
         // been created for the first time (attachPageContext ran before
         // panel.focus) or recreated after hide/show (no retainContextWhenHidden
