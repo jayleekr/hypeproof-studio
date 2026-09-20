@@ -139,3 +139,14 @@ test('negative control: no token on the device → starting a connection reports
   await f.host.resume(); await new Promise((r) => setTimeout(r, 300));
   assert.ok(!bodies.flatMap((b) => b.events).some((e) => e.kind === 'activation')); await f.host.disconnectInteractively();
 });
+
+test('a slow connect-time token check never overwrites what the learner\'s first turn already reported', async (t) => {
+  const bodies = []; let release; const held = new Promise((r) => { release = r; });
+  const f = await hostFixture(t, { live: true, endedMsAgo: -3_600_000, probeProfile: async () => { await held; return { ok: true }; },
+    onFetch: async (path, init) => { if (path !== '/v1/classroom/ops/sync') return null; const b = JSON.parse(init.body); bodies.push(b); return Response.json({ ack: { contiguous: Math.max(0, ...b.events.map((e) => e.seq)), results: [] }, connection_epoch: 1, poll_after_ms: 60000, control: { paused: false, control_revision: 0 } }); } });
+  await f.host.resume(); f.host.turnResult({ ok: false, runtime: 'agent-sdk', errorKind: 'upstream', status: 500 }); // a fault is reported while the check is still in flight
+  release(); await new Promise((r) => setTimeout(r, 300));
+  const sent = bodies.flatMap((b) => b.events), kinds = sent.map((e) => [e.kind, e.payload.stage ?? e.payload.class, e.payload.cleared === true]);
+  assert.ok(sent.some((e) => e.kind === 'error' && e.payload.blocking === true), 'precondition: the fault was sent'); assert.ok(!kinds.some(([k, , cleared]) => k === 'error' && cleared), 'the late check did not clear it: ' + JSON.stringify(kinds));
+  assert.ok(!kinds.some(([k, v]) => k === 'activation' && v === 'token_verified'), 'and did not move the entry stage back'); await f.host.disconnectInteractively();
+});

@@ -334,4 +334,6 @@ export class ChangeGate<T> {
   private last: string | null = null;
   next(value: T): T | null { const k = JSON.stringify(value); if (k === this.last) return null; this.last = k; return value; }
   reset(): void { this.last = null; }
+  /** Nothing has passed through yet (since construction or the last reset). */
+  get untouched(): boolean { return this.last === null; }
 }
