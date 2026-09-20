@@ -19,7 +19,7 @@
 // value import back would make the core cyclic.
 import type { ObservationEvent } from "./legacy-observation.ts";
 
-/** 학습 이벤트 8종 (SX-47). The order is the design table's order. */
+/** The 8 learning event kinds (SX-47). The order is the design table's order. */
 export const LEARNING_EVENT_KINDS = [
   "problem_committed",
   "criterion_set",
@@ -32,15 +32,15 @@ export const LEARNING_EVENT_KINDS = [
 ] as const;
 export type LearningEventKind = (typeof LEARNING_EVENT_KINDS)[number];
 
-/** 근거 종류 6종 (SX-18). A kind of thing left behind, never a judgment about a person. */
+/** The 6 evidence types (SX-18). A kind of thing left behind, never a judgment about a person. */
 export const EVIDENCE_TYPES = ["intent", "criterion", "action", "decision", "change", "ownership"] as const;
 export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 
-/** 출처 종류 6종 (SX-22). */
+/** The 6 source kinds (SX-22). */
 export const SOURCE_KINDS = ["link", "article", "policy", "interview", "test", "none"] as const;
 export type SourceKind = (typeof SOURCE_KINDS)[number];
 
-/** 실제/가상 (SX-46). Fixed when the event is stored; a correction is a new event, never an edit. */
+/** Real vs. simulated (SX-46). Fixed when the event is stored; a correction is a new event, never an edit. */
 export const SOURCE_STATES = ["real", "simulated", "self_reported", "unverified"] as const;
 export type SourceState = (typeof SOURCE_STATES)[number];
 
@@ -51,7 +51,7 @@ export type SourceState = (typeof SOURCE_STATES)[number];
 export const OBSERVATION_ACTORS = ["user", "ai", "teacher", "external_user", "policy"] as const;
 export type ObservationActor = (typeof OBSERVATION_ACTORS)[number];
 
-/** 강사 확인 (SX-42). Never stored on an event: observations are append-only. */
+/** Instructor confirmation (SX-42). Never stored on an event: observations are append-only. */
 export const TEACHER_STATES = ["unreviewed", "confirmed", "disputed"] as const;
 export type TeacherState = (typeof TEACHER_STATES)[number];
 
@@ -149,7 +149,7 @@ export function defaultSourceState(kind: unknown): SourceState | null {
  * What an event's source_state IS, stored value first.
  *
  * A stored value wins; absent falls back to the kind default; an event with no
- * kind default at all (every legacy kind) is `unverified` — 출처 미확인. Nothing is
+ * kind default at all (every legacy kind) is `unverified` — source unconfirmed. Nothing is
  * ever promoted to `real` here; that takes provenance or a bound executed result,
  * and the validator is what enforces it.
  */
@@ -185,7 +185,7 @@ export function isHumanEvidence(event: { kind?: unknown; actor?: unknown }): boo
 /**
  * Does this event satisfy a gate that names `kind`?
  *
- * SX-14 spells the completion rule as "actor=user, student_text 비어 있지 않은".
+ * SX-14 spells the completion rule as "actor=user, student_text not empty".
  * Two of the eight kinds (`test_observed`, `retest_confirmed`) have no
  * `student_text` at all, so requiring it for them would make a gate naming them
  * unsatisfiable — an instructor can name any of the eight in `learning.completion`.
@@ -219,7 +219,7 @@ export interface GatesInput {
 
 /**
  * A confirmation that happened and is kept even after it stops covering the work
- * (AE-37 "이전 증거는 보존한다"). Deleting it would make a check the student really
+ * (AE-37 "previous evidence is preserved"). Deleting it would make a check the student really
  * ran into something that never happened.
  */
 export interface PreviousVerification {
@@ -230,7 +230,7 @@ export interface PreviousVerification {
 }
 
 export interface GatesResult {
-  /** SX-14. `ok=false` disables the 완료 CTA and `missing` is what the screen lists. */
+  /** SX-14. `ok=false` disables the Complete CTA and `missing` is what the screen lists. */
   complete: { ok: boolean; missing: GateMiss[] };
   /**
    * SX-15. `needs_recheck` is AE-37: the confirmation was real, but the expectation
@@ -381,7 +381,7 @@ export interface StepGate {
 export type NextStepResult = { ok: true; step: string } | { ok: false; code: string; gate?: LearningEventKind };
 
 /**
- * "다음으로" and "이전으로".
+ * The "다음으로" (next) and "이전으로" (back) moves.
  *
  * Going back is always allowed (SX-16) — a student revisiting an earlier step is
  * not a failure state. Going forward is refused by name when the step being left

@@ -107,7 +107,7 @@ chat.get("/health", (c) =>
 // the active LLM provider (incl. anthropic proxy URL when set), KV, D1.
 // Used by:
 //   - the 15-min heartbeat cron (#45) when it needs richer diagnostics
-//   - operator console during 보아치과 티저 세션 (Jay polls)
+//   - operator console during the 보아치과 teaser session (Jay polls)
 //   - manual `wrangler tail` smoke before deploy
 //
 // Auth: admin Basic only. Operator surface — never a path the student app calls.
@@ -164,11 +164,12 @@ chat.get("/health/deep", async (c) => {
 // ---------------------------------------------------------------------------
 
 
-// GET /v1/worlds/:id — 게스트의 세상 사전 완성본 HTML (2026-08-19).
-// 학생 토큰이면 누구나. 코치가 만들 필요 없이 Studio 가 즉시 띄운다.
-// GET /v1/worlds/:id/engine.js — **그 세상만의** 엔진 (2026-08-20).
-// 공용본에는 9개 세상 스프라이트가 다 들어 있어, 코치가 읽으면 남의 세상이 섞인다
-// (실기기: 초코 세상에서 얼음). 이 경로는 그 세상이 쓰는 그림만 남겨 내려준다.
+// GET /v1/worlds/:id — the pre-built HTML of a guest's world (2026-08-19).
+// Any student token. Studio shows it instantly, with nothing for the coach to build.
+// GET /v1/worlds/:id/engine.js — the engine for **that world only** (2026-08-20).
+// The shared copy carries all 9 worlds' sprites, so when the coach reads it another
+// world's art bleeds in (on a real device: ice in 초코's world). This route serves
+// down only the art that world uses.
 chat.get("/worlds/:id/engine.js", async (c) => {
   const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
   if (!auth.ok) return c.json({ error: { message: auth.message, type: "auth", code: auth.code, request_id: c.get("requestId") } }, 401);
@@ -177,8 +178,9 @@ chat.get("/worlds/:id/engine.js", async (c) => {
   return new Response(js, { status: 200, headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-store" } });
 });
 
-// GET /v1/worlds/engine.js — 9개 세상이 공유하는 도트 엔진 + 스프라이트 (#629).
-// Studio 가 index.html 과 같은 폴더에 저장하고, 세상 HTML 이 <script src="engine.js"> 로 부른다.
+// GET /v1/worlds/engine.js — the dot engine + sprites the 9 worlds share (#629).
+// Studio saves it in the same folder as index.html, and a world's HTML loads it with
+// <script src="engine.js">.
 chat.get("/worlds/engine.js", async (c) => {
   const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
   if (!auth.ok) return c.json({ error: { message: auth.message, type: "auth", code: auth.code, request_id: c.get("requestId") } }, 401);
@@ -333,8 +335,9 @@ chat.get("/profile", async (c) => {
     // fixed-name precedence; no new top-level key, no capability change.
     ux: assistantName ? { ...profile.ux, coach: { ...profile.ux.coach, naming_mode: 'fixed', fallback_name: assistantName } } : profile.ux,
     publishing: { enabled: profile.publishing.enabled, strategy: profile.publishing.strategy },
-    // #596 — 세션 로그 업로드 opt-in. 클라이언트는 이걸로 "기록 보내기" UI 를
-    // 낼지만 판단한다 — 강제는 어차피 PUT /v1/logs 가 서버에서 한다(fail closed).
+    // #596 — session-log upload opt-in. The client uses it only to decide whether to
+    // show the "기록 보내기" UI — enforcement is done server-side by PUT /v1/logs
+    // anyway (fail closed).
     analytics: { upload_session_logs: profile.analytics.upload_session_logs === true },
     preview: profile.preview,
     // #422 — the cohort's on-disk workspace folder. The chat extension opens
@@ -343,8 +346,9 @@ chat.get("/profile", async (c) => {
     // lets the client stop hardcoding "~/HypeProofGames" for every cohort.
     workspace_root: profile.sandbox.workspace_root ?? null,
     ...(profile.workspace_start ? {workspace_start:profile.workspace_start} : {}),
-    // 2026-08-19 — 게스트의 세상 사전 완성본 목록. kids-quest tier 에서만. 확장이
-    // 아이의 "🐕 초코 세상에 가볼래"를 이 목록으로 매칭해 GET /v1/worlds/:id 를 즉시 띄운다.
+    // 2026-08-19 — the list of pre-built guest worlds. kids-quest tier only. The
+    // extension matches the child's "🐕 초코 세상에 가볼래" against this list and opens
+    // GET /v1/worlds/:id immediately.
     worlds: profile.game?.template_tier === "kids-quest" ? listWorlds() : undefined,
     // #278 — input capabilities, default off (minor-safe). Drives whether the
     // chat panel exposes "페이지를 코치에게" / image paste.
@@ -403,22 +407,24 @@ chat.get("/profile", async (c) => {
     // a profile mistake can never route a child to the file/exec-capable
     // runtime. Absent → proxy. The client still gates every tool via
     // canUseTool and honors the machine-scoped runtime setting.
-    // 2026-08-11 결정 — 미성년 코호트도 프로필이 명시적으로 opt-in 하면
-    // agent-sdk 에 도달한다. SK 아동 워크숍의 커리큘럼이 "코치가 워크스페이스의
-    // 파일을 읽고 고친다" 를 전제로 바뀌었고, 그러려면 파일 도구가 실행될
-    // 런타임이 필요하다. 이전에는 여기서 무조건 proxy 로 핀했다.
+    // 2026-08-11 decision — a minor cohort reaches agent-sdk too, when its profile
+    // explicitly opts in. The SK kids workshop curriculum changed to assume "the
+    // coach reads and fixes files in the workspace", and that needs a runtime where
+    // the file tools actually execute. Before, this place pinned to proxy
+    // unconditionally.
     //
-    // **무엇이 바뀌지 않았는가 (중요):**
-    //   - 모더레이션 — 인바운드/아웃바운드 스크린은 isMinorCohort 로 그대로 돈다
-    //     (이 파일 322·513행, messages.ts 298·444행). 이 변경과 무관한 계층이다.
-    //   - 도구 범위 — shell·browser·subagents 는 아동 프로필에 여전히 없고
-    //     하네스가 hard fail 로 막는다. 열린 것은 read/write 뿐이다.
-    //   - 경로 봉쇄 + 승인 모달 — 모든 툴 호출은 canUseTool 을 지나고
-    //     워크스페이스 밖 경로는 거부된다(evaluateSdkToolUse).
+    // **What did NOT change (important):**
+    //   - Moderation — the inbound/outbound screens still run off isMinorCohort
+    //     (this file lines 322·513, messages.ts 298·444). A layer unrelated to this
+    //     change.
+    //   - Tool scope — shell·browser·subagents are still absent from child profiles
+    //     and the harness blocks them with a hard fail. What opened is read/write only.
+    //   - Path sealing + approval modal — every tool call goes through canUseTool and
+    //     a path outside the workspace is refused (evaluateSdkToolUse).
     //
-    // 즉 "미성년은 무조건 proxy" 가 아니라 "미성년은 프로필이 명시하지 않으면
-    // proxy" 로 바뀐 것이다. 프로필에 sdk_tools 를 두지 않은 아동 코호트는
-    // 이전과 동작이 완전히 같다.
+    // That is, it went from "minors are proxy, always" to "minors are proxy unless the
+    // profile says otherwise". A child cohort with no sdk_tools in its profile behaves
+    // exactly as it did before.
     coach_runtime: profile.coach_runtime === "agent-sdk" ? "agent-sdk" : "proxy",
   });
 });
@@ -578,8 +584,9 @@ chat.post("/chat/completions", async (c) => {
     // cannot re-title the AI or attach a personality on that seat.
     name: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-name")),
     personality: gate.identity ? undefined : decodeHeader(c.req.header("x-hps-coach-personality")),
-    // #507 — 프록시 경로의 브라우저 루프도 같은 주소를 알아야 한다. 클라이언트는
-    // 주소만 보내고, 문구는 워커가 만든다(주입 통로가 되지 않게).
+    // #507 — the proxy path's browser loop has to know the same URL. The client sends
+    // the URL only; the worker writes the wording (so it cannot become an injection
+    // channel).
     previewUrl: decodeHeader(c.req.header("x-hps-preview-url")),
   };
 
@@ -626,12 +633,14 @@ chat.post("/chat/completions", async (c) => {
     }
   }
 
-  // Pick the upstream LLM. 우선순위는 **프로필 → 배포 기본값** 이다.
+  // Pick the upstream LLM. The precedence is **profile → deployment default**.
   //
-  // 쓰임새마다 맞는 모델이 다르다 — 아이들 수업은 싸고 빠른 쪽, 고위험 산출물은 비싸도
-  // 정확한 쪽. 배포 전체를 한 모델로 묶을 이유가 없어서, 프로필이 `model.provider` 를
-  // 선언하면 그 요청만 그쪽으로 나간다. 선언하지 않은 프로필은 지금까지와 똑같이
-  // LLM_PROVIDER 를 따른다 (기존 배포의 동작이 바뀌지 않는다).
+  // Different uses want different models — a kids' lesson wants the cheap, fast one;
+  // a high-risk artifact wants the accurate one even if it costs more. There is no
+  // reason to tie the whole deployment to one model, so when a profile declares
+  // `model.provider`, only that profile's requests go that way. A profile that does
+  // not declare one follows LLM_PROVIDER exactly as it did until now (the behaviour
+  // of existing deployments does not change).
   //
   // translate / translateOpenAI both drop client system+tool messages — the
   // trust model is identical either way.
@@ -715,14 +724,17 @@ chat.post("/chat/completions", async (c) => {
       await admit(oBody,'openai-chat');
       upstream = await callOpenAI(oBody, apiKey, requestSignal, c.env.OPENAI_BASE_URL);
     } else if (provider === "glm") {
-      // GLM (Z.ai) — Anthropic 호환 경로라 **번역기와 스트림 처리를 그대로 재사용**한다.
-      // 새로 쓰는 것은 URL 하나뿐이다 (lib/glm.ts 에 실측 근거를 적어 뒀다).
+      // GLM (Z.ai) — an Anthropic-compatible path, so **the translator and the stream
+      // handling are reused as they are**. The only new thing is one URL (the measured
+      // evidence is written down in lib/glm.ts).
       //
-      // Anthropic 프록시/시크릿은 붙이지 않는다 — 그건 지역 차단된 api.anthropic.com
-      // 우회용이고 z.ai 에는 해당이 없다. 붙이면 프록시가 403 을 낸다.
+      // Do NOT attach the Anthropic proxy/secret — that is for getting around a
+      // region-blocked api.anthropic.com and does not apply to z.ai. Attach it and the
+      // proxy returns 403.
       //
-      // 캐시는 자동이 아니다: cache_control 을 명시해야 걸린다 (실측 81% 절감).
-      // 그 지시를 넣는 것은 translate() 쪽 일이라 이 wrapper 범위 밖이다 — #545.
+      // Caching is not automatic: it only applies when cache_control is explicit
+      // (measured 81% saving). Putting that instruction in is translate()'s job, so it
+      // is outside this wrapper's scope — #545.
       const gBody = translate(body as any, profile, coach, "glm");
       gBody.stream = stream;
       modelLabel = gBody.model;
@@ -919,8 +931,9 @@ chat.post("/chat/completions", async (c) => {
     }
     c.header("x-hps-model", modelLabel);
     if (fellBack) c.header("x-hps-fallback", "1");
-    // 요청한 모델을 못 지켰으면 **말한다** — alias 번역과 요청 무시가 선에서 구별되지
-    // 않던 것이 #897 H-05 관측이다. 서빙 모델은 바꾸지 않는다.
+    // If the requested model was not honoured, **say so** — #897 H-05 observed that
+    // alias translation and an ignored request were indistinguishable on the wire. The
+    // served model itself is not changed.
     const announce = modelAnnouncement((body as any)?.model, profile, modelLabel);
     if (announce.substituted) {
       c.header("x-hps-model-substituted", "1");
@@ -945,7 +958,7 @@ chat.post("/chat/completions", async (c) => {
   //    (passthrough + usage tap); Anthropic events are transformed to OpenAI
   //    chunks.
   let streamedAssistantText = "";
-  // #684 — the "중단" case from the issue. The stream opened 200, so the client
+  // #684 — the "aborted" case from the issue. The stream opened 200, so the client
   // already has a status; the only place the gateway learns the turn actually
   // died is this hook, which the SSE layer fires BEFORE onUsage.
   let streamFailed = false;
@@ -1027,16 +1040,18 @@ chat.post("/chat/completions", async (c) => {
     ...((multi||executionAccess) ? { "x-hps-usage-request-id":usageRequestId } : {}),
     "x-hps-module": module.version,
     ...(module.fallback ? { "x-hps-module-fallback": module.fallback.pinned } : {}),
-    // #580 — raw Response 반환은 request-id 미들웨어의 c.header() 를 우회한다
-    // (Hono 는 핸들러가 만든 Response 에 미들웨어 헤더를 합치지 않는다). 4xx
-    // (c.json) 경로에만 있던 x-request-id 를 스트리밍 200 에도 직접 싣는다 —
-    // 클라이언트 스풀의 usage requestKey 와 #64 신고 플로우가 이 값을 쓴다.
+    // #580 — returning a raw Response bypasses the request-id middleware's c.header()
+    // (Hono does not merge middleware headers into a Response the handler built). The
+    // x-request-id that existed only on the 4xx (c.json) path is carried explicitly on
+    // the streaming 200 as well — the client spool's usage requestKey and the #64
+    // report flow both use this value.
     "x-request-id": c.get("requestId"),
   };
   if (fellBack) streamHeaders["x-hps-fallback"] = "1";
   // #1008 — the gate's c.header() receipt does not survive a raw Response.
   if (gate.help) streamHeaders["x-hps-help-mode"] = gate.help;
-  // 스트리밍에도 같이 싣는다. 한쪽만 실으면 "스트림이면 조용하다" 는 새 구멍이 된다.
+  // Carry it on the streaming path too. Carrying it on only one side opens a new
+  // hole: "it goes quiet when it streams".
   const streamAnnounce = modelAnnouncement((body as any)?.model, profile, modelLabel);
   if (streamAnnounce.substituted) {
     streamHeaders["x-hps-model-substituted"] = "1";

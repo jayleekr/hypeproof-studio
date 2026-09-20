@@ -190,27 +190,29 @@ test("SX-15 with no change_requested there is nothing to re-verify", () => {
 });
 
 test("SX-45 human evidence reads actor, and the /1 rule it widened is no longer identical", () => {
-  // 심은 결함 #15(평가자) — `isHumanEvidence` 의 actor 가드를 지워도 스위트 전체가
-  // 초록이었다. 그 가드는 "AI 가 쓴 글은 학생 행동이 아니다" 의 마지막 방어선이고
-  // 검사가 없었다. 동시에 이 함수는 `/1` 의 규칙을 **넓힌** 것이라, `/1` 이 허용하던
-  // 이벤트가 이제 human 이 아니게 되는 자리가 있다. 그 사실도 여기 못 박는다.
+  // Planted defect #15 (evaluator) — deleting `isHumanEvidence`'s actor guard left
+  // the whole suite green. That guard is the last line of defence for "what the AI
+  // wrote is not the student's behaviour", and nothing checked it. At the same time
+  // this function **widened** `/1`'s rule, so there are places where an event `/1`
+  // allowed is no longer human. That fact gets nailed down here too.
   assert.equal(core.isHumanEvidence({ kind: "user" }), true, "학생 발화가 human 이 아니다");
   assert.equal(core.isHumanEvidence({ kind: "correction" }), true, "정정이 human 이 아니다");
   assert.equal(core.isHumanEvidence({ kind: "coach" }), false, "코치 발화가 human 으로 셌다");
 
-  // actor 가드 — 이 두 줄이 없으면 위 세 줄은 전부 통과하면서 가드는 죽어 있다.
+  // The actor guard — without these two lines the three above all pass while the guard is dead.
   assert.equal(core.isHumanEvidence({ kind: "user", actor: "ai" }), false, "AI 가 쓴 user 이벤트가 human 으로 셌다");
   assert.equal(core.isHumanEvidence({ kind: "user", actor: "policy" }), false, "정책이 만든 이벤트가 human 으로 셌다");
   assert.equal(core.isHumanEvidence({ kind: "user", actor: "user" }), true, "학생이 낸 것이 막혔다");
 
-  // 학습 kind 는 actor=user 일 때만 human 이다.
+  // A learning kind is human only when actor=user.
   assert.equal(core.isHumanEvidence({ kind: "criterion_set", actor: "user" }), true);
   assert.equal(core.isHumanEvidence({ kind: "criterion_set", actor: "ai" }), false);
 });
 
 test("SX-15/AE-37 a confirmation stops covering the work once the criterion or the revision moves", () => {
-  // 확인 자체는 진짜로 있었던 일이다. 그래서 **지우지 않고** 보존한 채 상태만 내린다
-  // ("이전 증거는 보존한다"). 지우면 학생이 한 확인이 없었던 일이 된다.
+  // The confirmation itself really happened. So it is **not deleted** — it is kept
+  // and only the state drops ("previous evidence is preserved"). Delete it and a
+  // check the student actually ran becomes something that never happened.
   const moved = gate("criterion_changed_after_confirm");
   assert.equal(moved.verification.state, "needs_recheck", "기대 조건이 바뀌었는데 확인이 그대로 유효하다");
   assert.deepEqual(moved.verification.missing.map((m) => m.code), ["criterion_moved"]);
@@ -222,12 +224,13 @@ test("SX-15/AE-37 a confirmation stops covering the work once the criterion or t
   assert.deepEqual(rebuilt.verification.missing.map((m) => m.code), ["artifact_moved"]);
   assert.equal(rebuilt.verification.previous?.event_id, "rc1");
 
-  // 코치가 기대 조건을 **제안**한 것은 학생이 생각을 바꾼 것이 아니다.
-  // actor 를 안 보면 코치가 말할 때마다 학생의 확인이 무효가 된다.
+  // The coach **proposing** an expectation is not the student changing their mind.
+  // Without reading actor, every coach utterance invalidates the student's
+  // confirmation.
   const suggested = gate("coach_criterion_after_confirm");
   assert.equal(suggested.verification.state, "confirmed", "코치의 제안 한 줄이 학생의 확인을 무효로 만들었다");
 
-  // 양성 대조군 — 아무것도 움직이지 않았으면 확인은 확인으로 남는다.
+  // Positive control — if nothing moved, a confirmation stays a confirmation.
   const still = gate("retest_same_criterion");
   assert.equal(still.verification.state, "confirmed", "움직인 것이 없는데 재확인을 요구한다 — 너무 엄격하다");
   assert.equal(still.verification.previous, undefined, "확인 상태에서는 previous 가 필요 없다");
@@ -237,8 +240,9 @@ test("SX-15 부정 — 프리뷰 열람과 도구 실행 횟수는 재확인이 
   const clicks = gate("clicks_without_retest");
   assert.equal(clicks.verification.state, "unconfirmed", "버튼을 누른 것만으로 검증이 기록됐다");
   assert.deepEqual(clicks.verification.missing.map((m) => m.code), ["missing_retest"]);
-  // 대조군: 같은 도구 이벤트에 retest_confirmed 하나만 더하면 통과한다 —
-  // 막고 있는 것이 "도구 이벤트" 가 아니라 "재확인 선언의 부재" 임을 보인다.
+  // Control: adding just one retest_confirmed to the same tool events makes it pass —
+  // showing that what blocks is not "tool events" but "the absence of a re-check
+  // declaration".
   assert.equal(gate("retest_with_executed_result").verification.state, "confirmed");
 });
 

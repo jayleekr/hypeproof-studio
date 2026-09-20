@@ -1,20 +1,22 @@
-// SX-55 · SX-56 · SX-57 · SX-58 · SX-59 — hps-session-design/1 의 learning 확장.
+// SX-55 · SX-56 · SX-57 · SX-58 · SX-59 — the learning extension of hps-session-design/1.
 //
-// 설계: docs/design/studio-learning-experience.md "세션 설계 파일 (Module)".
-// 요구: docs/requirements/studio-learning-experience.md SX-55~59.
+// Design: docs/design/studio-learning-experience.md "세션 설계 파일 (Module)".
+// Requirements: docs/requirements/studio-learning-experience.md SX-55~59.
 //
-// 대조군 규율(.claude/rules/verification.md 규칙 2·3):
+// Control-group discipline (.claude/rules/verification.md rules 2·3):
 //
-//   양성 대조(심은 정답)  설계 문서의 3주차 JSON을 **그대로** fixture 로 두고
-//                        validateSessionDesign(content, true) === null 을 요구한다.
-//                        계약 문서와 검증기가 어긋나면 여기서 즉시 드러난다.
-//   불변 대조            learning 이 없는 설계는 오늘과 똑같이 통과해야 한다.
-//                        이 확장이 기존 수업을 건드리지 않았다는 증거다.
-//   음성 대조            결함을 **하나씩** 심어 그 규칙만 정확히 깨어나는지 센다.
+//   positive control (planted answer)
+//                        keep the design doc's week-3 JSON **verbatim** as the fixture and
+//                        require validateSessionDesign(content, true) === null.
+//                        If the contract doc and the validator drift, it shows up here at once.
+//   invariant control    a design with no learning must pass exactly as it does today.
+//                        That is the evidence this extension did not touch existing lessons.
+//   negative control     plant defects **one at a time** and count that exactly that rule wakes up.
 //
-// 이 파일은 learning-design.ts 를 모듈 최상위에서 import 하지 않는다. 변경 전
-// 코드에서도 끝까지 돌아야 대조군 역할을 하기 때문이다(그때는 learning 키가
-// 상위 allowlist 에 없어 "invalid session-design fields" 로 빨갛게 죽는다).
+// This file does not import learning-design.ts at module top level. It has to run all the
+// way through on the pre-change code too in order to act as a control group (back then the
+// learning key was not in the top-level allowlist, so it died red with
+// "invalid session-design fields").
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
@@ -30,13 +32,13 @@ const fixture = (n) =>
   JSON.parse(readFileSync(new URL(`./fixtures/session-design/week-${n}.json`, import.meta.url), 'utf8'));
 const week3 = () => fixture(3);
 
-// 진단 한 줄. 판정이 아니라 관측이다 — 변경 전에는 상위 allowlist 가 learning 을
-// 모르므로 "invalid session-design fields" 가, 변경 후에는 null 이 찍힌다.
+// One diagnostic line. Observation, not a verdict — before the change the top-level
+// allowlist does not know learning, so "invalid session-design fields" prints; after, null.
 console.log('probe: validateSessionDesign(week-3, complete=true) =>',
   JSON.stringify(validateSessionDesign(week3(), true)));
 
-// ─── 1. 불변 대조 — learning 이 없는 설계는 오늘과 같다 ──────────────────────
-// 변경 전 코드에서도 통과해야 한다. 여기가 빨개지면 확장이 기존 수업을 깼다는 뜻이다.
+// ─── 1. Invariant control — a design with no learning is the same as today ──
+// Must pass on the pre-change code too. If this goes red, the extension broke existing lessons.
 const legacy = () => ({
   schema: 'hps-session-design/1',
   title: '레거시 수업',
@@ -72,7 +74,7 @@ await check('불변: 스키마 id 는 오르지 않는다', () => {
   assert.equal(validateSessionDesign(bumped, true), 'unsupported session-design schema');
 });
 
-// ─── 2. 양성 대조 — 심은 정답 ───────────────────────────────────────────────
+// ─── 2. Positive control — the planted answer ──────────────────────────────
 await check('양성 대조: 설계 문서의 3주차 JSON 이 확정 가능하다', () => {
   assert.equal(validateSessionDesign(week3(), true), null);
 });
@@ -81,7 +83,7 @@ await check('양성 대조: 3주차는 초안으로도 통과한다', () => {
   assert.equal(validateSessionDesign(week3(), false), null);
 });
 
-// ─── 3. 음성 대조 — 결함을 하나씩 심는다 ────────────────────────────────────
+// ─── 3. Negative control — plant defects one at a time ─────────────────────
 const mutate = (fn) => { const c = week3(); fn(c); return validateSessionDesign(c, true); };
 
 await check('음성: learning.completion[].event 가 이벤트 8종 밖이면 거부', () => {
@@ -102,7 +104,7 @@ await check('음성: 중첩된 점수 키도 거부된다 — 재귀 스캔', ()
 await check('음성: week 말고 다른 숫자 값은 이름이 무엇이든 거부된다', () => {
   const bad = mutate(c => { c.learning.mastery = 0.8; });
   assert.match(String(bad), /learning must not carry a score/);
-  // week 는 유일하게 허용된 숫자다 — 대조.
+  // week is the only allowed number — control.
   assert.equal(validateSessionDesign(week3(), true), null);
 });
 
@@ -162,16 +164,16 @@ await check('음성: steps[].gate 는 이벤트 8종 밖이면 거부', () => {
   assert.match(String(bad), /^step expect: gate must be one of/);
 });
 
-// SX-57 — 관측만 목적인 단계는 만들지 않는다. evidence·gate 를 단 단계는 산출물이 있어야 한다.
+// SX-57 — no step exists only to be observed. A step carrying evidence·gate must have an artifact.
 await check('SX-57 음성: evidence 만 있고 완료 기준이 빈 단계는 초안에서도 거부', () => {
   const c = week3();
-  c.steps[3].acceptance = '   ';                 // diff 단계는 evidence: action 을 단다
+  c.steps[3].acceptance = '   ';                 // the diff step carries evidence: action
   assert.match(String(validateSessionDesign(c, false)), /must name an acceptance/);
 });
 
 await check('SX-57 음성: gate 만 있고 완료 기준이 빈 단계도 초안에서 거부', () => {
   const c = week3();
-  delete c.steps[2].evidence;                    // gate: test_observed 만 남긴다
+  delete c.steps[2].evidence;                    // leave only gate: test_observed
   c.steps[2].acceptance = '';
   assert.match(String(validateSessionDesign(c, false)), /must name an acceptance/);
 });
@@ -186,14 +188,15 @@ await check('SX-57 음성: 확정 모드에서도 거부된다', () => {
 
 await check('SX-57 대조: evidence·gate 가 없는 단계는 초안에서 빈 완료 기준을 허용한다', () => {
   const c = week3();
-  c.steps[1].acceptance = '';                    // build 단계는 evidence·gate 가 없다
+  c.steps[1].acceptance = '';                    // the build step has no evidence·gate
   assert.equal(validateSessionDesign(c, false), null, '초안 저장의 관용은 그대로다');
   assert.match(String(validateSessionDesign(c, true)), /acceptance is required to freeze a version/);
 });
 
-// ─── 4. 6주 예시 파일 — SX-56 · SX-58 · SX-51 ───────────────────────────────
-// SX-58 의 여섯 문장. 원문은 docs/design/ui-philosophy-2026-09-18.md §6·§7 의
-// "절대 하지 않을 것" 칸이고, 3주차만 설계 문서의 fixture 문자열을 그대로 쓴다.
+// ─── 4. Six-week example files — SX-56 · SX-58 · SX-51 ─────────────────────
+// The six sentences of SX-58. The source text is the "절대 하지 않을 것" column in
+// docs/design/ui-philosophy-2026-09-18.md §6·§7; only week 3 uses the design doc's
+// fixture string verbatim.
 const NEVER = {
   1: '인터뷰 답을 AI가 대신 만들어주거나 “좋은 문제”를 자동 선택하지 않는다.',
   2: '“AI 기반 맞춤형 플랫폼” 같은 추상 문구를 먼저 생성하지 않는다.',
@@ -219,15 +222,17 @@ await check('여섯 파일 모두 비어 있지 않은 learning.never 를 갖는
   }
 });
 
-// 2026-09-20 평가에서 잡힌 드리프트. 2·5주차의 미션과 목표가 보존 원문과 달랐다:
-//   2주  "시간/돈보다"        → "시간과 돈보다"
-//   5주  "10명을 만드나?"     → "열 명을 만나나?"   ← 뜻이 움직인다(획득 → 대면)
-// `never` 여섯 문장은 위 검사가 축자로 잡고 있었는데 미션·목표에는 같은 장치가
-// 없었다. 강사가 읽는 문장은 원문이 정본이므로 **문서 본문에 그대로 있는지**로
-// 판정한다. 이 검사는 다음에 누가 "다듬는" 것도 막는다.
+// Drift caught in the 2026-09-20 evaluation. The week 2·5 missions and objectives differed
+// from the preserved source text:
+//   week 2  "시간/돈보다"        → "시간과 돈보다"
+//   week 5  "10명을 만드나?"     → "열 명을 만나나?"   ← the meaning moves (acquire → meet in person)
+// The check above was catching the six `never` sentences verbatim, but the missions·objectives
+// had no such device. The sentence an instructor reads is canonical as the source text, so
+// judge it by **whether it is in the document body verbatim**. This check also stops the next
+// person from "polishing" it.
 await check('여섯 주차의 미션·목표·금지 문장이 보존 원문에 그대로 있다 (SX-56·SX-58)', () => {
   const source = readFileSync(new URL('../../docs/design/ui-philosophy-2026-09-18.md', import.meta.url), 'utf8');
-  // 대조군: 계측기가 무언가를 실제로 세는지. 원문에 없는 문장은 반드시 걸려야 한다.
+  // Control: does the instrument actually count anything? A sentence not in the source must be caught.
   assert.equal(source.includes('돈 안 쓰고 어떻게 열 명을 만나나?'), false,
     '드리프트한 문장이 원문에 있다 — 대조군 전제가 바뀌었다');
   for (let w = 1; w <= 6; w++) {
@@ -264,7 +269,7 @@ await check('모든 단계에 실제 산출물을 지목하는 완료 기준이 
   }
 });
 
-// ─── 5. enum 은 한 곳에서만 정의된다 ────────────────────────────────────────
+// ─── 5. The enums are defined in exactly one place ─────────────────────────
 await check('learning-design.ts 가 네 목록의 유일한 정의처다', async () => {
   const m = await import('../src/lib/learning-design.ts');
   assert.deepEqual([...m.LEARNING_EVENT_KINDS], [
@@ -279,13 +284,13 @@ await check('learning-design.ts 가 네 목록의 유일한 정의처다', async
   ]);
 });
 
-// ─── 6. SX-58 — never[] 가 코치 프롬프트 경로에 실제로 닿는가 ───────────────
+// ─── 6. SX-58 — does never[] actually reach the coach prompt path ──────────
 //
-// 읽어서 "닿을 것이다" 라고 쓰지 않는다(.claude/rules/verification.md 규칙 1b).
-// 실제 Service 앱에 수업을 저장·확정하고, 좌석 토큰으로 /v1/messages 를 불러,
-// **공급자가 본 body** 안에서 금지 문장을 찾는다. 경로에 새 분기를 추가하지 않았다는
-// 주장의 실측 근거이기도 하다 — chat-gate.ts 가 lesson.content 를 통째로
-// JSON.stringify 하므로 learning 은 라우트 변경 없이 따라간다.
+// Do not read the code and write "it will reach" (.claude/rules/verification.md rule 1b).
+// Save and freeze a lesson in a real Service app, call /v1/messages with a seat token, and
+// find the forbidden sentence **inside the body the provider saw**. It is also the measured
+// basis for the claim that no new branch was added to the path — chat-gate.ts JSON.stringify's
+// lesson.content whole, so learning follows along without a route change.
 const { localAuthoring } = await import('./harness/dental-authoring.mjs');
 const { withMockUpstream } = await import('./harness/index.mjs');
 const { setRoster, startSession } = await import('../src/lib/kv.ts');

@@ -115,7 +115,7 @@ export interface Purpose {
 }
 
 /**
- * 과제 흐름의 학습 단계 (SX-55). Deliberately NOT merged with `Task.status`
+ * The learning phase of the task flow (SX-55). Deliberately NOT merged with `Task.status`
  * (open/paused/completed/abandoned), which is the work axis: a submitted task can
  * still be paused, and an abandoned one can still have been reflected on (MC-23).
  */
@@ -196,13 +196,13 @@ export function confirmPurpose(task: Task, input: { by: "user"; at: number; text
 }
 
 /**
- * 과제 흐름 상태 기계 (SX-55). Every curriculum change goes through here so it
+ * The task-flow state machine (SX-55). Every curriculum change goes through here so it
  * lands in `history` as well, and a phase can only move the way the design's
  * transition table allows.
  *
  * Forward one step at a time: assigned → working → submitted → reflected. A skip
  * (`reflected` without `submitted`) and a move backwards are both refused by name —
- * SX-55's negative is exactly "submitted 없이 reflected가 생기면 실패". Staying in
+ * SX-55's negative is exactly "if reflected happens without submitted, it fails". Staying in
  * the same phase is how a step move is recorded.
  *
  * The work axis is untouched: this never changes `Task.status`.
@@ -307,7 +307,7 @@ export interface Review {
 }
 
 /**
- * 강사 확인 (SX-42). Shaped like `Review`, kept as its own record for the same
+ * Instructor confirmation (SX-42). Shaped like `Review`, kept as its own record for the same
  * reason: an observation is append-only, so a teacher's confirmation is a NEW
  * record about an event, never an edit of it. `teacher_state` is therefore not a
  * field on the event — it is computed by reading the newest record for that event.
@@ -646,7 +646,7 @@ export class LocalRecord {
   }
 
   /**
-   * 강사 확인 상태 (SX-42): the newest teacher record about one observed event, or
+   * Instructor confirmation state (SX-42): the newest teacher record about one observed event, or
    * `unreviewed` when there is none. Computed on read, never stored on the event.
    */
   async teacherState(taskId: string, eventId: string): Promise<TeacherState> {

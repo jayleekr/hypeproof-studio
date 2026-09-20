@@ -1,37 +1,37 @@
-// SX-44~48 · P1 F-1 — `/v1/profile` 과 `/observations/context` 가 **프로필이 선언한**
-// 관측 포맷을 서빙한다.
+// SX-44~48 · P1 F-1 — `/v1/profile` and `/observations/context` serve the observation
+// format **the profile declares**.
 //
 // Run: node --experimental-strip-types --experimental-sqlite test/observation-format-served.test.mjs
 //
-// ## 이 파일이 왜 뒤늦게 생겼나
+// ## Why this file showed up so late
 //
-// P1 이 `hps-observation/2` 검증기·학습 이벤트 8종·게이트 둘·Evidence drawer 를 전부
-// 만들고 스위트를 초록으로 만든 뒤, **독립 평가자가 그 화면이 어떤 빌드에서도 렌더되지
-// 않는다**는 것을 찾았다. 이유는 한 줄이었다:
+// P1 built the whole `hps-observation/2` validator, the 8 learning events, the two gates and
+// the Evidence drawer, turned the suite green — and then **an independent evaluator found that
+// that screen renders on no build at all.** The reason was one line:
 //
 //   worker/src/routes/chat.ts  →  observation: { format: 'hps-observation/1', … }
 //
-// 하드코딩이라 `/2` 를 내보낼 방법이 없었고, 그래서 확장의
-// `prepareObservation()` 이 `/2` 레코더를 만들지 못하고, `learningState` 가 내려가지
-// 않고, `{learning && <section …>}` 이 **한 번도 참이 아니었다.**
+// It was hardcoded, so there was no way to emit `/2`; the extension's
+// `prepareObservation()` therefore could not build a `/2` recorder, `learningState` never
+// came down, and `{learning && <section …>}` was **never once true.**
 //
-// 그 하드코딩 **세 줄 위**에 이 저장소가 직접 써 둔 경고가 있었다:
+// **Three lines above** that hardcoding sat a warning this repo had written itself:
 //
 //   "A gate-only change would pass every gate test and ship INERT on every SDK
 //    seat, because the client's tool policy is built from what THIS response says."
 //
-// `.claude/rules/verification.md` 의 "CI 초록은 아무것도 보장하지 않는다" 1번 항목과
-// 같은 유형·같은 파일이다. 단위 테스트는 순수 함수와 컴포넌트만 부르고 **라우트 응답을
-// 지나가지 않기 때문에** 끝까지 초록이었다.
+// Same type, same file as item 1 of "CI 초록은 아무것도 보장하지 않는다" in
+// `.claude/rules/verification.md`. The unit tests stayed green to the end because they call
+// only pure functions and components and **never pass through a route response.**
 //
-// 그래서 이 검사는 **라우트 응답을 직접 읽는다.** 그것이 클라이언트가 실제로 보는 것이다.
+// So this check **reads the route response directly.** That is what the client actually sees.
 
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-// **정적** import 여야 한다. 이 모듈이 `.md` 로더와 확장자 없는 상대 경로 해석 훅을
-// 등록하고, 그 훅이 등록된 **뒤에야** 프로필 레지스트리를 import 할 수 있다
-// (`scripts/dump-profiles.ts` 머리 주석). 순서를 뒤집으면 registry import 가
-// `ERR_MODULE_NOT_FOUND` 로 죽는다 — 처음에 그렇게 썼다.
+// Must be a **static** import. This module registers a `.md` loader and an extensionless
+// relative-path resolution hook, and the profile registry can only be imported **after** that
+// hook is registered (head comment of `scripts/dump-profiles.ts`). Flip the order and the
+// registry import dies with `ERR_MODULE_NOT_FOUND` — that is how it was written the first time.
 import { localAuthoring } from './harness/dental-authoring.mjs';
 import { TEST_SECRET } from './harness/index.mjs';
 
@@ -41,9 +41,9 @@ const check = async (name, fn) => {
   catch (e) { failed++; console.log(`FAIL ${name}\n      ${String(e && e.message).replace(/\s*\n\s*/g, ' | ')}`); }
 };
 
-// ─── 1. 레지스트리 규칙 — 선언한 포맷만 서빙될 수 있다 ──────────────────────
-// 라우트를 띄우기 전에, 프로필 층에서 먼저 센다. 어느 코호트가 무엇을 선언했는지가
-// **사람이 읽고 결정할 표**이므로 그 표 자체를 단언한다.
+// ─── 1. Registry rule — only a declared format can be served ───────────────
+// Count at the profile layer first, before bringing a route up. Which cohort declared what is
+// **a table a human reads and decides from**, so assert the table itself.
 
 const { listProfiles } = await import('../src/profiles/index.ts');
 const profiles = listProfiles();
@@ -61,7 +61,7 @@ await check('선언된 관측 포맷은 전부 코어가 아는 값이다', () =
 });
 
 await check('포맷을 선언하지 않은 코호트는 오늘과 같다 — 기본값은 /1 이다', () => {
-  // 불변 대조. `format` 칸을 추가한 것이 기존 코호트의 서빙을 바꾸지 않았다는 증거다.
+  // Invariant control. Evidence that adding the `format` field did not change what existing cohorts are served.
   const enabled = profiles.filter((p) => p.observation?.enabled);
   assert.ok(enabled.length > 0, '관측을 켠 코호트가 하나도 없다 — 시료가 없다');
   for (const p of enabled) {
@@ -82,14 +82,14 @@ await check('적어도 한 코호트가 /2 를 선언한다 — 아니면 P1 은
   }
 });
 
-// ─── 2. 실측 — 라우트가 실제로 무엇을 돌려주나 ──────────────────────────────
-// 여기가 이 파일의 본진이다. 위의 레지스트리 단언은 전부 통과하면서도 라우트가
-// 하드코딩을 유지하면 기능은 여전히 죽어 있다. 그게 정확히 P1 에서 벌어진 일이다.
+// ─── 2. Measured — what the route actually returns ─────────────────────────
+// This is the heart of this file. The registry assertions above can all pass while the route
+// keeps its hardcoding, and the feature is still dead. That is exactly what happened in P1.
 
 const { setRoster, startSession } = await import('../src/lib/kv.ts');
 const { issue } = await import('../src/lib/tokens.ts');
 
-/** 한 코호트에 좌석을 하나 내고 `/v1/profile` 과 `/observations/context` 를 읽는다. */
+/** Issue one seat in one cohort and read `/v1/profile` and `/observations/context`. */
 async function servedFor(profileId, clientFormat = 'hps-observation/2') {
   const local = await localAuthoring({ profileId });
   local.db.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
@@ -115,8 +115,9 @@ async function servedFor(profileId, clientFormat = 'hps-observation/2') {
     return { status: r.status, json: await r.json().catch(() => null) };
   };
 
-  // 수업(session design)이 없는 코호트도 재야 하므로 authoring 의 participants 경로가
-  // 아니라 좌석 토큰을 직접 발급한다. `/v1/profile` 은 수업 없이도 답한다.
+  // A cohort with no lesson (session design) has to be measured too, so issue the seat token
+  // directly instead of going through authoring's participants path. `/v1/profile` answers
+  // even without a lesson.
   const { token } = await issue({ u: 'student', c: local.cohort, p: local.profileId }, 1, TEST_SECRET);
 
   const view = await request('/v1/profile', 'GET', undefined, token, clientFormat);
@@ -124,8 +125,8 @@ async function servedFor(profileId, clientFormat = 'hps-observation/2') {
   return { local, token, view, ctx };
 }
 
-// `/2` 를 선언한 코호트를 레지스트리에서 **찾아서** 쓴다. 이름을 여기 박아 두면
-// 나중에 그 코호트가 바뀌었을 때 검사가 조용히 다른 것을 재게 된다.
+// **Find** the cohort that declares `/2` in the registry and use that. Pinning the name here
+// means that when that cohort changes later, the check quietly measures something else.
 const twoProfile = profiles.find((p) => p.observation?.format === 'hps-observation/2');
 const oneProfile = profiles.find(
   (p) => p.observation?.enabled && p.observation?.format === undefined,
@@ -143,9 +144,9 @@ await check('실측: /2 를 선언한 좌석의 /v1/profile 이 /2 를 돌려준
 });
 
 await check('실측: /observations/context 가 /v1/profile 과 같은 포맷을 말한다', async () => {
-  // 두 응답이 갈라지면 확장은 `/2` 레코더를 만들고 `/observations/context` 는 `/1`
-  // 컨텍스트를 주어 `recordLearningEvent()` 가 `observation_format` 으로 던진다.
-  // **두 군데를 같이 고쳐야 한다**(평가자 F-1).
+  // If the two responses diverge, the extension builds a `/2` recorder while
+  // `/observations/context` hands it a `/1` context, and `recordLearningEvent()` throws on
+  // `observation_format`. **Both places have to be fixed together** (evaluator F-1).
   assert.ok(twoProfile, '/2 를 선언한 코호트가 없다');
   const { view, ctx } = await servedFor(twoProfile.id);
   assert.equal(ctx.status, 200, JSON.stringify(ctx.json));
@@ -157,20 +158,20 @@ await check('실측: /observations/context 가 /v1/profile 과 같은 포맷을 
 });
 
 await check('불변 대조: 포맷을 선언하지 않은 좌석은 여전히 /1 을 받는다', async () => {
-  // 양성 대조군. `/2` 를 내보내는 분기가 **무조건** 켜졌다면 위 두 단언은 통과하고
-  // 여기서만 빨개진다. 기존 코호트를 건드리지 않았다는 증거다.
+  // Positive control. If the branch that emits `/2` got turned on **unconditionally**, the two
+  // assertions above pass and only this one goes red. Evidence that existing cohorts were untouched.
   assert.ok(oneProfile, '포맷 미선언 + 관측 켠 코호트가 없다 — 불변 대조를 세울 수 없다');
   const { view } = await servedFor(oneProfile.id);
   assert.equal(view.status, 200, JSON.stringify(view.json));
   assert.equal(view.json.observation?.format, 'hps-observation/1', '기존 좌석의 포맷이 바뀌었다');
 });
 
-// ─── 3. 협상 — 코호트 선언은 천장이지 명령이 아니다 ────────────────────────
+// ─── 3. Negotiation — a cohort declaration is a ceiling, not an order ──────
 
 await check('구버전 앱(/1 만 파싱)에는 /2 코호트라도 /1 을 준다', async () => {
-  // `x-hps-observation-format` 은 앱이 **자기가 읽을 수 있는 것**을 말하는 칸이다.
-  // 여기서 /2 를 내려보내면 구버전의 번들된 검증기가 배치를 통째로 거절해서
-  // 그 좌석은 관찰이 **아예** 죽는다. 그러니 못 읽는 앱에는 내리지 않는다.
+  // `x-hps-observation-format` is the field where the app says **what it can read**.
+  // Sending /2 here makes the old version's bundled validator reject the whole batch, so
+  // observation on that seat dies **entirely**. So don't send it to an app that can't read it.
   assert.ok(twoProfile, '/2 를 선언한 코호트가 없다');
   const { view, ctx } = await servedFor(twoProfile.id, 'hps-observation/1');
   assert.equal(view.json.observation?.format, 'hps-observation/1', '구버전 앱에 /2 를 내려보냈다');
@@ -179,33 +180,33 @@ await check('구버전 앱(/1 만 파싱)에는 /2 코호트라도 /1 을 준다
 
 await check('포맷을 아예 말하지 않는 클라이언트에도 /1 을 준다', async () => {
   assert.ok(twoProfile, '/2 를 선언한 코호트가 없다');
-  // `null` 은 "헤더를 아예 보내지 않는다" 는 뜻이다. `undefined` 를 넘기면 기본
-  // 매개변수가 살아나 /2 를 보내게 된다 — 처음에 그렇게 써서 이 단언이 빨갰다.
+  // `null` means "send no header at all". Passing `undefined` revives the default parameter
+  // and sends /2 — that is how it was written first, and this assertion went red.
   const { view } = await servedFor(twoProfile.id, null);
   assert.equal(view.json.observation?.format, 'hps-observation/1', '말하지 않은 클라이언트에 /2 를 내려보냈다');
 });
 
 await check('/1 코호트는 신버전 앱에도 /1 이다 — 클라이언트가 포맷을 정하지 못한다', async () => {
-  // 음성 대조군. 협상이 **클라이언트 쪽만** 보게 구현됐다면 여기서만 빨개진다.
+  // Negative control. If negotiation was implemented looking at **the client side only**, only this goes red.
   assert.ok(oneProfile, '포맷 미선언 코호트가 없다');
   const { view } = await servedFor(oneProfile.id, 'hps-observation/2');
   assert.equal(view.json.observation?.format, 'hps-observation/1', '클라이언트 헤더만으로 /2 가 열렸다');
 });
 
-// ─── 4. **클라이언트가 실제로 보내는 헤더**로 두 라우트를 부른다 ──────────────
+// ─── 4. Call both routes with **the header the client actually sends** ─────
 //
-// 위의 "두 라우트가 같은 포맷을 말한다" 단언은 **같은 헤더를 양쪽에 보내서** 재고
-// 있었다. 실제 클라이언트는 그렇게 부르지 않는다 — `/v1/profile` 은 `fetchProfile`
-// 이, `/observations/context` 는 `prepareObservation` 이 부르고, 둘이 서로 다른
-// 헤더를 만들면 서버가 아무리 같은 함수로 협상해도 **답이 갈라진다.**
+// The "두 라우트가 같은 포맷을 말한다" assertion above was measuring by **sending the same
+// header to both sides**. A real client does not call them that way — `/v1/profile` is called
+// by `fetchProfile` and `/observations/context` by `prepareObservation`, and if those two
+// build different headers the **answers diverge** no matter how identically the server negotiates.
 //
-// 실제로 그렇게 갈라졌다: 첫 수리가 `/v1/profile` 에만 헤더를 붙였고
-// `/observations/context` 는 헤더 없이 나가 `/1` 컨텍스트를 받았다. 레코더가 `/1`
-// 로 만들어져 `currentLearningRecorder()` 가 계속 null 이었고 **서랍은 여전히 죽어
-// 있었다.** 단언은 초록이었다.
+// And they did diverge: the first repair attached the header only to `/v1/profile`, and
+// `/observations/context` went out with no header and got a `/1` context. The recorder was
+// built as `/1`, `currentLearningRecorder()` kept returning null, and **the drawer was still
+// dead.** The assertions were green.
 //
-// 그래서 여기서는 **확장이 쓰는 헤더 빌더를 직접 import 해서** 그것으로 부른다.
-// 클라이언트가 헤더를 빠뜨리면 이 검사가 빨개진다.
+// So here we **import the extension's own header builder** and call with that. If the client
+// drops a header, this check goes red.
 
 const { observationHeaders } = await import('../../extensions/hypeproof-chat/src/proxyClientHelpers.ts');
 
@@ -223,8 +224,8 @@ await check('실측: 확장이 쓰는 헤더로 두 라우트를 부르면 같�
   });
   const { token } = await issue({ u: 'student', c: local.cohort, p: local.profileId }, 1, TEST_SECRET);
 
-  // **확장의 빌더**로 만든 헤더. 손으로 다시 적지 않는다 — 다시 적으면 이 검사가
-  // 클라이언트가 아니라 나 자신을 재게 된다.
+  // Headers built by **the extension's builder**. Do not retype them by hand — retyping makes
+  // this check measure myself instead of the client.
   const headers = observationHeaders(token);
   const call = async (path) => {
     const r = await local.fetcher(local.origin + path, { method: 'GET', headers });
@@ -240,9 +241,9 @@ await check('실측: 확장이 쓰는 헤더로 두 라우트를 부르면 같�
 });
 
 await check('실측: 신버전 앱이 /1 코호트에서 "업데이트하세요" 배너를 받지 않는다', async () => {
-  // 첫 수리가 만든 회귀. 클라이언트 헤더를 `/2` 로 올렸는데 배너 조건이
-  // `!== "hps-observation/1"` 로 남아 있어서, **관측이 켜진 모든 좌석**이
-  // "이 앱 버전은 작업 관찰 화면을 지원하지 않습니다" 를 받았다.
+  // A regression the first repair created. The client header was raised to `/2` but the banner
+  // condition stayed `!== "hps-observation/1"`, so **every seat with observation on** got
+  // "이 앱 버전은 작업 관찰 화면을 지원하지 않습니다".
   assert.ok(oneProfile, '포맷 미선언 코호트가 없다');
   const local = await localAuthoring({ profileId: oneProfile.id });
   local.db.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
@@ -263,8 +264,8 @@ await check('실측: 신버전 앱이 /1 코호트에서 "업데이트하세요"
     '신버전 앱이 "업데이트하세요" 배너를 받는다 — 첫 수리가 만든 회귀다',
   );
 
-  // 양성 대조군 — 포맷을 **모르는** 클라이언트에는 배너가 그대로 나가야 한다.
-  // 이 줄이 없으면 배너를 통째로 없애 버려도 위 단언이 통과한다.
+  // Positive control — a client that does **not** know the format must still get the banner.
+  // Without this line, deleting the banner entirely would still pass the assertion above.
   const withNone = await local.fetcher(local.origin + '/v1/profile', {
     method: 'GET', headers: { authorization: 'Bearer ' + token },
   });
@@ -275,7 +276,7 @@ await check('실측: 신버전 앱이 /1 코호트에서 "업데이트하세요"
   );
 });
 
-// 구버전 앱(`/1` 선언)도 배너를 받지 않아야 한다 — 그 앱은 관찰을 **지원한다**.
+// An old app (declaring `/1`) must not get the banner either — that app **does support** observation.
 await check('실측: /1 만 아는 구버전 앱도 배너를 받지 않는다', async () => {
   assert.ok(oneProfile, '포맷 미선언 코호트가 없다');
   const { view } = await servedFor(oneProfile.id, 'hps-observation/1');

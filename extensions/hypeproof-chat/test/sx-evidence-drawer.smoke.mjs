@@ -1,9 +1,10 @@
-// SX-17 · SX-18 · SX-20 · SX-22 · SX-23 — D 영역(Evidence drawer) 의 판정.
+// SX-17 · SX-18 · SX-20 · SX-22 · SX-23 — verdicts for region D (Evidence drawer).
 // Run: node --experimental-strip-types test/sx-evidence-drawer.smoke.mjs
 //
-// 구현 전에 쓰였다(ux-dag.yaml P1-B control). 순수 판정은 `.ts` 에서 직접 부르고,
-// 화면 주장(기본 닫힘·해석 없음·점수 없음)은 **실제 렌더 결과**로 판정한다
-// (verification.md 규칙 1). react 가 없으면 조용히 통과시키지 않고 건너뛴 사실을 찍는다.
+// Written before the implementation (ux-dag.yaml P1-B control). Pure verdicts are called
+// straight from the `.ts`; screen claims (closed by default · no interpretation · no score)
+// are judged on the **actual render output** (verification.md rule 1). If react is missing
+// we do not silently pass — we print the fact that we skipped.
 
 import assert from "node:assert/strict";
 import { auditRegionText } from "./sx-audit.mjs";
@@ -32,7 +33,7 @@ const row = (extra = {}) => ({
   ...extra,
 });
 
-// ── 1. SX-18 — evidence type 6종. 없는 것을 여섯 중 하나로 추정하지 않는다 ──
+// ── 1. SX-18 — six evidence types. An absent one is not guessed into the six ──
 
 {
   const types = Object.keys(EVIDENCE_TYPE_LABELS);
@@ -48,7 +49,7 @@ const row = (extra = {}) => ({
 }
 
 {
-  // 음성 대조군: evidence_type 이 없는 이벤트를 여섯 중 하나에 밀어 넣으면 실패.
+  // Negative control: pushing an event with no evidence_type into one of the six fails.
   const groups = groupByEvidenceType([row(), row({ id: "e2", evidence_type: undefined, kind: "artifact", actor: "ai" })]);
   const unknown = groups.find((g) => g.type === null);
   assert.ok(unknown, "종류를 모르는 근거를 담을 자리가 없다 — 어딘가로 추정해 넣었다는 뜻이다");
@@ -59,7 +60,7 @@ const row = (extra = {}) => ({
 }
 
 {
-  // 양성 대조군: 여섯 종류가 각자 자기 묶음으로 간다.
+  // Positive control: the six types each land in their own group.
   const rows = ["intent", "criterion", "action", "decision", "change", "ownership"].map((t, i) =>
     row({ id: `e${i}`, evidence_type: t }),
   );
@@ -67,7 +68,7 @@ const row = (extra = {}) => ({
   assert.equal(groups.length, 6, "여섯 종류가 한 묶음으로 뭉쳤다");
 }
 
-// ── 2. SX-20 — provenance. 미입력은 "출처 미기록", 추정으로 채우지 않는다 ───
+// ── 2. SX-20 — provenance. Blank reads "source not recorded", never guessed ───
 
 {
   assert.equal(provenanceLine(row({ provenance: null })), "출처 미기록");
@@ -78,19 +79,19 @@ const row = (extra = {}) => ({
 }
 
 {
-  // 음성 대조군: 일부만 채운 출처를 완성된 것처럼 보이면 실패.
+  // Negative control: a half-filled provenance that looks complete is a failure.
   const partial = provenanceLine(row({ provenance: { who: "친구", when: "", where: "" } }));
   assert.ok(partial.includes("미기록"), `빠진 칸이 있는데 완성된 출처처럼 보인다: ${partial}`);
   assert.ok(partial.includes("친구"), "적어 준 것까지 지우면 안 된다");
 }
 
 {
-  // 일반화 진술은 저장되지만 unverified 라벨을 가진다.
+  // A generalized statement is stored, but carries the unverified label.
   const line = provenanceLine(row({ source_state: "unverified", provenance: null }));
   assert.ok(line.includes("미기록"), line);
 }
 
-// ── 3. SX-22 — 종류별로 필요한 provenance 칸이 다르다 ───────────────────────
+// ── 3. SX-22 — each source kind needs different provenance fields ───────────
 
 {
   const kinds = Object.keys(SOURCE_KIND_LABELS);
@@ -99,34 +100,34 @@ const row = (extra = {}) => ({
     ["link", "article", "policy", "interview", "test", "none"],
     "설계 §관측 이벤트와 필드의 source_kind 와 달라졌다",
   );
-  // 인터뷰: 화자·날짜. 규정: 문서명·조항.
+  // interview: speaker · date. policy: document name · clause.
   assert.deepEqual(PROVENANCE_FIELDS.interview.map((f) => f.key), ["who", "when"]);
   assert.deepEqual(PROVENANCE_FIELDS.policy.map((f) => f.key), ["where", "who"]);
   assert.ok(PROVENANCE_FIELDS.policy.some((f) => f.label.includes("조항")), "규정에 조항 칸이 없다");
   assert.ok(PROVENANCE_FIELDS.interview.some((f) => f.label.includes("화자") || f.label.includes("말한")), "인터뷰에 화자 칸이 없다");
-  // 음성 대조군: 모든 종류가 같은 칸을 요구하면 SX-22 를 못 지킨다.
+  // Negative control: if every kind demands the same fields, SX-22 cannot be met.
   const shapes = new Set(kinds.map((k) => PROVENANCE_FIELDS[k].map((f) => f.key).join(",")));
   assert.ok(shapes.size > 1, "종류를 구분하지 않고 같은 칸을 쓰고 있다");
 }
 
 {
-  // 목록은 종류로 거를 수 있다.
+  // The list can be filtered by kind.
   const rows = [row({ source_kind: "interview" }), row({ id: "e2", source_kind: "policy" })];
   assert.equal(filterBySourceKind(rows, "interview").length, 1);
   assert.equal(filterBySourceKind(rows, null).length, 2, "필터 없음이 전부를 뜻하지 않는다");
 }
 
-// ── 4. SX-23 — 선택 이유. 비면 "이유 미기록", AI 가 대신 채우지 않는다 ──────
+// ── 4. SX-23 — decision reason. Blank reads "reason not recorded"; AI never fills it ──
 
 {
   assert.equal(decisionReason(row({ kind: "decision_revised", text: "" })), "이유 미기록");
   assert.equal(decisionReason(row({ kind: "decision_revised", text: "더 빨리 만들 수 있어서" })), "더 빨리 만들 수 있어서");
-  // actor=ai 인 이유는 학생 판단으로 보이지 않는다.
+  // A reason with actor=ai must not read as the student's own judgment.
   const byAi = decisionReason(row({ kind: "decision_revised", actor: "ai", text: "코치가 요약한 이유" }));
   assert.ok(byAi.includes("미기록"), `코치가 쓴 문장이 학생 이유로 보인다: ${byAi}`);
 }
 
-// ── 5. 화면 주장 — 실제 렌더로 판정한다 ─────────────────────────────────────
+// ── 5. Screen claims — judged on the actual render ──────────────────────────
 
 const status = rendererStatus();
 if (!status.available) {
@@ -146,7 +147,7 @@ if (!status.available) {
   };
 
   const closed = await renderComponent("EvidenceDrawer", props);
-  // SX-17 — 기본 닫힘. <details> 에 open 속성이 없어야 한다.
+  // SX-17 — closed by default. <details> must not carry the open attribute.
   assert.ok(/<details\b/.test(closed), "서랍이 details 가 아니다 — 접히지 않는다");
   assert.ok(!/<details\b[^>]*\bopen\b/.test(closed), "서랍이 작업 시작 시 열려 있다 (SX-17 부정 조건)");
 
@@ -154,18 +155,18 @@ if (!status.available) {
   assert.ok(/<details\b[^>]*\bopen\b/.test(opened), "열라고 했는데 닫혀 있다");
 
   const text = visibleText(opened);
-  // 학생 원문이 그대로 보인다 (SX-44).
+  // The student's own wording shows verbatim (SX-44).
   assert.ok(text.includes("버튼을 누르면 이름이 보여야 한다"), "학생이 쓴 기대 조건이 서랍에 없다");
   assert.ok(text.includes("이름이 크면 좋겠어요"), "인용한 외부 근거가 서랍에 없다");
-  // 검증 줄이 보인다 (SX-15).
+  // The verification line shows (SX-15).
   assert.ok(text.includes("아직 같은 조건으로 다시 확인하지 않음"), "재확인 줄이 서랍에 없다");
-  // 점수·등급·순위가 없다 (SX-17 부정 조건, SX-59).
+  // No score · grade · rank (SX-17 negative condition, SX-59).
   //
-  // `minLength` 가 이 단언의 절반이다. 처음 이 줄을 `auditRegionText("EvidenceDrawer", text)`
-  // 로 썼는데 시그니처는 `(text, opts)` 라서 **문자열 "EvidenceDrawer" 를 감사**하고
-  // 초록을 돌려줬다 — 열린 서랍에 "성장 점수" 를 심어도 통과했다. 심은 결함이
-  // 잡아낸 공허한 단언이고, 규칙 1 이 말하는 "대상을 열어보지 않고 기준을 세웠다" 의
-  // 교과서적인 예다.
+  // `minLength` is half of this assertion. This line was first written as
+  // `auditRegionText("EvidenceDrawer", text)`, but the signature is `(text, opts)`, so it
+  // **audited the string "EvidenceDrawer"** and came back green — planting "성장 점수"
+  // into the open drawer still passed. A hollow assertion caught by a planted defect, and
+  // a textbook case of what rule 1 calls "setting the criterion without opening the subject".
   const verdict = auditRegionText(text, { region: "work", minLength: 80 });
   assert.equal(verdict.ok, true, `서랍에 금지 표현이 있다: ${JSON.stringify(verdict.findings)}`);
 

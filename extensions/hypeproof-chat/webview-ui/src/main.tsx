@@ -1,6 +1,6 @@
-// 토큰이 가장 먼저 와야 한다(SX-49). 이 아래의 import 들이 CSS 를 끌고 들어오는
-// 순서가 곧 스타일시트 순서다: tokens.css → localReview.css(LocalReview) →
-// start.css(StartPage) → styles.css(마지막, 명시 import).
+// The tokens have to come first (SX-49). The order in which the imports below pull CSS in
+// is exactly the stylesheet order: tokens.css → localReview.css (LocalReview) →
+// start.css (StartPage) → styles.css (last, explicit import).
 import "./tokens.css";
 import { LocalReview } from "./LocalReview";
 import { createRoot } from "react-dom/client";

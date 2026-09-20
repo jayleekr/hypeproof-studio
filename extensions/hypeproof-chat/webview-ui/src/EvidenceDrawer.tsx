@@ -20,15 +20,17 @@ import {
 import type { SourceKind } from "../../../../worker/src/lib/measurement-core/learning-events.ts";
 
 /**
- * 영역 D — Evidence drawer (SX-17·18·20·22·23).
+ * Area D — Evidence drawer (SX-17·18·20·22·23).
  *
- * 세 가지를 지킨다.
- *   1. **기본 닫힘.** 작업 시작 시 자동으로 열리지 않는다(SX-17 부정 조건).
- *      `open` 은 호스트가 단계 `ui` 를 보고 정한다. 웹뷰가 스스로 열지 않는다.
- *   2. **해석이 없다.** 무엇이 있었는지만 보여 준다. 해석은 E 회고와 F 변화 기록.
- *   3. **점수가 없다.** 개수·진행률·등급 어느 것도 그리지 않는다(SX-59).
+ * It keeps three things.
+ *   1. **Closed by default.** It does not open automatically when work starts (SX-17
+ *      negative condition). `open` is decided by the host from the stage `ui`. The
+ *      webview never opens itself.
+ *   2. **No interpretation.** It only shows what happened. Interpretation is the E
+ *      retrospective and the F change record.
+ *   3. **No score.** It draws no count, no progress rate and no grade (SX-59).
  *
- * 게이트를 여기서 다시 계산하지 않는다 — `verification` 은 호스트가 보낸 값이다.
+ * The gate is not recomputed here — `verification` is a value the host sent.
  */
 export interface EvidenceDrawerProps {
   open: boolean;
@@ -39,16 +41,16 @@ export interface EvidenceDrawerProps {
     line: string;
     previous?: { event_id: string; criterion_ref?: string; artifact_after?: string; source_state: string };
   };
-  /** 폼 제출. 호스트의 `learningEventRequest` 가 actor·context 를 채운다. */
+  /** Form submit. The host's `learningEventRequest` fills in actor and context. */
   onSubmit: (draft: { kind: string } & Record<string, unknown>) => void;
   onToggle: (open: boolean) => void;
   /**
-   * 코치가 대안을 제시했고 학생이 하나를 고른 상태 (SX-23).
+   * The state where the coach offered alternatives and the student picked one (SX-23).
    *
-   * 없으면 이유 폼을 **그리지 않는다.** `decision_revised` 는 `/2` 스키마에서
-   * `decision{from,to}` 와 비어 있지 않은 `evidence_refs[]` 를 요구하므로, 고른 것이
-   * 없는 상태에서 이유만 받으면 저장할 수 없는 이벤트가 만들어진다. 누르면 실패하는
-   * 폼을 그리느니 그리지 않는다.
+   * Without it the reason form is **not drawn.** In the `/2` schema `decision_revised`
+   * requires `decision{from,to}` and a non-empty `evidence_refs[]`, so taking only a
+   * reason with nothing picked builds an event that cannot be stored. Better to draw no
+   * form at all than one that fails when pressed.
    */
   pendingDecision?: { from: string; to: string; evidenceRefs: string[] } | null;
 }
@@ -59,8 +61,8 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
   const [quote, setQuote] = useState("");
   const [sourceKind, setSourceKind] = useState<SourceKind>("interview");
   const [provenance, setProvenance] = useState<{ who: string; when: string; where: string }>({ who: "", when: "", where: "" });
-  // SX-46 — 기본값은 `unverified` 다. 학생이 고르기 전에 "실제로 있었던 일" 로
-  // 시작하면, 아무것도 안 고른 기록이 전부 실적이 된다.
+  // SX-46 — the default is `unverified`. If it started at "really happened" before the
+  // student picks anything, every record where nothing was picked becomes an achievement.
   const [sourceState, setSourceState] = useState<string>("unverified");
   const [filter, setFilter] = useState<SourceKind | null>(null);
 
@@ -71,17 +73,18 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
     <details className="hp-evidence" open={open} onToggle={(e) => onToggle((e.currentTarget as HTMLDetailsElement).open)}>
       <summary>근거 · 기대 조건 · 전후 · 출처</summary>
 
-      {/* SX-15 — 재확인 줄. 호스트가 계산해 보낸 문장을 그대로 그린다. */}
+      {/* SX-15 — the re-confirmation line. Draws the sentence the host computed and sent, verbatim. */}
       <p className="hp-evidence-verify">{verification.line}</p>
-      {/* AE-37 — 재확인이 필요해져도 **이전 확인은 지우지 않는다.** 학생이 실제로
-          한 확인이고, 지우면 없었던 일이 된다. */}
+      {/* AE-37 — even when a re-confirmation becomes necessary, **the previous
+          confirmation is not erased.** It is a confirmation the student actually did,
+          and erasing it makes it never have happened. */}
       {verification.previous && (
         <p className="hp-evidence-previous">
           이전에 확인한 것: {shortRevision(verification.previous.artifact_after ?? "")} 판
         </p>
       )}
 
-      {/* SX-16 — 변경 전후 보기. AI 초안 · 학생 수정본 · 그때의 기대 조건을 함께 연다. */}
+      {/* SX-16 — before/after view. Opens the AI draft, the student's revision and the expected condition of that moment together. */}
       {beforeAfterOf(rows).map((pair) => (
         <details key={pair.id} className="hp-evidence-diff">
           <summary>변경 전후 보기</summary>
@@ -99,7 +102,7 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
                   <small>{shortRevision(pair.before.sha256)} 판</small>
                 </>
               ) : (
-                // 빈 비교를 만들지 않는다(SX-16 부정 조건).
+                // Do not build an empty comparison (SX-16 negative condition).
                 <p className="hp-evidence-diff-note">{pair.note}</p>
               )}
             </section>
@@ -167,14 +170,15 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
             kind: "external_feedback_received",
             student_text: quote,
             source_kind: sourceKind,
-            // 비워 둔 칸은 "미기록" 으로 **기록한다**. 지어내지 않고(SX-20), 빈
-            // 문자열로 보내 배치 전체를 거절당하지도 않는다.
+            // A field left empty is **recorded** as "not recorded". We invent nothing
+            // (SX-20), and we do not send an empty string and get the whole batch
+            // rejected either.
             provenance: {
               who: provenance.who.trim() || UNRECORDED,
               when: provenance.when.trim() || UNRECORDED,
               where: provenance.where.trim() || UNRECORDED,
             },
-            // 학생이 고른 값 그대로. `real` 을 기본으로 채우지 않는다(SX-46).
+            // Exactly what the student picked. `real` is never filled in as a default (SX-46).
             source_state: sourceState,
           });
           setQuote("");
@@ -189,8 +193,8 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
             <option key={kind} value={kind}>{SOURCE_KIND_LABELS[kind]}</option>
           ))}
         </select>
-        {/* SX-22 — 종류마다 필요한 칸이 다르다. 비워 두면 "출처 미기록" 으로 남고,
-            추정으로 채우지 않는다(SX-20 부정 조건). */}
+        {/* SX-22 — each kind needs different fields. Left empty it stays as "source not
+            recorded", and we do not fill it in by guessing (SX-20 negative condition). */}
         {PROVENANCE_FIELDS[sourceKind].map((field) => (
           <label key={field.key}>
             {field.label}
@@ -207,8 +211,8 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
           ))}
         </select>
         {sourceState === "real" && (
-          // SX-46 부정 조건 — 출처 없이 "실제" 는 저장되지 않는다. 눌러 보고 나서
-          // 거절당하는 것보다 누르기 전에 말해 주는 편이 낫다.
+          // SX-46 negative condition — "real" without a source is not stored. Better to
+          // say so before they press than to reject them after they press.
           <p className="hp-evidence-hint">"실제로 있었던 일" 로 남기려면 누가·언제·어디서를 적어 주세요.</p>
         )}
         <button type="submit" disabled={!quote.trim()}>들은 말 남기기</button>
@@ -232,8 +236,8 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
         <p className="hp-evidence-empty">아직 남긴 근거가 없어요. 위에 한 줄만 적어도 여기 쌓입니다.</p>
       ) : (
         groups.map((group) => {
-          // SX-46 — 같은 종류 안에서도 **실제로 있었던 일**과 그 밖을 섞지 않는다.
-          // 4주차 가짜 결제가 매출로 읽히는 것이 이 구분이 막으려는 것이다.
+          // SX-46 — even within one type, **what really happened** is not mixed with the
+          // rest. What this split prevents is the week-4 fake payment reading as revenue.
           const { real, aside } = partitionBySourceState(group.rows);
           return (
             <section key={group.type ?? "untyped"} className="hp-evidence-group">
@@ -254,21 +258,23 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
 }
 
 /**
- * 근거 한 줄. 실제 칸과 그 밖 칸이 **같은 함수**로 그려진다 — 두 벌로 쓰면 한쪽에만
- * 라벨을 빠뜨리게 되고, 그것이 SX-21 이 금지하는 "라벨 없는 외부 반응" 이다.
+ * One evidence row. The real column and the everything-else column are drawn by the
+ * **same function** — writing two copies means dropping the label on one side, and that
+ * is the "unlabeled external reaction" SX-21 forbids.
  */
 function renderRow(row: EvidenceRowView) {
-  // **한 번만 정규화하고 셋 다 그 값을 쓴다.** 원래는 `amber` 와 `data-source-state`
-  // 가 원값을, 라벨만 정규화 값을 썼다. 호스트를 거치지 않는 경로가 생겨 모르는
-  // 문자열이 들어오면 마크업은 그 문자열을, 라벨은 "아직 확인 전" 을 말하게 된다 —
-  // 같은 줄이 두 가지로 읽히는 것이 SX-21 이 막으려는 바로 그것이다.
+  // **Normalize once and let all three use that value.** Originally `amber` and
+  // `data-source-state` used the raw value and only the label used the normalized one.
+  // If a path that skips the host appears and an unknown string comes in, the markup says
+  // that string while the label says "not verified yet" — the same row reading two ways
+  // is exactly what SX-21 is there to prevent.
   const state = normalizeSourceState(row.source_state);
   const amber = AMBER_STATES.includes(state);
   return (
     <li
       key={row.id}
       className={amber ? "hp-evidence-row hp-amber" : "hp-evidence-row"}
-      // 색뿐이면 색맹인 학생과 흑백 인쇄에서 구분이 사라진다. 마크업에도 남긴다.
+      // Color alone loses the distinction for a color-blind student and in black-and-white print. Leave it in the markup too.
       data-source-state={state}
     >
       <p className="hp-evidence-text">
@@ -284,5 +290,5 @@ function renderRow(row: EvidenceRowView) {
   );
 }
 
-/** 라벨 표를 화면 밖에서도 쓰기 위해 다시 내보낸다(감사기·테스트). */
+/** Re-exported so the label table can be used outside the screen too (auditors, tests). */
 export { EVIDENCE_TYPE_LABELS };

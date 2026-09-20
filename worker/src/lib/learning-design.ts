@@ -1,32 +1,35 @@
-// SX-55~59 — 세션 설계 파일의 `learning` 블록과 단계별 학습 칸(ui·evidence·gate).
+// SX-55~59 — the `learning` block of the session design file and the per-step
+// learning fields (ui·evidence·gate).
 //
-// 형제: lesson-feature-policy.ts(#748) · lesson-model-policy.ts(#795) ·
-// lesson-help-mode.ts(#1008) · lesson-pedagogy.ts(#1115). 같은 자리, 같은 모양의
-// 순수 함수이고 `string | null` 을 돌려준다. 저 셋과 갈리는 점 하나가 이 파일의
-// 성격이다:
+// Siblings: lesson-feature-policy.ts(#748) · lesson-model-policy.ts(#795) ·
+// lesson-help-mode.ts(#1008) · lesson-pedagogy.ts(#1115). Same place, same shape:
+// pure functions returning `string | null`. One thing splits this file from those
+// three, and it sets this file's character:
 //
-//   lesson-feature-policy / lesson-model-policy  **권한**을 다룬다 — 좁히기만 가능
-//   lesson-help-mode                             **교수 전략**을 다룬다 — 권한 불변
-//   이 파일                                      **학습 설계 데이터**를 다룬다 —
-//                                                권한도 전략도 아니고, 무엇을 만들고
-//                                                무엇이 관찰되는지에 대한 강사의 선언
+//   lesson-feature-policy / lesson-model-policy  handle **authority** — narrowing only
+//   lesson-help-mode                             handles **teaching strategy** — authority unchanged
+//   this file                                    handles **learning design data** —
+//                                                neither authority nor strategy, but the
+//                                                instructor's declaration of what gets built
+//                                                and what gets observed
 //
-// 데이터일 뿐이지만 아무 데이터나 되는 것은 아니다. 두 가지를 검증기 수준에서 막는다:
+// It is only data, but not just any data. Two things are blocked at the validator level:
 //
-//   SX-57  관측을 위해 과제를 왜곡하지 않는다. evidence·gate 를 선언한 단계는
-//          산출물을 지목하는 완료 기준을 반드시 가진다 — 관찰만 목적인 단계는
-//          만들 수 없다(validateStepLearning).
-//   SX-59  학습 블록은 점수를 나르지 않는다. 이름이 점수처럼 생긴 키도, `week`
-//          말고 다른 숫자 값도 거부한다(forbidScores).
+//   SX-57  do not distort the task for the sake of observation. A step that declares
+//          evidence·gate must have an acceptance that names an artifact — a step whose
+//          only purpose is observation cannot be authored (validateStepLearning).
+//   SX-59  the learning block does not carry scores. A key whose name looks like a
+//          score is rejected, and so is any numeric value other than `week`
+//          (forbidScores).
 //
-// 6주 커리큘럼은 이 스키마의 **데이터 파일 여섯 개**이지 코드 상수가 아니다(SX-56).
-// 이 파일에 주차 문자열이나 미션 문장이 들어가면 그 요구를 어기는 것이다.
+// The 6-week curriculum is **six data files** of this schema, not code constants (SX-56).
+// Putting a week string or a mission sentence into this file breaks that requirement.
 //
-// 스키마 id 는 오르지 않는다. 필수 키가 하나도 바뀌지 않기 때문이다 —
-// `learning` 은 선택 키이고, 없으면 오늘과 완전히 같은 동작이다.
-// 설계: docs/design/studio-learning-experience.md "세션 설계 파일 (Module)".
+// The schema id does not go up, because not one required key changes —
+// `learning` is an optional key, and without it the behavior is exactly today's.
+// Design: docs/design/studio-learning-experience.md "세션 설계 파일 (Module)".
 
-/** 학습 이벤트 8종(SX-47). `hps-observation/2` 가 같은 목록을 쓴다. */
+/** The 8 learning event kinds (SX-47). `hps-observation/2` uses the same list. */
 export const LEARNING_EVENT_KINDS = [
   'problem_committed',
   'criterion_set',
@@ -39,15 +42,15 @@ export const LEARNING_EVENT_KINDS = [
 ] as const;
 export type LearningEventKind = (typeof LEARNING_EVENT_KINDS)[number];
 
-/** 근거 종류 6종(SX-18). 사람에 대한 판정이 아니라 남는 물건의 종류다. */
+/** The 6 evidence types (SX-18). Not a judgment about a person — the kind of thing left behind. */
 export const EVIDENCE_TYPES = ['intent', 'criterion', 'action', 'decision', 'change', 'ownership'] as const;
 export type EvidenceType = (typeof EVIDENCE_TYPES)[number];
 
-/** 출처 종류 6종(SX-22). */
+/** The 6 source kinds (SX-22). */
 export const SOURCE_KINDS = ['link', 'article', 'policy', 'interview', 'test', 'none'] as const;
 export type SourceKind = (typeof SOURCE_KINDS)[number];
 
-/** 단계가 여는 작업 화면 7종. `metric_board` 는 숫자 주차에서만 쓴다(SX-51). */
+/** The 7 work surfaces a step can open. `metric_board` is only used in the numbers week (SX-51). */
 export const STEP_UI_KINDS = [
   'canvas_editor',
   'canvas_preview',
@@ -69,16 +72,16 @@ export interface LearningBlock {
   week: number;
   mission: string;
   completion?: LearningCompletionItem[];
-  /** 학생에게 보이지 않는다. 해석 프롬프트와 강사 화면의 입력이다. */
+  /** Not visible to the student. Input for the interpretation prompt and the instructor screen. */
   observe?: string[];
-  /** 절대 하지 않을 것(SX-58). 코치 프롬프트에 그대로 실려 나간다. */
+  /** Things never to do (SX-58). Carried into the coach prompt verbatim. */
   never?: string[];
   evidence_types?: EvidenceType[];
   source_kinds?: SourceKind[];
   reflection?: { changed_mind: boolean; next_experiment: boolean };
 }
 
-/** 단계에 얹히는 학습 칸. 셋 다 선택이고, 없으면 오늘의 단계와 같다. */
+/** Learning fields laid on top of a step. All three are optional; without them a step is today's step. */
 export interface StepLearningFields {
   ui?: StepUiKind;
   evidence?: EvidenceType;
@@ -89,9 +92,10 @@ export const LEARNING_KEYS = [
   'week', 'mission', 'completion', 'observe', 'never', 'evidence_types', 'source_kinds', 'reflection',
 ] as const;
 /**
- * `week` 와 `mission` 만 필수다. 둘이 없는 learning 블록은 화면 A 가 읽을 것이
- * 하나도 없어서 블록을 쓴 의미가 없다. 나머지는 주차마다 쓰는 칸이 달라서 선택이다
- * (3주차는 여덟 칸을 다 쓰고, 6주차는 completion 이 둘뿐이다).
+ * Only `week` and `mission` are required. A learning block without those two
+ * leaves screen A nothing to read, so writing the block was pointless. The rest
+ * are optional because each week uses different fields (week 3 uses all eight
+ * fields, week 6 has only two completion items).
  */
 export const LEARNING_REQUIRED_KEYS = ['week', 'mission'] as const;
 
@@ -112,25 +116,27 @@ const listOf = <T>(x: unknown, values: readonly T[], max: number): x is T[] =>
   Array.isArray(x) && x.length >= 1 && x.length <= max
   && x.every(v => values.includes(v as T)) && new Set(x).size === x.length;
 
-/** SX-59 의 거부 문구. 한 줄로 grep 되게 고정한다. */
+/** SX-59's refusal message. Pinned as one line so it can be grepped. */
 export const SCORE_REFUSAL = 'learning must not carry a score';
 
-// 이름이 점수처럼 생긴 키. interpretation.ts 의 SCORE_KEYS 와 같은 목록이다.
+// Keys whose names look like scores. Same list as SCORE_KEYS in interpretation.ts.
 const SCORE_KEYS = ['score', 'scores', 'level', 'points', 'rank', 'percentile', 'grade'];
 
 /**
- * SX-59 / C4 — 학습 블록 어디에도 점수·등급이 들어오지 못하게 한다.
+ * SX-59 / C4 — keeps scores and grades out of every corner of the learning block.
  *
- * `measurement-core/interpretation.ts` 의 `forbidKeys()` 와 같은 모양이다:
- * 배열과 객체를 재귀로 훑고, **이름이 붙은 거절**을 일반적인 "알 수 없는 필드"보다
- * 먼저 낸다. 다른 점 세 가지:
+ * Same shape as `forbidKeys()` in `measurement-core/interpretation.ts`: walks
+ * arrays and objects recursively, and emits the **named refusal** ahead of the
+ * generic "unknown field". Three differences:
  *
- *   1. 던지지 않고 `string | null` 을 돌려준다 — session-design.ts 의 집 규칙이다.
- *   2. 키 이름뿐 아니라 **값의 모양**도 본다. 학습 블록에서 정당한 숫자는 `week`
- *      하나뿐이므로, 다른 숫자는 이름이 무엇이든(`mastery`, `count`, `stars`)
- *      거절한다. 이름 목록만으로는 다음에 누가 지을 이름을 막지 못한다.
- *   3. `CONVERSION_KEYS`(legacy 환산) 는 보지 않는다. 수업 설계 파일에는 legacy
- *      점수 환산 경로가 닿지 않는다 — 그쪽은 관측 배치의 문제다.
+ *   1. It returns `string | null` instead of throwing — the house rule of session-design.ts.
+ *   2. It looks at the **shape of the value**, not just the key name. The only
+ *      legitimate number in a learning block is `week`, so any other number is
+ *      rejected whatever it is called (`mastery`, `count`, `stars`). A list of
+ *      names alone cannot block the name someone invents next.
+ *   3. It does not look at `CONVERSION_KEYS` (legacy conversion). The legacy score
+ *      conversion path does not reach the session design file — that one is the
+ *      observation batch's problem.
  */
 function forbidScores(value: unknown, atLearningRoot = false): string | null {
   if (Array.isArray(value)) {
@@ -148,11 +154,13 @@ function forbidScores(value: unknown, atLearningRoot = false): string | null {
 }
 
 /**
- * 선택 키 `learning` 의 검증. 없으면 호출되지 않고, 있으면 전부 여기서 본다.
+ * Validation of the optional key `learning`. Not called when it is absent; when
+ * it is present, everything about it is checked here.
  *
- * 순서가 계약의 일부다: 점수 거절이 **먼저**다. `completion[0].level = 3` 은
- * 모양 위반이기도 하지만 "알 수 없는 필드" 로 보고되면 강사가 무엇이 문제인지
- * 모른다. interpretation.ts 가 같은 이유로 forbidKeys 를 맨 앞에 둔다.
+ * The order is part of the contract: the score refusal comes **first**.
+ * `completion[0].level = 3` is a shape violation too, but reported as "unknown
+ * field" the instructor cannot tell what the problem is. interpretation.ts puts
+ * forbidKeys at the very front for the same reason.
  */
 export function validateLearningBlock(value: unknown): string | null {
   if (!isObject(value)) return 'invalid learning fields';
@@ -195,19 +203,21 @@ export function validateLearningBlock(value: unknown): string | null {
 }
 
 /**
- * 단계의 `ui` · `evidence` · `gate` 검증 + SX-57.
+ * Validation of a step's `ui` · `evidence` · `gate`, plus SX-57.
  *
- * **SX-57 (관측을 위해 함정을 넣지 않는다)** — `evidence` 나 `gate` 를 선언한
- * 단계는 완료 기준이 비어 있을 수 없다. 관찰 항목만 있고 산출물이 없는 단계는
- * "관측하기 좋은 행동" 을 유도하려고 만든 함정이며, 요구가 검증기에서 막으라고
- * 명시한 대상이다(SX-57 부정: "단계에 acceptance 없이 관찰 항목만 있으면 실패").
+ * **SX-57 (do not plant a trap for the sake of observation)** — a step that
+ * declares `evidence` or `gate` cannot have an empty acceptance. A step with only
+ * observation items and no artifact is a trap built to elicit "behavior that is
+ * good to observe", and the requirement names it as something the validator must
+ * block (SX-57 negative: "a step with observation items but no acceptance fails").
  *
- * 초안(complete=false)에서도 막는다. evidence·gate 를 단 단계는 "아직 덜 쓴 단계"
- * 가 아니라 **무엇이 관찰될지 이미 선언한 단계**이기 때문이다. 아무것도 선언하지
- * 않은 단계의 빈 완료 기준은 오늘처럼 초안에서 그대로 통과한다 — 이 규칙은
- * evidence·gate 를 단 단계에만 닿으므로 기존 수업 초안을 한 건도 건드리지 않는다.
+ * This is blocked in a draft (complete=false) too. A step carrying evidence·gate is
+ * not "a step that is not written out yet" but **a step that has already declared
+ * what will be observed**. An empty acceptance on a step that declares nothing
+ * still passes in a draft, exactly as today — this rule only reaches steps
+ * carrying evidence·gate, so it does not touch a single existing lesson draft.
  *
- * 돌려주는 문자열은 접미사다. 호출자(session-design.ts)가 `step <id>: ` 를 붙인다.
+ * The returned string is a suffix. The caller (session-design.ts) prepends `step <id>: `.
  */
 export function validateStepLearning(step: Record<string, unknown>): string | null {
   if ('ui' in step && !(STEP_UI_KINDS as readonly string[]).includes(step.ui as string)) {
@@ -226,23 +236,25 @@ export function validateStepLearning(step: Record<string, unknown>): string | nu
   return null;
 }
 
-// ─── `steps[].evidence` 는 lesson-pedagogy.ts 의 증거물 판정과 **다른 것이다** ──
+// ─── `steps[].evidence` is **not the same thing** as lesson-pedagogy.ts's artifact check ──
 //
-// 같은 낱말이라 붙이고 싶어지지만 붙이면 안 된다. 실제로 2026-09-20 구현 중에
-// 한 번 붙였다가 되돌렸다.
+// The word is the same, so it is tempting to wire them together — do not. It was
+// actually wired together once during implementation on 2026-09-20 and reverted.
 //
-//   여기의 `evidence`      SX-18 의 근거 **종류** 6종 enum. D 서랍 폼의 기본값이다.
-//   lesson-pedagogy 의 것  curriculum wiki `rules/curriculum-schema.md` Lint 2 —
+//   `evidence` here        SX-18's 6-value enum of evidence **types**. It is the
+//                          default for the drawer-D form.
+//   lesson-pedagogy's      curriculum wiki `rules/curriculum-schema.md` Lint 2 —
 //                          `evidence: ""  # 이 활동이 남기는 증거물 1개`,
-//                          즉 **남는 물건의 이름**(자유 텍스트). 관문2-1 은
-//                          "제3자가 볼 수 있는 물건이고 성찰·소감은 증거가 아니다"
-//                          라고 못박는다.
+//                          i.e. **the name of the thing left behind** (free text).
+//                          Gate 2-1 nails it down: it must be a thing a third party
+//                          can look at, and reflections or impressions are not evidence.
 //
-// `evidence: "ownership"` 을 골랐다고 그 단계가 제3자가 볼 수 있는 물건을 남기는
-// 것은 아니다. 그러므로 이 칸이 있다고 `step_evidence` 경고를 끄면, 무관한 필드로
-// 살아 있는 검사를 무력화하는 것이 된다. `lesson-pedagogy.ts` 는 건드리지 않았고
-// 산문 정규식(`제출 증거:`)이 그대로 유일한 판정이다.
+// Choosing `evidence: "ownership"` does not mean that step leaves behind something a
+// third party can look at. So switching off the `step_evidence` warning because this
+// field is present would be disabling a live check with an unrelated field.
+// `lesson-pedagogy.ts` was left untouched and its prose regex (`제출 증거:`) remains
+// the only judgment.
 //
-// 이 충돌은 `.claude/hypeproof/ux/STATE.md` "요구 개정 제안" 에 올려 두었다:
-// SX 쪽 키를 `evidence_type` 으로 개칭하고, 남는 물건은 별도 칸으로 여는 안.
-// 그 결정 전까지 이 파일에서 lesson-pedagogy 로 가는 함수는 만들지 않는다.
+// This conflict is filed under "요구 개정 제안" in `.claude/hypeproof/ux/STATE.md`:
+// rename the SX-side key to `evidence_type` and open a separate field for the thing
+// left behind. Until that decision, no function in this file reaches into lesson-pedagogy.

@@ -1,14 +1,14 @@
-// SX-14 · SX-45 — 완료 게이트와 "학습 이벤트는 폼에서만 생긴다" 의 판정.
+// SX-14 · SX-45 — the verdict for the completion gate and for "learning events are only born in a form".
 // Run: node --experimental-strip-types test/sx-evidence-gate.smoke.mjs
 //
-// 이 파일은 **구현 전에** 쓰였다(ux-dag.yaml P1-B control). 빨간 것을 먼저 보고
-// 초록으로 만든다. 판정 대상은 호스트가 실제로 부르는 순수 함수다 —
-// `src/learningStateHelpers.ts`. 웹뷰는 게이트를 다시 계산하지 않는다
-// (설계 §정보 구조 "호스트·웹뷰·워커의 경계").
+// This file was written **before the implementation** (ux-dag.yaml P1-B control). See red first,
+// then make it green. What gets judged is the pure function the host actually calls —
+// `src/learningStateHelpers.ts`. The webview does not recompute the gate
+// (design §정보 구조 "호스트·웹뷰·워커의 경계").
 //
-// 대조군 두 종류를 모두 둔다(verification.md 규칙 2):
-//   양성 — 확실히 통과해야 하는 시료가 통과한다  → 너무 엄격한 계측기를 잡는다
-//   음성 — 확실히 막혀야 하는 시료가 막힌다      → 너무 관대한 계측기를 잡는다
+// Both kinds of control are kept (verification.md rule 2):
+//   positive — a sample that must certainly pass, passes  → catches an instrument that is too strict
+//   negative — a sample that must certainly be blocked, is blocked → catches one that is too lenient
 
 import assert from "node:assert/strict";
 import {
@@ -48,10 +48,10 @@ const COMPLETION = [
   { id: "c2", event: "test_observed", label: "직접 시험하기" },
 ];
 
-// ── 1. DAG P1-B 대조군 그대로 ────────────────────────────────────────────────
+// ── 1. The DAG P1-B controls, verbatim ──────────────────────────────────────
 
 {
-  // 음성: AI 초안만 있고 기대 조건이 없다 → 완료는 막혀야 한다 (SX-T02)
+  // Negative: only an AI draft, no criterion → completion must be blocked (SX-T02)
   seq = 0;
   const state = learningState({ task: TASK, events: [aiDraft()], completion: [COMPLETION[0]] });
   assert.equal(state.complete.ok, false, "초안만 있는데 완료가 열렸다 — 게이트가 너무 관대하다");
@@ -63,7 +63,7 @@ const COMPLETION = [
 }
 
 {
-  // 양성: 기대 조건을 먼저 쓰고 초안을 받았다 → 완료가 열려야 한다
+  // Positive: the criterion was written first, then the draft arrived → completion must open
   seq = 0;
   const events = [criterion(), aiDraft()];
   const state = learningState({ task: TASK, events, completion: [COMPLETION[0]] });
@@ -71,17 +71,17 @@ const COMPLETION = [
   assert.deepEqual(state.complete.reasons, []);
 }
 
-// ── 2. SX-14 의 나머지 조항 ──────────────────────────────────────────────────
+// ── 2. The rest of SX-14's clauses ──────────────────────────────────────────
 
 {
-  // 코치가 쓴 기대 조건(actor=ai)은 게이트를 통과하지 못한다.
+  // A criterion written by the coach (actor=ai) does not pass the gate.
   //
-  // **이 시료에 `student_text` 가 반드시 있어야 한다.** 처음엔 없이 썼는데,
-  // `satisfiesGate()` 는 텍스트 절에서 먼저 false 를 내므로 **actor 절이 한 번도
-  // 실행되지 않았다.** 단언은 초록인데 재는 것이 없었다 — `isStudentAuthored` 절을
-  // 통째로 지워도 스위트 전체가 초록이었다(평가자 F-2). 텍스트를 채워야 actor 절만
-  // 남는다. 검증기는 이 이벤트를 `ai_text_as_student` 로 거절하지만, `satisfiesGate`
-  // 는 순수 함수라 직접 부를 수 있고 여기서 재려는 것이 바로 그 절이다.
+  // **This sample must carry a `student_text`.** The first version had none, and because
+  // `satisfiesGate()` returns false at the text clause first, **the actor clause never ran once.**
+  // The assertion was green while measuring nothing — deleting the whole `isStudentAuthored`
+  // clause left the entire suite green (judge F-2). Filling the text in is what leaves only the
+  // actor clause. The validator rejects this event as `ai_text_as_student`, but `satisfiesGate`
+  // is a pure function we can call directly, and that clause is exactly what is measured here.
   seq = 0;
   const state = learningState({
     task: TASK,
@@ -101,9 +101,9 @@ const COMPLETION = [
 }
 
 {
-  // `student_text` 칸이 **아예 없는** kind 에서는 actor 절이 유일한 방어다.
-  // 강사는 `learning.completion` 에서 8종 중 아무거나 고를 수 있으므로 이 경로가
-  // 실제로 쓰인다. 위 시료만으로는 이 자리가 덮이지 않는다.
+  // For a kind that has **no `student_text` field at all**, the actor clause is the only defense.
+  // The instructor can pick any of the 8 in `learning.completion`, so this path really is used.
+  // The sample above does not cover this spot on its own.
   seq = 0;
   const byCoach = ev("test_observed", {
     actor: "ai",
@@ -121,8 +121,8 @@ const COMPLETION = [
   });
   assert.equal(state.complete.ok, false, "코치가 '확인했다' 고 한 것이 학생의 확인으로 집계됐다");
 
-  // 양성 대조군 — 같은 이벤트를 학생이 냈으면 통과한다. 막고 있는 것이 kind 가
-  // 아니라 **actor** 임을 보인다.
+  // Positive control — the same event submitted by the student passes. Shows that what blocks is
+  // **actor**, not kind.
   seq = 0;
   const byStudent = { ...byCoach, actor: "user" };
   const ok = learningState({
@@ -134,9 +134,9 @@ const COMPLETION = [
 }
 
 {
-  // 코치 제안을 학생이 **폼에서 제출**했다면 actor=user + adopted_from 이고 통과한다
-  // (설계 §관측 이벤트와 필드 규칙 4). SX-14 본문과 어긋나는 자리이고
-  // STATE.md 개정 제안 9번에 올려 뒀다.
+  // If the student **submitted it from the form**, a coach suggestion is actor=user + adopted_from
+  // and it passes (design §관측 이벤트와 필드 규칙 4). This is a spot that
+  // diverges from the body of SX-14, and it is filed as revision proposal 9 in STATE.md.
   seq = 0;
   const state = learningState({
     task: TASK,
@@ -152,7 +152,8 @@ const COMPLETION = [
 }
 
 {
-  // 완료 조건이 둘인데 하나만 있으면 막히고, **빠진 쪽의 이름**이 이유에 들어간다.
+  // With two completion conditions and only one of them present it blocks, and **the name of the
+  // missing one** goes into the reason.
   seq = 0;
   const state = learningState({ task: TASK, events: [criterion()], completion: COMPLETION });
   assert.equal(state.complete.ok, false);
@@ -167,7 +168,7 @@ const COMPLETION = [
 }
 
 {
-  // 세션 설계가 완료 조건을 선언하지 않은 단계: 초안도 없으면 열려 있다.
+  // A step where the session design declared no completion condition: with no draft either, it is open.
   seq = 0;
   const state = learningState({ task: TASK, events: [], completion: [] });
   assert.equal(state.complete.ok, true, "요구하지 않은 것을 요구하고 있다");
@@ -175,15 +176,15 @@ const COMPLETION = [
 }
 
 {
-  // 다른 Task 의 이벤트는 이 Task 의 게이트를 열지 못한다.
+  // Another Task's events cannot open this Task's gate.
   seq = 0;
   const mine = aiDraft();
   const other = criterion({ task: "task-other" });
   const state = learningState({ task: TASK, events: [mine, other], completion: [COMPLETION[0]] });
   assert.equal(state.complete.ok, false, "옆 과제의 기대 조건으로 완료가 열렸다");
-  // 게이트만 보면 코어가 한 번 더 걸러 주기 때문에 이 결함이 드러나지 않는다.
-  // (심은 결함 "다른 Task 의 이벤트까지 집계" 가 여기서 통과해 버렸다.)
-  // **서랍 목록**까지 봐야 호스트 쪽 필터가 실제로 있는지 판정된다.
+  // Looking at the gate alone does not expose this defect, because the core filters it once more.
+  // (The planted defect "counts events from another Task too" passed right through here.)
+  // Only looking at **the drawer list** judges whether the host-side filter actually exists.
   assert.deepEqual(
     state.evidence.map((r) => r.id),
     [mine.id],
@@ -191,7 +192,7 @@ const COMPLETION = [
   );
 }
 
-// ── 3. 이유 문장에 숫자·점수가 없다 (SX-14 3항, SX-59) ───────────────────────
+// ── 3. No numbers or scores in the reason sentences (SX-14 clause 3, SX-59) ─
 
 {
   seq = 0;
@@ -203,17 +204,17 @@ const COMPLETION = [
 }
 
 {
-  // gateSentence 는 모르는 code 를 받아도 빈 문장을 돌려주지 않는다.
+  // gateSentence never returns an empty sentence, even for a code it does not know.
   const sentence = gateSentence({ code: "이런_코드는_없다" });
   assert.ok(typeof sentence === "string" && sentence.trim().length > 0, "모르는 이유가 빈 줄이 되면 버튼 옆이 비어 보인다");
   assert.ok(!/\d/.test(sentence));
 }
 
-// ── 3b. SX-14 부정 조건 — 버튼을 우회해도 호스트가 거절한다 ─────────────────
+// ── 3b. SX-14 negative condition — bypass the button, the host still rejects ─
 
 {
-  // 웹뷰가 무엇을 보내든 호스트가 같은 게이트로 다시 판정한다. `disabled` 속성을
-  // 지우고 메시지를 직접 던진 상황이 이것이다.
+  // Whatever the webview sends, the host judges it again with the same gate. This is the situation
+  // where the `disabled` attribute was deleted and the message thrown directly.
   seq = 0;
   const denied = acceptSubmit({ task: TASK, events: [aiDraft()], completion: [COMPLETION[0]] });
   assert.equal(denied.ok, false, "기대 조건 없이 완료가 받아들여졌다 — disabled 가 유일한 잠금이면 잠금이 아니다");
@@ -225,8 +226,8 @@ const COMPLETION = [
 }
 
 {
-  // 화면이 보는 판정과 호스트가 보는 판정이 **같은 함수**에서 나온다.
-  // 갈라지면 "화면은 열려 있는데 제출은 거절" 이 된다.
+  // The verdict the screen sees and the verdict the host sees come out of the **same function**.
+  // If they split, you get "the screen is open but the submit is rejected".
   seq = 0;
   const events = [criterion(), aiDraft()];
   const shown = learningState({ task: TASK, events, completion: COMPLETION });
@@ -235,7 +236,7 @@ const COMPLETION = [
   assert.deepEqual(shown.complete.reasons, server.ok ? [] : server.reasons);
 }
 
-// ── 4. SX-45 규칙 2 — 학습 이벤트는 웹뷰 폼 제출만 만든다 ───────────────────
+// ── 4. SX-45 rule 2 — only a webview form submit makes a learning event ─────
 
 {
   const ok = learningEventRequest(
@@ -250,7 +251,7 @@ const COMPLETION = [
 }
 
 {
-  // 코치 스트림 콜백은 학습 kind 를 만들 수 없다.
+  // A coach stream callback cannot make a learning kind.
   const denied = learningEventRequest(
     { kind: "criterion_set", student_text: "코치가 대신 적는다" },
     { ...CTX, sender: "coach-stream" },
@@ -260,7 +261,7 @@ const COMPLETION = [
 }
 
 {
-  // 웹뷰가 actor 를 스스로 정하려 해도 무시된다 — 호스트가 정한다.
+  // Even if the webview tries to decide actor itself, it is ignored — the host decides.
   const forced = learningEventRequest(
     { kind: "criterion_set", student_text: "직접 적은 기대 조건", actor: "teacher" },
     { ...CTX, sender: "webview-form" },
@@ -270,20 +271,20 @@ const COMPLETION = [
 }
 
 {
-  // 학습 kind 가 아닌 것은 이 경로로 들어오지 않는다.
+  // Anything that is not a learning kind does not come in through this path.
   const bad = learningEventRequest({ kind: "tool_result" }, { ...CTX, sender: "webview-form" });
   assert.equal(bad.ok, false);
   assert.equal(bad.code, "not_learning_kind");
 }
 
 {
-  // 필수 필드가 비면 거절한다. 채워 주지 않는다.
+  // An empty required field is rejected. We do not fill it in.
   const empty = learningEventRequest({ kind: "criterion_set", student_text: "   " }, { ...CTX, sender: "webview-form" });
   assert.equal(empty.ok, false);
   assert.equal(empty.code, "missing_student_text");
 }
 
-// ── 5. 재확인 게이트가 서랍 줄까지 온다 (SX-15) ──────────────────────────────
+// ── 5. The recheck gate reaches the drawer row (SX-15) ──────────────────────
 
 {
   seq = 0;
@@ -308,13 +309,13 @@ const COMPLETION = [
   assert.ok(!/\d/.test(state.verification.line), "검증 줄에 숫자가 있다");
 }
 
-// ── 6. 폼이 만든 초안이 정말 `/2` 로 저장되는가 ─────────────────────────────
+// ── 6. Does a draft made by the form really save as `/2` ────────────────────
 //
-// 여기가 이 파일에서 가장 값이 큰 자리다. 폼 → 호스트 → 검증기 세 계층 중 하나만
-// 어긋나도 "설정은 맞는데 동작이 없는" 유형이 된다(.claude/rules/verification.md
-// "CI 초록은 아무것도 보장하지 않는다" 의 1번·5번). 실제로 이 단언을 쓰면서 두 개가
-// 걸렸다: `evidence_refs: []` 와 빈 `provenance` 는 저장은 되고 **다음 읽기에서**
-// 배치 전체가 거절된다.
+// This is the highest-value spot in this file. If any one of the three layers — form → host →
+// validator — is off, you get the "the setting is right but there is no behavior" type
+// (.claude/rules/verification.md, "CI green guarantees nothing", items 1 and 5). Two were actually
+// caught while writing these assertions: `evidence_refs: []` and an empty `provenance` do save,
+// and then **on the next read** the whole batch is rejected.
 
 {
   const { validateObservation } = await import("../src/nativeObservationContract.ts");
@@ -334,7 +335,8 @@ const COMPLETION = [
     })),
   });
 
-  // 서랍의 세 폼이 실제로 만드는 초안. 컴포넌트가 부르는 인자 그대로 적는다.
+  // The drafts the drawer's three forms actually make. Written with the exact arguments the
+  // components pass.
   const FORM_DRAFTS = [
     { name: "기대 조건 폼", body: { kind: "criterion_set", student_text: "버튼을 누르면 이름이 보인다" } },
     {
@@ -349,9 +351,9 @@ const COMPLETION = [
     },
     {
       name: "이유 폼",
-      // `evidence_refs` 는 **같은 배치 안의 이벤트 id** 여야 한다(없으면 orphan_ref).
-      // 그래서 앞선 이벤트를 하나 깔고 그것을 가리킨다 — 화면에서도 학생이 고른
-      // 대안이 이미 기록돼 있는 상태에서만 이유 폼이 열린다(`pendingDecision`).
+      // `evidence_refs` must be **event ids inside the same batch** (otherwise orphan_ref).
+      // So we lay one earlier event down and point at it — on screen too, the reason form only
+      // opens once the alternative the student picked is already recorded (`pendingDecision`).
       prefix: [
         {
           kind: "criterion_set",
@@ -372,13 +374,14 @@ const COMPLETION = [
   ];
 
   for (const { name, body, prefix = [] } of FORM_DRAFTS) {
-    // `external_feedback_received` 의 evidence_type 은 kind 표가 정하지 않고
-    // **단계 `evidence`** 가 정한다(설계 표). 호스트가 그것을 넘겨준다.
+    // The evidence_type of `external_feedback_received` is not set by the kind table but by
+    // **the step's `evidence`** (design table). The host is what passes it in.
     const made = learningEventRequest(body, { ...CTX, sender: "webview-form", stepEvidenceType: "intent" });
     assert.equal(made.ok, true, `${name} 의 초안이 호스트에서 막혔다: ${JSON.stringify(made)}`);
-    // 검증기는 잘못된 이벤트를 `missing` 에 담지 않고 **던진다**. 처음 이 줄을
-    // `checked.missing.length === 0` 으로 썼는데 `missing` 은 seq 구멍을 뜻해서
-    // 무엇이 통과하든 초록이었다 — 대상을 열어보지 않고 기준을 세운 자리다(규칙 1).
+    // The validator does not put a bad event into `missing` — it **throws**. This line was first
+    // written as `checked.missing.length === 0`, but `missing` means a seq hole, so it was green
+    // no matter what passed — a spot where the criterion was set without opening the thing it
+    // measures (rule 1).
     let checked;
     assert.doesNotThrow(() => {
       checked = validateObservation(batchOf([...prefix, made.event]));
@@ -390,7 +393,7 @@ const COMPLETION = [
     );
   }
 
-  // 음성 대조군 — 빈 evidence_refs 와 빠진 decision 은 **만드는 자리에서** 막힌다.
+  // Negative controls — an empty evidence_refs and a missing decision are blocked **where they are made**.
   const emptyRefs = learningEventRequest(
     { kind: "decision_revised", student_text: "이유", decision: { from: "a", to: "b" }, evidence_refs: [] },
     { ...CTX, sender: "webview-form" },
@@ -405,7 +408,7 @@ const COMPLETION = [
   assert.equal(noDecision.ok, false, "고른 것이 없는 이유가 통과했다");
   assert.equal(noDecision.code, "missing_decision");
 
-  // 단계가 근거 종류를 정해 주지 않으면 여섯 중 하나를 골라 넣지 않고 거절한다.
+  // When the step does not set the evidence kind, we reject instead of picking one of the six.
   const noType = learningEventRequest(
     {
       kind: "external_feedback_received",
@@ -418,8 +421,9 @@ const COMPLETION = [
   assert.equal(noType.ok, false, "근거 종류를 추정해서 채웠다 (SX-18 부정 조건)");
   assert.equal(noType.code, "missing_evidence_type");
 
-  // 그리고 그 음성 시료가 **정말** 검증기에서도 거절되는지 확인한다.
-  // 이걸 안 보면 "호스트가 막았다" 가 과잉 엄격인지 알 수 없다(규칙 2, 양성/음성 짝).
+  // And then check that that negative sample really is rejected by the validator too.
+  // Without this you cannot tell whether "the host blocked it" is over-strictness
+  // (rule 2, the positive/negative pair).
   assert.throws(
     () =>
       validateObservation(
@@ -441,27 +445,27 @@ const COMPLETION = [
   );
 }
 
-// ── 7. SX-45 규칙 2 를 **규칙으로** 강제한다 (record() 경로) ────────────────
+// ── 7. Enforcing SX-45 rule 2 **as a rule** (the record() path) ─────────────
 //
-// P1-B 에서 `recordLearningEvent()` 를 `record()` 와 나눠 두고 "폼 제출만 학습
-// 이벤트를 만든다" 고 PR 본문에 적었다. **나눠 둔 것이 막은 것은 아니었다** —
-// `record()` 는 `/2` 의 모든 kind 를 받고, `extra` 를 고정 필드보다 **먼저** 펼치므로
-// 코치 스트림 콜백이 `{actor:"user", student_text}` 를 넘기면 AI 가 쓴 글이 학생의
-// 학습 이벤트로 저장됐다. "오늘 아무도 그렇게 부르지 않는다" 는 관습이지 규칙이 아니다.
+// In P1-B, `recordLearningEvent()` was split off from `record()` and the PR body said "only a form
+// submit makes a learning event". **Splitting them was not what blocked it** — `record()` takes
+// every kind of `/2`, and it spreads `extra` **before** the fixed fields, so when a coach stream
+// callback passed `{actor:"user", student_text}`, AI-written text got saved as the student's
+// learning event. "Nobody calls it that way today" is a custom, not a rule.
 
 {
   const { NativeObservationRecorder } = await import("../src/nativeObservationRecorder.ts");
   const context = { format: "hps-observation/2", scope: "s", session: "sess", program: "p" };
   const make = () => new NativeObservationRecorder(context);
 
-  // 음성: 코치 스트림 경로가 학습 kind 를 만들려 하면 이름을 붙여 거절한다.
+  // Negative: when the coach stream path tries to make a learning kind, it is rejected by name.
   assert.throws(
     () => make().record(TASK, "criterion_set", "코치가 대신 적는다"),
     /learning_kind_needs_form/,
     "코치 스트림이 학습 이벤트를 만들 수 있다 (SX-45 규칙 2)",
   );
 
-  // 음성: actor 와 student_text 를 실어 보내도 마찬가지다. 이것이 실제 위험 경로다.
+  // Negative: the same when actor and student_text are carried along. This is the actual dangerous path.
   assert.throws(
     () =>
       make().record(TASK, "criterion_set", "코치가 대신 적는다", {
@@ -475,13 +479,13 @@ const COMPLETION = [
     "AI 가 쓴 글이 actor=user 학습 이벤트로 저장됐다 (루브릭 C5)",
   );
 
-  // 양성 대조군 둘 — 막고 있는 것이 `record()` 자체가 아니라 **학습 kind** 임을 보인다.
+  // Two positive controls — they show that what blocks is the **learning kind**, not `record()` itself.
   const legacy = make();
   legacy.record(TASK, "coach", "코치가 한 말");
   legacy.record(TASK, "artifact", "index.html", { sha256: "a".repeat(64) });
   assert.equal(legacy.batch.events.length, 2, "기존 kind 까지 막혔다 — 너무 엄격하다");
 
-  // 양성: 폼 경로는 그대로 열려 있다. 규칙이 기능을 죽이지 않았다는 증거다.
+  // Positive: the form path is still open. Evidence that the rule did not kill the feature.
   const form = make();
   const made = learningEventRequest(
     { kind: "criterion_set", student_text: "버튼을 누르면 이름이 보인다" },
@@ -493,35 +497,36 @@ const COMPLETION = [
   assert.equal(form.batch.events[0].actor, "user");
 }
 
-// ── 8. 관측 라우트를 부르는 **모든** 자리가 한 목소리로 묻는다 ──────────────
+// ── 8. **Every** place that calls an observation route asks in one voice ────
 //
-// 서버가 `/v1/profile` 과 `/observations/context` 를 같은 함수로 협상하도록 고쳐 놓고도
-// 기능은 여전히 죽어 있었다. **두 호출부가 서로 다른 헤더를 보냈기 때문이다** —
-// `fetchProfile` 은 `x-hps-observation-format: /2` 를, `prepareObservation` 은
-// `authorization` 만. 서버는 정직하게 한쪽에 `/2`, 다른 쪽에 `/1` 을 주었고 레코더가
-// `/1` 로 만들어져 서랍이 끝까지 안 그려졌다. 워커 검사 9개는 그동안 초록이었다 —
-// 그 검사는 **같은 헤더를 양쪽에 보내서** 재고 있었으니까.
+// The server was fixed to negotiate `/v1/profile` and `/observations/context` through the same
+// function, and the feature was still dead. **Because the two call sites sent different headers** —
+// `fetchProfile` sent `x-hps-observation-format: /2`, `prepareObservation` sent only
+// `authorization`. The server honestly handed `/2` to one side and `/1` to the other, the recorder
+// got built as `/1`, and the drawer never drew to the end. The 9 worker checks were green that
+// whole time — because those checks measured by **sending the same header to both sides**.
 //
-// 그래서 이 단언은 **소스를 정적으로** 본다. 런타임 검사로는 "호출부가 헬퍼를
-// 안 썼다" 를 잡을 수 없다(그 호출부가 돌지 않는 한). 한계는 그대로 적어 둔다.
+// So this assertion looks at **the source, statically**. A runtime check cannot catch "a call site
+// did not use the helper" (not unless that call site runs). The limitation is written down as is.
 
 {
   const { readFileSync, readdirSync } = await import("node:fs");
   const srcDir = new URL("../src/", import.meta.url);
   const files = readdirSync(srcDir).filter((f) => f.endsWith(".ts"));
 
-  // 관측 계약이 걸린 라우트. 이 중 하나를 부르면서 헤더를 손으로 만들면 실패다.
+  // The routes the observation contract hangs on. Calling one of these while hand-building the
+  // headers is a failure.
   const ROUTES = ["/observations/", "/profile'", '/profile"', "/activity'", '/activity"'];
   const offenders = [];
   for (const file of files) {
     const text = readFileSync(new URL(file, srcDir), "utf8");
-    // `fetch(` 부터 닫는 `)` 근처까지를 한 덩어리로 훑는다. 정확한 파서가 아니라
-    // **호출 표현식 안에 헤더 리터럴이 있는지**를 보는 것이 목적이다.
+    // Sweep from `fetch(` to somewhere near the closing `)` as one chunk. Not an exact parser —
+    // the point is **whether there is a header literal inside the call expression**.
     for (const m of text.matchAll(/fetch\(([\s\S]{0,400}?)\}\s*\)/g)) {
       const call = m[1];
       if (!ROUTES.some((r) => call.includes(r))) continue;
       if (call.includes("observationHeaders")) continue;
-      // `authorization` 을 손으로 적고 있으면 포맷 헤더를 빠뜨릴 수 있는 자리다.
+      // Hand-writing `authorization` marks a spot where the format header can be dropped.
       if (/authorization/i.test(call)) offenders.push(`${file}: ${call.slice(0, 90).replace(/\s+/g, " ")}`);
     }
   }
@@ -532,13 +537,14 @@ const COMPLETION = [
       offenders.join("\n"),
   );
 
-  // 양성 대조군 — 그 헬퍼가 실제로 포맷을 싣는지. 없는 규칙을 지키고 있어도 소용없다.
+  // Positive control — does that helper actually carry the format. Obeying a rule that is not there
+  // is no use.
   const { observationHeaders } = await import("../src/proxyClientHelpers.ts");
   const h = observationHeaders("t0ken");
   assert.equal(h["x-hps-observation-format"], "hps-observation/2", "헬퍼가 포맷을 싣지 않는다");
   assert.equal(h.authorization, "Bearer t0ken");
 
-  // 음성 대조군 — 검사가 정말 세는지. 손으로 만든 호출을 심은 문자열로 확인한다.
+  // Negative control — does the check really count. Verified with a planted string of a hand-built call.
   const planted = `fetch(url + '/observations/context', {headers:{authorization:'Bearer '+token}})`;
   const hits = [...planted.matchAll(/fetch\(([\s\S]{0,400}?)\}\s*\)/g)]
     .filter((m) => m[1].includes("/observations/") && !m[1].includes("observationHeaders") && /authorization/i.test(m[1]));

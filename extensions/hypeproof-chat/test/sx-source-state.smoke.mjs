@@ -1,10 +1,11 @@
-// SX-19 · SX-21 · SX-46 — real / simulated 라벨과 원문 보존의 판정 (P1-D).
+// SX-19 · SX-21 · SX-46 — judging the real / simulated labels and verbatim preservation (P1-D).
 // Run: node --experimental-strip-types test/sx-source-state.smoke.mjs
 //
-// 구현 전에 쓰였다(ux-dag.yaml P1-D control).
+// Written before the implementation (ux-dag.yaml P1-D control).
 //
-// 이 파일이 지키려는 한 문장: **가상으로 해 본 것이 실제로 있었던 일처럼 보이면 안 된다.**
-// 4주차 가짜 결제가 매출로 읽히는 것이 SX-46 이 막으려는 바로 그것이다.
+// The one sentence this file defends: **something tried out in simulation must not look
+// like something that actually happened.**
+// Week 4's fake checkout being read as revenue is exactly what SX-46 blocks.
 
 import assert from "node:assert/strict";
 import { auditRegionText } from "./sx-audit.mjs";
@@ -33,11 +34,12 @@ const row = (extra = {}) => ({
   ...extra,
 });
 
-// ── 1. SX-21 — 네 값이 UI 와 데이터에 **같은 어휘**로 있다 ──────────────────
+// ── 1. SX-21 — the four values exist in the UI and the data in the **same vocabulary** ──
 
 {
-  // 라벨 표가 데이터 enum 과 정확히 같은 키를 갖는다. 하나라도 어긋나면 화면에
-  // 라벨 없는 상태가 생기고, SX-21 부정 조건("라벨 없는 외부 반응")에 걸린다.
+  // The label table holds exactly the same keys as the data enum. One mismatch and a
+  // state with no label appears on screen, tripping SX-21's negative condition
+  // ("an external reaction with no label").
   assert.deepEqual(
     Object.keys(SOURCE_STATE_LABELS).sort(),
     [...SOURCE_STATES].sort(),
@@ -48,33 +50,33 @@ const row = (extra = {}) => ({
     assert.ok(label && label.trim().length > 0, `${state}: 라벨이 비었다`);
     assert.ok(!/\d/.test(label), `${state}: 라벨에 숫자가 있다 — ${label}`);
   }
-  // 네 라벨이 서로 다른 문장이어야 구분이 된다.
+  // The four labels have to be four different sentences or they distinguish nothing.
   assert.equal(new Set(Object.values(SOURCE_STATE_LABELS)).size, 4, "라벨이 겹친다");
 }
 
 {
-  // "색만이 아니라 문구로 구분된다" — real 과 simulated 의 문구가 다르다.
+  // "distinguished by wording, not only by color" — real and simulated read differently.
   assert.notEqual(SOURCE_STATE_LABELS.real, SOURCE_STATE_LABELS.simulated);
   assert.ok(/실제/.test(SOURCE_STATE_LABELS.real), SOURCE_STATE_LABELS.real);
   assert.ok(/가상|해 본/.test(SOURCE_STATE_LABELS.simulated), SOURCE_STATE_LABELS.simulated);
 }
 
 {
-  // Amber 는 **혼동 가능한 상태에만** 쓴다. real 에 Amber 를 쓰면 경고가 의미를 잃는다.
+  // Amber is used **only on states that can be confused**. Amber on real drains the warning of meaning.
   assert.ok(AMBER_STATES.includes("simulated"), "가상인데 표시가 없다");
   assert.ok(!AMBER_STATES.includes("real"), "실제에 경고색을 썼다 — 경고가 의미를 잃는다");
   assert.ok(!AMBER_STATES.includes("self_reported"), "내가 적은 것은 혼동 상태가 아니다");
 }
 
 {
-  // 라벨 없는 이벤트는 "라벨 없음" 이 아니라 **unverified** 로 읽는다. 절대 real 이 아니다.
+  // An event with no label reads as **unverified**, not as "no label". Never as real.
   assert.equal(sourceStateLabel(undefined), SOURCE_STATE_LABELS.unverified);
   assert.equal(sourceStateLabel(null), SOURCE_STATE_LABELS.unverified);
   assert.equal(sourceStateLabel("이런_값은_없다"), SOURCE_STATE_LABELS.unverified);
   assert.notEqual(sourceStateLabel(undefined), SOURCE_STATE_LABELS.real);
 }
 
-// ── 2. SX-46 — 가상은 실적에 섞이지 않는다 ──────────────────────────────────
+// ── 2. SX-46 — simulation never mixes into the record of what happened ──────
 
 {
   const rows = [
@@ -86,24 +88,24 @@ const row = (extra = {}) => ({
   const { real, aside } = partitionBySourceState(rows);
   assert.deepEqual(real.map((r) => r.id), ["r1"], "실제 칸에 실제가 아닌 것이 섞였다");
   assert.deepEqual(aside.map((r) => r.id).sort(), ["s1", "sr1", "u1"], "별도 칸이 빠뜨린 것이 있다");
-  // 음성 대조군: simulated 가 real 쪽에 하나라도 들어가면 SX-21 부정 조건이다.
+  // Negative control: a single simulated row landing on the real side is SX-21's negative condition.
   assert.ok(!real.some((r) => r.source_state === "simulated"), "가상이 실제 칸에 섞였다");
 }
 
 {
-  // 빈 입력에서 빈 두 칸이 나온다. 던지지 않는다.
+  // Empty input yields two empty buckets. It does not throw.
   const { real, aside } = partitionBySourceState([]);
   assert.deepEqual(real, []);
   assert.deepEqual(aside, []);
 }
 
-// ── 3. SX-46 부정 — provenance 없이 real 로 저장하려 하면 거부한다 ──────────
+// ── 3. SX-46 negative — an attempt to save as real without provenance is refused ──
 
 {
-  // `external_feedback_received` 는 kind 표가 이미 provenance 를 필수로 잡는다.
-  // 그래서 이 kind 로는 "real 규칙" 이 따로 도는지 **구분되지 않는다** — 심은 결함
-  // "출처 없이도 real 을 저장한다" 가 여기서 통과해 버렸다. 규칙이 실제로 갈리는
-  // 자리는 provenance 가 필수가 **아닌** kind 다.
+  // For `external_feedback_received` the kind table already makes provenance required.
+  // So this kind **cannot tell** whether the "real rule" runs on its own — the planted
+  // defect "saves real even without a source" passed right here. The place where the
+  // rule actually branches is a kind where provenance is **not** required.
   const denied = learningEventRequest(
     { kind: "test_observed", criterion_ref: "cs1", artifact_after: "a".repeat(64), outcome: "match", source_state: "real" },
     { ...CTX, sender: "webview-form" },
@@ -111,15 +113,16 @@ const row = (extra = {}) => ({
   assert.equal(denied.ok, false, "출처도 실행 결과도 없이 '실제로 있었던 일' 로 저장됐다 (SX-46)");
   assert.equal(denied.code, "missing_provenance");
 
-  // 실행된 결과가 묶여 있으면 real 이 된다 — 출처만이 유일한 길은 아니다.
+  // An attached execution result makes it real — provenance is not the only path.
   const executed = learningEventRequest(
     { kind: "test_observed", criterion_ref: "cs1", artifact_after: "a".repeat(64), outcome: "match", source_state: "real", result_ref: "r1" },
     { ...CTX, sender: "webview-form" },
   );
   assert.equal(executed.ok, true, `실행 결과가 묶였는데 막혔다: ${JSON.stringify(executed)}`);
 
-  // 세 칸을 전부 "미기록" 으로 채운 것은 **적은 것이 아니다**(SX-20).
-  // 이렇게 통과시키면 센티널이 출처 규칙을 우회하는 뒷문이 된다.
+  // Filling all three fields with the "미기록" sentinel is **not writing anything
+  // down** (SX-20). Letting that through turns the sentinel into a back door around
+  // the provenance rule.
   const sentinel = learningEventRequest(
     {
       kind: "external_feedback_received",
@@ -135,7 +138,7 @@ const row = (extra = {}) => ({
 }
 
 {
-  // 양성 대조군: provenance 가 있으면 real 로 저장된다 — 너무 엄격한 계측기를 잡는다.
+  // Positive control: with provenance it does save as real — this catches an over-strict instrument.
   const allowed = learningEventRequest(
     {
       kind: "external_feedback_received",
@@ -151,7 +154,7 @@ const row = (extra = {}) => ({
 }
 
 {
-  // simulated 는 provenance 없이도 저장된다. 가상은 출처가 없는 것이 정상이다.
+  // simulated saves without provenance. Having no source is normal for a simulation.
   const sim = learningEventRequest(
     {
       kind: "external_feedback_received",
@@ -166,7 +169,7 @@ const row = (extra = {}) => ({
   assert.equal(sim.event.source_state, "simulated");
 }
 
-// ── 4. SX-19 — KO/EN 혼용 원문을 그대로 저장한다 ────────────────────────────
+// ── 4. SX-19 — mixed KO/EN source text is stored verbatim ───────────────────
 
 {
   const mixed = "I'd buy this, 근데 가격이 too expensive 예요";
@@ -184,7 +187,7 @@ const row = (extra = {}) => ({
   assert.equal(made.event.student_text, mixed, "혼용 원문이 정규화·번역됐다 (SX-19 부정 조건)");
 }
 
-// ── 5. 화면 — 실제 렌더로 판정한다 ──────────────────────────────────────────
+// ── 5. Screen — judged on the actual render ─────────────────────────────────
 
 const status = rendererStatus();
 if (!status.available) {
@@ -204,19 +207,21 @@ if (!status.available) {
   });
   const text = visibleText(html);
 
-  // 두 라벨이 문구로 화면에 있다.
+  // Both labels are on screen as wording.
   assert.ok(text.includes(SOURCE_STATE_LABELS.real), `실제 라벨이 화면에 없다:\n${text}`);
   assert.ok(text.includes(SOURCE_STATE_LABELS.simulated), `가상 라벨이 화면에 없다:\n${text}`);
-  // 가상 표시가 색만이 아니라 마크업에도 있다(색맹·흑백 인쇄에서도 구분돼야 한다).
-  // 처음에 `A|B` 로 썼는데 그러면 한쪽만 남아도 통과한다 — 심은 결함
-  // "가상 표시를 마크업에서 지운다" 가 그렇게 빠져나갔다. **둘 다** 요구한다.
+  // The simulated marker is in the markup and not only in the color (it has to be
+  // distinguishable for the color-blind and in black-and-white print).
+  // This was first written as `A|B`, which passes when only one side survives — the
+  // planted defect "erase the simulated marker from the markup" escaped exactly that
+  // way. We require **both**.
   assert.ok(/class="[^"]*hp-amber/.test(html), "가상 줄에 표시 class 가 없다");
   assert.ok(/data-source-state="simulated"/.test(html), "가상 표시가 색뿐이다 — 마크업에 남지 않았다");
   assert.ok(/data-source-state="real"/.test(html), "실제 줄에도 상태가 마크업에 있어야 한다");
 
-  // F-9 — 모르는 값이 와도 **마크업과 라벨이 같은 말을 한다.** 원래는 라벨만
-  // 정규화하고 `data-source-state` 와 amber 는 원값을 써서, 한 줄이 두 가지로
-  // 읽힐 수 있었다.
+  // F-9 — even when an unknown value arrives, **the markup and the label say the same
+  // thing.** Originally only the label was normalized while `data-source-state` and
+  // amber used the raw value, so one row could be read two ways.
   const odd = await renderComponent("EvidenceDrawer", {
     open: true,
     rows: [row({ id: "x1", source_state: "이런_값은_없다", text: "출처를 모르는 말" })],
@@ -228,10 +233,10 @@ if (!status.available) {
   assert.ok(/data-source-state="unverified"/.test(odd), "모르는 값이 unverified 로 떨어지지 않았다");
   assert.ok(visibleText(odd).includes(SOURCE_STATE_LABELS.unverified), "라벨과 마크업이 다른 말을 한다");
   assert.ok(!/data-source-state="real"/.test(odd), "모르는 값이 real 로 승격됐다");
-  // 실제에는 그 표시가 붙지 않는다.
+  // A real row never carries that marker.
   assert.ok(!/data-source-state="simulated"[^>]*>[^<]*실제로/.test(html));
 
-  // **개수를 세지 않는다.** "외부 반응 2건" 같은 문구가 생기면 가상이 실적에 섞인다.
+  // **No counting.** Wording like "외부 반응 2건" mixes simulation into the record.
   assert.ok(!/반응\s*\d+\s*건|\d+\s*명이/.test(text), `근거를 개수로 셌다:\n${text}`);
 
   const verdict = auditRegionText(text, { region: "work", minLength: 80 });

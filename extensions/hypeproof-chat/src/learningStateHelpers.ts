@@ -1,14 +1,14 @@
 /**
- * 호스트가 학습 상태를 계산하는 순수 함수들 (P1-B, SX-14·15·17·45).
+ * The pure functions the host uses to compute learning state (P1-B, SX-14·15·17·45).
  *
- * 왜 `vscode` 를 import 하지 않나: 이 저장소의 관용대로 판정 로직은 `xxxHelpers.ts`
- * 에 두고 orchestration 만 `chatPanelProvider.ts` 에 남긴다. 그래야 게이트를
- * Electron 없이 `node --experimental-strip-types` 로 잴 수 있다.
+ * Why this does not import `vscode`: per this repo's convention the verdict logic lives in
+ * `xxxHelpers.ts` and only the orchestration stays in `chatPanelProvider.ts`. That is what
+ * lets the gate be measured without Electron, under `node --experimental-strip-types`.
  *
- * 경계(설계 §정보 구조 "호스트·웹뷰·워커의 경계"):
- *   - **호스트가 진실을 갖는다.** 게이트는 여기서 계산해 `learningState` 로 내려보낸다.
- *   - **웹뷰는 다시 계산하지 않는다.** CTA 비활성은 `complete.ok` 를 그대로 그린다.
- *   - 게이트 결과는 **저장하지 않는다.** 매번 이벤트에서 계산한다.
+ * Boundaries (design §정보 구조 "호스트·웹뷰·워커의 경계"):
+ *   - **The host holds the truth.** The gate is computed here and sent down as `learningState`.
+ *   - **The webview does not recompute it.** A disabled CTA just draws `complete.ok` as it came.
+ *   - The gate result is **never stored.** It is computed from the events every time.
  */
 import {
   gates,
@@ -25,7 +25,7 @@ import {
 } from "../../../worker/src/lib/measurement-core/learning-events.ts";
 import type { ObservationEvent } from "../../../worker/src/lib/measurement-core/legacy-observation.ts";
 
-/** 세션 설계 `learning.completion[]` 한 줄. `label` 은 화면에 그대로 나간다. */
+/** One row of the session design's `learning.completion[]`. `label` goes to the screen verbatim. */
 export interface CompletionItem {
   id: string;
   event: LearningEventKind;
@@ -35,18 +35,18 @@ export interface CompletionItem {
 export interface EvidenceRow {
   id: string;
   kind: string;
-  /** 없으면 `null`. 여섯 중 하나로 **추정하지 않는다** (SX-18 부정 조건). */
+  /** `null` when absent. We do **not guess** one of the six (SX-18 negative condition). */
   evidence_type: EvidenceType | null;
   at: number;
-  /** 학생 원문 그대로. 없으면 이벤트 본문 (SX-44). */
+  /** The student's own wording, verbatim. The event body when there is none (SX-44). */
   text: string;
   actor: ObservationActor;
   source_kind: SourceKind;
   source_state: SourceState;
   provenance: { who: string; when: string; where: string } | null;
-  /** 코치 제안을 채택한 경우 그 코치 이벤트 id (설계 §관측 이벤트와 필드 규칙 4). */
+  /** When a coach suggestion was adopted, that coach event's id (design §관측 이벤트와 필드 규칙 4). */
   adopted_from: string | null;
-  /** SX-16 — 변경 전후 보기가 쓰는 칸. `artifact` 이벤트만 `sha256` 을 갖는다. */
+  /** SX-16 — the fields the before/after view uses. Only `artifact` events carry a `sha256`. */
   sha256: string | null;
   artifact_before: string | null;
   artifact_after: string | null;
@@ -57,29 +57,29 @@ export interface LearningStatePayload {
   task: string;
   phase: "assigned" | "working" | "submitted" | "reflected";
   currentStep: string | null;
-  /** SX-14. `ok=false` 면 완료 CTA 가 비활성이고 `reasons` 가 버튼 옆에 나온다. */
+  /** SX-14. When `ok=false` the completion CTA is disabled and `reasons` shows up next to the button. */
   complete: { ok: boolean; reasons: string[]; missing: GateMiss[] };
-  /** 세션 설계가 이 과제에 완료 조건을 **선언했는가**. 선언이 없다는 사실도 화면에 보인다. */
+  /** Whether the session design **declared** a completion condition for this task. The absence of a declaration is shown on screen too. */
   declared: boolean;
   verification: {
     state: GatesResult["verification"]["state"];
     source_state: SourceState;
     line: string;
-    /** AE-37 — 재확인이 필요해져도 **이전 확인은 남는다.** 지우면 없었던 일이 된다. */
+    /** AE-37 — even when a recheck becomes necessary, **the earlier confirmation stays.** Erase it and it becomes something that never happened. */
     previous?: PreviousVerification;
   };
   evidence: EvidenceRow[];
 }
 
-/** 서랍이 보여 주는 kind. `artifact` 는 변경 전후 비교에 필요해서 함께 온다. */
+/** The kinds the drawer shows. `artifact` comes along because the before/after comparison needs it. */
 const DRAWER_KINDS = new Set<string>([...Object.keys(LEARNING_EVENT_SPEC), "artifact"]);
 
 /**
- * 막힌 이유 한 문장.
+ * One sentence for why it is blocked.
  *
- * 숫자를 쓰지 않는다. "2개 중 1개" 같은 문구는 진행률로 읽히고, 진행률은 점수의
- * 다른 이름이다 (SX-59). 모르는 code 도 빈 줄을 돌려주지 않는다 — 버튼 옆이
- * 비어 있으면 학생은 왜 막혔는지 알 방법이 없다.
+ * No numbers. Phrasing like "1 of 2" reads as a progress rate, and a progress rate is another
+ * name for a score (SX-59). An unknown code does not get an empty line back either — if the
+ * space next to the button is blank, the student has no way to know why it is blocked.
  */
 export function gateSentence(miss: GateMiss, completion: readonly CompletionItem[] = []): string {
   const item = completion.find((c) => c.id === miss.item);
@@ -94,7 +94,7 @@ export function gateSentence(miss: GateMiss, completion: readonly CompletionItem
   }
 }
 
-/** 완료 조건에 라벨이 없을 때 쓰는 kind 이름. 화면 문구이므로 숫자가 없다. */
+/** The kind names used when a completion item has no label. Screen copy, so no numbers. */
 const KIND_LABELS: Record<LearningEventKind, string> = {
   problem_committed: "무엇을 할지 정하기",
   criterion_set: "기대 조건 적기",
@@ -110,8 +110,9 @@ const VERIFICATION_LINES: Record<GatesResult["verification"]["state"], string> =
   none: "아직 고쳐 달라고 한 것이 없어요",
   unconfirmed: "아직 같은 조건으로 다시 확인하지 않음",
   confirmed: "같은 조건으로 다시 확인했어요",
-  // AE-37 — 확인은 있었다. 그 뒤에 기대 조건이나 산출물이 움직여서 지금 화면을
-  // 덮지 못할 뿐이다. "확인 안 했어요" 와 다른 문장이어야 학생이 구분할 수 있다.
+  // AE-37 — the confirmation did happen. It is only that the criterion or the artifact moved
+  // afterwards, so it no longer covers the current screen. It has to be a different sentence
+  // from "you have not confirmed yet" for the student to tell the two apart.
   needs_recheck: "확인한 뒤에 달라진 것이 있어요. 다시 한 번 봐 주세요",
 };
 
@@ -137,10 +138,11 @@ function rowOf(event: ObservationEvent): EvidenceRow {
 }
 
 /**
- * 한 Task 의 학습 상태. 읽기만 한다.
+ * One Task's learning state. Read-only.
  *
- * `completion` 이 비어 있으면 세션 설계가 이 과제에 완료 조건을 선언하지 않은 것이고,
- * 그 사실을 `declared: false` 로 함께 내보낸다 (SX-14 예외 조항 "그 선언이 화면에 보인다").
+ * An empty `completion` means the session design declared no completion condition for this task,
+ * and that fact goes out alongside as `declared: false` (SX-14 exception clause, "that declaration
+ * is visible on screen").
  */
 export function learningState(input: {
   task: string;
@@ -176,12 +178,12 @@ export function learningState(input: {
 }
 
 /**
- * SX-14 부정 조건 — 완료 제출을 호스트가 **다시** 판정한다.
+ * SX-14 negative condition — the host judges the completion submit **again**.
  *
- * 웹뷰의 `disabled` 는 그림이지 잠금이 아니다. 개발자 도구로 속성 하나를 지우거나
- * `postMessage` 를 직접 던지면 그냥 눌린다. 그래서 같은 게이트를 같은 이벤트로
- * 여기서 한 번 더 돌린다. 두 곳이 **같은 함수**(`learningState`)를 부르므로 규칙이
- * 두 벌로 갈라지지 않는다.
+ * The webview's `disabled` is a picture, not a lock. Delete one attribute in devtools or throw
+ * a `postMessage` directly and it just presses. So the same gate runs once more here over the
+ * same events. Both places call the **same function** (`learningState`), so the rule never
+ * splits into two copies.
  */
 export function acceptSubmit(input: {
   task: string;
@@ -206,7 +208,7 @@ export type LearningEventRequestResult =
   | { ok: true; event: LearningEventDraft }
   | { ok: false; code: string };
 
-/** 웹뷰가 보내도 되는 칸. 나머지는 호스트가 채우거나 버린다. */
+/** The fields the webview is allowed to send. The host fills or discards the rest. */
 const WEBVIEW_FIELDS = [
   "student_text",
   "source_kind",
@@ -225,13 +227,13 @@ const WEBVIEW_FIELDS = [
 ] as const;
 
 /**
- * 웹뷰 폼 제출 하나를 학습 이벤트 초안으로 바꾼다 (SX-45 규칙 2).
+ * Turns one webview form submit into a learning-event draft (SX-45 rule 2).
  *
- * 세 가지를 **웹뷰가 정하지 못하게** 한다:
- *   - `actor` — 호스트가 kind 표에서 정한다. 웹뷰가 보낸 값은 버린다.
- *   - `context` — Task.curriculum 에서 호스트가 채운다.
- *   - 호출 경로 — `sender: "webview-form"` 이 아니면 아무것도 만들지 않는다.
- *     코치 스트림 콜백이 학습 이벤트를 만들 수 있으면 SX-45 전체가 무의미해진다.
+ * Three things the **webview does not get to decide**:
+ *   - `actor` — the host decides it from the kind table. Whatever the webview sent is discarded.
+ *   - `context` — the host fills it from Task.curriculum.
+ *   - the call path — nothing is made unless `sender: "webview-form"`.
+ *     If a coach stream callback can make a learning event, all of SX-45 is pointless.
  */
 export function learningEventRequest(
   request: unknown,
@@ -242,9 +244,10 @@ export function learningEventRequest(
     module_version: string;
     sender: string;
     /**
-     * 세션 설계 단계의 `evidence` 값. `external_feedback_received` 처럼 kind 표가
-     * evidence_type 을 정하지 않는 것에만 쓴다(설계 표의 "단계 `evidence`에 따름").
-     * 웹뷰가 보내지 않는다 — 학생이 근거의 종류를 고르는 것이 아니라 단계가 정한다.
+     * The `evidence` value of the session design step. Used only for kinds whose evidence_type
+     * the kind table does not set, like `external_feedback_received` (design table: "follows the
+     * step's `evidence`"). The webview does not send it — the student does not pick the kind of
+     * evidence, the step decides it.
      */
     stepEvidenceType?: EvidenceType;
   },
@@ -261,9 +264,9 @@ export function learningEventRequest(
     actor: spec.actor,
     context: { week: ctx.week, step_id: ctx.step_id, task: ctx.task, module_version: ctx.module_version },
   };
-  // `/2` 검증기는 학습 kind 전부에 evidence_type 을 요구한다. kind 표가 정하지 않는
-  // 것은 단계가 정하고, 둘 다 없으면 **거절한다**. 여섯 중 하나를 골라 넣지 않는다
-  // (SX-18 부정 조건: "evidence_type 없는 이벤트를 여섯 중 하나로 추정하지 않는다").
+  // The `/2` validator requires evidence_type on every learning kind. What the kind table does
+  // not set, the step sets; when neither has it, we **reject**. We do not pick one of the six
+  // (SX-18 negative condition: "do not guess one of the six for an event with no evidence_type").
   const evidenceType = spec.evidence_type ?? ctx.stepEvidenceType;
   if (!evidenceType) return { ok: false, code: "missing_evidence_type" };
   draft.evidence_type = evidenceType;
@@ -274,24 +277,24 @@ export function learningEventRequest(
     if (value === undefined || value === null) continue;
     if (field === "student_text") {
       const text = String(value).trim();
-      // 공백만 보낸 것은 "적었다" 가 아니다. 대신 채워 주지 않는다.
+      // Sending only whitespace is not "wrote it". We do not fill it in on their behalf.
       if (text.length === 0) return { ok: false, code: "missing_student_text" };
       draft.student_text = text.slice(0, 2000);
       continue;
     }
-    // `source_state` 등 좁은 리터럴 타입 칸이 섞여 있다. 값의 **정당성**은 `/2`
-    // 검증기가 이름을 붙여 거절하므로(`invalid_source_state`), 여기서 두 벌로
-    // 검사하지 않는다 — 규칙이 두 곳에 있으면 갈라진다.
+    // Narrow literal-type fields like `source_state` are mixed in here. Whether a value is
+    // **legitimate** is rejected by name in the `/2` validator (`invalid_source_state`), so we
+    // do not run a second copy of that check here — a rule kept in two places splits.
     (draft as Record<string, unknown>)[field] = value;
   }
 
-  // kind 표의 **모든** 필수 칸을 본다. `student_text` 하나만 보던 판을 넓힌 이유:
-  // `/2` 검증기는 `decision_revised` 에 `decision{from,to}` 와 비어 있지 않은
-  // `evidence_refs[]` 를 요구한다. 여기서 통과시키면 저장은 되고 **다음 읽기에서**
-  // 배치 전체가 거절된다 — 한 칸 빠진 것 때문에 그 자리의 기록이 통째로 날아간다.
-  // 막을 거면 만드는 자리에서 막는다.
+  // Look at **every** required field in the kind table. Why this widened from checking only
+  // `student_text`: the `/2` validator requires `decision{from,to}` and a non-empty
+  // `evidence_refs[]` on `decision_revised`. Let it through here and it saves, and then **on the
+  // next read** the whole batch is rejected — one missing field and every record in that spot is
+  // gone. If we are going to block it, block it where it is made.
   for (const field of spec.required) {
-    if (field === "context") continue; // 호스트가 방금 채웠다
+    if (field === "context") continue; // the host just filled it in
     if (draft[field] === undefined) {
       return { ok: false, code: field === "student_text" ? "missing_student_text" : `missing_${field}` };
     }
@@ -299,17 +302,17 @@ export function learningEventRequest(
   if (Array.isArray(draft.evidence_refs) && draft.evidence_refs.length === 0) {
     return { ok: false, code: "missing_evidence_refs" };
   }
-  // SX-46 부정 조건 — `real` 은 호스트가 혼자 쓸 수 있는 낱말이 아니다. 출처가
-  // 있거나 실행된 결과가 묶여 있어야 한다. 검증기도 같은 규칙으로 거절하지만
-  // (`missing_provenance`), 저장하고 나서 다음 읽기에 터지게 두면 학생이 적은 것이
-  // 통째로 사라진다. 만드는 자리에서 이름을 붙여 막는다.
+  // SX-46 negative condition — `real` is not a word the host gets to use on its own. There has
+  // to be a provenance, or an executed result tied to it. The validator rejects on the same rule
+  // (`missing_provenance`), but letting it save and blow up on the next read makes everything
+  // the student wrote disappear. Block it where it is made, by name.
   if (draft.source_state === "real" && !hasProvenance(draft) && draft.result_ref === undefined) {
     return { ok: false, code: "missing_provenance" };
   }
   return { ok: true, event: draft };
 }
 
-/** 세 칸이 모두 실제로 적혀 있는가. `미기록` 은 적은 것이 아니다(SX-20). */
+/** Are all three fields actually written in? `"미기록"` does not count as written (SX-20). */
 function hasProvenance(draft: Record<string, unknown>): boolean {
   const p = draft.provenance;
   if (typeof p !== "object" || p === null) return false;

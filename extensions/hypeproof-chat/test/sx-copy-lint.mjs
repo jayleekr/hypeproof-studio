@@ -1,25 +1,32 @@
-// 카피 lint — 순수 판정 함수. SX-11(대화 설계 5상황) · SX-12(언어 규칙 5개와 문구 원칙 5쌍).
+// Copy lint — a pure judgement function. SX-11 (5 conversation-design situations) ·
+// SX-12 (5 language rules and 5 phrasing-principle pairs).
 //
-// 계약의 정본: docs/requirements/studio-learning-experience.md SX-11 · SX-12.
-// 반례·정례의 정본: docs/design/ui-philosophy-2026-09-18.md §10 표와 Appendix 표.
-// 이 파일은 그 목록을 **집행만** 한다. 문장을 새로 짓지 않는다.
+// Canonical source of the contract: docs/requirements/studio-learning-experience.md
+// SX-11 · SX-12.
+// Canonical source of the counter-examples and examples:
+// docs/design/ui-philosophy-2026-09-18.md §10 table and Appendix table.
+// This file **only enforces** that list. It does not write new sentences.
 //
-// sx-audit.mjs 와 무엇이 다른가:
-//   sx-audit   화면에 **있으면 안 되는 문자열·수치**를 센다 (점수·등급·배지).
-//   여기       문장의 **형태**를 본다 — 사람을 평가하는 문형인가, 학생 대신 결정을
-//              확정하는 문형인가. 같은 낱말이 없어도 걸린다.
+// How this differs from sx-audit.mjs:
+//   sx-audit   counts the **strings and numbers that must not be on screen**
+//              (scores, grades, badges).
+//   here       looks at the **shape** of the sentence — is it a sentence pattern
+//              that evaluates a person, or one that settles a decision on the
+//              student's behalf. It is caught even when the same words are absent.
 //
-// 왜 형태를 보는가. §12 의 요구는 "평가형 형용사 대신 관찰 가능한 행동", "'당신은
-// ~한 사람' 대신 '이번 작업에서는 ~가 관찰됐다'" 다. 금지어 목록만으로는 "문제 정의
-// 역량이 낮습니다" 를 잡아도 "당신은 검증에 약한 편이군요" 를 놓친다.
+// Why look at shape. §12's requirement is "평가형 형용사 대신 관찰 가능한 행동",
+// "'당신은 ~한 사람' 대신 '이번 작업에서는 ~가 관찰됐다'". A banned-word list alone
+// catches "문제 정의 역량이 낮습니다" but misses "당신은 검증에 약한 편이군요".
 //
-// 한계와 그 처리 (harness_undecided 로 기록):
-//   이 lint 는 **한국어 문형 규칙**이고 자연어 이해가 아니다. 반례 목록 밖의 새로운
-//   평가 문형은 놓친다. 그래서 이 lint 의 통과는 "나쁜 문형이 없다" 가 아니라
-//   "알려진 나쁜 문형이 없다" 는 뜻이고, SX-T15·T18 의 사람 원문 검토를 대신하지
-//   않는다. 검사 결과에 그 사실을 `covers` 로 실어 보낸다.
+// Limits and how they are handled (recorded as harness_undecided):
+//   This lint is a set of **Korean sentence-pattern rules**, not natural-language
+//   understanding. It misses new evaluative sentence patterns outside the
+//   counter-example list. So a pass from this lint does not mean "there is no bad
+//   sentence pattern", it means "there is no known bad sentence pattern", and it
+//   does not replace the human review of the source text in SX-T15 · T18. The
+//   check result carries that fact along as `covers`.
 
-/** §10 "나쁜 UX" 다섯 문장. 코치 응답이 이 형태로 끝나면 실패한다(SX-11). */
+/** The five §10 "나쁜 UX" sentences. A coach response that lands in this shape fails (SX-11). */
 export const BAD_UX_SENTENCES = [
   { id: "define_for_student", text: "이 문제를 이렇게 정의하세요." },
   { id: "perfect_ship_it", text: "완벽합니다. 배포하세요." },
@@ -28,7 +35,7 @@ export const BAD_UX_SENTENCES = [
   { id: "capability_improved", text: "검증 역량이 향상되었습니다." },
 ];
 
-/** Appendix "피한다" 다섯 문장. 어떤 화면 문구도 이 형태면 실패한다(SX-12). */
+/** The five Appendix "피한다" sentences. Any screen copy in this shape fails (SX-12). */
 export const AVOID_SENTENCES = [
   { id: "framing_low", text: "문제 정의 역량이 낮습니다" },
   { id: "verify_score", text: "검증 점수 62점" },
@@ -37,7 +44,7 @@ export const AVOID_SENTENCES = [
   { id: "ai_skilled", text: "AI 활용 능숙" },
 ];
 
-/** Appendix "쓴다" 다섯 문장. 양성 대조군 — 이것들이 걸리면 계측기가 너무 엄격하다. */
+/** The five Appendix "쓴다" sentences. Positive control — if these get caught, the instrument is too strict. */
 export const PREFERRED_SENTENCES = [
   "이번 작업에서는 완료 기준이 아직 적히지 않았어요.",
   "AI 결과를 원자료와 비교하고 수정 후 다시 확인했습니다.",
@@ -47,8 +54,9 @@ export const PREFERRED_SENTENCES = [
 ];
 
 /**
- * 문형 규칙. 낱말 하나로 판정하지 않는다 — memory "Korean regex single-char trap"
- * (맨 /색/ 이 "검색" 을 잡았다). 평가 낱말은 **평가 대상과 붙어 있을 때만** 잡는다.
+ * Sentence-pattern rules. Do not judge on a single word — memory "Korean regex
+ * single-char trap" (a bare /색/ matched "검색"). An evaluative word is caught
+ * **only when it sits next to the thing being evaluated.**
  */
 export const COPY_RULES = [
   {
@@ -100,11 +108,11 @@ export const COPY_RULES = [
 const globalize = (re) => new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`);
 
 /**
- * 학생·강사에게 보이는 문구 한 덩어리를 판정한다.
+ * Judges one chunk of copy that students and instructors see.
  *
  * @param {string} text
  * @param {object} [opts]
- * @param {number} [opts.minLength=1] 이보다 짧으면 empty_region 실패(규칙 4).
+ * @param {number} [opts.minLength=1] Shorter than this is an empty_region failure (rule 4).
  * @returns {{ok:boolean, findings:Array, covers:string}}
  */
 export function lintCopy(text, opts = {}) {
@@ -137,7 +145,7 @@ export function lintCopy(text, opts = {}) {
   return { ok: findings.length === 0, findings, covers };
 }
 
-/** 코치 응답 시료가 §10 "나쁜 UX" 문장을 **그대로** 담고 있는가. 문자열 동일 비교. */
+/** Does a coach-response sample carry a §10 "나쁜 UX" sentence **verbatim**? Exact string comparison. */
 export function containsBadUxSentence(text) {
   const source = String(text ?? "");
   return BAD_UX_SENTENCES.filter((s) => source.includes(s.text)).map((s) => s.id);

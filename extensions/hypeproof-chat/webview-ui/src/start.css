@@ -1,6 +1,7 @@
-/* SX-49: --studio-* 는 --hp-* 의 별칭이다. 선택자는 그대로 두고 값만 토큰을 가리킨다
- * (설계 문서 §디자인 시스템 "기존 스타일 이행"). 여섯 값은 tokens.css 와 문자 그대로
- * 같은 색이므로 렌더 결과는 바뀌지 않는다. 값의 정본은 tokens.css 하나다. */
+/* SX-49: --studio-* are aliases of --hp-*. The selectors stay as they are and only the
+ * values point at the tokens (design doc §디자인 시스템 "기존 스타일 이행"). The six
+ * values are character-for-character the same colors as in tokens.css, so the render
+ * result does not change. tokens.css is the single canonical source for the values. */
 .studio-start,.studio-disconnected {
   --studio-bg:var(--hp-bg);
   --studio-panel:var(--hp-panel);
@@ -383,8 +384,9 @@
 .studio-entry-options { display: grid; gap: 12px; }
 .studio-secondary { background: transparent; color: var(--studio-text); border-color: var(--studio-line); }
 .studio-secondary:hover:enabled { background: var(--studio-bg); }
-/* SX-04 — 동급 선택지. 둘 중 하나를 강조하지 않는다. 강조 버튼(Primary)은
- * 고른 뒤의 "코드 확인하기" 하나다. `.studio-primary` 의 배치만 물려받고 강조는 뺀다. */
+/* SX-04 — peer options. Neither of the two is emphasized. The emphasized button
+ * (Primary) is the single "코드 확인하기" that follows the choice. Inherits only
+ * `.studio-primary`'s layout, with the emphasis taken out. */
 .studio-choice {
   width:100%;
   border:1px solid var(--studio-line);

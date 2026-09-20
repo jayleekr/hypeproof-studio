@@ -247,24 +247,27 @@ export const gateCases = {
     learn("rc1", 8, "retest_confirmed", "action", { criterion_ref: "cs1", artifact_after: SHA_B, outcome: "match", result_ref: "r1" }),
   ]),
   /**
-   * P1-C / AE-37 — 확인이 끝난 **뒤에 기대 조건이 바뀐다.**
-   * 확인은 진짜로 있었던 일이므로 지우지 않고, 상태만 "재확인 필요" 로 간다.
+   * P1-C / AE-37 — the criterion changes **after** the confirmation is done.
+   * The confirmation really happened, so it is not erased; only the state moves
+   * to "재확인 필요".
    */
   criterion_changed_after_confirm: () => v2([
     ...gateCases.retest_same_criterion().events,
     learn("cs2", 7, "criterion_set", "criterion", said("글씨가 작아도 3초 안에 읽힌다")),
   ]),
   /**
-   * P1-C / AE-37 — 확인이 끝난 **뒤에 산출물이 또 바뀐다.**
-   * 확인은 그 시점의 개정본에 묶여 있었으므로 지금 개정본을 덮지 못한다.
+   * P1-C / AE-37 — the artifact changes again **after** the confirmation is done.
+   * The confirmation was bound to the revision as of that moment, so it cannot
+   * cover the current revision.
    */
   artifact_changed_after_confirm: () => v2([
     ...gateCases.retest_same_criterion().events,
     ev("f3", 7, "artifact", { sha256: SHA_C, text: "menu.html" }),
   ]),
   /**
-   * P1-C / SX-15 부정 — 프리뷰를 열고 도구를 돌린 것만으로는 재확인이 되지 않는다.
-   * `retest_confirmed` 가 없으면 아무리 많이 눌러도 "수정 후 미확인" 이다.
+   * P1-C / SX-15 negative — opening the preview and running tools is not a
+   * re-confirmation by itself. With no `retest_confirmed`, however many times it
+   * is clicked, it is "수정 후 미확인".
    */
   clicks_without_retest: () => v2([
     ...gateCases.change_without_retest().events,
@@ -274,9 +277,10 @@ export const gateCases = {
     ev("r2", 9, "tool_result", { tool_id: "check-2", outcome: "success", text: "opened", sha256: SHA_B }),
   ]),
   /**
-   * P1-C / SX-15 부정 — 확인 뒤에 **코치가** 기대 조건을 제안한다.
-   * 학생이 생각을 바꾼 것이 아니므로 재확인을 요구하지 않는다. actor 를 안 보면
-   * 코치가 말 한 마디 할 때마다 학생의 확인이 무효가 된다.
+   * P1-C / SX-15 negative — **the coach** proposes a criterion after the
+   * confirmation. The student did not change their mind, so no re-confirmation is
+   * demanded. Without looking at `actor`, every single remark the coach makes
+   * invalidates the student's confirmation.
    */
   coach_criterion_after_confirm: () => v2([
     ...gateCases.retest_same_criterion().events,
@@ -286,8 +290,9 @@ export const gateCases = {
     }),
   ]),
   /**
-   * P1-C / SX-16 — **두 번 고쳤다.** 변경마다 쌍이 하나씩 나와야 한다.
-   * 마지막 하나로 뭉뚱그리면 첫 번째 판단이 없었던 일이 된다.
+   * P1-C / SX-16 — **changed twice.** Each change must yield one pair.
+   * Lumping them into the last one makes the first judgement something that
+   * never happened.
    */
   two_changes: () => v2([
     ev("u1", 1, "user", { text: "급식 메뉴 화면 만들어 줘" }),
@@ -305,9 +310,10 @@ export const gateCases = {
     learn("rc2", 9, "retest_confirmed", "action", { criterion_ref: "cs1", artifact_after: SHA_C, outcome: "match" }),
   ]),
   /**
-   * P1-C / SX-16 — 고쳐 달라고 해 놓고 **확인하지 않은 채 또 고쳐 달라고 한다.**
-   * 첫 변경에는 짝지을 확인이 없다. 두 번째 확인을 첫 변경 것으로 끌어오면
-   * 학생이 보지도 않은 개정본을 "확인했다" 로 그리게 된다.
+   * P1-C / SX-16 — asks for a change and then **asks for another change without
+   * confirming.** The first change has no confirmation to pair with. Pulling the
+   * second confirmation over onto the first change would paint a revision the
+   * student never even looked at as "confirmed".
    */
   change_then_change: () => v2([
     ev("u1", 1, "user", { text: "급식 메뉴 화면 만들어 줘" }),
@@ -324,8 +330,8 @@ export const gateCases = {
     learn("rc2", 8, "retest_confirmed", "action", { criterion_ref: "cs1", artifact_after: SHA_C, outcome: "match" }),
   ]),
   /**
-   * P1-C / SX-16 부정 — 학생 수정본만 있고 **AI 초안이 없다.**
-   * 빈 비교를 만들지 않고 "AI 초안 없음" 으로 남겨야 한다.
+   * P1-C / SX-16 negative — there is only the student's revision and **no AI
+   * draft.** Do not build an empty comparison; leave it as "AI 초안 없음".
    */
   after_without_before: () => v2([
     ev("u1", 1, "user", { text: "내가 직접 만들어 볼게" }),

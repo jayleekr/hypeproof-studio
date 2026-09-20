@@ -3,9 +3,10 @@ import type { StartRequest, StartResponse } from "./startPageProtocol";
 // Import this file from both sides; do not redefine these types anywhere else.
 
 /**
- * #503 — `"tool"` 은 화면·영속화 전용 역할이다. 대화와 툴 실행이 하나의
- * 타임라인이 되면서 툴 한 줄도 `ChatMessage` 가 됐다. **모델에 보내는
- * 히스토리에는 절대 들어가지 않는다** — `chatTimeline.modelHistory()` 로 거른다.
+ * #503 — `"tool"` is a display/persistence-only role. Once the conversation and tool
+ * execution became one timeline, a tool line became a `ChatMessage` too. **It never
+ * enters the history sent to the model** — `chatTimeline.modelHistory()` filters it
+ * out.
  */
 export type ChatRole = "user" | "assistant" | "system" | "tool";
 
@@ -15,9 +16,9 @@ export interface ChatMessage {
   content: string;
   createdAt: number;
   /**
-   * #503 — `role: "tool"` 일 때만 채워진다. 툴 한 줄의 표시 내용
-   * (`🔧 Write(index.html) ✓`). `id` 는 SDK 의 tool_use id 라 running → done
-   * 갱신이 제자리에서 일어난다.
+   * #503 — filled in only when `role: "tool"`. The display content of a single tool
+   * line (`🔧 Write(index.html) ✓`). `id` is the SDK's tool_use id, so the
+   * running → done update happens in place.
    */
   tool?: { icon: string; label: string; state: "running" | "done" | "error" };
   /**
@@ -36,22 +37,23 @@ export interface ChatMessage {
    */
   images?: string[];
   /**
-   * #747 (AE-08) — 이 턴이 **실제로 어떤 이름으로 답했는지**.
+   * #747 (AE-08) — **the name this turn actually answered under**.
    *
-   * 없었을 때: 답변 줄이 전부 살아 있는 `coachName` 하나를 렌더했다
-   * (`ChatPanel.tsx` 의 `hps-msg-role`). 아동 코호트 둘 다 `user_names_it` 이라
-   * 아이가 수업 중간에 이름을 바꾸면 **그 전에 코치가 한 말까지 새 이름이 한
-   * 것으로 소급해서 다시 쓰였다.** 증거 기반 관찰을 표방하는 제품에서 기록이
-   * 스스로를 고치는 상태였다.
+   * Without it: every answer line rendered the one live `coachName` (`hps-msg-role`
+   * in `ChatPanel.tsx`). Both child cohorts are `user_names_it`, so when a child
+   * renamed the coach mid-lesson, **even what the coach had said BEFORE that was
+   * retroactively rewritten as the new name's words.** In a product that claims
+   * evidence-based observation, the record was editing itself.
    *
-   * 값의 정의는 "지금 화면에 뜬 이름" 이 아니라 **그 턴을 돌릴 때 런타임에
-   * 넘긴 바로 그 문자열** 이다 — SDK 경로는 `coachName`, proxy 경로는
-   * `x-hps-coach-name` 으로 나간 값과 같다. 턴 도중에 이름이 바뀌는 경우
-   * 모델이 자기를 뭐라고 알고 답했는지가 기록에 남아야 하기 때문이다.
+   * The value is defined as **the exact string handed to the runtime when that turn
+   * ran**, not "the name currently on screen" — the same value that went out as
+   * `coachName` on the SDK path and as `x-hps-coach-name` on the proxy path. When
+   * the name changes mid-turn, what the model believed itself to be called while it
+   * answered has to survive in the record.
    *
-   * 없으면 살아 있는 이름으로 렌더한다 — 이 변경 이전에 쓰인 줄과 아직
-   * 스트리밍 중인 말풍선이 그 경로를 탄다. **백필하지 않는다.**
-   * `user`·`tool` 줄에는 절대 붙이지 않는다.
+   * Absent → render with the live name; lines written before this change and a
+   * bubble still streaming take that path. **It is not backfilled.** It is never
+   * attached to a `user` or `tool` line.
    */
   assistantName?: string;
 }
@@ -59,7 +61,7 @@ export interface ChatMessage {
 /**
  * #173 — Source attached to an assistant message. `tier` (1–4) is computed
  * server-side from the URL so the chip palette is consistent across clients.
- * 1 학회·edu·gov, 2 논문·DOI, 3 제조사 공식, 4 블로그·유튜브·기타.
+ * 1 academic society·edu·gov, 2 paper·DOI, 3 official manufacturer, 4 blog·YouTube·other.
  */
 export interface Citation {
   url: string;
@@ -137,14 +139,16 @@ export interface ResolvedProfile {
   model_selection?: {
     revision: 'hps-model-selection/1'; runtime: 'proxy' | 'agent-sdk'; provider: string;
     default: string; source: 'profile' | 'lesson';
-    // `provider` 는 **cross-provider 코호트에서만** 실려 온다
-    // (`worker/src/lib/lesson-model-policy.ts:57` — `crossProviderEnabled(profile)` 일 때만 넣는다).
-    // 그 바깥에서는 상위 `provider` 필드 하나가 좌석 전체를 설명하므로 선택지별로 중복하지 않는다.
+    // `provider` arrives **only for a cross-provider cohort**
+    // (`worker/src/lib/lesson-model-policy.ts:57` — it is added only when
+    // `crossProviderEnabled(profile)`). Outside that, the one top-level `provider`
+    // field describes the whole seat, so it is not duplicated per choice.
     //
-    // 이 필드가 빠져 있던 동안 깨지는 것은 없었다 — 웹뷰는 `alias`/`label` 만 렌더한다.
-    // 문제는 **타입을 읽은 사람이 "서버는 provider 를 보내지 않는다" 고 결론낸다**는 것이고,
-    // 그러면 선택지에 공급자를 표시하려는 다음 변경이 이미 오고 있는 값을 못 보고 서버부터
-    // 고치려 든다. 서버가 보내는 것은 타입에 있어야 한다.
+    // Nothing broke while this field was missing — the webview renders only
+    // `alias`/`label`. The problem is that **someone reading the type concludes "the
+    // server does not send provider"**, and then the next change that wants to show
+    // the provider on a choice cannot see the value already arriving and goes off to
+    // fix the server first. What the server sends belongs in the type.
     choices: Array<{
       alias: string; id: string; label: string;
       provider?: string;
@@ -159,11 +163,12 @@ export interface ResolvedProfile {
       schema: 'hps-session-design/1'; title: string; audience: string;
       duration_minutes: number; objective: string; prerequisites: string; starter: string;
       /**
-       * `help` (#1008) 와 `ui`/`evidence`/`gate` (SX-56) 는 **선택 키**이고 서비스가
-       * 실제로 실어 보낸다(`worker/test/lesson-help-mode.test.mjs`,
-       * `worker/test/session-design-learning.test.mjs` 가 `/v1/profile` 응답에서
-       * 확인한다). 타입이 서버가 보내는 것을 숨기면, 다음 변경이 이미 오고 있는 값을
-       * 못 보고 서버부터 고치려 든다 — `model_selection.provider` 가 그랬다.
+       * `help` (#1008) and `ui`/`evidence`/`gate` (SX-56) are **optional keys**, and
+       * the Service really does send them (`worker/test/lesson-help-mode.test.mjs`
+       * and `worker/test/session-design-learning.test.mjs` confirm it on the
+       * `/v1/profile` response). When the type hides what the server sends, the next
+       * change cannot see the value already arriving and goes off to fix the server
+       * first — which is what happened with `model_selection.provider`.
        */
       steps: Array<{
         id: string; title: string; instructions: string; hint: string; acceptance: string;
@@ -171,11 +176,13 @@ export interface ResolvedProfile {
         ui?: string; evidence?: string; gate?: string;
       }>;
       /**
-       * SX-55~58 — 주차·미션·완료 조건·관찰 항목·금지 목록. 6주 커리큘럼은 이 칸을
-       * 채운 데이터 파일 여섯 개다. 정의와 검증은 `worker/src/lib/learning-design.ts`.
+       * SX-55~58 — week, mission, completion conditions, observation items, forbidden
+       * list. The 6-week curriculum is six data files filling this slot. Definition
+       * and validation: `worker/src/lib/learning-design.ts`.
        *
-       * `observe` 는 여기 타입에 **두지 않는다.** 학생 화면이 읽을 것이 아니고
-       * (설계 §세션 설계 파일 "학생에게 보이지 않는다"), 타입에 두면 누군가 그린다.
+       * `observe` is **kept out of** this type. It is not for the student's screen to
+       * read (design §세션 설계 파일: "not shown to the student"), and if it is in the
+       * type someone will render it.
        */
       learning?: {
         week: number;
@@ -229,7 +236,7 @@ export interface ResolvedProfile {
   minor_cohort?: boolean;
   // Drives chat-panel tone (game vs search-webapp UI copy) (#159).
   game?: { template_tier: string };
-  /** kids-quest — 사전 완성 세상 목록 (GET /v1/worlds/:id 로 HTML). */
+  /** kids-quest — the list of pre-built worlds (GET /v1/worlds/:id returns the HTML). */
   worlds?: Array<{ id: string; guest: string; emoji: string; chip: string; aliases: string[]; line?: string }>;
   // #282 — provider-hosted tools the cohort profile opted into (sourced from the
   // worker, not inferred client-side). Drives which Agent SDK tools the coach may
@@ -262,7 +269,7 @@ export interface ResolvedProfile {
   // "proxy"). Absent → proxy. The client ORs this with the machine-scoped
   // setting; either can select agent-sdk, and canUseTool still gates tools.
   coach_runtime?: "proxy" | "agent-sdk";
-  /** #596 — 세션 로그 업로드 opt-in. 클라는 UI 노출 판단에만 쓴다(강제는 서버). */
+  /** #596 — session-log upload opt-in. The client uses it only to decide UI exposure (the server enforces). */
   analytics?: { upload_session_logs?: boolean };
 }
 
@@ -299,9 +306,10 @@ export interface SuggestionChip {
 export type WebviewMessage = (
   | {type:'saveActivityDraft';activityId:string;draft:import('./activityDraft').ActivityDraft;nonce?:string}
   /**
-   * #897 (VO-01) — 음성 capability 프로브의 **원시 관측**. 판정을 담지 않는다:
-   * 웹뷰는 재고, 판정은 호스트의 voiceCapabilityHelpers 가 한다. 관측과 판정을
-   * 같은 곳에서 하면 "못 쟀다" 와 "재서 막혔다" 가 섞인다.
+   * #897 (VO-01) — the **raw observation** from the voice capability probe. It
+   * carries no verdict: the webview measures, the host's voiceCapabilityHelpers
+   * judges. Observing and judging in the same place mixes up "could not measure"
+   * with "measured, and it is blocked".
    */
   | { type: 'voiceCapabilityProbeResult'; probeId: string;
       observations: import('./voiceCapabilityHelpers').VoiceProbeObservations }
@@ -310,19 +318,20 @@ export type WebviewMessage = (
   | {type:'requestBudget';note:string}
   | { type: 'observationOpen' }
   /**
-   * SX-45 규칙 2 — 학습 이벤트는 **웹뷰 폼 제출**만 만든다. 호스트는 이 메시지를
-   * 받은 자리에서만 `learningEventRequest(..., {sender:"webview-form"})` 를 부르고,
-   * 코치 스트림 콜백에서는 부르지 않는다. `actor` 와 `context` 는 웹뷰가 보내지
-   * 않는다 — 보내도 호스트가 버린다.
+   * SX-45 rule 2 — a learning event is made **only by a webview form submission**.
+   * The host calls `learningEventRequest(..., {sender:"webview-form"})` only where it
+   * receives this message, and never from a coach stream callback. The webview does
+   * not send `actor` or `context` — and if it does, the host throws them away.
    */
   | { type: 'learningEvent'; draft: { kind: string } & Record<string, unknown>; stepId?: string }
-  /** D 서랍 열림 상태. 보기 상태이므로 웹뷰가 소유하고, 호스트는 기록만 한다. */
+  /** The open state of drawer D. A view state, so the webview owns it and the host only records it. */
   | { type: 'learningDrawer'; open: boolean }
   /**
-   * SX-14 — "완료" 를 눌렀다. **웹뷰의 disabled 는 근거가 아니다**: 호스트가
-   * `acceptSubmit()` 으로 게이트를 다시 판정하고, 통과하지 못하면 거절한다.
-   * 요구 문서의 부정 조건("키보드나 API 직접 호출로 완료를 보내도 거부한다")이
-   * 바로 이 재판정을 말한다.
+   * SX-14 — "완료" was pressed. **The webview's disabled state is not evidence**:
+   * the host re-judges the gate with `acceptSubmit()` and refuses when it does not
+   * pass. The requirement document's negative condition ("sending a completion by
+   * keyboard or by calling the API directly is still refused") means exactly this
+   * re-judgment.
    */
   | { type: 'submitTask'; task: string }
   | { type: 'observationCancel' }
@@ -349,12 +358,13 @@ export type WebviewMessage = (
   | { type: "previewReady" }                // from preview webview only
   | { type: "openExternal"; url: string }   // #173 — citation chip click → host opens browser
   /**
-   * "갤러리에 올리기" — 지금 열려 있는 세상을 lab 갤러리로 보낸다.
+   * "갤러리에 올리기" — sends the world currently open to the lab gallery.
    *
-   * 웹뷰는 **아무것도 실어 보내지 않는다.** 어떤 세상인지도, 누구 것인지도
-   * 호스트가 안다(열린 세상 id + 시크릿 저장소의 토큰 + 작업 폴더의 index.html).
-   * 웹뷰가 HTML 을 들고 있지 않은 것이 여기서는 오히려 규약이다 — 화면에 있는
-   * 것이 아니라 **디스크에 저장된 것**이 올라가야 한다.
+   * The webview **carries nothing with it.** Which world it is and whose it is are
+   * both known to the host (the open world id + the token in secret storage + the
+   * index.html in the work folder). The webview NOT holding the HTML is the contract
+   * here rather than an oversight — what goes up must be **what is saved on disk**,
+   * not what is on screen.
    */
   | { type: "publishToGallery" }
   // Trace signals (#9). Webview fires; host forwards via POST /v1/trace/event.
@@ -391,13 +401,14 @@ export type HostMessage = (
   | {type:'inputRejected';text:string;images?:string[]}
   | {type:'activityFreeze';frozen:boolean;nonce?:string}
   | {type:'activityDraftError';error:string}
-  /** #897 (VO-01) — 프로브 실행 요청. 명령으로만 발생한다(활성화 시점 아님). */
+  /** #897 (VO-01) — a request to run the probe. Raised only by a command, never at activation time. */
   | { type: 'probeVoiceCapability'; probeId: string }
   | { type: 'observationState'; assessedEventCount?: number; learningPath?: {title:string;url:string;reason:string} | null; batch: import('./nativeObservationContract').ObservationBatch | null; error: string | null; findings?: import('./nativeObservationContract').ObservationFinding[] }
   /**
-   * SX-14·15·17 — 호스트가 계산한 학습 상태. **웹뷰는 이것을 다시 계산하지 않는다**
-   * (설계 §정보 구조 "호스트·웹뷰·워커의 경계"). 완료 CTA 비활성도 `complete.ok` 를
-   * 그대로 그린다. 게이트 결과는 저장하지 않으므로 이 메시지는 매번 새로 계산된 값이다.
+   * SX-14·15·17 — the learning state the host computed. **The webview does not
+   * recompute it** (design §정보 구조 "호스트·웹뷰·워커의 경계"). The disabled
+   * Complete CTA also just draws `complete.ok` as given. The gate result is never
+   * stored, so this message always carries a freshly computed value.
    */
   | { type: 'learningState'; state: import('./learningStateHelpers').LearningStatePayload }
   | StartResponse
@@ -406,12 +417,14 @@ export type HostMessage = (
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }
   | { type: "streamCitations"; streamId: string; citations: Citation[] }  // #173
-  // SX-59 — 역량 점수를 웹뷰로 흘리던 호스트 메시지(#204)는 제거됐다. 점수는 작업 중
-  // 화면에 어떤 모양으로도 가지 않는다. `AssetScoreChunk` 타입은 위에 **남아 있다** —
-  // 프록시 SSE 파서가 워커의 `asset_score` 청크를 계속 읽고 버려야 하기 때문이다
-  // (`proxyClient.ts`, `test/proxy-client-asset-score.smoke.mjs`).
-  // 메시지 이름을 여기 다시 적지 않는다: `test/sx-legacy-score-removed.smoke.mjs`
-  // 가 이 파일에서 그 이름의 부재를 검사한다.
+  // SX-59 — the host message that used to leak capability scores to the webview
+  // (#204) has been removed. A score reaches the working screen in no shape at all.
+  // The `AssetScoreChunk` type above **stays** — the proxy SSE parser still has to
+  // keep reading and discarding the worker's `asset_score` chunk (`proxyClient.ts`,
+  // `test/proxy-client-asset-score.smoke.mjs`).
+  // The message name is deliberately not written here again:
+  // `test/sx-legacy-score-removed.smoke.mjs` checks this file for the absence of
+  // that name.
   | { type: "streamEnd"; streamId: string }
   // #497 — user pressed Stop. Distinct from streamEnd (the turn did NOT finish)
   // and from streamError (nothing went wrong — the user asked for this, so no
@@ -420,13 +433,15 @@ export type HostMessage = (
   | { type: "streamStopped"; streamId: string }
   // #278 Phase 3 — agentic browser tool loop action log (auto-run + log, no
   // modal). One line per tool call; `state` flips running → done/error.
-  // #503 — 채널이 하나라 도착 순서가 곧 발생 순서다. 웹뷰는 이 줄을 `streamChunk`
-  // 와 **같은 배열**에 끼워 넣어 [말풍선] → [툴] → [말풍선] 을 만든다. `at` 은 SDK
-  // 가 실어 보낸 자기 시각(ms, 없으면 호스트 시계) — 영속화된 줄의 createdAt.
+  // #503 — there is one channel, so arrival order IS occurrence order. The webview
+  // splices this line into the **same array** as `streamChunk` to build
+  // [bubble] → [tool] → [bubble]. `at` is the SDK's own timestamp as it sent it (ms;
+  // the host clock when absent) — the createdAt of the persisted line.
   | { type: "toolLog"; streamId: string; id: string; icon: string; label: string; state: "running" | "done" | "error"; at?: number }
-  // #308 — "페이지를 코치에게" 완료 안내. VS Code 알림 토스트를 띄우면 통합
-  // 브라우저가 "Paused due to Notification"으로 멈추므로(코어 동작), 토스트 대신
-  // 채팅 패널 인라인 상태줄로 알린다.
+  // #308 — the "페이지를 코치에게" completion notice. Raising a VS Code notification
+  // toast stops the integrated browser with "Paused due to Notification" (core
+  // behaviour), so this is announced on the chat panel's inline status line instead
+  // of a toast.
   | { type: "pageAttached"; label: string }
   // #320 — AI disclosure notice (Anthropic Usage Policy: consumer-facing chat
   // must disclose "you are interacting with AI" at minimum at session start).
@@ -440,21 +455,22 @@ export type HostMessage = (
   // a data URL to attach to the next turn — making "drag a screenshot in" work
   // WITH VS Code's drop behavior instead of fighting it. image_paste-gated.
   | { type: "attachImage"; dataUrl: string; name: string }
-  // #649 — 사전 완성 세상이 실제로 화면에 떴다. config 와 별개의 메시지인 이유:
-  // config 는 프로필이 바뀔 때만 오는데, 세상은 한 세션에서 여러 번 바뀐다.
-  // 웹뷰는 이걸로 친구 스트립의 "지금 열린 세상"을 강조한다(aria-pressed).
+  // #649 — a pre-built world actually came up on screen. Why it is a message
+  // separate from config: config arrives only when the profile changes, whereas the
+  // world changes several times within one session. The webview uses this to
+  // highlight the currently open world in the friend strip (aria-pressed).
   | { type: "worldOpened"; id: string; guest: string; emoji: string }
   /**
-   * "갤러리에 올리기" 의 결과. `state` 가 셋인 이유: 업로드는 몇 초가 걸리고,
-   * 그 동안 아무 표시가 없으면 아이가 버튼을 계속 누른다(그리고 그건 서버
-   * 레이트리밋에 걸린다). 시작할 때 `uploading` 을 먼저 보낸다.
+   * The result of "갤러리에 올리기". Why `state` has three values: the upload takes a
+   * few seconds, and with nothing shown during them a child keeps pressing the button
+   * (and that hits the server rate limit). `uploading` is sent first, at the start.
    */
   | {
       type: "publishResult";
       state: "uploading" | "done" | "error";
-      /** done 일 때 — 아이에게 그대로 보여줄 갤러리 주소. */
+      /** When done — the gallery URL, shown to the child exactly as it is. */
       url?: string;
-      /** error 일 때 — 서버가 만든 한국어 문구. */
+      /** When error — the Korean sentence the server produced. */
       message?: string;
     }
   | { type: "streamError"; streamId: string; error: string; requestId?: string; runbookUrl?: string }

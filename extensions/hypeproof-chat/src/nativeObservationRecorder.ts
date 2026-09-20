@@ -63,14 +63,15 @@ export class NativeObservationRecorder {
     return event;
   }
   /**
-   * 학습 이벤트 하나를 붙인다 (SX-44·45, P1-B).
+   * Appends one learning event (SX-44·45, P1-B).
    *
-   * `record()` 와 나눠 둔 이유가 규칙 자체다. `record()` 는 코치 스트림 콜백이
-   * 부르는 자리이고, 그 자리에서 학습 kind 가 만들어질 수 있으면 SX-45 규칙 2가
-   * 무의미해진다. 이 메서드는 **웹뷰 폼 제출을 받은 호스트 핸들러만** 부른다.
+   * Being split from `record()` IS the rule. `record()` is where the coach stream
+   * callbacks call in, and if a learning kind can be made from that seat, SX-45
+   * rule 2 means nothing. This method is called by **the host handler that received
+   * a webview form submission, and by nothing else**.
    *
-   * `draft` 는 이미 `learningEventRequest()` 를 통과한 것이다 — 여기서 actor 나
-   * context 를 다시 정하지 않는다. 한 곳에서만 정해야 두 곳이 갈라지지 않는다.
+   * `draft` has already passed `learningEventRequest()` — actor and context are not
+   * decided again here. They must be decided in one place so the two cannot diverge.
    */
   recordLearningEvent(draft: { kind: string } & Record<string, unknown>) {
     if (this.batch.format !== "hps-observation/2") throw Error("observation_format");
@@ -88,8 +89,8 @@ export class NativeObservationRecorder {
       task: String((draft.context as { task?: unknown } | undefined)?.task ?? ""),
       at: Date.now(),
       kind,
-      // 학습 이벤트의 본문은 `student_text` 다. `/1` 의 `text` 칸은 비워 두되
-      // 키 자체는 남긴다 — 검증기가 모든 이벤트에 `text` 를 요구한다.
+      // The body of a learning event is `student_text`. Leave `/1`'s `text` slot
+      // empty but keep the key itself — the validator requires `text` on every event.
       text: safe ?? "",
       assistance: "unknown",
     } as unknown as ObservationEvent;

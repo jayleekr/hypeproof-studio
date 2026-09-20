@@ -1,24 +1,26 @@
-// 영역 A — Mission header (SX-01 ~ SX-05).
+// Region A — Mission header (SX-01 ~ SX-05).
 //
-// 요구: docs/requirements/studio-learning-experience.md A. HOME
-// 설계: docs/design/studio-learning-experience.md §정보 구조 (영역 A)
+// Requirements: docs/requirements/studio-learning-experience.md A. HOME
+// Design: docs/design/studio-learning-experience.md §정보 구조 (region A)
 //
-// 이 화면이 하는 일은 하나다: **지금 무엇을 해야 하는지 잃지 않게 하는 것.**
-// 그래서 위에서 아래로 주차 → 미션 한 문장 → 지금 할 1~3개 action → 완료 조건 →
-// 남은 단계 순이고, 변화 기록 진입은 그 **아래에, 링크 크기로** 있다(SX-03).
-// 가장 큰 활자는 미션 문장이다 — 5초 회상 테스트(SX-T01)가 그것을 본다.
+// This screen does one thing: **keep you from losing track of what to do right now.**
+// So top to bottom it is week → one mission sentence → the 1–3 actions to do now →
+// completion conditions → steps remaining, and the growth-record entry sits **below
+// that, at link size** (SX-03).
+// The largest type is the mission sentence — the 5-second recall test (SX-T01) looks at it.
 //
-// 여기에 없는 것과 그 이유:
-//   · 점수·등급·퍼센트·배지 — SX-59. `test/sx-audit.smoke.mjs` 가 렌더 결과를 감사한다.
-//   · 진행률 카드 — SX-51. "남은 단계 3" 은 **문장**이지 숫자 카드가 아니다.
-//   · 해석 문장 — 해석은 회고와 변화 기록에서만 한다(SX-17).
+// What is not here, and why:
+//   · scores, grades, percentages, badges — SX-59. `test/sx-audit.smoke.mjs` audits the render result.
+//   · a progress card — SX-51. "남은 단계 3" is a **sentence**, not a number card.
+//   · interpretive sentences — interpretation happens only in the retrospective and the growth record (SX-17).
 //
-// 현재 단계를 웹뷰가 들고 있는 것은 **P0 한정**이다. 설계는 호스트가 진실을 갖고
-// `learningState` 로 내려보내라고 한다(§정보 구조 "호스트·웹뷰·워커의 경계"). 그
-// 상태 기계는 SX-55/P1-B 의 일이고, 아직 학습 이벤트가 없어 완료를 판정할 근거가
-// 없다. 그래서 P0 는 "어느 단계를 보고 있나" 라는 **보기 상태**만 두고, 완료 조건은
-// 전부 미확인(☐)으로 그린다. 확인 표시는 이벤트가 생기는 P1 이 채운다 —
-// 근거 없이 ✓ 를 그리는 것이 이 제품이 가장 하지 말아야 할 일이다.
+// The webview holding the current step is **P0-only**. The design says the host owns
+// the truth and pushes it down as `learningState` (§정보 구조 "호스트·웹뷰·워커의
+// 경계"). That state machine is SX-55/P1-B's job, and with no learning events yet there
+// is no basis for judging completion. So P0 keeps only a **view state** — "which step am
+// I looking at" — and draws every completion condition as unchecked (☐). The check marks
+// are filled in by P1, where the events come from — drawing a ✓ with no evidence is the
+// one thing this product must most avoid.
 
 import type { ResolvedProfile } from "../../src/protocol";
 import { actionsFrom, stepsRemaining, type LessonStep as Step } from "./missionHeaderLogic";
@@ -27,16 +29,16 @@ type Lesson = NonNullable<ResolvedProfile["lesson"]>;
 
 export interface MissionHeaderProps {
   lesson: Lesson | null;
-  /** 지금 보고 있는 단계 id. null 이면 첫 단계. */
+  /** The id of the step currently being viewed. null means the first step. */
   currentStepId: string | null;
   onSelectStep: (stepId: string) => void;
-  /** 현재 단계 과제를 코치에게 넣는다. 화면의 유일한 Primary CTA(SX-04). */
+  /** Feeds the current step's task to the coach. The screen's only Primary CTA (SX-04). */
   onStartStep: (step: Step) => void;
-  /** 변화 기록으로. 작은 링크 하나다(SX-03). */
+  /** To the growth record. A single small link (SX-03). */
   onOpenGrowth: () => void;
-  /** 스트리밍 중에는 Primary 가 busy 가 되고 두 번째 Primary 가 생기지 않는다(SX-04). */
+  /** While streaming the Primary goes busy and no second Primary appears (SX-04). */
   busy: boolean;
-  /** 활동 종류·이름. 헤더 안 작은 줄로 내려간다(설계 §정보 구조 영역 A). */
+  /** Activity kind and name. Demoted to a small line inside the header (design §정보 구조, region A). */
   activity: { label: string; name: string; verified: boolean } | null;
 }
 
@@ -55,16 +57,17 @@ export function MissionHeader(props: MissionHeaderProps) {
         <p className="hp-mission-week">{learning.week}주차</p>
       ) : null}
 
-      {/* 가장 큰 활자. 설계 파일에 미션이 없으면 빈 헤더가 아니라 없다고 말한다(SX-01 부정). */}
+      {/* The largest type. If the design file has no mission, say so instead of rendering an empty header (SX-01 negative). */}
       <h1 className="hp-mission-sentence">
         {learning?.mission ?? (content ? "미션이 정해지지 않았습니다." : "아직 연결된 수업이 없습니다.")}
       </h1>
 
       {activity ? (
-        // `aria-label="현재 활동"` 은 예전 `hps-activity-header` 가 갖고 있던 것이다.
-        // 이 줄을 미션 헤더 안 작은 줄로 옮기면서 라벨을 빠뜨렸더니 CI 의 실제 브라우저
-        // 검사(US-UI-DRAFT)가 `getByLabel('현재 활동')` 에서 끊겼다. 활동이 바뀐 것을
-        // 스크린 리더가 짚을 수 있어야 한다는 계약은 자리 이동과 무관하게 그대로다.
+        // `aria-label="현재 활동"` is what the old `hps-activity-header` carried.
+        // Moving this line into the mission header as a small line dropped the label, and
+        // CI's real-browser check (US-UI-DRAFT) broke at `getByLabel('현재 활동')`. The
+        // contract — a screen reader must be able to point out that the activity changed —
+        // is unchanged by the move.
         <p className="hp-mission-activity" aria-label="현재 활동">
           {activity.label} · {activity.name}
           {!activity.verified ? (
@@ -102,8 +105,8 @@ export function MissionHeader(props: MissionHeaderProps) {
         <ul className="hp-mission-completion" aria-label="이번 주차의 완료 조건">
           {learning.completion.map((item) => (
             <li key={item.id}>
-              {/* SX-50 — 상태는 색만으로 표현하지 않는다. 아이콘 + 문구를 함께 쓴다.
-                  P0 에는 판정할 이벤트가 없으므로 전부 미확인이고, 그 사실을 말한다. */}
+              {/* SX-50 — state is never expressed by color alone. Icon + wording together.
+                  P0 has no events to judge on, so everything is unchecked, and we say so. */}
               <span className="hp-mark" aria-hidden="true">☐</span>
               <span className="hp-mission-completion-text">{item.text}</span>
             </li>
