@@ -65,7 +65,7 @@ try {
   host.turnResult({ ok: true, runtime: 'proxy', sdkFallback: true }); host.artifactChanged(undefined, 'b'.repeat(64));
   const seatOf = async (id) => (await local.request(local.base + '/status')).json.seats.find((s) => s.seat_id === id);
   const until = async (fn, what) => { for (let i = 0; i < 100; i++) { const v = await fn(); if (v) return v; await new Promise((r) => setTimeout(r, 100)); } throw Error('timed out: ' + what); };
-  const s01 = await until(async () => { const s = await seatOf('S01'); return s?.step?.status === 'submitted' && s.error ? s : null; }, 'the host\'s own sync loop delivers the signals');
+  const s01 = await until(async () => { const s = await seatOf('S01'); return s?.step?.status === 'submitted' && s.error?.class === 'sdk_not_ready' && s.entry_stage === 'runtime_ready' ? s : null; }, 'the host\'s own sync loop delivers the signals'); // the connect-time token check reports first; wait for the turn's own signals
   assert.deepEqual([s01.entry_stage, s01.step.step_id, s01.step.actor, s01.error.class, s01.error.blocking, s01.attention !== 'blocked'], ['runtime_ready', 'build', 'student', 'sdk_not_ready', false, true], 'SDK fallback is reported, and is not a red fault because the turn went on');
   assert.deepEqual(s01.observes, { step: true, runtime: true, evidence: true }); assert.deepEqual(s01.evidence.latest.map((e) => [e.evidence_type, e.source_state, e.actor]).sort(), [['change', 'real', 'ai'], ['decision', 'self_reported', 'student']]);
   assert.ok(!JSON.stringify(s01).includes('예약 버튼'), 'no learner text rides the status channel'); ok('host: real sync delivers step, runtime, SDK-fallback and evidence with provenance');

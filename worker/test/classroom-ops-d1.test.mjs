@@ -11,7 +11,16 @@ let f;
 try {
   const db = await mf.getD1Database('HPS_DB');
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run(); };
-  for (let i = 0; i < 2; i++) for (const m of ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log']) await apply(readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), 'utf8'));
+  // The deploy order is rehearsed here on real local D1, with the same checker the runbook uses against a remote target
+  // (worker/scripts/classroom-ops-d1-check.mjs): nothing applied → half applied → all applied → applied again.
+  const { compare } = await import('../scripts/classroom-ops-d1-check.mjs'), files = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log'];
+  const present = async () => (await db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all()).results.map((r) => r.name);
+  let seen = compare(await present()); assert.equal(seen.none, true); assert.deepEqual(seen.next, files.map((m) => m + '.sql'), 'the checker lists every migration file of this feature, in order');
+  for (const m of files.slice(0, 5)) await apply(readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), 'utf8'));
+  seen = compare(await present()); assert.deepEqual([seen.all, seen.none, seen.out_of_order, seen.next[0]], [false, false, false, files[5] + '.sql'], 'an interrupted rollout says exactly where to continue');
+  for (let i = 0; i < 2; i++) for (const m of files) await apply(readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), 'utf8'));
+  seen = compare(await present()); assert.deepEqual([seen.all, seen.partial, seen.rows.flatMap((r) => r.not_additive)], [true, [], []], 'all applied, re-applied without error, and every statement is CREATE … IF NOT EXISTS');
+  assert.equal(compare((await present()).filter((n) => n !== 'classroom_erasure_log_state')).partial[0], '0021-classroom-erasure-log.sql', 'negative control: a half-created migration is reported, not counted as applied');
   await db.prepare('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, cohort_id TEXT, profile_id TEXT, starts_at TEXT, ends_at TEXT, ended_at TEXT)').run();
   f = await localOps({ binding: db });
   const seats = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }];

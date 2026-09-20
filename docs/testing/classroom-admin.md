@@ -346,3 +346,38 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 **한계:** SQLite와 메모리 R2에서의 순서 검증이다. 실제 D1/R2의 지연·부분 실패·Worker 중단은 staging 시험 항목이며 NOT RUN이다. `settled` 이전의 고아 객체는 어떤 열람 경로로도 읽히지 않지만(작업 `withdrawn`, digest 없음, 링크 폐기) 저장소에는 최대 한 tick(15분)+창(약 13분) 동안 존재할 수 있다.
 
+#### 실제 Mac GUI·SDK 실행 · 2026-09-20
+
+`e2e/classroom/mac-devhost.mjs prepare` → `e2e/classroom/mac-gui.mjs`. 설치된 앱(`/Applications`)은 읽기만 했고 실행·수정하지 않았다. 아래는 **합성 시험이 아니라 실제 창을 구동한 결과**이며, 무엇이 실제이고 무엇이 합성인지는 결과 파일의 `real`/`synthetic` 항목이 소유한다.
+
+| 구분 | 내용 |
+|---|---|
+| 실제 | Studio shell 프로세스(v0.1.16 **복사본**, ad-hoc 서명, 격리 user-data), extension host·webview(현재 소스 `c4fe3de`, bundle 해시 4개 일치), 명령 팔레트·알림, Agent SDK 0.3.207 JS(저장소 설치본에서 복사, package-lock 핀 일치·import 검증) + 네이티브 `claude` 바이너리(`HPS_SDK_BINARY`), 127.0.0.1 HTTP → 실제 Service 라우터 + SQLite, 실제 sync loop·명령 실행기, 실제 workspace 파일 |
+| 합성 | 계정·수업, **모델 공급자**(api.anthropic.com 자리에 정해진 SSE/400/무응답), 메모리 R2, in-memory secret storage |
+| 결과 10/10 PASS | 토큰 활성화(수업 패널 표시) → 팔레트에 1회용 코드 입력해 연결(알림, 보드 `token_verified`·connection active) → 학생 단계 버튼 → 보드 in_progress/submitted(자기보고) → 강사 확인(`confirmed`, 기기 보고값은 그대로) → 공급자 400 → 보드 blocking 오류·`runtime_failed` → 다음 실제 턴 성공으로 해제(`cleared`, SDK 경로 stream+tools 15) → **실행 중인 SDK 턴을 강사가 중지**(`run_stopped`) → 보존형 reset(`reset_ok`, 파일 2개 sha256 동일, 대화 유지, reset 뒤 턴 성공) → 새 코드로 재연결(이전 grant `revoked`, epoch 2) → 연결 끊기(파일 동일) |
+
+이 실행이 **찾아낸 결함 2건**(수정·회귀 추가, #1167; ①의 첫 수정은 늦게 돌아온 확인이 최신 신호를 덮는 순서 문제를 만들었고 F4 왕복 e2e가 잡아 ‘그 연결의 첫 보고일 때만’으로 좁혔다): ① 연결 전에 끝난 토큰 검증이 보드에 도달하지 않음 — 합성 시험은 연결 뒤에 검증을 호출해 실제 순서를 가렸다. ② 학생 알림에 `reset_runtime` 식별자가 그대로 노출. **관측 2건**(결함으로 판정하지 않음): 지속적인 5xx에서 실제 CLI가 재시도를 계속해 보드는 stall watchdog(기본 240초)까지 아무 신호도 받지 못한다 — 강사에게 ‘응답 없음’이 늦게 보인다는 뜻이며 watchdog 값은 운영 결정이다. 확장의 시작 시 업데이트 확인이 공개 release feed를 읽어 이 구버전 shell 복사본에 “새 버전 v0.1.56” 배너를 띄웠다(읽기 전용, 설치하지 않음).
+
+**이 실행이 증거가 아닌 것:** 현재 공식 release shell(v0.1.56)·설치/업데이트/서명·seed된 바이너리 경로, release의 registry vendoring, 실제 모델의 응답, 학교망, Windows, production/staging D1·R2. 공식 v0.1.56 ZIP은 내려받지 않았다(다운로드는 별도 승인 사항).
+
+#### migration 순서 리허설과 대상 확인 도구 · 2026-09-20
+
+`worker/scripts/classroom-ops-d1-check.mjs`(읽기 전용, 대상 이름과 uuid를 매번 요구)와 절차는 [`worker/DEPLOY.md`](../../worker/DEPLOY.md#remote-classroom-operations-751--staging-rehearsal-schema-order-flags-recovery)가 소유한다. 로컬 workerd D1에서 미적용 → 0011~0015만 적용(중단 지점 보고) → 전체 → 재적용, 절반만 만들어진 migration의 음성 대조군까지 PASS(`npm --prefix worker run test:classroom-ops:d1`). 확인한 사실: 이 저장소에는 `d1_migrations` 이력이 없고, `deploy-worker.yml`은 0011~0021을 몰랐으며(명시적 opt-in 입력 추가), staging 환경은 존재하지 않는다. **실제 Cloudflare 대상에 대한 실행은 NOT RUN.**
+
+#### 실제 모델·메일 제한 시험 준비 · 2026-09-20 (둘 다 NOT RUN — 계정·비용 승인 전)
+
+**모델.** `e2e/classroom/evaluator-trial.mjs`. 운영 경로(라우트·adapter·`validateDraft`)를 그대로 쓰고 기록만 합성이며, 사례마다 정답을 심었다(본인 기준 제시 / AI만 있는 기록 / 가상 사례 / 판단 변경 / 비밀값이 든 줄 / 빈약한 기록). 상한: 호출 8회(9번째 시도에서 프로세스 중단), 입력 60,000자/회, 출력 4,096 토큰/회 → Sonnet급 정가 기준 **최악 $2.72**, 이 사례들의 예상 실비 $0.10 미만. 중단 조건: 상한 초과, 200이 아닌 응답 2회, anthropic 외 호스트로의 요청. 키는 환경변수로만 읽고 출력하지 않으며, 키가 속한 API workspace에 별도 지출 한도를 걸 것을 전제로 한다. 채점기 자체의 대조군은 모델 없이 실행했다: 양성(`good`) 6/6 통과, 음성(`scores`, claim에 “85점, 상위 10%”)은 FAIL — 그리고 이 음성 대조군이 **글로 쓴 점수가 저장되던 결함**을 드러내 수정했다.
+
+| 판정 | 기준 |
+|---|---|
+| 기계 PASS | 6사례 모두: 심은 본인 발화가 근거로 인용됨, AI·가상 사례 문장이 학생 근거로 인용되지 않음, 비밀값이 든 줄 미인용, AI만 있는 기록은 호출 0·전부 미관찰, 점수·순위 표현 없음, 모든 인용이 기록 원문과 글자 단위로 일치 |
+| 사람 PASS | 관찰 주장마다 인용이 그 행동을 실제로 보여 주는가. 6사례 중 5 이상에서 근거 없는 주장 0, AI/가상 문장을 학생에게 귀속한 사례 0 |
+| FAIL → 활성화 보류 | 위 미달, 또는 실측 비용이 예상의 5배 초과 |
+
+**메일(Resend).** 계정 준비(사람): 발신 전용 **하위 도메인** 인증(DKIM·SPF 레코드는 Resend 화면이 제시), 그 도메인에 한정한 sending 전용 API key, webhook endpoint `https://<service>/v1/classroom/delivery-webhooks/resend`와 signing secret. Service 설정은 이름만: `wrangler secret put RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, vars `HPS_DELIVERY_PROVIDER=resend`·`HPS_DELIVERY_FROM`·`HPS_PUBLIC_BASE_URL`. 값은 문서·커밋·대화에 적지 않는다. 시험 수신자: 공급자의 시험 주소 `delivered@resend.dev`·`bounced@resend.dev`·`complained@resend.dev`와 운영자 본인 사서함 1~2개(합성 학생에 연결, 열람 확인 값 설정). 상한 10통, staging Service에서만.
+
+| 판정 | 기준 |
+|---|---|
+| PASS | ① 발송 직후 `provider_accepted`이며 화면이 ‘전달 완료’라고 하지 않음 ② delivered 주소는 webhook 뒤 `delivered`, bounced 주소는 `bounced` ③ 같은 승인으로 다시 눌러도 새 발송 0(Idempotency-Key) ④ 서명이 틀린 webhook은 401·상태 불변, 같은 event 재전송은 1회만 반영 ⑤ 실제 사서함에서 링크 → 확인 값 오답 → 정답 → 보고서, 5회 오답 잠금 ⑥ 철회 뒤 같은 링크는 404 |
+| 합성으로만 남는 것 | 공급자 timeout 뒤 결과 불명(`send_unknown`)은 실계정에서 강제할 수 없다 |
+

@@ -2168,6 +2168,15 @@
         },
         {
           "path": "e2e/classroom/README.md"
+        },
+        {
+          "path": "e2e/classroom/mac-gui.mjs"
+        },
+        {
+          "path": "e2e/classroom/evaluator-trial.mjs"
+        },
+        {
+          "path": "worker/scripts/classroom-ops-d1-check.mjs"
         }
       ]
     },
