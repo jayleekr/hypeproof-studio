@@ -600,7 +600,7 @@
       "inline_prefixes": [
         "SX"
       ],
-      "sha256": "2da58b8c979b3406b09688ad077b67bd1f45807414308213793a7a1966ee4ccd",
+      "sha256": "d41b8a55499baee011bcf2efebad8940521724c6f82ba8891878ff65aa194048",
       "owner": "jayleekr",
       "intent": "docs/intents/studio-learning-experience.md",
       "design": "docs/design/studio-learning-experience.md",

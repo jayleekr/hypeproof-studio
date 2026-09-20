@@ -78,7 +78,7 @@
 | SX-T25 | provenance. 누가·언제·어떤 상황(context)에서 말했는지가 모든 인용에 붙는지 | 인용 카드마다 actor·시각·context 3요소 · 누락 인용은 렌더되지 않고 "출처 없음"으로 표시 | 3요소 중 무엇이 필수인지 미정은 spec | 단위 + Electron e2e | SX-20 |
 | SX-T26 | source_state 라벨 고정. real / simulated / self_reported / unverified 4값의 UI 라벨과 데이터 값 대응 | 4값 모두 UI 문구가 다르고 데이터와 1:1 · 저장 후 값 변경 시도가 거부됨 · 라벨 없는 레코드 렌더 시 `unverified`로 표시하며 `real`로 승격하지 않음 | 승격이 일어나면 product | 단위 + Electron e2e | SX-21, SX-46 |
 | SX-T27 | 외부 근거 유형 구분. 링크·기사·규정·인터뷰 각각 저장 | 4유형이 구분 저장·표시 · 링크 자체는 근거가 아니라 출처로 분류 | 유형 분류 미정은 spec | 단위 | SX-22 |
-| SX-T28 | 선택 이유 한 줄 기본 UX. 추천 뒤 선택 시 이유 입력이 기본 노출·선택적 강제 여부 | 선택 화면에 이유 필드가 기본 노출 · 이유 없이 선택하면 `decision`이 `student_text` 없이 저장되되 "이유 없음"으로 표시 · 강제 설문 아님(NAT-03 유지) | 강제 여부 다툼은 spec | Electron e2e | SX-23 |
+| SX-T28 | 선택 이유 한 줄 기본 UX. 추천 뒤 선택 시 이유 입력이 기본 노출·선택적 강제 여부 | 선택 화면에 이유 필드가 기본 노출 · **이유가 비면 선택이 저장되지 않고 입력이 유지된다**(2026-09-20 결정) · 이미 대화에 이유가 있으면 그 발화를 재사용할 수 있고 새 폼을 강제하지 않는다(AE-35) | 강제 여부 다툼은 spec | Electron e2e | SX-23 |
 | SX-T29 | 팀 프로젝트 기여 구분. AI 기여·학생 판단·학생 수정이 같은 산출물에서 분리 기록 | actor별 기여가 분리되어 저장되고 "기여 분리" 보기에서 확인 · AI 기여가 학생 기여로 합산되지 않음 | 합산이 일어나면 product | 단위 + Electron e2e | SX-24, SX-45 |
 
 ## REFL · GROW (SX-T30~39)
@@ -107,7 +107,7 @@
 | SX-T42 | "개선 필요" 배지 남발. 모든 화면 | "개선 필요" 0건 · 현재 작업 상태와 다음 실험으로만 표현 | 잔존은 product | 렌더 DOM 감사 | SX-35 |
 | SX-T43 | 가상 데이터를 실적처럼 표시. simulated 시료를 metric·반응·매출 위치에 넣기 | simulated가 real과 같은 스타일·같은 집계에 들어가지 않음 · 가짜 결제가 매출로 합산되지 않음 · 라벨 없는 시료는 unverified 표시 | 합산은 product | 단위 + Electron e2e + 렌더 DOM 감사 | SX-21, SX-46, SX-58 |
 | SX-T44 | 모든 행동을 수치화. 클릭수·토큰수·체류시간·메시지수를 화면이나 판단 입력으로 쓰는지 | 학생·강사 화면에 이 4종 수치 0건 · 관측 레코드에 저장되더라도 능력 해석의 입력으로 쓰이지 않음(HC-06/07 유지) | 화면 잔존은 product | 렌더 DOM 감사 + 단위 | SX-39, SX-43 |
-| SX-T45 | 회고를 매 세션 팝업으로. 연속 3세션 시작·종료 | 세션 시작 시 회고 모달 0 · 세션 종료 시에도 모달이 아니라 inline 영역 · 회고 미작성이 다음 세션 진입을 막지 않음 | 모달 판정 선택자는 구현 후 확정 | Electron e2e | SX-26, SX-52 |
+| SX-T45 | 회고를 매 세션 팝업으로. 연속 3세션 시작·종료 | 세션 시작 시 회고 모달 0 · 세션 종료 시에도 모달이 아니라 inline 영역 · 회고 미작성이 다음 세션 진입을 막지 않음 · **건너뛰면 `reflection_skipped` 이벤트가 남는다**(그냥 없음이 아니다, 2026-09-20 결정) | 모달 판정 선택자는 구현 후 확정 | Electron e2e | SX-26, SX-52 |
 
 부정 테스트의 문자열 목록(계측기와 요구 문서가 같은 목록을 본다. 정본은 요구 문서 SX-35·SX-59):
 - 금지 라벨: 개선 필요 · 낮음/높음 · 상위 N% · 역량 부족 · AI 활용 고수 · 성장 점수
@@ -123,7 +123,7 @@
 | SX-T50 | 강사 화면 표시 항목과 금지 항목, 개입 CTA. 학생 2명(막힘 있음/없음) 시료로 강사 화면을 연다 | 표시: 진행 상태·학생 원문·막힌 지점·확인할 증거·실제/가상 여부 5종 · 금지: 점수 순위·채팅량/토큰량/체류시간·AI 의존도·성격/잠재력·코호트 랭킹 0건 · CTA는 질문 보내기 / 다시 보게 할 지점 표시 / 근거 확인·추가 관찰 필요 3종만이고 "답변하기"·"평가 완료"는 없다 · 강사 인증은 기존 `role: "issuer"` + `IssuerScope`(`worker/src/lib/instructor-auth.ts`)를 쓰고 새 역할을 만들지 않는다. 학습 근거 조회 경로와 학생 공유 범위 선택(MC-39)이 없으면 BLOCKED로 기록 | 조회 경로·공유 경로 부재는 BLOCKED(P4 전) · 금지 항목 잔존은 product | Electron e2e + Worker(조회 권한) + 렌더 DOM 감사 | SX-38, SX-39, SX-40 |
 | SX-T51 | 기관 정책 가드레일. 학생이 실제 인터뷰·결제·외부 링크를 다루는 시나리오 3개 | 각 시나리오에서 정책 확인 단계가 학생 판단을 대신하지 않고 강사 매개 경로로 연결 · 정책 미설정이면 해당 행동이 "미확인"으로 남고 real로 저장되지 않음 | 정책 내용 미정은 spec | Electron e2e | SX-41 |
 | SX-T52 | teacher_state 분리. unreviewed / confirmed / disputed 전이와 자동 판단의 독립 | 자동 판단이 teacher_state를 바꾸지 않음 · 강사만 confirmed/disputed 전이 · disputed 항목이 변화 기록의 패턴 입력에서 제외 | 전이 규칙 미정은 spec | 단위(상태 전이) + Worker | SX-42 |
-| SX-T53 | 필드 7개 스키마. actor·context·evidence_type·source_state·student_text·artifact_before/after·teacher_state | 7필드 스키마 검증이 있고 각 필드 누락 시료가 거부 · actor에 AI 추천이 student로 들어가는 시료가 거부 · 기존 `hps-observation/1`(`nativeObservationContract.ts`)의 `validateObservation` 확장으로 구현되었고 제2 검증기가 아님 | 제2 검증기를 만들면 product(SX-48 위반) | 단위 | SX-44, SX-45, SX-48 |
+| SX-T53 | 이벤트 필드 6개 스키마. actor·context·evidence_type·source_state·student_text·artifact_before/after (`teacher_state`는 이벤트 필드가 **아니다** — teacher_review record에서 계산한다, 2026-09-20 정정) | 6필드 스키마 검증이 있고 각 필드 누락 시료가 거부 · `teacher_state`를 실은 이벤트는 **거부** · actor에 AI 추천이 student로 들어가는 시료가 거부 · 기존 `hps-observation/1`(`nativeObservationContract.ts`)의 `validateObservation` 확장으로 구현되었고 제2 검증기가 아님 | 제2 검증기를 만들면 product(SX-48 위반) | 단위 | SX-44, SX-45, SX-48 |
 | SX-T54 | 이벤트 8종. problem_committed·criterion_set·test_observed·change_requested·retest_confirmed·external_feedback_received·decision_revised·reflection_submitted 각 1건 | 8종 모두 스키마 통과, 미정의 종류 거부 · `external_feedback_received`는 source_state 없이는 거부 · `retest_confirmed`는 선행 `change_requested` 없이는 거부 | 선후 관계 미정은 spec | 단위 | SX-47, SX-46 |
 | SX-T55 | 디자인 토큰 역할·상태 표현·숫자 카드·모달·학생 문장 우선. 토큰 6개가 설계 문서 값과 일치하는지, 상태가 아이콘+문구인지, 학습 화면 숫자 카드 수, 모달 사용처, 학생 원문의 시각 우선 | 토큰 값은 설계 문서에서 읽어 비교(이 문서는 값을 갖지 않는다) · 상태 요소마다 텍스트 노드 존재 · 학습 화면 숫자 카드 0, 가격·GTM·지표 주차에서만 허용 · 모달은 파괴적 확인 외 0 · 학생 원문 블록이 AI 설명 블록보다 먼저·크게 | 토큰 값 다툼은 harness_undecided · 잔존은 product | 렌더 DOM 감사 + Electron e2e + 스크린샷 | SX-49, SX-50, SX-51, SX-52, SX-53 |
 | SX-T56 | 작업 화면 대비와 회고 Paper. 작업 화면·회고 화면 스크린샷 | 작업 화면 배경이 Deep forest 계열이고 작업물 영역이 가장 밝다 · 회고·보고서는 Paper 배경 · 값 비교는 설계 문서 토큰 기준 | 색 판정 기준 미정은 harness_undecided | 스크린샷 + 렌더 DOM 감사 | SX-54 |
@@ -177,7 +177,7 @@ Jay dogfood 인수 프로토콜:
 
 | SX 묶음 | 요구 ID | 검사 행 |
 |---|---|---|
-| HOME | SX-01 | T01, T10 |
+| HOME | SX-01 | T01, T10, T60 |
 | HOME | SX-02 | T01, T11, T60 |
 | HOME | SX-03 | T12 |
 | HOME | SX-04 | T01, T13 |
