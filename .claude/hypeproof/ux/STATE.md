@@ -5,7 +5,27 @@
 
 ## RESUME HERE
 
-**2026-09-20 실행 세션 진행 중 (Opus 5, worktree `claude-epic`).** 준비 문서 이관·레지스트리·색인 적용 완료, 기존 테스트 세 벌 모두 초록, `ux-dag.yaml` P0 task 실행 중. 아래 "단계별 게이트" 표가 현재 상태다.
+**2026-09-20 — P0 다섯 task 전부 구현 완료, 평가 1회, 수정 1회. 머지 안 함.**
+브랜치 `feat/sx-p0-curriculum-first`, `origin/main ce95747` 기준 커밋 9개.
+machine_gate 는 전부 초록이고 orchestrator 와 평가자가 **각각 따로** 다시 돌렸다.
+다음은 아래 순서로 읽으면 된다: **단계별 게이트** → **평가** → **사람에게 묻는 것** →
+**요구 개정 제안** → **다음 세션이 집을 첫 task**.
+
+네 가지를 먼저 알아 두는 편이 좋다.
+
+0. **평가 점수는 FAIL 75/100 이지만 CRITICAL 은 0 이고 거짓 초록은 없다.**
+   감점의 큰 덩어리는 루브릭이 P0 에 적용될 수 없는 부분이다(E 는 P1 이 만들 drawer 를
+   보고, C 는 만들 수 없는 스크린샷을 본다). 평가자가 그것을 구현자 점수에 조용히
+   얹지 않고 `spec` 으로 분리했다. 실제 결함 셋은 고쳤다.
+
+1. **실기 증거는 없다.** 만든 것은 전부 synthetic(단위 테스트·심은 시료·대조군)이다.
+   앱을 빌드하지도 띄우지도 않았다. SX-T60(Jay dogfood 인수)과 5초 회상 테스트는
+   NOT RUN 이고 이 세션의 어떤 초록도 그것을 대신하지 않는다.
+2. **SX-T 행은 하나도 PASS 로 옮기지 않았다.** 대부분이 단위 절반만 덮였고
+   Electron e2e·사람 원문 검토 절반이 남았다. 부분 PASS 를 전체 PASS 로 적지 않는다.
+3. **요구 개정 제안 1번(`steps[].evidence` 이름 충돌)은 결정이 필요하다.**
+   커리큘럼 위키가 상위 정본이고, 지금 이름으로 두면 나중에 진짜 증거물 칸을
+   열 자리가 막힌다.
 
 **2026-09-18 준비 완료.** Lab 세션(Fable 5.1, worktree-codex)이 Jay의 UI/UX 설계 철학(docx)을 요구사항화해 두었다. 첫 task는 `ux-dag.yaml`의 `P0-A`(세션 설계 파일 스키마와 3주차 예시).
 
@@ -55,7 +75,7 @@
 | 워커 | `cd worker && npx tsc --noEmit` | **PASS** (exit 0) |
 | Chalk | `cd chalk && npm ci && npm test && npm run typecheck` | **PASS** (exit 0, 0, 0) |
 | 문서 | `python3 scripts/docs-harness/check.py --min-score 95` | **PASS** 100/100, findings 0 |
-| PR | `python3 scripts/hype-pr/pr.py inspect` | **FAIL** — 아래 "사람에게 묻는 것" 아님, harness_fixable |
+| PR | `python3 scripts/hype-pr/pr.py inspect` | 1차 **FAIL** → fresh harness 로 **PASS** (아래) |
 
 **워커 첫 실패는 제품이 아니라 계측기였다 (harness_fixable).** `test:budget-recovery`가
 `SyntaxError: Named export 'convertV4MiniflareOptions' not found`로 죽었다. 원인은 worktree의
@@ -66,16 +86,38 @@ miniflare `5.20260730.0-alpha`가 깔려 있었던 것이다. 이 브랜치의 `
 (링크를 통해 `npm ci`를 돌리면 메인 쪽 설치본을 덮어썼을 것이다). 추적 파일 변경 0, `node_modules`는 gitignore 대상.
 규칙 6대로 계측기를 먼저 배제했고, 제품 결함으로 보고하지 않는다.
 
+**`pr.py inspect` 도 계측기 문제였다 (harness_fixable).** 형제 체크아웃
+`~/CodeWorkspace/hypeproof-harness` 에 `scripts/hype-pr/preparation.py` 가 없어서
+"canonical Harness checkout is outdated" 로 죽었다(memory 2026-09-08 과 같은 함정).
+scratchpad 에 harness main 을 새로 clone 하고 `HYPEPROOF_HARNESS` 를 그쪽으로 주니
+**exit 0, blockers `[]`, existing_debt 0**. 메인 형제 체크아웃은 건드리지 않았다
+(GIT_POLICY: 다른 저장소 변경 금지).
+
+> **주의 — 스카우트 보고를 그대로 올리지 않았다.** 조사 서브에이전트 하나가
+> "harness 정책 예외 두 건이 2026-09-15 에 만료돼 모든 subcommand 가 exit 4 다,
+> 이건 Harness 저장소를 고쳐야 하는 사람 몫 blocker" 라고 보고했다. 직접 돌려 보니
+> **재현되지 않았다.** 그 에이전트는 낡은 harness worktree
+> (`hypeproof-harness-worktrees/watcher-main`)를 썼고, 현재 harness main 에는 그 만료가
+> 없다. verification.md 규칙 5 — 남의 추출을 증거로 올리기 전에 먼저 의심한다.
+> 이 한 번의 확인이 없었으면 Jay 앞에 존재하지 않는 blocker 가 놓였을 것이다.
+
+`HYPEPROOF_HARNESS` 경로는 이 세션의 scratchpad 안이라 세션이 끝나면 사라진다.
+다음 세션은 harness main 을 다시 clone 하거나 형제 체크아웃을 fast-forward 해야 한다.
+
 ## 단계별 게이트
+
+machine_gate 는 **orchestrator 가 구현자와 별도로 다시 돌린 결과**다(루브릭 절차 1).
+acceptance 열은 평가 서브에이전트의 판정이 들어온 뒤 채운다.
 
 | 단계 | task | machine_gate | control | acceptance (루브릭 점수) | 판정 | 시도 |
 |---|---|---|---|---|---|---|
-| P0 | P0-A 세션 설계 파일 | NOT RUN | | | | 0 |
-| P0 | P0-B 토큰·디자인 시스템 | NOT RUN | | | | 0 |
-| P0 | P0-C 학생 홈·Mission header | NOT RUN | | | | 0 |
-| P0 | P0-D Coach rail·Work canvas 재배치 | NOT RUN | | | | 0 |
-| P0 | P0-E assetStatusBar 제거·작업 중 숫자 0 | NOT RUN | | | | 0 |
-| P0 | P0-PR | | | | | |
+| P0 | P0-A 세션 설계 파일 | **초록** tsc 0 · worker 0 · chalk 0/0 | **초록** 구현 전 트리에서 빨강, 전부 `invalid session-design fields` | 커밋 `b2517f9` + 수정 `115a746` | 1 |
+| P0 | P0-B 토큰·디자인 시스템 | **초록** ext npm test 0 · tsc 0 · webview tsc 0 | **초록** 양성 8 · 음성 18 · 심은 정답 6 · 빈영역 가드 · 실제 화면 3종 | 커밋 `0607777` + 수정 `115a746` | 1 |
+| P0 | P0-C 학생 홈·Mission header | **초록** ext npm test 0 · tsc 0 · webview tsc 0 | **초록** 실제 렌더 판정 + 음성 4종 | 커밋 `12c3ece` | 1 |
+| P0 | P0-D Coach rail·코치 계약 | **초록** worker tsc 0 · worker npm test 0 · ext npm test 0 | **초록** 구현 전 4 passed / 12 failed(P0-A 적용본 기준), 누출을 실제 조립 프롬프트에서 측정 | 커밋 `a891a01` + `2a841e0` | 1 |
+| P0 | P0-E assetStatusBar 제거 | **초록** ext npm test 0 · `! grep -rn '7자산' src webview-ui/src` 0건 | **초록** 부재 증명 + 음성 대조군 3건 | 커밋 `2afca8b` | 1 |
+| P0 | **P0 평가** | — | — | **FAIL 75/100, CRITICAL 0.** 판정서 `judge-P0-2026-09-20.md`. 실제 결함 3건(D-1·D-2·D-3)은 `115a746` 에서 고쳤다. 나머지 감점은 대부분 `spec`(아래) | 1 |
+| P0 | P0-PR | 대기 | | 수정 뒤 재평가 → PR | 0 |
 | P1 | P1-A 이벤트·필드 확장 | NOT RUN | | | | 0 |
 | P1 | P1-B Evidence drawer·기대 조건·완료 게이트 | NOT RUN | | | | 0 |
 | P1 | P1-C 재확인 게이트·변경 전후 | NOT RUN | | | | 0 |
@@ -90,24 +132,206 @@ miniflare `5.20260730.0-alpha`가 깔려 있었던 것이다. 이 브랜치의 `
 
 (없음)
 
+## 평가 (구현자와 다른 세션)
+
+판정서: `.claude/hypeproof/ux/judge-P0-2026-09-20.md`.
+**FAIL 75 / 100 (통과선 90). CRITICAL 10개는 전부 통과.**
+
+평가자가 게이트 여덟 개를 **직접 다시 돌렸고**, 구현 전 트리를 `git archive ce95747`
+로 scratchpad 에 풀어 대조군을 **재현**했다. 이 체크아웃은 건드리지 않았다.
+재현 결과 중 하나는 기록을 고치게 했다: P0-D 의 "4 passed / 12 failed" 는 순수
+`origin/main` 이 아니라 **P0-A 를 적용한 트리**에서 나오는 수치다(P0-D 가 데이터상
+P0-A 에 의존한다). 평가자가 먼저 계측기를 의심한 뒤 그 사실을 특정했다.
+
+점수 75 의 성격을 분명히 해 둔다. **거짓 초록은 하나도 발견되지 않았고**, 평가자는
+"통과라고 적은 것 중 실제로 NOT RUN 인 것을 찾지 못했다 — 오히려 과소 주장 쪽으로
+기울어 있다" 고 적었다. 감점의 큰 덩어리는 루브릭이 P0 에 적용될 수 없는 부분이다
+(위 "사람에게 묻는 것" 6번).
+
+실제 결함 셋은 `115a746` 에서 고쳤다:
+
+| 지적 | 분류 | 무엇이 틀렸나 | 고친 방법 |
+|---|---|---|---|
+| D-2 | **product** | 2·5주차 미션·목표가 보존 원문과 달랐다. 5주의 `10명을 만드나 → 열 명을 만나나` 는 **뜻이 움직인다** | 원문 바이트로 되돌리고, 여섯 주차의 미션·목표·금지 문장을 원문 본문과 대조하는 검사 추가(대조군 포함) |
+| D-1 | harness_fixable | 감사 계측기가 `ChatPanel`(작업 화면 본체)과 `StartPage` 를 렌더하지 않았다 — C1 의 통과 근거가 렌더가 아니라 소스 grep 이었다 | 두 화면을 등록하고 실제 렌더(530자·353자)를 감사. 미션에 점수를 심는 음성 대조군 추가 |
+| D-3 | harness_fixable | 수치 규칙이 단위 붙은 것만 봐서 `레벨 3`·`★★★☆☆`·맨숫자가 통과했다. `region:"metric"` 은 4·6주차 수치 규칙을 통째로 껐다 | 규칙 3개 추가(음성 대조군도 함께, 13→18종), metric 은 끄는 대신 허용 목록을 넓히는 방식으로 변경 |
+
+**그 수정이 곧바로 다시 물었다.** `bare_number` 를 넣자마자 실제 `ChatPanel` 렌더가
+두 곳에서 걸렸다 — 목록 번호 `1. 기대 조건` 과 모듈 버전 `m2026.09.20-1` 의 뒷자리.
+둘 다 정상 문자열이고 "너무 엄격한 계측기" 쪽 오류다. 허용 목록에 넣고 **양성
+대조군으로 고정**했으며, 버전 패턴은 짐작하지 않고 `modules.ts` 의
+`MODULE_VERSION_RE` 를 읽어서 맞췄다.
+
+고치지 않고 기록만 한 것(평가자가 `spec` 으로 분류): D-4 · D-5 · D-6 · D-9 · D-10.
+전부 아래 두 절에 있다. 요구와 루브릭은 조용히 바꾸지 않는다.
+
 ## 실기 증거
 
-(없음. 규칙: `docs/testing/studio-learning-experience.md` §실기 증거 규칙)
+**없다. 이 세션은 실기 증거를 만들지 않았다.**
+`docs/testing/studio-learning-experience.md` §실기 증거 규칙의 세 라벨 중
+이 세션이 만든 것은 전부 **synthetic** 이다 — 단위 테스트, 심은 시료, 대조군.
+live-host 도 captured-replay 도 없다. 앱을 빌드하지도 띄우지도 않았다
+(`bash build.sh` 는 사용자 승인 없이 금지).
+
+그래서 **SX-T60(Jay dogfood 인수)과 5초 회상 테스트는 NOT RUN 이고, 이 세션의
+어떤 결과도 그것을 대신하지 않는다.** 자동 판정이 통과했다는 사실은 학생이
+무언가를 배웠다는 증거가 아니고, 게이트가 화면에서 막혔다는 증거조차 아니다 —
+아직 화면을 띄워 본 적이 없다.
+
+**대리물은 하나 있다 — 그리고 그것도 증거가 아니다.**
+`e2e/test-results/sx-screens/mission-header.html` (gitignore 대상, 테스트가 매번 새로 쓴다).
+Mission header 를 실제 렌더해 토큰·스타일과 함께 떨군 HTML 이고, 브라우저로 열면
+"첫 화면에서 가장 큰 활자가 미션 문장인가" 를 눈으로 볼 수 있다. 파일 첫 줄에
+`synthetic` 라벨과 "실기 증거가 아니다" 가 박혀 있다 — 실제 앱 레이아웃도 폰트도
+VS Code 테마도 아니다.
+
+다음 세션이 실기 증거를 만들려면: `extensions/hypeproof-chat && npm run build`
+→ `scripts/inject-builtin-extensions.sh` → 앱 실행 → `e2e/` Playwright.
+그 전에 Jay 의 빌드 승인이 필요하다.
 
 ## 사람에게 묻는 것 (harness_undecided / spec / 진짜 blocker)
 
-(없음)
+**진짜 blocker 는 없다.** P0 는 끝까지 갔다. 아래는 판단이 필요한 것들이다.
+
+1. **SX-T13 "각 화면 정확히 1개" vs SX-04 의 진입 화면 규칙 (spec).**
+   SX-04 는 시작 화면의 "AI 체험하기 / 수업에 참여하기" 를 이름으로 지목해
+   "동급 선택이므로 선택지 목록으로 그리고 둘 다 Primary 로 그리지 않는다" 고 적었다.
+   그대로 구현하면 그 화면의 Primary 개수는 **0** 이 되고, SX-T13 의 "각 화면 정확히
+   1개" 와 어긋난다. 구현은 요구대로(선택지 목록) 했다.
+   → SX-T13 을 "1개를 넘지 않는다" 로 고칠지, 아니면 선택 뒤 별도 Primary 를 세울지.
+
+2. **SX-02 부정문이 전제하는 action 배열이 스키마에 없다 (spec).**
+   "action 이 4개 이상인 설계 파일은 잘라서 보이지 않고 설계 파일 검증에서 거부한다"
+   는 설계 파일이 action 을 직접 선언한다고 전제하는데, `hps-session-design/1` 에는
+   단계(step)만 있고 최대 30개까지 유효하다. 지금은 현재 단계부터 3개만 보여 주고
+   남은 단계 수를 문장으로 같이 말한다(`missionHeaderLogic.ts` 주석에 근거).
+   → 설계 파일에 action 칸을 새로 열지, 아니면 SX-02 의 부정문을 고칠지.
+
+3. **카피 lint 의 사각 (harness_undecided).**
+   `test/sx-copy-lint.mjs` 는 한국어 **문형 규칙**이지 자연어 이해가 아니다.
+   목록 밖의 새로운 평가 문형은 놓친다. 통과는 "나쁜 문형이 없다" 가 아니라
+   "알려진 나쁜 문형이 없다" 이고, 판정 결과가 그 사실을 `covers` 로 실어 보낸다.
+   SX-T15·T18 의 사람 원문 검토를 대신하지 않는다.
+
+4. **감사 계측기가 일부러 싣지 않은 규칙 두 개 (harness_undecided).**
+   - 맨 `상위` — 한국어 부분 문자열로 흔하다(이 저장소에만 "최상위 규칙",
+     "상위 provider 필드"). 랭킹 표시(`상위 N%`, `상위 랭킹/순위`)로만 좁혔다.
+   - 일반형 `\d+/\d+` 비율 — 날짜(9/20)와 구분되지 않는다. 두 문서가 이름을 댄
+     분모(6·7·10·100)로만 좁혔다.
+   → 좁힌 범위가 충분한지 사람이 한 번 봐야 한다.
+
+5. **`asset_score` SSE 청크는 워커가 아직 보낸다.**
+   App 은 이제 읽고 버린다(SX-59). 청크 발신을 멈추는 것은 별도 Service 변경이고
+   이 세션 범위 밖으로 뒀다. 지금 상태가 틀린 것은 아니다 — 죽은 대역폭일 뿐이다.
+
+6. **루브릭이 단계 PR 에 그대로 적용되지 않는다 (spec, 평가자 D-10).**
+   E(근거·출처 10점)는 drawer 와 `source_state` 라벨을 보는데 그것은 DAG 상
+   P1-B·P1-D 다. C(정보 우선순위 15점)는 스크린샷 기반 5초 회상 판정을 요구하는데
+   앱 빌드는 사용자 승인 사항이다. **P0 가 완벽해도 통과선 90 에 구조적으로 닿을 수
+   없다.** 평가자가 이것을 구현자 점수에 조용히 얹지 않고 `spec` 으로 분리했다.
+   → `.claude/evals/STUDIO_UX_EVAL.md` 에 단계별 적용 열을 넣거나(P0 는 A·B·F·G·H,
+     C·D·E 는 "해당 단계에 없으면 만점 제외"), 통과선을 "그 단계가 다루는 영역의
+     합계 비율" 로 바꾼다. 루브릭 수정은 `AUTONOMY_POLICY` 가 금지한 항목이라
+     이 세션은 손대지 않았다.
+
+7. **SX-55(과제 흐름 상태 기계)가 P0-A 의 `spec_section` 에 있는데 P0 에 없다 (spec, D-4).**
+   `learning.completion` 데이터만 있고 `assigned → in_progress → submitted → reflected`
+   전이는 없다. 판정 근거가 될 학습 이벤트가 P1-A 에서 생기므로 P1-B 가 맞는 자리다.
+   → `ux-dag.yaml` 의 `P0-A.spec_section` 에서 SX-55 를 빼고 P1-B 로 옮길지 결정.
+
+8. **개입 사다리가 데이터가 아니라 워커 코드 상수다 (spec, D-5).**
+   `P0-D.acceptance` 는 "encoded as **data** … with the answer step requiring a reason"
+   라고 적었다. 실제는 `learning-prompt.ts` 의 문자열 배열이고, 앱은 읽지 않으며
+   "이유 필수" 는 프롬프트 지시문이지 집행이 아니다.
+   → 사다리를 `learning-design.ts` 에 export 해 앱이 읽게 할지, acceptance 문장을
+     "프롬프트 조립기가 소비하는 순서 있는 상수" 로 좁힐지 결정.
 
 ## 요구 개정 제안
 
-(없음)
+구현은 **요구대로** 했다. 아래는 제안이고, 어느 것도 조용히 적용하지 않았다.
+
+1. **`steps[].evidence` 이름 충돌 — 가장 중요하다.**
+   SX 설계의 `steps[].evidence` 는 SX-18 의 근거 **종류** 6종 enum 이다.
+   그런데 `worker/src/lib/lesson-pedagogy.ts` 의 `step_evidence` 검사(관문2-1 /
+   curriculum wiki `rules/curriculum-schema.md` Lint 2)가 기다리는 `evidence` 는
+   `evidence: ""  # 이 활동이 남기는 증거물 1개` — **제3자가 볼 수 있는 남는 물건의
+   이름**(자유 텍스트)이다. 관문2-1 은 "성찰·소감은 증거가 아니다" 라고 못박는다.
+   같은 키 이름, 다른 계약. **커리큘럼 위키가 상위 정본이다.**
+
+   구현 중에 한 번 `steps[].evidence` 가 있으면 `step_evidence` 경고를 끄도록
+   붙였다가 **되돌렸다.** `evidence: "ownership"` 을 골랐다고 그 단계가 물건을
+   남기는 것은 아니고, 그러면 무관한 필드로 살아 있는 검사를 무력화하는 것이 된다.
+   `lesson-pedagogy.ts` 는 한 줄도 바뀌지 않았고, 산문 정규식(`제출 증거:`)이
+   그대로 유일한 판정이다. 근거는 `worker/src/lib/learning-design.ts` 파일 끝 주석.
+
+   → 제안: SX 쪽 단계 키를 **`evidence_type`** 으로 개칭한다. 그러면 뒤에
+     커리큘럼 위키의 `evidence`(남는 물건)를 충돌 없이 열 수 있다.
+   → 부작용 하나: 지금 상태로 SX 주차 파일을 확정하면 단계마다
+     `step_evidence` **warn** 이 뜬다(차단은 아니다). 시료 단계들이 산문에
+     `제출 증거:` 줄을 갖고 있지 않기 때문이고, 그건 사실이다 — 끄지 않았다.
+
+2. **SX-12 의 규칙 문장이 SX-12 의 금지 목록에 걸린다.**
+   원문 §10 언어 규칙 (1) 은 "평가형 형용사(우수, 부족, **낮음**)" 라고 예시를 든다.
+   그런데 "낮음" 은 §12 가 금지한 라벨 그 자체다. 규칙을 축자로 옮겨 적으면
+   그 규칙이 자기 금지 목록에 걸린다. 코치 프롬프트에서는 범주로 바꿔 적었고
+   (`learning-prompt.ts`), §10 "나쁜 UX" 다섯 문장도 그대로 싣지 않았다 —
+   금지 문형을 프롬프트에 넣는 것은 그 문형을 모델 문맥에 넣어 주는 것이다.
+   → §10 이나 §12 중 하나가 이 예외를 명시해야 한다.
+
+3. **§12 "금지 라벨 6개" 는 실제로 7개 토큰이다** ("낮음 / 높음" 이 한 줄).
+   계측기는 7개를 전부 센다. 문서의 숫자를 고치거나 목록을 6줄로 나눈다.
+
+4. **SX-56 의 "정책 플래그(SX-41)" 자리가 P0 에 없다.**
+   DAG P0-A 의 control 이 고정한 learning 키 집합에 없고 SX-41 자체가 P2 다.
+   P2 에서 `learning.policy` 를 열지 결정 필요.
+
+5. **설계 문서의 코치 프롬프트 조립 지점 경로가 틀렸다.**
+   §코드 변경 지도는 `worker/src/routes/*` 라고 적었지만 실제 단일 조립 지점은
+   `worker/src/lib/chat-gate.ts` 다. 라우트를 고쳤으면 두 런타임이 갈라졌을 것이고,
+   `chat-gate.ts` 는 바로 그것을 막으려고 추출된 파일이다.
+
+7. **"나의 변화 기록" 이름이 화면보다 먼저 갔다 (평가자 D-9).**
+   `localReview` 의 명령 제목·nav 라벨·패널 제목·h1 을 P0 에서 바꿨는데 화면 **내용**은
+   아직 P0 상태다(`LocalReview.tsx` 가 메시지 수·N건 카운트를 그대로 그린다).
+   작업 중 화면이 아니라 C1 은 걸리지 않지만, **P3-A 의 "첫 화면에 숫자 없음"
+   대조군이 나중에 여기서 빨개진다.** 새 회귀가 아니라 예정된 것이다.
+
+8. **SX-58 의 절반은 아직 없다.**
+   "각 항목은 예시 세션 설계 파일의 금지 필드 **와** 코치 프롬프트 부정 fixture 로
+   존재한다" 중 앞쪽만 했다. 금지 문장이 프롬프트에 **닿는다**는 것은 실측했지만,
+   코치가 그것을 **지킨다**는 부정 fixture 는 여섯 주차 어디에도 없다.
+   그건 실제 모델이 필요하다.
 
 ## Lab에 넘길 것
 
 - Lab `products/lab-web/measurement-profile.md` MP-01 "score-first" 개정: SX-60(6개 점수 카드를 접힌 세부 데이터로)과 충돌. Lab 결정 기록 `docs/decisions/2026-09-18-studio-ux-philosophy-adoption.md`에 등록됨.
 - 미성년(고등학생) 파일럿의 보호자 동의·강사 매개 경로: Lab MISSION 아동 안전 결정 대기.
 
+## 다음 세션이 집을 첫 task
+
+`docs/plan/ux-dag.yaml` **P1-A — 관찰 이벤트·필드 확장 (measurement-core)**.
+`depends_on: [P0-A]` 이고 P0-A 는 끝났다. Service 층(worker)이고 P1-B~D 의 저장
+형식을 정하므로 P1 의 첫 task 다.
+
+시작 전에 읽을 것: `worker/src/lib/measurement-core/legacy-observation.ts`(246줄,
+`hps-observation/1` 의 닫힌 kind·키 allowlist), `interpretation.ts` 의 `forbidKeys()`
+와 human 판정 술어, `worker/test/fixtures/measurement-core/legacy-cases.mjs` 상단의
+**golden 재생성 금지** 문구. 설계 §관측 이벤트와 필드가 `/1` 을 손대지 말고
+`hps-observation/2` 를 상위 집합으로 받으라고 정해 두었다.
+
+알아 둘 함정 하나: `legacy-verdicts.json` 은 추출 **이전** 구현에서 캡처한 golden 이고
+"차이는 의미 변경이며 절대 golden 을 다시 생성해서 해결하지 않는다" 고 파일이 직접
+적어 두었다.
+
 ## 기록
 
 - 2026-09-18 준비. 분류표·intent·요구·설계·검증·계획·DAG·정책·루브릭 작성. 코드 변경 없음.
 - 2026-09-18 검토. origin/main 대조로 기반 사실 확인, 강사 역할 전제 정정(5개 문서), P0-A를 기존 스키마 확장으로 수정, asset-status 스모크 함정 기록. 코드 변경 없음.
+- 2026-09-20 P0 실행. 커밋 8개(`c131be3`..`2a841e0`), 브랜치 `feat/sx-p0-curriculum-first`.
+  준비 문서 이관 + 레지스트리 4노드 + 색인 2곳 → P0-A → P0-B → P0-E → P0-C → P0-D(Service) → P0-D(카피 lint).
+  계측기 오류 **세 건**을 제품 결함으로 올리기 전에 배제했다: worktree 의 낡은
+  `node_modules` 심볼릭 링크(miniflare), 낡은 harness 체크아웃, 그리고 스카우트
+  에이전트가 낡은 worktree 기준으로 보고한 "harness 정책 만료" 오보.
+  구현 중 서브에이전트 판단 **두 건**을 되돌렸다: `steps[].evidence` 로 교육 관문
+  경고를 끈 것(요구 개정 제안 1), 감사 스모크가 삭제 예정 모듈을 import 한 것
+  (#904→#910 함정). 실기 증거 없음.
