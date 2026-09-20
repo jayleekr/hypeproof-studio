@@ -325,3 +325,24 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 추가 회귀는 임의 sleep으로 순서를 기대하지 말고 provider/R2 단계별 barrier로 재현한다. 평가/업로드 중 철회, R2 put 중 철회, 결과 CAS 실패, 삭제 중 오류·프로세스 중단을 대조한다. 실제 구현 위치의 원장을 재사용하고 별도 삭제 시스템을 복제하지 않는다.
 
 **Mac 인수 준비의 현재 한계:** 기존 `mac-devhost` manifest는 shell v0.1.16, extension SHA `f3763d6`, `agent_sdk_vendored=false`이며 prepare만 실행돼 있다. 현재 HEAD의 GUI/SDK 인수 증거가 아니다. v0.1.56의 공식 Mac arm64 ZIP(170,569,061 bytes)과 Windows x64 산출물은 GitHub release에 존재함을 조회했다. 다운로드/설치/GUI 실행은 이번 재검토에서 하지 않았다. 준비된 복사본과 실제 release, proxy fallback과 vendored SDK 실행은 각각 다른 증거로 남긴다.
+
+#### 위 두 결함의 수정과 실행 결과 · 2026-09-20
+
+수정 위치는 재현이 가리킨 그대로다. #1168에 `saveResult`(결과 저장), #1169에 삭제 원장의 복구·재확인을 넣었다. 계약은 [요구사항의 ‘결과 저장과 삭제의 순서’·‘요청된 삭제의 복구 ≠ 보존 만기 삭제’](../requirements/classroom-admin.md#검토-반영으로-확정한-계약-2026-09-19)가 소유한다. 추가 migration은 없다(0021의 `state`에 `settled` 값만 추가로 쓴다).
+
+| 시나리오 (순서는 sleep이 아니라 provider/R2 barrier로 강제) | 결과 |
+|---|---|
+| Codex 재현 1 그대로: provider 응답 대기 중 철회 → 삭제 `done` → 응답 도착 | 학생 객체 0, job `withdrawn`, 응답은 `withdrawn`으로 거부. 40일 뒤에도 0 |
+| R2 쓰기가 진행 중일 때 삭제 완료 → 쓰기 도착 | D1이 확정을 거부, 같은 요청에서 본문 삭제. 객체 0 |
+| 쓰기 도착 직후 프로세스 중단(CAS·보상 삭제 없음) | 고아 객체 1개(열람 경로 없음) → 창이 닫히기 전 tick은 건드리지 않음 → 이후 tick이 삭제, `settled`, 감사 `collection_erased_late_objects{objects:1}`. 이후 다시 선택되지 않음 |
+| lease 만료 뒤 재claim, 이전 세대의 늦은 쓰기 | 이전 세대는 자기 키만 쓰고 지움. 확정된 `draft.g2.json`은 digest까지 그대로, 검수자가 정상 열람, 저장 감사 1건 |
+| 보상 삭제 자체가 실패 | 요청은 정상 응답, 내용 없는 `report_draft_discard_failed` 기록, 같은 작업의 다음 확정 저장이 잔여 세대 본문 정리 |
+| Codex 재현 2 그대로: 철회 삭제 중 R2 오류, 보존 OFF | 학생 응답 `202 erasure=pending`, 원장 `started`. 5분 뒤 tick은 대기, 15분 뒤 tick이 완료(`done`, attempts 2). 보존 30일/enforce·기한 전이어도 동일하며 보존 tick은 due 0 |
+| 계속 실패 | 간격 15분·1시간·6시간·24시간…, 12회에서 자동 재시도 중단·`retry_limit`·감사 1건(매 tick 반복 없음). 운영자 조회에 `needs_operator`, 원인 해소 뒤 운영자 요청으로 완료 |
+| 15분 tick / 일일 tick | 15분 tick이 보존 설정 없이 철회를 끝냄. 보존 OFF의 일일 tick은 900일 지난 회차도 새로 지우지 않음 |
+| 다른 학생 | 모든 시나리오에서 다른 학생의 snapshot·초안 객체와 digest, 열람 링크가 그대로. 원장에 요청되지 않은 학생 행이 생기지 않음 |
+
+실행: `worker/test/classroom-ops-evaluator.test.mjs` 17(신규 4), `worker/test/classroom-ops-erasure.test.mjs` 12(신규 6, 기존 1건은 ‘중단된 보존 삭제는 복구가 끝낸다’로 계약 변경 반영) — 모두 PASS, skip 0. Codex의 원 재현 스크립트도 수정 뒤 다시 실행했다: 재현 1은 잔존 객체 0. 재현 2의 원본은 보존 tick만 호출하므로 출력이 같고(보존은 더 이상 재시도 주체가 아님), 복구 tick을 더한 사본은 `done`·객체 0이다. 결과 JSON은 저장소 공통 `.git` 아래 재검토 증거 폴더에 `*-after-fix.json`으로 두었다.
+
+**한계:** SQLite와 메모리 R2에서의 순서 검증이다. 실제 D1/R2의 지연·부분 실패·Worker 중단은 staging 시험 항목이며 NOT RUN이다. `settled` 이전의 고아 객체는 어떤 열람 경로로도 읽히지 않지만(작업 `withdrawn`, digest 없음, 링크 폐기) 저장소에는 최대 한 tick(15분)+창(약 13분) 동안 존재할 수 있다.
+
