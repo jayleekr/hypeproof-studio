@@ -1,0 +1,36 @@
+{
+  "schema": "hps-session-design/1",
+  "title": "5주차 · GTM",
+  "audience": "국제고 2학년 · GlobalBuddy 팀",
+  "duration_minutes": 120,
+  "objective": "돈 안 쓰고 어떻게 열 명을 만나나?",
+  "prerequisites": "4주차 가격 가설과 응답 기록, 공유 가능한 GlobalBuddy V1",
+  "starter": "globalbuddy-v1/ (4주차 사본, 원본 보존)",
+  "learning": {
+    "week": 5,
+    "mission": "돈 안 쓰고 어떻게 열 명을 만나나?",
+    "completion": [
+      { "id": "c1", "text": "경로마다 무엇이 보이면 통한 것인지 먼저 정했습니다", "event": "criterion_set" },
+      { "id": "c2", "text": "실제 사람에게 체험을 요청하고 반응을 기록했습니다", "event": "external_feedback_received" },
+      { "id": "c3", "text": "반응을 보고 접근이나 차별점을 고쳤습니다", "event": "decision_revised" }
+    ],
+    "observe": [
+      "유입 경로별 반응을 비교하는가",
+      "결과가 없으면 접근을 바꾸는가"
+    ],
+    "never": [
+      "SNS 노출·클릭만으로 PMF나 수요를 주장하지 않는다."
+    ],
+    "evidence_types": ["criterion", "action", "decision"],
+    "source_kinds": ["link", "article", "interview", "none"],
+    "reflection": { "changed_mind": true, "next_experiment": true }
+  },
+  "steps": [
+    { "id": "invite", "title": "Invite link", "instructions": "체험을 요청할 초대 링크와 안내 문구를 만듭니다.", "hint": "받는 사람이 무엇을 해 보면 되는지 한 줄로 적으면 반응이 빨라집니다.", "acceptance": "초대 링크와 안내 문구가 작업 폴더에 있습니다.", "ui": "canvas_editor", "help": { "default": "co_edit", "allowed": ["hint", "co_edit"] } },
+    { "id": "channel", "title": "유입 경로 태그", "instructions": "국제고 네트워크, 교환학생 커뮤니티, 학생회처럼 경로를 나누고, 무엇이 보이면 그 경로가 통한 것으로 볼지 요청 전에 먼저 정합니다.", "hint": "\"많이 봤다\"는 조건이 되기 어렵습니다. 무엇을 해 주면 통한 것인지로 적습니다.", "acceptance": "경로마다 태그와 확인 조건이 요청 전에 적혀 있습니다.", "ui": "criterion_form", "evidence": "criterion", "gate": "criterion_set" },
+    { "id": "request", "title": "체험 요청", "instructions": "정한 경로로 실제 체험을 요청하고 돌아온 반응을 들은 그대로 기록합니다. 노출과 클릭은 반응이 아니라 노출로 적습니다.", "hint": "답이 없었던 경로도 기록입니다. 비워 두지 않습니다.", "acceptance": "경로별 요청과 돌아온 반응이 실제인지 가상인지와 함께 기록돼 있습니다.", "ui": "evidence_note", "evidence": "action", "gate": "external_feedback_received" },
+    { "id": "compare", "title": "경쟁 비교", "instructions": "비슷한 서비스 세 개를 직접 써 보고 무엇이 달랐는지 출처와 함께 적습니다.", "hint": "소개 문구가 아니라 직접 써 본 화면을 근거로 적습니다.", "acceptance": "서비스 세 개의 비교와 각 출처가 파일에 적혀 있습니다.", "ui": "evidence_note", "evidence": "action" },
+    { "id": "difference", "title": "차별점", "instructions": "반응과 비교를 보고 차별점을 정하거나 고칩니다. 반응이 없었다면 다음에 바꿀 접근을 적습니다.", "hint": "차별점은 우리가 원하는 점이 아니라 상대가 이유로 말한 점에서 찾습니다.", "acceptance": "차별점 한 줄과 그렇게 정한 이유가 반응 기록과 연결돼 적혀 있습니다.", "ui": "decision_form", "evidence": "decision", "gate": "decision_revised" }
+  ],
+  "assistant": { "display_name": "코치" }
+}

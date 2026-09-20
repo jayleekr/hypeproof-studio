@@ -44,9 +44,46 @@ assert.match(authoring, /브라우저는 실행 경로와 무관하게 하나로
 assert.match(authoring, /label\.append\(input,document\.createTextNode\(f\.label\)\)/, 'feature labels render as text, never HTML');
 assert.doesNotMatch(authoring, /feature-allowed'\)\.innerHTML/, 'the feature list is never built by innerHTML');
 
+// #1036 (SX-56) — 저작 폼이 모르는 키를 조용히 버리지 않는다.
+// content() 는 DOM 에서 본문을 통째로 다시 짓는다. 그래서 폼이 칸을 갖지 않은 키는
+// 다음 저장에서 사라졌다 — steps[].help 가 이미 그랬고, learning 블록이 같은 길로
+// 갈 뻔했다. render() 가 연 초안의 미확인 키를 들고 있다가 content() 가 되돌려 깐다.
+// **보존만** 한다 — learning 편집 UI 는 이 변경의 범위가 아니다.
+assert.match(
+  authoring,
+  /const formKeys=\['schema',\.\.\.fields,'steps','assistant','model','features'\];/,
+  'the form declares which top-level keys it owns, so everything else is an unknown key to preserve',
+);
+assert.match(
+  authoring,
+  /const stepFormKeys=\['id','title','instructions','hint','acceptance'\];/,
+  'the form declares which step keys it owns — help/ui/evidence/gate are not among them',
+);
+assert.match(
+  authoring,
+  /function carry\(c\)\{carriedTop=Object\.fromEntries\(Object\.entries\(c\)\.filter\(\(\[k\]\)=>!formKeys\.includes\(k\)\)\);/,
+  'render() keeps the loaded draft’s unknown top-level keys (learning among them)',
+);
+assert.match(
+  authoring,
+  /carriedStep=new Map\(\(c\.steps\|\|\[\]\)\.map\(s=>\[s\.id,Object\.fromEntries\(Object\.entries\(s\)\.filter\(\(\[k\]\)=>!stepFormKeys\.includes\(k\)\)\)\]\)\);/,
+  'unknown step keys are kept per step id, so reordering or deleting a step moves its extras with it',
+);
+assert.match(authoring, /function render\(c\)\{carry\(c\);/, 'every render path refreshes what is preserved');
+assert.match(
+  authoring,
+  /return \{\.\.\.carriedTop,schema:'hps-session-design\/1',/,
+  'content() spreads preserved keys FIRST so the form’s own fields still win',
+);
+assert.match(
+  authoring,
+  /return \{\.\.\.carriedStep\.get\(own\.id\),\.\.\.own\};/,
+  'a step’s preserved keys are restored under the values the form produced',
+);
+
 const learn = await page('/learn');
 assert.match(learn, /c\.assistant\?\.display_name/, 'learn page reads the optional block');
 assert.match(learn, /'이 수업의 AI 이름: '\+c\.assistant\.display_name\+' \(AI 도우미\)'/, 'learn page renders the name through textContent with the AI notice');
 assert.doesNotMatch(learn, /innerHTML/, 'lesson text is never rendered as HTML');
 
-console.log('PASS authoring ui: AI name round-trips, feature narrowing is opt-in and omitted when inheriting, learn page renders via textContent');
+console.log('PASS authoring ui: AI name round-trips, feature narrowing is opt-in and omitted when inheriting, unknown keys survive a save, learn page renders via textContent');
