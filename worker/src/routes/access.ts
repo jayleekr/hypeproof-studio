@@ -27,7 +27,12 @@ export async function accessPrincipal(c: AccessContext): Promise<TokenPayload> {
     await accountForToken(c.env,p);
   } else {
     const profile = getProfile(p.p);
-    if (!profile || !(await profileServesCohort(c.env,profile,p)).ok || !(await getRoster(c.env.HPS_KV,p.c))?.users.includes(p.u)) throw new AccessError('participant_unavailable',403);
+    // 리허설 좌석(#1210)은 로스터에 닿지 않는다. 학생 앱이 토큰 설정 시마다 이 경로를 치고
+    // (`accessClient.fetchAccessView`), 실패하면 **강사에게만** `사용량 미확인` 문구가 뜬다 —
+    // 학생은 안 보는 경고다. 참가자 좌석의 이용권 화면은 `p.account` 가 아니라 **코호트**에서
+    // 나온다는 것을 측정으로 확인했다: 로스터만 지나가면 좌석이 학생과 **같은 choices** 를
+    // 받는다(예산이 설정된 환경에서도 contract_id 일치). 그래서 여는 것이 실제로 고친다.
+    if (!profile || !(await profileServesCohort(c.env,profile,p)).ok || (p.rehearsal!==true && !(await getRoster(c.env.HPS_KV,p.c))?.users.includes(p.u))) throw new AccessError('participant_unavailable',403);
   }
   return p;
 }

@@ -219,7 +219,13 @@ trace.post("/event", async (c) => {
   }
 
   // 4-5. Session + roster
-  const session = await getActiveSession(env.HPS_KV, payload.c);
+  // 리허설 좌석의 세션은 **토큰 자신**이다 — `chat-gate.ts` 의 `account`/리허설 갈래와 같은
+  // 형태. 리허설은 수업을 열기 전에 하는 일이므로 열린 세션을 요구하지 않는다(`RUN-01`).
+  const session = payload.rehearsal === true
+    ? { session_id: 'rehearsal:' + payload.u, profile_id: profile.id,
+        starts_at: new Date(payload.iat * 1000).toISOString(),
+        ends_at: new Date(payload.exp * 1000).toISOString() }
+    : await getActiveSession(env.HPS_KV, payload.c);
   if (!session) {
     return c.json({ error: { message: "no active session", type: "session_inactive" } }, 403);
   }
@@ -232,9 +238,17 @@ trace.post("/event", async (c) => {
       403,
     );
   }
-  const roster = await getRoster(env.HPS_KV, payload.c);
-  if (!roster || !roster.users.includes(payload.u)) {
-    return c.json({ error: { message: "not in roster", type: "not_in_roster" } }, 403);
+  // 리허설 좌석(#1210)은 이 검사에 **닿지 않는다** — 뚫는 것이 아니라 지나가지 않는다.
+  // `#1209` 가 채팅·진입에서 푼 것과 **같은 형태**이고, 판정은 언제나 서명된 `rehearsal`
+  // 클레임이다(좌석 id 접두사로는 절대 판정하지 않는다 — 접두사는 사람이 읽는 표시다).
+  // 왜 이 표면인가: 학생이 실제로 쓰기 때문이다. 안 열면 리허설이 **학생 조건이 아니다**(`RUN-01`).
+  // 학생 앱이 **토큰만 있으면 무조건** 친다(`chatPanelProvider.ts` 의 `/trace/event` 하트비트)
+  // — 즉 모든 학생이 매 세션 쓴다. 막히면 리허설 좌석이 라이브 보드에 **영영 안 뜬다**.
+  if (payload.rehearsal !== true) {
+    const roster = await getRoster(env.HPS_KV, payload.c);
+    if (!roster || !roster.users.includes(payload.u)) {
+      return c.json({ error: { message: "not in roster", type: "not_in_roster" } }, 403);
+    }
   }
 
   // 5b. F#6 (#33): coarse per-user rate limit on top of the session+roster gate.

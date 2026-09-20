@@ -133,9 +133,18 @@ logs.put("/:sessionId/:filename", async (c) => {
   // 5. Roster — 명단에 없는 핸들은 쓰기 불가. (active-session 게이트는 의도적
   // 부재 — 헤더 주석 참고. pause 도 검사하지 않는다: pause 는 채팅 차단이지
   // 수업 후 기록 회수까지 막을 이유가 없다.)
-  const roster = await getRoster(env.HPS_KV, payload.c);
-  if (!roster || !roster.users.includes(payload.u)) {
-    return c.json({ error: { message: "not in roster", type: "not_in_roster" } }, 403);
+  // 리허설 좌석(#1210)은 이 검사에 **닿지 않는다** — 뚫는 것이 아니라 지나가지 않는다.
+  // `#1209` 가 채팅·진입에서 푼 것과 **같은 형태**이고, 판정은 언제나 서명된 `rehearsal`
+  // 클레임이다(좌석 id 접두사로는 절대 판정하지 않는다 — 접두사는 사람이 읽는 표시다).
+  // 왜 이 표면인가: 학생이 실제로 쓰기 때문이다. 안 열면 리허설이 **학생 조건이 아니다**(`RUN-01`).
+  // 학생 앱이 `analytics.upload_session_logs === true` 일 때 이 경로를 친다
+  // (`spoolUploader.ts` 가 `PUT …/logs/:session/:name`). 막히면 강사는 로그 업로드가
+  // 도는지 **리허설로 확인할 방법이 없고**, 턴 오류로 나타나지 않아 관문은 초록이다.
+  if (payload.rehearsal !== true) {
+    const roster = await getRoster(env.HPS_KV, payload.c);
+    if (!roster || !roster.users.includes(payload.u)) {
+      return c.json({ error: { message: "not in roster", type: "not_in_roster" } }, 403);
+    }
   }
 
   // 6. Rate limit
