@@ -36,17 +36,39 @@ if (!appRoot) throw new Error("HPS_APP_PATH must point at the .app to drive");
 const APP = appRoot.includes("/Contents/MacOS/")
   ? appRoot : path.join(appRoot, "Contents/MacOS/HypeProof Studio");
 
-const COHORT = "boah-dental-2026-a";
-const COURSE = "dental-home";
-const VERSION = "m2026.09.21-1";
+/**
+ * 짝 실행 모드. `HPS_PAIR_UPSTREAM` 이 있으면 로컬 서버는 **스텁이 아니라 기록하는
+ * 중계기**가 된다 — 진짜 worker 로 그대로 넘기고 오가는 것을 적는다.
+ *
+ * 왜 필요한가: 스텁은 **내가 기대하는 서버**를 흉내내므로 내 오해까지 같이
+ * 흉내낸다. 실제로 그랬다 — 교환권 발급 경로를 `/v1/authoring/...` 로 잘못 알고
+ * 있었는데 스텁이 느슨하게 맞춰 받아 줬고, 실물(`/admin/cohorts/...`)에 물려 보고서야
+ * 드러났다. 81 쪽에서도 같은 방향으로 결함이 하나 나왔다(리허설 좌석의 `/v1/profile`
+ * 이 403 이었는데 채팅 한 표면만 재고 있어서 초록이었다).
+ *
+ * 중계기로 두면 **행동은 진짜 서버가 정하고 관측은 내가** 한다. 어긋나면 빨개진다.
+ */
+const UPSTREAM = process.env.HPS_PAIR_UPSTREAM?.replace(/\/$/, "");
+
+// ⚠️ 만료 시각을 쓰게 되면 **`credential_expires_at` 만** 읽어라. `expires_at` 은
+// 발급 응답에서는 **교환권**(24h) 수명이고 교환 응답에서는 **좌석** 수명이라
+// 읽는 위치에 따라 뜻이 바뀐다 — 같은 이름으로 읽으면 이미 죽은 좌석을 24시간
+// 살아 있다고 띄운다. 81 이 재서 잡았고 두 응답 모두에 `credential_expires_at` 을
+// 넣어 뒀다(`f7cce6f`). 지금 이 파일은 만료를 쓰지 않는다.
+const COHORT = process.env.HPS_PAIR_COHORT || "boah-dental-2026-a";
+const COURSE = process.env.HPS_PAIR_COURSE || "dental-home";
+const VERSION = process.env.HPS_PAIR_VERSION || "m2026.09.21-1";
 const PROFILE = "boah-dental-teaser-2026-s1";
 const TICKET = "Ab3-_dEfGhIjKlMnOpQr";
 
 const mint = (p) => Buffer.from(JSON.stringify(p)).toString("base64url") + ".devsig";
 const EXP = Math.floor(Date.now() / 1000) + 86_400;
-const STUDENT = mint({ u: "student-01", c: COHORT, p: PROFILE, exp: EXP });
-const ISSUER = mint({ role: "issuer", c: "__issuer__", p: "__issuer__", exp: EXP,
-  scopes: [{ cohort: COHORT, profiles: [PROFILE] }] });
+// 짝 실행에서는 **서명된 진짜 토큰**을 쓴다. 합성 토큰은 실물 worker 가 401 로 거절한다.
+const STUDENT = process.env.HPS_PAIR_STUDENT_TOKEN
+  || mint({ u: "student-01", c: COHORT, p: PROFILE, exp: EXP });
+const ISSUER = process.env.HPS_PAIR_ISSUER_TOKEN
+  || mint({ role: "issuer", c: "__issuer__", p: "__issuer__", exp: EXP,
+            scopes: [{ cohort: COHORT, profiles: [PROFILE] }] });
 // 좌석 토큰. 서명은 무의미하다 — 이 실행에서 서버는 스텁이고, 서명 검증은 81 의
 // 시험 15종이 잰다. 여기서 재는 것은 **앱이 어느 토큰을 싣는가**다.
 const SEAT = mint({ u: "rehearsal-jay-a1b2", c: COHORT, p: PROFILE, exp: EXP, rehearsal: true });
@@ -78,11 +100,48 @@ const bodyOf = (req) => new Promise((r) => {
   let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => r(b));
 });
 
+/** 좌석 토큰. 짝 실행에서는 진짜 서버가 정하므로 교환 응답에서 배운다. */
+let SEAT_OBSERVED;
+
 const server = http.createServer(async (req, res) => {
   const url = req.url ?? "";
   const body = req.method === "POST" ? await bodyOf(req) : "";
   seen.push({ method: req.method, url, auth: authOf(req), body });
   res.setHeader("access-control-allow-origin", "*");
+
+  if (UPSTREAM) {
+    // 기록하는 중계기. 판정은 진짜 서버가 하고 우리는 전선만 읽는다.
+    const target = UPSTREAM.replace(/\/v1$/, "") + url;
+    const headers = {};
+    for (const [k, v] of Object.entries(req.headers)) {
+      if (["host", "connection", "content-length"].includes(k.toLowerCase())) continue;
+      headers[k] = v;
+    }
+    let up;
+    try {
+      up = await fetch(target, {
+        method: req.method,
+        headers,
+        body: req.method === "GET" || req.method === "HEAD" ? undefined : body,
+      });
+    } catch (e) {
+      res.statusCode = 502;
+      res.setHeader("content-type", "application/json");
+      seen[seen.length - 1].upstreamError = String(e);
+      return void res.end(JSON.stringify({ error: "pair_upstream_unreachable" }));
+    }
+    const text = await up.text();
+    seen[seen.length - 1].status = up.status;
+    // 좌석 토큰을 교환 응답에서 배운다 — 합성하지 않는다.
+    if (url.includes("/rehearsal/redeem") && up.ok) {
+      try { SEAT_OBSERVED = JSON.parse(text).token; } catch { /* 본문이 JSON 이 아니다 */ }
+    }
+    res.statusCode = up.status;
+    const ct = up.headers.get("content-type");
+    if (ct) res.setHeader("content-type", ct);
+    return void res.end(text);
+  }
+
   res.setHeader("content-type", "application/json");
 
   if (url.includes("/rehearsal-tickets")) {
@@ -255,7 +314,7 @@ async function answerInput(win, value) {
   await sleep(800);
 }
 
-const report = { app: APP, proxy: PROXY, steps: {} };
+const report = { app: APP, proxy: PROXY, mode: UPSTREAM ? `pair:${UPSTREAM}` : "stub", cohort: COHORT, course: COURSE, version: VERSION, steps: {} };
 let failed = 0;
 const step = (name, fn) => fn().then(
   () => console.log(`✅ ${name}`),
@@ -263,6 +322,9 @@ const step = (name, fn) => fn().then(
 
 const profileCalls = () => seen.filter((s) => s.url.includes("/profile"));
 const withToken = (t) => profileCalls().filter((s) => s.auth === `Bearer ${t}`);
+/** 이 실행에서 좌석 토큰이 무엇인가. 짝 실행이면 서버가 준 것, 아니면 스텁 것. */
+const seatToken = () => SEAT_OBSERVED ?? SEAT;
+const withSeat = () => profileCalls().filter((s) => s.auth === `Bearer ${seatToken()}`);
 
 try {
   const { app, win } = await launch();
@@ -283,7 +345,7 @@ try {
       assert.ok(!before.some((r) => r.includes("리허설 끝내기")),
         "안 돌고 있는데 끝내기가 보인다 — when 절이 안 먹는다"));
 
-    const baselineSeat = withToken(SEAT).length;
+    const baselineSeat = withSeat().length;
     await step("대조군: 아직 좌석 토큰으로 나간 요청이 없다", async () =>
       assert.equal(baselineSeat, 0));
 
@@ -298,8 +360,24 @@ try {
     report.steps.wire = seen.map((s) => ({ method: s.method, url: s.url, auth: s.auth ? s.auth.slice(0, 18) + "…" : null }));
 
     // ── 전환이 실제로 일어났는가 (대조군 — 이게 먼저다) ─────────────
+    // 좌석 토큰과 학생 토큰은 **앞부분이 같다**(둘 다 `{"c":"boah-dental-…"` 로 시작).
+    // 잘라 놓은 로그만 보면 구분이 안 되므로, 둘이 실제로 다른 값인지와 짝 실행에서
+    // 좌석을 서버에서 배워 왔는지를 증거에 남긴다. 읽는 사람이 내 추론을 믿지
+    // 않아도 되게 하는 것이 목적이다.
+    report.tokens = {
+      studentHead: STUDENT.slice(0, 24),
+      seatHead: seatToken().slice(0, 24),
+      seatLearnedFromServer: SEAT_OBSERVED !== undefined,
+      seatDiffersFromStudent: seatToken() !== STUDENT,
+    };
+    await step("좌석 토큰이 학생 토큰과 실제로 다른 값이다", async () => {
+      assert.notEqual(seatToken(), STUDENT, "좌석과 학생이 같은 토큰이면 아래는 무의미하다");
+      if (UPSTREAM) {
+        assert.ok(SEAT_OBSERVED, "짝 실행인데 좌석을 서버에서 못 배웠다 — 합성 값과 비교하고 있다");
+      }
+    });
     await step("전환이 실제로 일어났다 — 좌석 토큰으로 프로필을 가져갔다", async () =>
-      assert.ok(withToken(SEAT).length > baselineSeat,
+      assert.ok(withSeat().length > baselineSeat,
         "좌석 토큰으로 나간 요청이 0건 — 아래 헤더 단언이 전부 헛돈다"));
 
     // ── 세 구간의 자격 ──────────────────────────────────────────────
@@ -312,8 +390,11 @@ try {
       const r = seen.filter((s) => s.url.includes("/rehearsal/redeem"));
       assert.equal(r.length, 1, `교환 요청 ${r.length}건`);
       assert.equal(r[0].auth, undefined, "교환에 자격이 실렸다 — ARC-02");
-      assert.ok(!r[0].url.includes(TICKET), "교환권이 URL 에 실렸다");
-      assert.deepEqual(JSON.parse(r[0].body), { ticket: TICKET });
+      const sent = JSON.parse(r[0].body);
+      assert.equal(Object.keys(sent).join(","), "ticket", "본문에 교환권 말고 다른 게 실렸다");
+      assert.match(sent.ticket, /^[A-Za-z0-9_-]{16,256}$/);
+      assert.ok(!r[0].url.includes(sent.ticket), "교환권이 URL 에 실렸다");
+      if (!UPSTREAM) assert.equal(sent.ticket, TICKET);
     });
     await step("리허설 중 issuer 로 나간 프로필·채팅 요청이 0건이다", async () => {
       const leaked = seen.filter((s) => s.auth === `Bearer ${ISSUER}` && !s.url.includes("/rehearsal-tickets"));
@@ -352,7 +433,7 @@ try {
         "when 절이 안 바뀌었다 — 리허설 상태가 화면에 반영되지 않았다"));
 
     // ── 돌아온다 ────────────────────────────────────────────────────
-    const seatBeforeReturn = withToken(SEAT).length;
+    const seatBeforeReturn = withSeat().length;
     const studentBeforeReturn = withToken(STUDENT).length;
     const ended = await runPalette(win, "리허설 끝내기");
     assert.ok(ended.ran, "끝내기를 실행하지 못했다");
@@ -361,9 +442,20 @@ try {
     await step("돌아왔다 — 이전 참여 자격으로 다시 나간 요청이 있다", async () =>
       assert.ok(withToken(STUDENT).length > studentBeforeReturn,
         "복귀 후 원래 자격으로 나간 요청이 없다"));
-    await step("복귀 뒤 좌석 토큰으로 더 나가지 않는다", async () => {
-      const after = withToken(SEAT).length;
-      assert.equal(after, seatBeforeReturn, `복귀 후에도 좌석으로 ${after - seatBeforeReturn}건 더 나갔다`);
+    // 되돌아올 때도 **같은 경합이 거울상으로** 있다. 리허설 중에 출발한 조회가
+    // 복귀 뒤에 착지한다. 처음엔 "복귀 뒤 좌석으로 0건" 으로 단정했는데 한 번은
+    // 통과하고 한 번은 3 !== 2 로 깨졌다 — **타이밍에 따라 갈리는 단정**이었다.
+    //
+    // 그래서 "더 안 나간다" 가 아니라 **"이전 자격으로 정착한다"** 를 잰다. 그것이
+    // 강사가 실제로 겪는 것이고(돌아와 보니 원래 수업이다), 경합과 무관하게 참이다.
+    // 늦게 착지한 좌석 조회 수는 세어서 증거에 남긴다 — 숨기지 않고 보이게 둔다.
+    await step("복귀 뒤 창이 이전 자격으로 정착한다 (마지막 프로필 조회가 이전 자격)", async () => {
+      const calls = profileCalls();
+      const last = calls[calls.length - 1];
+      assert.ok(last, "복귀 뒤 프로필 조회가 한 건도 없다");
+      assert.equal(last.auth, `Bearer ${STUDENT}`,
+        "창이 이전 자격으로 돌아오지 않았다 — 마지막 조회가 좌석이다");
+      report.steps.lateSeatLandings = withSeat().length - seatBeforeReturn;
     });
     const afterScan = await paletteItems(win);
     await win.keyboard.press("Escape");

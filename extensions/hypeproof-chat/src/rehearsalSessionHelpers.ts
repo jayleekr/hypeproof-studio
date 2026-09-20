@@ -35,11 +35,21 @@ export interface LessonRef {
   version: string;
 }
 
-/** 교환권 발급 경로. `#1164` 의 `routes/authoring.ts` 가 여는 자리. */
+/**
+ * 교환권 발급 경로.
+ *
+ * `/admin` 아래다 — `routes/admin.ts` 가 `admin.route("/", authoring)` 으로 저작
+ * 라우터를 얹고, 그 root 가 `/cohorts/:cohort/authoring/:course` 다. `/v1` 이 아니다.
+ *
+ * 첫 판본은 `/v1/authoring/...` 이었고 **스텁이 그 실수를 받아 줬다**
+ * (`url.includes("/rehearsal-tickets")` 로 느슨하게 맞췄다). 실물 worker 를 물려
+ * 보고서야 드러났다 — 스텁은 내가 기대하는 서버를 흉내내므로 내 오해까지 같이
+ * 흉내낸다. 그래서 이 경로는 **짐작이 아니라 라우터 등록을 읽고** 적었다.
+ */
 export function ticketPath(ref: LessonRef): string {
   return (
-    `/v1/authoring/${encodeURIComponent(ref.cohort)}` +
-    `/${encodeURIComponent(ref.course)}` +
+    `/admin/cohorts/${encodeURIComponent(ref.cohort)}` +
+    `/authoring/${encodeURIComponent(ref.course)}` +
     `/versions/${encodeURIComponent(ref.version)}/rehearsal-tickets`
   );
 }

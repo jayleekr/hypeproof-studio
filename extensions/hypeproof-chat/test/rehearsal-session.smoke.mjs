@@ -41,9 +41,11 @@ const headerOf = (init, name) => {
 
 // ─── 경로와 모양 ──────────────────────────────────────────────────────
 {
+  // 라우터 등록에서 읽은 경로다: admin.route("/", authoring) + root
+  // "/cohorts/:cohort/authoring/:course". `/v1` 아래가 아니다.
   assert.equal(
     H.ticketPath(REF),
-    "/v1/authoring/boah-dental-2026-a/dental-home/versions/m2026.09.21-1/rehearsal-tickets",
+    "/admin/cohorts/boah-dental-2026-a/authoring/dental-home/versions/m2026.09.21-1/rehearsal-tickets",
   );
   // 좌표에 슬래시가 들어와도 경로를 쪼개지 못한다.
   assert.ok(!H.ticketPath({ ...REF, course: "a/b" }).includes("a/b"));
@@ -62,7 +64,7 @@ const headerOf = (init, name) => {
   assert.equal(rec.calls[0].init.method, "POST");
   assert.equal(
     rec.calls[0].url,
-    "https://api.example.test/v1/authoring/boah-dental-2026-a/dental-home/versions/m2026.09.21-1/rehearsal-tickets",
+    "https://api.example.test/admin/cohorts/boah-dental-2026-a/authoring/dental-home/versions/m2026.09.21-1/rehearsal-tickets",
   );
   console.log("✅ 발급: POST 1건이 실제로 나간다 (대조군)");
 }
