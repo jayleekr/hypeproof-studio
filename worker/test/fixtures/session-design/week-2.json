@@ -1,0 +1,34 @@
+{
+  "schema": "hps-session-design/1",
+  "title": "2주차 · Value Proposition",
+  "audience": "국제고 2학년 · GlobalBuddy 팀",
+  "duration_minutes": 120,
+  "objective": "그 사람이 지금 쓰는 시간/돈보다 내 것이 나은가?",
+  "prerequisites": "1주차 문제 문장과 인터뷰 기록 폴더",
+  "starter": "globalbuddy-interviews/ (1주차 기록 사본, 원본 보존)",
+  "learning": {
+    "week": 2,
+    "mission": "그 사람이 지금 쓰는 시간/돈보다 내 것이 나은가?",
+    "completion": [
+      { "id": "c1", "text": "지금 쓰는 대안과 그 비용을 사용자의 말로 기록했습니다", "event": "external_feedback_received" },
+      { "id": "c2", "text": "인용한 말을 근거로 가치 한 줄을 정하거나 고쳤습니다", "event": "decision_revised" }
+    ],
+    "observe": [
+      "사용자의 말로 가치가 바뀌는가",
+      "기능보다 상황과 비용을 보는가"
+    ],
+    "never": [
+      "“AI 기반 맞춤형 플랫폼” 같은 추상 문구를 먼저 생성하지 않는다."
+    ],
+    "evidence_types": ["intent", "action", "decision"],
+    "source_kinds": ["interview", "link", "none"],
+    "reflection": { "changed_mind": true, "next_experiment": true }
+  },
+  "steps": [
+    { "id": "alternatives", "title": "현재 대안 카드", "instructions": "교환학생이 지금 정보를 얻는 방법(친구에게 묻기, 학교 홈페이지, 단톡방)을 하나씩 카드로 적습니다.", "hint": "쓰지 않는 방법이 아니라 실제로 쓰는 방법만 적습니다.", "acceptance": "현재 대안 세 개가 각각 어디서 확인한 것인지와 함께 파일에 적혀 있습니다.", "ui": "canvas_editor", "evidence": "action", "help": { "default": "hint", "allowed": ["hint", "co_edit"] } },
+    { "id": "cost", "title": "pain / time 기록", "instructions": "각 대안으로 답을 얻기까지 걸린 시간과 겪은 불편을 1주차 인터뷰 기록에서 찾아 적습니다.", "hint": "기록에 없으면 짐작해서 채우지 말고 없다고 적습니다.", "acceptance": "대안마다 걸린 시간 또는 불편이 인용과 함께 적혀 있고, 모르는 칸은 없음으로 표시돼 있습니다.", "ui": "evidence_note", "evidence": "action" },
+    { "id": "quote", "title": "사용자 문장 인용", "instructions": "가치와 관련해 사용자가 한 말을 그대로 옮겨 적고 누가 언제 한 말인지 함께 남깁니다.", "hint": "내 해석 문장과 사용자의 원문을 섞지 않고 따로 적습니다.", "acceptance": "사용자 인용 두 개 이상이 출처(누가·언제)와 함께 기록돼 있습니다.", "ui": "evidence_note", "evidence": "action", "gate": "external_feedback_received" },
+    { "id": "value", "title": "value statement", "instructions": "인용한 말과 어긋나는 부분을 보고 가치 한 줄을 정하거나 고칩니다. 고쳤다면 어느 말 때문에 고쳤는지 적습니다.", "hint": "기능 이름 대신 그 사람이 겪는 상황과 비용으로 씁니다.", "acceptance": "가치 한 줄과 그렇게 정한 이유가 인용과 연결돼 파일에 적혀 있습니다.", "ui": "decision_form", "evidence": "decision", "gate": "decision_revised" }
+  ],
+  "assistant": { "display_name": "코치" }
+}
