@@ -197,15 +197,25 @@ const headerOf = (init, name) => {
     }
   };
   walk("");
-  // issuer 키를 읽어도 되는 곳: 발급 흐름 · 강사 면 게이트 · 리허설 교환권 요청.
-  // 채팅·도구·프록시 경로는 여기 없어야 한다.
-  assert.deepEqual(readers.sort(), [
-    "chalkSurface.ts",
-    "extension.ts",
-    "mintStudentToken.ts",
-    "mintStudentTokenHelpers.ts",
-    "rehearsalSession.ts",
-  ], `issuer 키를 읽는 곳이 늘었다: ${readers.join(", ")}`);
+  // issuer 키를 읽어도 되는 곳과 **각각의 이유**. 숫자만 적어 두면 다음 사람이
+  // 숫자를 고치고 지나간다 — 6번째가 정당한지 판단하려면 앞의 다섯이 왜 정당한지
+  // 읽을 수 있어야 한다.
+  const ALLOWED = {
+    "mintStudentTokenHelpers.ts": "키를 선언하는 곳",
+    "mintStudentToken.ts": "강사가 학생 토큰을 발급하는 흐름 — 저작 권한이 맞다",
+    "extension.ts": "위 명령을 등록하고 '지우기' 를 처리한다",
+    "chalkSurface.ts": "강사 면을 보일지 정하는 게이트(표시 전용, 집행은 서버)",
+    "rehearsalSession.ts": "리허설 교환권을 받는 저작 호출 — 교환 자체는 무인증이다",
+  };
+  const unexpected = readers.filter((f) => !(f in ALLOWED));
+  assert.deepEqual(unexpected, [],
+    `issuer 키를 읽는 새 파일: ${unexpected.join(", ")}\n` +
+    `여기 추가하려면 그 파일이 **저작 권한으로 부르는 곳**인지 먼저 답해라. ` +
+    `채팅·도구·프록시 경로라면 답은 아니오다 — 좌석 토큰은 참여 자격 키에서 온다.\n` +
+    `현재 허용: ${Object.entries(ALLOWED).map(([f, why]) => `${f}(${why})`).join(" · ")}`);
+  const missing = Object.keys(ALLOWED).filter((f) => !readers.includes(f));
+  assert.deepEqual(missing, [],
+    `허용 목록에 있는데 더 이상 읽지 않는 파일: ${missing.join(", ")} — 목록을 줄여라`);
   for (const f of ["proxyClient.ts", "proxyClientHelpers.ts", "chatPanelProvider.ts", "sdkCoach.ts"]) {
     assert.ok(!readers.includes(f), `${f} 가 issuer 키를 읽는다 — 채팅 경로에 issuer 가 샌다`);
   }
