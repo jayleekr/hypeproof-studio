@@ -1,10 +1,13 @@
+/* SX-49: --studio-* 는 --hp-* 의 별칭이다. 선택자는 그대로 두고 값만 토큰을 가리킨다
+ * (설계 문서 §디자인 시스템 "기존 스타일 이행"). 여섯 값은 tokens.css 와 문자 그대로
+ * 같은 색이므로 렌더 결과는 바뀌지 않는다. 값의 정본은 tokens.css 하나다. */
 .studio-start,.studio-disconnected {
-  --studio-bg:#151D19;
-  --studio-panel:#202C24;
-  --studio-line:#35483A;
-  --studio-text:#F2F4E8;
-  --studio-muted:#ACB9A5;
-  --studio-accent:#D5F279;
+  --studio-bg:var(--hp-bg);
+  --studio-panel:var(--hp-panel);
+  --studio-line:var(--hp-line);
+  --studio-text:var(--hp-ink);
+  --studio-muted:var(--hp-muted);
+  --studio-accent:var(--hp-accent);
   color:var(--studio-text);
   background:var(--studio-bg);
   font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
