@@ -101,10 +101,12 @@ async function discardBody(env: Env, job: Job, key: string, actor: { kind: strin
 /** The learner withdrew while this job was leased: the job ends here. It is not re-queued, so their words are not read or sent to a provider again. */
 const WITHDRAWN = { state: 'withdrawn', reason: 'withdrawn', draft_digest: '', ok: false } as const;
 const closeIfWithdrawn = (db: Db, job: Job, generation: number, now: number) => db.prepare("UPDATE classroom_report_jobs SET state='withdrawn',reason='withdrawn',draft_digest='',summary_json='{}',lease_expires_at=0,revision=revision+1,updated_at=?3 WHERE id=?1 AND state='leased' AND lease_generation=?2 AND EXISTS (SELECT 1 FROM classroom_collect_tombstones t WHERE t.class_run_id=classroom_report_jobs.class_run_id AND t.student_id=classroom_report_jobs.student_id) RETURNING id").bind(job.id, generation, now).first();
+/** Refused because the learner withdrew — whether this call closed the job or the erasure already had. Anything else refused is a lost lease. */
+const refusedAs = async (db: Db, job: Job, generation: number, now: number) => ((await closeIfWithdrawn(db, job, generation, now)) || (await db.prepare("SELECT 1 FROM classroom_report_jobs WHERE id=? AND state='withdrawn'").bind(job.id).first())) ? WITHDRAWN : null;
 async function saveResult(env: Env, job: Job, generation: number, v: ReturnType<typeof validateDraft> | { ok: false; state: 'failed'; reason: string }, actor: { kind: string; id: string }, now: number) {
   const db = env.HPS_DB; let digest = '', summary = {}, key = '';
   if (v.ok) {
-    if (!(await db.prepare(`SELECT 1 FROM classroom_report_jobs WHERE id=?1 AND${liveLease}`).bind(job.id, generation).first())) return (await closeIfWithdrawn(db, job, generation, now)) ? WITHDRAWN : null;
+    if (!(await db.prepare(`SELECT 1 FROM classroom_report_jobs WHERE id=?1 AND${liveLease}`).bind(job.id, generation).first())) return refusedAs(db, job, generation, now);
     const body = JSON.stringify(v.draft); digest = await sha256Hex(body); key = draftKey(job, generation);
     await env.HPS_TRACES.put(key, body, { httpMetadata: { contentType: 'application/json' } });
     summary = { observed: v.draft.findings.filter((f) => f.status === 'observed').length, not_yet_seen: v.draft.findings.filter((f) => f.status !== 'observed').length };
@@ -112,7 +114,7 @@ async function saveResult(env: Env, job: Job, generation: number, v: ReturnType<
   let saved: { state: string } | null = null;
   try { saved = await db.prepare(`UPDATE classroom_report_jobs SET state=?3,reason=?4,draft_digest=?5,summary_json=?6,lease_expires_at=0,revision=revision+1,updated_at=?7 WHERE id=?1 AND${liveLease} RETURNING state`).bind(job.id, generation, v.state, v.reason, digest, JSON.stringify(summary), now).first<{ state: string }>(); }
   catch (err) { if (key) await discardBody(env, job, key, actor, now); throw err; }
-  if (!saved) { if (key) await discardBody(env, job, key, actor, now); return (await closeIfWithdrawn(db, job, generation, now)) ? WITHDRAWN : null; }
+  if (!saved) { if (key) await discardBody(env, job, key, actor, now); return refusedAs(db, job, generation, now); }
   if (key) { // Bodies left by earlier generations of this job (a lease that died after its write) are not the draft: remove them.
     try { for (const o of (await env.HPS_TRACES.list({ prefix: draftPrefix(job), limit: 100 })).objects) if (o.key !== key) await env.HPS_TRACES.delete(o.key); } catch { /* found again at erasure */ }
   }
