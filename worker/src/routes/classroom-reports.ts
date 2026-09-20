@@ -144,8 +144,10 @@ async function evaluateLeased(env: Env, job: Job, profileId: string, actor: { ki
   const text = await input.text();
   try {
     const out = await evaluateInput(env, cfg, model, job, text, evaluatorTransport);
-    await audit(db, job.class_run_id, 'system', 'evaluator', 'report_evaluated', { job_id: job.id, evaluator: cfg.id, analysis_ai_model: out.analysis_ai_model, usage: out.usage }, now).run();
-    return saveResult(env, job, job.lease_generation, validateDraft(out.draft, job, text), actor, now);
+    await audit(db, job.class_run_id, 'system', 'evaluator', 'report_evaluated', { job_id: job.id, evaluator: cfg.id, analysis_ai_model: out.analysis_ai_model, usage: out.usage, ...(out.truncated ? { input_truncated: out.truncated } : {}) }, now).run();
+    const verdict = validateDraft(out.draft, job, text);
+    // Only part of the record was read (cost guard): the reviewer is told, whatever the record's own coverage says.
+    return saveResult(env, job, job.lease_generation, verdict.ok && out.truncated ? { ...verdict, state: 'partial', reason: 'input_truncated' } : verdict, actor, now);
   } catch (err) {
     const code = String((err as Error)?.message ?? 'evaluator_failed').replace(/[^a-z0-9_]/g, '').slice(0, 48) || 'evaluator_failed';
     // Transient provider trouble: back to the queue, at most 3 leases. After that it is a visible failure, not a silent loop.
