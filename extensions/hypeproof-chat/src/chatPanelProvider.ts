@@ -5,16 +5,17 @@ import { verifyActivity } from './proxyClient';
 import { fetchAccessView, sendBudgetRequest, accessProfile, type AccessState } from './accessClient';
 import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice, selectedEffort, observedEffortResult, type SavedEffortChoice } from './modelSelection';
 import { modelEchoVerdict, modelEchoNotice, describeModelEcho, type ModelEchoInput } from './modelEchoHelpers';
-/** 턴마다 달라지는 부분을 뺀 나머지 — `resolved` 는 응답이 오면 채운다. */
+/** Everything except the part that changes per turn — `resolved` is filled in when the response arrives. */
 type ModelEchoContext = Omit<ModelEchoInput, 'resolved'>;
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import {createHash} from 'node:crypto';
 import {NativeObservationRecorder} from './nativeObservationRecorder';
-import {OBSERVATION_FORMAT, validateFindings, type ObservationBatch} from './nativeObservationContract';
+import {OBSERVATION_FORMATS, validateFindings, type ObservationBatch} from './nativeObservationContract';
+import {acceptSubmit, learningEventRequest, learningState, type CompletionItem} from './learningStateHelpers';
+import {observationHeaders} from './proxyClientHelpers.ts';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
-import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
@@ -37,10 +38,14 @@ import {
   pickRevealTabIndex,
 } from "./browserControlHelpers";
 
-// #525 — 코어에 등록된 일반 에디터 명령. 브라우저 전용 API 로는 탭을 앞으로 가져올
-// 수 없어서(BrowserTab 에 show()/reveal() 없음) 이 경로를 쓴다. `openEditorAtIndex`
-// 는 **활성 그룹**에서 0-based 인덱스로 연다(코어 editorCommands.ts) — 그래서 그룹
-// 활성화가 먼저다.
+// #525 — a plain editor command registered in the core. The browser-only API cannot
+// bring a tab to the front (BrowserTab has no show()/reveal()), so this path is used
+// instead. `openEditorAtIndex` opens by 0-based index within the **active group**
+// (core editorCommands.ts) — which is why activating the group comes first.
+/** The `/1` key is kept byte-for-byte and only `/2` uses a different slot. See the comment above. */
+const observationKey = (b: {format?: string; scope: string; program: string}) =>
+  'hps.observation.'+(b.format === 'hps-observation/2' ? '2' : '1')+'.'+b.scope+'.'+b.program;
+
 const FOCUS_FIRST_GROUP = "workbench.action.focusFirstEditorGroup";
 const FOCUS_SECOND_GROUP = "workbench.action.focusSecondEditorGroup";
 const OPEN_EDITOR_AT_INDEX = "workbench.action.openEditorAtIndex";
@@ -143,9 +148,10 @@ import {
 } from "./heartbeat";
 
 /**
- * 승인 모달 문구. `kind` 별로 무엇을 하려는지 한국어로 말하고, 확인 버튼도
- * 그 행동의 동사로 쓴다 — `Approve` 보다 `저장`/`위임`이 무엇을 승인하는지
- * 분명하다. 취소는 VS Code 가 항상 붙이므로 따로 만들지 않는다.
+ * Approval modal copy. It says in Korean what is about to happen, per `kind`, and the
+ * confirm button is the verb of that action — `저장`/`위임` makes what is being
+ * approved clearer than `Approve` does. Cancel is not written here: VS Code always
+ * adds it.
  *
  * #747 — the titles live in `coachIdentity.approvalCopyFor(name)` and are built
  * from the resolved AI name (lesson-fixed, student-chosen, or "코치"). With the
@@ -155,7 +161,7 @@ import {
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private effortNotice?: string;
-  /** #897 H-13 — 이 턴에 모델 대체 안내를 이미 붙였나. 좌석당 턴은 하나다(REQ-M37 ③). */
+  /** #897 H-13 — has the model-substitution notice already been attached to this turn? One turn per seat (REQ-M37 ③). */
   private modelNoticeTurn?: string;
   private effortScope?: string;
   private effortResult?: import('./protocol').ChatConfig['effortResult'];
@@ -204,62 +210,138 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private nativeLearningPath: {title:string;url:string;reason:string} | null = null;
   private observationAssessment: AbortController | null = null;
   private observationWrites: Promise<void> = Promise.resolve();
+  /**
+   * Puts the format into the storage key.
+   *
+   * The `/1` key is kept byte-for-byte (an existing saved batch still opens). `/2`
+   * uses a different slot — sharing one slot would open a `/1`-saved batch in a `/2`
+   * context, and `recordLearningEvent()` would then be blocked by
+   * `observation_format`, leaving the state where **the configuration is right but
+   * learning events just quietly stop accumulating**.
+   */
   private async prepareObservation(proxyUrl: string, token: string | undefined, profile: ResolvedProfile | null) {
     await this.observationWrites;
     this.nativeObservation = null;
-    if (profile?.observation?.format !== OBSERVATION_FORMAT || !token) return null;
+    // P1 — both `/1` and `/2` are accepted. Which one is used is the profile's call
+    // (design §관측 이벤트와 필드: "the profile's observation.format decides which one is used").
+    if (!OBSERVATION_FORMATS.includes(profile?.observation?.format as never) || !token) return null;
     try {
-      const response = await fetch(proxyUrl.replace(/\/$/, '')+'/observations/context', {headers:{authorization:'Bearer '+token},signal:AbortSignal.timeout(5000)});
+      // **P1 was still dead because this header was missing.** `/v1/profile` was
+      // served `/2` while this one request went out without the header and got back a
+      // `/1` context, so the recorder was built as `/1` and `currentLearningRecorder()`
+      // stayed null forever. The client asks with one voice.
+      const response = await fetch(proxyUrl.replace(/\/$/, '')+'/observations/context', {headers:observationHeaders(token),signal:AbortSignal.timeout(5000)});
       if (!response.ok) throw Error('observation_unavailable');
       const context = await response.json() as Omit<ObservationBatch,'events'> & {learning_path?:{title:string;url:string;reason:string}};
       this.nativeLearningPath=context.learning_path??null;
-      const key='hps.observation.1.'+context.scope+'.'+context.program;
+      const key=observationKey(context);
       this.nativeObservation = new NativeObservationRecorder(context, this.context.workspaceState.get(key));
       this.nativeObservationError=null;
       return this.nativeObservation;
     } catch { this.nativeObservationError='관찰 기록을 연결하지 못했습니다. 기존 작업은 계속할 수 있습니다.'; return null; }
   }
   private persistObservation(recorder: NativeObservationRecorder) {
-    const value=recorder.snapshot(), key='hps.observation.1.'+value.scope+'.'+value.program;
+    const value=recorder.snapshot(), key=observationKey(value);
     this.observationWrites=this.observationWrites.then(async()=>{await this.context.workspaceState.update(key,value);}).catch(()=>{this.nativeObservationError='관찰 기록 저장에 실패했습니다.';});
   }
+  /** Drawer D is open. A view state, so it is never used in a verdict. */
+  private learningDrawerOpen = false;
+
+  /** Learning events are made only on a connection using `/2`. Otherwise null, and region D is not drawn. */
+  private async currentLearningRecorder(): Promise<NativeObservationRecorder | null> {
+    const token = await this.context.secrets.get(TOKEN_KEY);
+    const proxy = vscode.workspace.getConfiguration('hypeproofChat').get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1');
+    const recorder = await this.prepareObservation(proxy, token, await this.ensureProfile());
+    return recorder?.batch.format === 'hps-observation/2' ? recorder : null;
+  }
+
+  /**
+   * Design §과제 흐름 상태 기계 — `task-<first 16 chars of the module sha256>-<first 8
+   * chars of the activity id>`. Two tasks are never merged just because they share a
+   * folder (MC-08).
+   */
+  private learningTaskId(lessonSha: string | undefined, activityId: string | undefined) {
+    return 'task-' + String(lessonSha ?? '').slice(0,16) + '-' + String(activityId ?? '').slice(0,8);
+  }
+
+  /**
+   * The completion conditions. When the session design declares none it is an **empty
+   * list**, and that fact travels all the way to the screen as
+   * `learningState.declared=false`. No default is invented here.
+   */
+  private learningCompletion(profile: ResolvedProfile | null): CompletionItem[] {
+    const rows = profile?.lesson?.content?.learning?.completion ?? [];
+    return rows.map(r => ({ id: r.id, event: r.event as CompletionItem['event'], label: r.text }));
+  }
+
+  /**
+   * Uses the step id the webview sent, but **only after checking it**. A step that is
+   * not part of this lesson falls back to the first step — if the webview's string
+   * were stored straight into `context.step_id`, there would later be no way to tell
+   * which step the evidence belongs to.
+   */
+  private learningStep(profile: ResolvedProfile | null, wanted: string | undefined) {
+    const steps = profile?.lesson?.content?.steps ?? [];
+    return steps.find(s => s.id === wanted) ?? steps[0];
+  }
+
+  /** The learning state the host computes and sends down to the webview. Never stored; computed every time. */
+  private async postLearningState() {
+    const recorder = await this.currentLearningRecorder();
+    if (!recorder) return;
+    const profile = await this.ensureProfile();
+    const task = this.learningTaskId(profile?.lesson?.sha256, activityConnections(this.context)?.current?.id);
+    await this.post({
+      type: 'learningState',
+      state: learningState({
+        task,
+        events: recorder.batch.events,
+        completion: this.learningCompletion(profile),
+      }),
+    });
+  }
+
   private view?: vscode.WebviewView;
   private editorChat?: vscode.WebviewPanel;
   private activeStreams = new Map<string, AbortController>();
   // A send owns its activity before its first authentication await, through persistence.
   private pendingSends = 0;
   /**
-   * #503 — 진행 중인 턴의 단일 타임라인(스트림 id 별). 웹뷰가 화면에 그리는 것과
-   * **같은 순수 리듀서**로 만들어 그대로 영속화한다. 규칙이 두 벌이면 창을 다시
-   * 열었을 때 순서가 달라진다.
+   * #503 — the single timeline of the in-flight turn (per stream id). It is built with
+   * the **same pure reducer** the webview draws with and persisted exactly as it is.
+   * Two sets of rules would mean a different order once the window is reopened.
    */
   private turnTimelines = new Map<string, TimelineState>();
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
   /**
-   * #476 — agent-sdk → proxy 폴백을 참가자에게 알린 적이 있는가 (세션 1회).
+   * #476 — has the participant ever been told about the agent-sdk → proxy fallback
+   * (once per session)?
    *
-   * 매 턴 붙이지 않는 이유: 폴백은 그 머신에서 **계속** 일어난다(시드가 없으면
-   * 다음 턴도 마찬가지). 턴마다 같은 경고가 뜨면 두 번째부터는 아무도 안 읽고,
-   * 대화 기록이 경고로 덮인다. 능력 상실은 상태이지 사건이 아니다.
+   * Why it is not attached every turn: the fallback keeps happening on that machine
+   * (without the seed the next turn is the same). The same warning every turn means
+   * nobody reads it from the second one on, and the conversation record gets buried
+   * under warnings. Losing a capability is a state, not an event.
    */
   private fallbackNoticeShown = false;
-  /** #596 — 세션 종료 업로드 배너를 이번 활성화에 이미 냈는가 (토스트 스팸 방지). */
+  /** #596 — has the session-end upload banner already been shown this activation (toast-spam guard)? */
   private sessionEndUploadOffered = false;
   /**
-   * #476 — 개발자용 진단 채널. 이전에는 폴백이 `console.warn` 한 줄이었는데,
-   * 확장에 `createOutputChannel` 이 **한 군데도 없어서** 그 줄은 어디에도 남지
-   * 않았다: 사고 당일 전 세션의 `exthost.log` 에서 `[coach]` 문자열이 0건이었다.
-   * 즉 사후에 "이 교실이 프록시로 돌았는가" 를 확인할 방법이 없었다.
+   * #476 — the developer-facing diagnostic channel. The fallback used to be a single
+   * `console.warn`, but the extension had `createOutputChannel` **nowhere at all**, so
+   * that line survived nowhere: on the day of the incident, the string `[coach]`
+   * appeared 0 times across every session's `exthost.log`. In other words there was no
+   * way, after the fact, to check "did this classroom run on the proxy?".
    */
   private logChannel: vscode.OutputChannel | null = null;
   /**
-   * #897 (VO-01) — 진행 중인 음성 capability 프로브. 명령당 하나이고, 응답이 오거나
-   * 타임아웃이면 지워진다. 웹뷰가 없거나 대답하지 않으면 **측정 안 됨**으로 끝나야
-   * 하므로(막혔다고 적으면 안 된다) 여기서 null 을 돌려준다.
+   * #897 (VO-01) — the voice capability probe in flight. One per command, cleared when
+   * a response arrives or it times out. With no webview, or one that does not answer,
+   * this has to end as **not measured** (it must not be written down as blocked), so
+   * null is returned here.
    */
   private voiceProbes = new Map<string, (o: import("./voiceCapabilityHelpers").VoiceProbeObservations) => void>();
 
-  /** 진단 명령이 쓰는 표면. 웹뷰가 닫혀 있으면 null 을 돌려 측정 안 됨으로 남긴다. */
+  /** The surface the diagnostic command uses. With the webview closed it returns null, leaving it as not measured. */
   async probeVoiceCapability(
     timeoutMs: number,
   ): Promise<import("./voiceCapabilityHelpers").VoiceProbeObservations | null> {
@@ -275,7 +357,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return observations;
   }
 
-  /** 출력 채널 — 진단이 판정을 남길 자리. 폴백 공지(#476)와 같은 채널을 쓴다. */
+  /** The output channel — where a diagnosis leaves its verdict. Same channel as the fallback notice (#476). */
   voiceLogChannel(): vscode.OutputChannel {
     this.logChannel ??= vscode.window.createOutputChannel("HypeProof Coach");
     return this.logChannel;
@@ -315,11 +397,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private readonly approvedCommandSignatures = new Set<string>();
   /**
-   * "이 사이트는 항상 허용" 을 누른 오리진. 셸 시그니처와 같은 규율 —
-   * 세션 한정, 저장하지 않는다. 오리진 단위라 다른 사이트는 다시 묻는다.
+   * Origins the participant pressed "이 사이트는 항상 허용" on. The same discipline as
+   * the shell signatures — session-scoped, never persisted. It is per origin, so a
+   * different site is asked again.
    */
   private readonly approvedBrowserOrigins = new Set<string>();
-  /** #457 — SDK 경로의 검사 도구용 CDP 실행기. 첫 사용 때 만든다. */
+  /** #457 — the CDP executor for the SDK path's inspection tools. Created on first use. */
   private mcpBrowser?: BrowserControl;
   // Stashed for the bug-report flow (#64). Updated whenever a stream errors
   // or completes — the Worker's request-id middleware (PR #49) plumbs an
@@ -339,8 +422,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly preview: PreviewProvider,
     private readonly liveServer: LiveServer,
-    private readonly assetScores?: AssetScoreSink,
-    /** #580 — 세션 로그 로컬 스풀. Optional: 테스트·구 호출자는 기록 없이 동작. */
+    /** #580 — the local session-log spool. Optional: tests and older callers run without recording. */
     private readonly spool?: SessionSpool,
   ) {}
 
@@ -432,8 +514,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * kid actually did, instead of guessing. Same consume-once channel as
    * attachPageContext (#278): history keeps the kid's clean text; only the
    * model sees the prepended line. Retries overwrite — the last round is the
-   * one the kid is talking about — but the attempt count is kept so "3번째
-   * 만에 성공" is visible to the coach.
+   * one the kid is talking about — but the attempt count is kept so "got it on the
+   * 3rd try" is visible to the coach.
    */
   attachQuestResult(result: Record<string, unknown>): void {
     const ok = result.ok === true;
@@ -448,9 +530,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       (attempts > 1 ? ` · ${attempts}번째 시도` : "") +
       `\n위 결과를 게스트 목소리로 한 줄 반응한 뒤 아이에게 넘겨줘. 결과에 없는 숫자는 지어내지 마.`;
     this.pendingPageImage = null;
-    // 2026-08-19 실기기 — 알림 문구("친구가 해봤어요 — 아직")는 아이에게 소음이다.
-    // 아이는 방금 자기가 해봐서 결과를 알고, 다음 말에 게스트가 반응하면 충분하다.
-    // 알림 없이 조용히 다음 턴에만 붙인다.
+    // 2026-08-19 on a real device — the notification copy ("친구가 해봤어요 — 아직")
+    // is noise to the child. The child just played it and already knows the result;
+    // the guest reacting in the next message is enough. Attached quietly to the next
+    // turn only, with no notification.
   }
   /** Rounds since the last success (a success resets it). */
   private questAttempts = 0;
@@ -519,9 +602,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 수업 로그 봉인 직전에 작업 폴더의 실제 index.html 을 마지막 증거로 남긴다.
-   * 마지막 AI 응답 뒤 아이가 직접 파일을 고쳤다면 채팅 원문만으로는 그 변화가
-   * 사라진다. 실패/파일 없음은 업로드 자체를 막지 않는 fail-soft 경로다.
+   * Just before the lesson log is sealed, leave the work folder's real index.html as
+   * the last piece of evidence. If the child edited the file by hand after the last
+   * AI response, that change disappears when only the chat text is kept. A failure or
+   * a missing file is a fail-soft path that never blocks the upload itself.
    */
   async captureFinalArtifactForSpool(): Promise<boolean> {
     if (!this.spool?.currentSessionDir()) return false;
@@ -650,7 +734,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       );
       if (choice !== "대화 지우기" || this.hasActiveStream() || key !== this.historyKey()) return;
       await this.context.workspaceState.update(key, []);
-      this.assetScores?.resetAssetScores();
       void this.post({ type: "history", messages: [] });
       // A cleared chat starts a new conversation, not a new trial allowance.
       void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
@@ -668,7 +751,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.lastProfileFailure = null;
     this.activeCohortId = null;
     this.nativeHistoryScope = null;
-    this.assetScores?.resetAssetScores();
   }
 
   /** #381 — cause of the most recent failed profile fetch, if any. */
@@ -948,29 +1030,33 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * #476 — agent-sdk → proxy 폴백을 **세 대상에게** 남긴다.
+   * #476 — records the agent-sdk → proxy fallback for **three audiences**.
    *
-   * 1. 개발자 — 전용 출력 채널. 이전의 `console.warn` 은 확장에
-   *    `createOutputChannel` 이 한 군데도 없어 `exthost.log` 에도 안 남았고,
-   *    사고 당일 전 세션에서 `[coach]` 문자열이 0건이었다. 사후 확인 자체가
-   *    불가능했다. 사유 원문을 그대로 싣는다 — `SdkUnavailableError` 메시지가
-   *    해석 후보 4개를 이미 나열한다.
-   * 2. 참가자 — 대화 타임라인의 한 줄(세션 1회). 무엇이 안 되고 무엇이 되는지
-   *    같이 말한다.
-   * 3. 강사 — 별도 채널을 만들지 않았다. 학생 화면의 그 한 줄이 강사가 교실을
-   *    돌며 볼 수 있는 실물이고, 대화 기록에 남으므로(REQ-C17) 사후에도 보인다.
-   *    워커까지 신호를 보내 `/console` 에서 교실 단위로 보는 것은 별건으로 남긴다.
+   * 1. The developer — a dedicated output channel. The previous `console.warn` left
+   *    nothing even in `exthost.log`, because the extension had `createOutputChannel`
+   *    nowhere at all; on the day of the incident the string `[coach]` appeared 0
+   *    times across every session. Checking after the fact was simply impossible. The
+   *    raw reason is carried verbatim — the `SdkUnavailableError` message already
+   *    lists the 4 candidate interpretations.
+   * 2. The participant — one line in the conversation timeline (once per session). It
+   *    says both what no longer works and what does.
+   * 3. The instructor — no separate channel was built. That one line on the student's
+   *    screen is the real thing an instructor walking the room can see, and it stays
+   *    in the conversation record (REQ-C17), so it is visible after the fact too.
+   *    Signalling the worker as well, to see it per classroom in `/console`, is left
+   *    as separate work.
    *
-   * 코치 자신에게 알리는 것은 **워커**가 한다 — `degradedRuntimeNoticeFor`
-   * (translate.ts). 런타임의 ground truth 가 라우트이고 프롬프트 소유자가
-   * 워커라서, 앱 릴리스 없이 배포만으로 반영된다.
+   * Telling the coach itself is the **worker's** job — `degradedRuntimeNoticeFor`
+   * (translate.ts). The runtime's ground truth is the route and the prompt's owner is
+   * the worker, so it lands with a deploy and needs no app release.
    */
   private noteSdkFallback(reason: string, streamId: string): void {
     this.logChannel ??= vscode.window.createOutputChannel("HypeProof Coach");
     this.logChannel.appendLine(sdkFallbackLogLine(reason, new Date()));
 
-    // 세션 1회. 폴백은 그 머신에서 계속 일어나므로(시드가 없으면 다음 턴도
-    // 마찬가지) 매 턴 붙이면 두 번째부터 아무도 안 읽고 기록이 경고로 덮인다.
+    // Once per session. The fallback keeps happening on that machine (without the
+    // seed the next turn is the same), so attaching it every turn means nobody reads
+    // it from the second one on and the record gets buried under warnings.
     if (this.fallbackNoticeShown) return;
     this.fallbackNoticeShown = true;
     this.postToolLog(streamId, {
@@ -982,20 +1068,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * #421 — 붙여넣은 이미지를 `<작업폴더>/assets/` 에 실제 파일로 저장한다.
+   * #421 — saves a pasted image as a real file under `<work folder>/assets/`.
    *
-   * 승인 게이트와의 관계 (이슈가 확인을 요청한 항목): 이건 **모델이 요청한 쓰기가
-   * 아니라 참가자가 방금 첨부한 자기 자료를 호스트가 보관하는 것**이다. 같은
-   * 계열의 선례가 이미 둘 있다 — `saveGameToWorkspace`(index.html)와
-   * `saveAgentMdIfPresent`(agent.md). 모달을 태우는 `resolveActionApproval` 은
-   * **모델발 액션**(writeFile/executeShell)의 게이트이고, 그 정책의 핵심인
-   * "워크스페이스 밖 절대경로 거절"은 여기서 구조적으로 성립한다: 경로가
-   * `resolveCoachCwd()` + 고정 하위 폴더 + mime 에서 뽑은 확장자로만 조립되고,
-   * 파일명은 참가자·모델 어느 쪽 문자열도 타지 않는다(#421 · REQ-C10~C13).
+   * Its relation to the approval gate (the item the issue asked to confirm): this is
+   * **not a write the model requested — it is the host keeping material the
+   * participant just attached themselves**. Two precedents of the same kind already
+   * exist — `saveGameToWorkspace` (index.html) and `saveAgentMdIfPresent` (agent.md).
+   * `resolveActionApproval`, which raises the modal, is the gate for
+   * **model-originated actions** (writeFile/executeShell), and the core of that
+   * policy — "refuse an absolute path outside the workspace" — holds structurally
+   * here: the path is assembled only from `resolveCoachCwd()` + a fixed subfolder +
+   * an extension taken from the mime type, and the filename rides on neither the
+   * participant's nor the model's string (#421 · REQ-C10~C13).
    *
-   * 실패는 조용히 넘기지 않는다 — 저장이 안 됐는데 코치만 "있다"고 믿으면
-   * 원래 증상으로 되돌아간다. 그때는 note 를 비우고(코치는 예전처럼 없는 것으로
-   * 취급) 참가자에게 한 줄 남긴다.
+   * A failure is not swallowed — if the save did not happen but the coach alone
+   * believes it "is there", we are back to the original symptom. In that case the
+   * note is emptied (the coach treats it as absent, as before) and one line is left
+   * for the participant.
    */
   private async savePastedImages(
     images: string[] | undefined,
@@ -1029,14 +1118,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         continue;
       }
       try {
-        // 같은 초에 같은 순번이 이미 있으면 이름을 올려 가며 빈 자리를 찾는다.
-        // 덮어쓰면 참가자가 앞서 붙인 사진이 소리 없이 사라진다.
+        // When the same index within the same second already exists, walk the name
+        // up until a free slot is found. Overwriting would silently lose a photo the
+        // participant pasted earlier.
         let name = pastedImageName(at, i + 1, parsed.ext);
         for (let dedupe = 1; dedupe <= 20; dedupe++) {
           try {
             await vscode.workspace.fs.stat(vscode.Uri.joinPath(dir, name));
           } catch {
-            break; // stat 실패 = 없음 = 이 이름을 쓴다
+            break; // stat failed = not there = this name is free
           }
           name = pastedImageName(at, i + 1, parsed.ext, dedupe);
         }
@@ -1084,14 +1174,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * Public so extension.ts (runLastCode) shares the same routing.
    */
   /**
-   * 새 세상을 index.html 에 쓰기 **전에** 지금 것을 '이전 세상/<제목>.html' 로 보관한다.
+   * **Before** a new world is written to index.html, archive the current one as
+   * '이전 세상/<title>.html'.
    *
-   * 2026-08-20 (#649) — 예전엔 `lastPrebuiltWorld === nextId` 면 통째로 건너뛰었다.
-   * 그 규칙이 실제 사고를 냈다: "초코 세상에 불 대신 물" 이 초코 세상을 다시 받아
-   * 왔는데, 같은 세상이라 보관을 건너뛴 채 아이가 한참 고쳐 둔 index.html 을
-   * 덮어썼다. 이제 기준은 id 가 아니라 **내용**이다 — 지금 파일이 새로 쓸 HTML 과
-   * 다르면 같은 세상을 다시 눌렀더라도 항상 보관한다. 보관 실패가 세상 열기를
-   * 막지는 않는다(아이 화면이 먼저다).
+   * 2026-08-20 (#649) — it used to skip the whole thing when
+   * `lastPrebuiltWorld === nextId`. That rule caused a real incident: "water instead
+   * of fire in 초코's world" fetched 초코's world again, and because it was the same
+   * world the archive was skipped and the index.html the child had spent a long time
+   * editing was overwritten. The criterion is now **content**, not id — if the
+   * current file differs from the HTML about to be written, it is always archived,
+   * even when the same world was clicked again. A failed archive does not block
+   * opening the world (the child's screen comes first).
    */
   private async archiveCurrentWorld(nextHtml: string, streamId?: string): Promise<string | null> {
     const cwd = this.resolveCoachCwd();
@@ -1101,7 +1194,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(path.join(cwd, "index.html")));
       html = Buffer.from(bytes).toString("utf8");
     } catch {
-      return null; // 파일이 없으면 보관할 것도 없다
+      return null; // no file means there is nothing to archive
     }
     if (!shouldArchiveWorld(html, nextHtml)) return null;
     try {
@@ -1111,21 +1204,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       try {
         taken = (await vscode.workspace.fs.readDirectory(dir)).map(([name]) => name);
       } catch {
-        /* 방금 만든 빈 폴더 */
+        /* the empty folder we just created */
       }
       const name = worldArchiveFileName(worldArchiveTitle(html), taken);
-      // 2026-08-20 검토 — 원문 그대로 넣으면 보관본이 **열리지 않는다**: 세상 HTML 은
-      // `<script src="engine.js">` 를 상대경로로 부르는데 저장 위치가 '이전 세상/' 이라
-      // `이전 세상/engine.js` 를 찾다 404 → S_* ReferenceError → 검은 화면이었다.
-      // 게다가 엔진은 이제 세상마다 다르다(#644) — 폴더에 한 벌 복사해 두는 것으로도
-      // 부족하다. 그래서 보관본에는 그 세상의 엔진을 **인라인**해 자체로 완결시킨다.
+      // 2026-08-20 review — putting the source in as-is means the archived copy
+      // **does not open**: a world's HTML calls `<script src="engine.js">` by relative
+      // path, and since it is saved under '이전 세상/' it went looking for
+      // `이전 세상/engine.js` → 404 → S_* ReferenceError → a black screen. On top of
+      // that the engine now differs per world (#644) — keeping one copy in the folder
+      // is not enough either. So the archived copy **inlines** that world's engine and
+      // is complete in itself.
       const body = await this.inlineEngineIfNeeded(html);
       await vscode.workspace.fs.writeFile(
         vscode.Uri.file(path.join(cwd, WORLD_ARCHIVE_DIR, name)),
         Buffer.from(body, "utf8"),
       );
-      // 보관은 조용히 일어나면 없는 것과 같다 — 아이는 백업이 생긴 줄 모른 채
-      // "아까 그거 어디 갔어" 라고 묻는다. 턴 안에서 일어난 보관은 한 줄 남긴다.
+      // An archive that happens silently is the same as no archive — the child does
+      // not know a backup was made and asks "where did the one from before go?". An
+      // archive that happened inside a turn leaves one line.
       if (streamId) {
         this.postToolLog(streamId, {
           id: randomId(),
@@ -1143,34 +1239,38 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
 
   /**
-   * "갤러리에 올리기" — 지금 세상을 lab 갤러리로 보낸다.
+   * "갤러리에 올리기" — sends the current world to the lab gallery.
    *
-   * ## 무엇을 올리나
+   * ## What is uploaded
    *
-   * 채팅 화면의 마지막 HTML 이 아니라 **작업 폴더의 `index.html`** 이다. 아이는
-   * 코치를 거치지 않고 파일을 직접 고치기도 하고(그게 이 수업의 목표 중 하나다),
-   * 그렇게 고친 것이 올라가야 한다. `engine.js` 는 인라인해서 **한 장으로** 만든다
-   * — 갤러리는 파일 하나만 받고, 상대경로 `<script src="engine.js">` 는 거기서
-   * 404 가 된다 (`archiveCurrentWorld` 가 같은 이유로 같은 처리를 한다).
+   * Not the last HTML on the chat screen but **the work folder's `index.html`**. The
+   * child also edits the file directly without going through the coach (that is one
+   * of this lesson's goals), and what was edited that way is what has to go up.
+   * `engine.js` is inlined to make it **one single page** — the gallery takes exactly
+   * one file, and the relative `<script src="engine.js">` 404s there
+   * (`archiveCurrentWorld` does the same thing for the same reason).
    *
-   * ## 누구 것인지는 여기서 안 정한다
+   * ## Whose it is is NOT decided here
    *
-   * 토큰만 보낸다. 이름·자리번호는 서버가 배부보드에서 찾는다 — 아이가 자기
-   * 이름을 다시 칠 일도, 남의 이름을 적을 여지도 없다.
+   * Only the token is sent. The name and seat number are looked up by the server on
+   * the distribution board — the child never retypes their own name, and there is no
+   * room to write someone else's.
    *
-   * ## 실패를 삼키지 않는다
+   * ## Failures are not swallowed
    *
-   * 명시적으로 누른 버튼이라 결과가 화면에 보여야 한다. 서버가 만든 한국어 문구를
-   * 그대로 웹뷰로 넘긴다(`publishResult`). VS Code 토스트를 쓰지 않는 것은 통합
-   * 브라우저가 알림에 멈추기 때문이다(#308 과 같은 이유).
+   * It is a button pressed explicitly, so the result has to be visible on screen. The
+   * Korean sentence the server produced is handed to the webview as it is
+   * (`publishResult`). A VS Code toast is not used because the integrated browser
+   * stops on a notification (the same reason as #308).
    */
   private async publishToGallery(): Promise<void> {
     const fail = (message: string) =>
       void this.post({ type: "publishResult", state: "error", message });
 
-    // #748 — 프로필이 발행 정책의 소유자다. 이 검사는 세상/토큰/폴더보다
-    // **먼저** 온다: 허용되지 않은 좌석에는 "세상을 열어주세요" 같은 다음 단계
-    // 안내를 주면 안 된다. 그건 하면 되는 일처럼 읽힌다.
+    // #748 — the profile owns the publishing policy. This check comes **before** the
+    // world / token / folder ones: a seat that is not permitted must not be handed a
+    // next-step hint like "open a world first". That reads as something that would
+    // work if they did it.
     const allowed = galleryPublishAllowed(this.cachedProfile?.publishing);
     if (!allowed.ok) return fail(allowed.message);
 
@@ -1195,9 +1295,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
     const body = await this.inlineEngineIfNeeded(html);
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
-    // 스풀 세션 디렉토리 이름이 곧 session_id 다 (sessionSpool 이 그렇게 만든다).
-    // 스풀이 꺼져 있으면 null — 그래도 발행은 진행한다. 작품을 올리는 것이 로그를
-    // 잇는 것보다 우선이다.
+    // The spool session directory's name IS the session_id (sessionSpool builds it
+    // that way). Null when the spool is off — publishing still goes ahead. Getting the
+    // work itself up comes before keeping the logs joined up.
     const sessionDir = this.spool?.currentSessionDir() ?? null;
     const sessionId = sessionDir ? path.basename(sessionDir) : null;
 
@@ -1216,14 +1316,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     void this.post({ type: "publishResult", state: "done", url: result.url });
 
-    // 발행 성공 → 진행 중 세션의 로그 스냅샷을 **봉인 없이** 올린다 (2026-08-21,
-    // 운영 결정: 보호자 사전설문 동의 확보). 발행 시점의 "여기까지" 가 서버에
-    // 남아, 아이가 수업 끝 "기록 보내기" 를 놓쳐도 리포트 원료가 확보된다.
-    // manifest 를 안 올리므로 미완결 — 수업 끝 완결 업로드가 같은 키를 덮으며
-    // 정본이 된다 (uploadSessionSnapshot 헤더 주석이 정본).
+    // Publish succeeded → upload a log snapshot of the in-flight session **without
+    // sealing it** (2026-08-21, operations decision: guardian pre-survey consent
+    // secured). The "this far" at publish time survives on the server, so the raw
+    // material for the report is secured even when the child misses "기록 보내기" at
+    // the end of the lesson. No manifest is uploaded, so it is incomplete — the
+    // complete upload at the end of the lesson overwrites the same key and becomes
+    // canonical (the header comment on uploadSessionSnapshot is the canonical one).
     //
-    // fire-and-forget: 게임은 이미 올라갔다. 스냅샷 실패를 아이 화면에 띄우지
-    // 않는다 — 콘솔에만 남기고, 완결 업로드 경로가 어차피 다시 덮는다.
+    // fire-and-forget: the game is already up. A snapshot failure is not put on the
+    // child's screen — it goes to the console only, and the complete-upload path
+    // overwrites it anyway.
     if (sessionDir && sessionId && this.cachedProfile?.analytics?.upload_session_logs === true) {
       const day = path.basename(path.dirname(sessionDir));
       const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
@@ -1241,16 +1344,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** 작업 폴더에 engine.js 저장 (세상 HTML 옆). 실패는 미리보기 인라인이 살린다. */
+  /** Saves engine.js into the work folder (beside the world HTML). A failure is rescued by the preview's inlining. */
   private async saveEngineToWorkspace(js: string): Promise<void> {
     const cwd = this.resolveCoachCwd();
     if (!cwd) return;
     try {
       await vscode.workspace.fs.writeFile(vscode.Uri.file(path.join(cwd, "engine.js")), Buffer.from(js, "utf8"));
-    } catch { /* 폴백이 인라인으로 살린다 */ }
+    } catch { /* the fallback rescues it by inlining */ }
   }
 
-  /** srcdoc 폴백용 — `<script src="engine.js">` 를 파일 내용으로 치환. */
+  /** For the srcdoc fallback — replaces `<script src="engine.js">` with the file's contents. */
   private async inlineEngineIfNeeded(html: string): Promise<string> {
     if (!html.includes('<script src="engine.js"></script>')) return html;
     const cwd = this.resolveCoachCwd();
@@ -1263,41 +1366,46 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  /** 연속 저장 디바운스 타이머 (마지막 저장 뒤 한 번만 미리보기). */
+  /** Debounce timer for consecutive saves (preview once, after the last save). */
   private revealTimer: ReturnType<typeof setTimeout> | undefined;
 
   /**
-   * 지금 화면에 띄운 사전 완성 세상 id. #649 이후로는 "다시 안 받는다" 는 뜻이
-   * 아니다(같은 세상 재클릭도 새로 받고, 그 전에 보관한다) — 웹뷰가 다시 붙었을 때
-   * 친구 스트립의 강조를 되살리는 데 쓴다.
+   * The id of the pre-built world currently on screen. Since #649 it does NOT mean
+   * "do not fetch it again" (re-clicking the same world fetches it again, archiving
+   * first) — it is used to restore the friend strip's highlight when the webview
+   * remounts.
    */
   private get lastPrebuiltWorld(): string | null {
     return this.context.workspaceState.get<string>(openWorldKeyForCohort(this.activeCohortId), "") || null;
   }
   /**
-   * 2026-08-20 검토 — 메모리 필드였을 때는 창을 다시 열면(Reload Window·노트북을
-   * 닫았다 열기) index.html 은 아이가 고친 세상 그대로인데 앱만 "아무 세상도 안
-   * 열림" 으로 돌아갔다: 스트립 강조가 사라지고, 러너가 ✨ 로 달리고, Clear 뒤 첫
-   * 전송의 세상 안내도 영영 안 붙었다. 값은 id 하나라 저장 비용이 없다.
+   * 2026-08-20 review — while this was an in-memory field, reopening the window
+   * (Reload Window, or closing and reopening the laptop) left index.html holding the
+   * world the child had edited while the app alone went back to "no world open": the
+   * strip highlight disappeared, the runner ran as ✨, and the world notice on the
+   * first send after a Clear never attached again. The value is a single id, so
+   * storing it costs nothing.
    */
   private set lastPrebuiltWorld(id: string | null) {
     void this.context.workspaceState.update(openWorldKeyForCohort(this.activeCohortId), id ?? undefined);
   }
 
-  /** revealPrebuiltWorld 재진입 가드 — 아이의 연타로 index.html 쓰기가 겹치면 안 된다. */
+  /** revealPrebuiltWorld re-entry guard — a child's rapid clicking must not overlap index.html writes. */
   private worldOpening = false;
 
-  /** 이번에 보관한 파일 이름(있으면). 코치에게 "되돌릴 것이 여기 있다" 고 알리는 데 쓴다. */
+  /** The name of the file archived this time (if any). Used to tell the coach "what to roll back to is here". */
   private lastArchivedWorldFile: string | null = null;
 
   /**
-   * 2026-08-19 — 워커의 사전 완성 세상(GET /v1/worlds/:id)을 받아 revealBuilt 로 띄운다.
-   * 실패하면 false — 코치가 예전처럼 직접 만든다(느리지만 동작).
+   * 2026-08-19 — fetches the worker's pre-built world (GET /v1/worlds/:id) and shows
+   * it through revealBuilt. False on failure — the coach then builds it itself as
+   * before (slow, but it works).
    */
   private async revealPrebuiltWorld(id: string, proxyUrl: string, token: string): Promise<boolean> {
-    // 2026-08-20 검토 — 아이가 친구 버튼을 연타하면(초코 누르고 1초 안에 나비)
-    // 이 함수가 겹쳐 돌아 보관·index.html 쓰기가 경합했다. 웹뷰의 pending 가드와
-    // 두 겹으로 막는다 — 두 번째 호출은 세상을 열지 않고 코치 턴으로 흘려보낸다.
+    // 2026-08-20 review — when a child hammers the friend buttons (초코, then 나비
+    // within a second) this function ran overlapped and the archive and the index.html
+    // write raced. It is blocked in two layers, together with the webview's pending
+    // guard — the second call opens no world and is passed on as a coach turn.
     if (this.worldOpening) return false;
     this.worldOpening = true;
     try {
@@ -1308,21 +1416,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (!res.ok) return false;
       const html = await res.text();
       if (!/<!doctype html/i.test(html)) return false;
-      // #629 — 세상 HTML 은 엔진을 <script src="engine.js"> 로 부른다. 같은 폴더에
-      // 먼저 저장해야 라이브서버가 200 으로 내려준다.
+      // #629 — a world's HTML calls the engine with <script src="engine.js">. It has
+      // to be saved into the same folder first for the live server to serve it 200.
       //
-      // #644 (2026-08-20 실기기) — 이제 **그 세상 엔진**부터 받는다. 공용본에는 9개
-      // 세상 스프라이트가 전부 들어 있어서(S_PENG 펭귄·S_ICE 얼음…) 코치가 한 번
-      // 읽자 초코 세상에서 얼음 이야기가 나왔다. 세상별 엔진에는 그 세상 그림만
-      // 있으니 읽혀도 섞일 것이 없다. 404·실패면 공용으로 폴백한다 — 엔진이 없으면
-      // 화면 자체가 안 뜨고, 그건 오염보다 나쁘다.
+      // #644 (2026-08-20, real device) — **that world's own engine** is fetched first
+      // now. The shared copy carries all 9 worlds' sprites (S_PENG penguin, S_ICE
+      // ice…), so one read by the coach produced ice talk in 초코's world. A per-world
+      // engine holds only that world's art, so there is nothing to bleed even if it is
+      // read. On a 404 or a failure it falls back to the shared one — with no engine
+      // the screen does not come up at all, and that is worse than contamination.
       //
-      // 2026-08-20 검토 — 두 후보가 **다 실패해도** 그냥 진행하던 자리다. 그러면
-      // index.html 만 새 세상으로 바뀌고 engine.js 는 이전 세상 것(또는 아예 없음)
-      // 이라, 새 HTML 이 부르는 S_* 상수가 undefined → ReferenceError → 검은 화면이
-      // 되는데 코치에게는 "이미 띄웠다" 고 알렸다(교실 와이파이가 끊기면 바로 이 길).
-      // 그래서 엔진을 **먼저** 확보하고, 못 받으면 아이 파일에 손대지 않고 false 를
-      // 돌려 코치 생성 경로에 넘긴다 — 느리지만 화면은 뜬다.
+      // 2026-08-20 review — this used to carry on **even when both candidates
+      // failed**. Then index.html alone became the new world while engine.js was the
+      // previous world's (or missing entirely), so the S_* constants the new HTML
+      // calls were undefined → ReferenceError → a black screen — while the coach was
+      // told "it is already up" (this is exactly the path when the classroom wifi
+      // drops). So the engine is secured **first**, and when it cannot be fetched the
+      // child's files are left untouched and false is returned, handing over to the
+      // coach-generation path — slow, but the screen does come up.
       let engineJs: string | null = null;
       for (const url of worldEngineUrls(base, id)) {
         try {
@@ -1331,19 +1442,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           engineJs = await eng.text();
           break;
         } catch {
-          /* 다음 후보(공용)로 — 여기서 던지면 세상 자체가 안 열린다 */
+          /* on to the next candidate (the shared one) — throwing here means the world never opens */
         }
       }
       if (!engineJs) return false;
-      // 엔진 교체와 index.html 쓰기는 한 덩어리라 revealBuilt 가 순서를 통째로
-      // 소유한다: 옛 세상 보관(그 시점의 engine.js 를 인라인) → 새 엔진 저장 →
-      // 새 index.html 저장. 여기서 엔진을 먼저 갈아 끼우면 보관본에 **다음 세상의**
-      // 엔진이 인라인돼 스프라이트가 어긋나고, 구조 가드에 막히면(blocked)
-      // index.html 은 옛 세상인데 engine.js 만 새 세상인 상태가 남는다.
+      // Swapping the engine and writing index.html are one unit, so revealBuilt owns
+      // the whole ordering: archive the old world (inlining the engine.js of that
+      // moment) → save the new engine → save the new index.html. Swapping the engine
+      // in here first would inline **the NEXT world's** engine into the archived copy
+      // and misalign its sprites, and if the structure guard then blocks, index.html
+      // is left on the old world while engine.js alone is the new one.
       const ok = await this.revealBuilt(html, { artifactSource: "prebuilt", engineJs });
       if (!ok) return false;
       this.lastPrebuiltWorld = id;
-      // 웹뷰의 친구 스트립이 "지금 열린 세상"을 강조할 수 있게 알린다 (#649).
+      // Tell the webview so its friend strip can highlight the currently open world (#649).
       const w = this.cachedProfile?.worlds?.find((x) => x.id === id);
       void this.post({ type: "worldOpened", id, guest: w?.guest ?? "", emoji: w?.emoji ?? "" });
       return true;
@@ -1355,10 +1467,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * 2026-08-19 — SDK 코치가 Write/Edit 로 저장한 .html 을 미리보기에 띄운다.
-   * 파일을 읽어 revealBuilt 로 넘긴다(펜스 경로와 완전히 같은 저장·리빌 동작).
-   * 파일이 없거나 HTML 이 아니면 조용히 넘어간다 — 코치의 다음 말이 화면을
-   * 대신하지 않도록, 실패는 툴 로그 한 줄로만 남긴다.
+   * 2026-08-19 — shows the .html the SDK coach saved with Write/Edit in the preview.
+   * It reads the file and hands it to revealBuilt (exactly the same save/reveal
+   * behaviour as the fence path). A missing file, or one that is not HTML, is passed
+   * over silently — so that the coach's next utterance does not stand in for the
+   * screen, a failure leaves only one tool-log line.
    */
   private async revealWrittenHtml(filePath: string, streamId?: string): Promise<void> {
     try {
@@ -1378,14 +1491,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     html: string,
     opts?: {
       streamId?: string;
-      /** #580 — UI 는 그대로 두고 스풀 귀속만 필요한 호출자용 (브라우저 루프). */
+      /** #580 — for callers that leave the UI alone and need only spool attribution (the browser loop). */
       spoolTurnId?: string;
-      /** 같은 HTML이라도 사전 완성본과 학생/AI의 수정본을 구분한다. */
+      /** Distinguishes a pre-built copy from the student's/AI's edited one, even for identical HTML. */
       artifactSource?: SpoolArtifactSource;
       /**
-       * 이 HTML 과 한 짝인 세상 엔진(#644). 주면 **보관 뒤 · 저장 직전**에 갈아 끼운다
-       * — 순서가 뒤집히면 보관본에 다음 세상 엔진이 들어가고, 구조 가드에 막힌 경우
-       * index.html(옛 세상)과 engine.js(새 세상)가 어긋난 채 남는다.
+       * The world engine paired with this HTML (#644). When given, it is swapped in
+       * **after the archive and just before the save** — reverse the order and the
+       * archived copy gets the NEXT world's engine, and when the structure guard
+       * blocks, index.html (old world) and engine.js (new world) are left mismatched.
        */
       engineJs?: string;
     },
@@ -1401,10 +1515,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const checked = validateAndRepairHtml(html, {
       worldContract: isWorldCohort(this.cachedProfile),
     });
-    // #580 — "preview open" 은 #552 MVP 5종 중 하나. 모든 reveal 경로(스트림
-    // 자동 · ▶ Run · show-intent · 브라우저 루프)가 이 메서드로 모이므로 여기
-    // 한 곳에서 남긴다. 구조 가드 **뒤**에 — 막힌 reveal 은 화면에 안 떴는데
-    // 기록되면 "미리보기 열림"이 과대계상된다.
+    // #580 — "preview open" is one of the 5 MVP events in #552. Every reveal path
+    // (stream auto · ▶ Run · show-intent · browser loop) funnels into this method, so
+    // it is recorded here, in one place. **After** the structure guard — a blocked
+    // reveal never reached the screen, and recording it would overcount "preview
+    // opened".
     if (!checked.blocked) {
       const spoolTurn = opts?.streamId ?? opts?.spoolTurnId;
       this.spool?.recordWorkflow({
@@ -1423,13 +1538,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       content: checked.html,
     });
 
-    // 2026-08-17 Windows 실기기 — 코치가 "완성됐어요!" 라고 말한 **뒤에도** 화면이
-    // 한참 비어 있었다. 스트림이 끝난 시점과 미리보기가 실제로 뜨는 시점 사이에
-    // 라이브서버 기동 + 탭 열기가 들어가는데, 그 구간에 아무 표시가 없어서
-    // 아이 눈에는 그냥 멈춘 것으로 보인다("완성된거 안보여").
+    // 2026-08-17, Windows real device — the screen stayed blank for a long time
+    // **even after** the coach said "완성됐어요!". Between the stream ending and the
+    // preview actually coming up sit the live-server startup and opening a tab, and
+    // with nothing shown across that stretch it simply looks stopped to the child
+    // ("완성된거 안보여").
     //
-    // 그 공백을 타임라인 한 줄로 메운다. 실제로 뜨면 done, 실패하면 error 로
-    // 바뀌므로 "떴다고 말했는데 안 뜬" 상태가 화면에 남지 않는다(R0).
+    // That gap is filled with one timeline line. It turns done when it really comes
+    // up and error when it fails, so the state "said it was up but it was not" never
+    // stays on screen (R0).
     const revealLogId = randomId();
     const logReveal = (state: "running" | "done" | "error", label: string): void => {
       if (!opts?.streamId) return;
@@ -1437,25 +1554,31 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     };
 
     logReveal("running", "미리보기 여는 중");
-    // 2026-08-20 검토 — 작업 폴더의 index.html 을 실제로 덮어쓰는 지점은 여기 하나로
-    // 모인다(사전 완성 세상 · ▶ Run · "보여줘" · 코치 펜스). 보관을 revealPrebuiltWorld
-    // 안에만 두었더니 "보여줘"/▶ Run 이 히스토리의 **옛 펜스**로 아이가 고쳐 둔 파일을
-    // 보관 없이 덮었다 — #649 가 막은 손실이 다른 문으로 그대로 남아 있었다.
-    // 아이 트랙에서만 — 성인 작업 폴더에 '이전 세상' 폴더가 생기면 그게 더 이상하다.
-    // 내용이 같으면 shouldArchiveWorld 가 걸러 보관본이 쌓이지 않는다(코치 Edit 저장
-    // 경로는 파일 자신을 다시 쓰는 것이라 여기서 항상 걸러진다).
+    // 2026-08-20 review — the point that actually overwrites the work folder's
+    // index.html funnels into this one place (pre-built world · ▶ Run · "보여줘" ·
+    // coach fence). With the archive living only inside revealPrebuiltWorld,
+    // "보여줘" / ▶ Run overwrote the file the child had edited, with no archive, using
+    // an **old fence** out of the history — the loss #649 blocked was still there
+    // through another door.
+    // Kids track only — an '이전 세상' folder appearing in an adult's work folder
+    // would be stranger still.
+    // When the content is identical, shouldArchiveWorld filters it out so archived
+    // copies do not pile up (the coach's Edit-save path rewrites the file itself, so
+    // it is always filtered here).
     if (isWorldCohort(this.cachedProfile)) {
       this.lastArchivedWorldFile = await this.archiveCurrentWorld(checked.html, opts?.streamId);
     }
-    // 보관이 끝난 **뒤에** 엔진을 갈아 끼운다(보관본은 옛 엔진을 인라인해 간다).
+    // Swap the engine in **after** the archive is done (the archived copy takes the
+    // old engine inlined).
     if (opts?.engineJs !== undefined) await this.saveEngineToWorkspace(opts.engineJs);
     await this.saveGameToWorkspace(checked.html);
     if (this.isLiveServerPreview() && (await this.openInLiveServer())) {
       logReveal("done", "미리보기를 열었어요");
       return true;
     }
-    // #629 — srcdoc 미리보기(폴백)는 상대경로 <script src="engine.js"> 를 못 읽는다.
-    // 라이브서버가 안 뜬 경우에만 타는 경로라 여기서만 엔진을 인라인으로 끼운다.
+    // #629 — the srcdoc preview (fallback) cannot read the relative
+    // <script src="engine.js">. This path is taken only when the live server did not
+    // come up, so the engine is inlined here and only here.
     void this.preview.show(await this.inlineEngineIfNeeded(checked.html));
     logReveal("done", "미리보기를 열었어요");
     return true;
@@ -1513,19 +1636,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const isPreviewTab = (u?: string): boolean =>
         !!u && /^https?:\/\/(127\.0\.0\.1|localhost)[:/]/i.test(u);
       const current = tabs.find((t) => t.url?.startsWith(url));
-      // #519 — 아래에서 프리뷰 탭을 코치의 운전 대상으로 고정한다. `?.` 로 두면
-      // live_preview_start 가 첫 도구 호출일 때(인스턴스가 아직 없다) 고정이
-      // 조용히 날아가고, 뒤이은 screenshot 이 다시 activeBrowserTab 에 의존한다.
+      // #519 — below, the preview tab is pinned as the coach's drive target. Leaving
+      // it as `?.` means that when live_preview_start is the first tool call (no
+      // instance yet) the pin is silently lost and the screenshot that follows falls
+      // back to depending on activeBrowserTab.
       this.mcpBrowser ??= new BrowserControl();
       if (current) {
         this.liveServer.reload();
-        // #519 — 코치가 이어서 screenshot/read 를 부를 때 이 탭이 대상이 되도록
-        // 고정한다. 이 경로는 `preserveFocus: true` 로 열기 때문에 activeBrowserTab
-        // 이 안 잡힐 수 있고, 그때 검사 도구가 "열린 탭이 없어요"로 실패했다.
+        // #519 — pin this tab so that it is the target when the coach calls
+        // screenshot/read next. This path opens with `preserveFocus: true`, so
+        // activeBrowserTab may not be set, and when that happened the inspection tools
+        // failed with "열린 탭이 없어요".
         this.mcpBrowser.setTargetTab(current);
-        // #525 — 참가자가 "미리보기 띄워줘"라고 한 흐름이다. 이미 떠 있는 탭이
-        // 배경에 있으면 리로드만 하고 화면은 그대로여서 "아무 일도 안 일어난"
-        // 것처럼 보인다. 앞으로 가져온다.
+        // #525 — this is the flow where the participant said "미리보기 띄워줘". If the
+        // already-open tab is in the background, only a reload happens and the screen
+        // is unchanged, so it looks like "nothing happened". Bring it forward.
         await this.revealBrowserTab(current);
       } else {
         for (const t of tabs) {
@@ -1555,15 +1680,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * #507 — 프록시 경로(#278)의 `browser_navigate` 를 실행 직전에 교정한다.
+   * #507 — corrects the proxy path's (#278) `browser_navigate` right before it runs.
    *
-   * 코치는 라이브 서버 주소를 모르면 `127.0.0.1:3000` 같은 흔한 포트를 반사적으로
-   * 찍는다(코드 어디에도 3000 은 없다 — 모델의 추측이다). 라이브 서버는 매 실행
-   * `listen(0)` 으로 임의 포트를 받으므로 그 주소는 항상 비어 있고,
-   * `ERR_CONNECTION_REFUSED` 로 끝난다. Run 버튼은 URL 을 직접 받으므로 멀쩡했고,
-   * 코치만 이 경로가 없어서 실패했다 (#470 재발).
+   * When the coach does not know the live server's address it reflexively types a
+   * common port such as `127.0.0.1:3000` (3000 appears nowhere in the code — it is
+   * the model's guess). The live server takes a random port via `listen(0)` on every
+   * run, so that address is always empty and it ends in `ERR_CONNECTION_REFUSED`. The
+   * Run button receives the URL directly so it was fine; only the coach failed,
+   * because it did not have this path (#470 recurrence).
    *
-   * 서버가 안 떠 있으면 교정하지 않는다 — 짐작으로 고치지 않는다(모르면 그대로).
+   * Nothing is corrected when the server is not up — it is never fixed by guessing
+   * (if we do not know, leave it as it is).
    */
   private retargetLoopbackNavigation(call: BrowserToolCall): {
     call: BrowserToolCall;
@@ -1590,27 +1717,32 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * a toast here would pause the integrated browser (#308).
    */
   /**
-   * 이미 열려 있는 브라우저 탭을 **참가자 화면 앞으로** 가져온다 (#525).
+   * Brings an already-open browser tab **to the front of the participant's screen**
+   * (#525).
    *
-   * proposed API 의 `BrowserTab` 에는 `show()`/`reveal()` 이 없고, `openBrowserTab`
-   * 재호출은 새 탭을 만들어 #519 를 되돌린다. 그래서 **일반 에디터 경로**를 쓴다:
-   * 그룹을 활성화한 뒤 `openEditorAtIndex` 로 그 탭을 앞세우고, 참가자가 편집기에
-   * 있었으면 되돌린다(bounce).
+   * The proposed API's `BrowserTab` has no `show()`/`reveal()`, and calling
+   * `openBrowserTab` again makes a new tab, undoing #519. So the **plain editor
+   * path** is used: activate the group, put that tab in front with
+   * `openEditorAtIndex`, and bounce back if the participant was in an editor.
    *
-   * 2026-08-02 실측(설치된 0.1.16, 격리 프로파일)에서 확인한 것:
-   *   - 배경에 있던 브라우저 탭이 실제로 앞으로 나온다
-   *   - bounce 후 `activeTextEditor` 와 **선택 영역이 그대로 보존**된다
-   *   - 그 컬럼은 계속 브라우저를 보여준다(되돌아가지 않는다)
+   * Measured on 2026-08-02 (installed 0.1.16, isolated profile):
+   *   - a browser tab that was in the background really does come forward
+   *   - after the bounce, `activeTextEditor` **and the selection are preserved
+   *     exactly**
+   *   - that column keeps showing the browser (it does not revert)
    *
-   * 규율 두 가지 — 둘 다 "확실하지 않으면 참가자 화면을 건드리지 않는다":
-   *   ① 탭 식별은 `pickRevealTabIndex` 의 세 조건 교집합. 후보가 둘이면 아무것도
-   *      안 한다(실측에서 라벨이 동점 나는 것을 봤다).
-   *   ② `activeTextEditor` 가 없으면 bounce 를 생략한다 — 되돌릴 커서가 없으면
-   *      IME 조합을 흔들 위험이 0 이다(코치가 도구를 쓸 때 참가자 포커스는 대개
-   *      채팅 사이드바에 있다).
+   * Two disciplines — both of them "if we are not sure, do not touch the
+   * participant's screen":
+   *   ① Tab identification is the intersection of `pickRevealTabIndex`'s three
+   *      conditions. With two candidates it does nothing (labels were seen tying in
+   *      the measurements).
+   *   ② With no `activeTextEditor` the bounce is skipped — with no cursor to return
+   *      to, the risk of disturbing an IME composition is 0 (when the coach uses a
+   *      tool, the participant's focus is usually in the chat sidebar).
    *
-   * 전부 best-effort 다. 실패해도 던지지 않는다 — 도구 결과를 오류로 바꾸면
-   * "열렸는데 실패로 보이는" 더 나쁜 상태가 된다.
+   * All of it is best-effort. It never throws on failure — turning the tool result
+   * into an error would be the worse state of "it opened but it looks like it
+   * failed".
    */
   private async revealBrowserTab(tab: vscode.BrowserTab): Promise<void> {
     try {
@@ -1629,14 +1761,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       );
       if (index === null) return;
 
-      // bounce 대상은 **명령을 쏘기 전에** 붙잡는다 — 쏜 뒤엔 이미 옮겨가 있다.
+      // Grab the bounce target **before** firing the command — after firing it has
+      // already moved.
       const restore = vscode.window.activeTextEditor;
       const focusGroup = column === 1 ? FOCUS_FIRST_GROUP : FOCUS_SECOND_GROUP;
       await vscode.commands.executeCommand(focusGroup);
       await vscode.commands.executeCommand(OPEN_EDITOR_AT_INDEX, index);
       if (restore) {
-        // 커서·선택까지 되돌린다. showTextDocument 는 컬럼을 명시할 수 있어
-        // focus{N}EditorGroup 조합보다 정확하다(참가자가 3번 컬럼에 있을 수도 있다).
+        // Restore the cursor and the selection too. showTextDocument can name the
+        // column explicitly, which is more precise than a focus{N}EditorGroup
+        // combination (the participant may be in column 3).
         await vscode.window.showTextDocument(restore.document, {
           viewColumn: restore.viewColumn,
           selection: restore.selection,
@@ -1644,39 +1778,43 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         });
       }
     } catch {
-      /* 앞으로 못 가져와도 도구 자체는 성공이다 — 조용히 넘어간다 */
+      /* failing to bring it forward does not make the tool itself fail — pass over quietly */
     }
   }
 
   private buildBrowserMcpHost(): BrowserMcpHost {
     return {
       openBrowser: async (url: string) => {
-        // #519 — **여는 게 아니라 이동한다.**
+        // #519 — **this navigates; it does not open.**
         //
-        // `openBrowserTab` 은 부를 때마다 새 에디터를 만든다(mainThreadBrowsers 가
-        // 매번 새 UUID 를 뽑는다) — 플랫폼에는 URL 재사용이 아예 없다. 전에는 그
-        // 위에 "닫고 새로 열기"를 얹었는데, 루프백(참가자 결과물)은 정리 대상에서
-        // 빠져 있어 하위 페이지를 돌 때마다 탭이 쌓였다. 이제 슬롯(결과물/참고)당
-        // 탭 하나를 잡아 CDP 로 이동시킨다: 탭도 컬럼도 늘지 않고, 페이지
-        // 히스토리(browser_back)가 살아 있고, 참가자가 보던 다른 슬롯은 그대로다.
+        // `openBrowserTab` makes a new editor on every call (mainThreadBrowsers draws
+        // a fresh UUID each time) — the platform has no URL reuse at all. There used
+        // to be a "close then open" layer on top of that, but loopback (the
+        // participant's own artifact) was left out of the cleanup, so tabs piled up
+        // every time a sub-page was visited. Now one tab is held per slot (artifact /
+        // reference) and navigated with CDP: neither tabs nor columns multiply, the
+        // page history (browser_back) survives, and the other slot the participant was
+        // looking at is left alone.
         const tabs = vscode.window.browserTabs ?? [];
         const plan = planCoachBrowserTabs(tabs.map((t) => t.url), url);
-        // 같은 슬롯에 이미 쌓여 있던 잉여 탭만 정리한다(레거시 누적분).
+        // Clean up only the surplus tabs already stacked in the same slot (the legacy pile-up).
         for (const i of plan.close) {
           try {
             await tabs[i]?.close();
           } catch {
-            /* 못 닫는 탭이 이동을 막아서는 안 된다 */
+            /* a tab we cannot close must not block the navigation */
           }
         }
         this.mcpBrowser ??= new BrowserControl();
         if (plan.reuse !== null) {
-          // #526 — 이동 **전에** 이 탭이 무엇을 보여주고 있었는지 붙잡아 둔다.
-          // 이동 후에 읽으면 이미 새 주소라 "무엇이 밀려났는지"를 알 수 없다.
+          // #526 — grab what this tab was showing **before** navigating. Read it after
+          // the navigation and it is already the new address, so there is no way to
+          // know "what got pushed out".
           const reused = tabs[plan.reuse];
           const replaced = reused?.url ? { url: reused.url, title: reused.title } : undefined;
-          // 재사용 탭을 고정한 뒤 CDP navigate — 프록시 경로(#278)가 쓰는 실행기를
-          // 그대로 태운다. 같은 동작을 두 벌 두면 한쪽만 고쳐진다(#457 과 같은 이유).
+          // Pin the reused tab, then CDP navigate — riding the very executor the
+          // proxy path (#278) uses. Two copies of the same behaviour means only one of
+          // them ever gets fixed (the same reason as #457).
           this.mcpBrowser.setTargetTab(reused);
           const r = await this.mcpBrowser.execute({
             id: "mcp-browser_open",
@@ -1684,19 +1822,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             input: { url },
           });
           if (!r.isError) {
-            // #525 — 이동은 됐는데 그 탭이 배경이면 참가자 화면은 그대로다.
-            // 참가자가 "열어줘"라고 한 흐름이므로 앞으로 가져온다.
+            // #525 — the navigation succeeded, but with that tab in the background the
+            // participant's screen is unchanged. This is the flow where the
+            // participant said "열어줘", so bring it forward.
             if (reused) await this.revealBrowserTab(reused);
             return { replaced };
           }
-          // 이동 실패(탭이 방금 닫혔다든지)는 새로 여는 쪽으로 폴백한다 —
-          // 학생 눈에는 "안 열렸다"가 되어선 안 된다.
+          // A failed navigation (the tab was just closed, say) falls back to opening a
+          // new one — to the student it must never become "it did not open".
           this.mcpBrowser.setTargetTab(undefined);
         }
-        // 슬롯이 비었으면 새로 연다. 컬럼을 **명시**하는 이유: `Beside`(SIDE_GROUP)는
-        // 활성 그룹 오른쪽 이웃을 찾고 없으면 새 그룹을 만든다. 방금 연 브라우저
-        // 탭이 활성(=맨 오른쪽)이면 다음 호출마다 컬럼이 갈라져 작업 공간이 좁아진다.
-        // preserveFocus 는 그 활성화 자체를 막고, 포커스가 없어도 탭 핸들로 운전한다.
+        // Open a new one when the slot is empty. Why the column is named
+        // **explicitly**: `Beside` (SIDE_GROUP) looks for the neighbour to the right of
+        // the active group and makes a new group when there is none. If the browser
+        // tab just opened is the active one (= rightmost), every following call splits
+        // off another column and the workspace narrows. preserveFocus prevents that
+        // activation in the first place, and the tab handle drives it without focus.
         const opened = await vscode.window.openBrowserTab(url, {
           viewColumn:
             this.editorChat ? vscode.ViewColumn.Two : coachTabSlot(url) === "preview" ? vscode.ViewColumn.One : vscode.ViewColumn.Two,
@@ -1705,14 +1846,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         this.mcpBrowser.setTargetTab(opened);
       },
       screenshot: async () => {
-        // #519 — 폴백 경로도 운전 중인 탭을 먼저 본다(위 currentPage 와 같은 이유).
+        // #519 — the fallback path also looks at the tab being driven first (the same
+        // reason as currentPage above).
         const tab = this.mcpBrowser?.currentTab() ?? vscode.window.activeBrowserTab;
         if (!tab) return null;
         try {
           const ctx = await capturePageContext(tab);
           if (!ctx.imageBase64) {
-            // 원인을 남긴다. `catch { return null }` 이 이유를 통째로 삼켜서
-            // 실측(2026-07-26)에서 스크린샷이 왜 실패하는지 못 밝혔다.
+            // Leave the cause behind. `catch { return null }` swallowed the reason
+            // whole, so the 2026-07-26 measurements could not establish why the
+            // screenshot was failing.
             console.warn(`[coach] screenshot: empty image for ${tab.url ?? "(no url)"}`);
             return null;
           }
@@ -1728,35 +1871,41 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
       },
       startLivePreview: () => this.startLivePreview(),
-      // #507 — 지금 떠 있는 라이브 서버 주소. 시작시키지 않는다(조회에 부작용을
-      // 두면 "주소가 뭐냐"가 서버를 켜게 된다). 이게 유일한 진실이고, 이걸 안
-      // 읽는 쪽은 전부 추측이다 — 그 추측이 127.0.0.1:3000 이었다.
+      // #507 — the address of the live server currently up. It does not start one
+      // (giving a lookup a side effect would mean "what is the address?" turns the
+      // server on). This is the only truth, and anything that does not read it is
+      // guessing — that guess was 127.0.0.1:3000.
       livePreviewUrl: async () => this.liveServer.currentUrl() ?? null,
-      // #415 — 지금 떠 있는 페이지를 가장 싸게 읽는 경로. BrowserTab 은 url/title 을
-      // 그대로 들고 있어 CDP 접속도 스크린샷도 필요 없다 (URL 하나 알자고 이미지를
-      // 뜨면 토큰도 시간도 낭비).
+      // #415 — the cheapest path to read the page currently up. BrowserTab already
+      // holds url/title as they are, so neither a CDP connection nor a screenshot is
+      // needed (taking an image just to learn one URL wastes tokens and time alike).
       //
-      // #519 — 여기서 `activeBrowserTab` 만 보면 안 된다. 그 값은 활성 에디터가
-      // 브라우저일 때만 세팅되므로, 참가자가 코드 탭을 클릭한 순간 "열린 페이지
-      // 없음"이 되어 중복 방지가 조용히 꺼졌다(같은 페이지를 또 열고 승인 모달이
-      // 또 뜬다). 코치가 운전 중인 탭을 먼저 보고, 없을 때만 활성 탭으로 폴백한다.
+      // #519 — looking only at `activeBrowserTab` here is wrong. That value is set
+      // only when the active editor is a browser, so the moment the participant
+      // clicked a code tab it became "no page open" and the duplicate guard silently
+      // switched off (the same page opens again and the approval modal appears again).
+      // Look at the tab the coach is driving first, and fall back to the active tab
+      // only when there is none.
       currentPage: async () => {
         const tab = this.mcpBrowser?.currentTab() ?? vscode.window.activeBrowserTab;
         if (!tab?.url) return null;
         return { url: tab.url, title: tab.title };
       },
-      // #519 — 중복 판정용. 슬롯이 둘이므로 "지금 보는 페이지" 하나로는 이미 떠
-      // 있는 다른 슬롯을 놓치고 불필요한 승인 모달이 뜬다.
+      // #519 — for the duplicate check. There are two slots, so "the page currently
+      // on screen" alone misses the other slot that is already up and raises an
+      // unnecessary approval modal.
       openPages: async () =>
         (vscode.window.browserTabs ?? [])
           .filter((t) => !!t.url)
           .map((t) => ({ url: t.url, title: t.title })),
-      // #523 — "이미 열려 있다"로 판정된 탭을 운전 대상으로 고정한다. openPages 가
-      // URL 만 넘기므로(탭 핸들은 이 경계를 넘지 않는다) 여기서 다시 찾는다 —
-      // 판정과 **같은 비교 함수**로 찾아야 판정된 탭과 고정된 탭이 갈라지지 않는다.
+      // #523 — pins the tab judged "already open" as the drive target. openPages
+      // passes URLs only (a tab handle never crosses this boundary), so it is looked
+      // up again here — it has to be found with the **same comparison function** as
+      // the judgment, or the judged tab and the pinned tab diverge.
       //
-      // #525 — 고정만으로는 참가자가 못 본다. 그 탭이 배경에 있으면 화면은 그대로다.
-      // 앞으로 가져오는 것까지 한다(revealBrowserTab — 실패는 조용히 무시).
+      // #525 — pinning alone is invisible to the participant. With that tab in the
+      // background the screen is unchanged. It brings it forward as well
+      // (revealBrowserTab — a failure is silently ignored).
       focusOpenPage: async (url: string) => {
         const tab = (vscode.window.browserTabs ?? []).find(
           (t) => !!t.url && isSameBrowserUrl(t.url, url),
@@ -1767,10 +1916,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.revealBrowserTab(tab);
         return { url: tab.url, title: tab.title };
       },
-      // #457 — 검사 3종(read/click/type)을 CDP 실행기에 그대로 위임한다.
-      // 프록시 경로(#278)가 쓰던 BrowserControl 을 재사용한다 — 같은 동작을 두 벌
-      // 구현하면 한쪽만 고쳐지는 버그가 생긴다. 인스턴스는 여기서 lazily 만들고
-      // dispose 는 패널 정리 경로가 맡는다.
+      // #457 — delegates the 3 inspection tools (read/click/type) straight to the CDP
+      // executor. It reuses the BrowserControl the proxy path (#278) was using —
+      // implementing the same behaviour twice produces the bug where only one of the
+      // two gets fixed. The instance is made lazily here and the panel cleanup path
+      // owns its dispose.
       inspect: async (name, input) => {
         try {
           this.mcpBrowser ??= new BrowserControl();
@@ -1799,9 +1949,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * #457 — 코치가 설 작업 폴더. 열린 폴더 → 프로필의 workspace_root 순.
-   * 둘 다 없으면 undefined 를 돌려주되 **조용히 넘어가지 않는다**: 그 상태는
-   * 코치가 파일을 못 찾는다는 뜻이고, 로그가 없으면 사후에 원인을 못 밝힌다.
+   * #457 — the work folder the coach stands in. The opened folder, then the profile's
+   * workspace_root. With neither it returns undefined, but it **does not pass over
+   * silently**: that state means the coach cannot find files, and with no log the
+   * cause cannot be established after the fact.
    */
   private resolveCoachCwd(): string | undefined {
     const opened = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -1882,7 +2033,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if(JSON.stringify(msg.eventIds)!==JSON.stringify(snapshot.events.map(e=>e.id))){await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:'새 작업 기록이 추가됐습니다. 보낼 내용을 다시 확인해 주세요.'});return;}
         const controller=new AbortController();this.observationAssessment=controller;
         try{
-          const response=await fetch(proxy.replace(/\/$/,'')+'/observations/assess',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify(snapshot),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(65000)])});
+          const response=await fetch(proxy.replace(/\/$/,'')+'/observations/assess',{method:'POST',headers:{...observationHeaders(token),'content-type':'application/json'},body:JSON.stringify(snapshot),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(65000)])});
           if(!response.ok){const failure=await response.json() as {error?:{code?:string}};throw Error(/^[a-z_0-9]{1,80}$/.test(failure.error?.code??'')?failure.error!.code:'assessment_failed');}
           const result=await response.json() as {findings:unknown};
           const findings=validateFindings(result.findings,snapshot);
@@ -1901,9 +2052,58 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:recorder?.snapshot()??null,error:this.nativeObservationError,findings,assessedEventCount:saved?.event_ids.length});
         return;
       }
+      case 'learningEvent': {
+        // SX-45 rule 2 — the **only** place where a learning event is made. The coach
+        // stream callback (`recordObservation`) does not call this function.
+        const recorder = await this.currentLearningRecorder();
+        if (!recorder) { await this.postLearningState(); return; }
+        const profile = await this.ensureProfile();
+        const step = this.learningStep(profile, msg.stepId);
+        const made = learningEventRequest(msg.draft, {
+          week: Number(profile?.lesson?.content?.learning?.week ?? 1),
+          step_id: step?.id ?? '',
+          task: this.learningTaskId(profile?.lesson?.sha256, activityConnections(this.context)?.current?.id),
+          module_version: String(profile?.lesson?.version ?? ''),
+          sender: 'webview-form',
+          stepEvidenceType: step?.evidence as never,
+        });
+        // A refusal is not swallowed silently — if what the student wrote disappears,
+        // they will not write it again.
+        if (!made.ok) { this.nativeObservationError = '남긴 내용을 저장하지 못했어요 ('+made.code+'). 다시 한 번 눌러 주세요.'; }
+        else {
+          try { recorder.recordLearningEvent(made.event); this.persistObservation(recorder); this.nativeObservationError = null; }
+          catch (error) { this.nativeObservationError = '남긴 내용을 저장하지 못했어요 ('+(error as Error).message+').'; }
+        }
+        await this.postLearningState();
+        return;
+      }
+      case 'learningDrawer':
+        // A view state. The host only records it and never uses it in a verdict.
+        this.learningDrawerOpen = msg.open;
+        return;
+      case 'submitTask': {
+        // SX-14's negative condition — the webview's disabled state is not evidence.
+        // Run the same gate again.
+        const recorder = await this.currentLearningRecorder();
+        const completion = this.learningCompletion(await this.ensureProfile());
+        const verdict = acceptSubmit({
+          task: msg.task,
+          events: recorder?.batch.events ?? [],
+          completion,
+        });
+        if (!verdict.ok) {
+          this.nativeObservationError = '아직 완료할 수 없어요: ' + verdict.reasons.join(' · ');
+          await this.postLearningState();
+          return;
+        }
+        this.nativeObservationError = null;
+        await this.postLearningState();
+        return;
+      }
       case "ready":
         await this.postConfig();
         await this.postHistory();
+        await this.postLearningState();
         // #308 — flush the pending inline notice. The webview may have just
         // been created for the first time (attachPageContext ran before
         // panel.focus) or recreated after hide/show (no retainContextWhenHidden
@@ -1977,7 +2177,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.handleSend(msg.prompt, msg.history, msg.images);
         return;
       case "voiceCapabilityProbeResult": {
-        // #897 — 원시 관측을 기다리는 쪽에 넘긴다. 판정은 여기서 하지 않는다.
+        // #897 — hand the raw observation to whoever is waiting for it. No verdict
+        // is made here.
         const pending = this.voiceProbes.get(msg.probeId);
         if (pending) {
           this.voiceProbes.delete(msg.probeId);
@@ -2054,11 +2255,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           `componentStack:\n${msg.componentStack}`,
         );
         return;
-      // #580 — trace 이벤트는 로컬 스풀에 먼저 남는다 (spool-then-forward).
-      // 워커 실시간 전송(#552, #9d follow-up)은 나중에 이 스풀을 읽어 보내면
-      // 되므로, 두 경로가 한 스키마를 공유한다. 매핑은 vscode-free 헬퍼
-      // (traceMsgToWorkflowRecord)가 소유하고, trace.ts 필드명 정합은
-      // test/trace-workflow-map.smoke.mjs 가 고정한다.
+      // #580 — a trace event lands in the local spool first (spool-then-forward).
+      // Real-time forwarding to the worker (#552, #9d follow-up) can later just read
+      // this spool and send, so the two paths share one schema. The mapping is owned
+      // by a vscode-free helper (traceMsgToWorkflowRecord), and agreement with
+      // trace.ts's field names is pinned by test/trace-workflow-map.smoke.mjs.
       case "traceTrialStart":
       case "traceTrialEnd":
       case "traceValidationRun":
@@ -2069,30 +2270,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * #580 — proxy 경로 usage → 스풀 매핑. 단일턴과 브라우저 루프가 같은 모양을
-   * 두 번 인라인했던 것을 한 곳으로. 필드명이 SpoolUsageRecord 와 일치해서
-   * spread 로 끝난다.
+   * #580 — proxy-path usage → spool mapping. The single turn and the browser loop had
+   * inlined the same shape twice; this brings it into one place. The field names match
+   * SpoolUsageRecord, so it ends in a spread.
    */
   /**
-   * #897 H-13 — usage 를 기록하면서 **요청한 모델과 답한 모델이 다른지**도 본다.
+   * #897 H-13 — while recording usage, also look at **whether the model requested and
+   * the model that answered differ**.
    *
-   * 2026-09-11 관측: 같은 요청에 다른 모델을 에코해도 화면 전체 innerText 가 완전히
-   * 같았다. `usage.model` 은 여기까지 왔지만 spool 로만 들어가고 학생에게는 한 글자도
-   * 도달하지 않았다 — 조용한 대체가 성공과 구별되지 않는 상태였다.
+   * Observed 2026-09-11: echoing a different model back for the same request left the
+   * whole screen's innerText completely identical. `usage.model` reached this far but
+   * went only into the spool, and not one character of it reached the student — a
+   * silent substitution was indistinguishable from success.
    *
-   * 판정은 `modelEchoHelpers` 가 한다(명시 선택만 경고, 날짜 변형은 일치, 에코 없으면
-   * 판정 없음). 여기서는 그 결과를 턴 텍스트에 한 번만 붙인다 — 한 턴에 안내를 하나만
-   * 쌓는 것은 REQ-M39 ④ 와 같은 규칙이고, 브라우저 루프처럼 한 턴에 요청이 여러 번
-   * 나가는 경로에서 같은 문장이 반복되는 것을 구조적으로 막는다. 좌석당 코치 턴은
-   * 동시에 하나이므로(REQ-M37 ③) 턴 id 한 칸으로 충분하다.
+   * The verdict is made by `modelEchoHelpers` (warn only on an explicit choice, a date
+   * variant counts as a match, no echo means no verdict). Here that result is attached
+   * to the turn's text exactly once — stacking only one notice per turn is the same
+   * rule as REQ-M39 ④, and it structurally prevents the same sentence repeating on a
+   * path like the browser loop where several requests go out within one turn. A seat
+   * has only one coach turn at a time (REQ-M37 ③), so one turn-id slot is enough.
    */
   private proxyUsageRecorder(turnId: string, echo?: ModelEchoContext, onNotice?: (text: string) => void) {
     return (u: ProxyStreamUsage & { requestKey: string | null; model: string | null;
       serverSubstituted?: boolean; serverRequested?: string | null }): void => {
       this.spool?.recordUsage({ turnId, source: "proxy", ...u });
       if (!echo || !onNotice) return;
-      // REQ-M42 — 서버가 직접 말한 판정을 넘긴다. 문자열 비교만으로는 "alias 번역" 과
-      // "요청이 버려졌다" 가 구별되지 않아서 판정 층이 침묵을 골라야 했던 자리다.
+      // REQ-M42 — pass on the verdict the server stated itself. String comparison
+      // alone does not distinguish "alias translation" from "the request was thrown
+      // away", which is why the verdict layer had to choose silence here.
       const verdict = modelEchoVerdict({
         ...echo, resolved: u.model,
         ...(u.serverSubstituted === true
@@ -2123,9 +2328,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       await verifyActivity({token:token!,proxyUrl:connections.current!.service},connections.current!.serverId);
     }
     preflightComplete=true;
-    // #503 — 웹뷰의 히스토리에는 이제 툴 줄(role:"tool")이 섞여 있다. 모델로
-    // 나가는 경로는 여기 하나뿐이므로 초입에서 한 번 거른다. 아래쪽 프록시·SDK
-    // 게이트웨이 호출은 user/assistant 만 아는 계약이다.
+    // #503 — the webview's history now has tool lines (role:"tool") mixed in. This is
+    // the only path out to the model, so they are filtered once right at the entrance.
+    // The proxy/SDK gateway calls below are a contract that knows only user/assistant.
     const history = modelHistory(activityConnections(this.context) ? this.getHistory() : rawHistory);
     // "Show me / open it / run it" — if the kid asks to see the game in plain
     // language and a game already exists, just open it. Don't make them hunt
@@ -2148,8 +2353,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             role: "assistant",
             content: reply,
             createdAt: Date.now(),
-            // #747 — 앱이 쓴 답변도 화면에는 코치 이름으로 붙는다. 나중에 이름이
-            // 바뀔 때 같이 끌려가지 않도록 여기서도 찍는다.
+            // #747 — an answer the app itself wrote is also labelled with the coach's
+            // name on screen. It is stamped here too so it is not dragged along when
+            // the name changes later.
             assistantName: this.coachDisplayName(),
           },
         ]);
@@ -2159,8 +2365,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // No game yet → fall through to the AI, which will guide them to make one.
     }
 
-    // 2026-08-19 — "다른 친구도 있어?" 는 프로필의 worlds 로 즉시 답한다. LLM 한 턴
-    // (10~40초) 을 쓰던 자리다 — 목록은 이미 앱이 들고 있다.
+    // 2026-08-19 — "다른 친구도 있어?" is answered instantly from the profile's
+    // worlds. This used to spend one LLM turn (10–40 s) — the app already holds the
+    // list.
     if (isGuestListRequest(text) && (!images || images.length === 0)) {
       const ws = this.cachedProfile?.worlds;
       if (ws?.length) {
@@ -2216,22 +2423,25 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // resurrecting it on webview remounts (webview clears its copy on userSent).
     this.pendingPageNotice = null;
     let userTextForModel = pageContext ? `${pageContext}\n\n${text}` : text;
-    // 2026-08-19 — 게스트의 세상 사전 완성본. 아이가 게스트를 고르면 코치가 5KB 를
-    // 만들 때까지 30~40초 기다리게 하지 않는다: 워커에서 채워진 HTML 을 받아 즉시
-    // 저장·띄우고, 코치에게는 "이미 띄웠다 — 첫 대사만" 이라고 알린다.
+    // 2026-08-19 — pre-built guest worlds. When a child picks a guest they are not
+    // made to wait 30–40 s for the coach to produce 5 KB: the filled-in HTML is
+    // fetched from the worker, saved and shown immediately, and the coach is told
+    // "it is already up — just the opening line".
     let openedWorldThisTurn = false;
     {
       const world = matchWorldRef(text, profile?.worlds);
       if (world && token) {
-        this.lastArchivedWorldFile = null; // 이번 턴에 생긴 보관본만 코치에게 알린다
+        this.lastArchivedWorldFile = null; // only tell the coach about an archive made this turn
 
         const shown = await this.revealPrebuiltWorld(world.id, proxyUrl, token);
         if (shown) {
           openedWorldThisTurn = true;
-          // 2026-08-20 검토 — 보관본('이전 세상/…')은 코치의 파일 목록에서 가려져 있어
-          // ("남의 세상" 오염 방지, #644) 아이가 "아까 초코 거 돌려줘" 라고 해도 코치가
-          // 경로를 몰랐다. 이번에 보관이 일어났을 때만 그 한 줄을 알려 준다 — 되돌리기
-          // 요청이 오면 그 파일을 Read 해서 index.html 로 되살릴 수 있다.
+          // 2026-08-20 review — archived copies ('이전 세상/…') are hidden from the
+          // coach's file listing (to stop "another world" contamination, #644), so even
+          // when the child said "give me 초코's from before back" the coach did not
+          // know the path. That one line is given only when an archive actually
+          // happened this turn — a rollback request can then Read that file and
+          // restore it into index.html.
           const archived = this.lastArchivedWorldFile
             ? `직전에 고치던 세상은 '${WORLD_ARCHIVE_DIR}/${this.lastArchivedWorldFile}' 로 보관해 뒀다 — ` +
               `아이가 되돌려 달라고 하면 그 파일을 Read 해서 index.html 에 되살려라. `
@@ -2243,12 +2453,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         }
       }
     }
-    // #644 (2026-08-20 실기기) — 대화를 지우면 코치의 기억만 비고, 오른쪽 화면의
-    // 세상은 그대로 떠 있다. 그 상태에서 아이가 "불 대신 물" 이라고 하면 코치는
-    // 무슨 세상인지 몰라 되묻거나 새 파일을 만들었다. 지운 뒤 첫 전송에만 열린 세상
-    // 한 줄을 모델 입력 앞에 얹어 기억을 채운다 — 아이 말풍선에는 붙지 않는다
-    // (히스토리에는 `text` 원문이 저장된다). 이번 턴에 세상을 연 경우는 위 안내가
-    // 이미 같은 말을 하므로 건너뛴다.
+    // #644 (2026-08-20, real device) — clearing the conversation empties only the
+    // coach's memory; the world on the right-hand screen stays up. In that state, when
+    // a child said "water instead of fire" the coach did not know which world it was
+    // and either asked back or made a new file. Only on the first send after a clear,
+    // one line about the open world is laid in front of the model input to refill that
+    // memory — it is not attached to the child's bubble (the history stores the
+    // original `text`). When a world was opened this turn it is skipped, because the
+    // notice above already says the same thing.
     if (!openedWorldThisTurn && history.length === 0 && this.lastPrebuiltWorld) {
       const open = profile?.worlds?.find((w) => w.id === this.lastPrebuiltWorld);
       const notice = openWorldNotice(open);
@@ -2259,9 +2471,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.pendingPageImage = null;
     const effectiveImages = pageImage ? [...(images ?? []), pageImage] : images;
 
-    // #580 — streamId 는 스풀의 turn_id 가 되고, 후속 spool-then-forward 가
-    // 워커 trace 로 재전송할 수 있어야 한다. 워커는 turn_id 를 UUID 로 강제
-    // 검증하므로(routes/trace.ts) randomId() 대신 UUID 를 쓴다.
+    // #580 — streamId becomes the spool's turn_id, and the later spool-then-forward
+    // has to be able to resend it to the worker's trace. The worker validates turn_id
+    // strictly as a UUID (routes/trace.ts), so a UUID is used instead of randomId().
     const streamId = crypto.randomUUID();
     if (token && profile && selection?.choices.some(c=>c.effort)) {
       this.effortTurn = {id:streamId,url:proxyUrl,token,scope:modelSelectionScope(profile)};
@@ -2282,17 +2494,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.activeStreams.set(streamId, ctrl);
 
     void this.post({ type: "streamStart", streamId, messageId });
-    // #503 — 이 턴의 단일 타임라인. 웹뷰와 같은 리듀서를 돌려 화면 순서 그대로
-    // 히스토리에 남긴다.
+    // #503 — this turn's single timeline. It runs the same reducer as the webview, so
+    // the history keeps exactly the on-screen order.
     this.turnTimelines.set(streamId, timelineStart(emptyTimeline(), messageId, Date.now()));
 
-    // #421 — 붙여넣은 이미지를 작업 폴더에 파일로 남기고, 그 경로를 이 턴의
-    // 모델 입력에 얹는다. 저장하지 않으면 코치가 `<img src>` 로 걸 대상이 없어
-    // "파일로 저장해 주시겠어요?" 라고 참가자에게 일을 떠넘긴다(2026-07-24 실강의).
+    // #421 — leave a pasted image in the work folder as a file, and lay its path onto
+    // this turn's model input. Without saving it the coach has nothing to point
+    // `<img src>` at, and it hands the job back to the participant with "could you
+    // save it as a file?" (2026-07-24, a live class).
     //
-    // `images` 만 저장한다 — `pageImage`(#278 "이 페이지를 코치에게") 는 참가자가
-    // 간직하겠다고 붙인 자료가 아니라 브라우저 캡처라, 저장하면 작업 폴더가
-    // 참가자가 요청한 적 없는 파일로 찬다.
+    // Only `images` is saved — `pageImage` (#278 "이 페이지를 코치에게") is a browser
+    // capture, not material the participant attached in order to keep it, and saving
+    // it would fill the work folder with files the participant never asked for.
     const savedImages = await this.savePastedImages(images, streamId);
     if (savedImages.note) userTextForModel = `${userTextForModel}\n\n${savedImages.note}`;
 
@@ -2323,14 +2536,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     };
     // #173 — accumulate citations across the stream so they persist to history.
     const assistantCitations: import("./protocol").Citation[] = [];
-    // #580 — 이 턴의 스풀 기록 상태. spoolRuntime 은 SDK→proxy 폴백을 반영한
-    // **실제로 돈** 런타임이다 — usage 없는 턴의 원인을 정량화하려면 기록된
-    // 런타임이 실제와 일치해야 한다 (no silent caps).
+    // #580 — this turn's spool recording state. spoolRuntime is the runtime that
+    // **actually ran**, reflecting an SDK→proxy fallback — quantifying the cause of a
+    // turn with no usage requires the recorded runtime to match reality (no silent
+    // caps).
     let spoolRuntime: "proxy" | "agent-sdk" | null = null;
     let spoolStatus: "ok" | "error" = "ok";
     let spoolErrorKind: string | undefined;
-    // holder 인 이유: 콜백 안에서의 재할당을 TS CFA 가 못 봐서, 평범한 let 은
-    // finally 시점에 null 로 좁혀진다.
+    // Why a holder: TS's CFA cannot see the reassignment inside the callback, so a
+    // plain let is narrowed to null by the time finally runs.
     const sdkTurnTotal: {
       current: { usage: Record<string, unknown>; totalCostUsd: number | null } | null;
     } = { current: null };
@@ -2344,18 +2558,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // canUseTool and strips minor tools. Belt-and-suspenders: never honor a
       // profile agent-sdk request for a minor_cohort, even if the worker
       // somehow sent one.
-      // 판단은 resolveCoachRuntime (chatPanelHelpers) 가 소유한다 — 미성년 검사가
-      // 설정 경로에만 빠져 있던 비대칭을 고치면서 순수 함수로 뺐다. 대조군 포함
-      // 단위 테스트: test/coach-runtime.smoke.mjs
+      // The decision is owned by resolveCoachRuntime (chatPanelHelpers) — it was
+      // pulled out as a pure function while fixing the asymmetry where the minor check
+      // was missing from the setting path alone. Unit test, with controls:
+      // test/coach-runtime.smoke.mjs
       const settingRuntime = cfg.get<"proxy" | "agent-sdk">("coachRuntime", "proxy");
       const runtime: "proxy" | "agent-sdk" = selection?.source === "lesson" ? selection.runtime : resolveCoachRuntime({
         settingRuntime,
         profileRuntime: profile?.coach_runtime,
         minorCohort: profile?.minor_cohort,
       });
-      // #580 — 질문 원문 + 이 턴이 향하는 런타임을 스풀에 남긴다. 신원은 토큰
-      // payload(u·c·p)에서 온다; 토큰이 없으면 신원 없이도 기록한다 (어차피
-      // 아래 호출이 실패하고 turn_end(status:error) 로 남는다).
+      // #580 — record the raw question plus the runtime this turn is headed for into
+      // the spool. The identity comes from the token payload (u·c·p); with no token it
+      // is recorded without an identity (the call below fails anyway and lands as
+      // turn_end(status:error)).
       spoolRuntime = runtime;
       this.spool?.noteIdentity(spoolIdentityFromToken(token));
       this.spool?.recordPrompt({
@@ -2378,10 +2594,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         for (const c of cites) assistantCitations.push(c);
         void this.post({ type: "streamCitations", streamId, citations: cites });
       };
-      const onAssetScore = (assetScore: import("./protocol").AssetScoreChunk) => {
-        this.assetScores?.recordAssetScore(assetScore);
-        void this.post({ type: "streamAssetScore", streamId, assetScore });
-      };
+      // SX-59 / SX-43 — no capability score, grade or badge appears on the working
+      // screen. The worker still sends the `asset_score` SSE chunk so the parser has
+      // to keep reading it, but the host **throws it away.** The status-bar sink
+      // (`assetStatusBar.ts`) and the webview message (`streamAssetScore`) disappeared
+      // in this commit.
+      // Stopping the chunk itself is a separate Service change (design §디자인 시스템).
+      // Why the callback is left as a no-op instead of removed: it is required by
+      // `sdkCoach.ts`'s option type, and the `sdk-surface-drift` smoke locks that
+      // surface.
+      const onAssetScore = (_assetScore: import("./protocol").AssetScoreChunk) => {};
       // #414 — the SDK coach's real work, rendered through the same toolLog
       // lines the browser loop already uses. Deliberately NOT translated: the
       // model thinks in English and the tool names are the SDK's own, and a
@@ -2392,21 +2614,24 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // The webview replaces an entry wholesale by id, so a tool_result has to
       // re-send the label the tool_use showed — keep it per stream.
       const toolLabels = new Map<string, string>();
-      // SDK 턴에서 Write/Edit 된 .html 경로 (tool_use id → 절대경로) — tool_result 성공 시 미리보기.
+      // .html paths Written/Edited during an SDK turn (tool_use id → absolute path) — previewed when the tool_result succeeds.
       const htmlWrites = new Map<string, string>();
-      // "다음 행동을 만드는 중" 안내 줄 (도구 결과 → 다음 호출 사이의 침묵 구간).
+      // The "building the next action" notice line (the silent stretch between a tool
+      // result and the next call).
       let pendingShown = false;
       const PENDING_ID = `pending-${streamId}`;
-      // 도구 결과 ↔ 다음 도구 호출 사이는 스트림이 완전히 조용하다(호출은 완성돼야
-      // 한 덩어리로 온다). 실기기에서 그 구간이 3분이었고 마지막 줄이 `Read ✓` 라
-      // 아이도 어른도 "읽는 중" 으로 오해했다. 그 구간을 살아있는 한 줄로 메운다.
+      // Between a tool result and the next tool call the stream is completely silent
+      // (a call only arrives once complete, in one lump). On a real device that stretch
+      // was 3 minutes and the last line was `Read ✓`, so children and adults alike
+      // misread it as "still reading". That stretch is filled with one live line.
       const showPending = () => {
         if (pendingShown) return;
         pendingShown = true;
         this.postToolLog(streamId, { id: PENDING_ID, icon: "…", label: "다음 단계를 준비하는 중…", state: "running" });
       };
-      // 이 턴에서 쓰기 도구가 **성공**한 적이 있는가. 안내 줄을 닫을 때
-      // "고쳤어요" 라고 적을 유일한 근거다 — 없으면 아이에게 거짓말이 된다(R0).
+      // Has a write tool **succeeded** during this turn? It is the only evidence for
+      // writing "고쳤어요" when the notice line closes — without it, it becomes a lie
+      // told to the child (R0).
       let wroteOk = false;
       const writeToolIds = new Set<string>();
       const clearPending = () => {
@@ -2444,7 +2669,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           })());
         }
         const log = (id: string, icon: string, label: string, state: "running" | "done" | "error") =>
-          // #503 — a.at: SDK 가 실어 보낸 자기 시각. 영속화된 줄의 createdAt 이 된다.
+          // #503 — a.at: the SDK's own timestamp as it sent it. It becomes the persisted line's createdAt.
           this.postToolLog(streamId, { id, icon, label, state, ...(a.at ? { at: a.at } : {}) });
         switch (a.kind) {
           case "thinking_tokens":
@@ -2452,33 +2677,38 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             log(`think-${thinkingIndex}`, "💭", `응답 준비 중 · ${a.tokens} 토큰`, "running");
             break;
           case "thinking":
-            // 2026-08-20 — 생각도 "뭔가 하는 중" 이다. 아동은 속생각을 숨기므로(아래)
-            // 이 줄이 없으면 화면이 완전히 조용해진다 — 실기기에서 Read ✓ 뒤 3분 침묵.
+            // 2026-08-20 — thinking is also "doing something". A child's inner
+            // thoughts are hidden (below), so without this line the screen goes
+            // completely quiet — 3 minutes of silence after Read ✓ on a real device.
             showPending();
-            // 2026-08-19 — 아동 코호트에는 코치의 속생각(영어 원문)을 그대로 보이지
-            // 않는다. "The user wants me to display the HTML file…" 이 아이 화면에
-            // 그대로 떴다(실기기, 게스트의 세상). 어른 트랙(#414)은 그대로.
+            // 2026-08-19 — a child cohort is not shown the coach's inner thoughts (the
+            // English original) as they are. "The user wants me to display the HTML
+            // file…" came up verbatim on a child's screen (real device, the guest
+            // worlds). The adult track (#414) is unchanged.
             if (profile?.minor_cohort === true) break;
             log(`think-${thinkingIndex}`, "💭", a.text, "done");
             thinkingIndex += 1;
             break;
           case "tool_use": {
-            // 워크스페이스 루트를 넘겨 경로를 루트 기준으로 보여 준다. 파일명만
-            // 남기면 "정상 · 상대경로 거부 · 워크스페이스 밖"이 같은 글자가 된다.
+            // Pass the workspace root so the path is shown relative to it. Leaving
+            // only the filename makes "normal · relative path refused · outside the
+            // workspace" all read as the same characters.
             clearPending();
             const label = `${a.name}(${summarizeToolInput(a.name, a.input, 60, this.resolveCoachCwd())})`;
             toolLabels.set(a.id, label);
-            // 2026-08-19 — SDK 코치가 Write/Edit 로 .html 을 저장하면 그 결과가
-            // 화면에 떠야 한다. 이전에는 채팅의 ```html 펜스만 미리보기를 열어서,
-            // 코치가 도구로 파일을 고친 턴은 "다 됐어요"라고 말해도 화면이 안 바뀌고
-            // 코치가 "▶ 실행을 눌러라 / 127.0.0.1:포트 를 열어라"로 흘렀다
-            // (2026-08-19 실기기, 게스트의 세상 T1). 어떤 파일을 쓰는지 기억해 둔다.
+            // 2026-08-19 — when the SDK coach saves a .html with Write/Edit, that
+            // result has to appear on screen. Before, only the chat's ```html fence
+            // opened the preview, so on a turn where the coach fixed the file with a
+            // tool the screen did not change even as it said "다 됐어요", and the coach
+            // drifted into "press ▶ Run / open 127.0.0.1:<port>" (2026-08-19, real
+            // device, guest worlds T1). Remember which file is being written.
             {
               const inp = a.input as { file_path?: unknown } | undefined;
               const fp = typeof inp?.file_path === "string" ? inp.file_path : "";
               const isWrite = (WRITE_TOOL_NAMES as readonly string[]).includes(a.name);
-              // 미리보기용(.html)과 별개로, "고쳤어요" 판정용은 **모든 쓰기 도구**를
-              // 센다 — engine.js 나 다른 파일을 고쳤어도 고친 것은 고친 것이다.
+              // Separately from the preview case (.html), the "고쳤어요" verdict counts
+              // **every write tool** — editing engine.js or any other file is still
+              // editing.
               if (isWrite) writeToolIds.add(a.id);
               if (isWrite && /\.html?$/i.test(fp)) {
                 htmlWrites.set(a.id, fp);
@@ -2488,9 +2718,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             break;
           }
           case "tool_result":
-            // 실패는 라벨에 표시를 남긴다 — 아이콘만으로는 스크롤 지나가면
-            // 사라진다. 실사용에서 Write 실패를 놓치고 "저장됐습니다"를 그대로
-            // 믿었다(2026-07-26).
+            // A failure leaves a mark in the label — an icon alone disappears once the
+            // scroll passes it. In real use a Write failure was missed and
+            // "저장됐습니다" was believed as it stood (2026-07-26).
             log(
               a.id,
               "🔧",
@@ -2499,18 +2729,21 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
                 : (toolLabels.get(a.id) ?? ""),
               a.isError ? "error" : "done",
             );
-            // 쓰기 도구가 **성공**했을 때만 "고쳤다" 의 근거가 선다. 실패했거나
-            // 애초에 쓰기가 아니었으면 안내 줄은 "생각했어요" 로 닫힌다.
+            // Only a **successful** write tool establishes the evidence for "it was
+            // fixed". On a failure, or when it was never a write in the first place,
+            // the notice line closes with "생각했어요".
             if (!a.isError && writeToolIds.has(a.id)) wroteOk = true;
-            // 도구로 .html 을 성공적으로 썼으면 그 파일을 읽어 미리보기에 띄운다
-            // (펜스 경로와 같은 revealBuilt — 저장·라이브서버·네이티브 탭까지 동일).
+            // When a tool successfully wrote a .html, read that file and show it in
+            // the preview (the same revealBuilt as the fence path — identical down to
+            // the save, the live server and the native tab).
             showPending();
             if (!a.isError && htmlWrites.has(a.id)) {
               const fp = htmlWrites.get(a.id)!;
               htmlWrites.delete(a.id);
-              // 2026-08-19 — 연속 편집(MultiEdit 이전엔 Edit 5 번)마다 미리보기를
-              // 다시 열면 "미리보기를 열었어요" 가 다섯 줄 쌓이고 라이브서버도
-              // 그만큼 재오픈된다. 마지막 저장 뒤 한 번만 연다(디바운스).
+              // 2026-08-19 — reopening the preview on every consecutive edit (5 Edits
+              // before MultiEdit existed) stacks five "미리보기를 열었어요" lines and
+              // reopens the live server just as many times. Open once, after the last
+              // save (debounce).
               if (this.revealTimer) clearTimeout(this.revealTimer);
               this.revealTimer = setTimeout(() => {
                 this.revealTimer = undefined;
@@ -2526,10 +2759,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // SdkUnavailableError fallback MUST route here too; falling back to a bare
       // runProxy() drops the browser loop, so the coach only *narrates* "브라우저
       // 열게요" and never opens it (regression from the #380 SDK-runtime flip).
-      // #897 H-13 — 요청한 모델과 답한 모델을 대조할 문맥. **출처를 함께 넘기는 것이
-      // 요점이다**: 학생이 직접 고른 모델이 바뀐 것과 수업 기본값·구형 alias 가 서버에서
-      // 풀린 것은 다른 사건이고, 후자까지 경고하면 정상 동작이 매 턴 경고를 내 진짜
-      // 대체가 묻힌다. 두 proxy 경로(일반 전송·브라우저 루프)가 같은 값을 쓴다.
+      // #897 H-13 — the context for comparing the model requested against the model
+      // that answered. **Passing the source along is the point**: a model the student
+      // picked themselves being changed and a lesson default or a legacy alias being
+      // resolved on the server are different events, and warning about the latter too
+      // means normal behaviour raises a warning every turn and buries the real
+      // substitution. Both proxy paths (ordinary send, browser loop) use the same
+      // value.
       const modelEcho: ModelEchoContext = {
         requestedAlias: model,
         source: !selection ? 'unknown'
@@ -2577,27 +2813,33 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           signal: ctrl.signal,
           coachName: effectiveCoachName,
           coachPersonality: effectiveCoachPersonality,
-          // #507 — 떠 있는 라이브 서버 주소를 매 턴 실어 보낸다. 없으면 생략:
-          // 워커가 "아직 안 떠 있다 + 포트를 추측하지 마라"를 대신 말한다.
+          // #507 — send the address of the live server that is up on every turn.
+          // Omitted when there is none: the worker then says "it is not up yet + do
+          // not guess the port" on our behalf.
           previewUrl: this.liveServer.currentUrl(),
           onDelta,
           onCitations,
           onAssetScore,
-          // #580 — 요청 1건의 usage (워커 hps_usage / 업스트림 usage 청크).
-          // #897 H-13 — 그 usage 의 `model` 이 요청과 다르면 학생에게 말한다.
-          // 출처를 함께 넘기는 것이 요점이다: 학생이 **직접 고른** 모델이 바뀐 것과
-          // 수업 기본값·구형 alias 가 서버에서 풀린 것은 다른 사건이고, 후자까지
-          // 경고하면 정상 동작이 매 턴 경고를 내 진짜 대체가 묻힌다.
+          // #580 — the usage of one request (the worker's hps_usage / the upstream
+          // usage chunk).
+          // #897 H-13 — when that usage's `model` differs from the request, say so to
+          // the student. Passing the source along is the point: a model the student
+          // **picked themselves** being changed and a lesson default or a legacy alias
+          // being resolved on the server are different events, and warning about the
+          // latter too means normal behaviour raises a warning every turn and buries
+          // the real substitution.
           onUsage: this.proxyUsageRecorder(streamId, modelEcho, onDelta),
         });
-      // #749 — 한 좌석에 코치 턴은 동시에 하나만 돈다. 잠금은 런타임 **바깥**에
-      // 있어야 한다: 처음엔 `runSdkCoach` 안에 있었는데 그러면 proxy 코호트 전체가
-      // 무방비였고, SDK 가 `SdkUnavailableError` 로 떨어질 때 잠금이 먼저 풀린 뒤
-      // 폴백이 돌아 **막으려던 중복 턴이 다른 런타임에서 실행**됐다. 여기서 잡으면
-      // 두 경로와 폴백이 한 울타리 안에 들어온다.
+      // #749 — a seat runs only one coach turn at a time. The lock has to be
+      // **outside** the runtime: it started inside `runSdkCoach`, which left every
+      // proxy cohort unprotected, and when the SDK dropped out with
+      // `SdkUnavailableError` the lock was released first and then the fallback ran —
+      // so **the duplicate turn it was meant to block ran on the other runtime**.
+      // Taking it here puts both paths and the fallback inside one fence.
       //
-      // 좌석 키는 토큰·프로필에서 파생한다(토큰은 해시만 쓴다). 토큰이 없으면
-      // 어차피 아래에서 막히므로 잠금은 최선 노력으로 둔다.
+      // The seat key is derived from the token and the profile (only a hash of the
+      // token is used). With no token it is blocked below anyway, so the lock is left
+      // best-effort.
       await withCoachSeatLock(coachSeatKeyFor({ token: token ?? undefined, profile: profile ?? undefined }), async () => {
       const local = localRuntimeConfig(vscode.env.appName, proxyUrl);
       if (local) {
@@ -2642,18 +2884,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             history: history.map((m) => ({ role: m.role, content: m.content })),
             userText: userTextForModel,
             signal: ctrl.signal,
-            // #457 — 폴더가 안 열려 있으면 workspaceFolders 가 비고, cwd 가
-            // undefined 로 넘어간다. 그러면 withWorkspaceContext 가 프롬프트를
-            // **그대로** 돌려주므로(경로 주입 없음) 코치는 자기 위치를 모르는
-            // 채로 상대 경로를 쓰다 전부 실패한다. 2026-07-26 실사용에서 Read 5회가
-            // 연속 실패했고, 코치가 `find ~` 로 홈 전체를 뒤지느라 20턴 중 13턴을
-            // 태우고 maxTurns 로 세션이 죽었다.
+            // #457 — with no folder open, workspaceFolders is empty and cwd goes
+            // through as undefined. withWorkspaceContext then returns the prompt
+            // **unchanged** (no path injection), so the coach uses relative paths
+            // without knowing where it is and every one of them fails. In real use on
+            // 2026-07-26, 5 Reads failed in a row and the coach burned 13 of 20 turns
+            // ransacking the whole home directory with `find ~` before the session died
+            // on maxTurns.
             //
-            // 프로필이 workspace_root 를 이미 알고 있으므로 그걸로 폴백한다.
-            // 두 소스가 모두 없을 때만 undefined 로 두고, 그 경우는 소리 나게 남긴다.
+            // The profile already knows workspace_root, so that is the fallback. Only
+            // when both sources are absent is it left undefined, and that case is
+            // recorded loudly.
             cwd: this.resolveCoachCwd(),
-            // #507 — 떠 있는 라이브 서버 주소(없으면 생략). MCP 도구 결과로도
-            // 알려주지만, 턴 시작 시점의 컨텍스트에 있어야 첫 이동부터 맞는다.
+            // #507 — the address of the live server that is up (omitted when there is
+            // none). It is also reported through an MCP tool result, but it has to be
+            // in the context at the start of the turn for the very first navigation to
+            // be right.
             previewUrl: this.liveServer.currentUrl(),
             // #282 W4a — explicit claude-binary override (highest priority in
             // the REQ-M24 resolution order: setting > HPS_SDK_BINARY env >
@@ -2664,9 +2910,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             stallTimeoutMs: cfg.get<number>("sdkStallTimeoutMs"),
             onDelta,
             onActivity,
-            // #580 — SDK 경로 usage: assistant 메시지가 요청 단위(같은 API 응답이
-            // 여러 메시지로 쪼개져 와도 requestKey dedupe 로 1건), result 메시지가
-            // 턴 합계(요청 단위 합의 대조군)로 turn_end 에 실린다.
+            // #580 — SDK-path usage: the assistant message is the per-request unit
+            // (one record even when a single API response arrives split across several
+            // messages, via requestKey dedupe), and the result message is the turn
+            // total (the control against the sum of the per-request records), carried
+            // on turn_end.
             onUsage: (u) => {
               if (u.kind === "request") {
                 this.spool?.recordUsage({
@@ -2705,21 +2953,26 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           // working — fall back to the proxy runtime for this turn instead of
           // showing the student a technical error.
           //
-          // #476 — 폴백 자체는 유지하되(동작 변경 없음) **보이게** 한다. 이전에는
-          // `console.warn` 한 줄이 전부였고, 확장에 출력 채널이 없어 그 줄은
-          // 어디에도 남지 않았다: 학생도 강사도 개발자도 코치 자신도 능력이
-          // 사라진 걸 몰랐고, 그 오진이 이슈 3건(#470·#471·#472)을 만들었다.
+          // #476 — the fallback itself is kept (no behaviour change) but made
+          // **visible**. Before, one `console.warn` was all there was, and with no
+          // output channel in the extension that line survived nowhere: the student,
+          // the instructor, the developer and the coach itself all failed to notice
+          // the capability had disappeared, and that misdiagnosis produced 3 issues
+          // (#470 · #471 · #472).
           assistantText = "";
           assistantCitations.length = 0;
           revealed = false;
-          // #503 — 텍스트를 버리면 타임라인도 같이 버린다. 안 그러면 폴백 전에
-          // 찍힌 툴 줄만 히스토리에 남아 "말은 없고 행동만 있는" 턴이 된다.
+          // #503 — discarding the text discards the timeline with it. Otherwise only
+          // the tool lines stamped before the fallback survive into the history, making
+          // a turn with "actions but no words".
           this.turnTimelines.set(streamId, timelineStart(emptyTimeline(), messageId, Date.now()));
-          // #476 — 안내는 이 리셋 **뒤에** 넣는다. 앞에 넣으면 방금 찍은 줄이
-          // 같이 지워져 웹뷰에만 남고 히스토리에는 안 남는다(창을 다시 열면 사라짐).
+          // #476 — the notice goes in **after** this reset. Put it before and the line
+          // just stamped is wiped along with it, surviving in the webview only and not
+          // in the history (it disappears when the window is reopened).
           this.noteSdkFallback(err.message, streamId);
-          // #580 — 이 턴이 실제로 돈 런타임은 proxy 다. 폴백은 상태이지만
-          // 사건으로도 남긴다 — "usage 없는 턴이 왜 생겼나"를 정량화하는 근거.
+          // #580 — the runtime this turn actually ran on is proxy. A fallback is a
+          // state, but it is recorded as an event too — the evidence for quantifying
+          // "why did a turn with no usage happen?".
           spoolRuntime = "proxy";
           this.spool?.recordWorkflow({
             turnId: streamId,
@@ -2744,8 +2997,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         clearPending();
         void this.post({ type: "streamEnd", streamId });
         // #371 — persist the agent.md handoff fence, if the coach emitted one.
-        // #503 — 히스토리를 굳히기 **전에** 기다린다. 이게 남기는 toolLog 줄도
-        // 이 턴의 타임라인에 들어가야 창을 다시 열었을 때 같이 보인다.
+        // #503 — await it **before** the history is frozen. The toolLog line this
+        // leaves also has to be in this turn's timeline for it to be visible when the
+        // window is reopened.
         await this.saveAgentMdIfPresent(assistantText, streamId);
         await this.appendHistory([
           { id: randomId(), role: "user", content: text, createdAt: Date.now() },
@@ -2766,9 +3020,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       spoolErrorKind = classifyTurnError(err);
       await this.handleSendError(err, streamId);
     } finally {
-      // #580 — 턴의 끝을 항상 남긴다. 사용자 중단(abort)도 catch 로 오므로
-      // 신호를 먼저 본다. SDK 턴 합계가 있으면 같이 싣는다 — 요청 단위 usage
-      // 레코드 합과의 대조군.
+      // #580 — always record the end of the turn. A user abort also arrives through
+      // catch, so the signal is checked first. When there is an SDK turn total it is
+      // carried along — the control against the sum of the per-request usage records.
       const total = sdkTurnTotal.current;
       const finalSpoolStatus = ctrl.signal.aborted ? "aborted" : spoolStatus;
       await Promise.all(observationCaptures);
@@ -2811,24 +3065,25 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * #503 — 턴을 닫고 영속화할 아이템들을 낸다. 말풍선과 툴 줄이 **일어난 순서
-   * 그대로** 섞여 있는 배열이다. 인용은 마지막 어시스턴트 말풍선에 붙인다(툴이
-   * 말풍선을 여러 개로 쪼갤 수 있으므로 "그 턴의 어시스턴트 메시지 하나"라는
-   * 가정을 더는 쓸 수 없다).
+   * #503 — closes the turn and produces the items to persist. It is an array with
+   * bubbles and tool lines mixed **in the order they happened**. Citations attach to
+   * the last assistant bubble (a tool can split the bubbles into several, so the
+   * assumption of "one assistant message per turn" can no longer be used).
    *
-   * 타임라인이 없으면(호출 순서가 어긋난 경우) 기존과 똑같이 어시스턴트 한
-   * 덩어리로 폴백한다 — 히스토리가 비는 것보다 낫다.
+   * With no timeline (when the call order got out of step) it falls back to a single
+   * assistant lump exactly as before — better than an empty history.
    */
   /**
-   * #747 (AE-08) — 이 턴의 답변 줄에 **그 턴이 답한 이름**을 찍는다.
+   * #747 (AE-08) — stamps this turn's answer lines with **the name that turn answered
+   * under**.
    *
-   * 여기가 두 런타임의 공통 커밋 지점이라 한 곳만 고치면 된다. 찍는 값은
-   * `handleSend` 가 이미 계산해 런타임에 넘긴 `effectiveCoachName` 그대로다 —
-   * 렌더 시점에 다시 해석하면 이름이 바뀐 뒤 과거가 따라 바뀌는 지금 동작이
-   * 그대로 남는다.
+   * This is the common commit point for both runtimes, so only one place needs fixing.
+   * The value stamped is exactly the `effectiveCoachName` `handleSend` already
+   * computed and handed to the runtime — resolving it again at render time would keep
+   * today's behaviour where the past changes along with the name.
    *
-   * `chatTimeline.ts` 는 건드리지 않는다. vscode 없는 순수 모듈이라 정체성을
-   * 넣지 않고 **나가는 길에** 찍는다.
+   * `chatTimeline.ts` is left alone. It is a pure module with no vscode, so identity
+   * is not put into it; it is stamped **on the way out**.
    */
   private finishTurnItems(
     streamId: string,
@@ -2893,13 +3148,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     coachPersonality: string;
     onDelta: (delta: string) => void;
     onCitations: (cites: import("./protocol").Citation[]) => void;
-    /** #897 H-13 — 한 턴에 요청이 여러 번 나가도 안내는 한 번이다(recorder 가 막는다). */
+    /** #897 H-13 — even when several requests go out within one turn the notice appears once (the recorder blocks the rest). */
     modelEcho?: ModelEchoContext;
   }): Promise<void> {
     const browser = new BrowserControl();
     const maxIter = this.cachedProfile?.browser_control?.max_iterations ?? 8;
     const scratch: Array<{ role: "user" | "assistant"; content: unknown }> = [];
-    let lastAssetScore: import("./protocol").AssetScoreChunk | null = null;
     try {
       for (let iter = 0; ; iter++) {
         if (p.signal.aborted) return;
@@ -2917,16 +3171,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           signal: p.signal,
           coachName: p.coachName,
           coachPersonality: p.coachPersonality,
-          // #507 — 루프 안에서 매 턴 다시 읽는다: live_preview_start 로 방금 뜬
-          // 서버 주소가 다음 턴 컨텍스트에 들어가야 추측할 이유가 사라진다.
+          // #507 — re-read on every turn inside the loop: the server address that
+          // live_preview_start just brought up has to be in the next turn's context for
+          // there to be no reason left to guess.
           previewUrl: this.liveServer.currentUrl(),
           onDelta: p.onDelta,
           onCitations: p.onCitations,
-          onAssetScore: (s) => {
-            lastAssetScore = s; // buffer; only the terminal turn is recorded
-          },
-          // #580 — 브라우저 루프는 한 턴에 요청을 여러 번 낸다. 반복마다
-          // 요청 1건 = 레코드 1건 (requestKey 는 요청별 request id).
+          // SX-59 — the browser loop discards the score chunk too. It used to buffer
+          // the last turn's and put it on the status bar. The status bar is gone, so
+          // the buffer went with it.
+          onAssetScore: () => {},
+          // #580 — the browser loop issues several requests within one turn. Per
+          // iteration, 1 request = 1 record (requestKey is the per-request request id).
           onUsage: this.proxyUsageRecorder(p.streamId, p.modelEcho, p.onDelta),
         });
         if (result.toolUses.length === 0) break; // terminal turn → done
@@ -2942,8 +3198,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         // fire here (browser loop path), so reveal explicitly per iteration.
         if (result.text) {
           const iterHtml = extractRenderableHtml(result.text);
-          // #580 — spoolTurnId 만 넘긴다: streamId 를 넘기면 logReveal 타임라인
-          // 줄이 반복마다 생겨 UI 가 달라진다. 스풀 귀속만 얹는다.
+          // #580 — pass spoolTurnId only: passing streamId would create a logReveal
+          // timeline line on every iteration and change the UI. Only the spool
+          // attribution is added.
           if (iterHtml) {
             await this.revealBuilt(iterHtml, {
               spoolTurnId: p.streamId,
@@ -2962,9 +3219,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         const toolResults: unknown[] = [];
         for (const call of result.toolUses) {
           if (p.signal.aborted) return;
-          // #507 — 추측된 루프백 포트를 실제 라이브 서버로 교정한 뒤 실행한다.
-          // **로그를 만들기 전에** 고친다: 화면 줄이 요청한 주소를 보여주면
-          // 참가자는 실제로 열린 곳과 다른 주소를 읽게 된다.
+          // #507 — correct a guessed loopback port to the real live server before
+          // running it. Fix it **before** building the log: if the on-screen line shows
+          // the requested address, the participant reads an address different from
+          // where it actually opened.
           const fixed = this.retargetLoopbackNavigation(call);
           const line = browserToolLogLine(fixed.call.name, fixed.call.input);
           this.postToolLog(p.streamId, { id: call.id, ...line, state: "running" });
@@ -2973,7 +3231,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           toolResults.push({
             type: "tool_result",
             tool_use_id: call.id,
-            // 교정했으면 모델에게도 말한다 — 조용히 고치면 다음 턴에 또 추측한다.
+            // If it was corrected, tell the model too — fix it silently and it
+            // guesses again next turn.
             content: fixed.note
               ? [...tr.content, { type: "text" as const, text: fixed.note }]
               : tr.content,
@@ -2981,10 +3240,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           });
         }
         scratch.push({ role: "user", content: toolResults });
-      }
-      if (lastAssetScore) {
-        this.assetScores?.recordAssetScore(lastAssetScore);
-        void this.post({ type: "streamAssetScore", streamId: p.streamId, assetScore: lastAssetScore });
       }
     } finally {
       await browser.dispose();
@@ -3011,12 +3266,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         requestId: err.requestId,
         runbookUrl: err.runbookUrl,
       });
-      // #596 — 세션이 닫힌 순간이 "오늘 기록 보내기"의 자연스러운 트리거다.
-      // 자동 업로드가 아니라 **버튼 하나 있는 안내**만 낸다(#580 AC: 명시적
-      // 액션 없이는 어떤 업로드도 없다). 코호트가 opt-in 하지 않았으면
-      // 아무것도 띄우지 않는다 — 서버도 어차피 거부한다(fail closed).
-      // 활성화당 1회 — 수업 끝나고 재전송할 때마다 토스트가 쌓이면 두 번째
-      // 부터는 아무도 안 읽는다 (#476 폴백 공지와 같은 판단).
+      // #596 — the moment the session closes is the natural trigger for "send today's
+      // records". It raises **a notice with one button**, not an automatic upload
+      // (#580 AC: no upload of any kind without an explicit action). If the cohort has
+      // not opted in, nothing is shown — the server refuses it anyway (fail closed).
+      // Once per activation — if toasts stack up on every resend after the lesson
+      // ends, nobody reads them from the second one on (the same judgment as the #476
+      // fallback notice).
       if (
         err.kind === "session_window" &&
         !this.sessionEndUploadOffered &&
@@ -3125,13 +3381,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       return pick === "실행";
     }
 
-    // Tier 1.5 — 브라우저 열기. 오리진 단위로 한 번만 묻는다.
+    // Tier 1.5 — opening the browser. Asked once per origin.
     //
-    // 실측(2026-07-26 실사용): 코치가 정답지 사이트의 서브페이지를 차례로 읽는
-    // 동안 About·첨단디지털·평생예방·시니어… 페이지마다 모달이 떴다. 판단은
-    // "이 사이트를 코치가 둘러봐도 되는가" 한 번이면 끝나는데, 같은 답을 다섯 번
-    // 요구하면 읽지 않고 누르는 습관만 남는다 — 승인 게이트가 훈련시키려던 것과
-    // 정반대다. 셸의 `항상 허용`(위)과 같은 장치이고, 마찬가지로 세션 한정이다.
+    // Measured (2026-07-26, real use): while the coach read the reference site's
+    // sub-pages one after another, a modal appeared for every page — About ·
+    // 첨단디지털 · 평생예방 · 시니어 … The judgment is finished after one answer to
+    // "may the coach look around this site", and demanding the same answer five times
+    // leaves only the habit of clicking without reading — the exact opposite of what
+    // the approval gate was meant to train. It is the same device as the shell's
+    // `항상 허용` (above) and, likewise, session-scoped.
     if (req.kind === "openBrowser") {
       const url = (req.payload as { url?: string } | null | undefined)?.url ?? "";
       const origin = originOfUrl(url);
@@ -3167,36 +3425,44 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // Tier 3 — modal-gated.
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
     //
-    // writeFile 은 여기서 **빠졌다** (원장 결정 2026-07-27, 이전 결정 번복).
+    // writeFile is **out** of this list (원장 decision 2026-07-27, reversing an
+    // earlier decision).
     //
-    // 이 모달이 뜰 때는 이미 안전 검사가 끝나 있다: 워크스페이스 밖 경로는
-    // evaluateSdkToolUse 의 containment 가 모달 없이 거부한다. 그래서 남은 기능은
-    // 안전이 아니라 위임 판단 교육뿐이었는데, 실측에서 그 교육이 성립하지 않았다.
+    // By the time this modal appears, the safety checks are already done: a path
+    // outside the workspace is refused with no modal by evaluateSdkToolUse's
+    // containment. So the only function left was not safety but teaching delegation
+    // judgment — and in the measurements that teaching did not hold up.
     //
-    //   07-27 턴 2: 파일 저장 모달 하나가 **174초** 방치됐다. 원장이 화면 앞에
-    //   없었고, 코치는 그동안 아무것도 못 하고 멈춰 있었다. 그 전날엔 42.2초짜리가
-    //   한 턴 승인 대기의 77% 였다. 한 턴에 8번 뜨던 날도 있었고 그때는 3~4초 만에
-    //   눌렸다 — 읽지 않고 누르는 리듬이다.
+    //   07-27 turn 2: one file-save modal was left sitting for **174 seconds**. The
+    //   원장 was not in front of the screen, and the coach was stuck doing nothing the
+    //   whole time. The day before, a 42.2-second one was 77% of one turn's approval
+    //   wait. There was also a day it appeared 8 times in one turn, and then it was
+    //   clicked within 3–4 seconds — the rhythm of clicking without reading.
     //
-    // 즉 이 모달은 둘 중 하나가 된다: 놓쳐서 세션을 멈추거나, 반사로 눌러 교육
-    // 효과가 없거나. 위임 판단은 셸·브라우저·서브에이전트에서 가르친다 — 그쪽은
-    // 진짜로 되돌리기 어렵거나 바깥으로 나가는 행위다.
+    // So this modal becomes one of two things: missed, stopping the session; or
+    // clicked by reflex, teaching nothing. Delegation judgment is taught on shell,
+    // browser and subagents — those are genuinely hard to undo, or they reach outside.
     //
-    // 되돌리려면 설정 한 줄이다: hypeproofChat.requireApprovalFor 에 "writeFile" 추가.
-    // browserClick 은 목록에 **없다** → 자동 허용.
+    // Reverting it is one line of settings: add "writeFile" to
+    // hypeproofChat.requireApprovalFor.
+    // browserClick is **not** in the list → auto-allowed.
     //
-    // 페이지를 여는 결정(openBrowser)에서 이미 위임 판단을 한 뒤다. 그 페이지 안에서
-    // 누르는 것은 새로운 바깥 행위가 아니라 검증이고, 같은 페이지의 browser_read 는
-    // 이미 자동 허용이다. 실측(07-27): 코치가 "고치고 직접 눌러 확인"하는 루프마다
-    // 모달이 떴고, 그것도 매핑 누락 탓에 **셸 문구에 빈 내용**으로 떴다.
-    // browserType 은 남긴다 — 값을 넣고 제출까지 갈 수 있어 성격이 다르다.
+    // The delegation judgment was already made in the decision to open the page
+    // (openBrowser). Clicking inside that page is verification, not a new outward act,
+    // and browser_read on the same page is already auto-allowed. Measured (07-27): a
+    // modal appeared on every loop where the coach "fixed it and clicked to check for
+    // himself", and thanks to a missing mapping it even appeared **with the shell copy
+    // and empty content**.
+    // browserType stays — it can enter a value and go as far as submitting, which is a
+    // different kind of act.
     //
-    // 정책의 단일 소스는 package.json 의 `requireApprovalFor.default` 다.
-    // 매니페스트에 default 가 선언돼 있으면 **항상 매니페스트가 이기고** 아래
-    // 두 번째 인자는 도달하지 않는다. #499 는 그 사실을 놓쳐서 생긴 드리프트였다
-    // — 코드만 고치고 매니페스트를 안 고쳐서 writeFile 모달이 살아 있었고
-    // browserType 은 목록에 없어 무조건 자동 허용이었다. 정책을 바꿀 때는
-    // package.json 의 `default` 와 `items.enum` 을 고친다(스모크 테스트가 잠근다).
+    // The single source of the policy is `requireApprovalFor.default` in package.json.
+    // When the manifest declares a default, **the manifest always wins** and the
+    // second argument below is never reached. #499 was the drift caused by missing
+    // that fact — only the code was fixed and not the manifest, so the writeFile modal
+    // was still alive while browserType, absent from the list, was unconditionally
+    // auto-allowed. To change the policy, edit `default` and `items.enum` in
+    // package.json (a smoke test locks it).
     const required = cfg.get<string[]>("requireApprovalFor", [
       "executeShell",
       "openBrowser",
@@ -3206,17 +3472,20 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const needsApproval = required.includes(req.kind);
     if (!needsApproval) return true;
 
-    // 한국어로 묻는다. 셸(`코치가 명령을 실행하려고 해요`)과 브라우저(`코치가
-    // 브라우저를 열려고 해요`)는 한국어인데 파일 쓰기만 이 일반 폴백으로 빠져
-    // `HypeProof Chat wants to writeFile:` / `Deny·Cancel·Approve` 로 나갔다.
+    // Ask in Korean. Shell (`코치가 명령을 실행하려고 해요`) and browser (`코치가
+    // 브라우저를 열려고 해요`) were Korean, but file writing alone dropped into this
+    // generic fallback and went out as `HypeProof Chat wants to writeFile:` /
+    // `Deny·Cancel·Approve`.
     //
-    // 잡음 제거가 아니라 **속도** 문제다(2026-07-27 실측): 한국어 모달은 3~4초
-    // 만에 눌렸는데 이 영어 모달 하나가 42.2초를 잡아먹었다 — 그 한 건이 그 턴
-    // 승인 대기의 77%였다. 성인 전문직 청중에게 갑자기 영어가 뜨면 읽는 데
-    // 시간이 걸린다.
+    // This is not about removing noise, it is about **speed** (measured 2026-07-27):
+    // the Korean modals were clicked within 3–4 seconds while this one English modal
+    // ate 42.2 seconds — that single instance was 77% of that turn's approval wait.
+    // When English suddenly appears in front of an adult professional audience, it
+    // takes time to read.
     //
-    // 승인 게이트 자체는 유지한다(원장 결정 2026-07-27): 자기 결과물이 바뀌는
-    // 순간마다 의식적으로 승인하는 것이 이 트랙의 위임 판단 훈련이다.
+    // The approval gate itself stays (원장 decision 2026-07-27): consciously approving
+    // at every moment your own artifact changes IS this track's delegation-judgment
+    // training.
     const coachName = this.coachDisplayName();
     const { title, verb } = approvalCopyFor(coachName)[req.kind] ?? {
       title: approvalFallbackTitle(coachName),
@@ -3265,8 +3534,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         update: local ? undefined : this.availableUpdate,
       },
     });
-    // #649 — 웹뷰가 다시 붙으면(패널 숨김→표시, 리로드) 강조가 사라진다. 지금 열려
-    // 있는 세상을 한 번 더 알려 스트립의 aria-pressed 를 되살린다.
+    // #649 — when the webview remounts (panel hide → show, reload) the highlight
+    // disappears. Announce the currently open world once more to restore the strip's
+    // aria-pressed.
     if (this.lastPrebuiltWorld) {
       const w = profile?.worlds?.find((x) => x.id === this.lastPrebuiltWorld);
       void this.post({
@@ -3310,8 +3580,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   private async appendHistory(msgs: ChatMessage[]): Promise<void> {
     const current = this.getHistory();
-    // #503 — 상한은 '말한 것' 기준으로 센다. 툴 줄까지 같은 200 안에서 세면 SDK
-    // 턴 한 번(수십 줄)이 대화 히스토리를 통째로 밀어낸다.
+    // #503 — the cap is counted on 'what was said'. Counting tool lines inside the
+    // same 200 lets a single SDK turn (dozens of lines) push the entire conversation
+    // history out.
     const next = clampTimeline([...current, ...msgs], HISTORY_MAX);
     await this.context.workspaceState.update(this.historyKey(), next);
   }
@@ -3368,9 +3639,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /**
-   * #503 — 툴 한 줄을 웹뷰로 보내면서 **같은 줄을 이 턴의 타임라인에도** 남긴다.
-   * 이 한 지점을 통과하지 않는 toolLog 는 화면엔 뜨는데 히스토리엔 없는 줄이 되어,
-   * 창을 다시 열면 사라진다 — 이 이슈가 잡으려는 증상 그 자체다.
+   * #503 — sends one tool line to the webview and leaves **the same line in this
+   * turn's timeline** as well. A toolLog that does not pass through this single point
+   * becomes a line that shows on screen but is not in the history, and disappears when
+   * the window is reopened — the very symptom this issue is meant to catch.
    */
   private postToolLog(streamId: string, entry: ToolEntry): void {
     const t = this.turnTimelines.get(streamId);
