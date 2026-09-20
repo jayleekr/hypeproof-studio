@@ -303,3 +303,25 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 최종 회귀(2026-09-20, 이 브랜치 끝): worker test·typecheck, `test:classroom-ops:d1`(0011~0021), chalk test·typecheck, 확장 test·typecheck·build, e2e 4종, `next-work --check`, docs harness, `check-registry`, `check-workflow-shells` — 결과는 PR 본문의 검증 절에 HEAD와 함께 적는다.
 
 **아직 코드가 없는 것(환경 대기가 아님):** 위 후속 범위 표의 5개 항목.
+
+<a id="remote-readiness-review-20260920"></a>
+
+### 독립 재검토와 실기 전 추가 인수 · 2026-09-20
+
+검토 기준은 #1169 끝 `c58dbc804503d45d6efde83a80e0d61cb5f6252a`다. 제품 소스는 수정하지 않았다. 확인한 범위는 다음과 같다.
+
+- 로컬은 `feat/751-review-c-ops-ui-retention-ci`, clean이며 원격 #1169 HEAD와 같다. 확인 당시 origin/main `ce95747`을 모두 포함하고 58 commits 앞이다. 관제 구현은 아직 main에 병합되지 않았다.
+- GitHub API로 #1165, #1119~1127, #1129, #1167~1169의 14개 PR을 조회했다. 모두 OPEN/CLEAN, 수집된 check 중 실패·대기 0. 마지막 3개는 Draft이고 #1169의 `classroom / browser`도 SUCCESS다. **#1120·#1121은 CHANGES_REQUESTED**, 나머지도 승인 확보와는 별개다. CLEAN은 테스트·실기·리뷰 승인을 합친 판정이 아니다.
+- 직접 실행: worker review 25, 확장 review 14, evaluator/provider/erasure 24 = **63 PASS / 0 FAIL / skip 0**. 기존 평가기 OFF→ON 재현도 다시 실행해 두 학생 각각 1회 평가, 이전 job superseded, 최종 more=false를 확인했다. 브라우저는 이번 재검토에서 재실행하지 않고 현재 PR의 CI 결과를 확인했다.
+- 이 기록은 전체 코드 감사나 출시 승인 판정이 아니다. 아래 두 동시성/복구 시나리오는 기존 테스트에 없었고 합성 계정·SQLite·메모리 R2·provider transport stub으로 직접 재현했다. 실제 모델/학생/운영 저장소에 접근하지 않았다.
+
+| 추가 수정 / 기존 인수 | 재현과 관측 | 수정 인수 |
+|---|---|---|
+| P1 · 철회 완료 뒤 늦은 평가 결과가 R2에 다시 남음 / AT-28~30 | 실제 `advance`가 provider 응답을 기다릴 때 같은 학생을 `eraseLearnerCollection`로 철회. 삭제 기록 done, report 객체 0 확인 뒤 provider 응답 반환. job은 withdrawn을 유지하지만 학생 인용을 담은 `draft.json`이 1개 다시 저장됨. 30일 보존을 설정하고 40일 뒤 tick해도 done 행을 제외해 객체가 남음 | 삭제/철회와 쓰기의 순서를 결속. stale lease 또는 tombstone의 입력은 결과 저장을 확정하지 못해야 함. D1/R2는 하나의 transaction이 아니므로 사전 확인만으로 끝내지 말고 늦은 PUT·CAS 실패·프로세스 중단 때 남는 객체의 보상 삭제/재조정까지 포함. 정상 job은 1회 저장. 학생 A 철회가 B를 건드리지 않음 |
+| P1 · 실패한 철회 삭제가 보존 만기까지 재시도되지 않음 / AT-28 | 수업 중 철회에서 R2 delete 실패 주입 → erasure_log는 withdrawn/started. R2 복구 뒤 retention=30일/enforce, 다음 날 tick. due=0, attempts=1 그대로이고 snapshot 객체 2개가 남음 | 사용자가 이미 요청한 철회의 중단된 삭제를 만기 보존 작업과 분리해 재시도. 보존 일수 미설정/기한 전에도 명시적으로 승인된 철회 작업은 회복 가능해야 함. 일반 보존 OFF는 신규 만기 삭제 0을 유지. 재시도 상한·지연·진행 상태·다른 학생 불변 검사 |
+
+첫 문제의 시작점은 `worker/src/routes/classroom-reports.ts`의 `saveResult`다. R2 put을 먼저 하고 D1의 leased/generation 조건을 나중에 검사한다. 두 번째는 `worker/src/lib/classroom-erasure.ts`의 `runClassroomRetention`: 모든 후보에 `ends_at <= cutoff`를 적용하며 설정 OFF 시 돌아온다. 기존의 철회 후 재요청 거부 시험은 **이미 진행 중인 요청의 늦은 완료**를 검사하지 않는다. 이번 재현은 R2 잔존을 증명하며 보호 링크의 재공개를 증명한 것은 아니다.
+
+추가 회귀는 임의 sleep으로 순서를 기대하지 말고 provider/R2 단계별 barrier로 재현한다. 평가/업로드 중 철회, R2 put 중 철회, 결과 CAS 실패, 삭제 중 오류·프로세스 중단을 대조한다. 실제 구현 위치의 원장을 재사용하고 별도 삭제 시스템을 복제하지 않는다.
+
+**Mac 인수 준비의 현재 한계:** 기존 `mac-devhost` manifest는 shell v0.1.16, extension SHA `f3763d6`, `agent_sdk_vendored=false`이며 prepare만 실행돼 있다. 현재 HEAD의 GUI/SDK 인수 증거가 아니다. v0.1.56의 공식 Mac arm64 ZIP(170,569,061 bytes)과 Windows x64 산출물은 GitHub release에 존재함을 조회했다. 다운로드/설치/GUI 실행은 이번 재검토에서 하지 않았다. 준비된 복사본과 실제 release, proxy fallback과 vendored SDK 실행은 각각 다른 증거로 남긴다.
