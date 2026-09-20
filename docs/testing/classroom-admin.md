@@ -352,7 +352,7 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 | 구분 | 내용 |
 |---|---|
-| 실제 | Studio shell 프로세스(v0.1.16 **복사본**, ad-hoc 서명, 격리 user-data), extension host·webview(현재 소스 `c4fe3de`, bundle 해시 4개 일치), 명령 팔레트·알림, Agent SDK 0.3.207 JS(저장소 설치본에서 복사, package-lock 핀 일치·import 검증) + 네이티브 `claude` 바이너리(`HPS_SDK_BINARY`), 127.0.0.1 HTTP → 실제 Service 라우터 + SQLite, 실제 sync loop·명령 실행기, 실제 workspace 파일 |
+| 실제 | Studio shell 프로세스(v0.1.16 **복사본**, ad-hoc 서명, 격리 user-data), extension host·webview(실행 시점의 소스 SHA와 bundle 해시 4개는 결과 파일에 기록, 최종 실행 `35370da`), 명령 팔레트·알림, Agent SDK 0.3.207 JS(저장소 설치본에서 복사, package-lock 핀 일치·import 검증) + 네이티브 `claude` 바이너리(`HPS_SDK_BINARY`), 127.0.0.1 HTTP → 실제 Service 라우터 + SQLite, 실제 sync loop·명령 실행기, 실제 workspace 파일 |
 | 합성 | 계정·수업, **모델 공급자**(api.anthropic.com 자리에 정해진 SSE/400/무응답), 메모리 R2, in-memory secret storage |
 | 결과 10/10 PASS | 토큰 활성화(수업 패널 표시) → 팔레트에 1회용 코드 입력해 연결(알림, 보드 `token_verified`·connection active) → 학생 단계 버튼 → 보드 in_progress/submitted(자기보고) → 강사 확인(`confirmed`, 기기 보고값은 그대로) → 공급자 400 → 보드 blocking 오류·`runtime_failed` → 다음 실제 턴 성공으로 해제(`cleared`, SDK 경로 stream+tools 15) → **실행 중인 SDK 턴을 강사가 중지**(`run_stopped`) → 보존형 reset(`reset_ok`, 파일 2개 sha256 동일, 대화 유지, reset 뒤 턴 성공) → 새 코드로 재연결(이전 grant `revoked`, epoch 2) → 연결 끊기(파일 동일) |
 
