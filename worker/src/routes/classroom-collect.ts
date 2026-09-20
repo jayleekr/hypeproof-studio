@@ -18,7 +18,7 @@ import { getProfile } from '../profiles';
 import { isMinorCohort } from '../lib/moderation';
 import { COMMAND_TTL_MS, ID_RE, UUIDISH_RE, parseFlags, parseLesson, sha256Hex } from '../lib/classroom-ops';
 import { CONSENT_BASES, PURPOSES, SNAPSHOT_FILES, UPLOAD_GRACE_MS, attributionProblem, eventCoverage, finalLineSha, sha256Bytes, snapshotKey, validateManifest } from '../lib/classroom-collect';
-import { eraseLearnerCollection } from '../lib/classroom-erasure';
+import { ERASURE_RETRY_STEPS_MS, MAX_ERASURE_ATTEMPTS, eraseLearnerCollection } from '../lib/classroom-erasure';
 import { opsEnabled } from './classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -56,9 +56,21 @@ classroomCollectOperator.post('/classroom/erasures', async (c) => {
   if (b.reason === 'retention' && run.ends_at + b.retention_days * 86_400_000 > now) return c.json({ error: 'the retention period of this run has not ended', reason: 'retention_not_due', due_at: run.ends_at + b.retention_days * 86_400_000 }, 409);
   const students = b.reason === 'withdrawn' ? [b.student_id as string] : (((await db.prepare('SELECT DISTINCT i.student_id FROM classroom_collect_items i JOIN classroom_collect_batches x ON x.id=i.batch_id WHERE x.class_run_id=?').bind(b.class_run_id).all()).results ?? []) as Array<{ student_id: string }>).map((r) => r.student_id);
   if (b.dry_run) return c.json({ dry_run: true, students: students.length });
-  const results = []; for (const student_id of students) results.push({ student_id, ...(await eraseLearnerCollection(c.env, { class_run_id: b.class_run_id, cohort_id: run.cohort_id, student_id }, b.reason, { kind: 'operator', id: 'operator' }, now)) });
+  // One learner's storage trouble does not stop the others. What did not finish is in the ledger as `started` and recovery retries it.
+  const results = []; let pending = 0;
+  for (const student_id of students) {
+    try { results.push({ student_id, ...(await eraseLearnerCollection(c.env, { class_run_id: b.class_run_id, cohort_id: run.cohort_id, student_id }, b.reason, { kind: 'operator', id: 'operator' }, now)) }); }
+    catch { pending++; results.push({ student_id, erasure: 'pending', reason: 'content_delete_failed' }); }
+  }
   if (b.reason === 'withdrawn') await db.prepare('UPDATE classroom_consents SET revoked_at=? WHERE class_run_id=? AND student_id=? AND revoked_at IS NULL').bind(now, b.class_run_id, b.student_id).run();
-  return c.json({ erased: results, note: 'copies already delivered to a recipient are not recalled' });
+  return c.json({ erased: results, pending, note: 'copies already delivered to a recipient are not recalled' }, pending ? 202 : 200);
+});
+// Where each requested erasure stands. Ids, states, counts and error codes only.
+classroomCollectOperator.get('/classroom/erasures', async (c) => {
+  if (!opsEnabled(c.env)) return c.json({ error: 'classroom operations are not enabled', reason: 'ops_disabled' }, 404);
+  const run = c.req.query('class_run_id') ?? ''; if (!ID_RE.test(run)) return c.json({ error: 'class_run_id required' }, 400);
+  const rows = ((await c.env.HPS_DB.prepare('SELECT student_id,reason,state,attempts,last_error,started_at,updated_at FROM classroom_erasure_log WHERE class_run_id=? ORDER BY student_id').bind(run).all()).results ?? []) as Array<{ state: string; attempts: number; last_error: string; updated_at: number }>;
+  return c.json({ erasures: rows.map((r) => ({ ...r, needs_operator: r.state === 'started' && r.attempts >= MAX_ERASURE_ATTEMPTS, next_attempt_at: r.state === 'started' && r.attempts < MAX_ERASURE_ATTEMPTS ? r.updated_at + ERASURE_RETRY_STEPS_MS[Math.min(Math.max(r.attempts, 1), ERASURE_RETRY_STEPS_MS.length) - 1]! : null })) });
 });
 
 // ── learner device (operations credential) ──
@@ -92,7 +104,14 @@ classroomCollectApp.post('/consent', async (c) => {
       audit(db, g.class_run_id, g.seat_id, 'student', g.student_id, 'collection_consent_withdrawn', { purpose: b.purpose }, now),
     ]);
     // Withdrawal reaches what was already collected: snapshots, drafts, links and queued work go; the content-free record stays.
-    const erased = await eraseLearnerCollection(c.env, { class_run_id: g.class_run_id, cohort_id: g.cohort_id, student_id: g.student_id }, 'withdrawn', { kind: 'student', id: g.student_id }, now);
+    // The withdrawal itself is already recorded above. If the stored content cannot be removed right now, that is said
+    // as "pending" — not as a failed withdrawal — and recovery finishes it without the learner having to ask again.
+    let erased; try { erased = await eraseLearnerCollection(c.env, { class_run_id: g.class_run_id, cohort_id: g.cohort_id, student_id: g.student_id }, 'withdrawn', { kind: 'student', id: g.student_id }, now); }
+    catch {
+      // "Retried automatically" is only true if the ledger knows about it. If even that cannot be written, this is an error the device sees.
+      await db.prepare("INSERT INTO classroom_erasure_log(class_run_id,student_id,reason,state,attempts,last_error,started_at,updated_at) VALUES(?,?,'withdrawn','started',1,'content_delete_failed',?,?) ON CONFLICT(class_run_id,student_id) DO NOTHING").bind(g.class_run_id, g.student_id, now, now).run();
+      return c.json({ consent: false, erased: null, erasure: 'pending', note: 'nothing further will be collected for this class and report links are closed. Removing what the Service held did not finish yet; it is retried automatically.' }, 202);
+    }
     return c.json({ consent: false, erased, note: 'nothing further will be collected for this class; what the Service held was removed and report links were closed. Copies already delivered to a recipient cannot be recalled.' });
   }
   // Past its normal expiry this credential only finishes an upload that was already authorized: no new consent, no new scope.
