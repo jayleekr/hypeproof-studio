@@ -129,7 +129,7 @@
       },
       {
         "command": "hypeproof-chat.localReview",
-        "title": "HypeProof: My task reviews"
+        "title": "HypeProof: 나의 변화 기록"
       }
     ],
     "menus": {
