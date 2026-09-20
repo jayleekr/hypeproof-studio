@@ -383,6 +383,27 @@
 .studio-entry-options { display: grid; gap: 12px; }
 .studio-secondary { background: transparent; color: var(--studio-text); border-color: var(--studio-line); }
 .studio-secondary:hover:enabled { background: var(--studio-bg); }
+/* SX-04 — 동급 선택지. 둘 중 하나를 강조하지 않는다. 강조 버튼(Primary)은
+ * 고른 뒤의 "코드 확인하기" 하나다. `.studio-primary` 의 배치만 물려받고 강조는 뺀다. */
+.studio-choice {
+  width:100%;
+  border:1px solid var(--studio-line);
+  border-radius:7px;
+  background:transparent;
+  color:var(--studio-text);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  text-align:left;
+  padding:13px 15px;
+  font-size:13px!important;
+  font-weight:650!important;
+  word-break:keep-all;
+  overflow-wrap:anywhere;
+  transition:background .15s}
+.studio-choice:hover:enabled { background: var(--studio-bg); }
+.studio-choice:disabled { opacity:.55; cursor:default; }
 
 .studio-saved-activities button { display: block; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
 .studio-saved-activities small { display: block; font-size: .8em; opacity: .75; }

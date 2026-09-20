@@ -158,7 +158,34 @@ export interface ResolvedProfile {
     content: {
       schema: 'hps-session-design/1'; title: string; audience: string;
       duration_minutes: number; objective: string; prerequisites: string; starter: string;
-      steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string }>;
+      /**
+       * `help` (#1008) 와 `ui`/`evidence`/`gate` (SX-56) 는 **선택 키**이고 서비스가
+       * 실제로 실어 보낸다(`worker/test/lesson-help-mode.test.mjs`,
+       * `worker/test/session-design-learning.test.mjs` 가 `/v1/profile` 응답에서
+       * 확인한다). 타입이 서버가 보내는 것을 숨기면, 다음 변경이 이미 오고 있는 값을
+       * 못 보고 서버부터 고치려 든다 — `model_selection.provider` 가 그랬다.
+       */
+      steps: Array<{
+        id: string; title: string; instructions: string; hint: string; acceptance: string;
+        help?: { default: string; allowed: string[] };
+        ui?: string; evidence?: string; gate?: string;
+      }>;
+      /**
+       * SX-55~58 — 주차·미션·완료 조건·관찰 항목·금지 목록. 6주 커리큘럼은 이 칸을
+       * 채운 데이터 파일 여섯 개다. 정의와 검증은 `worker/src/lib/learning-design.ts`.
+       *
+       * `observe` 는 여기 타입에 **두지 않는다.** 학생 화면이 읽을 것이 아니고
+       * (설계 §세션 설계 파일 "학생에게 보이지 않는다"), 타입에 두면 누군가 그린다.
+       */
+      learning?: {
+        week: number;
+        mission: string;
+        completion?: Array<{ id: string; text: string; event: string }>;
+        never?: string[];
+        evidence_types?: string[];
+        source_kinds?: string[];
+        reflection?: { changed_mind: boolean; next_experiment: boolean };
+      };
       /**
        * #747 — optional lesson-level AI display name. Informational here: the
        * Service already projects it onto `ux.coach` (fixed + fallback_name),

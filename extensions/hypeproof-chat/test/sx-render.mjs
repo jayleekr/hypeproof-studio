@@ -33,6 +33,9 @@ export const COMPONENTS = {
   // src/vscode.ts 는 모듈 최상위에서 `window.acquireVsCodeApi` 를 보기만 한다
   // (window 스텁을 주면 undefined 로 떨어진다).
   NativeObservationPanel: { from: "./src/NativeObservationPanel.tsx", exportName: "NativeObservationPanel" },
+  // 영역 A(SX-01~05). 호스트 브리지 없이 렌더된다 — 콜백은 props 로 주입받고
+  // 모듈 최상위에서 vscode API 를 만지지 않는다.
+  MissionHeader: { from: "./src/MissionHeader.tsx", exportName: "MissionHeader" },
 };
 
 /**

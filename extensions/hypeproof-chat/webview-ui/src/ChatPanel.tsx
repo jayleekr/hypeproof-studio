@@ -1,6 +1,7 @@
 import { AccessControl } from './AccessControl';
 import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
+import { MissionHeader } from './MissionHeader';
 import { MarkdownText } from './MarkdownText';
 import { DisconnectedChat } from "./StartPage";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -191,6 +192,11 @@ export function ChatPanel(props: Props) {
   const [queued, setQueued] = useState<string | null>(null);
   const [frozen, setFrozen] = useState(false);
   const [draftError, setDraftError] = useState<string | null>(null);
+  // SX-01/SX-02 — 지금 보고 있는 단계. **보기 상태**다. 완료 판정이 아니다.
+  // 설계는 호스트가 과제 상태 기계를 갖고 `learningState` 로 내려보내라고 한다
+  // (§정보 구조 "호스트·웹뷰·워커의 경계", SX-55). 그것은 학습 이벤트가 생기는
+  // P1-B 의 일이고, 그때 이 useState 는 호스트가 보낸 값으로 바뀐다.
+  const [currentStepId, setCurrentStepId] = useState<string | null>(null);
   const snapshot = useRef({text:draft,images:pendingImages,queued});
   snapshot.current = {text:draft,images:pendingImages,queued};
   const activityId = config?.activity?.id;
@@ -606,32 +612,53 @@ export function ChatPanel(props: Props) {
         </div>
       </header>
 
-      {config?.activity && <div className="hps-activity-header" aria-label="현재 활동">
-        {config.activity.kind === "trial" ? "AI 체험" : config.activity.kind === "classroom" ? "수업" : "개인 작업"} · {config.activity.name}
-        {!config.activity.verified && <p role="status">연결을 확인하지 못했습니다. 저장된 기록을 볼 수 있으며, 다시 연결한 뒤 보낼 수 있습니다.</p>}
-      </div>}
+      {/* 영역 A — Mission header. 예전의 `hps-activity-header` 와 `details.hps-lesson`
+          요약부를 함께 대체한다(설계 §정보 구조 영역 A). 활동 이름은 헤더 안 작은
+          줄로 내려갔다. */}
+      <MissionHeader
+        lesson={config?.profile?.lesson ?? null}
+        currentStepId={currentStepId}
+        onSelectStep={setCurrentStepId}
+        onStartStep={(step) => {
+          setCurrentStepId(step.id);
+          const lesson = config?.profile?.lesson;
+          if (!lesson) return;
+          handleChip({
+            style: 'good',
+            text: `수업: ${lesson.content.title} (${lesson.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`,
+          });
+        }}
+        onOpenGrowth={() => postToHost({ type: "openLocalReview" })}
+        busy={streaming}
+        activity={config?.activity ? {
+          label: config.activity.kind === "trial" ? "AI 체험" : config.activity.kind === "classroom" ? "수업" : "개인 작업",
+          name: config.activity.name,
+          verified: !!config.activity.verified,
+        } : null}
+      />
       {draftError && <p role="alert">{draftError}</p>}
       {updateBanner}
 
-      {config?.profile?.lesson && (
-        <details className="hps-lesson">
-          <summary>내 수업 · {config.profile.lesson.content.title}</summary>
-          <p>버전 {config.profile.lesson.version} · {config.profile.lesson.content.duration_minutes}분</p>
-          <p>{config.profile.lesson.content.objective}</p>
-          <p>준비: {config.profile.lesson.content.prerequisites || '별도 선수 조건 없음'}</p>
-          <p>시작 자료: {config.profile.lesson.content.starter}</p>
-          {config.profile.lesson.content.steps.map((step, index) => (
-            <section key={step.id}>
-              <h2>{index + 1}. {step.title}</h2>
-              <p>{step.instructions}</p>
-              <details><summary>힌트 보기</summary><p>{step.hint || '별도 힌트 없음'}</p></details>
-              <p>확인 기준: {step.acceptance}</p>
-              <button type="button" disabled={streaming} onClick={() => handleChip({style: 'good', text: `수업: ${config.profile!.lesson!.content.title} (${config.profile!.lesson!.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`})}>채팅에 과제 넣기</button>
-            </section>
-          ))}
-          <p>과제를 확인하고 채팅으로 요청하세요. 열람만으로 실습이 완료되지는 않습니다.</p>
-        </details>
-      )}
+      {/* 영역 B 의 학습 정보 — 코치 rail 안에 있고, 메시지 스트림 **밖**이다(SX-05).
+          기본 닫힘이고 현재 단계 하나만 편다. 예전에는 여섯 단계를 한꺼번에 펼쳐
+          미션보다 많은 자리를 차지했다. */}
+      {config?.profile?.lesson && (() => {
+        const lesson = config.profile.lesson;
+        const steps = lesson.content.steps;
+        const step = steps.find(s => s.id === currentStepId) ?? steps[0];
+        if (!step) return null;
+        const index = steps.indexOf(step);
+        return (
+          <details className="hp-rail-lesson">
+            <summary>이번 단계 안내 · {index + 1}. {step.title}</summary>
+            <p className="hp-rail-lesson-meta">{lesson.content.title} · 버전 {lesson.version} · {lesson.content.duration_minutes}분</p>
+            <p>{step.instructions}</p>
+            {step.hint ? <details><summary>힌트 보기</summary><p>{step.hint}</p></details> : null}
+            <p>확인 기준: {step.acceptance}</p>
+            <p className="hp-rail-lesson-note">안내를 읽은 것만으로 이 단계가 끝나지는 않습니다. 직접 만들고 확인한 기록이 남아야 합니다.</p>
+          </details>
+        );
+      })()}
 
       {config?.profile?.observation?.format === 'hps-observation/1' && <NativeObservationPanel scope={config.profile.observation.scope} coachName={coachName} />}
       {config?.profile?.profile_id === 'studio-native-trial' && config.profile.observation?.format !== 'hps-observation/1' && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}
