@@ -1,0 +1,38 @@
+{
+  "schema": "hps-session-design/1",
+  "title": "3주차 · Underlying Magic",
+  "audience": "국제고 2학년 · GlobalBuddy 팀",
+  "duration_minutes": 120,
+  "objective": "AI가 만든 결과를 내가 확인했는가?",
+  "prerequisites": "2주차 value statement, GlobalBuddy V1 초안 폴더",
+  "starter": "globalbuddy-v1/ (2주차 산출물 사본, 원본 보존)",
+  "learning": {
+    "week": 3,
+    "mission": "AI가 만든 걸 내가 확인했나?",
+    "completion": [
+      { "id": "c1", "text": "기대 조건을 시험 전에 적었다", "event": "criterion_set" },
+      { "id": "c2", "text": "발견한 차이를 근거로 수정을 요청했다", "event": "change_requested" },
+      { "id": "c3", "text": "같은 조건으로 다시 확인했다", "event": "retest_confirmed" }
+    ],
+    "observe": [
+      "기대 조건을 먼저 정하는가",
+      "오류를 근거로 설명하는가",
+      "같은 조건으로 다시 확인하는가"
+    ],
+    "never": [
+      "측정을 위해 고의 오류를 추가하지 않는다. 실제 제작 과정에서 생긴 결과를 확인하는 것이 기본이다"
+    ],
+    "evidence_types": ["criterion", "action", "change", "decision"],
+    "source_kinds": ["policy", "test"],
+    "reflection": { "changed_mind": true, "next_experiment": true }
+  },
+  "steps": [
+    { "id": "expect", "title": "기대 조건", "instructions": "GlobalBuddy V1의 수업·행정 정보가 어떤 상태여야 맞다고 볼지 적는다.", "hint": "학교 규정 원문 어디와 대조할지 먼저 정하면 쉽다.", "acceptance": "기대 조건이 학생의 말로 1개 이상 적혀 있다.", "ui": "criterion_form", "evidence": "criterion", "gate": "criterion_set", "help": { "default": "hint", "allowed": ["hint", "independent"] } },
+    { "id": "build", "title": "Build pane", "instructions": "V1을 코치와 함께 만들거나 이어서 고친다.", "hint": "", "acceptance": "실행 가능한 V1이 작업 폴더에 있다.", "ui": "canvas_editor", "help": { "default": "co_edit", "allowed": ["hint", "co_edit"] } },
+    { "id": "test", "title": "Preview / Test", "instructions": "기대 조건대로 직접 써 보고 실제 규정과 대조한다.", "hint": "", "acceptance": "기대 조건마다 맞음/다름을 기록했다.", "ui": "canvas_preview", "evidence": "action", "gate": "test_observed" },
+    { "id": "diff", "title": "발견한 차이", "instructions": "기대와 다른 점을 근거와 함께 적는다.", "hint": "규정 몇 조, 화면 어느 줄인지 남긴다.", "acceptance": "차이 1개 이상에 출처가 붙어 있다.", "ui": "evidence_note", "evidence": "action" },
+    { "id": "fix", "title": "수정 요청", "instructions": "발견한 차이를 근거로 코치에게 수정을 요청한다.", "hint": "", "acceptance": "요청 문장에 차이와 기대 조건이 들어 있다.", "ui": "coach_request", "evidence": "change", "gate": "change_requested" },
+    { "id": "retest", "title": "재검증", "instructions": "같은 기대 조건으로 다시 확인한다.", "hint": "", "acceptance": "재확인 결과가 기대 조건에 연결돼 있다.", "ui": "canvas_preview", "evidence": "action", "gate": "retest_confirmed" }
+  ],
+  "assistant": { "display_name": "코치" }
+}
