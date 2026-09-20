@@ -1,8 +1,13 @@
 import assert from 'node:assert/strict';
-// ⚠️ **PR CI 는 이 러너를 부르지 않는다.** .github/workflows/pr-ci.yml 에 브라우저 잡이 없어
-// e2e/chalk-authoring/* 는 전부 사람이 로컬에서 돌려야 한다. 실제로 #1115 가 이 파일을
-// 깨뜨린 것이 머지 시점에 안 잡히고 열흘 뒤 다른 작업 중에 발견됐다. 저작 화면을 바꾸면
-// 여기를 직접 돌려라: npm --prefix e2e run test:chalk-simple
+// 이 러너는 자동 검사가 돈다 — `.github/workflows/dental-reference.yml` 의 `reference-browser`
+// 잡이 chromium 을 깔고 **명시된 스크립트만** 부른다.
+//
+// ⚠️ **폴더에 있다고 자동으로 도는 것이 아니다.** 이 폴더의 러너 중 무엇이 검사 대상인지는
+// 그 워크플로에 적힌 목록이 전부다. 새 러너를 여기 만들면 **거기 한 줄을 더해야** 돈다.
+// 실제로 그 목록에 빠져 있던 `simple.mjs` 가 #1115 에 깨진 채로 머지됐고 열흘 뒤에 발견됐다.
+// 그때 조사한 사람은 반대로 `pr-ci.yml` 만 보고 "이 계열은 아예 안 돈다"고 단정했는데 그것도
+// 틀렸다 — 절반은 이미 돌고 있었다. **어디까지가 검사 대상인지 한 곳에 안 적혀 있는 것이
+// 양쪽 오해의 같은 원인이다.**
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {mkdirSync} from 'node:fs';

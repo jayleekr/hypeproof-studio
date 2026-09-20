@@ -74,6 +74,13 @@
 <script>
 const $=id=>document.getElementById(id);
 const fields=['title','audience','duration_minutes','objective','prerequisites','starter'];
+// #1036 — 이 폼이 소유한 키 목록. content() 는 DOM 에서 본문을 통째로 다시 지으므로,
+// 여기 없는 키(steps[].help, learning, 앞으로 생길 칸)는 다음 저장에서 조용히 사라진다.
+// 그래서 render() 가 연 초안의 미확인 키를 들고 있다가 content() 에서 되돌려 깐다.
+// 보존만 한다 — 편집 UI 는 이 변경의 범위가 아니다.
+const formKeys=['schema',...fields,'steps','assistant','model','features'];
+const stepFormKeys=['id','title','instructions','hint','acceptance'];
+let carriedTop={};
 let revision=null,bound=null,dirty=false,busy=false,pending=null,batch=[];
 let lessonModel, modelCatalogue, modelCatalogueScope;
 let lessonFeatures, featureCatalogue, featureCatalogueScope;
@@ -83,15 +90,19 @@ function controls(){$('models-fields').disabled=busy||modelCatalogueScope!==iden
 function changed(){dirty=true;$('completion').textContent='';controls();}
 function discard(){return !dirty||confirm('저장하지 않은 편집을 바꿀까요? 필요한 내용은 먼저 내보내세요.');}
 function scope(){for(const k of ['cohort','profile','course'])if(!/^[a-zA-Z0-9_-]{1,128}$/.test($(k).value.trim()))throw Error('코호트·프로필·수업 ID를 확인하세요.');if(!$('token').value.trim())throw Error('강사 토큰을 입력하세요.');return '/admin/cohorts/'+encodeURIComponent($('cohort').value.trim())+'/authoring/'+encodeURIComponent($('course').value.trim());}
-// 이 화면이 그리지 않는 단계 키(#1008 의 help, 앞으로 생길 칸)를 저장 때 잃지 않기 위해
-// **원본 단계 객체를 fieldset 에 묶어 둔다**(#1036). content() 가 그린 칸을 그 위에 덮어
-// 쓰므로, 화면이 모르는 칸은 손대지 않은 채 그대로 돌아간다.
-// WeakMap 이라 fieldset 이 삭제되면 같이 사라지고(= 단계 삭제는 그 키들도 지운다),
-// 순서 변경은 같은 element 를 옮기는 것이라 원본이 **다른 단계로 옮겨붙지 않는다**.
+// 이 화면이 그리지 않는 키를 저장 때 잃지 않는다 (#1036).
+// **단계 키**는 원본 단계 객체가 아니라 **미확인 키만** fieldset 에 묶어 둔다.
+//   - 요소로 색인한다 — 단계 id 를 수정해도 따라온다. id 로 색인하면 그 순간 보관분을
+//     잃는데, 그것이 이 이슈가 고치려는 사고(화면에 없는 키가 조용히 사라진다)의 다른 입구다.
+//   - WeakMap 이라 fieldset 이 삭제되면 같이 사라지고(= 단계 삭제는 그 키들도 지운다),
+//     순서 변경은 같은 element 를 옮기는 것이라 원본이 **다른 단계로 옮겨붙지 않는다**.
+// **최상위 키**(learning 등)는 carriedTop 이 들고 있다 — 단계만 지키면 최상위가 같은
+// 방식으로 사라진다. 둘 다 지켜야 이 이슈가 닫힌다.
 const stepOrigin=new WeakMap();
-function step(data={id:'step-'+crypto.randomUUID().slice(0,8),title:'',instructions:'',hint:'',acceptance:''}){const f=document.createElement('fieldset');f.className='step';stepOrigin.set(f,data);for(const [key,label] of Object.entries({id:'단계 ID',title:'단계 제목',instructions:'안내·실습',hint:'힌트',acceptance:'완료 기준'})){const l=document.createElement('label');l.textContent=label;const e=document.createElement(key==='id'||key==='title'?'input':'textarea');e.dataset.field=key;e.value=data[key]??'';l.append(e);if(key==='id')l.hidden=true;f.append(l);}if(data.help){const n=document.createElement('p');n.className='step-note';n.textContent='도움 방식 설정 있음 — 이 화면에서는 편집할 수 없고 저장 시 유지됩니다';f.append(n);}for(const [label,action] of [['위로',()=>f.previousElementSibling?.before(f)],['아래로',()=>f.nextElementSibling?.after(f)],['삭제',()=>f.remove()]]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{action();changed();};f.append(b);}$('steps').append(f);}
-function content(){const name=$('assistant_name').value.replace(/[\u200B-\u200D\uFEFF]/g,'').trim();return {schema:'hps-session-design/1',...Object.fromEntries(fields.map(k=>[k,k==='duration_minutes'?Number($(k).value):$(k).value])),steps:[...document.querySelectorAll('.step')].map(f=>({...(stepOrigin.get(f)??{}),...Object.fromEntries([...f.querySelectorAll('[data-field]')].map(e=>[e.dataset.field,e.value]))})),...(name?{assistant:{display_name:name}}:{}),...(lessonModel?{model:lessonModel}:{}),...(lessonFeatures?{features:lessonFeatures}:{})};}
-function render(c){lessonModel=c.model?{default:c.model.default,allowed:[...c.model.allowed],...(c.model.effort?{effort:structuredClone(c.model.effort)}:{})}:undefined;renderModels();lessonFeatures=c.features?{allowed:[...c.features.allowed]}:undefined;renderFeatures();for(const k of fields)$(k).value=c[k]??(k==='duration_minutes'?120:'');$('assistant_name').value=c.assistant?.display_name??'';$('steps').replaceChildren();for(const s of c.steps||[])step(s);}
+function step(data={id:'step-'+crypto.randomUUID().slice(0,8),title:'',instructions:'',hint:'',acceptance:''}){const f=document.createElement('fieldset');f.className='step';stepOrigin.set(f,Object.fromEntries(Object.entries(data).filter(([k])=>!stepFormKeys.includes(k))));for(const [key,label] of Object.entries({id:'단계 ID',title:'단계 제목',instructions:'안내·실습',hint:'힌트',acceptance:'완료 기준'})){const l=document.createElement('label');l.textContent=label;const e=document.createElement(key==='id'||key==='title'?'input':'textarea');e.dataset.field=key;e.value=data[key]??'';l.append(e);if(key==='id')l.hidden=true;f.append(l);}if(data.help){const n=document.createElement('p');n.className='step-note';n.textContent='도움 방식 설정 있음 — 이 화면에서는 편집할 수 없고 저장 시 유지됩니다';f.append(n);}for(const [label,action] of [['위로',()=>f.previousElementSibling?.before(f)],['아래로',()=>f.nextElementSibling?.after(f)],['삭제',()=>f.remove()]]){const b=document.createElement('button');b.type='button';b.textContent=label;b.onclick=()=>{action();changed();};f.append(b);}$('steps').append(f);}
+function content(){const name=$('assistant_name').value.replace(/[\u200B-\u200D\uFEFF]/g,'').trim();return {...carriedTop,schema:'hps-session-design/1',...Object.fromEntries(fields.map(k=>[k,k==='duration_minutes'?Number($(k).value):$(k).value])),steps:[...document.querySelectorAll('.step')].map(f=>{const own=Object.fromEntries([...f.querySelectorAll('[data-field]')].map(e=>[e.dataset.field,e.value]));return {...(stepOrigin.get(f)??{}),...own};}),...(name?{assistant:{display_name:name}}:{}),...(lessonModel?{model:lessonModel}:{}),...(lessonFeatures?{features:lessonFeatures}:{})};}
+function carry(c){carriedTop=Object.fromEntries(Object.entries(c).filter(([k])=>!formKeys.includes(k)));}
+function render(c){carry(c);lessonModel=c.model?{default:c.model.default,allowed:[...c.model.allowed],...(c.model.effort?{effort:structuredClone(c.model.effort)}:{})}:undefined;renderModels();lessonFeatures=c.features?{allowed:[...c.features.allowed]}:undefined;renderFeatures();for(const k of fields)$(k).value=c[k]??(k==='duration_minutes'?120:'');$('assistant_name').value=c.assistant?.display_name??'';$('steps').replaceChildren();for(const s of c.steps||[])step(s);}
 // 확정 판정을 화면에 그린다. **여기서 판정하지 않는다** — Service 가 계산해 보낸 목록을
 // 사람이 읽을 모양으로 옮길 뿐이다. 새 요청도, 상태 쓰기도, 정책 분기도 없다(ARC-01).
 // 서버 문자열은 전부 textContent 로 넣는다 — 이 화면은 어디에서도 innerHTML 을 쓰지 않는다.

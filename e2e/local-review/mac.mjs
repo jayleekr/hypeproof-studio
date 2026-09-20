@@ -55,10 +55,10 @@ try {
  app=await electron.launch(launchOptions);
  let win=await app.firstWindow();await win.waitForTimeout(4000);
  const start=await connectReview('.studio-start');
- await start.evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='내 작업 검토').click()`);
+ await start.evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='나의 변화 기록').click()`);
  let review; try { review=await connectReview(); } catch(e) { await win.screenshot({path:out+'/failure.png'}); console.log((await win.locator('body').innerText()).slice(-2200)); throw e; } const {evaluate}=review;
  const waitFor=async expression=>{for(let i=0;i<600;i++){if(await evaluate(expression))return;await win.waitForTimeout(100);}await win.screenshot({path:out+'/assertion-failure.png'}); console.log((await evaluate('document.querySelector("[role=alert]")?.textContent')));throw Error('Unmet UI assertion: '+expression);};
- await waitFor('document.querySelector("h1")?.textContent === "My task reviews"');
+ await waitFor('document.querySelector("h1")?.textContent === "나의 변화 기록"');
  if(id) {
   const recentHost = process.env.HPS_REVIEW_RECENT_HOST;
   await evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent===${JSON.stringify(recentHost === 'codex' ? '최근 Codex 세션' : recentHost === 'claude-code' ? '최근 Claude 세션' : 'Import Codex task')}).click()`);
@@ -97,7 +97,7 @@ try {
   app=await electron.launch(launchOptions);
   win=await app.firstWindow();await win.waitForTimeout(4000);
   const reopenedStart=await connectReview('.studio-start');
-  await reopenedStart.evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='내 작업 검토').click()`);
+  await reopenedStart.evaluate(`[...document.querySelectorAll('button')].find(b=>b.textContent==='나의 변화 기록').click()`);
   const reopened=await connectReview();
   for(let i=0;i<50 && !(await reopened.evaluate('document.querySelector(\"nav button\")'));i++) await win.waitForTimeout(100);
   await reopened.evaluate('document.querySelector(\"nav button\").click()');
