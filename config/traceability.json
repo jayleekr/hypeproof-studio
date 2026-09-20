@@ -2282,6 +2282,12 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/sx-evidence-drawer.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-before-after.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-source-state.smoke.mjs"
         }
       ]
     },

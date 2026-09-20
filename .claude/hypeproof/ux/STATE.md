@@ -8,8 +8,10 @@
 **2026-09-20 — P0 완료(평가 1회·수정 1회), P1 은 네 task 중 **하나**만. 둘 다 머지 안 함.**
 - `feat/sx-p0-curriculum-first` → **PR #1170**, CI 20개 전부 초록.
 - `feat/sx-p1-evidence-capture` (P0 브랜치 위에 쌓임) → **PR #1176, P1-A 하나만.**
-- `feat/sx-p1b-evidence-drawer` (#1176 위에 쌓임) → **PR #1177, P1-B.** P1-C·D 미착수.
-  머지 순서는 **#1170 → #1176 → P1-B** 다. 각 PR 의 diff 는 바로 아래 브랜치 기준이다.
+- `feat/sx-p1b-evidence-drawer` (#1176 위에 쌓임) → **PR #1177, P1-B.**
+- `feat/sx-p1c-before-after` (#1177 위에 쌓임) → **P1-C + P1-D.** SX-24 만 남았다.
+  머지 순서는 **#1170 → #1176 → #1177 → P1-C/D** 다. 각 PR 의 diff 는 바로 아래
+  브랜치 기준이므로 앞 것을 머지하기 전에는 앞 커밋들이 섞여 보인다.
   #1176 은 #1170 을 머지한 뒤에 본다. 그 전에는 diff 에 P0 커밋이 섞여 보인다.
   **#1172(P1 전체)를 닫지 않는다** — 네 task 중 하나만 담았으므로 `Closes` 줄을 비웠다.
 machine_gate 는 전부 초록이고 orchestrator 와 평가자가 **각각 따로** 다시 돌렸다.
@@ -125,9 +127,9 @@ acceptance 열은 평가 서브에이전트의 판정이 들어온 뒤 채운다
 | P0 | P0-PR | **초록** inspect exit 0, blockers [] | — | **PR #1170 열림, 머지 안 함** | 1 |
 | P1 | P1-A 이벤트·필드 확장 | **초록** worker tsc 0 · worker npm test 0 · ext npm test 0 | **초록** 구현 전 1 passed / 20 failed — 통과한 하나가 `/1` golden 불변이다 | 브랜치 `feat/sx-p1-evidence-capture` 커밋 `7171d56` | 1 |
 | P1 | P1-B Evidence drawer·기대 조건·완료 게이트 | **초록** ext tsc 0 · ext npm test 0 · webview vite build 0 | **초록** 심은 결함 18개 중 18개를 잡을 때까지 단언을 고쳤다 | 브랜치 `feat/sx-p1b-evidence-drawer` 커밋 `6d4b8d7` | 0 |
-| P1 | P1-C 재확인 게이트·변경 전후 | NOT RUN | | **미착수** | 0 |
-| P1 | P1-D real/simulated 라벨·인터뷰/반응 입력 | NOT RUN | | **미착수** | 0 |
-| P1 | P1-PR | | | **부분 범위 PR 둘** — #1176(P1-A), #1177(P1-B). C·D 없음 | 2 |
+| P1 | P1-C 재확인 게이트·변경 전후 | **초록** worker tsc/test 0 · ext tsc/test 0 · vite build 0 | **초록** 심은 결함 16개 중 16개 (게이트 6 · 보기 10) | 브랜치 `feat/sx-p1c-before-after` 커밋 `a2e4194` | 0 |
+| P1 | P1-D real/simulated 라벨·인터뷰/반응 입력 | **초록** 위와 같음 | **초록** 심은 결함 10개 중 10개 | 커밋 `6d9136e`. **SX-24(팀 기여 분할)는 없다** — 스키마 칸이 필요하고 #1176 이 리뷰 중이다 | 1 |
+| P1 | P1-PR | | | **부분 범위 PR 셋** — #1176(P1-A), #1177(P1-B), P1-C/D | 3 |
 | P2 | P2-A 경계 회고 | NOT RUN | | | | 0 |
 | P2 | P2-B 다음 실험 → 다음 과제, 기존 개선 루프 연결 | NOT RUN | | | | 0 |
 | P2 | P2-PR | | | | | |
@@ -423,47 +425,57 @@ VS Code 테마도 아니다.
 
 ## 다음 세션이 집을 첫 task
 
-`docs/plan/ux-dag.yaml` **P1-C — 재확인 게이트와 변경 전후 보기** (`depends_on: [P1-B]`, 끝났다).
-P1-D(`real`/`simulated` 라벨·인터뷰 입력)도 `depends_on: [P1-B]` 라 **둘은 서로 독립**이다.
-어느 쪽을 먼저 집어도 된다.
+**P1 은 SX-24 하나만 남았다.** P2 로 넘어가기 전에 이것부터 본다.
 
-P1-C 가 쓸 것은 이미 있다: `gates().verification` 이 `criterion_ref`·`artifact_after`·
-`result_ref` 세 조건을 이미 판정하고, 그 문장이 서랍의 검증 줄로 나가고 있다.
-남은 것은 **변경 전후 보기**(SX-16) — `artifact` 이벤트 두 개의 sha256 과 본문을
-나란히 놓고, 그때 적용된 기대 조건을 함께 보여 주는 화면이다. AE-05 의 기존
-전후 증거를 **다시 만들지 말고 재사용**하라고 DAG 수용 기준이 적고 있다 —
-`NativeObservationPanel` 의 `hps-observation-compare` 블록이 그것이다.
+### 1. SX-24 — 팀 기여 분할 (P1-D 의 남은 절반)
 
-P1-D 는 `source_state` 가 이미 저장·표시되고 있으므로 Amber 마커와 라벨,
-그리고 `external_feedback_received` 의 `source_state` 선택 UI 가 남았다.
-지금은 폼이 `unverified` 로 고정해 보낸다(`real` 을 기본으로 채우지 않기 위해).
+요구가 말하는 것: 팀 과제의 `artifact_after` 와 Decision 이 `actor=student` 와 함께
+**팀원 식별자**를 갖고, AI 기여(`actor=AI`)와 분리된다. 6주차 contribution split 은
+이 칸으로만 계산하고 **채팅량·토큰량은 쓰지 않는다.** 팀원을 구분할 수 없으면
+"팀원 미구분" 으로 표시하고 **균등 분배로 채우지 않는다.**
 
-**P1-B 에서 넘어온 빚 하나**: `Task.curriculum` 영속화와 phase 전이
-(`working → submitted`)가 없다. `submitTask` 는 게이트를 다시 판정하고 거절
-사유를 돌려주는 데까지다. 설계 §과제 흐름 상태 기계의 나머지 절반이다.
+하지 않은 이유는 하나다: `/2` 이벤트 키 allowlist 에 칸을 하나 더 여는 일인데,
+그 스키마가 지금 **리뷰 중인 PR(#1176)** 위에 있다. 리뷰 중인 스키마를 뒤에서
+넓히지 않는다. #1176 이 머지되면 그 위에서 한다.
 
-**저장 계층은 이미 있다.** P1-A 가 `hps-observation/2`, 학습 이벤트 8종, 그리고
-`gates()`(완료·재확인)를 순수 함수로 만들어 두었다(`measurement-core/learning-events.ts`).
-P1-B 가 할 일은 **그것을 부르는 화면**이다 — 지금은 게이트가 정확히 판정하지만
-아무도 부르지 않는다.
+필요한 것:
+- `LEARNING_EVENT_KEYS` 에 팀원 식별자 칸 하나 (`member_ref` 등, 이름은 사람이 정한다)
+- `fieldOk` 에 그 칸의 모양 검사
+- 서랍에서 "누가 한 것" 표시 + 팀원 미구분 문구
+- **분배를 계산하는 코드를 만들지 않는다.** 6주차 화면은 P3 이고, 여기서는 칸만 연다
 
-시작 전에 읽을 것:
-- `worker/src/lib/measurement-core/learning-events.ts` — `gates()` 의 입력과
-  `GateMiss` 코드. 화면이 "왜 막혔는지" 를 그 코드로 말해야 한다.
-- 설계 §정보 구조 영역 D, §과제 흐름 상태 기계.
-- `extensions/hypeproof-chat/webview-ui/src/NativeObservationPanel.tsx` — D 가 대체할 것.
-- `extensions/hypeproof-chat/test/sx-render.mjs` · `sx-audit.mjs` — 새 화면도 같은
-  계측기로 감사한다. `COMPONENTS` 에 등록하면 된다.
+### 2. 그 다음은 P2 (`ux-dag.yaml` P2-A · P2-B)
 
-**호스트가 게이트를 계산하고 웹뷰는 그린다.** 설계가 못박은 경계다 — 웹뷰에서
-게이트를 다시 계산하지 않는다. `MissionHeader` 의 `currentStepId` 가 지금 웹뷰
-`useState` 인 것도 P1-B 에서 호스트의 `learningState` 로 옮길 자리다.
+E 영역(회고 카드)이다. `depends_on` 은 P1-B 이고 이미 끝났다.
 
-**근거 없는 ✓ 를 그리지 않는다.** 지금 완료 조건은 전부 ☐ 이고 화면이 "아직 확인
-전" 이라고 말한다. P1-B 가 그 자리를 이벤트로 채운다.
+### 넘어온 빚 둘
+
+- **`Task.curriculum` 영속화와 phase 전이가 없다** (P1-B). `submitTask` 는 게이트를
+  다시 판정하고 거절 사유를 돌려주는 데까지고, 통과해도 상태가 바뀌지 않는다.
+  화면에서 "완료가 열린다" 까지만 참이고 **"완료된다" 는 아직 참이 아니다.**
+- **실기 증거가 여전히 0이다.** 앱을 빌드하지도 띄우지도 않았고 SX-T 행은 하나도
+  PASS 가 아니다. 이 세션의 어떤 초록도 그것을 대신하지 않는다.
 
 ## 기록
 
+- 2026-09-20 P1-C + P1-D. 브랜치 `feat/sx-p1c-before-after`(#1177 위),
+  커밋 `a2e4194`·`6d9136e`.
+  재확인 게이트에 네 번째 상태 `needs_recheck` 를 넣었다(AE-37) — 확인은 했는데 그 뒤에
+  기대 조건이나 산출물이 움직인 상태다. **이전 확인을 지우지 않고** `previous` 로 들고
+  화면까지 보낸다. 같이 고친 판정 하나: `retest_confirmed` 유효성을 오늘의 최신본과
+  비교하고 있었는데, 그러면 "처음부터 옛 개정본을 확인했다"(실수)와 "그때는 맞았고 그 뒤
+  개정본이 움직였다"(평범한 진행)가 한 이름으로 뭉개진다. 두 번째를 첫 번째라고 말하는
+  것은 학생에게 하지 않은 실수를 했다고 하는 것이다.
+  변경 전후 보기의 쌍 기준을 **`change_requested`** 로 잡았다. 처음엔 산출물 목록에서
+  인접한 것을 골랐는데, 그러면 학생이 아직 아무것도 안 고친 상태까지 "변경 전후" 로 그린다.
+  P1-D 에서는 `source_state` 라벨을 한 곳(`SOURCE_STATE_LABELS`)에서만 만들고 화면 쪽
+  사본을 지웠다. 가상은 실제 칸에 섞이지 않고, 출처 없이 "실제" 는 저장되지 않으며,
+  `미기록` 세 칸은 적은 것으로 치지 않는다(센티널이 뒷문이 되지 않게).
+  결함 26개(게이트 6 · 보기 10 · 라벨 10)를 심어 26개를 잡을 때까지 고쳤다. 그중
+  **내 단언이 아무것도 재지 않던 것이 셋**, **심은 결함 자체가 유효하지 않던 것이 하나**
+  (도달할 수 없는 경로에 심었다 — `/2` 가 `unknown_artifact` 로 먼저 거절한다).
+  SX-24(팀 기여 분할)는 하지 않았다. `/2` 키 allowlist 에 칸을 여는 일인데 그 스키마가
+  리뷰 중인 #1176 위에 있다. 리뷰 중인 스키마를 뒤에서 넓히지 않는다.
 - 2026-09-20 P1-B. 브랜치 `feat/sx-p1b-evidence-drawer`(#1176 위), 커밋 `6d4b8d7`.
   영역 D(Evidence drawer)와 완료 게이트를 화면까지 이었다. P1-A 의 순수 함수에
   **부르는 쪽**이 생겼다. 웹뷰는 게이트를 다시 계산하지 않고 호스트가 보낸
