@@ -156,6 +156,11 @@ This is local evidence; production deployment and live classroom behavior are se
 측정(로컬, 2026-09-21):
 
 - 저작 핸들러 **7개** 전부가 `authenticate`(`authorizeIssuerForCohort`) 아래 등록돼 있다.
+- 반대 방향도 잰다: 정상 강사 자격이 저작 경로 **전수**에 닿는다. `authenticate` 에만 등록하고
+  `isIssuerAllowedEndpoint` 에 올리지 않으면 admin 미들웨어가 Bearer 를 통과시키지 않아 **강사 본인이**
+  401/503 으로 막힌다. 목록이 둘이라 반드시 벌어지는 모양이고, 2026-09-21 실제로 옆 브랜치에서
+  나왔다(#1187 의 `…/rehearsal-tickets`). 거부만 세는 시험은 그것을 못 본다 — 표에 401 이 찍혀도
+  아무것도 단언하지 않으면 초록으로 지나간다.
 - `admin.use("*")` 가 Bearer 만 보고 통과시키는 경로(`isIssuerAllowedEndpoint`) **24개** ×
   자격 6종(없음·형식오류·위조서명·만료·학생·타코호트) = **144회** 호출, 전부 401/403.
   본문 검증이 먼저 끝나 역할 판정에 **도달하지 못한** 400 도 구멍으로 센다.
@@ -166,8 +171,9 @@ This is local evidence; production deployment and live classroom behavior are se
   헤더를 벗기는 데서 온다([HANDOFF §3](../plan/HANDOFF.md) 가 실측해 둔 사실). 저작 경로는
   그 가정 위에 서 있지 않다는 것이 여기서 잠긴 계약이다.
 
-계측기 검증: 결함 4종(authenticate 등록 누락 · role 검사 제거 · 이 시험이 모르는 param 을
-쓰는 새 경로 · authenticate 가 cf-access 를 신뢰)을 심어 각각 해당 단언이 잡는 것을 확인했다.
+계측기 검증: 결함 6종(authenticate 등록 누락 · role 검사 제거 · 이 시험이 모르는 param 을
+쓰는 새 경로 · authenticate 가 cf-access 를 신뢰 · 허용 목록 누락으로 강사가 막힘 · 그 반대)을
+심어 각각 해당 단언이 잡는 것을 확인했다.
 양성 대조군(정상 강사 자격은 통과해 404/200 에 도달)과 음성 대조군을 시험 안에 둔다.
 
 실행 환경: in-process(실제 Service 라우팅 + 서명 토큰) **및** 같은 브랜치의 로컬

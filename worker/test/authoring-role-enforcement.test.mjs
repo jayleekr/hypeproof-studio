@@ -148,6 +148,31 @@ await check('§1 저작 라우터의 모든 핸들러 경로에 authenticate 가
   console.log(`  저작 핸들러 ${handlers.length}개 전부 authenticate 아래 — OK`);
 });
 
+// ─── §1b 반대 방향 — 강사가 자기 경로에 닿는가 ────────────────────────────────
+// §1 은 "학생이 못 들어오는가" 만 본다. 집행은 **양방향**이다: `authenticate` 아래 등록했는데
+// `isIssuerAllowedEndpoint` 에 올리지 않으면, admin 미들웨어가 Bearer 를 통과시키지 않아
+// **강사 본인도 못 들어온다**(운영자 비번이 있으면 401, 없으면 503 `admin not configured`).
+// 목록이 둘이고 손으로 맞춰야 하므로 반드시 벌어진다.
+//
+// 2026-09-21 실제로 옆 브랜치에서 그 모양이 나왔다(#1187 의 `…/rehearsal-tickets`). 그때
+// 이 파일의 §1~§4 는 **전부 초록이었다** — 표에 401 이 찍혀 있는데도 아무것도 단언하지
+// 않았기 때문이다. 거부만 세는 시험은 거부밖에 못 본다. 그래서 양성 대조군을 한 경로가
+// 아니라 **저작 표면 전수**로 돌린다.
+await check('§1b 정상 강사 자격이 저작 경로 전수에 닿는다 (허용 목록 누락 탐지)', async () => {
+  const unreachable = [];
+  for (const route of authoring.routes.filter(r => r.method !== 'ALL')) {
+    const r = await callRoute(route, credential.instructor);
+    // 401/503 은 **인증 단계에서 막힌** 것이다. 400/404/409/200 은 판정을 통과한 뒤의 응답이라
+    // 이 시험의 관심사가 아니다(내용 판정은 authoring.test.mjs 의 몫).
+    if (r.status === 401 || r.status === 503) unreachable.push(`${route.method} ${route.path}: ${r.status} ${r.raw.slice(0, 120)}`);
+  }
+  assert.deepEqual(unreachable, [],
+    `정상 강사 자격으로도 닿지 않는 저작 경로:\n  ${unreachable.join('\n  ')}\n` +
+    `  → lib/instructor-auth.ts 의 isIssuerAllowedEndpoint 에 이 경로를 추가해라. authenticate 에만\n` +
+    `  등록하면 admin 미들웨어가 Bearer 를 통과시키지 않아 강사 본인이 막힌다 (#1187 이 그 모양이었다).`);
+  console.log(`  저작 핸들러 ${authoring.routes.filter(r => r.method !== 'ALL').length}개 전부 강사에게 도달 가능 — OK`);
+});
+
 // ─── §2 전수 — Bearer 로 들어올 수 있는 모든 admin 경로에서 학생/위조/만료/타코호트 거부 ──
 // 관문은 두 겹이다. admin.ts 의 use("*") 는 isIssuerAllowedEndpoint 가 허용한 경로에 한해
 // **Bearer 가 있다는 사실만 보고** 통과시킨다 — 토큰을 검증하지 않는다. 진짜 판정은 각
