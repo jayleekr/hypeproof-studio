@@ -134,6 +134,23 @@ await check('T-2 통함 — 교환권이 좌석 자격으로 바뀐다', async (
   assert.equal(r.json.seat, seatId);
   seatToken = r.json.token;
   seatLessonSha = r.json.lesson.sha256;
+  // 만료 이름이 두 응답에서 **같은 뜻**이어야 한다. 발급의 expires_at 은 교환권(24h)이고
+  // 교환의 expires_at 은 좌석이다 — 앱이 같은 이름으로 읽으면 죽은 좌석을 살아 있다고 본다.
+  assert.equal(r.json.credential_expires_at, r.json.expires_at,
+    '교환 응답의 credential_expires_at 이 좌석 만료와 다르다');
+  assert.ok(r.json.credential_expires_at > Math.floor(Date.now() / 1000),
+    '좌석 만료가 이미 지났다');
+});
+
+await check('T-2b — 발급의 expires_at(교환권)과 좌석 만료는 다른 수이고, credential_expires_at 이 둘을 잇는다', async () => {
+  const issued = await call(`${base}/versions/${VERSION}/rehearsal-tickets`, 'POST', { hours: 4 }, instructor);
+  assert.equal(issued.status, 200, issued.raw);
+  assert.notEqual(issued.json.expires_at, issued.json.credential_expires_at,
+    '발급에서 교환권 수명과 좌석 수명이 같은 수다 — 이름이 뜻을 잃었다');
+  const redeemed = await call('/v1/rehearsal/redeem', 'POST', { ticket: issued.json.ticket });
+  assert.equal(redeemed.status, 200, redeemed.raw);
+  assert.equal(redeemed.json.credential_expires_at, issued.json.credential_expires_at,
+    '같은 이름이 발급과 교환에서 다른 수를 낸다 — 앱이 어느 쪽을 읽든 같아야 한다');
 });
 
 await check('T-3 통함 — 리허설 좌석이 **로스터도 열린 세션도 없이** 수업에 들어간다', async () => {

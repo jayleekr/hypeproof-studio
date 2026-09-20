@@ -121,5 +121,15 @@ rehearsal.post("/rehearsal/redeem", async (c) => {
     const remaining = Math.max(60, Math.min(REHEARSAL_TICKET_TTL_SECONDS, payload.exp - now));
     await c.env.HPS_KV.put(key, encodeRedeemState({ token: state.token, used_at: now }), { expirationTtl: remaining });
   }
-  return c.json({ token: state.token, seat: payload.u, lesson: payload.lesson, expires_at: payload.exp });
+  // ⚠️ `expires_at` 이라는 이름이 **발급 응답과 여기서 서로 다른 것을 뜻한다.**
+  //   발급(`authoring.ts` rehearsal-tickets): expires_at = **교환권**의 수명(24h),
+  //                                           credential_expires_at = **좌석**의 수명
+  //   교환(여기):                              expires_at = **좌석**의 수명
+  // 실측으로 확인했다(2026-09-21): 교환의 expires_at 값이 발급의 credential_expires_at
+  // 과 **같은 수**다. 앱이 두 응답을 같은 이름으로 읽으면 24시간짜리를 좌석 만료로
+  // 띄운다 — 강사가 이미 죽은 좌석을 살아 있다고 본다.
+  // `expires_at` 은 이미 나가 있는 계약이라 바꾸지 않고, **좌석을 뜻하는 이름을 둘 다에
+  // 존재하게** 한다. 앱은 `credential_expires_at` 하나만 읽으면 두 응답에서 같은 뜻이다.
+  return c.json({ token: state.token, seat: payload.u, lesson: payload.lesson,
+    expires_at: payload.exp, credential_expires_at: payload.exp });
 });
