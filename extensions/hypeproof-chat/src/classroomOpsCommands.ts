@@ -25,6 +25,8 @@ export interface ExecutorResult { ok: boolean; code: string }
 export interface Executor {
   /** True when the action changes learner-visible state; such an action is never auto-retried. */
   mutating: boolean;
+  /** What the learner is told is happening, in their language. The wire id is for ledgers, not for people. */
+  label?: string;
   /** Closed argument check. Absent → the action takes no arguments at all. */
   acceptsArgs?(args: Record<string, unknown>): boolean;
   run(signal: AbortSignal, command: CommandEnvelope): Promise<ExecutorResult>;
@@ -152,7 +154,7 @@ export class CommandRunner {
     this.running = true; this.finish(e, "running", "");
     await this.save(); // journal first: a crash from here on is recoverable without re-running
     if (this.closed) { this.running = false; this.finish(e, "rejected", "connection_closed"); await this.save(); return; }
-    if (ex.mutating) this.deps.notify?.(`강사가 ‘${c.action}’ 조치를 요청해 실행합니다.`);
+    if (ex.mutating) this.deps.notify?.(`강사가 ‘${ex.label ?? c.action}’ 조치를 요청해 실행합니다.`);
     const abort = new AbortController(); this.current = abort; let timer: ReturnType<typeof setTimeout> | undefined, timedOut = false;
     try {
       const result = await Promise.race([
