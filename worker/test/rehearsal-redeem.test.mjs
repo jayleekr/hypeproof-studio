@@ -126,18 +126,40 @@ await check('T-1 막힘 — 학생 좌석은 세션이 없으면 session_inactiv
 });
 
 // ─── 통함 2 — 이 파일의 존재 이유 ─────────────────────────────────────────────
-let seatToken;
+let seatToken, seatLessonSha;
 await check('T-2 통함 — 교환권이 좌석 자격으로 바뀐다', async () => {
   const r = await call('/v1/rehearsal/redeem', 'POST', { ticket });
   assert.equal(r.status, 200, r.raw);
   assert.ok(typeof r.json?.token === 'string' && r.json.token.length > 0, '앱이 읽는 필드는 token 이다');
   assert.equal(r.json.seat, seatId);
   seatToken = r.json.token;
+  seatLessonSha = r.json.lesson.sha256;
 });
 
 await check('T-3 통함 — 리허설 좌석이 **로스터도 열린 세션도 없이** 수업에 들어간다', async () => {
   const r = await chat(seatToken);
   assert.equal(r.status, 200, `리허설 좌석이 막혔다 — RUN-01 이 깨졌다: ${r.raw}`);
+});
+
+// 🔴 채팅이 된다고 **진입도 된다고 짐작하지 않는다.** `/v1/profile` 은 일반 좌석에 대해
+// `gateChatRequest` 를 돌리지 않고 **자체 로스터 검사**를 갖고 있다(`routes/chat.ts`).
+// 그래서 게이트만 고치면 좌석이 채팅은 되는데 **첫 화면이 안 열린다.** 실제로 그랬다 —
+// 로컬 worker 에 전 구간을 쳐 보고서야 드러났고, 시험이 채팅 한 표면만 재고 있었다.
+// 참가자 자격이 지나가는 표면은 하나가 아니므로 **표면마다 따로 잰다.**
+await check('T-3d 통함 — 리허설 좌석이 **진입(/v1/profile)** 에서도 로스터 없이 통과한다', async () => {
+  const seat = await call('/v1/profile', 'GET', undefined, seatToken);
+  assert.equal(seat.status, 200, `리허설 좌석이 진입에서 막혔다 — 첫 화면이 안 열린다: ${seat.raw}`);
+  assert.equal(seat.json?.lesson?.version, VERSION, '진입이 고정된 수업을 돌려주지 않았다');
+});
+
+await check('T-3e 막힘 — 같은 표면에서 로스터 밖 **수업 좌석**은 여전히 403', async () => {
+  // 음성 대조군. `lesson` 을 든 일반 학생 좌석은 로스터가 있어야 한다 — 위 통함이
+  // "이 표면의 로스터 검사를 통째로 없앴다" 가 아님을 보인다.
+  const lessonStudent = (await issue({ u: 'kid01', c: cohort, p: profileId,
+    lesson: { course_id: 'rehearse-course', version: VERSION, sha256: seatLessonSha } }, 4, TEST_SECRET)).token;
+  const r = await call('/v1/profile', 'GET', undefined, lessonStudent);
+  assert.equal(r.status, 403, `로스터 밖 학생 좌석이 진입했다: ${r.raw}`);
+  assert.equal(r.json?.error?.code, 'not_in_roster', r.raw);
 });
 
 // 리허설 좌석에는 `sessions` 행이 없다(수업을 연 적이 없으므로). 그래서 `usage_log` 의

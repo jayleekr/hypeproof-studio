@@ -272,7 +272,15 @@ chat.get("/profile", async (c) => {
     c.header('cache-control', 'no-store');
     if (auth.payload.jti && await isTokenRevoked(c.env.HPS_KV, auth.payload.jti)) return c.json({ error: { type: 'auth', code: 'revoked', message: '참여 코드가 폐기되었습니다.' } }, 401);
     const cohortDecision = await profileServesCohort(c.env, profile, auth.payload);
-    if (!cohortDecision.ok || !(await getRoster(c.env.HPS_KV, auth.payload.c))?.users.includes(auth.payload.u))
+    // 리허설 좌석은 로스터를 **지나가지 않는다** (#1189, `chat-gate.ts` 와 같은 규율).
+    //
+    // 이 자리를 따로 적어야 하는 이유: 위 주석대로 이 라우트는 **일반 좌석에 대해
+    // `gateChatRequest` 를 돌리지 않는다.** 그래서 게이트만 고치면 좌석이 채팅은 되는데
+    // **진입(`/v1/profile`)에서 막힌다** — 리허설의 첫 화면이 안 열린다.
+    // 실제로 그랬다: 게이트만 고친 상태로 로컬 worker 에 전 구간을 쳐 보니 채팅 200,
+    // 프로필 403 이었다. 한 표면을 고치고 다른 표면도 그럴 것이라 **짐작한 결과**다.
+    const rosterRequired = auth.payload.rehearsal !== true;
+    if (!cohortDecision.ok || (rosterRequired && !(await getRoster(c.env.HPS_KV, auth.payload.c))?.users.includes(auth.payload.u)))
       return c.json({ error: { type: 'auth', code: 'not_in_roster', message: '수업 명단을 강사에게 확인하세요.' } }, 403);
     lesson = await resolveTokenLesson(c.env, auth.payload, cohortDecision.lessonCohort);
     if (!lesson) return c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 알려주세요.' } }, 409);
