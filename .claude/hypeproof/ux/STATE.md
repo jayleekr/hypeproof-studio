@@ -8,7 +8,7 @@
 **2026-09-20 — P0 완료(평가 1회·수정 1회), P1 은 네 task 중 **하나**만. 둘 다 머지 안 함.**
 - `feat/sx-p0-curriculum-first` → **PR #1170**, CI 20개 전부 초록.
 - `feat/sx-p1-evidence-capture` (P0 브랜치 위에 쌓임) → **PR #1176, P1-A 하나만.**
-- `feat/sx-p1b-evidence-drawer` (#1176 위에 쌓임) → **P1-B.** P1-C·D 미착수.
+- `feat/sx-p1b-evidence-drawer` (#1176 위에 쌓임) → **PR #1177, P1-B.** P1-C·D 미착수.
   머지 순서는 **#1170 → #1176 → P1-B** 다. 각 PR 의 diff 는 바로 아래 브랜치 기준이다.
   #1176 은 #1170 을 머지한 뒤에 본다. 그 전에는 diff 에 P0 커밋이 섞여 보인다.
   **#1172(P1 전체)를 닫지 않는다** — 네 task 중 하나만 담았으므로 `Closes` 줄을 비웠다.
@@ -127,7 +127,7 @@ acceptance 열은 평가 서브에이전트의 판정이 들어온 뒤 채운다
 | P1 | P1-B Evidence drawer·기대 조건·완료 게이트 | **초록** ext tsc 0 · ext npm test 0 · webview vite build 0 | **초록** 심은 결함 18개 중 18개를 잡을 때까지 단언을 고쳤다 | 브랜치 `feat/sx-p1b-evidence-drawer` 커밋 `6d4b8d7` | 0 |
 | P1 | P1-C 재확인 게이트·변경 전후 | NOT RUN | | **미착수** | 0 |
 | P1 | P1-D real/simulated 라벨·인터뷰/반응 입력 | NOT RUN | | **미착수** | 0 |
-| P1 | P1-PR | | | **부분 범위 PR 둘** — #1176 이 P1-A, 그 위가 P1-B. C·D 없음 | 2 |
+| P1 | P1-PR | | | **부분 범위 PR 둘** — #1176(P1-A), #1177(P1-B). C·D 없음 | 2 |
 | P2 | P2-A 경계 회고 | NOT RUN | | | | 0 |
 | P2 | P2-B 다음 실험 → 다음 과제, 기존 개선 루프 연결 | NOT RUN | | | | 0 |
 | P2 | P2-PR | | | | | |
