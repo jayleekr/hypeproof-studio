@@ -61,7 +61,11 @@ export function MissionHeader(props: MissionHeaderProps) {
       </h1>
 
       {activity ? (
-        <p className="hp-mission-activity">
+        // `aria-label="현재 활동"` 은 예전 `hps-activity-header` 가 갖고 있던 것이다.
+        // 이 줄을 미션 헤더 안 작은 줄로 옮기면서 라벨을 빠뜨렸더니 CI 의 실제 브라우저
+        // 검사(US-UI-DRAFT)가 `getByLabel('현재 활동')` 에서 끊겼다. 활동이 바뀐 것을
+        // 스크린 리더가 짚을 수 있어야 한다는 계약은 자리 이동과 무관하게 그대로다.
+        <p className="hp-mission-activity" aria-label="현재 활동">
           {activity.label} · {activity.name}
           {!activity.verified ? (
             <span role="status"> · 연결을 확인하지 못했습니다. 저장된 기록을 볼 수 있으며, 다시 연결한 뒤 보낼 수 있습니다.</span>

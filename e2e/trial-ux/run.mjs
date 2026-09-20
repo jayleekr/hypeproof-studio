@@ -291,7 +291,12 @@ try {
     await expect.poll(async()=>emitted(await requests(p),'ready').length).toBe(2);
   }, { expectedCrash: true });
   await test('TUX-COND-05', 'Native profile excludes unrelated naming/world/gallery/roll/lesson/followup surfaces', async p => {
-    for (const selector of ['.hps-naming', '.hps-world-strip', '.hps-gallery-btn', '.hps-btn-roll', '.hps-lesson']) await expect(p.locator(selector)).toHaveCount(0);
+    // `.hps-lesson` 은 P0-C 에서 `.hp-rail-lesson` 이 됐다. 이름을 안 따라가면 이 단언은
+    // **사라진 클래스가 0개**라는 뜻이 되어 조용히 무의미하게 통과한다 — 빨간 것보다 나쁘다.
+    for (const selector of ['.hps-naming', '.hps-world-strip', '.hps-gallery-btn', '.hps-btn-roll', '.hp-rail-lesson']) await expect(p.locator(selector)).toHaveCount(0);
+    // 대조군: 이 프로필에는 수업이 없으므로 미션 헤더가 "연결된 수업이 없다"고 말해야 한다.
+    // 위 단언이 진짜 무언가를 세고 있다는 증거다.
+    await expect(p.locator('.hp-mission')).toHaveCount(1);
     await host(p, { type: 'history', messages: history }); await expect(p.locator('.hps-chips')).toHaveCount(0);
     await host(p, { type: 'config', config: config({ ...native, observation: undefined }) }); await expect(p.getByText('현재 연결은 작업 관찰을 지원하지 않습니다.', { exact: false })).toBeVisible(); await expect(p.locator('.hps-native-observation')).toHaveCount(0);
   });

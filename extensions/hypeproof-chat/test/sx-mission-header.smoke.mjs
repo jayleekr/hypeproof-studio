@@ -79,7 +79,12 @@ const text = visibleText(html);
   assert.ok(h1, "h1 이 없다 — 가장 큰 활자가 무엇인지 판정할 수 없다");
   assert.equal(visibleText(h1[1]), week3.learning.mission);
   assert.equal((html.match(/<h1\b/g) ?? []).length, 1, "h1 이 둘 이상이면 무엇이 가장 큰지 모호하다");
-  console.log("ok SX-01: 첫 제목(h1)이 미션 문장이고 하나뿐이다");
+  // 활동 줄은 접근 라벨을 유지해야 한다. 자리를 옮기는 것과 라벨을 잃는 것은 다르다 —
+  // 2026-09-20 CI 의 실제 브라우저 검사(US-UI-DRAFT)가 `getByLabel('현재 활동')` 에서
+  // 끊겨서 잡혔고, 여기 로컬 검사에는 그 단언이 없었다. 이제 있다.
+  assert.match(html, /aria-label="현재 활동"/, "활동 줄의 접근 라벨이 없다");
+  assert.ok(text.includes("GlobalBuddy"), "활동 이름이 렌더되지 않았다");
+  console.log("ok SX-01: 첫 제목(h1)이 미션 문장이고 하나뿐이다 · 활동 줄은 접근 라벨을 유지한다");
 }
 
 {
