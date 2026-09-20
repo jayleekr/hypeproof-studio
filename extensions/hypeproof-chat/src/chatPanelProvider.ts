@@ -14,6 +14,7 @@ import {createHash} from 'node:crypto';
 import {NativeObservationRecorder} from './nativeObservationRecorder';
 import {OBSERVATION_FORMATS, validateFindings, type ObservationBatch} from './nativeObservationContract';
 import {acceptSubmit, learningEventRequest, learningState, type CompletionItem} from './learningStateHelpers';
+import {observationHeaders} from './proxyClientHelpers.ts';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
@@ -223,7 +224,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // (설계 §관측 이벤트와 필드 "프로필 observation.format 이 어느 쪽을 쓸지 정한다").
     if (!OBSERVATION_FORMATS.includes(profile?.observation?.format as never) || !token) return null;
     try {
-      const response = await fetch(proxyUrl.replace(/\/$/, '')+'/observations/context', {headers:{authorization:'Bearer '+token},signal:AbortSignal.timeout(5000)});
+      // **이 헤더가 빠져 있어서 P1 이 여전히 죽어 있었다.** `/v1/profile` 은 `/2` 를 받고
+      // 이 요청만 헤더 없이 나가서 `/1` 컨텍스트를 받았고, 레코더가 `/1` 로 만들어져
+      // `currentLearningRecorder()` 가 계속 null 이었다. 클라이언트가 한 목소리로 묻는다.
+      const response = await fetch(proxyUrl.replace(/\/$/, '')+'/observations/context', {headers:observationHeaders(token),signal:AbortSignal.timeout(5000)});
       if (!response.ok) throw Error('observation_unavailable');
       const context = await response.json() as Omit<ObservationBatch,'events'> & {learning_path?:{title:string;url:string;reason:string}};
       this.nativeLearningPath=context.learning_path??null;
@@ -1940,7 +1944,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if(JSON.stringify(msg.eventIds)!==JSON.stringify(snapshot.events.map(e=>e.id))){await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:'새 작업 기록이 추가됐습니다. 보낼 내용을 다시 확인해 주세요.'});return;}
         const controller=new AbortController();this.observationAssessment=controller;
         try{
-          const response=await fetch(proxy.replace(/\/$/,'')+'/observations/assess',{method:'POST',headers:{authorization:'Bearer '+token,'content-type':'application/json'},body:JSON.stringify(snapshot),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(65000)])});
+          const response=await fetch(proxy.replace(/\/$/,'')+'/observations/assess',{method:'POST',headers:{...observationHeaders(token),'content-type':'application/json'},body:JSON.stringify(snapshot),signal:AbortSignal.any([controller.signal,AbortSignal.timeout(65000)])});
           if(!response.ok){const failure=await response.json() as {error?:{code?:string}};throw Error(/^[a-z_0-9]{1,80}$/.test(failure.error?.code??'')?failure.error!.code:'assessment_failed');}
           const result=await response.json() as {findings:unknown};
           const findings=validateFindings(result.findings,snapshot);

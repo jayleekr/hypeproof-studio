@@ -1,10 +1,8 @@
 import type { AssetScoreChunk, ChatMessage, Citation, ResolvedProfile } from "./protocol";
-// This app build parses BOTH /1 and /2, so it declares the higher one. The
-// Service treats that header as a ceiling and still serves /1 to a /1 cohort
-// (`servedObservationFormat`), so an old cohort is unaffected.
-import { OBSERVATION_FORMAT_V2 } from "./nativeObservationContract.ts";
+
 import {
   buildProxyHeaders,
+  observationHeaders,
   classifyProfileFailure,
   friendlyTransportMessage,
   profileNetworkFailure,
@@ -398,7 +396,7 @@ export async function fetchProfileResult(args: FetchProfileArgs): Promise<Profil
   try {
     res = await fetch(url, {
       method: "GET",
-      headers: { authorization: `Bearer ${token}`, "x-hps-observation-format": OBSERVATION_FORMAT_V2 },
+      headers: observationHeaders(token),
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
@@ -423,7 +421,7 @@ export async function verifyActivity(args: FetchProfileArgs, expectedId: string)
   let response: Response;
   try {
     response = await fetch(args.proxyUrl.replace(/\/$/, '') + '/activity', {
-      headers: {authorization:`Bearer ${args.token}`, 'x-hps-observation-format':OBSERVATION_FORMAT_V2},
+      headers: observationHeaders(args.token),
       signal:AbortSignal.timeout(15_000),
     });
   } catch { throw new ProxyTransportError(profileNetworkFailure().friendly); }

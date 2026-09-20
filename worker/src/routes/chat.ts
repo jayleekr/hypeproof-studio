@@ -68,7 +68,7 @@ import {
   MODERATION_BLOCK_MESSAGE_KO,
 } from "../lib/moderation";
 import { runDeepHealth } from "../cron/health.ts";
-import { servedObservationFormat } from "../lib/measurement-core/legacy-observation.ts";
+import { isObservationFormat, servedObservationFormat } from "../lib/measurement-core/legacy-observation.ts";
 
 // #358 — request-shaped upstream 4xx that /v1/chat passes through with its REAL
 // status + a sanitized OpenAI-shaped error `type`, instead of masking it as a
@@ -326,7 +326,7 @@ chat.get("/profile", async (c) => {
     welcome: lesson ? {
       greeting_md: `오늘 수업: ${lesson.content.title}\n목표: ${lesson.content.objective}\n내 수업에서 과제와 확인 기준을 읽고 시작하세요.`,
       example_prompts: lesson.content.steps.slice(0, 3).map(s => `${s.instructions}\n확인 기준: ${s.acceptance}`),
-    } : profile.observation?.enabled && c.req.header("x-hps-observation-format") !== "hps-observation/1" ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."} : profile.welcome,
+    } : profile.observation?.enabled && !isObservationFormat(c.req.header("x-hps-observation-format")) ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."} : profile.welcome,
     // #747 feature A — a frozen lesson may fix the AI's display name for this
     // seat. It is projected onto the existing ux.coach contract (fixed +
     // fallback_name) so every app version shows it through the same

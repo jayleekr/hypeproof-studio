@@ -493,4 +493,56 @@ const COMPLETION = [
   assert.equal(form.batch.events[0].actor, "user");
 }
 
+// ── 8. 관측 라우트를 부르는 **모든** 자리가 한 목소리로 묻는다 ──────────────
+//
+// 서버가 `/v1/profile` 과 `/observations/context` 를 같은 함수로 협상하도록 고쳐 놓고도
+// 기능은 여전히 죽어 있었다. **두 호출부가 서로 다른 헤더를 보냈기 때문이다** —
+// `fetchProfile` 은 `x-hps-observation-format: /2` 를, `prepareObservation` 은
+// `authorization` 만. 서버는 정직하게 한쪽에 `/2`, 다른 쪽에 `/1` 을 주었고 레코더가
+// `/1` 로 만들어져 서랍이 끝까지 안 그려졌다. 워커 검사 9개는 그동안 초록이었다 —
+// 그 검사는 **같은 헤더를 양쪽에 보내서** 재고 있었으니까.
+//
+// 그래서 이 단언은 **소스를 정적으로** 본다. 런타임 검사로는 "호출부가 헬퍼를
+// 안 썼다" 를 잡을 수 없다(그 호출부가 돌지 않는 한). 한계는 그대로 적어 둔다.
+
+{
+  const { readFileSync, readdirSync } = await import("node:fs");
+  const srcDir = new URL("../src/", import.meta.url);
+  const files = readdirSync(srcDir).filter((f) => f.endsWith(".ts"));
+
+  // 관측 계약이 걸린 라우트. 이 중 하나를 부르면서 헤더를 손으로 만들면 실패다.
+  const ROUTES = ["/observations/", "/profile'", '/profile"', "/activity'", '/activity"'];
+  const offenders = [];
+  for (const file of files) {
+    const text = readFileSync(new URL(file, srcDir), "utf8");
+    // `fetch(` 부터 닫는 `)` 근처까지를 한 덩어리로 훑는다. 정확한 파서가 아니라
+    // **호출 표현식 안에 헤더 리터럴이 있는지**를 보는 것이 목적이다.
+    for (const m of text.matchAll(/fetch\(([\s\S]{0,400}?)\}\s*\)/g)) {
+      const call = m[1];
+      if (!ROUTES.some((r) => call.includes(r))) continue;
+      if (call.includes("observationHeaders")) continue;
+      // `authorization` 을 손으로 적고 있으면 포맷 헤더를 빠뜨릴 수 있는 자리다.
+      if (/authorization/i.test(call)) offenders.push(`${file}: ${call.slice(0, 90).replace(/\s+/g, " ")}`);
+    }
+  }
+  assert.deepEqual(
+    offenders,
+    [],
+    "관측 라우트를 부르면서 헤더를 직접 만드는 자리가 있다 — observationHeaders() 를 쓰지 않으면 포맷 선언이 조용히 빠진다:\n" +
+      offenders.join("\n"),
+  );
+
+  // 양성 대조군 — 그 헬퍼가 실제로 포맷을 싣는지. 없는 규칙을 지키고 있어도 소용없다.
+  const { observationHeaders } = await import("../src/proxyClientHelpers.ts");
+  const h = observationHeaders("t0ken");
+  assert.equal(h["x-hps-observation-format"], "hps-observation/2", "헬퍼가 포맷을 싣지 않는다");
+  assert.equal(h.authorization, "Bearer t0ken");
+
+  // 음성 대조군 — 검사가 정말 세는지. 손으로 만든 호출을 심은 문자열로 확인한다.
+  const planted = `fetch(url + '/observations/context', {headers:{authorization:'Bearer '+token}})`;
+  const hits = [...planted.matchAll(/fetch\(([\s\S]{0,400}?)\}\s*\)/g)]
+    .filter((m) => m[1].includes("/observations/") && !m[1].includes("observationHeaders") && /authorization/i.test(m[1]));
+  assert.equal(hits.length, 1, "정적 검사가 손으로 만든 헤더를 못 센다 — 규칙이 공전한다");
+}
+
 console.log("sx-evidence-gate: OK");

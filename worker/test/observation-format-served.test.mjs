@@ -192,5 +192,98 @@ await check('/1 코호트는 신버전 앱에도 /1 이다 — 클라이언트�
   assert.equal(view.json.observation?.format, 'hps-observation/1', '클라이언트 헤더만으로 /2 가 열렸다');
 });
 
+// ─── 4. **클라이언트가 실제로 보내는 헤더**로 두 라우트를 부른다 ──────────────
+//
+// 위의 "두 라우트가 같은 포맷을 말한다" 단언은 **같은 헤더를 양쪽에 보내서** 재고
+// 있었다. 실제 클라이언트는 그렇게 부르지 않는다 — `/v1/profile` 은 `fetchProfile`
+// 이, `/observations/context` 는 `prepareObservation` 이 부르고, 둘이 서로 다른
+// 헤더를 만들면 서버가 아무리 같은 함수로 협상해도 **답이 갈라진다.**
+//
+// 실제로 그렇게 갈라졌다: 첫 수리가 `/v1/profile` 에만 헤더를 붙였고
+// `/observations/context` 는 헤더 없이 나가 `/1` 컨텍스트를 받았다. 레코더가 `/1`
+// 로 만들어져 `currentLearningRecorder()` 가 계속 null 이었고 **서랍은 여전히 죽어
+// 있었다.** 단언은 초록이었다.
+//
+// 그래서 여기서는 **확장이 쓰는 헤더 빌더를 직접 import 해서** 그것으로 부른다.
+// 클라이언트가 헤더를 빠뜨리면 이 검사가 빨개진다.
+
+const { observationHeaders } = await import('../../extensions/hypeproof-chat/src/proxyClientHelpers.ts');
+
+await check('실측: 확장이 쓰는 헤더로 두 라우트를 부르면 같은 포맷이 나온다', async () => {
+  assert.ok(twoProfile, '/2 를 선언한 코호트가 없다');
+  const local = await localAuthoring({ profileId: twoProfile.id });
+  local.db.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+  local.db.prepare('INSERT INTO cohorts(id,display_name) VALUES (?,?)').run(local.cohort, 'client header probe');
+  local.db.prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES (?,?,?,?,?)')
+    .run('hdr', local.cohort, local.profileId, new Date(Date.now() - 1000).toISOString(), new Date(Date.now() + 3600000).toISOString());
+  await setRoster(local.env.HPS_KV, local.cohort, ['student']);
+  await startSession(local.env.HPS_KV, local.cohort, {
+    session_id: 'hdr', profile_id: local.profileId,
+    starts_at: new Date(Date.now() - 1000).toISOString(), ends_at: new Date(Date.now() + 3600000).toISOString(),
+  });
+  const { token } = await issue({ u: 'student', c: local.cohort, p: local.profileId }, 1, TEST_SECRET);
+
+  // **확장의 빌더**로 만든 헤더. 손으로 다시 적지 않는다 — 다시 적으면 이 검사가
+  // 클라이언트가 아니라 나 자신을 재게 된다.
+  const headers = observationHeaders(token);
+  const call = async (path) => {
+    const r = await local.fetcher(local.origin + path, { method: 'GET', headers });
+    return { status: r.status, json: await r.json().catch(() => null) };
+  };
+
+  const view = await call('/v1/profile');
+  const ctx = await call('/v1/observations/context');
+  assert.equal(view.status, 200, JSON.stringify(view.json));
+  assert.equal(ctx.status, 200, JSON.stringify(ctx.json));
+  assert.equal(view.json.observation?.format, 'hps-observation/2', '프로필 응답이 /2 가 아니다');
+  assert.equal(ctx.json?.format, 'hps-observation/2', '컨텍스트 응답이 /2 가 아니다 — 레코더가 /1 로 만들어진다');
+});
+
+await check('실측: 신버전 앱이 /1 코호트에서 "업데이트하세요" 배너를 받지 않는다', async () => {
+  // 첫 수리가 만든 회귀. 클라이언트 헤더를 `/2` 로 올렸는데 배너 조건이
+  // `!== "hps-observation/1"` 로 남아 있어서, **관측이 켜진 모든 좌석**이
+  // "이 앱 버전은 작업 관찰 화면을 지원하지 않습니다" 를 받았다.
+  assert.ok(oneProfile, '포맷 미선언 코호트가 없다');
+  const local = await localAuthoring({ profileId: oneProfile.id });
+  local.db.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
+  local.db.prepare('INSERT INTO cohorts(id,display_name) VALUES (?,?)').run(local.cohort, 'banner probe');
+  local.db.prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES (?,?,?,?,?)')
+    .run('ban', local.cohort, local.profileId, new Date(Date.now() - 1000).toISOString(), new Date(Date.now() + 3600000).toISOString());
+  await setRoster(local.env.HPS_KV, local.cohort, ['student']);
+  await startSession(local.env.HPS_KV, local.cohort, {
+    session_id: 'ban', profile_id: local.profileId,
+    starts_at: new Date(Date.now() - 1000).toISOString(), ends_at: new Date(Date.now() + 3600000).toISOString(),
+  });
+  const { token } = await issue({ u: 'student', c: local.cohort, p: local.profileId }, 1, TEST_SECRET);
+
+  const withNew = await local.fetcher(local.origin + '/v1/profile', { method: 'GET', headers: observationHeaders(token) });
+  const json = await withNew.json();
+  assert.ok(
+    !String(json.welcome?.greeting_md ?? '').includes('지원하지 않습니다'),
+    '신버전 앱이 "업데이트하세요" 배너를 받는다 — 첫 수리가 만든 회귀다',
+  );
+
+  // 양성 대조군 — 포맷을 **모르는** 클라이언트에는 배너가 그대로 나가야 한다.
+  // 이 줄이 없으면 배너를 통째로 없애 버려도 위 단언이 통과한다.
+  const withNone = await local.fetcher(local.origin + '/v1/profile', {
+    method: 'GET', headers: { authorization: 'Bearer ' + token },
+  });
+  const legacy = await withNone.json();
+  assert.ok(
+    String(legacy.welcome?.greeting_md ?? '').includes('지원하지 않습니다'),
+    '포맷을 말하지 않는 앱에도 안내가 사라졌다 — 배너를 없애 버린 것이다',
+  );
+});
+
+// 구버전 앱(`/1` 선언)도 배너를 받지 않아야 한다 — 그 앱은 관찰을 **지원한다**.
+await check('실측: /1 만 아는 구버전 앱도 배너를 받지 않는다', async () => {
+  assert.ok(oneProfile, '포맷 미선언 코호트가 없다');
+  const { view } = await servedFor(oneProfile.id, 'hps-observation/1');
+  assert.ok(
+    !String(view.json.welcome?.greeting_md ?? '').includes('지원하지 않습니다'),
+    '관찰을 지원하는 구버전 앱에 업데이트 안내가 나갔다',
+  );
+});
+
 console.log(`\nobservation-format-served: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
