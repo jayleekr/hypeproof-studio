@@ -36,7 +36,7 @@
 [같은 앱 안]
 Chalk 면  --issuer Bearer-->  POST …/versions/:v/rehearsal-tickets   (#1164, 그대로)
           <--ticket--------
-Chalk 면  --ticket-------->  POST /v1/rehearsal-sessions   ← 이 이슈가 만드는 것 (C-2)
+Chalk 면  --ticket-------->  POST /v1/rehearsal/redeem     ← 이 이슈가 만드는 것 (C-2)
           <--좌석 토큰-----
 채팅 패널 --좌석 토큰----->  기존 참여 경로
 ```
@@ -52,6 +52,12 @@ Chalk 면  --ticket-------->  POST /v1/rehearsal-sessions   ← 이 이슈가 �
 만든 장치인데, D1 에서는 **URL 이 아예 없다** — 교환권의 노출 구간이 "사람이 누르는 링크"
 에서 "프로세스 안 변수"로 줄어든다. 계약을 우회하는 게 아니라 **계약이 막으려던 것을
 구조적으로 없앤다.**
+
+⚠️ **경로 이름은 내가 고르지 않았다.** 이 문서의 첫 초안에는 `/v1/rehearsal-sessions` 라고 적혀
+있었는데, 앱 클라이언트(`rehearsalEntryHelpers.redeemRehearsalTicket`)가 **이미**
+`<proxy>/rehearsal/redeem` 을 치고 있었다. 계약의 방향은 서버가 정하고 앱이 따르는 것이
+아니라 **이미 출하된 쪽에 맞추는 것**이다. 구현은 `/v1/rehearsal/redeem` 이고 이 문단이
+정본이다 — 2026-09-21 6b 가 산문과 코드가 다른 것을 잡아 고쳤다.
 
 교환 엔드포인트가 정해야 할 것(= `#1164` 가 *"교환(C-2)의 몫"* 이라며 남긴 것):
 멱등 창의 길이, 이미 쓴 교환권의 응답(`already_used` 는 오류가 아니라 정상 결과), 붙여 둔
@@ -197,7 +203,7 @@ session: { session_id: 'account:' + payload.account,
 
 ## §8 구현 순서 (승인 후)
 
-1. 교환 엔드포인트 `POST /v1/rehearsal-sessions` — `ARC-01`, 멱등, `already_used`
+1. 교환 엔드포인트 `POST /v1/rehearsal/redeem` — `ARC-01`, 멱등, `already_used`
 2. `chat-gate.ts` 리허설 갈래 — `account` 선례와 같은 형태
 3. §5 시험 9종 (양방향). `#1186` 의 0행 단언을 "증거가 남는다" 로 뒤집기
 4. Chalk 면 → 채팅 패널 전환 (화면은 `#1184` 와 경계 확인 후)
