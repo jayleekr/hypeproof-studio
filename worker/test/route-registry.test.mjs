@@ -36,7 +36,6 @@ export const KNOWN_UNMAPPED = {
   'logs.ts': 'logs-upload.test.mjs 가 호출하지만 레지스트리에 없다. 업로드 허용 목록 계약의 요구 노드 결정 필요 (#996)',
   'native-trials.ts': '/admin 아래 하위 라우터(admin.ts:140). native-trial-grants.test.mjs 가 호출하지만 레지스트리에 없다 (#996)',
   'observations.ts': 'native-trial.test.mjs 등이 호출하지만 레지스트리에 없다 (#996)',
-  'rehearsal.ts': '/v1/rehearsal/redeem (#1189 C-2). rehearsal-redeem.test.mjs 가 전수로 호출하지만 그 테스트가 레지스트리에 없고, 저작·리허설 계열의 구현 노드가 아직 없다 — 요구(ST-REQ-CHALK-AUTHORING)와 시험(ST-TEST-CHALK-AUTHORING)의 source 는 둘 다 문서다. 부모와 owner 를 발명하지 않고 결정만 남긴다 (#996 과 같은 형태)',
   'report.ts': 'report-flow.smoke.mjs 가 호출하지만 레지스트리에 없다 (#996)',
   'trace.ts': 'liveness-trace.test.mjs 가 호출하지만 레지스트리에 없다 (#996)',
 };

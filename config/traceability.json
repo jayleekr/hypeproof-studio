@@ -1905,6 +1905,12 @@
         },
         {
           "path": "docs/plan/requirements-activation.md"
+        },
+        {
+          "path": "docs/design/rehearsal-entry-dev-deeplink-survey.md"
+        },
+        {
+          "path": "docs/design/rehearsal-entry-in-app-switch.md"
         }
       ]
     },
@@ -1945,6 +1951,34 @@
       "sources": [
         {
           "path": "worker/test/rehearsal-ticket.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-REHEARSAL-REDEEM",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-IMP-REHEARSAL-TICKET"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/rehearsal.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-REHEARSAL-REDEEM",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-IMP-REHEARSAL-REDEEM"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/rehearsal-redeem.test.mjs"
         }
       ]
     },
