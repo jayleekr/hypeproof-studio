@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import { localAuthoring } from './harness/dental-authoring.mjs';
 import { withMockUpstream } from './harness/index.mjs';
+import { plantRehearsal } from './harness/rehearsal-evidence.mjs';
+// 참여 코드 발급은 리허설 통과를 요구한다(#1187). 이 파일이 재는 것은 리허설이
+// 아니므로 발급 직전에 통과 증거를 심는다 — 관문 자체는
+// authoring-rehearsal-gate.test.mjs 가 잰다.
+
 const { MODEL_MAP, ANTHROPIC_MODELS, modelIdFor } = await import('../src/profiles/types.ts');
 const { getProfile } = await import('../src/profiles/index.ts');
 const { modelBinding, lessonModelIsCurrent, applyLessonModel } = await import('../src/lib/lesson-model-policy.ts');
@@ -45,6 +50,7 @@ try {
       const frozen=await request(path+'/versions/m2026.09.08-1','PUT',{expected_revision:1});assert.equal(frozen.status,200);
       const frozenPolicy=frozen.json.module.content.model;
       assert.deepEqual(frozenPolicy.binding,modelBinding(local.env,profile,policy));
+      plantRehearsal(local.db,local.cohort,runtime+'-'+mode,'m2026.09.08-1');
       const delivered=await request(path+'/versions/m2026.09.08-1/participants','POST',{user:'student',hours:1});assert.equal(delivered.status,200);
       const token=delivered.json.token;
       assert.equal((await request(path,'PUT',save(policy,1),token)).status,403);
@@ -95,6 +101,7 @@ try {
       const allowed=catalogue.json.choices.map(c=>c.alias),path=base+'expanded-'+runtime;
       assert.equal((await request(path,'PUT',save({default:'claude-sonnet-5',allowed}))).status,200);
       assert.equal((await request(path+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+      plantRehearsal(local.db,local.cohort,'expanded-'+runtime,'m2026.09.08-1');
       const invited=await request(path+'/versions/m2026.09.08-1/participants','POST',{user:'student',hours:1});
       const endpoint=runtime==='proxy'?'/v1/chat/completions':'/v1/messages';
       for(const key of allowed){

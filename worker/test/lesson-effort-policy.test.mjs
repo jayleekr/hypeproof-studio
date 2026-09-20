@@ -2,6 +2,11 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {localAuthoring} from './harness/dental-authoring.mjs';
 import {withMockUpstream, makeCtx, bootApp} from './harness/index.mjs';
+import { plantRehearsal } from './harness/rehearsal-evidence.mjs';
+// 참여 코드 발급은 리허설 통과를 요구한다(#1187). 이 파일이 재는 것은 리허설이
+// 아니므로 발급 직전에 통과 증거를 심는다 — 관문 자체는
+// authoring-rehearsal-gate.test.mjs 가 잰다.
+
 const {getProfile}=await import('../src/profiles/index.ts');
 const {setRoster,startSession}=await import('../src/lib/kv.ts');
 const {ANTHROPIC_MODELS}=await import('../src/profiles/types.ts');
@@ -46,6 +51,7 @@ try {
     assert.equal((await call(path,'PUT',save(policy))).status,200);
     const frozen=await call(path+'/versions/m2026.09.08-1','PUT',{expected_revision:1});assert.equal(frozen.status,200);
     assert.equal(frozen.json.module.content.model.binding.effort.revision,'hps-effort/1');
+    plantRehearsal(local.db,local.cohort,runtime,'m2026.09.08-1');
     const delivery=await call(path+'/versions/m2026.09.08-1/participants','POST',{user:'student',hours:1});assert.equal(delivery.status,200);
     const token=delivery.json.token,endpoint=runtime==='proxy'?'/v1/chat/completions':'/v1/messages';
     const view=await call('/v1/profile','GET',undefined,token);
@@ -84,6 +90,7 @@ try {
     const another=base+'fixed-'+runtime;
     assert.equal((await call(another,'PUT',save({default:'hypeproof-default',allowed:['hypeproof-default'],effort:{default:'low',allowed:['low']}}))).status,200);
     assert.equal((await call(another+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+    plantRehearsal(local.db,local.cohort,'fixed-'+runtime,'m2026.09.08-1');
     const fixed=(await call(another+'/versions/m2026.09.08-1/participants','POST',{user:'student',hours:1})).json.token;
     assert.deepEqual((await call('/v1/request-settings/'+turn,'GET',undefined,fixed)).json.requests,[],'same student in another frozen course cannot read the old turn');
     assert.deepEqual((await call('/v1/profile','GET',undefined,fixed)).json.model_selection.choices[0].effort,{default:'low',allowed:['low']});

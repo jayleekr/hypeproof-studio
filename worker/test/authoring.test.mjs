@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
 import { bootApp, createMockEnv, makeCtx, TEST_SECRET, withMockUpstream, openAIJsonBody, COHORT as KIDS_COHORT, PROFILE as KIDS_PROFILE, USER as KID } from './harness/index.mjs';
+import { plantRehearsal } from './harness/rehearsal-evidence.mjs';
 const { issueIssuer, issue } = await import('../src/lib/tokens.ts');
 const { validateModuleDoc } = await import('../src/lib/modules.ts');
 const app = await bootApp();
@@ -39,6 +40,10 @@ const student=(await issue({u:'student',c:cohort,p:profileId},1,TEST_SECRET)).to
 const base=`/admin/cohorts/${cohort}/authoring/site-1`;
 const content={schema:'hps-session-design/1',title:'진료시간 수정',audience:'치과의사',duration_minutes:120,objective:'진료시간을 수정하고 검수한다',prerequisites:'코딩 경험 불필요. 예제 폴더 사본 제공',starter:'정적 홈페이지 예제',steps:[{id:'edit',title:'시간 변경',instructions:'진료시간을 변경하세요',hint:'',acceptance:'모바일에서 확인'}]};
 const save=(revision,id,data=content)=>({expected_revision:revision,request_id:id,profile_id:profileId,content:data});
+// 참여 코드 발급은 이제 리허설 통과를 요구한다(#1187). 이 파일이 재는 것은 리허설이
+// 아니라 전달·이름·정책이므로, 발급까지 가는 곳마다 통과 증거를 먼저 심는다.
+// 관문 자체는 authoring-rehearsal-gate.test.mjs 가 잰다.
+const rehearsed=(course,version,cohortId=cohort)=>plantRehearsal(db,cohortId,course,version);
 async function request(path=base,method='GET',body,credential=alice) {
  const headers={authorization:`Bearer ${credential}`};
  if(body!==undefined)headers['content-type']='application/json';
@@ -111,6 +116,9 @@ await check('T-08/T-09 deliver immutable lesson only to registered students in a
  assert.equal((await request(delivery,'POST',body,student)).status,403);
  assert.equal((await request(delivery,'POST',{...body,user:'not-registered'})).status,403);
  assert.equal((await request(delivery,'POST',{...body,hours:25})).status,400);
+ // 앞의 넷을 전부 통과해도 리허설 증거가 없으면 막힌다 — 다섯 번째 거부(#1187).
+ assert.equal((await request(delivery,'POST',body)).status,403,'리허설 전에는 발급되지 않는다');
+ rehearsed('site-1','m2026.09.06-1');
  const r=await request(delivery,'POST',body);assert.equal(r.status,200,r.raw);
  const received=await request('/v1/profile','GET',undefined,r.json.token);assert.equal(received.status,200,received.raw);
  assert.deepEqual(received.json.lesson.content,frozen.content);assert.equal(received.json.lesson.version,frozen.version);
@@ -149,6 +157,7 @@ await check('AE-07 lesson assistant name: draft → frozen → student profile s
  assert.equal(f.json.module.content.assistant.display_name,'제작 파트너');
  // Draft renamed AFTER freezing: the frozen version keeps its name.
  assert.equal((await request(a,'PUT',save(1,'named-edit',{...named,assistant:{display_name:'검토 도우미'}}))).status,200);
+ rehearsed('site-named','m2026.09.08-1');
  const d=await request(a+'/versions/m2026.09.08-1/participants','POST',{user:'student',hours:1});assert.equal(d.status,200,d.raw);
  const p=await request('/v1/profile','GET',undefined,d.json.token);assert.equal(p.status,200,p.raw);
  assert.equal(p.json.ux.coach.naming_mode,'fixed');
@@ -170,6 +179,7 @@ await check('AE-08 two lessons keep separate names; old-schema lesson leaves ux.
  const b=`/admin/cohorts/${cohort}/authoring/site-review`;
  assert.equal((await request(b,'PUT',save(0,'review-create',{...content,title:'검수 수업',assistant:{display_name:'검토 도우미'}}))).status,200);
  assert.equal((await request(b+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+ rehearsed('site-review','m2026.09.08-1');
  const db_=await request(b+'/versions/m2026.09.08-1/participants','POST',{user:'student-b',hours:1});assert.equal(db_.status,200,db_.raw);
  const pb=await request('/v1/profile','GET',undefined,db_.json.token);
  assert.equal(pb.json.ux.coach.fallback_name,'검토 도우미');
@@ -214,6 +224,7 @@ await check('AE-08 user_names_it cohort: a named lesson serves fixed for that se
  const kreq=(path,method='GET',body,credential=kidsIssuer)=>app.fetch(new Request('https://service.test'+path,{method,headers:{authorization:`Bearer ${credential}`,...(body!==undefined?{'content-type':'application/json'}:{})},body:body===undefined?undefined:JSON.stringify(body)}),kenv,makeCtx()).then(async r=>({status:r.status,json:await r.json().catch(()=>null)}));
  assert.equal((await kreq(k,'PUT',{expected_revision:0,request_id:'kids-create',profile_id:KIDS_PROFILE,content:{...content,assistant:{display_name:'별똥별 코치'}}})).status,200);
  assert.equal((await kreq(k+'/versions/m2026.09.08-1','PUT',{expected_revision:1})).status,200);
+ rehearsed('kids-named','m2026.09.08-1',KIDS_COHORT);
  const d=await kreq(k+'/versions/m2026.09.08-1/participants','POST',{user:KID,hours:1});assert.equal(d.status,200,JSON.stringify(d.json));
  const p=await kreq('/v1/profile','GET',undefined,d.json.token);assert.equal(p.status,200);
  assert.deepEqual({naming_mode:p.json.ux.coach.naming_mode,fallback_name:p.json.ux.coach.fallback_name},{naming_mode:'fixed',fallback_name:'별똥별 코치'});

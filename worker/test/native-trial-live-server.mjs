@@ -30,6 +30,7 @@ if (codexMode) {
  try { const info=await codex.connect(); writeFileSync(resolve(output,'connection.json'),JSON.stringify({...info,scope:'local rehearsal only; subscription limits apply',request_limit:24,concurrency:1,timeout_ms:60000},null,2)); }
  catch(error) {codex.close();throw error;}
 }
+const { plantRehearsal } = await import('./harness/rehearsal-evidence.mjs');
 const { codexRehearsalResponse } = await import('./harness/codex-rehearsal.mjs');
 const env = createMockEnv({ withSession: false, withRoster: false, secret: signing, env: {
   LLM_PROVIDER: codexMode ? 'openai' : 'anthropic', ANTHROPIC_API_KEY: codexMode ? undefined : process.env.ANTHROPIC_API_KEY,
@@ -73,6 +74,10 @@ if(effortRun){
   const content={schema:'hps-session-design/1',title:'처리 수준 연습 '+mode,audience:'합성 성인',duration_minutes:60,objective:'요청 설정을 확인한다',prerequisites:'',starter:'빈 폴더',steps:[{id:'one',title:'확인',instructions:'가상 꽃집을 소개하세요.',hint:'',acceptance:'설정 비교'}],assistant:{display_name:'제작 파트너'},model:{default:'hypeproof-default',allowed:mode==='fixed'?['hypeproof-default']:catalogue.choices.map(c=>c.alias),effort:mode==='fixed'?{default:'low',allowed:['low']}:{default:'medium',allowed:['low','medium','high']}}};
   await call(base,'PUT',{profile_id:id,expected_revision:0,request_id:'create-'+mode,content});
   await call(base+'/versions/m2026.09.08-1','PUT',{expected_revision:1});
+  // 참여 코드 발급은 리허설 통과를 요구한다(#1187). 이 fixture 가 재는 것은 처리
+  // 수준이므로 증거를 심어 그 관문을 지나간다 — 관문 자체는
+  // authoring-rehearsal-gate.test.mjs 가 잰다.
+  plantRehearsal(effortDb,id,'effort-'+mode,'m2026.09.08-1');
   const delivered=await call(base+'/versions/m2026.09.08-1/participants','POST',{user:'synthetic-adult',hours:1});
   if(mode==='choice')token=delivered.token;
   else writeFileSync(process.env.HPS_E2E_TOKEN_FILE+'.fixed',delivered.token,{mode:0o600});

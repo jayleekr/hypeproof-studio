@@ -1949,6 +1949,33 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-AUTHORING-API",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/authoring.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-REHEARSAL-GATE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-IMP-CHALK-AUTHORING-API"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/authoring-rehearsal-gate.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-CLASSROOM-ADMIN",
       "stage": "requirement",
       "owner": "jayleekr",

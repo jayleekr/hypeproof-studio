@@ -13,6 +13,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { localAuthoring } from './harness/dental-authoring.mjs';
 import { withMockUpstream, anthropicStreamBody, TEST_SECRET } from './harness/index.mjs';
+import { plantRehearsal } from './harness/rehearsal-evidence.mjs';
+// 참여 코드 발급은 리허설 통과를 요구한다(#1187). 이 파일이 재는 것은 리허설이
+// 아니므로 발급 직전에 통과 증거를 심는다 — 관문 자체는
+// authoring-rehearsal-gate.test.mjs 가 잰다.
+
 const { getProfile } = await import('../src/profiles/index.ts');
 const { HELP_MODES, HELP_MODE_LABELS, resolveHelpMode, helpModeInstruction } = await import('../src/lib/lesson-help-mode.ts');
 const { validateSessionDesign } = await import('../src/lib/session-design.ts');
@@ -91,6 +96,7 @@ try {
     assert.equal((await request(base + slug, 'PUT', save(slug === 'plain' ? content(null) : content()))).status, 200);
     const frozen = await request(base + slug + '/versions/m2026.09.13-1', 'PUT', { expected_revision: 1 });
     assert.equal(frozen.status, 200, JSON.stringify(frozen.json));
+    plantRehearsal(local.db, local.cohort, slug, 'm2026.09.13-1');
     return (await request(base + slug + '/versions/m2026.09.13-1/participants', 'POST', { user: 'student', hours: 1 })).json.token;
   };
   const token = await seat('helped');

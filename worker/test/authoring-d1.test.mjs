@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createMiniflare } from './harness/miniflare.mjs';
 import { bootApp, createMockEnv, makeCtx, TEST_SECRET } from './harness/index.mjs';
+import { plantRehearsalD1 } from './harness/rehearsal-evidence.mjs';
 const compatibilityDate = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8').match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];
 assert.ok(compatibilityDate, 'use the production Worker compatibility date');
 const mf = createMiniflare({modules:true,script:'export default {fetch(){return new Response("local test")}}',compatibilityDate,d1Databases:['HPS_DB']});
@@ -51,6 +52,9 @@ try {
  const {setRoster,startSession}=await import('../src/lib/kv.ts');
  await setRoster(env.HPS_KV,p.session.cohort_id,['synthetic-d1-student']);
  await startSession(env.HPS_KV,p.session.cohort_id,{session_id:'synthetic-d1',profile_id:p.id,starts_at:new Date(Date.now()-1000).toISOString(),ends_at:new Date(Date.now()+3600000).toISOString()});
+ // 실제 D1 위에서도 관문이 같이 선다 — 증거가 없으면 발급이 막히고(#1187), 심으면 나간다.
+ assert.equal((await call('/versions/m2026.09.06-1/participants','POST',{user:'synthetic-d1-student',hours:1})).status,403,'리허설 증거 없이는 D1 에서도 발급되지 않는다');
+ await plantRehearsalD1(db,p.session.cohort_id,'d1-course','m2026.09.06-1');
  const delivered=await call('/versions/m2026.09.06-1/participants','POST',{user:'synthetic-d1-student',hours:1});assert.equal(delivered.status,200);
  const response=await app.fetch(new Request('https://local.test/v1/profile',{headers:{authorization:'Bearer '+delivered.body.token}}),env,makeCtx());assert.equal(response.status,200);assert.deepEqual((await response.json()).lesson.content,content);
  console.log('PASS local workerd/D1: migration, create, concurrent CAS, immutable version, reopen, overwrite rejection');

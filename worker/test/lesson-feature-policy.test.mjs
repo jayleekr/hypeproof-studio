@@ -19,6 +19,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { localAuthoring } from './harness/dental-authoring.mjs';
 import { withMockUpstream } from './harness/index.mjs';
+import { plantRehearsal } from './harness/rehearsal-evidence.mjs';
+// 참여 코드 발급은 리허설 통과를 요구한다(#1187). 이 파일이 재는 것은 리허설이
+// 아니므로 발급 직전에 통과 증거를 심는다 — 관문 자체는
+// authoring-rehearsal-gate.test.mjs 가 잰다.
+
 const { getProfile } = await import('../src/profiles/index.ts');
 const {
   FEATURE_KEYS, applyLessonFeatures, featureBinding,
@@ -163,7 +168,10 @@ try {
   assert.equal((await request(openPath, 'PUT', save(null))).status, 200);
   assert.equal((await request(openPath + '/versions/m2026.09.08-1', 'PUT', { expected_revision: 1 })).status, 200);
 
-  const seat = async p => (await request(p + '/versions/m2026.09.08-1/participants', 'POST', { user: 'student', hours: 1 })).json.token;
+  const seat = async p => {
+    plantRehearsal(local.db, local.cohort, p.slice(base.length), 'm2026.09.08-1');
+    return (await request(p + '/versions/m2026.09.08-1/participants', 'POST', { user: 'student', hours: 1 })).json.token;
+  };
   const narrowedToken = await seat(path);
   const openToken = await seat(openPath);
 

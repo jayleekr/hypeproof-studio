@@ -86,9 +86,28 @@ authoring.post(root + '/versions/:version/participants', async c => {
     return c.json({ error: 'open a matching practice session first' }, 403);
   const roster = await getRoster(c.env.HPS_KV, cohort);
   if (!roster?.users.includes(b.user)) return c.json({ error: 'register this student in the session console first' }, 403);
+  // 다섯 번째 거부 — 리허설 관문 (#1187, RUN-01). 앞의 넷(강사 스코프 · 확정된 버전 ·
+  // 열린 세션 · 로스터 멤버십)은 한 글자도 바꾸지 않는다. 여기에 한 줄이 더 붙는 것이
+  // 전부다.
+  //
+  // 왜 이 줄이 필요한가: #1152 가 상태를 **읽는** 경로를 만들었지만 그 값은 응답에
+  // 실리기만 했다. 그래서 제품이 하던 말이 "이 강의는 리허설을 안 했습니다. 그런데
+  // 학생을 들여보내세요" 였다. 경고를 띄우고 통과시키는 것은 점검표이고, 관문은
+  // 막는 것이다.
+  //
+  // 상태를 여기서 다시 계산하지 않는다. `readRehearsal()` 이 저장된 증거에서 읽어
+  // 돌려준 것을 그대로 쓴다 — 판정이 두 곳에 생기면 반드시 어긋난다. 같은 이유로
+  // 아래 응답도 같은 값을 다시 읽지 않고 이 변수를 싣는다.
+  //
+  // 실패 방향은 **닫히는 쪽**이다. `readRehearsal()` 은 테이블을 읽지 못하면
+  // `not_run` 으로 떨어지므로 저장소가 흔들릴 때 코드가 나가지 않는다. 관문에서는
+  // 그게 맞다 — 리허설 안 한 수업에 학생이 들어가는 것보다 발급이 멈추는 쪽이 싸고,
+  // 그리고 그 답은 오보가 아니다(증거가 실제로 없다).
+  const rehearsal = await readRehearsal(c.env.HPS_DB, cohort, course, lesson.version);
+  if (rehearsal !== 'passed') return c.json(rehearsalBlocked(rehearsal), 403);
   const ref = { course_id: course, version: lesson.version, sha256: lesson.sha256 };
   const { token } = await issue({ u: b.user, c: cohort, p: d.profile_id, lesson: ref }, b.hours, c.env.HPS_SIGNING_SECRET);
-  return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal: await readRehearsal(c.env.HPS_DB, cohort, course, lesson.version) });
+  return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal });
 });
 
 /**
@@ -118,6 +137,38 @@ async function readRehearsal(db: D1Database, cohort: string, course: string, ver
   } catch {
     return 'not_run';
   }
+}
+
+/**
+ * 리허설을 통과하지 않은 버전의 참여 코드 발급 거부 (#1187, RUN-01).
+ *
+ * **`not_run` 과 `failed` 는 둘 다 막되 같은 말을 하지 않는다.** 강사의 다음 행동이
+ * 다르기 때문이다 — 안 돌렸으면 돌리면 되고, 실패했으면 **수업을 고쳐야** 한다.
+ * 확정된 버전은 불변이므로 실패한 버전을 "다시 통과" 시킬 방법은 없다. 고친 내용은
+ * 새 버전이고, 그 새 버전을 리허설한다. 두 경우에 같은 문구를 내면 강사는 실패한
+ * 버전을 계속 다시 돌리면서 왜 안 풀리는지 모른다.
+ *
+ * `passed` 가 아닌 **모르는 값**도 막는다. 쓰는 경로(#1186)가 나중에 상태를 늘리면
+ * 그것은 여기서 자동으로 거부 쪽에 선다 — 새 상태가 조용히 통과하는 것보다, 막히고
+ * 문구에 그 값이 그대로 보이는 쪽이 고치기 쉽다. 그래서 상태를 문구에 싣는다.
+ *
+ * 문구는 같은 핸들러의 앞선 거부들과 같은 결이다(`open a matching practice session
+ * first` · `register this student in the session console first`) — **무엇을 하면
+ * 풀리는지**가 문장 안에 있고, 기계가 읽을 구분은 `reason` 이 맡는다.
+ */
+function rehearsalBlocked(status: string) {
+  if (status === 'failed') return {
+    error: 'this version failed rehearsal; fix the lesson, freeze a new version and rehearse that one',
+    reason: 'rehearsal_failed', rehearsal: status,
+  };
+  if (status === 'not_run') return {
+    error: 'rehearse this version yourself before issuing participation codes',
+    reason: 'rehearsal_not_run', rehearsal: status,
+  };
+  return {
+    error: `this version has not passed rehearsal (${status}); rehearse it before issuing participation codes`,
+    reason: 'rehearsal_not_passed', rehearsal: status,
+  };
 }
 
 // 리허설 교환권 발급 (#1131, C-1). **Router 결정 · Jay 검토 전** — 확정 계약이 아니다.
