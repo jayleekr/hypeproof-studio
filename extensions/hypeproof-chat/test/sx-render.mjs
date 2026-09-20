@@ -36,6 +36,13 @@ export const COMPONENTS = {
   // 영역 A(SX-01~05). 호스트 브리지 없이 렌더된다 — 콜백은 props 로 주입받고
   // 모듈 최상위에서 vscode API 를 만지지 않는다.
   MissionHeader: { from: "./src/MissionHeader.tsx", exportName: "MissionHeader" },
+  // 작업 화면 본체(코치 rail)와 진입 화면. C1 이 말하는 "작업 중 화면" 은 이것이다 —
+  // 2026-09-20 평가에서 "감사기가 정작 작업 화면을 렌더하지 않는다" 로 지적됐다.
+  // 둘 다 호스트 브리지 없이 렌더된다: `src/vscode.ts` 는 모듈 최상위에서
+  // `window.acquireVsCodeApi` 를 **읽기만** 하고(window 스텁을 주면 undefined),
+  // useEffect 는 SSR 에서 돌지 않는다.
+  ChatPanel: { from: "./src/ChatPanel.tsx", exportName: "ChatPanel" },
+  StartPage: { from: "./src/StartPage.tsx", exportName: "StartPage" },
 };
 
 /**
@@ -88,6 +95,10 @@ async function loadBundle() {
     platform: "node",
     format: "cjs",
     jsx: "automatic",
+    // 컴포넌트가 끌고 오는 자산. vite 는 css 를 별도 파일로, svg 를 URL 로 다루지만
+    // 여기서는 **텍스트로 삼키면 그만**이다 — 우리가 보는 것은 렌더된 글자이지
+    // 스타일이 아니다. 이걸 주지 않으면 StartPage 가 `./start.css` 에서 멎는다.
+    loader: { ".css": "text", ".svg": "text", ".png": "dataurl" },
     define: { "process.env.NODE_ENV": '"production"' },
     write: false,
     logLevel: "silent",

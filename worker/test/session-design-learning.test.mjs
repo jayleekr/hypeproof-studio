@@ -219,6 +219,27 @@ await check('여섯 파일 모두 비어 있지 않은 learning.never 를 갖는
   }
 });
 
+// 2026-09-20 평가에서 잡힌 드리프트. 2·5주차의 미션과 목표가 보존 원문과 달랐다:
+//   2주  "시간/돈보다"        → "시간과 돈보다"
+//   5주  "10명을 만드나?"     → "열 명을 만나나?"   ← 뜻이 움직인다(획득 → 대면)
+// `never` 여섯 문장은 위 검사가 축자로 잡고 있었는데 미션·목표에는 같은 장치가
+// 없었다. 강사가 읽는 문장은 원문이 정본이므로 **문서 본문에 그대로 있는지**로
+// 판정한다. 이 검사는 다음에 누가 "다듬는" 것도 막는다.
+await check('여섯 주차의 미션·목표·금지 문장이 보존 원문에 그대로 있다 (SX-56·SX-58)', () => {
+  const source = readFileSync(new URL('../../docs/design/ui-philosophy-2026-09-18.md', import.meta.url), 'utf8');
+  // 대조군: 계측기가 무언가를 실제로 세는지. 원문에 없는 문장은 반드시 걸려야 한다.
+  assert.equal(source.includes('돈 안 쓰고 어떻게 열 명을 만나나?'), false,
+    '드리프트한 문장이 원문에 있다 — 대조군 전제가 바뀌었다');
+  for (let w = 1; w <= 6; w++) {
+    const design = fixture(w);
+    assert.ok(source.includes(design.learning.mission), `week-${w} mission 이 원문에 없다: ${design.learning.mission}`);
+    assert.ok(source.includes(design.objective), `week-${w} objective 가 원문에 없다: ${design.objective}`);
+    for (const line of design.learning.never) {
+      assert.ok(source.includes(line), `week-${w} never 가 원문에 없다: ${line}`);
+    }
+  }
+});
+
 await check('숫자 카드(metric_board)는 4·6주차에만 있다 (SX-51)', () => {
   for (let w = 1; w <= 6; w++) {
     const uses = fixture(w).steps.some(s => s.ui === 'metric_board');

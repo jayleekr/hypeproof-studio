@@ -75,6 +75,19 @@ export const NUMERIC_PATTERNS = [
   { id: "percent", label: "\\d+%", re: /\d+(?:\.\d+)?\s*%/g },
   { id: "ratio_small", label: "\\d+/7 · \\d+/6", re: /\d+(?:\.\d+)?\s*\/\s*[67](?!\d)/g },
   { id: "ratio_hundred", label: "\\d+/10 · \\d+/100", re: /\d+(?:\.\d+)?\s*\/\s*(?:100|10)(?!\d)/g },
+  // 2026-09-20 평가에서 잡힌 구멍. 위 넷은 **단위가 붙은** 수치만 본다. 그래서
+  // `레벨 3` · `Lv 3` · `★★★☆☆` · 단위 없는 맨숫자 `0.82` 가 전부 통과했다.
+  // 점수를 화면에 넣는 가장 쉬운 방법이 바로 그것들이라 규칙을 더한다.
+  { id: "level", label: "레벨 N · Lv N", re: /(?:레벨|등급|Lv\.?|LEVEL)\s*\d+/gi },
+  { id: "stars", label: "별점 ★☆", re: /[★☆✦✧]{3,}/g },
+  {
+    id: "bare_number",
+    label: "단위 없는 맨숫자",
+    // 마스킹 뒤에 남은 숫자다. 허용 수치(주차·남은 단계·날짜·시각·N건/개)는 이미
+    // 제어 문자로 덮였으므로, 여기까지 살아남은 숫자는 설명이 붙지 않은 숫자다.
+    // 한글·영문에 붙은 숫자(GPT-4, 3주차 같은 형태)는 경계 조건으로 제외한다.
+    re: /(?<![\w가-힣])\d+(?:\.\d+)?(?![\w가-힣])/g,
+  },
 ];
 
 /**
@@ -94,6 +107,26 @@ export const ALLOWED_NUMERIC = [
   { id: "time_ko", label: "시각(3시 5분)", re: /\d+\s*시간|\d+\s*시(?!\S)|\d+\s*분(?!\S)|\d+\s*초(?!\S)|\d+\s*일째/g },
   // SX-43: 관찰 패널의 "N건" 은 기록 범위 설명으로 남는다. 진행률이 아니다.
   { id: "count_ko", label: "N건 · N개", re: /\d+\s*건|\d+\s*개(?!선)|\d+\s*번째|\d+\s*명(?!\s*중)/g },
+  // 아래 둘은 `bare_number` 규칙을 넣은 **직후** 실제 ChatPanel 렌더가 걸려서 추가했다.
+  // 둘 다 점수가 아니라 제품의 정상 문자열이다. "너무 엄격한 계측기" 쪽 오류이고,
+  // 검증 문서가 양성 대조군을 핵심이라고 적은 이유가 이것이다.
+  //   1. 목록 번호 — "이번 단계 안내 · 1. 기대 조건" 의 `1.`
+  //   2. 모듈 버전 — "버전 m2026.09.20-1" 의 뒷자리 `-1`.
+  //      패턴은 짐작하지 않고 `worker/src/lib/modules.ts:146` 의 MODULE_VERSION_RE 를 읽어서 맞췄다.
+  { id: "module_version", label: "모듈 버전 m2026.09.20-1", re: /m\d{4}\.\d{2}\.\d{2}-\d{1,4}/g },
+  { id: "ordinal", label: "목록 번호 N.", re: /(?:^|[\n·]\s*)\d+\.(?=\s)/gm },
+];
+
+/**
+ * 숫자 주차(4주 가격 · 5주 GTM · 6주 지표)에서만 **추가로** 허용하는 수치(SX-51).
+ * `region: "metric"` 일 때 ALLOWED_NUMERIC 에 얹힌다. 점수·등급·별점·퍼센트는
+ * 여기 없다 — 지표 주차라고 해서 사람을 점수로 부르는 것이 허용되지는 않는다.
+ */
+export const METRIC_WEEK_NUMERIC = [
+  { id: "money", label: "금액", re: /[$₩€£]\s?\d+(?:[,.]\d+)*|\d+(?:[,.]\d+)*\s*(?:원|달러|USD|KRW)/gi },
+  { id: "people", label: "인원", re: /\d+\s*(?:명|인)(?!\s*중)/g },
+  { id: "period", label: "기간", re: /\d+\s*(?:개월|주|일|년|분기)/g },
+  { id: "ratio_metric", label: "전환·재방문 비율", re: /\d+(?:\.\d+)?\s*배/g },
 ];
 
 /** 같은 문장에 이 중 하나가 있으면 soft 규칙은 면제된다. */
@@ -168,7 +201,11 @@ export function isDenialSentence(sentence) {
  * @param {object} [opts]
  * @param {"work"|"metric"|"label-only"} [opts.region="work"]
  *        work       — 금지 라벨 + 금지 문자열 + 랭킹 + soft 낱말 + 금지 수치 전부.
- *        metric     — SX-51 이 허용하는 숫자 주차(가격·GTM·지표)의 Work canvas. 수치 규칙만 끈다.
+ *        metric     — SX-51 이 허용하는 숫자 주차(가격·GTM·지표)의 Work canvas.
+ *                     수치 규칙을 **끄지 않는다.** 2026-09-20 평가 지적(D-3): 통째로 끄면
+ *                     지표 주차에 진짜 점수 카드가 들어와도 안 잡힌다. 대신 그 주차가
+ *                     정당하게 쓰는 형태(금액·인원·기간·비율)만 허용 목록에 더하고
+ *                     점수·등급·별점·맨숫자는 그대로 잡는다.
  *        label-only — 금지 라벨만. 아직 영역 분리가 확정되지 않은 화면에 쓴다.
  * @param {number} [opts.minLength=1]
  *        이 길이 미만이면 empty_region 으로 실패한다(verification.md 규칙 4:
@@ -196,7 +233,9 @@ export function auditRegionText(text, opts = {}) {
     return { ok: false, findings, exempt, masked: [], length: source.length };
   }
 
-  const { masked, spans } = maskAllowedNumerals(source);
+  // metric 주차는 허용 수치 목록이 넓다 — 규칙을 끄는 것이 아니라 허용을 넓힌다.
+  const allow = region === "metric" ? [...ALLOWED_NUMERIC, ...METRIC_WEEK_NUMERIC] : ALLOWED_NUMERIC;
+  const { masked, spans } = maskAllowedNumerals(source, allow);
   const accepted = [];
   const overlaps = (start, end) => accepted.some((s) => start < s.end && s.start < end);
 
@@ -226,9 +265,7 @@ export function auditRegionText(text, opts = {}) {
     scan(RANK_PATTERNS, "banned_string", masked);
     scan(SOFT_STRINGS, "banned_string", source, { denialExempt: true });
   }
-  if (region === "work") {
-    scan(NUMERIC_PATTERNS, "banned_numeral", masked);
-  }
+  scan(NUMERIC_PATTERNS, "banned_numeral", masked);
 
   findings.sort((a, b) => a.index - b.index);
   return { ok: findings.length === 0, findings, exempt, masked: spans, length: source.length };

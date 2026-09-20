@@ -3,12 +3,12 @@
   "title": "5주차 · GTM",
   "audience": "국제고 2학년 · GlobalBuddy 팀",
   "duration_minutes": 120,
-  "objective": "돈 안 쓰고 어떻게 열 명을 만나나?",
+  "objective": "돈 안 쓰고 어떻게 10명을 만드나?",
   "prerequisites": "4주차 가격 가설과 응답 기록, 공유 가능한 GlobalBuddy V1",
   "starter": "globalbuddy-v1/ (4주차 사본, 원본 보존)",
   "learning": {
     "week": 5,
-    "mission": "돈 안 쓰고 어떻게 열 명을 만나나?",
+    "mission": "돈 안 쓰고 어떻게 10명을 만드나?",
     "completion": [
       { "id": "c1", "text": "경로마다 무엇이 보이면 통한 것인지 먼저 정했습니다", "event": "criterion_set" },
       { "id": "c2", "text": "실제 사람에게 체험을 요청하고 반응을 기록했습니다", "event": "external_feedback_received" },

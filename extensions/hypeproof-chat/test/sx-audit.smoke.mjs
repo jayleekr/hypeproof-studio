@@ -188,7 +188,12 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
 {
   const r = auditRegionText("2026-09-20 오후 3:05 · 12개 저장됨", { region: "work" });
   assert.equal(r.ok, true, `날짜·시각·N개 카운트가 걸렸다: ${describe(r)}`);
-  console.log("ok 양성: 날짜·시각·N개 카운트는 허용 수치다");
+  // 아래 둘은 `bare_number` 규칙 추가 직후 실제 ChatPanel 렌더에서 걸린 정상 문자열이다.
+  const ord = auditRegionText("이번 단계 안내 · 1. 기대 조건\n3주차 · Underlying Magic", { region: "work" });
+  assert.equal(ord.ok, true, `목록 번호를 수치로 잡았다 → 계측기가 너무 엄격하다: ${describe(ord)}`);
+  const ver = auditRegionText("Underlying Magic · 버전 m2026.09.20-1 · 120분", { region: "work" });
+  assert.equal(ver.ok, true, `모듈 버전을 수치로 잡았다 → 계측기가 너무 엄격하다: ${describe(ver)}`);
+  console.log("ok 양성: 날짜·시각·N개 카운트 · 목록 번호 · 모듈 버전은 허용 수치다");
 }
 
 // ─── 음성 대조군 — 나쁜 시료가 각각 실패해야 한다 (너무 관대한 계측기를 잡는다) ──
@@ -207,6 +212,13 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
     ["코호트 랭킹", "ranking"],
     ["B등급", "grade_word"],
     ["52.5 / 100", "ratio_hundred"],
+    // 2026-09-20 평가 D-3 에서 잡힌 구멍. 규칙을 더했으면 대조군도 같이 더한다 —
+    // 대조군 없는 규칙은 돌고 있는지 알 방법이 없다.
+    ["레벨 3", "level"],
+    ["Lv 7", "level"],
+    ["★★★☆☆", "stars"],
+    ["오늘의 성과 0.82", "bare_number"],
+    ["확인함 12", "bare_number"],
   ];
   for (const [sample, rule] of negatives) {
     const r = auditRegionText(sample, { region: "work" });
@@ -337,7 +349,60 @@ const describe = (r) => r.findings.map((f) => `${f.rule}:${JSON.stringify(f.matc
   }
 }
 
+// ─── 실제 작업 화면과 진입 화면을 감사한다 (2026-09-20 평가 D-1) ─────────
+//
+// 여기까지의 렌더 대조군은 `NativeObservationPanel` 하나뿐이었다. 그런데 C1 이
+// 말하는 "작업 중 화면" 의 본체는 `ChatPanel`(코치 rail)이고 홈은 그 안의
+// Mission header 다. 그 둘을 렌더하지 않으면 C1 의 통과 근거가 렌더가 아니라
+// 소스 grep 이 된다 — 조건부 분기를 놓치는 바로 그 방식이다.
+{
+  const status = rendererStatus();
+  if (!status.available) {
+    console.log("ok 화면 감사 SKIP — " + status.detail);
+  } else {
+    const { chatPanelProps } = await import("./sx-screen-fixtures.mjs");
+
+    const chat = visibleText(await renderComponent("ChatPanel", chatPanelProps()));
+    // 규칙 4 — 빈 렌더를 감사하면 무엇이든 통과한다. 무엇이 렌더됐는지 먼저 확인한다.
+    assert.ok(chat.length >= 200, `ChatPanel 렌더가 ${chat.length}자다: ${JSON.stringify(chat.slice(0, 200))}`);
+    assert.ok(chat.includes("AI가 만든 걸 내가 확인했나?"), "작업 화면에 미션 문장이 없다");
+    assert.ok(chat.includes("기대 조건"), "작업 화면에 단계 action 이 없다");
+    const chatAudit = auditRegionText(chat, { region: "work", minLength: 200 });
+    assert.equal(chatAudit.ok, true, `실제 작업 화면(ChatPanel) 이 감사에 걸렸다: ${describe(chatAudit)}`);
+
+    const start = visibleText(await renderComponent("StartPage", {}));
+    assert.ok(start.length >= 200, `StartPage 렌더가 ${start.length}자다`);
+    assert.ok(start.includes("나의 변화 기록"), "진입 화면의 변화 기록 진입이 없다");
+    const startAudit = auditRegionText(start, { region: "work", minLength: 200 });
+    assert.equal(startAudit.ok, true, `진입 화면(StartPage) 이 감사에 걸렸다: ${describe(startAudit)}`);
+
+    // 음성 대조군 — 이 두 화면의 감사가 살아 있는가. 강사가 쓴 미션에 점수를 심는다.
+    const planted = visibleText(await renderComponent("ChatPanel", chatPanelProps({
+      config: {
+        ...chatPanelProps().config,
+        profile: {
+          ...chatPanelProps().config.profile,
+          lesson: {
+            ...chatPanelProps().config.profile.lesson,
+            content: {
+              ...chatPanelProps().config.profile.lesson.content,
+              learning: {
+                ...chatPanelProps().config.profile.lesson.content.learning,
+                mission: "검증 점수 62점 · 개선 필요",
+              },
+            },
+          },
+        },
+      },
+    })));
+    const plantedAudit = auditRegionText(planted, { region: "work", minLength: 200 });
+    assert.equal(plantedAudit.ok, false, "작업 화면에 심은 점수가 통과했다 — 이 화면의 감사가 아무것도 세지 않는다");
+
+    console.log(`ok 화면 감사: ChatPanel 실제 렌더(${chat.length}자) 0건 · StartPage(${start.length}자) 0건 · 심은 점수는 잡힌다`);
+  }
+}
+
 console.log(
   "PASS sx-audit: 토큰 2종(설계 문서 대조 · start.css 별칭) · 규칙 목록 · 양성 6종(실제 출하 부정 문장 2개 포함) · " +
-    "음성 13종 · 심은 정답 6건 · 빈 영역 가드 · 출하 문자열 · 실제 컴포넌트 렌더",
+    "음성 18종 · 심은 정답 6건 · 빈 영역 가드 · 출하 문자열 · 실제 화면 3종(관찰 패널 · ChatPanel · StartPage)",
 );

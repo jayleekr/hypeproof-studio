@@ -154,4 +154,36 @@ const text = visibleText(html);
   console.log("ok 음성 대조군 4종: Primary 2개 · 미션 없음 · 수업 없음 · 심은 금지 라벨");
 }
 
+// ─── 사람이 눈으로 볼 대리물 (2026-09-20 평가 D-8) ────────────────────────
+//
+// 루브릭 C 는 "첫 화면에서 가장 큰 활자가 과제 문장인가" 를 **스크린샷으로 대리 판정**
+// 하라고 적었다. 앱 빌드는 사용자 승인 사항이라 이 세션은 스크린샷을 만들 수 없다.
+// 대신 렌더 결과를 토큰과 함께 HTML 로 떨궈 사람이 브라우저로 열어 보게 한다.
+//
+// **이것은 실기 증거가 아니다.** `docs/testing/studio-learning-experience.md`
+// §실기 증거 규칙의 세 라벨 중 `synthetic` 이다 — 합성 시료를 서버 렌더한 것이고,
+// 실제 앱의 레이아웃·폰트·VS Code 테마가 아니다. 파일 첫 줄에 그 라벨을 박는다.
+{
+  const { mkdirSync, writeFileSync } = await import("node:fs");
+  const out = new URL("../../../e2e/test-results/sx-screens/", import.meta.url);
+  mkdirSync(out, { recursive: true });
+  const tokens = readFileSync(new URL("../webview-ui/src/tokens.css", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../webview-ui/src/styles.css", import.meta.url), "utf8");
+  const page = [
+    "<!doctype html>",
+    '<html lang="ko"><head><meta charset="utf-8">',
+    "<title>SX synthetic — Mission header</title>",
+    `<style>${tokens}${styles}</style>`,
+    '<style>body{margin:0;background:var(--hp-bg);color:var(--hp-ink);font-family:Inter,-apple-system,sans-serif}',
+    ".sx-note{padding:12px;font-size:12px;color:var(--hp-muted);border-bottom:1px solid var(--hp-line)}",
+    ".sx-frame{max-width:420px;border-right:1px solid var(--hp-line)}</style></head><body>",
+    '<p class="sx-note">synthetic · 2026-09-20 · week-3.json · 서버 렌더(react-dom/server). ',
+    "실제 앱 레이아웃·폰트·VS Code 테마가 아니다. 실기 증거가 아니다.</p>",
+    `<div class="sx-frame">${html}</div>`,
+    "</body></html>",
+  ].join("");
+  writeFileSync(new URL("mission-header.html", out), page);
+  console.log(`ok 대리물: e2e/test-results/sx-screens/mission-header.html (synthetic, 실기 증거 아님)`);
+}
+
 console.log("PASS sx-mission-header: 미션이 가장 큰 활자 · Primary 1개 · 변화 기록은 아래 작은 링크 · 홈 수치 0건");

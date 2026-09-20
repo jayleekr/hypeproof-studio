@@ -3,12 +3,12 @@
   "title": "2주차 · Value Proposition",
   "audience": "국제고 2학년 · GlobalBuddy 팀",
   "duration_minutes": 120,
-  "objective": "그 사람이 지금 쓰는 시간과 돈보다 내 것이 나은가?",
+  "objective": "그 사람이 지금 쓰는 시간/돈보다 내 것이 나은가?",
   "prerequisites": "1주차 문제 문장과 인터뷰 기록 폴더",
   "starter": "globalbuddy-interviews/ (1주차 기록 사본, 원본 보존)",
   "learning": {
     "week": 2,
-    "mission": "그 사람이 지금 쓰는 시간과 돈보다 내 것이 나은가?",
+    "mission": "그 사람이 지금 쓰는 시간/돈보다 내 것이 나은가?",
     "completion": [
       { "id": "c1", "text": "지금 쓰는 대안과 그 비용을 사용자의 말로 기록했습니다", "event": "external_feedback_received" },
       { "id": "c2", "text": "인용한 말을 근거로 가치 한 줄을 정하거나 고쳤습니다", "event": "decision_revised" }
