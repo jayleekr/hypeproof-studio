@@ -22,6 +22,13 @@ export const SERVICE_EVALUATOR = 'service-anthropic';
 export const EVALUATOR_REVISION = 'service-anthropic:1';
 export const DEFAULT_EVALUATOR_MODEL = 'claude-sonnet-4-5';
 const MAX_EVENT_CHARS = 4000, MAX_EVENTS = 400;
+/**
+ * Cost guard: the most learner/AI text one evaluation may send, whatever the record's size. Without a total, 400 events ×
+ * 4000 chars would be the only bound (far beyond a context window, and an unbounded bill). A record that does not fit is
+ * evaluated on its EARLIEST events up to this budget and the draft is marked `partial · input_truncated` for the reviewer;
+ * it is never silently treated as the whole record, and never split into several calls.
+ */
+export const MAX_CATALOG_CHARS = 120_000;
 
 export interface EvaluatorConfig { id: string; model: string }
 /** null → no evaluator is configured for this Service. The caller reports that; it never substitutes an empty draft. */
@@ -54,10 +61,11 @@ export function systemPrompt(model: CapabilityModel): string {
 
 interface CatalogEntry { quote_id: string; event_id: string; quote: string; basis: boolean; actor: string; source_state: string }
 /** Decoded events of the verified input → an immutable excerpt catalog. Ids are the record's own event_id, or `L<line>` for the legacy spool. */
-export function buildCatalog(inputText: string): { catalog: CatalogEntry[]; locators: Map<string, DraftEvidence> } {
+export function buildCatalog(inputText: string): { catalog: CatalogEntry[]; locators: Map<string, DraftEvidence>; truncated: { events_total: number; events_used: number } | null } {
   // An event whose text contains something that looks like a secret is left out entirely: a scrubbed excerpt would no
   // longer be a verbatim quote of the record, and a credential is not evidence of anything.
-  const events = indexInput(inputText).filter((e) => e.text.trim() && scrubSecrets(e.text) === e.text).slice(0, MAX_EVENTS), locators = new Map<string, DraftEvidence>();
+  const all = indexInput(inputText).filter((e) => e.text.trim() && scrubSecrets(e.text) === e.text), locators = new Map<string, DraftEvidence>();
+  let budget = MAX_CATALOG_CHARS; const events = all.slice(0, MAX_EVENTS).filter((e) => { const n = Math.min(e.text.length, MAX_EVENT_CHARS); if (n > budget) { budget = 0; return false; } budget -= n; return true; });
   const batchEvents = events.map((e) => {
     const id = e.event_id ?? `L${e.line}`;
     locators.set(id, e.event_id ? { event_id: e.event_id, quote: '' } : { locator: { line: e.line, ...(e.turn_id ? { turn_id: e.turn_id } : {}) }, quote: '' });
@@ -65,7 +73,7 @@ export function buildCatalog(inputText: string): { catalog: CatalogEntry[]; loca
   });
   const meta = new Map(batchEvents.map((e) => [e.id, e]));
   const catalog = makeEvidenceCatalog({ events: batchEvents } as never).map((q) => { const e = meta.get(q.event_id)!; return { ...q, actor: e.actor, source_state: e.source_state, basis: e.actor === 'student' && e.source_state !== 'simulated' }; });
-  return { catalog, locators };
+  return { catalog, locators, truncated: events.length < all.length ? { events_total: all.length, events_used: events.length } : null };
 }
 
 function outputSchema(model: CapabilityModel, quoteIds: string[]) {
@@ -99,10 +107,10 @@ export function draftFromSelections(raw: unknown, model: CapabilityModel, job: {
 
 export type Transport = (request: Record<string, unknown>, signal: AbortSignal) => Promise<Response>;
 /** One bounded call, no tools, no automatic retry, nothing logged. Throws a short machine code on failure. */
-export async function evaluateInput(env: Env, cfg: EvaluatorConfig, model: CapabilityModel, job: { rubric: string; evaluator: string }, inputText: string, transport?: Transport): Promise<{ draft: Draft; usage: Record<string, number>; analysis_ai_model: string }> {
+export async function evaluateInput(env: Env, cfg: EvaluatorConfig, model: CapabilityModel, job: { rubric: string; evaluator: string }, inputText: string, transport?: Transport): Promise<{ draft: Draft; usage: Record<string, number>; analysis_ai_model: string; truncated: { events_total: number; events_used: number } | null }> {
   const built = buildCatalog(inputText);
   // Nothing the learner said is in the record: every capability is "not seen yet". No provider call is made for that.
-  if (!built.catalog.some((q) => q.basis)) return { draft: draftFromSelections({ findings: [], next_experiment: '' }, model, job, built), usage: {}, analysis_ai_model: 'none' };
+  if (!built.catalog.some((q) => q.basis)) return { draft: draftFromSelections({ findings: [], next_experiment: '' }, model, job, built), usage: {}, analysis_ai_model: 'none', truncated: built.truncated };
   const request = { model: cfg.model, max_tokens: 4096, stream: false, output_config: { format: { type: 'json_schema', schema: outputSchema(model, built.catalog.map((q) => q.quote_id)) } },
     system: [{ type: 'text' as const, text: systemPrompt(model) }],
     messages: [{ role: 'user' as const, content: JSON.stringify({ evidence_catalog: built.catalog.map(({ quote_id, quote, basis, actor, source_state }) => ({ quote_id, quote, basis, actor, source_state })) }) }] };
@@ -112,5 +120,5 @@ export async function evaluateInput(env: Env, cfg: EvaluatorConfig, model: Capab
   const result = (await response.json()) as { content?: Array<{ type: string; text?: string }>; usage?: Record<string, number> };
   const text = (result.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('');
   let parsed: unknown; try { parsed = JSON.parse(text.replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '')); } catch { throw Error('evaluator_output_invalid'); }
-  return { draft: draftFromSelections(parsed, model, job, built), usage: result.usage ?? {}, analysis_ai_model: cfg.model };
+  return { draft: draftFromSelections(parsed, model, job, built), usage: result.usage ?? {}, analysis_ai_model: cfg.model, truncated: built.truncated };
 }

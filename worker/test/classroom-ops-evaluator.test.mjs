@@ -7,7 +7,7 @@ import test from 'node:test';
 import { localOps } from './harness/classroom-ops.mjs';
 import { CANDIDATE_CAPABILITY_V1 } from '../src/lib/measurement-core/index.ts';
 const { setEvaluatorTransport } = await import('../src/routes/classroom-reports.ts');
-const { rubricVersion, buildCatalog, draftFromSelections, EVALUATOR_REVISION, systemPrompt } = await import('../src/lib/classroom-evaluator.ts');
+const { rubricVersion, buildCatalog, draftFromSelections, EVALUATOR_REVISION, systemPrompt, MAX_CATALOG_CHARS } = await import('../src/lib/classroom-evaluator.ts');
 
 const seats = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }];
 const line = (o) => JSON.stringify({ schema_version: 1, ts: new Date().toISOString(), ...o });
@@ -200,4 +200,14 @@ test('late result: the removal itself fails — the request still answers, a con
   const note = f.db.prepare("SELECT detail_json FROM ops_audit WHERE action='report_draft_discard_failed'").get(); assert.ok(note && !note.detail_json.includes('예약'), 'the note holds ids only');
   f.env.HPS_TRACES.delete = del; const again = await f.advance(); assert.equal(again.json.step.state, 'partial');
   assert.deepEqual(reportObjects(f, 'student-a').map((k) => k.slice(-13)), ['draft.g2.json'], 'only the committed generation is left');
+});
+
+test('cost guard: one evaluation never sends more than the character budget; an oversized record is evaluated on its earliest events and the draft says so', async (t) => {
+  const big = Array.from({ length: 80 }, (_, i) => line({ type: 'prompt', turn_id: 't' + i, seq: i + 1, text: `질문 ${i} ` + '가'.repeat(3000) })).join('\n') + '\n';
+  const built = buildCatalog(big); assert.ok(built.truncated && built.truncated.events_total === 80 && built.truncated.events_used < 80); assert.ok(built.catalog.reduce((n, q) => n + q.quote.length, 0) <= MAX_CATALOG_CHARS);
+  assert.equal(buildCatalog(record).truncated, null, 'positive control: an ordinary record is read whole');
+  const f = await fixtureWithConns(t, [big, record]), calls = []; setEvaluatorTransport(careful(calls)); let more = true; for (let i = 0; more && i < 6; i++) more = (await f.advance()).json.more;
+  assert.ok(JSON.stringify(calls[0].messages).length < MAX_CATALOG_CHARS * 1.6, 'the request itself stays inside the budget (plus JSON framing)');
+  const jobs = (await f.request(f.B + '/reports')).json.jobs; assert.deepEqual(jobs.map((j) => [j.student_id, j.state, j.reason]), [['student-a', 'partial', 'input_truncated'], ['student-b', 'partial', 'input_sequence_unavailable']]);
+  const noted = f.db.prepare("SELECT detail_json FROM ops_audit WHERE action='report_evaluated' ORDER BY id LIMIT 1").get().detail_json; assert.deepEqual(JSON.parse(noted).input_truncated, built.truncated);
 });
