@@ -211,3 +211,16 @@ test('cost guard: one evaluation never sends more than the character budget; an 
   const jobs = (await f.request(f.B + '/reports')).json.jobs; assert.deepEqual(jobs.map((j) => [j.student_id, j.state, j.reason]), [['student-a', 'partial', 'input_truncated'], ['student-b', 'partial', 'input_sequence_unavailable']]);
   const noted = f.db.prepare("SELECT detail_json FROM ops_audit WHERE action='report_evaluated' ORDER BY id LIMIT 1").get().detail_json; assert.deepEqual(JSON.parse(noted).input_truncated, built.truncated);
 });
+
+// Found by the trial grader's negative control (2026-09-20): score KEYS were refused, score PROSE was stored.
+test('an evaluator that grades in prose is quarantined; numbers that are part of what the learner did are not grades', async (t) => {
+  const { GRADE_LANGUAGE } = await import('../src/lib/classroom-report.ts');
+  for (const bad of ['확인 조건을 정함 (85점)', '상위 10% 수준', '반에서 3등', '백분위가 높음', 'B+ 등급', '레벨 3에 해당', 'AI 의존도 70', '7/10 정도의 완성도', '2등급']) assert.ok(GRADE_LANGUAGE.test(bad), 'negative control: ' + bad);
+  for (const fine of ['390px 화면에서 버튼이 가려지는지 확인함', '예약 단계를 5번에서 3번으로 줄임', '링크 12개를 하나씩 점검함', '1번 시안 대신 2번 시안을 고름', '10분 뒤 다시 확인하기로 함']) assert.ok(!GRADE_LANGUAGE.test(fine), 'positive control: ' + fine);
+  const f = await fixtureWithConns(t, [record, record]); let n = 0;
+  setEvaluatorTransport(async (req) => { const own = JSON.parse(req.messages[0].content).evidence_catalog.find((q) => q.basis), claim = n++ === 0 ? '확인 조건을 먼저 정함 (85점, 상위 10%)' : '390px 화면에서 확인할 조건을 먼저 정함';
+    return Response.json({ content: [{ type: 'text', text: JSON.stringify({ findings: [{ capability: 'FRAMING', status: 'observed', claim, evidence: [{ quote_id: own.quote_id }], assistance: 'unknown' }], next_experiment: '' }) }] }); });
+  let more = true; for (let i = 0; more && i < 6; i++) more = (await f.advance()).json.more;
+  const jobs = (await f.request(f.B + '/reports')).json.jobs; assert.deepEqual(jobs.map((j) => [j.student_id, j.state, j.reason, j.draft_digest === '']), [['student-a', 'quarantined', 'grade_language', true], ['student-b', 'partial', 'input_sequence_unavailable', false]]);
+  assert.deepEqual(reportObjects(f, 'student-a'), [], 'a graded draft is never stored, so it can never be approved or sent');
+});
