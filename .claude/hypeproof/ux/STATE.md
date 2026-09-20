@@ -6,7 +6,7 @@
 ## RESUME HERE
 
 **2026-09-20 — P0 다섯 task 전부 구현 완료, 평가 1회, 수정 1회. 머지 안 함.**
-브랜치 `feat/sx-p0-curriculum-first`, `origin/main ce95747` 기준 커밋 9개.
+브랜치 `feat/sx-p0-curriculum-first`, `origin/main ce95747` 기준 커밋 12개. **PR #1170 열림(머지 안 함).**
 machine_gate 는 전부 초록이고 orchestrator 와 평가자가 **각각 따로** 다시 돌렸다.
 다음은 아래 순서로 읽으면 된다: **단계별 게이트** → **평가** → **사람에게 묻는 것** →
 **요구 개정 제안** → **다음 세션이 집을 첫 task**.
@@ -117,7 +117,7 @@ acceptance 열은 평가 서브에이전트의 판정이 들어온 뒤 채운다
 | P0 | P0-D Coach rail·코치 계약 | **초록** worker tsc 0 · worker npm test 0 · ext npm test 0 | **초록** 구현 전 4 passed / 12 failed(P0-A 적용본 기준), 누출을 실제 조립 프롬프트에서 측정 | 커밋 `a891a01` + `2a841e0` | 1 |
 | P0 | P0-E assetStatusBar 제거 | **초록** ext npm test 0 · `! grep -rn '7자산' src webview-ui/src` 0건 | **초록** 부재 증명 + 음성 대조군 3건 | 커밋 `2afca8b` | 1 |
 | P0 | **P0 평가** | — | — | **FAIL 75/100, CRITICAL 0.** 판정서 `judge-P0-2026-09-20.md`. 실제 결함 3건(D-1·D-2·D-3)은 `115a746` 에서 고쳤다. 나머지 감점은 대부분 `spec`(아래) | 1 |
-| P0 | P0-PR | 대기 | | 수정 뒤 재평가 → PR | 0 |
+| P0 | P0-PR | **초록** inspect exit 0, blockers [] | — | **PR #1170 열림, 머지 안 함** | 1 |
 | P1 | P1-A 이벤트·필드 확장 | NOT RUN | | | | 0 |
 | P1 | P1-B Evidence drawer·기대 조건·완료 게이트 | NOT RUN | | | | 0 |
 | P1 | P1-C 재확인 게이트·변경 전후 | NOT RUN | | | | 0 |
@@ -130,7 +130,38 @@ acceptance 열은 평가 서브에이전트의 판정이 들어온 뒤 채운다
 
 ## 열린 PR
 
-(없음)
+**[#1170 feat(sx): 학생 화면의 주인공을 현재 과제로 바꾼다 — 학습 경험 우선 P0](https://github.com/jayleekr/hypeproof-studio/pull/1170)**
+브랜치 `feat/sx-p0-curriculum-first` → `main`. 66 파일, +6412 / −269.
+**머지하지 않았다.** auto-merge 꺼짐, draft 아님, `mergeable: MERGEABLE`.
+리뷰어는 `pr.py` 정책대로 요청됐다(작성자 제외 7명).
+
+`hype-pr` 절차를 그대로 탔다: `inspect` → assessment 직접 작성 → `prepare` → `create --apply`.
+`gh pr create` 로 우회하지 않았다. inspect 는 blockers `[]`, existing_debt 0.
+
+assessment 에서 판정한 것(17 노드):
+- SX 사슬 5개(`ST-INT-SX`·`ST-REQ-SX`·`ST-DES-SX`·`ST-TEST-SX`·`ST-IMP-SX-P0`) → satisfied
+- 공유 파일로 걸린 기존 노드 중 실제 영향이 있는 것(`ST-IMP-START`·`ST-IMP-UNIFIED-ENTRY`·
+  `ST-IMP-ACTIVITY-BINDING`·`ST-IMP-LOCAL-REVIEW`·`ST-TEST-LOCAL-REVIEW`) → satisfied,
+  각각 무엇을 직접 읽어 확인했는지 적었다
+- 음성·실기 검증 노드 7개 → no-impact
+- validation 10행: 게이트 9개 pass, Electron e2e·실기·사람 판정은 `not-applicable` 로
+  적고 왜 실행할 수 없는지 밝혔다(앱 빌드는 사용자 승인 사항)
+
+**머지 전에 할 일**: 이슈를 붙인다(이 브랜치는 이슈 없이 야간 세션이 열었다).
+PR 본문 첫 줄에 그 안내가 주석으로 있다.
+
+### PR 을 쓰다가 잡은 것
+
+`ST-IMP-LOCAL-REVIEW` 의 영향을 판정하려고 바꾼 문자열을 저장소 전체에서 **세어 봤더니**
+`e2e/local-review/mac.mjs` 가 `'내 작업 검토'` 버튼과 `h1 === "My task reviews"` 를
+가리키고 있었다. P0-C 가 둘 다 "나의 변화 기록" 으로 바꿨으므로 그 하네스는 지금
+상태로는 버튼을 못 찾고 멎는다. 세 줄을 따라 고쳤다(`9f227cc`) — 단언을 약하게 한 것이
+아니라 같은 세기로 같은 것을 가리키게 했다. 같은 검사에서 `e2e/lesson-studio/*.mjs` 의
+`.studio-primary` 도 봤는데 그쪽은 **연결된 수업 화면**의 버튼이라 이번 진입 선택지
+변경과 무관했다 — 건드리지 않았다.
+
+assessment 를 쓰지 않았으면 다음에 Jay 가 `e2e/local-review` 를 돌렸을 때 제품 결함처럼
+보이는 하네스 고장을 만났을 것이다.
 
 ## 평가 (구현자와 다른 세션)
 
