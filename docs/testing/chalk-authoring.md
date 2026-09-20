@@ -144,3 +144,32 @@ denial with edit preservation, and the negative path where clearing a visible se
 removes the hidden target and blocks create/save until the setting is reselected without
 discarding curriculum edits. It also checks no credential storage and 390/1280px layout.
 This is local evidence; production deployment and live classroom behavior are separate.
+
+## 역할 집행 전수 기록 (#1185, T-01 / T-21 보강)
+
+`worker/test/authoring-role-enforcement.test.mjs`. T-01 은 그동안 `authoring.test.mjs`
+가 **고른 몇 경로**에서 강사 A/B·학생을 확인하는 형태였다. 2026-09-21 A안으로 Studio 한
+앱 안에 강사 면과 학생 면이 공존하게 되면서, "고른 몇 경로"는 더 이상 충분하지 않다 —
+화면을 가리는 것과 서버가 막는 것이 갈리는 자리이기 때문이다. 이 시험은 경로를
+**살아 있는 Hono 라우터에서 읽어** 전수로 돌린다(새 경로는 다음 실행부터 자동 편입).
+
+측정(로컬, 2026-09-21):
+
+- 저작 핸들러 **7개** 전부가 `authenticate`(`authorizeIssuerForCohort`) 아래 등록돼 있다.
+- `admin.use("*")` 가 Bearer 만 보고 통과시키는 경로(`isIssuerAllowedEndpoint`) **24개** ×
+  자격 6종(없음·형식오류·위조서명·만료·학생·타코호트) = **144회** 호출, 전부 401/403.
+  본문 검증이 먼저 끝나 역할 판정에 **도달하지 못한** 400 도 구멍으로 센다.
+- 거부 모양: 없음·형식오류·서명불일치·만료 = 401 / 학생·스코프 밖 = 403.
+  학생 토큰이 403 인 것은 의도다 — 토큰은 진짜이고 **역할이 아닌** 것이다.
+- 위조 `cf-access-authenticated-user-email` 헤더 단독으로는 저작 7개 경로 전부 401.
+  운영자 surface 는 설계대로 그 헤더로 열리며, 프로덕션 안전성은 코드가 아니라 엣지가
+  헤더를 벗기는 데서 온다([HANDOFF §3](../plan/HANDOFF.md) 가 실측해 둔 사실). 저작 경로는
+  그 가정 위에 서 있지 않다는 것이 여기서 잠긴 계약이다.
+
+계측기 검증: 결함 4종(authenticate 등록 누락 · role 검사 제거 · 이 시험이 모르는 param 을
+쓰는 새 경로 · authenticate 가 cf-access 를 신뢰)을 심어 각각 해당 단언이 잡는 것을 확인했다.
+양성 대조군(정상 강사 자격은 통과해 404/200 에 도달)과 음성 대조군을 시험 안에 둔다.
+
+실행 환경: in-process(실제 Service 라우팅 + 서명 토큰) **및** 같은 브랜치의 로컬
+`wrangler dev`(127.0.0.1:8792, 로컬 KV/D1) 에 실제 HTTP 로 전수 호출. 두 경로의 판정이
+같았다. **프로덕션 검증도, 실기기 App 검증도 아니다** — 이 슬라이스는 Service 판정만 다룬다.
