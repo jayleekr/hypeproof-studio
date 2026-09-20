@@ -2376,6 +2376,48 @@
           "path": "extensions/hypeproof-chat/webview-ui/src/evidenceDrawerLogic.ts"
         }
       ]
+    },
+    {
+      "id": "ST-TEST-CHALK-SURFACE",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/authoring-access.smoke.mjs"
+        },
+        {
+          "path": "e2e/chalk-surface/run.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-SURFACE",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-TEST-CHALK-SURFACE"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/authoringAccess.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/tokenPayload.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chalkSurface.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chalkSurfaceHelpers.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/chatPanelHelpers.ts"
+        }
+      ]
     }
   ]
 }
