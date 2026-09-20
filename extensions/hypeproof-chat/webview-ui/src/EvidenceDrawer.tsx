@@ -3,13 +3,17 @@ import {
   EVIDENCE_TYPE_LABELS,
   PROVENANCE_FIELDS,
   SOURCE_KIND_LABELS,
+  AMBER_STATES,
+  SOURCE_STATE_LABELS,
   UNRECORDED,
   beforeAfterOf,
   decisionReason,
   filterBySourceKind,
   groupByEvidenceType,
+  partitionBySourceState,
   provenanceLine,
   shortRevision,
+  sourceStateLabel,
   type EvidenceRowView,
 } from "./evidenceDrawerLogic";
 import type { SourceKind } from "../../../../worker/src/lib/measurement-core/learning-events.ts";
@@ -48,19 +52,15 @@ export interface EvidenceDrawerProps {
   pendingDecision?: { from: string; to: string; evidenceRefs: string[] } | null;
 }
 
-const SOURCE_STATE_LABELS: Record<string, string> = {
-  real: "실제로 있었던 일",
-  simulated: "가상으로 해 본 것",
-  self_reported: "내가 그렇다고 적은 것",
-  unverified: "아직 확인 안 됨",
-};
-
 export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, pendingDecision = null }: EvidenceDrawerProps) {
   const [criterion, setCriterion] = useState("");
   const [reason, setReason] = useState("");
   const [quote, setQuote] = useState("");
   const [sourceKind, setSourceKind] = useState<SourceKind>("interview");
   const [provenance, setProvenance] = useState<{ who: string; when: string; where: string }>({ who: "", when: "", where: "" });
+  // SX-46 — 기본값은 `unverified` 다. 학생이 고르기 전에 "실제로 있었던 일" 로
+  // 시작하면, 아무것도 안 고른 기록이 전부 실적이 된다.
+  const [sourceState, setSourceState] = useState<string>("unverified");
   const [filter, setFilter] = useState<SourceKind | null>(null);
 
   const visible = filterBySourceKind(rows, filter);
@@ -173,8 +173,8 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
               when: provenance.when.trim() || UNRECORDED,
               where: provenance.where.trim() || UNRECORDED,
             },
-            // 학생이 고르기 전까지 채우지 않는다. `real` 을 기본으로 넣지 않는다(SX-46).
-            source_state: "unverified",
+            // 학생이 고른 값 그대로. `real` 을 기본으로 채우지 않는다(SX-46).
+            source_state: sourceState,
           });
           setQuote("");
           setProvenance({ who: "", when: "", where: "" });
@@ -199,6 +199,17 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
             />
           </label>
         ))}
+        <label htmlFor="hp-source-state">이건 실제로 있었던 일인가요</label>
+        <select id="hp-source-state" value={sourceState} onChange={(e) => setSourceState(e.target.value)}>
+          {Object.keys(SOURCE_STATE_LABELS).map((state) => (
+            <option key={state} value={state}>{SOURCE_STATE_LABELS[state]}</option>
+          ))}
+        </select>
+        {sourceState === "real" && (
+          // SX-46 부정 조건 — 출처 없이 "실제" 는 저장되지 않는다. 눌러 보고 나서
+          // 거절당하는 것보다 누르기 전에 말해 주는 편이 낫다.
+          <p className="hp-evidence-hint">"실제로 있었던 일" 로 남기려면 누가·언제·어디서를 적어 주세요.</p>
+        )}
         <button type="submit" disabled={!quote.trim()}>들은 말 남기기</button>
       </form>
 
@@ -219,28 +230,51 @@ export function EvidenceDrawer({ open, rows, verification, onSubmit, onToggle, p
       {groups.length === 0 ? (
         <p className="hp-evidence-empty">아직 남긴 근거가 없어요. 위에 한 줄만 적어도 여기 쌓입니다.</p>
       ) : (
-        groups.map((group) => (
-          <section key={group.type ?? "untyped"} className="hp-evidence-group">
-            <h4>{group.label}</h4>
-            <ol>
-              {group.rows.map((row) => (
-                <li key={row.id} className="hp-evidence-row">
-                  <p className="hp-evidence-text">
-                    {row.evidence_type === "decision" ? decisionReason(row) : row.text}
-                  </p>
-                  <p className="hp-evidence-meta">
-                    <span>{SOURCE_KIND_LABELS[row.source_kind] ?? SOURCE_KIND_LABELS.none}</span>
-                    <span>{provenanceLine(row)}</span>
-                    <span>{SOURCE_STATE_LABELS[row.source_state] ?? SOURCE_STATE_LABELS.unverified}</span>
-                  </p>
-                  {row.adopted_from && <p className="hp-evidence-adopted">코치가 제안한 문장을 받아서 적었어요</p>}
-                </li>
-              ))}
-            </ol>
-          </section>
-        ))
+        groups.map((group) => {
+          // SX-46 — 같은 종류 안에서도 **실제로 있었던 일**과 그 밖을 섞지 않는다.
+          // 4주차 가짜 결제가 매출로 읽히는 것이 이 구분이 막으려는 것이다.
+          const { real, aside } = partitionBySourceState(group.rows);
+          return (
+            <section key={group.type ?? "untyped"} className="hp-evidence-group">
+              <h4>{group.label}</h4>
+              {real.length > 0 && <ol>{real.map(renderRow)}</ol>}
+              {aside.length > 0 && (
+                <div className="hp-evidence-aside">
+                  <h5>아직 실제로 확인되지 않은 것</h5>
+                  <ol>{aside.map(renderRow)}</ol>
+                </div>
+              )}
+            </section>
+          );
+        })
       )}
     </details>
+  );
+}
+
+/**
+ * 근거 한 줄. 실제 칸과 그 밖 칸이 **같은 함수**로 그려진다 — 두 벌로 쓰면 한쪽에만
+ * 라벨을 빠뜨리게 되고, 그것이 SX-21 이 금지하는 "라벨 없는 외부 반응" 이다.
+ */
+function renderRow(row: EvidenceRowView) {
+  const amber = AMBER_STATES.includes(row.source_state);
+  return (
+    <li
+      key={row.id}
+      className={amber ? "hp-evidence-row hp-amber" : "hp-evidence-row"}
+      // 색뿐이면 색맹인 학생과 흑백 인쇄에서 구분이 사라진다. 마크업에도 남긴다.
+      data-source-state={row.source_state}
+    >
+      <p className="hp-evidence-text">
+        {row.evidence_type === "decision" ? decisionReason(row) : row.text}
+      </p>
+      <p className="hp-evidence-meta">
+        <span>{SOURCE_KIND_LABELS[row.source_kind] ?? SOURCE_KIND_LABELS.none}</span>
+        <span>{provenanceLine(row)}</span>
+        <span className="hp-evidence-state">{sourceStateLabel(row.source_state)}</span>
+      </p>
+      {row.adopted_from && <p className="hp-evidence-adopted">코치가 제안한 문장을 받아서 적었어요</p>}
+    </li>
   );
 }
 

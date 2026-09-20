@@ -299,5 +299,23 @@ export function learningEventRequest(
   if (Array.isArray(draft.evidence_refs) && draft.evidence_refs.length === 0) {
     return { ok: false, code: "missing_evidence_refs" };
   }
+  // SX-46 부정 조건 — `real` 은 호스트가 혼자 쓸 수 있는 낱말이 아니다. 출처가
+  // 있거나 실행된 결과가 묶여 있어야 한다. 검증기도 같은 규칙으로 거절하지만
+  // (`missing_provenance`), 저장하고 나서 다음 읽기에 터지게 두면 학생이 적은 것이
+  // 통째로 사라진다. 만드는 자리에서 이름을 붙여 막는다.
+  if (draft.source_state === "real" && !hasProvenance(draft) && draft.result_ref === undefined) {
+    return { ok: false, code: "missing_provenance" };
+  }
   return { ok: true, event: draft };
+}
+
+/** 세 칸이 모두 실제로 적혀 있는가. `미기록` 은 적은 것이 아니다(SX-20). */
+function hasProvenance(draft: Record<string, unknown>): boolean {
+  const p = draft.provenance;
+  if (typeof p !== "object" || p === null) return false;
+  const fields = p as Record<string, unknown>;
+  return ["who", "when", "where"].some((k) => {
+    const v = fields[k];
+    return typeof v === "string" && v.trim().length > 0 && v.trim() !== "미기록";
+  });
 }

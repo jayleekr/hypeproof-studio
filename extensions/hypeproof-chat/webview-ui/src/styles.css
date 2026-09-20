@@ -1366,3 +1366,12 @@ html, body, #root {
   white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px;
 }
 .hp-evidence-compare small { color: var(--hp-muted); font-size: 11px; }
+
+/* SX-21 (P1-D) — real / simulated 라벨.
+   Amber 는 **혼동 가능한 상태에만**. 색은 보조이고, 문구(`sourceStateLabel`)와
+   `data-source-state` 가 본체다 — 색맹인 학생과 흑백 인쇄에서도 갈라져야 한다. */
+.hp-evidence-aside { margin: 8px 0 0; padding: 8px 0 0; border-top: 1px dashed var(--hp-line); }
+.hp-evidence-aside h5 { margin: 0 0 6px; font-size: 12px; color: var(--hp-muted); font-weight: 600; }
+.hp-evidence-row.hp-amber { border-left: 3px solid var(--hp-warn); padding-left: 8px; }
+.hp-evidence-row.hp-amber .hp-evidence-state { color: var(--hp-warn); }
+.hp-evidence-hint { margin: 0; font-size: 12px; color: var(--hp-muted); }

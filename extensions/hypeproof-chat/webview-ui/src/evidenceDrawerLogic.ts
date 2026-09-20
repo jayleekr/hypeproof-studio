@@ -259,3 +259,60 @@ export function beforeAfterOf(rows: readonly EvidenceRowView[]): BeforeAfterPair
 
 /** 화면에 쓰는 개정본 표시. 64자 16진수는 학생에게 아무 의미가 없다. */
 export const shortRevision = (sha256: string) => String(sha256).slice(0, 7);
+
+// ── SX-21 · SX-46 real / simulated 라벨 ──────────────────────────────────────
+
+/**
+ * 네 상태의 **하나뿐인** 어휘 (SX-21).
+ *
+ * 데이터의 `source_state` 와 화면 문구가 같은 곳에서 나온다. 화면 쪽에 사본을 두면
+ * 값이 하나 늘었을 때 라벨 없는 상태가 생기고, 그것이 SX-21 이 금지하는
+ * "라벨 없는 외부 반응" 이다. 검사가 이 표의 키와 코어 enum 이 정확히 같은지를 센다.
+ *
+ * **색이 아니라 문구로 구분한다.** 색맹인 학생과 흑백 인쇄에서도 실제와 가상이
+ * 갈라져야 한다.
+ */
+export const SOURCE_STATE_LABELS: Record<string, string> = {
+  real: "실제로 있었던 일",
+  simulated: "가상으로 해 본 것",
+  self_reported: "내가 그렇다고 적은 것",
+  unverified: "아직 확인 전",
+};
+
+/**
+ * Amber 를 붙이는 상태 (SX-21 "Amber는 혼동 가능 상태에만 쓴다").
+ *
+ * 가상만이다. 실제에까지 경고를 붙이면 경고가 배경이 되고, 정작 헷갈릴 자리에서
+ * 아무도 보지 않게 된다.
+ */
+export const AMBER_STATES: readonly string[] = ["simulated"];
+
+/**
+ * 라벨 한 줄. 모르는 값과 빈 값은 **`unverified`** 로 읽는다.
+ *
+ * 절대 `real` 로 떨어지지 않는다 — 모르는 것을 "실제로 있었던 일" 로 보여 주는 것이
+ * 이 화면이 할 수 있는 가장 나쁜 실수다(SX-46).
+ */
+export function sourceStateLabel(state: unknown): string {
+  const key = typeof state === "string" ? state : "";
+  return SOURCE_STATE_LABELS[key] ?? SOURCE_STATE_LABELS.unverified!;
+}
+
+/**
+ * 실제 / 그 밖 (SX-46).
+ *
+ * `simulated`·`self_reported`·`unverified` 는 실제 칸에 섞이지 않는다. 4주차 가짜
+ * 결제가 매출로 읽히는 것이 이 함수가 막으려는 것이고, 섞이면 학생은 자기가 만든
+ * 숫자를 세상이 준 답으로 착각한다.
+ *
+ * 개수를 세서 돌려주지 않는다. 세는 순간 "반응 N건" 이 생기고 그것은 곧 점수다.
+ */
+export function partitionBySourceState(rows: readonly EvidenceRowView[]): {
+  real: EvidenceRowView[];
+  aside: EvidenceRowView[];
+} {
+  const real: EvidenceRowView[] = [];
+  const aside: EvidenceRowView[] = [];
+  for (const row of rows) (row.source_state === "real" ? real : aside).push(row);
+  return { real, aside };
+}
