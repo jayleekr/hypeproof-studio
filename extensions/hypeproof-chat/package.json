@@ -143,6 +143,14 @@
       {
         "command": "hypeproof-chat.chalk.openWeb",
         "title": "HypeProof: Chalk 웹에서 확인"
+      },
+      {
+        "command": "hypeproof-chat.chalk.startRehearsal",
+        "title": "HypeProof: 학생 조건으로 리허설"
+      },
+      {
+        "command": "hypeproof-chat.chalk.endRehearsal",
+        "title": "HypeProof: 리허설 끝내기"
       }
     ],
     "menus": {
@@ -198,6 +206,14 @@
         {
           "command": "hypeproof-chat.chalk.openWeb",
           "when": "hypeproof-chat.canAuthor"
+        },
+        {
+          "command": "hypeproof-chat.chalk.startRehearsal",
+          "when": "hypeproof-chat.canAuthor"
+        },
+        {
+          "command": "hypeproof-chat.chalk.endRehearsal",
+          "when": "hypeproof-chat.rehearsing"
         }
       ]
     },

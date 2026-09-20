@@ -2390,6 +2390,15 @@
         },
         {
           "path": "e2e/chalk-surface/run.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/rehearsal-session.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/rehearsal-entry.smoke.mjs"
+        },
+        {
+          "path": "e2e/rehearsal-surface/run.mjs"
         }
       ]
     },
@@ -2416,6 +2425,18 @@
         },
         {
           "path": "extensions/hypeproof-chat/src/chatPanelHelpers.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/rehearsalSession.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/rehearsalSessionHelpers.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/rehearsalEntryHelpers.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/startPage.ts"
         }
       ]
     }

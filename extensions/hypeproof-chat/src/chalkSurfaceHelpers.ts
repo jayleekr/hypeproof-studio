@@ -25,6 +25,13 @@ export interface ChalkAction {
 /** Order is the order a 강사 does them. */
 export const CHALK_ACTIONS: readonly ChalkAction[] = [
   {
+    // #1205 — 강사가 리허설을 시작할 자리. 데모 다섯 칸 중 4번.
+    label: "학생 조건으로 리허설",
+    detail: "고정된 버전을 학생처럼 돌려 봅니다 — 끝나면 돌아옵니다",
+    icon: "play-circle",
+    command: "hypeproof-chat.chalk.startRehearsal",
+  },
+  {
     label: "수업 지도안 열기",
     detail: "마크다운 파일로 엽니다 — 없으면 만듭니다",
     icon: "notebook",

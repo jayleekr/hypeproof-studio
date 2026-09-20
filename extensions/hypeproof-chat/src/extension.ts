@@ -25,6 +25,7 @@ import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
 import { runMintStudentToken, ISSUER_TOKEN_KEY } from "./mintStudentToken";
 import { registerChalkSurface } from "./chalkSurface.ts";
+import { registerRehearsalSession } from "./rehearsalSession.ts";
 import {
   scheduleUpdateChecks,
   checkForUpdates,
@@ -174,13 +175,26 @@ export async function activate(context: vscode.ExtensionContext) {
   // already in, gated by the `hypeproof-chat.canAuthor` context key. The
   // student path is untouched: with no issuer token the key stays false and
   // the manifest's `when` leaves the view out of the container entirely.
+  const proxyUrlOf = () =>
+    vscode.workspace
+      .getConfiguration("hypeproofChat")
+      .get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
   const chalkSurface = registerChalkSurface({
     context,
     participantToken: () => context.secrets.get(TOKEN_KEY),
-    proxyUrl: () =>
-      vscode.workspace
-        .getConfiguration("hypeproofChat")
-        .get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
+    proxyUrl: proxyUrlOf,
+  });
+
+  // #1205 — 강사가 학생 조건으로 들어가고 돌아오는 자리. 면에서 시작한다.
+  // 자격은 이 모듈이 만들지 않는다: 좌석 토큰을 기존 참여 자격 자리에 앉히면
+  // 채팅·도구 경로가 그것을 읽어 간다. issuer 는 다른 키에 있고 그 경로는
+  // 그 키를 읽지 않는다 — 그것이 "issuer 를 안 싣는다" 의 근거다.
+  registerRehearsalSession({
+    context,
+    startPage,
+    proxyUrl: proxyUrlOf,
+    currentToken: () => context.secrets.get(TOKEN_KEY),
+    onStateChange: () => { void chalkSurface.sync(); },
   });
   // kids-quest — skeleton round result → next-turn context for the coach.
   context.subscriptions.push(preview.onResult((r) => provider.attachQuestResult(r)));

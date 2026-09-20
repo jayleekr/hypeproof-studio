@@ -87,6 +87,23 @@ export class StartPage {
     await this.panel?.webview.postMessage({ type: "startState", state });
   }
 
+  /**
+   * #1205 — 강사가 Chalk 면에서 리허설을 시작할 때 쓰는 진입구.
+   *
+   * 학생이 코드를 붙여 넣는 경로와 **같은 경로**를 탄다. 리허설 전용 진입을 따로
+   * 만들면 워크스페이스 준비·롤백·프로필 검증이 두 벌이 되고 둘이 갈린다 —
+   * `RUN-01` 이 요구하는 "학생 조건" 은 그 경로를 그대로 지나가는 것이기도 하다.
+   *
+   * 시작 화면을 띄운 뒤 connect → begin 을 그대로 부른다. 강사는 **어느 수업이
+   * 열리는지 보고 나서** 진행한다(후보 미리보기가 그대로 동작한다).
+   */
+  async enterWithToken(token: string): Promise<void> {
+    await this.show();
+    await this.handle({ type: "connectCourse", token } as StartRequest);
+    if (!this.candidate) return; // connect 가 거절했다 — 오류는 화면에 이미 떠 있다
+    await this.handle({ type: "beginCourse" } as StartRequest);
+  }
+
   private async handle(msg: StartRequest): Promise<void> {
     if (!msg || typeof msg !== "object") return;
     if (msg.type === "openLocalReview") { await vscode.commands.executeCommand("hypeproof-chat.localReview"); return; }

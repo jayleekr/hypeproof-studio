@@ -23,7 +23,8 @@
     "test:voice:lifecycle": "node voice-conversation/probe-lifecycle.mjs",
     "test:voice:popup": "node voice-conversation/popup-browser.mjs",
     "test:chalk-simple": "node --experimental-strip-types --experimental-sqlite chalk-authoring/simple.mjs",
-    "test:chalk-surface": "node chalk-surface/run.mjs"
+    "test:chalk-surface": "node chalk-surface/run.mjs",
+    "test:rehearsal-surface": "node rehearsal-surface/run.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

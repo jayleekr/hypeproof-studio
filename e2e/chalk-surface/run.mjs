@@ -159,34 +159,103 @@ async function containerMounted(win) {
     [...document.querySelectorAll(".pane-header")].some((h) => /Chat/i.test(h.innerText)));
 }
 
-/** Every command the palette offers under "HypeProof". */
+/**
+ * Every command the palette offers under "HypeProof" — ALL of them.
+ *
+ * Two instrument traps live here, both of which report a shorter list than
+ * reality and therefore fail toward "pass":
+ *
+ * 1. `state: "visible"`, not the default "attached". VS Code leaves the widget
+ *    in the DOM with display:none after it closes, so an attached-only wait
+ *    returns instantly against a CLOSED palette and the rows read back are the
+ *    previous invocation's.
+ * 2. The list is **virtualized** — `querySelectorAll` returns only the rendered
+ *    rows. Measured on this app: 23 commands exist for a student window and 17
+ *    render. The first version of this file scraped the DOM, saw 17, and called
+ *    it the whole list; the absence assertion below was then made against a
+ *    truncated view. It happened to be true (re-verified exhaustively), but the
+ *    evidence did not establish it. #1205 is where this surfaced: a genuinely
+ *    registered command was reported "not in the palette".
+ *
+ * So: read `aria-setsize` for the real total and walk it with ArrowDown. The
+ * focused row is always rendered, virtualization or not.
+ */
 async function paletteCommands(win) {
   const tb = win.locator(".monaco-workbench .part.titlebar").first();
   if (await tb.count()) await tb.click({ position: { x: 5, y: 5 } }).catch(() => {});
   await win.keyboard.press("Meta+Shift+P");
-  // `state: "visible"`, not the default "attached". VS Code leaves the widget
-  // in the DOM with display:none after it closes, so an attached-only wait
-  // returns instantly against a CLOSED palette and the rows read back are the
-  // previous invocation's — a stale list that looks like a real answer.
   await win.waitForSelector(".quick-input-widget", { state: "visible", timeout: 15_000 });
   await win.keyboard.type("HypeProof");
   await sleep(2000);
-  const rows = await win.evaluate(() =>
-    [...document.querySelectorAll(".quick-input-list .monaco-list-row")]
-      .map((e) => e.innerText.replace(/\n/g, " | ").trim()));
-  return { rows, close: () => win.keyboard.press("Escape") };
+  const total = await win.evaluate(() => {
+    const row = document.querySelector(".quick-input-list .monaco-list-row");
+    const n = Number(row?.getAttribute("aria-setsize"));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  });
+  const focused = () => win.evaluate(() => {
+    const r = document.querySelector(".quick-input-list .monaco-list-row.focused")
+      ?? document.querySelector('.quick-input-list .monaco-list-row[aria-selected="true"]');
+    return r ? r.innerText.replace(/\n/g, " | ").trim() : null;
+  });
+  const rows = [];
+  const first = await focused();
+  if (first) rows.push(first);
+  for (let i = 1; i < (total || 200); i++) {
+    await win.keyboard.press("ArrowDown");
+    await sleep(40);
+    const t = await focused();
+    if (!t) break;
+    if (!total && rows.length && t === rows[0]) break; // wrapped
+    rows.push(t);
+  }
+  // The scan must reach the declared total, or the list below is partial and
+  // every "is absent" assertion made from it is worthless.
+  if (total && rows.length !== total) {
+    throw new Error(`palette scan incomplete: ${rows.length}/${total}`);
+  }
+  return { rows, total, close: () => win.keyboard.press("Escape") };
 }
 
-/** Run a palette command by a substring of its title. Keyboard only — a click
- *  on the list row does not register on an off-screen window (measured). */
+/**
+ * Run a palette command by a substring of its title. Keyboard only — a click
+ * on the list row does not register on an off-screen window (measured).
+ *
+ * It walks the list itself instead of reusing `paletteCommands`' output and
+ * counting ArrowDowns from row 0. That shortcut broke the moment
+ * `paletteCommands` became an exhaustive scan: the scan leaves focus on the
+ * LAST row, so a relative walk from there selects the wrong command. The
+ * mounted-container control check caught it immediately, which is what it is
+ * for. Selecting by what is actually focused has no such assumption.
+ */
 async function runPalette(win, needle) {
-  const { rows } = await paletteCommands(win);
-  const idx = rows.findIndex((t) => t.includes(needle));
-  if (idx < 0) { await win.keyboard.press("Escape"); return false; }
-  for (let i = 0; i < idx; i++) { await win.keyboard.press("ArrowDown"); await sleep(50); }
-  await win.keyboard.press("Enter");
-  await sleep(2500);
-  return true;
+  const tb = win.locator(".monaco-workbench .part.titlebar").first();
+  if (await tb.count()) await tb.click({ position: { x: 5, y: 5 } }).catch(() => {});
+  await win.keyboard.press("Meta+Shift+P");
+  await win.waitForSelector(".quick-input-widget", { state: "visible", timeout: 15_000 });
+  await win.keyboard.type("HypeProof");
+  await sleep(2000);
+  const focused = () => win.evaluate(() => {
+    const r = document.querySelector(".quick-input-list .monaco-list-row.focused")
+      ?? document.querySelector('.quick-input-list .monaco-list-row[aria-selected="true"]');
+    return r ? r.innerText.replace(/\n/g, " | ").trim() : null;
+  });
+  const total = await win.evaluate(() => {
+    const row = document.querySelector(".quick-input-list .monaco-list-row");
+    const n = Number(row?.getAttribute("aria-setsize"));
+    return Number.isFinite(n) && n > 0 ? n : 200;
+  });
+  for (let i = 0; i < total; i++) {
+    const t = await focused();
+    if (t && t.includes(needle)) {
+      await win.keyboard.press("Enter");
+      await sleep(2500);
+      return true;
+    }
+    await win.keyboard.press("ArrowDown");
+    await sleep(40);
+  }
+  await win.keyboard.press("Escape");
+  return false;
 }
 
 /** What the 강사 surface looks like right now, as the window renders it. */
