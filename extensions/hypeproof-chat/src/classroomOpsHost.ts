@@ -344,6 +344,9 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       onDisconnected: (reason) => { if (!live()) return; this.log(`[ops] disconnected: ${reason}`); if (reason === "ops_grant_expired") { this.stopConnection(); void this.resumeUploadOnly(meta, credential); } else void this.forget(); },
     }, meta.poll_after_ms);
     this.context.subscriptions.push({ dispose: () => this.loop?.stop() });
+    // The usual order in a class is "token first, pair later": the token was verified BEFORE this connection existed, so that
+    // result had nowhere to go and the board would show the token as unknown until some later refresh. Ask once, now.
+    void Promise.resolve().then(() => this.actions.probeProfile()).then((p) => { if (live() && !p.noToken) this.profileResult(p, this.token); }).catch(() => {});
   }
 
   private async post(credential: string, body: unknown, timeoutMs: number): Promise<SyncResponse> {
