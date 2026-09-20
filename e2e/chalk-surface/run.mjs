@@ -164,7 +164,11 @@ async function paletteCommands(win) {
   const tb = win.locator(".monaco-workbench .part.titlebar").first();
   if (await tb.count()) await tb.click({ position: { x: 5, y: 5 } }).catch(() => {});
   await win.keyboard.press("Meta+Shift+P");
-  await win.waitForSelector(".quick-input-widget", { timeout: 15_000 });
+  // `state: "visible"`, not the default "attached". VS Code leaves the widget
+  // in the DOM with display:none after it closes, so an attached-only wait
+  // returns instantly against a CLOSED palette and the rows read back are the
+  // previous invocation's — a stale list that looks like a real answer.
+  await win.waitForSelector(".quick-input-widget", { state: "visible", timeout: 15_000 });
   await win.keyboard.type("HypeProof");
   await sleep(2000);
   const rows = await win.evaluate(() =>
@@ -188,8 +192,9 @@ async function runPalette(win, needle) {
 /** What the 강사 surface looks like right now, as the window renders it. */
 async function readSurface(win) {
   return win.evaluate(() => {
+    // offsetParent: a pane that exists but is not laid out is not "there".
     const pane = [...document.querySelectorAll(".pane")].find((p) =>
-      p.querySelector(".pane-header")?.innerText?.includes("강사 작업"));
+      p.offsetParent !== null && p.querySelector(".pane-header")?.innerText?.includes("강사 작업"));
     return {
       present: !!pane,
       header: pane?.querySelector(".pane-header")?.innerText?.replace(/\s+/g, " ").trim() ?? null,
