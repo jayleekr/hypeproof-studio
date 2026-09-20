@@ -13,7 +13,9 @@ const profileId = listProfiles().find(p => p.session.cohort_id === cohort)?.id;
 assert.ok(profileId);
 const db = new DatabaseSync(':memory:');
 db.exec('PRAGMA foreign_keys=ON');
-const migration = readFileSync(new URL('../migrations/0002-chalk-authoring.sql',import.meta.url),'utf8');
+// 새 마이그레이션을 여기 등록하지 않으면 이 시험은 옛 스키마로 돌면서 통과한다.
+const migration = ['0002-chalk-authoring.sql','0011-rehearsal-evidence.sql']
+  .map(f => readFileSync(new URL('../migrations/'+f,import.meta.url),'utf8')).join('\n');
 db.exec(migration);
 db.exec(migration); // additive migration is safe to retry
 const env = createMockEnv();
