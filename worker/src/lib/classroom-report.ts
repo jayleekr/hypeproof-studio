@@ -58,6 +58,13 @@ export interface Draft {
 }
 export type DraftVerdict = { ok: true; draft: Draft; state: 'review_required' | 'partial'; reason: string } | { ok: false; state: 'quarantined' | 'failed'; reason: string };
 
+/**
+ * Words the EVALUATOR writes (claim, change, next experiment) may not grade the learner. Keys were already refused; this is the
+ * same rule for prose: a number used as a score, a rank, a percentile, a level, or an AI-dependency estimate. It is deliberately
+ * narrow — a number that is part of what the learner did ("390px", "3단계로 줄임") is not a grade. Quotes are the record's own
+ * words and are never touched by this.
+ */
+export const GRADE_LANGUAGE = /(\d+(?:\.\d+)?\s*점(?!검)|\d+\s*(?:등|위)(?![가-힣])|(?:상위|하위)\s*\d+\s*(?:%|퍼센트|프로)|백분위|\d+\s*등급|[A-F][+-]?\s*(?:등급|학점)|레벨\s*\d|Lv\.?\s*\d|(?:AI\s*)?의존도\s*(?:는|가|:)?\s*\d+|\d+\s*\/\s*(?:10|100)\b)/i;
 /** `inputText` is the verified events.jsonl the job was built from: every quote must be in the event it names, or the draft is about someone/something else. */
 export function validateDraft(value: unknown, job: { capability_model: string; rubric: string; evaluator: string; input_coverage: string }, inputText: string): DraftVerdict {
   const fail = (reason: string, state: 'quarantined' | 'failed' = 'failed'): DraftVerdict => ({ ok: false, state, reason });
@@ -69,6 +76,8 @@ export function validateDraft(value: unknown, job: { capability_model: string; r
   // The job pins the model. A draft in the other model is not "close enough" — six and seven are different instruments.
   if (!model || model.id !== job.capability_model) return fail('model_mismatch', 'quarantined');
   if (d.versions.rubric !== job.rubric || d.versions.evaluator !== job.evaluator || d.versions.renderer_revision !== RENDERER_REVISION) return fail('version_mismatch', 'quarantined');
+  const written = [typeof d.next_experiment === 'string' ? d.next_experiment : '', ...d.findings.flatMap((f: any) => [f?.claim, f?.change?.before, f?.change?.after].filter((x) => typeof x === 'string'))];
+  if (written.some((t) => GRADE_LANGUAGE.test(t))) return fail('grade_language', 'quarantined');
   const keys = new Set(model.capabilities.map((c) => c.key));
   const events = indexInput(inputText);
   for (const f of d.findings) {
