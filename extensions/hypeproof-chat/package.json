@@ -45,6 +45,12 @@
           "id": "hypeproof-chat.panel",
           "name": "Chat",
           "type": "webview"
+        },
+        {
+          "id": "hypeproof-chat.chalk",
+          "name": "강사 작업",
+          "when": "hypeproof-chat.canAuthor",
+          "visibility": "visible"
         }
       ]
     },
@@ -125,6 +131,18 @@
       {
         "command": "hypeproof-chat.localReview",
         "title": "HypeProof: 나의 변화 기록"
+      },
+      {
+        "command": "hypeproof-chat.openChalkSurface",
+        "title": "HypeProof: 강사 작업 면 열기"
+      },
+      {
+        "command": "hypeproof-chat.chalk.openLessonPlan",
+        "title": "HypeProof: 수업 지도안 열기"
+      },
+      {
+        "command": "hypeproof-chat.chalk.openWeb",
+        "title": "HypeProof: Chalk 웹에서 확인"
       }
     ],
     "menus": {
@@ -168,6 +186,18 @@
         {
           "command": "hypeproof-chat.diagnoseVoiceCapability",
           "when": "false"
+        },
+        {
+          "command": "hypeproof-chat.openChalkSurface",
+          "when": "hypeproof-chat.canAuthor"
+        },
+        {
+          "command": "hypeproof-chat.chalk.openLessonPlan",
+          "when": "hypeproof-chat.canAuthor"
+        },
+        {
+          "command": "hypeproof-chat.chalk.openWeb",
+          "when": "hypeproof-chat.canAuthor"
         }
       ]
     },

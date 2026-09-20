@@ -144,3 +144,23 @@ denial with edit preservation, and the negative path where clearing a visible se
 removes the hidden target and blocks create/save until the setting is reselected without
 discarding curriculum edits. It also checks no credential storage and 390/1280px layout.
 This is local evidence; production deployment and live classroom behavior are separate.
+
+## Studio 내장 강사 면 (#1184, BASE-01 · ARC-02 일부)
+
+`npm --prefix e2e run test:chalk-surface` 는 **진짜 Studio 창을 두 번** 띄우고,
+심어 넣은 토큰만 바꾼다. 학생 토큰만 있는 창에는 `강사 작업` 뷰도 강사 명령도
+없고, issuer 토큰이 있는 창에는 뷰·cohort 부제·행동 4개가 뜬다. 세션 중
+issuer 토큰을 지우면 **재시작 없이 그 자리에서** 사라진다.
+`extensions/hypeproof-chat/test/authoring-access.smoke.mjs` 가 같은 판정을
+순수 함수·매니페스트 수준에서 양성/음성 대조군으로 다시 잰다.
+
+**이 슬라이스가 증명하지 않는 것**: 서버 권한 집행. 화면 게이트는 설계상
+**서명을 확인하지 않는 로컬 디코드**이고, 무엇을 거부할지는 Service 몫이다
+(#1185). 리허설·확정·지도안 저장 API 도 범위 밖이다. T-01 의 API 부분은
+여전히 NOT RUN 이다.
+
+**계측기 자체의 오판 2건을 기록한다** — 둘 다 "통과" 쪽으로 틀렸다:
+`activity_id` 를 빼먹은 첫 판본은 두 창이 모두 진입 화면에 멈춘 채로 부재
+단정을 통과시켰고(그래서 "채팅 컨테이너가 떴는가" 대조 검사를 넣었다),
+명령 id 를 `<viewId>.focus` 로 지어 VS Code 내장 명령을 가려 버린 탓에 뷰가
+열리지 않았다. 앞의 것은 실기기 없이는 드러나지 않았을 것이다.

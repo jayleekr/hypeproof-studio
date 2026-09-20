@@ -503,6 +503,7 @@ PR — 이 도메인은 "각 PC 에 빠짐없이, 깨지지 않게 쌓인다"까
 | ID | Requirement | Acceptance | Layer |
 |---|---|---|---|
 | REQ-STUDIO-CHALK-AUTHORING-UI | Instructor can import and edit course drafts, save/reopen and view frozen versions | Preserve edits on 401/403/409; no token in URLs/storage/export; support request draft is explicitly unsubmitted | Surface; `e2e/chalk-authoring/run.mjs` |
+| REQ-STUDIO-CHALK-SURFACE | Studio shows an instructor-only Chalk surface, native (not a webview), inside the existing chat view container | A window holding an issuer token shows the `강사 작업` view with its actions and a cohort subtitle; a student-token-only window does not register the view or its palette commands; deleting the issuer token removes the view in place without a reload; the mint bootstrap command stays reachable before any issuer token exists; the web entry carries no credential in the URL (ARC-02). Display only — the Service, not this view, refuses an unauthorized call (#1185). | Host + App; `extensions/hypeproof-chat/test/authoring-access.smoke.mjs`, `e2e/chalk-surface/run.mjs` |
 
 REQ-A8 fixture isolation: both the environment flag and the existing user-data test-state file keep an explicitly opened practice folder. The activation verdict is shared with spool suppression and passed through onboarding and token changes (#713). Normal cohort switching remains unchanged.
 

@@ -2,6 +2,8 @@
 // under plain Node — mirrors mintStudentTokenHelpers.ts / reportProblemHelpers.ts.
 
 import { coachDegradedNotice, DEFAULT_COACH_NAME, resolveCoachIdentity } from "./coachIdentity.ts";
+import { isIssuerRolePayload } from "./authoringAccess.ts";
+import { decodeTokenPayloadUnverified } from "./tokenPayload.ts";
 
 export interface CoachStateForResolve {
   name: string;
@@ -70,24 +72,10 @@ export function extractCohortIdUnverified(token: string | null | undefined): str
   return typeof c === "string" && c.trim() ? c : undefined;
 }
 
-/** Decode the (unverified) payload half of `<base64url(payload)>.<sig>`. */
-export function decodeTokenPayloadUnverified(
-  token: string | null | undefined,
-): Record<string, unknown> | undefined {
-  try {
-    if (!token) return undefined;
-    const parts = token.split(".");
-    if (parts.length !== 2) return undefined;
-    const payload = parts[0].replace(/-/g, "+").replace(/_/g, "/");
-    const padded = payload + "=".repeat((4 - (payload.length % 4)) % 4);
-    const json = Buffer.from(padded, "base64").toString("utf8");
-    const parsed = JSON.parse(json) as unknown;
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-    return parsed as Record<string, unknown>;
-  } catch {
-    return undefined;
-  }
-}
+/** Decode the (unverified) payload half of `<base64url(payload)>.<sig>`.
+ *  Body moved to tokenPayload.ts (#1184); re-exported so callers and smoke
+ *  tests keep importing it from here. */
+export { decodeTokenPayloadUnverified } from "./tokenPayload.ts";
 
 /**
  * #381 — is this an issuer (instructor) token pasted into the participant
@@ -102,13 +90,10 @@ export function decodeTokenPayloadUnverified(
  * code, and before any network call at all.
  */
 export function looksLikeIssuerTokenUnverified(token: string | null | undefined): boolean {
-  const payload = decodeTokenPayloadUnverified(token);
-  if (!payload) return false;
-  if (payload.role === "issuer") return true;
-  // Belt-over-braces: issueIssuer() stamps these placeholders (worker
-  // lib/tokens.ts), so an older issuer token without an explicit role still
-  // gets named correctly.
-  return payload.c === "__issuer__" || payload.p === "__issuer__";
+  // #1184 — the role shape itself is now owned by authoringAccess.ts, which is
+  // also what the instructor surface asks. Two readers, one definition: change
+  // what an issuer token looks like there and both follow.
+  return isIssuerRolePayload(decodeTokenPayloadUnverified(token));
 }
 
 /**

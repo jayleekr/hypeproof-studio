@@ -24,6 +24,7 @@ import {
 import { PreviewProvider } from "./previewProvider";
 import { runReportProblemCommand } from "./reportProblem";
 import { runMintStudentToken, ISSUER_TOKEN_KEY } from "./mintStudentToken";
+import { registerChalkSurface } from "./chalkSurface.ts";
 import {
   scheduleUpdateChecks,
   checkForUpdates,
@@ -168,6 +169,19 @@ export async function activate(context: vscode.ExtensionContext) {
     return ensureWorkspace(profile, context, isTestRun && process.env.HPS_TEST_REAL_WORKSPACE !== "1", commit);
   });
   context.subscriptions.push(vscode.commands.registerCommand("hypeproof-chat.start", () => startPage.show()));
+
+  // #1184 — the 강사's own surface. A native view in the sidebar the 강사 is
+  // already in, gated by the `hypeproof-chat.canAuthor` context key. The
+  // student path is untouched: with no issuer token the key stays false and
+  // the manifest's `when` leaves the view out of the container entirely.
+  const chalkSurface = registerChalkSurface({
+    context,
+    participantToken: () => context.secrets.get(TOKEN_KEY),
+    proxyUrl: () =>
+      vscode.workspace
+        .getConfiguration("hypeproofChat")
+        .get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
+  });
   // kids-quest — skeleton round result → next-turn context for the coach.
   context.subscriptions.push(preview.onResult((r) => provider.attachQuestResult(r)));
 
@@ -363,10 +377,16 @@ export async function activate(context: vscode.ExtensionContext) {
           profile: provider.getProfileId(),
         },
       });
+      // #1184 — a first mint is how most 강사 get an issuer token into this
+      // window at all; show the surface without waiting for a reload.
+      await chalkSurface.sync();
     }),
 
     vscode.commands.registerCommand("hypeproof-chat.forgetIssuerToken", async () => {
       await context.secrets.delete(ISSUER_TOKEN_KEY);
+      // #1184 — the surface follows the token. onDidChange already re-syncs;
+      // this awaits it so the view is gone by the time the toast is read.
+      await chalkSurface.sync();
       vscode.window.showInformationMessage("issuer 토큰이 지워졌어요. 다음 발급 시 다시 물어봅니다.");
     }),
 
