@@ -11,7 +11,7 @@ import { Hono } from 'hono';
 import type { Env } from '../env';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { ID_RE, parseFlags, sha256Hex, type OpsCapability } from '../lib/classroom-ops';
-import { composeReport, modelById } from '../lib/classroom-report';
+import { composeReport, draftKey, modelById } from '../lib/classroom-report';
 import { REPORT_PAGE_CSP, renderReportHtml } from '../lib/classroom-report-html';
 import { APPROVAL_TTL_MS, EMAIL_RE, LINK_TTL_MS, MAX_VIEWER_ATTEMPTS, TEMPLATE_RE, VIEWER_CHECK_KINDS, VIEWER_CHECK_PROMPT, deliveryKey, dryRunAdapter, maskAddress, nextDeliveryState, sameHash, viewerCheckHash, type DeliveryAdapter, type ViewerCheckKind } from '../lib/classroom-delivery';
 import { EMAIL_TEMPLATES, resendAdapter, resendConfigured, resendEventKind, verifySvix } from '../lib/classroom-delivery-resend';
@@ -196,7 +196,7 @@ async function openLink(c: any, supplied: string | null): Promise<Response> {
     }
   }
   await db.batch([db.prepare('UPDATE classroom_report_links SET views=views+1 WHERE id=?').bind(link.id), audit(db, link.class_run_id, 'recipient', link.recipient_ref, 'report_link_viewed', { link_id: link.id, viewer_check: check ? 'passed' : 'not_configured' }, now)]);
-  const obj = await c.env.HPS_TRACES.get(`classroom-reports/${job.cohort_id}/${job.class_run_id}/${job.student_id}/${job.id}/draft.json`); if (!obj) return c.json({ error: NOT_AVAILABLE }, 404);
+  const obj = await c.env.HPS_TRACES.get(draftKey(job as never, job.lease_generation)); if (!obj) return c.json({ error: NOT_AVAILABLE }, 404);
   const report = composeReport(JSON.parse(await obj.text()), { class_runs_with_evidence: 1, coverage: job.input_coverage, model: modelById(job.capability_model)! });
   // A person opens this in a browser: they get a page. `?format=json` keeps the data form for tools; both are the same composeReport().
   if (wantsJson) return c.json({ report });
