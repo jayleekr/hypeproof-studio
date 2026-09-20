@@ -1,0 +1,38 @@
+/* HypeProof Studio 디자인 토큰 — 학습 경험 우선 (SX-49 ~ SX-54)
+ *
+ * 값의 정본: docs/design/studio-learning-experience.md §디자인 시스템.
+ *   요구 문서(SX-49)는 역할만 배정하고 값을 적지 않는다. 여기의 값은 설계 문서에서
+ *   그대로 옮긴 것이며, 값을 바꾸려면 설계 문서를 먼저 고친다.
+ * 역할 배정의 정본: docs/requirements/studio-learning-experience.md SX-49 ~ SX-54.
+ *
+ * main.tsx 가 **가장 먼저** import 한다. 뒤따르는 localReview.css · start.css ·
+ * styles.css 가 모두 이 변수를 참조할 수 있어야 하기 때문이다(styles.css 가 마지막).
+ *
+ * 한 화면에 Primary CTA 는 하나다(SX-04/SX-49). --hp-accent 를 배경으로 쓰는 요소가
+ * 한 뷰포트에 둘 이상이면 그 자체로 요구 위반이다.
+ * 상태는 색만으로 표현하지 않는다(SX-50) — 이 파일은 색만 정의하고, 아이콘과 문구는
+ * 컴포넌트가 함께 낸다. 색을 제거한 렌더에서도 상태를 읽을 수 있어야 한다.
+ */
+
+:root {
+  --hp-bg: #151D19;       /* Deep forest · 앱 배경, 집중 모드, 코치 rail 외곽 */
+  --hp-panel: #202C24;    /* Panel · 미션 카드, 근거 서랍, 보조 패널 */
+  --hp-accent: #D5F279;   /* Lime · Primary CTA 1개, 현재 단계 표시 */
+  --hp-warn: #E6A373;     /* Amber · 주의, 보류, 확인 필요, 실제/가상 혼동 */
+  --hp-ink: #F2F4E8;      /* Ink light · 어두운 면 위 제목·본문 */
+  --hp-paper: #F4F6F0;    /* Paper · 회고, 변화 기록, 보고서 */
+  --hp-ink-on-paper: #151D19;
+  --hp-ink-on-accent: #18231C;   /* start.css .studio-primary가 이미 쓰는 값 */
+  --hp-line: #35483A;            /* start.css --studio-line */
+  --hp-muted: #ACB9A5;           /* start.css --studio-muted · AI 설명, 보조 문구 */
+}
+
+/* 읽기 화면(회고·변화 기록·보고서)은 Paper 로 뒤집는다(SX-54).
+ * Amber on Paper 는 대비 2.0:1 이라 글자로 쓰지 않는다 — 아이콘·테두리 + --hp-ink-on-paper 문구. */
+[data-surface="growth"], .hp-reflection {
+  --hp-bg: var(--hp-paper);
+  --hp-panel: #FFFFFF;
+  --hp-ink: var(--hp-ink-on-paper);
+  --hp-muted: #4B5A4F;
+  --hp-line: #D7DDD2;
+}

@@ -1,6 +1,7 @@
 import { validateLessonFeatures, type LessonFeaturePolicy } from './lesson-feature-policy.ts';
 import { validateLessonModel, type LessonModelPolicy } from './lesson-model-policy.ts';
 import { validateStepHelp, type StepHelpPolicy } from './lesson-help-mode.ts';
+import { validateLearningBlock, validateStepLearning, type LearningBlock, type StepLearningFields } from './learning-design.ts';
 
 // Chalk authoring content v1. Data only: never grants tools or stores credentials.
 export interface SessionDesign {
@@ -15,7 +16,15 @@ export interface SessionDesign {
    * `help` (#1008, optional) — the help modes this step offers and its default.
    * A teaching strategy, never a grant; see lesson-help-mode.ts.
    */
-  steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string; help?: StepHelpPolicy }>;
+  steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string; help?: StepHelpPolicy } & StepLearningFields>;
+  /**
+   * SX-55~58 (optional) — 주차·미션·완료 조건·관찰 항목·금지 목록. 6주 커리큘럼은
+   * 이 칸을 채운 **데이터 파일 여섯 개**이고 코드 상수가 아니다(SX-56). 키가 없으면
+   * 오늘의 동작과 완전히 같다. 교수 데이터일 뿐 어떤 권한도 주지 않는다 — 코치
+   * 프롬프트는 이미 수업 content 전체를 직렬화해 싣는다(chat-gate.ts).
+   * 정의와 검증: learning-design.ts.
+   */
+  learning?: LearningBlock;
   /**
    * Optional lesson-level AI identity (#747 feature A). When present, the
    * Service projects `display_name` onto the served `ux.coach` as a fixed
@@ -53,9 +62,13 @@ const MARK_STACK = /\p{M}{3,}/u;
 const LONE_SURROGATE = /\p{Cs}/u;
 
 const REQUIRED_KEYS = ["schema", "title", "audience", "duration_minutes", "objective", "prerequisites", "starter", "steps"];
-const OPTIONAL_KEYS = ["assistant", "model", "features"];
+const OPTIONAL_KEYS = ["assistant", "model", "features", "learning"];
 const ALLOWED_KEYS = [...REQUIRED_KEYS, ...OPTIONAL_KEYS];
 const STEP_KEYS = ["id", "title", "instructions", "hint", "acceptance"];
+// Optional step keys. `help` (#1008) is a teaching strategy; `ui`/`evidence`/`gate`
+// (SX-56) are learning-design data. Required step keys do not change, so the schema
+// id stays hps-session-design/1 — a `/2` is opened only when a REQUIRED key moves.
+const STEP_OPTIONAL_KEYS = ["help", "ui", "evidence", "gate"];
 
 const isObject = (x: unknown): x is Record<string, unknown> =>
   !!x && typeof x === "object" && !Array.isArray(x);
@@ -109,7 +122,7 @@ export function validateSessionDesign(value: unknown, complete = false): string 
   if (!Array.isArray(value.steps) || value.steps.length > 30 || (complete && !value.steps.length)) return "steps must contain 1..30 items to freeze a version";
   const ids = new Set<string>();
   for (const step of value.steps) {
-    if (!isObject(step) || !allowKeys(step, STEP_KEYS, [...STEP_KEYS, "help"])) return "invalid step fields";
+    if (!isObject(step) || !allowKeys(step, STEP_KEYS, [...STEP_KEYS, ...STEP_OPTIONAL_KEYS])) return "invalid step fields";
     if (typeof step.id !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(step.id) || ids.has(step.id)) return "step ids must be unique";
     ids.add(step.id);
     for (const k of ["title", "instructions", "hint", "acceptance"]) {
@@ -117,7 +130,13 @@ export function validateSessionDesign(value: unknown, complete = false): string 
       if (complete && k !== "hint" && !(step[k] as string).trim()) return `step ${step.id}.${k} is required to freeze a version`;
     }
     if ("help" in step) { const bad = validateStepHelp(step.help); if (bad) return `step ${step.id}: ${bad}`; }
+    // SX-57 — a step that declares what will be observed must name the artifact
+    // it leaves behind. See learning-design.ts for why this bites drafts too.
+    { const bad = validateStepLearning(step); if (bad) return `step ${step.id}: ${bad}`; }
   }
+  // SX-55~59 — teaching data only. It grants nothing; it says what the week is
+  // about, what counts as done, and what the coach must never do (learning.never).
+  if ('learning' in value) { const bad = validateLearningBlock(value.learning); if (bad) return bad; }
   if ('model' in value) { const bad = validateLessonModel(value.model); if (bad) return bad; }
   if ('features' in value) { const bad = validateLessonFeatures(value.features); if (bad) return bad; }
   // Optional identity block: when present it must be exactly { display_name }.

@@ -158,7 +158,34 @@ export interface ResolvedProfile {
     content: {
       schema: 'hps-session-design/1'; title: string; audience: string;
       duration_minutes: number; objective: string; prerequisites: string; starter: string;
-      steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string }>;
+      /**
+       * `help` (#1008) 와 `ui`/`evidence`/`gate` (SX-56) 는 **선택 키**이고 서비스가
+       * 실제로 실어 보낸다(`worker/test/lesson-help-mode.test.mjs`,
+       * `worker/test/session-design-learning.test.mjs` 가 `/v1/profile` 응답에서
+       * 확인한다). 타입이 서버가 보내는 것을 숨기면, 다음 변경이 이미 오고 있는 값을
+       * 못 보고 서버부터 고치려 든다 — `model_selection.provider` 가 그랬다.
+       */
+      steps: Array<{
+        id: string; title: string; instructions: string; hint: string; acceptance: string;
+        help?: { default: string; allowed: string[] };
+        ui?: string; evidence?: string; gate?: string;
+      }>;
+      /**
+       * SX-55~58 — 주차·미션·완료 조건·관찰 항목·금지 목록. 6주 커리큘럼은 이 칸을
+       * 채운 데이터 파일 여섯 개다. 정의와 검증은 `worker/src/lib/learning-design.ts`.
+       *
+       * `observe` 는 여기 타입에 **두지 않는다.** 학생 화면이 읽을 것이 아니고
+       * (설계 §세션 설계 파일 "학생에게 보이지 않는다"), 타입에 두면 누군가 그린다.
+       */
+      learning?: {
+        week: number;
+        mission: string;
+        completion?: Array<{ id: string; text: string; event: string }>;
+        never?: string[];
+        evidence_types?: string[];
+        source_kinds?: string[];
+        reflection?: { changed_mind: boolean; next_experiment: boolean };
+      };
       /**
        * #747 — optional lesson-level AI display name. Informational here: the
        * Service already projects it onto `ux.coach` (fixed + fallback_name),
@@ -357,7 +384,12 @@ export type HostMessage = (
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }
   | { type: "streamCitations"; streamId: string; citations: Citation[] }  // #173
-  | { type: "streamAssetScore"; streamId: string; assetScore: AssetScoreChunk }  // #204
+  // SX-59 — 역량 점수를 웹뷰로 흘리던 호스트 메시지(#204)는 제거됐다. 점수는 작업 중
+  // 화면에 어떤 모양으로도 가지 않는다. `AssetScoreChunk` 타입은 위에 **남아 있다** —
+  // 프록시 SSE 파서가 워커의 `asset_score` 청크를 계속 읽고 버려야 하기 때문이다
+  // (`proxyClient.ts`, `test/proxy-client-asset-score.smoke.mjs`).
+  // 메시지 이름을 여기 다시 적지 않는다: `test/sx-legacy-score-removed.smoke.mjs`
+  // 가 이 파일에서 그 이름의 부재를 검사한다.
   | { type: "streamEnd"; streamId: string }
   // #497 — user pressed Stop. Distinct from streamEnd (the turn did NOT finish)
   // and from streamError (nothing went wrong — the user asked for this, so no

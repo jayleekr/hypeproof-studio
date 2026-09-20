@@ -532,6 +532,79 @@
       "intent": "docs/intents/measurement-core.md",
       "design": "docs/design/measurement-core.md",
       "test": "docs/testing/measurement-core.md"
+    },
+    {
+      "path": "docs/requirements/studio-learning-experience.md",
+      "ids": [
+        "SX-01",
+        "SX-02",
+        "SX-03",
+        "SX-04",
+        "SX-05",
+        "SX-06",
+        "SX-07",
+        "SX-08",
+        "SX-09",
+        "SX-10",
+        "SX-11",
+        "SX-12",
+        "SX-13",
+        "SX-14",
+        "SX-15",
+        "SX-16",
+        "SX-17",
+        "SX-18",
+        "SX-19",
+        "SX-20",
+        "SX-21",
+        "SX-22",
+        "SX-23",
+        "SX-24",
+        "SX-25",
+        "SX-26",
+        "SX-27",
+        "SX-28",
+        "SX-29",
+        "SX-30",
+        "SX-31",
+        "SX-32",
+        "SX-33",
+        "SX-34",
+        "SX-35",
+        "SX-36",
+        "SX-37",
+        "SX-38",
+        "SX-39",
+        "SX-40",
+        "SX-41",
+        "SX-42",
+        "SX-43",
+        "SX-44",
+        "SX-45",
+        "SX-46",
+        "SX-47",
+        "SX-48",
+        "SX-49",
+        "SX-50",
+        "SX-51",
+        "SX-52",
+        "SX-53",
+        "SX-54",
+        "SX-55",
+        "SX-56",
+        "SX-57",
+        "SX-58",
+        "SX-59",
+        "SX-60"
+      ],
+      "inline_prefixes": [
+        "SX"
+      ],
+      "sha256": "2da58b8c979b3406b09688ad077b67bd1f45807414308213793a7a1966ee4ccd",
+      "owner": "jayleekr",
+      "intent": "docs/intents/studio-learning-experience.md",
+      "design": "docs/design/studio-learning-experience.md",
+      "test": "docs/testing/studio-learning-experience.md"
     }
   ],
   "work_items": [
@@ -2121,6 +2194,232 @@
         "worker/src/routes"
       ],
       "verification_inputs": []
+    },
+    {
+      "id": "sx-p0-curriculum-first",
+      "title": "학습 경험 우선 P0 — 화면의 주인공을 현재 과제로",
+      "issue": 1171,
+      "kind": "implementation",
+      "feature_ids": [
+        "design-session"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/studio-learning-experience.md",
+          "ids": [
+            "SX-01",
+            "SX-02",
+            "SX-03",
+            "SX-04",
+            "SX-05",
+            "SX-06",
+            "SX-07",
+            "SX-08",
+            "SX-09",
+            "SX-10",
+            "SX-11",
+            "SX-12",
+            "SX-13",
+            "SX-43",
+            "SX-49",
+            "SX-50",
+            "SX-51",
+            "SX-52",
+            "SX-53",
+            "SX-54",
+            "SX-55",
+            "SX-56",
+            "SX-57",
+            "SX-58",
+            "SX-59"
+          ]
+        }
+      ],
+      "depends_on": [],
+      "next_action": "6주 커리큘럼을 세션 설계 파일에서 읽고, 작업 중 화면의 역량 점수를 지우고, 미션 문장을 화면에서 가장 큰 활자로 세운다. 코치에게는 미션·현재 단계·금지 목록을 이름 붙여 주되 관찰 항목은 감춘다.",
+      "design_delta": "기존 hps-session-design/1 에 선택 키를 더한다. 스키마 id 를 올리지 않고 제2 포맷을 만들지 않는다. 판정은 실제 컴포넌트를 렌더해서 하고, 계측기마다 양성·음성 대조군과 심은 정답을 둔다.",
+      "positive_control": "learning 키가 없는 기존 수업이 초안·확정 양쪽에서 오늘과 바이트 단위로 같게 동작한다. 실제 출하 중인 부정 문장(\"관찰은 점수나 능력 인증이 아닙니다\")이 감사를 통과한다. 3주차·남은 단계 N·목록 번호·모듈 버전이 수치로 잡히지 않는다.",
+      "negative_control": "learning 안의 점수 키와 week 외 숫자, 이벤트 8종 밖의 완료 조건, 6종 밖의 단계 ui/evidence/gate, 완료 기준 없이 관찰만 선언한 단계가 전부 거부된다. 금지 라벨 6개를 심으면 정확히 6건을 센다. 구형 상태바 문자열을 계측기가 잡는다.",
+      "evidence_required": "제출 SHA · 실행한 게이트와 exit code · 구현 전 트리에서 control 이 빨갰다는 증거 · NOT RUN 목록. 합성/실기/사람 증거를 구분하고, 실기가 없으면 없다고 적는다.",
+      "implementation_paths": [
+        "worker/src/lib",
+        "extensions/hypeproof-chat/webview-ui/src",
+        "chalk/src/ui"
+      ],
+      "verification_inputs": [
+        "docs/requirements/studio-learning-experience.md",
+        "docs/testing/studio-learning-experience.md"
+      ]
+    },
+    {
+      "id": "sx-p1-evidence-capture",
+      "title": "학습 경험 우선 P1 — 판단의 근거가 흐름 안에 남는다",
+      "issue": 1172,
+      "kind": "implementation",
+      "feature_ids": [
+        "design-session"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/studio-learning-experience.md",
+          "ids": [
+            "SX-14",
+            "SX-15",
+            "SX-16",
+            "SX-17",
+            "SX-18",
+            "SX-19",
+            "SX-20",
+            "SX-21",
+            "SX-22",
+            "SX-23",
+            "SX-24",
+            "SX-44",
+            "SX-45",
+            "SX-46",
+            "SX-47",
+            "SX-48"
+          ]
+        }
+      ],
+      "depends_on": [
+        "sx-p0-curriculum-first"
+      ],
+      "next_action": "hps-observation/1 을 상위 집합으로 확장해 학습 이벤트 8종과 필드 7개를 받고, 기대 조건 게이트와 재확인 게이트를 이벤트만으로 판정한다. 근거 서랍에서 기대 조건·이유·전후·출처를 연다.",
+      "design_delta": "/1 은 손대지 않고 /2 를 같은 파일에서 받는다. 게이트 결과는 저장하지 않고 매번 이벤트에서 계산한다 — 저장된 값과 계산된 값이 갈라지는 길을 두지 않는다. student_text 는 학생 actor 에만 허용한다.",
+      "positive_control": "/1 배치가 golden verdict 그대로 유효하고, 학생이 쓴 criterion_set 이 self_reported 로 받아들여진다. 기대 조건을 쓰면 완료 게이트가 열린다.",
+      "negative_control": "AI 가 쓴 텍스트가 학생 행동으로 기록되지 않는다. source_state 없는 외부 반응이 거부된다. 같은 기준이 아닌 재확인은 검증으로 세지 않는다. 존재하지 않는 id 참조와 낡은 artifact 가 거부된다.",
+      "evidence_required": "제출 SHA · /1 golden verdict 가 한 건도 움직이지 않았다는 확인 · 게이트 두 개가 실제로 막는 것을 보인 기록 · NOT RUN 목록.",
+      "implementation_paths": [
+        "worker/src/lib/measurement-core",
+        "extensions/hypeproof-chat/src",
+        "extensions/hypeproof-chat/webview-ui/src"
+      ],
+      "verification_inputs": [
+        "docs/requirements/studio-learning-experience.md",
+        "docs/testing/studio-learning-experience.md"
+      ]
+    },
+    {
+      "id": "sx-p2-boundary-reflection",
+      "title": "학습 경험 우선 P2 — 회고는 경계에서만, 다음 실험으로 잇는다",
+      "issue": 1173,
+      "kind": "implementation",
+      "feature_ids": [
+        "design-session"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/studio-learning-experience.md",
+          "ids": [
+            "SX-25",
+            "SX-26",
+            "SX-27",
+            "SX-28",
+            "SX-29",
+            "SX-34"
+          ]
+        }
+      ],
+      "depends_on": [
+        "sx-p1-evidence-capture"
+      ],
+      "next_action": "제출·세션 종료·주차 종료 세 경계에서만 회고를 inline 으로 열고, \"바뀐 생각 1개 + 다음 실험 1개\" 만 받아 다음 과제 홈에 원문 그대로 잇는다.",
+      "design_delta": "기존 개선 행동 루프(Improvement·follow_up)를 재사용하고 새 원장을 만들지 않는다. 회고 표시 조건은 호스트가 상태 기계로 판정하고 웹뷰가 다시 계산하지 않는다.",
+      "positive_control": "제출 시점에 회고가 inline 으로 열리고 입력이 정확히 둘이다. 건너뛰기가 가능하고 건너뛴 사실이 기록된다. 다음 실험이 다음 과제 action 목록에 의역 없이 나타난다.",
+      "negative_control": "유휴 타이머·메시지 수·시간 경과로는 회고가 열리지 않는다. 모달로 뜨지 않는다. 회고 미작성이 다음 세션 진입을 막지 않는다. 배지·스트릭·랭킹·축하 애니메이션이 없다.",
+      "evidence_required": "제출 SHA · 네 시점(작업 중·제출·세션 종료·주차 종료)에서의 회고 영역 유무 기록 · 다음 과제로 이어진 원문 · NOT RUN 목록.",
+      "implementation_paths": [
+        "extensions/hypeproof-chat/webview-ui/src",
+        "extensions/hypeproof-chat/src"
+      ],
+      "verification_inputs": [
+        "docs/requirements/studio-learning-experience.md",
+        "docs/testing/studio-learning-experience.md"
+      ]
+    },
+    {
+      "id": "sx-p3-change-record",
+      "title": "학습 경험 우선 P3 — 점수 대신 변화 이야기",
+      "issue": 1174,
+      "kind": "implementation",
+      "feature_ids": [
+        "design-session"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/studio-learning-experience.md",
+          "ids": [
+            "SX-30",
+            "SX-31",
+            "SX-32",
+            "SX-33",
+            "SX-35",
+            "SX-36",
+            "SX-37",
+            "SX-60"
+          ]
+        }
+      ],
+      "depends_on": [
+        "sx-p2-boundary-reflection"
+      ],
+      "next_action": "변화 기록 첫 화면을 최근 발견한 변화 문장과 근거 2~3개로 만들고, 여섯 점수 카드를 접힌 방법/세부 데이터 안으로 내린다.",
+      "design_delta": "패턴 계산은 순수 함수로 두고 출력에 숫자 필드는 방법 블록 안에만 둔다. 같은 기준·같은 평가기 아래 여러 과제에서 반복될 때만 패턴이라고 말한다.",
+      "positive_control": "서로 다른 과제 두 개 이상에서 같은 기준으로 반복된 행동이 \"최근 반복된 패턴\" 으로 나오고 근거가 클릭으로 열린다.",
+      "negative_control": "첫 화면에 숫자가 하나라도 있으면 실패. 한 과제만 있으면 패턴 문장을 만들지 않는다. 평가기가 바뀐 두 과제를 비교하지 않는다. 근거 없음을 0 이나 빈 막대로 그리지 않는다.",
+      "evidence_required": "제출 SHA · 첫 뷰포트 렌더의 수치 0건 확인 · 근거 링크가 실제 이벤트 원문을 여는 기록 · Lab MP-01 개정 결정 링크 · NOT RUN 목록.",
+      "implementation_paths": [
+        "worker/src/lib/measurement-core",
+        "extensions/hypeproof-chat/webview-ui/src"
+      ],
+      "verification_inputs": [
+        "docs/requirements/studio-learning-experience.md",
+        "docs/testing/studio-learning-experience.md"
+      ],
+      "gate": {
+        "reason": "SX-60 은 Lab products/lab-web/measurement-profile.md MP-01(score-first) 개정 결정 기록이 먼저 있어야 구현 PR 을 낼 수 있다. 그 전까지 로컬 화면만 만들고 Lab 웹은 건드리지 않는다."
+      }
+    },
+    {
+      "id": "sx-p4-instructor-evidence",
+      "title": "학습 경험 우선 P4·P5 — 강사 화면과 방법 레이어",
+      "issue": 1175,
+      "kind": "design",
+      "feature_ids": [
+        "design-session"
+      ],
+      "requirements": [
+        {
+          "path": "docs/requirements/studio-learning-experience.md",
+          "ids": [
+            "SX-38",
+            "SX-39",
+            "SX-40",
+            "SX-41",
+            "SX-42"
+          ]
+        }
+      ],
+      "depends_on": [
+        "sx-p1-evidence-capture"
+      ],
+      "next_action": "학습 근거를 기존 issuer 범위로 내보내는 조회 경로와 학생의 공유 범위 선택을 설계한다. 새 역할을 만들지 않는다.",
+      "design_delta": "강사 정체성과 화면은 이미 있다(role issuer + IssuerScope, instructor-auth.ts 하나, Chalk 화면 5종). 없는 것은 조회 경로와 공유 결정이다. 검증은 두 워커가 공유하는 구현 하나만 쓰고 두 번째 신뢰 경계를 만들지 않는다.",
+      "positive_control": "막힘·학생 원문·확인할 증거·실제/가상 여부가 보이고, 개입 CTA 가 질문 보내기 / 다시 보게 할 지점 표시 / 근거 확인·추가 관찰 필요 셋뿐이다.",
+      "negative_control": "점수 순위·채팅량·토큰량·체류시간·AI 의존도 추정치·성격 평가·코호트 랭킹이 없다. 학생이 공유 범위를 고르지 않은 근거가 강사 화면에 나타나지 않는다. 정렬 옵션에 점수가 없다.",
+      "evidence_required": "설계 문서 링크 · 기존 issuer 범위를 그대로 쓴다는 확인 · MC-39 원격 제출 의존 명시 · 미성년 동의 경로의 Lab 결정 링크. 구현 전이면 NOT RUN 으로 적는다.",
+      "implementation_paths": [
+        "chalk/src",
+        "worker/src/routes"
+      ],
+      "verification_inputs": [
+        "docs/requirements/studio-learning-experience.md",
+        "docs/testing/studio-learning-experience.md"
+      ],
+      "gate": {
+        "reason": "학습 이벤트는 지금 로컬에만 있다(MC-24). MC-39 원격 제출과 학생 공유 범위 선택이 없으면 강사 화면에 보낼 근거 자체가 없다. 미성년 파일럿의 보호자 동의·강사 매개 경로는 Lab MISSION 아동 안전 결정 대기."
+      }
     }
   ]
 }

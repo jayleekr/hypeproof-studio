@@ -34,7 +34,7 @@ export function StartPage() {
   const showProfile = !!state.profile && !editing;
 
   return <main className="studio-start">
-    <header className="studio-top"><Brand/><nav className="studio-nav" aria-label="Studio 탐색"><button onClick={() => postToHost({ type: "openLocalReview" })}>내 작업 검토</button><button onClick={() => postToHost({ type: "openStudioFiles" })}>파일</button><button onClick={() => postToHost({ type: "openStudioSettings" })}>설정</button></nav></header>
+    <header className="studio-top"><Brand/><nav className="studio-nav" aria-label="Studio 탐색"><button onClick={() => postToHost({ type: "openLocalReview" })}>나의 변화 기록</button><button onClick={() => postToHost({ type: "openStudioFiles" })}>파일</button><button onClick={() => postToHost({ type: "openStudioSettings" })}>설정</button></nav></header>
     <div className="studio-main">
       <section className="studio-intro" aria-labelledby="start-title">
         <p className="studio-eyebrow"><span/> 생각에서, 나의 결과물로</p>
@@ -55,9 +55,13 @@ export function StartPage() {
           <button className="studio-primary" disabled={state.checking} onClick={() => { setState(s => ({ ...s, checking: true, error: undefined })); postToHost({ type: "beginCourse" }); }}>{state.checking ? "활동 여는 중…" : state.started ? copy.continueButton : state.candidate ? "이 활동 시작하기" : "이어서 하기"} <span aria-hidden="true">↗</span></button>
           {state.candidate && <button className="studio-text-button" disabled={state.checking} onClick={() => postToHost({type:"chooseActivityFolder"})}>다른 작업 폴더 선택</button>}
           <div className="studio-course-actions"><button className="studio-text-button" onClick={() => { setEditing(true); setEntry(null); setToken(""); }} disabled={state.checking}>다른 활동 선택</button><button className="studio-text-button" onClick={() => postToHost({ type: state.candidate ? "cancelCandidate" : "disconnectCourse" })} disabled={state.checking}>{state.candidate ? "선택 취소" : "연결 해제"}</button></div>
-        </> : entry === null ? <div className="studio-entry-options">
-          <button className="studio-primary" disabled={state.checking} onClick={() => choose("trial")}>AI 체험하기 <span aria-hidden="true">→</span></button>
-          <button className="studio-primary studio-secondary" disabled={state.checking} onClick={() => choose("classroom")}>수업에 참여하기 <span aria-hidden="true">→</span></button>
+        </> : entry === null ? <div className="studio-entry-options" role="group" aria-label="시작 방법 고르기">
+          {/* SX-04 — 이 둘은 **동급 선택**이다. 예전에는 둘 다 Lime Primary 였고,
+              그러면 한 화면에 강조 버튼이 둘이다. 요구가 이 화면을 이름으로 지목해
+              "선택지 목록으로 그리고 둘 다 Primary 로 그리지 않는다" 고 적었다.
+              고른 뒤 나오는 "코드 확인하기" 가 이 흐름의 유일한 Primary 다. */}
+          <button className="studio-choice" disabled={state.checking} onClick={() => choose("trial")}>AI 체험하기 <span aria-hidden="true">→</span></button>
+          <button className="studio-choice" disabled={state.checking} onClick={() => choose("classroom")}>수업에 참여하기 <span aria-hidden="true">→</span></button>
           {state.profile && <button className="studio-text-button" onClick={() => setEditing(false)}>기존 활동으로 돌아가기</button>}
         </div> : <form onSubmit={connect}>
           <label htmlFor="course-code">{entry === "trial" ? "체험 참여 코드" : "수업 참여 코드"}</label>
