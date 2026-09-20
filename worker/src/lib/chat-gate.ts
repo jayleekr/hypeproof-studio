@@ -177,6 +177,37 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
   }
 
   // 4-5. Session window + roster
+  //
+  // 리허설 좌석(#1189 C-2)은 **이 두 검사를 뚫지 않는다. 지나가지 않는다.**
+  //
+  // `RUN-01` 본문이 이미 그렇게 적었다 — *"리허설은 수업을 열기 전에 하는 일이므로
+  // **열린 세션을 요구하지 않는다**"*. 그리고 `#1131` 은 강사가 리허설하려고 자기를
+  // 운영 로스터에 넣는 것을 **데이터 오염**으로 규정했다. 새 요구가 아니라 **적혀 있는데
+  // 게이트에 구현이 없던 것**이다.
+  //
+  // 형태는 발명하지 않았다 — 이 파일의 `account` 좌석이 이미 같은 모양이다(수업 세션을
+  // 조회하지 않고 토큰 `iat..exp` 에서 세션을 만든다). 리허설도 그렇게 한다.
+  //
+  // **권한의 출처를 바꾸는 것이지 검사를 면제하는 것이 아니다**: 학생 좌석이 "명단에
+  // 있는가" 로 판정된다면 리허설 좌석은 **"이 고정된 수업 버전인가"** 로 판정된다.
+  // 아래 `payload.lesson` 블록의 `sha256` 일치가 그 관문이고, 그래서 이 갈래는
+  // **lesson 이 없으면 아예 성립하지 않는다**(둘 다 없으면 무검사 좌석이 되어 버린다).
+  // 내용이 바뀌면 좌석이 죽는다(`VER-02`) — 학생 좌석보다 오히려 **좁다**.
+  //
+  // 학생이 이 갈래로 로스터를 우회할 수 있는가: 없다. `rehearsal` 은 **서명된 클레임**이라
+  // 손으로 붙이면 HMAC 이 깨지고, 그 클레임을 붙일 수 있는 유일한 경로인 저작 API 는
+  // 학생 토큰을 전수로 거부한다(#1188). 좌석 id 접두사(`rehearsal-`)로는 **판정하지
+  // 않는다** — 접두사는 사람이 읽는 표시이고 권한은 클레임이 답한다(#1164).
+  if (payload.rehearsal === true) {
+    if (!payload.lesson) {
+      return { ok: false, response: c.json({ error: { type: 'config', code: 'rehearsal_lesson_required', message: '리허설 좌석에 고정된 수업이 없습니다. 교환권을 다시 받으세요.' } }, 409) };
+    }
+    // 수업을 멈췄으면 리허설도 멈춘다. kill-switch 는 좌석 종류를 가리지 않는다.
+    const rehearsalPause = await getCohortPause(env.HPS_KV, payload.c);
+    if (rehearsalPause) {
+      return { ok: false, response: c.json({ error: { message: '수업이 일시정지되었습니다.', type: 'cohort_paused' } }, 503) };
+    }
+  }
   if(payload.native_trial){
     const allowedRoster=await getRoster(env.HPS_KV,payload.c);
     if(!allowedRoster?.users.includes(payload.u))return {ok:false,response:c.json({error:{type:"not_in_roster",message:"등록된 참가자가 아닙니다."}},403)};
@@ -185,7 +216,14 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     if(!grant||grant.revoked)return {ok:false,response:c.json({error:{code:'trial_revoked_or_reissued',type:'auth',message:'폐기되었거나 새 코드로 교체된 체험 코드입니다.'}},401)};
     if(grant.expires_at!==null&&grant.expires_at<=Date.now())return {ok:false,response:c.json({error:{code:'trial_expired',type:'session_window',message:'개인 체험 시간이 끝났습니다. 작업 파일은 그대로 보존됩니다.'}},403)};
   }
-  const session = payload.native_trial
+  // 리허설 좌석의 세션은 **토큰 자신**이다 — `account` 좌석과 같은 형태. 수업 세션 행을
+  // 조회하지 않으므로 "수업이 아직 시작 전" 으로 막히지 않는다(`RUN-01`). 창은 좌석의
+  // `iat..exp` 이고, 아래 `isSessionLive` 가 그 창을 학생 좌석과 **같은 코드로** 본다.
+  const session = payload.rehearsal === true
+    ? { session_id: 'rehearsal:' + payload.u, profile_id: profile.id,
+        starts_at: new Date(payload.iat * 1000).toISOString(),
+        ends_at: new Date(payload.exp * 1000).toISOString() }
+    : payload.native_trial
     ? (profile.observation?.enabled ? await startNativeGrant(env,payload) : null)
     : await getActiveSession(env.HPS_KV, payload.c);
   if (!session) {
@@ -224,15 +262,20 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
       ),
     };
   }
-  const roster = await getRoster(env.HPS_KV, payload.c);
-  if (!roster || !roster.users.includes(payload.u)) {
-    return {
-      ok: false,
-      response: c.json(
-        { error: { message: "등록된 참가자가 아니에요. 강사에게 알려주세요.", type: "not_in_roster" } },
-        403,
-      ),
-    };
+  // 리허설 좌석은 이 검사에 **닿지 않는다**(위 4-5 주석). 예외 조건을 검사 안에 끼워
+  // 넣지 않고 갈래를 나누는 이유: 검사 안의 `|| rehearsal` 은 다음 사람이 "로스터 검사에
+  // 구멍이 있다" 로 읽는다. 로스터를 보는 좌석과 안 보는 좌석은 **다른 종류**다.
+  if (payload.rehearsal !== true) {
+    const roster = await getRoster(env.HPS_KV, payload.c);
+    if (!roster || !roster.users.includes(payload.u)) {
+      return {
+        ok: false,
+        response: c.json(
+          { error: { message: "등록된 참가자가 아니에요. 강사에게 알려주세요.", type: "not_in_roster" } },
+          403,
+        ),
+      };
+    }
   }
 
   // 5b. Cohort kill-switch (S-12 / #47) — must precede any upstream call.

@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import { resolveChalkOrigin, resolveWorkerVersion, type Env } from "./env";
 import { chat } from "./routes/chat";
 import { access } from './routes/access';
+import { rehearsal } from './routes/rehearsal';
 import { messages } from "./routes/messages";
 import { observations } from './routes/observations';
 import { trace } from "./routes/trace";
@@ -37,6 +38,7 @@ app.use("/v1/messages", signingSecretGuard);
 // (#282 count_tokens passthrough) needs its own wildcard mount.
 app.use("/v1/messages/*", signingSecretGuard);
 app.use("/v1/profile", signingSecretGuard);
+app.use('/v1/rehearsal/*', signingSecretGuard);
 app.use('/v1/access', signingSecretGuard);
 app.use('/v1/access/*', signingSecretGuard);
 app.use("/v1/request-settings/*", signingSecretGuard);
@@ -78,6 +80,7 @@ for (const page of ["/issuer", "/console"] as const) {
 }
 
 app.route("/v1", chat);
+app.route('/v1', rehearsal);
 app.route('/v1/access', access);
 // #282 — Anthropic-native Agent SDK gateway (POST /v1/messages). Own router,
 // same /v1 base; the chat router doesn't define /messages so no shadowing.
