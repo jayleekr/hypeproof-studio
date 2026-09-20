@@ -27,8 +27,10 @@ const MAX_EVENT_CHARS = 4000, MAX_EVENTS = 400;
  * 4000 chars would be the only bound (far beyond a context window, and an unbounded bill). A record that does not fit is
  * evaluated on its EARLIEST events up to this budget and the draft is marked `partial · input_truncated` for the reviewer;
  * it is never silently treated as the whole record, and never split into several calls.
+ * 60 000 characters of Korean is at most ~90 000 input tokens by a conservative 1.5 tokens/char — inside a 200 k window with the
+ * prompt, schema and answer, and the number the cost ceiling in docs/testing/classroom-admin.md is computed from.
  */
-export const MAX_CATALOG_CHARS = 120_000;
+export const MAX_CATALOG_CHARS = 60_000;
 
 export interface EvaluatorConfig { id: string; model: string }
 /** null → no evaluator is configured for this Service. The caller reports that; it never substitutes an empty draft. */
