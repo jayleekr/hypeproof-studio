@@ -32,7 +32,11 @@ const TEMPLATE_REQUIRED = { error: 'select an execution template first', reason:
 const TEMPLATE_NOT_REVIEWED = { error: 'independent course requires a reviewed execution template', reason: 'template_not_reviewed' };
 export const authoring = new Hono<Bindings>();
 
-const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
+// Exported for test/authoring-role-enforcement.test.mjs (#1185): the test asserts by
+// function identity that EVERY handler path below is registered under this middleware.
+// Hono's use(path) does not cover subpaths, so the list at the bottom of this block is
+// the whole enforcement surface — a new path missing from it would be open.
+export const authenticate: MiddlewareHandler<Bindings> = async (c, next) => {
   // Explicit issuer identity even if the enclosing admin middleware admits Basic/Access.
   const auth = await authorizeIssuerForCohort(c, c.req.param("cohort")! ?? "");
   if (auth instanceof Response) return auth;

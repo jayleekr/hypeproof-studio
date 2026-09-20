@@ -479,6 +479,7 @@ PR — 이 도메인은 "각 PC 에 빠짐없이, 깨지지 않게 쌓인다"까
 | ID | 요구사항 | 수용 기준 | Layer |
 |---|---|---|---|
 | REQ-STUDIO-AUTHORING-API | 강사 소유 초안 및 불변 버전 저장 | 타 강사·코호트·프로필 접근 차단, revision 충돌 검출, 중복 재시도 안전, 버전 원문 보존. 수업 활성화 없음. | R — in-process Service/SQLite and local D1 |
+| REQ-STUDIO-AUTHORING-ROLE | 저작 API 의 역할 집행은 화면이 아니라 서버에 있다 (#1185, ARC-01/BASE-01) | A안(2026-09-21)으로 Studio 한 앱 안에 강사 면과 학생 면이 공존한다. `role` 로 화면을 가리는 것(#1184)은 **숨긴 것**이고, 서버 판정이 **막은 것**이다. 계약: ① 저작 라우터의 **모든** 핸들러 경로가 `authenticate`(=`authorizeIssuerForCohort`) 아래 등록돼 있다 — Hono 의 `use(path)` 는 하위 경로를 덮지 않으므로 경로 추가 시 등록 누락이 곧 무인증 경로다; ② `admin.use("*")` 가 Bearer 만 보고 통과시키는 경로(`isIssuerAllowedEndpoint`) 전수에서 학생·위조·만료·타코호트 자격이 전부 거부된다; ③ 거부 응답 모양이 일관된다 — Bearer 없음·형식오류·서명불일치·만료=401, 유효하지만 역할/스코프 밖=403 (학생 토큰은 401 이 아니라 403: 토큰은 진짜이고 **역할이 아닌** 것이다); ④ 저작 경로는 `cf-access-authenticated-user-email` 헤더를 신뢰하지 않는다 — 헤더만으로는 401. 운영자 surface 는 설계대로 그 헤더로 열리며 프로덕션에서는 엣지가 클라이언트 헤더를 벗긴다([HANDOFF §3](plan/HANDOFF.md) 실측). 경로 목록은 살아 있는 Hono 라우터에서 읽으므로 **새 경로가 자동으로 편입**된다 | R (`worker/test/authoring-role-enforcement.test.mjs`) |
 
 [Contract](adr/0004-chalk-authoring-storage.md) · [Execution scope](testing/chalk-authoring.md).
 
