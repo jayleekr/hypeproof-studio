@@ -346,7 +346,10 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     this.context.subscriptions.push({ dispose: () => this.loop?.stop() });
     // The usual order in a class is "token first, pair later": the token was verified BEFORE this connection existed, so that
     // result had nowhere to go and the board would show the token as unknown until some later refresh. Ask once, now.
-    void Promise.resolve().then(() => this.actions.probeProfile()).then((p) => { if (live() && !p.noToken) this.profileResult(p, this.token); }).catch(() => {});
+    // …but only as the FIRST word on this connection. The answer can come back after the learner's first turn has already
+    // reported "runtime ready" or a fault; an older fact must not overwrite a newer one.
+    this.activationGate.reset(); this.errorGate.reset();
+    void Promise.resolve().then(() => this.actions.probeProfile()).then((p) => { if (live() && !p.noToken && this.activationGate.untouched && this.errorGate.untouched) this.profileResult(p, this.token); }).catch(() => {});
   }
 
   private async post(credential: string, body: unknown, timeoutMs: number): Promise<SyncResponse> {
