@@ -1,5 +1,5 @@
 import { useEffect, useReducer, useState, useRef } from "react";
-import type { AssetScoreChunk, ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
+import type { ChatConfig, ChatMessage, Citation, HostMessage } from "../../src/protocol";
 import {
   emptyTimeline,
   timelineCitations,
@@ -27,7 +27,6 @@ interface State {
   error: string | null;
   errorRequestId: string | null;   // S-07 / #49 — surfaced in ErrorBanner
   errorRunbookUrl: string | null;  // #165 — banner renders as clickable link
-  assetScore: AssetScoreChunk | null;
   pageNotice: string | null;        // #308 — "페이지를 코치에게" 인라인 안내 (토스트 대체)
   aiNotice: string | null;          // #320 — AI disclosure at session start (host-gated)
   stopNotice: string | null;        // #497 — Stop 을 눌러 턴이 끊겼음을 알리는 인라인 안내
@@ -48,7 +47,6 @@ type Action =
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; delta: string }
   | { type: "streamCitations"; citations: Citation[] }
-  | { type: "streamAssetScore"; assetScore: AssetScoreChunk }
   | { type: "toolLog"; entry: ToolEntry }
   | { type: "pageAttached"; label: string }
   | { type: "aiDisclosure"; text: string }
@@ -71,7 +69,6 @@ const initialState: State = {
   error: null,
   errorRequestId: null,
   errorRunbookUrl: null,
-  assetScore: null,
   pageNotice: null,
   aiNotice: null,
   stopNotice: null,
@@ -94,7 +91,6 @@ function reducer(state: State, action: Action): State {
         streamId: action.streamId,
         error: null,
         stopNotice: null,   // #497 — 새 턴이 시작되면 이전 중지 안내는 사라진다
-        assetScore: null,
         // #503 — 직전 턴의 툴 줄을 **비우지 않는다**. 예전에는 여기서 toolLog 를
         // [] 로 밀어서, 다음 턴이 시작되는 순간 이전 턴이 무슨 도구를 썼는지가
         // 통째로 증발했다(스크롤을 올려도 말풍선만 남았다).
@@ -104,8 +100,6 @@ function reducer(state: State, action: Action): State {
       return { ...state, timeline: timelineDelta(state.timeline, action.delta, Date.now()) };
     case "streamCitations":
       return { ...state, timeline: timelineCitations(state.timeline, action.citations) };
-    case "streamAssetScore":
-      return { ...state, assetScore: action.assetScore };
     case "toolLog":
       // 같은 id 는 제자리 갱신(running → done/error), 새 id 는 지금 이 자리에 삽입.
       return { ...state, timeline: timelineTool(state.timeline, action.entry, Date.now()) };
@@ -215,7 +209,6 @@ export function App() {
         case "streamStart": dispatch({ type: "streamStart", streamId: msg.streamId, messageId: msg.messageId }); break;
         case "streamChunk": dispatch({ type: "streamChunk", delta: msg.delta }); break;
         case "streamCitations": dispatch({ type: "streamCitations", citations: msg.citations }); break;
-        case "streamAssetScore": dispatch({ type: "streamAssetScore", assetScore: msg.assetScore }); break;
         case "toolLog": dispatch({ type: "toolLog", entry: { id: msg.id, icon: msg.icon, label: msg.label, state: msg.state, ...(msg.at ? { at: msg.at } : {}) } }); break;
         case "pageAttached": dispatch({ type: "pageAttached", label: msg.label }); break;
         case "aiDisclosure": dispatch({ type: "aiDisclosure", text: msg.text }); break;
