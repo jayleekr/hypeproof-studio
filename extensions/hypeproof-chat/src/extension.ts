@@ -9,7 +9,6 @@ import * as path from "path";
 import * as os from "os";
 import { StartPage } from "./startPage";
 import { ChatPanelProvider } from "./chatPanelProvider";
-import { AssetStatusBar } from "./assetStatusBar";
 import {
   labelsForProfile,
   appToneOf,
@@ -68,7 +67,10 @@ export async function activate(context: vscode.ExtensionContext) {
   const preview = new PreviewProvider(context);
   const liveServer = new LiveServer();
   registerPreviewViewport(context, liveServer);
-  const assetStatus = new AssetStatusBar();
+  // SX-59 — 구형 역량 상태바가 여기서 만들어져 작업 내내 떠 있었다. 작업 중 화면에
+  // 역량 점수·등급·배지를 두지 않는다는 요구에 따라 모듈째 제거했다. 무엇이 사라졌는지는
+  // git 이력과 `test/sx-legacy-score-removed.smoke.mjs` 가 갖는다 — 지운 문자열을
+  // 주석에 다시 적으면 그 부재 검사가 자기 자신의 문서에 걸린다(실제로 한 번 걸렸다).
   // #580 — 세션 로그 로컬 스풀 (수집 계층). 세션 = 이 활성화 1회. 디렉토리는
   // 첫 이벤트에서 게으르게 생기므로 채팅 없는 창은 아무것도 남기지 않는다.
   //
@@ -148,7 +150,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }, 15_000);
     context.subscriptions.push({ dispose: () => clearTimeout(pendingTimer) });
   }
-  const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus, spool);
+  const provider = new ChatPanelProvider(context, preview, liveServer, spool);
   providerRef = provider;
   registerLocalReview(context, (webview, dist) => provider.renderHtml(webview, dist));
   const startPage = new StartPage(context, provider, async (profile, commit) => {
@@ -160,7 +162,6 @@ export async function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     { dispose: () => liveServer.dispose() },
-    assetStatus,
     vscode.window.registerWebviewViewProvider("hypeproof-chat.panel", provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),

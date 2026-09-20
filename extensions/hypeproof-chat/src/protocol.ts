@@ -357,7 +357,12 @@ export type HostMessage = (
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }
   | { type: "streamCitations"; streamId: string; citations: Citation[] }  // #173
-  | { type: "streamAssetScore"; streamId: string; assetScore: AssetScoreChunk }  // #204
+  // SX-59 — 역량 점수를 웹뷰로 흘리던 호스트 메시지(#204)는 제거됐다. 점수는 작업 중
+  // 화면에 어떤 모양으로도 가지 않는다. `AssetScoreChunk` 타입은 위에 **남아 있다** —
+  // 프록시 SSE 파서가 워커의 `asset_score` 청크를 계속 읽고 버려야 하기 때문이다
+  // (`proxyClient.ts`, `test/proxy-client-asset-score.smoke.mjs`).
+  // 메시지 이름을 여기 다시 적지 않는다: `test/sx-legacy-score-removed.smoke.mjs`
+  // 가 이 파일에서 그 이름의 부재를 검사한다.
   | { type: "streamEnd"; streamId: string }
   // #497 — user pressed Stop. Distinct from streamEnd (the turn did NOT finish)
   // and from streamError (nothing went wrong — the user asked for this, so no

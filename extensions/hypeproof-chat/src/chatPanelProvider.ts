@@ -14,7 +14,6 @@ import {createHash} from 'node:crypto';
 import {NativeObservationRecorder} from './nativeObservationRecorder';
 import {OBSERVATION_FORMAT, validateFindings, type ObservationBatch} from './nativeObservationContract';
 import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
-import type { AssetScoreSink } from "./assetStatusBar";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
@@ -339,7 +338,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     private readonly context: vscode.ExtensionContext,
     private readonly preview: PreviewProvider,
     private readonly liveServer: LiveServer,
-    private readonly assetScores?: AssetScoreSink,
     /** #580 — 세션 로그 로컬 스풀. Optional: 테스트·구 호출자는 기록 없이 동작. */
     private readonly spool?: SessionSpool,
   ) {}
@@ -650,7 +648,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       );
       if (choice !== "대화 지우기" || this.hasActiveStream() || key !== this.historyKey()) return;
       await this.context.workspaceState.update(key, []);
-      this.assetScores?.resetAssetScores();
       void this.post({ type: "history", messages: [] });
       // A cleared chat starts a new conversation, not a new trial allowance.
       void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
@@ -668,7 +665,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.lastProfileFailure = null;
     this.activeCohortId = null;
     this.nativeHistoryScope = null;
-    this.assetScores?.resetAssetScores();
   }
 
   /** #381 — cause of the most recent failed profile fetch, if any. */
@@ -2371,10 +2367,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         for (const c of cites) assistantCitations.push(c);
         void this.post({ type: "streamCitations", streamId, citations: cites });
       };
-      const onAssetScore = (assetScore: import("./protocol").AssetScoreChunk) => {
-        this.assetScores?.recordAssetScore(assetScore);
-        void this.post({ type: "streamAssetScore", streamId, assetScore });
-      };
+      // SX-59 / SX-43 — 작업 중 화면에 역량 점수·등급·배지가 없다. 워커는 아직
+      // `asset_score` SSE 청크를 보내므로 파서는 계속 읽어야 하지만, 호스트는 그것을
+      // **버린다.** 상태바 싱크(`assetStatusBar.ts`)와 웹뷰 메시지
+      // (`streamAssetScore`)는 이 커밋에서 사라졌다.
+      // 청크 자체를 그만 보내는 것은 별도 Service 변경이다(설계 §디자인 시스템).
+      // 콜백을 없애지 않고 no-op 으로 두는 이유: `sdkCoach.ts` 의 옵션 타입에서
+      // 필수이고, `sdk-surface-drift` 스모크가 그 표면을 잠근다.
+      const onAssetScore = (_assetScore: import("./protocol").AssetScoreChunk) => {};
       // #414 — the SDK coach's real work, rendered through the same toolLog
       // lines the browser loop already uses. Deliberately NOT translated: the
       // model thinks in English and the tool names are the SDK's own, and a
@@ -2892,7 +2892,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const browser = new BrowserControl();
     const maxIter = this.cachedProfile?.browser_control?.max_iterations ?? 8;
     const scratch: Array<{ role: "user" | "assistant"; content: unknown }> = [];
-    let lastAssetScore: import("./protocol").AssetScoreChunk | null = null;
     try {
       for (let iter = 0; ; iter++) {
         if (p.signal.aborted) return;
@@ -2915,9 +2914,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           previewUrl: this.liveServer.currentUrl(),
           onDelta: p.onDelta,
           onCitations: p.onCitations,
-          onAssetScore: (s) => {
-            lastAssetScore = s; // buffer; only the terminal turn is recorded
-          },
+          // SX-59 — 브라우저 루프도 점수 청크를 버린다. 예전에는 마지막 턴 것만
+          // 버퍼해 상태바에 올렸다. 상태바가 없어졌으므로 버퍼도 없앴다.
+          onAssetScore: () => {},
           // #580 — 브라우저 루프는 한 턴에 요청을 여러 번 낸다. 반복마다
           // 요청 1건 = 레코드 1건 (requestKey 는 요청별 request id).
           onUsage: this.proxyUsageRecorder(p.streamId, p.modelEcho, p.onDelta),
@@ -2974,10 +2973,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           });
         }
         scratch.push({ role: "user", content: toolResults });
-      }
-      if (lastAssetScore) {
-        this.assetScores?.recordAssetScore(lastAssetScore);
-        void this.post({ type: "streamAssetScore", streamId: p.streamId, assetScore: lastAssetScore });
       }
     } finally {
       await browser.dispose();
