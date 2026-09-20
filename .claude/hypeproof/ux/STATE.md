@@ -7,7 +7,9 @@
 
 **2026-09-20 — P0 완료(평가 1회·수정 1회), P1 은 네 task 중 **하나**만. 둘 다 머지 안 함.**
 - `feat/sx-p0-curriculum-first` → **PR #1170**, CI 20개 전부 초록.
-- `feat/sx-p1-evidence-capture` (P0 브랜치 위에 쌓임) → **PR #1176, P1-A 하나만.** P1-B·C·D 미착수.
+- `feat/sx-p1-evidence-capture` (P0 브랜치 위에 쌓임) → **PR #1176, P1-A 하나만.**
+- `feat/sx-p1b-evidence-drawer` (#1176 위에 쌓임) → **P1-B.** P1-C·D 미착수.
+  머지 순서는 **#1170 → #1176 → P1-B** 다. 각 PR 의 diff 는 바로 아래 브랜치 기준이다.
   #1176 은 #1170 을 머지한 뒤에 본다. 그 전에는 diff 에 P0 커밋이 섞여 보인다.
   **#1172(P1 전체)를 닫지 않는다** — 네 task 중 하나만 담았으므로 `Closes` 줄을 비웠다.
 machine_gate 는 전부 초록이고 orchestrator 와 평가자가 **각각 따로** 다시 돌렸다.
@@ -122,10 +124,10 @@ acceptance 열은 평가 서브에이전트의 판정이 들어온 뒤 채운다
 | P0 | **P0 평가** | — | — | **FAIL 75/100, CRITICAL 0.** 판정서 `judge-P0-2026-09-20.md`. 실제 결함 3건(D-1·D-2·D-3)은 `115a746` 에서 고쳤다. 나머지 감점은 대부분 `spec`(아래) | 1 |
 | P0 | P0-PR | **초록** inspect exit 0, blockers [] | — | **PR #1170 열림, 머지 안 함** | 1 |
 | P1 | P1-A 이벤트·필드 확장 | **초록** worker tsc 0 · worker npm test 0 · ext npm test 0 | **초록** 구현 전 1 passed / 20 failed — 통과한 하나가 `/1` golden 불변이다 | 브랜치 `feat/sx-p1-evidence-capture` 커밋 `7171d56` | 1 |
-| P1 | P1-B Evidence drawer·기대 조건·완료 게이트 | NOT RUN | | **미착수** — 다음 세션 | 0 |
+| P1 | P1-B Evidence drawer·기대 조건·완료 게이트 | **초록** ext tsc 0 · ext npm test 0 · webview vite build 0 | **초록** 심은 결함 18개 중 18개를 잡을 때까지 단언을 고쳤다 | 브랜치 `feat/sx-p1b-evidence-drawer` 커밋 `6d4b8d7` | 0 |
 | P1 | P1-C 재확인 게이트·변경 전후 | NOT RUN | | **미착수** | 0 |
 | P1 | P1-D real/simulated 라벨·인터뷰/반응 입력 | NOT RUN | | **미착수** | 0 |
-| P1 | P1-PR | | | **부분 범위 PR** — P1-A 만 담는다 | 1 |
+| P1 | P1-PR | | | **부분 범위 PR 둘** — #1176 이 P1-A, 그 위가 P1-B. C·D 없음 | 2 |
 | P2 | P2-A 경계 회고 | NOT RUN | | | | 0 |
 | P2 | P2-B 다음 실험 → 다음 과제, 기존 개선 루프 연결 | NOT RUN | | | | 0 |
 | P2 | P2-PR | | | | | |
@@ -394,6 +396,26 @@ VS Code 테마도 아니다.
      "코어는 이름이 score·rank·grade 로 읽히는 것을 export 하지 않는다" 를 단언한다.
      **이름을 바꿔 그 단언을 피하는 것은 살아 있는 검사를 속이는 것**이라 합치지 않았다.
 
+11. **P1-B 가 찾은 스키마 ↔ 요구 충돌 둘 — 둘 다 "사람이 정할 것" 이다.**
+   - `provenance` 가 SX-20 과 충돌한다. `/2` 검증기는 `{who,when,where}` 세 칸이
+     **모두 비어 있지 않을 것**을 요구하는데(`legacy-observation.ts` `shapeOf`),
+     SX-20 은 미입력을 "출처 미기록" 으로 남기라고 한다. 빈 문자열을 보내면 배치
+     전체가 거절되고, 아무 말이나 넣으면 SX-20 이 금지한 "추정으로 채우기" 가 된다.
+     → **기록되지 않았다는 사실 자체를 기록**했다(`UNRECORDED = "미기록"`). 지어낸
+     출처가 아니므로 추정이 아니고, 화면에서는 빈 칸과 똑같이 다룬다.
+     **정본 선택**: (a) 스키마가 빈 문자열을 허용하도록 넓힌다, (b) 지금처럼 센티널을
+     쓴다, (c) `provenance` 를 `external_feedback_received` 의 선택 키로 내린다.
+   - SX-22 는 종류에 **설문**을 적고, 설계 표의 `source_kind` 는 `test`(직접 시험)를
+     적는다. 둘 다 여섯 개이고 나머지 다섯은 같다. P1-A 가 이미 설계 쪽으로 닫았고
+     fixture 와 열린 PR(#1176)이 그 enum 위에 있어서 **바꾸지 않았다**.
+     → 설문을 받을 자리가 지금은 없다. 인터뷰로 뭉뚱그리면 SX-22 부정 조건에 걸린다.
+
+12. **P1-B 가 남긴 빚 하나 (범위였는데 못 끝낸 것).**
+   `Task.curriculum` 영속화와 phase 전이(`working → submitted`)가 없다. `submitTask` 는
+   게이트를 다시 판정하고 거절 사유를 돌려주는 데까지고, 통과해도 상태가 바뀌지 않는다.
+   설계 §과제 흐름 상태 기계의 나머지 절반이다. 화면에서는 "완료가 열린다" 까지만
+   참이고 **"완료된다" 는 아직 참이 아니다.**
+
 ## Lab에 넘길 것
 
 - Lab `products/lab-web/measurement-profile.md` MP-01 "score-first" 개정: SX-60(6개 점수 카드를 접힌 세부 데이터로)과 충돌. Lab 결정 기록 `docs/decisions/2026-09-18-studio-ux-philosophy-adoption.md`에 등록됨.
@@ -401,8 +423,24 @@ VS Code 테마도 아니다.
 
 ## 다음 세션이 집을 첫 task
 
-`docs/plan/ux-dag.yaml` **P1-B — Evidence drawer·기대 조건·완료 게이트**.
-`depends_on: [P0-C, P0-D, P1-A]` 이고 셋 다 끝났다.
+`docs/plan/ux-dag.yaml` **P1-C — 재확인 게이트와 변경 전후 보기** (`depends_on: [P1-B]`, 끝났다).
+P1-D(`real`/`simulated` 라벨·인터뷰 입력)도 `depends_on: [P1-B]` 라 **둘은 서로 독립**이다.
+어느 쪽을 먼저 집어도 된다.
+
+P1-C 가 쓸 것은 이미 있다: `gates().verification` 이 `criterion_ref`·`artifact_after`·
+`result_ref` 세 조건을 이미 판정하고, 그 문장이 서랍의 검증 줄로 나가고 있다.
+남은 것은 **변경 전후 보기**(SX-16) — `artifact` 이벤트 두 개의 sha256 과 본문을
+나란히 놓고, 그때 적용된 기대 조건을 함께 보여 주는 화면이다. AE-05 의 기존
+전후 증거를 **다시 만들지 말고 재사용**하라고 DAG 수용 기준이 적고 있다 —
+`NativeObservationPanel` 의 `hps-observation-compare` 블록이 그것이다.
+
+P1-D 는 `source_state` 가 이미 저장·표시되고 있으므로 Amber 마커와 라벨,
+그리고 `external_feedback_received` 의 `source_state` 선택 UI 가 남았다.
+지금은 폼이 `unverified` 로 고정해 보낸다(`real` 을 기본으로 채우지 않기 위해).
+
+**P1-B 에서 넘어온 빚 하나**: `Task.curriculum` 영속화와 phase 전이
+(`working → submitted`)가 없다. `submitTask` 는 게이트를 다시 판정하고 거절
+사유를 돌려주는 데까지다. 설계 §과제 흐름 상태 기계의 나머지 절반이다.
 
 **저장 계층은 이미 있다.** P1-A 가 `hps-observation/2`, 학습 이벤트 8종, 그리고
 `gates()`(완료·재확인)를 순수 함수로 만들어 두었다(`measurement-core/learning-events.ts`).
@@ -426,6 +464,20 @@ P1-B 가 할 일은 **그것을 부르는 화면**이다 — 지금은 게이트
 
 ## 기록
 
+- 2026-09-20 P1-B. 브랜치 `feat/sx-p1b-evidence-drawer`(#1176 위), 커밋 `6d4b8d7`.
+  영역 D(Evidence drawer)와 완료 게이트를 화면까지 이었다. P1-A 의 순수 함수에
+  **부르는 쪽**이 생겼다. 웹뷰는 게이트를 다시 계산하지 않고 호스트가 보낸
+  `complete.ok` 를 그린다. `disabled` 는 잠금이 아니므로 `submitTask` 를 받은
+  호스트가 **같은 함수**로 다시 판정한다.
+  결함 18개를 심어 18개를 잡을 때까지 단언을 고쳤고, 그 과정에서 **내 단언 두 개가
+  아무것도 재고 있지 않은 것**을 찾았다: `auditRegionText("EvidenceDrawer", text)` 는
+  시그니처가 `(text, opts)` 라서 문자열 "EvidenceDrawer" 를 감사하고 있었고,
+  `checked.missing.length === 0` 의 `missing` 은 seq 구멍이라 무엇이 통과하든 초록이었다.
+  폼 → 호스트 → 검증기 루프에서 제품 결함 둘도 잡았다(`evidence_refs: []`,
+  빈 `provenance`) — 둘 다 저장은 되고 **다음 읽기에서 배치 전체가 거절**되는 유형이다.
+  단위 테스트만으로는 끝까지 초록이었을 것이다.
+  곁가지로 `prepareObservation` 이 `/1` 만 받던 것을 고쳤다. 안 고쳤으면 `/2` 프로필에서
+  관찰이 아예 안 붙어 학습 이벤트가 쌓일 자리가 없었다 — 설정은 맞는데 동작이 없는 유형.
 - 2026-09-20 P1-A. 브랜치 `feat/sx-p1-evidence-capture`(P0 브랜치 위), 커밋 `7171d56`.
   `hps-observation/2` 를 같은 파일 안의 상위 집합으로 받고, 학습 이벤트 8종·필드 7개와
   두 게이트를 순수 함수로 만들었다. `/1` golden 은 한 바이트도 안 움직였다.
