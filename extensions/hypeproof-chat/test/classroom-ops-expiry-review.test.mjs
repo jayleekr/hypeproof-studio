@@ -51,7 +51,7 @@ async function hostFixture(t, opts = {}) {
   });
   assert.equal(pending.code, 'offline_pending', 'precondition: a real uploader-created pending snapshot');
   const state = new Map([['hypeproof.classroomOps.connection', {
-    grant_id: 'review-grant', class_run_id: 'review-run', seat_id: 'A1', expires_at: ended + 1000, poll_after_ms: 5000, student, run, lesson: null,
+    grant_id: 'review-grant', class_run_id: 'review-run', seat_id: 'A1', expires_at: opts.live ? Date.now() + 3_600_000 : ended + 1000, poll_after_ms: 5000, student, run, lesson: null,
   }]]);
   const secrets = new Map([['hypeproof.classroomOps.credential', 'SYNTHETIC-UPLOAD-GRACE-CREDENTIAL']]);
   const context = {
@@ -60,13 +60,15 @@ async function hostFixture(t, opts = {}) {
     globalStorageUri: { fsPath: dir }, subscriptions,
   };
   const requests = [];
-  globalThis.fetch = async (url) => {
+  globalThis.fetch = async (url, init) => {
     const path = new URL(url).pathname; requests.push(path);
+    if (opts.onFetch) { const r = await opts.onFetch(path, init); if (r) return r; }
     if (!path.startsWith('/v1/classroom/ops/collect/snapshots/')) return Response.json({ reason: 'ops_credential_expired' }, { status: 401 });
     return Response.json(path.endsWith('/seal') ? { receipt_id: 'synthetic-receipt', coverage: 'sequence_unavailable' } : {}, { status: 201 });
   };
   const host = new ClassroomOpsHost(context, () => ({ idleMs: 0, status: 'idle' }), {
     setHold() {}, readSpool: async () => { throw Error('resume must use the frozen copy, never read a new live spool'); },
+    ...(opts.probeProfile ? { probeProfile: opts.probeProfile } : {}),
   }, () => {});
   return { host, requests, stateFile, secrets };
 }
@@ -115,4 +117,25 @@ test('F5 a Service refusal (withdrawn) ends the resume: recorded once, not retri
   assert.equal(JSON.parse(await readFile(f.stateFile, 'utf8')).result, 'withdrawn');
   const before = f.requests.length; await f.host.resume(); await settle();
   assert.equal(f.requests.length, before, 'a withdrawn upload is not attempted again');
+});
+
+// Found in the real Mac GUI run (2026-09-20): in a class the token is verified FIRST and the seat is paired LATER. The
+// verification that happened before the connection existed had nowhere to go, so the board showed the token as unknown.
+test('token verified before pairing still reaches the board: the host asks once when the connection starts', async (t) => {
+  const bodies = [], jwt = (o) => Buffer.from(JSON.stringify(o)).toString('base64url') + '.synthetic-signature'; // HPS tokens are payload.signature
+  const token = jwt({ u: 'synthetic-student', c: 'synthetic-cohort', p: 'synthetic-profile', jti: 'issue-0001', exp: Math.floor(Date.now() / 1000) + 3600 });
+  let probes = 0; const f = await hostFixture(t, { live: true, endedMsAgo: -3_600_000, probeProfile: async () => { probes++; return { ok: true }; },
+    onFetch: async (path, init) => { if (path !== '/v1/classroom/ops/sync') return null; const b = JSON.parse(init.body); bodies.push(b); return Response.json({ ack: { contiguous: Math.max(0, ...b.events.map((e) => e.seq)), results: [] }, connection_epoch: 1, poll_after_ms: 60000, control: { paused: false, control_revision: 0 } }); } });
+  f.host.profileResult({ ok: true }, token); // before any connection: nothing to report to yet
+  await f.host.resume();
+  const until = Date.now() + 2000; while (Date.now() < until && !bodies.some((b) => b.events.some((e) => e.kind === 'activation'))) await new Promise((r) => setTimeout(r, 20));
+  const activation = bodies.flatMap((b) => b.events).find((e) => e.kind === 'activation'); assert.ok(activation, 'an activation event was sent after the connection started');
+  assert.deepEqual([activation.payload.stage, activation.payload.token_jti], ['token_verified', 'issue-0001']); assert.equal(probes, 1, 'asked once, not polled');
+  await f.host.disconnectInteractively();
+});
+test('negative control: no token on the device → starting a connection reports no token verification', async (t) => {
+  const bodies = []; const f = await hostFixture(t, { live: true, endedMsAgo: -3_600_000, probeProfile: async () => ({ ok: false, noToken: true }),
+    onFetch: async (path, init) => { if (path !== '/v1/classroom/ops/sync') return null; const b = JSON.parse(init.body); bodies.push(b); return Response.json({ ack: { contiguous: 0, results: [] }, connection_epoch: 1, poll_after_ms: 60000, control: { paused: false, control_revision: 0 } }); } });
+  await f.host.resume(); await new Promise((r) => setTimeout(r, 300));
+  assert.ok(!bodies.flatMap((b) => b.events).some((e) => e.kind === 'activation')); await f.host.disconnectInteractively();
 });
