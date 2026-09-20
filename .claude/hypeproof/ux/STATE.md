@@ -5,8 +5,9 @@
 
 ## RESUME HERE
 
-**2026-09-20 — P0 다섯 task 전부 구현 완료, 평가 1회, 수정 1회. 머지 안 함.**
-브랜치 `feat/sx-p0-curriculum-first`, `origin/main ce95747` 기준 커밋 12개. **PR #1170 열림(머지 안 함).**
+**2026-09-20 — P0 완료(평가 1회·수정 1회), P1 은 네 task 중 **하나**만. 둘 다 머지 안 함.**
+- `feat/sx-p0-curriculum-first` → **PR #1170**, CI 20개 전부 초록.
+- `feat/sx-p1-evidence-capture` (P0 브랜치 위에 쌓임) → **P1-A 하나만.** P1-B·C·D 미착수.
 machine_gate 는 전부 초록이고 orchestrator 와 평가자가 **각각 따로** 다시 돌렸다.
 다음은 아래 순서로 읽으면 된다: **단계별 게이트** → **평가** → **사람에게 묻는 것** →
 **요구 개정 제안** → **다음 세션이 집을 첫 task**.
@@ -118,11 +119,11 @@ acceptance 열은 평가 서브에이전트의 판정이 들어온 뒤 채운다
 | P0 | P0-E assetStatusBar 제거 | **초록** ext npm test 0 · `! grep -rn '7자산' src webview-ui/src` 0건 | **초록** 부재 증명 + 음성 대조군 3건 | 커밋 `2afca8b` | 1 |
 | P0 | **P0 평가** | — | — | **FAIL 75/100, CRITICAL 0.** 판정서 `judge-P0-2026-09-20.md`. 실제 결함 3건(D-1·D-2·D-3)은 `115a746` 에서 고쳤다. 나머지 감점은 대부분 `spec`(아래) | 1 |
 | P0 | P0-PR | **초록** inspect exit 0, blockers [] | — | **PR #1170 열림, 머지 안 함** | 1 |
-| P1 | P1-A 이벤트·필드 확장 | NOT RUN | | | | 0 |
-| P1 | P1-B Evidence drawer·기대 조건·완료 게이트 | NOT RUN | | | | 0 |
-| P1 | P1-C 재확인 게이트·변경 전후 | NOT RUN | | | | 0 |
-| P1 | P1-D real/simulated 라벨·인터뷰/반응 입력 | NOT RUN | | | | 0 |
-| P1 | P1-PR | | | | | |
+| P1 | P1-A 이벤트·필드 확장 | **초록** worker tsc 0 · worker npm test 0 · ext npm test 0 | **초록** 구현 전 1 passed / 20 failed — 통과한 하나가 `/1` golden 불변이다 | 브랜치 `feat/sx-p1-evidence-capture` 커밋 `7171d56` | 1 |
+| P1 | P1-B Evidence drawer·기대 조건·완료 게이트 | NOT RUN | | **미착수** — 다음 세션 | 0 |
+| P1 | P1-C 재확인 게이트·변경 전후 | NOT RUN | | **미착수** | 0 |
+| P1 | P1-D real/simulated 라벨·인터뷰/반응 입력 | NOT RUN | | **미착수** | 0 |
+| P1 | P1-PR | | | **부분 범위 PR** — P1-A 만 담는다 | 1 |
 | P2 | P2-A 경계 회고 | NOT RUN | | | | 0 |
 | P2 | P2-B 다음 실험 → 다음 과제, 기존 개선 루프 연결 | NOT RUN | | | | 0 |
 | P2 | P2-PR | | | | | |
@@ -363,6 +364,34 @@ VS Code 테마도 아니다.
    코치가 그것을 **지킨다**는 부정 fixture 는 여섯 주차 어디에도 없다.
    그건 실제 모델이 필요하다.
 
+9. **P1-A 가 찾은 설계 문서 모순 넷 — 문자 그대로면 쓸 수 없는 것이 나온다.**
+   조용히 지나가지 않고 좁은 예외를 만들었다. 어느 쪽이 정본인지는 사람이 정한다.
+   - **`external_feedback_received` 가 자기 규칙 1과 충돌한다.** kind 표는 `student_text`(인용)를
+     필수로, 기본 actor 를 `external_user` 로 둔다. 규칙 1 은 `student_text` 가
+     `actor=user` 에만 있을 수 있다고 한다. 문자 그대로면 **이 kind 는 쓸 수 없다.**
+     → 그 한 조합만 예외로 열고 나머지 거절은 유지. SX-44 부정문이 이름을 댄 것은 `actor=AI` 뿐이다.
+   - **`criterion_set` 의 `student_text` 필수와 SX-14 가 충돌한다.** SX-14 는 코치가 제안한
+     기대 조건이 "actor=AI 로 남아 게이트를 통과하지 못한다" 고 하는데, 그러려면 그
+     이벤트가 **저장은 돼야** 한다. → 필수를 `actor=user` 일 때로 좁혔다.
+   - **SX-14 규칙 1 이 8종 중 2종에 충족 불가능하다.** `test_observed`·`retest_confirmed` 에는
+     `student_text` 칸이 아예 없는데 강사는 8종 중 아무거나 완료 조건으로 고를 수 있다.
+     → 텍스트 요구를 그 kind 의 표에 칸이 있을 때만 적용했다.
+   - **SX-15 규칙 3 의 `resolveVerification()` 은 그대로 부를 수 없다.** 그 함수는 요청·결과·
+     인용된 method 를 받는데 `retest_confirmed` 는 `result_ref` 하나뿐이고, 코어로
+     import 하면 순환이 된다. → 같은 규칙을 8줄로 그 자리에 적용하고 주석에 밝혔다.
+
+10. **P1-A 가 남긴 부채 넷 (범위 밖이거나 결정 대기).**
+   - `worker/src/routes/observations.ts` 의 `POST /observations/validate` 가 `/2` 배치를 받아
+     놓고 응답에 `format: OBSERVATION_FORMAT` 을 **하드코딩**한다 — `/2` 가 `/1` 로 보고된다.
+     설계의 "바꾸는 파일" 목록에 이 파일이 없다.
+   - `worker/src/lib/learning-design.ts`(P0)가 세 목록을 **자기 사본**으로 들고 있다.
+     설계는 코어에 두라고 한다. control 이 deep-equal 을 단언해 드리프트는 스위트가 잡는다.
+   - `teacher_review` 의 키가 `reviews/<task>/` 아래라 `exportTask` 가 `Review[]` 로 쓸어
+     담는다. P4 가 쓰기 시작하면 한 배열에 두 record 모양이 섞인다. 아직 쓰는 경로가 없다.
+   - `SCORE_KEYS` 가 세 군데에 있다. 합치려면 코어에서 export 해야 하는데 `MC-T09` 가
+     "코어는 이름이 score·rank·grade 로 읽히는 것을 export 하지 않는다" 를 단언한다.
+     **이름을 바꿔 그 단언을 피하는 것은 살아 있는 검사를 속이는 것**이라 합치지 않았다.
+
 ## Lab에 넘길 것
 
 - Lab `products/lab-web/measurement-profile.md` MP-01 "score-first" 개정: SX-60(6개 점수 카드를 접힌 세부 데이터로)과 충돌. Lab 결정 기록 `docs/decisions/2026-09-18-studio-ux-philosophy-adoption.md`에 등록됨.
@@ -370,22 +399,39 @@ VS Code 테마도 아니다.
 
 ## 다음 세션이 집을 첫 task
 
-`docs/plan/ux-dag.yaml` **P1-A — 관찰 이벤트·필드 확장 (measurement-core)**.
-`depends_on: [P0-A]` 이고 P0-A 는 끝났다. Service 층(worker)이고 P1-B~D 의 저장
-형식을 정하므로 P1 의 첫 task 다.
+`docs/plan/ux-dag.yaml` **P1-B — Evidence drawer·기대 조건·완료 게이트**.
+`depends_on: [P0-C, P0-D, P1-A]` 이고 셋 다 끝났다.
 
-시작 전에 읽을 것: `worker/src/lib/measurement-core/legacy-observation.ts`(246줄,
-`hps-observation/1` 의 닫힌 kind·키 allowlist), `interpretation.ts` 의 `forbidKeys()`
-와 human 판정 술어, `worker/test/fixtures/measurement-core/legacy-cases.mjs` 상단의
-**golden 재생성 금지** 문구. 설계 §관측 이벤트와 필드가 `/1` 을 손대지 말고
-`hps-observation/2` 를 상위 집합으로 받으라고 정해 두었다.
+**저장 계층은 이미 있다.** P1-A 가 `hps-observation/2`, 학습 이벤트 8종, 그리고
+`gates()`(완료·재확인)를 순수 함수로 만들어 두었다(`measurement-core/learning-events.ts`).
+P1-B 가 할 일은 **그것을 부르는 화면**이다 — 지금은 게이트가 정확히 판정하지만
+아무도 부르지 않는다.
 
-알아 둘 함정 하나: `legacy-verdicts.json` 은 추출 **이전** 구현에서 캡처한 golden 이고
-"차이는 의미 변경이며 절대 golden 을 다시 생성해서 해결하지 않는다" 고 파일이 직접
-적어 두었다.
+시작 전에 읽을 것:
+- `worker/src/lib/measurement-core/learning-events.ts` — `gates()` 의 입력과
+  `GateMiss` 코드. 화면이 "왜 막혔는지" 를 그 코드로 말해야 한다.
+- 설계 §정보 구조 영역 D, §과제 흐름 상태 기계.
+- `extensions/hypeproof-chat/webview-ui/src/NativeObservationPanel.tsx` — D 가 대체할 것.
+- `extensions/hypeproof-chat/test/sx-render.mjs` · `sx-audit.mjs` — 새 화면도 같은
+  계측기로 감사한다. `COMPONENTS` 에 등록하면 된다.
+
+**호스트가 게이트를 계산하고 웹뷰는 그린다.** 설계가 못박은 경계다 — 웹뷰에서
+게이트를 다시 계산하지 않는다. `MissionHeader` 의 `currentStepId` 가 지금 웹뷰
+`useState` 인 것도 P1-B 에서 호스트의 `learningState` 로 옮길 자리다.
+
+**근거 없는 ✓ 를 그리지 않는다.** 지금 완료 조건은 전부 ☐ 이고 화면이 "아직 확인
+전" 이라고 말한다. P1-B 가 그 자리를 이벤트로 채운다.
 
 ## 기록
 
+- 2026-09-20 P1-A. 브랜치 `feat/sx-p1-evidence-capture`(P0 브랜치 위), 커밋 `7171d56`.
+  `hps-observation/2` 를 같은 파일 안의 상위 집합으로 받고, 학습 이벤트 8종·필드 7개와
+  두 게이트를 순수 함수로 만들었다. `/1` golden 은 한 바이트도 안 움직였다.
+  **학생 화면은 한 픽셀도 바뀌지 않았다** — 게이트를 부르는 UI 는 P1-B 다.
+  설계 문서 모순 4건과 부채 4건을 찾아 위에 올렸다(개정 제안 9·10번).
+  구현 중 판단 하나를 되돌렸다: `SCORE_KEYS` 를 코어 export 로 합치려다
+  `MC-T09`("코어는 score·rank·grade 로 읽히는 이름을 export 하지 않는다")에 걸렸고,
+  이름을 바꿔 피하는 대신 사본을 행동으로 잠갔다.
 - 2026-09-18 준비. 분류표·intent·요구·설계·검증·계획·DAG·정책·루브릭 작성. 코드 변경 없음.
 - 2026-09-18 검토. origin/main 대조로 기반 사실 확인, 강사 역할 전제 정정(5개 문서), P0-A를 기존 스키마 확장으로 수정, asset-status 스모크 함정 기록. 코드 변경 없음.
 - 2026-09-20 P0 실행. 커밋 8개(`c131be3`..`2a841e0`), 브랜치 `feat/sx-p0-curriculum-first`.
