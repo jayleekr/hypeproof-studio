@@ -41,6 +41,29 @@ export function preflight() {
   return { shell: json(path.join(source, 'Contents/Resources/app/product.json')), source_sha: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), source_dirty: !!dirty };
 }
 
+/**
+ * The release build vendors the Agent SDK JS with `npm install` (scripts/inject-builtin-extensions.sh §1b). This host
+ * downloads nothing: it copies the SAME pinned version's JS closure from the repository's own install, leaves the
+ * platform binary out exactly as the release does, and proves the tree by importing it. The native `claude` binary is
+ * handed to the app through the HPS_SDK_BINARY seam at launch — the user's seeded location is never written.
+ * What this is NOT: the release's registry install, nor the seeded-binary path. Both stay release/venue checks.
+ */
+function vendorSdk() {
+  const from = path.join(repo, 'extensions/hypeproof-chat/node_modules'), root = path.join(ext, 'dist/vendor'), to = path.join(root, 'node_modules');
+  const lock = json(path.join(repo, 'extensions/hypeproof-chat/package-lock.json')).packages['node_modules/@anthropic-ai/claude-agent-sdk']?.version;
+  if (process.env.HPS_DEVHOST_VENDOR_SDK === '0' || !existsSync(path.join(from, '@anthropic-ai/claude-agent-sdk/sdk.mjs'))) return { vendored: false };
+  assert.equal(json(path.join(from, '@anthropic-ai/claude-agent-sdk/package.json')).version, lock, 'the installed SDK is not the version package-lock pins');
+  rmSync(root, { recursive: true, force: true }); mkdirSync(to, { recursive: true }); writeFileSync(path.join(root, 'package.json'), JSON.stringify({ name: 'hypeproof-sdk-vendor', private: true, version: '0.0.0' }));
+  const seen = new Set(), queue = ['@anthropic-ai/claude-agent-sdk', 'ajv', 'ajv-formats', 'zod'];
+  while (queue.length) { const name = queue.shift(); if (seen.has(name) || !existsSync(path.join(from, name, 'package.json'))) continue; seen.add(name);
+    cpSync(path.join(from, name), path.join(to, name), { recursive: true, dereference: true, filter: (src) => !src.includes(`${path.sep}node_modules${path.sep}.bin`) });
+    queue.push(...Object.keys(json(path.join(from, name, 'package.json')).dependencies ?? {})); } // runtime deps only: no optional (platform binary), no peer, no dev
+  assert.ok(![...seen].some((n) => /claude-agent-sdk-/.test(n)), 'a platform binary package must not be vendored into the app');
+  execFileSync(process.execPath, ['--input-type=module', '-e', "const m = await import(process.argv[1]); if (typeof m.query !== 'function') process.exit(1);", 'file://' + path.join(to, '@anthropic-ai/claude-agent-sdk/sdk.mjs')], { stdio: 'ignore' });
+  const binary = path.join(from, `@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}/claude`);
+  return { vendored: true, version: lock, source: 'copied from the repository install pinned by package-lock (no download)', packages: [...seen].sort(), sdk_mjs_sha256: sha(path.join(to, '@anthropic-ai/claude-agent-sdk/sdk.mjs')), binary: existsSync(binary) ? { path: binary, via: 'HPS_SDK_BINARY at launch', sha256: sha(binary) } : null };
+}
+
 function prepare() {
   const pre = preflight();
   rmSync(copy, { recursive: true, force: true }); mkdirSync(home, { recursive: true });
@@ -49,15 +72,16 @@ function prepare() {
   // The shell stamps the extension with the product version; keep that field so the shell's own checks behave as shipped, take everything else from source.
   const shipped = json(path.join(ext, 'package.json')), current = json(path.join(repo, 'extensions/hypeproof-chat/package.json'));
   writeFileSync(path.join(ext, 'package.json'), JSON.stringify({ ...current, version: shipped.version, devDependencies: undefined, scripts: undefined }, null, 2));
+  const sdk = vendorSdk(); // before signing: it changes the bundle
   execFileSync('codesign', ['--force', '--deep', '--sign', '-', copy], { stdio: 'ignore' }); // ad-hoc, the COPY only
   const bundles = Object.fromEntries(BUNDLES.map((f) => { const a = sha(path.join(ext, f)), b = sha(path.join(repo, 'extensions/hypeproof-chat', f)); assert.equal(a, b, `${f} in the copy is not the current build`); return [f, a]; }));
   const manifest = { schema: 'hps-classroom-devhost/1', prepared_at: new Date().toISOString(), what_this_is: 'CURRENT extension + webview build inside a COPY of a Studio shell, isolated user data, local synthetic Service',
     what_this_is_not: ['the installed /Applications app', 'a current official release build', 'evidence about updater, signing, notarization or shell patches', 'a production Service, real learners, a school network or a real model'],
     shell: { copied_from: source, version: pre.shell.version, commit: pre.shell.commit, date: pre.shell.date, note: pre.shell.version !== current.version ? 'the shell is NOT the version this branch would ship in; only extension-level behaviour may be read from it' : '' },
     extension: { source_sha: pre.source_sha, source_dirty: pre.source_dirty, bundles, commands: current.contributes.commands.filter((c) => c.command.includes('classroom')).map((c) => c.command) },
-    // No vendored Agent SDK in this copy (the v0.1.16 shell predates it and a source build does not vendor one): agent-sdk turns fall back to the proxy runtime.
-    // That makes the SDK-fallback signal observable here, and means real SDK stop/reset behaviour is NOT covered by this host.
-    agent_sdk_vendored: existsSync(path.join(ext, 'dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs')),
+    // HPS_DEVHOST_VENDOR_SDK=0 prepares a copy WITHOUT the SDK: agent-sdk turns then fall back to the proxy runtime, which is how the
+    // SDK-fallback signal is observed. Results from such a copy are never evidence about SDK stop/reset behaviour.
+    agent_sdk_vendored: existsSync(path.join(ext, 'dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs')), agent_sdk: sdk,
     isolation: { user_data_dir: path.join(home, 'user-data'), extensions_dir: path.join(home, 'extensions'), service: 'http://127.0.0.1:<port>/v1 (in-process, SQLite + in-memory R2)' } };
   writeFileSync(path.join(home, 'manifest.json'), JSON.stringify(manifest, null, 2));
   console.log(`prepared: ${copy}\n  shell ${manifest.shell.version} (copy) · extension source ${pre.source_sha.slice(0, 7)}${pre.source_dirty ? ' + uncommitted changes' : ''} · ${BUNDLES.length} bundle hashes match the current build\n  manifest: ${path.join(home, 'manifest.json')}\n  next: node e2e/classroom/mac-devhost.mjs launch`);
