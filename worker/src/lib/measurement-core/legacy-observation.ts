@@ -25,6 +25,7 @@
 // The /2 table (kinds, enums, per-kind required fields, defaults) lives in
 // ./learning-events.ts so the gates and the session-design schema read the same
 // list. This file stays the one place that decides whether a batch is valid.
+import { CANDIDATE_CAPABILITY_V1, LEGACY_SEVEN_ASSETS } from "./capability-models.ts";
 import {
   ARTIFACT_REF_KEYS,
   EVIDENCE_TYPES,
@@ -115,7 +116,14 @@ export interface ObservationBatch {
   incomplete?: boolean;
 }
 export interface ObservationFinding {
-  asset: ObservationAsset;
+  /**
+   * A capability key from the model this findings array was written against —
+   * one of the seven Assets, or one of the six candidate capabilities. Not a
+   * union of both: nothing maps one model onto the other (capability-models.ts),
+   * so a mixed array is invalid, and `validateFindings` is the thing that says
+   * which model applies.
+   */
+  asset: string;
   status: "observed" | "unobserved";
   interpretation: string;
   evidence: Array<{ event_id: string; quote: string }>;
@@ -353,31 +361,118 @@ export function validateObservation(value: unknown): {
     missing,
   };
 }
-export function observableAssets(batch: ObservationBatch): ObservationAsset[] {
+/**
+ * Which capability model a findings array is written against.
+ *
+ * Jay's 2026-09-13 decision (#1020, recorded in `capability-models.ts`): new
+ * interpretations default to the six-capability candidate model, and the seven
+ * Assets stay readable under their own id. Nothing maps one onto the other, so
+ * a findings array belongs to exactly one model and is validated against it.
+ *
+ * The default is the LEGACY model on purpose. Every stored findings record
+ * written before this change carries seven Asset keys, and the App re-validates
+ * saved records from `workspaceState` on load — defaulting to the new model
+ * would turn all of that history into "이전 관찰 근거를 확인하지 못했습니다."
+ * The producer of new findings passes its model explicitly.
+ */
+export type CapabilityModelId = "legacy-seven-assets" | "candidate-capability-v1";
+
+const MODEL_KEYS: Record<CapabilityModelId, readonly string[]> = {
+  "legacy-seven-assets": LEGACY_SEVEN_ASSETS.capabilities.map((c) => c.key),
+  "candidate-capability-v1": CANDIDATE_CAPABILITY_V1.capabilities.map((c) => c.key),
+};
+
+/** The keys a findings array for this model must carry — exactly once each. */
+export const capabilityKeys = (model: CapabilityModelId): readonly string[] => MODEL_KEYS[model];
+
+/**
+ * Read a stored record's model id. Anything unrecognized — including absent — is
+ * the legacy seven Assets, because a record with no model id was written before
+ * the field existed, and that is what it was written in.
+ */
+export const asCapabilityModel = (value: unknown): CapabilityModelId =>
+  value === "candidate-capability-v1" ? value : "legacy-seven-assets";
+
+/**
+ * Which capability model one seat's ASSESSMENT is written in — the same
+ * client-generation negotiation `servedObservationFormat` does for the batch
+ * format, for the same reason.
+ *
+ * Every Studio already installed bundles a validator that hardcodes seven keys
+ * (`v0.1.56 nativeObservationContract.ts:194`: `value.length === 7`) and calls
+ * `validateFindings` with no model argument. Serving it six would make the app
+ * throw `invalid_findings` **after** the provider call was paid for, show
+ * "관찰 결과를 확인하지 못했습니다", and never store the result — so it never
+ * recovers. Worker and app ship independently, so that skew is the normal state,
+ * not an edge case.
+ *
+ * An app that can parse the candidate model says so with
+ * `x-hps-capability-model`. Absent means an older build: it gets the seven
+ * Assets, exactly as it does today. The declaration is a ceiling, not an order.
+ */
+export const CAPABILITY_MODEL_HEADER = "x-hps-capability-model";
+
+export const servedCapabilityModel = (client: string | undefined): CapabilityModelId =>
+  client === "candidate-capability-v1" ? "candidate-capability-v1" : "legacy-seven-assets";
+
+/**
+ * Capabilities that cannot be `observed` without a particular kind of evidence
+ * in the batch, whatever the model calls them.
+ *
+ * Where each rule comes from, stated exactly:
+ *
+ *   VERIFY   candidate model's own `insufficient`:
+ *            "AI가 '테스트 통과'라고 말함; 테스트 요청만 존재"      -> executed result
+ *   ADAPT    candidate model's own `insufficient`:
+ *            "같은 요청 반복, 결과 변화 없이 재시도 횟수 증가"       -> >= 2 artifact versions
+ *   ITERATE  NOT from the model. Every `legacy-seven-assets` capability carries
+ *            `observe: "historical"` / `insufficient: "historical"` — the legacy
+ *            model states no criteria at all. This entry is the PRE-EXISTING /1
+ *            rule, moved here unchanged from the old hardcoded
+ *            `asset !== "ITERATE" || versions.size >= 2`. Its wording lives in the
+ *            seven-Asset rubric prompt, not in `capability-models.ts`.
+ *
+ * So the candidate half is read off the definitions and the legacy half is
+ * preserved behaviour. An earlier version of this comment said both halves came
+ * from the model and quoted an `insufficient` line for ITERATE that does not
+ * exist. VERIFY is in both models and keeps one rule; no other key has a floor.
+ */
+const EVIDENCE_FLOOR: Record<string, "executed" | "revised"> = {
+  VERIFY: "executed",
+  ITERATE: "revised",
+  ADAPT: "revised",
+};
+
+export function observableAssets(
+  batch: ObservationBatch,
+  model: CapabilityModelId = "legacy-seven-assets",
+): string[] {
   const executed = batch.events.some(
     (e) => e.kind === "tool_result" && e.outcome === "success",
   );
   const versions = new Set(
     batch.events.filter((e) => e.kind === "artifact").map((e) => e.sha256),
   );
-  return OBSERVATION_ASSETS.filter(
-    (asset) =>
-      (asset !== "VERIFY" || executed) &&
-      (asset !== "ITERATE" || versions.size >= 2),
-  );
+  const met = { executed, revised: versions.size >= 2 };
+  return capabilityKeys(model).filter((key) => {
+    const floor = EVIDENCE_FLOOR[key];
+    return floor === undefined || met[floor];
+  });
 }
 export function validateFindings(
   value: unknown,
   batch: ObservationBatch,
+  model: CapabilityModelId = "legacy-seven-assets",
 ): ObservationFinding[] {
-  check(Array.isArray(value) && value.length === 7, "invalid_findings");
+  const keys = capabilityKeys(model);
+  // Length AND membership. Length alone would accept six of the seven Assets
+  // plus one candidate key, which is the mixed array the models forbid.
+  check(Array.isArray(value) && value.length === keys.length, "invalid_findings");
   const events = new Map(batch.events.map((e) => [e.id, e]));
   const seen = new Set<string>();
   for (const f of value) {
     check(
-      object(f) &&
-        OBSERVATION_ASSETS.includes(f.asset as ObservationAsset) &&
-        !seen.has(String(f.asset)),
+      object(f) && keys.includes(String(f.asset)) && !seen.has(String(f.asset)),
       "invalid_asset",
     );
     seen.add(String(f.asset));
@@ -409,8 +504,7 @@ export function validateFindings(
     }
     check(f.status !== "observed" || human, "missing_human_evidence");
     check(
-      f.status !== "observed" ||
-        observableAssets(batch).includes(f.asset as ObservationAsset),
+      f.status !== "observed" || observableAssets(batch, model).includes(String(f.asset)),
       "missing_execution_evidence",
     );
     check(
@@ -462,3 +556,69 @@ export function servedObservationFormat(
  */
 export const isObservationFormat = (value: unknown): value is ObservationFormat =>
   (OBSERVATION_FORMATS as readonly string[]).includes(String(value));
+
+/**
+ * May the observation RESULTS panel be drawn on the work screen for this seat?
+ *
+ * Not the same question as "is observation on". On the work screen the panel
+ * draws its entry point — "내 작업 돌아보기" and a filled "이 작업의 기록 확인" button —
+ * and one press further, per-capability verdicts (독립 수행 근거 / 도움을 받은 수행 /
+ * 도움 사용 범위 미확인). An assessment of the learner, offered mid-task.
+ *
+ * The row that forbids this is **SX-59**, and it is the only one that reaches it:
+ *
+ *   SX-59  "작업 중 어떤 화면에도 역량 점수·등급·'개선 필요' 배지가 없다"   <- applies
+ *   SX-01  scoped to the inside of the mission header                    <- does not
+ *   SX-06  scoped to the coach rail (`hps-messages`/`hps-input-area`)    <- does not
+ *   SX-07  scoped to coach-initiated interventions, not always-on UI     <- does not
+ *
+ * SX-03 (변화 기록 진입은 작은 링크이며 `studio-primary` 급 스타일을 쓰지 않는다) is
+ * arguable and not relied on here. An earlier version of this comment claimed all
+ * four rows said the same thing; counting them is the point of
+ * `.claude/rules/verification.md` §1b, and I had not counted.
+ *
+ * SX-59 also names the remedy — "제거하거나 **학습 경험 프로필에서 비활성**한다" — because
+ * the trial cohort's own requirement (TUX-OBS-07) is to read observation results.
+ * So the panel follows `assess`, the cohort's opt-in to assessment, and recording
+ * keeps its own switch. A cohort that records but does not assess gets the drawer
+ * and the completion gate with no verdict shown back at the learner.
+ *
+ * Takes the SERVED block, not the profile: the client is the caller that matters,
+ * and a worker too old to send `assess` must read as "no", never as permission.
+ */
+export const showsObservationResults = (
+  served: { format?: unknown; assess?: unknown } | null | undefined,
+): boolean => isObservationFormat(served?.format) && served?.assess === true;
+
+/** What a profile's observation block actually permits. */
+export interface ObservationCapability {
+  /** Write learning events on the student's device. */
+  readonly record: boolean;
+  /** May call `POST /v1/observations/assess` — the batch leaves the device. */
+  readonly assess: boolean;
+}
+
+/**
+ * The ONE place `observation.record` / `observation.assess` are decided
+ * (ADR 0010).
+ *
+ * There is a reason this is a function and not two `??` expressions at each
+ * call site. The P1 repair put the same negotiation in two callers, wrote
+ * "same function, so the two answers cannot drift" in a comment, and the two
+ * answers drifted — a third literal elsewhere gave every observation seat a
+ * "please update Studio" banner. A flag read in eight places gets eight
+ * chances to disagree.
+ *
+ * Step 1 changes nothing that ships: `record` and `assess` both fall back to
+ * the legacy `enabled`, and no profile sets either field yet. The
+ * profile-serving snapshot is what proves that, not this comment.
+ */
+export function observationCapability(
+  observation: { enabled?: boolean; record?: boolean; assess?: boolean } | undefined,
+): ObservationCapability {
+  const legacy = observation?.enabled === true;
+  return {
+    record: observation?.record ?? legacy,
+    assess: observation?.assess ?? legacy,
+  };
+}
