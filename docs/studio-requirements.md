@@ -681,3 +681,6 @@ closed-by-default `<details>` in the coach rail of the work screen and a quiet l
 canvas or evidence drawer (SX-05/06/13). Text is rendered as text; links open only on a
 learner click through the existing https-guarded `openExternal` path. A late response or
 webview callback from an ended connection generation changes nothing.
+Without a valid connection the list stays readable and says "수업 연결 확인 전"; it says "끝난 수업의 자료"
+only on a normal expiry or once the run's own end time has passed — a missing connection (an app restart in a
+running class) is not evidence that the class ended.

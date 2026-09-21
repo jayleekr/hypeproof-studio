@@ -128,7 +128,7 @@ npm --prefix chalk run typecheck
 | AT-41 | 세 흐름 공통 결과 화면 | **NOT RUN · 계획** | 같은 곳 |
 | AT-42 | 공통 선택 모델 (옛 표기 AT-37) | **실행됨** — UI e2e + 실제 Mac 정상 경로. 실제 기기 2대 이상·Safari/Firefox NOT RUN | [U1 실행 기록](#remote-management-u1-run-20260921) |
 | AT-43 | 선택한 학생의 수업 기록 회수 (옛 표기 AT-38) | **실행됨** — Service + UI e2e + 실제 Mac 정상 경로. 기기 실패·재전송은 합성, Windows·학교망·staging D1 NOT RUN | 같은 곳 |
-| AT-44 | 공지·자료 대상 배포 (옛 표기 AT-39) | **실행됨** — Service + 기기 + 로컬 workerd D1 + UI e2e + 실제 Mac M1(실제 창 1대, A2·A3 합성). Windows·학교망·staging D1·기기 2대 이상 NOT RUN | [U2 실행 기록](#remote-management-u2-run-20260921) |
+| AT-44 | 공지·자료 대상 배포 (옛 표기 AT-39) | **실행됨 · 재인수 요청 중** — Service + 기기 + 로컬 workerd D1 + UI e2e + 실제 Mac M1(실제 창 1대, A2·A3 합성). 첫 인수 요청은 제안 커밋 경계 결함으로 반려, 수정·회귀 추가. Windows·학교망·staging D1·기기 2대 이상 NOT RUN | [U2 실행 기록](#remote-management-u2-run-20260921) · [재인수 수정](#remote-management-u2-reaccept-20260921) |
 
 **옛 표기가 남아 있는 곳(이번에는 고치지 않았다 — 시험 파일은 이 설계 세션의 소유가 아니다).** 아래 파일의 시험 제목·주석에 있는 번호는 작성 당시 표기다. U2 구현에서 시험 파일 소유권을 넘겨받을 때 제목을 새 번호로 바꾸고, 그때까지는 이 표로 읽는다.
 
@@ -632,8 +632,10 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 | 배포 확정 200석 | 20 (2) | 25 | 4,246 | 809 |
 | sync · flag OFF · idle | 4 | 3 | 5 | 0 |
 | sync · flag ON · 대기 없음 | 5 | 3 | 6 | 0 |
-| sync · 제안 2건 | 16 (2) | 9 | 49 | 2 |
-| sync · `received`+`reflected` | 21 (4) | 11 | 54 | 10 |
+| sync · 제안 2건 | 16 (2) | 19 | 61 | 2 |
+| sync · `received`+`reflected` | 21 (4) | 18 | 69 | 10 |
+
+아래 두 sync 행은 [재인수 수정](#remote-management-u2-reaccept-20260921) 뒤의 값이다(수정 전 `51708c7`: 제안 2건 bind 9·읽기 49, receipt bind 11·읽기 54). 문장·batch·쓰기 수는 그대로이고, 기록하는 문장이 전제조건을 스스로 검사하게 되면서 **bind와 읽은 행만** 늘었다(제안 1건당 읽기 약 +6행, receipt 1건당 약 +7행 — PK·UNIQUE 조회). idle과 확정 경로는 바뀌지 않았다(100석 확정 읽기는 실행마다 2,232~2,235로 3행 흔들린다).
 
 게이트: 좌석 수와 무관한 문장 수(200석도 조건부 batch 1개), 문장당 bind ≤ 30, idle 증가분 쓰기 0·문장 ≤ +1·읽기 ≤ +2, sync 1회 ≤ 45문장, 대상 1명 전달 쓰기 ≤ 20행 — 모두 충족. 확정 쓰기는 요구 문서의 모델(125/405/805행)과 +3% 이내다. 확정 읽기(좌석당 약 20행)는 모델에 없던 항목으로, 확정 직후의 결과 view·정산이 대부분이다. 운영 D1의 latency·쿼터·30초 한도는 NOT RUN.
 
@@ -652,6 +654,47 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 **관측하지 않은 것 (NOT RUN).** Windows(link/rename·보안 프로그램의 파일 점유·한글 사용자 폴더), 학교망, Cloudflare staging/production D1(0023 적용·실제 guard·쿼터·30초 한도·plan), 실제 기기 2대 이상, 실제 모델·실제 메일, Keychain에 자격이 남는 설치본에서의 ‘재시작 뒤 연결 유지’(M1은 재연결로 대체), 전원 차단 수준의 내구성(fsync는 요청만 함), 100석 실부하에서의 채팅 p95(AT-25 기준 — 합성 부하 미실행), Safari/Firefox. D16의 200%·390px는 브라우저에 mount한 학생 컴포넌트와 Chalk 페이지에서만 봤고 실제 Studio 창의 확대는 보지 않았다. INT-CO-04 owner 승인과 운영 활성화는 시험 결과가 아니다.
 
 **구현하며 바뀐 계약**은 [요구 문서의 표](../requirements/classroom-admin.md#remote-management-u2-20260921)에 있다(현재 판 기준 coverage, 회수 전용 키, link() CAS, 요청 시각 기준 적용 기한, probe 분리).
+
+<a id="remote-management-u2-reaccept-20260921"></a>
+
+### U2 — 재인수 수정 기록 · 2026-09-21 (독립 검토가 `51708c7`에서 재현한 P1 1건 + receipt 결속 1건 + 화면 P2)
+
+Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 재현 스크립트 4개(`management-20260921/u2-*.mjs` — 검토자 소유, 이 PR에 넣지 않음)를 같은 worktree에서 수정 전·후로 실행했다. 층은 전부 **로컬 HTTP + SQLite + 실제 `InboxSession/InboxStore`(임시 디스크)** 다.
+
+| 재현 | `51708c7` (수정 전) | 수정 뒤 (`9d85718`) |
+|---|---|---|
+| `u2-deferred-boundary-check` — 후보 SELECT 뒤·원장 UPDATE 전에 ①정상 회수 API ②flag OFF ③좌석 교체 ④옛 epoch receipt | ①②③ **FAIL**: 응답에 item 1건, 원장은 `revoked/accepted · offers 0` · ④ PASS | 4/4 PASS — 응답 item 0건, 원장 `offers 0 · offer_key ''` 그대로 · ④ 유지 |
+| `u2-revoke-inbox-impact` — 실제 기기 클라이언트·디스크 | **음성 FAIL**: 기록되지 않은 제안의 본문이 끝까지 보임(`final_visible 1`) · 양성(기록된 뒤 회수) PASS | 2/2 PASS — 음성 `initially_visible 0 → 0`, 양성 `1 → 0`(tombstone으로 내려감) |
+| `u2-receipt-binding-boundary-check` — receipt 행을 읽은 뒤·기록 전에 ①재로그인(epoch+1) ②좌석 교체 (수정 중 추가된 스크립트) | `4aaab9e`에서 ①② **FAIL**: `reflected`·카드·감사 행이 바뀐 신원 아래 기록됨 | 3/3 PASS — `changed · final=false`, 상태·카드·감사 0. 양성 대조군은 정상 기록 |
+| `u2-index-corruption-check` | PASS | PASS(변경 없음) |
+
+**원인.** `distributionExchange`는 후보를 읽고(`SELECT … next_offer_at`) 원장에 기록한 뒤 응답을 만들었는데, 응답은 **읽은 후보 목록**에서 만들어졌고 기록 UPDATE의 조건은 행의 상태·키뿐이었다. 그 사이에 끼어든 회수·flag·명단 변경은 UPDATE를 0행으로 만들었지만(또는 조건에 없어 통과했지만) batch는 성공했고 item은 그대로 실렸다. receipt도 같은 모양이었다(행 CAS는 있었으나 **누구의 sync인지**는 기록 시점에 다시 묶지 않았다). **수정:** 기록하는 문장이 전제조건 전체를 스스로 검사하고, 응답·카드·감사 행은 **그 문장이 실제로 바꾼 행**에서만 만든다(‘한 번 더 읽기’ 아님). 계약은 [요구 문서의 표](../requirements/classroom-admin.md#remote-management-u2-20260921) 끝 8행.
+
+**제품 회귀로 편입한 것.** 각 경합은 실제 SELECT 하나의 결과를 붙잡아 두고 그 사이에 **실제 요청**을 실행하는 hook으로 만들며, hook이 발화하지 않으면 시험이 실패한다(주입 지점이 SQL과 어긋난 채 통과하는 것을 막음).
+
+| 층 | 추가 | 결과 |
+|---|---|---|
+| Service `classroom-ops-distribution.test.mjs` D5 ‘OFFER commit boundary’ | 양성 대조군(간섭 없음 → 응답과 원장 일치) · 제안 기록 전 간섭 6종(배포 회수·자료 회수·flag OFF(API)·수업 종료·재로그인·lease 이전) + 좌석 교체(API): 응답 0건·원장 `offers 0`, 조건이 돌아오면 같은 의도 재제안 · **기록된 뒤 회수 → receipt는 `revoked·final` + tombstone 즉시** · receipt CAS 패배: `changed·final=false`, 카드·감사 0, 재전송은 지금의 행 기준 · `no_change` 판정 순간 카드가 사라지면 ‘이미 보유’라 하지 않고 다음 sync에 실제 전송 · receipt 신원 결속(재로그인 → `changed` → 재전송 `stale_offer·final` → 새 키로 재제안·정상 기록 / 좌석 교체) · 회수 확인 receipt의 신원 결속 · `card` 대조군 5행(전달 중 회수된 카드 표시) | 17 PASS. 새 검사는 수정 전 store에서 **실패함을 확인**(offer 경계: ‘must not be in the answer’, receipt: ‘not recorded, not final’) |
+| 실제 기기 루프 ↔ Service `classroom-ops-distribution-device.test.mjs` | 같은 회수 경합을 실제 sync 루프로: 응답에 item 0, **디스크 어디에도 본문 없음**, 강사 view `revoked · none` / 양성: 1 tick으로 저장됨을 확인 → 회수 → 카드 `withdrawn`, **본문 파일 사라짐**, 저널 0, view `revoked · withdrawn` | 5 PASS |
+| 확장 `classroom-inbox.smoke.mjs` | `inboxPresence` 대조군 6행(연결·미연결·정상 만료·종료 시각 경과·종료 시각 모름) · 미연결 view에서도 보유 자료 읽힘 · 확정 종료는 ‘미확인’으로 같이 표시되지 않음 | 10 PASS |
+| 브라우저 `e2e/classroom/ops-distribution.mjs` | 1280×720 첫 화면: 선택 → 조치 → **첫 학생 행 < 720px**, 작성기·이력 닫힘, 결과·이력은 목록 뒤, 공유 패널은 그 뒤 · 권한 없는 강사에게 작성기·보내기·결과 모두 미표시 · 선택 요약에 ‘전달되지 않습니다’ 없음 + 조치별 정책 줄(미연결 좌석이 있을 때만) · 저장줄 ‘저장만으로는 아무에게도 보내지지 않습니다’, 주 흐름에 ID·hash 없음(‘검증용 상세’에 전체) · 전송 접수 뒤 작성기 접힘·요약줄/저장줄이 ‘보낸 배포가 있음’ · 회수된 실행: 머리말 `회수한 배포`, ‘모두 반영’ 없음, ‘지금 기기’ 줄(다른 배포로 유지 1 / 회수 확인 2·남은 자료 없음) · 학생 컴포넌트: 미연결 ‘수업 연결 확인 전’ + 안내 1줄, 확정 종료 ‘끝난 수업의 자료’, 연결 중 둘 다 없음 | 7 PASS |
+| 회귀 (로컬, Node 22.22.1) | worker `npm test` · `test:classroom-ops` · `test:classroom-ops:d1` · typecheck / Chalk `npm test` · typecheck / 확장 `npm test` · typecheck(host·webview) / 브라우저 e2e `classroom`·`classroom-ops`·`-roster`·`-selection`·`-distribution`·`classroom-report` | 전부 PASS |
+
+**화면(P2)에서 계측기 쪽 오류였던 것.** e2e가 접힌 작성기를 열지 않고 입력하려다 실패(제품 아님 — 시험이 새 구조를 따르게 고침), 학생 컴포넌트 시험의 `window.root`가 `id="root"` 요소와 이름이 겹쳐 실패(시험 변수명 변경).
+
+**실제 Mac M1 재실행 (source `9d85718` — 이 기록을 담은 문서 커밋만 그 위에 있다 · 공식 shell 0.1.56 복사본(`f5939d9`) · Agent SDK 0.3.207 + 실제 binary · 확장 bundle hash 4개가 현재 빌드와 일치 · 전용 devhost·user-data·HOME·포트 18771/18772/9371).** 앞선 U2 runner(그 프로세스의 명령·cwd·포트를 확인한 뒤)만 내리고 다시 띄웠다. `:18761/:18762` 데모와 설치본은 건드리지 않았다(전후 같은 PID가 그 포트를 듣고 있음을 확인). 수정 도중의 `4aaab9e` 실행도 PASS였고, 그 뒤 Service가 바뀌어 최종 소스로 한 번 더 돌렸다. 강사 쪽은 전부 보이는 Chromium의 실제 Chalk `/manage`에서 조작했다.
+
+1. 강사 첫 화면(1280×720): 선택 묶음 477px → 조치 버튼 569px → **첫 학생 행 676px**, 작성기·이력 닫힘(수정 전 독립 검토 실측 1742px).
+2. 작성기를 열어 공지 저장(전송 0) → A1만 선택 → 미리 확인 → 보내기 → 작성기가 접히고 요약줄 ‘이 판을 보낸 배포가 아래 조치 결과에 있음’, 저장줄에 ‘보내지 않았습니다’ 없음 → `대상 1명 · 보관함 반영 1 · 모두 반영`.
+3. 실제 창: 닫힌 카드 → 열기 → 다시 열기, 진입 카드 동일, 대화·입력 초안·workspace 해시 불변.
+4. **앱 완전 종료 → 재시작**: 양쪽 표시면에 같은 카드 1장, 요약은 **‘수업 연결 확인 전’**(‘끝난 수업’이라고 말하지 않음 — 회차는 열려 있다) → 새 코드로 다시 연결하면 그 문구가 사라짐. **같은 grant의 자동 재연결은 이 harness에서 NOT RUN**(secret을 메모리에만 둠).
+5. 2번째 판 → 카드 1장이 2번째 판으로 → 같은 판 한 번 더 → `no_change`, 카드 1장.
+6. 방금 실행 회수 → 머리말 `회수한 배포`, ‘모두 반영’ 없음, ‘지금 기기: … 다른 배포로 보관함에 남아 있음 1’, 실제 창 카드 유지 → 이력에서 남은 2번째 판 실행을 찾아 회수 → 실제 창 ‘강사가 회수한 자료입니다’, 강사 ‘기기 보관함에서 회수 확인 1 · 회수 확인 불가 0 — 이 배포로 기기에 남은 자료는 없습니다’, 1번째 판은 돌아오지 않음.
+7. 합성 A2·A3: targets 행 0 · distribution 블록 0 · 보관함 디렉터리 없음. 모델 응답은 합성(실제 모델 호출 0), 메일 없음.
+
+증거: devhost `distribution/result.json`·`run.log`·화면 13장(`00-instructor-first-screen-720` ~ `11-learner-work-screen-withdrawn`, `06b-learner-unconfirmed-connection` 포함), `manifest.json`, 독립 재현 4종 재실행 로그 `reacceptance/*-9d85718.log`(4종 모두 exit 0; 수정 도중의 `*-4aaab9e.log`에는 receipt 결속 FAIL 2건이 그대로 남아 있다). 이전 실행의 증거는 `distribution-2f4eab8/`·`distribution-4aaab9e/`로 보존했다. 실행기는 강사 페이지와 학생 앱을 연 채 떠 있다.
+
+**여전히 NOT RUN (PASS로 바꾸지 않았다).** Keychain 자격을 유지한 **같은 grant의 자동 재연결**(이 harness는 secret을 메모리에만 둔다 — 재시작 뒤 새 코드로 다시 연결했다), Windows, 학교망, Cloudflare staging/production D1(0023 적용·실제 guard·쿼터·30초 한도·plan), 실제 기기 2대 이상과 실제 네트워크 지연에서의 경합(위 경합은 로컬 SQLite에서 hook으로 만든 것이다), 실제 모델·실제 메일, VoiceOver/NVDA, Safari/Firefox, owner의 INT-CO-04 승인과 운영 활성화. U2는 원격관리 전체의 완료가 아니다(U3·AT-40/41 미착수).
 
 <a id="windows-field-cuesheet-20260921"></a>
 
