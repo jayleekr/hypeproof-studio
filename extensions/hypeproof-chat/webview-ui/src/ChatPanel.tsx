@@ -1,6 +1,9 @@
 import { AccessControl } from './AccessControl';
 import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
+import { MissionHeader } from './MissionHeader';
+import { EvidenceDrawer } from './EvidenceDrawer';
+import { isObservationFormat } from '../../src/nativeObservationContract';
 import { MarkdownText } from './MarkdownText';
 import { DisconnectedChat } from "./StartPage";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -13,6 +16,7 @@ import type {
   UpdateOffer,
   UxConfig,
 } from "../../src/protocol";
+import type { LearningStatePayload } from "../../src/learningStateHelpers";
 import { onHostMessage, postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
 import { composerLabel, copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
@@ -31,17 +35,17 @@ interface Props {
   // #384 — image handed from the host (editor-tab image → attach to coach).
   incomingImage: { dataUrl: string; nonce: number } | null;
   /**
-   * #503 — 단일 타임라인. user / assistant / tool 이 일어난 순서대로 섞여 있다.
-   * 툴 로그를 따로 받던 `toolLog` prop 은 사라졌다 — 그게 화면을 두 덩어리로
-   * 가르던 원인이었다.
+   * #503 — a single timeline. user / assistant / tool are interleaved in the order
+   * they happened. The `toolLog` prop that used to carry tool logs separately is gone
+   * — that was what split the screen into two blocks.
    */
   messages: ChatMessage[];
-  pageNotice: string | null;           // #308 — "페이지를 코치에게" 인라인 안내
+  pageNotice: string | null;           // #308 — inline notice for "페이지를 코치에게"
   aiNotice: string | null;             // #320 — AI disclosure at session start
-  stopNotice: string | null;           // #497 — Stop 으로 턴이 끊겼음을 알리는 안내
-  /** #649 — 지금 열려 있는 세상 id (호스트의 worldOpened). 스트립 강조에만 쓴다. */
+  stopNotice: string | null;           // #497 — notice that the turn was cut off by Stop
+  /** #649 — id of the world currently open (the host's worldOpened). Used only to highlight the strip. */
   openWorldId: string | null;
-  /** "갤러리에 올리기" 진행 상태. null = 아직 안 눌렀다. */
+  /** Progress of "갤러리에 올리기". null = not pressed yet. */
   publish:
     | { state: "uploading" }
     | { state: "done"; url: string }
@@ -193,6 +197,17 @@ export function ChatPanel(props: Props) {
   const [draftError, setDraftError] = useState<string | null>(null);
   // #751 F4 — what the learner said about each lesson step in this panel. Their statement, not a grade.
   const [lessonSteps, setLessonSteps] = useState<Record<string, 'in_progress' | 'submitted'>>({});
+  // SX-01/SX-02 — the step currently being viewed. A **view state**. Not a completion judgment.
+  const [currentStepId, setCurrentStepId] = useState<string | null>(null);
+  /**
+   * SX-14·15·17 — the learning state the host computed and sent. **It is not
+   * recomputed here.** null means this connection does not use learning events (it is
+   * not `hps-observation/2`), and then region D is not drawn — an empty drawer left on
+   * screen does nothing when pressed.
+   */
+  const [learning, setLearning] = useState<LearningStatePayload | null>(null);
+  /** Drawer open/closed is a **view state**, so the webview owns it. Closed by default (SX-17). */
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const snapshot = useRef({text:draft,images:pendingImages,queued});
   snapshot.current = {text:draft,images:pendingImages,queued};
   const activityId = config?.activity?.id;
@@ -216,12 +231,22 @@ export function ChatPanel(props: Props) {
     });
     return off;
   }, [activityId]);
+  // SX-14·15·17 — take the learning state the host sent as-is. Why it is not filtered
+  // by activity id: the gate is per **task**, and the host already sends only that
+  // task's events.
+  useEffect(() => {
+    const off = onHostMessage((msg) => {
+      if (msg.type === "learningState") setLearning(msg.state);
+    });
+    return off;
+  }, []);
   /**
-   * #642/#649 (2026-08-20 검토) — 친구를 누른 순간부터 호스트가 streamStart 를
-   * 보내기까지의 **무방비 구간**. 그 사이 호스트는 세상 HTML + 엔진을 받아오고(왕복
-   * 두 번) 보관하고 index.html 을 쓴다 — 수백 ms ~ 수 초다. `streaming` 은 아직
-   * false 라 스트립은 다 살아 있고 러너도 접혀 있었다: 아이가 초코를 누른 직후 나비를
-   * 누르면 세상 열기가 겹쳤다(#642·#649 가 잡으려던 바로 그 증상).
+   * #642/#649 (2026-08-20 review) — the **unguarded window** between pressing a friend
+   * and the host sending streamStart. In between, the host fetches the world HTML +
+   * engine (two round trips), archives them and writes index.html — hundreds of ms to
+   * several seconds. `streaming` is still false, so the whole strip stayed live and the
+   * runner stayed folded: a kid pressing 초코 and then 나비 right after made two world
+   * opens overlap (exactly the symptom #642·#649 were meant to catch).
    */
   const [worldPending, setWorldPending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -229,9 +254,9 @@ export function ChatPanel(props: Props) {
   /** Previous `streaming` value — the flush must fire on the edge, not the state. */
   const prevStreamingRef = useRef(streaming);
 
-  // 호스트가 턴을 시작했으면(streamStart) 그때부터는 streaming 이 같은 일을 한다.
-  // 안전 타이머 — 세상 열기가 실패해 턴이 아예 안 시작되는 경우에도 버튼이 영영
-  // 잠기지는 않게(그러면 아이는 앱이 죽은 줄 안다).
+  // Once the host has started the turn (streamStart), `streaming` does the same job
+  // from there on. Safety timer — so the buttons are never locked forever when opening
+  // a world fails and the turn never starts at all (the kid reads that as a dead app).
   useEffect(() => {
     if (!worldPending) return;
     if (streaming) {
@@ -239,14 +264,14 @@ export function ChatPanel(props: Props) {
       return;
     }
     const t = setTimeout(() => setWorldPending(false), 20000);
-    // `return () => …` 로 쓰면 test/hook-order.smoke.mjs 의 정적 검사가 이 줄을
-    // **컴포넌트의 조기 return** 으로 읽어(아래 훅들을 전부 위반으로 센다) — 정리
-    // 함수는 이름을 붙여 돌려준다.
+    // Written as `return () => …`, test/hook-order.smoke.mjs's static check reads this
+    // line as an **early return of the component** (and counts every hook below it as a
+    // violation) — so the cleanup function is named and then returned.
     const cancel = () => clearTimeout(t);
     return cancel;
   }, [worldPending, streaming]);
 
-  /** 응답 중이거나 세상을 여는 중 — 친구 버튼과 러너는 같은 값을 본다. */
+  /** Responding, or opening a world — the friend buttons and the runner read the same value. */
   const unavailable = frozen || (!!config?.activity && !config.activity.verified);
   const busy = streaming || worldPending || unavailable;
 
@@ -256,25 +281,29 @@ export function ChatPanel(props: Props) {
   // gate server-side, this just keeps the UI honest (no thumbnail, plain text
   // paste). Absent on older cached /v1/profile responses → treated as off.
   const imagePasteEnabled = config?.profile?.input?.image_paste === true;
-  // #649 — 세상 전환은 **클릭만**. 프로필에 worlds 가 실려 오는 코호트(kids-quest)
-  // 에서만, 작성란 바로 위에 친구 스트립을 늘 띄운다. 대화가 시작된 뒤에도 사라지지
-  // 않아야 한다 — 첫 화면 칩만 있던 v0.1.48 에서는 세상을 바꾸려면 타이핑밖에
-  // 길이 없었고, 그 타이핑이 아이가 고쳐 둔 세상을 덮어썼다.
+  // #649 — switching worlds is **click-only**. Only for cohorts whose profile carries
+  // worlds (kids-quest), the friend strip is always up, right above the composer. It
+  // must not disappear once the conversation has started — in v0.1.48, which had only
+  // the first-screen chips, typing was the only way to change worlds, and that typing
+  // overwrote the world the kid had already fixed up.
   const worlds: WorldChoice[] = config?.profile?.worlds ?? [];
   /**
-   * 갤러리 버튼을 보일지. **코호트 프로필이 정한다** — 워커의 `publishing` 이
-   * 켜져 있고(`enabled`) 목적지가 갤러리(`strategy`)일 때만.
+   * Whether to show the gallery button. **The cohort profile decides** — only when the
+   * worker's `publishing` is on (`enabled`) and the destination is the gallery
+   * (`strategy`).
    *
-   * 미성년 코호트 기본값은 `local_only` 이고, 그 프로필에는 "공개 퍼블리시는
-   * 부모 동의 + PII 설계가 끝난 뒤에만 켠다" 는 결정이 주석으로 박혀 있다.
-   * 여기서 화면만 열어 봐야 서버가 403 으로 막으므로(fail closed), 이 판단은
-   * **아이에게 없는 버튼을 안 보여주기 위한 것**이지 보안 경계가 아니다.
+   * The minor-cohort default is `local_only`, and that profile carries the decision as
+   * a comment: "public publishing is turned on only after parental consent + the PII
+   * design is finished". Opening the UI here alone still gets a 403 from the server
+   * (fail closed), so this check is **about not showing a kid a button they do not
+   * have**, not a security boundary.
    *
-   * #748 — 이전에는 `strategy` 만 봤다. `enabled` 는 워커가 실어 보내기만 하고
-   * 어디서도 읽지 않는 값이었다. 이제 호스트의 `galleryPublishAllowed` 와 **같은
-   * 두 값을 같은 방향으로** 본다. 손으로 미러링하는 이유는 REQ-M33 과 같다 —
-   * 웹뷰는 별도 vite 앱이라 확장 호스트 모듈을 import 하지 않는다. 두 쪽이
-   * 갈라지지 않도록 test/gallery-publish-gate.smoke.mjs 가 드리프트를 잠근다.
+   * #748 — this used to look at `strategy` only. `enabled` was a value the worker
+   * shipped down and nobody read. Now it reads **the same two values in the same
+   * direction** as the host's `galleryPublishAllowed`. The reason for mirroring by hand
+   * is the same as REQ-M33 — the webview is a separate vite app and does not import
+   * extension-host modules. test/gallery-publish-gate.smoke.mjs locks the drift so the
+   * two sides do not diverge.
    */
   const publishing = config?.profile?.publishing;
   const galleryEnabled =
@@ -289,9 +318,10 @@ export function ChatPanel(props: Props) {
   // but mirrored here so the webview stays vscode-free (chatPanelHelpers
   // imports Node `Buffer`).
   //
-  // ⚠ 이 미러가 어긋나면 화면에 틀린 낱말이 뜬다. 2026-08-17 실기기에서 kids-world(현 kids-quest)
-  // 트랙이 "게임 만드는 중" 을 띄웠다 — 그 커리큘럼은 "게임" 프레임을 금지한다.
-  // test/tone-mirror.smoke.mjs 가 두 곳의 일치를 강제한다. 톤을 추가하면 양쪽 다 고칠 것.
+  // ⚠ If this mirror drifts, the wrong word shows on screen. On 2026-08-17, on a real
+  // device, the kids-world (now kids-quest) track put up "게임 만드는 중" — that
+  // curriculum forbids the "게임" frame. test/tone-mirror.smoke.mjs forces the two
+  // places to agree. When adding a tone, fix both sides.
   const templateTier =
     (config?.profile as { game?: { template_tier?: string } } | undefined)?.game?.template_tier;
   const appTone: "game" | "search" | "site" | "quest" =
@@ -326,8 +356,8 @@ export function ChatPanel(props: Props) {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages.length, streaming]);
 
-  // NOTE: 작명 카드로 빠지는 조기 return 은 **이 컴포넌트의 마지막 훅 아래**에 있다.
-  // 여기(훅 사이)에 두면 안 된다 — 아래 "훅 순서" 주석 참조.
+  // NOTE: the early return into the naming card sits **below this component's last
+  // hook**. It must not go here (between hooks) — see the "Hook order" comment below.
 
   const submit = (text?: string) => {
     const value = (text ?? draft).trim();
@@ -428,21 +458,22 @@ export function ChatPanel(props: Props) {
   const [dragActive, setDragActive] = useState(false);
 
   // ─────────────────────────────────────────────────────────────────────────
-  // 훅 순서 — 이 아래로는 훅을 추가하지 말 것. 조기 return 이 여기 있다.
+  // Hook order — do not add hooks below this line. The early return is here.
   //
-  // 작명 카드는 `needsNaming` 이 true 일 때만 렌더된다. 이 return 이 훅들 **사이**
-  // 에 있으면 렌더마다 훅 개수가 달라져 React 가 크래시한다:
+  // The naming card renders only when `needsNaming` is true. If that return sits
+  // **between** hooks, the hook count differs per render and React crashes:
   //
-  //   작명 전 (needsNaming=true)  → return → 훅 N개
-  //   아이가 이름 저장 → coach.configured=true
-  //   작명 후 (needsNaming=false) → 통과   → 훅 N+3개   ← React #310
-  //   (반대 방향 — config 지연 도착·`코치 이름 다시 짓기` → 훅 감소 → React #300)
+  //   before naming (needsNaming=true) → return → N hooks
+  //   kid saves the name → coach.configured=true
+  //   after naming (needsNaming=false) → falls through → N+3 hooks   ← React #310
+  //   (the other direction — config arriving late, `코치 이름 다시 짓기` → fewer hooks → React #300)
   //
-  // 작명 의식은 모든 학생이 반드시 통과하므로 이 전이는 정상 경로에서 100% 발생한다.
-  // 2026-08-10 실기기 세션에서 #300·#310 두 방향 모두 재현됐다 (2/2).
-  // ErrorBoundary 가 잡아 "화면을 그리다가 멈췄어요" 로 떨어지고 "다시 열기" 로만 복구된다.
+  // Every student must pass through the naming ritual, so this transition happens 100%
+  // of the time on the normal path.
+  // Both directions, #300 and #310, reproduced in the 2026-08-10 real-device session (2/2).
+  // ErrorBoundary catches it, it drops to "화면을 그리다가 멈췄어요", and only "다시 열기" recovers.
   //
-  // 새 훅이 필요하면 이 블록 **위**에 추가한다.
+  // If you need a new hook, add it **above** this block.
   // ─────────────────────────────────────────────────────────────────────────
   const updateBanner = config?.update ? (
     <UpdateBanner offer={config.update} onInstall={props.onInstallUpdate} onDismiss={props.onDismissUpdate} />
@@ -499,9 +530,10 @@ export function ChatPanel(props: Props) {
   };
 
   /**
-   * #649 — 친구 버튼: 칩 문구를 **그대로** 보낸다(호스트가 정확일치로만 세상을 연다).
-   * submit() 을 쓰지 않는 이유: submit 은 draft 를 비운다. 아이가 "불 대신 물" 을
-   * 적다가 친구를 누르면 적던 글이 소리 없이 사라진다 — 버튼은 세상만 바꾼다.
+   * #649 — friend button: sends the chip text **verbatim** (the host opens a world only
+   * on an exact match). Why not submit(): submit clears the draft. If a kid is typing
+   * "불 대신 물" and presses a friend, what they were writing vanishes silently — the
+   * button changes only the world.
    */
   const handleWorldPick = (chip: string) => {
     if (busy) return;
@@ -535,8 +567,9 @@ export function ChatPanel(props: Props) {
     draft.length > 0 &&
     draft.trim().length < ux.hints.short_input.min_chars;
 
-  // 스트립이 같은 칩을 이미 들고 있으면 첫 화면 칩에서는 뺀다 — 같은 버튼이 두 벌
-  // 뜨면 아이가 "둘이 다른 것" 이라고 읽는다(2026-08-20 검토).
+  // If the strip already carries the same chip, drop it from the first-screen chips —
+  // two copies of the same button read to a kid as "these are two different things"
+  // (2026-08-20 review).
   const stripChips = new Set(worlds.map((w) => w.chip));
   const initialChips =
     worlds.length > 0
@@ -547,21 +580,24 @@ export function ChatPanel(props: Props) {
     !streaming &&
     initialChips.length > 0;
 
-  // #503 — 타임라인 끝에 툴 줄이 올 수 있으므로 "마지막이 어시스턴트인가"를
-  // 마지막 **말풍선** 기준으로 본다. 안 그러면 툴로 끝난 턴에서 후속 칩이 사라진다.
+  // #503 — a tool row can come at the end of the timeline, so "is the last one the
+  // assistant" is judged by the last **bubble**. Otherwise the follow-up chips vanish
+  // on a turn that ended with a tool.
   const lastSpoken = [...messages].reverse().find((m) => m.role !== "tool");
   const showFollowUpChips =
     !streaming &&
     messages.length > 0 &&
     lastSpoken?.role === "assistant" &&
     ux.suggestions.follow_up.length > 0;
-  // #414 — 이번 턴에 진짜 활동 로그가 떴으면 스피너가 가짜 단계를 지어내지 않는다.
+  // #414 — if a real activity log showed up this turn, the spinner does not invent fake stages.
   const turnHasActivity = hasActivityThisTurn(messages);
 
-  // #642 — 코치가 일하는 1~3분 동안 화면이 정적이면 아이는 고장으로 읽는다(2026-08-20
-  // 실기기). 아이 트랙에서만 작성란 위에 러너 바를 둔다. 판단은 전부 runner.ts(순수).
-  // 코호트가 맞으면 **턴이 없을 때도 접힌 채로 자리에** 있다 — 그래야 나타날 때와
-  // 사라질 때 둘 다 부드럽고, 작성란이 위아래로 튀지 않는다.
+  // #642 — if the screen is static for the 1–3 minutes the coach is working, a kid
+  // reads it as broken (2026-08-20, real device). The runner bar goes above the
+  // composer on the kids track only. All the decisions live in runner.ts (pure). When
+  // the cohort matches it **stays in place, folded, even with no turn running** — that
+  // is what makes both the appearing and the disappearing smooth, and keeps the
+  // composer from jumping up and down.
   const runnerCohort = isRunnerCohort({ worldCount: worlds.length, tone: appTone });
   const runnerRunning = shouldShowRunner({ streaming: busy, worldCount: worlds.length, tone: appTone });
   const runnerWho = runnerFace(worlds, props.openWorldId);
@@ -581,11 +617,11 @@ export function ChatPanel(props: Props) {
           ? <strong title={`이 수업의 AI 이름: ${coachName}`} className="hps-coach-name">{coachName}</strong>
           : <button title="코치 이름 바꾸기" onClick={() => setForceNaming(true)} className="hps-coach-name">{coachName}</button>}
         <div className="hps-actions">
-          {/* Token 바로 **왼쪽**, 같은 크기. 헤더 버튼 스타일(.hps-header button)을
-              그대로 물려받고 색만 다르다 — 크기를 따로 주면 헤더 줄 높이가 이 버튼
-              하나 때문에 늘어난다.
-              Token·Clear·⚙ 는 설정 계열이고 이건 아이가 쓰는 조작이라, 그 묶음
-              앞에 세워 손이 먼저 닿는 자리에 둔다. */}
+          {/* Immediately **left** of Token, same size. It inherits the header button
+              style (.hps-header button) as-is and differs only in color — giving it its
+              own size makes the header row grow taller because of this one button.
+              Token·Clear·⚙ are the settings family and this is a control the kid uses,
+              so it stands in front of that group, where the hand reaches first. */}
           {galleryEnabled && props.openWorldId !== null && (
             <button
               className="hps-gallery-btn"
@@ -608,37 +644,119 @@ export function ChatPanel(props: Props) {
         </div>
       </header>
 
-      {config?.activity && <div className="hps-activity-header" aria-label="현재 활동">
-        {config.activity.kind === "trial" ? "AI 체험" : config.activity.kind === "classroom" ? "수업" : "개인 작업"} · {config.activity.name}
-        {!config.activity.verified && <p role="status">연결을 확인하지 못했습니다. 저장된 기록을 볼 수 있으며, 다시 연결한 뒤 보낼 수 있습니다.</p>}
-      </div>}
+      {/* Region A — Mission header. Replaces both the old `hps-activity-header` and the
+          `details.hps-lesson` summary (design §정보 구조, region A). The activity name
+          moved down to a small line inside the header. */}
+      <MissionHeader
+        lesson={config?.profile?.lesson ?? null}
+        currentStepId={currentStepId}
+        onSelectStep={setCurrentStepId}
+        onStartStep={(step) => {
+          setCurrentStepId(step.id);
+          const lesson = config?.profile?.lesson;
+          if (!lesson) return;
+          // #751 F4 — starting a step is also the learner's own "in progress" report for the class board.
+          postToHost({type: 'lessonStep', stepId: step.id, status: 'in_progress'});
+          setLessonSteps(prev => ({...prev, [step.id]: prev[step.id] === 'submitted' ? 'submitted' : 'in_progress'}));
+          handleChip({
+            style: 'good',
+            text: `수업: ${lesson.content.title} (${lesson.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`,
+          });
+        }}
+        onOpenGrowth={() => postToHost({ type: "openLocalReview" })}
+        busy={streaming}
+        activity={config?.activity ? {
+          label: config.activity.kind === "trial" ? "AI 체험" : config.activity.kind === "classroom" ? "수업" : "개인 작업",
+          name: config.activity.name,
+          verified: !!config.activity.verified,
+        } : null}
+      />
       {draftError && <p role="alert">{draftError}</p>}
       {updateBanner}
 
-      {config?.profile?.lesson && (
-        <details className="hps-lesson">
-          <summary>내 수업 · {config.profile.lesson.content.title}</summary>
-          <p>버전 {config.profile.lesson.version} · {config.profile.lesson.content.duration_minutes}분</p>
-          <p>{config.profile.lesson.content.objective}</p>
-          <p>준비: {config.profile.lesson.content.prerequisites || '별도 선수 조건 없음'}</p>
-          <p>시작 자료: {config.profile.lesson.content.starter}</p>
-          {config.profile.lesson.content.steps.map((step, index) => (
-            <section key={step.id}>
-              <h2>{index + 1}. {step.title}</h2>
-              <p>{step.instructions}</p>
-              <details><summary>힌트 보기</summary><p>{step.hint || '별도 힌트 없음'}</p></details>
-              <p>확인 기준: {step.acceptance}</p>
-              <button type="button" disabled={streaming} onClick={() => { postToHost({type: 'lessonStep', stepId: step.id, status: 'in_progress'}); setLessonSteps(prev => ({...prev, [step.id]: prev[step.id] === 'submitted' ? 'submitted' : 'in_progress'})); handleChip({style: 'good', text: `수업: ${config.profile!.lesson!.content.title} (${config.profile!.lesson!.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`}); }}>채팅에 과제 넣기</button>
-              {/* The learner decides when a step is done. It is recorded as their own statement, not as a verified result. */}
-              <button type="button" className="hps-lesson-done" aria-pressed={lessonSteps[step.id] === 'submitted'} disabled={lessonSteps[step.id] === 'submitted'} onClick={() => { postToHost({type: 'lessonStep', stepId: step.id, status: 'submitted'}); setLessonSteps(prev => ({...prev, [step.id]: 'submitted'})); }}>{lessonSteps[step.id] === 'submitted' ? '마쳤다고 표시함 · 강사 확인 전' : '이 단계를 마쳤어요'}</button>
-            </section>
-          ))}
-          <p>과제를 확인하고 채팅으로 요청하세요. 열람만으로 실습이 완료되지는 않습니다.</p>
-        </details>
+      {/* Region B's lesson info — inside the coach rail, **outside** the message stream
+          (SX-05). Closed by default, and it opens only the current step. It used to
+          expand all six steps at once and took up more room than the mission. */}
+      {config?.profile?.lesson && (() => {
+        const lesson = config.profile.lesson;
+        const steps = lesson.content.steps;
+        const step = steps.find(s => s.id === currentStepId) ?? steps[0];
+        if (!step) return null;
+        const index = steps.indexOf(step);
+        return (
+          <>
+          <details className="hp-rail-lesson">
+            <summary>이번 단계 안내 · {index + 1}. {step.title}</summary>
+            <p className="hp-rail-lesson-meta">{lesson.content.title} · 버전 {lesson.version} · {lesson.content.duration_minutes}분</p>
+            <p>{step.instructions}</p>
+            {step.hint ? <details><summary>힌트 보기</summary><p>{step.hint}</p></details> : null}
+            <p>확인 기준: {step.acceptance}</p>
+            <p className="hp-rail-lesson-note">안내를 읽은 것만으로 이 단계가 끝나지는 않습니다. 직접 만들고 확인한 기록이 남아야 합니다.</p>
+          </details>
+          {/* #751 F4 — the learner decides when the CURRENT step is done. It goes to the class board as their own
+              statement ("강사 확인 전"), never as a verified result, and it is not the completion gate of region D.
+              Quiet on purpose: the screen's one Primary stays region A's "지금 할 행동" (SX-01·SX-04). */}
+          <p className="hp-rail-step-report">
+            <button type="button" className="hp-cta-quiet hps-lesson-done" aria-pressed={lessonSteps[step.id] === 'submitted'} disabled={lessonSteps[step.id] === 'submitted'} onClick={() => { postToHost({type: 'lessonStep', stepId: step.id, status: 'submitted'}); setLessonSteps(prev => ({...prev, [step.id]: 'submitted'})); }}>{lessonSteps[step.id] === 'submitted' ? '마쳤다고 표시함 · 강사 확인 전' : '이 단계를 마쳤어요'}</button>
+          </p>
+          </>
+        );
+      })()}
+
+      {/* Region D — the completion gate and the Evidence drawer (SX-14·17). Drawn only
+          when the host sends `learningState`. On a connection that does not send it (a
+          profile that does not use learning events), an empty drawer left on screen is
+          decoration that does nothing when pressed. */}
+      {learning && (
+        <section className="hp-evidence-region" aria-label="근거와 완료">
+          <div className="hp-complete">
+            {/* SX-14 — the reason it is disabled is visible **next to the button**.
+                There is no bypass button. The host made the judgment; this only draws it. */}
+            <button
+              type="button"
+              // **Not a Primary.** There is one emphasized button on screen and that
+              // slot belongs to region A's "지금 할 행동" (SX-01·SX-51). Completion is
+              // pressed **after** all those actions are done, so it has no reason to
+              // catch the eye first. Emphasize both and "what to do now" becomes two things.
+              className="hp-cta-quiet"
+              disabled={!learning.complete.ok}
+              onClick={() => postToHost({ type: "submitTask", task: learning.task })}
+            >
+              이 과제 완료하기
+            </button>
+            {!learning.complete.ok && (
+              <ul className="hp-complete-why">
+                {learning.complete.reasons.map((reason) => (
+                  <li key={reason}>☐ {reason}</li>
+                ))}
+              </ul>
+            )}
+            {!learning.declared && (
+              <p className="hp-complete-note">이 단계는 따로 정해 둔 완료 조건이 없어요.</p>
+            )}
+          </div>
+          <EvidenceDrawer
+            open={drawerOpen}
+            rows={learning.evidence}
+            verification={learning.verification}
+            // The step id is a **view state**, so it comes from here. The host uses it
+            // only after checking it is a step of this lesson — a value the webview
+            // sent is never trusted as-is.
+            onSubmit={(draft) => postToHost({ type: "learningEvent", draft, stepId: currentStepId ?? undefined })}
+            onToggle={(open) => {
+              setDrawerOpen(open);
+              postToHost({ type: "learningDrawer", open });
+            }}
+          />
+        </section>
       )}
 
-      {config?.profile?.observation?.format === 'hps-observation/1' && <NativeObservationPanel scope={config.profile.observation.scope} coachName={coachName} />}
-      {config?.profile?.profile_id === 'studio-native-trial' && config.profile.observation?.format !== 'hps-observation/1' && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}
+      {/* Both lines were originally pinned to `=== 'hps-observation/1'`. The moment `/2`
+          opened, (a) the observation panel disappeared and (b) "관찰을 지원하지 않습니다"
+          showed up next to a screen whose drawer was working fine. The test is "is
+          observation on", not "which version is it". */}
+      {isObservationFormat(config?.profile?.observation?.format) && <NativeObservationPanel scope={config!.profile!.observation!.scope} coachName={coachName} />}
+      {config?.profile?.profile_id === 'studio-native-trial' && !isObservationFormat(config.profile.observation?.format) && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}
 
       <div className="hps-messages" ref={scrollRef}>
         {props.aiNotice && (
@@ -693,8 +811,9 @@ export function ChatPanel(props: Props) {
           </div>
         )}
 
-        {/* #497 — Stop 직후 안내. 오류가 아니므로 에러 배너가 아니라 조용한
-            인라인 상태줄로 알린다. 다음 입력을 하면 사라진다. */}
+        {/* #497 — the notice right after Stop. It is not an error, so it is announced as
+            a quiet inline status line rather than an error banner. It goes away on the
+            next input. */}
         {props.stopNotice && (
           <div className="hps-stop-notice" role="status" aria-live="polite">
             <span className="hps-stop-notice-icon" aria-hidden="true">⏹</span>
@@ -758,9 +877,10 @@ export function ChatPanel(props: Props) {
         <EffortControl config={config} post={postToHost} />
         <AccessControl config={config} streaming={streaming} post={postToHost} />
         {runnerCohort && <RunnerBar face={runnerWho} running={runnerRunning} />}
-        {/* 버튼은 헤더에 있고 여기는 **결과만** 나온다. 헤더 한 줄에는 링크도
-            실패 사유도 들어갈 자리가 없는데, 아이는 사라지는 안내를 못 읽는다 —
-            그래서 말할 것이 있을 때만 작성란 위에 한 줄로 남는다. */}
+        {/* The button is in the header; **only the result** appears here. One header row
+            has no room for either the link or the failure reason, and a kid cannot read
+            a notice that disappears — so it stays as one line above the composer, only
+            when there is something to say. */}
         {props.publish && props.publish.state !== "uploading" && (
           <GalleryNotice
             publish={props.publish}
@@ -772,9 +892,10 @@ export function ChatPanel(props: Props) {
             worlds={worlds}
             openId={props.openWorldId}
             disabled={busy}
-            /* 대화가 비어 있으면(첫 화면 · Clear 직후) 무엇을 누르라는 말이 다시
-               필요하다 — kids-quest 는 첫 화면 칩이 스트립과 겹쳐 통째로 빠지므로
-               이 한 줄이 유일한 지시문이다. */
+            /* When the conversation is empty (first screen, right after Clear) the
+               instruction about what to press is needed again — in kids-quest the
+               first-screen chips overlap the strip and drop out entirely, so this one
+               line is the only instruction. */
             showLabel={props.openWorldId === null || messages.length === 0}
             onPick={handleWorldPick}
           />
@@ -927,17 +1048,20 @@ export function ChatPanel(props: Props) {
 // Sub-components
 // ---------------------------------------------------------------------------
 
-/** 프로필이 실어 보내는 세상 하나 (호스트 protocol 의 정의를 그대로 쓴다). */
+/** One world the profile ships down (reuses the host protocol's definition as-is). */
 type WorldChoice = NonNullable<ResolvedProfile["worlds"]>[number];
 
 /**
- * 발행 결과 한 줄. 버튼은 헤더에 있고(Token 옆) 여기는 **결과만** 말한다.
+ * One line of publish result. The button is in the header (next to Token); this says
+ * **only the result**.
  *
- * 성공을 계속 띄워 두는 이유: 아이는 사라지는 안내를 못 읽는다. 링크가 남아
- * 있어야 옆자리 친구에게, 부모에게 보여줄 수 있다. 세상을 바꾸면 App 의
- * `worldOpened` 가 이 상태를 지운다 — 그때부터는 다른 세상 얘기라서다.
+ * Why success stays up: a kid cannot read a notice that disappears. The link has to
+ * stay there so they can show it to the friend sitting next to them, or to a parent.
+ * Changing worlds clears this state through App's `worldOpened` — from then on it is a
+ * different world's story.
  *
- * 실패 문구는 자르지 않는다. "왜 안 됐는지"가 이 기능의 유일한 복구 단서다.
+ * The failure text is never truncated. "why it did not work" is this feature's only
+ * recovery clue.
  */
 function GalleryNotice({
   publish,
@@ -964,15 +1088,17 @@ function GalleryNotice({
 }
 
 /**
- * #649 — 친구 스트립. 작성란 바로 위에 **항상** 있다(대화 중에도, 응답 중에도).
+ * #649 — the friend strip. **Always** right above the composer (mid-conversation and
+ * mid-response too).
  *
- * 왜 버튼인가: 세상 전환을 말로도 받던 v0.1.47/48 에서 "초코 세상에 다람쥐 데려와줘"
- * 가 도토 세상을 띄우고, "초코 세상에 불 대신 물" 이 초코 원본을 다시 받아 아이가
- * 고쳐 둔 화면을 덮어썼다(2026-08-20 실기기). 이제 세상은 이 버튼으로만 바뀐다.
+ * Why buttons: in v0.1.47/48, which also accepted world switches in prose, "초코 세상에
+ * 다람쥐 데려와줘" opened 도토's world, and "초코 세상에 불 대신 물" re-fetched the
+ * original 초코 and overwrote the screen the kid had fixed up (2026-08-20, real device).
+ * Worlds now change only through this button.
  *
- * 응답 중에는 비활성 — 그 사이 세상을 갈아치우면 지금 오고 있는 답이 남의 세상에
- * 붙는다. 클릭은 칩 문구를 **그대로** 보낸다(호스트 matchWorldRef 가 정확일치로만
- * 잡으므로 한 글자도 다듬지 않는다).
+ * Disabled while responding — swapping the world in the middle attaches the answer now
+ * arriving to somebody else's world. A click sends the chip text **verbatim** (the
+ * host's matchWorldRef only catches an exact match, so not one character is touched up).
  */
 function WorldStrip({
   worlds,
@@ -989,11 +1115,13 @@ function WorldStrip({
 }) {
   return (
     <div className="hps-worlds-wrap">
-      {/* 대화가 비어 있거나 아직 아무 세상도 안 열렸으면 한 줄 안내. 첫 화면 칩(같은
-          문구)은 스트립과 겹쳐서 숨겼으므로, 무엇을 누르라는 말은 여기 한 번은 있어야
-          한다. 2026-08-20 검토: 조건이 `openId === null` 뿐이라 **Clear 직후**에는
-          칩도 라벨도 없는 빈 첫 화면이 됐다. 화살표는 아래를 가리킨다 — 이 줄 바로
-          밑이 버튼이다(게스트 목록 답변의 문구와 방향을 맞춘다). */}
+      {/* A one-line instruction when the conversation is empty or no world has been
+          opened yet. The first-screen chips (same wording) are hidden because they
+          overlap the strip, so the "what to press" has to be said here at least once.
+          2026-08-20 review: the condition was `openId === null` alone, so **right after
+          Clear** the first screen was empty — no chips and no label. The arrow points
+          down — the buttons are directly below this line (matching the wording and
+          direction of the guest-list answer). */}
       {showLabel && <div className="hps-worlds-label">👇 친구를 누르면 그 세상으로 가요</div>}
       <div className="hps-worlds" role="group" aria-label="친구 고르기">
         {worlds.map((w) => {
@@ -1004,11 +1132,13 @@ function WorldStrip({
               type="button"
               className={`hps-world${open ? " hps-world-open" : ""}`}
               aria-pressed={open}
-              /* 지금 열린 세상은 다시 누를 수 없다 (2026-08-20 검토). 재클릭은
-                 '처음 상태 원본을 다시 받아 index.html 을 덮는' 동작이라, 20분 고친
-                 세상이 한 번의 오조작으로 초기화된다 — 그리고 가장 눈에 띄는 색
-                 (button-background)이 하필 그 버튼이라 초3·4 의 첫 오조작 대상이다.
-                 보관본은 남지만 되돌리는 건 코치를 거쳐야 하는 일이다. */
+              /* The world currently open cannot be pressed again (2026-08-20 review). A
+                 re-click means 're-fetch the pristine original and overwrite
+                 index.html', so a world worked on for 20 minutes is reset by one
+                 misoperation — and the most eye-catching color (button-background)
+                 happens to be on that very button, which makes it the first thing a
+                 3rd/4th grader mis-taps. The archived copy survives, but undoing it is
+                 something that has to go through the coach. */
               disabled={disabled || open}
               title={
                 open
@@ -1030,22 +1160,23 @@ function WorldStrip({
 }
 
 /**
- * #642 — 달리는 게스트. "Read ✓" 뒤 1~3분 정적이던 구간을 채운다(2026-08-20 실기기:
- * 아이는 멈춘 화면을 고장으로 읽고 같은 말을 또 보냈다 — 턴이 겹친다).
+ * #642 — the running guest. Fills the 1–3 minutes that used to sit static after
+ * "Read ✓" (2026-08-20, real device: the kid read the frozen screen as broken and sent
+ * the same message again — turns overlap).
  *
- * 왜 항상 렌더하고 클래스만 토글하나: 조건부로 붙였다 떼면 사라지는 순간이 뚝
- * 끊기고 작성란이 40px 튀어 오른다. 접힌 상태(max-height:0)로 남겨 두면 CSS 가
- * 양방향을 다 부드럽게 처리한다.
+ * Why it always renders and only toggles a class: attaching and detaching it
+ * conditionally cuts the moment of disappearance off abruptly and pops the composer up
+ * 40px. Leaving it folded (max-height:0) lets CSS handle both directions smoothly.
  *
- * 스크린리더에는 숨긴다(aria-hidden): 4초마다 바뀌는 문구를 live region 으로
- * 읽어 주면 소음이 된다. 진행 상황의 접근 가능한 통로는 타임라인의 툴 로그
- * ("✍️ 고치는 중…") 쪽이고, 이 바는 그 위에 얹은 시각 장치다.
+ * Hidden from screen readers (aria-hidden): reading out a phrase that changes every 4
+ * seconds through a live region is noise. The accessible route to progress is the tool
+ * log in the timeline ("✍️ 고치는 중…"); this bar is a visual device laid on top of it.
  */
 function RunnerBar({ face, running }: { face: RunnerFace; running: boolean }) {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
-    // 턴이 끝나면 타이머를 끄고 0 으로 되돌린다 — 다음 턴은 "세상을 고치는 중…"
-    // 부터 다시 시작해야 한다(이어서 "거의 다 됐어요…" 로 시작하면 거짓말이 된다).
+    // When the turn ends, stop the timer and reset to 0 — the next turn has to start
+    // over from "세상을 고치는 중…" (carrying on from "거의 다 됐어요…" would be a lie).
     if (!running) {
       setElapsed(0);
       return;
@@ -1058,8 +1189,8 @@ function RunnerBar({ face, running }: { face: RunnerFace; running: boolean }) {
   return (
     <div className={`hps-runner${running ? " hps-runner-on" : ""}`} aria-hidden="true">
       <div className="hps-runner-track">
-        {/* 먼지는 얼굴 뒤에 남는다 — CSS 의 row-reverse 가 순서를 뒤집는다.
-            prefers-reduced-motion 에서는 제자리에서 점 세 개만 깜빡인다. */}
+        {/* The dust trails behind the face — CSS row-reverse flips the order.
+            Under prefers-reduced-motion three dots just blink in place. */}
         <div className="hps-runner-go">
           <span className="hps-runner-face">{face.emoji}</span>
           <span className="hps-runner-dust" />
@@ -1230,13 +1361,13 @@ function ChipRack({
 }
 
 /**
- * #503 — 타임라인 안의 툴 한 줄. 예전에는 말풍선 전부 **아래**에 있는 하나의
- * `.hps-tool-log` 상자였고, 그래서 "코치가 무슨 말을 하고 나서 무슨 일을 했는지"가
- * 화면에서 읽히지 않았다. 지금은 일어난 자리에 그대로 놓인다.
+ * #503 — one tool row inside the timeline. It used to be a single `.hps-tool-log` box
+ * sitting **below** all the bubbles, so "what the coach said and then what it did"
+ * could not be read off the screen. Now it sits exactly where it happened.
  *
- * 클래스 이름(`hps-tool-log-line` / `hps-tool-icon` / `hps-tool-label` /
- * `hps-tool-<state>`)은 **일부러 그대로 둔다** — e2e(t1-first-turn-trace)와
- * 관측기(e2e/observe/watch.mjs)가 이 셀렉터로 활동을 읽는다.
+ * The class names (`hps-tool-log-line` / `hps-tool-icon` / `hps-tool-label` /
+ * `hps-tool-<state>`) are **left alone on purpose** — the e2e (t1-first-turn-trace) and
+ * the observer (e2e/observe/watch.mjs) read activity through these selectors.
  */
 function ToolLine({ message }: { message: ChatMessage }) {
   const t = message.tool;
@@ -1311,9 +1442,9 @@ function MessageItem({
     <div className={`hps-msg hps-msg-${message.role}`}>
       <div className="hps-msg-role">
         {/*
-          * #747 (AE-08) — 저장된 이름이 있으면 **그것을** 쓴다. 없으면(이 변경
-          * 이전 줄, 아직 스트리밍 중인 말풍선) 살아 있는 이름으로 떨어진다.
-          * 여기서 다시 해석하면 이름을 바꾼 순간 과거가 따라 바뀐다.
+          * #747 (AE-08) — if a stored name exists, use **that**. If not (rows from
+          * before this change, a bubble still streaming) it falls back to the live name.
+          * Re-resolving here would make the past change along the moment the name changes.
           */}
         <span>{message.role === "user" ? "나" : message.assistantName ?? coachName}</span>
         {renderable && (
@@ -1420,8 +1551,8 @@ function buildStageText(
   hasActivity = false,
 ): string {
   if (fenceOpen) return "거의 다 됐어요";
-  // quest 트랙은 만드는 대상을 이름 붙이지 않는다 — 라벨 자체가 "생각 중…" 이고
-  // 하위 단계를 붙이면 다시 "무엇을" 만드는지 규정하게 된다.
+  // The quest track does not name what is being made — the label itself is "생각 중…",
+  // and adding sub-stages would define "what" is being made all over again.
   if (tone === "quest") return buildingLabel;
   // Real signal present → say only what is certainly true.
   if (hasActivity) return buildingLabel;
@@ -1561,7 +1692,7 @@ function ErrorBanner({
 }) {
   // Spot common transport-layer signals so the framing is honest about the
   // recovery path. We don't try to classify perfectly — just enough to pick
-  // between "연결 끊김" (worth retrying) and "토큰/세션 문제" (강사에게).
+  // between "연결 끊김" (worth retrying) and "토큰/세션 문제" (go to the instructor).
   const isAuth = /참여 코드|토큰|세션|강사|만료|등록|인가/.test(message);
   const isConn = /연결|네트워크|시간|타임아웃|중단|stream|interrupt|abort/i.test(message);
   const icon = isAuth ? "🔒" : isConn ? "🔌" : "⚠️";

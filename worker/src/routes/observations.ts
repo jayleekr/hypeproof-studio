@@ -11,10 +11,8 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { gateChatRequest } from "../lib/chat-gate";
 import { nativeObservationScope } from "../lib/native-observation-scope";
-import {
-  OBSERVATION_FORMAT,
-  validateObservation,
-} from "../lib/native-observation";
+import { servedObservationFormat } from "../lib/measurement-core/legacy-observation.ts";
+import { validateObservation } from "../lib/native-observation";
 export const observations = new Hono<{ Bindings: Env }>();
 observations.use("*", async (c, next) => {
   c.header("cache-control", "no-store");
@@ -22,9 +20,16 @@ observations.use("*", async (c, next) => {
 });
 export async function observationContext(
   gate: Extract<Awaited<ReturnType<typeof gateChatRequest>>, { ok: true }>,
+  /** `x-hps-observation-format` — what the calling app build can parse. */
+  clientFormat: string | undefined,
 ) {
   return {
-    format: OBSERVATION_FORMAT,
+    // Must agree with what /v1/profile served for the SAME seat and the SAME
+    // client. If these two disagree the client builds a /2 recorder and then
+    // gets a /1 context, and `recordLearningEvent()` throws
+    // `observation_format` — the feature looks configured and records nothing.
+    // Same negotiation, same function, so the two answers cannot drift.
+    format: servedObservationFormat(gate.profile.observation?.format, clientFormat),
     scope: await nativeObservationScope(gate.payload,gate.session),
     session: gate.session.session_id,
     program: gate.module.version,
@@ -37,7 +42,7 @@ observations.get("/context", async (c) => {
     return c.json({ error: { code: "observation_unavailable" } }, 404);
   const doc = await getObservationRubric(c.env, gate.profile.id);
   return c.json({
-    ...(await observationContext(gate)),
+    ...(await observationContext(gate, c.req.header("x-hps-observation-format"))),
     learning_path: doc.content.next_learning,
   });
 });
@@ -52,7 +57,7 @@ observations.post("/validate", async (c) => {
     return c.json({ error: { code: "observation_too_large" } }, 413);
   try {
     const { batch, missing } = validateObservation(JSON.parse(raw));
-    const context = await observationContext(gate);
+    const context = await observationContext(gate, c.req.header("x-hps-observation-format"));
     if (
       batch.scope !== context.scope ||
       batch.session !== context.session ||
@@ -60,7 +65,8 @@ observations.post("/validate", async (c) => {
     )
       return c.json({ error: { code: "observation_scope_changed" } }, 409);
     return c.json({
-      format: OBSERVATION_FORMAT,
+      // Report the format this seat actually runs, not a constant (#F-1).
+      format: context.format,
       events: batch.events.length,
       missing,
     });
@@ -84,7 +90,7 @@ observations.post("/assess", async (c) => {
     batch = checked.batch;
     if (checked.missing.length || batch.incomplete)
       return c.json({ error: { code: "observation_incomplete" } }, 409);
-    const context = await observationContext(gate);
+    const context = await observationContext(gate, c.req.header("x-hps-observation-format"));
     if (
       batch.scope !== context.scope ||
       batch.session !== context.session ||

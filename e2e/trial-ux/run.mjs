@@ -291,7 +291,13 @@ try {
     await expect.poll(async()=>emitted(await requests(p),'ready').length).toBe(2);
   }, { expectedCrash: true });
   await test('TUX-COND-05', 'Native profile excludes unrelated naming/world/gallery/roll/lesson/followup surfaces', async p => {
-    for (const selector of ['.hps-naming', '.hps-world-strip', '.hps-gallery-btn', '.hps-btn-roll', '.hps-lesson']) await expect(p.locator(selector)).toHaveCount(0);
+    // `.hps-lesson` became `.hp-rail-lesson` in P0-C. If the name is not kept up with, this
+    // assertion means **a class that no longer exists occurs 0 times** and passes quietly
+    // while measuring nothing — worse than a red.
+    for (const selector of ['.hps-naming', '.hps-world-strip', '.hps-gallery-btn', '.hps-btn-roll', '.hp-rail-lesson']) await expect(p.locator(selector)).toHaveCount(0);
+    // Control: this profile has no lesson, so the mission header has to say "no lesson is
+    // connected". That is the evidence the assertion above is actually counting something.
+    await expect(p.locator('.hp-mission')).toHaveCount(1);
     await host(p, { type: 'history', messages: history }); await expect(p.locator('.hps-chips')).toHaveCount(0);
     await host(p, { type: 'config', config: config({ ...native, observation: undefined }) }); await expect(p.getByText('현재 연결은 작업 관찰을 지원하지 않습니다.', { exact: false })).toBeVisible(); await expect(p.locator('.hps-native-observation')).toHaveCount(0);
   });
