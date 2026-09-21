@@ -125,3 +125,87 @@ v0.1.52~v0.1.56 이 전부 `x-hps-observation-format: hps-observation/1` 을 하
 프로필 한 줄씩이다. `record: false` 로 돌리면 서랍·게이트가 사라지고,
 `assess: false` 로 돌리면 전송 버튼이 사라진다. 세션 게이트와 좌석 발급은 이미
 자기 조건을 갖고 있으므로 관측을 껐다고 같이 움직이지 않는다 — **그것이 이 ADR 의 요점이다.**
+
+---
+
+## Implementation log
+
+> This section is English because `CLAUDE.md` puts ADRs in the English column.
+> The body above is Korean and predates that reading; it is left as written
+> rather than translated, which would be a separate change.
+
+### Step 1 — done (PR #1218, `f44cce3`)
+
+`record` / `assess` added, both falling back to `enabled`. Nothing shipped
+changed; `worker/test/fixtures/profile-serving-baseline.json` (9 profiles × 4
+axes) is the evidence.
+
+### Step 2 — done
+
+Two new profile fields, because the two switches are two decisions:
+
+| field | read by | replaces |
+|---|---|---|
+| `session.requires_open_session` | `GET /v1/profile` only | `observationCapability(...).record` at `routes/chat.ts` |
+| `trial.individual` | `POST /admin/tokens/issue` **and** `gateChatRequest` | `observation?.enabled` at `routes/admin.ts` and `lib/chat-gate.ts` |
+
+Declared `true` on `canary-sdk-contract` and `studio-native-trial` — the exact
+two profiles that answered `true` before — so all 36 serving cells are
+unchanged. Neither field is serialized into any response.
+
+Three things this turned up that the table above does not say:
+
+- **There was a fifth reader.** `lib/chat-gate.ts` decides whether a minted
+  `native_trial` seat gets a session at all, off the same `observation.enabled`.
+  Moving the mint check alone would have minted seats that 403 forever.
+- **`studio-gpt-practice` spreads `studio-native-trial`.** The ADR names
+  `studio-model-practice → studio-gpt-practice`; the chain is one link longer,
+  so `trial: { individual: true }` on the trial profile is inherited by two
+  more profiles unless blocked. `studio-gpt-practice` now declares
+  `{ individual: false }`, and `native-trial-grants.test.mjs` pins the set to
+  exactly two so the next inheritance is not silent.
+- **`/v1/profile` never emits a scopeless `observation` block.** The scope
+  comes from the session, so a recording seat that no longer takes the gate has
+  none — and the shipped app tests the block's bare truthiness and falls back
+  to `sha256(token)` for the chat-history bucket, which loses the student's
+  conversation and loses it again on every reissue.
+
+### Step 3 — done, as the refusal branch only
+
+The route computes the assessment model once, before reading the body, and
+returns `409 assessment_provider_mismatch` when the cohort's model key does not
+belong to the assessment provider. It does **not** pick a model instead:
+`native-assessment.ts` posts to Anthropic with no branch, so substituting would
+not route anything — it would send that cohort's student prose and workspace
+file bodies to a vendor its profile never names. Whether a cohort may be
+assessed on a provider it did not run on is a decision for a human.
+
+Correction to the evidence table above: the 502 was **not reachable** when this
+ADR was written. The two profiles whose `model.default` is not an Anthropic key
+(`studio-gpt-practice`, `studio-model-practice`) both have `assess` off and are
+stopped by the 404 one line earlier. Measured, not reasoned — the profile probe
+is in the PR. The fix closes the hole before step 4 opens it.
+
+### Step 4 — blocked, and on more than this ADR said
+
+`record: true` by default is what Jay asked for. Two things stand in front of
+it, both about **already-installed** builds, neither fixable in the worker:
+
+1. **The results panel does not follow `assess` on a shipped build.** v0.1.56
+   never reads `observation.assess` — zero occurrences of the field across its
+   `extensions/hypeproof-chat` tree. `ChatPanel.tsx:590` draws the observation
+   results panel on `observation.format === 'hps-observation/1'` and nothing
+   else, and a cohort that declares no format is served exactly that. So a
+   cohort switched to record-without-assess still shows its learners the
+   "내 작업 돌아보기" entry and the assess button — the SX-59 violation the
+   split exists to remove — and pressing it 404s. `assess: false` is correct
+   for the next build and inert on this one.
+2. **Turning `record` on moves that cohort's chat history.** The presence of an
+   `observation` block flips the shipped app's history bucket from
+   `<cohort id>` to `native-<scope>` and disables the one-shot legacy
+   migration. Every existing conversation goes blank at the start of the next
+   class.
+
+So step 4 needs an app release first, or a server-side rule for what old
+clients are served — not a profile edit. Step 5 (`enabled` removal) is
+unblocked and independent.
