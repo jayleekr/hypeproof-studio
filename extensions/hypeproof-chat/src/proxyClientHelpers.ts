@@ -1,3 +1,4 @@
+import { OBSERVATION_FORMAT_V2 } from "./nativeObservationContract.ts";
 // Pure helpers for proxyClient.ts. Kept vscode-free + fetch-free so they can
 // be unit-tested under plain Node — mirrors mintStudentTokenHelpers.ts.
 
@@ -227,5 +228,33 @@ export function usageFromStreamChunk(chunk: unknown): ProxyStreamUsage | null {
     outputTokens: chunkNumber(u.completion_tokens),
     cacheReadInputTokens: 0,
     cacheCreationInputTokens: 0,
+  };
+}
+
+
+/**
+ * Headers for **every** request that touches an observation-aware route.
+ *
+ * This exists because splitting the concern was not enough. The repair for the
+ * "P1 screens never render" bug made `/v1/profile` and `/observations/context`
+ * negotiate through one shared function and asserted "same function, so the two
+ * answers cannot drift" — which was wrong. They drifted anyway, because the two
+ * CALLERS sent different headers: `fetchProfile` declared
+ * `x-hps-observation-format: /2` and `prepareObservation` sent only
+ * `authorization`. The Service dutifully served /2 to one and /1 to the other,
+ * the recorder was built from the /1 answer, and the drawer stayed dead.
+ *
+ * A shared negotiator on the server is worthless if the client asks two
+ * different questions. So the client asks with one voice, from here.
+ */
+export function observationHeaders(token: string | undefined): Record<string, string> {
+  // `token` is widened to `| undefined` on purpose: one caller (the assess path)
+  // already had a possibly-undefined token and built `'Bearer '+token` by hand.
+  // Narrowing here would have changed that site's behaviour as a side effect of
+  // a header refactor, which is not what this change is for. The route answers
+  // 401 either way; this helper's job is the FORMAT header, not auth policy.
+  return {
+    authorization: `Bearer ${token}`,
+    "x-hps-observation-format": OBSERVATION_FORMAT_V2,
   };
 }

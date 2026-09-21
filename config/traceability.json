@@ -2228,6 +2228,217 @@
           "path": ".github/workflows/requirement-work.yml"
         }
       ]
+    },
+    {
+      "id": "ST-INT-SX",
+      "stage": "intent",
+      "owner": "jayleekr",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE",
+        "ST-INT-MEASUREMENT-CORE"
+      ],
+      "sources": [
+        {
+          "path": "docs/intents/studio-learning-experience.md"
+        },
+        {
+          "path": "docs/design/ux-principles-breakdown-2026-09-18.md"
+        },
+        {
+          "path": "docs/design/ui-philosophy-2026-09-18.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-SX",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-INT-SX",
+        "ST-REQ-MEASUREMENT-CORE",
+        "ST-REQ-LEARNING-AGENT-EXPERIENCE",
+        "ST-REQ-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/studio-learning-experience.md"
+        },
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## Learning experience revision — 2026-09-18"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-SX",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-SX"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/studio-learning-experience.md"
+        },
+        {
+          "path": "docs/plan/studio-learning-experience.md"
+        },
+        {
+          "path": "docs/plan/ux-dag.yaml"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-SX",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-SX",
+        "ST-DES-SX"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/studio-learning-experience.md"
+        },
+        {
+          "path": ".claude/evals/STUDIO_UX_EVAL.md"
+        },
+        {
+          "path": "worker/test/session-design-learning.test.mjs"
+        },
+        {
+          "path": "worker/test/learning-prompt.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-audit.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-audit.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-render.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-screen-fixtures.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-copy-lint.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-copy-lint.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-legacy-score-removed.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-mission-header.smoke.mjs"
+        },
+        {
+          "path": "worker/test/learning-events.test.mjs"
+        },
+        {
+          "path": "worker/test/fixtures/measurement-core/learning-cases.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-evidence-gate.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-evidence-drawer.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-before-after.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/sx-source-state.smoke.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-SX-P0",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-SX",
+        "ST-REQ-SX"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/learning-design.ts"
+        },
+        {
+          "path": "worker/src/lib/learning-prompt.ts"
+        },
+        {
+          "path": "worker/src/lib/session-design.ts"
+        },
+        {
+          "path": "worker/src/lib/chat-gate.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/MissionHeader.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/missionHeaderLogic.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/tokens.css"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-SX-P1",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-SX",
+        "ST-REQ-SX",
+        "ST-REQ-MEASUREMENT-CORE"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/measurement-core/learning-events.ts"
+        },
+        {
+          "path": "worker/src/lib/measurement-core/legacy-observation.ts"
+        },
+        {
+          "path": "worker/src/lib/measurement-core/interpretation.ts"
+        },
+        {
+          "path": "worker/src/lib/measurement-core/local-record.ts"
+        },
+        {
+          "path": "worker/src/lib/measurement-core/normalize.ts"
+        },
+        {
+          "path": "worker/src/lib/measurement-core/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-SX-P1B",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-DES-SX",
+        "ST-REQ-SX",
+        "ST-REQ-MEASUREMENT-CORE"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/learningStateHelpers.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/nativeObservationRecorder.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/EvidenceDrawer.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/evidenceDrawerLogic.ts"
+        }
+      ]
     }
   ]
 }
