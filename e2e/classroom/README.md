@@ -89,6 +89,7 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
 node --experimental-strip-types --experimental-sqlite e2e/classroom/ui-review-preview.mjs      # 127.0.0.1:18951, until Control-C
 HPS_UI_REVIEW_OUT=<dir> node e2e/classroom/ui-review-capture.mjs                                # on a FRESH preview: it sends and collects
 HPS_UI_REVIEW_OUT=<dir> node e2e/classroom/ui-review-capture-pass2.mjs                          # pass 2 screens only; reads, sends nothing
+HPS_UI_REVIEW_OUT=<dir> node e2e/classroom/ui-review-capture-integration.mjs                    # integration screens; changes the preview roster and puts it back
 ```
 
 - 24 synthetic seats in mixed states; connected seats run the real device client code in-process. The instructor token is

@@ -116,7 +116,7 @@ try {
   shareMode = 'cap'; await page.locator('#refresh').click(); await page.locator('#ops-help-state').filter({ hasText: '한도에 닿아' }).waitFor();
   assert.match(await helpState(), /응답할 도움 요청 2건[\s\S]*공유 기록이 \d+건 한도에 닿아 더 오래된 요청은 확인하지 못했습니다/); assert.equal((await page.locator('#ops-select-help').innerText()).trim(), '도움 요청 학생 선택 (2 이상)'); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 2 이상/);
   shareMode = 'ok'; await page.locator('#refresh').click(); await page.locator('#ops-select-help').filter({ hasText: '(2)' }).waitFor();
-  assert.match(await helpState(), /^응답할 도움 요청 2건 · 학생 2명/); assert.equal(await help.count(), 2); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 2/);
+  assert.match(await helpState(), /^응답할 도움 요청 2건 · 학생 2명/); assert.doesNotMatch(await helpState(), /한도/, 'the cap note leaves with a complete read'); assert.equal(await help.count(), 2); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 2/);
   assert.equal(await page.locator('#detail-status').innerText(), '', 'the stale-list note leaves once the list is read'); assert.equal(await page.locator('#feedback-text').inputValue(), '작성 중인 답'); assert.equal(await row('A4').getByLabel('선택').isChecked(), true);
   await page.unroute(/\/classroom\/shares(\?|$)/);
 

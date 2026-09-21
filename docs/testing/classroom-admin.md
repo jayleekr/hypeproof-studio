@@ -1006,3 +1006,37 @@ U4 브랜치는 병합하지 않았다 — 재발급 링크 규칙만 U4 `9b0c64
 미충족·범위 밖: 학생 Studio 안에서 도움 요청을 보내는 입구(현재는 웹 `/sharing`)와 U1b·AT-41 통합은 이번 범위가 아니다. 도움 요청 판정은 기존 공유 metadata만 쓰며 새 API·저장소는 없다.
 NOT RUN: 실제 강사 사용 관측·실제 Studio 창·실제 학생·Windows·학교망·staging/production·메일, 스크린리더 실사용, 브라우저 확대 기능 자체,
 `mac-*.mjs`(실제 Mac 창 — 이 작업은 Studio GUI·18841/18842/9441을 쓰지 않는다), 전체 빌드. 사용자 시각 피드백 전이며 디자인 승인·인수가 아니다.
+
+<a id="instructor-ui-integration-run-20260922"></a>
+
+### U4 원인별 복구 + 강사 UI 2차 보완 통합 — 실행 기록 · 2026-09-22 (로컬 · 통합 검증 · 인수 아님)
+
+통합 브랜치 `feat/751-instructor-ui-integration`: U4 `dea5935`(Draft #1232, 인수된 기준) 위에 UI `71af80e`를 병합(`0592da9`), Codex 검토 P2 2건 수정(`31fc27b`).
+충돌은 `manage.html`(UI 쪽 명단·도움·상세 코드 채택, U4 재발급 링크 규칙은 UI 쪽에 이미 같은 코드, U4의 `receipt_verified`·`offline_pending`·`server_health_only` 문구 유지),
+`ops.mjs`(UI 쪽 새 계약: 첫 조치=Service 권장), e2e README(두 절 모두), `requirement-work.json`(병합본 해시 재계산)이었다. 확장·worker 소스는 U4와 같다(차이 0).
+이전 실행 기록(U4 12차 전체·13차 R0/R4, UI 2차)은 그대로 두고 아래는 통합본에서 새로 돌린 것만이다.
+
+| 검사 (통합본) | 결과 |
+|---|---|
+| `npm --prefix chalk run typecheck` · `npm --prefix chalk test` | PASS · PASS |
+| `ops-help.mjs`(보강) · `ops.mjs` · `ops-roster.mjs` · `ops-selection.mjs` · `ops-distribution.mjs` · `ops-lesson-settings.mjs` · `run.mjs` · `access-budgets/browser.mjs` · `chalk-authoring/run.mjs` | 9개 PASS (`ops-roster`는 첫 실행에서 webview 미빌드로 시험 전제 단언 실패 → 이 worktree에서 webview를 빌드한 뒤 PASS) |
+| `ops-help.mjs` 추가 5절: 공유 기록 조회 실패(브라우저 요청을 `page.route`로 503) | 도움 영역 ‘알 수 없습니다 (요청 없음이 아님)’, 목록 0, 집계 `도움 요청 확인 불가`(‘0’ 아님), `도움 요청 학생 선택 (확인 불가)` 비활성, 좌석 카드 ‘도움 요청 여부 확인 불가’ · 명단 10석·장애 집계·선택(A4)·열린 공유 기록·쓰던 피드백 유지 · 한도 도달 응답 → `2 이상`·한도 문구 · 다음 정상 조회 → `2`, 한도 문구·실패 안내 사라짐 |
+| `ops-help.mjs` 추가 6절: 질문 초안 식별자(명단은 Service API로 변경) | 무관 좌석(A10) 학생 변경 → A2 초안 유지 · A2가 다른 학생(student-l)으로 → 상세가 새 학생으로 다시 그려지고 질문 빈칸 + ‘옮기지 않았습니다’ 안내, 닫았다 열어도 빈칸, 빈 질문 보내기 거부 · 페이지 상태를 일부러 낡게 만든 주입(명시) 뒤 보내기 → ‘보내지 않았습니다’, `send_question` 명령 0건 · 원래 학생 복귀 → 그 학생의 초안 복원 |
+| 대조군 | 통합 병합본(`0592da9`)의 `manage.html` → 5절 첫 단언(‘알 수 없습니다’ 대기)에서 FAIL · 초안 키를 좌석만으로 되돌린 `manage.html` → ‘never inherits’ 단언에서 FAIL |
+| `python3 scripts/next-work.py --check` | exit 0 (무결성만, 완료 판정 아님) |
+
+실제 Mac(이 Mac arm64, `mac-recovery.mjs`, `HPS_U4_SCENARIOS=R4,R7`, 포트 18861/18862/debug 9461 — U4 runtime 18841/18842/9441과 분리):
+확장 빌드 4개 파일 해시가 U4 13차 빌드와 같고(`eb9cc5e…` 등), 셸은 0.1.56 복사본(출하 버전 아님). 결과 `e2e/test-results/classroom-devhost-integ/recovery/result.json`, `source_sha 31fc27b`.
+- R0: 실제 창 연결 · 실제 Agent SDK turn 1회 완료(모델 공급자는 스크립트된 대역).
+- R4: 404 → 문제 남음 · 같은 주소 복귀 → 해결 확인 · 서버 사망 → **같은 탭**이 새 포트 `/page.html`(complete·visible·학생 페이지 표식) · 무관 localhost 도구 탭·외부 사이트 탭 id/주소 유지, 도구 서버 요청 0.
+- R7(강의 고정 수업 재발급): 통합 보드 좌석 상세의 재발급 링크 `/authoring`(강의 버전 표기) → `/authoring`에서 클릭 발급 → 입력 전 재확인은 ‘문제 남음’ → 학생이 시작 화면에 코드 입력(dev token file 변경·재시작 없음) → 새 발급 ID 확인 ‘해결 확인’ · 초안·대화·작업 파일 유지, 비선택 학생 발급 0 · 새 발급이 이전 연결 세대를 끊어 강사 연결 코드로 재연결(기존 계약, `re_paired: true`).
+- 실행하지 않은 시나리오: R1·R2·R3·R5·R6 — 확장·worker 소스가 U4와 같아 U4 12차 증거를 그대로 쓴다.
+
+캡처(합성 미리보기 포트 18971, 새 폴더): `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-20260922T035744/`
+— `integration/`(I-01 도움 확인 불가 데스크톱·390, I-02 한도 도달, I-03 좌석 주인 변경) · `pass2-on-integrated/`(2차 10장을 통합본에서 다시). 이전 `after/`·`codex/`·`pass2/`는 그대로다.
+`integration-first-attempt-race/`는 캡처 스크립트가 복구 문구를 갱신 전에 읽은 첫 시도(계측기 결함, 제품 아님)로 남겨 둔다.
+
+미충족·범위 밖(완료 아님): AT-41 공통 대상별 결과, Studio 안 자발적 도움 요청·피드백·해결 입구, U1b 종류별·연속 회수, 커리큘럼→실행 인수, 보고서·전달, 1인 강사 전체 리허설.
+Service 계약 공백: 강사 공유 목록은 범위 필터 전 100행에서 잘리고 `truncated` 표시가 없어, 필터 뒤 100행 미만인데 잘린 경우를 화면이 알 수 없다.
+NOT RUN: 실제 강사·학생, Windows, 학교망, 여러 실제 기기, staging/production D1·R2, 실제 모델, 메일, 설치본 Keychain, 스크린리더 실사용, 전체 빌드, 통합본 CI.
+사용자 시각 피드백 전이며 디자인 승인·인수가 아니다.
