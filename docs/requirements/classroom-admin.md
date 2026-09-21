@@ -413,11 +413,28 @@ RM-1의 선택 모델과 RM-2 중 ‘수업 기록’만 다룬다. (인수 ID �
 
 <a id="remote-management-u2-20260921"></a>
 
-#### U2 — 공지·자료의 대상 배포 · 2026-09-21 (설계 계약 · 구현 아님 · 같은 날 보완 1회)
+#### U2 — 공지·자료의 대상 배포 · 2026-09-21 (설계 → 보완 1회 → 구현 · 운영 비활성)
 
-상태: **설계만.** 제품 코드·migration 파일·실행 없음. RM-3·RM-5와 ADM-10/11의 구체화이고 인수는 [AT-44](../testing/classroom-admin.md#remote-management-u2-plan-20260921)다. Intent 연결은 #1165(`docs/intents/remote-classroom-operations.md`, 브랜치 `docs/751-classroom-ops-intent`)의 **INT-CO-04 — 2026-09-21 개정 제안, owner 승인 전**이다. 이 절은 그 제안이 승인됐다고 전제하지 않으며, 승인 전에는 구현·합성 검증까지만 가능하고 운영 활성화는 하지 않는다. 그 문서를 이 브랜치에 복제하지 않는다. 범위: **평문 공지(`notice`)와 자료(`material` = 본문 + 허용된 HTTPS 링크)**. 수업 프롬프트·수업 설정은 U3이고 아래 ‘U3와의 연결’만 정한다. 새 제품·인증 체계·상주 프로세스·WebSocket·화면 스트리밍을 만들지 않는다. 사용자 참고 DOCX는 UI 원칙의 참고일 뿐 그 예시를 정책으로 옮기지 않았다.
+상태: **구현됨(2026-09-21) · 운영 비활성.** 회차 flag `ops_distribute` 기본 OFF, migration 0023은 어느 원격 DB에도 적용하지 않았다. 실행한 검증과 NOT RUN은 [테스트 문서의 실행 기록](../testing/classroom-admin.md#remote-management-u2-run-20260921)이 정본이다. 아래 본문은 설계 계약이고, 구현하며 바꾼 곳은 바로 아래 ‘구현에서 확정·변경한 계약’이 우선한다. RM-3·RM-5와 ADM-10/11의 구체화이고 인수는 [AT-44](../testing/classroom-admin.md#remote-management-u2-plan-20260921)다. Intent 연결은 #1165(`docs/intents/remote-classroom-operations.md`, 브랜치 `docs/751-classroom-ops-intent`)의 **INT-CO-04 — 2026-09-21 개정 제안, owner 승인 전**이다. 이 절은 그 제안이 승인됐다고 전제하지 않으며, 승인 전에는 구현·합성 검증까지만 가능하고 운영 활성화는 하지 않는다. 그 문서를 이 브랜치에 복제하지 않는다. 범위: **평문 공지(`notice`)와 자료(`material` = 본문 + 허용된 HTTPS 링크)**. 수업 프롬프트·수업 설정은 U3이고 아래 ‘U3와의 연결’만 정한다. 새 제품·인증 체계·상주 프로세스·WebSocket·화면 스트리밍을 만들지 않는다. 사용자 참고 DOCX는 UI 원칙의 참고일 뿐 그 예시를 정책으로 옮기지 않았다.
 
 **보완 이력.** 첫 계약(`17aef2b`)을 독립 검토가 읽고 **미구현 계약의 공백** 일곱 가지를 짚었다(재현된 제품 결함이 아니다 — 코드가 없다): 배포 강사의 권한 철회 경계, 기존 자료를 잃지 않는 기기 쪽 커밋, 배포 실행과 카드의 단위 불일치, 미반영 파일의 복구와 receipt·ack 결속, sync 조건의 충돌, D1 한도 안의 원자성과 비용, 공통 확정 UI의 남는 안내. 이 절은 그 보완본이며 바뀐 결정은 각 소절에 ‘(보완)’으로 표시했다.
+
+##### 구현에서 확정·변경한 계약 · 2026-09-21 (아래 설계 문장과 다르면 이 표가 우선)
+
+인계 때 받은 세 경계(현재 판 기준 coverage, 회수의 receipt, 적용 기한과 잠금)를 포함해, 코드와 시험으로 확정한 것이다. 더 단순해진 곳은 이유를 적었다.
+
+| 설계 문장 | 구현된 계약 | 이유 · 시험 |
+|---|---|---|
+| coverage = ‘다른 유효 배포가 있으면 카드 유지’ (자료 단위) | **카드가 지금 보여 주는 판(revision)과 hash를 허용하는 배포**가 남아 있을 때만 유지한다. v1 실행이 남아 있어도 v2 카드를 받치지 못하고, v2의 마지막 허용 배포를 회수하면 카드가 내려가며 **v1으로 조용히 되돌아가지 않는다.** 대기 중인 배포는 살아 있는 동안만 받치고, 실패·만료·대상 변경·회수로 빠지면 그 자리에서 coverage를 다시 정산한다(`coverageStatements`). 배포 강사 폐기(sweep)로 닫힌 실행은 **이미 반영한 것**에 한해 계속 받친다 | D8 Service · 기기 왕복 시험 · 브라우저 e2e · M1 (v1→v2→같은 v2→두 v2 실행 순서대로 회수) |
+| `card_state`는 targets 행의 열 | 별도 테이블 **`classroom_distribution_cards`**(참가자 × 자료 1행: 현재 기기·판·hash·`seq`·상태·회수 전달 정보). 화면의 `card`는 Service가 (대상 행, 카드 행, 그 좌석의 현재 기기)에서 계산한다: `none·present·replaced(더 새 판이 있음)·covered·withdraw_pending·withdrawn·withdraw_unconfirmed·detached`. 과거 실행의 반영 증거(`state`)는 회수로 바뀌지 않는다 | `no_change`로 본문을 받은 적 없는 실행도 같은 카드를 가리켜야 해서, 실행별 열로는 표현이 안 됐다 |
+| 회수 tombstone = `{object_id, seq, reason}`, receipt는 공통 stage `withdrawn` | 회수는 **자기 전달 키와 자기 receipt**를 갖는다: `withdraw[] = {withdraw_key, object_id, seq, revision, reason}`, 기기는 `withdraw_receipts[] = {withdraw_key, object_id, seq, result: withdrawn｜not_held｜stale}`, Service는 `withdraw_acks[] = {withdraw_key, recorded, reason, final}`. `withdraw_key` = SHA-256(`'withdraw'·회차·좌석·학생·자료·회수 seq·grant·epoch·기기`) 앞 32자 — 제안의 `offer_key`(`'offer'·…`)와 **이름 공간이 다르다.** 기기 저널은 `(종류, 키, 단계)`로만 지워지므로 옛 회수 ack가 새 제안·새 회수의 저널을 지우지 못한다. `stale`(기기가 더 새 사건을 갖고 있음)만으로는 회수 완료로 기록하지 않는다. 제안 receipt의 단계는 `received·reflected·failed·superseded` 넷 | `no_change`였던 실행을 마지막으로 회수하거나 retire로 여러 실행이 한꺼번에 닫혀도 기기가 보고할 키가 하나로 정해진다. D6·D8·D13 |
+| receipt는 대상 행의 `offer_key`와 비교 | 그에 더해 **그 sync가 들어온 연결(grant·epoch)로 키를 다시 계산해** 비교한다. 재발급으로 epoch가 오른 뒤에는 새 제안이 나가기 전이라도 옛 키의 receipt가 `stale_offer`다 | 시험이 잡은 실제 빈틈(행에 남은 옛 키와 일치해 통과하던 것). D6 |
+| `index.lock`(O_EXCL, 10초 stale) + `index.json` rename | **잠금 파일이 없다.** index는 `index.<n>.json`이고 commit은 다음 번호를 **`link()`로 만드는 것**(이미 있으면 실패)이다. 진 쪽은 다시 읽고 다시 판정한다(무작위 간격, 최대 40회). 살아 있는 느린 writer·SIGSTOP된 writer·다른 창이 늦게 깨어나도 **더 새 index를 덮을 방법이 없고**, 훔칠 잠금도 없다. 현재 index = 파싱되는 가장 큰 번호. 저널은 별도 파일이 아니라 index 문서 안에 있어 ‘포인터 이동’과 ‘`reflected` 기록’이 한 commit이다. 그 뒤 같은 읽기 경로로 다시 읽어 확인하고, 읽히지 않으면 `reflected`를 빼고 `failed: store_corrupt`로 바꾼다 | ‘10초 지난 잠금을 훔친다’는 살아 있는 writer와 동시 commit을 허용했다. 기기 시험: 경계별 중단 · 정지된 writer · 8개 동시 writer · 실제 프로세스 SIGKILL · SIGSTOP/SIGCONT |
+| 적용 기한 = 수신 뒤 30초, `failed: apply_deadline` | 기한은 **요청을 보낸 시각**부터 센다(늦게 온 응답은 시간을 벌지 못한다). Service는 `apply_within_ms = min(30초, 의도의 남은 시간 − 요청 제한 4초 − 여유 1초)`를 주고 0 이하면 아예 싣지 않는다. 기기는 monotonic과 wall **두 시계의 경과를 모두** 보고 엄격한 쪽을 따른다(잠자기 동안 monotonic이 멈추는 경우, 시계를 돌린 경우). 거꾸로 간 시계는 실패다. 기한은 메모리에만 있어 재시작을 넘지 못한다. 기한을 넘긴 시도는 **receipt 없이 버린다** — ‘적용 안 됨’의 정직한 표현은 무보고이고, 의도가 유효하면 Service가 다시 싣는다(`apply_deadline` 실패 코드는 쓰지 않는다). `expires_at`과 기기의 절대 시각은 어디서도 비교하지 않는다. 이미 commit된 자료를 다시 여는 것은 기한과 무관한 로컬 읽기다 | 기기 시험(늦은 응답 · 잠자기 · 시계 앞/뒤 · 재시작 · 종료 직전의 500ms 예산) |
+| idle sync 증가분 ‘문장 +0’, 확정 ‘≤ 12쿼리’ | 실측(로컬 workerd D1): **flag OFF면 +0, ON이면 +1문장**(부분 인덱스 probe, 읽기 +1행, 쓰기 0). probe를 grant 조회에 넣지 않고 **별도 문장 + try/catch**로 뺐다 — migration 0023이 없는 DB에 새 Service가 먼저 배포돼도 기존 sync가 죽지 않게 하려는 것이다. flag OFF 회차에서는 45초 상태 주기에만 probe가 돌아 rollback 중 발급된 회수도 전달된다. 확정은 인증 읽기·정산·결과 view를 포함해 **20문장(batch 2개)**, 30·100·200석 동일, 문장당 bound ≤ 25 | 호환·장애 격리가 문장 1개보다 중요하다고 판단. `classroom-ops-distribution-d1.test.mjs` |
+| 공지에도 링크 가능(암묵) | **공지(`notice`)는 링크를 받지 않는다**(`material`만). 허용 host 목록이 비어 있으면 어떤 링크도 거부 | 종류의 뜻을 분명히 |
+| 최종 거부 뒤 ‘과거 기록으로 읽기’ | 최종 거부(연결 폐기·좌석 교체·기기 교체)를 받은 기기는 그 보관함을 **숨긴다**. 표시되는 보관함은 ‘지금 유효하거나 정상 만료된 마지막 연결’ 하나이며, 토큰으로 확인된 학생이 그 보관함의 학생과 같을 때만 보인다. 앱을 완전히 끄고 켠 뒤 연결이 복원되지 않은 상태에서는 ‘끝난 수업의 자료’로 읽힌다 | 회수를 통보받을 길이 없는 기기 |
+| 기기 교체 시 Service가 sync에서 되돌림 | **`/connect`에서** 그 참가자의 유효한 대상(`offered·received·reflected·no_change·unsupported`)을 `device_generation`+1·`accepted`로 되돌리고 옛 기기 카드를 `detached`로 둔다. 실패해도 연결은 성립하고(격리), 결과 view는 ‘카드의 기기 ≠ 지금 연결된 기기’를 직접 계산해 `detached`로 보여 준다 | 매 sync에 기기 비교 조회를 넣지 않기 위해 |
 
 ##### 이름과 권한 — `ops_delivery`와 섞지 않는다
 
@@ -469,7 +486,8 @@ RM-1의 선택 모델과 RM-2 중 ‘수업 기록’만 다룬다. (인수 ID �
 | `classroom_content_objects` — 자료 머리 | `object_id` PK · `class_run_id` · `cohort_id` · `kind` · `latest_revision` · **`event_seq`** · `retired_at` · `retired_by` · `retire_seq` · `created_by` · `created_at` | `kind`는 생성 뒤 불변. `latest_revision`은 **object마다** 따로 오른다(전역 revision 없음), revision 생성은 CAS. `event_seq`는 **이 자료에 일어난 배포·회수 사건의 순번**(보완 3) — 배포 확정·배포 회수·자료 회수가 같은 batch 안에서 1씩 올린다 |
 | `classroom_content_revisions` — 불변 내용 | `object_id` · `revision`(1부터) · `class_run_id` · `kind` · `title` · `payload_json`(kind별 검증된 본문: notice/material = `{body, links:[{label,url}]}`) · `content_hash` · `schema`=`hps-classroom-content/1` · `created_by` · `issuer_jti` · `created_at` · `idempotency_key` | PK(`object_id`,`revision`) · UNIQUE(`class_run_id`,`idempotency_key`). 제품 경로에 UPDATE·DELETE 없음. `content_hash` = SHA-256(`[schema, kind, title, body, [[label,url]…]]`의 정규 JSON) |
 | `classroom_distributions` — 배포 실행 1건 | `id` · `class_run_id` · `cohort_id` · `object_id` · `revision` · `content_hash` · **`seq`**(확정 때의 `event_seq`) · `roster_revision` · `targets_json` · `request_hash` · `idempotency_key` · `expires_at` · `created_by` · `issuer_jti` · `created_at` · `revoked_at` · `revoked_by` · `revoke_reason` · **`revoke_seq`** · `row_revision` | UNIQUE(`class_run_id`,`idempotency_key`). 대상·내용·만료는 생성 뒤 불변. 바뀌는 것은 회수(`revoked_*`, `row_revision` CAS)뿐 |
-| `classroom_distribution_targets` — 대상 결속과 결과 | `distribution_id` · `class_run_id` · `seat_id` · `seat_revision` · `student_id` · `object_id` · `revision` · **`state`**(전달 증거) · **`card_state`**(현재 보관함 상태) · `result_code` · `device_generation` · `device_registration_id` · `grant_id` · `connection_epoch` · `offer_key` · `offers` · `next_offer_at` · `first_offered_at` · `received_at` · `reflected_at` · `withdraw_seq` · `withdraw_offers` · `withdraw_acked_at` · **`pending`**(0/1: Service가 이 대상에게 실을 것이 있음) · `updated_at` | PK(`distribution_id`,`seat_id`) · **부분 인덱스** `(class_run_id, seat_id) WHERE pending=1`(idle sync가 훑는 행 0) · INDEX(`class_run_id`,`student_id`,`object_id`)(대체·같은 revision·회수 coverage 조회). 최종 전이는 기존 `ops_audit`. 본문 없음 |
+| `classroom_distribution_cards` — 참가자×자료의 현재 카드 | `class_run_id` · `seat_id` · `student_id` · `object_id` · `seat_revision` · `device_registration_id` · `revision` · `content_hash` · `seq` · `state` · `withdraw_seq` · `withdraw_reason` · `withdraw_key` · `withdraw_offers` · `next_withdraw_at` · `pending` | PK(`class_run_id`,`seat_id`,`student_id`,`object_id`) · 부분 인덱스 `(class_run_id, seat_id) WHERE pending=1` · INDEX(`class_run_id`,`object_id`,`state`) |
+| `classroom_distribution_targets` — 대상 결속과 결과 | `distribution_id` · `class_run_id` · `seat_id` · `seat_revision` · `student_id` · `object_id` · `revision` · **`state`**(전달 증거) · `result_code` · `device_generation` · `device_registration_id` · `grant_id` · `connection_epoch` · `offer_key` · `offers` · `next_offer_at` · `first_offered_at` · `received_at` · `reflected_at` · **`pending`**(0/1: Service가 이 대상에게 실을 것이 있음) · `updated_at` | PK(`distribution_id`,`seat_id`) · **부분 인덱스** `(class_run_id, seat_id) WHERE pending=1`(idle sync가 훑는 행 0) · INDEX(`class_run_id`,`student_id`,`object_id`)(대체·같은 revision·회수 coverage 조회). 최종 전이는 기존 `ops_audit`. 본문 없음 |
 | `ops_issuer_fences` — 폐기된 issuer의 D1 기록 | 위 ‘철회 경계’ | PK(`issuer_jti`) |
 
 여러 자료가 한 회차에 공존한다(object가 다르면 서로의 revision·`event_seq`·결과에 영향이 없다). 같은 자료의 수정은 새 revision이고, 이전 revision 행과 그 배포 결과는 그대로 남는다. 보존 기간·만기 삭제는 새로 정하지 않는다(아래 ‘미결’). 철회·보존 정리(`classroom_erasure`)가 이 테이블을 다루는 방식은 구현 단계에서 기존 원장에 **추가**로 연결한다 — 학생 식별자(`student_id`)를 가진 것은 targets뿐이고 학생이 쓴 내용은 어디에도 없다.
@@ -494,15 +512,17 @@ App(`POST /v1/classroom/ops/sync`, 기존 자격·4초 제한·single-flight·ba
 // 요청에 추가 (보낼 receipt가 없으면 생략)
 "distribution": { "receipts": [ { "offer_key": "…32hex", "distribution_id": "…", "object_id": "…", "revision": 2,
     "content_hash": "…64hex", "seq": 7,
-    "stage": "received | reflected | failed | superseded | withdrawn", "result_code": "", "observed_at": 0 } ] }   // ≤ 6
+    "stage": "received | reflected | failed | superseded", "result_code": "", "observed_at": 0 } ],               // ≤ 6
+  "withdraw_receipts": [ { "withdraw_key": "…32hex", "object_id": "…", "seq": 9, "result": "withdrawn | not_held | stale", "observed_at": 0 } ] }   // ≤ 10
 // 응답에 추가 (말할 것이 없거나 · 미선언이거나 · 교환이 실패하면 블록 자체가 없다 — 없음은 ‘소식 없음’이지 성공이 아니다)
 "distribution": {
   "items": [ { "offer_key": "…", "distribution_id": "…", "seq": 7, "object_id": "…", "revision": 2, "kind": "notice",
       "schema": "hps-classroom-content/1", "title": "…", "body": "…", "links": [ { "label": "…", "url": "https://…" } ],
       "content_hash": "…", "from": "instructor", "issued_at": 0,
-      "expires_at": 0, "apply_within_ms": 30000 } ],                           // ≤ 2개 그리고 ≤ 24 KiB
-  "withdraw": [ { "object_id": "…", "seq": 9, "reason": "revoked | retired | issuer_revoked" } ],   // ≤ 10
-  "receipt_acks": [ { "offer_key": "…", "stage": "reflected", "recorded": true, "reason": "" } ], // 받은 receipt 수만큼
+      "expires_at": 0, "apply_within_ms": 30000 } ],                           // ≤ 2개 그리고 ≤ 24 KiB · apply_within_ms는 요청을 보낸 시각부터
+  "withdraw": [ { "withdraw_key": "…32hex", "object_id": "…", "seq": 9, "revision": 2, "reason": "revoked | retired" } ],   // ≤ 10
+  "receipt_acks": [ { "offer_key": "…", "stage": "reflected", "recorded": true, "reason": "", "final": true } ], // 받은 receipt 수만큼
+  "withdraw_acks": [ { "withdraw_key": "…", "recorded": true, "reason": "", "final": true } ],
   "more": false }                                                               // true면 1초 뒤 다시
 ```
 
@@ -635,7 +655,7 @@ rev/<object>.<revision>.<hash 앞 16자>.json   불변. 한 번 쓰면 덮어쓰
 index.json      유일한 가변 파일. {schema:'hps-classroom-inbox/2', index_revision, objects:{<object>:{revision, content_hash, seq,
                 file, kind, title, reflected_at, tombstone?:{seq, reason}, sources:[{offer_key, reflected_acked}]}}}
 journal.json    보낼 receipt (offer_key, stage, …) — 보내기 전에 기록, ack 뒤에만 삭제
-index.lock      O_EXCL로 만드는 잠금(pid·boot·시각, 10초 지나면 stale) — 같은 기기의 두 창(각자 extension host)을 직렬화
+(index.lock 없음 — 구현에서 `index.<n>.json` + link() compare-and-swap으로 대체. 위 ‘구현에서 확정·변경한 계약’)
 quarantine/     hash가 맞지 않는 수신물
 ```
 

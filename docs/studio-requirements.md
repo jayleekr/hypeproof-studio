@@ -662,11 +662,12 @@ proposal does not relax existing manual-upload or operator-only log access.
 New reports follow MC-17/19; legacy HAIN7 stays a separate versioned adapter.
 Implementation phases and rollback are in [E5](plan/learning-agent-experience-epics.md#remote-classroom-delivery).
 
-### Targeted distribution of notices and materials (U2) — design contract only, 2026-09-21
+### Targeted distribution of notices and materials (U2) — implemented 2026-09-21, off by default
 
-Not implemented; no REQ row is claimed and [AT-44](testing/classroom-admin.md#remote-management-u2-plan-20260921) is NOT RUN.
+Implemented behind the per-run switch `ops_distribute` (default OFF); no REQ row is claimed. What was run and what was NOT RUN
+is in the [AT-44 run record](testing/classroom-admin.md#remote-management-u2-run-20260921).
 The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u2-20260921).
-The Studio behavior it will add, once built, is bounded as follows. The App host owns a
+The Studio behavior it adds is bounded as follows. The App host owns a
 durable per-learner, per-class-run inbox under extension global storage; it never writes
 to the learner's workspace, conversation, input draft or spool (REQ-Q ownership unchanged).
 An item is stored only after its hash is verified, as an immutable per-revision file followed
