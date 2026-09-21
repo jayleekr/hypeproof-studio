@@ -1,10 +1,14 @@
+/* SX-49: --studio-* are aliases of --hp-*. The selectors stay as they are and only the
+ * values point at the tokens (design doc §디자인 시스템 "기존 스타일 이행"). The six
+ * values are character-for-character the same colors as in tokens.css, so the render
+ * result does not change. tokens.css is the single canonical source for the values. */
 .studio-start,.studio-disconnected {
-  --studio-bg:#151D19;
-  --studio-panel:#202C24;
-  --studio-line:#35483A;
-  --studio-text:#F2F4E8;
-  --studio-muted:#ACB9A5;
-  --studio-accent:#D5F279;
+  --studio-bg:var(--hp-bg);
+  --studio-panel:var(--hp-panel);
+  --studio-line:var(--hp-line);
+  --studio-text:var(--hp-ink);
+  --studio-muted:var(--hp-muted);
+  --studio-accent:var(--hp-accent);
   color:var(--studio-text);
   background:var(--studio-bg);
   font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
@@ -380,6 +384,28 @@
 .studio-entry-options { display: grid; gap: 12px; }
 .studio-secondary { background: transparent; color: var(--studio-text); border-color: var(--studio-line); }
 .studio-secondary:hover:enabled { background: var(--studio-bg); }
+/* SX-04 — peer options. Neither of the two is emphasized. The emphasized button
+ * (Primary) is the single "코드 확인하기" that follows the choice. Inherits only
+ * `.studio-primary`'s layout, with the emphasis taken out. */
+.studio-choice {
+  width:100%;
+  border:1px solid var(--studio-line);
+  border-radius:7px;
+  background:transparent;
+  color:var(--studio-text);
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  text-align:left;
+  padding:13px 15px;
+  font-size:13px!important;
+  font-weight:650!important;
+  word-break:keep-all;
+  overflow-wrap:anywhere;
+  transition:background .15s}
+.studio-choice:hover:enabled { background: var(--studio-bg); }
+.studio-choice:disabled { opacity:.55; cursor:default; }
 
 .studio-saved-activities button { display: block; text-align: left; max-width: 100%; overflow-wrap: anywhere; }
 .studio-saved-activities small { display: block; font-size: .8em; opacity: .75; }
