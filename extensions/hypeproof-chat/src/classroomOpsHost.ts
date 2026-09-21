@@ -39,7 +39,7 @@ const INBOX_KEY = "hypeproof.classroomOps.inbox";
  */
 interface InboxPointer { cohort: string; run: string; seat: string; student: string; hidden: boolean; ends_at?: number; expired?: boolean; grant?: string }
 /** `student`/`run`/`lesson` come from the Service's connect response: they are what a collected snapshot is bound to. */
-interface ConnectionMeta { grant_id: string; class_run_id: string; seat_id: string; expires_at: number; poll_after_ms: number; student?: { u: string; c: string; p: string }; run?: { starts_at: number; ends_at: number }; lesson?: { course_id: string; version: string } | null }
+interface ConnectionMeta { grant_id: string; class_run_id: string; seat_id: string; expires_at: number; poll_after_ms: number; connected_at?: number; student?: { u: string; c: string; p: string }; run?: { starts_at: number; ends_at: number }; lesson?: { course_id: string; version: string } | null }
 /** After its normal expiry a connection can only finish an upload that was already authorized, for this long after class. */
 const UPLOAD_GRACE_MS = 24 * 3_600_000;
 const FINAL_CREDENTIAL_REFUSALS = ["ops_credential_invalid", "ops_grant_revoked", "ops_grant_expired"];
@@ -335,7 +335,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     // A new pairing replaces whatever this window was connected to; responses still in flight for it are void.
     this.stopConnection();
     await this.context.secrets.store(CREDENTIAL_KEY, b.credential);
-    const meta: ConnectionMeta = { grant_id: b.grant_id, class_run_id: b.class_run_id, seat_id: b.seat_id, expires_at: b.expires_at, poll_after_ms: b.poll_after_ms, ...(b.student ? { student: b.student } : {}), ...(b.run ? { run: b.run } : {}), lesson: b.lesson ? { course_id: b.lesson.course_id, version: b.lesson.version } : null };
+    const meta: ConnectionMeta = { grant_id: b.grant_id, class_run_id: b.class_run_id, seat_id: b.seat_id, expires_at: b.expires_at, poll_after_ms: b.poll_after_ms, connected_at: Date.now(), ...(b.student ? { student: b.student } : {}), ...(b.run ? { run: b.run } : {}), lesson: b.lesson ? { course_id: b.lesson.course_id, version: b.lesson.version } : null };
     await this.context.globalState.update(META_KEY, meta);
     await this.start(meta, b.credential);
     void vscode.window.showInformationMessage(
@@ -344,9 +344,9 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   }
 
   /** #751 native help — this window's LIVE class connection: whose seat, which class, which grant. Never the credential. */
-  helpConnection(): { grant_id: string; class_run_id: string; seat_id: string; student?: { u: string; c: string; p: string }; run?: { starts_at: number; ends_at: number } } | null {
+  helpConnection(): { grant_id: string; class_run_id: string; seat_id: string; connected_at?: number; student?: { u: string; c: string; p: string }; run?: { starts_at: number; ends_at: number } } | null {
     const m = this.meta; if (!m || !this.loop || !this.credential) return null;
-    return { grant_id: m.grant_id, class_run_id: m.class_run_id, seat_id: m.seat_id, ...(m.student ? { student: m.student } : {}), ...(m.run ? { run: m.run } : {}) };
+    return { grant_id: m.grant_id, class_run_id: m.class_run_id, seat_id: m.seat_id, ...(m.connected_at ? { connected_at: m.connected_at } : {}), ...(m.student ? { student: m.student } : {}), ...(m.run ? { run: m.run } : {}) };
   }
 
   async disconnectInteractively(): Promise<void> {

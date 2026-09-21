@@ -6,11 +6,11 @@ import * as vscode from "vscode";
 import { randomUUID } from "crypto";
 import {
   bindingOf, buildContent, classifyPost, cleanDraft, draftKey, emptyDraft, emptyStore, makeEnvelope, prune, requestBody, sendKey, sendable,
-  splitShares, turnContent, turnsOf, type Assignment, type Availability, type HelpBinding, type HelpEnvelope, type HelpStore, type HelpView, type ShareRecord,
+  splitShares, turnContent, turnsOf, turnsSince, type Assignment, type Availability, type HelpBinding, type HelpEnvelope, type HelpStore, type HelpView, type ShareRecord,
 } from "./classroomHelp";
 
 const STORE_KEY = "hypeproof.classroomHelp.v1";
-type Conn = { grant_id: string; class_run_id: string; seat_id: string; student?: { u: string; c: string; p: string }; run?: { starts_at: number; ends_at: number } } | null;
+type Conn = { grant_id: string; class_run_id: string; seat_id: string; connected_at?: number; student?: { u: string; c: string; p: string }; run?: { starts_at: number; ends_at: number } } | null;
 export interface HelpHostDeps {
   token(): Promise<string>;
   /** This window's LIVE class connection (null when not paired, ended, revoked or replaced). */
@@ -78,7 +78,7 @@ export class ClassroomHelpHost {
     let store = this.store(); const env = store.envelopes[sk] ?? null;
     // A request whose answer was lost: if the Service has it, it was stored — the envelope is done. Otherwise it stays unknown.
     if (env && env.state !== "prepared" && shares?.some((s) => s.id === env.request_id)) { delete store.envelopes[sk]; await this.save(store, dk); store = this.store(); this.note = "보낸 도움 요청이 서버에 저장된 것을 확인했습니다."; }
-    const since = this.deps.connection()?.run?.starts_at ?? 0;
+    const since = turnsSince(this.deps.connection());
     this.deps.post({
       generation: gen, draft_key: dk, availability, seat: b.seat, draft: store.drafts[dk] ?? emptyDraft(), turns: turnsOf(this.deps.history(), since),
       envelope: store.envelopes[sk] ?? null, current: split.current, history: split.history,
@@ -98,7 +98,7 @@ export class ClassroomHelpHost {
     const b = w.binding, s = this.store(), draft = cleanDraft(raw, Date.now()); s.drafts[key] = draft;
     const availability = await this.assignment(w.token);
     if (availability.state !== "ready") { await this.save(s, key); await this.refresh(availability.state === "unknown" ? "받는 강사를 지금 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요." : null); return; }
-    const since = this.deps.connection()?.run?.starts_at ?? 0, turn = draft.turnId ? turnContent(this.deps.history(), draft.turnId, since) : null;
+    const since = turnsSince(this.deps.connection()), turn = draft.turnId ? turnContent(this.deps.history(), draft.turnId, since) : null;
     if (draft.turnId && !turn) { await this.save(s, key); await this.refresh("고른 대화를 이번 수업 기록에서 찾지 못했습니다. 다시 골라 주세요."); return; }
     const { content, truncated } = buildContent(draft.question, turn);
     if (!Object.keys(content).length) { await this.save(s, key); await this.refresh("질문을 쓰거나 보낼 대화를 하나 골라 주세요."); return; }

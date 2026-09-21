@@ -85,6 +85,15 @@ export function turnContent(history: Array<{ id: string; role: string; content: 
   return { prompt: history[i].content, response: answer.join("\n\n") };
 }
 
+/**
+ * From when a chat message may be offered for sharing. The chat history of a workspace is kept per class, not per learner,
+ * so a message from before THIS window's class connection cannot be attributed to the learner who is here now (a shared
+ * PC). Without a known connection time nothing is offered — the learner can still write their own question.
+ */
+export function turnsSince(conn: { connected_at?: number; run?: { starts_at: number } } | null): number {
+  return conn?.connected_at ? Math.max(conn.connected_at, conn.run?.starts_at ?? 0) : Number.POSITIVE_INFINITY;
+}
+
 export function expiryEstimate(now: number, durationMinutes: number, capSec: number): number { return Math.min(now + durationMinutes * 60_000, capSec * 1000); }
 
 export function makeEnvelope(o: { binding: HelpBinding; assignment: Assignment; draft: HelpDraft; content: Record<string, string>; truncated: string[]; now: number; id: string }): HelpEnvelope {

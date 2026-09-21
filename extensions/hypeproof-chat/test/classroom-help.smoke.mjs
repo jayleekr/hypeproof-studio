@@ -32,6 +32,10 @@ const history = [
 assert.deepEqual(H.turnsOf(history, 900).map((t) => t.id), ["u2", "u1"], "only this class's learner messages, newest first");
 assert.deepEqual(H.turnContent(history, "u1", 900), { prompt: "버튼 만들어 줘", response: "만들었어요\n\n확인해 보세요" }, "tool lines are not attached");
 assert.equal(H.turnContent(history, "u0", 900), null, "a turn from before the class cannot be picked"); assert.equal(H.turnContent(history, "a1", 900), null, "an AI message is not a turn id");
+assert.equal(H.turnsSince({ connected_at: 900, run: { starts_at: 100 } }), 900, "only messages since this window's connection");
+assert.equal(H.turnsSince({ connected_at: 50, run: { starts_at: 100 } }), 100, "and never from before the class");
+assert.equal(H.turnsSince({ run: { starts_at: 100 } }), Infinity, "unknown connection time → no turn is offered");
+assert.deepEqual(H.turnsOf(history, H.turnsSince(null)), [], "no connection → nothing offered");
 const long = H.buildContent("q", { prompt: "p", response: "x".repeat(9000) }); assert.equal(long.content.response.length, 8000); assert.deepEqual(long.truncated, ["response"]);
 ok("the learner's own question can go alone; a picked turn is its message + the AI answer; long text is clamped and said so");
 
