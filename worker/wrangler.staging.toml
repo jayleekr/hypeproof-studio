@@ -1,0 +1,58 @@
+# Staging target for the remote classroom operations rollout (#751). See DEPLOY.md "Remote classroom operations".
+#
+# A SEPARATE file on purpose: `wrangler deploy` without `-c` can never pick it up, and nothing in it is inherited from
+# wrangler.toml. Every resource below must be staging's own. `node scripts/classroom-ops-staging-check.mjs` refuses this
+# file while a REPLACE_ placeholder remains (exit 2, "not provisioned") and refuses it for good (exit 1) if any id,
+# bucket, dataset, name or route is one production uses.
+#
+#   npx wrangler d1 create hypeproof-studio-staging        → database_id below
+#   npx wrangler kv namespace create HPS_KV_STAGING        → id below
+#   npx wrangler r2 bucket create hps-traces-staging
+#   npx wrangler secret put HPS_SIGNING_SECRET -c wrangler.staging.toml   # a NEW value: a staging token must never open production
+#   npx wrangler secret put ADMIN_PASSWORD     -c wrangler.staging.toml
+#   npx wrangler deploy -c wrangler.staging.toml
+name = "hypeproof-studio-api-staging"
+main = "src/index.ts"
+compatibility_date = "2026-05-15"
+compatibility_flags = ["nodejs_compat"]
+account_id = "f1da7073b98021b4117c82a4a219eef0"
+# No routes: staging is reached on its workers.dev URL only. It never answers on a hypeproof-ai.xyz host.
+workers_dev = true
+
+[observability]
+enabled = true
+
+# Only the 15-minute tick (erasure recovery, retention dry-run). The nightly production backup cron does not run here.
+[triggers]
+crons = ["*/15 * * * *"]
+
+[[kv_namespaces]]
+binding = "HPS_KV"
+id = "REPLACE_WITH_STAGING_KV_ID"
+
+[[d1_databases]]
+binding = "HPS_DB"
+database_name = "hypeproof-studio-staging"
+database_id = "REPLACE_WITH_STAGING_D1_ID"
+
+[[analytics_engine_datasets]]
+binding = "HPS_ANALYTICS"
+dataset = "hypeproof_studio_staging"
+
+[[r2_buckets]]
+binding = "HPS_TRACES"
+bucket_name = "hps-traces-staging"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.md", "**/*.html", "**/*.yaml"]
+fallthrough = true
+
+[vars]
+ENVIRONMENT = "staging"
+LLM_PROVIDER = "anthropic"
+GALLERY_LOGS_BASE = "https://hypeproof-ai.xyz"
+# After the first deploy of chalk/wrangler.staging.toml, put its workers.dev URL here and redeploy.
+HPS_CHALK_ORIGIN = "REPLACE_WITH_STAGING_CHALK_ORIGIN"
+# HPS_CLASSROOM_OPS and every evaluator / delivery / retention switch stay unset here: DEPLOY.md step 5 turns them on
+# one at a time with `wrangler deploy -c wrangler.staging.toml --var NAME:value`, so this file is always the "all off" state.
