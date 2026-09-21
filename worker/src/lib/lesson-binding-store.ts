@@ -132,6 +132,8 @@ export async function recordDispatch(env: Env, turn: TurnRow | null, o: { reques
 /** After the request ended. A failure to write leaves "dispatched, outcome unknown" — never "completed", never "not started". */
 export async function recordOutcome(env: Env, turn: TurnRow | null, outcome: Outcome, o: { status: number | null; now: number }): Promise<void> {
   if (!turn) return;
+  // First-only evidence that the admitted row already carries: nothing to write (measured: two statements per later request).
+  if (outcome === 'completed' && turn.first_completed_at !== null) return;
   const db = env.HPS_DB, pk = [turn.class_run_id, turn.student_id, turn.turn_id];
   try {
     if (outcome === 'completed') await db.batch([

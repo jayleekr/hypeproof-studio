@@ -102,7 +102,12 @@ export function turnState(row: Pick<TurnRow, 'first_dispatched_at' | 'first_comp
 }
 
 export type SettingPhase = 'prepared' | 'switched' | 'attempted' | 'attempt_failed' | 'outcome_unknown' | 'applied' | 'replaced';
-/** The instructor's words for one target of a setting distribution. `applied` is a protocol-complete response, nothing less. */
+/**
+ * The instructor's words for one target of a setting distribution. `applied` is a protocol-complete provider response under
+ * the binding, nothing less — and nothing more: it is REQUEST-level. A learner question is several requests (the pinned Agent
+ * SDK sends an auxiliary request before its main loop under the same turn id), and the Service cannot tell them apart without
+ * guessing from the body, so it does not. `applied` is not "the question succeeded"; a later failure stays on the row beside it.
+ */
 export function settingPhase(b: Pick<BindingRow, 'binding_seq' | 'activated_at' | 'first_dispatched_at' | 'first_completed_at' | 'last_failure_kind'> | null, o: { latestSeq: number; now: number }): SettingPhase {
   if (!b) return 'prepared';
   if (b.first_completed_at !== null) return b.binding_seq < o.latestSeq ? 'replaced' : 'applied';
