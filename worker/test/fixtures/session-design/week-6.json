@@ -1,0 +1,35 @@
+{
+  "schema": "hps-session-design/1",
+  "title": "6주차 · Financial projection & key metrics",
+  "audience": "국제고 2학년 · GlobalBuddy 팀",
+  "duration_minutes": 120,
+  "objective": "내 기록으로 3개월 뒤 몇 명인가?",
+  "prerequisites": "1~5주차 기록 폴더 전체와 5주차 체험 반응 기록",
+  "starter": "globalbuddy-v1/ (5주차 사본, 원본 보존) + 1~5주차 기록 폴더",
+  "learning": {
+    "week": 6,
+    "mission": "내 기록으로 3개월 뒤 몇 명인가?",
+    "completion": [
+      { "id": "c1", "text": "다음 3개월 가설을 예측이라고 표시해 적었습니다", "event": "criterion_set" },
+      { "id": "c2", "text": "AI가 한 것과 내가 한 것을 나눠 적고 다음 실험을 정했습니다", "event": "reflection_submitted" }
+    ],
+    "observe": [
+      "현재 수치를 목표와 구분하는가",
+      "불확실성을 표시하는가",
+      "다음 가설을 정하는가"
+    ],
+    "never": [
+      "예측 숫자를 확정된 미래처럼 표현하지 않는다."
+    ],
+    "evidence_types": ["criterion", "action", "ownership"],
+    "source_kinds": ["test", "link", "none"],
+    "reflection": { "changed_mind": true, "next_experiment": true }
+  },
+  "steps": [
+    { "id": "board", "title": "Metric board", "instructions": "가입, 활성, 재방문, 유료 전환을 지금까지 남은 기록에서 모읍니다. 기록이 없는 칸은 채우지 말고 없음으로 적습니다.", "hint": "기억으로 채운 칸과 기록에서 옮긴 칸을 섞지 않습니다.", "acceptance": "각 칸에 현재 기록과 그 기록의 출처가 적혀 있고, 없는 칸은 없음으로 표시돼 있습니다.", "ui": "metric_board", "evidence": "action" },
+    { "id": "timeline", "title": "Evidence timeline", "instructions": "숫자마다 언제 무엇을 해서 생긴 기록인지 시간 순서로 잇습니다.", "hint": "이어지지 않는 숫자는 지우지 말고 출처를 모른다고 표시합니다.", "acceptance": "각 숫자가 그 숫자를 만든 사건과 날짜에 연결돼 있습니다.", "ui": "evidence_note", "evidence": "action" },
+    { "id": "plan", "title": "3-month plan", "instructions": "다음 3개월에 무엇을 하면 무엇이 달라질지 가설로 적습니다. 예측한 숫자에는 예측이라고 표시하고 아직 모르는 것은 모른다고 적습니다.", "hint": "지금 기록과 예측을 같은 칸에 적으면 나중에 구분할 수 없습니다.", "acceptance": "3개월 계획이 적혀 있고 각 예측에 예측 표시와 근거가 붙어 있습니다.", "ui": "criterion_form", "evidence": "criterion", "gate": "criterion_set" },
+    { "id": "split", "title": "Contribution split", "instructions": "이번 6주에 AI가 한 것과 내가 한 것을 사례와 함께 나눠 적고, 다음에 직접 해 보고 싶은 것을 하나 고릅니다.", "hint": "\"같이 했다\"로 묶지 말고 어느 부분을 누가 정했는지로 나눕니다.", "acceptance": "AI가 한 것과 내가 한 것이 사례와 함께 나뉘어 적혀 있고 다음 실험 하나가 적혀 있습니다.", "ui": "decision_form", "evidence": "ownership", "gate": "reflection_submitted" }
+  ],
+  "assistant": { "display_name": "코치" }
+}
