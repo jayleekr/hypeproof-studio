@@ -10,7 +10,6 @@ import * as path from "path";
 import * as os from "os";
 import { StartPage } from "./startPage";
 import { ChatPanelProvider } from "./chatPanelProvider";
-import { AssetStatusBar } from "./assetStatusBar";
 import {
   labelsForProfile,
   appToneOf,
@@ -43,7 +42,7 @@ import type { ResolvedProfile } from "./protocol";
 const TOKEN_KEY = "hypeproofChat.workshopToken";
 
 let providerRef: ChatPanelProvider | null = null;
-/** #596 — 업로드 커맨드 재진입 락 (배너+팔레트 동시 클릭 → 이중 업로드 방지). */
+/** #596 — re-entry lock on the upload command (banner + palette clicked at once → no double upload). */
 let uploadInFlight = false;
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -69,20 +68,29 @@ export async function activate(context: vscode.ExtensionContext) {
   const preview = new PreviewProvider(context);
   const liveServer = new LiveServer();
   registerPreviewViewport(context, liveServer);
-  const assetStatus = new AssetStatusBar();
-  // #580 — 세션 로그 로컬 스풀 (수집 계층). 세션 = 이 활성화 1회. 디렉토리는
-  // 첫 이벤트에서 게으르게 생기므로 채팅 없는 창은 아무것도 남기지 않는다.
+  // SX-59 — the old capability status bar was built here and sat on screen for the
+  // whole session. It was removed module and all, per the requirement that no
+  // capability score, grade or badge belongs on the working screen. What disappeared
+  // is held by git history and `test/sx-legacy-score-removed.smoke.mjs` — writing the
+  // deleted strings back into a comment makes that absence check trip over its own
+  // documentation (which it did, once).
+  // #580 — local session-log spool (collection layer). A session = one activation of
+  // this extension. The directory is created lazily on the first event, so a window
+  // with no chat leaves nothing behind.
   //
-  // e2e 런은 스풀을 만들지 않는다: 스풀 루트는 의도적으로 user-data-dir 밖의
-  // 고정 경로라 e2e 의 fresh-user-data-dir 격리를 우회하는데, e2e 픽스처는
-  // 실코호트의 진짜 토큰을 프리시드하므로 합성 턴이 실학생 신원의 세션으로
-  // 실기기 스풀에 쌓인다 — 업로더가 생기는 순간 분석 오염이다.
+  // An e2e run makes no spool: the spool root is deliberately a fixed path OUTSIDE
+  // user-data-dir, which bypasses e2e's fresh-user-data-dir isolation, and the e2e
+  // fixture preseeds a real cohort's real token — so synthetic turns would pile up in
+  // the real-device spool as sessions under a real student's identity. The moment an
+  // uploader exists, that is analytics contamination.
   //
-  // 게이트는 env + 테스트 상태 파일의 OR 다. env(HPS_TEST_E2E)는 확장 호스트
-  // 까지 전파가 "inconsistent" 하다고 이 파일 스스로 적어 놨고(REQ-A7 의
-  // 파일 백도어가 존재하는 이유), 오염이 성립하려면 토큰이 도달해야 하는데
-  // 토큰은 env 아니면 그 파일로 온다 — 어느 쪽이 뚫렸든 게이트에 걸린다.
-  // F5 개발 호스트는 기록하되 meta 에 `dev: true` 표식으로 걸러낼 수 있게 한다.
+  // The gate is env OR the test state file. This file itself has written down that
+  // env (HPS_TEST_E2E) propagates "inconsistently" as far as the extension host (that
+  // is why REQ-A7's file backdoor exists), and contamination requires the token to
+  // arrive — and the token comes either by env or by that file, so whichever one got
+  // through, the gate catches it.
+  // An F5 development host does record, but is marked `dev: true` in meta so it can
+  // be filtered out.
   const isTestRun = !!process.env.HPS_TEST_E2E || backdoors.testStateFileFound;
   const spoolRoot = resolveSpoolSessionsRoot({
     platform: process.platform,
@@ -99,13 +107,15 @@ export async function activate(context: vscode.ExtensionContext) {
         os: { platform: process.platform, release: os.release(), arch: process.arch },
         devHost: context.extensionMode === vscode.ExtensionMode.Development,
       });
-  // #897 (VO-01) — 음성 capability 진단. **명령으로만** 돈다: core patch 후에는
-  // 이 경로가 OS 권한 프롬프트를 띄우므로 활성화 시점에 돌려서는 안 된다.
+  // #897 (VO-01) — voice capability diagnosis. It runs **by command only**: after the
+  // core patch this path raises an OS permission prompt, so it must never be run at
+  // activation time.
   //
-  // 스풀 분기 **밖**에 둔다. #904 에서 이 등록이 `if (spool)` 안에 들어가 있었고,
-  // `spool` 은 테스트 런(`isTestRun`)이나 스풀 초기화 실패에서 undefined 라
-  // 그 조건에서 명령이 조용히 사라졌다. 진단 도구가 진단이 필요한 상황에서
-  // 없어지는 것은 도구가 없는 것보다 나쁘다.
+  // It sits **outside** the spool branch. In #904 this registration had been put
+  // inside `if (spool)`, and `spool` is undefined on a test run (`isTestRun`) or when
+  // spool initialization fails — so under exactly those conditions the command
+  // silently disappeared. A diagnostic tool that vanishes when diagnosis is needed is
+  // worse than no tool at all.
   context.subscriptions.push(
     vscode.commands.registerCommand("hypeproof-chat.diagnoseVoiceCapability", async () => {
       const { diagnoseVoiceCapability } = await import("./voiceCapability");
@@ -114,15 +124,17 @@ export async function activate(context: vscode.ExtensionContext) {
   );
 
   if (spool) {
-    // 총량 캡 집행 (#580 D7) — 활성화를 막지 않는 fire-and-forget, 실패는 삼킨다.
+    // Total-size cap enforcement (#580 D7) — fire-and-forget so it never blocks
+    // activation; failures are swallowed.
     void spool.sweepRetention();
-    // 종료 시 큐에 남은 마지막 이벤트를 흘려보낸다 (best-effort — 크래시는
-    // 라인 단위 append 가 감당한다).
+    // On shutdown, flush the last events left in the queue (best-effort — a crash is
+    // covered by the line-at-a-time append).
     context.subscriptions.push({ dispose: () => void spool.flush() });
-    // #596 — 기동 시 잔여분 배너 (활성화당 1회). 세션 종료 배너는 proxy
-    // 런타임의 session_window 에만 걸리는데 주력 런타임은 agent-sdk 라(1회차
-    // 리뷰 F6) 그 경로만으론 도달이 안 된다 — 다음 기동에서 "안 보낸 기록"을
-    // 발견하면 버튼을 내민다. 업로드 자체는 여전히 클릭이 있어야만 일어난다.
+    // #596 — leftovers banner at startup (once per activation). The session-end
+    // banner only fires on the proxy runtime's session_window, but the main runtime
+    // is agent-sdk (session 1 review F6), so that path alone never reaches anyone —
+    // instead, the next startup that finds "records not sent" offers the button. The
+    // upload itself still only happens on a click.
     const pendingTimer = setTimeout(() => {
       void (async () => {
         try {
@@ -130,8 +142,9 @@ export async function activate(context: vscode.ExtensionContext) {
           if (!token) return;
           const pending = scanUploadableSessions(spoolRoot, {
             currentSessionDir: spool.currentSessionDir(),
-            // 공용 PC(N2): 이 토큰 주인의 세션만 센다 — 남의 잔여분으로
-            // 배너를 울리면 남의 원문이 이 학생의 동의 아래 올라간다.
+            // Shared PC (N2): count only the sessions belonging to this token's
+            // owner — ringing the banner over someone else's leftovers uploads
+            // someone else's raw text under THIS student's consent.
             identity: spoolIdentityFromToken(token),
           });
           if (pending.length === 0) return;
@@ -144,12 +157,12 @@ export async function activate(context: vscode.ExtensionContext) {
           if (pick === "기록 보내기") {
             void vscode.commands.executeCommand("hypeproof-chat.uploadSessionLogs");
           }
-        } catch { /* best-effort — 배너 실패가 활성화를 방해하면 안 된다 */ }
+        } catch { /* best-effort — a failed banner must not get in the way of activation */ }
       })();
     }, 15_000);
     context.subscriptions.push({ dispose: () => clearTimeout(pendingTimer) });
   }
-  const provider = new ChatPanelProvider(context, preview, liveServer, assetStatus, spool);
+  const provider = new ChatPanelProvider(context, preview, liveServer, spool);
   providerRef = provider;
   registerLocalReview(context, (webview, dist) => provider.renderHtml(webview, dist));
   const startPage = new StartPage(context, provider, async (profile, commit) => {
@@ -185,7 +198,6 @@ export async function activate(context: vscode.ExtensionContext) {
   void classroomOps.resume();
   context.subscriptions.push(
     { dispose: () => liveServer.dispose() },
-    assetStatus,
     vscode.window.registerWebviewViewProvider("hypeproof-chat.panel", provider, {
       webviewOptions: { retainContextWhenHidden: true },
     }),
@@ -207,14 +219,16 @@ export async function activate(context: vscode.ExtensionContext) {
       vscode.window.showInformationMessage("HypeProof Chat: conversation cleared.");
     }),
 
-    // #596 — 세션 로그 업로드 (#580 업로드 계층). 항상 **명시적 액션**으로만
-    // 돈다: 이 커맨드(팔레트) 또는 세션 종료 감지/기동 시 잔여분 배너의 버튼.
+    // #596 — session-log upload (#580 upload layer). It always runs on an **explicit
+    // action** only: this command (palette), or the button on the session-end /
+    // startup leftovers banner.
     //
-    // 순서가 본질이다: 먼저 현재 세션을 **봉인**(seal — 스풀이 다음 이벤트를
-    // 새 세션으로 돌림)하고, 봉인된 디렉토리는 정지 게이트 면제(allowFresh)로
-    // 업로드한다. 이게 없으면 "활성 세션 제외" 규칙 때문에 1일차 수업 끝
-    // 배너가 오늘 데이터를 하나도 못 올린다(1회차 리뷰 F1). 다른 창의 활성
-    // 세션은 정지 게이트(UPLOAD_QUIESCENT_MS)가 보호한다(F2).
+    // The ORDER is the whole point: first **seal** the current session (seal — the
+    // spool routes the next event into a new session), then upload the sealed
+    // directory with the quiescence gate waived (allowFresh). Without this, the
+    // "exclude the active session" rule means the end-of-day-1 banner uploads none of
+    // today's data (session 1 review F1). Active sessions in other windows are still
+    // protected by the quiescence gate (UPLOAD_QUIESCENT_MS) (F2).
     vscode.commands.registerCommand("hypeproof-chat.uploadSessionLogs", async () => {
       if (!spool) {
         vscode.window.showInformationMessage("테스트 실행에서는 세션 기록을 남기지 않아요.");
@@ -224,8 +238,8 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showInformationMessage("이미 기록을 보내는 중이에요 — 잠시만요.");
         return;
       }
-      // 락은 체크 직후 즉시 — 아래 await 들 사이에 두 번째 호출이 끼어들면
-      // 락이 장식이 된다 (2회차 리뷰 N4).
+      // Take the lock immediately after the check — if a second call slips in between
+      // the awaits below, the lock is decoration (session 2 review N4).
       uploadInFlight = true;
       try {
         const token = await context.secrets.get(TOKEN_KEY);
@@ -235,9 +249,10 @@ export async function activate(context: vscode.ExtensionContext) {
         }
         const profile = await provider.ensureProfile();
         if (profile === null) {
-          // 확인 실패와 "기능 꺼짐"을 합치면 안 되고(#381), 원인을 단정하는
-          // 문구도 안 된다(verification.md 의 401 오독 사고) — 원인+다음
-          // 행동을 아는 쪽은 profileFailure 다.
+          // A failed lookup must not be merged with "the feature is off" (#381), and
+          // the wording must not assert a cause either (the 401 misreading incident in
+          // verification.md) — the side that knows the cause AND the next action is
+          // profileFailure.
           vscode.window.showWarningMessage(
             provider.profileFailure()?.friendly ??
               "수업 정보를 확인하지 못했어요 — 잠시 후 다시 시도해주세요.",
@@ -245,7 +260,7 @@ export async function activate(context: vscode.ExtensionContext) {
           return;
         }
         if (profile.analytics?.upload_session_logs !== true) {
-          // 서버도 어차피 거부한다(fail closed) — 여기서 미리 조용히 알린다.
+          // The server refuses it anyway (fail closed) — say so quietly, up front.
           vscode.window.showInformationMessage("이 수업은 기록 업로드를 사용하지 않아요.");
           return;
         }
@@ -255,12 +270,14 @@ export async function activate(context: vscode.ExtensionContext) {
         await vscode.window.withProgress(
           { location: vscode.ProgressLocation.Notification, title: "오늘 활동 기록 보내는 중…" },
           async () => {
-            // 시도 기록은 **봉인 전에, 이미 활동이 있던 세션에만** 남긴다.
-            // 봉인 후에 기록하면 이벤트 1개짜리 정크 세션이 실체화되고, 그게
-            // 다음 기동 배너의 "안 보낸 기록 1개"가 되어 신호가 죽는다(N3).
+            // Record the attempt **before sealing, and only into a session that
+            // already had activity**. Recording after the seal materializes a junk
+            // one-event session, which becomes the next startup banner's "1 record not
+            // sent" and kills the signal (N3).
             if (spool.currentSessionDir()) {
-              // 채팅 응답 속 코드가 아니라 수업 종료 시점의 실제 index.html 을
-              // 봉인한다. 아이가 마지막으로 직접 고친 부분도 결과 분석에 남는다.
+              // Seal the real index.html as it stands at the end of the lesson, not
+              // the code inside a chat reply. Whatever the child edited by hand last
+              // then survives into the outcome analysis.
               await provider.captureFinalArtifactForSpool();
               spool.recordWorkflow({ event: "logs_upload" });
             }
@@ -269,14 +286,15 @@ export async function activate(context: vscode.ExtensionContext) {
               baseUrl: proxyUrl,
               token,
               currentSessionDir: spool.currentSessionDir(),
-              // 공용 PC 방어(N2): 이 토큰의 신원과 meta 가 일치하는 세션만.
+              // Shared-PC defence (N2): only sessions whose meta matches this token's identity.
               identity: spoolIdentityFromToken(token),
               ...(sealed ? { allowFresh: [sealed] } : {}),
             });
             const ok = results.filter((r) => r.ok).length;
             const fail = results.length - ok;
-            // 결과 집계는 스풀이 아니라 콘솔로 — 스풀에 남기면 봉인 직후의
-            // 빈 세션을 실체화해 정크 체인이 된다(N3).
+            // The result tally goes to the console, not the spool — writing it to the
+            // spool materializes the empty post-seal session and starts a junk chain
+            // (N3).
             console.log(`[spool-upload] sessions=${results.length} ok=${ok} fail=${fail}`);
             if (results.length === 0) {
               vscode.window.showInformationMessage("보낼 새 기록이 없어요.");
@@ -320,15 +338,16 @@ export async function activate(context: vscode.ExtensionContext) {
         vscode.window.showWarningMessage("HypeProof: .html / .htm 파일만 preview 가능합니다.");
         return;
       }
-      // 미리보기는 **라이브 서버 하나로** 모은다 (원장 결정 2026-07-27).
+      // Preview is consolidated onto **one live server** (원장 decision 2026-07-27).
       //
-      // 예전에는 webview 로 HTML 을 직접 렌더했다. 그러면 코치가 보는 화면
-      // (live_preview_start → 127.0.0.1)과 학생이 우클릭으로 여는 화면이 **서로 다른
-      // 진실**이 된다. 실사용에서 우클릭 미리보기가 라이브보다 뒤처진 내용을 보여
-      // 줬고, 학생은 어느 쪽이 맞는지 알 방법이 없었다.
+      // It used to render the HTML directly in a webview. That makes the screen the
+      // coach sees (live_preview_start → 127.0.0.1) and the screen the student opens
+      // by right-click **two different truths**. In real use the right-click preview
+      // showed content that lagged behind the live one, and the student had no way to
+      // tell which was right.
       //
-      // 라이브 서버는 진짜 HTTP + 진짜 브라우저 + 저장 시 자동 새로고침이라
-      // 코치가 검증하는 화면과 정확히 같다.
+      // The live server is real HTTP + a real browser + auto-reload on save, so it is
+      // exactly the screen the coach verifies against.
       const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
       if (!root) {
         vscode.window.showWarningMessage("HypeProof: 작업 폴더를 먼저 열어주세요.");
@@ -336,7 +355,7 @@ export async function activate(context: vscode.ExtensionContext) {
       }
       try {
         const base = await liveServer.ensure(root);
-        // 워크스페이스 루트 기준 상대경로로 연다. 루트의 index.html 은 `/`.
+        // Open by a path relative to the workspace root. index.html at the root is `/`.
         const rel = path.relative(root, target.fsPath).split(path.sep).join("/");
         const url = rel === "index.html" ? base : `${base.replace(/\/$/, "")}/${rel}`;
         await vscode.commands.executeCommand("hypeproof-chat.openBrowser", url);
@@ -359,7 +378,7 @@ export async function activate(context: vscode.ExtensionContext) {
     }),
 
     // #66 — Mint Student Token for instructors. Pulls cohort/profile defaults
-    // from the active /v1/profile response so the 강사 doesn't have to retype
+    // from the active /v1/profile response so the instructor doesn't have to retype
     // them. issuer token persists in SecretStorage between mints.
     vscode.commands.registerCommand("hypeproof-chat.mintStudentToken", async () => {
       const proxyUrl = vscode.workspace
@@ -834,8 +853,9 @@ async function applyTestBackdoors(
     ];
     for (const f of candidates) {
       if (fs.existsSync(f)) {
-        // 파싱 성공 여부와 무관하게 "테스트 런" 표식이다 — #580 스풀 게이트가
-        // 이 플래그를 env 와 OR 로 쓴다 (파일은 env 보다 신뢰 가능한 채널).
+        // Regardless of whether parsing succeeds, this is the "test run" marker —
+        // the #580 spool gate ORs this flag with env (the file is a more trustworthy
+        // channel than env).
         testStateFileFound = true;
         const j = JSON.parse(fs.readFileSync(f, "utf8")) as {
           token?: string;
