@@ -533,6 +533,19 @@ export async function activate(context: vscode.ExtensionContext) {
     }
   }
 
+  // Test-only (#751 U4): with HPS_TEST_PREVIEW_FAULT=<file>, the appearance of that file drops the live preview server the
+  // way a crash would, so a real window can exercise the new-port recovery. Unset = nothing is watched, nothing registered.
+  const previewFault = process.env.HPS_TEST_PREVIEW_FAULT;
+  if (previewFault) {
+    const timer = setInterval(() => {
+      if (!fs.existsSync(previewFault)) return;
+      try { fs.rmSync(previewFault); } catch { /* the next tick retries */ return; }
+      liveServer.simulateCrashForTest();
+      console.log("[test] preview server dropped (HPS_TEST_PREVIEW_FAULT)");
+    }, 500);
+    context.subscriptions.push({ dispose: () => clearInterval(timer) });
+  }
+
   // #72: kick off background update checks. Scheduler is disposable so we
   // attach it to the extension lifecycle.
   context.subscriptions.push(

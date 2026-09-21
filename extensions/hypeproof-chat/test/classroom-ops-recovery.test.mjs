@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RecoveryWatch, profileCheckClears, recoveryPayload } from '../src/classroomOps.ts';
-import { classifyArtifact, isLoopbackPreview, previewPagePath, previewPageUrl } from '../src/previewRecovery.ts';
+import { classifyArtifact, isLoopbackPreview, isTabOfServer, previewPagePath, previewPageUrl, recoverLearnerPreview } from '../src/previewRecovery.ts';
 
 const SECRET_MARK = 'SYNTHETIC-TOKEN-BODY-MUST-NOT-LEAVE';
 const token = (jti) => `${Buffer.from(JSON.stringify({ jti, u: 'synthetic-student', c: 'synthetic-cohort', exp: 4102444800 })).toString('base64url')}.${SECRET_MARK}`;
@@ -115,8 +115,57 @@ test('a token re-check does not clear a runtime fault; a finished turn does', as
 });
 
 test('preview: a missing page and a tab left on the dead address are reported as what they are', async (t) => {
-  let answer = { state: 'reloaded', artifact: 'opened', reopened: false }; const f = await hostFixture(t, { recoverPreview: async () => answer });
+  let answer = { state: 'reloaded', artifact: 'opened', tabs: 'loaded' }; const f = await hostFixture(t, { recoverPreview: async () => answer });
   const codes = [];
-  for (const [i, a] of [[1, answer], [2, { state: 'reloaded', artifact: 'missing', reopened: false }], [3, { state: 'restarted', artifact: 'opened', reopened: true }], [4, { state: 'restarted', artifact: 'opened', reopened: false }], [5, { state: 'restarted', artifact: 'unreachable', reopened: false }], [6, { state: 'no_preview', artifact: 'unreachable', reopened: false }]]) { answer = a; const r = await f.run('restart_preview', 'cmd-preview-000' + i); codes.push([r.state, r.result_code]); }
-  assert.deepEqual(codes, [['succeeded', 'preview_artifact_ok'], ['failed', 'preview_artifact_missing'], ['succeeded', 'preview_reopened_artifact_ok'], ['failed', 'preview_restarted_new_url'], ['failed', 'preview_unhealthy'], ['failed', 'no_preview']]);
+  for (const [i, a] of [[1, answer], [2, { state: 'reloaded', artifact: 'missing', tabs: 'not_loaded' }], [3, { state: 'restarted', artifact: 'opened', tabs: 'loaded' }], [4, { state: 'restarted', artifact: 'opened', tabs: 'not_loaded' }], [5, { state: 'restarted', artifact: 'unreachable', tabs: 'none' }], [6, { state: 'no_preview', artifact: 'unreachable', tabs: 'none' }], [7, { state: 'restarted', artifact: 'opened', tabs: 'none' }], [8, { state: 'reloaded', artifact: 'opened', tabs: 'none' }], [9, { state: 'reloaded', artifact: 'opened', tabs: 'not_loaded' }]]) { answer = a; const r = await f.run('restart_preview', 'cmd-preview-000' + i); codes.push([r.state, r.result_code]); }
+  assert.deepEqual(codes, [['succeeded', 'preview_artifact_ok'], ['failed', 'preview_artifact_missing'], ['succeeded', 'preview_reopened_artifact_ok'], ['failed', 'preview_restarted_new_url'], ['failed', 'preview_unhealthy'], ['failed', 'no_preview'], ['failed', 'preview_restarted_new_url'], ['succeeded', 'preview_reloaded'], ['succeeded', 'preview_reloaded']], 'no own tab = never "reconnected"; a tab that did not load anew = server answer only');
+});
+
+// ── #751 U4 — only the learner's own preview tabs. Tabs are fakes; the procedure is the product's recoverLearnerPreview. ──
+function tabWorld(urls, { restart = true, page = { status: 200, contentType: 'text/html' }, loadFails = [] } = {}) {
+  let n = 0; const tabs = urls.map((url) => ({ id: 'tab-' + (++n), url })), log = { loaded: [], closed: [], opened: [], fetched: [] };
+  const deps = {
+    tabs: () => tabs, serverUrl: () => 'http://127.0.0.1:41000/',
+    recover: async () => (restart ? { state: 'restarted', url: 'http://127.0.0.1:42000/' } : { state: 'reloaded', url: 'http://127.0.0.1:41000/' }),
+    fetchPage: async (url) => { log.fetched.push(url); return page; },
+    load: async (tab, url) => { if (!tabs.includes(tab) || loadFails.includes(tab.id)) return null; log.loaded.push([tab.id, url]); tab.url = url; return { href: url, complete: true, fresh: true }; },
+    close: async (tab) => { log.closed.push(tab.id); tabs.splice(tabs.indexOf(tab), 1); },
+    open: async (url) => { const t = { id: 'tab-' + (++n), url }; tabs.push(t); log.opened.push(url); return t; },
+  };
+  return { tabs, log, deps };
+}
+const STUDENT = 'http://127.0.0.1:41000/game.html', TOOL = 'http://localhost:5173/admin', SITE = 'https://example.com/';
+
+test('preview identity: a tab belongs to the learner\'s server only by that server\'s scheme + port', () => {
+  assert.equal(isTabOfServer(STUDENT, 'http://127.0.0.1:41000/'), true); assert.equal(isTabOfServer('http://localhost:41000/x', 'http://127.0.0.1:41000/'), true, 'two spellings of loopback');
+  assert.equal(isTabOfServer(TOOL, 'http://127.0.0.1:41000/'), false); assert.equal(isTabOfServer(SITE, 'http://127.0.0.1:41000/'), false); assert.equal(isTabOfServer('http://127.0.0.1.evil.test:41000/', 'http://127.0.0.1:41000/'), false); assert.equal(isTabOfServer(STUDENT, undefined), false);
+});
+
+test('preview recovery: the learner\'s tab moves to the new port at its own path; an unrelated localhost tool and a site are untouched in either order', async () => {
+  for (const order of [[TOOL, STUDENT, SITE], [STUDENT, TOOL, SITE]]) {
+    const w = tabWorld(order); const before = w.tabs.map((t) => ({ ...t }));
+    const r = await recoverLearnerPreview(w.deps);
+    assert.deepEqual(r, { state: 'restarted', artifact: 'opened', tabs: 'loaded' }, order.join(' '));
+    assert.deepEqual(w.log.fetched, ['http://127.0.0.1:42000/game.html'], 'the page judged is the learner\'s, never /admin');
+    const student = before.find((t) => t.url === STUDENT);
+    assert.deepEqual(w.log.loaded, [[student.id, 'http://127.0.0.1:42000/game.html']]); assert.deepEqual(w.log.closed, []); assert.deepEqual(w.log.opened, []);
+    for (const other of before.filter((t) => t.url !== STUDENT)) assert.equal(w.tabs.find((t) => t.id === other.id)?.url, other.url, 'kept: ' + other.url);
+  }
+});
+
+test('preview recovery: no own tab is never "reconnected"; a 404 moves nothing; several own sub-pages each keep their path', async () => {
+  const none = tabWorld([TOOL, SITE]); assert.deepEqual(await recoverLearnerPreview(none.deps), { state: 'restarted', artifact: 'opened', tabs: 'none' });
+  assert.deepEqual([none.log.loaded, none.log.closed, none.log.opened], [[], [], []]);
+  const gone = tabWorld([STUDENT, TOOL], { page: { status: 404, contentType: 'text/plain' } }); assert.deepEqual(await recoverLearnerPreview(gone.deps), { state: 'restarted', artifact: 'missing', tabs: 'not_loaded' }); assert.deepEqual(gone.log.loaded, []);
+  const two = tabWorld([STUDENT, 'http://127.0.0.1:41000/levels/2.html?x=1', TOOL]); assert.equal((await recoverLearnerPreview(two.deps)).tabs, 'loaded');
+  assert.deepEqual(two.log.loaded.map(([, u]) => u), ['http://127.0.0.1:42000/game.html', 'http://127.0.0.1:42000/levels/2.html?x=1']);
+  const alive = tabWorld([TOOL, STUDENT], { restart: false }); assert.deepEqual(await recoverLearnerPreview(alive.deps), { state: 'reloaded', artifact: 'opened', tabs: 'loaded' }); assert.deepEqual(alive.log.fetched, ['http://127.0.0.1:41000/game.html'], 'reloaded: judged on the learner\'s path, not the tool\'s');
+});
+
+test('preview recovery: a tab that will not load is replaced only when it is the learner\'s own on a dead server — and it must then load', async () => {
+  const w = tabWorld([TOOL, STUDENT], { loadFails: ['tab-2'] }); assert.equal((await recoverLearnerPreview(w.deps)).tabs, 'loaded');
+  assert.deepEqual(w.log.closed, ['tab-2']); assert.deepEqual(w.log.opened, ['http://127.0.0.1:42000/game.html']); assert.equal(w.tabs.find((t) => t.id === 'tab-1').url, TOOL);
+  const stale = tabWorld([STUDENT]); stale.deps.load = async () => ({ href: STUDENT, complete: true, fresh: false });
+  assert.equal((await recoverLearnerPreview(stale.deps)).tabs, 'not_loaded', 'an old document that was already complete is not the new page');
+  const live = tabWorld([STUDENT], { restart: false, loadFails: ['tab-1'] }); assert.equal((await recoverLearnerPreview(live.deps)).tabs, 'not_loaded'); assert.deepEqual(live.log.closed, [], 'a healthy server\'s tab is never closed');
 });

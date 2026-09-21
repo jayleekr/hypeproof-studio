@@ -23,3 +23,62 @@ export function classifyArtifact(status: number | null, contentType: string | nu
   if (status >= 200 && status < 300) return /^(text\/html|application\/xhtml\+xml)/i.test(contentType ?? "") ? "opened" : "missing";
   return "missing";
 }
+
+const LOOPBACK_HOSTS = ["127.0.0.1", "localhost"];
+/**
+ * A tab belongs to the learner's preview server only when it is on THAT server: same scheme and port as the address the
+ * server had before the action (the two loopback spellings count as one host). Any other localhost tab is someone else's.
+ */
+export function isTabOfServer(tabUrl: string | undefined, serverBase: string | undefined): boolean {
+  if (!tabUrl || !serverBase) return false;
+  try {
+    const t = new URL(tabUrl), b = new URL(serverBase);
+    return t.protocol === b.protocol && t.port === b.port && LOOPBACK_HOSTS.includes(t.hostname) && LOOPBACK_HOSTS.includes(b.hostname);
+  } catch { return false; }
+}
+const sameDocument = (a: string, b: string): boolean => { try { const x = new URL(a), y = new URL(b); x.hash = ""; y.hash = ""; return x.href === y.href; } catch { return false; } };
+
+/** What the learner's own preview tabs showed afterwards: every one loaded its page anew / not all did / there were none. */
+export type PreviewTabsState = "loaded" | "not_loaded" | "none";
+export interface PreviewRecoveryDeps<T extends { readonly url: string | undefined }> {
+  tabs(): readonly T[];
+  /** The running server's base URL NOW (before recovery); undefined when nothing serves. */
+  serverUrl(): string | undefined;
+  /** Reload a healthy server, or start it again (new port). */
+  recover(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; url?: string }>;
+  fetchPage(url: string): Promise<{ status: number | null; contentType: string | null }>;
+  /** Load `url` in THIS tab (never another) and report the document it then holds; null when the tab is gone or unreachable. */
+  load(tab: T, url: string): Promise<{ href: string; complete: boolean; fresh: boolean } | null>;
+  close(tab: T): Promise<void>;
+  open(url: string): Promise<T | undefined>;
+}
+/**
+ * #751 U4 — bring back the learner's OWN preview: only tabs on the server the learner had before the action, each at its own
+ * path. Nothing else is read for a path, navigated or closed. "Loaded" is what the tab itself reported afterwards (a fresh
+ * document at that address that finished loading) — an HTTP answer to this host is not the learner's tab showing it.
+ */
+export async function recoverLearnerPreview<T extends { readonly url: string | undefined }>(deps: PreviewRecoveryDeps<T>, preferred?: T): Promise<{ state: "no_preview" | "reloaded" | "restarted"; artifact: ArtifactState; tabs: PreviewTabsState }> {
+  const before = deps.serverUrl();
+  const own = before ? deps.tabs().filter((t) => isTabOfServer(t.url, before)) : [];
+  const primary = preferred && own.includes(preferred) ? preferred : own[0];
+  const r = await deps.recover();
+  if (r.state === "no_preview" || !r.url) return { state: "no_preview", artifact: "unreachable", tabs: "none" };
+  const base = r.url;
+  let artifact: ArtifactState = "unreachable";
+  try { const res = await deps.fetchPage(previewPageUrl(base, previewPagePath(primary?.url))); artifact = classifyArtifact(res.status, res.contentType); } catch { artifact = "unreachable"; }
+  if (!own.length) return { state: r.state, artifact, tabs: "none" };
+  if (artifact !== "opened") return { state: r.state, artifact, tabs: "not_loaded" };
+  let all = true;
+  for (const tab of own) {
+    const target = previewPageUrl(base, previewPagePath(tab.url));
+    const shown = (d: { href: string; complete: boolean; fresh: boolean } | null) => !!d && d.complete && d.fresh && sameDocument(d.href, target);
+    if (shown(await deps.load(tab, target).catch(() => null))) continue;
+    // Only a tab of the learner's own dead server is replaced, and only by the same page on the running one.
+    let replaced = false;
+    if (r.state === "restarted") {
+      try { await deps.close(tab); const next = await deps.open(target); replaced = !!next && shown(await deps.load(next, target).catch(() => null)); } catch { replaced = false; }
+    }
+    all &&= replaced;
+  }
+  return { state: r.state, artifact, tabs: all ? "loaded" : "not_loaded" };
+}

@@ -75,7 +75,7 @@ import {
 } from "./coachIdentity.ts";
 import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
-import { classifyArtifact, isLoopbackPreview, previewPagePath, previewPageUrl, type ArtifactState } from "./previewRecovery";
+import { recoverLearnerPreview, type ArtifactState, type PreviewTabsState } from "./previewRecovery";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import { extractAgentMd } from "./agentHandoff";
@@ -131,6 +131,7 @@ import {
   sdkFallbackLogLine,
   resolveCoachRuntime,
   classifyTurnError,
+  sdkTurnEndFailure,
   lessonStepSignal,
   pendingCloseLabel,
   WRITE_TOOL_NAMES,
@@ -773,29 +774,27 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return ++this.opsGeneration;
   }
   /**
-   * #751 U4 — bring the learner's preview back and check the PAGE they had open, not just the server. Touches no file.
-   * A restarted server has a new address: the learner's own preview tab (a loopback tab, nothing else) is re-pointed to the
-   * same page there. When that cannot be confirmed the answer says so, and the instructor is told the learner must reopen it.
+   * #751 U4 — bring the learner's preview back and report what the learner's OWN tabs then hold. Touches no file. Only tabs
+   * on the preview server as it was before the action are re-loaded (each at its own path) — any other localhost tool or
+   * site is left exactly as it was. The re-load goes through a tab-pinned CDP session that never falls back to another tab.
    */
-  async opsRecoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; artifact: ArtifactState; reopened: boolean }> {
-    const tabsNow = () => vscode.window.browserTabs ?? [];
-    const pagePath = previewPagePath(tabsNow().find((t) => isLoopbackPreview(t.url))?.url);
+  async opsRecoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; artifact: ArtifactState; tabs: PreviewTabsState }> {
     const answers = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(4000) })).status < 500; } catch { return false; } };
-    const r = await this.liveServer.recover(answers);
-    if (r.state === "no_preview" || !r.url) return { state: "no_preview", artifact: "unreachable", reopened: false };
-    const base = r.url, page = previewPageUrl(base, pagePath);
-    let artifact: ArtifactState = "unreachable";
-    try { const res = await fetch(page, { signal: AbortSignal.timeout(4000) }); artifact = classifyArtifact(res.status, res.headers.get("content-type")); } catch { artifact = "unreachable"; }
-    if (artifact !== "opened" || r.state === "reloaded") return { state: r.state, artifact, reopened: false };
-    const stale = tabsNow().filter((t) => isLoopbackPreview(t.url) && !t.url?.startsWith(base));
-    if (!stale.length) return { state: r.state, artifact, reopened: true }; // no tab points at the dead address
-    try {
-      for (const t of stale) { try { await t.close(); } catch { /* a tab that will not close is caught by the check below */ } }
-      const opened = await vscode.window.openBrowserTab(page, { viewColumn: this.editorChat ? vscode.ViewColumn.Two : vscode.ViewColumn.One, preserveFocus: true });
-      this.mcpBrowser ??= new BrowserControl(); this.mcpBrowser.setTargetTab(opened);
-    } catch { /* reported as not reopened */ }
-    const after = tabsNow();
-    return { state: r.state, artifact, reopened: after.some((t) => t.url?.startsWith(base)) && !after.some((t) => isLoopbackPreview(t.url) && !t.url?.startsWith(base)) };
+    const column = () => (this.editorChat ? vscode.ViewColumn.Two : vscode.ViewColumn.One);
+    const driven = this.mcpBrowser?.currentTab();
+    return recoverLearnerPreview<vscode.BrowserTab>({
+      tabs: () => vscode.window.browserTabs ?? [],
+      serverUrl: () => this.liveServer.currentUrl(),
+      recover: () => this.liveServer.recover(answers),
+      fetchPage: async (url) => { const res = await fetch(url, { signal: AbortSignal.timeout(4000) }); return { status: res.status, contentType: res.headers.get("content-type") }; },
+      load: async (tab, url) => { const pinned = new BrowserControl(); pinned.setTargetTab(tab); try { return await pinned.loadInPinnedTab(url); } finally { await pinned.dispose(); } },
+      close: async (tab) => { await tab.close(); },
+      open: async (url) => {
+        const opened = await vscode.window.openBrowserTab(url, { viewColumn: column(), preserveFocus: true });
+        this.mcpBrowser ??= new BrowserControl(); this.mcpBrowser.setTargetTab(opened);
+        return opened;
+      },
+    }, driven);
   }
   /** #751 — approval wait is reported as such, never as a failure or as "running". */
   opsRuntime(): { idleMs: number; status: "idle" | "running" | "waiting_approval" } {
@@ -3037,7 +3036,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           throw new ProxyAuthError("missing", TOKEN_MISSING_FRIENDLY);
         }
         try {
-          await runSdkCoach({
+          const sdkEnd = await runSdkCoach({
             gatewayUrl: proxyUrl,
             effort,
             turnId: streamId,
@@ -3120,6 +3119,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // when the profile grants sdk_tools.browser (minors never do).
             browserHost: this.buildBrowserMcpHost(),
           });
+          // #751 U4 — the SDK closed the stream normally but its result said the turn failed (the learner already read the
+          // notice). Not thrown: the notice and the words stay in the conversation exactly as shown, nothing is re-sent. The
+          // failure is recorded ONCE here so closeTurn, the ops observation, the spool and the observation log all say the same.
+          const ended = sdkTurnEndFailure(sdkEnd);
+          if (ended) { spoolStatus = "error"; spoolErrorKind = ended.errorKind; opsFailure = ended.failure; }
         } catch (err) {
           if (!(err instanceof SdkUnavailableError)||fundingSource) throw err;
           if (selection && (selection.source === 'lesson' || (profile && savedModel?.scope === modelSelectionScope(profile)))) throw new Error('선택한 모델의 실행 환경을 사용할 수 없습니다. Studio의 Agent SDK 설치를 확인하거나 강사에게 알려주세요. 대화와 작업은 보존됩니다.');

@@ -98,7 +98,8 @@ export function recoveryOutcome(i: OutcomeInput): Outcome {
     if (code === 'preview_restarted_new_url') return out('remains', 'preview_tab_stale', code, 'ask_learner_to_reopen_preview');
     if (code === 'preview_artifact_missing') return out('remains', 'artifact_not_found', code, 'check_learner_file');
     if (code === 'preview_unhealthy') return out('remains', 'preview_server_down', code, 'onsite_check');
-    // An older app answers "reloaded" after checking the server only (a 404 passed that check).
+    // The server alone was checked: an older app (a 404 passed that check), or a current one that found no preview tab of the
+    // learner's own to re-load — either way nobody saw the learner's tab show the page.
     if (code === 'preview_reloaded') return out('executed', '', 'server_health_only', 'ask_learner_whether_preview_shows');
     return out('unverified', '', code || 'no_result', 'onsite_check');
   }

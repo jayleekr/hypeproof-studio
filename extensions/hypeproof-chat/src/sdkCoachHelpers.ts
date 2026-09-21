@@ -1655,16 +1655,35 @@ export interface SdkStreamHandlers {
  * possible; the early-exit paths close the iterator explicitly, which
  * `for await` used to do for us.
  */
+/**
+ * #751 U4 — how the turn ended, as the SDK itself said it. A `result` flagged as an error (explicit `error_*` subtype, or a
+ * `success` envelope with `is_error`) is a FAILED turn even though the stream closes normally and the learner already read
+ * the notice. `status` is only ever an HTTP status this turn's stream carried: the result's own `api_error_status`, else
+ * the retry status still standing when the stream ended (a later good response clears it). Never one from another turn.
+ */
+export type SdkTurnEnd = { failed: false } | { failed: true; subtype: string; status?: number };
+
+/** The failure a terminal `result` states, or null for a result that is not one (success, truncation notice only). */
+export function sdkTerminalFailure(msg: Record<string, unknown>, standingRetryStatus: number | undefined): Extract<SdkTurnEnd, { failed: true }> | null {
+  if (String(msg["type"] ?? "") !== "result") return null;
+  const subtype = String(msg["subtype"] ?? "");
+  if (!(subtype.startsWith("error") || msg["is_error"] === true)) return null;
+  const own = msg["api_error_status"];
+  const status = typeof own === "number" ? own : standingRetryStatus;
+  return { failed: true, subtype: /^[a-z_]{1,40}$/.test(subtype) ? subtype : "unknown", ...(status !== undefined ? { status } : {}) };
+}
+
 export async function consumeSdkStream(
   stream: AsyncIterable<unknown>,
   h: SdkStreamHandlers,
-): Promise<void> {
+): Promise<SdkTurnEnd> {
   const budget = h.stallMs ?? SDK_STREAM_STALL_MS;
   const it = stream[Symbol.asyncIterator]();
   /** In-flight it.next(); kept across timer re-arms so it is never called twice. */
   let pending: Promise<IteratorResult<unknown>> | null = null;
   let progressAt = Date.now();
   let lastRetryStatus: number | undefined;
+  let end: SdkTurnEnd = { failed: false };
   /**
    * The blocked state is only sampled when the budget expires, so a modal that
    * closes mid-window would otherwise leave the coach ~0ms to answer. One grace
@@ -1718,11 +1737,13 @@ export async function consumeSdkStream(
   try {
     for (;;) {
       const step = await nextEvent();
-      if (step.done) return;
+      if (step.done) return end;
       // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
       if (h.isAborted()) throw h.makeAbortError();
       const msg = (step.value ?? {}) as Record<string, unknown>;
-      if(isSdkRetryEvent(msg)&&typeof msg.error_status==='number')lastRetryStatus=msg.error_status;
+      if (isSdkRetryEvent(msg)) lastRetryStatus = typeof msg.error_status === "number" ? msg.error_status : undefined;
+      // A response that came back after the retries answers them: their status no longer describes this turn.
+      else if (msg["type"] === "assistant" && msg["error"] === undefined) lastRetryStatus = undefined;
       const fatal = sdkFatalAuthStatus(msg);
       if (fatal !== null) {
         // Kill the subprocess's retry loop first, then surface the token error.
@@ -1775,6 +1796,8 @@ export async function consumeSdkStream(
       // 무슨 일이 있었는지를, 그리고 한 일이 디스크에 남아 있음을 우리 말로
       // 알려 준다. 판정은 sdkResultNotice 가 소유한다 — 미지 subtype 도 침묵
       // 대신 폴백으로 떨어진다.
+      const failure = sdkTerminalFailure(msg, lastRetryStatus);
+      if (failure) end = failure;
       const notice = sdkResultNotice(msg);
       if (notice) {
         console.warn(`[coach] SDK 종료 오류 subtype=${String(msg["subtype"] ?? "(none)")}`);

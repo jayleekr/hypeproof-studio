@@ -53,9 +53,10 @@ export interface ClassroomOpsActions {
   /**
    * U4 — `artifact` is about the page the learner actually had open, not the server: "opened" = it answered 2xx with a document,
    * "missing" = the server is up and the page is not there (a 404 is not a recovery), "unreachable" = nothing answered.
-   * `reopened` = after a restart on a new address, the learner's preview tab was re-pointed to it.
+   * `tabs` = what the learner's OWN preview tabs (those on the server as it was before) reported afterwards: "loaded" = every
+   * one loaded its page anew at the running address, "not_loaded" = not all did, "none" = the learner had none open.
    */
-  recoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; artifact: "opened" | "missing" | "unreachable"; reopened: boolean }>;
+  recoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; artifact: "opened" | "missing" | "unreachable"; tabs: "loaded" | "not_loaded" | "none" }>;
   // R3 — stop / preserving reset / pause. Nothing here can clear history or delete a file.
   requestStop(): void;
   freezeInput(frozen: boolean): Promise<void>;
@@ -273,8 +274,10 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
         // tab still points at the dead address is not a recovery until that tab is re-pointed (or the learner is asked to).
         if (r.artifact === "missing") return { ok: false, code: "preview_artifact_missing" };
         if (r.artifact !== "opened") return { ok: false, code: "preview_unhealthy" };
-        if (r.state === "reloaded") return { ok: true, code: "preview_artifact_ok" };
-        return r.reopened ? { ok: true, code: "preview_reopened_artifact_ok" } : { ok: false, code: "preview_restarted_new_url" };
+        // Only the learner's own tab having loaded the page counts as the page being back. Without one, a healthy server is
+        // all that was seen (the learner may have no preview open), and a restart left them nothing on the new address.
+        if (r.state === "reloaded") return { ok: true, code: r.tabs === "loaded" ? "preview_artifact_ok" : "preview_reloaded" };
+        return r.tabs === "loaded" ? { ok: true, code: "preview_reopened_artifact_ok" } : { ok: false, code: "preview_restarted_new_url" };
       } },
     };
   }
