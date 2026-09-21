@@ -213,7 +213,12 @@ classroomReportsTeacher.post(root + '/advance', async (c) => {
 });
 
 async function queueView(db: Db, batchId: string) {
-  const jobs = ((await db.prepare('SELECT id,student_id,state,reason,capability_model,rubric,evaluator,renderer_revision,input_revision,input_coverage,input_manifest_digest,draft_digest,summary_json,revision,reviewed_by,lease_owner,lease_expires_at,updated_at FROM classroom_report_jobs WHERE batch_id=? ORDER BY student_id,input_revision').bind(batchId).all()).results ?? []) as Array<Record<string, any>>;
+  const storedJobs = ((await db.prepare('SELECT id,student_id,state,reason,capability_model,rubric,evaluator,renderer_revision,input_revision,input_coverage,input_manifest_digest,draft_digest,summary_json,revision,reviewed_by,lease_owner,lease_expires_at,updated_at FROM classroom_report_jobs WHERE batch_id=? ORDER BY student_id,input_revision').bind(batchId).all()).results ?? []) as Array<Record<string, any>>;
+  // A no-input placeholder is historical once this batch has verified input for
+  // the same learner. Preserve its row, but do not call that learner both missing
+  // and drafted in the instructor's current queue or totals.
+  const received = new Set(storedJobs.filter((j) => j.input_manifest_digest).map((j) => j.student_id));
+  const jobs = storedJobs.filter((j) => j.state !== 'missing' || !received.has(j.student_id));
   const by: Record<string, number> = {}; for (const j of jobs) by[j.state] = (by[j.state] ?? 0) + 1;
   const now = Date.now(), waiting = jobs.filter((j) => j.state === 'queued' || j.state === 'leased');
   return { summary: { jobs: jobs.length, by_state: by,

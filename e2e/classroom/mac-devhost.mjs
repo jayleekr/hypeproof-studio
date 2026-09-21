@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -29,6 +30,14 @@ const home = path.resolve(process.env.HPS_DEVHOST_DIR || path.join(repo, 'e2e/te
 const copy = path.join(home, 'HypeProof Studio (ops devhost).app'), ext = path.join(copy, 'Contents/Resources/app/extensions/hypeproof-chat');
 const BUNDLES = ['dist/extension.js', 'webview-ui/dist/index.html', 'webview-ui/dist/assets/index.js', 'webview-ui/dist/assets/index.css'];
 const sha = (p) => createHash('sha256').update(readFileSync(p)).digest('hex'), json = (p) => JSON.parse(readFileSync(p, 'utf8'));
+// macOS limits the Electron Unix socket path to 103 bytes. Keep the copied app
+// and evidence in the checkout, but give each host a separate short profile.
+export function isolatedUserDataDir(hostHome, tempRoot = tmpdir()) {
+  const id = createHash('sha256').update(path.resolve(hostHome)).digest('hex').slice(0, 16);
+  const userData = path.join(tempRoot, 'hps-ops-' + id);
+  assert.ok(Buffer.byteLength(path.join(userData, '0.1.-main.sock')) <= 103, 'temporary directory is too long for the Studio IPC socket; use a shorter TMPDIR');
+  return userData;
+}
 const inside = (child, parent) => { const r = path.relative(parent, child); return !!r && !r.startsWith('..') && !path.isAbsolute(r); };
 
 export function preflight() {
@@ -82,7 +91,7 @@ function prepare() {
     // HPS_DEVHOST_VENDOR_SDK=0 prepares a copy WITHOUT the SDK: agent-sdk turns then fall back to the proxy runtime, which is how the
     // SDK-fallback signal is observed. Results from such a copy are never evidence about SDK stop/reset behaviour.
     agent_sdk_vendored: existsSync(path.join(ext, 'dist/vendor/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs')), agent_sdk: sdk,
-    isolation: { user_data_dir: path.join(home, 'user-data'), extensions_dir: path.join(home, 'extensions'), service: 'http://127.0.0.1:<port>/v1 (in-process, SQLite + in-memory R2)' } };
+    isolation: { user_data_dir: isolatedUserDataDir(home), extensions_dir: path.join(isolatedUserDataDir(home), 'extensions'), service: 'http://127.0.0.1:<port>/v1 (in-process, SQLite + in-memory R2)' } };
   writeFileSync(path.join(home, 'manifest.json'), JSON.stringify(manifest, null, 2));
   console.log(`prepared: ${copy}\n  shell ${manifest.shell.version} (copy) · extension source ${pre.source_sha.slice(0, 7)}${pre.source_dirty ? ' + uncommitted changes' : ''} · ${BUNDLES.length} bundle hashes match the current build\n  manifest: ${path.join(home, 'manifest.json')}\n  next: node e2e/classroom/mac-devhost.mjs launch`);
   return manifest;
@@ -98,14 +107,17 @@ async function launch() {
   assert.equal((await local.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true, ops_reports: true } })).status, 201);
   const server = createServer(async (req, res) => { try { const parts = []; for await (const p of req) parts.push(p); const body = Buffer.concat(parts); const r = await local.app.fetch(new Request('https://service.test' + req.url, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) }), local.env, { waitUntil() {} }); res.writeHead(r.status, Object.fromEntries(r.headers)); res.end(Buffer.from(await r.arrayBuffer())); } catch { res.writeHead(500).end(); } });
   server.listen(0, '127.0.0.1'); await once(server, 'listening'); const origin = 'http://127.0.0.1:' + server.address().port;
-  const userData = manifest.isolation.user_data_dir, settings = path.join(userData, 'User/settings.json'); mkdirSync(path.dirname(settings), { recursive: true });
+  const userData = manifest.isolation.user_data_dir;
+  assert.ok(Buffer.byteLength(path.join(userData, '0.1.-main.sock')) <= 103, 'prepared user-data-dir is too long for macOS IPC; run prepare again');
+  const settings = path.join(userData, 'User/settings.json'); mkdirSync(path.dirname(settings), { recursive: true });
   writeFileSync(settings, JSON.stringify({ 'hypeproofChat.proxyUrl': origin + '/v1', 'update.mode': 'none', 'telemetry.telemetryLevel': 'off' }, null, 2)); // the ONLY Service this copy knows
   const token = await local.student('student-a'), ticket = (await local.request(local.base + '/pairings', 'POST', { seat_id: 'A1', roster_revision: 1 })).json.ticket, workspace = path.join(home, 'workspace'); mkdirSync(workspace, { recursive: true });
   writeFileSync(path.join(home, 'session.txt'), [`Local Service: ${origin} (synthetic; nothing here reaches production)`, `Instructor board data: GET ${origin}${local.base}/status  (Bearer = the instructor token below)`, `Instructor token: ${local.teacherToken}`, '', 'In the Studio COPY:', `  1. Paste this synthetic learner token when the chat panel asks: ${token}`, `  2. Command palette → “수업 연결” → code ${ticket} (10 minutes, single use)`, '  3. Open “내 수업”, press “채팅에 과제 넣기”, then “이 단계를 마쳤어요”; send a chat turn; try disconnect / reconnect.', '', 'Write results into docs/testing/classroom-admin.md as “isolated dev host (shell vX copy + current extension)”, with manifest.json. Never as a check of the installed app or of a release.'].join('\n'));
   console.log(readFileSync(path.join(home, 'session.txt'), 'utf8'));
   const app = spawn(path.join(copy, 'Contents/MacOS/HypeProof Studio'), ['--user-data-dir', userData, '--extensions-dir', manifest.isolation.extensions_dir, '--disable-updates', '--new-window', workspace], { stdio: 'ignore' });
   const stop = () => { app.kill(); server.close(); local.close(); }; process.on('SIGINT', () => { stop(); process.exit(0); });
-  await once(app, 'exit'); stop();
+  const [code, signal] = await once(app, 'exit'); stop();
+  assert.ok(code === 0 || signal === 'SIGTERM', `Studio exited abnormally (code=${code}, signal=${signal}); the host was not verified`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

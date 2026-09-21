@@ -29,3 +29,15 @@ node e2e/classroom/mac-devhost.mjs launch    # local synthetic Service + the cop
 - Use `HPS_DEVHOST_SOURCE=/path/to/official.app` for a current official shell. This script downloads nothing.
 - Record results as “isolated dev host (shell vX copy + current extension)” with the manifest. Real release builds,
   Windows, the school network and production D1/R2 stay **NOT RUN** until they are actually run.
+
+### Long checkout paths on macOS
+
+`prepare` keeps the copied app and manifest under `HPS_DEVHOST_DIR`, but gives
+Electron a short, per-host user-data directory under the OS temporary directory.
+The former `<checkout>/e2e/test-results/.../user-data` path exceeded the 103-byte
+Unix socket limit on this Mac and the process exited with `ENOTSOCK`. Re-run
+`prepare` for an old manifest; `launch` now rejects that path before opening an app.
+The temporary profile is a development artifact and may be removed by OS cleanup.
+
+Regression: `node --test e2e/classroom/mac-devhost.test.mjs` binds a real local
+Unix socket for a deeply nested checkout and verifies separate host profiles.

@@ -3,7 +3,7 @@
 // browser, real D1 concurrency or a school network: those rows stay NOT RUN
 // until their own layer runs (docs/testing/classroom-admin.md).
 import assert from 'node:assert/strict';
-import { localOps } from './harness/classroom-ops.mjs';
+import { localOps, OPS_ALL } from './harness/classroom-ops.mjs';
 import * as ops from '../src/lib/classroom-ops.ts';
 let count = 0; async function check(name, fn) { await fn(); count++; console.log('PASS ' + name); }
 
@@ -226,6 +226,42 @@ try {
       assert.equal(r.status, 200, r.raw); assert.equal(r.json.ack.contiguous_seq, 3); assert.equal(r.json.rejected.length, 2);
       assert.equal(k.db.prepare('SELECT contiguous_seq n FROM ops_device_connections').get().n, 3, 'stored cursor follows the acked stream');
     } finally { k.close(); }
+  });
+  await check('AT-15/23 lesson participant mint records issuance and fences only that student on reissue', async () => {
+    const e = await localOps(); try {
+      const { issueIssuer, verify } = await import('../src/lib/tokens.ts');
+      const teacher = (await issueIssuer({ issuer: 'teacher-a', scopes: [{ cohort: e.cohort, profiles: [e.profile], ops: OPS_ALL }] }, 4, e.env.HPS_SIGNING_SECRET)).token;
+      await e.freeze(); assert.equal((await e.configure(seats2)).status, 201);
+      const path = `/admin/cohorts/${e.cohort}/authoring/${e.lesson.course_id}/versions/${e.lesson.version}/participants`;
+      const mint = () => e.request(path, 'POST', { user: 'student-a', hours: 1 }, teacher);
+      const first = await mint(); assert.equal(first.status, 200, first.raw);
+      const payload = await verify(first.json.token, e.env.HPS_SIGNING_SECRET);
+      assert.deepEqual(payload.lesson, first.json.lesson, 'lesson binding is preserved');
+      const before = await e.request(e.base + '/status');
+      assert.equal(before.json.seats[0].entry_stage, 'token_issued');
+      assert.equal(before.json.seats[0].token.issue_id, payload.jti);
+      assert.ok(!before.raw.includes(first.json.token));
+      const a = (await e.pair('A1', 1)).conn.json, b = (await e.pair('A2', 1, 2)).conn.json;
+      const second = await mint(); assert.equal(second.status, 200, second.raw);
+      assert.deepEqual(second.json.ops, { epoch_advanced: true });
+      assert.equal((await e.sync(a.credential)).json.connection_epoch, a.connection_epoch + 1);
+      assert.equal((await e.sync(b.credential, [], 2)).json.connection_epoch, b.connection_epoch);
+      assert.equal(e.db.prepare('SELECT count(*) n FROM ops_token_issues').get().n, 2);
+      e.fail('connection_epoch=connection_epoch+1');
+      const degraded = await mint(); e.fail(null);
+      assert.equal(degraded.status, 200, degraded.raw); assert.ok(degraded.json.token);
+      assert.deepEqual(degraded.json.ops, { epoch_advanced: false }, 'storage outage is reported without blocking lesson entry');
+    } finally { e.close(); }
+  });
+  await check('AT-32 lesson participant mint with operations OFF preserves the existing route without a ledger', async () => {
+    const e = await localOps({ enabled: false }); try {
+      const { issueIssuer } = await import('../src/lib/tokens.ts');
+      const teacher = (await issueIssuer({ issuer: 'teacher-a', scopes: [{ cohort: e.cohort, profiles: [e.profile] }] }, 4, e.env.HPS_SIGNING_SECRET)).token;
+      await e.freeze();
+      const minted = await e.request(`/admin/cohorts/${e.cohort}/authoring/${e.lesson.course_id}/versions/${e.lesson.version}/participants`, 'POST', { user: 'student-a', hours: 1 }, teacher);
+      assert.equal(minted.status, 200, minted.raw); assert.ok(minted.json.token); assert.equal(minted.json.ops, undefined);
+      assert.equal(e.db.prepare('SELECT count(*) n FROM ops_token_issues').get().n, 0);
+    } finally { e.close(); }
   });
   console.log(`${count} remote classroom operations controls passed`);
 } finally { f.close(); }

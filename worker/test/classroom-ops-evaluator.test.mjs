@@ -224,3 +224,24 @@ test('an evaluator that grades in prose is quarantined; numbers that are part of
   const jobs = (await f.request(f.B + '/reports')).json.jobs; assert.deepEqual(jobs.map((j) => [j.student_id, j.state, j.reason, j.draft_digest === '']), [['student-a', 'quarantined', 'grade_language', true], ['student-b', 'partial', 'input_sequence_unavailable', false]]);
   assert.deepEqual(reportObjects(f, 'student-a'), [], 'a graded draft is never stored, so it can never be approved or sent');
 });
+
+// Actual Mac collection arrives after the first automatic advance (#751).
+test('late input: the current queue replaces only that learner missing placeholder, preserving history and other missing learners', async (t) => {
+  const f = await localOps(); t.after(() => { setEvaluatorTransport(undefined); f.close(); });
+  f.env.HPS_CLASSROOM_EVALUATOR = 'service-anthropic'; f.env.ANTHROPIC_API_KEY = 'synthetic-not-a-key';
+  setEvaluatorTransport(careful([])); await f.freeze();
+  await f.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true, ops_reports: true } });
+  const a = (await f.pair('A1', 1, 1)).conn.json;
+  await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: true, purpose: 'class_report', notice_version: 'notice-v1' }, a.credential);
+  const batch = (await f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: 1, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false })).json.batch.id;
+  const B = f.base + '/report-batches/' + batch;
+  const before = await f.request(B + '/advance', 'POST', {});
+  assert.deepEqual(before.json.jobs.map(j => [j.student_id, j.state]), [['student-a', 'missing'], ['student-b', 'missing']]);
+  assert.equal((await f.uploadSnapshotAs(a, batch, 1, record)).status, 201);
+  for (const response of [await f.request(B + '/advance', 'POST', {}), await f.request(B + '/reports'), await f.request(B + '/advance', 'POST', {})]) {
+    assert.deepEqual(response.json.jobs.map(j => [j.student_id, j.state]), [['student-a', 'partial'], ['student-b', 'missing']]);
+    assert.deepEqual(response.json.summary.by_state, { partial: 1, missing: 1 });
+    assert.equal(response.json.summary.jobs, 2);
+  }
+  assert.equal(f.db.prepare("SELECT count(*) n FROM classroom_report_jobs WHERE batch_id=? AND state='missing'").get(batch).n, 2, 'historical rows remain for audit; nothing is deleted');
+});

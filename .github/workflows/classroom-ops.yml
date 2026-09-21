@@ -25,6 +25,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - run: node --test e2e/classroom/mac-devhost.test.mjs
       - run: npm ci
         working-directory: worker
       - run: npm ci

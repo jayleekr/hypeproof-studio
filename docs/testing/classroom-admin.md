@@ -381,3 +381,32 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 | PASS | ① 발송 직후 `provider_accepted`이며 화면이 ‘전달 완료’라고 하지 않음 ② delivered 주소는 webhook 뒤 `delivered`, bounced 주소는 `bounced` ③ 같은 승인으로 다시 눌러도 새 발송 0(Idempotency-Key) ④ 서명이 틀린 webhook은 401·상태 불변, 같은 event 재전송은 1회만 반영 ⑤ 실제 사서함에서 링크 → 확인 값 오답 → 정답 → 보고서, 5회 오답 잠금 ⑥ 철회 뒤 같은 링크는 404 |
 | 합성으로만 남는 것 | 공급자 timeout 뒤 결과 불명(`send_unknown`)은 실계정에서 강제할 수 없다 |
 
+
+<a id="remote-mac-readiness-20260921"></a>
+
+### 공식 Mac shell 복사본으로 직접 실행 · 2026-09-21
+
+기준 소스는 #1169 `e3196e5bcf08c1e373014cc8086cd14ef4018f90`. 그 HEAD의 #1167~1169 최신 체크는 성공이며 Draft OPEN이다. 최신 main은 `19ff881`(학생 화면 개편 #1170/#1178). `git merge-tree --write-tree HEAD origin/main`에서 **5개 파일 충돌**(요구 목록, 확장 package.json, chatPanelProvider, ChatPanel, worker package.json)을 확인했다. 합성 CI 성공은 이 두 개발선의 통합이나 운영 활성화를 증명하지 않는다.
+
+이번에는 공식 v0.1.56 arm64 ZIP을 내려받아 SHA-256 `96d4cb31c3845370dc5ba8794a0bfd7682063579b0549bc94b4c19cfb9ad9526`를 대조했다. 그 **복사본**에 현재 extension/webview 번들 4개를 주입하고 ad-hoc 서명했다. SDK 0.3.207 JS와 native binary를 실제 실행했다. 설치 앱·실학생·production 자격은 사용하지 않았다. 창 조작은 macOS 접근성/브라우저 UI로 직접 수행했다.
+
+| 직접 수행한 경로 | 결과와 경계 |
+|---|---|
+| 학생 입장 → A1 연결 | 실제 앱이 frozen lesson과 토큰을 읽고 `token_verified`를 보고. 6좌석 중 **실제 Mac은 A1 하나**이며 A2 오류/A3 정상은 합성 신호, A4~6은 미연결 대조군 |
+| 과제 수행 → 제출 → 강사 확인 | 실제 학생 버튼에서 `in_progress/submitted`, Chalk에서 강사 `confirmed`. 자기보고와 강사 확인을 구분 |
+| 오류 → 진단 → 보존형 초기화 → 재시도 | 공급자 400을 주입해 빨간 장애 표시. `retry_diagnostics=token_ok`, `reset_runtime=reset_ok`. 대화·미전송 입력 보존, workspace 파일 2개 전후 SHA-256 동일, SDK 재대화 성공 |
+| 실행 중인 SDK 중지 → 재시작 | 지연 응답 중 강사 명령 `cancel_current_run=run_stopped`. 이어서 새 SDK 턴 성공. 의도적인 중지를 학생 화면에서 일반 연결 오류처럼 표현하는 문구는 후속 UX 과제 |
+| 동의 → 수업 마무리 → 실제 기록 회수 → 초안 | A1의 실제 SessionSpool 파일을 업로드·서버 해시 검증. 6명 중 1명 수신, 동의 없는 5명 제외. **평가기 transport는 합성**이나 실제 입력한 질문이 인용된 초안을 열고 내용 검수/승인함 |
+| 발송 미리 확인·보고서 렌더 | 합성 수신자에 dry-run 통과, 외부 발송 0. 실제 발송 버튼은 HTTP public origin 등 미설정 상태로 `delivery_provider_not_configured`를 반환. HTML 보고서는 실제 compose/render 경로로 열었지만 정적 로컬 미리보기이며 실제 수신자 인증·메일 전달 증거가 아님 |
+
+로컬 증거는 공통 git-dir `remote-classroom-evidence/review-20260921/`(PR 상태, 전후 workspace 해시, status/명령/초안 JSON, 화면, 재현 로그)에 있다. 시연 산출물은 ignored `e2e/test-results/classroom-demo-20260921/`이며 자격값/원문을 git에 넣지 않는다. `/manage`는 실제 Chalk 화면이다. 수업용 토큰·세션은 임시이고 재실행 시 새 합성 회차로 시작한다.
+
+**실행 중 발견해 수정한 코드 3건.** 격리 브랜치 `fix/751-mac-devhost-launch`에 준비했다. 위 실기 기록은 수정 전 기준이며 아래 회귀가 수정본의 증거다.
+
+1. 긴 checkout 하위 user-data 경로로 Electron IPC Unix socket가 103바이트를 넘으면 `ENOTSOCK`로 종료. 짧은 temp 경로를 host별로 분리하고 비정상 종료를 성공으로 끝내지 않음. 실제 Unix socket bind 대조군 포함 2 PASS, 기존 브라우저 workflow에 편입. GUI는 짧은 별도 profile로 실행해 원인을 확인함.
+2. 늦게 기록이 도착하면 같은 학생이 `missing`과 초안 행 양쪽에 남아 6명이 7작업으로 보임. 검수 view에서 입력 있는 학생의 옛 placeholder만 제외하고 DB 이력/다른 학생 누락은 보존. 해당 회귀 포함 evaluator+erasure 32 PASS.
+3. 강의의 `participants` 초대 경로가 일반 발급의 원장·재발급 세대 갱신을 누락. 위 실제 UI에서 발급 이력 없음으로 나타났고, 새 API 회귀에서 `unregistered != token_issued`로 재현. 같은 hook 연결 후 ops 20 PASS(강의 binding·다른 학생 세대·OFF·저장 장애 대조 포함), 기존 authoring 25 PASS, worker typecheck PASS.
+
+**남는 코드 과제:** 현재 `SessionSpool.append`는 `seq`를 쓰지 않는다. 따라서 **새 앱의 새 기록도** `sequence_unavailable`이며 UI의 ‘구형 기록’ 설명은 부정확하다. 이를 complete로 승격하지 말고 durable 순번/선언된 범위/재시작·부분 쓰기·snapshot 계약을 구현하고 기존 legacy를 계속 수용해야 한다. 최신 main 학생 UX와 관제 hook 통합도 아직 미완이다.
+
+**NOT RUN:** 실제 모델 답변의 품질·비용, 실제 메일/수신/webhook, Windows, 학교망, Cloudflare staging/production D1·R2, 공식 전체 release의 설치/업데이트/서명/seed 경로. 이번 실행은 공식 shell을 활용한 개발 host 검증이며 출하 패키지 인수가 아니다. 필요한 개발 계정 key는 이 checkout/현재 환경에 없었다(값은 읽거나 출력하지 않음).
