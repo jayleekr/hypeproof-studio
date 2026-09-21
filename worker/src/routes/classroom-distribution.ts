@@ -27,6 +27,7 @@ import { readOpening } from '../lib/cohort-binding';
 import { getProfile } from '../profiles';
 import { bindingsEnforced } from '../lib/lesson-binding-store';
 import { lessonImpact, settingPhase } from '../lib/lesson-binding';
+import { effectiveBySeat } from '../lib/lesson-binding-store';
 import { declaresKind, type Content } from '../lib/classroom-distribution';
 
 type Db = Env['HPS_DB'];
@@ -220,7 +221,7 @@ classroomDistributionTeacher.post(root + '/distributions', async (c) => {
   if (revision.content_hash !== req.content_hash) return c.json({ error: 'the content differs from what was reviewed', reason: 'content_mismatch' }, 409);
   // U3 — sending a SETTING needs its own authority and switch, and the version must still resolve at this moment. The
   // impact summary is computed here from the two frozen rows; the instructor does not type it.
-  const isSetting = revision.kind === 'setting'; let impact: unknown = null, settingLesson: unknown = null;
+  const isSetting = revision.kind === 'setting'; let impact: unknown = null, settingLesson: unknown = null, settled: Exclude<Awaited<ReturnType<typeof settingAdmissible>>, Response> | null = null;
   if (isSetting) {
     const no = settingAuthority(c, auth, run); if (no) return no;
     const rev = await db.prepare('SELECT payload_json,title FROM classroom_content_revisions WHERE object_id=? AND revision=?').bind(req.object_id, req.revision).first<{ payload_json: string; title: string }>();
@@ -228,7 +229,7 @@ classroomDistributionTeacher.post(root + '/distributions', async (c) => {
     if (lesson === undefined) return c.json({ error: 'this setting cannot be read right now', reason: 'content_unavailable' }, 503);
     const okay = await settingAdmissible(c, run, { kind: 'setting', title: revision.title, body: '', links: [], lesson }); if (okay instanceof Response) return okay;
     settingLesson = lesson === 'base' ? { base: true, course_id: okay.pin.course_id } : lesson;
-    impact = lessonImpact(okay.base.content, (okay.target ?? okay.base).content);
+    impact = lessonImpact(okay.base.content, (okay.target ?? okay.base).content); settled = okay;
   }
   const seats = await seatsNow(db, run.class_run_id, now), chosen = req.targets.map((id) => seats.find((s) => s.seat_id === id));
   const unknown = req.targets.filter((_, i) => !chosen[i]);
@@ -242,9 +243,21 @@ classroomDistributionTeacher.post(root + '/distributions', async (c) => {
     const expect = card && card.revision > req.revision ? 'has_newer_revision' : !grant ? 'offline_until_reconnect' : !declaresKind(caps, revision.kind) ? 'unsupported_app' : card && card.device_registration_id === device && card.revision === req.revision && card.content_hash === req.content_hash ? 'already_held' : 'deliverable_now';
     return { seat_id: s.seat_id, student_id: s.student_id, expect };
   });
+  // What changes FOR EACH SELECTED LEARNER, from the version that learner runs now — not only against the run's version. A
+  // learner already on v2 who is sent the return loses v2's steps; "nothing changes" is true only for one who never left the base.
+  // Grouped by the version they run now (a handful of groups, one lesson read each). Unknown stays unknown.
+  let byCurrent: unknown = null;
+  if (req.dry_run && isSetting && settled) {
+    const pin = { course_id: settled.pin.course_id, version: settled.pin.version, sha256: settled.base.sha256 }, now_by_seat = await effectiveBySeat(db, pin, run.class_run_id);
+    if (now_by_seat === 'unknown') byCurrent = 'unknown';
+    else { const cohort = await lessonCohortOf(c.env, run.cohort_id), groups = new Map<string, { version: string; source: string; seats: string[] }>();
+      for (const s of picked) { const e = now_by_seat.get(s.seat_id), version = e?.version ?? settled.pin.version, source = e?.source === 'setting' ? 'setting' : 'run'; const g = groups.get(version) ?? { version, source, seats: [] }; g.seats.push(s.seat_id); groups.set(version, g); }
+      const out = []; for (const g of [...groups.values()].slice(0, 8)) { const from = g.version === settled.base.version ? settled.base : await readLesson(c.env, cohort, settled.pin.course_id, g.version, run.profile_id); out.push({ ...g, impact: from ? lessonImpact(from.content, (settled.target ?? settled.base).content) : null }); }
+      byCurrent = out; }
+  }
   if (req.dry_run) return c.json({ dry_run: true, object_id: req.object_id, revision: req.revision, content_hash: req.content_hash, kind: revision.kind, title: revision.title, latest_revision: revision.latest_revision, expires_at: expires, roster_revision: run.roster_revision, targets: plan, not_selected: seats.length - picked.length,
     // For a setting: what changes (against the run's pinned version) and when. A learner's running answer is never cut.
-    ...(isSetting ? { setting: { lesson: settingLesson, impact, applies: 'next_question' } } : {}) }, 200);
+    ...(isSetting ? { setting: { lesson: settingLesson, impact, impact_basis: 'run_version', run_version: settled?.base.version ?? null, by_current: byCurrent, applies: 'next_question' } } : {}) }, 200);
   const count = await db.prepare('SELECT count(*) AS n,sum(CASE WHEN created_at>? THEN 1 ELSE 0 END) AS recent FROM classroom_distributions WHERE class_run_id=?').bind(now - 60_000, run.class_run_id).first<{ n: number; recent: number | null }>();
   if ((count?.n ?? 0) >= MAX_DISTRIBUTIONS_PER_RUN || (count?.recent ?? 0) >= MAX_DISTRIBUTIONS_PER_MINUTE) return c.json({ error: 'too many distributions for this run right now', reason: 'rate_limited' }, 429, { 'retry-after': '30' });
 

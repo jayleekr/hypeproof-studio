@@ -380,9 +380,13 @@ export function ChatPanel(props: Props) {
   const submit = (text?: string) => {
     const value = (text ?? draft).trim();
     if ((!value && pendingImages.length === 0) || streaming || unavailable) return;
-    props.onSend(value, pendingImages.length > 0 ? pendingImages : undefined, imports.length ? imports : undefined);
-    setDraft("");
-    setImports([]); setLastImport(null); setImportNote(null);
+    // `text` given = the PARKED message going out when the turn ended (#416). It is its own message: it never contained the
+    // prompt the learner imported into the draft meanwhile, so it carries no import reference — and the draft typed while
+    // waiting is not thrown away with it (observed in the browser run: the parked send took the draft's provenance and
+    // emptied the input). Pasted images still ride along with the next turn that goes out, as #416 defined.
+    const parked = text !== undefined;
+    props.onSend(value, pendingImages.length > 0 ? pendingImages : undefined, !parked && imports.length ? imports : undefined);
+    if (!parked) { setDraft(""); setImports([]); setLastImport(null); setImportNote(null); }
     setPendingImages([]);
     setImgNote(null);
     setRollExpand(null);

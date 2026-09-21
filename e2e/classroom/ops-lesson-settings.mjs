@@ -89,6 +89,7 @@ try {
   assert.deepEqual(await page.locator('#ops-dist-kind option').evaluateAll((os) => os.filter((o) => !o.hidden && !o.disabled).map((o) => o.value)), ['notice', 'material', 'prompt'], 'this instructor may distribute, not change lesson settings');
   await page.locator('#ops-dist-kind').selectOption('prompt'); assert.match(await T('ops-dist-kind-help'), /초안에 가져오기.*수업 설정은 지금 쓸 수 없습니다: 이 강사 토큰에는 수업 설정 권한/s);
   await connect(L); await compose();
+  assert.match(await page.locator('#ops-dist-preview').innerText(), /^선택한 학생에게 보내기 \(공지·자료·프롬프트·수업 설정\) — 먼저 확인$/, 'the entry names everything it can send'); assert.match(await T('ops-dist-summary'), /^공지·자료·프롬프트·수업 설정 작성/);
   assert.deepEqual(await page.locator('#ops-dist-kind option').evaluateAll((os) => os.filter((o) => !o.hidden && !o.disabled).map((o) => o.value)), ['notice', 'material', 'prompt', 'setting']);
   ok('E1 the setting kind is offered only to an instructor who holds `lesson_settings`; the prompt kind needs only `distribute`');
 
@@ -116,7 +117,48 @@ try {
   await card.locator('[data-inbox-undo]').click(); assert.equal(await input.inputValue(), '내가 쓰던 글', 'undo restores the learner\'s own text exactly');
   await card.locator('[data-inbox-import]').click(); await input.press('End'); await input.pressSequentially(' 그리고 내 질문'); assert.equal(await card.locator('[data-inbox-undo]').isDisabled(), true, 'once the learner typed on, the text is theirs: undo no longer touches it');
   assert.deepEqual(dialogs, []); assert.deepEqual(appErrors, []); await app.screenshot({ path: path.join(out, 'learner-prompt-import.png'), fullPage: true }); await app.close();
+  // ── E2b (P2·P3·P4·P5·P7): a draft + TWO attachments + a parked message, keyboard only, 390px and 200%, then a withdrawal ──
+  const app2 = await browser.newPage({ viewport: { width: 390, height: 844 } }); const app2Errors = []; app2.on('pageerror', (e) => app2Errors.push(e.message));
+  await app2.addInitScript(() => { window.sent = []; window.acquireVsCodeApi = () => ({ postMessage: (m) => window.sent.push(m), getState: () => undefined, setState: () => {} }); });
+  await app2.goto('http://127.0.0.1:' + webviewServer.address().port + '/'); await app2.waitForFunction(() => window.sent.some((m) => m.type === 'ready'));
+  const host2 = (m) => app2.evaluate((m) => window.dispatchEvent(new MessageEvent('message', { data: m })), m), sends2 = async () => (await app2.evaluate(() => window.sent)).filter((m) => m.type === 'sendMessage');
+  await host2({ type: 'config', config: { proxyUrl: 'http://controlled-host.invalid/v1', model: 'controlled-host-only', hasToken: true, coach: { name: '코치', personality: '', configured: true }, profile: profile1 } }); await host2({ type: 'inboxState', inbox: view });
+  const in2 = app2.locator('textarea').first(); await in2.waitFor();
+  // a turn is running (the host said so), and the learner parks the next message
+  await in2.fill('첫 질문'); await in2.press('Enter'); await app2.waitForFunction(() => window.sent.some((m) => m.type === 'sendMessage')); const turn1 = (await sends2())[0];
+  await host2({ type: 'streamStart', streamId: turn1.streamId ?? 'stream-1', messageId: 'm-1' }); await in2.fill('예약한 입력'); await in2.press('Enter');
+  const parked = app2.locator('.hps-queued-text'); await parked.waitFor(); assert.equal(await parked.innerText(), '예약한 입력');
+  await in2.fill('내가 쓰던 초안'); const PNG1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+  for (const name of ['one.png', 'two.png']) await app2.evaluate(([b64, name]) => { const e = document.querySelector('textarea'), bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0) + 0), dt = new DataTransfer(); dt.items.add(new File([bytes, name], name, { type: 'image/png' })); e.focus(); e.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); }, [PNG1, name]);
+  await app2.waitForFunction(() => document.querySelectorAll('.hps-attachment').length === 2);
+  // keyboard only: open the inbox, open the card, press the import button — every control is reached by Tab and has a name
+  const inbox2 = app2.locator('details.hp-inbox'); await inbox2.locator('> summary').focus(); await app2.keyboard.press('Enter'); await inbox2.locator('li.hp-inbox-card summary').first().focus(); await app2.keyboard.press('Enter');
+  const importBtn = app2.getByRole('button', { name: '초안에 가져오기' }); await importBtn.waitFor(); assert.equal(await importBtn.count(), 1, 'the import control has an accessible name');
+  let tabs = 0; while (tabs++ < 40 && !(await app2.evaluate(() => document.activeElement?.hasAttribute('data-inbox-import')))) await app2.keyboard.press('Tab'); assert.ok(tabs < 40, 'the import button is reachable with Tab alone'); await app2.keyboard.press('Enter');
+  assert.equal(await in2.inputValue(), '내가 쓰던 초안\n\n' + PROMPT); assert.equal(await app2.locator('.hps-attachment').count(), 2, 'both attachments are untouched'); assert.equal(await parked.innerText(), '예약한 입력', 'the parked message is untouched'); assert.equal((await sends2()).length, 1, 'importing sent nothing');
+  const said = app2.locator('[data-inbox-imported]'); assert.match(await said.innerText(), /입력창 끝에 덧붙였습니다/, 'the result is said in words (role=status), not by colour'); assert.equal(await said.getAttribute('role'), 'status');
+  // After an import the focus goes back to the input (the learner keeps typing). Undo is reached from there with the keyboard alone.
+  assert.equal(await app2.evaluate(() => document.activeElement?.tagName), 'TEXTAREA', 'focus returns to the learner\'s input'); let hops = 0; while (hops++ < 40 && !(await app2.evaluate(() => document.activeElement?.hasAttribute('data-inbox-undo')))) await app2.keyboard.press('Shift+Tab'); assert.ok(hops < 40, 'undo is reachable with Shift+Tab alone'); await app2.keyboard.press('Enter'); assert.equal(await in2.inputValue(), '내가 쓰던 초안'); assert.equal(await app2.locator('.hps-attachment').count(), 2);
+  // undo after ADDING an attachment still restores the text and never drops an attachment; after a keystroke it is disabled WITH its reason in words
+  await importBtn.click(); await app2.evaluate(([b64]) => { const e = document.querySelector('textarea'), bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)), dt = new DataTransfer(); dt.items.add(new File([bytes, '3'], 'three.png', { type: 'image/png' })); e.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); }, [PNG1]); await app2.waitForFunction(() => document.querySelectorAll('.hps-attachment').length === 3);
+  await app2.getByRole('button', { name: '되돌리기' }).click(); assert.equal(await in2.inputValue(), '내가 쓰던 초안'); assert.equal(await app2.locator('.hps-attachment').count(), 3, 'undo restores text only');
+  await importBtn.click(); await in2.press('End'); await in2.pressSequentially(' + 내 말'); const undo2 = app2.getByRole('button', { name: '되돌리기' }); assert.equal(await undo2.isDisabled(), true); assert.match(await said.innerText(), /그 뒤에 고친 글이 있어 자동으로 되돌리지 않습니다/, 'disabled is explained in words');
+  // 390px, then 200% text: no sideways scrolling, the buttons stay inside the viewport; forced colours keep the words
+  const overflow2 = () => app2.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth); assert.ok(await overflow2() <= 0, '390px: no sideways scrolling');
+  await app2.evaluate(() => { document.documentElement.style.fontSize = '200%'; }); assert.ok(await overflow2() <= 0, '200%: no sideways scrolling'); const box2 = await importBtn.boundingBox(); assert.ok(box2 && box2.x >= 0 && box2.x + box2.width <= 390, 'the import button is inside the 390px viewport at 200%: ' + JSON.stringify(box2));
+  await app2.emulateMedia({ forcedColors: 'active' }); assert.equal(await importBtn.isVisible(), true); assert.match(await said.innerText(), /덧붙였습니다/); await app2.screenshot({ path: path.join(out, 'learner-prompt-390-200-forced-colors.png'), fullPage: true }); await app2.emulateMedia({ forcedColors: 'none' }); await app2.evaluate(() => { document.documentElement.style.fontSize = ''; });
+  assert.equal(await app2.locator('.studio-primary, .hp-cta-primary').count() <= 1, true, 'no second Primary'); assert.equal(await app2.locator('[role=dialog],dialog[open]').count(), 0, 'no modal');
+  // P4 — the instructor withdraws the prompt AFTER it was imported and edited: the card comes down, the learner's text, attachments, parked message and provenance stay
+  const edited = await in2.inputValue(); await host2({ type: 'inboxState', inbox: { ...view, cards: view.cards.map((c) => ({ ...c, title: '', body: '', withdrawn: true })) } });
+  await app2.waitForFunction(() => !document.querySelector('[data-inbox-import]')); assert.match(await inbox2.innerText(), /강사가 회수한 자료입니다/); assert.equal(await in2.inputValue(), edited, 'withdrawal never touches the learner\'s draft'); assert.equal(await app2.locator('.hps-attachment').count(), 3); assert.equal(await parked.innerText(), '예약한 입력');
+  // P5 — the running turn ends: the PARKED message goes out as itself (it carries no provenance of a prompt it never contained); the learner then sends the draft, which does
+  await host2({ type: 'streamEnd', streamId: turn1.streamId ?? 'stream-1' }); await app2.waitForFunction(() => window.sent.filter((m) => m.type === 'sendMessage').length === 2); const flushed = (await sends2())[1];
+  assert.equal(flushed.text, '예약한 입력'); assert.equal(flushed.imports, undefined, 'the parked message did not import anything'); assert.equal(await in2.inputValue(), edited, 'the draft typed while waiting is still in the input after the parked message went out'); assert.equal(flushed.images.length, 3, 'pasted images ride along with the next turn that goes out — the #416 contract, unchanged');
+  await host2({ type: 'streamStart', streamId: flushed.streamId ?? 'stream-2', messageId: 'm-2' }); await host2({ type: 'streamEnd', streamId: flushed.streamId ?? 'stream-2' }); await in2.press('Enter'); await app2.waitForFunction(() => window.sent.filter((m) => m.type === 'sendMessage').length === 3);
+  const own = (await sends2())[2]; assert.equal(own.text, edited.trim()); assert.deepEqual(own.imports.map((r) => [r.object_id, r.revision]), [[view.cards[0].object_id, 1]], 'the learner\'s own send names the exact prompt object and revision it imported'); assert.match(own.imports[0].hash16, /^[a-f0-9]{16}$/);
+  assert.deepEqual(app2Errors, []); await app2.close();
   ok('E2 prompt: selected+capable device only; the learner\'s own press appends to their draft in the built webview, sends nothing, and can be undone until they type');
+  ok('E2b draft + two attachments + a parked message survive import, undo and withdrawal; keyboard only, 390px, 200%, forced colours; the learner\'s own send carries the exact object and revision');
 
   // ── E3: a setting — picked from the confirmed versions, impact shown, A1+A2 (not A3), prepared ≠ switched ≠ applied ──
   await page.locator('#ops-select-none').click(); await compose() /* the composer closes itself after a send */; await page.locator('#ops-dist-new').click(); await page.locator('#ops-dist-kind').selectOption('setting');
@@ -124,10 +166,13 @@ try {
   assert.deepEqual((await page.locator('#ops-dist-setting option').evaluateAll((os) => os.map((o) => o.value))).sort(), ['', V1, V2, 'base'].sort(), 'the picker lists the confirmed versions of this run\'s course and the return — nothing else');
   await page.locator('#ops-dist-title').fill('2번째 판으로'); await page.locator('#ops-dist-body').fill('다음 질문부터 새 단계로 진행합니다.'); await page.locator('#ops-dist-save').click();
   assert.match(await T('ops-dist-saved'), /바꿀 강의 버전.*고르세요/, 'a setting without a version is not saved'); assert.equal(local.db.prepare("SELECT count(*) n FROM classroom_content_objects WHERE kind='setting'").get().n, 0);
-  await page.locator('#ops-dist-setting').selectOption(V2); assert.match(await T('ops-dist-setting-impact'), /새로 생김 craft-v2.*없어짐 build, review.*이전 기준/s); await saveForm();
+  assert.match(await T('ops-dist-about'), /다음 질문부터 실행하는 수업 기준.*이미 쓴 초안·첨부·대화·작업 파일은 그대로/s);
+  await page.locator('#ops-dist-setting').selectOption(V2); assert.match(await T('ops-dist-setting-impact'), /비교 기준: 이 수업의 기본 버전/); assert.match(await T('ops-dist-setting-impact'), /새로 생김 craft-v2.*없어짐 build, review.*이전 기준/s); await saveForm();
   assert.match(await T('ops-dist-summary'), /^수업 설정 · ‘2번째 판으로’ 1번째 판/, 'a setting is not called a notice');
   await box('A1').check(); await box('A2').check(); const s1 = await sendNow(2);
   assert.match(s1.impact, new RegExp('수업 설정을 바꿉니다.*강의 버전 ' + V2.replace(/\./g, '\\.') + '.*진행 중인 응답은 끊지 않고 각 학생의 다음 질문부터.*보관함 반영은 ‘준비’일 뿐', 's'));
+  // what stays and what changes is said without contradiction, and the change is told FROM what each selected learner runs now
+  assert.match(s1.impact, /선택한 학생이 지금 실행하는 버전에서 바뀌는 것 — A1, A2 \(지금 m2026\.09\.18-1 · 이 수업의 기본 버전\): 단계: 그대로 1개 · 새로 생김 craft-v2 · 없어짐 build, review/); assert.match(s1.impact, /이미 쓴 초안·첨부·대화·작업 파일은 그대로입니다\. 바뀌는 것은 다음 질문부터의 수업 기준/); assert.doesNotMatch(s1.impact, /과제·입력·대화·파일은 바뀌지 않습니다/, 'a setting DOES change what the learner works under');
   await tickAll(); let sl = await refresh();
   assert.match(sl[0], /^A1 · student-a — 전달: 보관함 반영 · 보관함: 지금 보관함에 있음 · 설정: 준비 — 기기 보관함에 있음 · 전환 전/); assert.match(await T('ops-dist-state'), /수업 설정: 준비 2 · 전환 0 · 실행 시도 0 · 적용 0/); assert.doesNotMatch(await T('ops-dist-state'), /모두 적용/);
   assert.deepEqual(bindings('student-a'), [], 'delivered to the inbox: nothing is switched yet'); assert.equal((await profileOf('A1')).lesson.version, V1);
@@ -152,6 +197,7 @@ try {
   const after = await switchOn('A2'); assert.ok(!after || after.status >= 400, 'withdrawn before A2 switched: A2 can no longer switch to it'); assert.deepEqual(bindings('student-b'), []); assert.equal((await profileOf('A2')).lesson.version, V1);
   await page.locator('#ops-dist-return').click(); assert.match(await T('ops-dist-note'), /복귀를 준비했습니다.*아직 아무것도 보내지 않았습니다/s); assert.equal(await page.locator('#ops-dist-setting').inputValue(), 'base'); assert.equal(local.db.prepare('SELECT count(*) n FROM classroom_distributions').get().n, 2, 'preparing the return sent nothing');
   await box('A2').uncheck(); await saveForm(); assert.match(await T('ops-dist-saved'), /2번째 판/, 'the return is the next revision of the run\'s one setting object'); const s2 = await sendNow(1); assert.match(s2.impact, /기본 수업으로 복귀/);
+  assert.match(s2.impact, /A1 \(지금 m2026\.09\.18-2 · 수업 설정으로 전환된 상태\): 단계: 그대로 1개 · 새로 생김 build, review · 없어짐 craft-v2/, 'the return is described from v2, which this learner runs — not as "nothing changes" against the run\'s version'); assert.doesNotMatch(s2.impact, /단계: 그대로 3개/);
   await tickAll(); const back = await switchOn('A1'); assert.equal(back.status, 201, back.raw); assert.deepEqual(bindings('student-a'), [[1, 'setting', V2], [2, 'base', '']], 'a return names no version of its own: it is whatever the participant\'s token pins');
   assert.equal((await profileOf('A1')).lesson.version, V1); const K3 = back.json.binding.key; assert.equal((await ask('A1', { key: K2 })).status, 403); const home = await ask('A1', { key: K3 }); assert.equal(home.status, 200); assert.ok(!home.sent.includes('craft-v2'));
   sl = await refresh(); assert.match(sl[0], /설정: 적용 — 이 설정으로 보낸 모델 요청이 정상 종료됨 \(기본 수업\)/);
