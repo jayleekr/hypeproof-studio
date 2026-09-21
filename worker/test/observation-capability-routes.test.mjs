@@ -31,20 +31,28 @@ const { issue } = await import('../src/lib/tokens.ts');
 
 const CANARY = 'canary-sdk-contract';
 
-/** One seat on the canary cohort with class open, asked the way the extension asks. */
-async function seat() {
+/**
+ * One seat on the canary cohort, asked the way the extension asks.
+ *
+ * `openSession` exists for ADR 0010 step 2: the claim "the session gate stopped
+ * riding on observation" is only measurable on a seat whose class is NOT open,
+ * and every case in this file before that step had one open.
+ */
+async function seat({ openSession = true } = {}) {
   const local = await localAuthoring({ profileId: CANARY });
   local.db.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
   local.db.prepare('INSERT INTO cohorts(id,display_name) VALUES (?,?)').run(local.cohort, 'capability-routes');
-  const starts = new Date(Date.now() - 1000).toISOString();
-  const ends = new Date(Date.now() + 3600000).toISOString();
-  local.db
-    .prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES (?,?,?,?,?)')
-    .run('cap', local.cohort, local.profileId, starts, ends);
-  await setRoster(local.env.HPS_KV, local.cohort, ['student']);
-  await startSession(local.env.HPS_KV, local.cohort, {
-    session_id: 'cap', profile_id: local.profileId, starts_at: starts, ends_at: ends,
-  });
+  if (openSession) {
+    const starts = new Date(Date.now() - 1000).toISOString();
+    const ends = new Date(Date.now() + 3600000).toISOString();
+    local.db
+      .prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES (?,?,?,?,?)')
+      .run('cap', local.cohort, local.profileId, starts, ends);
+    await setRoster(local.env.HPS_KV, local.cohort, ['student']);
+    await startSession(local.env.HPS_KV, local.cohort, {
+      session_id: 'cap', profile_id: local.profileId, starts_at: starts, ends_at: ends,
+    });
+  }
   const { token } = await issue({ u: 'student', c: local.cohort, p: local.profileId }, 1, TEST_SECRET);
   return {
     close: local.close,
@@ -72,17 +80,20 @@ async function seat() {
 /** The code the routes return when a capability is off, and nothing else. */
 const unavailable = (r) => r.status === 404 && r.body?.error?.code === 'observation_unavailable';
 
-async function withCanaryObservation(observation, fn) {
+/** Patch any set of top-level canary fields for the duration of `fn`. */
+async function withCanaryProfile(patch, fn) {
   const profile = getProfile(CANARY);
   assert.ok(profile, `${CANARY} is not in the registry — this test's subject moved`);
-  const original = profile.observation;
-  profile.observation = observation;
+  const original = Object.fromEntries(Object.keys(patch).map((k) => [k, profile[k]]));
+  Object.assign(profile, patch);
   try {
     return await fn();
   } finally {
-    profile.observation = original;
+    Object.assign(profile, original);
   }
 }
+
+const withCanaryObservation = (observation, fn) => withCanaryProfile({ observation }, fn);
 
 test('record on, assess off: the device records, nothing may leave it', async () => {
   await withCanaryObservation({ record: true, assess: false, format: 'hps-observation/2' }, async () => {
@@ -179,4 +190,100 @@ test('both off closes both — negative control', async () => {
       s.close();
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// ADR 0010 step 2 — the /v1/profile session gate stops riding on observation
+// ---------------------------------------------------------------------------
+//
+// The snapshot next door (profile-serving-snapshot) proves today's 36 answers
+// did not move. That is necessary and not sufficient: a route that still read
+// `record` would produce the identical 36 answers, because the only two
+// recording cohorts are the only two that declare `requires_open_session`.
+// What the split claims is a DIFFERENT thing — that the two switches are now
+// independent — and the only way to measure it is to set them apart, which no
+// shipped profile does. Hence the canary, again.
+
+/** The canary's own session block, with one field overridden. */
+const sessionWith = (over) => ({ ...getProfile(CANARY).session, ...over });
+
+test('/v1/profile: recording a seat no longer requires the class to be open', async () => {
+  // record ON, requires_open_session OFF, class NOT open.
+  // Before step 2 this was a 403: `record` was the gate. It is what would have
+  // happened to seven cohorts the day `record` defaults on (ADR step 4).
+  await withCanaryProfile(
+    {
+      observation: { record: true, assess: false, format: 'hps-observation/2' },
+      session: sessionWith({ requires_open_session: false }),
+    },
+    async () => {
+      const s = await seat({ openSession: false });
+      try {
+        const res = await s.get('/v1/profile');
+        assert.equal(
+          res.status,
+          200,
+          `기록이 켜졌다는 이유만으로 수업 전 프로필 읽기가 막혔다 — ${res.status} ${JSON.stringify(res.body)}`,
+        );
+        // And the guard that makes loosening the gate safe: no session means no
+        // scope, and a scopeless observation block moves the shipped app's chat
+        // history to a token hash. Serve nothing rather than something broken.
+        assert.equal(
+          res.body.observation,
+          undefined,
+          `scope 를 만들 수 없는데 observation 블록을 보냈다 — ${JSON.stringify(res.body.observation)}`,
+        );
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
+
+test('/v1/profile: the cohort that declares requires_open_session still gets 403 — negative control', async () => {
+  // The mirror. observation entirely OFF, the new flag ON. If the route still
+  // read `record`, this would be a 200 and the flag would be decorative.
+  await withCanaryProfile(
+    {
+      observation: { record: false, assess: false },
+      session: sessionWith({ requires_open_session: true }),
+    },
+    async () => {
+      const s = await seat({ openSession: false });
+      try {
+        const res = await s.get('/v1/profile');
+        assert.equal(
+          res.status,
+          403,
+          `requires_open_session 을 켰는데 수업 없이 프로필이 나왔다 — ${res.status}`,
+        );
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
+
+test('/v1/profile: a recording seat inside an open class still gets its scope — positive control', async () => {
+  // Without this the two cases above are satisfied by a route that never
+  // serves an observation block at all.
+  await withCanaryProfile(
+    {
+      observation: { record: true, assess: true, format: 'hps-observation/2' },
+      session: sessionWith({ requires_open_session: true }),
+    },
+    async () => {
+      const s = await seat();
+      try {
+        const res = await s.get('/v1/profile');
+        assert.equal(res.status, 200);
+        assert.equal(res.body.observation?.format, 'hps-observation/2');
+        assert.equal(typeof res.body.observation?.scope, 'string');
+        assert.ok(res.body.observation.scope.length > 0, 'scope 가 빈 문자열이다');
+        assert.equal(res.body.observation?.assess, true);
+      } finally {
+        s.close();
+      }
+    },
+  );
 });

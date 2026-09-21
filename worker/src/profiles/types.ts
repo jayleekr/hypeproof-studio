@@ -303,6 +303,43 @@ export interface Profile {
     series_total: number;
     series_index: number;
     hours: number;
+    /**
+     * ADR 0010 step 2 — does `GET /v1/profile` require an open class session?
+     *
+     * Scope: this route ONLY. `/v1/chat/completions`, `/v1/messages`,
+     * `/v1/observations/*` and `/v1/request-settings` call `gateChatRequest`
+     * unconditionally and are not affected either way — a seat that reads its
+     * profile before class still cannot send anything.
+     *
+     * It exists because the answer used to be `observation.enabled`. Nothing
+     * about reading your cohort, greeting and model list depends on being
+     * observed; the coupling was an accident of one boolean meaning four
+     * things, and it is the one that would have flipped seven cohorts from
+     * 200 to 403 the day `record` defaults on (ADR step 4).
+     *
+     * Absent → false: a seat may read its profile before the instructor opens
+     * the class. Cohorts whose seat is only meaningful inside a session (the
+     * individual trial, whose observation scope IS the session) declare true
+     * and keep today's 403.
+     */
+    requires_open_session?: boolean;
+  };
+  /**
+   * ADR 0010 step 2 — individual ("native") trial seats.
+   *
+   * Two things read this and they must agree: `POST /admin/tokens/issue` will
+   * not mint a `native_trial` token for a cohort that does not declare it, and
+   * `gateChatRequest` will not open a grant-backed session for one. Splitting
+   * them is how a minted seat that 403s forever gets made, so they move
+   * together.
+   *
+   * Absent → false (fail closed). It used to be `observation.enabled`, which
+   * meant turning observation on for a kids cohort silently made that cohort
+   * mintable as a personal trial — an admin-authority change riding on a
+   * measurement change.
+   */
+  trial?: {
+    individual: boolean;
   };
   analytics: {
     log_user_messages: boolean;     // store message bodies (privacy)
