@@ -289,7 +289,7 @@
         "WEB-09"
       ],
       "inline_prefixes": [],
-      "sha256": "e90461fa4d1e6891220e4f70fc1a5f7b42ac4b3698686139b72f908b78017be6",
+      "sha256": "c724bf3253812d6a0854250e7145cba01c19cf55d8ecb6e32b7ac5950780d2a7",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/chalk-authoring.md",
@@ -314,7 +314,7 @@
         "ADM-14"
       ],
       "inline_prefixes": [],
-      "sha256": "55a3ba39185db97ca78a7a11183434974a97f852d2469767a4b729d5182d250a",
+      "sha256": "be2497f4bc41e5b750d1f28cf7e49d977447ac65c2f48eb4eb48a0c009281332",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/classroom-admin.md",

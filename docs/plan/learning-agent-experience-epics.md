@@ -10,6 +10,38 @@
 
 ## 로드맵
 
+<a id="one-instructor-classroom"></a>
+
+### New umbrella feature: curriculum-connected operation by one instructor
+
+Added 2026-09-21 from **TJ's explicit product request**. This is a development
+roadmap item, not a completed feature. [Product intent](../PRODUCT-INTENT.md#one-instructor-classroom-intent)
+owns the motivation and attribution. The existing epics below remain the execution
+units; this grouping creates neither another product nor another implementation queue.
+
+| Category | Intent and user-visible addition | Existing delivery path | Remaining boundary |
+|---|---|---|---|
+| Curriculum authoring | Combine reusable lesson components and adapt examples to the audience; curriculum changes configure Studio's AI role, available tools, exercise flow and completion criteria | Chalk BASE-04, CH-01/04/06/07, ENV-01/03, EDU-02, VER-01/02; E1/E2; #1011/#1012/#1015 | Existing authoring and U3 version switching are partial foundations. A usable component-composition flow and student-context rehearsal still need acceptance; a visual block editor is not claimed implemented |
+| Live monitoring and communication | See who has entered, their stage, submissions and help requests; connect individual feedback and group recurring problems to reduce instructor attention switching | ADM-02/04/05/09; CLS-01/02/03; E5 #751 and #732 | Existing metadata boards and selected sharing remain useful. One-instructor operation and reduced waiting are field outcomes, still unmeasured |
+| Remote intervention | Issue/verify participation tokens, distribute to selected/all learners, collect permitted data and recover known faults with per-learner effect confirmation | ADM-01/03/07/10/11/13/14; E5 U1–U4, E3 recovery | U1/U2 have local acceptance; U3 has direct Mac prompt-flow evidence but a remaining mixed-basis predicate defect is under correction. Cause-specific recovery and collection extensions follow; external environments remain NOT RUN |
+
+**Finish the current delivery slice before expanding.** First close the reproduced
+U3 basis defect, then accept the bounded U4 known-fault actions and the minimum
+remaining collection flow needed for the agreed class scenario. Reuse the current
+authoring, selection and result UI. Do not start a general block editor, unrestricted
+remote desktop, new messaging product or a second storage/auth system to finish
+this slice. Keep curriculum-composition improvements and optional extensions in
+their existing linked backlog rather than silently dropping or implementing them.
+
+**Consolidation after completion.** In the product's main Features section retain
+one entry, “Curriculum-connected classroom operation”, with these three categories
+inside it. Promote a capability only with linked implementation and actual supported-
+environment acceptance. Preserve unfinished categories and known limits in the
+roadmap. Do not equate local acceptance, release, operational activation and measured
+one-instructor operation. The [integrated acceptance scenario](../testing/classroom-admin.md#one-instructor-acceptance)
+is the finish criterion; the individual U1/U2/U3 records remain the evidence for their
+own scope. No new deadline, seat-capacity claim or production approval is introduced.
+
 GitHub 하위 에픽: [E1 #747](https://github.com/jayleekr/hypeproof-studio/issues/747),
 [E2 #748](https://github.com/jayleekr/hypeproof-studio/issues/748),
 [E3 #749](https://github.com/jayleekr/hypeproof-studio/issues/749),
