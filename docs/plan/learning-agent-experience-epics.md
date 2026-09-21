@@ -338,7 +338,7 @@ rollback은 먼저 delivery/collect/commands 신규 enqueue를 끄고 관측을 
 
 1. 로컬 `fix/751-mac-devhost-launch`의 실행기·초대 발급 hook·검수 중복 행 수정 및 회귀를 기존 PR 소유 범위에 반영한다. 기존 스택 위의 준비 커밋이며 별도 중복 PR/무단 base 변경은 하지 않았다.
 2. 최신 main `19ff881`의 학생 경험 개편(#1170/#1178)을 관제 스택과 통합한다. 5개 충돌을 어느 한쪽으로 덮지 말고 현재 과제 중심 UI, 변경 전후 보기, real/simulated 표시, 단계 자기보고·강사 확인·원격 명령 보존 계약을 함께 유지한다. 최신 source/base에서 필수 체크와 실제 Mac 경로를 재실행한다.
-3. 실제 SessionSpool의 sequence 계약을 보강한다. 최신 기록을 ‘구형’으로 설명하는 문구, 의도적인 강사 중지를 연결 장애로 설명하는 문구도 고친다. 재시작·동시 append·부분 쓰기·회차 경계·legacy 대조 없이는 complete를 올리지 않는다.
+3. 발급 토큰 확인이 후속 runtime_ready에 덮여 unknown이 되는 재현(`activation-regression.mjs`)을 먼저 닫는다. 현재 상태와 확인 근거의 저장을 분리하고 재발급/다른 token/new boot/좌석 변경을 대조한다. 이어서 실제 SessionSpool의 sequence 계약을 보강한다. 최신 기록을 ‘구형’으로 설명하는 문구, 의도적인 강사 중지를 연결 장애로 설명하는 문구도 고친다. 재시작·동시 append·부분 쓰기·회차 경계·legacy 대조 없이는 complete를 올리지 않는다.
 4. 위 통합본으로 Mac 재실행 가능한 시연 패키지를 기존 devhost에 연결한다. Windows 실행 패키지/현장 큐시트, production과 분리된 staging 설정·대상 검사·rollback을 준비한다. 스크립트 존재와 실제 실행을 구분한다.
 5. 계정·운영 결정이 갖춰지면 기존 제한 평가 시험 → Resend sandbox·실수신·webhook → staging D1/R2 삭제·복구 → 성인 2~3석 canary → 30석 순서로 진행한다. 상한/수신자/실행 대상은 구체적으로 확정하고 증거 없이 NOT RUN을 지우지 않는다.
 

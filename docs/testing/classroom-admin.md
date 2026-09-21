@@ -410,3 +410,8 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 **남는 코드 과제:** 현재 `SessionSpool.append`는 `seq`를 쓰지 않는다. 따라서 **새 앱의 새 기록도** `sequence_unavailable`이며 UI의 ‘구형 기록’ 설명은 부정확하다. 이를 complete로 승격하지 말고 durable 순번/선언된 범위/재시작·부분 쓰기·snapshot 계약을 구현하고 기존 legacy를 계속 수용해야 한다. 최신 main 학생 UX와 관제 hook 통합도 아직 미완이다.
 
 **NOT RUN:** 실제 모델 답변의 품질·비용, 실제 메일/수신/webhook, Windows, 학교망, Cloudflare staging/production D1·R2, 공식 전체 release의 설치/업데이트/서명/seed 경로. 이번 실행은 공식 shell을 활용한 개발 host 검증이며 출하 패키지 인수가 아니다. 필요한 개발 계정 key는 이 checkout/현재 환경에 없었다(값은 읽거나 출력하지 않음).
+
+
+**수정 Service의 GUI 재실행:** `6a7f33c` Service + 같은 e3196e5 확장으로 합성 회차를 새로 열었다. 실제 A1 연결·SDK 대화·동의·자동 회수를 다시 실행해 **발급 ID 표시**, **6명 → 초안 1 + 미수신 5 = 현재 작업 6건**을 화면에서 확인했다. 현재 시연본은 이 조합이다. `e2e/test-results/classroom-demo-20260921/start.command`는 이 작업의 프로세스만 교체해 다시 연다. 전체 79개 회귀(실행기 2, ops 20, authoring 25, evaluator/erasure 32), worker typecheck, docs harness 100, requirement integrity, registry, workflow-shell 검사 통과. 브라우저 CI에 추가한 실행기 시험의 원격 CI는 아직 실행하지 않았다.
+
+**추가 재현 1건 · 미해결:** 발급 이력을 연결하자 `token_verified` 때 `matches_issue`였던 표시가 다음 `runtime_ready` 뒤 `unknown`으로 돌아간다. Service가 `state.activation.value.token_jti`만 읽는데 최신 activation 전체 교체가 이전 토큰 확인을 지우기 때문이다. 실기 상세에서 ‘준비 완료’와 ‘앱 확인 보고 없음’이 함께 나타났고, 별도 `activation-regression.mjs`/`.log`에서 양성→음성 순서를 재현했다. 이 실패는 위 79개 수정 범위 회귀와 별개이며 숨기지 않는다. 다음 구현은 토큰 확인 근거를 입장 진행 상태와 분리해 보존하되 재발급/다른 토큰/새 연결·boot/좌석 변경의 근거를 섞지 않아야 한다. 최신 main 통합과 함께 AT-15/23에 회귀를 추가한다.
