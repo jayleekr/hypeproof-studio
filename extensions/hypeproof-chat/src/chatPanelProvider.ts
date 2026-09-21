@@ -723,7 +723,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   opsRuntimeGeneration(): number { return this.opsGeneration; }
   /** Ask every running turn and pending approval to end. Entries leave the maps through their normal finally paths — that is the confirmation. */
   opsRequestStop(): void {
-    for (const [streamId, ctrl] of [...this.activeStreams]) { try { ctrl.abort(); } catch { /* best-effort */ } void this.post({ type: "streamStopped", streamId }); }
+    for (const [streamId, ctrl] of [...this.activeStreams]) { try { ctrl.abort(); } catch { /* best-effort */ } void this.post({ type: "streamStopped", streamId, by: "instructor" }); }
     for (const resolve of [...this.pendingApprovals.values()]) resolve(false);
     this.observationAssessment?.abort();
   }
@@ -3080,7 +3080,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       spoolStatus = "error";
       spoolErrorKind = classifyTurnError(err);
       { const e = err as { status?: unknown; kind?: unknown; requestId?: unknown }; opsFailure = { ...(typeof e?.status === "number" ? { status: e.status } : {}), ...(typeof e?.kind === "string" ? { code: e.kind } : {}), ...(typeof e?.requestId === "string" ? { requestId: e.requestId } : {}) }; }
-      await this.handleSendError(err, streamId);
+      // #751 — a stop (the learner's or the instructor's) is judged by THIS turn's abort signal, not by the shape of what
+      // the runtime threw while dying: the SDK can surface an abort as a transport-looking error, and the learner then
+      // read a deliberate stop as "연결이 끊겼어요". The stop notice was already posted by whoever stopped it.
+      if (!ctrl.signal.aborted) await this.handleSendError(err, streamId);
     } finally {
       // #751 F4 — what actually happened to this turn, from the real runtime path. No text leaves here.
       this.opsObserver?.turnResult({ ok: spoolStatus === "ok", aborted: ctrl.signal.aborted, runtime: spoolRuntime === "agent-sdk" ? "agent-sdk" : "proxy", sdkFallback: opsSdkFallback, ...(spoolErrorKind ? { errorKind: spoolErrorKind } : {}), ...opsFailure });
