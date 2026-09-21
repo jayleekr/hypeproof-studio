@@ -681,30 +681,41 @@ closed-by-default `<details>` in the coach rail of the work screen and a quiet l
 canvas or evidence drawer (SX-05/06/13). Text is rendered as text; links open only on a
 learner click through the existing https-guarded `openExternal` path. A late response or
 webview callback from an ended connection generation changes nothing.
-
-### Targeted distribution of lesson prompts and lesson settings (U3) — design contract only, 2026-09-21
-
-Not implemented; no REQ row is claimed and [AT-45/46](testing/classroom-admin.md#remote-management-u3-plan-20260921) are NOT RUN.
-The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u3-20260921).
-The Studio behavior it will add, once built, is bounded as follows. **Prompt:** an instructor
-prompt is an inbox card; only the learner's own press of `초안에 가져오기` changes the input
-draft, as one functional update inside the webview that appends to the latest draft and never
-replaces it, touches no attachment or queued send, sends nothing and calls no model. Undo
-restores the previous draft only while the text is byte-identical to the just-imported state.
-Withdrawal removes the card body and never the learner's draft, conversation or files.
-Importing and sending are not reported to the instructor; the only provenance is a bodiless
-reference kept with the local draft and, when the learner sends it, on that turn's spool
-`prompt` event. **Setting:** a setting is a reference to a frozen lesson version of the same
-course, never free-form values, and can only narrow within the compiled profile (ADR 0006/0007).
-The host switches at the turn-start preflight, never mid-turn: it asks the Service to record the
-binding, re-fetches `/v1/profile` as a candidate, swaps the cached profile only when the served
-`lesson_binding.key` matches, and sends that key on every request of the turn for both runtimes.
-Any failure lets the turn proceed unchanged on the previous setting; a rejected turn returns the
-learner's text and attachments to the input (existing `inputRejected`). The activity identity,
-conversation, draft, workspace files and usage attribution do not move. Step signals carry the
-new lesson version after the switch, and earlier self-reports are never shown as completion of
-the new version. "Applied" is the Service's record of the first real model request under that
-binding — not a device receipt, a profile 200, or the inbox card.
 Without a valid connection the list stays readable and says "수업 연결 확인 전"; it says "끝난 수업의 자료"
 only on a normal expiry or once the run's own end time has passed — a missing connection (an app restart in a
 running class) is not evidence that the class ended.
+
+### Targeted distribution of lesson prompts and lesson settings (U3) — design under review, not accepted, 2026-09-21
+
+Not implemented; no REQ row is claimed and [AT-45/46](testing/classroom-admin.md#remote-management-u3-plan-20260921) are NOT RUN.
+The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u3-20260921);
+its first draft was revised the same day after an independent review (turn pinning, fallback under
+outage/off, execution evidence, mixed-basis reports). The Studio behavior it will add, once built, is
+bounded as follows. **Prompt:** an instructor prompt is an inbox card; only the learner's own press of
+`초안에 가져오기` changes the input draft, as one functional update inside the webview that appends to
+the latest draft and never replaces it, touches no attachment or queued send, sends nothing and calls
+no model. Undo restores the previous draft only while the text is byte-identical to the just-imported
+state. Withdrawal removes the card body and never the learner's draft, conversation or files.
+Importing and sending are not reported to the instructor; the only provenance is a bodiless reference
+kept with the local draft and, when the learner sends it, on that turn's spool `prompt` event.
+**Setting:** a setting is a reference to a frozen lesson version of the same course, never free-form
+values, and can only narrow within the compiled profile (ADR 0006/0007). The host switches at the
+turn-start preflight: it asks the Service to record the binding, re-fetches `/v1/profile` as a
+candidate and swaps the cached profile only when the served `lesson_binding.key` matches. It sends
+that key as its expectation with the existing per-turn `x-hps-turn-id` on every request of the turn,
+for both runtimes. The header is never the authority: the Service admits each turn id once, records
+the execution snapshot for it, and runs every later request of that turn from that snapshot however
+many times the setting changes afterwards; a new turn carrying an old key is refused before anything
+runs. If the switch succeeded but the new profile could not be verified, the host does not send a
+turn at all and the learner's text and attachments stay in the input. A turn that ends in a
+`lesson_binding` refusal is closed from the Service's record of that turn, not from guesswork:
+nothing dispatched → text and attachments return to the input (existing `inputRejected`); something
+dispatched → the turn is marked as partially executed and is never re-sent automatically; record
+unreadable → marked unknown, never re-sent automatically. When the binding cannot be read the
+Service holds new execution instead of falling back to the wider token lesson, and turning classroom
+operations off does not undo a setting that was already switched. The activity identity,
+conversation, draft, workspace files and usage attribution do not move. Step signals carry the new
+lesson version after the switch, and earlier self-reports are never shown as completion of the new
+version. "Applied" is the Service's record that a request pinned to that binding reached the
+upstream with its normalized wire and got a response — not a gate pass, a device receipt, a profile
+200, `count_tokens`, or the inbox card.
