@@ -3,7 +3,7 @@ import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
 import { MissionHeader } from './MissionHeader';
 import { EvidenceDrawer } from './EvidenceDrawer';
-import { isObservationFormat } from '../../src/nativeObservationContract';
+import { isObservationFormat, showsObservationResults } from '../../src/nativeObservationContract';
 import { MarkdownText } from './MarkdownText';
 import { DisconnectedChat } from "./StartPage";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -742,7 +742,11 @@ export function ChatPanel(props: Props) {
           opened, (a) the observation panel disappeared and (b) "관찰을 지원하지 않습니다"
           showed up next to a screen whose drawer was working fine. The test is "is
           observation on", not "which version is it". */}
-      {isObservationFormat(config?.profile?.observation?.format) && <NativeObservationPanel scope={config!.profile!.observation!.scope} coachName={coachName} />}
+      {/* The observation RESULTS panel is an assessment shown to the learner. SX-01·06·07·59
+          keep that off the work screen, and SX-59 names the remedy as "학습 경험 프로필에서
+          비활성" rather than deletion, because the trial's own TUX-OBS-07 is to read it. So it
+          follows the cohort's `assess` opt-in; recording keeps its own switch and stays on. */}
+      {showsObservationResults(config?.profile?.observation) && <NativeObservationPanel scope={config!.profile!.observation!.scope} coachName={coachName} />}
       {config?.profile?.profile_id === 'studio-native-trial' && !isObservationFormat(config.profile.observation?.format) && <p role="status">현재 연결은 작업 관찰을 지원하지 않습니다. 기존 작업 파일은 계속 사용할 수 있습니다.</p>}
 
       <div className="hps-messages" ref={scrollRef}>
