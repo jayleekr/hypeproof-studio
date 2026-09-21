@@ -149,7 +149,7 @@ npm --prefix chalk run typecheck
 | AT-38 | 관찰·성장 보고서 구성 | **실행됨** — core + runner fixtures(합성). 실제 모델 NOT RUN | R5 기록 |
 | AT-39 | 학생 화면의 질문·확인 지점(모달 0·문맥 유지) | **NOT RUN** — 실제 Studio 미확인 | 보강 기준 실행 기록의 NOT RUN |
 | AT-40 | 원인별 복구: 원인 → 먼저 할 조치 → 조치 뒤 검증 | **실행됨 · 인수 전(2026-09-22)** — Service + 기기 host + 로컬 workerd D1 + UI e2e + 실제 Mac M3(실제 창 1대, 장애·계정·공급자는 여기서 만든 것). Windows·학교망·복수 기기·운영 D1·실제 모델 NOT RUN, 일시정지를 가로지르는 다중 요청 turn은 실제 창 NOT RUN. 새 포트 재시작(시험 전용 트리거 + 음성 대조)과 시작 화면 토큰 입력은 12차 실제 창에서 실행 | [U4 실행 기록](#remote-management-u4-run-20260922) |
-| AT-41 | 세 흐름 공통 결과 화면 | **NOT RUN · 계획** | 같은 곳 |
+| AT-41 | 세 흐름 공통 결과 화면 | **구현 · 로컬 실행 PASS · 인수 전(2026-09-22)** — Service + 브라우저 e2e(12) + 실제 Mac 창 1대(진단→회수→공지). 수업 마무리 카드·Windows·학교망·복수 기기·운영 D1 NOT RUN | [AT-41 실행 기록](#remote-management-at41-run-20260922) |
 | AT-42 | 공통 선택 모델 (옛 표기 AT-37) | **실행됨** — UI e2e + 실제 Mac 정상 경로. 실제 기기 2대 이상·Safari/Firefox NOT RUN | [U1 실행 기록](#remote-management-u1-run-20260921) |
 | AT-43 | 선택한 학생의 수업 기록 회수 (옛 표기 AT-38) | **실행됨** — Service + UI e2e + 실제 Mac 정상 경로. 기기 실패·재전송은 합성, Windows·학교망·staging D1 NOT RUN | 같은 곳 |
 | AT-44 | 공지·자료 대상 배포 (옛 표기 AT-39) | **실행됨 · 로컬 인수(2026-09-21)** — Service + 기기 + 로컬 workerd D1 + UI e2e + 실제 Mac M1(실제 창 1대, A2·A3 합성). 첫 인수 요청은 제안 커밋 경계 결함으로 반려 → 수정(`9d85718`)·회귀 추가 → **조율 측(Codex)이 독립 경합 재현과 실제 Chalk→Mac A1 선택 배포·회수·기기 회수 확인·초안 보존을 직접 확인해 로컬 범위를 인수**(그 증거는 조율 측 소유의 공통 git-dir `remote-classroom-evidence/management-20260921/u2-codex-reaccept-*-bdebdd3.*`·`u2-deferred-boundary-check-9d85718.log`에 있고 이 문서 작성 세션이 다시 실행한 것이 아니다). `bdebdd3`은 그 위의 문서·추적 커밋. **인수 범위 밖으로 남은 NOT RUN:** 같은 grant의 자동 재연결, Windows, 학교망, staging/production D1, 실제 기기 2대 이상, owner의 INT-CO-04 승인·운영 활성화. 로컬 인수는 PR 병합·운영 승인이 아니다 | [U2 실행 기록](#remote-management-u2-run-20260921) · [재인수 수정](#remote-management-u2-reaccept-20260921) |
@@ -1104,3 +1104,36 @@ A1 연결 `active`, 행 ‘입장: 준비 완료 … 마지막 신호: 방금’
 남은 한계: 창을 옮긴 동안 더 새로운 요청은 목록에 없고(수는 `counts`로 정확, `최신 요청부터 보기`로 복귀) 옮긴 창은 완결이 아니므로 그 사이 철회된 열린 기록은 저장 시 404로만 드러난다.
 10초 갱신 중에 누른 ‘더 오래된/최신’은 그 갱신이 끝난 다음 갱신(최대 10초)에 반영된다(기존 동작). 새 수업으로 바뀌어도 열려 있던 좌석 상세는 조치만 막힌 채 남는다(F1의 조회 실패 규칙, 이번에 바꾸지 않음).
 NOT RUN: 앱의 도움 요청 입구, 실제 강사·학생, Windows, 학교망, staging/production D1·R2, 실제 모델·메일, 스크린리더 실사용, 전체 빌드, 사용자 시각 승인. 인수가 아니다.
+
+<a id="remote-management-at41-run-20260922"></a>
+
+### AT-41 — 회수·배포·복구의 대상별 결과 · 실행 기록 · 2026-09-22 (로컬 · 합성 + 실제 Mac 창 1대 · 인수 전 · 운영 아님)
+
+계약: [요구 문서 AT-41 절](../requirements/classroom-admin.md#remote-management-at41-20260922). 기준 소스 `dfea36e`(Draft #1233) 위의 별도 브랜치 `feat/751-at41-common-results`. 증거 사본: 공용 git-dir `remote-classroom-evidence/management-20260921/instructor-ui-review/at41/`(`browser/`·`mac/`).
+
+**재현(기준 소스 `dfea36e`의 화면, 같은 Service·같은 시험 흐름 — `control-dfea36e.json`).** ① A1 상세에서 ‘AI 실행 환경 초기화’를 보내고 A2 상세를 연 뒤 A1이 끝나자, **A2 상세(제목 `A2 · student-b`)의 상태 줄에 A1의 결과 전문**이 나타났다. ② A2에 진단을 보내고 곧 A3에 진단을 보낸 뒤 A2가 끝나자, A2의 결과는 화면 어디에도 없었다(일괄 줄은 A3 차지). 같은 흐름을 이 브랜치로 돌리면 A2 상세는 비어 있고(`control-branch.json`), 앞 조치는 자기 카드에 남는다(아래 시험).
+
+**브라우저 인수 시험 `npm --prefix e2e run test:classroom-ops-results` — 12/12 PASS** (Chromium · Chalk 실제 페이지 · Service 라우터 + SQLite · 명령의 배정·receipt는 실제 `/sync` 프로토콜 · 회수 기록은 앱의 실제 freezer · A3는 실제 보관함 클라이언트). 여기서 정한 것: 기기가 동기화하는 **시점**과 보고하는 receipt, 503으로 막은 읽기 1회, 구버전 앱의 느린 동기화 주기(마지막 상태 시각을 당김).
+
+| 확인 | 결과 |
+|---|---|
+| 조치 전 카드 없음 | PASS |
+| C1 전체 선택 진단: 구버전 = 실패(unsupported), 미연결·미페어링 = 미전달, `leased` = 수신 확인 전, 기기 receipt = 기기 수신 | PASS |
+| C1 진행 중에 C2: C1 카드 유지·자기 관측으로 나중에 결말(적용 2 · 실패 1 · 미확인 1 · 미전달 2, 해결 확인 1 · 문제 남음 1), C2 줄 침범 없음, ‘모두’ 없음, 미확인이 남으면 ‘확정 아님’ | PASS |
+| A1 상세의 초기화: A2 상세에 나타나지 않음, ‘실행됨·해결 확인 전’ → 연결된 다음 실행 완료 뒤 **클릭 없이** ‘해결 확인’ | PASS |
+| 선택 회수: 비선택 없음, 동의 없음·미연결 명시, `leased` ≠ 수신, 기기의 ‘보냄’ = 기기 수신(검증 전), **현재 세션만 검증된 기록**이 `range_unknown · other_session_not_included` + 실제 범위(시각·줄 수·빠진 다른 세션 1개) + ‘수업 전체의 기록이 아님’, 사유가 DB에 남음 | PASS |
+| K2 시작 뒤 K1 유지·자기 관측(늦게 온 A1 기록 검증이 K1에만), 이중 확인 = 한 batch·한 카드 | PASS |
+| 배포: `accepted` = 접수(Service 기록), `offered` = 수신 확인 전, 실제 보관함 = 보관함 반영, 구버전 앱은 느린 주기 전 ‘접수’ → 주기 뒤 실패 | PASS |
+| 배포 거두기: 전달 기록 유지 + ‘지금 보관함’ 따로(내리기 요청 → 기기 확인), ‘기록 회수와 다름’ | PASS |
+| 다시 읽기 실패(503): 마지막 관측·시각 유지, ‘실패 0·전원 성공으로 읽지 마세요’, 값 그대로 | PASS |
+| 실패만 다시 선택: 최신 기록 + 보드를 읽고 A3(미확인)·A4·A5·A6만 선택, 보낸 것 0 → 좌석 A5 주인 변경 뒤 A5 제외, A5 줄은 원래 학생 유지 | PASS |
+| 음성: 비선택·미동의·미연결 학생에게 요청·배포 0 | PASS |
+| 재연결 시 카드 없음 | PASS |
+
+시험 작성 중 틀린 것은 전부 계측기 쪽이었다(전체 선택에 A3 포함을 빠뜨림, 같은 sync가 C1·C2를 함께 배정한 사실, 로캘 시각 형식, 미확인도 재선택 대상). 화면 기대를 바꾸기 전에 카드 내용과 Service 기록을 대조했다.
+
+**기존 시험(영향 확인).** worker: collect(9) · selected-collect(14) · spool-seq(7) · snapshot-device(4) · recovery(9) · commands(12) · reports(6) · erasure — PASS. `classroom-ops-collect`의 ‘강사 화면에 세션 문자열 없음’ 가드가 새 범위 필드 이름(`other_sessions_in_window`)에 걸려, 가드를 풀지 않고 화면 필드 이름을 `others_in_window`·`spool_last_seq`로 바꿨다. e2e: ops · ops-selection · ops-distribution · ops-help · ops-lesson-settings · ops-roster — PASS. typecheck: worker · chalk · extension — PASS.
+
+**실제 Mac 창 (`HPS_U4_SCENARIOS=AT41`, R0 + AT41) — PASS.** 소스·확장 `9f54cc7`(이 브랜치의 WIP 커밋, 이후 커밋은 문서·README·CI 연결만), 셸 0.1.56 복사본(이 브랜치가 나갈 판이 아님 — 확장 수준 동작만 읽는다), Agent SDK 0.3.207, 자체 포트 18881/18882·debug 9481, 헤드리스 강사 창, 끝나고 스스로 정리. 강사는 Chalk에서 클릭: A1+A3+A4 진단 → A1 기록 회수 → A1+A3 공지. 세 카드가 최신순으로 공존하고 각자 실제 앱의 답에 도달했다: 진단 `[적용 (기기가 실행함)] 성공 — 토큰 정상 → 문제 해결 확인`, 회수 `[적용 (서버 검증)] 서버 검증됨 · 기록 순번 연속 · 시작과 끝 확인됨 · 기록 범위 … · 4줄 · 기기 요청: 기기가 전송을 마쳤다고 보고함`, 공지 `[적용 (보관함 반영)] … 지금 보관함에 있음`. A3 = 미전달/접수, A4 = 실패(지원 안 함), A2 대상 0·실행 0, 학생 초안·작업 파일 변화 없음. 실제 창의 기록은 한 세션이라 `complete`였다 — ‘현재 세션만’ 경로는 브라우저 시험(앱 freezer)에서만 확인했다.
+
+**NOT RUN.** 수업 마무리(명단 전체 회수) 카드 클릭 경로 · 실제 창에서 여러 세션이 있는 회수 · 수업 설정(U3) 배포 카드의 실제 창 · 12건 초과로 카드를 내리는 경로 · 숨은 탭 · Windows · 학교망 · 복수 실제 기기 · staging/운영 D1·R2 · 실제 모델 · 메일. 사람 검토: 화면 문구·배치는 사용자 시각 검토 전이며 이 기록은 승인이 아니다.

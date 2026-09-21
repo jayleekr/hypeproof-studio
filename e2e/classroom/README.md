@@ -6,6 +6,7 @@
 | `npm --prefix e2e run test:classroom-ops` | Chalk operations panel, commands through the real device client | a real Studio app |
 | `npm --prefix e2e run test:classroom-ops-roster` | built webview click → real `ClassroomOpsHost` (VS Code stubbed at the bundle edge) → real Service → real Chalk; 30 seats, reviewed input, finish → evaluation → review, real-send confirmation, reader's viewer check | a real Studio app, SDK, model, mailbox |
 | `npm --prefix e2e run test:classroom-ops-help` | Chalk /manage: roster on connect, help requests vs technical problems (open/answered/resolved/withdrawn/expired/other class), the Service's first action as the one primary, help entry under "2 수업 진행" keeping page state; share read failed/partial/next-page failure/older Service (never "no help" without proof); the open seat detail following live connection, cause and flag changes, nothing sent after revocation; unsent question/checkpoint drafts never crossing a disconnect or another instructor; open help read with `status=open` and both lists as a cursor window (older → moves on to the end, newest → back; one window per refresh; place kept across new rows, withdrawal and a failed page) | a real Studio app or learner |
+| `npm --prefix e2e run test:classroom-ops-results` | AT-41: per-action result cards for commands, record collection and distribution kept side by side (keyed by kind + server id, each observed on its own); flow-typed stages (distribution `accepted` ≠ command `accepted`, `leased`/`offered` ≠ receipt, device "sent" ≠ verified, verified ≠ whole lesson with the sealed extent and reason, executed ≠ resolved later without a click); a failed re-read stays stale, never zero; failure-only re-selection sends nothing; another student's detail never shows this command | a real Studio window (the Mac `AT41` scenario below) |
 | `npm --prefix e2e run test:classroom-report` | the report page and its PDF in Chromium | a recipient's mail client or printer |
 
 All four run in PR CI (`.github/workflows/classroom-ops.yml`). The evaluator and mail provider are replaced at their
@@ -78,6 +79,9 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
   are made locally and listed in `result.json` under `made_here`; what was not run is under `not_run`. It stays open
   afterwards (class and tokens last 12 hours); `recovery-session.json` has the URL, PID, ports and how to stop it.
   `mac-window.mjs` holds the window-driving helpers this runner uses.
+  `HPS_U4_SCENARIOS=AT41` runs R0 plus diagnosis → record collection → notice from the Chalk page to the real window (A3/A4 selected
+  on purpose, A2 never) and checks that the three result cards coexist and each reaches the real app's own answer; it switches
+  `ops_distribute` on and gives the instructor `distribute` for that run only.
   `HPS_U4_SCENARIOS=BOARD` runs R0 plus only a board smoke of this source (served `/manage` bytes against the source file, the
   Service's `status=open` filter, A1's real connection, action availability, the help list and checkpoint-draft isolation across
   instructors; the learner's draft, answers and files unchanged) — no recovery action. Use another `HPS_DEVHOST_DIR` (an APFS
