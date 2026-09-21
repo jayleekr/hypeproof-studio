@@ -886,3 +886,28 @@ Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 
 
 Windows에서만 확인할 수 있어 **NOT RUN으로 남는 것:** 경로 구분자·긴 경로·한글 사용자 폴더에서의 spool/동결 복사본, Defender/학교 보안 프로그램의 `claude.exe` 차단, 프록시·TLS 재서명 망에서의 SDK 스트리밍, 절전 복귀 뒤 sync 재개, 설치본 업데이트 알림과의 공존.
 
+
+<a id="instructor-ui-pass-run-20260922"></a>
+
+### 강사 UI 1차 정리 — 실행 기록 · 2026-09-22 (로컬 · 사용자 검토 전 시안 · 인수 아님)
+
+설계·범위: [디자인 요구](../requirements/classroom-design.md#instructor-ui-pass-20260922). 소스 `48b4820`
+(브랜치 `feat/751-instructor-ui-pass`, 기준 `d87f1fc` = U4 중간 스냅샷 — U4 최종 head와의 통합은 별도). Mac arm64 ·
+Playwright Chromium · 합성 계정만. 화면 배치·문구·스타일 변경이며 Service·SDK·API 계약은 바꾸지 않았다.
+
+| 검사 | 결과 |
+|---|---|
+| `npm --prefix chalk test` · `npm --prefix chalk run typecheck` | PASS · PASS |
+| `e2e/classroom/run.mjs`(공유·피드백·재연결) · `ops.mjs` · `ops-selection.mjs` · `ops-distribution.mjs` · `ops-lesson-settings.mjs` · `ops-roster.mjs`(30석·1024·200%·390 drawer·44px·주요 CTA 1개) | 6개 PASS |
+| `e2e/access-budgets/browser.mjs` · `e2e/chalk-authoring/run.mjs`(동선 막대가 붙은 두 화면) | PASS · PASS |
+| `e2e/chalk-authoring/simple.mjs` | FAIL — **기준 소스 `d87f1fc`의 원래 `authoring.html`로도 같은 지점(‘강의가 확정되었습니다’ 대기)에서 실패**. 이 변경과 무관한 기존 실패로 분리해 둔다 |
+| `e2e/classroom/ui-review-capture.mjs`(아래 캡처) | PASS — 12장 모두 가로 넘침 없음·페이지에 토큰 없음, 1280×720 첫 학생 행 434px, 연결 뒤 폼 접힘, Esc 후 포커스 복귀(C1), 취소 후 작성 내용·선택 유지, 비선택 A2 배포 대상 아님, 1024×700·200%(720×450, DSF 2)·390 drawer `fixed`·주요 CTA 1개 |
+
+기존 시험 갱신은 1건: `ops-roster.mjs`의 합쳐진 목록 안내 문구(패널 이름 `이번 수업 학생`, 위치 ‘위’ — 이전 문구는 아래에 있지 않은 패널을 ‘아래’라고 했다). 의미(한 목록, 명단 밖 학생만 옛 패널에)는 같다.
+
+캡처: `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/after/`(`index.html`·`manifest.json`·`capture-facts.json`).
+합성 미리보기 `e2e/classroom/ui-review-preview.mjs`(127.0.0.1:18951) — 24석 합성, 연결 좌석은 실제 기기 클라이언트 코드가 같은 프로세스에서 동작,
+배포 실패는 합성 디스크 거부, 회수 실패는 합성 `nothing_recorded`. 각 캡처의 ‘합성 데이터’ 표식은 캡처 스크립트가 붙인 것이다.
+
+NOT RUN: 실제 강사 사용 관측·실제 Studio 창·Windows·학교망·staging/production·실제 학생 자료·메일, 브라우저 확대 기능 자체(200%는
+viewport 축소 + DSF 2로 근사), 스크린리더 실사용. `/authoring`·`/console`·`/issuer`·`/budgets`는 연결 전 첫 화면만 캡처했다.
