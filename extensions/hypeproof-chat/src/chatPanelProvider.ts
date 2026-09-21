@@ -740,13 +740,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const dir = this.spool?.currentSessionDir() ?? null;
     return { history_count: history.length, history_sha256: digest(history), draft_sha256: draft === undefined ? null : digest(draft), spool_session: dir ? path.basename(dir) : null, spool_flushed: flushed };
   }
-  /** #751 R4 — read the allowlisted spool files of the current session. Reads only: the live spool is not sealed, truncated or moved. */
-  async opsReadSpool(): Promise<Array<{ name: string; data: Uint8Array }> | null> {
-    try { await this.spool?.flush(); } catch { return null; }
-    const dir = this.spool?.currentSessionDir(); if (!dir) return null;
-    const out: Array<{ name: string; data: Uint8Array }> = [];
-    for (const name of ["session.meta.json", "events.jsonl"]) { try { out.push({ name, data: new Uint8Array(await fs.promises.readFile(path.join(dir, name))) }); } catch { /* absent file is simply not part of the copy */ } }
-    return out.length ? out : null;
+  /**
+   * #751 R4 — the allowlisted spool files of the current session plus the spool's sequence state, read under the
+   * spool's own write queue so the counter matches the bytes. Reads only: the live spool is not sealed, truncated or moved.
+   */
+  async opsReadSpool(sinceMs: number): Promise<import("./sessionSpool").SpoolSnapshotSource | null> {
+    try { return (await this.spool?.readForSnapshot(sinceMs)) ?? null; } catch { return null; }
   }
   /** New execution generation on the same files: cached runtime handles are dropped, nothing stored is touched. */
   async opsNewGeneration(): Promise<number> {

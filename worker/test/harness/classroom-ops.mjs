@@ -76,9 +76,14 @@ export async function localOps({ enabled = true, binding } = {}) {
   // The App freezes a copy once and keeps its binding; the fixture freezes at a fixed instant so a re-seal is the same manifest.
   const opts_now = (conn) => conn.run.ends_at;
   const metaFor = (conn, over = {}) => JSON.stringify({ schema_version: 1, session_id: 'spool-' + conn.grant_id, user: conn.student, app_version: '0.1.56', os: 'synthetic', started_at: new Date(conn.run.starts_at).toISOString(), ...over });
-  function sealBody(conn, batchId, eventsText, { meta = metaFor(conn), files, consent = { purpose: 'class_report', notice_version: 'notice-v1' } } = {}) {
+  // `spool` is what the live SessionSpool reported with the bytes (its own counter, and other sessions of this learner in
+  // the class window). Default: a healthy single session whose counter equals the last seq in the text. `spool: null`
+  // is an App build that predates the sequence contract. A committed spool always ends with a newline.
+  const lastSeqOf = (text) => Math.max(0, ...text.split('\n').map((l) => { try { const q = JSON.parse(l).seq; return Number.isSafeInteger(q) ? q : 0; } catch { return 0; } }));
+  function sealBody(conn, batchId, eventsText, { meta = metaFor(conn), files, consent = { purpose: 'class_report', notice_version: 'notice-v1' }, spool } = {}) {
+    const source = spool === null ? undefined : { sequence: { session_id: JSON.parse(meta).session_id, last_seq: spool?.last_seq ?? lastSeqOf(eventsText) }, other_sessions: spool?.other_sessions === undefined ? 0 : spool.other_sessions };
     const scope = { grant_id: conn.grant_id, class_run_id: conn.class_run_id, seat_id: conn.seat_id, student: conn.student, activity: conn.lesson ? { course_id: conn.lesson.course_id, version: conn.lesson.version } : null, run: conn.run };
-    const frozen = freezeSnapshot([{ name: 'session.meta.json', data: enc(meta) }, { name: 'events.jsonl', data: enc(eventsText) }], scope, batchId, consent, opts_now(conn));
+    const frozen = freezeSnapshot([{ name: 'session.meta.json', data: enc(meta) }, { name: 'events.jsonl', data: enc(eventsText) }], scope, batchId, consent, opts_now(conn), source);
     if (!frozen.ok) throw Error('the App would not send this: ' + frozen.code);
     return { schema: 'hps-classroom-snapshot/2', files: files ?? [{ name: 'session.meta.json', bytes: Buffer.byteLength(meta), sha256: hex(meta) }, { name: 'events.jsonl', bytes: Buffer.byteLength(eventsText), sha256: hex(eventsText) }], binding: frozen.binding };
   }
