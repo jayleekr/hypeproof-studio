@@ -80,7 +80,8 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
   afterwards (class and tokens last 12 hours); `recovery-session.json` has the URL, PID, ports and how to stop it.
   `mac-window.mjs` holds the window-driving helpers this runner uses.
   `HPS_U4_SCENARIOS=AT41` runs R0 plus diagnosis → record collection → notice from the Chalk page to the real window (A3/A4 selected
-  on purpose, A2 never) and checks that the three result cards coexist and each reaches the real app's own answer; it switches
+  on purpose, A2 never) and checks that the three result cards coexist and each reaches the real app's own answer, then clicks the
+  whole-roster finish (dry run: no card, no request; live: one card naming every seat, A1's real record verified in it); it switches
   `ops_distribute` on and gives the instructor `distribute` for that run only.
   `HPS_U4_SCENARIOS=BOARD` runs R0 plus only a board smoke of this source (served `/manage` bytes against the source file, the
   Service's `status=open` filter, A1's real connection, action availability, the help list and checkpoint-draft isolation across
