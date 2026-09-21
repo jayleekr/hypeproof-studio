@@ -86,7 +86,7 @@ export function HelpRequest(props: { view: HelpView | null; post: Post }) {
         <p className="hp-inbox-meta">아래 내용이 이 글자 그대로 저장됩니다. 비밀번호·키처럼 보이는 글자는 저장할 때 가려집니다.</p>
         {Object.entries(e.content).map(([field, text]) => <div key={field}><p className="hp-inbox-meta">{({ question: "내가 쓴 질문", prompt: "내가 AI에게 보낸 말", response: "AI의 답" } as Record<string, string>)[field] ?? field}</p><p className="hp-inbox-body" data-help-preview-field={field}>{text}</p></div>)}
         {e.truncated.length > 0 && <p className="hp-inbox-meta">길어서 앞부분 8,000자만 보냅니다.</p>}
-        <p className="hp-inbox-meta" data-help-preview-expiry="">강사는 {time(e.expiry_estimate)}까지 볼 수 있습니다(수업 참여 기간이 먼저 끝나면 그때까지). 기간이 지나면 강사도 나도 더 열 수 없습니다.</p>
+        <p className="hp-inbox-meta" data-help-preview-expiry="">강사는 {time(e.consent_expires_at * 1000)}까지 볼 수 있습니다(수업 참여 기간이 먼저 끝나면 그때까지). 기간이 지나면 강사도 나도 더 열 수 없습니다.</p>
         <p className="hp-inbox-meta">보낸 뒤에도 여기의 ‘공유 철회’로 언제든 거둘 수 있고, 철회하면 강사는 더 열 수 없습니다. 강사가 이미 읽은 것은 되돌릴 수 없습니다.</p>
         <label className="hp-help-consent"><input type="checkbox" data-help-consent="" checked={consent} onChange={(ev) => setConsent(ev.target.checked)} /> 위 내용을 이 강사에게 보내는 데 동의합니다</label>
         <div className="hp-help-actions">

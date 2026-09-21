@@ -40,9 +40,19 @@ try {
   await apply(readFileSync(new URL('../migrations/0003-classroom-sharing.sql', import.meta.url), 'utf8'));
   const who = (await db.prepare('SELECT student_id FROM class_run_seats WHERE seat_id=? AND replaced_at IS NULL').bind(seat).first()).student_id, st = await f.student(who);
   const hr = await f.request('/v1/classroom/help-recipient', 'GET', undefined, st); assert.deepEqual([hr.status, hr.json.recipient_id, hr.json.seat_id], [200, 'teacher-a', seat], hr.raw);
-  const hb = { id: 'd1-help', recipient_id: 'teacher-a', kind: 'help', consent: true, duration_minutes: 30, class_run_id: hr.json.class_run_id, grant_id: hr.json.grant_id, content: { question: 'q' } };
-  assert.equal((await f.request('/v1/classroom/shares', 'POST', { ...hb, recipient_id: 'teacher-b' }, st)).status, 409); assert.equal((await f.request('/v1/classroom/shares', 'POST', hb, st)).status, 201); assert.equal((await f.request('/v1/classroom/shares', 'POST', hb, st)).status, 200, 'same-envelope retry');
-  assert.equal((await f.request('/v1/classroom/shares', 'POST', { ...hb, duration_minutes: 60 }, st)).status, 409, 'a changed expiry is a conflict on D1 too');
+  // The preview's Service-signed end (help-recipient with request_id + duration) goes back with the POST and is what D1 stores.
+  const signed = async (id) => { const k = (await f.request(`/v1/classroom/help-recipient?request_id=${id}&duration_minutes=30`, 'GET', undefined, st)).json; return { id, recipient_id: 'teacher-a', kind: 'help', consent: true, duration_minutes: 30, class_run_id: k.class_run_id, grant_id: k.grant_id, content: { question: 'q' }, consent_envelope: { expires_at: k.consent.expires_at, proof: k.consent.proof } }; };
+  const hb = await signed('d1-help');
+  assert.equal((await f.request('/v1/classroom/shares', 'POST', { ...hb, recipient_id: 'teacher-b' }, st)).status, 400, 'a consent is for its recipient');
+  const made = await f.request('/v1/classroom/shares', 'POST', hb, st); assert.equal(made.status, 201, made.raw); assert.equal(made.json.expires_at, hb.consent_envelope.expires_at, 'D1 stores the previewed end');
+  assert.equal((await f.request('/v1/classroom/shares', 'POST', hb, st)).status, 200, 'same-envelope retry');
+  assert.equal((await f.request('/v1/classroom/shares', 'POST', { ...hb, consent_envelope: { ...hb.consent_envelope, expires_at: hb.consent_envelope.expires_at + 600 } }, st)).status, 400, 'a moved end is refused on D1 too');
+  // The conditional INSERT itself refuses on D1: the run's D1 window is closed while the KV session still says the class runs,
+  // so every earlier read passes and only the write's guard sees it. Nothing is stored.
+  const late = await signed('d1-help-ended'), runEnd = (await db.prepare('SELECT ends_at FROM class_run_ops WHERE class_run_id=?').bind(late.class_run_id).first()).ends_at;
+  await db.prepare('UPDATE class_run_ops SET ends_at=? WHERE class_run_id=?').bind(Date.now() - 1000, late.class_run_id).run();
+  const refused = await f.request('/v1/classroom/shares', 'POST', late, st); assert.deepEqual([refused.status, refused.json.reason], [403, 'no_active_class'], refused.raw);
+  assert.equal((await db.prepare("SELECT count(*) AS n FROM classroom_shares WHERE id='d1-help-ended'").first()).n, 0); await db.prepare('UPDATE class_run_ops SET ends_at=? WHERE class_run_id=?').bind(runEnd, late.class_run_id).run();
   await db.prepare("INSERT INTO ops_issuer_fences(issuer_jti,state,reason,recorded_by,created_at,updated_at) SELECT issuer_jti,'revoked','t','t',0,0 FROM ops_grants WHERE kind='connection' AND state='active'").run();
   assert.equal((await f.request('/v1/classroom/help-recipient', 'GET', undefined, st)).json.reason, 'instructor_revoked'); await db.prepare('DELETE FROM ops_issuer_fences').run();
   const r1 = await f.sync(credential, [f.event(1, 'runtime', { status: 'running' }), f.event(2, 'error', { class: 'network', blocking: false })], n); assert.equal(r1.status, 200, r1.raw); assert.equal(r1.json.ack.contiguous_seq, 2);
