@@ -1070,3 +1070,37 @@ NOT RUN: 실제 강사·학생, Windows, 학교망, 여러 실제 기기, stagin
 남은 한계: 도움 요청 페이지는 강사가 요청한 만큼만(10초마다 최대 10쪽) 다시 읽는다. `counts`는 요청 수이고 학생 수는 불러온 행에서만 센다(일부만 읽힌 경우 하한).
 원격 조치 플래그 변경은 명단 개정 번호를 올려 목록 선택을 비운다(기존 동작, 이번에 바꾸지 않음).
 NOT RUN: 실제 강사·학생, Windows, 학교망, staging/production D1·R2, 실제 모델·메일, 스크린리더 실사용, 전체 빌드. 사용자 시각 피드백 전이며 인수가 아니다.
+
+<a id="instructor-ui-integration-followup2-run-20260922"></a>
+
+### 통합 후속 2 — Codex F2b·F1b · Mac 강사 보드 스모크 · 2026-09-22 (로컬 · 합성 · 인수 아님)
+
+기준 `883136e`(통합 후속 최종), 제품·실기 source `6cc3476`. Codex 증거: `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-codex/`(`followup-review.json`).
+위 절의 ‘남은 한계: 10초마다 최대 10쪽’은 이 절로 대체된다.
+
+| 검사 | 결과 |
+|---|---|
+| 재현(`883136e`) | Codex `pagination-reachability-probe.mjs`: 새 답변함 1000건 뒤의 오래된 이번 수업 접수 1건 — 10쪽 뒤 ‘1건 (이 화면에 0건)’·`다시 확인`만, Service 커서로는 닿음 — REPRODUCED. `checkpoint-isolation-probe.mjs`: 강사 A의 보내지 않은 확인 지점 메모가 연결 해제·강사 B 연결 뒤 같은 좌석에 남음(질문은 비워짐) — REPRODUCED |
+| 수정 후 Codex 프로브 | `checkpoint-isolation-probe.mjs` PASS(메모·질문 모두 빈 값). `pagination-reachability-probe.mjs` 원본은 이제 첫 조회가 완결이라 ‘최근 100건만’ 대기에서 시간 초과 — 단언 조건(열 수 있는 요청 또는 다음 조치)은 아래 v2가 판정 |
+| 도달성 프로브 v2(`checks/pagination-reachability-probe-v2.mjs`, 같은 고정 데이터·head 무관, 제공되는 ‘더 오래된’ 조치를 끝까지 누름) | 새 화면+새 Service: 클릭 0회, `요청 열기` 1 — PASS · 새 화면+`883136e` Service(`status` 무시): 창 이동 10회 뒤 `요청 열기` 1·`최신 요청부터 보기` — PASS · `883136e` 화면: 9회 뒤 `다시 확인`만, `요청 열기` 0 — FAIL(대조군) |
+| `worker` `test:classroom` 추가 검사 | 이번 수업 도움 요청 1001건(답변함 1000+접수 1): 필터 없이 11쪽째에야 닿음 · `status=open` 첫 쪽에 그 1건, `counts` {1001,1,1000} 유지 · `limit=1`로 열린 요청 2건을 같은 커서로 이어 읽음 · `status=answered`·빈 값 400 — PASS (12개) |
+| `ops-help.mjs` 5절(갱신) | 도움 요청 조회가 모두 `status=open` · 부분 조회 문구가 열린 요청 행 수(2건) 기준 — PASS |
+| `ops-help.mjs` 4·6·7절(보강, F1b) | 확인 지점 메모: 좌석이 다른 학생에게 가면 빈 값, 원래 학생이 돌아오면 복귀, 같은 강사의 실시간 재그리기·플래그 끔/켬에 유지 — PASS |
+| `ops-help.mjs` 8절(신규, F1b) | 연결 해제→다른 강사: 메모·질문 빈 값 · 같은 강사 재연결도 빈 값(초안은 그 연결에만 있음) — PASS |
+| `ops-help.mjs` 9절(신규, F2b) | 9a 실제 쪽 크기: 답변함 1000건 앞의 오래된 접수가 첫 조회에 `요청 열기`로 · 9b 도움 요청 쪽 크기 2(요청 URL만 바꿈, Service 실물): 2→4→6건, 창 이동 뒤 가장 오래된 요청 도달·열기, 창 하나의 갱신 = 도움 요청 조회 1회(창 시작 커서), 새 요청 추가·창 안 요청 철회에도 자리 유지·열린 기록과 쓰던 답 유지, 창 쪽 503 → 확인 불가·창 유지 → 복구 시 같은 창, `최신 요청부터 보기` · 9c 일반 공유 목록(1000건 초과, 쪽 100): 끝까지 이동해 본 id 수 = Service `counts.matched`, 렌더 최대 300행, `최신 기록부터 보기` — PASS |
+| 대조군 | `opsReset`의 `checkpointDraft.clear()` 한 줄만 되돌림 → 8절 FAIL · `883136e`의 `manage.html` → 5절 FAIL · `883136e`의 `classroom.ts` → `test:classroom` FAIL·`ops-help` 5절 FAIL |
+| 변경 범위 회귀 | `worker` typecheck·`test:classroom`·`test:classroom:d1`·`test:classroom-ops`·`test:cohort-routes` · `chalk` typecheck·`npm test`·`test:classroom`·`test:classroom-ops` · e2e `ops-help`·`ops`·`ops-roster`·`ops-selection`·`ops-distribution`·`ops-lesson-settings`·`run` — PASS |
+
+**실제 Mac 강사 보드 스모크(R0+BOARD, source `6cc3476`)** — `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-board HPS_U4_SERVICE_PORT=18863 HPS_U4_BOARD_PORT=18864 HPS_U4_DEBUG_PORT=9463 HPS_U4_SCENARIOS=BOARD` `mac-recovery.mjs`.
+devhost 폴더는 통합본 폴더의 APFS 클론(공식 셸 0.1.56 복사본, 확장 source `31fc27b` — 이후 확장 소스 변경 없음을 러너가 대조, Agent SDK 0.3.207). PASS:
+실제 창이 연결·실제 SDK 턴 완료(R0) → 보드가 제공한 `/manage` 바이트 sha256 = 소스 파일(`97860631…`) · 같은 프로세스 Service가 `filter.status:'open'` 응답 ·
+A1 연결 `active`, 행 ‘입장: 준비 완료 … 마지막 신호: 방금’, 상단 ‘연결됨’ · 조치 가능: `질문 보내기`(주요 CTA)·`확인할 지점 표시` 활성 · 학생 도움 요청 1건(학생 경로 `/v1/classroom/shares`, 합성 토큰으로 이 러너가 만듦 — 앱의 도움 요청 입구는 NOT RUN)이
+‘응답할 도움 요청 1건 · 학생 1명’ · 확인 지점 메모: 같은 강사 갱신에 유지, 강사 B 연결에 빈 값 · 학생 창의 초안·답 1건·작업 파일 불변. 복구 조치는 누르지 않았다.
+보존: 기존 러너 12662/앱 12677(18861/18862/9461, `31fc27b` 적재 — 현재 Chalk·Service 증거 아님)과 그 폴더·토큰, 18841·18951·18792는 건드리지 않았다. R4/R7은 확장 소스가 같아 기존 증거를 그대로 쓴다.
+
+증거(새 폴더): `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-followup2-20260921T195328/` — `fixture-captures/`(9절 창 이동 데스크톱·390, 일반 목록 마지막 창), `mac-board/`(보드 2장·학생 창 1장·`result.json`), `checks/`(재현·대조군·검사 로그), `manifest.json`·`gallery.html`.
+합성 미리보기 18971은 새 코드로 재기동했다(이전 PID 26272의 토큰·manifest는 `e2e/test-results/ui-review-preview/*.pid26272-*`로 보존).
+
+남은 한계: 창을 옮긴 동안 더 새로운 요청은 목록에 없고(수는 `counts`로 정확, `최신 요청부터 보기`로 복귀) 옮긴 창은 완결이 아니므로 그 사이 철회된 열린 기록은 저장 시 404로만 드러난다.
+10초 갱신 중에 누른 ‘더 오래된/최신’은 그 갱신이 끝난 다음 갱신(최대 10초)에 반영된다(기존 동작). 새 수업으로 바뀌어도 열려 있던 좌석 상세는 조치만 막힌 채 남는다(F1의 조회 실패 규칙, 이번에 바꾸지 않음).
+NOT RUN: 앱의 도움 요청 입구, 실제 강사·학생, Windows, 학교망, staging/production D1·R2, 실제 모델·메일, 스크린리더 실사용, 전체 빌드, 사용자 시각 승인. 인수가 아니다.
