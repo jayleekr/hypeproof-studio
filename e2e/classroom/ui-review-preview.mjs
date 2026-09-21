@@ -32,7 +32,7 @@ const rows = ['A', 'B', 'C', 'D'], seats = rows.flatMap((r, ri) => Array.from({ 
 await setRoster(local.env.HPS_KV, local.cohort, seats.map((s) => s.student_id)); await local.freeze();
 const FLAGS = { ops_observe: true, ops_commands: true, ops_collect: true, ops_reports: true, ops_distribute: true, ops_lesson_settings: true };
 const configured = await local.configure(seats, 0, { flags: FLAGS }); if (configured.status !== 201) throw Error('configure: ' + configured.raw);
-const teacher = (await issueIssuer({ issuer: 'teacher-ui', scopes: [{ cohort: local.cohort, profiles: [local.profile], ops: [...OPS_ALL, 'distribute', 'lesson_settings'] }] }, 8, TEST_SECRET)).token;
+const teacher = (await issueIssuer({ issuer: 'teacher-a', /* the seats are paired by teacher-a (local.pair); only the assigned instructor receives shares (AT-47) */ scopes: [{ cohort: local.cohort, profiles: [local.profile], ops: [...OPS_ALL, 'distribute', 'lesson_settings'] }] }, 8, TEST_SECRET)).token;
 writeFileSync(path.join(out, 'instructor-token.txt'), teacher + '\n', { mode: 0o600 });
 
 const CAPS = ['observe', 'observe_step', 'observe_runtime', 'observe_evidence', 'commands', 'retry_diagnostics', 'reset_runtime', 'send_question', 'retry_evidence_upload', 'distribution_inbox'];
@@ -85,7 +85,7 @@ local.db.prepare("UPDATE ops_latest_state SET last_received_at=? WHERE seat_id='
 //   open now: B2 synth-08 (a working seat), C2 synth-14 (also a confirmed fault), C6 synth-18 (quiet — asked, then went silent);
 //   not open: A5 synth-05 answered and waiting for the learner, A6 synth-06 resolved by the learner, B1 synth-07 withdrawn,
 //   B3 synth-09 expired, B4 synth-10 asked in an earlier class; B6 synth-12 is a submission, not a help request.
-const share = async (sid, kind, content) => { const t = await local.student(sid), id = crypto.randomUUID(); const r = await local.request('/v1/classroom/shares', 'POST', { id, recipient_id: 'teacher-ui', kind, consent: true, duration_minutes: 480, content }, t); if (r.status !== 201 && r.status !== 200) throw Error('share ' + sid + ': ' + r.status + ' ' + r.raw); return { id, t, revision: r.json.revision }; };
+const share = async (sid, kind, content) => { const t = await local.student(sid), id = crypto.randomUUID(); const r = await local.request('/v1/classroom/shares', 'POST', { id, recipient_id: 'teacher-a', kind, consent: true, duration_minutes: 480, content }, t); if (r.status !== 201 && r.status !== 200) throw Error('share ' + sid + ': ' + r.status + ' ' + r.raw); return { id, t, revision: r.json.revision }; };
 const answer = (s) => local.request(`/admin/cohorts/${local.cohort}/classroom/shares/${s.id}`, 'PUT', { expected_revision: s.revision, status: 'answered', feedback: '[합성] 확인할 지점을 적었습니다.', next_action: '[합성] 390px에서 다시 보기' }, teacher);
 const ask = (sid, text) => share(sid, 'help', { prompt: '[합성] ' + text });
 await share('synth-08', 'help', { prompt: '[합성] 미리보기에서 버튼이 안 보여요. 어디부터 확인하면 될까요?', verification: '[합성] 390px 화면에서 확인함' });

@@ -36,6 +36,15 @@ try {
   assert.deepEqual(connects.map((r) => r.status).sort(), [201, 403, 403, 403]);
   assert.equal((await db.prepare("SELECT count(*) AS n FROM ops_grants WHERE kind='connection' AND state='active'").first()).n, 1);
   const credential = connects.find((r) => r.status === 201).json.credential, n = connects.findIndex((r) => r.status === 201) + 1;
+  // #751 AT-47 — the help-recipient join, the D1 fence probe and the re-checked share write, on actual local workerd/D1.
+  await apply(readFileSync(new URL('../migrations/0003-classroom-sharing.sql', import.meta.url), 'utf8'));
+  const who = (await db.prepare('SELECT student_id FROM class_run_seats WHERE seat_id=? AND replaced_at IS NULL').bind(seat).first()).student_id, st = await f.student(who);
+  const hr = await f.request('/v1/classroom/help-recipient', 'GET', undefined, st); assert.deepEqual([hr.status, hr.json.recipient_id, hr.json.seat_id], [200, 'teacher-a', seat], hr.raw);
+  const hb = { id: 'd1-help', recipient_id: 'teacher-a', kind: 'help', consent: true, duration_minutes: 30, class_run_id: hr.json.class_run_id, grant_id: hr.json.grant_id, content: { question: 'q' } };
+  assert.equal((await f.request('/v1/classroom/shares', 'POST', { ...hb, recipient_id: 'teacher-b' }, st)).status, 409); assert.equal((await f.request('/v1/classroom/shares', 'POST', hb, st)).status, 201); assert.equal((await f.request('/v1/classroom/shares', 'POST', hb, st)).status, 200, 'same-envelope retry');
+  assert.equal((await f.request('/v1/classroom/shares', 'POST', { ...hb, duration_minutes: 60 }, st)).status, 409, 'a changed expiry is a conflict on D1 too');
+  await db.prepare("INSERT INTO ops_issuer_fences(issuer_jti,state,reason,recorded_by,created_at,updated_at) SELECT issuer_jti,'revoked','t','t',0,0 FROM ops_grants WHERE kind='connection' AND state='active'").run();
+  assert.equal((await f.request('/v1/classroom/help-recipient', 'GET', undefined, st)).json.reason, 'instructor_revoked'); await db.prepare('DELETE FROM ops_issuer_fences').run();
   const r1 = await f.sync(credential, [f.event(1, 'runtime', { status: 'running' }), f.event(2, 'error', { class: 'network', blocking: false })], n); assert.equal(r1.status, 200, r1.raw); assert.equal(r1.json.ack.contiguous_seq, 2);
   // Two syncs racing on the same seat state: events from both are kept, at most one loses the state CAS and is told to resend.
   const race = await Promise.all([f.sync(credential, [f.event(3, 'runtime', { status: 'idle' })], n), f.sync(credential, [f.event(4, 'runtime', { status: 'waiting_user' })], n)]);
