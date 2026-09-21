@@ -409,6 +409,39 @@ test('the mint route refuses a cohort that does not declare trial.individual', a
       assert.equal((await stillRefused.json()).error, 'profile does not support individual trials');
     } finally { child.observation = childObservation; }
 
+    // And the field this test is NAMED after, pinned.
+    //
+    // Everything above is also satisfied by a route that reads
+    // `session.requires_open_session`: all four flags (record, assess,
+    // trial.individual, requires_open_session) are true on exactly the same two
+    // profiles today, so on the shipped registry they are indistinguishable.
+    // The /v1/profile cases next door set them apart with the canary; this is
+    // the same move for the mint route. Without it, swapping the two conditions
+    // ships green — and then the day a class cohort declares
+    // `requires_open_session` (which is what the field is FOR) that cohort
+    // becomes mintable as a personal, out-of-class, minor-facing seat.
+    const childSession = child.session;
+    child.session = { ...childSession, requires_open_session: true };
+    try {
+      const wrongField = await mint({ u: 'synthetic-person', c: kids.cohort, p: kids.profile, hours: 1, native_trial: true });
+      assert.equal(wrongField.status, 400, '세션 게이트 플래그가 체험 좌석 발급을 열었다 — 두 조건이 뒤바뀌었다');
+      assert.equal((await wrongField.json()).error, 'profile does not support individual trials');
+    } finally { child.session = childSession; }
+
+    // The mirror: the declaration alone is what opens it, with the session flag
+    // absent. Otherwise the two cases above pass against a route that refuses
+    // every kids seat for some unrelated reason.
+    const childTrial = child.trial;
+    child.trial = { individual: true };
+    try {
+      await env.HPS_KV.put(`cohort:${kids.cohort}:roster`, JSON.stringify({ users: ['synthetic-person'] }));
+      const minted = await mint({ u: 'synthetic-person', c: kids.cohort, p: kids.profile, hours: 1, native_trial: true });
+      assert.equal(minted.status, 200, `trial.individual 을 켰는데 발급되지 않았다 — ${await minted.text()}`);
+    } finally {
+      child.trial = childTrial;
+      await env.HPS_KV.delete(`cohort:${kids.cohort}:roster`);
+    }
+
     // Positive control on the same route and the same issuer shape: an ordinary
     // classroom seat on that cohort still mints. Otherwise this test would also
     // pass against a route that refused everything.

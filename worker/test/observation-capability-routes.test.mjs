@@ -240,6 +240,50 @@ test('/v1/profile: recording a seat no longer requires the class to be open', as
   );
 });
 
+test('/v1/profile: `record` alone serves nothing even with the class open — ADR step 4 is NOT a profile edit', async () => {
+  // This case is here because the adversarial review of this branch caught the
+  // ADR saying the opposite.
+  //
+  // After step 2 the scope comes from the gate, and the gate is now
+  // `native_trial || requires_open_session`. So a cohort that turns `record` on
+  // and declares neither gets NO observation block — open class or not. That is
+  // the "설정은 맞는데 동작이 없는" shape, and it is what ADR step 4 would ship
+  // if it were written as one profile edit.
+  //
+  // Pinning it deliberately, not endorsing it. Where a classroom seat's
+  // observation scope comes from when its cohort does not require an open
+  // session is step 4's decision to make; whoever makes it will change this
+  // assertion, and should. Until then a green suite must not read as "record
+  // works".
+  await withCanaryProfile(
+    {
+      observation: { record: true, assess: true, format: 'hps-observation/2' },
+      session: sessionWith({ requires_open_session: false }),
+    },
+    async () => {
+      const s = await seat();               // class OPEN
+      try {
+        const res = await s.get('/v1/profile');
+        assert.equal(res.status, 200);
+        assert.equal(
+          res.body.observation,
+          undefined,
+          'record 만으로 블록이 나왔다 — 그렇다면 ADR step 4 의 막힌 지점이 바뀐 것이다. ADR 을 같이 고쳐라',
+        );
+        // The banner follows the block, so it must be silent too: telling a
+        // student to update Studio for a screen this response is not offering
+        // is the drift this branch collapsed into one decision.
+        assert.ok(
+          !String(res.body.welcome?.greeting_md ?? '').includes('이 앱 버전은 작업 관찰 화면을 지원하지 않습니다'),
+          '블록은 안 주면서 업데이트 배너만 붙였다',
+        );
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
+
 test('/v1/profile: the cohort that declares requires_open_session still gets 403 — negative control', async () => {
   // The mirror. observation entirely OFF, the new flag ON. If the route still
   // read `record`, this would be a 200 and the flag would be decorative.

@@ -18,10 +18,13 @@ export interface Profile {
    */
   observation?: {
     /**
-     * @deprecated ADR 0010 step 1. One boolean meaning four things: record,
-     * assess, `/v1/profile` session gating and individual-trial minting.
-     * Still the only field any profile sets, and still the fallback both new
-     * fields read. Removed in the ADR's last step, once every reader has moved.
+     * @deprecated ADR 0010. It meant four things — record, assess,
+     * `/v1/profile` session gating and individual-trial minting. Steps 1 and 2
+     * moved all four out: the last two now read `session.requires_open_session`
+     * and `trial.individual`, so this flag is down to being the fallback
+     * `observationCapability()` reads for `record` and `assess` on profiles
+     * that have not been rewritten. It is still the only field any profile
+     * sets. Removed in the ADR's last step, once they have been.
      */
     enabled?: boolean;
     /** Write learning events on the student's device. The drawer and the completion gate turn on with this. */

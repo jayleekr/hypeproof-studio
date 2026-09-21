@@ -186,26 +186,69 @@ ADR was written. The two profiles whose `model.default` is not an Anthropic key
 stopped by the 404 one line earlier. Measured, not reasoned — the profile probe
 is in the PR. The fix closes the hole before step 4 opens it.
 
-### Step 4 — blocked, and on more than this ADR said
+### Step 4 — blocked, and the first blocker is in the worker
 
-`record: true` by default is what Jay asked for. Two things stand in front of
-it, both about **already-installed** builds, neither fixable in the worker:
+`record: true` by default is what Jay asked for. Written as the ADR describes
+it — one profile edit — it does nothing at all.
+
+**Measured, on this branch's head.** Patch a kids cohort to
+`observation: { record: true, assess: false }` and ask `GET /v1/profile`:
+
+```
+step4 kids, class OPEN  -> {"status":200,"observation":null,"banner":false}
+step4 kids, class SHUT  -> {"status":200,"observation":null,"banner":false}
+today canary, class OPEN -> {"status":200,"observation":{"format":"hps-observation/1","scope":"52e5a079…","assess":true}}
+today canary, class SHUT -> {"status":403}
+```
+
+The scope is produced inside the session gate, and after step 2 that gate is
+`native_trial || session.requires_open_session`. A cohort that declares neither
+has no scope, and step 2's own guard then withholds the whole block rather than
+serve a scopeless one. So `record` alone is inert — the "설정은 맞는데 동작이
+없는" shape this ADR exists to end, moved rather than removed.
+
+An earlier version of this section did not say that. It listed the two
+installed-build hazards below and concluded "step 4 needs an app release first,
+not a profile edit" — a sentence written against the pre-step-2 code, on a
+branch that had just changed it. The adversarial review caught it. The
+assertion `record alone serves nothing even with the class open` in
+`observation-capability-routes.test.mjs` now pins the behaviour so the next
+reader measures it instead of believing a paragraph.
+
+**So step 4's first question is a worker question, and it is a real decision,
+not an oversight:** where does a classroom seat's observation scope come from
+when its cohort does not require an open session? `nativeObservationScope`
+hashes a `session_id`. The candidates:
+
+- fetch the active session opportunistically on `/v1/profile` — serve the block
+  during class, nothing outside it. Cheap, and it keeps `/v1/observations/context`
+  (unconditionally gated, same session source) in agreement. But it hands a
+  scope to a seat that has passed no roster, revocation or pause check, which
+  those seven cohorts currently never do on this route.
+- put the recording cohorts behind `requires_open_session` after all — which
+  re-imposes the pre-class 403 that step 2 removed, for exactly the cohorts it
+  removed it for.
+- give the scope a session-free derivation — rejected on sight: it would
+  disagree with `/observations/context`, and a client that builds a recorder
+  against one scope and a context against another drops every event.
+
+**Then, and only then, the two installed-build hazards arrive with it.** Both
+are still true, and both are properties of already-shipped Studio builds that
+no worker change can repair:
 
 1. **The results panel does not follow `assess` on a shipped build.** v0.1.56
    never reads `observation.assess` — zero occurrences of the field across its
    `extensions/hypeproof-chat` tree. `ChatPanel.tsx:590` draws the observation
    results panel on `observation.format === 'hps-observation/1'` and nothing
    else, and a cohort that declares no format is served exactly that. So a
-   cohort switched to record-without-assess still shows its learners the
+   cohort switched to record-without-assess would show its learners the
    "내 작업 돌아보기" entry and the assess button — the SX-59 violation the
    split exists to remove — and pressing it 404s. `assess: false` is correct
    for the next build and inert on this one.
-2. **Turning `record` on moves that cohort's chat history.** The presence of an
-   `observation` block flips the shipped app's history bucket from
-   `<cohort id>` to `native-<scope>` and disables the one-shot legacy
-   migration. Every existing conversation goes blank at the start of the next
-   class.
+2. **Serving an `observation` block moves that cohort's chat history.** Its
+   mere presence flips the shipped history bucket from `<cohort id>` to
+   `native-<scope>` and disables the one-shot legacy migration
+   (`chatPanelProvider.ts:660`, `:2951`). Every existing conversation goes
+   blank at the start of the next class.
 
-So step 4 needs an app release first, or a server-side rule for what old
-clients are served — not a profile edit. Step 5 (`enabled` removal) is
-unblocked and independent.
+Step 5 (`enabled` removal) is unblocked and independent of all of this.

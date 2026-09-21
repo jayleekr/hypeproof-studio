@@ -343,11 +343,14 @@ chat.get("/profile", async (c) => {
     // cohort's /2 to that app would break observation for it entirely, so the
     // cohort's declaration is a ceiling, not an order.
     //
-    // SX-59 forbids a competence score, label or verdict on any screen during
-    // work, so the observation RESULTS panel is drawn only where a cohort has
-    // opted into assessment (the trial, TUX-OBS-07) — that is what `assess`
-    // carries. Recording is a separate switch and stays on: the student is
-    // just not graded at themselves while working.
+    // SX-59, quoted rather than paraphrased because a wider paraphrase is how
+    // a citation starts meaning more than its row: "작업 중 어떤 화면에도 역량
+    // 점수·등급·'개선 필요' 배지가 없다". The observation RESULTS panel shows
+    // per-capability verdicts, so it is drawn only where a cohort has opted
+    // into assessment — the remedy the same row names ("학습 경험 프로필에서
+    // 비활성"), because the trial's own row (TUX-OBS-07) wants that screen.
+    // That opt-in is what `assess` carries. Recording is a separate switch and
+    // stays on: the student is just not graded at themselves while working.
     //
     // Decided once, above, so the block and the banner below cannot disagree.
     ...(servedObservation ? { observation: servedObservation } : {}),
