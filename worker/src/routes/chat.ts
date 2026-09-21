@@ -363,14 +363,34 @@ chat.get("/profile", async (c) => {
     series_index: profile.session.series_index,
     series_total: profile.session.series_total,
     assets_focus: profile.assets_focus,
-    welcome: lesson ? {
-      greeting_md: `오늘 수업: ${lesson.content.title}\n목표: ${lesson.content.objective}\n내 수업에서 과제와 확인 기준을 읽고 시작하세요.`,
-      example_prompts: lesson.content.steps.slice(0, 3).map(s => `${s.instructions}\n확인 기준: ${s.acceptance}`),
-    // The banner reads `servedObservation`, not `record`, for the same reason
-    // the block does: telling a student to update Studio for a screen this
-    // response is not offering them is noise, and the two answers drifting is
-    // how the P1 repair shipped a "please update" banner to every seat.
-    } : servedObservation && !isObservationFormat(c.req.header("x-hps-observation-format")) ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."} : profile.welcome,
+    // A lesson NO LONGER replaces the cohort's welcome (#1222 G4).
+    //
+    // It used to overwrite both fields wholesale. `greeting_md` is the one the
+    // client actually reads (`webview-ui/src/ChatPanel.tsx`), and for the kids
+    // cohort that string is not decoration — it is the instruction that points
+    // a child at the only affordance that works. Its own profile says why:
+    //
+    //   sk-biopharm-kids-s1.ts — "이름을 타이핑하면 세상이 안 열리고 그냥 코치
+    //   턴이 된다. 화면에서 가장 큰 글씨가 안 되는 길을 가리키면 안 되므로,
+    //   작성란 바로 위 친구 스트립을 가리킨다."
+    //
+    // Attaching a lesson replaced that with "내 수업에서 과제와 확인 기준을 읽고
+    // 시작하세요." — adult register, and it stops pointing at the friend strip.
+    // The 8-year-old is then told to read a thing the screen no longer shows.
+    //
+    // Nothing is lost by keeping the cohort's copy: the lesson's title, mission
+    // and steps already reach the student through `lesson`, which is what the
+    // mission header renders (SX-01/SX-02 put week · mission · 1–3 actions
+    // there). The replacement was a second, worse copy of the same thing.
+    //
+    // A cohort profile is the cohort's. A lesson supplies the lesson.
+    welcome: servedObservation && !isObservationFormat(c.req.header("x-hps-observation-format"))
+      // The banner reads `servedObservation`, not `record`, for the same reason
+      // the block does: telling a student to update Studio for a screen this
+      // response is not offering them is noise, and the two answers drifting is
+      // how the P1 repair shipped a "please update" banner to every seat.
+      ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."}
+      : profile.welcome,
     // #747 feature A — a frozen lesson may fix the AI's display name for this
     // seat. It is projected onto the existing ux.coach contract (fixed +
     // fallback_name) so every app version shows it through the same
