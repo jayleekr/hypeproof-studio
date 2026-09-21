@@ -7,12 +7,16 @@
 ## 0. 지금 상태
 
 - **PR #1218 은 머지됐다** → `main` 의 `f44cce3`. ADR 0010 **1단계 완료**.
-- 새 브랜치 **`feat/adr0010-step2-gate-split`** 가 push 돼 있고 커밋 4개가 올라가 있다.
-  ADR 0010 **2·3단계**. 추적 이슈는 **#1220**.
-- **PR 은 아직 안 열렸다.** `hype-pr prepare` 가 GitHub **2차 레이트 리밋**(secondary)
-  에 막혔다. 07:03 UTC 기준 08:03 UTC 리셋. 아래 §5 에 재개 절차가 있다.
+- **PR #1221 이 열려 있고 CI 18개가 전부 초록이다.** 브랜치
+  `feat/adr0010-step2-gate-split`, 추적 이슈 **#1220**. ADR 0010 **2·3단계**.
+  https://github.com/jayleekr/hypeproof-studio/pull/1221
+- 초록 중에 **`start-page-browser` 도 있다** — 로컬에 playwright 가 없어 못 돌린
+  `e2e/trial-ux` 를 CI 가 돌렸고 통과했다. `start-page.yml` path 필터에
+  `worker/src/profiles/**` 가 있어서 이 PR 로 트리거된다.
+- 리뷰어 요청까지 끝났다. **머지는 사람이 한다.**
 
 ```
+c42fc59  docs(sx): 이 문서
 d58c3ad  fix(adr,worker): 적대적 검토가 확인한 3건 수리
 bb2fba3  docs(adr): 2·3단계 구현 기록과 4단계가 실제로 막힌 지점
 473e6ae  feat(worker): 평가할 수 없는 코호트를 이름 대고 거절한다 (3단계)
@@ -139,7 +143,7 @@ scope 는 세션 게이트 **안**에서 만들어지고, 2단계 이후 그 게
 | **실기 증거 0** | 앱을 한 번도 안 띄웠다. 전부 라우트 응답 아니면 정적 단언이다. 새 409 의 한국어 문구는 화면에서 본 적이 없다 |
 | **실제 provider 호출 0** | 거절 경로만 쟀다. 성공 경로가 무엇을 내는지는 이 브랜치가 아무 말도 안 한다 |
 | **출하 빌드 주장은 `git show v0.1.56:…` 에서 읽은 것** | 출하된 소스는 맞지만, 실제로 깔린 앱을 이 워커에 물려 본 적은 없다 |
-| **`e2e/trial-ux` 로컬 미실행** | 로컬에 playwright 없음. CI 의 `start-page-browser` 잡이 돌린다 — 다만 그 워크플로 path 필터에 `worker/src/routes/**` 가 **없어서** 이 PR 로는 안 돌 수 있다 |
+| **`e2e/trial-ux` 로컬 미실행** | 로컬에 playwright 없음. **CI 에서는 돌았고 통과했다** (`start-page-browser`). path 필터의 `worker/src/profiles/**` 가 이 PR 에 걸린다. 즉 이 줄은 "내가 안 봤다"이지 "아무도 안 봤다"가 아니다 |
 | **워커의 한국어 `message` 는 어느 빌드도 안 쓴다** | 앱이 자기 문장을 만들고 코드만 괄호에 넣는다. 학생은 `(assessment_provider_mismatch)` 를 날것으로 본다. 이건 이 브랜치가 만든 게 아니라 502 때도 같았다 |
 
 `ST-VAL-ACTIVITY-CANDIDATE` · `ST-VAL-UNIFIED-ENTRY` 를 **`unknown`** 으로 올리고
@@ -147,30 +151,11 @@ followup 을 **#1217** 로 달아 둔 이유가 이것이다.
 
 ---
 
-## 5. PR 재개 절차 — 여기서 이어서 하면 된다
+## 5. hype-pr 기록 — 다음에 또 걸릴 함정
 
-준비물은 전부 만들어져 있다 (세션 스크래치패드, 경로는 아래).
+PR 은 냈다. 여기 남기는 건 **다음 사람이 같은 데서 안 멈추도록**이다.
 
-```
-scratchpad/hpr-assess-filled.json   평가서 (fingerprint 5b42a9ef… , 재실행해도 안 변했다)
-scratchpad/pr-body-draft.md         PR 본문 초안
-scratchpad/prepare-retry.py         prepare 재시도 (HTTP unknown/403 일 때만 재시도)
-scratchpad/.ghtoken                 gh auth token
-```
-
-```bash
-# 1) 리밋이 풀렸는지 확인 — rate_limit 엔드포인트는 2차 리밋에 면제라 믿으면 안 된다
-gh api repos/jayleekr/hypeprooflab/contents --jq 'length'
-# 2) prepare (fingerprint 는 안정적이라 inspect 를 다시 안 돌려도 된다)
-python3 scratchpad/prepare-retry.py
-# 3) create
-GH_TOKEN="$(gh auth token)" python3 scripts/hype-pr/pr.py create \
-  --repo jayleekr/hypeproof-studio --head feat/adr0010-step2-gate-split \
-  --title '…' --body-file scratchpad/pr-body-draft.md --author jayleekr \
-  --preparation scratchpad/hpr-receipt.json --apply
-```
-
-**이번에 새로 배운 hype-pr 함정 둘:**
+**함정 셋 (이번에 실제로 걸린 것):**
 
 - **`HTTP unknown` 은 토큰 문제만이 아니다.** 이번엔 GitHub **2차 레이트 리밋**이었다.
   같은 호출이 다음 시도에서 `HTTP 403` 으로 바뀌어서야 알았다. `gh api rate_limit` 은
@@ -178,6 +163,11 @@ GH_TOKEN="$(gh auth token)" python3 scripts/hype-pr/pr.py create \
   `gh api repos/<owner>/<repo>/contents` 를 직접 찔러라.
 - **`inspect` 한 번이 Lab 저장소까지 훑는다.** 적대적 검토에 `gh` 를 금지시켜도
   inspect·prepare 자체가 리밋을 태운다. PR 낼 계획이면 **검토와 PR 사이에 여유**를 둬라.
+  2차 리밋은 **1차 리셋(다음 정시)보다 훨씬 빨리 풀렸다** — 07:06 에 막혀서 07:17 에 풀렸다.
+  한 시간 기다리지 말고 `contents` 를 2분마다 찔러 보는 게 맞다.
+- **`gh pr edit --body-file` 은 `hype-pr` 가 붙인 `<!-- hype-pr-prepared:v1 -->` 각주를
+  지운다.** 본문을 고칠 일이 있으면 각주를 직접 다시 붙여라 — 내용은 receipt 의
+  `report` 에서 그대로 만들 수 있다 (`preparation.summary()` 와 같은 형식).
 
 평가서에서 직접 손댄 판정: `ST-IMP-MODEL-USAGE` · `ST-IMP-OPERATOR-HEALTH-AUTH` ·
 `ST-IMP-SX-P0` · `ST-IMP-UNIFIED-ENTRY` 는 `satisfied`,
