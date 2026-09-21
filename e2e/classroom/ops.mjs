@@ -57,7 +57,7 @@ try {
     await page.locator('#ops-seats').getByText(/조치: 진단 다시 실행 — 성공 — 토큰 정상/).waitFor();
     // Bulk on "needs help" + an unconnected seat: A1 has a connection but no running app, A3 has no device at all.
     await page.locator('#ops-select-help').click(); await page.locator('#ops-seats .ops-seat').nth(2).getByLabel('선택').check();
-    assert.match(await page.locator('#ops-selection').innerText(), /선택 2 \/ 전체 3석 · 전달 가능 1 · 기기 연결 없음 1/);
+    assert.match(await page.locator('#ops-selection').innerText(), /선택 2 \/ 전체 3석 \(명단 1차\) · 기기 연결됨 1 · 기기 연결 없음 1/);
     await page.locator('#ops-bulk-diagnose').click(); await page.locator('#ops-bulk-result').filter({ hasText: /A3: 기기 연결 없음 · 전달되지 않음/ }).waitFor();
     const bulk = await page.locator('#ops-bulk-result').innerText(); assert.match(bulk, /대상 2 · 성공 0 .*전달 안 됨 1 .*진행 중 1 · 아직 확정되지 않음/); assert.doesNotMatch(bulk, /모두 완료/, 'a recorded request is never shown as done');
     assert.match(bulk, /A1: 접수됨 · 기기 전달 전/);

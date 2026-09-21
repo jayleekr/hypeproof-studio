@@ -114,13 +114,46 @@ try {
   }
   ok('chalk: side pane when wide, reviewed input, drawer at 1024 / 200 % zoom / 390, keyboard open-close, focus return, 44px targets');
 
-  // ── "수업 마무리" once → collected from the real host → evaluated → waiting for review. Nothing is approved or sent. ──
+  // ── AT-37/38: one selection model → collect the class record of the SELECTED learners only (UI → Service → real host) ──
   await host.collectionConsentInteractively(); // the adult learner agrees in the app (modal stub answers "동의")
+  let selectedEvaluatorCalls = 0; local.env.HPS_CLASSROOM_EVALUATOR = 'service-anthropic'; local.env.ANTHROPIC_API_KEY = 'synthetic-not-a-key'; setEvaluatorTransport(async () => { selectedEvaluatorCalls++; return Response.json({ content: [{ type: 'text', text: '{}' }] }); });
+  const selection = () => page.locator('#ops-selection').innerText(), asked = () => local.db.prepare("SELECT count(*) n FROM ops_commands WHERE action='retry_evidence_upload'").get().n;
+  for (const [button, expected] of [['ops-select-all', /선택 30 \/ 전체 30석 \(명단 1차\) · 기기 연결됨 11 · 기기 연결 없음 19/], ['ops-select-online', /선택 11 \/ 전체 30석/], ['ops-select-offline', /선택 19 \/ 전체 30석 .* 기기 연결됨 0/], ['ops-select-help', /선택 (9|1\d|2\d) \/ 전체 30석/]]) { await page.locator('#' + button).click(); assert.match(await selection(), expected, button); }
+  await page.locator('#ops-select-none').click(); assert.match(await selection(), /선택한 좌석이 없습니다\. 선택 없이 실행되는 조치는 없습니다/); assert.equal(await page.locator('#ops-pick-collect').isDisabled(), true, 'nothing selected → nothing can be requested; the default is never everybody');
+  // S12 agreed to send the record and then went offline: selected, consenting, unreachable. (A seat that never connected has
+  // never agreed either — the Service reports that as "동의 없음", which is the stronger reason.)
+  const gone = (await local.pair('S12', 1, 12)).conn.json; assert.equal((await local.request('/v1/classroom/ops/collect/consent', 'POST', { consent: true, purpose: 'class_report', notice_version: 'notice-v1' }, gone.credential)).status, 201); assert.equal((await local.request(local.base + '/grants/' + gone.grant_id, 'DELETE')).status, 200);
+  await page.locator('#ops-check').click(); await page.waitForTimeout(800);
+  for (const id of ['S01', 'S02', 'S12']) await row(id).getByLabel('선택').check();
+  assert.match(await selection(), /선택 3 \/ 전체 30석 \(명단 1차\) · 기기 연결됨 2 · 기기 연결 없음 1 .*S01, S02, S12/);
+  await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor();
+  assert.match(await page.locator('#ops-pick-impact').innerText(), /선택 3명 중 1명에게 기록 회수를 요청합니다\. 제외 2명.*선택하지 않은 27명에게는 아무것도 요청·저장하지 않습니다\. 회수만 하며 평가 초안·발송은 시작하지 않습니다/);
+  assert.match(await page.locator('#ops-pick-preview').innerText(), /S01 · student-01 — 요청 예정[\s\S]*S02 · student-02 — 동의 없음 · 회수하지 않음[\s\S]*S12 · student-12 — 기기 연결 없음 · 요청하지 못함/); assert.equal(asked(), 0, 'the preview asked no device');
+  // Changing the selection after the preview withdraws the confirmation: what is confirmed is what was shown.
+  await row('S12').getByLabel('선택').uncheck(); assert.equal(await page.locator('#ops-pick-confirm').isHidden(), true); assert.match(await page.locator('#ops-pick-state').innerText(), /선택이 바뀌었습니다/);
+  await row('S12').getByLabel('선택').check(); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor();
+  await page.locator('#ops-pick-go').dblclick(); // a double click is one request
+  await page.locator('#ops-pick-items').filter({ hasText: /S01 · student-01 — 서버 검증됨 · 기록 순번 연속/ }).waitFor({ timeout: 30000 }).catch(async (e) => { throw Error('selected collection did not verify: ' + (await page.locator('#ops-pick-state').innerText()) + ' | ' + (await page.locator('#ops-pick-items').innerText()), { cause: e }); });
+  await page.locator('#ops-pick-state').filter({ hasText: /결과 확정/ }).waitFor({ timeout: 15000 });
+  assert.match(await page.locator('#ops-pick-state').innerText(), /선택 회수 · 대상 3명 · 서버 검증됨 1 · 진행 중 0 · 도착하지 않음 1 · 제외 1 · 선택하지 않은 27명은 요청 없음/);
+  assert.match(await page.locator('#ops-pick-items').innerText(), /S02 · student-02 — 동의 없음[\s\S]*S12 · student-12 — 기기 연결 없음/);
+  const pickBatches = local.db.prepare("SELECT b.id FROM classroom_collect_batches b JOIN classroom_collect_scopes s ON s.batch_id=b.id WHERE s.scope='targets' AND b.dry_run=0").all(); assert.equal(pickBatches.length, 1, 'double click → one batch'); assert.equal(asked(), 1);
+  const pickKeys = [...local.r2.keys()].filter((k) => k.includes(pickBatches[0].id)); assert.equal(pickKeys.length, 2); assert.ok(pickKeys.every((k) => k.includes('/student-01/')), 'objects only for the selected, consenting, connected learner: ' + pickKeys.join(' '));
+  assert.equal([...local.r2.keys()].filter((k) => /student-(02|12)\//.test(k)).length, 0, 'the excluded and the unreachable learner have no object'); assert.equal(local.db.prepare("SELECT count(*) n FROM ops_command_targets t JOIN ops_commands c ON c.id=t.command_id WHERE c.action='retry_evidence_upload' AND t.seat_id<>'S01'").get().n, 0, 'no device but S01 was asked');
+  assert.deepEqual([selectedEvaluatorCalls, local.db.prepare('SELECT count(*) n FROM classroom_report_jobs').get().n, local.db.prepare('SELECT count(*) n FROM classroom_job_outbox').get().n, await page.locator('#ops-reports').isHidden()], [0, 0, 0, true], 'collecting started no evaluation and opened no report or delivery UI');
+  await page.locator('#ops-pick-retry').click(); assert.match(await selection(), /선택 1 \/ 전체 30석 .*: S12$/, 'only the seat whose record did not arrive is selected again — not the excluded one, not everybody');
+  await page.screenshot({ path: path.join(out, 'selected-collection.png'), fullPage: true }); await page.locator('#ops-select-none').click();
+  // An instructor who may collect but not command still gets the selection — and only the collection action.
+  { const p = await browser.newPage({ viewport: { width: 1200, height: 800 } }); await p.goto(origin + '/manage'); await p.locator('#token').fill(await local.teacher('collector', ['observe', 'collect'])); await p.locator('#cohort').fill(local.cohort); await p.locator('#connect button').first().click(); await p.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await p.locator('#ops-check').click(); await p.locator('#ops-seats .ops-seat').nth(29).waitFor();
+    assert.deepEqual([await p.locator('#ops-bulk').isVisible(), await p.locator('#ops-pick-collect').isVisible(), await p.locator('#ops-bulk-diagnose').isVisible()], [true, true, false]); await p.close(); }
+  ok('chalk: all / needs-help / connected / not-connected / manual selection → preview → selected collection through the real host; unselected and excluded learners get nothing; no evaluation');
+
+  // ── "수업 마무리" once → collected from the real host → evaluated → waiting for review. Nothing is approved or sent. ──
   local.env.HPS_CLASSROOM_EVALUATOR = 'service-anthropic'; local.env.ANTHROPIC_API_KEY = 'synthetic-not-a-key'; let providerCalls = 0;
   setEvaluatorTransport(async (request) => { providerCalls++; const own = JSON.parse(request.messages[0].content).evidence_catalog.find((q) => q.basis); return Response.json({ content: [{ type: 'text', text: JSON.stringify({ findings: [{ capability: 'FRAMING', status: 'observed', claim: '확인할 조건을 먼저 정함', evidence: [{ quote_id: own.quote_id }], assistance: 'independent' }], next_experiment: '확인 조건을 두 개 적어 보기' }) }] }); });
   assert.equal(await page.locator('#ops-finish-dry').isChecked(), true, 'the safe default is a preview that requests and stores nothing'); await page.locator('#ops-finish-dry').uncheck();
   await page.locator('#ops-finish-go').click(); await page.locator('#ops-auto-state').filter({ hasText: /자동 단계가 끝났습니다 · 검수 대기 1건/ }).waitFor({ timeout: 30000 }).catch(async (e) => { throw Error('auto chain did not finish: ' + (await page.locator('#ops-auto-state').innerText()) + ' | ' + (await page.locator('#ops-finish-state').innerText()), { cause: e }); });
-  assert.equal(providerCalls, 1); assert.match(await page.locator('#ops-reports-list').innerText(), /student-01 · 6개 후보 모델 — 검수 대기/); // the real spool's record is sequence-complete, so the draft is not the 'partial' kind it was while the spool wrote no seq assert.match(await page.locator('#ops-auto-state').innerText(), /승인과 발송은 자동으로 일어나지 않습니다/);
+  assert.equal(providerCalls, 1); assert.match(await page.locator('#ops-reports-list').innerText(), /student-01 · 6개 후보 모델 — 검수 대기/); /* the real spool's record is sequence-complete, so the draft is not the 'partial' kind it was while the spool wrote no seq */ assert.match(await page.locator('#ops-auto-state').innerText(), /승인과 발송은 자동으로 일어나지 않습니다/);
   await page.locator('#ops-jobs-go').click(); await page.waitForTimeout(500); assert.equal(providerCalls, 1, 'continuing again evaluates nothing twice'); assert.equal(local.db.prepare("SELECT count(*) n FROM classroom_report_jobs WHERE state IN ('partial','review_required')").get().n, 1);
   await page.getByRole('button', { name: '초안 열기' }).click(); await page.getByRole('button', { name: '근거 확인하고 내용 승인' }).waitFor(); assert.match(await page.locator('#ops-report-view').innerText(), /예약 버튼이 모바일에서 눌리는지/);
   ok('chalk: one "수업 마무리" → real host upload → evaluation → review queue; re-running duplicates nothing');
