@@ -155,7 +155,9 @@ try {
   const stopCmd = await local.command('cancel_current_run', ['A1']); assert.ok([201, 202].includes(stopCmd.status), stopCmd.raw); const stopped = await commandDone(stopCmd.json.command_id ?? stopCmd.json.command?.id);
   assert.deepEqual([stopped.state, stopped.result_code], ['succeeded', 'run_stopped'], JSON.stringify(stopped)); await wait(() => chat.evaluate("![...document.querySelectorAll('button')].some(b=>b.textContent.trim()==='Stop')"), 'the running turn ended on screen'); await shot('06c-stopped');
   const stopNotice = (await toasts()).find((t) => t.includes('조치를 요청해')); provider = 'ok';
-  record('stop', { receipt: { state: stopped.state, result_code: stopped.result_code }, learner_notice: stopNotice ?? null, note: 'a real SDK turn, stopped by the instructor\'s command while the scripted provider withheld its answer' });
+  // A deliberate stop is not a fault: the panel names the instructor's stop and shows no connection-error banner for it.
+  const panelAfterStop = await chat.evaluate("document.body.innerText"); assert.ok(panelAfterStop.includes('강사가 지금 실행 중이던 작업을 멈췄어요'), 'the learner is told who stopped the run'); assert.ok(!panelAfterStop.includes('연결이 끊겼어요') && !panelAfterStop.includes('문제가 생겼어요'), 'a deliberate stop is not shown as a connection error');
+  record('stop', { receipt: { state: stopped.state, result_code: stopped.result_code }, learner_notice: stopNotice ?? null, panel_notice: 'instructor stop notice shown; no connection-error banner', note: 'a real SDK turn, stopped by the instructor\'s command while the scripted provider withheld its answer' });
 
   // 7 — preserving reset: conversation, files and the record survive; a new runtime generation starts
   const messagesBefore = await chat.evaluate("document.body.textContent.includes('예약 버튼이 모바일에서')&&document.body.textContent.includes('SYNTHETIC-PROVIDER-ANSWER')"), filesBefore = workHashes(); assert.ok(messagesBefore);
