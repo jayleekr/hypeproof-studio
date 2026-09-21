@@ -1,0 +1,35 @@
+{
+  "schema": "hps-session-design/1",
+  "title": "4주차 · Business model",
+  "audience": "국제고 2학년 · GlobalBuddy 팀",
+  "duration_minutes": 120,
+  "objective": "누구 주머니에서 얼마?",
+  "prerequisites": "3주차까지 확인을 마친 GlobalBuddy V1과 사용자 인용 기록",
+  "starter": "globalbuddy-v1/ (3주차 재검증본 사본, 원본 보존)",
+  "learning": {
+    "week": 4,
+    "mission": "누구 주머니에서 얼마?",
+    "completion": [
+      { "id": "c1", "text": "가격 가설을 나란히 두고 확인 조건을 먼저 적었습니다", "event": "criterion_set" },
+      { "id": "c2", "text": "실제 사람에게 묻고 답을 들은 그대로 기록했습니다", "event": "external_feedback_received" },
+      { "id": "c3", "text": "응답을 보고 가격 결정을 유지하거나 고친 이유를 적었습니다", "event": "decision_revised" }
+    ],
+    "observe": [
+      "가격을 숫자로 고정하기 전 대안을 비교하는가",
+      "사용자의 이유를 기록하는가"
+    ],
+    "never": [
+      "가짜 결제를 실제 매출로 표시하지 않는다."
+    ],
+    "evidence_types": ["criterion", "action", "decision"],
+    "source_kinds": ["interview", "link", "none"],
+    "reflection": { "changed_mind": true, "next_experiment": true }
+  },
+  "steps": [
+    { "id": "hypotheses", "title": "가격 가설 카드", "instructions": "무료, 월 구독, 학교 라이선스처럼 서로 다른 가격 가설을 카드로 나란히 적습니다. 묻기 전에 각 가설이 맞다면 무엇이 보여야 하는지도 함께 적습니다.", "hint": "가설을 하나만 적으면 비교할 것이 없어집니다.", "acceptance": "가격 가설 두 개 이상과 각각의 확인 조건이 카드에 적혀 있습니다.", "ui": "metric_board", "evidence": "criterion", "gate": "criterion_set" },
+    { "id": "reason", "title": "선택 이유", "instructions": "어느 가설부터 물어볼지 정하고 그렇게 정한 이유를 적습니다.", "hint": "가장 확인하기 쉬운 가설과 가장 중요한 가설이 다를 수 있습니다.", "acceptance": "먼저 확인할 가설 하나와 그 이유가 파일에 적혀 있습니다.", "ui": "decision_form", "evidence": "decision" },
+    { "id": "responses", "title": "실제 응답", "instructions": "실제 사용자나 구매자 후보에게 지불 의향을 묻고 답을 들은 그대로 기록합니다. 결제가 실제로 일어나지 않았다면 가상으로 표시합니다.", "hint": "\"살 것 같다\"와 \"샀다\"는 다른 기록입니다. 들은 말을 그대로 남깁니다.", "acceptance": "응답 세 건 이상이 누가·언제·실제인지 가상인지와 함께 기록돼 있습니다.", "ui": "evidence_note", "evidence": "action", "gate": "external_feedback_received" },
+    { "id": "next", "title": "다음 실험", "instructions": "응답을 보고 가격 가설을 유지할지 바꿀지 정하고 다음에 확인할 것 하나를 적습니다.", "hint": "바꾸지 않기로 했다면 그 판단의 근거가 된 응답을 지목합니다.", "acceptance": "유지 또는 변경 결정과 다음에 확인할 것 한 가지가 응답 기록과 연결돼 적혀 있습니다.", "ui": "decision_form", "evidence": "decision", "gate": "decision_revised" }
+  ],
+  "assistant": { "display_name": "코치" }
+}

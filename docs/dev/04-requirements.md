@@ -182,6 +182,19 @@ Lab #777 → [Product Intent](../PRODUCT-INTENT.md) →
 Full app rebuild and remote team collection are not prerequisites for the first
 local dogfood. Actual host support and user acceptance require retained evidence.
 
+## Learning experience first
+
+| ID | Area | Acceptance criteria | Primary paths |
+|---|---|---|---|
+| REQ-STUDIO-LEARNING-EXPERIENCE | learning-first UX (SX-01..60) | mission header and today's-work home, coach rail without answers, evidence drawer with completion and re-verification gates, boundary-only reflection, no score or badge on work screens, six-week content read from session design files | `docs/requirements/studio-learning-experience.md`, `extensions/hypeproof-chat/webview-ui/src/`, `worker/src/lib/measurement-core/`, `chalk/` |
+
+[INT-SX-00–10](../intents/studio-learning-experience.md) →
+[SX-01–60](../requirements/studio-learning-experience.md) →
+[SX-T01–T60](../testing/studio-learning-experience.md) →
+[plan and DAG](../plan/studio-learning-experience.md).
+The source philosophy is preserved in [ui-philosophy-2026-09-18](../design/ui-philosophy-2026-09-18.md)
+and is not edited by derived documents. Every SX-T row starts NOT RUN; document
+publication is not implementation and is not human acceptance.
 
 ## Remote classroom operations design
 
