@@ -70,3 +70,16 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
   real turn and records consent by itself), then `node e2e/classroom/mac-demo-board.mjs` — a visible browser signs in to the real
   Chalk board, selects A1, previews, collects, and checks from the Service's rows that the scripted seats A2/A3 (connected and
   consenting) were left untouched. `HPS_BOARD_HEADLESS=1` runs the same without keeping a window open.
+
+## Instructor UI review preview (synthetic, for looking at the screens)
+
+```sh
+node --experimental-strip-types --experimental-sqlite e2e/classroom/ui-review-preview.mjs      # 127.0.0.1:18951, until Control-C
+HPS_UI_REVIEW_OUT=<dir> node e2e/classroom/ui-review-capture.mjs                                # on a FRESH preview: it sends and collects
+```
+
+- 24 synthetic seats in mixed states; connected seats run the real device client code in-process. The instructor token is
+  synthetic (test secret, this process only) and is written to `e2e/test-results/ui-review-preview/instructor-token.txt`.
+- The capture script asserts no horizontal overflow and no token on the page, and records the primary CTAs, viewport and
+  device scale factor of every screenshot. Its "합성 데이터" badge is added by the script, not by the product.
+- Not evidence about a real class, a real Studio window, Windows, a school network, staging or production.

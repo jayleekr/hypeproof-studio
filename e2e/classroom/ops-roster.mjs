@@ -88,7 +88,7 @@ try {
   assert.match(await row('S02').innerText(), /확인 불가 \(이 앱은 단계를 보고하지 않음\)/, 'an older build is unknown, not "nothing happened"'); assert.match(await row('S30').innerText(), /기기 연결 안 됨/);
   assert.match(await page.locator('#ops-incidents').innerText(), /AI 제공자 장애 · 영향 9명 · 공통 원인일 가능성이 높아 개별 PC 초기화를 권하지 않습니다/);
   // One list, not two: learners of this run are no longer repeated in the old panel; only someone outside the run stays there.
-  assert.match(await page.locator('#merged').innerText(), /학생 30명은 아래 ‘원격 수업 운영’ 목록 한 곳에/); assert.deepEqual([await page.locator('#seats .seat').count(), await page.locator('#seats .seat:visible').count(), (await page.locator('#seats .seat:visible').innerText()).includes('student-walk-in')], [31, 1, true], 'the 30 run learners are shown once; the one learner outside the run stays in the old panel');
+  assert.match(await page.locator('#merged').innerText(), /학생 30명은 위 ‘이번 수업 학생’ 목록 한 곳에/); assert.deepEqual([await page.locator('#seats .seat').count(), await page.locator('#seats .seat:visible').count(), (await page.locator('#seats .seat:visible').innerText()).includes('student-walk-in')], [31, 1, true], 'the 30 run learners are shown once; the one learner outside the run stays in the old panel');
   ok('chalk: 30 seats, real App signals, unknown vs none, shared incident, de-duplicated list');
 
   // list + detail: side by side when wide; keyboard in and out; the list scrolls on its own
