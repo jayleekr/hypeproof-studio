@@ -63,6 +63,14 @@ export function HelpRequest(props: { view: HelpView | null; post: Post }) {
       {a.state === "unknown" && <p className="hp-rail-lesson-note" data-help-unknown="">받는 강사를 지금 확인할 수 없습니다(서버 응답 없음). 쓰던 질문은 이 기기에 남아 있고, 연결되면 다시 확인합니다.</p>}
       {a.state === "ready" && <p className="hp-inbox-meta" data-help-recipient={a.assignment.recipient_id}>받는 강사: {a.assignment.recipient_id} · 이번 수업에서 내 자리({a.assignment.seat_id})를 연결한 강사</p>}
 
+      {/* This class's requests come first: an instructor's answer is what the learner opens the panel for, and the panel is a
+          short scroll box (45vh) — below the form it was off screen (Mac H5, 2026-09-22). */}
+      {key && v.refresh.state !== "never" && v.current.length > 0 && <>
+        <p className="hp-inbox-meta">이번 수업에서 보낸 도움 요청 {v.current.length}개</p>
+        <ul className="hp-inbox-list" data-help-current="">{v.current.map((c) => <Card key={c.id} card={c} k={key} post={props.post} />)}</ul>
+      </>}
+      {key && v.refresh.state !== "never" && v.current.length === 0 && <p className="hp-inbox-meta" data-help-current="">이번 수업에서 보낸 도움 요청 0개</p>}
+
       {key && !e && a.state !== "unavailable" && d && <div className="hp-help-form">
         <label className="hp-help-label">무엇이 막혔나요? (내가 직접 쓰는 질문)
           <textarea data-help-question="" rows={3} maxLength={8000} value={d.question} onChange={(ev) => edit({ ...d, question: ev.target.value })} placeholder="예: 예약 버튼을 눌러도 아무 일도 안 일어나요" />
@@ -106,8 +114,6 @@ export function HelpRequest(props: { view: HelpView | null; post: Post }) {
       {key && v.refresh.state === "failed" && <p className="hp-rail-lesson-note" data-help-stale="">지금 상태를 확인할 수 없습니다. 아래는 {time(v.refresh.at)}에 확인한 내용입니다.</p>}
       {key && v.refresh.state === "never" && a.state !== "unavailable" && <p className="hp-rail-lesson-note" data-help-stale="">보낸 요청 목록을 아직 확인하지 못했습니다.</p>}
       {key && v.refresh.state !== "never" && <>
-        <p className="hp-inbox-meta">이번 수업에서 보낸 도움 요청 {v.current.length}개</p>
-        <ul className="hp-inbox-list" data-help-current="">{v.current.map((c) => <Card key={c.id} card={c} k={key} post={props.post} />)}</ul>
         {v.history.length > 0 && <details data-help-history=""><summary>이전 수업에서 공유한 것 {v.history.length}개 (철회만 할 수 있음)</summary>
           <ul className="hp-inbox-list">{v.history.map((c) => <Card key={c.id} card={c} k={key} post={props.post} history />)}</ul>
         </details>}

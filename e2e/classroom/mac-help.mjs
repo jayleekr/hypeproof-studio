@@ -200,7 +200,9 @@ try {
   for (let i = 0; i < 40 && !visible.both; i++) {
     const dy = visible.confirm.bottom > visible.confirm.vh || visible.feedback.bottom > visible.feedback.vh ? 120 : -120; wheel.push(dy);
     const at = await q(chat, '.hp-help', '(()=>{const b=e.getBoundingClientRect();return {x:Math.round(b.left+b.width/2),y:Math.round(Math.min(innerHeight-20,Math.max(20,b.top+40)))}})()');
-    await chat.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.x, y: at.y, deltaX: 0, deltaY: dy }); await sleep(250); visible = await onScreen();
+    // The wheel goes to the WINDOW at the panel's screen position (a wheel sent into the webview's own target did not scroll, run 2).
+    const o = await win.evaluate(() => [...document.querySelectorAll('iframe')].map((f) => f.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0).sort((p, q) => q.width * q.height - p.width * p.height).map((r) => ({ x: r.left, y: r.top }))[0]);
+    await win.mouse.move(o.x + at.x, o.y + at.y); await win.mouse.wheel(0, dy); await sleep(300); visible = await onScreen();
   }
   assert.ok(visible.both, 'the answer and 해결됐어요 could not both be brought on screen by scrolling: ' + JSON.stringify(visible));
   await shot(win, 'help-05-learner-feedback.png'); fb.on_screen = { before_scroll: beforeScroll, wheel_steps: wheel, after_scroll: visible };
