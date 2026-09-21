@@ -132,7 +132,7 @@ npm --prefix chalk run typecheck
 | AT-43 | 선택한 학생의 수업 기록 회수 (옛 표기 AT-38) | **실행됨** — Service + UI e2e + 실제 Mac 정상 경로. 기기 실패·재전송은 합성, Windows·학교망·staging D1 NOT RUN | 같은 곳 |
 | AT-44 | 공지·자료 대상 배포 (옛 표기 AT-39) | **실행됨 · 로컬 인수(2026-09-21)** — Service + 기기 + 로컬 workerd D1 + UI e2e + 실제 Mac M1(실제 창 1대, A2·A3 합성). 첫 인수 요청은 제안 커밋 경계 결함으로 반려 → 수정(`9d85718`)·회귀 추가 → **조율 측(Codex)이 독립 경합 재현과 실제 Chalk→Mac A1 선택 배포·회수·기기 회수 확인·초안 보존을 직접 확인해 로컬 범위를 인수**(그 증거는 조율 측 소유의 공통 git-dir `remote-classroom-evidence/management-20260921/u2-codex-reaccept-*-bdebdd3.*`·`u2-deferred-boundary-check-9d85718.log`에 있고 이 문서 작성 세션이 다시 실행한 것이 아니다). `bdebdd3`은 그 위의 문서·추적 커밋. **인수 범위 밖으로 남은 NOT RUN:** 같은 grant의 자동 재연결, Windows, 학교망, staging/production D1, 실제 기기 2대 이상, owner의 INT-CO-04 승인·운영 활성화. 로컬 인수는 PR 병합·운영 승인이 아니다 | [U2 실행 기록](#remote-management-u2-run-20260921) · [재인수 수정](#remote-management-u2-reaccept-20260921) |
 | AT-45 | 수업 프롬프트 대상 배포 | **구현 · 로컬 실행 PASS · 인수 전** — Service·App 단위·브라우저·실제 Mac(실제 마우스 입력). 독립 검토 뒤 P2~P5·P7을 브라우저와 실제 host에서 마무리. 운영·Windows·학교망 NOT RUN | [실행 기록](#remote-management-u3-run-20260921) · [검토 보완 기록](#remote-management-u3-review-20260921) |
-| AT-46 | 수업 설정 대상 배포 | **구현 · 로컬 실행 PASS · 인수 전** — Service·App 단위·로컬 workerd D1·브라우저·실제 Mac(agent-sdk 창 2개 + proxy-runtime 창). 독립 검토의 Service 결함 6건·화면 결함 보완, S3·S4·S9·S10·S13ⓒ를 실제 경로로 마무리. S15의 구 App 실물·p95·plan NOT RUN. 적용 시점의 운영 정책은 사용자 결정 대기(로컬 가정: 다음 질문부터) | 같은 곳 |
+| AT-46 | 수업 설정 대상 배포 | **구현 · 로컬 실행 PASS · 인수 전** — Service·App 단위·로컬 workerd D1·브라우저·실제 Mac(agent-sdk 창 2개 + proxy-runtime 창). 독립 검토의 Service 결함 6건·화면 결함 보완, S3·S4·S9·S10·S13ⓒ를 실제 경로로 마무리. S15의 구 App 실물·p95·plan NOT RUN. 적용 시점의 운영 정책은 사용자 결정 대기(로컬 가정: 다음 질문부터) · 기준 판정은 [요청 단위의 식별 연결](#remote-management-u3-basis-identity-20260921)로 다시 닫음 | 같은 곳 |
 
 **옛 표기가 남아 있는 곳(이번에는 고치지 않았다 — 시험 파일은 이 설계 세션의 소유가 아니다).** 아래 파일의 시험 제목·주석에 있는 번호는 작성 당시 표기다. U2 구현에서 시험 파일 소유권을 넘겨받을 때 제목을 새 번호로 바꾸고, 그때까지는 이 표로 읽는다.
 
@@ -827,6 +827,24 @@ Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 
 **이번에 고친 계측기 오류.** ① ‘SDK 요청의 마지막 메시지에 학생 글이 있다’는 가정(없다 — 대화 전체에서 가장 뒤의 마크로 귀속) ② 합성 stream이 첫 delta를 빠뜨려 화면 문구가 잘림 ③ 강사 조작 헬퍼가 ‘새 자료’를 건너뜀 ④ 브라우저 e2e: 가져오기 뒤 포커스는 입력창으로 돌아간다(되돌리기는 Shift+Tab으로 도달) — ‘다음 Tab이 되돌리기’라는 가정이 틀렸다 ⑤ 기준 판정 시험의 fixture가 turn만 넣고 usage 행을 넣지 않아 실제 원장과 달랐다.
 
 **여전히 NOT RUN.** Windows · 학교망 · 실제 복수 기기 · staging/production D1·R2 · 계정 plan·쿼터·지연·p95 · 실제 모델 · 실제 메일 · **Keychain을 쓰는 일반 설치본에서 두 창의 연결 공유·자동 재연결**(이 harness는 secret을 창마다 메모리에 둔다 — 설치본·기존 자격증명을 건드리지 않고는 격리해 돌릴 수 없어 실행하지 않았다) · 구 App 실물(S15) · 전역 `HPS_CLASSROOM_OPS` OFF를 실제 창의 turn 도중에 주입하는 것(연결이 끊겨 이후 단계를 오염시킨다 — Service 시험으로만). 섞인 기준의 ‘보류’는 보고서 기능의 완료가 아니다: 기준별 분할 보고서는 후속이다. U4 복구·U1b 회수 확장은 시작하지 않았다.
+
+<a id="remote-management-u3-basis-identity-20260921"></a>
+
+### U3 — 실패 요청 마스킹 보완의 실행 기록 · 2026-09-21 (로컬 · 인수 전 · 운영 아님)
+
+`e7d719a`에 대한 독립 검토가 회수 입력의 기준 판정에서 결함 하나를 더 재현했다: 실패한 집행 요청 하나가 집행 OFF 뒤의 성공 요청 하나를 개수로 가린다. 계약은 [요구 문서의 ‘요청 단위의 식별 연결’](../requirements/classroom-admin.md#remote-management-u3-20260921). 앞의 두 실행 기록은 고치지 않았다 — 그 기록의 ‘두 원장의 개수 대조’는 이 절로 대체된다.
+
+| 무엇 | 어디서 | 결과 |
+|---|---|---|
+| 검토의 HTTP 재현 그대로 | 공통 git-dir `u3-basis-failure-mask-review.mjs` — 원본 그대로 고친 소스에 | 양성 대조군(v2 성공만) `single`/allow · v2 성공 → v2 500 → OFF → v1 성공은 `unknown`/보류 — PASS. `u3-basis-rollback-review.mjs`와 `--same-second`도 그대로 PASS |
+| 회귀(실제 라우트 · 양성 대조군 먼저) | `worker/test/classroom-ops-lesson-review.test.mjs` `failure mask` | **실제 단일 기준 수업에 있는 것 전부** — 성공 1 · 한 turn의 요청 3 · provider 500 · 도중에 끊긴 stream · 같은 질문 재시도 · turn id 없는 요청 — 이 모두 v2로 기록되고(요청 행 8 = usage 행 8, 각 usage 행을 **그 요청이** 가리킴) `single`로 **보류되지 않는다**. 결함 시나리오는 허가 2 = 응답 2인데 `unknown`(음성 대조군 = `5a476f7`의 개수 규칙은 같은 입력을 single이라 함). 연결 유실 → 보류. seal 뒤에 도착한 usage 행 → 다음 경계의 verdict와 커밋 predicate가 모두 보류. 관찰 평가의 usage 행은 식별되면 single, 식별 없이는 보류(음성 대조군). 이전에 seal된 다른 입력의 행은 그대로 |
+| 기준 판정의 소비 지점 | `classroom-ops-lesson-basis.test.mjs`(5) — fixture를 실제 원장 모양(요청 행 + 연결된 usage 행)으로 | lease 직후 · evaluator/runner 입력 전 · 결과 저장·승인·전달 범위·링크 열람 · flag OFF/집행 해제/복귀 뒤 유지 · 0024 없는 DB — PASS |
+| 실제 D1에서의 식별 | `classroom-ops-lesson-settings-d1.test.mjs` | D1 batch 안의 `last_insert_rowid()`가 그 batch가 방금 쓴 usage 행임을 **join을 되읽어** 확인(가정하지 않음). 비용: T +9문장/+6행 · R +4문장/+2행 · seal 1문장, 전환된 참가자 요청 50 → 100개에 읽은 행 201 → 401(선형) · 100개 중 귀속 불가 1개 → `unknown` |
+| 집행 OFF · 구스키마 | `lesson-binding.test.mjs` `enforcement unset…nothing is written` · `…without migration 0024` | 증가분 0 · 기존 동작 — PASS |
+| 회귀 전체 | worker `npm test` · `test:classroom-ops` · `test:classroom-ops:d1` · 관찰 suite 3개 · Chalk · 확장 · 브라우저 e2e 8개 | 아래 최종 보고의 exit code |
+| 실제 Mac M2 | `mac-lesson-settings.mjs`(같은 시나리오 · Service만 바뀜 — 확장 build는 `84ec5fb` 그대로) | 실제 학생의 허가된 요청 전부가 자기 usage 행을 가리키고, 가리켜지지 않는 응답 1건은 **U3 OFF 단계(0단계)의 질문**임을 `result.json.request_ledger`로 확인 |
+
+**NOT RUN / 알 수 없는 것.** 집행이 꺼져 있던 동안의 요청인데 usage 행마저 쓰이지 못한 경우는 어디에도 흔적이 없다(기존의 기록된 손실) — 탐지했다고 쓰지 않는다. 운영 D1의 batch 동작·지연·plan·p95, Windows·학교망·실제 모델·실제 메일은 그대로 NOT RUN. 보류는 보고서 기능의 완료가 아니다.
 
 <a id="windows-field-cuesheet-20260921"></a>
 
