@@ -74,9 +74,11 @@ globalThis.fetch = async (input, init) => {
   const body = JSON.parse(String(init.body)); providerCalls.push({ at: Date.now(), model: body.model, stream: body.stream === true });
   return body.stream ? sse(body.model, ANSWER) : Response.json({ id: 'synthetic', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text: ANSWER }], stop_reason: 'end_turn', usage: { input_tokens: 12, output_tokens: 9 } });
 };
-// real HTTP between the app and the Service. The ONE fault made here: after the Service STORED a help POST, the answer is dropped.
-const wire = []; let dropNextHelpPost = false;
+// real HTTP between the app and the Service. The faults made here: after the Service STORED a help POST its answer is dropped,
+// and (at the same time) the learner's share list cannot be read — so the device cannot tell whether the request exists.
+const wire = []; let dropNextHelpPost = false, failShareReads = false;
 const server = createServer(async (req, res) => { try { const parts = []; for await (const p of req) parts.push(p); const body = Buffer.concat(parts), url = req.url.split('?')[0];
+  if (failShareReads && req.method === 'GET' && url === '/v1/classroom/shares') { wire.push({ at: Date.now(), method: 'GET', path: req.url, status: 503, injected: 'list read unavailable' }); res.writeHead(503); res.end(); return; }
   const r = await local.app.fetch(new Request('https://service.test' + req.url, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) }), local.env, { waitUntil() {}, passThroughOnException() {} });
   if (url.startsWith('/v1/classroom/shares') || url === '/v1/classroom/help-recipient') wire.push({ at: Date.now(), method: req.method, path: req.url, status: r.status });
   if (dropNextHelpPost && req.method === 'POST' && url === '/v1/classroom/shares') { dropNextHelpPost = false; wire.push({ at: Date.now(), injected: 'answer dropped after the Service stored it', status: r.status }); req.socket.destroy(); return; }
@@ -192,11 +194,13 @@ try {
   // ── H7 a lost answer: the Service stored the POST but the answer never arrives → unknown, retried with the same id, one row ──
   await setValue(chat, '[data-help-question]', 'HELP-Q2 응답이 사라져도 한 번만 저장되나요?'); await sleep(600); await press(chat, '[data-help-preview]', 'preview 2');
   const env2 = await wait(() => q(chat, '[data-help-envelope]', "e.getAttribute('data-help-envelope')"), 'second preview'); await press(chat, '[data-help-consent]', 'consent 2');
-  dropNextHelpPost = true; await press(chat, '[data-help-send]', 'send 2'); await noteIs(chat, /보냈는지 확인하지 못했습니다/);
+  dropNextHelpPost = true; failShareReads = true; await press(chat, '[data-help-send]', 'send 2'); await noteIs(chat, /보냈는지 확인하지 못했습니다/);
+  assert.ok(await q(chat, '[data-help-stale]', '1'), 'the failed list read is said, not shown as zero'); assert.match(await q(chat, '.hp-help > summary'), /보냈는지 확인 필요/);
   assert.equal(await q(chat, '[data-help-pending]', "e.getAttribute('data-help-pending')"), env2); assert.equal(db('SELECT count(*) n FROM classroom_shares WHERE id=?', env2)[0].n, 1, 'the Service did store it');
-  await shot(win, 'help-07-lost-answer.png'); await press(chat, '[data-help-retry]', 'retry'); await wait(async () => !(await q(chat, '[data-help-pending]', '1')), 'the pending request was reconciled');
+  await shot(win, 'help-07-lost-answer.png'); failShareReads = false; const postsBefore = wire.filter((w) => w.method === 'POST' && w.path?.startsWith('/v1/classroom/shares')).length; await press(chat, '[data-help-retry]', 'retry'); await wait(async () => !(await q(chat, '[data-help-pending]', '1')), 'the pending request was reconciled');
   assert.equal(db('SELECT count(*) n FROM classroom_shares WHERE id=?', env2)[0].n, 1); assert.equal(db('SELECT count(*) n FROM classroom_shares WHERE student_id=?', learners[0])[0].n, 2, 'no duplicate');
-  const retryWire = wire.filter((w) => w.path?.startsWith('/v1/classroom/shares') && w.method === 'POST'); step('H7 lost answer → unknown → same-id check adopted the stored request; exactly one row', { posts: retryWire.length });
+  const retryWire = wire.filter((w) => w.path?.startsWith('/v1/classroom/shares') && w.method === 'POST'); assert.equal(retryWire.length, postsBefore, 'the retry found it by reading — no second POST');
+  step('H7 lost answer + unreadable list → unknown (not zero, not sent) → 다시 확인 found the stored request by id; one row, no second POST', { posts: retryWire.length });
 
   // ── H8 withdraw: the learner withdraws the second request; the instructor can no longer open it ──
   await wait(() => q(chat, `[data-help-share="${env2}"]`, '1'), 'second request listed'); await press(chat, `[data-help-share="${env2}"] [data-help-withdraw]`, 'withdraw'); await noteIs(chat, /공유를 철회했습니다/);
@@ -209,8 +213,16 @@ try {
   await wait(async () => (await q(chat, '[data-help-unavailable]', "e.getAttribute('data-help-unavailable')")) === 'not_paired', 'the old learner\'s window lost its class connection', 90000);
   assert.equal(await q(chat, '[data-help-question]', '1'), null, 'the draft is not shown once the class connection is gone'); assert.equal((await helpText(chat)).includes('OLD-LEARNER-DRAFT'), false);
   await shot(win, 'help-08-seat-replaced.png');
-  const token3 = await invite(learners[2]); writeFileSync(tokenPath, token3, { mode: 0o600 }); app.kill(); await once(app, 'exit'); await sleep(1500);
-  launch(); win = await attach(); chat = await enterWork(); await connectSeat(win); await helpOpen(chat);
+  // Learner 3 enters the way a learner does on a shared PC: the app is restarted (no dev token file), and on the start page
+  // 수업에 참여하기 → the code the instructor issued → 코드 확인하기 → start.
+  const token3 = await invite(learners[2]); writeFileSync(tokenPath, '', { mode: 0o600 }); app.kill(); await once(app, 'exit'); await sleep(1500);
+  launch(); win = await attach();
+  const start = await frame('.studio-start', 'true', 120000);
+  const startButton = async (text) => { await wait(() => start.evaluate(`[...document.querySelectorAll('button')].some(x=>x.textContent.includes(${JSON.stringify(text)})&&!x.disabled)`), text);
+    await start.evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes(${JSON.stringify(text)})&&!x.disabled);b.setAttribute('data-hps-runner',${JSON.stringify(text)});})()`); await press(start, `[data-hps-runner=${JSON.stringify(text)}]`, text); };
+  await startButton('수업에 참여하기'); await press(start, '#course-code', 'the code field'); await start.send('Input.insertText', { text: token3 }); await startButton('코드 확인하기');
+  await wait(() => start.evaluate("(()=>{const b=document.querySelector('.studio-primary');return !!b&&!b.disabled})()"), 'the start button for the checked code', 60000); await press(start, '.studio-primary', 'start');
+  chat = await frame(TEXTAREA, 'true', 120000); await connectSeat(win); await helpOpen(chat);
   await wait(() => q(chat, '[data-help-recipient]', "e.getAttribute('data-help-recipient')"), 'learner 3 sees a recipient');
   const l3 = { question: await q(chat, '[data-help-question]', 'e.value'), cards: await chat.evaluate("document.querySelectorAll('[data-help-share]').length"), leaked: (await helpText(chat)).includes('OLD-LEARNER-DRAFT') || (await helpText(chat)).includes('HELP-Q1') || (await helpText(chat)).includes('HELP-FB1'), turns: await q(chat, '[data-help-turn]', '[...e.options].filter(o=>o.value).length') };
   assert.deepEqual(l3, { question: '', cards: 0, leaked: false, turns: 0 }, 'learner 3 inherits no draft, no request, no feedback and no earlier turn');
@@ -221,8 +233,8 @@ try {
   const result = { schema: 'hps-classroom-mac-help/1', at: new Date().toISOString(), source_sha: head, extension_source_sha: manifest.extension.source_sha, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256 },
     served_manage_sha256: digest(Buffer.from(await (await realFetch('http://127.0.0.1:' + boardPort + '/manage')).arrayBuffer())), manage_source_sha256: sha(path.join(repo, 'chalk/src/ui/manage.html')), service_classroom_ts_sha256: sha(path.join(repo, 'worker/src/routes/classroom.ts')),
     real: ['Studio shell copy', 'current extension build', 'Agent SDK + binary', 'ops connection (pairing code typed in the palette)', 'the help entry in the coach rail', 'Chalk /manage page', 'Service router + SQLite', 'HTTP between app and Service'],
-    made_here: ['accounts, class and tokens (synthetic)', 'model provider (scripted stand-in)', 'A2\'s help request through the Service learner route', 'one dropped answer after the Service stored a POST (local HTTP front)', 'learner 3 entering by the dev token file + an app restart'],
-    not_run: ['real model', 'Windows', 'school network', 'hosted/staging/production D1/R2', 'children / guardian consent (#1175)', 'several physical devices', 'Keychain-backed installed app', 'start-page code entry for learner 3'],
+    made_here: ['accounts, class and tokens (synthetic)', 'model provider (scripted stand-in)', 'A2\'s help request through the Service learner route', 'one dropped answer after the Service stored a POST, with the share list unreadable until the learner retried (local HTTP front)', 'learner 3 entering after an app restart by typing their issued code on the start page'],
+    not_run: ['real model', 'Windows', 'school network', 'hosted/staging/production D1/R2', 'children / guardian consent (#1175)', 'several physical devices', 'Keychain-backed installed app'],
     results, provider_calls: providerCalls.length, wire, steps };
   writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 2)); console.log('PASS — AT-47 native help loop → ' + path.join(out, 'result.json'));
   console.log('The instructor page (' + session.instructor_url + ') and the learner app stay open until ' + endsAt + '. Control-C ends the session.'); if (process.env.HPS_BOARD_HEADLESS === '1') cleanup(); await new Promise(() => {});
