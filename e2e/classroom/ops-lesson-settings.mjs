@@ -71,7 +71,7 @@ try {
   const profileOf = async (seat) => (await toService('https://service.test/v1/profile', { headers: { authorization: 'Bearer ' + token[seat] } })).json();
   /** Exactly what ClassroomOpsHost.switchPendingSetting does: the device's own index names the offer; the Service decides. */
   async function switchOn(seat) { const d = dev[seat], pending = pendingSetting((await d.store.current()).index); if (!pending) return null;
-    const r = await local.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: d.inst.app_instance_id, boot_id: d.inst.boot_id, offer_key: pending.offer_key, distribution_id: pending.distribution_id, object_id: pending.object_id, revision: pending.revision, content_hash: pending.content_hash, base_lesson_sha256: tokenLessonSha(token[seat]) }, conn[seat].credential);
+    const r = await local.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: d.inst.app_instance_id, boot_id: d.inst.boot_id, offer_key: pending.offer_key, distribution_id: pending.distribution_id, object_id: pending.object_id, revision: pending.revision, content_hash: pending.content_hash, base_lesson_sha256: tokenLessonSha(token[seat]), learner_token: token[seat] }, conn[seat].credential);
     if (r.status === 201 || r.status === 200) await d.store.commit((index) => ({ next: markSettingBound(index, { object_id: pending.object_id, revision: pending.revision, content_hash: pending.content_hash, key: r.json.binding.key, seq: r.json.binding.seq }), result: null }));
     return r; }
 

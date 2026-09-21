@@ -236,7 +236,8 @@ async function turnCaller(c: any): Promise<{ payload: TokenPayload; run: string 
 }
 chat.get('/lesson-turns/:turn', async (c) => {
   const who = await turnCaller(c); if (who instanceof Response) return who;
-  const read = who.run ? await readTurn(c.env, who.payload, who.run, c.req.param('turn')!) : { known: false as const };
+  // Looked up where the turn was admitted (any run of this cohort), not only in the run that is active now.
+  const read = await readTurn(c.env, who.payload, who.run, c.req.param('turn')!);
   if (!read.known) return c.json({ turn_id: c.req.param('turn'), state: 'unknown' });
   const row = read.row;
   return c.json({ turn_id: c.req.param('turn'), state: turnState(row), admitted: !!row, closed: !!row?.closed_at, binding_key: row?.binding_key ?? null, ...(row?.last_failure_kind ? { last_failure: row.last_failure_kind } : {}) });
@@ -246,7 +247,7 @@ chat.post('/lesson-turns/:turn/close', async (c) => {
   let b: any = null; try { b = await c.req.json(); } catch { b = null; }
   const outcome = b && typeof b === 'object' && Object.keys(b).every((k) => k === 'outcome') && (CLOSE_OUTCOMES as readonly unknown[]).includes(b.outcome) ? b.outcome as string : null;
   if (!outcome) return c.json({ error: { type: 'request', code: 'outcome', message: `outcome is one of ${CLOSE_OUTCOMES.join(', ')}` } }, 400);
-  if (!who.run || !bindingsEnforced(c.env)) return c.json({ turn_id: c.req.param('turn'), closed: false, reason: 'not_tracked' });
+  if (!bindingsEnforced(c.env)) return c.json({ turn_id: c.req.param('turn'), closed: false, reason: 'not_tracked' });
   const r = await closeTurn(c.env, who.payload, { classRunId: who.run, turnId: c.req.param('turn')!, outcome, now: Date.now() });
   return r === 'unavailable' ? c.json({ turn_id: c.req.param('turn'), closed: false, reason: 'storage' }, 503) : c.json({ turn_id: c.req.param('turn'), closed: r !== 'not_found', reason: r });
 });

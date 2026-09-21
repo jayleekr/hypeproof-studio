@@ -62,7 +62,7 @@ try {
   const conn = {}; for (const [i, s] of students.entries()) conn[s.seat_id] = (await f.pair(s.seat_id, 1, i + 1, i === 3 ? ['observe', 'commands', 'distribution_inbox'] /* A4: holds notices, nothing of U3 */ : FULL)).conn.json;
   const token = {}; for (const s of students) token[s.seat_id] = await issue({ u: s.student_id, c: f.cohort, p: f.profile, lesson: ref(V1) }, 2, TEST_SECRET);
   const KEY1 = B.tokenBindingKey(sha[V1]);
-  const switchTo = (seat, n, item, _seqHint, extra = {}) => f.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: f.instance(n).app_instance_id, boot_id: f.instance(n).boot_id, offer_key: item.offer_key, distribution_id: item.distribution_id, object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, base_lesson_sha256: sha[V1], ...extra }, conn[seat].credential);
+  const switchTo = (seat, n, item, _seqHint, extra = {}) => f.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: f.instance(n).app_instance_id, boot_id: f.instance(n).boot_id, offer_key: item.offer_key, distribution_id: item.distribution_id, object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, base_lesson_sha256: sha[V1], learner_token: token[seat].token, ...extra }, conn[seat].credential);
   async function ask(seat, { turn = KEY(), key } = {}) {
     const ctx = makeCtx();
     return withMockUpstream(() => new Response(JSON.stringify(anthropicJsonBody({ text: 'ok' })), { status: 200, headers: { 'content-type': 'application/json' } }), async (calls) => {

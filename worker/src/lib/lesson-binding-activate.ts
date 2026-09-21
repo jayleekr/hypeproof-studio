@@ -14,19 +14,45 @@ import { deliveryKey, offerKeyInput, sha256Hex, OFFER_KEY_RE } from './classroom
 import { bindingKeyInput } from './lesson-binding';
 import { bindingsEnforced } from './lesson-binding-store';
 import { parseLesson } from './classroom-ops';
+import { verify } from './tokens';
+import { isTokenRevoked } from './kv';
 
 type Db = Env['HPS_DB'];
 const KEY_RE = /^[A-Za-z0-9-]{8,64}$/, SHA_RE = /^[a-f0-9]{64}$/;
 export interface ActivateGrant { id: string; class_run_id: string; cohort_id: string; profile_id: string; seat_id: string; seat_revision: number; student_id: string; connection_epoch: number; device_registration_id: string | null; flags_json: string; lesson_json: string }
-export interface ActivateRequest { app_instance_id: string; offer_key: string; distribution_id: string; object_id: string; revision: number; content_hash: string; base_lesson_sha256: string }
+/**
+ * `learner_token` is the learner's own signed token. The lesson a switch starts FROM decides where the binding applies, so it
+ * is taken from that token after the Service verified it — never from a value the device merely states. `base_lesson_sha256`
+ * is optional and only cross-checked: a device that decodes its token differently is refused, not believed.
+ */
+export interface ActivateRequest { app_instance_id: string; offer_key: string; distribution_id: string; object_id: string; revision: number; content_hash: string; base_lesson_sha256: string | null; learner_token: string | null }
 
 export function normalizeActivate(raw: unknown): ActivateRequest | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const o = raw as Record<string, unknown>, allowed = ['app_instance_id', 'boot_id', 'offer_key', 'distribution_id', 'object_id', 'revision', 'content_hash', 'base_lesson_sha256'];
+  const o = raw as Record<string, unknown>, allowed = ['app_instance_id', 'boot_id', 'offer_key', 'distribution_id', 'object_id', 'revision', 'content_hash', 'base_lesson_sha256', 'learner_token'];
   if (Object.keys(o).some((k) => !allowed.includes(k))) return null;
   if (typeof o.app_instance_id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(o.app_instance_id) || typeof o.offer_key !== 'string' || !OFFER_KEY_RE.test(o.offer_key) || typeof o.distribution_id !== 'string' || !KEY_RE.test(o.distribution_id) || typeof o.object_id !== 'string' || !KEY_RE.test(o.object_id)) return null;
-  if (!Number.isSafeInteger(o.revision) || (o.revision as number) < 1 || typeof o.content_hash !== 'string' || !SHA_RE.test(o.content_hash) || typeof o.base_lesson_sha256 !== 'string' || !SHA_RE.test(o.base_lesson_sha256)) return null;
-  return { app_instance_id: o.app_instance_id, offer_key: o.offer_key, distribution_id: o.distribution_id, object_id: o.object_id, revision: o.revision as number, content_hash: o.content_hash, base_lesson_sha256: o.base_lesson_sha256 };
+  if (!Number.isSafeInteger(o.revision) || (o.revision as number) < 1 || typeof o.content_hash !== 'string' || !SHA_RE.test(o.content_hash)) return null;
+  if (o.base_lesson_sha256 !== undefined && (typeof o.base_lesson_sha256 !== 'string' || !SHA_RE.test(o.base_lesson_sha256))) return null;
+  if (o.learner_token !== undefined && (typeof o.learner_token !== 'string' || o.learner_token.length > 4096 || !/^[A-Za-z0-9_.-]+$/.test(o.learner_token))) return null;
+  return { app_instance_id: o.app_instance_id, offer_key: o.offer_key, distribution_id: o.distribution_id, object_id: o.object_id, revision: o.revision as number, content_hash: o.content_hash, base_lesson_sha256: (o.base_lesson_sha256 as string | undefined) ?? null, learner_token: (o.learner_token as string | undefined) ?? null };
+}
+
+/**
+ * The lesson this switch starts from, established by the Service: the learner's token is verified (signature, expiry,
+ * revocation), it must be THIS grant's learner in THIS cohort, and it must pin a lesson of the run's course. Nothing of the
+ * token is logged or stored — only the lesson hash it pins.
+ */
+async function verifiedBase(env: Env, g: ActivateGrant, req: ActivateRequest, course: string): Promise<{ sha256: string } | { reason: string }> {
+  if (!req.learner_token) return { reason: 'learner_token_required' };
+  let p: Awaited<ReturnType<typeof verify>>;
+  try { p = await verify(req.learner_token, env.HPS_SIGNING_SECRET); } catch { return { reason: 'learner_token_invalid' }; }
+  if ((p as any).role === 'issuer' || p.u !== g.student_id || p.c !== g.cohort_id) return { reason: 'learner_token_mismatch' };
+  try { if (p.jti && await isTokenRevoked(env.HPS_KV, p.jti)) return { reason: 'learner_token_invalid' }; } catch { return { reason: 'storage' }; }
+  const l = p.lesson;
+  if (!l || typeof l.sha256 !== 'string' || !SHA_RE.test(l.sha256) || l.course_id !== course) return { reason: 'learner_token_lesson' };
+  if (req.base_lesson_sha256 !== null && req.base_lesson_sha256 !== l.sha256) return { reason: 'base_mismatch' };
+  return { sha256: l.sha256 };
 }
 
 const VIEW = 'binding_key AS key,binding_seq AS seq,source,object_id,revision,course_id,version,lesson_sha256,activated_at';
@@ -39,14 +65,20 @@ export const activateHooks: { beforeCommit?: () => Promise<void> } = {};
 export async function activateBinding(env: Env, g: ActivateGrant, req: ActivateRequest, now: number): Promise<Activated> {
   const db = env.HPS_DB, no = (reason: string, final = true, status: 200 | 409 | 503 = 200): Activated => ({ recorded: false, reason, final, status });
   if (!bindingsEnforced(env)) return no('not_enforced', false, 503);
-  let t: Record<string, any> | null, latest: (View & { seat_id: string }) | null, mine: View | null;
+  const pin = parseLesson(g.lesson_json);
+  if (!pin?.course_id) return no('lesson_unavailable');
+  const base = await verifiedBase(env, g, req, pin.course_id);
+  if ('reason' in base) return base.reason === 'storage' ? no('storage', false, 503) : no(base.reason, true, 409);
+  let t: Record<string, any> | null, latest: (View & { seat_id: string; seat_revision: number; content_hash: string }) | null, mine: View | null;
   try {
     const r = await db.batch([
       db.prepare(`SELECT t.state,t.offer_key,t.device_generation,t.seat_revision,t.student_id,t.object_id,t.revision,d.content_hash,d.revoked_at,d.expires_at,ob.kind,ob.retired_at,rv.payload_json
  FROM classroom_distribution_targets t JOIN classroom_distributions d ON d.id=t.distribution_id JOIN classroom_content_objects ob ON ob.object_id=t.object_id JOIN classroom_content_revisions rv ON rv.object_id=t.object_id AND rv.revision=t.revision
  WHERE t.distribution_id=? AND t.class_run_id=? AND t.seat_id=?`).bind(req.distribution_id, g.class_run_id, g.seat_id),
-      db.prepare(`SELECT ${VIEW},seat_id FROM classroom_lesson_bindings WHERE class_run_id=? AND student_id=? ORDER BY binding_seq DESC LIMIT 1`).bind(g.class_run_id, g.student_id),
-      db.prepare(`SELECT ${VIEW} FROM classroom_lesson_bindings WHERE distribution_id=? AND seat_id=?`).bind(req.distribution_id, g.seat_id),
+      db.prepare(`SELECT ${VIEW},seat_id,seat_revision,content_hash FROM classroom_lesson_bindings WHERE class_run_id=? AND student_id=? ORDER BY binding_seq DESC LIMIT 1`).bind(g.class_run_id, g.student_id),
+      // A replay is an answer to the SAME participant about the SAME offer: run, learner, seat revision and content all have to
+      // be the caller's. The previous holder of this seat has a row under (distribution, seat) too — that one is not "mine".
+      db.prepare(`SELECT ${VIEW} FROM classroom_lesson_bindings WHERE distribution_id=? AND seat_id=? AND class_run_id=? AND student_id=? AND seat_revision=? AND object_id=? AND revision=? AND content_hash=?`).bind(req.distribution_id, g.seat_id, g.class_run_id, g.student_id, g.seat_revision, req.object_id, req.revision, req.content_hash),
     ]) as Array<{ results?: any[] }>;
     t = r[0]?.results?.[0] ?? null; latest = r[1]?.results?.[0] ?? null; mine = r[2]?.results?.[0] ?? null;
   } catch (err) { console.error('lesson binding switch: state unreadable, nothing recorded:', err); return no('storage', false, 503); }
@@ -56,13 +88,12 @@ export async function activateBinding(env: Env, g: ActivateGrant, req: ActivateR
   // The key is re-derived from the connection THIS request came in on: a key minted under an earlier login generation is stale.
   const current = await deliveryKey(offerKeyInput({ distribution_id: req.distribution_id, seat_id: g.seat_id, device_generation: t.device_generation, grant_id: g.id, connection_epoch: g.connection_epoch, object_id: t.object_id, revision: t.revision, content_hash: t.content_hash }));
   if (req.offer_key !== current || t.offer_key !== current) return no('stale_offer');
-  if (latest && latest.object_id === req.object_id && latest.revision === req.revision && latest.seat_id === g.seat_id) return { recorded: true, replayed: true, binding: latest };
+  if (latest && latest.object_id === req.object_id && latest.revision === req.revision && latest.content_hash === req.content_hash && latest.seat_id === g.seat_id && latest.seat_revision === g.seat_revision) { const { seat_id: _s, seat_revision: _r, content_hash: _h, ...view } = latest; return { recorded: true, replayed: true, binding: view }; }
   let lessonRef: any; try { lessonRef = JSON.parse(t.payload_json).lesson; } catch { lessonRef = undefined; }
-  const pin = parseLesson(g.lesson_json);
-  if (lessonRef === undefined || !pin?.course_id) return no('lesson_unavailable');
+  if (lessonRef === undefined) return no('lesson_unavailable');
   // The version must resolve NOW (frozen row + compiled policy — neither changes within a request, so this is not part of the race).
   let row: { source: 'setting' | 'base'; course_id: string; version: string; sha256: string; steps: string[]; runtime: string };
-  if (lessonRef === 'base') row = { source: 'base', course_id: pin.course_id, version: '', sha256: req.base_lesson_sha256, steps: [], runtime: '' };
+  if (lessonRef === 'base') row = { source: 'base', course_id: pin.course_id, version: '', sha256: base.sha256, steps: [], runtime: '' };
   else {
     let cohort = g.cohort_id; try { cohort = (await readOpening(env, g.cohort_id))?.template_cohort ?? g.cohort_id; } catch { cohort = g.cohort_id; }
     const lesson = await readLesson(env, cohort, lessonRef.course_id, lessonRef.version, g.profile_id);
@@ -87,7 +118,7 @@ export async function activateBinding(env: Env, g: ActivateGrant, req: ActivateR
  AND EXISTS (SELECT 1 FROM ops_seat_leases l WHERE l.grant_id=? AND l.app_instance_id=?)
  AND NOT EXISTS (SELECT 1 FROM classroom_distribution_targets n JOIN classroom_distributions nd ON nd.id=n.distribution_id WHERE n.class_run_id=? AND n.student_id=? AND n.object_id=? AND n.revision>? AND nd.revoked_at IS NULL AND n.state IN ('accepted','offered','received','reflected','no_change'))
  ON CONFLICT DO NOTHING`).bind(
-        g.class_run_id, g.student_id, g.class_run_id, g.student_id, g.seat_id, g.seat_revision, key, row.source, req.distribution_id, req.object_id, req.revision, req.content_hash, row.course_id, row.version, row.sha256, req.base_lesson_sha256, JSON.stringify(row.steps), row.runtime, g.id, g.connection_epoch, g.device_registration_id ?? '', req.app_instance_id, now,
+        g.class_run_id, g.student_id, g.class_run_id, g.student_id, g.seat_id, g.seat_revision, key, row.source, req.distribution_id, req.object_id, req.revision, req.content_hash, row.course_id, row.version, row.sha256, base.sha256, JSON.stringify(row.steps), row.runtime, g.id, g.connection_epoch, g.device_registration_id ?? '', req.app_instance_id, now,
         req.distribution_id, g.seat_id, g.seat_revision, g.student_id, current, t.device_generation, now,
         g.class_run_id, now,
         g.class_run_id, g.seat_id, g.seat_revision, g.student_id,
@@ -96,7 +127,7 @@ export async function activateBinding(env: Env, g: ActivateGrant, req: ActivateR
         g.class_run_id, g.student_id, req.object_id, req.revision),
       db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,?,'device',?,'lesson_binding_switched',?,? WHERE ${made}`).bind(g.class_run_id, g.seat_id, g.device_registration_id || g.id, JSON.stringify({ distribution_id: req.distribution_id, object_id: req.object_id, revision: req.revision, binding_key: key, source: row.source, version: row.version }), now, ...madeArgs),
       db.prepare(`SELECT ${VIEW} FROM classroom_lesson_bindings WHERE class_run_id=? AND student_id=? AND binding_key=? AND activated_at=?`).bind(...madeArgs),
-      db.prepare(`SELECT ${VIEW} FROM classroom_lesson_bindings WHERE distribution_id=? AND seat_id=?`).bind(req.distribution_id, g.seat_id),
+      db.prepare(`SELECT ${VIEW} FROM classroom_lesson_bindings WHERE distribution_id=? AND seat_id=? AND class_run_id=? AND student_id=? AND seat_revision=?`).bind(req.distribution_id, g.seat_id, g.class_run_id, g.student_id, g.seat_revision),
     ]) as Array<{ meta?: { changes?: number }; results?: View[] }>;
     // Only the row this statement actually wrote counts. A successful batch whose INSERT changed nothing recorded nothing.
     const stored = r[2]?.results?.[0];

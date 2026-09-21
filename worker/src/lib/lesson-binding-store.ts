@@ -107,24 +107,30 @@ export async function resolveEffectiveLesson(env: Env, payload: TokenPayload, o:
 
 // ── execution evidence ───────────────────────────────────────────────────────
 /**
- * Called immediately before the normalized request leaves for the provider. For the FIRST dispatch of a turn the write is
- * awaited and must land: "no dispatch on record" is only allowed to mean "nothing was executed" if the record precedes the
- * execution. If it cannot be written the caller does not call the provider. Later dispatches of the same turn add nothing.
- * The binding row's own first_dispatched_at is filled by a SECOND conditional statement of the same batch (one transaction).
+ * The LAST check before the provider is called, for EVERY request of a turn — not only the first. One conditional UPDATE
+ * is both the permission and the record: it counts this request on the turn row (`requests`, what the collection seal later
+ * compares with the usage ledger) and it changes a row only while the host has not closed the turn. `meta.changes` decides;
+ * the snapshot the gate read earlier decides nothing here (a close may have landed since — observed on the real route).
+ * Not recorded → the provider is not called, so "no dispatch row" does mean "nothing was executed".
+ *
+ * What this cannot do: a close that lands AFTER this statement does not cancel a call that is already on its way upstream.
+ * The boundary is request accepted (gate) → dispatch permitted (here) → upstream call; only the first two are the database's.
  */
 export async function recordDispatch(env: Env, turn: TurnRow | null, o: { request: string; runtime: string; model: string; now: number }): Promise<{ ok: true } | { ok: false; code: Refusal }> {
-  if (!turn || turn.first_dispatched_at !== null) return { ok: true };
+  if (!turn) return { ok: true };
   const db = env.HPS_DB, pk = [turn.class_run_id, turn.student_id, turn.turn_id];
   try {
-    const r = await db.batch([
-      db.prepare('UPDATE classroom_lesson_turns SET first_dispatched_at=?,first_dispatch_request=?,runtime=?,model=? WHERE class_run_id=? AND student_id=? AND turn_id=? AND first_dispatched_at IS NULL AND closed_at IS NULL').bind(o.now, o.request, o.runtime, o.model.slice(0, 120), ...pk),
+    const permit = db.prepare(`UPDATE classroom_lesson_turns SET requests=requests+1,first_dispatch_request=CASE WHEN first_dispatched_at IS NULL THEN ? ELSE first_dispatch_request END,
+ runtime=CASE WHEN first_dispatched_at IS NULL THEN ? ELSE runtime END,model=CASE WHEN first_dispatched_at IS NULL THEN ? ELSE model END,first_dispatched_at=COALESCE(first_dispatched_at,?)
+ WHERE class_run_id=? AND student_id=? AND turn_id=? AND closed_at IS NULL`).bind(o.request, o.runtime, o.model.slice(0, 120), o.now, ...pk);
+    // The binding's own "first attempted" is written with the turn's first dispatch, in the same batch, and only by the request that made it.
+    const r = (turn.first_dispatched_at === null && turn.binding_seq > 0 ? await db.batch([permit,
       db.prepare(`UPDATE classroom_lesson_bindings SET first_dispatched_at=? WHERE class_run_id=? AND student_id=? AND binding_seq=? AND first_dispatched_at IS NULL
  AND EXISTS (SELECT 1 FROM classroom_lesson_turns t WHERE t.class_run_id=? AND t.student_id=? AND t.turn_id=? AND t.first_dispatch_request=?)`).bind(o.now, turn.class_run_id, turn.student_id, turn.binding_seq, ...pk, o.request),
-      db.prepare('SELECT first_dispatched_at,closed_at FROM classroom_lesson_turns WHERE class_run_id=? AND student_id=? AND turn_id=?').bind(...pk),
-    ]) as Array<{ results?: Array<{ first_dispatched_at: number | null; closed_at: number | null }> }>;
-    const row = r[2]?.results?.[0];
-    // A sibling request of this turn may have recorded it first: that is the same durable fact. A turn the host closed meanwhile is not dispatched.
-    if (row && row.first_dispatched_at !== null) return { ok: true };
+    ]) : [await permit.run()]) as Array<{ meta?: { changes?: number } }>;
+    if ((r[0]?.meta?.changes ?? 0) === 1) return { ok: true };
+    // Nothing was counted: the host closed this turn meanwhile (or the row is gone). Read only to NAME the refusal.
+    const row = await db.prepare('SELECT closed_at FROM classroom_lesson_turns WHERE class_run_id=? AND student_id=? AND turn_id=?').bind(...pk).first<{ closed_at: number | null }>();
     return { ok: false, code: row?.closed_at ? 'lesson_turn_closed' : 'lesson_binding_unknown' };
   } catch (err) { console.error('dispatch not recorded — provider not called:', err); return { ok: false, code: 'lesson_binding_unknown' }; }
 }
@@ -149,26 +155,38 @@ export async function recordOutcome(env: Env, turn: TurnRow | null, outcome: Out
   } catch (err) { console.error('turn outcome not recorded — it stays "dispatched, outcome unknown":', err); }
 }
 
+/**
+ * A turn is looked up and closed where it was ADMITTED, not in whichever run happens to be active now: the cohort's runs,
+ * this learner, this turn id, this token. "No row in the active run" says nothing about a turn that ran in the previous one
+ * (observed: after a run rollover the app was told `not_started` and gave the learner their input back to send again).
+ */
+const COHORT_RUNS = '(SELECT id FROM sessions WHERE cohort_id=?1 UNION SELECT class_run_id FROM class_run_ops WHERE cohort_id=?1)';
 /** The host says its turn ended. Only the token that was admitted may close it; a closed turn id is refused from then on. */
-export async function closeTurn(env: Env, payload: TokenPayload, o: { classRunId: string; turnId: string; outcome: string; now: number }): Promise<'closed' | 'already' | 'not_found' | 'unavailable'> {
+export async function closeTurn(env: Env, payload: TokenPayload, o: { classRunId?: string | null; turnId: string; outcome: string; now: number }): Promise<'closed' | 'already' | 'not_found' | 'unavailable'> {
   try {
     const r = await env.HPS_DB.batch([
-      env.HPS_DB.prepare('UPDATE classroom_lesson_turns SET closed_at=?,close_outcome=? WHERE class_run_id=? AND student_id=? AND turn_id=? AND token_jti=? AND closed_at IS NULL').bind(o.now, o.outcome, o.classRunId, payload.u, o.turnId, tokenIdentity(payload)),
-      env.HPS_DB.prepare('SELECT closed_at FROM classroom_lesson_turns WHERE class_run_id=? AND student_id=? AND turn_id=? AND token_jti=?').bind(o.classRunId, payload.u, o.turnId, tokenIdentity(payload)),
+      env.HPS_DB.prepare(`UPDATE classroom_lesson_turns SET closed_at=?5,close_outcome=?6 WHERE class_run_id IN ${COHORT_RUNS} AND student_id=?2 AND turn_id=?3 AND token_jti=?4 AND closed_at IS NULL`).bind(payload.c, payload.u, o.turnId, tokenIdentity(payload), o.now, o.outcome),
+      env.HPS_DB.prepare(`SELECT closed_at FROM classroom_lesson_turns WHERE class_run_id IN ${COHORT_RUNS} AND student_id=?2 AND turn_id=?3 AND token_jti=?4`).bind(payload.c, payload.u, o.turnId, tokenIdentity(payload)),
     ]) as Array<{ meta?: { changes?: number }; results?: Array<{ closed_at: number | null }> }>;
-    if ((r[0]?.meta?.changes ?? 0) === 1) return 'closed';
+    if ((r[0]?.meta?.changes ?? 0) >= 1) return 'closed';
     return r[1]?.results?.[0] ? 'already' : 'not_found';
   } catch (err) { if (noSuchTable(err)) return 'not_found'; console.error('turn close not recorded:', err); return 'unavailable'; }
 }
 
-/** What the Service knows about ONE turn of THIS token. Another learner's, another run's or another token's turn is "none". */
-export async function readTurn(env: Env, payload: TokenPayload, classRunId: string, turnId: string): Promise<{ known: true; row: TurnRow | null } | { known: false }> {
+/**
+ * What the Service can say about ONE turn of THIS caller. `known: false` = it cannot say: enforcement is off, the read
+ * failed, or the turn id exists only under another token of this learner (a reissue) — never turned into "not started".
+ * `row: null` is said only after a successful read over every run of the cohort found no such turn at all.
+ */
+export async function readTurn(env: Env, payload: TokenPayload, classRunId: string | null, turnId: string): Promise<{ known: true; row: TurnRow | null } | { known: false }> {
   if (!bindingsEnforced(env)) return { known: false };
   try {
-    const row = await env.HPS_DB.prepare(TURN_SQL).bind(classRunId, payload.u, turnId).first<TurnRow>();
-    // A row admitted under ANOTHER token of this learner is not this caller's turn: that is "not known", never "not started".
-    if (row && row.token_jti !== tokenIdentity(payload)) return { known: false };
-    return { known: true, row: row ?? null };
+    const rows = ((await env.HPS_DB.prepare(`SELECT * FROM classroom_lesson_turns WHERE class_run_id IN ${COHORT_RUNS} AND student_id=?2 AND turn_id=?3 ORDER BY admitted_at DESC`).bind(payload.c, payload.u, turnId).all<TurnRow>()).results ?? []);
+    if (!rows.length) return { known: true, row: null };
+    const mine = rows.filter((r) => r.token_jti === tokenIdentity(payload));
+    if (!mine.length) return { known: false };
+    // The same turn id admitted in two runs (a turn that straddled a rollover): what was dispatched anywhere is what happened.
+    return { known: true, row: mine.find((r) => r.first_dispatched_at !== null) ?? mine.find((r) => r.class_run_id === classRunId) ?? mine[0]! };
   } catch (err) { if (!noSuchTable(err)) console.error('turn state unreadable:', err); return { known: false }; }
 }
 

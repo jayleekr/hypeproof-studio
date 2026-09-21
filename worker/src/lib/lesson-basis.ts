@@ -44,17 +44,32 @@ export async function basisTables(db: Db): Promise<boolean | 'unreadable'> {
 }
 
 /**
- * Written INSIDE the seal batch, computed in SQL so that it is atomic with the seal. `mixed` when the participant's ADMITTED
- * turns ran under more than one lesson, or when they ran under a switched lesson and had model requests before the first
- * switch (a request without a turn row is always a token-lesson request). It counts admitted-but-never-dispatched turns too:
- * it can only err towards `mixed`, and held is the safe side. Never derived from `activated_at` alone — turns of another
- * window keep running under the old basis after a switch.
+ * Written INSIDE the seal batch, computed in SQL so that it is atomic with the seal. The basis is what the participant's
+ * model requests ACTUALLY ran under, and it is established from two ledgers that are compared, not from clocks:
+ *   - the turn ledger: every request the Service permitted under an admitted turn is counted on that turn's row
+ *     (`requests`, written by the same statement that permits the provider call), and the row names the lesson;
+ *   - the usage ledger: one row per answered model request of this participant in this run, written by the existing path
+ *     whatever the lesson policy is — including while enforcement is switched off.
+ * `mixed`   = admitted turns ran under more than one lesson, or the participant was ever switched and there are answered
+ *             requests that no admitted turn accounts for while a turn ran under a switched lesson (a rollback, a request
+ *             without a turn id).
+ * `unknown` = the participant was ever switched and there are unaccounted requests, but no turn shows which lesson they
+ *             ran under. Held as well: a guess is not a basis.
+ * `single`  = everything else: one lesson among the turns and nothing unaccounted, or a participant who was never switched
+ *             (every request of theirs ran the token's lesson, turn row or not).
+ * No timestamp is compared: `usage_log.created_at` has one-second resolution and `activated_at` has milliseconds, and a
+ * request in the same second as the switch was read as "before it" (a single-basis record was held for nothing).
+ * A usage row whose session attribution was lost (the existing NULL retry) is still counted, by cohort and run window.
+ * What this cannot see: a usage row that was never written. That is an existing, logged loss and can only hide a request.
  */
 // (`WHERE 1` below is required by SQLite's grammar: after INSERT … SELECT … FROM <subquery>, a bare ON would parse as a join constraint.)
 export const sealBasisStatement = (db: Db, i: { batch_id: string; student_id: string; revision: number; class_run_id: string; now: number }) => db.prepare(`INSERT INTO classroom_input_basis(batch_id,student_id,revision,class_run_id,basis,lessons,turns,created_at)
- SELECT ?1,?2,?3,?4,CASE WHEN x.n>1 OR (x.switched>0 AND x.before>0) THEN 'mixed' ELSE 'single' END,x.n,x.t,?5 FROM (SELECT
- (SELECT COUNT(DISTINCT lesson_sha256) FROM classroom_lesson_turns WHERE class_run_id=?4 AND student_id=?2) AS n,
+ SELECT ?1,?2,?3,?4,CASE WHEN x.n>1 THEN 'mixed' WHEN x.switched=0 OR x.executed<=x.accounted THEN 'single' WHEN x.ran_switched>0 THEN 'mixed' ELSE 'unknown' END,x.n,x.t,?5 FROM (SELECT
+ (SELECT COUNT(DISTINCT lesson_sha256) FROM classroom_lesson_turns WHERE class_run_id=?4 AND student_id=?2 AND requests>0) AS n,
  (SELECT COUNT(*) FROM classroom_lesson_turns WHERE class_run_id=?4 AND student_id=?2) AS t,
- (SELECT COUNT(*) FROM classroom_lesson_turns t JOIN classroom_lesson_bindings b ON b.class_run_id=t.class_run_id AND b.student_id=t.student_id AND b.binding_seq=t.binding_seq WHERE t.class_run_id=?4 AND t.student_id=?2 AND b.source='setting' AND b.lesson_sha256<>b.base_lesson_sha256) AS switched,
- (SELECT COUNT(*) FROM usage_log u WHERE u.session_id=?4 AND u.user_id=?2 AND CAST(strftime('%s',u.created_at) AS INTEGER)*1000<(SELECT MIN(b.activated_at) FROM classroom_lesson_bindings b WHERE b.class_run_id=?4 AND b.student_id=?2 AND b.source='setting' AND b.lesson_sha256<>b.base_lesson_sha256)) AS before) x WHERE 1
+ (SELECT COALESCE(SUM(requests),0) FROM classroom_lesson_turns WHERE class_run_id=?4 AND student_id=?2) AS accounted,
+ (SELECT COUNT(*) FROM classroom_lesson_bindings b WHERE b.class_run_id=?4 AND b.student_id=?2 AND b.source='setting' AND b.lesson_sha256<>b.base_lesson_sha256) AS switched,
+ (SELECT COUNT(*) FROM classroom_lesson_turns t JOIN classroom_lesson_bindings b ON b.class_run_id=t.class_run_id AND b.student_id=t.student_id AND b.binding_seq=t.binding_seq WHERE t.class_run_id=?4 AND t.student_id=?2 AND t.requests>0 AND b.source='setting' AND b.lesson_sha256<>b.base_lesson_sha256) AS ran_switched,
+ (SELECT COUNT(*) FROM usage_log u WHERE u.user_id=?2 AND u.status BETWEEN 200 AND 299 AND (u.session_id=?4 OR (u.session_id IS NULL
+   AND u.cohort_id=(SELECT r.cohort_id FROM class_run_ops r WHERE r.class_run_id=?4) AND u.created_at>=(SELECT datetime(r.starts_at/1000,'unixepoch') FROM class_run_ops r WHERE r.class_run_id=?4)))) AS executed) x WHERE 1
  ON CONFLICT(batch_id,student_id,revision) DO NOTHING`).bind(i.batch_id, i.student_id, i.revision, i.class_run_id, i.now);

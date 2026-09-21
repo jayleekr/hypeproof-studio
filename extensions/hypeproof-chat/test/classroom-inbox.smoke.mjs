@@ -171,5 +171,18 @@ try {
     assert.deepEqual([readFileSync(path.join(root, "learner-work.txt"), "utf8"), readdirSync(root).sort()], ["mine", ["classroom-inbox", "learner-work.txt"]], "nothing outside classroom-inbox/ was created or changed");
   });
 
+  await check("two windows of one learner: a REPLACED connection does not hide the inbox the newer connection owns (seen on the real Mac: board 'reflected', no inbox in either window)", async () => {
+    const first = { run: "r", seat: "A1", student: "s", hidden: false, grant: "g1" }, second = { ...first, grant: "g2" };
+    assert.equal(inbox.mayHideInbox(first, "g1"), true, "control: the device whose own connection was closed for good hides its inbox (U2 contract: seat re-assigned, revoked, replaced by ANOTHER device)");
+    assert.equal(inbox.mayHideInbox(second, "g1"), false, "window 2 paired with a new code and owns the pointer: window 1's late 'I was replaced' hides nothing");
+    assert.equal(inbox.mayHideInbox({ run: "r", seat: "A1", student: "s", hidden: false }, "g1"), true, "a pointer written before this rule keeps the old behaviour");
+    assert.equal(inbox.mayHideInbox(undefined, "g1"), false); assert.equal(inbox.mayHideInbox({ ...first, hidden: true }, "g1"), false);
+    const wrong = (p) => !!p && !p.hidden; /* negative control: the U2 rule — any final refusal hides the shared pointer */ assert.equal(wrong(second), true); assert.notEqual(wrong(second), inbox.mayHideInbox(second, "g1"), "the control is caught");
+    // the live connection is authoritative for its own window and repairs what a stale window wrote
+    const live = { grant: "g2", run: "r", seat: "A1", student: "s" };
+    assert.equal(inbox.pointerIsStale({ ...first, hidden: true }, live), true, "window 1's stale write (hidden, g1) over window 2's pointer is repaired"); assert.equal(inbox.pointerIsStale(second, live), false);
+    assert.equal(inbox.pointerIsStale(undefined, live), true); assert.equal(inbox.pointerIsStale({ ...second, student: "other" }, live), true);
+  });
+
   console.log(`\n${count} inbox checks passed`);
 } finally { for (const d of dirs) rmSync(d, { recursive: true, force: true }); }

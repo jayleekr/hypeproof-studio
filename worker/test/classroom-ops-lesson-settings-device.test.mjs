@@ -64,7 +64,7 @@ try {
   const profile = async () => (await (await f.app.fetch(new Request('https://service.test/v1/profile', { headers: { authorization: 'Bearer ' + token.token } }), f.env, makeCtx())).json());
   const before = await profile(); assert.equal(before.lesson.version, V1);
   // exactly what ClassroomOpsHost.switchPendingSetting sends
-  const sw = await f.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: A.inst.app_instance_id, offer_key: pending.offer_key, distribution_id: pending.distribution_id, object_id: pending.object_id, revision: pending.revision, content_hash: pending.content_hash, base_lesson_sha256: tokenLessonSha(token.token) }, connA.credential);
+  const sw = await f.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: A.inst.app_instance_id, offer_key: pending.offer_key, distribution_id: pending.distribution_id, object_id: pending.object_id, revision: pending.revision, content_hash: pending.content_hash, base_lesson_sha256: tokenLessonSha(token.token), learner_token: token.token }, connA.credential);
   assert.equal(sw.status, 201, sw.raw);
   const result = { state: 'switched', key: sw.json.binding.key, seq: sw.json.binding.seq, object_id: pending.object_id, revision: pending.revision, content_hash: pending.content_hash, lesson: pending.lesson };
   const plan = planPreflight(before.lesson_binding, result, null); assert.equal(plan.action, 'adopt');

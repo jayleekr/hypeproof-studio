@@ -210,3 +210,16 @@ export function inboxPresence(o: { connected: boolean; expired: boolean; ends_at
   const ended = o.expired || (o.ends_at > 0 && o.now >= o.ends_at);
   return { ended, offline: !ended };
 }
+
+// ── which connection may hide the inbox that every window of this app shares (#751 U3 review 0) ──
+export interface InboxOwner { run: string; seat: string; student: string; hidden: boolean; grant?: string }
+/**
+ * A connection that was closed for good hides the inbox only while the shared pointer is still ITS pointer. A pointer written
+ * by a newer connection of the same learner (a second window paired with a new code) is not this connection's to hide.
+ * A pointer without `grant` predates this rule and keeps the old behaviour.
+ */
+export const mayHideInbox = (pointer: InboxOwner | undefined, closedGrant: string): boolean => !!pointer && !pointer.hidden && (pointer.grant === undefined || pointer.grant === closedGrant);
+/** Does the shared pointer say what this window's LIVE connection says? If not, the live connection wins and repairs it. */
+export const pointerIsStale = (pointer: InboxOwner | undefined, live: { grant: string; run: string; seat: string; student: string }): boolean =>
+  !pointer || pointer.hidden || pointer.grant !== live.grant || pointer.run !== live.run || pointer.seat !== live.seat || pointer.student !== live.student;
+

@@ -1,6 +1,7 @@
 // Remote classroom operations (#751, U3) — what lesson settings cost and whether their conditional batches hold, measured on
 // actual LOCAL workerd/D1 (miniflare), not the SQLite shim. Quantities are kept apart because they are not each other:
-//   T  a learner question the Service ADMITS (one turn row)            R  a model/SDK request of a turn (auxiliary, tool loop)
+//   T  a learner question the Service ADMITS (one turn row)            R  a later model/SDK request of a turn (auxiliary, tool loop):
+//                                                                          its dispatch permission is one counted UPDATE (1 row written)
 //   E  execution evidence written for a request (dispatch, outcome)    B  one instructor board refresh
 // R is not T: the pinned Agent SDK sends an auxiliary request before the main loop under the SAME turn id, so a question is
 // one T and several R. D1's own `meta.rows_read` / `meta.rows_written` are what is reported (rows scanned, rows written
@@ -71,6 +72,7 @@ try {
   const L = await f.teacher('teacher-l', [...OPS_ALL, 'distribute', 'lesson_settings']);
   const token = async (s) => (await issue({ u: s.student_id, c: f.cohort, p: f.profile, lesson: { course_id: course, version: V1, sha256: sha[V1] } }, 2, TEST_SECRET)).token;
   const KEY1 = B.tokenBindingKey(sha[V1]);
+  const minted = new Map(), tokenOf = async (u) => { if (!minted.has(u)) minted.set(u, await token({ student_id: u })); return minted.get(u); };
   async function ask(tok, { turn = KEY(), key, path = '/v1/messages' } = {}) {
     const ctx = makeCtx();
     return withMockUpstream(() => new Response(JSON.stringify(anthropicJsonBody({ text: 'ok' })), { status: 200, headers: { 'content-type': 'application/json' } }), async (calls) => {
@@ -128,11 +130,17 @@ try {
   const turnRow = await one('SELECT * FROM classroom_lesson_turns WHERE turn_id=?', turn);
   assert.ok(turnRow.first_dispatched_at && turnRow.first_completed_at && turnRow.closed_at, 'admitted, dispatched, completed and closed are all on the ONE turn row');
   assert.equal((await one('SELECT count(*) n FROM classroom_lesson_turns WHERE student_id=?', seat.student_id)).n, 1, 'two requests of one turn are one T; a refusal admits nothing');
-  assert.ok(T.statements <= 10 && T.rows_written <= 5, 'T: ' + JSON.stringify(T)); assert.ok(R.statements <= 2 && R.rows_written === 0, 'R writes no new turn and no second dispatch record: ' + JSON.stringify(R));
+  assert.ok(T.statements <= 8 && T.rows_written <= 5, 'T: ' + JSON.stringify(T)); assert.ok(R.statements <= 3 && R.rows_written === 1, 'R = the gate\'s read batch + ONE conditional UPDATE that is both the last permission check and the request count: ' + JSON.stringify(R));
+  assert.ok(state.cost.statements === 1 && state.cost.rows_written === 0 && close.cost.statements === 2 && close.cost.rows_written === 1, 'a turn is read and closed where it was admitted (the cohort\'s runs), in one and two statements');
   assert.equal(profile.cost.rows_written, offProfile.cost.rows_written, 'reading a profile writes nothing'); assert.ok(profile.cost.statements - offProfile.cost.statements <= 2);
   assert.ok(first.cost.statements <= 45, 'a whole model request stays under D1\'s 50 queries per invocation (Free plan)');
   assert.equal(refused.cost.rows_written - 0 <= offReq.cost.rows_written, true, 'a refusal writes no evidence');
-  console.log('PASS local D1: T = one turn row + first-dispatch + outcome; R adds reads only; profile/state reads write nothing');
+  // The seal's basis statement: two ledgers compared (turn rows of this participant + their answered usage rows), one written row.
+  const { sealBasisStatement } = await import('../src/lib/lesson-basis.ts');
+  const seal = await measured(async () => { await sealBasisStatement(db, { batch_id: 'd1-seal-probe', student_id: seat.student_id, revision: 1, class_run_id: f.run, now: Date.now() }).run(); return (await one("SELECT basis,lessons,turns FROM classroom_input_basis WHERE batch_id='d1-seal-probe'")); });
+  console.log(`  seal basis statement (this learner: ${seal.out.turns} turns) → ${JSON.stringify(seal.cost)} → ${JSON.stringify(seal.out)}`);
+  assert.deepEqual([seal.out.basis, seal.cost.statements, seal.cost.rows_written <= 2], ['single', 1, true], JSON.stringify(seal)); assert.ok(seal.cost.rows_read <= 40, 'bounded by this participant\'s own turns and usage rows: ' + seal.cost.rows_read);
+  console.log('PASS local D1: T = one turn row + counted first dispatch + outcome; R = one counted permission (1 row written); profile/state reads write nothing');
 
   // ── D: "one batch, two tables" is real on D1 — row counts, and a batch whose guard fails changes NEITHER table ──
   const { recordDispatch, recordOutcome } = await import('../src/lib/lesson-binding-store.ts');
@@ -140,7 +148,7 @@ try {
   const setting = (await f.request(f.base + '/contents', 'POST', { idempotency_key: KEY(), kind: 'setting', title: '2번째 판', body: '다음 질문부터 새 단계로 진행합니다.', lesson: { course_id: course, version: V2, sha256: sha[V2] } }, L)).json; assert.ok(setting.object_id, JSON.stringify(setting));
   const distribute = async (targets) => { await raw.prepare('UPDATE classroom_distributions SET created_at=created_at-120000').run(); const r = await f.request(f.base + '/distributions', 'POST', { idempotency_key: KEY(), expected_roster_revision: roster, object_id: setting.object_id, revision: 1, content_hash: setting.content_hash, targets }, L); assert.equal(r.status, 201, r.raw); return r.json; };
   const takeItem = async (c, n) => { await raw.prepare('UPDATE classroom_distribution_targets SET next_offer_at=0').run(); const r = await f.sync(c.credential, [], n, {}); const item = r.json.distribution?.items?.[0]; assert.ok(item, r.raw); const rc = (stage) => ({ offer_key: item.offer_key, distribution_id: item.distribution_id, object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, seq: item.seq, stage, result_code: '', observed_at: Date.now() }); await f.sync(c.credential, [], n, { distribution: { receipts: [rc('received'), rc('reflected')] } }); return item; };
-  const activate = (c, n, item) => f.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: f.instance(n).app_instance_id, boot_id: f.instance(n).boot_id, offer_key: item.offer_key, distribution_id: item.distribution_id, object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, base_lesson_sha256: sha[V1] }, c.credential);
+  const activate = async (c, n, item) => f.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: f.instance(n).app_instance_id, boot_id: f.instance(n).boot_id, offer_key: item.offer_key, distribution_id: item.distribution_id, object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, base_lesson_sha256: sha[V1], learner_token: await tokenOf(c.student.u) }, c.credential);
   await distribute([seat.seat_id]); const item = await takeItem(conn, 1);
   const act = await measured(() => activate(conn, 1, item)); assert.equal(act.out.status, 201, act.out.raw); assert.equal(act.out.json.recorded, true);
   const replay = await measured(() => activate(conn, 1, item)); assert.deepEqual([replay.out.status, replay.out.json.replayed, replay.out.json.binding.key], [200, true, act.out.json.binding.key], replay.out.raw);

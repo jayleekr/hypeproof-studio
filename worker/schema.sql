@@ -1131,6 +1131,7 @@ CREATE TABLE IF NOT EXISTS classroom_lesson_turns (
  close_outcome TEXT NOT NULL DEFAULT '',
  first_dispatched_at INTEGER,
  first_dispatch_request TEXT NOT NULL DEFAULT '',
+ requests INTEGER NOT NULL DEFAULT 0,
  runtime TEXT NOT NULL DEFAULT '',
  model TEXT NOT NULL DEFAULT '',
  first_completed_at INTEGER,
