@@ -269,8 +269,8 @@ export class InboxSession {
     await this.d.store.commit((index) => { const e = index.objects[objectId]; return { next: e && !e.tombstone && !e.opened ? { ...index, objects: { ...index.objects, [objectId]: { ...e, opened: true } } } : null, result: null }; });
   }
 }
-export async function inboxView(store: InboxStore, o: { run: string; student: string; generation: number; ended: boolean }): Promise<InboxView> {
+export async function inboxView(store: InboxStore, o: { run: string; student: string; generation: number; ended: boolean; offline?: boolean }): Promise<InboxView> {
   // A withdrawal marker is shown only for something the learner actually had (a tombstone kept only for ordering has seq 0).
   const { index, cards } = await store.read(), shown = cards.filter((c) => !c.withdrawn || (index.objects[c.object_id]?.seq ?? 0) > 0);
-  return { run: o.run, student: o.student, generation: o.generation, ended: o.ended, cards: shown, unread: shown.filter((c) => c.is_new).length };
+  return { run: o.run, student: o.student, generation: o.generation, ended: o.ended, offline: !o.ended && !!o.offline, cards: shown, unread: shown.filter((c) => c.is_new).length };
 }

@@ -18,8 +18,9 @@ export function InstructorInbox(props: { inbox: InboxView | null; post: (msg: { 
   const time = (ms: number) => { try { return new Date(ms).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }); } catch { return ""; } };
   return (
     <details className={props.quiet ? "hp-inbox hp-inbox-quiet" : "hp-inbox hp-rail-lesson"} data-inbox-generation={inbox.generation}>
-      <summary>강사가 보낸 공지·자료 {inbox.cards.filter(c => !c.withdrawn).length}개{inbox.unread ? ` · 새 자료 ${inbox.unread}개` : ""}{inbox.ended ? " · 끝난 수업의 자료" : ""}</summary>
+      <summary>강사가 보낸 공지·자료 {inbox.cards.filter(c => !c.withdrawn).length}개{inbox.unread ? ` · 새 자료 ${inbox.unread}개` : ""}{inbox.ended ? " · 끝난 수업의 자료" : inbox.offline ? " · 수업 연결 확인 전" : ""}</summary>
       <p className="hp-rail-lesson-note">강사가 보낸 글입니다. 내 과제·대화·파일은 바뀌지 않았고, 읽지 않아도 작업은 계속할 수 있습니다.</p>
+      {inbox.offline && <p className="hp-rail-lesson-note" data-inbox-offline="">지금은 수업 연결이 확인되지 않았습니다. 이미 받은 자료는 그대로 볼 수 있고, 그 뒤에 강사가 고치거나 회수한 내용은 다시 연결되면 반영됩니다.</p>}
       <ul className="hp-inbox-list">
         {inbox.cards.map(card => (
           <li key={card.object_id} className="hp-inbox-card" data-inbox-object={card.object_id} data-inbox-revision={card.revision}>

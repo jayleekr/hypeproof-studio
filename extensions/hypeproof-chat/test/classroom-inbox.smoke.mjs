@@ -150,6 +150,11 @@ try {
     writeFileSync(path.join(dir, "rev", "orphan.2.deadbeefdeadbeef.json"), JSON.stringify({ kind: "material", title: "자료 M", body: "v2 본문", links: [] })); const rebooted = session(dir); await rebooted.store.reconcile(Date.now() + 600_000);
     assert.deepEqual(await cardsOf(dir), [["M", 1, "v1 본문"]], "nothing new appears after a restart without a fresh answer from the Service"); assert.ok(!existsSync(path.join(dir, "rev", "orphan.2.deadbeefdeadbeef.json")));
     assert.equal((await inboxView(rebooted.store, { run: "r", student: "s", generation: 9, ended: true })).cards[0].body, "v1 본문", "what is already held is simply read — no window, no Service");
+    // "not connected" is not "the class ended" (an app restart in a running class looks exactly like this): only a normal expiry or the run's own end time says so
+    const pres = (o) => { const r = inbox.inboxPresence({ connected: false, expired: false, ends_at: 2000, now: 1000, ...o }); return [r.ended, r.offline].join(); };
+    assert.deepEqual([pres({ connected: true }), pres({}), pres({ expired: true }), pres({ now: 2000 }), pres({ ends_at: 0 }), pres({ connected: true, expired: true, now: 9999 })], ["false,false", "false,true", "true,false", "true,false", "false,true", "false,false"]);
+    const offlineView = await inboxView(rebooted.store, { run: "r", student: "s", generation: 9, ended: false, offline: true }); assert.deepEqual([offlineView.ended, offlineView.offline, offlineView.cards.length], [false, true, 1], "held material stays readable while the connection is unconfirmed");
+    assert.equal((await inboxView(rebooted.store, { run: "r", student: "s", generation: 9, ended: true, offline: true })).offline, false, "a confirmed end is never also shown as unconfirmed");
     // the connection ended while an item was being applied: every await is followed by a check
     const d2 = fresh(); let s2; s2 = session(d2, { hooks: { at: (p) => { if (p === "rev_linked") s2.kill(); } } }); await s2.s.onBlock({ items: [item(1, 1)] }, s2.win(), 10);
     assert.deepEqual(await cardsOf(d2), [], "an answer that belongs to an ended connection applies nothing"); assert.ok(!(await journalOf(d2)).includes("reflected:r1"));

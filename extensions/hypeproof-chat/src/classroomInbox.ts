@@ -158,5 +158,12 @@ export function withinApplyWindow(w: ApplyWindow, clock: Clock, applyWithinMs: n
 
 // ── what the learner sees ────────────────────────────────────────────────────
 export interface InboxCard { object_id: string; kind: string; title: string; body: string; links: InboxLink[]; revision: number; received_at: number; is_new: boolean; withdrawn: boolean; unreadable: boolean }
-export interface InboxView { run: string; student: string; generation: number; ended: boolean; cards: InboxCard[]; unread: number }
-export const emptyView = (generation = 0): InboxView => ({ run: "", student: "", generation, ended: false, cards: [], unread: 0 });
+/** `ended` = this device KNOWS the class is over (normal expiry, or its end time passed). `offline` = no valid connection right now and no such knowledge: the class may well be running. */
+export interface InboxView { run: string; student: string; generation: number; ended: boolean; offline: boolean; cards: InboxCard[]; unread: number }
+export const emptyView = (generation = 0): InboxView => ({ run: "", student: "", generation, ended: false, offline: false, cards: [], unread: 0 });
+/** Not being connected is not evidence that a class ended (an app restart looks exactly like this). Only a normal expiry or the run's own end time is. */
+export function inboxPresence(o: { connected: boolean; expired: boolean; ends_at: number; now: number }): { ended: boolean; offline: boolean } {
+  if (o.connected) return { ended: false, offline: false };
+  const ended = o.expired || (o.ends_at > 0 && o.now >= o.ends_at);
+  return { ended, offline: !ended };
+}
