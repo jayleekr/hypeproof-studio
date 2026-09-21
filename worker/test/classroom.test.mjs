@@ -15,6 +15,33 @@ try{
  await check('AT-14 owner sees access audit; other students cannot read or delete',async()=>{assert.equal((await req(student+'/share-a/audit','GET',undefined,f.studentToken)).json.audit.length,1);assert.equal((await req(student,'GET',undefined,await f.student('student-b'))).json.shares.length,0);assert.equal((await req(student+'/share-a','DELETE',undefined,await f.student('student-b'))).status,404);});
  await check('AT-14 withdrawal deletes content and audit and immediately closes teacher access',async()=>{assert.equal((await req(student+'/share-a','DELETE',undefined,f.studentToken)).status,200);assert.equal((await req(base+'/share-a')).status,404);assert.equal(f.db.prepare('SELECT count(*) n FROM classroom_share_audit').get().n,0);});
  await check('AT-14 expiry denies reads before cleanup; purge only removes expired shares',async()=>{assert.equal((await create('expired')).status,201);assert.equal((await create('active')).status,201);f.db.prepare('UPDATE classroom_shares SET expires_at=0 WHERE id=?').run('expired');assert.equal((await req(base+'/expired')).status,404);assert.equal((await req(base)).json.shares.length,1);const {purgeExpiredClassroomShares}=await import('../src/routes/classroom.ts');await purgeExpiredClassroomShares(f.env);assert.equal(f.db.prepare('SELECT count(*) n FROM classroom_shares').get().n,1);});
+ await check('AT-07 instructor list: scope filtered before the limit, cursor pages, completeness and authorized counts only',async()=>{
+  // Rows copied in SQLite from one real share; only profile_id/recipient_id/session_id/status/created_at differ. Synthetic.
+  const t=await f.teacher('teacher-a'),row=f.db.prepare('SELECT * FROM classroom_shares WHERE id=?').get('active'),cols=Object.keys(row);
+  const ins=f.db.prepare(`INSERT INTO classroom_shares(${cols.join(',')}) VALUES(${cols.map(()=>'?').join(',')})`),put=(id,over)=>ins.run(...cols.map(k=>({...row,id,...over})[k]));
+  const clear=()=>f.db.prepare("DELETE FROM classroom_shares WHERE id!='active'").run(),list=async(q='')=>{const r=await req(base+q,'GET',undefined,t);assert.equal(r.status,200,r.raw);return r.json;};
+  // 1. starvation: 100 newer rows outside the instructor's profile scope no longer push the allowed one off the page.
+  for(let i=0;i<100;i++)put('other-profile-'+i,{profile_id:'synthetic-other-profile',created_at:row.created_at+1+i});
+  for(let i=0;i<5;i++)put('other-teacher-'+i,{recipient_id:'teacher-b',created_at:row.created_at+1+i});
+  let j=await list();assert.deepEqual(j.shares.map(x=>x.id),['active']);assert.equal(j.has_more,false);assert.equal(j.next_cursor,null);assert.deepEqual(j.counts,{matched:1,open:1,answered:0},'counts never include rows outside the scope or for another recipient');
+  assert.ok(!JSON.stringify(j).includes('synthetic-other-profile')&&!JSON.stringify(j).includes('teacher-b'));clear();
+  // 2. exactly 100 authorized rows is complete; 101 is not, and the cursor reaches the last one without repeats.
+  for(let i=0;i<99;i++)put('mine-'+String(i).padStart(3,'0'),{created_at:row.created_at+1+(i%7)});
+  j=await list();assert.equal(j.shares.length,100);assert.equal(j.has_more,false,'exactly 100 is complete');assert.equal(j.counts.matched,100);
+  put('mine-100',{created_at:row.created_at});j=await list();assert.equal(j.shares.length,100);assert.equal(j.has_more,true,'101 is not');assert.match(j.next_cursor,/^\d+:[\w-]+$/);assert.equal(j.counts.matched,101);
+  const next=await list('?before='+encodeURIComponent(j.next_cursor));assert.equal(next.shares.length,1);assert.equal(next.has_more,false);assert.equal(new Set([...j.shares,...next.shares].map(x=>x.id)).size,101,'no row repeated or skipped across pages');
+  const small=await list('?limit=40');assert.equal(small.shares.length,40);assert.equal(small.limit,40);assert.equal(small.has_more,true);clear();
+  // 3. an older help request of the current class behind 150 newer rows of other classes and submissions is found by the class filter.
+  for(let i=0;i<150;i++)put('earlier-class-'+i,{session_id:'an-earlier-class',created_at:row.created_at+1+i});
+  for(let i=0;i<3;i++)put('current-submission-'+i,{kind:'submission',created_at:row.created_at+200+i});
+  put('current-answered',{status:'answered',created_at:row.created_at+300});
+  j=await list();assert.equal(j.has_more,true);assert.ok(!j.shares.some(x=>x.id==='active'),'unfiltered first page does not reach it');
+  j=await list('?kind=help&session_id='+encodeURIComponent(row.session_id));assert.deepEqual(j.shares.map(x=>x.id),['current-answered','active']);assert.equal(j.has_more,false);assert.deepEqual(j.counts,{matched:2,open:1,answered:1});assert.deepEqual(j.filter,{session_id:row.session_id,kind:'help'});
+  // 4. malformed filters are refused rather than widened.
+  for(const q of ['?limit=0','?limit=101','?limit=x','?kind=all','?session_id=../x','?before=abc','?before=1:a%27--'])assert.equal((await req(base+q,'GET',undefined,t)).status,400,q);
+  // 5. an instructor whose scope has no profile of these rows sees nothing and no counts.
+  j=(await req(base,'GET',undefined,await f.teacher('teacher-a',['other-profile']))).json;assert.deepEqual([j.shares.length,j.counts.matched,j.has_more],[0,0,false]);clear();
+ });
  await check('AT-07 revoked students and instructors lose access',async()=>{const {verify}=await import('../src/lib/tokens.ts');const p=await verify(f.studentToken,f.env.HPS_SIGNING_SECRET);f.env._kv.set('revoked:'+p.jti,JSON.stringify({ts:new Date().toISOString()}));assert.equal((await req(student,'GET',undefined,f.studentToken)).status,401);const t=await verify(f.teacherToken,f.env.HPS_SIGNING_SECRET);f.env._kv.set('revoked:'+t.jti,JSON.stringify({ts:new Date().toISOString()}));assert.equal((await req(base)).status,401);});
  console.log(`${count} classroom API controls passed`);
 }finally{f.close();}

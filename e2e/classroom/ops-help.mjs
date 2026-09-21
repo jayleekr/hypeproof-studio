@@ -101,9 +101,14 @@ try {
   // ── 5. A failed share read is "unknown", never "no help": board, selection, open record and typed feedback stay; the next read recovers ──
   const helpState = () => page.locator('#ops-help-state').innerText(), commands = () => local.db.prepare("SELECT COUNT(*) AS n FROM ops_commands WHERE action='send_question'").get().n;
   let shareMode = 'fail';
+  const helpRead = (u) => u.searchParams.get('kind') === 'help';
   await page.route(/\/classroom\/shares(\?|$)/, async (route) => {
+    const u = new URL(route.request().url());
     if (shareMode === 'fail') return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: '[합성] 공유 기록 일시 장애' }) });
-    if (shareMode === 'cap') { const r = await route.fetch(), j = await r.json(); j.limit = j.shares.length; return route.fulfill({ response: r, json: j }); }
+    // The Service says older rows exist; the next page fails. The general page no longer carries the open record.
+    if (shareMode === 'cap') { if (u.searchParams.get('before')) return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: '[합성] 다음 페이지 장애' }) }); const r = await route.fetch(), j = await r.json(); j.has_more = true; j.next_cursor = '1:synthetic-next'; if (!helpRead(u)) j.shares = j.shares.filter((x) => x.id !== b2.id); return route.fulfill({ response: r, json: j }); }
+    // An older Service: no completeness or counts, and a page in which no help request of this class is visible.
+    if (shareMode === 'legacy') { const r = await route.fetch(), j = await r.json(); delete j.has_more; delete j.next_cursor; delete j.counts; if (helpRead(u)) j.shares = []; return route.fulfill({ response: r, json: j }); }
     return route.continue();
   });
   await page.locator('#refresh').click(); await page.locator('#ops-help-state').filter({ hasText: '알 수 없습니다' }).waitFor();
@@ -113,11 +118,22 @@ try {
   assert.match(await row('A2').innerText(), /도움 요청 여부 확인 불가/);
   assert.equal(await page.locator('#ops-seats .ops-seat').count(), 10, 'the roster stays'); assert.match(await page.locator('#ops-summary').innerText(), /기술 장애 확인 4/); assert.equal(await row('A4').getByLabel('선택').isChecked(), true, 'the selection stays');
   assert.equal(await page.locator('#detail').isVisible(), true, 'the open record is not closed by a failed list read'); assert.equal(await page.locator('#feedback-text').inputValue(), '작성 중인 답'); assert.match(await page.locator('#detail-status').innerText(), /다음 갱신에서 확인합니다/);
-  shareMode = 'cap'; await page.locator('#refresh').click(); await page.locator('#ops-help-state').filter({ hasText: '한도에 닿아' }).waitFor();
-  assert.match(await helpState(), /응답할 도움 요청 2건[\s\S]*공유 기록이 \d+건 한도에 닿아 더 오래된 요청은 확인하지 못했습니다/); assert.equal((await page.locator('#ops-select-help').innerText()).trim(), '도움 요청 학생 선택 (2 이상)'); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 2 이상/);
-  shareMode = 'ok'; await page.locator('#refresh').click(); await page.locator('#ops-select-help').filter({ hasText: '(2)' }).waitFor();
-  assert.match(await helpState(), /^응답할 도움 요청 2건 · 학생 2명/); assert.doesNotMatch(await helpState(), /한도/, 'the cap note leaves with a complete read'); assert.equal(await help.count(), 2); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 2/);
+  // Partial: the Service's counts keep the number exact, the student count is a lower bound, and the instructor can read on.
+  shareMode = 'cap'; await page.locator('#refresh').click(); await page.locator('#ops-help-state').filter({ hasText: '최근' }).waitFor();
+  assert.match(await helpState(), /^응답할 도움 요청 2건 · 학생 2명 이상 · 답변함·학생 확인 대기 1건은 뺐습니다[\s\S]*이번 수업 도움 요청 중 최근 4건만 불러왔습니다/); assert.equal((await page.locator('#ops-select-help').innerText()).trim(), '도움 요청 학생 선택 (2 이상)'); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 2 이상/);
+  assert.equal(await page.locator('#detail').isVisible(), true, 'absence from one partial page is not withdrawal'); assert.equal(await page.locator('#feedback-text').inputValue(), '작성 중인 답');
+  assert.match(await page.locator('#shares').innerText(), /더 오래된 공유 기록이 있을 수 있습니다 \(목록에 없다고 철회된 것이 아닙니다\)/);
+  // The next page fails: the whole help read is unknown again, not the first page presented as complete.
+  await help.getByRole('button', { name: '더 오래된 도움 요청 불러오기' }).click(); await page.locator('#ops-help-state').filter({ hasText: '알 수 없습니다' }).waitFor(); assert.equal(await help.count(), 0);
+  assert.equal(await page.locator('#detail').isVisible(), true); assert.equal(await page.locator('#feedback-text').inputValue(), '작성 중인 답');
+  // An older Service with no counts and none visible: never "no requests", with a next action.
+  shareMode = 'legacy'; await page.locator('#refresh').click(); await page.locator('#ops-help-state').filter({ hasText: '불러온 범위' }).waitFor();
+  assert.match(await helpState(), /^불러온 범위에는 응답할 도움 요청이 없습니다 · 더 오래된 요청은 확인하지 못했습니다 \(요청 없음이 아님\)/); assert.doesNotMatch(await helpState(), /지금 응답할 도움 요청이 없습니다/);
+  assert.equal(await help.getByRole('button', { name: '다시 확인' }).count(), 1); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 0 이상/);
+  shareMode = 'ok'; await help.getByRole('button', { name: '다시 확인' }).click(); await page.locator('#ops-select-help').filter({ hasText: '(2)' }).waitFor();
+  assert.match(await helpState(), /^응답할 도움 요청 2건 · 학생 2명 ·/); assert.doesNotMatch(await helpState(), /최근|불러온 범위/, 'the partial note leaves with a complete read'); assert.equal(await help.count(), 2); assert.match(await page.locator('#ops-summary').innerText(), /도움 요청 2/);
   assert.equal(await page.locator('#detail-status').innerText(), '', 'the stale-list note leaves once the list is read'); assert.equal(await page.locator('#feedback-text').inputValue(), '작성 중인 답'); assert.equal(await row('A4').getByLabel('선택').isChecked(), true);
+  await page.locator('#shares').filter({ hasNotText: '더 오래된 공유 기록' }).waitFor({ timeout: 15000 }); // a 10-second refresh already under way may have read the list in the previous mode
   await page.unroute(/\/classroom\/shares(\?|$)/);
 
   // ── 6. An unsent question belongs to class run + student + seat ──
@@ -132,7 +148,7 @@ try {
   assert.equal(await page.locator('#ops-question').inputValue(), '', 'the new holder of the seat never inherits the question'); assert.match(await page.locator('#ops-detail-status').innerText(), /학생 또는 수업이 바뀌어 쓰던 질문을 이 학생에게 옮기지 않았습니다/);
   await page.keyboard.press('Escape'); await row('A2').getByRole('button', { name: '근거·조치' }).click(); assert.equal(await page.locator('#ops-question').inputValue(), '', 'reopening does not bring it back either');
   { const c = (await local.pair('A2', 3, 11)).conn.json; assert.equal((await local.sync(c.credential, [local.event(1, 'activation', { stage: 'runtime_ready' })], 11)).status, 200); }
-  await page.locator('#refresh').click(); await page.waitForFunction(() => opsData?.seats.find((x) => x.seat_id === 'A2')?.connection?.state === 'active'); await page.keyboard.press('Escape'); await row('A2').getByRole('button', { name: '근거·조치' }).click(); await page.getByRole('button', { name: '질문 보내기' }).and(page.locator(':enabled')).waitFor();
+  await page.locator('#refresh').click(); await page.waitForFunction(() => opsData?.seats.find((x) => x.seat_id === 'A2')?.connection?.state === 'active'); assert.equal(await page.getByRole('button', { name: '질문 보내기', exact: true }).isEnabled(), true, 'LIVE_ACTIONS: newly connected same student enables send without closing the detail');
   assert.equal(await page.locator('#ops-question').inputValue(), ''); await page.getByRole('button', { name: '질문 보내기' }).click(); assert.match(await page.locator('#ops-detail-status').innerText(), /보낼 질문을 입력하세요/);
   // Send-time check, with the page's own state made stale on purpose (injected here; a normal refresh redraws the form first).
   await page.locator('#ops-question').fill('[합성] L에게 쓰는 질문'); await page.evaluate(() => { opsData.seats.find((x) => x.seat_id === 'A2').student_id = 'student-x'; });
@@ -141,6 +157,46 @@ try {
   assert.equal((await local.configure(roster({ A10: 'student-k' }), 3, flags)).status, 200, 'student-b is back on A2');
   await page.locator('#refresh').click(); await page.locator('#ops-detail-title').filter({ hasText: 'A2 · student-b' }).waitFor(); assert.equal(await page.locator('#ops-question').inputValue(), '어디까지 확인했나요?', 'the same learner on the same seat in the same class gets their own draft back');
   assert.equal(commands(), sentBefore);
+
+  // ── 7. The open detail follows live changes without reopening: connection (both ways), cause, flag/permission ──
+  // Same learner/run/seat throughout (student-b on A2); the unsent question, the focus and the list selection stay.
+  // tick = the page's own 10-second refresh (a click on 갱신 would move the focus this block checks).
+  const tick = () => page.evaluate(() => refresh()), q = page.locator('#ops-question'), send = () => page.getByRole('button', { name: '질문 보내기', exact: true }), actionsPrimary = () => page.locator('#ops-actions .primary').innerText();
+  const seatA2 = () => page.evaluate(() => { const s = opsData.seats.find((x) => x.seat_id === 'A2'); return { state: s.connection?.state ?? null, rec: s.recommended?.action ?? null }; });
+  if (!(await row('A4').getByLabel('선택').isChecked())) await row('A4').getByLabel('선택').check(); // roster edits above clear a selection by design
+  assert.equal(await send().isDisabled(), true, 'student-b is not connected on A2 yet (the seat was handed back)'); await q.focus();
+  const b2c = (await local.pair('A2', 4, 12)).conn.json; assert.equal((await local.sync(b2c.credential, [local.event(1, 'activation', { stage: 'runtime_ready' })], 12)).status, 200);
+  await tick(); await send().and(page.locator(':enabled')).waitFor();
+  assert.equal((await seatA2()).state, 'active'); assert.match(await page.locator('#ops-detail-title').innerText(), /A2 · student-b/); assert.equal(await q.inputValue(), '어디까지 확인했나요?', 'disconnected -> connected keeps the same learner\'s question');
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'ops-question', 'focus stays in the question'); assert.equal((await actionsPrimary()).trim(), '질문 보내기'); assert.match(await page.locator('#ops-actions').innerText(), /지금 할 수 있는 조치를 다시 표시했습니다/);
+  assert.equal(await row('A4').getByLabel('선택').isChecked(), true, 'the list selection stays');
+  await page.screenshot({ path: path.join(out, 'live-01-connected.png') });
+  // A heartbeat changes nothing the actions depend on: the form is not rebuilt.
+  await page.evaluate(() => { document.getElementById('ops-question').dataset.same = '1'; });
+  assert.equal((await local.sync(b2c.credential, [local.event(2, 'activation', { stage: 'runtime_ready' })], 12)).status, 200); await tick(); await page.waitForTimeout(600);
+  assert.equal(await page.evaluate(() => document.getElementById('ops-question').dataset.same), '1', 'a heartbeat does not rebuild the inputs');
+  // The cause changes (a runtime fault): the Service's first action becomes the primary in place; the question stays.
+  assert.equal((await local.sync(b2c.credential, [local.event(3, 'error', { class: 'sdk_not_ready', code: 'sdk_missing', request_id: 'req-live-0001', blocking: true })], 12)).status, 200);
+  await tick(); await page.waitForFunction(() => opsData.seats.find((x) => x.seat_id === 'A2').recommended?.action === 'reset_runtime');
+  await page.locator('#ops-actions .primary').filter({ hasText: 'AI 실행 환경 초기화' }).waitFor(); assert.equal(await page.locator('.primary:visible').count(), 1); assert.equal(await q.inputValue(), '어디까지 확인했나요?');
+  assert.match(await page.locator('#ops-recovery').innerText(), /먼저 할 조치: AI 실행 환경 초기화/);
+  await page.screenshot({ path: path.join(out, 'live-02-cause-changed.png') });
+  // Coaching turned off for the class (flag): the question form leaves; turned back on, the same learner's question returns.
+  const offFlags = { flags: { ops_observe: true, ops_commands: false, ops_collect: true } };
+  assert.equal((await local.configure(roster({ A10: 'student-k' }), 4, offFlags)).status, 200);
+  await tick(); await page.locator('#ops-actions').filter({ hasText: '학습 지원 권한이 없거나 이 수업에서 조치가 꺼져 있습니다' }).waitFor();
+  assert.equal(await q.count(), 0); assert.equal(await send().count(), 0);
+  await page.screenshot({ path: path.join(out, 'live-03-commands-off.png') });
+  assert.equal((await local.configure(roster({ A10: 'student-k' }), 5, flags)).status, 200);
+  await tick(); await send().and(page.locator(':enabled')).waitFor(); assert.equal(await q.inputValue(), '어디까지 확인했나요?', 'the same learner\'s question comes back with the flag');
+  // The connection is revoked: send is disabled in place, the question is kept, and even a forced click dispatches nothing.
+  const sentLive = commands(); assert.equal((await local.request(`${local.base}/grants/${b2c.grant_id}`, 'DELETE')).status, 200);
+  await tick(); await send().and(page.locator(':disabled')).waitFor();
+  assert.equal((await seatA2()).state, 'revoked'); assert.equal(await q.inputValue(), '어디까지 확인했나요?', 'connected -> disconnected keeps the question'); assert.equal((await actionsPrimary()).trim(), '이 좌석의 연결 코드 발급 (10분 · 1회)');
+  await page.evaluate(() => { const b = [...document.querySelectorAll('#ops-actions button')].find((x) => x.textContent === '질문 보내기'); b.disabled = false; b.click(); });
+  assert.match(await page.locator('#ops-detail-status').innerText(), /기기 연결이 끊겨 이 질문을 보내지 않았습니다/); assert.equal(commands(), sentLive, 'no command after revocation');
+  await page.screenshot({ path: path.join(out, 'live-04-revoked.png') });
+  await page.setViewportSize({ width: 390, height: 844 }); assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'no horizontal overflow at 390 with the live note'); await page.screenshot({ path: path.join(out, 'live-04-revoked-390.png'), fullPage: false }); await page.setViewportSize({ width: 1280, height: 900 });
 
   // The learner withdraws: the request leaves the queue, the count and the open record.
   assert.equal((await local.request('/v1/classroom/shares/' + b2.id, 'DELETE', undefined, b2.t)).status, 200); await page.locator('#refresh').click();
@@ -152,5 +208,5 @@ try {
   assert.equal(await page.locator('#ops-seats .ops-seat').count(), 0); assert.equal(await page.locator('#ops-summary').isHidden(), true); assert.equal(await help.count(), 0);
   assert.match(await page.locator('#ops-help-state').innerText(), /지금 응답할 도움 요청이 없습니다/); assert.match(await page.locator('#shares').innerText(), /student-d · 도움 요청\s*검토 중 · 다른 수업의 기록/);
   assert.deepEqual(errors, []);
-  console.log('PASS classroom ops help: auth failure and missing permission named in the class panel, roster loads on connect and never says "not connected" under "connected", unknown seats not counted as fine; help queue from metadata only (open = this class, not answered/resolved/withdrawn/expired), help and fault selection separate with counts, silence not red; first action = Service recommendation (re-issue link to /authoring for a lesson class, pairing first when offline, none for a shared outage); help under "2 수업 진행" keeps detail, draft question (also across closing the detail), selection and share feedback draft; a failed share read is unknown (never no-help) while roster, selection and the open record stay, a capped read is a lower bound, the next read recovers; an unsent question is bound to class run + student + seat (kept across unrelated roster edits, never shown to or sent for the next holder of the seat); withdrawal and a new class leave the queue');
+  console.log('PASS classroom ops help: auth failure and missing permission named in the class panel, roster loads on connect and never says "not connected" under "connected", unknown seats not counted as fine; help queue from metadata only (open = this class, not answered/resolved/withdrawn/expired), help and fault selection separate with counts, silence not red; first action = Service recommendation (re-issue link to /authoring for a lesson class, pairing first when offline, none for a shared outage); help under "2 수업 진행" keeps detail, draft question (also across closing the detail), selection and share feedback draft; a failed share read is unknown (never no-help) while roster, selection and the open record stay; a partial read keeps the Service-counted exact open count, a lower-bound student count and a next action, a failed next page is unknown, an older Service without counts never says no-help, absence from a partial page does not close the open record, the next read recovers; an unsent question is bound to class run + student + seat (kept across unrelated roster edits, never shown to or sent for the next holder of the seat); the open detail follows live connection (both ways), cause and flag changes without reopening, keeping the question, focus and selection, not rebuilding on a heartbeat, and dispatching nothing after revocation; withdrawal and a new class leave the queue');
 } finally { if (browser) await browser.close(); await new Promise((r) => server.close(r)); globalThis.fetch = realFetch; local.close(); }
