@@ -65,7 +65,7 @@ try {
   for (let i = 0; i < 12; i++) { await p.waitForTimeout(1500); if (await p.locator('#ops-dist-refresh').isVisible()) await p.click('#ops-dist-refresh'); if (/실패 [1-9]/.test(await p.locator('#ops-dist-state').innerText()) && /보관함 반영 [1-9]/.test(await p.locator('#ops-dist-state').innerText())) break; }
   facts.dist_items = (await p.locator('#ops-dist-items').innerText()).split('\n').filter(Boolean); facts.dist_untouched_A2 = !facts.dist_items.some((l) => l.startsWith('A2 '));
   await p.locator('#ops-dist-results').evaluate((e) => e.scrollIntoView({ block: 'start' }));
-  await shot(p, '05-manage-dist-result', '/manage (배포 결과)', '배포 결과 — 반영(✓)·실패(✕, 디스크 거부 합성)·미지원(!)·오프라인 접수(…)가 학생별로 갈림. 선택하지 않은 A2에는 아무것도 가지 않음.', '결과를 학생별 한 줄 목록 + 기호로 정리, 실패는 빨강·확인 필요는 주황·진행 중은 회색');
+  await shot(p, '05-manage-dist-result', '/manage (배포 결과)', '배포 결과 — 반영(✓)·실패(✕, 합성 디스크 거부)·접수(…, 구버전 앱·오프라인)가 학생별로 갈림. 선택하지 않은 A2에는 아무것도 가지 않음.', '결과를 학생별 한 줄 목록 + 기호로 정리, 실패는 빨강·확인 필요는 주황·진행 중은 회색');
   await p.click('#ops-select-none');
 
   // Selected collection: consented + connected, consented + no upload, not consented (stale), no device.
