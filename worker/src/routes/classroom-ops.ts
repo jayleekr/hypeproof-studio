@@ -19,7 +19,8 @@ import { bearer, signOpsCredential, verifyOpsCredential } from '../lib/tokens';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { bumpRateCounter, getActiveSession, getRoster } from '../lib/kv';
 import { readLesson } from '../lib/lesson-delivery';
-import { readRunControl } from '../lib/classroom-ops-control';
+import { readRunControl, readRunControlDetail } from '../lib/classroom-ops-control';
+import { FOLLOWUP_CAPABILITY, FOLLOWUP_LINKABLE_STATES, controlOutcome, recommendAction, recoveryOutcome, summarizeOutcomes, type Followup } from '../lib/classroom-recovery';
 import { scrubSecrets } from '../lib/scrub-secrets';
 import { PENDING_PROBE, declaresInbox, deviceRebindStatements, distributionExchange, issuerFenceStatements, type DistributionBlock } from '../lib/classroom-distribution-store';
 import {
@@ -27,7 +28,7 @@ import {
   RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
   newPairingTicket, normalizeTicket, parseFlags, parseLesson, pollAfterMs, sha256Hex, shouldApply, signalOf,
   stepDisposition, validateEvent, reduceTokenCheck, tokenCheckOf, type OpsCapability, type SeatState,
-  REVIEW_STATES, SERVICE_ISSUED_ACTIONS, COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
+  REVIEW_STATES, SERVICE_ISSUED_ACTIONS, keepsRuntimeFault, COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
 } from '../lib/classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -229,15 +230,15 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
   const run = await loadRun(c, auth); if (run instanceof Response) return run;
   const now = Date.now(), db = c.env.HPS_DB;
   await settleOverdueRun(db, run.class_run_id, now);
-  const rows = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,s.student_id,l.state_json,l.revision AS state_revision,l.last_received_at,
+  const rows = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,s.student_id,l.state_json,l.revision AS state_revision,l.last_received_at,l.grant_id AS state_grant,
  (SELECT count(*) FROM ops_grants p WHERE p.class_run_id=s.class_run_id AND p.seat_id=s.seat_id AND p.seat_revision=s.seat_revision AND p.kind='pairing' AND p.state='issued' AND p.expires_at>?) AS pairing_open,
  (SELECT g.id||'|'||g.state||'|'||g.connection_epoch||'|'||g.expires_at FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' ORDER BY g.created_at DESC LIMIT 1) AS conn,
- (SELECT t.jti||'|'||t.expires_at FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS token,
- (SELECT c.action||'|'||ct.state||'|'||ct.result_code||'|'||ct.updated_at||'|'||ct.command_id FROM ops_command_targets ct JOIN ops_commands c ON c.id=ct.command_id WHERE ct.class_run_id=s.class_run_id AND ct.seat_id=s.seat_id AND ct.seat_revision=s.seat_revision ORDER BY ct.updated_at DESC LIMIT 1) AS last_command,
+ (SELECT t.jti||'|'||t.expires_at||'|'||(SELECT count(*) FROM ops_token_issues n WHERE n.cohort_id=t.cohort_id AND n.student_id=t.student_id AND n.profile_id=t.profile_id) FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS token,
+ (SELECT c.action||'|'||ct.state||'|'||ct.result_code||'|'||ct.updated_at||'|'||ct.command_id||'|'||ct.grant_id||'|'||c.created_at||'|'||COALESCE(json_extract(ct.receipt_json,'$.observed_at'),'') FROM ops_command_targets ct JOIN ops_commands c ON c.id=ct.command_id WHERE ct.class_run_id=s.class_run_id AND ct.seat_id=s.seat_id AND ct.seat_revision=s.seat_revision ORDER BY ct.updated_at DESC LIMIT 1) AS last_command,
  (SELECT d.capabilities_json FROM ops_device_connections d JOIN ops_grants g3 ON g3.id=d.grant_id WHERE g3.class_run_id=s.class_run_id AND g3.seat_id=s.seat_id AND g3.seat_revision=s.seat_revision AND g3.kind='connection' AND g3.state='active' ORDER BY d.last_seen_at DESC LIMIT 1) AS device_caps
  FROM class_run_seats s LEFT JOIN ops_latest_state l ON l.class_run_id=s.class_run_id AND l.seat_id=s.seat_id AND l.seat_revision=s.seat_revision
- WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; pairing_open: number; conn: string | null; token: string | null; last_command: string | null; device_caps: string | null }>;
-  const control = await readRunControl(c.env, run.class_run_id) ?? { paused: false, control_revision: 0 };
+ WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; state_grant: string | null; pairing_open: number; conn: string | null; token: string | null; last_command: string | null; device_caps: string | null }>;
+  const controlRow = await readRunControlDetail(c.env, run.class_run_id), control = { paused: controlRow?.paused ?? false, control_revision: controlRow?.control_revision ?? 0 };
   // U3 — what each participant executes under, by the gate's own rule. Read only where settings can exist.
   const pinnedLesson = parseLesson(run.lesson_json);
   const bases = parseFlags(run.flags_json).ops_lesson_settings || bindingsEnforced(c.env) ? await effectiveBySeat(db, pinnedLesson, run.class_run_id) : new Map();
@@ -245,19 +246,23 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
     let state: SeatState = {}; try { state = JSON.parse(r.state_json ?? '{}'); } catch { state = {}; }
     const [grantId, connState, epoch, connExpires] = (r.conn ?? '|||').split('|');
     const connected = connState === 'active' && Number(connExpires) > now;
-    const [issueId, tokenExpires] = (r.token ?? '|').split('|');
+    const [issueId, tokenExpires, issueCount] = (r.token ?? '||').split('|');
     const inputs = { pairing_issued: r.pairing_open > 0, connected, token_issued: !!issueId, state, last_received_at: connected ? r.last_received_at : null, grant_revoked: connState === 'revoked' };
     const { attention, reason } = attentionOf(inputs, now);
     const slot = (k: keyof SeatState) => state[k] ? { ...state[k]!.value, observed_at: state[k]!.observed_at, received_at: state[k]!.received_at, actor: state[k]!.actor } : null;
+    const controlApplied = !connected || signalOf(inputs.last_received_at, now) !== 'fresh' || state.sample?.value.control_revision === undefined ? 'unknown' as const : state.sample.value.control_revision === control.control_revision ? 'applied' as const : 'pending' as const;
     return {
       seat_id: r.seat_id, seat_revision: r.seat_revision, student_id: r.student_id,
       entry_stage: entryStage(inputs), signal: signalOf(inputs.last_received_at, now), last_received_at: r.last_received_at,
       attention, reason, state_revision: r.state_revision ?? 0,
-      control_applied: !connected || signalOf(inputs.last_received_at, now) !== 'fresh' || state.sample?.value.control_revision === undefined ? 'unknown' : state.sample.value.control_revision === control.control_revision ? 'applied' : 'pending',
+      control_applied: controlApplied,
+      // U4 — three separate observations: the Service's admission, this device's hold, and a run seen after a resume.
+      control_outcome: controlOutcome({ ...control, control_updated_at: controlRow?.updated_at ?? null, device: controlApplied, runtime: state.runtime ? { status: state.runtime.value.status, received_at: state.runtime.received_at } : null, state_from_current_connection: !!grantId && r.state_grant === grantId }),
       connection: grantId ? { grant_id: grantId, state: connected ? 'active' : connState === 'active' ? 'expired' : connState, epoch: Number(epoch) } : null,
       token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: tokenCheckOf(state, issueId, grantId ?? '') } : null,
       // The latest instructor action on this seat, in ledger terms: queued is not done.
-      last_command: r.last_command ? (([action, state, result_code, updated_at, command_id]) => ({ action, state, result_code, updated_at: Number(updated_at), command_id }))(r.last_command.split('|')) : null,
+      last_command: r.last_command ? (([action = '', state = '', result_code = '', updated_at = '', command_id = '', target_grant = '', created_at = '', receipt_at = '']) => ({ action, state, result_code, updated_at: Number(updated_at), command_id, target_grant, created_at: Number(created_at), receipt_at: receipt_at ? Number(receipt_at) : undefined }))(r.last_command.split('|')) : null,
+      issue_count: Number(issueCount) || 0, reports_followup: ((): boolean | null => { if (!connected || !r.device_caps) return null; try { return (JSON.parse(r.device_caps) as string[]).includes(FOLLOWUP_CAPABILITY); } catch { return null; } })(),
       // Review F4: which signals this device's build can report from its real runtime path. An absent signal from a
       // build that cannot report it is "unknown", not "nothing happened". A build that predates the declaration says nothing.
       observes: ((): { step: boolean | null; runtime: boolean | null; evidence: boolean | null } => { let caps: string[] | null = null; try { caps = r.device_caps ? JSON.parse(r.device_caps) : null; } catch { caps = null; } const has = (k: string) => (!connected || !caps ? null : caps.includes(k)); return { step: has('observe_step'), runtime: has('observe_runtime'), evidence: has('observe_evidence') }; })(),
@@ -290,6 +295,20 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
     // Zero is "not seen yet", and the UI says so. It is never a score.
     (seat as Record<string, unknown>).evidence = { observed: mine.length, unreviewed: mine.filter((e) => e.review_state === 'unreviewed').length, by_source_state: by, latest: mine.slice(0, 5) };
   }
+  // U4 — what the last action on each seat achieved, and the one first action for what the seat shows now. Follow-ups
+  // are read only for seats whose last action ran on a device, through the (run, seat, received_at) index.
+  const incidents = commonIncidents(seats), inIncident = new Set(incidents.flatMap((x) => x.seats));
+  const ran = seats.filter((s) => s.last_command && (FOLLOWUP_LINKABLE_STATES as readonly string[]).includes(s.last_command.state) && COMMAND_ACTIONS[s.last_command.action]?.kind === 'recovery');
+  const followups = await readFollowups(db, run.class_run_id, ran.map((s) => ({ seat_id: s.seat_id, command_id: s.last_command!.command_id, grant_id: s.last_command!.target_grant, since: s.last_command!.created_at })));
+  for (const seat of seats) {
+    const lc = seat.last_command, x = seat as Record<string, unknown>;
+    if (lc) {
+      const { target_grant, created_at, receipt_at, ...shown } = lc; void target_grant; void created_at;
+      x.last_command = { ...shown, outcome: recoveryOutcome({ action: lc.action, state: lc.state, result_code: lc.result_code, receipt: { observed_at: receipt_at, received_at: lc.updated_at }, followups: followups === 'unknown' ? [] : followups.get(`${lc.command_id}|${seat.seat_id}`) ?? [], reports_followup: seat.reports_followup, latest_issue: seat.token ? { id: seat.token.issue_id, count: seat.issue_count } : null }), ...(followups === 'unknown' ? { followups: 'unknown' } : {}) };
+    }
+    x.recommended = recommendAction({ connected: seat.connection?.state === 'active', attention: seat.attention, reason: seat.reason, entry_stage: seat.entry_stage, runtime_status: (seat.runtime as { status?: unknown } | null)?.status ?? (seat.sample as { runtime_status?: unknown } | null)?.runtime_status, token_app_verified: seat.token?.app_verified ?? null, upload_status: (seat.upload as { status?: unknown } | null)?.status, in_shared_incident: inIncident.has(seat.seat_id) });
+    delete x.issue_count; delete x.reports_followup;
+  }
   const history = (await db.prepare('SELECT seat_id,seat_revision,student_id,replaced_at,replaced_reason,changed_by FROM class_run_seats WHERE class_run_id=? AND replaced_at IS NOT NULL ORDER BY replaced_at DESC LIMIT 100').bind(run.class_run_id).all()).results ?? [];
   const count = (f: (s: (typeof seats)[number]) => boolean) => seats.filter(f).length;
   return c.json({
@@ -309,7 +328,7 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
     // Server admission is applied the moment `control` is saved. Device-side tool admission is per seat:
     // applied / not yet / unknown (old app or no signal) are different answers.
     control: { ...control, devices: { applied: count((s) => s.control_applied === 'applied'), pending: count((s) => s.control_applied === 'pending'), unknown: count((s) => s.control_applied === 'unknown') } },
-    incidents: commonIncidents(seats), seats, seat_history: history,
+    incidents, seats, seat_history: history,
   });
 });
 
@@ -429,6 +448,11 @@ classroomOpsApp.post('/sync', async (c) => {
     await stored_('SELECT seq,payload_hash FROM ops_events WHERE grant_id=? AND boot_id=? AND seq>? ORDER BY seq LIMIT 1000', device.contiguous_seq);
     if (Math.min(...seqs) <= device.contiguous_seq) await stored_('SELECT seq,payload_hash FROM ops_events WHERE grant_id=? AND boot_id=? AND seq BETWEEN ? AND ? LIMIT 1000', Math.min(...seqs), device.contiguous_seq);
   }
+  // U4 — a follow-up is evidence only for a command this connection was actually given, under the login generation it still has.
+  // Anything else is stored as `unlinked` and never read by a verdict.
+  const namedCommands = [...new Set(raw.filter((e) => (e as any)?.kind === 'recovery' && typeof (e as any)?.payload?.command_id === 'string').map((e) => (e as any).payload.command_id as string))].slice(0, MAX_SYNC_EVENTS);
+  const linkable = new Set<string>();
+  if (namedCommands.length) for (const t of ((await db.prepare(`SELECT command_id FROM ops_command_targets WHERE class_run_id=? AND seat_id=? AND grant_id=? AND connection_epoch=? AND state IN (${FOLLOWUP_LINKABLE_STATES.map((x) => `'${x}'`).join(',')}) AND command_id IN (SELECT value FROM json_each(?))`).bind(g.class_run_id, g.seat_id, g.id, g.connection_epoch, JSON.stringify(namedCommands)).all()).results ?? []) as Array<{ command_id: string }>) linkable.add(t.command_id);
   const latest = await db.prepare('SELECT seat_revision,grant_id,revision,state_json,last_received_at FROM ops_latest_state WHERE class_run_id=? AND seat_id=?').bind(g.class_run_id, g.seat_id).first<{ seat_revision: number; grant_id: string; revision: number; state_json: string; last_received_at: number }>();
   // Board state never crosses a seat reassignment: a new binding starts empty.
   let state: SeatState = {}; const carried = latest && latest.seat_revision === g.seat_revision;
@@ -441,7 +465,7 @@ classroomOpsApp.post('/sync', async (c) => {
     if (existing.has(seq)) {
       if (existing.get(seq) !== hash) { quarantined.push(seq); stmts.push(audit(db, g.class_run_id, g.seat_id, 'system', 'sync', 'event_conflict', { grant_id: g.id, boot_id: b.boot_id, seq }, now)); continue; }
     } else {
-      const disposition = !v.ok ? 'rejected_schema' : v.value.kind === 'step' ? stepDisposition(v.value.payload, lesson) : 'applied';
+      const disposition = !v.ok ? 'rejected_schema' : v.value.kind === 'step' ? stepDisposition(v.value.payload, lesson) : v.value.kind === 'recovery' && !linkable.has(v.value.payload.command_id as string) ? 'unlinked' : 'applied';
       if (!v.ok) rejected.push({ seq, error: v.error });
       stmts.push(db.prepare('INSERT INTO ops_events(grant_id,boot_id,seq,event_id,class_run_id,seat_id,kind,actor,payload_json,payload_hash,disposition,observed_at,received_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING').bind(g.id, b.boot_id, seq, v.ok ? v.value.event_id : '', g.class_run_id, g.seat_id, v.ok ? v.value.kind : 'rejected', v.ok ? v.value.actor : 'unknown', v.ok ? JSON.stringify(v.value.payload) : '{}', hash, disposition, v.ok ? v.value.observed_at : 0, now));
       stored.push(seq);
@@ -449,9 +473,11 @@ classroomOpsApp.post('/sync', async (c) => {
       if (!v.ok || disposition !== 'applied') continue;
     }
     if (!v.ok) continue;
+    if (v.value.kind === 'recovery') continue; // read from the event ledger by command id; it is not a board slot
     if (v.value.kind === 'step' && stepDisposition(v.value.payload, lesson) !== 'applied') continue;
     // Token evidence has its own ordering: a stage that arrives later must not erase it, and a resend must not revive it.
     if (v.value.kind === 'activation' && reduceTokenCheck(state, { grantId: g.id, bootId: b.boot_id, bootSeenAt: device.first_seen_at }, { seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, payload: v.value.payload })) changed = true;
+    if (v.value.kind === 'activation' && keepsRuntimeFault(state.activation, v.value.payload.stage, device.first_seen_at)) continue;
     if (shouldApply(state[v.value.kind], device.first_seen_at, seq)) { state[v.value.kind] = { boot_seen_at: device.first_seen_at, seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, value: v.value.payload }; changed = true; }
   }
   const ack = contiguousAck(device.contiguous_seq, [...new Set([...existing.keys(), ...stored])].filter((s) => s > device!.contiguous_seq).sort((x, y) => x - y));
@@ -625,7 +651,7 @@ classroomOpsTeacher.post(root + '/commands', async (c) => {
   const db = c.env.HPS_DB, now = Date.now(), targets = [...b.targets].sort();
   const payloadHash = await sha256Hex(JSON.stringify([b.action, targets, b.reason_code, run.roster_revision, args]));
   const prior = await db.prepare('SELECT id,payload_hash FROM ops_commands WHERE class_run_id=? AND idempotency_key=?').bind(run.class_run_id, b.idempotency_key).first<{ id: string; payload_hash: string }>();
-  if (prior) return prior.payload_hash === payloadHash ? c.json(await commandView(db, run.class_run_id, prior.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
+  if (prior) return prior.payload_hash === payloadHash ? c.json(await commandView(db, run, prior.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
   const recent = await db.prepare('SELECT count(*) AS n FROM ops_commands WHERE class_run_id=? AND created_at>?').bind(run.class_run_id, now - 60_000).first<{ n: number }>();
   if ((recent?.n ?? 0) >= 60) return c.json({ error: 'too many commands in the last minute', reason: 'rate_limited' }, 429, { 'retry-after': '30' });
   const seats = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,(SELECT g.id||'|'||g.connection_epoch FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' AND g.state='active' AND g.expires_at>? ORDER BY g.created_at DESC LIMIT 1) AS conn,
@@ -653,27 +679,63 @@ classroomOpsTeacher.post(root + '/commands', async (c) => {
   try { await db.batch(stmts); }
   catch (err) {
     const again = await db.prepare('SELECT id,payload_hash FROM ops_commands WHERE class_run_id=? AND idempotency_key=?').bind(run.class_run_id, b.idempotency_key).first<{ id: string; payload_hash: string }>();
-    if (again) return again.payload_hash === payloadHash ? c.json(await commandView(db, run.class_run_id, again.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
+    if (again) return again.payload_hash === payloadHash ? c.json(await commandView(db, run, again.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
     console.error('ops command enqueue failed:', err); return c.json({ error: 'command not recorded; nothing was sent', reason: 'storage' }, 503);
   }
   // 202: recorded and queued. Not delivered, not started, not done.
-  return c.json(await commandView(db, run.class_run_id, id, now), 202);
+  return c.json(await commandView(db, run, id, now), 202);
 });
 
 const settleOverdueRun = (db: Db, runId: string, now: number) => db.batch(settleOverdue(db, 'class_run_id=?', [runId], now));
 
-async function commandView(db: Db, runId: string, id: string, now: number) {
+type FollowupKey = { seat_id: string; command_id: string; grant_id: string; since: number };
+/**
+ * Follow-up observations for the given (command, seat) pairs — through the (run, seat, received_at) index, so the cost is the
+ * events of THOSE seats since THEIR command, not the run's ledger. A row counts only when it names that command and came over
+ * the connection the command was addressed to. 'unknown' = the read failed; the caller shows no follow-up and says so.
+ */
+async function readFollowups(db: Db, runId: string, keys: FollowupKey[]): Promise<Map<string, Followup[]> | 'unknown'> {
+  const out = new Map<string, Followup[]>(); if (!keys.length) return out;
+  try {
+    const rows = ((await db.prepare(`SELECT e.seat_id,e.grant_id,e.payload_json,e.observed_at,e.received_at FROM json_each(?) j JOIN ops_events e ON e.class_run_id=? AND e.seat_id=json_extract(j.value,'$[0]') AND e.received_at>=json_extract(j.value,'$[1]') WHERE e.kind='recovery' AND e.disposition='applied' ORDER BY e.received_at LIMIT 2000`).bind(JSON.stringify(keys.map((k) => [k.seat_id, k.since])), runId).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; payload_json: string; observed_at: number; received_at: number }>;
+    for (const r of rows) {
+      let p: Record<string, unknown> = {}; try { p = JSON.parse(r.payload_json); } catch { continue; }
+      const k = keys.find((x) => x.seat_id === r.seat_id && x.command_id === p.command_id && x.grant_id === r.grant_id && r.received_at >= x.since); if (!k) continue;
+      const key = `${k.command_id}|${k.seat_id}`; out.set(key, [...(out.get(key) ?? []), { check: String(p.check), ...(typeof p.token_jti === 'string' ? { token_jti: p.token_jti } : {}), ...(typeof p.error_class === 'string' ? { error_class: p.error_class } : {}), ...(typeof p.runtime === 'string' ? { runtime: p.runtime } : {}), observed_at: r.observed_at, received_at: r.received_at }]);
+    }
+    return out;
+  } catch (err) { console.error('ops follow-up read failed:', err); return 'unknown'; }
+}
+
+async function commandView(db: Db, run: Pick<RunRow, 'class_run_id' | 'cohort_id' | 'profile_id'>, id: string, now: number) {
+  const runId = run.class_run_id;
   const cmd = await db.prepare('SELECT id,action,reason_code,issued_by,created_at,expires_at,cancelled_at FROM ops_commands WHERE id=? AND class_run_id=?').bind(id, runId).first<Record<string, unknown>>();
   if (!cmd) return null;
-  const targets = ((await db.prepare('SELECT seat_id,state,result_code,lease_generation,connection_epoch,receipt_json,updated_at FROM ops_command_targets WHERE command_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<{ seat_id: string; state: string; result_code: string; lease_generation: number; connection_epoch: number; receipt_json: string; updated_at: number }>;
-  return { command: cmd, now, summary: summarize(targets), targets: targets.map((t) => { let receipt = {}; try { receipt = JSON.parse(t.receipt_json); } catch { receipt = {}; } return { seat_id: t.seat_id, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt }; }) };
+  const targets = ((await db.prepare('SELECT seat_id,grant_id,state,result_code,lease_generation,connection_epoch,receipt_json,updated_at FROM ops_command_targets WHERE command_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; state: string; result_code: string; lease_generation: number; connection_epoch: number; receipt_json: string; updated_at: number }>;
+  // U4 — `succeeded` is the device saying it ran. What that achieved is a separate answer, per target, from linked evidence only.
+  const action = String(cmd.action), recovery = COMMAND_ACTIONS[action]?.kind === 'recovery' || !!SERVICE_ISSUED_ACTIONS[action];
+  const ran = recovery ? targets.filter((t) => (FOLLOWUP_LINKABLE_STATES as readonly string[]).includes(t.state)) : [];
+  const followups = await readFollowups(db, runId, ran.map((t) => ({ seat_id: t.seat_id, command_id: id, grant_id: t.grant_id, since: Number(cmd.created_at) })));
+  const caps = new Map<string, boolean>(), issues = new Map<string, { id: string; count: number }>();
+  if (ran.length) {
+    try {
+      for (const r of ((await db.prepare('SELECT grant_id,capabilities_json FROM ops_device_connections WHERE grant_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ran.map((t) => t.grant_id))).all()).results ?? []) as Array<{ grant_id: string; capabilities_json: string }>) { let has = false; try { has = (JSON.parse(r.capabilities_json) as string[]).includes(FOLLOWUP_CAPABILITY); } catch { has = false; } caps.set(r.grant_id, (caps.get(r.grant_id) ?? false) || has); }
+      if (action === 'refresh_connection') for (const r of ((await db.prepare(`SELECT s.seat_id,(SELECT t.jti FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS jti,(SELECT count(*) FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=?) AS n FROM class_run_seats s WHERE s.class_run_id=? AND s.replaced_at IS NULL AND s.seat_id IN (SELECT value FROM json_each(?))`).bind(run.cohort_id, run.profile_id, now, run.cohort_id, run.profile_id, runId, JSON.stringify(ran.map((t) => t.seat_id))).all()).results ?? []) as Array<{ seat_id: string; jti: string | null; n: number }>) if (r.jti) issues.set(r.seat_id, { id: r.jti, count: r.n });
+    } catch (err) { console.error('ops outcome inputs unavailable:', err); }
+  }
+  const shaped = targets.map((t) => {
+    let receipt: { observed_at?: number; received_at?: number } = {}; try { receipt = JSON.parse(t.receipt_json); } catch { receipt = {}; }
+    const outcome = recoveryOutcome({ action, state: t.state, result_code: t.result_code, receipt, followups: followups === 'unknown' ? [] : followups.get(`${id}|${t.seat_id}`) ?? [], reports_followup: caps.has(t.grant_id) ? caps.get(t.grant_id)! : null, latest_issue: issues.get(t.seat_id) ?? null });
+    return { seat_id: t.seat_id, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt, outcome };
+  });
+  return { command: cmd, now, summary: { ...summarize(targets), outcomes: summarizeOutcomes(shaped.map((t) => t.outcome)), ...(followups === 'unknown' ? { followups: 'unknown' } : {}) }, targets: shaped };
 }
 
 classroomOpsTeacher.get(root + '/commands/:id', async (c) => {
   const auth = await teacher(c, 'observe'); if (auth instanceof Response) return auth;
   const run = await loadRun(c, auth); if (run instanceof Response) return run;
   const now = Date.now(); await settleOverdueRun(c.env.HPS_DB, run.class_run_id, now);
-  const view = await commandView(c.env.HPS_DB, run.class_run_id, c.req.param('id')!, now);
+  const view = await commandView(c.env.HPS_DB, run, c.req.param('id')!, now);
   return view ? c.json(view) : c.json({ error: 'command not found' }, 404);
 });
 
@@ -688,7 +750,7 @@ classroomOpsTeacher.delete(root + '/commands/:id', async (c) => {
     db.prepare("UPDATE ops_command_targets SET state='cancelled',result_code='instructor_cancelled',updated_at=? WHERE command_id=? AND state IN ('queued','leased')").bind(now, id),
     audit(db, run.class_run_id, '', 'instructor', auth.payload.u, 'command_cancelled', { command_id: id }, now),
   ]);
-  return c.json(await commandView(db, run.class_run_id, id, now));
+  return c.json(await commandView(db, run, id, now));
 });
 
 // ── class-run control (R3): pause / resume new runs ─────────────────────────
