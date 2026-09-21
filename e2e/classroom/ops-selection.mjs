@@ -46,6 +46,8 @@ try {
   // ── control: the ordinary path still works (preview → confirm → the Service records exactly what was shown) ──
   await box('A8').check(); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); assert.match(await page.locator('#ops-pick-preview').innerText(), /A8 · student-h — 요청 예정/);
   await page.locator('#ops-pick-go').click(); await page.locator('#ops-pick-items').filter({ hasText: /^A8 · student-h/ }).waitFor(); assert.deepEqual(live().map((x) => [x.rev, x.seat_id, x.student_id]), [[1, 'A8', 'student-h']]);
+  // Seen on the real Mac run (2026-09-21): the confirm-step notice stayed next to "서버 검증됨 · 결과 확정". Once confirmed it must be replaced.
+  assert.doesNotMatch(await note(), /확인만 했습니다/, 'the notice of the confirm step does not survive the confirmation'); assert.match(await note(), /요청을 접수했습니다/);
   await page.locator('#ops-select-none').click(); ok('control: an undisturbed preview and confirmation request exactly the seat that was shown');
 
   // ── P1a: a preview answer held back while the selection changes, while it is cleared, and behind a newer preview ──
