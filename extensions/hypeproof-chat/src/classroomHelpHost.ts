@@ -77,7 +77,10 @@ export class ClassroomHelpHost {
     const good = this.lastGood.get(dk), split = splitShares(good?.shares ?? [], b.run);
     let store = this.store(); const env = store.envelopes[sk] ?? null;
     // A request whose answer was lost: if the Service has it, it was stored — the envelope is done. Otherwise it stays unknown.
-    if (env && env.state !== "prepared" && shares?.some((s) => s.id === env.request_id)) { delete store.envelopes[sk]; await this.save(store, dk); store = this.store(); this.note = "보낸 도움 요청이 서버에 저장된 것을 확인했습니다."; }
+    if (env && env.state !== "prepared" && shares?.some((s) => s.id === env.request_id)) {
+      delete store.envelopes[sk]; const d = store.drafts[dk]; if (d && d.question.trim() === (env.content.question ?? "")) store.drafts[dk] = { ...d, question: "", turnId: null, updated_at: Date.now() };
+      await this.save(store, dk); store = this.store(); this.note = "보낸 도움 요청이 서버에 저장된 것을 확인했습니다.";
+    }
     const since = turnsSince(this.deps.connection());
     this.deps.post({
       generation: gen, draft_key: dk, availability, seat: b.seat, draft: store.drafts[dk] ?? emptyDraft(), turns: turnsOf(this.deps.history(), since),

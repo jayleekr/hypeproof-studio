@@ -44,7 +44,10 @@ export function HelpRequest(props: { view: HelpView | null; post: Post }) {
   const drawnFor = useRef<string | null>(null), saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // The local draft is (re)loaded only when the view is for another learner-in-class; typing is never overwritten by a refresh.
   useEffect(() => { if (!v) return; if (drawnFor.current !== key) { drawnFor.current = key; setDraft(v.draft); setConsent(false); } }, [v, key]);
-  useEffect(() => { setConsent(false); }, [v?.envelope?.request_id]);
+  // A preview being made, sent or dropped is the host's decision about the draft (a sent question is cleared there): take it.
+  // The form is hidden while a preview is open, so no typing can be lost here.
+  const envSig = v?.envelope ? v.envelope.request_id + ":" + v.envelope.state : "";
+  useEffect(() => { setConsent(false); if (v) setDraft(v.draft); }, [envSig]);
   // While open, read again now and then (the instructor's answer arrives without the learner doing anything).
   useEffect(() => { if (!open) return; props.post({ type: "helpRequest" }); const t = setInterval(() => { if (document.visibilityState !== "hidden") props.post({ type: "helpRequest" }); }, 15000); const stop = () => clearInterval(t); return stop; }, [open]);
   useEffect(() => () => { if (saveTimer.current) clearTimeout(saveTimer.current); }, []);
