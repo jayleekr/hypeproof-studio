@@ -33,25 +33,30 @@ assert.equal(execFileSync('git', ['diff', manifest.extension.source_sha, head, '
 const sdk = manifest.agent_sdk?.vendored === true && manifest.agent_sdk.binary && process.env.HPS_GUI_NO_SDK !== '1';
 
 const steps = [], result = { schema: 'hps-classroom-mac-gui/1', started_at: new Date().toISOString(), source_sha: head, prepared_extension_sha: manifest.extension.source_sha, shell: manifest.shell, agent_sdk: sdk ? { version: manifest.agent_sdk.version, sdk_mjs_sha256: manifest.agent_sdk.sdk_mjs_sha256, binary_sha256: manifest.agent_sdk.binary.sha256, binary_via: 'HPS_SDK_BINARY', js_source: manifest.agent_sdk.source } : null,
-  real: ['Studio shell process (isolated copy)', 'extension host + webview', 'command palette + notifications', ...(sdk ? ['Agent SDK ' + manifest.agent_sdk.version + ' + native claude binary'] : []), 'HTTP → Service router + SQLite', 'ops sync loop + command runner', 'workspace files'],
+  real: ['Studio shell process (isolated copy)', 'extension host + webview', 'command palette + notifications', ...(sdk ? ['Agent SDK ' + manifest.agent_sdk.version + ' + native claude binary'] : []), 'HTTP → Service router + SQLite', 'ops sync loop + command runner', 'workspace files', 'SessionSpool on disk (isolated HOME) → snapshot freezer → upload → Service re-hash and coverage'],
   observations: ['The extension\'s startup update check reads the PUBLIC release feed and showed "새 버전 v0.1.56" in this old-shell copy. It is a read-only request; this runner never clicks it, and nothing was installed.',
     'With a persistent provider 5xx the real Agent SDK CLI retried for more than 90 s without any board signal; the instructor only hears of it when the 240 s stall watchdog ends the turn.'],
-  synthetic: ['accounts', 'lesson', 'model provider (scripted at api.anthropic.com)', 'in-memory R2', 'in-memory secret storage'], steps };
+  synthetic: ['accounts', 'lesson', 'model provider (scripted at api.anthropic.com)', 'report evaluator transport (scripted; cites only catalog quotes)', 'in-memory R2', 'in-memory secret storage'], steps };
 const save = (status, error) => writeFileSync(path.join(out, 'result.json'), JSON.stringify({ ...result, status, ...(error ? { error } : {}), finished_at: new Date().toISOString() }, null, 2));
-const PLAN = ['token', 'connect', 'step', 'reviewed', 'error', 'resolved', 'stop', 'reset', 'reconnect', 'disconnect'];
+const PLAN = ['token', 'connect', 'step', 'reviewed', 'error', 'resolved', 'token_evidence', 'stop', 'reset', 'consent', 'collect', 'draft', 'reconnect', 'disconnect'];
 const record = (id, data) => { steps.push({ id, status: 'PASS', ...data }); console.log('PASS ' + id); save('IN_PROGRESS'); };
 
 // ── Service: real router + SQLite, synthetic class run ──
 const local = await localOps(), { setRoster } = await import('../../worker/src/lib/kv.ts');
 const seats = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }];
 await setRoster(local.env.HPS_KV, local.cohort, seats.map((s) => s.student_id)); await local.freeze();
-assert.equal((await local.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true } })).status, 201);
+assert.equal((await local.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true, ops_reports: true } })).status, 201);
 // The harness instructor token lives one hour; a participant token may not outlive its issuer, so this one is issued for longer.
 const { issueIssuer } = await import('../../worker/src/lib/tokens.ts'), { TEST_SECRET } = await import('../../worker/test/harness/index.mjs'), { OPS_ALL } = await import('../../worker/test/harness/classroom-ops.mjs');
 const inviter = (await issueIssuer({ issuer: 'teacher-a', scopes: [{ cohort: local.cohort, profiles: [local.profile], ops: OPS_ALL }] }, 4, TEST_SECRET)).token;
 const invite = await local.request(`/admin/cohorts/${local.cohort}/authoring/${local.lesson.course_id}/versions/${local.lesson.version}/participants`, 'POST', { user: 'student-a', hours: 1 }, inviter);
 assert.equal(invite.status, 200, invite.raw); const token = invite.json.token;
 Object.assign(local.env, { LLM_PROVIDER: 'anthropic', ANTHROPIC_API_KEY: 'synthetic-no-live-key', OPENAI_API_KEY: undefined, ANTHROPIC_PROXY_URL: undefined });
+
+// ── evaluator: a scripted transport that may only cite quotes the Service put in its catalog (no live model, no key) ──
+const { setEvaluatorTransport } = await import('../../worker/src/routes/classroom-reports.ts'); local.env.HPS_CLASSROOM_EVALUATOR = 'service-anthropic'; let evaluatorCalls = 0;
+setEvaluatorTransport(async (request) => { evaluatorCalls++; const own = JSON.parse(request.messages[0].content).evidence_catalog.find((q) => q.basis);
+  return Response.json({ content: [{ type: 'text', text: JSON.stringify({ findings: own ? [{ capability: 'FRAMING', status: 'observed', claim: '확인할 조건을 말로 제시했습니다.', evidence: [{ quote_id: own.quote_id }], assistance: 'unknown' }] : [], next_experiment: '다음에는 확인 기준을 먼저 적고 시작해 보세요.' }) }], usage: { input_tokens: 100, output_tokens: 40 } }); });
 
 // ── provider: scripted, and the only thing that is. Nothing in this process may reach a real provider. ──
 let provider = 'ok'; const providerCalls = [], realFetch = globalThis.fetch;
@@ -77,14 +82,18 @@ server.listen(0, '127.0.0.1'); await once(server, 'listening'); const origin = '
 const userDir = realpathSync(mkdtempSync(path.join(tmpdir(), 'hps-ops-gui-'))), ws = path.join(userDir, 'ws'); mkdirSync(path.join(userDir, 'User'), { recursive: true }); mkdirSync(ws);
 writeFileSync(path.join(ws, 'index.html'), '<!doctype html><title>학생 작업</title><h1>SYNTHETIC LEARNER WORK</h1>\n'); writeFileSync(path.join(ws, 'notes.md'), '# 내 메모\n- 예약 버튼 위치 확인\n');
 writeFileSync(path.join(userDir, 'User/settings.json'), JSON.stringify({ 'hypeproofChat.proxyUrl': origin + '/v1', 'window.dialogStyle': 'custom', 'workbench.startupEditor': 'none', 'update.mode': 'none', 'telemetry.telemetryLevel': 'off' }));
-writeFileSync(path.join(userDir, 'User/hps-test-state.json'), JSON.stringify({ token, coach: { name: '연습 코치', personality: '' } }), { mode: 0o600 });
+// No e2e gate (HPS_TEST_E2E / hps-test-state.json): with it the extension creates no SessionSpool at all, and the record this
+// run collects has to be the real one. The token arrives through the local-dev token file instead, and HOME is this run's own
+// directory, so the spool (…/Library/Application Support/HypeProof-Studio/logs/sessions) never mixes with the user's Studio data.
+const fakeHome = path.join(userDir, 'home'), tokenFile = path.join(userDir, 'learner-token.txt'); mkdirSync(fakeHome, { recursive: true }); writeFileSync(tokenFile, token, { mode: 0o600 });
+const spoolRoot = path.join(fakeHome, 'Library/Application Support/HypeProof-Studio/logs/sessions');
 const workHashes = () => Object.fromEntries(readdirSync(ws).filter((f) => statSync(path.join(ws, f)).isFile()).sort().map((f) => [f, sha(path.join(ws, f))]));
 
 let app; const sockets = [], port = 9351;
 const status = async () => (await local.request(local.base + '/status')).json, seat = async (id = 'A1') => (await status()).seats.find((s) => s.seat_id === id);
 try {
-  const appEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/(API_KEY|AUTH_TOKEN|SIGNING_SECRET|ADMIN_PASSWORD|_SECRET$)/.test(k)));
-  app = await electron.launch({ executablePath: path.join(copy, 'Contents/MacOS/HypeProof Studio'), timeout: 45000, env: { ...appEnv, HPS_TEST_E2E: '1', ...(sdk ? { HPS_SDK_BINARY: manifest.agent_sdk.binary.path } : {}) },
+  const appEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/(API_KEY|AUTH_TOKEN|SIGNING_SECRET|ADMIN_PASSWORD|_SECRET$|^HPS_TEST|ELECTRON_RUN_AS_NODE)/.test(k)));
+  app = await electron.launch({ executablePath: path.join(copy, 'Contents/MacOS/HypeProof Studio'), timeout: 45000, env: { ...appEnv, HOME: fakeHome, HPS_DEV_TOKEN_FILE: tokenFile, HPS_TEST_COACH_NAME: '연습 코치', ...(sdk ? { HPS_SDK_BINARY: manifest.agent_sdk.binary.path } : {}) },
     args: ['--user-data-dir=' + userDir, '--extensions-dir=' + path.join(userDir, 'extensions'), '--disable-workspace-trust', '--use-inmemory-secretstorage', '--disable-updates', '--skip-welcome', '--skip-release-notes', '--remote-debugging-port=' + port, '--folder-uri', pathToFileURL(ws).href] });
   const window = await app.firstWindow(); await window.waitForTimeout(6000);
   const wait = async (fn, label, ms = 30000) => { const until = Date.now() + ms; let last; while (Date.now() < until) { try { last = await fn(); if (last) return last; } catch (e) { last = e; } await window.waitForTimeout(250); } throw Error('timed out: ' + label + (last instanceof Error ? ' — ' + last.message : '')); };
@@ -148,6 +157,11 @@ try {
   const s6 = await wait(async () => { const s = await seat(); return s?.error?.cleared === true || (s?.error && s.error.blocking === false) ? s : null; }, 'fault cleared on the board', 60000); await shot('06-resolved');
   record('resolved', { attention: s6.attention, reason: s6.reason, activation: s6.activation, error: s6.error, answered_by: sdk ? 'agent-sdk runtime (vendored SDK + native binary) against the scripted provider' : 'proxy runtime against the scripted provider' });
 
+  // 6a — the defect reproduced on 2026-09-21: after the first working turn (runtime_ready) the board forgot that the app had verified the issued token
+  const s6a = await wait(async () => { const s = await seat(); return s?.entry_stage === 'runtime_ready' ? s : null; }, 'runtime_ready on the board', 60000);
+  assert.equal(s6a.token?.app_verified, 'matches_issue', 'token evidence survives the later entry stage: ' + JSON.stringify(s6a.token)); assert.equal(s6a.token.issue_id.length > 0, true);
+  record('token_evidence', { entry_stage: s6a.entry_stage, token: { issue_id_prefix: s6a.token.issue_id.slice(0, 8), app_verified: s6a.token.app_verified }, note: 'issued through the lesson participants route (ledger), verified by the real app, still shown after runtime_ready' });
+
   // 6b — the instructor stops a turn that is really running in the SDK (the provider never answers)
   const commandDone = async (id, ms = 90000) => wait(async () => { const v = (await local.request(local.base + '/commands/' + id)).json; const t = (v.targets ?? [])[0]; return t && !['queued', 'leased', 'accepted', 'running'].includes(t.state) ? t : null; }, 'command receipt', ms);
   provider = 'stall'; const stalledAt = providerCalls.length; await say(chat, '이 요청은 응답이 오지 않는 동안 강사가 멈춥니다'); await wait(() => providerCalls.length > stalledAt, 'the turn reached the provider', 60000);
@@ -167,6 +181,30 @@ try {
   assert.ok(await chat.evaluate("document.body.textContent.includes('예약 버튼이 모바일에서')&&document.body.textContent.includes('SYNTHETIC-PROVIDER-ANSWER')"), 'the conversation is still on screen');
   await say(chat, '초기화 뒤에도 이어서 질문합니다'); await wait(() => chat.evaluate("(document.body.textContent.match(/SYNTHETIC-PROVIDER-ANSWER/g)||[]).length>=2"), 'a turn works after the reset', 90000);
   record('reset', { receipt: { state: done.state, result_code: done.result_code }, learner_notice: resetNotice ?? null, files: filesBefore, conversation_kept: true, turn_after_reset: true });
+
+  // 7a — the learner agrees, in the real window, to send this class's record
+  await palette('수업 기록 보내기 동의·철회'); const agree = '동의하고 보내기 허용';
+  await wait(() => window.evaluate((t) => { const b = [...document.querySelectorAll('.monaco-dialog-box .monaco-button, .notifications-toasts .monaco-button, .notifications-center .monaco-button')].find((x) => x.textContent.trim() === t); if (!b) return false; b.click(); return true; }, agree), 'consent prompt');
+  await wait(async () => (await toasts()).some((t) => t.includes('동의를 기록했습니다')), 'consent recorded notification'); await shot('07a-consent');
+  record('consent', { recorded: local.db.prepare("SELECT count(*) n FROM classroom_consents WHERE student_id='student-a' AND purpose='class_report'").get().n, note: 'pressed in the real window; purpose class_report, notice-v1' });
+
+  // 7b — "수업 마무리": the Service asks, the real app freezes a copy of its REAL SessionSpool and uploads it; the Service re-hashes it
+  const batchRes = await local.request(local.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: 1, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false }); assert.equal(batchRes.status, 201, batchRes.raw); const batchId = batchRes.json.batch.id;
+  const item = await wait(async () => { const v = (await local.request(local.base + '/report-batches/' + batchId)).json; const i = v.items.find((x) => x.seat_id === 'A1'); return i?.state === 'verified' ? { i, summary: v.summary, others: v.items.filter((x) => x.seat_id !== 'A1').map((x) => [x.seat_id, x.state]) } : null; }, 'the real record is verified by the Service', 120000);
+  const sessions = readdirSync(spoolRoot, { recursive: true }).filter((f) => String(f).endsWith('events.jsonl')); assert.equal(sessions.length, 1, 'one real spool session in this run\'s own HOME: ' + sessions.join(','));
+  const liveSeqs = readFileSync(path.join(spoolRoot, String(sessions[0])), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l).seq); assert.deepEqual(liveSeqs, liveSeqs.map((_, n) => n + 1), 'the real app numbers its spool 1..N');
+  const stored = [...local.r2.keys()].find((k) => k.includes(batchId) && k.endsWith('events.jsonl')), storedText = new TextDecoder().decode(local.r2.get(stored)), storedEvents = storedText.split('\n').filter(Boolean).map((l) => JSON.parse(l));
+  assert.ok(storedEvents.some((e) => e.type === 'prompt' && String(e.text).includes('예약 버튼이 모바일에서')), 'the collected record is what was really typed in this window');
+  assert.equal(item.i.coverage, 'complete', 'real spool + real freezer → complete: ' + JSON.stringify(item.i)); await shot('07b-collected');
+  record('collect', { batch: { roster: item.summary.roster, verified: item.summary.verified, verified_complete_coverage: item.summary.verified_complete_coverage }, a1: { state: item.i.state, integrity: item.i.integrity, coverage: item.i.coverage, input_revision: item.i.input_revision }, others: item.others, real_spool: { events: storedEvents.length, first_seq: storedEvents[0].seq, last_seq: storedEvents[storedEvents.length - 1].seq, live_events_now: liveSeqs.length, types: [...new Set(storedEvents.map((e) => e.type))] }, note: 'A2 never connected or consented: it stays on the batch with its reason, not as a zero' });
+
+  // 7c — a draft from that verified record (evaluator transport is scripted), opened and approved for CONTENT only
+  const B = local.base + '/report-batches/' + batchId; await local.request(B + '/advance', 'POST', {});
+  const job = await wait(async () => { await local.request(B + '/advance', 'POST', {}); const q = (await local.request(B + '/reports')).json; const j = q.jobs.find((x) => x.student_id === 'student-a'); return j && !['queued', 'leased'].includes(j.state) ? { j, q } : null; }, 'draft job settled', 60000);
+  assert.equal(job.j.state, 'review_required', JSON.stringify(job.j)); assert.equal(job.j.input_coverage, 'complete'); assert.equal(job.q.jobs.filter((x) => x.student_id === 'student-a').length, 1, 'one current row for this learner');
+  const draft = await local.request(B + '/reports/' + job.j.id); assert.equal(draft.status, 200, draft.raw); assert.ok(draft.raw.includes('예약 버튼이 모바일에서'), 'the draft cites what the learner really typed');
+  const approved = await local.request(B + '/reports/' + job.j.id + '/review', 'PUT', { decision: 'approve', expected_revision: draft.json.revision, draft_digest: draft.json.draft_digest }); assert.equal(approved.json?.state, 'approved', approved.raw); assert.ok([200, 201].includes(approved.status), approved.raw);
+  record('draft', { evaluator_calls: evaluatorCalls, job: { state: job.j.state, input_coverage: job.j.input_coverage, evaluator: job.j.evaluator }, by_state: job.q.summary.by_state, content_approved: true, delivery: 'NOT_RUN (approval is not sending; no delivery provider is configured in this run)' });
 
   // 8 — reconnect: a new one-time code replaces the connection; the old one cannot act
   const again = (await local.request(local.base + '/pairings', 'POST', { seat_id: 'A1', roster_revision: 1 })).json; const grantBefore = (await seat()).connection?.grant_id ?? null;
