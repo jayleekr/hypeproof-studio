@@ -713,7 +713,7 @@ async function commandView(db: Db, run: Pick<RunRow, 'class_run_id' | 'cohort_id
   const runId = run.class_run_id;
   const cmd = await db.prepare('SELECT id,action,reason_code,issued_by,created_at,expires_at,cancelled_at FROM ops_commands WHERE id=? AND class_run_id=?').bind(id, runId).first<Record<string, unknown>>();
   if (!cmd) return null;
-  const targets = ((await db.prepare('SELECT seat_id,grant_id,state,result_code,lease_generation,connection_epoch,receipt_json,updated_at FROM ops_command_targets WHERE command_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; state: string; result_code: string; lease_generation: number; connection_epoch: number; receipt_json: string; updated_at: number }>;
+  const targets = ((await db.prepare('SELECT seat_id,seat_revision,grant_id,state,result_code,lease_generation,connection_epoch,receipt_json,updated_at FROM ops_command_targets WHERE command_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<{ seat_id: string; seat_revision: number; grant_id: string; state: string; result_code: string; lease_generation: number; connection_epoch: number; receipt_json: string; updated_at: number }>;
   // U4 — `succeeded` is the device saying it ran. What that achieved is a separate answer, per target, from linked evidence only.
   const action = String(cmd.action), recovery = COMMAND_ACTIONS[action]?.kind === 'recovery' || !!SERVICE_ISSUED_ACTIONS[action];
   const ran = recovery ? targets.filter((t) => (FOLLOWUP_LINKABLE_STATES as readonly string[]).includes(t.state)) : [];
@@ -728,7 +728,7 @@ async function commandView(db: Db, run: Pick<RunRow, 'class_run_id' | 'cohort_id
   const shaped = targets.map((t) => {
     let receipt: { observed_at?: number; received_at?: number } = {}; try { receipt = JSON.parse(t.receipt_json); } catch { receipt = {}; }
     const outcome = recoveryOutcome({ action, state: t.state, result_code: t.result_code, receipt, followups: followups === 'unknown' ? [] : followups.get(`${id}|${t.seat_id}`) ?? [], reports_followup: caps.has(t.grant_id) ? caps.get(t.grant_id)! : null, latest_issue: issues.get(t.seat_id) ?? null });
-    return { seat_id: t.seat_id, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt, outcome };
+    return { seat_id: t.seat_id, seat_revision: t.seat_revision, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt, outcome };
   });
   return { command: cmd, now, summary: { ...summarize(targets), outcomes: summarizeOutcomes(shaped.map((t) => t.outcome)), ...(followups === 'unknown' ? { followups: 'unknown' } : {}) }, targets: shaped };
 }

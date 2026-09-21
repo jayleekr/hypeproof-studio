@@ -184,7 +184,7 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   if (!snap) return c.json({ error: 'nothing was uploaded for this revision', reason: 'manifest_only' }, 409);
   // The binding is part of what was sealed: the same bytes under another binding are another manifest.
   const digest = await sha256Hex(JSON.stringify([m.value.files.map((f) => [f.name, f.bytes, f.sha256]).sort(), m.value.binding ?? null]));
-  if (snap.state === 'sealed') return snap.manifest_digest === digest ? c.json({ receipt_id: snap.receipt_id, manifest_digest: digest, integrity: snap.integrity, coverage: snap.coverage, replay: true }) : c.json({ error: 'this revision is sealed with a different manifest', reason: 'revision_sealed' }, 409);
+  if (snap.state === 'sealed') return snap.manifest_digest === digest ? c.json({ receipt_id: snap.receipt_id, manifest_digest: digest, integrity: snap.integrity, coverage: snap.coverage, ...(item.state === 'verified' && item.receipt_id === snap.receipt_id && item.reason ? { coverage_reason: item.reason } : {}), replay: true }) : c.json({ error: 'this revision is sealed with a different manifest', reason: 'revision_sealed' }, 409);
   // Re-hash what the Service actually holds. The device's claim is only what it is compared against.
   let coverage = 'sequence_unavailable', coverageReason = '', problem = '', malformed = 0, metaText = '', sessionId = '';
   for (const f of m.value.files) {
@@ -198,7 +198,8 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
       if (cov.foreign) { problem = 'foreign_events'; break; }
       // The declared final event must be the one the Service sees last; a different tail is another extent.
       if (range && (cov.range_problem === 'line_count_mismatch' || cov.range_problem === 'declared_extent_mismatch' || range.final_line_sha256 !== (await finalLineSha(text)))) { problem = 'range_mismatch'; break; }
-      coverage = cov.coverage; coverageReason = cov.range_problem; malformed = cov.malformed;
+      // A verified record that is not `complete` always says why: an undeclared extent is a reason too (AT-41).
+      coverage = cov.coverage; coverageReason = cov.range_problem || (cov.coverage === 'range_unknown' ? 'range_not_declared' : ''); malformed = cov.malformed;
     }
   }
   // Identity lives in the spool metadata. A record of another learner, cohort, profile, class run or activity —
@@ -228,7 +229,8 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
     ...(u3 ? [sealBasisStatement(db, { batch_id: item.batch_id, student_id: g.student_id, revision, class_run_id: g.class_run_id, now })] : []),
     db.prepare("UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading'").bind(digest, coverage, receipt, now, item.batch_id, g.student_id, revision),
     // A later verified revision is a NEW input revision. It never silently replaces what a report was built from.
-    db.prepare("UPDATE classroom_collect_items SET state='verified',reason='',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=?").bind(digest, coverage, receipt, inputRevision, now, item.batch_id, item.seat_id),
+    // `reason` of a verified item is the coverage reason: integrity=verified is not coverage=complete, and the teacher view needs why (AT-41).
+    db.prepare("UPDATE classroom_collect_items SET state='verified',reason=?,manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=?").bind(coverageReason, digest, coverage, receipt, inputRevision, now, item.batch_id, item.seat_id),
     db.prepare('INSERT INTO classroom_snapshot_bindings(batch_id,student_id,revision,class_run_id,cohort_id,profile_id,seat_id,grant_id,consent_id,spool_session_id,attribution,activity_json,range_json,malformed_lines,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING').bind(item.batch_id, g.student_id, revision, g.class_run_id, g.cohort_id, g.profile_id, g.seat_id, g.id, item.consent_id ?? '', sessionId, m.value.binding ? 'bound' : 'metadata_run', JSON.stringify(m.value.binding?.activity ?? null), JSON.stringify(m.value.binding?.range ?? null), malformed, now),
     ...(feedsEvaluation ? [db.prepare("INSERT INTO classroom_job_outbox(kind,dedupe_key,payload_json,created_at) VALUES('report_input',?,?,?) ON CONFLICT(kind,dedupe_key) DO NOTHING").bind(`${item.batch_id}:${g.student_id}:${digest}`, JSON.stringify({ batch_id: item.batch_id, class_run_id: g.class_run_id, student_id: g.student_id, snapshot_revision: revision, input_revision: inputRevision, manifest_digest: digest, coverage }), now)] : []),
     audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage, ...(coverageReason ? { coverage_reason: coverageReason } : {}) }, now),
@@ -288,7 +290,21 @@ async function batchView(db: Db, runId: string, id: string) {
   // One observation: the same `now` decides the grace, what counts as recent bytes, and what the instructor is told was seen when.
   const now = Date.now(), live = await db.prepare('SELECT o.flags_json,o.ends_at,s.ended_at FROM class_run_ops o LEFT JOIN sessions s ON s.id=o.class_run_id WHERE o.class_run_id=?').bind(runId).first<{ flags_json: string; ends_at: number; ended_at: string | null }>();
   const closed = !live ? 'run_not_found' : !parseFlags(live.flags_json).ops_collect ? 'ops_collect_disabled' : live.ended_at || now > live.ends_at ? 'run_ended' : '';
-  for (const i of items) { i.request = delivery.get(i.seat_id) ?? null; if (i.state !== 'not_selected') { i.status = collectStatus(i as never, { now, upload_until: Number(b.upload_until) }); i.outcome = collectOutcome(i.status.phase); } } // U4: the same verdict words as recovery; `resolved` = the Service verified the receipt, never the device's 'sent'
+  // AT-41 — what a verified record actually spans, from the binding it was sealed under (not from the device's later claims).
+  // Unreadable → `extent` is absent and the page says so; it is never filled in as "the whole lesson".
+  const extents = new Map<string, Record<string, unknown>>();
+  try {
+    for (const r of ((await db.prepare("SELECT i.seat_id,g.range_json FROM classroom_collect_items i JOIN classroom_snapshots s ON s.batch_id=i.batch_id AND s.student_id=i.student_id AND s.receipt_id=i.receipt_id JOIN classroom_snapshot_bindings g ON g.batch_id=s.batch_id AND g.student_id=s.student_id AND g.revision=s.revision WHERE i.batch_id=? AND i.state='verified'").bind(id).all()).results ?? []) as Array<{ seat_id: string; range_json: string }>) {
+      const r0 = JSON.parse(r.range_json) as Record<string, unknown> | null; if (!r0) continue;
+      // Numbers and times only, under view names — the view never carries a spool session id or any content.
+      extents.set(r.seat_id, Object.fromEntries(([['lines', 'lines'], ['from_ts', 'from_ts'], ['to_ts', 'to_ts'], ['first_seq', 'first_seq'], ['last_seq', 'last_seq'], ['spool_last_seq', 'session_last_seq'], ['others_in_window', 'other_sessions_in_window']] as const).filter(([, k]) => r0[k] !== undefined).map(([v, k]) => [v, r0[k]])));
+    }
+  } catch (err) { console.error('collect extent unavailable:', err); }
+  for (const i of items) {
+    i.request = delivery.get(i.seat_id) ?? null;
+    if (i.state !== 'not_selected') { i.status = collectStatus(i as never, { now, upload_until: Number(b.upload_until) }); i.outcome = collectOutcome(i.status.phase); } // U4: the same verdict words as recovery; `resolved` = the Service verified the receipt, never the device's 'sent'
+    if (i.state === 'verified') { i.coverage_reason = i.reason ?? ''; const e = extents.get(i.seat_id); if (e) i.extent = e; }
+  }
   return { observed_at: now, batch: { ...b, dry_run: b.dry_run === 1, scope: sc.scope, mode: sc.mode, targets: sc.targets, upload_open: now < Number(b.upload_until), new_request_allowed: !closed, new_request_blocked_by: closed }, summary: { roster: items.length, selected: selected.length, not_selected: items.length - selected.length, by_state: by,
     // "Collected" is only what the Service verified. Arrived bytes and complete behaviour coverage are separate counts.
     verified: by.verified ?? 0, verified_complete_coverage: items.filter((i) => i.state === 'verified' && i.coverage === 'complete').length, held: items.filter((i) => ['consent_missing', 'guardian_consent_missing', 'withdrawn'].includes(i.state)).length }, items };
