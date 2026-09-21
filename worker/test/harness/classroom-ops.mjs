@@ -12,7 +12,8 @@ function sqliteBinding(db) {
     const params = () => { const n = [...sql.matchAll(/\?(\d+)/g)]; return n.length ? n.map((m) => args[Number(m[1]) - 1]) : args; };
     const q = () => db.prepare(sql.replace(/\?\d+/g, '?'));
     const stmt = { bind(...a) { args = a; return stmt; },
-      _run() { const r = q().run(...params()); return { success: true, results: [], meta: { changes: Number(r.changes) } }; },
+      // D1 returns the rows of a SELECT inside a batch; the U3 turn admission reads its stored row back that way.
+      _run() { if (/^\s*SELECT/i.test(sql)) return { success: true, results: q().all(...params()), meta: { changes: 0 } }; const r = q().run(...params()); return { success: true, results: [], meta: { changes: Number(r.changes) } }; },
       async run() { return stmt._run(); }, async first() { return q().get(...params()) ?? null; },
       async all() { return { success: true, results: q().all(...params()) }; } };
     return stmt;

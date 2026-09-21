@@ -49,6 +49,8 @@ import {NATIVE_TRIAL_LIMITS} from '../lib/native-trial-grants';
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { gateChatRequest } from "../lib/chat-gate";
+import { recordDispatch, recordOutcome } from "../lib/lesson-binding-store";
+import { BINDING_HEADER, classifyOutcome } from "../lib/lesson-binding";
 import {
   buildAnthropicSystemBlocks,
   clampMaxTokens,
@@ -256,6 +258,10 @@ messages.post("/messages", async (c) => {
   catch(error){return budgetErrorResponse(c,error);}
   if(executionAccess)profile=applyLessonFeatures(profile,{allowed:permittedFeatureKeys(profile).filter(f=>f!=='web_search'&&executionAccess!.choice.plan.allowed.features.includes(f))});
   let budgetReserved=false;
+  // #751 U3 — execution evidence for the turn this request was admitted into. `dispatched` is set only once the normalized
+  // request is about to leave for the provider; everything that is refused before that leaves no evidence at all.
+  const lessonTurn = gate.turn;
+  let dispatched = false, upstreamStatus: number | null = null, streamBroke = false, protocolDone = false;
 
   // #684 — accounting declared above every failure exit, mirroring chat.ts.
   // The SDK route wrote the same literal `status: 200` on the success path
@@ -291,6 +297,7 @@ messages.post("/messages", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    if (dispatched && lessonTurn) c.executionCtx.waitUntil(recordOutcome(env, lessonTurn, classifyOutcome({ upstreamStatus, protocolComplete: protocolDone, streamError: streamBroke, outputTokens: log.tokens_out, recordedStatus: log.status }), { status: upstreamStatus, now: Date.now() }));
     if(budgetReserved){budgetReserved=false;c.executionCtx.waitUntil(finishModelRequest(env,usageRequestId,log.status,returnedModel,measureUsage('anthropic',reportedUsage,log.status<400)).catch(()=>console.error('SDK usage finish unavailable')));}
     c.executionCtx.waitUntil(captureUsageCost(env,usageRequestId,{usage:reportedUsage,model:returnedModel,
       tier:typeof reportedUsage.service_tier==='string'?reportedUsage.service_tier:null,
@@ -530,6 +537,11 @@ messages.post("/messages", async (c) => {
       budgetReserved=true;await dispatchBudgetAttempt(env,usageRequestId);
     }
     if(env.HPS_ACCESS_CONTRACTS==='enabled')c.header('x-hps-usage-request-id',usageRequestId);
+    // #751 U3 — the durable intent comes BEFORE the call. If the first dispatch of this turn cannot be recorded, the
+    // provider is not called: "nothing on record" may only ever mean "nothing was executed".
+    const intent = await recordDispatch(env, lessonTurn, { request: usageRequestId, runtime: 'agent-sdk', model: modelLabel, now: Date.now() });
+    if (!intent.ok) { recordFailure(403, ERROR_KIND.BAD_REQUEST); return c.json({ error: { type: 'lesson_binding', code: intent.code, message: '수업 설정을 확인할 수 없어 실행하지 않았습니다. 잠시 뒤 다시 보내 주세요.' } }, 403); }
+    dispatched = true;
     upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {
       signal: nativeTrialSignal(c.req.raw),
       url: env.ANTHROPIC_PROXY_URL,
@@ -547,6 +559,7 @@ messages.post("/messages", async (c) => {
     return c.json(anthropicError(c, "api_error", "upstream request failed"), 502);
   }
 
+  upstreamStatus = upstream.status;
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
     // #257 — the upstream error body (provider prose, key hints, quota info)
@@ -589,6 +602,8 @@ messages.post("/messages", async (c) => {
       };
     };
     reportedUsage=j.usage??{};returnedModel=typeof j.model==='string'?j.model:null;costComplete=true;costEnded=true;
+    // A body without the provider's own end marker is not a finished answer, whatever the status line said.
+    protocolDone = typeof (j as { stop_reason?: unknown }).stop_reason === 'string';
     const tin = j.usage?.input_tokens ?? 0;
     const tout = j.usage?.output_tokens ?? 0;
     const cr = j.usage?.cache_read_input_tokens ?? 0;
@@ -693,14 +708,14 @@ messages.post("/messages", async (c) => {
   };
 
   const outStream = tapAnthropicStream(upstream.body, onUsage, {
-    onProtocolComplete:()=>{costComplete=true;costEnded=true;},
+    onProtocolComplete:()=>{costComplete=true;costEnded=true;protocolDone=true;},
     onUsageReport:(raw,model)=>{reportedUsage={...reportedUsage,...raw};if(model)returnedModel=model;},
     requestId: c.get("requestId"),
     onTextDelta: (delta) => {
       responseChars += delta.length;
     },
     onStreamError: () => {
-      streamFailed = true;
+      streamFailed = true; streamBroke = true;
     },
   });
 
@@ -710,6 +725,7 @@ messages.post("/messages", async (c) => {
       "cache-control": "no-cache",
       "x-accel-buffering": "no",
       "x-hps-model": modelLabel,
+      ...(gate.binding ? { [BINDING_HEADER]: gate.binding.key } : {}),
       "x-hps-module": module.version,
       ...(module.fallback ? { "x-hps-module-fallback": module.fallback.pinned } : {}),
       // #1008 — the gate's c.header() receipt does not survive a raw Response.
