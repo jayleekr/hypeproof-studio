@@ -118,6 +118,24 @@ export const CAPABILITY_MODELS: readonly CapabilityModel[] = [CANDIDATE_CAPABILI
 /** New work cards and interpretations use this model unless a legacy record is being read. */
 export const DEFAULT_CAPABILITY_MODEL = CANDIDATE_CAPABILITY_V1;
 
+/**
+ * The Korean label for a capability key, in the model that key belongs to.
+ *
+ * `model` is required for a reason. Scanning both models candidate-first labels
+ * a stored seven-Asset finding with the current model's word wherever the keys
+ * collide: OWNERSHIP is 책임 in the candidate model and 주인의식 in the seven
+ * Assets. Those are different constructs, and quietly showing one under the
+ * other's name is exactly the conversion this file's header says does not exist.
+ *
+ * An unrecognized model or key returns the key, so a wrong value is visible on
+ * screen rather than blank.
+ */
+export function capabilityLabel(key: unknown, model: string): string {
+  const wanted = String(key);
+  const found = CAPABILITY_MODELS.find((m) => m.id === model);
+  return found?.capabilities.find((c) => c.key === wanted)?.label_ko ?? wanted;
+}
+
 export function capabilityModel(id: unknown, revision: unknown): CapabilityModel | undefined {
   return CAPABILITY_MODELS.find((m) => m.id === id && m.revision === revision);
 }
