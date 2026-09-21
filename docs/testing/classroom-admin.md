@@ -422,7 +422,7 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 ### 최신 main 통합본의 Mac 재실행 · 2026-09-21 (오후)
 
-위 기록(수정 전 e3196e5 기준)의 후속이다. 같은 날 오후에 **스택 전체를 최신 main `19ff881`과 통합**하고 남은 결함 두 건을 고친 뒤 같은 devhost로 다시 실행했다. 아래 표의 ‘실제/합성’ 경계가 이 실행이 증명하는 범위의 전부다.
+위 기록(수정 전 e3196e5 기준)의 후속이다. 같은 날 오후에 **스택 전체를 최신 main과 통합**(`19ff881`, 이어서 작업 중 들어온 `f44cce3` #1218 — 시험 체인 목록 1곳만 충돌)하고 남은 결함 두 건을 고친 뒤 같은 devhost로 다시 실행했다. 아래 표의 ‘실제/합성’ 경계가 이 실행이 증명하는 범위의 전부다.
 
 **통합 방식.** main은 스택 맨 아래 `docs/remote-classroom-operations-20260918`에 병합하고 13개 브랜치로 올렸다(기존 관례, force-push 없음). 목록형 충돌(요구 목록·두 `package.json`의 시험 체인)은 양쪽을 합쳤다. 실제 충돌은 #1167에서 났다: `chatPanelProvider`는 관제 코드 + main의 영문 주석, `ChatPanel`은 main의 현재 과제 중심 화면을 그대로 두고 단계 자기보고를 얹었다(요구사항 ‘학생 화면 통합’ 행). Codex 수정 `6a7f33c`는 소유 PR별로 나눠 넣었다 — 초대 발급 원장 → #1167, 보고서 중복 행 → #1168, 실행기·문서 → #1169. 나눠 넣은 뒤 #1169 끝 트리가 `6fc8868` 위 병합 결과와 같음을 `git diff`로 확인했다.
 
@@ -432,7 +432,7 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 | 항목 | 값 |
 |---|---|
-| source | `b72b8f4faa62ffc1ddb969e36aa39bbb549fa84e` — #1169 tip, 원 checkout에서 빌드·`prepare`·실행(dirty 아님, 4개 번들 해시가 소스 빌드와 일치). 이 기록을 적는 뒤따르는 커밋은 문서만 바꾼다. 같은 내용의 첫 실행은 메시지 정리 전 커밋에서 14/14였고, 아래 값은 최종 커밋의 재실행(05:49–05:50Z)이다 |
+| source | `4278b8d6b907df15bcc98a3f317633033f1fe9bb` — #1169 tip, **main `f44cce3`(#1218)까지 포함**. 원 checkout에서 빌드·`prepare`·실행(dirty 아님, 4개 번들 해시가 소스 빌드와 일치, 05:54–05:55Z). 같은 경로를 통합 과정에서 세 번 실행해 모두 14/14였다: main `19ff881` 통합 직후, 커밋 메시지 정리 뒤(`b72b8f4`), main `f44cce3` 통합 뒤(이 값). 이 기록을 적는 뒤따르는 커밋은 문서만 바꾼다 |
 | shell | 공식 v0.1.56 arm64 **복사본**(commit `f5939d9cf6`), ad-hoc 서명. `/Applications` 설치본 미사용 |
 | Agent SDK | 0.3.207 JS(`sdk.mjs` sha256 `7f12ca8bcc75fcdb…`) + native `claude`(sha256 `1397a062c6889675…`) 실제 실행 |
 | OS | macOS 26.5.2 (25F84) arm64 |
