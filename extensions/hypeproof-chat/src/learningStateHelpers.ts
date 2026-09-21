@@ -94,8 +94,16 @@ export function gateSentence(miss: GateMiss, completion: readonly CompletionItem
   }
 }
 
-/** The kind names used when a completion item has no label. Screen copy, so no numbers. */
-const KIND_LABELS: Record<LearningEventKind, string> = {
+/**
+ * The kind names used when a completion item has no label, and when an evidence row
+ * has no words of the student's own. Screen copy, so no numbers.
+ *
+ * Exported because the Evidence drawer needs the same table. `test_observed` and
+ * `retest_confirmed` do not require `student_text` by spec (learning-events.ts), so
+ * a perfectly valid row of either kind has nothing to print — a second copy of
+ * these strings in the webview is how the two would drift apart.
+ */
+export const KIND_LABELS: Record<LearningEventKind, string> = {
   problem_committed: "무엇을 할지 정하기",
   criterion_set: "기대 조건 적기",
   test_observed: "직접 확인하기",

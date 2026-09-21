@@ -7,7 +7,7 @@ import {
   SOURCE_STATE_LABELS,
   UNRECORDED,
   beforeAfterOf,
-  decisionReason,
+  rowTitle,
   filterBySourceKind,
   groupByEvidenceType,
   normalizeSourceState,
@@ -278,7 +278,12 @@ function renderRow(row: EvidenceRowView) {
       data-source-state={state}
     >
       <p className="hp-evidence-text">
-        {row.evidence_type === "decision" ? decisionReason(row) : row.text}
+        {(() => {
+          const title = rowTitle(row);
+          // A kind name is not the student's sentence. Marked so, rather than
+          // printed as if they had written it (SX-12 rule 5).
+          return title.student ? title.text : <span className="hp-evidence-kindonly">{title.text}</span>;
+        })()}
       </p>
       <p className="hp-evidence-meta">
         <span>{SOURCE_KIND_LABELS[row.source_kind] ?? SOURCE_KIND_LABELS.none}</span>
