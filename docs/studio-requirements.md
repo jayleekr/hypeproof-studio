@@ -1,5 +1,22 @@
 # Studio behavioral requirements
 
+## Learning experience revision — 2026-09-18
+
+`REQ-STUDIO-LEARNING-EXPERIENCE`: the student's default screen shows the current
+task, customer and artifact; the coach asks and hints instead of answering;
+evidence (criteria, reasons, before/after, real vs simulated) is captured in
+the flow; reflection opens only at submit, session end and week end; no
+capability score, level or badge appears on a work screen; six-week content is
+session-design data, never code. Source: Jay's 2026-09-18 UI/UX design
+philosophy. [Intent INT-SX-00–10](intents/studio-learning-experience.md),
+[breakdown](design/ux-principles-breakdown-2026-09-18.md),
+[SX-01–60 requirements](requirements/studio-learning-experience.md),
+[design](design/studio-learning-experience.md),
+[SX-T validation](testing/studio-learning-experience.md),
+[plan and DAG](plan/studio-learning-experience.md).
+Status: criteria proposed; implementation, runtime and human acceptance NOT RUN.
+Overnight execution governance: `.claude/hypeproof/ux/`.
+
 ## Measurement core proposal — 2026-09-13
 
 `REQ-STUDIO-MEASUREMENT-CORE`: extract the existing observation/evidence/interpretation
