@@ -214,13 +214,15 @@ export function ChatPanel(props: Props) {
   const [imports, setImports] = useState<ImportRef[]>(() => config?.activityDraft?.imports ?? []);
   const [lastImport, setLastImport] = useState<LastImport | null>(null);
   const [importNote, setImportNote] = useState<string | null>(null);
-  const snapshot = useRef({text:draft,images:pendingImages,queued,imports});
-  snapshot.current = {text:draft,images:pendingImages,queued,imports};
+  // A draft that never imported an instructor prompt is saved exactly as before U3: no `imports` key at all.
+  const draftPayload = () => ({text:draft,images:pendingImages,queued,...(imports.length?{imports}:{})});
+  const snapshot = useRef(draftPayload());
+  snapshot.current = draftPayload();
   const activityId = config?.activity?.id;
   const initialDraft = useRef(true);
   useEffect(() => {
     if (initialDraft.current) { initialDraft.current=false; return; }
-    if (activityId) postToHost({type:"saveActivityDraft",activityId,draft:{text:draft,images:pendingImages,queued,...(imports.length?{imports}:{})}});
+    if (activityId) postToHost({type:"saveActivityDraft",activityId,draft:draftPayload()});
   }, [activityId,draft,pendingImages,queued,imports]);
   useEffect(() => {
     const off = onHostMessage(msg => {
