@@ -343,6 +343,12 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     );
   }
 
+  /** #751 native help — this window's LIVE class connection: whose seat, which class, which grant. Never the credential. */
+  helpConnection(): { grant_id: string; class_run_id: string; seat_id: string; student?: { u: string; c: string; p: string }; run?: { starts_at: number; ends_at: number } } | null {
+    const m = this.meta; if (!m || !this.loop || !this.credential) return null;
+    return { grant_id: m.grant_id, class_run_id: m.class_run_id, seat_id: m.seat_id, ...(m.student ? { student: m.student } : {}), ...(m.run ? { run: m.run } : {}) };
+  }
+
   async disconnectInteractively(): Promise<void> {
     await this.forget();
     void vscode.window.showInformationMessage("수업 연결을 끊었습니다. 수업 참여와 작업 파일은 그대로입니다.");

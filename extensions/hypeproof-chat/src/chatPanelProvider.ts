@@ -730,6 +730,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   /** #751 U2 — set by extension.ts. The provider only relays: every answer is read from disk by the host adapter. */
   inboxSource: { inboxView(): Promise<import("./classroomInbox").InboxView>; inboxOpened(objectId: string, generation: number): Promise<void>; inboxLink(objectId: string, url: string, generation: number): Promise<string | null> } | null = null;
   async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
+  /** #751 native help — set by extension.ts. The provider only relays; the host adapter re-checks the learner on every call. */
+  helpSource: import("./classroomHelpHost").ClassroomHelpHost | null = null;
+  postHelp(help: import("./classroomHelp").HelpView): void { void this.post({ type: "helpState", help }); }
   /** Shared with the start page: one rule for what a click on an instructor link may do. */
   async handleInboxLink(msg: { objectId: string; url: string; generation: number; action: "open" | "copy" }): Promise<void> {
     const url = await this.inboxSource?.inboxLink(msg.objectId, msg.url, msg.generation); if (!url) return;
@@ -2250,6 +2253,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "inboxRequest": await this.postInbox(); return;
       case "inboxOpen": await this.inboxSource?.inboxOpened(msg.objectId, msg.generation); return;
       case "inboxLink": await this.handleInboxLink(msg); return;
+      case "helpRequest": await this.helpSource?.refresh(); return;
+      case "helpDraft": await this.helpSource?.draft(msg.key, msg.draft); return;
+      case "helpPreview": await this.helpSource?.preview(msg.key, msg.draft); return;
+      case "helpCancel": await this.helpSource?.cancel(msg.key); return;
+      case "helpSend": await this.helpSource?.send(msg.key, msg.requestId, msg.consent === true); return;
+      case "helpRetry": await this.helpSource?.retry(msg.key); return;
+      case "helpDiscard": await this.helpSource?.discard(msg.key); return;
+      case "helpConfirm": await this.helpSource?.confirm(msg.key, msg.id, msg.revision); return;
+      case "helpWithdraw": await this.helpSource?.withdraw(msg.key, msg.id); return;
       case "ready":
         await this.postInbox();
         await this.postConfig();

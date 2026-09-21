@@ -1,6 +1,7 @@
 import { registerLocalReview } from "./localReviewPanel";
 import { ActivityConnectionError, ActivityConnections, activityConnections } from './activityConnections';
 import { fetchProfileResult } from './proxyClient';
+import { ClassroomHelpHost } from './classroomHelpHost';
 import { ClassroomOpsHost } from './classroomOpsHost';
 import { prepareWorkspaceDirectory } from './workspacePreparation';
 import { imageAttachPrompt } from "./coachIdentity.ts";
@@ -192,6 +193,15 @@ export async function activate(context: vscode.ExtensionContext) {
   }, (line) => console.log(line));
   provider.opsObserver = classroomOps;
   provider.inboxSource = classroomOps;
+  // #751 native help: the learner's help requests to the instructor of their live class connection (ADM-03/05, AT-47).
+  provider.helpSource = new ClassroomHelpHost(context.globalState, {
+    token: async () => (await context.secrets.get(TOKEN_KEY)) ?? "",
+    connection: () => classroomOps.helpConnection(),
+    base: () => vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1").replace(/\/$/, ""),
+    history: () => provider.getHistorySnapshot(),
+    post: (view) => provider.postHelp(view),
+    log: (line) => console.log(line),
+  });
   context.subscriptions.push(classroomOps.onInboxChanged(() => { void provider.postInbox(); startPage.inboxChanged(); }));
   void classroomOps.resume();
   context.subscriptions.push(

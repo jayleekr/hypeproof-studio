@@ -387,6 +387,16 @@ export type WebviewMessage = (
   | { type: "inboxRequest" }
   | { type: "inboxOpen"; objectId: string; generation: number }
   | { type: "inboxLink"; objectId: string; url: string; generation: number; action: "open" | "copy" }
+  // #751 native help — every message names the learner-in-class key the view was drawn under; the host ignores a mismatch.
+  | { type: "helpRequest" }
+  | { type: "helpDraft"; key: string; draft: { question: string; turnId: string | null; duration: number } }
+  | { type: "helpPreview"; key: string; draft: { question: string; turnId: string | null; duration: number } }
+  | { type: "helpCancel"; key: string }
+  | { type: "helpSend"; key: string; requestId: string; consent: boolean }
+  | { type: "helpRetry"; key: string }
+  | { type: "helpDiscard"; key: string }
+  | { type: "helpConfirm"; key: string; id: string; revision: number }
+  | { type: "helpWithdraw"; key: string; id: string }
   | { type: "traceTrialStart"; taskLabel?: string }
   | { type: "traceTrialEnd"; trialId: string }
   | {
@@ -434,6 +444,7 @@ export type HostMessage = (
   | { type: "config"; config: ChatConfig }
   /** #751 U2 — always read from disk by the host; the webview holds no copy of record. */
   | { type: "inboxState"; inbox: import("./classroomInbox").InboxView }
+  | { type: "helpState"; help: import("./classroomHelp").HelpView }
   | { type: "history"; messages: ChatMessage[] }
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }
