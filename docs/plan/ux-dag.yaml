@@ -1,0 +1,420 @@
+# Execution DAG for the "학습 경험 우선 Studio" plan (SX).
+#
+# Read by the orchestrator (the overnight session). The orchestrator MUST NOT
+# infer ordering. `depends_on` here is the only source of truth for sequence.
+#
+# Spec: docs/plan/studio-learning-experience.md · Requirements: docs/requirements/studio-learning-experience.md
+# Tests: docs/testing/studio-learning-experience.md · Rubric: .claude/evals/STUDIO_UX_EVAL.md
+# Governance: .claude/hypeproof/ux/{MASTER_PROMPT,STATE,PROJECT_RULES,AUTONOMY_POLICY,GIT_POLICY}.md
+#
+# Field contract (same as dag.yaml)
+#   layer         v* app | w* service | c* surface | m* module  (vessel-and-modules §1)
+#   model         implementer model
+#   depends_on    task ids that must be plan:passed first
+#   human_gate    non-empty => orchestrator STOPS that task, records it in STATE.md, moves on
+#   machine_gate  commands that must exit 0 before any model-judged eval runs
+#   control       the planted answer. Gate 2. Written BEFORE implementation.
+#   acceptance    prose criteria. Gate 3, judged by a fresh evaluator with the rubric.
+#
+# Gate order is always: machine_gate -> control -> acceptance.
+# Failure classification (from dag.yaml): harness_fixable | harness_undecided | product | spec | flake.
+# Rule out the instrument first.
+
+version: 1
+spec: docs/plan/studio-learning-experience.md
+
+limits:
+  max_attempts_per_task: 3
+  stop_on_repeated_identical_failure: 2
+  task_wallclock_minutes: 90
+  phase_wallclock_hours: 4
+
+# No deploy-touching task exists in this DAG. The deploy freeze check is not needed.
+
+results: {}
+
+tasks:
+  - id: P0-A
+    title: "hps-session-design/1에 learning 확장 + 3주차(Underlying magic) 예시"
+    layer: m
+    model: opus
+    issue: null
+    depends_on: []
+    human_gate: null
+    spec_section: "SX-55, SX-56, SX-57, SX-58; design §세션 설계 파일"
+    files:
+      - worker/src/lib/session-design.ts
+      - worker/test/
+      - chalk/
+    machine_gate:
+      - "cd worker && npx tsc --noEmit"
+      - "cd worker && npm test"
+      - "(cd chalk && npm ci && npm test && npm run typecheck)"
+    control:
+      description: >-
+        The existing validator in worker/src/lib/session-design.ts has a strict
+        key allowlist (REQUIRED_KEYS / OPTIONAL_KEYS / STEP_KEYS), so today the
+        week-03 example is REJECTED. Write that rejection as a failing test
+        first, then add `learning` to OPTIONAL_KEYS and `ui`/`evidence`/`gate`
+        to the step allowlist. Do not bump the schema id: required keys do not
+        change, so it stays hps-session-design/1.
+      positive: "week-03 example with learning{week,mission,completion,observe,never,evidence_types,reflection} => valid; a design without `learning` still valid (today's behaviour byte-for-byte)"
+      negative: "learning.completion[].event not in the event kind list => invalid; any numeric score/level key anywhere => invalid; unknown step key => still invalid"
+    acceptance:
+      - "The six-week content lives only in session design data; no week or mission string is a code constant (SX-56, C9)."
+      - "Extends the existing hps-session-design/1 schema through optional keys; no second format and no new schema id (design §세션 설계 파일)."
+      - "learning.never[] is present in the example and reachable by the coach prompt path (SX-58)."
+      - "Existing authoring fixtures and chalk/src/ui/authoring.html keep working unchanged."
+    notes: >-
+        Confirmed on origin/main 2026-09-18: worker/src/lib/session-design.ts
+        defines SessionDesign with schema "hps-session-design/1", steps
+        [{id,title,instructions,hint,acceptance,help?}], and exact-key
+        validation. Chalk /authoring edits the same fields and freezes versions
+        as m2026.09.18-N. Read both before editing.
+
+  - id: P0-B
+    title: "디자인 토큰과 DOM 감사 계측기"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: []
+    human_gate: null
+    spec_section: "SX-49, SX-50, SX-51, SX-52, SX-53, SX-54; design §디자인 시스템; testing §층과 명령 (DOM 감사)"
+    files:
+      - extensions/hypeproof-chat/webview-ui/src/
+      - extensions/hypeproof-chat/test/
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        The DOM audit instrument (renders a webview component to static HTML
+        and scans a region for banned strings and numerals) must itself be
+        tested against a planted fixture: a fixture containing "52.5 / 100"
+        and "개선 필요" must FAIL the audit; a clean fixture must PASS.
+      positive: "clean fixture => audit passes"
+      negative: "fixture with '52.5 / 100' or '개선 필요' or '7자산' => audit fails"
+    acceptance:
+      - "Six tokens exist as CSS custom properties with the exact values from design §디자인 시스템; existing styles reference tokens, not new hex literals (SX-49)."
+      - "The audit instrument is a reusable smoke test other tasks call (SX-T05, T40, T45 depend on it)."
+      - "The instrument reads real component render output, not a copy of the strings (verification.md rule 1)."
+
+  - id: P0-C
+    title: "학생 홈(오늘의 작업)과 Mission header"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P0-A, P0-B]
+    human_gate: null
+    spec_section: "SX-01, SX-02, SX-03, SX-04, SX-05; design §정보 구조 A"
+    files:
+      - extensions/hypeproof-chat/webview-ui/src/StartPage.tsx
+      - extensions/hypeproof-chat/src/startPage.ts
+      - extensions/hypeproof-chat/webview-ui/src/
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        Render the home with the week-03 file: the first heading text equals the
+        mission sentence, exactly one primary CTA exists, and the 변화 기록 link
+        is below the actions and smaller. A fixture with two primary CTAs fails.
+      positive: "home(week-03) => h1 == mission sentence; primaryCTA count == 1; growth link after actions"
+      negative: "fixture with 2 primary CTAs => fails; any numeral score in home => audit fails"
+    acceptance:
+      - "SX-T01: a reader can state '지금 해야 할 것' from the first screen (screenshot judged)."
+      - "Existing participation-code entry and 이어서 하기 (US-03, TUX-SP) still work; they move, they are not removed."
+      - "No score, level, badge or 7자산 text anywhere on the home (SX-T05 via the P0-B audit)."
+
+  - id: P0-D
+    title: "Coach rail과 Work canvas 재배치, 코치 응답 계약"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P0-B]
+    human_gate: null
+    spec_section: "SX-06, SX-07, SX-08, SX-11, SX-12, SX-13; design §정보 구조 B, C"
+    files:
+      - extensions/hypeproof-chat/webview-ui/src/ChatPanel.tsx
+      - extensions/hypeproof-chat/webview-ui/src/App.tsx
+      - extensions/hypeproof-chat/src/chatPanelProvider.ts
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        Layout snapshot: at desktop width the canvas (editor/preview/test) is
+        the center region and the coach rail is a side region; the rail never
+        renders a numeric capability value. Coach copy lint: the five "나쁜 UX"
+        sentences from the source §10 table are banned strings in coach templates.
+      positive: "rail region contains only question/hint/checklist/request/instructor-message kinds"
+      negative: "a template containing '완벽합니다. 배포하세요.' fails the lint; a rail fixture with '52.5' fails the audit"
+    acceptance:
+      - "Existing chat behaviours (send, retry, cancel, history, preview) are preserved (TUX-CHAT rows); only placement and framing change."
+      - "The intervention ladder order is encoded as data (question, structure, hint, example, instructor, answer) with the answer step requiring a reason (SX-08, SX-10)."
+      - "Coach system prompt or template changes cite SX-11 and keep NAT-03 (act when sufficient, one question)."
+
+  - id: P0-E
+    title: "assetStatusBar 제거, 작업 중 숫자 0"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P0-B]
+    human_gate: null
+    spec_section: "SX-59, SX-43; Lab measurement proposal decision 8"
+    files:
+      - extensions/hypeproof-chat/src/assetStatusBar.ts
+      - extensions/hypeproof-chat/src/assetStatus.ts
+      - extensions/hypeproof-chat/src/extension.ts
+      - extensions/hypeproof-chat/src/chatPanelProvider.ts
+      - extensions/hypeproof-chat/test/asset-status.smoke.mjs
+      - extensions/hypeproof-chat/package.json
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+      - "cd extensions/hypeproof-chat && ! grep -rn '7자산' src webview-ui/src"
+    control:
+      description: >-
+        Before: grep for '7자산' and 'showAssetHistogram' finds hits. After:
+        zero hits, the command is gone from package.json contributes, and the
+        extension still activates in the smoke test. Note the ordering trap:
+        extensions/hypeproof-chat/test/asset-status.smoke.mjs currently ASSERTS
+        that formatAssetStatusText contains "7자산 0/7". Deleting the source
+        without deleting or inverting that test turns the suite red, and a red
+        suite for the intended reason still blocks the gate. Remove the smoke
+        test in the same commit and say so in the commit body.
+      positive: "extension activation smoke passes without the status bar sink"
+      negative: "grep '7자산' src webview-ui/src => no matches"
+    acceptance:
+      - "The AssetScoreSink protocol path is removed or stubbed so the coach model's asset score chunks are ignored, not rendered (SX-43). chatPanelProvider's onAssetScore callback no longer reaches a status bar."
+      - "Legacy seven-asset records stay readable elsewhere (HC-01); this task deletes a display, not data. worker/src/lib/asset-scorer.ts and the AssetScoreChunk SSE type are not removed in this task."
+      - "asset-status.smoke.mjs is removed or rewritten to assert the absence; no test is left asserting a string this task deletes."
+
+  - id: P0-PR
+    title: "P0 PR: Curriculum-first"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P0-A, P0-B, P0-C, P0-D, P0-E]
+    human_gate: null
+    spec_section: "SX-T01, T05, T10..T19, T40, T45"
+    files:
+      - .claude/hypeproof/ux/STATE.md
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+      - "python3 scripts/hype-pr/pr.py inspect"
+    control:
+      description: "The rubric evaluator (fresh agent) scores the branch with .claude/evals/STUDIO_UX_EVAL.md; CRITICAL C1..C10 all clear."
+      positive: "score >= 90, zero CRITICAL"
+      negative: "any CRITICAL => no PR; repair loop"
+    acceptance:
+      - "PR opened through hype-pr with SX ids, executed SX-T list, NOT RUN list, evidence paths; not merged."
+      - "STATE.md phase table filled with gate results and the judge file path."
+
+  - id: P1-A
+    title: "관찰 이벤트·필드 확장 (measurement-core)"
+    layer: w
+    model: opus
+    issue: null
+    depends_on: [P0-A]
+    human_gate: null
+    spec_section: "SX-44, SX-45, SX-46, SX-47, SX-48; design §관측 이벤트와 필드; MC-07..MC-20"
+    files:
+      - worker/src/lib/measurement-core/
+      - worker/test/
+    machine_gate:
+      - "cd worker && npx tsc --noEmit"
+      - "cd worker && npm test"
+    control:
+      description: >-
+        Validator tests written first: an event with actor=AI and student_text
+        set is rejected; source_state missing defaults to unverified and is
+        recorded; the eight new event kinds validate; an unknown kind is rejected.
+      positive: "criterion_set by student with source_state=self_reported => accepted"
+      negative: "AI-authored text with actor=student => rejected (C5)"
+    acceptance:
+      - "Extends the existing record/event shapes; no second store, no new score (SX-48, C4)."
+      - "Legacy hps-observation/1 fixtures still validate byte-for-byte."
+      - "Field defaults and enums match design §관측 이벤트와 필드."
+
+  - id: P1-B
+    title: "Evidence drawer: 기대 조건, 선택 이유, 완료 게이트"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P0-C, P0-D, P1-A]
+    human_gate: null
+    spec_section: "SX-14, SX-17, SX-18, SX-20, SX-22, SX-23; design §정보 구조 D, §과제 흐름 상태 기계"
+    files:
+      - extensions/hypeproof-chat/webview-ui/src/
+      - extensions/hypeproof-chat/src/localReviewService.ts
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        State machine test: after an AI draft, 완료 stays disabled until a
+        criterion_set event exists for the task; writing a criterion enables it.
+      positive: "draft + criterion => 완료 enabled"
+      negative: "draft without criterion => 완료 disabled (SX-T02)"
+    acceptance:
+      - "Criterion, reason, provenance and evidence type are stored as events through P1-A shapes, with student_text preserved verbatim."
+      - "The drawer is closed by default and opened on demand (SX-17); it never shows a score."
+
+  - id: P1-C
+    title: "재확인 게이트와 변경 전후 보기"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P1-B]
+    human_gate: null
+    spec_section: "SX-15, SX-16; AE-05, AE-37"
+    files:
+      - extensions/hypeproof-chat/webview-ui/src/
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        A change_requested event followed by no retest_confirmed under the same
+        criterion leaves the task at 검증 미완; a retest_confirmed with the same
+        criterion id marks it 검증됨. A retest against a different criterion
+        does not count.
+      positive: "change_requested + retest_confirmed(same criterion) => 검증됨"
+      negative: "change_requested only => 검증 미완 (SX-T03)"
+    acceptance:
+      - "Before/after view shows AI draft, student edit and the criterion that applied (SX-16)."
+      - "Existing artifact before/after evidence from AE-05 is reused, not duplicated."
+
+  - id: P1-D
+    title: "real / simulated 라벨과 인터뷰·반응 입력"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P1-B]
+    human_gate: null
+    spec_section: "SX-19, SX-21, SX-24, SX-46; design §디자인 시스템 (Amber for 실제/가상 혼동)"
+    files:
+      - extensions/hypeproof-chat/webview-ui/src/
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        Rendering an external_feedback_received event with source_state=simulated
+        shows the simulated label and Amber marker; with source_state=real it
+        does not. An event without source_state renders as unverified, never as real.
+      positive: "simulated => label + amber; real => no amber"
+      negative: "missing source_state rendered as real => fails (SX-T04, C6)"
+    acceptance:
+      - "Interview and user reaction inputs accept mixed Korean and English and keep who/when/context (SX-19, SX-20)."
+      - "Team contribution split (AI vs student) is recordable on the artifact (SX-24)."
+
+  - id: P1-PR
+    title: "P1 PR: Evidence capture"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P1-A, P1-B, P1-C, P1-D]
+    human_gate: null
+    spec_section: "SX-T02, T03, T04, T20..T29, T43, T44"
+    files:
+      - .claude/hypeproof/ux/STATE.md
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+      - "cd worker && npm test"
+      - "python3 scripts/hype-pr/pr.py inspect"
+    control:
+      description: "Fresh evaluator with the rubric; CRITICAL clear."
+      positive: "score >= 90"
+      negative: "any CRITICAL => repair loop"
+    acceptance:
+      - "PR opened through hype-pr; branch may stack on P0 (stated in the body); not merged."
+
+  - id: P2-A
+    title: "경계 회고: 제출·세션 종료·주차 종료"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P1-B]
+    human_gate: null
+    spec_section: "SX-25, SX-26, SX-27; design §정보 구조 E"
+    files:
+      - extensions/hypeproof-chat/webview-ui/src/
+      - extensions/hypeproof-chat/src/
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        Reflection opens only on the three boundary events (submit, session end,
+        week end) and never as a modal; a fixture that fires it on thread end
+        must fail. The week-end form has exactly two fields.
+      positive: "submit => reflection inline with two fields (바뀐 생각, 다음 실험)"
+      negative: "thread end => no reflection (SX-T06, T41, C7)"
+    acceptance:
+      - "reflection_submitted event is written through P1-A shapes."
+      - "Skipping reflection is allowed and recorded as skipped, never as failure."
+
+  - id: P2-B
+    title: "다음 실험 → 다음 과제, 기존 개선 행동 루프 연결"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P2-A]
+    human_gate: null
+    spec_section: "SX-28, SX-29, SX-34; LocalReview 개선 행동 저장·후속 결과 저장 재사용"
+    files:
+      - extensions/hypeproof-chat/webview-ui/src/LocalReview.tsx
+      - extensions/hypeproof-chat/src/localReviewService.ts
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        The 다음 실험 text from reflection becomes the one open improvement
+        action (existing chooseImprovement path) and is shown on the next
+        task's home as one line; the follow-up uses the existing tried / not
+        tried / unknown record. No badge, no count.
+      positive: "reflection(next experiment) => next task home shows it; follow-up recordable"
+      negative: "two open actions at once => rejected; any badge/streak string => audit fails (C1)"
+    acceptance:
+      - "Reuses the existing improvement/follow-up records; no new ledger (SX-48)."
+      - "Copy is 합니다체 and ends with an invitation, not a verdict (SX-12)."
+
+  - id: P2-PR
+    title: "P2 PR: Boundary reflection"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P2-A, P2-B]
+    human_gate: null
+    spec_section: "SX-T06, T30..T34, T41"
+    files:
+      - .claude/hypeproof/ux/STATE.md
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+      - "python3 scripts/hype-pr/pr.py inspect"
+    control:
+      description: "Fresh evaluator with the rubric; CRITICAL clear."
+      positive: "score >= 90"
+      negative: "any CRITICAL => repair loop"
+    acceptance:
+      - "PR opened through hype-pr; not merged; STATE.md final section written for the morning."
+
+  - id: P3-A
+    title: "나의 변화 기록 화면 (여유가 있을 때만)"
+    layer: v
+    model: opus
+    issue: null
+    depends_on: [P2-B]
+    human_gate: >-
+      SX-60 conflicts with Lab MP-01 (score-first profile). Build the local
+      screen only; do not touch the Lab web page. Record the conflict in
+      STATE.md "Lab에 넘길 것".
+    spec_section: "SX-30..SX-37, SX-60; design §변화 기록 화면"
+    files:
+      - extensions/hypeproof-chat/webview-ui/src/
+    machine_gate:
+      - "cd extensions/hypeproof-chat && npm test"
+    control:
+      description: >-
+        First screen contains a change sentence with 2..3 evidence links and no
+        numeral; the six-score block is inside a closed disclosure; an insight
+        with one supporting task is rendered as '아직 충분히 보지 못함'.
+      positive: "3 supporting tasks => pattern sentence + links; 1 task => 아직 충분히 보지 못함"
+      negative: "numeral in first screen => audit fails; banned label => fails (C2)"
+    acceptance:
+      - "Every sentence opens its evidence (SX-32); pattern needs repetition across tasks under the same rubric and evaluator (SX-31)."
+      - "Ends with one next experiment (SX-34)."
