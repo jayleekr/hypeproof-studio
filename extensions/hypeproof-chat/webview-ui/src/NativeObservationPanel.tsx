@@ -5,6 +5,11 @@ import type {
   ObservationFinding,
 } from "../../src/nativeObservationContract";
 import { DEFAULT_COACH_NAME, observationIntro } from "../../src/coachIdentity";
+// The stored finding carries a capability KEY ("FRAMING"). Printing the key put
+// an English word in front of a Korean learner, and after the 2026-09-13 model
+// decision it may be a key from either model — so the label is looked up across
+// both rather than mapped here.
+import { capabilityLabel } from "../../../../worker/src/lib/measurement-core/capability-models";
 export function NativeObservationPanel({ scope, coachName = DEFAULT_COACH_NAME }: { scope?: string; coachName?: string }) {
   const activeScope = useRef<string | null>(scope ?? null);
   const [assessedCount,setAssessedCount]=useState<number|undefined>();
@@ -145,7 +150,7 @@ export function NativeObservationPanel({ scope, coachName = DEFAULT_COACH_NAME }
           {findings.map((f) => (
             <article key={f.asset}>
               <h4>
-                {f.asset} ·{" "}
+                {capabilityLabel(f.asset)} ·{" "}
                 {f.status === "unobserved" ? "아직 관찰하지 못함" : "잠정 관찰"}
               </h4>
               <p>{f.interpretation}</p>

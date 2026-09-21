@@ -25,6 +25,7 @@
 // The /2 table (kinds, enums, per-kind required fields, defaults) lives in
 // ./learning-events.ts so the gates and the session-design schema read the same
 // list. This file stays the one place that decides whether a batch is valid.
+import { CANDIDATE_CAPABILITY_V1, LEGACY_SEVEN_ASSETS } from "./capability-models.ts";
 import {
   ARTIFACT_REF_KEYS,
   EVIDENCE_TYPES,
@@ -115,7 +116,14 @@ export interface ObservationBatch {
   incomplete?: boolean;
 }
 export interface ObservationFinding {
-  asset: ObservationAsset;
+  /**
+   * A capability key from the model this findings array was written against —
+   * one of the seven Assets, or one of the six candidate capabilities. Not a
+   * union of both: nothing maps one model onto the other (capability-models.ts),
+   * so a mixed array is invalid, and `validateFindings` is the thing that says
+   * which model applies.
+   */
+  asset: string;
   status: "observed" | "unobserved";
   interpretation: string;
   evidence: Array<{ event_id: string; quote: string }>;
@@ -353,31 +361,87 @@ export function validateObservation(value: unknown): {
     missing,
   };
 }
-export function observableAssets(batch: ObservationBatch): ObservationAsset[] {
+/**
+ * Which capability model a findings array is written against.
+ *
+ * Jay's 2026-09-13 decision (#1020, recorded in `capability-models.ts`): new
+ * interpretations default to the six-capability candidate model, and the seven
+ * Assets stay readable under their own id. Nothing maps one onto the other, so
+ * a findings array belongs to exactly one model and is validated against it.
+ *
+ * The default is the LEGACY model on purpose. Every stored findings record
+ * written before this change carries seven Asset keys, and the App re-validates
+ * saved records from `workspaceState` on load — defaulting to the new model
+ * would turn all of that history into "이전 관찰 근거를 확인하지 못했습니다."
+ * The producer of new findings passes its model explicitly.
+ */
+export type CapabilityModelId = "legacy-seven-assets" | "candidate-capability-v1";
+
+const MODEL_KEYS: Record<CapabilityModelId, readonly string[]> = {
+  "legacy-seven-assets": LEGACY_SEVEN_ASSETS.capabilities.map((c) => c.key),
+  "candidate-capability-v1": CANDIDATE_CAPABILITY_V1.capabilities.map((c) => c.key),
+};
+
+/** The keys a findings array for this model must carry — exactly once each. */
+export const capabilityKeys = (model: CapabilityModelId): readonly string[] => MODEL_KEYS[model];
+
+/**
+ * Read a stored record's model id. Anything unrecognized — including absent — is
+ * the legacy seven Assets, because a record with no model id was written before
+ * the field existed, and that is what it was written in.
+ */
+export const asCapabilityModel = (value: unknown): CapabilityModelId =>
+  value === "candidate-capability-v1" ? value : "legacy-seven-assets";
+
+/**
+ * Capabilities that cannot be `observed` without a particular kind of evidence
+ * in the batch, whatever the model calls them.
+ *
+ * Each entry is that capability's own `insufficient` line turned into a gate:
+ *
+ *   VERIFY   "AI가 '테스트 통과'라고 말함; 테스트 요청만 존재"  -> needs an executed result
+ *   ITERATE  "사용자 수정 이유와 실제 artifact/tool_result의 변화가 함께"
+ *   ADAPT    "같은 요청 반복, 결과 변화 없이 재시도 횟수 증가"   -> needs >= 2 artifact versions
+ *
+ * ADAPT is ITERATE's counterpart in the six-capability model; VERIFY is in both
+ * and keeps one rule. No other key has a floor in either model.
+ */
+const EVIDENCE_FLOOR: Record<string, "executed" | "revised"> = {
+  VERIFY: "executed",
+  ITERATE: "revised",
+  ADAPT: "revised",
+};
+
+export function observableAssets(
+  batch: ObservationBatch,
+  model: CapabilityModelId = "legacy-seven-assets",
+): string[] {
   const executed = batch.events.some(
     (e) => e.kind === "tool_result" && e.outcome === "success",
   );
   const versions = new Set(
     batch.events.filter((e) => e.kind === "artifact").map((e) => e.sha256),
   );
-  return OBSERVATION_ASSETS.filter(
-    (asset) =>
-      (asset !== "VERIFY" || executed) &&
-      (asset !== "ITERATE" || versions.size >= 2),
-  );
+  const met = { executed, revised: versions.size >= 2 };
+  return capabilityKeys(model).filter((key) => {
+    const floor = EVIDENCE_FLOOR[key];
+    return floor === undefined || met[floor];
+  });
 }
 export function validateFindings(
   value: unknown,
   batch: ObservationBatch,
+  model: CapabilityModelId = "legacy-seven-assets",
 ): ObservationFinding[] {
-  check(Array.isArray(value) && value.length === 7, "invalid_findings");
+  const keys = capabilityKeys(model);
+  // Length AND membership. Length alone would accept six of the seven Assets
+  // plus one candidate key, which is the mixed array the models forbid.
+  check(Array.isArray(value) && value.length === keys.length, "invalid_findings");
   const events = new Map(batch.events.map((e) => [e.id, e]));
   const seen = new Set<string>();
   for (const f of value) {
     check(
-      object(f) &&
-        OBSERVATION_ASSETS.includes(f.asset as ObservationAsset) &&
-        !seen.has(String(f.asset)),
+      object(f) && keys.includes(String(f.asset)) && !seen.has(String(f.asset)),
       "invalid_asset",
     );
     seen.add(String(f.asset));
@@ -409,8 +473,7 @@ export function validateFindings(
     }
     check(f.status !== "observed" || human, "missing_human_evidence");
     check(
-      f.status !== "observed" ||
-        observableAssets(batch).includes(f.asset as ObservationAsset),
+      f.status !== "observed" || observableAssets(batch, model).includes(String(f.asset)),
       "missing_execution_evidence",
     );
     check(

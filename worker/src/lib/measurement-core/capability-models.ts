@@ -118,6 +118,23 @@ export const CAPABILITY_MODELS: readonly CapabilityModel[] = [CANDIDATE_CAPABILI
 /** New work cards and interpretations use this model unless a legacy record is being read. */
 export const DEFAULT_CAPABILITY_MODEL = CANDIDATE_CAPABILITY_V1;
 
+/**
+ * The Korean label for a capability key, looked up across BOTH models.
+ *
+ * A screen may be drawing a stored finding written in either model, and the raw
+ * key is an English word a Korean elementary-school learner has no reason to
+ * read. Falls back to the key so an unknown value is visible rather than blank.
+ * Candidate first: a key in both models is labelled by the current one.
+ */
+export function capabilityLabel(key: unknown): string {
+  const wanted = String(key);
+  for (const model of CAPABILITY_MODELS) {
+    const hit = model.capabilities.find((c) => c.key === wanted);
+    if (hit) return hit.label_ko;
+  }
+  return wanted;
+}
+
 export function capabilityModel(id: unknown, revision: unknown): CapabilityModel | undefined {
   return CAPABILITY_MODELS.find((m) => m.id === id && m.revision === revision);
 }

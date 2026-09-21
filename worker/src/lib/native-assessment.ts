@@ -9,9 +9,10 @@ import {
 import { callAnthropic } from "./anthropic";
 import { scrubSecrets } from "./scrub-secrets";
 import {
-  OBSERVATION_ASSETS,
+  capabilityKeys,
   observableAssets,
   validateFindings,
+  type CapabilityModelId,
   type ObservationBatch,
 } from "./native-observation";
 import {
@@ -19,6 +20,14 @@ import {
   resolveEvidenceSelections,
 } from "./native-evidence";
 import type { Env } from "../env";
+/**
+ * The model a NEW assessment is written against (Jay's 2026-09-13 decision,
+ * #1020; `capability-models.ts`). The seven Assets stay readable under their own
+ * id — `validateFindings` still defaults to them, so every stored record keeps
+ * validating — but nothing new is produced in those terms.
+ */
+export const ASSESSMENT_CAPABILITY_MODEL: CapabilityModelId = "candidate-capability-v1";
+
 export async function getObservationRubric(env: Env, profileId: string) {
   const rawPin = await env.HPS_KV.get(
     modulePinKey("observation-rubric", profileId),
@@ -94,7 +103,7 @@ export async function assessNativeObservation(
   };
   const catalog = makeEvidenceCatalog(safeBatch);
   const common = {
-    asset: { type: "string", enum: [...OBSERVATION_ASSETS] },
+    asset: { type: "string", enum: [...capabilityKeys(ASSESSMENT_CAPABILITY_MODEL)] },
     interpretation: { type: "string" },
     next: { type: "string" },
   };
@@ -111,7 +120,7 @@ export async function assessNativeObservation(
     ],
     properties: {
       ...common,
-      asset: { type: "string", enum: observableAssets(safeBatch) },
+      asset: { type: "string", enum: observableAssets(safeBatch, ASSESSMENT_CAPABILITY_MODEL) },
       status: { type: "string", enum: ["observed"] },
       assistance: {
         type: "string",
@@ -188,6 +197,7 @@ export async function assessNativeObservation(
         catalog,
       ),
       safeBatch,
+      ASSESSMENT_CAPABILITY_MODEL,
     );
   } catch (error) {
     onUsage?.(result.usage ?? {}, 502, doc.version);
@@ -196,6 +206,7 @@ export async function assessNativeObservation(
   onUsage?.(result.usage ?? {}, 200, doc.version);
   return {
     findings,
+    capability_model: ASSESSMENT_CAPABILITY_MODEL,
     rubric: { version: doc.version, sha256: doc.sha256 },
     provider_request_id: response.headers.get("request-id"),
     usage: result.usage,
