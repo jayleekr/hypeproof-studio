@@ -22,7 +22,7 @@ import {
   ID_RE, MAX_SEATS, MAX_SYNC_BYTES, MAX_SYNC_EVENTS, OPS_FLAGS, OPS_PROTOCOL, OPS_SCHEMA_VERSION, PAIRING_TTL_MS,
   RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
   newPairingTicket, normalizeTicket, parseFlags, parseLesson, pollAfterMs, sha256Hex, shouldApply, signalOf,
-  stepDisposition, validateEvent, type OpsCapability, type SeatState,
+  stepDisposition, validateEvent, reduceTokenCheck, tokenCheckOf, type OpsCapability, type SeatState,
   REVIEW_STATES, SERVICE_ISSUED_ACTIONS, COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
 } from '../lib/classroom-ops';
 
@@ -218,14 +218,13 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
     const inputs = { pairing_issued: r.pairing_open > 0, connected, token_issued: !!issueId, state, last_received_at: connected ? r.last_received_at : null, grant_revoked: connState === 'revoked' };
     const { attention, reason } = attentionOf(inputs, now);
     const slot = (k: keyof SeatState) => state[k] ? { ...state[k]!.value, observed_at: state[k]!.observed_at, received_at: state[k]!.received_at, actor: state[k]!.actor } : null;
-    const reported = state.activation?.value.token_jti;
     return {
       seat_id: r.seat_id, seat_revision: r.seat_revision, student_id: r.student_id,
       entry_stage: entryStage(inputs), signal: signalOf(inputs.last_received_at, now), last_received_at: r.last_received_at,
       attention, reason, state_revision: r.state_revision ?? 0,
       control_applied: !connected || signalOf(inputs.last_received_at, now) !== 'fresh' || state.sample?.value.control_revision === undefined ? 'unknown' : state.sample.value.control_revision === control.control_revision ? 'applied' : 'pending',
       connection: grantId ? { grant_id: grantId, state: connected ? 'active' : connState === 'active' ? 'expired' : connState, epoch: Number(epoch) } : null,
-      token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: reported === undefined ? 'unknown' : reported === issueId ? 'matches_issue' : 'other_token' } : null,
+      token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: tokenCheckOf(state, issueId, grantId ?? '') } : null,
       // The latest instructor action on this seat, in ledger terms: queued is not done.
       last_command: r.last_command ? (([action, state, result_code, updated_at, command_id]) => ({ action, state, result_code, updated_at: Number(updated_at), command_id }))(r.last_command.split('|')) : null,
       // Review F4: which signals this device's build can report from its real runtime path. An absent signal from a
@@ -377,7 +376,7 @@ classroomOpsApp.post('/sync', async (c) => {
   // Board state never crosses a seat reassignment: a new binding starts empty.
   let state: SeatState = {}; const carried = latest && latest.seat_revision === g.seat_revision;
   if (carried) { try { state = JSON.parse(latest!.state_json); } catch { state = {}; } }
-  let changed = false; const quarantined: number[] = [], rejected: Array<{ seq: number; error: string }> = [], stored: number[] = [];
+  let changed = reduceTokenCheck(state, { grantId: g.id, bootId: b.boot_id, bootSeenAt: device.first_seen_at }); const quarantined: number[] = [], rejected: Array<{ seq: number; error: string }> = [], stored: number[] = [];
   for (const e of raw) {
     const seq = (e as any).seq as number, v = validateEvent(e);
     // A malformed event still consumes its seq so the cursor can move, but its content is not kept.
@@ -394,6 +393,8 @@ classroomOpsApp.post('/sync', async (c) => {
     }
     if (!v.ok) continue;
     if (v.value.kind === 'step' && stepDisposition(v.value.payload, lesson) !== 'applied') continue;
+    // Token evidence has its own ordering: a stage that arrives later must not erase it, and a resend must not revive it.
+    if (v.value.kind === 'activation' && reduceTokenCheck(state, { grantId: g.id, bootId: b.boot_id, bootSeenAt: device.first_seen_at }, { seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, payload: v.value.payload })) changed = true;
     if (shouldApply(state[v.value.kind], device.first_seen_at, seq)) { state[v.value.kind] = { boot_seen_at: device.first_seen_at, seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, value: v.value.payload }; changed = true; }
   }
   const ack = contiguousAck(device.contiguous_seq, [...new Set([...existing.keys(), ...stored])].filter((s) => s > device!.contiguous_seq).sort((x, y) => x - y));

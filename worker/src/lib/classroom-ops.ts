@@ -152,7 +152,38 @@ export function stepDisposition(payload: Record<string, unknown>, lesson: Lesson
 }
 
 export interface SeatStateSlot { boot_seen_at: number; seq: number; observed_at: number; received_at: number; actor: string; value: Record<string, unknown> }
-export type SeatState = Partial<Record<EventKind | 'sample', SeatStateSlot>>;
+export type SeatState = Partial<Record<EventKind | 'sample' | 'token_check', SeatStateSlot>>;
+
+/**
+ * What the app said about ITS token is evidence, not an entry stage. `activation` holds only the latest stage, so a
+ * later `runtime_ready` used to erase the `token_jti` that `token_verified` carried and the board fell back to
+ * "unknown". The evidence lives in its own slot, bound to the connection (grant) and the app process (boot) that
+ * reported it, and is dropped — never inherited — when either changes or the app reports a rejected token.
+ */
+export function reduceTokenCheck(state: SeatState, ctx: { grantId: string; bootId: string; bootSeenAt: number }, event?: { seq: number; observed_at: number; received_at: number; actor: string; payload: Record<string, unknown> }): boolean {
+  let changed = false;
+  const held = state.token_check;
+  // A new connection or a newer app process has not verified anything yet. An older boot's late sync clears nothing.
+  if (held && (held.value.grant_id !== ctx.grantId || (held.value.boot_id !== ctx.bootId && ctx.bootSeenAt >= held.boot_seen_at))) { delete state.token_check; changed = true; }
+  if (!event) return changed;
+  const stage = event.payload.stage, jti = event.payload.token_jti;
+  const newer = shouldApply(state.token_check, ctx.bootSeenAt, event.seq);
+  if (stage === 'token_verified' && typeof jti === 'string' && newer) {
+    state.token_check = { boot_seen_at: ctx.bootSeenAt, seq: event.seq, observed_at: event.observed_at, received_at: event.received_at, actor: event.actor, value: { token_jti: jti, grant_id: ctx.grantId, boot_id: ctx.bootId } };
+    return true;
+  }
+  if (stage === 'token_rejected' && state.token_check && newer) { delete state.token_check; return true; }
+  return changed;
+}
+
+/** `unknown` = this connection's app has not reported a verified token. Never inferred from the entry stage. */
+export function tokenCheckOf(state: SeatState, issueId: string, currentGrantId: string): 'unknown' | 'matches_issue' | 'other_token' {
+  const held = state.token_check;
+  // Rows written before the evidence slot existed kept the jti inside the activation slot itself.
+  const legacy = !held && state.activation?.value.stage === 'token_verified' ? state.activation.value.token_jti : undefined;
+  const reported = held ? (held.value.grant_id === currentGrantId ? held.value.token_jti : undefined) : legacy;
+  return typeof reported !== 'string' ? 'unknown' : reported === issueId ? 'matches_issue' : 'other_token';
+}
 
 /** Later boot wins; within a boot, only a higher seq. A delayed resend never rolls the board back. */
 export function shouldApply(current: SeatStateSlot | undefined, bootSeenAt: number, seq: number): boolean {
