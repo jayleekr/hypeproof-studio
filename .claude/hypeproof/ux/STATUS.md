@@ -4,59 +4,27 @@
 
 ---
 
-## 0. 지금 당장 할 일 — PR 생성이 레이트 리밋으로 막혀 있다
+## 0. 지금 상태 — PR #1218 이 열려 있다
 
-브랜치 `feat/sx-observation-capability-split` 은 **커밋 6개가 준비되어 푸시까지 끝났다.**
-PR 만 안 났다. 이유는 코드가 아니라 **GitHub API 레이트 리밋**이다 — 적대적 검토
-에이전트 26개가 시간당 5000 을 소진했다 (2026-09-21 03:57 UTC 기준, 리셋 약 1시간 뒤).
+https://github.com/jayleekr/hypeproof-studio/pull/1218 (`feat/sx-observation-capability-split`)
 
-리밋이 풀렸으면 이것부터 한다:
+CI 를 통과하면 머지한다. 레이트 리밋은 풀렸다 — 2026-09-21 세션에서 검토 에이전트
+26개가 시간당 5000 을 소진해 PR 생성이 약 1시간 막혔었다. **검토 직후에 PR 을 내는
+순서는 다시 쓰지 않는다** (MASTER_PROMPT v4 §6).
 
-```bash
-gh api rate_limit --jq '.resources.core.remaining'     # 4000 이상이면 진행
-cd /Users/jaylee/CodeWorkspace/hypeproof-studio/.claude/worktrees/claude-epic
-export GH_TOKEN="$(gh auth token)"                      # 없으면 hype-pr 가 HTTP unknown
-git fetch origin main
+`hype-pr` 로 다시 작업해야 하면 함정 넷:
 
-# inspect → 채움 → prepare 를 한 번에 이어 돌린다 (fingerprint 가 inspect 마다 바뀐다)
-python3 scripts/hype-pr/pr.py inspect --repo jayleekr/hypeproof-studio \
-  --output /tmp/hpr-inspect.json --assessment-template /tmp/hpr-assess.json > /tmp/hpr-out.txt 2>&1
-python3 <평가서 채우는 스크립트>            # 아래 §0a 참조
-python3 scripts/hype-pr/pr.py prepare --repo jayleekr/hypeproof-studio \
-  --assessment /tmp/hpr-assess.json
-python3 scripts/hype-pr/pr.py create --repo jayleekr/hypeproof-studio \
-  --head feat/sx-observation-capability-split \
-  --title 'feat(sx): 관측을 기록과 평가로 쪼개고, 작업 화면에서 학생 평가를 걷어낸다' \
-  --body-file /tmp/pr-body.md --author jayleekr --preparation <receipt> --apply
-```
+1. `GH_TOKEN="$(gh auth token)"` 없이는 `HTTP unknown` 으로 죽는다
+2. `fingerprint` 는 inspect 마다 바뀐다 (작업 트리가 깨끗해도) → inspect·채움·prepare 를
+   한 명령에 이어 돌린다
+3. `evidence` 는 **20자 이상** (`"Clean on ee9a9d7."` 는 17자라 탈락했다)
+4. `disposition: unknown` 은 followups 에 **추적 이슈 URL** 필요 (#1217 을 만들어 뒀다),
+   `implementation` 링크는 **requirement 노드와 test 노드 둘 다** 필요 (`ST-DES-*` 불가)
 
-### 0a. 평가서는 이미 한 번 통과 직전까지 갔다
-
-채우는 스크립트가 세션 scratchpad 에 남아 있지만 **scratchpad 는 세션마다 사라진다.**
-다시 만들어야 하면 아래 내용대로 52개 노드를 채운다. 실제로 걸렸던 함정 넷:
-
-1. `fingerprint` 는 inspect 마다 바뀐다 — 작업 트리가 깨끗해도 바뀐다
-2. `evidence` 는 **20자 이상** (`"Clean on ee9a9d7."` 는 17자라 탈락했다)
-3. `disposition: unknown` 은 `followups` 에 **추적 이슈 URL** 이 있어야 한다
-   → **이슈 #1217 을 이미 만들어 뒀다.** `ST-VAL-NATIVE` 에 그 URL 을 넣는다
-4. `implementation` 링크는 **requirement 노드와 test 노드가 둘 다** 필요하다.
-   `ST-DES-*` 는 design 이라 안 된다 → `ST-REQ-UX` + `ST-TEST-*` 로
-
-직접 손댄 노드 7개 (나머지 45개는 `no-impact`):
-
-| 노드 | disposition |
-|---|---|
-| `ST-DES-STUDIO-NATIVE-TRIAL-UX` | satisfied (TUX-OBS-07 갱신) |
-| `ST-TEST-STUDIO-NATIVE-TRIAL-UX` | satisfied (e2e 프로필에 `assess: true`) |
-| `ST-IMP-SX-P1` | satisfied (근거 서랍 결함 2건) |
-| `ST-IMP-SX-P1B` | satisfied (작업 화면 게이트) |
-| `ST-REQ-UX` | satisfied (요구 약화 없음, 인용 오류 정정) |
-| `ST-TEST-UX` | satisfied (신규 스위트 5 + 확장 스모크 2) |
-| `ST-VAL-NATIVE` | **unknown** → followups: `https://github.com/jayleekr/hypeproof-studio/issues/1217` |
-
-path_links 7개: worker 쪽 4개는 `implementation` + `[ST-REQ-UX, ST-TEST-UX]`,
-`NativeObservationPanel.tsx` 는 `implementation` + `[ST-REQ-UX, ST-TEST-STUDIO-NATIVE-TRIAL-UX]`,
-새 스모크 2개는 `supporting` + `[ST-TEST-UX]`.
+평가서에서 직접 손댄 노드 7개 (나머지 45개는 `no-impact`):
+`ST-DES-STUDIO-NATIVE-TRIAL-UX` · `ST-TEST-STUDIO-NATIVE-TRIAL-UX` · `ST-IMP-SX-P1` ·
+`ST-IMP-SX-P1B` · `ST-REQ-UX` · `ST-TEST-UX` 는 satisfied,
+**`ST-VAL-NATIVE` 는 unknown** → followups `…/issues/1217`.
 
 ---
 
@@ -112,7 +80,7 @@ webview npm run build  0
 |---|---|
 | **실기 증거 0** | 앱을 한 번도 안 띄웠다. 전부 정적 렌더 + 라우트 응답 |
 | **실제 provider 호출 0** | 새 루브릭(`m2026.09.21-1`)으로 모델이 진짜 6개 키를 내는지 모른다. 테스트는 프롬프트를 되받아치는 **스텁**이라, 모델이 못 따르는 루브릭이어도 초록이다 |
-| **Playwright `e2e/trial-ux` 미실행** | 화면 잠금 정책. 패널이 돌아온 것은 harness 의 프로필 블록을 렌더해서만 확인했다 |
+| **Playwright `e2e/trial-ux` 로컬 미실행** | 로컬에 playwright 가 없다. **CI 에서는 돈다** — `start-page-browser` 잡이다. 검토와 내가 "CI 에 없다"고 한 것은 틀렸고, 실제로 그 잡이 TUX-OBS-10 실패를 잡아 줬다 |
 | **사진의 테마는 내가 채운 값** | `--vscode-*` 를 VS Code Dark Modern 기본값으로 직접 넣었다. 실제 앱 테마가 아니다 |
 | `.hps-access button` | 같은 커밋에서 고쳤지만 **한 번도 렌더해 보지 않았다** |
 
