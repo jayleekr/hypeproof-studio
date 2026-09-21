@@ -463,6 +463,32 @@ export function servedObservationFormat(
 export const isObservationFormat = (value: unknown): value is ObservationFormat =>
   (OBSERVATION_FORMATS as readonly string[]).includes(String(value));
 
+/**
+ * May the observation RESULTS panel be drawn on the work screen for this seat?
+ *
+ * Not the same question as "is observation on". The panel prints capability keys,
+ * "독립 수행 근거 / 도움을 받은 수행 / 도움 사용 범위 미확인" and a "평가에 보낼 기록 보기"
+ * button — an assessment, shown to the learner, mid-task. Four P0 rows forbid
+ * exactly that during work:
+ *
+ *   SX-01  헤더 안에 점수·등급·역량 이름이 없다
+ *   SX-06  rail 에 점수·자산 라벨·평가 문장이 없다
+ *   SX-07  자기평가·변화 기록·역량 라벨은 작업 중 개입 대상에서 제외된다
+ *   SX-59  작업 중 어떤 화면에도 역량 점수·등급·배지가 없다
+ *
+ * SX-59 also names the remedy — "제거하거나 **학습 경험 프로필에서 비활성**한다" — because
+ * the trial cohort's own requirement (TUX-OBS-07) is to read observation results.
+ * So the panel follows `assess`, the cohort's opt-in to assessment, and recording
+ * keeps its own switch. A cohort that records but does not assess gets the drawer
+ * and the completion gate with no verdict shown back at the learner.
+ *
+ * Takes the SERVED block, not the profile: the client is the caller that matters,
+ * and a worker too old to send `assess` must read as "no", never as permission.
+ */
+export const showsObservationResults = (
+  served: { format?: unknown; assess?: unknown } | null | undefined,
+): boolean => isObservationFormat(served?.format) && served?.assess === true;
+
 /** What a profile's observation block actually permits. */
 export interface ObservationCapability {
   /** Write learning events on the student's device. */

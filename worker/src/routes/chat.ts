@@ -315,6 +315,13 @@ chat.get("/profile", async (c) => {
               c.req.header("x-hps-observation-format"),
             ),
             scope: observationScope,
+            // SX-01·06·07·59 forbid scores, asset labels and evaluation
+            // sentences on any screen during work. The observation results
+            // panel shows all three, so it is drawn only where a cohort has
+            // opted into assessment (the trial, TUX-OBS-07). Recording is a
+            // separate switch and stays on — the student just does not get
+            // graded at themselves while working.
+            assess: observationCapability(profile.observation).assess,
           },
         }
       : {}),

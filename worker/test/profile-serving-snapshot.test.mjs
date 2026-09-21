@@ -50,8 +50,16 @@ function shape(status, json) {
   if (status !== 200) return { status, error: json?.error?.code ?? null };
   return {
     status,
+    // `assess` is here because the client gates the observation results panel on
+    // it (SX-59). A field the snapshot does not read is a field it cannot guard:
+    // adding one and leaving `shape()` alone would let the panel appear or vanish
+    // for a cohort with a green diff.
     observation: json.observation
-      ? { format: json.observation.format, scope_kind: typeof json.observation.scope }
+      ? {
+          format: json.observation.format,
+          scope_kind: typeof json.observation.scope,
+          assess: json.observation.assess ?? null,
+        }
       : null,
     // The banner is appended to the greeting, so its presence is a length change
     // a human would never notice in a diff of the whole response.

@@ -120,7 +120,8 @@
       "status": 200,
       "observation": {
         "format": "hps-observation/2",
-        "scope_kind": "string"
+        "scope_kind": "string",
+        "assess": true
       },
       "update_banner": false,
       "sdk_tools": {
@@ -141,7 +142,8 @@
       "status": 200,
       "observation": {
         "format": "hps-observation/1",
-        "scope_kind": "string"
+        "scope_kind": "string",
+        "assess": true
       },
       "update_banner": false,
       "sdk_tools": {
@@ -454,7 +456,8 @@
       "status": 200,
       "observation": {
         "format": "hps-observation/1",
-        "scope_kind": "string"
+        "scope_kind": "string",
+        "assess": true
       },
       "update_banner": false,
       "sdk_tools": {
@@ -475,7 +478,8 @@
       "status": 200,
       "observation": {
         "format": "hps-observation/1",
-        "scope_kind": "string"
+        "scope_kind": "string",
+        "assess": true
       },
       "update_banner": false,
       "sdk_tools": {

@@ -155,7 +155,13 @@ export interface ResolvedProfile {
       effort?: {default: CourseEffort; allowed: CourseEffort[]};
     }>;
   };
-  observation?: { format: string; scope?: string };
+  /**
+   * `assess` is the cohort's opt-in to sending a batch off the device, and it is
+   * also what decides whether the observation RESULTS panel is drawn during work
+   * (SX-59). Absent means no — an older worker that does not serve the field must
+   * not be read as permission.
+   */
+  observation?: { format: string; scope?: string; assess?: boolean };
   /** Immutable teaching content; capability policy remains in the profile. */
   lesson?: {
     course_id: string; version: string; sha256: string;
