@@ -459,6 +459,24 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 **이 실행이 아닌 것.** 실제 모델의 답·품질·비용, 실제 메일·webhook·수신함, Windows, 학교망, Cloudflare staging/production D1·R2, 이 기능을 담은 release의 설치·업데이트·서명·seed 경로, 30석 동시 부하, 재시작 전 세션을 합친 회수(선언만 함).
 
+<a id="remote-management-map-20260921"></a>
+
+### 원격관리 다섯 흐름 — 현재 구현 매핑 · 2026-09-21 (HEAD `d9d31bf` 기준, 읽기 전용 조사)
+
+[인수 계약 RM-1~5](../requirements/classroom-admin.md#remote-management-acceptance-20260921)와 현재 코드의 대조다. ‘직접 실행’은 오늘 실제 Mac 창(`mac-gui.mjs` 14/14, source `4278b8d`) 또는 오전 Codex의 수동 실행에서 본 것만이다. 브라우저 e2e·Service 시험은 ‘코드+합성 시험’으로 적는다. **오늘까지의 결과는 관제·복구·단일 회차 회수이며 원격관리 전체 완료가 아니다.**
+
+| 흐름 | 있는 경로 (코드 · API · UI) | 증거 수준 | 없는 경로 |
+|---|---|---|---|
+| RM-1 선택·상태 | `GET …/ops/status`(좌석별 connection·token·entry_stage·step+review·error·runtime·signal·attention·last_command·observes) → Chalk `#ops-seats` 목록+`#ops-detail`. 선택: 좌석 체크박스 `picked`, `도움 필요한 좌석 선택`, `선택 해제`, 선택 요약(전달 가능/연결 없음) | 상태: **직접 실행**(실제 앱 A1 → 보드). 선택 UI: 코드+합성(30석 브라우저 e2e), 오전 수동 1석 | 전체 선택, 그룹(저장된 묶음·상태 필터), 선택을 회수·배포·다른 복구에 쓰는 공통 모델(지금 일괄 조치는 `retry_diagnostics` 하나) |
+| RM-2 회수 | 수업 기록: `POST …/report-batches`(명단 전체 스냅샷, 동의·철회·미연결 사유 유지) → Service 발행 `retry_evidence_upload` → App freezer → PUT/seal → coverage. Chalk `수업 마무리`. 학생 프롬프트·결과물: 학생이 고른 공유 `POST /v1/classroom/shares`(ADM-03/05/06) → Chalk 공유 목록 | 수업 기록: **직접 실행**(실제 spool 16사건 `complete`, 미동의 좌석 제외). 공유: 코드+기존 시험, 오늘 미실행 | **대상 선택 회수**(API에 `targets` 없음 — 항상 명단 전체), 학생 프롬프트만/승인 결과물만 고르는 회수 종류, 강사가 요청하는 공유(지금은 학생 주도뿐) |
+| RM-3 배포 | 없음. 인접 경로: `send_question`·`mark_checkpoint`(300/200자 평문, 기기 표시=성공, 읽음 아님), 회차 구성의 강의 version pin(`PUT …/ops` — 회차 전체, 학생 토큰의 lesson ref와 별개), 회차 일시정지의 기기별 `control_applied`(applied/pending/unknown) | 인접 경로: 코드+합성 시험만. 실제 창에서 `send_question` 미실행 | **수업 프롬프트·공지/자료·수업 설정의 대상 배포 전부**: 버전 있는 배포 객체, 좌석별 원하는 revision, 기기의 적용 보고, 비선택 불변 증거, 오프라인 후 재접속 적용 |
+| RM-4 복구 | 허용 목록 5종 `retry_diagnostics`·`refresh_connection`·`restart_preview`·`cancel_current_run`·`reset_runtime`(1명씩) + 회차 `pause`. Chalk 상세의 ‘기술 복구’가 확인된 장애일 때 1순위 조치를 Primary로 제시 | `cancel_current_run`·`reset_runtime`: **직접 실행**(API 경유, 파일 해시·대화 보존). `retry_diagnostics`: 오전 수동(구 빌드). `refresh_connection`·`restart_preview`·pause: 코드+합성 | 원인→조치 대응표의 명문화와 시험(토큰 만료/거부 → 재발급 안내는 조치가 아니라 문구뿐), 업로드 실패 복구의 강사 트리거(Service 발행만), 복구를 Chalk UI에서 누른 실제 창 실행 |
+| RM-5 대상별 결과 | `ops_command_targets` 상태 12종 + result_code, `GET …/commands/:id`, Chalk `showCommand`(성공/실패/확인 불가/전달 안 됨/진행 중 + 좌석별 문구), 좌석 `last_command`. 회수는 batch item 상태, 일시정지는 `control_applied` | 성공 경로: **직접 실행**(`run_stopped`·`reset_ok`·회수 `verified`). 실패·만료·미확인·미연결·두 번째 창·재발급 뒤 미전달: 코드+합성(AT-20/21/23) | 세 흐름 공통의 한 화면 결과(지금은 명령·회수·일시정지가 각각 다른 자리), 실패 대상만 다시 선택, 배포의 결과 단계 |
+
+**경계 조건 현황.** 중복 요청(idempotency key·payload 충돌)·만료(TTL 120초: 시작 전 `expired`, 시작 후 영수증 없음 `outcome_unknown`)·재접속/재발급(이전 epoch 미전달)·부분 실패(대상별 원장)·수업 경계(회차·좌석 revision 결속)는 **명령과 회수에 구현+합성 시험**이 있다. 오프라인은 **접수 시점에 `not_connected`로 확정**된다 — 복구 명령에는 맞지만 배포에는 맞지 않는다(재접속해도 도착하지 않음). 배포에는 위 어느 것도 없다.
+
+**추가할 인수 시험(전부 NOT RUN · 계획).** AT-37 선택 모델(개별·그룹·전체, 실행 전 요약, 명단 변경 시 재확인) · AT-38 대상 회수(선택 2석만 요청·저장, 비선택 0, 미동의 선택은 사유와 함께 남음, 같은 요청 재실행 0) · AT-39 대상 배포(선택 좌석만 revision 적용 보고, 비선택 revision 불변, 오프라인 → 재접속 적용, 회차 종료 뒤 미적용은 `만료`, 같은 revision 재배포 0, 기기 일부 실패는 대상별 표시) · AT-40 원인별 복구 대응표(원인 5종 × 1순위 조치, 실제 창) · AT-41 세 흐름의 결과가 같은 단계 어휘로 한 화면에 남음.
+
 <a id="windows-field-cuesheet-20260921"></a>
 
 ### Windows 현장 실행 패키지와 큐시트 · 2026-09-21 (준비 완료 · 현장 실행 NOT RUN)
