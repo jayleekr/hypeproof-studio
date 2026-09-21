@@ -340,6 +340,24 @@ try {
       const gone = between(candidates, () => g.db.prepare("UPDATE classroom_distribution_cards SET state='withdrawn' WHERE object_id=?").run(base.c.object_id)), r2 = await sync1(); gone();
       assert.notEqual(row(dup).state, 'no_change', 'the card it relied on is gone: "already held" is not claimed'); assert.equal((r2.json.distribution?.items ?? []).filter((i) => i.distribution_id === dup.id).length, 0);
       g.db.prepare('UPDATE classroom_distribution_targets SET next_offer_at=0').run(); assert.equal(((await sync1()).json.distribution?.items ?? []).filter((i) => i.distribution_id === dup.id).length, 1, '…so it is sent for real on the next sync');
+
+      // A RECEIPT is recorded only under the identity it was read under (an independent review, u2-receipt-binding-boundary-check.mjs:
+      // a re-login or a seat change landing after the receipt's row was read was still recorded as `reflected`, with a card and an audit row).
+      const reflectedAudits = () => g.db.prepare("SELECT count(*) n FROM ops_audit WHERE action='distribution_reflected'").get().n, cardsOf = (x) => g.db.prepare('SELECT count(*) n FROM classroom_distribution_cards WHERE object_id=?').get(x.c.object_id).n;
+      const idn = await fresh('receipt 신원'); g.db.prepare('UPDATE classroom_distribution_targets SET next_offer_at=0').run(); const it1 = (await sync1()).json.distribution.items.find((i) => i.distribution_id === idn.d.id); assert.ok(it1); let audits0 = reflectedAudits();
+      const relog = between(receiptRead, () => recordTokenIssue(g.env, { jti: KEY(), cohort: g.cohort, student: 'student-a', profile: g.profile, issuedBy: 'teacher-x', hours: 1 })), a1 = await sync1({ receipts: [rc(it1, 'reflected')] }); relog();
+      assert.deepEqual(a1.json.distribution.receipt_acks.map((a) => [a.recorded, a.reason, a.final]), [[false, 'changed', false]], 're-login after the read: not recorded, not final'); assert.deepEqual([row(idn.d).state, cardsOf(idn), reflectedAudits() - audits0], ['offered', 0, 0], 'no state, no card, no audit row under the identity that was replaced');
+      g.db.prepare('UPDATE classroom_distribution_targets SET next_offer_at=0').run(); const a2 = await sync1({ receipts: [rc(it1, 'reflected')] }); assert.deepEqual(a2.json.distribution.receipt_acks.map((a) => [a.reason, a.final]), [['stale_offer', true]], 'the resend is judged under the login generation as it is now');
+      const it1b = a2.json.distribution.items.find((i) => i.distribution_id === idn.d.id); assert.ok(it1b && it1b.offer_key !== it1.offer_key, 'and the same intent is offered again under it'); assert.deepEqual((await sync1({ receipts: [rc(it1b, 'reflected')] })).json.distribution.receipt_acks.map((a) => [a.recorded, a.final]), [[true, true]], 'positive control: under an unchanged identity the receipt is recorded'); assert.deepEqual([row(idn.d).state, cardsOf(idn)], ['reflected', 1]);
+      // …the same for the device's confirmation of a withdrawal
+      await call(`/distributions/${idn.d.id}/revoke`, { expected_row_revision: 0 }); const tomb = (await sync1()).json.distribution.withdraw.find((w) => w.object_id === idn.c.object_id); assert.ok(tomb);
+      const wr = { withdraw_key: tomb.withdraw_key, object_id: tomb.object_id, seq: tomb.seq, result: 'withdrawn', observed_at: Date.now() }, cardRead = (sql) => sql.includes('SELECT state,withdraw_key,withdraw_seq FROM classroom_distribution_cards');
+      const relog2 = between(cardRead, () => recordTokenIssue(g.env, { jti: KEY(), cohort: g.cohort, student: 'student-a', profile: g.profile, issuedBy: 'teacher-x', hours: 1 })), w1 = await sync1({ withdraw_receipts: [wr] }); relog2();
+      assert.deepEqual(w1.json.distribution.withdraw_acks.map((a) => [a.recorded, a.reason, a.final]), [[false, 'changed', false]]); assert.equal(g.db.prepare('SELECT state FROM classroom_distribution_cards WHERE object_id=?').get(idn.c.object_id).state, 'withdraw_pending', 'the card is not marked removed under a replaced identity — the device keeps its receipt');
+      // the seat changes hands after the receipt's row was read (this ends the connection, so it comes last)
+      const sc = await fresh('receipt 좌석'); g.db.prepare('UPDATE classroom_distribution_targets SET next_offer_at=0').run(); const it2 = (await sync1()).json.distribution.items.find((i) => i.distribution_id === sc.d.id); assert.ok(it2); audits0 = reflectedAudits();
+      const swap2 = between(receiptRead, () => configure([{ seat_id: 'A1', student_id: 'student-c' }, two[1]], { ops_observe: true, ops_distribute: true })), a3 = await sync1({ receipts: [rc(it2, 'reflected')] }); swap2();
+      assert.deepEqual((a3.json.distribution?.receipt_acks ?? []).map((a) => [a.recorded, a.final]), [[false, false]]); assert.deepEqual([cardsOf(sc), reflectedAudits() - audits0], [0, 0], 'nothing is recorded for a learner who no longer holds the seat'); assert.notEqual(row(sc.d).state, 'reflected');
     } finally { g.close(); }
   });
 

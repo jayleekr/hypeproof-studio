@@ -112,6 +112,16 @@ const OFFER_GUARD = `state IN ${OPEN} AND pending=1 AND seat_revision=? AND stud
  AND EXISTS (SELECT 1 FROM class_run_seats x WHERE x.class_run_id=${T}.class_run_id AND x.seat_id=${T}.seat_id AND x.seat_revision=${T}.seat_revision AND x.student_id=${T}.student_id AND x.replaced_at IS NULL)
  AND EXISTS (SELECT 1 FROM ops_grants gg WHERE gg.id=? AND gg.kind='connection' AND gg.state='active' AND gg.connection_epoch=? AND gg.expires_at>?)
  AND EXISTS (SELECT 1 FROM ops_seat_leases l WHERE l.grant_id=? AND l.app_instance_id=?)`;
+/**
+ * WHO a write is made for, checked by the write itself. A receipt is evidence and is settled even with the feature off or
+ * the run closed — but only under the identity this sync was authorised as: the seat still this learner's, this grant
+ * active at this login generation, this window holding the seat. A re-login or a seat change that lands after the row was
+ * read must not be recorded under the identity it replaced. Binds: seat_revision, student_id, grant id, epoch, now, grant id, app instance.
+ */
+const IDENTITY_GUARD = `seat_revision=? AND student_id=?
+ AND EXISTS (SELECT 1 FROM class_run_seats x WHERE x.class_run_id=${T}.class_run_id AND x.seat_id=${T}.seat_id AND x.seat_revision=${T}.seat_revision AND x.student_id=${T}.student_id AND x.replaced_at IS NULL)
+ AND EXISTS (SELECT 1 FROM ops_grants gg WHERE gg.id=? AND gg.kind='connection' AND gg.state='active' AND gg.connection_epoch=? AND gg.expires_at>?)
+ AND EXISTS (SELECT 1 FROM ops_seat_leases l WHERE l.grant_id=? AND l.app_instance_id=?)`;
 const changed = (r: { meta?: { changes?: number } } | undefined) => (r?.meta?.changes ?? 0) === 1;
 export interface SyncGrant { id: string; class_run_id: string; seat_id: string; seat_revision: number; student_id: string; connection_epoch: number; device_registration_id: string | null }
 export interface DistributionBlock { items: Array<Record<string, unknown>>; withdraw: Array<Record<string, unknown>>; receipt_acks: Array<Record<string, unknown>>; withdraw_acks: Array<Record<string, unknown>>; more: boolean }
@@ -135,6 +145,7 @@ export async function distributionExchange(db: Db, g: SyncGrant, o: { body: unkn
     if (o.flagOn && !o.runEnded) await batch(db, [db.prepare(`UPDATE ${T} SET state='unsupported',result_code='capability_missing',pending=0,grant_id=?,device_registration_id=?,updated_at=? WHERE class_run_id=? AND seat_id=? AND seat_revision=? AND student_id=? AND pending=1 AND state IN ${OPEN}`).bind(g.id, device, now, ...seatArgs, g.seat_revision, g.student_id)], o.meter);
     return null;
   }
+  const identityArgs = [g.seat_revision, g.student_id, g.id, g.connection_epoch, now, g.id, o.instance];
   const block: DistributionBlock = { items: [], withdraw: [], receipt_acks: [], withdraw_acks: [], more: receiptsIn.length > MAX_SYNC_RECEIPTS || withdrawIn.length > MAX_SYNC_WITHDRAWS };
 
   for (const raw of receiptsIn.slice(0, MAX_SYNC_RECEIPTS)) {
@@ -157,7 +168,7 @@ export async function distributionExchange(db: Db, g: SyncGrant, o: { body: unkn
       // The card exists only if the target is STILL revoked at this commit; the final answer is given only once the card
       // (and with it the withdrawal) is on record, so the device keeps its journal entry until then.
       if (r.stage === 'reflected') {
-        let done = false; try { done = changed((await batch(db, [cardUpsert(db, g, t, device, now, `EXISTS (SELECT 1 FROM ${T} WHERE distribution_id=? AND seat_id=? AND state='revoked')`, [t.distribution_id, t.seat_id]), ...coverageStatements(db, 'class_run_id=? AND seat_id=?', seatArgs, now)], o.meter))[0]) || !!(await all(db.prepare(`SELECT 1 AS x FROM ${C} WHERE class_run_id=? AND seat_id=? AND student_id=? AND object_id=?`).bind(...seatArgs, g.student_id, t.object_id), o.meter))[0]; }
+        let done = false; try { done = changed((await batch(db, [cardUpsert(db, g, t, device, now, `EXISTS (SELECT 1 FROM ${T} WHERE distribution_id=? AND seat_id=? AND state='revoked' AND ${IDENTITY_GUARD})`, [t.distribution_id, t.seat_id, ...identityArgs]), ...coverageStatements(db, 'class_run_id=? AND seat_id=?', seatArgs, now)], o.meter))[0]) || !!(await all(db.prepare(`SELECT 1 AS x FROM ${C} WHERE class_run_id=? AND seat_id=? AND student_id=? AND object_id=?`).bind(...seatArgs, g.student_id, t.object_id), o.meter))[0]; }
         catch (err) { console.error('distribution in-flight card not recorded:', err); }
         ack(false, 'revoked', done); continue;
       }
@@ -168,7 +179,7 @@ export async function distributionExchange(db: Db, g: SyncGrant, o: { body: unkn
     if (!step.ok) { ack(false, t.state === 'target_changed' ? 'target_changed' : t.state === 'expired' ? 'expired' : step.reason); continue; }
     // A late truthful `reflected` is accepted after expiry only for an offer that went out BEFORE the intent expired.
     if (t.state === 'unconfirmed' && !(t.first_offered_at !== null && t.first_offered_at < t.expires_at)) { ack(false, 'expired'); continue; }
-    const stmts = [db.prepare(`UPDATE ${T} SET state=?,result_code=?,pending=?,received_at=COALESCE(received_at,?),reflected_at=CASE WHEN ?='reflected' THEN ? ELSE reflected_at END,updated_at=? WHERE distribution_id=? AND seat_id=? AND state=? AND offer_key=?`).bind(step.state, r.result_code, step.state === 'received' ? 1 : 0, now, step.state, now, now, t.distribution_id, t.seat_id, t.state, t.offer_key)];
+    const stmts = [db.prepare(`UPDATE ${T} SET state=?,result_code=?,pending=?,received_at=COALESCE(received_at,?),reflected_at=CASE WHEN ?='reflected' THEN ? ELSE reflected_at END,updated_at=? WHERE distribution_id=? AND seat_id=? AND state=? AND offer_key=? AND ${IDENTITY_GUARD}`).bind(step.state, r.result_code, step.state === 'received' ? 1 : 0, now, step.state, now, now, t.distribution_id, t.seat_id, t.state, t.offer_key, ...identityArgs)];
     // The card and the audit row exist only if THIS transition won: a batch that succeeds says nothing about a CAS that
     // changed zero rows (a withdrawal, a rebind or another receipt may have moved the row since it was read).
     const won = `EXISTS (SELECT 1 FROM ${T} WHERE distribution_id=? AND seat_id=? AND state=? AND offer_key=? AND updated_at=?)`, wonArgs = [t.distribution_id, t.seat_id, step.state, t.offer_key, now];
@@ -192,7 +203,7 @@ export async function distributionExchange(db: Db, g: SyncGrant, o: { body: unkn
     // `stale` = the device holds something newer than this withdrawal. The card is not marked removed on that word alone.
     if (r.result === 'stale') { ack(false, 'device_holds_newer'); continue; }
     try {
-      const res = await batch(db, [db.prepare(`UPDATE ${C} SET state='withdrawn',pending=0,updated_at=? WHERE class_run_id=? AND seat_id=? AND student_id=? AND object_id=? AND state='withdraw_pending' AND withdraw_key=?`).bind(now, ...seatArgs, g.student_id, r.object_id, r.withdraw_key), db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,?,'device',?,'distribution_withdrawn',?,? WHERE EXISTS (SELECT 1 FROM ${C} WHERE class_run_id=? AND seat_id=? AND student_id=? AND object_id=? AND state='withdrawn' AND withdraw_key=? AND updated_at=?)`).bind(g.class_run_id, g.seat_id, device || g.id, JSON.stringify({ object_id: r.object_id, seq: r.seq, result: r.result }), now, ...seatArgs, g.student_id, r.object_id, r.withdraw_key, now)], o.meter);
+      const res = await batch(db, [db.prepare(`UPDATE ${C} SET state='withdrawn',pending=0,updated_at=? WHERE class_run_id=? AND seat_id=? AND student_id=? AND object_id=? AND state='withdraw_pending' AND withdraw_key=? AND EXISTS (SELECT 1 FROM class_run_seats x WHERE x.class_run_id=${C}.class_run_id AND x.seat_id=${C}.seat_id AND x.seat_revision=? AND x.student_id=${C}.student_id AND x.replaced_at IS NULL) AND EXISTS (SELECT 1 FROM ops_grants gg WHERE gg.id=? AND gg.kind='connection' AND gg.state='active' AND gg.connection_epoch=? AND gg.expires_at>?) AND EXISTS (SELECT 1 FROM ops_seat_leases l WHERE l.grant_id=? AND l.app_instance_id=?)`).bind(now, ...seatArgs, g.student_id, r.object_id, r.withdraw_key, g.seat_revision, g.id, g.connection_epoch, now, g.id, o.instance), db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,?,'device',?,'distribution_withdrawn',?,? WHERE EXISTS (SELECT 1 FROM ${C} WHERE class_run_id=? AND seat_id=? AND student_id=? AND object_id=? AND state='withdrawn' AND withdraw_key=? AND updated_at=?)`).bind(g.class_run_id, g.seat_id, device || g.id, JSON.stringify({ object_id: r.object_id, seq: r.seq, result: r.result }), now, ...seatArgs, g.student_id, r.object_id, r.withdraw_key, now)], o.meter);
       ack(changed(res[0]), changed(res[0]) ? 'recorded' : 'changed', changed(res[0]));
     } catch (err) { console.error('distribution withdraw receipt not stored:', err); ack(false, 'storage', false); }
   }
