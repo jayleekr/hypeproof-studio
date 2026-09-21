@@ -24,6 +24,7 @@ import { evaluateInput, evaluatorConfig, rubricVersion, type Transport } from '.
 import { getProfile } from '../profiles';
 import { modelIdFor } from '../profiles/types';
 import { opsEnabled } from './classroom-ops';
+import { basisAllows, basisTables, inputBasisVerdict } from '../lib/lesson-basis';
 
 type Db = Env['HPS_DB'];
 type Job = { id: string; job_key: string; batch_id: string; class_run_id: string; cohort_id: string; student_id: string; input_manifest_digest: string; input_revision: number; snapshot_revision: number; input_coverage: string; capability_model: string; rubric: string; evaluator: string; renderer_revision: string; state: string; reason: string; lease_owner: string; lease_generation: number; lease_expires_at: number; draft_digest: string; summary_json: string; revision: number };
@@ -65,7 +66,10 @@ async function createJobs(db: Db, run: Record<string, any>, batch: Record<string
   for (const o of pending) {
     const p = JSON.parse(o.payload_json); if (p.batch_id !== batch.id) continue;
     const key = await sha256Hex([p.student_id, run.class_run_id, p.manifest_digest, v.model.id, v.model.revision, v.rubric, v.evaluator, RENDERER_REVISION].join('|'));
-    stmts.push(db.prepare("INSERT INTO classroom_report_jobs(id,job_key,batch_id,class_run_id,cohort_id,student_id,input_manifest_digest,input_revision,snapshot_revision,input_coverage,capability_model,rubric,evaluator,renderer_revision,state,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'queued',?,?) ON CONFLICT(job_key) DO NOTHING").bind(crypto.randomUUID(), key, batch.id, run.class_run_id, run.cohort_id, p.student_id, p.manifest_digest, p.input_revision, p.snapshot_revision, p.coverage, v.model.id, v.rubric, v.evaluator, RENDERER_REVISION, now, now));
+    // #751 U3 — an input made under more than one lesson basis (or whose basis cannot be established) becomes a HELD job:
+    // visible in the review queue with its reason, never leased, never evaluated. One verdict for every consumer (lib/lesson-basis.ts).
+    const basis = await inputBasisVerdict(db, { class_run_id: run.class_run_id, student_id: p.student_id, batch_id: batch.id, snapshot_revision: p.snapshot_revision });
+    stmts.push(db.prepare("INSERT INTO classroom_report_jobs(id,job_key,batch_id,class_run_id,cohort_id,student_id,input_manifest_digest,input_revision,snapshot_revision,input_coverage,capability_model,rubric,evaluator,renderer_revision,state,reason,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(job_key) DO NOTHING").bind(crypto.randomUUID(), key, batch.id, run.class_run_id, run.cohort_id, p.student_id, p.manifest_digest, p.input_revision, p.snapshot_revision, p.coverage, v.model.id, v.rubric, v.evaluator, RENDERER_REVISION, basis.allow ? 'queued' : 'held', basis.allow ? '' : basis.reason, now, now));
     stmts.push(db.prepare("UPDATE classroom_job_outbox SET state='processed',processed_at=? WHERE id=?").bind(now, o.id)); created++;
   }
   // A learner whose job in this batch was closed by a withdrawal already has their (content-free) row: no second "missing" row for them.
@@ -108,8 +112,26 @@ const WITHDRAWN = { state: 'withdrawn', reason: 'withdrawn', draft_digest: '', o
 const closeIfWithdrawn = (db: Db, job: Job, generation: number, now: number) => db.prepare("UPDATE classroom_report_jobs SET state='withdrawn',reason='withdrawn',draft_digest='',summary_json='{}',lease_expires_at=0,revision=revision+1,updated_at=?3 WHERE id=?1 AND state='leased' AND lease_generation=?2 AND EXISTS (SELECT 1 FROM classroom_collect_tombstones t WHERE t.class_run_id=classroom_report_jobs.class_run_id AND t.student_id=classroom_report_jobs.student_id) RETURNING id").bind(job.id, generation, now).first();
 /** Refused because the learner withdrew — whether this call closed the job or the erasure already had. Anything else refused is a lost lease. */
 const refusedAs = async (db: Db, job: Job, generation: number, now: number) => ((await closeIfWithdrawn(db, job, generation, now)) || (await db.prepare("SELECT 1 FROM classroom_report_jobs WHERE id=? AND state='withdrawn'").bind(job.id).first())) ? WITHDRAWN : null;
+/**
+ * #751 U3 — a job whose input may not be evaluated ends here as `held`. Used right after a lease (a job queued before its
+ * basis was known), before the evaluator or a runner sees a byte of the input, and when a result arrives for it anyway.
+ */
+async function holdForBasis(env: Env, job: Job, generation: number, actor: { kind: string; id: string }, now: number): Promise<{ state: 'held'; reason: string; draft_digest: ''; ok: false } | null> {
+  const verdict = await inputBasisVerdict(env.HPS_DB, { class_run_id: job.class_run_id, student_id: job.student_id, batch_id: job.batch_id, snapshot_revision: job.snapshot_revision });
+  if (verdict.allow) return null;
+  await env.HPS_DB.batch([
+    env.HPS_DB.prepare("UPDATE classroom_report_jobs SET state='held',reason=?,draft_digest='',summary_json='{}',lease_expires_at=0,revision=revision+1,updated_at=? WHERE id=? AND state='leased' AND lease_generation=?").bind(verdict.reason, now, job.id, generation),
+    audit(env.HPS_DB, job.class_run_id, actor.kind, actor.id, 'report_job_held', { job_id: job.id, reason: verdict.reason }, now),
+  ]);
+  return { state: 'held', reason: verdict.reason, draft_digest: '', ok: false };
+}
 async function saveResult(env: Env, job: Job, generation: number, v: ReturnType<typeof validateDraft> | { ok: false; state: 'failed'; reason: string }, actor: { kind: string; id: string }, now: number) {
   const db = env.HPS_DB; let digest = '', summary = {}, key = '';
+  // The commit below carries the basis rule itself (a basis row may land between this check and the write); this check only
+  // saves writing a body that would be discarded. The predicate names the U3 tables, so it is attached only where they exist.
+  const held = await holdForBasis(env, job, generation, actor, now); if (held) return held;
+  const tables = await basisTables(db); if (tables === 'unreadable') return { state: 'held', reason: 'lesson_basis_unreadable', draft_digest: '', ok: false } as const;
+  const basisGuard = tables ? ` AND ${basisAllows('classroom_report_jobs')}` : '';
   if (v.ok) {
     if (!(await db.prepare(`SELECT 1 FROM classroom_report_jobs WHERE id=?1 AND${liveLease}`).bind(job.id, generation).first())) return refusedAs(db, job, generation, now);
     const body = JSON.stringify(v.draft); digest = await sha256Hex(body); key = draftKey(job, generation);
@@ -117,9 +139,9 @@ async function saveResult(env: Env, job: Job, generation: number, v: ReturnType<
     summary = { observed: v.draft.findings.filter((f) => f.status === 'observed').length, not_yet_seen: v.draft.findings.filter((f) => f.status !== 'observed').length };
   }
   let saved: { state: string } | null = null;
-  try { saved = await db.prepare(`UPDATE classroom_report_jobs SET state=?3,reason=?4,draft_digest=?5,summary_json=?6,lease_expires_at=0,revision=revision+1,updated_at=?7 WHERE id=?1 AND${liveLease} RETURNING state`).bind(job.id, generation, v.state, v.reason, digest, JSON.stringify(summary), now).first<{ state: string }>(); }
+  try { saved = await db.prepare(`UPDATE classroom_report_jobs SET state=?3,reason=?4,draft_digest=?5,summary_json=?6,lease_expires_at=0,revision=revision+1,updated_at=?7 WHERE id=?1 AND${liveLease}${basisGuard} RETURNING state`).bind(job.id, generation, v.state, v.reason, digest, JSON.stringify(summary), now).first<{ state: string }>(); }
   catch (err) { if (key) await discardBody(env, job, key, actor, now); throw err; }
-  if (!saved) { if (key) await discardBody(env, job, key, actor, now); return refusedAs(db, job, generation, now); }
+  if (!saved) { if (key) await discardBody(env, job, key, actor, now); return (await holdForBasis(env, job, generation, actor, now)) ?? refusedAs(db, job, generation, now); }
   if (key) { // Bodies left by earlier generations of this job (a lease that died after its write) are not the draft: remove them.
     try { for (const o of (await env.HPS_TRACES.list({ prefix: draftPrefix(job), limit: 100 })).objects) if (o.key !== key) await env.HPS_TRACES.delete(o.key); } catch { /* found again at erasure */ }
   }
@@ -143,6 +165,8 @@ async function evaluateLeased(env: Env, job: Job, profileId: string, actor: { ki
   if (!model || job.evaluator !== cfg.id || job.rubric !== rubricVersion(model)) { await release('evaluator_mismatch'); return { state: 'queued', reason: 'evaluator_mismatch', ok: false }; }
   if (model.status === 'legacy') { await release('legacy_engine_required'); return { state: 'queued', reason: 'legacy_engine_required', ok: false }; }
   if (await closeIfWithdrawn(db, job, job.lease_generation, now)) return WITHDRAWN;
+  // #751 U3 — BEFORE the input is read or a provider is called.
+  { const held = await holdForBasis(env, job, job.lease_generation, actor, now); if (held) return held; }
   const input = await env.HPS_TRACES.get(snapshotKey(job.cohort_id, job.class_run_id, job.student_id, job.batch_id, job.snapshot_revision, 'events.jsonl'));
   if (!input) return saveResult(env, job, job.lease_generation, { ok: false, state: 'failed', reason: 'input_missing' }, actor, now);
   const text = await input.text();
@@ -264,8 +288,15 @@ classroomReportsTeacher.put(root + '/reports/:job/review', async (c) => {
   // Approval is about the exact draft the reviewer read. A re-run or late input changes the digest and needs a new look.
   if (b.draft_digest !== job.draft_digest) return c.json({ error: 'the draft changed since it was opened', reason: 'draft_changed' }, 409);
   if (b.decision === 'approve' && job.reason === 'marker_review_missing') return c.json({ error: 'the legacy 28-marker review is not complete', reason: 'marker_review_missing' }, 409);
+  // #751 U3 — a draft made before its input's basis was known is not approved either. Checked here AND in the commit.
+  let approveGuard = '';
+  if (b.decision === 'approve') {
+    const verdict = await inputBasisVerdict(db, { class_run_id: job.class_run_id, student_id: job.student_id, batch_id: job.batch_id, snapshot_revision: job.snapshot_revision });
+    if (!verdict.allow) return c.json({ error: 'this record was produced under more than one lesson basis (or its basis cannot be established); it is held until reports are written per basis', reason: verdict.reason }, 409);
+    if (verdict.tables) approveGuard = ` AND ${basisAllows('classroom_report_jobs')}`;
+  }
   const state = b.decision === 'approve' ? 'approved' : b.decision === 'quarantine' ? 'quarantined' : 'review_required';
-  const saved = await db.prepare('UPDATE classroom_report_jobs SET state=?,reason=?,reviewed_by=?,revision=revision+1,updated_at=? WHERE id=? AND revision=? RETURNING state,revision').bind(state, b.decision === 'needs_observation' ? 'needs_observation' : b.decision === 'quarantine' ? 'reviewer_quarantined' : job.reason, t.auth.payload.u, now, job.id, b.expected_revision).first<{ state: string; revision: number }>();
+  const saved = await db.prepare('UPDATE classroom_report_jobs SET state=?,reason=?,reviewed_by=?,revision=revision+1,updated_at=? WHERE id=? AND revision=?' + approveGuard + ' RETURNING state,revision').bind(state, b.decision === 'needs_observation' ? 'needs_observation' : b.decision === 'quarantine' ? 'reviewer_quarantined' : job.reason, t.auth.payload.u, now, job.id, b.expected_revision).first<{ state: string; revision: number }>();
   if (!saved) return c.json({ error: 'another reviewer changed this report; reload', reason: 'revision_conflict' }, 409);
   await audit(db, t.run.class_run_id, 'instructor', t.auth.payload.u, 'report_' + b.decision, { job_id: job.id, draft_digest: job.draft_digest }, now).run();
   return c.json({ id: job.id, state: saved.state, revision: saved.revision, approved_draft_digest: state === 'approved' ? job.draft_digest : null, note: 'approval of the report content is not approval to send it' });
@@ -290,7 +321,7 @@ classroomReportsRunner.post('/claim', async (c) => {
   const can: Runnable = { service: want.service && cfg ? { evaluator: cfg.id, rubric: rubricVersion(DEFAULT_CAPABILITY_MODEL), model: DEFAULT_CAPABILITY_MODEL.id } : null, legacy: want.legacy === true, local: want.local === true };
   // A learner who withdrew is never handed to a runner: their leased job is closed instead and the next one is tried.
   let job = await claimNext(db, batch, runner, now, can);
-  for (let i = 0; job && i < 50 && (await closeIfWithdrawn(db, job, job.lease_generation, now)); i++) job = await claimNext(db, batch, runner, now, can);
+  for (let i = 0; job && i < 50 && ((await closeIfWithdrawn(db, job, job.lease_generation, now)) || (await holdForBasis(c.env, job, job.lease_generation, { kind: 'runner', id: runner }, now))); i++) job = await claimNext(db, batch, runner, now, can);
   if (!job) {
     // Nothing for THIS runner. Say why work may still be waiting, so an operator sees "not configured" instead of an idle runner.
     const waiting = ((await db.prepare("SELECT j.capability_model,j.evaluator,COALESCE(a.next_attempt_at,0) AS next_at FROM classroom_report_jobs j LEFT JOIN classroom_report_job_attempts a ON a.job_id=j.id WHERE j.batch_id=? AND j.state='queued'").bind(batch).all()).results ?? []) as Array<{ capability_model: string; evaluator: string; next_at: number }>;
@@ -303,6 +334,8 @@ const leased = (c: any, generation: unknown) => c.env.HPS_DB.prepare("SELECT * F
 classroomReportsRunner.get('/jobs/:job/input/:file', async (c) => {
   const job = await leased(c, c.req.query('generation')); if (!job) return c.json({ error: 'no live lease on this job', reason: 'lease_lost' }, 409);
   if (!['session.meta.json', 'events.jsonl'].includes(c.req.param('file'))) return c.json({ error: 'not an input file' }, 400);
+  // #751 U3 — no byte of a held input leaves the Service, even for a job leased before its basis was known.
+  { const held = await holdForBasis(c.env, job, job.lease_generation, { kind: 'runner', id: c.get('runner') }, Date.now()); if (held) return c.json({ error: 'this input is held: it was produced under more than one lesson basis, or its basis cannot be established', reason: held.reason }, 409); }
   const obj = await c.env.HPS_TRACES.get(snapshotKey(job.cohort_id, job.class_run_id, job.student_id, job.batch_id, job.snapshot_revision, c.req.param('file')));
   return obj ? new Response(await obj.arrayBuffer(), { headers: { 'cache-control': 'no-store', 'content-type': 'application/octet-stream' } }) : c.json({ error: 'input missing' }, 404);
 });

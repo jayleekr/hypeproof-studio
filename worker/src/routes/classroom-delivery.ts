@@ -16,6 +16,7 @@ import { REPORT_PAGE_CSP, renderReportHtml } from '../lib/classroom-report-html'
 import { APPROVAL_TTL_MS, EMAIL_RE, LINK_TTL_MS, MAX_VIEWER_ATTEMPTS, TEMPLATE_RE, VIEWER_CHECK_KINDS, VIEWER_CHECK_PROMPT, deliveryKey, dryRunAdapter, maskAddress, nextDeliveryState, sameHash, viewerCheckHash, type DeliveryAdapter, type ViewerCheckKind } from '../lib/classroom-delivery';
 import { EMAIL_TEMPLATES, resendAdapter, resendConfigured, resendEventKind, verifySvix } from '../lib/classroom-delivery-resend';
 import { opsEnabled } from './classroom-ops';
+import { basisAllows, basisTables, inputBasisVerdict } from '../lib/lesson-basis';
 import { batchScope, scopeRefusal } from './classroom-collect';
 
 type Db = Env['HPS_DB'];
@@ -91,7 +92,10 @@ async function teacher(c: any, capability: OpsCapability): Promise<{ auth: Issue
 }
 /** What would be sent, to whom — recomputed from live rows every time, so an approval can be checked against reality. */
 async function currentScope(db: Db, batchId: string, runId: string, channel: string, template: string) {
-  const rows = ((await db.prepare("SELECT j.id AS job_id,j.student_id,j.draft_digest,r.recipient_ref,r.revision AS recipient_revision,r.address,COALESCE(k.revision,0) AS check_revision FROM classroom_report_jobs j JOIN classroom_recipients r ON r.class_run_id=j.class_run_id AND r.student_id=j.student_id AND r.channel=? LEFT JOIN classroom_recipient_checks k ON k.class_run_id=r.class_run_id AND k.student_id=r.student_id AND k.recipient_ref=r.recipient_ref WHERE j.batch_id=? AND j.class_run_id=? AND j.state='approved' AND j.input_revision=(SELECT MAX(x.input_revision) FROM classroom_report_jobs x WHERE x.batch_id=j.batch_id AND x.student_id=j.student_id AND x.capability_model=j.capability_model) ORDER BY j.student_id,r.recipient_ref").bind(channel, batchId, runId).all()).results ?? []) as Array<{ job_id: string; student_id: string; draft_digest: string; recipient_ref: string; recipient_revision: number; address: string; check_revision: number }>;
+  // #751 U3 — a report built from an input of mixed (or unestablished) lesson basis is not in ANY delivery scope, including
+  // one that was approved before that was known. Unreadable basis tables = nothing is in scope (the caller sees an empty scope).
+  const tables = await basisTables(db); if (tables === 'unreadable') return { rows: [], hash: await sha256Hex(JSON.stringify([channel, template, 'lesson_basis_unreadable'])) };
+  const rows = ((await db.prepare("SELECT j.id AS job_id,j.student_id,j.draft_digest,r.recipient_ref,r.revision AS recipient_revision,r.address,COALESCE(k.revision,0) AS check_revision FROM classroom_report_jobs j JOIN classroom_recipients r ON r.class_run_id=j.class_run_id AND r.student_id=j.student_id AND r.channel=? LEFT JOIN classroom_recipient_checks k ON k.class_run_id=r.class_run_id AND k.student_id=r.student_id AND k.recipient_ref=r.recipient_ref WHERE j.batch_id=? AND j.class_run_id=? AND j.state='approved'" + (tables ? ' AND ' + basisAllows('j') : '') + " AND j.input_revision=(SELECT MAX(x.input_revision) FROM classroom_report_jobs x WHERE x.batch_id=j.batch_id AND x.student_id=j.student_id AND x.capability_model=j.capability_model) ORDER BY j.student_id,r.recipient_ref").bind(channel, batchId, runId).all()).results ?? []) as Array<{ job_id: string; student_id: string; draft_digest: string; recipient_ref: string; recipient_revision: number; address: string; check_revision: number }>;
   // A changed or removed viewer check is a changed delivery: the approval no longer matches.
   const hash = await sha256Hex(JSON.stringify([channel, template, rows.map((r) => [r.job_id, r.draft_digest, r.recipient_ref, r.recipient_revision, r.check_revision])]));
   return { rows, hash };
@@ -187,6 +191,8 @@ async function openLink(c: any, supplied: string | null): Promise<Response> {
   if (!link || link.revoked_at || link.expires_at <= now) return c.json({ error: NOT_AVAILABLE }, 404);
   const job = await db.prepare("SELECT * FROM classroom_report_jobs WHERE id=? AND state='approved'").bind(link.job_id).first<Record<string, any>>();
   if (!job) return c.json({ error: NOT_AVAILABLE }, 404);
+  // #751 U3 — the same verdict at the point a report is actually RETURNED to a reader.
+  if (!(await inputBasisVerdict(db, { class_run_id: job.class_run_id, student_id: job.student_id, batch_id: job.batch_id, snapshot_revision: job.snapshot_revision })).allow) return c.json({ error: NOT_AVAILABLE }, 404);
   const check = await db.prepare('SELECT kind,salt,check_hash FROM classroom_recipient_checks WHERE class_run_id=? AND student_id=? AND recipient_ref=?').bind(link.class_run_id, link.student_id, link.recipient_ref).first<{ kind: ViewerCheckKind; salt: string; check_hash: string }>();
   if (check) {
     const tries = await db.prepare('SELECT failed,locked_at FROM classroom_link_attempts WHERE link_id=?').bind(link.id).first<{ failed: number; locked_at: number | null }>();

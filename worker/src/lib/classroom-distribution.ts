@@ -8,10 +8,18 @@
 // the learners the instructor selected, during class. Nothing here touches the first.
 
 export const CONTENT_SCHEMA = 'hps-classroom-content/1';
-/** U3 adds `prompt` and `setting` as further kinds of the same object; until then anything else is refused. */
-export const CONTENT_KINDS = ['notice', 'material'] as const;
+/**
+ * `prompt` (U3): a text the learner may IMPORT INTO THEIR DRAFT by their own press — inbox content like a notice.
+ * `setting` (U3): a reference to a frozen lesson version of the run's course (or `base`: back to the token's lesson). It
+ * carries no values of its own, and one class run has ONE setting object whose revisions are the successive choices.
+ */
+export const CONTENT_KINDS = ['notice', 'material', 'prompt', 'setting'] as const;
 export type ContentKind = (typeof CONTENT_KINDS)[number];
 export const DIST_CLIENT_CAPABILITY = 'distribution_inbox';
+/** Declared per kind: an app that can hold notices is not thereby able to import a prompt or switch a lesson binding. */
+export const KIND_CLIENT_CAPABILITY: Record<ContentKind, string> = { notice: 'distribution_inbox', material: 'distribution_inbox', prompt: 'inbox_prompt', setting: 'lesson_binding' };
+export const declaresKind = (caps: unknown, kind: string) => Array.isArray(caps) && caps.includes(DIST_CLIENT_CAPABILITY) && caps.includes(KIND_CLIENT_CAPABILITY[kind as ContentKind] ?? '\u0000');
+const VERSION_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
 export const MAX_TITLE_CHARS = 80;
 export const MAX_BODY_CHARS = 2000;
@@ -48,7 +56,9 @@ const bad = (reason: string, detail: string, field?: string): Verdict<never> => 
 const exact = (o: Record<string, unknown>, allowed: string[]) => Object.keys(o).find((k) => !allowed.includes(k));
 
 export interface ContentLink { label: string; url: string }
-export interface Content { kind: ContentKind; title: string; body: string; links: ContentLink[] }
+export interface LessonRef { course_id: string; version: string; sha256: string }
+/** `lesson` exists on a setting only: a frozen version, or `'base'` = the lesson the participant's own token pins. */
+export interface Content { kind: ContentKind; title: string; body: string; links: ContentLink[]; lesson?: LessonRef | 'base' }
 
 /** `hosts` is the operator's allowlist. Empty (the default) refuses every link: no domain is trusted by default. */
 export function normalizeLink(raw: unknown, hosts: readonly string[]): Verdict<ContentLink> {
@@ -81,15 +91,23 @@ export function normalizeContent(raw: unknown, hosts: readonly string[]): Verdic
   if (typeof o.body !== 'string' || !o.body.trim() || [...o.body].length > MAX_BODY_CHARS || new TextEncoder().encode(o.body).length > MAX_BODY_BYTES || CONTROL_RE.test(o.body)) return bad('content_invalid', `body is 1–${MAX_BODY_CHARS} characters of plain text (≤ ${MAX_BODY_BYTES} bytes)`, 'body');
   const rawLinks = o.links === undefined ? [] : o.links;
   if (!Array.isArray(rawLinks) || rawLinks.length > MAX_LINKS) return bad('content_invalid', `links[] ≤ ${MAX_LINKS}`, 'links');
-  if (o.kind === 'notice' && rawLinks.length) return bad('content_invalid', 'a notice carries no links; use a material', 'links');
+  if (o.kind !== 'material' && rawLinks.length) return bad('content_invalid', 'only a material carries links', 'links');
   const links: ContentLink[] = [];
   for (const l of rawLinks) { const v = normalizeLink(l, hosts); if (!v.ok) return v; links.push(v.value); }
-  return { ok: true, value: { kind: o.kind as ContentKind, title: o.title.trim(), body: o.body.replace(/\r\n?/g, '\n'), links } };
+  const base = { kind: o.kind as ContentKind, title: o.title.trim(), body: o.body.replace(/\r\n?/g, '\n'), links };
+  if (o.kind !== 'setting') { if (o.lesson !== undefined || o.base !== undefined) return bad('content_invalid', 'only a setting names a lesson version', 'lesson'); return { ok: true, value: base }; }
+  // A setting is a REFERENCE: a frozen version of the course, or an explicit return to the token's own lesson. No values.
+  if (o.base !== undefined) { if (o.base !== true || o.lesson !== undefined) return bad('content_invalid', 'a return is {base:true} and nothing else', 'base'); return { ok: true, value: { ...base, lesson: 'base' } }; }
+  const l = o.lesson as Record<string, unknown> | null | undefined;
+  if (!l || typeof l !== 'object' || Array.isArray(l) || exact(l, ['course_id', 'version', 'sha256']) || typeof l.course_id !== 'string' || !ID_RE.test(l.course_id) || typeof l.version !== 'string' || !VERSION_RE.test(l.version) || typeof l.sha256 !== 'string' || !SHA256_RE.test(l.sha256)) return bad('content_invalid', 'a setting names lesson{course_id,version,sha256} or base:true', 'lesson');
+  return { ok: true, value: { ...base, lesson: { course_id: l.course_id, version: l.version, sha256: l.sha256 } } };
 }
 
 /** What is hashed is what a learner's device re-hashes: schema, kind, title, body, links — in this order, nothing else. */
 export function contentCanonical(c: Content): string {
-  return JSON.stringify([CONTENT_SCHEMA, c.kind, c.title, c.body, c.links.map((l) => [l.label, l.url])]);
+  const head = [CONTENT_SCHEMA, c.kind, c.title, c.body, c.links.map((l) => [l.label, l.url])];
+  // A sixth element for a setting ONLY: the hash of a notice or material is byte-for-byte what it was before U3.
+  return JSON.stringify(c.kind === 'setting' ? [...head, c.lesson === 'base' ? ['base'] : [c.lesson!.course_id, c.lesson!.version, c.lesson!.sha256]] : head);
 }
 export async function sha256Hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
@@ -100,10 +118,10 @@ export const contentHash = (c: Content) => sha256Hex(contentCanonical(c));
 export interface ContentRequest { idempotency_key: string; content: Content; object_id: string | null; expected_latest_revision: number | null }
 export function normalizeContentRequest(raw: unknown, hosts: readonly string[]): Verdict<ContentRequest> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return bad('request_invalid', 'body must be an object');
-  const o = raw as Record<string, unknown>, extra = exact(o, ['idempotency_key', 'kind', 'title', 'body', 'links', 'object_id', 'expected_latest_revision']);
+  const o = raw as Record<string, unknown>, extra = exact(o, ['idempotency_key', 'kind', 'title', 'body', 'links', 'lesson', 'base', 'object_id', 'expected_latest_revision']);
   if (extra) return bad('unknown_field', `unknown field '${extra.slice(0, 40)}'`);
   if (typeof o.idempotency_key !== 'string' || !KEY_RE.test(o.idempotency_key)) return bad('request_invalid', 'idempotency_key');
-  const c = normalizeContent({ kind: o.kind, title: o.title, body: o.body, links: o.links }, hosts); if (!c.ok) return c;
+  const c = normalizeContent({ kind: o.kind, title: o.title, body: o.body, links: o.links, ...(o.lesson !== undefined ? { lesson: o.lesson } : {}), ...(o.base !== undefined ? { base: o.base } : {}) }, hosts); if (!c.ok) return c;
   if (o.object_id === undefined) { if (o.expected_latest_revision !== undefined) return bad('request_invalid', 'expected_latest_revision belongs to a revision of an existing object'); return { ok: true, value: { idempotency_key: o.idempotency_key, content: c.value, object_id: null, expected_latest_revision: null } }; }
   if (typeof o.object_id !== 'string' || !KEY_RE.test(o.object_id)) return bad('request_invalid', 'object_id');
   if (!Number.isSafeInteger(o.expected_latest_revision) || (o.expected_latest_revision as number) < 1) return bad('request_invalid', 'a new revision names the latest revision it was written against');

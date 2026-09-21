@@ -19,11 +19,18 @@ import {
   contentCanonical, contentHash, distStatus, distributionRequestCanonical, normalizeContentRequest, normalizeDistributionRequest,
   parseLinkHosts, sha256Hex, summarizeDistribution, type CardFacts,
 } from '../lib/classroom-distribution';
-import { NOT_FENCED, coverageStatements, declaresInbox, settleStatements } from '../lib/classroom-distribution-store';
+import { NOT_FENCED, coverageStatements, settleStatements } from '../lib/classroom-distribution-store';
 import { opsEnabled } from './classroom-ops';
+import { parseLesson } from '../lib/classroom-ops';
+import { readLesson } from '../lib/lesson-delivery';
+import { readOpening } from '../lib/cohort-binding';
+import { getProfile } from '../profiles';
+import { bindingsEnforced } from '../lib/lesson-binding-store';
+import { lessonImpact, settingPhase } from '../lib/lesson-binding';
+import { declaresKind, type Content } from '../lib/classroom-distribution';
 
 type Db = Env['HPS_DB'];
-type Run = { class_run_id: string; cohort_id: string; profile_id: string; flags_json: string; roster_revision: number; starts_at: number; ends_at: number; ended_at?: string | null };
+type Run = { class_run_id: string; cohort_id: string; profile_id: string; flags_json: string; lesson_json?: string; roster_revision: number; starts_at: number; ends_at: number; ended_at?: string | null };
 const json = async (c: any) => { try { return await c.req.json(); } catch { return null; } };
 const auditIf = (db: Db, run: string, who: string, action: string, detail: unknown, at: number, cond: string, condArgs: unknown[]) =>
   db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,'','instructor',?,?,?,? WHERE ${cond}`).bind(run, who, action, JSON.stringify(detail), at, ...condArgs);
@@ -57,6 +64,34 @@ async function whyRefused(db: Db, run: Run, jti: string | undefined, now: number
   if (live.roster_revision !== run.roster_revision) return { reason: 'revision_conflict', status: 409, roster_revision: live.roster_revision };
   return { reason: (await extra()) ?? 'changed_during_request', status: 409, roster_revision: live.roster_revision };
 }
+// ── U3: a SETTING changes what a participant executes, so it has its own switch, its own authority and its own checks ──
+const SETTINGS_ON = "EXISTS (SELECT 1 FROM class_run_ops o2 WHERE o2.class_run_id=? AND json_extract(o2.flags_json,'$.ops_lesson_settings')=1)";
+const runtimeOf = (lesson: { content: { model?: { binding?: { runtime?: string } } } }, profileId: string) => { const p = getProfile(profileId); return lesson.content.model?.binding?.runtime ?? (p?.minor_cohort ? 'proxy' : p?.coach_runtime ?? 'proxy'); };
+/** Where the frozen versions of this run's course live: the template cohort for a class opening, the cohort itself otherwise. */
+async function lessonCohortOf(env: Env, cohort: string): Promise<string> { try { return (await readOpening(env, cohort))?.template_cohort ?? cohort; } catch { return cohort; } }
+/** Who may create or send a setting, and whether this Service can enforce one at all. Returns a Response to refuse. */
+function settingAuthority(c: any, auth: IssuerAuthz, run: Run): Response | null {
+  if (!(auth.scope.ops ?? []).includes('lesson_settings')) return c.json({ error: "issuer scope lacks operations capability 'lesson_settings'", reason: 'ops_capability_missing' }, 403);
+  if (!parseFlags(run.flags_json).ops_lesson_settings) return c.json({ error: 'lesson settings are off for this run', reason: 'ops_lesson_settings_disabled' }, 403);
+  // A binding row may only ever exist where it is enforced: otherwise a "switched" learner would silently keep the old version.
+  if (!bindingsEnforced(c.env)) return c.json({ error: 'this Service does not enforce lesson bindings; a setting cannot be created or sent', reason: 'lesson_bindings_not_enforced' }, 503);
+  return null;
+}
+/** A setting names a frozen version of THE RUN'S course that resolves NOW for the run's profile, on the run's runtime. */
+async function settingAdmissible(c: any, run: Run, content: Content): Promise<Response | { pin: NonNullable<ReturnType<typeof parseLesson>>; target: Awaited<ReturnType<typeof readLesson>>; base: NonNullable<Awaited<ReturnType<typeof readLesson>>> }> {
+  const pin = parseLesson(run.lesson_json);
+  if (!pin || !pin.course_id) return c.json({ error: 'this run has no pinned lesson; a setting needs a base to change from', reason: 'run_lesson_not_pinned' }, 409);
+  const cohort = await lessonCohortOf(c.env, run.cohort_id), base = await readLesson(c.env, cohort, pin.course_id, pin.version, run.profile_id);
+  if (!base) return c.json({ error: "the run's pinned lesson cannot be opened", reason: 'lesson_unavailable' }, 409);
+  if (content.lesson === 'base') return { pin, target: null, base };
+  const ref = content.lesson!;
+  if (ref.course_id !== pin.course_id) return c.json({ error: "a setting names a version of this run's course", reason: 'setting_course_mismatch' }, 409);
+  const target = await readLesson(c.env, cohort, ref.course_id, ref.version, run.profile_id);
+  if (!target) return c.json({ error: 'no confirmed version with this id resolves for the run profile (a draft, another cohort, or a policy that no longer fits)', reason: 'lesson_unavailable' }, 409);
+  if (target.sha256 !== ref.sha256) return c.json({ error: 'the version differs from what was reviewed', reason: 'lesson_mismatch' }, 409);
+  if (runtimeOf(target, run.profile_id) !== runtimeOf(base, run.profile_id)) return c.json({ error: 'this version runs on another runtime; a class does not switch runtime mid-session', reason: 'setting_runtime_change' }, 409);
+  return { pin, target, base };
+}
 const RUN_OPEN = "EXISTS (SELECT 1 FROM class_run_ops o WHERE o.class_run_id=? AND json_extract(o.flags_json,'$.ops_distribute')=1 AND o.ends_at>? AND NOT EXISTS (SELECT 1 FROM sessions z WHERE z.id=o.class_run_id AND z.ended_at IS NOT NULL))";
 
 // ── contents: immutable revisions of a per-run object ────────────────────────
@@ -64,8 +99,14 @@ classroomDistributionTeacher.post(root + '/contents', async (c) => {
   const t = await teacher(c, true); if (t instanceof Response) return t; const { auth, run } = t, db = c.env.HPS_DB, now = Date.now();
   const norm = normalizeContentRequest(await json(c), parseLinkHosts(c.env.HPS_CLASSROOM_LINK_HOSTS));
   if (!norm.ok) return c.json({ error: norm.detail, reason: norm.reason, ...(norm.field ? { field: norm.field } : {}) }, 400);
-  const req = norm.value;
+  const req = norm.value, isSetting = req.content.kind === 'setting';
   if (ended(run, now)) return c.json({ error: 'this class run has ended; nothing new can be authored for it', reason: 'run_ended' }, 409);
+  if (isSetting) {
+    const no = settingAuthority(c, auth, run); if (no) return no;
+    const okay = await settingAdmissible(c, run, req.content); if (okay instanceof Response) return okay;
+    // One setting object per run (unique partial index): a second choice is the NEXT REVISION of that object.
+    if (req.object_id === null) { const prior = await db.prepare("SELECT object_id,latest_revision FROM classroom_content_objects WHERE class_run_id=? AND kind='setting'").bind(run.class_run_id).first<{ object_id: string; latest_revision: number }>(); if (prior) return c.json({ error: 'this run already has its setting object; save the next revision of it', reason: 'setting_object_exists', object_id: prior.object_id, latest_revision: prior.latest_revision }, 409); }
+  }
   // Secrets are masked BEFORE hashing: what is stored, hashed, reviewed and delivered is one and the same text.
   const content = { ...req.content, title: scrubSecrets(req.content.title), body: scrubSecrets(req.content.body) };
   const hash = await contentHash(content), requestHash = await sha256Hex(JSON.stringify([req.object_id, req.expected_latest_revision, contentCanonical(content)]));
@@ -79,13 +120,13 @@ classroomDistributionTeacher.post(root + '/contents', async (c) => {
   const jti = auth.payload.jti ?? '', objectId = req.object_id ?? crypto.randomUUID(), revision = (req.expected_latest_revision ?? 0) + 1;
   if (revision > MAX_REVISIONS_PER_OBJECT) return c.json({ error: `a material has at most ${MAX_REVISIONS_PER_OBJECT} revisions`, reason: 'content_limit' }, 429);
   const made = 'EXISTS (SELECT 1 FROM classroom_content_revisions WHERE object_id=? AND revision=? AND idempotency_key=?)', madeArgs = [objectId, revision, req.idempotency_key];
-  const payload = JSON.stringify({ body: content.body, links: content.links });
+  const payload = JSON.stringify({ body: content.body, links: content.links, ...(isSetting ? { lesson: content.lesson } : {}) });
   // The revision row carries the whole precondition: the run is open with the switch on, the token is not fenced, and the
   // object is where the author saw it (absent for a new one; at the expected revision, same kind, not retired otherwise).
   const where = req.object_id === null
-    ? `${RUN_OPEN} AND ${NOT_FENCED} AND (SELECT count(*) FROM classroom_content_objects WHERE class_run_id=?)<?`
-    : `${RUN_OPEN} AND ${NOT_FENCED} AND EXISTS (SELECT 1 FROM classroom_content_objects x WHERE x.object_id=? AND x.class_run_id=? AND x.latest_revision=? AND x.kind=? AND x.retired_at IS NULL)`;
-  const whereArgs = req.object_id === null ? [run.class_run_id, now, jti, run.class_run_id, MAX_OBJECTS_PER_RUN] : [run.class_run_id, now, jti, objectId, run.class_run_id, req.expected_latest_revision, content.kind];
+    ? `${RUN_OPEN} AND ${NOT_FENCED} AND (SELECT count(*) FROM classroom_content_objects WHERE class_run_id=?)<?${isSetting ? ` AND ${SETTINGS_ON}` : ''}`
+    : `${RUN_OPEN} AND ${NOT_FENCED} AND EXISTS (SELECT 1 FROM classroom_content_objects x WHERE x.object_id=? AND x.class_run_id=? AND x.latest_revision=? AND x.kind=? AND x.retired_at IS NULL)${isSetting ? ` AND ${SETTINGS_ON}` : ''}`;
+  const whereArgs = [...(req.object_id === null ? [run.class_run_id, now, jti, run.class_run_id, MAX_OBJECTS_PER_RUN] : [run.class_run_id, now, jti, objectId, run.class_run_id, req.expected_latest_revision, content.kind]), ...(isSetting ? [run.class_run_id] : [])];
   const stmts = [
     db.prepare(`INSERT INTO classroom_content_revisions(object_id,revision,class_run_id,kind,title,payload_json,content_hash,content_schema,request_hash,idempotency_key,created_by,issuer_jti,created_at) SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${where}`).bind(objectId, revision, run.class_run_id, content.kind, content.title, payload, hash, CONTENT_SCHEMA, requestHash, req.idempotency_key, auth.payload.u, jti || null, now, ...whereArgs),
     req.object_id === null
@@ -123,7 +164,7 @@ classroomDistributionTeacher.get(root + '/contents/:object/revisions/:rev', asyn
   if (!r) return c.json({ error: 'no such revision in this run', reason: 'not_found' }, 404);
   let payload: { body?: unknown; links?: unknown }; try { payload = JSON.parse(r.payload_json); } catch { return c.json({ error: 'this revision cannot be read right now', reason: 'content_unavailable' }, 503); }
   const { payload_json, ...meta } = r;
-  return c.json({ ...meta, body: payload.body, links: payload.links ?? [] });
+  return c.json({ ...meta, body: payload.body, links: payload.links ?? [], ...((payload as any).lesson !== undefined ? { lesson: (payload as any).lesson } : {}) });
 });
 
 // ── distributions ────────────────────────────────────────────────────────────
@@ -155,6 +196,18 @@ classroomDistributionTeacher.post(root + '/distributions', async (c) => {
   if (!revision) return c.json({ error: 'no such revision in this run', reason: 'content_not_found' }, 404);
   if (revision.retired_at !== null) return c.json({ error: 'this material was withdrawn; author a new one', reason: 'object_retired' }, 409);
   if (revision.content_hash !== req.content_hash) return c.json({ error: 'the content differs from what was reviewed', reason: 'content_mismatch' }, 409);
+  // U3 — sending a SETTING needs its own authority and switch, and the version must still resolve at this moment. The
+  // impact summary is computed here from the two frozen rows; the instructor does not type it.
+  const isSetting = revision.kind === 'setting'; let impact: unknown = null, settingLesson: unknown = null;
+  if (isSetting) {
+    const no = settingAuthority(c, auth, run); if (no) return no;
+    const rev = await db.prepare('SELECT payload_json,title FROM classroom_content_revisions WHERE object_id=? AND revision=?').bind(req.object_id, req.revision).first<{ payload_json: string; title: string }>();
+    let lesson: Content['lesson']; try { lesson = JSON.parse(rev?.payload_json ?? '{}').lesson; } catch { lesson = undefined; }
+    if (lesson === undefined) return c.json({ error: 'this setting cannot be read right now', reason: 'content_unavailable' }, 503);
+    const okay = await settingAdmissible(c, run, { kind: 'setting', title: revision.title, body: '', links: [], lesson }); if (okay instanceof Response) return okay;
+    settingLesson = lesson === 'base' ? { base: true, course_id: okay.pin.course_id } : lesson;
+    impact = lessonImpact(okay.base.content, (okay.target ?? okay.base).content);
+  }
   const seats = await seatsNow(db, run.class_run_id, now), chosen = req.targets.map((id) => seats.find((s) => s.seat_id === id));
   const unknown = req.targets.filter((_, i) => !chosen[i]);
   if (unknown.length) return c.json({ error: 'targets outside this run', reason: 'seat_not_found', seats: unknown.slice(0, 20) }, 404);
@@ -164,10 +217,12 @@ classroomDistributionTeacher.post(root + '/distributions', async (c) => {
   const plan = picked.map((s) => {
     const [grant, device] = (s.conn ?? '|').split('|'), card = held.find((h) => h.seat_id === s.seat_id && h.student_id === s.student_id);
     let caps: unknown = null; try { caps = s.caps ? JSON.parse(s.caps) : null; } catch { caps = null; }
-    const expect = card && card.revision > req.revision ? 'has_newer_revision' : !grant ? 'offline_until_reconnect' : !declaresInbox(caps) ? 'unsupported_app' : card && card.device_registration_id === device && card.revision === req.revision && card.content_hash === req.content_hash ? 'already_held' : 'deliverable_now';
+    const expect = card && card.revision > req.revision ? 'has_newer_revision' : !grant ? 'offline_until_reconnect' : !declaresKind(caps, revision.kind) ? 'unsupported_app' : card && card.device_registration_id === device && card.revision === req.revision && card.content_hash === req.content_hash ? 'already_held' : 'deliverable_now';
     return { seat_id: s.seat_id, student_id: s.student_id, expect };
   });
-  if (req.dry_run) return c.json({ dry_run: true, object_id: req.object_id, revision: req.revision, content_hash: req.content_hash, kind: revision.kind, title: revision.title, latest_revision: revision.latest_revision, expires_at: expires, roster_revision: run.roster_revision, targets: plan, not_selected: seats.length - picked.length }, 200);
+  if (req.dry_run) return c.json({ dry_run: true, object_id: req.object_id, revision: req.revision, content_hash: req.content_hash, kind: revision.kind, title: revision.title, latest_revision: revision.latest_revision, expires_at: expires, roster_revision: run.roster_revision, targets: plan, not_selected: seats.length - picked.length,
+    // For a setting: what changes (against the run's pinned version) and when. A learner's running answer is never cut.
+    ...(isSetting ? { setting: { lesson: settingLesson, impact, applies: 'next_question' } } : {}) }, 200);
   const count = await db.prepare('SELECT count(*) AS n,sum(CASE WHEN created_at>? THEN 1 ELSE 0 END) AS recent FROM classroom_distributions WHERE class_run_id=?').bind(now - 60_000, run.class_run_id).first<{ n: number; recent: number | null }>();
   if ((count?.n ?? 0) >= MAX_DISTRIBUTIONS_PER_RUN || (count?.recent ?? 0) >= MAX_DISTRIBUTIONS_PER_MINUTE) return c.json({ error: 'too many distributions for this run right now', reason: 'rate_limited' }, 429, { 'retry-after': '30' });
 
@@ -176,12 +231,12 @@ classroomDistributionTeacher.post(root + '/distributions', async (c) => {
   const guard = `EXISTS (SELECT 1 FROM class_run_ops o WHERE o.class_run_id=? AND o.roster_revision=? AND json_extract(o.flags_json,'$.ops_distribute')=1 AND o.ends_at>? AND NOT EXISTS (SELECT 1 FROM sessions z WHERE z.id=o.class_run_id AND z.ended_at IS NOT NULL))
  AND NOT EXISTS (SELECT 1 FROM json_each(?) j WHERE NOT EXISTS (SELECT 1 FROM class_run_seats x WHERE x.class_run_id=? AND x.replaced_at IS NULL AND x.seat_id=json_extract(j.value,'$[0]') AND x.seat_revision=json_extract(j.value,'$[1]') AND x.student_id=json_extract(j.value,'$[2]')))
  AND EXISTS (SELECT 1 FROM classroom_content_revisions r JOIN classroom_content_objects ob ON ob.object_id=r.object_id WHERE r.object_id=? AND r.revision=? AND r.class_run_id=? AND r.content_hash=? AND ob.retired_at IS NULL)
- AND ${NOT_FENCED}`;
+ AND ${NOT_FENCED}${isSetting ? ` AND ${SETTINGS_ON}` : ''}`;
   const committed = 'EXISTS (SELECT 1 FROM classroom_distributions WHERE id=?)';
   const stmts = [
     db.prepare(`INSERT INTO classroom_distributions(id,class_run_id,cohort_id,object_id,revision,content_hash,seq,roster_revision,targets_json,request_hash,idempotency_key,expires_at,created_by,issuer_jti,created_at)
  SELECT ?,?,?,?,?,?,(SELECT event_seq+1 FROM classroom_content_objects WHERE object_id=?),?,?,?,?,?,?,?,? WHERE ${guard}`).bind(id, run.class_run_id, run.cohort_id, req.object_id, req.revision, req.content_hash, req.object_id, req.roster_revision, JSON.stringify(req.targets), requestHash, req.idempotency_key, expires, auth.payload.u, jti || null, now,
-      run.class_run_id, req.roster_revision, now, targets, run.class_run_id, req.object_id, req.revision, run.class_run_id, req.content_hash, jti),
+      run.class_run_id, req.roster_revision, now, targets, run.class_run_id, req.object_id, req.revision, run.class_run_id, req.content_hash, jti, ...(isSetting ? [run.class_run_id] : [])),
     // A learner who already has (or is already being sent) a NEWER revision of this object is not walked back to this one.
     db.prepare(`INSERT INTO classroom_distribution_targets(distribution_id,class_run_id,seat_id,seat_revision,student_id,object_id,revision,state,result_code,pending,updated_at)
  SELECT ?,?,json_extract(j.value,'$[0]'),json_extract(j.value,'$[1]'),json_extract(j.value,'$[2]'),?,?,
@@ -209,7 +264,7 @@ classroomDistributionTeacher.post(root + '/distributions', async (c) => {
 async function distributionView(db: Db, run: Run, id: string, now: number) {
   const runEnded = ended(run, now);
   // Lazy settlement of THIS run of the distribution (primary-key prefix) and of the cards of its object. No timers anywhere.
-  const head = await db.prepare('SELECT id,object_id,revision,content_hash,seq,roster_revision,targets_json,expires_at,created_by,created_at,revoked_at,revoked_by,revoke_reason,row_revision FROM classroom_distributions WHERE id=? AND class_run_id=?').bind(id, run.class_run_id).first<Record<string, any>>();
+  const head = await db.prepare('SELECT d.id,d.object_id,d.revision,d.content_hash,d.seq,d.roster_revision,d.targets_json,d.expires_at,d.created_by,d.created_at,d.revoked_at,d.revoked_by,d.revoke_reason,d.row_revision,o.kind FROM classroom_distributions d JOIN classroom_content_objects o ON o.object_id=d.object_id WHERE d.id=? AND d.class_run_id=?').bind(id, run.class_run_id).first<Record<string, any>>();
   if (!head) return null;
   await db.batch(settleStatements(db, { scope: 'distribution_id=?', args: [id], cardScope: 'class_run_id=? AND object_id=?', cardArgs: [run.class_run_id, head.object_id], runEnded, now }));
   const rows = ((await db.prepare(`SELECT t.seat_id,t.seat_revision,t.student_id,t.state,t.result_code,t.offers,t.device_registration_id,t.first_offered_at,t.received_at,t.reflected_at,t.updated_at,
@@ -227,7 +282,25 @@ async function distributionView(db: Db, run: Run, id: string, now: number) {
   });
   let selected: string[] = []; try { selected = JSON.parse(head.targets_json); } catch { selected = []; }
   const { targets_json, ...meta } = head;
-  return { distribution: { ...meta, targets: selected, revoked: head.revoked_at !== null }, targets, summary: summarizeDistribution(targets.map((x) => x.status)), observed_at: now, new_request_allowed: allowed, new_request_blocked_by: blocked };
+  const view = { distribution: { ...meta, targets: selected, revoked: head.revoked_at !== null }, targets, summary: summarizeDistribution(targets.map((x) => x.status)), observed_at: now, new_request_allowed: allowed, new_request_blocked_by: blocked };
+  if (head.kind !== 'setting') return view;
+  // U3 — for a setting, "in the inbox" is only PREPARED. What happened next is the Service's own record: the binding row
+  // this distribution switched the participant to, and the execution evidence on it. One row per target, read by the
+  // unique (distribution, seat) index; the participant's newest sequence comes from the primary key. Unreadable = said so.
+  let bindings: Array<Record<string, any>> | null = null;
+  try { bindings = ((await db.prepare(`SELECT b.seat_id,b.binding_seq,b.binding_key,b.source,b.version,b.activated_at,b.first_dispatched_at,b.first_completed_at,b.last_failure_kind,b.last_failure_at,
+ (SELECT MAX(n.binding_seq) FROM classroom_lesson_bindings n WHERE n.class_run_id=b.class_run_id AND n.student_id=b.student_id) AS latest_seq
+ FROM classroom_distribution_targets t JOIN classroom_lesson_bindings b ON b.distribution_id=t.distribution_id AND b.seat_id=t.seat_id WHERE t.distribution_id=?`).bind(id).all()).results ?? []) as Array<Record<string, any>>; }
+  catch (err) { console.error('setting results unreadable:', err); bindings = null; }
+  const withSetting = targets.map((x) => {
+    if (!bindings) return { ...x, setting: { phase: 'unknown' } };
+    const b = bindings.find((r) => r.seat_id === x.seat_id) ?? null;
+    const prepared = x.state === 'reflected' || x.state === 'no_change';
+    return { ...x, setting: b ? { phase: settingPhase(b as any, { latestSeq: b.latest_seq ?? b.binding_seq, now }), binding_seq: b.binding_seq, version: b.version, source: b.source, activated_at: b.activated_at, first_dispatched_at: b.first_dispatched_at, first_completed_at: b.first_completed_at, last_failure_kind: b.last_failure_kind || null } : { phase: prepared ? 'prepared' : 'not_prepared' } };
+  });
+  const phases: Record<string, number> = {}; for (const x of withSetting) phases[x.setting.phase] = (phases[x.setting.phase] ?? 0) + 1;
+  // `all_applied` never rounds up: prepared, switched, attempted and unknown are not applied.
+  return { ...view, targets: withSetting, setting_summary: { by_phase: phases, applied: phases.applied ?? 0, all_applied: withSetting.length > 0 && (phases.applied ?? 0) === withSetting.length } };
 }
 
 classroomDistributionTeacher.get(root + '/distributions', async (c) => {
@@ -272,8 +345,11 @@ classroomDistributionTeacher.post(root + '/distributions/:id/revoke', async (c) 
 classroomDistributionTeacher.post(root + '/contents/:object/retire', async (c) => {
   const t = await teacher(c, false); if (t instanceof Response) return t; const { auth, run } = t, db = c.env.HPS_DB, now = Date.now(), object = c.req.param('object')!, b = await json(c);
   if (!UUIDISH_RE.test(object) || !b || Object.keys(b).some((k) => k !== 'expected_latest_revision') || !Number.isSafeInteger(b.expected_latest_revision)) return c.json({ error: 'expected_latest_revision required' }, 400);
-  const head = await db.prepare('SELECT retired_at,latest_revision FROM classroom_content_objects WHERE object_id=? AND class_run_id=?').bind(object, run.class_run_id).first<{ retired_at: number | null; latest_revision: number }>();
+  const head = await db.prepare('SELECT retired_at,latest_revision,kind FROM classroom_content_objects WHERE object_id=? AND class_run_id=?').bind(object, run.class_run_id).first<{ retired_at: number | null; latest_revision: number; kind: string }>();
   if (!head) return c.json({ error: 'no such material in this run', reason: 'not_found' }, 404);
+  // Retiring forbids every later revision, and a run has ONE setting object: retiring it would end settings for the run.
+  // Stopping a setting = withdrawing its distribution; going back = sending the explicit return.
+  if (head.kind === 'setting') return c.json({ error: 'a setting is not retired: withdraw its distribution, or send the return to the base lesson', reason: 'setting_not_retirable' }, 409);
   if (head.retired_at !== null) return c.json({ object_id: object, retired: true, retired_at: head.retired_at, replayed: true }, 200);
   const jti = auth.payload.jti ?? '', mine = 'EXISTS (SELECT 1 FROM classroom_content_objects WHERE object_id=? AND retired_at=? AND retired_by=?)', mineArgs = [object, now, auth.payload.u];
   const stmts = [
