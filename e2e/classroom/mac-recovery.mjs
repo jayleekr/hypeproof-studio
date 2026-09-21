@@ -69,7 +69,7 @@ const workFiles = () => { const now = Object.fromEntries(walk(ws).sort().map((f)
 { const probe = path.join(ws, 'notes.md'); writeFileSync(probe, ORIGINALS[probe] + 'tampered'); assert.deepEqual(workFiles().changed, ['notes.md'], 'negative control: a changed learner file is caught'); writeFileSync(probe, ORIGINALS[probe]); assert.deepEqual(workFiles(), { changed: [], added: [] }, 'positive control'); }
 
 // ── the scripted thing: the model provider. It records each call, can hold one answer open, and can be made to fail. ──
-const providerCalls = [], realFetch = globalThis.fetch, ANSWER = '[로컬 시험 응답] 실제 AI 모델은 호출하지 않았습니다.'; let holdGate = null; const faults = { health503: false, provider500: false };
+const providerCalls = [], realFetch = globalThis.fetch, ANSWER = '[로컬 시험 응답] 실제 AI 모델은 호출하지 않았습니다.'; let holdGate = null; const faults = { health503: false, provider500: false }, slowMarks = new Set(), SLOW_MS = 9000;
 const enc = new TextEncoder(), ev = (e, d) => enc.encode(`event: ${e}\ndata: ${JSON.stringify(d)}\n\n`);
 function sse(model, text, gate) { const id = 'synthetic-' + providerCalls.length;
   return new Response(new ReadableStream({ async start(c) {
@@ -86,6 +86,9 @@ globalThis.fetch = async (input, init) => {
   const raw = String(init.body), body = JSON.parse(raw), convo = JSON.stringify(body.messages ?? []), marks = [...new Set(raw.match(/\b(?:Q|HOLD)-[A-Z0-9]+(?:-[A-Z0-9]+)*/g) ?? [])];
   const current = marks.map((m) => [m, convo.lastIndexOf(m)]).filter(([, i]) => i >= 0).sort((x, y) => y[1] - x[1])[0]?.[0] ?? null, held = !!holdGate && !!current && current.startsWith('HOLD-');
   providerCalls.push({ at: Date.now(), model: body.model, stream: body.stream === true, mark: current, held, failed: faults.provider500 });
+  // A real model takes seconds. The app reads its runtime status when it syncs (about every 5 s), so an answer that comes back
+  // instantly is a run the board can never see as `running` (found on real run 5). These marks answer after SLOW_MS instead.
+  if (current && slowMarks.has(current)) await new Promise((r) => setTimeout(r, SLOW_MS));
   if (faults.provider500) return Response.json({ type: 'error', error: { type: 'api_error', message: 'synthetic injected provider failure' } }, { status: 500 });
   return body.stream ? sse(body.model, ANSWER, held ? holdGate : null) : Response.json({ id: 'synthetic', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text: ANSWER }], stop_reason: 'end_turn', usage: { input_tokens: 12, output_tokens: 9 } });
 };
@@ -228,9 +231,9 @@ try {
   // The Service admits again the moment the control row is saved; THIS DEVICE lifts its own hold at its next sync. The two are
   // separate observations (run 3 pressed Enter in between and the app, correctly, still held the send and kept the text).
   await wait(async () => { const c = (await seatNow('A1')).control_outcome; return c.service === 'admitting' && c.device === 'applied'; }, 'this device reported that it lifted the hold', 90000); assert.equal(providerCalls.length, n5);
-  await pressEnter(chat); await wait(() => callsFor('Q-WHILE-PAUSED').length > 0, 'the learner sent it again themselves'); await idle(chat);
+  slowMarks.add('Q-WHILE-PAUSED'); await pressEnter(chat); await wait(() => callsFor('Q-WHILE-PAUSED').length > 0, 'the learner sent it again themselves'); await idle(chat);
   await wait(async () => /재개 뒤 AI 실행 관측됨/.test(await I.recovery('A1')), 'a run after the resume was seen'); const resumedLine = await I.T('ops-control-state'); assert.match(resumedLine, /재개 뒤 AI 실행이 관측된 좌석 1석/); assert.equal((await seatNow('A1')).step?.lesson_version ?? V1, V1); await I.shot('r5-pause-resume.png');
-  results.R5 = { paused_line: pausedLine, resumed_line: resumedLine, in_flight_request_finished: true, mid_turn_followup_request_during_pause: 'NOT RUN in a real window (needs a multi-request turn crossing the pause)' }; step('R5 pause held a new run (input kept), let the streaming request finish, counted only devices that reported; after resume the learner\'s own run was seen', {});
+  results.R5 = { paused_line: pausedLine, resumed_line: resumedLine, in_flight_request_finished: true, resumed_run_length: `the stand-in answered after ${SLOW_MS} ms so that the run spans the app's ~5 s status sample; a run SHORTER than the sample interval is not reported as running and stays "not observed" (conservative: never a false "observed")`, mid_turn_followup_request_during_pause: 'NOT RUN in a real window (needs a multi-request turn crossing the pause)' }; step('R5 pause held a new run (input kept), let the streaming request finish, counted only devices that reported; after resume the learner\'s own run was seen', {});
 
   // ── R6 upload (U1 contract, reused): consent on the device, request from Chalk, and only the Service's verification counts ──
   await palette(win, '수업 기록 보내기 동의·철회'); const agree = '동의하고 보내기 허용';
