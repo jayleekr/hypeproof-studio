@@ -16,11 +16,14 @@ try {
   // The scope is what the Service returned at pairing; the copy is made by the App's real freezer (review F1).
   const scopeOf = (c) => ({ grant_id: c.grant_id, class_run_id: c.class_run_id, seat_id: c.seat_id, student: c.student, activity: c.lesson ? { course_id: c.lesson.course_id, version: c.lesson.version } : null, run: c.run });
   let scope = scopeOf(a1), spool = { "session.meta.json": f.metaFor(a1), "events.jsonl": '{"seq":1,"type":"prompt"}\n{"seq":2,"type":"turn_end"}\n', "secret.txt": "must never be sent" };
+  // What the live SessionSpool reports together with the bytes (2026-09-21 sequence contract): its own counter and the other
+  // sessions of this learner in the class window. Here: one healthy session whose counter is the last seq written.
+  const liveSource = () => ({ sequence: { session_id: JSON.parse(spool["session.meta.json"]).session_id, last_seq: Math.max(0, ...spool["events.jsonl"].split("\n").filter(Boolean).map((l) => { try { return JSON.parse(l).seq ?? 0; } catch { return 0; } })) }, other_sessions: 0 });
   let offline = 0, puts = [];
   const deps = (frozen = new Map()) => { let saved = null; return {
     // The copy is taken once per (batch, revision) and then never changes, whatever the live spool does.
     scope: () => scope,
-    copy: async (b, rev) => { const k = b + ":" + rev; if (!frozen.has(k)) { const fr = freezeSnapshot(Object.entries(spool).map(([name, text]) => ({ name, data: enc(text) })), scope, b, { purpose: "class_report", notice_version: "notice-v1" }, Date.now()); if (!fr.ok) return { code: fr.code }; frozen.set(k, { files: fr.files, binding: fr.binding }); } return frozen.get(k); },
+    copy: async (b, rev) => { const k = b + ":" + rev; if (!frozen.has(k)) { const fr = freezeSnapshot(Object.entries(spool).map(([name, text]) => ({ name, data: enc(text) })), scope, b, { purpose: "class_report", notice_version: "notice-v1" }, Date.now(), liveSource()); if (!fr.ok) return { code: fr.code }; frozen.set(k, { files: fr.files, binding: fr.binding }); } return frozen.get(k); },
     loadState: async () => (saved ? JSON.parse(saved) : null), saveState: async (s) => { saved = JSON.stringify(s); }, peek: () => JSON.parse(saved),
     put: async (b, rev, name, data) => { if (offline-- > 0) return { status: 0 }; puts.push(name); const r = await f.app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${b}/${rev}/${name}`, { method: "PUT", headers: { authorization: "Bearer " + a1.credential }, body: data }), f.env, { waitUntil() {} }); const j = await r.json().catch(() => ({})); return { status: r.status, reason: j.reason }; },
     seal: async (b, rev, manifest) => { const r = await f.request(`/v1/classroom/ops/collect/snapshots/${b}/${rev}/seal`, "POST", manifest, a1.credential); return { status: r.status, reason: r.json?.reason, receipt_id: r.json?.receipt_id, coverage: r.json?.coverage }; },
