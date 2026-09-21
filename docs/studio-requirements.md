@@ -669,7 +669,10 @@ The contract lives in the [classroom ADM document](requirements/classroom-admin.
 The Studio behavior it will add, once built, is bounded as follows. The App host owns a
 durable per-learner, per-class-run inbox under extension global storage; it never writes
 to the learner's workspace, conversation, input draft or spool (REQ-Q ownership unchanged).
-An item is stored only after its hash is verified, and "applied" means the host re-read it
+An item is stored only after its hash is verified, as an immutable per-revision file followed
+by one atomic index commit, so an interrupted update never costs the learner the material they
+already had; a file that was received but not committed is never promoted on restart without a
+fresh sync response. "Applied" means the host re-read the committed item
 through the same disk path the card list uses — a sync HTTP 200, a notification or a
 webview `postMessage` is not completion, and opening a card is not reported. The card is a
 closed-by-default `<details>` in the coach rail of the work screen and a quiet line on the
