@@ -758,7 +758,7 @@ Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 
 | 구현 · Chalk | `chalk`: `npm test`(`classroom-ops.test.mjs`에 U3 문구·전달 경로) | PASS | 최종 HEAD |
 | 로컬 D1 | `worker`: `npm run test:classroom-ops:d1`(`classroom-ops-lesson-settings-d1.test.mjs` 추가) | PASS — 수치는 [요구 문서의 실측 표](../requirements/classroom-admin.md#remote-management-u3-20260921) | 최종 HEAD |
 | 브라우저 | `e2e`: `npm run test:classroom-ops-lesson-settings`(E1~E4) · 회귀 `test:classroom-ops-distribution`(7) | PASS · 화면 3장은 `e2e/test-results/classroom-ops-lesson-settings/` | 최종 HEAD |
-| 로컬 실기 M2 | `e2e/classroom/mac-devhost.mjs prepare` → `e2e/classroom/mac-lesson-settings.mjs` | PASS(5번째 실행) · `result.json`·화면 10장은 devhost의 `lesson-settings/` | `7665223`(확장·Service·Chalk 소스는 최종 HEAD와 동일 — 이후 커밋은 시험·문서뿐) |
+| 로컬 실기 M2 | `e2e/classroom/mac-devhost.mjs prepare` → `e2e/classroom/mac-lesson-settings.mjs` | PASS — `7665223`에서 처음 통과(5번째 실행 · 앞의 4번은 아래 결함 1건과 계측기 오류), CI가 잡은 초안 저장 회귀를 고친 **`ded79c4`에서 다시 준비해 재실행 PASS**. `result.json`·화면 10장은 devhost의 `lesson-settings/` | `ded79c4`(확장·Service·Chalk 소스는 최종 HEAD와 동일 — 이후 커밋은 문서뿐) |
 
 **시나리오별.** PARTIAL은 ‘그 행이 요구한 조건 중 실행하지 않은 것이 있다’는 뜻이고 그 부분은 NOT RUN이다.
 
@@ -788,12 +788,14 @@ Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 
 | S19 | PASS | Service `classroom-ops-lesson-basis`(5): 이미 lease된 작업 · 기준 행 없는 작업 · 승인된 작업 · 늦은 기준 · flag 롤백 · 재시도 | — |
 | M2 | PASS | 아래 | 아래 NOT RUN |
 
-**M2 — 실제 Mac.** 공식 shell `0.1.56`의 복사본(설치된 앱은 읽지도 실행하지도 않음) + 현재 확장 build(번들 4개 hash 일치 · source `7665223`) + 실제 Agent SDK `0.3.207` binary, 자체 포트 18781/18782/9381 · 자체 user-data·HOME. 강사 조작은 전부 보이는 Chromium의 Chalk `/manage`에서 클릭했다. 순서: ① U3 OFF(집행 값 없음 · 회차 스위치 없음): 실제 1턴 + U2 공지 도착 — turn 행 0 · profile에 `lesson_binding` 없음 · 작성란에 ‘수업 설정’ 없음 ② 집행 + 회차 스위치 ON → ‘수업 설정’이 나타남 ③ 프롬프트: 실제 창의 초안 + 붙여넣은 이미지 → `초안에 가져오기`로 덧붙음(전송 0) → 되돌리기 → 다시 가져와 학생이 직접 전송 → 공급자 요청에 그 글 ④ 첫 설정 V2: `준비` → 다음 질문에서 전환 → 실제 요청 헤더의 key = 전환된 binding → turn 닫힘 → `적용` ⑤ 창 1의 답이 오는 중에 V3 확정, 두 번째 창의 다음 질문은 V3, 창 1의 질문은 끝까지 V2 ⑥ 회수 클릭 → 여전히 V3 ⑦ 복귀 준비 → 저장(3번째 판) → 확인 → 보내기 → 다음 질문은 V1 ⑧ 비선택 A2(실제 기기 클라이언트): 배포 블록 0 · 보관함 폴더 없음 · binding 0 · 실제 proxy 클라이언트의 질문은 V1. 결과: 공급자 요청 9 · turn 7(집행 뒤의 것은 전부 host가 `completed`로 닫음) · binding [V2, V3, 복귀].
+**M2 — 실제 Mac.** 공식 shell `0.1.56`의 복사본(설치된 앱은 읽지도 실행하지도 않음) + 현재 확장 build(번들 4개 hash 일치 · source `ded79c4`) + 실제 Agent SDK `0.3.207` binary, 자체 포트 18781/18782/9381 · 자체 user-data·HOME. 강사 조작은 전부 보이는 Chromium의 Chalk `/manage`에서 클릭했다. 순서: ① U3 OFF(집행 값 없음 · 회차 스위치 없음): 실제 1턴 + U2 공지 도착 — turn 행 0 · profile에 `lesson_binding` 없음 · 작성란에 ‘수업 설정’ 없음 ② 집행 + 회차 스위치 ON → ‘수업 설정’이 나타남 ③ 프롬프트: 실제 창의 초안 + 붙여넣은 이미지 → `초안에 가져오기`로 덧붙음(전송 0) → 되돌리기 → 다시 가져와 학생이 직접 전송 → 공급자 요청에 그 글 ④ 첫 설정 V2: `준비` → 다음 질문에서 전환 → 실제 요청 헤더의 key = 전환된 binding → turn 닫힘 → `적용` ⑤ 창 1의 답이 오는 중에 V3 확정, 두 번째 창의 다음 질문은 V3, 창 1의 질문은 끝까지 V2 ⑥ 회수 클릭 → 여전히 V3 ⑦ 복귀 준비 → 저장(3번째 판) → 확인 → 보내기 → 다음 질문은 V1 ⑧ 비선택 A2(실제 기기 클라이언트): 배포 블록 0 · 보관함 폴더 없음 · binding 0 · 실제 proxy 클라이언트의 질문은 V1. 결과: 공급자 요청 9 · turn 7(집행 뒤의 것은 전부 host가 `completed`로 닫음) · binding [V2, V3, 복귀].
 
 **실기에서만 드러난 것.**
 1. **제품 결함(수정함 · `7665223`).** 수업 중에 집행을 켜면 App의 세션 캐시 profile에 `lesson_binding`이 없어 key·전환·close를 전혀 보내지 않았고 강사 화면은 ‘준비’에서 멈췄다. 합성 시험은 전부 통과하던 상태였다. App은 이제 자기 보관함에 수업 설정이 있을 때만 profile을 한 번 다시 읽는다(단위 시험 + 음성 대조군 + M2 ④에서 확인). 설정을 받은 적 없는 학생의, 집행 전에 시작한 turn은 계속 key·close 없이 나간다(토큰 강의와 같아 승인됨 · 30분 상한) — 기록에 남겼다.
 2. 이 harness는 secret을 **창마다** 메모리에 둔다. 두 번째 창은 수업 연결이 없어 새 1회용 코드로 연결했다. 연결 직후(기기가 새 연결의 전달 key로 자료를 다시 받기 전)의 전환은 `stale_offer`로 거절되고 설계대로 다음 질문에서 다시 시도된다 — 실행기는 재수신을 기다린다. **Keychain을 쓰는 실제 설치본에서 두 창이 연결을 공유하는지는 NOT RUN.**
 3. agent-sdk runtime은 붙여넣은 이미지를 파일로 저장해 Read 도구로 읽힌다 — 첫 공급자 요청의 image block이 아니다. M2는 ‘첨부가 가져오기·되돌리기 동안 그대로이고 전송과 함께 입력창을 떠났다’까지만 말한다.
+
+**CI가 잡은 회귀(수정함 · `ded79c4`).** 초안 저장의 flush 경로가 항상 `imports: []`를 실어, 프롬프트를 받은 적 없는 학생의 저장 메시지 모양까지 바뀌었다. 로컬 회귀에 `e2e`의 `test:trial-ux`(US-UI-DRAFT)를 넣지 않아 놓쳤고 PR의 `start-page-browser`가 잡았다. 빈 경우 key를 생략하도록 고치고 그 suite(49)와 확장·U3 브라우저 시험·M2를 다시 실행했다.
 
 **계측기 오류(제품이 아니라 시험이 틀렸던 것 — 고친 뒤 다시 실행).** ① M2의 `설정: 준비` 정규식이 ‘준비 **전**’ 문구에도 걸려 기기가 받기 전에 질문을 보냈다 → ‘기기 보관함에 있음’까지 요구 ② 브라우저 e2e가 확인 뒤에 미리보기 본문을 읽었다(이미 비워진 뒤) ③ 같은 값을 자기 자신과 비교하는 단언 1개 ④ 첫 M2는 turn close를 응답 직후에 단언했다(close는 그 뒤에 나간다) → 기다림 ⑤ D1 시험의 기준선이 `sessions` 행 없음 때문에 매 요청 재시도 1회를 포함했다 → 운영처럼 행을 넣음.
 
