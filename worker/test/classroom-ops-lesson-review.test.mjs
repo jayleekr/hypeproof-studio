@@ -139,4 +139,48 @@ for (const sameSecond of [false, true]) { const { f, course, V1, V2, sha, token,
     f.env.HPS_LESSON_BINDINGS = 'enforce'; assert.equal((await basis('after-re-enable')).verdict.allow, false, 'turning enforcement back on does not launder the record');
     ok('2 v2 under an admitted turn, then v1 with enforcement switched off: the usage ledger has a request no turn accounts for — mixed, held');
   } finally { f.close(); } }
+// ── S9 + S10: other cohorts, a new run, and the four reissue cases — end to end, with the identity fixes above as controls ──
+{ const { f, course, V1, V2, sha, token, ask } = await world();
+  try {
+    const { issueIssuer } = await import('../src/lib/tokens.ts');
+    // a third confirmed version, so that "reissued for ANOTHER version" is distinguishable from the switched one
+    const V3 = 'm2026.09.21-3', a = `/admin/cohorts/${f.cohort}/authoring/${course}`, cur = (await f.request(a)).json;
+    const saved = await f.request(a, 'PUT', { profile_id: f.profile, request_id: KEY(), expected_revision: cur.revision ?? cur.draft?.revision, content: { schema: 'hps-session-design/1', title: '합성 v3', audience: '합성 사용자', duration_minutes: 60, objective: '기준 확인', prerequisites: '없음', starter: '연습', steps: ['v3-only'].map((id) => ({ id, title: id, instructions: '합성 ' + id, hint: '', acceptance: '합성 기준' })) } }); assert.equal(saved.status, 200, saved.raw);
+    assert.equal((await f.request(a + '/versions/' + V3, 'PUT', { expected_revision: saved.json.revision })).status, 200); sha[V3] = (await readLesson(f.env, f.cohort, course, V3, f.profile)).sha256;
+    assert.equal((await f.configure([{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }], 0, { flags: FLAGS })).status, 201);
+    const L = await f.teacher('review-teacher', [...OPS_ALL, 'distribute', 'lesson_settings']);
+    const save = await f.request(f.base + '/contents', 'POST', { idempotency_key: KEY(), kind: 'setting', title: '합성 전환', body: '다음 질문부터 적용', lesson: { course_id: course, version: V2, sha256: sha[V2] } }, L); assert.equal(save.status, 201, save.raw);
+    // S9 — an instructor of ANOTHER cohort, a learner token and an operations credential reach nothing of this run's settings
+    const stranger = (await issueIssuer({ issuer: 'other-teacher', scopes: [{ cohort: 'another-cohort-2026', profiles: [f.profile], ops: [...OPS_ALL, 'distribute', 'lesson_settings'] }] }, 2, TEST_SECRET)).token, learner = (await token('student-a')).token;
+    const conn = (await f.pair('A1', 1, 1, CAPS)).conn.json;
+    for (const [who, tok] of [['another cohort\'s instructor', stranger], ['a learner token', learner], ['an operations credential', conn.credential]]) for (const [path, method, body] of [['/setting-options', 'GET'], ['/contents', 'POST', { idempotency_key: KEY(), kind: 'setting', title: 't', body: 'b', base: true, object_id: save.json.object_id, expected_latest_revision: 1 }], ['/distributions', 'POST', { idempotency_key: KEY(), expected_roster_revision: 1, object_id: save.json.object_id, revision: 1, content_hash: save.json.content_hash, targets: ['A1'] }], ['/distributions', 'GET']]) {
+      const r = await f.request(f.base + path, method, body, tok); assert.ok(r.status === 401 || r.status === 403, `${who} ${method} ${path}: ${r.status}`); }
+    assert.equal(f.db.prepare('SELECT COUNT(*) n FROM classroom_distributions').get().n, 0); assert.equal(f.db.prepare('SELECT latest_revision r FROM classroom_content_objects WHERE object_id=?').get(save.json.object_id).r, 1, 'nothing was written by any of them');
+    // the switch, honestly
+    const dist = await f.request(f.base + '/distributions', 'POST', { idempotency_key: KEY(), expected_roster_revision: 1, object_id: save.json.object_id, revision: 1, content_hash: save.json.content_hash, targets: ['A1'] }, L); assert.equal(dist.status, 201, dist.raw);
+    const got = await f.sync(conn.credential, [], 1), item = got.json.distribution.items[0], rc = (stage) => ({ offer_key: item.offer_key, distribution_id: item.distribution_id, object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, seq: item.seq, stage, result_code: '', observed_at: Date.now() });
+    await f.sync(conn.credential, [], 1, { distribution: { receipts: [rc('received'), rc('reflected')] } });
+    const old = await token('student-a'), sw = await f.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: f.instance(1).app_instance_id, boot_id: f.instance(1).boot_id, offer_key: item.offer_key, distribution_id: item.distribution_id, object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, learner_token: old.token }, conn.credential); assert.equal(sw.status, 201, sw.raw); const K2 = sw.json.binding.key;
+    const profile = async (tok) => (await f.request('/v1/profile', 'GET', undefined, tok)).json;
+    assert.equal((await profile(old.token)).lesson.version, V2, 'control: switched');
+    // S10 ① reissued for the SAME version: the binding keeps applying, under the same key
+    const same = await token('student-a'); const p1 = await profile(same.token); assert.deepEqual([p1.lesson.version, p1.lesson_binding.key], [V2, K2]); assert.match((await ask(same.token, { key: K2 })).system, /v2-work/);
+    // S10 ② reissued for ANOTHER version: that token is the newer explicit decision — it runs ITS lesson, and says why the setting is not applied
+    const other = await token('student-a', V3); const p3 = await profile(other.token); assert.deepEqual([p3.lesson.version, p3.lesson_binding.not_applied, p3.lesson_binding.key], [V3, 'token_lesson_changed', B.tokenBindingKey(sha[V3])]);
+    const ran3 = await ask(other.token, { key: B.tokenBindingKey(sha[V3]) }); assert.equal(ran3.status, 200); assert.match(ran3.system, /v3-only/); assert.doesNotMatch(ran3.system, /v2-work/);
+    const seat = (await f.request(f.base + '/status', 'GET', undefined, L)).json.seats.find((s) => s.seat_id === 'A1'); assert.equal(seat.lesson.version, V2, 'the board speaks for the run\'s token lesson; a learner-specific reissue is visible in that learner\'s own profile');
+    // S10 ③ a forged base with the genuine token — refused (review 1, here as the control of this block)
+    assert.equal((await f.request('/v1/classroom/ops/lesson-binding', 'POST', { app_instance_id: f.instance(1).app_instance_id, boot_id: f.instance(1).boot_id, offer_key: item.offer_key, distribution_id: item.distribution_id, object_id: item.object_id, revision: item.revision, content_hash: 'd'.repeat(64), learner_token: old.token, base_lesson_sha256: sha[V3] }, conn.credential)).json.recorded, false);
+    // S10 ④ a turn that was running under the OLD token keeps its snapshot with that token; the new token cannot take the turn over
+    const turn = KEY(); assert.equal((await ask(old.token, { turn, key: K2 })).status, 200); const cont = await ask(old.token, { turn, key: K2 }); assert.equal(cont.status, 200); assert.match(cont.system, /v2-work/);
+    const taken = await ask(same.token, { turn, key: K2 }); assert.deepEqual([taken.status, taken.provider], [403, 0]); assert.match(taken.json.error.message, /\[hps:lesson_turn_mismatch\]/);
+    ok('S10 reissue: same version keeps the binding; another version runs its own lesson and says token_lesson_changed; a forged base is refused; a running turn stays with the token it was admitted under');
+    // S9 — a NEW run of the same cohort: the old run's binding is not this run's; back in the old run it still is
+    const next = 'review-next-run', starts = new Date(Date.now() - 1000).toISOString(), ends = new Date(Date.now() + 3600000).toISOString();
+    f.db.prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES(?,?,?,?,?)').run(next, f.cohort, f.profile, starts, ends); await startSession(f.env.HPS_KV, f.cohort, { session_id: next, profile_id: f.profile, starts_at: starts, ends_at: ends });
+    const pn = await profile(same.token); assert.deepEqual([pn.lesson.version, pn.lesson_binding.key], [V1, B.tokenBindingKey(sha[V1])], 'a new run starts from the token lesson'); const inNew = await ask(same.token, { key: B.tokenBindingKey(sha[V1]) }); assert.equal(inNew.status, 200); assert.doesNotMatch(inNew.system, /v2-work/);
+    assert.equal((await ask(same.token, { key: K2 })).status, 403, 'the old run\'s key is refused in the new run');
+    await startSession(f.env.HPS_KV, f.cohort, { session_id: f.run, profile_id: f.profile, starts_at: starts, ends_at: ends }); assert.equal((await profile(same.token)).lesson.version, V2, 'control: the binding is still the old run\'s');
+    ok('S9 another cohort\'s instructor, a learner token and an operations credential reach nothing; a new run does not inherit the previous run\'s binding');
+  } finally { f.close(); } }
 console.log(`\n${n} passed`);
