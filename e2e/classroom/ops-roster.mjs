@@ -96,7 +96,7 @@ try {
   const boxes = await page.evaluate(() => { const r = (id) => document.getElementById(id).getBoundingClientRect(); return { list: r('ops-seats'), detail: r('ops-detail'), position: getComputedStyle(document.getElementById('ops-detail')).position }; });
   assert.ok(boxes.position === 'sticky' && boxes.detail.left >= boxes.list.right - 1 && boxes.detail.top < 900, 'wide: detail beside the list, in view — not at the bottom of a long page: ' + JSON.stringify(boxes));
   assert.equal(await row('S01').getAttribute('aria-current'), 'true'); assert.match(await page.locator('#ops-evidence').innerText(), /학생 자기보고/);
-  assert.equal(await page.locator('button.primary:visible').count(), 1, 'one primary CTA on the screen'); assert.ok(await page.evaluate(() => { const l = document.getElementById('ops-seats'); return l.scrollHeight > l.clientHeight; }), 'the 30-seat list scrolls inside its own region');
+  assert.equal(await page.locator('.primary:visible').count(), 1, 'one primary CTA on the screen'); assert.ok(await page.evaluate(() => { const l = document.getElementById('ops-seats'); return l.scrollHeight > l.clientHeight; }), 'the 30-seat list scrolls inside its own region');
   await page.screenshot({ path: path.join(out, 'wide-1440.png') });
   // reviewed: the instructor records that they looked at the step the learner said they finished. The learner's status stays as reported.
   assert.match(await row('S01').innerText(), /build · 제출함 \(학생 자기보고 · 강사 확인 전\)/); await page.getByRole('button', { name: '결과를 확인했어요' }).click();
@@ -108,7 +108,7 @@ try {
     await p.locator('#ops-seats .ops-seat[data-seat="S03"]').getByRole('button', { name: '근거·조치' }).click(); await p.locator('#ops-detail').waitFor();
     const d = await p.evaluate(() => { const e = document.getElementById('ops-detail'), r = e.getBoundingClientRect(); return { position: getComputedStyle(e).position, right: Math.round(r.right), top: Math.round(r.top), width: r.width, vw: innerWidth, overflow: document.documentElement.scrollWidth > innerWidth + 1 }; });
     assert.ok(d.position === 'fixed' && d.top === 0 && d.right === d.vw && d.width <= d.vw && !d.overflow, name + ': narrow screens get a drawer over the list, no horizontal scroll: ' + JSON.stringify(d));
-    assert.equal(await p.locator('button.primary:visible').count(), 1, name + ': one primary CTA'); assert.equal((await p.locator('#ops-detail button.primary').innerText()).trim(), '진단 다시 실행', 'a confirmed fault → recovery is the primary action');
+    assert.equal(await p.locator('.primary:visible').count(), 1, name + ': one primary CTA'); assert.equal(await p.locator('#ops-detail .primary').count(), 0, 'S03 is in the shared provider outage → the Service names no per-PC first action, so the drawer offers none (UI pass 2)'); assert.match(await p.locator('#ops-actions').innerText(), /이 좌석에서 먼저 할 개별 조치는 없습니다/);
     for (const b of await p.locator('#ops-detail button:visible').all()) { const box = await b.boundingBox(); assert.ok(box.height >= 44, name + ': 44px targets'); }
     await p.screenshot({ path: path.join(out, name + '.png') }); await p.locator('#ops-backdrop').click({ position: { x: 5, y: 5 } }).catch(() => p.keyboard.press('Escape')); assert.equal(await p.locator('#ops-detail').isHidden(), true); await p.close();
   }
@@ -118,7 +118,7 @@ try {
   await host.collectionConsentInteractively(); // the adult learner agrees in the app (modal stub answers "동의")
   let selectedEvaluatorCalls = 0; local.env.HPS_CLASSROOM_EVALUATOR = 'service-anthropic'; local.env.ANTHROPIC_API_KEY = 'synthetic-not-a-key'; setEvaluatorTransport(async () => { selectedEvaluatorCalls++; return Response.json({ content: [{ type: 'text', text: '{}' }] }); });
   const selection = () => page.locator('#ops-selection').innerText(), asked = () => local.db.prepare("SELECT count(*) n FROM ops_commands WHERE action='retry_evidence_upload'").get().n;
-  for (const [button, expected] of [['ops-select-all', /선택 30 \/ 전체 30석 \(명단 1차\) · 기기 연결됨 11 · 기기 연결 없음 19/], ['ops-select-online', /선택 11 \/ 전체 30석/], ['ops-select-offline', /선택 19 \/ 전체 30석 .* 기기 연결됨 0/], ['ops-select-help', /선택 (9|1\d|2\d) \/ 전체 30석/]]) { await page.locator('#' + button).click(); assert.match(await selection(), expected, button); }
+  for (const [button, expected] of [['ops-select-all', /선택 30 \/ 전체 30석 \(명단 1차\) · 기기 연결됨 11 · 기기 연결 없음 19/], ['ops-select-online', /선택 11 \/ 전체 30석/], ['ops-select-offline', /선택 19 \/ 전체 30석 .* 기기 연결됨 0/], ['ops-select-fault', /선택 (9|1\d|2\d) \/ 전체 30석/]]) { await page.locator('#' + button).click(); assert.match(await selection(), expected, button); }
   await page.locator('#ops-select-none').click(); assert.match(await selection(), /선택한 좌석이 없습니다\. 선택 없이 실행되는 조치는 없습니다/); assert.equal(await page.locator('#ops-pick-collect').isDisabled(), true, 'nothing selected → nothing can be requested; the default is never everybody');
   // S12 agreed to send the record and then went offline: selected, consenting, unreachable. (A seat that never connected has
   // never agreed either — the Service reports that as "동의 없음", which is the stronger reason.)
@@ -146,7 +146,7 @@ try {
   // An instructor who may collect but not command still gets the selection — and only the collection action.
   { const p = await browser.newPage({ viewport: { width: 1200, height: 800 } }); await p.goto(origin + '/manage'); await p.locator('#token').fill(await local.teacher('collector', ['observe', 'collect'])); await p.locator('#cohort').fill(local.cohort); await p.locator('#connect button').first().click(); await p.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await p.locator('#ops-check').click(); await p.locator('#ops-seats .ops-seat').nth(29).waitFor();
     assert.deepEqual([await p.locator('#ops-bulk').isVisible(), await p.locator('#ops-pick-collect').isVisible(), await p.locator('#ops-bulk-diagnose').isVisible()], [true, true, false]); await p.close(); }
-  ok('chalk: all / needs-help / connected / not-connected / manual selection → preview → selected collection through the real host; unselected and excluded learners get nothing; no evaluation');
+  ok('chalk: all / technical-problems / connected / not-connected / manual selection → preview → selected collection through the real host; unselected and excluded learners get nothing; no evaluation');
 
   // ── "수업 마무리" once → collected from the real host → evaluated → waiting for review. Nothing is approved or sent. ──
   local.env.HPS_CLASSROOM_EVALUATOR = 'service-anthropic'; local.env.ANTHROPIC_API_KEY = 'synthetic-not-a-key'; let providerCalls = 0;

@@ -911,3 +911,33 @@ Playwright Chromium · 합성 계정만. 화면 배치·문구·스타일 변경
 
 NOT RUN: 실제 강사 사용 관측·실제 Studio 창·Windows·학교망·staging/production·실제 학생 자료·메일, 브라우저 확대 기능 자체(200%는
 viewport 축소 + DSF 2로 근사), 스크린리더 실사용. `/authoring`·`/console`·`/issuer`·`/budgets`는 연결 전 첫 화면만 캡처했다.
+
+<a id="instructor-ui-pass2-run-20260922"></a>
+
+### 강사 UI 2차 보완 — 실행 기록 · 2026-09-22 (로컬 · 조작 결함 4건 · 인수 아님)
+
+설계·범위: [2차 보완](../requirements/classroom-design.md#instructor-ui-pass2-20260922). 브랜치 `feat/751-instructor-ui-pass`, 시작 `1ea0f31`.
+U4 브랜치는 병합하지 않았다 — 재발급 링크 규칙만 U4 `9b0c643`과 같은 코드로 옮겼다(통합 시 같은 줄이 겹친다). Mac arm64 · Playwright Chromium · 합성 계정만.
+
+| 검사 | 결과 |
+|---|---|
+| `npm --prefix chalk test` · `npm --prefix chalk run typecheck` | PASS · PASS (정적 계약의 버튼 문구 `준비 확인` → `현황 새로 확인`·`도움 요청 응대`) |
+| `e2e/classroom/ops-help.mjs` (신규, `test:classroom-ops-help`, CI 단계 추가) | PASS — 잘못된 토큰: 명단 영역이 ‘강사 인증이 거부돼 … 불러오지 않았습니다’, 목록·집계 없음 · 운영 권한 없는 토큰: 상단 ‘연결됨’ + 명단 영역 ‘원격 운영 권한이 없습니다’ · 올바른 토큰: 버튼 없이 10석 로드, ‘연결하지 않았습니다’ 없음, 미연결 A3·무신호 A4는 `확인 불가`(정상 4 ≠ 10) · 도움 요청: 이번 수업 `접수`(A2)·`검토 중`(A4)만 목록·집계·선택 대상, 답변함(A8)·해결(A9)·철회(A10)·만료·다른 수업·결과물 제출 제외 · 선택 `A2, A4` vs 기술 문제 `A1, A5, A6, A7` · 첫 조치: A1 토큰 거부 → `/authoring` 재발급 링크(새 탭, 강의 버전 유지, 주요 버튼 색·44px), 진단은 보조 · A3 미연결 → `기기 연결` 묶음 맨 위·연결 코드 발급 · A6 공통 장애(3/10석) → 상세 주요 CTA 0 · ‘2 수업 진행 › 도움 요청 응대’ 이동 후 상세·질문 초안·선택·연결 유지, 상세를 닫았다 열어도 질문 초안 유지, 공유 피드백 초안은 갱신 뒤에도 유지 · 학생 철회 → 목록·집계·열린 기록에서 빠짐 · 다른 수업 개설 → 옛 명단·도움 목록 비움, 옛 요청은 ‘다른 수업의 기록’ · 390px 가로 넘침 없음 |
+| 대조군 | 같은 시험을 `1ea0f31`의 `manage.html`로 돌리면 첫 단언(인증 거부 시 명단 영역 문구)에서 FAIL |
+| `ops.mjs` · `ops-roster.mjs` 갱신 후, `run.mjs` · `ops-selection.mjs` · `ops-distribution.mjs` · `ops-lesson-settings.mjs` · `e2e/access-budgets/browser.mjs` · `e2e/chalk-authoring/run.mjs` | 8개 PASS |
+| `e2e/classroom/ui-review-capture-pass2.mjs` (아래 캡처) | PASS — 10장 가로 넘침 없음·토큰 없음·주요 CTA ≤1, 390px에서 ‘도움 요청 응대’ 링크가 화면 안 |
+
+기존 시험 갱신(기대가 바로 이번 결함이던 곳): `ops.mjs` — A1(토큰 거부)의 주요 버튼 기대 ‘진단 다시 실행’ → 재발급 링크, 증거 링크 `/issuer` → `/authoring`(U4 `9b0c643`과 같은 단언),
+목록 주요 버튼 ‘도움 필요한 학생 선택’ → ‘기술 문제 좌석 선택 (장애 1 · 주의 0)’, 묶음 선택 버튼 `#ops-select-help` → `#ops-select-fault`.
+`ops-roster.mjs` — S03(9석 공통 장애)의 서랍 주요 버튼 기대 ‘진단 다시 실행’ → 없음(Service `none_shared_incident`), 묶음 선택 `ops-select-help` → `ops-select-fault`.
+두 파일의 `button.primary` 셈은 링크도 세도록 `.primary`로 바꿨다.
+
+작업 중 발견해 고친 것: 첫 캡처에서 재발급 링크가 어두운 바탕에 어두운 글자였다(주요 버튼 색이 `button.primary`에만 걸려 있었음). 링크에도 같은 색을 주고 `ops-help.mjs`에 색·높이 단언을 넣었다.
+
+캡처: `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/pass2/`(`index.html`·`manifest.json`·`capture-facts.json`, 1차 `after/`·`codex/`는 그대로).
+합성 미리보기 `ui-review-preview.mjs`에 도움 요청 상태(열림 B2·C2·C6, 답변 A5, 해결 A6, 철회 B1, 만료 B3, 다른 수업 B4)를 추가했다. 이 미리보기에서 C3~C5의 공급자 장애는 3/24석이라
+공통 장애 기준(30%) 아래이고, Service는 ‘진단 다시 실행’을 첫 조치로 준다 — 캡처 P2-06은 그 상태이며, 기준 이상(개별 첫 조치 없음)은 `ops-help.mjs`가 시험한다.
+
+미충족·범위 밖: 학생 Studio 안에서 도움 요청을 보내는 입구(현재는 웹 `/sharing`)와 U1b·AT-41 통합은 이번 범위가 아니다. 도움 요청 판정은 기존 공유 metadata만 쓰며 새 API·저장소는 없다.
+NOT RUN: 실제 강사 사용 관측·실제 Studio 창·실제 학생·Windows·학교망·staging/production·메일, 스크린리더 실사용, 브라우저 확대 기능 자체,
+`mac-*.mjs`(실제 Mac 창 — 이 작업은 Studio GUI·18841/18842/9441을 쓰지 않는다), 전체 빌드. 사용자 시각 피드백 전이며 디자인 승인·인수가 아니다.

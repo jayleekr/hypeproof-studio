@@ -7,6 +7,7 @@
 // shared provider incident, waiting for approval, stale signal, never connected, older app). Connected seats run the REAL
 // device client code in-process (ops sync loop, command runner, inbox store on a temp dir), so selections, distributions,
 // diagnostics and collections produce real per-target outcomes. One seat's inbox disk refuses writes (a partial failure).
+// Help requests (shares) cover open, answered, resolved, withdrawn, expired and earlier-class states — see below.
 // Nothing here is a real student, a real Studio window, a real model, mail, Windows, a school network, staging or production.
 // The synthetic instructor token (signed with the test secret, valid only against this process) is written to
 // e2e/test-results/ui-review-preview/instructor-token.txt — never commit or screenshot it.
@@ -80,10 +81,21 @@ for (const s of seats) {
 }
 // C6 went quiet a while ago: an old signal is "확인 불가", not red.
 local.db.prepare("UPDATE ops_latest_state SET last_received_at=? WHERE seat_id='C6'").run(Date.now() - 25 * 60000);
-// Voluntary shares from two learners (help request + submission), addressed to this instructor.
-for (const [sid, kind, content] of [['synth-08', 'help', { prompt: '[합성] 미리보기에서 버튼이 안 보여요. 어디부터 확인하면 될까요?', verification: '[합성] 390px 화면에서 확인함' }], ['synth-12', 'submission', { artifact_url: 'https://example.invalid/synthetic-project', verification: '[합성] 기대 조건 3개 중 2개 확인' }]]) {
-  const t = await local.student(sid); const r = await local.request('/v1/classroom/shares', 'POST', { id: crypto.randomUUID(), recipient_id: 'teacher-ui', kind, consent: true, duration_minutes: 480, content }, t); if (r.status !== 201 && r.status !== 200) console.warn('share ' + sid + ': ' + r.status + ' ' + r.raw);
-}
+// Voluntary shares addressed to this instructor, in every state the help queue must tell apart (UI pass 2):
+//   open now: B2 synth-08 (a working seat), C2 synth-14 (also a confirmed fault), C6 synth-18 (quiet — asked, then went silent);
+//   not open: A5 synth-05 answered and waiting for the learner, A6 synth-06 resolved by the learner, B1 synth-07 withdrawn,
+//   B3 synth-09 expired, B4 synth-10 asked in an earlier class; B6 synth-12 is a submission, not a help request.
+const share = async (sid, kind, content) => { const t = await local.student(sid), id = crypto.randomUUID(); const r = await local.request('/v1/classroom/shares', 'POST', { id, recipient_id: 'teacher-ui', kind, consent: true, duration_minutes: 480, content }, t); if (r.status !== 201 && r.status !== 200) throw Error('share ' + sid + ': ' + r.status + ' ' + r.raw); return { id, t, revision: r.json.revision }; };
+const answer = (s) => local.request(`/admin/cohorts/${local.cohort}/classroom/shares/${s.id}`, 'PUT', { expected_revision: s.revision, status: 'answered', feedback: '[합성] 확인할 지점을 적었습니다.', next_action: '[합성] 390px에서 다시 보기' }, teacher);
+const ask = (sid, text) => share(sid, 'help', { prompt: '[합성] ' + text });
+await share('synth-08', 'help', { prompt: '[합성] 미리보기에서 버튼이 안 보여요. 어디부터 확인하면 될까요?', verification: '[합성] 390px 화면에서 확인함' });
+await ask('synth-14', 'AI가 대답을 안 해요. 제가 뭘 잘못했나요?'); await ask('synth-18', '다음 단계에서 무엇을 확인해야 할지 모르겠어요.');
+await share('synth-12', 'submission', { artifact_url: 'https://example.invalid/synthetic-project', verification: '[합성] 기대 조건 3개 중 2개 확인' });
+{ const s = await ask('synth-05', '제출 전에 확인할 것이 있나요?'); if ((await answer(s)).status !== 200) throw Error('answer synth-05'); }
+{ const s = await ask('synth-06', '색이 이상해요.'), a = await answer(s); const c = await local.request(`/v1/classroom/shares/${s.id}/confirm`, 'POST', { expected_revision: a.json.revision }, s.t); if (c.status !== 200) throw Error('confirm synth-06 ' + c.raw); }
+{ const s = await ask('synth-07', '[철회 예정]'); if ((await local.request('/v1/classroom/shares/' + s.id, 'DELETE', undefined, s.t)).status !== 200) throw Error('withdraw synth-07'); }
+{ const s = await ask('synth-09', '[만료된 요청]'); local.db.prepare('UPDATE classroom_shares SET expires_at=? WHERE id=?').run(Math.floor(Date.now() / 1000) - 60, s.id); }
+{ const s = await ask('synth-10', '[지난 수업의 요청]'); local.db.prepare("UPDATE classroom_shares SET session_id='synthetic-earlier-class' WHERE id=?").run(s.id); }
 const pump = setInterval(async () => {
   local.db.prepare('UPDATE classroom_distribution_targets SET next_offer_at=0').run(); local.db.prepare('UPDATE classroom_distribution_cards SET next_withdraw_at=0').run();
   for (const l of Object.values(loops)) void l.tick();
