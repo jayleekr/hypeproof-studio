@@ -300,7 +300,8 @@ try {
   await startButton('다른 활동 선택'); await startButton('수업에 참여하기'); await press(start, '#course-code', 'the code field'); await start.send('Input.insertText', { text: reissued }); await startButton('코드 확인하기');
   await W.shot(win, 'r7-start-page-code-checked.png');
   const primary = await wait(() => start.evaluate("(()=>{const b=document.querySelector('.studio-primary');return b&&!b.disabled?b.textContent.trim():null})()"), 'the start button for the checked code'); await press(start, '.studio-primary', 'start: ' + primary);
-  await wait(async () => !(await start.evaluate("!!document.querySelector('.studio-start')").catch(() => false)), 'the start page handed over to the work screen', 120000);
+  // Asked of the webviews open NOW: the entry panel turns into the work screen, and its old debugging socket may never answer.
+  await wait(async () => !(await frame('.studio-start', 'true', 2500).then(() => true, () => false)), 'the start page handed over to the work screen', 120000);
   chat = await frame(TEXTAREA); let repaired = false;
   if (!(await seatNow('A1')).connected) { repaired = true; await connectSeat(win); } // a new issue fences the old connection generation; the instructor's pairing code is the existing way back
   await wait(async () => (await seatNow('A1')).token?.app_verified === 'matches_issue', 'the app verified the newest issue', 120000);

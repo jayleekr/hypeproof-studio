@@ -757,5 +757,6 @@ preview server as it was before the action (other localhost tools and sites are 
 the page back only when that tab itself loaded a fresh document at the page's address, never from an HTTP answer alone;
 an Agent SDK turn whose result is an error is a failed turn for the spool, the observation log, the turn close and the
 board alike (the learner's notice is shown once, nothing is retried), classified only from the HTTP status this turn's own
-stream carried (5xx → provider, 429 → rate limit, none → unknown). Pause still refuses only NEW model requests: a request already streaming is not
+stream carried (5xx → provider, 429 → rate limit, none → unknown). A re-issued code typed on the start page for the activity already open in
+the window keeps the learner's work folder (it used to move them to the profile's default folder). Pause still refuses only NEW model requests: a request already streaming is not
 cut, the next request of the same turn is a new request and is refused, nothing is re-sent on resume.

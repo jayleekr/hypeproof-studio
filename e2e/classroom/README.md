@@ -77,3 +77,7 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
   are made locally and listed in `result.json` under `made_here`; what was not run is under `not_run`. It stays open
   afterwards (class and tokens last 12 hours); `recovery-session.json` has the URL, PID, ports and how to stop it.
   `mac-window.mjs` holds the window-driving helpers this runner uses.
+  R4 drops the app's own preview server through the test-only `HPS_TEST_PREVIEW_FAULT` (the runner sets it; a trigger file
+  appears, the app closes its server socket). `mac-preview-fault-negative.mjs` is the control: the same copy started without
+  the variable (debug port 9442) ignores the same trigger. R7 issues the code on `/authoring` and types it into the app's
+  start page — no dev token file change, no restart.
