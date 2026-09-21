@@ -2,6 +2,7 @@
 // No real VS Code process, SDK, timer, filesystem change or network request.
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import { CommandRunner } from '../src/classroomOpsCommands.ts';
 import { OpsOutbox, startOpsSync } from '../src/classroomOps.ts';
 
@@ -120,4 +121,17 @@ test('the learner is told what is happening in words, not the wire id; an action
   await run('reset_runtime', { mutating: true, label: 'AI 세션 다시 시작 (대화와 파일은 그대로)', run: async () => ({ ok: true, code: 'reset_ok' }) });
   await run('unlabelled_action', { mutating: true, run: async () => ({ ok: true, code: 'ok' }) }); await run('send_question', { mutating: false, label: '질문', run: async () => ({ ok: true, code: 'shown' }) });
   assert.deepEqual(lines, ['강사가 ‘AI 세션 다시 시작 (대화와 파일은 그대로)’ 조치를 요청해 실행합니다.', '강사가 ‘unlabelled_action’ 조치를 요청해 실행합니다.'], 'only state-changing actions announce themselves');
+});
+
+// 2026-09-21 Mac run: an instructor's stop of a live SDK turn reached the learner as "연결이 끊겼어요" because the dying
+// runtime threw something that was not an AbortError. The real window is checked by e2e/classroom/mac-gui.mjs; this pins
+// the three places that have to agree so the wording cannot drift back unnoticed.
+test('a deliberate instructor stop is never routed to the error banner, and the learner is told who stopped it', () => {
+  const src = (p) => readFileSync(new URL(p, import.meta.url), 'utf8');
+  const provider = src('../src/chatPanelProvider.ts'), app = src('../webview-ui/src/App.tsx');
+  assert.match(provider, /if \(!ctrl\.signal\.aborted\) await this\.handleSendError\(err, streamId\);/, 'judged by this turn\'s abort signal, not by the error\'s shape');
+  assert.match(provider, /opsRequestStop\(\): void \{[\s\S]{0,300}?type: "streamStopped", streamId, by: "instructor"/, 'the classroom stop says it is the instructor\'s');
+  const notice = app.match(/const INSTRUCTOR_STOP_NOTICE = "([^"]+)"/)?.[1] ?? '';
+  assert.ok(notice.includes('강사') && notice.includes('그대로'), 'names the instructor and says nothing was lost'); assert.ok(!/연결|오류|문제/.test(notice), 'and does not describe a fault');
+  assert.match(app, /stopNotice: action\.by === "instructor" \? INSTRUCTOR_STOP_NOTICE : STOP_NOTICE/);
 });

@@ -125,7 +125,7 @@ export function composeReport(draft: Draft, ctx: { class_runs_with_evidence: num
     { title: '다음에 실험해볼 것', items: draft.next_experiment ? [{ text: draft.next_experiment }] : [], note: draft.next_experiment ? undefined : '다음 실험은 검수자가 학생과 함께 정합니다.' },
   ];
   if (ctx.class_runs_with_evidence >= 2) sections.splice(2, 0, { title: '최근 반복된 패턴', items: [], note: `근거가 있는 수업 ${ctx.class_runs_with_evidence}회를 함께 본 경우에만 적습니다. 검수자가 회차별 근거를 확인한 뒤 작성합니다.` });
-  if (ctx.coverage !== 'complete') sections.unshift({ title: '이 보고서가 본 범위', items: [], note: ctx.coverage === 'gaps' ? '수업 기록 일부가 빠져 있습니다. 빠진 구간의 행동은 이 보고서에 없습니다.' : ctx.coverage === 'damaged' ? '수업 기록 일부가 손상돼 읽을 수 없었습니다. 읽을 수 있었던 장면만 서술합니다.' : ctx.coverage === 'range_unknown' ? '기록의 시작과 끝을 확인할 수 없었습니다. 기록에 남은 장면만 서술합니다.' : '구형 기록이라 빠진 구간이 있는지 확인할 수 없습니다. 기록에 남은 장면만 서술합니다.' });
+  if (ctx.coverage !== 'complete') sections.unshift({ title: '이 보고서가 본 범위', items: [], note: ctx.coverage === 'gaps' ? '수업 기록 일부가 빠져 있습니다. 빠진 구간의 행동은 이 보고서에 없습니다.' : ctx.coverage === 'damaged' ? '수업 기록 일부가 손상돼 읽을 수 없었습니다. 읽을 수 있었던 장면만 서술합니다.' : ctx.coverage === 'range_unknown' ? '기록의 시작과 끝을 확인할 수 없었습니다. 기록에 남은 장면만 서술합니다.' : '이 기록에는 순번이 없어 빠진 구간이 있는지 확인할 수 없습니다. 기록에 남은 장면만 서술합니다.' });
   // Versions and counts are method detail: folded, never the headline, and never a score.
   return { sections, method: { capability_model: draft.versions.capability_model, rubric: draft.versions.rubric, evaluator: draft.versions.evaluator, renderer_revision: draft.versions.renderer_revision, observed_findings: observed.length, not_yet_seen: rest.length, scope: ctx.class_runs_with_evidence >= 2 ? 'cumulative' : 'single_class' } };
 }
