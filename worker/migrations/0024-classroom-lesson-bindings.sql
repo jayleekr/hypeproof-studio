@@ -56,7 +56,6 @@ CREATE TABLE IF NOT EXISTS classroom_lesson_turns (
  close_outcome TEXT NOT NULL DEFAULT '',
  first_dispatched_at INTEGER,
  first_dispatch_request TEXT NOT NULL DEFAULT '',
- requests INTEGER NOT NULL DEFAULT 0,
  runtime TEXT NOT NULL DEFAULT '',
  model TEXT NOT NULL DEFAULT '',
  first_completed_at INTEGER,
@@ -65,6 +64,22 @@ CREATE TABLE IF NOT EXISTS classroom_lesson_turns (
  last_failure_at INTEGER,
  PRIMARY KEY(class_run_id,student_id,turn_id)
 );
+
+-- One row per provider request the Service PERMITTED under enforcement, written BEFORE the provider is called: which
+-- request, which turn, which lesson. When the usage ledger row of that request is stored, its id is written here in the
+-- same batch. A usage row of this participant that no row here points at is a request the Service cannot attribute to a
+-- lesson (enforcement was off, or the link was lost) — the collection seal holds such an input instead of counting.
+CREATE TABLE IF NOT EXISTS classroom_lesson_requests (
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ request_id TEXT NOT NULL,
+ turn_id TEXT NOT NULL DEFAULT '',
+ binding_seq INTEGER NOT NULL DEFAULT 0,
+ lesson_sha256 TEXT NOT NULL,
+ permitted_at INTEGER NOT NULL,
+ usage_row_id INTEGER,
+ PRIMARY KEY(class_run_id,student_id,request_id)
+) WITHOUT ROWID;
 
 -- How many lesson bases a sealed collection input was produced under. Written inside the seal batch, immutable after.
 CREATE TABLE IF NOT EXISTS classroom_input_basis (

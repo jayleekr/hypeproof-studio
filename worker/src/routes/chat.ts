@@ -573,6 +573,10 @@ chat.post("/chat/completions", async (c) => {
   let costComplete=false, costEnded=false;
   // #751 U3 — execution evidence of the turn this request was admitted into (see `admit` below).
   const lessonTurn = gate.turn;
+  // #751 U3 — under enforcement every permitted request is recorded with its lesson before it runs, turn id or not, and the
+  // usage row it produces is linked to that record. With enforcement unset both are null and nothing is added to this route.
+  const lessonUntracked = gate.binding?.enforced && !gate.turn && gate.lessonSha ? { class_run_id: session.session_id, student_id: payload.u, binding_seq: gate.binding.seq, lesson_sha256: gate.lessonSha } : null;
+  const usageLink = () => (dispatched && (lessonTurn || lessonUntracked) ? { class_run_id: (lessonTurn?.class_run_id ?? lessonUntracked!.class_run_id), student_id: payload.u, request_id: usageRequestId } : null);
   let dispatched = false, upstreamStatus: number | null = null, streamBroke = false, protocolDone = false;
   const requestSignal = (multi||executionAccess) ? AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(60000)]) : undefined;
 
@@ -622,7 +626,7 @@ chat.post("/chat/completions", async (c) => {
 
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }));
+    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }, usageLink()));
   };
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>
@@ -755,7 +759,7 @@ chat.post("/chat/completions", async (c) => {
   // durable record that precedes the call; if it cannot be written the provider is not called (LessonHold).
   const admit=async(wire:Record<string,any>,protocol:'anthropic-messages'|'openai-chat')=>{
     await reserve(wire,protocol);
-    const intent = await recordDispatch(env, lessonTurn, { request: usageRequestId, runtime: 'proxy', model: String(wire.model ?? modelLabel), now: Date.now() });
+    const intent = await recordDispatch(env, lessonTurn, { request: usageRequestId, runtime: 'proxy', model: String(wire.model ?? modelLabel), now: Date.now(), untracked: lessonUntracked });
     if (!intent.ok) throw new LessonHold(intent.code);
     dispatched = true;
   };

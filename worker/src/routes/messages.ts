@@ -261,6 +261,10 @@ messages.post("/messages", async (c) => {
   // #751 U3 — execution evidence for the turn this request was admitted into. `dispatched` is set only once the normalized
   // request is about to leave for the provider; everything that is refused before that leaves no evidence at all.
   const lessonTurn = gate.turn;
+  // #751 U3 — under enforcement every permitted request is recorded with its lesson before it runs, turn id or not, and the
+  // usage row it produces is linked to that record. With enforcement unset both are null and nothing is added to this route.
+  const lessonUntracked = gate.binding?.enforced && !gate.turn && gate.lessonSha ? { class_run_id: session.session_id, student_id: payload.u, binding_seq: gate.binding.seq, lesson_sha256: gate.lessonSha } : null;
+  const usageLink = () => (dispatched && (lessonTurn || lessonUntracked) ? { class_run_id: (lessonTurn?.class_run_id ?? lessonUntracked!.class_run_id), student_id: payload.u, request_id: usageRequestId } : null);
   let dispatched = false, upstreamStatus: number | null = null, streamBroke = false, protocolDone = false;
 
   // #684 — accounting declared above every failure exit, mirroring chat.ts.
@@ -305,7 +309,7 @@ messages.post("/messages", async (c) => {
       complete:costComplete,ended:costEnded}).catch(()=>console.error('SDK cost evidence unavailable; unresolved reservation retained')));
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }));
+    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }, usageLink()));
   };
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>
@@ -539,7 +543,7 @@ messages.post("/messages", async (c) => {
     if(env.HPS_ACCESS_CONTRACTS==='enabled')c.header('x-hps-usage-request-id',usageRequestId);
     // #751 U3 — the durable intent comes BEFORE the call. If the first dispatch of this turn cannot be recorded, the
     // provider is not called: "nothing on record" may only ever mean "nothing was executed".
-    const intent = await recordDispatch(env, lessonTurn, { request: usageRequestId, runtime: 'agent-sdk', model: modelLabel, now: Date.now() });
+    const intent = await recordDispatch(env, lessonTurn, { request: usageRequestId, runtime: 'agent-sdk', model: modelLabel, now: Date.now(), untracked: lessonUntracked });
     if (!intent.ok) { recordFailure(403, ERROR_KIND.BAD_REQUEST); return c.json({ error: { type: 'lesson_binding', code: intent.code, message: bindingRefusalMessage(intent.code) } }, 403); }
     dispatched = true;
     upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {

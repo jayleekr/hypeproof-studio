@@ -119,7 +119,7 @@ async function world() {
     db.batch = async (stmts) => { const r = await batch(stmts); if (armed && stmts.length === 2 && r[0]?.results?.[0]?.turn_id === id && r[0].results[0].closed_at === null) { armed = false; assert.equal(await S.closeTurn(f.env, payload, { turnId: id, outcome: 'completed', now: Date.now() }), 'closed'); injected++; } return r; };
     let closedAtProvider = 'not called'; const raced = await ask(tok, { turn: id, key: K1, onProvider: () => { closedAtProvider = f.db.prepare('SELECT closed_at c FROM classroom_lesson_turns WHERE turn_id=?').get(id).c; } }); db.batch = batch;
     assert.equal(injected, 1, 'the close really landed between the read and the dispatch'); assert.deepEqual([raced.status, raced.provider, closedAtProvider], [403, 0, 'not called']); assert.match(raced.json.error.message, /\[hps:lesson_turn_closed\]/);
-    const counted = f.db.prepare('SELECT requests r FROM classroom_lesson_turns WHERE turn_id=?').get(id).r; assert.equal(counted, 2, 'only the two requests that were permitted are on the turn row');
+    const counted = f.db.prepare('SELECT COUNT(*) n FROM classroom_lesson_requests WHERE turn_id=?').get(id).n; assert.equal(counted, 2, 'only the two requests that were permitted have a request row');
     ok('5 the dispatch permission is the last database check of EVERY request: a close that lands after the gate\'s read stops the provider call and is not counted');
   } finally { f.close(); } }
 
@@ -135,9 +135,9 @@ for (const sameSecond of [false, true]) { const { f, course, V1, V2, sha, token,
     if (sameSecond) { ok('6 one request in the very second of the switch is a single basis — no clock is compared'); continue; }
     f.env.HPS_LESSON_BINDINGS = undefined; const rolled = await ask(tok, { key }); assert.equal(rolled.status, 200); assert.match(rolled.system, /build/); assert.doesNotMatch(rolled.system, /v2-work/);
     assert.equal(f.db.prepare("SELECT COUNT(*) n FROM usage_log WHERE session_id=? AND user_id='student-a'").get(f.run).n, 2, 'both requests are in the usage ledger');
-    const mixed = await basis('after-rollback'); assert.deepEqual([mixed.basis, mixed.verdict], ['mixed', { allow: false, reason: 'mixed_lesson_basis', tables: true }]);
+    const mixed = await basis('after-rollback'); assert.deepEqual([mixed.basis, mixed.verdict], ['unknown', { allow: false, reason: 'lesson_basis_unknown', tables: true }], 'an answered request that no permitted request points at: not attributable, held — not labelled by a guess');
     f.env.HPS_LESSON_BINDINGS = 'enforce'; assert.equal((await basis('after-re-enable')).verdict.allow, false, 'turning enforcement back on does not launder the record');
-    ok('2 v2 under an admitted turn, then v1 with enforcement switched off: the usage ledger has a request no turn accounts for — mixed, held');
+    ok('2 v2 under a permitted request, then v1 with enforcement switched off: the usage ledger has an answered row no permitted request points at — held');
   } finally { f.close(); } }
 // ── S9 + S10: other cohorts, a new run, and the four reissue cases — end to end, with the identity fixes above as controls ──
 { const { f, course, V1, V2, sha, token, ask } = await world();
@@ -182,5 +182,60 @@ for (const sameSecond of [false, true]) { const { f, course, V1, V2, sha, token,
     assert.equal((await ask(same.token, { key: K2 })).status, 403, 'the old run\'s key is refused in the new run');
     await startSession(f.env.HPS_KV, f.cohort, { session_id: f.run, profile_id: f.profile, starts_at: starts, ends_at: ends }); assert.equal((await profile(same.token)).lesson.version, V2, 'control: the binding is still the old run\'s');
     ok('S9 another cohort\'s instructor, a learner token and an operations credential reach nothing; a new run does not inherit the previous run\'s binding');
+  } finally { f.close(); } }
+// ── review at 5a476f7: a FAILED enforced request must not stand in for a successful request made with enforcement off ──
+{ const { f, course, V1, V2, sha, token } = await world();
+  try {
+    assert.equal((await f.configure([{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }], 0, { flags: FLAGS })).status, 201);
+    const bind = (student, seat, key) => f.db.prepare('INSERT INTO classroom_lesson_bindings(class_run_id,student_id,binding_seq,seat_id,seat_revision,binding_key,source,distribution_id,object_id,revision,content_hash,course_id,version,lesson_sha256,base_lesson_sha256,steps_json,activated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(f.run, student, 1, seat, 1, key, 'setting', 'review-dist-' + student, 'review-obj', 1, 'a'.repeat(64), course, V2, sha[V2], sha[V1], '[]', Date.now() - 2000);
+    const KA = 'b'.repeat(32), KB = 'c'.repeat(32); bind('student-a', 'A1', KA); bind('student-b', 'A2', KB); const ta = (await token('student-a')).token, tb = (await token('student-b')).token;
+    /** One real request through the route; `answer` scripts the provider: ok · a 500 · a stream that is cut before its end marker. */
+    async function call(tok, { key, turn = KEY(), answer = 'ok', path = '/v1/messages' } = {}) { const ctx = makeCtx();
+      const sse = (events) => new Response(events.map(([e, d]) => `event: ${e}\ndata: ${JSON.stringify(d)}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } });
+      const cut = () => sse([['message_start', { type: 'message_start', message: { id: 'm', type: 'message', role: 'assistant', model: 'claude-mock', content: [], usage: { input_tokens: 5, output_tokens: 0 } } }], ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }], ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: '끊긴' } }]]);
+      return withMockUpstream(() => answer === 'ok' ? Response.json(anthropicJsonBody({ text: '합성 응답' })) : answer === 'cut' ? cut() : Response.json({ error: { type: 'api_error', message: 'synthetic injected failure' } }, { status: 500 }), async (calls) => {
+        const r = await f.app.fetch(new Request('https://service.test' + path, { method: 'POST', headers: { authorization: 'Bearer ' + tok, 'content-type': 'application/json', ...(turn ? { 'x-hps-turn-id': turn } : {}), ...(key ? { 'x-hps-lesson-binding': key } : {}) }, body: JSON.stringify({ model: 'claude-mock', max_tokens: 128, ...(answer === 'cut' ? { stream: true } : {}), messages: [{ role: 'user', content: '합성 질문' }] }) }), f.env, ctx);
+        await r.text(); await ctx.settle(); return { status: r.status, provider: calls.length, system: calls.map((c) => JSON.stringify(JSON.parse(c.init.body).system)).join('\n') }; }); }
+    const basis = async (student, batch) => { const i = { class_run_id: f.run, student_id: student, batch_id: batch, revision: 1, now: Date.now() }; await sealBasisStatement(f.env.HPS_DB, i).run(); return [f.db.prepare('SELECT basis b FROM classroom_input_basis WHERE batch_id=?').get(batch).b, (await inputBasisVerdict(f.env.HPS_DB, { ...i, snapshot_revision: 1 })).allow]; };
+    const requests = (student) => f.db.prepare('SELECT turn_id,lesson_sha256 s,usage_row_id u FROM classroom_lesson_requests WHERE student_id=? ORDER BY permitted_at,request_id').all(student).map((r) => ({ ...r }));
+    const usage = (student) => f.db.prepare('SELECT id,status FROM usage_log WHERE user_id=? ORDER BY id').all(student).map((r) => ({ ...r }));
+
+    // positive control — everything a single-basis class really contains: a success, a multi-request turn, a provider error,
+    // a cut stream, a retry of the failed question under a new request, and a request without a turn id. All v2. All attributed.
+    assert.match((await call(ta, { key: KA })).system, /v2-work/);
+    const multi = KEY(); for (let k = 0; k < 3; k++) assert.equal((await call(ta, { key: KA, turn: multi })).status, 200);
+    assert.ok((await call(ta, { key: KA, answer: 'fail' })).status >= 400); assert.equal((await call(ta, { key: KA, answer: 'cut' })).provider, 1); assert.equal((await call(ta, { key: KA })).status, 200, 'the learner asks again');
+    assert.equal((await call(ta, { key: KA, turn: null })).status, 200, 'a request without a turn id still runs under the binding in force');
+    const ra = requests('student-a'), ua = usage('student-a'); assert.equal(ra.length, 8); assert.ok(ra.every((r) => r.s === sha[V2]), 'every permitted request names v2 — the failed, the cut and the turn-less one as well');
+    assert.deepEqual(ra.map((r) => r.u).sort((x, y) => x - y), ua.map((r) => r.id), 'every usage row — 200, 500 and the cut stream alike — is pointed at by exactly the request that produced it');
+    assert.deepEqual(await basis('student-a', 'a-single'), ['single', true], 'a real single-basis record with failures, a cut stream, a retry and a multi-request turn is NOT held');
+
+    // an answered usage row that is NOT a lesson execution (the opt-in observation assessment writes one for the same learner and
+    // run): identified as such under enforcement, it is neither a basis nor "cannot attribute" — without that note it would hold
+    const { persistUsage } = await import('../src/lib/analytics.ts'), assessLog = { cohort_id: f.cohort, user_id: 'student-a', profile_id: f.profile, model: 'm', status: 200, error_kind: null, tokens_in: 1, tokens_out: 1, cache_read: 0, cache_create: 0, latency_ms: 1, module_version: 'v', session_id: f.run };
+    await persistUsage(f.env, assessLog, { class_run_id: f.run, student_id: 'student-a', request_id: 'observation:' + KEY(), non_lesson: true }); assert.deepEqual(await basis('student-a', 'a-with-assessment'), ['single', true], 'an identified assessment call does not hold a single-basis record');
+    { const wrongNoNote = async () => { await persistUsage(f.env, assessLog, null); const r = await basis('student-a', 'a-assessment-unnoted'); f.db.prepare("DELETE FROM usage_log WHERE id=(SELECT MAX(id) FROM usage_log)").run(); return r; }; assert.deepEqual(await wrongNoNote(), ['unknown', false], 'negative control: the same row WITHOUT the note is unattributable'); }
+
+    // the defect: v2 success → v2 provider FAILURE → enforcement off → v1 success. Permitted 2, answered 2 — and two different lessons ran.
+    assert.match((await call(tb, { key: KB })).system, /v2-work/); assert.deepEqual(await basis('student-b', 'b-before'), ['single', true], 'control: v2 only');
+    assert.ok((await call(tb, { key: KB, answer: 'fail' })).status >= 400);
+    f.env.HPS_LESSON_BINDINGS = undefined; const off = await call(tb, { key: KB }); f.env.HPS_LESSON_BINDINGS = 'enforce'; assert.equal(off.status, 200); assert.match(off.system, /build/); assert.doesNotMatch(off.system, /v2-work/);
+    assert.deepEqual(usage('student-b').map((r) => r.status), [200, 500, 200]); assert.equal(requests('student-b').length, 2, 'permitted requests 2 = answered usage rows 2: the totals that used to "match"');
+    const wrong = (permitted, answered) => answered <= permitted; /* negative control: the counting rule of 5a476f7 */ assert.equal(wrong(2, 2), true, 'the control calls this single');
+    assert.deepEqual(await basis('student-b', 'b-masked'), ['unknown', false], 'by identity: the second answered usage row is pointed at by no permitted request — held');
+    assert.equal(f.db.prepare("SELECT COUNT(*) n FROM usage_log u WHERE u.user_id='student-b' AND u.status BETWEEN 200 AND 299 AND u.id NOT IN (SELECT usage_row_id FROM classroom_lesson_requests WHERE student_id='student-b' AND usage_row_id IS NOT NULL)").get().n, 1, 'exactly the v1 request');
+
+    // a lost link (the usage row was stored, the note was not) is "cannot attribute" as well — never "fine"
+    f.db.prepare("UPDATE classroom_lesson_requests SET usage_row_id=NULL WHERE student_id='student-a' AND request_id=(SELECT request_id FROM classroom_lesson_requests WHERE student_id='student-a' AND usage_row_id=(SELECT MIN(id) FROM usage_log WHERE user_id='student-a' AND status=200))").run();
+    assert.deepEqual(await basis('student-a', 'a-lost-link'), ['unknown', false]); 
+    // a usage row stored AFTER the seal for a request made before it: the sealed `single` does not outlive it — at the model-input
+    // boundary (the verdict) and in the predicate the commit statements carry
+    f.db.prepare("DELETE FROM usage_log WHERE user_id='student-a' AND id NOT IN (SELECT usage_row_id FROM classroom_lesson_requests WHERE student_id='student-a' AND usage_row_id IS NOT NULL)").run();
+    assert.deepEqual(await basis('student-a', 'a-sealed-early'), ['single', true]); const { basisAllows } = await import('../src/lib/lesson-basis.ts');
+    const commitOk = () => f.db.prepare(`SELECT ${basisAllows('j')} AS ok FROM (SELECT 'a-sealed-early' AS batch_id,'student-a' AS student_id,1 AS snapshot_revision,? AS class_run_id) j`).get(f.run).ok; assert.equal(commitOk(), 1);
+    f.db.prepare("INSERT INTO usage_log(session_id,cohort_id,user_id,profile_id,model,status) VALUES(?,?,?,?,?,200)").run(f.run, f.cohort, 'student-a', f.profile, 'm');
+    assert.equal((await inputBasisVerdict(f.env.HPS_DB, { class_run_id: f.run, student_id: 'student-a', batch_id: 'a-sealed-early', snapshot_revision: 1 })).allow, false, 'read again at the boundary: held'); assert.equal(commitOk(), 0, 'and the commit predicate says the same');
+    assert.equal(f.db.prepare("SELECT basis b FROM classroom_input_basis WHERE batch_id='a-single'").get().b, 'single', 'an input sealed earlier keeps its own row; the verdict of each input is read at each boundary');
+    ok('failure mask: a failed enforced request no longer covers a successful request made with enforcement off — requests are joined to usage rows by identity; failures, cut streams, retries, multi-request and turn-less requests stay single; a lost link and a late usage row are held');
   } finally { f.close(); } }
 console.log(`\n${n} passed`);

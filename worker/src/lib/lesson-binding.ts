@@ -33,8 +33,6 @@ export interface TurnRow {
   class_run_id: string; student_id: string; turn_id: string; token_jti: string; binding_seq: number; binding_key: string;
   course_id: string; version: string; lesson_sha256: string; admitted_at: number; closed_at: number | null; close_outcome: string;
   first_dispatched_at: number | null; first_completed_at: number | null; last_failure_kind: string; last_failure_status: number | null; last_failure_at: number | null;
-  /** Provider requests PERMITTED under this turn (counted by the same statement that permits them). */
-  requests?: number;
 }
 
 export const tokenBindingKey = (sha256: string) => 'token:' + sha256.slice(0, 16);

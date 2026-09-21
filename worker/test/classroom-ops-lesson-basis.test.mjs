@@ -15,9 +15,11 @@ const seats = [['A1', 'student-a'], ['A2', 'student-b'], ['A3', 'student-c'], ['
 const SHA1 = '1'.repeat(64), SHA2 = '2'.repeat(64), T0 = Date.now() - 600_000;
 const bind = (student, seat, seq, sha, at, source = 'setting') => f.db.prepare('INSERT INTO classroom_lesson_bindings(class_run_id,student_id,binding_seq,seat_id,seat_revision,binding_key,source,distribution_id,object_id,revision,content_hash,course_id,version,lesson_sha256,base_lesson_sha256,activated_at) VALUES(?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?)')
   .run(f.run, student, seq, seat, (student + seq).padEnd(32, '0').slice(0, 32), source, 'dist-' + student + seq, 'obj-setting', seq, 'h'.repeat(64), 'ops-course', 'v' + seq, sha, SHA1, at);
-// One admitted turn = one permitted provider request (`requests=1`) and, as in the real path, one answered row in the usage ledger.
-const turn = (student, id, seq, sha, admitted, dispatched) => { f.db.prepare('INSERT INTO classroom_lesson_turns(class_run_id,student_id,turn_id,token_jti,binding_seq,binding_key,course_id,version,lesson_sha256,admitted_at,first_dispatched_at,requests) VALUES(?,?,?,?,?,?,?,?,?,?,?,1)').run(f.run, student, id, 'jti-' + student, seq, 'k' + seq, 'ops-course', 'v', sha, admitted, dispatched);
-  f.db.prepare("INSERT INTO usage_log(session_id,cohort_id,user_id,profile_id,model,status,created_at) VALUES(?,?,?,?,?,200,datetime(?,'unixepoch'))").run(f.run, f.cohort, student, f.profile, 'm', Math.floor(dispatched / 1000)); };
+// One admitted turn = one permitted provider request (its row, written before the provider call) and, as in the real path, one
+// answered row in the usage ledger that the request row points at.
+const turn = (student, id, seq, sha, admitted, dispatched) => { f.db.prepare('INSERT INTO classroom_lesson_turns(class_run_id,student_id,turn_id,token_jti,binding_seq,binding_key,course_id,version,lesson_sha256,admitted_at,first_dispatched_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)').run(f.run, student, id, 'jti-' + student, seq, 'k' + seq, 'ops-course', 'v', sha, admitted, dispatched);
+  const u = f.db.prepare("INSERT INTO usage_log(session_id,cohort_id,user_id,profile_id,model,status,created_at) VALUES(?,?,?,?,?,200,datetime(?,'unixepoch'))").run(f.run, f.cohort, student, f.profile, 'm', Math.floor(dispatched / 1000));
+  f.db.prepare('INSERT INTO classroom_lesson_requests(class_run_id,student_id,request_id,turn_id,binding_seq,lesson_sha256,permitted_at,usage_row_id) VALUES(?,?,?,?,?,?,?,?)').run(f.run, student, 'req-' + id, id, seq, sha, dispatched, Number(u.lastInsertRowid)); };
 try {
   const { setRoster } = await import('../src/lib/kv.ts'); await setRoster(f.env.HPS_KV, f.cohort, seats.map((s) => s.student_id)); await f.freeze();
   assert.equal((await f.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true, ops_reports: true, ops_delivery: true, ops_distribute: true, ops_lesson_settings: true } })).status, 201);
@@ -42,17 +44,17 @@ try {
     // a learner who ran v2 only in ADMITTED turns but had model requests BEFORE the first switch is mixed as well (those ran the token lesson)
     f.db.prepare("INSERT INTO usage_log(session_id,cohort_id,user_id,profile_id,model,status,created_at) VALUES(?,?,?,?,?,200,datetime(?,'unixepoch'))").run(f.run, f.cohort, 'student-b', f.profile, 'm', Math.floor((T0 - 60_000) / 1000));
     const b2 = (await f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: 1, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false, targets: ['A2'], mode: 'collect_only' })).json.batch.id;
-    assert.equal((await f.uploadSnapshotAs(conn['student-b'], b2, 1, ev('student-b'))).status, 201); assert.equal(one('SELECT basis b FROM classroom_input_basis WHERE batch_id=?', b2).b, 'mixed');
+    assert.equal((await f.uploadSnapshotAs(conn['student-b'], b2, 1, ev('student-b'))).status, 201); assert.equal(one('SELECT basis b FROM classroom_input_basis WHERE batch_id=?', b2).b, 'unknown', 'an answered request no permitted request points at, for a switched participant: not attributable — held, not guessed');
     f.db.prepare("DELETE FROM usage_log WHERE id=(SELECT MAX(id) FROM usage_log)").run();
     // Codex review 2 · rollback: the participant ran v2 under an admitted turn, then enforcement was switched off and the SAME token
     // ran v1 — a usage row that no admitted turn accounts for. The record is mixed; the flag being off now changes nothing.
     f.db.prepare("INSERT INTO usage_log(session_id,cohort_id,user_id,profile_id,model,status) VALUES(?,?,?,?,?,200)").run(f.run, f.cohort, 'student-b', f.profile, 'm');
     const b3 = (await f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: 1, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false, targets: ['A2'], mode: 'collect_only' })).json.batch.id;
-    assert.equal((await f.uploadSnapshotAs(conn['student-b'], b3, 1, ev('student-b'))).status, 201); assert.equal(one('SELECT basis b FROM classroom_input_basis WHERE batch_id=?', b3).b, 'mixed', 'an answered request outside the turn ledger, for a participant who ran a switched lesson');
+    assert.equal((await f.uploadSnapshotAs(conn['student-b'], b3, 1, ev('student-b'))).status, 201); assert.equal(one('SELECT basis b FROM classroom_input_basis WHERE batch_id=?', b3).b, 'unknown', 'an answered request outside the request ledger, for a participant who ran a switched lesson');
     f.db.prepare("DELETE FROM usage_log WHERE id=(SELECT MAX(id) FROM usage_log)").run();
     // a usage row whose session attribution was lost (the existing NULL retry) still counts
     f.db.prepare("INSERT INTO usage_log(session_id,cohort_id,user_id,profile_id,model,status) VALUES(NULL,?,?,?,?,200)").run(f.cohort, 'student-b', f.profile, 'm');
-    assert.equal({ ...(await sealBasisStatement(f.env.HPS_DB, { batch_id: 'probe-null-session', student_id: 'student-b', revision: 1, class_run_id: f.run, now: Date.now() }).run(), f.db.prepare("SELECT basis b FROM classroom_input_basis WHERE batch_id='probe-null-session'").get()) }.b, 'mixed');
+    assert.equal({ ...(await sealBasisStatement(f.env.HPS_DB, { batch_id: 'probe-null-session', student_id: 'student-b', revision: 1, class_run_id: f.run, now: Date.now() }).run(), f.db.prepare("SELECT basis b FROM classroom_input_basis WHERE batch_id='probe-null-session'").get()) }.b, 'unknown');
     f.db.prepare("DELETE FROM usage_log WHERE id=(SELECT MAX(id) FROM usage_log)").run();
     // Codex review 6 · same second: ONE v2 request in the very second of the switch is a single basis (no clock is compared)
     assert.equal({ ...(await sealBasisStatement(f.env.HPS_DB, { batch_id: 'probe-same-second', student_id: 'student-b', revision: 1, class_run_id: f.run, now: Date.now() }).run(), f.db.prepare("SELECT basis b FROM classroom_input_basis WHERE batch_id='probe-same-second'").get()) }.b, 'single');
@@ -107,7 +109,7 @@ try {
     await f.request(f.base, 'PUT', { expected_roster_revision: 1, seats, flags: { ops_lesson_settings: false, ops_distribute: false } }); f.env.HPS_LESSON_BINDINGS = undefined; f.env.HPS_CLASSROOM_OPS = 'enabled';
     bind('student-c', 'A3', 2, SHA1, Date.now(), 'base');
     assert.deepEqual([(await v('student-c')).allow, (await v('student-c')).reason], [false, 'mixed_lesson_basis']); assert.deepEqual([(await v('student-a')).allow, (await v('student-a')).kind], [true, 'single']);
-    f.fail('FROM classroom_input_basis'); assert.deepEqual([(await v('student-a')).allow, (await v('student-a')).reason], [false, 'lesson_basis_unreadable'], 'unreadable is held — for everybody, including a learner who was never switched'); f.fail('');
+    f.fail('JOIN classroom_input_basis') /* the verdict's own read */; assert.deepEqual([(await v('student-a')).allow, (await v('student-a')).reason], [false, 'lesson_basis_unreadable'], 'unreadable is held — for everybody, including a learner who was never switched'); f.fail('');
     f.fail('FROM classroom_input_basis'); const b3 = (await f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: 2, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false, targets: ['A1'], mode: 'collect_only' })).json.batch.id; const sealed = await f.uploadSnapshotAs(conn['student-a'], b3, 1, ev('student-a')); f.fail('');
     assert.equal(sealed.status, 503); assert.equal(sealed.json.reason, 'lesson_basis_unreadable'); assert.equal(rows('SELECT 1 FROM classroom_snapshots WHERE batch_id=? AND state=?', b3, 'sealed').length, 0, 'there is no seal without a basis');
   });

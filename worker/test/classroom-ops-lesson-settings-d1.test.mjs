@@ -1,7 +1,7 @@
 // Remote classroom operations (#751, U3) — what lesson settings cost and whether their conditional batches hold, measured on
 // actual LOCAL workerd/D1 (miniflare), not the SQLite shim. Quantities are kept apart because they are not each other:
 //   T  a learner question the Service ADMITS (one turn row)            R  a later model/SDK request of a turn (auxiliary, tool loop):
-//                                                                          its dispatch permission is one counted UPDATE (1 row written)
+//                                                                          its dispatch permission is its own request row, and its usage row is linked to it
 //   E  execution evidence written for a request (dispatch, outcome)    B  one instructor board refresh
 // R is not T: the pinned Agent SDK sends an auxiliary request before the main loop under the SAME turn id, so a question is
 // one T and several R. D1's own `meta.rows_read` / `meta.rows_written` are what is reported (rows scanned, rows written
@@ -22,7 +22,7 @@ const B = await import('../src/lib/lesson-binding.ts');
 const compatibilityDate = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8').match(/^compatibility_date\s*=\s*"([^"]+)"/m)?.[1];
 const mf = createMiniflare({ modules: true, script: 'export default {fetch(){return new Response("local test")}}', compatibilityDate, d1Databases: ['HPS_DB'] });
 const KEY = () => crypto.randomUUID(), FULL = ['observe', 'commands', 'distribution_inbox', 'inbox_prompt', 'lesson_binding'];
-const U3 = ['classroom_lesson_bindings', 'classroom_lesson_turns', 'classroom_input_basis', 'classroom_lesson_bindings_distribution', 'classroom_content_objects_setting'];
+const U3 = ['classroom_lesson_bindings', 'classroom_lesson_turns', 'classroom_lesson_requests', 'classroom_input_basis', 'classroom_lesson_bindings_distribution', 'classroom_content_objects_setting'];
 const squash = (sql) => String(sql).replace(/\s+/g, ' ').replace(/\s*([(),])\s*/g, '$1').replace(/ IF NOT EXISTS/g, '').trim();
 let f;
 try {
@@ -45,7 +45,7 @@ try {
   // The measurements below need the tables that predate 0011 (usage, authoring): schema.sql is all IF NOT EXISTS, so applying it
   // on top supplies them and must leave every object the migration chain made exactly as it was.
   await apply(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8').replace(/--[^\n]*/g, '')); { const now = await master(); for (const [name, sql] of Object.entries(after)) assert.equal(now[name], sql, 'unchanged by schema.sql: ' + name); }
-  console.log('PASS local D1: 0011→0023 then 0024 twice — earlier objects byte-identical, exactly five objects added, schema.sql agrees');
+  console.log('PASS local D1: 0011→0023 then 0024 twice — earlier objects byte-identical, exactly six objects added, schema.sql agrees');
 
   // ── metering wrapper: counts what the Service really sends to D1 ──
   let m = null; const meter = () => (m = { statements: 0, batches: 0, max_binds: 0, rows_read: 0, rows_written: 0, unmetered: 0 });
@@ -130,7 +130,12 @@ try {
   const turnRow = await one('SELECT * FROM classroom_lesson_turns WHERE turn_id=?', turn);
   assert.ok(turnRow.first_dispatched_at && turnRow.first_completed_at && turnRow.closed_at, 'admitted, dispatched, completed and closed are all on the ONE turn row');
   assert.equal((await one('SELECT count(*) n FROM classroom_lesson_turns WHERE student_id=?', seat.student_id)).n, 1, 'two requests of one turn are one T; a refusal admits nothing');
-  assert.ok(T.statements <= 8 && T.rows_written <= 5, 'T: ' + JSON.stringify(T)); assert.ok(R.statements <= 3 && R.rows_written === 1, 'R = the gate\'s read batch + ONE conditional UPDATE that is both the last permission check and the request count: ' + JSON.stringify(R));
+  // Identity on REAL D1: each permitted request has its row, and the usage row stored for it is the one it points at —
+  // `last_insert_rowid()` inside a D1 batch is the usage row that batch just stored (not assumed: read back and joined).
+  const linked = await all("SELECT q.request_id,q.usage_row_id,u.id,u.status,u.user_id FROM classroom_lesson_requests q LEFT JOIN usage_log u ON u.id=q.usage_row_id WHERE q.student_id=? ORDER BY q.permitted_at", seat.student_id);
+  assert.equal(linked.length, 2, 'two permitted requests, two request rows'); assert.ok(linked.every((r) => r.usage_row_id !== null && r.id === r.usage_row_id && r.user_id === seat.student_id && r.status === 200), 'each points at its own usage row: ' + JSON.stringify(linked)); assert.equal(new Set(linked.map((r) => r.usage_row_id)).size, 2);
+  const stray = await one("SELECT count(*) n FROM usage_log u WHERE u.user_id=? AND u.status BETWEEN 200 AND 299 AND u.id NOT IN (SELECT usage_row_id FROM classroom_lesson_requests WHERE student_id=? AND usage_row_id IS NOT NULL)", seat.student_id, seat.student_id); assert.equal(stray.n, 2, 'the two answered requests made BEFORE enforcement was switched on (the warm-up and the baseline) are exactly the unattributed ones');
+  assert.ok(T.statements <= 10 && T.rows_written <= 7, 'T: ' + JSON.stringify(T)); assert.ok(R.statements <= 4 && R.rows_written <= 3, 'R = the gate\'s read batch + ONE conditional INSERT (the last permission check and the request\'s own record) + the link written in the usage row\'s batch: ' + JSON.stringify(R));
   assert.ok(state.cost.statements === 1 && state.cost.rows_written === 0 && close.cost.statements === 2 && close.cost.rows_written === 1, 'a turn is read and closed where it was admitted (the cohort\'s runs), in one and two statements');
   assert.equal(profile.cost.rows_written, offProfile.cost.rows_written, 'reading a profile writes nothing'); assert.ok(profile.cost.statements - offProfile.cost.statements <= 2);
   assert.ok(first.cost.statements <= 45, 'a whole model request stays under D1\'s 50 queries per invocation (Free plan)');
@@ -139,8 +144,9 @@ try {
   const { sealBasisStatement } = await import('../src/lib/lesson-basis.ts');
   const seal = await measured(async () => { await sealBasisStatement(db, { batch_id: 'd1-seal-probe', student_id: seat.student_id, revision: 1, class_run_id: f.run, now: Date.now() }).run(); return (await one("SELECT basis,lessons,turns FROM classroom_input_basis WHERE batch_id='d1-seal-probe'")); });
   console.log(`  seal basis statement (this learner: ${seal.out.turns} turns) → ${JSON.stringify(seal.cost)} → ${JSON.stringify(seal.out)}`);
+  // never switched → single, although two of this learner's answered requests predate enforcement (a token-lesson learner is single whether or not enforcement recorded it)
   assert.deepEqual([seal.out.basis, seal.cost.statements, seal.cost.rows_written <= 2], ['single', 1, true], JSON.stringify(seal)); assert.ok(seal.cost.rows_read <= 40, 'bounded by this participant\'s own turns and usage rows: ' + seal.cost.rows_read);
-  console.log('PASS local D1: T = one turn row + counted first dispatch + outcome; R = one counted permission (1 row written); profile/state reads write nothing');
+  console.log('PASS local D1: T = turn row + request row + first dispatch + outcome + usage link; R = request row + usage link; every request points at its own usage row; profile/state reads write nothing');
 
   // ── D: "one batch, two tables" is real on D1 — row counts, and a batch whose guard fails changes NEITHER table ──
   const { recordDispatch, recordOutcome } = await import('../src/lib/lesson-binding-store.ts');
@@ -180,6 +186,16 @@ try {
   assert.deepEqual([...new Set(burst.out.map((r) => r.status + ':' + r.json.recorded))], ['201:true'], JSON.stringify(burst.out.find((r) => r.status !== 201)?.json));
   assert.deepEqual(await all('SELECT count(*) n,min(binding_seq) lo,max(binding_seq) hi,count(DISTINCT student_id) s FROM classroom_lesson_bindings WHERE distribution_id=?', items[0].distribution_id), [{ n: 30, lo: 1, hi: 1, s: 30 }]);
   console.log(`  30 concurrent switches (whole burst)       → ${JSON.stringify(burst.cost)} · per learner ≈ ${JSON.stringify({ statements: burst.cost.statements / 30, rows_read: Math.round(burst.cost.rows_read / 30), rows_written: burst.cost.rows_written / 30 })}`);
+  // The seal for a SWITCHED learner with many requests: the identity join reads requests + usage rows ONCE each (linear), it is
+  // not a per-usage-row probe of the request table (quadratic). 50 then 100 linked requests of one learner; then one stray answered row.
+  const heavy = crowd[5].student_id, sealFor = async (batch) => measured(async () => { await sealBasisStatement(db, { batch_id: batch, student_id: heavy, revision: 1, class_run_id: f.run, now: Date.now() }).run(); return (await one('SELECT basis FROM classroom_input_basis WHERE batch_id=?', batch)).basis; });
+  const addLinked = async (from, to) => { for (let i = from; i < to; i += 10) { const ids = []; for (let k = i; k < Math.min(to, i + 10); k++) { const r = await raw.prepare("INSERT INTO usage_log(session_id,cohort_id,user_id,profile_id,model,status) VALUES(?,?,?,?,?,200)").bind(f.run, f.cohort, heavy, f.profile, 'm').run(); ids.push([k, r.meta.last_row_id]); }
+    await raw.batch(ids.map(([k, id]) => raw.prepare('INSERT INTO classroom_lesson_requests(class_run_id,student_id,request_id,turn_id,binding_seq,lesson_sha256,permitted_at,usage_row_id) VALUES(?,?,?,?,1,?,?,?)').bind(f.run, heavy, 'heavy-' + k, 'heavy-turn-' + k, sha[V2], Date.now(), id))); } };
+  await addLinked(0, 50); const s50 = await sealFor('d1-heavy-50'); await addLinked(50, 100); const s100 = await sealFor('d1-heavy-100');
+  console.log(`  seal basis, switched learner: 50 requests → ${JSON.stringify(s50.cost)} · 100 requests → ${JSON.stringify(s100.cost)}`);
+  assert.deepEqual([s50.out, s100.out], ['single', 'single']); assert.ok(s100.cost.rows_read <= 2.4 * s50.cost.rows_read && s100.cost.rows_read <= 100 * 6, 'linear in the learner\'s own rows: ' + s50.cost.rows_read + ' → ' + s100.cost.rows_read);
+  await raw.prepare("INSERT INTO usage_log(session_id,cohort_id,user_id,profile_id,model,status) VALUES(?,?,?,?,?,200)").bind(f.run, f.cohort, heavy, f.profile, 'm').run(); assert.equal((await sealFor('d1-heavy-stray')).out, 'unknown', 'one answered row that no permitted request points at, among 100 that are: held');
+
   // The same switch sent twice at once (a retry racing its original): one row, the loser answers with that row as a replay.
   const solo = big[31], cs = (await f.pair(solo.seat_id, roster, 40, FULL)).conn.json; await distribute([solo.seat_id]); const it1 = await takeItem(cs, 40);
   const dup = await Promise.all([activate(cs, 40, it1), activate(cs, 40, it1), activate(cs, 40, it1)]);

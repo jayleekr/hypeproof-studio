@@ -106,34 +106,49 @@ export async function resolveEffectiveLesson(env: Env, payload: TokenPayload, o:
 }
 
 // ── execution evidence ───────────────────────────────────────────────────────
+/** A request under enforcement that carries no turn id: there is no turn to pin, but what it ran under is still recorded. */
+export interface UntrackedRequest { class_run_id: string; student_id: string; binding_seq: number; lesson_sha256: string }
 /**
- * The LAST check before the provider is called, for EVERY request of a turn — not only the first. One conditional UPDATE
- * is both the permission and the record: it counts this request on the turn row (`requests`, what the collection seal later
- * compares with the usage ledger) and it changes a row only while the host has not closed the turn. `meta.changes` decides;
- * the snapshot the gate read earlier decides nothing here (a close may have landed since — observed on the real route).
- * Not recorded → the provider is not called, so "no dispatch row" does mean "nothing was executed".
+ * The LAST check before the provider is called, for EVERY request under enforcement — and the record of WHICH request ran
+ * under WHICH lesson. One conditional INSERT into `classroom_lesson_requests` is both: it stores (request id, turn, lesson)
+ * and it inserts a row only while the host has not closed the turn. `meta.changes` decides; the snapshot the gate read
+ * earlier decides nothing here. Not recorded → the provider is not called, so "no request row" does mean "not executed".
+ *
+ * Why a row per request and not a counter: a count of permitted requests compared with a count of answered usage rows let
+ * one FAILED enforced request stand in for one successful request made after enforcement was switched off (independent
+ * review, 5a476f7). Totals that match are not the same requests. The seal joins by identity (see lesson-basis.ts).
  *
  * What this cannot do: a close that lands AFTER this statement does not cancel a call that is already on its way upstream.
  * The boundary is request accepted (gate) → dispatch permitted (here) → upstream call; only the first two are the database's.
  */
-export async function recordDispatch(env: Env, turn: TurnRow | null, o: { request: string; runtime: string; model: string; now: number }): Promise<{ ok: true } | { ok: false; code: Refusal }> {
-  if (!turn) return { ok: true };
-  const db = env.HPS_DB, pk = [turn.class_run_id, turn.student_id, turn.turn_id];
+export async function recordDispatch(env: Env, turn: TurnRow | null, o: { request: string; runtime: string; model: string; now: number; untracked?: UntrackedRequest | null }): Promise<{ ok: true } | { ok: false; code: Refusal }> {
+  if (!turn && !o.untracked) return { ok: true };
+  const db = env.HPS_DB;
   try {
-    const permit = db.prepare(`UPDATE classroom_lesson_turns SET requests=requests+1,first_dispatch_request=CASE WHEN first_dispatched_at IS NULL THEN ? ELSE first_dispatch_request END,
- runtime=CASE WHEN first_dispatched_at IS NULL THEN ? ELSE runtime END,model=CASE WHEN first_dispatched_at IS NULL THEN ? ELSE model END,first_dispatched_at=COALESCE(first_dispatched_at,?)
- WHERE class_run_id=? AND student_id=? AND turn_id=? AND closed_at IS NULL`).bind(o.request, o.runtime, o.model.slice(0, 120), o.now, ...pk);
-    // The binding's own "first attempted" is written with the turn's first dispatch, in the same batch, and only by the request that made it.
-    const r = (turn.first_dispatched_at === null && turn.binding_seq > 0 ? await db.batch([permit,
-      db.prepare(`UPDATE classroom_lesson_bindings SET first_dispatched_at=? WHERE class_run_id=? AND student_id=? AND binding_seq=? AND first_dispatched_at IS NULL
- AND EXISTS (SELECT 1 FROM classroom_lesson_turns t WHERE t.class_run_id=? AND t.student_id=? AND t.turn_id=? AND t.first_dispatch_request=?)`).bind(o.now, turn.class_run_id, turn.student_id, turn.binding_seq, ...pk, o.request),
+    if (!turn) { // enforced, no turn id: nothing to pin or to close, but the request and its lesson are on record before it runs
+      const u = o.untracked!;
+      const r = await db.prepare(`INSERT INTO classroom_lesson_requests(class_run_id,student_id,request_id,turn_id,binding_seq,lesson_sha256,permitted_at) VALUES(?,?,?,'',?,?,?) ON CONFLICT DO NOTHING`).bind(u.class_run_id, u.student_id, o.request, u.binding_seq, u.lesson_sha256, o.now).run() as { meta?: { changes?: number } };
+      return (r.meta?.changes ?? 0) === 1 ? { ok: true } : { ok: false, code: 'lesson_binding_unknown' };
+    }
+    const pk = [turn.class_run_id, turn.student_id, turn.turn_id];
+    const permit = db.prepare(`INSERT INTO classroom_lesson_requests(class_run_id,student_id,request_id,turn_id,binding_seq,lesson_sha256,permitted_at)
+ SELECT ?,?,?,?,?,?,? WHERE EXISTS (SELECT 1 FROM classroom_lesson_turns t WHERE t.class_run_id=? AND t.student_id=? AND t.turn_id=? AND t.closed_at IS NULL) ON CONFLICT DO NOTHING`).bind(turn.class_run_id, turn.student_id, o.request, turn.turn_id, turn.binding_seq, turn.lesson_sha256, o.now, ...pk);
+    const mine = 'EXISTS (SELECT 1 FROM classroom_lesson_requests q WHERE q.class_run_id=? AND q.student_id=? AND q.request_id=? AND q.permitted_at=?)', mineArgs = [turn.class_run_id, turn.student_id, o.request, o.now];
+    // The turn's and the binding's own "first attempted" are written with the turn's first permitted request, in the same batch,
+    // and only where THIS request's row exists.
+    const r = (turn.first_dispatched_at === null ? await db.batch([permit,
+      db.prepare(`UPDATE classroom_lesson_turns SET first_dispatched_at=?,first_dispatch_request=?,runtime=?,model=? WHERE class_run_id=? AND student_id=? AND turn_id=? AND first_dispatched_at IS NULL AND ${mine}`).bind(o.now, o.request, o.runtime, o.model.slice(0, 120), ...pk, ...mineArgs),
+      ...(turn.binding_seq > 0 ? [db.prepare(`UPDATE classroom_lesson_bindings SET first_dispatched_at=? WHERE class_run_id=? AND student_id=? AND binding_seq=? AND first_dispatched_at IS NULL
+ AND EXISTS (SELECT 1 FROM classroom_lesson_turns t WHERE t.class_run_id=? AND t.student_id=? AND t.turn_id=? AND t.first_dispatch_request=?)`).bind(o.now, turn.class_run_id, turn.student_id, turn.binding_seq, ...pk, o.request)] : []),
     ]) : [await permit.run()]) as Array<{ meta?: { changes?: number } }>;
     if ((r[0]?.meta?.changes ?? 0) === 1) return { ok: true };
-    // Nothing was counted: the host closed this turn meanwhile (or the row is gone). Read only to NAME the refusal.
+    // Nothing was stored: the host closed this turn meanwhile (or the row is gone). Read only to NAME the refusal.
     const row = await db.prepare('SELECT closed_at FROM classroom_lesson_turns WHERE class_run_id=? AND student_id=? AND turn_id=?').bind(...pk).first<{ closed_at: number | null }>();
     return { ok: false, code: row?.closed_at ? 'lesson_turn_closed' : 'lesson_binding_unknown' };
   } catch (err) { console.error('dispatch not recorded — provider not called:', err); return { ok: false, code: 'lesson_binding_unknown' }; }
 }
+/** Which permitted request a usage ledger row belongs to — handed to persistUsage, which writes the link in the usage row's own batch. */
+export interface UsageLink { class_run_id: string; student_id: string; request_id: string }
 
 /** After the request ended. A failure to write leaves "dispatched, outcome unknown" — never "completed", never "not started". */
 export async function recordOutcome(env: Env, turn: TurnRow | null, outcome: Outcome, o: { status: number | null; now: number }): Promise<void> {

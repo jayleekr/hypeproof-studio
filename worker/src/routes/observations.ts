@@ -130,10 +130,12 @@ observations.post("/assess", async (c) => {
           };
           logChat(c.env, log);
           c.executionCtx.waitUntil(
+            // #751 U3 — under enforced lesson bindings this answered usage row is identified as NOT a lesson execution, so that
+            // the collection seal neither counts it as a basis nor reads it as a request it cannot attribute.
             persistUsage(c.env, {
               ...log,
               session_id: gate.session.session_id,
-            }),
+            }, gate.binding?.enforced ? { class_run_id: gate.session.session_id, student_id: gate.payload.u, request_id: 'observation:' + crypto.randomUUID(), non_lesson: true } : null),
           );
         },
         // What this app can read back (`servedCapabilityModel`). An installed
