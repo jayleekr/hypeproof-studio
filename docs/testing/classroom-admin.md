@@ -503,6 +503,18 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 **이 보완에서 관측하지 않은 것(NOT RUN).** 실제 Studio 기기에서의 업로드 실패·거절·만료·결과 미확인(원장 상태를 직접 넣어 본 것이 전부다), 실제 기기 2대 이상에서의 지연·역순 응답, Safari/Firefox, 느린 실제 네트워크. Service 경계(멱등·fail-closed·커밋 경계 원자성)는 바꾸지 않았고 Service 시험 12건과 독립 재현 2건을 같은 커밋에서 다시 실행해 통과했다.
 
+**업로드 생명주기 보완 · 같은 날 (독립 검토가 `83900f3`에서 재현한 2건, 증거 `management-20260921/ui-partial-upload-*`·`ui-late-seal-*`).** ① meta 한 파일이 실제 PUT으로 도착한 뒤 명령이 failed로 끝나면 화면은 ‘전송·검증 대기’만 말하고 실패를 숨겼으며 유예가 끝나도 같았다. ② 실패/미확인 뒤 늦게 검증된 학생이 패널에는 계속 실패로 남아 재선택 대상이 됐다. 수정은 `6004ccb`. 전이 표는 [요구 문서의 ‘회수 생명주기’](../requirements/classroom-admin.md#remote-management-u1-20260921)이고 구현(`collectStatus`)과 같은 행이다.
+
+| 층 | 무엇을 (상태를 **바꿔 가며** 관측) | 결과 |
+|---|---|---|
+| 순수 함수 표 (`classroom-ops-selected-collect.test.mjs`) | 전이 표 27행(item × 요청 × 시각 × 유예) + 한 좌석의 시간 경과(요청 → 전송 → `offline_pending` 재전송 대기 → 재개된 바이트 → 검증됨) | PASS |
+| 실제 Service 경로 (같은 파일) | 실제 PUT으로 meta만 도착 + `offline_pending` / `upload_refused` / `outcome_unknown` → 방금 도착한 바이트는 전송 중, 2분 조용하면 각각 재전송 대기·최종 거부·결과 미확인 → `outcome_unknown` 좌석이 유예 안에 늦게 seal → 검증됨(과거 요청 결과는 그대로 남음) → 재전송 대기 좌석이 같은 동결 revision을 마저 보내 검증됨 → 유예 종료: `grace_over`·`upload_open=false`·PUT 403 → 회차 종료: `new_request_allowed=false(run_ended)` | PASS (suite 14) |
+| 실제 브라우저 + 실제 Chalk + Service (`ops-selection.mjs`, 8 PASS) | **L1** 8석 혼합 배치를 열어 둔 채 원장을 바꾸면 화면이 스스로 따라감: 검증됨 1·수신 확인 전 1·전송 진행 1·최종 거부 1·전달 안 됨 3·미확인 1, ‘진행 중 2명 — 자동으로 다시 확인’, 행마다 ‘현재: … · 기기 요청: …’, 진행 중이 있어도 재선택 5명(대기·전송·검증 제외) **L2** meta만 도착 3석: 직후에는 ‘전송 진행 3’·재선택 없음 → 2분 조용해지면 재전송 대기 1·최종 거부 2·‘일부 파일만 도착’·‘확정 아님: 업로드 유예 …까지’ → 재전송 대기 좌석의 늦은 seal을 **아무것도 누르지 않고** 재관측(5초 단계)해 검증됨, 과거 `offline_pending` 표시 유지 → 유예 종료: ‘업로드 유예 종료’·‘결과 확정 (업로드 유예 종료)’·재선택은 가능(새 요청) → 회차 종료: 재선택 비활성 + ‘이 수업은 끝나 새 회수를 요청할 수 없습니다. 업로드 유예도 끝났습니다’ **L3** 실패 + (meta 도착) 미확인 → 확정 아님 → 둘 다 늦게 seal → 보드의 ‘현황 새로 확인’만 눌러도 검증됨 2·재선택 사라짐·결과 확정 / 재선택 버튼과의 경합: 화면은 실패 2인데 그사이 한 명은 검증되고 한 명은 좌석 주인이 바뀜 → 재선택을 누르면 먼저 다시 읽어 선택 0명, 요청 0 **L4** `status` 없는 이전 Service 응답 → ‘구분 불가’, 재선택 없음. 앞선 지연 미리 확인·명단 교체·역순 확정 4건도 같은 파일에서 통과 | 8 PASS |
+| 기존 회귀 | worker 전체·review, Chalk, 브라우저 e2e 4종(문구 변경 반영) | PASS |
+| 실제 Mac 정상 경로 | 새 빌드로 세션 재시작, 실제 창 A1 준비 → 보이는 Chalk 창에서 A1만 선택·회수 → ‘현재: 서버 검증됨 · 기록 순번 연속’, ‘결과 확정’, A2·A3 무접촉, 평가 0 | 아래 SHA 줄 참고 |
+
+**이 보완에서 관측하지 않은 것(NOT RUN).** 기기 실패는 전부 원장에 기록한 합성이다 — 실제 Studio 기기가 `offline_pending`으로 멈췄다가 앱 재시작으로 재전송하는 경로, 실제 `upload_refused`/`verify_failed`, 실제 24시간 유예 경과는 보지 못했다(시각을 옮겨 대조). 10분 무변화 뒤 자동 확인 정지는 코드 경로만 있고 실시간으로 기다려 보지 않았다. 실제 기기 2대 이상, Safari/Firefox, 느린 망, Windows, 학교망, staging/production D1도 NOT RUN.
+
 **실제/합성 경계.** 실제: Studio shell 복사본·확장·SDK·spool·freezer·업로드, Chalk UI, Service 라우터+SQLite. 합성: 계정·강의·모델 응답·좌석 A2/A3(그리고 e2e의 S02~S30)·R2(in-memory). 여러 좌석 동시성은 합성 좌석으로만 봤고 실제 기기는 1대다.
 
 **남은 한계.** 실제 기기 2대 이상에서의 선택/비선택 대조, Windows, 학교망, staging D1에서의 0022 적용과 조건부 batch(D1의 트랜잭션 의미는 로컬 workerd D1 리허설까지만), 재시작 전 세션을 합친 회수, `coverage_reason`의 화면 표시는 NOT RUN/미구현. 학생 프롬프트·승인 결과물의 대상 회수, 배포(U2~), 세 흐름 공통 결과 화면은 이 단계 범위 밖이다.
