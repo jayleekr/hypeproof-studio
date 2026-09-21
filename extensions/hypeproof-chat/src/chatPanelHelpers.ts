@@ -819,3 +819,17 @@ export function lessonStepSignal(
   const step = lesson.content.steps.find((x) => x.id === msg.stepId);
   return step ? { lesson_version: lesson.version, step_id: step.id, status: msg.status, source_state: msg.status === "submitted" ? "self_reported" : "real" } : null;
 }
+
+/**
+ * #751 U4 — the work folder a newly entered code should open. A code for the activity that is ALREADY open in this window
+ * (a re-issued code: same class, same learner) keeps the folder the learner is working in — the saved record's folder, or,
+ * for a window entered before records existed, the open folder. Any other activity takes its own default (undefined).
+ * Seen on a real Mac: without this, typing a re-issued code moved the learner to the profile's default folder and away from
+ * their files, draft and conversation.
+ */
+export function reentryWorkspace(o: { candidateActivity?: string; record?: { serverId: string; workspace: string } | null; recordServiceMatches: boolean; openFolder?: string; runningActivity?: string }): string | undefined {
+  const a = o.candidateActivity;
+  if (!a) return undefined;
+  if (o.record) return o.recordServiceMatches && o.record.serverId === a ? o.record.workspace : undefined;
+  return o.openFolder && o.runningActivity === a ? o.openFolder : undefined;
+}

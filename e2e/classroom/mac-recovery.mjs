@@ -278,8 +278,14 @@ try {
   const recheck = (await I.act('A1', '연결 다시 확인', /해결 확인 1/)).replace(/\s+/g, ' '); assert.match(recheck, /수업 정보 재확인됨 → 문제 해결 확인 · 기존 발급분을 다시 확인함 \(재발급 아님\)/);
   const tokenFileBefore = sha(tokenPath), issuesBefore = db('SELECT jti FROM ops_token_issues WHERE student_id=?', seats[0].student_id).map((r) => r.jti), a2IssuesBefore = db('SELECT count(*) n FROM ops_token_issues WHERE student_id=?', seats[1].student_id)[0].n;
   // The instructor's issuing page for a lesson class (the board sends lesson classes there, see the seat link below).
-  const issuing = await page.context().newPage(); await issuing.goto('http://127.0.0.1:' + boardPort + '/authoring');
-  for (const [id, v] of [['token', teacherToken], ['cohort', local.cohort], ['profile', local.profile], ['course', course], ['version', V1], ['student', seats[0].student_id], ['hours', String(HOURS)]]) await issuing.locator('#' + id).fill(v);
+  const issuing = await browser.newPage({ viewport: { width: 1280, height: 1000 } }); await issuing.goto('http://127.0.0.1:' + boardPort + '/authoring');
+  // What the instructor does on that page: token → open "연결 정보 직접 입력" → open the saved draft → the frozen version →
+  // open "학생 초대 · 참여 코드 발급" → student + hours → issue. Every field is filled only after its section is opened by a click.
+  const section = async (summary) => { const d = issuing.locator('details', { has: issuing.locator('summary', { hasText: summary }) }); if (!(await d.getAttribute('open') !== null)) await d.locator('summary').click(); };
+  await issuing.locator('#token').fill(teacherToken); await section('연결 정보 직접 입력'); await issuing.locator('#cohort').fill(local.cohort); await issuing.locator('#profile').fill(local.profile);
+  await section('저장한 강의 열기'); await issuing.locator('#course').fill(course); await issuing.locator('#load').click(); await issuing.locator('#status').filter({ hasNotText: '초안을 선택하세요' }).waitFor({ timeout: 30000 });
+  await section('버전 정보'); await issuing.locator('#version').fill(V1);
+  await section('학생 초대'); await issuing.locator('#student').fill(seats[0].student_id); await issuing.locator('#hours').fill(String(HOURS));
   await issuing.locator('#deliver').click(); await issuing.locator('#delivery-status').filter({ hasText: V1 }).waitFor({ timeout: 30000 });
   const reissued = await issuing.locator('#student-token').inputValue(); assert.ok(reissued.length > 20 && reissued !== token, 'a new code is on the issuing page');
   await issuing.screenshot({ path: path.join(out, 'r7-issuing-page.png'), mask: [issuing.locator('#token'), issuing.locator('#student-token')] });

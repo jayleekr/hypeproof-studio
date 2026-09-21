@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { ChatPanelProvider } from "./chatPanelProvider";
 import { ActivityConnectionError, activityConnections } from "./activityConnections";
 import { fetchProfileResult, verifyActivity, ProxyTransportError } from "./proxyClient";
-import { sanitizeWorkshopToken, looksLikeIssuerTokenUnverified } from "./chatPanelHelpers";
+import { sanitizeWorkshopToken, looksLikeIssuerTokenUnverified, reentryWorkspace } from "./chatPanelHelpers";
 import type { ResolvedProfile } from "./protocol";
 import type { StartRequest, StartState } from "./startPageProtocol";
 
@@ -251,7 +251,9 @@ export class StartPage {
       }
       if (!entryPanel || this.panel!==entryPanel) return;
       // Preview only. Existing runtime and credential stay bound until workspace preparation succeeds.
-      this.candidate = { token, profile: p, proxyUrl, previousConnected: !!await this.chat.ensureProfile() };
+      const running = await this.chat.ensureProfile(), connections = activityConnections(this.context);
+      const workspace = reentryWorkspace({ candidateActivity: p.activity_id, record: connections?.current ?? null, recordServiceMatches: !!connections?.matchesService, openFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, runningActivity: running?.activity_id });
+      this.candidate = { token, profile: workspace ? { ...p, workspace_root: workspace } : p, proxyUrl, previousConnected: !!running, ...(workspace ? { workspace } : {}) };
     } catch {
       this.error = "수업에 연결하지 못했습니다. 연결 상태를 확인하고 다시 시도하세요.";
     } finally {

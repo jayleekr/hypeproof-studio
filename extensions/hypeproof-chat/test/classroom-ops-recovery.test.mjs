@@ -169,3 +169,14 @@ test('preview recovery: a tab that will not load is replaced only when it is the
   assert.equal((await recoverLearnerPreview(stale.deps)).tabs, 'not_loaded', 'an old document that was already complete is not the new page');
   const live = tabWorld([STUDENT], { restart: false, loadFails: ['tab-1'] }); assert.equal((await recoverLearnerPreview(live.deps)).tabs, 'not_loaded'); assert.deepEqual(live.log.closed, [], 'a healthy server\'s tab is never closed');
 });
+
+test('token re-entry: a code for the activity already open keeps the learner\'s folder; any other activity takes its own default', async () => {
+  const { reentryWorkspace } = await import('../src/chatPanelHelpers.ts');
+  const A = 'a'.repeat(64), B = 'b'.repeat(64), rec = { serverId: A, workspace: '/learner/chosen' };
+  assert.equal(reentryWorkspace({ candidateActivity: A, record: rec, recordServiceMatches: true, openFolder: '/learner/chosen', runningActivity: A }), '/learner/chosen', 're-issued code, saved record');
+  assert.equal(reentryWorkspace({ candidateActivity: A, record: null, recordServiceMatches: false, openFolder: '/learner/ws', runningActivity: A }), '/learner/ws', 're-issued code, window entered before records existed');
+  assert.equal(reentryWorkspace({ candidateActivity: B, record: rec, recordServiceMatches: true, openFolder: '/learner/chosen', runningActivity: A }), undefined, 'another activity: its own default');
+  assert.equal(reentryWorkspace({ candidateActivity: A, record: rec, recordServiceMatches: false, openFolder: '/learner/chosen', runningActivity: A }), undefined, 'a record of another Service is not this class');
+  assert.equal(reentryWorkspace({ candidateActivity: A, record: null, recordServiceMatches: false, openFolder: '/learner/ws', runningActivity: B }), undefined, 'a different running activity');
+  assert.equal(reentryWorkspace({ candidateActivity: undefined, record: rec, recordServiceMatches: true, openFolder: '/x', runningActivity: A }), undefined, 'no activity id: nothing to match');
+});
