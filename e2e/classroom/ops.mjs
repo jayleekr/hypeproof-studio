@@ -53,13 +53,14 @@ try {
   const pump = setInterval(() => void deviceLoop.tick(), 300);
   try {
     await page.locator('#ops-seats .ops-seat').nth(1).getByRole('button', { name: '근거·조치' }).click(); await page.getByRole('button', { name: '진단 다시 실행' }).click();
-    await page.locator('#ops-detail-status').filter({ hasText: /성공 1 .*모두 완료.*A2: 성공 — 토큰 정상/ }).waitFor(); assert.equal(deviceRuns, 1);
-    await page.locator('#ops-seats').getByText(/조치: 진단 다시 실행 — 성공 — 토큰 정상/).waitFor();
+    await page.locator('#ops-detail-status').filter({ hasText: /성공 1 .*해결 확인 1 \/ 문제 남음 0 .*선택한 전원 해결 확인.*A2: 성공 — 토큰 정상 → 문제 해결 확인 · 학생 PC에서 서버 연결과 토큰이 정상임을 확인함/ }).waitFor(); assert.equal(deviceRuns, 1);
+    await page.locator('#ops-seats').getByText(/조치: 진단 다시 실행 — 성공 — 토큰 정상 → 문제 해결 확인/).waitFor();
     // Bulk on "needs help" + an unconnected seat: A1 has a connection but no running app, A3 has no device at all.
     await page.locator('#ops-select-help').click(); await page.locator('#ops-seats .ops-seat').nth(2).getByLabel('선택').check();
     assert.match(await page.locator('#ops-selection').innerText(), /선택 2 \/ 전체 3석 \(명단 1차\) · 기기 연결됨 1 · 기기 연결 없음 1/);
     await page.locator('#ops-bulk-diagnose').click(); await page.locator('#ops-bulk-result').filter({ hasText: /A3: 기기 연결 없음 · 전달되지 않음/ }).waitFor();
-    const bulk = await page.locator('#ops-bulk-result').innerText(); assert.match(bulk, /대상 2 · 성공 0 .*전달 안 됨 1 .*진행 중 1 · 아직 확정되지 않음/); assert.doesNotMatch(bulk, /모두 완료/, 'a recorded request is never shown as done');
+    const bulk = await page.locator('#ops-bulk-result').innerText(); assert.match(bulk, /대상 2 · 성공 0 .*전달 안 됨 1 .*진행 중 1 ‖ 해결 확인 0 .*실행 안 됨 1 · 아직 확정되지 않음/); assert.doesNotMatch(bulk, /모두 완료|전원 해결/, 'a recorded request is never shown as done');
+    assert.match(bulk, /A3: 기기 연결 없음 · 전달되지 않음 → 실행되지 않음 · 문제 상태는 그대로 · 학생 앱에 도달하지 못함/, 'U4: an offline seat is not a success and not a resolution');
     assert.match(bulk, /A1: 접수됨 · 기기 전달 전/);
     // ── 2026-09-18 added criteria: DT-07 CTA priority, AT-35 coaching vs recovery, AT-36 provenance, AT-37 not-enough-evidence ──
     const primaries = (scope) => page.locator(scope + ' button.primary:visible');
@@ -85,8 +86,18 @@ try {
     // R3: reset needs an inline confirmation naming the learner; the result names what was preserved.
     await page.getByRole('button', { name: 'AI 실행 환경 초기화' }).click(); const go = page.getByRole('button', { name: /대상 A2 · student-b 확인하고 실행/ }); await go.waitFor(); assert.equal(await go.evaluate((e) => e === document.activeElement), true); await page.keyboard.press('Enter');
     await page.locator('#ops-detail-status').filter({ hasText: /성공 1 .*대화·입력·파일 보존 확인/ }).waitFor(); assert.deepEqual([studentWork.history, studentWork.draft, studentWork.files, studentWork.generation], [['q1', 'a1'], '쓰던 글', ['index.html'], 2]);
+    // U4 (AT-40): the device ran the restart — that is NOT yet "resolved". It becomes resolved only when the learner's next run,
+    // named by this command id and reported over the same connection, completed. A follow-up naming another command changes nothing.
+    { const status = await page.locator('#ops-detail-status').innerText(); assert.match(status, /해결 확인 0 .*실행됨·해결 확인 전 1/); assert.match(status, /명령 실행 완료 · 해결 여부는 아직 확인 전/); assert.doesNotMatch(status, /전원 해결 확인/);
+      const resetId = local.db.prepare("SELECT c.id FROM ops_commands c WHERE c.action='reset_runtime' ORDER BY c.created_at DESC").get().id;
+      deviceEvents.push(local.event(60, 'recovery', { command_id: 'not-this-command-0001', check: 'turn_completed' })); await page.locator('#refresh').click();
+      await page.locator('#ops-seats .ops-seat').nth(1).getByText(/조치: AI 실행 환경 초기화 — 성공 .*→ 명령 실행 완료 · 해결 여부는 아직 확인 전/).waitFor();
+      deviceEvents.push(local.event(61, 'recovery', { command_id: resetId, check: 'turn_completed', runtime: 'agent-sdk' }));
+      await page.locator('#ops-seats .ops-seat').nth(1).getByText(/조치: AI 실행 환경 초기화 — 성공 .*→ 문제 해결 확인/).waitFor({ timeout: 40000 });
+      await page.locator('#ops-seats .ops-seat').nth(1).getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-recovery').getByText(/조치 뒤 검증: 문제 해결 확인 · 조치 뒤 학생의 다음 AI 실행이 끝까지 완료됨 · 관측 /).waitFor();
+      assert.equal((await local.request(local.base + '/status')).json.seats[0].last_command.outcome.verdict, 'pending', 'the seat that was only queued stays unresolved'); }
     // R3: pause says what it does not stop, and counts only devices that reported the revision.
-    await page.locator('#ops-pause').click(); assert.match(await page.locator('#ops-pause-impact').innerText(), /이미 실행 중인 요청은 끊지 않으며/); await page.locator('#ops-pause-go').click();
+    await page.locator('#ops-pause').click(); assert.match(await page.locator('#ops-pause-impact').innerText(), /이미 응답을 받고 있는 요청은 끊지 않습니다\. .*다음 AI 요청은 새 요청이므로 서버가 받지 않습니다.*적용된 것으로 세지 않습니다/); await page.locator('#ops-pause-go').click();
     await page.locator('#ops-control-state').filter({ hasText: /일시정지 중 · 기기 적용 1 \/ 적용 대기 \d \/ 확인 불가 \d/ }).waitFor({ timeout: 40000 });
     await page.locator('#ops-pause').click(); await page.locator('#ops-pause-go').click(); await page.locator('#ops-control-state').filter({ hasText: /허용 중/ }).waitFor({ timeout: 40000 });
     // R4: finishing the class is a secondary action; the roster stays whole and nothing is called collected before the Service verified it.
