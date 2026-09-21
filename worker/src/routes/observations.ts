@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { gateChatRequest } from "../lib/chat-gate";
 import { nativeObservationScope } from "../lib/native-observation-scope";
-import { servedObservationFormat } from "../lib/measurement-core/legacy-observation.ts";
+import { servedObservationFormat, observationCapability } from "../lib/measurement-core/legacy-observation.ts";
 import { validateObservation } from "../lib/native-observation";
 export const observations = new Hono<{ Bindings: Env }>();
 observations.use("*", async (c, next) => {
@@ -38,7 +38,7 @@ export async function observationContext(
 observations.get("/context", async (c) => {
   const gate = await gateChatRequest(c);
   if (!gate.ok) return gate.response;
-  if (!gate.profile.observation?.enabled)
+  if (!observationCapability(gate.profile.observation).record)
     return c.json({ error: { code: "observation_unavailable" } }, 404);
   const doc = await getObservationRubric(c.env, gate.profile.id);
   return c.json({
@@ -50,7 +50,7 @@ observations.get("/context", async (c) => {
 observations.post("/validate", async (c) => {
   const gate = await gateChatRequest(c);
   if (!gate.ok) return gate.response;
-  if (!gate.profile.observation?.enabled)
+  if (!observationCapability(gate.profile.observation).record)
     return c.json({ error: { code: "observation_unavailable" } }, 404);
   const raw = await c.req.text();
   if (raw.length > 300000)
@@ -79,7 +79,7 @@ observations.post("/assess", async (c) => {
   if (!gate.ok) return gate.response;
   try{if(await resolveExecutionAccess(c.env,gate.payload,c.req.header('x-hps-funding-source')))throw new AccessError('assessment_budget_not_supported',403);}
   catch(error){return budgetErrorResponse(c,error);}
-  if (!gate.profile.observation?.enabled)
+  if (!observationCapability(gate.profile.observation).assess)
     return c.json({ error: { code: "observation_unavailable" } }, 404);
   const raw = await c.req.text();
   if (raw.length > 300000)

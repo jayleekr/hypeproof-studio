@@ -16,7 +16,20 @@ export interface Profile {
    * and the Evidence drawer reachable at all: with no cohort declaring it, the
    * client never builds a /2 recorder and those screens never render.
    */
-  observation?: { enabled: boolean; format?: "hps-observation/1" | "hps-observation/2" };
+  observation?: {
+    /**
+     * @deprecated ADR 0010 step 1. One boolean meaning four things: record,
+     * assess, `/v1/profile` session gating and individual-trial minting.
+     * Still the only field any profile sets, and still the fallback both new
+     * fields read. Removed in the ADR's last step, once every reader has moved.
+     */
+    enabled?: boolean;
+    /** Write learning events on the student's device. The drawer and the completion gate turn on with this. */
+    record?: boolean;
+    /** May call `POST /v1/observations/assess` — the batch leaves the device. Off unless a cohort opts in. */
+    assess?: boolean;
+    format?: "hps-observation/1" | "hps-observation/2";
+  };
   /** Empty starts wait for a task; absent preserves existing web curriculum. */
   workspace_start?: 'empty' | 'html';
   id: string;

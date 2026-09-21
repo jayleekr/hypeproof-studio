@@ -462,3 +462,36 @@ export function servedObservationFormat(
  */
 export const isObservationFormat = (value: unknown): value is ObservationFormat =>
   (OBSERVATION_FORMATS as readonly string[]).includes(String(value));
+
+/** What a profile's observation block actually permits. */
+export interface ObservationCapability {
+  /** Write learning events on the student's device. */
+  readonly record: boolean;
+  /** May call `POST /v1/observations/assess` — the batch leaves the device. */
+  readonly assess: boolean;
+}
+
+/**
+ * The ONE place `observation.record` / `observation.assess` are decided
+ * (ADR 0010).
+ *
+ * There is a reason this is a function and not two `??` expressions at each
+ * call site. The P1 repair put the same negotiation in two callers, wrote
+ * "same function, so the two answers cannot drift" in a comment, and the two
+ * answers drifted — a third literal elsewhere gave every observation seat a
+ * "please update Studio" banner. A flag read in eight places gets eight
+ * chances to disagree.
+ *
+ * Step 1 changes nothing that ships: `record` and `assess` both fall back to
+ * the legacy `enabled`, and no profile sets either field yet. The
+ * profile-serving snapshot is what proves that, not this comment.
+ */
+export function observationCapability(
+  observation: { enabled?: boolean; record?: boolean; assess?: boolean } | undefined,
+): ObservationCapability {
+  const legacy = observation?.enabled === true;
+  return {
+    record: observation?.record ?? legacy,
+    assess: observation?.assess ?? legacy,
+  };
+}
