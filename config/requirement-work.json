@@ -314,7 +314,7 @@
         "ADM-14"
       ],
       "inline_prefixes": [],
-      "sha256": "3da49fc4c1a0c83ce9c168dc2e97c685e8510f303f54348a789b70dacbf04378",
+      "sha256": "fea1087afdcbe44cccf3fa4487a59aca7d74d2b424aeaf6c938b8911fc86cbff",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/classroom-admin.md",
@@ -405,7 +405,7 @@
         "DES-12"
       ],
       "inline_prefixes": [],
-      "sha256": "896b8638282c6745a872e8f617698b143ee315aa0168cf3584e126deb8898801",
+      "sha256": "323c95ff9012cd08be4bc215e6142d8afeff355ecfd5577bd6b2d03ce3be7a84",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/classroom-design.md",

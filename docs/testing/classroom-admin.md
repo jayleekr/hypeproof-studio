@@ -1037,6 +1037,36 @@ NOT RUN: 실제 강사 사용 관측·실제 Studio 창·실제 학생·Windows�
 `integration-first-attempt-race/`는 캡처 스크립트가 복구 문구를 갱신 전에 읽은 첫 시도(계측기 결함, 제품 아님)로 남겨 둔다.
 
 미충족·범위 밖(완료 아님): AT-41 공통 대상별 결과, Studio 안 자발적 도움 요청·피드백·해결 입구, U1b 종류별·연속 회수, 커리큘럼→실행 인수, 보고서·전달, 1인 강사 전체 리허설.
-Service 계약 공백: 강사 공유 목록은 범위 필터 전 100행에서 잘리고 `truncated` 표시가 없어, 필터 뒤 100행 미만인데 잘린 경우를 화면이 알 수 없다.
+Service 계약 공백: 강사 공유 목록은 범위 필터 전 100행에서 잘리고 `truncated` 표시가 없어, 필터 뒤 100행 미만인데 잘린 경우를 화면이 알 수 없다. → 통합 후속에서 해소(아래).
 NOT RUN: 실제 강사·학생, Windows, 학교망, 여러 실제 기기, staging/production D1·R2, 실제 모델, 메일, 설치본 Keychain, 스크린리더 실사용, 전체 빌드, 통합본 CI.
 사용자 시각 피드백 전이며 디자인 승인·인수가 아니다.
+
+
+<a id="instructor-ui-integration-followup-run-20260922"></a>
+
+### 통합 후속 — Codex F1·F2 · 실행 기록 · 2026-09-22 (로컬 · 합성 · 인수 아님)
+
+기준 `9bbe913`(통합 전체 최종), 제품 커밋 `11bb190`. Codex 증거: `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-codex/`.
+
+| 검사 | 결과 |
+|---|---|
+| 재현(수정 전 `9bbe913`) | Codex `share-scope-probe.mjs`: 허용 요청 1건이 범위 밖 새 행 100개 뒤에서 0건, 완결성 표시 없음 — REPRODUCED. `live-actions-probe.mjs`: 같은 학생 재연결 뒤 상세를 닫지 않으면 `질문 보내기` 비활성 — FAIL(재현) |
+| 수정 후 Codex 프로브 | `share-scope-probe.mjs`의 `after=0` 단언이 `after=1`로 깨짐(결함 해소). `live-actions-probe.mjs`의 단언은 `ops-help.mjs` 6절에 그대로 들어가 PASS (프로브 파일 자체는 이전 한도 흉내(`limit=행 수`)에 기대어 5절에서 새 계약과 맞지 않음) |
+| `worker` `test:classroom` 새 검사 | 범위 밖 100행+다른 수신자 5행 뒤 허용 1건 보임·`counts` {1,1,0}·범위 밖 식별자 비노출 · 정확히 100건 `has_more:false` / 101건 `true`+커서, 두 쪽 합 101건 중복·누락 없음 · `limit=40` · 다른 수업 150행+제출 3건 뒤의 이번 수업 도움 요청을 `session_id`+`kind=help`로 찾음(`counts` {2,1,1}) · 잘못된 필터 7종 400 · 범위 프로필 없는 강사 0건·0집계 — PASS (12개) |
+| `worker` `classroom-d1`(miniflare 로컬 D1) | `json_each` 범위 필터·집계가 D1에서 동작 — PASS |
+| `ops-help.mjs` 5절(갱신) | 조회 실패=확인 불가 · 일부만 읽힘: `응답할 도움 요청 2건 · 학생 2명 이상`·`(2 이상)`·`더 오래된 도움 요청 불러오기`, 한 쪽에 없는 열린 공유 기록·쓰던 피드백 유지 · 다음 쪽 503 → 다시 확인 불가 · 집계 없는 이전 Service+보이는 0건 → ‘요청 없음이 아님’+`다시 확인`, 집계 칩 `도움 요청 0 이상` · 정상 응답으로 복구 — PASS |
+| `ops-help.mjs` 7절(신규, 상세를 열어 둔 채) | 해제→연결: 보내기 활성·주요 CTA·질문·포커스·목록 선택 유지 · 심장박동: 입력 요소 재생성 없음 · 원인 변경(`sdk_not_ready`): 주요 CTA `AI 실행 환경 초기화` · 원격 조치 플래그 끔/켬: 질문 영역 사라짐/같은 질문 복귀 · 연결 해제: 보내기 비활성, 강제 클릭에도 `send_question` 0건 — PASS |
+| 대조군 | `9bbe913`의 `classroom.ts`로 `test:classroom` → 새 검사에서 FAIL · `9bbe913`의 `manage.html`로 `ops-help.mjs` → 5절 부분 조회 대기에서 FAIL |
+| 변경 범위 회귀 | `chalk` typecheck·`npm test` · `worker` typecheck·`test:classroom-ops`·`test:cohort-routes`·`classroom-ops-regression` · e2e `ops`·`ops-roster`·`ops-selection`·`ops-distribution`·`ops-lesson-settings`·`run` — PASS · `next-work.py --check` exit 0(재해시 2문서) |
+
+캡처(새 폴더): `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-followup-20260922T042200/`(`gallery.html`·`manifest.json`)
+— `preview-captures/` 합성 미리보기 18971에서 F-01 부분 조회·F-02 하한·F-03 조치 끔 실시간·F-04 연결 해제 실시간(각 데스크톱·390, `ui-review-capture-followup.mjs`),
+`fixture-captures/` `ops-help.mjs` 7절 화면 5장. 이전 폴더는 그대로다. 미리보기는 캡처 뒤 재기동해 깨끗한 상태로 둔다.
+
+실제 Mac: 이번 변경은 Chalk 화면과 Service 목록 경로뿐이고 확장·기기 코드는 바뀌지 않아 U4·통합본의 R0/R4/R7 증거(`31fc27b`와 확장 소스 동일)를 그대로 쓴다.
+현재 Mac 강사 보드 스모크는 NOT RUN — 보존 러너(18861/18862)는 변경 전 Chalk·Service를 프로세스 안에 들고 있고, 별도 Chalk는 그 KV(열린 수업)를 공유하지 못해 “열린 수업 없음”이 된다.
+러너 재시작은 네이티브 시나리오 재실행이라 이번 범위에 비례하지 않는다.
+
+남은 한계: 도움 요청 페이지는 강사가 요청한 만큼만(10초마다 최대 10쪽) 다시 읽는다. `counts`는 요청 수이고 학생 수는 불러온 행에서만 센다(일부만 읽힌 경우 하한).
+원격 조치 플래그 변경은 명단 개정 번호를 올려 목록 선택을 비운다(기존 동작, 이번에 바꾸지 않음).
+NOT RUN: 실제 강사·학생, Windows, 학교망, staging/production D1·R2, 실제 모델·메일, 스크린리더 실사용, 전체 빌드. 사용자 시각 피드백 전이며 인수가 아니다.

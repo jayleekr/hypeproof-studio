@@ -5,7 +5,7 @@
 | `npm --prefix e2e run test:classroom` | Chalk sharing pages ↔ real Service routes (SQLite) | — |
 | `npm --prefix e2e run test:classroom-ops` | Chalk operations panel, commands through the real device client | a real Studio app |
 | `npm --prefix e2e run test:classroom-ops-roster` | built webview click → real `ClassroomOpsHost` (VS Code stubbed at the bundle edge) → real Service → real Chalk; 30 seats, reviewed input, finish → evaluation → review, real-send confirmation, reader's viewer check | a real Studio app, SDK, model, mailbox |
-| `npm --prefix e2e run test:classroom-ops-help` | Chalk /manage: roster on connect, help requests vs technical problems (open/answered/resolved/withdrawn/expired/other class), the Service's first action as the one primary, help entry under "2 수업 진행" keeping page state | a real Studio app or learner |
+| `npm --prefix e2e run test:classroom-ops-help` | Chalk /manage: roster on connect, help requests vs technical problems (open/answered/resolved/withdrawn/expired/other class), the Service's first action as the one primary, help entry under "2 수업 진행" keeping page state; share read failed/partial/next-page failure/older Service (never "no help" without proof); the open seat detail following live connection, cause and flag changes, nothing sent after revocation | a real Studio app or learner |
 | `npm --prefix e2e run test:classroom-report` | the report page and its PDF in Chromium | a recipient's mail client or printer |
 
 All four run in PR CI (`.github/workflows/classroom-ops.yml`). The evaluator and mail provider are replaced at their
@@ -90,6 +90,7 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/ui-review-pr
 HPS_UI_REVIEW_OUT=<dir> node e2e/classroom/ui-review-capture.mjs                                # on a FRESH preview: it sends and collects
 HPS_UI_REVIEW_OUT=<dir> node e2e/classroom/ui-review-capture-pass2.mjs                          # pass 2 screens only; reads, sends nothing
 HPS_UI_REVIEW_OUT=<dir> node e2e/classroom/ui-review-capture-integration.mjs                    # integration screens; changes the preview roster and puts it back
+HPS_UI_REVIEW_OUT=<dir> node e2e/classroom/ui-review-capture-followup.mjs                       # follow-up (partial help read, lower bound, live actions); toggles a flag back, revokes one seat until restart
 ```
 
 - 24 synthetic seats in mixed states; connected seats run the real device client code in-process. The instructor token is
