@@ -257,7 +257,7 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
       attention, reason, state_revision: r.state_revision ?? 0,
       control_applied: controlApplied,
       // U4 — three separate observations: the Service's admission, this device's hold, and a run seen after a resume.
-      control_outcome: controlOutcome({ ...control, control_updated_at: controlRow?.updated_at ?? null, device: controlApplied, runtime: state.runtime ? { status: state.runtime.value.status, received_at: state.runtime.received_at } : null, state_from_current_connection: !!grantId && r.state_grant === grantId }),
+      control_outcome: controlOutcome({ ...control, control_updated_at: controlRow?.updated_at ?? null, device: controlApplied, runtime: state.last_run ? { status: 'running', received_at: state.last_run.received_at } : null, state_from_current_connection: !!grantId && state.last_run?.value.grant_id === grantId }),
       connection: grantId ? { grant_id: grantId, state: connected ? 'active' : connState === 'active' ? 'expired' : connState, epoch: Number(epoch) } : null,
       token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: tokenCheckOf(state, issueId, grantId ?? '') } : null,
       // The latest instructor action on this seat, in ledger terms: queued is not done.
@@ -479,6 +479,8 @@ classroomOpsApp.post('/sync', async (c) => {
     if (v.value.kind === 'activation' && reduceTokenCheck(state, { grantId: g.id, bootId: b.boot_id, bootSeenAt: device.first_seen_at }, { seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, payload: v.value.payload })) changed = true;
     if (v.value.kind === 'activation' && keepsRuntimeFault(state.activation, v.value.payload.stage, device.first_seen_at)) continue;
     if (shouldApply(state[v.value.kind], device.first_seen_at, seq)) { state[v.value.kind] = { boot_seen_at: device.first_seen_at, seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, value: v.value.payload }; changed = true; }
+    // U4 — "a run was seen after the resume" must survive the idle report that follows it, and must name the connection that reported it.
+    if (v.value.kind === 'runtime' && v.value.payload.status === 'running' && shouldApply(state.last_run, device.first_seen_at, seq)) { state.last_run = { boot_seen_at: device.first_seen_at, seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, value: { grant_id: g.id } }; changed = true; }
   }
   const ack = contiguousAck(device.contiguous_seq, [...new Set([...existing.keys(), ...stored])].filter((s) => s > device!.contiguous_seq).sort((x, y) => x - y));
   // Unchanged, recently written state is not rewritten: the 5 s poll must not become a 5 s D1 write.

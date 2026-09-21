@@ -178,8 +178,13 @@ try {
     await tick(); assert.equal((await put(false, 1)).status, 200);
     await f.sync(live.credential, [], 12, { sample: { idle_ms: 0, runtime_status: 'idle', observed_at: Date.now(), control_revision: 2 } });
     assert.deepEqual((await seatOf('A2')).control_outcome, { service: 'admitting', device: 'applied', resumed_run: 'not_observed' }, 'the run seen BEFORE the resume is not a resumed run');
-    await tick(); await f.sync(live.credential, [f.event(++s, 'runtime', { status: 'idle' }), f.event(++s, 'runtime', { status: 'running' })], 12, { sample: { idle_ms: 0, runtime_status: 'running', observed_at: Date.now(), control_revision: 2 } });
+    // A short run: `running` and the `idle` that follows arrive in ONE sync. The run was still seen (found on the real Mac: the idle overwrote it).
+    await tick(); await f.sync(live.credential, [f.event(++s, 'runtime', { status: 'idle' }), f.event(++s, 'runtime', { status: 'running' }), f.event(++s, 'runtime', { status: 'idle' })], 12, { sample: { idle_ms: 0, runtime_status: 'running', observed_at: Date.now(), control_revision: 2 } });
     assert.equal((await seatOf('A2')).control_outcome.resumed_run, 'observed');
+    assert.equal((await seatOf('A2')).runtime.status, 'idle', 'the board\'s runtime line is the latest report; the run-after-resume is its own fact');
+    // Another device for the same seat has not run anything: the old connection's run is not its run.
+    const replaced = (await f.pair('A2', 1, 13, CAPS)).conn.json; await f.sync(replaced.credential, [], 13, { sample: { idle_ms: 0, runtime_status: 'idle', observed_at: Date.now(), control_revision: 2 } });
+    assert.equal((await seatOf('A2')).control_outcome.resumed_run, 'not_observed');
   });
 } finally { await f.close?.(); }
 console.log(`${count} remote classroom recovery controls passed`);

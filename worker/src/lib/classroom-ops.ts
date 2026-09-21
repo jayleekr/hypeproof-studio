@@ -168,7 +168,8 @@ export function stepDisposition(payload: Record<string, unknown>, lesson: Lesson
 }
 
 export interface SeatStateSlot { boot_seen_at: number; seq: number; observed_at: number; received_at: number; actor: string; value: Record<string, unknown> }
-export type SeatState = Partial<Record<EventKind | 'sample' | 'token_check', SeatStateSlot>>;
+/** `last_run` (U4) = the latest `running` report, kept apart because the runtime slot itself is overwritten by the `idle` that follows a short run. */
+export type SeatState = Partial<Record<EventKind | 'sample' | 'token_check' | 'last_run', SeatStateSlot>>;
 
 /**
  * What the app said about ITS token is evidence, not an entry stage. `activation` holds only the latest stage, so a

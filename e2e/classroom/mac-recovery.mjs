@@ -180,6 +180,9 @@ try {
   const stopCmd = lastCommand('cancel_current_run'); assert.deepEqual([stopCmd.state, stopCmd.result_code, followups(stopCmd.id)], ['succeeded', 'run_stopped', []]); await I.shot('r2-stopped-not-yet-resolved.png'); await shot(win, 'r2-learner-after-stop.png');
   // the LEARNER sends what they had kept (the runner presses Enter as the learner; the app sent nothing by itself)
   await pressEnter(chat); await wait(() => callsFor('Q-PARKED').length > 0, 'the learner\'s own next question ran'); await answered(chat, baseline.answers + 1); await idle(chat);
+  // Sending a pasted image stores it as the LEARNER'S own file (existing behaviour). It is the only file that may appear, it appears
+  // because the learner sent it, and from here on it is part of what must not change.
+  const learnerMade = workFiles().added; assert.deepEqual(workFiles().changed, []); assert.ok(learnerMade.length === 1 && /^assets\/pasted-\d{8}-\d{6}-\d+\.png$/.test(learnerMade[0]), 'only the image the learner sent was added: ' + learnerMade.join(' ')); const KEPT = { changed: [], added: learnerMade };
   const resumed = await I.rowText('A1', /조치: 현재 AI 실행 중지 — 성공 .*→ 문제 해결 확인/); const stopProof = await I.recovery('A1'); assert.match(stopProof, /조치 뒤 검증: 문제 해결 확인 · 조치 뒤 학생의 다음 AI 실행이 끝까지 완료됨 · 관측 /);
   assert.deepEqual(followups(stopCmd.id).map((f) => [f.disposition, f.check, f.runtime]), [['applied', 'turn_completed', 'agent-sdk']]);
   results.R2 = { baseline: { ...baseline, draft_sha256: digest(baseline.draft), parked_sha256: digest(baseline.parked ?? '') }, after_stop: { ...afterStop, draft_sha256: digest(afterStop.draft) }, stop_line: stopLine, resumed_row: resumed, recovery_block: stopProof, followups: followups(stopCmd.id), held_provider_calls: providerCalls.slice(before).filter((c) => c.held).length };
@@ -188,13 +191,17 @@ try {
   // ── R3 preserving restart while the PROVIDER is down (a shared cause): ready ≠ running, and the PC is not blamed ──
   await setDraft(chat, 'DRAFT-RESET 초기화 전에 쓰던 글'); const draftBeforeReset = await draftOf(chat); faults.provider500 = true;
   const resetLine = (await I.act('A1', 'AI 실행 환경 초기화', /대화·입력·파일 보존 확인/)).replace(/\s+/g, ' '); assert.match(resetLine, /해결 확인 0 .*실행됨·해결 확인 전 1/); assert.match(resetLine, /멈춤·보존 대조·재시작까지 확인함\(비용 없는 준비 확인\)/);
-  assert.equal(await draftOf(chat), draftBeforeReset, 'the draft typed before the restart is still there'); assert.deepEqual(workFiles(), { changed: [], added: [] }); const n3 = providerCalls.length; await sleep(4000); assert.equal(providerCalls.length, n3, 'the restart itself called no model');
-  await ask(chat, 'Q-AFTER-RESET 초기화 뒤 첫 질문', 'Q-AFTER-RESET'); await idle(chat); const resetCmd = lastCommand('reset_runtime');
+  assert.equal(await draftOf(chat), draftBeforeReset, 'the draft typed before the restart is still there'); assert.deepEqual(workFiles(), KEPT); const n3 = providerCalls.length; await sleep(4000); assert.equal(providerCalls.length, n3, 'the restart itself called no model');
+  // Seen on the first real runs: the real Agent SDK does not give up on a provider 5xx quickly — it retried for more than two minutes
+  // (9 attempts) while the turn stayed "running". Until it ends there is no follow-up, and the verdict honestly stays "실행만 됨".
+  const tAsk = Date.now(); await ask(chat, 'Q-AFTER-RESET 초기화 뒤 첫 질문', 'Q-AFTER-RESET'); const resetCmd = lastCommand('reset_runtime');
+  await sleep(20000); assert.deepEqual(followups(resetCmd.id), [], 'a turn that is still retrying has proven nothing yet'); assert.match(await I.rowText('A1', /조치: AI 실행 환경 초기화/), /→ 명령 실행 완료 · 해결 여부는 아직 확인 전/);
+  await wait(async () => !(await stopShown(chat)), 'the failing turn ended on screen', 900000); const failAfterMs = Date.now() - tAsk, attempts = callsFor('Q-AFTER-RESET').length;
   const failedRow = await I.rowText('A1', /조치: AI 실행 환경 초기화 — 성공 .*→ 문제 남음/); const failedProof = await I.recovery('A1'); assert.match(failedProof, /조치 뒤 검증: 문제 남음 — 원인: .*조치 뒤 학생의 다음 AI 실행이 실패함/);
   const f3 = followups(resetCmd.id); assert.deepEqual(f3.map((f) => [f.disposition, f.check]), [['applied', 'turn_failed']]); if (rec_shared(f3[0].error_class)) assert.match(failedProof, /공통 장애입니다 — 이 PC를 다시 초기화하지 마세요/);
   faults.provider500 = false; await ask(chat, 'Q-RECOVERED 다시 질문', 'Q-RECOVERED'); await idle(chat); await I.rowText('A1', /입장: 준비 완료/);
   assert.equal(followups(resetCmd.id).length, 1, 'one answer per action: a later good run does not rewrite what followed the restart'); await I.shot('r3-reset-ready-then-provider-down.png');
-  results.R3 = { reset_line: resetLine, failed_row: failedRow, recovery_block: failedProof, followups: f3, draft_kept: true }; step('R3 restart = READY (no model call); the next run failed for a shared cause → 문제 남음, never "fixed by resetting the PC"', { error_class: f3[0].error_class });
+  results.R3 = { reset_line: resetLine, failed_row: failedRow, recovery_block: failedProof, followups: f3, draft_kept: true, provider_attempts_before_the_sdk_gave_up: attempts, ms_until_the_failing_turn_ended: failAfterMs }; step('R3 restart = READY (no model call); the next run failed for a shared cause → 문제 남음, never "fixed by resetting the PC"', { error_class: f3[0].error_class });
 
   // ── R4 preview: the learner's REAL preview tab on the real live server. A 404 is a fault with a name; the page coming back is the recovery. ──
   await win.bringToFront(); await win.keyboard.press('Meta+P'); await win.waitForSelector('.quick-input-widget input', { state: 'visible' }); await win.keyboard.type('page.html', { delay: 15 }); await sleep(1200); await win.keyboard.press('Enter'); await sleep(1500);
@@ -204,7 +211,7 @@ try {
   const missingLine = (await I.act('A1', '미리보기 복구', /결과물 페이지가 없음/)).replace(/\s+/g, ' '); assert.match(missingLine, /해결 확인 0 \/ 문제 남음 1/); assert.match(missingLine, /A1: 실패 — 서버는 응답하나 결과물 페이지가 없음\(404\) → 문제 남음 — 원인: 미리보기 서버는 정상이나 학생 결과물 페이지가 없음 \(404\)/);
   renameSync(away, path.join(ws, 'page.html')); assert.equal(sha(path.join(ws, 'page.html')), ORIGINAL_HASHES[path.join(ws, 'page.html')], 'the same bytes are back');
   const openedLine = (await I.act('A1', '미리보기 복구', /해결 확인 1/)).replace(/\s+/g, ' '); assert.match(openedLine, /A1: 성공 — 학생 결과물 페이지가 열림 → 문제 해결 확인 · 학생 결과물 페이지가 다시 열리는 것을 확인함/);
-  assert.ok((await tabs()).some((t) => t.url === previewUrl), 'the learner\'s tab is still on the same address'); assert.deepEqual(workFiles(), { changed: [], added: [] }); await I.shot('r4-preview-404-then-opened.png');
+  assert.ok((await tabs()).some((t) => t.url === previewUrl), 'the learner\'s tab is still on the same address'); assert.deepEqual(workFiles(), KEPT); await I.shot('r4-preview-404-then-opened.png');
   results.R4 = { preview_url: previewUrl.replace(/:\d+\//, ':<port>/'), missing_line: missingLine, opened_line: openedLine, new_port_branch: 'NOT RUN in a real window (the live server cannot be killed from outside the app); covered by the host-level test with a stand-in' };
   step('R4 preview: a 404 on the learner\'s page is 문제 남음; the same page answering again is 해결 확인', {});
 
@@ -218,6 +225,9 @@ try {
   assert.match(await I.recovery('A1'), /새 AI 실행 제어 — 서버: 새 요청 차단 중 · 이 기기: 반영 확인/); assert.match(await I.recovery('A3'), /이 기기: 확인 불가/);
   await I.refresh(); await page.locator('#ops-pause').click(); await page.locator('#ops-pause-go').click(); await page.locator('#ops-control-state').filter({ hasText: /허용 중/ }).waitFor({ timeout: 90000 });
   await wait(async () => /재개 뒤 AI 실행은 아직 관측 전/.test(await I.recovery('A1')), 'resumed, and no run seen yet'); assert.equal(providerCalls.length, n5, 'resuming sent nothing by itself');
+  // The Service admits again the moment the control row is saved; THIS DEVICE lifts its own hold at its next sync. The two are
+  // separate observations (run 3 pressed Enter in between and the app, correctly, still held the send and kept the text).
+  await wait(async () => { const c = (await seatNow('A1')).control_outcome; return c.service === 'admitting' && c.device === 'applied'; }, 'this device reported that it lifted the hold', 90000); assert.equal(providerCalls.length, n5);
   await pressEnter(chat); await wait(() => callsFor('Q-WHILE-PAUSED').length > 0, 'the learner sent it again themselves'); await idle(chat);
   await wait(async () => /재개 뒤 AI 실행 관측됨/.test(await I.recovery('A1')), 'a run after the resume was seen'); const resumedLine = await I.T('ops-control-state'); assert.match(resumedLine, /재개 뒤 AI 실행이 관측된 좌석 1석/); assert.equal((await seatNow('A1')).step?.lesson_version ?? V1, V1); await I.shot('r5-pause-resume.png');
   results.R5 = { paused_line: pausedLine, resumed_line: resumedLine, in_flight_request_finished: true, mid_turn_followup_request_during_pause: 'NOT RUN in a real window (needs a multi-request turn crossing the pause)' }; step('R5 pause held a new run (input kept), let the streaming request finish, counted only devices that reported; after resume the learner\'s own run was seen', {});
@@ -241,7 +251,7 @@ try {
   await wait(async () => (await seatNow('A1')).token?.app_verified === 'matches_issue', 'the app verified the newest issue'); const newLine = (await I.act('A1', '연결 다시 확인', /해결 확인 1/)).replace(/\s+/g, ' '); assert.match(newLine, /→ 문제 해결 확인 · 재발급한 새 토큰을 학생 앱이 확인함/);
   const refreshCmd = lastCommand('refresh_connection'), f7 = followups(refreshCmd.id); assert.equal(f7.length, 1); assert.equal(f7[0].token_jti, (await seatNow('A1')).token.issue_id);
   const leaked = [JSON.stringify(results), await page.content(), ...db('SELECT payload_json FROM ops_events').map((r) => r.payload_json), ...db('SELECT detail_json FROM ops_audit').map((r) => r.detail_json)].some((t) => t.includes(token) || t.includes(reissued) || t.includes(teacherToken)); assert.equal(leaked, false, 'no token text on the board, in the ledgers or in this evidence');
-  assert.deepEqual(workFiles(), { changed: [], added: [] }); await I.shot('r7-reissued-token-active.png');
+  assert.deepEqual(workFiles(), KEPT); await I.shot('r7-reissued-token-active.png');
   results.R7 = { existing_issue_rechecked: recheck, old_issue_line: oldLine, reissued_active_line: newLine, delivered_by: 'dev token file + restart of the copy (start-page entry NOT RUN)', issues_recorded: db('SELECT count(*) n FROM ops_token_issues WHERE student_id=?', seats[0].student_id)[0].n };
   step('R7 token: existing issue re-checked / old issue still in the app / re-issued token active are three different answers', {});
 

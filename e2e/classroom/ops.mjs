@@ -53,7 +53,7 @@ try {
   const pump = setInterval(() => void deviceLoop.tick(), 300);
   try {
     await page.locator('#ops-seats .ops-seat').nth(1).getByRole('button', { name: '근거·조치' }).click(); await page.getByRole('button', { name: '진단 다시 실행' }).click();
-    await page.locator('#ops-detail-status').filter({ hasText: /성공 1 .*해결 확인 1 \/ 문제 남음 0 .*선택한 전원 해결 확인.*A2: 성공 — 토큰 정상 → 문제 해결 확인 · 학생 PC에서 서버 연결과 토큰이 정상임을 확인함/ }).waitFor(); assert.equal(deviceRuns, 1);
+    await page.locator('#ops-detail-status').filter({ hasText: /성공 1 .*해결 확인 1 \/ 문제 남음 0 .*선택한 전원 해결 확인[\s\S]*A2: 성공 — 토큰 정상 → 문제 해결 확인 · 학생 PC에서 서버 연결과 토큰이 정상임을 확인함/ }).waitFor(); assert.equal(deviceRuns, 1);
     await page.locator('#ops-seats').getByText(/조치: 진단 다시 실행 — 성공 — 토큰 정상 → 문제 해결 확인/).waitFor();
     // Bulk on "needs help" + an unconnected seat: A1 has a connection but no running app, A3 has no device at all.
     await page.locator('#ops-select-help').click(); await page.locator('#ops-seats .ops-seat').nth(2).getByLabel('선택').check();
@@ -85,7 +85,7 @@ try {
     assert.equal((await local.request(local.base + '/status')).json.seats[1].step.step_id, 'build', 'reviewing evidence did not move the step');
     // R3: reset needs an inline confirmation naming the learner; the result names what was preserved.
     await page.getByRole('button', { name: 'AI 실행 환경 초기화' }).click(); const go = page.getByRole('button', { name: /대상 A2 · student-b 확인하고 실행/ }); await go.waitFor(); assert.equal(await go.evaluate((e) => e === document.activeElement), true); await page.keyboard.press('Enter');
-    await page.locator('#ops-detail-status').filter({ hasText: /성공 1 .*대화·입력·파일 보존 확인/ }).waitFor(); assert.deepEqual([studentWork.history, studentWork.draft, studentWork.files, studentWork.generation], [['q1', 'a1'], '쓰던 글', ['index.html'], 2]);
+    await page.locator('#ops-detail-status').filter({ hasText: /성공 1 [\s\S]*대화·입력·파일 보존 확인/ }).waitFor(); assert.deepEqual([studentWork.history, studentWork.draft, studentWork.files, studentWork.generation], [['q1', 'a1'], '쓰던 글', ['index.html'], 2]);
     // U4 (AT-40): the device ran the restart — that is NOT yet "resolved". It becomes resolved only when the learner's next run,
     // named by this command id and reported over the same connection, completed. A follow-up naming another command changes nothing.
     { const status = await page.locator('#ops-detail-status').innerText(); assert.match(status, /해결 확인 0 .*실행됨·해결 확인 전 1/); assert.match(status, /명령 실행 완료 · 해결 여부는 아직 확인 전/); assert.doesNotMatch(status, /전원 해결 확인/);
