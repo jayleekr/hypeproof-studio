@@ -432,13 +432,13 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 | 항목 | 값 |
 |---|---|
-| source | `afbda82855acc23ca26eb5c62c1c2ed019f298ce` (확장·webview·Service·Chalk 모두 이 커밋, dirty 아님). 이후 커밋은 실행기·staging·Windows 자료·문서만 바꾼다 |
+| source | `b72b8f4faa62ffc1ddb969e36aa39bbb549fa84e` — #1169 tip, 원 checkout에서 빌드·`prepare`·실행(dirty 아님, 4개 번들 해시가 소스 빌드와 일치). 이 기록을 적는 뒤따르는 커밋은 문서만 바꾼다. 같은 내용의 첫 실행은 메시지 정리 전 커밋에서 14/14였고, 아래 값은 최종 커밋의 재실행(05:49–05:50Z)이다 |
 | shell | 공식 v0.1.56 arm64 **복사본**(commit `f5939d9cf6`), ad-hoc 서명. `/Applications` 설치본 미사용 |
 | Agent SDK | 0.3.207 JS(`sdk.mjs` sha256 `7f12ca8bcc75fcdb…`) + native `claude`(sha256 `1397a062c6889675…`) 실제 실행 |
 | OS | macOS 26.5.2 (25F84) arm64 |
 | 실제 | Studio shell 프로세스·확장 host·webview·명령 팔레트·알림, SDK+native binary, HTTP→Service 라우터+SQLite, ops sync·명령 실행기, workspace 파일, **디스크의 SessionSpool(격리 HOME) → freezer → 업로드 → Service 재해시·coverage** |
 | 합성 | 계정·강의, **모델 응답**(api.anthropic.com 자리의 스크립트), **보고서 평가 transport**, in-memory R2·secret storage. 메일은 이 실행에 없음 |
-| 실행 | `e2e/classroom/mac-gui.mjs` 14/14 PASS, 41초, `result.json`·화면 13장은 devhost의 `gui/` |
+| 실행 | `e2e/classroom/mac-gui.mjs` 14/14 PASS, 39초, `result.json`·화면 13장은 devhost의 `gui/` |
 
 | 단계(실제 창) | 확인한 것 |
 |---|---|
