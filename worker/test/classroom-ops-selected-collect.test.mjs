@@ -26,7 +26,7 @@ await check('controls: what a request means is decided once — legacy stays who
 
 await check('controls: the collection lifecycle table — item × device request × grace, and how each row moves over time', async () => {
   const { collectStatus, COLLECT_ACTIVE_MS, COLLECT_SETTLE_MS } = await import('../src/lib/classroom-collect.ts'), T = 1_000_000_000_000, until = T + 3_600_000;
-  const at = (state, request, o = {}) => { const r = collectStatus({ state, updated_at: o.item_at ?? T, request: request ? { state: request[0], result_code: request[1] ?? '', updated_at: o.req_at ?? T } : null }, { now: o.now ?? T + 1000, upload_until: o.until ?? until }); return [r.phase, r.active, r.retryable, r.may_change, r.partial].join(' '); };
+  const at = (state, request, o = {}) => { const r = collectStatus({ state, updated_at: 'item_at' in o ? o.item_at : T, request: request ? { state: request[0], result_code: request[1] ?? '', updated_at: 'req_at' in o ? o.req_at : T } : null }, { now: o.now ?? T + 1000, upload_until: o.until ?? until }); return [r.phase, r.active, r.retryable, r.may_change, r.partial].join(' '); };
   const table = [
     // item         request                                   → phase            active retry may_change partial
     ['verified',   ['failed', 'upload_failed'], {},            'verified false false false false'],          // a failed command before a verified record is history
@@ -38,17 +38,30 @@ await check('controls: the collection lifecycle table — item × device request
     ['requested',  ['leased'], {},                             'awaiting_device true false true false'],     // assigned by the server ≠ received by the device
     ['requested',  ['accepted'], {},                           'transferring true false true false'],
     ['uploading',  ['running'], {},                            'transferring true false true true'],
-    ['uploading',  ['failed', 'offline_pending'], { now: T + COLLECT_ACTIVE_MS + 1 }, 'resend_wait false true true true'],   // meta arrived, then the network dropped: the device keeps the copy
-    ['uploading',  ['failed', 'upload_refused'], { now: T + COLLECT_ACTIVE_MS + 1 },  'refused false true true true'],      // meta arrived, the next file was refused: final
-    ['uploading',  ['failed', 'verify_failed'], { now: T + COLLECT_ACTIVE_MS + 1 },   'refused false true true true'],
-    ['uploading',  ['failed', 'upload_refused'], { now: T + 1000 },                   'transferring true false true true'],  // bytes a second ago ARE evidence of a transfer (a resumed upload)
+    // ── the request ENDED. What it ended as is the answer, unless a file arrived strictly AFTER it ended. ──
+    // file → failure: the bytes are how that attempt went. Not "sending", from the first second (no waiting for them to age).
+    ['uploading',  ['failed', 'offline_pending'], { item_at: T, req_at: T + 1000, now: T + 3000 }, 'resend_wait false true true true'],
+    ['uploading',  ['failed', 'upload_refused'],  { item_at: T, req_at: T + 1000, now: T + 3000 }, 'refused false true true true'],
+    ['uploading',  ['failed', 'verify_failed'],   { item_at: T, req_at: T + 1000, now: T + 3000 }, 'refused false true true true'],
+    ['uploading',  ['outcome_unknown'],           { item_at: T, req_at: T + 1000, now: T + 3000 }, 'unknown false true true true'],
+    ['uploading',  ['failed', 'upload_refused'],  { item_at: T - 120_000, req_at: T + 1000, now: T + 3000 }, 'refused false true true true'],
+    // failure → new file: a resumed upload, for as long as the bytes are recent
+    ['uploading',  ['failed', 'offline_pending'], { item_at: T + 2000, req_at: T + 1000, now: T + 3000 }, 'transferring true false true true'],
+    ['uploading',  ['failed', 'upload_refused'],  { item_at: T + 2000, req_at: T + 1000, now: T + 3000 }, 'transferring true false true true'],
+    ['uploading',  ['expired'],                   { item_at: T + 2000, req_at: T + 1000, now: T + 3000 }, 'transferring true false true true'],   // an older pending copy resumed after this command expired
+    ['uploading',  ['outcome_unknown'],           { item_at: T + 2000, req_at: T + 1000, now: T + 3000 }, 'transferring true false true true'],
+    ['uploading',  ['failed', 'offline_pending'], { item_at: T + 2000, req_at: T + 1000, now: T + 2000 + COLLECT_ACTIVE_MS }, 'resend_wait false true true true'], // …and then it went quiet again
+    // an order that cannot be proven is never "in progress": same millisecond, a missing time, an unreadable time
+    ['uploading',  ['failed', 'upload_refused'],  { item_at: T + 1000, req_at: T + 1000, now: T + 3000 }, 'refused false true true true'],
+    ['uploading',  ['failed', 'offline_pending'], { item_at: T + 2000, req_at: null, now: T + 3000 }, 'resend_wait false true true true'],
+    ['uploading',  ['failed', 'offline_pending'], { item_at: T + 2000, req_at: NaN, now: T + 3000 }, 'resend_wait false true true true'],
+    ['uploading',  ['failed', 'upload_refused'],  { item_at: undefined, req_at: T + 1000, now: T + 3000 }, 'refused false true true true'],
     ['requested',  ['failed', 'nothing_recorded'], {},         'refused false true true false'],
     ['requested',  ['rejected', 'busy'], {},                   'not_delivered false true true false'],
     ['requested',  ['expired'], {},                            'not_delivered false true true false'],
     ['requested',  ['unsupported'], {},                        'not_delivered false true true false'],
     ['requested',  ['cancelled'], {},                          'not_delivered false true true false'],
     ['requested',  ['outcome_unknown'], {},                    'unknown false true true false'],
-    ['uploading',  ['outcome_unknown'], { now: T + COLLECT_ACTIVE_MS + 1 }, 'unknown false true true true'],
     ['requested',  ['succeeded', 'receipt_verified'], {},      'transferring true false true false'],        // "sent", verification pending — for a bounded time
     ['requested',  ['succeeded', 'receipt_verified'], { now: T + COLLECT_SETTLE_MS + 1 }, 'unknown false true true false'],
     ['incomplete', ['failed', 'hash_mismatch'], {},            'refused false true true false'],
@@ -60,7 +73,7 @@ await check('controls: the collection lifecycle table — item × device request
   ];
   for (const [state, request, o, want] of table) assert.equal(at(state, request, o), want, `${state} × ${JSON.stringify(request)} × ${JSON.stringify(o)}`);
   // One seat over time: partial upload → the device gives up for now → the same copy resumes → verified. Status follows each step; "failed" never sticks.
-  const steps = [['requested', ['queued'], {}, 'awaiting_device'], ['uploading', ['running'], {}, 'transferring'], ['uploading', ['failed', 'offline_pending'], { now: T + COLLECT_ACTIVE_MS + 1 }, 'resend_wait'], ['uploading', ['failed', 'offline_pending'], { item_at: T + 200_000, now: T + 200_500 }, 'transferring'], ['verified', ['failed', 'offline_pending'], { now: T + 300_000 }, 'verified']];
+  const steps = [['requested', ['queued'], {}, 'awaiting_device'], ['uploading', ['running'], { item_at: T + 500, req_at: T + 400, now: T + 600 }, 'transferring'], ['uploading', ['failed', 'offline_pending'], { item_at: T + 500, req_at: T + 900, now: T + 1000 }, 'resend_wait'] /* one tenth of a second after the failure report: already not "sending" */, ['uploading', ['failed', 'offline_pending'], { item_at: T + 200_000, req_at: T + 900, now: T + 200_500 }, 'transferring'] /* the device came back and a file arrived */, ['uploading', ['failed', 'offline_pending'], { item_at: T + 200_000, req_at: T + 900, now: T + 200_000 + COLLECT_ACTIVE_MS + 1 }, 'resend_wait'], ['verified', ['failed', 'offline_pending'], { now: T + 300_000 }, 'verified']];
   for (const [state, request, o, phase] of steps) assert.equal(at(state, request, o).split(' ')[0], phase);
 });
 
@@ -224,11 +237,17 @@ try {
       const putMeta = (seat) => k.app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${id}/1/session.meta.json`, { method: 'PUT', headers: { authorization: 'Bearer ' + c[seat].credential }, body: k.metaFor(c[seat]) }), k.env, { waitUntil() {} }).then((r) => r.status);
       const old = (seat) => k.db.prepare('UPDATE classroom_collect_items SET updated_at=? WHERE batch_id=? AND seat_id=?').run(Date.now() - 120_000, id, seat); // "the bytes arrived two minutes ago and nothing since"
       let s = await view(); assert.equal(s.of('A1'), 'requested queued  awaiting_device false false'); assert.ok(Math.abs(s.v.observed_at - Date.now()) < 5000); assert.deepEqual([s.v.batch.upload_open, s.v.batch.new_request_allowed], [true, true]);
-      // A1: meta arrived over the real PUT, then the device stopped for now (offline_pending) · A2: meta arrived, then a final refusal · A3: started, never reported
-      assert.equal(await putMeta('A1'), 201); assert.equal(await putMeta('A2'), 201); target('A1', 'failed', 'offline_pending'); target('A2', 'failed', 'upload_refused'); target('A3', 'outcome_unknown');
-      s = await view(); assert.equal(s.of('A1'), 'uploading failed offline_pending transferring false true', 'bytes a moment ago are still a transfer');
-      old('A1'); old('A2'); s = await view();
-      assert.equal(s.of('A1'), 'uploading failed offline_pending resend_wait true true'); assert.equal(s.of('A2'), 'uploading failed upload_refused refused true true'); assert.equal(s.of('A3'), 'requested outcome_unknown  unknown true false');
+      // file → failure, through the real routes and with no clock moved: A1 meta arrives, THEN the device reports it stopped for now
+      // (offline_pending); A2 meta arrives, THEN a final refusal; A3 started and never reported.
+      const tick = () => new Promise((r) => setTimeout(r, 5)); // two Service timestamps in one millisecond prove no order — and that case is a table row, not this one
+      assert.equal(await putMeta('A1'), 201); assert.equal(await putMeta('A2'), 201); await tick(); target('A1', 'failed', 'offline_pending'); target('A2', 'failed', 'upload_refused'); target('A3', 'outcome_unknown');
+      s = await view(); assert.equal(s.of('A1'), 'uploading failed offline_pending resend_wait true true', 'a file that arrived BEFORE the failure report is not a transfer in progress — not for 90 s, not for one'); assert.equal(s.of('A2'), 'uploading failed upload_refused refused true true'); assert.equal(s.of('A3'), 'requested outcome_unknown  unknown true false');
+      // failure → new file: A2's device sends the NEXT file after the refusal was reported. That is a transfer again.
+      await tick(); const next = await k.app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${id}/1/events.jsonl`, { method: 'PUT', headers: { authorization: 'Bearer ' + c.A2.credential }, body: record('student-b') }), k.env, { waitUntil() {} }); assert.equal(next.status, 201);
+      s = await view(); assert.equal(s.of('A2'), 'uploading failed upload_refused transferring false true', 'a file received after the request ended is resumed activity');
+      // …and so is an identical re-send (the way a resuming device starts): it stores nothing, but the Service saw an upload after the failure.
+      await tick(); assert.equal(await putMeta('A1'), 200); s = await view(); assert.equal(s.of('A1'), 'uploading failed offline_pending transferring false true', 'an idempotent re-send after the failure is upload activity too');
+      old('A1'); old('A2'); s = await view(); assert.equal(s.of('A1'), 'uploading failed offline_pending resend_wait true true', 'activity that went quiet falls back to what the request ended as'); assert.equal(s.of('A2'), 'uploading failed upload_refused refused true true');
       // A3's record arrives late, inside the grace: the past command result stays visible next to the present, verified, collection result.
       const late = await k.uploadSnapshotAs(c.A3, id, 1, record('student-c')); assert.equal(late.status, 201, late.raw); s = await view(); assert.equal(s.of('A3'), 'verified outcome_unknown  verified false false');
       // A1's device comes back and finishes the SAME frozen revision: resend_wait → verified.

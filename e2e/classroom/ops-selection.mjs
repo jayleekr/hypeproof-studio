@@ -91,7 +91,6 @@ try {
   const newest = () => local.db.prepare("SELECT b.id FROM classroom_collect_batches b JOIN classroom_collect_scopes s ON s.batch_id=b.id WHERE b.dry_run=0 ORDER BY b.created_at DESC, b.rowid DESC LIMIT 1").get().id;
   const target = (batch, seat, st, code = '') => local.db.prepare("UPDATE ops_command_targets SET state=?,result_code=?,updated_at=? WHERE seat_id=? AND command_id=(SELECT id FROM ops_commands WHERE idempotency_key=?)").run(st, code, Date.now(), seat, 'collect-' + batch);
   const putMeta = async (batch, c) => (await local.app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${batch}/1/session.meta.json`, { method: 'PUT', headers: { authorization: 'Bearer ' + c.credential }, body: local.metaFor(c) }), local.env, { waitUntil() {} })).status;
-  const quiet = (batch, seat) => local.db.prepare('UPDATE classroom_collect_items SET updated_at=? WHERE batch_id=? AND seat_id=?').run(Date.now() - 120_000, batch, seat); // the bytes arrived two minutes ago and nothing since
   const rowOf = async (seat) => (await page.locator('#ops-pick-items').innerText()).split('\n').find((l) => l.startsWith(seat + ' ')) ?? '', observed = () => page.locator('#ops-pick-observed').innerText(), retry = page.locator('#ops-pick-retry'), manual = async () => { await page.locator('#ops-pick-refresh').click(); await page.waitForTimeout(500); };
   const collect = async (ids) => { await page.locator('#ops-select-none').click(); for (const id of ids) await box(id).check(); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.locator('#ops-pick-go').click(); await page.locator('#ops-pick-items').filter({ hasText: new RegExp('^' + [...ids].sort()[0] + ' ') }).waitFor(); return newest(); };
 
@@ -106,15 +105,20 @@ try {
   await retry.click(); await page.locator('#ops-pick-note').filter({ hasText: /도착하지 않은 5명만 다시 선택했습니다/ }).waitFor(); assert.deepEqual(await checked(), ['A4', 'A5', 'A6', 'A7', 'A8'], 'not the queued, the sending or the verified seat'); assert.equal(await confirmOpen(), false, 're-selecting requests nothing by itself');
   ok('lifecycle: a mixed batch is followed as it moves; failures are re-selectable while others are in flight, and only they are');
 
-  // L2 — meta arrived, then the device stopped. offline_pending (it will resend) and upload_refused / verify_failed (it will not) are different answers.
-  batch = await collect(['A4', 'A5', 'A6']); for (const id of ['A4', 'A5', 'A6']) assert.equal(await putMeta(batch, conn[id]), 201); target(batch, 'A4', 'failed', 'offline_pending'); target(batch, 'A5', 'failed', 'upload_refused'); target(batch, 'A6', 'failed', 'verify_failed');
-  await manual(); assert.match(await state(), /전송·검증 진행 중 3/, 'bytes that arrived a moment ago are still a transfer: ' + await state()); assert.equal(await retry.isVisible(), false);
-  for (const id of ['A4', 'A5', 'A6']) quiet(batch, id); await manual();
-  assert.match(await state(), /전송·검증 진행 중 0 · 재전송 대기 1 · 최종 거부 2/, 'a file that arrived and then nothing is not "sending": ' + await state());
+  // L2 — ORDER. "meta arrived, THEN the device reported failure" is a failure from the first second; "failure, THEN a file arrived" is a
+  //      transfer again. Real PUTs and real batch reads, no clock moved: only the ORDER of the PUT and the terminal report differs.
+  batch = await collect(['A4', 'A5', 'A6']); for (const id of ['A4', 'A5', 'A6']) assert.equal(await putMeta(batch, conn[id]), 201); await page.waitForTimeout(10);
+  target(batch, 'A4', 'failed', 'offline_pending'); target(batch, 'A5', 'failed', 'upload_refused'); target(batch, 'A6', 'failed', 'verify_failed'); await manual();
+  assert.match(await state(), /전송·검증 진행 중 0 · 재전송 대기 1 · 최종 거부 2/, 'a file that arrived BEFORE the failure report is not "in progress" — immediately, not after 90 s: ' + await state());
   assert.match(await rowOf('A4'), /현재: 재전송 대기 · 기기가 사본을 보관 중.*일부 파일만 도착\(검증 전\) · 기기 요청: 기기에서 실패 \(offline_pending\)/); assert.match(await rowOf('A5'), /현재: 최종 거부 .*일부 파일만 도착\(검증 전\) · 기기 요청: 기기에서 실패 \(upload_refused\)/); assert.match(await rowOf('A6'), /기기 요청: 기기에서 실패 \(verify_failed\)/);
-  assert.match(await observed(), /확정 아님: 업로드 유예\(.*까지\) 동안 늦게 도착한 기록이 검증될 수 있습니다/); assert.match(await retry.innerText(), /도착하지 않은 3명만 다시 선택$/); evidence.partial_upload = { state: await state(), a4: await rowOf('A4'), a5: await rowOf('A5'), observed: await observed() };
-  // A4's device comes back and finishes the same frozen revision. Nobody presses anything: the idle re-observation (5 s step) sees it.
-  assert.equal((await local.uploadSnapshotAs(conn.A4, batch, 1, record)).status, 201); await page.locator('#ops-pick-state').filter({ hasText: /서버 검증됨 1 · .*재전송 대기 0/ }).waitFor({ timeout: 20000 }).catch(async (e) => { throw Error('the late resend was not re-observed: ' + await state(), { cause: e }); });
+  assert.equal(await retry.isVisible(), true, 're-select is offered right after the failure'); assert.match(await retry.innerText(), /도착하지 않은 3명만 다시 선택$/); assert.match(await observed(), /확정 아님: 업로드 유예\(.*까지\) 동안 늦게 도착한 기록이 검증될 수 있습니다/);
+  evidence.file_then_failure = { state: await state(), a4: await rowOf('A4'), a5: await rowOf('A5'), retry: await retry.innerText(), observed: await observed() };
+  // failure → new file: A4's device really sends its next file AFTER the failure was reported. Progress comes back, and A4 leaves the retry set.
+  await page.waitForTimeout(10); const nextFile = await local.app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${batch}/1/events.jsonl`, { method: 'PUT', headers: { authorization: 'Bearer ' + conn.A4.credential }, body: record }), local.env, { waitUntil() {} }); assert.equal(nextFile.status, 201); await manual();
+  assert.match(await state(), /전송·검증 진행 중 1 · 재전송 대기 0 · 최종 거부 2/, 'a file received after the request ended is a resumed transfer: ' + await state()); assert.match(await rowOf('A4'), /현재: 전송·검증 진행 중 · 일부 파일만 도착\(검증 전\) · 기기 요청: 기기에서 실패 \(offline_pending\)/);
+  assert.match(await retry.innerText(), /도착하지 않은 2명만 다시 선택 \(진행 중 1명은 제외\)/); assert.match(await observed(), /진행 중인 대상 1명 — 자동으로 다시 확인합니다/); evidence.failure_then_file = { state: await state(), a4: await rowOf('A4'), retry: await retry.innerText() };
+  // The resumed upload completes (identical re-sends + seal). Nobody presses anything: the active re-observation sees it.
+  assert.equal((await local.uploadSnapshotAs(conn.A4, batch, 1, record)).status, 201); await page.locator('#ops-pick-state').filter({ hasText: /서버 검증됨 1 · .*전송·검증 진행 중 0 · 재전송 대기 0/ }).waitFor({ timeout: 20000 }).catch(async (e) => { throw Error('the resumed upload was not re-observed: ' + await state(), { cause: e }); });
   assert.match(await rowOf('A4'), /현재: 서버 검증됨 .*기기 요청: 기기에서 실패 \(offline_pending\)/, 'the past command result stays next to the present, verified, result'); assert.match(await retry.innerText(), /도착하지 않은 2명만/);
   // The grace of this batch closes: said as such, and "new request" is a separate fact that changes when the class ends.
   local.db.prepare('UPDATE classroom_collect_batches SET upload_until=? WHERE id=?').run(Date.now() - 1, batch); await manual();
@@ -122,10 +126,10 @@ try {
   const endsAt = local.db.prepare('SELECT ends_at e FROM class_run_ops WHERE class_run_id=?').get(local.run).e; local.db.prepare('UPDATE class_run_ops SET ends_at=? WHERE class_run_id=?').run(Date.now() - 1, local.run); await manual();
   assert.equal(await retry.isDisabled(), true, 'no new request on an ended class'); assert.match(await page.locator('#ops-pick-grace').innerText(), /이 수업은 끝나 새 회수를 요청할 수 없습니다\. 업로드 유예도 끝났습니다/); evidence.grace_over = { state: await state(), grace: await page.locator('#ops-pick-grace').innerText(), observed: await observed() };
   await page.screenshot({ path: path.join(out, 'grace-over-class-ended.png'), fullPage: true }); local.db.prepare('UPDATE class_run_ops SET ends_at=? WHERE class_run_id=?').run(endsAt, local.run);
-  ok('lifecycle: partial upload + offline_pending / final refusal, the late resend re-observed without a click, the closed grace, the ended class');
+  ok('lifecycle: file→failure is a failure at once, failure→new file is a transfer again, the resumed upload is re-observed without a click, the closed grace, the ended class');
 
   // L3 — the reviewed defect: a failed / unknown target verifies LATE, the panel is stale, and the instructor goes to re-select.
-  batch = await collect(['A6', 'A7']); target(batch, 'A6', 'failed', 'upload_failed'); assert.equal(await putMeta(batch, conn.A7), 201); target(batch, 'A7', 'outcome_unknown'); quiet(batch, 'A7'); await manual();
+  batch = await collect(['A6', 'A7']); target(batch, 'A6', 'failed', 'upload_failed'); assert.equal(await putMeta(batch, conn.A7), 201); await page.waitForTimeout(10); target(batch, 'A7', 'outcome_unknown'); await manual(); // meta first, THEN no receipt: unknown at once
   assert.match(await state(), /최종 거부 1 · 전달 안 됨 0 · 결과 미확인 1/); assert.match(await rowOf('A7'), /현재: 결과 미확인 .*일부 파일만 도착/); assert.doesNotMatch(await observed(), /결과 확정/, 'failed and unknown inside the grace are not final');
   for (const id of ['A6', 'A7']) assert.equal((await local.uploadSnapshotAs(conn[id], batch, 1, record)).status, 201); // both records arrive late, inside the grace
   // (a) the board's own "현황 새로 확인" re-reads the collection result too

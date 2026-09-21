@@ -155,7 +155,14 @@ classroomCollectApp.put('/snapshots/:batch/:revision/:filename', bodyLimit({ max
   if (snap?.state === 'sealed') return c.json({ error: 'this revision is sealed; changed bytes need a new revision', reason: 'revision_sealed' }, 409);
   const files: Array<{ name: string; bytes: number; sha256: string }> = snap ? JSON.parse(snap.files_json) : [], prior = files.find((f) => f.name === filename);
   // Write-once per (revision, file): the same bytes again is an idempotent retry, different bytes is refused.
-  if (prior) return prior.sha256 === sha ? c.json({ stored: true, sha256: sha, bytes: body.byteLength, retry: true }) : c.json({ error: 'this revision already holds different bytes; use a new revision', reason: 'revision_immutable' }, 409);
+  if (prior) {
+    if (prior.sha256 !== sha) return c.json({ error: 'this revision already holds different bytes; use a new revision', reason: 'revision_immutable' }, 409);
+    // An identical re-send stores nothing, but it IS upload activity: a device that resumes begins by re-sending what it holds.
+    // `updated_at` of an uploading item means "the Service last received an upload PUT for this seat", which is what the
+    // lifecycle compares with the time the request ended. Best effort: a failed touch must not fail an idempotent retry.
+    await db.prepare("UPDATE classroom_collect_items SET updated_at=? WHERE batch_id=? AND seat_id=? AND state='uploading'").bind(now, item.batch_id, item.seat_id).run().catch(() => undefined);
+    return c.json({ stored: true, sha256: sha, bytes: body.byteLength, retry: true });
+  }
   await c.env.HPS_TRACES.put(snapshotKey(g.cohort_id, g.class_run_id, g.student_id, item.batch_id, revision, filename), body, { httpMetadata: { contentType: spec.contentType } });
   files.push({ name: filename, bytes: body.byteLength, sha256: sha });
   // The object exists before this row does. If this write fails the object is an orphan that reconcile() reports — not a "complete" upload.

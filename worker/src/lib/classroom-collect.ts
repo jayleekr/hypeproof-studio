@@ -62,8 +62,9 @@ export function normalizeCollectRequest(b: unknown, maxTargets: number): { ok: t
  *   not_delivered      -      yes    (item: -)   no device ever got it: no connection, or the command expired / was rejected /
  *                                                cancelled / unsupported before it ran
  *   awaiting_device   yes      -      yes        asked; queued or assigned by the server — no device receipt yet
- *   transferring      yes      -      yes        the device accepted / is running, OR bytes arrived within ACTIVE_MS, OR it reported
- *                                                "sent" and verification is still pending (bounded by SETTLE_MS)
+ *   transferring      yes      -      yes        the device accepted / is running, OR — after the request ENDED — bytes arrived LATER than
+ *                                                that end and within ACTIVE_MS (a resumed upload), OR it reported "sent" and
+ *                                                verification is still pending (bounded by SETTLE_MS)
  *   resend_wait        -      yes     yes        the device failed with `offline_pending`: it KEEPS the frozen copy and resumes when
  *                                                the app restarts or reconnects. Not a transfer in progress, not a final refusal.
  *   refused            -      yes     yes        a final refusal: the device gave up (upload_refused, verify_failed, …) or the Service
@@ -72,7 +73,14 @@ export function normalizeCollectRequest(b: unknown, maxTargets: number): { ok: t
  *                                                verification for longer than SETTLE_MS. Neither a success nor a failure.
  *
  * `partial` = some files of this revision are stored but it is not verified. It is a fact about stored bytes, never evidence
- * that a transfer is happening NOW — only recent bytes (ACTIVE_MS) or a running command are.
+ * that a transfer is happening NOW — only a running command is, or bytes that arrived AFTER the request had ended.
+ *
+ * Order matters (reproduced 2026-09-21, management-20260921/upload-terminal-order-check.mjs): "meta arrived, then the device
+ * reported failure" and "the device reported failure, then a file arrived" both show recent bytes and a failed request. Only
+ * the second is a resumed transfer. `item.updated_at` is the Service's receive time of the last upload PUT for this seat
+ * (new file or an identical re-send) and `request.updated_at` is the Service's receive time of the terminal report — the same
+ * clock. Bytes count as resumed activity only when they are STRICTLY later than the terminal report. Equal times, or a missing
+ * or unreadable time on either side, prove no order — and an order that is not proven is never turned into "in progress".
  * `may_change` is why a panel must not say "final" and must be looked at again: inside the grace window a late upload can
  * still turn a failed or unknown target into `verified`.
  */
@@ -91,9 +99,11 @@ export function collectStatus(item: { state: string; updated_at: number; request
   const r = item.request?.state ?? '', code = item.request?.result_code ?? '';
   if (r === '' || r === 'queued' || r === 'leased') return out('awaiting_device', true, false, true);
   if (r === 'accepted' || r === 'running') return out('transferring', true, false, true);
-  // From here the command is over. Bytes that arrived a moment ago are the only remaining evidence of a transfer in progress
-  // (a resumed upload); a file that arrived and then nothing is not.
-  if (item.state === 'uploading' && ctx.now - item.updated_at < COLLECT_ACTIVE_MS) return out('transferring', true, false, true);
+  // From here the request is over. What it ended as is the answer — unless a file arrived AFTER it ended (a resumed upload).
+  // A file that arrived BEFORE the failure report is how that attempt went, not a new one.
+  const endedAt = item.request?.updated_at, bytesAt = item.updated_at;
+  const resumed = item.state === 'uploading' && r !== 'succeeded' && Number.isFinite(endedAt) && Number.isFinite(bytesAt) && bytesAt > (endedAt as number) && ctx.now - bytesAt < COLLECT_ACTIVE_MS;
+  if (resumed) return out('transferring', true, false, true);
   if (r === 'succeeded') return ctx.now - (item.request?.updated_at ?? item.updated_at) < COLLECT_SETTLE_MS ? out('transferring', true, false, true) : out('unknown', false, true, true);
   if (r === 'outcome_unknown') return out('unknown', false, true, true);
   if (r === 'failed') return code === 'offline_pending' ? out('resend_wait', false, true, true) : out('refused', false, true, true);
