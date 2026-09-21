@@ -287,3 +287,59 @@ test('/v1/profile: a recording seat inside an open class still gets its scope �
     },
   );
 });
+
+// ---------------------------------------------------------------------------
+// ADR 0010 step 3 — the assess route refuses by name instead of smearing a 502
+// ---------------------------------------------------------------------------
+
+test('/v1/observations/assess names the refusal when the cohort runs on another provider', async () => {
+  // `native-assessment.ts` posts to Anthropic with no branch, so a cohort whose
+  // model key belongs to another provider cannot be assessed at all. It used to
+  // find that out as 502 `assessment_failed` — after passing every check, on a
+  // button the cohort could never use.
+  await withCanaryProfile(
+    {
+      observation: { record: true, assess: true, format: 'hps-observation/2' },
+      model: { ...getProfile(CANARY).model, provider: 'openai', default: 'gpt-5.6-luna' },
+    },
+    async () => {
+      const s = await seat();
+      try {
+        const res = await s.post('/v1/observations/assess', {});
+        assert.equal(
+          res.status,
+          409,
+          `공급자가 안 맞는 코호트인데 ${res.status} 가 나왔다 — ${JSON.stringify(res.body)}`,
+        );
+        assert.equal(res.body?.error?.code, 'assessment_provider_mismatch');
+        // Not the code that already means "this cohort turned assessment off".
+        assert.notEqual(res.body?.error?.code, 'observation_unavailable');
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
+
+test('/v1/observations/assess does not refuse an Anthropic-model cohort — positive control', async () => {
+  // The refusal must be about the provider, not about the route. This seat's
+  // model resolves for Anthropic, so it gets past and fails on the empty body
+  // instead — a 400, which is the pre-existing behaviour.
+  await withCanaryProfile(
+    { observation: { record: true, assess: true, format: 'hps-observation/2' } },
+    async () => {
+      const s = await seat();
+      try {
+        const res = await s.post('/v1/observations/assess', {});
+        assert.notEqual(
+          res.body?.error?.code,
+          'assessment_provider_mismatch',
+          'Anthropic 로 풀리는 모델인데 공급자 불일치로 거절했다',
+        );
+        assert.equal(res.status, 400, `기대한 건 본문 오류(400) — ${res.status} ${JSON.stringify(res.body)}`);
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
