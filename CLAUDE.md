@@ -45,6 +45,26 @@ Progress tracking: METAPLAN §10. Latest detail: git history.
 - `proxy-poc/` — HypeProof Proxy (OpenAI-compatible). Extension talks to this.
 - `METAPLAN.md` — phased build plan. Always cross-reference by section (§N) rather than copying.
 
+## Language
+
+The global rule is "English only" for documents, code, comments and commit
+messages. This repo carves out one exception, and only one.
+
+| What | Language | Why |
+|---|---|---|
+| Code comments, commit messages, PR bodies, ADRs, CLAUDE.md, dev docs | **English** | The global rule. No exception. |
+| Student-facing UI copy and the fixtures/assertions quoting it | **Korean** | It is the product. Elementary-school learners read it. |
+| Requirement / design / testing / evaluation docs for the learning experience (`docs/requirements/studio-learning-experience.md`, `docs/testing/…`, `.claude/hypeproof/ux/**`) | **Korean** | They quote and reason about that Korean copy sentence by sentence. Translating them splits a requirement from the string it governs. |
+
+Two consequences worth stating, because a session got both wrong on 2026-09-20:
+
+- **Never translate a string literal** when converting comments. Korean inside
+  quotes, template literals, regexes, assertion messages and fixtures is
+  load-bearing: it is either the product's copy or the thing a test measures.
+- **Surrounding-code convention does not override this.** Many files here are
+  heavily Korean; that is not permission to write new Korean comments. If the
+  rule and the neighbourhood disagree, follow the rule and say so.
+
 ## Hard rules
 
 - **YOU MUST NOT** run `bash build.sh` without explicit user approval. A full build is 1–2 hours and consumes 10–20 GB. Confirm disk + intent first.

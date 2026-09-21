@@ -4,7 +4,7 @@
 // not exist in it. They are reported as "unknown" — never guessed from nearby
 // values. In particular `at` is the host-reported observation time; there is no
 // separate receive time in this format, and host session is not a task.
-import type { ObservationBatch } from "./legacy-observation.ts";
+import { OBSERVATION_FORMAT_V2, type ObservationBatch } from "./legacy-observation.ts";
 import type { Unknown } from "./interpretation.ts";
 
 export interface EventEnvelope {
@@ -23,10 +23,13 @@ export interface EventEnvelope {
 }
 
 export const LEGACY_SOURCE_NAMESPACE = "studio/hps-observation/1";
+/** /2 events come from the same host but a different schema; the namespace says which (MC-13). */
+export const LEARNING_SOURCE_NAMESPACE = "studio/hps-observation/2";
 
 export function describeLegacySource(batch: ObservationBatch): EventEnvelope[] {
+  const source_namespace = batch.format === OBSERVATION_FORMAT_V2 ? LEARNING_SOURCE_NAMESPACE : LEGACY_SOURCE_NAMESPACE;
   return batch.events.map((e) => ({
-    source_namespace: LEGACY_SOURCE_NAMESPACE,
+    source_namespace,
     host_session: batch.session,
     task: e.task,
     event_id: e.id,
