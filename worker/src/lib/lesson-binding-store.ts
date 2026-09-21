@@ -26,7 +26,7 @@ const TURN_SQL = 'SELECT * FROM classroom_lesson_turns WHERE class_run_id=? AND 
 export interface BindingView { key: string; seq: number; source: Effective['source']; object_id: string | null; revision: number | null; enforced: boolean; not_applied: Effective['not_applied'] }
 export type Resolved =
   | { ok: true; lesson: Lesson; binding: BindingView; effective: Effective | null; turn: TurnRow | null }
-  | { ok: false; status: 403 | 409; code: Refusal | 'lesson_unavailable'; current_key?: string };
+  | { ok: false; status: 403 | 409; code: Refusal | 'lesson_unavailable'; current_key?: string; /** true when the version that stopped resolving is a SWITCHED one (not the token's own). */ switched?: boolean };
 
 /** Test seam: lets a test hold the resolver between its read and its conditional INSERT, the way U2's D5 holds a SELECT. */
 export const resolverHooks: { afterRead?: () => Promise<void> } = {};
@@ -53,7 +53,7 @@ export async function resolveEffectiveLesson(env: Env, payload: TokenPayload, o:
   };
   const done = async (e: Effective, turn: TurnRow | null, snapshot?: { source: string; course_id: string; version: string; lesson_sha256: string; key: string; seq: number }): Promise<Resolved> => {
     const s = snapshot ?? e, lesson = await lessonFor(s);
-    if (!lesson) return { ok: false, status: 409, code: 'lesson_unavailable' };
+    if (!lesson) return { ok: false, status: 409, code: 'lesson_unavailable', switched: s.source === 'setting' };
     const same = !snapshot || snapshot.seq === e.seq;
     return { ok: true, lesson, effective: e, turn, binding: { key: s.key, seq: s.seq, source: (same ? e.source : snapshot!.source) as Effective['source'], object_id: same ? e.object_id : null, revision: same ? e.revision : null, enforced: true, not_applied: same ? e.not_applied : '' } };
   };

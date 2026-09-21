@@ -94,6 +94,28 @@ async function settingAdmissible(c: any, run: Run, content: Content): Promise<Re
 }
 const RUN_OPEN = "EXISTS (SELECT 1 FROM class_run_ops o WHERE o.class_run_id=? AND json_extract(o.flags_json,'$.ops_distribute')=1 AND o.ends_at>? AND NOT EXISTS (SELECT 1 FROM sessions z WHERE z.id=o.class_run_id AND z.ended_at IS NOT NULL))";
 
+// What an instructor may pick for a setting: the confirmed versions of THE RUN'S course, each judged by the same rule that
+// admits a setting. A picker over frozen rows — nothing is authored here. Read-only, instructor-initiated, bounded.
+const MAX_SETTING_OPTIONS = 20;
+classroomDistributionTeacher.get(root + '/setting-options', async (c) => {
+  const t = await teacher(c, false); if (t instanceof Response) return t; const { auth, run } = t;
+  const no = settingAuthority(c, auth, run); if (no) return no;
+  const pin = parseLesson(run.lesson_json);
+  if (!pin || !pin.course_id) return c.json({ error: 'this run has no pinned lesson; a setting needs a base to change from', reason: 'run_lesson_not_pinned' }, 409);
+  try {
+    const cohort = await lessonCohortOf(c.env, run.cohort_id), base = await readLesson(c.env, cohort, pin.course_id, pin.version, run.profile_id);
+    if (!base) return c.json({ error: "the run's pinned lesson cannot be opened", reason: 'lesson_unavailable' }, 409);
+    const rows = await c.env.HPS_DB.prepare('SELECT version FROM authoring_versions WHERE cohort_id=? AND course_id=? ORDER BY source_revision DESC, version DESC LIMIT ?').bind(cohort, pin.course_id, MAX_SETTING_OPTIONS + 1).all<{ version: string }>();
+    const options = [];
+    for (const r of (rows.results ?? []).slice(0, MAX_SETTING_OPTIONS)) {
+      const l = r.version === base.version ? base : await readLesson(c.env, cohort, pin.course_id, r.version, run.profile_id);
+      const why = !l ? 'lesson_unavailable' : runtimeOf(l, run.profile_id) !== runtimeOf(base, run.profile_id) ? 'setting_runtime_change' : '';
+      options.push({ version: r.version, is_run_version: r.version === base.version, selectable: !why, reason: why, ...(l ? { sha256: l.sha256, title: l.content.title ?? '', impact: lessonImpact(base.content, l.content) } : {}) });
+    }
+    return c.json({ course_id: pin.course_id, run_version: base.version, options, truncated: (rows.results ?? []).length > MAX_SETTING_OPTIONS, applies: 'next_question' }, 200);
+  } catch (err) { console.error('setting options unreadable:', err); return c.json({ error: 'setting options cannot be read right now', reason: 'distribution_unavailable' }, 503); }
+});
+
 // ── contents: immutable revisions of a per-run object ────────────────────────
 classroomDistributionTeacher.post(root + '/contents', async (c) => {
   const t = await teacher(c, true); if (t instanceof Response) return t; const { auth, run } = t, db = c.env.HPS_DB, now = Date.now();

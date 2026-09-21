@@ -266,8 +266,9 @@ const KEY3 = one('SELECT binding_key k FROM classroom_lesson_bindings WHERE clas
 {
   const Ft = await tokenFor('student-a'); f.db.prepare('DELETE FROM authoring_versions WHERE course_id=? AND version=?').run(course, V2);
   const r = await ask(Ft, { turn: turnId(), key: one('SELECT binding_key k FROM classroom_lesson_bindings WHERE student_id=? ORDER BY binding_seq DESC LIMIT 1', 'student-a').k });
-  assert.equal(r.status, 409); assert.equal(r.json.error.code, 'lesson_unavailable'); assert.equal(r.upstream.length, 0);
-  ok('a switched version that stops resolving is refused (409 lesson_unavailable); nothing runs under the token lesson instead');
+  assert.equal(r.status, 403, 'a 403, not the legacy 409: the pinned SDK retries a 409 for a minute and more'); assert.equal(r.json.error.code, 'lesson_unavailable'); assert.match(r.json.error.message, /\[hps:lesson_unavailable\]/); assert.equal(r.upstream.length, 0);
+  assert.equal((await profileOf(Ft)).status, 409, 'the profile route keeps the existing 409');
+  ok('a switched version that stops resolving is refused (403 lesson_unavailable on the model routes); nothing runs under the token lesson instead');
 }
 
 // ── "no such table": enforcement on, migration 0024 absent ───────────────────

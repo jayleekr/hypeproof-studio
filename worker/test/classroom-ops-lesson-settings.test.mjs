@@ -77,6 +77,7 @@ try {
 
   let prompt, setting;
   await check('S14 authority and admission: `lesson_settings` is its own capability and switch; a setting names a frozen version of THE RUN\'S course that resolves now', async () => {
+    f.db.exec('CREATE TEMP TABLE authoring_versions_keep AS SELECT module_json FROM authoring_versions WHERE version=' + JSON.stringify(V3).replace(/"/g, "'"));
     const before = tables();
     assert.equal((await save({ kind: 'setting', title: '2번째 판', body: '안내', lesson: ref(V2) }, X)).json.reason, 'ops_capability_missing', 'X holds distribute and everything else — not lesson_settings');
     assert.equal((await save({ kind: 'setting', title: 't', body: 'b', lesson: ref(V2) }, Y)).json.reason, 'ops_capability_missing');
@@ -98,6 +99,15 @@ try {
     const status = (await f.request(f.base + '/status', 'GET', undefined, L)).json; assert.deepEqual(status.lesson_settings, { enabled: true, held: true, enforced: true, pinned: true });
     assert.deepEqual(status.seats.map((s) => [s.inbox_prompt, s.lesson_binding]), [['declared', 'declared'], ['declared', 'declared'], ['declared', 'declared'], ['not_declared', 'not_declared']]);
     assert.equal((await f.request(f.base + '/status', 'GET', undefined, X)).json.lesson_settings.held, false);
+    // The picker reads the same frozen rows under the same authority, and judges each by the rule that admits a setting.
+    const opts = await f.request(f.base + '/setting-options', 'GET', undefined, L); assert.equal(opts.status, 200, opts.raw);
+    assert.deepEqual([opts.json.course_id, opts.json.run_version, opts.json.applies], [course, V1, 'next_question']);
+    assert.deepEqual(opts.json.options.map((o) => [o.version, o.is_run_version, o.selectable, o.sha256]).sort(), [[V1, true, true, sha[V1]], [V2, false, true, sha[V2]], [V3, false, true, sha[V3]]].sort());
+    const o3 = opts.json.options.find((o) => o.version === V3); assert.deepEqual(o3.impact.steps, { kept: ['intro'], removed: ['build', 'review'], added: ['craft-v3'] }); assert.deepEqual(o3.impact.title.to, '합성 수업 v3');
+    assert.equal((await f.request(f.base + '/setting-options', 'GET', undefined, X)).json.reason, 'ops_capability_missing');
+    f.db.prepare("UPDATE authoring_versions SET module_json='{' WHERE cohort_id=? AND course_id=? AND version=?").run(f.cohort, course, V3);
+    const broken = (await f.request(f.base + '/setting-options', 'GET', undefined, L)).json.options.find((o) => o.version === V3); assert.deepEqual([broken.selectable, broken.reason, broken.sha256], [false, 'lesson_unavailable', undefined], 'a version that no longer resolves is listed as not selectable, never offered');
+    f.db.prepare('UPDATE authoring_versions SET module_json=(SELECT module_json FROM authoring_versions_keep) WHERE cohort_id=? AND course_id=? AND version=?').run(f.cohort, course, V3);
   });
 
   await check('P1/P6 prompt: only the selected learners get it; an app that holds notices but cannot import a prompt is "unsupported" and its body is never sent', async () => {

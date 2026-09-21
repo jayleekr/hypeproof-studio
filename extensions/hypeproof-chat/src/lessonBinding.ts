@@ -59,8 +59,8 @@ export const REFUSAL_COPY: Record<RefusedTurnEnding, string> = {
  */
 export function bindingRefusalCode(err: unknown): string | null {
   const e = err as { code?: unknown; kind?: unknown; message?: unknown } | null;
-  for (const v of [e?.code, e?.kind]) if (typeof v === "string" && /^lesson_(binding|turn)_[a-z_]+$/.test(v)) return v;
-  const m = typeof e?.message === "string" ? /\[hps:(lesson_(?:binding|turn)_[a-z_]+)\]/.exec(e.message) : null;
+  for (const v of [e?.code, e?.kind]) if (typeof v === "string" && /^lesson_(binding|turn)_[a-z_]+$|^lesson_unavailable$/.test(v)) return v;
+  const m = typeof e?.message === "string" ? /\[hps:(lesson_(?:binding|turn)_[a-z_]+|lesson_unavailable)\]/.exec(e.message) : null;
   return m ? m[1]! : null;
 }
 

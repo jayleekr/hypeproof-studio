@@ -294,7 +294,12 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     const modelRoute = path.startsWith('/v1/messages') || path === '/v1/chat/completions';
     const resolved = await resolveEffectiveLesson(env, payload, { classRunId: payload.native_trial ? null : session.session_id, lessonCohort: cohortDecision.lessonCohort, mode: modelRoute ? 'turn' : 'read', turnId: c.req.header(TURN_HEADER), expectKey: c.req.header(BINDING_HEADER), now: Date.now() });
     if (!resolved.ok) {
-      if (resolved.code === 'lesson_unavailable') return { ok: false, response: c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 확인하세요.' } }, 409) };
+      // The token's own lesson keeps its existing 409. A SWITCHED version that stopped resolving (a profile whose grants or model
+      // pins shrank) is refused with 403 on the model routes: observed on the pinned Agent SDK, the CLI retries a 409 for a
+      // minute and more (14 attempts in 62 s, until aborted), while a 403 ends the turn at once. Nothing runs under a wider lesson.
+      if (resolved.code === 'lesson_unavailable') return { ok: false, response: resolved.switched && modelRoute
+        ? c.json({ error: { type: 'lesson_binding', code: 'lesson_unavailable', message: '바뀐 수업 설정의 강의 버전을 열 수 없어 실행하지 않았습니다. 강사에게 알려 주세요. [hps:lesson_unavailable]' } }, 403)
+        : c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 확인하세요.' } }, 409) };
       return { ok: false, response: c.json({ error: { type: 'lesson_binding', code: resolved.code, message: bindingRefusalMessage(resolved.code), ...(resolved.current_key ? { current_key: resolved.current_key } : {}) } }, 403) };
     }
     const lesson = resolved.lesson;
