@@ -8,11 +8,13 @@
 
 export const OPS_SCHEMA_VERSION = 1;
 export const OPS_PROTOCOL = 1;
-export const OPS_FLAGS = ['ops_observe', 'ops_commands', 'ops_collect', 'ops_reports', 'ops_delivery'] as const;
+/** `ops_delivery` is sending REPORTS to recipients. `ops_distribute` (U2) is putting notices/materials into selected learners' inboxes. */
+export const OPS_FLAGS = ['ops_observe', 'ops_commands', 'ops_collect', 'ops_reports', 'ops_delivery', 'ops_distribute'] as const;
 export type OpsFlag = (typeof OPS_FLAGS)[number];
 /** Issuer-scope capabilities. Absent on every issuer minted before this landed — new authority is opt-in. */
 /** `coach` is deliberately separate from `command`/`reset`: fixing a PC and guiding a learner are different authorities. */
-export const OPS_CAPABILITIES = ['observe', 'manage', 'command', 'reset', 'pause', 'coach', 'collect', 'review', 'deliver'] as const;
+/** `distribute` (U2) is its own authority: holding `deliver`, `coach`, `collect` or anything else never implies it. */
+export const OPS_CAPABILITIES = ['observe', 'manage', 'command', 'reset', 'pause', 'coach', 'collect', 'review', 'deliver', 'distribute'] as const;
 export type OpsCapability = (typeof OPS_CAPABILITIES)[number];
 
 /** Every ops_* timestamp is unix milliseconds (token expiries included, converted at the edge). */

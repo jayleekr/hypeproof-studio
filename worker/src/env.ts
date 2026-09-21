@@ -8,6 +8,8 @@ export interface Env {
   /** #751 R6 — id of a registered live delivery adapter. Unset (the default) means only dry-run delivery can run. */
   HPS_DELIVERY_PROVIDER?: string;
   /** #751 R5 — 'service-anthropic' turns the Service-side report evaluator on. Unset (default): jobs wait as `evaluator_not_configured`. */
+  /** #751 U2 — comma-separated https hosts a distributed material may link to. Unset (default) = every link is refused. */
+  HPS_CLASSROOM_LINK_HOSTS?: string;
   HPS_CLASSROOM_EVALUATOR?: string;
   HPS_CLASSROOM_EVALUATOR_MODEL?: string;
   /** #751 — scheduled retention. Unset days (default) = the run does nothing. With days set it only reports (dry-run) until HPS_CLASSROOM_RETENTION='enforce'. */

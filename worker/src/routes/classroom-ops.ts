@@ -18,6 +18,7 @@ import { bumpRateCounter, getActiveSession, getRoster } from '../lib/kv';
 import { readLesson } from '../lib/lesson-delivery';
 import { readRunControl } from '../lib/classroom-ops-control';
 import { scrubSecrets } from '../lib/scrub-secrets';
+import { PENDING_PROBE, declaresInbox, deviceRebindStatements, distributionExchange, issuerFenceStatements, type DistributionBlock } from '../lib/classroom-distribution-store';
 import {
   ID_RE, MAX_SEATS, MAX_SYNC_BYTES, MAX_SYNC_EVENTS, OPS_FLAGS, OPS_PROTOCOL, OPS_SCHEMA_VERSION, PAIRING_TTL_MS,
   RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
@@ -64,9 +65,33 @@ export async function recordTokenIssue(env: Env, t: { jti: string; cohort: strin
 }
 
 /** Throws on storage failure: the caller must not report the revocation as complete. */
-export async function revokeOpsGrantsForIssuer(env: Env, issuerJti: string): Promise<void> {
+export async function revokeOpsGrantsForIssuer(env: Env, issuerJti: string, by = 'operator'): Promise<void> {
   if (!opsEnabled(env)) return;
-  await env.HPS_DB.prepare("UPDATE ops_grants SET state='revoked',revoked_at=?,revoked_reason='issuer_revoked',revision=revision+1 WHERE issuer_jti=? AND state IN ('issued','active')").bind(Date.now(), issuerJti).run();
+  const now = Date.now(), grants = env.HPS_DB.prepare("UPDATE ops_grants SET state='revoked',revoked_at=?,revoked_reason='issuer_revoked',revision=revision+1 WHERE issuer_jti=? AND state IN ('issued','active')").bind(now, issuerJti);
+  // U2: the same transaction records the revocation in D1 (the distribution guards read it, not KV) and closes every open
+  // distribution this token created — so it stops reaching learners even when ANOTHER instructor paired their devices.
+  try { await env.HPS_DB.batch([grants, ...issuerFenceStatements(env.HPS_DB, issuerJti, { reason: 'issuer_revoked', by, sweep: true, now })]); }
+  catch (err) {
+    // A database without migration 0023 has no fence table. The pre-existing guarantee (grants closed) must not regress
+    // because of that, and the caller is still told the revocation is incomplete.
+    await grants.run();
+    throw err;
+  }
+}
+/**
+ * Issuer re-scope and class close revoke a token in KV only. For distribution that is not a boundary, so the D1 fence is
+ * written here. `sweep` = the replaced token's open distributions are closed too (always for a plain revocation; for a
+ * re-scope only when the new scope no longer holds `distribute`, so re-issuing a token mid-class does not cancel what is
+ * still waiting for offline learners). Throws on storage failure: the caller must not report the fence as written.
+ */
+export async function fenceIssuerForDistribution(env: Env, issuerJti: string, o: { reason: string; by: string; sweep: boolean }): Promise<void> {
+  if (!opsEnabled(env)) return;
+  await env.HPS_DB.batch(issuerFenceStatements(env.HPS_DB, issuerJti, { ...o, now: Date.now() }));
+}
+export async function liftIssuerFence(env: Env, issuerJti: string): Promise<void> {
+  if (!opsEnabled(env)) return;
+  const { issuerFenceLiftStatement } = await import('../lib/classroom-distribution-store');
+  await issuerFenceLiftStatement(env.HPS_DB, issuerJti, Date.now()).run();
 }
 
 // ── instructor surface (/admin/cohorts/:cohort/classroom/runs/…) ────────────
@@ -230,6 +255,7 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
       // Review F4: which signals this device's build can report from its real runtime path. An absent signal from a
       // build that cannot report it is "unknown", not "nothing happened". A build that predates the declaration says nothing.
       observes: ((): { step: boolean | null; runtime: boolean | null; evidence: boolean | null } => { let caps: string[] | null = null; try { caps = r.device_caps ? JSON.parse(r.device_caps) : null; } catch { caps = null; } const has = (k: string) => (!connected || !caps ? null : caps.includes(k)); return { step: has('observe_step'), runtime: has('observe_runtime'), evidence: has('observe_evidence') }; })(),
+      distribution_inbox: ((): 'declared' | 'not_declared' | 'unknown' => { if (!connected || !r.device_caps) return 'unknown'; try { return declaresInbox(JSON.parse(r.device_caps)) ? 'declared' : 'not_declared'; } catch { return 'unknown'; } })(),
       step_seq: state.step?.seq, activation: slot('activation'), step: slot('step'), runtime: slot('runtime'), error: slot('error'), upload: slot('upload'), sample: slot('sample'),
     };
   });
@@ -261,6 +287,9 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
     actions: Object.entries(COMMAND_ACTIONS).map(([action, a]) => ({ action, kind: a.kind, capability: a.capability, mutating: a.mutating, enabled: parseFlags(run.flags_json)[a.flag], held: (auth.scope.ops ?? []).includes(a.capability) })),
     // Collection is not a command: an instructor may hold `collect` without `command`, and the board has to know that to offer the selection.
     collection: { enabled: parseFlags(run.flags_json).ops_collect, held: (auth.scope.ops ?? []).includes('collect') },
+    // Distribution (U2) is neither a command nor a collection: its own switch, its own authority. `link_hosts_configured` tells the
+    // author up front whether a material may carry links at all.
+    distribution: { enabled: parseFlags(run.flags_json).ops_distribute, held: (auth.scope.ops ?? []).includes('distribute'), link_hosts_configured: !!(c.env.HPS_CLASSROOM_LINK_HOSTS ?? '').trim() },
     run: { class_run_id: run.class_run_id, profile_id: run.profile_id, roster_revision: run.roster_revision, flags: parseFlags(run.flags_json), lesson: parseLesson(run.lesson_json), starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at },
     // Scope note for the UI: this is the run snapshot, not the cumulative cohort roster.
     roster: { source: 'class_run_seats', total: seats.length },
@@ -313,6 +342,11 @@ classroomOpsApp.post('/connect', async (c) => {
     audit(db, run.class_run_id, pairing.seat_id, 'device', device, 'device_connected', { grant_id: id, protocol: b.protocol, app_version: version }, now),
   ]);
   const grant = await db.prepare('SELECT connection_epoch FROM ops_grants WHERE id=?').bind(id).first<{ connection_epoch: number }>();
+  // U2: a new device starts with an empty inbox. Intents that are still valid go to it again; what the old device held is no
+  // longer what this learner sees. Isolated on purpose — pairing must succeed even on a database without migration 0023,
+  // and the instructor's result view derives "not on this device" on its own if this did not run.
+  try { await db.batch(deviceRebindStatements(db, { class_run_id: run.class_run_id, seat_id: pairing.seat_id, seat_revision: pairing.seat_revision, student_id: pairing.student_id }, device, now)); }
+  catch (err) { console.error('distribution rebind skipped:', err); }
   return c.json({
     credential: await signOpsCredential(id, c.env.HPS_SIGNING_SECRET), grant_id: id, device_registration_id: device,
     class_run_id: run.class_run_id, seat_id: pairing.seat_id, connection_epoch: grant?.connection_epoch ?? 1, expires_at: expires,
@@ -357,10 +391,10 @@ classroomOpsApp.post('/sync', async (c) => {
   const receiptsIn: unknown[] = b.receipts === undefined ? [] : b.receipts;
   if (!Array.isArray(receiptsIn) || receiptsIn.length > 50) return c.json({ error: 'receipts[] ≤ 50', reason: 'batch_limit' }, 400);
 
-  let device = await db.prepare('SELECT first_seen_at,last_seen_at,contiguous_seq FROM ops_device_connections WHERE grant_id=? AND app_instance_id=? AND boot_id=?').bind(g.id, b.app_instance_id, b.boot_id).first<{ first_seen_at: number; last_seen_at: number; contiguous_seq: number }>();
+  let device = await db.prepare('SELECT first_seen_at,last_seen_at,contiguous_seq,capabilities_json FROM ops_device_connections WHERE grant_id=? AND app_instance_id=? AND boot_id=?').bind(g.id, b.app_instance_id, b.boot_id).first<{ first_seen_at: number; last_seen_at: number; contiguous_seq: number; capabilities_json?: string }>();
   const stmts = [];
   if (!device) {
-    device = { first_seen_at: now, last_seen_at: 0, contiguous_seq: 0 };
+    device = { first_seen_at: now, last_seen_at: 0, contiguous_seq: 0, capabilities_json: JSON.stringify(Array.isArray(b.capabilities) ? b.capabilities.filter((x: unknown) => typeof x === 'string').slice(0, 32) : []) };
     // A window that did not do the pairing itself (second window, restart) declares what it can run here.
     const caps = Array.isArray(b.capabilities) && b.capabilities.length <= 32 && b.capabilities.every((x: unknown) => typeof x === 'string' && /^[a-z_]{1,48}$/.test(x)) ? b.capabilities : [];
     stmts.push(db.prepare("INSERT INTO ops_device_connections(grant_id,app_instance_id,boot_id,protocol,capabilities_json,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING").bind(g.id, b.app_instance_id, b.boot_id, OPS_PROTOCOL, JSON.stringify(caps), now, now));
@@ -427,12 +461,29 @@ classroomOpsApp.post('/sync', async (c) => {
     try { exchange = await commandExchange(db, g, b.app_instance_id, receiptsIn, now, parseFlags(g.flags_json).ops_commands); }
     catch (err) { console.error('ops command exchange failed:', err); exchange = { commands: [], receipt_acks: [], lease: 'unknown' }; }
   }
+  // U2 — targeted distribution. Isolated like the command exchange: a failure here drops this block only, and an absent
+  // block is "no news", never success. The probe is a partial-index lookup; it runs when the feature is on for this run,
+  // when the device has something to report, or (feature off) at the slow state cadence so that a withdrawal issued
+  // during a rollback still reaches the device.
+  let distribution: DistributionBlock | null = null;
+  let declared = false; try { declared = declaresInbox(JSON.parse(device.capabilities_json ?? '[]')); } catch { declared = false; }
+  const distFlag = parseFlags(g.flags_json).ops_distribute, distBody = b.distribution;
+  if (distBody !== undefined || (declared && (distFlag || due)) || (!declared && distFlag && due)) {
+    try {
+      const hint = await db.prepare(`SELECT ${PENDING_PROBE} AS pending FROM ops_grants g WHERE g.id=?`).bind(g.id).first<{ pending: number }>();
+      if (hint?.pending || distBody !== undefined) {
+        const lease = exchange.lease === 'unknown' ? await seatLease(db, g, b.app_instance_id, now) : { owner: exchange.lease === 'owner' };
+        if (lease.owner) distribution = await distributionExchange(db, g, { body: distBody, declared, flagOn: distFlag, runEnded: !!g.run_ended || now > g.run_ends, runEndsAt: g.run_ends, pendingHint: !!hint?.pending, now });
+      }
+    } catch (err) { console.error('ops distribution exchange failed:', err); distribution = null; }
+  }
   return c.json({
     schema_version: OPS_SCHEMA_VERSION, server_time: now, connection_epoch: g.connection_epoch,
     ack: { boot_id: b.boot_id, contiguous_seq: ack.contiguous, missing: ack.missing }, quarantined, rejected,
     commands: exchange.commands, receipt_acks: exchange.receipt_acks, lease: exchange.lease,
     // The device applies this to its own new-run admission and reports the revision it applied.
-    control: await readRunControl(c.env, g.class_run_id) ?? { paused: false, control_revision: 0 }, poll_after_ms: exchange.commands.length ? 1000 : poll,
+    control: await readRunControl(c.env, g.class_run_id) ?? { paused: false, control_revision: 0 }, poll_after_ms: exchange.commands.length || distribution?.more || distribution?.items.length ? 1000 : poll,
+    ...(distribution ? { distribution } : {}),
   });
 });
 
@@ -449,8 +500,8 @@ function settleOverdue(db: Db, where: string, args: unknown[], now: number) {
   ];
 }
 
-async function commandExchange(db: Db, g: GrantRow, instance: string, receiptsIn: unknown[], now: number, deliver: boolean) {
-  // Seat execution lease: one window per seat may run commands; the others only observe.
+/** Seat execution lease: one window per seat may run commands or take inbox items; the others only observe. */
+async function seatLease(db: Db, g: GrantRow, instance: string, now: number) {
   let lease = await db.prepare('SELECT app_instance_id,generation,renewed_at FROM ops_seat_leases WHERE grant_id=?').bind(g.id).first<{ app_instance_id: string; generation: number; renewed_at: number }>();
   if (!lease) {
     await db.prepare('INSERT INTO ops_seat_leases(grant_id,app_instance_id,generation,renewed_at) VALUES(?,?,1,?) ON CONFLICT(grant_id) DO NOTHING').bind(g.id, instance, now).run();
@@ -461,7 +512,11 @@ async function commandExchange(db: Db, g: GrantRow, instance: string, receiptsIn
   } else if (lease.app_instance_id === instance && now - lease.renewed_at >= 45_000) {
     await db.prepare('UPDATE ops_seat_leases SET renewed_at=? WHERE grant_id=? AND app_instance_id=?').bind(now, g.id, instance).run();
   }
-  const owner = lease?.app_instance_id === instance;
+  return { owner: lease?.app_instance_id === instance, lease };
+}
+
+async function commandExchange(db: Db, g: GrantRow, instance: string, receiptsIn: unknown[], now: number, deliver: boolean) {
+  const { owner, lease } = await seatLease(db, g, instance, now);
   const scope = 'class_run_id=? AND seat_id=?', scopeArgs = [g.class_run_id, g.seat_id];
   await db.batch([
     ...settleOverdue(db, scope, scopeArgs, now),

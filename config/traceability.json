@@ -2225,6 +2225,21 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/session-spool-seq.smoke.mjs"
+        },
+        {
+          "path": "worker/src/routes/classroom-distribution.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-distribution.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-distribution-store.ts"
+        },
+        {
+          "path": "worker/migrations/0023-classroom-distribution.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-distribution.test.mjs"
         }
       ]
     },
