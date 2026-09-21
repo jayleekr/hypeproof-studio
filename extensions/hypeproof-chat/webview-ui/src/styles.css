@@ -1356,7 +1356,28 @@ html, body, #root {
   background: var(--hp-bg); color: var(--hp-ink); border: 1px solid var(--hp-line);
   border-radius: 6px; padding: 8px; font: inherit;
 }
-.hp-evidence-form button { align-self: flex-start; min-height: 44px; }
+/* These two buttons ("기대 조건 남기기", "들은 말 남기기") had NO colour rule and no
+   generic `button` rule to inherit from, so they fell through to the browser's
+   default grey chrome — grey text on grey, unreadable on the dark panel. Every
+   other button family in this file sets its own background and colour; this one
+   was simply missed. Found by photographing the rendered drawer.
+
+   Quiet, not Primary: the one emphasised slot on the screen belongs to region
+   A's "지금 할 행동" (SX-04 · SX-51). Same treatment as `.hp-cta-quiet`. */
+.hp-evidence-form button {
+  align-self: flex-start; min-height: 44px;
+  padding: 10px 14px; font: inherit; cursor: pointer;
+  color: var(--hp-ink); background: transparent;
+  border: 1px solid var(--hp-line); border-radius: 6px;
+}
+.hp-evidence-form button:hover:not(:disabled) { border-color: var(--hp-muted); }
+/* Disabled still has to be READ — it is how the student learns what is missing.
+   Colour alone never carries the state (SX-50); the reason is spelled out beside
+   the button. */
+.hp-evidence-form button:disabled { opacity: .55; cursor: default; }
+/* A row with no words of the student's own shows its kind name instead. Muted and
+   italic so it does not read as something they wrote. */
+.hp-evidence-kindonly { color: var(--hp-muted); font-style: italic; }
 .hp-evidence-filter { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; font-size: 13px; color: var(--hp-muted); }
 .hp-evidence-empty { margin: 0; font-size: 13px; color: var(--hp-muted); }
 .hp-evidence-group { margin: 0 0 12px; }
