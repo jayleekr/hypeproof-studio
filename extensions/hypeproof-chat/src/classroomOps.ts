@@ -17,6 +17,8 @@ export const OPS_PROTOCOL = 1;
 /** Base capability. The host appends "commands" plus each action it registered an executor for. */
 /** `observe_*` say WHAT this build reports from its real runtime path. A board must show a missing one as "unknown", never as "nothing happened". */
 export const OPS_CLIENT_CAPABILITIES = ["observe", "observe_step", "observe_runtime", "observe_evidence"] as const;
+/** U4 — this build names the command a follow-up observation belongs to. Without it the Service expects none and says so. */
+export const RECOVERY_FOLLOWUP_CAPABILITY = "recovery_followup";
 export const SYNC_TIMEOUT_MS = 4000;
 export const BACKOFF_STEPS_MS = [5000, 10000, 20000, 60000] as const;
 export const MAX_BATCH_EVENTS = 100;
@@ -28,7 +30,7 @@ export type OpsErrorClass =
   | "auth_expired" | "auth_signature" | "auth_revoked" | "auth_rejected" | "class_not_open" | "profile_mismatch"
   | "roster_missing" | "budget_limit" | "provider_rate_limit" | "provider_5xx" | "network" | "sdk_not_ready"
   | "tool_not_ready" | "review_error" | "upload_failed" | "unknown";
-export type OpsEventKind = "activation" | "step" | "runtime" | "error" | "upload" | "evidence";
+export type OpsEventKind = "activation" | "step" | "runtime" | "error" | "upload" | "evidence" | "recovery";
 /** Who acted. Kept per event so a learner's own decision is never merged with what the AI or an instructor did. */
 export type OpsActor = "student" | "ai" | "teacher" | "external_user" | "tool" | "system" | "unknown";
 export type SourceState = "real" | "simulated" | "self_reported" | "unverified";
@@ -141,14 +143,55 @@ export function turnObservations(t: TurnOutcome): Array<{ kind: "activation" | "
     else if (!t.sdkFallback) out.push({ kind: "error", actor: "system", payload: errorPayload("unknown", { blocking: false, cleared: true }) });
     return out;
   }
-  const kind = t.errorKind ?? "";
-  const cls: OpsErrorClass = kind.startsWith("auth:") || t.status !== undefined
-    ? classifyFailure({ status: t.status ?? (kind.startsWith("auth:") ? 401 : undefined), code: t.code ?? (kind.startsWith("auth:") ? kind.slice(5) : undefined) })
-    : kind === "transport" ? "network" : "unknown";
+  const kind = t.errorKind ?? "", cls = turnFailureClass(t);
   out.push({ kind: "error", actor: "system", payload: errorPayload(cls, { code: safeCode(kind.replace(/[^a-z0-9_.-]/gi, "_").toLowerCase()) ?? undefined, requestId: t.requestId, blocking: true }) });
   if (cls === "unknown" && !kind.startsWith("auth:")) out.push({ kind: "activation", actor: "system", payload: activationPayload("runtime_failed") });
   return out;
 }
+
+/** The failure class of a finished turn, by the same rule the board's error report uses. */
+export function turnFailureClass(t: TurnOutcome): OpsErrorClass {
+  const kind = t.errorKind ?? "";
+  return kind.startsWith("auth:") || t.status !== undefined
+    ? classifyFailure({ status: t.status ?? (kind.startsWith("auth:") ? 401 : undefined), code: t.code ?? (kind.startsWith("auth:") ? kind.slice(5) : undefined) })
+    : kind === "transport" ? "network" : "unknown";
+}
+
+// ── U4: what happened AFTER a remote action, named by that action's command id ──
+/** An id, a code and at most the token's public issue id. No text, no path, no token. */
+export const recoveryPayload = (commandId: string, check: "profile_verified" | "turn_completed" | "turn_failed", o: { tokenJti?: string; errorClass?: OpsErrorClass; runtime?: "agent-sdk" | "proxy" } = {}) => ({
+  command_id: commandId, check,
+  ...(check === "profile_verified" && safeId(o.tokenJti) ? { token_jti: o.tokenJti } : {}),
+  ...(check === "turn_failed" && o.errorClass ? { error_class: o.errorClass } : {}),
+  ...(o.runtime ? { runtime: o.runtime } : {}),
+});
+/**
+ * A stop or a preserving restart proves a READY state, not a working AI. Whether it works is known from the learner's own
+ * next question — never from a request this app makes on its own (that would spend the class budget and put words in the
+ * learner's mouth). The watch is armed by the action and answered ONCE, by the first turn that really finished.
+ */
+export class RecoveryWatch {
+  private armed: { commandId: string; epoch: number } | null = null;
+  arm(commandId: string, epoch: number): void { this.armed = { commandId, epoch }; }
+  clear(): void { this.armed = null; }
+  get pending(): string | null { return this.armed?.commandId ?? null; }
+  /** `epoch` = the login generation now. A turn after the learner signed in again belongs to another generation: it proves nothing about the old command. */
+  onTurn(t: TurnOutcome, epoch: number): ReturnType<typeof recoveryPayload> | null {
+    const a = this.armed; if (!a) return null;
+    if (a.epoch !== epoch) { this.armed = null; return null; }
+    if (t.aborted) return null; // the learner pressed Stop: neither a success nor a fault, keep waiting
+    this.armed = null;
+    // A turn that only completed because the SDK was given up on is not the SDK working again.
+    if (t.ok && t.sdkFallback) return recoveryPayload(a.commandId, "turn_failed", { errorClass: "sdk_not_ready", runtime: t.runtime });
+    return t.ok ? recoveryPayload(a.commandId, "turn_completed", { runtime: t.runtime }) : recoveryPayload(a.commandId, "turn_failed", { errorClass: turnFailureClass(t), runtime: t.runtime });
+  }
+}
+/**
+ * Re-verifying the token can only disprove faults that ARE about the token, the class gate or the network. A runtime, tool or
+ * provider fault stays on the board until a turn really completes — otherwise "diagnostics ran" would read as "fixed".
+ */
+const PROFILE_DISPROVABLE: readonly string[] = ["auth_expired", "auth_signature", "auth_revoked", "auth_rejected", "class_not_open", "profile_mismatch", "roster_missing", "network"];
+export const profileCheckClears = (faultClass: string | null): boolean => faultClass === null || PROFILE_DISPROVABLE.includes(faultClass);
 
 /** jti/exp are not secrets; the token itself never enters this module. */
 export function tokenIdentityUnverified(token: string): { jti?: string; exp?: number; u?: string; c?: string } {

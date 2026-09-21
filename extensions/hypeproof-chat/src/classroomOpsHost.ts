@@ -13,7 +13,8 @@ import { removeFrozenCopy } from "./evidenceSnapshotStore";
 import { resetPostcondition, runPreservingReset, stopAndConfirm, type Preservation, type ResetManifest, type ResetSteps } from "./runtimeReset";
 import {
   ChangeGate, OPS_CLIENT_CAPABILITIES, OPS_PROTOCOL, OpsOutbox, activationPayload, classifyFailure, errorPayload,
-  evidencePayload, runtimePayload, stepPayload, turnObservations, uploadPayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
+  evidencePayload, runtimePayload, stepPayload, turnObservations, uploadPayload, startOpsSync, tokenIdentityUnverified,
+  RECOVERY_FOLLOWUP_CAPABILITY, RecoveryWatch, profileCheckClears, recoveryPayload, turnFailureClass, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
 } from "./classroomOps";
 import { INBOX_CAPABILITY, INBOX_PROMPT_CAPABILITY, LESSON_BINDING_CAPABILITY, boundSetting, emptyView, inboxPresence, markSettingBound, mayHideInbox, pendingSetting, pointerIsStale, type InboxView, type LessonRef } from "./classroomInbox";
 import { InboxSession, InboxStore, inboxDir, inboxView } from "./classroomInboxStore";
@@ -49,7 +50,12 @@ export interface ClassroomOpsActions {
   /** Re-verify the stored learning token against the Service without changing panel state. */
   probeProfile(): Promise<{ ok: boolean; status?: number; code?: string; requestId?: string; network?: boolean; noToken?: boolean }>;
   refreshProfile(): Promise<boolean>;
-  recoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; healthy: boolean }>;
+  /**
+   * U4 — `artifact` is about the page the learner actually had open, not the server: "opened" = it answered 2xx with a document,
+   * "missing" = the server is up and the page is not there (a 404 is not a recovery), "unreachable" = nothing answered.
+   * `reopened` = after a restart on a new address, the learner's preview tab was re-pointed to it.
+   */
+  recoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; artifact: "opened" | "missing" | "unreachable"; reopened: boolean }>;
   // R3 — stop / preserving reset / pause. Nothing here can clear history or delete a file.
   requestStop(): void;
   freezeInput(frozen: boolean): Promise<void>;
@@ -87,6 +93,11 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   private readonly actions: ClassroomOpsActions;
   private epoch = 0;
   private token = "";
+  /** U4 — armed by a stop / preserving restart, answered once by the learner's next finished turn. */
+  private readonly recoveryWatch = new RecoveryWatch();
+  /** The class of the fault this connection last reported, so a token re-check clears only what it can actually disprove. */
+  private faultClass: string | null = null;
+  private followup(payload: ReturnType<typeof recoveryPayload>): void { void this.outbox?.add("recovery", payload); this.loop?.nudge(); }
 
   constructor(context: vscode.ExtensionContext, runtime: () => { idleMs: number; status: RuntimeStatus }, actions: ClassroomOpsActions, log: (line: string) => void) {
     this.context = context; this.runtime = runtime; this.actions = actions; this.log = log;
@@ -215,22 +226,34 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
         this.profileResult(p, this.token);
         return { ok: true, code: p.ok ? "token_ok" : p.network ? "profile_network" : `profile_${p.status ?? 0}` };
       } },
-      refresh_connection: { mutating: false, run: async () => {
+      refresh_connection: { mutating: false, run: async (_s, command) => {
         // Never under a running turn: a refresh must not disturb work in progress.
         if (this.actions.hasActiveRun()) return { ok: false, code: "busy_active_run" };
-        return (await this.actions.refreshProfile()) ? { ok: true, code: "profile_verified" } : { ok: false, code: "profile_not_verified" };
+        if (!(await this.actions.refreshProfile())) return { ok: false, code: "profile_not_verified" };
+        // U4 — WHICH issue was verified is the whole answer after a re-issue: the old token still validating is not the new one
+        // arriving. The public issue id of the token this app holds now goes with the command id; the token never does.
+        this.followup(recoveryPayload(command.command_id, "profile_verified", { tokenJti: tokenIdentityUnverified(this.token).jti }));
+        return { ok: true, code: "profile_verified" };
       } },
-      cancel_current_run: { mutating: true, label: "지금 실행 중인 작업 멈추기", run: async () => {
+      cancel_current_run: { mutating: true, label: "지금 실행 중인 작업 멈추기", run: async (_s, command) => {
+        if (!this.actions.hasActiveRun()) return { ok: true, code: "no_active_run" };
+        // U4 — the baseline is taken BEFORE the stop and compared after it. Two readings of the same moment would always agree.
+        let before: Preservation | null = null; try { before = await this.actions.preservation(); } catch { before = null; }
         const stopped = await stopAndConfirm({ requestStop: () => this.actions.requestStop(), isStopped: () => !this.actions.hasActiveRun(), wait: (ms) => new Promise((r) => setTimeout(r, ms)) });
         // An unconfirmed stop holds NEW runs only. What already happened outside is not undone, and is not claimed to be.
         this.stopUnconfirmed = !stopped; this.applyHold();
-        return stopped ? { ok: true, code: "run_stopped" } : { ok: false, code: "stop_unconfirmed" };
+        if (!stopped) return { ok: false, code: "stop_unconfirmed" };
+        // The unsent draft (text, attachments, queued input) is byte-identical and the conversation did not get shorter.
+        let kept = false; try { const after = await this.actions.preservation(); kept = !!before && after.draft_sha256 === before.draft_sha256 && after.history_count >= before.history_count; } catch { kept = false; }
+        if (!kept) return { ok: false, code: "preservation_mismatch" };
+        this.recoveryWatch.arm(command.command_id, this.epoch);
+        return { ok: true, code: "run_stopped" };
       } },
       reset_runtime: { mutating: true, label: "AI 세션 다시 시작 (대화와 파일은 그대로)",
         run: async (signal, command) => {
           const r = await runPreservingReset(command.command_id, this.resetSteps(command.command_id), signal);
           if (r.code === "stop_unconfirmed") { this.stopUnconfirmed = true; this.applyHold(); }
-          if (r.ok) { this.stopUnconfirmed = false; this.applyHold(); }
+          if (r.ok) { this.stopUnconfirmed = false; this.applyHold(); this.recoveryWatch.arm(command.command_id, this.epoch); }
           return r;
         },
         postcondition: async (command) => resetPostcondition(await this.readManifest(command.command_id), this.actions.runtimeGeneration()),
@@ -246,8 +269,12 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       restart_preview: { mutating: false, run: async () => {
         const r = await this.actions.recoverPreview();
         if (r.state === "no_preview") return { ok: false, code: "no_preview" };
-        // A restarted server has a new port: say so rather than claim the open tab recovered.
-        return r.healthy ? { ok: true, code: r.state === "reloaded" ? "preview_reloaded" : "preview_restarted_new_url" } : { ok: false, code: "preview_unhealthy" };
+        // U4 — the server answering is not the learner's page opening. A 404 is a fault with its own name, and a restart whose
+        // tab still points at the dead address is not a recovery until that tab is re-pointed (or the learner is asked to).
+        if (r.artifact === "missing") return { ok: false, code: "preview_artifact_missing" };
+        if (r.artifact !== "opened") return { ok: false, code: "preview_unhealthy" };
+        if (r.state === "reloaded") return { ok: true, code: "preview_artifact_ok" };
+        return r.reopened ? { ok: true, code: "preview_reopened_artifact_ok" } : { ok: false, code: "preview_restarted_new_url" };
       } },
     };
   }
@@ -293,7 +320,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     try {
       res = await fetch(`${this.base()}/classroom/ops/connect`, {
         method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10000),
-        body: JSON.stringify({ ticket, app_instance_id: this.appInstanceId, boot_id: randomUUID(), protocol: OPS_PROTOCOL, capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(this.executors()), INBOX_CAPABILITY], app_version: this.version() }),
+        body: JSON.stringify({ ticket, app_instance_id: this.appInstanceId, boot_id: randomUUID(), protocol: OPS_PROTOCOL, capabilities: [...OPS_CLIENT_CAPABILITIES, RECOVERY_FOLLOWUP_CAPABILITY, "commands", ...Object.keys(this.executors()), INBOX_CAPABILITY], app_version: this.version() }),
       });
     } catch {
       void vscode.window.showWarningMessage("서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 같은 코드로 다시 시도하세요."); return;
@@ -380,6 +407,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     this.loop?.stop(); this.runner?.close(); this.loop = null; this.runner = null; this.outbox = null;
     // Disconnecting ends the instructor's pause on this device; the Service's own admission still applies.
     this.paused = false; this.stopUnconfirmed = false; this.applyHold();
+    this.recoveryWatch.clear(); this.faultClass = null;
   }
   private async forget(): Promise<void> {
     const mine = this.meta?.grant_id, was = this.credential;
@@ -431,7 +459,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     }
     this.loop = startOpsSync({
       ...(inbox ? { distribution: inbox } : {}),
-      capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(executors), ...(inbox ? [INBOX_CAPABILITY, INBOX_PROMPT_CAPABILITY, LESSON_BINDING_CAPABILITY] : [])], onEpoch: (e) => { if (live()) this.epoch = e; },
+      capabilities: [...OPS_CLIENT_CAPABILITIES, RECOVERY_FOLLOWUP_CAPABILITY, "commands", ...Object.keys(executors), ...(inbox ? [INBOX_CAPABILITY, INBOX_PROMPT_CAPABILITY, LESSON_BINDING_CAPABILITY] : [])], onEpoch: (e) => { if (live()) this.epoch = e; },
       commands: runner as unknown as NonNullable<Parameters<typeof startOpsSync>[0]["commands"]>,
       post: (body, timeoutMs) => this.post(credential, body, timeoutMs), outbox: this.outbox, appInstanceId: this.appInstanceId,
       sample: () => { const r = this.runtime(); const changed = this.runtimeGate.next(r.status); if (changed) void this.outbox?.add("runtime", runtimePayload(changed)); return { idle_ms: Math.max(0, Math.round(r.idleMs)), runtime_status: r.status, control_revision: this.controlRevision }; },
@@ -520,9 +548,11 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     if (!this.outbox) return;
     if (r.ok) {
       if (this.activationGate.next(`verified:${id.jti}`)) void this.outbox.add("activation", activationPayload("token_verified", { tokenJti: id.jti, tokenExp: id.exp }));
-      if (this.errorGate.next("clear")) void this.outbox.add("error", errorPayload("unknown", { blocking: false, cleared: true }));
+      // U4 — a verified token disproves token, class-gate and network faults only. A runtime fault stays until a turn completes.
+      if (profileCheckClears(this.faultClass)) { this.faultClass = null; if (this.errorGate.next("clear")) void this.outbox.add("error", errorPayload("unknown", { blocking: false, cleared: true })); }
     } else {
       const cls = classifyFailure({ status: r.status, code: r.code, networkError: r.network });
+      this.faultClass = cls;
       // A dead network says nothing about the token: report the error, not a rejection.
       if (cls !== "network" && this.activationGate.next(`rejected:${cls}`)) void this.outbox.add("activation", activationPayload("token_rejected", { reason: cls, httpStatus: r.status }));
       if (this.errorGate.next(`${cls}:${r.status}`)) void this.outbox.add("error", errorPayload(cls, { code: r.status ? `http_${r.status}` : undefined, requestId: r.requestId, blocking: cls !== "network" }));
@@ -532,7 +562,10 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
 
   turnResult(t: import("./classroomOps").TurnOutcome): void {
     if (!this.outbox) return;
+    if (!t.aborted) this.faultClass = t.ok ? (t.sdkFallback ? "sdk_not_ready" : t.toolFailed ? "tool_not_ready" : null) : turnFailureClass(t);
     let added = false;
+    // U4 — the learner's own next question answers the last stop / restart. One answer per command, never a request of our own.
+    const answer = this.recoveryWatch.onTurn(t, this.epoch); if (answer) { void this.outbox.add("recovery", answer); added = true; }
     for (const o of turnObservations(t)) {
       const gate = o.kind === "activation" ? this.activationGate : this.errorGate;
       // Reported on change, not per turn. "cleared" shares its key with the profile check so the two do not echo each other.

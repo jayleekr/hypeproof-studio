@@ -75,6 +75,7 @@ import {
 } from "./coachIdentity.ts";
 import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
+import { classifyArtifact, isLoopbackPreview, previewPagePath, previewPageUrl, type ArtifactState } from "./previewRecovery";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import { extractAgentMd } from "./agentHandoff";
@@ -770,6 +771,31 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     // Reached only after the stop was confirmed, so there is no run state to force-clear here.
     await this.ensureProfile(true);
     return ++this.opsGeneration;
+  }
+  /**
+   * #751 U4 — bring the learner's preview back and check the PAGE they had open, not just the server. Touches no file.
+   * A restarted server has a new address: the learner's own preview tab (a loopback tab, nothing else) is re-pointed to the
+   * same page there. When that cannot be confirmed the answer says so, and the instructor is told the learner must reopen it.
+   */
+  async opsRecoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; artifact: ArtifactState; reopened: boolean }> {
+    const tabsNow = () => vscode.window.browserTabs ?? [];
+    const pagePath = previewPagePath(tabsNow().find((t) => isLoopbackPreview(t.url))?.url);
+    const answers = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(4000) })).status < 500; } catch { return false; } };
+    const r = await this.liveServer.recover(answers);
+    if (r.state === "no_preview" || !r.url) return { state: "no_preview", artifact: "unreachable", reopened: false };
+    const base = r.url, page = previewPageUrl(base, pagePath);
+    let artifact: ArtifactState = "unreachable";
+    try { const res = await fetch(page, { signal: AbortSignal.timeout(4000) }); artifact = classifyArtifact(res.status, res.headers.get("content-type")); } catch { artifact = "unreachable"; }
+    if (artifact !== "opened" || r.state === "reloaded") return { state: r.state, artifact, reopened: false };
+    const stale = tabsNow().filter((t) => isLoopbackPreview(t.url) && !t.url?.startsWith(base));
+    if (!stale.length) return { state: r.state, artifact, reopened: true }; // no tab points at the dead address
+    try {
+      for (const t of stale) { try { await t.close(); } catch { /* a tab that will not close is caught by the check below */ } }
+      const opened = await vscode.window.openBrowserTab(page, { viewColumn: this.editorChat ? vscode.ViewColumn.Two : vscode.ViewColumn.One, preserveFocus: true });
+      this.mcpBrowser ??= new BrowserControl(); this.mcpBrowser.setTargetTab(opened);
+    } catch { /* reported as not reopened */ }
+    const after = tabsNow();
+    return { state: r.state, artifact, reopened: after.some((t) => t.url?.startsWith(base)) && !after.some((t) => isLoopbackPreview(t.url) && !t.url?.startsWith(base)) };
   }
   /** #751 — approval wait is reported as such, never as a failure or as "running". */
   opsRuntime(): { idleMs: number; status: "idle" | "running" | "waiting_approval" } {

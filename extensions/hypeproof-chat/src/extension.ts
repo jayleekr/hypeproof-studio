@@ -188,11 +188,7 @@ export async function activate(context: vscode.ExtensionContext) {
     newGeneration: () => provider.opsNewGeneration(),
     setHold: (hold) => provider.opsSetHold(hold),
     readSpool: (sinceMs) => provider.opsReadSpool(sinceMs),
-    recoverPreview: async () => {
-      const probe = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(4000) })).status < 500; } catch { return false; } };
-      const r = await liveServer.recover(probe);
-      return { state: r.state, healthy: r.url ? await probe(r.url) : false };
-    },
+    recoverPreview: () => provider.opsRecoverPreview(),
   }, (line) => console.log(line));
   provider.opsObserver = classroomOps;
   provider.inboxSource = classroomOps;
