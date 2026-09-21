@@ -695,6 +695,14 @@ Found only on the real window and fixed: a profile cached before enforcement beg
 never switch and never close a turn — the preflight now re-reads the profile once when the device's own inbox holds a
 lesson setting. "Applied" on the instructor screen is request-level evidence (one provider request under the binding
 ended protocol-complete), not "the learner's question succeeded".
+An independent review at `d32a191` then found, on the real window, that neither Studio window drew the inbox although the
+board said "reflected": windows of one app share `globalState` and the inbox directory, and the window whose connection a
+second window's pairing had replaced marked the shared pointer hidden. The pointer now names its connection, only that
+connection may hide it, a live connection is authoritative, and a window re-reads the shared inbox on focus (a read — no
+new "opened" tracking). The switch request now carries the learner's token for the Service to verify (the device's own
+statement of its base lesson decides nothing); a parked message that goes out when a turn ends carries no prompt
+provenance and no longer empties the draft typed meanwhile; a turn is looked up and closed where it was admitted.
+See the [review record](testing/classroom-admin.md#remote-management-u3-review-20260921).
 The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u3-20260921);
 its first draft was revised the same day after an independent review (turn pinning, fallback under
 outage/off, execution evidence, mixed-basis reports). The Studio behavior it adds is bounded as follows. **Prompt:** an instructor prompt is an inbox card; only the learner's own press of

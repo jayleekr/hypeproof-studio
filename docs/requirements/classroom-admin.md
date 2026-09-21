@@ -780,7 +780,7 @@ quarantine/     hash가 맞지 않는 수신물
 
 #### U3 — 수업 프롬프트·수업 설정의 대상 배포 · 2026-09-21 (구현 · 로컬 합성·workerd D1·브라우저·실제 Mac 실행 · 인수 전 · 운영 미승인)
 
-상태: **설계 계약만이며 아직 인수되지 않았다.** 첫 설계(`75f1f37`)를 독립 검토가 읽고 코드 착수 전에 닫아야 할 결함 네 가지(진행 중 turn의 증명 · 장애·전역 OFF 때의 폴백 · 실행 증거의 위치 · 섞인 기준의 보고서 경로)를 짚었고, 이 절은 그 보완본이다(바뀐 곳은 ‘보완’으로 표시). 제품 코드·migration·시험 파일·화면은 없고 아무것도 실행하지 않았다. 기준 소스는 U2 인수본 `bdebdd3`(실행 제품 source `9d85718`)이며 아래 ‘확인한 현재 코드’의 위치는 그 커밋 기준이다. RM-3·RM-5와 ADM-10/11의 구체화이고 인수는 [AT-45(프롬프트)·AT-46(설정)](../testing/classroom-admin.md#remote-management-u3-plan-20260921)이다. 강의 설정의 정본은 기존 그대로다: 확정 `authoring_versions`(`hps-session-design/1`), [ADR 0005](../adr/0005-lesson-assistant-identity.md)·[0006](../adr/0006-lesson-model-policy.md)·[0007](../adr/0007-lesson-feature-binding.md), AE-07~09·12·26·33, VER-01. 0006·0007에는 이 설계가 기대는 문장과 call site 변경을 **제안 주석**으로만 달았다(결정 본문은 그대로다). **새 강의 스키마·새 인증·새 PRD를 만들지 않는다.** #751의 하위 범위이며 #1011(강사 설정·확정 버전·학생 실행 바인딩, 2026-09-21 조회 시 ready·담당/댓글 없음)의 실행 바인딩과 맞닿지만 그 이슈를 claim하지 않았다. Intent는 U2와 같이 #1165의 **INT-CO-04(제안 · owner 승인 전)**에 연결한다. 위 ‘U3와의 연결’ 소절은 이 절이 구체화하며, 서로 다른 곳은 이 절이 우선한다(참가자별 effective 값을 `classroom_distribution_targets`에서 읽는다는 문장 → 아래 `classroom_lesson_bindings`).
+상태: **구현됐고 아직 인수되지 않았다(기본 OFF · 운영 미승인).** 첫 설계(`75f1f37`)를 독립 검토가 읽고 코드 착수 전에 닫아야 할 결함 네 가지(진행 중 turn의 증명 · 장애·전역 OFF 때의 폴백 · 실행 증거의 위치 · 섞인 기준의 보고서 경로)를 짚어 보완했고(바뀐 곳은 ‘보완’으로 표시), 그 뒤 구현(Draft PR #1227)과 `d32a191`에 대한 독립 검토의 결함 9건 보완이 이어졌다 — 설계 문장과 구현이 다른 곳은 아래 ‘구현에서 확정·변경한 계약’과 ‘독립 검토 보완’ 표가 우선한다. 무엇을 어느 층에서 실행했는지는 [실행 기록](../testing/classroom-admin.md#remote-management-u3-run-20260921)에만 있다. 기준 소스는 U2 인수본 `bdebdd3`(실행 제품 source `9d85718`)이며 아래 ‘확인한 현재 코드’의 위치는 그 커밋 기준이다. RM-3·RM-5와 ADM-10/11의 구체화이고 인수는 [AT-45(프롬프트)·AT-46(설정)](../testing/classroom-admin.md#remote-management-u3-plan-20260921)이다. 강의 설정의 정본은 기존 그대로다: 확정 `authoring_versions`(`hps-session-design/1`), [ADR 0005](../adr/0005-lesson-assistant-identity.md)·[0006](../adr/0006-lesson-model-policy.md)·[0007](../adr/0007-lesson-feature-binding.md), AE-07~09·12·26·33, VER-01. 0006·0007에는 이 설계가 기대는 문장과 call site 변경을 **제안 주석**으로만 달았다(결정 본문은 그대로다). **새 강의 스키마·새 인증·새 PRD를 만들지 않는다.** #751의 하위 범위이며 #1011(강사 설정·확정 버전·학생 실행 바인딩, 2026-09-21 조회 시 ready·담당/댓글 없음)의 실행 바인딩과 맞닿지만 그 이슈를 claim하지 않았다. Intent는 U2와 같이 #1165의 **INT-CO-04(제안 · owner 승인 전)**에 연결한다. 위 ‘U3와의 연결’ 소절은 이 절이 구체화하며, 서로 다른 곳은 이 절이 우선한다(참가자별 effective 값을 `classroom_distribution_targets`에서 읽는다는 문장 → 아래 `classroom_lesson_bindings`).
 
 **적용 시점의 가정.** 로컬 개발의 기본 제안은 **‘진행 중 응답은 기존 설정으로 마치고 다음 질문부터 적용’**이다. 조율 측이 사용자에게 이 가정을 알렸으나 **운영 정책 승인으로 기록하지 않는다.** 다른 선택지(학생 확인 뒤 / 다음 수업부터)는 아래 경계(전환을 App이 turn 경계에서 요청)의 호출 시점만 바꾸면 되고 서버 계약은 같다. **어느 선택지에서도 진행 중 turn은 Service가 승인한 snapshot으로 끝난다.**
 
@@ -893,7 +893,7 @@ capability를 선언하지 않은 App의 좌석은 Service가 **제안하는 순
 
 | Service의 답 | 뜻 | App |
 |---|---|---|
-| (조회는 학습 토큰의 학생·열린 회차로 행을 찾고 **행의 `token_jti`가 이 토큰과 같을 때만** 답한다 — 남의 turn·다른 활동의 turn은 ‘모름’이다) 행 없음 · 또는 `admitted`(dispatch 없음) — 집행이 켜진 Service가 읽기에 성공했을 때만 | **아무것도 실행되지 않았다**(승인 행과 첫 dispatch 기록은 실행보다 먼저 durable하므로 이 부재는 근거가 있다) | 기존 `inputRejected`로 글·첨부를 입력창에 되돌리고(3142행) profile을 후보로 다시 받아 이유를 말한다(`수업 설정이 바뀌었습니다 · 다시 보내 주세요` / `수업 설정을 확인할 수 없어 보내지 않았습니다`). 자동 재전송 0 |
+| (조회는 turn이 **승인된 곳** — 그 cohort의 회차들 · 학습 토큰의 학생 · 이 turn id — 에서 행을 찾고 **행의 `token_jti`가 이 토큰과 같을 때만** 답한다. 지금 열린 회차에 행이 없다는 것은 증거가 아니다(‘독립 검토 보완’ 4) — 남의 turn·다른 활동의 turn은 ‘모름’이다) 행 없음 · 또는 `admitted`(dispatch 없음) — 집행이 켜진 Service가 읽기에 성공했을 때만 | **아무것도 실행되지 않았다**(승인 행과 첫 dispatch 기록은 실행보다 먼저 durable하므로 이 부재는 근거가 있다) | 기존 `inputRejected`로 글·첨부를 입력창에 되돌리고(3142행) profile을 후보로 다시 받아 이유를 말한다(`수업 설정이 바뀌었습니다 · 다시 보내 주세요` / `수업 설정을 확인할 수 없어 보내지 않았습니다`). 자동 재전송 0 |
 | `dispatched`가 있음(완료·실패·미확인 어느 쪽이든) | **일부 실행됐다** | 받은 출력·도구 결과는 그대로 두고 그 turn에 `부분 실행 — 끝까지 실행되지 않았습니다`를 표시한다. 입력을 되돌리지 않고 **자동으로 다시 보내지 않는다** — 다시 보낼지는 학생이 정한다 |
 | 조회 실패 · 회차를 찾을 수 없음 · 집행 상태를 모름 | 실행 여부 미확인 | `실행 여부 미확인`으로 표시 · 자동 재전송 0 · 조용한 버튼 `입력창에 다시 넣기` |
 
@@ -935,7 +935,7 @@ malformed JSON·`messages` 아님·`effort_not_allowed`·예산/이용권 거절
 
 `모두 적용`은 전 대상이 `적용됨`일 때만 쓴다. 질문을 보내지 않는 학생은 `준비됨`에 머무는 것이 정직한 상태다(실패 아님 · `더 바뀔 수 있음`).
 
-**전환 요청 — `POST /v1/classroom/ops/lesson-binding`** (기존 ops 연결 자격 · 4초 제한 · 모르는 필드 거부 · `no-store`). App host가 **turn 시작 preflight에서**(이 창이 좌석 lease owner이고 · index에 `pending_binding`이 있을 때) 부른다: `{app_instance_id, boot_id, offer_key, distribution_id, object_id, revision, content_hash, expected_binding_seq, base_lesson_sha256}`. **다른 창이나 이 창의 turn이 진행 중이어도 전환할 수 있다** — 진행 중 turn은 자기 snapshot에 고정돼 있으므로 전환이 그것을 건드리지 않는다. Service는 먼저 `readLesson`으로 그 버전이 **지금도** 유효한지 확인한 뒤(불변 행·컴파일된 정책이라 요청 안에서 경합하지 않는다) **조건부 batch 하나**를 실행한다:
+**전환 요청 — `POST /v1/classroom/ops/lesson-binding`** (기존 ops 연결 자격 · 4초 제한 · 모르는 필드 거부 · `no-store`). App host가 **turn 시작 preflight에서**(이 창이 좌석 lease owner이고 · index에 `pending_binding`이 있을 때) 부른다: `{app_instance_id, boot_id, offer_key, distribution_id, object_id, revision, content_hash, learner_token, base_lesson_sha256?}` — 순번은 DB가 정하고(아래 ‘구현에서 확정·변경한 계약’), **전환의 출발 기준은 `learner_token`을 Service가 검증해 얻는다**(아래 ‘독립 검토 보완’ 1). `base_lesson_sha256`은 선택이며 대조만 한다. **다른 창이나 이 창의 turn이 진행 중이어도 전환할 수 있다** — 진행 중 turn은 자기 snapshot에 고정돼 있으므로 전환이 그것을 건드리지 않는다. Service는 먼저 `readLesson`으로 그 버전이 **지금도** 유효한지 확인한 뒤(불변 행·컴파일된 정책이라 요청 안에서 경합하지 않는다) **조건부 batch 하나**를 실행한다:
 
 1. `INSERT INTO classroom_lesson_bindings(…, binding_seq) SELECT …, ?expected+1 WHERE <guard> ON CONFLICT DO NOTHING` — guard가 **전제조건 전체를 스스로** 검사한다: 대상 행이 `reflected`/`no_change`이고 그 `offer_key`가 **이 연결(grant·epoch)로 다시 계산한 값**과 같음 · 배포 미회수·미만료 · 객체 `kind='setting'` · `ops_lesson_settings`·`ops_distribute` ON · 회차 미종료 · 좌석이 같은 `seat_revision`에서 같은 학생 소유·미교체 · grant `active`·epoch 일치 · 이 창이 lease owner · 그 참가자에게 **더 높은 `seq`의 유효한 설정 배포가 없음** · 그 참가자의 `MAX(binding_seq)` = `expected_binding_seq`(없으면 0) · 최신 행이 이미 같은 `(object_id, revision)`이 아님.
 2. `INSERT INTO ops_audit … WHERE EXISTS(<1의 행>)`.
@@ -988,7 +988,7 @@ malformed JSON·`messages` 아님·`effort_not_allowed`·예산/이용권 거절
 | 지점 (현재 코드) | U3가 넣는 것 (보완 2 · C) | 막는 경로 |
 |---|---|---|
 | **공통 판정 `inputBasisVerdict`** — 신규 `worker/src/lib/lesson-basis.ts`. 모든 소비자가 이 하나를 쓴다 | **허용은 둘뿐이다:** ① 그 입력 revision의 basis 행이 `single` ② basis 행이 없고 **그 회차·학생에게 변경 이력이 없음이 읽기로 확인됨**(binding 행 0) — 검증된 미전환 legacy. 그 밖은 전부 **보류**: `mixed` · `unknown` · 변경 이력은 있는데 basis 행이 없음(`lesson_basis_unknown`) · 읽기 실패(`lesson_basis_unreadable`). `no such table`(0024 이전 DB)만 ‘이력이 있을 수 없다’로 읽는다. 첫 보완의 `NOT EXISTS(basis<>'single')`는 **basis 행이 없는 옛 작업을 통과시키므로 버렸다.** 판정은 **회차 flag·`HPS_CLASSROOM_OPS`·`HPS_LESSON_BINDINGS` 어느 것도 보지 않는다** — 실행 정책을 끄거나 복귀시키는 것은 과거에 섞여 만들어진 기록을 평가해도 된다는 결정이 아니다 | 아래 전부 |
-| seal — `routes/classroom-collect.ts:221`의 batch | 같은 batch에 `INSERT INTO classroom_input_basis …`(**SQL 안에서** 계산 → 봉인과 원자적). `mixed` = 그 회차·학생의 **승인된 turn 행**의 서로 다른 `lesson_sha256`이 2개 이상 **이거나**, 토큰과 다른 강의의 binding 행이 있는데 그 첫 `activated_at`보다 앞선 그 회차·학생의 `usage_log` 행이 있음(turn 행 없이 실행된 것은 언제나 토큰 강의다). 승인만 되고 실행되지 않은 turn도 세므로 판정은 `mixed` 쪽으로만 틀린다. 계산을 읽을 수 없으면 batch가 실패하고 seal은 `503`. **outbox 행은 오늘처럼 언제나 만든다** — 보류는 아래 `createJobs`가 `held` 작업으로 만들어 **검수 목록에 사유와 함께 보이게** 한다(outbox를 만들지 않으면 그 학생은 목록에서 사라진다) | 표시 없는 봉인 |
+| seal — `routes/classroom-collect.ts:221`의 batch | 같은 batch에 `INSERT INTO classroom_input_basis …`(**SQL 안에서** 계산 → 봉인과 원자적). `mixed` = 그 회차·학생의 **요청이 허가된 turn 행**(`requests>0`)의 서로 다른 `lesson_sha256`이 2개 이상 **이거나**, 한 번이라도 전환된 참가자에게 turn 원장이 설명하지 못하는 응답된 `usage_log` 행이 있고 전환된 강의로 실행한 turn이 있음. 설명되지 않는 요청은 있는데 어느 강의였는지 보여 주는 turn이 없으면 `unknown`(역시 보류). **시각은 비교하지 않는다** — 첫 구현은 초 단위 `usage_log.created_at`을 ms의 `activated_at`과 비교해 같은 초의 단일 기준을 `mixed`로, 집행을 끈 뒤의 v1 실행을 `single`로 오판했다(위 ‘독립 검토 보완’ 2·6). 계산을 읽을 수 없으면 batch가 실패하고 seal은 `503`. **outbox 행은 오늘처럼 언제나 만든다** — 보류는 아래 `createJobs`가 `held` 작업으로 만들어 **검수 목록에 사유와 함께 보이게** 한다(outbox를 만들지 않으면 그 학생은 목록에서 사라진다) | 표시 없는 봉인 |
 | `createJobs` — `classroom-reports.ts:62` | outbox 항목마다 공통 판정 → 허용이면 `queued`, 보류면 **`held`**(reason = 판정 사유) | 새 입력 · 배포 전에 쌓인 outbox · 늦게 도착한 입력 revision |
 | `claimNext` — `:175` · `/advance` `:209` · runner `/claim` `:285` | `claimNext`는 `queued`만 고르므로 `held`는 배정되지 않는다. **배포 전에 이미 `queued`/`leased`였던 옛 작업**은 lease 직후 공통 판정을 받아 보류면 `held`로 닫히고 다음 작업으로 넘어간다 | 옛 queued·leased 작업 |
 | `evaluateLeased` — `:134` · runner 입력 전달 `GET …/jobs/:job/input/:file` `:303` | **평가기를 부르기 전 · 입력 바이트를 runner에 내주기 전**에 공통 판정. 보류면 입력을 읽지도 provider를 호출하지도 않는다 | 학생 기록이 기준을 모른 채 평가기·runner로 나가는 것 |
@@ -1039,30 +1039,31 @@ D1이 돌려준 `meta.rows_read`·`meta.rows_written`(인덱스 유지 포함)�
 
 | 양 | 뜻 | 집행 OFF의 같은 요청 대비 증가분 |
 |---|---|---|
-| **T** | Service가 **승인한 학생 질문** 1개(= turn 행 1개) — 그 turn의 첫 모델 요청 | 문장 +9(읽기 batch 2 · 승인 INSERT + 같은 batch의 되읽기 2 · 첫 dispatch batch 3 · 결과 batch 2) · 읽은 행 +4 · **쓴 행 +4** |
-| **R** | 같은 turn의 **이후 모델 요청**(SDK의 보조 요청·도구 루프) | 문장 +2(읽기 batch) · 읽은 행 +1 · **쓴 행 0** — 이미 끝난 turn의 결과 문장은 보내지 않는다(실측으로 2문장 제거) |
+| **T** | Service가 **승인한 학생 질문** 1개(= turn 행 1개) — 그 turn의 첫 모델 요청 | 문장 +7(읽기 batch 2 · 승인 INSERT + 같은 batch의 되읽기 2 · dispatch 허가 1 · 결과 batch 2) · 읽은 행 +3 · **쓴 행 +4** |
+| **R** | 같은 turn의 **이후 모델 요청**(SDK의 보조 요청·도구 루프) | 문장 +3(읽기 batch 2 + **dispatch 허가 1**) · 읽은 행 +2 · **쓴 행 +1** — 허가는 ‘turn이 아직 열려 있을 때만 요청 수를 1 올리는’ 조건부 UPDATE 하나다(검토 보완 5 · 2). 검토 전에는 쓴 행 0이었다: 그때는 이후 요청이 닫힌 turn에서도 provider에 닿았고 seal이 실행을 셀 수 없었다 |
 | **E** | 실행 증거 | T에 포함: 첫 dispatch 1행 + 첫 정상 종료 1행(binding이 있으면 같은 batch에서 그 행도). 이후 요청은 **실패했을 때만** batch 1 |
-| close | host의 turn 종료 선언 | 문장 2 · 쓴 행 1 |
+| close | host의 turn 종료 선언 | 문장 2 · 쓴 행 1 · 읽은 행 14(시험 DB) — turn을 **승인된 회차**에서 찾기 위해 그 cohort의 회차 목록을 훑는다(읽은 행은 cohort의 회차 수에 비례) |
+| seal의 기준 판정 | seal batch 안의 1문장 | 문장 1 · 쓴 행 2 · 읽은 행 ≈ 그 참가자의 turn 행 + 응답된 usage 행(turn 1개일 때 8) |
 | 승인 전 거부(옛 key) | provider 호출 0 | 문장 3 · 쓴 행 0 |
-| `/v1/profile` · turn 상태 조회 | 읽기 전용 | 문장 +1 / 문장 1 · 쓴 행 0 |
-| 전환 | `POST …/lesson-binding` | 문장 11 · 읽은 행 23 · 쓴 행 6 (같은 요청의 재전송: 문장 5 · 쓴 행 0) |
+| `/v1/profile` · turn 상태 조회 | 읽기 전용 | 문장 +1 / 문장 1(읽은 행 7 — close와 같은 이유) · 쓴 행 0 |
+| 전환 | `POST …/lesson-binding` | 문장 11 · 읽은 행 23 · 쓴 행 6 (같은 요청의 재전송: 문장 5 · 쓴 행 0). 학습 토큰 검증은 서명 확인 + 폐기 KV 읽기 1회이고 D1 문장은 늘지 않았다 |
 | **B** | 강사 보드 1회(`GET …/status`) | 문장 **+1** · 쓴 행 0 · 읽은 행 = +좌석 수(binding 없음) ~ +2×좌석 수(전 좌석 전환): 30석 +30~60 · 100석 +100~200 · 200석 +200~400. **binding 이력을 3배로 늘려도 +0행** — 모델의 ‘좌석 수 × 전환 횟수’는 틀렸다(좌석당 인덱스 탐색 1회) |
 
-**R은 T가 아니다.** 기록 서버로 본 SDK turn은 요청 1~3개였다(보조 요청 1 + 도구 루프 · 실제 Mac M2의 일반 질문은 요청 1개). 시나리오 입력(8/22 고정본: 좌석당 turn ≈ 45 · 모델 요청 ≈ 225 — **현재 사용량이 아니다**)으로 다시 계산하면 좌석당 문장 45×9 + 180×2 + close 45×2 = 855 · 쓴 행 45×(4+1) = 225 · 읽은 행 45×4 + 180 + 45×2 = 450이다.
+**R은 T가 아니다.** 기록 서버로 본 SDK turn은 요청 1~3개였다(보조 요청 1 + 도구 루프 · 실제 Mac M2의 일반 질문은 요청 1개). 시나리오 입력(8/22 고정본: 좌석당 turn ≈ 45 · 모델 요청 ≈ 225 — **현재 사용량이 아니다**)으로 다시 계산하면 좌석당 문장 45×7 + 180×3 + close 45×2 = 945 · 쓴 행 45×(4+1) + 180×1 = 405 · 읽은 행 45×3 + 180×2 + close 45×14 ≈ 1,125이다(검토 보완 뒤의 값 — 그 전 계산은 855 / 225 / 450이었다).
 
 | 2시간 수업 1회 | 30석 | 100석 | 200석 |
 |---|---|---|---|
-| 학습 경로 문장 | ≈ 2.6만 | ≈ 8.6만 | ≈ 17.1만 |
-| 학습 경로 쓴 행 | ≈ 6.8천 | ≈ 2.3만 | ≈ 4.5만 |
-| 학습 경로 읽은 행 | ≈ 1.4만 | ≈ 4.5만 | ≈ 9만 |
+| 학습 경로 문장 | ≈ 2.8만 | ≈ 9.5만 | ≈ 18.9만 |
+| 학습 경로 쓴 행 | ≈ 1.2만 | ≈ 4.1만 | ≈ 8.1만 |
+| 학습 경로 읽은 행 | ≈ 3.4만 | ≈ 11.3만 | ≈ 22.5만 |
 | 보드 읽은 행(강사 화면 1개 · 10초 주기 720회 · 전 좌석 전환) | ≈ 4.3만 | ≈ 14.4만 | ≈ 28.8만 |
 | 전원 1회 전환 쓴 행 | 180 | 600 | 1,200 |
 
-모델과의 차이: 쓴 행은 turn당 5(승인 2 · dispatch 1 · 종료 1 · close 1)로 모델의 4보다 많아 200석에서 4.5만(모델 3.6만)이다. 호출당 문장은 모델 요청 최대 13 · 전환 11로 Free plan의 호출당 50 아래다. 결론은 같고 더 보수적이다 — **plan을 확인하기 전에는 100석 이상 회차에서 `HPS_LESSON_BINDINGS`를 켜지 않는다.** turn 행은 캐시가 아니라 seal의 기준 판정이 읽는 증거여서 시간으로 지우지 않는다(본문 없음 · 회차당 T개 · 삭제는 기존 ‘보존 일수’ 결정의 항목).
+모델과의 차이: 쓴 행은 turn당 5(승인 2 · dispatch 1 · 종료 1 · close 1)에 **이후 요청마다 1**이 더해져 200석에서 8.1만(모델 3.6만 · 검토 전 실측 4.5만)이다 — Free plan의 일 10만 행에 수업 하나로 근접한다. 호출당 문장은 모델 요청 최대 11 · 전환 11로 Free plan의 호출당 50 아래다. 결론은 같고 더 보수적이다 — **plan을 확인하기 전에는 100석 이상 회차에서 `HPS_LESSON_BINDINGS`를 켜지 않는다.** turn 행은 캐시가 아니라 seal의 기준 판정이 읽는 증거여서 시간으로 지우지 않는다(본문 없음 · 회차당 T개 · 삭제는 기존 ‘보존 일수’ 결정의 항목).
 
 동시성(같은 로컬 D1): 30명이 동시에 전환 → 30행 · 참가자당 1행(문장 330 · 쓴 행 180), 같은 전환의 3중 요청 → 1행(201 하나 · 200 replay 둘), 옛 제안과 새 제안(복귀)을 동시에 응답 → 순번 1·2로 유실·중복·재사용 0. 한 batch가 두 테이블을 함께 바꾸는지는 `meta.changes`로 확인했다: guard가 맞으면 `[1,1]`(turn 행 + binding 행 · 같은 시각), 닫힌 turn이면 `[0,0]`이고 binding은 ‘시도됨’이 되지 않는다.
 
-예산 대비: ①⑤ 증가분 0 — 집행 값 없음은 단위·Service 시험(profile 바이트 동일 · 쓰기 0)으로 확인, idle sync는 U3가 sync 경로에 문장을 추가하지 않았다(U2 계측 그대로) ②③의 ‘문장 1’은 batch를 1로 센 값이었고 실측은 2다 ④ 쓴 행 4 + close 1 ⑥ ‘전환 ≤ 5문장’은 실측 11로 **초과** — 권한·lease·대상·최신 binding 확인을 빼서 숫자를 맞추지 않았다 ⑦ 위 동시성 ⑧ p95는 재지 않았다(**NOT RUN**).
+예산 대비: ①⑤ 증가분 0 — 집행 값 없음은 단위·Service 시험(profile 바이트 동일 · 쓰기 0)으로 확인, idle sync는 U3가 sync 경로에 문장을 추가하지 않았다(U2 계측 그대로) ②③의 ‘문장 1’은 batch를 1로 센 값이었고 실측은 2(+ dispatch 허가 1)다 — ③ ‘고정된 turn의 후속 요청 쓰기 0’은 **지키지 않기로 했다**(허가와 요청 수 기록이 쓰기 1이다) ④ 쓴 행 4 + close 1 ⑥ ‘전환 ≤ 5문장’은 실측 11로 **초과** — 권한·lease·대상·최신 binding 확인을 빼서 숫자를 맞추지 않았다 ⑦ 위 동시성 ⑧ p95는 재지 않았다(**NOT RUN**).
 
 ##### 구현에서 확정·변경한 계약 (설계 `1190e5f` 대비 · 2026-09-21)
 
@@ -1082,6 +1083,22 @@ D1이 돌려준 `meta.rows_read`·`meta.rows_written`(인덱스 유지 포함)�
 | 캐시된 profile | 집행 전에 받아 둔 profile에는 `lesson_binding`이 없다. App은 **자기 보관함에 수업 설정이 있을 때만** profile을 한 번 다시 읽는다 | **실제 Mac에서 발견**: 수업 중에 집행을 켜자 App이 key도 전환도 close도 보내지 않아 강사 화면이 ‘준비’에 머물렀다 |
 | 재연결 직후의 전환 | 새 연결이 자료를 자기 전달 key로 다시 받기 전(수 초)의 전환은 `stale_offer`로 거절되고 **다음 질문에서 다시 시도**된다. 그 질문은 지금 유효한 binding으로 실행된다 | 실제 Mac에서 관측 |
 | 음성 대조군 | 제품 코드에 시험용 스위치를 두지 않는다. 첫 설계의 동작은 시험 파일 안의 틀린 함수나 설정(집행 값 없음 = 토큰 fallback)으로 재현해 시험이 그것을 잡는지 본다 | 제품에 우회로를 남기지 않는다 |
+
+##### 독립 검토 보완 (`d32a191` 검토 → 같은 PR) · 2026-09-21
+
+독립 검토가 실제 강사 화면 → 실제 Mac 학생 앱 조작과 격리 재현으로 결함 9건을 짚었다. 아래가 고친 뒤의 계약이다 — 재현 파일은 공통 git-dir의 `u3-*-review.mjs`, 회귀는 `worker/test/classroom-ops-lesson-review.test.mjs`(양성 대조군과 함께)·브라우저 e2e·실제 Mac.
+
+| # | 드러난 것 | 고친 뒤의 계약 |
+|---|---|---|
+| 0 | 보드는 ‘보관함 반영’인데 실제 두 창 어디에도 보관함이 그려지지 않았다. 같은 앱의 창들은 globalState와 보관함 폴더를 **공유**하는데, 두 번째 창의 새 연결로 교체된 첫 창이 ‘최종 거부’를 받고 공유 포인터를 `hidden`으로 바꿨다 | 포인터는 자기 **연결(grant)** 을 기록하고, 그 연결만 숨길 수 있다. 살아 있는 연결이 있는 창은 자기 연결이 기준이며 낡은 포인터를 고친다. 창이 포커스를 되찾으면 공유 보관함을 디스크에서 다시 읽는다(읽기일 뿐 — 읽음·열람을 새로 기록하지 않는다). 다른 **기기**로 교체·좌석 교체·폐기 때 숨기는 U2 계약은 그대로다. `forget()`은 더 새 연결이 저장한 것을 지우지 않는다 |
+| 1 | 전환 요청의 `base_lesson_sha256`만 틀리게 보내면 Service가 그 값을 기준으로 기록해, 설정이 영영 적용되지 않으면서 강사 화면은 ‘전환’이 됐다 | 기기가 **말한** 값은 아무것도 정하지 않는다. App은 학습 토큰을 함께 보내고 Service가 검증한다: 서명·만료·폐기 · 이 grant의 학생·cohort · 회차 과정의 강의. 출발 기준 = 검증된 토큰의 `lesson.sha256`. 거부(`learner_token_required`·`_invalid`·`_mismatch`·`_lesson` · `base_mismatch`)는 **기록 전**이며 감사·로그에 토큰을 남기지 않는다. 같은 학생의 정상 재발급 토큰은 전환한다 |
+| 2 · 6 | v2로 실행한 뒤 집행만 끄고 같은 토큰으로 v1을 실행해도 `single`이었다. 반대로 전환과 **같은 초**의 v2 요청 하나는 `mixed`로 보류됐다(초 단위 `usage_log.created_at`을 ms의 `activated_at`과 비교) | 시각을 비교하지 않는다. **두 원장을 센다**: 승인된 turn에 허가된 요청 수(`classroom_lesson_turns.requests` — provider 호출을 허가하는 그 문장이 올린다)와, 그 참가자의 응답된 `usage_log` 행 수(집행이 꺼져 있어도 기존 경로가 쓴다 · 세션 귀속이 빠진 행도 cohort·회차 시작 시각으로 센다). turn들의 강의가 둘 이상 → `mixed`. 한 번이라도 전환된 참가자에게 **어느 turn도 설명하지 못하는 응답된 요청**이 있으면 → 전환된 강의로 실행한 turn이 있으면 `mixed`, 없으면 `unknown`. 둘 다 보류. 그 밖은 `single`. 한계: 쓰이지 못한 usage 행(기존의 기록된 손실)은 볼 수 없다 |
+| 3 | 좌석이 a→c로 바뀐 뒤 c의 자격으로 a의 제안을 보내면 a의 binding key를 `replayed`로 돌려줬다 | replay는 **같은 회차·학생·`seat_revision`·내용(object·revision·content_hash)** 에만 답한다. `(distribution_id, seat_id)`만으로 찾지 않는다. 새 학생은 아무것도 받지 못하고 그 학생의 binding 행은 0이다 |
+| 4 | 회차만 바뀌면 같은 토큰·turn 조회가 `dispatched` → `not_started`가 돼, App이 ‘보내지 않았습니다’라며 입력을 돌려줬다. close도 현재 회차에서만 찾았다 | 조회·종료는 turn이 **승인된 곳**(그 cohort의 회차들 · 이 학생 · 이 turn id · 이 토큰)에서 한다. ‘현재 회차에 행이 없음’은 증거가 아니다. 어느 회차에도 행이 없을 때만 `not_started`, 다른 토큰의 turn이거나 읽기 실패면 `unknown`. 자동 재전송 0 |
+| 5 | resolver가 열린 turn을 읽은 직후 host의 close가 들어오면, 이미 dispatch된 turn이라는 이유로 검사를 건너뛰어 provider가 호출됐다 | provider 직전의 마지막 DB 검사는 **모든 요청**에 있고, 읽어 둔 snapshot이 아니라 `closed_at IS NULL`을 조건으로 가진 UPDATE의 `meta.changes`가 정한다. 경계는 셋이다: ① 요청 접수(gate) ② 집행 허가(이 문장) ③ upstream 호출. ②와 ③ 사이·③ 도중에 도착한 close는 **이미 나간 호출을 취소하지 못한다** — 원자적이라고 말하지 않는다. (합성 upstream의 Service HTTP 경로 재현이며 실제 SDK에서 중복 유료 호출이 있었다는 뜻이 아니다) |
+| 7 | 진입·버튼·요약이 공지·자료만 말했고, 설정 확인에도 ‘과제·입력·대화·파일은 바뀌지 않습니다’가 붙었다. 복귀 확인은 회차 기본 버전과 비교해 ‘단계: 그대로 3개’라고 했다 | 진입·확인·회수 문구는 종류별이다: 설정은 ‘이미 쓴 초안·첨부·대화·작업 파일은 그대로 · 바뀌는 것은 다음 질문부터의 수업 기준’. 미리 확인은 `setting.by_current` — **선택한 학생이 지금 실행하는 버전별**로 묶은 영향 — 을 보여 주고, 버전 고르기의 한 줄은 비교 기준(회차 기본 버전)을 밝힌다. 현재 기준을 읽지 못하면 ‘확인 불가’다 |
+| 8 | 실기의 파일 보존 검사가 현재 해시를 현재 해시와 비교했다. 실행 기록은 ‘turn 7개가 모두 닫혔다’고 했지만 6개였다 | 실행기는 앱을 띄우기 **전에 쓴 바이트**와 비교하고 음성 대조군을 가진다. 앱이 추가한 파일은 목록으로 남긴다. 닫히지 않은 turn은 [실행 기록](../testing/classroom-admin.md#remote-management-u3-review-20260921)에 원인과 함께 적었다 |
+| — | (검토 중 브라우저에서 관측) turn이 끝나 **예약 전송**이 나갈 때 그 메시지가 초안의 가져오기 출처를 달고 나가며 입력창을 비웠다 | 예약 전송은 자기 자신의 메시지다: 출처 참조 없음, 기다리는 동안 쓴 초안은 그대로. 붙여넣은 이미지가 다음에 나가는 turn에 실리는 #416의 동작은 바꾸지 않았다 |
 
 ##### 구현 단위와 순서 (구현됨 — 브랜치 `feat/751-u3-prompt-settings` · 실행 기록은 [시험 문서](../testing/classroom-admin.md#remote-management-u3-run-20260921))
 

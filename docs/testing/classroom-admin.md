@@ -131,8 +131,8 @@ npm --prefix chalk run typecheck
 | AT-42 | 공통 선택 모델 (옛 표기 AT-37) | **실행됨** — UI e2e + 실제 Mac 정상 경로. 실제 기기 2대 이상·Safari/Firefox NOT RUN | [U1 실행 기록](#remote-management-u1-run-20260921) |
 | AT-43 | 선택한 학생의 수업 기록 회수 (옛 표기 AT-38) | **실행됨** — Service + UI e2e + 실제 Mac 정상 경로. 기기 실패·재전송은 합성, Windows·학교망·staging D1 NOT RUN | 같은 곳 |
 | AT-44 | 공지·자료 대상 배포 (옛 표기 AT-39) | **실행됨 · 로컬 인수(2026-09-21)** — Service + 기기 + 로컬 workerd D1 + UI e2e + 실제 Mac M1(실제 창 1대, A2·A3 합성). 첫 인수 요청은 제안 커밋 경계 결함으로 반려 → 수정(`9d85718`)·회귀 추가 → **조율 측(Codex)이 독립 경합 재현과 실제 Chalk→Mac A1 선택 배포·회수·기기 회수 확인·초안 보존을 직접 확인해 로컬 범위를 인수**(그 증거는 조율 측 소유의 공통 git-dir `remote-classroom-evidence/management-20260921/u2-codex-reaccept-*-bdebdd3.*`·`u2-deferred-boundary-check-9d85718.log`에 있고 이 문서 작성 세션이 다시 실행한 것이 아니다). `bdebdd3`은 그 위의 문서·추적 커밋. **인수 범위 밖으로 남은 NOT RUN:** 같은 grant의 자동 재연결, Windows, 학교망, staging/production D1, 실제 기기 2대 이상, owner의 INT-CO-04 승인·운영 활성화. 로컬 인수는 PR 병합·운영 승인이 아니다 | [U2 실행 기록](#remote-management-u2-run-20260921) · [재인수 수정](#remote-management-u2-reaccept-20260921) |
-| AT-45 | 수업 프롬프트 대상 배포 | **구현 · 로컬 실행 PASS(일부 PARTIAL) · 인수 전** — Service·App 단위·브라우저·실제 Mac M2. P4·P5·P7은 PARTIAL. 운영·Windows·학교망 NOT RUN | [U3 실행 기록](#remote-management-u3-run-20260921) |
-| AT-46 | 수업 설정 대상 배포 | **구현 · 로컬 실행 PASS(일부 PARTIAL) · 인수 전** — Service·App 단위·로컬 workerd D1·브라우저·실제 Mac M2(두 창 · 진행 중 응답 보존 · 연속 2회 변경 · 회수 · 복귀). S4·S9·S10·S15 일부 PARTIAL, p95 NOT RUN. 적용 시점의 운영 정책은 사용자 결정 대기(로컬 가정: 다음 질문부터) | [U3 실행 기록](#remote-management-u3-run-20260921) |
+| AT-45 | 수업 프롬프트 대상 배포 | **구현 · 로컬 실행 PASS · 인수 전** — Service·App 단위·브라우저·실제 Mac(실제 마우스 입력). 독립 검토 뒤 P2~P5·P7을 브라우저와 실제 host에서 마무리. 운영·Windows·학교망 NOT RUN | [실행 기록](#remote-management-u3-run-20260921) · [검토 보완 기록](#remote-management-u3-review-20260921) |
+| AT-46 | 수업 설정 대상 배포 | **구현 · 로컬 실행 PASS · 인수 전** — Service·App 단위·로컬 workerd D1·브라우저·실제 Mac(agent-sdk 창 2개 + proxy-runtime 창). 독립 검토의 Service 결함 6건·화면 결함 보완, S3·S4·S9·S10·S13ⓒ를 실제 경로로 마무리. S15의 구 App 실물·p95·plan NOT RUN. 적용 시점의 운영 정책은 사용자 결정 대기(로컬 가정: 다음 질문부터) | 같은 곳 |
 
 **옛 표기가 남아 있는 곳(이번에는 고치지 않았다 — 시험 파일은 이 설계 세션의 소유가 아니다).** 아래 파일의 시험 제목·주석에 있는 번호는 작성 당시 표기다. U2 구현에서 시험 파일 소유권을 넘겨받을 때 제목을 새 번호로 바꾸고, 그때까지는 이 표로 읽는다.
 
@@ -788,10 +788,10 @@ Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 
 | S19 | PASS | Service `classroom-ops-lesson-basis`(5): 이미 lease된 작업 · 기준 행 없는 작업 · 승인된 작업 · 늦은 기준 · flag 롤백 · 재시도 | — |
 | M2 | PASS | 아래 | 아래 NOT RUN |
 
-**M2 — 실제 Mac.** 공식 shell `0.1.56`의 복사본(설치된 앱은 읽지도 실행하지도 않음) + 현재 확장 build(번들 4개 hash 일치 · source `ded79c4`) + 실제 Agent SDK `0.3.207` binary, 자체 포트 18781/18782/9381 · 자체 user-data·HOME. 강사 조작은 전부 보이는 Chromium의 Chalk `/manage`에서 클릭했다. 순서: ① U3 OFF(집행 값 없음 · 회차 스위치 없음): 실제 1턴 + U2 공지 도착 — turn 행 0 · profile에 `lesson_binding` 없음 · 작성란에 ‘수업 설정’ 없음 ② 집행 + 회차 스위치 ON → ‘수업 설정’이 나타남 ③ 프롬프트: 실제 창의 초안 + 붙여넣은 이미지 → `초안에 가져오기`로 덧붙음(전송 0) → 되돌리기 → 다시 가져와 학생이 직접 전송 → 공급자 요청에 그 글 ④ 첫 설정 V2: `준비` → 다음 질문에서 전환 → 실제 요청 헤더의 key = 전환된 binding → turn 닫힘 → `적용` ⑤ 창 1의 답이 오는 중에 V3 확정, 두 번째 창의 다음 질문은 V3, 창 1의 질문은 끝까지 V2 ⑥ 회수 클릭 → 여전히 V3 ⑦ 복귀 준비 → 저장(3번째 판) → 확인 → 보내기 → 다음 질문은 V1 ⑧ 비선택 A2(실제 기기 클라이언트): 배포 블록 0 · 보관함 폴더 없음 · binding 0 · 실제 proxy 클라이언트의 질문은 V1. 결과: 공급자 요청 9 · turn 7(집행 뒤의 것은 전부 host가 `completed`로 닫음) · binding [V2, V3, 복귀].
+**M2 — 실제 Mac.** 공식 shell `0.1.56`의 복사본(설치된 앱은 읽지도 실행하지도 않음) + 현재 확장 build(번들 4개 hash 일치 · source `ded79c4`) + 실제 Agent SDK `0.3.207` binary, 자체 포트 18781/18782/9381 · 자체 user-data·HOME. 강사 조작은 전부 보이는 Chromium의 Chalk `/manage`에서 클릭했다. 순서: ① U3 OFF(집행 값 없음 · 회차 스위치 없음): 실제 1턴 + U2 공지 도착 — turn 행 0 · profile에 `lesson_binding` 없음 · 작성란에 ‘수업 설정’ 없음 ② 집행 + 회차 스위치 ON → ‘수업 설정’이 나타남 ③ 프롬프트: 실제 창의 초안 + 붙여넣은 이미지 → `초안에 가져오기`로 덧붙음(전송 0) → 되돌리기 → 다시 가져와 학생이 직접 전송 → 공급자 요청에 그 글 ④ 첫 설정 V2: `준비` → 다음 질문에서 전환 → 실제 요청 헤더의 key = 전환된 binding → turn 닫힘 → `적용` ⑤ 창 1의 답이 오는 중에 V3 확정, 두 번째 창의 다음 질문은 V3, 창 1의 질문은 끝까지 V2 ⑥ 회수 클릭 → 여전히 V3 ⑦ 복귀 준비 → 저장(3번째 판) → 확인 → 보내기 → 다음 질문은 V1 ⑧ 비선택 A2(실제 기기 클라이언트): 배포 블록 0 · 보관함 폴더 없음 · binding 0 · 실제 proxy 클라이언트의 질문은 V1. 결과: 공급자 요청 9 · turn 7 · binding [V2, V3, 복귀]. **정정(독립 검토):** 처음에는 ‘집행 뒤의 turn은 전부 host가 `completed`로 닫음’이라고 썼으나 틀렸다 — `ded79c4`의 `result.json`에서 닫힌 turn은 7개 중 **6개**이고, `db166bab`(binding_seq 0 · dispatched 1 · completed 1 · **closed 0**)는 닫히지 않았다(`7665223` 실행의 같은 경우는 `90e2e050`). 그 turn은 ‘집행 전에 시작한 turn’이 아니라 **집행을 켠 뒤에**, 집행 전에 profile을 캐시해 둔 App이 보낸 프롬프트 turn이다: 요청은 정상 완료됐고(Service 기록 `completed`) host가 key도 close도 보내지 않았을 뿐이다.
 
 **실기에서만 드러난 것.**
-1. **제품 결함(수정함 · `7665223`).** 수업 중에 집행을 켜면 App의 세션 캐시 profile에 `lesson_binding`이 없어 key·전환·close를 전혀 보내지 않았고 강사 화면은 ‘준비’에서 멈췄다. 합성 시험은 전부 통과하던 상태였다. App은 이제 자기 보관함에 수업 설정이 있을 때만 profile을 한 번 다시 읽는다(단위 시험 + 음성 대조군 + M2 ④에서 확인). 설정을 받은 적 없는 학생의, 집행 전에 시작한 turn은 계속 key·close 없이 나간다(토큰 강의와 같아 승인됨 · 30분 상한) — 기록에 남겼다.
+1. **제품 결함(수정함 · `7665223`).** 수업 중에 집행을 켜면 App의 세션 캐시 profile에 `lesson_binding`이 없어 key·전환·close를 전혀 보내지 않았고 강사 화면은 ‘준비’에서 멈췄다. 합성 시험은 전부 통과하던 상태였다. App은 이제 자기 보관함에 수업 설정이 있을 때만 profile을 한 번 다시 읽는다(단위 시험 + 음성 대조군 + M2 ④에서 확인). **정정:** ‘집행 전에 시작한 turn’이라는 표현은 틀렸다. 정확히는 — 집행을 켜기 **전에 profile을 캐시한** App이, 아직 수업 설정을 받지 않은 상태에서 집행 **뒤에** 보내는 turn은 key·close 없이 나간다(토큰 강의와 같아 승인됨 · host가 닫지 않으므로 30분 상한만 적용). 세 시점을 구별한다: profile 캐시 시점 · 요청 완료(Service 기록) · host의 종료 선언.
 2. 이 harness는 secret을 **창마다** 메모리에 둔다. 두 번째 창은 수업 연결이 없어 새 1회용 코드로 연결했다. 연결 직후(기기가 새 연결의 전달 key로 자료를 다시 받기 전)의 전환은 `stale_offer`로 거절되고 설계대로 다음 질문에서 다시 시도된다 — 실행기는 재수신을 기다린다. **Keychain을 쓰는 실제 설치본에서 두 창이 연결을 공유하는지는 NOT RUN.**
 3. agent-sdk runtime은 붙여넣은 이미지를 파일로 저장해 Read 도구로 읽힌다 — 첫 공급자 요청의 image block이 아니다. M2는 ‘첨부가 가져오기·되돌리기 동안 그대로이고 전송과 함께 입력창을 떠났다’까지만 말한다.
 
@@ -802,6 +802,31 @@ Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 
 **음성 대조군.** 제품 코드에 시험 스위치는 없다. 첫 설계의 동작(옛 key 허용 · `activated_at`으로 기준 자르기 · 집행 값 없음 = 토큰 fallback · 매 turn profile 재읽기)은 시험 파일 안의 틀린 함수·설정으로 만들고, 시험이 그것을 잡는지 확인했다.
 
 **NOT RUN.** Windows · 학교망 · 실제 복수 기기 · staging/production D1·R2 · 계정 plan·쿼터·지연·p95 · 실제 모델(품질·비용) · 실제 메일 · 같은 grant의 Keychain 자동 재연결 · proxy-runtime profile의 실제 창 · 구 App 실물 · 위 PARTIAL의 나머지. 후속으로 남는 것: 구간별 보고서(섞인 기준은 지금 `보류`까지만) · U4 복구 · U1b 회수 확장 · 공통 결과 통합.
+
+<a id="remote-management-u3-review-20260921"></a>
+
+### U3 — 독립 검토 보완의 실행 기록 · 2026-09-21 (로컬 · 인수 전 · 운영 아님)
+
+`d32a191`에 대한 독립 검토(실제 강사 화면 → 실제 Mac 학생 앱 조작 + 격리 재현 4종)가 짚은 9건의 보완이다. 계약은 [요구 문서의 ‘독립 검토 보완’ 표](../requirements/classroom-admin.md#remote-management-u3-20260921). 위 [첫 실행 기록](#remote-management-u3-run-20260921)의 PARTIAL 행은 고치지 않고 여기서 닫는다. 모델 공급자는 여전히 프로토콜을 끝까지 말하는 기록 서버다.
+
+| # | 회귀(양성 대조군 포함) | 검토의 재현 파일을 고친 소스에 다시 실행 |
+|---|---|---|
+| 1 · 3 | `worker/test/classroom-ops-lesson-review.test.mjs` `1`·`3` — 같은 진짜 토큰 + 변조된 기준값 · 토큰 없음 · 남의 토큰 · 위조 · 강의 없는 토큰 · 다른 과정 · 폐기된 토큰은 **기록 0**, 정직한 요청과 재발급 토큰은 전환. 좌석 a→c 교체 뒤 c는 a의 key를 받지 못함(같은 학생의 유실 응답 재요청은 replay) | `u3-activation-identity-review.mjs` — 전환 요청에 학습 토큰만 추가한 사본(케이스·기대값 그대로)으로 3/3 PASS. 원본 wire(토큰 없음)는 이제 양성 대조군부터 `learner_token_required`로 거부된다 |
+| 2 · 6 | 같은 파일 `2`·`6` + `classroom-ops-lesson-basis.test.mjs`(rollback · 세션 귀속이 빠진 usage 행 · 같은 초 · `unknown`) | `u3-basis-rollback-review.mjs`(+`--same-second`) 그대로 PASS: rollback 뒤 `mixed`/보류, 같은 초의 v2 1건은 `single` |
+| 4 · 5 | 같은 파일 `4`·`5` — 회차 변경 뒤에도 `dispatched`/`completed` 유지, 어디에도 없는 turn만 `not_started`, 재발급 토큰·읽기 실패는 `unknown`, close는 원래 행을 닫음. 열린 turn 200/provider 1 · 요청 전에 닫힌 turn 403/0 · **읽기와 호출 사이에 닫힌 turn 403/0**(hook 발화 확인 · `requests`는 허가된 2건만) | `u3-turn-boundary-review.mjs` 5/5 · `u3-close-route-review.mjs` PASS 그대로 |
+| S9 · S10 | 같은 파일 `S9`·`S10` — 다른 cohort 강사·학습 토큰·ops 자격은 설정 API에서 401/403·쓰기 0, 새 회차는 이전 회차의 binding을 물려받지 않음(돌아오면 그대로). 재발급: 같은 버전은 binding 유지 · 다른 버전은 그 토큰의 강의로 실행 + `token_lesson_changed` · 위조 기준 거부 · 옛 토큰으로 진행 중이던 turn은 그 토큰에만 | — |
+| 7 | 브라우저 e2e E1·E3·E4(진입·버튼·확인·회수 문구, `by_current`: 복귀는 ‘지금 V2 · 전환된 상태: 새로 생김 build, review · 없어짐 craft-v2’) · Chalk 표면 시험 | 실제 Chalk 화면에서 M2가 같은 문장을 확인 |
+| 0 · 8 | 확장 `classroom-inbox.smoke.mjs`(포인터 소유 · 음성 대조군 = U2 규칙) · **M2** | 아래 |
+| P2~P5 · P7 | 브라우저 e2e **E2b**(빌드된 webview): 초안 + 첨부 2장 + 예약 전송 · 키보드만(Tab/Shift+Tab/Enter) · 390px · 200% · 강제 색상 · 회수 뒤 보존 · 학생이 보낸 turn의 `imports` = 정확한 object·revision · 예약 전송은 출처 없음 | M2가 실제 host에서 같은 조합을 실제 마우스로 |
+
+**M2 재작성 — 실제 Mac.** 같은 shell 복사본·SDK binary, 최종 확장 build. 학생 쪽 조작은 전부 **화면에 보이는 컨트롤을 실제 마우스 입력으로** 눌렀다: 누르기 전에 크기 · viewport 안 · 그 좌표의 최상위 요소 · enabled · visible을 검사하고, 하나라도 아니면 `evaluate(click)`으로 넘어가지 않고 실패한다. 순서: ① U3 OFF 회귀(실제 1턴 · U2 공지를 마우스로 열기) ② 집행 ON ③ 답이 오는 중에 예약 전송 1건 + 초안 + 붙여넣은 이미지 2장 → 프롬프트 도착 → 가져오기 → 되돌리기 → 다시 가져와 편집 → **강사가 프롬프트 회수** → 초안·첨부·예약 그대로 → 답이 끝나 예약 전송이 단독으로 나가고 초안은 남음 → 학생이 전송 → spool의 그 turn `prompt` 사건에 `instructor_prompt_refs=[{object, revision 1}]`(예약 turn에는 없음) ④ **S4-①** 전환 요청 무응답 4초 → 질문은 V1·토큰 key로 실행, 다음 질문에서 전환·새 key·close ⑤ 창 1의 답이 V2로 오는 중에 V3 확정 → 두 번째 창 연결 → **두 창 모두 보관함이 화면에 있고 마우스로 열림**(검토 0) → **S4-②** 전환은 됐는데 profile 5xx → 아무것도 보내지 않음 · 입력 유지 · 안내 → 학생이 다시 전송 → V3, 창 1의 질문은 끝까지 V2 ⑥ **S13-ⓒ** 실제 SDK 다중 요청 turn(도구 호출 1회) 도중 회차 스위치 OFF → 두 요청 모두 V3 · 다음 turn 도중 binding 읽기 장애 → 다음 하위 요청 보류 → 화면 ‘끝까지 실행되지 않았습니다’ · 자동 재전송 0 ⑦ 회수 클릭 → 여전히 V3 ⑧ 복귀: **S4-③** 전환 응답 유실 → 옛 key 질문은 provider 전에 거부 → ‘보내지 않았습니다’ + 입력 복원 → 학생이 다시 전송 → V1 ⑨ 두 workspace의 원본 파일 3개가 **앱 시작 전에 쓴 바이트와 동일**(음성 대조군: 한 글자 바꾸면 잡힘) · 앱이 추가한 파일은 붙여넣은 이미지 2개(`ws/assets/pasted-*.png` — 기존 동작)뿐 · 비선택 A2 불변.
+결과(`result.json` schema 2): 공급자 요청 14 · turn 11개 중 host가 닫은 것 8개 — 닫히지 않은 3개는 전부 집행 전에 profile을 캐시한 창이 **설정을 받기 전에** 보낸 turn(답이 붙잡힌 질문 · 예약 전송 · 프롬프트 질문 — 요청은 모두 정상 완료, host가 key·close를 보내지 않음)이고 원인과 함께 `turns_not_closed`에 있다. 그 창이 설정을 받은 뒤의 turn은 전부 닫혔고, S13에서 보류된 turn은 host가 `failed`로 닫았다(`requests` 1 — 허가된 요청만 셈).
+
+**proxy-runtime 실제 창(S3).** `HPS_U3_MODE=proxy`: 같은 합성 cohort를 proxy runtime profile(`boah-dental-teaser-2026-s1`)로 열어 실제 Studio 창이 `/v1/chat/completions`로 말한다. 집행·회차 스위치를 **앱 시작 전에** 켠 순서다: 첫 질문부터 토큰 key · 모든 요청에 turn id · host가 3개 turn 모두 `completed`로 닫음 · 설정 V2 → 실제 헤더의 key = 전환된 binding → `적용` → 복귀 → V1. `/v1/messages`는 한 번도 쓰지 않았다.
+
+**이번에 고친 계측기 오류.** ① ‘SDK 요청의 마지막 메시지에 학생 글이 있다’는 가정(없다 — 대화 전체에서 가장 뒤의 마크로 귀속) ② 합성 stream이 첫 delta를 빠뜨려 화면 문구가 잘림 ③ 강사 조작 헬퍼가 ‘새 자료’를 건너뜀 ④ 브라우저 e2e: 가져오기 뒤 포커스는 입력창으로 돌아간다(되돌리기는 Shift+Tab으로 도달) — ‘다음 Tab이 되돌리기’라는 가정이 틀렸다 ⑤ 기준 판정 시험의 fixture가 turn만 넣고 usage 행을 넣지 않아 실제 원장과 달랐다.
+
+**여전히 NOT RUN.** Windows · 학교망 · 실제 복수 기기 · staging/production D1·R2 · 계정 plan·쿼터·지연·p95 · 실제 모델 · 실제 메일 · **Keychain을 쓰는 일반 설치본에서 두 창의 연결 공유·자동 재연결**(이 harness는 secret을 창마다 메모리에 둔다 — 설치본·기존 자격증명을 건드리지 않고는 격리해 돌릴 수 없어 실행하지 않았다) · 구 App 실물(S15) · 전역 `HPS_CLASSROOM_OPS` OFF를 실제 창의 turn 도중에 주입하는 것(연결이 끊겨 이후 단계를 오염시킨다 — Service 시험으로만). 섞인 기준의 ‘보류’는 보고서 기능의 완료가 아니다: 기준별 분할 보고서는 후속이다. U4 복구·U1b 회수 확장은 시작하지 않았다.
 
 <a id="windows-field-cuesheet-20260921"></a>
 

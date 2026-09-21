@@ -2296,6 +2296,9 @@
           "path": "worker/test/classroom-ops-lesson-settings-d1.test.mjs"
         },
         {
+          "path": "worker/test/classroom-ops-lesson-review.test.mjs"
+        },
+        {
           "path": "extensions/hypeproof-chat/src/lessonBinding.ts"
         },
         {
