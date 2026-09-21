@@ -24,6 +24,7 @@ import { crossProviderEnabled } from '../profiles/types';
 import { applyLessonFeatures } from './lesson-feature-policy';
 import { applyLessonModel } from './lesson-model-policy';
 import { helpModeInstruction, helpModeReceipt, resolveHelpMode } from './lesson-help-mode';
+import { coachVisibleLesson, learningInstruction } from './learning-prompt';
 import type { Context } from "hono";
 import type { Env } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "./tokens";
@@ -294,7 +295,20 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     if (!help.ok) return { ok: false, response: c.json({ error: { type: 'config', code: help.code, message: help.message } }, help.status) };
     if (help.help) c.header('x-hps-help-mode', helpModeReceipt(help.help));
     const helpInstruction = help.help ? helpModeInstruction(help.help) : '';
-    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(lesson.content) + helpInstruction }, session, module, identity: assistantName ? { fixed_name: assistantName } : null, help: help.help ? helpModeReceipt(help.help) : null };
+    // SX-57 — the coach sees the lesson MINUS `learning.observe`. That list is
+    // the instructor's "what will be watched", and the design routes it to the
+    // interpretation prompt and the instructor view, not here. A coach that
+    // knows it steers students into producing observable behavior, which is the
+    // trap SX-57 forbids. Without `learning` this is the same object reference,
+    // so existing lessons serialize to the exact same bytes.
+    const visibleLesson = coachVisibleLesson(lesson.content);
+    // SX-06~SX-12 — mission, completion conditions, the current step, the
+    // `never` list, the intervention ladder and the conversation/language
+    // contracts, labelled instead of buried in the JSON dump. Teaching text
+    // only: like helpInstruction it changes no grant and no policy, and it is
+    // '' for a lesson without `learning`.
+    const learning = learningInstruction(visibleLesson, c.req.header('x-hps-lesson-step'));
+    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(visibleLesson) + helpInstruction + learning }, session, module, identity: assistantName ? { fixed_name: assistantName } : null, help: help.help ? helpModeReceipt(help.help) : null };
   }
   // A help mode without a lesson has nothing to apply to — say so instead of
   // letting the student believe it took effect.

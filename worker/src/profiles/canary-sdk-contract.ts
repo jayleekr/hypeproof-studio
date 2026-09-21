@@ -32,6 +32,18 @@ import systemPromptMd from "../prompts/boah-dental-director-copyclone-2026-s1.md
 export const profile: Profile = {
   id: "canary-sdk-contract",
   version: 1,
+  // `hps-observation/2` — the learning-event superset (SX-44~48).
+  //
+  // Why HERE and nowhere else: /2 is the switch that makes the completion gate
+  // and the Evidence drawer reachable, and until some cohort declares it those
+  // screens are built but dead. It goes on the canary because the canary has
+  // no roster and no human ever sits on it, so turning it on changes what zero
+  // students see. Which REAL cohort gets /2 first — and on which week — is a
+  // teaching decision, not a code one; it is written up for a human in
+  // `.claude/hypeproof/ux/STATE.md`.
+  //
+  // Reverting is one line: delete `format` and this cohort is back on /1.
+  observation: { enabled: true, format: "hps-observation/2" },
   display_name: "내부 카나리 — SDK 게이트웨이 계약 검증",
   audience: {
     // Adult-only. A minor cohort would drag in the child_* harness rules and,
