@@ -685,13 +685,19 @@ Without a valid connection the list stays readable and says "수업 연결 확�
 only on a normal expiry or once the run's own end time has passed — a missing connection (an app restart in a
 running class) is not evidence that the class ended.
 
-### Targeted distribution of lesson prompts and lesson settings (U3) — design under review, not accepted, 2026-09-21
+### Targeted distribution of lesson prompts and lesson settings (U3) — implemented, locally run, not accepted, default OFF, 2026-09-21
 
-Not implemented; no REQ row is claimed and [AT-45/46](testing/classroom-admin.md#remote-management-u3-plan-20260921) are NOT RUN.
+Implemented on `feat/751-u3-prompt-settings` and run locally (unit, Service, local workerd D1, browser, a real
+Studio window on a Mac with a scripted model provider): see the
+[run record](testing/classroom-admin.md#remote-management-u3-run-20260921). Not accepted, not deployed, OFF by default
+(`HPS_LESSON_BINDINGS` unset and the per-run `ops_lesson_settings` flag false); no REQ row is claimed until acceptance.
+Found only on the real window and fixed: a profile cached before enforcement began made the host send no binding key,
+never switch and never close a turn — the preflight now re-reads the profile once when the device's own inbox holds a
+lesson setting. "Applied" on the instructor screen is request-level evidence (one provider request under the binding
+ended protocol-complete), not "the learner's question succeeded".
 The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u3-20260921);
 its first draft was revised the same day after an independent review (turn pinning, fallback under
-outage/off, execution evidence, mixed-basis reports). The Studio behavior it will add, once built, is
-bounded as follows. **Prompt:** an instructor prompt is an inbox card; only the learner's own press of
+outage/off, execution evidence, mixed-basis reports). The Studio behavior it adds is bounded as follows. **Prompt:** an instructor prompt is an inbox card; only the learner's own press of
 `초안에 가져오기` changes the input draft, as one functional update inside the webview that appends to
 the latest draft and never replaces it, touches no attachment or queued send, sends nothing and calls
 no model. Undo restores the previous draft only while the text is byte-identical to the just-imported
