@@ -17,6 +17,7 @@
     "test:classroom": "node --experimental-strip-types --experimental-sqlite classroom/run.mjs",
     "test:classroom-ops": "node --experimental-strip-types --experimental-sqlite classroom/ops.mjs",
     "test:classroom-report": "node --experimental-strip-types classroom/report-page.mjs",
+    "test:classroom-ops-selection": "node --experimental-strip-types --experimental-sqlite classroom/ops-selection.mjs",
     "test:classroom-ops-roster": "node --experimental-strip-types --experimental-sqlite classroom/ops-roster.mjs",
     "test:trial-ux": "node trial-ux/run.mjs",
     "test:budgets:browser": "node --experimental-strip-types --experimental-sqlite access-budgets/browser.mjs",

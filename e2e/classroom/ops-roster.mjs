@@ -130,12 +130,12 @@ try {
   assert.match(await page.locator('#ops-pick-impact').innerText(), /선택 3명 중 1명에게 기록 회수를 요청합니다\. 제외 2명.*선택하지 않은 27명에게는 아무것도 요청·저장하지 않습니다\. 회수만 하며 평가 초안·발송은 시작하지 않습니다/);
   assert.match(await page.locator('#ops-pick-preview').innerText(), /S01 · student-01 — 요청 예정[\s\S]*S02 · student-02 — 동의 없음 · 회수하지 않음[\s\S]*S12 · student-12 — 기기 연결 없음 · 요청하지 못함/); assert.equal(asked(), 0, 'the preview asked no device');
   // Changing the selection after the preview withdraws the confirmation: what is confirmed is what was shown.
-  await row('S12').getByLabel('선택').uncheck(); assert.equal(await page.locator('#ops-pick-confirm').isHidden(), true); assert.match(await page.locator('#ops-pick-state').innerText(), /선택이 바뀌었습니다/);
+  await row('S12').getByLabel('선택').uncheck(); assert.equal(await page.locator('#ops-pick-confirm').isHidden(), true); assert.match(await page.locator('#ops-pick-state').innerText(), /선택이나 명단·연결 상태가 바뀌었습니다/);
   await row('S12').getByLabel('선택').check(); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor();
   await page.locator('#ops-pick-go').dblclick(); // a double click is one request
   await page.locator('#ops-pick-items').filter({ hasText: /S01 · student-01 — 서버 검증됨 · 기록 순번 연속/ }).waitFor({ timeout: 30000 }).catch(async (e) => { throw Error('selected collection did not verify: ' + (await page.locator('#ops-pick-state').innerText()) + ' | ' + (await page.locator('#ops-pick-items').innerText()), { cause: e }); });
   await page.locator('#ops-pick-state').filter({ hasText: /결과 확정/ }).waitFor({ timeout: 15000 });
-  assert.match(await page.locator('#ops-pick-state').innerText(), /선택 회수 · 대상 3명 · 서버 검증됨 1 · 진행 중 0 · 도착하지 않음 1 · 제외 1 · 선택하지 않은 27명은 요청 없음/);
+  assert.match(await page.locator('#ops-pick-state').innerText(), /선택 회수 · 대상 3명 · 서버 검증됨 1 · 기기 응답 대기 0 · 전송·검증 대기 0 · 실패·미도착 1 · 결과 미확인 0 · 제외 1 · 선택하지 않은 27명은 요청 없음 · 결과 확정/);
   assert.match(await page.locator('#ops-pick-items').innerText(), /S02 · student-02 — 동의 없음[\s\S]*S12 · student-12 — 기기 연결 없음/);
   const pickBatches = local.db.prepare("SELECT b.id FROM classroom_collect_batches b JOIN classroom_collect_scopes s ON s.batch_id=b.id WHERE s.scope='targets' AND b.dry_run=0").all(); assert.equal(pickBatches.length, 1, 'double click → one batch'); assert.equal(asked(), 1);
   const pickKeys = [...local.r2.keys()].filter((k) => k.includes(pickBatches[0].id)); assert.equal(pickKeys.length, 2); assert.ok(pickKeys.every((k) => k.includes('/student-01/')), 'objects only for the selected, consenting, connected learner: ' + pickKeys.join(' '));
