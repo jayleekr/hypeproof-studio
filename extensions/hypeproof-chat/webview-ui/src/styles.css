@@ -1430,3 +1430,16 @@ html, body, #root {
 .hp-evidence-row.hp-amber { border-left: 3px solid var(--hp-warn); padding-left: 8px; }
 .hp-evidence-row.hp-amber .hp-evidence-state { color: var(--hp-warn); }
 .hp-evidence-hint { margin: 0; font-size: 12px; color: var(--hp-muted); }
+
+/* #751 U2 — instructor notices/materials. Text is text: pre-wrap, never markup. State is said in words, not colour.
+   No fixed heights and `overflow-wrap:anywhere`, so 200% zoom and a 390px rail never scroll sideways. */
+.hp-inbox-list { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 8px; }
+.hp-inbox-card { border-top: 1px solid var(--hp-line); padding-top: 8px; min-width: 0; }
+.hp-inbox-card summary { min-height: 44px; cursor: pointer; padding: 8px 4px; overflow-wrap: anywhere; }
+.hp-inbox-title { font-weight: 600; }
+.hp-inbox-meta { color: var(--hp-muted); font-size: 12px; overflow-wrap: anywhere; }
+.hp-inbox-body { white-space: pre-wrap; overflow-wrap: anywhere; margin: 8px 4px; }
+.hp-inbox-links { list-style: none; margin: 8px 4px; padding: 0; display: grid; gap: 8px; }
+.hp-inbox-links li { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.hp-inbox-link-url { font-family: var(--vscode-editor-font-family, ui-monospace, monospace); font-size: 12px; color: var(--hp-muted); overflow-wrap: anywhere; min-width: 0; }
+.hp-inbox :focus-visible { outline: 2px solid var(--hp-accent); outline-offset: 2px; }

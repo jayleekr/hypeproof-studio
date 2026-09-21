@@ -378,6 +378,11 @@ export type WebviewMessage = (
   // with worker/src/routes/trace.ts TraceEvent union.
   // #751 F4 — explicit learner step action in the lesson panel (never inferred from chat volume).
   | { type: "lessonStep"; stepId: string; status: "in_progress" | "submitted" }
+  // #751 U2 — the inbox of instructor notices/materials. `generation` is the connection the card list was drawn under: the
+  // host answers a callback from an older one with nothing. Opening a card is kept on this device; it is not reported.
+  | { type: "inboxRequest" }
+  | { type: "inboxOpen"; objectId: string; generation: number }
+  | { type: "inboxLink"; objectId: string; url: string; generation: number; action: "open" | "copy" }
   | { type: "traceTrialStart"; taskLabel?: string }
   | { type: "traceTrialEnd"; trialId: string }
   | {
@@ -423,6 +428,8 @@ export type HostMessage = (
   | { type: 'learningState'; state: import('./learningStateHelpers').LearningStatePayload }
   | StartResponse
   | { type: "config"; config: ChatConfig }
+  /** #751 U2 — always read from disk by the host; the webview holds no copy of record. */
+  | { type: "inboxState"; inbox: import("./classroomInbox").InboxView }
   | { type: "history"; messages: ChatMessage[] }
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }
