@@ -17,7 +17,7 @@ import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth'
 import { getProfile } from '../profiles';
 import { isMinorCohort } from '../lib/moderation';
 import { COMMAND_TTL_MS, ID_RE, MAX_SEATS, UUIDISH_RE, parseFlags, parseLesson, sha256Hex } from '../lib/classroom-ops';
-import { CONSENT_BASES, PURPOSES, SNAPSHOT_FILES, collectRequestCanonical, normalizeCollectRequest, UPLOAD_GRACE_MS, attributionProblem, eventCoverage, finalLineSha, sha256Bytes, snapshotKey, validateManifest } from '../lib/classroom-collect';
+import { CONSENT_BASES, PURPOSES, SNAPSHOT_FILES, collectRequestCanonical, collectStatus, normalizeCollectRequest, UPLOAD_GRACE_MS, attributionProblem, eventCoverage, finalLineSha, sha256Bytes, snapshotKey, validateManifest } from '../lib/classroom-collect';
 import { ERASURE_RETRY_STEPS_MS, MAX_ERASURE_ATTEMPTS, eraseLearnerCollection } from '../lib/classroom-erasure';
 import { opsEnabled } from './classroom-ops';
 
@@ -266,13 +266,16 @@ export const scopeRefusal = (c: any, err: unknown) => err instanceof CollectScop
 async function batchView(db: Db, runId: string, id: string) {
   const b = await db.prepare('SELECT id,roster_revision,purpose,notice_version,dry_run,created_by,created_at,upload_until FROM classroom_collect_batches WHERE id=? AND class_run_id=?').bind(id, runId).first<Record<string, unknown>>();
   if (!b) return null;
-  const items = ((await db.prepare('SELECT seat_id,student_id,state,reason,input_revision,manifest_digest,integrity,coverage,receipt_id,updated_at FROM classroom_collect_items WHERE batch_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<Record<string, any>>;
+  const items = ((await db.prepare('SELECT seat_id,seat_revision,student_id,state,reason,input_revision,manifest_digest,integrity,coverage,receipt_id,updated_at FROM classroom_collect_items WHERE batch_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<Record<string, any>>;
   const by: Record<string, number> = {}; for (const i of items) by[i.state] = (by[i.state] ?? 0) + 1;
   const sc = await batchScope(db, id), selected = items.filter((i) => i.state !== 'not_selected');
   // Per selected seat, what the device-side request did — in ledger terms, so "asked" is never read as "received".
-  const delivery = new Map((((await db.prepare("SELECT t.seat_id,t.state,t.result_code FROM ops_command_targets t JOIN ops_commands c ON c.id=t.command_id WHERE c.class_run_id=? AND c.idempotency_key=?").bind(runId, 'collect-' + id).all()).results ?? []) as Array<{ seat_id: string; state: string; result_code: string }>).map((t) => [t.seat_id, { state: t.state, result_code: t.result_code }]));
-  for (const i of items) i.request = delivery.get(i.seat_id) ?? null;
-  return { batch: { ...b, dry_run: b.dry_run === 1, scope: sc.scope, mode: sc.mode, targets: sc.targets }, summary: { roster: items.length, selected: selected.length, not_selected: items.length - selected.length, by_state: by,
+  const delivery = new Map((((await db.prepare("SELECT t.seat_id,t.state,t.result_code,t.updated_at FROM ops_command_targets t JOIN ops_commands c ON c.id=t.command_id WHERE c.class_run_id=? AND c.idempotency_key=?").bind(runId, 'collect-' + id).all()).results ?? []) as Array<{ seat_id: string; state: string; result_code: string; updated_at: number }>).map((t) => [t.seat_id, { state: t.state, result_code: t.result_code, updated_at: t.updated_at }]));
+  // One observation: the same `now` decides the grace, what counts as recent bytes, and what the instructor is told was seen when.
+  const now = Date.now(), live = await db.prepare('SELECT o.flags_json,o.ends_at,s.ended_at FROM class_run_ops o LEFT JOIN sessions s ON s.id=o.class_run_id WHERE o.class_run_id=?').bind(runId).first<{ flags_json: string; ends_at: number; ended_at: string | null }>();
+  const closed = !live ? 'run_not_found' : !parseFlags(live.flags_json).ops_collect ? 'ops_collect_disabled' : live.ended_at || now > live.ends_at ? 'run_ended' : '';
+  for (const i of items) { i.request = delivery.get(i.seat_id) ?? null; if (i.state !== 'not_selected') i.status = collectStatus(i as never, { now, upload_until: Number(b.upload_until) }); }
+  return { observed_at: now, batch: { ...b, dry_run: b.dry_run === 1, scope: sc.scope, mode: sc.mode, targets: sc.targets, upload_open: now < Number(b.upload_until), new_request_allowed: !closed, new_request_blocked_by: closed }, summary: { roster: items.length, selected: selected.length, not_selected: items.length - selected.length, by_state: by,
     // "Collected" is only what the Service verified. Arrived bytes and complete behaviour coverage are separate counts.
     verified: by.verified ?? 0, verified_complete_coverage: items.filter((i) => i.state === 'verified' && i.coverage === 'complete').length, held: items.filter((i) => ['consent_missing', 'guardian_consent_missing', 'withdrawn'].includes(i.state)).length }, items };
 }

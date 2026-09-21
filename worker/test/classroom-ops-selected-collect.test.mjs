@@ -24,6 +24,46 @@ await check('controls: what a request means is decided once — legacy stays who
   for (const o of [{ targets: ['A1', 'A3'] }, { notice_version: 'notice-v2' }, { dry_run: true }, { roster_revision: 2 }, { scope: 'roster', mode: 'finish', targets: [] }]) assert.notEqual(c(o), c({}), 'a different request is a different hash: ' + JSON.stringify(o));
 });
 
+await check('controls: the collection lifecycle table — item × device request × grace, and how each row moves over time', async () => {
+  const { collectStatus, COLLECT_ACTIVE_MS, COLLECT_SETTLE_MS } = await import('../src/lib/classroom-collect.ts'), T = 1_000_000_000_000, until = T + 3_600_000;
+  const at = (state, request, o = {}) => { const r = collectStatus({ state, updated_at: o.item_at ?? T, request: request ? { state: request[0], result_code: request[1] ?? '', updated_at: o.req_at ?? T } : null }, { now: o.now ?? T + 1000, upload_until: o.until ?? until }); return [r.phase, r.active, r.retryable, r.may_change, r.partial].join(' '); };
+  const table = [
+    // item         request                                   → phase            active retry may_change partial
+    ['verified',   ['failed', 'upload_failed'], {},            'verified false false false false'],          // a failed command before a verified record is history
+    ['withdrawn',  ['succeeded', 'receipt_verified'], {},      'excluded false false false false'],
+    ['consent_missing', null, {},                              'excluded false false false false'],
+    ['quarantined', ['succeeded'], {},                         'held false false false false'],
+    ['not_connected', null, {},                                'not_delivered false true false false'],
+    ['requested',  ['queued'], {},                             'awaiting_device true false true false'],
+    ['requested',  ['leased'], {},                             'awaiting_device true false true false'],     // assigned by the server ≠ received by the device
+    ['requested',  ['accepted'], {},                           'transferring true false true false'],
+    ['uploading',  ['running'], {},                            'transferring true false true true'],
+    ['uploading',  ['failed', 'offline_pending'], { now: T + COLLECT_ACTIVE_MS + 1 }, 'resend_wait false true true true'],   // meta arrived, then the network dropped: the device keeps the copy
+    ['uploading',  ['failed', 'upload_refused'], { now: T + COLLECT_ACTIVE_MS + 1 },  'refused false true true true'],      // meta arrived, the next file was refused: final
+    ['uploading',  ['failed', 'verify_failed'], { now: T + COLLECT_ACTIVE_MS + 1 },   'refused false true true true'],
+    ['uploading',  ['failed', 'upload_refused'], { now: T + 1000 },                   'transferring true false true true'],  // bytes a second ago ARE evidence of a transfer (a resumed upload)
+    ['requested',  ['failed', 'nothing_recorded'], {},         'refused false true true false'],
+    ['requested',  ['rejected', 'busy'], {},                   'not_delivered false true true false'],
+    ['requested',  ['expired'], {},                            'not_delivered false true true false'],
+    ['requested',  ['unsupported'], {},                        'not_delivered false true true false'],
+    ['requested',  ['cancelled'], {},                          'not_delivered false true true false'],
+    ['requested',  ['outcome_unknown'], {},                    'unknown false true true false'],
+    ['uploading',  ['outcome_unknown'], { now: T + COLLECT_ACTIVE_MS + 1 }, 'unknown false true true true'],
+    ['requested',  ['succeeded', 'receipt_verified'], {},      'transferring true false true false'],        // "sent", verification pending — for a bounded time
+    ['requested',  ['succeeded', 'receipt_verified'], { now: T + COLLECT_SETTLE_MS + 1 }, 'unknown false true true false'],
+    ['incomplete', ['failed', 'hash_mismatch'], {},            'refused false true true false'],
+    ['some_future_state', ['queued'], {},                      'unknown false false true false'],            // not guessed at, and not offered for retry
+    // the grace window closed: nothing of THIS batch can arrive any more, whatever the command said
+    ['uploading',  ['failed', 'offline_pending'], { now: until }, 'grace_over false true false true'],
+    ['requested',  ['queued'], { now: until + 1 },             'grace_over false true false false'],
+    ['verified',   ['failed'], { now: until + 1 },             'verified false false false false'],
+  ];
+  for (const [state, request, o, want] of table) assert.equal(at(state, request, o), want, `${state} × ${JSON.stringify(request)} × ${JSON.stringify(o)}`);
+  // One seat over time: partial upload → the device gives up for now → the same copy resumes → verified. Status follows each step; "failed" never sticks.
+  const steps = [['requested', ['queued'], {}, 'awaiting_device'], ['uploading', ['running'], {}, 'transferring'], ['uploading', ['failed', 'offline_pending'], { now: T + COLLECT_ACTIVE_MS + 1 }, 'resend_wait'], ['uploading', ['failed', 'offline_pending'], { item_at: T + 200_000, now: T + 200_500 }, 'transferring'], ['verified', ['failed', 'offline_pending'], { now: T + 300_000 }, 'verified']];
+  for (const [state, request, o, phase] of steps) assert.equal(at(state, request, o).split(' ')[0], phase);
+});
+
 const f = await localOps(); let evaluatorCalls = 0;
 const students = ['a', 'b', 'c', 'd', 'e', 'f'].map((x, i) => ({ seat_id: 'A' + (i + 1), student_id: 'student-' + x }));
 const B = f.base + '/report-batches', post = (body, token) => f.request(B, 'POST', body, token);
@@ -171,6 +211,35 @@ try {
         assert.equal(k.db.prepare("SELECT count(*) n FROM ops_command_targets t JOIN class_run_seats s ON s.class_run_id=t.class_run_id AND s.seat_id=t.seat_id AND s.seat_revision=t.seat_revision WHERE s.student_id='student-c'").get().n, 0, label + ': the learner who now holds the seat was asked nothing');
       } finally { k.close(); }
     }
+  });
+
+  await check('AT-38 lifecycle through the real routes: a partial upload that failed is not "sending"; an unknown outcome that later seals is verified; the closed grace is said as such', async () => {
+    const k = await localOps(); try {
+      const three = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }, { seat_id: 'A3', student_id: 'student-c' }];
+      await k.freeze(); assert.equal((await k.configure(three, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true } })).status, 201);
+      const c = {}; for (const [i, s] of three.entries()) { c[s.seat_id] = (await k.pair(s.seat_id, 1, i + 1)).conn.json; assert.equal((await k.request('/v1/classroom/ops/collect/consent', 'POST', { consent: true, purpose: 'class_report', notice_version: 'notice-v1' }, c[s.seat_id].credential)).status, 201); }
+      const made = await k.request(k.base + '/report-batches', 'POST', { idempotency_key: KEY(), ...base, targets: ['A1', 'A2', 'A3'] }); assert.equal(made.status, 201, made.raw); const id = made.json.batch.id;
+      const view = async () => { const v = (await k.request(k.base + '/report-batches/' + id)).json; return { v, of: (seat) => { const i = v.items.find((x) => x.seat_id === seat); return [i.state, i.request?.state, i.request?.result_code || '', i.status.phase, i.status.retryable, i.status.partial].join(' '); } }; };
+      const target = (seat, st, code = '', at = Date.now()) => k.db.prepare("UPDATE ops_command_targets SET state=?,result_code=?,updated_at=? WHERE seat_id=? AND command_id=(SELECT id FROM ops_commands WHERE idempotency_key=?)").run(st, code, at, seat, 'collect-' + id);
+      const putMeta = (seat) => k.app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${id}/1/session.meta.json`, { method: 'PUT', headers: { authorization: 'Bearer ' + c[seat].credential }, body: k.metaFor(c[seat]) }), k.env, { waitUntil() {} }).then((r) => r.status);
+      const old = (seat) => k.db.prepare('UPDATE classroom_collect_items SET updated_at=? WHERE batch_id=? AND seat_id=?').run(Date.now() - 120_000, id, seat); // "the bytes arrived two minutes ago and nothing since"
+      let s = await view(); assert.equal(s.of('A1'), 'requested queued  awaiting_device false false'); assert.ok(Math.abs(s.v.observed_at - Date.now()) < 5000); assert.deepEqual([s.v.batch.upload_open, s.v.batch.new_request_allowed], [true, true]);
+      // A1: meta arrived over the real PUT, then the device stopped for now (offline_pending) · A2: meta arrived, then a final refusal · A3: started, never reported
+      assert.equal(await putMeta('A1'), 201); assert.equal(await putMeta('A2'), 201); target('A1', 'failed', 'offline_pending'); target('A2', 'failed', 'upload_refused'); target('A3', 'outcome_unknown');
+      s = await view(); assert.equal(s.of('A1'), 'uploading failed offline_pending transferring false true', 'bytes a moment ago are still a transfer');
+      old('A1'); old('A2'); s = await view();
+      assert.equal(s.of('A1'), 'uploading failed offline_pending resend_wait true true'); assert.equal(s.of('A2'), 'uploading failed upload_refused refused true true'); assert.equal(s.of('A3'), 'requested outcome_unknown  unknown true false');
+      // A3's record arrives late, inside the grace: the past command result stays visible next to the present, verified, collection result.
+      const late = await k.uploadSnapshotAs(c.A3, id, 1, record('student-c')); assert.equal(late.status, 201, late.raw); s = await view(); assert.equal(s.of('A3'), 'verified outcome_unknown  verified false false');
+      // A1's device comes back and finishes the SAME frozen revision: resend_wait → verified.
+      const resumed = await k.uploadSnapshotAs(c.A1, id, 1, record('student-a'), { meta: k.metaFor(c.A1) }); assert.equal(resumed.status, 201, resumed.raw); s = await view(); assert.equal(s.of('A1'), 'verified failed offline_pending verified false false');
+      // The grace of this batch closes with A2 still partial: said as such, and the Service refuses the bytes too.
+      k.db.prepare('UPDATE classroom_collect_batches SET upload_until=? WHERE id=?').run(Date.now() - 1, id); s = await view();
+      assert.equal(s.of('A2'), 'uploading failed upload_refused grace_over true true'); assert.equal(s.v.batch.upload_open, false); assert.equal(await putMeta('A2'), 403);
+      // …and whether a NEW request is possible is a separate fact: the class is still open here, then it ends.
+      assert.equal(s.v.batch.new_request_allowed, true); k.db.prepare('UPDATE class_run_ops SET ends_at=? WHERE class_run_id=?').run(Date.now() - 1, k.run);
+      s = await view(); assert.deepEqual([s.v.batch.new_request_allowed, s.v.batch.new_request_blocked_by], [false, 'run_ended']);
+    } finally { k.close(); }
   });
 
   await check('AT-32 switches off: the run flag and the Service switch each refuse selection and wrap-up alike', async () => {

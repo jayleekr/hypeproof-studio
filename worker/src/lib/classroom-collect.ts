@@ -48,6 +48,59 @@ export function normalizeCollectRequest(b: unknown, maxTargets: number): { ok: t
   if (o.mode === 'finish') return no('mode_not_allowed', 'the class wrap-up (evaluation may follow) covers the whole roster; selected seats are collect_only');
   return { ok: true, value: { ...base, scope: 'targets', mode: 'collect_only', targets: [...(o.targets as string[])].sort() } };
 }
+/**
+ * What one selected seat of a collection batch IS right now — from three independent facts, none of which is enough alone:
+ *   the collection ITEM (what the Service holds), the device REQUEST (what happened to the command), the upload GRACE
+ *   (whether this batch can still receive anything). The table in docs/requirements/classroom-admin.md (U1 · 회수 생명주기)
+ *   is this function; the rows are evaluated top to bottom.
+ *
+ *   phase            active  retry  may_change   meaning
+ *   verified           -       -       -         the Service verified a record (a failed command before it is history, not status)
+ *   excluded           -       -       -         consent missing / withdrawn — asking again changes nothing
+ *   held               -       -       -         quarantined: a person looks first
+ *   grace_over         -      yes      -         the upload window of THIS batch has closed without a verified record
+ *   not_delivered      -      yes    (item: -)   no device ever got it: no connection, or the command expired / was rejected /
+ *                                                cancelled / unsupported before it ran
+ *   awaiting_device   yes      -      yes        asked; queued or assigned by the server — no device receipt yet
+ *   transferring      yes      -      yes        the device accepted / is running, OR bytes arrived within ACTIVE_MS, OR it reported
+ *                                                "sent" and verification is still pending (bounded by SETTLE_MS)
+ *   resend_wait        -      yes     yes        the device failed with `offline_pending`: it KEEPS the frozen copy and resumes when
+ *                                                the app restarts or reconnects. Not a transfer in progress, not a final refusal.
+ *   refused            -      yes     yes        a final refusal: the device gave up (upload_refused, verify_failed, …) or the Service
+ *                                                marked the record incomplete. Files that already arrived do not make it "sending".
+ *   unknown            -      yes     yes        the device started and never reported back (`outcome_unknown`), or "sent" without a
+ *                                                verification for longer than SETTLE_MS. Neither a success nor a failure.
+ *
+ * `partial` = some files of this revision are stored but it is not verified. It is a fact about stored bytes, never evidence
+ * that a transfer is happening NOW — only recent bytes (ACTIVE_MS) or a running command are.
+ * `may_change` is why a panel must not say "final" and must be looked at again: inside the grace window a late upload can
+ * still turn a failed or unknown target into `verified`.
+ */
+export const COLLECT_ACTIVE_MS = 90_000, COLLECT_SETTLE_MS = 5 * 60_000;
+export type CollectPhase = 'verified' | 'excluded' | 'held' | 'grace_over' | 'not_delivered' | 'awaiting_device' | 'transferring' | 'resend_wait' | 'refused' | 'unknown';
+export interface CollectStatus { phase: CollectPhase; active: boolean; retryable: boolean; may_change: boolean; partial: boolean }
+export function collectStatus(item: { state: string; updated_at: number; request?: { state: string; result_code?: string | null; updated_at?: number | null } | null }, ctx: { now: number; upload_until: number }): CollectStatus {
+  const out = (phase: CollectPhase, active: boolean, retryable: boolean, may_change: boolean): CollectStatus => ({ phase, active, retryable, may_change, partial: item.state === 'uploading' });
+  if (item.state === 'verified') return out('verified', false, false, false);
+  if (['consent_missing', 'guardian_consent_missing', 'withdrawn'].includes(item.state)) return out('excluded', false, false, false);
+  if (item.state === 'quarantined') return out('held', false, false, false);
+  if (ctx.now >= ctx.upload_until) return out('grace_over', false, true, false);
+  if (item.state === 'not_connected') return out('not_delivered', false, true, false);
+  if (item.state === 'incomplete') return out('refused', false, true, true);
+  if (item.state !== 'requested' && item.state !== 'uploading') return out('unknown', false, false, true); // a state this build does not know is not guessed at
+  const r = item.request?.state ?? '', code = item.request?.result_code ?? '';
+  if (r === '' || r === 'queued' || r === 'leased') return out('awaiting_device', true, false, true);
+  if (r === 'accepted' || r === 'running') return out('transferring', true, false, true);
+  // From here the command is over. Bytes that arrived a moment ago are the only remaining evidence of a transfer in progress
+  // (a resumed upload); a file that arrived and then nothing is not.
+  if (item.state === 'uploading' && ctx.now - item.updated_at < COLLECT_ACTIVE_MS) return out('transferring', true, false, true);
+  if (r === 'succeeded') return ctx.now - (item.request?.updated_at ?? item.updated_at) < COLLECT_SETTLE_MS ? out('transferring', true, false, true) : out('unknown', false, true, true);
+  if (r === 'outcome_unknown') return out('unknown', false, true, true);
+  if (r === 'failed') return code === 'offline_pending' ? out('resend_wait', false, true, true) : out('refused', false, true, true);
+  if (['rejected', 'unsupported', 'expired', 'cancelled', 'not_connected'].includes(r)) return out('not_delivered', false, true, true);
+  return out('unknown', false, false, true);
+}
+
 /** Everything that makes two requests "the same request". The idempotency key itself is not part of it. */
 export const collectRequestCanonical = (r: Pick<CollectRequest, 'scope' | 'mode' | 'targets' | 'purpose' | 'notice_version' | 'dry_run' | 'roster_revision'>): string => JSON.stringify([r.scope, r.mode, r.targets, r.purpose, r.notice_version, r.dry_run, r.roster_revision]);
 
