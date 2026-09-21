@@ -108,9 +108,9 @@ try {
     await c.evaluate("(()=>{const e=document.querySelector('.hps-input textarea');e.focus();e.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',bubbles:true,cancelable:true}));})()"); };
 
   // 1 — the token the learner was given is active in the real app (real /v1/profile through the real window)
-  const entry = await frame('.studio-course, .hps-lesson, .hps-input textarea', 60000); await shot('01-launched');
+  const entry = await frame('.studio-course, .hp-mission, .hps-input textarea', 60000); await shot('01-launched');
   if (await entry.evaluate("!!document.querySelector('.studio-primary')")) await entry.evaluate("document.querySelector('.studio-primary').click()");
-  const chat = await frame('.hps-input textarea', 30000), lessonTitle = await wait(() => chat.evaluate("document.querySelector('.hps-lesson')?.textContent||''"), 'lesson panel');
+  const chat = await frame('.hps-input textarea', 30000), lessonTitle = await wait(() => chat.evaluate("document.querySelector('.hp-mission')?.textContent||''"), 'mission header of the confirmed lesson');
   record('token', { lesson_panel: lessonTitle.slice(0, 60), note: 'participant token bound to the frozen synthetic lesson; verified by the app against /v1/profile' });
 
   // 2 — connect with the one-time code, typed into the real command palette prompt
@@ -122,7 +122,7 @@ try {
   assert.ok(!JSON.stringify(s1).includes('SYNTHETIC LEARNER WORK'), 'the board never carries file content');
 
   // 3 — the learner's own step buttons → the instructor's board
-  await chat.evaluate("document.querySelector('.hps-lesson').open=true"); assert.ok(await clickText(chat, '채팅에 과제 넣기'), 'step button');
+  assert.equal(await chat.evaluate("document.querySelectorAll('.hp-cta-primary').length"), 1, 'one Primary on the learner screen'); await chat.evaluate("document.querySelector('.hp-mission .hp-cta-primary').click()"); // the learning-first screen: starting the current step is the in_progress report
   const s2 = await wait(async () => { const s = await seat(); return s?.step?.status === 'in_progress' ? s : null; }, 'step in_progress on the board');
   assert.ok(await clickText(chat, '이 단계를 마쳤어요')); const s3 = await wait(async () => { const s = await seat(); return s?.step?.status === 'submitted' ? s : null; }, 'step submitted on the board'); await shot('03-step-submitted');
   assert.ok(await chat.evaluate("[...document.querySelectorAll('button')].some(b=>b.textContent.includes('마쳤다고 표시함 · 강사 확인 전')&&b.disabled)"), 'shown as the learner\'s own statement');

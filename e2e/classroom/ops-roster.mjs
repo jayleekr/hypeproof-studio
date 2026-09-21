@@ -43,9 +43,11 @@ try {
   await app.addInitScript(() => { window.sent = []; window.acquireVsCodeApi = () => ({ postMessage: (m) => window.sent.push(m), getState: () => undefined, setState: () => {} }); });
   await app.goto('http://127.0.0.1:' + webviewServer.address().port + '/'); await app.waitForFunction(() => window.sent.some((m) => m.type === 'ready'));
   await app.evaluate((config) => window.dispatchEvent(new MessageEvent('message', { data: { type: 'config', config } })), { proxyUrl: 'http://controlled-host.invalid/v1', model: 'controlled-host-only', hasToken: true, coach: { name: '코치', personality: '', configured: true }, profile: { ...profile, lesson } });
-  await app.getByText('내 수업 · 합성 수업').click(); const build2 = app.locator('.hps-lesson section').nth(1);
-  await build2.getByRole('button', { name: '채팅에 과제 넣기' }).click(); await build2.getByRole('button', { name: '이 단계를 마쳤어요' }).click();
-  assert.equal(await build2.getByRole('button', { name: '마쳤다고 표시함 · 강사 확인 전' }).isDisabled(), true, 'the learner sees it as their own statement, not as a pass');
+  // The learning-first screen (#1170/#1178): pick the second step in the mission header, start it with the screen's ONE Primary, then report it.
+  const mission = app.locator('.hp-mission'); await mission.locator('.hp-mission-actions').getByRole('button', { name: 'build' }).click();
+  assert.equal(await app.locator('.hp-cta-primary').count(), 1, 'the class report does not add a second Primary to the learner screen');
+  await mission.locator('.hp-cta-primary', { hasText: 'build' }).click(); const report = app.locator('.hp-rail-step-report'); await report.getByRole('button', { name: '이 단계를 마쳤어요' }).click();
+  assert.equal(await report.getByRole('button', { name: '마쳤다고 표시함 · 강사 확인 전' }).isDisabled(), true, 'the learner sees it as their own statement, not as a pass');
   const stepMessages = (await app.evaluate(() => window.sent)).filter((m) => m.type === 'lessonStep'); assert.deepEqual(stepMessages.map((m) => [m.stepId, m.status]), [['build', 'in_progress'], ['build', 'submitted']]); assert.deepEqual(appErrors, []);
   await app.screenshot({ path: path.join(out, 'app-lesson-step.png'), fullPage: true }); await app.close(); ok('webview: the learner\'s own click produces the step messages');
 
