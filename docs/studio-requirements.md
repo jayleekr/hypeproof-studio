@@ -661,3 +661,19 @@ Automatic collection requires the new explicit consent/grant contract; this
 proposal does not relax existing manual-upload or operator-only log access.
 New reports follow MC-17/19; legacy HAIN7 stays a separate versioned adapter.
 Implementation phases and rollback are in [E5](plan/learning-agent-experience-epics.md#remote-classroom-delivery).
+
+### Targeted distribution of notices and materials (U2) — design contract only, 2026-09-21
+
+Not implemented; no REQ row is claimed and [AT-44](testing/classroom-admin.md#remote-management-u2-plan-20260921) is NOT RUN.
+The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u2-20260921).
+The Studio behavior it will add, once built, is bounded as follows. The App host owns a
+durable per-learner, per-class-run inbox under extension global storage; it never writes
+to the learner's workspace, conversation, input draft or spool (REQ-Q ownership unchanged).
+An item is stored only after its hash is verified, and "applied" means the host re-read it
+through the same disk path the card list uses — a sync HTTP 200, a notification or a
+webview `postMessage` is not completion, and opening a card is not reported. The card is a
+closed-by-default `<details>` in the coach rail of the work screen and a quiet line on the
+"이어서 하기" entry card: no modal, no second Primary (SX-04), nothing in the message stream,
+canvas or evidence drawer (SX-05/06/13). Text is rendered as text; links open only on a
+learner click through the existing https-guarded `openExternal` path. A late response or
+webview callback from an ended connection generation changes nothing.

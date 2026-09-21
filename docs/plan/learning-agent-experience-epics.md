@@ -362,11 +362,32 @@ rollback은 먼저 delivery/collect/commands 신규 enqueue를 끄고 관측을 
 
 | 단위 | 내용 (기존 원장·Chalk `/manage`·연결 자격을 재사용) | 크기 | 선행 결정 |
 |---|---|---|---|
-| U1 공통 선택 + 대상 회수 — **구현·실행 완료(2026-09-21)**, Codex 인수 대기 | Chalk 공통 선택(개별·전체·도움 필요/연결됨/미연결) + `report-batches`의 명시적 `targets`(collect_only). 예상과 달리 **migration 0022가 필요했다**(불변 범위·요청 해시). 독립 재현 2건(범위 조회 fail-open, 커밋 경계 좌석 교체)을 같은 단계에서 닫음. [계약](../requirements/classroom-admin.md#remote-management-u1-20260921) · [실행 기록](../testing/classroom-admin.md#remote-management-u1-run-20260921) | 작음→중간 | 그룹은 상태 필터로 확정(저장 그룹 없음) |
-| U2 대상 배포 — 공지/자료 | 서버 보관 배포 객체(id·revision·평문/허용 링크) + 좌석별 원하는 revision(일시정지의 `control_revision` 방식) → sync 응답으로 그 좌석에만 전달 → 기기가 적용 revision 보고 → 보드 `접수/수신/적용/실패/미확인`. 오프라인은 재접속 시 적용, 회차 종료 시 만료. AT-39/41 | 중간 (migration 1, App 표시면 1) | 배포 1순위 종류, 오프라인 재적용 허용과 만료 시점 |
+| U1 공통 선택 + 대상 회수 — **구현·실행 완료(2026-09-21)**, 독립 검토 인수(tip `4867ddf`, 인계 지시 기준: 선택 범위·명단 경합·늦은 확인·실패/만료·늦은 검증·시간 순서 4건 대조, 최종 CI 완료·실패 0). 인수 ID는 AT-42/43([정정 원장](../testing/classroom-admin.md#at-id-ledger-20260921)) | Chalk 공통 선택(개별·전체·도움 필요/연결됨/미연결) + `report-batches`의 명시적 `targets`(collect_only). 예상과 달리 **migration 0022가 필요했다**(불변 범위·요청 해시). 독립 재현 2건(범위 조회 fail-open, 커밋 경계 좌석 교체)을 같은 단계에서 닫음. [계약](../requirements/classroom-admin.md#remote-management-u1-20260921) · [실행 기록](../testing/classroom-admin.md#remote-management-u1-run-20260921) | 작음→중간 | 그룹은 상태 필터로 확정(저장 그룹 없음) |
+| U2 대상 배포 — 공지/자료 — **설계 계약 완료(2026-09-21) · 구현 없음** | [계약](../requirements/classroom-admin.md#remote-management-u2-20260921) · [인수 계획 AT-44](../testing/classroom-admin.md#remote-management-u2-plan-20260921). 처음 적었던 ‘좌석별 원하는 revision 하나(`control_revision` 방식)’는 버렸다 — 여러 자료가 한 회차에 공존하므로 **object별 revision + 배포 실행 + 참가자에 묶인 대상 행**이다. sync 응답으로 자격이 확인된 그 좌석에만 전달, 완료 = 기기의 **보관함 반영** 보고. 아래 ‘U2 설계 계약과 구현 순서’ | 중간→큼 (migration 1, Service route 1, App 보관함 + 표시면 2, Chalk 작성·결과) | 아래 표의 미결(링크 host·열람 수집·보존·권한 부여·활성화). 배포 1순위와 오프라인 처리는 사용자 지시로 정해짐 |
 | U3 대상 배포 — 수업 프롬프트·수업 설정 | U2의 객체 종류 확장. 진행 중 회차의 설정 변경은 ADM-11(조용히 바꾸지 않음)과 충돌하므로 적용 시점·학생 고지를 먼저 정한다 | 큼 | 수업 중 version 교체 허용 여부 |
 | U4 원인별 복구 대응표 + 실제 창 | 원인 5종 × 1순위 조치를 코드 상수·시험으로 고정하고 Chalk에서 눌러 실제 창으로 확인. AT-40 | 작음 | — |
 
-**결정 필요.** ① 배포 1순위(수업 프롬프트 / 공지·자료 / 수업 설정) ② 오프라인 학생: 재접속 시 적용할지, 언제 만료할지 ③ 그룹의 정의 ④ 학생 프롬프트·결과물 회수를 학생 공유 기반으로 둘지, 강사 요청형을 추가할지(동의 모델이 달라짐) ⑤ 수업 중 설정 version 교체 허용 여부 ⑥ 앱 설치·업데이트·PC 전체 제어 포함 여부(사용자 확인 중 — 현재 범위 아님). Intent 문서(#1165, 승인 전)는 복구·학습 지원·수업 후 회수 세 가지뿐이며 **배포 Intent가 없다** — U2 전에 Intent 개정이 먼저다.
+**결정 필요.** ① 배포 1순위(수업 프롬프트 / 공지·자료 / 수업 설정) ② 오프라인 학생: 재접속 시 적용할지, 언제 만료할지 ③ 그룹의 정의 ④ 학생 프롬프트·결과물 회수를 학생 공유 기반으로 둘지, 강사 요청형을 추가할지(동의 모델이 달라짐) ⑤ 수업 중 설정 version 교체 허용 여부 ⑥ 앱 설치·업데이트·PC 전체 제어 포함 여부(사용자 확인 중 — 현재 범위 아님). (정정 2026-09-21: 이 문단의 원래 끝 문장 ‘Intent 문서에는 **배포 Intent가 없다** — U2 전에 Intent 개정이 먼저다’는 작성 시점의 #1165 원문(INT-CO-01~03) 기준이었다. 같은 날 #1165 브랜치 `docs/751-classroom-ops-intent`에 **INT-CO-04(대상 배포) 개정 제안**이 `ab7ee2f`로 추가됐다. **제안의 존재와 승인은 별개다** — 제안은 있고 owner 승인은 아직 없다. U2 설계는 그 제안에 연결하되 승인된 것으로 쓰지 않으며, 그 문서를 이 브랜치에 복제하지 않는다. ①②는 아래처럼 정해졌고 ③은 U1에서 상태 필터로 확정됐다. ④⑤⑥은 그대로 열려 있다.)
 
-(당시 #1119~#1169 스택의 범위 기준) 인수는 관제·보존형 복구·단일 회차 보고서다. 현재 사용자 목표인 원격관리 RM-1~5의 인수와 혼동하지 않는다 — 그쪽은 U1만 구현됐고 U2(배포)는 Codex 검토 뒤 진행한다. 원래 요청의 누적 패턴/PDF 첨부/다른 전달 채널은 후속 범위를 유지하며 ‘제품 전체 개발 완료’로 표현하지 않는다. 현재 CI CLEAN은 비작성자 승인·최신 main 통합·실수업 가동을 대신하지 않는다.
+#### U2 설계 계약과 구현 순서 · 2026-09-21 (설계만 — 구현·migration·실행·PR 없음)
+
+**작업 범위 표시.** #751 전체를 새로 claim하지 않았고 다른 열린 작업을 가져오지 않았다. 이 단위는 #751의 하위 범위 **‘U2 설계’**이며 브랜치 `feat/751-u2-classroom-distribution`(기준 `4867ddf`, 예정 PR base `feat/751-review-c-ops-ui-retention-ci`)에서 **기존 문서 4개만** 고쳤다: 요구·시험·이 계획·`docs/studio-requirements.md`. 제품 코드·시험 파일·migration·Mac 시연 프로세스는 건드리지 않았다. 구현 파일의 소유권과 Mac 실행권은 독립 검토 뒤 따로 인계된다.
+
+**정해진 것(사용자 지시 + 기존 코드 조사).** ① 배포 1순위 = 공지·자료, 프롬프트·설정은 U3. ② 오프라인 = 같은 회차·같은 참가자에 묶인 의도를 재접속 때의 자격 재검사 뒤 전달, 기본 만료 = 회차 종료. ③ 이름 = 회차 flag `ops_distribute` · issuer capability `distribute` · App capability `distribution_inbox` — `ops_delivery`/`deliver`(보고서 발송)는 뜻도 이름도 그대로. ④ 명령 원장(`ops_commands`)을 쓰지 않는다: 그 원장은 접수 시점에 `not_connected`를 확정하고 TTL 120초·grant/epoch 결속이라 ‘다시 연결되면 전달’과 맞지 않는다(코칭 `send_question`은 그대로 그 원장). ⑤ ‘적용’ = **보관함 반영**(디스크 저장 + 카드 목록의 읽기 경로로 재검증). HTTP 200·제안·알림·webview 메시지는 완료가 아니고 열람은 수집하지 않는다. ⑥ 학생용 콘텐츠 조회 API 없음 — 내용은 자격이 확인된 sync 응답으로만 나간다. ⑦ 새 연결·daemon·WebSocket 없음.
+
+| 순서 | 구현 단위 (각 단위는 자기 시험과 함께 끝난다) | 주 위치 | 끝났다는 근거 |
+|---|---|---|---|
+| 1 | 순수 계약: 내용 검증·정규 hash·링크 규칙·요청 정규화·대상 상태 전이·`status` 계산. 양성·음성 대조군 먼저 | 신규 `worker/src/lib/classroom-distribution.ts` | 전이 표·거부 목록이 요구 문서의 행과 1:1 (D7·D8·D12의 순수 부분) |
+| 2 | additive migration(착수 시 다음 번호, 현재 0023) + `schema.sql` + D1 리허설 편입 | `worker/migrations/`, `worker/schema.sql` | fresh = 누적, 재적용 멱등, 기존 테이블 불변 (D15) |
+| 3 | 강사 API: contents·distributions·revoke/retire, 조건부 batch guard, 멱등, fail-closed, `OPS_FLAGS`/`OPS_CAPABILITIES`·issuer 경로·`/status.distribution` | 신규 `worker/src/routes/classroom-distribution.ts`, `classroom-ops.ts`(lib·route), `instructor-auth.ts` | D1·D2·D5·D7·D11·D13·D14의 Service 부분. 경합 주입은 U1의 7종과 같은 구조 |
+| 4 | sync 확장: 자격 재검사 뒤 제안, receipt 기록, 기기 세대 되돌림, lazy 정산, 교환 실패 격리. 좌석 lease 확보를 공통 함수로 분리 | `worker/src/routes/classroom-ops.ts` | D3·D4·D6·D9(Service 쪽)·D14. 기존 sync·명령 시험 불변 |
+| 5 | App 보관함: 순수 reducer(순서·중복·hash) + host adapter(원자 저장·읽기 경로·receipt 저널·재시작 reconciler·세대 검사) | 신규 `extensions/hypeproof-chat/src/classroomInbox.ts`, `classroomOps.ts`, `classroomOpsHost.ts` | D8·D9의 기기 부분, fault 주입 |
+| 6 | 학생 표시면 2곳: 작업 화면 rail의 `<details>`와 ‘이어서 하기’ 진입 화면의 조용한 줄. 같은 host 메시지·같은 읽기 경로 | `protocol.ts`, `chatPanelProvider.ts`, `startPage.ts`, webview `ChatPanel.tsx`·`StartPage.tsx` | D12 렌더·D16, SX-04/05/06/13 불변 |
+| 7 | Chalk: 작성 → 미리 확인 → 확정 → 대상별 결과 → 실패·미확인 재선택 → ‘보낸 자료’. U1의 선택 세대 함수를 조치 공통으로 | `chalk/src/ui/manage.html`, forwarder | D1·D10·D13·D16 브라우저 e2e(응답 도착 시점은 U1처럼 네트워크 층에서 제어) |
+| 8 | 회귀 + 실제 Mac M1 + 실행 기록·NOT RUN 정리. 시험 제목의 옛 AT 표기를 새 번호로 | 기존 suite, `e2e/classroom/mac-demo*.mjs`, 문서 | D15·M1. 로컬 SQLite / 로컬 workerd D1 / 실제 Mac 증거를 구분해 기록 |
+
+1→2→3→4는 직렬, 5는 1 뒤에 3·4와 병렬 가능, 6은 5 뒤, 7은 3 뒤, 8은 전부 뒤. 한 PR로 묶되(예정 base 위 stacked) 단위마다 커밋을 나눈다. 운영 flag는 기본 OFF로 남기고 production·staging 자원은 건드리지 않는다.
+
+**이 설계로 닫히지 않는 것.** 미결 결정과 권고는 [요구 문서의 표](../requirements/classroom-admin.md#remote-management-u2-20260921)가 소유한다(INT-CO-04 owner 승인, 허용 링크 host, 열람 수집 여부, 시간 기준 보존, `distribute` 부여 대상, 운영 활성화). 이어질 범위는 그대로 남는다: U3(프롬프트·수업 설정 — U2의 object/revision·`kind`·`payload_json`·receipt 단계를 확장, 수업 중 version 교체 허용 여부가 선행 결정), 학생 프롬프트·승인 결과물의 대상 회수(④), U4 원인별 복구(AT-40), 세 흐름 공통 결과 화면(AT-41), 재시작 전 세션 병합 회수와 `coverage_reason` 표시, 그리고 기존 보고서 생성·검수·허용된 전달의 실제 모델·메일 인수. 실제 기기 업로드 실패·재전송, Windows·학교망·staging/production D1은 계속 NOT RUN이다.
+
+(당시 #1119~#1169 스택의 범위 기준) 인수는 관제·보존형 복구·단일 회차 보고서다. 현재 사용자 목표인 원격관리 RM-1~5의 인수와 혼동하지 않는다 — 그쪽은 U1만 구현됐고 U2(배포)는 설계 계약까지이며 구현은 독립 검토 뒤 진행한다. 원래 요청의 누적 패턴/PDF 첨부/다른 전달 채널은 후속 범위를 유지하며 ‘제품 전체 개발 완료’로 표현하지 않는다. 현재 CI CLEAN은 비작성자 승인·최신 main 통합·실수업 가동을 대신하지 않는다.
