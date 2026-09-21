@@ -289,7 +289,7 @@
         "WEB-09"
       ],
       "inline_prefixes": [],
-      "sha256": "c724bf3253812d6a0854250e7145cba01c19cf55d8ecb6e32b7ac5950780d2a7",
+      "sha256": "76cb41b1245edb078f9dafada9617a88837d9512230e0a1ae4ecb7b7034145b7",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/chalk-authoring.md",
@@ -314,7 +314,7 @@
         "ADM-14"
       ],
       "inline_prefixes": [],
-      "sha256": "268f2d765a2974d1020c25d88b08ee69580841c57dc27d3c9a4734d743243a2d",
+      "sha256": "4c0b40fd5aa00ee5d0691aefe066cf090ffa1f59d81df166cc5de9a098e8fe8e",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/classroom-admin.md",
@@ -405,7 +405,7 @@
         "DES-12"
       ],
       "inline_prefixes": [],
-      "sha256": "bcd8a24caa62834274b1cd5d1272a3feddef4829055ebb603473e8df355a1b39",
+      "sha256": "07c61a8df5d0aa32e6a8756c42d377abf3bb4dbd63879eb19b58b5b722504bfc",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/classroom-design.md",

@@ -124,3 +124,8 @@ also clears its hidden cohort/profile binding and blocks create/save until a ver
 setting or manual target is selected, while preserving the in-progress curriculum.
 This does not implement AI
 generation, new cohort provisioning, persistent login or independent course storage.
+
+2026-09-22: the authoring page carries the shared instructor flow bar (prepare → run → wrap up) from the
+[instructor UI pass](classroom-design.md#instructor-ui-pass-20260922). Layout and contracts of the page are unchanged.
+The same day's [second pass](classroom-design.md#instructor-ui-pass2-20260922) only moved the bar's help link from wrap-up to "2 수업 진행"
+(`/manage#ops-help-title`); the authoring page itself is unchanged.
