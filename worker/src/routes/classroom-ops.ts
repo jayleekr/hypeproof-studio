@@ -259,6 +259,8 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
   return c.json({
     schema_version: OPS_SCHEMA_VERSION, now, stale_after_ms: STALE_AFTER_MS, viewer: auth.payload.u,
     actions: Object.entries(COMMAND_ACTIONS).map(([action, a]) => ({ action, kind: a.kind, capability: a.capability, mutating: a.mutating, enabled: parseFlags(run.flags_json)[a.flag], held: (auth.scope.ops ?? []).includes(a.capability) })),
+    // Collection is not a command: an instructor may hold `collect` without `command`, and the board has to know that to offer the selection.
+    collection: { enabled: parseFlags(run.flags_json).ops_collect, held: (auth.scope.ops ?? []).includes('collect') },
     run: { class_run_id: run.class_run_id, profile_id: run.profile_id, roster_revision: run.roster_revision, flags: parseFlags(run.flags_json), lesson: parseLesson(run.lesson_json), starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at },
     // Scope note for the UI: this is the run snapshot, not the cumulative cohort roster.
     roster: { source: 'class_run_seats', total: seats.length },

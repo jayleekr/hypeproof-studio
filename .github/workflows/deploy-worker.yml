@@ -26,7 +26,7 @@ on:
       # turns this on for the ONE deploy that follows the staging rehearsal in worker/DEPLOY.md; later deploys leave
       # it off (the tables are there, and every file is CREATE … IF NOT EXISTS should it be turned on again).
       apply_classroom_ops_schema:
-        description: "Apply additive remote-classroom-operations schema 0011–0021 before deploying (see worker/DEPLOY.md)"
+        description: "Apply additive remote-classroom-operations schema 0011–0022 before deploying (see worker/DEPLOY.md)"
         type: boolean
         default: false
 
@@ -185,12 +185,12 @@ jobs:
           done
 
       # Additive tables only. No flag is set by this: HPS_CLASSROOM_OPS stays unset and every class run's ops flags stay off.
-      - name: Apply additive remote classroom operations schema (0011–0021)
+      - name: Apply additive remote classroom operations schema (0011–0022)
         if: ${{ !inputs.dry_run && inputs.apply_classroom_ops_schema }}
         working-directory: worker
         run: |
           set -euo pipefail
-          for migration in migrations/0011-classroom-ops.sql migrations/0012-classroom-ops-commands.sql migrations/0013-classroom-ops-control.sql migrations/0014-classroom-ops-evidence-review.sql migrations/0015-classroom-collection.sql migrations/0016-classroom-report-jobs.sql migrations/0017-classroom-delivery.sql migrations/0018-classroom-snapshot-binding.sql migrations/0019-classroom-report-attempts.sql migrations/0020-classroom-viewer-check.sql migrations/0021-classroom-erasure-log.sql; do
+          for migration in migrations/0011-classroom-ops.sql migrations/0012-classroom-ops-commands.sql migrations/0013-classroom-ops-control.sql migrations/0014-classroom-ops-evidence-review.sql migrations/0015-classroom-collection.sql migrations/0016-classroom-report-jobs.sql migrations/0017-classroom-delivery.sql migrations/0018-classroom-snapshot-binding.sql migrations/0019-classroom-report-attempts.sql migrations/0020-classroom-viewer-check.sql migrations/0021-classroom-erasure-log.sql migrations/0022-classroom-collect-scope.sql; do
             npx wrangler d1 execute hypeproof-studio --remote --file="$migration"
           done
           node scripts/classroom-ops-d1-check.mjs --database hypeproof-studio --expect-id 2427207c-272e-4ecd-9d16-7a1dcc0fc741 --require all

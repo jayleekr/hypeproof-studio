@@ -9,7 +9,47 @@ export const SNAPSHOT_FILES: Record<string, { maxBytes: number; contentType: str
 export const PURPOSES = ['class_report'] as const;
 export const CONSENT_BASES = ['adult_self', 'guardian_verified'] as const;
 export const UPLOAD_GRACE_MS = 24 * 3_600_000;
-export const ITEM_STATES = ['consent_missing', 'guardian_consent_missing', 'withdrawn', 'not_connected', 'requested', 'uploading', 'verified', 'incomplete', 'quarantined'] as const;
+// `not_selected` is roster metadata of a targeted batch: no command, no upload, no object and no evaluation exists for that learner.
+export const ITEM_STATES = ['consent_missing', 'guardian_consent_missing', 'withdrawn', 'not_connected', 'not_selected', 'requested', 'uploading', 'verified', 'incomplete', 'quarantined'] as const;
+
+/**
+ * What a collection request asks for, normalized. The contract that matters most is what this REFUSES:
+ *  - `targets` absent  = the class wrap-up over the whole roster (the behaviour before targets existed). Its mode is `finish`.
+ *  - `targets` present = exactly those seats, mode `collect_only` (no evaluation, no delivery). An empty list, a duplicate, a
+ *    malformed id or a field this contract does not know is refused. Nothing is ever widened to the whole roster: a caller
+ *    that misspells `targets` gets a 400, not everybody's records.
+ * Whether the seats belong to THIS run is the route's question (it needs the roster); this function is pure.
+ */
+export const COLLECT_MODES = ['finish', 'collect_only'] as const;
+export const COLLECT_REQUEST_FIELDS = ['idempotency_key', 'roster_revision', 'purpose', 'notice_version', 'dry_run', 'targets', 'mode'] as const;
+// This file stays import-free (tests load it without the Service resolver). The two shapes are the command ledger's ID_RE and
+// UUIDISH_RE; classroom-ops-selected-collect.test.mjs fails if they drift apart.
+export const COLLECT_SEAT_RE = /^[A-Za-z0-9_-]{1,128}$/, COLLECT_KEY_RE = /^[A-Za-z0-9-]{8,64}$/;
+const SEAT_RE = COLLECT_SEAT_RE, KEY_RE = COLLECT_KEY_RE, NOTICE = /^[A-Za-z0-9_.-]{1,64}$/;
+export interface CollectRequest { idempotency_key: string; roster_revision: number; purpose: string; notice_version: string; dry_run: boolean; scope: 'roster' | 'targets'; mode: 'finish' | 'collect_only'; targets: string[] }
+export function normalizeCollectRequest(b: unknown, maxTargets: number): { ok: true; value: CollectRequest } | { ok: false; reason: string; detail: string } {
+  const no = (reason: string, detail: string) => ({ ok: false as const, reason, detail });
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return no('request_invalid', 'a JSON object is required');
+  const o = b as Record<string, unknown>, unknown = Object.keys(o).filter((k) => !(COLLECT_REQUEST_FIELDS as readonly string[]).includes(k));
+  if (unknown.length) return no('unknown_field', 'unknown field: ' + unknown.slice(0, 5).join(', '));
+  if (typeof o.idempotency_key !== 'string' || !KEY_RE.test(o.idempotency_key) || !Number.isInteger(o.roster_revision) || typeof o.dry_run !== 'boolean' || !(PURPOSES as readonly string[]).includes(o.purpose as string) || typeof o.notice_version !== 'string' || !NOTICE.test(o.notice_version)) return no('request_invalid', 'idempotency_key, roster_revision, purpose, notice_version and dry_run required');
+  if (o.mode !== undefined && !(COLLECT_MODES as readonly string[]).includes(o.mode as string)) return no('mode_invalid', 'mode is finish or collect_only');
+  const base = { idempotency_key: o.idempotency_key, roster_revision: o.roster_revision as number, purpose: o.purpose as string, notice_version: o.notice_version, dry_run: o.dry_run };
+  if (o.targets === undefined) {
+    // Collect-only over "everyone" must name everyone: the whole roster is never a default of the new action.
+    if (o.mode === 'collect_only') return no('targets_required', 'collect_only names its seats explicitly');
+    return { ok: true, value: { ...base, scope: 'roster', mode: 'finish', targets: [] } };
+  }
+  if (!Array.isArray(o.targets)) return no('targets_invalid', 'targets is a list of seat ids');
+  if (!o.targets.length) return no('targets_empty', 'an empty selection collects nothing; it is not the whole class');
+  if (o.targets.length > maxTargets) return no('targets_invalid', 'too many seats');
+  if (o.targets.some((t) => typeof t !== 'string' || !SEAT_RE.test(t))) return no('targets_invalid', 'a seat id is malformed');
+  if (new Set(o.targets).size !== o.targets.length) return no('targets_duplicate', 'a seat is named twice');
+  if (o.mode === 'finish') return no('mode_not_allowed', 'the class wrap-up (evaluation may follow) covers the whole roster; selected seats are collect_only');
+  return { ok: true, value: { ...base, scope: 'targets', mode: 'collect_only', targets: [...(o.targets as string[])].sort() } };
+}
+/** Everything that makes two requests "the same request". The idempotency key itself is not part of it. */
+export const collectRequestCanonical = (r: Pick<CollectRequest, 'scope' | 'mode' | 'targets' | 'purpose' | 'notice_version' | 'dry_run' | 'roster_revision'>): string => JSON.stringify([r.scope, r.mode, r.targets, r.purpose, r.notice_version, r.dry_run, r.roster_revision]);
 
 export interface ManifestFile { name: string; bytes: number; sha256: string }
 /**

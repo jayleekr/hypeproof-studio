@@ -13,7 +13,7 @@ try {
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run(); };
   // The deploy order is rehearsed here on real local D1, with the same checker the runbook uses against a remote target
   // (worker/scripts/classroom-ops-d1-check.mjs): nothing applied → half applied → all applied → applied again.
-  const { compare } = await import('../scripts/classroom-ops-d1-check.mjs'), files = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log'];
+  const { compare } = await import('../scripts/classroom-ops-d1-check.mjs'), files = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log', '0022-classroom-collect-scope'];
   const present = async () => (await db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all()).results.map((r) => r.name);
   let seen = compare(await present()); assert.equal(seen.none, true); assert.deepEqual(seen.next, files.map((m) => m + '.sql'), 'the checker lists every migration file of this feature, in order');
   for (const m of files.slice(0, 5)) await apply(readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), 'utf8'));

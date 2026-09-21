@@ -17,6 +17,7 @@ import { bearer, signOpsCredential, verifyOpsCredential } from '../lib/tokens';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { parseFlags, sha256Hex, type OpsCapability } from '../lib/classroom-ops';
 import { snapshotKey } from '../lib/classroom-collect';
+import { batchScope, scopeRefusal } from './classroom-collect';
 import { LEASE_MS, RENDERER_REVISION, composeReport, draftKey, draftPrefix, modelById, validateDraft } from '../lib/classroom-report';
 import { DEFAULT_CAPABILITY_MODEL } from '../lib/measurement-core/index.ts';
 import { evaluateInput, evaluatorConfig, rubricVersion, type Transport } from '../lib/classroom-evaluator';
@@ -42,6 +43,9 @@ async function teacher(c: any, capability: OpsCapability): Promise<{ auth: Issue
   if (!parseFlags(run.flags_json).ops_reports) return c.json({ error: 'reports are off for this run', reason: 'ops_reports_disabled' }, 403);
   const batch = await c.env.HPS_DB.prepare('SELECT * FROM classroom_collect_batches WHERE id=? AND class_run_id=?').bind(c.req.param('batch'), run.class_run_id).first();
   if (!batch) return c.json({ error: 'batch not found' }, 404);
+  // Selected collection is collection only (#751 U1): it never becomes an evaluation or a delivery by a later click.
+  let scope; try { scope = await batchScope(c.env.HPS_DB, String(batch.id)); } catch (err) { const no = scopeRefusal(c, err); if (no) return no; throw err; }
+  if (scope.mode === 'collect_only') return c.json({ error: 'this batch collected records only; evaluation and delivery belong to the class wrap-up', reason: 'collect_only_batch' }, 409);
   return { auth, run, batch };
 }
 

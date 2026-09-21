@@ -941,3 +941,15 @@ CREATE TABLE IF NOT EXISTS classroom_erasure_log (
  PRIMARY KEY(class_run_id,student_id)
 );
 CREATE INDEX IF NOT EXISTS classroom_erasure_log_state ON classroom_erasure_log(state,updated_at);
+
+-- ── migrations/0022-classroom-collect-scope.sql (remote classroom operations, immutable collection scope, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_collect_scopes (
+ batch_id TEXT PRIMARY KEY,
+ class_run_id TEXT NOT NULL,
+ scope TEXT NOT NULL,
+ mode TEXT NOT NULL,
+ targets_json TEXT NOT NULL DEFAULT '[]',
+ request_hash TEXT NOT NULL,
+ created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS classroom_collect_scopes_run ON classroom_collect_scopes(class_run_id,created_at);
