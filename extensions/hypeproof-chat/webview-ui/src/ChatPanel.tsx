@@ -22,7 +22,7 @@ import type { LearningStatePayload } from "../../src/learningStateHelpers";
 import { onHostMessage, postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
 import { composerLabel, copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
-import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
+import { decideEnter, draftAfterStop, shouldFlushQueue, shouldRestoreQueue } from "./sendQueue";
 import {
   RUNNER_PHRASE_MS,
   isRunnerCohort,
@@ -398,7 +398,9 @@ export function ChatPanel(props: Props) {
   useEffect(() => {
     const prev = prevStreamingRef.current;
     prevStreamingRef.current = streaming;
-    if (unavailable || !shouldFlushQueue(prev, streaming, queued)) return;
+    // #751 U4 — a turn the instructor cut off hands the parked message back, exactly like the learner's own Stop. Never sent.
+    if (shouldRestoreQueue(prev, streaming, queued, !!props.stopNotice)) { restoreQueuedToDraft(); return; }
+    if (unavailable || !shouldFlushQueue(prev, streaming, queued, !!props.stopNotice)) return;
     const text = queued as string;
     setQueued(null);
     submit(text);

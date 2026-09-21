@@ -1,6 +1,6 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
-import { emptyActivityDraft, validActivityDraft } from './activityDraft';
+import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
 import { fetchAccessView, sendBudgetRequest, accessProfile, type AccessState } from './accessClient';
 import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice, selectedEffort, observedEffortResult, type SavedEffortChoice } from './modelSelection';
@@ -757,7 +757,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     let flushed = true;
     try { await this.spool?.flush(); } catch { flushed = false; }
     const dir = this.spool?.currentSessionDir() ?? null;
-    return { history_count: history.length, history_sha256: digest(history), draft_sha256: draft === undefined ? null : digest(draft), spool_session: dir ? path.basename(dir) : null, spool_flushed: flushed };
+    return { history_count: history.length, history_sha256: digest(history), draft_sha256: draft === undefined ? null : digest(preservedDraftContent(draft)), spool_session: dir ? path.basename(dir) : null, spool_flushed: flushed };
   }
   /**
    * #751 R4 — the allowlisted spool files of the current session plus the spool's sequence state, read under the
