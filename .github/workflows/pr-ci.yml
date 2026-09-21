@@ -253,6 +253,14 @@ jobs:
         # `claude` binary package (#282) — typecheck/smoke never spawn it.
         working-directory: extensions/hypeproof-chat
         run: npm ci --omit=optional
+      # The render instrument (`test/sx-render.mjs`) resolves react from
+      # webview-ui. Without these deps `rendererStatus()` reports
+      # `webview-deps-missing` and EVERY screen test skips — which is what was
+      # happening: the SX-59 work-screen gate had no CI enforcement at all, and
+      # a suite reported as "0 fail" was 100% skipped.
+      - name: Install webview deps (the render instrument needs react)
+        working-directory: extensions/hypeproof-chat/webview-ui
+        run: npm ci
       # U-layer pure smoke tests (test/*.smoke.mjs) — no vscode host needed.
       - name: Run extension smoke tests
         working-directory: extensions/hypeproof-chat
