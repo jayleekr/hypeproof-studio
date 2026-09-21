@@ -1,4 +1,4 @@
-import { OBSERVATION_FORMAT_V2 } from "./nativeObservationContract.ts";
+import { OBSERVATION_FORMAT_V2, CAPABILITY_MODEL_HEADER } from "./nativeObservationContract.ts";
 // Pure helpers for proxyClient.ts. Kept vscode-free + fetch-free so they can
 // be unit-tested under plain Node — mirrors mintStudentTokenHelpers.ts.
 
@@ -256,5 +256,9 @@ export function observationHeaders(token: string | undefined): Record<string, st
   return {
     authorization: `Bearer ${token}`,
     "x-hps-observation-format": OBSERVATION_FORMAT_V2,
+    // This build's `validateFindings` can read the candidate capability model.
+    // A build that cannot says nothing, and the worker keeps serving it the seven
+    // Assets — the same ceiling-not-an-order rule as the format header above.
+    [CAPABILITY_MODEL_HEADER]: "candidate-capability-v1",
   };
 }

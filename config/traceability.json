@@ -847,6 +847,19 @@
       ]
     },
     {
+      "id": "ST-TEST-INBOUND-IMAGES",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-COACH-RUNTIME"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/inbound-images.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-ROUTE-MESSAGES",
       "stage": "implementation",
       "owner": "jayleekr",
@@ -854,11 +867,15 @@
         "ST-REQ-VOICE-CAPABILITY",
         "ST-REQ-COACH-RUNTIME",
         "ST-TEST-VOICE-AUDIO-REFUSAL",
-        "ST-TEST-LESSON-FEATURES"
+        "ST-TEST-LESSON-FEATURES",
+        "ST-TEST-INBOUND-IMAGES"
       ],
       "sources": [
         {
           "path": "worker/src/routes/messages.ts"
+        },
+        {
+          "path": "worker/src/lib/inbound-images.ts"
         }
       ]
     },

@@ -1,6 +1,9 @@
 # STATE: 학습 경험 우선 Studio 야간 개발 원장
 
-> 살아 있는 원장. 단계·게이트가 바뀔 때마다 갱신한다. 재개할 때 이것을 먼저 읽는다.
+> **2026-09-21: 재개 지점은 [STATUS.md](./STATUS.md) 로 옮겼다.** 이 원장은 2026-09-20
+> 완주의 기록으로 남는다. 지금 무엇이 어디까지 갔는지·다음에 무엇을 할지는 STATUS.md 에 있다.
+>
+> 살아 있는 원장. 단계·게이트가 바뀔 때마다 갱신한다.
 > 마스터 프롬프트 `MASTER_PROMPT.md` · 루브릭 `../../evals/STUDIO_UX_EVAL.md` · DAG `docs/plan/ux-dag.yaml`
 
 ## RESUME HERE
