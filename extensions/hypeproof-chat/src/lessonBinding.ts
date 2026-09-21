@@ -43,6 +43,13 @@ export type RefusedTurnEnding = "restore_input" | "partial" | "unknown";
  * dispatched" returns the learner's text and attachments to the composer. Anything dispatched = partially executed; anything
  * unreadable = unknown. Neither is ever re-sent automatically.
  */
+/**
+ * A profile is cached for the session. One that was fetched before the Service began to enforce bindings carries no
+ * `lesson_binding`, and an app that trusted it would send no key, never switch and never close a turn — while the instructor
+ * waits on "준비". Observed on the real Mac run (2026-09-21). The device looks again only when it has a reason of its own:
+ * its inbox holds a lesson setting. That is one profile read, and only for a learner who was sent a setting.
+ */
+export const shouldRecheckEnforcement = (cached: LessonBindingView | undefined, holdsSetting: boolean): boolean => !cached?.enforced && holdsSetting;
 export function refusedTurnEnding(state: TurnState | null): RefusedTurnEnding {
   if (state === "not_started") return "restore_input";
   return state === "dispatched" || state === "completed" || state === "failed" ? "partial" : "unknown";

@@ -40,6 +40,13 @@ let n = 0; const ok = (name) => { n++; console.log("PASS " + name); };
   assert.deepEqual(L.planPreflight(token, sw, null), { action: "adopt", expectKey: K2, lessonSha: "b".repeat(64), confirm: true });
   assert.deepEqual(L.planPreflight({ ...token, key: K2 }, sw, null), { action: "proceed" }, "already on it (a replayed switch)");
   assert.deepEqual(L.planPreflight(token, { state: "failed", reason: "not_owner", final: false }, K2), { action: "adopt", expectKey: K2, lessonSha: null, confirm: false }, "another window of this learner switched");
+  // Found on the real Mac run (2026-09-21): a profile cached BEFORE the Service enforced bindings made the app send no key,
+  // never switch and never close a turn. It looks again only when its own inbox holds a setting — and never otherwise.
+  assert.equal(L.shouldRecheckEnforcement(undefined, true), true, "cached before enforcement + a setting in the inbox: look again");
+  assert.equal(L.shouldRecheckEnforcement({ ...token, enforced: false }, true), true);
+  assert.equal(L.shouldRecheckEnforcement(undefined, false), false, "nothing was sent to this learner: no extra profile read, ever");
+  assert.equal(L.shouldRecheckEnforcement(token, true), false, "already enforced: the ordinary preflight handles it");
+  { const wrong = (cached) => !cached?.enforced; /* negative control: re-reading on EVERY turn of a non-enforcing Service */ assert.equal(wrong(undefined), true); assert.notEqual(wrong(undefined), L.shouldRecheckEnforcement(undefined, false), "the control is caught: it would cost every default-OFF turn a profile read"); }
   assert.deepEqual(L.planPreflight(token, { ...sw, lesson: "base" }, null).lessonSha, null);
   const plan = L.planPreflight(token, sw, null);
   assert.equal(L.candidateMatches(plan, { lesson_binding: { ...token, key: K2 }, lesson: { sha256: "b".repeat(64) } }), true);

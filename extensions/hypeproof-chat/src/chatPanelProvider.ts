@@ -19,7 +19,7 @@ import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
-import { REFUSAL_COPY, bindingRefusalCode, candidateMatches, closeTurn, fetchTurnState, planPreflight, refusedTurnEnding, tokenLessonSha } from "./lessonBinding";
+import { REFUSAL_COPY, bindingRefusalCode, candidateMatches, closeTurn, fetchTurnState, planPreflight, refusedTurnEnding, shouldRecheckEnforcement, tokenLessonSha } from "./lessonBinding";
 import {
   coachSeatKeyFor,
   isAbortError,
@@ -724,7 +724,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** #751 — metadata-only observer for remote classroom operations; null unless the learner connected. */
-  opsObserver: (import("./classroomOpsHost").ClassroomOpsObserver & Partial<Pick<import("./classroomOpsHost").ClassroomOpsHost, "switchPendingSetting" | "confirmSettingBound" | "knownBindingKey">>) | null = null;
+  opsObserver: (import("./classroomOpsHost").ClassroomOpsObserver & Partial<Pick<import("./classroomOpsHost").ClassroomOpsHost, "switchPendingSetting" | "confirmSettingBound" | "knownBindingKey" | "holdsLessonSetting">>) | null = null;
   /** #751 U2 — set by extension.ts. The provider only relays: every answer is read from disk by the host adapter. */
   inboxSource: { inboxView(): Promise<import("./classroomInbox").InboxView>; inboxOpened(objectId: string, generation: number): Promise<void>; inboxLink(objectId: string, url: string, generation: number): Promise<string | null> } | null = null;
   async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
@@ -810,8 +810,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    */
   private async lessonBindingPreflight(): Promise<void> {
     const ops = this.opsObserver; if (!ops?.switchPendingSetting || !ops.knownBindingKey) return;
-    const current = await this.ensureProfile(); if (!current?.lesson || !current.lesson_binding?.enforced) return;
+    let current = await this.ensureProfile(); if (!current?.lesson) return;
     const token = await this.context.secrets.get(TOKEN_KEY), base = tokenLessonSha(token); if (!token || !base) return;
+    if (shouldRecheckEnforcement(current.lesson_binding, (await ops.holdsLessonSetting?.()) === true)) {
+      const fresh = await this.fetchCandidateProfile(token);
+      if (fresh?.lesson_binding?.enforced) { await this.adoptProfile(fresh, token); current = fresh; }
+    }
+    if (!current.lesson_binding?.enforced) return;
     const sw = await ops.switchPendingSetting(base);
     const plan = planPreflight(current.lesson_binding, sw, sw.state === "switched" ? null : await ops.knownBindingKey());
     if (plan.action === "proceed") { if (sw.state === "switched") await ops.confirmSettingBound?.(sw); return; }
@@ -822,7 +827,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       if (plan.confirm) throw new LessonBindingPreflightError("수업 설정을 확인하지 못했습니다. 입력한 글과 첨부는 그대로입니다 — 잠시 뒤 다시 보내 주세요.");
       return;
     }
-    const from = current.lesson_binding, fromVersion = current.lesson?.version;
+    const from = current.lesson_binding!, fromVersion = current.lesson?.version;
     await this.adoptProfile(candidate!, token);
     if (sw.state === "switched") await ops.confirmSettingBound?.(sw);
     this.spool?.recordLessonBinding({ from: { key: from.key, version: fromVersion }, to: { key: candidate!.lesson_binding!.key, version: candidate!.lesson?.version, source: candidate!.lesson_binding!.source, object_id: candidate!.lesson_binding!.object_id, revision: candidate!.lesson_binding!.revision } });

@@ -453,6 +453,15 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     const store = this.inboxStore; if (!store) return;
     try { await store.commit((index) => { const next = markSettingBound(index, o); return { next: next === index ? null : next, result: null }; }); this.inboxChanged(false); } catch (err) { this.log(`[inbox] binding note not saved: ${(err as Error).message}`); }
   }
+  /**
+   * Does this learner's shared inbox hold a lesson setting at all (pending or already bound)? Read-only, any window. A profile
+   * cached before the Service began to enforce bindings says nothing about them; this is the device's own reason to look again.
+   */
+  async holdsLessonSetting(): Promise<boolean> {
+    const p = this.context.globalState.get<InboxPointer>(INBOX_KEY), me = tokenIdentityUnverified(this.token);
+    if (!p || p.hidden || !me.u || me.u !== p.student || me.c !== p.cohort) return false;
+    try { const index = (await new InboxStore(inboxDir(this.context.globalStorageUri.fsPath, p)).current()).index; return pendingSetting(index) !== null || boundSetting(index) !== null; } catch { return false; }
+  }
   /** What any window of this learner can read from the shared inbox: the binding the owner window last verified. */
   async knownBindingKey(): Promise<string | null> {
     const p = this.context.globalState.get<InboxPointer>(INBOX_KEY), me = tokenIdentityUnverified(this.token);
