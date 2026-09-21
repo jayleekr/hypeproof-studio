@@ -204,11 +204,22 @@ npx wrangler r2 bucket create hps-traces-staging
 npx wrangler kv namespace create HPS_KV_STAGING
 ```
 
-Add an `[env.staging]` block to `wrangler.toml` that declares ALL of its own bindings (`HPS_DB` → the staging uuid,
-`HPS_TRACES` → `hps-traces-staging`, `HPS_KV` → the staging namespace, `vars.ENVIRONMENT = "staging"`,
-`name = "hypeproof-studio-api-staging"`), no `routes`, and its own secrets
-(`wrangler secret put HPS_SIGNING_SECRET --env staging` — a NEW value, so a staging token can never open production).
-Chalk gets the same treatment in `chalk/wrangler.toml` with `HPS_SERVICE_ORIGIN` = the staging workers.dev URL.
+The staging pair is already in the repository as **separate files** — `wrangler.staging.toml` here and in `chalk/` —
+so a plain `wrangler deploy` can never pick it up and nothing is inherited from production's file. Paste the three ids
+printed above over the `REPLACE_WITH_STAGING_*` placeholders in BOTH files, then:
+
+```bash
+node scripts/classroom-ops-staging-check.mjs     # exit 2 = a placeholder remains · exit 1 = UNSAFE (something is production's) · 0 = independent
+npx wrangler secret put HPS_SIGNING_SECRET -c wrangler.staging.toml    # a NEW value: a staging token must never open production
+npx wrangler secret put ADMIN_PASSWORD     -c wrangler.staging.toml
+npx wrangler deploy -c wrangler.staging.toml                            # prints the workers.dev URL → chalk's HPS_SERVICE_ORIGIN
+(cd ../chalk && npx wrangler secret put HPS_SIGNING_SECRET -c wrangler.staging.toml && npx wrangler deploy -c wrangler.staging.toml)
+```
+
+The checker (also run by `npm run test:classroom-ops:review`) refuses any D1/KV/R2/dataset id or name, Worker name, route
+or `*_ORIGIN` that production uses, and a Worker/Chalk staging pair that does not share the same staging resources.
+Every later command in this section takes `-c wrangler.staging.toml` on staging. Removing staging afterwards is
+`wrangler delete -c wrangler.staging.toml` for both Workers plus deleting the three staging resources; production is not involved.
 Give staging production's real shape, not `schema.sql` (which already contains this feature): export production's
 schema WITHOUT data (`npx wrangler d1 export hypeproof-studio --remote --no-data --output=<outside the repo>/prod-schema.sql`)
 and execute that file against staging. Staging then starts exactly where production is, without a single production row.
@@ -283,6 +294,11 @@ The 15-minute cron runs erasure recovery on an empty ledger (one SELECT); withou
 
 After any rollback, `GET /admin/classroom/erasures?class_run_id=…` must show no `started` row older than a day with
 `needs_operator=false`; a `needs_operator=true` row is a person's task, not a background one.
+
+**Status 2026-09-21:** the staging files, the independence checker and its controls exist; the committed pair reports
+`not_provisioned` (exit 2). No Cloudflare command was run, no resource was created, nothing was deployed.
+The 2026-09-21 code changes (token evidence slot, spool sequence contract, `coverage_reason`) add **no migration**: they live
+in `ops_latest_state.state_json`, the snapshot binding JSON and the audit detail.
 
 **Status 2026-09-20:** steps 1–3 rehearsed on local workerd D1 with the same checker (`npm run test:classroom-ops:d1`:
 none → interrupted → all → re-applied, plus a half-created negative control). Steps 0 and 1–6 against a real

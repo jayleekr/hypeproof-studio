@@ -2177,6 +2177,42 @@
         },
         {
           "path": "worker/scripts/classroom-ops-d1-check.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-demo.mjs"
+        },
+        {
+          "path": "e2e/classroom/delivery-trial.mjs"
+        },
+        {
+          "path": "e2e/classroom/field-bundle.mjs"
+        },
+        {
+          "path": "e2e/classroom/win-field/prepare-devhost.ps1"
+        },
+        {
+          "path": "e2e/classroom/win-field/preflight.ps1"
+        },
+        {
+          "path": "e2e/classroom/win-field/README.md"
+        },
+        {
+          "path": "worker/scripts/classroom-ops-staging-check.mjs"
+        },
+        {
+          "path": "worker/wrangler.staging.toml"
+        },
+        {
+          "path": "chalk/wrangler.staging.toml"
+        },
+        {
+          "path": "worker/test/classroom-ops-spool-seq.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-staging-config.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/session-spool-seq.smoke.mjs"
         }
       ]
     },
