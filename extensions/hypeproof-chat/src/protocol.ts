@@ -409,7 +409,9 @@ export type HostMessage = (
   | {type:'activityDraftError';error:string}
   /** #897 (VO-01) — a request to run the probe. Raised only by a command, never at activation time. */
   | { type: 'probeVoiceCapability'; probeId: string }
-  | { type: 'observationState'; assessedEventCount?: number; learningPath?: {title:string;url:string;reason:string} | null; batch: import('./nativeObservationContract').ObservationBatch | null; error: string | null; findings?: import('./nativeObservationContract').ObservationFinding[] }
+  // `capabilityModel` travels WITH the findings: the screen labels each key in
+  // the model that key belongs to, and a stored record may be either one.
+  | { type: 'observationState'; capabilityModel?: string; assessedEventCount?: number; learningPath?: {title:string;url:string;reason:string} | null; batch: import('./nativeObservationContract').ObservationBatch | null; error: string | null; findings?: import('./nativeObservationContract').ObservationFinding[] }
   /**
    * SX-14·15·17 — the learning state the host computed. **The webview does not
    * recompute it** (design §정보 구조 "호스트·웹뷰·워커의 경계"). The disabled

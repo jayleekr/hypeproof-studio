@@ -2035,7 +2035,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           const findings=validateFindings(result.findings,snapshot,asCapabilityModel(result.capability_model));
           if(this.nativeObservation?.batch.scope!==snapshot.scope || await this.context.secrets.get(TOKEN_KEY)!==token)return;
           await this.context.workspaceState.update('hps.observation.result.'+snapshot.scope+'.'+snapshot.program,{...result,at:Date.now(),event_ids:snapshot.events.map(e=>e.id)});
-          await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:null,findings,assessedEventCount:snapshot.events.length});
+          await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:null,findings,capabilityModel:asCapabilityModel(result.capability_model),assessedEventCount:snapshot.events.length});
         }catch(error){const code=error instanceof Error&&/^[a-z_0-9]{1,80}$/.test(error.message)?error.message:'assessment_failed';if(await this.context.secrets.get(TOKEN_KEY)===token)await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:snapshot,error:controller.signal.aborted?'관찰을 취소했습니다. 작업과 기록은 보존돼 있습니다.':'관찰 결과를 확인하지 못했습니다. 작업과 기록은 보존돼 있습니다. ('+code+')'});}finally{if(this.observationAssessment===controller)this.observationAssessment=null;}
         return;
       }
@@ -2045,7 +2045,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         const recorder=await this.prepareObservation(proxy,token,await this.ensureProfile());
         const saved=recorder?this.context.workspaceState.get<{findings:unknown;event_ids:string[];capability_model?:unknown}>('hps.observation.result.'+recorder.batch.scope+'.'+recorder.batch.program):undefined;
         let findings;try{if(saved&&recorder&&saved.event_ids.every(id=>recorder.batch.events.some(e=>e.id===id)))findings=validateFindings(saved.findings,recorder.batch,asCapabilityModel(saved.capability_model));}catch{this.nativeObservationError='이전 관찰 근거를 확인하지 못했습니다.';}
-        await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:recorder?.snapshot()??null,error:this.nativeObservationError,findings,assessedEventCount:saved?.event_ids.length});
+        await this.post({type:'observationState',learningPath:this.nativeLearningPath,batch:recorder?.snapshot()??null,error:this.nativeObservationError,findings,capabilityModel:asCapabilityModel(saved?.capability_model),assessedEventCount:saved?.event_ids.length});
         return;
       }
       case 'learningEvent': {

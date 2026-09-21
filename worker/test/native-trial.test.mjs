@@ -93,7 +93,11 @@ test('observation contract uses actual session/identity gates and rejects scope 
 
 test('assessment is separate from coaching, validates real citations and does not persist transcript', async()=>{
  const {env,token}=await fixture(),app=await bootApp(); env.ANTHROPIC_API_KEY='synthetic-provider-key';
- const headers={authorization:'Bearer '+token,'content-type':'application/json'};
+ // Declares the candidate model, i.e. this test speaks for a CURRENT Studio build.
+ // Without the header the worker correctly serves the seven Assets (an installed
+ // app bundles a seven-key validator) — that path is covered end to end in
+ // capability-negotiation.test.mjs.
+ const headers={authorization:'Bearer '+token,'content-type':'application/json','x-hps-capability-model':'candidate-capability-v1'};
  const ctxResponse=await app.fetch(new Request('https://test/v1/observations/context',{headers}),env,makeCtx());
  const batch={...await ctxResponse.json(),events:[{id:'u1',seq:1,task:'t1',at:1,kind:'user',text:'새 직원이 주문을 확인할 문서가 필요해',assistance:'unknown'}]};
  const assets=['FRAMING','JUDGMENT','ORCHESTRATE','VERIFY','ADAPT','OWNERSHIP'];

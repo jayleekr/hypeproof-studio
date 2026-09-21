@@ -21,6 +21,9 @@ export function NativeObservationPanel({ scope, coachName = DEFAULT_COACH_NAME }
   const [batch, setBatch] = useState<ObservationBatch | null>(null),
     [error, setError] = useState<string | null>(null),
     [findings, setFindings] = useState<ObservationFinding[]>([]),
+    // Which model those findings are written in. Defaults to the legacy seven,
+    // because a record with no model id predates the field and was written in them.
+    [capabilityModel, setCapabilityModel] = useState<string>('legacy-seven-assets'),
     [consent, setConsent] = useState(false),
     [busy, setBusy] = useState(false),
     [correction, setCorrection] = useState("");
@@ -47,6 +50,7 @@ export function NativeObservationPanel({ scope, coachName = DEFAULT_COACH_NAME }
           setBatch(msg.batch);
           setError(msg.error);
           setFindings(msg.findings ?? []);
+          setCapabilityModel(msg.capabilityModel ?? 'legacy-seven-assets');
           setBusy(false);
           setConsent(false);
         }
@@ -150,7 +154,7 @@ export function NativeObservationPanel({ scope, coachName = DEFAULT_COACH_NAME }
           {findings.map((f) => (
             <article key={f.asset}>
               <h4>
-                {capabilityLabel(f.asset)} ·{" "}
+                {capabilityLabel(f.asset, capabilityModel)} ·{" "}
                 {f.status === "unobserved" ? "아직 관찰하지 못함" : "잠정 관찰"}
               </h4>
               <p>{f.interpretation}</p>

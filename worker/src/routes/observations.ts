@@ -11,7 +11,7 @@ import { Hono } from "hono";
 import type { Env } from "../env";
 import { gateChatRequest } from "../lib/chat-gate";
 import { nativeObservationScope } from "../lib/native-observation-scope";
-import { servedObservationFormat, observationCapability } from "../lib/measurement-core/legacy-observation.ts";
+import { servedObservationFormat, observationCapability, servedCapabilityModel, CAPABILITY_MODEL_HEADER } from "../lib/measurement-core/legacy-observation.ts";
 import { validateObservation } from "../lib/native-observation";
 export const observations = new Hono<{ Bindings: Env }>();
 observations.use("*", async (c, next) => {
@@ -40,7 +40,11 @@ observations.get("/context", async (c) => {
   if (!gate.ok) return gate.response;
   if (!observationCapability(gate.profile.observation).record)
     return c.json({ error: { code: "observation_unavailable" } }, 404);
-  const doc = await getObservationRubric(c.env, gate.profile.id);
+  const doc = await getObservationRubric(
+    c.env,
+    gate.profile.id,
+    servedCapabilityModel(c.req.header(CAPABILITY_MODEL_HEADER)),
+  );
   return c.json({
     ...(await observationContext(gate, c.req.header("x-hps-observation-format"))),
     learning_path: doc.content.next_learning,
@@ -132,6 +136,10 @@ observations.post("/assess", async (c) => {
             }),
           );
         },
+        // What this app can read back (`servedCapabilityModel`). An installed
+        // build sends no such header and is served the seven Assets, which is
+        // what its bundled validator accepts.
+        servedCapabilityModel(c.req.header(CAPABILITY_MODEL_HEADER)),
       ),
     );
   } catch (error) {

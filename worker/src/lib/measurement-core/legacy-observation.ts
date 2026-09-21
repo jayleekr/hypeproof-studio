@@ -394,17 +394,48 @@ export const asCapabilityModel = (value: unknown): CapabilityModelId =>
   value === "candidate-capability-v1" ? value : "legacy-seven-assets";
 
 /**
+ * Which capability model one seat's ASSESSMENT is written in — the same
+ * client-generation negotiation `servedObservationFormat` does for the batch
+ * format, for the same reason.
+ *
+ * Every Studio already installed bundles a validator that hardcodes seven keys
+ * (`v0.1.56 nativeObservationContract.ts:194`: `value.length === 7`) and calls
+ * `validateFindings` with no model argument. Serving it six would make the app
+ * throw `invalid_findings` **after** the provider call was paid for, show
+ * "관찰 결과를 확인하지 못했습니다", and never store the result — so it never
+ * recovers. Worker and app ship independently, so that skew is the normal state,
+ * not an edge case.
+ *
+ * An app that can parse the candidate model says so with
+ * `x-hps-capability-model`. Absent means an older build: it gets the seven
+ * Assets, exactly as it does today. The declaration is a ceiling, not an order.
+ */
+export const CAPABILITY_MODEL_HEADER = "x-hps-capability-model";
+
+export const servedCapabilityModel = (client: string | undefined): CapabilityModelId =>
+  client === "candidate-capability-v1" ? "candidate-capability-v1" : "legacy-seven-assets";
+
+/**
  * Capabilities that cannot be `observed` without a particular kind of evidence
  * in the batch, whatever the model calls them.
  *
- * Each entry is that capability's own `insufficient` line turned into a gate:
+ * Where each rule comes from, stated exactly:
  *
- *   VERIFY   "AI가 '테스트 통과'라고 말함; 테스트 요청만 존재"  -> needs an executed result
- *   ITERATE  "사용자 수정 이유와 실제 artifact/tool_result의 변화가 함께"
- *   ADAPT    "같은 요청 반복, 결과 변화 없이 재시도 횟수 증가"   -> needs >= 2 artifact versions
+ *   VERIFY   candidate model's own `insufficient`:
+ *            "AI가 '테스트 통과'라고 말함; 테스트 요청만 존재"      -> executed result
+ *   ADAPT    candidate model's own `insufficient`:
+ *            "같은 요청 반복, 결과 변화 없이 재시도 횟수 증가"       -> >= 2 artifact versions
+ *   ITERATE  NOT from the model. Every `legacy-seven-assets` capability carries
+ *            `observe: "historical"` / `insufficient: "historical"` — the legacy
+ *            model states no criteria at all. This entry is the PRE-EXISTING /1
+ *            rule, moved here unchanged from the old hardcoded
+ *            `asset !== "ITERATE" || versions.size >= 2`. Its wording lives in the
+ *            seven-Asset rubric prompt, not in `capability-models.ts`.
  *
- * ADAPT is ITERATE's counterpart in the six-capability model; VERIFY is in both
- * and keeps one rule. No other key has a floor in either model.
+ * So the candidate half is read off the definitions and the legacy half is
+ * preserved behaviour. An earlier version of this comment said both halves came
+ * from the model and quoted an `insufficient` line for ITERATE that does not
+ * exist. VERIFY is in both models and keeps one rule; no other key has a floor.
  */
 const EVIDENCE_FLOOR: Record<string, "executed" | "revised"> = {
   VERIFY: "executed",
@@ -529,15 +560,22 @@ export const isObservationFormat = (value: unknown): value is ObservationFormat 
 /**
  * May the observation RESULTS panel be drawn on the work screen for this seat?
  *
- * Not the same question as "is observation on". The panel prints capability keys,
- * "독립 수행 근거 / 도움을 받은 수행 / 도움 사용 범위 미확인" and a "평가에 보낼 기록 보기"
- * button — an assessment, shown to the learner, mid-task. Four P0 rows forbid
- * exactly that during work:
+ * Not the same question as "is observation on". On the work screen the panel
+ * draws its entry point — "내 작업 돌아보기" and a filled "이 작업의 기록 확인" button —
+ * and one press further, per-capability verdicts (독립 수행 근거 / 도움을 받은 수행 /
+ * 도움 사용 범위 미확인). An assessment of the learner, offered mid-task.
  *
- *   SX-01  헤더 안에 점수·등급·역량 이름이 없다
- *   SX-06  rail 에 점수·자산 라벨·평가 문장이 없다
- *   SX-07  자기평가·변화 기록·역량 라벨은 작업 중 개입 대상에서 제외된다
- *   SX-59  작업 중 어떤 화면에도 역량 점수·등급·배지가 없다
+ * The row that forbids this is **SX-59**, and it is the only one that reaches it:
+ *
+ *   SX-59  "작업 중 어떤 화면에도 역량 점수·등급·'개선 필요' 배지가 없다"   <- applies
+ *   SX-01  scoped to the inside of the mission header                    <- does not
+ *   SX-06  scoped to the coach rail (`hps-messages`/`hps-input-area`)    <- does not
+ *   SX-07  scoped to coach-initiated interventions, not always-on UI     <- does not
+ *
+ * SX-03 (변화 기록 진입은 작은 링크이며 `studio-primary` 급 스타일을 쓰지 않는다) is
+ * arguable and not relied on here. An earlier version of this comment claimed all
+ * four rows said the same thing; counting them is the point of
+ * `.claude/rules/verification.md` §1b, and I had not counted.
  *
  * SX-59 also names the remedy — "제거하거나 **학습 경험 프로필에서 비활성**한다" — because
  * the trial cohort's own requirement (TUX-OBS-07) is to read observation results.

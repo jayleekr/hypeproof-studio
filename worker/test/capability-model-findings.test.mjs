@@ -73,8 +73,10 @@ test('a mixed array is refused even when the count is right', () => {
 
 test('evidence floors follow the capability, not the model', () => {
   // VERIFY needs an executed result in both models; ITERATE and its candidate
-  // counterpart ADAPT need two artifact versions. Each rule is that capability's own
-  // `insufficient` line, so the two models must agree on the shape of the answer.
+  // counterpart ADAPT need two artifact versions. The candidate half comes from
+  // that capability's `insufficient` line; the ITERATE half is the pre-existing /1
+  // rule preserved (every legacy capability's `insufficient` is literally
+  // "historical" — the legacy model states no criteria).
   const thin = batch();
   assert.ok(!observableAssets(thin).includes('VERIFY'));
   assert.ok(!observableAssets(thin, 'candidate-capability-v1').includes('VERIFY'));
@@ -98,14 +100,34 @@ test('capabilityKeys is the single list both the schema and the validator read',
   assert.deepEqual([...capabilityKeys('candidate-capability-v1')], SIX);
 });
 
-test('every key a screen may draw has a Korean label', () => {
-  // The panel prints `capabilityLabel(f.asset)`. A key with no label would silently
-  // fall back to the English key in front of a learner.
-  for (const key of [...SEVEN, ...SIX]) {
-    const label = capabilityLabel(key);
-    assert.notEqual(label, key, `${key} 에 한국어 이름표가 없다`);
-    assert.match(label, /[가-힣]/, `${key} 의 이름표가 한국어가 아니다`);
+test('every key a screen may draw has a Korean label, in its own model', () => {
+  // The panel prints `capabilityLabel(f.asset, model)`. A key with no label would
+  // silently fall back to the English key in front of a learner.
+  for (const [model, keys] of [['legacy-seven-assets', SEVEN], ['candidate-capability-v1', SIX]]) {
+    for (const key of keys) {
+      const label = capabilityLabel(key, model);
+      assert.notEqual(label, key, `${model}/${key} 에 한국어 이름표가 없다`);
+      assert.match(label, /[가-힣]/, `${model}/${key} 의 이름표가 한국어가 아니다`);
+    }
   }
-  // Unknown stays visible rather than blank.
-  assert.equal(capabilityLabel('NOPE'), 'NOPE');
+  // Unknown key, and unknown model, both stay visible rather than blank.
+  assert.equal(capabilityLabel('NOPE', 'candidate-capability-v1'), 'NOPE');
+  assert.equal(capabilityLabel('VERIFY', 'no-such-model'), 'VERIFY');
+});
+
+test('a key in both models keeps its own model\'s word', () => {
+  // OWNERSHIP is the one collision, and the two words are different constructs:
+  // 책임 in the candidate model, 주인의식 in the seven Assets. An implementation
+  // that scanned both models and took the first hit would relabel every stored
+  // legacy finding with the current model's word — a silent one-way conversion in
+  // a file whose header says there is deliberately no conversion table.
+  assert.equal(capabilityLabel('OWNERSHIP', 'candidate-capability-v1'), '책임');
+  assert.equal(capabilityLabel('OWNERSHIP', 'legacy-seven-assets'), '주인의식');
+  assert.notEqual(
+    capabilityLabel('OWNERSHIP', 'candidate-capability-v1'),
+    capabilityLabel('OWNERSHIP', 'legacy-seven-assets'),
+  );
+  // A key that exists in only one model is not borrowed from the other.
+  assert.equal(capabilityLabel('TASTE', 'candidate-capability-v1'), 'TASTE');
+  assert.equal(capabilityLabel('FRAMING', 'legacy-seven-assets'), 'FRAMING');
 });

@@ -141,6 +141,34 @@ test('legacy `enabled` alone still opens both — the shipped profiles did not c
   });
 });
 
+test('/v1/profile hands the client the cohort\'s own assess, not a constant', async () => {
+  // This is the ONLY place the client learns `assess`, and therefore the only
+  // input to the work-screen gate (SX-59). Without this case, hardcoding
+  // `assess: true` in the response would pass every other test in this file —
+  // the routes below would still branch correctly while every cohort got the
+  // observation results panel back.
+  for (const [observation, expected] of [
+    [{ record: true, assess: false, format: 'hps-observation/2' }, false],
+    [{ record: true, assess: true, format: 'hps-observation/2' }, true],
+    [{ enabled: true, format: 'hps-observation/2' }, true],
+  ]) {
+    await withCanaryObservation(observation, async () => {
+      const s = await seat();
+      try {
+        const res = await s.get('/v1/profile');
+        assert.equal(res.status, 200);
+        assert.equal(
+          res.body.observation?.assess,
+          expected,
+          `${JSON.stringify(observation)} 인데 /v1/profile 이 assess=${res.body.observation?.assess} 를 줬다`,
+        );
+      } finally {
+        s.close();
+      }
+    });
+  }
+});
+
 test('both off closes both — negative control', async () => {
   await withCanaryObservation({ record: false, assess: false }, async () => {
     const s = await seat();

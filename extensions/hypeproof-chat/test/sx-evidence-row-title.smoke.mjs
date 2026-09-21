@@ -103,5 +103,26 @@ if (!status.available) {
     text.includes(KIND_LABELS.retest_confirmed),
     `말 없는 행이 이름 없이 그려진다 — 화면 전문:\n${text}`,
   );
-  console.log("sx-evidence-row-title: OK — 말 없는 행도 이름을 가진다");
+
+  // The other half of rowTitle's contract, at render level: a kind name must be
+  // MARKED as not the student's sentence (SX-12 rule 5), not printed like one.
+  // Asserting only that the text appears would pass against a drawer that dropped
+  // the marking entirely.
+  const html = await renderComponent("EvidenceDrawer", {
+    open: true,
+    rows,
+    verification: { state: "none", before: null, after: null, criterion: null },
+    onSubmit: () => {},
+    onToggle: () => {},
+  });
+  const marked = new RegExp(
+    `hp-evidence-kindonly[^>]*>\\s*${KIND_LABELS.retest_confirmed}`,
+  ).test(html);
+  assert.ok(marked, `종류 이름이 학생의 문장처럼 그려진다 — markup:\n${html}`);
+  assert.ok(
+    !new RegExp(`hp-evidence-kindonly[^>]*>\\s*3초 안에 보인다`).test(html),
+    "학생이 쓴 문장에 '학생 것이 아님' 표시가 붙었다",
+  );
+
+  console.log("sx-evidence-row-title: OK — 말 없는 행도 이름을 가지고, 그 이름은 학생의 문장이 아니라고 표시된다");
 }

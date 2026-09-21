@@ -12,6 +12,12 @@
 //   individual-trial minting     kids cohorts become mintable
 //   assessment model routing     GPT/GLM cohorts 502 on every assess
 //
+// Of those four, this snapshot can only SEE the ones that reach `/v1/profile`:
+// session gating (200 -> 403) and the served observation block. The chat-history
+// key and individual-trial minting are decided elsewhere and need their own
+// evidence in the ADR steps that move them — do not read a green diff here as
+// covering them.
+//
 // None of that is visible from a unit test of the helper. It is only visible in the
 // **route response**, which is what the client actually builds its behaviour from.
 // P1's whole feature shipped unreachable because nothing looked there

@@ -265,7 +265,12 @@ chat.get("/profile", async (c) => {
   let { profile, module } = resolved;
   if(auth.payload.account){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;profile=gate.profile;c.header('cache-control','no-store');}
   let observationScope:string|undefined;
-  if(auth.payload.native_trial||profile.observation?.enabled){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;observationScope=await nativeObservationScope(gate.payload,gate.session);c.header("cache-control","no-store");}
+  // `record`, not `enabled`: the served `observation` block below is gated on
+  // `record`, and this is what fills its `scope`. Split, a profile with
+  // `record:true, enabled:false` would be served an observation block whose
+  // scope is undefined. Identical today for all 9 profiles (the serving
+  // snapshot is the proof); session gating itself moves out in ADR 0010 step 2.
+  if(auth.payload.native_trial||observationCapability(profile.observation).record){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;observationScope=await nativeObservationScope(gate.payload,gate.session);c.header("cache-control","no-store");}
 
   let lesson = null;
   if (auth.payload.lesson) {
