@@ -342,6 +342,26 @@ try {
   const draft41 = await draftOf(chat); assert.deepEqual(workFiles(), KEPT);
   results.AT41 = { served_manage_sha256: digest(served), cards: keys, lines, summaries: sums, a1: { diagnosis: cLine, collection: kLine, notice: dLine }, learner_draft: draft41, work_files: workFiles(), a2_targets: db("SELECT count(*) n FROM ops_command_targets WHERE seat_id='A2'")[0].n + db("SELECT count(*) n FROM classroom_distribution_targets WHERE seat_id='A2'")[0].n };
   step('AT41 diagnosis → collection → notice to the real window: three cards, each with its own truthful stage; A3/A4 named; A2 untouched', { a1: [cLine.slice(0, 60), kLine.slice(0, 60), dLine.slice(0, 60)] });
+  // 4 — the whole-roster finish from the same page: the dry run first (no request, no card), then the live one. Its card names every
+  // roster seat with its exclusion; the real app's record for it lands in THAT card while the earlier selected-collection card keeps its own.
+  const liveN = () => db('SELECT count(*) n FROM classroom_collect_batches WHERE dry_run=0')[0].n, cmdN = () => db('SELECT count(*) n FROM ops_commands')[0].n, live0 = liveN(), cmd0 = cmdN();
+  const kBefore = await card(K).locator('.ledger-items > p').allTextContents();
+  await page.locator('#ops-finish-go').scrollIntoViewIfNeeded(); assert.equal(await page.locator('#ops-finish-dry').isChecked(), true, 'the finish starts as a dry run');
+  await page.locator('#ops-finish-go').click(); await page.locator('#ops-finish-state').filter({ hasText: '미리 확인 결과 (요청·저장 없음)' }).waitFor();
+  const dryRows = await page.locator('#ops-finish-items > p').allTextContents(); assert.equal(dryRows.length, 4, 'the preview names the whole roster');
+  assert.deepEqual([liveN(), cmdN()], [live0, cmd0], 'dry run: no live batch, no device request'); assert.deepEqual(await page.locator('#ops-ledger-list .ledger-card').evaluateAll((l) => l.map((x) => x.dataset.key)), keys, 'dry run: no card');
+  await page.locator('#ops-finish-dry').uncheck(); await page.locator('#ops-finish-go').click(); await wait(() => liveN() === live0 + 1, 'the live finish batch');
+  const WK = 'collect:' + db('SELECT id FROM classroom_collect_batches WHERE dry_run=0 ORDER BY created_at DESC LIMIT 1')[0].id; await card(WK).waitFor();
+  assert.match(await card(WK).locator('h4').innerText(), /^기록 회수 \(수업 마무리 · 명단 전체\) · 회수 .* · 명단 전체 4명$/);
+  const wLine = await wait(async () => { const l = await cardLine(WK, 'A1'); return /\[적용 \(서버 검증\)\]/.test(l) ? l : null; }, 'A1 record verified on the whole-roster card', 180000);
+  const wLines = await card(WK).locator('.ledger-items > p').allTextContents(); assert.deepEqual(wLines.map((l) => l.split(' · ')[0]), ['A1', 'A2', 'A3', 'A4'], 'every roster seat');
+  for (const id of ['A2', 'A3', 'A4']) assert.match(await cardLine(WK, id), /\[미전달·만료·대상 변경\] (제외 · 동의 없음|기기에 전달되지 않음 · 기기 연결 없음)/, id + ' is named with its exclusion');
+  assert.equal(db("SELECT count(*) n FROM ops_command_targets WHERE seat_id='A2'")[0].n, 0, 'the finish asked nothing of A2 (no consent)');
+  assert.deepEqual(await card(K).locator('.ledger-items > p').allTextContents(), kBefore, 'the selected-collection card kept its own lines');
+  const keys4 = await page.locator('#ops-ledger-list .ledger-card').evaluateAll((l) => l.map((x) => x.dataset.key)); assert.deepEqual(keys4, [WK, D, K, C]);
+  await card(WK).scrollIntoViewIfNeeded(); await I.shot('at41-03-board-whole-roster.png'); assert.deepEqual(workFiles(), KEPT);
+  results.AT41.whole_roster = { dry_run_rows: dryRows, card: WK, lines: wLines, a1: wLine, sum: await card(WK).locator('.ledger-sum').innerText(), cards: keys4, selected_card_unchanged: true };
+  step('AT41 whole-roster finish clicked: dry run made no card and no request; live card names all four with exclusions; the real app\'s record verified in that card', { a1: wLine.slice(0, 80) });
   }
   if (want('R6')) {
   // ── R6 upload (U1 contract, reused): consent on the device, request from Chalk, and only the Service's verification counts ──

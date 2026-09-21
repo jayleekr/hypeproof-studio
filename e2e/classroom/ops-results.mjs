@@ -199,6 +199,89 @@ try {
   await page.locator('#disconnect').click(); await connect(); assert.equal(await page.locator('#ops-ledger').isVisible(), false); assert.equal(await page.locator('#ops-ledger-list .ledger-card').count(), 0);
   ok('reconnecting starts without result cards (the server records stay; nothing is repainted onto a new roster)');
 
+
+  // ── W: the whole-roster finish path, clicked. A dry run asks nothing and makes no card; the live one names every roster seat with
+  // its exclusion; a record that arrives late lands in THAT card, not in a selected collection started in the same connection. ──
+  const k4 = await collect(['A2']), K4 = 'collect:' + k4; await card(K4).waitFor();
+  const cmdsBefore = commandsNow().length, liveBefore = batches().length, dryBefore = local.db.prepare('SELECT count(*) n FROM classroom_collect_batches WHERE dry_run=1').get().n;
+  assert.equal(await page.locator('#ops-finish-dry').isChecked(), true, 'the finish starts as a dry run'); await page.locator('#ops-finish-go').click();
+  await page.locator('#ops-finish-state').filter({ hasText: '미리 확인 결과 (요청·저장 없음)' }).waitFor();
+  assert.equal(commandsNow().length, cmdsBefore, 'dry run: no device request'); assert.equal(batches().length, liveBefore, 'dry run: no live batch');
+  assert.equal(local.db.prepare('SELECT count(*) n FROM classroom_collect_batches WHERE dry_run=1').get().n, dryBefore + 1, 'the dry run is the Service\'s own preview row');
+  assert.deepEqual(await keys(), [K4], 'dry run: no result card'); const dryLines = await page.locator('#ops-finish-items > p').allTextContents(); assert.equal(dryLines.length, 6, 'the preview names the whole roster');
+  await page.locator('#ops-finish-dry').uncheck(); await page.locator('#ops-finish-go').click(); await until('whole-roster card', async () => batches().length === liveBefore + 1 && (await keys()).length === 2);
+  const kw = batches().at(-1), KW = 'collect:' + kw; assert.deepEqual(await keys(), [KW, K4]);
+  assert.match(await card(KW).locator('h4').innerText(), /^기록 회수 \(수업 마무리 · 명단 전체\) · 회수 .* · 명단 전체 6명$/);
+  const wl = await lines(KW); assert.deepEqual(wl.map((l) => l.split(' — ')[0]), ['A1 · student-a', 'A2 · student-b', 'A3 · student-c', 'A4 · student-d', 'A5 · student-g', 'A6 · student-f'], 'every roster seat, the current holder of A5');
+  assert.match(await line(KW, 'A4'), /\[미전달·만료·대상 변경\] 제외 · 동의 없음 · 회수하지 않음/); assert.match(await line(KW, 'A5'), /\[미전달·만료·대상 변경\] .*(동의 없음|기기 연결 없음)/); assert.match(await line(KW, 'A6'), /\[미전달·만료·대상 변경\] .*(동의 없음|기기 연결 없음)/);
+  for (const id of ['A1', 'A2', 'A3']) assert.doesNotMatch(await line(KW, id), /\[적용|\[미전달/, id + ' was asked, nothing arrived yet');
+  const finishRows = await page.locator('#ops-finish-items > p').allTextContents(); assert.equal(finishRows.length, 6); assert.match(await page.locator('#ops-finish-state').innerText(), /^명단 6명 · 서버 검증됨 0 /);
+  evidence.whole_roster = { dry_run_rows: dryLines, card_lines: wl, finish_state: await page.locator('#ops-finish-state').innerText() };
+  assert.equal((await local.uploadSnapshotAs(conn.A1, kw, 1, record)).status, 201); // A1's record for the finish arrives late, nothing clicked
+  await until('late record in the whole-roster card', async () => /\[적용 \(서버 검증\)\] 서버 검증됨/.test(await line(KW, 'A1')), 30000);
+  assert.deepEqual((await lines(K4)).map((l) => l.split(' — ')[0]), ['A2 · student-b'], 'the selected collection still names only A2'); assert.doesNotMatch(await line(K4, 'A2'), /서버 검증/, 'and nothing of A1 was painted into it');
+  assert.match(await sum(KW), /적용 \(서버 검증\) 1 /); assert.doesNotMatch(await sum(KW), /모두|전원/);
+  evidence.whole_roster.late = { a1: await line(KW, 'A1'), sum: await sum(KW), k4: await lines(K4) }; await shot('whole-roster', 'finish (whole roster): dry run made no card; live card names all six with exclusions; late A1 record in this card only');
+  ok('whole-roster finish, clicked: the dry run requests and shows nothing as a card; the live card names every roster seat with its exclusion; a late verified record lands in that card only');
+
+  // ── H: a hidden tab pauses the card's polling and says so; the observation keeps its time; coming back reads it at once. A manual
+  // re-read racing an older automatic one keeps the newer answer and the card goes on watching the action still in flight. ──
+  const hidden = (v) => page.evaluate((v) => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => v }); Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => v ? 'hidden' : 'visible' }); document.dispatchEvent(new Event('visibilitychange')); }, v);
+  // A1's queue is drained first (the whole-roster upload request), so its next lease is this diagnosis.
+  for (const id of local.db.prepare("SELECT t.command_id id FROM ops_command_targets t WHERE t.seat_id='A1' AND t.state IN ('queued','leased')").all().map((r) => r.id)) { await lease('A1', id); await report('A1', id, 'rejected', 'busy'); }
+  await pick(['A1']); await page.locator('#ops-bulk-diagnose').click(); await until('H card', async () => (await keys()).length === 3); const H = 'command:' + commandsNow().at(-1).id, hid = H.slice(8);
+  assert.match(await seen(H), /진행 중 — 자동으로 다시 확인합니다/); const gets = []; page.on('request', (r) => { if (r.method() === 'GET' && r.url().endsWith('/commands/' + hid)) gets.push(Date.now()); });
+  await hidden(true); await until('paused', async () => /이 화면이 가려진 동안 자동 확인을 멈췄습니다/.test(await seen(H)), 10000); const pausedAt = Date.now(), seenPaused = await seen(H);
+  await lease('A1', hid); await report('A1', hid, 'accepted'); await report('A1', hid, 'succeeded', 'token_ok'); await page.waitForTimeout(5000);
+  assert.equal(gets.filter((t) => t > pausedAt).length, 0, 'no read while hidden'); assert.match(await line(H, 'A1'), /^A1 · student-a — \[접수\]/, 'the paused card still shows what it last saw, not a guess');
+  assert.equal(await seen(H), seenPaused, 'and says it is paused with the time of that observation'); assert.match(seenPaused, /^서버 시각 .* 관측 · /);
+  evidence.hidden = { paused: seenPaused, line_while_hidden: await line(H, 'A1') }; await hidden(false);
+  await until('read on return', async () => /\[적용 \(기기가 실행함\)\]/.test(await line(H, 'A1')), 3000); assert.ok(gets.some((t) => t > pausedAt), 'returning read it'); assert.doesNotMatch(await seen(H), /가려진/);
+  evidence.hidden.after_return = { line: await line(H, 'A1'), seen: await seen(H) };
+  ok('hidden tab: the card stops reading and says so with its last observation time; the device settled meanwhile; coming back reads it at once');
+  // Manual re-read vs an older automatic read still in flight.
+  await pick(['A1']); await page.locator('#ops-bulk-diagnose').click(); await until('M card', async () => (await keys()).length === 4); const M = 'command:' + commandsNow().at(-1).id, mid = M.slice(8);
+  let release, held = new Promise((r) => { release = r; }), stale = null;
+  await page.route('**/commands/' + mid, async (route) => { if (route.request().method() !== 'GET' || stale) return route.continue(); const resp = await route.fetch(); stale = resp; await held; await route.fulfill({ response: resp }); });
+  await until('an automatic read is held', async () => !!stale, 10000);
+  await lease('A1', mid); await report('A1', mid, 'accepted'); await more(M); // later reads pass through; only the first one is held
+  assert.match(await line(M, 'A1'), /^A1 · student-a — \[기기 수신\]/, 'the manual read shows the newer state'); release(); await page.waitForTimeout(600); await page.unroute('**/commands/' + mid);
+  assert.match(await line(M, 'A1'), /\[기기 수신\]/, 'the older automatic answer arriving later did not roll it back'); assert.match(await seen(M), /진행 중 — 자동으로 다시 확인합니다/, 'still watching the action in flight');
+  await report('A1', mid, 'succeeded', 'token_ok'); await until('M settles by itself', async () => /\[적용 \(기기가 실행함\)\]/.test(await line(M, 'A1')), 10000);
+  evidence.manual_race = { final: await line(M, 'A1'), seen: await seen(M) };
+  ok('manual re-read racing an older automatic read: the newer answer stays, the in-flight action keeps being watched and settles on its own');
+
+  // ── R: more than twelve actions, settled and pending mixed. The settled action sent EARLIEST leaves the cards first; no pending one
+  // ever does; what leaves is listed and can be read again by its id for this connection. ──
+  await page.locator('#disconnect').click(); await connect();
+  const diag = async (seat) => { await pick([seat]); await page.locator('#ops-bulk-diagnose').click(); const id = await until('command recorded', async () => { const c = commandsNow().at(-1); return c && !made.includes('command:' + c.id) ? c.id : null; }); await card('command:' + id).waitFor(); made.push('command:' + id); return 'command:' + id; };
+  const made = []; const shelf = () => page.locator('#ops-ledger-shelf-list > p').evaluateAll((l) => l.map((x) => x.dataset.key));
+  for (const id of local.db.prepare("SELECT t.command_id id FROM ops_command_targets t WHERE t.seat_id IN ('A1','A3') AND t.state IN ('queued','leased')").all().map((r) => r.id)) for (const seat of ['A1', 'A3']) { const r = await sync(seat); const got = (r.json.commands || []).find((x) => x.command_id === id); if (got) { leased[seat + id] = got; await report(seat, id, 'rejected', 'busy'); } }
+  const P1 = await diag('A1'); const S = []; for (let i = 0; i < 6; i++) S.push(await diag('A6')); const P2 = await diag('A3'); for (let i = 0; i < 7; i++) S.push(await diag('A6'));
+  // 15 actions: P1, S1–S6, P2, S7–S13. Twelve fit; the three earliest settled (S1 S2 S3) leave; P1 — the oldest of all — stays.
+  assert.deepEqual(await keys(), [...S.slice(6).reverse(), P2, ...S.slice(3, 6).reverse(), P1], 'newest first; S1–S3 gone; both pending kept');
+  assert.deepEqual(await shelf(), [S[2], S[1], S[0]], 'the shelf lists what left, most recent first');
+  assert.match(await page.locator('#ops-ledger-note').innerText(), /결과가 확정된 이전 조치 3건은 카드를 아래 ‘화면에서 내린 결과’로 옮겼습니다 — 이 연결 동안 거기서 다시 열 수 있습니다/);
+  assert.match(await page.locator('#ops-ledger-shelf').textContent(), /명령·기록 회수 결과를 다시 찾는 목록 화면은 아직 없어, 연결을 끊거나 이 페이지를 닫으면 이 목록도 사라집니다/); assert.doesNotMatch(await page.locator('#ops-ledger').innerText(), /기록 회수·보낸 자료에서 다시 찾기/);
+  assert.match(await sum(P1), /접수 1/); assert.match(await sum(P2), /접수 1/);
+  // P1 settles; the next action makes it — now the earliest settled — the one that leaves, while the later P2 (still pending) stays.
+  const p1 = P1.slice(8); await lease('A1', p1); await report('A1', p1, 'accepted'); await report('A1', p1, 'succeeded', 'token_ok'); await until('P1 settled', async () => /결과 확정/.test(await seen(P1)), 10000);
+  S.push(await diag('A6')); assert.deepEqual(await keys(), [S[13], ...S.slice(6, 13).reverse(), P2, ...S.slice(3, 6).reverse()], 'P1 (earliest, now settled) left; P2 pending stays');
+  assert.deepEqual(await shelf(), [P1, S[2], S[1], S[0]]); await shot('retention', 'more than twelve: earliest settled leave to the shelf, pending stay');
+  evidence.retention = { created: made, cards: await keys(), shelf: await shelf(), note: await page.locator('#ops-ledger-note').innerText() };
+  ok('more than twelve mixed actions: the earliest-sent settled ones leave first, every pending one stays, and the note says where they went and its limit');
+  // Reopen S1: read again by its id, back on top; the next earliest settled (S4) leaves in its place. A failed read keeps it listed.
+  await page.locator('#ops-ledger-shelf-sum').click(); await page.locator(`#ops-ledger-shelf-list > p[data-key="${S[0]}"] .ledger-reopen`).click(); await card(S[0]).waitFor();
+  assert.equal((await keys())[0], S[0]); assert.match(await line(S[0], 'A6'), /^A6 · student-f — \[미전달·만료·대상 변경\]/); assert.match(await seen(S[0]), /결과 확정/);
+  assert.deepEqual(await shelf(), [S[3], P1, S[2], S[1]], 'S4 left for it'); assert.equal(await card(S[3]).count(), 0);
+  const s2 = S[1].slice(8); await page.route('**/commands/' + s2, (route) => route.request().method() === 'GET' ? route.fulfill({ status: 503, json: { reason: 'storage' } }) : route.continue());
+  await page.locator(`#ops-ledger-shelf-list > p[data-key="${S[1]}"] .ledger-reopen`).click(); await page.locator(`#ops-ledger-shelf-list > p[data-key="${S[1]}"] .ledger-reopen-note`).filter({ hasText: '다시 읽지 못했습니다 (storage) — 목록에 그대로 둡니다.' }).waitFor();
+  assert.equal(await card(S[1]).count(), 0); assert.ok((await shelf()).includes(S[1])); await page.unroute('**/commands/' + s2);
+  evidence.reopen = { cards: await keys(), shelf: await shelf() }; await shot('reopen', 'S1 reopened from the shelf; a failed reopen stays listed');
+  ok('a card that left can be reopened by its id (fresh read, back on top, the next earliest settled leaves); a failed reopen keeps it listed and says so');
+  await page.locator('#disconnect').click(); await connect(); assert.equal(await page.locator('#ops-ledger-shelf').isVisible(), false); assert.deepEqual(await shelf(), []);
+  ok('the shelf belongs to the connection: reconnecting starts without it, as the page said');
+
   assert.deepEqual(errors, [], 'no page error');
   writeFileSync(path.join(out, 'result.json'), JSON.stringify({ schema: 'hps-classroom-ops-results/1', at: new Date().toISOString(), checks: n, screenshots: shots, evidence, not_run: ['real Studio window (see the Mac run)', 'Windows', 'school network', 'staging/production D1·R2', 'real model', 'mail'] }, null, 2));
   console.log(`${n} AT-41 per-target result checks passed → ${out}`);
