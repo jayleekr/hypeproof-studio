@@ -86,21 +86,22 @@ async function authorized(c:any){
 }
 // The instructor scope is applied in SQL, before the page limit: rows outside it must neither fill a page (and starve an
 // allowed request behind them) nor be counted. `has_more`/`next_cursor` say whether older matching rows exist; the list alone
-// never proves completeness. `counts` covers every authorized row matching the filters (not only this page).
+// never proves completeness. `counts` covers every authorized row matching the filters (not only this page); `status=open`
+// narrows only the page to rows still awaiting the instructor, so a help list is not buried behind answered rows.
 const cursorOK=(s:string)=>/^\d{1,12}:[a-zA-Z0-9_-]{1,128}$/.test(s);
 classroomTeacher.get(root,async c=>{
  const a=c.get('teacher'),q=c.req.query(),size=q.limit===undefined?100:Number(q.limit);
- if(!Number.isInteger(size)||size<1||size>100||(q.session_id!==undefined&&!idOK(q.session_id))||(q.kind!==undefined&&!['help','submission'].includes(q.kind))||(q.before!==undefined&&!cursorOK(q.before)))return c.json({error:'invalid session_id, kind, before or limit'},400);
+ if(!Number.isInteger(size)||size<1||size>100||(q.session_id!==undefined&&!idOK(q.session_id))||(q.kind!==undefined&&!['help','submission'].includes(q.kind))||(q.status!==undefined&&q.status!=='open')||(q.before!==undefined&&!cursorOK(q.before)))return c.json({error:'invalid session_id, kind, status, before or limit'},400);
  let where='cohort_id=? AND recipient_id=? AND expires_at>? AND profile_id IN (SELECT value FROM json_each(?))';const args:unknown[]=[c.req.param('cohort'),a.payload.u,now(),JSON.stringify(a.scope.profiles??[])];
  if(q.session_id!==undefined){where+=' AND session_id=?';args.push(q.session_id);}
  if(q.kind!==undefined){where+=' AND kind=?';args.push(q.kind);}
- let page=where;const pageArgs=[...args];
+ let page=where+(q.status==='open'?" AND status IN ('received','reviewing')":'');const pageArgs=[...args];
  if(q.before!==undefined){const i=q.before.indexOf(':'),at=Number(q.before.slice(0,i)),id=q.before.slice(i+1);page+=' AND (created_at<? OR (created_at=? AND id<?))';pageArgs.push(at,at,id);}
  const [rows,counts]=await Promise.all([
   c.env.HPS_DB.prepare(`SELECT * FROM classroom_shares WHERE ${page} ORDER BY created_at DESC, id DESC LIMIT ?`).bind(...pageArgs,size+1).all<Row>(),
   c.env.HPS_DB.prepare(`SELECT count(*) AS matched, coalesce(sum(status IN ('received','reviewing')),0) AS open, coalesce(sum(status='answered'),0) AS answered FROM classroom_shares WHERE ${where}`).bind(...args).first<{matched:number;open:number;answered:number}>()]);
  const list=rows.results??[],more=list.length>size,shown=list.slice(0,size),last=shown[shown.length-1];
- return c.json({recipient_id:a.payload.u,shares:shown.map(metadata),limit:size,has_more:more,next_cursor:more&&last?last.created_at+':'+last.id:null,filter:{session_id:q.session_id??null,kind:q.kind??null},counts:{matched:Number(counts?.matched??0),open:Number(counts?.open??0),answered:Number(counts?.answered??0)}});
+ return c.json({recipient_id:a.payload.u,shares:shown.map(metadata),limit:size,has_more:more,next_cursor:more&&last?last.created_at+':'+last.id:null,filter:{session_id:q.session_id??null,kind:q.kind??null,status:q.status??null},counts:{matched:Number(counts?.matched??0),open:Number(counts?.open??0),answered:Number(counts?.answered??0)}});
 });
 classroomTeacher.get(root+'/:id',async c=>{
  const r=await authorized(c);if(!r)return c.json({error:'share not found'},404);

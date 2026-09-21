@@ -163,7 +163,8 @@ async function instructor() { browser = await chromium.launch({ headless: proces
 
 const results = {};
 // HPS_U4_SCENARIOS=R4 (comma list) runs R0 + only those scenarios — e.g. to re-check the preview path without repeating the
-// three-minute provider failure of R3. Unset = all of R1..R7. What was skipped is written into result.json.
+// three-minute provider failure of R3. Unset = all of R1..R7. BOARD (opt-in) = the instructor board of this source over R0's
+// real report, with no recovery action. What was skipped is written into result.json.
 const SCENARIOS = (process.env.HPS_U4_SCENARIOS || 'R1,R2,R3,R4,R5,R6,R7').split(',').map((x) => x.trim()).filter(Boolean), want = (id) => SCENARIOS.includes(id);
 let KEPT = { changed: [], added: [] }, release;
 try {
@@ -172,6 +173,36 @@ try {
   await ask(chat, 'Q-ONE 첫 질문', 'Q-ONE'); await answered(chat, 1); await idle(chat);
   await I.rowText('A1', /입장: 준비 완료/); const sdkRoute = wire.some((w) => w.path === '/v1/messages' && w.status === 200); assert.ok(sdkRoute, 'the learner window really ran the Agent SDK route');
   step('R0 a real window is connected and a real Agent SDK turn completed', { provider_calls: providerCalls.length });
+
+  if (want('BOARD')) {
+  // ── BOARD: the instructor board of THIS source over the real report of R0 (no recovery action is pressed). Versions are read from
+  // what is served and answered, not assumed: the /manage bytes against the source file, and a list field only the current Service has.
+  const served = Buffer.from(await (await realFetch('http://127.0.0.1:' + boardPort + '/manage')).arrayBuffer()), manageSrc = path.join(repo, 'chalk/src/ui/manage.html');
+  const servedSha = digest(served); assert.equal(servedSha, sha(manageSrc), 'the board serves this source\'s manage.html');
+  const probe = await local.request(`/admin/cohorts/${local.cohort}/classroom/shares?status=open&limit=1`, 'GET', undefined, teacherToken); assert.equal(probe.status, 200); assert.equal(probe.json.filter?.status, 'open', 'the Service in this process has the open-help filter');
+  // The learner's window state that the board must not touch: a typed draft, the answered turn, the files.
+  await setDraft(chat, '보드 확인 중에도 남아야 하는 학생 초안'); const answersBefore = await answers(chat);
+  // One help request by the learner of A1 (made here through the learner route with a synthetic learner token; the app's own help entry is not run).
+  const helpId = crypto.randomUUID(), shared = await local.request('/v1/classroom/shares', 'POST', { id: helpId, recipient_id: 'teacher-a', kind: 'help', consent: true, duration_minutes: 120, content: { prompt: '[합성] 보드 스모크 도움 요청' } }, await local.student(seats[0].student_id)); assert.equal(shared.status, 201, shared.raw);
+  await page.locator('#refresh').click(); await page.locator('#ops-help-list li').filter({ hasText: seats[0].student_id }).waitFor({ timeout: 30000 });
+  const a1 = await seatNow('A1'); assert.equal(a1.connection?.state, 'active', 'the real window\'s connection is active in the Service');
+  await I.open('A1'); const send = page.locator('#ops-actions').getByRole('button', { name: '질문 보내기', exact: true }), mark = page.locator('#ops-actions').getByRole('button', { name: '확인할 지점 표시', exact: true });
+  const availability = { question: await send.isEnabled(), checkpoint: await mark.isEnabled(), primary: (await page.locator('#ops-actions .primary').allInnerTexts()).map((x) => x.trim()) };
+  assert.equal(availability.question, true); assert.equal(availability.checkpoint, true);
+  // F1b on the real board: the same instructor's live redraw keeps the unsent checkpoint note; another instructor never gets it.
+  await page.locator('#ops-checkpoint-note').fill('[합성] 강사 A의 보내지 않은 메모'); await page.evaluate(() => refresh()); await page.waitForTimeout(1500);
+  const keptSameOwner = await page.locator('#ops-checkpoint-note').inputValue(); assert.equal(keptSameOwner, '[합성] 강사 A의 보내지 않은 메모');
+  await I.shot('board-01-a1-detail-connected.png');
+  const otherTeacher = (await issueIssuer({ issuer: 'teacher-b', scopes: [{ cohort: local.cohort, profiles: [local.profile], ops: [...OPS_ALL] }] }, 1, TEST_SECRET)).token;
+  const reconnect = async (t) => { await page.locator('#disconnect').click(); await page.locator('#conn-edit').isVisible() && await page.locator('#conn-edit').click(); await page.locator('#token').fill(t); await page.locator('#cohort').fill(local.cohort); await page.locator('#prefix').fill(prefix); await page.locator('#connect-go').click(); await page.locator('#status').filter({ hasText: '연결됨' }).waitFor(); await I.row('A1').waitFor(); };
+  await reconnect(otherTeacher); await I.open('A1'); const otherSees = [await page.locator('#ops-checkpoint-note').inputValue(), await page.locator('#ops-question').inputValue()]; assert.deepEqual(otherSees, ['', '']);
+  await reconnect(teacherToken); await I.open('A1');
+  const statusLine = (await I.T('status')).trim(), a1Row = (await I.row('A1').innerText()).replace(/\s+/g, ' '), helpLine = (await I.T('ops-help-state')).replace(/\s+/g, ' ');
+  await I.shot('board-02-reconnected-help.png'); await W.shot(win, 'board-03-learner-window.png');
+  const draftAfter = await draftOf(chat), answersAfter = await answers(chat); assert.equal(draftAfter, '보드 확인 중에도 남아야 하는 학생 초안'); assert.equal(answersAfter, answersBefore); assert.deepEqual(workFiles(), KEPT);
+  results.BOARD = { served_manage_sha256: servedSha, manage_source_sha256: sha(manageSrc), service_classroom_ts_sha256: sha(path.join(repo, 'worker/src/routes/classroom.ts')), service_open_filter: probe.json.filter, a1_connection: a1.connection?.state, a1_row: a1Row, status_line: statusLine, help_line: helpLine, action_availability: availability, checkpoint_same_owner_redraw: keptSameOwner, other_instructor_sees: otherSees, learner_draft_kept: draftAfter, answers_on_screen: [answersBefore, answersAfter], work_files: workFiles(), help_request: 'made here through /v1/classroom/shares with a synthetic learner token (the app\'s own help entry is NOT run)' };
+  step('BOARD latest Chalk + Service over the real report: connected, actions available, help listed, checkpoint draft isolated; learner draft/chat/files kept', { a1: a1.connection?.state });
+  }
 
   if (want('R1')) {
   // ── R1 diagnostics: selected A1 + offline A3 + old-app A4; A2 is NOT selected. The fault is a /v1/health that does not answer OK. ──
@@ -335,7 +366,7 @@ try {
 
   }
   assert.equal(a2Runs, 0, 'the never-selected seat ran nothing in the whole session'); assert.equal(db("SELECT count(*) n FROM ops_command_targets WHERE seat_id='A2'")[0].n, 0);
-  const result = { schema: 'hps-classroom-mac-recovery/1', at: new Date().toISOString(), scenarios_run: ['R0', ...SCENARIOS], scenarios_not_run_here: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7'].filter((x) => !want(x)), source_sha: head, extension_source_sha: manifest.extension.source_sha, extension_bundles: manifest.extension.bundles, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256, route_seen: '/v1/messages' }, how: 'instructor = clicks on the Chalk page (visible Chromium); learner = real Studio window over the debugging port (real mouse input for webview controls)',
+  const result = { schema: 'hps-classroom-mac-recovery/1', at: new Date().toISOString(), scenarios_run: ['R0', ...SCENARIOS], scenarios_not_run_here: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'BOARD'].filter((x) => !want(x)), source_sha: head, extension_source_sha: manifest.extension.source_sha, extension_bundles: manifest.extension.bundles, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256, route_seen: '/v1/messages' }, how: 'instructor = clicks on the Chalk page (visible Chromium); learner = real Studio window over the debugging port (real mouse input for webview controls)',
     real: ['Studio shell copy', 'current extension build', 'Agent SDK + binary', 'ops sync loop and command runner', 'Chalk page', 'Service router + SQLite', 'HTTP between app and Service', 'live preview server and browser tab'],
     made_here: ['accounts, class and tokens (synthetic)', 'model provider (scripted stand-in; "provider down" = it answers 500)', '"/v1/health does not answer OK" at the local HTTP front', 'the learner page moved away and back by the runner', 'the preview server dropped by the test-only HPS_TEST_PREVIEW_FAULT trigger', 'an unrelated localhost tool served by the runner', 'seat A2 (real device client in this process), A3 (never connected), A4 (no command capability)', 'the new code carried from the issuing page to the start page by the runner (as a person would read it out)'],
     not_run: ['real model', 'school network / real outage', 'Windows', 'several physical devices', 'staging or production D1/R2', 'mail', 'Keychain-backed installed app', 'a multi-request turn crossing a pause in a real window'],

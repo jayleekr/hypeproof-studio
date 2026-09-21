@@ -36,9 +36,16 @@ try{
   for(let i=0;i<3;i++)put('current-submission-'+i,{kind:'submission',created_at:row.created_at+200+i});
   put('current-answered',{status:'answered',created_at:row.created_at+300});
   j=await list();assert.equal(j.has_more,true);assert.ok(!j.shares.some(x=>x.id==='active'),'unfiltered first page does not reach it');
-  j=await list('?kind=help&session_id='+encodeURIComponent(row.session_id));assert.deepEqual(j.shares.map(x=>x.id),['current-answered','active']);assert.equal(j.has_more,false);assert.deepEqual(j.counts,{matched:2,open:1,answered:1});assert.deepEqual(j.filter,{session_id:row.session_id,kind:'help'});
+  j=await list('?kind=help&session_id='+encodeURIComponent(row.session_id));assert.deepEqual(j.shares.map(x=>x.id),['current-answered','active']);assert.equal(j.has_more,false);assert.deepEqual(j.counts,{matched:2,open:1,answered:1});assert.deepEqual(j.filter,{session_id:row.session_id,kind:'help',status:null});clear();
+  // 3b. F2b: 1000 newer answered help requests of the current class. Unfiltered, the old open one sits past page 10 (reachable only by
+  // cursor); `status=open` returns it on the first page while `counts` still cover every matching row.
+  const sid=encodeURIComponent(row.session_id);for(let i=0;i<1000;i++)put('answered-'+String(i).padStart(4,'0'),{status:'answered',created_at:row.created_at+1+i});
+  j=await list('?kind=help&session_id='+sid);let pages=1;while(j.has_more){j=await list('?kind=help&session_id='+sid+'&before='+encodeURIComponent(j.next_cursor));pages++;}assert.equal(pages,11,'1001 rows are 11 pages of 100');assert.deepEqual(j.shares.map(x=>x.id),['active']);
+  j=await list('?kind=help&status=open&session_id='+sid);assert.deepEqual([j.shares.map(x=>x.id),j.has_more,j.counts],[['active'],false,{matched:1001,open:1,answered:1000}]);assert.equal(j.filter.status,'open');
+  put('open-2',{status:'reviewing',created_at:row.created_at+2000});j=await list('?kind=help&status=open&limit=1&session_id='+sid);assert.deepEqual([j.shares.map(x=>x.id),j.has_more],[['open-2'],true]);
+  j=await list('?kind=help&status=open&limit=1&session_id='+sid+'&before='+encodeURIComponent(j.next_cursor));assert.deepEqual([j.shares.map(x=>x.id),j.has_more],[['active'],false],'the open filter continues by the same cursor');
   // 4. malformed filters are refused rather than widened.
-  for(const q of ['?limit=0','?limit=101','?limit=x','?kind=all','?session_id=../x','?before=abc','?before=1:a%27--'])assert.equal((await req(base+q,'GET',undefined,t)).status,400,q);
+  for(const q of ['?limit=0','?limit=101','?limit=x','?kind=all','?session_id=../x','?before=abc','?before=1:a%27--','?status=answered','?status='])assert.equal((await req(base+q,'GET',undefined,t)).status,400,q);
   // 5. an instructor whose scope has no profile of these rows sees nothing and no counts.
   j=(await req(base,'GET',undefined,await f.teacher('teacher-a',['other-profile']))).json;assert.deepEqual([j.shares.length,j.counts.matched,j.has_more],[0,0,false]);clear();
  });
