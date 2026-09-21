@@ -5,7 +5,9 @@ Strategic + phase plan: see [METAPLAN.md](./METAPLAN.md). Do not duplicate it he
 
 ## Product philosophy (READ BEFORE DESIGNING UX)
 
-Studio is a prepared environment where learners exercise and examine their agency, judgment and responsibility while working with AI. The **7 AI Native Assets** are the current research model, not established learning outcomes. Every UX decision in the chat panel, welcome flow, approval modals and onboarding must connect to observable learner behavior and a testable hypothesis.
+Studio is a prepared environment where learners exercise and examine their agency, judgment and responsibility while working with AI. The current research model is the **six-capability candidate model** (`candidate-capability-v1` — FRAMING, JUDGMENT, ORCHESTRATE, VERIFY, ADAPT, OWNERSHIP), adopted 2026-09-13 (#1020). The **7 AI Native Assets** are `legacy-seven-assets`: historical, still readable, never produced by a new assessment. Neither is an established learning outcome, and there is deliberately no conversion table between them — see `worker/src/lib/measurement-core/capability-models.ts`. Every UX decision in the chat panel, welcome flow, approval modals and onboarding must connect to observable learner behavior and a testable hypothesis.
+
+**Capability names are not learner-facing during work.** SX-01/06/07/59 keep scores, capability labels and evaluation sentences off the work screen; the observation results panel is drawn only where a cohort opted in via `observation.assess` (ADR 0010).
 
 Use this traceability order for product decisions:
 
