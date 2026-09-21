@@ -70,3 +70,10 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
   real turn and records consent by itself), then `node e2e/classroom/mac-demo-board.mjs` — a visible browser signs in to the real
   Chalk board, selects A1, previews, collects, and checks from the Service's rows that the scripted seats A2/A3 (connected and
   consenting) were left untouched. `HPS_BOARD_HEADLESS=1` runs the same without keeping a window open.
+- Cause-specific recovery (#751 U4) on this Mac: `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-u4 node e2e/classroom/mac-devhost.mjs prepare`,
+  then from the repo root `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-u4 node --experimental-strip-types --experimental-sqlite --no-warnings e2e/classroom/mac-recovery.mjs`
+  (ports 18841/18842, debug 9441, about 12 minutes — the real Agent SDK retries a failing provider for about three). Every
+  instructor step is a click on the Chalk page; the learner side is a real window. The faults, accounts and model provider
+  are made locally and listed in `result.json` under `made_here`; what was not run is under `not_run`. It stays open
+  afterwards (class and tokens last 12 hours); `recovery-session.json` has the URL, PID, ports and how to stop it.
+  `mac-window.mjs` holds the window-driving helpers this runner uses.

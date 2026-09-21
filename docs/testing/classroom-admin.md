@@ -138,7 +138,7 @@ npm --prefix chalk run typecheck
 | AT-44 | ADM-10/11 · RM-3 · INT-CO-04(제안) | 공지·자료의 대상 배포: 선택 A1·A3/비선택 A2, 권한 없음·flag OFF·구버전 capability, 배포 강사의 권한 철회(배포 강사 ≠ 연결 발급 강사), 여러 배포와 회수의 단위, 오프라인 재접속·좌석 교체·재발급·기기 교체·종료, 중복 요청·같은 key 다른 내용, v2 뒤 늦은 v1, 저장 오류·응답 유실·앱 재시작, 부분 실패만 재선택, 미연결·비선택 학생의 콘텐츠 접근, 회수, 기존 수업 회귀 | 선택 좌석만 그 revision을 **보관함에 반영**했다고 보고하고 재시작 뒤에도 카드가 열림, 비선택 학생의 제안·읽기·파일 변화 0, HTTP 200·제안·알림을 완료로 세지 않음, 되돌아감·중복 카드 0, 기존 자료 보존·거짓 반영 0, 전체로 확장 0, 미확인·회수 확인 불가는 성공이 아님 | Service + App + UI e2e + 실제 Mac ([시나리오 D1~D16·M1](#remote-management-u2-plan-20260921)) |
 | AT-45 | ADM-10/11 · RM-3 · INT-CO-04(제안) | 수업 **프롬프트**의 대상 배포: 선택 A1·A3/비선택 A2, 기존 초안·첨부·예약 전송이 있는 상태와 클릭 직전의 입력, 가져온 뒤 편집·회수, 출처·revision, 미지원 App | 선택 좌석만 보관함 반영, **학생이 직접 누른 `초안에 가져오기`만** 초안을 바꾸고 덧붙일 뿐 대체·자동 전송·모델 호출 0, 첨부·예약·진행 중 turn 불변, 회수가 학생 초안·대화·파일을 지우지 않음, 가져옴·보냄이 강사에게 보고되지 않음, 보관함 반영을 ‘사용’으로 세지 않음 | Service + App + UI e2e + 실제 Mac ([시나리오 P1~P7·M2](#remote-management-u3-plan-20260921)) |
 | AT-46 | ADM-10/11 · RM-3/5 · ADM-13 · AE-09/12/26/33 · VER-01 · INT-CO-04(제안) | 수업 **설정**(확정 강의 버전)의 대상 배포: 선택/비선택, 실행 중 변경과 두 번 연속 변경·다른 창의 다중 요청, 옛 key·옛 turn id 재사용, 헤더 없는 App, 두 runtime, 전환 커밋 경계의 경합, 재발급·좌석 교체·늦은 응답, OFF·전역 OFF·읽기 장애(전환 전/후/도중)·종료·권한 폐기·정책 축소, 실행 전에 거절된 요청, 기준 변경과 보고서 경로, 회수와 복귀, 미지원 App | 진행 중 turn은 **Service가 승인한 snapshot**으로 끝나고(이후 전환 횟수와 무관 · 수명 30분 · 연장 불가) 새 turn은 현재 binding으로만 승인됨, App(`/v1/profile`)·Service(gate)·turn 행·요청 헤더가 같은 key, `적용됨`은 **정규화된 wire가 upstream 응답을 받은 기록**뿐(gate 통과·`/v1/profile`·preflight·`count_tokens`·거절된 요청은 아님 · 시도/상류 실패/미확인을 구분), OFF와 장애가 좁혀진 설정을 넓히지 않고 모르는 상태에서는 보류(실행 전이면 입력 복원 · 일부 실행됐으면 부분 실행 표시 · 자동 재전송 0), 비선택 학생의 실행·profile 불변, 이전 기준의 자기보고·강사 확인을 새 기준 완료로 상속 0, **섞인 기준의 회수 입력이 평가·승인·전달되지 않음**(단일 기준은 그대로 처리), 회수가 설정을 되돌리지 않고 복귀는 새 요청+새 적용 증거 | Service + App + 합성 upstream + 로컬 workerd D1 + UI e2e + 실제 Mac ([시나리오 S1~S19·M2](#remote-management-u3-plan-20260921)) |
-| AT-40 | ADM-10 · RM-4 | 원인 5종(토큰·연결·runtime·preview·업로드) × 1순위 조치, Chalk에서 눌러 실제 창으로 확인 | 원인마다 허용 목록의 조치 하나가 1순위로 제시되고 실제 사후 조건이 재관측됨, 대화·입력·파일 보존 | Service + UI e2e + 실제 Mac |
+| AT-40 | ADM-10 · RM-4/5 | 원인(토큰·연결·runtime·preview·업로드·일시정지) × 먼저 할 조치, Chalk에서 눌러 실제 창으로 확인. 깨뜨릴 가정: 기기의 `succeeded`·HTTP 2xx·`all_succeeded`가 해결이다 / 진단 완료가 해결이다 / profile 재확인이 SDK 복구다 / 서버 health가 미리보기 복구다 / 미연결·구버전·만료·거절·중복·지연·관측 불가도 성공 수에 든다 / 다른 좌석·다른 연결·옛 로그인 세대·조치 전의 정상 신호가 근거가 된다 | 원인마다 허용 목록의 조치 하나(또는 원장 밖의 기존 강사 절차, 또는 ‘이 PC가 아님’)가 먼저 제시됨. 판정은 해결 확인·문제 남음·실행만 됨·미확인·실행 안 됨 중 하나이고 `resolved`는 그 명령에 연결된 근거로만. 선택 좌석만 적용·비선택 불변. 대화·미전송 초안·첨부·예약 문장·파일 보존(기준값은 조치 **전**), 자동 모델 호출·자동 재전송 0 | 순수 함수 + Service + 기기 host + workerd D1 + UI e2e + 실제 Mac |
 | AT-41 | ADM-10 · RM-5 | 회수·배포·복구의 결과를 한 화면에서 같은 단계 어휘로 표시, 부분 결과 | `접수 → 수신 확인 전 → 기기 수신 → 적용 / 실패 / 미확인 / 만료·대상 변경`이 세 흐름에 공통, ‘서버 검증됨’·‘보관함 반영’·복구 결과 코드를 한 성공 수로 합치지 않음, `leased`/`offered`를 수신으로 표시하지 않음 | UI e2e + 실제 Mac |
 
 | ID | 뜻 | 상태 (2026-09-21 현재) | 근거 위치 |
@@ -148,7 +148,7 @@ npm --prefix chalk run typecheck
 | AT-37 | 근거 부족 표시 | **실행됨** — Service·core fixtures(합성) | 같은 곳 · R5 기록 |
 | AT-38 | 관찰·성장 보고서 구성 | **실행됨** — core + runner fixtures(합성). 실제 모델 NOT RUN | R5 기록 |
 | AT-39 | 학생 화면의 질문·확인 지점(모달 0·문맥 유지) | **NOT RUN** — 실제 Studio 미확인 | 보강 기준 실행 기록의 NOT RUN |
-| AT-40 | 원인별 복구 대응표 | **NOT RUN · 계획** (U4) | [매핑](#remote-management-map-20260921) |
+| AT-40 | 원인별 복구: 원인 → 먼저 할 조치 → 조치 뒤 검증 | **실행됨 · 인수 전(2026-09-22)** — Service + 기기 host + 로컬 workerd D1 + UI e2e + 실제 Mac M3(실제 창 1대, 장애·계정·공급자는 여기서 만든 것). Windows·학교망·복수 기기·운영 D1·실제 모델 NOT RUN, 새 포트 재시작·시작 화면 토큰 입력·일시정지를 가로지르는 다중 요청 turn은 실제 창 NOT RUN | [U4 실행 기록](#remote-management-u4-run-20260922) |
 | AT-41 | 세 흐름 공통 결과 화면 | **NOT RUN · 계획** | 같은 곳 |
 | AT-42 | 공통 선택 모델 (옛 표기 AT-37) | **실행됨** — UI e2e + 실제 Mac 정상 경로. 실제 기기 2대 이상·Safari/Firefox NOT RUN | [U1 실행 기록](#remote-management-u1-run-20260921) |
 | AT-43 | 선택한 학생의 수업 기록 회수 (옛 표기 AT-38) | **실행됨** — Service + UI e2e + 실제 Mac 정상 경로. 기기 실패·재전송은 합성, Windows·학교망·staging D1 NOT RUN | 같은 곳 |
@@ -538,7 +538,7 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 **경계 조건 현황.** (정정: ‘종료’는 둘이다 — 종료 전에 이미 요청된 업로드의 유예(`upload_until`)는 계속 받고, 종료된 회차에 대한 **새** 회수 요청은 U1부터 `run_ended`로 거부한다. 기존 전체 ‘수업 마무리’의 종료 후 동작은 바꾸지 않았다.) 중복 요청(idempotency key·payload 충돌)·만료(TTL 120초: 시작 전 `expired`, 시작 후 영수증 없음 `outcome_unknown`)·재접속/재발급(이전 epoch 미전달)·부분 실패(대상별 원장)·수업 경계(회차·좌석 revision 결속)는 **명령과 회수에 구현+합성 시험**이 있다. 오프라인은 **접수 시점에 `not_connected`로 확정**된다 — 복구 명령에는 맞지만 배포에는 맞지 않는다(재접속해도 도착하지 않음). 배포에는 위 어느 것도 없다.
 
-**추가한 인수 시험** ([ID 정정 원장](#at-id-ledger-20260921) — 이 문단은 처음에 AT-37/38/39로 적혔다). AT-42 선택 모델과 AT-43 대상 회수는 U1에서, AT-44 대상 배포(공지·자료)는 U2에서 구현·실행했다([U1 기록](#remote-management-u1-run-20260921) · [U2 기록](#remote-management-u2-run-20260921)). **아직 NOT RUN · 계획:** AT-40 원인별 복구 대응표(원인 5종 × 1순위 조치, 실제 창) · AT-41 세 흐름의 결과가 같은 단계 어휘로 한 화면에 남음. RM-3 행의 ‘없음’은 `d9d31bf` 시점의 조사이며, 그 뒤 공지·자료 배포가 구현됐다(수업 프롬프트·수업 설정 배포는 U3로 계속 없음).
+**추가한 인수 시험** ([ID 정정 원장](#at-id-ledger-20260921) — 이 문단은 처음에 AT-37/38/39로 적혔다). AT-42 선택 모델과 AT-43 대상 회수는 U1에서, AT-44 대상 배포(공지·자료)는 U2에서 구현·실행했다([U1 기록](#remote-management-u1-run-20260921) · [U2 기록](#remote-management-u2-run-20260921)). **AT-40은 U4에서 구현·실행했다([U4 기록](#remote-management-u4-run-20260922)). 아직 NOT RUN · 계획:** AT-41 세 흐름의 결과가 같은 단계 어휘로 한 화면에 남음. RM-3 행의 ‘없음’은 `d9d31bf` 시점의 조사이며, 그 뒤 공지·자료 배포가 구현됐다(수업 프롬프트·수업 설정 배포는 U3로 계속 없음).
 
 <a id="remote-management-u1-run-20260921"></a>
 
@@ -867,6 +867,63 @@ Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 
 | 실제 Mac M2 | `mac-lesson-settings.mjs`(같은 시나리오 · Service만 바뀜 — 확장 build는 `84ec5fb` 그대로) | 실제 학생의 허가된 요청 전부가 자기 usage 행을 가리키고, 가리켜지지 않는 응답 1건은 **U3 OFF 단계(0단계)의 질문**임을 `result.json.request_ledger`로 확인 |
 
 **NOT RUN / 알 수 없는 것.** 집행이 꺼져 있던 동안의 요청인데 usage 행마저 쓰이지 못한 경우는 어디에도 흔적이 없다(기존의 기록된 손실) — 탐지했다고 쓰지 않는다. 운영 D1의 batch 동작·지연·plan·p95, Windows·학교망·실제 모델·실제 메일은 그대로 NOT RUN. 보류는 보고서 기능의 완료가 아니다.
+
+<a id="remote-management-u4-run-20260922"></a>
+
+### U4 — 원인별 원격 복구의 실행 기록 · 2026-09-22 (로컬 · 인수 전 · 운영 아님)
+
+[계약](../requirements/classroom-admin.md#remote-management-u4-20260922) · 인수 ID **AT-40**(원인 → 먼저 할 조치 → 조치 뒤 검증). 기준 브랜치 `feat/751-u4-remote-recovery`(U3 `86b47f2` 위). 아래 ‘실제’는 이 Mac 한 대의 공식 shell 복사본이고, **장애·계정·수업·모델 공급자는 전부 여기서 만든 것**이다. Windows·학교망·실제 복수 기기·staging/production D1·R2·실제 모델·실제 메일·Keychain 설치본은 **NOT RUN**이다.
+
+**시나리오와 판정 (AT-40)**
+
+| ID | 조건 / 깨뜨릴 가정 | 합격 기준 | 계층 | 결과 |
+|---|---|---|---|---|
+| R-V | 모든 조치 × 모든 결과 코드: 미연결·구버전·만료·세대 변경·취소·거절·좌석 사용 중·결과 미확인 | 어떤 경우에도 `succeeded` 단독으로 `resolved`가 되지 않음. 실행 안 된 것은 `not_executed`, 모르는 것은 `unverified` | 순수 함수 | PASS (`classroom-ops-recovery.test.mjs` controls) |
+| R-L | 후속 관측의 연결: 다른 좌석이 남의 command_id를 적음 · 없는 command_id · 아직 기기에 가지 않은 명령 · 재발급 뒤 옛 세대 · 같은 사건 재전송 · 다른 연결의 같은 사건(원장 변조) · 읽기 실패 | 전부 `unlinked`/무시, 판정은 그대로. 읽기 실패는 `followups: unknown` + 해결로 세지 않음 | Service + SQLite, workerd D1 | PASS |
+| R1 | 진단: 선택 A1 + 미연결 A3 + 구버전 A4, **비선택 A2**. 장애 = `/v1/health`가 OK로 답하지 않음 | A1 `성공`이지만 **문제 남음(네트워크) · PC 초기화로 해결되지 않음**, A3·A4 **실행되지 않음**, 해결 확인 0. A2는 대상 행 0·실행 0. 장애 제거 뒤 다시 → 해결 확인 | Service · 브라우저 · **실제 Mac** | PASS |
+| R2 | **실제로 실행 중인 Agent SDK turn**을 Chalk에서 중지. 중지 전에 기준값: 미전송 초안 · 붙여 넣은 이미지 · 예약 문장 · 파일 바이트 | 멈춤 확인 → `실행만 됨`(해결 아님). 초안 = 예약 문장 + 입력 중 글(순서대로), 첨부 수 동일, 파일 동일, **중지 뒤 공급자 호출 0**(자동 전송·유료 호출 없음). 학생이 직접 보낸 다음 질문이 완료된 뒤에만 **해결 확인** | 기기 host · 브라우저 · **실제 Mac** | PASS |
+| R3 | 보존형 초기화 + 그 뒤 공급자가 500 | 초기화 = `실행만 됨 · 비용 없는 준비 확인`, 초기화 자체의 모델 호출 0, 초안·파일 동일. 다음 질문 실패 → **문제 남음**. 그 뒤의 정상 실행이 그 조치의 판정을 고쳐 쓰지 않음(1회 응답) | 기기 host · **실제 Mac** | PASS — 단 아래 ‘실기에서만 보인 것’ ① ② |
+| R4 | 미리보기: 학생의 **실제 미리보기 탭**(실제 live server), 학생 페이지를 치움(404) → 되돌림 | 404 = `실패 · 문제 남음 · 결과물 페이지가 없음`(서버는 정상). 페이지가 돌아온 뒤 = 해결 확인, 탭 주소 그대로, 파일 동일 | 순수 함수 · 기기 host · **실제 Mac** | PASS — 새 포트 재시작 분기는 실제 창 NOT RUN |
+| R5 | 일시정지/해제: 응답 중인 요청이 있는 상태에서 정지 | 응답 중이던 요청은 끝까지 옴. 정지 중 학생 전송 → 모델 호출 0 + 입력이 입력창에 그대로. 미연결·구버전은 `확인 불가`(적용 아님). 해제는 아무것도 보내지 않음. 기기가 해제를 **반영했다고 보고한 뒤** 학생이 보낸 실행이 ‘재개 뒤 실행 관측’ | Service · 브라우저 · **실제 Mac** | PASS — 재개 실행은 각본 공급자가 9초 뒤에 답하게 했다(앱의 약 5초 상태 표본보다 길게). 표본보다 짧은 실행은 ‘관측 전’에 머문다(아래 ③) |
+| R6 | 업로드(U1 계약 재사용): 기기에서 동의 → Chalk에서 A1만 회수 요청 | 회수 항목 `verified` + `outcome: resolved`, 보드의 업로드 명령은 `실행만 됨`(기기의 ‘보냄’은 검증이 아님), 비선택 좌석은 판정 없음 | Service · **실제 Mac** | PASS — `verified` · coverage `complete` · `outcome: resolved`; 보드의 업로드 명령은 `실행만 됨` |
+| R7 | 토큰: 기존 발급분 재확인 → 재발급(기존 강사 발급 경로) → 옛 토큰이 아직 앱에 있음 → 새 토큰이 앱에 들어감 | 세 답이 다름: `기존 발급분 재확인` / `문제 남음 · 새 토큰이 학생 앱에 없음` / `재발급한 새 토큰 활성화`. 토큰 원문은 보드·원장·증거 어디에도 없음 | Service · 기기 host · **실제 Mac** | PASS — 새 토큰 전달은 dev token file + 복사본 재시작(시작 화면 입력은 NOT RUN) |
+| R-F | 토큰 재확인이 실행 환경 오류를 지우지 않음(앱·Service 양쪽) | 진단 `token_ok` 뒤에도 보드는 `runtime_failed`·먼저 할 조치 = 초기화. 실행 완료 뒤에만 정상 | Service · 기기 host | PASS — 옛 동작으로 되돌리면 실패함을 확인 |
+
+**실행한 것**
+
+| 무엇 | 어디서 | 결과 |
+|---|---|---|
+| 판정·연결·토큰·일시정지·원인 유지 | `worker/test/classroom-ops-recovery.test.mjs`(9) — `npm run test:classroom-ops`에 포함 | PASS |
+| 회수 항목의 같은 어휘 | `worker/test/classroom-ops-selected-collect.test.mjs`(14) | PASS |
+| 실제 workerd D1 | `worker/test/classroom-ops-d1.test.mjs` — `json_each` + `(run, seat, received_at)` 인덱스 join, 두 읽기의 판정, 비용 | PASS · `rows_read` 7 / 좌석 사건 6 |
+| 실제 host(VS Code만 stub) ↔ 가짜 Service | `extensions/hypeproof-chat/test/classroom-ops-recovery.test.mjs`(6) — `npm test`에 포함 | PASS |
+| 예약 문장·보존 비교 규칙 | `extensions/hypeproof-chat/test/send-queue.smoke.mjs` | PASS |
+| 브라우저 → 실제 Chalk → 실제 Service ← 실제 기기 client | `e2e/classroom/ops.mjs` (`npm run test:classroom-ops`) | PASS |
+| **실제 Mac M3** | `e2e/classroom/mac-recovery.mjs` | **PASS — 6차 실행, source `aa1c05b`(확장 build `18502a2`), R0~R7 전부.** 1~5차는 실패했고 사유를 아래 표에 적었다(계측기 3 · 제품 1 · 관측 한계 1) |
+| 영향 받은 회귀 | worker `npm test` · `test:classroom-ops`(160 PASS) · `test:classroom-ops:d1` · Chalk `npm test` · 확장 `npm test` · 브라우저 e2e `ops`·`roster`·`selection`·`distribution`·`lesson-settings`·`trial-ux` · worker/확장/webview `tsc` | 전부 exit 0 |
+
+**실제 Mac M3 — 어떻게, 무엇이 실제였나.** 강사의 모든 조치는 보이는 Chromium 창의 **Chalk 페이지 클릭**이다(학생 선택 → 조치 → 확인 → 결과를 그 화면에서 읽음). 학생 쪽은 공식 shell `0.1.56` 복사본 + 현재 확장 build + 실제 Agent SDK `0.3.207` binary의 **실제 창**이며 webview 조작은 실제 마우스 입력이다. 실제: shell 복사본 · 확장 · SDK · ops sync loop·명령 실행기 · Chalk · Service router + SQLite · 앱↔Service 실제 HTTP · live preview 서버와 브라우저 탭. **여기서 만든 것:** 계정·수업·토큰(합성) · 모델 공급자(각본; ‘공급자 장애’ = 500 응답) · `/v1/health` 무응답(로컬 HTTP 앞단) · 학생 페이지를 실행기가 치웠다 되돌림 · 좌석 A2(이 프로세스의 실제 기기 client, 선택 안 함)·A3(미연결)·A4(명령 capability 없음) · 재발급 토큰은 dev token file + 복사본 재시작으로 전달. 자기 포트(18841/18842/9441)·자기 user-data·자기 HOME — 설치본, U1/U2/U3 실행기, 사용자의 Studio 데이터는 건드리지 않았다.
+
+**실기에서만 보인 것 (합성 시험은 전부 통과한 상태였다)**
+
+| # | 본 것 | 처리 |
+|---|---|---|
+| ① | 실제 Agent SDK는 공급자 5xx를 **빨리 포기하지 않는다**: 같은 질문으로 11회 재시도, 약 3분 동안 turn이 ‘실행 중’이었다 | 제품 변경 없음. 그동안 후속 관측이 없으므로 판정은 정직하게 `실행만 됨`에 머문다(실행기가 그 구간에서 단언). 실행기의 대기 시간을 고쳤다 |
+| ② | 그 실패를 앱은 `unknown`으로 분류한다(SDK 경로는 HTTP status를 넘겨주지 않음) → 판정은 **문제 남음**까지이고 ‘공통 장애 — 이 PC를 초기화하지 마세요’ 안내와 공통 장애 묶음은 **SDK 경로의 공급자 장애에는 뜨지 않는다** | **남김**(아래). 초기화가 ‘해결’로 표시되지 않는다는 계약은 지켜진다 |
+| ③ | ‘해제 뒤 실행 관측’이 뜨지 않았다. 두 겹이었다: (가) 최신 runtime 슬롯만 보면 `running` 뒤의 `idle`이 덮는다 → **수정**: 마지막 `running` 보고를 자기 슬롯(`last_run`)에 두고 보고한 연결에 묶음, 회귀 추가. (나) 그래도 안 떴다 — 앱은 실행 상태를 sync 때(약 5초)만 표본으로 읽어서, 즉답하는 각본 공급자의 실행은 `running`으로 **보고된 적이 없었다**(공급자 호출 기록은 있음) | (나)는 제품 변경 없음: 거짓 ‘관측됨’을 만들지 않는 쪽의 한계로 계약에 적고, 실행기의 재개 질문이 표본 간격보다 오래 걸리게 했다. 해제에 묶인 1회 turn 보고는 **남김** |
+| ④ | 학생이 붙여 넣은 이미지를 보내면 그 파일이 학생 폴더(`assets/pasted-*.png`)에 저장된다(기존 동작) | 계측기 오류였다: 그 파일은 학생이 만든 것이므로 그 뒤의 ‘변하면 안 되는 것’에 포함 |
+| ⑤ | 해제 직후 Enter는 기기가 아직 정지를 풀기 전이라 (올바르게) 거절된다 | 계측기 오류였다: 기기가 해제를 반영했다고 **보고한 뒤**에 보내도록 — 두 관측이 따로라는 계약 그대로 |
+| ⑥ | 코드 읽기에서 찾음: 강사가 turn을 끊으면 학생이 예약해 둔 문장이 **그 순간 자동 전송**됐다 | **수정**(학생 Stop과 같게 초안으로 되돌림) + 실기 R2에서 ‘중지 뒤 공급자 호출 0’ 확인 |
+
+화면 문구 하나는 실행 뒤에 고쳤다: 업로드 명령의 결과 코드 `receipt_verified`가 번역 없이 보였다(R6 증거에 원문 그대로 남아 있음) → 라벨 추가. Chalk 문구 1건이며 판정·Service·확장은 실행한 source와 같다.
+
+증거: `e2e/test-results/classroom-devhost-u4/recovery/result.json`(source SHA, shell·SDK 버전과 binary 해시, 실행 경로, 시나리오별 화면 문구·후속 관측·기준값 해시, `made_here`·`not_run` 목록)과 화면 6장. 앞선 실행 5회의 실패 기록도 같은 폴더에 사유를 이름으로 보존했다(`recovery-run1-instrument-error` 등). 토큰 원문은 어디에도 없다(실행기가 보드 HTML·두 원장·증거를 검사).
+
+**NOT RUN.** Windows · 학교망·실제 장애 · 실제 복수 기기 · staging/production D1·R2·p95·쿼터 · 실제 모델 · 실제 메일 · Keychain 설치본 · **재발급 토큰을 시작 화면에 입력하는 실제 조작** · **미리보기 서버가 새 포트로 재시작되는 분기의 실제 창**(앱 밖에서 서버를 죽일 수 없다 — host 계층 시험만) · **일시정지를 가로지르는 다중 요청 turn의 실제 창**(Service가 다음 요청을 거절한다는 것은 코드와 Service 시험으로만) · 구 App 실물.
+
+**남긴 것(이번 범위 밖).** 학생별 일시정지 · 승인된 turn의 후속 요청 유예 · SDK 경로 실패의 원인 분류(② — 공급자 장애를 `unknown`이 아닌 공통 원인으로) · 미리보기 상태를 보드에 보고하는 신호 · AT-41의 나머지 · U1b.
+
+**다시 여는 법.** 확장 소스를 바꿨으면 `npm --prefix extensions/hypeproof-chat run build` → `HPS_DEVHOST_SOURCE="<공식 0.1.56 .app>" HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-u4 node e2e/classroom/mac-devhost.mjs prepare` → 레포 루트에서 `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-u4 node --experimental-strip-types --experimental-sqlite --no-warnings e2e/classroom/mac-recovery.mjs`. 끝난 뒤에도 강사 화면과 학생 앱이 열려 있다(합성 수업·토큰 12시간). 접속 정보·PID·포트·종료 방법은 `e2e/test-results/classroom-devhost-u4/recovery-session.json`(토큰은 파일 경로만).
 
 <a id="windows-field-cuesheet-20260921"></a>
 
