@@ -2182,6 +2182,15 @@
           "path": "e2e/classroom/mac-demo.mjs"
         },
         {
+          "path": "e2e/classroom/mac-demo-board.mjs"
+        },
+        {
+          "path": "worker/migrations/0022-classroom-collect-scope.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-selected-collect.test.mjs"
+        },
+        {
           "path": "e2e/classroom/delivery-trial.mjs"
         },
         {

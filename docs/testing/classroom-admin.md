@@ -98,6 +98,8 @@ npm --prefix chalk run typecheck
 |---|---|---|---|---|
 | AT-35 | ADM-05/10 | 복구 capability만 있는 강사의 질문 전송, coach만 있는 강사의 reset, 정답·코드·파일 경로를 담은 질문, 기술 장애 좌석에 질문 없이 바로 복구 | capability 상호 비대체, 코칭 조치가 파일·대화·입력 불변, 본문 비밀 마스킹, 복구가 코칭 단계에 막히지 않음, 표시됨≠읽음 | Service+App+browser |
 | AT-36 | ADM-02/04/07 | actor·source_state 미지정/위조, simulated 근거, 변경 전후 digest, 강사 confirmed/disputed, 로그 도착만 있는 좌석 | 미지정은 unverified, simulated가 real로 승격되지 않음, 강사 확인이 발송 승인·학습 완료로 읽히지 않음, 새 저장소 0 | Service+browser |
+| AT-37 | ADM-02/10 · RM-1 | 개별·전체·도움 필요·연결됨·미연결 선택, 선택 없음, 명단 revision 변경, 미리 확인 뒤 선택 변경, `collect` 전용 강사 | 실행 전 대상 수·연결 가능/불가·제외 사유 표시, 빈 선택은 실행 불가, revision이 바뀌면 선택 비움, 확인은 본 대상에만 유효, 권한별로 허용된 조치만 노출 | UI e2e + 실제 Mac |
+| AT-38 | ADM-03/13/14 · RM-2 | 선택 A1·A3/비선택 A2, 미동의·철회·오프라인 선택, 빈 대상·오타 필드·중복·회차 밖 좌석, 더블클릭·응답 유실·같은 key 다른 요청, 명단 변경, 종료된 회차의 새 요청 vs 이미 요청된 업로드, 구버전 전체 회수, ops OFF, 범위 조회 장애·손상, 읽기–쓰기 사이의 좌석 교체·종료·flag·철회 | 비선택 학생의 명령·업로드·객체·평가 0, 전체로 확장 0, 같은 요청은 같은 결과·다른 요청은 409, 범위를 못 읽으면 503(평가 입력 0), 경합은 0건 기록으로 거부, 회수는 평가·발송을 시작하지 않음 | Service + UI e2e + 실제 Mac |
 | AT-37 | ADM-09/13 | 근거 0건 학생·조용한 학생·느린 학생·프롬프트만 있는 학생 | 0점/미달/빨간색 0건, `아직 충분히 보지 못함` 표기, 활동량→능력 추론 0 | core+browser |
 | AT-38 | ADM-06/13 | 단일 수업 입력, 누적 회차 입력, 점수 필드가 있는 legacy 입력 | 관찰→근거→판단 변화→다음 실험 구성, 단일 수업에서 성장 패턴 서술 0, 점수·순위·의존도 전면 노출 0, legacy 7축 산출 불변 | core+runner fixtures |
 | AT-39 | ADM-05 | 학생 작업 중 질문/확인 지점 수신, 같은 근거 재입력 요구 | 모달·평가 팝업 0, 작업 문맥 유지, 닫기/나중에 보기 가능, 재입력 강제 0 | App 실기 |
@@ -463,7 +465,7 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 ### 원격관리 다섯 흐름 — 현재 구현 매핑 · 2026-09-21 (HEAD `d9d31bf` 기준, 읽기 전용 조사)
 
-[인수 계약 RM-1~5](../requirements/classroom-admin.md#remote-management-acceptance-20260921)와 현재 코드의 대조다. ‘직접 실행’은 오늘 실제 Mac 창(`mac-gui.mjs` 14/14, source `4278b8d`) 또는 오전 Codex의 수동 실행에서 본 것만이다. 브라우저 e2e·Service 시험은 ‘코드+합성 시험’으로 적는다. **오늘까지의 결과는 관제·복구·단일 회차 회수이며 원격관리 전체 완료가 아니다.**
+[인수 계약 RM-1~5](../requirements/classroom-admin.md#remote-management-acceptance-20260921)와 현재 코드의 대조다. ‘직접 실행’은 오늘 실제 Mac 창(`mac-gui.mjs` 14/14, source `4278b8d`) 또는 오전 Codex의 수동 실행에서 본 것만이다. 브라우저 e2e·Service 시험은 ‘코드+합성 시험’으로 적는다. **오늘까지의 결과는 관제·복구·단일 회차 회수이며 원격관리 전체 완료가 아니다.** 이 문서와 E5 계획의 과거 문장 ‘이번 인수 = 관제·보존형 복구·단일 회차 보고서’는 **당시 #1119~#1169 스택의 범위**를 가리키며, 현재 사용자 목표인 원격관리 RM-1~5의 인수와 같은 말이 아니다.
 
 | 흐름 | 있는 경로 (코드 · API · UI) | 증거 수준 | 없는 경로 |
 |---|---|---|---|
@@ -471,11 +473,29 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 | RM-2 회수 | 수업 기록: `POST …/report-batches`(명단 전체 스냅샷, 동의·철회·미연결 사유 유지) → Service 발행 `retry_evidence_upload` → App freezer → PUT/seal → coverage. Chalk `수업 마무리`. 학생 프롬프트·결과물: 학생이 고른 공유 `POST /v1/classroom/shares`(ADM-03/05/06) → Chalk 공유 목록 | 수업 기록: **직접 실행**(실제 spool 16사건 `complete`, 미동의 좌석 제외). 공유: 코드+기존 시험, 오늘 미실행 | **대상 선택 회수**(API에 `targets` 없음 — 항상 명단 전체), 학생 프롬프트만/승인 결과물만 고르는 회수 종류, 강사가 요청하는 공유(지금은 학생 주도뿐) |
 | RM-3 배포 | 없음. 인접 경로: `send_question`·`mark_checkpoint`(300/200자 평문, 기기 표시=성공, 읽음 아님), 회차 구성의 강의 version pin(`PUT …/ops` — 회차 전체, 학생 토큰의 lesson ref와 별개), 회차 일시정지의 기기별 `control_applied`(applied/pending/unknown) | 인접 경로: 코드+합성 시험만. 실제 창에서 `send_question` 미실행 | **수업 프롬프트·공지/자료·수업 설정의 대상 배포 전부**: 버전 있는 배포 객체, 좌석별 원하는 revision, 기기의 적용 보고, 비선택 불변 증거, 오프라인 후 재접속 적용 |
 | RM-4 복구 | 허용 목록 5종 `retry_diagnostics`·`refresh_connection`·`restart_preview`·`cancel_current_run`·`reset_runtime`(1명씩) + 회차 `pause`. Chalk 상세의 ‘기술 복구’가 확인된 장애일 때 1순위 조치를 Primary로 제시 | `cancel_current_run`·`reset_runtime`: **직접 실행**(API 경유, 파일 해시·대화 보존). `retry_diagnostics`: 오전 수동(구 빌드). `refresh_connection`·`restart_preview`·pause: 코드+합성 | 원인→조치 대응표의 명문화와 시험(토큰 만료/거부 → 재발급 안내는 조치가 아니라 문구뿐), 업로드 실패 복구의 강사 트리거(Service 발행만), 복구를 Chalk UI에서 누른 실제 창 실행 |
-| RM-5 대상별 결과 | `ops_command_targets` 상태 12종 + result_code, `GET …/commands/:id`, Chalk `showCommand`(성공/실패/확인 불가/전달 안 됨/진행 중 + 좌석별 문구), 좌석 `last_command`. 회수는 batch item 상태, 일시정지는 `control_applied` | 성공 경로: **직접 실행**(`run_stopped`·`reset_ok`·회수 `verified`). 실패·만료·미확인·미연결·두 번째 창·재발급 뒤 미전달: 코드+합성(AT-20/21/23) | 세 흐름 공통의 한 화면 결과(지금은 명령·회수·일시정지가 각각 다른 자리), 실패 대상만 다시 선택, 배포의 결과 단계 |
+| RM-5 대상별 결과 (정정: `leased`는 서버가 기기에 배정한 상태이지 기기 수신의 증거가 아니다 — 기기 receipt(`accepted` 이후) 전에는 ‘수신 확인 전’) | `ops_command_targets` 상태 12종 + result_code, `GET …/commands/:id`, Chalk `showCommand`(성공/실패/확인 불가/전달 안 됨/진행 중 + 좌석별 문구), 좌석 `last_command`. 회수는 batch item 상태, 일시정지는 `control_applied` | 성공 경로: **직접 실행**(`run_stopped`·`reset_ok`·회수 `verified`). 실패·만료·미확인·미연결·두 번째 창·재발급 뒤 미전달: 코드+합성(AT-20/21/23) | 세 흐름 공통의 한 화면 결과(지금은 명령·회수·일시정지가 각각 다른 자리), 실패 대상만 다시 선택, 배포의 결과 단계 |
 
-**경계 조건 현황.** 중복 요청(idempotency key·payload 충돌)·만료(TTL 120초: 시작 전 `expired`, 시작 후 영수증 없음 `outcome_unknown`)·재접속/재발급(이전 epoch 미전달)·부분 실패(대상별 원장)·수업 경계(회차·좌석 revision 결속)는 **명령과 회수에 구현+합성 시험**이 있다. 오프라인은 **접수 시점에 `not_connected`로 확정**된다 — 복구 명령에는 맞지만 배포에는 맞지 않는다(재접속해도 도착하지 않음). 배포에는 위 어느 것도 없다.
+**경계 조건 현황.** (정정: ‘종료’는 둘이다 — 종료 전에 이미 요청된 업로드의 유예(`upload_until`)는 계속 받고, 종료된 회차에 대한 **새** 회수 요청은 U1부터 `run_ended`로 거부한다. 기존 전체 ‘수업 마무리’의 종료 후 동작은 바꾸지 않았다.) 중복 요청(idempotency key·payload 충돌)·만료(TTL 120초: 시작 전 `expired`, 시작 후 영수증 없음 `outcome_unknown`)·재접속/재발급(이전 epoch 미전달)·부분 실패(대상별 원장)·수업 경계(회차·좌석 revision 결속)는 **명령과 회수에 구현+합성 시험**이 있다. 오프라인은 **접수 시점에 `not_connected`로 확정**된다 — 복구 명령에는 맞지만 배포에는 맞지 않는다(재접속해도 도착하지 않음). 배포에는 위 어느 것도 없다.
 
-**추가할 인수 시험(전부 NOT RUN · 계획).** AT-37 선택 모델(개별·그룹·전체, 실행 전 요약, 명단 변경 시 재확인) · AT-38 대상 회수(선택 2석만 요청·저장, 비선택 0, 미동의 선택은 사유와 함께 남음, 같은 요청 재실행 0) · AT-39 대상 배포(선택 좌석만 revision 적용 보고, 비선택 revision 불변, 오프라인 → 재접속 적용, 회차 종료 뒤 미적용은 `만료`, 같은 revision 재배포 0, 기기 일부 실패는 대상별 표시) · AT-40 원인별 복구 대응표(원인 5종 × 1순위 조치, 실제 창) · AT-41 세 흐름의 결과가 같은 단계 어휘로 한 화면에 남음.
+**추가한 인수 시험.** AT-37 선택 모델과 AT-38 대상 회수는 U1에서 구현·실행했다([실행 기록](#remote-management-u1-run-20260921)). **아직 NOT RUN · 계획:** AT-39 대상 배포(선택 좌석만 revision 적용 보고, 비선택 revision 불변, 오프라인 → 재접속 적용, 회차 종료 뒤 미적용은 `만료`, 같은 revision 재배포 0, 기기 일부 실패는 대상별 표시) · AT-40 원인별 복구 대응표(원인 5종 × 1순위 조치, 실제 창) · AT-41 세 흐름의 결과가 같은 단계 어휘로 한 화면에 남음.
+
+<a id="remote-management-u1-run-20260921"></a>
+
+### U1 — 공통 선택 + 선택 회수: 실행 기록 · 2026-09-21
+
+[계약](../requirements/classroom-admin.md#remote-management-u1-20260921). 배포·PC 제어·평가 확장은 이 단계에 없다.
+
+**먼저 있던 재현 3건(Codex 독립 실행, 공통 git-dir `remote-classroom-evidence/management-20260921/`).** ① `selected-collection-check`: `targets:['A1']` dry-run이 201로 A1·A2 모두 반환 — API가 `targets`를 몰랐다. ② `scope-read-failure-check`: 구현 중 `batchScope`가 조회 예외를 `finish`로 읽어 collect_only 배치의 seal이 평가 입력 1건을 만들었다. ③ `selected-roster-race-check`: revision 검사 뒤 좌석이 a→b로 바뀌면 a를 고른 요청이 b에게 회수 명령을 보냈다. 수정 뒤: ① A2는 `not_selected` ② seal `503 scope_unavailable`·평가 입력 0 ③ `409 revision_conflict`·명령 0.
+
+| 층 | 무엇을 | 결과 |
+|---|---|---|
+| Service (합성 6석, SQLite + in-memory R2) `classroom-ops-selected-collect.test.mjs` | 요청 정규화 대조군(양성 2·거부 12·해시 5) · 재현 ① · **선택 A1·A3 / 비선택 A2**(명령 target 2, A2 sync 명령 0, A2 PUT `not_requested`, R2 객체는 a·c만, 평가 입력 0, 보고서·발송 6개 경로 `409 collect_only_batch`, 평가 호출 0) · 선택한 미동의/철회/오프라인은 사유와 함께 남음 · 빈 대상/오타 필드/중복/회차 밖 좌석/`finish`+targets 거부와 DB 불변 · 더블클릭(경합)·응답 유실·같은 key 다른 대상/고지/dry-run/전체 → 1배치 또는 409 · 구버전 전체 회수 불변(평가 입력 생성)과 0022 이전 배치 재생 · `collect`만 가진 강사 허용/`command`만 가진 강사 거부 · 명단 변경 409·종료 뒤 새 요청 `run_ended`·이미 요청된 업로드는 유예 안에 수신 · **fail-closed**(조회 예외 + 손상 6종 × seal·조회·advance·jobs·reports·recipients·재생 = 503, 복구 뒤 검증·평가 입력 0, 진짜 이전 배치는 평가 입력 1) · **커밋 경계 경합 7종**(좌석 교체 revision 증가/미증가, flag 끔, 강사 종료, 시간 종료, 동의 철회, tombstone: 양성 대조 뒤 주입 → 거부, 5개 테이블 행 수 불변, 새 학생 target 0) · ops OFF | 12 PASS. 전체 worker suite·review suite·D1 리허설(0011→0022, 재적용, 반쪽 migration 음성 대조) PASS |
+| UI → Service → 실제 host (브라우저 e2e, 30석) `ops-roster.mjs` | 전체 30/연결됨 11/미연결 19/도움 필요/해제(해제 시 회수 버튼 비활성) → S01·S02·S12 수동 선택 → 미리 확인(1명 요청·제외 2명 사유·비선택 27명 무접촉, 명령 0) → 선택 변경 시 확인 철회 → 더블클릭 요청 = 배치 1 → **실제 ClassroomOpsHost + 실제 SessionSpool**이 S01 기록 업로드 → ‘서버 검증됨 · 순번 연속’ · 결과 확정 문구 · 객체는 student-01만 · 평가/보고서 UI 미개방 · ‘도착하지 않은 대상만 다시 선택’ = S12만 · `collect` 전용 강사 화면(회수 버튼만) | 7 PASS (CI `classroom / browser`에 포함) |
+| **실제 Mac** `mac-demo.mjs`(HPS_DEMO_PREPARE_A1=1) + `mac-demo-board.mjs` | 실제 Studio 창(A1): 1회용 코드 연결 → 실제 1턴 → 실제 창에서 동의. **실제 Chalk `/manage`(보이는 브라우저 창)**: A1 선택 → 미리 확인 → 요청 → `A1 — 서버 검증됨 · 기록 순번 연속 · 시작과 끝 확인됨`. 합성 좌석 A2·A3은 **연결+동의 상태**(선택만이 제외 이유)에서 `not_selected`, 회수 명령 target은 A1 하나(`succeeded · receipt_verified`), R2 객체 2개 모두 A1, 평가 입력 0·평가 호출 0·메일 0 | PASS — `result.json`·화면 2장은 devhost `board/`. source `c15e77a` + 실행기 수정(같은 커밋 묶음), shell 0.1.56 복사본, SDK 0.3.207, 확장 소스는 `4278b8d` 이후 불변 |
+
+**실제/합성 경계.** 실제: Studio shell 복사본·확장·SDK·spool·freezer·업로드, Chalk UI, Service 라우터+SQLite. 합성: 계정·강의·모델 응답·좌석 A2/A3(그리고 e2e의 S02~S30)·R2(in-memory). 여러 좌석 동시성은 합성 좌석으로만 봤고 실제 기기는 1대다.
+
+**남은 한계.** 실제 기기 2대 이상에서의 선택/비선택 대조, Windows, 학교망, staging D1에서의 0022 적용과 조건부 batch(D1의 트랜잭션 의미는 로컬 workerd D1 리허설까지만), 재시작 전 세션을 합친 회수, `coverage_reason`의 화면 표시는 NOT RUN/미구현. 학생 프롬프트·승인 결과물의 대상 회수, 배포(U2~), 세 흐름 공통 결과 화면은 이 단계 범위 밖이다.
 
 <a id="windows-field-cuesheet-20260921"></a>
 

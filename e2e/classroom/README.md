@@ -66,3 +66,7 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
 - Scripted in both: model answers, the report evaluator transport, mail. `mac-demo.mjs` also scripts seats A2/A3.
   Neither is evidence about a real model, real mail, Windows, a school network, staging/production D1·R2 or a release install.
 - `mac-demo.mjs` creates a new synthetic class on every start; its token and class expire after about an hour.
+- Selected collection (#751 U1) on this Mac: start `mac-demo.mjs` with `HPS_DEMO_PREPARE_A1=1` (the real window connects, takes one
+  real turn and records consent by itself), then `node e2e/classroom/mac-demo-board.mjs` — a visible browser signs in to the real
+  Chalk board, selects A1, previews, collects, and checks from the Service's rows that the scripted seats A2/A3 (connected and
+  consenting) were left untouched. `HPS_BOARD_HEADLESS=1` runs the same without keeping a window open.
