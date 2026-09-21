@@ -76,11 +76,14 @@ globalThis.fetch = async (input, init) => {
 };
 // real HTTP between the app and the Service. The faults made here: after the Service STORED a help POST its answer is dropped,
 // and (at the same time) the learner's share list cannot be read — so the device cannot tell whether the request exists.
-const wire = []; let dropNextHelpPost = false, failShareReads = false;
+const wire = []; let dropNextHelpPost = false, failShareReads = false, holdNext = null;
+/** The next matching request is processed by the Service at once, but its answer is held until released (≤ 6 s, under the app's 8 s timeout). */
+const holdAnswer = (method, prefix) => { let release, entered; const e = new Promise((r) => (entered = r)); const gate = new Promise((r) => (release = r)); holdNext = { method, prefix, entered, gate }; return { entered: e, release: () => release() }; };
 const server = createServer(async (req, res) => { try { const parts = []; for await (const p of req) parts.push(p); const body = Buffer.concat(parts), url = req.url.split('?')[0];
   if (failShareReads && req.method === 'GET' && url === '/v1/classroom/shares') { wire.push({ at: Date.now(), method: 'GET', path: req.url, status: 503, injected: 'list read unavailable' }); res.writeHead(503); res.end(); return; }
   const r = await local.app.fetch(new Request('https://service.test' + req.url, { method: req.method, headers: req.headers, ...(body.length ? { body } : {}) }), local.env, { waitUntil() {}, passThroughOnException() {} });
   if (url.startsWith('/v1/classroom/shares') || url === '/v1/classroom/help-recipient') wire.push({ at: Date.now(), method: req.method, path: req.url, status: r.status });
+  if (holdNext && req.method === holdNext.method && url.startsWith(holdNext.prefix)) { const h = holdNext; holdNext = null; h.entered(); const t0 = Date.now(); await Promise.race([h.gate, new Promise((r) => setTimeout(r, 6000))]); wire.push({ at: Date.now(), injected: 'answer held after the Service processed it', path: req.url, held_ms: Date.now() - t0, status: r.status }); }
   if (dropNextHelpPost && req.method === 'POST' && url === '/v1/classroom/shares') { dropNextHelpPost = false; wire.push({ at: Date.now(), injected: 'answer dropped after the Service stored it', status: r.status }); req.socket.destroy(); return; }
   res.writeHead(r.status, Object.fromEntries(r.headers)); if (r.body) for await (const chunk of r.body) res.write(chunk); res.end(); } catch { if (!res.headersSent) res.writeHead(500); res.end(); } });
 server.listen(servicePort, '127.0.0.1'); await once(server, 'listening'); const origin = 'http://127.0.0.1:' + server.address().port;
@@ -133,8 +136,8 @@ try {
   assert.deepEqual(baseline.files, { changed: [], added: [] }); step('R0 connected real window; one Agent SDK turn; an unsent composer draft', { provider_calls: providerCalls.length });
 
   // A2's own help request (the second learner; made through the Service learner route, as its device would). It must stay as it is.
-  const a2Assign = (await local.request('/v1/classroom/help-recipient', 'GET', undefined, tokenA2)).json; assert.equal(a2Assign.recipient_id, 'teacher-a');
-  const a2 = await local.request('/v1/classroom/shares', 'POST', { id: crypto.randomUUID(), recipient_id: a2Assign.recipient_id, kind: 'help', consent: true, duration_minutes: 120, class_run_id: a2Assign.class_run_id, grant_id: a2Assign.grant_id, content: { question: '[합성] A2의 질문 — 바뀌면 안 됨' } }, tokenA2); assert.equal(a2.status, 201, a2.raw);
+  const a2Id = crypto.randomUUID(), a2Assign = (await local.request(`/v1/classroom/help-recipient?request_id=${a2Id}&duration_minutes=120`, 'GET', undefined, tokenA2)).json; assert.equal(a2Assign.recipient_id, 'teacher-a');
+  const a2 = await local.request('/v1/classroom/shares', 'POST', { id: a2Id, recipient_id: a2Assign.recipient_id, kind: 'help', consent: true, duration_minutes: 120, class_run_id: a2Assign.class_run_id, grant_id: a2Assign.grant_id, content: { question: '[합성] A2의 질문 — 바뀌면 안 됨' }, consent_envelope: { expires_at: a2Assign.consent.expires_at, proof: a2Assign.consent.proof } }, tokenA2); assert.equal(a2.status, 201, a2.raw);
   const a2Before = sharesOf(learners[1]);
 
   // ── H1 help entry: closed by default, opened by the learner; the recipient comes from the Service, not from typing ──
@@ -150,17 +153,21 @@ try {
   await setValue(chat, '[data-help-turn]', turnValue, 'change'); await setValue(chat, '[data-help-duration]', '60', 'change'); await sleep(700);
   assert.equal(sharesOf(learners[0]).length, 0, 'nothing is sent while writing');
   await press(chat, '[data-help-preview]', 'preview'); const envId = await wait(() => q(chat, '[data-help-envelope]', "e.getAttribute('data-help-envelope')"), 'the consent preview');
-  const preview = { recipient: await q(chat, '[data-help-preview-recipient]'), question: await q(chat, '[data-help-preview-field="question"]'), prompt: await q(chat, '[data-help-preview-field="prompt"]'), response: await q(chat, '[data-help-preview-field="response"]'), expiry: await q(chat, '[data-help-preview-expiry]'), consent_checked: await q(chat, '[data-help-consent]', 'e.checked'), send_disabled: await q(chat, '[data-help-send]', 'e.disabled'), text: (await q(chat, '[data-help-envelope]')).replace(/\s+/g, ' ') };
+  const preview = { end: Number(await q(chat, '[data-help-preview-expiry]', "e.getAttribute('data-help-preview-end')")), recipient: await q(chat, '[data-help-preview-recipient]'), question: await q(chat, '[data-help-preview-field="question"]'), prompt: await q(chat, '[data-help-preview-field="prompt"]'), response: await q(chat, '[data-help-preview-field="response"]'), expiry: await q(chat, '[data-help-preview-expiry]'), consent_checked: await q(chat, '[data-help-consent]', 'e.checked'), send_disabled: await q(chat, '[data-help-send]', 'e.disabled'), text: (await q(chat, '[data-help-envelope]')).replace(/\s+/g, ' ') };
   assert.deepEqual([preview.recipient, preview.question, preview.consent_checked, preview.send_disabled], ['teacher-a', QUESTION, false, true]); assert.match(preview.prompt, /Q-HELP/); assert.match(preview.response, /로컬 시험 응답/);
   assert.match(preview.text, /공유 철회/); assert.match(preview.expiry, /\d{1,2}:\d{2}.*까지 볼 수 있습니다/); assert.equal(sharesOf(learners[0]).length, 0, 'the preview sent nothing');
-  await shot(win, 'help-02-consent-preview.png'); step('H2 consent preview: exact content, recipient, expiry and withdrawal shown; consent unticked; nothing stored', { envelope: envId });
+  assert.ok(preview.expiry.includes(new Date(preview.end * 1000).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })), 'the time shown is the signed end: ' + preview.expiry);
+  await shot(win, 'help-02-consent-preview.png'); step('H2 consent preview: exact content, recipient, expiry and withdrawal shown; consent unticked; nothing stored', { envelope: envId, previewed_end: preview.end });
+  // F2 on the real window: the learner reads the preview for a while before agreeing. The end must not move with the wait.
+  const previewedAt = Date.now(); await sleep(65_000);
 
   // ── H3 send ──
   await press(chat, '[data-help-consent]', 'consent'); assert.equal(await q(chat, '[data-help-send]', 'e.disabled'), false); await press(chat, '[data-help-send]', 'send');
   await noteIs(chat, /강사에게 보냈습니다/); const stored = sharesOf(learners[0]); assert.equal(stored.length, 1); const S1 = stored[0], c1 = JSON.parse(S1.content_json);
+  assert.equal(S1.expires_at, preview.end, `stored until ${S1.expires_at}, previewed ${preview.end} (sent ${Math.round((Date.now() - previewedAt) / 1000)} s after the preview)`);
   assert.deepEqual([S1.id, S1.recipient_id, S1.session_id, S1.kind, S1.status], [envId, 'teacher-a', local.run, 'help', 'received']); assert.equal(c1.question, QUESTION); assert.match(c1.prompt, /Q-HELP/); assert.match(c1.response, /로컬 시험 응답/);
   await wait(() => q(chat, `[data-help-share="${S1.id}"]`, "e.getAttribute('data-help-status')"), 'the sent request is listed');
-  assert.equal(await draftOf(chat), baseline.draft, 'the composer draft is untouched'); step('H3 sent after explicit consent; the Service stored exactly the previewed content for teacher-a in this class', { share: S1.id });
+  assert.equal(await draftOf(chat), baseline.draft, 'the composer draft is untouched'); step('H3 sent after explicit consent, 65 s after the preview; the Service stored exactly the previewed content for teacher-a in this class, until exactly the previewed end', { share: S1.id, stored_expires_at: S1.expires_at, previewed_end: preview.end, sent_after_preview_s: Math.round((Date.now() - previewedAt) / 1000) });
 
   // ── H4 instructor: the existing /manage help queue shows it; open, answer; A2 untouched; the selection stays on A1 ──
   await page.locator('#refresh').click(); const helpItem = page.locator('#ops-help-list li').filter({ hasText: learners[0] }); await helpItem.waitFor({ timeout: 30000 });
@@ -183,7 +190,20 @@ try {
   const fb = { feedback: await q(chat, `[data-help-share="${S1.id}"] [data-help-feedback-text]`), next: await q(chat, `[data-help-share="${S1.id}"] [data-help-next]`), label: await q(chat, `[data-help-share="${S1.id}"] .hp-help-status`), outside: await outsideHelp(chat, 'HELP-FB1') };
   assert.deepEqual([fb.feedback, fb.next, fb.label, fb.outside], [FEEDBACK, NEXT, '강사 답변 도착 · 내 확인 전', 0]);
   assert.equal(sharesOf(learners[0])[0].status, 'answered', 'still not resolved'); assert.equal(await draftOf(chat), baseline.draft); assert.equal(await chatAnswers(chat), baseline.answers, 'nothing entered the conversation'); assert.equal(providerCalls.length, baseline.provider_calls, 'the feedback went to no model'); assert.deepEqual(workFiles(), baseline.files);
-  await shot(win, 'help-05-learner-feedback.png'); step('H5 feedback shown in the help panel only (not chat, not model); status answered, not resolved; draft/files/conversation intact');
+  assert.equal(await q(chat, '[data-help-note]'), null, 'the "sent" note is gone once the answer is there');
+  // On screen, not only in the DOM: the learner scrolls the coach rail with the mouse wheel until the answer and 해결됐어요 are
+  // both inside the webview's viewport and on top at their centre. No scrollIntoView here.
+  const card = `[data-help-share="${S1.id}"]`, seen = (sel) => q(chat, sel, "(()=>{const b=e.getBoundingClientRect(),x=b.left+b.width/2,y=b.top+b.height/2,h=document.elementFromPoint(x,y);return {top:Math.round(b.top),bottom:Math.round(b.bottom),vh:innerHeight,in_view:b.top>=0&&b.bottom<=innerHeight&&b.left>=0&&b.right<=innerWidth,topmost:!!h&&(h===e||e.contains(h))}})()");
+  const onScreen = async () => { const f = await seen(`${card} [data-help-feedback-text]`), c = await seen(`${card} [data-help-confirm]`); return { feedback: f, confirm: c, both: f.in_view && f.topmost && c.in_view && c.topmost }; };
+  const beforeScroll = await onScreen(), wheel = []; let visible = beforeScroll;
+  for (let i = 0; i < 40 && !visible.both; i++) {
+    const dy = visible.confirm.bottom > visible.confirm.vh || visible.feedback.bottom > visible.feedback.vh ? 120 : -120; wheel.push(dy);
+    const at = await q(chat, '.hp-help', '(()=>{const b=e.getBoundingClientRect();return {x:Math.round(b.left+b.width/2),y:Math.round(Math.min(innerHeight-20,Math.max(20,b.top+40)))}})()');
+    await chat.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: at.x, y: at.y, deltaX: 0, deltaY: dy }); await sleep(250); visible = await onScreen();
+  }
+  assert.ok(visible.both, 'the answer and 해결됐어요 could not both be brought on screen by scrolling: ' + JSON.stringify(visible));
+  await shot(win, 'help-05-learner-feedback.png'); fb.on_screen = { before_scroll: beforeScroll, wheel_steps: wheel, after_scroll: visible };
+  step('H5 feedback shown in the help panel only (not chat, not model); status answered, not resolved; the sent note is gone; answer + 해결됐어요 on screen after the learner scrolls (captured); draft/files/conversation intact', { wheel_steps: wheel.length, before: { feedback: beforeScroll.feedback.in_view, confirm: beforeScroll.confirm.in_view } });
 
   // ── H6 the learner confirms ──
   await press(chat, `[data-help-share="${S1.id}"] [data-help-confirm]`, 'resolved'); await noteIs(chat, /해결됐다고 강사에게 알렸습니다/);
@@ -209,6 +229,17 @@ try {
 
   // ── H9 learner replacement: an unsent help draft of learner 1; seat A1 goes to learner 3; nothing of learner 1 is shown or sent ──
   const OLD = 'OLD-LEARNER-DRAFT 이전 학생의 보내지 않은 질문'; await setValue(chat, '[data-help-question]', OLD); await sleep(1200);
+  // F1 on the real window: learner 1 withdraws their resolved request; the Service does it at once but its answer is held while
+  // the class connection of this window ends (shared-PC handover: 수업 연결 끊기). When the answer then arrives, the window —
+  // no longer learner 1's — must show neither learner 1's note ("공유를 철회했습니다") nor any of learner 1's requests or text.
+  const held = holdAnswer('DELETE', '/v1/classroom/shares/'); await press(chat, `[data-help-share="${S1.id}"] [data-help-withdraw]`, 'withdraw during handover'); await held.entered;
+  await palette(win, '수업 연결 끊기'); await wait(async () => (await toasts(win)).some((t) => t.includes('수업 연결을 끊었습니다')), 'disconnected'); held.release();
+  await wait(async () => (await q(chat, '[data-help-unavailable]', "e.getAttribute('data-help-unavailable')")) === 'not_paired', 'the window is no longer learner 1\'s', 30000);
+  const watch = []; for (let i = 0; i < 20; i++) { const t = await helpText(chat); watch.push({ note: await q(chat, '[data-help-note]'), cards: await chat.evaluate("document.querySelectorAll('[data-help-share]').length"), leaked: ['HELP-Q1', 'HELP-FB1', 'OLD-LEARNER-DRAFT', '공유를 철회했습니다'].filter((x) => t.includes(x)) }); await sleep(500); }
+  assert.ok(watch.every((w) => w.note === null && w.cards === 0 && w.leaked.length === 0), 'after the handover the window showed learner 1\'s data: ' + JSON.stringify(watch.find((w) => w.note || w.cards || w.leaked.length)));
+  assert.equal(db('SELECT count(*) n FROM classroom_shares WHERE id=?', S1.id)[0].n, 0, 'learner 1\'s withdrawal itself was carried out');
+  await shot(win, 'help-08a-handover-late-answer.png'); results.handover_late_answer = { held: wire.filter((w) => w.injected?.startsWith('answer held')), samples: watch.length, shown: watch.at(-1) };
+  step('H9a handover while learner 1\'s withdrawal answer was held: the late answer showed nothing of learner 1 (no note, no card, no text) for 10 s; the withdrawal itself happened on the Service', { samples: watch.length });
   const replaced = await local.request(local.base, 'PUT', { expected_roster_revision: rosterRevision, seats: [{ seat_id: 'A1', student_id: learners[2] }, seats[1]], flags: { ops_observe: true } }, teacherToken); assert.equal(replaced.status, 200, replaced.raw); rosterRevision++;
   await wait(async () => (await q(chat, '[data-help-unavailable]', "e.getAttribute('data-help-unavailable')")) === 'not_paired', 'the old learner\'s window lost its class connection', 90000);
   assert.equal(await q(chat, '[data-help-question]', '1'), null, 'the draft is not shown once the class connection is gone'); assert.equal((await helpText(chat)).includes('OLD-LEARNER-DRAFT'), false);
