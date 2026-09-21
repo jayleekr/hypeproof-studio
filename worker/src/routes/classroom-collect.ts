@@ -177,7 +177,7 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   const digest = await sha256Hex(JSON.stringify([m.value.files.map((f) => [f.name, f.bytes, f.sha256]).sort(), m.value.binding ?? null]));
   if (snap.state === 'sealed') return snap.manifest_digest === digest ? c.json({ receipt_id: snap.receipt_id, manifest_digest: digest, integrity: snap.integrity, coverage: snap.coverage, replay: true }) : c.json({ error: 'this revision is sealed with a different manifest', reason: 'revision_sealed' }, 409);
   // Re-hash what the Service actually holds. The device's claim is only what it is compared against.
-  let coverage = 'sequence_unavailable', problem = '', malformed = 0, metaText = '', sessionId = '';
+  let coverage = 'sequence_unavailable', coverageReason = '', problem = '', malformed = 0, metaText = '', sessionId = '';
   for (const f of m.value.files) {
     const obj = await c.env.HPS_TRACES.get(snapshotKey(g.cohort_id, g.class_run_id, g.student_id, item.batch_id, revision, f.name));
     if (!obj) { problem = 'file_missing'; break; }
@@ -189,7 +189,7 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
       if (cov.foreign) { problem = 'foreign_events'; break; }
       // The declared final event must be the one the Service sees last; a different tail is another extent.
       if (range && (cov.range_problem === 'line_count_mismatch' || cov.range_problem === 'declared_extent_mismatch' || range.final_line_sha256 !== (await finalLineSha(text)))) { problem = 'range_mismatch'; break; }
-      coverage = cov.coverage; malformed = cov.malformed;
+      coverage = cov.coverage; coverageReason = cov.range_problem; malformed = cov.malformed;
     }
   }
   // Identity lives in the spool metadata. A record of another learner, cohort, profile, class run or activity —
@@ -215,9 +215,9 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
     db.prepare("UPDATE classroom_collect_items SET state='verified',reason='',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=?").bind(digest, coverage, receipt, inputRevision, now, item.batch_id, item.seat_id),
     db.prepare('INSERT INTO classroom_snapshot_bindings(batch_id,student_id,revision,class_run_id,cohort_id,profile_id,seat_id,grant_id,consent_id,spool_session_id,attribution,activity_json,range_json,malformed_lines,created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING').bind(item.batch_id, g.student_id, revision, g.class_run_id, g.cohort_id, g.profile_id, g.seat_id, g.id, item.consent_id ?? '', sessionId, m.value.binding ? 'bound' : 'metadata_run', JSON.stringify(m.value.binding?.activity ?? null), JSON.stringify(m.value.binding?.range ?? null), malformed, now),
     db.prepare("INSERT INTO classroom_job_outbox(kind,dedupe_key,payload_json,created_at) VALUES('report_input',?,?,?) ON CONFLICT(kind,dedupe_key) DO NOTHING").bind(`${item.batch_id}:${g.student_id}:${digest}`, JSON.stringify({ batch_id: item.batch_id, class_run_id: g.class_run_id, student_id: g.student_id, snapshot_revision: revision, input_revision: inputRevision, manifest_digest: digest, coverage }), now),
-    audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage }, now),
+    audit(db, g.class_run_id, g.seat_id, 'system', 'collect', 'snapshot_verified', { batch_id: item.batch_id, revision, receipt_id: receipt, coverage, ...(coverageReason ? { coverage_reason: coverageReason } : {}) }, now),
   ]);
-  return c.json({ receipt_id: receipt, manifest_digest: digest, integrity: 'verified', coverage, input_revision: inputRevision }, 201);
+  return c.json({ receipt_id: receipt, manifest_digest: digest, integrity: 'verified', coverage, ...(coverageReason ? { coverage_reason: coverageReason } : {}), input_revision: inputRevision }, 201);
 });
 
 // ── instructor (collect capability) ──

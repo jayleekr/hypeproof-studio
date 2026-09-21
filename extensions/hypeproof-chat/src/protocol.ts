@@ -432,7 +432,8 @@ export type HostMessage = (
   // and from streamError (nothing went wrong — the user asked for this, so no
   // "문제가 생겼어요" banner and no 🚨 신고하기 button). The webview leaves the
   // streaming state and shows a plain notice inviting the next message.
-  | { type: "streamStopped"; streamId: string }
+  /** `by: "instructor"` — stopped by a classroom command (#751), so the learner is told who stopped it and that nothing was lost. */
+  | { type: "streamStopped"; streamId: string; by?: "instructor" }
   // #278 Phase 3 — agentic browser tool loop action log (auto-run + log, no
   // modal). One line per tool call; `state` flips running → done/error.
   // #503 — there is one channel, so arrival order IS occurrence order. The webview

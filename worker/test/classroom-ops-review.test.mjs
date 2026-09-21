@@ -205,7 +205,12 @@ test('F7 a damaged record is verified bytes with coverage "damaged" — never co
 test('F7 sequenced events are complete only against the declared start and end', () => {
   const tail = '{"seq":5,"type":"prompt"}\n{"seq":6,"type":"turn_end"}\n', range = (first_seq, last_seq, lines = 2) => ({ lines, from_ts: '2026-09-19T00:00:00.000Z', to_ts: '2026-09-19T00:00:00.000Z', final_line_sha256: 'a'.repeat(64), first_seq, last_seq });
   assert.equal(eventCoverage(tail, { student: 'student-a' }).coverage, 'range_unknown', 'a contiguous tail alone says nothing about what came before it');
-  assert.equal(eventCoverage(tail, { student: 'student-a' }, range(5, 6)).coverage, 'complete');
+  // 2026-09-21: a matching first/last pair alone is no longer enough — the spool's own counter and the other-session statement must be declared too.
+  const undeclared = eventCoverage(tail, { student: 'student-a' }, range(5, 6)); assert.deepEqual([undeclared.coverage, undeclared.range_problem], ['range_unknown', 'extent_not_declared']);
+  const full = (extra) => ({ ...range(5, 6), session_last_seq: 6, other_sessions_in_window: 0, ...extra });
+  assert.equal(eventCoverage(tail, { student: 'student-a' }, full()).coverage, 'complete');
+  assert.deepEqual([eventCoverage(tail, { student: 'student-a' }, full({ session_last_seq: 8 })).coverage, eventCoverage(tail, { student: 'student-a' }, full({ session_last_seq: 8 })).range_problem], ['gaps', 'tail_missing'], 'the spool allocated events the copy does not hold');
+  assert.deepEqual([eventCoverage(tail, { student: 'student-a' }, full({ other_sessions_in_window: 1 })).coverage, eventCoverage(tail, { student: 'student-a' }, full({ other_sessions_in_window: 1 })).range_problem], ['range_unknown', 'other_session_not_included'], 'an app restart left part of the class in another session');
   assert.equal(eventCoverage(tail, { student: 'student-a' }, range(1, 6)).coverage, 'gaps', 'the declared start is missing');
   assert.equal(eventCoverage(tail, { student: 'student-a' }, range(5, 9)).coverage, 'gaps', 'the declared end is missing');
   assert.equal(eventCoverage(tail, { student: 'student-a' }, range(5, 6, 3)).range_problem, 'line_count_mismatch');

@@ -21,8 +21,16 @@ export interface SnapshotBinding {
   class_run_id: string; batch_id: string; seat_id: string; spool_session_id: string;
   student: { u: string; c: string; p: string }; activity: { course_id: string; version: string } | null;
   consent: { purpose: string; notice_version: string };
-  range: { lines: number; from_ts: string; to_ts: string; final_line_sha256: string; first_seq?: number; last_seq?: number };
+  /**
+   * What this copy covers. `first_seq`/`last_seq` are declared only when the START is provable from the live file;
+   * `session_last_seq` is the spool's own counter when the copy was read (a lost tail shows as a difference);
+   * `other_sessions_in_window` counts sessions of this learner in the class window that this copy does NOT contain.
+   * A field the App cannot establish is left out — the Service then answers `range_unknown`, never `complete`.
+   */
+  range: { lines: number; from_ts: string; to_ts: string; final_line_sha256: string; first_seq?: number; last_seq?: number; session_last_seq?: number; other_sessions_in_window?: number };
 }
+/** The live spool's sequence state, read together with the bytes (SessionSpool.readForSnapshot). */
+export interface SnapshotSource { sequence: { session_id: string; last_seq: number }; other_sessions: number | null }
 /** Events of an earlier session on the same PC are another activity: only this class run's window is copied. */
 export const WINDOW_LEAD_MS = 30 * 60_000;
 
@@ -31,7 +39,7 @@ export const WINDOW_LEAD_MS = 30 * 60_000;
  * The spool keeps identity in session.meta.json only. A session that belongs to another learner,
  * cohort or profile — or to nobody — is never sent under this seat's credential.
  */
-export function freezeSnapshot(files: Array<{ name: string; data: Uint8Array }>, scope: SnapshotScope, batchId: string, consent: { purpose: string; notice_version: string }, nowMs: number):
+export function freezeSnapshot(files: Array<{ name: string; data: Uint8Array }>, scope: SnapshotScope, batchId: string, consent: { purpose: string; notice_version: string }, nowMs: number, source?: SnapshotSource):
   { ok: true; files: Array<{ name: string; data: Uint8Array }>; binding: SnapshotBinding } | { ok: false; code: string } {
   const metaFile = files.find((f) => f.name === "session.meta.json"), eventsFile = files.find((f) => f.name === "events.jsonl");
   if (!metaFile || !eventsFile) return { ok: false, code: "nothing_recorded" };
@@ -41,20 +49,28 @@ export function freezeSnapshot(files: Array<{ name: string; data: Uint8Array }>,
   if (!user || typeof user.u !== "string" || typeof user.c !== "string" || typeof user.p !== "string" || typeof meta.session_id !== "string") return { ok: false, code: "identity_unbound" };
   if (user.u !== scope.student.u || user.c !== scope.student.c || user.p !== scope.student.p) return { ok: false, code: "identity_mismatch" };
   const from = scope.run.starts_at - WINDOW_LEAD_MS, kept: string[] = []; let firstTs = "", lastTs = "", sequenced = true; const seqs: number[] = [];
-  for (const raw of new TextDecoder().decode(eventsFile.data).split("\n")) {
+  const rawLines = new TextDecoder().decode(eventsFile.data).split("\n");
+  // Bytes after the last newline are an append still in flight (or torn): not a committed line, so not part of the copy.
+  rawLines.pop();
+  // The seq of the line that sits immediately before the first kept one, when the window (not a loss) excluded it.
+  let beforeFirst: number | null | undefined;
+  for (const raw of rawLines) {
     if (!raw.trim()) continue;
     let e: { ts?: unknown; seq?: unknown } | null = null; try { e = JSON.parse(raw); } catch { e = null; }
     const at = e && typeof e.ts === "string" ? Date.parse(e.ts) : NaN;
-    if (Number.isFinite(at) && (at < from || at > nowMs)) continue; // outside this class run
+    if (Number.isFinite(at) && (at < from || at > nowMs)) { if (!kept.length) beforeFirst = e && Number.isSafeInteger(e.seq) ? (e.seq as number) : null; continue; } // outside this class run
     kept.push(raw);
     if (e && typeof e.ts === "string") { firstTs ||= e.ts; lastTs = e.ts; }
     if (e && Number.isSafeInteger(e.seq)) seqs.push(e.seq as number); else sequenced = false;
   }
   if (!kept.length) return { ok: false, code: "nothing_recorded" };
+  // The start is provable only if the copy begins at the session's first event, or right after an event the window left out.
+  const first = seqs.length ? Math.min(...seqs) : 0, startProven = sequenced && seqs.length > 0 && (first === 1 ? beforeFirst === undefined : beforeFirst === first - 1);
+  const live = source && source.sequence.session_id === meta.session_id ? source : undefined;
   const events = new TextEncoder().encode(kept.join("\n") + "\n"), iso = new Date(nowMs).toISOString();
   const binding: SnapshotBinding = {
     class_run_id: scope.class_run_id, batch_id: batchId, seat_id: scope.seat_id, spool_session_id: meta.session_id, student: scope.student, activity: scope.activity, consent,
-    range: { lines: kept.length, from_ts: firstTs || iso, to_ts: lastTs || iso, final_line_sha256: createHash("sha256").update(kept[kept.length - 1]!).digest("hex"), ...(sequenced && seqs.length ? { first_seq: Math.min(...seqs), last_seq: Math.max(...seqs) } : {}) },
+    range: { lines: kept.length, from_ts: firstTs || iso, to_ts: lastTs || iso, final_line_sha256: createHash("sha256").update(kept[kept.length - 1]!).digest("hex"), ...(startProven ? { first_seq: first, last_seq: Math.max(...seqs) } : {}), ...(live && Number.isSafeInteger(live.sequence.last_seq) && live.sequence.last_seq > 0 ? { session_last_seq: live.sequence.last_seq } : {}), ...(live && live.other_sessions !== null ? { other_sessions_in_window: live.other_sessions } : {}) },
   };
   return { ok: true, files: [{ name: "session.meta.json", data: metaFile.data }, { name: "events.jsonl", data: events }], binding };
 }

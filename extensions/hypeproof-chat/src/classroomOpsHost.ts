@@ -8,7 +8,7 @@ import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { CommandRunner, type Executor, type JournalState } from "./classroomOpsCommands";
-import { freezeSnapshot, uploadSnapshot, type SnapshotBinding, type SnapshotDeps, type SnapshotScope, type SnapshotState } from "./evidenceSnapshot";
+import { freezeSnapshot, uploadSnapshot, WINDOW_LEAD_MS, type SnapshotBinding, type SnapshotDeps, type SnapshotScope, type SnapshotState } from "./evidenceSnapshot";
 import { removeFrozenCopy } from "./evidenceSnapshotStore";
 import { resetPostcondition, runPreservingReset, stopAndConfirm, type Preservation, type ResetManifest, type ResetSteps } from "./runtimeReset";
 import {
@@ -39,7 +39,8 @@ export interface ClassroomOpsActions {
   newGeneration(): Promise<number>;
   setHold(hold: "paused" | "stop_unconfirmed" | null): void;
   // R4 — allowlisted spool files of the current session, read-only.
-  readSpool(): Promise<Array<{ name: string; data: Uint8Array }> | null>;
+  /** The current spool session's files with its sequence state, read under the spool's write queue. `sinceMs` = start of the class window. */
+  readSpool(sinceMs: number): Promise<import("./sessionSpool").SpoolSnapshotSource | null>;
 }
 
 /** What the chat provider is allowed to tell this adapter. No message text, no paths. */
@@ -108,8 +109,8 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
         } catch { /* not copied yet */ }
         // Resuming never reads the live spool: without the frozen copy and an explicit consent scope there is nothing to send.
         const scope = this.scope(); if (!scope || !consent) return null;
-        const live = await this.actions.readSpool(); if (!live) return null;
-        const frozen = freezeSnapshot(live, scope, b, consent, Date.now()); if (!frozen.ok) return { code: frozen.code };
+        const live = await this.actions.readSpool(scope.run.starts_at - WINDOW_LEAD_MS); if (!live) return null;
+        const frozen = freezeSnapshot(live.files, scope, b, consent, Date.now(), live); if (!frozen.ok) return { code: frozen.code };
         await fs.mkdir(target, { recursive: true });
         for (const f of frozen.files) await fs.writeFile(path.join(target, f.name), f.data, { flag: "wx" });
         await fs.writeFile(bindingFile, JSON.stringify(frozen.binding), { flag: "wx" });

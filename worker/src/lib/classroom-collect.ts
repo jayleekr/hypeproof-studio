@@ -25,7 +25,7 @@ export interface SnapshotBinding {
   activity: { course_id: string; version: string } | null;
   consent: { purpose: string; notice_version: string };
   /** Declared extent of events.jsonl. `final_line_sha256` names the last confirmed event. */
-  range: { lines: number; from_ts: string; to_ts: string; final_line_sha256: string; first_seq?: number; last_seq?: number };
+  range: { lines: number; from_ts: string; to_ts: string; final_line_sha256: string; first_seq?: number; last_seq?: number; session_last_seq?: number; other_sessions_in_window?: number };
 }
 export interface SnapshotManifest { schema: string; files: ManifestFile[]; binding?: SnapshotBinding }
 export type Coverage = 'complete' | 'gaps' | 'sequence_unavailable' | 'damaged' | 'range_unknown';
@@ -40,6 +40,7 @@ function validateBinding(v: unknown): SnapshotBinding | null {
   if (!b.consent || !str(b.consent.purpose) || !str(b.consent.notice_version)) return null;
   const r = b.range; if (!r || !Number.isSafeInteger(r.lines) || r.lines < 1 || !str(r.from_ts, TS) || !str(r.to_ts, TS) || !str(r.final_line_sha256, /^[a-f0-9]{64}$/)) return null;
   if ((r.first_seq === undefined) !== (r.last_seq === undefined) || (r.first_seq !== undefined && (!Number.isSafeInteger(r.first_seq) || !Number.isSafeInteger(r.last_seq) || r.first_seq! < 1 || r.last_seq! < r.first_seq!))) return null;
+  if ((r.session_last_seq !== undefined && !(Number.isSafeInteger(r.session_last_seq) && r.session_last_seq >= 1)) || (r.other_sessions_in_window !== undefined && !(Number.isSafeInteger(r.other_sessions_in_window) && r.other_sessions_in_window >= 0 && r.other_sessions_in_window <= 10_000))) return null;
   return b;
 }
 
@@ -92,9 +93,13 @@ export function attributionProblem(metaText: string, binding: SnapshotBinding | 
 /**
  * Behavioural coverage is a separate answer from byte integrity.
  *  - A line that is not a JSON event is never skipped into "complete": the record is `damaged`.
- *  - A legacy spool has no seq: `sequence_unavailable`, never invented.
+ *  - A record without seq (any build before the spool wrote one, or a line that lost it): `sequence_unavailable`,
+ *    never invented. That says nothing about the record's age.
  *  - Sequenced events are `complete` only against a DECLARED start and end whose final event
  *    the Service can see; a contiguous tail alone proves nothing about what came before it.
+ *  - `complete` also needs the spool's own counter (`session_last_seq`: an event that was allocated but is not in
+ *    the copy is a lost tail → `gaps`) and the App's statement that no other session of this learner in the class
+ *    window was left out (app restart, second window, sealed session → `range_unknown`). Undeclared is unknown.
  * Also flags a line that names another owner — one learner's file must not carry another's events.
  */
 export function eventCoverage(jsonl: string, owner: { student: string }, range?: SnapshotBinding['range']): { coverage: Coverage; lines: number; foreign: boolean; malformed: number; range_problem: string } {
@@ -119,8 +124,12 @@ export function eventCoverage(jsonl: string, owner: { student: string }, range?:
   const contiguous = sorted.every((s, i) => i === 0 || s === sorted[i - 1]! + 1);
   if (!contiguous) return { coverage: 'gaps', lines, foreign, malformed, range_problem };
   if (!range || range.first_seq === undefined) return { coverage: 'range_unknown', lines, foreign, malformed, range_problem };
-  const bounded = range.first_seq === sorted[0] && range.last_seq === sorted[sorted.length - 1];
-  return { coverage: bounded && !range_problem ? 'complete' : 'gaps', lines, foreign, malformed, range_problem: range_problem || (bounded ? '' : 'declared_seq_mismatch') };
+  const last = sorted[sorted.length - 1]!, bounded = range.first_seq === sorted[0] && range.last_seq === last;
+  if (!bounded || range_problem) return { coverage: 'gaps', lines, foreign, malformed, range_problem: range_problem || 'declared_seq_mismatch' };
+  if (range.session_last_seq === undefined || range.other_sessions_in_window === undefined) return { coverage: 'range_unknown', lines, foreign, malformed, range_problem: 'extent_not_declared' };
+  if (range.session_last_seq !== last) return { coverage: 'gaps', lines, foreign, malformed, range_problem: range.session_last_seq > last ? 'tail_missing' : 'declared_seq_mismatch' };
+  if (range.other_sessions_in_window > 0) return { coverage: 'range_unknown', lines, foreign, malformed, range_problem: 'other_session_not_included' };
+  return { coverage: 'complete', lines, foreign, malformed, range_problem: '' };
 }
 export async function finalLineSha(jsonl: string): Promise<string> {
   const last = jsonl.split('\n').filter((l) => l.trim()).pop() ?? '';
