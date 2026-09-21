@@ -41,3 +41,28 @@ The temporary profile is a development artifact and may be removed by OS cleanup
 
 Regression: `node --test e2e/classroom/mac-devhost.test.mjs` binds a real local
 Unix socket for a deeply nested checkout and verifies separate host profiles.
+
+### Re-running the whole classroom path on this Mac
+
+One prepared host serves both runs. Re-run `prepare` whenever extension, webview, Service or Chalk sources change — both
+runs refuse a copy whose bundle hashes or extension sources differ from the checkout.
+
+```sh
+export HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost         # any git-ignored directory; reuse it between runs
+export HPS_DEVHOST_SOURCE="/path/to/official/HypeProof Studio.app" # an unpacked official arm64 release, never /Applications
+npm --prefix extensions/hypeproof-chat run build:extension && (cd extensions/hypeproof-chat/webview-ui && npx vite build)
+node e2e/classroom/mac-devhost.mjs prepare
+(cd e2e && node --experimental-strip-types --experimental-sqlite classroom/mac-gui.mjs)   # machine-checked, ~3 min → $HPS_DEVHOST_DIR/gui/result.json
+node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs          # stays open for a person: /demo and /manage on :18762
+```
+
+- `mac-gui.mjs` drives the real window: issue → verify → connect → step → instructor confirm → provider error → recovery →
+  token evidence after `runtime_ready` → instructor stop → preserving reset (file hashes) → learner consent → collection of
+  the app's **real SessionSpool** (Service re-hash, `coverage`) → draft opened and approved for content → reconnect → leave.
+  Every step is `PASS` or `NOT_RUN` in `result.json`, next to the source SHA, shell version and SDK version.
+- Neither run sets the e2e gate (`HPS_TEST_E2E` / `hps-test-state.json`): with it the extension creates no spool at all.
+  The app gets its own `HOME`, so the spool is real but never lands in the user's
+  `~/Library/Application Support/HypeProof-Studio`.
+- Scripted in both: model answers, the report evaluator transport, mail. `mac-demo.mjs` also scripts seats A2/A3.
+  Neither is evidence about a real model, real mail, Windows, a school network, staging/production D1·R2 or a release install.
+- `mac-demo.mjs` creates a new synthetic class on every start; its token and class expire after about an hour.
