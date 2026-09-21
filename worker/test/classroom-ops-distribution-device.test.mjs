@@ -3,7 +3,7 @@
 // needs the Service's dependencies. Not a real Studio window, a real network or a real D1 — those are the browser e2e, the
 // Mac run and classroom-ops-distribution-d1.test.mjs.
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { localOps, OPS_ALL } from './harness/classroom-ops.mjs';
@@ -61,6 +61,22 @@ try {
   assert.deepEqual([(await view(d1.id)).targets[0].status, (await view(d3.id)).targets[0].status.card], [{ phase: 'reflected', card: 'none', in_progress: false, can_change: false, reselectable: false }, 'withdrawn'], 'evidence of the v1 delivery stays; what is on the device now is "withdrawn", confirmed by the device');
   assert.equal((await A2.store.current()).index.journal.length, 0);
   ok('withdrawal in order: covered → withdrawn, confirmed by the device, v1 not restored');
+  // The offer commit boundary, on the REAL device (reproduced on 51708c7: the run was withdrawn between the Service reading its candidates
+  // and recording the offer; the item still went out, the device stored it, its receipts were refused as final and no withdrawal ever came).
+  const onDisk = (dir, text) => existsSync(dir) && readdirSync(dir, { recursive: true, withFileTypes: true }).some((e) => e.isFile() && readFileSync(path.join(e.parentPath ?? e.path, e.name), 'utf8').includes(text));
+  const raced = (await save({ kind: 'notice', title: '경합', body: '기록되지 않은 제안의 본문' })).json, dr = (await send({ object_id: raced.object_id, revision: 1, content_hash: raced.content_hash, targets: ['A2'] })).json.distribution;
+  const inner = f.env.HPS_DB; let fired = false;
+  f.env.HPS_DB = { prepare(sql) { const st = inner.prepare(sql), w = { bind(...a) { st.bind(...a); return w; }, run: () => st.run(), _run: () => st._run(), first: (...a) => st.first(...a), all: async (...a) => { const r = await st.all(...a); if (!fired && sql.includes('c.revision AS card_revision') && sql.includes('t.next_offer_at')) { fired = true; f.env.HPS_DB = inner; assert.equal((await f.request(`${f.base}/distributions/${dr.id}/revoke`, 'POST', { expected_row_revision: 0 }, X)).status, 200); } return r; } }; return w; }, batch: (s) => inner.batch(s) };
+  bodiesB.length = 0; await spin(B); f.env.HPS_DB = inner; assert.equal(fired, true, 'the injection point no longer matches the SQL — fix the test before trusting it');
+  assert.ok(bodiesB.every((b) => !(b.distribution?.items ?? []).length), 'the unrecorded offer never left the Service'); assert.deepEqual(await B.cards(), []); assert.equal(onDisk(B.dir, '기록되지 않은 제안의 본문'), false, 'nothing of it is on the disk');
+  assert.deepEqual([(await view(dr.id)).targets[0].status.phase, (await view(dr.id)).targets[0].status.card], ['revoked', 'none'], 'the instructor sees a withdrawn run that was never on the device — which is what happened');
+  // positive control: the offer WAS recorded and stored; the withdrawal lands before the receipts → the device takes it down and says so
+  const held = (await save({ kind: 'notice', title: '이미 받은 공지', body: '기기가 이미 저장한 본문' })).json, dh = (await send({ object_id: held.object_id, revision: 1, content_hash: held.content_hash, targets: ['A2'] })).json.distribution;
+  now0(); await B.loop.tick(); assert.deepEqual(await B.cards(), [['이미 받은 공지', 1, '기기가 이미 저장한 본문']], 'control: it is on the device'); assert.equal(onDisk(B.dir, '기기가 이미 저장한 본문'), true);
+  await f.request(`${f.base}/distributions/${dh.id}/revoke`, 'POST', { expected_row_revision: 0 }, X); await spin(B);
+  assert.deepEqual(await B.cards(), [['', 1, 'withdrawn']]); assert.equal(onDisk(B.dir, '기기가 이미 저장한 본문'), false, 'the body left the disk'); assert.equal((await B.store.current()).index.journal.length, 0, 'and the device owes nothing');
+  assert.deepEqual([(await view(dh.id)).targets[0].status.phase, (await view(dh.id)).targets[0].status.card], ['revoked', 'withdrawn'], 'never recorded as delivered; the withdrawal is confirmed by the device');
+  ok('offer commit boundary on the real device: an unrecorded offer never reaches the disk; a recorded one is withdrawn from it');
   A2.end(); B.end();
   console.log(`classroom-ops-distribution-device: ${n} checks passed`);
 } finally { f.close(); rmSync(root, { recursive: true, force: true }); }

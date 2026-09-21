@@ -473,7 +473,7 @@ classroomOpsApp.post('/sync', async (c) => {
       const hint = await db.prepare(`SELECT ${PENDING_PROBE} AS pending FROM ops_grants g WHERE g.id=?`).bind(g.id).first<{ pending: number }>();
       if (hint?.pending || distBody !== undefined) {
         const lease = exchange.lease === 'unknown' ? await seatLease(db, g, b.app_instance_id, now) : { owner: exchange.lease === 'owner' };
-        if (lease.owner) distribution = await distributionExchange(db, g, { body: distBody, declared, flagOn: distFlag, runEnded: !!g.run_ended || now > g.run_ends, runEndsAt: g.run_ends, pendingHint: !!hint?.pending, now });
+        if (lease.owner) distribution = await distributionExchange(db, g, { body: distBody, declared, instance: b.app_instance_id, flagOn: distFlag, runEnded: !!g.run_ended || now > g.run_ends, runEndsAt: g.run_ends, pendingHint: !!hint?.pending, now });
       }
     } catch (err) { console.error('ops distribution exchange failed:', err); distribution = null; }
   }

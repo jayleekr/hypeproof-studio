@@ -223,8 +223,11 @@ export function distStatus(t: TargetFacts, card: CardFacts | null, ctx: { new_re
   const known = [...DIST_OPEN_STATES, ...DIST_FINAL_STATES] as readonly string[];
   if (!known.includes(t.state)) return { phase: 'unknown', card: 'none', in_progress: false, can_change: true, reselectable: false };
   const delivered = t.state === 'reflected' || t.state === 'no_change';
+  // A run withdrawn while its recorded offer was in flight never proves delivery, yet the device may hold the material: the
+  // Service tracks that card to take it down. The instructor is shown that withdrawal, not "nothing was ever there".
+  const recalled = t.state === 'revoked' && t.offers > 0 && !!card && card.state !== 'present';
   let view: CardView = 'none';
-  if (delivered || card?.state === 'detached') {
+  if (delivered || recalled || card?.state === 'detached') {
     if (!card) view = 'none';
     else if (card.state === 'detached') view = 'detached';
     else if (card.revision !== t.revision || card.content_hash !== t.content_hash) view = card.state === 'present' ? 'replaced' : 'none';

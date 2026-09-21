@@ -55,6 +55,10 @@ await check('controls: delivery evidence only moves forward; an offer or a 200 i
     [{}, { state: 'withdraw_unconfirmed', revision: 2, content_hash: 'h2' }, 'reflected withdraw_unconfirmed false false false'], [{}, { state: 'detached', revision: 2, content_hash: 'h2' }, 'reflected detached false false false'],
     [{ state: 'failed', result_code: 'store_failed' }, null, 'failed none false false true'], [{ state: 'unconfirmed' }, null, 'unconfirmed none false true true'], [{ state: 'expired' }, null, 'expired none false false true'],
     [{ state: 'expired' }, null, 'expired none false false false', false], [{ state: 'superseded' }, null, 'superseded none false false false'], [{ state: 'revoked' }, null, 'revoked none false false false'],
+    // withdrawn while a RECORDED offer was in flight: no delivery was proved, but the card the Service is taking down is shown — never when nothing was offered, never a card another run keeps
+    [{ state: 'revoked' }, { state: 'withdraw_pending', revision: 2, content_hash: 'h2' }, 'revoked withdraw_pending false true false'], [{ state: 'revoked' }, { state: 'withdrawn', revision: 2, content_hash: 'h2' }, 'revoked withdrawn false false false'],
+    [{ state: 'revoked', offers: 0 }, { state: 'withdrawn', revision: 2, content_hash: 'h2' }, 'revoked none false false false'], [{ state: 'revoked' }, { state: 'present', revision: 2, content_hash: 'h2' }, 'revoked none false false false'],
+    [{ state: 'revoked', revision: 1, content_hash: 'h1' }, { state: 'withdrawn', revision: 2, content_hash: 'h2' }, 'revoked none false false false'],
     [{ state: 'target_changed' }, null, 'target_changed none false false false'], [{ state: 'some_future_state' }, null, 'unknown none false true false'],
   ];
   for (const [t, card, want, allowed] of table) assert.equal(s(t, card, allowed ?? true), want, JSON.stringify([t, card]));
@@ -276,6 +280,67 @@ try {
     for (const o of open) assert.equal((await view(o.id)).json.targets.find((t) => t.seat_id === 'A3').status.phase, 'target_changed', 'student-c\'s intents end as "target changed"; nothing migrates to the new holder');
     const z = (await f.pair('A3', 2, 6, CAPS)).conn.json; now0(); assert.equal((await dsync(z, 6)).json.distribution, undefined, 'the new holder of A3 is offered nothing that was meant for the previous one');
     assert.equal((await dsync(conn.A3, 3)).status, 401, 'and the previous holder\'s connection was closed with the seat');
+  });
+
+  await check('D5 the OFFER commit boundary: what changes between reading the candidates and recording the offer keeps the item OUT of the answer — and an offer that WAS recorded is still withdrawn from the device', async () => {
+    // Reproduced by an independent review on 51708c7 (management-20260921/u2-revoke-inbox-impact.mjs, u2-deferred-boundary-check.mjs):
+    // a withdrawal that landed after the candidate SELECT left the item in the sync answer while its row said `revoked, offers=0`;
+    // the device stored it, its receipts were refused as stale, and no withdrawal ever followed. Same for the switch and the seat.
+    const { recordTokenIssue } = await import('../src/routes/classroom-ops.ts');
+    const g = await localOps(); try {
+      const two = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }]; await g.freeze(); let rev = 0;
+      const configure = async (seats, flags) => { const r = await g.configure(seats, rev, { flags }, T2); assert.ok([200, 201].includes(r.status), r.raw); rev++; return r; };
+      const T2 = await g.teacher('teacher-x', [...OPS_ALL, 'distribute']); await configure(two, { ops_observe: true, ops_distribute: true });
+      let c1 = (await g.pair('A1', rev, 1, CAPS)).conn.json; const sync1 = (distribution) => g.sync(c1.credential, [], 1, distribution ? { distribution } : {});
+      const call = (path, body) => g.request(g.base + path, 'POST', body, T2), fresh = async (title) => { const c = (await call('/contents', { idempotency_key: KEY(), kind: 'notice', title, body: '본문 ' + title })).json; g.db.prepare('UPDATE classroom_distributions SET created_at=created_at-120000').run(); const d = (await call('/distributions', { idempotency_key: KEY(), object_id: c.object_id, revision: 1, content_hash: c.content_hash, targets: ['A1'], expected_roster_revision: rev })).json.distribution; assert.ok(d?.id, title); return { c, d }; };
+      const row = (d) => ({ ...g.db.prepare('SELECT state,offers,offer_key,pending FROM classroom_distribution_targets WHERE distribution_id=?').get(d.id) });
+      // Freeze the result of ONE real SELECT and run a real competing request before it is used. The hook must fire, or the case proves nothing.
+      const between = (match, action) => { const inner = g.env.HPS_DB; let fired = false; g.env.HPS_DB = { prepare(sql) { const st = inner.prepare(sql), w = { bind(...a) { st.bind(...a); return w; }, _run: () => st._run(), run: () => st.run(), first: (...a) => st.first(...a), all: async (...a) => { const r = await st.all(...a); if (!fired && match(sql)) { fired = true; g.env.HPS_DB = inner; await action(); } return r; } }; return w; }, batch: (s) => inner.batch(s) }; return () => { g.env.HPS_DB = inner; assert.equal(fired, true, 'the injection point no longer matches the SQL — fix the test before trusting it'); }; };
+      const candidates = (sql) => sql.includes('c.revision AS card_revision') && sql.includes('t.next_offer_at'), receiptRead = (sql) => sql.includes('ob.retired_at FROM classroom_distribution_targets t');
+      const rc = (item, stage) => ({ offer_key: item.offer_key, distribution_id: item.distribution_id, object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, seq: item.seq, stage, result_code: '', observed_at: Date.now() });
+
+      // positive control: nothing interferes → the item is in the answer AND its row says so
+      const ok = await fresh('대조군'); const first = await sync1(); assert.equal(first.json.distribution.items.length, 1); assert.deepEqual([row(ok.d).state, row(ok.d).offers, row(ok.d).offer_key], ['offered', 1, first.json.distribution.items[0].offer_key], 'answer and ledger agree');
+      await sync1({ receipts: [rc(first.json.distribution.items[0], 'received'), rc(first.json.distribution.items[0], 'reflected')] });
+
+      for (const [name, interfere, expectState, restore] of [
+        ['the instructor withdraws the run', (x) => call(`/distributions/${x.d.id}/revoke`, { expected_row_revision: 0 }), 'revoked'],
+        ['the material is retired', (x) => call(`/contents/${x.c.object_id}/retire`, { expected_latest_revision: 1 }), 'revoked'],
+        ['the run switch goes off (through the API)', () => configure(two, { ops_observe: true, ops_distribute: false }), 'accepted', () => configure(two, { ops_observe: true, ops_distribute: true })],
+        ['the instructor ends the class', () => g.db.prepare("UPDATE sessions SET ended_at='2026-01-01T00:00:00Z' WHERE id=?").run(g.run), 'accepted', () => g.db.prepare('UPDATE sessions SET ended_at=NULL WHERE id=?').run(g.run)],
+        ['the learner logs in again (new login generation)', () => recordTokenIssue(g.env, { jti: KEY(), cohort: g.cohort, student: 'student-a', profile: g.profile, issuedBy: 'teacher-x', hours: 1 }), 'accepted'],
+        ['another window takes the seat lease', () => g.db.prepare("UPDATE ops_seat_leases SET app_instance_id='instance-other',generation=generation+1 WHERE grant_id=?").run(c1.grant_id), 'accepted', () => g.db.prepare('UPDATE ops_seat_leases SET app_instance_id=? WHERE grant_id=?').run(g.instance(1).app_instance_id, c1.grant_id)],
+      ]) {
+        const x = await fresh(name), audits = g.db.prepare('SELECT count(*) n FROM ops_audit').get().n, done = between(candidates, () => interfere(x)), r = await sync1(); done();
+        assert.equal(r.status, 200, name); assert.equal((r.json.distribution?.items ?? []).filter((i) => i.distribution_id === x.d.id).length, 0, name + ': an offer that was not recorded must not be in the answer');
+        assert.deepEqual([row(x.d).state, row(x.d).offers, row(x.d).offer_key], [expectState, 0, ''], name + ': the ledger says it was never offered — and that is now true');
+        if (restore) { await restore(); g.db.prepare('UPDATE classroom_distribution_targets SET next_offer_at=0').run(); const again = await sync1(); assert.equal((again.json.distribution?.items ?? []).filter((i) => i.distribution_id === x.d.id).length, 1, name + ': once the condition holds again, the same intent is offered'); await sync1({ receipts: [rc(again.json.distribution.items.find((i) => i.distribution_id === x.d.id), 'reflected')] }); }
+        else if (expectState === 'accepted') { g.db.prepare('UPDATE classroom_distribution_targets SET next_offer_at=0').run(); const again = await sync1(); const it = (again.json.distribution?.items ?? []).find((i) => i.distribution_id === x.d.id); assert.ok(it, name + ': offered again under the connection as it is NOW'); assert.equal(row(x.d).offer_key, it.offer_key); await sync1({ receipts: [rc(it, 'reflected')] }); }
+      }
+      // the seat changes hands through the API between the read and the write: the previous learner's device gets nothing
+      const moved = await fresh('좌석 교체'), swap = between(candidates, () => configure([{ seat_id: 'A1', student_id: 'student-c' }, two[1]], { ops_observe: true, ops_distribute: true })), late = await sync1(); swap();
+      assert.equal((late.json.distribution?.items ?? []).length, 0, 'the seat was re-assigned: nothing for the learner who just lost it'); assert.deepEqual([row(moved.d).offers, row(moved.d).offer_key], [0, '']); assert.equal((await sync1()).status, 401);
+      await configure(two, { ops_observe: true, ops_distribute: true }); c1 = (await g.pair('A1', rev, 1, CAPS)).conn.json;
+
+      // an offer that WAS recorded and is merely in flight when the run is withdrawn: the device stored it — it must come down
+      const inflight = await fresh('이미 기록된 제안'); const sent = (await sync1()).json.distribution.items.find((i) => i.distribution_id === inflight.d.id); assert.equal(row(inflight.d).offers, 1);
+      await call(`/distributions/${inflight.d.id}/revoke`, { expected_row_revision: 0 }); const told = await sync1({ receipts: [rc(sent, 'received'), rc(sent, 'reflected')] });
+      assert.deepEqual(told.json.distribution.receipt_acks.map((a) => [a.recorded, a.reason, a.final]), [[false, 'revoked', true], [false, 'revoked', true]]); assert.equal(told.json.distribution.withdraw.length, 1, 'the device that holds it is sent the withdrawal at once'); assert.equal(row(inflight.d).state, 'revoked', 'and it is never recorded as delivered');
+
+      // a RECEIPT that loses its compare-and-swap leaves nothing behind: no card, no audit row, and the answer is not final
+      const cas = await fresh('receipt 경합'); const held = (await sync1()).json.distribution.items.find((i) => i.distribution_id === cas.d.id), auditsBefore = g.db.prepare("SELECT count(*) n FROM ops_audit WHERE action='distribution_reflected'").get().n;
+      const lose = between(receiptRead, () => call(`/distributions/${cas.d.id}/revoke`, { expected_row_revision: 0 })), lost = await sync1({ receipts: [rc(held, 'reflected')] }); lose();
+      assert.deepEqual(lost.json.distribution.receipt_acks.map((a) => [a.recorded, a.reason, a.final]), [[false, 'changed', false]], 'not recorded, and the device keeps the receipt'); assert.equal(g.db.prepare("SELECT count(*) n FROM ops_audit WHERE action='distribution_reflected'").get().n, auditsBefore, 'no audit row for a transition that did not happen');
+      assert.equal(g.db.prepare('SELECT count(*) n FROM classroom_distribution_cards WHERE object_id=?').get(cas.c.object_id).n, 0, 'and no card'); assert.equal(row(cas.d).state, 'revoked');
+      const retry = await sync1({ receipts: [rc(held, 'reflected')] }); assert.deepEqual(retry.json.distribution.receipt_acks.map((a) => [a.recorded, a.reason, a.final]), [[false, 'revoked', true]]); assert.equal(retry.json.distribution.withdraw.filter((w) => w.object_id === cas.c.object_id).length, 1, 'the resent receipt is read against the row as it is now: the device is told to take it down');
+
+      // "already held" is decided at the commit too: the card is withdrawn between the read and the write → not no_change
+      const base = await fresh('no_change 경합'); const b1 = (await sync1()).json.distribution.items.find((i) => i.distribution_id === base.d.id); await sync1({ receipts: [rc(b1, 'reflected')] });
+      g.db.prepare('UPDATE classroom_distributions SET created_at=created_at-120000').run(); const dup = (await call('/distributions', { idempotency_key: KEY(), object_id: base.c.object_id, revision: 1, content_hash: base.c.content_hash, targets: ['A1'], expected_roster_revision: rev })).json.distribution;
+      const gone = between(candidates, () => g.db.prepare("UPDATE classroom_distribution_cards SET state='withdrawn' WHERE object_id=?").run(base.c.object_id)), r2 = await sync1(); gone();
+      assert.notEqual(row(dup).state, 'no_change', 'the card it relied on is gone: "already held" is not claimed'); assert.equal((r2.json.distribution?.items ?? []).filter((i) => i.distribution_id === dup.id).length, 0);
+      g.db.prepare('UPDATE classroom_distribution_targets SET next_offer_at=0').run(); assert.equal(((await sync1()).json.distribution?.items ?? []).filter((i) => i.distribution_id === dup.id).length, 1, '…so it is sent for real on the next sync');
+    } finally { g.close(); }
   });
 
   await check('D6 token re-issue and device change: the old key is refused, the intent is offered again under the connection the learner has NOW', async () => {
