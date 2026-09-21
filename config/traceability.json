@@ -2332,6 +2332,9 @@
           "path": "e2e/classroom/mac-window.mjs"
         },
         {
+          "path": "worker/src/routes/classroom.ts"
+        },
+        {
           "path": "worker/test/classroom-help.test.mjs"
         },
         {
