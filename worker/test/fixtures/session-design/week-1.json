@@ -1,0 +1,35 @@
+{
+  "schema": "hps-session-design/1",
+  "title": "1주차 · Problem / Opportunity",
+  "audience": "국제고 2학년 · GlobalBuddy 팀",
+  "duration_minutes": 120,
+  "objective": "누가 언제 무엇 때문에 불편한가?",
+  "prerequisites": "코딩 경험 불필요. 인터뷰할 교환학생 3~5명을 미리 섭외해 둡니다.",
+  "starter": "globalbuddy-interviews/ (빈 폴더, 인터뷰 기록을 여기에 모읍니다)",
+  "learning": {
+    "week": 1,
+    "mission": "누가 언제 무엇 때문에 불편한가?",
+    "completion": [
+      { "id": "c1", "text": "겪은 일을 세 명 이상에게 직접 물었습니다", "event": "external_feedback_received" },
+      { "id": "c2", "text": "들은 말을 근거로 문제 문장을 정했습니다", "event": "problem_committed" },
+      { "id": "c3", "text": "어긋나는 기록을 보고 문제를 유지할지 정했습니다", "event": "decision_revised" }
+    ],
+    "observe": [
+      "학생이 실제 경험을 묻는가",
+      "반증이 나오면 문제를 바꾸는가"
+    ],
+    "never": [
+      "인터뷰 답을 AI가 대신 만들어주거나 “좋은 문제”를 자동 선택하지 않는다."
+    ],
+    "evidence_types": ["intent", "action", "decision"],
+    "source_kinds": ["interview", "none"],
+    "reflection": { "changed_mind": true, "next_experiment": true }
+  },
+  "steps": [
+    { "id": "prepare", "title": "인터뷰 준비", "instructions": "교환학생에게 물어볼 질문을 적습니다. “최근 학교에서 가장 당황했던 순간”처럼 실제로 겪은 일을 묻는 질문으로 씁니다.", "hint": "해결책을 묻는 질문보다 있었던 일을 묻는 질문이 답을 많이 받습니다.", "acceptance": "겪은 일을 묻는 질문 세 개 이상이 인터뷰 준비 파일에 적혀 있습니다.", "ui": "canvas_editor", "help": { "default": "hint", "allowed": ["hint", "independent"] } },
+    { "id": "record", "title": "현장 기록", "instructions": "인터뷰에서 들은 말을 들은 그대로 기록합니다. 누구에게 언제 물었는지도 함께 적습니다.", "hint": "요약하기 전에 원문 한 줄을 그대로 남겨 두면 나중에 근거가 됩니다.", "acceptance": "인터뷰 세 건 이상이 인용과 출처(누가·언제)와 함께 기록돼 있습니다.", "ui": "evidence_note", "evidence": "action", "gate": "external_feedback_received" },
+    { "id": "problem", "title": "문제 문장", "instructions": "기록한 말을 근거로 누가 언제 무엇 때문에 불편한지 한 문장으로 적습니다.", "hint": "사람, 상황, 불편이 모두 들어가면 다음 주에 이어 쓰기 쉽습니다.", "acceptance": "문제 문장 하나가 인용한 기록과 연결돼 적혀 있습니다.", "ui": "evidence_note", "evidence": "intent", "gate": "problem_committed" },
+    { "id": "decide", "title": "유지·수정·폐기 결정", "instructions": "인터뷰 기록이 문제 문장과 어긋나면 문제를 유지할지 고칠지 버릴지 정하고 이유를 적습니다.", "hint": "어긋나는 기록이 하나도 없다면 아직 충분히 묻지 않은 것일 수 있습니다.", "acceptance": "유지·수정·폐기 중 하나와 그렇게 정한 이유가 어느 기록 때문인지와 함께 적혀 있습니다.", "ui": "decision_form", "evidence": "decision", "gate": "decision_revised" }
+  ],
+  "assistant": { "display_name": "코치" }
+}
