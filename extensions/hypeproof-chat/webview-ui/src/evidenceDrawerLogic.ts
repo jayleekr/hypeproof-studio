@@ -14,6 +14,10 @@ import type {
   EvidenceType,
   SourceKind,
 } from "../../../../worker/src/lib/measurement-core/learning-events.ts";
+// The one table of kind names. A row whose kind does not require `student_text`
+// has nothing of the learner's to print, and a second copy here is how the two
+// wordings drift apart.
+import { KIND_LABELS } from "../../src/learningStateHelpers.ts";
 
 /** One evidence row the drawer handles. Exactly the shape the host sends down as `learningState.evidence`. */
 export interface EvidenceRowView {
@@ -147,6 +151,27 @@ export function groupByEvidenceType(rows: readonly EvidenceRowView[]): EvidenceG
     label: type === null ? UNTYPED_LABEL : EVIDENCE_TYPE_LABELS[type],
     rows: rows.filter((r) => (r.evidence_type ?? null) === type),
   }));
+}
+
+/**
+ * The line a row shows as itself, and whether those are the student's own words.
+ *
+ * Rendering `row.text` alone leaves some rows blank. `test_observed` and
+ * `retest_confirmed` do not require `student_text` by spec
+ * (`learning-events.ts` LEARNING_EVENT_SPEC), so a valid row of either kind
+ * drew as "1." followed by three grey badges and nothing else — visible in a
+ * render of the real drawer, invisible to every test, because no assertion
+ * looked at the row's own line.
+ *
+ * The fallback is the kind's name from the ONE table (`learningStateHelpers`),
+ * and `student: false` goes with it so the screen can mark it as a record of
+ * what happened rather than pass it off as something the learner wrote (SX-12
+ * rule 5: what the model did and what the student did never share a sentence).
+ */
+export function rowTitle(row: EvidenceRowView): { text: string; student: boolean } {
+  const own = row.evidence_type === "decision" ? decisionReason(row) : row.text;
+  if (own && own.trim()) return { text: own, student: true };
+  return { text: KIND_LABELS[row.kind as keyof typeof KIND_LABELS] ?? UNRECORDED, student: false };
 }
 
 /** SX-22 — filter the list by kind. `null` means no filter, not the "none" kind. */
