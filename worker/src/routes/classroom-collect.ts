@@ -19,6 +19,7 @@ import { getProfile } from '../profiles';
 import { isMinorCohort } from '../lib/moderation';
 import { COMMAND_TTL_MS, ID_RE, MAX_SEATS, UUIDISH_RE, parseFlags, parseLesson, sha256Hex } from '../lib/classroom-ops';
 import { CONSENT_BASES, PURPOSES, SNAPSHOT_FILES, collectRequestCanonical, collectStatus, normalizeCollectRequest, UPLOAD_GRACE_MS, attributionProblem, eventCoverage, finalLineSha, sha256Bytes, snapshotKey, validateManifest } from '../lib/classroom-collect';
+import { collectOutcome } from '../lib/classroom-recovery';
 import { ERASURE_RETRY_STEPS_MS, MAX_ERASURE_ATTEMPTS, eraseLearnerCollection } from '../lib/classroom-erasure';
 import { opsEnabled } from './classroom-ops';
 
@@ -287,7 +288,7 @@ async function batchView(db: Db, runId: string, id: string) {
   // One observation: the same `now` decides the grace, what counts as recent bytes, and what the instructor is told was seen when.
   const now = Date.now(), live = await db.prepare('SELECT o.flags_json,o.ends_at,s.ended_at FROM class_run_ops o LEFT JOIN sessions s ON s.id=o.class_run_id WHERE o.class_run_id=?').bind(runId).first<{ flags_json: string; ends_at: number; ended_at: string | null }>();
   const closed = !live ? 'run_not_found' : !parseFlags(live.flags_json).ops_collect ? 'ops_collect_disabled' : live.ended_at || now > live.ends_at ? 'run_ended' : '';
-  for (const i of items) { i.request = delivery.get(i.seat_id) ?? null; if (i.state !== 'not_selected') i.status = collectStatus(i as never, { now, upload_until: Number(b.upload_until) }); }
+  for (const i of items) { i.request = delivery.get(i.seat_id) ?? null; if (i.state !== 'not_selected') { i.status = collectStatus(i as never, { now, upload_until: Number(b.upload_until) }); i.outcome = collectOutcome(i.status.phase); } } // U4: the same verdict words as recovery; `resolved` = the Service verified the receipt, never the device's 'sent'
   return { observed_at: now, batch: { ...b, dry_run: b.dry_run === 1, scope: sc.scope, mode: sc.mode, targets: sc.targets, upload_open: now < Number(b.upload_until), new_request_allowed: !closed, new_request_blocked_by: closed }, summary: { roster: items.length, selected: selected.length, not_selected: items.length - selected.length, by_state: by,
     // "Collected" is only what the Service verified. Arrived bytes and complete behaviour coverage are separate counts.
     verified: by.verified ?? 0, verified_complete_coverage: items.filter((i) => i.state === 'verified' && i.coverage === 'complete').length, held: items.filter((i) => ['consent_missing', 'guardian_consent_missing', 'withdrawn'].includes(i.state)).length }, items };
