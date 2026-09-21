@@ -1743,7 +1743,9 @@ export async function consumeSdkStream(
       const msg = (step.value ?? {}) as Record<string, unknown>;
       if (isSdkRetryEvent(msg)) lastRetryStatus = typeof msg.error_status === "number" ? msg.error_status : undefined;
       // A response that came back after the retries answers them: their status no longer describes this turn.
-      else if (msg["type"] === "assistant" && msg["error"] === undefined) lastRetryStatus = undefined;
+      // The CLI's own "API Error: …" line is an assistant message too — it is the failure, not an answer (`error` set, or
+      // the CLI's `<synthetic>` model).
+      else if (msg["type"] === "assistant" && msg["error"] === undefined && (msg["message"] as { model?: unknown } | undefined)?.model !== "<synthetic>") lastRetryStatus = undefined;
       const fatal = sdkFatalAuthStatus(msg);
       if (fatal !== null) {
         // Kill the subprocess's retry loop first, then surface the token error.
@@ -1809,6 +1811,13 @@ export async function consumeSdkStream(
   } catch (err) {
     // `for await` closed the iterator on an early exit; the manual loop must.
     void Promise.resolve(it.return?.()).catch(() => {});
+    // #751 U4 — the real SDK can end a failing turn by THROWING a plain Error after its retries (seen on a real Mac: the
+    // provider answered 5xx eleven times, then query() threw). That error carries no status; this turn's stream did. Only
+    // an error without its own status gets one, and only a status this very stream reported.
+    const standing = end.failed ? end.status ?? lastRetryStatus : lastRetryStatus;
+    if (standing !== undefined && err instanceof Error && (err as { status?: unknown }).status === undefined) {
+      try { Object.defineProperty(err, "status", { value: standing, enumerable: false }); } catch { /* a frozen error stays unclassified */ }
+    }
     throw err;
   }
 }

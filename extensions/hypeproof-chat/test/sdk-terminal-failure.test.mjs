@@ -32,9 +32,9 @@ const never = () => new Promise(() => {});
  * One turn the way chatPanelProvider runs it: the value runSdkCoach returns or the error it throws, mapped by the same
  * code the provider uses, into the TurnOutcome every consumer reads (closeTurn / spool / observation take `ok`).
  */
-async function turn(events, { hang = false } = {}) {
+async function turn(events, { hang = false, throws = null } = {}) {
   const shown = [];
-  const sdk = { query: () => (async function* () { for (const e of events) yield e; if (hang) await never(); })() };
+  const sdk = { query: () => (async function* () { for (const e of events) yield e; if (throws) throw throws; if (hang) await never(); })() };
   let ok = true, errorKind, failure = {};
   try {
     const end = await runSdkCoach({ sdk, binaryResolution: { available: true, reasons: [] }, gatewayUrl: 'http://127.0.0.1:1/v1', token: 't', model: 'm', profile: {}, systemPrompt: '', history: [], userText: 'q', signal: new AbortController().signal, stallTimeoutMs: hang ? 60 : 0, onDelta: (d) => shown.push(d) });
@@ -99,4 +99,19 @@ test('no evidence stays unknown, and a previous turn\'s status is never carried 
   await turn([retry(500), { type: 'result', subtype: 'success', is_error: true, api_error_status: 500 }]);
   const next = await turn([said('다음 질문'), { type: 'result', subtype: 'error_during_execution', is_error: true }]);
   assert.equal(next.outcome.status, undefined); assert.equal(judged(next.outcome).followup.error_class, 'unknown');
+});
+
+test('the real SDK\'s own ending: retries, an API-error message, then query() THROWS a plain Error — the status of this turn\'s retries is the cause', async () => {
+  // Shape seen on a real Mac (run 7): the gateway answered 502 for the provider's 500; the SDK retried, printed
+  // "API Error: 502 …" and threw. Before the fix this came out as `unknown`.
+  const apiError = { type: 'assistant', error: 'server_error', message: { id: 'e', content: [{ type: 'text', text: 'API Error: 502 upstream error (status 500).' }] } };
+  const real = await turn([retry(502), retry(502), apiError], { throws: new Error('Claude Code process exited with code 1') });
+  assert.deepEqual([real.outcome.ok, real.outcome.errorKind, real.outcome.status], [false, 'error', 502]);
+  assert.deepEqual([judged(real.outcome).followup.error_class, judged(real.outcome).verdict.next], ['provider_5xx', 'shared_cause_not_pc']);
+  const synthetic = { type: 'assistant', message: { id: 's', model: '<synthetic>', content: [{ type: 'text', text: 'API Error: 502 upstream error' }] } };
+  assert.equal((await turn([retry(502), synthetic], { throws: new Error('exit 1') })).outcome.status, 502, 'the CLI\'s own API-error line does not count as an answer');
+  const bare = await turn([said('작업 중')], { throws: new Error('boom') });
+  assert.equal(bare.outcome.status, undefined, 'a thrown error with no status in this turn stays unknown'); assert.equal(judged(bare.outcome).followup.error_class, 'unknown');
+  const own = Object.assign(new Error('auth'), { status: 401 }); const kept = await turn([retry(500)], { throws: own });
+  assert.equal(kept.outcome.status, 401, 'an error that already names its status keeps it');
 });

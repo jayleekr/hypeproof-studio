@@ -213,7 +213,7 @@ try {
   await wait(async () => !(await stopShown(chat)), 'the failing turn ended on screen', 900000); const failAfterMs = Date.now() - tAsk, attempts = callsFor('Q-AFTER-RESET').length;
   const failedRow = await I.rowText('A1', /조치: AI 실행 환경 초기화 — 성공 .*→ 문제 남음/); const failedProof = await I.recovery('A1'); assert.match(failedProof, /조치 뒤 검증: 문제 남음 — 원인: .*조치 뒤 학생의 다음 AI 실행이 실패함/);
   const f3 = followups(resetCmd.id); assert.deepEqual(f3.map((f) => [f.disposition, f.check, f.error_class]), [['applied', 'turn_failed', 'provider_5xx']], 'the provider\'s own 5xx, carried from this turn\'s SDK stream'); assert.match(failedProof, /공통 장애입니다 — 이 PC를 다시 초기화하지 마세요/);
-  const sdkExit = await wait(() => turnEnds().filter((e) => e.status === 'error').at(-1), 'the failed turn is in the learner\'s own log'); assert.match(sdkExit.error_kind, /^(stall|sdk_result:[a-z_]+)$/, 'how the SDK ended it is recorded, never guessed');
+  const sdkExit = await wait(() => turnEnds().filter((e) => e.status === 'error').at(-1), 'the failed turn is in the learner\'s own log'); assert.match(sdkExit.error_kind, /^(stall|error|sdk_result:[a-z_]+)$/, 'how the SDK ended it is recorded (run 7: the real SDK threw a plain Error after its retries)');
   faults.provider500 = false; await ask(chat, 'Q-RECOVERED 다시 질문', 'Q-RECOVERED'); await idle(chat); await I.rowText('A1', /입장: 준비 완료/);
   assert.equal((await wait(() => turnEnds().at(-1)?.status === 'ok' && turnEnds().at(-1), 'the good turn is logged as ok')).status, 'ok', 'control: a completed SDK turn stays a success in the same log');
   assert.equal(followups(resetCmd.id).length, 1, 'one answer per action: a later good run does not rewrite what followed the restart'); await I.shot('r3-reset-ready-then-provider-down.png');
