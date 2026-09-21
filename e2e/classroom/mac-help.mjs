@@ -221,8 +221,12 @@ try {
   const startButton = async (text) => { await wait(() => start.evaluate(`[...document.querySelectorAll('button')].some(x=>x.textContent.includes(${JSON.stringify(text)})&&!x.disabled)`), text);
     await start.evaluate(`(()=>{const b=[...document.querySelectorAll('button')].find(x=>x.textContent.includes(${JSON.stringify(text)})&&!x.disabled);b.setAttribute('data-hps-runner',${JSON.stringify(text)});})()`); await press(start, `[data-hps-runner=${JSON.stringify(text)}]`, text); };
   await startButton('수업에 참여하기'); await press(start, '#course-code', 'the code field'); await start.send('Input.insertText', { text: token3 }); await startButton('코드 확인하기');
-  await wait(() => start.evaluate("(()=>{const b=document.querySelector('.studio-primary');return !!b&&!b.disabled})()"), 'the start button for the checked code', 60000); await press(start, '.studio-primary', 'start');
-  chat = await frame(TEXTAREA, 'true', 120000); await connectSeat(win); await helpOpen(chat);
+  await wait(() => start.evaluate("(()=>{const b=document.querySelector('.studio-primary');return !!b&&!b.disabled})()"), 'the start button for the checked code', 60000);
+  // Starting opens the lesson's work folder, which reloads the window. This harness keeps secrets in memory only
+  // (--use-inmemory-secretstorage), so the reloaded window would forget the code just typed; the same code is handed to it
+  // through the dev token file (a harness seam — a real install keeps it in the Keychain, NOT RUN here).
+  writeFileSync(tokenPath, token3, { mode: 0o600 }); await press(start, '.studio-primary', 'start');
+  await sleep(8000); win = (await wait(() => W.workbenches().find((p) => !p.isClosed()), 'the reloaded workbench', 90000)); chat = await enterWork(); await connectSeat(win); await helpOpen(chat);
   await wait(() => q(chat, '[data-help-recipient]', "e.getAttribute('data-help-recipient')"), 'learner 3 sees a recipient');
   const l3 = { question: await q(chat, '[data-help-question]', 'e.value'), cards: await chat.evaluate("document.querySelectorAll('[data-help-share]').length"), leaked: (await helpText(chat)).includes('OLD-LEARNER-DRAFT') || (await helpText(chat)).includes('HELP-Q1') || (await helpText(chat)).includes('HELP-FB1'), turns: await q(chat, '[data-help-turn]', '[...e.options].filter(o=>o.value).length') };
   assert.deepEqual(l3, { question: '', cards: 0, leaked: false, turns: 0 }, 'learner 3 inherits no draft, no request, no feedback and no earlier turn');
@@ -233,7 +237,7 @@ try {
   const result = { schema: 'hps-classroom-mac-help/1', at: new Date().toISOString(), source_sha: head, extension_source_sha: manifest.extension.source_sha, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256 },
     served_manage_sha256: digest(Buffer.from(await (await realFetch('http://127.0.0.1:' + boardPort + '/manage')).arrayBuffer())), manage_source_sha256: sha(path.join(repo, 'chalk/src/ui/manage.html')), service_classroom_ts_sha256: sha(path.join(repo, 'worker/src/routes/classroom.ts')),
     real: ['Studio shell copy', 'current extension build', 'Agent SDK + binary', 'ops connection (pairing code typed in the palette)', 'the help entry in the coach rail', 'Chalk /manage page', 'Service router + SQLite', 'HTTP between app and Service'],
-    made_here: ['accounts, class and tokens (synthetic)', 'model provider (scripted stand-in)', 'A2\'s help request through the Service learner route', 'one dropped answer after the Service stored a POST, with the share list unreadable until the learner retried (local HTTP front)', 'learner 3 entering after an app restart by typing their issued code on the start page'],
+    made_here: ['accounts, class and tokens (synthetic)', 'model provider (scripted stand-in)', 'A2\'s help request through the Service learner route', 'one dropped answer after the Service stored a POST, with the share list unreadable until the learner retried (local HTTP front)', 'learner 3 entering after an app restart by typing their issued code on the start page; the reloaded lesson window receives the same code through the dev token file (in-memory secret storage)'],
     not_run: ['real model', 'Windows', 'school network', 'hosted/staging/production D1/R2', 'children / guardian consent (#1175)', 'several physical devices', 'Keychain-backed installed app'],
     results, provider_calls: providerCalls.length, wire, steps };
   writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 2)); console.log('PASS — AT-47 native help loop → ' + path.join(out, 'result.json'));
