@@ -49,9 +49,10 @@ const endsAt = new Date(Date.now() + HOURS * 3600_000).toISOString();
 await startSession(local.env.HPS_KV, local.cohort, { session_id: local.run, profile_id: local.profile, starts_at: new Date(Date.now() - 60000).toISOString(), ends_at: endsAt }); local.db.prepare('UPDATE sessions SET ends_at=? WHERE id=?').run(endsAt, local.run);
 const seats = ['A1', 'A2', 'A3', 'A4'].map((id, i) => ({ seat_id: id, student_id: prefix + (i + 1) })), course = local.lesson.course_id, V1 = local.lesson.version;
 await setRoster(local.env.HPS_KV, local.cohort, seats.map((s) => s.student_id)); await local.freeze(course, V1, ['intro', 'build', 'review']);
-assert.equal((await local.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true } })).status, 201);
+const AT41 = (process.env.HPS_U4_SCENARIOS || '').split(',').map((x) => x.trim()).includes('AT41'); // distribution is switched on only for the AT-41 scenario
+assert.equal((await local.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true, ...(AT41 ? { ops_distribute: true } : {}) } })).status, 201);
 const { issueIssuer } = await import('../../worker/src/lib/tokens.ts'), { TEST_SECRET } = await import('../../worker/test/harness/index.mjs');
-const teacherToken = (await issueIssuer({ issuer: 'teacher-a', scopes: [{ cohort: local.cohort, profiles: [local.profile], ops: [...OPS_ALL] }] }, HOURS + 1, TEST_SECRET)).token;
+const teacherToken = (await issueIssuer({ issuer: 'teacher-a', scopes: [{ cohort: local.cohort, profiles: [local.profile], ops: [...OPS_ALL, ...(AT41 ? ['distribute'] : [])] }] }, HOURS + 1, TEST_SECRET)).token;
 /** The instructor's existing issuing path (it records the issue and moves the learner's login generation). */
 const invite = async (user) => { const r = await local.request(`/admin/cohorts/${local.cohort}/authoring/${course}/versions/${V1}/participants`, 'POST', { user, hours: HOURS }, teacherToken); assert.equal(r.status, 200, r.raw); return r.json.token; };
 const token = await invite(seats[0].student_id);
@@ -308,6 +309,40 @@ try {
   results.R5 = { paused_line: pausedLine, resumed_line: resumedLine, in_flight_request_finished: true, resumed_run_length: `the stand-in answered after ${SLOW_MS} ms so that the run spans the app's ~5 s status sample; a run SHORTER than the sample interval is not reported as running and stays "not observed" (conservative: never a false "observed")`, mid_turn_followup_request_during_pause: 'NOT RUN in a real window (needs a multi-request turn crossing the pause)' }; step('R5 pause held a new run (input kept), let the streaming request finish, counted only devices that reported; after resume the learner\'s own run was seen', {});
 
   }
+  if (want('AT41')) {
+  // ── AT41: three kinds of action from the Chalk page to the real window, one after another, each keeping its own result card. The
+  // learner side is the real app: its command runner answers the diagnosis, its real session spool is collected, its real inbox
+  // takes the notice. A3 (never connected) and A4 (no command capability) are selected on purpose; A2 never is.
+  const served = Buffer.from(await (await realFetch('http://127.0.0.1:' + boardPort + '/manage')).arrayBuffer()); assert.equal(digest(served), sha(path.join(repo, 'chalk/src/ui/manage.html')), 'the board serves this source');
+  await palette(win, '수업 기록 보내기 동의·철회'); const agree41 = '동의하고 보내기 허용';
+  await wait(() => win.evaluate((t) => { const b = [...document.querySelectorAll('.monaco-dialog-box .monaco-button, .monaco-dialog-box a.monaco-button')].find((x) => x.textContent.trim() === t); if (!b) return false; b.click(); return true; }, agree41), 'the consent dialog'); await wait(async () => (await toasts(win)).some((t) => t.includes('동의를 기록했습니다')), 'consent recorded');
+  const card = (k) => page.locator(`#ops-ledger-list .ledger-card[data-key="${k}"]`), cardLine = async (k, seat) => (await card(k).locator('.ledger-items > p').allTextContents()).find((l) => l.startsWith(seat + ' ')) ?? '';
+  const pickSeats = async (ids) => { await I.refresh(); await page.locator('#ops-select-none').click(); for (const id of ids) await I.row(id).getByLabel('선택').check(); };
+  // 1 — diagnosis to A1 + A3 + A4
+  await pickSeats(['A1', 'A3', 'A4']); await page.locator('#ops-bulk-diagnose').click(); await wait(() => db("SELECT id FROM ops_commands WHERE action='retry_diagnostics' ORDER BY created_at DESC LIMIT 1")[0], 'command recorded');
+  const C = 'command:' + db("SELECT id FROM ops_commands WHERE action='retry_diagnostics' ORDER BY created_at DESC LIMIT 1")[0].id;
+  // 2 — collection of A1, started while the diagnosis may still be open
+  await pickSeats(['A1']); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.locator('#ops-pick-go').click(); await page.locator('#ops-pick-note').filter({ hasText: '요청을 접수했습니다' }).waitFor();
+  const K = 'collect:' + db('SELECT id FROM classroom_collect_batches WHERE dry_run=0 ORDER BY created_at DESC LIMIT 1')[0].id;
+  // 3 — a notice to A1 + A3 (A3 has never connected)
+  if (!(await page.locator('#ops-dist').evaluate((d) => d.open))) await page.locator('#ops-dist-summary').click();
+  await page.locator('#ops-dist-title').fill('[합성] 다음 시간 준비물'); await page.locator('#ops-dist-body').fill('노트북 충전기를 가져오세요.'); await page.locator('#ops-dist-save').click(); await page.locator('#ops-dist-saved').filter({ hasText: '저장했습니다' }).waitFor();
+  await pickSeats(['A1', 'A3']); await page.locator('#ops-dist-preview').click(); await page.locator('#ops-dist-confirm').waitFor(); await page.locator('#ops-dist-go').click(); await page.locator('#ops-dist-items').filter({ hasText: 'A1 · ' }).waitFor();
+  const D = 'distribution:' + db('SELECT id FROM classroom_distributions ORDER BY created_at DESC LIMIT 1')[0].id;
+  // Each card reaches the real app's own answer by itself (no click on the cards).
+  const cLine = await wait(async () => { const l = await cardLine(C, 'A1'); return /\[적용 \(기기가 실행함\)\]/.test(l) ? l : null; }, 'A1 diagnosis executed on its card', 120000);
+  const kLine = await wait(async () => { const l = await cardLine(K, 'A1'); return /\[적용 \(서버 검증\)\]/.test(l) ? l : null; }, 'A1 record verified on its card', 180000);
+  const dLine = await wait(async () => { const l = await cardLine(D, 'A1'); return /\[적용 \(보관함 반영\)\]/.test(l) ? l : null; }, 'A1 notice in its inbox on its card', 120000);
+  const keys = await page.locator('#ops-ledger-list .ledger-card').evaluateAll((l) => l.map((x) => x.dataset.key)); assert.deepEqual(keys, [D, K, C], 'three cards, newest first — the diagnosis was not replaced by the later actions');
+  const lines = {}; for (const k of keys) lines[k] = await card(k).locator('.ledger-items > p').allTextContents();
+  assert.match(lines[C].join('\n'), /A3 · .* — \[미전달·만료·대상 변경\]/); assert.match(lines[C].join('\n'), /A4 · .* — \[실패\] 이 앱 버전은 지원하지 않음/); assert.match(await cardLine(D, 'A3'), /\[접수\] 전달: 접수 — 기기 연결 없음/);
+  assert.match(kLine, /서버 검증됨 · .* · 기록 범위 /, 'a verified record says its real extent'); for (const k of keys) assert.doesNotMatch(lines[k].join('\n'), new RegExp('^A2 ', 'm'), 'A2 is never a recipient');
+  const sums = {}; for (const k of keys) sums[k] = { sum: await card(k).locator('.ledger-sum').innerText(), extra: await card(k).locator('.ledger-extra').innerText(), seen: await card(k).locator('.ledger-seen').innerText() };
+  await page.locator('#ops-ledger').scrollIntoViewIfNeeded(); await I.shot('at41-01-board-three-cards.png'); await W.shot(win, 'at41-02-learner-window.png');
+  const draft41 = await draftOf(chat); assert.deepEqual(workFiles(), KEPT);
+  results.AT41 = { served_manage_sha256: digest(served), cards: keys, lines, summaries: sums, a1: { diagnosis: cLine, collection: kLine, notice: dLine }, learner_draft: draft41, work_files: workFiles(), a2_targets: db("SELECT count(*) n FROM ops_command_targets WHERE seat_id='A2'")[0].n + db("SELECT count(*) n FROM classroom_distribution_targets WHERE seat_id='A2'")[0].n };
+  step('AT41 diagnosis → collection → notice to the real window: three cards, each with its own truthful stage; A3/A4 named; A2 untouched', { a1: [cLine.slice(0, 60), kLine.slice(0, 60), dLine.slice(0, 60)] });
+  }
   if (want('R6')) {
   // ── R6 upload (U1 contract, reused): consent on the device, request from Chalk, and only the Service's verification counts ──
   await palette(win, '수업 기록 보내기 동의·철회'); const agree = '동의하고 보내기 허용';
@@ -366,7 +401,7 @@ try {
 
   }
   assert.equal(a2Runs, 0, 'the never-selected seat ran nothing in the whole session'); assert.equal(db("SELECT count(*) n FROM ops_command_targets WHERE seat_id='A2'")[0].n, 0);
-  const result = { schema: 'hps-classroom-mac-recovery/1', at: new Date().toISOString(), scenarios_run: ['R0', ...SCENARIOS], scenarios_not_run_here: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'BOARD'].filter((x) => !want(x)), source_sha: head, extension_source_sha: manifest.extension.source_sha, extension_bundles: manifest.extension.bundles, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256, route_seen: '/v1/messages' }, how: 'instructor = clicks on the Chalk page (visible Chromium); learner = real Studio window over the debugging port (real mouse input for webview controls)',
+  const result = { schema: 'hps-classroom-mac-recovery/1', at: new Date().toISOString(), scenarios_run: ['R0', ...SCENARIOS], scenarios_not_run_here: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7', 'BOARD', 'AT41'].filter((x) => !want(x)), source_sha: head, extension_source_sha: manifest.extension.source_sha, extension_bundles: manifest.extension.bundles, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256, route_seen: '/v1/messages' }, how: 'instructor = clicks on the Chalk page (visible Chromium); learner = real Studio window over the debugging port (real mouse input for webview controls)',
     real: ['Studio shell copy', 'current extension build', 'Agent SDK + binary', 'ops sync loop and command runner', 'Chalk page', 'Service router + SQLite', 'HTTP between app and Service', 'live preview server and browser tab'],
     made_here: ['accounts, class and tokens (synthetic)', 'model provider (scripted stand-in; "provider down" = it answers 500)', '"/v1/health does not answer OK" at the local HTTP front', 'the learner page moved away and back by the runner', 'the preview server dropped by the test-only HPS_TEST_PREVIEW_FAULT trigger', 'an unrelated localhost tool served by the runner', 'seat A2 (real device client in this process), A3 (never connected), A4 (no command capability)', 'the new code carried from the issuing page to the start page by the runner (as a person would read it out)'],
     not_run: ['real model', 'school network / real outage', 'Windows', 'several physical devices', 'staging or production D1/R2', 'mail', 'Keychain-backed installed app', 'a multi-request turn crossing a pause in a real window'],
