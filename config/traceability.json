@@ -2185,6 +2185,9 @@
           "path": "e2e/classroom/mac-demo-board.mjs"
         },
         {
+          "path": "e2e/classroom/ops-selection.mjs"
+        },
+        {
           "path": "worker/migrations/0022-classroom-collect-scope.sql"
         },
         {

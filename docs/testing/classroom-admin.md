@@ -493,6 +493,16 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 | UI → Service → 실제 host (브라우저 e2e, 30석) `ops-roster.mjs` | 전체 30/연결됨 11/미연결 19/도움 필요/해제(해제 시 회수 버튼 비활성) → S01·S02·S12 수동 선택 → 미리 확인(1명 요청·제외 2명 사유·비선택 27명 무접촉, 명령 0) → 선택 변경 시 확인 철회 → 더블클릭 요청 = 배치 1 → **실제 ClassroomOpsHost + 실제 SessionSpool**이 S01 기록 업로드 → ‘서버 검증됨 · 순번 연속’ · 결과 확정 문구 · 객체는 student-01만 · 평가/보고서 UI 미개방 · ‘도착하지 않은 대상만 다시 선택’ = S12만 · `collect` 전용 강사 화면(회수 버튼만) | 7 PASS (CI `classroom / browser`에 포함) |
 | **실제 Mac** `mac-demo.mjs`(HPS_DEMO_PREPARE_A1=1) + `mac-demo-board.mjs` | 실제 Studio 창(A1): 1회용 코드 연결 → 실제 1턴 → 실제 창에서 동의. **실제 Chalk `/manage`(보이는 브라우저 창)**: A1 선택 → 미리 확인 → 요청 → `A1 — 서버 검증됨 · 기록 순번 연속 · 시작과 끝 확인됨`. 합성 좌석 A2·A3은 **연결+동의 상태**(선택만이 제외 이유)에서 `not_selected`, 회수 명령 target은 A1 하나(`succeeded · receipt_verified`), R2 객체 2개 모두 A1, 평가 입력 0·평가 호출 0·메일 0 | PASS — `result.json`·화면 2장은 devhost `board/`. source `c15e77a` + 실행기 수정(같은 커밋 묶음), shell 0.1.56 복사본, SDK 0.3.207, 확장 소스는 `4278b8d` 이후 불변 |
 
+**UI 보완 · 같은 날 (독립 검토가 `b222c34`의 실제 브라우저에서 재현한 2건, 증거는 `management-20260921/ui-stale-preview-*`·`ui-failed-retry.*`).** P1: 지연된 미리 확인 응답이 명단 교체 뒤 도착해 ‘선택한 좌석 없음’ 옆에 ‘A1 · student-a — 요청 예정’ 확인을 다시 열었고, 확정하면 새 좌석 주인(student-c)에게 회수 명령이 나갔다(revision을 `await` 뒤에 읽음). P2: `failed`로 끝난 요청이 ‘진행 중 1’로도 세어져 재선택 버튼이 숨었다. 수정은 `017f02c`.
+
+| 층 | 무엇을 | 결과 |
+|---|---|---|
+| 실제 브라우저(Chromium) + 실제 Chalk 페이지 + Service(SQLite), 합성 8석 — `e2e/classroom/ops-selection.mjs`. 응답 **도착 시점**은 네트워크 층에서 붙잡아 제어(Service는 이미 처리함), 업로드 명령의 종료 상태는 원장에 직접 기록(실제 기기를 지시대로 실패시킬 수 없음) | 대조군: 방해 없는 미리 확인→확정은 본 좌석 그대로 요청 · **지연 응답**: 선택 변경 뒤 / 선택 해제 뒤(버튼이 되살아나지 않음) / 더 새로운 미리 확인 뒤(역순 도착, 새 미리 확인 유지) / 취소 → 확인 화면 미개방, 실제 요청 0 · **재현 결함**: A1(a) 미리 확인 지연 → 정상 configure·pair·consent로 A1을 student-i(명단 2)로 교체 → 새로 확인 → 선택 비움·체크박스 0 → 옛 응답 도착 → 확인 미개방·미리 보기 빈칸 → 숨은 확정 버튼을 강제로 눌러도 student-i에게 명령 0 → 이어서 정상 경로로 student-i를 확인·확정하면 revision 2·student-i로 기록 · **확정 응답 역순**: 최신 확정이 결과 영역 유지, 이전 확정은 ‘접수되었습니다’로 고지, 두 배치 각 1건 · **P2**: 한 배치에 queued / 검증됨 / 전송 중 / failed(upload_failed) / rejected / expired / unsupported / outcome_unknown → `검증됨 1 · 기기 응답 대기 1 · 전송·검증 대기 1 · 실패·미도착 4 · 결과 미확인 1`, 미확인 줄에 ‘성공으로 세지 않습니다’, 진행 중이 남아도 재선택 버튼 표시(‘실패·미확인 5명만 … 진행 중 2명은 제외’), 누르면 A4~A8만 선택되고 아무것도 요청되지 않음, 유예·새 요청 안내 문구 | 5 PASS. **음성 대조군:** 같은 시험을 `b222c34`의 `manage.html`로 돌리면 FAIL(대조군 1건만 통과). CI `classroom / browser`에 추가 |
+| 기존 브라우저 e2e 4종 + Chalk 시험 | 문구 변경 반영(`ops-roster.mjs`의 결과 요약·선택 변경 안내) | 전부 PASS |
+| 실제 Mac (정상 경로 보존) `mac-demo.mjs` + `mac-demo-board.mjs`, source `017f02c` | 실제 창 A1 준비 → 보이는 Chalk 창에서 A1 선택 → 미리 확인 → 확정 → `검증됨 1 · … · 실패·미도착 0 · 결과 미확인 0 · … · 결과 확정`, A2·A3 `not_selected`, 평가 입력·호출 0 | PASS |
+
+**이 보완에서 관측하지 않은 것(NOT RUN).** 실제 Studio 기기에서의 업로드 실패·거절·만료·결과 미확인(원장 상태를 직접 넣어 본 것이 전부다), 실제 기기 2대 이상에서의 지연·역순 응답, Safari/Firefox, 느린 실제 네트워크. Service 경계(멱등·fail-closed·커밋 경계 원자성)는 바꾸지 않았고 Service 시험 12건과 독립 재현 2건을 같은 커밋에서 다시 실행해 통과했다.
+
 **실제/합성 경계.** 실제: Studio shell 복사본·확장·SDK·spool·freezer·업로드, Chalk UI, Service 라우터+SQLite. 합성: 계정·강의·모델 응답·좌석 A2/A3(그리고 e2e의 S02~S30)·R2(in-memory). 여러 좌석 동시성은 합성 좌석으로만 봤고 실제 기기는 1대다.
 
 **남은 한계.** 실제 기기 2대 이상에서의 선택/비선택 대조, Windows, 학교망, staging D1에서의 0022 적용과 조건부 batch(D1의 트랜잭션 의미는 로컬 workerd D1 리허설까지만), 재시작 전 세션을 합친 회수, `coverage_reason`의 화면 표시는 NOT RUN/미구현. 학생 프롬프트·승인 결과물의 대상 회수, 배포(U2~), 세 흐름 공통 결과 화면은 이 단계 범위 밖이다.
