@@ -180,3 +180,79 @@ test('token re-entry: a code for the activity already open keeps the learner\'s 
   assert.equal(reentryWorkspace({ candidateActivity: A, record: null, recordServiceMatches: false, openFolder: '/learner/ws', runningActivity: B }), undefined, 'a different running activity');
   assert.equal(reentryWorkspace({ candidateActivity: undefined, record: rec, recordServiceMatches: true, openFolder: '/x', runningActivity: A }), undefined, 'no activity id: nothing to match');
 });
+
+// ── #751 U4 review P1 — the pinned-tab load never reaches another tab. The real BrowserControl, bundled with `vscode` and the
+// CDP session replaced by fakes that record which tab every CDP call went to. ──
+async function pinnedWorld(t) {
+  const dir = await mkdtemp(join(tmpdir(), 'hps-pinned-')); t.after(() => rm(dir, { recursive: true, force: true }));
+  const out = join(dir, 'bc.cjs');
+  await build({ entryPoints: [fileURLToPath(new URL('../src/browserControl.ts', import.meta.url))], outfile: out, bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent',
+    plugins: [{ name: 'fakes', setup(b) {
+      b.onResolve({ filter: /^vscode$/ }, () => ({ path: 'vscode', namespace: 'fake' }));
+      b.onResolve({ filter: /\/cdpSession$/ }, () => ({ path: 'cdp', namespace: 'fake' }));
+      b.onLoad({ filter: /^vscode$/, namespace: 'fake' }, () => ({ contents: 'module.exports={window:globalThis.__pinned.window,ViewColumn:{Beside:-2}};', loader: 'js' }));
+      b.onLoad({ filter: /^cdp$/, namespace: 'fake' }, () => ({ contents: 'module.exports={CdpSession:{attach:(tab)=>globalThis.__pinned.attach(tab)}};', loader: 'js' }));
+    } }] });
+  const student = { name: 'student', url: 'http://127.0.0.1:41000/game.html' }, other = { name: 'unrelated', url: 'http://localhost:5173/admin' };
+  const w = { calls: [], tabs: [other, student], hooks: {}, origin: 1 };
+  w.window = { get browserTabs() { return w.tabs; }, get activeBrowserTab() { return w.tabs.find((x) => x.name === 'unrelated') ?? w.tabs[0]; } };
+  w.attach = async (tab) => { let closeFns = []; const s = {
+    send: async (method, params) => {
+      w.calls.push({ tab: tab.name, method }); const n = w.calls.filter((c) => c.method === method).length;
+      await w.hooks[method + '#' + n]?.({ tab, fireClose: () => closeFns.forEach((f) => f()) });
+      if (method === 'Page.navigate') { tab.url = params.url; w.origin++; return {}; }
+      return { result: { value: JSON.stringify({ h: tab.url, r: 'complete', t: tab.name === 'student' ? w.origin : 1 }) } };
+    },
+    onDidClose: (f) => { closeFns.push(f); return { dispose() { closeFns = closeFns.filter((x) => x !== f); } }; },
+    close: async () => {},
+  }; return s; };
+  globalThis.__pinned = w;
+  const { BrowserControl } = createRequire(import.meta.url)(out);
+  const load = async () => { const bc = new BrowserControl(); bc.setTargetTab(student); try { return await bc.loadInPinnedTab('http://127.0.0.1:42000/game.html', 800); } finally { await bc.dispose(); } };
+  return { w, student, other, load, BrowserControl };
+}
+
+test('pinned load, positive control: a stable learner tab is the only tab any CDP call reaches, and it reports the fresh page', async (t) => {
+  const { w, load } = await pinnedWorld(t);
+  assert.deepEqual(await load(), { href: 'http://127.0.0.1:42000/game.html', complete: true, fresh: true });
+  assert.ok(w.calls.length >= 3 && w.calls.every((c) => c.tab === 'student'), JSON.stringify(w.calls));
+});
+
+test('pinned load, negative controls: the learner tab closing or being replaced at any await ends the load with null — nothing is sent to another tab', async (t) => {
+  const cases = {
+    'closed during the first document read': { 'Runtime.evaluate#1': ({ tab }) => { tab.gone = true; } },
+    'closed during navigation': { 'Page.navigate#1': ({ tab }) => { tab.gone = true; } },
+    'closed while waiting for the new document': { 'Runtime.evaluate#2': ({ tab }) => { tab.gone = true; } },
+    'its CDP session closed': { 'Runtime.evaluate#1': ({ fireClose }) => fireClose() },
+    'replaced by another tab object at the same address': { 'Runtime.evaluate#1': ({ tab }) => { tab.gone = true; tab.replacement = true; } },
+  };
+  for (const [label, hooks] of Object.entries(cases)) {
+    const { w, student, other, load } = await pinnedWorld(t);
+    w.hooks = Object.fromEntries(Object.entries(hooks).map(([k, f]) => [k, (a) => { f(a); if (student.gone) w.tabs = w.tabs.filter((x) => x !== student).concat(student.replacement ? [{ name: 'replacement', url: student.url }] : []); }]));
+    assert.equal(await load(), null, label);
+    assert.ok(w.calls.every((c) => c.tab === 'student'), label + ': ' + JSON.stringify(w.calls));
+    assert.equal(other.url, 'http://localhost:5173/admin', label + ': the unrelated tab was not navigated');
+  }
+});
+
+test('pinned load leaves the coach\'s own fallback alone: with no live pinned tab the coach still drives the active tab', async (t) => {
+  const { w, BrowserControl } = await pinnedWorld(t);
+  const bc = new BrowserControl(); assert.equal(bc.currentTab()?.name, 'unrelated', 'the coach falls back to the active tab as before');
+  assert.equal(await bc.loadInPinnedTab('http://127.0.0.1:42000/x.html'), null, 'the pinned load has nothing to load into'); assert.equal(w.calls.length, 0);
+});
+
+// ── #751 U4 review P2 — every page a learner tab will be said to show is judged on its own ──
+test('preview recovery with several learner pages: one 404 or one that does not answer is not a recovery and moves no tab; all good = loaded', async () => {
+  const GOOD = 'http://127.0.0.1:41000/good.html', MISSING = 'http://127.0.0.1:41000/missing.html?x=1';
+  const world = (answers) => { const w = tabWorld([GOOD, MISSING, TOOL, SITE]); w.deps.fetchPage = async (url) => { w.log.fetched.push(url); const a = answers[new URL(url).pathname]; if (a === 'throw') throw new Error('refused'); return a; }; return w; };
+  const html = { status: 200, contentType: 'text/html' };
+  const missing = world({ '/good.html': html, '/missing.html': { status: 404, contentType: 'text/plain' } });
+  assert.deepEqual(await recoverLearnerPreview(missing.deps), { state: 'restarted', artifact: 'missing', tabs: 'not_loaded' });
+  assert.deepEqual(missing.log.fetched, ['http://127.0.0.1:42000/good.html', 'http://127.0.0.1:42000/missing.html?x=1'], 'each learner path, with its own query, is judged');
+  assert.deepEqual([missing.log.loaded, missing.log.closed, missing.log.opened], [[], [], []], 'no tab moves when one page is not there');
+  const down = world({ '/good.html': html, '/missing.html': 'throw' }); assert.deepEqual(await recoverLearnerPreview(down.deps), { state: 'restarted', artifact: 'unreachable', tabs: 'not_loaded' });
+  const five = world({ '/good.html': html, '/missing.html': { status: 503, contentType: 'text/html' } }); assert.equal((await recoverLearnerPreview(five.deps)).artifact, 'unreachable');
+  const good = world({ '/good.html': html, '/missing.html': html }); assert.deepEqual(await recoverLearnerPreview(good.deps), { state: 'restarted', artifact: 'opened', tabs: 'loaded' });
+  assert.deepEqual(good.log.loaded.map(([, u]) => u), ['http://127.0.0.1:42000/good.html', 'http://127.0.0.1:42000/missing.html?x=1']);
+  for (const w of [missing, down, five, good]) { assert.equal(w.tabs.find((x) => x.id === 'tab-3').url, TOOL); assert.equal(w.tabs.find((x) => x.id === 'tab-4').url, SITE); assert.ok(w.log.fetched.every((u) => u.startsWith('http://127.0.0.1:42000/')), 'the unrelated tool is never asked'); }
+});

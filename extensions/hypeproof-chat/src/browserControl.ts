@@ -110,28 +110,46 @@ export class BrowserControl {
   }
 
   /**
-   * #751 U4 — load `url` in the PINNED tab only and report the document that tab then holds. Never falls back to the active
-   * tab and never opens one: a pinned tab that is gone answers null. `fresh` = a new document replaced the one that was
-   * there (its time origin moved), so an old page that was already "complete" cannot pass for the new one.
+   * #751 U4 — load `url` in the PINNED tab only and report the document that tab then holds. The whole operation runs on
+   * one CDP session attached to that tab object — never `cdp()`, whose `currentTab()` falls back to the active tab once the
+   * pinned one is gone (the coach wants that fallback; this must never have it). If the tab leaves `browserTabs` or its
+   * session closes at any point, the answer is null: nothing is sent after that, and nothing is reported as loaded.
+   * `fresh` = a new document replaced the one that was there (its time origin moved), so an old page that was already
+   * "complete" cannot pass for the new one.
    */
   async loadInPinnedTab(url: string, timeoutMs = 10_000): Promise<{ href: string; complete: boolean; fresh: boolean } | null> {
     const tab = this.targetTab;
-    if (!tab || !(vscode.window.browserTabs ?? []).includes(tab)) return null;
+    if (!tab) return null;
+    const alive = () => (vscode.window.browserTabs ?? []).includes(tab);
+    if (!alive()) return null;
+    let session: CdpSession;
+    try { session = await CdpSession.attach(tab); } catch { return null; }
+    let closed = false;
+    const sub = session.onDidClose(() => { closed = true; });
+    const gone = () => closed || !alive();
     const doc = async () => {
-      const r = await (await this.cdp()).send("Runtime.evaluate", { expression: "JSON.stringify({h:location.href,r:document.readyState,t:performance.timeOrigin})", returnByValue: true }).catch(() => null);
+      if (gone()) return null;
+      const r = await session.send("Runtime.evaluate", { expression: "JSON.stringify({h:location.href,r:document.readyState,t:performance.timeOrigin})", returnByValue: true }).catch(() => null);
+      if (gone()) return null;
       try { const v = JSON.parse(String(r?.result?.value)); return { href: String(v.h), complete: v.r === "complete", origin: Number(v.t) }; } catch { return null; }
     };
     try {
-      const before = (await doc())?.origin ?? 0;
-      await (await this.cdp()).send("Page.navigate", { url });
+      const first = await doc();
+      if (gone()) return null;
+      const before = first?.origin ?? 0;
+      await session.send("Page.navigate", { url });
       const until = Date.now() + timeoutMs;
       for (;;) {
         const d = await doc();
+        if (gone()) return null;
         if (d && d.complete && d.origin > before) return { href: d.href, complete: true, fresh: true };
         if (Date.now() > until) return d ? { href: d.href, complete: d.complete, fresh: d.origin > before } : null;
         await sleep(250);
       }
-    } catch { return null; }
+    } catch { return null; } finally {
+      try { sub.dispose(); } catch { /* already gone */ }
+      await session.close().catch(() => {});
+    }
   }
 
   async dispose(): Promise<void> {

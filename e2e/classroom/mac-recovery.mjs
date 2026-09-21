@@ -162,6 +162,10 @@ async function instructor() { browser = await chromium.launch({ headless: proces
 }
 
 const results = {};
+// HPS_U4_SCENARIOS=R4 (comma list) runs R0 + only those scenarios — e.g. to re-check the preview path without repeating the
+// three-minute provider failure of R3. Unset = all of R1..R7. What was skipped is written into result.json.
+const SCENARIOS = (process.env.HPS_U4_SCENARIOS || 'R1,R2,R3,R4,R5,R6,R7').split(',').map((x) => x.trim()).filter(Boolean), want = (id) => SCENARIOS.includes(id);
+let KEPT = { changed: [], added: [] }, release;
 try {
   launch(); let win = await attach(); let chat = await enterWork(); await connectSeat(win);
   const I = await instructor(), { page } = I;
@@ -169,6 +173,7 @@ try {
   await I.rowText('A1', /입장: 준비 완료/); const sdkRoute = wire.some((w) => w.path === '/v1/messages' && w.status === 200); assert.ok(sdkRoute, 'the learner window really ran the Agent SDK route');
   step('R0 a real window is connected and a real Agent SDK turn completed', { provider_calls: providerCalls.length });
 
+  if (want('R1')) {
   // ── R1 diagnostics: selected A1 + offline A3 + old-app A4; A2 is NOT selected. The fault is a /v1/health that does not answer OK. ──
   faults.health503 = true; await I.refresh(); await page.locator('#ops-select-none').click(); for (const id of ['A1', 'A3', 'A4']) await I.row(id).getByLabel('선택').check();
   assert.match(await I.T('ops-selection'), /선택 3 \/ 전체 4석/); const targetsBefore = db("SELECT count(*) n FROM ops_command_targets WHERE seat_id='A2'")[0].n;
@@ -179,8 +184,10 @@ try {
   faults.health503 = false; const fixed = (await I.act('A1', '진단 다시 실행', /해결 확인 1/)).replace(/\s+/g, ' '); assert.match(fixed, /선택한 전원 해결 확인.*A1: 성공 — 토큰 정상 → 문제 해결 확인 · 학생 PC에서 서버 연결과 토큰이 정상임을 확인함/);
   results.R1 = { bulk, fixed, unselected_A2: { new_targets: 0, executor_runs: a2Runs } }; step('R1 diagnosis that finished is not a fix: fault → 문제 남음, offline/old app → 실행되지 않음, unselected untouched; fault removed → 해결 확인', { a2Runs });
 
+  }
+  if (want('R2')) {
   // ── R2 a REAL running SDK turn is stopped; the unsent draft, a pasted image and a parked message are compared with what was there BEFORE ──
-  let release; holdGate = new Promise((r) => { release = r; }); const before = providerCalls.length;
+  holdGate = new Promise((r) => { release = r; }); const before = providerCalls.length;
   await setDraft(chat, 'HOLD-STOP 오래 걸리는 질문'); await pressEnter(chat); await wait(() => callsFor('HOLD-STOP').length > 0, 'the held question reached the provider'); await wait(() => stopShown(chat), 'the turn is running on screen');
   await setDraft(chat, 'Q-PARKED 예약해 둔 다음 질문'); await pressEnter(chat); await wait(async () => (await parkedOf(chat)) !== null, 'the message is parked');
   await setDraft(chat, 'DRAFT-U4 아직 보내지 않은 글'); await pasteImage(chat, 'u4.png'); await wait(async () => (await attachments(chat)) === 1, 'the pasted image is attached');
@@ -196,12 +203,14 @@ try {
   await pressEnter(chat); await wait(() => callsFor('Q-PARKED').length > 0, 'the learner\'s own next question ran'); await answered(chat, baseline.answers + 1); await idle(chat);
   // Sending a pasted image stores it as the LEARNER'S own file (existing behaviour). It is the only file that may appear, it appears
   // because the learner sent it, and from here on it is part of what must not change.
-  const learnerMade = workFiles().added; assert.deepEqual(workFiles().changed, []); assert.ok(learnerMade.length === 1 && /^assets\/pasted-\d{8}-\d{6}-\d+\.png$/.test(learnerMade[0]), 'only the image the learner sent was added: ' + learnerMade.join(' ')); const KEPT = { changed: [], added: learnerMade };
+  const learnerMade = workFiles().added; assert.deepEqual(workFiles().changed, []); assert.ok(learnerMade.length === 1 && /^assets\/pasted-\d{8}-\d{6}-\d+\.png$/.test(learnerMade[0]), 'only the image the learner sent was added: ' + learnerMade.join(' ')); KEPT = { changed: [], added: learnerMade };
   const resumed = await I.rowText('A1', /조치: 현재 AI 실행 중지 — 성공 .*→ 문제 해결 확인/); const stopProof = await I.recovery('A1'); assert.match(stopProof, /조치 뒤 검증: 문제 해결 확인 · 조치 뒤 학생의 다음 AI 실행이 끝까지 완료됨 · 관측 /);
   assert.deepEqual(followups(stopCmd.id).map((f) => [f.disposition, f.check, f.runtime]), [['applied', 'turn_completed', 'agent-sdk']]);
   results.R2 = { baseline: { ...baseline, draft_sha256: digest(baseline.draft), parked_sha256: digest(baseline.parked ?? '') }, after_stop: { ...afterStop, draft_sha256: digest(afterStop.draft) }, stop_line: stopLine, resumed_row: resumed, recovery_block: stopProof, followups: followups(stopCmd.id), held_provider_calls: providerCalls.slice(before).filter((c) => c.held).length };
   step('R2 a running Agent SDK turn was stopped from Chalk; draft + image + parked message + files preserved against the BEFORE values; nothing auto-sent; resolved only after the learner\'s own next run', { followups: followups(stopCmd.id).length });
 
+  }
+  if (want('R3')) {
   // ── R3 preserving restart while the PROVIDER is down (a shared cause): ready ≠ running, and the PC is not blamed ──
   await setDraft(chat, 'DRAFT-RESET 초기화 전에 쓰던 글'); const draftBeforeReset = await draftOf(chat); faults.provider500 = true;
   const resetLine = (await I.act('A1', 'AI 실행 환경 초기화', /대화·입력·파일 보존 확인/)).replace(/\s+/g, ' '); assert.match(resetLine, /해결 확인 0 .*실행됨·해결 확인 전 1/); assert.match(resetLine, /멈춤·보존 대조·재시작까지 확인함\(비용 없는 준비 확인\)/);
@@ -219,6 +228,8 @@ try {
   assert.equal(followups(resetCmd.id).length, 1, 'one answer per action: a later good run does not rewrite what followed the restart'); await I.shot('r3-reset-ready-then-provider-down.png');
   results.R3 = { reset_line: resetLine, failed_row: failedRow, recovery_block: failedProof, followups: f3, draft_kept: true, provider_attempts_before_the_sdk_gave_up: attempts, ms_until_the_failing_turn_ended: failAfterMs, sdk_exit: sdkExit.error_kind, spool_status: sdkExit.status }; step('R3 restart = READY (no model call); the next run failed for a shared cause → 문제 남음, never "fixed by resetting the PC"', { error_class: f3[0].error_class });
 
+  }
+  if (want('R4')) {
   // ── R4 preview: the learner's REAL preview tab on the real live server, next to an unrelated localhost tool tab (opened FIRST)
   // and an outside site. Only the learner's tab may be judged, re-loaded or moved; the others keep their tab, address and page. ──
   const openTab = async (url) => { const before = new Set((await browserTabsNow()).map((t) => t.id)); await palette(win, 'Open Integrated Browser');
@@ -246,6 +257,8 @@ try {
   results.R4 = { preview_url: previewUrl.replace(/:\d+\//, ':<port>/'), missing_line: missingLine, opened_line: openedLine, new_port_line: movedLine, new_port: { old_port_differs: true, same_tab_target: sameTab, document: { state: doc.state, visibility: doc.visible, path: new URL(doc.href).pathname, marker_seen: true } }, unrelated_tabs_kept: await others(), unrelated_tool_requests_during_recovery: 0, fault: 'HPS_TEST_PREVIEW_FAULT (test-only env; the app closes its own preview server socket, keeps root/address)' };
   step('R4 preview: 404 = 문제 남음; same address re-loaded = 해결 확인; a dead server moved ONLY the learner\'s tab to a new port and its page is in that tab; the unrelated tool/site tabs were untouched', { same_tab_target: sameTab });
 
+  }
+  if (want('R5')) {
   // ── R5 pause / resume: the Service's block, this device's hold and a run after the resume are three observations ──
   holdGate = new Promise((r) => { release = r; }); await setDraft(chat, 'HOLD-PAUSE 일시정지 전에 시작한 질문'); await pressEnter(chat); await wait(() => callsFor('HOLD-PAUSE').length > 0, 'a request is streaming'); const a5 = await answers(chat);
   await I.refresh(); await page.locator('#ops-pause').click(); assert.match(await I.T('ops-pause-impact'), /이미 응답을 받고 있는 요청은 끊지 않습니다/); await page.locator('#ops-pause-go').click();
@@ -263,6 +276,8 @@ try {
   await wait(async () => /재개 뒤 AI 실행 관측됨/.test(await I.recovery('A1')), 'a run after the resume was seen'); const resumedLine = await I.T('ops-control-state'); assert.match(resumedLine, /재개 뒤 AI 실행이 관측된 좌석 1석/); assert.equal((await seatNow('A1')).step?.lesson_version ?? V1, V1); await I.shot('r5-pause-resume.png');
   results.R5 = { paused_line: pausedLine, resumed_line: resumedLine, in_flight_request_finished: true, resumed_run_length: `the stand-in answered after ${SLOW_MS} ms so that the run spans the app's ~5 s status sample; a run SHORTER than the sample interval is not reported as running and stays "not observed" (conservative: never a false "observed")`, mid_turn_followup_request_during_pause: 'NOT RUN in a real window (needs a multi-request turn crossing the pause)' }; step('R5 pause held a new run (input kept), let the streaming request finish, counted only devices that reported; after resume the learner\'s own run was seen', {});
 
+  }
+  if (want('R6')) {
   // ── R6 upload (U1 contract, reused): consent on the device, request from Chalk, and only the Service's verification counts ──
   await palette(win, '수업 기록 보내기 동의·철회'); const agree = '동의하고 보내기 허용';
   await wait(() => win.evaluate((t) => { const b = [...document.querySelectorAll('.monaco-dialog-box .monaco-button, .monaco-dialog-box a.monaco-button')].find((x) => x.textContent.trim() === t); if (!b) return false; b.click(); return true; }, agree), 'the consent dialog'); await wait(async () => (await toasts(win)).some((t) => t.includes('동의를 기록했습니다')), 'consent recorded');
@@ -273,6 +288,8 @@ try {
   const uploadRow = await I.rowText('A1', /조치: 수업 기록 다시 보내기 — 성공 .*→ 명령 실행 완료/); results.R6 = { pick_state: pickState, item: { state: mine.state, outcome: mine.outcome, coverage: mine.coverage }, board_row: uploadRow }; await I.shot('r6-upload-verified.png');
   step('R6 upload: the device\'s "sent" reads as executed; the Service\'s verification is what reads as resolved', { coverage: mine.coverage });
 
+  }
+  if (want('R7')) {
   // ── R7 token: issuing is not receiving. Issued on the instructor's real issuing page, typed by the learner into the app's own
   // start page — no dev token file, no restart. Old issue re-checked → 문제 남음; the new issue in the app → 해결 확인. ──
   const recheck = (await I.act('A1', '연결 다시 확인', /해결 확인 1/)).replace(/\s+/g, ' '); assert.match(recheck, /수업 정보 재확인됨 → 문제 해결 확인 · 기존 발급분을 다시 확인함 \(재발급 아님\)/);
@@ -316,8 +333,9 @@ try {
   results.R7 = { existing_issue_rechecked: recheck, old_issue_line: oldLine, reissued_active_line: newLine, issued_on: 'Chalk /authoring 참여 코드 발급 (clicked)', delivered_by: 'typed into the app\'s own start page (활동 변경 → 수업에 참여하기 → 코드 확인하기); no dev token file change, no restart', start_button: primary, re_paired_after_entry: repaired, draft_kept: true, issues_recorded: db('SELECT count(*) n FROM ops_token_issues WHERE student_id=?', seats[0].student_id)[0].n, never_connected_seat: 'A3 → first step is pairing (not delivered)' };
   step('R7 token: issued on the issuing page / typed on the start page / the newest issue verified — the old issue re-checked stays 문제 남음', { re_paired: repaired });
 
+  }
   assert.equal(a2Runs, 0, 'the never-selected seat ran nothing in the whole session'); assert.equal(db("SELECT count(*) n FROM ops_command_targets WHERE seat_id='A2'")[0].n, 0);
-  const result = { schema: 'hps-classroom-mac-recovery/1', at: new Date().toISOString(), source_sha: head, extension_source_sha: manifest.extension.source_sha, extension_bundles: manifest.extension.bundles, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256, route_seen: '/v1/messages' }, how: 'instructor = clicks on the Chalk page (visible Chromium); learner = real Studio window over the debugging port (real mouse input for webview controls)',
+  const result = { schema: 'hps-classroom-mac-recovery/1', at: new Date().toISOString(), scenarios_run: ['R0', ...SCENARIOS], scenarios_not_run_here: ['R1', 'R2', 'R3', 'R4', 'R5', 'R6', 'R7'].filter((x) => !want(x)), source_sha: head, extension_source_sha: manifest.extension.source_sha, extension_bundles: manifest.extension.bundles, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256, route_seen: '/v1/messages' }, how: 'instructor = clicks on the Chalk page (visible Chromium); learner = real Studio window over the debugging port (real mouse input for webview controls)',
     real: ['Studio shell copy', 'current extension build', 'Agent SDK + binary', 'ops sync loop and command runner', 'Chalk page', 'Service router + SQLite', 'HTTP between app and Service', 'live preview server and browser tab'],
     made_here: ['accounts, class and tokens (synthetic)', 'model provider (scripted stand-in; "provider down" = it answers 500)', '"/v1/health does not answer OK" at the local HTTP front', 'the learner page moved away and back by the runner', 'the preview server dropped by the test-only HPS_TEST_PREVIEW_FAULT trigger', 'an unrelated localhost tool served by the runner', 'seat A2 (real device client in this process), A3 (never connected), A4 (no command capability)', 'the new code carried from the issuing page to the start page by the runner (as a person would read it out)'],
     not_run: ['real model', 'school network / real outage', 'Windows', 'several physical devices', 'staging or production D1/R2', 'mail', 'Keychain-backed installed app', 'a multi-request turn crossing a pause in a real window'],

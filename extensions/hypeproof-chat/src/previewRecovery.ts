@@ -64,13 +64,19 @@ export async function recoverLearnerPreview<T extends { readonly url: string | u
   const r = await deps.recover();
   if (r.state === "no_preview" || !r.url) return { state: "no_preview", artifact: "unreachable", tabs: "none" };
   const base = r.url;
-  let artifact: ArtifactState = "unreachable";
-  try { const res = await deps.fetchPage(previewPageUrl(base, previewPagePath(primary?.url))); artifact = classifyArtifact(res.status, res.contentType); } catch { artifact = "unreachable"; }
-  if (!own.length) return { state: r.state, artifact, tabs: "none" };
+  const judge = async (url: string): Promise<ArtifactState> => { try { const res = await deps.fetchPage(url); return classifyArtifact(res.status, res.contentType); } catch { return "unreachable"; } };
+  if (!own.length) return { state: r.state, artifact: await judge(previewPageUrl(base, previewPagePath(undefined))), tabs: "none" };
+  // Every page a tab will be said to show is judged on its own — the primary tab's page answering says nothing about another
+  // tab's path. One page that is missing or does not answer is the artifact state for the whole action, and no tab moves.
+  const targets = [primary, ...own.filter((t) => t !== primary)].map((tab) => ({ tab, url: previewPageUrl(base, previewPagePath(tab!.url)) }));
+  const pages = new Map<string, ArtifactState>();
+  for (const { url } of targets) if (!pages.has(url)) pages.set(url, await judge(url));
+  const states = [...pages.values()];
+  const artifact: ArtifactState = states.includes("unreachable") ? "unreachable" : states.includes("missing") ? "missing" : "opened";
   if (artifact !== "opened") return { state: r.state, artifact, tabs: "not_loaded" };
   let all = true;
-  for (const tab of own) {
-    const target = previewPageUrl(base, previewPagePath(tab.url));
+  for (const { tab: owned, url: target } of targets) {
+    const tab = owned!;
     const shown = (d: { href: string; complete: boolean; fresh: boolean } | null) => !!d && d.complete && d.fresh && sameDocument(d.href, target);
     if (shown(await deps.load(tab, target).catch(() => null))) continue;
     // Only a tab of the learner's own dead server is replaced, and only by the same page on the running one.
