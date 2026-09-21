@@ -48,7 +48,7 @@ import {NATIVE_TRIAL_LIMITS} from '../lib/native-trial-grants';
 
 import { Hono } from "hono";
 import type { Env } from "../env";
-import { gateChatRequest } from "../lib/chat-gate";
+import { gateChatRequest, bindingRefusalMessage } from "../lib/chat-gate";
 import { recordDispatch, recordOutcome } from "../lib/lesson-binding-store";
 import { BINDING_HEADER, classifyOutcome } from "../lib/lesson-binding";
 import {
@@ -540,7 +540,7 @@ messages.post("/messages", async (c) => {
     // #751 U3 — the durable intent comes BEFORE the call. If the first dispatch of this turn cannot be recorded, the
     // provider is not called: "nothing on record" may only ever mean "nothing was executed".
     const intent = await recordDispatch(env, lessonTurn, { request: usageRequestId, runtime: 'agent-sdk', model: modelLabel, now: Date.now() });
-    if (!intent.ok) { recordFailure(403, ERROR_KIND.BAD_REQUEST); return c.json({ error: { type: 'lesson_binding', code: intent.code, message: '수업 설정을 확인할 수 없어 실행하지 않았습니다. 잠시 뒤 다시 보내 주세요.' } }, 403); }
+    if (!intent.ok) { recordFailure(403, ERROR_KIND.BAD_REQUEST); return c.json({ error: { type: 'lesson_binding', code: intent.code, message: bindingRefusalMessage(intent.code) } }, 403); }
     dispatched = true;
     upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {
       signal: nativeTrialSignal(c.req.raw),

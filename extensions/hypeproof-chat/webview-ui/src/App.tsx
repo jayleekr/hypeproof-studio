@@ -236,12 +236,12 @@ export function App() {
   // 전에 role:"tool" 이 걸러진다(chatTimeline.modelHistory).
   const messages = state.timeline.items;
 
-  const send = (text: string, images?: string[]) => {
+  const send = (text: string, images?: string[], imports?: Array<{ object_id: string; revision: number; hash16: string }>) => {
     const trimmed = text.trim();
     const hasImages = !!images && images.length > 0;
     if ((!trimmed && !hasImages) || state.streamId) return;
     dispatch({ type: "userSent", text: trimmed, images });
-    postToHost({ type: "sendMessage", activityId: state.config?.activity?.id, text: trimmed, history: messages, images });
+    postToHost({ type: "sendMessage", activityId: state.config?.activity?.id, text: trimmed, history: messages, images, ...(imports?.length ? { imports } : {}) });
   };
 
   const retry = (prompt: string) => {

@@ -78,6 +78,12 @@ export type ChatGateResult =
     }
   | { ok: false; response: Response };
 
+/**
+ * The SDK CLI hands the host only the MESSAGE of a refused request ("API Error: 403 <message>", observed on the pinned SDK),
+ * never the JSON body. The trailing tag is how the host recognises a lesson-binding refusal there; the learner-facing copy
+ * is the app's own.
+ */
+export const bindingRefusalMessage = (code: string) => `${BINDING_REFUSALS[code] ?? BINDING_REFUSALS.lesson_binding_unknown} [hps:${code}]`;
 /** Student-facing words for a refusal of the lesson-binding contract. 403 on purpose: the SDK CLI does not retry it. */
 const BINDING_REFUSALS: Record<string, string> = {
   lesson_binding_changed: '수업 설정이 바뀌었습니다. 다시 보내 주세요.',
@@ -289,7 +295,7 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     const resolved = await resolveEffectiveLesson(env, payload, { classRunId: payload.native_trial ? null : session.session_id, lessonCohort: cohortDecision.lessonCohort, mode: modelRoute ? 'turn' : 'read', turnId: c.req.header(TURN_HEADER), expectKey: c.req.header(BINDING_HEADER), now: Date.now() });
     if (!resolved.ok) {
       if (resolved.code === 'lesson_unavailable') return { ok: false, response: c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 확인하세요.' } }, 409) };
-      return { ok: false, response: c.json({ error: { type: 'lesson_binding', code: resolved.code, message: BINDING_REFUSALS[resolved.code] ?? BINDING_REFUSALS.lesson_binding_unknown, ...(resolved.current_key ? { current_key: resolved.current_key } : {}) } }, 403) };
+      return { ok: false, response: c.json({ error: { type: 'lesson_binding', code: resolved.code, message: bindingRefusalMessage(resolved.code), ...(resolved.current_key ? { current_key: resolved.current_key } : {}) } }, 403) };
     }
     const lesson = resolved.lesson;
     c.header(BINDING_HEADER, resolved.binding.key);

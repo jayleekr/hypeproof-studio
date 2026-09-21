@@ -86,7 +86,7 @@ export class InboxStore {
   /** Writes the immutable revision file. An existing file with the same content is reused; a different one is a conflict. */
   async writeRevision(item: InboxItem): Promise<{ ok: true; file: string; bytes: number } | { ok: false; code: "hash_conflict" | "store_failed" }> {
     const file = this.revFile(item), target = path.join(this.dir, "rev", file);
-    const text = JSON.stringify({ schema: item.schema, object_id: item.object_id, revision: item.revision, kind: item.kind, title: item.title, body: item.body, links: item.links, content_hash: item.content_hash });
+    const text = JSON.stringify({ schema: item.schema, object_id: item.object_id, revision: item.revision, kind: item.kind, title: item.title, body: item.body, links: item.links, ...(item.lesson !== undefined ? { lesson: item.lesson } : {}), content_hash: item.content_hash });
     try {
       if (await this.writeOnce(target, text) === "exists") {
         const held = await this.readRevision(file, item.content_hash);
@@ -102,7 +102,7 @@ export class InboxStore {
   async readRevision(file: string, expectedHash: string): Promise<{ kind: string; title: string; body: string; links: InboxLink[] } | null> {
     try {
       const v = JSON.parse(await fs.readFile(path.join(this.dir, "rev", file), "utf8"));
-      const c = { kind: String(v.kind), title: String(v.title), body: String(v.body), links: Array.isArray(v.links) ? v.links.map((l: InboxLink) => ({ label: String(l.label), url: String(l.url) })) : [] };
+      const c = { kind: String(v.kind), title: String(v.title), body: String(v.body), links: Array.isArray(v.links) ? v.links.map((l: InboxLink) => ({ label: String(l.label), url: String(l.url) })) : [], ...(v.lesson !== undefined ? { lesson: v.lesson } : {}) };
       return sha256(contentCanonical(c)) === expectedHash ? c : null;
     } catch { return null; }
   }
@@ -113,7 +113,7 @@ export class InboxStore {
     for (const e of Object.values(index.objects).sort((a, b) => b.received_at - a.received_at || b.seq - a.seq)) {
       if (e.tombstone) { cards.push({ object_id: e.object_id, kind: e.kind, title: "", body: "", links: [], revision: e.revision, received_at: e.tombstone.at, is_new: false, withdrawn: true, unreadable: false }); continue; }
       const c = await this.readRevision(e.file, e.content_hash);
-      cards.push(c ? { object_id: e.object_id, kind: c.kind, title: c.title, body: c.body, links: c.links, revision: e.revision, received_at: e.received_at, is_new: !e.opened, withdrawn: false, unreadable: false }
+      cards.push(c ? { object_id: e.object_id, kind: c.kind, title: c.title, body: c.body, links: c.links, revision: e.revision, received_at: e.received_at, is_new: !e.opened, withdrawn: false, unreadable: false, content_hash: e.content_hash, ...(e.setting ? { setting: e.setting.state } : {}) }
         : { object_id: e.object_id, kind: e.kind, title: e.title, body: "", links: [], revision: e.revision, received_at: e.received_at, is_new: false, withdrawn: false, unreadable: true });
     }
     return { n, index, cards };

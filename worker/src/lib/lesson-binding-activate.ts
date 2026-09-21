@@ -18,15 +18,15 @@ import { parseLesson } from './classroom-ops';
 type Db = Env['HPS_DB'];
 const KEY_RE = /^[A-Za-z0-9-]{8,64}$/, SHA_RE = /^[a-f0-9]{64}$/;
 export interface ActivateGrant { id: string; class_run_id: string; cohort_id: string; profile_id: string; seat_id: string; seat_revision: number; student_id: string; connection_epoch: number; device_registration_id: string | null; flags_json: string; lesson_json: string }
-export interface ActivateRequest { app_instance_id: string; offer_key: string; distribution_id: string; object_id: string; revision: number; content_hash: string; expected_binding_seq: number; base_lesson_sha256: string }
+export interface ActivateRequest { app_instance_id: string; offer_key: string; distribution_id: string; object_id: string; revision: number; content_hash: string; base_lesson_sha256: string }
 
 export function normalizeActivate(raw: unknown): ActivateRequest | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const o = raw as Record<string, unknown>, allowed = ['app_instance_id', 'boot_id', 'offer_key', 'distribution_id', 'object_id', 'revision', 'content_hash', 'expected_binding_seq', 'base_lesson_sha256'];
+  const o = raw as Record<string, unknown>, allowed = ['app_instance_id', 'boot_id', 'offer_key', 'distribution_id', 'object_id', 'revision', 'content_hash', 'base_lesson_sha256'];
   if (Object.keys(o).some((k) => !allowed.includes(k))) return null;
   if (typeof o.app_instance_id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(o.app_instance_id) || typeof o.offer_key !== 'string' || !OFFER_KEY_RE.test(o.offer_key) || typeof o.distribution_id !== 'string' || !KEY_RE.test(o.distribution_id) || typeof o.object_id !== 'string' || !KEY_RE.test(o.object_id)) return null;
-  if (!Number.isSafeInteger(o.revision) || (o.revision as number) < 1 || typeof o.content_hash !== 'string' || !SHA_RE.test(o.content_hash) || !Number.isSafeInteger(o.expected_binding_seq) || (o.expected_binding_seq as number) < 0 || typeof o.base_lesson_sha256 !== 'string' || !SHA_RE.test(o.base_lesson_sha256)) return null;
-  return { app_instance_id: o.app_instance_id, offer_key: o.offer_key, distribution_id: o.distribution_id, object_id: o.object_id, revision: o.revision as number, content_hash: o.content_hash, expected_binding_seq: o.expected_binding_seq as number, base_lesson_sha256: o.base_lesson_sha256 };
+  if (!Number.isSafeInteger(o.revision) || (o.revision as number) < 1 || typeof o.content_hash !== 'string' || !SHA_RE.test(o.content_hash) || typeof o.base_lesson_sha256 !== 'string' || !SHA_RE.test(o.base_lesson_sha256)) return null;
+  return { app_instance_id: o.app_instance_id, offer_key: o.offer_key, distribution_id: o.distribution_id, object_id: o.object_id, revision: o.revision as number, content_hash: o.content_hash, base_lesson_sha256: o.base_lesson_sha256 };
 }
 
 const VIEW = 'binding_key AS key,binding_seq AS seq,source,object_id,revision,course_id,version,lesson_sha256,activated_at';
@@ -69,14 +69,15 @@ export async function activateBinding(env: Env, g: ActivateGrant, req: ActivateR
     if (!lesson || lesson.sha256 !== lessonRef.sha256 || lesson.course_id !== pin.course_id) return no('lesson_unavailable');
     row = { source: 'setting', course_id: lesson.course_id, version: lesson.version, sha256: lesson.sha256, steps: lesson.content.steps.map((s) => s.id), runtime: lesson.content.model?.binding?.runtime ?? '' };
   }
-  const seq = req.expected_binding_seq + 1;
-  const key = (await sha256Hex(bindingKeyInput({ class_run_id: g.class_run_id, seat_id: g.seat_id, seat_revision: g.seat_revision, student_id: g.student_id, source: row.source, object_id: req.object_id, revision: req.revision, course_id: row.course_id, version: row.version, lesson_sha256: row.sha256, binding_seq: seq }))).slice(0, 32);
+  // The sequence number is taken INSIDE the INSERT (the participant's highest + 1): the device does not have to know it, and
+  // two switches that race are ordered by the database — a primary-key collision is the loser.
+  const key = (await sha256Hex(bindingKeyInput({ class_run_id: g.class_run_id, seat_id: g.seat_id, seat_revision: g.seat_revision, student_id: g.student_id, source: row.source, distribution_id: req.distribution_id, object_id: req.object_id, revision: req.revision, course_id: row.course_id, version: row.version, lesson_sha256: row.sha256 }))).slice(0, 32);
   if (activateHooks.beforeCommit) await activateHooks.beforeCommit();
-  const made = 'EXISTS (SELECT 1 FROM classroom_lesson_bindings WHERE class_run_id=? AND student_id=? AND binding_seq=? AND binding_key=?)', madeArgs = [g.class_run_id, g.student_id, seq, key];
+  const made = 'EXISTS (SELECT 1 FROM classroom_lesson_bindings WHERE class_run_id=? AND student_id=? AND binding_key=? AND activated_at=?)', madeArgs = [g.class_run_id, g.student_id, key, now];
   try {
     const r = await db.batch([
       db.prepare(`INSERT INTO classroom_lesson_bindings(class_run_id,student_id,binding_seq,seat_id,seat_revision,binding_key,source,distribution_id,object_id,revision,content_hash,course_id,version,lesson_sha256,base_lesson_sha256,steps_json,runtime,grant_id,connection_epoch,device_registration_id,app_instance_id,activated_at)
- SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+ SELECT ?,?,COALESCE((SELECT MAX(b0.binding_seq) FROM classroom_lesson_bindings b0 WHERE b0.class_run_id=? AND b0.student_id=?),0)+1,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
  WHERE EXISTS (SELECT 1 FROM classroom_distribution_targets t JOIN classroom_distributions d ON d.id=t.distribution_id JOIN classroom_content_objects ob ON ob.object_id=t.object_id
    WHERE t.distribution_id=? AND t.seat_id=? AND t.seat_revision=? AND t.student_id=? AND t.state='reflected' AND t.offer_key=? AND t.device_generation=?
    AND d.revoked_at IS NULL AND d.expires_at>? AND ob.kind='setting' AND ob.retired_at IS NULL)
@@ -85,18 +86,16 @@ export async function activateBinding(env: Env, g: ActivateGrant, req: ActivateR
  AND EXISTS (SELECT 1 FROM ops_grants gg WHERE gg.id=? AND gg.kind='connection' AND gg.state='active' AND gg.connection_epoch=? AND gg.expires_at>?)
  AND EXISTS (SELECT 1 FROM ops_seat_leases l WHERE l.grant_id=? AND l.app_instance_id=?)
  AND NOT EXISTS (SELECT 1 FROM classroom_distribution_targets n JOIN classroom_distributions nd ON nd.id=n.distribution_id WHERE n.class_run_id=? AND n.student_id=? AND n.object_id=? AND n.revision>? AND nd.revoked_at IS NULL AND n.state IN ('accepted','offered','received','reflected','no_change'))
- AND COALESCE((SELECT MAX(b.binding_seq) FROM classroom_lesson_bindings b WHERE b.class_run_id=? AND b.student_id=?),0)=?
  ON CONFLICT DO NOTHING`).bind(
-        g.class_run_id, g.student_id, seq, g.seat_id, g.seat_revision, key, row.source, req.distribution_id, req.object_id, req.revision, req.content_hash, row.course_id, row.version, row.sha256, req.base_lesson_sha256, JSON.stringify(row.steps), row.runtime, g.id, g.connection_epoch, g.device_registration_id ?? '', req.app_instance_id, now,
+        g.class_run_id, g.student_id, g.class_run_id, g.student_id, g.seat_id, g.seat_revision, key, row.source, req.distribution_id, req.object_id, req.revision, req.content_hash, row.course_id, row.version, row.sha256, req.base_lesson_sha256, JSON.stringify(row.steps), row.runtime, g.id, g.connection_epoch, g.device_registration_id ?? '', req.app_instance_id, now,
         req.distribution_id, g.seat_id, g.seat_revision, g.student_id, current, t.device_generation, now,
         g.class_run_id, now,
         g.class_run_id, g.seat_id, g.seat_revision, g.student_id,
         g.id, g.connection_epoch, now,
         g.id, req.app_instance_id,
-        g.class_run_id, g.student_id, req.object_id, req.revision,
-        g.class_run_id, g.student_id, req.expected_binding_seq),
-      db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,?,'device',?,'lesson_binding_switched',?,? WHERE ${made}`).bind(g.class_run_id, g.seat_id, g.device_registration_id || g.id, JSON.stringify({ distribution_id: req.distribution_id, object_id: req.object_id, revision: req.revision, binding_seq: seq, source: row.source, version: row.version }), now, ...madeArgs),
-      db.prepare(`SELECT ${VIEW} FROM classroom_lesson_bindings WHERE class_run_id=? AND student_id=? AND binding_seq=? AND binding_key=?`).bind(...madeArgs),
+        g.class_run_id, g.student_id, req.object_id, req.revision),
+      db.prepare(`INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT ?,?,'device',?,'lesson_binding_switched',?,? WHERE ${made}`).bind(g.class_run_id, g.seat_id, g.device_registration_id || g.id, JSON.stringify({ distribution_id: req.distribution_id, object_id: req.object_id, revision: req.revision, binding_key: key, source: row.source, version: row.version }), now, ...madeArgs),
+      db.prepare(`SELECT ${VIEW} FROM classroom_lesson_bindings WHERE class_run_id=? AND student_id=? AND binding_key=? AND activated_at=?`).bind(...madeArgs),
       db.prepare(`SELECT ${VIEW} FROM classroom_lesson_bindings WHERE distribution_id=? AND seat_id=?`).bind(req.distribution_id, g.seat_id),
     ]) as Array<{ meta?: { changes?: number }; results?: View[] }>;
     // Only the row this statement actually wrote counts. A successful batch whose INSERT changed nothing recorded nothing.
@@ -129,7 +128,6 @@ async function whyNot(db: Db, g: ActivateGrant, req: ActivateRequest, now: numbe
     if (s.revoked_at !== null) return 'revoked';
     if (s.expires_at <= now) return 'expired';
     if (s.state === 'superseded') return 'superseded';
-    if ((s.seq ?? 0) !== req.expected_binding_seq) return 'changed';
     return s.state === 'reflected' ? 'superseded' : 'stale_offer';
   } catch { return 'changed'; }
 }

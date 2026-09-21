@@ -9,7 +9,11 @@
 export const INBOX_SCHEMA = "hps-classroom-inbox/2";
 export const CONTENT_SCHEMA = "hps-classroom-content/1";
 export const INBOX_CAPABILITY = "distribution_inbox";
-export const INBOX_KINDS = ["notice", "material"] as const;
+/** U3: `prompt` = a text the learner may import into their own draft by their own press; `setting` = a REFERENCE to a lesson version that applies from the next question. */
+export const INBOX_KINDS = ["notice", "material", "prompt", "setting"] as const;
+/** Declared per kind: holding notices does not imply importing prompts or switching a lesson binding. */
+export const INBOX_PROMPT_CAPABILITY = "inbox_prompt", LESSON_BINDING_CAPABILITY = "lesson_binding";
+export interface LessonRef { course_id: string; version: string; sha256: string }
 export const MAX_INBOX_OBJECTS = 50;
 export const MAX_INBOX_BYTES = 1024 * 1024;
 export const MAX_JOURNAL = 200;
@@ -20,7 +24,7 @@ const KEY_RE = /^[A-Za-z0-9-]{8,64}$/, SHA256_RE = /^[a-f0-9]{64}$/, DELIVERY_KE
 const CONTROL_RE = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/;
 
 export interface InboxLink { label: string; url: string }
-export interface InboxItem { offer_key: string; distribution_id: string; seq: number; object_id: string; revision: number; kind: (typeof INBOX_KINDS)[number]; schema: string; title: string; body: string; links: InboxLink[]; content_hash: string; issued_at: number; expires_at: number; apply_within_ms: number }
+export interface InboxItem { offer_key: string; distribution_id: string; seq: number; object_id: string; revision: number; kind: (typeof INBOX_KINDS)[number]; schema: string; title: string; body: string; links: InboxLink[]; lesson?: LessonRef | "base"; content_hash: string; issued_at: number; expires_at: number; apply_within_ms: number }
 export interface InboxWithdraw { withdraw_key: string; object_id: string; seq: number; revision: number; reason: string }
 export type Verdict<T> = { ok: true; value: T } | { ok: false; code: "schema" | "unsupported_kind" };
 
@@ -35,15 +39,24 @@ export function validateItem(raw: unknown): Verdict<InboxItem> {
   const o = raw as Record<string, unknown>;
   if (typeof o.offer_key !== "string" || !DELIVERY_KEY_RE.test(o.offer_key) || typeof o.distribution_id !== "string" || !KEY_RE.test(o.distribution_id) || typeof o.object_id !== "string" || !KEY_RE.test(o.object_id)) return bad();
   if (!Number.isSafeInteger(o.seq) || (o.seq as number) < 1 || !Number.isSafeInteger(o.revision) || (o.revision as number) < 1 || typeof o.content_hash !== "string" || !SHA256_RE.test(o.content_hash)) return bad();
-  // A kind this build does not know (U3: prompt, setting) is refused as such — never stored, never guessed at.
+  // A kind this build does not know is refused as such — never stored, never guessed at.
   if (o.schema !== CONTENT_SCHEMA || !(INBOX_KINDS as readonly unknown[]).includes(o.kind)) return bad("unsupported_kind");
   if (typeof o.title !== "string" || !o.title || [...o.title].length > MAX_TITLE_CHARS || CONTROL_RE.test(o.title)) return bad();
   if (typeof o.body !== "string" || !o.body || [...o.body].length > MAX_BODY_CHARS || new TextEncoder().encode(o.body).length > MAX_BODY_BYTES || CONTROL_RE.test(o.body)) return bad();
   const links = o.links === undefined ? [] : o.links;
   if (!Array.isArray(links) || links.length > MAX_LINKS) return bad();
   for (const l of links) if (!l || typeof l !== "object" || Object.keys(l).some((k) => k !== "label" && k !== "url") || typeof (l as InboxLink).label !== "string" || !(l as InboxLink).label || [...(l as InboxLink).label].length > MAX_LINK_LABEL_CHARS || CONTROL_RE.test((l as InboxLink).label) || !safeLink((l as InboxLink).url)) return bad();
+  if (o.kind !== "material" && links.length) return bad();
+  // A setting carries a reference and nothing else of the lesson; every other kind carries none.
+  let lesson: LessonRef | "base" | undefined;
+  if (o.kind === "setting") {
+    const l = o.lesson as Record<string, unknown> | string | undefined;
+    if (l === "base") lesson = "base";
+    else if (l && typeof l === "object" && !Array.isArray(l) && Object.keys(l).every((k) => ["course_id", "version", "sha256"].includes(k)) && typeof l.course_id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(l.course_id) && typeof l.version === "string" && /^[A-Za-z0-9._-]{1,64}$/.test(l.version) && typeof l.sha256 === "string" && SHA256_RE.test(l.sha256)) lesson = { course_id: l.course_id, version: l.version, sha256: l.sha256 };
+    else return bad();
+  } else if (o.lesson !== undefined) return bad();
   if (!Number.isSafeInteger(o.apply_within_ms) || (o.apply_within_ms as number) <= 0 || (o.apply_within_ms as number) > APPLY_WITHIN_MS) return bad();
-  return { ok: true, value: { offer_key: o.offer_key, distribution_id: o.distribution_id, seq: o.seq as number, object_id: o.object_id, revision: o.revision as number, kind: o.kind as InboxItem["kind"], schema: CONTENT_SCHEMA, title: o.title, body: o.body, links: (links as InboxLink[]).map((l) => ({ label: l.label, url: l.url })), content_hash: o.content_hash, issued_at: Number.isSafeInteger(o.issued_at) ? o.issued_at as number : 0, expires_at: Number.isSafeInteger(o.expires_at) ? o.expires_at as number : 0, apply_within_ms: o.apply_within_ms as number } };
+  return { ok: true, value: { offer_key: o.offer_key, distribution_id: o.distribution_id, seq: o.seq as number, object_id: o.object_id, revision: o.revision as number, kind: o.kind as InboxItem["kind"], schema: CONTENT_SCHEMA, title: o.title, body: o.body, links: (links as InboxLink[]).map((l) => ({ label: l.label, url: l.url })), ...(lesson !== undefined ? { lesson } : {}), content_hash: o.content_hash, issued_at: Number.isSafeInteger(o.issued_at) ? o.issued_at as number : 0, expires_at: Number.isSafeInteger(o.expires_at) ? o.expires_at as number : 0, apply_within_ms: o.apply_within_ms as number } };
 }
 export function validateWithdraw(raw: unknown): InboxWithdraw | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -52,11 +65,21 @@ export function validateWithdraw(raw: unknown): InboxWithdraw | null {
   return { withdraw_key: o.withdraw_key, object_id: o.object_id, seq: o.seq as number, revision: Number.isSafeInteger(o.revision) ? o.revision as number : 0, reason: typeof o.reason === "string" && /^[a-z_]{1,32}$/.test(o.reason) ? o.reason : "revoked" };
 }
 /** Byte-for-byte what the Service hashed: schema, kind, title, body, links — nothing else, in this order. */
-export const contentCanonical = (c: { kind: string; title: string; body: string; links: InboxLink[] }) => JSON.stringify([CONTENT_SCHEMA, c.kind, c.title, c.body, c.links.map((l) => [l.label, l.url])]);
+export const contentCanonical = (c: { kind: string; title: string; body: string; links: InboxLink[]; lesson?: LessonRef | "base" }) => {
+  const head = [CONTENT_SCHEMA, c.kind, c.title, c.body, c.links.map((l) => [l.label, l.url])];
+  // A sixth element for a setting only: notices and materials hash exactly as they did before U3.
+  return JSON.stringify(c.kind === "setting" ? [...head, c.lesson === "base" ? ["base"] : c.lesson ? [c.lesson.course_id, c.lesson.version, c.lesson.sha256] : []] : head);
+};
 
 // ── the index: the ONLY mutable document. It points at immutable revision files and carries the receipt journal. ──
 export interface InboxSource { offer_key: string; distribution_id: string }
-export interface InboxEntry { object_id: string; revision: number; content_hash: string; seq: number; file: string; bytes: number; kind: string; title: string; received_at: number; opened: boolean; sources: InboxSource[]; tombstone?: { seq: number; reason: string; at: number } }
+/**
+ * What this device knows about a SETTING it holds. `pending` = in the inbox, to be switched at the start of the next turn.
+ * `bound` = the Service recorded the switch and this device verified the served profile carries that key. Neither is
+ * "applied": that is the Service's record of a real answer under the binding, and the device never claims it.
+ */
+export interface SettingState { state: "pending" | "bound"; offer_key: string; distribution_id: string; content_hash: string; lesson: LessonRef | "base"; key?: string; seq?: number }
+export interface InboxEntry { object_id: string; revision: number; content_hash: string; seq: number; file: string; bytes: number; kind: string; title: string; received_at: number; opened: boolean; sources: InboxSource[]; setting?: SettingState; tombstone?: { seq: number; reason: string; at: number } }
 export type JournalEntry =
   | { type: "offer"; key: string; stage: "received" | "reflected" | "failed" | "superseded"; distribution_id: string; object_id: string; revision: number; content_hash: string; seq: number; result_code: string; observed_at: number }
   | { type: "withdraw"; key: string; object_id: string; seq: number; result: "withdrawn" | "not_held" | "stale"; observed_at: number };
@@ -97,8 +120,27 @@ export function decideOffer(index: InboxIndex, item: Pick<InboxItem, "object_id"
 }
 export function applyOffer(index: InboxIndex, item: InboxItem, file: string, bytes: number, serverTime: number): InboxIndex {
   const prev = index.objects[item.object_id], same = prev && live(prev) && prev.revision === item.revision;
-  const entry: InboxEntry = { object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, seq: Math.max(item.seq, same ? prev!.seq : 0), file, bytes, kind: item.kind, title: item.title, received_at: same ? prev!.received_at : serverTime, opened: same ? prev!.opened : false, sources: [...(same ? prev!.sources.filter((s) => s.offer_key !== item.offer_key) : []), { offer_key: item.offer_key, distribution_id: item.distribution_id }].slice(-8) };
+  const entry: InboxEntry = { object_id: item.object_id, revision: item.revision, content_hash: item.content_hash, seq: Math.max(item.seq, same ? prev!.seq : 0), file, bytes, kind: item.kind, title: item.title, received_at: same ? prev!.received_at : serverTime, opened: same ? prev!.opened : false, sources: [...(same ? prev!.sources.filter((s) => s.offer_key !== item.offer_key) : []), { offer_key: item.offer_key, distribution_id: item.distribution_id }].slice(-8),
+    // A setting that arrives is PENDING: it is switched at the start of the learner's next turn, never on arrival. A re-offer
+    // of the revision this device already bound (a new login generation) keeps it bound and only refreshes the delivery key.
+    ...(item.kind === "setting" && item.lesson !== undefined ? { setting: same && prev!.setting?.state === "bound" ? { ...prev!.setting, offer_key: item.offer_key, distribution_id: item.distribution_id } : { state: "pending" as const, offer_key: item.offer_key, distribution_id: item.distribution_id, content_hash: item.content_hash, lesson: item.lesson } } : {}) };
   return { ...index, objects: { ...index.objects, [item.object_id]: entry } };
+}
+/** The setting this device holds and has not switched to yet — at most one: a class run has one setting object. */
+export function pendingSetting(index: InboxIndex): (SettingState & { object_id: string; revision: number }) | null {
+  const e = Object.values(index.objects).filter((x) => live(x) && x.kind === "setting" && x.setting?.state === "pending").sort((a, b) => b.seq - a.seq)[0];
+  return e ? { ...e.setting!, object_id: e.object_id, revision: e.revision } : null;
+}
+/** The key of the binding this device last verified, if it still holds that setting. Other windows read it from the shared index. */
+export function boundSetting(index: InboxIndex): { key: string; seq: number } | null {
+  const e = Object.values(index.objects).filter((x) => x.kind === "setting" && x.setting?.state === "bound" && x.setting.key).sort((a, b) => (b.setting!.seq ?? 0) - (a.setting!.seq ?? 0))[0];
+  return e ? { key: e.setting!.key!, seq: e.setting!.seq ?? 0 } : null;
+}
+/** Only the exact revision that was switched is marked: a newer revision that arrived meanwhile stays pending. */
+export function markSettingBound(index: InboxIndex, o: { object_id: string; revision: number; content_hash: string; key: string; seq: number }): InboxIndex {
+  const e = index.objects[o.object_id];
+  if (!e || !e.setting || e.revision !== o.revision || e.content_hash !== o.content_hash) return index;
+  return { ...index, objects: { ...index.objects, [o.object_id]: { ...e, setting: { ...e.setting, state: "bound", key: o.key, seq: o.seq } } } };
 }
 export type WithdrawDecision = "withdraw" | "stale" | "not_held" | "already";
 export function decideWithdraw(index: InboxIndex, w: InboxWithdraw): WithdrawDecision {
@@ -110,7 +152,7 @@ export function decideWithdraw(index: InboxIndex, w: InboxWithdraw): WithdrawDec
 /** The body file is dropped from the index; what stays is a marker — and the event number, so a late offer stays out. */
 export function applyWithdraw(index: InboxIndex, w: InboxWithdraw, serverTime: number): InboxIndex {
   const e = index.objects[w.object_id];
-  const entry: InboxEntry = e ? { ...e, title: "", bytes: 0, file: "none", content_hash: "", sources: [], tombstone: { seq: w.seq, reason: w.reason, at: serverTime } } : { object_id: w.object_id, revision: w.revision, content_hash: "", seq: 0, file: "none", bytes: 0, kind: "notice", title: "", received_at: serverTime, opened: true, sources: [], tombstone: { seq: w.seq, reason: w.reason, at: serverTime } };
+  const entry: InboxEntry = e ? { ...e, title: "", bytes: 0, file: "none", content_hash: "", sources: [], setting: undefined, tombstone: { seq: w.seq, reason: w.reason, at: serverTime } } : { object_id: w.object_id, revision: w.revision, content_hash: "", seq: 0, file: "none", bytes: 0, kind: "notice", title: "", received_at: serverTime, opened: true, sources: [], tombstone: { seq: w.seq, reason: w.reason, at: serverTime } };
   return { ...index, objects: { ...index.objects, [w.object_id]: entry } };
 }
 
@@ -157,7 +199,8 @@ export function withinApplyWindow(w: ApplyWindow, clock: Clock, applyWithinMs: n
 }
 
 // ── what the learner sees ────────────────────────────────────────────────────
-export interface InboxCard { object_id: string; kind: string; title: string; body: string; links: InboxLink[]; revision: number; received_at: number; is_new: boolean; withdrawn: boolean; unreadable: boolean }
+/** `setting`: `pending` = applies from the next question; `bound` = this device switched to it. Never "applied" — the device does not claim execution. */
+export interface InboxCard { object_id: string; kind: string; title: string; body: string; links: InboxLink[]; revision: number; received_at: number; is_new: boolean; withdrawn: boolean; unreadable: boolean; content_hash?: string; setting?: "pending" | "bound" }
 /** `ended` = this device KNOWS the class is over (normal expiry, or its end time passed). `offline` = no valid connection right now and no such knowledge: the class may well be running. */
 export interface InboxView { run: string; student: string; generation: number; ended: boolean; offline: boolean; cards: InboxCard[]; unread: number }
 export const emptyView = (generation = 0): InboxView => ({ run: "", student: "", generation, ended: false, offline: false, cards: [], unread: 0 });

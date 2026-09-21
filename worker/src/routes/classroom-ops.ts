@@ -525,7 +525,7 @@ classroomOpsApp.post('/lesson-binding', async (c) => {
   if (g.expires_at <= now) return c.json({ error: 'operations connection expired', reason: 'ops_grant_expired' }, 401);
   if (!g.seat_live) return c.json({ error: 'seat was reassigned', reason: 'seat_replaced' }, 403);
   const req = normalizeActivate(await json(c));
-  if (!req) return c.json({ error: 'offer_key, distribution_id, object_id, revision, content_hash, expected_binding_seq and base_lesson_sha256 required; unknown fields are refused', reason: 'schema' }, 400);
+  if (!req) return c.json({ error: 'offer_key, distribution_id, object_id, revision, content_hash and base_lesson_sha256 required; unknown fields are refused', reason: 'schema' }, 400);
   // Only the window that holds the seat changes what the seat runs under; another window learns of it from /v1/profile.
   const lease = await seatLease(db, g, req.app_instance_id, now);
   if (!lease.owner) return c.json({ recorded: false, reason: 'not_owner', final: false }, 409);

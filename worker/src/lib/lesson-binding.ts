@@ -36,8 +36,9 @@ export interface TurnRow {
 }
 
 export const tokenBindingKey = (sha256: string) => 'token:' + sha256.slice(0, 16);
-export const bindingKeyInput = (b: { class_run_id: string; seat_id: string; seat_revision: number; student_id: string; source: string; object_id: string; revision: number; course_id: string; version: string; lesson_sha256: string; binding_seq: number }) =>
-  ['binding', b.class_run_id, b.seat_id, b.seat_revision, b.student_id, b.source, b.object_id, b.revision, b.course_id, b.version, b.lesson_sha256, b.binding_seq].join('|');
+/** Named by the distribution that switched it (one distribution switches one participant once), so the key exists before the sequence number does. */
+export const bindingKeyInput = (b: { class_run_id: string; seat_id: string; seat_revision: number; student_id: string; source: string; distribution_id: string; object_id: string; revision: number; course_id: string; version: string; lesson_sha256: string }) =>
+  ['binding', b.class_run_id, b.seat_id, b.seat_revision, b.student_id, b.source, b.distribution_id, b.object_id, b.revision, b.course_id, b.version, b.lesson_sha256].join('|');
 /** A legacy token has no jti; its issue time stands in so that a turn is still bound to ONE token. */
 export const tokenIdentity = (p: { jti?: string; iat?: number }) => p.jti ?? 'iat:' + String(p.iat ?? 0);
 

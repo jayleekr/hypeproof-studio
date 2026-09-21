@@ -33,7 +33,7 @@ import {
   type LLMProvider,
 } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
-import { gateChatRequest } from "../lib/chat-gate";
+import { gateChatRequest, bindingRefusalMessage } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
 import { applyLessonFeatures } from '../lib/lesson-feature-policy';
 import { resolveEffectiveLesson, recordDispatch, recordOutcome, closeTurn, readTurn, bindingsEnforced, type BindingView } from '../lib/lesson-binding-store';
@@ -843,7 +843,7 @@ chat.post("/chat/completions", async (c) => {
     if (err instanceof AccessError) return budgetErrorResponse(c,err);
     if (err instanceof LessonHold) {
       recordFailure(403, ERROR_KIND.BAD_REQUEST);
-      return c.json({ error: { type: 'lesson_binding', code: err.code, message: '수업 설정을 확인할 수 없어 실행하지 않았습니다. 잠시 뒤 다시 보내 주세요.' } }, 403);
+      return c.json({ error: { type: 'lesson_binding', code: err.code, message: bindingRefusalMessage(err.code) } }, 403);
     }
     if (err instanceof EffortPolicyError) {
       recordFailure(403, ERROR_KIND.BAD_REQUEST);

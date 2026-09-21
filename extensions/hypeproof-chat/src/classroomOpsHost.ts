@@ -15,7 +15,7 @@ import {
   ChangeGate, OPS_CLIENT_CAPABILITIES, OPS_PROTOCOL, OpsOutbox, activationPayload, classifyFailure, errorPayload,
   evidencePayload, runtimePayload, stepPayload, turnObservations, uploadPayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
 } from "./classroomOps";
-import { INBOX_CAPABILITY, emptyView, inboxPresence, type InboxView } from "./classroomInbox";
+import { INBOX_CAPABILITY, INBOX_PROMPT_CAPABILITY, LESSON_BINDING_CAPABILITY, boundSetting, emptyView, inboxPresence, markSettingBound, pendingSetting, type InboxView, type LessonRef } from "./classroomInbox";
 import { InboxSession, InboxStore, inboxDir, inboxView } from "./classroomInboxStore";
 
 const CREDENTIAL_KEY = "hypeproof.classroomOps.credential";
@@ -309,6 +309,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
 
   // ── U2 inbox: what the two learner surfaces read ──
   private inbox: InboxSession | null = null;
+  private inboxStore: InboxStore | null = null;
   private readonly inboxListeners = new Set<(view: InboxView, fresh: boolean) => void>();
   /** `fresh` = a card just arrived or changed (the surfaces may say so once); false = state refresh only. */
   onInboxChanged(listener: (view: InboxView, fresh: boolean) => void): vscode.Disposable { this.inboxListeners.add(listener); return { dispose: () => this.inboxListeners.delete(listener) }; }
@@ -355,7 +356,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
 
   /** End the current connection in this window: no late response, queued approval or pause may act after this line. */
   private stopConnection(): void {
-    this.generation++; this.inbox = null;
+    this.generation++; this.inbox = null; this.inboxStore = null;
     this.loop?.stop(); this.runner?.close(); this.loop = null; this.runner = null; this.outbox = null;
     // Disconnecting ends the instructor's pause on this device; the Service's own admission still applies.
     this.paused = false; this.stopUnconfirmed = false; this.applyHold();
@@ -401,11 +402,11 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       await store.reconcile(Date.now()).catch((err) => this.log(`[inbox] reconcile: ${(err as Error).message}`));
       if (!live()) { runner.close(); return; }
       inbox = new InboxSession({ store, alive: live, clock: { mono: () => performance.now(), wall: () => Date.now() }, log: this.log, changed: () => { if (live()) this.inboxChanged(true); } });
-      this.inbox = inbox; this.inboxChanged(false);
+      this.inbox = inbox; this.inboxStore = store; this.inboxChanged(false);
     }
     this.loop = startOpsSync({
       ...(inbox ? { distribution: inbox } : {}),
-      capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(executors), ...(inbox ? [INBOX_CAPABILITY] : [])], onEpoch: (e) => { if (live()) this.epoch = e; },
+      capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(executors), ...(inbox ? [INBOX_CAPABILITY, INBOX_PROMPT_CAPABILITY, LESSON_BINDING_CAPABILITY] : [])], onEpoch: (e) => { if (live()) this.epoch = e; },
       commands: runner as unknown as NonNullable<Parameters<typeof startOpsSync>[0]["commands"]>,
       post: (body, timeoutMs) => this.post(credential, body, timeoutMs), outbox: this.outbox, appInstanceId: this.appInstanceId,
       sample: () => { const r = this.runtime(); const changed = this.runtimeGate.next(r.status); if (changed) void this.outbox?.add("runtime", runtimePayload(changed)); return { idle_ms: Math.max(0, Math.round(r.idleMs)), runtime_status: r.status, control_revision: this.controlRevision }; },
@@ -423,6 +424,40 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     // reported "runtime ready" or a fault; an older fact must not overwrite a newer one.
     this.activationGate.reset(); this.errorGate.reset();
     void Promise.resolve().then(() => this.actions.probeProfile()).then((p) => { if (live() && !p.noToken && this.activationGate.untouched && this.errorGate.untouched) this.profileResult(p, this.token); }).catch(() => {});
+  }
+
+  // ── U3: a lesson SETTING this device holds is switched at the START of the learner's next turn ──
+  /**
+   * Asks the Service to record the switch. Never mid-turn logic of its own: the caller is the turn preflight, and a turn that
+   * is already running keeps the snapshot the Service admitted it with. Any failure leaves the setting pending — the turn
+   * then goes out exactly as it would have, and the switch is tried again at the next turn.
+   */
+  async switchPendingSetting(baseLessonSha256: string): Promise<{ state: "none" } | { state: "switched"; key: string; seq: number; object_id: string; revision: number; content_hash: string; lesson: LessonRef | "base" } | { state: "failed"; reason: string; final: boolean }> {
+    const store = this.inboxStore, credential = this.credential, gen = this.generation;
+    if (!store || !credential || !this.meta) return { state: "none" };
+    let pending: ReturnType<typeof pendingSetting>;
+    try { pending = pendingSetting((await store.current()).index); } catch { return { state: "none" }; }
+    if (!pending || !/^[a-f0-9]{64}$/.test(baseLessonSha256)) return { state: "none" };
+    try {
+      const res = await fetch(`${this.base()}/classroom/ops/lesson-binding`, { method: "POST", headers: { authorization: `Bearer ${credential}`, "content-type": "application/json" }, signal: AbortSignal.timeout(4000),
+        body: JSON.stringify({ app_instance_id: this.appInstanceId, offer_key: pending.offer_key, distribution_id: pending.distribution_id, object_id: pending.object_id, revision: pending.revision, content_hash: pending.content_hash, base_lesson_sha256: baseLessonSha256 }) });
+      const body = await res.json().catch(() => null) as { recorded?: boolean; reason?: string; final?: boolean; binding?: { key: string; seq: number } } | null;
+      // An answer that arrives after this connection ended decides nothing (the same rule as every other operations answer).
+      if (gen !== this.generation) return { state: "failed", reason: "connection_closed", final: false };
+      if (body?.recorded && body.binding && /^[a-f0-9]{32}$/.test(body.binding.key)) return { state: "switched", key: body.binding.key, seq: body.binding.seq, object_id: pending.object_id, revision: pending.revision, content_hash: pending.content_hash, lesson: pending.lesson };
+      return { state: "failed", reason: body?.reason ?? `http_${res.status}`, final: body?.final === true };
+    } catch { return { state: "failed", reason: "network", final: false }; }
+  }
+  /** Called only after the served profile was verified to carry this key: the device's own note that it is bound. */
+  async confirmSettingBound(o: { object_id: string; revision: number; content_hash: string; key: string; seq: number }): Promise<void> {
+    const store = this.inboxStore; if (!store) return;
+    try { await store.commit((index) => { const next = markSettingBound(index, o); return { next: next === index ? null : next, result: null }; }); this.inboxChanged(false); } catch (err) { this.log(`[inbox] binding note not saved: ${(err as Error).message}`); }
+  }
+  /** What any window of this learner can read from the shared inbox: the binding the owner window last verified. */
+  async knownBindingKey(): Promise<string | null> {
+    const p = this.context.globalState.get<InboxPointer>(INBOX_KEY), me = tokenIdentityUnverified(this.token);
+    if (!p || p.hidden || !me.u || me.u !== p.student || me.c !== p.cohort) return null;
+    try { return boundSetting((await new InboxStore(inboxDir(this.context.globalStorageUri.fsPath, p)).current()).index)?.key ?? null; } catch { return null; }
   }
 
   private async post(credential: string, body: unknown, timeoutMs: number): Promise<SyncResponse> {
