@@ -754,7 +754,8 @@ attachments + import references), not which slot holds them; a turn the instruct
 to the draft like the learner's own Stop (REQ-C16); a token re-check no longer clears a runtime, tool or provider fault;
 preview recovery checks the page the learner had open (a 404 is a named fault) and touches only tabs on the learner's
 preview server as it was before the action (other localhost tools and sites are never read, moved or closed); it reports
-the page back only when that tab itself loaded a fresh document at the page's address, never from an HTTP answer alone;
+the page back only when that tab itself loaded a fresh document at the page's address (on one session bound to that
+tab, stopping if the tab goes) and every learner page answered as a document, never from an HTTP answer alone;
 an Agent SDK turn whose result is an error is a failed turn for the spool, the observation log, the turn close and the
 board alike (the learner's notice is shown once, nothing is retried), classified only from the HTTP status this turn's own
 stream carried (5xx → provider, 429 → rate limit, none → unknown). A re-issued code typed on the start page for the activity already open in
