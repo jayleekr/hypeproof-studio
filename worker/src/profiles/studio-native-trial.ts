@@ -22,7 +22,14 @@ export const profile: Profile = {
       'claude-sonnet-4-5-20250929', 'claude-opus-5', 'claude-opus-4-8',
       'hypeproof-strong', 'claude-opus-4-6', 'claude-opus-4-5-20251101'],
   },
-  session: { cohort_id: 'studio-native-trial', series_total: 1, series_index: 1, hours: 1 },
+  // ADR 0010 step 2 — both of these were `observation.enabled` until now.
+  // `requires_open_session`: this seat's observation scope IS its session
+  // (`nativeObservationScope` hashes `session_id`), so reading the profile
+  // outside one would hand the client a scopeless block.
+  // `trial.individual`: the mint route and the chat gate both ask it, and they
+  // have to agree or a minted seat 403s forever.
+  session: { cohort_id: 'studio-native-trial', series_total: 1, series_index: 1, hours: 1, requires_open_session: true },
+  trial: { individual: true },
   sandbox: { ...practice.sandbox, workspace_root: '~/HypeProofTrial' },
   assets_focus: [...ASSET_FOCUS],
   essences_focus: [],

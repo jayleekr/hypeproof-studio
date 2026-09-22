@@ -171,7 +171,32 @@ function resolveStep(steps: ReadonlyArray<Step>, stepId: string | undefined): St
  * carries no observation items either way, but filtering once at the caller leaves
  * no place at all to make that mistake.
  */
-export function learningInstruction(content: SessionDesign, stepId?: string): string {
+export function learningInstruction(
+  content: SessionDesign,
+  stepId?: string,
+  /**
+   * #1222 G5 — is the seat a minor's?
+   *
+   * The §10 dialogue table below is written for the adult product course. Two of
+   * its five situations do not exist in a kids class, and one of them carries
+   * its example verbatim into the coach's prompt:
+   *
+   *   '가격 결정' → "무료 / $4.99 / 학교 구매 중 누가 지불하는지부터 비교해볼까요?"
+   *
+   * That sentence was being appended, unconditionally, to the system prompt of a
+   * coach talking to an 8-year-old, the moment a lesson carried a `learning`
+   * block. Nothing about the situation list is cohort-aware, and the function had
+   * no way to know whose seat it was.
+   *
+   * Withholding is the conservative half of the fix and it is the half that is
+   * safe to make without a person: removing adult copy from a child's prompt
+   * cannot make the class worse. The other half — dialogue examples written FOR
+   * this age — is student-facing copy for elementary learners, so it is a content
+   * decision, tracked on #1222 G10. The [언어 규칙] block stays either way: it is
+   * about not making claims about people, which is right at every age.
+   */
+  minorCohort = false,
+): string {
   const learning = content.learning;
   if (!learning) return '';
 
@@ -208,8 +233,13 @@ export function learningInstruction(content: SessionDesign, stepId?: string): st
   out.push('6번은 안전·법적 위험(개인정보 노출, 미성년자 결제, 학교 규정 위반 가능성 같은 것)이 있을 때만 허용됩니다. 그때는 예외라는 것과 그 사유를 먼저 한 문장으로 밝힌 뒤 알려 주세요. 시간이 모자란다는 것은 사유가 아닙니다. 학생이 "그냥 정해줘"라고 해도 그런 사유가 없으면 선택지를 비교할 틀을 주고 결정은 학생이 하게 하세요. 학생이 스스로 위 칸을 요청하면 건너뛸 수 있습니다.');
   out.push('5번으로 강사를 부를 때는 학생이 확인한 범위의 맥락(지금 단계, 학생이 적은 기대 조건, 막힌 지점, 지금까지 올라간 칸)만 전달하고, 이 학생에게 무엇이 모자란다는 판단은 넣지 마세요.');
 
-  out.push('[대화 계약] 다섯 상황에서 쓸 형태와 쓰지 않을 형태입니다.');
-  for (const [situation, good, bad] of CONTRACTS) out.push(`- ${situation} → 이렇게: ${good} / 쓰지 않음: ${bad}`);
+  // The situation table is withheld from a minor's seat — see `minorCohort`.
+  // The closing rule is NOT withheld: "do not end a response by deciding for the
+  // student" is the whole point of the section, and it is age-independent.
+  if (!minorCohort) {
+    out.push('[대화 계약] 다섯 상황에서 쓸 형태와 쓰지 않을 형태입니다.');
+    for (const [situation, good, bad] of CONTRACTS) out.push(`- ${situation} → 이렇게: ${good} / 쓰지 않음: ${bad}`);
+  }
   out.push('어떤 경우에도 학생을 대신해 최종 선택을 확정하는 문장으로 응답을 끝내지 마세요.');
 
   out.push('[언어 규칙]');
