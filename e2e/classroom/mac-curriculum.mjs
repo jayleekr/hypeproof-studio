@@ -10,6 +10,8 @@
 // the switch, the turn close, the rehearsal report the window sends. Synthetic: accounts, the curricula, and the MODEL PROVIDER —
 // a recorder that answers protocol-complete streams and records what reached it (lesson, help instruction, tools, the learner's
 // saved work). It proves transport and enforcement, never a real model's quality, latency or cost.
+// #751 G2 mission: A and B also get DIFFERENT missions and completion conditions through the visible /authoring controls; the
+// mission the real window's header draws and the mission the Service puts in the model request are read at each step.
 // Seat A1 is the real window (selected). A2 runs the real device client in this process and is never selected. A3 is registered
 // and invited but never connects (offline). Own ports 18991/18992/9591, own user-data dirs and HOME; the installed app, other
 // sessions' hosts and the user's Studio data are not touched. Nothing about Windows, a school network, staging/production or mail.
@@ -30,7 +32,7 @@ import { InboxSession, InboxStore, inboxDir } from '../../extensions/hypeproof-c
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'), home = path.resolve(process.env.HPS_DEVHOST_DIR || path.join(repo, 'e2e/test-results/classroom-devhost-g2'));
 const servicePort = 18991, boardPort = 18992, debugPort = 9591, HOURS = 12, prefix = 'g2-' + new Date().toISOString().slice(0, 10).replaceAll('-', '') + '-';
-const sha = (p) => createHash('sha256').update(readFileSync(p)).digest('hex'), json = (p) => JSON.parse(readFileSync(p, 'utf8')), out = path.join(home, 'curriculum'); mkdirSync(out, { recursive: true });
+const sha = (p) => createHash('sha256').update(readFileSync(p)).digest('hex'), json = (p) => JSON.parse(readFileSync(p, 'utf8')), out = path.join(home, process.env.HPS_G2_RUN || 'curriculum'); mkdirSync(out, { recursive: true });
 const manifest = json(path.join(home, 'manifest.json')), copy = path.join(home, 'HypeProof Studio (ops devhost).app'), ext = path.join(copy, 'Contents/Resources/app/extensions/hypeproof-chat');
 assert.ok(!copy.startsWith('/Applications'), 'never the installed app');
 for (const [f, h] of Object.entries(manifest.extension.bundles)) { assert.equal(sha(path.join(ext, f)), h, `${f} changed since prepare`); assert.equal(sha(path.join(repo, 'extensions/hypeproof-chat', f)), h, `${f}: the prepared copy is not the current build — prepare again`); }
@@ -88,8 +90,10 @@ globalThis.fetch = async (input, init) => {
   const marks = [...new Set(raw.match(/(?<![A-Z0-9-])(?:Q|HOLD)-[A-Z0-9]+(?:-[A-Z0-9]+)*/g) ?? [])], fresh = marks.filter((m) => !seenMarks.has(m));
   const current = fresh.length === 1 ? fresh[0] : marks.map((m) => [m, raw.lastIndexOf(m)]).sort((x, y) => y[1] - x[1])[0]?.[0] ?? null; for (const m of marks) seenMarks.add(m);
   const help = /\[도움 방식\] 단계 '([^']+)'의 도움 방식은 '([^']+)'이며 ([^.]+)\./.exec(raw);
+  // The mission the Service put into THIS request's coach context (learning-prompt.ts), as it crossed to the provider.
+  const mission = /\[학습 설계\] (\d+)주차 · 이번 주 미션: \\"((?:[^"\\]|\\.)+?)\\"/.exec(raw);
   const held = !!holdGate && !!current && current.startsWith('HOLD-');
-  providerCalls.push({ at: Date.now(), model: body.model, lesson: LESSON_OF.find(([m]) => raw.includes(m))?.[1] ?? 'unknown', mark: current, help: help ? { step: help[1], mode: help[2], source: help[3] } : null,
+  providerCalls.push({ at: Date.now(), mission: mission ? [Number(mission[1]), mission[2]] : null, model: body.model, lesson: LESSON_OF.find(([m]) => raw.includes(m))?.[1] ?? 'unknown', mark: current, help: help ? { step: help[1], mode: help[2], source: help[3] } : null,
     tools: (body.tools ?? []).map((t) => t.name).filter(Boolean).sort(), in_messages: !!current && convo.includes(current), criterion: /학생이 직접 저장한 확인 기준\]\\n([^\\[]+)/.exec(raw)?.[1] ?? null, decision: /결정: ([^\\]+)\\n이유: ([^\\]+)/.exec(raw)?.slice(1, 3) ?? null, held });
   return body.stream ? sse(body.model, held ? holdGate : null) : Response.json({ id: 'synthetic', type: 'message', role: 'assistant', model: body.model, content: [{ type: 'text', text: ANSWER }], stop_reason: 'end_turn', usage: { input_tokens: 12, output_tokens: 9 } });
 };
@@ -149,6 +153,12 @@ const enterWork = async (where = 'true') => { const e = await frame('.studio-pri
 /** What the learner SEES of the current step: help choices (checked), the work surface, saved work, rehearsal line. */
 const PANEL = `(()=>{const p=document.querySelector('[data-lesson-step-panel]');if(!p)return null;return {step:p.dataset.lessonStepPanel,help:[...p.querySelectorAll('input[name="hp-help-mode"]')].map(i=>[i.value,i.checked]),surface:p.querySelector('[data-surface]')?.dataset.surface??null,saved:p.querySelector('[data-saved-work]')?.textContent??null,rehearsal:p.querySelector('.hp-rehearsal')?.textContent??null,result:p.querySelector('[data-rehearsal-result]')?.textContent??null,text:p.textContent.slice(0,600)};})()`;
 const panelOf = (chat) => chat.evaluate(PANEL);
+/** The mission header as drawn in the real window (MissionHeader.tsx): week line, sentence, completion items and their marks. */
+const HEADER = `(()=>{const h=document.querySelector('header.hp-mission');if(!h)return null;return {week:h.querySelector('.hp-mission-week')?.textContent??null,sentence:h.querySelector('.hp-mission-sentence')?.textContent??null,completion:[...h.querySelectorAll('.hp-mission-completion-text')].map(e=>e.textContent),marks:[...h.querySelectorAll('.hp-mission-completion li:not(.hp-mission-completion-note) .hp-mark')].map(e=>e.textContent)};})()`;
+const headerOf = (chat) => chat.evaluate(HEADER);
+const UNSET = { week: null, sentence: '미션이 정해지지 않았습니다.', completion: [], marks: [] };
+const headerFor = (m) => m ? { week: m.week + '주차', sentence: m.mission, completion: m.completion.map((c) => c[0]), marks: m.completion.map(() => '☐') } : UNSET;
+const waitHeader = (chat, m, label) => wait(async () => { const h = await headerOf(chat); return JSON.stringify(h) === JSON.stringify(headerFor(m)) ? h : null; }, label + ' — the header draws ' + (m ? '‘' + m.mission + '’' : 'no mission'));
 const shot = async (w, name) => { try { await w.screenshot({ path: path.join(out, name) }); } catch (e) { console.log('screenshot skipped: ' + e.message); } };
 const db = (sql, ...a) => local.db.prepare(sql).all(...a).map((r) => ({ ...r }));
 const bindingsOf = (student) => db('SELECT binding_seq,source,version,first_completed_at IS NOT NULL AS applied FROM classroom_lesson_bindings WHERE student_id=? ORDER BY binding_seq', student);
@@ -172,7 +182,14 @@ async function author(t, c) {
   for (const box of await s0.locator('[data-help-mode]').all()) { const m = await box.getAttribute('data-help-mode'); if (c.step.help.includes(m)) await box.check(); else await box.uncheck(); }
   await s0.locator('[data-help-default]').selectOption(c.step.default); await s0.locator('[data-ui]').selectOption(c.step.ui);
   await page.locator('#feature-mode').selectOption('narrow'); for (const box of await page.locator('#feature-allowed input').all()) { const k = await box.getAttribute('value'); if (c.features.includes(k)) await box.check(); else await box.uncheck(); }
+  // The mission with the visible controls: on, week, sentence, and the completion rows replaced one by one.
+  await page.locator('#learning-on').check(); await page.locator('#learning-week').fill(String(c.mission.week)); await page.locator('#learning-mission').fill(c.mission.mission);
+  while (await page.locator('#learning-completion li').count()) await page.locator('#learning-completion li').first().getByRole('button', { name: '삭제' }).click();
+  for (const [text, event] of c.mission.completion) { await page.locator('#completion-add').click(); const row = page.locator('#learning-completion li').last(); await row.locator('[data-completion-text]').fill(text); await row.locator('[data-completion-event]').selectOption(event); }
+  await page.locator('#learning').scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(out, 'g2-mac-00-mission-' + c.key + '.png') });
   await page.locator('#save').click(); await waitStatus(/저장했습니다/);
+  const saved = (await local.request(`/admin/cohorts/${local.cohort}/authoring/${course}`, 'GET', undefined, teacherToken)).json.content.learning;
+  assert.deepEqual([saved.week, saved.mission, saved.completion.map((x) => [x.text, x.event])], [c.mission.week, c.mission.mission, c.mission.completion], 'the controls saved the mission');
 }
 async function reviewAgainst(t, version, file) { const { page } = t; await page.locator('#versions-load').click(); await page.locator(`#base-version option[value="${version}"]`).waitFor({ state: 'attached' }); await page.locator('#base-version').selectOption(version); await page.waitForTimeout(400); await page.locator('#impact').click(); await page.locator('#impact-view li').first().waitFor(); const lines = await page.locator('#impact-view li').allInnerTexts(); await page.locator('#review').scrollIntoViewIfNeeded(); await page.screenshot({ path: path.join(out, file) }); return lines; }
 async function candidate(t, version) { const { page } = t; await page.locator('#version').evaluate((e) => { e.closest('details').open = true; }); await page.locator('#version').fill(version); await page.locator('#freeze').click(); await page.locator('#completion').filter({ hasText: version }).waitFor();
@@ -185,6 +202,7 @@ async function rehearse(code, label, expect) {
   launch('rehearsal-' + label, code, wsR); const win = await attach(); const chat = await enterWork();
   const p0 = await wait(() => panelOf(chat), 'the rehearsal panel'); assert.match(p0.rehearsal, /강사 리허설/);
   assert.deepEqual([p0.step, p0.help, p0.surface], expect.first, 'the rehearsal window draws exactly the candidate\'s first step');
+  const header = await waitHeader(chat, expect.mission, 'rehearsal ' + label);
   // "Not executed" is its own answer: sending before any request is refused and nothing is judged.
   await press(chat, '[data-rehearsal-send]', 'the rehearsal send button'); const early = await wait(() => chat.evaluate("document.querySelector('[data-rehearsal-result]')?.textContent"), 'the not-yet answer'); assert.match(early, /아직 AI에게 한 번도 묻지 않았습니다/);
   await shot(win, `g2-mac-${label}-rehearsal-not-executed.png`);
@@ -192,7 +210,8 @@ async function rehearse(code, label, expect) {
   for (const id of expect.rest) { await press(chat, `.hp-mission-actions [data-step-id="${id}"]`, 'step ' + id); await wait(async () => (await panelOf(chat))?.step === id, 'panel of ' + id); }
   await press(chat, '[data-rehearsal-send]', 'the rehearsal send button'); const verdict = await wait(() => chat.evaluate("document.querySelector('[data-rehearsal-result]')?.dataset.rehearsalResult"), 'the verdict');
   const p1 = await panelOf(chat); await shot(win, `g2-mac-${label}-rehearsal-${verdict}.png`); await quit();
-  return { verdict, first: p0, last: p1, call: callsFor(`Q-R${label}`)[0] };
+  const judged = db('SELECT verdict_json FROM authoring_rehearsals WHERE learner_id=? AND verdict IS NOT NULL ORDER BY judged_at DESC LIMIT 1', REHEARSER)[0];
+  return { verdict, header, first: p0, last: p1, call: callsFor(`Q-R${label}`)[0], mission_check: JSON.parse(judged.verdict_json).checks.mission };
 }
 
 const session = { pid: process.pid, service: origin, instructor: 'http://127.0.0.1:' + boardPort + '/authoring', cohort: local.cohort, profile: local.profile, app: copy, source_sha: head, extension_source_sha: manifest.extension.source_sha, extension_bundles: manifest.extension.bundles, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256 }, ports: { service: servicePort, instructor: boardPort, app_debug: debugPort } };
@@ -202,23 +221,32 @@ const result = { schema: 'hps-classroom-mac-curriculum/1', at: new Date().toISOS
 try {
   // ── A: author → review → candidate → rehearsal in a real window → confirm ──
   teacher = await authoringPage();
-  const A = { title: '첫 시제품 — 예약 안내 페이지', audience: '처음 만들어 보는 원장님', objective: '예약 안내 페이지의 첫 판을 만들고 확인 기준을 스스로 정한다', starter: '예약 안내 페이지 예제 폴더', step: { title: '확인 기준 정하기', acceptance: '저장한 확인 기준 한 줄이 있다', help: ['hint', 'independent'], default: 'hint', ui: 'criterion_form' }, features: ['read'] };
+  const A = { title: '첫 시제품 — 예약 안내 페이지', audience: '처음 만들어 보는 원장님', objective: '예약 안내 페이지의 첫 판을 만들고 확인 기준을 스스로 정한다', starter: '예약 안내 페이지 예제 폴더', step: { title: '확인 기준 정하기', acceptance: '저장한 확인 기준 한 줄이 있다', help: ['hint', 'independent'], default: 'hint', ui: 'criterion_form' }, features: ['read'],
+    key: 'A', mission: { week: 1, mission: '예약 안내 첫 판을 만들고 확인 기준을 먼저 정한다', completion: [['확인 기준을 한 줄로 적었다', 'criterion_set'], ['첫 판을 직접 열어 확인했다', 'test_observed']] } };
   await author(teacher, A); await teacher.page.screenshot({ path: path.join(out, 'g2-mac-01-authoring-A.png') });
   result.impact_A = await reviewAgainst(teacher, V1, 'g2-mac-02-review-A-vs-V1.png');
-  const codeA = await candidate(teacher, VA); assert.match(await readinessText(teacher), /리허설 중 — .*\(준비 완료 아님\)/); await teacher.page.locator('#rehearsal').scrollIntoViewIfNeeded(); await teacher.page.screenshot({ path: path.join(out, 'g2-mac-03-rehearsal-A-running.png') });
+  assert.ok(result.impact_A.includes('학생 미션: 미션 없음 → 1주차 ‘' + A.mission.mission + '’'), result.impact_A.join('\n'));
+  assert.ok(result.impact_A.includes('완료 조건: 없음 → ‘확인 기준을 한 줄로 적었다’(기대 조건 적기), ‘첫 판을 직접 열어 확인했다’(직접 확인하기)'), result.impact_A.join('\n'));
+  const codeA = await candidate(teacher, VA); assert.match(await readinessText(teacher), /리허설 중 — .*\(준비 완료 아님\)/); await teacher.page.locator('#readiness').evaluate((e) => e.scrollIntoView({ block: 'center' })); await teacher.page.screenshot({ path: path.join(out, 'g2-mac-03-rehearsal-A-running.png') });
   step('candidate A frozen, rehearsal code issued');
-  result.rehearsal_A = await rehearse(codeA, 'A', { first: ['intro', [['hint', true], ['independent', false]], 'criterion_form'], rest: ['build', 'review'] });
+  assert.match(await readinessText(teacher), new RegExp('이 후보의 학생 미션: 1주차 ‘' + A.mission.mission + '’ · 완료 조건 2개'));
+  result.rehearsal_A = await rehearse(codeA, 'A', { first: ['intro', [['hint', true], ['independent', false]], 'criterion_form'], rest: ['build', 'review'], mission: A.mission });
+  assert.equal(result.rehearsal_A.mission_check.result, 'match', JSON.stringify(result.rehearsal_A.mission_check)); assert.deepEqual(result.rehearsal_A.call.mission, [1, A.mission.mission], 'the rehearsal request carried A\'s mission');
   assert.equal(result.rehearsal_A.verdict, 'passed', JSON.stringify(result.rehearsal_A)); assert.deepEqual([result.rehearsal_A.call.lesson, result.rehearsal_A.call.help?.mode], [VA, '힌트 받기']);
   assert.ok(!result.rehearsal_A.call.tools.some((n) => ['Write', 'Edit', 'MultiEdit'].includes(n)), 'A is read-only at the model boundary: ' + result.rehearsal_A.call.tools);
-  const readyA = await readinessText(teacher); assert.match(readyA, /통과 — 학생 조건에서 설계대로 실행됐습니다/); await teacher.page.locator('#readiness-detail').evaluate((e) => { e.closest('details').open = true; }); await teacher.page.locator('#rehearsal').scrollIntoViewIfNeeded(); await teacher.page.screenshot({ path: path.join(out, 'g2-mac-04-rehearsal-A-passed.png') });
+  const readyA = await readinessText(teacher); assert.match(readyA, /통과 — 학생 조건에서 설계대로 실행됐습니다/); assert.match(readyA, /리허설 학생 화면의 미션: 이 후보와 같았습니다/); await teacher.page.locator('#readiness-detail').evaluate((e) => { e.closest('details').open = true; }); await teacher.page.locator('#readiness').evaluate((e) => e.scrollIntoView({ block: 'center' })); await teacher.page.screenshot({ path: path.join(out, 'g2-mac-04-rehearsal-A-passed.png') });
   await confirm(teacher, 'g2-mac-05-confirmed-A.png'); step('A confirmed');
 
   // ── B: a deliberately different curriculum from the same controls ──
-  const B = { title: '고쳐 보기 — 진료시간 수정', audience: '첫 판을 만든 원장님', objective: '진료시간 안내를 고치고 무엇을 왜 바꿨는지 남긴다', starter: '첫 판 index.html', step: { title: '고치고 이유 남기기', acceptance: '고친 index.html과 바꾼 이유 한 줄이 있다', help: ['co_edit', 'independent'], default: 'co_edit', ui: 'decision_form' }, features: ['read', 'write'] };
+  const B = { title: '고쳐 보기 — 진료시간 수정', audience: '첫 판을 만든 원장님', objective: '진료시간 안내를 고치고 무엇을 왜 바꿨는지 남긴다', starter: '첫 판 index.html', step: { title: '고치고 이유 남기기', acceptance: '고친 index.html과 바꾼 이유 한 줄이 있다', help: ['co_edit', 'independent'], default: 'co_edit', ui: 'decision_form' }, features: ['read', 'write'],
+    key: 'B', mission: { week: 2, mission: '진료시간을 고치고 왜 바꿨는지 남긴다', completion: [['바꾼 이유를 적었다', 'decision_revised']] } };
   await author(teacher, B); result.impact_B = await reviewAgainst(teacher, VA, 'g2-mac-06-review-B-vs-A.png');
+  assert.ok(result.impact_B.includes('학생 미션: 1주차 ‘' + A.mission.mission + '’ → 2주차 ‘' + B.mission.mission + '’'), result.impact_B.join('\n'));
+  assert.ok(result.impact_B.includes('완료 조건: ‘확인 기준을 한 줄로 적었다’(기대 조건 적기), ‘첫 판을 직접 열어 확인했다’(직접 확인하기) → ‘바꾼 이유를 적었다’(고른 이유 적기)'), result.impact_B.join('\n'));
   assert.ok(result.impact_B.some((l) => /도움 방식 힌트 받기·직접 해보기 \(처음: 힌트 받기\) → 함께 수정·직접 해보기 \(처음: 함께 수정\)/.test(l)) && result.impact_B.some((l) => /작업 화면 확인 기준 적기 양식 → 결정과 이유 적기 양식/.test(l)) && result.impact_B.some((l) => /허용 기능: read → read, write/.test(l)), result.impact_B.join('\n'));
   const codeB = await candidate(teacher, VB);
-  result.rehearsal_B = await rehearse(codeB, 'B', { first: ['intro', [['co_edit', true], ['independent', false]], 'decision_form'], rest: ['build', 'review'] });
+  result.rehearsal_B = await rehearse(codeB, 'B', { first: ['intro', [['co_edit', true], ['independent', false]], 'decision_form'], rest: ['build', 'review'], mission: B.mission });
+  assert.equal(result.rehearsal_B.mission_check.result, 'match'); assert.deepEqual(result.rehearsal_B.call.mission, [2, B.mission.mission]);
   assert.equal(result.rehearsal_B.verdict, 'passed', JSON.stringify(result.rehearsal_B)); assert.deepEqual([result.rehearsal_B.call.lesson, result.rehearsal_B.call.help?.mode], [VB, '함께 수정']);
   assert.ok(result.rehearsal_B.call.tools.includes('Write'), 'B admits writing at the model boundary: ' + result.rehearsal_B.call.tools);
   assert.match(await readinessText(teacher), /통과/); await confirm(teacher, 'g2-mac-07-confirmed-B.png'); step('B confirmed');
@@ -228,6 +256,7 @@ try {
   const pairing = async () => (await local.request(local.base + '/pairings', 'POST', { seat_id: 'A1', roster_revision: roster }, teacherToken)).json.ticket;
   await palette(win, '수업 연결 (강사가 준 코드 입력)', await pairing()); await wait(async () => (await toasts(win)).some((t) => t.includes('수업에 연결했습니다')), 'connected');
   await ask(chat, 'Q-L0 첫 질문입니다', 'Q-L0'); await idle(chat); assert.equal(callsFor('Q-L0')[0].lesson, V1); assert.deepEqual(await panelOf(chat).then((p) => [p.help, p.surface]), [[], 'chat'], 'V1 has no help choice and no work surface');
+  result.header_V1 = await waitHeader(chat, null, 'V1 (legacy, no mission)'); assert.equal(callsFor('Q-L0')[0].mission, null, 'V1 has no mission, and none reaches the model');
   await shot(win, 'g2-mac-08-learner-V1.png');
 
   const manage = await browser.newPage({ viewport: { width: 1280, height: 720 } }); const T = (id) => manage.locator('#' + id).innerText();
@@ -251,9 +280,11 @@ try {
   result.items_A_prepared = await items(/A1 · .* 설정: 준비 — 기기 보관함에 있음/, 'A1 prepared'); assert.match(result.items_A_prepared, /A3 · .*(연결 없음|오프라인|연결되면|미확인|대기)/, 'A3 is offline: pending, never shown as applied');
   release(); holdGate = null; await idle(chat);
   assert.deepEqual(callsFor('HOLD-L1').map((c) => c.lesson), callsFor('HOLD-L1').map(() => V1), 'the running turn kept V1 to its end');
+  assert.deepEqual(callsFor('HOLD-L1').map((c) => c.mission), callsFor('HOLD-L1').map(() => null), 'the running turn kept V1\'s (absent) mission context to its end');
   // Next turn: the switch, then A's help/surface/tools at the execution boundary.
   await ask(chat, 'Q-LA1 이제 무엇을 할까요', 'Q-LA1'); await idle(chat);
-  const la1 = callsFor('Q-LA1').at(-1); assert.deepEqual([la1.lesson, la1.help?.mode, la1.help?.source], [VA, '힌트 받기', '수업 기본값입니다']); assert.ok(!la1.tools.some((n) => ['Write', 'Edit', 'MultiEdit'].includes(n)), 'A1 on A: no write tool');
+  const la1 = callsFor('Q-LA1').at(-1); assert.deepEqual([la1.lesson, la1.help?.mode, la1.help?.source], [VA, '힌트 받기', '수업 기본값입니다']);
+  assert.deepEqual(la1.mission, [1, A.mission.mission], 'the next turn carried A\'s mission'); result.header_A = await waitHeader(chat, A.mission, 'A1 on A'); assert.ok(!la1.tools.some((n) => ['Write', 'Edit', 'MultiEdit'].includes(n)), 'A1 on A: no write tool');
   let p = await wait(async () => { const x = await panelOf(chat); return x?.surface === 'criterion_form' ? x : null; }, 'A\'s work surface on the learner\'s screen'); assert.deepEqual(p.help, [['hint', true], ['independent', false]]);
   await press(chat, 'input[name="hp-help-mode"][value="independent"]', 'the help choice 직접 해보기');
   await setValue(chat, '[data-surface="criterion_form"] textarea', '예약 버튼이 첫 화면에서 바로 보인다'); await press(chat, '[data-surface="criterion_form"] button[type="submit"]', 'the criterion save button');
@@ -270,7 +301,8 @@ try {
   await compose(); await manage.locator(`#ops-dist-setting option[value="${VB}"]`).waitFor({ state: 'attached' }); await manage.locator('#ops-dist-setting').selectOption(VB); await manage.locator('#ops-dist-title').fill('B — 고쳐 보기'); await manage.locator('#ops-dist-body').fill('다음 질문부터 함께 고치고 이유를 남깁니다.'); await saveForm();
   result.send_B = await sendTo(['A1']); await items(/A1 · .* 설정: 준비 — 기기 보관함에 있음/, 'B prepared');
   await ask(chat, 'Q-LB1 진료시간을 고치고 싶어요', 'Q-LB1'); await idle(chat);
-  const lb1 = callsFor('Q-LB1').at(-1); assert.deepEqual([lb1.lesson, lb1.help?.mode], [VB, '함께 수정']); assert.ok(lb1.tools.includes('Write'), 'B admits writing: ' + lb1.tools);
+  const lb1 = callsFor('Q-LB1').at(-1); assert.deepEqual([lb1.lesson, lb1.help?.mode], [VB, '함께 수정']);
+  assert.deepEqual(lb1.mission, [2, B.mission.mission], 'the next turn carried B\'s mission'); result.header_B = await waitHeader(chat, B.mission, 'A1 on B'); assert.ok(lb1.tools.includes('Write'), 'B admits writing: ' + lb1.tools);
   p = await wait(async () => { const x = await panelOf(chat); return x?.surface === 'decision_form' ? x : null; }, 'B\'s decision surface'); assert.deepEqual(p.help, [['co_edit', true], ['independent', false]]);
   await setValue(chat, '[data-surface="decision_form"] input', '토요일 진료시간을 오후 2시까지로 고친다'); await setValue(chat, '[data-surface="decision_form"] textarea', '원장님이 확인한 실제 시간이라서');
   await press(chat, '[data-surface="decision_form"] button[type="submit"]', 'the decision save button'); await wait(async () => /저장한 결정: 토요일/.test((await panelOf(chat))?.saved ?? ''), 'the saved decision'); await shot(win, 'g2-mac-12-learner-B-decision.png');
@@ -280,6 +312,7 @@ try {
   // ── restart: the window comes back on B with the learner's files untouched ──
   await quit(); launch('learner', codes.A1, ws); const win2 = await attach(); chat = await enterWork();
   await ask(chat, 'Q-LB3 다시 열었습니다', 'Q-LB3'); await idle(chat); assert.equal(callsFor('Q-LB3').at(-1).lesson, VB, 'after a restart the next turn still runs B');
+  assert.deepEqual(callsFor('Q-LB3').at(-1).mission, [2, B.mission.mission]); result.header_restart = await waitHeader(chat, B.mission, 'after restart'); await shot(win2, 'g2-mac-12b-learner-B-after-restart.png');
   assert.equal((await panelOf(chat)).surface, 'decision_form'); step('restart kept B');
   // This host keeps secrets in memory (--use-inmemory-secretstorage), so the class-connection credential does not survive the
   // restart: the learner enters a fresh connection code, as after a lost device credential. The lesson binding is the
@@ -287,7 +320,8 @@ try {
   await palette(win2, '수업 연결 (강사가 준 코드 입력)', await pairing()); await wait(async () => (await toasts(win2)).some((t) => t.includes('수업에 연결했습니다')), 'reconnected'); step('reconnected after restart');
   // ── rollback: the return to the class's own version is an ordinary setting revision ──
   await manage.locator('#ops-dist-return').click(); await saveForm(); await sendTo(['A1']); await items(/A1 · .* 설정: 준비 — 기기 보관함에 있음/, 'return prepared');
-  await ask(chat, 'Q-L9 복귀 뒤 질문', 'Q-L9'); await idle(chat); assert.equal(callsFor('Q-L9').at(-1).lesson, V1, 'the return runs V1 again'); await items(/설정: 적용 .*\(기본 수업\)/, 'return applied');
+  await ask(chat, 'Q-L9 복귀 뒤 질문', 'Q-L9'); await idle(chat); assert.equal(callsFor('Q-L9').at(-1).lesson, V1, 'the return runs V1 again');
+  assert.equal(callsFor('Q-L9').at(-1).mission, null); result.header_return = await waitHeader(chat, null, 'after the return to V1'); await shot(win2, 'g2-mac-14-learner-returned-V1.png'); await items(/설정: 적용 .*\(기본 수업\)/, 'return applied');
   await manage.screenshot({ path: path.join(out, 'g2-mac-13-manage-returned.png') }); step('rollback to V1');
   assert.deepEqual(workFiles(), { changed: [], added: [] }, 'the learner\'s files are the bytes written before the app started');
 
