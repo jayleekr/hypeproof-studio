@@ -52,15 +52,17 @@ export async function localOps({ enabled = true, binding } = {}) {
     if (frozen.status !== 200) throw Error('freeze failed: ' + frozen.raw);
   }
   const configure = (seats, expected = 0, extra = {}, token) => request(base, 'PUT', { expected_roster_revision: expected, seats, flags: { ops_observe: true }, lesson, ...extra }, token);
-  const instance = (n = 1) => ({ app_instance_id: `instance-000${n}`, boot_id: `boot-0000-000${n}`, protocol: 1, app_version: '0.1.56' });
-  async function pair(seat, revision, n = 1) {
+  const instance = (n = 1, capabilities = ['observe', 'commands', 'retry_diagnostics', 'refresh_connection', 'restart_preview', 'cancel_current_run', 'reset_runtime', 'retry_evidence_upload', 'pause_new_runs', 'resume_new_runs']) => ({ app_instance_id: `instance-000${n}`, boot_id: `boot-0000-000${n}`, protocol: 1, app_version: '0.1.56', capabilities });
+  async function pair(seat, revision, n = 1, capabilities) {
     const p = await request(base + '/pairings', 'POST', { seat_id: seat, roster_revision: revision });
     if (p.status !== 201) throw Error('pairing failed: ' + p.raw);
-    const conn = await request('/v1/classroom/ops/connect', 'POST', { ticket: p.json.ticket, ...instance(n) }, null);
+    const conn = await request('/v1/classroom/ops/connect', 'POST', { ticket: p.json.ticket, ...instance(n, capabilities) }, null);
     return { pairing: p.json, conn };
   }
   let eventN = 0;
   const event = (seq, kind, payload, extra = {}) => ({ event_id: `event-${String(++eventN).padStart(6, '0')}`, seq, observed_at: Date.now(), kind, actor: 'system', payload, ...extra });
-  const sync = (credential, events = [], n = 1, extra = {}) => request('/v1/classroom/ops/sync', 'POST', { schema_version: 1, app_instance_id: instance(n).app_instance_id, boot_id: instance(n).boot_id, events, ...extra }, credential);
-  return { app, env, db, cohort, profile, run, base, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
+  const command = (action, targets, extra = {}, token) => request(base + '/commands', 'POST', { action, targets, idempotency_key: crypto.randomUUID(), reason_code: 'blocked_error', expected_roster_revision: 1, ...extra }, token);
+  const receipt = (cmd, state, result_code = '') => ({ command_id: cmd.command_id, lease_generation: cmd.lease_generation, connection_epoch: cmd.connection_epoch, state, result_code, observed_at: Date.now() });
+  const sync = (credential, events = [], n = 1, extra = {}) => request('/v1/classroom/ops/sync', 'POST', { schema_version: 1, app_instance_id: instance(n).app_instance_id, boot_id: instance(n).boot_id, capabilities: instance(n).capabilities, events, ...extra }, credential);
+  return { app, env, db, cohort, profile, run, base, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, command, receipt, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
 }
