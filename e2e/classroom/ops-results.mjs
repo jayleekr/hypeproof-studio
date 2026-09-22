@@ -114,20 +114,20 @@ try {
   // ── K1: selected collection. Upload report ≠ server verified; server verified ≠ the whole lesson. ──
   const line2 = (o) => JSON.stringify({ schema_version: 1, ts: new Date().toISOString(), ...o }), record = [line2({ seq: 1, type: 'prompt', turn_id: 't1', text: 'synthetic' }), line2({ seq: 2, type: 'turn_end', turn_id: 't1', status: 'ok' })].join('\n') + '\n';
   const batches = () => local.db.prepare("SELECT b.id FROM classroom_collect_batches b JOIN classroom_collect_scopes s ON s.batch_id=b.id WHERE b.dry_run=0 ORDER BY b.created_at,b.rowid").all().map((r) => r.id);
-  const collect = async (list) => { await pick(list); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.locator('#ops-pick-go').click(); await page.locator('#ops-pick-note').filter({ hasText: '요청을 접수했습니다' }).waitFor(); return batches().at(-1); };
+  const collect = async (list) => { await pick(list); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.locator('#ops-pick-kind-record').check(); await page.locator('#ops-pick-go').click(); await page.locator('#ops-last-what').filter({ hasText: '요청 접수' }).waitFor(); return batches().at(-1); };
   const k1 = await collect(['A1', 'A2', 'A4', 'A5']), K1 = 'collect:' + k1; await card(K1).waitFor();
   assert.deepEqual((await lines(K1)).map((l) => l.split(' — ')[0]), ['A1 · student-a', 'A2 · student-b', 'A4 · student-d', 'A5 · student-e'], 'only the selected; A3 and A6 are not recipients');
   assert.match(await line(K1, 'A4'), /\[미전달·만료·대상 변경\] 제외 · 동의 없음 · 회수하지 않음/); assert.match(await line(K1, 'A5'), /\[미전달·만료·대상 변경\] 기기에 전달되지 않음 · 기기 연결 없음/);
   const upCmd = local.db.prepare("SELECT id FROM ops_commands WHERE idempotency_key=?").get('collect-' + k1).id; await lease('A1', upCmd);
   await until('A1 leased', async () => /^A1 · student-a — \[기기 수신 확인 전\]/.test(await line(K1, 'A1')));
   await report('A1', upCmd, 'accepted'); await report('A1', upCmd, 'succeeded', 'receipt_verified'); // the device SAYS it sent — nothing was sealed
-  assert.equal((await local.uploadSnapshotAs(conn.A2, k1, 1, record, { spool: { other_sessions: 1 } })).status, 201); // A2: a valid current-session record that leaves out an earlier session of this class
+  assert.equal((await local.uploadSnapshotAs(conn.A2, k1, 1, record, { spool: { other_sessions: 1 } })).status, 201); // A2: a valid record; the App could not read one earlier session of this class (U1b: said, never guessed)
   await until('K1 moved', async () => /\[적용 \(서버 검증\)\]/.test(await line(K1, 'A2')) && /\[기기 수신\]/.test(await line(K1, 'A1')));
   assert.match(await line(K1, 'A1'), /\[기기 수신\] 전송·검증 진행 중 · 기기 요청: 기기가 전송을 마쳤다고 보고함/, 'the device reporting "sent" is not verified');
-  const a2 = await line(K1, 'A2'); assert.match(a2, /\[적용 \(서버 검증\)\] 서버 검증됨 · 기록의 시작·끝 또는 다른 세션 포함 여부 확인 불가 — 이번 세션 기록만 — 같은 수업 시간의 다른 세션\(앱 재시작·다른 창\)은 들어 있지 않음 · 기록 범위 [^·–]+–[^·]+ · 2줄 · 같은 수업 시간의 다른 세션 1개는 이 기록에 없음 · 수업 전체의 기록이 아님/, a2);
+  const a2 = await line(K1, 'A2'); assert.match(a2, /\[적용 \(서버 검증\)\] 서버 검증됨 · 기록의 시작·끝 또는 다른 세션 포함 여부 확인 불가 — 같은 수업 시간의 세션 일부를 읽지 못했거나 한도를 넘어 포함하지 않음 · 세션 1개: 1\) [^·–]+–[^·]+ 현재 세션 · 시작 확인 · 끝 확인 · 받음: 프롬프트 1 · 작업 기록 1 · .* · 수업 전체의 기록이 아님 — 앱을 다시 시작한 뒤 새 회수로 다시 요청할 수 있습니다/, a2);
   assert.match(await extra(K1), /서버 검증 1명 중 기록 범위: 시작·끝·순번 확인 0 · 범위 제한·확인 불가 1 — 서버 검증은 받은 파일이 온전하다는 뜻이고 수업 전체를 담았다는 뜻이 아닙니다/);
-  assert.equal(local.db.prepare("SELECT reason FROM classroom_collect_items WHERE batch_id=? AND seat_id='A2'").get(k1).reason, 'other_session_not_included', 'the reason is persisted, not recomputed in the page');
-  assert.match(await page.locator('#ops-pick-items').innerText(), /이번 세션 기록만/, 'the detail panel says the same');
+  assert.equal(local.db.prepare("SELECT reason FROM classroom_collect_items WHERE batch_id=? AND seat_id='A2'").get(k1).reason, 'session_not_included', 'the reason is persisted, not recomputed in the page');
+  assert.match(await page.locator('#ops-pick-items').innerText(), /세션 일부를 읽지 못했거나/, 'the detail panel says the same');
   evidence.k1 = { lines: await lines(K1), extra: await extra(K1) };
   ok('selected collection: nonselected absent, consent/offline named, leased ≠ receipt, a device\'s "sent" ≠ verified, verified shows its real extent and why it is not the whole lesson');
 
@@ -138,7 +138,7 @@ try {
   await until('K1 follows by itself', async () => /\[적용 \(서버 검증\)\] 서버 검증됨 · 기록 순번 연속/.test(await line(K1, 'A1')), 30000);
   assert.doesNotMatch(await line(K2, 'A3'), /서버 검증/, 'A1\'s late record was not painted into K2'); assert.match(await line(K1, 'A1'), /기기 요청: 기기가 전송을 마쳤다고 보고함/, 'the historical command result stays beside the present verification');
   // a double confirmation is one request and one card
-  await pick(['A3']); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.evaluate(() => { const b = document.getElementById('ops-pick-go'); b.click(); b.disabled = false; b.click(); }); await page.waitForTimeout(1200);
+  await pick(['A3']); await page.locator('#ops-pick-collect').click(); await page.locator('#ops-pick-confirm').waitFor(); await page.locator('#ops-pick-kind-record').check(); await page.evaluate(() => { const b = document.getElementById('ops-pick-go'); b.click(); b.disabled = false; b.click(); }); await page.waitForTimeout(1200);
   const k3 = batches().at(-1); assert.equal(batches().length, 3, 'two clicks, one batch'); assert.equal((await keys()).filter((k) => k === 'collect:' + k3).length, 1, 'and one card');
   await shot('collections', 'K1 (upload report vs verified, current-session extent) kept and re-observed after K2/K3'); ok('a second collection does not erase the first; the first is re-observed on its own; a double confirmation is one card');
 
