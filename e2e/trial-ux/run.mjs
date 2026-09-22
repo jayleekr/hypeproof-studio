@@ -18,7 +18,11 @@ const bundled = await build({ entryPoints: [path.join(repo, 'worker/src/profiles
 const { profile: sourceProfile } = await import(`data:text/javascript;base64,${Buffer.from(bundled.outputFiles[0].text).toString('base64')}`);
 const native = {
   ...sourceProfile, profile_id: sourceProfile.id,
-  observation: { format: 'hps-observation/1', scope: 'synthetic-scope-a' },
+  // `assess: true` because this suite OWNS TUX-OBS-01..10, and after ADR 0010 the
+  // results panel is drawn only for a cohort that opted into assessment. The trial
+  // is that cohort (`studio-native-trial`), so this mirrors what it is served — it
+  // is not a test-only switch.
+  observation: { format: 'hps-observation/1', scope: 'synthetic-scope-a', assess: true },
   series_index: 1, series_total: 1,
 };
 const config = (profile = native, extra = {}) => ({ proxyUrl: 'http://controlled-host.invalid/v1', model: 'controlled-host-only', hasToken: true, coach: { name: '다른 수업 이름', personality: '', configured: true }, profile, ...extra });
@@ -269,7 +273,7 @@ try {
   await test('TUX-OBS-09', 'Learning link available before assessment and emits exact approved URL', async p => { await openObservation(p); await observe(p); await btn(p, learningPath.title).click(); await request(p, { type: 'openExternal', url: learningPath.url }); assert.equal(emitted(await requests(p), 'observationAssess').length, 0); });
   await test('TUX-OBS-10', 'Config scope switch clears prior errors, learning link and unsubmitted correction', async p => {
     await openObservation(p); await observe(p, { findings, error: '이전 사용자 오류' }); await p.getByLabel('내가 다르게 보는 점').fill('이전 사용자 개인 정정');
-    await host(p, { type: 'config', config: config({ ...native, observation: { format: 'hps-observation/1', scope: 'synthetic-scope-b' } }) });
+    await host(p, { type: 'config', config: config({ ...native, observation: { format: 'hps-observation/1', scope: 'synthetic-scope-b', assess: true } }) });
     await expect(p.getByText('이전 사용자 오류', { exact: true })).toHaveCount(0); await expect(btn(p, learningPath.title)).toHaveCount(0);
     await observe(p, { batch: { ...batch, scope: 'synthetic-scope-b' }, findings, learningPath: null }); await expect(p.getByLabel('내가 다르게 보는 점')).toHaveValue('');
   });
@@ -291,7 +295,13 @@ try {
     await expect.poll(async()=>emitted(await requests(p),'ready').length).toBe(2);
   }, { expectedCrash: true });
   await test('TUX-COND-05', 'Native profile excludes unrelated naming/world/gallery/roll/lesson/followup surfaces', async p => {
-    for (const selector of ['.hps-naming', '.hps-world-strip', '.hps-gallery-btn', '.hps-btn-roll', '.hps-lesson']) await expect(p.locator(selector)).toHaveCount(0);
+    // `.hps-lesson` became `.hp-rail-lesson` in P0-C. If the name is not kept up with, this
+    // assertion means **a class that no longer exists occurs 0 times** and passes quietly
+    // while measuring nothing — worse than a red.
+    for (const selector of ['.hps-naming', '.hps-world-strip', '.hps-gallery-btn', '.hps-btn-roll', '.hp-rail-lesson']) await expect(p.locator(selector)).toHaveCount(0);
+    // Control: this profile has no lesson, so the mission header has to say "no lesson is
+    // connected". That is the evidence the assertion above is actually counting something.
+    await expect(p.locator('.hp-mission')).toHaveCount(1);
     await host(p, { type: 'history', messages: history }); await expect(p.locator('.hps-chips')).toHaveCount(0);
     await host(p, { type: 'config', config: config({ ...native, observation: undefined }) }); await expect(p.getByText('현재 연결은 작업 관찰을 지원하지 않습니다.', { exact: false })).toBeVisible(); await expect(p.locator('.hps-native-observation')).toHaveCount(0);
   });

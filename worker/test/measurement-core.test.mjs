@@ -82,7 +82,10 @@ test("MC-T02 shim files carry no logic of their own", () => {
 
 test("MC-T02 core imports only its own files (no VS Code, Worker, Chalk, node or network modules)", () => {
   const files = readdirSync(CORE_DIR).filter((f) => f.endsWith(".ts"));
-  assert.deepEqual(files.sort(), ["capability-models.ts", "evidence.ts", "index.ts", "interpretation.ts", "legacy-observation.ts", "local-record.ts", "normalize.ts"]);
+  // Still an exact list, one name longer: learning-events.ts joined the core with
+  // hps-observation/2 (P1-A). A new file here is a deliberate act, so it is named
+  // here or the suite fails.
+  assert.deepEqual(files.sort(), ["capability-models.ts", "evidence.ts", "index.ts", "interpretation.ts", "learning-events.ts", "legacy-observation.ts", "local-record.ts", "normalize.ts"]);
   for (const f of files) {
     const src = readFileSync(new URL(f, CORE_DIR), "utf8");
     const specs = [...src.matchAll(/(?:import|export)[^'"]*?from\s+["']([^"']+)["']/g)].map((m) => m[1]);
@@ -113,7 +116,12 @@ test("MC-T02 core runs in a bare process without network, credentials or host AP
 });
 
 test("MC-T02 unsupported schema versions fail explicitly", () => {
-  throwsCode(() => core.validateObservation({ ...batchCases.normal_chain(), format: "hps-observation/2" }), "unsupported_observation");
+  // hps-observation/2 is a supported superset since P1-A, so the pinned
+  // unsupported version moves up one. /1 and /2 are the whole list; /3 is not a
+  // format anyone may send, and neither is /0 (legacy-cases.mjs pins that one).
+  assert.deepEqual([...core.OBSERVATION_FORMATS], ["hps-observation/1", "hps-observation/2"]);
+  assert.equal(core.validateObservation({ ...batchCases.normal_chain(), format: "hps-observation/2" }).batch.format, "hps-observation/2");
+  throwsCode(() => core.validateObservation({ ...batchCases.normal_chain(), format: "hps-observation/3" }), "unsupported_observation");
   throwsCode(() => core.validateInterpretation({ ...interp(legacyBatch("normal_chain")), format: "hps-interpretation/2" }, legacyBatch("normal_chain")), "unsupported_interpretation");
 });
 

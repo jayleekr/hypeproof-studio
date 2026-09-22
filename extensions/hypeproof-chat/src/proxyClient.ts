@@ -1,6 +1,8 @@
 import type { AssetScoreChunk, ChatMessage, Citation, ResolvedProfile } from "./protocol";
+
 import {
   buildProxyHeaders,
+  observationHeaders,
   classifyProfileFailure,
   friendlyTransportMessage,
   profileNetworkFailure,
@@ -394,7 +396,7 @@ export async function fetchProfileResult(args: FetchProfileArgs): Promise<Profil
   try {
     res = await fetch(url, {
       method: "GET",
-      headers: { authorization: `Bearer ${token}`, "x-hps-observation-format": "hps-observation/1" },
+      headers: observationHeaders(token),
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
@@ -419,7 +421,7 @@ export async function verifyActivity(args: FetchProfileArgs, expectedId: string)
   let response: Response;
   try {
     response = await fetch(args.proxyUrl.replace(/\/$/, '') + '/activity', {
-      headers: {authorization:`Bearer ${args.token}`, 'x-hps-observation-format':'hps-observation/1'},
+      headers: observationHeaders(args.token),
       signal:AbortSignal.timeout(15_000),
     });
   } catch { throw new ProxyTransportError(profileNetworkFailure().friendly); }

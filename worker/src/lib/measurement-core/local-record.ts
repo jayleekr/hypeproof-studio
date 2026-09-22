@@ -7,6 +7,7 @@
 // before it issues a receipt, so a port that loses or truncates data cannot fake one.
 import { validateObservation, type ObservationEvent } from "./legacy-observation.ts";
 import { validateInterpretation, type Interpretation } from "./interpretation.ts";
+import type { TeacherState } from "./learning-events.ts";
 
 export const LOCAL_RECORD_FORMAT = "hps-local-record/1";
 /** Provisional local capacity (MC-35). Exposed, never enforced by deleting data; fixed with host evidence later. */
@@ -113,11 +114,40 @@ export interface Purpose {
   exclusions?: ExclusionNote[];
 }
 
+/**
+ * The learning phase of the task flow (SX-55). Deliberately NOT merged with `Task.status`
+ * (open/paused/completed/abandoned), which is the work axis: a submitted task can
+ * still be paused, and an abandoned one can still have been reflected on (MC-23).
+ */
+export type CurriculumPhase = "assigned" | "working" | "submitted" | "reflected";
+const PHASES: readonly CurriculumPhase[] = ["assigned", "working", "submitted", "reflected"];
+
+/**
+ * One Task ↔ one session design file (one week). Extends `hps-local-record/1`'s
+ * Task; no new record kind (SX-48).
+ *
+ * No gate result is stored here. The design is explicit: the gates are computed
+ * from the observed events every time, so a stored copy can never drift from them.
+ */
+export interface TaskCurriculum {
+  /** Copied from the profile's lesson so the record says which version it was. */
+  module: { course_id: string; version: string; sha256: string };
+  week: number;
+  phase: CurriculumPhase;
+  current_step: string;
+  steps: Record<string, { entered_at: number; left_at?: number }>;
+  submitted_at?: number;
+  /** The previous Task's Improvement id, carried into this week. */
+  carry_in?: string;
+}
+
 export interface Task {
   format: typeof LOCAL_RECORD_FORMAT;
   kind: "task";
   id: string;
   project: string;
+  /** Absent on every task created before the curriculum layer, and on any task outside it. */
+  curriculum?: TaskCurriculum;
   /** null = undecided. Work is still allowed (MC-07). */
   purpose: Purpose | null;
   purpose_state: PurposeState;
@@ -163,6 +193,70 @@ export function confirmPurpose(task: Task, input: { by: "user"; at: number; text
   const purpose: Purpose = { text: r.text, source: "user", at: input.at, ...(r.exclusions.length ? { exclusions: r.exclusions } : {}) };
   const change = task.purpose && r.text !== task.purpose.text ? "purpose_edited" : "purpose_confirmed";
   return { ...task, purpose, purpose_state: "confirmed", purpose_history: [...task.purpose_history, purpose], history: [...task.history, { at: input.at, by: "user", change }] };
+}
+
+/**
+ * The task-flow state machine (SX-55). Every curriculum change goes through here so it
+ * lands in `history` as well, and a phase can only move the way the design's
+ * transition table allows.
+ *
+ * Forward one step at a time: assigned → working → submitted → reflected. A skip
+ * (`reflected` without `submitted`) and a move backwards are both refused by name —
+ * SX-55's negative is exactly "if reflected happens without submitted, it fails". Staying in
+ * the same phase is how a step move is recorded.
+ *
+ * The work axis is untouched: this never changes `Task.status`.
+ */
+export function updateCurriculum(
+  task: Task,
+  patch: Partial<TaskCurriculum>,
+  input: { by: Actor; at: number },
+): Task {
+  check(isObj(patch) && isObj(input) && Number.isFinite(input.at) && ["user", "adapter_explicit"].includes(String(input.by)), "invalid_curriculum");
+  const current = task.curriculum;
+  const phase = patch.phase ?? current?.phase ?? "assigned";
+  check(PHASES.includes(phase), "invalid_phase_transition");
+  if (current) {
+    const from = PHASES.indexOf(current.phase);
+    const to = PHASES.indexOf(phase);
+    check(to === from || to === from + 1, "invalid_phase_transition");
+  } else {
+    check(phase === "assigned" || phase === "working", "invalid_phase_transition");
+  }
+  const module = patch.module ?? current?.module;
+  check(
+    isObj(module) && text(module.course_id, 200) && text(module.version, 100) && /^[a-f0-9]{64}$/.test(String(module.sha256)),
+    "invalid_curriculum",
+  );
+  const week = patch.week ?? current?.week;
+  check(Number.isSafeInteger(week) && Number(week) >= 1, "invalid_curriculum");
+  const step = patch.current_step ?? current?.current_step ?? "";
+  check(text(step, 200), "invalid_curriculum");
+
+  const history = [...task.history];
+  const steps: TaskCurriculum["steps"] = { ...(current?.steps ?? {}) };
+  if (phase !== current?.phase) history.push({ at: input.at, by: input.by, change: `curriculum:phase:${phase}` });
+  if (step !== current?.current_step) {
+    const leaving = current?.current_step ? steps[current.current_step] : undefined;
+    if (current?.current_step && leaving) steps[current.current_step] = { ...leaving, left_at: input.at };
+    steps[step] = { entered_at: input.at };
+    history.push({ at: input.at, by: input.by, change: `curriculum:step:${step}:entered` });
+  }
+  const carry_in = patch.carry_in ?? current?.carry_in;
+  const submitted_at = phase === "submitted" && current?.phase !== "submitted" ? input.at : current?.submitted_at;
+  return {
+    ...task,
+    curriculum: {
+      module: module as TaskCurriculum["module"],
+      week: week as number,
+      phase,
+      current_step: step,
+      steps,
+      ...(submitted_at !== undefined ? { submitted_at } : {}),
+      ...(carry_in ? { carry_in } : {}),
+    },
+    history,
+  };
 }
 
 export function setTaskStatus(task: Task, status: TaskStatus, input: { by: Actor; at: number; reason?: string }): Task {
@@ -211,6 +305,32 @@ export interface Review {
   note?: string;
   corrected_claim?: string;
 }
+
+/**
+ * Instructor confirmation (SX-42). Shaped like `Review`, kept as its own record for the same
+ * reason: an observation is append-only, so a teacher's confirmation is a NEW
+ * record about an event, never an edit of it. `teacher_state` is therefore not a
+ * field on the event — it is computed by reading the newest record for that event.
+ *
+ * P4 writes these. Until then only the shape, the key layout and the default
+ * exist: `teacherState()` answers `unreviewed` because no record exists, which is
+ * a different statement from "a teacher looked and had no opinion".
+ */
+export interface TeacherReview {
+  format: typeof LOCAL_RECORD_FORMAT;
+  kind: "teacher_review";
+  key: string;
+  task: string;
+  /** The observed event this is about. */
+  event: string;
+  action: "confirmed" | "disputed";
+  by: "teacher";
+  at: number;
+  previous: string | null;
+  note?: string;
+}
+
+const teacherReviewPrefix = (task: string, eventId: string) => `reviews/${task}/teacher/${enc(eventId)}/`;
 
 export interface SubmissionPayload {
   format: typeof LOCAL_RECORD_FORMAT;
@@ -523,6 +643,18 @@ export class LocalRecord {
     };
     check(await this.#write(review.key, review, true), "concurrent_review");
     return review;
+  }
+
+  /**
+   * Instructor confirmation state (SX-42): the newest teacher record about one observed event, or
+   * `unreviewed` when there is none. Computed on read, never stored on the event.
+   */
+  async teacherState(taskId: string, eventId: string): Promise<TeacherState> {
+    check(ID.test(String(taskId)) && text(eventId, 200), "invalid_task");
+    const keys = (await this.#keys(teacherReviewPrefix(taskId, eventId))).sort();
+    const latest = keys.at(-1);
+    if (!latest) return "unreviewed";
+    return (await this.#read<TeacherReview>(latest))?.action ?? "unreviewed";
   }
 
   // ── Submission and local receipt (MC-23/24/25) ──────────────────────────────
