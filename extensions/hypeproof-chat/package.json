@@ -125,6 +125,14 @@
       {
         "command": "hypeproof-chat.localReview",
         "title": "HypeProof: 나의 변화 기록"
+      },
+      {
+        "command": "hypeproof-chat.classroomConnect",
+        "title": "HypeProof: 수업 연결 (강사가 준 코드 입력)"
+      },
+      {
+        "command": "hypeproof-chat.classroomDisconnect",
+        "title": "HypeProof: 수업 연결 끊기"
       }
     ],
     "menus": {

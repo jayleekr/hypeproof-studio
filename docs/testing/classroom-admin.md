@@ -117,3 +117,20 @@ npm --prefix chalk run typecheck
 - `npm --prefix worker run test:classroom-ops:d1`(로컬 workerd/D1): migration 재실행, 3개 동시 명단 저장 중 1개만 전체 적용, 같은 ticket 4개 동시 connect 중 1개만 성공, 좌석 상태 CAS. 운영 D1 증거가 아니다.
 - 회귀: `npm --prefix worker test`, `npm --prefix worker run typecheck`, `npm --prefix chalk test`, `npm --prefix chalk run typecheck` 모두 exit 0.
 - 이 단계에서 NOT RUN: App의 실제 연결·다중 창 lease(AT-21/23 App 계층), Chalk 브라우저 화면(AT-16/18 browser), 100명 부하·KV 지연·학교망(AT-25/34), 구버전 설치 앱(AT-32 real app), staging D1(AT-33).
+
+### R1 Chalk 화면 · 2026-09-18
+
+대상: 기존 `chalk/src/ui/manage.html`의 ‘원격 수업 운영’ 패널(새 대시보드 없음). Chalk는 기존 forwarder만 사용한다.
+
+- `npm --prefix chalk run test:classroom-ops`: 페이지 스크립트 계약(토큰·ticket 비영속, textContent 렌더), run/status/pairing forwarding, 위조 헤더 제거, capability 없는 강사 403, 앱 경로(`/v1/classroom/ops/*`)와 미등록 action은 Service로 전달되지 않음.
+- `npm --prefix e2e run test:classroom-ops`(Mac/Chromium, 합성 계정): AT-16 browser — 무신호 좌석 포함 회차 명단 전부 표시·누적 roster 좌석 제외, 명단 오류 시 입력 보존. AT-18 browser — 401을 만료로 표시하지 않고 앱이 보고한 원인과 다음 조치 표시, 확인된 차단만 빨간 글자, 승인 대기는 오류 아님, stale 신호는 회색 ‘확인 불가’로 강등. AT-15 — 발급 문구가 연결 완료를 주장하지 않음. DES — 키보드만으로 좌석 열기·코드 발급, 포커스 이동, 대비 4.5:1 실측, 375/390/768/1280/1440px 무넘침, 44px 대상, 연결 해제 시 ticket 제거. 화면은 `e2e/test-results/classroom/ops-*.png`.
+- 회귀: `npm --prefix chalk test`, 기존 `npm --prefix e2e run test:classroom` PASS.
+- NOT RUN: 200% 확대, 실제 Windows 브라우저, 공통 장애 묶음의 30명 이상 화면, 실제 Studio 앱이 보낸 신호.
+
+### R1 Studio 확장(App) · 2026-09-18
+
+대상: 순수 모듈 `extensions/hypeproof-chat/src/classroomOps.ts`(영속 outbox·sync 스케줄러·원인 분류), host 어댑터 `classroomOpsHost.ts`, `chatPanelProvider.ts`의 관측 hook 3곳, 명령 `수업 연결`/`수업 연결 끊기`. 학생이 직접 코드를 입력해야만 연결되며 credential은 SecretStorage, outbox는 grant별 파일이다.
+
+- `node --experimental-strip-types test/classroom-ops.smoke.mjs`(5 PASS): payload builder ↔ Service validator drift lock(양성·음성 대조), 안전하지 않은 문자열 제거, 401을 만료로 승격하지 않는 분류, outbox의 전송 전 영속·contiguous ack로만 삭제·재시작 후 seq 연속·다른 grant 비상속·상한 도달 시 명시적 거부, sync의 ack 없는 2xx 무삭제·5→10→20→60초 backoff·single-flight·Service 지정 주기·401 영구 중지·Retry-After·기능 OFF 시 저빈도·±20% jitter.
+- 회귀: 확장 `npm test`(전체 smoke)·`npm run typecheck`·`npm run build:extension` exit 0. 신고 메타의 `studio_version`은 상수 대신 설치된 package 버전을 쓴다.
+- **NOT RUN (BLOCKED: 실제 앱 필요):** 설치된 Studio에서의 코드 입력→연결→보드 반영, 재시작 후 outbox 재개, 다중 창, Windows, 학교망 TLS proxy, 45초 heartbeat와의 병합(현재는 기존 heartbeat를 그대로 두고 sync를 추가로 보낸다 — 중복 제거는 실측 뒤). 단계(step) 이벤트는 builder와 Service 계약만 있고 App의 수업 단계 UI 연결은 아직 없다.
