@@ -314,7 +314,7 @@
         "ADM-14"
       ],
       "inline_prefixes": [],
-      "sha256": "9e9412a4a21ea70a6577f831d5da4cc967c78dd4b4a1ede3517efe336ee611fb",
+      "sha256": "9cf5c80d8d16c4ad59b62069ab45a2f370da2328c0b4d841905cbb29a13ef040",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/classroom-admin.md",
@@ -405,7 +405,7 @@
         "DES-12"
       ],
       "inline_prefixes": [],
-      "sha256": "e34e2104cf87e62c29e4996e430066aedfe7fb3c769f0a259f5bff55cb2311a5",
+      "sha256": "6e995e64351c01c875ecc3a62b25cccf1586cb6ad0a33c4f37f4a8750fd26e25",
       "owner": "jayleekr",
       "intent": "docs/PRODUCT-INTENT.md",
       "design": "docs/requirements/classroom-design.md",
@@ -1031,19 +1031,44 @@
             "AE-22",
             "AE-40"
           ]
+        },
+        {
+          "path": "docs/requirements/classroom-admin.md",
+          "ids": [
+            "ADM-01",
+            "ADM-02",
+            "ADM-03",
+            "ADM-04",
+            "ADM-05",
+            "ADM-06",
+            "ADM-07",
+            "ADM-08",
+            "ADM-09",
+            "ADM-10",
+            "ADM-11",
+            "ADM-12",
+            "ADM-13",
+            "ADM-14"
+          ]
         }
       ],
       "depends_on": [],
-      "next_action": "기존 보드/선택 공유를 재사용해 무신호와 알려진 원인별 다음 행동부터 연결한다.",
-      "design_delta": "전체 명단 유지, 원문 없이 도움 요청. 일시정지는 새 실행 admission에 적용하고 미적용 기기/진행 중 효과 구분.",
+      "next_action": "2026-09-18 원격 운영 PRD와 R0~R7 순서에 따라 회차 명단·pairing·토큰 활성화·단계·원인별 오류의 첫 수직 경로부터 구현한다. 다른 열린 PR과 scope를 확인한다.",
+      "design_delta": "기존 Chalk·Service·App 재사용. D1 command CAS/lease/epoch/receipt, 보존형 reset, 동의된 immutable 수집, 공통 측정/legacy adapter, 승인된 수신자·delivery outbox. 단계별 기능 flag.",
       "positive_control": "정상 학생/무신호 학생 모두 보이며 학생이 해결 확인.",
-      "negative_control": "401/403/429/5xx를 모두 같은 원인으로 단정·원문 자동 공유·오프라인 기기에도 중지 완료 표시 금지.",
+      "negative_control": "발급을 활성화로 표시·무신호 정상화·401/403/429/5xx를 모두 같은 원인으로 단정·타 학생 제어/원문·중복 reset·미검수 발송·provider 수락을 전달 완료로 표시 금지.",
       "evidence_required": "제출 SHA·App/Service/모델/OS·실행 조건·명령·기대/관측·파일 hash·화면/이벤트. NOT RUN/BLOCKED와 합성/실기/사람 증거를 구분한다.",
       "implementation_paths": [
         "chalk/src",
-        "worker/src"
+        "worker/src",
+        "extensions/hypeproof-chat/src",
+        "packages/measurement"
       ],
-      "verification_inputs": []
+      "verification_inputs": [
+        "docs/testing/classroom-admin.md",
+        "docs/requirements/classroom-admin.md",
+        "docs/plan/learning-agent-experience-epics.md"
+      ]
     },
     {
       "id": "feedback-loop",

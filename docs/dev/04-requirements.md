@@ -195,3 +195,13 @@ local dogfood. Actual host support and user acceptance require retained evidence
 The source philosophy is preserved in [ui-philosophy-2026-09-18](../design/ui-philosophy-2026-09-18.md)
 and is not edited by derived documents. Every SX-T row starts NOT RUN; document
 publication is not implementation and is not human acceptance.
+
+## Remote classroom operations design
+
+2026-09-18 proposal: [ADM-01–14 detailed remote operations contract](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18),
+[existing DES screen criteria](../requirements/classroom-design.md),
+[AT-15–34 acceptance plan](../testing/classroom-admin.md#remote-classroom-tests),
+[E5 delivery sequence](../plan/learning-agent-experience-epics.md#remote-classroom-delivery).
+This extends the existing #751/#732 work and covers activation, whole-class state,
+command receipts, preserving reset and collection/report/delivery jobs. New
+behavior is planned; existing baseline tests do not mark these scenarios passed.
