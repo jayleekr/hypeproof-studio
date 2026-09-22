@@ -46,6 +46,7 @@ try {
 
   // ── selected student with a technical error: detail beside the list ──
   await seat(p, 'C1').getByLabel('선택').check(); await seat(p, 'C1').getByRole('button', { name: '근거·조치' }).click(); await p.locator('#ops-detail-title').filter({ hasText: 'C1' }).waitFor();
+  await p.evaluate(() => { scrollTo(0, 0); showDetail(true); }); /* the click scrolled the page to reach C1; show the board from its top with C1 kept in sight inside the list */
   facts.detail_1280 = await rows(p); await shot(p, 'G1-05-selected-error-detail-1280x720', 'C1(토큰 거부) 선택 + 상세 — 목록·선택·현재 행 표시는 유지, 상세는 오른쪽. 원인·앱 보고·먼저 할 조치(재발급)가 주요 버튼.', [], facts.detail_1280);
   await p.keyboard.press('Escape');
 
