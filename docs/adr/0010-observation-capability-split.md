@@ -125,3 +125,130 @@ v0.1.52~v0.1.56 이 전부 `x-hps-observation-format: hps-observation/1` 을 하
 프로필 한 줄씩이다. `record: false` 로 돌리면 서랍·게이트가 사라지고,
 `assess: false` 로 돌리면 전송 버튼이 사라진다. 세션 게이트와 좌석 발급은 이미
 자기 조건을 갖고 있으므로 관측을 껐다고 같이 움직이지 않는다 — **그것이 이 ADR 의 요점이다.**
+
+---
+
+## Implementation log
+
+> This section is English because `CLAUDE.md` puts ADRs in the English column.
+> The body above is Korean and predates that reading; it is left as written
+> rather than translated, which would be a separate change.
+
+### Step 1 — done (PR #1218, `f44cce3`)
+
+`record` / `assess` added, both falling back to `enabled`. Nothing shipped
+changed; `worker/test/fixtures/profile-serving-baseline.json` (9 profiles × 4
+axes) is the evidence.
+
+### Step 2 — done
+
+Two new profile fields, because the two switches are two decisions:
+
+| field | read by | replaces |
+|---|---|---|
+| `session.requires_open_session` | `GET /v1/profile` only | `observationCapability(...).record` at `routes/chat.ts` |
+| `trial.individual` | `POST /admin/tokens/issue` **and** `gateChatRequest` | `observation?.enabled` at `routes/admin.ts` and `lib/chat-gate.ts` |
+
+Declared `true` on `canary-sdk-contract` and `studio-native-trial` — the exact
+two profiles that answered `true` before — so all 36 serving cells are
+unchanged. Neither field is serialized into any response.
+
+Three things this turned up that the table above does not say:
+
+- **There was a fifth reader.** `lib/chat-gate.ts` decides whether a minted
+  `native_trial` seat gets a session at all, off the same `observation.enabled`.
+  Moving the mint check alone would have minted seats that 403 forever.
+- **`studio-gpt-practice` spreads `studio-native-trial`.** The ADR names
+  `studio-model-practice → studio-gpt-practice`; the chain is one link longer,
+  so `trial: { individual: true }` on the trial profile is inherited by two
+  more profiles unless blocked. `studio-gpt-practice` now declares
+  `{ individual: false }`, and `native-trial-grants.test.mjs` pins the set to
+  exactly two so the next inheritance is not silent.
+- **`/v1/profile` never emits a scopeless `observation` block.** The scope
+  comes from the session, so a recording seat that no longer takes the gate has
+  none — and the shipped app tests the block's bare truthiness and falls back
+  to `sha256(token)` for the chat-history bucket, which loses the student's
+  conversation and loses it again on every reissue.
+
+### Step 3 — done, as the refusal branch only
+
+The route computes the assessment model once, before reading the body, and
+returns `409 assessment_provider_mismatch` when the cohort's model key does not
+belong to the assessment provider. It does **not** pick a model instead:
+`native-assessment.ts` posts to Anthropic with no branch, so substituting would
+not route anything — it would send that cohort's student prose and workspace
+file bodies to a vendor its profile never names. Whether a cohort may be
+assessed on a provider it did not run on is a decision for a human.
+
+Correction to the evidence table above: the 502 was **not reachable** when this
+ADR was written. The two profiles whose `model.default` is not an Anthropic key
+(`studio-gpt-practice`, `studio-model-practice`) both have `assess` off and are
+stopped by the 404 one line earlier. Measured, not reasoned — the profile probe
+is in the PR. The fix closes the hole before step 4 opens it.
+
+### Step 4 — blocked, and the first blocker is in the worker
+
+`record: true` by default is what Jay asked for. Written as the ADR describes
+it — one profile edit — it does nothing at all.
+
+**Measured, on this branch's head.** Patch a kids cohort to
+`observation: { record: true, assess: false }` and ask `GET /v1/profile`:
+
+```
+step4 kids, class OPEN  -> {"status":200,"observation":null,"banner":false}
+step4 kids, class SHUT  -> {"status":200,"observation":null,"banner":false}
+today canary, class OPEN -> {"status":200,"observation":{"format":"hps-observation/1","scope":"52e5a079…","assess":true}}
+today canary, class SHUT -> {"status":403}
+```
+
+The scope is produced inside the session gate, and after step 2 that gate is
+`native_trial || session.requires_open_session`. A cohort that declares neither
+has no scope, and step 2's own guard then withholds the whole block rather than
+serve a scopeless one. So `record` alone is inert — the "설정은 맞는데 동작이
+없는" shape this ADR exists to end, moved rather than removed.
+
+An earlier version of this section did not say that. It listed the two
+installed-build hazards below and concluded "step 4 needs an app release first,
+not a profile edit" — a sentence written against the pre-step-2 code, on a
+branch that had just changed it. The adversarial review caught it. The
+assertion `record alone serves nothing even with the class open` in
+`observation-capability-routes.test.mjs` now pins the behaviour so the next
+reader measures it instead of believing a paragraph.
+
+**So step 4's first question is a worker question, and it is a real decision,
+not an oversight:** where does a classroom seat's observation scope come from
+when its cohort does not require an open session? `nativeObservationScope`
+hashes a `session_id`. The candidates:
+
+- fetch the active session opportunistically on `/v1/profile` — serve the block
+  during class, nothing outside it. Cheap, and it keeps `/v1/observations/context`
+  (unconditionally gated, same session source) in agreement. But it hands a
+  scope to a seat that has passed no roster, revocation or pause check, which
+  those seven cohorts currently never do on this route.
+- put the recording cohorts behind `requires_open_session` after all — which
+  re-imposes the pre-class 403 that step 2 removed, for exactly the cohorts it
+  removed it for.
+- give the scope a session-free derivation — rejected on sight: it would
+  disagree with `/observations/context`, and a client that builds a recorder
+  against one scope and a context against another drops every event.
+
+**Then, and only then, the two installed-build hazards arrive with it.** Both
+are still true, and both are properties of already-shipped Studio builds that
+no worker change can repair:
+
+1. **The results panel does not follow `assess` on a shipped build.** v0.1.56
+   never reads `observation.assess` — zero occurrences of the field across its
+   `extensions/hypeproof-chat` tree. `ChatPanel.tsx:590` draws the observation
+   results panel on `observation.format === 'hps-observation/1'` and nothing
+   else, and a cohort that declares no format is served exactly that. So a
+   cohort switched to record-without-assess would show its learners the
+   "내 작업 돌아보기" entry and the assess button — the SX-59 violation the
+   split exists to remove — and pressing it 404s. `assess: false` is correct
+   for the next build and inert on this one.
+2. **Serving an `observation` block moves that cohort's chat history.** Its
+   mere presence flips the shipped history bucket from `<cohort id>` to
+   `native-<scope>` and disables the one-shot legacy migration
+   (`chatPanelProvider.ts:660`, `:2951`). Every existing conversation goes
+   blank at the start of the next class.
+
+Step 5 (`enabled` removal) is unblocked and independent of all of this.
