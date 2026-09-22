@@ -111,7 +111,7 @@ try {
   assert.ok(side.position === 'sticky' && side.beside, JSON.stringify(side)); assert.equal(await row(page, 'A1').getAttribute('aria-current'), 'true'); assert.equal(await row(page, 'C2').getByLabel('선택').isChecked(), true, 'opening a detail keeps the selection');
   assert.match(await page.locator('#ops-recovery').innerText(), /앱이 보고한 상태: 토큰이 올바르지 않습니다 — /); assert.match(await page.locator('#ops-tech').innerText(), /요청 ID req-g1-0001/, 'technical ids live in the detail');
   await page.keyboard.press('Escape'); await row(page, 'D5').getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-detail-title').filter({ hasText: 'D5' }).waitFor();
-  assert.ok(await row(page, 'D5').evaluate((r) => { const a = r.getBoundingClientRect(), l = document.getElementById('ops-seats').getBoundingClientRect(); return a.top >= l.top && a.bottom <= l.bottom + 0.5; }), 'the opened row is in sight inside the list'); await page.keyboard.press('Escape');
+  assert.ok(await row(page, 'D5').evaluate((r) => { const a = r.getBoundingClientRect(), l = document.getElementById('ops-seats').getBoundingClientRect(); return a.top >= l.top && a.bottom <= Math.min(l.bottom, innerHeight) + 0.5; }), 'the opened row is in sight inside the list and the window'); await page.keyboard.press('Escape');
   await row(page, 'A1').getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-detail-title').filter({ hasText: 'A1' }).waitFor();
   results.detail_1280 = { ...side, rows_visible: (await measure(page)).complete }; await page.screenshot({ path: path.join(out, 'g1-detail-error-1280x720.png') });
   await page.keyboard.press('Escape'); assert.equal(await page.evaluate(() => document.activeElement?.closest('.ops-seat')?.dataset.seat), 'A1');
