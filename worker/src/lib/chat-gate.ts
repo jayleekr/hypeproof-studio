@@ -24,6 +24,7 @@ import { applyLessonFeatures } from './lesson-feature-policy';
 import { applyLessonModel } from './lesson-model-policy';
 import { helpModeInstruction, helpModeReceipt, resolveHelpMode } from './lesson-help-mode';
 import { coachVisibleLesson, learningInstruction } from './learning-prompt';
+import { isMinorCohort } from './moderation';
 import type { Context } from "hono";
 import type { Env } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "./tokens";
@@ -304,7 +305,13 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     // contracts, labelled instead of buried in the JSON dump. Teaching text
     // only: like helpInstruction it changes no grant and no policy, and it is
     // '' for a lesson without `learning`.
-    const learning = learningInstruction(visibleLesson, c.req.header('x-hps-lesson-step'));
+    // `isMinorCohort(profile)` — #1222 G5. The §10 dialogue table is written for
+    // the adult product course and one of its examples is a price comparison;
+    // it is withheld from a minor's seat. Read from the COMPILED profile, the
+    // same source `/v1/profile` serves `minor_cohort` from, so the coach's
+    // prompt and the client's minor-specific UX cannot disagree about who this
+    // seat belongs to.
+    const learning = learningInstruction(visibleLesson, c.req.header('x-hps-lesson-step'), isMinorCohort(profile));
     return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(visibleLesson) + helpInstruction + learning }, session, module, identity: assistantName ? { fixed_name: assistantName } : null, help: help.help ? helpModeReceipt(help.help) : null };
   }
   // A help mode without a lesson has nothing to apply to — say so instead of
