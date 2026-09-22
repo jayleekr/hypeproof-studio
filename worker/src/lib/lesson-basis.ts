@@ -86,9 +86,11 @@ export async function basisTables(db: Db): Promise<boolean | 'unreadable'> {
  * "usage row LOST") — nothing of it exists anywhere. Under enforcement nothing depends on the usage row being written.
  */
 // (`WHERE 1` below is required by SQLite's grammar: after INSERT … SELECT … FROM <subquery>, a bare ON would parse as a join constraint.)
-export const sealBasisStatement = (db: Db, i: { batch_id: string; student_id: string; revision: number; class_run_id: string; now: number }) => db.prepare(`INSERT INTO classroom_input_basis(batch_id,student_id,revision,class_run_id,basis,lessons,turns,created_at)
+// `receipt` (#751 U1b): write the basis only if that very seal committed in the same batch — a seal refused inside its own commit
+// (a withdrawal landed meanwhile) leaves no basis row behind.
+export const sealBasisStatement = (db: Db, i: { batch_id: string; student_id: string; revision: number; class_run_id: string; now: number; receipt?: string }) => db.prepare(`INSERT INTO classroom_input_basis(batch_id,student_id,revision,class_run_id,basis,lessons,turns,created_at)
  SELECT ?1,?2,?3,?4,CASE WHEN x.n>1 THEN 'mixed' WHEN x.unattributed THEN 'unknown' ELSE 'single' END,x.n,x.t,?5 FROM (SELECT
  (SELECT COUNT(DISTINCT lesson_sha256) FROM classroom_lesson_requests WHERE class_run_id=?4 AND student_id=?2 AND lesson_sha256<>'') AS n,
  (SELECT COUNT(*) FROM classroom_lesson_turns WHERE class_run_id=?4 AND student_id=?2) AS t,
- ${unattributed('?4', '?2', '?5')} AS unattributed) x WHERE 1
- ON CONFLICT(batch_id,student_id,revision) DO NOTHING`).bind(i.batch_id, i.student_id, i.revision, i.class_run_id, i.now);
+ ${unattributed('?4', '?2', '?5')} AS unattributed) x WHERE ${i.receipt === undefined ? '1' : 'EXISTS (SELECT 1 FROM classroom_snapshots s WHERE s.batch_id=?1 AND s.student_id=?2 AND s.revision=?3 AND s.receipt_id=?6)'}
+ ON CONFLICT(batch_id,student_id,revision) DO NOTHING`).bind(i.batch_id, i.student_id, i.revision, i.class_run_id, i.now, ...(i.receipt === undefined ? [] : [i.receipt]));
