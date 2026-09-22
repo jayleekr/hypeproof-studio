@@ -31,20 +31,28 @@ const { issue } = await import('../src/lib/tokens.ts');
 
 const CANARY = 'canary-sdk-contract';
 
-/** One seat on the canary cohort with class open, asked the way the extension asks. */
-async function seat() {
+/**
+ * One seat on the canary cohort, asked the way the extension asks.
+ *
+ * `openSession` exists for ADR 0010 step 2: the claim "the session gate stopped
+ * riding on observation" is only measurable on a seat whose class is NOT open,
+ * and every case in this file before that step had one open.
+ */
+async function seat({ openSession = true } = {}) {
   const local = await localAuthoring({ profileId: CANARY });
   local.db.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
   local.db.prepare('INSERT INTO cohorts(id,display_name) VALUES (?,?)').run(local.cohort, 'capability-routes');
-  const starts = new Date(Date.now() - 1000).toISOString();
-  const ends = new Date(Date.now() + 3600000).toISOString();
-  local.db
-    .prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES (?,?,?,?,?)')
-    .run('cap', local.cohort, local.profileId, starts, ends);
-  await setRoster(local.env.HPS_KV, local.cohort, ['student']);
-  await startSession(local.env.HPS_KV, local.cohort, {
-    session_id: 'cap', profile_id: local.profileId, starts_at: starts, ends_at: ends,
-  });
+  if (openSession) {
+    const starts = new Date(Date.now() - 1000).toISOString();
+    const ends = new Date(Date.now() + 3600000).toISOString();
+    local.db
+      .prepare('INSERT INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES (?,?,?,?,?)')
+      .run('cap', local.cohort, local.profileId, starts, ends);
+    await setRoster(local.env.HPS_KV, local.cohort, ['student']);
+    await startSession(local.env.HPS_KV, local.cohort, {
+      session_id: 'cap', profile_id: local.profileId, starts_at: starts, ends_at: ends,
+    });
+  }
   const { token } = await issue({ u: 'student', c: local.cohort, p: local.profileId }, 1, TEST_SECRET);
   return {
     close: local.close,
@@ -72,17 +80,20 @@ async function seat() {
 /** The code the routes return when a capability is off, and nothing else. */
 const unavailable = (r) => r.status === 404 && r.body?.error?.code === 'observation_unavailable';
 
-async function withCanaryObservation(observation, fn) {
+/** Patch any set of top-level canary fields for the duration of `fn`. */
+async function withCanaryProfile(patch, fn) {
   const profile = getProfile(CANARY);
   assert.ok(profile, `${CANARY} is not in the registry — this test's subject moved`);
-  const original = profile.observation;
-  profile.observation = observation;
+  const original = Object.fromEntries(Object.keys(patch).map((k) => [k, profile[k]]));
+  Object.assign(profile, patch);
   try {
     return await fn();
   } finally {
-    profile.observation = original;
+    Object.assign(profile, original);
   }
 }
+
+const withCanaryObservation = (observation, fn) => withCanaryProfile({ observation }, fn);
 
 test('record on, assess off: the device records, nothing may leave it', async () => {
   await withCanaryObservation({ record: true, assess: false, format: 'hps-observation/2' }, async () => {
@@ -179,4 +190,200 @@ test('both off closes both — negative control', async () => {
       s.close();
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// ADR 0010 step 2 — the /v1/profile session gate stops riding on observation
+// ---------------------------------------------------------------------------
+//
+// The snapshot next door (profile-serving-snapshot) proves today's 36 answers
+// did not move. That is necessary and not sufficient: a route that still read
+// `record` would produce the identical 36 answers, because the only two
+// recording cohorts are the only two that declare `requires_open_session`.
+// What the split claims is a DIFFERENT thing — that the two switches are now
+// independent — and the only way to measure it is to set them apart, which no
+// shipped profile does. Hence the canary, again.
+
+/** The canary's own session block, with one field overridden. */
+const sessionWith = (over) => ({ ...getProfile(CANARY).session, ...over });
+
+test('/v1/profile: recording a seat no longer requires the class to be open', async () => {
+  // record ON, requires_open_session OFF, class NOT open.
+  // Before step 2 this was a 403: `record` was the gate. It is what would have
+  // happened to seven cohorts the day `record` defaults on (ADR step 4).
+  await withCanaryProfile(
+    {
+      observation: { record: true, assess: false, format: 'hps-observation/2' },
+      session: sessionWith({ requires_open_session: false }),
+    },
+    async () => {
+      const s = await seat({ openSession: false });
+      try {
+        const res = await s.get('/v1/profile');
+        assert.equal(
+          res.status,
+          200,
+          `기록이 켜졌다는 이유만으로 수업 전 프로필 읽기가 막혔다 — ${res.status} ${JSON.stringify(res.body)}`,
+        );
+        // And the guard that makes loosening the gate safe: no session means no
+        // scope, and a scopeless observation block moves the shipped app's chat
+        // history to a token hash. Serve nothing rather than something broken.
+        assert.equal(
+          res.body.observation,
+          undefined,
+          `scope 를 만들 수 없는데 observation 블록을 보냈다 — ${JSON.stringify(res.body.observation)}`,
+        );
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
+
+test('/v1/profile: `record` alone serves nothing even with the class open — ADR step 4 is NOT a profile edit', async () => {
+  // This case is here because the adversarial review of this branch caught the
+  // ADR saying the opposite.
+  //
+  // After step 2 the scope comes from the gate, and the gate is now
+  // `native_trial || requires_open_session`. So a cohort that turns `record` on
+  // and declares neither gets NO observation block — open class or not. That is
+  // the "설정은 맞는데 동작이 없는" shape, and it is what ADR step 4 would ship
+  // if it were written as one profile edit.
+  //
+  // Pinning it deliberately, not endorsing it. Where a classroom seat's
+  // observation scope comes from when its cohort does not require an open
+  // session is step 4's decision to make; whoever makes it will change this
+  // assertion, and should. Until then a green suite must not read as "record
+  // works".
+  await withCanaryProfile(
+    {
+      observation: { record: true, assess: true, format: 'hps-observation/2' },
+      session: sessionWith({ requires_open_session: false }),
+    },
+    async () => {
+      const s = await seat();               // class OPEN
+      try {
+        const res = await s.get('/v1/profile');
+        assert.equal(res.status, 200);
+        assert.equal(
+          res.body.observation,
+          undefined,
+          'record 만으로 블록이 나왔다 — 그렇다면 ADR step 4 의 막힌 지점이 바뀐 것이다. ADR 을 같이 고쳐라',
+        );
+        // The banner follows the block, so it must be silent too: telling a
+        // student to update Studio for a screen this response is not offering
+        // is the drift this branch collapsed into one decision.
+        assert.ok(
+          !String(res.body.welcome?.greeting_md ?? '').includes('이 앱 버전은 작업 관찰 화면을 지원하지 않습니다'),
+          '블록은 안 주면서 업데이트 배너만 붙였다',
+        );
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
+
+test('/v1/profile: the cohort that declares requires_open_session still gets 403 — negative control', async () => {
+  // The mirror. observation entirely OFF, the new flag ON. If the route still
+  // read `record`, this would be a 200 and the flag would be decorative.
+  await withCanaryProfile(
+    {
+      observation: { record: false, assess: false },
+      session: sessionWith({ requires_open_session: true }),
+    },
+    async () => {
+      const s = await seat({ openSession: false });
+      try {
+        const res = await s.get('/v1/profile');
+        assert.equal(
+          res.status,
+          403,
+          `requires_open_session 을 켰는데 수업 없이 프로필이 나왔다 — ${res.status}`,
+        );
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
+
+test('/v1/profile: a recording seat inside an open class still gets its scope — positive control', async () => {
+  // Without this the two cases above are satisfied by a route that never
+  // serves an observation block at all.
+  await withCanaryProfile(
+    {
+      observation: { record: true, assess: true, format: 'hps-observation/2' },
+      session: sessionWith({ requires_open_session: true }),
+    },
+    async () => {
+      const s = await seat();
+      try {
+        const res = await s.get('/v1/profile');
+        assert.equal(res.status, 200);
+        assert.equal(res.body.observation?.format, 'hps-observation/2');
+        assert.equal(typeof res.body.observation?.scope, 'string');
+        assert.ok(res.body.observation.scope.length > 0, 'scope 가 빈 문자열이다');
+        assert.equal(res.body.observation?.assess, true);
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
+
+// ---------------------------------------------------------------------------
+// ADR 0010 step 3 — the assess route refuses by name instead of smearing a 502
+// ---------------------------------------------------------------------------
+
+test('/v1/observations/assess names the refusal when the cohort runs on another provider', async () => {
+  // `native-assessment.ts` posts to Anthropic with no branch, so a cohort whose
+  // model key belongs to another provider cannot be assessed at all. It used to
+  // find that out as 502 `assessment_failed` — after passing every check, on a
+  // button the cohort could never use.
+  await withCanaryProfile(
+    {
+      observation: { record: true, assess: true, format: 'hps-observation/2' },
+      model: { ...getProfile(CANARY).model, provider: 'openai', default: 'gpt-5.6-luna' },
+    },
+    async () => {
+      const s = await seat();
+      try {
+        const res = await s.post('/v1/observations/assess', {});
+        assert.equal(
+          res.status,
+          409,
+          `공급자가 안 맞는 코호트인데 ${res.status} 가 나왔다 — ${JSON.stringify(res.body)}`,
+        );
+        assert.equal(res.body?.error?.code, 'assessment_provider_mismatch');
+        // Not the code that already means "this cohort turned assessment off".
+        assert.notEqual(res.body?.error?.code, 'observation_unavailable');
+      } finally {
+        s.close();
+      }
+    },
+  );
+});
+
+test('/v1/observations/assess does not refuse an Anthropic-model cohort — positive control', async () => {
+  // The refusal must be about the provider, not about the route. This seat's
+  // model resolves for Anthropic, so it gets past and fails on the empty body
+  // instead — a 400, which is the pre-existing behaviour.
+  await withCanaryProfile(
+    { observation: { record: true, assess: true, format: 'hps-observation/2' } },
+    async () => {
+      const s = await seat();
+      try {
+        const res = await s.post('/v1/observations/assess', {});
+        assert.notEqual(
+          res.body?.error?.code,
+          'assessment_provider_mismatch',
+          'Anthropic 로 풀리는 모델인데 공급자 불일치로 거절했다',
+        );
+        assert.equal(res.status, 400, `기대한 건 본문 오류(400) — ${res.status} ${JSON.stringify(res.body)}`);
+      } finally {
+        s.close();
+      }
+    },
+  );
 });
