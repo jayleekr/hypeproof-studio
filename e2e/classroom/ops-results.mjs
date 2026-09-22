@@ -91,7 +91,9 @@ try {
   assert.match(await seen(C1), /확정 아님: 해결 여부는 학생의 다음 실행·관측 뒤 바뀔 수 있습니다/, 'every device has answered, yet a 미확인 is not called final');
   assert.match(await sum(C1), /^적용 \(기기가 실행함\) 2 · 실패 1 · 미확인 1 · 미전달·만료·대상 변경 2$/); assert.doesNotMatch(await sum(C1), /모두/);
   assert.match(await extra(C1), /해결 여부 \(기기 실행과 별개\): 해결 확인 1 · 문제 남음 1 · 실행됨·해결 확인 전 0 · 결과 미확인 1 · 실행 안 됨 3/, 'two devices executed, one cause is gone');
-  assert.match(await line(C1, 'A3'), /^A3 · student-c — \[미확인\] 결과 확인 불가 · 현장 확인 필요 → 결과 미확인/); assert.match(await line(C2, 'A3'), /^A3 · student-c — \[기기 수신 확인 전\]/, 'the same sync also assigned C2 to A3 (the Service\'s fact); C1\'s unknown on A3 did not spill into C2');
+  assert.match(await line(C1, 'A3'), /^A3 · student-c — \[미확인\] 결과 확인 불가 · 현장 확인 필요 → 결과 미확인/);
+  await until('C2 independently reflects A3 lease', async () => /^A3 · student-c — \[기기 수신 확인 전\]/.test(await line(C2, 'A3')));
+  assert.match(await line(C2, 'A3'), /^A3 · student-c — \[기기 수신 확인 전\]/, 'the same sync also assigned C2 to A3 (the Service\'s fact); C1\'s unknown on A3 did not spill into C2');
   assert.match(await line(C1, 'A2'), /\[적용 \(기기가 실행함\)\] 성공 — .* → 문제 남음 — 원인: 학생 PC에서 서버에 닿지 않음/); assert.doesNotMatch(await page.locator('#ops-bulk-result').innerText(), /A1:|A2:/, 'C1 did not write into C2\'s line');
   await shot('two-commands', 'C1 settled (executed ≠ resolved) while C2 is still 접수; newest first'); evidence.two_commands = { c1: await lines(C1), c2: await lines(C2), bulk_line: await page.locator('#ops-bulk-result').innerText() };
   ok('two successive commands: the earlier one keeps its card, settles later in its own card, and never writes into the newer one');
