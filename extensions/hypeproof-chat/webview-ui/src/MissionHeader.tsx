@@ -90,7 +90,7 @@ export function MissionHeader(props: MissionHeaderProps) {
                   {step.title}
                 </button>
               ) : (
-                <button type="button" className="hp-cta-quiet" onClick={() => props.onSelectStep(step.id)}>
+                <button type="button" className="hp-cta-quiet" data-step-id={step.id} onClick={() => props.onSelectStep(step.id)}>
                   {step.title}
                 </button>
               )}
