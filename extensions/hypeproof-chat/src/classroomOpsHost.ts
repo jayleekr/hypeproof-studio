@@ -8,6 +8,7 @@ import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { CommandRunner, type Executor, type JournalState } from "./classroomOpsCommands";
+import { resetPostcondition, runPreservingReset, stopAndConfirm, type Preservation, type ResetManifest, type ResetSteps } from "./runtimeReset";
 import {
   ChangeGate, OPS_CLIENT_CAPABILITIES, OPS_PROTOCOL, OpsOutbox, activationPayload, classifyFailure, errorPayload,
   runtimePayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
@@ -24,6 +25,13 @@ export interface ClassroomOpsActions {
   probeProfile(): Promise<{ ok: boolean; status?: number; code?: string; requestId?: string; network?: boolean; noToken?: boolean }>;
   refreshProfile(): Promise<boolean>;
   recoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; healthy: boolean }>;
+  // R3 — stop / preserving reset / pause. Nothing here can clear history or delete a file.
+  requestStop(): void;
+  freezeInput(frozen: boolean): Promise<void>;
+  preservation(): Promise<Preservation>;
+  runtimeGeneration(): number;
+  newGeneration(): Promise<number>;
+  setHold(hold: "paused" | "stop_unconfirmed" | null): void;
 }
 
 /** What the chat provider is allowed to tell this adapter. No message text, no paths. */
@@ -50,6 +58,24 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     this.context = context; this.runtime = runtime; this.actions = actions; this.log = log;
   }
 
+  private stopUnconfirmed = false;
+  private paused = false;
+  private controlRevision = 0;
+  private applyHold(): void { this.actions.setHold(this.stopUnconfirmed ? "stop_unconfirmed" : this.paused ? "paused" : null); }
+  private manifestFile(commandId: string): string { return path.join(this.context.globalStorageUri.fsPath, `classroom-ops-reset-${commandId.replace(/[^A-Za-z0-9-]/g, "")}.json`); }
+  private async readManifest(commandId: string): Promise<ResetManifest | null> { try { return JSON.parse(await fs.readFile(this.manifestFile(commandId), "utf8")) as ResetManifest; } catch { return null; } }
+  private resetSteps(commandId: string): ResetSteps {
+    const file = this.manifestFile(commandId);
+    return {
+      freezeInput: () => this.actions.freezeInput(true), unfreezeInput: () => this.actions.freezeInput(false),
+      requestStop: () => this.actions.requestStop(), isStopped: () => !this.actions.hasActiveRun(),
+      preserve: () => this.actions.preservation(), generation: () => this.actions.runtimeGeneration(),
+      persistManifest: async (m) => { const tmp = `${file}.${process.pid}.tmp`; await fs.writeFile(tmp, JSON.stringify(m), "utf8"); await fs.rename(tmp, file); },
+      newGeneration: () => this.actions.newGeneration(), probe: () => this.actions.refreshProfile(),
+      wait: (ms) => new Promise((r) => setTimeout(r, ms)), now: () => Date.now(),
+    };
+  }
+
   /** R2 low-risk set. Each is read-only or re-connects something that already exists. */
   private executors(): Record<string, Executor> {
     return {
@@ -67,6 +93,21 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
         if (this.actions.hasActiveRun()) return { ok: false, code: "busy_active_run" };
         return (await this.actions.refreshProfile()) ? { ok: true, code: "profile_verified" } : { ok: false, code: "profile_not_verified" };
       } },
+      cancel_current_run: { mutating: true, run: async () => {
+        const stopped = await stopAndConfirm({ requestStop: () => this.actions.requestStop(), isStopped: () => !this.actions.hasActiveRun(), wait: (ms) => new Promise((r) => setTimeout(r, ms)) });
+        // An unconfirmed stop holds NEW runs only. What already happened outside is not undone, and is not claimed to be.
+        this.stopUnconfirmed = !stopped; this.applyHold();
+        return stopped ? { ok: true, code: "run_stopped" } : { ok: false, code: "stop_unconfirmed" };
+      } },
+      reset_runtime: { mutating: true,
+        run: async (signal, command) => {
+          const r = await runPreservingReset(command.command_id, this.resetSteps(command.command_id), signal);
+          if (r.code === "stop_unconfirmed") { this.stopUnconfirmed = true; this.applyHold(); }
+          if (r.ok) { this.stopUnconfirmed = false; this.applyHold(); }
+          return r;
+        },
+        postcondition: async (command) => resetPostcondition(await this.readManifest(command.command_id), this.actions.runtimeGeneration()),
+      },
       restart_preview: { mutating: false, run: async () => {
         const r = await this.actions.recoverPreview();
         if (r.state === "no_preview") return { ok: false, code: "no_preview" };
@@ -129,6 +170,8 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
 
   private async forget(): Promise<void> {
     this.loop?.stop(); this.loop = null; this.outbox = null;
+    // Disconnecting ends the instructor's pause on this device; the Service's own admission still applies.
+    this.paused = false; this.stopUnconfirmed = false; this.applyHold();
     await this.context.secrets.delete(CREDENTIAL_KEY);
     await this.context.globalState.update(META_KEY, undefined);
   }
@@ -156,7 +199,9 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       capabilities: ["observe", "commands", ...Object.keys(executors)], onEpoch: (e) => { this.epoch = e; },
       commands: runner as unknown as NonNullable<Parameters<typeof startOpsSync>[0]["commands"]>,
       post: (body, timeoutMs) => this.post(credential, body, timeoutMs), outbox: this.outbox, appInstanceId: this.appInstanceId,
-      sample: () => { const r = this.runtime(); const changed = this.runtimeGate.next(r.status); if (changed) void this.outbox?.add("runtime", runtimePayload(changed)); return { idle_ms: Math.max(0, Math.round(r.idleMs)), runtime_status: r.status }; },
+      sample: () => { const r = this.runtime(); const changed = this.runtimeGate.next(r.status); if (changed) void this.outbox?.add("runtime", runtimePayload(changed)); return { idle_ms: Math.max(0, Math.round(r.idleMs)), runtime_status: r.status, control_revision: this.controlRevision }; },
+      // The revision is reported only after the hold is actually in place on this device.
+      onControl: (control) => { this.paused = control.paused; this.applyHold(); this.controlRevision = control.control_revision; },
       now: () => Date.now(), random: Math.random, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
       log: this.log,
       onDisconnected: (reason) => { this.log(`[ops] disconnected: ${reason}`); void this.forget(); },

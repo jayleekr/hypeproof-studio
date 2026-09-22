@@ -181,6 +181,12 @@ export async function activate(context: vscode.ExtensionContext) {
       return r.ok ? { ok: true } : { ok: false, status: r.failure.status, code: r.failure.reason === "expired" ? "expired" : undefined, requestId: r.failure.requestId, network: r.failure.reason === "network" };
     },
     refreshProfile: async () => !!(await provider.ensureProfile(true)),
+    requestStop: () => provider.opsRequestStop(),
+    freezeInput: (frozen) => provider.opsFreezeInput(frozen),
+    preservation: () => provider.opsPreservation(),
+    runtimeGeneration: () => provider.opsRuntimeGeneration(),
+    newGeneration: () => provider.opsNewGeneration(),
+    setHold: (hold) => provider.opsSetHold(hold),
     recoverPreview: async () => {
       const probe = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(4000) })).status < 500; } catch { return false; } };
       const r = await liveServer.recover(probe);
