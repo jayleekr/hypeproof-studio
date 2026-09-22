@@ -1679,6 +1679,21 @@
       ]
     },
     {
+      "id": "ST-INT-CLASSROOM-OPS",
+      "stage": "intent",
+      "owner": "jayleekr",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE",
+        "ST-INT-MEASUREMENT-CORE"
+      ],
+      "sources": [
+        {
+          "path": "docs/intents/remote-classroom-operations.md"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-MEASUREMENT-CORE",
       "stage": "requirement",
       "owner": "jayleekr",
@@ -1943,7 +1958,8 @@
       "stage": "requirement",
       "owner": "jayleekr",
       "depends_on": [
-        "ST-INT-NATIVE"
+        "ST-INT-NATIVE",
+        "ST-INT-CLASSROOM-OPS"
       ],
       "sources": [
         {
@@ -2014,7 +2030,8 @@
       "stage": "requirement",
       "owner": "jayleekr",
       "depends_on": [
-        "ST-INT-NATIVE"
+        "ST-INT-NATIVE",
+        "ST-INT-CLASSROOM-OPS"
       ],
       "sources": [
         {
