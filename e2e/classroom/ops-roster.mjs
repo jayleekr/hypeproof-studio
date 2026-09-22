@@ -47,8 +47,12 @@ try {
   // The learning-first screen (#1170/#1178): pick the second step in the mission header, start it with the screen's ONE Primary, then report it.
   const mission = app.locator('.hp-mission'); await mission.locator('.hp-mission-actions').getByRole('button', { name: 'build' }).click();
   assert.equal(await app.locator('.hp-cta-primary').count(), 1, 'the class report does not add a second Primary to the learner screen');
-  await mission.locator('.hp-cta-primary', { hasText: 'build' }).click(); const report = app.locator('.hp-rail-step-report'); await report.getByRole('button', { name: '이 단계를 마쳤어요' }).click();
-  assert.equal(await report.getByRole('button', { name: '마쳤다고 표시함 · 강사 확인 전' }).isDisabled(), true, 'the learner sees it as their own statement, not as a pass');
+  await mission.locator('.hp-cta-primary', { hasText: 'build' }).click();
+  // MissionHeader starts the step; the current completion contract is the host-owned evidence gate.
+  // This fixture supplies an allowed verdict because this leg verifies the submitted step signal, not gate calculation.
+  await app.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'learningState', state: { task: 'synthetic-task', phase: 'working', currentStep: 'build', complete: { ok: true, reasons: [], missing: [] }, declared: true, verification: { state: 'none', source_state: 'self_reported', line: '아직 확인 전' }, evidence: [] } } })));
+  const completion = app.getByRole('button', { name: '이 과제 완료하기' }); await completion.click();
+  assert.equal(await completion.isEnabled(), true, 'the host verdict allows the learner to submit the current step');
   const stepMessages = (await app.evaluate(() => window.sent)).filter((m) => m.type === 'lessonStep'); assert.deepEqual(stepMessages.map((m) => [m.stepId, m.status]), [['build', 'in_progress'], ['build', 'submitted']]); assert.deepEqual(appErrors, []);
   await app.screenshot({ path: path.join(out, 'app-lesson-step.png'), fullPage: true }); await app.close(); ok('webview: the learner\'s own click produces the step messages');
 
