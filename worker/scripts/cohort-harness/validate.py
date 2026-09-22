@@ -127,6 +127,38 @@ def dotted_get(obj, path: str):
     return cur
 
 
+# --------------------------------------------------------------------------- #
+# rules.yaml integrity (#692)
+# --------------------------------------------------------------------------- #
+# Every guardrail below reads a key out of rules.yaml, and a missing key reads
+# as "no requirement" — deleting one line disarms a check without turning
+# anything red. `required_keys` names the paths that must exist; that the list
+# itself exists is asserted here, in code, so the block cannot be deleted
+# either. Presence only: editing a phrase or a threshold stays normal work.
+#
+# lib/harness-rules.ts carries the same assertion on the serve side, and
+# test/module-child-guard.test.mjs drift-locks the two.
+RULES_INTEGRITY_KEY = "required_keys"
+
+
+def missing_required_keys(rules: dict) -> list:
+    """Dotted paths declared in `required_keys` that are absent or empty.
+
+    Returns `[RULES_INTEGRITY_KEY]` when the declaration block itself is gone.
+    """
+    declared = rules.get(RULES_INTEGRITY_KEY)
+    if not isinstance(declared, list) or not declared:
+        return [RULES_INTEGRITY_KEY]
+    missing = []
+    for path in declared:
+        if not isinstance(path, str) or not path:
+            continue
+        value = dotted_get(rules, path)
+        if value is None or value == "" or value == [] or value == {}:
+            missing.append(path)
+    return missing
+
+
 def find_promise_hits(prompt: str, rules: dict) -> list:
     pub = rules.get("publishing", {}) or {}
     phrases = pub.get("promise_phrases") or []
@@ -438,6 +470,19 @@ def main() -> int:
         return 2
     if not rules.get("assets"):
         print(f"error: rules file {args.rules} has no 'assets' enum — is it valid?", file=sys.stderr)
+        return 2
+
+    # #692 — a deleted guardrail key must not read as "nothing required".
+    # Exit 2 (broken rules), not 1 (a profile violates the rules).
+    missing = missing_required_keys(rules)
+    if missing:
+        print(
+            f"error: rules file {args.rules} is missing required key(s): "
+            + ", ".join(missing)
+            + " — a guardrail was deleted, not relaxed. Restore the key(s) or "
+            "remove them from `required_keys` deliberately.",
+            file=sys.stderr,
+        )
         return 2
 
     try:
