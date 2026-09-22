@@ -82,6 +82,22 @@ G3 여러 세션 보고서·발송 → G4 이 통합 인수(실제 Mac 여정)�
 기존 시험에서 바꾼 것은 **화면 위치·문구 기대값뿐**이다: 행의 원인 문장은 원인만(권장 조치는 상세 `앱이 보고한 상태`), 행의 조치 줄은 “조치: 이름 → 판정”
 (기기 보고 전문은 상세·상태 줄), 근거 수 표기, 선택이 있을 때의 주요 버튼(진단), ‘전체 선택’은 ‘다른 조건으로 선택’ 메뉴 안, 보내기 버튼 이름, 결과 카드 제목 줄.
 
+<a id="g1-instructor-ia-run-20260922"></a>
+
+#### G1 실행 기록 · 2026-09-22 (Mac arm64 · Chromium · source `9eb796d`)
+
+| 실행 | 결과 | 범위 |
+|---|---|---|
+| 기준선 — 수정 전 `966b5c5`에서 기존 9개 브라우저 스위트 | 9/9 통과 | 비교 기준 |
+| `npm --prefix e2e run test:classroom`·`-ops`·`-ops-roster`·`-ops-selection`·`-ops-distribution`·`-ops-lesson-settings`·`-ops-help`·`-ops-results`·`-ops-g1`·`-report` | 10/10 통과 | Chalk 페이지 + Service router + SQLite, 합성 계정 |
+| `npm --prefix chalk test`, `npm --prefix chalk run typecheck` | 통과 | Chalk 계약 |
+| G1-T1 실측(`ops-g1-layout.mjs`, 합성 24석) | 1280×720 완전한 행 **8**, 1024×640 **5**, 행 45px, 최소 글자 14px, 가로 넘침 없음 | 브라우저 확대 100% |
+| 인수 캡처(`ui-review-capture-g1.mjs`, 합성 24석 미리보기, 배지 포함 14장) | 1280×720 **8행**, 1024×640 **6행**; 상세 열림(1280)은 목록이 두 줄 격자로 좁아져 4행 | 공통 조율 원장 `report-gap-g1/captures-9eb796d/`. 잘림·범위 확인 불가 2장(G1-08b/c)은 A1 조회 응답을 **브라우저에서 가공**(page.route)한 모양이며 `captures.json`의 `made_here`에 적었다 |
+| 실제 Mac M1 `mac-distribution.mjs`(셸 0.1.56 복사본 + 현재 확장·SDK 0.3.207, 로컬 Service, 합성 계정·모델 응답, 포트 18981/18982/9481) | 1차 **실패** — 계측기: 학생 창에 새로 생긴 ‘강사에게 도움 요청’도 `details.hp-inbox`라 “보내기 전 보관함 없음” 검사가 그것을 보관함으로 읽음(G1 이전 표류, Chalk 단계 도달 전). 선택자를 보관함 고유 속성 `[data-inbox-generation]`으로 좁혀(시험만) 2차 **PASS**: 새 보드에서 A1만 선택→확인→보내기→결과, 실제 Studio 창의 작업 화면·입장 카드·전체 재시작 뒤·v2 교체·같은 판 재전송 무변화·회수 확인 | 강사 조작은 새 G1 화면(헤드리스 Chromium). 학생 창은 1440×900@2x(2880×1800 캡처) — 1280×720 창이 아님. `report-gap-g1/mac-distribution-9eb796d/` |
+
+**NOT RUN:** Windows 실기, 여러 물리 PC, 학교망, staging/production D1·R2, 실제 모델 품질·비용, 실제 메일 수신, 실제 학생/보호자, 사용자 시각 인수,
+`/authoring`·`/issuer`·`/budgets`·`/console` 화면 재촬영(이번 변경은 `/manage`만), 200% 확대 실측(기존 ops-roster zoom-200 서랍 검사만 통과).
+
 ## 재현과 출시 게이트
 
 ```sh
