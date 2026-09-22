@@ -199,6 +199,8 @@ export function ChatPanel(props: Props) {
   const [draftError, setDraftError] = useState<string | null>(null);
   // SX-01/SX-02 — the step currently being viewed. A **view state**. Not a completion judgment.
   const [currentStepId, setCurrentStepId] = useState<string | null>(null);
+  // #751 F4 — local display state for the learner's step self-report; it is separate from task completion.
+  const [lessonSteps, setLessonSteps] = useState<Record<string, 'in_progress' | 'submitted'>>({});
   /**
    * SX-14·15·17 — the learning state the host computed and sent. **It is not
    * recomputed here.** null means this connection does not use learning events (it is
@@ -699,6 +701,7 @@ export function ChatPanel(props: Props) {
           const lesson = config?.profile?.lesson;
           if (!lesson) return;
           postToHost({ type: 'lessonStep', stepId: step.id, status: 'in_progress' });
+          setLessonSteps(prev => ({ ...prev, [step.id]: prev[step.id] === 'submitted' ? 'submitted' : 'in_progress' }));
           handleChip({
             style: 'good',
             text: `수업: ${lesson.content.title} (${lesson.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`,
@@ -725,14 +728,20 @@ export function ChatPanel(props: Props) {
         if (!step) return null;
         const index = steps.indexOf(step);
         return (
-          <details className="hp-rail-lesson">
-            <summary>이번 단계 안내 · {index + 1}. {step.title}</summary>
-            <p className="hp-rail-lesson-meta">{lesson.content.title} · 버전 {lesson.version} · {lesson.content.duration_minutes}분</p>
-            <p>{step.instructions}</p>
-            {step.hint ? <details><summary>힌트 보기</summary><p>{step.hint}</p></details> : null}
-            <p>확인 기준: {step.acceptance}</p>
-            <p className="hp-rail-lesson-note">안내를 읽은 것만으로 이 단계가 끝나지는 않습니다. 직접 만들고 확인한 기록이 남아야 합니다.</p>
-          </details>
+          <>
+            <details className="hp-rail-lesson">
+              <summary>이번 단계 안내 · {index + 1}. {step.title}</summary>
+              <p className="hp-rail-lesson-meta">{lesson.content.title} · 버전 {lesson.version} · {lesson.content.duration_minutes}분</p>
+              <p>{step.instructions}</p>
+              {step.hint ? <details><summary>힌트 보기</summary><p>{step.hint}</p></details> : null}
+              <p>확인 기준: {step.acceptance}</p>
+              <p className="hp-rail-lesson-note">안내를 읽은 것만으로 이 단계가 끝나지는 않습니다. 직접 만들고 확인한 기록이 남아야 합니다.</p>
+            </details>
+            {/* #751 F4 — a learner self-report for the current step, separate from region D's task completion gate. */}
+            <p className="hp-rail-step-report">
+              <button type="button" className="hp-cta-quiet hps-lesson-done" aria-pressed={lessonSteps[step.id] === 'submitted'} disabled={lessonSteps[step.id] === 'submitted'} onClick={() => { postToHost({ type: 'lessonStep', stepId: step.id, status: 'submitted' }); setLessonSteps(prev => ({ ...prev, [step.id]: 'submitted' })); }}>{lessonSteps[step.id] === 'submitted' ? '마쳤다고 표시함 · 강사 확인 전' : '이 단계를 마쳤어요'}</button>
+            </p>
+          </>
         );
       })()}
 
@@ -757,10 +766,7 @@ export function ChatPanel(props: Props) {
               // catch the eye first. Emphasize both and "what to do now" becomes two things.
               className="hp-cta-quiet"
               disabled={!learning.complete.ok}
-              onClick={() => {
-                if (currentStepId) postToHost({ type: 'lessonStep', stepId: currentStepId, status: 'submitted' });
-                postToHost({ type: "submitTask", task: learning.task });
-              }}
+              onClick={() => postToHost({ type: "submitTask", task: learning.task })}
             >
               이 과제 완료하기
             </button>
