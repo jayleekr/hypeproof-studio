@@ -34,6 +34,15 @@ required_keys:
   - assets
   - thresholds.child_age_max
   - publishing.strategies
+  # #692 후속 훑기 — `publishing_promise_contradiction` 은 severity: fail 인데
+  # 이 목록을 읽는다. 목록이 사라지면 `find_promise_hits` 가 히트 0건을 내고
+  # 검사가 조용히 통과한다(실증: 발행이 꺼진 프로필이 "인터넷에 공개"를 약속해도
+  # exit 1 → exit 0). child.required_prompt_phrase 와 같은 모양이다.
+  #
+  # 이 키는 CI 전용이다 — 워커는 아동 문구 규칙만 유도하므로(harness-rules.ts 의
+  # `child.` 접두 필터) 이것이 비어도 서빙은 멈추지 않는다. 그게 의도다: 빌드를
+  # 세우는 것과 수업을 세우는 것은 다른 사건이다.
+  - publishing.promise_phrases
   - child.required_prompt_phrase
   - child.publish_consent_key
   - child.upload_consent_key

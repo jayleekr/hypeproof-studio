@@ -259,6 +259,68 @@ console.log("✓ child-guard: DRIFT LOCK — rules.yaml read identically by vali
 }
 console.log("✓ child-guard: #692 — a deleted rules key fails closed on both sides (exit 2 · module refused)");
 
+// ─── #692 후속 훑기 — 같은 모양의 다른 severity: fail 규칙 ──────────────────
+//
+// 이슈의 마지막 요청은 "같은 논리가 다른 severity: fail 규칙에도 적용되는지
+// 훑어라" 였다. 훑었더니 하나 나왔다: `publishing_promise_contradiction` 은
+// `publishing.promise_phrases` 를 읽고, 그 목록이 사라지면 히트 0건이 되어
+// 조용히 통과한다 — child.required_prompt_phrase 와 정확히 같은 모양이다.
+//
+//   PLANTED ANSWER — 발행이 꺼져 있는데 프롬프트가 공개를 약속하는 합성 시료를
+//     만든다. 출고 상태에서는 규칙이 잡고(exit 1), 목록을 지우면 잡지 못한다.
+//     required_keys 가 그 삭제를 exit 2 로 막는다.
+//   CONTROL — 이 키는 CI 전용이다. 워커는 `child.` 접두 키만 보므로 이것이
+//     비어도 아동 코호트 서빙은 계속된다. 빌드를 세우는 것과 수업을 세우는 것은
+//     다른 사건이고, 그 구분이 깨지면 CI 규칙 하나가 교실을 멈춘다.
+{
+  const { readHarnessRules, curriculumRequirementsFor } = await import("../src/lib/harness-rules.ts");
+
+  const stripPhrases = (text) => text.replace(/\n  promise_phrases:\n(?:    - .*\n)+/, "\n");
+  const noPhrases = stripPhrases(rulesText);
+  assert.equal(noPhrases.includes("promise_phrases:"), false, "fixture actually removed the list");
+
+  // 합성 시료: publishing.enabled=false 인데 프롬프트가 "인터넷에 공개" 를 약속한다.
+  const promiser = {
+    ...adult,
+    id: "synthetic-promise-probe",
+    publishing: { ...(adult.publishing ?? {}), enabled: false },
+    system_prompt: adult.system_prompt + "\n\n만든 결과물을 인터넷에 공개해 드릴게요.",
+  };
+
+  const dir = mkdtempSync(join(tmpdir(), "hps-promise-"));
+  try {
+    const pf = join(dir, "profiles.json");
+    const rf = join(dir, "rules.yaml");
+    writeFileSync(pf, JSON.stringify([promiser]));
+
+    writeFileSync(rf, rulesText);
+    const shipped = spawnSync("python3", [VALIDATE_PY, pf, "--rules", rf, "--json"], { encoding: "utf8" });
+    assert.equal(shipped.status, 1, "출고 상태에서는 약속 모순을 잡아 exit 1 이어야 한다");
+    assert.ok(
+      JSON.parse(shipped.stdout).findings.some((f) => f.check === "publishing_promise_contradiction"),
+      "publishing_promise_contradiction 이 실제로 걸린다",
+    );
+
+    writeFileSync(rf, noPhrases);
+    const gutted = spawnSync("python3", [VALIDATE_PY, pf, "--rules", rf], { encoding: "utf8" });
+    assert.equal(gutted.status, 2, `목록이 사라지면 exit 2 (조용한 통과가 아니라)\n${gutted.stdout}${gutted.stderr}`);
+    assert.match(gutted.stderr, /missing required key\(s\): publishing\.promise_phrases/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  // CONTROL — CI 전용 키의 부재가 서빙을 멈추지 않는다.
+  const rules = readHarnessRules(noPhrases);
+  assert.deepEqual(rules.missing_keys, ["publishing.promise_phrases"], "워커도 무엇이 빠졌는지는 안다");
+  assert.equal(
+    curriculumRequirementsFor(child, rules).rules_error,
+    undefined,
+    "그러나 아동 코호트 서빙은 계속된다 — 이 키는 CI 규칙이지 서빙 관문이 아니다",
+  );
+  assert.deepEqual(curriculumRequirementsFor(child, rules).required_phrases, [PHRASE]);
+}
+console.log("✓ child-guard: #692 훑기 — promise_phrases 도 같은 구멍이었다 (CI 는 막고, 서빙은 안 멈춘다)");
+
 // ─── #693 the guard cannot be disarmed by forgetting an argument ─────────────
 //
 //   PLANTED ANSWER — call validateModuleDoc WITHOUT `requirements`, the way
