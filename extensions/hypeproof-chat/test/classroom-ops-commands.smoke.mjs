@@ -21,7 +21,11 @@ const state = (r, id) => r.pendingReceipts().find((x) => x.command_id === id)?.s
   assert.equal(await r.onAcks([proceed("cmd-00000001")]), true); assert.equal(runs, 1); assert.equal(state(r, "cmd-00000001"), "succeeded");
   await r.onAcks([proceed("cmd-00000001")]); assert.equal(runs, 1, "a repeated proceed never re-runs");
   await r.onAcks([{ command_id: "cmd-00000001", state: "succeeded", proceed: false, reason: "" }, { command_id: "cmd-00000002", state: "unsupported", proceed: false, reason: "terminal" }]); assert.ok(!r.pendingReceipts().some((x) => ["cmd-00000001", "cmd-00000002"].includes(x.command_id)), "acknowledged receipts stop being sent");
-  ok("allowlist, empty args, epoch, ask-before-run, journal-before-effect, no re-run, receipts until acked");
+  // Coaching executors take a closed argument shape; recovery executors take none. Showing is not a state change, so no "instructor acted" banner.
+  let shown = [], banners = 0; const c = new CommandRunner({ executors: { send_question: { mutating: false, acceptsArgs: (a) => Object.keys(a).join() === "text", run: async (_s, cmd) => { shown.push(cmd.args.text); return { ok: true, code: "shown" }; } }, retry_diagnostics: executors.retry_diagnostics }, journal: store(), monotonic: () => 0, now: () => 1, epoch: () => 3, notify: () => banners++ }); await c.recover();
+  await c.onCommands([env("cmd-00000005", "send_question", { args: { text: "어떤 결과를 기대했나요?" } }), env("cmd-00000006", "send_question", { args: { text: "x", file: "a.html" } }), env("cmd-00000007", "retry_diagnostics", { args: { text: "x" } })]);
+  assert.deepEqual(["cmd-00000005", "cmd-00000006", "cmd-00000007"].map((id) => state(c, id)), ["accepted", "rejected", "rejected"]); await c.onAcks([proceed("cmd-00000005")]); assert.deepEqual(shown, ["어떤 결과를 기대했나요?"]); assert.equal(banners, 0);
+  ok("allowlist, empty args, epoch, ask-before-run, journal-before-effect, no re-run, receipts until acked, closed coaching args");
 }
 {
   let mono = 0, wall = 5_000_000, runs = 0; const r = new CommandRunner({ executors: { restart_preview: { mutating: false, run: async () => { runs++; return { ok: true, code: "ok" }; } } }, journal: store(), monotonic: () => mono, now: () => wall, epoch: () => 3 }); await r.recover();

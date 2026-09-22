@@ -687,3 +687,18 @@ CREATE TABLE IF NOT EXISTS class_run_control (
  updated_by TEXT NOT NULL,
  updated_at INTEGER NOT NULL
 );
+
+-- ── migrations/0014-classroom-ops-evidence-review.sql (#751 evidence review state) ──
+CREATE TABLE IF NOT EXISTS ops_event_reviews (
+ grant_id TEXT NOT NULL,
+ boot_id TEXT NOT NULL,
+ seq INTEGER NOT NULL,
+ class_run_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ state TEXT NOT NULL,
+ reviewer_id TEXT NOT NULL,
+ revision INTEGER NOT NULL DEFAULT 1,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(grant_id,boot_id,seq)
+);
+CREATE INDEX IF NOT EXISTS ops_event_reviews_run ON ops_event_reviews(class_run_id,seat_id);

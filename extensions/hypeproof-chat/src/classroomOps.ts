@@ -27,8 +27,11 @@ export type OpsErrorClass =
   | "auth_expired" | "auth_signature" | "auth_revoked" | "auth_rejected" | "class_not_open" | "profile_mismatch"
   | "roster_missing" | "budget_limit" | "provider_rate_limit" | "provider_5xx" | "network" | "sdk_not_ready"
   | "tool_not_ready" | "review_error" | "upload_failed" | "unknown";
-export type OpsEventKind = "activation" | "step" | "runtime" | "error" | "upload";
-export type OpsActor = "human" | "ai" | "tool" | "operator" | "system" | "unknown";
+export type OpsEventKind = "activation" | "step" | "runtime" | "error" | "upload" | "evidence";
+/** Who acted. Kept per event so a learner's own decision is never merged with what the AI or an instructor did. */
+export type OpsActor = "student" | "ai" | "teacher" | "external_user" | "tool" | "system" | "unknown";
+export type SourceState = "real" | "simulated" | "self_reported" | "unverified";
+export type EvidenceType = "intent" | "criterion" | "action" | "decision" | "change" | "ownership";
 export type RuntimeStatus = "idle" | "running" | "waiting_approval" | "waiting_user" | "error";
 
 export interface OpsEvent {
@@ -47,6 +50,7 @@ export const CLIENT_OPS_PAYLOAD_KEYS = {
   runtime: ["status"],
   error: ["class", "code", "request_id", "blocking", "cleared"],
   upload: ["status", "snapshot_revision"],
+  evidence: ["evidence_type", "source_state", "step_id", "artifact_before", "artifact_after"],
 } as const;
 
 const SAFE_CODE = /^[a-z0-9_.-]{1,64}$/;
@@ -103,6 +107,19 @@ export const errorPayload = (cls: OpsErrorClass, o: { code?: string; requestId?:
 export const uploadPayload = (status: "pending" | "uploaded" | "failed" | "verified", snapshotRevision?: number) => ({
   status,
   ...(Number.isInteger(snapshotRevision) ? { snapshot_revision: snapshotRevision } : {}),
+});
+
+/**
+ * Provenance of something the learner (or the AI, or an outside user) did. Digests only:
+ * the learner's own words stay in the local spool and the existing consented share.
+ * An unstated source is sent as `unverified` — a simulation is never reported as real.
+ */
+export const evidencePayload = (type: EvidenceType, o: { sourceState?: SourceState; stepId?: string; before?: string; after?: string } = {}) => ({
+  evidence_type: type,
+  source_state: o.sourceState ?? "unverified",
+  ...(o.stepId && /^[A-Za-z0-9_-]{1,128}$/.test(o.stepId) ? { step_id: o.stepId } : {}),
+  ...(o.before && /^[a-f0-9]{64}$/.test(o.before) ? { artifact_before: o.before } : {}),
+  ...(o.after && /^[a-f0-9]{64}$/.test(o.after) ? { artifact_after: o.after } : {}),
 });
 
 /** jti/exp are not secrets; the token itself never enters this module. */

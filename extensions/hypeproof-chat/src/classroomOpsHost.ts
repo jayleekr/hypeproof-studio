@@ -58,6 +58,17 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     this.context = context; this.runtime = runtime; this.actions = actions; this.log = log;
   }
 
+  /** Kept in memory for this window so the learner can come back to it; never written into their files or chat. */
+  private readonly coachingNotes: Array<{ at: number; title: string; text: string }> = [];
+  /** A toast, not a modal: it never takes focus from the work and can be dismissed or read later. */
+  private showCoaching(title: string, text: string): void {
+    this.coachingNotes.unshift({ at: Date.now(), title, text }); this.coachingNotes.length = Math.min(this.coachingNotes.length, 50);
+    void vscode.window.showInformationMessage(`${title}: ${text}`, "나중에 보기");
+  }
+  async showCoachingNotes(): Promise<void> {
+    if (!this.coachingNotes.length) { void vscode.window.showInformationMessage("강사가 보낸 질문이나 확인 지점이 없습니다."); return; }
+    await vscode.window.showQuickPick(this.coachingNotes.map((n) => ({ label: n.title, detail: n.text, description: new Date(n.at).toLocaleTimeString() })), { title: "강사가 보낸 질문·확인 지점", placeHolder: "읽기만 합니다. 답을 대신 써 주지 않습니다." });
+  }
   private stopUnconfirmed = false;
   private paused = false;
   private controlRevision = 0;
@@ -108,6 +119,11 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
         },
         postcondition: async (command) => resetPostcondition(await this.readManifest(command.command_id), this.actions.runtimeGeneration()),
       },
+      // Coaching: a question or a pointer, shown without covering the work. Nothing on disk or in the conversation changes.
+      send_question: { mutating: false, acceptsArgs: (a) => Object.keys(a).join() === "text" && typeof a.text === "string" && a.text.length <= 300,
+        run: async (_s, command) => { this.showCoaching("강사의 질문", String(command.args.text)); return { ok: true, code: "shown" }; } },
+      mark_checkpoint: { mutating: false, acceptsArgs: (a) => Object.keys(a).every((k) => k === "step_id" || k === "note") && Object.values(a).every((v) => typeof v === "string" && v.length <= 200),
+        run: async (_s, command) => { this.showCoaching("강사가 다시 보라고 표시한 지점", [command.args.step_id ? `단계 ${command.args.step_id}` : "", command.args.note ?? ""].filter(Boolean).join(" · ") || "현재 작업"); return { ok: true, code: "shown" }; } },
       restart_preview: { mutating: false, run: async () => {
         const r = await this.actions.recoverPreview();
         if (r.state === "no_preview") return { ok: false, code: "no_preview" };

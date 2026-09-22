@@ -17,12 +17,13 @@ import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth'
 import { bumpRateCounter, getActiveSession, getRoster } from '../lib/kv';
 import { readLesson } from '../lib/lesson-delivery';
 import { readRunControl } from '../lib/classroom-ops-control';
+import { scrubSecrets } from '../lib/scrub-secrets';
 import {
   ID_RE, MAX_SEATS, MAX_SYNC_BYTES, MAX_SYNC_EVENTS, OPS_FLAGS, OPS_PROTOCOL, OPS_SCHEMA_VERSION, PAIRING_TTL_MS,
   RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
   newPairingTicket, normalizeTicket, parseFlags, parseLesson, pollAfterMs, sha256Hex, shouldApply, signalOf,
   stepDisposition, validateEvent, type OpsCapability, type SeatState,
-  COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
+  REVIEW_STATES, COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
 } from '../lib/classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -229,11 +230,22 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
       activation: slot('activation'), step: slot('step'), runtime: slot('runtime'), error: slot('error'), upload: slot('upload'), sample: slot('sample'),
     };
   });
+  // Evidence the instructor may want to look at — provenance and review state only, never the learner's words.
+  const evidenceRows = ((await db.prepare(`SELECT e.seat_id,e.grant_id,e.boot_id,e.seq,e.actor,e.payload_json,e.observed_at,COALESCE(r.state,'unreviewed') AS review_state,COALESCE(r.revision,0) AS review_revision
+ FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL
+ LEFT JOIN ops_event_reviews r ON r.grant_id=e.grant_id AND r.boot_id=e.boot_id AND r.seq=e.seq
+ WHERE e.class_run_id=? AND e.kind='evidence' AND e.disposition='applied' ORDER BY e.received_at DESC LIMIT 1000`).bind(run.class_run_id).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; boot_id: string; seq: number; actor: string; payload_json: string; observed_at: number; review_state: string; review_revision: number }>;
+  for (const seat of seats) {
+    const mine = evidenceRows.filter((e) => e.seat_id === seat.seat_id).map((e) => { let p: Record<string, unknown> = {}; try { p = JSON.parse(e.payload_json); } catch { p = {}; } return { ref: `${e.grant_id}.${e.boot_id}.${e.seq}`, evidence_type: p.evidence_type, source_state: p.source_state ?? 'unverified', step_id: p.step_id ?? null, actor: e.actor, changed: typeof p.artifact_before === 'string' && typeof p.artifact_after === 'string' ? p.artifact_before !== p.artifact_after : null, observed_at: e.observed_at, review_state: e.review_state, review_revision: e.review_revision }; });
+    const by: Record<string, number> = {}; for (const e of mine) by[String(e.source_state)] = (by[String(e.source_state)] ?? 0) + 1;
+    // Zero is "not seen yet", and the UI says so. It is never a score.
+    (seat as Record<string, unknown>).evidence = { observed: mine.length, unreviewed: mine.filter((e) => e.review_state === 'unreviewed').length, by_source_state: by, latest: mine.slice(0, 5) };
+  }
   const history = (await db.prepare('SELECT seat_id,seat_revision,student_id,replaced_at,replaced_reason,changed_by FROM class_run_seats WHERE class_run_id=? AND replaced_at IS NOT NULL ORDER BY replaced_at DESC LIMIT 100').bind(run.class_run_id).all()).results ?? [];
   const count = (f: (s: (typeof seats)[number]) => boolean) => seats.filter(f).length;
   return c.json({
     schema_version: OPS_SCHEMA_VERSION, now, stale_after_ms: STALE_AFTER_MS, viewer: auth.payload.u,
-    actions: Object.entries(COMMAND_ACTIONS).map(([action, a]) => ({ action, capability: a.capability, mutating: a.mutating, enabled: parseFlags(run.flags_json)[a.flag], held: (auth.scope.ops ?? []).includes(a.capability) })),
+    actions: Object.entries(COMMAND_ACTIONS).map(([action, a]) => ({ action, kind: a.kind, capability: a.capability, mutating: a.mutating, enabled: parseFlags(run.flags_json)[a.flag], held: (auth.scope.ops ?? []).includes(a.capability) })),
     run: { class_run_id: run.class_run_id, profile_id: run.profile_id, roster_revision: run.roster_revision, flags: parseFlags(run.flags_json), lesson: parseLesson(run.lesson_json), starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at },
     // Scope note for the UI: this is the run snapshot, not the cumulative cohort roster.
     roster: { source: 'class_run_seats', total: seats.length },
@@ -478,10 +490,14 @@ classroomOpsTeacher.post(root + '/commands', async (c) => {
   const run = await loadRun(c, auth); if (run instanceof Response) return run;
   if (!parseFlags(run.flags_json)[spec.flag]) return c.json({ error: 'commands are off for this run', reason: spec.flag + '_disabled' }, 403);
   if (!b || !UUIDISH_RE.test(b.idempotency_key ?? '') || !Array.isArray(b.targets) || !b.targets.length || b.targets.length > spec.maxTargets || b.targets.some((x: unknown) => typeof x !== 'string' || !ID_RE.test(x)) || new Set(b.targets).size !== b.targets.length || !(REASON_CODES as readonly string[]).includes(b.reason_code) || !Number.isInteger(b.expected_roster_revision)) return c.json({ error: 'idempotency_key, unique targets[], reason_code and expected_roster_revision required' }, 400);
-  if (b.args !== undefined && (typeof b.args !== 'object' || b.args === null || Array.isArray(b.args) || Object.keys(b.args).length)) return c.json({ error: 'this action takes no arguments', reason: 'args_not_allowed' }, 400);
+  if (b.args !== undefined && (typeof b.args !== 'object' || b.args === null || Array.isArray(b.args))) return c.json({ error: 'args must be an object', reason: 'args_not_allowed' }, 400);
+  let args: Record<string, unknown> = {};
+  if (spec.args) { const v = spec.args(b.args ?? {}); if (!v.ok) return c.json({ error: v.error, reason: 'args_invalid' }, 400); args = Object.fromEntries(Object.entries(v.value).map(([k, x]) => [k, typeof x === 'string' ? scrubSecrets(x) : x])); }
+  else if (b.args && Object.keys(b.args).length) return c.json({ error: 'this action takes no arguments', reason: 'args_not_allowed' }, 400);
+  if (args.step_id !== undefined && !parseLesson(run.lesson_json)?.steps.includes(args.step_id as string)) return c.json({ error: 'step is not part of the confirmed lesson for this run', reason: 'unknown_step' }, 400);
   if (b.expected_roster_revision !== run.roster_revision) return c.json({ error: 'roster changed; reload before acting', reason: 'revision_conflict', roster_revision: run.roster_revision }, 409);
   const db = c.env.HPS_DB, now = Date.now(), targets = [...b.targets].sort();
-  const payloadHash = await sha256Hex(JSON.stringify([b.action, targets, b.reason_code, run.roster_revision]));
+  const payloadHash = await sha256Hex(JSON.stringify([b.action, targets, b.reason_code, run.roster_revision, args]));
   const prior = await db.prepare('SELECT id,payload_hash FROM ops_commands WHERE class_run_id=? AND idempotency_key=?').bind(run.class_run_id, b.idempotency_key).first<{ id: string; payload_hash: string }>();
   if (prior) return prior.payload_hash === payloadHash ? c.json(await commandView(db, run.class_run_id, prior.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
   const recent = await db.prepare('SELECT count(*) AS n FROM ops_commands WHERE class_run_id=? AND created_at>?').bind(run.class_run_id, now - 60_000).first<{ n: number }>();
@@ -494,7 +510,7 @@ classroomOpsTeacher.post(root + '/commands', async (c) => {
   await settleOverdueRun(db, run.class_run_id, now);
   const id = crypto.randomUUID(), expires = now + COMMAND_TTL_MS;
   const stmts = [
-    db.prepare('INSERT INTO ops_commands(id,class_run_id,cohort_id,action,args_json,payload_hash,idempotency_key,issued_by,issuer_jti,reason_code,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, run.class_run_id, run.cohort_id, b.action, '{}', payloadHash, b.idempotency_key, auth.payload.u, auth.payload.jti ?? null, b.reason_code, now, expires),
+    db.prepare('INSERT INTO ops_commands(id,class_run_id,cohort_id,action,args_json,payload_hash,idempotency_key,issued_by,issuer_jti,reason_code,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').bind(id, run.class_run_id, run.cohort_id, b.action, JSON.stringify(args), payloadHash, b.idempotency_key, auth.payload.u, auth.payload.jti ?? null, b.reason_code, now, expires),
     audit(db, run.class_run_id, '', 'instructor', auth.payload.u, 'command_enqueued', { command_id: id, action: b.action, targets: targets.slice(0, 50), reason_code: b.reason_code }, now),
   ];
   for (const t of targets) {
@@ -575,4 +591,22 @@ classroomOpsTeacher.put(root + '/control', async (c) => {
     // Said up front so the instructor does not read "paused" as "everything stopped".
     not_applied_to: ['requests already running', 'local file editing, saving, Stop and export', 'devices that are offline or on an app without this feature until they report the revision'],
   });
+});
+
+// ── evidence review state (2026-09-18 added criteria) ───────────────────────
+// `confirmed` = an instructor looked at this evidence. It is not delivery approval,
+// not a grade and not lesson completion, and it changes nothing on the learner's side.
+classroomOpsTeacher.put(root + '/evidence/:ref', async (c) => {
+  const auth = await teacher(c, 'coach'); if (auth instanceof Response) return auth;
+  const run = await loadRun(c, auth); if (run instanceof Response) return run;
+  const [grantId, bootId, seqText] = (c.req.param('ref') ?? '').split('.'), seq = Number(seqText), b = await json(c), now = Date.now(), db = c.env.HPS_DB;
+  if (!UUIDISH_RE.test(grantId ?? '') || !UUIDISH_RE.test(bootId ?? '') || !Number.isSafeInteger(seq) || !b || !(REVIEW_STATES as readonly string[]).includes(b.state) || !Number.isInteger(b.expected_revision)) return c.json({ error: 'evidence ref, state and expected_revision required' }, 400);
+  const ev = await db.prepare("SELECT e.seat_id FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL WHERE e.grant_id=? AND e.boot_id=? AND e.seq=? AND e.class_run_id=? AND e.kind='evidence' AND e.disposition='applied'").bind(grantId, bootId, seq, run.class_run_id).first<{ seat_id: string }>();
+  if (!ev) return c.json({ error: 'evidence not found in this run' }, 404);
+  const saved = b.expected_revision === 0
+    ? await db.prepare('INSERT INTO ops_event_reviews(grant_id,boot_id,seq,class_run_id,seat_id,state,reviewer_id,revision,updated_at) VALUES(?,?,?,?,?,?,?,1,?) ON CONFLICT(grant_id,boot_id,seq) DO NOTHING RETURNING state,revision').bind(grantId, bootId, seq, run.class_run_id, ev.seat_id, b.state, auth.payload.u, now).first<{ state: string; revision: number }>()
+    : await db.prepare('UPDATE ops_event_reviews SET state=?,reviewer_id=?,revision=revision+1,updated_at=? WHERE grant_id=? AND boot_id=? AND seq=? AND revision=? RETURNING state,revision').bind(b.state, auth.payload.u, now, grantId, bootId, seq, b.expected_revision).first<{ state: string; revision: number }>();
+  if (!saved) return c.json({ error: 'another instructor reviewed this; reload', reason: 'revision_conflict' }, 409);
+  await audit(db, run.class_run_id, ev.seat_id, 'instructor', auth.payload.u, 'evidence_' + b.state, { ref: c.req.param('ref') }, now).run();
+  return c.json({ ref: c.req.param('ref'), review_state: saved.state, review_revision: saved.revision, means: 'instructor looked at this evidence', does_not_mean: ['delivery approval', 'lesson completion', 'a grade'] });
 });
