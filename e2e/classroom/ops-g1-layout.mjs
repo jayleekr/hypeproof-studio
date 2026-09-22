@@ -58,6 +58,9 @@ try {
   let page = await open({ width: 1280, height: 720 });
   assert.equal(await page.locator('#ops-table').isHidden(), true); assert.equal(await page.locator('#ops-seats .ops-seat').count(), 0); assert.match(await page.locator('#status').innerText(), /강사 토큰과 코호트를 입력하세요/);
   await connect(page); console.log('PASS states: before a connection the table is absent and the connection form is the page');
+  // HPS_G1_WIDEN=0.06 widens every glyph (letter-spacing, em) to rehearse a wider font on a machine that has a narrow one — the CI
+  // runner's Korean font measured one to two toolbar lines taller than the Mac's. The default run measures the page as it is.
+  if (process.env.HPS_G1_WIDEN) await page.addStyleTag({ content: `*{letter-spacing:${Number(process.env.HPS_G1_WIDEN)}em!important}` });
 
   // ── 1. the table at 1280×720 and 1024×640 ──
   const heads = await page.locator('#ops-table thead th').allInnerTexts(); assert.deepEqual(heads, ['선택', '좌석 · 학생', '입장 · 토큰', '현재 단계', '수행 · 도움 · 오류', '마지막 신호', '기록 · 근거']);
