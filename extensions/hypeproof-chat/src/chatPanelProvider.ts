@@ -2275,6 +2275,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "inboxOpen": await this.inboxSource?.inboxOpened(msg.objectId, msg.generation); return;
       case "inboxLink": await this.handleInboxLink(msg); return;
       case "helpRequest": await this.helpSource?.refresh(); return;
+      case "artifactApprove": await this.approveArtifactInteractively(); return;
       case "helpDraft": await this.helpSource?.draft(msg.key, msg.draft); return;
       case "helpPreview": await this.helpSource?.preview(msg.key, msg.draft); return;
       case "helpCancel": await this.helpSource?.cancel(msg.key); return;

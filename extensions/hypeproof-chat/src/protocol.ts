@@ -389,6 +389,8 @@ export type WebviewMessage = (
   | { type: "inboxLink"; objectId: string; url: string; generation: number; action: "open" | "copy" }
   // #751 native help — every message names the learner-in-class key the view was drawn under; the host ignores a mismatch.
   | { type: "helpRequest" }
+  // #751 U1b — the learner opens the approval question for the current index.html (the host asks; nothing is approved or sent by this message).
+  | { type: "artifactApprove" }
   | { type: "helpDraft"; key: string; draft: { question: string; turnId: string | null; duration: number } }
   | { type: "helpPreview"; key: string; draft: { question: string; turnId: string | null; duration: number } }
   | { type: "helpCancel"; key: string }
