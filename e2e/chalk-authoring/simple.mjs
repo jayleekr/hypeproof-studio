@@ -42,10 +42,10 @@ else{
  // Selecting the same server-verified setting restores the binding and keeps the draft.
  await page.locator('#setting').selectOption('0');assert.equal(await page.locator('#cohort').inputValue(),local.cohort);assert.equal(await page.locator('#profile').inputValue(),local.profileId);assert.equal(await page.locator('#title').inputValue(),'AI 창업 첫 수업');assert.equal(await page.locator('#save').isEnabled(),true);
  await page.locator('#save').click();await page.locator('#status').filter({hasText:'revision 1'}).waitFor();
- await page.locator('#freeze').click();await page.locator('#completion').filter({hasText:'강의가 확정되었습니다'}).waitFor();
+ await page.locator('#freeze').click();await page.locator('#completion').filter({hasText:'리허설 후보'}).waitFor();
  assert.match(await page.locator('#version').inputValue(),/^m\d{4}\.\d{2}\.\d{2}-1$/);
  const firstVersion=await page.locator('#version').inputValue();
- await page.locator('#title').fill('수정한 강의');await page.locator('#save').click();await page.locator('#status').filter({hasText:'revision 2'}).waitFor();await page.locator('#freeze').click();await page.locator('#completion').filter({hasText:'강의가 확정되었습니다'}).waitFor();assert.notEqual(await page.locator('#version').inputValue(),firstVersion);
+ await page.locator('#title').fill('수정한 강의');await page.locator('#save').click();await page.locator('#status').filter({hasText:'revision 2'}).waitFor();await page.locator('#freeze').click();await page.locator('#completion').filter({hasText:'리허설 후보'}).waitFor();assert.notEqual(await page.locator('#version').inputValue(),firstVersion);
  mkdirSync('test-results/chalk-simple',{recursive:true});
  for(const width of [1280,390]){await page.setViewportSize({width,height:900});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));await page.screenshot({path:'test-results/chalk-simple/authoring-'+width+'.png',fullPage:true});}
  // Reload and reopen with existing escape hatch; automatic IDs must remain recoverable.
