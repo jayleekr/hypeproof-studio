@@ -75,7 +75,7 @@ try {
   assert.equal((await page.locator('#ops-select-help').innerText()).trim(), '도움 요청 학생 선택 (2)'); assert.equal((await page.locator('#ops-select-fault').innerText()).trim(), '기술 문제 좌석 선택 (장애 4 · 주의 0)');
   await page.locator('#ops-select-help').click(); assert.match(await page.locator('#ops-selection').innerText(), /선택 2 \/ 전체 10석 .* — 선택: A2, A4$/, 'the learner who asked is selected; the faults are not');
   await page.locator('#ops-select-fault').click(); assert.match(await page.locator('#ops-selection').innerText(), /— 선택: A1, A5, A6, A7$/);
-  assert.equal((await primaries().innerText()).trim(), '기술 문제 좌석 선택 (장애 4 · 주의 0)', 'one primary on the list');
+  assert.equal((await primaries().innerText()).trim(), '좌석 진단', 'one primary on the list — with the fault seats selected it is the next step for them, diagnosis (G1); nothing is sent by it being primary');
 
   // ── 3. The Service's first action is the one primary ──
   await row('A1').getByRole('button', { name: '근거·조치' }).click();

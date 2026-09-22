@@ -230,7 +230,7 @@ try {
   assert.deepEqual(turns(), [], 'U3 off: no turn is admitted or recorded');
   const profileOff = await (await realFetch(origin + '/v1/profile', { headers: { authorization: 'Bearer ' + token } })).json(); assert.equal(profileOff.lesson_binding, undefined, 'U3 off: the profile says nothing about bindings'); assert.equal(profileOff.lesson.version, V1);
   const I = await instructor(), { page, row, T } = I;
-  await I.compose(); assert.deepEqual(await I.kinds(), ['notice', 'material', 'prompt'], 'U3 off for this run: the setting kind is not offered'); assert.match(await page.locator('#ops-dist-preview').innerText(), /^선택한 학생에게 보내기 \(공지·자료·프롬프트\) — 먼저 확인$/);
+  await I.compose(); assert.deepEqual(await I.kinds(), ['notice', 'material', 'prompt'], 'U3 off for this run: the setting kind is not offered'); assert.match(await page.locator('#ops-dist-preview').innerText(), /^보내기 — 먼저 확인$/);
   await I.newMaterial('notice', '오늘 수업 안내', '끝나기 10분 전에 작업을 저장하세요.'); await I.saveForm(); await I.sendToA1(); await I.items(/A1 · .* — 전달: 보관함 반영 · 보관함: 지금 보관함에 있음/, 'the U2 notice reached the real window');
   const notice = await openCard(chat, '오늘 수업 안내'); assert.deepEqual([notice.card.body, notice.card.canImport, notice.card.setting], ['끝나기 10분 전에 작업을 저장하세요.', false, null]);
   await page.screenshot({ path: path.join(out, '00-instructor-u3-off.png'), fullPage: true }); await shot(win, '00b-learner-notice-opened-by-mouse.png'); step('U3 OFF: a real turn and a U2 notice (opened with the mouse) work as before; no turn rows, no binding in the profile, no setting kind', { provider_calls: providerCalls.length });

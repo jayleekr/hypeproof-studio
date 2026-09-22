@@ -69,7 +69,7 @@ try {
   await connect(); assert.equal(await page.locator('#ops-ledger').isVisible(), false, 'no action, no result card'); ok('control: before any action there is no result card');
 
   // ── C1: whole class (전체 선택) → 진단. Offline, never-paired and old-app seats are named at once; delivery is not receipt. ──
-  await page.locator('#ops-select-all').click(); await page.locator('#ops-bulk-diagnose').click(); await page.locator('#ops-ledger').waitFor();
+  await page.locator('#ops-pick-by > summary').click(); await page.locator('#ops-select-all').click(); /* G1: under ‘다른 조건으로 선택’ */ await page.locator('#ops-bulk-diagnose').click(); await page.locator('#ops-ledger').waitFor();
   const C1 = 'command:' + commandsNow().at(-1).id; await card(C1).waitFor();
   assert.match(await sum(C1), /^적용 \(기기가 실행함\) 0 · 실패 1 · 미확인 0 · 미전달·만료·대상 변경 2 · 접수 3$/, await sum(C1));
   assert.match(await line(C1, 'A4'), /^A4 · student-d — \[실패\] 이 앱 버전은 지원하지 않음/); assert.match(await line(C1, 'A5'), /^A5 · student-e — \[미전달·만료·대상 변경\] 기기 연결 없음/); assert.match(await line(C1, 'A6'), /^A6 · student-f — \[미전달·만료·대상 변경\]/);
@@ -211,7 +211,7 @@ try {
   assert.deepEqual(await keys(), [K4], 'dry run: no result card'); const dryLines = await page.locator('#ops-finish-items > p').allTextContents(); assert.equal(dryLines.length, 6, 'the preview names the whole roster');
   await page.locator('#ops-finish-dry').uncheck(); await page.locator('#ops-finish-go').click(); await until('whole-roster card', async () => batches().length === liveBefore + 1 && (await keys()).length === 2);
   const kw = batches().at(-1), KW = 'collect:' + kw; assert.deepEqual(await keys(), [KW, K4]);
-  assert.match(await card(KW).locator('h4').innerText(), /^기록 회수 \(수업 마무리 · 명단 전체\) · 회수 .* · 명단 전체 6명$/);
+  assert.match(await card(KW).locator('h4').innerText(), /^기록 회수 \(수업 마무리 · 명단 전체\) — 결과 확정 \d+ · 미확인 \d+ · 진행 중 \d+ \/ 6명 · 다음: /, 'G1: the first line is the action, final / unknown / still moving, and the next step'); assert.match(await card(KW).locator('.ledger-meta').innerText(), /^회수 .* · 명단 전체 6명 · 보낼 때의 대상 기준/);
   const wl = await lines(KW); assert.deepEqual(wl.map((l) => l.split(' — ')[0]), ['A1 · student-a', 'A2 · student-b', 'A3 · student-c', 'A4 · student-d', 'A5 · student-g', 'A6 · student-f'], 'every roster seat, the current holder of A5');
   assert.match(await line(KW, 'A4'), /\[미전달·만료·대상 변경\] 제외 · 동의 없음 · 회수하지 않음/); assert.match(await line(KW, 'A5'), /\[미전달·만료·대상 변경\] .*(동의 없음|기기 연결 없음)/); assert.match(await line(KW, 'A6'), /\[미전달·만료·대상 변경\] .*(동의 없음|기기 연결 없음)/);
   for (const id of ['A1', 'A2', 'A3']) assert.doesNotMatch(await line(KW, id), /\[적용|\[미전달/, id + ' was asked, nothing arrived yet');
