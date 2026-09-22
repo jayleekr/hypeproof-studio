@@ -2123,6 +2123,9 @@
         },
         {
           "path": "scripts/classroom-report-runner.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-regression.test.mjs"
         }
       ]
     },
