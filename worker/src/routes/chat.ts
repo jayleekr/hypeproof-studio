@@ -265,12 +265,44 @@ chat.get("/profile", async (c) => {
   let { profile, module } = resolved;
   if(auth.payload.account){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;profile=gate.profile;c.header('cache-control','no-store');}
   let observationScope:string|undefined;
-  // `record`, not `enabled`: the served `observation` block below is gated on
-  // `record`, and this is what fills its `scope`. Split, a profile with
-  // `record:true, enabled:false` would be served an observation block whose
-  // scope is undefined. Identical today for all 9 profiles (the serving
-  // snapshot is the proof); session gating itself moves out in ADR 0010 step 2.
-  if(auth.payload.native_trial||observationCapability(profile.observation).record){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;observationScope=await nativeObservationScope(gate.payload,gate.session);c.header("cache-control","no-store");}
+  // ADR 0010 step 2 — the session gate no longer rides on observation.
+  //
+  // It used to read `observationCapability(profile.observation).record`, which
+  // meant the day `record` defaults on (ADR step 4) seven cohorts would have
+  // flipped from 200 to 403 here and no longer been able to read their class,
+  // greeting and model list before the instructor opened the session. Nothing
+  // about reading a profile depends on being observed. The condition is now
+  // the cohort's own `session.requires_open_session`, and `native_trial` keeps
+  // its own disjunct because for a trial seat this gate is the grant / expiry /
+  // revocation check (chat-gate.ts), not a class check.
+  //
+  // Only this route moves. `/v1/chat/completions`, `/v1/messages` and
+  // `/v1/observations/*` each call `gateChatRequest` unconditionally, so a seat
+  // that can now read its profile before class still cannot send anything.
+  if(auth.payload.native_trial||profile.session.requires_open_session){const gate=await gateChatRequest(c);if(!gate.ok)return gate.response;observationScope=await nativeObservationScope(gate.payload,gate.session);c.header("cache-control","no-store");}
+  // One decision, read twice below (the block and the stale-app banner).
+  //
+  // `&& observationScope` is the guard that makes the line above safe to
+  // loosen. `nativeObservationScope` needs a `session_id`, so a recording seat
+  // that did not take the gate has no scope — and an observation block WITHOUT
+  // a scope is worse than none at all: the shipped app tests the block's bare
+  // truthiness and falls back to `sha256(token)` for the chat-history bucket
+  // (v0.1.56 chatPanelProvider.ts:660), which moves every existing
+  // conversation out of view and moves it again on each token reissue.
+  // Identical for all 9 profiles today — the two recording cohorts are exactly
+  // the two that declare `requires_open_session`, so the serving snapshot's 36
+  // cells do not move. It is a guard against a future step, not a change.
+  const observationCapabilities = observationCapability(profile.observation);
+  const servedObservation = observationCapabilities.record && observationScope
+    ? {
+        format: servedObservationFormat(
+          profile.observation?.format,
+          c.req.header("x-hps-observation-format"),
+        ),
+        scope: observationScope,
+        assess: observationCapabilities.assess,
+      }
+    : null;
 
   let lesson = null;
   if (auth.payload.lesson) {
@@ -310,26 +342,18 @@ chat.get("/profile", async (c) => {
     // older app that only knows /1 would reject a /2 batch outright. Serving a
     // cohort's /2 to that app would break observation for it entirely, so the
     // cohort's declaration is a ceiling, not an order.
-    ...(observationCapability(profile.observation).record
-      ? {
-          observation: {
-            format: servedObservationFormat(
-              // `?.` because the capability helper no longer narrows the block
-              // the way the old `profile.observation?.enabled` truthiness did.
-              profile.observation?.format,
-              c.req.header("x-hps-observation-format"),
-            ),
-            scope: observationScope,
-            // SX-01·06·07·59 forbid scores, asset labels and evaluation
-            // sentences on any screen during work. The observation results
-            // panel shows all three, so it is drawn only where a cohort has
-            // opted into assessment (the trial, TUX-OBS-07). Recording is a
-            // separate switch and stays on — the student just does not get
-            // graded at themselves while working.
-            assess: observationCapability(profile.observation).assess,
-          },
-        }
-      : {}),
+    //
+    // SX-59, quoted rather than paraphrased because a wider paraphrase is how
+    // a citation starts meaning more than its row: "작업 중 어떤 화면에도 역량
+    // 점수·등급·'개선 필요' 배지가 없다". The observation RESULTS panel shows
+    // per-capability verdicts, so it is drawn only where a cohort has opted
+    // into assessment — the remedy the same row names ("학습 경험 프로필에서
+    // 비활성"), because the trial's own row (TUX-OBS-07) wants that screen.
+    // That opt-in is what `assess` carries. Recording is a separate switch and
+    // stays on: the student is just not graded at themselves while working.
+    //
+    // Decided once, above, so the block and the banner below cannot disagree.
+    ...(servedObservation ? { observation: servedObservation } : {}),
     // dag task H — which curriculum module this seat is running. Observability
     // only (the prompt itself never leaves the worker): lets e2e/observe and
     // the instructor tell "which curriculum" without a D1 query.
@@ -342,7 +366,11 @@ chat.get("/profile", async (c) => {
     welcome: lesson ? {
       greeting_md: `오늘 수업: ${lesson.content.title}\n목표: ${lesson.content.objective}\n내 수업에서 과제와 확인 기준을 읽고 시작하세요.`,
       example_prompts: lesson.content.steps.slice(0, 3).map(s => `${s.instructions}\n확인 기준: ${s.acceptance}`),
-    } : observationCapability(profile.observation).record && !isObservationFormat(c.req.header("x-hps-observation-format")) ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."} : profile.welcome,
+    // The banner reads `servedObservation`, not `record`, for the same reason
+    // the block does: telling a student to update Studio for a screen this
+    // response is not offering them is noise, and the two answers drifting is
+    // how the P1 repair shipped a "please update" banner to every seat.
+    } : servedObservation && !isObservationFormat(c.req.header("x-hps-observation-format")) ? {...profile.welcome,greeting_md:profile.welcome.greeting_md+"\n\n이 앱 버전은 작업 관찰 화면을 지원하지 않습니다. 기존 작업은 계속할 수 있으며, 관찰하려면 Studio를 업데이트해 주세요."} : profile.welcome,
     // #747 feature A — a frozen lesson may fix the AI's display name for this
     // seat. It is projected onto the existing ux.coach contract (fixed +
     // fallback_name) so every app version shows it through the same

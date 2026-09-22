@@ -185,8 +185,14 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     if(!grant||grant.revoked)return {ok:false,response:c.json({error:{code:'trial_revoked_or_reissued',type:'auth',message:'폐기되었거나 새 코드로 교체된 체험 코드입니다.'}},401)};
     if(grant.expires_at!==null&&grant.expires_at<=Date.now())return {ok:false,response:c.json({error:{code:'trial_expired',type:'session_window',message:'개인 체험 시간이 끝났습니다. 작업 파일은 그대로 보존됩니다.'}},403)};
   }
+  // ADR 0010 step 2 — the runtime twin of the mint check in routes/admin.ts.
+  // This decides whether a minted `native_trial` seat ever gets a session at
+  // all (and so whether its one-hour window ever starts). It read
+  // `observation.enabled`, the same flag the mint route read, which is why the
+  // two have to move together: leave this one behind and the admin route mints
+  // seats that fall straight into the `session_inactive` 403 below, forever.
   const session = payload.native_trial
-    ? (profile.observation?.enabled ? await startNativeGrant(env,payload) : null)
+    ? (profile.trial?.individual ? await startNativeGrant(env,payload) : null)
     : await getActiveSession(env.HPS_KV, payload.c);
   if (!session) {
     // #165 — student-facing copy is no longer a dead-end. The chat panel's
