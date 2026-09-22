@@ -13,7 +13,7 @@ try {
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run(); };
   // The deploy order is rehearsed here on real local D1, with the same checker the runbook uses against a remote target
   // (worker/scripts/classroom-ops-d1-check.mjs): nothing applied → half applied → all applied → applied again.
-  const { compare } = await import('../scripts/classroom-ops-d1-check.mjs'), files = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log', '0022-classroom-collect-scope', '0023-classroom-distribution', '0024-classroom-lesson-bindings'];
+  const { compare } = await import('../scripts/classroom-ops-d1-check.mjs'), files = ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check', '0021-classroom-erasure-log', '0022-classroom-collect-scope', '0023-classroom-distribution', '0024-classroom-lesson-bindings', '0025-classroom-collect-kinds'];
   const present = async () => (await db.prepare("SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all()).results.map((r) => r.name);
   let seen = compare(await present()); assert.equal(seen.none, true); assert.deepEqual(seen.next, files.map((m) => m + '.sql'), 'the checker lists every migration file of this feature, in order');
   for (const m of files.slice(0, 5)) await apply(readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), 'utf8'));
@@ -78,5 +78,16 @@ try {
     const cost = await db.prepare("SELECT e.seat_id FROM json_each(?) j JOIN ops_events e ON e.class_run_id=? AND e.seat_id=json_extract(j.value,'$[0]') AND e.received_at>=json_extract(j.value,'$[1]') WHERE e.kind='recovery' AND e.disposition='applied'").bind(JSON.stringify([[seat, 0]]), f.run).all();
     const total = (await db.prepare('SELECT count(*) AS n FROM ops_events').first()).n, mine = (await db.prepare('SELECT count(*) AS n FROM ops_events WHERE seat_id=?').bind(seat).first()).n;
     console.log(`U4 follow-up read on local D1: rows_read=${cost.meta.rows_read} for ${mine} event(s) of the seat, ${total} in the run`); assert.ok(cost.meta.rows_read <= mine + 2, 'the read is bounded by the seat\'s own events, not the run\'s ledger'); }
+  // U1b on real D1: a kinds batch writes its kinds row inside the same conditional batch (and the device is told the kinds); a moved roster writes neither.
+  { const roster = live.map((id) => ({ seat_id: id, student_id: id === 'B1' ? 'student-c' : id === 'A1' ? 'student-a' : 'student-b' }));
+    assert.equal((await f.configure(roster, 2, { lesson: undefined, flags: { ops_commands: true, ops_collect: true } })).status, 200);
+    assert.equal((await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: true, purpose: 'class_report', notice_version: 'notice-v1' }, credential)).status, 201);
+    const ask = (rev) => f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: rev, purpose: 'class_report', notice_version: 'notice-v1', dry_run: false, targets: [seat], kinds: ['prompts', 'artifacts'] });
+    const made = await ask(3); assert.equal(made.status, 201, made.raw); assert.deepEqual(made.json.batch.kinds, ['artifacts', 'prompts']);
+    assert.equal((await db.prepare('SELECT kinds_json FROM classroom_collect_kinds WHERE batch_id=?').bind(made.json.batch.id).first()).kinds_json, '["artifacts","prompts"]');
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT args_json FROM ops_commands WHERE idempotency_key=?').bind('collect-' + made.json.batch.id).first()).args_json).kinds, ['artifacts', 'prompts']);
+    const before = (await db.prepare('SELECT count(*) AS n FROM classroom_collect_kinds').first()).n, stale = await ask(2);
+    assert.deepEqual([stale.status, stale.json.reason, (await db.prepare('SELECT count(*) AS n FROM classroom_collect_kinds').first()).n], [409, 'revision_conflict', before]);
+    console.log('PASS actual local workerd/D1 (U1b): the kinds row commits with its batch; a refused request writes no kinds row'); }
   console.log('PASS actual local workerd/D1: re-runnable migration 0011, atomic roster CAS, single-use pairing under 4 parallel connects, state CAS, one-read status, idempotent parallel enqueue, single lease owner, U4 linked follow-up + outcome + bounded follow-up read');
 } finally { f?.close(); await mf.dispose(); }

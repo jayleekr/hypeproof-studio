@@ -58,7 +58,8 @@ let count = 0; const ok = (name) => { count++; console.log("PASS " + name); };
   spool.recordPrompt({ turnId: "t-1", runtime: "proxy", text: "a" }); await spool.flush(); const firstDir = spool.currentSessionDir();
   spool.noteIdentity({ ...ID, u: "student-b" }); spool.recordPrompt({ turnId: "t-2", runtime: "proxy", text: "b" });
   spool.recordWorkflow({ turnId: "t-1", event: "sdk_fallback", payload: { reason: "late" } }); await spool.flush();
-  assert.deepEqual(seqs(firstDir), [1, 2], "the previous learner's late turn event continues their own numbering");
+  // #751 U1b: the rotation writes `session_close` (seq 2) into the old session; the late pinned event still continues ITS numbering (3).
+  assert.deepEqual(seqs(firstDir), [1, 2, 3], "the previous learner's late turn event continues their own numbering");
   assert.deepEqual(seqs(spool.currentSessionDir()), [1]);
   ok("each session file has its own contiguous stream");
 }

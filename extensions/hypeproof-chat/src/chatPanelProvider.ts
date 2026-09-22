@@ -770,6 +770,31 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   async opsReadSpool(sinceMs: number): Promise<import("./sessionSpool").SpoolSnapshotSource | null> {
     try { return (await this.spool?.readForSnapshot(sinceMs)) ?? null; } catch { return null; }
   }
+  /** #751 U1b — this learner's sessions in the class window for a kinds collection. Reads only; the live spool is not sealed or moved. */
+  async opsReadCollection(sinceMs: number, identity: { u: string; c: string; p: string }): Promise<import("./sessionSpool").SpoolCollectionSource | null> {
+    try { return (await this.spool?.readForCollection(sinceMs, identity)) ?? null; } catch { return null; }
+  }
+  /**
+   * #751 U1b — the learner marks the CURRENT artifact version (workspace index.html) as their class result, or withdraws that
+   * mark. Only versions marked here travel in an "approved artifacts" collection; nothing is sent by this command itself.
+   */
+  async approveArtifactInteractively(): Promise<void> {
+    if (!this.spool) { void vscode.window.showInformationMessage("이 창에서는 결과물을 표시할 수 없습니다."); return; }
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
+    let content = "";
+    try { if (root) content = Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, "index.html"))).toString("utf8"); } catch { content = ""; }
+    if (!/<html[\s>]/i.test(content) && !/<!doctype html/i.test(content)) { void vscode.window.showInformationMessage("작업 폴더에 결과물(index.html)이 없습니다. 결과물을 만든 뒤 다시 해 주세요."); return; }
+    const sha256 = createHash("sha256").update(content, "utf8").digest("hex"), kb = Math.max(1, Math.round(Buffer.byteLength(content, "utf8") / 1024));
+    const pick = await vscode.window.showQuickPick([
+      { label: "이 결과물을 수업 결과물로 승인", detail: `index.html · ${kb}KB · 지문 ${sha256.slice(0, 8)}`, approved: true },
+      { label: "이 결과물의 승인 취소", detail: `index.html · 지문 ${sha256.slice(0, 8)}`, approved: false },
+    ], { title: "수업 결과물 승인", placeHolder: "승인한 판만 ‘학생이 승인한 결과물’ 회수에 들어갑니다. 지금 바로 보내지는 않으며, 수업 기록 보내기에 동의한 경우에만 보냅니다." });
+    if (!pick) return;
+    this.spool.recordArtifactSnapshot({ source: "existing", path: "index.html", content });
+    this.spool.recordArtifactApproval({ sha256, path: "index.html", approved: pick.approved });
+    await this.spool.flush();
+    void vscode.window.showInformationMessage(pick.approved ? `이 판(지문 ${sha256.slice(0, 8)})을 수업 결과물로 승인했습니다. 나중에 고치면 새 판은 다시 승인해야 합니다.` : `이 판(지문 ${sha256.slice(0, 8)})의 승인을 취소했습니다.`);
+  }
   /** New execution generation on the same files: cached runtime handles are dropped, nothing stored is touched. */
   async opsNewGeneration(): Promise<number> {
     // Reached only after the stop was confirmed, so there is no run state to force-clear here.

@@ -238,6 +238,13 @@ export interface SpoolSnapshotSource {
   other_sessions: number | null;
 }
 
+/** #751 U1b — this learner's sessions in a class window, read for a kinds collection. `current` is read under the write queue. */
+export interface SpoolCollectionSource {
+  current: { files: Array<{ name: string; data: Uint8Array }>; sequence: { session_id: string; last_seq: number } } | null;
+  others: Array<{ session_id: string; meta: Uint8Array; events: Uint8Array; started_at: string }>;
+  omitted: { unreadable: number; over_limit: number };
+}
+
 export type SpoolArtifactSource =
   | "assistant_response"
   | "assistant_tool"
@@ -303,6 +310,7 @@ export class SessionSpool {
       }
       // 신원 교체 — 세션 회전. 이전 세션 파일은 그대로 남고, 피닝된 턴은
       // 계속 이전 세션으로 간다.
+      await this.writeClose(this.session, "identity_change");
       this.session = null;
       this.pendingIdentity = identity;
     });
@@ -398,6 +406,18 @@ export class SessionSpool {
         content: clamped ? content.slice(0, SPOOL_MAX_ARTIFACT_CHARS) : content,
         ...(clamped ? { content_truncated: true, content_original_chars: content.length } : {}),
       });
+    });
+  }
+
+  /**
+   * #751 U1b — the learner approved (or withdrew approval of) one exact artifact version as their class result. Only approved
+   * versions travel in an "approved artifacts" collection. Carries the version's hash and file name, never its content; the
+   * content line is written just before by recordArtifactSnapshot (once per session and hash).
+   */
+  recordArtifactApproval(e: { sha256: string; path: string; approved: boolean }): void {
+    this.enqueue(async () => {
+      const s = await this.materialize();
+      await this.writeEvent(s, { type: "artifact_approval", artifact_sha256: e.sha256, path: path.basename(e.path).slice(0, 255), approved: e.approved });
     });
   }
 
@@ -504,6 +524,58 @@ export class SessionSpool {
     return n;
   }
 
+  /**
+   * #751 U1b — the events of THIS learner's other sessions whose files changed since `sinceMs` (an app restart, a second
+   * window, a sealed session), next to the current session read under the write queue. Only sessions whose metadata names
+   * exactly `identity` are read; another learner's session on a shared PC is not opened past its metadata. A recent session
+   * whose metadata cannot be read is counted (`unreadable`), never guessed to be this learner's. Reads only.
+   */
+  readForCollection(sinceMs: number, identity: { u: string; c: string; p: string }, maxOthers = 7): Promise<SpoolCollectionSource | null> {
+    return new Promise((resolve) => {
+      this.enqueue(async () => {
+        const s = this.session, out: SpoolCollectionSource = { current: null, others: [], omitted: { unreadable: 0, over_limit: 0 } };
+        if (s) {
+          const files: Array<{ name: string; data: Uint8Array }> = [];
+          for (const name of ["session.meta.json", "events.jsonl"]) {
+            try { files.push({ name, data: new Uint8Array(await fs.promises.readFile(path.join(s.dir, name))) }); } catch { /* an absent file is simply not part of the copy */ }
+          }
+          if (files.length === 2) out.current = { files, sequence: { session_id: s.id, last_seq: s.lastSeq } };
+        }
+        const found: Array<{ session_id: string; meta: Uint8Array; events: Uint8Array; started_at: string }> = [];
+        for (const { dir } of await listSessionDirs(this.env.root)) {
+          if (s && path.resolve(dir) === path.resolve(s.dir)) continue;
+          try { if ((await fs.promises.stat(path.join(dir, "events.jsonl"))).mtimeMs < sinceMs) continue; } catch { continue; } // no events there
+          let meta: Uint8Array, parsed: { session_id?: unknown; user?: { u?: unknown; c?: unknown; p?: unknown } | null; started_at?: unknown };
+          try { meta = new Uint8Array(await fs.promises.readFile(path.join(dir, "session.meta.json"))); parsed = JSON.parse(new TextDecoder().decode(meta)); } catch { out.omitted.unreadable++; continue; }
+          const u = parsed?.user;
+          if (!u || u.u !== identity.u || u.c !== identity.c || u.p !== identity.p) continue; // another learner, or nobody: not this collection's
+          if (typeof parsed.session_id !== "string") { out.omitted.unreadable++; continue; }
+          try { found.push({ session_id: parsed.session_id, meta, events: new Uint8Array(await fs.promises.readFile(path.join(dir, "events.jsonl"))), started_at: typeof parsed.started_at === "string" ? parsed.started_at : "" }); } catch { out.omitted.unreadable++; }
+        }
+        found.sort((a, b) => a.started_at.localeCompare(b.started_at));
+        // The most recent sessions are the ones closest to this class; any beyond the limit are said, not silently dropped.
+        out.omitted.over_limit = Math.max(0, found.length - maxOthers);
+        out.others = found.slice(found.length - Math.min(found.length, maxOthers));
+        resolve(out.current || out.others.length || out.omitted.unreadable ? out : null);
+      });
+      void this.queue.then(() => resolve(null));
+    });
+  }
+
+  /**
+   * #751 U1b — end the current session on purpose (the app is shutting down): a `session_close` line is its last event, so a
+   * later collection can prove this session's end. A session that ends without one (crash, power loss) stays unproven.
+   */
+  close(reason: string): Promise<void> {
+    this.enqueue(async () => {
+      if (!this.session) return;
+      await this.writeClose(this.session, reason);
+      this.pendingIdentity = this.session.identity;
+      this.session = null;
+    });
+    return this.queue;
+  }
+
   /** 큐를 비운다 — 테스트와 dispose 용. 결코 reject 하지 않는다. */
   flush(): Promise<void> {
     return this.queue;
@@ -525,6 +597,7 @@ export class SessionSpool {
           return;
         }
         const dir = this.session.dir;
+        await this.writeClose(this.session, "seal");
         this.pendingIdentity = this.session.identity;
         this.session = null;
         resolve(dir);
@@ -705,6 +778,11 @@ export class SessionSpool {
       await fs.promises.appendFile(file, line, "utf8");
       s.tornTail = false;
     }
+  }
+
+  /** Never fails the caller: a close marker that cannot be written only leaves that session's end unproven. */
+  private async writeClose(s: SessionState, reason: string): Promise<void> {
+    await this.writeEvent(s, { type: "session_close", reason }).catch((err) => this.warnOnce("close", err));
   }
 
   private warnOnce(what: string, err: unknown): void {
