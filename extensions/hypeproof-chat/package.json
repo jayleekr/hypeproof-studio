@@ -144,7 +144,8 @@
       },
       {
         "command": "hypeproof-chat.classroomApproveArtifact",
-        "title": "HypeProof: 지금 결과물을 수업 결과물로 승인·취소"
+        "title": "HypeProof: 지금 결과물을 수업 결과물로 승인·취소",
+        "icon": "$(pass)"
       }
     ],
     "menus": {
@@ -168,12 +169,22 @@
           "command": "hypeproof-chat.localReview",
           "when": "view == hypeproof-chat.panel",
           "group": "navigation@4"
+        },
+        {
+          "command": "hypeproof-chat.classroomApproveArtifact",
+          "when": "view == hypeproof-chat.panel && hypeproof-chat.classroomConnected",
+          "group": "navigation@5"
         }
       ],
       "editor/title": [
         {
           "command": "hypeproof-chat.previewActiveFile",
           "when": "resourceExtname == .html || resourceExtname == .htm",
+          "group": "navigation"
+        },
+        {
+          "command": "hypeproof-chat.classroomApproveArtifact",
+          "when": "resourceFilename == index.html && hypeproof-chat.classroomConnected",
           "group": "navigation"
         }
       ],
