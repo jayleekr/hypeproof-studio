@@ -186,3 +186,10 @@ npm --prefix chalk run typecheck
 - `worker/test/classroom-ops-reports.test.mjs`(5 PASS): AT-29 검증된 입력에서만 job 생성·입력 없는 학생은 `missing`(0점 아님)·재실행 시 중복 0, 신규 6모델과 legacy 7축은 같은 입력이어도 별도 job/버전이며 변환 key·다른 모델 초안·legacy 필드 혼입은 quarantine, 근거 quote가 검증된 본인 입력에 없으면(다른 학생·AI 문장) quarantine, 근거 없는 observed 거부, score/rank key 거부, legacy는 fingerprint 필수·28 marker review 미완이면 승인 불가. AT-30 runner capability는 배치 단위(학생 연결·타 배치·승인 불가), lease 만료 후 takeover 시 옛 generation 결과 폐기, 완료 job 재결과 거부, 한 학생 격리가 다른 학생을 막지 않음, runner 스크립트는 같은 lease API 사용·평가기 예외 시 그 job만 failed·credential/경로 미로그. AT-37/38 보고서 구성이 `관찰된 행동→판단이 바뀐 과정→아직 충분히 보지 못함→다음 실험`이고 단일 수업에는 `최근 반복된 패턴` 없음(근거 있는 수업 2회 이상에서만), 제목·항목에 점수·순위·의존도·퍼센트 0, coverage가 complete가 아니면 ‘본 범위’ 절이 앞에 옴, 방법/세부 데이터는 별도 `method`. 검수는 열람 감사 실패 시 본문 비반환, 승인은 읽은 draft digest에 결속(CAS), `승인≠발송 승인` 명시.
 - 회귀는 아래 R6/R7 기록의 전체 실행에 포함.
 - **NOT RUN:** 실제 Mac에서의 장시간 runner·절전 복귀, legacy `skills/hain7-report` 엔진을 evaluator로 연결한 실제 PDF·지면 QA(이번 구현은 계약과 격리만; 엔진 호출 adapter는 미작성), LLM 서술 평가기(운영자가 evaluator version·호출 한도를 정하기 전 OFF), 누적 회차 패턴의 실제 서술, Chalk 검수 화면 브라우저 인수.
+
+### R6 수신자·승인 결속·전달 원장 · 2026-09-18
+
+대상: `worker/migrations/0017-classroom-delivery.sql`, `lib/classroom-delivery.ts`(adapter 경계·상태 전이), `routes/classroom-delivery.ts`, Chalk 발송 승인/상태. 회차 flag `ops_delivery` 기본 OFF, `HPS_DELIVERY_PROVIDER` 미설정이 기본이며 이 변경은 어떤 발신 계정도 설정하지 않는다. 실제 provider adapter는 없다(dry-run + 시험용 sandbox만).
+
+- `worker/test/classroom-ops-delivery.test.mjs`(7 PASS): AT-31 수신자는 운영자 import만(강사 Bearer 불가, 회차 명단 밖·갤러리 인물 거부, 형제는 별도 행, 강사에게는 마스킹), 보내지 않는 학생도 사유와 함께 표시, 승인은 표시된 scope hash에 결속·검수 권한과 발송 권한 분리, 발신 계정 미설정 시 live 거부·dry-run은 외부 발송 0, 승인 뒤 수신자 주소 변경/새 보고서 승인 → `approval_stale`로 발송 0, 원장 행을 adapter 호출 전에 기록, timeout=`send_unknown`이며 재요청해도 재발송 0, 운영자가 provider 확인 근거와 함께 resolve, `provider_accepted`≠`delivered`, 중복 webhook 흡수, 늦은 accepted가 delivered를 되돌리지 않음, 열람(opened) 상태 없음, 메시지에는 불투명 링크만, 링크는 no-store·만료·철회·조회 감사·token 미저장(hash만), 거절은 `failed`.
+- **NOT RUN / 운영 gate:** 실제 발신 계정·provider sandbox·실제 수신자, 반송/전달 webhook의 provider 서명 검증(현재 이벤트 수신은 운영자 인증 경로), Kakao/SMS, QR, PDF 첨부·지면 QA, 링크 열람자의 수신자 본인 확인, Chalk 발송 화면 브라우저 인수.

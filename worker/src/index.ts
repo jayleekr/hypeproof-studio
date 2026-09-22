@@ -14,6 +14,7 @@ import { classroomStudent, purgeExpiredClassroomShares } from "./routes/classroo
 import { classroomOpsApp } from "./routes/classroom-ops";
 import { classroomCollectApp } from "./routes/classroom-collect";
 import { classroomReportsRunner } from "./routes/classroom-reports";
+import { classroomReportLinks } from "./routes/classroom-delivery";
 import { runHeartbeat } from "./cron/heartbeat.ts";
 import { runD1Backup } from "./cron/d1-backup.ts";
 import { requestId, makeErrorBody } from "./middleware/request-id.ts";
@@ -91,6 +92,7 @@ app.route("/v1/logs", logs);
 app.route("/v1/report", report);
 // #751 — mounted BEFORE the student router: that router's `*` middleware
 // demands a student token, and the operations credential is deliberately not one.
+app.route("/v1/classroom/report-links", classroomReportLinks);
 app.route("/v1/classroom/ops/collect", classroomCollectApp);
 app.route("/v1/classroom/ops/runner", classroomReportsRunner);
 app.route("/v1/classroom/ops", classroomOpsApp);
