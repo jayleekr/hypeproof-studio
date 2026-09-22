@@ -118,7 +118,12 @@ export function settingPhase(b: Pick<BindingRow, 'binding_seq' | 'activated_at' 
 }
 
 // ── what the instructor is shown before sending a setting ────────────────────
-interface LessonShape { title?: string; steps?: Array<{ id: string; title?: string }>; assistant?: { display_name?: string }; model?: { default?: string; allowed?: string[] }; features?: { allowed?: string[] } }
+type StepShape = { id: string; title?: string; instructions?: string; hint?: string; acceptance?: string; help?: { default?: string; allowed?: string[] }; ui?: string };
+interface LessonShape { title?: string; audience?: string; objective?: string; starter?: string; prerequisites?: string; duration_minutes?: number; steps?: Array<StepShape>; assistant?: { display_name?: string }; model?: { default?: string; allowed?: string[] }; features?: { allowed?: string[] } }
+const TEXT_FIELDS = ['audience', 'objective', 'starter', 'prerequisites', 'duration_minutes'] as const;
+const STEP_TEXT = ['title', 'instructions', 'hint', 'acceptance'] as const;
+const clip = (x: unknown) => { const t = String(x ?? ''); return t.length > 160 ? t.slice(0, 159) + '…' : t; };
+const helpOf = (s?: StepShape) => s?.help ? { default: s.help.default ?? null, allowed: [...(s.help.allowed ?? [])].sort() } : null;
 /**
  * Computed by the Service from the two frozen rows — never typed by the instructor. `null` sides mean "the compiled
  * profile's own rule" (no lesson-level narrowing), which is a wider set than any list.
@@ -132,5 +137,14 @@ export function lessonImpact(from: LessonShape, to: LessonShape) {
     assistant_name: (from.assistant?.display_name ?? null) === (to.assistant?.display_name ?? null) ? null : { from: from.assistant?.display_name ?? null, to: to.assistant?.display_name ?? null },
     model: same([from.model?.default, list(from.model?.allowed)], [to.model?.default, list(to.model?.allowed)]) ? null : { from: from.model ? { default: from.model.default, allowed: list(from.model.allowed) } : null, to: to.model ? { default: to.model.default, allowed: list(to.model.allowed) } : null },
     features: same(list(from.features?.allowed), list(to.features?.allowed)) ? null : { from: list(from.features?.allowed), to: list(to.features?.allowed) },
+    // #751 G2 — what the learner reads and does changes too, not only names and grants. Additive: U3 readers ignore these.
+    text: TEXT_FIELDS.filter((k) => (from[k] ?? '') !== (to[k] ?? '')).map((k) => ({ field: k, from: clip(from[k]), to: clip(to[k]) })),
+    step_changes: a.filter((x) => b.includes(x)).map((sid) => {
+      const f = from.steps!.find((s) => s.id === sid)!, t = to.steps!.find((s) => s.id === sid)!;
+      return { id: sid, text: STEP_TEXT.filter((k) => (f[k] ?? '') !== (t[k] ?? '')),
+        help: same(helpOf(f), helpOf(t)) ? null : { from: helpOf(f), to: helpOf(t) },
+        surface: (f.ui ?? null) === (t.ui ?? null) ? null : { from: f.ui ?? null, to: t.ui ?? null } };
+    }).filter((x) => x.text.length || x.help || x.surface),
+    order_changed: !same(a.filter((x) => b.includes(x)), b.filter((x) => a.includes(x))),
   };
 }

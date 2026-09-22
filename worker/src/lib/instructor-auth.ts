@@ -67,6 +67,9 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   // 컴파일된 프로필에서 파생해 돌려준다. Chalk 포워더도 이 목록을 그대로 쓴다.
   if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/features\/[^/]+$/.test(path)) return true;
   if (method === 'POST' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/versions\/[^/]+\/participants$/.test(path)) return true;
+  // #1012 · #751 G2 — reuse/review reads, learner-condition rehearsal codes and confirmation. Same owner/scope checks in the handlers.
+  if (method === 'GET' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/(?:versions|impact|versions\/[^/]+\/readiness)$/.test(path)) return true;
+  if (method === 'POST' && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+\/versions\/[^/]+\/(?:rehearsals|confirmation)$/.test(path)) return true;
   if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/classroom\/shares(?:\/[^/]+)?$/.test(path)) return true;
   // Chalk authoring: handlers still enforce issuer identity, cohort/profile and owner.
   if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+(?:\/versions\/[^/]+)?$/.test(path)) return true;

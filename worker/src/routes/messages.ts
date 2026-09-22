@@ -48,6 +48,8 @@ import {NATIVE_TRIAL_LIMITS} from '../lib/native-trial-grants';
 
 import { Hono } from "hono";
 import type { Env } from "../env";
+import { recordRehearsalRequest } from '../lib/lesson-rehearsal-store';
+import { requestToolNames } from '../lib/lesson-rehearsal';
 import { gateChatRequest, bindingRefusalMessage } from "../lib/chat-gate";
 import { recordDispatch, recordOutcome } from "../lib/lesson-binding-store";
 import { BINDING_HEADER, classifyOutcome } from "../lib/lesson-binding";
@@ -266,6 +268,7 @@ messages.post("/messages", async (c) => {
   const lessonUntracked = gate.binding?.enforced && !gate.turn && gate.lessonSha ? { class_run_id: session.session_id, student_id: payload.u, binding_seq: gate.binding.seq, lesson_sha256: gate.lessonSha } : null;
   const usageLink = () => (dispatched && (lessonTurn || lessonUntracked) ? { class_run_id: (lessonTurn?.class_run_id ?? lessonUntracked!.class_run_id), student_id: payload.u, request_id: usageRequestId } : null);
   let dispatched = false, upstreamStatus: number | null = null, streamBroke = false, protocolDone = false;
+  let rehearsalTools: string[] = [];
 
   // #684 — accounting declared above every failure exit, mirroring chat.ts.
   // The SDK route wrote the same literal `status: 200` on the success path
@@ -302,6 +305,8 @@ messages.post("/messages", async (c) => {
   });
   const record = (log: ChatLog) => {
     if (dispatched && lessonTurn) c.executionCtx.waitUntil(recordOutcome(env, lessonTurn, classifyOutcome({ upstreamStatus, protocolComplete: protocolDone, streamError: streamBroke, outputTokens: log.tokens_out, recordedStatus: log.status }), { status: upstreamStatus, now: Date.now() }));
+    // #1012 · #751 G2 — a request made with a rehearsal code is also the rehearsal's own execution record (what left, how it ended).
+    if (dispatched && payload.rehearsal && gate.lessonSha) c.executionCtx.waitUntil(recordRehearsalRequest(env, payload, { requestId: usageRequestId, lessonSha: gate.lessonSha, step: c.req.header('x-hps-lesson-step')?.trim() ?? '', help: gate.help ?? '', runtime: 'agent-sdk', model: modelLabel, toolNames: rehearsalTools, outcome: classifyOutcome({ upstreamStatus, protocolComplete: protocolDone, streamError: streamBroke, outputTokens: log.tokens_out, recordedStatus: log.status }), status: upstreamStatus, now: Date.now() }));
     if(budgetReserved){budgetReserved=false;c.executionCtx.waitUntil(finishModelRequest(env,usageRequestId,log.status,returnedModel,measureUsage('anthropic',reportedUsage,log.status<400)).catch(()=>console.error('SDK usage finish unavailable')));}
     c.executionCtx.waitUntil(captureUsageCost(env,usageRequestId,{usage:reportedUsage,model:returnedModel,
       tier:typeof reportedUsage.service_tier==='string'?reportedUsage.service_tier:null,
@@ -328,6 +333,7 @@ messages.post("/messages", async (c) => {
     recordFailure(400, ERROR_KIND.BAD_REQUEST);
     return c.json(anthropicError(c, "invalid_request_error", "bad json body"), 400);
   }
+  if (payload.rehearsal) rehearsalTools = requestToolNames(raw);
   if (!Array.isArray(raw.messages)) {
     recordFailure(400, ERROR_KIND.BAD_REQUEST);
     return c.json(anthropicError(c, "invalid_request_error", "messages must be an array"), 400);

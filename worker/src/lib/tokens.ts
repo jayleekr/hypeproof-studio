@@ -20,6 +20,9 @@ export interface TokenPayload {
   native_trial?: true;
   /** Instructor-selected immutable lesson. Never carries runtime capabilities. */
   lesson?: { course_id: string; version: string; sha256: string };
+  /** #1012 · #751 G2 — names the instructor's rehearsal record this learner code was issued for. Grants nothing: the
+   *  Service records requests against it only where the record names this token's jti. */
+  rehearsal?: string;
   u: string;       // user id (cohort-local), e.g. "kid01"
   c: string;       // cohort id, e.g. "sk-biopharm-2026-a"
   p: string;       // profile id, e.g. "sk-biopharm-kids-2026-grade-3-4-s1"
@@ -264,6 +267,7 @@ function canonicalize(p: TokenPayload): string {
   if (p.scopes !== undefined) out.scopes = p.scopes;
   if (p.can_issue_issuers !== undefined) out.can_issue_issuers = p.can_issue_issuers;
   if (p.lesson !== undefined) out.lesson = p.lesson;
+  if (p.rehearsal !== undefined) out.rehearsal = p.rehearsal;
   if (p.native_trial !== undefined) out.native_trial = p.native_trial;
   if (p.account !== undefined) out.account = p.account;
   return JSON.stringify(out);

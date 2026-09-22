@@ -12,6 +12,8 @@ export interface Env {
   HPS_CLASSROOM_LINK_HOSTS?: string;
   /** #751 U3 — `enforce` makes the chat gate and /v1/profile resolve a participant's switched lesson version. Independent of HPS_CLASSROOM_OPS on purpose: switching operations off must not undo a setting that was already applied. */
   HPS_LESSON_BINDINGS?: string;
+  /** #1012 · #751 G2 — `require` makes a confirmation on a passed learner-condition rehearsal the condition for inviting learners to, or switching them to, a lesson version. Unset (default): versions stay usable as before, and Chalk still shows their rehearsal state. */
+  HPS_LESSON_CONFIRMATION?: string;
   HPS_CLASSROOM_EVALUATOR?: string;
   HPS_CLASSROOM_EVALUATOR_MODEL?: string;
   /** #751 — scheduled retention. Unset days (default) = the run does nothing. With days set it only reports (dry-run) until HPS_CLASSROOM_RETENTION='enforce'. */

@@ -33,6 +33,7 @@ import {
   type LLMProvider,
 } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
+import { recordRehearsalRequest } from '../lib/lesson-rehearsal-store';
 import { gateChatRequest, bindingRefusalMessage } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
 import { applyLessonFeatures } from '../lib/lesson-feature-policy';
@@ -325,6 +326,13 @@ chat.get("/profile", async (c) => {
       : c.json({ error: { type: 'lesson_binding', code: resolved.code, message: '수업 설정을 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' } }, 503);
     lesson = resolved.lesson; lessonBinding = resolved.binding;
   }
+  // #1012 · #751 G2 — a rehearsal code tells the App it runs an instructor's learner-condition rehearsal of this candidate.
+  // Data only: the lesson, tools and model above are exactly what a learner invited to that version would get.
+  let rehearsal: { id: string; course_id: string; version: string; expires_at: number; judged: boolean } | null = null;
+  if (lesson && auth.payload.rehearsal && auth.payload.jti) {
+    const row = await c.env.HPS_DB.prepare('SELECT rehearsal_id,course_id,version,lesson_sha256,expires_at,verdict FROM authoring_rehearsals WHERE rehearsal_id=? AND token_jti=?').bind(auth.payload.rehearsal, auth.payload.jti).first<{ rehearsal_id: string; course_id: string; version: string; lesson_sha256: string; expires_at: number; verdict: string | null }>().catch(() => null);
+    if (row && row.lesson_sha256 === lesson.sha256) rehearsal = { id: row.rehearsal_id, course_id: row.course_id, version: row.version, expires_at: row.expires_at, judged: !!row.verdict };
+  }
 
   const assistantName = lessonAssistantName(lesson?.content);
   // #748 (E2) — the SAME narrowing the chat gate applies, applied here too.
@@ -339,6 +347,7 @@ chat.get("/profile", async (c) => {
     ...(lesson ? { lesson } : {}),
     // Served only where bindings are enforced: without enforcement the response is byte-identical to what it was.
     ...(lessonBinding?.enforced ? { lesson_binding: lessonBinding } : {}),
+    ...(rehearsal ? { rehearsal } : {}),
     activity_id: await activityIdentity(auth.payload),
     activity_kind: auth.payload.native_trial ? "trial" : auth.payload.account ? "personal" : "classroom",
     profile_id: profile.id,
@@ -608,6 +617,8 @@ chat.post("/chat/completions", async (c) => {
   });
   const record = (log: ChatLog) => {
     if (dispatched && lessonTurn) c.executionCtx.waitUntil(recordOutcome(env, lessonTurn, classifyOutcome({ upstreamStatus, protocolComplete: protocolDone, streamError: streamBroke, outputTokens: log.tokens_out, recordedStatus: log.status }), { status: upstreamStatus, now: Date.now() }));
+    // #1012 · #751 G2 — the rehearsal's own execution record. On this route the Service builds the upstream tool list itself.
+    if (dispatched && payload.rehearsal && gate.lessonSha) c.executionCtx.waitUntil(recordRehearsalRequest(env, payload, { requestId: usageRequestId, lessonSha: gate.lessonSha, step: c.req.header('x-hps-lesson-step')?.trim() ?? '', help: gate.help ?? '', runtime: 'proxy', model: modelLabel, toolNames: [], outcome: classifyOutcome({ upstreamStatus, protocolComplete: protocolDone, streamError: streamBroke, outputTokens: log.tokens_out, recordedStatus: log.status }), status: upstreamStatus, now: Date.now() }));
     c.executionCtx.waitUntil(captureUsageCost(env,usageRequestId,{usage:reportedUsage,model:returnedModel,
       tier:typeof reportedUsage.service_tier==='string'?reportedUsage.service_tier:null,
       region:typeof reportedUsage.inference_geo==='string'?reportedUsage.inference_geo:(env.HPS_USAGE_REGION??null),
