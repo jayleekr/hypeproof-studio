@@ -2393,6 +2393,59 @@
           "path": "extensions/hypeproof-chat/webview-ui/src/evidenceDrawerLogic.ts"
         }
       ]
+    },
+    {
+      "id": "ST-REQ-MODULE-DISTRIBUTION",
+      "stage": "requirement",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-STUDIO-SAFETY"
+      ],
+      "sources": [
+        {
+          "path": "docs/studio-requirements.md",
+          "section": "## B. Token & profile"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-MODULE-DISTRIBUTION",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODULE-DISTRIBUTION"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/module-distribution.test.mjs"
+        },
+        {
+          "path": "worker/test/module-child-guard.test.mjs"
+        },
+        {
+          "path": "worker/scripts/cohort-harness/validate.py"
+        },
+        {
+          "path": "worker/scripts/cohort-harness/rules.yaml"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-MODULE-DISTRIBUTION",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-MODULE-DISTRIBUTION",
+        "ST-TEST-MODULE-DISTRIBUTION"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/modules.ts"
+        },
+        {
+          "path": "worker/src/lib/harness-rules.ts"
+        }
+      ]
     }
   ]
 }
