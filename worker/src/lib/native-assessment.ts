@@ -35,6 +35,23 @@ import type { Env } from "../env";
  */
 export const ASSESSMENT_CAPABILITY_MODEL: CapabilityModelId = "candidate-capability-v1";
 
+/**
+ * The provider an assessment runs on — Anthropic, with no branch (ADR 0010
+ * step 3).
+ *
+ * This is a fact about the code below, not a policy knob: `assessNativeObservation`
+ * calls `callAnthropic(request, env.ANTHROPIC_API_KEY, …)` unconditionally.
+ * It is exported so the route can ask "can this cohort's model be used here"
+ * BEFORE spending the request, and refuse by name if not, instead of letting
+ * `modelIdFor` throw into a catch that reports every cause as a 502.
+ *
+ * It must not be read as permission to substitute. A batch carries the
+ * student's own prose and the bodies of the files the coach wrote; handing a
+ * GPT or GLM cohort an Anthropic model id would not route anything, it would
+ * send that cohort's text to a vendor its profile never names.
+ */
+export const ASSESSMENT_PROVIDER = "anthropic" as const;
+
 const RUBRIC_FOR: Record<CapabilityModelId, typeof rubricCandidate> = {
   "candidate-capability-v1": rubricCandidate,
   "legacy-seven-assets": rubricLegacy as typeof rubricCandidate,
