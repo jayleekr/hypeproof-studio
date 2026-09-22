@@ -783,3 +783,34 @@ CREATE TABLE IF NOT EXISTS classroom_collect_tombstones (
  created_at INTEGER NOT NULL,
  PRIMARY KEY(class_run_id,student_id)
 );
+
+-- ── migrations/0016-classroom-report-jobs.sql (remote classroom operations R5, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_report_jobs (
+ id TEXT PRIMARY KEY,
+ job_key TEXT NOT NULL,
+ batch_id TEXT NOT NULL,
+ class_run_id TEXT NOT NULL,
+ cohort_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ input_manifest_digest TEXT NOT NULL,
+ input_revision INTEGER NOT NULL,
+ snapshot_revision INTEGER NOT NULL,
+ input_coverage TEXT NOT NULL,
+ capability_model TEXT NOT NULL,
+ rubric TEXT NOT NULL,
+ evaluator TEXT NOT NULL,
+ renderer_revision TEXT NOT NULL,
+ state TEXT NOT NULL,
+ reason TEXT NOT NULL DEFAULT '',
+ lease_owner TEXT NOT NULL DEFAULT '',
+ lease_generation INTEGER NOT NULL DEFAULT 0,
+ lease_expires_at INTEGER NOT NULL DEFAULT 0,
+ draft_digest TEXT NOT NULL DEFAULT '',
+ summary_json TEXT NOT NULL DEFAULT '{}',
+ revision INTEGER NOT NULL DEFAULT 1,
+ reviewed_by TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_report_jobs_key ON classroom_report_jobs(job_key);
+CREATE INDEX IF NOT EXISTS classroom_report_jobs_batch ON classroom_report_jobs(batch_id,state);
