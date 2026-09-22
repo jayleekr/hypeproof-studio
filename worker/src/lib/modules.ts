@@ -250,11 +250,36 @@ export interface ValidateExpect {
   version?: string;
   /**
    * Text-level rules the harness would apply to this cohort's prompt
-   * (lib/harness-rules.ts curriculumRequirementsFor). Omitted = none, which is
-   * only correct for a non-child cohort; callers that have the profile MUST
-   * pass it. resolveProfile and the publisher both do.
+   * (lib/harness-rules.ts curriculumRequirementsFor).
+   *
+   * #693 — this used to be an optional argument that silently disabled the
+   * child-safety phrase check when a caller forgot it, on the one function
+   * that IS the serve-time gate. It is now DERIVED from `profileId` when
+   * omitted, so forgetting is no longer expressible. Pass `null` only to state
+   * deliberately that no text rule applies (non-curriculum kinds do not reach
+   * this check at all).
    */
-  requirements?: CurriculumRequirements;
+  requirements?: CurriculumRequirements | null;
+}
+
+/**
+ * The harness's text rules for a profile id, derived rather than passed (#693).
+ *
+ * An unknown id fails closed: a curriculum module is only ever published for a
+ * registered cohort, so "I cannot tell whether this is a child cohort" must
+ * reject the document, not wave it through unchecked.
+ */
+function requirementsForProfileId(profileId: string): CurriculumRequirements {
+  const profile = getProfile(profileId);
+  if (!profile) {
+    return {
+      required_phrases: [],
+      rules_error:
+        `unknown profile ${JSON.stringify(profileId)} — cannot derive the cohort-harness ` +
+        `text rules, refusing the module rather than serving it unchecked (#693)`,
+    };
+  }
+  return curriculumRequirementsFor(profile);
 }
 
 /**
@@ -305,9 +330,13 @@ export async function validateModuleDoc(raw: unknown, expect: ValidateExpect): P
     }
     if (sp.includes("\u0000")) return bad("content.system_prompt contains a NUL byte");
     // The harness rule that lives in the text (attempt 2). Derived from
-    // rules.yaml, never hardcoded here.
-    if (expect.requirements) {
-      const violated = checkCurriculumRequirements(sp, expect.requirements);
+    // rules.yaml, never hardcoded here — and derived from the profile id when
+    // the caller did not pass it, so a caller cannot disarm it by omission
+    // (#693). `null` is the explicit "no text rule" opt-out.
+    const requirements =
+      expect.requirements === undefined ? requirementsForProfileId(expect.profileId) : expect.requirements;
+    if (requirements) {
+      const violated = checkCurriculumRequirements(sp, requirements);
       if (violated) return bad(violated);
     }
   }

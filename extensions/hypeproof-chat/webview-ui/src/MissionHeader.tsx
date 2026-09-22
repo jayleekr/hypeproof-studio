@@ -57,10 +57,33 @@ export function MissionHeader(props: MissionHeaderProps) {
         <p className="hp-mission-week">{learning.week}주차</p>
       ) : null}
 
-      {/* The largest type. If the design file has no mission, say so instead of rendering an empty header (SX-01 negative). */}
-      <h1 className="hp-mission-sentence">
-        {learning?.mission ?? (content ? "미션이 정해지지 않았습니다." : "아직 연결된 수업이 없습니다.")}
-      </h1>
+      {/* The largest type — and only when there is a design file to read it from.
+          Two DIFFERENT rows govern two different states, and an earlier version of
+          this line collapsed them into one sentence:
+
+            SX-01 부정  design file present, mission empty
+                        -> "미션이 정해지지 않았습니다" (not an empty header)
+            SX-02 부정  no design file at all
+                        -> "'지난번 이어서'만 보이고 진행률 카드로 대체하지 않는다"
+
+          The second case used to render "아직 연결된 수업이 없습니다." in the largest
+          type on the work screen. No row asks for that sentence, and it is what every
+          one of the 9 cohorts would have shown the day this header shipped, because
+          none of them has a session design published. Substituting a sentence for a
+          mission is the same move SX-02 forbids when it says not to substitute a
+          progress card.
+
+          The 이어가기 진입 that SX-02 does ask for is NOT implemented anywhere in this
+          repo (`grep -rn 지난번 extensions/` finds nothing), and SX-T11 makes it
+          conditional on a previous session existing. Building it is a separate piece of
+          work with its own design question — what "이어가기" resumes, the conversation
+          or the project. Until then this seat shows the activity line below and nothing
+          invented above it. */}
+      {content ? (
+        <h1 className="hp-mission-sentence">
+          {learning?.mission ?? "미션이 정해지지 않았습니다."}
+        </h1>
+      ) : null}
 
       {activity ? (
         // `aria-label="현재 활동"` is what the old `hps-activity-header` carried.
