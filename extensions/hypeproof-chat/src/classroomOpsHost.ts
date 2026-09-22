@@ -127,8 +127,6 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   private generation = 0;
   /** #751 U1b — the connection a learner's approval question was asked under ('' = none). Any connect, disconnect or expiry changes it. */
   approvalScope(): string { const m = this.meta; return m ? `${this.generation}:${m.grant_id}:${m.class_run_id}:${m.seat_id}` : ""; }
-  /** Shows the learner's approval button in the chat panel title and on index.html only while connected to a class. */
-  private connectedContext(on: boolean): void { void vscode.commands.executeCommand("setContext", "hypeproof-chat.classroomConnected", on); }
   private runner: CommandRunner | null = null;
   private scope(): SnapshotScope | null {
     const m = this.meta; if (!m?.student || !m.run) return null; // a connection made before the binding contract cannot collect
@@ -436,7 +434,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   }
   private async forget(): Promise<void> {
     const mine = this.meta?.grant_id, was = this.credential;
-    this.stopConnection(); this.credential = ""; this.meta = null; this.connectedContext(false);
+    this.stopConnection(); this.credential = ""; this.meta = null;
     // Secrets and globalState are shared between windows where the OS keychain backs them: a window that was replaced must not
     // delete the connection the replacing window has just stored. (Keychain sharing itself was not run — see the test record.)
     const stored = this.context.globalState.get<ConnectionMeta>(META_KEY);
@@ -449,7 +447,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   private async start(meta: ConnectionMeta, credential: string): Promise<void> {
     this.stopConnection();
     const gen = this.generation, live = () => gen === this.generation;
-    this.credential = credential; this.meta = meta; void this.resumePendingUploads(); this.connectedContext(true);
+    this.credential = credential; this.meta = meta; void this.resumePendingUploads();
     const dir = this.context.globalStorageUri.fsPath; await fs.mkdir(dir, { recursive: true });
     // One file per grant: a shared PC's next learner never inherits the previous seat's queue.
     const file = path.join(dir, `classroom-ops-outbox-${meta.grant_id}.json`);

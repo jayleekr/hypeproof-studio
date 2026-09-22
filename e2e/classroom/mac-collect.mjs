@@ -119,9 +119,6 @@ const ask = async (chat, text, mark) => { const n = providerCalls.length; await 
 const dialog = (w, label) => wait(() => w.evaluate((t) => { const b = [...document.querySelectorAll('.monaco-dialog-box .monaco-button, .monaco-dialog-box a.monaco-button')].find((x) => x.textContent.trim() === t); if (!b) return false; b.click(); return true; }, label), 'dialog button ' + label);
 /** #751 U1b — the learner's approval entry on the work screen ("AI와 작업"): the coach rail item next to help, opened and pressed with real mouse input. */
 const railApprove = async (chat) => { if (!(await chat.evaluate("document.querySelector('[data-artifact-approval]')?.open === true"))) await press(chat, '[data-artifact-approval] > summary', 'the approval entry in the coach rail'); await press(chat, '[data-artifact-approve]', 'the approval button'); };
-/** The same command's button in the workbench: the chat panel title ('panel') or the editor title of index.html ('editor'). */
-const approveButton = (w, where) => wait(() => w.evaluate((where) => { const b = [...document.querySelectorAll('a.action-label[aria-label*="수업 결과물로 승인"]')].filter((a) => a.checkVisibility() && (where === 'editor') === !!a.closest('.editor-actions')); if (!b.length) return false; b[0].click(); return true; }, where), 'approval button in the ' + where + ' title');
-const openFile = async (w, name) => { await w.keyboard.press('Meta+P'); await w.waitForSelector('.quick-input-widget input', { state: 'visible' }); await w.keyboard.type(name, { delay: 15 }); await sleep(600); await w.keyboard.press('Enter'); await wait(() => w.evaluate((n) => [...document.querySelectorAll('.tab .label-name')].some((t) => t.textContent === n), name), 'editor tab ' + name); };
 const quickPick = async (w, label) => { await wait(() => w.evaluate(() => !!document.querySelector('.quick-input-widget') && getComputedStyle(document.querySelector('.quick-input-widget')).display !== 'none'), 'quick pick'); await w.keyboard.type(label, { delay: 10 }); await sleep(400); await w.keyboard.press('Enter'); };
 const walk = (dir) => existsSync(dir) ? readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]) : [];
 /** The window's own spool (not the planted sessions): each session with its lines, oldest first. */
@@ -165,22 +162,22 @@ try {
   step('M0 real window connected, consent given in the app, one Agent SDK turn', { provider_calls: providerCalls.length });
 
   // ── M1: the learner approves version 1 from the coach rail entry on the work screen — the file changes to version 2 while the question is open,
-  //    and what is recorded is the version that was shown (v1). Then, from index.html's editor title, the learner withdraws approval of v2. ──
+  //    and what is recorded is the version that was shown (v1). Then, from the same entry, the learner withdraws approval of v2. ──
   await railApprove(chat); await wait(() => win.evaluate(() => getComputedStyle(document.querySelector('.quick-input-widget') ?? document.body).display !== 'none' && !!document.querySelector('.quick-input-widget')?.textContent.includes('지문')), 'the question shows the fingerprint');
   const shown = await win.evaluate(() => document.querySelector('.quick-input-widget').innerText); await shot(win, 'm1-approve-question-rail.png');
   writeFileSync(path.join(ws, 'index.html'), PAGE_V2); await sleep(300);
   await win.keyboard.type('이 결과물을 수업 결과물로 승인', { delay: 10 }); await sleep(400); await win.keyboard.press('Enter');
   const approvedToast = await wait(async () => (await toasts(win)).find((t) => t.includes('수업 결과물로 승인했습니다')), 'approved v1');
   await shot(win, 'm1-app-approved-v1.png');
-  await openFile(win, 'index.html'); await approveButton(win, 'editor'); await quickPick(win, '이 결과물의 승인 취소');
+  await railApprove(chat); await quickPick(win, '이 결과물의 승인 취소');
   const cancelToast = await wait(async () => (await toasts(win)).find((t) => t.includes('승인을 취소했습니다') && t.includes(digest(PAGE_V2).slice(0, 8))), 'v2 not approved');
-  await shot(win, 'm1-editor-title-cancel-v2.png');
+  await shot(win, 'm1-rail-cancel-v2.png');
   const approvals = mySessions().flatMap((x) => x.lines).filter((l) => l.type === 'artifact_approval').map((l) => [l.artifact_sha256.slice(0, 12), l.approved]);
   results.M1 = { v1: digest(PAGE_V1).slice(0, 12), v2: digest(PAGE_V2).slice(0, 12), question: shown, approved_toast: approvedToast, cancel_toast: cancelToast, approvals };
   assert.ok(shown.includes(digest(PAGE_V1).slice(0, 8)), 'the question names the version it is about');
   assert.ok(approvedToast.includes(digest(PAGE_V1).slice(0, 8)) && approvedToast.includes('고르는 사이에 파일이 바뀌었습니다'), 'the recorded version is the one shown and the change is said: ' + approvedToast);
   assert.deepEqual(approvals, [[results.M1.v1, true], [results.M1.v2, false]], 'v1 approved (the shown version, not the file at answer time), v2 withdrawn');
-  step('M1 approval from the coach rail entry (file changed while asked → the shown v1 is recorded, and said); withdrawal of v2 from index.html\'s editor title', { approvals });
+  step('M1 approval from the coach rail entry (file changed while asked → the shown v1 is recorded, and said); withdrawal of v2 from the same entry', { approvals });
 
   // ── M2: a graceful quit (⌘Q): the session ends with session_close; relaunch = a second session of the same learner ──
   const exited = once(app, 'exit'); await win.keyboard.press('Meta+q'); const graceful = await Promise.race([exited.then(() => true), sleep(20000).then(() => false)]);
@@ -251,8 +248,8 @@ try {
   assert.match(results.M8.last, /→ A1 \(지금 선택과 다른 대상\)/); await I.shot('m8-current-a2-previous-a1-1280x720.png');
   await page.locator('#ops-select-none').click(); step('M8 current selection A2 vs previous run A1 are labelled apart', results.M8);
 
-  // ── M10 (review F2): a page over the spool limit, approved from the editor title → stored cut; the card says so and is not complete ──
-  writeFileSync(path.join(ws, 'index.html'), PAGE_BIG); await openFile(win, 'index.html'); await approveButton(win, 'editor');
+  // ── M10 (review F2): a page over the spool limit, approved from the rail → stored cut; the card says so and is not complete ──
+  writeFileSync(path.join(ws, 'index.html'), PAGE_BIG); await railApprove(chat);
   await wait(() => win.evaluate(() => !!document.querySelector('.quick-input-widget')?.textContent.includes('앞부분만 보관됩니다')), 'the question says only the start is kept');
   await shot(win, 'm10-approve-big-question.png'); await win.keyboard.type('이 결과물을 수업 결과물로 승인', { delay: 10 }); await sleep(400); await win.keyboard.press('Enter');
   const bigToast = await wait(async () => (await toasts(win)).find((t) => t.includes(digest(PAGE_BIG).slice(0, 8)) && t.includes('잘린 결과물')), 'approved the big page (named as cut)');

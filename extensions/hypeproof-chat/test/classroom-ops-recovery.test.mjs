@@ -44,7 +44,7 @@ async function hostFixture(t, actions) {
   const dir = await mkdtemp(join(tmpdir(), 'hps-ops-recovery-')), subscriptions = [], originalFetch = globalThis.fetch;
   const bundled = join(dir, 'host.cjs');
   await build({ entryPoints: [fileURLToPath(new URL('../src/classroomOpsHost.ts', import.meta.url))], outfile: bundled, bundle: true, platform: 'node', format: 'cjs', logLevel: 'silent',
-    plugins: [{ name: 'vscode-stub', setup(b) { b.onResolve({ filter: /^vscode$/ }, () => ({ path: 'vscode', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const window={showInformationMessage:async()=>undefined,showWarningMessage:async()=>undefined}; export const commands={executeCommand:async()=>undefined}; export const workspace={getConfiguration:()=>({get:()=>"https://example.invalid/v1"})};', loader: 'js' })); } }] });
+    plugins: [{ name: 'vscode-stub', setup(b) { b.onResolve({ filter: /^vscode$/ }, () => ({ path: 'vscode', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: 'export const window={showInformationMessage:async()=>undefined,showWarningMessage:async()=>undefined}; export const workspace={getConfiguration:()=>({get:()=>"https://example.invalid/v1"})};', loader: 'js' })); } }] });
   const { ClassroomOpsHost } = createRequire(import.meta.url)(bundled);
   const student = { u: 'synthetic-student', c: 'synthetic-cohort', p: 'synthetic-profile' }, now = Date.now();
   const state = new Map([['hypeproof.classroomOps.connection', { grant_id: 'recovery-grant', class_run_id: 'recovery-run', seat_id: 'A1', expires_at: now + 3_600_000, poll_after_ms: 1000, student, run: { starts_at: now - 60_000, ends_at: now + 3_600_000 }, lesson: null }]]);
