@@ -281,7 +281,17 @@ admin.post("/tokens/issue", async (c) => {
   // Mint the student token.
   if(body.native_trial){
     const selected=getProfile(profile);
-    if(!selected?.observation?.enabled||selected.session.cohort_id!==cohort)return c.json({error:'profile does not support individual trials'},400);
+    // ADR 0010 step 2 — `trial.individual`, not `observation.enabled`. Who may
+    // be handed a personal trial seat is an admin-authority question; it was
+    // riding on a measurement flag, so turning observation on for a kids cohort
+    // would have made that cohort mintable. Fail closed: the field is optional
+    // and absent means no. Deliberately NOT `trial?.individual ?? observation
+    // ?.enabled` — a fallback rebuilds the coupling and hides the widening.
+    //
+    // The cohort equality is untouched and is a separate, stricter check than
+    // the chat gate's `profileServesCohort`: this route must not mint a trial
+    // seat against a class cohort that merely serves the profile.
+    if(!selected?.trial?.individual||selected.session.cohort_id!==cohort)return c.json({error:'profile does not support individual trials'},400);
     if(!(await getRoster(c.env.HPS_KV,cohort))?.users.includes(u))return c.json({error:'participant must be registered first'},403);
   }
   const { token, jti } = await issue(
