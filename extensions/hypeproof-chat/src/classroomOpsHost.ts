@@ -8,10 +8,11 @@ import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { CommandRunner, type Executor, type JournalState } from "./classroomOpsCommands";
+import { uploadSnapshot, type SnapshotDeps, type SnapshotState } from "./evidenceSnapshot";
 import { resetPostcondition, runPreservingReset, stopAndConfirm, type Preservation, type ResetManifest, type ResetSteps } from "./runtimeReset";
 import {
   ChangeGate, OPS_CLIENT_CAPABILITIES, OPS_PROTOCOL, OpsOutbox, activationPayload, classifyFailure, errorPayload,
-  runtimePayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
+  runtimePayload, uploadPayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
 } from "./classroomOps";
 
 const CREDENTIAL_KEY = "hypeproof.classroomOps.credential";
@@ -32,6 +33,8 @@ export interface ClassroomOpsActions {
   runtimeGeneration(): number;
   newGeneration(): Promise<number>;
   setHold(hold: "paused" | "stop_unconfirmed" | null): void;
+  // R4 — allowlisted spool files of the current session, read-only.
+  readSpool(): Promise<Array<{ name: string; data: Uint8Array }> | null>;
 }
 
 /** What the chat provider is allowed to tell this adapter. No message text, no paths. */
@@ -68,6 +71,41 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   async showCoachingNotes(): Promise<void> {
     if (!this.coachingNotes.length) { void vscode.window.showInformationMessage("강사가 보낸 질문이나 확인 지점이 없습니다."); return; }
     await vscode.window.showQuickPick(this.coachingNotes.map((n) => ({ label: n.title, detail: n.text, description: new Date(n.at).toLocaleTimeString() })), { title: "강사가 보낸 질문·확인 지점", placeHolder: "읽기만 합니다. 답을 대신 써 주지 않습니다." });
+  }
+  private credential = "";
+  private snapshotDeps(): SnapshotDeps {
+    const dir = path.join(this.context.globalStorageUri.fsPath, "classroom-snapshots"), safe = (s: string) => s.replace(/[^A-Za-z0-9-]/g, "");
+    const stateFile = (b: string) => path.join(dir, `${safe(b)}.state.json`), copyDir = (b: string, r: number) => path.join(dir, safe(b), `r${r}`);
+    const call = async (url: string, init: RequestInit) => { try { const res = await fetch(`${this.base()}/classroom/ops/collect/${url}`, { ...init, signal: AbortSignal.timeout(30000), headers: { authorization: `Bearer ${this.credential}`, ...(init.headers ?? {}) } }); const j = (await res.json().catch(() => ({}))) as Record<string, string>; return { status: res.status, reason: j.reason, receipt_id: j.receipt_id, coverage: j.coverage }; } catch { return { status: 0 }; } };
+    return {
+      // The immutable copy: written once per (batch, revision) and only ever read back afterwards.
+      copy: async (b, r) => {
+        const target = copyDir(b, r);
+        try { const names = await fs.readdir(target); if (names.length) return Promise.all(names.map(async (name) => ({ name, data: new Uint8Array(await fs.readFile(path.join(target, name))) }))); } catch { /* not copied yet */ }
+        const files = await this.actions.readSpool(); if (!files) return null;
+        await fs.mkdir(target, { recursive: true }); for (const f of files) await fs.writeFile(path.join(target, f.name), f.data, { flag: "wx" }).catch(() => undefined);
+        return files;
+      },
+      loadState: async (b) => { try { return JSON.parse(await fs.readFile(stateFile(b), "utf8")) as SnapshotState; } catch { return null; } },
+      saveState: async (st) => { await fs.mkdir(dir, { recursive: true }); const tmp = `${stateFile(st.batch_id)}.${process.pid}.tmp`; await fs.writeFile(tmp, JSON.stringify(st), "utf8"); await fs.rename(tmp, stateFile(st.batch_id)); },
+      put: (b, r, name, data) => call(`snapshots/${safe(b)}/${r}/${name}`, { method: "PUT", body: data }),
+      seal: (b, r, manifest) => call(`snapshots/${safe(b)}/${r}/seal`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(manifest) }),
+    };
+  }
+  /** Uploads that were cut off (offline, laptop closed) are finished on the next start, from their frozen copy. */
+  private async resumePendingUploads(): Promise<void> {
+    const dir = path.join(this.context.globalStorageUri.fsPath, "classroom-snapshots");
+    let names: string[] = []; try { names = await fs.readdir(dir); } catch { return; }
+    for (const n of names.filter((x) => x.endsWith(".state.json"))) { try { const st = JSON.parse(await fs.readFile(path.join(dir, n), "utf8")) as SnapshotState; if (!st.receipt_id && !st.result) await uploadSnapshot(st.batch_id, this.snapshotDeps()); } catch { /* next start tries again */ } }
+  }
+  /** Adult learners decide for themselves, after reading what is sent and to whom. A child class needs a guardian consent recorded by the operator. */
+  async collectionConsentInteractively(): Promise<void> {
+    if (!this.credential) { void vscode.window.showInformationMessage("먼저 ‘수업 연결’로 이번 수업에 연결하세요."); return; }
+    const pick = await vscode.window.showInformationMessage("이번 수업의 기록(내 질문·AI 응답·작업 이벤트)을 수업 보고서 작성 목적으로 운영자에게 보낼까요? 강사 화면에는 원문이 보이지 않으며, 보낸 뒤에도 같은 메뉴에서 철회할 수 있습니다. 이미 전달된 사본은 회수할 수 없습니다.", { modal: true }, "동의하고 보내기 허용", "동의 철회");
+    if (!pick) return;
+    const res = await fetch(`${this.base()}/classroom/ops/collect/consent`, { method: "POST", headers: { authorization: `Bearer ${this.credential}`, "content-type": "application/json" }, body: JSON.stringify({ consent: pick === "동의하고 보내기 허용", purpose: "class_report", notice_version: "notice-v1" }), signal: AbortSignal.timeout(10000) }).catch(() => null);
+    const reason = res && !res.ok ? ((await res.json().catch(() => ({}))) as { reason?: string }).reason : "";
+    void vscode.window.showInformationMessage(!res ? "서버에 연결하지 못했습니다. 동의 상태는 바뀌지 않았습니다." : res.ok ? (pick === "동의 철회" ? "동의를 철회했습니다. 이 수업의 기록은 더 수집되지 않습니다." : "동의를 기록했습니다.") : reason === "guardian_consent_required" ? "이 수업은 보호자 동의가 필요합니다. 앱에서 직접 동의할 수 없습니다." : reason === "ops_collect_disabled" ? "이 수업은 기록 수집을 사용하지 않습니다." : "동의를 기록하지 못했습니다.");
   }
   private stopUnconfirmed = false;
   private paused = false;
@@ -119,6 +157,9 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
         },
         postcondition: async (command) => resetPostcondition(await this.readManifest(command.command_id), this.actions.runtimeGeneration()),
       },
+      // R4 — issued by the Service as part of a collection batch the learner consented to. Reads the spool; changes nothing.
+      retry_evidence_upload: { mutating: false, acceptsArgs: (a) => typeof a.batch_id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(a.batch_id) && Object.keys(a).every((k) => ["batch_id", "purpose", "notice_version"].includes(k)),
+        run: async (_s, command) => { const r = await uploadSnapshot(String(command.args.batch_id), this.snapshotDeps()); void this.outbox?.add("upload", uploadPayload(r.ok ? "verified" : r.code === "offline_pending" ? "pending" : "failed")); return r; } },
       // Coaching: a question or a pointer, shown without covering the work. Nothing on disk or in the conversation changes.
       send_question: { mutating: false, acceptsArgs: (a) => Object.keys(a).join() === "text" && typeof a.text === "string" && a.text.length <= 300,
         run: async (_s, command) => { this.showCoaching("강사의 질문", String(command.args.text)); return { ok: true, code: "shown" }; } },
@@ -185,7 +226,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   }
 
   private async forget(): Promise<void> {
-    this.loop?.stop(); this.loop = null; this.outbox = null;
+    this.loop?.stop(); this.loop = null; this.outbox = null; this.credential = "";
     // Disconnecting ends the instructor's pause on this device; the Service's own admission still applies.
     this.paused = false; this.stopUnconfirmed = false; this.applyHold();
     await this.context.secrets.delete(CREDENTIAL_KEY);
@@ -193,6 +234,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   }
 
   private async start(meta: ConnectionMeta, credential: string): Promise<void> {
+    this.credential = credential; void this.resumePendingUploads();
     const dir = this.context.globalStorageUri.fsPath; await fs.mkdir(dir, { recursive: true });
     // One file per grant: a shared PC's next learner never inherits the previous seat's queue.
     const file = path.join(dir, `classroom-ops-outbox-${meta.grant_id}.json`);
