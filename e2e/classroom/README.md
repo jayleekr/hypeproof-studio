@@ -98,6 +98,15 @@ node --experimental-strip-types --experimental-sqlite e2e/classroom/mac-demo.mjs
   appears, the app closes its server socket). `mac-preview-fault-negative.mjs` is the control: the same copy started without
   the variable (debug port 9442) ignores the same trigger. R7 issues the code on `/authoring` and types it into the app's
   start page — no dev token file change, no restart.
+- Curriculum → actual execution (#751 G2, #1012) on this Mac: `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-g2 node e2e/classroom/mac-devhost.mjs prepare`,
+  then `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-g2 node --experimental-strip-types --experimental-sqlite --no-warnings e2e/classroom/mac-curriculum.mjs`
+  (ports 18991/18992, debug 9591, about 10 minutes). A visible Chalk `/authoring` page authors two different curricula (help modes,
+  work surface, allowed features, audience), reviews the differences, freezes each as a candidate and issues a rehearsal code; a
+  real Studio window opens under that code, draws the candidate, sends one question and its rehearsal report; the teacher
+  confirms; `/manage` sends A then B to seat A1 (A3 selected but never connected, A2 connected and never selected) while a V1
+  question is still being answered; the real window's next turns are checked at the provider (lesson, help instruction, tool
+  names, the learner's saved criterion/decision), then a restart and the return to V1. `curriculum/result.json` has the rows;
+  it exits when done (nothing is left running). The browser counterpart that CI runs is `authoring-g2.mjs`.
 
 ## Instructor UI review preview (synthetic, for looking at the screens)
 
