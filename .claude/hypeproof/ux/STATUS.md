@@ -1,166 +1,252 @@
-# STATUS — 2026-09-21
+# STATUS — 2026-09-21 (2차)
 
 다음 세션이 **제일 먼저** 읽는 문서. 그다음 `MASTER_PROMPT.md` (v4).
 
 ---
 
-## 0. 지금 상태 — PR #1218 이 열려 있다
+## 0. 지금 상태
 
-https://github.com/jayleekr/hypeproof-studio/pull/1218 (`feat/sx-observation-capability-split`)
+- **PR #1218 은 머지됐다** → `main` 의 `f44cce3`. ADR 0010 **1단계 완료**.
+- **PR #1221 이 열려 있고 CI 18개가 전부 초록이다.** 브랜치
+  `feat/adr0010-step2-gate-split`, 추적 이슈 **#1220**. ADR 0010 **2·3단계**.
+  https://github.com/jayleekr/hypeproof-studio/pull/1221
+- 초록 중에 **`start-page-browser` 도 있다** — 로컬에 playwright 가 없어 못 돌린
+  `e2e/trial-ux` 를 CI 가 돌렸고 통과했다. `start-page.yml` path 필터에
+  `worker/src/profiles/**` 가 있어서 이 PR 로 트리거된다.
+- 리뷰어 요청까지 끝났다. **머지는 사람이 한다.**
 
-CI 를 통과하면 머지한다. 레이트 리밋은 풀렸다 — 2026-09-21 세션에서 검토 에이전트
-26개가 시간당 5000 을 소진해 PR 생성이 약 1시간 막혔었다. **검토 직후에 PR 을 내는
-순서는 다시 쓰지 않는다** (MASTER_PROMPT v4 §6).
+### 같은 세션에서 두 개가 더 열렸다 — 셋 다 18/18 초록
 
-`hype-pr` 로 다시 작업해야 하면 함정 넷:
+| PR | 무엇 | 브랜치 |
+|---|---|---|
+| **#1224** | 작업 화면이 설계 파일 없을 때 문장을 지어내지 않는다 (SX-02) | `fix/sx02-no-invented-mission-placeholder` (main 기준) |
+| **#1225** | 수업이 코호트 카피를 덮지 않는다 (#1222 G4·G5) | `feat/lesson-must-not-overwrite-cohort` (**#1221 위에 쌓임**) |
 
-1. `GH_TOKEN="$(gh auth token)"` 없이는 `HTTP unknown` 으로 죽는다
-2. `fingerprint` 는 inspect 마다 바뀐다 (작업 트리가 깨끗해도) → inspect·채움·prepare 를
-   한 명령에 이어 돌린다
-3. `evidence` 는 **20자 이상** (`"Clean on ee9a9d7."` 는 17자라 탈락했다)
-4. `disposition: unknown` 은 followups 에 **추적 이슈 URL** 필요 (#1217 을 만들어 뒀다),
-   `implementation` 링크는 **requirement 노드와 test 노드 둘 다** 필요 (`ST-DES-*` 불가)
+**에픽 [#1222](https://github.com/jayleekr/hypeproof-studio/issues/1222)** — 수업 설계를
+실제 좌석까지 보내는 경로의 공백 9개. 전부 명령으로 확인했고 **7개가 코드, 2개가 콘텐츠**다.
+`#1225` 가 그중 G4·G5(아이 수업 퇴행)를 닫는다.
 
-평가서에서 직접 손댄 노드 7개 (나머지 45개는 `no-impact`):
-`ST-DES-STUDIO-NATIVE-TRIAL-UX` · `ST-TEST-STUDIO-NATIVE-TRIAL-UX` · `ST-IMP-SX-P1` ·
-`ST-IMP-SX-P1B` · `ST-REQ-UX` · `ST-TEST-UX` 는 satisfied,
-**`ST-VAL-NATIVE` 는 unknown** → followups `…/issues/1217`.
-
----
-
-## 1. 이 브랜치가 한 일 — 커밋 6개
-
-```
-ee9a9d7  fix(sx): 적대적 검토 16건 수리
-d9b8599  fix(sx): 사진으로만 찾은 서랍 결함 2건
-39e67ab  feat(measurement): 새 평가는 6역량 모델로 (7자산 아님)
-bda6774  fix(sx): 작업 화면이 학생에게 자기 평가를 권하지 않는다
-2bf9dbe  feat(worker): observation 을 record 와 assess 로 쪼갠다 (ADR 0010 1단계)
-9123550  test(worker): 각 반의 좌석이 /v1/profile 에서 무엇을 받는지 고정
-```
-
-### Jay 가 이 세션에서 짚은 세 가지와 그 결과
-
-1. **"7에셋이 없어진지가 언젠데"** — 상태바(`assetStatusBar.ts`)는 이미 지워져 있었는데
-   **굴러가는 평가와 학생 화면은 아직 7자산**이었다. 이제 새 평가는 6역량으로 나가고
-   화면은 `FRAMING` 대신 **문제 구성**을 보인다. 저장된 7자산 기록은 자기 모델로
-   검증되어 그대로 읽힌다.
-2. **"아이가 자기 점수를 확인하는 게 UX 설계상 맞아?"** — 맞지 않고, **SX-59 가 이미
-   금지하고 있었는데 코드만 안 따라갔다.** 관측 결과 패널이 작업 화면에서 사라졌다.
-   (주의: 당시 내가 "P0 4개가 금지한다"고 말한 것은 틀렸다. 행을 세어 보니 SX-59 하나다.)
-3. **"관측이 백그라운드에서만 일어나는 줄 알았는데"** — 지금은 학생이 `관찰 받기`
-   버튼을 눌러 채점을 받는 구조였다. `record`(배경)와 `assess`(버튼)를 쪼갰고
-   **기본값은 `record: true, assess: false`** 다.
-
-**중요한 단서**: 지금 아이 코호트는 관측이 **아예 꺼져 있다.** 그래서 이 변경은 새는
-것을 막은 게 아니라, **앞으로 켤 때 새지 않도록 미리 막아 둔 것**이다. Jay 가 말한
-"모든 반에 관측을 켠다"(= ADR 0010 4단계)에서 이 게이트가 없었으면 **기록을 켜는 순간
-모든 아이 화면에 "평가받기" 버튼이 같이 켜졌을 것**이다.
-
----
-
-## 2. 게이트 상태 (커밋 `ee9a9d7` 기준)
+**#1225 는 #1221 위에 쌓여 있다.** G4 가 #1221 이 옮긴 `welcome:` 식을 건드려서다.
+GIT_POLICY 가 허용하는 형태이고 PR 본문에 적어 뒀다. **#1221 을 먼저 머지한다.**
 
 ```
-worker  npm test      0 fail
-worker  tsc           0
-ext     npm test      0 fail
-ext     tsc           0
-webview npm run build  0
-프로필 서빙 스냅샷      9 프로필 × 4 축 = 36칸 불변
-심은 결함 검사          5종 전부 의도한 테스트만 빨개짐
-적대적 검토             22 보고 → 16 확인 → 16 수리 완료
+c42fc59  docs(sx): 이 문서
+d58c3ad  fix(adr,worker): 적대적 검토가 확인한 3건 수리
+bb2fba3  docs(adr): 2·3단계 구현 기록과 4단계가 실제로 막힌 지점
+473e6ae  feat(worker): 평가할 수 없는 코호트를 이름 대고 거절한다 (3단계)
+9ec3bb8  feat(worker): 세션 게이트와 체험 좌석 발급에 각자의 플래그 (2단계)
 ```
 
 ---
 
-## 3. **검증하지 않은 것** — 이름으로 적는다
+## 1. 이 브랜치가 한 일
+
+`observation.enabled` 가 겸하던 네 가지 중 **남은 둘**을 떼어냈다.
+
+| 무엇 | 전 | 후 | 읽는 곳 |
+|---|---|---|---|
+| 수업 전에 프로필을 읽을 수 있나 | `record` | `session.requires_open_session` | `GET /v1/profile` **만** |
+| 개인 체험 좌석을 발급할 수 있나 | `observation.enabled` | `trial.individual` | `admin/tokens/issue` **와** `gateChatRequest` |
+| 코호트 모델이 평가 공급자가 아닐 때 | `502 assessment_failed` | `409 assessment_provider_mismatch` | `observations/assess` |
+
+둘 다 **오늘 `true` 이던 딱 그 두 프로필**(`canary-sdk-contract`, `studio-native-trial`)
+에만 선언했다. 그래서 서빙 스냅샷 36칸이 그대로다. 두 필드 모두 **응답 본문에 나가지
+않는다** — 출하된 앱은 존재조차 모른다.
+
+### ADR 이 안 적어 둔 것 셋 (전부 실측)
+
+1. **읽는 곳이 다섯 번째로 있었다.** `lib/chat-gate.ts` 가 발급된 native_trial 좌석에
+   세션을 줄지를 같은 플래그로 정한다. 발급 쪽만 옮겼으면 **발급은 되는데 영원히 403**
+   인 좌석이 만들어진다. 한 커밋에서 같이 옮겼다.
+2. **클론 사슬이 한 칸 더 길다.** `studio-gpt-practice` 가 `studio-native-trial` 을
+   spread 하고(`studio-gpt-practice.ts:7`), `studio-model-practice` 가 그걸 또 한다.
+   `trial` 은 둘 다 덮지 않는 키라 **발급 대상이 2개→4개로 소리 없이 늘 뻔했다.**
+   `studio-gpt-practice` 에 `{ individual: false }` 를 명시했고, 집합을 못 박는 테스트를 넣었다.
+3. **scope 없는 observation 블록은 절대 안 보낸다.** scope 는 세션에서 나오므로, 게이트를
+   안 타는 기록 좌석엔 scope 가 없다. 그런데 출하된 v0.1.56 은 블록의 **존재만** 보고
+   채팅 기록 버킷을 `sha256(token)` 으로 돌린다 — 학생 대화가 화면에서 사라지고 토큰을
+   재발급할 때마다 또 사라진다. 블록과 배너를 **한 번 결정해서 두 번 읽는** 구조로 바꿨다.
+
+### 3단계는 **거절**이고 대체가 아니다
+
+ADR 은 둘 다 허용했지만(`고르거나 … 거절한다`) 앞쪽 가지는 존재하지 않는다.
+`native-assessment.ts` 는 분기 없이 Anthropic 으로 보낸다. GPT 코호트에 Claude 모델 id 를
+주는 건 라우팅이 아니라 **그 코호트 학생 원문과 코치가 만든 파일 본문을 프로필에 없는
+공급자로 보내는 일**이다. 어느 코호트를 자기가 안 쓴 공급자로 평가할지는 사람이 정한다.
+
+**ADR 증거표 정정: 502 는 원래 도달 불가능했다.** 모델 키가 Anthropic 이 아닌 프로필은
+`studio-gpt-practice`(gpt-5.6-luna)·`studio-model-practice`(glm-5.2) 둘뿐이고 **둘 다
+assess 가 꺼져 있어** 한 줄 위 404 에서 멈춘다. 이번 변경은 4단계가 열 구멍을 **미리**
+막은 것이지 지금 나는 고장을 고친 게 아니다.
+
+---
+
+## 2. 게이트 상태 (`d58c3ad` 기준)
+
+```
+worker  npm test           0 fail (exit 0)
+worker  tsc                0
+ext     npm test / tsc     0 fail / 0
+webview npm run build      0
+프로필 서빙 스냅샷          9 프로필 × 4 축 = 36칸 불변
+심은 결함                  8개 심어 8개 잡힘, 전부 의도한 테스트에서만
+적대적 검토                18건 보고 → 반증 우선 3중 검증 → 3건 확인 → 3건 수리 완료
+```
+
+심은 결함 8종: 게이트가 다시 record 를 읽음 / 게이트가 새 플래그를 무시 / scope 없는
+블록을 보냄 / assess 모델을 코호트 공급자로 해석 / 발급 검사가 legacy 로 폴백 /
+`studio-gpt-practice` 가 상속 차단을 그만둠 / 채팅 게이트를 안 옮김 /
+**발급 라우트가 세션 게이트 플래그를 읽음**(마지막 둘은 적대적 검토가 찾아준 것).
+
+### 적대적 검토에서 확인된 3건 — 전부 고쳤다 (`d58c3ad`)
+
+- **HIGH** — ADR 의 "4단계 막힘" 절이 **이 브랜치가 방금 불가능하게 만든 피해**를 적고
+  있었다. 자세한 건 §3.
+- **MEDIUM** — 발급 라우트 테스트가 `trial.individual` 과 `session.requires_open_session`
+  을 **구분하지 못했다**. 오늘 네 플래그가 같은 두 프로필에서 참이라 그렇다. 두 조건을
+  맞바꿔도 워커 스위트 전체가 초록이었다. 분리 케이스 둘을 넣고 다시 심어 확인했다.
+- **LOW** — `473e6ae` 본문이 `native-assessment.ts:196` 을 인용하는데 그건 **부모 트리의
+  줄 번호**다. 같은 커밋이 위에 17줄을 넣어서 자기 트리에선 :213 이다. 코드 주석은
+  심볼로 인용하고 있어 멀쩡하다.
+
+---
+
+## 3. **4단계는 프로필 한 줄이 아니다** — 이번에 실측으로 드러났다
+
+`record: true` 기본값이 Jay 가 원한 것이다. ADR 이 적은 대로 프로필만 고치면
+**아무 일도 안 일어난다.** 이 브랜치 head 에서 잰 값:
+
+```
+step4 kids, class OPEN  -> {"status":200,"observation":null,"banner":false}
+step4 kids, class SHUT  -> {"status":200,"observation":null,"banner":false}
+today canary, class OPEN -> {"status":200,"observation":{...,"scope":"52e5a079…"}}
+```
+
+scope 는 세션 게이트 **안**에서 만들어지고, 2단계 이후 그 게이트는
+`native_trial || requires_open_session` 이다. 둘 다 선언 안 한 코호트는 scope 가 없고,
+2단계의 가드가 블록 전체를 뺀다. **즉 `record` 혼자서는 죽은 설정이다** — 이 ADR 이
+없애려던 "설정은 맞는데 동작이 없는" 모양이 옮겨간 것이다.
+
+**그래서 4단계의 첫 질문은 워커 질문이고, 실수가 아니라 진짜 결정이다:**
+수업 세션을 요구하지 않는 코호트의 관측 scope 는 어디서 오나?
+
+- `/v1/profile` 에서 활성 세션을 **실패하지 않게** 조회 — 수업 중엔 블록, 밖에선 없음.
+  `/observations/context` 와 같은 출처라 어긋나지 않는다. 대신 roster·폐기·일시정지
+  검사를 **안 거친** 좌석에 scope 를 준다.
+- 기록 코호트를 `requires_open_session` 뒤에 두기 — 2단계가 없앤 수업 전 403 을
+  바로 그 코호트들에 되돌린다.
+- 세션 없는 scope 공식 — **즉시 기각**. `/observations/context` 와 달라져서 이벤트가 전부
+  떨어진다.
+
+그 결정을 한 다음에야 **출하된 빌드 쪽 위험 둘**이 따라온다 (둘 다 여전히 참):
+
+1. **v0.1.56 은 `observation.assess` 를 안 읽는다.** 확장 트리 전체에서 0회.
+   `ChatPanel.tsx:590` 이 `format === 'hps-observation/1'` **만** 보고 관측 결과 패널을
+   그린다. → **#1218 이 고친 SX-59 는 이미 깔린 빌드에선 무효다.** 다음 빌드에선 맞다.
+2. **블록을 보내는 순간 채팅 기록 버킷이 옮겨간다** (`chatPanelProvider.ts:660`, `:2951`).
+   다음 수업 첫 화면에서 지난 대화가 통째로 빈다.
+
+5단계(`enabled` 제거)는 이 전부와 무관하게 열려 있다.
+
+---
+
+## 4. **검증하지 않은 것** — 이름으로 적는다
 
 | 안 한 것 | 왜 중요한가 |
 |---|---|
-| **실기 증거 0** | 앱을 한 번도 안 띄웠다. 전부 정적 렌더 + 라우트 응답 |
-| **실제 provider 호출 0** | 새 루브릭(`m2026.09.21-1`)으로 모델이 진짜 6개 키를 내는지 모른다. 테스트는 프롬프트를 되받아치는 **스텁**이라, 모델이 못 따르는 루브릭이어도 초록이다 |
-| **Playwright `e2e/trial-ux` 로컬 미실행** | 로컬에 playwright 가 없다. **CI 에서는 돈다** — `start-page-browser` 잡이다. 검토와 내가 "CI 에 없다"고 한 것은 틀렸고, 실제로 그 잡이 TUX-OBS-10 실패를 잡아 줬다 |
-| **사진의 테마는 내가 채운 값** | `--vscode-*` 를 VS Code Dark Modern 기본값으로 직접 넣었다. 실제 앱 테마가 아니다 |
-| `.hps-access button` | 같은 커밋에서 고쳤지만 **한 번도 렌더해 보지 않았다** |
+| **실기 증거 0** | 앱을 한 번도 안 띄웠다. 전부 라우트 응답 아니면 정적 단언이다. 새 409 의 한국어 문구는 화면에서 본 적이 없다 |
+| **실제 provider 호출 0** | 거절 경로만 쟀다. 성공 경로가 무엇을 내는지는 이 브랜치가 아무 말도 안 한다 |
+| **출하 빌드 주장은 `git show v0.1.56:…` 에서 읽은 것** | 출하된 소스는 맞지만, 실제로 깔린 앱을 이 워커에 물려 본 적은 없다 |
+| **`e2e/trial-ux` 로컬 미실행** | 로컬에 playwright 없음. **CI 에서는 돌았고 통과했다** (`start-page-browser`). path 필터의 `worker/src/profiles/**` 가 이 PR 에 걸린다. 즉 이 줄은 "내가 안 봤다"이지 "아무도 안 봤다"가 아니다 |
+| **워커의 한국어 `message` 는 어느 빌드도 안 쓴다** | 앱이 자기 문장을 만들고 코드만 괄호에 넣는다. 학생은 `(assessment_provider_mismatch)` 를 날것으로 본다. 이건 이 브랜치가 만든 게 아니라 502 때도 같았다 |
 
-→ 전부 **이슈 #1217** 에 적어 뒀다. `ST-VAL-NATIVE` 가 `unknown` 인 이유다.
+`ST-VAL-ACTIVITY-CANDIDATE` · `ST-VAL-UNIFIED-ENTRY` 를 **`unknown`** 으로 올리고
+followup 을 **#1217** 로 달아 둔 이유가 이것이다.
 
 ---
 
-## 4. 다음 작업 — 우선순위 순
+## 5. hype-pr 기록 — 다음에 또 걸릴 함정
 
-### 4a. ADR 0010 나머지 단계 (2~5)
+PR 은 냈다. 여기 남기는 건 **다음 사람이 같은 데서 안 멈추도록**이다.
 
-`docs/adr/0010-observation-capability-split.md` 참조. 1단계만 끝났다.
+**함정 셋 (이번에 실제로 걸린 것):**
 
-아직 **legacy `enabled`** 를 읽는 곳이 정확히 셋 남아 있다:
+- **`HTTP unknown` 은 토큰 문제만이 아니다.** 이번엔 GitHub **2차 레이트 리밋**이었다.
+  같은 호출이 다음 시도에서 `HTTP 403` 으로 바뀌어서야 알았다. `gh api rate_limit` 은
+  2차 리밋에 **면제라서 `remaining: 5000` 을 그대로 보여준다** — 믿지 말고
+  `gh api repos/<owner>/<repo>/contents` 를 직접 찔러라.
+- **`inspect` 한 번이 Lab 저장소까지 훑는다.** 적대적 검토에 `gh` 를 금지시켜도
+  inspect·prepare 자체가 리밋을 태운다. PR 낼 계획이면 **검토와 PR 사이에 여유**를 둬라.
+  2차 리밋은 **1차 리셋(다음 정시)보다 훨씬 빨리 풀렸다** — 07:06 에 막혀서 07:17 에 풀렸다.
+  한 시간 기다리지 말고 `contents` 를 2분마다 찔러 보는 게 맞다.
+- **`gh pr edit --body-file` 은 `hype-pr` 가 붙인 `<!-- hype-pr-prepared:v1 -->` 각주를
+  지운다.** 본문을 고칠 일이 있으면 각주를 직접 다시 붙여라 — 내용은 receipt 의
+  `report` 에서 그대로 만들 수 있다 (`preparation.summary()` 와 같은 형식).
 
-```
-worker/src/lib/chat-gate.ts:189   native grant     → 세션 게이팅으로 (2단계)
-worker/src/routes/chat.ts:268     세션 게이트       → 세션 게이팅으로 (2단계)
-worker/src/routes/admin.ts:284    체험 좌석 발급    → profile.trial.individual 로 (3단계)
-```
+평가서에서 직접 손댄 판정: `ST-IMP-MODEL-USAGE` · `ST-IMP-OPERATOR-HEALTH-AUTH` ·
+`ST-IMP-SX-P0` · `ST-IMP-UNIFIED-ENTRY` 는 `satisfied`,
+**`ST-VAL-ACTIVITY-CANDIDATE` · `ST-VAL-UNIFIED-ENTRY` 는 `unknown` → #1217**.
+`path_links` 6개는 전부 `implementation` 으로 분류했다 — **이건 receipt 안의 링크지
+`config/traceability.json` 에 노드를 넣은 게 아니다.** 두 개를 섞어 말하지 마라.
 
-- **2단계**: 세션 게이팅과 체험 좌석 발급을 관측에서 떼어낸다.
-  스냅샷의 `no-session` 축이 바로 이걸 잰다 — `enabled` 하나 켜면 좌석이 `200 → 403` 이
-  되는 것이 음성 대조군으로 이미 기록돼 있다
-- **3단계**: assess 라우트가 provider 에 맞는 모델을 고르거나 **이름을 대고 거절**한다
-  (지금 `gpt-5.6-luna`·`glm-5.2` 코호트는 assess 가 502 로 죽는다 — ADR 의 "설정은
-  맞는데 동작이 없는" 유형)
-- **4단계**: `record` 기본 켜기 ← **Jay 가 원한 것**. 3단계까지 끝나야 안전하다
-- **5단계**: `enabled` 제거 (독립 커밋)
+---
 
-각 단계마다 `profile-serving-snapshot` 을 다시 돌리고 **diff 를 읽고** 커밋한다.
+## 6. 다음 작업 — 우선순위 순
 
-### 4b. 수업 내용이 하나도 없다 — 그릇만 있다
+### 6-0. **에픽 #1222 를 시작하기 전에 열린 PR 을 먼저 본다**
 
-`session_design` / `lesson` 키가 **`worker/src/profiles/types.ts` 에만** 있다.
-9개 프로필 어디에도 수업 내용이 없다. `worker/test/fixtures/session-design/week-*.json`
-은 **테스트 픽스처**이고 어떤 실제 반도 그걸 싣지 않는다.
+이 세션이 에픽을 `main` 만 보고 썼다가 **G8(리허설)이 이미 열린 PR 8건짜리 프로그램**인
+것을 뒤늦게 알았다 (#1131·#1132·#1152·#1186·#1187·#1189·#1205·#1210). #1222 에 정정
+코멘트를 달아 뒀다. G2·G1 도 일부 겹칠 수 있다 — **제목만 보고 판단한 것이라 착수 전에
+diff 로 확인해야 한다.** `next-work.py` 가 "Also mentioned ... in open PR #N" 을 찍는
+이유가 이것이다.
 
-즉 관측 플래그를 다 풀어도 **띄울 수업이 없다.** 이건 Jay 의 결정이 필요하다:
-미션 문장(`3주차 · AI가 만든 걸 내가 확인했나?` 같은)을 누가 쓰나.
+### 6a. ADR 0010 4단계 — 먼저 §3 의 결정부터
 
-### 4c. Jay 결정 대기
+Jay 가 원한 것이지만 지금 상태로는 프로필 한 줄이 아니다. 세 후보 중 무엇을 고를지가
+먼저고, 그다음이 앱 릴리스다. 5단계(`enabled` 제거)는 지금 바로 할 수 있다.
 
-- 위 4b — 수업 내용 작성 주체
-- 학생 화면 문구가 초등학생에게 통하나. 내가 의심한 것들:
-  `종류로 추리기` · `기대 조건 남기기` / `들은 말 남기기` · `출처 미기록` ·
-  `이건 실제로 있었던 일인가요` 의 선택지 `아직 확인 전` vs `내가 그렇다고 적은 것`
-  (이 둘의 차이를 아이가 구분할지가 제일 걱정된다)
+### 6b. 수업 내용이 하나도 없다 — 그릇만 있다 (변동 없음)
+
+`session_design` / `lesson` 키가 `worker/src/profiles/types.ts` 에만 있다. 9개 프로필
+어디에도 수업 내용이 없다. **Jay 의 결정이 필요하다**: 미션 문장을 누가 쓰나.
+
+### 6c. Jay 결정 대기
+
+- 6b — 수업 내용 작성 주체
+- §3 — 수업 세션을 요구하지 않는 코호트의 관측 scope 출처
+- **#1218 의 SX-59 수정이 이미 깔린 빌드에선 무효라는 사실** (§3-1). 다음 빌드를 언제 낼지
+- 학생 화면 문구가 초등학생에게 통하나 (`종류로 추리기` · `기대 조건 남기기` ·
+  `아직 확인 전` vs `내가 그렇다고 적은 것`)
 - 어느 실제 반에 `hps-observation/2` 를 줄 것인가
 - SX-T 행들을 위한 앱 빌드 승인 (1~2시간)
 
-### 4d. 남은 문서 표류
+### 6d. 남은 문서 표류
 
-- SX-24 (팀 기여) — `/2` 스키마가 머지됐으니 이제 풀렸다
+- SX-24 (팀 기여) — `/2` 스키마가 머지됐으니 풀렸다
 - P2 (경계 회고)
 - 테스팅 문서의 층·명령 index 표류 약 30곳
+- `worker/test/` 에 **어느 스크립트도 안 부르는 파일이 12개** 있다 (`scrub-secrets.test.mjs`
+  포함). 워커 테스트는 `package.json` 에 손으로 나열한다 — 새 파일은 반드시 추가해라
 
 ---
 
-## 5. 이 세션이 배운 것 — MASTER_PROMPT v4 에 반영됨
+## 7. 이 세션이 배운 것
 
-1. **화면을 건드렸으면 사진을 찍는다** (v4 G7). 결함 2건이 모든 테스트를 통과한 채
-   살아 있었다. 글자 계측기는 대비·빈 줄을 못 본다
-2. **출하된 빌드를 연다** (v4 G8). `git show <tag>:<파일>` 30초면 `length === 7` 이 보인다
-3. **산문 주장은 명령으로 뒷받침한다** (v4 §4). v3 에 이미 규칙이 있었는데 세 번 틀렸다.
-   규칙을 적는 것으로는 안 지켜진다 — 검사를 강제해야 지켜진다
-4. **건너뛴 테스트는 초록으로 보고된다** (v4 §5a). SX-59 P0 게이트가 CI 에서 100%
-   skip 이었다
-5. **게이트를 다 통과해도 적대적 검토는 필요하다** (v4 §6). HIGH 4건이 나왔다
-6. 검토는 **GitHub 레이트 리밋을 태운다** — PR 계획이 있으면 순서를 잡는다
-
----
-
-## 6. 만든 산출물 위치
-
-```
-docs/adr/0010-observation-capability-split.md          ADR (1단계만 구현됨)
-docs/curriculum/studio-trial/native-rubric.json        6역량 루브릭 m2026.09.21-1
-docs/curriculum/studio-trial/native-rubric-legacy-seven.json   7자산 루브릭 (옛 앱용, 보존)
-worker/test/fixtures/profile-serving-baseline.json     36칸 기준선
-.claude/hypeproof/ux/REQUIREMENTS-HARDENING-2026-09-20.md
-https://github.com/jayleekr/hypeproof-studio/issues/1217   실기 검증 공백
-```
+1. **내 가드가 만든 결과를 내 산문이 못 따라갔다.** 2단계에서 "scope 없으면 블록 없음"
+   가드를 넣어 놓고, 스무 줄 아래 4단계 절에는 **그 가드가 불가능하게 만든 피해**를
+   적었다. 게이트 여덟 개가 전부 초록인 상태였다. 적대적 검토가 잡았다.
+   → MASTER_PROMPT v4 §4 의 낱말 표에 **"~하면 ~가 된다"(미래형 인과 주장)** 도 넣을 값이 있다.
+2. **집합이 같으면 테스트는 구분하지 못한다.** 오늘 `record`·`assess`·`trial.individual`·
+   `requires_open_session` 이 같은 두 프로필에서 참이다. 그래서 조건을 맞바꿔도 초록이었다.
+   **합성 코호트로 플래그를 갈라 놓는 케이스**가 그 자리의 유일한 계측기다.
+3. **상속은 침묵으로 동의한다.** spread 로 만든 프로필에 새 블록을 넣으면 자식이 가져간다.
+   `grep structuredClone src/profiles/*.ts` 30초.
+4. **`rate_limit` 엔드포인트는 2차 리밋을 못 본다.** `remaining: 5000` 이 초록 신호가 아니다.
+   이 세션에서 **두 번** 걸렸다. `inspect` 한 번이 Lab 저장소까지 훑어서 빠르게 태운다.
+5. **`prepare` 의 fingerprint 는 같은 head 에서도 바뀐다.** g45 에서 `7b54de1f` →
+   `b25b6892` 로 움직여 `assessment is stale` 이 났고, 재실행하니 통과했다. 보고서에
+   GitHub 에서 읽는 값(열린 PR/이슈 등)이 들어 있는 것으로 보인다 — **inspect·채움·prepare 를
+   한 프로세스에 붙여도 실패할 수 있으니 재시도를 넣어라.**
+6. **에픽은 `main` 만 보고 쓰지 않는다** (§6-0). 열린 PR 38건 중 8건이 내가 "공백"이라고
+   적은 것을 이미 하고 있었다.

@@ -99,6 +99,43 @@ export interface HarnessRules {
   child: YamlMap | null;
   /** rules.yaml `thresholds.child_age_max` (null if absent → validate.py defaults to 12). */
   child_age_max: number | null;
+  /**
+   * Dotted paths from rules.yaml `required_keys` that are absent or empty
+   * (#692). Non-empty means a guardrail was DELETED from the file, which every
+   * reader would otherwise report as "nothing required". Port of validate.py's
+   * `missing_required_keys`, including the code-level assertion that the
+   * `required_keys` block itself exists.
+   */
+  missing_keys: string[];
+}
+
+/** Port of validate.py `dotted_get`, over the parsed rules map. */
+function dottedGet(obj: YamlValue | undefined, path: string): YamlValue | undefined {
+  let cur: YamlValue | undefined = obj;
+  for (const part of path.split(".")) {
+    if (!cur || typeof cur !== "object" || Array.isArray(cur) || !(part in cur)) return undefined;
+    cur = (cur as YamlMap)[part];
+  }
+  return cur;
+}
+
+/** Port of validate.py `missing_required_keys`. */
+export function missingRequiredKeys(rules: YamlMap): string[] {
+  const declared = rules.required_keys;
+  if (!Array.isArray(declared) || declared.length === 0) return ["required_keys"];
+  const missing: string[] = [];
+  for (const path of declared) {
+    if (typeof path !== "string" || !path) continue;
+    const value = dottedGet(rules, path);
+    const empty =
+      value === undefined ||
+      value === null ||
+      value === "" ||
+      (Array.isArray(value) && value.length === 0) ||
+      (!!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
+    if (empty) missing.push(path);
+  }
+  return missing;
 }
 
 let memo: HarnessRules | null = null;
@@ -112,6 +149,7 @@ export function readHarnessRules(text: string = rulesYamlText as unknown as stri
   const out: HarnessRules = {
     child: child && typeof child === "object" && !Array.isArray(child) ? child : null,
     child_age_max: typeof ageMax === "number" ? ageMax : null,
+    missing_keys: missingRequiredKeys(r),
   };
   if (text === (rulesYamlText as unknown as string)) memo = out;
   return out;
@@ -137,6 +175,13 @@ export function isChildCohortPerHarness(
 export interface CurriculumRequirements {
   /** Phrases the served system_prompt MUST contain. Empty for non-child cohorts. */
   required_phrases: string[];
+  /**
+   * Set when rules.yaml itself lost a guardrail key (#692) for a cohort that
+   * NEEDS one. No text can satisfy it: the module is rejected and the compiled
+   * prompt is served instead. An unguarded child cohort fails closed rather
+   * than serving a published module nothing checked.
+   */
+  rules_error?: string;
 }
 
 /**
@@ -150,12 +195,27 @@ export function curriculumRequirementsFor(
   rules: HarnessRules = readHarnessRules(),
 ): CurriculumRequirements {
   if (!isChildCohortPerHarness(profile, rules)) return { required_phrases: [] };
+  // #692 — for a child cohort, "the rule is gone" must not read as "the rule
+  // is satisfied". Only the child-facing keys matter here; an unrelated
+  // missing key is CI's problem, not a reason to stop serving children.
+  const relevant = rules.missing_keys.filter((k) => k.startsWith("child.") || k === "required_keys");
   const phrase = rules.child?.required_prompt_phrase;
-  return { required_phrases: typeof phrase === "string" && phrase.length > 0 ? [phrase] : [] };
+  const phraseOk = typeof phrase === "string" && phrase.length > 0;
+  if (relevant.length > 0 || !phraseOk) {
+    const lost = relevant.length > 0 ? relevant.join(", ") : "child.required_prompt_phrase";
+    return {
+      required_phrases: [],
+      rules_error:
+        `cohort-harness rules are incomplete for a child cohort (missing: ${lost}) — ` +
+        `refusing to serve a published module the harness cannot check (#692)`,
+    };
+  }
+  return { required_phrases: [phrase as string] };
 }
 
 /** First violated requirement as a reason string, or null when the text passes. */
 export function checkCurriculumRequirements(text: string, req: CurriculumRequirements): string | null {
+  if (req.rules_error) return req.rules_error;
   for (const phrase of req.required_phrases) {
     if (!text.includes(phrase)) {
       return (

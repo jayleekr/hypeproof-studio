@@ -109,7 +109,8 @@ existing philosophy, autonomy, and verification rules in their canonical files.
 - [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md) — build failure modes, env vars, jq patterns
 - [.claude/rules/branding-swap.md](.claude/rules/branding-swap.md) — asset replacement checklist
 - [.claude/rules/extension-dev.md](.claude/rules/extension-dev.md) — hypeproof-chat React webview
-- [.claude/rules/verification.md](.claude/rules/verification.md) — 관측 규율. **판정 기준을 세우기 전에 대상을 열어본다** · 대조군 먼저 · CI 초록은 아무것도 보장하지 않는다
+- [.claude/rules/verification.md](.claude/rules/verification.md) — 관측 규율. **판정 기준을 세우기 전에 대상을 열어본다** · 대조군 먼저 · CI 초록은 아무것도 보장하지 않는다 · 물려받은 주장은 증거가 아니다 · 일괄 치환 전에 걸린 줄을 본다
+- [.claude/rules/gh-budget.md](.claude/rules/gh-budget.md) — GitHub API 예산. `gh` 부르는 에이전트는 하나만 · `rate_limit` 은 2차 리밋을 **못 본다** · `HTTP unknown` 이 토큰 문제라는 보장이 없다 · `hype-pr` 함정
 - [e2e/observe/README.md](e2e/observe/README.md) — 실사용 관측 도구. 큐시트는 강사가 채팅으로 몰고, 이건 그동안 무슨 일이 일어났는지 보는 용도
 - [docs/seven-assets.md](docs/seven-assets.md) — upstream philosophy reference and Studio asset compatibility index
 
