@@ -25,6 +25,7 @@ import { applyLessonFeatures } from './lesson-feature-policy';
 import { applyLessonModel } from './lesson-model-policy';
 import { helpModeInstruction, helpModeReceipt, resolveHelpMode } from './lesson-help-mode';
 import { coachVisibleLesson, learningInstruction } from './learning-prompt';
+import { isMinorCohort } from './moderation';
 import type { Context } from "hono";
 import type { Env } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "./tokens";
@@ -186,8 +187,14 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     if(!grant||grant.revoked)return {ok:false,response:c.json({error:{code:'trial_revoked_or_reissued',type:'auth',message:'폐기되었거나 새 코드로 교체된 체험 코드입니다.'}},401)};
     if(grant.expires_at!==null&&grant.expires_at<=Date.now())return {ok:false,response:c.json({error:{code:'trial_expired',type:'session_window',message:'개인 체험 시간이 끝났습니다. 작업 파일은 그대로 보존됩니다.'}},403)};
   }
+  // ADR 0010 step 2 — the runtime twin of the mint check in routes/admin.ts.
+  // This decides whether a minted `native_trial` seat ever gets a session at
+  // all (and so whether its one-hour window ever starts). It read
+  // `observation.enabled`, the same flag the mint route read, which is why the
+  // two have to move together: leave this one behind and the admin route mints
+  // seats that fall straight into the `session_inactive` 403 below, forever.
   const session = payload.native_trial
-    ? (profile.observation?.enabled ? await startNativeGrant(env,payload) : null)
+    ? (profile.trial?.individual ? await startNativeGrant(env,payload) : null)
     : await getActiveSession(env.HPS_KV, payload.c);
   if (!session) {
     // #165 — student-facing copy is no longer a dead-end. The chat panel's
@@ -307,7 +314,13 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     // contracts, labelled instead of buried in the JSON dump. Teaching text
     // only: like helpInstruction it changes no grant and no policy, and it is
     // '' for a lesson without `learning`.
-    const learning = learningInstruction(visibleLesson, c.req.header('x-hps-lesson-step'));
+    // `isMinorCohort(profile)` — #1222 G5. The §10 dialogue table is written for
+    // the adult product course and one of its examples is a price comparison;
+    // it is withheld from a minor's seat. Read from the COMPILED profile, the
+    // same source `/v1/profile` serves `minor_cohort` from, so the coach's
+    // prompt and the client's minor-specific UX cannot disagree about who this
+    // seat belongs to.
+    const learning = learningInstruction(visibleLesson, c.req.header('x-hps-lesson-step'), isMinorCohort(profile));
     return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(visibleLesson) + helpInstruction + learning }, session, module, identity: assistantName ? { fixed_name: assistantName } : null, help: help.help ? helpModeReceipt(help.help) : null };
   }
   // A help mode without a lesson has nothing to apply to — say so instead of
