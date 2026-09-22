@@ -24,7 +24,7 @@ async function hostFixture(t, opts = {}) {
     plugins: [{ name: 'vscode-review-stub', setup(b) {
       b.onResolve({ filter: /^vscode$/ }, () => ({ path: 'vscode', namespace: 'stub' }));
       b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({
-        contents: 'export const window={showInformationMessage:async()=>undefined}; export const workspace={getConfiguration:()=>({get:()=>"https://example.invalid/v1"})};', loader: 'js',
+        contents: 'export const window={showInformationMessage:async()=>undefined}; export const commands={executeCommand:async()=>undefined}; export const workspace={getConfiguration:()=>({get:()=>"https://example.invalid/v1"})};', loader: 'js',
       }));
     } }],
   });

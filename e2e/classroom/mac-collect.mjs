@@ -57,6 +57,8 @@ const runStarts = local.db.prepare('SELECT starts_at FROM class_run_ops WHERE cl
 // ── the learner's machine: own profile, own HOME, a workspace with the learner's page ──
 const userDir = realpathSync(mkdtempSync(path.join(tmpdir(), 'hps-751-u1b-'))), ws = path.join(userDir, 'ws'), fakeHome = path.join(userDir, 'home'); for (const d of [path.join(userDir, 'User'), ws, fakeHome]) mkdirSync(d, { recursive: true });
 const PAGE_V1 = '<!doctype html><title>학생 결과물</title><h1>SYNTHETIC APPROVED PAGE V1</h1>\n', PAGE_V2 = '<!doctype html><title>학생 결과물</title><h1>SYNTHETIC UNAPPROVED PAGE V2</h1>\n';
+// Over the spool's SPOOL_MAX_ARTIFACT_CHARS (200,000): the approved version is stored cut (M10).
+const PAGE_BIG = '<!doctype html><title>큰 결과물</title><h1>SYNTHETIC BIG PAGE</h1><p>' + 'B'.repeat(200_100) + '</p><p>BIG-PAGE-END</p>\n';
 writeFileSync(path.join(ws, 'index.html'), PAGE_V1);
 // Planted in the SAME spool folder the window writes to: another learner who used this PC during this class, and this learner's earlier class.
 const spoolRoot = path.join(fakeHome, 'Library/Application Support/HypeProof-Studio/logs/sessions'), day = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
@@ -115,6 +117,9 @@ const connectSeat = async (w) => { await palette(w, '수업 연결 (강사가 �
 const db = (sql, ...a) => local.db.prepare(sql).all(...a).map((r) => ({ ...r }));
 const ask = async (chat, text, mark) => { const n = providerCalls.length; await setDraft(chat, text); await pressEnter(chat); await wait(() => providerCalls.slice(n).some((c) => c.mark === mark), 'the provider was called for ' + mark, 120000); };
 const dialog = (w, label) => wait(() => w.evaluate((t) => { const b = [...document.querySelectorAll('.monaco-dialog-box .monaco-button, .monaco-dialog-box a.monaco-button')].find((x) => x.textContent.trim() === t); if (!b) return false; b.click(); return true; }, label), 'dialog button ' + label);
+/** #751 U1b — the learner's approval button in the workbench: the chat panel title ('panel') or the editor title of index.html ('editor'). */
+const approveButton = (w, where) => wait(() => w.evaluate((where) => { const b = [...document.querySelectorAll('a.action-label[aria-label*="수업 결과물로 승인"]')].filter((a) => a.checkVisibility() && (where === 'editor') === !!a.closest('.editor-actions')); if (!b.length) return false; b[0].click(); return true; }, where), 'approval button in the ' + where + ' title');
+const openFile = async (w, name) => { await w.keyboard.press('Meta+P'); await w.waitForSelector('.quick-input-widget input', { state: 'visible' }); await w.keyboard.type(name, { delay: 15 }); await sleep(600); await w.keyboard.press('Enter'); await wait(() => w.evaluate((n) => [...document.querySelectorAll('.tab .label-name')].some((t) => t.textContent === n), name), 'editor tab ' + name); };
 const quickPick = async (w, label) => { await wait(() => w.evaluate(() => !!document.querySelector('.quick-input-widget') && getComputedStyle(document.querySelector('.quick-input-widget')).display !== 'none'), 'quick pick'); await w.keyboard.type(label, { delay: 10 }); await sleep(400); await w.keyboard.press('Enter'); };
 const walk = (dir) => existsSync(dir) ? readdirSync(dir, { withFileTypes: true }).flatMap((e) => e.isDirectory() ? walk(path.join(dir, e.name)) : [path.join(dir, e.name)]) : [];
 /** The window's own spool (not the planted sessions): each session with its lines, oldest first. */
@@ -157,12 +162,23 @@ try {
   I = await instructor(); const { page } = I;
   step('M0 real window connected, consent given in the app, one Agent SDK turn', { provider_calls: providerCalls.length });
 
-  // ── M1: the learner approves version 1 of their page, changes it, and withdraws approval of version 2 (both versions are in the record) ──
-  await palette(win, '지금 결과물을 수업 결과물로 승인·취소'); await quickPick(win, '이 결과물을 수업 결과물로 승인'); await wait(async () => (await toasts(win)).some((t) => t.includes('수업 결과물로 승인했습니다')), 'approved v1');
+  // ── M1: the learner approves version 1 from the chat panel's title button — the file changes to version 2 while the question is open,
+  //    and what is recorded is the version that was shown (v1). Then, from index.html's editor title, the learner withdraws approval of v2. ──
+  await approveButton(win, 'panel'); await wait(() => win.evaluate(() => getComputedStyle(document.querySelector('.quick-input-widget') ?? document.body).display !== 'none' && !!document.querySelector('.quick-input-widget')?.textContent.includes('지문')), 'the question shows the fingerprint');
+  const shown = await win.evaluate(() => document.querySelector('.quick-input-widget').innerText); await shot(win, 'm1-approve-question-panel.png');
+  writeFileSync(path.join(ws, 'index.html'), PAGE_V2); await sleep(300);
+  await win.keyboard.type('이 결과물을 수업 결과물로 승인', { delay: 10 }); await sleep(400); await win.keyboard.press('Enter');
+  const approvedToast = await wait(async () => (await toasts(win)).find((t) => t.includes('수업 결과물로 승인했습니다')), 'approved v1');
   await shot(win, 'm1-app-approved-v1.png');
-  writeFileSync(path.join(ws, 'index.html'), PAGE_V2);
-  await palette(win, '지금 결과물을 수업 결과물로 승인·취소'); await quickPick(win, '이 결과물의 승인 취소'); await wait(async () => (await toasts(win)).some((t) => t.includes('승인을 취소했습니다')), 'v2 not approved');
-  results.M1 = { v1: digest(PAGE_V1).slice(0, 12), v2: digest(PAGE_V2).slice(0, 12) }; step('M1 approved v1 in the app, v2 recorded and not approved', results.M1);
+  await openFile(win, 'index.html'); await approveButton(win, 'editor'); await quickPick(win, '이 결과물의 승인 취소');
+  const cancelToast = await wait(async () => (await toasts(win)).find((t) => t.includes('승인을 취소했습니다') && t.includes(digest(PAGE_V2).slice(0, 8))), 'v2 not approved');
+  await shot(win, 'm1-editor-title-cancel-v2.png');
+  const approvals = mySessions().flatMap((x) => x.lines).filter((l) => l.type === 'artifact_approval').map((l) => [l.artifact_sha256.slice(0, 12), l.approved]);
+  results.M1 = { v1: digest(PAGE_V1).slice(0, 12), v2: digest(PAGE_V2).slice(0, 12), question: shown, approved_toast: approvedToast, cancel_toast: cancelToast, approvals };
+  assert.ok(shown.includes(digest(PAGE_V1).slice(0, 8)), 'the question names the version it is about');
+  assert.ok(approvedToast.includes(digest(PAGE_V1).slice(0, 8)) && approvedToast.includes('고르는 사이에 파일이 바뀌었습니다'), 'the recorded version is the one shown and the change is said: ' + approvedToast);
+  assert.deepEqual(approvals, [[results.M1.v1, true], [results.M1.v2, false]], 'v1 approved (the shown version, not the file at answer time), v2 withdrawn');
+  step('M1 approval from the chat panel title (file changed while asked → the shown v1 is recorded, and said); withdrawal of v2 from index.html\'s editor title', { approvals });
 
   // ── M2: a graceful quit (⌘Q): the session ends with session_close; relaunch = a second session of the same learner ──
   const exited = once(app, 'exit'); await win.keyboard.press('Meta+q'); const graceful = await Promise.race([exited.then(() => true), sleep(20000).then(() => false)]);
@@ -232,6 +248,32 @@ try {
   await I.pick(['A2']); await I.toBulk(); results.M8 = { selection: await page.locator('#ops-selection').innerText(), last: await page.locator('#ops-last-what').innerText() };
   assert.match(results.M8.last, /→ A1 \(지금 선택과 다른 대상\)/); await I.shot('m8-current-a2-previous-a1-1280x720.png');
   await page.locator('#ops-select-none').click(); step('M8 current selection A2 vs previous run A1 are labelled apart', results.M8);
+
+  // ── M10 (review F2): a page over the spool limit, approved from the editor title → stored cut; the card says so and is not complete ──
+  writeFileSync(path.join(ws, 'index.html'), PAGE_BIG); await approveButton(win, 'editor');
+  await wait(() => win.evaluate(() => !!document.querySelector('.quick-input-widget')?.textContent.includes('앞부분만 보관됩니다')), 'the question says only the start is kept');
+  await shot(win, 'm10-approve-big-question.png'); await win.keyboard.type('이 결과물을 수업 결과물로 승인', { delay: 10 }); await sleep(400); await win.keyboard.press('Enter');
+  const bigToast = await wait(async () => (await toasts(win)).find((t) => t.includes(digest(PAGE_BIG).slice(0, 8)) && t.includes('잘린 결과물')), 'approved the big page (named as cut)');
+  const K6 = await I.collect(['A1'], ['artifacts']);
+  const l10 = await wait(async () => { const l = await I.line('collect:' + K6, 'A1'); return /\[적용 \(서버 검증\)\]/.test(l) ? l : null; }, 'A1 artifacts with a cut page verified', 180000);
+  await I.toCard('collect:' + K6); await I.shot('m10-card-cut-artifact-1280x720.png');
+  const item6 = (await local.request(local.base + '/report-batches/' + K6, 'GET', undefined, teacherToken)).json.items.find((i) => i.seat_id === 'A1'), s6 = r2Of(K6).map(([, v]) => v).join('\n');
+  results.M10 = { toast: bigToast, line: l10, coverage: item6.coverage, reasons: item6.extent.reasons, received: item6.extent.received, stored_cut: s6.includes('"content_truncated":true'), stored_end_marker: s6.includes('BIG-PAGE-END') };
+  assert.deepEqual([item6.coverage !== 'complete', item6.extent.reasons.includes('artifact_truncated'), item6.extent.received.truncated_artifacts >= 1, results.M10.stored_cut, results.M10.stored_end_marker], [true, true, true, true, false], JSON.stringify(results.M10));
+  assert.match(l10, /잘린 결과물/, 'the card line names the cut page');
+  step('M10 review F2: an approved page over the spool limit is received as a cut copy — counted, named on the card, not complete', { coverage: item6.coverage, reasons: item6.extent.reasons });
+
+  // ── M11 (review F1): the session ended by ⌘Q (session_close) gets a torn tail on disk → its end is no longer proven ──
+  const closed = readdirSync(path.join(spoolRoot, day)).filter((d) => !d.startsWith('planted-')).map((d) => path.join(spoolRoot, day, d, 'events.jsonl')).filter((f) => existsSync(f)).find((f) => { const last = readFileSync(f, 'utf8').trimEnd().split('\n').at(-1); try { return JSON.parse(last).type === 'session_close' && JSON.parse(last).reason === 'shutdown'; } catch { return false; } });
+  assert.ok(closed, 'a gracefully closed session exists (M2)'); writeFileSync(closed, readFileSync(closed, 'utf8') + '{"schema_version":1,"seq":999,"type":"response","text":"TORN-');
+  const K7 = await I.collect(['A1'], ['prompts']);
+  const l11 = await wait(async () => { const l = await I.line('collect:' + K7, 'A1'); return /\[적용 \(서버 검증\)\]/.test(l) ? l : null; }, 'A1 prompts with a torn earlier session verified', 180000);
+  await I.toCard('collect:' + K7); await I.shot('m11-card-torn-tail-1280x720.png');
+  const item7 = (await local.request(local.base + '/report-batches/' + K7, 'GET', undefined, teacherToken)).json.items.find((i) => i.seat_id === 'A1'), torn = item7.extent.parts.find((p) => p.torn_tail);
+  results.M11 = { line: l11, coverage: item7.coverage, reasons: item7.extent.reasons, torn_part: torn, torn_bytes_stored: r2Of(K7).some(([, v]) => v.includes('TORN-')) };
+  assert.deepEqual([item7.coverage !== 'complete', item7.extent.reasons.includes('torn_tail_dropped'), !!torn && torn.end_proven === false && torn.current === false, results.M11.torn_bytes_stored], [true, true, true, false], JSON.stringify(results.M11));
+  assert.match(l11, /마지막 줄이 잘려 있어/, 'the card line gives the reason');
+  step('M11 review F1: session_close followed by a torn tail is not a proven end — not complete, the reason on the card, torn bytes never sent', { coverage: item7.coverage, reasons: item7.extent.reasons });
 
   // ── M9: the learner withdraws in the app: nothing further is asked, what was held is removed ──
   await palette(win, '수업 기록 보내기 동의·철회'); await dialog(win, '동의 철회'); await wait(async () => (await toasts(win)).some((t) => t.includes('동의를 철회했습니다')), 'withdrawn');
