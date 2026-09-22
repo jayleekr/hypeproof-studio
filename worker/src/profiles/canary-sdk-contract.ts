@@ -104,7 +104,13 @@ export const profile: Profile = {
     series_total: 1,
     series_index: 1,
     hours: 1,
+    // ADR 0010 step 2. Both of these used to be spelled `observation.enabled`
+    // above; they are written out here so that flipping observation does not
+    // move them, and so that the committed profile-serving baseline (this
+    // cohort is 403 on both no-session axes) keeps its exact answer.
+    requires_open_session: true,
   },
+  trial: { individual: true },
   analytics: {
     log_user_messages: false,
     log_metadata: true,

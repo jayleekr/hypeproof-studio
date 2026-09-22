@@ -2443,6 +2443,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           `componentStack:\n${msg.componentStack}`,
         );
         return;
+      // #580 — a trace event lands in the local spool first (spool-then-forward).
+      // Real-time forwarding to the worker (#552, #9d follow-up) can later just read
+      // this spool and send, so the two paths share one schema. The mapping is owned
+      // by a vscode-free helper (traceMsgToWorkflowRecord), and agreement with
+      // trace.ts's field names is pinned by test/trace-workflow-map.smoke.mjs.
       // #751 F4 — the learner's own step action in the lesson panel. Only a step of the CONFIRMED lesson this profile
       // carries is accepted; the record stays in the local spool first, then goes to the class board as ids only.
       case "lessonStep": {
@@ -2476,11 +2481,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.sendRehearsalReport(msg.steps, msg.mission);
         return;
       }
-      // #580 — a trace event lands in the local spool first (spool-then-forward).
-      // Real-time forwarding to the worker (#552, #9d follow-up) can later just read
-      // this spool and send, so the two paths share one schema. The mapping is owned
-      // by a vscode-free helper (traceMsgToWorkflowRecord), and agreement with
-      // trace.ts's field names is pinned by test/trace-workflow-map.smoke.mjs.
+
       case "traceTrialStart":
       case "traceTrialEnd":
       case "traceValidationRun":
@@ -2779,10 +2780,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     let spoolRuntime: "proxy" | "agent-sdk" | null = null;
     let spoolStatus: "ok" | "error" = "ok";
     let spoolErrorKind: string | undefined;
-    let opsSdkFallback = false;
-    let opsFailure: { status?: number; code?: string; requestId?: string } = {};
     // Why a holder: TS's CFA cannot see the reassignment inside the callback, so a
     // plain let is narrowed to null by the time finally runs.
+    let opsSdkFallback = false;
+    let opsFailure: { status?: number; code?: string; requestId?: string } = {};
     const sdkTurnTotal: {
       current: { usage: Record<string, unknown>; totalCostUsd: number | null } | null;
     } = { current: null };
@@ -3223,10 +3224,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           // just stamped is wiped along with it, surviving in the webview only and not
           // in the history (it disappears when the window is reopened).
           this.noteSdkFallback(err.message, streamId);
-          opsSdkFallback = true;
           // #580 — the runtime this turn actually ran on is proxy. A fallback is a
           // state, but it is recorded as an event too — the evidence for quantifying
           // "why did a turn with no usage happen?".
+          opsSdkFallback = true;
           spoolRuntime = "proxy";
           this.spool?.recordWorkflow({
             turnId: streamId,
@@ -3284,11 +3285,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // The host is the only party that knows a turn ended (an auxiliary request of the same turn ends with end_turn before
       // the main loop does). A closed turn id is refused by the Service from then on; best effort, bounded by the Service.
       if (bindingKey && token) void closeTurn({ proxyUrl, token, turnId: streamId, outcome: ctrl.signal.aborted ? "aborted" : spoolStatus === "ok" ? "completed" : "failed" });
-      // #751 F4 — what actually happened to this turn, from the real runtime path. No text leaves here.
-      this.opsObserver?.turnResult({ ok: spoolStatus === "ok", aborted: ctrl.signal.aborted, runtime: spoolRuntime === "agent-sdk" ? "agent-sdk" : "proxy", sdkFallback: opsSdkFallback, ...(spoolErrorKind ? { errorKind: spoolErrorKind } : {}), ...opsFailure });
       // #580 — always record the end of the turn. A user abort also arrives through
       // catch, so the signal is checked first. When there is an SDK turn total it is
       // carried along — the control against the sum of the per-request usage records.
+      // #751 F4 — what actually happened to this turn, from the real runtime path. No text leaves here.
+      this.opsObserver?.turnResult({ ok: spoolStatus === "ok", aborted: ctrl.signal.aborted, runtime: spoolRuntime === "agent-sdk" ? "agent-sdk" : "proxy", sdkFallback: opsSdkFallback, ...(spoolErrorKind ? { errorKind: spoolErrorKind } : {}), ...opsFailure });
       const total = sdkTurnTotal.current;
       const finalSpoolStatus = ctrl.signal.aborted ? "aborted" : spoolStatus;
       await Promise.all(observationCaptures);

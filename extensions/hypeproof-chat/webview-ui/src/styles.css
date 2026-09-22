@@ -1205,9 +1205,6 @@ html, body, #root {
 .hp-rail-lesson summary { min-height: 44px; cursor: pointer; padding: 10px 4px; }
 .hp-rail-lesson-meta, .hp-rail-lesson-note { color: var(--hp-muted); font-size: 12px; }
 .hp-rail-lesson :focus-visible { outline: 2px solid var(--hp-accent); outline-offset: 2px; }
-/* #751 — the learner's own "I finished this step" report. Quiet: region A keeps the one Primary. */
-.hp-rail-step-report { margin: 0 12px 8px; flex-shrink: 0; }
-.hp-rail-step-report button { min-height: 44px; }
 
 .hps-native-observation { margin: 8px 12px; padding: 12px; border: 1px solid var(--vscode-panel-border,#777); border-radius: 8px; max-height: 50vh; overflow: auto; flex-shrink: 0; }
 .hps-native-observation pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }

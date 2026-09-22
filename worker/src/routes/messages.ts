@@ -3,6 +3,7 @@ import { resolveExecutionAccess, reserveBudgetAttempt, dispatchBudgetAttempt, bu
 import { AccessError } from '../lib/access-contracts';
 import { finishModelRequest, measureUsage } from '../lib/model-usage';
 import { crossProviderEnabled } from '../profiles/types';
+import { filterInboundImages, summarizeImageReport } from '../lib/inbound-images';
 import { captureUsageCost } from '../lib/usage-costs';
 
 import { applyRequestEffort, EffortPolicyError, type EffortReceipt } from '../lib/model-effort';
@@ -410,6 +411,36 @@ messages.post("/messages", async (c) => {
     raw.messages = (raw.messages as Array<Record<string, unknown>>).map((m) =>
       typeof m?.content === "string" ? { ...m, content: trimMinorContext(m.content) } : m,
     );
+  }
+
+  // #811 — the image boundary on this path. The proxy path has filtered
+  // participant images since the copyclone work (`filterMessages(body,
+  // profile.input?.image_paste === true, …)`); this route had no image
+  // handling at all, and BOTH registered child cohorts run here
+  // (`coach_runtime: "agent-sdk"`), neither of them opting into image_paste.
+  //
+  // The discriminator is structural, not role-based: a tool's output arrives
+  // as a `tool_result` block inside a user-role message, so filtering by role
+  // would cut the browser screenshot loop. Top-level image blocks are the
+  // participant's and are dropped when the cohort did not opt in; images
+  // inside tool_result are the coach's own and are never dropped. Count and
+  // size caps apply on both sides — those are a cost/abuse bound, not policy.
+  //
+  // Loud on purpose. The reason this was left undone is that a wrong filter
+  // breaks the screenshot loop *quietly*; every removal is logged and put on
+  // the response, so a regression names itself.
+  {
+    const filtered = filterInboundImages(raw.messages, {
+      allowUserImages: profile.input?.image_paste === true,
+    });
+    raw.messages = filtered.messages as typeof raw.messages;
+    const summary = summarizeImageReport(filtered.report);
+    if (summary) {
+      console.warn(
+        `[${c.get("requestId")}] /v1/messages image boundary: ${summary} profile=${profile.id}`,
+      );
+      c.header("x-hps-images-filtered", summary.replace(/ /g, ","));
+    }
   }
 
   const stream = raw.stream === true;
