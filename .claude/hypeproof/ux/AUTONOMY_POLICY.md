@@ -13,7 +13,10 @@
 - 세션 설계 파일의 필드 이름(설계 문서의 예시를 따름)과 3주차 예시 내용(원문 GlobalBuddy 그대로)
 - 한국어 카피의 문장 선택. 규칙: 합니다체, 행동이 주어, 금지 라벨 없음, 원문의 "쓴다" 열을 우선 사용
 - 기존 테스트 파일에 대한 의도적 구조 변경 시 스펙 갱신(단언을 약하게 하지 않는 한)
-- 서브에이전트 분할, 병렬 정도, 재시도 횟수(한도 안에서)
+- 서브에이전트 분할, 병렬 정도, 재시도 횟수(한도 안에서). **그 한도는
+  [`.claude/rules/gh-budget.md`](../../rules/gh-budget.md) 다** — 읽기·테스트 fan-out 은
+  자유지만 `gh` 를 부르는 에이전트는 한 번에 하나다. 검토 에이전트 26개가 시간당 5000 을
+  태워 PR 생성을 한 시간 막은 적이 있다
 
 해결 순서: `docs/requirements/studio-learning-experience.md` → `docs/design/studio-learning-experience.md` → 원문 `ui-philosophy-2026-09-18.md` → 기존 저장소 관례 → 평가자 피드백.
 

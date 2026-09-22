@@ -115,7 +115,23 @@ await check('T-08/T-09 deliver immutable lesson only to registered students in a
  assert.equal(received.json.lesson.content.title,content.title); // draft already changed to new
  const legacy=await request('/v1/profile','GET',undefined,student);assert.equal(legacy.status,200);assert.equal(legacy.json.lesson,undefined);
  assert.deepEqual(received.json.sdk_tools,legacy.json.sdk_tools);
- assert.equal(received.json.display_name,content.title);assert.match(received.json.welcome.greeting_md,/진료시간 수정/);
+ assert.equal(received.json.display_name,content.title);
+ // #1222 G4 — a lesson supplies the lesson; it does not rewrite the cohort's copy.
+ //
+ // This line used to assert the opposite: `/진료시간 수정/`, i.e. that the served
+ // greeting had become the lesson's own text. That is what made attaching a lesson to
+ // a kids seat replace "아래 친구 버튼을 눌러요 👇" — the sentence that points a child
+ // at the only affordance that works — with "내 수업에서 과제와 확인 기준을 읽고
+ // 시작하세요." The assertion is re-pointed at the corrected contract, not relaxed:
+ // both directions are now pinned, where before only one was.
+ assert.equal(received.json.welcome.greeting_md,legacy.json.welcome.greeting_md,
+   '수업을 붙였더니 코호트 인사말이 바뀌었다 — 코호트 프로필은 코호트의 것이다');
+ assert.doesNotMatch(received.json.welcome.greeting_md,/진료시간 수정/,
+   '수업 본문이 인사말로 새어 나왔다');
+ // Positive control: the lesson still reaches the seat, through the channels that own
+ // it. Without this the case above is satisfied by a route that drops the lesson.
+ assert.equal(received.json.lesson.content.learning?.mission ?? null,content.learning?.mission ?? null);
+ assert.equal(received.json.display_name,content.title);
  const {verify}=await import('../src/lib/tokens.ts');const claim=await verify(r.json.token,TEST_SECRET);
  const bad=(await issue({u:'student',c:cohort,p:profileId,lesson:{...claim.lesson,sha256:'0'.repeat(64)}},1,TEST_SECRET)).token;
  assert.equal((await request('/v1/profile','GET',undefined,bad)).status,409);
