@@ -61,6 +61,9 @@ try {
   const states = async (p) => (await steps(p)).map((s) => s.state);
   // Wait until the four steps read as expected (the page polls and advances on its own); fail with what it did show.
   const until = async (p, want, why, timeout = 30000) => { const end = Date.now() + timeout; let got; while (Date.now() < end) { got = await steps(p); if (want.every((w, i) => w === null || got[i].state === w)) return got; await p.waitForTimeout(150); } throw Error(why + ': want ' + JSON.stringify(want) + ' got ' + JSON.stringify(got, null, 1)); };
+  // A status word's colour and size against its own card (WCAG relative luminance).
+  const badgeLook = (p, state) => p.locator('#ops-wrap-steps > li.wrap-' + state + ' .wrap-badge').first().evaluate((e) => { const lum = (c) => c.match(/[\d.]+/g).slice(0, 3).map(Number).map((x) => x / 255).map((x) => x <= .04045 ? x / 12.92 : ((x + .055) / 1.055) ** 2.4).reduce((a, x, i) => a + x * [.2126, .7152, .0722][i], 0);
+    const fg = getComputedStyle(e).color, bg = getComputedStyle(e.closest('li')).backgroundColor, [a, b] = [lum(fg), lum(bg)].sort((x, y) => y - x); return { text: e.textContent, color: fg, size: parseFloat(getComputedStyle(e).fontSize), contrast: Math.round((a + .05) / (b + .05) * 100) / 100 }; });
   const shot = async (p, name) => { await p.locator('#ops-wrap').scrollIntoViewIfNeeded(); await p.locator('#ops-wrap').screenshot({ path: path.join(out, name) }); };
   const finish = async (p) => { const prev = await p.evaluate(() => finishBatch); await p.locator('#ops-finish-dry').uncheck(); await p.locator('#ops-finish-go').click(); await p.waitForFunction((x) => finishBatch && finishBatch !== x, prev); return p.evaluate(() => finishBatch); };
   const refresh = (p) => p.locator('#refresh').click();
@@ -96,6 +99,7 @@ try {
   const approve = async (student) => { await page.locator('#ops-reports-list p').filter({ hasText: student }).getByRole('button', { name: '초안 열기' }).click(); await page.getByRole('button', { name: '근거 확인하고 내용 승인' }).click(); await page.locator('#ops-reports-state').filter({ hasText: '검수 결과를 저장했습니다' }).waitFor(); };
   await approve('student-01'); s = await until(page, ['blocked', 'blocked', 'partial', 'idle'], 'one of two approved');
   assert.match(s[2].text, /^3 검수 ◐ 일부만\n내용 승인 1 \/ 초안 2건 · 검수 대기 1/); await shot(page, 'wrap-mixed-partial-1280.png');
+  { const look = await badgeLook(page, 'blocked'), body = await page.locator('#ops-wrap-steps > li.wrap-blocked p').first().evaluate((e) => getComputedStyle(e).color); assert.ok(look.contrast >= 4.5 && look.size >= 14, JSON.stringify(look)); assert.notEqual(body, 'rgb(255, 157, 140)', 'the card body is not painted with the page-wide red .blocked colour'); }
   assert.equal((await recipients(['student-01'])).status, 201); await page.locator('#ops-recipients-go').click(); await page.locator('#ops-delivery-state').filter({ hasText: '보낼 메시지 1건' }).waitFor();
   await page.locator('#ops-approve-go').click(); await page.locator('#ops-delivery-state').filter({ hasText: '아직 아무것도 보내지 않았습니다' }).waitFor(); s = await until(page, [null, null, null, 'idle'], 'approved, not sent'); assert.match(s[3].text, /발송 승인 1건 · 아직 보내지 않았습니다/); assert.equal(mails.length, 0);
   await page.locator('#ops-send-go').click(); await page.locator('#ops-send-yes').click(); s = await until(page, [null, null, null, 'pending'], 'provider accepted');
@@ -132,7 +136,7 @@ try {
   await page.locator('#ops-deliveries-go').click(); s = await until(page, [null, null, null, 'partial'], 'three delivered'); assert.match(s[3].text, /전달 확인 3 \/ 보낸 메시지 4건 · 제공자 접수 1 \(전달 미확인\)/);
   await delivered('resend-wrap-' + String(before + 4).padStart(4, '0')); await page.locator('#ops-deliveries-go').click();
   s = await until(page, ['done', 'done', 'done', 'done'], 'everything delivered'); results.finished = s; assert.match(s[3].text, /^4 발송 ✓ 완료\n전달 확인 4 \/ 보낸 메시지 4건 — 전달은 열람이 아닙니다/);
-  const done = await page.locator('#ops-wrap-steps > li.done .wrap-badge').first().evaluate((e) => ({ color: getComputedStyle(e).color, size: parseFloat(getComputedStyle(e).fontSize) })); assert.ok(done.size >= 14, JSON.stringify(done));
+  const done = await badgeLook(page, 'done'); assert.ok(done.size >= 14 && done.contrast >= 4.5, JSON.stringify(done));
   await shot(page, 'wrap-finished-1280.png'); ok('E route-backed finished: 4/4 verified with whole coverage, 4/4 drafted, 4/4 approved, 4/4 delivered (after 3/4 = 일부만) read ✓ 완료 in words');
 
   // ── F. transient errors ──
