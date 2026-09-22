@@ -3,6 +3,8 @@ import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
 import { MissionHeader } from './MissionHeader';
 import { EvidenceDrawer } from './EvidenceDrawer';
+import { LessonStepPanel } from './LessonStepPanel';
+import type { StepWork } from '../../src/lessonFocus';
 import { InstructorInbox } from './InstructorInbox';
 import { HelpRequest } from './HelpRequest';
 import { acceptHelp } from '../../src/classroomHelp';
@@ -203,6 +205,13 @@ export function ChatPanel(props: Props) {
   const [lessonSteps, setLessonSteps] = useState<Record<string, 'in_progress' | 'submitted'>>({});
   // SX-01/SX-02 — the step currently being viewed. A **view state**. Not a completion judgment.
   const [currentStepId, setCurrentStepId] = useState<string | null>(null);
+  // #751 G2 — the learner's saved work-surface entries for the current lesson digest, and the rehearsal send result.
+  const [lessonWork, setLessonWork] = useState<{ sha256: string; work: Record<string, StepWork> } | null>(null);
+  const [rehearsalResult, setRehearsalResult] = useState<{ state: "sending" | "sent" | "error"; verdict?: string; reasons?: string[]; message?: string } | null>(null);
+  useEffect(() => onHostMessage((msg) => {
+    if (msg.type === "lessonWorkState") setLessonWork({ sha256: msg.sha256, work: msg.work });
+    if (msg.type === "rehearsalState") setRehearsalResult({ state: msg.state, verdict: msg.verdict, reasons: msg.reasons, message: msg.message });
+  }), []);
   /**
    * SX-14·15·17 — the learning state the host computed and sent. **It is not
    * recomputed here.** null means this connection does not use learning events (it is
@@ -752,6 +761,8 @@ export function ChatPanel(props: Props) {
             <p>확인 기준: {step.acceptance}</p>
             <p className="hp-rail-lesson-note">안내를 읽은 것만으로 이 단계가 끝나지는 않습니다. 직접 만들고 확인한 기록이 남아야 합니다.</p>
           </details>
+          <LessonStepPanel lesson={lesson} step={step} rehearsal={config.profile.rehearsal} busy={streaming} post={postToHost}
+            work={lessonWork?.sha256 === lesson.sha256 ? lessonWork.work : {}} rehearsalState={rehearsalResult} />
           {/* #751 F4 — the learner decides when the CURRENT step is done. It goes to the class board as their own
               statement ("강사 확인 전"), never as a verified result, and it is not the completion gate of region D.
               Quiet on purpose: the screen's one Primary stays region A's "지금 할 행동" (SX-01·SX-04). */}

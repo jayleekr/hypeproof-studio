@@ -135,6 +135,8 @@ export interface LessonBindingView { key: string; seq: number; source: "token" |
 export interface ResolvedProfile {
   /** #751 U3 — which lesson binding the Service executes this seat under. Present only where bindings are enforced. The app sends `key` back as its expectation; it never selects a lesson with it. */
   lesson_binding?: LessonBindingView;
+  /** #751 G2 — present when this code is an instructor's learner-condition rehearsal of `version`. Data only: grants nothing. */
+  rehearsal?: { id: string; course_id: string; version: string; expires_at: number; judged: boolean };
   /** Server-verified identity; never an execution grant. */
   activity_id?: string;
   /** Presentation only; derived from authenticated Service access, never grants authority. */
@@ -382,6 +384,12 @@ export type WebviewMessage = (
   // with worker/src/routes/trace.ts TraceEvent union.
   // #751 F4 — explicit learner step action in the lesson panel (never inferred from chat volume).
   | { type: "lessonStep"; stepId: string; status: "in_progress" | "submitted" }
+  // #751 G2 — the step on screen and the help mode the learner picked for the NEXT turn; the host re-checks both against the lesson.
+  | { type: "lessonFocus"; stepId: string; helpMode: string | null }
+  // #751 G2 — a work-surface save (criterion_form → criterion, decision_form → decision) for one step of the current lesson.
+  | { type: "lessonWork"; stepId: string; kind: "criterion" | "decision"; text: string; reason?: string }
+  // #751 G2 — rehearsal only: what the panel DREW for each step, read back from the rendered DOM. The host adds App identity and sends it.
+  | { type: "rehearsalSend"; steps: import("./lessonFocus").RenderedStep[] }
   // #751 U2 — the inbox of instructor notices/materials. `generation` is the connection the card list was drawn under: the
   // host answers a callback from an older one with nothing. Opening a card is kept on this device; it is not reported.
   | { type: "inboxRequest" }
@@ -444,6 +452,9 @@ export type HostMessage = (
   | { type: 'learningState'; state: import('./learningStateHelpers').LearningStatePayload }
   | StartResponse
   | { type: "config"; config: ChatConfig }
+  /** #751 G2 — the learner's saved work-surface entries for the lesson `sha256` (read from this device), and the rehearsal result. */
+  | { type: "lessonWorkState"; sha256: string; work: Record<string, import("./lessonFocus").StepWork> }
+  | { type: "rehearsalState"; state: "sending" | "sent" | "error"; verdict?: string; reasons?: string[]; message?: string }
   /** #751 U2 — always read from disk by the host; the webview holds no copy of record. */
   | { type: "inboxState"; inbox: import("./classroomInbox").InboxView }
   | { type: "helpState"; help: import("./classroomHelp").HelpView }
