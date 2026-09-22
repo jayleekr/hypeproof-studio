@@ -9,6 +9,13 @@ export const profile: Profile = {
   display_name: '내 삶에 AI 더하기 · GPT 실습',
   dashboard_hidden: true,
   observation: { enabled: false },
+  // ADR 0010 step 2. This profile spreads studio-native-trial, which declares
+  // `trial: { individual: true }` — and `trial` is NOT one of the keys
+  // overridden below, so without this line the personal-trial mint would widen
+  // from two profiles to four (studio-model-practice spreads THIS one in turn).
+  // The same shape as `observation: { enabled: false }` right above, and for
+  // the same reason: inheritance here is by spread, so silence is consent.
+  trial: { individual: false },
   coach_runtime: 'proxy',
   model: { provider: 'openai', default: 'gpt-5.6-luna',
     allowed: ['gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol'], max_tokens: 4096 },

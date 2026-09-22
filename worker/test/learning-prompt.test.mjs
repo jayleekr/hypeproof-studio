@@ -303,6 +303,69 @@ try {
     assert.equal(mod().learningInstruction(plainContent, 'expect'), '');
     assert.equal(mod().learningInstruction(plainContent, undefined), '');
   });
+
+  // ─── #1222 G5 — §10's situation table is not for a child's seat ──────────
+  //
+  // The table is written for the adult product course. One of its five
+  // situations is '가격 결정' and it carries its example verbatim:
+  //
+  //   "무료 / $4.99 / 학교 구매 중 누가 지불하는지부터 비교해볼까요?"
+  //
+  // That was being appended to the system prompt of a coach talking to an
+  // 8-year-old the moment a lesson carried a `learning` block. Two of the five
+  // situations ('가격 결정', '사용자 반응이 없음') do not occur in a kids class
+  // at all.
+  await check('G5 minor: §10 대화 계약 표가 아이 좌석 프롬프트에 안 들어간다', async () => {
+    const kid = mod().learningInstruction(week3, 'expect', true);
+    assert.doesNotMatch(kid, /\$4\.99/, '아이 프롬프트에 가격 예시가 들어갔다');
+    assert.doesNotMatch(kid, /가격 결정/, '아이 프롬프트에 가격 결정 상황이 들어갔다');
+    assert.doesNotMatch(kid, /\[대화 계약\]/, '아이 프롬프트에 대화 계약 표가 들어갔다');
+    // Withheld, not gutted: everything else the block teaches must survive.
+    assert.match(kid, /\[개입 사다리\]/, '사다리까지 같이 사라졌다');
+    assert.match(kid, /\[언어 규칙\]/, '언어 규칙까지 같이 사라졌다 — 이건 나이와 무관하다');
+    assert.match(kid, /학생을 대신해 최종 선택을 확정하는 문장으로 응답을 끝내지 마세요/,
+      '표는 뺐는데 그 표의 결론까지 뺐다 — 이 문장이 그 절의 요점이다');
+    assert.ok(kid.includes(week3.learning.mission), '미션이 사라졌다');
+  });
+
+  // The two cases above call learningInstruction() directly, and that is not the
+  // claim. This file's own header says it: "learningInstruction() alone cannot tell
+  // whether chat-gate really appended it." Dropping the third argument at the call
+  // site leaves both of them green — verified by planting exactly that. So the claim
+  // is measured where it matters, on the ASSEMBLED prompt the coach receives.
+  await check('G5 도달성: 조립된 프롬프트에서도 아이 좌석엔 가격 예시가 없다', async () => {
+    const { getProfile } = await import('../src/profiles/index.ts');
+    const profile = getProfile(local.profileId);
+    assert.ok(profile, `${local.profileId} 가 레지스트리에 없다 — 이 테스트의 대상이 옮겨갔다`);
+    const adultPrompt = await promptOf(w3Token);
+    assert.ok(adultPrompt.includes('$4.99'), '어른 좌석 대조군이 성립하지 않는다');
+
+    const original = profile.minor_cohort;
+    profile.minor_cohort = true;
+    try {
+      const kidPrompt = await promptOf(w3Token);
+      assert.ok(!kidPrompt.includes('$4.99'),
+        '미성년 코호트인데 조립된 프롬프트에 가격 예시가 들어갔다 — 게이트가 플래그를 안 넘긴다');
+      assert.ok(!kidPrompt.includes('[대화 계약]'), '미성년 코호트에 대화 계약 표가 들어갔다');
+      // Same seat, same lesson: only the cohort's age changed. Everything the lesson
+      // itself carries must be identical, or this is measuring the wrong thing.
+      assert.ok(kidPrompt.includes(week3.learning.mission), '미션까지 사라졌다');
+      assert.ok(kidPrompt.includes('[개입 사다리]'), '사다리까지 사라졌다');
+    } finally {
+      profile.minor_cohort = original;
+    }
+  });
+
+  await check('G5 adult: 어른 좌석은 표를 그대로 받는다 — 양성 대조군', async () => {
+    // Without this, withholding the table from EVERY seat would pass the case
+    // above, and the adult course would silently lose its §10 guidance.
+    const adult = mod().learningInstruction(week3, 'expect', false);
+    assert.match(adult, /\[대화 계약\]/);
+    assert.match(adult, /\$4\.99/);
+    // And the default must stay the adult shape: the flag is opt-in, so a caller
+    // that has not been taught about it cannot accidentally strip an adult seat.
+    assert.equal(adult, mod().learningInstruction(week3, 'expect'), '기본값이 어른 형태가 아니다');
+  });
 } finally {
   local.close();
 }
