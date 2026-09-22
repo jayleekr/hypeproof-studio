@@ -1922,6 +1922,62 @@
       ]
     },
     {
+      "id": "ST-TEST-CHALK-REHEARSAL",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-TEST-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/authoring-rehearsal.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/lesson-focus.smoke.mjs"
+        },
+        {
+          "path": "e2e/classroom/authoring-g2.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-curriculum.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-REHEARSAL",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-AUTHORING",
+        "ST-DES-CHALK-AUTHORING",
+        "ST-TEST-CHALK-REHEARSAL"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/lesson-rehearsal.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-rehearsal-store.ts"
+        },
+        {
+          "path": "worker/src/routes/rehearsal-report.ts"
+        },
+        {
+          "path": "worker/migrations/0026-authoring-rehearsal.sql"
+        },
+        {
+          "path": "chalk/src/ui/authoring.html"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/lessonFocus.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/LessonStepPanel.tsx"
+        }
+      ]
+    },
+    {
       "id": "ST-REQ-CLASSROOM-ADMIN",
       "stage": "requirement",
       "owner": "jayleekr",

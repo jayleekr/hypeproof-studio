@@ -57,9 +57,20 @@ assert.match(
 );
 assert.match(
   authoring,
-  /const stepFormKeys=\['id','title','instructions','hint','acceptance'\];/,
-  'the form declares which step keys it owns — help/ui/evidence/gate are not among them',
+  /const stepFormKeys=\['id','title','instructions','hint','acceptance','help','ui'\];/,
+  'the form declares which step keys it owns — since G2 help and ui have their own controls; evidence/gate are still only preserved',
 );
+// #751 G2 — per-step help choices and work surface are EDITED here (not only preserved), and the controls say what they are.
+assert.match(authoring, /function stepTeachingValue\(f\)\{/, 'help/ui are produced from the step controls');
+assert.match(authoring, /\.\.\.\(on\.length\?\{help:\{default:on\.includes\(def\)\?def:on\[0\],allowed:on\}\}:\{\}\)/, 'no help block when no mode is chosen; the default is always one of the allowed modes');
+assert.match(authoring, /지원 전 값 유지: /, 'a ui value this Studio cannot draw is kept and named, never dropped');
+assert.match(authoring, /도움 방식은 AI가 돕는 방법이며 도구 권한을 바꾸지 않습니다/, 'the copy says help grants nothing');
+// #751 G2 — candidate → rehearsal → confirmation. Freezing is not confirmation and issuing a code is not readiness.
+assert.match(authoring, /<button id="freeze" disabled>저장한 초안을 리허설 후보로 고정<\/button>/);
+assert.doesNotMatch(authoring, /강의가 확정되었습니다/, 'freezing no longer claims the course is confirmed');
+assert.match(authoring, /\$\('confirm-go'\)\.disabled=busy\|\|readiness\?\.state!=='passed'/, 'confirmation is offered only on a passed rehearsal');
+assert.match(authoring, /리허설 중 — 코드를 발급했고 Studio의 결과를 기다립니다 \(준비 완료 아님\)/);
+assert.doesNotMatch(authoring, /readiness-detail'\)\.innerHTML|impact-view'\)\.innerHTML/, 'server text is never rendered as HTML');
 assert.match(
   authoring,
   /function carry\(c\)\{carriedTop=Object\.fromEntries\(Object\.entries\(c\)\.filter\(\(\[k\]\)=>!formKeys\.includes\(k\)\)\);/,
@@ -78,8 +89,8 @@ assert.match(
 );
 assert.match(
   authoring,
-  /return \{\.\.\.carriedStep\.get\(own\.id\),\.\.\.own\};/,
-  'a step’s preserved keys are restored under the values the form produced',
+  /return \{\.\.\.carriedStep\.get\(own\.id\),\.\.\.own,\.\.\.stepTeachingValue\(f\)\};/,
+  'a step’s preserved keys are restored under the values the form produced (text fields, then help/ui controls)',
 );
 
 const learn = await page('/learn');
