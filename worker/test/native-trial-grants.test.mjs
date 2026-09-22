@@ -339,3 +339,136 @@ test('profile labels an authorized native grant as trial without creating anothe
   assert.equal(db.prepare('SELECT requests_used FROM native_trials').get().requests_used,0);
  } finally {db.close();}
 });
+
+// ---------------------------------------------------------------------------
+// ADR 0010 step 2 — who may be minted an individual trial seat
+// ---------------------------------------------------------------------------
+//
+// Until now the answer was `observation.enabled`, and NOTHING tested it: the
+// string 'profile does not support individual trials' appeared exactly once in
+// the repository, in the source. So the mintable set could be widened — by a
+// default, by a `??` fallback, by a profile inheriting a block through
+// structuredClone — and every suite would stay green. The refusal side is the
+// side that matters here, so it gets the assertions.
+
+const { listProfiles, getProfile } = await import('../src/profiles/index.ts');
+
+test('exactly two profiles may mint an individual trial seat', async () => {
+  // A set assertion, not a per-profile one, because the failure mode is a
+  // profile JOINING the set without anyone writing a line about it. Three of
+  // the nine profiles are built by spreading another one
+  // (studio-gpt-practice spreads studio-native-trial, studio-model-practice
+  // spreads studio-gpt-practice, homepage-practice spreads the dental cohort),
+  // so a `trial` block placed on a base profile is inherited in silence — the
+  // same trap ADR 0010 documents for `observation`.
+  //
+  // If this list is meant to change, change it here and say why in the commit.
+  assert.deepEqual(
+    listProfiles().filter((p) => p.trial?.individual === true).map((p) => p.id).sort(),
+    ['canary-sdk-contract', 'studio-native-trial'],
+  );
+  // And the minors are on the other side of it, named rather than implied.
+  for (const id of ['sk-biopharm-kids-2026-grade-3-4-s1', 'sk-biopharm-kids-2026-grade-5-6-s1'])
+    assert.notEqual(getProfile(id)?.trial?.individual, true, `${id} 가 개인 체험 발급 대상이 됐다`);
+});
+
+test('the mint route refuses a cohort that does not declare trial.individual', async () => {
+  const { db, env } = fixture();
+  try {
+    const app = await bootApp();
+    // Scoped, authorized, session-capable issuer — everything the route asks
+    // for EXCEPT the profile's own declaration. Without this the test could
+    // pass on an unrelated 403 and prove nothing.
+    const kids = { profile: 'sk-biopharm-kids-2026-grade-3-4-s1', cohort: 'sk-biopharm-2026-a' };
+    const issuer = (await issueIssuer({
+      issuer: 'synthetic-instructor',
+      scopes: [{ cohort: kids.cohort, profiles: [kids.profile], max_hours: 24, can_start_session: true, max_session_hours: 1 }],
+    }, 48, TEST_SECRET)).token;
+    const mint = (body) => app.fetch(new Request('https://test/admin/tokens/issue', {
+      method: 'POST',
+      headers: { authorization: 'Bearer ' + issuer, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }), env, makeCtx());
+
+    const refused = await mint({ u: 'synthetic-person', c: kids.cohort, p: kids.profile, hours: 1, native_trial: true });
+    assert.equal(refused.status, 400, `아이 코호트에 개인 체험 좌석이 발급됐다 — ${refused.status}`);
+    assert.equal((await refused.json()).error, 'profile does not support individual trials');
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM native_trials').get().n, 0, '거절했는데 grant 행이 생겼다');
+
+    // The hazard the ADR is actually about, made measurable: turning observation
+    // ON for this cohort must not hand it an admin capability. It used to —
+    // `observation.enabled` WAS the mint condition — and a `trial?.individual ??
+    // observation?.enabled` fallback would quietly bring that back while every
+    // other assertion in this file stayed green.
+    const child = getProfile(kids.profile);
+    const childObservation = child.observation;
+    child.observation = { enabled: true, record: true, assess: false };
+    try {
+      const stillRefused = await mint({ u: 'synthetic-person', c: kids.cohort, p: kids.profile, hours: 1, native_trial: true });
+      assert.equal(stillRefused.status, 400, '관측을 켰더니 아이 코호트가 개인 체험 발급 대상이 됐다');
+      assert.equal((await stillRefused.json()).error, 'profile does not support individual trials');
+    } finally { child.observation = childObservation; }
+
+    // And the field this test is NAMED after, pinned.
+    //
+    // Everything above is also satisfied by a route that reads
+    // `session.requires_open_session`: all four flags (record, assess,
+    // trial.individual, requires_open_session) are true on exactly the same two
+    // profiles today, so on the shipped registry they are indistinguishable.
+    // The /v1/profile cases next door set them apart with the canary; this is
+    // the same move for the mint route. Without it, swapping the two conditions
+    // ships green — and then the day a class cohort declares
+    // `requires_open_session` (which is what the field is FOR) that cohort
+    // becomes mintable as a personal, out-of-class, minor-facing seat.
+    const childSession = child.session;
+    child.session = { ...childSession, requires_open_session: true };
+    try {
+      const wrongField = await mint({ u: 'synthetic-person', c: kids.cohort, p: kids.profile, hours: 1, native_trial: true });
+      assert.equal(wrongField.status, 400, '세션 게이트 플래그가 체험 좌석 발급을 열었다 — 두 조건이 뒤바뀌었다');
+      assert.equal((await wrongField.json()).error, 'profile does not support individual trials');
+    } finally { child.session = childSession; }
+
+    // The mirror: the declaration alone is what opens it, with the session flag
+    // absent. Otherwise the two cases above pass against a route that refuses
+    // every kids seat for some unrelated reason.
+    const childTrial = child.trial;
+    child.trial = { individual: true };
+    try {
+      await env.HPS_KV.put(`cohort:${kids.cohort}:roster`, JSON.stringify({ users: ['synthetic-person'] }));
+      const minted = await mint({ u: 'synthetic-person', c: kids.cohort, p: kids.profile, hours: 1, native_trial: true });
+      assert.equal(minted.status, 200, `trial.individual 을 켰는데 발급되지 않았다 — ${await minted.text()}`);
+    } finally {
+      child.trial = childTrial;
+      await env.HPS_KV.delete(`cohort:${kids.cohort}:roster`);
+    }
+
+    // Positive control on the same route and the same issuer shape: an ordinary
+    // classroom seat on that cohort still mints. Otherwise this test would also
+    // pass against a route that refused everything.
+    const ordinary = await mint({ u: 'synthetic-person', c: kids.cohort, p: kids.profile, hours: 1 });
+    assert.equal(ordinary.status, 200, `일반 좌석까지 막혔다 — ${await ordinary.text()}`);
+  } finally { db.close(); }
+});
+
+test('the chat gate refuses a seat whose profile stopped declaring trial.individual', async () => {
+  // The runtime twin of the check above. They read the same field because a
+  // seat that mints and then never gets a session is unrecoverable from the
+  // student's side: `startNativeGrant` is what starts the one-hour window.
+  const { db, env } = fixture();
+  const profile = getProfile('studio-native-trial');
+  const original = profile.trial;
+  try {
+    await env.HPS_KV.put('cohort:studio-native-trial:roster', JSON.stringify({ users: ['synthetic-person'] }));
+    const token = await credential();
+    await createNativeGrant(env, await verify(token, TEST_SECRET), 'synthetic-instructor');
+    const app = await bootApp();
+    const ask = () => app.fetch(new Request('https://test/v1/profile', { headers: { authorization: 'Bearer ' + token } }), env, makeCtx());
+
+    assert.equal((await ask()).status, 200, '선언이 살아 있는데 좌석이 막혔다');
+
+    profile.trial = { individual: false };
+    const refused = await ask();
+    assert.equal(refused.status, 403, `선언을 껐는데 좌석이 계속 열렸다 — ${refused.status}`);
+    assert.equal((await refused.json()).error.type, 'session_inactive');
+  } finally { profile.trial = original; db.close(); }
+});

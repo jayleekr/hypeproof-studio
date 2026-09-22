@@ -149,9 +149,31 @@ const text = visibleText(html);
   assert.ok(bareText.includes("미션이 정해지지 않았습니다"), bareText);
   assert.doesNotMatch(bareText, /주차/, "learning 이 없는데 주차를 지어냈다");
 
-  // (c) Even with no lesson at all, the header says something.
-  const none = visibleText(await renderComponent("MissionHeader", { ...homeProps, lesson: null }));
-  assert.ok(none.includes("아직 연결된 수업이 없습니다"), none);
+  // (c) With no design file at all, the header invents nothing.
+  //
+  // This case used to assert the opposite — that the header "says something", namely
+  // "아직 연결된 수업이 없습니다." in the <h1>. That sentence appears in no requirement
+  // row, and it is what ALL NINE cohorts would have shown the day this header shipped,
+  // because none of them has a session design published. SX-02's negative for this
+  // exact state is "설계 파일이 없으면 '지난번 이어서'만 보이고 진행률 카드로 대체하지
+  // 않는다" — substituting a sentence is the same move as substituting a card.
+  //
+  // The assertion is strengthened, not relaxed: it now pins the ABSENCE of the invented
+  // sentence AND the absence of an h1, while still requiring the activity line SX-02
+  // does ask for ("현재 프로젝트 상태"). The 이어가기 진입 is not built yet (SX-T11 makes
+  // it conditional on a previous session); when it is, add its case here.
+  const noneHtml = await renderComponent("MissionHeader", { ...homeProps, lesson: null });
+  const none = visibleText(noneHtml);
+  assert.doesNotMatch(none, /아직 연결된 수업이 없습니다/, `설계 파일이 없는데 문장을 지어냈다: ${none}`);
+  assert.doesNotMatch(none, /미션이 정해지지 않았습니다/, `설계 파일 자체가 없는데 SX-01 문구를 썼다: ${none}`);
+  assert.doesNotMatch(noneHtml, /<h1/, `수업이 없는데 가장 큰 활자를 그렸다: ${noneHtml}`);
+  assert.doesNotMatch(none, /주차/, "수업이 없는데 주차를 지어냈다");
+  // Positive control on the same render: the header is not simply blank — SX-02 keeps
+  // "현재 프로젝트 상태". Without this, deleting the whole component would pass.
+  assert.ok(none.includes("GlobalBuddy"), `현재 프로젝트 상태까지 사라졌다: ${none}`);
+  // And the design-file case still draws its h1 — otherwise the branch above could be
+  // satisfied by never rendering one.
+  assert.match(await renderComponent("MissionHeader", homeProps), /<h1/, "수업이 있는데 미션 문장이 없다");
 
   // (d) A mission with a planted forbidden label must trip the audit — this screen's audit is alive.
   const planted = await renderComponent("MissionHeader", {
