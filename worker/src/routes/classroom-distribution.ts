@@ -119,7 +119,7 @@ classroomDistributionTeacher.get(root + '/setting-options', async (c) => {
       const confirmedNow = !!ready?.confirmed && ready.confirmation_current;
       const why = !l ? 'lesson_unavailable' : runtimeOf(l, run.profile_id) !== runtimeOf(base, run.profile_id) ? 'setting_runtime_change'
         : r.version !== base.version && confirmationRequired(c.env) && !confirmedNow ? 'not_confirmed' : '';
-      options.push({ version: r.version, is_run_version: r.version === base.version, selectable: !why, reason: why, rehearsal: ready?.state ?? 'not_run', confirmed: confirmedNow, ...(l ? { sha256: l.sha256, title: l.content.title ?? '', impact: lessonImpact(base.content, l.content) } : {}) });
+      options.push({ version: r.version, is_run_version: r.version === base.version, selectable: !why, reason: why, rehearsal: ready?.state ?? 'not_run', confirmed: confirmedNow, ...(l ? { sha256: l.sha256, title: l.content.title ?? '', mission: l.content.learning?.mission ?? null, impact: lessonImpact(base.content, l.content) } : {}) });
     }
     return c.json({ course_id: pin.course_id, run_version: base.version, options, truncated: (rows.results ?? []).length > MAX_SETTING_OPTIONS, applies: 'next_question', confirmation_required: confirmationRequired(c.env) }, 200);
   } catch (err) { console.error('setting options unreadable:', err); return c.json({ error: 'setting options cannot be read right now', reason: 'distribution_unavailable' }, 503); }

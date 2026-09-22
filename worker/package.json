@@ -15,7 +15,7 @@
     "scaffold-profile": "node --experimental-strip-types scripts/scaffold-profile.ts",
     "module": "node --experimental-strip-types scripts/publish-module.ts",
     "validate-profiles": "node --experimental-strip-types scripts/dump-profiles.ts | python3 scripts/cohort-harness/validate.py",
-    "test:authoring": "node --experimental-strip-types --experimental-sqlite test/authoring.test.mjs && node --experimental-strip-types --experimental-sqlite --no-warnings test/authoring-rehearsal.test.mjs",
+    "test:authoring": "node --experimental-strip-types --experimental-sqlite test/authoring.test.mjs && node --experimental-strip-types --experimental-sqlite --no-warnings test/authoring-rehearsal.test.mjs && node --experimental-strip-types --experimental-sqlite --no-warnings test/authoring-mission.test.mjs",
     "test:pedagogy": "node --experimental-strip-types --experimental-sqlite test/lesson-pedagogy.test.mjs",
     "test:independent-course": "node --experimental-strip-types --experimental-sqlite test/independent-course.test.mjs",
     "test:cohort-routes": "node --experimental-strip-types test/cohort-routes.test.mjs",

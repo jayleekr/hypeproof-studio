@@ -273,7 +273,7 @@ authoring.get(root + '/versions', async (c) => {
     if (!a.scope.profiles.includes(m.profile_id)) continue;
     const lesson = await readLesson(c.env, cohort, course, r.version, m.profile_id);
     const ready = lesson ? await readinessOf(c.env, { cohort, course, version: r.version, profileId: m.profile_id, lessonSha: lesson.sha256, content: lesson.content }) : null;
-    versions.push({ version: r.version, source_revision: r.source_revision, title: m.content?.title ?? '', lesson_sha256: lesson?.sha256 ?? null, readable: !!lesson,
+    versions.push({ version: r.version, source_revision: r.source_revision, title: m.content?.title ?? '', mission: m.content?.learning ? { week: m.content.learning.week, mission: m.content.learning.mission } : null, lesson_sha256: lesson?.sha256 ?? null, readable: !!lesson,
       rehearsal: ready?.state ?? 'not_run', confirmed: !!ready?.confirmed, confirmation_current: !!ready?.confirmation_current, steps: (m.content?.steps ?? []).map((s: any) => ({ id: s.id, title: s.title })) });
   }
   return c.json({ draft_revision: d.revision, versions, truncated: rows.length > MAX_VERSIONS, confirmation_required: confirmationRequired(c.env), authorable_step_ui: AUTHORABLE_STEP_UI });

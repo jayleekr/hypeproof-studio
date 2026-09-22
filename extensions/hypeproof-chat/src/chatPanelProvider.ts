@@ -2473,7 +2473,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       }
       // #751 G2 — rehearsal only: send what the panel drew, with this App's identity, under the rehearsal code.
       case "rehearsalSend": {
-        await this.sendRehearsalReport(msg.steps);
+        await this.sendRehearsalReport(msg.steps, msg.mission);
         return;
       }
       // #580 — a trace event lands in the local spool first (spool-then-forward).
@@ -3780,7 +3780,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * #751 G2 — the rehearsal report. The panel's own read-back of what it drew goes out unchanged (only steps of this lesson);
    * the Service compares it with the candidate AND with its own records of the requests made under this code.
    */
-  private async sendRehearsalReport(steps: import("./lessonFocus").RenderedStep[]): Promise<void> {
+  private async sendRehearsalReport(steps: import("./lessonFocus").RenderedStep[], mission?: unknown): Promise<void> {
     const profile = this.cachedProfile, lesson = profile?.lesson, token = await this.context.secrets.get(TOKEN_KEY);
     if (!profile?.rehearsal || !lesson || !token) { await this.post({ type: "rehearsalState", state: "error", message: "리허설 코드로 연 수업이 아닙니다." }); return; }
     const cfg = vscode.workspace.getConfiguration("hypeproofChat");
@@ -3789,7 +3789,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       extension_version: String(pkg.version ?? "unknown"), host: `${vscode.env.appName} ${vscode.version}`.slice(0, 120),
       runtime: cfg.get<string>("coachRuntime", "proxy"), sdk: String(pkg.devDependencies?.["@anthropic-ai/claude-agent-sdk"] ?? "none").slice(0, 120),
       os: process.platform, arch: process.arch,
-    });
+    }, mission);
     await this.post({ type: "rehearsalState", state: "sending" });
     try {
       const base = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1").replace(/\/$/, "");
