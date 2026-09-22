@@ -21,7 +21,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { localOps } from '../../worker/test/harness/classroom-ops.mjs';
+import { localOps, OPS_ALL } from '../../worker/test/harness/classroom-ops.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'), out = path.join(repo, 'e2e/test-results/classroom-ops-g1'); mkdirSync(out, { recursive: true });
 const local = await localOps(), { default: chalk } = await import('../../chalk/src/index.ts'), { setRoster } = await import('../../worker/src/lib/kv.ts');
@@ -33,7 +33,7 @@ const LONG = 'student-긴이름-국제교류-동아리-발표준비-0024'.replac
 try {
   const seats = ['A', 'B', 'C', 'D'].flatMap((r, ri) => Array.from({ length: 6 }, (_, i) => ({ seat_id: r + (i + 1), student_id: ri * 6 + i === 23 ? LONG : 'student-' + String(ri * 6 + i + 1).padStart(2, '0') })));
   await setRoster(local.env.HPS_KV, local.cohort, seats.map((s) => s.student_id)); await local.freeze();
-  assert.equal((await local.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true } })).status, 201);
+  assert.equal((await local.configure(seats, 0, { flags: { ops_observe: true, ops_commands: true, ops_collect: true, ops_distribute: true } })).status, 201);
   // A1 token rejected (blocked) · A2 waiting for the learner's approval · A3 never connected · A4 went quiet (stale) · B1–B3 one provider
   // outage (shared) · the rest ready. D6 has the long learner id. B5 asked for help (a share addressed to the instructor).
   const plan = { A1: [local.event(1, 'activation', { stage: 'token_rejected', reason: 'auth_signature', http_status: 401 }), local.event(2, 'error', { class: 'auth_signature', code: 'http_401', request_id: 'req-g1-0001', blocking: true })],
@@ -41,7 +41,7 @@ try {
   for (const s of ['B1', 'B2', 'B3']) plan[s] = [local.event(1, 'activation', { stage: 'runtime_ready' }), local.event(2, 'error', { class: 'provider_5xx', code: 'http_529', request_id: 'req-g1-' + s, blocking: true })];
   let n = 0; for (const s of seats) { n++; if (s.seat_id === 'A3') continue; const c = (await local.pair(s.seat_id, 1, n)).conn.json; assert.equal((await local.sync(c.credential, plan[s.seat_id] ?? [local.event(1, 'activation', { stage: 'runtime_ready' }), local.event(2, 'step', { lesson_version: local.lesson.version, step_id: 'build', status: 'in_progress' })], n)).status, 200); }
   local.db.prepare("UPDATE ops_latest_state SET last_received_at=? WHERE seat_id='A4'").run(Date.now() - 25 * 60000);
-  const teacher = await local.teacher('teacher-a'), learner = await local.student('student-11');
+  const teacher = await local.teacher('teacher-a', [...OPS_ALL, 'distribute']), /* distribution on: its buttons share the toolbar */ learner = await local.student('student-11');
   assert.equal((await local.request('/v1/classroom/shares', 'POST', { id: crypto.randomUUID(), recipient_id: 'teacher-a', kind: 'help', consent: true, duration_minutes: 480, content: { prompt: '[합성] 어디부터 확인할까요?' } }, learner)).status, 201);
   const commands = () => local.db.prepare('SELECT COUNT(*) AS n FROM ops_commands').get().n, batches = () => local.db.prepare('SELECT COUNT(*) AS n FROM classroom_collect_batches WHERE dry_run=0').get().n;
 
@@ -62,6 +62,7 @@ try {
   // ── 1. the table at 1280×720 and 1024×640 ──
   const heads = await page.locator('#ops-table thead th').allInnerTexts(); assert.deepEqual(heads, ['선택', '좌석 · 학생', '입장 · 토큰', '현재 단계', '수행 · 도움 · 오류', '마지막 신호', '기록 · 근거']);
   for (const id of ['A1', 'C4', 'D6']) assert.equal(await row(page, id).locator('> td').count(), 7, id + ': every row has the same cells');
+  assert.equal(await page.locator('#ops-dist-preview').isVisible(), true, 'distribution is on, so all four actions share the toolbar while measuring');
   const wide = await measure(page); results.default_1280x720 = wide; await page.screenshot({ path: path.join(out, 'g1-default-1280x720.png') });
   assert.ok(wide.complete >= 8, '1280×720: at least 8 complete rows before page scrolling: ' + JSON.stringify(wide)); assert.ok(wide.min_font_px >= 14 && wide.body_font_px >= 14 && !wide.overflow && wide.zoom === 1, JSON.stringify(wide));
   assert.equal(await page.locator('#side').isVisible(), true, 'the left navigation is on screen at 1280'); assert.equal(await page.locator('nav.flow a[aria-current="page"]').innerText(), '운영 보드');
