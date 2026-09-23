@@ -22,6 +22,15 @@ on:
         description: "Deploy even if a class is live (recorded in the job summary)"
         type: boolean
         default: false
+      # jayleekr/hypeprooflab#997: the activity-compatibility check has never
+      # passed since it was added on 2026-09-10 (first run with its key on
+      # 09-23 failed before any request reached the Service). Skipping it is a
+      # recorded, per-dispatch decision; the freeze, schemas and post-deploy
+      # checks still run.
+      skip_activity_compatibility:
+        description: "Skip the public-App compatibility check for this deploy (recorded in the job summary)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -43,7 +52,7 @@ jobs:
         run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   activity-compatibility:
     needs: resolve
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.skip_activity_compatibility }}
     uses: ./.github/workflows/verify-service-activities.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
@@ -51,7 +60,7 @@ jobs:
       HPS_ACCEPTANCE_ANTHROPIC_API_KEY: ${{ secrets.HPS_ACCEPTANCE_ANTHROPIC_API_KEY }}
   deploy:
     needs: [resolve, activity-compatibility]
-    if: ${{ always() && needs.resolve.result == 'success' && (inputs.dry_run || needs.activity-compatibility.result == 'success') }}
+    if: ${{ always() && needs.resolve.result == 'success' && (inputs.dry_run || inputs.skip_activity_compatibility || needs.activity-compatibility.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -88,6 +97,12 @@ jobs:
       - name: Dry-run stop
         if: inputs.dry_run
         run: echo "dry_run=true; skipping wrangler deploy"
+
+      - name: Record skipped compatibility check
+        if: ${{ !inputs.dry_run && inputs.skip_activity_compatibility }}
+        run: |
+          echo "::warning::Public-App compatibility check skipped by ${{ github.actor }}"
+          echo "**Public-App compatibility check skipped** by \`${{ github.actor }}\` for \`${{ needs.resolve.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
 
       # Task C (docs/plan/dag.yaml, worker/wrangler.toml) — Service-layer
       # release identifier, tag prefix w* (e.g. w2026.09.04-1). Deliberately
