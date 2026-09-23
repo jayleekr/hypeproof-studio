@@ -177,6 +177,18 @@ jobs:
             npx wrangler d1 execute hypeproof-studio --remote --file="$migration"
           done
 
+      # #751 R0-R6 added 0011-0017 on 2026-09-22 without a deploy step, so the
+      # classroom operation routes would reach production without their tables.
+      # All seven are CREATE ... IF NOT EXISTS, safe to replay on every deploy.
+      - name: Apply additive classroom operation schemas
+        if: ${{ !inputs.dry_run }}
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          for migration in migrations/0011-classroom-ops.sql migrations/0012-classroom-ops-commands.sql migrations/0013-classroom-ops-control.sql migrations/0014-classroom-ops-evidence-review.sql migrations/0015-classroom-collection.sql migrations/0016-classroom-report-jobs.sql migrations/0017-classroom-delivery.sql; do
+            npx wrangler d1 execute hypeproof-studio --remote --file="$migration"
+          done
+
       - name: Deploy Worker
         if: ${{ !inputs.dry_run }}
         working-directory: worker
