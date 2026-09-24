@@ -102,3 +102,29 @@ test('not configured: without every setting the live path refuses and only dry-r
   assert.equal((await f.deliver(approval)).json.reason, 'delivery_provider_not_configured'); assert.equal(f.rows().length, 0);
   assert.equal((await f.request(f.B + '/deliver', 'POST', { approval_id: approval, dry_run: true })).status, 202); assert.deepEqual(f.rows().map((x) => x.state), ['dry_run', 'dry_run']);
 });
+
+for (const outcome of ['accepted', 'timeout']) test(`early webhook survives the send response: ${outcome}`, async (t) => {
+  const f = await fixture(t);
+  setResendFetch(async (_url, init) => {
+    const body = JSON.parse(init.body), id = 'early-msg-' + body.to[0].slice(0,2);
+    assert.deepEqual((await f.event('email.bounced', id, body.tags)).json, { applied: true, state: 'bounced' });
+    if (outcome === 'timeout') throw Error('response lost after event');
+    return Response.json({ id });
+  });
+  const result = await f.deliver(await f.approve('report-link-ko-1'));
+  assert.ok(result.json.results.every((r) => r.state === 'bounced'));
+  assert.deepEqual(f.rows().map((r) => [r.state, r.provider_message_id]), [['bounced', 'early-msg-a1'], ['bounced', 'early-msg-a2']]);
+});
+
+test('viewer check reserves attempts atomically: thirty concurrent wrong checks lock the link', async (t) => {
+  const f = await fixture(t), links = [];
+  setResendFetch(async (_url, init) => { const body = JSON.parse(init.body); links.push(body.text.match(/https:\/\/[^\s]+\/v1\/classroom\/report-links\/[a-z0-9-]+/)[0]); return Response.json({ id: 'viewer-' + body.to[0] }); });
+  await f.deliver(await f.approve('report-link-ko-1'));
+  const path = new URL(links[0]).pathname + '?format=json';
+  for (let i = 0; i < 8; i++) assert.equal((await f.request(path, 'POST', { check: '4821' }, null)).status, 200);
+  const results = await Promise.all(Array.from({ length: 30 }, () => f.request(path, 'POST', { check: '0000' }, null)));
+  assert.ok(results.every((r) => [403,404].includes(r.status)));
+  assert.equal((await f.request(path, 'POST', { check: '4821' }, null)).status, 404);
+  const tries = f.db.prepare('SELECT failed,locked_at FROM classroom_link_attempts').get();
+  assert.equal(tries.failed, 5); assert.ok(tries.locked_at);
+});
