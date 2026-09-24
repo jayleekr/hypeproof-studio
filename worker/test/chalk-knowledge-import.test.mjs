@@ -236,11 +236,19 @@ test("fixture: C-2a placement excluded", () => {
   assert(!sql.includes("'placement:C-2a'"), "C-2a must be excluded from placement docs");
 });
 
-test("fixture: gate docs have judge field", () => {
+test("fixture: gate docs have judge field (machine/model/human/unassigned)", () => {
   const { sql } = runImport(FIXTURE_VAULT);
-  // All gate judge values must be one of machine/model/human
-  assert(sql.includes('"judge":"machine"') || sql.includes('"judge":"model"') || sql.includes('"judge":"human"'),
-    "gate docs must have judge field");
+  assert(
+    sql.includes('"judge":"machine"') || sql.includes('"judge":"model"') ||
+    sql.includes('"judge":"human"') || sql.includes('"judge":"unassigned"'),
+    "gate docs must have judge field"
+  );
+});
+
+test("fixture: G1-1 judge=machine (§4 explicit)", () => {
+  const { sql } = runImport(FIXTURE_VAULT);
+  assert(sql.includes('"id":"G1-1"') && sql.includes('"judge":"machine"'),
+    "G1-1 should have judge=machine per §4");
 });
 
 test("fixture: gate G2-2 has judge=model", () => {
@@ -276,6 +284,15 @@ test("fixture: axis docs have key field", () => {
   const { sql } = runImport(FIXTURE_VAULT);
   assert(sql.includes('"key":"input"'), "axis input missing");
   assert(sql.includes('"key":"load"'), "axis load missing");
+});
+
+test("fixture: prohibited-move P3 has single doc with reformulation in fields and original in body", () => {
+  const { sql } = runImport(FIXTURE_VAULT);
+  // Only one P3 doc
+  const p3Matches = [...sql.matchAll(/'prohibited-move:P3'/g)];
+  assertEqual(p3Matches.length, 1, "P3 should produce exactly one doc (no duplicate)");
+  // Body should contain the original definition marker
+  assert(sql.includes("이전 정의(재정식화 전)"), "P3 body should contain original definition with marker");
 });
 
 test("fixture: guide docs present (authoring-order, conversion, etc.)", () => {
@@ -357,11 +374,29 @@ if (!VAULT_PATH) {
     assert(guideMatches.length === 5, `expected 5 guide docs, got ${guideMatches.length}`);
   });
 
-  test("real vault: total doc_count=94 in version row", () => {
+  test("real vault: prohibited-move=4 (P3 deduplicated)", () => {
     const { sql } = runImport(VAULT_PATH);
-    // doc_count is the 9th column in the version INSERT
-    assert(sql.includes(", 94, ") || sql.includes(",94,") || sql.match(/doc_count: 94/),
-      "version row should have doc_count=94");
+    const pmMatches = [...sql.matchAll(/INSERT INTO chalk_knowledge_docs[\s\S]*?'prohibited-move'/g)];
+    assert(pmMatches.length === 4, `expected 4 prohibited-move docs (P3 deduped), got ${pmMatches.length}`);
+    const p3Matches = [...sql.matchAll(/'prohibited-move:P3'/g)];
+    assertEqual(p3Matches.length, 1, "P3 should be deduplicated to 1 doc");
+    assert(sql.includes("이전 정의(재정식화 전)"), "P3 body must contain original definition");
+  });
+
+  test("real vault: gate unassigned list = G2-1, G2-4, G2-10, G3-3, G3-5", () => {
+    const { sql } = runImport(VAULT_PATH);
+    // These 5 gates are not in §4 table and should be unassigned
+    const unassignedIds = ["G2-1", "G2-4", "G2-10", "G3-3", "G3-5"];
+    for (const id of unassignedIds) {
+      assert(sql.includes(`"id":"${id}"`) && sql.includes('"judge":"unassigned"'),
+        `${id} should have judge=unassigned`);
+    }
+  });
+
+  test("real vault: total doc_count=93 in version row", () => {
+    const { sql } = runImport(VAULT_PATH);
+    assert(sql.includes(", 93, ") || sql.includes(",93,") || sql.match(/doc_count: 93/),
+      "version row should have doc_count=93 (P3 deduplicated from 94)");
   });
 
   test("real vault: family:reference excluded", () => {

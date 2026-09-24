@@ -226,14 +226,23 @@ function buildMethodDocs(methodsDir: string, vaultRoot: string): KnowledgeDoc[] 
 // --- Gate doc builder from lesson-plan-quality-checklist.md -----------
 
 // Judge assignments from product-read-contract.md §4.
-// Items not in the explicit machine/model/human table default to machine
-// (structural field checks). Only G2-2, G2-3, G3-2 are model; G2-12, G3-6 human.
-const GATE_JUDGE: Record<string, "machine" | "model" | "human"> = {
+// Exact table — only IDs listed here get a concrete judge value.
+// IDs absent from the table get "unassigned"; E2-4 will report those
+// rather than implementing a guess.  judge space: machine | model | human | unassigned
+const GATE_JUDGE: Record<string, "machine" | "model" | "human" | "unassigned"> = {
+  // machine — structural field checks (§4 "기계 가능" column)
+  "G1-1": "machine", "G1-2": "machine", "G1-3": "machine", "G1-4": "machine",
+  "G1-5": "machine", "G1-6": "machine", "G1-7": "machine", "G1-8": "machine",
+  "G2-5": "machine", "G2-6": "machine", "G2-7": "machine", "G2-8": "machine",
+  "G2-9": "machine", "G2-11": "machine",
+  "G3-1": "machine", "G3-4": "machine",
+  // model — LLM judgment required (§4 "LLM 판정" column)
   "G2-2": "model", "G2-3": "model", "G3-2": "model",
+  // human — human review only (§4 "사람만" column)
   "G2-12": "human", "G3-6": "human",
 };
-function gateJudge(id: string): "machine" | "model" | "human" {
-  return GATE_JUDGE[id] ?? "machine";
+function gateJudge(id: string): "machine" | "model" | "human" | "unassigned" {
+  return GATE_JUDGE[id] ?? "unassigned";
 }
 
 // Extract parenthetical clause refs like "(B-3)" or "(A-5, B-4)".
@@ -329,7 +338,12 @@ function buildConstitutionDocs(constitutionPath: string, relPath: string): Knowl
 
 function buildProhibitedMoveDocs(prohibitedPath: string, relPath: string): KnowledgeDoc[] {
   const content = readFileSync(prohibitedPath, "utf-8");
-  const docs: KnowledgeDoc[] = [];
+  // Map from id → { family, description, reformulation? }
+  // P3 has two rows in the vault: the first is the original definition,
+  // the second is the reformulation (marked "재정식화됨").
+  // Rule: P3's second row (reformulation) wins in fields; original goes to body.
+  // Any other duplicate key is a hard error — do not silently pick one.
+  const seen = new Map<string, { family: string; description: string; isReformulation?: boolean }>();
 
   // Table row: | **P1 선취** | description | destruction |
   const re = /^\|\s+\*\*P(\d)\s+([^*]+)\*\*\s+\|\s+(.+?)\s+\|/gm;
@@ -338,12 +352,45 @@ function buildProhibitedMoveDocs(prohibitedPath: string, relPath: string): Knowl
     const id = `P${m[1]}`;
     const family = m[2].trim();
     const description = m[3].trim();
+    const isReformulation = /재정식화/.test(description);
 
+    if (seen.has(id)) {
+      if (id === "P3" && isReformulation) {
+        // Second P3 row is the current definition — replace.
+        seen.set(id, { family, description, isReformulation: true });
+      } else if (id === "P3" && !isReformulation) {
+        // First P3 row already stored; skip (will be added to body later).
+      } else {
+        // Any other duplicate is a hard error.
+        console.error(`prohibited-move: duplicate key ${id} — import aborted`);
+        process.exit(1);
+      }
+    } else {
+      seen.set(id, { family, description, isReformulation });
+    }
+  }
+
+  // Collect original P3 definition for the body.
+  // Re-scan for P3 rows to gather both in order.
+  const p3Rows: string[] = [];
+  const reP3 = /^\|\s+\*\*P3\s+([^*]+)\*\*\s+\|\s+(.+?)\s+\|/gm;
+  let mp3: RegExpExecArray | null;
+  while ((mp3 = reP3.exec(content)) !== null) {
+    p3Rows.push(mp3[2].trim());
+  }
+
+  const docs: KnowledgeDoc[] = [];
+  for (const [id, { family, description }] of seen.entries()) {
+    let body = description;
+    if (id === "P3" && p3Rows.length >= 2) {
+      // First row is the original; compose body: current + original section.
+      body = `${p3Rows[p3Rows.length - 1]}\n\n이전 정의(재정식화 전): ${p3Rows[0]}`;
+    }
     docs.push({
       doc_id: `prohibited-move:${id}`,
       kind: "prohibited-move",
       fields_json: JSON.stringify({ id, family }),
-      body: description,
+      body,
       source_path: relPath,
     });
   }
