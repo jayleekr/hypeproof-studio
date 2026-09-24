@@ -1458,5 +1458,12 @@ html, body, #root {
 .hp-help-modes label { display: flex; align-items: center; gap: 6px; min-height: 32px; }
 .hp-surface { display: flex; flex-direction: column; gap: 6px; }
 .hp-surface label { display: flex; flex-direction: column; gap: 4px; font-size: 14px; }
-.hp-surface textarea, .hp-surface input { font: inherit; width: 100%; box-sizing: border-box; }
+/* The criterion/decision fields sat on the dark rail as the platform's default white boxes: same tokens as the evidence form. */
+.hp-surface textarea, .hp-surface input {
+  font: inherit; width: 100%; box-sizing: border-box; min-height: 36px; padding: 6px 8px;
+  background: var(--hp-bg); color: var(--hp-ink); border: 1px solid var(--hp-line); border-radius: 6px;
+}
+.hp-surface textarea { resize: vertical; }
+.hp-surface textarea::placeholder, .hp-surface input::placeholder { color: var(--hp-muted); }
+.hp-surface :focus-visible { outline: 2px solid var(--hp-accent); outline-offset: 2px; }
 .hp-rehearsal { border: 1px dashed var(--hp-line); border-radius: 8px; padding: 8px 10px; }

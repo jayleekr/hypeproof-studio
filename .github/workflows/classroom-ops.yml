@@ -60,6 +60,8 @@ jobs:
         working-directory: e2e
       - run: npm run test:classroom-authoring-g2
         working-directory: e2e
+      - run: npm run test:classroom-authoring-mission
+        working-directory: e2e
       - run: npm run test:classroom-report
         working-directory: e2e
       - uses: actions/upload-artifact@v4
@@ -75,6 +77,7 @@ jobs:
             e2e/test-results/classroom-ops-g1/
             e2e/test-results/classroom-ops-g1-wrap/
             e2e/test-results/classroom-authoring-g2/
+            e2e/test-results/classroom-authoring-mission/
             e2e/test-results/classroom-report/
   # The extension build a venue PC injects into a copy of an official shell (e2e/classroom/field-bundle.mjs). Built from
   # the PR's own commit; the manifest carries the source SHA and every file's sha256.
