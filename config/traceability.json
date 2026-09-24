@@ -2377,6 +2377,9 @@
           "path": "extensions/hypeproof-chat/src/classroomHelpHost.ts"
         },
         {
+          "path": "extensions/hypeproof-chat/src/classroomHelpStore.ts"
+        },
+        {
           "path": "extensions/hypeproof-chat/webview-ui/src/HelpRequest.tsx"
         },
         {
@@ -2386,7 +2389,16 @@
           "path": "extensions/hypeproof-chat/test/classroom-help-host.smoke.mjs"
         },
         {
+          "path": "extensions/hypeproof-chat/test/classroom-help-store.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/fixtures/help-store-writer.mjs"
+        },
+        {
           "path": "e2e/classroom/mac-help.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-help-windows.mjs"
         }
       ]
     },

@@ -194,7 +194,9 @@ export async function activate(context: vscode.ExtensionContext) {
   provider.opsObserver = classroomOps;
   provider.inboxSource = classroomOps;
   // #751 native help: the learner's help requests to the instructor of their live class connection (ADM-03/05, AT-47).
-  provider.helpSource = new ClassroomHelpHost(context.globalState, {
+  // Drafts and requests live one file family per record under globalStorageUri (shared by every window; globalState is one
+  // object per window and loses records written in two windows at once). globalState is only read to move the old store.
+  provider.helpSource = new ClassroomHelpHost(context.globalState, path.join(context.globalStorageUri.fsPath, "classroom-help"), {
     token: async () => (await context.secrets.get(TOKEN_KEY)) ?? "",
     connection: () => classroomOps.helpConnection(),
     base: () => vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1").replace(/\/$/, ""),

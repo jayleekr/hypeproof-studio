@@ -1,10 +1,12 @@
 // #751 native help — the REAL host adapter (src/classroomHelpHost.ts, bundled with esbuild, `vscode` stubbed) against a
-// synthetic Service and a storage model of VS Code's extension globalState. Only fetch, the Memento and the window's
-// token/connection are synthetic; every decision is the shipped code's.
+// synthetic Service, a REAL shared directory (the store under globalStorageUri every window of the app shares) and a model
+// of VS Code's extension globalState (only the pre-2026-09-22 store is read from it, then moved to files). Only fetch, the
+// Memento and the window's token/connection are synthetic; every decision and every file is the shipped code's.
 //
-// Storage model (VS Code extHostMemento ExtensionGlobalMemento): `get` reads this window's cache; `update(k, v)` sets the key
-// in that cache at once and writes the WHOLE object of the extension to shared storage, which then replaces the cache of every
-// other window (`propagation` ms later; 0 = the same tick). A window that writes from a stale copy overwrites the others.
+// globalState model (VS Code extHostMemento, read from the shipped extensionHostProcess.js): `get` reads this window's
+// cache; `update(k, v)` sets the key in that cache at once and writes the WHOLE object of the extension to shared storage,
+// which then replaces the cache of every other window (`propagation` ms later — the window's storage flushes after 100 ms, so
+// the gates use 150). A window that writes from a stale copy overwrites the others: that is why records no longer live there.
 //
 // What must hold (ADM-05 native help, AT-47):
 //   F1   no draw posted after a newer draw or after the learner/connection changed carries the earlier learner's data or notes
@@ -12,11 +14,17 @@
 //   W    a window's write never erases another window's or another learner's draft/envelope read before an await, and an
 //        envelope reaches `sending`/`unknown` (and a POST leaves) only for the request id the learner consented to
 //   N    "강사에게 보냈습니다" is not kept next to the instructor's answer
+//   S    two windows writing inside the propagation delay keep every other learner's draft and request (the W-residual
+//        characterisation of bced496 is now this gate; that revision failed it — Codex storage-retention probe, 10/11);
+//        a restarted window restores the draft and the lost-answer request and retries only that request, unchanged;
+//        the old globalState store is moved once, repeatably, and stays until every record is on disk
 // Controls: the normal single-learner flow and an inverted pair of reads for the same learner still draw correctly.
-// HELP_HOST_SRC / HELP_SRC point the same checks at another revision (used to record the before-fix failures).
+// HELP_HOST_SRC / HELP_SRC point the same checks at another revision with the same constructor.
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdtempSync, promises as fs } from "node:fs";
+import { createHash } from "node:crypto";
+import os from "node:os";
 import vm from "node:vm";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -27,9 +35,10 @@ const { build } = require("esbuild");
 const hostSrc = process.env.HELP_HOST_SRC ?? path.join(ext, "src/classroomHelpHost.ts");
 const bundle = (await build({ entryPoints: [hostSrc], bundle: true, platform: "node", format: "cjs", write: false, external: ["vscode"] })).outputFiles[0].text;
 const H = await import(process.env.HELP_SRC ?? path.join(ext, "src/classroomHelp.ts"));
+const { HelpRecordStore } = await import(path.join(ext, "src/classroomHelpStore.ts"));
 const mod = { exports: {} };
 let fetchImpl = null;
-vm.runInNewContext(bundle, { module: mod, exports: mod.exports, require: (id) => (id === "vscode" ? {} : require(id)), fetch: (...a) => fetchImpl(...a), AbortSignal, Date, console, atob, TextDecoder, Uint8Array, setTimeout, clearTimeout, Response, URL });
+vm.runInNewContext(bundle, { module: mod, exports: mod.exports, require: (id) => (id === "vscode" ? {} : require(id)), fetch: (...a) => fetchImpl(...a), AbortSignal, Date, console, atob, TextDecoder, Uint8Array, setTimeout, clearTimeout, Response, URL, process, Buffer });
 const { ClassroomHelpHost } = mod.exports;
 const STORE = "hypeproof.classroomHelp.v1";
 
@@ -68,7 +77,9 @@ function service() {
 
 // ── storage model + windows ───────────────────────────────────────────────────────────────────────────────────────────────
 function sharedStorage(propagation = 0) {
-  const shared = { value: {}, windows: [] };
+  const root = mkdtempSync(path.join(os.tmpdir(), "hps-help-host-"));
+  const shared = { value: {}, windows: [], root, files: new HelpRecordStore(root) };
+  shared.draft = (u) => shared.files.get("draft", dk(u)); shared.envelope = (u) => shared.files.get("envelope", sk(u));
   shared.window = () => {
     const w = { cache: structuredClone(shared.value), pause: null };
     w.memento = {
@@ -78,7 +89,6 @@ function sharedStorage(propagation = 0) {
         w.cache[k] = structuredClone(v); const snap = structuredClone(w.cache);
         const apply = () => { shared.value = snap; for (const o of shared.windows) if (o !== w) o.cache = structuredClone(snap); };
         if (propagation) setTimeout(apply, propagation); else apply();
-        if (w.pause) { const p = w.pause; w.pause = null; p.hit(); await p.gate; }
       },
     };
     shared.windows.push(w); return w;
@@ -87,13 +97,15 @@ function sharedStorage(propagation = 0) {
 }
 function win(shared, S, name, who) {
   const w = shared.window(), views = [];
-  w.who = who; w.name = name;
-  w.host = new ClassroomHelpHost(w.memento, {
+  w.who = who; w.name = name; w.logs = [];
+  const pauseAtWrite = async (point) => { if (point === "tmp_written" && w.pause) { const p = w.pause; w.pause = null; p.hit(); await p.gate; } };
+  w.host = new ClassroomHelpHost(w.memento, shared.root, {
     token: async () => tok(w.who()),
     connection: () => ({ grant_id: "grant-" + w.who(), class_run_id: "run", seat_id: "A1", connected_at: 1, student: { u: w.who(), c: "cohort", p: "profile" } }),
-    base: () => "https://synthetic.invalid/v1", history: () => [], post: (v) => views.push(structuredClone(v)), log: () => {},
-  });
+    base: () => "https://synthetic.invalid/v1", history: () => [], post: (v) => views.push(structuredClone(v)), log: (l) => w.logs.push(l),
+  }, { at: pauseAtWrite });
   w.views = views; w.last = () => views.at(-1);
+  /** Pauses this window's next record write after its bytes are complete and before it is published (tmp → link). */
   w.pauseSave = () => { let gate, hit; const entered = new Promise((r) => (hit = r)); const g = new Promise((r) => (gate = r)); w.pause = { gate: g, hit }; return { entered, release: () => gate() }; };
   return w;
 }
@@ -143,7 +155,7 @@ await check("F1", "Codex repro: the reconciliation save of learner A finishes af
   let who = "a"; const shared = sharedStorage(), w = win(shared, S, "W1", () => who);
   S.shares.set("pending-a", { id: "pending-a", owner: "a", session_id: "run", status: "answered", revision: 2, recipient_id: "teacher-a", created_at: 1, expires_at: 4_000_000_000, content: { question: "PRIVATE-A-QUESTION" }, feedback: "PRIVATE-A-FEEDBACK", next_action: "PRIVATE-A-NEXT" });
   const seed = { drafts: { [dk("a")]: { question: "PRIVATE-A-QUESTION", turnId: null, duration: 30, updated_at: Date.now() } }, envelopes: { [sk("a")]: { request_id: "pending-a", draft_key: dk("a"), send_key: sk("a"), recipient_id: "teacher-a", class_run_id: "run", grant_id: "grant-a", seat_id: "A1", duration_minutes: 30, content: { question: "PRIVATE-A-QUESTION" }, prepared_at: Date.now(), expiry_estimate: Date.now() + 1800000, consent_expires_at: Math.floor(Date.now() / 1000) + 1800, consent_proof: "p".repeat(43), class_ends_at: "2099-01-01T00:00:00Z", state: "unknown", truncated: [] } } };
-  await w.memento.update(STORE, seed);
+  await shared.files.update("draft", dk("a"), () => seed.drafts[dk("a")]); await shared.files.update("envelope", sk("a"), () => seed.envelopes[sk("a")]);
   const p = w.pauseSave(), older = w.host.refresh(); await p.entered;
   who = "b"; await w.host.refresh(); assert.equal(w.last().draft_key, dk("b")); assert.equal(w.last().current.length, 0);
   p.release(); await older; await tick();
@@ -169,7 +181,7 @@ await check("F1-send", "a POST answer that returns after the swap: recorded for 
   const h = S.hold((rest, m) => rest === "shares" && m === "POST"), sending = w.host.send(dk("a"), e.request_id, true); await h.entered;
   who = "b"; await w.host.refresh(); h.release(); await sending; await w.host.refresh(); await tick();
   noLeakAfter(w, "b", ["PRIVATE-A", "강사에게 보냈습니다", dk("a")]);
-  const st = w.memento.get(STORE); assert.equal(st.envelopes[sk("a")], undefined, "A's own record says stored (envelope done)");
+  assert.equal(await shared.envelope("a"), null, "A's own record says stored (envelope done)");
 });
 
 await check("F1-preview", "a preview whose recipient answer returns after the swap writes no envelope and shows nothing of A", async (S) => {
@@ -178,7 +190,7 @@ await check("F1-preview", "a preview whose recipient answer returns after the sw
   const pv = w.host.preview(dk("a"), { question: "PRIVATE-A-Q", turnId: null, duration: 30 }); await h.entered;
   who = "b"; await w.host.refresh(); h.release(); await pv; await tick();
   noLeakAfter(w, "b", ["PRIVATE-A", dk("a")]);
-  assert.equal(w.memento.get(STORE)?.envelopes?.[sk("a")], undefined, "no preview was frozen for a learner who is no longer here");
+  assert.equal(await shared.envelope("a"), null, "no preview was frozen for a learner who is no longer here");
 });
 
 await check("F1-actions", "confirm / withdraw answers that return after the swap are not noted to B", async (S) => {
@@ -203,8 +215,8 @@ await check("W1", "two windows, two learners: a preview in window 1 that awaited
   const pv = w1.host.preview(dk("a"), { question: "A-Q", turnId: null, duration: 30 }); await h.entered;
   await w2.host.draft(dk("b"), { question: "PRIVATE-B-DRAFT", turnId: null, duration: 30 });
   h.release(); await pv; await tick();
-  assert.equal(shared.value[STORE].drafts[dk("b")]?.question, "PRIVATE-B-DRAFT", "B's draft survived A's preview");
-  assert.ok(shared.value[STORE].envelopes[sk("a")], "A's preview was still made");
+  assert.equal((await shared.draft("b"))?.question, "PRIVATE-B-DRAFT", "B's draft survived A's preview");
+  assert.ok(await shared.envelope("a"), "A's preview was still made");
 });
 
 await check("W2", "two windows, same learner: an envelope reaches sending/unknown, and a POST leaves, only for the request the learner consented to", async (S) => {
@@ -214,7 +226,7 @@ await check("W2", "two windows, same learner: an envelope reaches sending/unknow
   const h = S.hold((rest, m) => rest === "shares" && m === "POST"), sending = w1.host.send(dk("a"), e1.request_id, true); await h.entered;
   await w2.host.preview(dk("a"), { question: "SECOND (never agreed)", turnId: null, duration: 30 });
   h.release({ status: 503, body: {} }); await sending; await tick();
-  const env = shared.value[STORE].envelopes[sk("a")];
+  const env = await shared.envelope("a");
   assert.ok(env, "the request with the lost answer is still known"); assert.ok(consented.has(env.request_id) || env.state === "prepared", "an unconsented preview became " + env.state);
   await w2.host.refresh(); if (w2.last().envelope?.state === "unknown") await w2.host.retry(dk("a"));
   for (const p of S.posts) assert.ok(consented.has(p.id), "a POST left for a request nobody consented to: " + p.id);
@@ -228,15 +240,98 @@ await check("W3", "two windows, same learner, same draft: the text is last-write
   h.release({ status: 0 }); await sending; // lost answer → unknown
   await w1.host.draft(dk("a"), { question: "typed in window 1", turnId: null, duration: 30 });
   await w2.host.draft(dk("a"), { question: "typed in window 2", turnId: null, duration: 60 });
-  const st = shared.value[STORE]; assert.equal(st.drafts[dk("a")].question, "typed in window 2", "same draft: the later save wins (documented)");
-  assert.deepEqual([st.envelopes[sk("a")]?.request_id, st.envelopes[sk("a")]?.state], [e1.request_id, "unknown"], "the unknown request and its consented content are untouched");
+  assert.equal((await shared.draft("a")).question, "typed in window 2", "same draft: the later save wins (documented)");
+  const kept = await shared.envelope("a");
+  assert.deepEqual([kept?.request_id, kept?.state, kept?.content], [e1.request_id, "unknown", e1.content], "the unknown request and its consented content are untouched");
 });
 
-await check("W-residual", "characterisation (not a pass/fail gate): writes from two windows inside the storage propagation delay", async (S) => {
-  const shared = sharedStorage(50), w1 = win(shared, S, "W1", () => "a"), w2 = win(shared, S, "W2", () => "b");
-  await w1.host.draft(dk("a"), { question: "A", turnId: null, duration: 30 }); await w2.host.draft(dk("b"), { question: "B", turnId: null, duration: 30 });
-  await new Promise((r) => setTimeout(r, 120)); const st = shared.value[STORE];
-  return { propagation_ms: 50, a_kept: !!st.drafts[dk("a")], b_kept: !!st.drafts[dk("b")], note: "VS Code writes the extension's whole globalState object; two windows writing within the propagation delay are last-write-wins — the host cannot close this, it only never widens it past one tick." };
+for (const propagation of [0, 50, 150]) {
+  await check("S1-" + propagation, `two windows, two learners, drafts written at the same instant (globalState propagation ${propagation} ms): both survive — the bced496 W-residual, now a gate`, async (S) => {
+    const shared = sharedStorage(propagation), w1 = win(shared, S, "W1", () => "a"), w2 = win(shared, S, "W2", () => "b");
+    await Promise.all([w1.host.draft(dk("a"), { question: "A", turnId: null, duration: 30 }), w2.host.draft(dk("b"), { question: "B", turnId: null, duration: 30 })]);
+    await new Promise((r) => setTimeout(r, propagation + 50));
+    assert.equal((await shared.draft("a"))?.question, "A", "independent learner A draft must survive learner B write");
+    assert.equal((await shared.draft("b"))?.question, "B", "independent learner B draft must survive");
+    await w1.host.refresh(); await w2.host.refresh();
+    assert.equal(w1.last().draft.question, "A"); assert.equal(w2.last().draft.question, "B");
+  });
+}
+
+await check("S2", "inside the propagation delay: B previews and types while A's request is unknown and A types — every record is kept, A's consented request unchanged", async (S) => {
+  const shared = sharedStorage(150), w1 = win(shared, S, "W1", () => "a"), w2 = win(shared, S, "W2", () => "b");
+  await w1.host.refresh(); await w2.host.refresh();
+  const e = await preview(w1, "a", "PRIVATE-A-Q");
+  const h = S.hold((rest, m) => rest === "shares" && m === "POST"), sending = w1.host.send(dk("a"), e.request_id, true); await h.entered;
+  await Promise.all([w2.host.preview(dk("b"), { question: "PRIVATE-B-Q", turnId: null, duration: 60 }), w1.host.draft(dk("a"), { question: "A typed after sending", turnId: null, duration: 30 })]);
+  h.release({ status: 0 }); await sending;
+  await Promise.all([w2.host.draft(dk("b"), { question: "B typed after preview", turnId: null, duration: 60 }), w1.host.draft(dk("a"), { question: "A typed again", turnId: null, duration: 30 })]);
+  await new Promise((r) => setTimeout(r, 200));
+  const ea = await shared.envelope("a"), eb = await shared.envelope("b");
+  assert.deepEqual([ea?.request_id, ea?.state, ea?.content, ea?.consent_expires_at, ea?.consent_proof], [e.request_id, "unknown", e.content, e.consent_expires_at, e.consent_proof], "A's lost-answer request is exactly what A consented to");
+  assert.deepEqual([eb?.state, eb?.content], ["prepared", { question: "PRIVATE-B-Q" }], "B's preview is kept");
+  assert.equal((await shared.draft("a"))?.question, "A typed again"); assert.equal((await shared.draft("b"))?.question, "B typed after preview");
+  assert.equal(S.posts.length, 0, "the held POST never reached the Service");
+});
+
+await check("S3", "restart: a new window restores A's draft and lost-answer request; a new preview does not replace it; the retry sends only that request, unchanged", async (S) => {
+  const shared = sharedStorage(150), w1 = win(shared, S, "W1", () => "a");
+  await w1.host.refresh(); const e = await preview(w1, "a", "PRIVATE-A-Q");
+  const h = S.hold((rest, m) => rest === "shares" && m === "POST"), sending = w1.host.send(dk("a"), e.request_id, true); await h.entered;
+  h.release({ status: 503 }); await sending; await w1.host.draft(dk("a"), { question: "PRIVATE-A-Q", turnId: null, duration: 30 });
+  // The app quits; a new window (new extension host, fresh globalState copy) opens for the same learner.
+  const w3 = win(shared, S, "W3", () => "a"); await w3.host.refresh();
+  assert.deepEqual([w3.last().envelope?.request_id, w3.last().envelope?.state, w3.last().envelope?.content], [e.request_id, "unknown", e.content]);
+  assert.equal(w3.last().draft.question, "PRIVATE-A-Q");
+  await w3.host.preview(dk("a"), { question: "SOMETHING ELSE (never agreed)", turnId: null, duration: 120 });
+  assert.match(w3.last().note ?? "", /아직 확인하는 중/); assert.equal((await shared.envelope("a")).request_id, e.request_id, "a new preview did not replace the consented request");
+  await w3.host.retry(dk("a"));
+  assert.deepEqual(S.posts.map((p) => p.id), [e.request_id], "only the consented request left");
+  assert.deepEqual(S.shares.get(e.request_id)?.content, e.content, "the stored content is exactly the consented content");
+  assert.equal(await shared.envelope("a"), null); assert.match(w3.last().note ?? "", /강사에게 보냈습니다/);
+});
+
+await check("S4", "a window that quit with its request `sending` (the POST never arrived): the next window retries that same request once; the first window's late answer changes nothing", async (S) => {
+  const shared = sharedStorage(150), w1 = win(shared, S, "W1", () => "a");
+  await w1.host.refresh(); const e = await preview(w1, "a", "PRIVATE-A-Q");
+  const h = S.hold((rest, m) => rest === "shares" && m === "POST"), lost = w1.host.send(dk("a"), e.request_id, true); await h.entered;
+  const w3 = win(shared, S, "W3", () => "a"); await w3.host.refresh();
+  assert.deepEqual([w3.last().envelope?.request_id, w3.last().envelope?.state], [e.request_id, "sending"]);
+  await w3.host.retry(dk("a"));
+  assert.deepEqual(S.posts.map((p) => p.id), [e.request_id]); assert.equal(await shared.envelope("a"), null);
+  h.release({ status: 503 }); await lost; await tick();
+  assert.equal(await shared.envelope("a"), null, "the dead window's late 503 does not bring the stored request back as unknown");
+});
+
+await check("MIG1", "the old globalState store is moved to files once — from two windows at the same instant, and again from a stale copy — and then removed", async (S) => {
+  const shared = sharedStorage(150), now = Date.now(), old = now - H.LOCAL_RETENTION_MS - 60_000;
+  const legacyEnv = { request_id: "legacy-b", draft_key: dk("b"), send_key: sk("b"), recipient_id: "teacher-a", class_run_id: "run", grant_id: "grant-b", seat_id: "A1", duration_minutes: 30, content: { question: "LEGACY-B-Q" }, prepared_at: now, class_ends_at: "2099-01-01T00:00:00Z", consent_expires_at: Math.floor(now / 1000) + 1800, consent_proof: "p".repeat(43), state: "unknown", truncated: [] };
+  const legacy = { drafts: { [dk("a")]: { question: "LEGACY-A", turnId: null, duration: 30, updated_at: now }, [dk("x")]: { question: "LEGACY-X", turnId: null, duration: 30, updated_at: old } }, envelopes: { [sk("b")]: legacyEnv } };
+  shared.value = { [STORE]: legacy, "other.key": 1 };
+  const w1 = win(shared, S, "W1", () => "a"), w2 = win(shared, S, "W2", () => "b");
+  await Promise.all([w1.host.refresh(), w2.host.refresh()]); await new Promise((r) => setTimeout(r, 200));
+  assert.equal((await shared.draft("a"))?.question, "LEGACY-A"); assert.deepEqual(await shared.envelope("b"), legacyEnv);
+  assert.equal(await shared.files.get("draft", dk("x")), null, "a record past the 24-hour retention is not brought over");
+  assert.equal(shared.value[STORE], undefined, "the old store is removed"); assert.equal(shared.value["other.key"], 1);
+  assert.equal(w1.last().draft.question, "LEGACY-A"); assert.equal(w2.last().envelope?.request_id, "legacy-b");
+  await w1.host.draft(dk("a"), { question: "A typed after the move", turnId: null, duration: 30 });
+  const stale = win(shared, S, "W3", () => "a"); stale.cache = { ...structuredClone(shared.value), [STORE]: structuredClone(legacy) }; await stale.host.refresh();
+  assert.equal((await shared.draft("a"))?.question, "A typed after the move", "a window still holding the old copy does not overwrite a newer draft");
+  await w2.host.retry(dk("b"));
+  assert.deepEqual(S.posts.map((p) => p.id), ["legacy-b"], "the moved request is retried as the same request"); assert.deepEqual(S.shares.get("legacy-b").content, legacyEnv.content);
+  for (const l of [...w1.logs, ...w2.logs, ...stale.logs]) assert.ok(!/LEGACY-|PRIVATE-|cohort\|/.test(l), "a log line carries content or a key: " + l);
+  assert.ok(w1.logs.concat(w2.logs).some((l) => /imported=\d+ present=\d+ expired=1 failed=0/.test(l)));
+});
+
+await check("MIG2", "a record the disk refuses during the move: the old store is kept, and the next refresh completes the move", async (S) => {
+  const shared = sharedStorage(0), now = Date.now();
+  shared.value = { [STORE]: { drafts: { [dk("a")]: { question: "LEGACY-A", turnId: null, duration: 30, updated_at: now }, [dk("b")]: { question: "LEGACY-B", turnId: null, duration: 30, updated_at: now } }, envelopes: {} } };
+  const blocked = path.join(shared.root, "d", createHash("sha256").update(dk("b")).digest("hex").slice(0, 32));
+  await fs.mkdir(path.dirname(blocked), { recursive: true }); await fs.writeFile(blocked, "not a directory");
+  const w = win(shared, S, "W1", () => "a"); await w.host.refresh();
+  assert.ok(shared.value[STORE], "kept while a record is missing"); assert.ok(w.logs.some((l) => /failed=1/.test(l)) && w.logs.some((l) => /deferred/.test(l)));
+  assert.equal(w.last().draft.question, "LEGACY-A", "the imported record is already drawn");
+  await fs.rm(blocked); await w.host.refresh();
+  assert.equal(shared.value[STORE], undefined); assert.equal((await shared.files.get("draft", dk("b")))?.question, "LEGACY-B");
 });
 
 const failed = results.filter((r) => r.status === "FAIL");
