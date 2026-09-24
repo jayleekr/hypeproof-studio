@@ -5,6 +5,14 @@ import { CAPABILITY_MODELS, capabilityModel, forbidKeys, type CapabilityModel } 
 
 export const RENDERER_REVISION = 'observation-report/1';
 export const LEASE_MS = 5 * 60_000;
+/**
+ * Where a draft body lives. One object per LEASE GENERATION, never one per job: a writer whose lease was lost (expired and
+ * re-claimed, or the learner withdrew) can then only ever touch its own object. It cannot overwrite the draft another
+ * generation committed, and discarding its late write cannot delete that draft either. The committed body is the one
+ * named by the job row's `lease_generation` — a job is never leased again once a result is stored.
+ */
+export const draftPrefix = (j: { cohort_id: string; class_run_id: string; student_id: string; id: string }) => `classroom-reports/${j.cohort_id}/${j.class_run_id}/${j.student_id}/${j.id}/`;
+export const draftKey = (j: { cohort_id: string; class_run_id: string; student_id: string; id: string }, generation: number) => `${draftPrefix(j)}draft.g${generation}.json`;
 export const NOT_YET_SEEN = '아직 충분히 보지 못함';
 export const JOB_STATES = ['queued', 'leased', 'missing', 'partial', 'quarantined', 'draft', 'review_required', 'approved', 'failed'] as const;
 export const modelById = (id: string): CapabilityModel | undefined => CAPABILITY_MODELS.find((m) => m.id === id);
@@ -50,6 +58,13 @@ export interface Draft {
 }
 export type DraftVerdict = { ok: true; draft: Draft; state: 'review_required' | 'partial'; reason: string } | { ok: false; state: 'quarantined' | 'failed'; reason: string };
 
+/**
+ * Words the EVALUATOR writes (claim, change, next experiment) may not grade the learner. Keys were already refused; this is the
+ * same rule for prose: a number used as a score, a rank, a percentile, a level, or an AI-dependency estimate. It is deliberately
+ * narrow — a number that is part of what the learner did ("390px", "3단계로 줄임") is not a grade. Quotes are the record's own
+ * words and are never touched by this.
+ */
+export const GRADE_LANGUAGE = /(\d+(?:\.\d+)?\s*점(?!검)|\d+\s*(?:등|위)(?![가-힣])|(?:상위|하위)\s*\d+\s*(?:%|퍼센트|프로)|백분위|\d+\s*등급|[A-F][+-]?\s*(?:등급|학점)|레벨\s*\d|Lv\.?\s*\d|(?:AI\s*)?의존도\s*(?:는|가|:)?\s*\d+|\d+\s*\/\s*(?:10|100)\b)/i;
 /** `inputText` is the verified events.jsonl the job was built from: every quote must be in the event it names, or the draft is about someone/something else. */
 export function validateDraft(value: unknown, job: { capability_model: string; rubric: string; evaluator: string; input_coverage: string }, inputText: string): DraftVerdict {
   const fail = (reason: string, state: 'quarantined' | 'failed' = 'failed'): DraftVerdict => ({ ok: false, state, reason });
@@ -61,6 +76,8 @@ export function validateDraft(value: unknown, job: { capability_model: string; r
   // The job pins the model. A draft in the other model is not "close enough" — six and seven are different instruments.
   if (!model || model.id !== job.capability_model) return fail('model_mismatch', 'quarantined');
   if (d.versions.rubric !== job.rubric || d.versions.evaluator !== job.evaluator || d.versions.renderer_revision !== RENDERER_REVISION) return fail('version_mismatch', 'quarantined');
+  const written = [typeof d.next_experiment === 'string' ? d.next_experiment : '', ...d.findings.flatMap((f: any) => [f?.claim, f?.change?.before, f?.change?.after].filter((x) => typeof x === 'string'))];
+  if (written.some((t) => GRADE_LANGUAGE.test(t))) return fail('grade_language', 'quarantined');
   const keys = new Set(model.capabilities.map((c) => c.key));
   const events = indexInput(inputText);
   for (const f of d.findings) {
@@ -102,7 +119,8 @@ export function composeReport(draft: Draft, ctx: { class_runs_with_evidence: num
   const observed = draft.findings.filter((f) => f.status === 'observed'), rest = draft.findings.filter((f) => f.status !== 'observed'), changed = observed.filter((f) => f.change);
   const sections: ReportSection[] = [
     { title: '이번 수업에서 관찰된 행동', items: observed.map((f) => ({ label: label(f.capability), text: f.claim, evidence: f.evidence, ...(f.assistance ? { assistance: f.assistance } : {}) })), note: observed.length ? undefined : `이번 수업 기록에서는 ${NOT_YET_SEEN}.` },
-    { title: '판단이 바뀐 과정', items: changed.map((f) => ({ label: label(f.capability), text: `${f.change!.before} → ${f.change!.after}`, evidence: f.evidence })), note: changed.length ? undefined : '이번 수업 기록에서 판단을 바꾼 장면은 관찰되지 않았습니다. 바꾸지 않은 것이 문제라는 뜻은 아닙니다.' },
+// The quotes behind a changed judgement are already shown with the observed behaviour above; repeating them here only makes the page longer.
+    { title: '판단이 바뀐 과정', items: changed.map((f) => ({ label: label(f.capability), text: `${f.change!.before} → ${f.change!.after}` })), note: changed.length ? undefined : '이번 수업 기록에서 판단을 바꾼 장면은 관찰되지 않았습니다. 바꾸지 않은 것이 문제라는 뜻은 아닙니다.' },
     { title: NOT_YET_SEEN, items: rest.map((f) => ({ label: label(f.capability), text: NOT_YET_SEEN })), note: '점수나 미달이 아닙니다. 이번 기록에 그 행동을 볼 장면이 없었다는 뜻입니다.' },
     { title: '다음에 실험해볼 것', items: draft.next_experiment ? [{ text: draft.next_experiment }] : [], note: draft.next_experiment ? undefined : '다음 실험은 검수자가 학생과 함께 정합니다.' },
   ];

@@ -2135,6 +2135,51 @@
         },
         {
           "path": "worker/test/classroom-ops-regression.test.mjs"
+        },
+        {
+          "path": "worker/migrations/0018-classroom-snapshot-binding.sql"
+        },
+        {
+          "path": "worker/src/lib/classroom-evaluator.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-evaluator.test.mjs"
+        },
+        {
+          "path": "scripts/classroom-legacy-hain7.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/evidenceSnapshotStore.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-expiry-review.test.mjs"
+        },
+        {
+          "path": "worker/src/lib/classroom-report-html.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-delivery-resend.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-provider.test.mjs"
+        },
+        {
+          "path": "scripts/classroom-report-pdf.mjs"
+        },
+        {
+          "path": "e2e/classroom/report-page.mjs"
+        },
+        {
+          "path": "worker/migrations/0019-classroom-report-attempts.sql"
+        },
+        {
+          "path": "worker/migrations/0020-classroom-viewer-check.sql"
         }
       ]
     },

@@ -11,7 +11,7 @@ let f;
 try {
   const db = await mf.getD1Database('HPS_DB');
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await db.prepare(s).run(); };
-  for (let i = 0; i < 2; i++) for (const m of ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding']) await apply(readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), 'utf8'));
+  for (let i = 0; i < 2; i++) for (const m of ['0011-classroom-ops', '0012-classroom-ops-commands', '0013-classroom-ops-control', '0014-classroom-ops-evidence-review', '0015-classroom-collection', '0016-classroom-report-jobs', '0017-classroom-delivery', '0018-classroom-snapshot-binding', '0019-classroom-report-attempts', '0020-classroom-viewer-check']) await apply(readFileSync(new URL(`../migrations/${m}.sql`, import.meta.url), 'utf8'));
   await db.prepare('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, cohort_id TEXT, profile_id TEXT, starts_at TEXT, ends_at TEXT, ended_at TEXT)').run();
   f = await localOps({ binding: db });
   const seats = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }];

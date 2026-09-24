@@ -7,6 +7,15 @@ export interface Env {
   HPS_CLASSROOM_OPS?: string;
   /** #751 R6 — id of a registered live delivery adapter. Unset (the default) means only dry-run delivery can run. */
   HPS_DELIVERY_PROVIDER?: string;
+  /** #751 R5 — 'service-anthropic' turns the Service-side report evaluator on. Unset (default): jobs wait as `evaluator_not_configured`. */
+  HPS_CLASSROOM_EVALUATOR?: string;
+  HPS_CLASSROOM_EVALUATOR_MODEL?: string;
+  /** #751 R6 — live report delivery. All four are needed for HPS_DELIVERY_PROVIDER='resend'; none is set by default. */
+  RESEND_API_KEY?: string;
+  RESEND_WEBHOOK_SECRET?: string;
+  HPS_DELIVERY_FROM?: string;
+  /** Public https origin of this Service, for the link inside the message. */
+  HPS_PUBLIC_BASE_URL?: string;
   /** Explicit opt-in; migrations and approved contracts must precede activation. */
   HPS_ACCESS_CONTRACTS?: string;
   /** Exact SHA-256 digests of approved sales publications; never provider prices. */
