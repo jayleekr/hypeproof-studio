@@ -81,9 +81,9 @@ export function settleStatements(db: Db, o: { scope: string; args: unknown[]; ca
  * transaction closes every open distribution that token created, so the next sync of ANY learner stops carrying it, no
  * matter which instructor paired that learner. Idempotent: repeating a revocation changes nothing more.
  */
-export function issuerFenceStatements(db: Db, jti: string, o: { reason: string; by: string; sweep: boolean; retainedCohorts?: string[]; now: number }): Stmt[] {
-  const scope = `issuer_jti=? AND revoked_at IS NULL${o.retainedCohorts ? ' AND cohort_id NOT IN (SELECT value FROM json_each(?))' : ''}`;
-  const args = o.retainedCohorts ? [jti, JSON.stringify(o.retainedCohorts)] : [jti];
+export function issuerFenceStatements(db: Db, jti: string, o: { reason: string; by: string; sweep: boolean; retainedCohorts?: string[]; retainedSettingCohorts?: string[]; now: number }): Stmt[] {
+  const scope = `issuer_jti=? AND revoked_at IS NULL${o.retainedCohorts ? ` AND (cohort_id NOT IN (SELECT value FROM json_each(?))${o.retainedSettingCohorts ? " OR (cohort_id NOT IN (SELECT value FROM json_each(?)) AND object_id IN (SELECT object_id FROM classroom_content_objects WHERE kind='setting'))" : ''})` : ''}`;
+  const args = o.retainedCohorts ? [jti, JSON.stringify(o.retainedCohorts), ...(o.retainedSettingCohorts ? [JSON.stringify(o.retainedSettingCohorts)] : [])] : [jti];
   const mine = `(SELECT id FROM ${D} WHERE ${scope})`;
   const stmts = [db.prepare("INSERT INTO ops_issuer_fences(issuer_jti,state,reason,recorded_by,created_at,updated_at) VALUES(?,'revoked',?,?,?,?) ON CONFLICT(issuer_jti) DO UPDATE SET state='revoked',reason=excluded.reason,recorded_by=excluded.recorded_by,revision=ops_issuer_fences.revision+1,updated_at=excluded.updated_at WHERE ops_issuer_fences.state<>'revoked'").bind(jti, o.reason.slice(0, 64), o.by.slice(0, 64), o.now, o.now)];
   if (!o.sweep) return stmts;

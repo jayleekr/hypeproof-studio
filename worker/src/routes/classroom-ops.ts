@@ -87,7 +87,7 @@ export async function revokeOpsGrantsForIssuer(env: Env, issuerJti: string, by =
  * re-scope only when the new scope no longer holds `distribute`, so re-issuing a token mid-class does not cancel what is
  * still waiting for offline learners). Throws on storage failure: the caller must not report the fence as written.
  */
-export async function fenceIssuerForDistribution(env: Env, issuerJti: string, o: { reason: string; by: string; sweep: boolean; retainedCohorts?: string[] }): Promise<void> {
+export async function fenceIssuerForDistribution(env: Env, issuerJti: string, o: { reason: string; by: string; sweep: boolean; retainedCohorts?: string[]; retainedSettingCohorts?: string[] }): Promise<void> {
   if (!opsEnabled(env)) return;
   await env.HPS_DB.batch(issuerFenceStatements(env.HPS_DB, issuerJti, { ...o, now: Date.now() }));
 }
