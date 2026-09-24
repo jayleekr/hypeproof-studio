@@ -3,7 +3,7 @@
 
 This tool is intentionally conservative:
 
-- every active member is requested as a reviewer, excluding the PR author
+- reviewer requests are explicit opt-in and exclude the PR author
 - auto-merge is opt-in and only enabled when repo policy allows it and the
   detected risk is low enough
 - dry-run is the default for commands that would mutate GitHub
@@ -21,6 +21,85 @@ from pathlib import Path
 from typing import Any
 
 
+def refresh_canonical(canonical):
+    """Fast-forward the canonical checkout to origin/main before delegating to it.
+
+    A consumer that delegates to a stale or broken checkout runs yesterday's
+    engine against today's policy, and the old failure mode only said
+    "outdated" without saying what to do. This repairs the cheap cases and
+    names the rest.
+
+    Nothing is ever discarded. Uncommitted changes and commits that are not on
+    origin/main stop the repair and are reported, because neither can be
+    recreated once overwritten. Being left on a feature branch is repaired:
+    the branch keeps its commits and only the checkout moves to main.
+
+    Returns None when the checkout is usable, otherwise a reason a human must
+    resolve. Set HYPEPROOF_HARNESS_PIN to stay on a chosen revision.
+    """
+    if os.environ.get("HYPEPROOF_HARNESS_PIN"):
+        return None
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(canonical), *args], text=True, capture_output=True)
+
+    def out(*args):
+        return git(*args).stdout.strip()
+
+    if git("rev-parse", "--git-dir").returncode:
+        return "not a git checkout"
+    if git("fetch", "--quiet", "origin", "main").returncode:
+        return "cannot fetch origin/main; check network access and credentials"
+    if out("rev-parse", "HEAD") == out("rev-parse", "origin/main"):
+        return None
+
+    dirty = [line[3:] for line in out("status", "--porcelain").splitlines() if line]
+    if dirty:
+        return "uncommitted changes would be overwritten: " + ", ".join(sorted(dirty)[:5])
+    branch = out("rev-parse", "--abbrev-ref", "HEAD")
+    if branch != "main" and git("checkout", "main").returncode:
+        return f"cannot leave branch {branch} for main"
+    ahead = [line for line in out("log", "--oneline", "origin/main..HEAD").splitlines() if line]
+    if ahead:
+        return "local commits are not on origin/main: " + ", ".join(ahead[:3])
+    if git("merge", "--ff-only", "origin/main").returncode:
+        return "fast-forward to origin/main failed"
+    return None
+
+
+BUNDLE_PATHS = ("scripts/hype-pr", "skills/hype-pr", "docs/AGENT-GUIDE.ko.md", "docs/HYPE-PR.ko.md")
+
+
+def bundle_drift(canonical, root):
+    """Report when the installed bundle no longer matches the canonical one.
+
+    The engine that runs is always the canonical copy, so drift is not fatal and
+    must not block work. The launcher, the skill and its docs are the installed
+    copy though, and a launcher that predates a fix does not carry it. That is
+    how the canonical-checkout repair sat inert in a consumer repo: the old
+    launcher checked only that preparation.py existed and delegated in silence.
+
+    Only a real difference in the bundle is reported. Harness commits that touch
+    nothing here are not drift, and a consumer that went red every time Harness
+    moved would be muted within a week.
+
+    Returns None when the installed bundle is current, otherwise a message.
+    """
+    stamp = root / "scripts/hype-pr/HARNESS_VERSION"
+    if not stamp.is_file():
+        return None
+    installed = stamp.read_text().strip()
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(canonical), *args], text=True, capture_output=True)
+
+    if not installed or git("cat-file", "-e", installed + "^{commit}").returncode:
+        return f"installed revision {installed or '(empty)'} is unknown to the canonical checkout"
+    if git("diff", "--quiet", installed, "HEAD", "--", *BUNDLE_PATHS).returncode == 0:
+        return None
+    return f"installed bundle is from {installed[:7]} and the canonical bundle has changed since"
+
+
 ROOT = Path(__file__).resolve().parents[2]
 # Consumer copies delegate to the canonical checkout; policy/engine are never vendored.
 if not (ROOT / "policy/repos.yaml").is_file():
@@ -33,8 +112,17 @@ if not (ROOT / "policy/repos.yaml").is_file():
     target = canonical / "scripts/hype-pr/pr.py"
     if not target.is_file() or not (canonical / "policy/repos.yaml").is_file():
         raise SystemExit("hype-pr: canonical Harness checkout missing; clone hypeproof-harness as a sibling or set HYPEPROOF_HARNESS")
+    unresolved = refresh_canonical(canonical)
+    # Staleness keeps its own verdict: the automatic update is what should have
+    # fixed it, so its reason belongs in that message rather than replacing it.
     if not (canonical / "scripts/hype-pr/preparation.py").is_file():
-        raise SystemExit("hype-pr: canonical Harness checkout is outdated; update it to current main or set HYPEPROOF_HARNESS to an updated checkout")
+        raise SystemExit("hype-pr: canonical Harness checkout is outdated; update it to current main or set HYPEPROOF_HARNESS to an updated checkout"
+                         + (f" (automatic update stopped: {unresolved})" if unresolved else ""))
+    if unresolved:
+        raise SystemExit(f"hype-pr: canonical Harness checkout at {canonical} needs attention: {unresolved}")
+    drift = bundle_drift(canonical, ROOT)
+    if drift:
+        print(f"hype-pr: {drift}; reinstall with: python3 {canonical}/scripts/hype-pr/install.py {ROOT}", file=sys.stderr)
     if __name__ == "__main__":
         os.execv(sys.executable, [sys.executable, str(target), *sys.argv[1:]])
     raise RuntimeError("import hype-pr from the canonical Harness checkout")
@@ -138,12 +226,14 @@ def plan(
     labels: list[str],
     draft: bool,
     auto_merge: bool,
+    request_reviewers: bool = False,
 ) -> dict[str, Any]:
     repo, profile = find_repo(policy, repo_ref)
     full = repo_full_name(repo)
     profile_repo = profile.get("repository", {})
     risks = detect_risks(paths)
-    reviewer_logins = reviewers_for_author(policy, author)
+    eligible_reviewers = reviewers_for_author(policy, author)
+    reviewer_logins = eligible_reviewers if request_reviewers else []
     profile_allows_auto_merge = bool(profile_repo.get("allow_auto_merge"))
     checks = required_checks(repo)
 
@@ -170,8 +260,10 @@ def plan(
         "author": author,
         "reviewers": reviewer_logins,
         "review_request": {
+            "enabled": request_reviewers,
             "active_members": active_members(policy),
             "exclude_author": True,
+            "eligible_reviewers": eligible_reviewers,
             "requested_reviewers": reviewer_logins,
         },
         "risk": {
@@ -235,6 +327,7 @@ def command_request_reviewers(args: argparse.Namespace, policy: dict[str, Any]) 
         labels=labels,
         draft=bool(pr.get("isDraft")),
         auto_merge=False,
+        request_reviewers=True,
     )
     reviewers = planned["reviewers"]
     result = {
@@ -266,9 +359,63 @@ def reviewer_commands(repo: str, pr_ref: str, reviewers: list[str]) -> list[list
     ]
 
 
+def reviewer_cleanup_commands(repo: str, pr_ref: str, reviewers: list[str]) -> list[list[str]]:
+    return [
+        [
+            "gh",
+            "pr",
+            "edit",
+            str(pr_ref),
+            "--repo",
+            parse_repo(repo),
+            "--remove-reviewer",
+            reviewer,
+        ]
+        for reviewer in reviewers
+    ]
+
+
 def apply_reviewer_requests(repo: str, pr_ref: str, reviewers: list[str]) -> list[dict[str, Any]]:
+    if os.environ.get("HYPE_PR_WORK_DIR"):
+        from work_transport import exchange
+        results = []
+        for reviewer in reviewers:
+            try:
+                exchange("reviewer", {"repo": parse_repo(repo), "pr": pr_ref, "reviewer": reviewer})
+                results.append({"reviewer": reviewer, "returncode": 0})
+            except ValueError:
+                results.append({"reviewer": reviewer, "returncode": 1,
+                                "stderr": "Work reviewer request failed; no approval implied"})
+        return results
     results: list[dict[str, Any]] = []
     for reviewer, cmd in zip(reviewers, reviewer_commands(repo, pr_ref, reviewers)):
+        gh_result = run(cmd)
+        results.append(
+            {
+                "reviewer": reviewer,
+                "returncode": gh_result.returncode,
+                "stdout": gh_result.stdout.strip(),
+                "stderr": gh_result.stderr.strip(),
+            }
+        )
+    return results
+
+
+def apply_reviewer_cleanup(repo: str, pr_ref: str, reviewers: list[str]) -> list[dict[str, Any]]:
+    if os.environ.get("HYPE_PR_WORK_DIR"):
+        from work_transport import exchange
+        results = []
+        for reviewer in reviewers:
+            try:
+                exchange("unreviewer", {"repo": parse_repo(repo), "pr": pr_ref, "reviewer": reviewer})
+                results.append({"reviewer": reviewer, "returncode": 0})
+            except ValueError:
+                results.append({"reviewer": reviewer, "returncode": 1,
+                                "stderr": "Work reviewer cleanup failed; reconcile the created PR"})
+        return results
+    results: list[dict[str, Any]] = []
+    commands = reviewer_cleanup_commands(repo, pr_ref, reviewers)
+    for reviewer, cmd in zip(reviewers, commands):
         gh_result = run(cmd)
         results.append(
             {
@@ -320,6 +467,9 @@ def git_receipt_path(checkout):
 
 
 def command_create(args: argparse.Namespace, policy: dict[str, Any]) -> int:
+    work = bool(os.environ.get("HYPE_PR_WORK_DIR"))
+    if work and args.auto_merge:
+        raise ValueError("Work transport does not schedule auto-merge; follow existing review policy")
     labels = args.label or []
     preparation_required = parse_repo(args.repo) in json.loads((ROOT / "policy/change-impact.json").read_text())["repositories"]
     report = prepared_report(args, policy) if args.apply and preparation_required else None
@@ -332,6 +482,7 @@ def command_create(args: argparse.Namespace, policy: dict[str, Any]) -> int:
         labels=labels,
         draft=args.draft,
         auto_merge=args.auto_merge,
+        request_reviewers=args.request_reviewers,
     )
     body = args.body or ""
     if args.body_file:
@@ -363,24 +514,46 @@ def command_create(args: argparse.Namespace, policy: dict[str, Any]) -> int:
         "preparation": {"required_for_apply": preparation_required, "verified": report is not None},
         "create_command": cmd,
         "reviewer_commands": reviewer_commands(args.repo, "<created-pr>", planned["reviewers"]),
+        "reviewer_cleanup_commands": reviewer_cleanup_commands(
+            args.repo,
+            "<created-pr>",
+            [] if args.request_reviewers else planned["review_request"]["eligible_reviewers"],
+        ),
         "apply": args.apply,
     }
     if not args.apply:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
 
-    created = run(cmd)
+    if work:
+        if report is None:
+            raise ValueError("Work PR creation requires verified preparation")
+        from work_transport import exchange
+        outcome = exchange("create", {
+            "repo": parse_repo(args.repo), "base": args.base, "head": args.head,
+            "title": args.title, "body": body, "draft": args.draft,
+            "labels": labels, "author": args.author,
+            "expected": {"head": report["head"], "base": report["base_tip"],
+                         "sources": report["source_commits"]},
+        })
+        created = CommandResult(0, outcome["url"], "")
+    else:
+        created = run(cmd)
     result["create"] = {
         "returncode": created.returncode,
         "stdout": created.stdout.strip(),
         "stderr": created.stderr.strip(),
     }
+    if work:
+        result["label_errors"] = outcome.get("label_errors", [])
     if created.returncode != 0:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return created.returncode
 
     pr_ref = created.stdout.strip().splitlines()[-1]
     result["reviewer_results"] = apply_reviewer_requests(args.repo, pr_ref, planned["reviewers"])
+    cleanup_reviewers = [] if args.request_reviewers else planned["review_request"]["eligible_reviewers"]
+    result["reviewer_cleanup_results"] = apply_reviewer_cleanup(args.repo, pr_ref, cleanup_reviewers)
     if planned["auto_merge"]["eligible"]:
         merge_cmd = [
             "gh",
@@ -401,27 +574,29 @@ def command_create(args: argparse.Namespace, policy: dict[str, Any]) -> int:
             "stderr": merged.stderr.strip(),
         }
     print(json.dumps(result, ensure_ascii=False, indent=2))
-    return 0
+    cleanup_failed = any(item["returncode"] != 0 for item in result["reviewer_cleanup_results"])
+    return 1 if cleanup_failed else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="HypeProof PR creation and review-request harness.")
+    parser = argparse.ArgumentParser(description="HypeProof guarded PR creation harness.")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    plan_parser = sub.add_parser("plan", help="Plan reviewers and auto-merge eligibility without GitHub calls.")
+    plan_parser = sub.add_parser("plan", help="Plan explicit reviewers and auto-merge eligibility without GitHub calls.")
     plan_parser.add_argument("--repo", required=True, help="owner/name or policy repo name")
     plan_parser.add_argument("--author", required=True, help="GitHub login of PR author")
     plan_parser.add_argument("--path", action="append", default=[], help="Changed path. Can repeat.")
     plan_parser.add_argument("--label", action="append", default=[], help="PR label. Can repeat.")
     plan_parser.add_argument("--draft", action="store_true")
     plan_parser.add_argument("--auto-merge", action="store_true")
+    plan_parser.add_argument("--request-reviewers", action="store_true", help="Opt in to all active non-author reviewers.")
 
     req_parser = sub.add_parser("request-reviewers", help="Request all active members on an existing PR.")
     req_parser.add_argument("--repo", required=True)
     req_parser.add_argument("--pr", required=True)
     req_parser.add_argument("--apply", action="store_true", help="Mutate GitHub. Omit for dry-run.")
 
-    create_parser = sub.add_parser("create", help="Create a PR with all-member reviewers.")
+    create_parser = sub.add_parser("create", help="Create a guarded PR without reviewers by default.")
     create_parser.add_argument("--repo", required=True)
     create_parser.add_argument("--head", required=True)
     create_parser.add_argument("--base", default=DEFAULT_BASE)
@@ -433,6 +608,7 @@ def build_parser() -> argparse.ArgumentParser:
     create_parser.add_argument("--label", action="append", default=[])
     create_parser.add_argument("--draft", action="store_true")
     create_parser.add_argument("--auto-merge", action="store_true")
+    create_parser.add_argument("--request-reviewers", action="store_true", help="Opt in to all active non-author reviewers.")
     create_parser.add_argument("--checkout", default=".", help="Target worktree; inferred from the invocation directory")
     create_parser.add_argument("--preparation", help="Receipt from prepare, required for --apply")
     create_parser.add_argument("--apply", action="store_true", help="Mutate GitHub. Omit for dry-run.")
@@ -469,6 +645,7 @@ def main(argv: list[str] | None = None) -> int:
                 labels=args.label,
                 draft=args.draft,
                 auto_merge=args.auto_merge,
+                request_reviewers=args.request_reviewers,
             )
             print(json.dumps(data, ensure_ascii=False, indent=2))
             return 0
