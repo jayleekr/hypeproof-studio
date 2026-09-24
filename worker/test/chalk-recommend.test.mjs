@@ -27,31 +27,68 @@ const GOAL_VOCAB = [
   "evidence-based-reasoning", "questioning", "pattern-recognition",
   "systems-thinking", "reflection", "transfer",
 ];
-// Three biopharm-compatible methods and one excluded
-const METHODS = [
+// Four methods: three biopharm-compatible, one excluded by condition
+const BASE_METHODS = [
   {
     id: "m-guided-discovery",
     best_for: ["inquiry-skills", "observation", "critical-thinking"],
     weak_for: [],
     avoid_when: ["no-prep-time"],
+    prior_knowledge: "any",
+    requires_guidance: false,
   },
   {
     id: "m-predict-observe-explain",
     best_for: ["prediction", "observation", "evidence-based-reasoning"],
     weak_for: [],
     avoid_when: ["high-tech-required"],
+    prior_knowledge: "any",
+    requires_guidance: false,
   },
   {
     id: "m-cooperative-learning",
     best_for: ["cooperative-skills", "communication", "leadership"],
     weak_for: [],
     avoid_when: ["large-group"],
+    prior_knowledge: "any",
+    requires_guidance: false,
   },
   {
     id: "m-project-based-learning",
     best_for: ["design-thinking", "autonomy", "problem-solving"],
     weak_for: [],
     avoid_when: ["short-session", "novice-learners"],
+    prior_knowledge: "any",
+    requires_guidance: false,
+  },
+];
+
+// Additional methods for prior_knowledge and requires_guidance tests
+const METHODS_EXTRA = [
+  ...BASE_METHODS,
+  {
+    id: "m-research-project",
+    best_for: ["autonomy", "design-thinking", "evidence-based-reasoning"],
+    weak_for: [],
+    avoid_when: [],
+    prior_knowledge: "intermediate",  // needs intermediate+ learner
+    requires_guidance: false,
+  },
+  {
+    id: "m-guided-inquiry",
+    best_for: ["questioning", "observation", "inquiry-skills"],
+    weak_for: [],
+    avoid_when: [],
+    prior_knowledge: "any",
+    requires_guidance: true,  // needs guidance support
+  },
+  {
+    id: "m-weak-overlap",
+    best_for: ["design-thinking", "creativity"],
+    weak_for: ["cooperative-skills"],  // weak overlap with cooperative goals
+    avoid_when: [],
+    prior_knowledge: "any",
+    requires_guidance: false,
   },
 ];
 
@@ -64,7 +101,7 @@ async function check(name, fn) { await fn(); passed++; console.log(`PASS ${name}
 await check("U-01 biopharm conditions: project-based excluded, three candidates", () => {
   const result = recommendMethods(
     { conditions: ["single-session", "short-session", "novice-learners"], goals: [] },
-    METHODS, VOCAB, 1,
+    BASE_METHODS, VOCAB, 1,
   );
   const chosenIds = result.chosen.map((m) => m.id).sort();
   const excludedIds = result.excluded.map((m) => m.id);
@@ -76,7 +113,7 @@ await check("U-01 biopharm conditions: project-based excluded, three candidates"
 await check("U-02 exclusion because lists both avoid_when hits", () => {
   const result = recommendMethods(
     { conditions: ["short-session", "novice-learners"], goals: [] },
-    [METHODS[3]], VOCAB, 1,
+    [BASE_METHODS[3]], VOCAB, 1,
   );
   const ex = result.excluded[0];
   assert.equal(ex.id, "m-project-based-learning");
@@ -86,37 +123,87 @@ await check("U-02 exclusion because lists both avoid_when hits", () => {
 
 await check("U-03 unknown condition throws VocabError", () => {
   assert.throws(
-    () => recommendMethods({ conditions: ["unknown-condition"], goals: [] }, METHODS, VOCAB, 1),
+    () => recommendMethods({ conditions: ["unknown-condition"], goals: [] }, BASE_METHODS, VOCAB, 1),
     (err) => err instanceof VocabError && err.field === "condition",
   );
 });
 
 await check("U-04 unknown goal throws VocabError", () => {
   assert.throws(
-    () => recommendMethods({ conditions: [], goals: ["nonexistent-goal"] }, METHODS, VOCAB, 1),
+    () => recommendMethods({ conditions: [], goals: ["nonexistent-goal"] }, BASE_METHODS, VOCAB, 1),
     (err) => err instanceof VocabError && err.field === "goal",
   );
 });
 
 await check("U-05 determinism: same input + same methods → same output", () => {
   const input = { conditions: ["short-session"], goals: ["cooperative-skills"] };
-  const r1 = recommendMethods(input, METHODS, VOCAB, 1);
-  const r2 = recommendMethods(input, METHODS, VOCAB, 1);
+  const r1 = recommendMethods(input, BASE_METHODS, VOCAB, 1);
+  const r2 = recommendMethods(input, BASE_METHODS, VOCAB, 1);
   assert.deepEqual(r1, r2);
 });
 
 await check("U-06 goal rationale: matched goals shown when input goals provided", () => {
   const result = recommendMethods(
     { conditions: [], goals: ["cooperative-skills"] },
-    [METHODS[2]], VOCAB, 1,
+    [BASE_METHODS[2]], VOCAB, 1,
   );
   assert.deepEqual(result.chosen[0].rationale, ["cooperative-skills"]);
 });
 
 await check("U-07 empty conditions → all methods are candidates", () => {
-  const result = recommendMethods({ conditions: [], goals: [] }, METHODS, VOCAB, 1);
-  assert.equal(result.chosen.length, METHODS.length);
+  const result = recommendMethods({ conditions: [], goals: [] }, BASE_METHODS, VOCAB, 1);
+  assert.equal(result.chosen.length, BASE_METHODS.length);
   assert.equal(result.excluded.length, 0);
+});
+
+await check("U-08 prior_knowledge: intermediate method excluded for novice learner", () => {
+  const result = recommendMethods(
+    { conditions: [], goals: [], learner_level: "novice" },
+    [METHODS_EXTRA[4]], // m-research-project: prior_knowledge=intermediate
+    VOCAB, 1,
+  );
+  assert.equal(result.excluded.length, 1);
+  assert.ok(result.excluded[0].because.includes("prior_knowledge"));
+});
+
+await check("U-09 prior_knowledge: intermediate method OK for intermediate learner", () => {
+  const result = recommendMethods(
+    { conditions: [], goals: [], learner_level: "intermediate" },
+    [METHODS_EXTRA[4]], VOCAB, 1,
+  );
+  assert.equal(result.chosen.length, 1);
+});
+
+await check("U-10 requires_guidance excluded when has_guidance=false", () => {
+  const result = recommendMethods(
+    { conditions: [], goals: [], has_guidance: false },
+    [METHODS_EXTRA[5]], // m-guided-inquiry: requires_guidance=true
+    VOCAB, 1,
+  );
+  assert.equal(result.excluded.length, 1);
+  assert.ok(result.excluded[0].because.includes("requires_guidance"));
+});
+
+await check("U-11 requires_guidance allowed when has_guidance=true", () => {
+  const result = recommendMethods(
+    { conditions: [], goals: [], has_guidance: true },
+    [METHODS_EXTRA[5]], VOCAB, 1,
+  );
+  assert.equal(result.chosen.length, 1);
+});
+
+await check("U-12 weak_for overlap: penalised methods sorted after clean ones", () => {
+  const weakMethod = METHODS_EXTRA[6]; // weak_for: ["cooperative-skills"]
+  const cleanMethod = BASE_METHODS[0]; // no weak_for
+  const result = recommendMethods(
+    { conditions: [], goals: ["cooperative-skills", "inquiry-skills"] },
+    [weakMethod, cleanMethod], VOCAB, 1,
+  );
+  assert.equal(result.chosen.length, 2);
+  // clean method (no weak overlap) should come first
+  assert.equal(result.chosen[0].id, "m-guided-discovery");
+  assert.equal(result.chosen[1].id, "m-weak-overlap");
+  assert.deepEqual(result.chosen[1].weak_overlap, ["cooperative-skills"]);
 });
 
 // ── Integration tests (real routing, in-memory D1) ────────────────────────────
@@ -135,16 +222,21 @@ CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
   PRIMARY KEY (version, doc_id)
 );
 `;
+// authoring_drafts is created by the existing migration (0002-chalk-authoring.sql).
+const AUTHORING_SCHEMA_FILE = new URL("../migrations/0002-chalk-authoring.sql", import.meta.url);
+import { readFileSync } from "node:fs";
+const AUTHORING_SCHEMA = readFileSync(AUTHORING_SCHEMA_FILE, "utf8");
 
 const profileId = listProfiles().find((p) => p.session.cohort_id === COHORT)?.id;
 assert.ok(profileId, "profile not found for COHORT");
 
-function makeDb(seed = true) {
+function makeDb({ seed = true, seedDraft = true, draftOwner = "tester" } = {}) {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
   db.exec(KB_SCHEMA);
+  db.exec(AUTHORING_SCHEMA);
   if (seed) {
-    db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,${METHODS.length + 2},'digest0')`).run();
+    db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,${BASE_METHODS.length + 2},'digest0')`).run();
     db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
       1, "vocab:goal", "vocab",
       JSON.stringify({ keys: GOAL_VOCAB.map((k) => ({ key: k, label: k })) }), "", null,
@@ -153,13 +245,19 @@ function makeDb(seed = true) {
       1, "vocab:condition", "vocab",
       JSON.stringify({ keys: COND_VOCAB.map((k) => ({ key: k, label: k })) }), "", null,
     );
-    for (const m of METHODS) {
+    for (const m of BASE_METHODS) {
       db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
         1, `method:${m.id}`, "method",
-        JSON.stringify({ id: m.id, best_for: m.best_for, weak_for: m.weak_for, avoid_when: m.avoid_when }),
-        "", null,
+        JSON.stringify(m), "", null,
       );
     }
+  }
+  if (seedDraft) {
+    // Insert a draft owned by draftOwner
+    db.prepare(
+      `INSERT INTO authoring_drafts (cohort_id,course_id,owner_id,profile_id,revision,content_json,request_id,request_hash,updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?)`
+    ).run(COHORT, "test-course", draftOwner, profileId, 1, '{"schema":"hps-session-design/1"}', "req-1", "hash-1", new Date().toISOString());
   }
   return db;
 }
@@ -180,14 +278,15 @@ function makeEnv(db) {
   return env;
 }
 
-const token = async (scopes = [{ cohort: COHORT, profiles: [profileId] }]) =>
-  (await issueIssuer({ issuer: "tester", scopes }, 4, TEST_SECRET)).token;
+const token = async (issuer, scopes = [{ cohort: COHORT, profiles: [profileId] }]) =>
+  (await issueIssuer({ issuer, scopes }, 4, TEST_SECRET)).token;
 const studentToken = async () => (await issue({ u: "kid01", c: COHORT, p: profileId }, 1, TEST_SECRET)).token;
 
 const base = `/admin/chalk/cohorts/${COHORT}/courses/test-course/recommend`;
 
-async function req(body, credential, db = makeDb()) {
-  const env = makeEnv(db);
+async function req(body, credential, db) {
+  const usedDb = db ?? makeDb();
+  const env = makeEnv(usedDb);
   const headers = { authorization: `Bearer ${credential}`, "content-type": "application/json" };
   const res = await app.fetch(
     new Request("https://service.test" + base, { method: "POST", headers, body: JSON.stringify(body) }),
@@ -197,7 +296,8 @@ async function req(body, credential, db = makeDb()) {
   return { status: res.status, json };
 }
 
-const issuerTok = await token();
+const issuerTok = await token("tester");
+const otherIssuerTok = await token("other-instructor");
 const studentTok = await studentToken();
 
 await check("I-01 student token → 403", async () => {
@@ -206,7 +306,7 @@ await check("I-01 student token → 403", async () => {
 });
 
 await check("I-02 no knowledge version → 409", async () => {
-  const r = await req({ conditions: [], goals: [] }, issuerTok, makeDb(false));
+  const r = await req({ conditions: [], goals: [] }, issuerTok, makeDb({ seed: false }));
   assert.equal(r.status, 409);
 });
 
@@ -236,6 +336,17 @@ await check("I-06 invalid Bearer → 401", async () => {
   // admin middleware lets through any Bearer-prefixed header; route handler verifies.
   const r = await req({ conditions: [], goals: [] }, "not-a-valid-token");
   assert.equal(r.status, 401);
+});
+
+await check("I-07 draft not found (no draft seeded) → 404", async () => {
+  const r = await req({ conditions: [], goals: [] }, issuerTok, makeDb({ seedDraft: false }));
+  assert.equal(r.status, 404);
+});
+
+await check("I-08 other issuer's course → 404", async () => {
+  // Draft is owned by "tester". otherIssuerTok.u = "other-instructor" → 404.
+  const r = await req({ conditions: [], goals: [] }, otherIssuerTok);
+  assert.equal(r.status, 404);
 });
 
 console.log(`\n${passed} tests passed.`);

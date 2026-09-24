@@ -1,9 +1,13 @@
 // #1293 — POST /admin/chalk/cohorts/:cohort/courses/:course/recommend
 // Issuer Bearer only. Deterministic closed-vocabulary method recommendation.
 // Depends on chalk_knowledge_versions and chalk_knowledge_docs from #1288 (migration 0030).
+//
+// Note: this route will be merged into chalk-courses.ts once worker4's #1294
+// (POST …/check) lands — whichever PR merges second does the consolidation.
 import { Hono } from "hono";
 import type { Env } from "../env";
 import { authorizeIssuerForCohort } from "../lib/instructor-auth";
+import { owns, type Draft } from "./authoring";
 import { recommendMethods, VocabError, type MethodFields } from "../lib/chalk-recommend";
 
 interface KbDoc {
@@ -21,12 +25,22 @@ chalkRecommend.post(
   "/chalk/cohorts/:cohort/courses/:course/recommend",
   async (c) => {
     const cohort = c.req.param("cohort")!;
+    const course = c.req.param("course")!;
 
     const auth = await authorizeIssuerForCohort(c, cohort);
     if (auth instanceof Response) return auth;
     if (!auth) return c.json({ error: "instructor Bearer required" }, 401);
 
     c.header("cache-control", "no-store");
+
+    // Verify the course draft exists and is owned by this issuer.
+    const draft = await c.env.HPS_DB
+      .prepare("SELECT * FROM authoring_drafts WHERE cohort_id=? AND course_id=?")
+      .bind(cohort, course)
+      .first<Draft>();
+    if (!draft || !owns(draft, auth)) {
+      return c.json({ error: "course not found" }, 404);
+    }
 
     let body: unknown;
     try {
@@ -56,6 +70,9 @@ chalkRecommend.post(
       return c.json({ error: "knowledge_version must be a number" }, 400);
     }
 
+    const learnerLevel = typeof req.learner_level === "string" ? req.learner_level : undefined;
+    const hasGuidance = typeof req.has_guidance === "boolean" ? req.has_guidance : undefined;
+
     // Resolve knowledge version
     const versionRow = requestedVersion !== null
       ? await c.env.HPS_DB
@@ -84,6 +101,8 @@ chalkRecommend.post(
         best_for: Array.isArray(fields.best_for) ? (fields.best_for as string[]) : [],
         weak_for: Array.isArray(fields.weak_for) ? (fields.weak_for as string[]) : [],
         avoid_when: Array.isArray(fields.avoid_when) ? (fields.avoid_when as string[]) : [],
+        prior_knowledge: typeof fields.prior_knowledge === "string" ? fields.prior_knowledge : undefined,
+        requires_guidance: typeof fields.requires_guidance === "boolean" ? fields.requires_guidance : undefined,
       };
     });
 
@@ -106,7 +125,12 @@ chalkRecommend.post(
 
     try {
       const result = recommendMethods(
-        { conditions: req.conditions as string[], goals: req.goals as string[] },
+        {
+          conditions: req.conditions as string[],
+          goals: req.goals as string[],
+          learner_level: learnerLevel,
+          has_guidance: hasGuidance,
+        },
         methods,
         { goals: goalKeys, conditions: condKeys },
         kbVersion,
