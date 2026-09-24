@@ -16,7 +16,7 @@
 
 | | |
 |---|---|
-| `transcript.md` | 대화 전문. 턴마다 타임스탬프 + 이전 턴과의 간격 |
+| `transcript.md` | Moved to the private lab repo with personal data redacted (2026-09-23) |
 | `errors.md` | 세션 중 앱이 남긴 에러 전부 (exthost 로그) |
 
 ## 세션 흐름
