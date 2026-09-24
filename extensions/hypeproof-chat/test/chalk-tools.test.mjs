@@ -198,4 +198,88 @@ await check('T-L11 execCheckPlan uses #1294 route with cohort in path', async ()
   }
 });
 
+// ─── T-L12~L15: 서버 경로 단언 (#1288 세 경로 + #1293 cohort 포함 경로) ──────
+
+// 공통: 모의 서버 유틸
+async function withMockServer(handler, fn) {
+  const server = createServer(handler);
+  await new Promise(r => server.listen(0, '127.0.0.1', r));
+  const { port } = server.address();
+  try {
+    await fn(port);
+  } finally {
+    server.close();
+  }
+}
+
+const {
+  execGetKnowledge,
+  execRecommendMethods,
+} = await import('../src/chalk/tools.ts');
+
+const fakeCtx = (port) => ({
+  serverUrl: `http://127.0.0.1:${port}`,
+  secrets: { get: async () => 'tok', store: async () => {}, delete: async () => {}, keys: async () => [] },
+});
+
+await check('T-L12 execGetKnowledge versions → GET /admin/chalk/knowledge/versions', async () => {
+  let captured = '';
+  await withMockServer((req, res) => {
+    captured = req.url ?? '';
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ versions: [] }));
+  }, async (port) => {
+    await execGetKnowledge(fakeCtx(port), {});
+    assert.equal(captured, '/admin/chalk/knowledge/versions', `경로 불일치: ${captured}`);
+  });
+});
+
+await check('T-L13 execGetKnowledge version+kind → GET .../docs?kind=method (쿼리스트링)', async () => {
+  let captured = '';
+  await withMockServer((req, res) => {
+    captured = req.url ?? '';
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ version: 3, docs: [] }));
+  }, async (port) => {
+    await execGetKnowledge(fakeCtx(port), { version: 3, kind: 'method' });
+    assert.match(captured, /\/admin\/chalk\/knowledge\/3\/docs\?kind=method/, `경로 불일치: ${captured}`);
+    // kind가 경로 세그먼트에 들어가면 안 됨
+    assert.ok(!captured.includes('/docs/method'), `kind가 경로 세그먼트로 들어갔다: ${captured}`);
+  });
+});
+
+await check('T-L14 execGetKnowledge version+doc_id → GET .../docs/:doc_id (URL 인코딩)', async () => {
+  let captured = '';
+  await withMockServer((req, res) => {
+    captured = req.url ?? '';
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ doc_id: 'method:m-001' }));
+  }, async (port) => {
+    await execGetKnowledge(fakeCtx(port), { version: 3, doc_id: 'method:m-001' });
+    // ':' 가 %3A 로 인코딩돼야 함
+    assert.match(captured, /\/admin\/chalk\/knowledge\/3\/docs\/method%3Am-001/, `URL 인코딩 실패: ${captured}`);
+  });
+});
+
+await check('T-L15 execRecommendMethods → POST /admin/chalk/cohorts/:cohort/courses/:course/recommend', async () => {
+  let captured = '';
+  await withMockServer((req, res) => {
+    captured = req.url ?? '';
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ recommended: [] }));
+  }, async (port) => {
+    await execRecommendMethods(fakeCtx(port), {
+      cohort: 'sk-biopharm-kids-s1',
+      course: 'lesson-01',
+      conditions: ['no_prior'],
+      goals: ['concept_understanding'],
+    });
+    assert.match(
+      captured,
+      /\/admin\/chalk\/cohorts\/sk-biopharm-kids-s1\/courses\/lesson-01\/recommend/,
+      `#1293 경로 불일치: ${captured}`,
+    );
+  });
+});
+
 console.log(`\n${passed} tests passed`);

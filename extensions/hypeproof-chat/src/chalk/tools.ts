@@ -134,25 +134,27 @@ export async function execCheckPlan(
   );
 }
 
-// chalk_get_knowledge — GET /admin/chalk/knowledge/:version/docs[/:kind[/:doc_id]]
-// (#1288 경로)
+// chalk_get_knowledge — #1288 경로 세 가지:
+//   version 없음          → GET /admin/chalk/knowledge/versions (버전 목록)
+//   version + doc_id      → GET /admin/chalk/knowledge/:version/docs/:doc_id (URL 인코딩 필수; doc_id에 ':' 포함)
+//   version (+ kind 선택) → GET /admin/chalk/knowledge/:version/docs?kind=<kind>
 export const CHALK_GET_KNOWLEDGE_DEF: ChalkToolDefinition = {
   name: "chalk_get_knowledge",
   description:
-    "Chalk 지식 저장소에서 문서를 읽습니다. 초안의 지식 버전을 지정해야 합니다.",
+    "Chalk 지식 저장소에서 문서를 읽습니다. version 생략 시 버전 목록, doc_id 지정 시 단일 문서, kind 지정 시 해당 종류 목록을 돌려줍니다.",
   inputSchema: schema(
     {
-      version: { type: "number", description: "지식 버전 (예: 3)" },
+      version: { type: "number", description: "지식 버전 (예: 3). 생략하면 버전 목록을 돌려줍니다." },
       kind: {
         ...str,
-        description: "문서 종류 (예: method, guide). 생략하면 목록을 돌려줍니다.",
+        description: "문서 종류 (예: method, guide). version과 함께 지정하면 해당 종류만 필터합니다.",
       },
       doc_id: {
         ...str,
-        description: "문서 ID. 생략하면 kind 전체 목록을 돌려줍니다.",
+        description: "문서 ID (예: method:m-001). version과 함께 지정하면 해당 문서 하나를 돌려줍니다.",
       },
     },
-    ["version"],
+    [],
   ),
 };
 
@@ -161,31 +163,60 @@ export async function execGetKnowledge(
   input: Record<string, unknown>,
 ): Promise<unknown> {
   const { version, kind, doc_id } = input as {
-    version: number;
+    version?: number;
     kind?: string;
     doc_id?: string;
   };
-  if (typeof version !== "number") throw new Error("version은 숫자여야 합니다.");
-  let path = `/admin/chalk/knowledge/${encodeURIComponent(String(version))}/docs`;
-  if (kind) {
-    path += `/${encodeURIComponent(kind)}`;
-    if (doc_id) path += `/${encodeURIComponent(doc_id)}`;
+
+  // 버전 없음 → 버전 목록
+  if (version === undefined || version === null) {
+    return issuerFetch(ctx, `/admin/chalk/knowledge/versions`);
   }
-  return issuerFetch(ctx, path);
+
+  if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
+    throw new Error("version은 양의 정수여야 합니다.");
+  }
+
+  const ver = encodeURIComponent(String(version));
+
+  // doc_id 있음 → 단일 문서 (doc_id에 ':' 포함 가능 → encodeURIComponent 필수)
+  if (doc_id) {
+    return issuerFetch(ctx, `/admin/chalk/knowledge/${ver}/docs/${encodeURIComponent(doc_id)}`);
+  }
+
+  // kind 있음 → 쿼리스트링으로 필터
+  const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+  return issuerFetch(ctx, `/admin/chalk/knowledge/${ver}/docs${qs}`);
 }
 
-// chalk_recommend_methods — POST /admin/chalk/courses/:course/recommend
-// (#1293 경로; chalk-worker1이 구현 중)
+// chalk_recommend_methods — POST /admin/chalk/cohorts/:cohort/courses/:course/recommend
+// (#1293 경로; cohort는 도구 입력으로 받는다 — 강사 토큰 scope에 코호트가 여럿일 수 있기 때문)
 export const CHALK_RECOMMEND_METHODS_DEF: ChalkToolDefinition = {
   name: "chalk_recommend_methods",
   description:
-    "강의 초안의 입력(대상·자산·형식 등)을 기반으로 적합한 교수 모형을 추천합니다.",
+    "강의 초안의 학습 조건·목표를 기반으로 적합한 교수 모형을 추천합니다.",
   inputSchema: schema(
     {
-      cohort: { ...str, description: "코호트 ID" },
-      course: { ...str, description: "강의 ID" },
+      cohort: { ...str, description: "코호트 ID (예: sk-biopharm-kids-s1). 강사 토큰 scope에서 선택" },
+      course: { ...str, description: "강의 ID (예: lesson-01)" },
+      conditions: {
+        type: "array",
+        items: { type: "string" },
+        description: "학습 조건 목록 (예: [\"no_prior\", \"short_time\"])",
+      },
+      goals: {
+        type: "array",
+        items: { type: "string" },
+        description: "학습 목표 목록 (예: [\"concept_understanding\"])",
+      },
+      knowledge_version: {
+        type: "number",
+        description: "지식 버전. 생략 시 서버가 최신 버전을 사용합니다.",
+      },
+      learner_level: { ...str, description: "학습자 수준 (optional, 예: beginner)" },
+      has_guidance: { type: "boolean", description: "교사 지도 여부 (optional)" },
     },
-    ["cohort", "course"],
+    ["cohort", "course", "conditions", "goals"],
   ),
 };
 
@@ -193,13 +224,30 @@ export async function execRecommendMethods(
   ctx: ChalkToolContext,
   input: Record<string, unknown>,
 ): Promise<unknown> {
-  const { cohort, course } = input as { cohort: string; course: string };
+  const { cohort, course, conditions, goals, knowledge_version, learner_level, has_guidance } =
+    input as {
+      cohort: string;
+      course: string;
+      conditions: string[];
+      goals: string[];
+      knowledge_version?: number;
+      learner_level?: string;
+      has_guidance?: boolean;
+    };
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
-  // #1293 경로. cohort 포함 형태는 E2-1 §5 표와 같이 추후 확정. 지금은 course만.
-  return issuerFetch(ctx, `/admin/chalk/courses/${encodeURIComponent(course)}/recommend`, {
-    method: "POST",
-    body: { cohort },
-  });
+  if (!Array.isArray(conditions) || !Array.isArray(goals)) {
+    throw new Error("conditions와 goals는 배열이어야 합니다.");
+  }
+  const body: Record<string, unknown> = { conditions, goals };
+  if (knowledge_version !== undefined) body.knowledge_version = knowledge_version;
+  if (learner_level !== undefined) body.learner_level = learner_level;
+  if (has_guidance !== undefined) body.has_guidance = has_guidance;
+
+  return issuerFetch(
+    ctx,
+    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/recommend`,
+    { method: "POST", body },
+  );
 }
 
 // ─── 도구 묶음 ─────────────────────────────────────────────────────────────
