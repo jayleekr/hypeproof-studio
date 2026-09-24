@@ -9,6 +9,9 @@
 //     the learner picked that turn.
 //   - A draft belongs to one learner in one class (cohort, profile, learner, class run). A prepared request additionally
 //     belongs to the class connection it was previewed under. Another learner, class or connection never sees or sends it.
+//   - The end time shown in the preview is the Service's, signed for this learner, class, connection, instructor and request id
+//     (GET help-recipient?request_id&duration_minutes). The POST carries it back and the Service stores exactly that end (or
+//     earlier, if the learning token ends first) — never "duration counted from whenever the POST arrived".
 //   - "Sent" means the Service stored it. A lost answer is `unknown`, retried with the same id and the same envelope only.
 //   - answered ≠ resolved: only the learner's explicit confirmation resolves. A failed read is `unknown`, not "no requests".
 
@@ -18,12 +21,16 @@ export const FIELD_MAX = 8000;
 export const LOCAL_RETENTION_MS = 24 * 3_600_000;
 
 export interface HelpBinding { u: string; c: string; p: string; run: string; grant: string; seat: string }
-export interface Assignment { recipient_id: string; class_run_id: string; seat_id: string; grant_id: string; class_ends_at: string; expires_cap: number }
+/** The Service's signed end time for one request id + duration (help-recipient with request_id & duration_minutes). */
+export interface HelpConsent { request_id: string; duration_minutes: number; expires_at: number; proof: string }
+export interface Assignment { recipient_id: string; class_run_id: string; seat_id: string; grant_id: string; class_ends_at: string; expires_cap: number; consent?: HelpConsent }
 export type Availability = { state: "ready"; assignment: Assignment } | { state: "unavailable"; reason: string } | { state: "unknown" };
 export interface HelpDraft { question: string; turnId: string | null; duration: number; updated_at: number }
 export interface HelpEnvelope {
   request_id: string; draft_key: string; send_key: string; recipient_id: string; class_run_id: string; grant_id: string; seat_id: string;
-  duration_minutes: number; content: Record<string, string>; prepared_at: number; expiry_estimate: number; class_ends_at: string;
+  duration_minutes: number; content: Record<string, string>; prepared_at: number; class_ends_at: string;
+  /** The end the learner consents to (Service-issued, seconds) and the Service's signature over it. */
+  consent_expires_at: number; consent_proof: string;
   /** prepared = previewed, not consented · sending = consented, the POST left (or may have) · unknown = its answer was lost */
   state: "prepared" | "sending" | "unknown";
   truncated: string[];
@@ -94,14 +101,17 @@ export function turnsSince(conn: { connected_at?: number; run?: { starts_at: num
   return conn?.connected_at ? Math.max(conn.connected_at, conn.run?.starts_at ?? 0) : Number.POSITIVE_INFINITY;
 }
 
-export function expiryEstimate(now: number, durationMinutes: number, capSec: number): number { return Math.min(now + durationMinutes * 60_000, capSec * 1000); }
+export const helpDuration = (d: unknown): number => (HELP_DURATIONS.includes(d as 30) ? (d as number) : HELP_DURATIONS[0]);
 
-export function makeEnvelope(o: { binding: HelpBinding; assignment: Assignment; draft: HelpDraft; content: Record<string, string>; truncated: string[]; now: number; id: string }): HelpEnvelope {
-  const a = o.assignment, d = HELP_DURATIONS.includes(o.draft.duration as 30) ? o.draft.duration : HELP_DURATIONS[0];
-  return { request_id: o.id, draft_key: draftKey(o.binding), send_key: sendKey(o.binding), recipient_id: a.recipient_id, class_run_id: a.class_run_id, grant_id: a.grant_id, seat_id: a.seat_id, duration_minutes: d, content: o.content, truncated: o.truncated, prepared_at: o.now, expiry_estimate: expiryEstimate(o.now, d, a.expires_cap), class_ends_at: a.class_ends_at, state: "prepared" };
+/** null when the Service did not sign an end time for exactly this request id and duration: there is nothing to consent to. */
+export function makeEnvelope(o: { binding: HelpBinding; assignment: Assignment; draft: HelpDraft; content: Record<string, string>; truncated: string[]; now: number; id: string }): HelpEnvelope | null {
+  const a = o.assignment, d = helpDuration(o.draft.duration), k = a.consent;
+  if (!k || k.request_id !== o.id || k.duration_minutes !== d || !Number.isInteger(k.expires_at) || typeof k.proof !== "string") return null;
+  return { request_id: o.id, draft_key: draftKey(o.binding), send_key: sendKey(o.binding), recipient_id: a.recipient_id, class_run_id: a.class_run_id, grant_id: a.grant_id, seat_id: a.seat_id, duration_minutes: d, content: o.content, truncated: o.truncated, prepared_at: o.now, consent_expires_at: k.expires_at, consent_proof: k.proof, class_ends_at: a.class_ends_at, state: "prepared" };
 }
-/** The body sent. It names its class and connection so the Service refuses it (before writing) if either changed. */
-export const requestBody = (e: HelpEnvelope) => ({ id: e.request_id, recipient_id: e.recipient_id, kind: "help", consent: true, duration_minutes: e.duration_minutes, class_run_id: e.class_run_id, grant_id: e.grant_id, content: e.content });
+/** The body sent. It names its class and connection so the Service refuses it (before writing) if either changed, and carries
+ * the signed end time back so the Service stores what the learner saw. */
+export const requestBody = (e: HelpEnvelope) => ({ id: e.request_id, recipient_id: e.recipient_id, kind: "help", consent: true, duration_minutes: e.duration_minutes, class_run_id: e.class_run_id, grant_id: e.grant_id, content: e.content, consent_envelope: { expires_at: e.consent_expires_at, proof: e.consent_proof } });
 
 /**
  * May this envelope be sent from here, now? Local checks only — the Service decides again. The assignment is the one read
@@ -109,7 +119,8 @@ export const requestBody = (e: HelpEnvelope) => ({ id: e.request_id, recipient_i
  */
 export function sendable(e: HelpEnvelope, binding: HelpBinding | null, assignment: Assignment | null, now: number): "ok" | "identity_changed" | "class_changed" | "recipient_changed" | "connection_changed" | "stale" {
   if (!binding || sendKey(binding) !== e.send_key) return binding && draftKey(binding) === e.draft_key ? "connection_changed" : "identity_changed";
-  if (now > e.prepared_at + e.duration_minutes * 60_000) return "stale";
+  // An envelope stored before the Service signed end times (no proof) has nothing sendable in it: preview again.
+  if (!e.consent_proof || !Number.isInteger(e.consent_expires_at) || now >= e.consent_expires_at * 1000) return "stale";
   if (!assignment) return "ok";
   if (assignment.class_run_id !== e.class_run_id) return "class_changed";
   if (assignment.grant_id !== e.grant_id) return "connection_changed";
@@ -118,8 +129,9 @@ export function sendable(e: HelpEnvelope, binding: HelpBinding | null, assignmen
 }
 
 /** What an answer to the POST means. `stored` is the only outcome that says the request exists. */
-export function classifyPost(status: number, reason?: string): "stored" | "unknown" | "changed" | "conflict" | "refused" {
+export function classifyPost(status: number, reason?: string): "stored" | "unknown" | "changed" | "conflict" | "expired" | "refused" {
   if (status === 200 || status === 201) return "stored";
+  if (status === 409 && reason === "consent_expired") return "expired";
   if (status === 0 || status >= 500 || status === 429) return "unknown";
   if (status === 409 && (reason === "class_changed" || reason === "connection_changed" || reason === "recipient_not_assigned")) return "changed";
   if (status === 409) return "conflict";
@@ -141,6 +153,9 @@ export function prune(store: HelpStore, now: number, keep: string | null): HelpS
   const fresh = <T extends { updated_at?: number; prepared_at?: number }>(k: string, v: T) => k === keep || (keep !== null && k.startsWith(keep + "|")) || now - (v.updated_at ?? v.prepared_at ?? 0) < LOCAL_RETENTION_MS;
   return { drafts: Object.fromEntries(Object.entries(store.drafts).filter(([k, v]) => fresh(k, v))), envelopes: Object.fromEntries(Object.entries(store.envelopes).filter(([k, v]) => fresh(k, v))) };
 }
+
+/** The webview's receiving edge: a draw numbered before the one on screen (an older learner's or an older read) is dropped. */
+export const acceptHelp = (prev: HelpView | null, next: HelpView): HelpView => (prev && next.generation < prev.generation ? prev : next);
 
 /** Normalises a draft coming from the webview. Anything unexpected becomes the empty value; the text is kept as typed. */
 export function cleanDraft(d: unknown, now: number): HelpDraft {

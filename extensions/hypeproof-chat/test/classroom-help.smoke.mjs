@@ -40,23 +40,30 @@ const long = H.buildContent("q", { prompt: "p", response: "x".repeat(9000) }); a
 ok("the learner's own question can go alone; a picked turn is its message + the AI answer; long text is clamped and said so");
 
 // envelope + sendability
-const A = { recipient_id: "teacher-a", class_run_id: "run-a", seat_id: "A1", grant_id: "grant-1", class_ends_at: "2026-09-22T12:00:00Z", expires_cap: 2_000_000 };
+const K = { request_id: "req-1", duration_minutes: 60, expires_at: 1_003_000, proof: "p".repeat(43) };
+const A = { recipient_id: "teacher-a", class_run_id: "run-a", seat_id: "A1", grant_id: "grant-1", class_ends_at: "2026-09-22T12:00:00Z", expires_cap: 2_000_000, consent: K };
 const draft = { question: "q", turnId: null, duration: 60, updated_at: 0 }, now = 1_000_000_000;
 const e = H.makeEnvelope({ binding: b, assignment: A, draft, content: { question: "q" }, truncated: [], now, id: "req-1" });
-assert.equal(e.expiry_estimate, Math.min(now + 3_600_000, 2_000_000_000)); assert.equal(e.state, "prepared");
-assert.deepEqual(H.requestBody(e), { id: "req-1", recipient_id: "teacher-a", kind: "help", consent: true, duration_minutes: 60, class_run_id: "run-a", grant_id: "grant-1", content: { question: "q" } });
-assert.equal(H.makeEnvelope({ binding: b, assignment: A, draft: { ...draft, duration: 999 }, content: {}, truncated: [], now, id: "x" }).duration_minutes, 30, "an unknown duration falls back to the shortest");
+assert.deepEqual([e.consent_expires_at, e.consent_proof, e.state], [1_003_000, K.proof, "prepared"], "the end shown is the Service-signed one, not now + duration on this device");
+assert.deepEqual(H.requestBody(e), { id: "req-1", recipient_id: "teacher-a", kind: "help", consent: true, duration_minutes: 60, class_run_id: "run-a", grant_id: "grant-1", content: { question: "q" }, consent_envelope: { expires_at: 1_003_000, proof: K.proof } });
+// negative controls: no signed end, or one signed for another id or duration → nothing to consent to
+assert.equal(H.makeEnvelope({ binding: b, assignment: { ...A, consent: undefined }, draft, content: { question: "q" }, truncated: [], now, id: "req-1" }), null);
+assert.equal(H.makeEnvelope({ binding: b, assignment: A, draft, content: { question: "q" }, truncated: [], now, id: "req-2" }), null, "a signature for another request id");
+assert.equal(H.makeEnvelope({ binding: b, assignment: A, draft: { ...draft, duration: 30 }, content: { question: "q" }, truncated: [], now, id: "req-1" }), null, "a signature for another duration");
+assert.equal(H.helpDuration(999), 30, "an unknown duration falls back to the shortest");
 assert.equal(H.sendable(e, b, A, now + 1), "ok");
 assert.equal(H.sendable(e, { ...b, u: "learner-2" }, A, now), "identity_changed");
 assert.equal(H.sendable(e, { ...b, grant: "grant-2" }, A, now), "connection_changed");
 assert.equal(H.sendable(e, null, A, now), "identity_changed");
 assert.equal(H.sendable(e, b, { ...A, class_run_id: "run-b" }, now), "class_changed");
 assert.equal(H.sendable(e, b, { ...A, recipient_id: "teacher-b" }, now), "recipient_changed");
-assert.equal(H.sendable(e, b, A, now + 61 * 60_000), "stale", "a request is not sent after the time it was consented for");
+assert.equal(H.sendable(e, b, A, 1_003_000 * 1000 - 1), "ok", "positive control: just before the agreed end");
+assert.equal(H.sendable(e, b, A, 1_003_000 * 1000), "stale", "a request is not sent at or after the end the learner agreed to");
+assert.equal(H.sendable({ ...e, consent_proof: undefined, consent_expires_at: undefined }, b, A, now), "stale", "an envelope stored before signed ends has nothing sendable");
 ok("an envelope is sendable only for the same learner, class, connection and recipient, within its time");
 
 // POST outcomes
-for (const [s, r, want] of [[201, undefined, "stored"], [200, undefined, "stored"], [0, undefined, "unknown"], [503, "unknown", "unknown"], [429, undefined, "unknown"], [409, "class_changed", "changed"], [409, "recipient_not_assigned", "changed"], [409, "request_id_conflict", "conflict"], [403, "instructor_revoked", "changed"], [400, undefined, "refused"]]) assert.equal(H.classifyPost(s, r), want, `${s} ${r}`);
+for (const [s, r, want] of [[201, undefined, "stored"], [200, undefined, "stored"], [0, undefined, "unknown"], [503, "unknown", "unknown"], [429, undefined, "unknown"], [409, "class_changed", "changed"], [409, "recipient_not_assigned", "changed"], [409, "request_id_conflict", "conflict"], [409, "consent_expired", "expired"], [400, "consent_invalid", "refused"], [403, "instructor_revoked", "changed"], [400, undefined, "refused"]]) assert.equal(H.classifyPost(s, r), want, `${s} ${r}`);
 ok("only 200/201 means stored; a lost or 5xx answer is unknown, never sent");
 
 // cards: answered ≠ resolved; feedback only after an answer; history split by stored class
