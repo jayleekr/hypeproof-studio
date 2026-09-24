@@ -304,3 +304,10 @@ in `ops_latest_state.state_json`, the snapshot binding JSON and the audit detail
 **Status 2026-09-20:** steps 1–3 rehearsed on local workerd D1 with the same checker (`npm run test:classroom-ops:d1`:
 none → interrupted → all → re-applied, plus a half-created negative control). Steps 0 and 1–6 against a real
 Cloudflare staging or production target: NOT RUN — no staging target exists and no account action was taken.
+
+### Viewer-check signing-secret rotation
+
+Recipient viewer-check hashes use `HPS_SIGNING_SECRET`. Rotating this secret also
+invalidates existing imported checks: coordinate a fresh recipient import with
+new salts/check hashes before reopening report links. Do not enable delivery
+with stale checks or treat the rotation as transparent to existing recipients.
