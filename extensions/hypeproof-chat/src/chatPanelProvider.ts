@@ -1,4 +1,5 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
+import { chalkToolsEnabled } from './chalk/tools';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
@@ -2896,9 +2897,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         if (effectiveImages?.length) throw new Error('로컬 개발 연결의 이미지 입력은 아직 지원하지 않습니다. 텍스트로 요청하세요.');
         const cwd=this.resolveCoachCwd();
         if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
+        // #1297 (E4-2): 강사 모드(issuer 토큰)일 때만 Chalk 도구를 붙인다(SUB-06).
+        const chalkCtx = await chalkToolsEnabled(this.context.secrets)
+          ? { serverUrl: proxyUrl, secrets: this.context.secrets }
+          : undefined;
         const result=await runLocalCoach({config:local,profile,cwd,
           history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
-          signal:ctrl.signal,onDelta,onActivity,
+          signal:ctrl.signal,onDelta,onActivity,chalkCtx,
           requestApproval:async action=>{
             let prompted=false;
             const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
