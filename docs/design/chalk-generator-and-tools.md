@@ -105,13 +105,18 @@
 E1-1 §2-7 모양에 두 칸을 더한다.
 
 ```json
-{ "item": "G2-9", "severity": "warn", "judge": "machine",
+{ "item": "G2-9", "check": "duration_consistency", "severity": "warn", "judge": "machine",
   "at": { "file": "lesson", "section": "flow", "step": "s-2", "field": null },
   "message": "시간 합이 회차 길이와 12분 어긋난다",
+  "remedy": "각 step의 duration 합을 회차 길이에 맞춘다",
+  "skipped": false,
+  "source": "checkLessonPedagogy",
   "blocks_confirm": false }
 ```
 
-- `severity`: `fail` · `warn` · `info`. `judge`: `machine` · `model` · `human`
+- `item`: `G*-*` 항목 ID. `check`: 기존 `PedagogyFinding.check` 필드 그대로 (`check` → `item` 매핑은 E2-4 담당)
+- `remedy` · `skipped` · `source`: 기존 `PedagogyFinding` 필드 그대로 유지
+- `severity`: `fail` · `warn` · `info`. `info`는 신규 수준 — 기존 `checkLessonPedagogy()`는 미발행; `blockingPedagogyFindings()`는 `fail`만 확인(현행 유지). `judge`: `machine` · `model` · `human`
 - 🔴 `blocks_confirm`: **지금 서버에 있는 관문 v0 의 `fail` 규칙과 OUT-02 만 `true`.** 새로 더하는 기계 판정 항목(E2-4)과 문맥 판정(E2-5)은 **항상 `false`** 다. 강의 퀄리티 게이트는 후속이다(PRD 7판 10절)
 - 초안 단계에서는 `blocks_confirm` 과 상관없이 아무것도 막지 않는다(FB-03)
 
@@ -155,7 +160,7 @@ E1-1 §2-7 모양에 두 칸을 더한다.
 | `GET …/judge-brief` · `POST …/judgements` | E2-5 | 판정 기록 테이블 필요(마이그레이션, 번호는 리드 배정) |
 | `POST …/feedback` · `GET …/diff` | E2-7 | 🔴 `authoring_drafts` 는 최신 revision 만 갖는다. 비교(FB-01)와 이력(FB-05)을 위해 **초안 revision 이력 테이블**이 필요하다(E2-7 설계에서 정함) |
 
-- 전부 `worker/src/routes/chalk-*.ts` 새 파일, issuer 전용, 소유 강사만(기존 `owns()` 규칙 재사용). `authoring.ts` 는 고치지 않는다(plan §4-1 R1)
+- 전부 `worker/src/routes/chalk-*.ts` 새 파일, issuer 전용, 소유 강사만(기존 `owns()` 규칙 재사용). `authoring.ts` 는 고치지 않는다(plan §4-1 R1). `authoring.ts` 의 `owns()` 에 `export` 한 단어만 붙여 재사용한다. 로직을 복사하지 않는다(R1 예외, 한 단어 변경).
 - 🔴 issuer Bearer 는 허용 목록(`isIssuerAllowedEndpoint`)에 있는 admin 경로에서만 통한다(T0-b 실측: 목록에 없는 경로는 Basic 인증을 요구한다). 새 `/admin/chalk/*` 경로를 이 목록에 더하는 것을 각 구현 이슈의 작업에 넣는다. 허용 목록은 `worker/src/lib/instructor-auth.ts:59` 한 곳이고 Chalk 웹 포워더와 공유한다(`admin.ts:112`). 두 번째 목록을 만들지 않는다(ARC-01 `instructor-auth-drift` 시험)
 
 ---
