@@ -251,6 +251,12 @@ try {
   assert.ok(result.rehearsal_B.call.tools.includes('Write'), 'B admits writing at the model boundary: ' + result.rehearsal_B.call.tools);
   assert.match(await readinessText(teacher), /통과/); await confirm(teacher, 'g2-mac-07-confirmed-B.png'); step('B confirmed');
 
+  if (process.env.HPS_G4_JOURNEY === '1') {
+    result.journey = await (await import('./g4-journey.mjs')).journey({ local, course, VA, seats, teacherToken, browser, boardPort, prefix, launch, attach, enterWork, palette, toasts, wait, ask, idle, quit, ws, shot, out, press, setValue, step, workFiles, A, waitHeader });
+    result.steps = steps; writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 2));
+    console.log('PASS G4 integrated Mac journey'); await cleanup(0);
+  }
+
   // ── the class: A1 in a real window on V1; A2 connected and never selected; A3 invited but offline ──
   launch('learner', codes.A1, ws); const win = await attach(); let chat = await enterWork();
   const pairing = async () => (await local.request(local.base + '/pairings', 'POST', { seat_id: 'A1', roster_revision: roster }, teacherToken)).json.ticket;

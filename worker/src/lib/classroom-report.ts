@@ -20,14 +20,16 @@ export const modelById = (id: string): CapabilityModel | undefined => CAPABILITY
 export type EvidenceActor = 'student' | 'ai' | 'teacher' | 'external_user' | 'tool' | 'system' | 'unknown';
 export type EvidenceSource = 'real' | 'simulated' | 'self_reported' | 'unverified';
 /** `event_id` for records that carry one; `locator` (1-based line, optional turn) for the legacy spool that does not. */
-export interface DraftEvidence { event_id?: string; locator?: { line: number; turn_id?: string }; quote: string; actor?: EvidenceActor; source_state?: EvidenceSource }
+export interface DraftEvidence { session_id?: string; event_id?: string; locator?: { line: number; turn_id?: string }; quote: string; actor?: EvidenceActor; source_state?: EvidenceSource }
 export interface DraftFinding { capability: string; status: 'observed' | 'unobserved' | 'insufficient_evidence'; claim: string; evidence: DraftEvidence[]; assistance?: string; change?: { before: string; after: string } }
 
-interface InputEvent { line: number; event_id?: string; turn_id?: string; actor: EvidenceActor; source_state: EvidenceSource; text: string }
+export type ReportInput = string | { sessions: Array<{ session_id: string; part: number; text: string }>; omitted: { unreadable: number; over_limit: number }; reasons: string[] };
+interface InputEvent { session_id?: string; line: number; event_id?: string; turn_id?: string; actor: EvidenceActor; source_state: EvidenceSource; text: string }
 const ACTOR_BY_TYPE: Record<string, EvidenceActor> = { prompt: 'student', response: 'ai', artifact_snapshot: 'ai', usage: 'system', turn_end: 'system', workflow: 'student' };
 const ACTORS: EvidenceActor[] = ['student', 'ai', 'teacher', 'external_user', 'tool', 'system', 'unknown'];
 /** Decode the verified record once: who produced each event, how it was sourced, and its DECODED text. */
-export function indexInput(inputText: string): InputEvent[] {
+export function indexInput(inputText: ReportInput): InputEvent[] {
+  if (typeof inputText !== 'string') return inputText.sessions.flatMap((s) => indexInput(s.text).map((e) => ({ ...e, session_id: s.session_id })));
   const out: InputEvent[] = []; let line = 0;
   for (const raw of inputText.split('\n')) {
     if (!raw.trim()) continue; line++;
@@ -43,13 +45,15 @@ export function indexInput(inputText: string): InputEvent[] {
   return out;
 }
 function locate(events: InputEvent[], ev: DraftEvidence): InputEvent | null {
-  if (typeof ev.event_id === 'string' && ev.event_id) return events.find((e) => e.event_id === ev.event_id) ?? null;
+  events = events.filter((e) => e.session_id === ev.session_id);
+  if (typeof ev.event_id === 'string' && ev.event_id) { const hits = events.filter((e) => e.event_id === ev.event_id); return hits.length === 1 ? hits[0]! : null; }
   const l = ev.locator; if (!l || !Number.isSafeInteger(l.line)) return null;
   const hit = events.find((e) => e.line === l.line) ?? null;
   return hit && (l.turn_id === undefined || hit.turn_id === l.turn_id) ? hit : null;
 }
 export interface Draft {
   format: 'hps-classroom-report-draft/1';
+  input_sessions?: { sessions: Array<{ session_id: string; part: number; events: number }>; omitted: { unreadable: number; over_limit: number }; reasons: string[] };
   versions: { capability_model: { id: string; revision: number }; rubric: string; evaluator: string; renderer_revision: string };
   findings: DraftFinding[];
   next_experiment: string;
@@ -66,7 +70,7 @@ export type DraftVerdict = { ok: true; draft: Draft; state: 'review_required' | 
  */
 export const GRADE_LANGUAGE = /(\d+(?:\.\d+)?\s*점(?!검)|\d+\s*(?:등|위)(?![가-힣])|(?:상위|하위)\s*\d+\s*(?:%|퍼센트|프로)|백분위|\d+\s*등급|[A-F][+-]?\s*(?:등급|학점)|레벨\s*\d|Lv\.?\s*\d|(?:AI\s*)?의존도\s*(?:는|가|:)?\s*\d+|\d+\s*\/\s*(?:10|100)\b)/i;
 /** `inputText` is the verified events.jsonl the job was built from: every quote must be in the event it names, or the draft is about someone/something else. */
-export function validateDraft(value: unknown, job: { capability_model: string; rubric: string; evaluator: string; input_coverage: string }, inputText: string): DraftVerdict {
+export function validateDraft(value: unknown, job: { capability_model: string; rubric: string; evaluator: string; input_coverage: string }, inputText: ReportInput): DraftVerdict {
   const fail = (reason: string, state: 'quarantined' | 'failed' = 'failed'): DraftVerdict => ({ ok: false, state, reason });
   if (!value || typeof value !== 'object') return fail('draft_invalid');
   const d = value as Draft;
@@ -104,6 +108,9 @@ export function validateDraft(value: unknown, job: { capability_model: string; r
   if (typeof d.next_experiment !== 'string' || d.next_experiment.length > 300) return fail('draft_invalid');
   if (model.status === 'legacy') { if (!d.legacy || typeof d.legacy.fingerprint !== 'string' || !/^[a-f0-9]{16,64}$/.test(d.legacy.fingerprint)) return fail('legacy_fingerprint_missing'); if (d.legacy.marker_review_complete !== true) return { ok: true, draft: d, state: 'review_required', reason: 'marker_review_missing' }; }
   else if (d.legacy) return fail('legacy_conversion', 'quarantined');
+  // Scope is derived from the verified input, never from evaluator prose.
+  if (typeof inputText !== 'string') d.input_sessions = { sessions: inputText.sessions.map((s) => ({ session_id: s.session_id, part: s.part, events: indexInput(s.text).length })), omitted: inputText.omitted, reasons: inputText.reasons };
+  else delete d.input_sessions;
   // Bytes verified but behaviour coverage unknown/gappy: the draft is kept and says so; it is not a complete observation.
   return { ok: true, draft: d, state: job.input_coverage === 'complete' ? 'review_required' : 'partial', reason: job.input_coverage === 'complete' ? '' : 'input_' + job.input_coverage };
 }
@@ -126,6 +133,7 @@ export function composeReport(draft: Draft, ctx: { class_runs_with_evidence: num
   ];
   if (ctx.class_runs_with_evidence >= 2) sections.splice(2, 0, { title: '최근 반복된 패턴', items: [], note: `근거가 있는 수업 ${ctx.class_runs_with_evidence}회를 함께 본 경우에만 적습니다. 검수자가 회차별 근거를 확인한 뒤 작성합니다.` });
   if (ctx.coverage !== 'complete') sections.unshift({ title: '이 보고서가 본 범위', items: [], note: ctx.coverage === 'gaps' ? '수업 기록 일부가 빠져 있습니다. 빠진 구간의 행동은 이 보고서에 없습니다.' : ctx.coverage === 'damaged' ? '수업 기록 일부가 손상돼 읽을 수 없었습니다. 읽을 수 있었던 장면만 서술합니다.' : ctx.coverage === 'range_unknown' ? '기록의 시작과 끝을 확인할 수 없었습니다. 기록에 남은 장면만 서술합니다.' : '이 기록에는 순번이 없어 빠진 구간이 있는지 확인할 수 없습니다. 기록에 남은 장면만 서술합니다.' });
+  if (draft.input_sessions) { const scope = draft.input_sessions; sections.push({ title: '이 보고서에 포함된 기록', items: scope.sessions.map((s) => ({ text: `세션 ${s.part} · ${s.session_id} · 기록 ${s.events}개` })), note: `읽지 못한 세션 ${scope.omitted.unreadable}개 · 상한으로 제외된 세션 ${scope.omitted.over_limit}개. ${scope.reasons.length ? '일부 구간의 완전성을 확인하지 못했습니다. 빠진 행동은 추측하지 않습니다.' : '같은 수업의 재시작 전후 기록이며 여러 회차의 성장 기록이 아닙니다.'}` }); }
   // Versions and counts are method detail: folded, never the headline, and never a score.
   return { sections, method: { capability_model: draft.versions.capability_model, rubric: draft.versions.rubric, evaluator: draft.versions.evaluator, renderer_revision: draft.versions.renderer_revision, observed_findings: observed.length, not_yet_seen: rest.length, scope: ctx.class_runs_with_evidence >= 2 ? 'cumulative' : 'single_class' } };
 }

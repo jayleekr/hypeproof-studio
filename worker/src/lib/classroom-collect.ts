@@ -52,14 +52,14 @@ export function normalizeCollectRequest(b: unknown, maxTargets: number): { ok: t
   if (typeof o.idempotency_key !== 'string' || !KEY_RE.test(o.idempotency_key) || !Number.isInteger(o.roster_revision) || typeof o.dry_run !== 'boolean' || !(PURPOSES as readonly string[]).includes(o.purpose as string) || typeof o.notice_version !== 'string' || !NOTICE.test(o.notice_version)) return no('request_invalid', 'idempotency_key, roster_revision, purpose, notice_version and dry_run required');
   if (o.mode !== undefined && !(COLLECT_MODES as readonly string[]).includes(o.mode as string)) return no('mode_invalid', 'mode is finish or collect_only');
   const base = { idempotency_key: o.idempotency_key, roster_revision: o.roster_revision as number, purpose: o.purpose as string, notice_version: o.notice_version, dry_run: o.dry_run };
-  // The class wrap-up feeds evaluation from the current session's whole record; kinds and restarted sessions are not part of it (U1b).
+  // G3: explicit finish + record requests all consented sessions in this class window. Legacy requests retain /2.
   let kinds: CollectKind[] | undefined;
   if (o.kinds !== undefined) { const k = normalizeKinds(o.kinds); if (!k) return no('kinds_invalid', 'kinds is ["record"], or one or both of "prompts" and "artifacts"'); kinds = k; }
   if (o.targets === undefined) {
     // Collect-only over "everyone" must name everyone: the whole roster is never a default of the new action.
     if (o.mode === 'collect_only') return no('targets_required', 'collect_only names its seats explicitly');
-    if (kinds) return no('kinds_not_allowed', 'the class wrap-up collects the whole record; kinds belong to a selected collection');
-    return { ok: true, value: { ...base, scope: 'roster', mode: 'finish', targets: [] } };
+    if (kinds && (o.mode !== 'finish' || kinds.join() !== 'record')) return no('kinds_not_allowed', 'multi-session wrap-up requires explicit finish and the whole record');
+    return { ok: true, value: { ...base, scope: 'roster', mode: 'finish', targets: [], ...(kinds ? { kinds } : {}) } };
   }
   if (!Array.isArray(o.targets)) return no('targets_invalid', 'targets is a list of seat ids');
   if (!o.targets.length) return no('targets_empty', 'an empty selection collects nothing; it is not the whole class');

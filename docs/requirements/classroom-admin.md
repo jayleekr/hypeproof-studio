@@ -1424,3 +1424,31 @@ Resend 항목은 2026-09-19 공식 문서(idempotency keys, verify webhooks, eve
 지금 확정 가능한 설계는 기존 Chalk 확장, App 안의 제한 실행기, Service 권한·D1 명령 원장, 증거 보존형 reset, 배치별 검수·전달 상태다. 구현 순서·소유 파일·출시/롤백은 [기존 E5 실행 계획](../plan/learning-agent-experience-epics.md#remote-classroom-delivery)을 따른다. 테스트는 [AT-15~34](../testing/classroom-admin.md#remote-classroom-tests)로 연결한다.
 
 파일럿 전 운영자가 정할 값: 실제 수업 인원/동시 반 수·학교망, 허용 복구 action, 수집 목적/고지·동의·보존, 수신자 정본/발신 계정, 신규 6모델 평가 출력의 검수자, 자동 발송 승인 정책, 원격 화면 도구 필요 여부. 이 값이 미정이어도 합성 계정의 관제·명령·dry-run 구현은 진행할 수 있다. 실수업 수집·발송·권한 변경·production migration 활성화만 해당 gate에서 멈춘다.
+
+
+## G3/G4 single-class completion — 2026-09-24 (#1301)
+
+The accepted single-class boundary connects explicit whole-roster `mode: finish`,
+`kinds: [record]` collection to reviewed reports across restarts. An omitted `kinds`
+keeps the legacy /1-/2 path. Selected collect-only batches never feed evaluation.
+A report pins the verified snapshot digest and rechecks input file hashes. Each /3
+quote carries its session and original line; unqualified or cross-session evidence
+is refused. The report lists included sessions and missing-session counts. Mixed or
+unreadable lesson bases remain held; this does not implement cross-version scoring.
+Approval, recipient approval, provider acceptance and confirmed delivery remain separate.
+
+Regression: `worker/test/classroom-ops-report-sessions.test.mjs` exercises the real
+spool/freezer/upload/routes/evaluator adapter/review/delivery ledger with synthetic
+people, SQLite, in-memory R2 and transport substitutes. Existing collect, basis,
+withdrawal, evaluator, provider and erasure suites remain required.
+Mac integration: `HPS_G4_JOURNEY=1` runs `e2e/classroom/mac-curriculum.mjs` through
+authored and rehearsed lessons into `g4-journey.mjs` on the same local Service.
+Execution evidence is recorded separately after the run; a test file is not a PASS.
+
+Explicit follow-ups: cross-week pattern prose, PDF mail attachments, Kakao/SMS/QR,
+additional work surfaces and a general visual composer are outside this single-class
+completion. Existing PDF export and approved report-link email remain. Local/legacy
+external evaluators retain their single-spool contract and explicitly refuse /3;
+the Service evaluator supports /3. Real learners, real model quality, installed
+Keychain, Windows, multiple physical PCs, school network, hosted D1/R2 and actual
+recipients are separate field/release gates, not synthetic successes.
