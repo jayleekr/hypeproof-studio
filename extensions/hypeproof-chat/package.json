@@ -100,6 +100,10 @@
         "title": "HypeProof Chat: 저장된 issuer 토큰 지우기"
       },
       {
+        "command": "hypeproof-chat.chalk.checkPlan",
+        "title": "Chalk: 초안 검사 (강사용)"
+      },
+      {
         "command": "hypeproof-chat.previewActiveFile",
         "title": "HypeProof: HTML 미리보기 (옆 패널)",
         "icon": "$(open-preview)"

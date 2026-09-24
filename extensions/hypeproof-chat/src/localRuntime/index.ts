@@ -1,6 +1,11 @@
 import type { ResolvedProfile } from "../protocol";
 import type { CoachToolAction, SdkActivity } from "../sdkCoachHelpers.ts";
 import { workspaceTools } from "./tools.ts";
+import {
+  CHALK_TOOL_DEFINITIONS,
+  callChalkTool,
+  type ChalkToolContext,
+} from "../chalk/tools.ts";
 import { CodexLocalClient } from "./codexClient.mjs";
 import { runClaude } from "./claudeClient.mjs";
 import { startToolServer } from "./toolServer.mjs";
@@ -66,6 +71,8 @@ export async function runLocalCoach(args: {
   requestApproval: (
     a: CoachToolAction,
   ) => Promise<boolean | { approved: boolean; actor: "user" | "policy" }>;
+  /** 강사 모드일 때만 넘긴다. 없으면 Chalk 도구를 AI 에 붙이지 않는다(SUB-06). */
+  chalkCtx?: ChalkToolContext;
 }) {
   const lifetime = new AbortController();
   const signal = AbortSignal.any([
@@ -73,13 +80,25 @@ export async function runLocalCoach(args: {
     lifetime.signal,
     AbortSignal.timeout(180000),
   ]);
-  const tools = workspaceTools({
+  const workTools = workspaceTools({
     cwd: args.cwd,
     profile: args.profile,
     signal,
     approve: args.requestApproval,
     activity: args.onActivity,
   });
+
+  // Chalk 도구는 강사 모드(chalkCtx 있음)에서만 붙는다(SUB-06).
+  const chalkDefs = args.chalkCtx ? CHALK_TOOL_DEFINITIONS : [];
+  const tools = {
+    definitions: [...workTools.definitions, ...chalkDefs],
+    call: async (name: string, input: unknown) => {
+      if (args.chalkCtx && CHALK_TOOL_DEFINITIONS.some((d) => d.name === name)) {
+        return callChalkTool(args.chalkCtx, name, input as Record<string, unknown>);
+      }
+      return workTools.call(name, input);
+    },
+  };
   const system =
     "You are the coach in a LOCAL DEVELOPMENT rehearsal of HypeProof Studio. Reply in Korean. Follow the supplied course. Only provided Studio file tools are available; do not claim shell, browser or deployment actions. Read existing files before changing them; preserve unrelated work. Never treat sample results as real customers.\n" +
     JSON.stringify({
