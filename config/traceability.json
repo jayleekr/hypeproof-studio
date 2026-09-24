@@ -2171,6 +2171,7 @@
       "stage": "intent",
       "owner": "JinyongShin",
       "depends_on": [
+        "LAB-PRODUCT-ROLES",
         "ST-INT-NATIVE"
       ],
       "sources": [
@@ -2326,7 +2327,7 @@
       "stage": "test",
       "owner": "JinyongShin",
       "depends_on": [
-        "ST-INT-CHALK-MVP"
+        "ST-REQ-CHALK-UX"
       ],
       "sources": [
         {
