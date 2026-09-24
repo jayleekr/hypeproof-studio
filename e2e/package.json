@@ -15,6 +15,7 @@
     "test:start-page": "node start-page/run.mjs",
     "test:lesson:mac": "node --experimental-strip-types --experimental-sqlite lesson-studio/mac.mjs",
     "test:classroom": "node --experimental-strip-types --experimental-sqlite classroom/run.mjs",
+    "test:classroom-ops": "node --experimental-strip-types --experimental-sqlite classroom/ops.mjs",
     "test:trial-ux": "node trial-ux/run.mjs",
     "test:budgets:browser": "node --experimental-strip-types --experimental-sqlite access-budgets/browser.mjs",
     "test:budgets:mac": "node --experimental-strip-types --experimental-sqlite access-budgets/mac.mjs",

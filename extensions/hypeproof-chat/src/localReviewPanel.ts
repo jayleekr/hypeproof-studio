@@ -64,7 +64,7 @@ export function registerLocalReview(context: vscode.ExtensionContext, render: (w
   context.subscriptions.push(vscode.commands.registerCommand('hypeproof-chat.localReview', () => {
     if (panel) { panel.reveal(); void handle({ type: 'localReview', action: 'load' }); return; }
     const dist = vscode.Uri.joinPath(context.extensionUri, 'webview-ui', 'dist');
-    panel = vscode.window.createWebviewPanel('hypeproof.localReview', 'My task reviews', vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [dist] });
+    panel = vscode.window.createWebviewPanel('hypeproof.localReview', '나의 변화 기록', vscode.ViewColumn.One, { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [dist] });
     panel.webview.html = render(panel.webview, dist).replace(/<html\b/, '<html data-surface="local-review"');
     panel.webview.onDidReceiveMessage(handle, undefined, context.subscriptions);
     panel.onDidDispose(() => { panel = undefined; selected = undefined; });

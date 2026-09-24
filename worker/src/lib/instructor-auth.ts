@@ -70,6 +70,10 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/classroom\/shares(?:\/[^/]+)?$/.test(path)) return true;
   // Chalk authoring: handlers still enforce issuer identity, cohort/profile and owner.
   if ((method === "GET" || method === "PUT") && /^\/admin\/cohorts\/[^/]+\/authoring\/[^/]+(?:\/versions\/[^/]+)?$/.test(path)) return true;
+  // #751 — remote classroom operations. Admitting the Bearer here grants
+  // nothing: every handler re-checks the explicit scope.ops capability
+  // (authorizeIssuerForOps) and the per-run feature flag.
+  if (/^\/admin\/cohorts\/[^/]+\/classroom\/runs\/[^/]+(?:\/(?:status|pairings|control|grants\/[^/]+|evidence\/[^/]+|report-batches(?:\/[^/]+(?:\/(?:reconcile|jobs|runner-grants|reports(?:\/[^/]+(?:\/review)?)?|recipients|approve|deliver|deliveries(?:\/[^/]+\/(?:resolve|link))?))?)?|commands(?:\/[^/]+)?))?$/.test(path) && ['GET', 'PUT', 'POST', 'DELETE'].includes(method)) return true;
   if (path === "/admin/tokens/issue" && method === "POST") return true;
   // #167 — issuer-role tokens with can_start_session scope may start/end
   // their scoped cohort's session without admin Basic auth.
@@ -178,4 +182,23 @@ export async function authorizeIssuerForSession(
     if (rev) return Response.json({ error: "issuer token revoked" }, { status: 401 });
   }
   return { scope, payload };
+}
+
+// #751 — operations authority is an explicit, opt-in capability on the cohort
+// scope. A plain cohort scope (every issuer minted before this landed) gets
+// 403 here even though the same token may mint students and open sessions.
+export async function authorizeIssuerForOps(
+  c: InstructorAuthRequest,
+  cohortId: string,
+  capability: string,
+): Promise<IssuerAuthz | null | Response> {
+  const auth = await authorizeIssuerForCohort(c, cohortId);
+  if (!auth || auth instanceof Response) return auth;
+  if (!(auth.scope.ops ?? []).includes(capability)) {
+    return Response.json(
+      { error: `issuer scope lacks operations capability '${capability}' for cohort=${cohortId}`, reason: "ops_capability_missing" },
+      { status: 403 },
+    );
+  }
+  return auth;
 }

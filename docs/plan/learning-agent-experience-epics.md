@@ -222,3 +222,50 @@ AE-17의 예약/정산을 먼저 대조한다. effort/크레딧/예산 UI는 아
 [후속 의존성 계획](capability-and-pricing-epics.md)은 기존 E1~E7을 유지하면서
 Lab 철학 개정안을 HC 측정 계약과 #800의 수업/구독/기관 이용권·원가·예산으로 연결한다.
 이름 변경이나 사용량 조회만으로 해당 Epic을 완료하지 않는다.
+
+<a id="remote-classroom-delivery"></a>
+
+## E5 원격 수업 운영 구현 순서 · 2026-09-18
+
+사용자가 요청한 다수 PC 수업 관제의 PRD는 [기존 classroom-admin 확장](../requirements/classroom-admin.md#원격-수업-운영-확장-설계--2026-09-18), UX는 [기존 classroom-design](../requirements/classroom-design.md), 인수는 [AT-15~34](../testing/classroom-admin.md#remote-classroom-tests)다. 본 절은 실행 분해이며 기존 #751/#732/#673/#647/#1020을 재사용한다. 2026-09-18 기준 R0~R7의 Service·Chalk·확장 구현과 합성 계정 검증이 stacked branch(`feat/751-ops-r1-service` … `feat/751-ops-r7-regression`)에 있다. 모든 기능은 기본 OFF이고 실기·운영 gate는 열지 않았다(테스트 문서 실행 기록 참고). 현재 `next-work`의 ready는 작업 가능성이지 요구 충족 판정이 아니다.
+
+### 의존성과 PR 크기
+
+| 순서 | 구현 단위 / 기존 추적 | 주 수정 위치 | 완료 gate |
+|---|---|---|---|
+| R0 | 현재 main/열린 PR·claim 재확인, 신호/스키마/auth/활동 재사용 감사, schema+feature flag·합성 fixture | root instructions, `config/requirement-work.json`, `config/traceability.json`, `worker/schema.sql`, `worker/migrations/` | 관찰/명령/원문/보고서 경계, 1개 회차·2명 수직 흐름 계약. applied migration 변경 없음 |
+| R1 | 명단·pairing·토큰 활성화·step/오류 관측과 기존 보드 확장 (#751/#732) | `worker/src/routes/trace.ts`, 새 제한 ops route와 `lib/`, 기존 auth, `chalk/src/routes/board.ts`, `src/ui/manage.html`, `extensions/.../src/heartbeat.ts`, `activityConnections.ts`, `protocol.ts` | AT-15~18/23/25. 전체 명단·unknown·원문 비노출. 새 관제 OFF일 때 회귀 |
+| R2 | 명령 원장/CAS/lease/epoch/receipt와 저위험 진단·재연결·preview (#751) | 같은 ops route/lib, Chalk 기존 forwarder, App `src/`의 순수 helper+host adapter | AT-19~21/23. 임의 command 실행 불가, expired/offline/duplicate 처리. 별도 OS daemon 없음 |
+| R3 | 보존형 reset·Stop·class pause, SDK/실제 앱 인수 (#673/#647/#751) | 기존 `chatPanelProvider.ts`, SDK stop/활동/draft/spool 경로, Service `chat-gate`와 `messages/chat` admission | AT-22/24. 현재/미저장 파일·대화·근거 보존. OS별 중지·재연결 검증. reset 하나부터, bulk reset 후순위 |
+| R4 | 동의 scope와 기록 batch, immutable snapshot/manifest receipt/outbox (#751/#732) | `sessionSpool.ts`, `spoolUploader.ts`, 기존 logs route/read path, 새 report-job route/lib | AT-26~28. 서버 complete 판정·수업 종료 후 scoped upload·원문 강사 자동 공개 0 |
+| R5 | 공통 코어 기반 평가 초안, legacy adapter, Mac runner·검수 큐 (#1020/#751) | `packages/measurement/`, `worker/src/lib/measurement-core/`, `skills/hain7-report/` 재사용 adapter, 기존 scripts convention, Chalk batch 상세 | AT-29/30. 6/7 모델 분리, version/hash/근거·NA·검수. 새 채점기 복제 금지 |
+| R6 | 수신자 승인·이메일 adapter·보호 링크·전달 원장 (#751) | Service report-delivery routes/lib, existing private storage/auth, Chalk approval UI | AT-31. provider sandbox, unknown send 재조정, 실제 발송은 운영 승인된 계정·수신자만 |
+| R7 | 회귀/부하·Mac/Windows·성인 canary→30명 pilot·100명 synthetic | 기존 worker/chalk/extension/e2e 테스트, 운영/릴리스 문서 | AT-32~34·기존 suite·실기 기준. 아동 자동 수집은 동의 인수 뒤 별도 활성화 |
+
+2026-09-18 보강 기준은 새 단계를 만들지 않고 기존 단계에 얹는다: 복구/코칭 분리와 코칭 조치 2종(`coach` capability)·학생 화면 비차단 알림은 R2/R3의 명령 계약 위(AT-35/39), 출처(`actor`·`source_state`·전후 digest·강사 확인 상태)는 R1의 관측 envelope 확장(AT-36), §14 토큰·CTA 우선순위·집계 표기는 R1~R3의 Chalk 패널(DT-07), 근거 부족 표기와 관찰·성장 보고서 구성은 R5(AT-37/38). 문서의 GlobalBuddy·6주·고정 도움 순서는 예시이며 구현에 넣지 않는다.
+
+R1→R2→R3, R1→R4→R5→R6, 통합→R7. 보고서 경로를 별도 구현해도 공통 신원/명단/동의 계약은 R0/R1을 따른다. 단계별 vertical slice를 완료하고 실제 실행 증거를 남긴 후 다음 단계로 이동한다. 합성 dry-run은 운영 계정·발송 provider 미정과 무관하게 진행한다. 한 번에 전체 프로그램 재작성·일괄 production 배포하지 않는다.
+
+### 예상 작업량과 비용 결정
+
+초기 추정(숙련 개발자 1명 기준, 일정 약속 아님): R0 1~2일, R1 3~5일, R2/R3 5~8일, R4/R5 5~8일, R6 3~5일, R7 3~5일. 총 20~33 개발일이며 provider 승인·수업 일정·기기 확보 대기는 제외. 가장 큰 불확실성은 실제 SDK 중단/복구, 입력 evidence 품질, 공통 코어의 보고서 완성도, 아동 consent/recipient 계약이다. 첫 인수 가능한 산출은 토큰/전체 명단/단계/오류가 보이는 R1이며 전체 자동 발송 완료와 분리한다.
+
+P0에는 신규 화면 서버·DO·Queue·상시 container를 필수 도입하지 않는다. D1 outbox+기존 scheduled 작업의 작은 reconcile, 관리자의 제한된 runner로 시작한다. queue나 container 도입 시 같은 job key/lease/receipt를 유지하고 중복 소비·순서 비보장을 테스트한다. 구체 운영 단가와 polling 선택 근거는 PRD가 소유한다.
+
+### 배포와 롤백
+
+독립 기능 flag `ops_observe`, `ops_commands`, `ops_collect`, `ops_reports`, `ops_delivery`는 회차별 기본 OFF. 저장소는 KV가 아니라 D1이다: 회차 행(`class_run_ops.flags_json`)에 두고 요청마다 D1 primary에서 읽으므로 flag를 끄면 다음 요청부터 신규 enqueue·수집·발송이 거부된다(전파 지연 상한 = 진행 중이던 요청 1회). 전역 스위치 `HPS_CLASSROOM_OPS`는 배포 설정이라 끄는 데 재배포가 필요하므로 rollback 1순위는 회차 flag다. 학급 일시정지는 같은 이유로 D1 control revision을 쓴다. 구버전 protocol/capability unknown은 기존 수업 경로만 제공한다. Service additive schema→호환 API→Chalk→새 App canary→단일 회차 관측→단일 학생 저위험 조치→reset→batch→delivery 순서로 켠다. live-session freeze와 기존 release 절차를 지키며 release 버전/BUILD_ID를 검증한다.
+
+rollback은 먼저 delivery/collect/commands 신규 enqueue를 끄고 관측을 축소한다. pending 명령은 취소/TTL 만료, 수행 중 명령은 결과 확인, job은 retry 보류 후 receipt·미처리 목록 유지. 구버전 Service로 돌아가야 하면 신규 client는 unsupported로 강등하며 학습 경로를 유지한다. 앱 rollback은 기존 updater/설치 경로를 따르고 학생 workspace/spool/history를 삭제하지 않는다. schema drop·원본 삭제·보존 변경을 rollback과 섞지 않는다. 보고서·원격 기능 canary 실패가 기존 chat 운영을 중단시키지 않도록 별도 flag와 timeout을 검사한다.
+
+출시 gate: 기존 입장/모델/SDK/preview/저장/업로드/공유/예산 회귀 + 새 AT 인수, 실제 Windows/macOS, 학교망 1곳, offline/crash/retry/D1 경합, 현재 승인된 수집·발송 정책. 미실행은 NOT RUN/BLOCKED와 해제 조건을 남긴다. 운영 활성화가 필요한 마지막 단계의 권한·계정·동의 결정만 사람에게 요청한다.
+
+### 로컬 인수인계
+
+- 설계 branch `docs/remote-classroom-operations-20260918`, 작성 당시 기준 main `75fe6e4`. 작업 머신의 checkout 경로는 저장소에 남기지 않는다.
+- 기존 main은 355 commit fast-forward로 갱신. untracked `docs/ui-concepts/` 보존. 로컬 기존 tag `v0.1.40` 충돌은 강제 덮어쓰지 않았고 main 갱신과 분리했다.
+- `vscodium-base`는 main이 지정한 `8b9b01df...`로 초기화했으며 임의 bump 없음. 공통 Harness도 clean main을 `a664e1b`로 fast-forward해 `next-work` 실행 가능.
+- Node 22.22.1 설치, 기본 Node 24 설정은 변경하지 않음. 작업 터미널에서 `source ~/.nvm/nvm.sh && nvm use 22.22.1` 사용. worker/chalk/extension/webview/e2e lockfile 기반 의존성 설치 완료.
+- `check-registry`용 격리 Python/PyYAML은 `.git/remote-classroom-evidence/check-env/`에 준비했다. 전역 Python 환경은 변경하지 않았다.
+- 전체 VSCodium build·새 앱 설치·production deploy·실수업 토큰 발급·실제 발송은 하지 않았다. full build는 CLAUDE.md의 별도 승인/10~20GB 조건이며 당시 여유 공간 약16GB라 이번 소스·확장 개발 세팅과 구분한다.
+- 검증 결과와 실제 제한은 [테스트 문서](../testing/classroom-admin.md#2026-09-18-설계-작업의-기반-검증)에 남긴다. 다음 구현자는 여기서 시작하고 원격 main 변동과 #751 등의 현재 claim을 다시 확인한다.

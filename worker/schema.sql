@@ -516,3 +516,370 @@ CREATE TABLE IF NOT EXISTS budget_requests (
   resolved_at INTEGER
 );
 CREATE UNIQUE INDEX IF NOT EXISTS budget_one_pending_request ON budget_requests(period_id,subject_key) WHERE state='pending';
+
+-- ── migrations/0011-classroom-ops.sql (remote classroom operations R1, #751) ──
+CREATE TABLE IF NOT EXISTS class_run_ops (
+ class_run_id TEXT PRIMARY KEY,
+ cohort_id TEXT NOT NULL,
+ profile_id TEXT NOT NULL,
+ flags_json TEXT NOT NULL DEFAULT '{}',
+ lesson_json TEXT NOT NULL DEFAULT '{}',
+ roster_revision INTEGER NOT NULL DEFAULT 0,
+ roster_writer TEXT NOT NULL DEFAULT '',
+ starts_at INTEGER NOT NULL,
+ ends_at INTEGER NOT NULL,
+ created_by TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS class_run_ops_cohort ON class_run_ops(cohort_id,created_at);
+CREATE TABLE IF NOT EXISTS class_run_seats (
+ class_run_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ seat_revision INTEGER NOT NULL,
+ student_id TEXT NOT NULL,
+ roster_revision INTEGER NOT NULL,
+ changed_by TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ replaced_at INTEGER,
+ replaced_reason TEXT,
+ PRIMARY KEY(class_run_id,seat_id,seat_revision)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS class_run_seats_active ON class_run_seats(class_run_id,seat_id) WHERE replaced_at IS NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS class_run_seats_student ON class_run_seats(class_run_id,student_id) WHERE replaced_at IS NULL;
+CREATE TABLE IF NOT EXISTS ops_grants (
+ id TEXT PRIMARY KEY,
+ kind TEXT NOT NULL,
+ class_run_id TEXT NOT NULL,
+ cohort_id TEXT NOT NULL,
+ profile_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ seat_revision INTEGER NOT NULL,
+ student_id TEXT NOT NULL,
+ secret_hash TEXT,
+ state TEXT NOT NULL,
+ connection_epoch INTEGER NOT NULL DEFAULT 0,
+ device_registration_id TEXT,
+ parent_grant_id TEXT,
+ issuer_id TEXT NOT NULL,
+ issuer_jti TEXT,
+ revision INTEGER NOT NULL DEFAULT 1,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ used_at INTEGER,
+ revoked_at INTEGER,
+ revoked_reason TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ops_grants_secret ON ops_grants(secret_hash) WHERE secret_hash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ops_grants_seat ON ops_grants(class_run_id,seat_id,kind,state);
+CREATE INDEX IF NOT EXISTS ops_grants_issuer ON ops_grants(issuer_jti,state);
+CREATE INDEX IF NOT EXISTS ops_grants_student ON ops_grants(cohort_id,student_id,kind,state);
+CREATE TABLE IF NOT EXISTS ops_device_connections (
+ grant_id TEXT NOT NULL REFERENCES ops_grants(id) ON DELETE CASCADE,
+ app_instance_id TEXT NOT NULL,
+ boot_id TEXT NOT NULL,
+ protocol INTEGER NOT NULL,
+ capabilities_json TEXT NOT NULL DEFAULT '[]',
+ app_version TEXT NOT NULL DEFAULT '',
+ contiguous_seq INTEGER NOT NULL DEFAULT 0,
+ first_seen_at INTEGER NOT NULL,
+ last_seen_at INTEGER NOT NULL,
+ PRIMARY KEY(grant_id,app_instance_id,boot_id)
+);
+CREATE TABLE IF NOT EXISTS ops_latest_state (
+ class_run_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ seat_revision INTEGER NOT NULL,
+ grant_id TEXT NOT NULL,
+ revision INTEGER NOT NULL DEFAULT 1,
+ state_json TEXT NOT NULL DEFAULT '{}',
+ last_received_at INTEGER NOT NULL,
+ PRIMARY KEY(class_run_id,seat_id)
+);
+CREATE TABLE IF NOT EXISTS ops_events (
+ grant_id TEXT NOT NULL,
+ boot_id TEXT NOT NULL,
+ seq INTEGER NOT NULL,
+ event_id TEXT NOT NULL,
+ class_run_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ actor TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ payload_hash TEXT NOT NULL,
+ disposition TEXT NOT NULL DEFAULT 'applied',
+ observed_at INTEGER NOT NULL,
+ received_at INTEGER NOT NULL,
+ PRIMARY KEY(grant_id,boot_id,seq)
+);
+CREATE INDEX IF NOT EXISTS ops_events_run ON ops_events(class_run_id,seat_id,received_at);
+CREATE TABLE IF NOT EXISTS ops_audit (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ class_run_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL DEFAULT '',
+ actor_kind TEXT NOT NULL,
+ actor_id TEXT NOT NULL,
+ action TEXT NOT NULL,
+ detail_json TEXT NOT NULL DEFAULT '{}',
+ at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ops_audit_run ON ops_audit(class_run_id,at);
+CREATE TABLE IF NOT EXISTS ops_token_issues (
+ jti TEXT PRIMARY KEY,
+ cohort_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ profile_id TEXT NOT NULL,
+ issued_by TEXT NOT NULL,
+ issued_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ops_token_issues_student ON ops_token_issues(cohort_id,student_id,issued_at);
+
+-- ── migrations/0012-classroom-ops-commands.sql (remote classroom operations R2, #751) ──
+CREATE TABLE IF NOT EXISTS ops_commands (
+ id TEXT PRIMARY KEY,
+ class_run_id TEXT NOT NULL,
+ cohort_id TEXT NOT NULL,
+ action TEXT NOT NULL,
+ args_json TEXT NOT NULL DEFAULT '{}',
+ payload_hash TEXT NOT NULL,
+ idempotency_key TEXT NOT NULL,
+ issued_by TEXT NOT NULL,
+ issuer_jti TEXT,
+ reason_code TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ cancelled_at INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ops_commands_idempotency ON ops_commands(class_run_id,idempotency_key);
+CREATE TABLE IF NOT EXISTS ops_command_targets (
+ command_id TEXT NOT NULL REFERENCES ops_commands(id) ON DELETE CASCADE,
+ class_run_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ seat_revision INTEGER NOT NULL,
+ grant_id TEXT NOT NULL DEFAULT '',
+ connection_epoch INTEGER NOT NULL DEFAULT 0,
+ mutating INTEGER NOT NULL DEFAULT 0,
+ state TEXT NOT NULL,
+ result_code TEXT NOT NULL DEFAULT '',
+ lease_generation INTEGER NOT NULL DEFAULT 0,
+ lease_instance TEXT NOT NULL DEFAULT '',
+ receipt_json TEXT NOT NULL DEFAULT '{}',
+ expires_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(command_id,seat_id)
+);
+CREATE INDEX IF NOT EXISTS ops_command_targets_pending ON ops_command_targets(class_run_id,seat_id,state,expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS ops_command_targets_one_mutation ON ops_command_targets(class_run_id,seat_id) WHERE mutating=1 AND state IN ('queued','leased','accepted','running');
+CREATE TABLE IF NOT EXISTS ops_seat_leases (
+ grant_id TEXT PRIMARY KEY REFERENCES ops_grants(id) ON DELETE CASCADE,
+ app_instance_id TEXT NOT NULL,
+ generation INTEGER NOT NULL DEFAULT 1,
+ renewed_at INTEGER NOT NULL
+);
+
+-- ── migrations/0013-classroom-ops-control.sql (remote classroom operations R3, #751) ──
+CREATE TABLE IF NOT EXISTS class_run_control (
+ class_run_id TEXT PRIMARY KEY,
+ cohort_id TEXT NOT NULL,
+ paused INTEGER NOT NULL DEFAULT 0,
+ control_revision INTEGER NOT NULL DEFAULT 0,
+ updated_by TEXT NOT NULL,
+ updated_at INTEGER NOT NULL
+);
+
+-- ── migrations/0014-classroom-ops-evidence-review.sql (#751 evidence review state) ──
+CREATE TABLE IF NOT EXISTS ops_event_reviews (
+ grant_id TEXT NOT NULL,
+ boot_id TEXT NOT NULL,
+ seq INTEGER NOT NULL,
+ class_run_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ state TEXT NOT NULL,
+ reviewer_id TEXT NOT NULL,
+ revision INTEGER NOT NULL DEFAULT 1,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(grant_id,boot_id,seq)
+);
+CREATE INDEX IF NOT EXISTS ops_event_reviews_run ON ops_event_reviews(class_run_id,seat_id);
+
+-- ── migrations/0015-classroom-collection.sql (remote classroom operations R4, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_consents (
+ id TEXT PRIMARY KEY,
+ class_run_id TEXT NOT NULL,
+ cohort_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ purpose TEXT NOT NULL,
+ notice_version TEXT NOT NULL,
+ basis TEXT NOT NULL,
+ evidence_ref TEXT NOT NULL DEFAULT '',
+ recorded_by TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ revoked_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS classroom_consents_student ON classroom_consents(class_run_id,student_id,purpose);
+CREATE TABLE IF NOT EXISTS classroom_collect_batches (
+ id TEXT PRIMARY KEY,
+ class_run_id TEXT NOT NULL,
+ cohort_id TEXT NOT NULL,
+ profile_id TEXT NOT NULL,
+ roster_revision INTEGER NOT NULL,
+ purpose TEXT NOT NULL,
+ notice_version TEXT NOT NULL,
+ dry_run INTEGER NOT NULL DEFAULT 1,
+ idempotency_key TEXT NOT NULL,
+ created_by TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ upload_until INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_collect_batches_key ON classroom_collect_batches(class_run_id,idempotency_key);
+CREATE TABLE IF NOT EXISTS classroom_collect_items (
+ batch_id TEXT NOT NULL REFERENCES classroom_collect_batches(id) ON DELETE CASCADE,
+ seat_id TEXT NOT NULL,
+ seat_revision INTEGER NOT NULL,
+ student_id TEXT NOT NULL,
+ state TEXT NOT NULL,
+ reason TEXT NOT NULL DEFAULT '',
+ consent_id TEXT NOT NULL DEFAULT '',
+ input_revision INTEGER NOT NULL DEFAULT 0,
+ manifest_digest TEXT NOT NULL DEFAULT '',
+ integrity TEXT NOT NULL DEFAULT '',
+ coverage TEXT NOT NULL DEFAULT '',
+ receipt_id TEXT NOT NULL DEFAULT '',
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(batch_id,seat_id)
+);
+CREATE INDEX IF NOT EXISTS classroom_collect_items_student ON classroom_collect_items(batch_id,student_id);
+CREATE TABLE IF NOT EXISTS classroom_snapshots (
+ batch_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ state TEXT NOT NULL,
+ files_json TEXT NOT NULL DEFAULT '[]',
+ manifest_digest TEXT NOT NULL DEFAULT '',
+ integrity TEXT NOT NULL DEFAULT '',
+ coverage TEXT NOT NULL DEFAULT '',
+ receipt_id TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,
+ sealed_at INTEGER,
+ PRIMARY KEY(batch_id,student_id,revision)
+);
+CREATE TABLE IF NOT EXISTS classroom_job_outbox (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ kind TEXT NOT NULL,
+ dedupe_key TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ state TEXT NOT NULL DEFAULT 'pending',
+ created_at INTEGER NOT NULL,
+ processed_at INTEGER
+);
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_job_outbox_dedupe ON classroom_job_outbox(kind,dedupe_key);
+CREATE TABLE IF NOT EXISTS classroom_collect_tombstones (
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ reason TEXT NOT NULL,
+ created_by TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ PRIMARY KEY(class_run_id,student_id)
+);
+
+-- ── migrations/0016-classroom-report-jobs.sql (remote classroom operations R5, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_report_jobs (
+ id TEXT PRIMARY KEY,
+ job_key TEXT NOT NULL,
+ batch_id TEXT NOT NULL,
+ class_run_id TEXT NOT NULL,
+ cohort_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ input_manifest_digest TEXT NOT NULL,
+ input_revision INTEGER NOT NULL,
+ snapshot_revision INTEGER NOT NULL,
+ input_coverage TEXT NOT NULL,
+ capability_model TEXT NOT NULL,
+ rubric TEXT NOT NULL,
+ evaluator TEXT NOT NULL,
+ renderer_revision TEXT NOT NULL,
+ state TEXT NOT NULL,
+ reason TEXT NOT NULL DEFAULT '',
+ lease_owner TEXT NOT NULL DEFAULT '',
+ lease_generation INTEGER NOT NULL DEFAULT 0,
+ lease_expires_at INTEGER NOT NULL DEFAULT 0,
+ draft_digest TEXT NOT NULL DEFAULT '',
+ summary_json TEXT NOT NULL DEFAULT '{}',
+ revision INTEGER NOT NULL DEFAULT 1,
+ reviewed_by TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_report_jobs_key ON classroom_report_jobs(job_key);
+CREATE INDEX IF NOT EXISTS classroom_report_jobs_batch ON classroom_report_jobs(batch_id,state);
+
+-- ── migrations/0017-classroom-delivery.sql (remote classroom operations R6, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_recipients (
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ recipient_ref TEXT NOT NULL,
+ channel TEXT NOT NULL,
+ address TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ source_ref TEXT NOT NULL,
+ imported_by TEXT NOT NULL,
+ imported_at INTEGER NOT NULL,
+ PRIMARY KEY(class_run_id,student_id,recipient_ref)
+);
+CREATE TABLE IF NOT EXISTS classroom_delivery_approvals (
+ id TEXT PRIMARY KEY,
+ batch_id TEXT NOT NULL,
+ class_run_id TEXT NOT NULL,
+ template_revision TEXT NOT NULL,
+ channel TEXT NOT NULL,
+ scope_hash TEXT NOT NULL,
+ scope_json TEXT NOT NULL,
+ approved_by TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ revoked_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS classroom_report_deliveries (
+ delivery_key TEXT PRIMARY KEY,
+ batch_id TEXT NOT NULL,
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ recipient_ref TEXT NOT NULL,
+ job_id TEXT NOT NULL,
+ report_digest TEXT NOT NULL,
+ recipient_revision INTEGER NOT NULL,
+ channel TEXT NOT NULL,
+ template_revision TEXT NOT NULL,
+ approval_id TEXT NOT NULL,
+ adapter TEXT NOT NULL,
+ state TEXT NOT NULL,
+ provider_message_id TEXT NOT NULL DEFAULT '',
+ attempts INTEGER NOT NULL DEFAULT 0,
+ link_id TEXT NOT NULL DEFAULT '',
+ detail TEXT NOT NULL DEFAULT '',
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS classroom_report_deliveries_batch ON classroom_report_deliveries(batch_id,state);
+CREATE INDEX IF NOT EXISTS classroom_report_deliveries_provider ON classroom_report_deliveries(provider_message_id);
+CREATE TABLE IF NOT EXISTS classroom_report_links (
+ id TEXT PRIMARY KEY,
+ token_hash TEXT NOT NULL,
+ job_id TEXT NOT NULL,
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ recipient_ref TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL,
+ revoked_at INTEGER,
+ views INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_report_links_token ON classroom_report_links(token_hash);
+CREATE TABLE IF NOT EXISTS classroom_delivery_events (
+ provider_event_id TEXT PRIMARY KEY,
+ provider_message_id TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ received_at INTEGER NOT NULL
+);

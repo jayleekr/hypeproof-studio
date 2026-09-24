@@ -15,7 +15,7 @@ export function LocalReview() {
     return () => window.removeEventListener('message', listener);
   }, []);
   return <main className="local-review">
-    <header><p className="eyebrow">PERSONAL WORK RECORD</p><h1>My task reviews</h1><p>Keep evidence, examine your decisions, and choose what to submit.</p></header>
+    <header><p className="eyebrow">나의 작업 기록</p><h1>나의 변화 기록</h1><p>근거를 남기고, 내가 내린 판단을 직접 살펴보고, 무엇을 제출할지 고릅니다.</p></header>
     <aside className="record-policy">Local only · Automatic capture off · No automatic expiry · 256 MiB provisional limit
       <details><summary>Storage and scope</summary><p>{state.storage}</p><p>Select one Claude Code or Codex JSONL transcript from the open project. Only visible user and assistant messages are imported. Known secret patterns are removed; review the text before sharing.</p></details>
     </aside>
