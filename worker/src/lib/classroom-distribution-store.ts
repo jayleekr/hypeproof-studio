@@ -81,14 +81,16 @@ export function settleStatements(db: Db, o: { scope: string; args: unknown[]; ca
  * transaction closes every open distribution that token created, so the next sync of ANY learner stops carrying it, no
  * matter which instructor paired that learner. Idempotent: repeating a revocation changes nothing more.
  */
-export function issuerFenceStatements(db: Db, jti: string, o: { reason: string; by: string; sweep: boolean; now: number }): Stmt[] {
-  const mine = `(SELECT id FROM ${D} WHERE issuer_jti=? AND revoked_at IS NULL)`;
+export function issuerFenceStatements(db: Db, jti: string, o: { reason: string; by: string; sweep: boolean; retainedCohorts?: string[]; now: number }): Stmt[] {
+  const scope = `issuer_jti=? AND revoked_at IS NULL${o.retainedCohorts ? ' AND cohort_id NOT IN (SELECT value FROM json_each(?))' : ''}`;
+  const args = o.retainedCohorts ? [jti, JSON.stringify(o.retainedCohorts)] : [jti];
+  const mine = `(SELECT id FROM ${D} WHERE ${scope})`;
   const stmts = [db.prepare("INSERT INTO ops_issuer_fences(issuer_jti,state,reason,recorded_by,created_at,updated_at) VALUES(?,'revoked',?,?,?,?) ON CONFLICT(issuer_jti) DO UPDATE SET state='revoked',reason=excluded.reason,recorded_by=excluded.recorded_by,revision=ops_issuer_fences.revision+1,updated_at=excluded.updated_at WHERE ops_issuer_fences.state<>'revoked'").bind(jti, o.reason.slice(0, 64), o.by.slice(0, 64), o.now, o.now)];
   if (!o.sweep) return stmts;
   return [...stmts,
-    db.prepare(`UPDATE ${O} SET event_seq=event_seq+1 WHERE object_id IN (SELECT object_id FROM ${D} WHERE issuer_jti=? AND revoked_at IS NULL)`).bind(jti),
-    db.prepare(`UPDATE ${T} SET state='revoked',result_code='issuer_revoked',pending=0,updated_at=? WHERE state IN ${OPEN} AND distribution_id IN ${mine}`).bind(o.now, jti),
-    db.prepare(`UPDATE ${D} SET revoked_at=?,revoked_by='system',revoke_reason='issuer_revoked',revoke_seq=(SELECT o.event_seq FROM ${O} o WHERE o.object_id=${D}.object_id),row_revision=row_revision+1 WHERE issuer_jti=? AND revoked_at IS NULL`).bind(o.now, jti),
+    db.prepare(`UPDATE ${O} SET event_seq=event_seq+1 WHERE object_id IN (SELECT object_id FROM ${D} WHERE ${scope})`).bind(...args),
+    db.prepare(`UPDATE ${T} SET state='revoked',result_code='issuer_revoked',pending=0,updated_at=? WHERE state IN ${OPEN} AND distribution_id IN ${mine}`).bind(o.now, ...args),
+    db.prepare(`UPDATE ${D} SET revoked_at=?,revoked_by='system',revoke_reason='issuer_revoked',revoke_seq=(SELECT o.event_seq FROM ${O} o WHERE o.object_id=${D}.object_id),row_revision=row_revision+1 WHERE ${scope}`).bind(o.now, ...args),
   ];
 }
 /** Un-revoke restores the token, not what the sweep closed: a swept distribution stays closed and is sent again if wanted. */
