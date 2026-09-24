@@ -31,7 +31,7 @@ export async function journey(x) {
   // A bounded diagnostic, through the actual instructor controls, returns a device result.
   await page.locator('#ops-check').click();await row('A1').getByRole('button',{name:'근거·조치'}).click();
   await page.locator('#ops-actions').getByRole('button',{name:'진단 다시 실행',exact:true}).click();
-  await page.locator('#ops-detail-status').filter({hasText:/성공|실행|정상/}).waitFor({timeout:90000});
+  await wait(()=>local.db.prepare("SELECT t.state FROM ops_command_targets t JOIN ops_commands c ON c.id=t.command_id WHERE c.action='retry_diagnostics' AND t.seat_id='A1' ORDER BY c.created_at DESC LIMIT 1").get()?.state==='succeeded','G4 device diagnostic receipt',90000);
   await page.screenshot({path:path.join(out,'g4-03-diagnostic.png')});
   // Existing notice distribution, selected seat only, and an explicit receipt.
   if(!(await page.locator('#ops-dist').evaluate(e=>e.open)))await page.locator('#ops-dist-summary').click();
@@ -50,7 +50,7 @@ export async function journey(x) {
   await wait(async()=>{await page.locator('#ops-jobs-go').click();return local.db.prepare("SELECT id FROM classroom_report_jobs WHERE student_id=? AND state IN ('partial','review_required')").get(seats[0].student_id);},'G4 native records to report',120000);
   await page.locator('#ops-reports-refresh').click();await page.locator('#ops-reports-list').getByRole('button',{name:'초안 열기'}).first().click();
   await page.locator('#ops-report-view').getByText('이 보고서에 포함된 기록',{exact:true}).waitFor();const reportText=await page.locator('#ops-report-view').innerText();assert.match(reportText,/Q-G41/);assert.match(reportText,/Q-G42/);
-  await page.screenshot({path:path.join(out,'g4-04-report-review.png'),fullPage:true});await page.locator('#ops-report-view').getByRole('button',{name:'근거 확인하고 내용 승인'}).click();
+  await page.locator('#ops-report-view').screenshot({path:path.join(out,'g4-04-report-review.png')});await page.locator('#ops-report-view').getByRole('button',{name:'근거 확인하고 내용 승인'}).click();
   await page.locator('#ops-recipients-go').click();await page.locator('#ops-approve-go').click();await page.locator('#ops-send-go').click();
   // The final confirmation is discovered from the actual form, not an assumed API mutation.
   await page.locator('#ops-send-confirm button').filter({hasText:/발송/}).click();
