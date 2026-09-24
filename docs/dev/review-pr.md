@@ -1,58 +1,57 @@
-# JY dev review: one-command PR check
+# JY dev 검수: 명령 한 줄로 PR 확인하기
 
-Runs a screen-bearing PR branch in the Dev app before merge (PRD UX-05).
+화면이 들어가는 PR을 머지하기 전에 Dev 앱에서 직접 확인하는 절차 (PRD UX-05).
 
-## Usage
+## 사용법
 
 ```bash
-bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service]
+bash scripts/review-pr.sh <PR번호-또는-브랜치> [--provider claude|codex|service]
 ```
 
-- `<PR-number-or-branch>`: GitHub PR number (e.g. `1302`) or branch name
-- `--provider`: how the Dev app connects to its AI backend
-  - `service` (default): routes through the local wrangler server on port 8787
-  - `claude`: uses your local Claude Code subscription
-  - `codex`: uses your local Codex subscription
+- `<PR번호-또는-브랜치>`: GitHub PR 번호 (예: `1302`) 또는 브랜치 이름
+- `--provider`: Dev 앱의 AI 백엔드 연결 방식
+  - `service` (기본값): 로컬 wrangler 서버(포트 8787)를 경유
+  - `claude`: 로컬 Claude Code 구독 사용
+  - `codex`: 로컬 Codex 구독 사용
 
-## What it does
+## 동작 단계
 
-| Step | Action | Typical time |
+| 단계 | 내용 | 전형적 소요 |
 |---|---|---|
-| 1 | Fetch and check out the PR branch in a temp worktree | ~3s |
-| 2 | `npm ci` for extension + webview-ui | ~3–60s (cold/warm) |
-| 3 | Generate a random local `.dev.vars`, init D1, start `wrangler dev --port 8787` | ~25s cold |
-| 4 | Issue a local test instructor token; copy to clipboard | <1s |
-| 5 | `studio-dev.py run` — build extension, patch base app, launch Dev app | ~15–30s |
-| 6 | Print in-app instructions | — |
+| 1 | PR 브랜치를 임시 worktree로 체크아웃 | ~3초 |
+| 2 | 확장·webview-ui `npm ci` | ~3–5초(캐시 있음) / ~40–60초(첫 실행) |
+| 3 | 임의 로컬 `.dev.vars` 생성 후 D1 초기화, `wrangler dev --port 8787` 기동 | ~25초(cold) |
+| 4 | 로컬 테스트 강사 토큰 발급 및 클립보드 복사 | <1초 |
+| 5 | `studio-dev.py run` — 확장 빌드·base app 패치·Dev 앱 실행 | ~15–30초 |
+| 6 | 인앱 안내 출력 | — |
 
-Press **Ctrl+C** to stop the app, server, and remove the worktree.
+**Ctrl+C** 를 누르면 앱·서버·worktree를 자동 정리합니다.
 
-## Prerequisites
+## 사전 조건
 
-- `/Applications/HypeProof Studio.app` installed (base app)
-- `node`, `npm`, `npx wrangler`, `python3` in PATH
-- `gh` logged in (for PR-number mode)
+- `/Applications/HypeProof Studio.app` 설치돼 있어야 함 (base app)
+- `node`, `npm`, `npx wrangler`, `python3` 가 PATH에 있어야 함
+- `gh` 로그인 돼 있어야 함 (PR 번호 모드 사용 시)
 
-## Model connection
+## 모델 연결
 
-`--provider service` (default) routes chat through the local wrangler server on port 8787.
-The script does **not** inject `ANTHROPIC_API_KEY` or `ANTHROPIC_PROXY_URL` into `.dev.vars`.
-Without those, a real LLM call returns 502 — which is the correct behaviour for local review.
+`--provider service`(기본값)로 실행하면 채팅이 로컬 wrangler 서버(포트 8787)를 경유합니다.
+스크립트는 `.dev.vars`에 `ANTHROPIC_API_KEY`나 `ANTHROPIC_PROXY_URL`을 넣지 않습니다.
+키가 없으면 실제 LLM 호출 시 502를 반환합니다 — 로컬 검수에서는 정상 동작입니다.
 
-To run the chat flow end-to-end with a fake model (no real API calls), use the T0-e approach:
-set `ANTHROPIC_PROXY_URL` to a local mock server in `.dev.vars` before starting.
+모의 모델로 채팅 흐름을 끝까지 돌리려면 서버를 띄우기 전에 `.dev.vars`의 `ANTHROPIC_PROXY_URL`을 로컬 가짜 서버로 둔다(T0-e 방식).
 
-## Security notes
+## 보안
 
-- Uses a freshly generated random signing secret every run — never copies or symlinks the production `.dev.vars`.
-- Refuses to start if port 8787 is already occupied (prints the holder PID).
-- Refuses to start if a production URL (`hypeproof-ai.xyz`) is detected in environment.
+- 매 실행마다 임의 서명 값(32자 hex)을 새로 생성 — 운영 `.dev.vars`를 복사하거나 심링크하지 않습니다.
+- 포트 8787이 이미 점유돼 있으면 점유 프로세스 PID를 출력하고 즉시 종료합니다.
+- 환경 변수에 운영 URL(`hypeproof-ai.xyz`)이 있으면 즉시 종료합니다.
 
-## Troubleshooting
+## 문제 해결
 
-| Problem | Fix |
+| 증상 | 조치 |
 |---|---|
-| `port 8787 already in use` | Kill the listed PID or close the other session |
-| `profile not permitted` in app | Auto-detected profile may not match the PR's cohort; check `worker/src/profiles/` manually |
-| `Dependencies missing` from studio-dev.py | `npm ci` failed silently; re-run script |
-| Token not in clipboard | Token is printed to stdout; copy it manually |
+| `port 8787 already in use` | 표시된 PID를 종료하거나 다른 세션을 닫는다 |
+| 앱에서 `profile not permitted` | 자동 감지된 profile이 해당 PR의 cohort와 다를 수 있음 — `worker/src/profiles/` 직접 확인 |
+| `Dependencies missing` | `npm ci`가 조용히 실패한 것 — 스크립트 재실행 |
+| 토큰이 클립보드에 없음 | stdout에 출력된 토큰을 수동 복사 |
