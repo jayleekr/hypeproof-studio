@@ -3,8 +3,7 @@
 // issuer Bearer 전용 — 학생 토큰은 403.
 import { Hono } from 'hono';
 import type { Env } from '../env';
-import { bearer, verify, TokenError } from '../lib/tokens';
-import { isTokenRevoked } from '../lib/kv';
+import { authorizeIssuer } from '../lib/instructor-auth';
 
 interface KbVersion {
   version: number; parent_version: number | null; origin: string;
@@ -21,14 +20,9 @@ export const chalkKnowledge = new Hono<{ Bindings: Env }>();
 
 // Global middleware: issuer Bearer required. KB is cohort-global — no scope check needed.
 chalkKnowledge.use('/chalk/knowledge/*', async (c, next) => {
-  const token = bearer(c.req.header('authorization'));
-  if (!token) return c.json({ error: 'instructor Bearer required' }, 401);
-  let payload;
-  try { payload = await verify(token, c.env.HPS_SIGNING_SECRET); }
-  catch (err) { return c.json({ error: err instanceof TokenError ? err.message : 'invalid token' }, 401); }
-  if (payload.role !== 'issuer') return c.json({ error: 'token is not an issuer' }, 403);
-  if (payload.jti && await isTokenRevoked(c.env.HPS_KV, payload.jti))
-    return c.json({ error: 'issuer token revoked' }, 401);
+  const result = await authorizeIssuer(c);
+  if (result === null) return c.json({ error: 'instructor Bearer required' }, 401);
+  if (result instanceof Response) return result;
   c.header('cache-control', 'no-store');
   return next();
 });

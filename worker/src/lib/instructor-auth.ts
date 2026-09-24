@@ -40,6 +40,11 @@ export interface IssuerAuthz {
   payload: TokenPayload;
 }
 
+/** Cohort-scope-free authz result — used by KB and other cohort-global endpoints. */
+export interface IssuerAuthzNoScope {
+  payload: TokenPayload;
+}
+
 // #257 — verify() failures surface curated TokenError prose only; anything
 // else (crypto/config internals) is logged server-side, client gets a
 // generic message.
@@ -47,6 +52,31 @@ export function publicVerifyError(err: unknown, label: string): string {
   if (err instanceof TokenError) return `invalid ${label} token: ${err.message}`;
   console.error(`${label} token verify failed:`, err);
   return `invalid ${label} token`;
+}
+
+// Internal helper: Bearer extract → verify → role check.
+// Returns null (no Bearer), a Response (error), or { payload } on success.
+// Revocation and scope checks are the caller's responsibility, in the order
+// the caller needs (preserving existing contract for each exported function).
+async function verifyIssuerBearer(
+  c: InstructorAuthRequest,
+): Promise<{ payload: TokenPayload } | null | Response> {
+  const auth = c.req.header("authorization") ?? "";
+  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
+  if (!bearerMatch || !bearerMatch[1]) return null;
+  let payload: TokenPayload;
+  try {
+    payload = await verify(bearerMatch[1], c.env.HPS_SIGNING_SECRET);
+  } catch (err) {
+    return Response.json(
+      { error: publicVerifyError(err, "issuer") },
+      { status: 401 },
+    );
+  }
+  if (payload.role !== "issuer") {
+    return Response.json({ error: "token is not an issuer" }, { status: 403 });
+  }
+  return { payload };
 }
 
 // Path-scoped issuer-Bearer exceptions on the Service's /admin/* prefix. Each
@@ -107,22 +137,10 @@ export async function authorizeIssuerForCohort(
   c: InstructorAuthRequest,
   cohortId: string,
 ): Promise<IssuerAuthz | null | Response> {
-  const auth = c.req.header("authorization") ?? "";
-  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
-  if (!bearerMatch || !bearerMatch[1]) return null;
+  const base = await verifyIssuerBearer(c);
+  if (base === null || base instanceof Response) return base;
+  const { payload } = base;
 
-  let payload: TokenPayload;
-  try {
-    payload = await verify(bearerMatch[1], c.env.HPS_SIGNING_SECRET);
-  } catch (err) {
-    return Response.json(
-      { error: publicVerifyError(err, "issuer") },
-      { status: 401 },
-    );
-  }
-  if (payload.role !== "issuer") {
-    return Response.json({ error: "token is not an issuer" }, { status: 403 });
-  }
   const scope = (payload.scopes ?? []).find((s) => s.cohort === cohortId);
   if (!scope) {
     return Response.json(
@@ -145,23 +163,10 @@ export async function authorizeIssuerForSession(
   cohortId: string,
   requireProfileId: string | null,
 ): Promise<IssuerAuthz | null | Response> {
-  const auth = c.req.header("authorization") ?? "";
-  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
-  if (!bearerMatch || !bearerMatch[1]) return null;
-  const issuerToken = bearerMatch[1];
+  const base = await verifyIssuerBearer(c);
+  if (base === null || base instanceof Response) return base;
+  const { payload } = base;
 
-  let payload: TokenPayload;
-  try {
-    payload = await verify(issuerToken, c.env.HPS_SIGNING_SECRET);
-  } catch (err) {
-    return Response.json(
-      { error: publicVerifyError(err, "issuer") },
-      { status: 401 },
-    );
-  }
-  if (payload.role !== "issuer") {
-    return Response.json({ error: "token is not an issuer" }, { status: 403 });
-  }
   const scopes: IssuerScope[] = payload.scopes ?? [];
   const scope = scopes.find(
     (s) =>
@@ -184,6 +189,23 @@ export async function authorizeIssuerForSession(
     if (rev) return Response.json({ error: "issuer token revoked" }, { status: 401 });
   }
   return { scope, payload };
+}
+
+// #1288 — Cohort-global issuer authorization: verifies the token is a valid,
+// non-revoked issuer Bearer without checking any cohort scope. Used by KB
+// endpoints that are cohort-global. Returns null (no Bearer), Response (error),
+// or IssuerAuthzNoScope on success.
+export async function authorizeIssuer(
+  c: InstructorAuthRequest,
+): Promise<IssuerAuthzNoScope | null | Response> {
+  const base = await verifyIssuerBearer(c);
+  if (base === null || base instanceof Response) return base;
+  const { payload } = base;
+  if (payload.jti) {
+    const rev = await isTokenRevoked(c.env.HPS_KV, payload.jti);
+    if (rev) return Response.json({ error: "issuer token revoked" }, { status: 401 });
+  }
+  return { payload };
 }
 
 // #751 — operations authority is an explicit, opt-in capability on the cohort

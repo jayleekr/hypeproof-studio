@@ -143,7 +143,41 @@ try {
     assert.ok(e.message.includes('UNIQUE') || e.message.includes('PRIMARY KEY'), `constraint error expected, got: ${e.message}`);
   }
 
-  console.log('PASS chalk-knowledge D1: 버전 목록, 문서 조회, kind 필터, v1 불변, 학생 403, 없는 버전/문서 404, 중복 버전 거부');
+  // ── 회귀: authorizeIssuerForCohort 리팩터 후에도 기존 동작 불변 ──────────────
+  const { authorizeIssuerForCohort } = await import('../src/lib/instructor-auth.ts');
+  function makeAuthReq(token, e) {
+    return {
+      env: { HPS_SIGNING_SECRET: e.HPS_SIGNING_SECRET, HPS_KV: e.HPS_KV },
+      req: { header: (k) => k.toLowerCase() === 'authorization' ? `Bearer ${token}` : undefined },
+    };
+  }
+
+  // 정상: scope 있는 cohort → IssuerAuthz 반환
+  const r1 = await authorizeIssuerForCohort(makeAuthReq(issuerToken, env), 'test-cohort');
+  assert.ok(r1 && !(r1 instanceof Response), 'authorizeIssuerForCohort: scope 있는 cohort는 통과해야');
+  assert.equal(r1.scope.cohort, 'test-cohort');
+
+  // 부정 회귀: scope 없는 cohort → 403 Response
+  const r2 = await authorizeIssuerForCohort(makeAuthReq(issuerToken, env), 'other-cohort');
+  assert.ok(r2 instanceof Response, 'authorizeIssuerForCohort: scope 없는 cohort는 Response여야');
+  assert.equal(r2.status, 403);
+
+  // 부정: Bearer 없음 → null
+  const r3 = await authorizeIssuerForCohort(
+    { env: makeAuthReq(issuerToken, env).env, req: { header: () => undefined } },
+    'test-cohort',
+  );
+  assert.equal(r3, null, 'authorizeIssuerForCohort: Bearer 없으면 null');
+
+  // ── 부정: 폐기된 issuer 토큰은 지식 API에서 401 ──────────────────────────────
+  const { verify: verifyTok } = await import('../src/lib/tokens.ts');
+  const issuerPayload = await verifyTok(issuerToken, TEST_SECRET);
+  assert.ok(issuerPayload.jti, 'issuer token must have jti for revocation test');
+  await env.HPS_KV.put(`revoked:${issuerPayload.jti}`, JSON.stringify({ ts: new Date().toISOString() }));
+  const revokedResp = await call('/chalk/knowledge/versions', { token: issuerToken });
+  assert.equal(revokedResp.status, 401, '폐기된 issuer 토큰은 401이어야');
+
+  console.log('PASS chalk-knowledge D1: 버전 목록, 문서 조회, kind 필터, v1 불변, 학생 403, 없는 버전/문서 404, 중복 버전 거부, authorizeIssuerForCohort 회귀, 폐기 토큰 401');
 } finally {
   await mf.dispose();
 }
