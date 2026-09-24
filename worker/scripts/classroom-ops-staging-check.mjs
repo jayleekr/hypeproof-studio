@@ -47,7 +47,7 @@ export function checkStaging(files) {
     if (s.environment !== 'staging') unsafe.push(`${label}: vars.ENVIRONMENT must be "staging" (got ${s.environment})`);
     for (const kind of ['d1', 'd1_names', 'kv', 'r2', 'analytics']) for (const id of s[kind]) if (prod[kind].has(id)) unsafe.push(`${label}: ${kind} ${id} is PRODUCTION's`);
     if (!s.d1.length || !s.kv.length || !s.r2.length) unsafe.push(`${label}: staging must declare its own D1, KV and R2 (a missing binding is not inherited, and a copied one would be production's)`);
-    for (const [k, v] of Object.entries(raw.vars ?? {})) if (typeof v === 'string' && PRODUCTION_HOSTS.test(v) && /ORIGIN$/.test(k)) unsafe.push(`${label}: vars.${k} points at a production host (${v})`);
+    for (const [k, v] of Object.entries(raw.vars ?? {})) if (typeof v === 'string' && PRODUCTION_HOSTS.test(v)) unsafe.push(`${label}: vars.${k} points at a production host (${v})`);
     const text = label === 'worker' ? files.workerStaging : files.chalkStaging;
     for (const m of text.replace(/^\s*#.*$/gm, '').matchAll(/"(REPLACE_[A-Z0-9_]+)"/g)) pending.push(`${label}: ${m[1]}`);
   }
