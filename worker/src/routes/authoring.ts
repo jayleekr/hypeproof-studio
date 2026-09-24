@@ -12,9 +12,9 @@ import { checkLessonPedagogy, blockingPedagogyFindings } from "../lib/lesson-ped
 import { readLesson } from '../lib/lesson-delivery';
 import { issue } from '../lib/tokens';
 import { getRoster, getActiveSession } from '../lib/kv';
+import { type Draft, readDraft, owns as ownsDraft, writeDraft } from '../lib/authoring-draft-write';
 
 type Bindings = { Bindings: Env; Variables: { author: IssuerAuthz } };
-interface Draft { cohort_id: string; course_id: string; owner_id: string; profile_id: string; revision: number; content_json: string; request_id: string; request_hash: string; updated_at: string; independent?: number }
 interface Version { source_revision: number; module_json: string }
 const root = "/cohorts/:cohort/authoring/:course";
 const validId = (s: string) => /^[a-zA-Z0-9_-]{1,128}$/.test(s);
@@ -90,13 +90,7 @@ authoring.post(root + '/versions/:version/participants', async c => {
   return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal: 'not_run' });
 });
 
-async function readDraft(db: D1Database, cohort: string, course: string) {
-  return db.prepare(`SELECT d.*, EXISTS(SELECT 1 FROM authoring_independent_courses m WHERE m.cohort_id=d.cohort_id AND m.course_id=d.course_id) AS independent
-    FROM authoring_drafts d WHERE d.cohort_id=? AND d.course_id=?`).bind(cohort, course).first<Draft>();
-}
-function owns(d: Draft, a: IssuerAuthz) {
-  return d.owner_id === a.payload.u && (d.profile_id === '' || a.scope.profiles.includes(d.profile_id));
-}
+const owns = (d: Draft, a: IssuerAuthz) => ownsDraft(d, a.payload.u, a.scope.profiles);
 
 authoring.get(root, async (c) => {
   const d = await readDraft(c.env.HPS_DB, c.req.param("cohort")!, c.req.param("course")!);
@@ -137,34 +131,20 @@ authoring.put(root, async (c) => {
   }
   const content = JSON.stringify(b.content);
   const hash = await sha256Hex(JSON.stringify([b.expected_revision, b.profile_id, b.content]));
-  if (prior && prior.request_id === b.request_id) {
-    if (prior.request_hash !== hash) return c.json({ error: "request id reused with different content" }, 409);
-    return c.json(draftView(prior));
-  }
   const now = new Date().toISOString();
-  let d: Draft | null;
-  if (b.expected_revision === 0) {
-    const insert = c.env.HPS_DB.prepare(`INSERT INTO authoring_drafts (cohort_id,course_id,owner_id,profile_id,revision,content_json,request_id,request_hash,updated_at)
-        VALUES (?,?,?,?,1,?,?,?,?) ON CONFLICT(cohort_id,course_id) DO NOTHING RETURNING *`)
-        .bind(cohort,course,a.payload.u,b.profile_id,content,b.request_id,hash,now);
-    if (independent) {
-      // Draft and marker commit together (D1 batch is transactional); the marker SELECT only
-      // matches the row this request created, so a lost create race never marks another course.
-      await c.env.HPS_DB.batch([insert, c.env.HPS_DB.prepare(`INSERT INTO authoring_independent_courses (cohort_id,course_id)
-          SELECT cohort_id,course_id FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND owner_id=? AND request_id=? AND request_hash=? AND revision=1
-          ON CONFLICT(cohort_id,course_id) DO NOTHING`).bind(cohort,course,a.payload.u,b.request_id,hash)]);
-      const created = await readDraft(c.env.HPS_DB, cohort, course);
-      d = created && created.independent && created.revision === 1 && created.request_id === b.request_id && created.request_hash === hash ? created : null;
-    } else d = await insert.first<Draft>();
-  } else {
-    d = await c.env.HPS_DB.prepare(`UPDATE authoring_drafts SET profile_id=?,revision=revision+1,content_json=?,request_id=?,request_hash=?,updated_at=?
-        WHERE cohort_id=? AND course_id=? AND owner_id=? AND revision=? RETURNING *`)
-        .bind(b.profile_id,content,b.request_id,hash,now,cohort,course,a.payload.u,b.expected_revision).first<Draft>();
-  }
-  if (d) return c.json(draftView({ ...d, independent: independent ? 1 : 0 }));
-  // Concurrent retry may have won the conditional write after our first read.
-  const latest = await readDraft(c.env.HPS_DB, cohort, course);
-  if (latest && owns(latest,a) && latest.request_id === b.request_id && latest.request_hash === hash) return c.json(draftView(latest));
+  const markerStmt = independent && b.expected_revision === 0
+    ? c.env.HPS_DB.prepare(`INSERT INTO authoring_independent_courses (cohort_id,course_id)
+        SELECT cohort_id,course_id FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND owner_id=? AND request_id=? AND request_hash=? AND revision=1
+        ON CONFLICT(cohort_id,course_id) DO NOTHING`).bind(cohort, course, a.payload.u, b.request_id, hash)
+    : undefined;
+  const wr = await writeDraft(c.env.HPS_DB, prior, {
+    cohort, course, owner_id: a.payload.u,
+    expected_revision: b.expected_revision, request_id: b.request_id,
+    profile_id: b.profile_id, content_json: content, hash, now, independent,
+    independent_marker_stmt: markerStmt,
+  });
+  if (wr.kind === 'ok' || wr.kind === 'idempotent') return c.json(draftView(wr.draft));
+  if (wr.kind === 'request_id_reused') return c.json({ error: "request id reused with different content" }, 409);
   return c.json({ error: "revision conflict; reload before saving" }, 409);
 });
 
