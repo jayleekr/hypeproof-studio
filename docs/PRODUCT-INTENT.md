@@ -176,6 +176,9 @@ time, waiting time, unresolved cases and verified recovery as operating evidence
 do not infer that outcome from endpoint coverage or claim it has already been measured.
 The [roadmap](plan/learning-agent-experience-epics.md#one-instructor-classroom)
 connects these intents to existing requirements and the completion boundary.
+The 2026-09-22 [instructor UI pass](requirements/classroom-design.md#instructor-ui-pass-20260922) applies the
+live-monitoring and remote-intervention intents to the existing Chalk screens (list first, cause → action → result);
+it is a draft for user review, not evidence that the one-instructor outcome was measured.
 
 ## 공통 측정 코어와 Jay dogfood
 

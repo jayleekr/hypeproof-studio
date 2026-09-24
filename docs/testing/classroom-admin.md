@@ -951,3 +951,156 @@ Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 
 
 Windows에서만 확인할 수 있어 **NOT RUN으로 남는 것:** 경로 구분자·긴 경로·한글 사용자 폴더에서의 spool/동결 복사본, Defender/학교 보안 프로그램의 `claude.exe` 차단, 프록시·TLS 재서명 망에서의 SDK 스트리밍, 절전 복귀 뒤 sync 재개, 설치본 업데이트 알림과의 공존.
 
+
+<a id="instructor-ui-pass-run-20260922"></a>
+
+### 강사 UI 1차 정리 — 실행 기록 · 2026-09-22 (로컬 · 사용자 검토 전 시안 · 인수 아님)
+
+설계·범위: [디자인 요구](../requirements/classroom-design.md#instructor-ui-pass-20260922). 소스 `48b4820`
+(브랜치 `feat/751-instructor-ui-pass`, 기준 `d87f1fc` = U4 중간 스냅샷 — U4 최종 head와의 통합은 별도). Mac arm64 ·
+Playwright Chromium · 합성 계정만. 화면 배치·문구·스타일 변경이며 Service·SDK·API 계약은 바꾸지 않았다.
+
+| 검사 | 결과 |
+|---|---|
+| `npm --prefix chalk test` · `npm --prefix chalk run typecheck` | PASS · PASS |
+| `e2e/classroom/run.mjs`(공유·피드백·재연결) · `ops.mjs` · `ops-selection.mjs` · `ops-distribution.mjs` · `ops-lesson-settings.mjs` · `ops-roster.mjs`(30석·1024·200%·390 drawer·44px·주요 CTA 1개) | 6개 PASS |
+| `e2e/access-budgets/browser.mjs` · `e2e/chalk-authoring/run.mjs`(동선 막대가 붙은 두 화면) | PASS · PASS |
+| `e2e/chalk-authoring/simple.mjs` | FAIL — **기준 소스 `d87f1fc`의 원래 `authoring.html`로도 같은 지점(‘강의가 확정되었습니다’ 대기)에서 실패**. 이 변경과 무관한 기존 실패로 분리해 둔다 |
+| `e2e/classroom/ui-review-capture.mjs`(아래 캡처) | PASS — 12장 모두 가로 넘침 없음·페이지에 토큰 없음, 1280×720 첫 학생 행 434px, 연결 뒤 폼 접힘, Esc 후 포커스 복귀(C1), 취소 후 작성 내용·선택 유지, 비선택 A2 배포 대상 아님, 1024×700·200%(720×450, DSF 2)·390 drawer `fixed`·주요 CTA 1개 |
+
+기존 시험 갱신은 1건: `ops-roster.mjs`의 합쳐진 목록 안내 문구(패널 이름 `이번 수업 학생`, 위치 ‘위’ — 이전 문구는 아래에 있지 않은 패널을 ‘아래’라고 했다). 의미(한 목록, 명단 밖 학생만 옛 패널에)는 같다.
+
+캡처: `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/after/`(`index.html`·`manifest.json`·`capture-facts.json`).
+합성 미리보기 `e2e/classroom/ui-review-preview.mjs`(127.0.0.1:18951) — 24석 합성, 연결 좌석은 실제 기기 클라이언트 코드가 같은 프로세스에서 동작,
+배포 실패는 합성 디스크 거부, 회수 실패는 합성 `nothing_recorded`. 각 캡처의 ‘합성 데이터’ 표식은 캡처 스크립트가 붙인 것이다.
+
+NOT RUN: 실제 강사 사용 관측·실제 Studio 창·Windows·학교망·staging/production·실제 학생 자료·메일, 브라우저 확대 기능 자체(200%는
+viewport 축소 + DSF 2로 근사), 스크린리더 실사용. `/authoring`·`/console`·`/issuer`·`/budgets`는 연결 전 첫 화면만 캡처했다.
+
+<a id="instructor-ui-pass2-run-20260922"></a>
+
+### 강사 UI 2차 보완 — 실행 기록 · 2026-09-22 (로컬 · 조작 결함 4건 · 인수 아님)
+
+설계·범위: [2차 보완](../requirements/classroom-design.md#instructor-ui-pass2-20260922). 브랜치 `feat/751-instructor-ui-pass`, 시작 `1ea0f31`.
+U4 브랜치는 병합하지 않았다 — 재발급 링크 규칙만 U4 `9b0c643`과 같은 코드로 옮겼다(통합 시 같은 줄이 겹친다). Mac arm64 · Playwright Chromium · 합성 계정만.
+
+| 검사 | 결과 |
+|---|---|
+| `npm --prefix chalk test` · `npm --prefix chalk run typecheck` | PASS · PASS (정적 계약의 버튼 문구 `준비 확인` → `현황 새로 확인`·`도움 요청 응대`) |
+| `e2e/classroom/ops-help.mjs` (신규, `test:classroom-ops-help`, CI 단계 추가) | PASS — 잘못된 토큰: 명단 영역이 ‘강사 인증이 거부돼 … 불러오지 않았습니다’, 목록·집계 없음 · 운영 권한 없는 토큰: 상단 ‘연결됨’ + 명단 영역 ‘원격 운영 권한이 없습니다’ · 올바른 토큰: 버튼 없이 10석 로드, ‘연결하지 않았습니다’ 없음, 미연결 A3·무신호 A4는 `확인 불가`(정상 4 ≠ 10) · 도움 요청: 이번 수업 `접수`(A2)·`검토 중`(A4)만 목록·집계·선택 대상, 답변함(A8)·해결(A9)·철회(A10)·만료·다른 수업·결과물 제출 제외 · 선택 `A2, A4` vs 기술 문제 `A1, A5, A6, A7` · 첫 조치: A1 토큰 거부 → `/authoring` 재발급 링크(새 탭, 강의 버전 유지, 주요 버튼 색·44px), 진단은 보조 · A3 미연결 → `기기 연결` 묶음 맨 위·연결 코드 발급 · A6 공통 장애(3/10석) → 상세 주요 CTA 0 · ‘2 수업 진행 › 도움 요청 응대’ 이동 후 상세·질문 초안·선택·연결 유지, 상세를 닫았다 열어도 질문 초안 유지, 공유 피드백 초안은 갱신 뒤에도 유지 · 학생 철회 → 목록·집계·열린 기록에서 빠짐 · 다른 수업 개설 → 옛 명단·도움 목록 비움, 옛 요청은 ‘다른 수업의 기록’ · 390px 가로 넘침 없음 |
+| 대조군 | 같은 시험을 `1ea0f31`의 `manage.html`로 돌리면 첫 단언(인증 거부 시 명단 영역 문구)에서 FAIL |
+| `ops.mjs` · `ops-roster.mjs` 갱신 후, `run.mjs` · `ops-selection.mjs` · `ops-distribution.mjs` · `ops-lesson-settings.mjs` · `e2e/access-budgets/browser.mjs` · `e2e/chalk-authoring/run.mjs` | 8개 PASS |
+| `e2e/classroom/ui-review-capture-pass2.mjs` (아래 캡처) | PASS — 10장 가로 넘침 없음·토큰 없음·주요 CTA ≤1, 390px에서 ‘도움 요청 응대’ 링크가 화면 안 |
+
+기존 시험 갱신(기대가 바로 이번 결함이던 곳): `ops.mjs` — A1(토큰 거부)의 주요 버튼 기대 ‘진단 다시 실행’ → 재발급 링크, 증거 링크 `/issuer` → `/authoring`(U4 `9b0c643`과 같은 단언),
+목록 주요 버튼 ‘도움 필요한 학생 선택’ → ‘기술 문제 좌석 선택 (장애 1 · 주의 0)’, 묶음 선택 버튼 `#ops-select-help` → `#ops-select-fault`.
+`ops-roster.mjs` — S03(9석 공통 장애)의 서랍 주요 버튼 기대 ‘진단 다시 실행’ → 없음(Service `none_shared_incident`), 묶음 선택 `ops-select-help` → `ops-select-fault`.
+두 파일의 `button.primary` 셈은 링크도 세도록 `.primary`로 바꿨다.
+
+작업 중 발견해 고친 것: 첫 캡처에서 재발급 링크가 어두운 바탕에 어두운 글자였다(주요 버튼 색이 `button.primary`에만 걸려 있었음). 링크에도 같은 색을 주고 `ops-help.mjs`에 색·높이 단언을 넣었다.
+
+캡처: `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/pass2/`(`index.html`·`manifest.json`·`capture-facts.json`, 1차 `after/`·`codex/`는 그대로).
+합성 미리보기 `ui-review-preview.mjs`에 도움 요청 상태(열림 B2·C2·C6, 답변 A5, 해결 A6, 철회 B1, 만료 B3, 다른 수업 B4)를 추가했다. 이 미리보기에서 C3~C5의 공급자 장애는 3/24석이라
+공통 장애 기준(30%) 아래이고, Service는 ‘진단 다시 실행’을 첫 조치로 준다 — 캡처 P2-06은 그 상태이며, 기준 이상(개별 첫 조치 없음)은 `ops-help.mjs`가 시험한다.
+
+미충족·범위 밖: 학생 Studio 안에서 도움 요청을 보내는 입구(현재는 웹 `/sharing`)와 U1b·AT-41 통합은 이번 범위가 아니다. 도움 요청 판정은 기존 공유 metadata만 쓰며 새 API·저장소는 없다.
+NOT RUN: 실제 강사 사용 관측·실제 Studio 창·실제 학생·Windows·학교망·staging/production·메일, 스크린리더 실사용, 브라우저 확대 기능 자체,
+`mac-*.mjs`(실제 Mac 창 — 이 작업은 Studio GUI·18841/18842/9441을 쓰지 않는다), 전체 빌드. 사용자 시각 피드백 전이며 디자인 승인·인수가 아니다.
+
+<a id="instructor-ui-integration-run-20260922"></a>
+
+### U4 원인별 복구 + 강사 UI 2차 보완 통합 — 실행 기록 · 2026-09-22 (로컬 · 통합 검증 · 인수 아님)
+
+통합 브랜치 `feat/751-instructor-ui-integration`: U4 `dea5935`(Draft #1232, 인수된 기준) 위에 UI `71af80e`를 병합(`0592da9`), Codex 검토 P2 2건 수정(`31fc27b`).
+충돌은 `manage.html`(UI 쪽 명단·도움·상세 코드 채택, U4 재발급 링크 규칙은 UI 쪽에 이미 같은 코드, U4의 `receipt_verified`·`offline_pending`·`server_health_only` 문구 유지),
+`ops.mjs`(UI 쪽 새 계약: 첫 조치=Service 권장), e2e README(두 절 모두), `requirement-work.json`(병합본 해시 재계산)이었다. 확장·worker 소스는 U4와 같다(차이 0).
+이전 실행 기록(U4 12차 전체·13차 R0/R4, UI 2차)은 그대로 두고 아래는 통합본에서 새로 돌린 것만이다.
+
+| 검사 (통합본) | 결과 |
+|---|---|
+| `npm --prefix chalk run typecheck` · `npm --prefix chalk test` | PASS · PASS |
+| `ops-help.mjs`(보강) · `ops.mjs` · `ops-roster.mjs` · `ops-selection.mjs` · `ops-distribution.mjs` · `ops-lesson-settings.mjs` · `run.mjs` · `access-budgets/browser.mjs` · `chalk-authoring/run.mjs` | 9개 PASS (`ops-roster`는 첫 실행에서 webview 미빌드로 시험 전제 단언 실패 → 이 worktree에서 webview를 빌드한 뒤 PASS) |
+| `ops-help.mjs` 추가 5절: 공유 기록 조회 실패(브라우저 요청을 `page.route`로 503) | 도움 영역 ‘알 수 없습니다 (요청 없음이 아님)’, 목록 0, 집계 `도움 요청 확인 불가`(‘0’ 아님), `도움 요청 학생 선택 (확인 불가)` 비활성, 좌석 카드 ‘도움 요청 여부 확인 불가’ · 명단 10석·장애 집계·선택(A4)·열린 공유 기록·쓰던 피드백 유지 · 한도 도달 응답 → `2 이상`·한도 문구 · 다음 정상 조회 → `2`, 한도 문구·실패 안내 사라짐 |
+| `ops-help.mjs` 추가 6절: 질문 초안 식별자(명단은 Service API로 변경) | 무관 좌석(A10) 학생 변경 → A2 초안 유지 · A2가 다른 학생(student-l)으로 → 상세가 새 학생으로 다시 그려지고 질문 빈칸 + ‘옮기지 않았습니다’ 안내, 닫았다 열어도 빈칸, 빈 질문 보내기 거부 · 페이지 상태를 일부러 낡게 만든 주입(명시) 뒤 보내기 → ‘보내지 않았습니다’, `send_question` 명령 0건 · 원래 학생 복귀 → 그 학생의 초안 복원 |
+| 대조군 | 통합 병합본(`0592da9`)의 `manage.html` → 5절 첫 단언(‘알 수 없습니다’ 대기)에서 FAIL · 초안 키를 좌석만으로 되돌린 `manage.html` → ‘never inherits’ 단언에서 FAIL |
+| `python3 scripts/next-work.py --check` | exit 0 (무결성만, 완료 판정 아님) |
+
+실제 Mac(이 Mac arm64, `mac-recovery.mjs`, `HPS_U4_SCENARIOS=R4,R7`, 포트 18861/18862/debug 9461 — U4 runtime 18841/18842/9441과 분리):
+확장 빌드 4개 파일 해시가 U4 13차 빌드와 같고(`eb9cc5e…` 등), 셸은 0.1.56 복사본(출하 버전 아님). 결과 `e2e/test-results/classroom-devhost-integ/recovery/result.json`, `source_sha 31fc27b`.
+- R0: 실제 창 연결 · 실제 Agent SDK turn 1회 완료(모델 공급자는 스크립트된 대역).
+- R4: 404 → 문제 남음 · 같은 주소 복귀 → 해결 확인 · 서버 사망 → **같은 탭**이 새 포트 `/page.html`(complete·visible·학생 페이지 표식) · 무관 localhost 도구 탭·외부 사이트 탭 id/주소 유지, 도구 서버 요청 0.
+- R7(강의 고정 수업 재발급): 통합 보드 좌석 상세의 재발급 링크 `/authoring`(강의 버전 표기) → `/authoring`에서 클릭 발급 → 입력 전 재확인은 ‘문제 남음’ → 학생이 시작 화면에 코드 입력(dev token file 변경·재시작 없음) → 새 발급 ID 확인 ‘해결 확인’ · 초안·대화·작업 파일 유지, 비선택 학생 발급 0 · 새 발급이 이전 연결 세대를 끊어 강사 연결 코드로 재연결(기존 계약, `re_paired: true`).
+- 실행하지 않은 시나리오: R1·R2·R3·R5·R6 — 확장·worker 소스가 U4와 같아 U4 12차 증거를 그대로 쓴다.
+
+캡처(합성 미리보기 포트 18971, 새 폴더): `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-20260922T035744/`
+— `integration/`(I-01 도움 확인 불가 데스크톱·390, I-02 한도 도달, I-03 좌석 주인 변경) · `pass2-on-integrated/`(2차 10장을 통합본에서 다시). 이전 `after/`·`codex/`·`pass2/`는 그대로다.
+`integration-first-attempt-race/`는 캡처 스크립트가 복구 문구를 갱신 전에 읽은 첫 시도(계측기 결함, 제품 아님)로 남겨 둔다.
+
+미충족·범위 밖(완료 아님): AT-41 공통 대상별 결과, Studio 안 자발적 도움 요청·피드백·해결 입구, U1b 종류별·연속 회수, 커리큘럼→실행 인수, 보고서·전달, 1인 강사 전체 리허설.
+Service 계약 공백: 강사 공유 목록은 범위 필터 전 100행에서 잘리고 `truncated` 표시가 없어, 필터 뒤 100행 미만인데 잘린 경우를 화면이 알 수 없다. → 통합 후속에서 해소(아래).
+NOT RUN: 실제 강사·학생, Windows, 학교망, 여러 실제 기기, staging/production D1·R2, 실제 모델, 메일, 설치본 Keychain, 스크린리더 실사용, 전체 빌드, 통합본 CI.
+사용자 시각 피드백 전이며 디자인 승인·인수가 아니다.
+
+
+<a id="instructor-ui-integration-followup-run-20260922"></a>
+
+### 통합 후속 — Codex F1·F2 · 실행 기록 · 2026-09-22 (로컬 · 합성 · 인수 아님)
+
+기준 `9bbe913`(통합 전체 최종), 제품 커밋 `11bb190`. Codex 증거: `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-codex/`.
+
+| 검사 | 결과 |
+|---|---|
+| 재현(수정 전 `9bbe913`) | Codex `share-scope-probe.mjs`: 허용 요청 1건이 범위 밖 새 행 100개 뒤에서 0건, 완결성 표시 없음 — REPRODUCED. `live-actions-probe.mjs`: 같은 학생 재연결 뒤 상세를 닫지 않으면 `질문 보내기` 비활성 — FAIL(재현) |
+| 수정 후 Codex 프로브 | `share-scope-probe.mjs`의 `after=0` 단언이 `after=1`로 깨짐(결함 해소). `live-actions-probe.mjs`의 단언은 `ops-help.mjs` 6절에 그대로 들어가 PASS (프로브 파일 자체는 이전 한도 흉내(`limit=행 수`)에 기대어 5절에서 새 계약과 맞지 않음) |
+| `worker` `test:classroom` 새 검사 | 범위 밖 100행+다른 수신자 5행 뒤 허용 1건 보임·`counts` {1,1,0}·범위 밖 식별자 비노출 · 정확히 100건 `has_more:false` / 101건 `true`+커서, 두 쪽 합 101건 중복·누락 없음 · `limit=40` · 다른 수업 150행+제출 3건 뒤의 이번 수업 도움 요청을 `session_id`+`kind=help`로 찾음(`counts` {2,1,1}) · 잘못된 필터 7종 400 · 범위 프로필 없는 강사 0건·0집계 — PASS (12개) |
+| `worker` `classroom-d1`(miniflare 로컬 D1) | `json_each` 범위 필터·집계가 D1에서 동작 — PASS |
+| `ops-help.mjs` 5절(갱신) | 조회 실패=확인 불가 · 일부만 읽힘: `응답할 도움 요청 2건 · 학생 2명 이상`·`(2 이상)`·`더 오래된 도움 요청 불러오기`, 한 쪽에 없는 열린 공유 기록·쓰던 피드백 유지 · 다음 쪽 503 → 다시 확인 불가 · 집계 없는 이전 Service+보이는 0건 → ‘요청 없음이 아님’+`다시 확인`, 집계 칩 `도움 요청 0 이상` · 정상 응답으로 복구 — PASS |
+| `ops-help.mjs` 7절(신규, 상세를 열어 둔 채) | 해제→연결: 보내기 활성·주요 CTA·질문·포커스·목록 선택 유지 · 심장박동: 입력 요소 재생성 없음 · 원인 변경(`sdk_not_ready`): 주요 CTA `AI 실행 환경 초기화` · 원격 조치 플래그 끔/켬: 질문 영역 사라짐/같은 질문 복귀 · 연결 해제: 보내기 비활성, 강제 클릭에도 `send_question` 0건 — PASS |
+| 대조군 | `9bbe913`의 `classroom.ts`로 `test:classroom` → 새 검사에서 FAIL · `9bbe913`의 `manage.html`로 `ops-help.mjs` → 5절 부분 조회 대기에서 FAIL |
+| 변경 범위 회귀 | `chalk` typecheck·`npm test` · `worker` typecheck·`test:classroom-ops`·`test:cohort-routes`·`classroom-ops-regression` · e2e `ops`·`ops-roster`·`ops-selection`·`ops-distribution`·`ops-lesson-settings`·`run` — PASS · `next-work.py --check` exit 0(재해시 2문서) |
+
+캡처(새 폴더): `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-followup-20260922T042200/`(`gallery.html`·`manifest.json`)
+— `preview-captures/` 합성 미리보기 18971에서 F-01 부분 조회·F-02 하한·F-03 조치 끔 실시간·F-04 연결 해제 실시간(각 데스크톱·390, `ui-review-capture-followup.mjs`),
+`fixture-captures/` `ops-help.mjs` 7절 화면 5장. 이전 폴더는 그대로다. 미리보기는 캡처 뒤 재기동해 깨끗한 상태로 둔다.
+
+실제 Mac: 이번 변경은 Chalk 화면과 Service 목록 경로뿐이고 확장·기기 코드는 바뀌지 않아 U4·통합본의 R0/R4/R7 증거(`31fc27b`와 확장 소스 동일)를 그대로 쓴다.
+현재 Mac 강사 보드 스모크는 NOT RUN — 보존 러너(18861/18862)는 변경 전 Chalk·Service를 프로세스 안에 들고 있고, 별도 Chalk는 그 KV(열린 수업)를 공유하지 못해 “열린 수업 없음”이 된다.
+러너 재시작은 네이티브 시나리오 재실행이라 이번 범위에 비례하지 않는다.
+
+남은 한계: 도움 요청 페이지는 강사가 요청한 만큼만(10초마다 최대 10쪽) 다시 읽는다. `counts`는 요청 수이고 학생 수는 불러온 행에서만 센다(일부만 읽힌 경우 하한).
+원격 조치 플래그 변경은 명단 개정 번호를 올려 목록 선택을 비운다(기존 동작, 이번에 바꾸지 않음).
+NOT RUN: 실제 강사·학생, Windows, 학교망, staging/production D1·R2, 실제 모델·메일, 스크린리더 실사용, 전체 빌드. 사용자 시각 피드백 전이며 인수가 아니다.
+
+<a id="instructor-ui-integration-followup2-run-20260922"></a>
+
+### 통합 후속 2 — Codex F2b·F1b · Mac 강사 보드 스모크 · 2026-09-22 (로컬 · 합성 · 인수 아님)
+
+기준 `883136e`(통합 후속 최종), 제품·실기 source `6cc3476`. Codex 증거: `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-codex/`(`followup-review.json`).
+위 절의 ‘남은 한계: 10초마다 최대 10쪽’은 이 절로 대체된다.
+
+| 검사 | 결과 |
+|---|---|
+| 재현(`883136e`) | Codex `pagination-reachability-probe.mjs`: 새 답변함 1000건 뒤의 오래된 이번 수업 접수 1건 — 10쪽 뒤 ‘1건 (이 화면에 0건)’·`다시 확인`만, Service 커서로는 닿음 — REPRODUCED. `checkpoint-isolation-probe.mjs`: 강사 A의 보내지 않은 확인 지점 메모가 연결 해제·강사 B 연결 뒤 같은 좌석에 남음(질문은 비워짐) — REPRODUCED |
+| 수정 후 Codex 프로브 | `checkpoint-isolation-probe.mjs` PASS(메모·질문 모두 빈 값). `pagination-reachability-probe.mjs` 원본은 이제 첫 조회가 완결이라 ‘최근 100건만’ 대기에서 시간 초과 — 단언 조건(열 수 있는 요청 또는 다음 조치)은 아래 v2가 판정 |
+| 도달성 프로브 v2(`checks/pagination-reachability-probe-v2.mjs`, 같은 고정 데이터·head 무관, 제공되는 ‘더 오래된’ 조치를 끝까지 누름) | 새 화면+새 Service: 클릭 0회, `요청 열기` 1 — PASS · 새 화면+`883136e` Service(`status` 무시): 창 이동 10회 뒤 `요청 열기` 1·`최신 요청부터 보기` — PASS · `883136e` 화면: 9회 뒤 `다시 확인`만, `요청 열기` 0 — FAIL(대조군) |
+| `worker` `test:classroom` 추가 검사 | 이번 수업 도움 요청 1001건(답변함 1000+접수 1): 필터 없이 11쪽째에야 닿음 · `status=open` 첫 쪽에 그 1건, `counts` {1001,1,1000} 유지 · `limit=1`로 열린 요청 2건을 같은 커서로 이어 읽음 · `status=answered`·빈 값 400 — PASS (12개) |
+| `ops-help.mjs` 5절(갱신) | 도움 요청 조회가 모두 `status=open` · 부분 조회 문구가 열린 요청 행 수(2건) 기준 — PASS |
+| `ops-help.mjs` 4·6·7절(보강, F1b) | 확인 지점 메모: 좌석이 다른 학생에게 가면 빈 값, 원래 학생이 돌아오면 복귀, 같은 강사의 실시간 재그리기·플래그 끔/켬에 유지 — PASS |
+| `ops-help.mjs` 8절(신규, F1b) | 연결 해제→다른 강사: 메모·질문 빈 값 · 같은 강사 재연결도 빈 값(초안은 그 연결에만 있음) — PASS |
+| `ops-help.mjs` 9절(신규, F2b) | 9a 실제 쪽 크기: 답변함 1000건 앞의 오래된 접수가 첫 조회에 `요청 열기`로 · 9b 도움 요청 쪽 크기 2(요청 URL만 바꿈, Service 실물): 2→4→6건, 창 이동 뒤 가장 오래된 요청 도달·열기, 창 하나의 갱신 = 도움 요청 조회 1회(창 시작 커서), 새 요청 추가·창 안 요청 철회에도 자리 유지·열린 기록과 쓰던 답 유지, 창 쪽 503 → 확인 불가·창 유지 → 복구 시 같은 창, `최신 요청부터 보기` · 9c 일반 공유 목록(1000건 초과, 쪽 100): 끝까지 이동해 본 id 수 = Service `counts.matched`, 렌더 최대 300행, `최신 기록부터 보기` — PASS |
+| 대조군 | `opsReset`의 `checkpointDraft.clear()` 한 줄만 되돌림 → 8절 FAIL · `883136e`의 `manage.html` → 5절 FAIL · `883136e`의 `classroom.ts` → `test:classroom` FAIL·`ops-help` 5절 FAIL |
+| 변경 범위 회귀 | `worker` typecheck·`test:classroom`·`test:classroom:d1`·`test:classroom-ops`·`test:cohort-routes` · `chalk` typecheck·`npm test`·`test:classroom`·`test:classroom-ops` · e2e `ops-help`·`ops`·`ops-roster`·`ops-selection`·`ops-distribution`·`ops-lesson-settings`·`run` — PASS |
+
+**실제 Mac 강사 보드 스모크(R0+BOARD, source `6cc3476`)** — `HPS_DEVHOST_DIR=e2e/test-results/classroom-devhost-board HPS_U4_SERVICE_PORT=18863 HPS_U4_BOARD_PORT=18864 HPS_U4_DEBUG_PORT=9463 HPS_U4_SCENARIOS=BOARD` `mac-recovery.mjs`.
+devhost 폴더는 통합본 폴더의 APFS 클론(공식 셸 0.1.56 복사본, 확장 source `31fc27b` — 이후 확장 소스 변경 없음을 러너가 대조, Agent SDK 0.3.207). PASS:
+실제 창이 연결·실제 SDK 턴 완료(R0) → 보드가 제공한 `/manage` 바이트 sha256 = 소스 파일(`97860631…`) · 같은 프로세스 Service가 `filter.status:'open'` 응답 ·
+A1 연결 `active`, 행 ‘입장: 준비 완료 … 마지막 신호: 방금’, 상단 ‘연결됨’ · 조치 가능: `질문 보내기`(주요 CTA)·`확인할 지점 표시` 활성 · 학생 도움 요청 1건(학생 경로 `/v1/classroom/shares`, 합성 토큰으로 이 러너가 만듦 — 앱의 도움 요청 입구는 NOT RUN)이
+‘응답할 도움 요청 1건 · 학생 1명’ · 확인 지점 메모: 같은 강사 갱신에 유지, 강사 B 연결에 빈 값 · 학생 창의 초안·답 1건·작업 파일 불변. 복구 조치는 누르지 않았다.
+보존: 기존 러너 12662/앱 12677(18861/18862/9461, `31fc27b` 적재 — 현재 Chalk·Service 증거 아님)과 그 폴더·토큰, 18841·18951·18792는 건드리지 않았다. R4/R7은 확장 소스가 같아 기존 증거를 그대로 쓴다.
+
+증거(새 폴더): `.git/remote-classroom-evidence/management-20260921/instructor-ui-review/integration-followup2-20260921T195328/` — `fixture-captures/`(9절 창 이동 데스크톱·390, 일반 목록 마지막 창), `mac-board/`(보드 2장·학생 창 1장·`result.json`), `checks/`(재현·대조군·검사 로그), `manifest.json`·`gallery.html`.
+합성 미리보기 18971은 새 코드로 재기동했다(이전 PID 26272의 토큰·manifest는 `e2e/test-results/ui-review-preview/*.pid26272-*`로 보존).
+
+남은 한계: 창을 옮긴 동안 더 새로운 요청은 목록에 없고(수는 `counts`로 정확, `최신 요청부터 보기`로 복귀) 옮긴 창은 완결이 아니므로 그 사이 철회된 열린 기록은 저장 시 404로만 드러난다.
+10초 갱신 중에 누른 ‘더 오래된/최신’은 그 갱신이 끝난 다음 갱신(최대 10초)에 반영된다(기존 동작). 새 수업으로 바뀌어도 열려 있던 좌석 상세는 조치만 막힌 채 남는다(F1의 조회 실패 규칙, 이번에 바꾸지 않음).
+NOT RUN: 앱의 도움 요청 입구, 실제 강사·학생, Windows, 학교망, staging/production D1·R2, 실제 모델·메일, 스크린리더 실사용, 전체 빌드, 사용자 시각 승인. 인수가 아니다.

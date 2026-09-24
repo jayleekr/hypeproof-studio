@@ -10,7 +10,7 @@ async function request(path, method = 'GET', body, token = f.teacherToken) { con
 try {
   const html = readFileSync(new URL('../src/ui/manage.html', import.meta.url), 'utf8'), script = html.match(/<script>([\s\S]*?)<\/script>/)[1]; new Script(script);
   assert.ok(!/localStorage|sessionStorage|\.innerHTML\s*=|insertAdjacentHTML|document\.cookie/.test(script), 'ticket and token stay in page memory and are rendered as text');
-  for (const label of ['준비 확인', '확인 불가', '발급은 연결 완료가 아닙니다', '개별 PC 초기화를 권하지 않습니다', '만료로 단정하지 말고']) assert.ok(html.includes(label), label);
+  for (const label of ['현황 새로 확인', '도움 요청 응대', '확인 불가', '발급은 연결 완료가 아닙니다', '개별 PC 초기화를 권하지 않습니다', '만료로 단정하지 말고']) assert.ok(html.includes(label), label);
   // Red is reserved for a confirmed block; silence and staleness render with the neutral class.
   assert.match(script, /s\.attention==='blocked'\?'blocked'/); assert.ok(!/no_signal[^\]]*blocked/.test(script));
   const seats = [{ seat_id: 'A1', student_id: 'student-a' }, { seat_id: 'A2', student_id: 'student-b' }];
