@@ -29,6 +29,15 @@ on:
         description: "Apply additive remote-classroom-operations schema 0011–0023 before deploying (see worker/DEPLOY.md)"
         type: boolean
         default: false
+      # jayleekr/hypeprooflab#997: the activity-compatibility check has never
+      # passed since it was added on 2026-09-10 (first run with its key on
+      # 09-23 failed before any request reached the Service). Skipping it is a
+      # recorded, per-dispatch decision; the freeze, schemas and post-deploy
+      # checks still run.
+      skip_activity_compatibility:
+        description: "Skip the public-App compatibility check for this deploy (recorded in the job summary)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -50,7 +59,7 @@ jobs:
         run: echo "value=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
   activity-compatibility:
     needs: resolve
-    if: ${{ !inputs.dry_run }}
+    if: ${{ !inputs.dry_run && !inputs.skip_activity_compatibility }}
     uses: ./.github/workflows/verify-service-activities.yml
     with:
       ref: ${{ needs.resolve.outputs.sha }}
@@ -58,7 +67,7 @@ jobs:
       HPS_ACCEPTANCE_ANTHROPIC_API_KEY: ${{ secrets.HPS_ACCEPTANCE_ANTHROPIC_API_KEY }}
   deploy:
     needs: [resolve, activity-compatibility]
-    if: ${{ always() && needs.resolve.result == 'success' && (inputs.dry_run || needs.activity-compatibility.result == 'success') }}
+    if: ${{ always() && needs.resolve.result == 'success' && (inputs.dry_run || inputs.skip_activity_compatibility || needs.activity-compatibility.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -95,6 +104,12 @@ jobs:
       - name: Dry-run stop
         if: inputs.dry_run
         run: echo "dry_run=true; skipping wrangler deploy"
+
+      - name: Record skipped compatibility check
+        if: ${{ !inputs.dry_run && inputs.skip_activity_compatibility }}
+        run: |
+          echo "::warning::Public-App compatibility check skipped by ${{ github.actor }}"
+          echo "**Public-App compatibility check skipped** by \`${{ github.actor }}\` for \`${{ needs.resolve.outputs.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
 
       # Task C (docs/plan/dag.yaml, worker/wrangler.toml) — Service-layer
       # release identifier, tag prefix w* (e.g. w2026.09.04-1). Deliberately
@@ -181,6 +196,18 @@ jobs:
         run: |
           set -euo pipefail
           for migration in migrations/0007-access-contracts.sql migrations/0008-usage-costs.sql migrations/0009-budget-admission.sql migrations/0010-budget-surfaces.sql; do
+            npx wrangler d1 execute hypeproof-studio --remote --file="$migration"
+          done
+
+      # #751 R0-R6 added 0011-0017 on 2026-09-22 without a deploy step, so the
+      # classroom operation routes would reach production without their tables.
+      # All seven are CREATE ... IF NOT EXISTS, safe to replay on every deploy.
+      - name: Apply additive classroom operation schemas
+        if: ${{ !inputs.dry_run }}
+        working-directory: worker
+        run: |
+          set -euo pipefail
+          for migration in migrations/0011-classroom-ops.sql migrations/0012-classroom-ops-commands.sql migrations/0013-classroom-ops-control.sql migrations/0014-classroom-ops-evidence-review.sql migrations/0015-classroom-collection.sql migrations/0016-classroom-report-jobs.sql migrations/0017-classroom-delivery.sql; do
             npx wrangler d1 execute hypeproof-studio --remote --file="$migration"
           done
 
