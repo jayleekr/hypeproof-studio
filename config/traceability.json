@@ -2542,6 +2542,9 @@
       "sources": [
         {
           "path": "docs/testing/classroom-admin.md"
+        },
+        {
+          "path": "e2e/classroom/ops-g1-layout.mjs"
         }
       ]
     },
