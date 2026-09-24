@@ -44,6 +44,8 @@ MODES="
 irm  scripts/install.ps1
 irm  scripts/install-win.ps1
 file scripts/seed-sdk-binary.ps1
+file e2e/classroom/win-field/prepare-devhost.ps1
+file e2e/classroom/win-field/preflight.ps1
 "
 
 mode_for() {

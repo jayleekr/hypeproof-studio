@@ -98,6 +98,8 @@ npm --prefix chalk run typecheck
 |---|---|---|---|---|
 | AT-35 | ADM-05/10 | 복구 capability만 있는 강사의 질문 전송, coach만 있는 강사의 reset, 정답·코드·파일 경로를 담은 질문, 기술 장애 좌석에 질문 없이 바로 복구 | capability 상호 비대체, 코칭 조치가 파일·대화·입력 불변, 본문 비밀 마스킹, 복구가 코칭 단계에 막히지 않음, 표시됨≠읽음 | Service+App+browser |
 | AT-36 | ADM-02/04/07 | actor·source_state 미지정/위조, simulated 근거, 변경 전후 digest, 강사 confirmed/disputed, 로그 도착만 있는 좌석 | 미지정은 unverified, simulated가 real로 승격되지 않음, 강사 확인이 발송 승인·학습 완료로 읽히지 않음, 새 저장소 0 | Service+browser |
+| AT-37 | ADM-02/10 · RM-1 | 개별·전체·도움 필요·연결됨·미연결 선택, 선택 없음, 명단 revision 변경, 미리 확인 뒤 선택 변경, `collect` 전용 강사 | 실행 전 대상 수·연결 가능/불가·제외 사유 표시, 빈 선택은 실행 불가, revision이 바뀌면 선택 비움, 확인은 본 대상에만 유효, 권한별로 허용된 조치만 노출 | UI e2e + 실제 Mac |
+| AT-38 | ADM-03/13/14 · RM-2 | 선택 A1·A3/비선택 A2, 미동의·철회·오프라인 선택, 빈 대상·오타 필드·중복·회차 밖 좌석, 더블클릭·응답 유실·같은 key 다른 요청, 명단 변경, 종료된 회차의 새 요청 vs 이미 요청된 업로드, 구버전 전체 회수, ops OFF, 범위 조회 장애·손상, 읽기–쓰기 사이의 좌석 교체·종료·flag·철회 | 비선택 학생의 명령·업로드·객체·평가 0, 전체로 확장 0, 같은 요청은 같은 결과·다른 요청은 409, 범위를 못 읽으면 503(평가 입력 0), 경합은 0건 기록으로 거부, 회수는 평가·발송을 시작하지 않음 | Service + UI e2e + 실제 Mac |
 | AT-37 | ADM-09/13 | 근거 0건 학생·조용한 학생·느린 학생·프롬프트만 있는 학생 | 0점/미달/빨간색 0건, `아직 충분히 보지 못함` 표기, 활동량→능력 추론 0 | core+browser |
 | AT-38 | ADM-06/13 | 단일 수업 입력, 누적 회차 입력, 점수 필드가 있는 legacy 입력 | 관찰→근거→판단 변화→다음 실험 구성, 단일 수업에서 성장 패턴 서술 0, 점수·순위·의존도 전면 노출 0, legacy 7축 산출 불변 | core+runner fixtures |
 | AT-39 | ADM-05 | 학생 작업 중 질문/확인 지점 수신, 같은 근거 재입력 요구 | 모달·평가 팝업 0, 작업 문맥 유지, 닫기/나중에 보기 가능, 재입력 강제 0 | App 실기 |
@@ -261,3 +263,297 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 | 기존 학생 목록과 원격 목록 중복, 선택 상세가 긴 화면 하단 | 기존 관리 화면 안에서 중복 정리·목록+오른쪽 상세(좁은 폭은 drawer 등), 화면 기준 주요 CTA 하나 | 30좌석·공통 장애·키보드·200%·5개 폭에서 실제 렌더. forest/lime, 코칭/복구 분리, 도움받은 수행 출처 유지 |
 
 실제 macOS/Windows Studio·SDK 중지/복구, 학교망, staging/운영 D1/R2, 실제 평가 공급자 호출·메일 발송은 이번 인계에서도 **NOT RUN**이다. mock/브라우저/타입검사로 이 행을 PASS로 바꾸지 않는다. 코드로 가능한 부분은 계정 대기와 분리해 끝내고, 운영 활성화에 필요한 결정만 마지막에 남긴다.
+
+### 검토 결함 수정과 미완 기능 보강의 실행 기록 · 2026-09-19
+
+브랜치 `fix/751-ops-review-f1-f7`(R7 끝 `1432b27` + 준비 커밋 `115d4d3` 위). 이 기록 직전 HEAD `dcc2332`, Mac arm64, Node 22.22.1. 인계 시 15건 중 4 PASS / 11 FAIL이던 review 시험은 **기대값을 바꾸지 않고** 전부 통과하며, 빠져 있던 대조군을 더해 worker 25건·확장 14건이 됐다. 두 묶음은 worker `test:classroom-ops`와 확장 기본 `npm test`에 편입돼 PR CI의 `worker / test`·`extension / smoke`에서 항상 실행된다.
+
+| 결함 | 수정 | 실행한 시험 (모두 exit 0) |
+|---|---|---|
+| F1 | App `freezeSnapshot` + manifest `/2` binding, Service 귀속 대조, migration 0018 | 다른 u/c/p 3건, 다른 회차·활동·활동 없음·동의 범위·좌석·spool session, 수업 창 밖 기록, 신원 없는 기록, 회차 귀속 없는 레거시, metadata 없는 manifest, 자기 기록 양성 대조군. 기기 쪽: 공유 PC(`identity_mismatch`)·신원 없음·수업 전 이벤트 제외·다른 grant의 복사본 |
+| F2 | sync 응답 폐기, `CommandRunner.close()`, host 연결 generation | 늦은 proceed 0회·늦은 pause 0회·정상 1회, 재연결 뒤 이전 응답 무효, 실행 도중 해제 → 중지 요청 + `outcome_unknown(connection_closed)` |
+| F3 | `deliveryKey` | 형제자매 2건·재시도 0건, key 단위: 다른 회차의 같은 recipient_ref·정정 주소·개정 보고서·dry/live |
+| F4 | 수업 패널 단계 버튼, `turnObservations`, 산출물 digest, capability 선언, status `observes` | 단위 3건 + 브라우저 왕복(아래) |
+| F5 | upload-only 재개, grant 결속 state | 정상 만료 재개·명시적 해제·공유 PC·24시간 경과·Service 거부(철회) 1회 기록 후 미재시도 |
+| F6 | 사건별 디코딩 원문 대조, actor/source_state | 없는 event_id·다른 사건 인용·따옴표/줄바꿈 양성, AI·강사·가상 사례 단독 근거 거부, 맥락 인용 허용, 초안의 화자 바꿔 적기 거부, 레거시 line/turn locator |
+| F7 | `damaged`·`range_unknown`·extent 대조 | 깨진 행, 비객체 JSON, 선언 없는 연속 꼬리, 선언 시작/끝 불일치, 행 수 불일치, 마지막 사건 불일치, 레거시 유지 |
+
+보강한 기능과 그 시험:
+
+- **평가 adapter·자동 연결** `worker/test/classroom-ops-evaluator.test.mjs`(7): 미설정은 `evaluator_not_configured`(초안 0건), `advance` 반복에도 학생당 provider 호출 1회·job 중복 0, 학생 입력 없는 기록은 호출 없이 전부 `아직 충분히 보지 못함`, 카탈로그 밖 인용·AI 단독 근거는 초안이 되지 않음, 503은 큐 복귀 후 가시적 실패, runner의 Service 내 평가. provider는 전송 seam에서 대체했다 — **실제 모델의 관찰 품질 검증이 아니다.**
+- **legacy HAIN7 adapter**: 기존 Python 엔진을 실제로 실행(`--legacy-replay`, 엔진의 sample session). 7축 유지, score/band 미반입, 학생 발화만 근거, 28-marker 검수 없으면 `marker_review_missing`.
+- **읽기 화면·PDF** `e2e test:classroom-report`: 실제 Chromium 1280/360/200%. 악성 인용 미실행, 가로 스크롤 없음, 키보드로 세부 열기, 대비(본문 ≥7, 보조 ≥4.5), 같은 페이지에서 A4 PDF 2쪽 생성을 눈으로도 확인(한글·밝은 지면·방법 절 인쇄).
+- **메일 adapter·webhook** `classroom-ops-provider.test.mjs`(5): Svix 공개 테스트 벡터, 응답별 accepted/unknown/rejected 매핑, 검수된 문안만 live 발송, 확정 실패만 재시도, 서명 불일치·재생·중복·역순(delivered 뒤 sent)·opened 무시, delivery_key tag로 `send_unknown` 확정, 다른 message id를 가진 행은 가로챌 수 없음, 미설정은 dry-run만.
+- **철회·보존** `classroom-ops-erasure.test.mjs`(3): 철회 시 해당 학생의 snapshot·초안·링크만 사라지고 다른 학생은 유지, 남는 행에 학생 원문 없음, 늦은 기기 재전송·`수업 마무리` 재실행·새 batch·새 발송에서 제외, 운영자 1명 철회·보존 기간(기본값 없음·기한 전 거부·재실행 무해).
+- **Chalk 목록+상세·왕복** `e2e test:classroom-ops-roster`(6): 빌드된 webview의 실제 클릭 → provider의 단계 매핑 → **실제 ClassroomOpsHost**(vscode만 bundle 경계에서 stub) → 실제 Service → 실제 Chalk. 30좌석, 공통 장애(30%=9석), 구버전 앱 `확인 불가`, 기존 목록과 중복 제거, 1440 측면 패널·1024/200%/390 drawer, 키보드 열기/닫기·포커스 복귀, 44px, 화면 기준 주요 CTA 1개, `수업 마무리` 1회 → 실제 host 업로드 → 평가 → 검수 대기(재실행 중복 0), 승인≠발송·실제 발송 확인 단계·재클릭 재발송 0.
+  - 이 왕복 시험이 **실제 결함 1건**을 잡았다: 관측 훅이 동시에 outbox에 저장하면 임시 파일 rename 경합으로 사건이 사라졌다. 저장을 직렬화했고 대조군을 추가했다.
+- 기존 시험의 계약 변경: `수집/보고서/발송/기기 snapshot` fixture를 App의 실제 freezer를 쓰는 발급 경로로 바꿨다(시나리오는 보존). runner 시험의 "평가기 없으면 전부 not seen yet 초안"은 검토 지적대로 **잘못된 기대**여서 `evaluator_not_configured`로 바꿨다. 철회 시험은 "이미 수집한 것도 지워진다"로 강화했다.
+
+최종 회귀(이 브랜치 끝): `npm --prefix worker test`·typecheck, `test:classroom-ops:d1`(migration 0011~0018 재실행), `npm --prefix chalk test`·typecheck, 확장 `npm test`·typecheck, e2e `test:classroom`·`test:classroom-ops`·`test:classroom-ops-roster`·`test:classroom-report`, `next-work --check`, docs harness, `check-registry` — **실행 결과: 전부 exit 0**, 확장 `build:extension`도 exit 0(2026-09-19, 문서 커밋 직전 작업 트리 기준). 브라우저 e2e 4종은 PR CI에 없다(로컬 실행).
+
+**코드는 있으나 실제 환경에서 NOT RUN:** 실제 macOS/Windows Studio에서의 단계 버튼·SDK fallback·reset·업로드 재개, 학교망, staging/운영 D1(0018 포함)·R2 삭제, 실제 Anthropic 호출로 만든 초안의 품질과 비용, Resend 계정·sandbox·실수신·실제 webhook, 실제 보호자 메일 클라이언트에서의 링크·PDF.
+
+**2026-09-20 후속 보강(같은 브랜치):** 앞 문장의 “아직 코드가 없는 것” 중 단계의 강사 확인 입력, 브라우저 e2e의 PR CI 편입, 보존 기간 자동 실행, 링크 열람자 확인은 구현했다(아래). 누적 패턴 본문·PDF 첨부·Kakao/SMS·QR·열람자 본인 인증은 [후속 범위](../requirements/classroom-admin.md#이번-인수-범위와-후속-범위-2026-09-20)로 분리했고 **이번 관제·단일 회차 보고서 인수의 합격 조건이 아니다.**
+
+- **평가 큐 정체(Codex 후속 재현)** `classroom-ops-evaluator.test.mjs` +6(총 13): OFF→ON에서 이전 `evaluator=none` 작업은 `superseded`, 학생당 평가 1회, 반복 호출 중복 0; Codex 재현 그대로(두 학생 각 1회, `more`가 끝남); evaluator 버전 변경 시 평가된 초안은 그대로 두고 미평가 작업만 재준비; legacy 7축이 앞에 있어도 Service가 lease하지 않음; 두 호출자 동시 실행은 서로 다른 job; 503은 그 작업만 30초→2분 쉬고(fake clock) 3회째 `failed`; runner는 선언한 종류만 받는다. 재현 스크립트(`.git/remote-classroom-evidence/review-20260919/followup-evaluator.mjs`) 재실행 결과 provider 호출 2회·정체 없음.
+- **강사 reviewed** `classroom-ops-coaching.test.mjs` +1: 진행 중 단계는 확인 불가(`step_not_submitted`), `observe`만 가진 강사 거부, 두 강사 동시 확인은 200/409, 오래된 revision 거부, 다음 단계는 ‘확인 전’. 브라우저 왕복에서 `결과를 확인했어요` → 행에 `(강사 확인함)`.
+- **보존 자동 실행** `classroom-ops-erasure.test.mjs` +3(총 6): 기간 미설정·잘못된 값 6종·전역 스위치 OFF는 무동작, 기간만 설정은 dry-run, 기한 전(fake clock) 대상 0, enforce에서 R2 장애 주입 → `started/content_delete_failed` → 다음 tick이 완료, 재실행 무해, tick 상한, 15분 tick은 실행하지 않고 일일 tick만 실행.
+- **링크 열람자 확인** `classroom-ops-delivery.test.mjs` +1(총 8)과 기존 링크 시험 갱신: GET은 질문만(보고서 내용 없음), 오답 403·남은 횟수, 구분자 섞인 정답 허용, 5회째 영구 잠금(정답도 404), 값 없는 수신자는 live 발송 제외·원장 0행, 승인 뒤 값 변경은 `approval_stale`, 잘못된 형식 4종 거부, DB·감사에 값 원문 없음. 브라우저에서 질문 → 오답 → 정답 → 보고서.
+- **PR CI** `.github/workflows/classroom-ops.yml`: 브라우저 e2e 4종. 확장 의존성을 숨긴 상태(CI와 같은 설치 집합)에서 로컬 통과를 확인했다. **GitHub에서의 첫 실행 결과는 PR 생성 뒤 확인한다.**
+- **격리 Mac host** `e2e/classroom/mac-devhost.mjs`([README](../../e2e/classroom/README.md)): `prepare`를 실제 실행 — 설치된 v0.1.16 앱은 변경되지 않았고, 복사본의 번들 4개 해시가 현재 빌드와 일치, 복사본 ad-hoc 서명 검증 통과. **`launch`(GUI 실행)와 실기 관찰은 하지 않았다.** 설치된 v0.1.16을 실행한 결과를 이 기능의 검증으로 기록하지 않는다.
+
+최종 회귀(2026-09-20, 이 브랜치 끝): worker test·typecheck, `test:classroom-ops:d1`(0011~0021), chalk test·typecheck, 확장 test·typecheck·build, e2e 4종, `next-work --check`, docs harness, `check-registry`, `check-workflow-shells` — 결과는 PR 본문의 검증 절에 HEAD와 함께 적는다.
+
+**아직 코드가 없는 것(환경 대기가 아님):** 위 후속 범위 표의 5개 항목.
+
+<a id="remote-readiness-review-20260920"></a>
+
+### 독립 재검토와 실기 전 추가 인수 · 2026-09-20
+
+검토 기준은 #1169 끝 `c58dbc804503d45d6efde83a80e0d61cb5f6252a`다. 제품 소스는 수정하지 않았다. 확인한 범위는 다음과 같다.
+
+- 로컬은 `feat/751-review-c-ops-ui-retention-ci`, clean이며 원격 #1169 HEAD와 같다. 확인 당시 origin/main `ce95747`을 모두 포함하고 58 commits 앞이다. 관제 구현은 아직 main에 병합되지 않았다.
+- GitHub API로 #1165, #1119~1127, #1129, #1167~1169의 14개 PR을 조회했다. 모두 OPEN/CLEAN, 수집된 check 중 실패·대기 0. 마지막 3개는 Draft이고 #1169의 `classroom / browser`도 SUCCESS다. **#1120·#1121은 CHANGES_REQUESTED**, 나머지도 승인 확보와는 별개다. CLEAN은 테스트·실기·리뷰 승인을 합친 판정이 아니다.
+- 직접 실행: worker review 25, 확장 review 14, evaluator/provider/erasure 24 = **63 PASS / 0 FAIL / skip 0**. 기존 평가기 OFF→ON 재현도 다시 실행해 두 학생 각각 1회 평가, 이전 job superseded, 최종 more=false를 확인했다. 브라우저는 이번 재검토에서 재실행하지 않고 현재 PR의 CI 결과를 확인했다.
+- 이 기록은 전체 코드 감사나 출시 승인 판정이 아니다. 아래 두 동시성/복구 시나리오는 기존 테스트에 없었고 합성 계정·SQLite·메모리 R2·provider transport stub으로 직접 재현했다. 실제 모델/학생/운영 저장소에 접근하지 않았다.
+
+| 추가 수정 / 기존 인수 | 재현과 관측 | 수정 인수 |
+|---|---|---|
+| P1 · 철회 완료 뒤 늦은 평가 결과가 R2에 다시 남음 / AT-28~30 | 실제 `advance`가 provider 응답을 기다릴 때 같은 학생을 `eraseLearnerCollection`로 철회. 삭제 기록 done, report 객체 0 확인 뒤 provider 응답 반환. job은 withdrawn을 유지하지만 학생 인용을 담은 `draft.json`이 1개 다시 저장됨. 30일 보존을 설정하고 40일 뒤 tick해도 done 행을 제외해 객체가 남음 | 삭제/철회와 쓰기의 순서를 결속. stale lease 또는 tombstone의 입력은 결과 저장을 확정하지 못해야 함. D1/R2는 하나의 transaction이 아니므로 사전 확인만으로 끝내지 말고 늦은 PUT·CAS 실패·프로세스 중단 때 남는 객체의 보상 삭제/재조정까지 포함. 정상 job은 1회 저장. 학생 A 철회가 B를 건드리지 않음 |
+| P1 · 실패한 철회 삭제가 보존 만기까지 재시도되지 않음 / AT-28 | 수업 중 철회에서 R2 delete 실패 주입 → erasure_log는 withdrawn/started. R2 복구 뒤 retention=30일/enforce, 다음 날 tick. due=0, attempts=1 그대로이고 snapshot 객체 2개가 남음 | 사용자가 이미 요청한 철회의 중단된 삭제를 만기 보존 작업과 분리해 재시도. 보존 일수 미설정/기한 전에도 명시적으로 승인된 철회 작업은 회복 가능해야 함. 일반 보존 OFF는 신규 만기 삭제 0을 유지. 재시도 상한·지연·진행 상태·다른 학생 불변 검사 |
+
+첫 문제의 시작점은 `worker/src/routes/classroom-reports.ts`의 `saveResult`다. R2 put을 먼저 하고 D1의 leased/generation 조건을 나중에 검사한다. 두 번째는 `worker/src/lib/classroom-erasure.ts`의 `runClassroomRetention`: 모든 후보에 `ends_at <= cutoff`를 적용하며 설정 OFF 시 돌아온다. 기존의 철회 후 재요청 거부 시험은 **이미 진행 중인 요청의 늦은 완료**를 검사하지 않는다. 이번 재현은 R2 잔존을 증명하며 보호 링크의 재공개를 증명한 것은 아니다.
+
+추가 회귀는 임의 sleep으로 순서를 기대하지 말고 provider/R2 단계별 barrier로 재현한다. 평가/업로드 중 철회, R2 put 중 철회, 결과 CAS 실패, 삭제 중 오류·프로세스 중단을 대조한다. 실제 구현 위치의 원장을 재사용하고 별도 삭제 시스템을 복제하지 않는다.
+
+**Mac 인수 준비의 현재 한계:** 기존 `mac-devhost` manifest는 shell v0.1.16, extension SHA `f3763d6`, `agent_sdk_vendored=false`이며 prepare만 실행돼 있다. 현재 HEAD의 GUI/SDK 인수 증거가 아니다. v0.1.56의 공식 Mac arm64 ZIP(170,569,061 bytes)과 Windows x64 산출물은 GitHub release에 존재함을 조회했다. 다운로드/설치/GUI 실행은 이번 재검토에서 하지 않았다. 준비된 복사본과 실제 release, proxy fallback과 vendored SDK 실행은 각각 다른 증거로 남긴다.
+
+#### 위 두 결함의 수정과 실행 결과 · 2026-09-20
+
+수정 위치는 재현이 가리킨 그대로다. #1168에 `saveResult`(결과 저장), #1169에 삭제 원장의 복구·재확인을 넣었다. 계약은 [요구사항의 ‘결과 저장과 삭제의 순서’·‘요청된 삭제의 복구 ≠ 보존 만기 삭제’](../requirements/classroom-admin.md#검토-반영으로-확정한-계약-2026-09-19)가 소유한다. 추가 migration은 없다(0021의 `state`에 `settled` 값만 추가로 쓴다).
+
+| 시나리오 (순서는 sleep이 아니라 provider/R2 barrier로 강제) | 결과 |
+|---|---|
+| Codex 재현 1 그대로: provider 응답 대기 중 철회 → 삭제 `done` → 응답 도착 | 학생 객체 0, job `withdrawn`, 응답은 `withdrawn`으로 거부. 40일 뒤에도 0 |
+| R2 쓰기가 진행 중일 때 삭제 완료 → 쓰기 도착 | D1이 확정을 거부, 같은 요청에서 본문 삭제. 객체 0 |
+| 쓰기 도착 직후 프로세스 중단(CAS·보상 삭제 없음) | 고아 객체 1개(열람 경로 없음) → 창이 닫히기 전 tick은 건드리지 않음 → 이후 tick이 삭제, `settled`, 감사 `collection_erased_late_objects{objects:1}`. 이후 다시 선택되지 않음 |
+| lease 만료 뒤 재claim, 이전 세대의 늦은 쓰기 | 이전 세대는 자기 키만 쓰고 지움. 확정된 `draft.g2.json`은 digest까지 그대로, 검수자가 정상 열람, 저장 감사 1건 |
+| 보상 삭제 자체가 실패 | 요청은 정상 응답, 내용 없는 `report_draft_discard_failed` 기록, 같은 작업의 다음 확정 저장이 잔여 세대 본문 정리 |
+| Codex 재현 2 그대로: 철회 삭제 중 R2 오류, 보존 OFF | 학생 응답 `202 erasure=pending`, 원장 `started`. 5분 뒤 tick은 대기, 15분 뒤 tick이 완료(`done`, attempts 2). 보존 30일/enforce·기한 전이어도 동일하며 보존 tick은 due 0 |
+| 계속 실패 | 간격 15분·1시간·6시간·24시간…, 12회에서 자동 재시도 중단·`retry_limit`·감사 1건(매 tick 반복 없음). 운영자 조회에 `needs_operator`, 원인 해소 뒤 운영자 요청으로 완료 |
+| 15분 tick / 일일 tick | 15분 tick이 보존 설정 없이 철회를 끝냄. 보존 OFF의 일일 tick은 900일 지난 회차도 새로 지우지 않음 |
+| 다른 학생 | 모든 시나리오에서 다른 학생의 snapshot·초안 객체와 digest, 열람 링크가 그대로. 원장에 요청되지 않은 학생 행이 생기지 않음 |
+
+실행: `worker/test/classroom-ops-evaluator.test.mjs` 17(신규 4), `worker/test/classroom-ops-erasure.test.mjs` 12(신규 6, 기존 1건은 ‘중단된 보존 삭제는 복구가 끝낸다’로 계약 변경 반영) — 모두 PASS, skip 0. Codex의 원 재현 스크립트도 수정 뒤 다시 실행했다: 재현 1은 잔존 객체 0. 재현 2의 원본은 보존 tick만 호출하므로 출력이 같고(보존은 더 이상 재시도 주체가 아님), 복구 tick을 더한 사본은 `done`·객체 0이다. 결과 JSON은 저장소 공통 `.git` 아래 재검토 증거 폴더에 `*-after-fix.json`으로 두었다.
+
+**한계:** SQLite와 메모리 R2에서의 순서 검증이다. 실제 D1/R2의 지연·부분 실패·Worker 중단은 staging 시험 항목이며 NOT RUN이다. `settled` 이전의 고아 객체는 어떤 열람 경로로도 읽히지 않지만(작업 `withdrawn`, digest 없음, 링크 폐기) 저장소에는 최대 한 tick(15분)+창(약 13분) 동안 존재할 수 있다.
+
+#### 실제 Mac GUI·SDK 실행 · 2026-09-20
+
+`e2e/classroom/mac-devhost.mjs prepare` → `e2e/classroom/mac-gui.mjs`. 설치된 앱(`/Applications`)은 읽기만 했고 실행·수정하지 않았다. 아래는 **합성 시험이 아니라 실제 창을 구동한 결과**이며, 무엇이 실제이고 무엇이 합성인지는 결과 파일의 `real`/`synthetic` 항목이 소유한다.
+
+| 구분 | 내용 |
+|---|---|
+| 실제 | Studio shell 프로세스(v0.1.16 **복사본**, ad-hoc 서명, 격리 user-data), extension host·webview(실행 시점의 소스 SHA와 bundle 해시 4개는 결과 파일에 기록, 최종 실행 `35370da`), 명령 팔레트·알림, Agent SDK 0.3.207 JS(저장소 설치본에서 복사, package-lock 핀 일치·import 검증) + 네이티브 `claude` 바이너리(`HPS_SDK_BINARY`), 127.0.0.1 HTTP → 실제 Service 라우터 + SQLite, 실제 sync loop·명령 실행기, 실제 workspace 파일 |
+| 합성 | 계정·수업, **모델 공급자**(api.anthropic.com 자리에 정해진 SSE/400/무응답), 메모리 R2, in-memory secret storage |
+| 결과 10/10 PASS | 토큰 활성화(수업 패널 표시) → 팔레트에 1회용 코드 입력해 연결(알림, 보드 `token_verified`·connection active) → 학생 단계 버튼 → 보드 in_progress/submitted(자기보고) → 강사 확인(`confirmed`, 기기 보고값은 그대로) → 공급자 400 → 보드 blocking 오류·`runtime_failed` → 다음 실제 턴 성공으로 해제(`cleared`, SDK 경로 stream+tools 15) → **실행 중인 SDK 턴을 강사가 중지**(`run_stopped`) → 보존형 reset(`reset_ok`, 파일 2개 sha256 동일, 대화 유지, reset 뒤 턴 성공) → 새 코드로 재연결(이전 grant `revoked`, epoch 2) → 연결 끊기(파일 동일) |
+
+이 실행이 **찾아낸 결함 2건**(수정·회귀 추가, #1167; ①의 첫 수정은 늦게 돌아온 확인이 최신 신호를 덮는 순서 문제를 만들었고 F4 왕복 e2e가 잡아 ‘그 연결의 첫 보고일 때만’으로 좁혔다): ① 연결 전에 끝난 토큰 검증이 보드에 도달하지 않음 — 합성 시험은 연결 뒤에 검증을 호출해 실제 순서를 가렸다. ② 학생 알림에 `reset_runtime` 식별자가 그대로 노출. **관측 2건**(결함으로 판정하지 않음): 지속적인 5xx에서 실제 CLI가 재시도를 계속해 보드는 stall watchdog(기본 240초)까지 아무 신호도 받지 못한다 — 강사에게 ‘응답 없음’이 늦게 보인다는 뜻이며 watchdog 값은 운영 결정이다. 확장의 시작 시 업데이트 확인이 공개 release feed를 읽어 이 구버전 shell 복사본에 “새 버전 v0.1.56” 배너를 띄웠다(읽기 전용, 설치하지 않음).
+
+**이 실행이 증거가 아닌 것:** 현재 공식 release shell(v0.1.56)·설치/업데이트/서명·seed된 바이너리 경로, release의 registry vendoring, 실제 모델의 응답, 학교망, Windows, production/staging D1·R2. 공식 v0.1.56 ZIP은 내려받지 않았다(다운로드는 별도 승인 사항).
+
+#### migration 순서 리허설과 대상 확인 도구 · 2026-09-20
+
+`worker/scripts/classroom-ops-d1-check.mjs`(읽기 전용, 대상 이름과 uuid를 매번 요구)와 절차는 [`worker/DEPLOY.md`](../../worker/DEPLOY.md#remote-classroom-operations-751--staging-rehearsal-schema-order-flags-recovery)가 소유한다. 로컬 workerd D1에서 미적용 → 0011~0015만 적용(중단 지점 보고) → 전체 → 재적용, 절반만 만들어진 migration의 음성 대조군까지 PASS(`npm --prefix worker run test:classroom-ops:d1`). 확인한 사실: 이 저장소에는 `d1_migrations` 이력이 없고, `deploy-worker.yml`은 0011~0021을 몰랐으며(명시적 opt-in 입력 추가), staging 환경은 존재하지 않는다. **실제 Cloudflare 대상에 대한 실행은 NOT RUN.**
+
+#### 실제 모델·메일 제한 시험 준비 · 2026-09-20 (둘 다 NOT RUN — 계정·비용 승인 전)
+
+**모델.** `e2e/classroom/evaluator-trial.mjs`. 운영 경로(라우트·adapter·`validateDraft`)를 그대로 쓰고 기록만 합성이며, 사례마다 정답을 심었다(본인 기준 제시 / AI만 있는 기록 / 가상 사례 / 판단 변경 / 비밀값이 든 줄 / 빈약한 기록). 상한: 호출 8회(9번째 시도에서 프로세스 중단), 입력 60,000자/회, 출력 4,096 토큰/회 → Sonnet급 정가 기준 **최악 $2.72**, 이 사례들의 예상 실비 $0.10 미만. 중단 조건: 상한 초과, 200이 아닌 응답 2회, anthropic 외 호스트로의 요청. 키는 환경변수로만 읽고 출력하지 않으며, 키가 속한 API workspace에 별도 지출 한도를 걸 것을 전제로 한다. 채점기 자체의 대조군은 모델 없이 실행했다: 양성(`good`) 6/6 통과, 음성(`scores`, claim에 “85점, 상위 10%”)은 FAIL — 그리고 이 음성 대조군이 **글로 쓴 점수가 저장되던 결함**을 드러내 수정했다.
+
+| 판정 | 기준 |
+|---|---|
+| 기계 PASS | 6사례 모두: 심은 본인 발화가 근거로 인용됨, AI·가상 사례 문장이 학생 근거로 인용되지 않음, 비밀값이 든 줄 미인용, AI만 있는 기록은 호출 0·전부 미관찰, 점수·순위 표현 없음, 모든 인용이 기록 원문과 글자 단위로 일치 |
+| 사람 PASS | 관찰 주장마다 인용이 그 행동을 실제로 보여 주는가. 6사례 중 5 이상에서 근거 없는 주장 0, AI/가상 문장을 학생에게 귀속한 사례 0 |
+| FAIL → 활성화 보류 | 위 미달, 또는 실측 비용이 예상의 5배 초과 |
+
+**메일(Resend).** 계정 준비(사람): 발신 전용 **하위 도메인** 인증(DKIM·SPF 레코드는 Resend 화면이 제시), 그 도메인에 한정한 sending 전용 API key, webhook endpoint `https://<service>/v1/classroom/delivery-webhooks/resend`와 signing secret. Service 설정은 이름만: `wrangler secret put RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, vars `HPS_DELIVERY_PROVIDER=resend`·`HPS_DELIVERY_FROM`·`HPS_PUBLIC_BASE_URL`. 값은 문서·커밋·대화에 적지 않는다. 시험 수신자: 공급자의 시험 주소 `delivered@resend.dev`·`bounced@resend.dev`·`complained@resend.dev`와 운영자 본인 사서함 1~2개(합성 학생에 연결, 열람 확인 값 설정). 상한 10통, staging Service에서만.
+
+| 판정 | 기준 |
+|---|---|
+| PASS | ① 발송 직후 `provider_accepted`이며 화면이 ‘전달 완료’라고 하지 않음 ② delivered 주소는 webhook 뒤 `delivered`, bounced 주소는 `bounced` ③ 같은 승인으로 다시 눌러도 새 발송 0(Idempotency-Key) ④ 서명이 틀린 webhook은 401·상태 불변, 같은 event 재전송은 1회만 반영 ⑤ 실제 사서함에서 링크 → 확인 값 오답 → 정답 → 보고서, 5회 오답 잠금 ⑥ 철회 뒤 같은 링크는 404 |
+| 합성으로만 남는 것 | 공급자 timeout 뒤 결과 불명(`send_unknown`)은 실계정에서 강제할 수 없다 |
+
+**실행기 (2026-09-21 추가).** `e2e/classroom/delivery-trial.mjs` — 모델 시험과 같은 구조다. 기본은 계획 + 로컬 대조군(네트워크 없음, `PASS_MACHINE_PART` 확인: 접수≠전달 / 열람 확인 값 없는 수신자에게는 실제 메일을 보내지 않음 / 같은 승인 재클릭 0통 / 서명 틀린 webhook 401·상태 불변·같은 event 2회는 1회 반영). 실제 발송은 `HPS_TRIAL_CONFIRM=real-mail`과 key·발신 주소가 있을 때만이며, 수신자는 공급자 시험 주소 3개 + 환경변수로 준 운영자 사서함 최대 2개, 10통 상한, `api.resend.com` 외 호스트 거부, 주소는 출력에서 가린다. 로컬 Service로는 볼 수 없는 ②(Resend의 실제 서명 webhook 수신)·⑤(실제 사서함에서 링크 열기)·⑥(철회 뒤 404)은 결과 파일에 `NOT_RUN`으로 적히며 staging Service에서 수행한다. 실제 발송: **NOT RUN**.
+
+
+<a id="remote-mac-readiness-20260921"></a>
+
+### 공식 Mac shell 복사본으로 직접 실행 · 2026-09-21
+
+기준 소스는 #1169 `e3196e5bcf08c1e373014cc8086cd14ef4018f90`. 그 HEAD의 #1167~1169 최신 체크는 성공이며 Draft OPEN이다. 최신 main은 `19ff881`(학생 화면 개편 #1170/#1178). `git merge-tree --write-tree HEAD origin/main`에서 **5개 파일 충돌**(요구 목록, 확장 package.json, chatPanelProvider, ChatPanel, worker package.json)을 확인했다. 합성 CI 성공은 이 두 개발선의 통합이나 운영 활성화를 증명하지 않는다.
+
+이번에는 공식 v0.1.56 arm64 ZIP을 내려받아 SHA-256 `96d4cb31c3845370dc5ba8794a0bfd7682063579b0549bc94b4c19cfb9ad9526`를 대조했다. 그 **복사본**에 현재 extension/webview 번들 4개를 주입하고 ad-hoc 서명했다. SDK 0.3.207 JS와 native binary를 실제 실행했다. 설치 앱·실학생·production 자격은 사용하지 않았다. 창 조작은 macOS 접근성/브라우저 UI로 직접 수행했다.
+
+| 직접 수행한 경로 | 결과와 경계 |
+|---|---|
+| 학생 입장 → A1 연결 | 실제 앱이 frozen lesson과 토큰을 읽고 `token_verified`를 보고. 6좌석 중 **실제 Mac은 A1 하나**이며 A2 오류/A3 정상은 합성 신호, A4~6은 미연결 대조군 |
+| 과제 수행 → 제출 → 강사 확인 | 실제 학생 버튼에서 `in_progress/submitted`, Chalk에서 강사 `confirmed`. 자기보고와 강사 확인을 구분 |
+| 오류 → 진단 → 보존형 초기화 → 재시도 | 공급자 400을 주입해 빨간 장애 표시. `retry_diagnostics=token_ok`, `reset_runtime=reset_ok`. 대화·미전송 입력 보존, workspace 파일 2개 전후 SHA-256 동일, SDK 재대화 성공 |
+| 실행 중인 SDK 중지 → 재시작 | 지연 응답 중 강사 명령 `cancel_current_run=run_stopped`. 이어서 새 SDK 턴 성공. 의도적인 중지를 학생 화면에서 일반 연결 오류처럼 표현하는 문구는 후속 UX 과제 |
+| 동의 → 수업 마무리 → 실제 기록 회수 → 초안 | A1의 실제 SessionSpool 파일을 업로드·서버 해시 검증. 6명 중 1명 수신, 동의 없는 5명 제외. **평가기 transport는 합성**이나 실제 입력한 질문이 인용된 초안을 열고 내용 검수/승인함 |
+| 발송 미리 확인·보고서 렌더 | 합성 수신자에 dry-run 통과, 외부 발송 0. 실제 발송 버튼은 HTTP public origin 등 미설정 상태로 `delivery_provider_not_configured`를 반환. HTML 보고서는 실제 compose/render 경로로 열었지만 정적 로컬 미리보기이며 실제 수신자 인증·메일 전달 증거가 아님 |
+
+로컬 증거는 공통 git-dir `remote-classroom-evidence/review-20260921/`(PR 상태, 전후 workspace 해시, status/명령/초안 JSON, 화면, 재현 로그)에 있다. 시연 산출물은 ignored `e2e/test-results/classroom-demo-20260921/`이며 자격값/원문을 git에 넣지 않는다. `/manage`는 실제 Chalk 화면이다. 수업용 토큰·세션은 임시이고 재실행 시 새 합성 회차로 시작한다.
+
+**실행 중 발견해 수정한 코드 3건.** 격리 브랜치 `fix/751-mac-devhost-launch`에 준비했다. 위 실기 기록은 수정 전 기준이며 아래 회귀가 수정본의 증거다.
+
+1. 긴 checkout 하위 user-data 경로로 Electron IPC Unix socket가 103바이트를 넘으면 `ENOTSOCK`로 종료. 짧은 temp 경로를 host별로 분리하고 비정상 종료를 성공으로 끝내지 않음. 실제 Unix socket bind 대조군 포함 2 PASS, 기존 브라우저 workflow에 편입. GUI는 짧은 별도 profile로 실행해 원인을 확인함.
+2. 늦게 기록이 도착하면 같은 학생이 `missing`과 초안 행 양쪽에 남아 6명이 7작업으로 보임. 검수 view에서 입력 있는 학생의 옛 placeholder만 제외하고 DB 이력/다른 학생 누락은 보존. 해당 회귀 포함 evaluator+erasure 32 PASS.
+3. 강의의 `participants` 초대 경로가 일반 발급의 원장·재발급 세대 갱신을 누락. 위 실제 UI에서 발급 이력 없음으로 나타났고, 새 API 회귀에서 `unregistered != token_issued`로 재현. 같은 hook 연결 후 ops 20 PASS(강의 binding·다른 학생 세대·OFF·저장 장애 대조 포함), 기존 authoring 25 PASS, worker typecheck PASS.
+
+**남는 코드 과제(같은 날 오후 구현 — 아래 절):** 당시 `SessionSpool.append`는 `seq`를 쓰지 않는다. 따라서 **새 앱의 새 기록도** `sequence_unavailable`이며 UI의 ‘구형 기록’ 설명은 부정확하다. 이를 complete로 승격하지 말고 durable 순번/선언된 범위/재시작·부분 쓰기·snapshot 계약을 구현하고 기존 legacy를 계속 수용해야 한다. 최신 main 학생 UX와 관제 hook 통합도 아직 미완이다.
+
+**NOT RUN:** 실제 모델 답변의 품질·비용, 실제 메일/수신/webhook, Windows, 학교망, Cloudflare staging/production D1·R2, 공식 전체 release의 설치/업데이트/서명/seed 경로. 이번 실행은 공식 shell을 활용한 개발 host 검증이며 출하 패키지 인수가 아니다. 필요한 개발 계정 key는 이 checkout/현재 환경에 없었다(값은 읽거나 출력하지 않음).
+
+
+**수정 Service의 GUI 재실행:** `6a7f33c` Service + 같은 e3196e5 확장으로 합성 회차를 새로 열었다. 실제 A1 연결·SDK 대화·동의·자동 회수를 다시 실행해 **발급 ID 표시**, **6명 → 초안 1 + 미수신 5 = 현재 작업 6건**을 화면에서 확인했다. 현재 시연본은 이 조합이다. `e2e/test-results/classroom-demo-20260921/start.command`는 이 작업의 프로세스만 교체해 다시 연다. 전체 79개 회귀(실행기 2, ops 20, authoring 25, evaluator/erasure 32), worker typecheck, docs harness 100, requirement integrity, registry, workflow-shell 검사 통과. 브라우저 CI에 추가한 실행기 시험의 원격 CI는 아직 실행하지 않았다.
+
+**추가 재현 1건 · (같은 날 오후 해결 — 아래 ‘최신 main 통합본의 Mac 재실행’):** 발급 이력을 연결하자 `token_verified` 때 `matches_issue`였던 표시가 다음 `runtime_ready` 뒤 `unknown`으로 돌아간다. Service가 `state.activation.value.token_jti`만 읽는데 최신 activation 전체 교체가 이전 토큰 확인을 지우기 때문이다. 실기 상세에서 ‘준비 완료’와 ‘앱 확인 보고 없음’이 함께 나타났고, 별도 `activation-regression.mjs`/`.log`에서 양성→음성 순서를 재현했다. 이 실패는 위 79개 수정 범위 회귀와 별개이며 숨기지 않는다. 다음 구현은 토큰 확인 근거를 입장 진행 상태와 분리해 보존하되 재발급/다른 토큰/새 연결·boot/좌석 변경의 근거를 섞지 않아야 한다. 최신 main 통합과 함께 AT-15/23에 회귀를 추가한다.
+
+<a id="remote-mac-integrated-20260921"></a>
+
+### 최신 main 통합본의 Mac 재실행 · 2026-09-21 (오후)
+
+위 기록(수정 전 e3196e5 기준)의 후속이다. 같은 날 오후에 **스택 전체를 최신 main과 통합**(`19ff881`, 이어서 작업 중 들어온 `f44cce3` #1218 — 시험 체인 목록 1곳만 충돌)하고 남은 결함 두 건을 고친 뒤 같은 devhost로 다시 실행했다. 아래 표의 ‘실제/합성’ 경계가 이 실행이 증명하는 범위의 전부다.
+
+**통합 방식.** main은 스택 맨 아래 `docs/remote-classroom-operations-20260918`에 병합하고 13개 브랜치로 올렸다(기존 관례, force-push 없음). 목록형 충돌(요구 목록·두 `package.json`의 시험 체인)은 양쪽을 합쳤다. 실제 충돌은 #1167에서 났다: `chatPanelProvider`는 관제 코드 + main의 영문 주석, `ChatPanel`은 main의 현재 과제 중심 화면을 그대로 두고 단계 자기보고를 얹었다(요구사항 ‘학생 화면 통합’ 행). Codex 수정 `6a7f33c`는 소유 PR별로 나눠 넣었다 — 초대 발급 원장 → #1167, 보고서 중복 행 → #1168, 실행기·문서 → #1169. 나눠 넣은 뒤 #1169 끝 트리가 `6fc8868` 위 병합 결과와 같음을 `git diff`로 확인했다.
+
+**고친 결함.** ① 토큰 확인 표시: `activation-regression.mjs` 재현이 이제 통과한다(before/after 모두 `matches_issue`). 순수 대조군 1 + Service 회귀 1(`classroom-ops.test.mjs`: runtime_ready 뒤 유지 / 재발급 → other_token → 새 토큰 보고 → matches / 다른 토큰 / rejected → unknown / 새 boot → unknown → 재보고 / 오래된 boot의 늦은 sync는 무영향 / 새 연결은 첫 sync 전부터 unknown / 좌석 변경 → unknown). ② 기록 순번: 확장 `session-spool-seq.smoke.mjs` 7 PASS(동시 append 120건 1..N, 호출자가 seq를 덮어쓰지 못함, 세션별 독립 번호와 늦은 pinned turn, 실패한 append는 번호를 버림·찢어진 줄 격리, snapshot 읽기와 쓰기 큐의 일관성·쓰는 중 꼬리 제외, 재시작/다른 학생/창 밖/소유 불명 세션 수, freezer의 시작 증명 양성 2·음성 4). Service `classroom-ops-spool-seq.test.mjs` 7 PASS — **실제 SessionSpool → 실제 freezer → 실제 회수 라우트**로 정상=`complete`, seq 없는 기록=`sequence_unavailable`, 수업 중 재시작=`range_unknown(other_session_not_included)`, 꼬리 유실=`gaps(tail_missing)`, 실패한 append=`gaps`, 찢어진 줄=`damaged`, 세션 폴더 소실=`range_unknown`; 강사 요약의 ‘순번 연속’은 7건 중 1건. 기존 시험은 기대값만 고치고 시나리오는 보존했다(F7 순수 시험, device snapshot 왕복, 브라우저 왕복은 손으로 쓴 spool 대신 실제 SessionSpool로 기록 → 초안이 `partial`이 아니라 `review_required`). ③ 문구: ‘구형 기록’ 제거, Chalk에 `damaged`·`range_unknown` 표시 추가, 강사 중지 전용 안내.
+
+**실행 구성.**
+
+| 항목 | 값 |
+|---|---|
+| source | `4278b8d6b907df15bcc98a3f317633033f1fe9bb` — #1169 tip, **main `f44cce3`(#1218)까지 포함**. 원 checkout에서 빌드·`prepare`·실행(dirty 아님, 4개 번들 해시가 소스 빌드와 일치, 05:54–05:55Z). 같은 경로를 통합 과정에서 세 번 실행해 모두 14/14였다: main `19ff881` 통합 직후, 커밋 메시지 정리 뒤(`b72b8f4`), main `f44cce3` 통합 뒤(이 값). 이 기록을 적는 뒤따르는 커밋은 문서만 바꾼다 |
+| shell | 공식 v0.1.56 arm64 **복사본**(commit `f5939d9cf6`), ad-hoc 서명. `/Applications` 설치본 미사용 |
+| Agent SDK | 0.3.207 JS(`sdk.mjs` sha256 `7f12ca8bcc75fcdb…`) + native `claude`(sha256 `1397a062c6889675…`) 실제 실행 |
+| OS | macOS 26.5.2 (25F84) arm64 |
+| 실제 | Studio shell 프로세스·확장 host·webview·명령 팔레트·알림, SDK+native binary, HTTP→Service 라우터+SQLite, ops sync·명령 실행기, workspace 파일, **디스크의 SessionSpool(격리 HOME) → freezer → 업로드 → Service 재해시·coverage** |
+| 합성 | 계정·강의, **모델 응답**(api.anthropic.com 자리의 스크립트), **보고서 평가 transport**, in-memory R2·secret storage. 메일은 이 실행에 없음 |
+| 실행 | `e2e/classroom/mac-gui.mjs` 14/14 PASS, 39초, `result.json`·화면 13장은 devhost의 `gui/` |
+
+| 단계(실제 창) | 확인한 것 |
+|---|---|
+| 발급 → 확인 | 강의 participants 경로로 발급(원장 기록). 앱이 `/v1/profile`로 확인. 과제 머리말에 확정 강의가 보임 |
+| 연결 | 명령 팔레트에 1회용 코드 입력 → 보드 A1 `active` |
+| 단계 → 강사 확인 | Primary 1개 확인 후 클릭 → `in_progress`; 조용한 버튼 → `submitted`·‘강사 확인 전’; Service API로 `confirmed`(기기 보고는 그대로) |
+| 오류 → 해소 | 공급자 400 → 보드 차단 장애 → 다음 실제 턴 성공으로 해소 |
+| **토큰 근거** | `runtime_ready` 뒤에도 `app_verified=matches_issue` (오전에 `unknown`으로 돌아가던 지점) |
+| 중지 | 응답을 주지 않는 SDK 턴을 강사 명령으로 중지 → `run_stopped`. 패널에 ‘강사가 지금 실행 중이던 작업을 멈췄어요…’; ‘연결이 끊겼어요’·‘문제가 생겼어요’ 없음(화면 `06c-stopped.png`) |
+| 초기화 · 작업 보존 | `reset_ok`. workspace 파일 2개 sha256 전후 동일, 대화 화면 유지, 초기화 뒤 SDK 턴 성공 |
+| 동의 → 실제 기록 회수 | 실제 창에서 동의. `수업 마무리`에 해당하는 batch 생성 → 앱이 **자신의 실제 spool** 16사건(seq 1–16: workflow·prompt·usage·response·turn_end)을 동결·업로드 → Service `verified` · **`complete`**. 실제로 입력한 질문이 회수본에 있음. A2는 `consent_missing`으로 명단에 남음 |
+| 초안 검수 | 평가 1회(합성 transport) → `review_required`·input `complete`·현재 행 1개. 초안이 실제 입력 문장을 인용. 내용 승인(발송 아님) |
+| 재연결 · 나가기 | 새 코드로 연결 교체, 옛 연결 무효. 연결 끊기 후 파일 불변 |
+
+이 실행은 e2e 관문(`HPS_TEST_E2E`/`hps-test-state.json`)을 **쓰지 않는다** — 쓰면 확장이 spool을 아예 만들지 않아 ‘실제 기록’을 시험할 수 없다. 대신 앱에 별도 `HOME`을 주어 실제 spool이 사용자의 `~/Library/Application Support/HypeProof-Studio`에 섞이지 않게 했다. 오전 시연은 이 격리가 없어 사용자의 실제 spool 폴더에 합성 세션(`demo-20260921-1`)을 남겼다 — 삭제하지 않았고, 정리 여부는 사람 결정이다.
+
+**열어 둔 화면.** `e2e/classroom/mac-demo.mjs`(오전의 일회성 `demo-server.mjs`를 레포 상대 경로·격리 HOME·포트 설정으로 옮긴 추적 파일)가 같은 devhost로 6석 합성 회차를 띄운다: `http://127.0.0.1:18762/demo`(안내·강사 시험 토큰·A1 연결 코드·오류/대기 재현), `/manage`(실제 Chalk), 학생 앱 A1. 재실행 절차는 `e2e/classroom/README.md` ‘Re-running the whole classroom path on this Mac’. 회차·토큰은 약 1시간 뒤 만료되며 다시 시작하면 새 회차다.
+
+**이 실행이 아닌 것.** 실제 모델의 답·품질·비용, 실제 메일·webhook·수신함, Windows, 학교망, Cloudflare staging/production D1·R2, 이 기능을 담은 release의 설치·업데이트·서명·seed 경로, 30석 동시 부하, 재시작 전 세션을 합친 회수(선언만 함).
+
+<a id="remote-management-map-20260921"></a>
+
+### 원격관리 다섯 흐름 — 현재 구현 매핑 · 2026-09-21 (HEAD `d9d31bf` 기준, 읽기 전용 조사)
+
+[인수 계약 RM-1~5](../requirements/classroom-admin.md#remote-management-acceptance-20260921)와 현재 코드의 대조다. ‘직접 실행’은 오늘 실제 Mac 창(`mac-gui.mjs` 14/14, source `4278b8d`) 또는 오전 Codex의 수동 실행에서 본 것만이다. 브라우저 e2e·Service 시험은 ‘코드+합성 시험’으로 적는다. **오늘까지의 결과는 관제·복구·단일 회차 회수이며 원격관리 전체 완료가 아니다.** 이 문서와 E5 계획의 과거 문장 ‘이번 인수 = 관제·보존형 복구·단일 회차 보고서’는 **당시 #1119~#1169 스택의 범위**를 가리키며, 현재 사용자 목표인 원격관리 RM-1~5의 인수와 같은 말이 아니다.
+
+| 흐름 | 있는 경로 (코드 · API · UI) | 증거 수준 | 없는 경로 |
+|---|---|---|---|
+| RM-1 선택·상태 | `GET …/ops/status`(좌석별 connection·token·entry_stage·step+review·error·runtime·signal·attention·last_command·observes) → Chalk `#ops-seats` 목록+`#ops-detail`. 선택: 좌석 체크박스 `picked`, `도움 필요한 좌석 선택`, `선택 해제`, 선택 요약(전달 가능/연결 없음) | 상태: **직접 실행**(실제 앱 A1 → 보드). 선택 UI: 코드+합성(30석 브라우저 e2e), 오전 수동 1석 | 전체 선택, 그룹(저장된 묶음·상태 필터), 선택을 회수·배포·다른 복구에 쓰는 공통 모델(지금 일괄 조치는 `retry_diagnostics` 하나) |
+| RM-2 회수 | 수업 기록: `POST …/report-batches`(명단 전체 스냅샷, 동의·철회·미연결 사유 유지) → Service 발행 `retry_evidence_upload` → App freezer → PUT/seal → coverage. Chalk `수업 마무리`. 학생 프롬프트·결과물: 학생이 고른 공유 `POST /v1/classroom/shares`(ADM-03/05/06) → Chalk 공유 목록 | 수업 기록: **직접 실행**(실제 spool 16사건 `complete`, 미동의 좌석 제외). 공유: 코드+기존 시험, 오늘 미실행 | **대상 선택 회수**(API에 `targets` 없음 — 항상 명단 전체), 학생 프롬프트만/승인 결과물만 고르는 회수 종류, 강사가 요청하는 공유(지금은 학생 주도뿐) |
+| RM-3 배포 | 없음. 인접 경로: `send_question`·`mark_checkpoint`(300/200자 평문, 기기 표시=성공, 읽음 아님), 회차 구성의 강의 version pin(`PUT …/ops` — 회차 전체, 학생 토큰의 lesson ref와 별개), 회차 일시정지의 기기별 `control_applied`(applied/pending/unknown) | 인접 경로: 코드+합성 시험만. 실제 창에서 `send_question` 미실행 | **수업 프롬프트·공지/자료·수업 설정의 대상 배포 전부**: 버전 있는 배포 객체, 좌석별 원하는 revision, 기기의 적용 보고, 비선택 불변 증거, 오프라인 후 재접속 적용 |
+| RM-4 복구 | 허용 목록 5종 `retry_diagnostics`·`refresh_connection`·`restart_preview`·`cancel_current_run`·`reset_runtime`(1명씩) + 회차 `pause`. Chalk 상세의 ‘기술 복구’가 확인된 장애일 때 1순위 조치를 Primary로 제시 | `cancel_current_run`·`reset_runtime`: **직접 실행**(API 경유, 파일 해시·대화 보존). `retry_diagnostics`: 오전 수동(구 빌드). `refresh_connection`·`restart_preview`·pause: 코드+합성 | 원인→조치 대응표의 명문화와 시험(토큰 만료/거부 → 재발급 안내는 조치가 아니라 문구뿐), 업로드 실패 복구의 강사 트리거(Service 발행만), 복구를 Chalk UI에서 누른 실제 창 실행 |
+| RM-5 대상별 결과 (정정: `leased`는 서버가 기기에 배정한 상태이지 기기 수신의 증거가 아니다 — 기기 receipt(`accepted` 이후) 전에는 ‘수신 확인 전’) | `ops_command_targets` 상태 12종 + result_code, `GET …/commands/:id`, Chalk `showCommand`(성공/실패/확인 불가/전달 안 됨/진행 중 + 좌석별 문구), 좌석 `last_command`. 회수는 batch item 상태, 일시정지는 `control_applied` | 성공 경로: **직접 실행**(`run_stopped`·`reset_ok`·회수 `verified`). 실패·만료·미확인·미연결·두 번째 창·재발급 뒤 미전달: 코드+합성(AT-20/21/23) | 세 흐름 공통의 한 화면 결과(지금은 명령·회수·일시정지가 각각 다른 자리), 실패 대상만 다시 선택, 배포의 결과 단계 |
+
+**경계 조건 현황.** (정정: ‘종료’는 둘이다 — 종료 전에 이미 요청된 업로드의 유예(`upload_until`)는 계속 받고, 종료된 회차에 대한 **새** 회수 요청은 U1부터 `run_ended`로 거부한다. 기존 전체 ‘수업 마무리’의 종료 후 동작은 바꾸지 않았다.) 중복 요청(idempotency key·payload 충돌)·만료(TTL 120초: 시작 전 `expired`, 시작 후 영수증 없음 `outcome_unknown`)·재접속/재발급(이전 epoch 미전달)·부분 실패(대상별 원장)·수업 경계(회차·좌석 revision 결속)는 **명령과 회수에 구현+합성 시험**이 있다. 오프라인은 **접수 시점에 `not_connected`로 확정**된다 — 복구 명령에는 맞지만 배포에는 맞지 않는다(재접속해도 도착하지 않음). 배포에는 위 어느 것도 없다.
+
+**추가한 인수 시험.** AT-37 선택 모델과 AT-38 대상 회수는 U1에서 구현·실행했다([실행 기록](#remote-management-u1-run-20260921)). **아직 NOT RUN · 계획:** AT-39 대상 배포(선택 좌석만 revision 적용 보고, 비선택 revision 불변, 오프라인 → 재접속 적용, 회차 종료 뒤 미적용은 `만료`, 같은 revision 재배포 0, 기기 일부 실패는 대상별 표시) · AT-40 원인별 복구 대응표(원인 5종 × 1순위 조치, 실제 창) · AT-41 세 흐름의 결과가 같은 단계 어휘로 한 화면에 남음.
+
+<a id="remote-management-u1-run-20260921"></a>
+
+### U1 — 공통 선택 + 선택 회수: 실행 기록 · 2026-09-21
+
+[계약](../requirements/classroom-admin.md#remote-management-u1-20260921). 배포·PC 제어·평가 확장은 이 단계에 없다.
+
+**먼저 있던 재현 3건(Codex 독립 실행, 공통 git-dir `remote-classroom-evidence/management-20260921/`).** ① `selected-collection-check`: `targets:['A1']` dry-run이 201로 A1·A2 모두 반환 — API가 `targets`를 몰랐다. ② `scope-read-failure-check`: 구현 중 `batchScope`가 조회 예외를 `finish`로 읽어 collect_only 배치의 seal이 평가 입력 1건을 만들었다. ③ `selected-roster-race-check`: revision 검사 뒤 좌석이 a→b로 바뀌면 a를 고른 요청이 b에게 회수 명령을 보냈다. 수정 뒤: ① A2는 `not_selected` ② seal `503 scope_unavailable`·평가 입력 0 ③ `409 revision_conflict`·명령 0.
+
+| 층 | 무엇을 | 결과 |
+|---|---|---|
+| Service (합성 6석, SQLite + in-memory R2) `classroom-ops-selected-collect.test.mjs` | 요청 정규화 대조군(양성 2·거부 12·해시 5) · 재현 ① · **선택 A1·A3 / 비선택 A2**(명령 target 2, A2 sync 명령 0, A2 PUT `not_requested`, R2 객체는 a·c만, 평가 입력 0, 보고서·발송 6개 경로 `409 collect_only_batch`, 평가 호출 0) · 선택한 미동의/철회/오프라인은 사유와 함께 남음 · 빈 대상/오타 필드/중복/회차 밖 좌석/`finish`+targets 거부와 DB 불변 · 더블클릭(경합)·응답 유실·같은 key 다른 대상/고지/dry-run/전체 → 1배치 또는 409 · 구버전 전체 회수 불변(평가 입력 생성)과 0022 이전 배치 재생 · `collect`만 가진 강사 허용/`command`만 가진 강사 거부 · 명단 변경 409·종료 뒤 새 요청 `run_ended`·이미 요청된 업로드는 유예 안에 수신 · **fail-closed**(조회 예외 + 손상 6종 × seal·조회·advance·jobs·reports·recipients·재생 = 503, 복구 뒤 검증·평가 입력 0, 진짜 이전 배치는 평가 입력 1) · **커밋 경계 경합 7종**(좌석 교체 revision 증가/미증가, flag 끔, 강사 종료, 시간 종료, 동의 철회, tombstone: 양성 대조 뒤 주입 → 거부, 5개 테이블 행 수 불변, 새 학생 target 0) · ops OFF | 12 PASS. 전체 worker suite·review suite·D1 리허설(0011→0022, 재적용, 반쪽 migration 음성 대조) PASS |
+| UI → Service → 실제 host (브라우저 e2e, 30석) `ops-roster.mjs` | 전체 30/연결됨 11/미연결 19/도움 필요/해제(해제 시 회수 버튼 비활성) → S01·S02·S12 수동 선택 → 미리 확인(1명 요청·제외 2명 사유·비선택 27명 무접촉, 명령 0) → 선택 변경 시 확인 철회 → 더블클릭 요청 = 배치 1 → **실제 ClassroomOpsHost + 실제 SessionSpool**이 S01 기록 업로드 → ‘서버 검증됨 · 순번 연속’ · 결과 확정 문구 · 객체는 student-01만 · 평가/보고서 UI 미개방 · ‘도착하지 않은 대상만 다시 선택’ = S12만 · `collect` 전용 강사 화면(회수 버튼만) | 7 PASS (CI `classroom / browser`에 포함) |
+| **실제 Mac** `mac-demo.mjs`(HPS_DEMO_PREPARE_A1=1) + `mac-demo-board.mjs` | 실제 Studio 창(A1): 1회용 코드 연결 → 실제 1턴 → 실제 창에서 동의. **실제 Chalk `/manage`(보이는 브라우저 창)**: A1 선택 → 미리 확인 → 요청 → `A1 — 서버 검증됨 · 기록 순번 연속 · 시작과 끝 확인됨`. 합성 좌석 A2·A3은 **연결+동의 상태**(선택만이 제외 이유)에서 `not_selected`, 회수 명령 target은 A1 하나(`succeeded · receipt_verified`), R2 객체 2개 모두 A1, 평가 입력 0·평가 호출 0·메일 0 | PASS — `result.json`·화면 2장은 devhost `board/`. source `c15e77a` + 실행기 수정(같은 커밋 묶음), shell 0.1.56 복사본, SDK 0.3.207, 확장 소스는 `4278b8d` 이후 불변 |
+
+**UI 보완 · 같은 날 (독립 검토가 `b222c34`의 실제 브라우저에서 재현한 2건, 증거는 `management-20260921/ui-stale-preview-*`·`ui-failed-retry.*`).** P1: 지연된 미리 확인 응답이 명단 교체 뒤 도착해 ‘선택한 좌석 없음’ 옆에 ‘A1 · student-a — 요청 예정’ 확인을 다시 열었고, 확정하면 새 좌석 주인(student-c)에게 회수 명령이 나갔다(revision을 `await` 뒤에 읽음). P2: `failed`로 끝난 요청이 ‘진행 중 1’로도 세어져 재선택 버튼이 숨었다. 수정은 `017f02c`.
+
+| 층 | 무엇을 | 결과 |
+|---|---|---|
+| 실제 브라우저(Chromium) + 실제 Chalk 페이지 + Service(SQLite), 합성 8석 — `e2e/classroom/ops-selection.mjs`. 응답 **도착 시점**은 네트워크 층에서 붙잡아 제어(Service는 이미 처리함), 업로드 명령의 종료 상태는 원장에 직접 기록(실제 기기를 지시대로 실패시킬 수 없음) | 대조군: 방해 없는 미리 확인→확정은 본 좌석 그대로 요청 · **지연 응답**: 선택 변경 뒤 / 선택 해제 뒤(버튼이 되살아나지 않음) / 더 새로운 미리 확인 뒤(역순 도착, 새 미리 확인 유지) / 취소 → 확인 화면 미개방, 실제 요청 0 · **재현 결함**: A1(a) 미리 확인 지연 → 정상 configure·pair·consent로 A1을 student-i(명단 2)로 교체 → 새로 확인 → 선택 비움·체크박스 0 → 옛 응답 도착 → 확인 미개방·미리 보기 빈칸 → 숨은 확정 버튼을 강제로 눌러도 student-i에게 명령 0 → 이어서 정상 경로로 student-i를 확인·확정하면 revision 2·student-i로 기록 · **확정 응답 역순**: 최신 확정이 결과 영역 유지, 이전 확정은 ‘접수되었습니다’로 고지, 두 배치 각 1건 · **P2**: 한 배치에 queued / 검증됨 / 전송 중 / failed(upload_failed) / rejected / expired / unsupported / outcome_unknown → `검증됨 1 · 기기 응답 대기 1 · 전송·검증 대기 1 · 실패·미도착 4 · 결과 미확인 1`, 미확인 줄에 ‘성공으로 세지 않습니다’, 진행 중이 남아도 재선택 버튼 표시(‘실패·미확인 5명만 … 진행 중 2명은 제외’), 누르면 A4~A8만 선택되고 아무것도 요청되지 않음, 유예·새 요청 안내 문구 | 5 PASS. **음성 대조군:** 같은 시험을 `b222c34`의 `manage.html`로 돌리면 FAIL(대조군 1건만 통과). CI `classroom / browser`에 추가 |
+| 기존 브라우저 e2e 4종 + Chalk 시험 | 문구 변경 반영(`ops-roster.mjs`의 결과 요약·선택 변경 안내) | 전부 PASS |
+| 실제 Mac (정상 경로 보존) `mac-demo.mjs` + `mac-demo-board.mjs`, source `017f02c` | 실제 창 A1 준비 → 보이는 Chalk 창에서 A1 선택 → 미리 확인 → 확정 → `검증됨 1 · … · 실패·미도착 0 · 결과 미확인 0 · … · 결과 확정`, A2·A3 `not_selected`, 평가 입력·호출 0 | PASS |
+
+**이 보완에서 관측하지 않은 것(NOT RUN).** 실제 Studio 기기에서의 업로드 실패·거절·만료·결과 미확인(원장 상태를 직접 넣어 본 것이 전부다), 실제 기기 2대 이상에서의 지연·역순 응답, Safari/Firefox, 느린 실제 네트워크. Service 경계(멱등·fail-closed·커밋 경계 원자성)는 바꾸지 않았고 Service 시험 12건과 독립 재현 2건을 같은 커밋에서 다시 실행해 통과했다.
+
+**업로드 생명주기 보완 · 같은 날 (독립 검토가 `83900f3`에서 재현한 2건, 증거 `management-20260921/ui-partial-upload-*`·`ui-late-seal-*`).** ① meta 한 파일이 실제 PUT으로 도착한 뒤 명령이 failed로 끝나면 화면은 ‘전송·검증 대기’만 말하고 실패를 숨겼으며 유예가 끝나도 같았다. ② 실패/미확인 뒤 늦게 검증된 학생이 패널에는 계속 실패로 남아 재선택 대상이 됐다. 수정은 `6004ccb`. 전이 표는 [요구 문서의 ‘회수 생명주기’](../requirements/classroom-admin.md#remote-management-u1-20260921)이고 구현(`collectStatus`)과 같은 행이다.
+
+| 층 | 무엇을 (상태를 **바꿔 가며** 관측) | 결과 |
+|---|---|---|
+| 순수 함수 표 (`classroom-ops-selected-collect.test.mjs`) | 전이 표 27행(item × 요청 × 시각 × 유예) + 한 좌석의 시간 경과(요청 → 전송 → `offline_pending` 재전송 대기 → 재개된 바이트 → 검증됨) | PASS |
+| 실제 Service 경로 (같은 파일) | 실제 PUT으로 meta만 도착 + `offline_pending` / `upload_refused` / `outcome_unknown` → 방금 도착한 바이트는 전송 중, 2분 조용하면 각각 재전송 대기·최종 거부·결과 미확인 → `outcome_unknown` 좌석이 유예 안에 늦게 seal → 검증됨(과거 요청 결과는 그대로 남음) → 재전송 대기 좌석이 같은 동결 revision을 마저 보내 검증됨 → 유예 종료: `grace_over`·`upload_open=false`·PUT 403 → 회차 종료: `new_request_allowed=false(run_ended)` | PASS (suite 14) |
+| 실제 브라우저 + 실제 Chalk + Service (`ops-selection.mjs`, 8 PASS) | **L1** 8석 혼합 배치를 열어 둔 채 원장을 바꾸면 화면이 스스로 따라감: 검증됨 1·수신 확인 전 1·전송 진행 1·최종 거부 1·전달 안 됨 3·미확인 1, ‘진행 중 2명 — 자동으로 다시 확인’, 행마다 ‘현재: … · 기기 요청: …’, 진행 중이 있어도 재선택 5명(대기·전송·검증 제외) **L2** meta만 도착 3석: 직후에는 ‘전송 진행 3’·재선택 없음 → 2분 조용해지면 재전송 대기 1·최종 거부 2·‘일부 파일만 도착’·‘확정 아님: 업로드 유예 …까지’ → 재전송 대기 좌석의 늦은 seal을 **아무것도 누르지 않고** 재관측(5초 단계)해 검증됨, 과거 `offline_pending` 표시 유지 → 유예 종료: ‘업로드 유예 종료’·‘결과 확정 (업로드 유예 종료)’·재선택은 가능(새 요청) → 회차 종료: 재선택 비활성 + ‘이 수업은 끝나 새 회수를 요청할 수 없습니다. 업로드 유예도 끝났습니다’ **L3** 실패 + (meta 도착) 미확인 → 확정 아님 → 둘 다 늦게 seal → 보드의 ‘현황 새로 확인’만 눌러도 검증됨 2·재선택 사라짐·결과 확정 / 재선택 버튼과의 경합: 화면은 실패 2인데 그사이 한 명은 검증되고 한 명은 좌석 주인이 바뀜 → 재선택을 누르면 먼저 다시 읽어 선택 0명, 요청 0 **L4** `status` 없는 이전 Service 응답 → ‘구분 불가’, 재선택 없음. 앞선 지연 미리 확인·명단 교체·역순 확정 4건도 같은 파일에서 통과 | 8 PASS |
+| 기존 회귀 | worker 전체·review, Chalk, 브라우저 e2e 4종(문구 변경 반영) | PASS |
+| 실제 Mac 정상 경로 (source `586d13e`, shell 0.1.56 복사본, SDK 0.3.207) | 새 빌드로 세션 재시작, 실제 창 A1 준비 → 보이는 Chalk 창에서 A1만 선택·회수 → ‘현재: 서버 검증됨 · 기록 순번 연속 · 시작과 끝 확인됨 · 기기 요청: 기기가 전송을 마쳤다고 보고함 (receipt_verified)’, ‘서버 시각 … 관측 · 결과 확정’, A2·A3 `not_selected`, 평가 입력·호출 0. `6004ccb`에서 먼저 돌렸을 때 검증된 좌석 옆 과거 요청 문구에 ‘서버 검증 대기’가 남는 모순을 발견해 고치고 다시 실행했다 | PASS |
+
+**시간 순서 보완 · 같은 날 (독립 검토가 `ec0f608`에서 재현, 증거 `management-20260921/upload-terminal-order-check.*`·`ui-fresh-terminal-still-active-6004ccb.txt`).** `collectStatus`가 종료된 요청 뒤에도 item `updated_at`이 90초 안이면 ‘전송 중’을 먼저 돌려줬다. 그 파일이 실패 보고 **전에** 온 것인지 **뒤에** 온 것인지 비교하지 않아, 실제 meta PUT → failed 순서에서 최대 90초 동안 ‘전송·검증 진행 중 · 기기에서 실패’, 진행 1, 재선택 숨김이었다.
+
+| | 이전 (`ec0f608`) | 이후 |
+|---|---|---|
+| 파일 T → failed/`upload_refused` T+1초, 관측 T+3초 | 전송·검증 진행 중 · 재선택 숨김 | **최종 거부** · 재선택 가능 |
+| 파일 T → failed/`offline_pending` T+1초, 관측 T+3초 | 전송·검증 진행 중 | **재전송 대기** · 재선택 가능 |
+| failed T+1초 → **새 파일** T+2초 | 전송·검증 진행 중 | 전송·검증 진행 중(유지) — 조용해지면 재전송 대기/최종 거부로 복귀 |
+| 같은 ms · 시각 없음(null) · NaN | 전송·검증 진행 중 | 순서 증명 불가 → 요청이 끝난 결과 그대로(진행 중 아님) |
+
+`updated_at` 갱신 경로 확인: `uploading` item의 시각은 **새 파일** PUT만 갱신했고, 같은 바이트의 재전송(`retry:true`)은 갱신하지 않았다. 재개하는 기기는 가진 파일을 다시 보내는 것으로 시작하므로, 이제 같은 파일의 재전송도 (아무것도 저장하지 않지만) 이 시각을 갱신한다 — 실패해도 멱등 응답은 그대로다. `requested` 상태의 `updated_at`은 배치 생성 시각이라 바이트 규칙에 쓰지 않는다(`uploading`에서만 비교). 요청 시각은 receipt 수신·TTL 만료·취소 때 Service 시계로 기록된다. schema·새 서비스 없음.
+
+| 층 | 무엇을 | 결과 |
+|---|---|---|
+| 독립 재현 그대로 | `upload-terminal-order-check.mjs` (수정 전 exit 1) | 4/4 PASS |
+| 전이 표(순수) | ‘파일→실패’ 5행 · ‘실패→새 파일’ 5행(만료 뒤 재개·미확인 뒤 재개·다시 조용해짐 포함) · 순서 증명 불가 4행(같은 ms, null, NaN, item 시각 없음)을 분리해 추가. 시간 경과 시험도 ‘실패 0.1초 뒤 이미 진행 중 아님 → 새 파일 → 다시 조용’으로 교체 | PASS |
+| 실제 API의 **순서만** 바꾼 검사(시계 이동 없음) | 실제 PUT(meta) → 종료 보고 → 즉시 조회: 재전송 대기 / 최종 거부 · 종료 보고 → 실제 PUT(다음 파일) → 전송 중 · 종료 보고 → 같은 파일 재전송(200 `retry`) → 전송 중 · 이후 조용해지면 복귀 · 늦은 seal·유예 종료·회차 종료는 기존 그대로 | PASS (Service suite 14) |
+| 실제 브라우저 + Chalk + Service | meta 3석 PUT → failed 3종 → **곧바로** ‘전송·검증 진행 중 0 · 재전송 대기 1 · 최종 거부 2’, 재선택 3명 표시 → A4에 실패 뒤 실제 다음 파일 PUT → ‘진행 중 1’·‘도착하지 않은 2명만 … (진행 중 1명은 제외)’·‘자동으로 다시 확인’ → 같은 revision seal → 클릭 없이 검증됨 1, 과거 `offline_pending` 표시 유지. 파일 시각을 2분 전으로 옮기는 방식은 이 파일에서 제거했다. **음성 대조:** 수정 전 Service로는 이 구간의 옛 기대(‘직후에는 전송 중’)가 성립했고, 새 기대로는 실패한다 | `ops-selection.mjs` 8 PASS |
+| 회귀 | worker 전체·review·Chalk·브라우저 e2e 4종, 독립 재현 2건(범위 조회 장애 503·명단 경합 409) | PASS |
+| 실제 Mac (source `cb09c68`) | 이번 변경은 **종료된 요청 뒤의 바이트 해석**과 멱등 재전송의 시각 기록뿐이고 정상 경로(실행 중 → 검증됨)는 그 행들을 지나지 않는다. 별도 실기 항목을 늘리지는 않았고, 이 세션이 띄워 둔 시연(이전 빌드)을 새 빌드로 다시 여는 과정에서 같은 보드 스크립트가 실제 A1 선택 회수를 한 번 수행했다: ‘현재: 서버 검증됨 · 기록 순번 연속 · 시작과 끝 확인됨’, ‘결과 확정’, 평가 입력 0. 실제 기기의 실패·재전송은 관측하지 않았다 | PASS (정상 경로만) |
+
+**이 보완에서 관측하지 않은 것(NOT RUN).** 기기 실패는 전부 원장에 기록한 합성이다 — 실제 Studio 기기가 `offline_pending`으로 멈췄다가 앱 재시작으로 재전송하는 경로, 실제 `upload_refused`/`verify_failed`, 실제 24시간 유예 경과는 보지 못했다(시각을 옮겨 대조). 10분 무변화 뒤 자동 확인 정지는 코드 경로만 있고 실시간으로 기다려 보지 않았다. 실제 기기 2대 이상, Safari/Firefox, 느린 망, Windows, 학교망, staging/production D1도 NOT RUN.
+
+**실제/합성 경계.** 실제: Studio shell 복사본·확장·SDK·spool·freezer·업로드, Chalk UI, Service 라우터+SQLite. 합성: 계정·강의·모델 응답·좌석 A2/A3(그리고 e2e의 S02~S30)·R2(in-memory). 여러 좌석 동시성은 합성 좌석으로만 봤고 실제 기기는 1대다.
+
+**남은 한계.** 실제 기기 2대 이상에서의 선택/비선택 대조, Windows, 학교망, staging D1에서의 0022 적용과 조건부 batch(D1의 트랜잭션 의미는 로컬 workerd D1 리허설까지만), 재시작 전 세션을 합친 회수, `coverage_reason`의 화면 표시는 NOT RUN/미구현. 학생 프롬프트·승인 결과물의 대상 회수, 배포(U2~), 세 흐름 공통 결과 화면은 이 단계 범위 밖이다.
+
+<a id="windows-field-cuesheet-20260921"></a>
+
+### Windows 현장 실행 패키지와 큐시트 · 2026-09-21 (준비 완료 · 현장 실행 NOT RUN)
+
+구성은 `e2e/classroom/win-field/README.md`. 개발 Mac에서는 Windows 명령을 실행하지 않는다(레포 규칙). 두 스크립트는 CI `windows-latest`(Windows PowerShell 5.1)에서 가짜 shell로 자가 시험한다 — 파싱되고 거부해야 할 것(production 주소·http·설치 경로 아래 작업 폴더·변조된 번들·dirty 번들·shell 아님)을 거부한다는 증거이지 Studio 창이 동작한다는 증거가 아니다.
+
+| 시점 | 누가 | 할 일 | 기록 |
+|---|---|---|---|
+| D-2 이전 | 운영자 | staging 대상 준비(`worker/DEPLOY.md` §0) · PR의 CI artifact `classroom-field-bundle` 내려받기 · PC마다 공식 Studio 설치와 `scripts\seed-sdk-binary.ps1` | staging 검사기 출력, bundle `manifest.json`의 source SHA |
+| D-1 | 운영자 | 대표 PC 1대에서 `prepare-devhost.ps1` → `preflight.ps1` → `-Launch` → 성인 1석으로 아래 수업 중 표 전체 | `manifest.json`·`preflight.json` |
+| 수업 30분 전 | 보조 | 모든 PC에서 `preflight.ps1`(현장망). FAIL은 그 PC를 빼거나 원인 제거, WARN은 기록 | PC별 `preflight.json` |
+| 입장 | 강사 | Chalk에서 회차 구성 → 좌석별 1회용 코드. 학생: 토큰 입력 → 명령 팔레트 ‘수업 연결’ | 보드: 전 좌석 `active`·토큰 `앱이 같은 발급분을 확인함` |
+| 수업 중 | 강사 | 단계 제출 → 강사 확인 1건 · `진단 다시 실행` 1건 · (성인 좌석에서만) 중지 1건·초기화 1건 + 파일 해시 전후 | 명령 영수증, 학생 화면 문구 |
+| 마무리 | 강사 | 동의한 좌석만 `수업 마무리` → 회수 상태·coverage → 초안 1건 열람 | 좌석별 coverage와 사유 |
+| 중단 조건 | 누구나 | 학생 파일 변화, 다른 학생 기록 혼입(격리), production 주소 접속, 일반 채팅 지연 체감 → run flag를 끄고(`worker/DEPLOY.md` §6) 수업은 기존 방식으로 계속 | 시각·증상 |
+
+Windows에서만 확인할 수 있어 **NOT RUN으로 남는 것:** 경로 구분자·긴 경로·한글 사용자 폴더에서의 spool/동결 복사본, Defender/학교 보안 프로그램의 `claude.exe` 차단, 프록시·TLS 재서명 망에서의 SDK 스트리밍, 절전 복귀 뒤 sync 재개, 설치본 업데이트 알림과의 공존.
+

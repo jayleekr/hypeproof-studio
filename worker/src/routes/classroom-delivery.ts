@@ -16,6 +16,7 @@ import { REPORT_PAGE_CSP, renderReportHtml } from '../lib/classroom-report-html'
 import { APPROVAL_TTL_MS, EMAIL_RE, LINK_TTL_MS, MAX_VIEWER_ATTEMPTS, TEMPLATE_RE, VIEWER_CHECK_KINDS, VIEWER_CHECK_PROMPT, deliveryKey, dryRunAdapter, maskAddress, nextDeliveryState, sameHash, viewerCheckHash, type DeliveryAdapter, type ViewerCheckKind } from '../lib/classroom-delivery';
 import { EMAIL_TEMPLATES, resendAdapter, resendConfigured, resendEventKind, verifySvix } from '../lib/classroom-delivery-resend';
 import { opsEnabled } from './classroom-ops';
+import { batchScope, scopeRefusal } from './classroom-collect';
 
 type Db = Env['HPS_DB'];
 const json = async (c: any) => { try { return await c.req.json(); } catch { return null; } };
@@ -82,7 +83,11 @@ async function teacher(c: any, capability: OpsCapability): Promise<{ auth: Issue
   if (!run || !auth.scope.profiles.includes(run.profile_id)) return c.json({ error: 'class run not found in scope', reason: 'run_not_found' }, 404);
   if (!parseFlags(run.flags_json).ops_delivery) return c.json({ error: 'delivery is off for this run', reason: 'ops_delivery_disabled' }, 403);
   const batch = await c.env.HPS_DB.prepare('SELECT * FROM classroom_collect_batches WHERE id=? AND class_run_id=?').bind(c.req.param('batch'), run.class_run_id).first();
-  return batch ? { auth, run, batch } : c.json({ error: 'batch not found' }, 404);
+  if (!batch) return c.json({ error: 'batch not found' }, 404);
+  // Selected collection is collection only (#751 U1): nothing collected that way can be sent.
+  let scope; try { scope = await batchScope(c.env.HPS_DB, String(batch.id)); } catch (err) { const no = scopeRefusal(c, err); if (no) return no; throw err; }
+  if (scope.mode === 'collect_only') return c.json({ error: 'this batch collected records only; evaluation and delivery belong to the class wrap-up', reason: 'collect_only_batch' }, 409);
+  return { auth, run, batch };
 }
 /** What would be sent, to whom — recomputed from live rows every time, so an approval can be checked against reality. */
 async function currentScope(db: Db, batchId: string, runId: string, channel: string, template: string) {

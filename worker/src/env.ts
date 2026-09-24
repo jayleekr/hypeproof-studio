@@ -10,6 +10,9 @@ export interface Env {
   /** #751 R5 — 'service-anthropic' turns the Service-side report evaluator on. Unset (default): jobs wait as `evaluator_not_configured`. */
   HPS_CLASSROOM_EVALUATOR?: string;
   HPS_CLASSROOM_EVALUATOR_MODEL?: string;
+  /** #751 — scheduled retention. Unset days (default) = the run does nothing. With days set it only reports (dry-run) until HPS_CLASSROOM_RETENTION='enforce'. */
+  HPS_CLASSROOM_RETENTION_DAYS?: string;
+  HPS_CLASSROOM_RETENTION?: string;
   /** #751 R6 — live report delivery. All four are needed for HPS_DELIVERY_PROVIDER='resend'; none is set by default. */
   RESEND_API_KEY?: string;
   RESEND_WEBHOOK_SECRET?: string;

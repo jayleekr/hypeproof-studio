@@ -230,7 +230,7 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
       // Review F4: which signals this device's build can report from its real runtime path. An absent signal from a
       // build that cannot report it is "unknown", not "nothing happened". A build that predates the declaration says nothing.
       observes: ((): { step: boolean | null; runtime: boolean | null; evidence: boolean | null } => { let caps: string[] | null = null; try { caps = r.device_caps ? JSON.parse(r.device_caps) : null; } catch { caps = null; } const has = (k: string) => (!connected || !caps ? null : caps.includes(k)); return { step: has('observe_step'), runtime: has('observe_runtime'), evidence: has('observe_evidence') }; })(),
-      activation: slot('activation'), step: slot('step'), runtime: slot('runtime'), error: slot('error'), upload: slot('upload'), sample: slot('sample'),
+      step_seq: state.step?.seq, activation: slot('activation'), step: slot('step'), runtime: slot('runtime'), error: slot('error'), upload: slot('upload'), sample: slot('sample'),
     };
   });
   // Evidence the instructor may want to look at — provenance and review state only, never the learner's words.
@@ -238,6 +238,16 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
  FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL
  LEFT JOIN ops_event_reviews r ON r.grant_id=e.grant_id AND r.boot_id=e.boot_id AND r.seq=e.seq
  WHERE e.class_run_id=? AND e.kind='evidence' AND e.disposition='applied' ORDER BY e.received_at DESC LIMIT 1000`).bind(run.class_run_id).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; boot_id: string; seq: number; actor: string; payload_json: string; observed_at: number; review_state: string; review_revision: number }>;
+  const stepRows = ((await db.prepare(`SELECT e.seat_id,e.grant_id,e.boot_id,e.seq,e.payload_json,COALESCE(r.state,'unreviewed') AS review_state,COALESCE(r.revision,0) AS review_revision,COALESCE(r.reviewer_id,'') AS reviewer_id
+ FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL
+ LEFT JOIN ops_event_reviews r ON r.grant_id=e.grant_id AND r.boot_id=e.boot_id AND r.seq=e.seq
+ WHERE e.class_run_id=? AND e.kind='step' AND e.disposition='applied' ORDER BY e.received_at DESC,e.seq DESC LIMIT 2000`).bind(run.class_run_id).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; boot_id: string; seq: number; payload_json: string; review_state: string; review_revision: number; reviewer_id: string }>;
+  for (const seat of seats) {
+    // The review belongs to the exact event the board is showing: same seat, same seq, same step. A later step starts unreviewed.
+    const st = seat.step as (Record<string, unknown> & { step_id?: string; status?: string }) | null, shown = (seat as unknown as { step_seq?: number }).step_seq;
+    if (st && st.status === 'submitted') { const row = stepRows.find((e) => { if (e.seat_id !== seat.seat_id || e.seq !== shown) return false; try { const p = JSON.parse(e.payload_json); return p.step_id === st.step_id && p.status === 'submitted'; } catch { return false; } }); if (row) (seat.step as Record<string, unknown>).review = { ref: `${row.grant_id}.${row.boot_id}.${row.seq}`, state: row.review_state, revision: row.review_revision, reviewed_by: row.reviewer_id || null }; }
+    delete (seat as unknown as { step_seq?: number }).step_seq;
+  }
   for (const seat of seats) {
     const mine = evidenceRows.filter((e) => e.seat_id === seat.seat_id).map((e) => { let p: Record<string, unknown> = {}; try { p = JSON.parse(e.payload_json); } catch { p = {}; } return { ref: `${e.grant_id}.${e.boot_id}.${e.seq}`, evidence_type: p.evidence_type, source_state: p.source_state ?? 'unverified', step_id: p.step_id ?? null, actor: e.actor, changed: typeof p.artifact_before === 'string' && typeof p.artifact_after === 'string' ? p.artifact_before !== p.artifact_after : null, observed_at: e.observed_at, review_state: e.review_state, review_revision: e.review_revision }; });
     const by: Record<string, number> = {}; for (const e of mine) by[String(e.source_state)] = (by[String(e.source_state)] ?? 0) + 1;
@@ -249,6 +259,8 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
   return c.json({
     schema_version: OPS_SCHEMA_VERSION, now, stale_after_ms: STALE_AFTER_MS, viewer: auth.payload.u,
     actions: Object.entries(COMMAND_ACTIONS).map(([action, a]) => ({ action, kind: a.kind, capability: a.capability, mutating: a.mutating, enabled: parseFlags(run.flags_json)[a.flag], held: (auth.scope.ops ?? []).includes(a.capability) })),
+    // Collection is not a command: an instructor may hold `collect` without `command`, and the board has to know that to offer the selection.
+    collection: { enabled: parseFlags(run.flags_json).ops_collect, held: (auth.scope.ops ?? []).includes('collect') },
     run: { class_run_id: run.class_run_id, profile_id: run.profile_id, roster_revision: run.roster_revision, flags: parseFlags(run.flags_json), lesson: parseLesson(run.lesson_json), starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at },
     // Scope note for the UI: this is the run snapshot, not the cumulative cohort roster.
     roster: { source: 'class_run_seats', total: seats.length },
@@ -608,12 +620,15 @@ classroomOpsTeacher.put(root + '/evidence/:ref', async (c) => {
   const run = await loadRun(c, auth); if (run instanceof Response) return run;
   const [grantId, bootId, seqText] = (c.req.param('ref') ?? '').split('.'), seq = Number(seqText), b = await json(c), now = Date.now(), db = c.env.HPS_DB;
   if (!UUIDISH_RE.test(grantId ?? '') || !UUIDISH_RE.test(bootId ?? '') || !Number.isSafeInteger(seq) || !b || !(REVIEW_STATES as readonly string[]).includes(b.state) || !Number.isInteger(b.expected_revision)) return c.json({ error: 'evidence ref, state and expected_revision required' }, 400);
-  const ev = await db.prepare("SELECT e.seat_id FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL WHERE e.grant_id=? AND e.boot_id=? AND e.seq=? AND e.class_run_id=? AND e.kind='evidence' AND e.disposition='applied'").bind(grantId, bootId, seq, run.class_run_id).first<{ seat_id: string }>();
+  // An instructor may look at an evidence event, or at a step the LEARNER marked as finished. Nothing else is reviewable:
+  // a step the learner has not submitted cannot be "reviewed" into completion from the instructor's side.
+  const ev = await db.prepare("SELECT e.seat_id,e.kind,e.payload_json FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL WHERE e.grant_id=? AND e.boot_id=? AND e.seq=? AND e.class_run_id=? AND e.kind IN ('evidence','step') AND e.disposition='applied'").bind(grantId, bootId, seq, run.class_run_id).first<{ seat_id: string; kind: string; payload_json: string }>();
   if (!ev) return c.json({ error: 'evidence not found in this run' }, 404);
+  if (ev.kind === 'step') { let status = ''; try { status = JSON.parse(ev.payload_json).status; } catch { status = ''; } if (status !== 'submitted') return c.json({ error: 'only a step the learner submitted can be reviewed', reason: 'step_not_submitted' }, 409); }
   const saved = b.expected_revision === 0
     ? await db.prepare('INSERT INTO ops_event_reviews(grant_id,boot_id,seq,class_run_id,seat_id,state,reviewer_id,revision,updated_at) VALUES(?,?,?,?,?,?,?,1,?) ON CONFLICT(grant_id,boot_id,seq) DO NOTHING RETURNING state,revision').bind(grantId, bootId, seq, run.class_run_id, ev.seat_id, b.state, auth.payload.u, now).first<{ state: string; revision: number }>()
     : await db.prepare('UPDATE ops_event_reviews SET state=?,reviewer_id=?,revision=revision+1,updated_at=? WHERE grant_id=? AND boot_id=? AND seq=? AND revision=? RETURNING state,revision').bind(b.state, auth.payload.u, now, grantId, bootId, seq, b.expected_revision).first<{ state: string; revision: number }>();
   if (!saved) return c.json({ error: 'another instructor reviewed this; reload', reason: 'revision_conflict' }, 409);
-  await audit(db, run.class_run_id, ev.seat_id, 'instructor', auth.payload.u, 'evidence_' + b.state, { ref: c.req.param('ref') }, now).run();
-  return c.json({ ref: c.req.param('ref'), review_state: saved.state, review_revision: saved.revision, means: 'instructor looked at this evidence', does_not_mean: ['delivery approval', 'lesson completion', 'a grade'] });
+  await audit(db, run.class_run_id, ev.seat_id, 'instructor', auth.payload.u, (ev.kind === 'step' ? 'step_' : 'evidence_') + b.state, { ref: c.req.param('ref') }, now).run();
+  return c.json({ ref: c.req.param('ref'), kind: ev.kind, review_state: saved.state, review_revision: saved.revision, reviewed_by: auth.payload.u, means: ev.kind === 'step' ? 'an instructor looked at the step the learner said they finished' : 'instructor looked at this evidence', does_not_mean: ['delivery approval', 'lesson completion', 'a grade'] });
 });

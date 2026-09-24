@@ -57,16 +57,19 @@ try {
     await page.locator('#ops-seats').getByText(/조치: 진단 다시 실행 — 성공 — 토큰 정상/).waitFor();
     // Bulk on "needs help" + an unconnected seat: A1 has a connection but no running app, A3 has no device at all.
     await page.locator('#ops-select-help').click(); await page.locator('#ops-seats .ops-seat').nth(2).getByLabel('선택').check();
-    assert.match(await page.locator('#ops-selection').innerText(), /선택 2 \/ 전체 3석 · 전달 가능 1 · 기기 연결 없음 1/);
+    assert.match(await page.locator('#ops-selection').innerText(), /선택 2 \/ 전체 3석 \(명단 1차\) · 기기 연결됨 1 · 기기 연결 없음 1/);
     await page.locator('#ops-bulk-diagnose').click(); await page.locator('#ops-bulk-result').filter({ hasText: /A3: 기기 연결 없음 · 전달되지 않음/ }).waitFor();
     const bulk = await page.locator('#ops-bulk-result').innerText(); assert.match(bulk, /대상 2 · 성공 0 .*전달 안 됨 1 .*진행 중 1 · 아직 확정되지 않음/); assert.doesNotMatch(bulk, /모두 완료/, 'a recorded request is never shown as done');
     assert.match(bulk, /A1: 접수됨 · 기기 전달 전/);
     // ── 2026-09-18 added criteria: DT-07 CTA priority, AT-35 coaching vs recovery, AT-36 provenance, AT-37 not-enough-evidence ──
     const primaries = (scope) => page.locator(scope + ' button.primary:visible');
-    assert.equal(await primaries('#ops').count(), 1, 'one primary CTA in the panel'); assert.equal((await primaries('#ops').innerText()).trim(), '도움 필요한 학생 선택');
-    assert.equal(await primaries('#ops-detail').count(), 1); assert.equal((await primaries('#ops-detail').innerText()).trim(), '질문 보내기', 'no technical fault on A2 → coaching is the primary action');
-    await page.locator('#ops-seats .ops-seat').nth(0).getByRole('button', { name: '근거·조치' }).click(); assert.equal(await primaries('#ops-detail').count(), 1); assert.equal((await primaries('#ops-detail').innerText()).trim(), '진단 다시 실행', 'confirmed fault on A1 → recovery is the primary action, offered without any coaching step first');
-    assert.match(await page.locator('#ops-evidence').innerText(), /아직 충분히 보지 못함 — 점수나 미달이 아니라/); assert.doesNotMatch(await page.locator('#ops').innerText(), /점수|순위|의존도|상위|하위|역량 부족/, 'no evaluative wording on the operations board');
+    // DT-07 (2026-09-19): one primary CTA on the SCREEN. With a student's detail open, its action is the one and the list's steps back.
+    assert.equal(await primaries('body').count(), 1, 'one primary CTA on the screen'); assert.equal((await primaries('body').innerText()).trim(), '질문 보내기', 'no technical fault on A2 → coaching is the primary action');
+    await page.locator('#ops-seats .ops-seat').nth(0).getByRole('button', { name: '근거·조치' }).click(); assert.equal(await primaries('body').count(), 1); assert.equal((await primaries('#ops-detail').innerText()).trim(), '진단 다시 실행', 'confirmed fault on A1 → recovery is the primary action, offered without any coaching step first');
+    { const t = await page.locator('#ops-evidence').innerText(); assert.match(t, /토큰을 거부당했습니다\. ‘연결 다시 확인’으로는 해결되지 않습니다/, 're-verify is not re-issue'); assert.equal(await page.locator('#ops-evidence a[href="/issuer"]').count(), 1, 'the existing issue/re-issue screen is the way to a new token'); assert.ok(!/[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{20,}/.test(t), 'no bearer on the board'); }
+    await page.keyboard.press('Escape'); assert.equal(await page.locator('#ops-detail').isHidden(), true, 'Escape closes the detail'); assert.equal(await page.evaluate(() => document.activeElement?.closest('.ops-seat')?.dataset.seat), 'A1', 'focus returns to the row that opened it'); assert.equal((await primaries('body').innerText()).trim(), '도움 필요한 학생 선택', 'with the detail closed the list\'s call to action is primary again');
+    await page.locator('#ops-seats .ops-seat').nth(0).getByRole('button', { name: '근거·조치' }).click();
+    assert.match(await page.locator('#ops-evidence').innerText(), /아직 충분히 보지 못함 — 점수나 미달이 아니라/); assert.doesNotMatch((await page.locator('#ops').innerText()).replaceAll('점수나 미달이 아니라', ''), /점수|순위|의존도|상위|하위|역량 부족/, 'no evaluative wording on the operations board (saying that missing evidence is NOT a score is the one allowed mention)');
     assert.match(await page.locator('#ops-state').innerText(), /운영 집계\(학생 평가 아님\)/);
     // Coaching: a question reaches the learner's device as text to show; code is refused and the typed text is kept.
     await page.locator('#ops-seats .ops-seat').nth(1).getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-question').fill('```js\nfix()\n```'); await page.getByRole('button', { name: '질문 보내기' }).click();

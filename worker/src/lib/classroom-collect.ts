@@ -9,7 +9,110 @@ export const SNAPSHOT_FILES: Record<string, { maxBytes: number; contentType: str
 export const PURPOSES = ['class_report'] as const;
 export const CONSENT_BASES = ['adult_self', 'guardian_verified'] as const;
 export const UPLOAD_GRACE_MS = 24 * 3_600_000;
-export const ITEM_STATES = ['consent_missing', 'guardian_consent_missing', 'withdrawn', 'not_connected', 'requested', 'uploading', 'verified', 'incomplete', 'quarantined'] as const;
+// `not_selected` is roster metadata of a targeted batch: no command, no upload, no object and no evaluation exists for that learner.
+export const ITEM_STATES = ['consent_missing', 'guardian_consent_missing', 'withdrawn', 'not_connected', 'not_selected', 'requested', 'uploading', 'verified', 'incomplete', 'quarantined'] as const;
+
+/**
+ * What a collection request asks for, normalized. The contract that matters most is what this REFUSES:
+ *  - `targets` absent  = the class wrap-up over the whole roster (the behaviour before targets existed). Its mode is `finish`.
+ *  - `targets` present = exactly those seats, mode `collect_only` (no evaluation, no delivery). An empty list, a duplicate, a
+ *    malformed id or a field this contract does not know is refused. Nothing is ever widened to the whole roster: a caller
+ *    that misspells `targets` gets a 400, not everybody's records.
+ * Whether the seats belong to THIS run is the route's question (it needs the roster); this function is pure.
+ */
+export const COLLECT_MODES = ['finish', 'collect_only'] as const;
+export const COLLECT_REQUEST_FIELDS = ['idempotency_key', 'roster_revision', 'purpose', 'notice_version', 'dry_run', 'targets', 'mode'] as const;
+// This file stays import-free (tests load it without the Service resolver). The two shapes are the command ledger's ID_RE and
+// UUIDISH_RE; classroom-ops-selected-collect.test.mjs fails if they drift apart.
+export const COLLECT_SEAT_RE = /^[A-Za-z0-9_-]{1,128}$/, COLLECT_KEY_RE = /^[A-Za-z0-9-]{8,64}$/;
+const SEAT_RE = COLLECT_SEAT_RE, KEY_RE = COLLECT_KEY_RE, NOTICE = /^[A-Za-z0-9_.-]{1,64}$/;
+export interface CollectRequest { idempotency_key: string; roster_revision: number; purpose: string; notice_version: string; dry_run: boolean; scope: 'roster' | 'targets'; mode: 'finish' | 'collect_only'; targets: string[] }
+export function normalizeCollectRequest(b: unknown, maxTargets: number): { ok: true; value: CollectRequest } | { ok: false; reason: string; detail: string } {
+  const no = (reason: string, detail: string) => ({ ok: false as const, reason, detail });
+  if (!b || typeof b !== 'object' || Array.isArray(b)) return no('request_invalid', 'a JSON object is required');
+  const o = b as Record<string, unknown>, unknown = Object.keys(o).filter((k) => !(COLLECT_REQUEST_FIELDS as readonly string[]).includes(k));
+  if (unknown.length) return no('unknown_field', 'unknown field: ' + unknown.slice(0, 5).join(', '));
+  if (typeof o.idempotency_key !== 'string' || !KEY_RE.test(o.idempotency_key) || !Number.isInteger(o.roster_revision) || typeof o.dry_run !== 'boolean' || !(PURPOSES as readonly string[]).includes(o.purpose as string) || typeof o.notice_version !== 'string' || !NOTICE.test(o.notice_version)) return no('request_invalid', 'idempotency_key, roster_revision, purpose, notice_version and dry_run required');
+  if (o.mode !== undefined && !(COLLECT_MODES as readonly string[]).includes(o.mode as string)) return no('mode_invalid', 'mode is finish or collect_only');
+  const base = { idempotency_key: o.idempotency_key, roster_revision: o.roster_revision as number, purpose: o.purpose as string, notice_version: o.notice_version, dry_run: o.dry_run };
+  if (o.targets === undefined) {
+    // Collect-only over "everyone" must name everyone: the whole roster is never a default of the new action.
+    if (o.mode === 'collect_only') return no('targets_required', 'collect_only names its seats explicitly');
+    return { ok: true, value: { ...base, scope: 'roster', mode: 'finish', targets: [] } };
+  }
+  if (!Array.isArray(o.targets)) return no('targets_invalid', 'targets is a list of seat ids');
+  if (!o.targets.length) return no('targets_empty', 'an empty selection collects nothing; it is not the whole class');
+  if (o.targets.length > maxTargets) return no('targets_invalid', 'too many seats');
+  if (o.targets.some((t) => typeof t !== 'string' || !SEAT_RE.test(t))) return no('targets_invalid', 'a seat id is malformed');
+  if (new Set(o.targets).size !== o.targets.length) return no('targets_duplicate', 'a seat is named twice');
+  if (o.mode === 'finish') return no('mode_not_allowed', 'the class wrap-up (evaluation may follow) covers the whole roster; selected seats are collect_only');
+  return { ok: true, value: { ...base, scope: 'targets', mode: 'collect_only', targets: [...(o.targets as string[])].sort() } };
+}
+/**
+ * What one selected seat of a collection batch IS right now — from three independent facts, none of which is enough alone:
+ *   the collection ITEM (what the Service holds), the device REQUEST (what happened to the command), the upload GRACE
+ *   (whether this batch can still receive anything). The table in docs/requirements/classroom-admin.md (U1 · 회수 생명주기)
+ *   is this function; the rows are evaluated top to bottom.
+ *
+ *   phase            active  retry  may_change   meaning
+ *   verified           -       -       -         the Service verified a record (a failed command before it is history, not status)
+ *   excluded           -       -       -         consent missing / withdrawn — asking again changes nothing
+ *   held               -       -       -         quarantined: a person looks first
+ *   grace_over         -      yes      -         the upload window of THIS batch has closed without a verified record
+ *   not_delivered      -      yes    (item: -)   no device ever got it: no connection, or the command expired / was rejected /
+ *                                                cancelled / unsupported before it ran
+ *   awaiting_device   yes      -      yes        asked; queued or assigned by the server — no device receipt yet
+ *   transferring      yes      -      yes        the device accepted / is running, OR — after the request ENDED — bytes arrived LATER than
+ *                                                that end and within ACTIVE_MS (a resumed upload), OR it reported "sent" and
+ *                                                verification is still pending (bounded by SETTLE_MS)
+ *   resend_wait        -      yes     yes        the device failed with `offline_pending`: it KEEPS the frozen copy and resumes when
+ *                                                the app restarts or reconnects. Not a transfer in progress, not a final refusal.
+ *   refused            -      yes     yes        a final refusal: the device gave up (upload_refused, verify_failed, …) or the Service
+ *                                                marked the record incomplete. Files that already arrived do not make it "sending".
+ *   unknown            -      yes     yes        the device started and never reported back (`outcome_unknown`), or "sent" without a
+ *                                                verification for longer than SETTLE_MS. Neither a success nor a failure.
+ *
+ * `partial` = some files of this revision are stored but it is not verified. It is a fact about stored bytes, never evidence
+ * that a transfer is happening NOW — only a running command is, or bytes that arrived AFTER the request had ended.
+ *
+ * Order matters (reproduced 2026-09-21, management-20260921/upload-terminal-order-check.mjs): "meta arrived, then the device
+ * reported failure" and "the device reported failure, then a file arrived" both show recent bytes and a failed request. Only
+ * the second is a resumed transfer. `item.updated_at` is the Service's receive time of the last upload PUT for this seat
+ * (new file or an identical re-send) and `request.updated_at` is the Service's receive time of the terminal report — the same
+ * clock. Bytes count as resumed activity only when they are STRICTLY later than the terminal report. Equal times, or a missing
+ * or unreadable time on either side, prove no order — and an order that is not proven is never turned into "in progress".
+ * `may_change` is why a panel must not say "final" and must be looked at again: inside the grace window a late upload can
+ * still turn a failed or unknown target into `verified`.
+ */
+export const COLLECT_ACTIVE_MS = 90_000, COLLECT_SETTLE_MS = 5 * 60_000;
+export type CollectPhase = 'verified' | 'excluded' | 'held' | 'grace_over' | 'not_delivered' | 'awaiting_device' | 'transferring' | 'resend_wait' | 'refused' | 'unknown';
+export interface CollectStatus { phase: CollectPhase; active: boolean; retryable: boolean; may_change: boolean; partial: boolean }
+export function collectStatus(item: { state: string; updated_at: number; request?: { state: string; result_code?: string | null; updated_at?: number | null } | null }, ctx: { now: number; upload_until: number }): CollectStatus {
+  const out = (phase: CollectPhase, active: boolean, retryable: boolean, may_change: boolean): CollectStatus => ({ phase, active, retryable, may_change, partial: item.state === 'uploading' });
+  if (item.state === 'verified') return out('verified', false, false, false);
+  if (['consent_missing', 'guardian_consent_missing', 'withdrawn'].includes(item.state)) return out('excluded', false, false, false);
+  if (item.state === 'quarantined') return out('held', false, false, false);
+  if (ctx.now >= ctx.upload_until) return out('grace_over', false, true, false);
+  if (item.state === 'not_connected') return out('not_delivered', false, true, false);
+  if (item.state === 'incomplete') return out('refused', false, true, true);
+  if (item.state !== 'requested' && item.state !== 'uploading') return out('unknown', false, false, true); // a state this build does not know is not guessed at
+  const r = item.request?.state ?? '', code = item.request?.result_code ?? '';
+  if (r === '' || r === 'queued' || r === 'leased') return out('awaiting_device', true, false, true);
+  if (r === 'accepted' || r === 'running') return out('transferring', true, false, true);
+  // From here the request is over. What it ended as is the answer — unless a file arrived AFTER it ended (a resumed upload).
+  // A file that arrived BEFORE the failure report is how that attempt went, not a new one.
+  const endedAt = item.request?.updated_at, bytesAt = item.updated_at;
+  const resumed = item.state === 'uploading' && r !== 'succeeded' && Number.isFinite(endedAt) && Number.isFinite(bytesAt) && bytesAt > (endedAt as number) && ctx.now - bytesAt < COLLECT_ACTIVE_MS;
+  if (resumed) return out('transferring', true, false, true);
+  if (r === 'succeeded') return ctx.now - (item.request?.updated_at ?? item.updated_at) < COLLECT_SETTLE_MS ? out('transferring', true, false, true) : out('unknown', false, true, true);
+  if (r === 'outcome_unknown') return out('unknown', false, true, true);
+  if (r === 'failed') return code === 'offline_pending' ? out('resend_wait', false, true, true) : out('refused', false, true, true);
+  if (['rejected', 'unsupported', 'expired', 'cancelled', 'not_connected'].includes(r)) return out('not_delivered', false, true, true);
+  return out('unknown', false, false, true);
+}
+
+/** Everything that makes two requests "the same request". The idempotency key itself is not part of it. */
+export const collectRequestCanonical = (r: Pick<CollectRequest, 'scope' | 'mode' | 'targets' | 'purpose' | 'notice_version' | 'dry_run' | 'roster_revision'>): string => JSON.stringify([r.scope, r.mode, r.targets, r.purpose, r.notice_version, r.dry_run, r.roster_revision]);
 
 export interface ManifestFile { name: string; bytes: number; sha256: string }
 /**
