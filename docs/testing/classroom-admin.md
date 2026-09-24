@@ -1400,3 +1400,21 @@ external evaluators retain their single-spool contract and explicitly refuse /3;
 the Service evaluator supports /3. Real learners, real model quality, installed
 Keychain, Windows, multiple physical PCs, school network, hosted D1/R2 and actual
 recipients are separate field/release gates, not synthetic successes.
+
+### Observed local G4 result — 2026-09-24
+
+PASS on implementation `4cb0a29`: authored A/B lesson rehearsal and confirmation;
+native learner mission across restart; voluntary help and instructor feedback;
+actual device diagnostic receipt `succeeded`; notice distributed only to A1;
+explicit whole-roster finish collecting two same-learner sessions; reviewed
+session-qualified report; recipient approval and one sandbox send followed by a
+synthetic delivered event. Work files were unchanged. Screenshots were inspected.
+The shell was a copy of installed Mac 0.1.16 with current extension bundles built
+at `c6e65f2`; this is extension-level evidence, not a newly packaged release.
+The recorder model, identities, SQLite/R2 and mail transport were synthetic/local.
+
+The same implementation passed Worker full tests, classroom-ops regressions,
+typecheck, Chalk tests, report/G1-wrap/ops browser checks and docs integrity.
+Review fixes also reproduce thirty concurrent wrong viewer checks, signed bounce
+before accepted/lost send response, and 25 stalled plus 25 delayed erasures ahead
+of runnable work. These prove bounded local behavior; the field gates above remain.
