@@ -609,9 +609,10 @@ admin.post("/issuers", async (c) => {
     // #751 U2 — KV alone is not a boundary for distribution (it can reach other locations late). The replaced token is
     // fenced in D1 FIRST; if that fails nothing is revoked and the new token is not returned, so the instructor keeps
     // exactly what they had. Open distributions of the replaced token are closed only when the new scope no longer holds
-    // `distribute` anywhere — re-issuing a token mid-class must not cancel what is waiting for offline learners.
-    const keepsDistribute = scopes.some((s: { ops?: string[] }) => (s.ops ?? []).includes("distribute"));
-    try { await fenceIssuerForDistribution(c.env, body.revoke_jti, { reason: "issuer_rescope", by: minter, sweep: !keepsDistribute }); }
+    // `distribute` in that cohort — re-issuing a token mid-class must not cancel what is waiting for offline learners.
+    const retainedCohorts = scopes.filter((s: { ops?: string[] }) => (s.ops ?? []).includes("distribute")).map((s: { cohort: string }) => s.cohort);
+    const retainedSettingCohorts = scopes.filter((s: { ops?: string[] }) => (s.ops ?? []).includes("lesson_settings")).map((s: { cohort: string }) => s.cohort);
+    try { await fenceIssuerForDistribution(c.env, body.revoke_jti, { reason: "issuer_rescope", by: minter, sweep: true, retainedCohorts, retainedSettingCohorts }); }
     catch (err) { console.error("issuer re-scope: distribution fence not written:", err); return c.json({ error: "re-scope not applied: the replaced token could not be fenced — nothing changed, retry", reason: "distribute_fence_failed" }, 500); }
     try {
       await revokeToken(
