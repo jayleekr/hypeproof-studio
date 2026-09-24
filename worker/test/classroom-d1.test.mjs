@@ -13,6 +13,7 @@ try{
  const body={id:'d1-share',recipient_id:'teacher-a',kind:'help',consent:true,duration_minutes:60,content:{prompt:'공유한 질문'}};
  assert.equal((await f.request('/v1/classroom/shares','POST',body,f.studentToken)).status,201);
  assert.equal((await f.request(base+'/d1-share')).status,200);
+ { const l=(await f.request(base+'?kind=help&limit=1')).json; assert.deepEqual([l.shares.map(x=>x.id),l.has_more,l.counts.matched],[['d1-share'],false,1],'scope filter (json_each) and counts run on D1'); assert.equal((await f.request(base,'GET',undefined,await f.teacher('teacher-a',['other-profile']))).json.counts.matched,0); }
  const update={expected_revision:1,status:'answered',feedback:'확인',next_action:'다시 실행'};
  const responses=await Promise.all([f.request(base+'/d1-share','PUT',update),f.request(base+'/d1-share','PUT',{...update,feedback:'다른 값'})]);
  assert.deepEqual(responses.map(x=>x.status).sort(),[200,409]);
@@ -20,5 +21,5 @@ try{
  assert.equal((await f.request('/v1/classroom/shares/d1-share','DELETE',undefined,f.studentToken)).status,200);
  assert.equal((await db.prepare('SELECT count(*) AS n FROM classroom_share_audit').first()).n,0);
  assert.equal((await f.request(base+'/d1-share')).status,404);
- console.log('PASS actual local workerd/D1: idempotent migration, share, audited read, concurrent CAS, delete cascade, access revoked');
+ console.log('PASS actual local workerd/D1: idempotent migration, share, scope-filtered paged list with counts, audited read, concurrent CAS, delete cascade, access revoked');
 }finally{f.close();await mf.dispose();}
