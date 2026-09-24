@@ -158,7 +158,7 @@ npm --prefix chalk run typecheck
 | AT-45 | 수업 프롬프트 대상 배포 | **구현 · 로컬 실행 PASS · 인수 전** — Service·App 단위·브라우저·실제 Mac(실제 마우스 입력). 독립 검토 뒤 P2~P5·P7을 브라우저와 실제 host에서 마무리. 운영·Windows·학교망 NOT RUN | [실행 기록](#remote-management-u3-run-20260921) · [검토 보완 기록](#remote-management-u3-review-20260921) |
 | AT-46 | 수업 설정 대상 배포 | **구현 · 로컬 실행 PASS · 인수 전** — Service·App 단위·로컬 workerd D1·브라우저·실제 Mac(agent-sdk 창 2개 + proxy-runtime 창). 독립 검토의 Service 결함 6건·화면 결함 보완, S3·S4·S9·S10·S13ⓒ를 실제 경로로 마무리. S15의 구 App 실물·p95·plan NOT RUN. 적용 시점의 운영 정책은 사용자 결정 대기(로컬 가정: 다음 질문부터) · 기준 판정은 [요청 단위의 식별 연결](#remote-management-u3-basis-identity-20260921)로 다시 닫음 | 같은 곳 |
 | AT-47 | Studio 도움 요청 → Chalk 응답 → 학생 확인 | **구현 · 로컬 실행 PASS · 인수 전** — Service 11건·App 단위 7건·실제 Mac 창 H1~H9. U4 보완(Codex F1~F3 재현 수정): Service 16건·App 단위 7건·실제 host 11건·workerd D1·실제 Mac 재실행(`d82c695`, H1~H9+H9a PASS) — [U4 보완](#native-help-u4-20260922). 저장 보완(`fe37a72`): 기기 저장 13건·실제 host 18건(W-residual → 판정 S1)·실제 Mac 한 대 두 창 W0~W5·H1~H9+H9a 재실행 PASS — [저장 보완](#native-help-storage-20260922). Codex 재검토 전. Windows·학교망·hosted D1/R2·실제 아동/보호자 동의·운영 NOT RUN | [실행 기록](#native-help-run-20260922) |
-| AT-48 | 종류별 회수 · 재시작 전 세션 | **구현 · 로컬 실행 PASS · 인수 전(2026-09-22)** — Service+App+실제 spool 9 · workerd D1 · 브라우저(선택·결과 카드·명단·배포) · 실제 Mac 1대 M0~M9(정상 종료·강제 종료·확장 호스트 재시작, 한 학생·여러 학생). 여러 실제 PC·Windows·학교망·운영 D1/R2·실제 모델/메일·아동 동의 NOT RUN, 원문 열람·기준별 보고서 분할은 구현하지 않음 | [실행 기록](#remote-management-u1b-run-20260922) |
+| AT-48 | 종류별 회수 · 재시작 전 세션 | **구현 · 로컬 실행 PASS · 인수 전(2026-09-22)** — Codex 검토 F1~F3·두 경계 인수 보완은 [보완 기록](#remote-management-u1b-integrity-20260922) — Service+App+실제 spool 9 · workerd D1 · 브라우저(선택·결과 카드·명단·배포) · 실제 Mac 1대 M0~M9(정상 종료·강제 종료·확장 호스트 재시작, 한 학생·여러 학생). 여러 실제 PC·Windows·학교망·운영 D1/R2·실제 모델/메일·아동 동의 NOT RUN, 원문 열람·기준별 보고서 분할은 구현하지 않음 | [실행 기록](#remote-management-u1b-run-20260922) |
 
 **옛 표기가 남아 있는 곳(이번에는 고치지 않았다 — 시험 파일은 이 설계 세션의 소유가 아니다).** 아래 파일의 시험 제목·주석에 있는 번호는 작성 당시 표기다. U2 구현에서 시험 파일 소유권을 넘겨받을 때 제목을 새 번호로 바꾸고, 그때까지는 이 표로 읽는다.
 
@@ -1200,6 +1200,56 @@ NOT RUN: 앱의 도움 요청 입구, 실제 강사·학생, Windows, 학교망,
 
 만든 것(실물 아님): 계정·수업·토큰, 모델 공급자 대역, 창의 spool 폴더에 심은 두 세션(같은 PC 다른 학생 / 이 학생의 앞 수업), R2 쓰기 1회 거절, 합성 좌석 A2/A3/A4.
 **NOT RUN:** 여러 실제 PC(한 Mac이다) · Windows(spool 읽기·파일 잠금) · 학교망 · staging/운영 D1·R2 · 실제 모델 · 메일 · Keychain 설치 앱 · 실제 학생·보호자 동의(#1175) · 이 Mac에서의 새 회차·기기 교체(in-process 시험으로만 — 앞 수업 창 배제, 이전 연결의 동결 사본 미전송) · 원문 열람(구현하지 않음) · 기준별 보고서 분할(구현하지 않음). 화면 문구는 사용자 시각 검토 전이다.
+
+<a id="remote-management-u1b-integrity-20260922"></a>
+
+### U1b 인수 보완 (AT-48) · Codex 검토 F1~F3와 두 경계 · 2026-09-22 (로컬 합성 + 브라우저 + 실제 Mac 1대 · 인수 전 · 운영 아님)
+
+기준 `1ee2ff1`(Draft #1242 head) 위의 브랜치 `fix/751-u1b-collection-integrity`. 계약: [요구 문서 U1b 절의 ‘인수 보완’ 행](../requirements/classroom-admin.md#remote-management-u1b-20260922). 증거 사본: 공용 git-dir `remote-classroom-evidence/management-20260921/u1b-integrity/`.
+
+**재현 먼저 (고치기 전 코드에서 실패함을 확인).**
+
+| 결함 | 재현 | 수정 뒤 |
+|---|---|---|
+| F1 이전 세션 `session_close` 뒤 잘린 꼬리 | Codex probe(실제 App `freezeCollection` + Service `verifyCollection`): `complete`, reason `''` | `range_unknown`, `torn_tail_dropped`, 그 파트 끝 미확인 — 강사 카드에 사유 |
+| F2 승인 결과물이 저장 한도로 잘린 사본 | probe: `complete` | `gaps`, `artifact_truncated`, `received.truncated_artifacts` · 실제 `SessionSpool`에 200,100자 페이지를 승인해 같은 결과 · 음성 대조: 한도 표시를 숨긴 줄·내용을 바꾼 온전한 줄은 `artifact_content_mismatch`로 격리 |
+| F3 원문 `approved:false` · 색인만 `true` | probe: 승인 결과물 1로 `complete` | `index_mismatch` 격리, 라우트에서도 422·영수증 없음 · 요청 종류가 부른 승인 줄이 오지 않아도 `index_mismatch` · 실제 앱 흐름의 승인 → 취소, 이전 세션 승인 유지(마지막 선택) 보존 |
+| 경계 1: 승인 질문 중 기록 주인 변경 | 실제 `SessionSpool`로 원래 순서(페이지 읽기 → 선택 대기 → 쓰기)를 재생: 학생 A의 페이지 승인이 **학생 B 세션에 기록됨** | 질문 전 주인(세션·학생)과 수업 연결을 잡고 한 큐 단계에서 조건부로 씀 — 학생 교체·A→B→A 세션 교체·수업 연결 변경은 기록 0, 같은 학생의 정상 종료 뒤는 그 학생의 다음 세션 |
+| 경계 2: 봉인 중 철회 | 회귀 시험에서 R2 읽기 도중 철회 → `withdrawn`이 `incomplete/file_missing`으로 덮임 · 모든 읽기 뒤·커밋 전 철회 → `verified` + 영수증 + binding 재생성, 기기는 `receipt_verified` | 두 경우 모두 `withdrawn` 유지, sealed·binding 0, 같은 봉인 재요청 403 `withdrawn`(/2·/3 공통 가드) |
+
+**자동 시험 (이 브랜치에서 실행).**
+
+| 층 | 무엇 | 결과 |
+|---|---|---|
+| Service + 실제 App + 실제 spool | `worker/test/classroom-ops-collect-kinds.test.mjs` (기존 9 + 봉인 중 철회 2변형 + F1·F2·F3) — 새 시험을 수정 전 Service 코드로 돌리면 봉인 경합 시험에서 실패 | 13/13 PASS |
+| 기존 Service | 수집·선택 회수·기기 snapshot·기준·회귀·복구·보고서·삭제 시험 | PASS |
+| App | `extensions/hypeproof-chat/test/artifact-approval.smoke.mjs` 9 · smoke 111개 파일 · `test:classroom-ops:review` 41 · `tsc --noEmit` | PASS |
+| 로컬 workerd D1 | `worker/test/classroom-ops-d1.test.mjs`에 가드된 /3 seal 추가: 정상 seal → binding·감사 1 · verified, R2 읽는 도중 철회 → 403 `withdrawn` · binding 0 · sealed 0 (전체 `test:classroom-ops:d1` PASS) | PASS |
+| 브라우저 | e2e `test:classroom-ops` · `-roster` · `-selection` · `-results` · `-distribution` · `-lesson-settings` · `-help`(접힘·펼침 단계 추가) | PASS |
+
+**운영 보드 첫 화면 (합성 미리보기 24석, 같은 데이터로 전후, `HPS_UI_PREVIEW_HELP`로 요청 수만 바꿈).** 첫 학생 행의 뷰포트 y(스크롤 없음):
+
+| 도움 요청 | 1280×720 전 → 후 | 1024×640 전 → 후 | 390×844 전 → 후 |
+|---|---|---|---|
+| 0건 | — → 507 | — → 709 | — → 1268 |
+| 3건 | 722 → **527** | 946 → 729 | 1646 → 1315 |
+| 12건 | 1249 → **527** | 1474 → 729 | 2670 → 1338 |
+
+1280×720에서는 요청 수와 무관하게 명단·선택 작업이 첫 화면에 온다. 1024×640에서는 선택 작업(y498)은 보이지만 첫 학생 행(y729)은 아직 아래다 — 공용 앱 헤더가 두 줄(≈270px)로 접히는 몫이고 이 범위에서 바꾸지 않았다. 390px 폰은 스크롤이 전제다. 키보드: 제목에서 Tab 한 번에 ‘요청 목록 펼치기’, Enter로 펼침·접힘(`aria-expanded` 따라감 — 첫 구현에서 다시 그릴 때 버튼을 잠깐 숨겨 포커스가 빠지던 것을 캡처로 발견해 고침). 상단 링크와 학생 행 ‘요청 보기’도 목록을 연다. 현재 선택/직전 실행 구분, 회수 확인·진행·부분(서버 검증 1 · 최종 거부 1 · 제외 2) 카드는 캡처로 확인.
+
+**실제 Mac (`e2e/classroom/mac-collect.mjs`) — 세 번째 실행 PASS.** 소스·확장 소스 `0584191`(재주입 때 번들 해시 4개 대조), 셸 0.1.56 복사본(이 브랜치가 나갈 판 아님), Agent SDK 0.3.207. 앱 복사본은 #1242 작성자의 멈춘 U1b 데모 앱을 **이름 변경으로 넘겨받아** 재주입했다(셸 재복사 없음 — 작성자 실행 기록은 제자리, AT-41 러너는 건드리지 않음). 포트 18901/18902/9501.
+
+| # | 한 일 | 관측 |
+|---|---|---|
+| 실패 1·2 (고친 것) | 채팅 패널 제목줄, 그다음 `index.html` 편집기 제목줄의 승인 버튼을 찾음 | 둘 다 **그려지지 않음** — 이 셸의 학생 화면은 ‘AI와 작업’ 편집기 웹뷰이고 제목줄 동작이 없다(캡처 보관). 제목줄 버튼을 빼고 코치 레일 ‘수업 결과물 승인’으로 옮김 |
+| M1 | 레일에서 실제 마우스로 승인 질문을 엶 → 질문이 열린 동안 파일을 v2로 바꿈 → 승인 · 같은 레일에서 v2 승인 취소 | 질문에 `지문 c7005bf7`(v1). 토스트 ‘이 판(지문 c7005bf7)을 수업 결과물로 승인했습니다. 고르는 사이에 파일이 바뀌었습니다 — …’. spool 승인 줄 `[v1 true, v2 false]` |
+| M2~M9 | 기존 AT-48 절차(정상 종료·두 세션·한 학생/여러 학생·이전 앱·기록 전체·재전송·강제 종료·직전 실행·철회) | 이전 실행과 같은 관측, PASS |
+| M10 (F2) | 200,100자 페이지를 레일에서 승인(질문에 ‘앞부분만 보관됩니다’) → 승인 결과물 회수 | 토스트에 ‘잘린 결과물’, 카드 ‘기록 순번에 빈 구간 있음 — 승인 결과물이 저장 한도보다 커서 앞부분만 보관된 사본이 있음’, `artifact_truncated`, R2에는 잘린 사본(끝 표식 없음) |
+| M11 (F1) | ⌘Q로 닫힌 세션(`session_close`)의 파일 끝에 잘린 줄을 붙임 → 프롬프트 회수 | `range_unknown`, `torn_tail_dropped`, 그 세션 ‘끝 미확인 · 잘린 마지막 줄 제외’, 카드에 사유와 ‘끝난 세션의 잘린 줄은 다시 요청해도 돌아오지 않습니다’, 잘린 바이트 R2 0 |
+
+증거: `u1b-integrity/mac-run/`(result.json·캡처 18개·run 로그·manifest·takeover), 실패 두 번은 `mac-run-failed/`, 재현 스크립트와 수정 전·후 로그는 `repro/`, 브라우저 전후는 `browser-before/`·`browser-after/`.
+
+**NOT RUN:** 실제 Mac에서의 ‘질문 중 학생 교체’(실제 spool 단위 시험으로만) · 봉인 중 철회의 실제 창(in-process 라우트 시험으로만) · 여러 실제 PC · Windows · 학교망 · staging/운영 D1·R2 · 실제 모델 · 메일 · 실제 학생·보호자 동의(#1175) · 사용자 시각 검토.
 
 ## Studio 도움 요청 실행 기록 · 2026-09-22 (AT-47)
 

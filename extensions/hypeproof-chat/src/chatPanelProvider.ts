@@ -11,6 +11,7 @@ import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import {createHash} from 'node:crypto';
+import { APPROVAL_PLACEHOLDER, approvalChoices, approvalMessage, approveArtifact } from "./artifactApproval.ts";
 import {NativeObservationRecorder} from './nativeObservationRecorder';
 import {OBSERVATION_FORMATS, validateFindings, asCapabilityModel, type ObservationBatch} from './nativeObservationContract';
 import {acceptSubmit, learningEventRequest, learningState, type CompletionItem} from './learningStateHelpers';
@@ -726,7 +727,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** #751 — metadata-only observer for remote classroom operations; null unless the learner connected. */
-  opsObserver: (import("./classroomOpsHost").ClassroomOpsObserver & Partial<Pick<import("./classroomOpsHost").ClassroomOpsHost, "switchPendingSetting" | "confirmSettingBound" | "knownBindingKey" | "holdsLessonSetting">>) | null = null;
+  opsObserver: (import("./classroomOpsHost").ClassroomOpsObserver & Partial<Pick<import("./classroomOpsHost").ClassroomOpsHost, "switchPendingSetting" | "confirmSettingBound" | "knownBindingKey" | "holdsLessonSetting" | "approvalScope">>) | null = null;
   /** #751 U2 — set by extension.ts. The provider only relays: every answer is read from disk by the host adapter. */
   inboxSource: { inboxView(): Promise<import("./classroomInbox").InboxView>; inboxOpened(objectId: string, generation: number): Promise<void>; inboxLink(objectId: string, url: string, generation: number): Promise<string | null> } | null = null;
   async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
@@ -779,21 +780,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
    * mark. Only versions marked here travel in an "approved artifacts" collection; nothing is sent by this command itself.
    */
   async approveArtifactInteractively(): Promise<void> {
-    if (!this.spool) { void vscode.window.showInformationMessage("이 창에서는 결과물을 표시할 수 없습니다."); return; }
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri;
-    let content = "";
-    try { if (root) content = Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, "index.html"))).toString("utf8"); } catch { content = ""; }
-    if (!/<html[\s>]/i.test(content) && !/<!doctype html/i.test(content)) { void vscode.window.showInformationMessage("작업 폴더에 결과물(index.html)이 없습니다. 결과물을 만든 뒤 다시 해 주세요."); return; }
-    const sha256 = createHash("sha256").update(content, "utf8").digest("hex"), kb = Math.max(1, Math.round(Buffer.byteLength(content, "utf8") / 1024));
-    const pick = await vscode.window.showQuickPick([
-      { label: "이 결과물을 수업 결과물로 승인", detail: `index.html · ${kb}KB · 지문 ${sha256.slice(0, 8)}`, approved: true },
-      { label: "이 결과물의 승인 취소", detail: `index.html · 지문 ${sha256.slice(0, 8)}`, approved: false },
-    ], { title: "수업 결과물 승인", placeHolder: "승인한 판만 ‘학생이 승인한 결과물’ 회수에 들어갑니다. 지금 바로 보내지는 않으며, 수업 기록 보내기에 동의한 경우에만 보냅니다." });
-    if (!pick) return;
-    this.spool.recordArtifactSnapshot({ source: "existing", path: "index.html", content });
-    this.spool.recordArtifactApproval({ sha256, path: "index.html", approved: pick.approved });
-    await this.spool.flush();
-    void vscode.window.showInformationMessage(pick.approved ? `이 판(지문 ${sha256.slice(0, 8)})을 수업 결과물로 승인했습니다. 나중에 고치면 새 판은 다시 승인해야 합니다.` : `이 판(지문 ${sha256.slice(0, 8)})의 승인을 취소했습니다.`);
+    const spool = this.spool;
+    if (!spool) { void vscode.window.showInformationMessage("이 창에서는 결과물을 표시할 수 없습니다."); return; }
+    const outcome = await approveArtifact({
+      owner: () => spool.owner(),
+      classroom: () => this.opsObserver?.approvalScope?.() ?? "",
+      readPage: async () => { const root = vscode.workspace.workspaceFolders?.[0]?.uri; try { return root ? Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(root, "index.html"))).toString("utf8") : null; } catch { return null; } },
+      ask: async (page) => (await vscode.window.showQuickPick(approvalChoices(page), { title: "수업 결과물 승인", placeHolder: APPROVAL_PLACEHOLDER }))?.approved,
+      record: (owner, e) => spool.recordArtifactApprovalFor(owner, e),
+    });
+    const msg = approvalMessage(outcome); if (msg) void vscode.window.showInformationMessage(msg);
   }
   /** New execution generation on the same files: cached runtime handles are dropped, nothing stored is touched. */
   async opsNewGeneration(): Promise<number> {
@@ -2279,6 +2275,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       case "inboxOpen": await this.inboxSource?.inboxOpened(msg.objectId, msg.generation); return;
       case "inboxLink": await this.handleInboxLink(msg); return;
       case "helpRequest": await this.helpSource?.refresh(); return;
+      case "artifactApprove": await this.approveArtifactInteractively(); return;
       case "helpDraft": await this.helpSource?.draft(msg.key, msg.draft); return;
       case "helpPreview": await this.helpSource?.preview(msg.key, msg.draft); return;
       case "helpCancel": await this.helpSource?.cancel(msg.key); return;

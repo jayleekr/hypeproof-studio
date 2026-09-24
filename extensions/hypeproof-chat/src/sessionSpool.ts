@@ -238,6 +238,9 @@ export interface SpoolSnapshotSource {
   other_sessions: number | null;
 }
 
+/** #751 U1b — the record an approval question was asked for: `session` null = no session yet (the next one carries `identity`). */
+export interface SpoolOwner { session: string | null; identity: SpoolIdentity | null }
+
 /** #751 U1b — this learner's sessions in a class window, read for a kinds collection. `current` is read under the write queue. */
 export interface SpoolCollectionSource {
   current: { files: Array<{ name: string; data: Uint8Array }>; sequence: { session_id: string; last_seq: number } } | null;
@@ -384,28 +387,59 @@ export class SessionSpool {
   }): void {
     this.enqueue(async () => {
       const s = (e.turnId ? this.sessionForTurn(e.turnId) : null) ?? (await this.materialize());
-      const content = typeof e.content === "string" ? e.content : "";
-      const bytes = Buffer.from(content, "utf8");
-      const sha256 = createHash("sha256").update(bytes).digest("hex");
-      if (s.seenArtifactHashes.has(sha256)) return;
-      s.seenArtifactHashes.add(sha256);
-      if (s.seenArtifactHashes.size > SEEN_ARTIFACT_HASHES_MAX) {
-        const oldest = s.seenArtifactHashes.values().next().value;
-        if (oldest !== undefined) s.seenArtifactHashes.delete(oldest);
-      }
-      const clamped = content.length > SPOOL_MAX_ARTIFACT_CHARS;
-      await this.writeEvent(s, {
-        type: "artifact_snapshot",
-        ...(e.turnId ? { turn_id: e.turnId } : {}),
-        source: e.source,
-        // 전체 경로는 사용자명·폴더명을 누출한다. 평가에는 파일명만 필요하다.
-        path: path.basename(e.path).slice(0, 255),
-        mime_type: "text/html",
-        sha256,
-        content_bytes: bytes.length,
-        content: clamped ? content.slice(0, SPOOL_MAX_ARTIFACT_CHARS) : content,
-        ...(clamped ? { content_truncated: true, content_original_chars: content.length } : {}),
+      await this.writeArtifactSnapshot(s, e);
+    });
+  }
+  private async writeArtifactSnapshot(s: SessionState, e: { turnId?: string; source: SpoolArtifactSource; path: string; content: string }): Promise<string> {
+    const content = typeof e.content === "string" ? e.content : "";
+    const bytes = Buffer.from(content, "utf8");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
+    if (s.seenArtifactHashes.has(sha256)) return sha256;
+    s.seenArtifactHashes.add(sha256);
+    if (s.seenArtifactHashes.size > SEEN_ARTIFACT_HASHES_MAX) {
+      const oldest = s.seenArtifactHashes.values().next().value;
+      if (oldest !== undefined) s.seenArtifactHashes.delete(oldest);
+    }
+    const clamped = content.length > SPOOL_MAX_ARTIFACT_CHARS;
+    await this.writeEvent(s, {
+      type: "artifact_snapshot",
+      ...(e.turnId ? { turn_id: e.turnId } : {}),
+      source: e.source,
+      // 전체 경로는 사용자명·폴더명을 누출한다. 평가에는 파일명만 필요하다.
+      path: path.basename(e.path).slice(0, 255),
+      mime_type: "text/html",
+      sha256,
+      content_bytes: bytes.length,
+      content: clamped ? content.slice(0, SPOOL_MAX_ARTIFACT_CHARS) : content,
+      ...(clamped ? { content_truncated: true, content_original_chars: content.length } : {}),
+    });
+    return sha256;
+  }
+
+  /** #751 U1b — whose record the next event would go into: the current session, or (none yet) the identity the next one will carry. */
+  owner(): Promise<SpoolOwner> {
+    return new Promise((resolve) => {
+      this.enqueue(async () => resolve({ session: this.session?.id ?? null, identity: this.session ? this.session.identity : this.pendingIdentity }));
+      void this.queue.then(() => resolve({ session: null, identity: null }));
+    });
+  }
+
+  /**
+   * #751 U1b — the learner's approval (or withdrawal of it) of ONE exact page version: the page line, then the approval, in one
+   * queue step — and only into the record of the `owner` captured when the learner was asked. If another learner signed in, or
+   * this learner's session was replaced by a different one, while the question was open, nothing is written (false).
+   */
+  recordArtifactApprovalFor(owner: SpoolOwner, e: { content: string; path: string; approved: boolean }): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.enqueue(async () => {
+        const now = this.session ? this.session.identity : this.pendingIdentity;
+        if (!owner.identity || !now || !sameIdentity(owner.identity, now) || (owner.session !== null && this.session !== null && this.session.id !== owner.session)) { resolve(false); return; }
+        const s = await this.materialize();
+        const sha256 = await this.writeArtifactSnapshot(s, { source: "existing", path: e.path, content: e.content });
+        await this.writeEvent(s, { type: "artifact_approval", artifact_sha256: sha256, path: path.basename(e.path).slice(0, 255), approved: e.approved });
+        resolve(true);
       });
+      void this.queue.then(() => resolve(false));
     });
   }
 

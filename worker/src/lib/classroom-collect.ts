@@ -327,11 +327,21 @@ function validateCollectionManifest(o: Record<string, unknown>): { ok: true; val
   if (want.size !== seen.size || [...want].some((n) => !seen.has(n))) return { ok: false, error: 'the files do not match the declared parts' };
   return { ok: true, value: { schema: SNAPSHOT_SCHEMA_V3, files: o.files as ManifestFile[], collection: b } };
 }
+/**
+ * How an artifact line stores its page: `false` = the whole page (its hash is checked by the caller), `true` = cut at the spool's
+ * size limit and saying so consistently (the original was larger than what is stored), `null` = inconsistent — not a line the App writes.
+ */
+export function artifactCut(e: Record<string, unknown>): boolean | null {
+  if (typeof e.content !== 'string' || typeof e.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(e.sha256)) return null;
+  const stored = new TextEncoder().encode(e.content).byteLength;
+  if (e.content_truncated !== true) return e.content_truncated === undefined && (e.content_bytes === undefined || e.content_bytes === stored) ? false : null;
+  return Number.isSafeInteger(e.content_bytes) && (e.content_bytes as number) > stored && Number.isSafeInteger(e.content_original_chars) && (e.content_original_chars as number) > e.content.length ? true : null;
+}
 export interface CollectionOwner extends SnapshotOwner { kinds: readonly string[] }
 export interface CollectionExtent {
   lines: number; included: number; from_ts: string; to_ts: string; other_sessions_in_window: number; kinds: string[]; sessions: number;
-  parts: Array<{ current: boolean; lines: number; included: number; from_ts: string; to_ts: string; first_seq?: number; last_seq?: number; start_proven: boolean; end_proven: boolean; torn_tail: boolean; truncated_prompts: number; coverage: Coverage }>;
-  received: Record<LineCategory, number> & { instructor_refs: number; truncated_prompts: number; basis_markers: number };
+  parts: Array<{ current: boolean; lines: number; included: number; from_ts: string; to_ts: string; first_seq?: number; last_seq?: number; start_proven: boolean; end_proven: boolean; torn_tail: boolean; truncated_prompts: number; truncated_artifacts: number; coverage: Coverage }>;
+  received: Record<LineCategory, number> & { instructor_refs: number; truncated_prompts: number; truncated_artifacts: number; basis_markers: number };
   not_sent: Record<LineCategory, number>;
   omitted: { unreadable: number; over_limit: number }; reasons: string[];
 }
@@ -377,14 +387,14 @@ export async function verifyCollection(texts: Map<string, string>, b: Collection
     indexes.push(idx);
   }
   const approved = approvedArtifacts(indexes.flat());
-  const received = { ...zero(), instructor_refs: 0, truncated_prompts: 0, basis_markers: 0 }, notSent = zero(), reasons: string[] = [], parts: CollectionExtent['parts'] = [];
+  const received = { ...zero(), instructor_refs: 0, truncated_prompts: 0, truncated_artifacts: 0, basis_markers: 0 }, notSent = zero(), reasons: string[] = [], parts: CollectionExtent['parts'] = [];
   const add = (r: string) => { if (!reasons.includes(r)) reasons.push(r); };
   let coverage: Coverage = 'complete';
   for (const [n, p] of b.parts.entries()) {
     const idx = indexes[n]!, events = texts.has(`p${p.part}.events.jsonl`) ? nd(texts.get(`p${p.part}.events.jsonl`)!) : [];
     if (events.length !== p.included) return { problem: 'range_mismatch' };
     // Every sent line is an index entry, in order, with the same type/seq/ts — and of a kind that was asked for.
-    const sent = new Set<number>(); let cursor = 0, truncated = 0;
+    const sent = new Set<number>(); let cursor = 0, truncated = 0, cutArtifacts = 0;
     for (const line of events) {
       const sha = await sha256Bytes(new TextEncoder().encode(line).buffer as ArrayBuffer);
       while (cursor < idx.length && idx[cursor]!.sha256 !== sha) cursor++;
@@ -395,14 +405,31 @@ export async function verifyCollection(texts: Map<string, string>, b: Collection
       if (!e || typeof e !== 'object' || Array.isArray(e) || (e.type ?? null) !== (entry.type ?? null) || (e.seq ?? null) !== (entry.seq ?? null) || (e.ts ?? null) !== (entry.ts ?? null)) return { problem: 'index_mismatch' };
       const artifact = e.type === 'artifact_snapshot' ? e.sha256 : e.type === 'artifact_approval' ? e.artifact_sha256 : undefined;
       if (artifact !== undefined && artifact !== entry.artifact_sha256) return { problem: 'index_mismatch' };
+      // Which versions count as approved is read from the index (so an unsent line can be classified); the index's approval must be
+      // the line's own — never a flag the device set on the side (#751 U1b review F3).
+      if (e.type === 'artifact_approval' && (typeof entry.approved !== 'boolean' || entry.approved !== (e.approved === true))) return { problem: 'index_mismatch' };
+      // An artifact line carries its version hash (sha256 of the WHOLE page) and the page as stored. A whole page must hash to it;
+      // a page the spool cut at its size limit must say so and say how big the original was. A cut page is never "the approved
+      // result" in full: it is received, counted and makes the answer not complete (F2).
+      if (e.type === 'artifact_snapshot') {
+        const cut = artifactCut(e); if (cut === null) return { problem: 'artifact_content_mismatch' };
+        if (cut) cutArtifacts++;
+        else if ((await sha256Bytes(new TextEncoder().encode(e.content as string).buffer as ArrayBuffer)) !== e.sha256) return { problem: 'artifact_content_mismatch' };
+      }
       if (!kindSelects(b.kinds, e.type, e.sha256, approved)) return { problem: 'kind_violation' };
       const cat = lineCategory(e.type, e.sha256, approved); received[cat]++;
       if (e.type === 'prompt') { if (e.text_truncated === true) { received.truncated_prompts++; truncated++; } if (Array.isArray(e.instructor_prompt_refs) && e.instructor_prompt_refs.length) received.instructor_refs++; }
       if (e.type === 'lesson_binding') received.basis_markers++;
     }
+    received.truncated_artifacts += cutArtifacts;
     // What was not sent is counted from the index only. A line of an asked kind that did not arrive is a gap, not "not asked".
+    // An approval the kinds asked for that did not arrive is different: the index alone would then decide what counts as approved.
     let missing = false;
-    for (const [i, entry] of idx.entries()) { if (sent.has(i)) continue; if (kindSelects(b.kinds, entry.type, entry.artifact_sha256, approved)) missing = true; else notSent[lineCategory(entry.type, entry.artifact_sha256, approved)]++; }
+    for (const [i, entry] of idx.entries()) {
+      if (sent.has(i)) continue;
+      if (kindSelects(b.kinds, entry.type, entry.artifact_sha256, approved)) { if (entry.type === 'artifact_approval') return { problem: 'index_mismatch' }; missing = true; }
+      else notSent[lineCategory(entry.type, entry.artifact_sha256, approved)]++;
+    }
     // Sequence coverage is read on the whole window of this session (the index), never on the filtered lines.
     let c: Coverage = 'complete'; const partReasons: string[] = [];
     const seqs = idx.map((e) => e.seq), malformed = idx.some((e) => e.malformed === true || typeof e.type !== 'string');
@@ -423,15 +450,18 @@ export async function verifyCollection(texts: Map<string, string>, b: Collection
       else { c = worst(c, 'range_unknown'); partReasons.push('earlier_session_end_unproven'); }
       if (!startProven) { c = worst(c, 'range_unknown'); partReasons.push('start_not_proven'); }
     }
-    if (p.torn_tail) partReasons.push('torn_tail_dropped');
+    // Bytes after the last newline were left out. Whatever came before them — even a session_close — is not where that session
+    // ended: something was still being written after it (a crash mid-append, another window). Never a proven end (F1).
+    if (p.torn_tail) { endProven = false; c = worst(c, 'range_unknown'); partReasons.push('torn_tail_dropped'); }
     if (missing) { c = worst(c, 'gaps'); partReasons.push('selected_line_missing'); }
     if (truncated) { c = worst(c, 'gaps'); partReasons.push('prompt_truncated'); }
+    if (cutArtifacts) { c = worst(c, 'gaps'); partReasons.push('artifact_truncated'); }
     coverage = worst(coverage, c); partReasons.forEach(add);
-    parts.push({ current: p.current, lines: idx.length, included: events.length, from_ts: p.from_ts, to_ts: p.to_ts, ...(p.first_seq !== undefined ? { first_seq: p.first_seq, last_seq: p.last_seq } : {}), start_proven: startProven, end_proven: endProven, torn_tail: p.torn_tail, truncated_prompts: truncated, coverage: c });
+    parts.push({ current: p.current, lines: idx.length, included: events.length, from_ts: p.from_ts, to_ts: p.to_ts, ...(p.first_seq !== undefined ? { first_seq: p.first_seq, last_seq: p.last_seq } : {}), start_proven: startProven, end_proven: endProven, torn_tail: p.torn_tail, truncated_prompts: truncated, truncated_artifacts: cutArtifacts, coverage: c });
   }
   const omitted = b.omitted.unreadable + b.omitted.over_limit;
   if (omitted) { coverage = worst(coverage, 'range_unknown'); add('session_not_included'); }
-  const order = ['damaged_line', 'seq_gap', 'tail_missing', 'selected_line_missing', 'prompt_truncated', 'declared_seq_mismatch', 'sequence_unavailable', 'session_not_included', 'earlier_session_end_unproven', 'extent_not_declared', 'start_not_proven', 'torn_tail_dropped'];
+  const order = ['damaged_line', 'seq_gap', 'tail_missing', 'selected_line_missing', 'artifact_truncated', 'prompt_truncated', 'declared_seq_mismatch', 'sequence_unavailable', 'session_not_included', 'earlier_session_end_unproven', 'extent_not_declared', 'start_not_proven', 'torn_tail_dropped'];
   reasons.sort((x, y) => order.indexOf(x) - order.indexOf(y));
   const froms = b.parts.map((p) => p.from_ts).sort(), tos = b.parts.map((p) => p.to_ts).sort();
   return { coverage, reason: coverage === 'complete' ? '' : reasons.find((r) => r !== 'torn_tail_dropped') ?? reasons[0] ?? '', reasons, extent: { lines: parts.reduce((s, p) => s + p.lines, 0), included: parts.reduce((s, p) => s + p.included, 0), from_ts: froms[0]!, to_ts: tos.at(-1)!, other_sessions_in_window: omitted, kinds: [...b.kinds], sessions: b.parts.length, parts, received, not_sent: notSent, omitted: { ...b.omitted }, reasons } };

@@ -64,6 +64,9 @@ try {
   for (const s of ['A3', 'A4']) assert.equal(await row(s).locator('p.blocked').count(), 0, s + ': silence is never red');
 
   // ── 2. Learning help and technical problems are different targets ──
+  // #751 U1b — the requests fold behind one summary line so the roster stays on the first screen; opening it is one button.
+  assert.equal(await page.locator('#ops-help-list').isVisible(), false, 'folded by default'); assert.match(await page.locator('#ops-help-toggle').innerText(), /요청 목록 펼치기 \(2건\)/);
+  await page.locator('#ops-help-toggle').click(); assert.equal(await page.getAttribute('#ops-help-toggle', 'aria-expanded'), 'true');
   const help = page.locator('#ops-help-list li');
   assert.equal(await help.count(), 2); assert.match(await help.nth(0).innerText() + await help.nth(1).innerText(), /A2 · student-b[\s\S]*A4 · student-d|A4 · student-d[\s\S]*A2 · student-b/);
   for (const gone of ['student-h', 'student-i', 'student-j', 'student-e']) assert.doesNotMatch(await page.locator('#ops-help-list').innerText(), new RegExp(gone), gone + ' is not an open help request');
@@ -207,6 +210,7 @@ try {
   assert.deepEqual([await page.locator('#ops-checkpoint-note').inputValue(), await page.locator('#ops-question').inputValue()], ['', ''], 'another instructor inherits neither the checkpoint note nor the question');
   await page.locator('#disconnect').click(); await connect(teacher); await row('A2').waitFor(); await row('A2').getByRole('button', { name: '근거·조치' }).click(); await page.locator('#ops-checkpoint-note').waitFor();
   assert.deepEqual([await page.locator('#ops-checkpoint-note').inputValue(), await page.locator('#ops-question').inputValue()], ['', ''], 'a new sign-in (even the same instructor) starts empty: drafts live only in that connection');
+  await page.locator('#ops-help-toggle').filter({ hasText: '펼치기' }).click(); // a new sign-in starts with the requests folded again
   await help.filter({ hasText: 'student-b' }).getByRole('button', { name: '요청 열기' }).click(); await page.locator('#detail').waitFor();
 
   // The learner withdraws: the request leaves the queue, the count and the open record.
