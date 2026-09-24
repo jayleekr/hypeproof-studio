@@ -1,4 +1,16 @@
-export type Severity = 'error' | 'warn' | 'info';
+export type Severity = 'fail' | 'warn' | 'info';
+
+export type ViolationCode =
+  | 'markup.malformed'
+  | 'markup.script'
+  | 'markup.external_resource'
+  | 'markup.too_large'
+  | 'spec.section_missing'
+  | 'spec.support_missing'
+  | 'spec.parent_role_missing'
+  | 'spec.step_id_duplicate'
+  | 'spec.step_ref_unknown'
+  | 'spec.meta_missing';
 
 export interface ViolationAt {
   file: string;
@@ -8,10 +20,11 @@ export interface ViolationAt {
 }
 
 export interface Violation {
-  item: string;
+  item: ViolationCode;
   severity: Severity;
   at: ViolationAt;
   message: string;
+  refs: string[];
 }
 
 export interface PlanMeta {
@@ -25,11 +38,22 @@ export interface PlanMeta {
   methods: string[];
 }
 
+export interface StepCell {
+  text: string;
+  role?: string;
+}
+
 export interface ParsedStep {
   id: string;
   durationMin: number | null;
   title: string | null;
   roles: string[];
+  cells: {
+    teacher?: string;
+    assistant?: string;
+    learner?: string;
+    parent?: { text: string; role: string };
+  };
   requires: string[];
   forbids: string[];
 }
@@ -48,10 +72,38 @@ export interface ParsedSection {
   present: boolean;
 }
 
+export interface ProhibitedMove {
+  family: string;
+  stepId: string | null;
+  text: string;
+}
+
+export interface KeyQuestion {
+  text: string;
+  stepId: string | null;
+}
+
+export interface Objective {
+  id: string | null;
+  text: string;
+}
+
+export interface Evidence {
+  id: string | null;
+  text: string;
+}
+
 export interface ParsedPlan {
   meta: PlanMeta;
   sections: ParsedSection[];
   steps: ParsedStep[];
   stucks: ParsedStuck[];
+  objectives: Objective[];
+  essentialQuestion: string | null;
+  evidence: Evidence[];
+  keyQuestions: KeyQuestion[];
+  prohibitedMoves: ProhibitedMove[];
+  safety: string | null;
+  bridgingOpener: string | null;
   violations: Violation[];
 }
