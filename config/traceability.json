@@ -2327,7 +2327,16 @@
       "stage": "test",
       "owner": "JinyongShin",
       "depends_on": [
-        "ST-REQ-CHALK-UX"
+        "ST-REQ-CHALK-UX",
+        "ST-REQ-CHALK-GEN",
+        "ST-REQ-CHALK-FB",
+        "ST-REQ-CHALK-OUT",
+        "ST-REQ-CHALK-RH",
+        "ST-REQ-CHALK-PLAN",
+        "ST-REQ-CHALK-SUB",
+        "ST-REQ-CHALK-HTML",
+        "ST-REQ-CHALK-SCH",
+        "ST-REQ-CHALK-KB"
       ],
       "sources": [
         {
