@@ -238,7 +238,7 @@ export class OpsOutbox {
 export interface SyncResponse {
   status: number;
   /** Parsed JSON body when there was one. */
-  body?: { reason?: string; poll_after_ms?: number; connection_epoch?: number; ack?: { boot_id: string; contiguous_seq: number; missing: Array<[number, number]> }; commands?: unknown[]; receipt_acks?: unknown[]; control?: { paused: boolean; control_revision: number } };
+  body?: { reason?: string; poll_after_ms?: number; connection_epoch?: number; ack?: { boot_id: string; contiguous_seq: number; missing: Array<[number, number]> }; commands?: unknown[]; receipt_acks?: unknown[]; control?: { paused: boolean; control_revision: number }; server_time?: number; distribution?: { items?: unknown[]; withdraw?: unknown[]; receipt_acks?: unknown[]; withdraw_acks?: unknown[]; more?: boolean } };
   retryAfterSec?: number;
 }
 export interface SyncDeps {
@@ -259,6 +259,14 @@ export interface SyncDeps {
   onEpoch?(epoch: number): void;
   /** Declared on every sync: a window that did not pair itself still says what it can run. */
   capabilities?: string[];
+  /**
+   * U2 inbox of instructor notices/materials. Absent → this client declares no inbox and is never offered one.
+   * `window` is when THIS request was sent, on two clocks: an item must be committed within its budget counted from there,
+   * so a slow answer buys no time and nothing fetched before a restart can be applied after it.
+   */
+  distribution?: { pending(): Promise<{ receipts: unknown[]; withdraw_receipts: unknown[] } | undefined>; onBlock(block: NonNullable<SyncResponse["body"]>["distribution"], window: { monoStart: number; wallStart: number }, serverTime: number): Promise<boolean> };
+  /** Monotonic milliseconds. Defaults to performance.now(). */
+  mono?(): number;
   /** R2 command ledger. Absent → this client observes only. */
   commands?: { pendingReceipts(): unknown[]; onAcks(acks: unknown[]): Promise<boolean>; onCommands(cmds: unknown[]): Promise<void>; /** The connection ended: nothing new may start, a running action is told to stop. */ close?(): void };
 }
@@ -276,7 +284,10 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
     let next = pollMs;
     try {
       const events = deps.outbox.batch();
-      const r = await deps.post({ schema_version: OPS_SCHEMA_VERSION, app_instance_id: deps.appInstanceId, boot_id: deps.outbox.bootId, events, sample: { ...deps.sample(), observed_at: deps.now() }, ...(deps.capabilities ? { capabilities: deps.capabilities } : {}), ...(deps.commands ? { receipts: deps.commands.pendingReceipts() } : {}) }, SYNC_TIMEOUT_MS);
+      const distribution = deps.distribution ? await deps.distribution.pending().catch(() => undefined) : undefined;
+      if (stopped) return;
+      const window = { monoStart: (deps.mono ?? (() => performance.now()))(), wallStart: deps.now() };
+      const r = await deps.post({ ...(distribution ? { distribution } : {}), schema_version: OPS_SCHEMA_VERSION, app_instance_id: deps.appInstanceId, boot_id: deps.outbox.bootId, events, sample: { ...deps.sample(), observed_at: deps.now() }, ...(deps.capabilities ? { capabilities: deps.capabilities } : {}), ...(deps.commands ? { receipts: deps.commands.pendingReceipts() } : {}) }, SYNC_TIMEOUT_MS);
       // The learner disconnected (or re-paired) while this request was in flight. Whatever it carries — a pause,
       // an approval to run, new commands — was addressed to a connection that no longer exists: drop all of it.
       if (stopped) return;
@@ -294,6 +305,11 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
           if (stopped) return;
           await deps.commands.onCommands(r.body.commands ?? []);
           if (ran || deps.commands.pendingReceipts().length) next = 1000;
+        }
+        if (deps.distribution && !stopped) {
+          // Isolated: an inbox fault never stops observation or commands, and an absent block is "no news", not success.
+          try { if (await deps.distribution.onBlock(r.body.distribution, window, typeof r.body.server_time === "number" ? r.body.server_time : deps.now())) next = 1000; }
+          catch (err) { deps.log?.(`[ops] inbox: ${(err as Error).message}`); }
         }
       } else if (r.status === 401) {
         deps.log?.(`[ops] connection closed by the Service (${r.body?.reason ?? "401"}) — stopping`);

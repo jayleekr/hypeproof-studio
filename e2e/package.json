@@ -26,7 +26,8 @@
     "test:budgets:live-sdk": "node --experimental-strip-types --experimental-sqlite access-budgets/live-sdk.mjs",
     "test:voice:lifecycle": "node voice-conversation/probe-lifecycle.mjs",
     "test:voice:popup": "node voice-conversation/popup-browser.mjs",
-    "test:chalk-simple": "node --experimental-strip-types --experimental-sqlite chalk-authoring/simple.mjs"
+    "test:chalk-simple": "node --experimental-strip-types --experimental-sqlite chalk-authoring/simple.mjs",
+    "test:classroom-ops-distribution": "node --experimental-strip-types --experimental-sqlite classroom/ops-distribution.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

@@ -190,10 +190,10 @@ What each switch means is owned by `docs/requirements/classroom-admin.md`; this 
 **Facts that shape the procedure (checked 2026-09-20).** Migrations are applied with `wrangler d1 execute --file`, so
 there is no `d1_migrations` table: the schema itself is the applied history, read by
 `scripts/classroom-ops-d1-check.mjs` (read-only). `deploy-worker.yml` applied 0002–0010 unconditionally and did not
-know 0011–0022; it now has an explicit `apply_classroom_ops_schema` input (default off). `wrangler.toml` has no
+know 0011–0023; it now has an explicit `apply_classroom_ops_schema` input (default off). `wrangler.toml` has no
 staging environment — `[env.dev]` declares no D1/KV/R2 of its own and named environments do not inherit bindings, so
 **a staging target does not exist yet and must not be improvised by pointing `--env dev` at production ids.**
-0011–0022 contain only `CREATE TABLE|INDEX IF NOT EXISTS` (the D1 test asserts this), so order matters only for
+0011–0023 contain only `CREATE TABLE|INDEX IF NOT EXISTS` (the D1 test asserts this), so order matters only for
 readability and every file can be re-applied.
 
 ### 0. Staging target (once; needs the Cloudflare account — not done)
@@ -246,19 +246,19 @@ tables, the rollback for a bad rollout is "flags off + previous Worker", not a r
 (`wrangler d1 time-travel restore <name> --bookmark=<bookmark>`) is for a damaged database only, rewinds EVERY table
 including usage and budgets, and is a separate decision with its own confirmation.
 
-### 3. Apply 0011 → 0022, then verify
+### 3. Apply 0011 → 0023, then verify
 
 ```bash
 for f in 0011-classroom-ops 0012-classroom-ops-commands 0013-classroom-ops-control 0014-classroom-ops-evidence-review \
          0015-classroom-collection 0016-classroom-report-jobs 0017-classroom-delivery 0018-classroom-snapshot-binding \
          0019-classroom-report-attempts 0020-classroom-viewer-check 0021-classroom-erasure-log \
-         0022-classroom-collect-scope; do
+         0022-classroom-collect-scope 0023-classroom-distribution; do
   npx wrangler d1 execute <name> --remote --file=migrations/$f.sql || break
 done
 node scripts/classroom-ops-d1-check.mjs --database <name> --expect-id <uuid> --require all
 ```
 
-A migration added after 0022 for this feature goes to the end of both lists (here and in `deploy-worker.yml`); the
+A migration added after 0023 for this feature goes to the end of both lists (here and in `deploy-worker.yml`); the
 checker picks up any `migrations/00NN-*.sql` ≥ 0011 by itself. On production this step is the workflow input
 `apply_classroom_ops_schema: true` on ONE deploy, after the staging rehearsal below has passed.
 

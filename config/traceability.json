@@ -2258,6 +2258,45 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/session-spool-seq.smoke.mjs"
+        },
+        {
+          "path": "worker/src/routes/classroom-distribution.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-distribution.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-distribution-store.ts"
+        },
+        {
+          "path": "worker/migrations/0023-classroom-distribution.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-distribution.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-distribution-device.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-distribution-d1.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomInbox.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomInboxStore.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/InstructorInbox.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-inbox.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/fixtures/inbox-writer.mjs"
+        },
+        {
+          "path": "e2e/classroom/ops-distribution.mjs"
         }
       ]
     },

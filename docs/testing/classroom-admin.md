@@ -98,12 +98,47 @@ npm --prefix chalk run typecheck
 |---|---|---|---|---|
 | AT-35 | ADM-05/10 | 복구 capability만 있는 강사의 질문 전송, coach만 있는 강사의 reset, 정답·코드·파일 경로를 담은 질문, 기술 장애 좌석에 질문 없이 바로 복구 | capability 상호 비대체, 코칭 조치가 파일·대화·입력 불변, 본문 비밀 마스킹, 복구가 코칭 단계에 막히지 않음, 표시됨≠읽음 | Service+App+browser |
 | AT-36 | ADM-02/04/07 | actor·source_state 미지정/위조, simulated 근거, 변경 전후 digest, 강사 confirmed/disputed, 로그 도착만 있는 좌석 | 미지정은 unverified, simulated가 real로 승격되지 않음, 강사 확인이 발송 승인·학습 완료로 읽히지 않음, 새 저장소 0 | Service+browser |
-| AT-37 | ADM-02/10 · RM-1 | 개별·전체·도움 필요·연결됨·미연결 선택, 선택 없음, 명단 revision 변경, 미리 확인 뒤 선택 변경, `collect` 전용 강사 | 실행 전 대상 수·연결 가능/불가·제외 사유 표시, 빈 선택은 실행 불가, revision이 바뀌면 선택 비움, 확인은 본 대상에만 유효, 권한별로 허용된 조치만 노출 | UI e2e + 실제 Mac |
-| AT-38 | ADM-03/13/14 · RM-2 | 선택 A1·A3/비선택 A2, 미동의·철회·오프라인 선택, 빈 대상·오타 필드·중복·회차 밖 좌석, 더블클릭·응답 유실·같은 key 다른 요청, 명단 변경, 종료된 회차의 새 요청 vs 이미 요청된 업로드, 구버전 전체 회수, ops OFF, 범위 조회 장애·손상, 읽기–쓰기 사이의 좌석 교체·종료·flag·철회 | 비선택 학생의 명령·업로드·객체·평가 0, 전체로 확장 0, 같은 요청은 같은 결과·다른 요청은 409, 범위를 못 읽으면 503(평가 입력 0), 경합은 0건 기록으로 거부, 회수는 평가·발송을 시작하지 않음 | Service + UI e2e + 실제 Mac |
 | AT-37 | ADM-09/13 | 근거 0건 학생·조용한 학생·느린 학생·프롬프트만 있는 학생 | 0점/미달/빨간색 0건, `아직 충분히 보지 못함` 표기, 활동량→능력 추론 0 | core+browser |
 | AT-38 | ADM-06/13 | 단일 수업 입력, 누적 회차 입력, 점수 필드가 있는 legacy 입력 | 관찰→근거→판단 변화→다음 실험 구성, 단일 수업에서 성장 패턴 서술 0, 점수·순위·의존도 전면 노출 0, legacy 7축 산출 불변 | core+runner fixtures |
 | AT-39 | ADM-05 | 학생 작업 중 질문/확인 지점 수신, 같은 근거 재입력 요구 | 모달·평가 팝업 0, 작업 문맥 유지, 닫기/나중에 보기 가능, 재입력 강제 0 | App 실기 |
 | DT-07 | DES-01/05/11 | §14 토큰 조합, 기술 장애 있는/없는 학생 상세, 집계 표기 | 실측 대비 기준 충족, 패널당 주요 CTA 1개, 장애 시 복구가 주요·마무리는 보조, 집계가 평가 지표로 읽히지 않음 | 실제 브라우저 |
+
+<a id="at-id-ledger-20260921"></a>
+
+#### 원격관리 인수 행과 AT ID 정정 · 2026-09-21
+
+**무엇이 겹쳤나.** 2026-09-18(`c891b4f`)에 AT-37(근거 부족 표시)·AT-38(관찰·성장 보고서 구성)·AT-39(학생 화면의 질문·확인 지점)가 먼저 정해졌다. 2026-09-21(`b222c34`)의 U1 작업이 같은 표에 **같은 번호로** 선택 모델(AT-37)·선택 회수(AT-38) 행을 넣었고, 다섯 흐름 매핑은 대상 배포를 AT-39라고 불렀다. 한 ID가 두 인수 조건을 가리키면 ‘AT-38 PASS’가 무엇의 통과인지 알 수 없다. **먼저 정해진 뜻이 번호를 유지한다**(AT-37/38/39 = 2026-09-18의 뜻, 위 표 그대로). 나중에 들어온 세 조건은 새 번호를 받는다. AT-40·AT-41은 겹치지 않아 그대로다. 과거 실행 기록의 문장은 고치지 않았고, 아래 ‘옛 표기’로 읽는다.
+
+| Test ID | 제품 REQ | 조건 / 깨뜨릴 가정 | 합격 기준 | 실행 계층 |
+|---|---|---|---|---|
+| AT-42 | ADM-02/10 · RM-1 | 개별·전체·도움 필요·연결됨·미연결 선택, 선택 없음, 명단 revision 변경, 미리 확인 뒤 선택 변경, `collect` 전용 강사 | 실행 전 대상 수·연결 가능/불가·제외 사유 표시, 빈 선택은 실행 불가, revision이 바뀌면 선택 비움, 확인은 본 대상에만 유효, 권한별로 허용된 조치만 노출 | UI e2e + 실제 Mac |
+| AT-43 | ADM-03/13/14 · RM-2 | 선택 A1·A3/비선택 A2, 미동의·철회·오프라인 선택, 빈 대상·오타 필드·중복·회차 밖 좌석, 더블클릭·응답 유실·같은 key 다른 요청, 명단 변경, 종료된 회차의 새 요청 vs 이미 요청된 업로드, 구버전 전체 회수, ops OFF, 범위 조회 장애·손상, 읽기–쓰기 사이의 좌석 교체·종료·flag·철회 | 비선택 학생의 명령·업로드·객체·평가 0, 전체로 확장 0, 같은 요청은 같은 결과·다른 요청은 409, 범위를 못 읽으면 503(평가 입력 0), 경합은 0건 기록으로 거부, 회수는 평가·발송을 시작하지 않음 | Service + UI e2e + 실제 Mac |
+| AT-44 | ADM-10/11 · RM-3 · INT-CO-04(제안) | 공지·자료의 대상 배포: 선택 A1·A3/비선택 A2, 권한 없음·flag OFF·구버전 capability, 배포 강사의 권한 철회(배포 강사 ≠ 연결 발급 강사), 여러 배포와 회수의 단위, 오프라인 재접속·좌석 교체·재발급·기기 교체·종료, 중복 요청·같은 key 다른 내용, v2 뒤 늦은 v1, 저장 오류·응답 유실·앱 재시작, 부분 실패만 재선택, 미연결·비선택 학생의 콘텐츠 접근, 회수, 기존 수업 회귀 | 선택 좌석만 그 revision을 **보관함에 반영**했다고 보고하고 재시작 뒤에도 카드가 열림, 비선택 학생의 제안·읽기·파일 변화 0, HTTP 200·제안·알림을 완료로 세지 않음, 되돌아감·중복 카드 0, 기존 자료 보존·거짓 반영 0, 전체로 확장 0, 미확인·회수 확인 불가는 성공이 아님 | Service + App + UI e2e + 실제 Mac ([시나리오 D1~D16·M1](#remote-management-u2-plan-20260921)) |
+| AT-40 | ADM-10 · RM-4 | 원인 5종(토큰·연결·runtime·preview·업로드) × 1순위 조치, Chalk에서 눌러 실제 창으로 확인 | 원인마다 허용 목록의 조치 하나가 1순위로 제시되고 실제 사후 조건이 재관측됨, 대화·입력·파일 보존 | Service + UI e2e + 실제 Mac |
+| AT-41 | ADM-10 · RM-5 | 회수·배포·복구의 결과를 한 화면에서 같은 단계 어휘로 표시, 부분 결과 | `접수 → 수신 확인 전 → 기기 수신 → 적용 / 실패 / 미확인 / 만료·대상 변경`이 세 흐름에 공통, ‘서버 검증됨’·‘보관함 반영’·복구 결과 코드를 한 성공 수로 합치지 않음, `leased`/`offered`를 수신으로 표시하지 않음 | UI e2e + 실제 Mac |
+
+| ID | 뜻 | 상태 (2026-09-21 현재) | 근거 위치 |
+|---|---|---|---|
+| AT-35 | 복구·코칭 capability 분리 | **실행됨** — Service + 브라우저(합성). 실제 Studio 창에서 `send_question` 미실행 | [보강 기준 실행 기록](#보강-기준복구코칭-분리-출처-근거-부족-14--2026-09-18) |
+| AT-36 | 출처·source_state·강사 확인 | **실행됨** — Service + 브라우저(합성). App의 실제 `evidence` 발행 연결은 같은 기록의 NOT RUN | 같은 곳 |
+| AT-37 | 근거 부족 표시 | **실행됨** — Service·core fixtures(합성) | 같은 곳 · R5 기록 |
+| AT-38 | 관찰·성장 보고서 구성 | **실행됨** — core + runner fixtures(합성). 실제 모델 NOT RUN | R5 기록 |
+| AT-39 | 학생 화면의 질문·확인 지점(모달 0·문맥 유지) | **NOT RUN** — 실제 Studio 미확인 | 보강 기준 실행 기록의 NOT RUN |
+| AT-40 | 원인별 복구 대응표 | **NOT RUN · 계획** (U4) | [매핑](#remote-management-map-20260921) |
+| AT-41 | 세 흐름 공통 결과 화면 | **NOT RUN · 계획** | 같은 곳 |
+| AT-42 | 공통 선택 모델 (옛 표기 AT-37) | **실행됨** — UI e2e + 실제 Mac 정상 경로. 실제 기기 2대 이상·Safari/Firefox NOT RUN | [U1 실행 기록](#remote-management-u1-run-20260921) |
+| AT-43 | 선택한 학생의 수업 기록 회수 (옛 표기 AT-38) | **실행됨** — Service + UI e2e + 실제 Mac 정상 경로. 기기 실패·재전송은 합성, Windows·학교망·staging D1 NOT RUN | 같은 곳 |
+| AT-44 | 공지·자료 대상 배포 (옛 표기 AT-39) | **실행됨 · 재인수 요청 중** — Service + 기기 + 로컬 workerd D1 + UI e2e + 실제 Mac M1(실제 창 1대, A2·A3 합성). 첫 인수 요청은 제안 커밋 경계 결함으로 반려, 수정·회귀 추가. Windows·학교망·staging D1·기기 2대 이상 NOT RUN | [U2 실행 기록](#remote-management-u2-run-20260921) · [재인수 수정](#remote-management-u2-reaccept-20260921) |
+
+**옛 표기가 남아 있는 곳(이번에는 고치지 않았다 — 시험 파일은 이 설계 세션의 소유가 아니다).** 아래 파일의 시험 제목·주석에 있는 번호는 작성 당시 표기다. U2 구현에서 시험 파일 소유권을 넘겨받을 때 제목을 새 번호로 바꾸고, 그때까지는 이 표로 읽는다.
+
+| 파일 | 적힌 표기 | 가리키는 인수 |
+|---|---|---|
+| `worker/test/classroom-ops-selected-collect.test.mjs`(제목 11곳) | `AT-38 …`, `AT-37/38 authority and switches` | AT-43 (권한·스위치 항목은 AT-42/43) |
+| `e2e/classroom/ops-roster.mjs` | `AT-37/38: one selection model → collect …` | AT-42/43 |
+| `e2e/classroom/ops-selection.mjs` | `AT-37 in a real browser` | AT-42 |
+| `worker/test/classroom-ops-coaching.test.mjs`, `e2e/classroom/ops.mjs` | `AT-37`(nothing observed), `AT-39`(learner-side display) | AT-37·AT-39 — 원래 뜻 그대로, 변경 없음 |
+| #1165 Intent 문서의 ‘AT-15~39는 #1119에서 추가’ | AT-35~39 | 원래 뜻 그대로, 변경 없음 |
 
 실기 gate는 Windows/macOS 각각 앱 release/build hash, Service/Chalk SHA, DB·profile/lesson revision, Test ID, 재현 명령, 기대/관측, screenshot/receipt hash, 실행자·날짜를 남긴다. 지원 안 하는 OS·죽은 host·네트워크 없는 PC에서 원격 복구 성공을 주장하지 않는다. 실제 발송 시험은 승인된 테스트 수신자로 provider sandbox 또는 지정 계정에서만 하고 합성 adapter 성공과 구분한다.
 
@@ -477,13 +512,13 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 
 **경계 조건 현황.** (정정: ‘종료’는 둘이다 — 종료 전에 이미 요청된 업로드의 유예(`upload_until`)는 계속 받고, 종료된 회차에 대한 **새** 회수 요청은 U1부터 `run_ended`로 거부한다. 기존 전체 ‘수업 마무리’의 종료 후 동작은 바꾸지 않았다.) 중복 요청(idempotency key·payload 충돌)·만료(TTL 120초: 시작 전 `expired`, 시작 후 영수증 없음 `outcome_unknown`)·재접속/재발급(이전 epoch 미전달)·부분 실패(대상별 원장)·수업 경계(회차·좌석 revision 결속)는 **명령과 회수에 구현+합성 시험**이 있다. 오프라인은 **접수 시점에 `not_connected`로 확정**된다 — 복구 명령에는 맞지만 배포에는 맞지 않는다(재접속해도 도착하지 않음). 배포에는 위 어느 것도 없다.
 
-**추가한 인수 시험.** AT-37 선택 모델과 AT-38 대상 회수는 U1에서 구현·실행했다([실행 기록](#remote-management-u1-run-20260921)). **아직 NOT RUN · 계획:** AT-39 대상 배포(선택 좌석만 revision 적용 보고, 비선택 revision 불변, 오프라인 → 재접속 적용, 회차 종료 뒤 미적용은 `만료`, 같은 revision 재배포 0, 기기 일부 실패는 대상별 표시) · AT-40 원인별 복구 대응표(원인 5종 × 1순위 조치, 실제 창) · AT-41 세 흐름의 결과가 같은 단계 어휘로 한 화면에 남음.
+**추가한 인수 시험** ([ID 정정 원장](#at-id-ledger-20260921) — 이 문단은 처음에 AT-37/38/39로 적혔다). AT-42 선택 모델과 AT-43 대상 회수는 U1에서, AT-44 대상 배포(공지·자료)는 U2에서 구현·실행했다([U1 기록](#remote-management-u1-run-20260921) · [U2 기록](#remote-management-u2-run-20260921)). **아직 NOT RUN · 계획:** AT-40 원인별 복구 대응표(원인 5종 × 1순위 조치, 실제 창) · AT-41 세 흐름의 결과가 같은 단계 어휘로 한 화면에 남음. RM-3 행의 ‘없음’은 `d9d31bf` 시점의 조사이며, 그 뒤 공지·자료 배포가 구현됐다(수업 프롬프트·수업 설정 배포는 U3로 계속 없음).
 
 <a id="remote-management-u1-run-20260921"></a>
 
 ### U1 — 공통 선택 + 선택 회수: 실행 기록 · 2026-09-21
 
-[계약](../requirements/classroom-admin.md#remote-management-u1-20260921). 배포·PC 제어·평가 확장은 이 단계에 없다.
+[계약](../requirements/classroom-admin.md#remote-management-u1-20260921). 배포·PC 제어·평가 확장은 이 단계에 없다. 인수 ID는 선택 모델 = AT-42, 선택 회수 = AT-43이다(작성 당시 표기 AT-37/38 — [정정 원장](#at-id-ledger-20260921)). 아래 기록의 내용은 고치지 않았다.
 
 **먼저 있던 재현 3건(Codex 독립 실행, 공통 git-dir `remote-classroom-evidence/management-20260921/`).** ① `selected-collection-check`: `targets:['A1']` dry-run이 201로 A1·A2 모두 반환 — API가 `targets`를 몰랐다. ② `scope-read-failure-check`: 구현 중 `batchScope`가 조회 예외를 `finish`로 읽어 collect_only 배치의 seal이 평가 입력 1건을 만들었다. ③ `selected-roster-race-check`: revision 검사 뒤 좌석이 a→b로 바뀌면 a를 고른 요청이 b에게 회수 명령을 보냈다. 수정 뒤: ① A2는 `not_selected` ② seal `503 scope_unavailable`·평가 입력 0 ③ `409 revision_conflict`·명령 0.
 
@@ -538,6 +573,128 @@ npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
 **실제/합성 경계.** 실제: Studio shell 복사본·확장·SDK·spool·freezer·업로드, Chalk UI, Service 라우터+SQLite. 합성: 계정·강의·모델 응답·좌석 A2/A3(그리고 e2e의 S02~S30)·R2(in-memory). 여러 좌석 동시성은 합성 좌석으로만 봤고 실제 기기는 1대다.
 
 **남은 한계.** 실제 기기 2대 이상에서의 선택/비선택 대조, Windows, 학교망, staging D1에서의 0022 적용과 조건부 batch(D1의 트랜잭션 의미는 로컬 workerd D1 리허설까지만), 재시작 전 세션을 합친 회수, `coverage_reason`의 화면 표시는 NOT RUN/미구현. 학생 프롬프트·승인 결과물의 대상 회수, 배포(U2~), 세 흐름 공통 결과 화면은 이 단계 범위 밖이다.
+
+<a id="remote-management-u2-plan-20260921"></a>
+
+### U2 — 공지·자료 대상 배포: 인수 계획 · 2026-09-21 (작성 당시 전부 NOT RUN · 계획 — 실행은 [아래 실행 기록](#remote-management-u2-run-20260921))
+
+[계약](../requirements/classroom-admin.md#remote-management-u2-20260921). 이 절은 AT-44를 구현과 **함께 한 번에** 검증할 수 있게 시나리오로 풀어 둔 것이다. 아래 어느 행도 실행되지 않았고, 시험 파일·migration·화면도 아직 없다. 제목이나 ID가 연결돼 있다는 사실을 실행으로 세지 않는다 — 실행되면 이 절 아래에 ‘실행 기록’을 따로 만들고 여기의 상태 칸은 고치지 않는다.
+
+**보완(같은 날).** 독립 검토가 짚은 계약 공백 일곱 가지(권한 철회 경계, 기기 커밋, 배포·카드의 단위, 미반영 복구와 receipt·ack 결속, sync 조건, D1 한도·비용, 확정 뒤 안내)를 **새 행을 늘리지 않고** 기존 D2·D6·D8·D9·D10·D13·D14·M1에 묶었다. 이것들은 재현된 제품 결함이 아니라 미구현 계약의 공백이었다.
+
+고정 fixture: 합성 회차 1개, 좌석 A1(student-a)·A2(student-b)·A3(student-c) + 30석 확장, 강사 X(`distribute` 보유)·강사 A(`distribute`만, 학생 연결은 발급하지 않음)·강사 B(학생 연결 발급)·강사 Y(`observe`·`coach`·`collect`·`command`·`deliver`만)·다른 코호트 강사 Z, 자료 M(rev 1→2)·공지 N. 모든 시나리오는 **양성 대조(방해 없는 정상 경로가 반영됨으로 끝남)를 같은 환경에서 먼저** 통과시킨 뒤 방해를 주입한다(verification 규칙 2). 비선택 불변은 ‘없음을 센다’: A2의 sync 응답 `distribution.items` 0 · targets 행 0 · 보관함 디렉터리의 파일 목록·hash 전후 동일.
+
+| # | 조건 / 깨뜨릴 가정 | 합격 기준 | 실행 계층 | 상태 |
+|---|---|---|---|---|
+| D1 | A1·A3 선택 + A2 비선택(세 좌석 모두 연결·보관함 선언). 공지 N 확정 | A1·A3 `reflected`, 기기 index에 N rev 1·hash 일치. A2: targets 0 · 제안 0 · 보관함 파일 변화 0 · 화면 카드 0. `모두 반영`은 두 대상 모두 반영 뒤에만 | Service(SQLite) + App 순수/host + 브라우저 e2e | NOT RUN · 계획 |
+| D2 | 권한과 그 철회: 강사 Y(다른 capability 전부 보유), 강사 Z, 학생 토큰·ops 자격으로 `contents`/`distributions` 호출 · `ops_distribute` OFF · `HPS_CLASSROOM_OPS` OFF · **배포 강사 A ≠ 학생 연결을 발급한 강사 B**에서 ① A의 배포가 대기 중일 때 A 폐기 ② A의 요청이 KV 검증을 통과한 뒤·커밋 전에 A 폐기(주입 지점 = guard 직전) ③ A를 `revoke_jti`로 재범위화(새 scope에 `distribute` 없음/있음) ④ `session/close`의 `jti` ⑤ 폐기의 D1 batch 실패 주입 ⑥ un-revoke | Y `403 ops_capability_missing`(자동 승격 0), Z 범위 거부, 학생/ops 자격 401·403, flag OFF `403 ops_distribute_disabled`, 전역 OFF 404 — 모두 새 테이블 행 수 불변. ① B가 발급한 연결이 살아 있어도 A의 열린 배포는 sweep으로 `revoked`, 다음 sync의 items 0(KV 상태와 무관 — 시험은 KV 폐기를 **반영하지 않은 채** D1만으로 판정) ② `403 issuer_revoked`·0건 ③ 옛 토큰은 fence 뒤 배포 불가, `distribute` 없는 재범위화만 sweep, D1 실패면 새 토큰 미반환·아무것도 안 바뀜 ④ 종료는 성립, fence 결과가 응답에 표시 ⑤ 응답 `ok:false` — 폐기 완료로 세지 않음, 그동안 접수·전달이 계속될 수 있음을 그대로 관측, 재시도 뒤 막힘(멱등) ⑥ sweep된 배포가 되살아나지 않음. sweep 전에 이미 나간 응답을 기기가 저장한 경우: receipt에 `recorded:false, revoked` + tombstone, 다음 sync에 카드 내려감 — ‘즉시 회수’를 주장하지 않음 | Service(경합·fault 주입) + App host + 브라우저 e2e | NOT RUN · 계획 |
+| D3 | 구버전: `distribution_inbox`를 선언하지 않은 App(현재 v0.1.56 계열 동작) · `status.distribution`을 모르는 구 Chalk · 새 App ↔ 구 Service | 구 App 좌석: 미리 확인에 `지원하지 않음`, 확정 뒤 자격 있는 sync에서 `unsupported`, 그 App의 sync·명령·채팅 회귀 0. 구 Service: 새 App이 블록 없이 정상 동작. 구 Chalk: flag를 켤 수 없음 | Service + App 계약 시험 | NOT RUN · 계획 |
+| D4 | 오프라인 A3 선택 → 확정 → 회차 안에 재접속 / 회차가 끝난 뒤 재접속 | 확정 직후 `accepted`(`다시 연결되면 전달`) — `not_connected`로 끝내지 않음. 회차 안 재접속: 같은 의도가 그때의 자격 검사 뒤 전달 → `reflected`. 종료 뒤 재접속: 제안 0, `expired`, 보관함 변화 0 | Service + 실제 host(브라우저 e2e의 ClassroomOpsHost) | NOT RUN · 계획 |
+| D5 | 좌석 교체: A1(a) 선택·확정 뒤 반영 전에 A1을 student-d로 교체(정상 configure·pair) · 같은 학생의 좌석 이동 · **읽기–쓰기 사이** 교체·회차 종료·flag 끔·자료 회수(주입 지점 = guard 직전) | d에게 제안·보관함 0, a의 대상 `target_changed`. 이동한 학생에게 자동 이관 0. 커밋 경계 4종: `409`/`403`, 배포·대상·감사 0건, 새 학생 target 0(U1의 7종 경합 시험과 같은 구조) | Service(경합 주입) | NOT RUN · 계획 |
+| D6 | 연결이 바뀌는 네 경우를 구분: ① 같은 기기의 새 boot ② 같은 기기의 다른 창이 lease owner가 됨(두 창이 같은 보관함에 동시에 씀) ③ 학습 토큰 재발급(epoch+1) 뒤 옛 `offer_key`의 receipt·**옛 ack** ④ 같은 학생이 새 1회용 코드로 다른 기기 연결, 옛 기기의 늦은 receipt | ①② `offer_key` 불변 — 저널이 이어서 보고되고 잠금으로 index 역전·이중 쓰기 0 ③ 옛 key receipt `stale_offer`·상태 불변 → 현재 epoch로 재전달 → 가진 항목은 다시 쓰지 않고 새 key로 `reflected`. 옛 ack가 새 key의 저널 항목을 지우지 못함 ④ 대상이 `device_generation`+1·`accepted`·`card_state none`으로 되돌아가 새 기기에 반영, 감사 `target_rebound_device`, 옛 기기 receipt 전부 `stale_offer`, 옛 기기는 최종 거부 뒤 그 보관함을 숨김. 옛 연결의 제안이 새 grant로 복사된 흔적 0 | Service + App host | NOT RUN · 계획 |
+| D7 | 중복 요청: 더블클릭(경합) · 응답 유실 뒤 같은 key 재전송 · 같은 key + 다른 본문 revision/다른 대상/다른 만료 · `contents`의 같은 key 다른 내용 · 같은 revision을 이미 반영한 좌석에 재배포 | 배포 1건 또는 `409 idempotency_conflict`. 재배포 대상은 `no_change`·제안 0·카드 1장 그대로. 빈 대상·중복·회차 밖 좌석·모르는 필드(`all`,`seats`)는 거부이며 DB 불변 — 전체로 넓어진 경우 0 | Service | NOT RUN · 계획 |
+| D8 | 순서와 단위: M rev 2 반영 뒤 rev 1이 늦게 도착(응답을 네트워크 층에서 붙잡아 역순) · rev 1 진행 중 rev 2 확정 · 같은 revision 다른 hash · **D1(v1) 반영 → D2(같은 v1) → D1 회수** · **D1(v1) 반영 → D2(v2) 반영 → D1의 늦은 회수** · 회수 tombstone과 새 배포 제안이 두 순서로 교차 도착 · retire 뒤 늦은 제안 · 두 강사의 같은 자료 동시 배포/회수 | 카드는 자료당 한 장, `seq`가 작은 사건은 어느 순서로 와도 적용되지 않음(되돌아감 0·중복 0). D2가 받치는 카드는 D1 회수로 내려가지 않음(D1 `covered`, tombstone 0), D2까지 회수돼야 내려감. `no_change`는 같은 기기·미회수일 때만. 교차 도착의 두 순서가 같은 끝 상태. retire 뒤 저장된 늦은 항목은 다음 sync에 내려가고 그 사이를 ‘막았다’고 쓰지 않음. 동시 회수는 한쪽 `409`. 과거 실행의 `reflected` 증거는 회수 뒤에도 남고 `card_state`만 바뀜 | App 순수 reducer + host + Service | NOT RUN · 계획 |
+| D9 | 기기 커밋 경계 — **v1이 이미 보관함에 있는 상태에서 v2 적용 중** 중단을 경계마다 주입: rev 파일 tmp / rev rename 뒤 / index tmp / index rename 거부 / index rename 뒤 저널 전 / 저널 뒤 ack 전 · v2 뒤 늦은 v1 writer · 회수 뒤 늦은 writer · 용량 초과 · 재시작 전에 받아 두기만 한 미반영 파일 + 그사이 회차 종료/회수 · `apply_within_ms` 초과 · 기기 시계를 앞뒤로 변경 · 끝난 연결 세대의 늦은 sync 응답·webview callback | 모든 경계에서 **v1 카드가 계속 열림**(index는 전부 아니면 전무, 가리키는 파일은 지워지지 않음), 역전 0, 저널에 `reflected`가 생기는 것은 index commit + 재검증 뒤뿐(거짓 reflected 0). 재시작 reconciler는 참조되지 않는 파일을 **승격하지 않고 지움** — 회차 종료·회수 뒤 새 카드 0, 다시 실려야만 적용. 시계 변경은 판정에 영향 0. 저장 실패는 `failed`·채팅 정상. 늦은 응답의 items·withdraw·acks는 적용 0, callback은 빈 상태 | App host(fault 주입, Mac) + Service. **Windows rename·파일 점유·한글 경로는 NOT RUN** | NOT RUN · 계획 |
+| D10 | 부분 실패와 확정 뒤 안내: 5석 중 반영 2·실패 1·미확인 1·전달 전 1 → ‘실패·미확인만 다시 선택’ → 그사이 1명이 늦게 반영됨 · 확정 뒤에도 확인 단계의 안내(`확인만 했습니다. 아래에서 요청해야…`)가 남는지 — **배포와 U1 선택 회수 양쪽** | 버튼은 요청을 보내지 않음. 누르는 순간 다시 읽어 선택 = 실패 1명만(늦게 반영된 미확인 제외), 반영된 2명 재실행 0. 미확인 줄에 근거와 ‘다시 보내도 중복 카드 없음’ 문구. 확정이 접수되면 안내가 확정 뒤의 말로 바뀌고, 결과가 최종 상태(`모두 반영`/`서버 검증됨 · 결과 확정`)를 말하는 화면에 그와 모순되는 과거 안내 0 | 브라우저 e2e + Service + 실제 Mac | NOT RUN · 계획 |
+| D11 | 콘텐츠 접근: 연결하지 않은 학생 · 비선택 좌석의 ops 자격 · 교체된 학생의 옛 자격 · 다른 회차 자격으로 내용을 얻으려는 모든 경로(`sync`, 강사 `contents` GET, 추측한 URL) | 학생용 콘텐츠 API 부재(404), 강사 GET은 `distribute` 없이는 403, 비선택·교체·타 회차 자격의 sync 응답에 items 0. 본문이 보드 `/status`·감사·대상 원장 응답에 나타나지 않음 | Service negative | NOT RUN · 계획 |
+| D12 | 내용 안전: `<script>`·`<img onerror>`·마크다운 링크·`javascript:`/`http:`/IP/userinfo/허용 목록 밖 host·셸 명령·`file://` 경로·제어문자·2,001자 | 허용 밖은 `400`. 통과한 문자열은 기기·Chalk에서 **글자 그대로** 보이고 DOM에 새 element·요청 0. 자동 URL 열기·다운로드·AI 호출·입력창 삽입 0. 링크는 학생 클릭 뒤에만 https 재검사 후 열림. 결과 어휘에 ‘다운로드/파일 전달 완료’ 없음 | Service + webview 렌더 시험 + 브라우저 e2e | NOT RUN · 계획 |
+| D13 | 회수·종료: 반영 전 실행 회수 · 반영 뒤 실행 회수(다른 유효 배포 없음) · 회수 중 기기 부재 → grant 폐기/만료 · `ops_distribute`를 끈 상태에서의 회수 전달 · 종료된 회차의 새 콘텐츠/배포 vs 종료 뒤 회수·늦은 receipt · 종료 뒤 학생의 재열람 · 새 회차 연결 · 좌석 이동 | 반영 전 `revoked`·제안 중단. 반영 뒤 `withdraw_pending`→`withdrawn`, 카드가 ‘강사가 회수한 자료입니다’로 바뀌고 학생 초안·대화·workspace 파일 hash 전후 동일. 연결이 끝난 기기는 **`withdraw_unconfirmed` — 원격 삭제 완료로 세지 않음**. flag OFF에서도 tombstone·receipt ack는 오가고 새 items는 0. 종료 뒤 새 요청 `409 run_ended`, 회수와 늦은 receipt는 grant가 살아 있는 동안 처리, 기존 카드는 로컬에서 열림. 새 회차·새 좌석 화면에 이전 카드 0(`detached`) | Service + App host + 브라우저 e2e | NOT RUN · 계획 |
+| D14 | 한도·D1 모양·장애 격리: 자료 51개·revision 21개·분당 21회 · 응답 3번째 item·11번째 tombstone·7번째 receipt · 제안 무응답이 만료까지 지속 · 저널 200건 · 배포 교환 예외 주입 · 배포 행 조회 예외(손상) · **30/100/200석 확정과 sync를 로컬 workerd D1에서 `meta.rows_read/rows_written`·호출당 문장 수로 계측**(준비·동시 배포·정상 idle·중복 receipt·전 좌석 동시 재접속) | 한도는 `429`/`more:true`, 재시도는 요구 문서 상한 안에서 멈춤, 부분·미확인을 성공으로 센 집계 0. 교환 예외: 블록만 빠지고 관측·명령·채팅 정상(없음≠성공). 손상 행: 재생·조회·전달 `503`. 계측 허용 한도(요구 문서): idle sync 증가분 쓰기 0·읽기 ≤ 1·문장 +0, 확정 ≤ 12쿼리·문장당 bound ≤ 30·**200석도 batch 1개**(여러 transaction으로 쪼개지 않음), 대상 1명 정상 전달 쓰기 ≤ 20행, sync 1회 ≤ 45문장, 모델 대비 +25% 이내. 기존 채팅 p95 증가 ≤ 5%(AT-25 기준) | Service fault + 로컬 workerd D1 계측. **운영 D1의 쿼터·latency·30초 한도·계정 plan은 NOT RUN/미확인** | NOT RUN · 계획 |
+| D15 | 기존 수업 회귀: flag 전부 OFF · `ops_distribute`만 OFF인 기존 ops 회차(U1 선택 회수, 복구·코칭 명령, 일시정지, ‘수업 마무리’) · migration 0023 전/후 fresh vs 누적 | 기존 worker·review·Chalk·확장 suite와 기존 브라우저 e2e 전부, U1 독립 재현(공통 git-dir 증거 폴더의 검사 스크립트) 그대로 PASS. schema 동등·기존 테이블 불변·재적용 멱등(D1 리허설). `send_question` 동작 불변 | regression + 로컬 workerd/D1 | NOT RUN · 계획 |
+| D16 | 접근성·표시: 학생 카드와 Chalk 작성/결과 화면 — 색 없이 읽기(흑백), 키보드만, 200% 확대, 390px, 긴 한글·긴 URL | 상태·‘새 자료’가 글자로 구분됨, 모든 조작에 포커스·접근 이름, 가로 넘침 0, 작업 화면 Primary 1개 유지(SX-04)·모달 0·자동 펼침 0 | 브라우저 e2e + 실제 Mac | NOT RUN · 계획 |
+| **M1 실제 Mac** | 실제 Studio 창(A1, 공식 shell 복사본 + 현재 확장·SDK) + **실제 Chalk `/manage`(보이는 브라우저 창)**: 강사가 자료 작성 → A1만 선택 → 미리 확인 → 보내기 → 학생 창의 작업 화면 카드 → 학생이 닫았다가 다시 열기 → **앱 완전 종료 뒤 재시작** → ‘이어서 하기’ 진입 화면과 작업 화면 양쪽에서 같은 카드 → rev 2 배포 → 카드 1장이 rev 2로 → 같은 rev 2를 한 번 더 배포(`no_change`) → 첫 실행 회수(카드 유지) → 둘째 실행 회수(카드 내려감) | 보드: A1 `보관함 반영`(그 앞 단계 시각 포함), 합성 A2·A3(연결+선언 상태)은 targets 0·보관함 0. 학생 workspace 파일·대화 hash 전후 동일. 재시작 뒤에도 카드 유지·중복 0. 확정 뒤 강사 화면에 확인 단계 안내가 남지 않음. 증거: source SHA·shell/SDK 버전·`result.json`·화면(강사/학생 각 단계)·보관함 index hash | 실제 Mac GUI | NOT RUN · 계획 |
+
+**증거 층의 구분(실행 기록을 쓸 때 그대로 지킬 것).** ‘Service(SQLite)’ = Node SQLite + in-memory 대역, ‘로컬 workerd/D1’ = wrangler의 로컬 D1(조건부 batch의 트랜잭션 의미·migration 적용·`rows_read/rows_written` 계측은 여기까지만 증명되며 **운영 D1 실측이라고 부르지 않는다**), ‘실제 Mac’ = 실제 창 1대 + 합성 좌석. **실행 전까지 NOT RUN으로 남는 환경:** Windows(경로 구분자·한글 사용자 폴더·보안 프로그램의 `globalStorage` 쓰기), 학교망(TLS 재서명·프록시에서 24 KiB 응답), Cloudflare staging/production D1(0023 적용, 실제 D1의 guard 동작·호출당 쿼리 한도·30초 batch 한도·쿼터, 계정 plan은 미확인), 실제 기기 2대 이상의 동시 수신, 실제 모델·실제 메일(이 흐름은 둘 다 쓰지 않지만 전체 목표의 미실행으로 남는다). 운영 활성화·owner 승인(INT-CO-04)은 시험 결과가 아니라 사람의 결정이다.
+
+<a id="remote-management-u2-run-20260921"></a>
+
+### U2 — 공지·자료 대상 배포: 실행 기록 · 2026-09-21
+
+[계약](../requirements/classroom-admin.md#remote-management-u2-20260921) · 위 [인수 계획](#remote-management-u2-plan-20260921)의 D1~D16·M1을 구현과 함께 실행했다. 계획 표의 상태 칸은 고치지 않았다 — 실행된 것은 이 절에만 있다. 모든 계정·수업·모델 응답은 합성이고, `ops_distribute`는 시험 회차에서만 켰다. 운영·staging에는 아무것도 적용하지 않았다.
+
+| 층 | 무엇을 | 결과 |
+|---|---|---|
+| Service (SQLite, 합성 5석 + 200석) `worker/test/classroom-ops-distribution.test.mjs` | 대조군 2(내용·링크·선택 정규화 / 전이 표·`card` 표·기한·재시도 간격·키) · **D2 권한**(다른 capability 전부 가진 강사 Y·다른 코호트·학생 토큰·ops 자격 거부, `/status.distribution`, 좌석별 보관함 선언) · contents(불변 revision·멱등·비밀 마스킹 뒤 hash·두 저자 경합·종류 변경 거부·빈 허용 목록의 링크 거부) · **D1** A1·A3 선택/A2 비선택(A2는 행 0·블록 0) · **D3/D4** 구 앱 `unsupported`, 오프라인 `accepted_offline` → 재연결 뒤 같은 의도 전달 · **D7** 더블클릭·응답 유실·같은 key 다른 요청 3종·거부 6종·같은 판 재배포 `no_change` · **D8** v2 뒤 늦은 v1(`superseded`, 늦은 receipt `final`)·v1로 되돌리기 거부·**같은 v2 두 실행을 순서대로 회수(첫 회수 `covered`, 마지막 회수에서 내려감, 남아 있는 v1 실행이 v1을 되살리지 않음)**·제안 키/회수 키 교차 ack 거부·중복 ack·**대기 중 배포가 받치다 만료되면 coverage 재정산** · **D13** retire·연결이 끝난 기기는 `withdraw_unconfirmed` · **D2 철회**(A 배포/B 연결: KV를 지연시킨 채 D1 fence만으로 대기 중 배포 `revoked`·B의 연결은 그대로·검증 통과 뒤 요청 `403 issuer_revoked`·D1 실패 주입 시 `ok:false`이고 그동안 접수됨을 그대로 관측·재시도 멱등·이미 나간 응답은 receipt 거부 + tombstone·un-revoke는 sweep을 되살리지 않음·재범위화 `distribute` 유/무·fence 실패 시 새 토큰 미반환) · **D5** 커밋 경계 5종(flag·종료·retire·좌석 주인 변경·정상 API로 명단 교체) 0건 기록 · **D6** 재발급 뒤 옛 키 `stale_offer`·기기 교체 되돌림 · sync 조건 표(flag OFF에서 새 제안 0·receipt 기록·회수 전달, 종료 뒤 `expired`/`unconfirmed`·늦은 `reflected` 수용) · **D14** 응답 2개·`more`·receipt 6개·교환 예외 격리·조회 장애 503·분당/판 한도 · 30/100/200석 확정의 문장 수 동일 · **D15** flag 없는 회차의 sync 응답 key 불변·오타 flag 400·ops OFF 404 | 16 PASS |
+| 실제 기기 클라이언트 ↔ Service `worker/test/classroom-ops-distribution-device.test.mjs` | 확장의 실제 sync 루프 + `InboxSession` + 실제 디렉터리의 `InboxStore`: 선택/비선택(비선택 기기는 블록 0·디렉터리 0, `ops_commands` OFF에서도 좌석 lease 확보) · 응답 2회 유실 뒤 1회 적용 · 재시작 뒤 카드 유지 · 같은 판 재배포 `no_change` · 순서대로 회수(기기가 `withdrawn` 확인, v1 미복원) | 4 PASS |
+| 기기 보관함 (실제 디렉터리, macOS/APFS) `extensions/hypeproof-chat/test/classroom-inbox.smoke.mjs` | 대조군 3(Service와 hash·한도 일치 / 순번 규칙 표 / ack는 자기 키·단계만) · 정상 v1→v2→재시작 · **D9 v1 보유 중 v2 적용의 네 경계에서 중단**(rev tmp / rev link 뒤 / index tmp / index link 뒤) + index link 거부(EPERM) + rev 쓰기 거부(ENOSPC): 모든 경우 v1 카드 유지·거짓 `reflected` 0·재시작 reconciler는 고아 파일을 승격하지 않고 삭제 · **D8** 늦은 v1·회수 뒤 늦은 제안·회수/재배포 교차 두 순서 동일 결과·보유한 적 없는 자료의 회수 · **정지된 writer와 두 창**(index tmp 직후 멈춘 writer가 깨어나도 v3 위에 v2를 못 씀, 8개 동시 writer 유실 0) · **실제 프로세스** SIGKILL(커밋 중) / SIGSTOP→경쟁 commit→SIGCONT · **적용 기한**(요청 시각 기준 29초 허용 / 31초·잠자기·시계 앞뒤·500ms 예산 초과는 무보고 폐기 / 재시작 뒤 고아 미승격 / 연결 종료 뒤 적용 0) · hash 불일치·모르는 kind·같은 판 다른 내용·손상 파일·디렉터리 밖 쓰기 0 | 10 PASS (3회 반복) |
+| **로컬 workerd D1** (miniflare — 운영 D1 아님) `worker/test/classroom-ops-distribution-d1.test.mjs` | 0011→0023 두 번 적용, 기존 객체 SQL 불변, 새 테이블·부분 인덱스 존재 · D1의 `meta.rows_read/rows_written`과 문장·bind 수 계측(meta 없는 문장은 0이 아니라 `unmetered`로 세어 실패시킴) | PASS — 아래 실측 표. 이 PR에서 `test:classroom-ops:d1`을 PR CI(`worker / test`)에 편입했다(기존에는 로컬 전용이었다) |
+| 실제 브라우저(Chromium) + 실제 Chalk + Service + **좌석별 실제 기기 클라이언트** `e2e/classroom/ops-distribution.mjs` | 권한 없는 강사에게 기능 미표시 · **D1** 작성→A1·A3 선택→미리 확인→확정→두 기기 반영, A2 무접촉, **확정 뒤 ‘확인만 했습니다’ 안내가 사라지고 최종 결과 옆에 되돌아오지 않음** · 늦은 미리 확인 응답(네트워크 층에서 붙잡음)·확인 뒤 본문 수정·숨은 버튼 강제 클릭 → 전송 0 · **D3/D4/D9/D10** 구 앱·오프라인·디스크 거부(v1 유지)·‘실패·미확인만 다시 선택’(요청 0, 실패한 2석만) → 복구 뒤 v2 한 장 · **D8/D13** 같은 판 재배포 = 카드 1장, 첫 회수 `covered`, ‘보낸 자료’에서 이전 실행을 찾아(재전송 0) 회수 → 카드 내려감·v1 미복원·전달 증거와 현재 보관함이 나란히 표시 · retire · 종료된 수업 · **D12/D16 실제 학생 컴포넌트**(`InstructorInbox.tsx`를 번들해 Chromium에 mount): 악성 문자열이 글자 그대로, 생성된 `img/script/a` 0, 네트워크 요청 0, 링크는 버튼을 눌렀을 때만 host로 메시지, 기본 닫힘, 키보드 조작, 390px·200%에서 가로 넘침 0, Primary 0 | 7 PASS (5회 반복). CI `classroom / browser`에 추가 |
+| U1 후속 `e2e/classroom/ops-selection.mjs` | 선택 회수 확정 뒤 확인 단계 안내가 남지 않음(실제 Mac에서 관측된 문구) | 8 PASS |
+| 회귀 (로컬, Node 22.22.1) | worker `npm test` 전체 · `test:classroom-ops:d1`(로컬 workerd) · typecheck / Chalk `npm test` · typecheck / 확장 `npm test`(hook-order 포함) · typecheck / `mac-devhost.test.mjs` / 브라우저 e2e `classroom`·`classroom-ops`·`-roster`(7)·`-selection`(8)·`-distribution`(7) | 전부 exit 0. 기존 시험에서 바꾼 기대값은 하나: ‘모든 회차 flag 기본 OFF’ 단언에 `ops_distribute:false` 추가 |
+| **실제 Mac M1** `e2e/classroom/mac-distribution.mjs` | 아래 | PASS |
+
+**로컬 workerd D1 실측 (운영 D1 아님 · 계정 plan 미확인).**
+
+| 경로 | 문장(batch) | 최대 bind | rows_read | rows_written |
+|---|---:|---:|---:|---:|
+| 배포 확정 30석 (인증 읽기·조건부 batch·정산·결과 view 포함) | 20 (2) | 25 | 1,044 | 129 |
+| 배포 확정 100석 | 20 (2) | 25 | 2,235 | 409 |
+| 배포 확정 200석 | 20 (2) | 25 | 4,246 | 809 |
+| sync · flag OFF · idle | 4 | 3 | 5 | 0 |
+| sync · flag ON · 대기 없음 | 5 | 3 | 6 | 0 |
+| sync · 제안 2건 | 16 (2) | 19 | 61 | 2 |
+| sync · `received`+`reflected` | 21 (4) | 18 | 69 | 10 |
+
+아래 두 sync 행은 [재인수 수정](#remote-management-u2-reaccept-20260921) 뒤의 값이다(수정 전 `51708c7`: 제안 2건 bind 9·읽기 49, receipt bind 11·읽기 54). 문장·batch·쓰기 수는 그대로이고, 기록하는 문장이 전제조건을 스스로 검사하게 되면서 **bind와 읽은 행만** 늘었다(제안 1건당 읽기 약 +6행, receipt 1건당 약 +7행 — PK·UNIQUE 조회). idle과 확정 경로는 바뀌지 않았다(100석 확정 읽기는 실행마다 2,232~2,235로 3행 흔들린다).
+
+게이트: 좌석 수와 무관한 문장 수(200석도 조건부 batch 1개), 문장당 bind ≤ 30, idle 증가분 쓰기 0·문장 ≤ +1·읽기 ≤ +2, sync 1회 ≤ 45문장, 대상 1명 전달 쓰기 ≤ 20행 — 모두 충족. 확정 쓰기는 요구 문서의 모델(125/405/805행)과 +3% 이내다. 확정 읽기(좌석당 약 20행)는 모델에 없던 항목으로, 확정 직후의 결과 view·정산이 대부분이다. 운영 D1의 latency·쿼터·30초 한도는 NOT RUN.
+
+**실제 Mac M1 (source `2f4eab8`, 공식 shell 0.1.56 복사본, Agent SDK 0.3.207 + 실제 binary, 전용 devhost·user-data·HOME·포트 18771/18772).** 강사 쪽은 전부 **보이는 Chromium 창의 실제 Chalk `/manage`에서 조작**했고(API 직접 호출 없음), 학생 쪽은 실제 Studio 창을 디버깅 포트로 읽었다.
+
+1. 실제 창 A1: 수업 진입 → 1회용 코드로 연결 → 실제 1턴(모델 응답만 합성) → 입력창에 초안 남김.
+2. Chalk: 공지 작성·저장(전송 0 확인) → **A1만 선택** → 미리 확인(‘선택하지 않은 2명에게는 아무것도 가지 않습니다’) → 보내기 → `대상 1명 · 보관함 반영 1 · 모두 반영`, ‘결과 확정 · 읽음·이해를 뜻하지 않습니다’.
+3. 실제 창: 작업 화면 rail에 `강사가 보낸 공지·자료 1개 · 새 자료 1개`가 **닫힌 채** 나타남(모달 0) → 펼치면 본문이 `<b>…</b>`까지 글자 그대로 → 닫았다가 **다시 열기** → ‘새 자료’ 표시 사라짐 → 명령 팔레트로 시작 화면을 열어 **진입 카드에도 같은 목록**(Primary 1개 이하).
+4. **앱 완전 종료(SIGTERM, exit 0) → 재시작**: 진입 화면과 작업 화면 양쪽에 같은 카드 1장(`끝난 수업의 자료` — 이 harness는 Keychain 대화상자를 피하려고 secret을 메모리에만 두므로 종료와 함께 운영 자격이 사라진다. 카드는 **연결 없이 디스크에서** 읽힌 것이다) → 새 1회용 코드로 다시 연결.
+5. Chalk: 본문 수정·저장(2번째 판) → A1에 보내기 → 실제 창의 카드 1장이 2번째 판(`수정됨`)으로 → **같은 2번째 판을 한 번 더** 보내기(미리 확인에 ‘이미 같은 판이 있음’) → `no_change`, 카드 1장 그대로.
+6. Chalk: 방금 실행 회수 → ‘같은 판의 다른 배포가 보관함을 유지’, 실제 창 카드 유지 → ‘보낸 자료’에서 남은 2번째 판 실행을 찾아 회수 → 실제 창 카드가 ‘강사가 회수한 자료입니다’로(제목·본문 0, **1번째 판 미복원**) → Chalk에 `보관함: 기기 보관함에서 회수됨`.
+7. 학생 workspace 두 파일 sha256 전후 동일, 대화 유지(재시작 뒤 포함), 입력 초안 유지(재시작 뒤 화면에서도 확인). 합성 A2·A3(연결 + 보관함 선언, 실제 기기 클라이언트 구동): targets 행 0 · 받은 distribution 블록 0 · 보관함 디렉터리 없음. 모델 호출은 합성 1회, 실제 모델·메일 0.
+
+증거: devhost `distribution/result.json`, 화면 11장(강사 5 · 학생 6), `manifest.json`(bundle hash 4개가 현재 빌드와 일치). 1→4에서 재연결로 1번째 판 대상이 `device_generation 1`로 되돌려져 다시 `reflected`된 것도 result.json에 있다.
+
+**관측하지 않은 것 (NOT RUN).** Windows(link/rename·보안 프로그램의 파일 점유·한글 사용자 폴더), 학교망, Cloudflare staging/production D1(0023 적용·실제 guard·쿼터·30초 한도·plan), 실제 기기 2대 이상, 실제 모델·실제 메일, Keychain에 자격이 남는 설치본에서의 ‘재시작 뒤 연결 유지’(M1은 재연결로 대체), 전원 차단 수준의 내구성(fsync는 요청만 함), 100석 실부하에서의 채팅 p95(AT-25 기준 — 합성 부하 미실행), Safari/Firefox. D16의 200%·390px는 브라우저에 mount한 학생 컴포넌트와 Chalk 페이지에서만 봤고 실제 Studio 창의 확대는 보지 않았다. INT-CO-04 owner 승인과 운영 활성화는 시험 결과가 아니다.
+
+**구현하며 바뀐 계약**은 [요구 문서의 표](../requirements/classroom-admin.md#remote-management-u2-20260921)에 있다(현재 판 기준 coverage, 회수 전용 키, link() CAS, 요청 시각 기준 적용 기한, probe 분리).
+
+<a id="remote-management-u2-reaccept-20260921"></a>
+
+### U2 — 재인수 수정 기록 · 2026-09-21 (독립 검토가 `51708c7`에서 재현한 P1 1건 + receipt 결속 1건 + 화면 P2)
+
+Draft PR #1223(`51708c7`, CI 23/23)은 인수되지 않았다. 독립 검토의 재현 스크립트 4개(`management-20260921/u2-*.mjs` — 검토자 소유, 이 PR에 넣지 않음)를 같은 worktree에서 수정 전·후로 실행했다. 층은 전부 **로컬 HTTP + SQLite + 실제 `InboxSession/InboxStore`(임시 디스크)** 다.
+
+| 재현 | `51708c7` (수정 전) | 수정 뒤 (`9d85718`) |
+|---|---|---|
+| `u2-deferred-boundary-check` — 후보 SELECT 뒤·원장 UPDATE 전에 ①정상 회수 API ②flag OFF ③좌석 교체 ④옛 epoch receipt | ①②③ **FAIL**: 응답에 item 1건, 원장은 `revoked/accepted · offers 0` · ④ PASS | 4/4 PASS — 응답 item 0건, 원장 `offers 0 · offer_key ''` 그대로 · ④ 유지 |
+| `u2-revoke-inbox-impact` — 실제 기기 클라이언트·디스크 | **음성 FAIL**: 기록되지 않은 제안의 본문이 끝까지 보임(`final_visible 1`) · 양성(기록된 뒤 회수) PASS | 2/2 PASS — 음성 `initially_visible 0 → 0`, 양성 `1 → 0`(tombstone으로 내려감) |
+| `u2-receipt-binding-boundary-check` — receipt 행을 읽은 뒤·기록 전에 ①재로그인(epoch+1) ②좌석 교체 (수정 중 추가된 스크립트) | `4aaab9e`에서 ①② **FAIL**: `reflected`·카드·감사 행이 바뀐 신원 아래 기록됨 | 3/3 PASS — `changed · final=false`, 상태·카드·감사 0. 양성 대조군은 정상 기록 |
+| `u2-index-corruption-check` | PASS | PASS(변경 없음) |
+
+**원인.** `distributionExchange`는 후보를 읽고(`SELECT … next_offer_at`) 원장에 기록한 뒤 응답을 만들었는데, 응답은 **읽은 후보 목록**에서 만들어졌고 기록 UPDATE의 조건은 행의 상태·키뿐이었다. 그 사이에 끼어든 회수·flag·명단 변경은 UPDATE를 0행으로 만들었지만(또는 조건에 없어 통과했지만) batch는 성공했고 item은 그대로 실렸다. receipt도 같은 모양이었다(행 CAS는 있었으나 **누구의 sync인지**는 기록 시점에 다시 묶지 않았다). **수정:** 기록하는 문장이 전제조건 전체를 스스로 검사하고, 응답·카드·감사 행은 **그 문장이 실제로 바꾼 행**에서만 만든다(‘한 번 더 읽기’ 아님). 계약은 [요구 문서의 표](../requirements/classroom-admin.md#remote-management-u2-20260921) 끝 8행.
+
+**제품 회귀로 편입한 것.** 각 경합은 실제 SELECT 하나의 결과를 붙잡아 두고 그 사이에 **실제 요청**을 실행하는 hook으로 만들며, hook이 발화하지 않으면 시험이 실패한다(주입 지점이 SQL과 어긋난 채 통과하는 것을 막음).
+
+| 층 | 추가 | 결과 |
+|---|---|---|
+| Service `classroom-ops-distribution.test.mjs` D5 ‘OFFER commit boundary’ | 양성 대조군(간섭 없음 → 응답과 원장 일치) · 제안 기록 전 간섭 6종(배포 회수·자료 회수·flag OFF(API)·수업 종료·재로그인·lease 이전) + 좌석 교체(API): 응답 0건·원장 `offers 0`, 조건이 돌아오면 같은 의도 재제안 · **기록된 뒤 회수 → receipt는 `revoked·final` + tombstone 즉시** · receipt CAS 패배: `changed·final=false`, 카드·감사 0, 재전송은 지금의 행 기준 · `no_change` 판정 순간 카드가 사라지면 ‘이미 보유’라 하지 않고 다음 sync에 실제 전송 · receipt 신원 결속(재로그인 → `changed` → 재전송 `stale_offer·final` → 새 키로 재제안·정상 기록 / 좌석 교체) · 회수 확인 receipt의 신원 결속 · `card` 대조군 5행(전달 중 회수된 카드 표시) | 17 PASS. 새 검사는 수정 전 store에서 **실패함을 확인**(offer 경계: ‘must not be in the answer’, receipt: ‘not recorded, not final’) |
+| 실제 기기 루프 ↔ Service `classroom-ops-distribution-device.test.mjs` | 같은 회수 경합을 실제 sync 루프로: 응답에 item 0, **디스크 어디에도 본문 없음**, 강사 view `revoked · none` / 양성: 1 tick으로 저장됨을 확인 → 회수 → 카드 `withdrawn`, **본문 파일 사라짐**, 저널 0, view `revoked · withdrawn` | 5 PASS |
+| 확장 `classroom-inbox.smoke.mjs` | `inboxPresence` 대조군 6행(연결·미연결·정상 만료·종료 시각 경과·종료 시각 모름) · 미연결 view에서도 보유 자료 읽힘 · 확정 종료는 ‘미확인’으로 같이 표시되지 않음 | 10 PASS |
+| 브라우저 `e2e/classroom/ops-distribution.mjs` | 1280×720 첫 화면: 선택 → 조치 → **첫 학생 행 < 720px**, 작성기·이력 닫힘, 결과·이력은 목록 뒤, 공유 패널은 그 뒤 · 권한 없는 강사에게 작성기·보내기·결과 모두 미표시 · 선택 요약에 ‘전달되지 않습니다’ 없음 + 조치별 정책 줄(미연결 좌석이 있을 때만) · 저장줄 ‘저장만으로는 아무에게도 보내지지 않습니다’, 주 흐름에 ID·hash 없음(‘검증용 상세’에 전체) · 전송 접수 뒤 작성기 접힘·요약줄/저장줄이 ‘보낸 배포가 있음’ · 회수된 실행: 머리말 `회수한 배포`, ‘모두 반영’ 없음, ‘지금 기기’ 줄(다른 배포로 유지 1 / 회수 확인 2·남은 자료 없음) · 학생 컴포넌트: 미연결 ‘수업 연결 확인 전’ + 안내 1줄, 확정 종료 ‘끝난 수업의 자료’, 연결 중 둘 다 없음 | 7 PASS |
+| 회귀 (로컬, Node 22.22.1) | worker `npm test` · `test:classroom-ops` · `test:classroom-ops:d1` · typecheck / Chalk `npm test` · typecheck / 확장 `npm test` · typecheck(host·webview) / 브라우저 e2e `classroom`·`classroom-ops`·`-roster`·`-selection`·`-distribution`·`classroom-report` | 전부 PASS |
+
+**화면(P2)에서 계측기 쪽 오류였던 것.** e2e가 접힌 작성기를 열지 않고 입력하려다 실패(제품 아님 — 시험이 새 구조를 따르게 고침), 학생 컴포넌트 시험의 `window.root`가 `id="root"` 요소와 이름이 겹쳐 실패(시험 변수명 변경).
+
+**실제 Mac M1 재실행 (source `9d85718` — 이 기록을 담은 문서 커밋만 그 위에 있다 · 공식 shell 0.1.56 복사본(`f5939d9`) · Agent SDK 0.3.207 + 실제 binary · 확장 bundle hash 4개가 현재 빌드와 일치 · 전용 devhost·user-data·HOME·포트 18771/18772/9371).** 앞선 U2 runner(그 프로세스의 명령·cwd·포트를 확인한 뒤)만 내리고 다시 띄웠다. `:18761/:18762` 데모와 설치본은 건드리지 않았다(전후 같은 PID가 그 포트를 듣고 있음을 확인). 수정 도중의 `4aaab9e` 실행도 PASS였고, 그 뒤 Service가 바뀌어 최종 소스로 한 번 더 돌렸다. 강사 쪽은 전부 보이는 Chromium의 실제 Chalk `/manage`에서 조작했다.
+
+1. 강사 첫 화면(1280×720): 선택 묶음 477px → 조치 버튼 569px → **첫 학생 행 676px**, 작성기·이력 닫힘(수정 전 독립 검토 실측 1742px).
+2. 작성기를 열어 공지 저장(전송 0) → A1만 선택 → 미리 확인 → 보내기 → 작성기가 접히고 요약줄 ‘이 판을 보낸 배포가 아래 조치 결과에 있음’, 저장줄에 ‘보내지 않았습니다’ 없음 → `대상 1명 · 보관함 반영 1 · 모두 반영`.
+3. 실제 창: 닫힌 카드 → 열기 → 다시 열기, 진입 카드 동일, 대화·입력 초안·workspace 해시 불변.
+4. **앱 완전 종료 → 재시작**: 양쪽 표시면에 같은 카드 1장, 요약은 **‘수업 연결 확인 전’**(‘끝난 수업’이라고 말하지 않음 — 회차는 열려 있다) → 새 코드로 다시 연결하면 그 문구가 사라짐. **같은 grant의 자동 재연결은 이 harness에서 NOT RUN**(secret을 메모리에만 둠).
+5. 2번째 판 → 카드 1장이 2번째 판으로 → 같은 판 한 번 더 → `no_change`, 카드 1장.
+6. 방금 실행 회수 → 머리말 `회수한 배포`, ‘모두 반영’ 없음, ‘지금 기기: … 다른 배포로 보관함에 남아 있음 1’, 실제 창 카드 유지 → 이력에서 남은 2번째 판 실행을 찾아 회수 → 실제 창 ‘강사가 회수한 자료입니다’, 강사 ‘기기 보관함에서 회수 확인 1 · 회수 확인 불가 0 — 이 배포로 기기에 남은 자료는 없습니다’, 1번째 판은 돌아오지 않음.
+7. 합성 A2·A3: targets 행 0 · distribution 블록 0 · 보관함 디렉터리 없음. 모델 응답은 합성(실제 모델 호출 0), 메일 없음.
+
+증거: devhost `distribution/result.json`·`run.log`·화면 13장(`00-instructor-first-screen-720` ~ `11-learner-work-screen-withdrawn`, `06b-learner-unconfirmed-connection` 포함), `manifest.json`, 독립 재현 4종 재실행 로그 `reacceptance/*-9d85718.log`(4종 모두 exit 0; 수정 도중의 `*-4aaab9e.log`에는 receipt 결속 FAIL 2건이 그대로 남아 있다). 이전 실행의 증거는 `distribution-2f4eab8/`·`distribution-4aaab9e/`로 보존했다. 실행기는 강사 페이지와 학생 앱을 연 채 떠 있다.
+
+**여전히 NOT RUN (PASS로 바꾸지 않았다).** Keychain 자격을 유지한 **같은 grant의 자동 재연결**(이 harness는 secret을 메모리에만 둔다 — 재시작 뒤 새 코드로 다시 연결했다), Windows, 학교망, Cloudflare staging/production D1(0023 적용·실제 guard·쿼터·30초 한도·plan), 실제 기기 2대 이상과 실제 네트워크 지연에서의 경합(위 경합은 로컬 SQLite에서 hook으로 만든 것이다), 실제 모델·실제 메일, VoiceOver/NVDA, Safari/Firefox, owner의 INT-CO-04 승인과 운영 활성화. U2는 원격관리 전체의 완료가 아니다(U3·AT-40/41 미착수).
 
 <a id="windows-field-cuesheet-20260921"></a>
 

@@ -715,6 +715,14 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   /** #751 — metadata-only observer for remote classroom operations; null unless the learner connected. */
   opsObserver: import("./classroomOpsHost").ClassroomOpsObserver | null = null;
+  /** #751 U2 — set by extension.ts. The provider only relays: every answer is read from disk by the host adapter. */
+  inboxSource: { inboxView(): Promise<import("./classroomInbox").InboxView>; inboxOpened(objectId: string, generation: number): Promise<void>; inboxLink(objectId: string, url: string, generation: number): Promise<string | null> } | null = null;
+  async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
+  /** Shared with the start page: one rule for what a click on an instructor link may do. */
+  async handleInboxLink(msg: { objectId: string; url: string; generation: number; action: "open" | "copy" }): Promise<void> {
+    const url = await this.inboxSource?.inboxLink(msg.objectId, msg.url, msg.generation); if (!url) return;
+    if (msg.action === "copy") await vscode.env.clipboard.writeText(url); else void vscode.env.openExternal(vscode.Uri.parse(url));
+  }
   private opsLastArtifact: string | undefined;
   // #751 R3 — why new AI runs are held. Local editing, saving, Stop and export never consult this.
   private opsHold: "paused" | "stop_unconfirmed" | null = null;
@@ -2152,7 +2160,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.postLearningState();
         return;
       }
+      case "inboxRequest": await this.postInbox(); return;
+      case "inboxOpen": await this.inboxSource?.inboxOpened(msg.objectId, msg.generation); return;
+      case "inboxLink": await this.handleInboxLink(msg); return;
       case "ready":
+        await this.postInbox();
         await this.postConfig();
         await this.postHistory();
         await this.postLearningState();

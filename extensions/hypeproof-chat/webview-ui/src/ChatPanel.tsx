@@ -3,6 +3,7 @@ import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
 import { MissionHeader } from './MissionHeader';
 import { EvidenceDrawer } from './EvidenceDrawer';
+import { InstructorInbox } from './InstructorInbox';
 import { isObservationFormat, showsObservationResults } from '../../src/nativeObservationContract';
 import { MarkdownText } from './MarkdownText';
 import { DisconnectedChat } from "./StartPage";
@@ -239,6 +240,16 @@ export function ChatPanel(props: Props) {
       if (msg.type === "learningState") setLearning(msg.state);
     });
     return off;
+  }, []);
+  // #751 U2 — notices/materials an instructor sent. Nothing is kept here as a record: the host reads the inbox from disk
+  // and sends it; this panel asks again whenever it (re)appears, so a restart or a hidden sidebar loses nothing.
+  const [inbox, setInbox] = useState<import("../../src/classroomInbox").InboxView | null>(null);
+  useEffect(() => {
+    const off = onHostMessage((msg) => { if (msg.type === "inboxState") setInbox(msg.inbox); });
+    const ask = () => { if (document.visibilityState !== "hidden") postToHost({ type: "inboxRequest" }); };
+    ask(); document.addEventListener("visibilitychange", ask);
+    const stop = () => { off(); document.removeEventListener("visibilitychange", ask); };
+    return stop;
   }, []);
   /**
    * #642/#649 (2026-08-20 review) — the **unguarded window** between pressing a friend
@@ -699,6 +710,10 @@ export function ChatPanel(props: Props) {
           </>
         );
       })()}
+
+      {/* #751 U2 — instructor notices/materials: the coach rail's "강사 메시지" kind (SX-06), outside the message stream
+          (SX-05), closed by default, no Primary (SX-04). Drawn with or without a lesson. */}
+      <InstructorInbox inbox={inbox} post={postToHost} />
 
       {/* Region D — the completion gate and the Evidence drawer (SX-14·17). Drawn only
           when the host sends `learningState`. On a connection that does not send it (a

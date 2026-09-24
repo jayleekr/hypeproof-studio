@@ -15,9 +15,21 @@ import {
   ChangeGate, OPS_CLIENT_CAPABILITIES, OPS_PROTOCOL, OpsOutbox, activationPayload, classifyFailure, errorPayload,
   evidencePayload, runtimePayload, stepPayload, turnObservations, uploadPayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
 } from "./classroomOps";
+import { INBOX_CAPABILITY, emptyView, inboxPresence, type InboxView } from "./classroomInbox";
+import { InboxSession, InboxStore, inboxDir, inboxView } from "./classroomInboxStore";
 
 const CREDENTIAL_KEY = "hypeproof.classroomOps.credential";
 const META_KEY = "hypeproof.classroomOps.connection";
+/**
+ * Which inbox the learner is shown: the one of the connection that is valid now, or of the last one that ended the
+ * normal way (class over). Kept apart from META_KEY because that one is forgotten when a class ends, and material the
+ * learner already received must stay readable after it. `hidden` = the Service closed that connection for good
+ * (revoked, seat re-assigned, replaced by another device): this device can no longer be told about a withdrawal, so it
+ * stops showing the instructor's text. Nothing is deleted.
+ */
+const INBOX_KEY = "hypeproof.classroomOps.inbox";
+/** `ends_at`/`expired` are the only things that let this device SAY a class ended; without them a missing connection is just that. */
+interface InboxPointer { cohort: string; run: string; seat: string; student: string; hidden: boolean; ends_at?: number; expired?: boolean }
 /** `student`/`run`/`lesson` come from the Service's connect response: they are what a collected snapshot is bound to. */
 interface ConnectionMeta { grant_id: string; class_run_id: string; seat_id: string; expires_at: number; poll_after_ms: number; student?: { u: string; c: string; p: string }; run?: { starts_at: number; ends_at: number }; lesson?: { course_id: string; version: string } | null }
 /** After its normal expiry a connection can only finish an upload that was already authorized, for this long after class. */
@@ -270,7 +282,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     try {
       res = await fetch(`${this.base()}/classroom/ops/connect`, {
         method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(10000),
-        body: JSON.stringify({ ticket, app_instance_id: this.appInstanceId, boot_id: randomUUID(), protocol: OPS_PROTOCOL, capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(this.executors())], app_version: this.version() }),
+        body: JSON.stringify({ ticket, app_instance_id: this.appInstanceId, boot_id: randomUUID(), protocol: OPS_PROTOCOL, capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(this.executors()), INBOX_CAPABILITY], app_version: this.version() }),
       });
     } catch {
       void vscode.window.showWarningMessage("서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 같은 코드로 다시 시도하세요."); return;
@@ -295,9 +307,55 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     void vscode.window.showInformationMessage("수업 연결을 끊었습니다. 수업 참여와 작업 파일은 그대로입니다.");
   }
 
+  // ── U2 inbox: what the two learner surfaces read ──
+  private inbox: InboxSession | null = null;
+  private readonly inboxListeners = new Set<(view: InboxView, fresh: boolean) => void>();
+  /** `fresh` = a card just arrived or changed (the surfaces may say so once); false = state refresh only. */
+  onInboxChanged(listener: (view: InboxView, fresh: boolean) => void): vscode.Disposable { this.inboxListeners.add(listener); return { dispose: () => this.inboxListeners.delete(listener) }; }
+  private inboxChanged(fresh: boolean): void {
+    void this.inboxView().then((view) => {
+      for (const l of this.inboxListeners) l(view, fresh);
+      // A convenience, never evidence: whether this shows, fails or is dismissed changes nothing that is reported.
+      if (fresh && view.unread) void vscode.window.showInformationMessage("강사가 자료를 보냈습니다. 작업 화면의 ‘강사가 보낸 공지·자료’에서 볼 수 있습니다.");
+    }).catch(() => undefined);
+  }
+  /**
+   * Always answered from disk, through the same read path that decided "reflected". Empty unless the learner whose token
+   * this device verified is the learner the inbox belongs to — a shared PC's next user sees nothing of the previous one.
+   */
+  async inboxView(): Promise<InboxView> {
+    const gen = this.generation, p = this.context.globalState.get<InboxPointer>(INBOX_KEY), me = tokenIdentityUnverified(this.token);
+    if (!p || p.hidden || !me.u || me.u !== p.student || me.c !== p.cohort) return emptyView(gen);
+    const connected = !!this.meta && this.meta.class_run_id === p.run && this.meta.seat_id === p.seat;
+    const presence = inboxPresence({ connected, expired: p.expired === true, ends_at: p.ends_at ?? 0, now: Date.now() });
+    try { return await inboxView(new InboxStore(inboxDir(this.context.globalStorageUri.fsPath, p)), { run: p.run, student: p.student, generation: gen, ...presence }); }
+    catch (err) { this.log(`[inbox] read: ${(err as Error).message}`); return emptyView(gen); }
+  }
+  /** A callback from a renderer names the generation it was drawn under; one from an ended connection changes nothing. */
+  async inboxOpened(objectId: string, generation: number): Promise<void> {
+    if (generation !== this.generation || !/^[A-Za-z0-9-]{8,64}$/.test(objectId)) return;
+    const p = this.context.globalState.get<InboxPointer>(INBOX_KEY); if (!p || p.hidden) return;
+    const session = this.inbox ?? new InboxSession({ store: new InboxStore(inboxDir(this.context.globalStorageUri.fsPath, p)), alive: () => true, clock: { mono: () => performance.now(), wall: () => Date.now() } });
+    await session.markOpened(objectId).catch(() => undefined); this.inboxChanged(false);
+  }
+  /** Only a link that is in a card this learner can see right now, and only https. Returns the URL to open, or null. */
+  async inboxLink(objectId: string, url: string, generation: number): Promise<string | null> {
+    if (generation !== this.generation) return null;
+    const card = (await this.inboxView()).cards.find((c) => c.object_id === objectId && !c.withdrawn);
+    return card?.links.some((l) => l.url === url) && /^https:\/\//i.test(url) ? url : null;
+  }
+  private async inboxExpired(): Promise<void> {
+    const p = this.context.globalState.get<InboxPointer>(INBOX_KEY); if (!p || p.hidden || p.expired) return;
+    await this.context.globalState.update(INBOX_KEY, { ...p, expired: true }); this.inboxChanged(false);
+  }
+  private async hideInbox(): Promise<void> {
+    const p = this.context.globalState.get<InboxPointer>(INBOX_KEY); if (!p || p.hidden) return;
+    await this.context.globalState.update(INBOX_KEY, { ...p, hidden: true }); this.inboxChanged(false);
+  }
+
   /** End the current connection in this window: no late response, queued approval or pause may act after this line. */
   private stopConnection(): void {
-    this.generation++;
+    this.generation++; this.inbox = null;
     this.loop?.stop(); this.runner?.close(); this.loop = null; this.runner = null; this.outbox = null;
     // Disconnecting ends the instructor's pause on this device; the Service's own admission still applies.
     this.paused = false; this.stopUnconfirmed = false; this.applyHold();
@@ -306,6 +364,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     this.stopConnection(); this.credential = ""; this.meta = null;
     await this.context.secrets.delete(CREDENTIAL_KEY);
     await this.context.globalState.update(META_KEY, undefined);
+    this.inboxChanged(false);
   }
 
   private async start(meta: ConnectionMeta, credential: string): Promise<void> {
@@ -332,8 +391,21 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     await runner.recover();
     if (!live()) { runner.close(); return; } // disconnected while the journal was being read
     this.runner = runner;
+    // U2 inbox. Only a connection that knows whose seat it is can hold one (the directory is per run, seat and learner).
+    let inbox: InboxSession | null = null;
+    if (meta.student) {
+      const pointer: InboxPointer = { cohort: meta.student.c, run: meta.class_run_id, seat: meta.seat_id, student: meta.student.u, hidden: false, ends_at: meta.run?.ends_at ?? meta.expires_at };
+      const store = new InboxStore(inboxDir(dir, pointer));
+      await this.context.globalState.update(INBOX_KEY, pointer);
+      // Files a previous run of this app fetched but never committed are removed, never promoted: their deadline died with it.
+      await store.reconcile(Date.now()).catch((err) => this.log(`[inbox] reconcile: ${(err as Error).message}`));
+      if (!live()) { runner.close(); return; }
+      inbox = new InboxSession({ store, alive: live, clock: { mono: () => performance.now(), wall: () => Date.now() }, log: this.log, changed: () => { if (live()) this.inboxChanged(true); } });
+      this.inbox = inbox; this.inboxChanged(false);
+    }
     this.loop = startOpsSync({
-      capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(executors)], onEpoch: (e) => { if (live()) this.epoch = e; },
+      ...(inbox ? { distribution: inbox } : {}),
+      capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(executors), ...(inbox ? [INBOX_CAPABILITY] : [])], onEpoch: (e) => { if (live()) this.epoch = e; },
       commands: runner as unknown as NonNullable<Parameters<typeof startOpsSync>[0]["commands"]>,
       post: (body, timeoutMs) => this.post(credential, body, timeoutMs), outbox: this.outbox, appInstanceId: this.appInstanceId,
       sample: () => { const r = this.runtime(); const changed = this.runtimeGate.next(r.status); if (changed) void this.outbox?.add("runtime", runtimePayload(changed)); return { idle_ms: Math.max(0, Math.round(r.idleMs)), runtime_status: r.status, control_revision: this.controlRevision }; },
@@ -342,7 +414,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       now: () => Date.now(), random: Math.random, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
       log: this.log,
       // Normal expiry keeps the credential for the upload-only afterlife; a revoked or replaced connection is dropped outright.
-      onDisconnected: (reason) => { if (!live()) return; this.log(`[ops] disconnected: ${reason}`); if (reason === "ops_grant_expired") { this.stopConnection(); void this.resumeUploadOnly(meta, credential); } else void this.forget(); },
+      onDisconnected: (reason) => { if (!live()) return; this.log(`[ops] disconnected: ${reason}`); if (reason === "ops_grant_expired") { void this.inboxExpired(); this.stopConnection(); void this.resumeUploadOnly(meta, credential); } else { void this.hideInbox(); void this.forget(); } },
     }, meta.poll_after_ms);
     this.context.subscriptions.push({ dispose: () => this.loop?.stop() });
     // The usual order in a class is "token first, pair later": the token was verified BEFORE this connection existed, so that
@@ -366,7 +438,8 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   // ── observations from the chat provider ──
 
   profileResult(r: { ok: boolean; status?: number; code?: string; requestId?: string; network?: boolean }, token: string): void {
-    this.token = token || this.token;
+    const before = this.token; this.token = token || this.token;
+    if (this.token !== before) this.inboxChanged(false); // whose inbox may be shown depends on who is signed in
     const id = tokenIdentityUnverified(token), seat = this.meta?.student;
     // Shared PC: someone else signed in. This seat's connection must not report, run commands or upload for them.
     if (r.ok && seat && id.u && id.c && (id.u !== seat.u || id.c !== seat.c)) {

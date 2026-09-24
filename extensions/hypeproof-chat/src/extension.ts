@@ -195,6 +195,8 @@ export async function activate(context: vscode.ExtensionContext) {
     },
   }, (line) => console.log(line));
   provider.opsObserver = classroomOps;
+  provider.inboxSource = classroomOps;
+  context.subscriptions.push(classroomOps.onInboxChanged(() => { void provider.postInbox(); startPage.inboxChanged(); }));
   void classroomOps.resume();
   context.subscriptions.push(
     { dispose: () => liveServer.dispose() },

@@ -23,7 +23,7 @@ const f = await localOps();
 try {
   await f.freeze();
   await check('AT-32 switch ON but every per-run flag OFF (the default): a configured run observes, commands, collects, reports and sends nothing', async () => {
-    assert.equal((await f.request(f.base, 'PUT', { expected_roster_revision: 0, seats: [{ seat_id: 'A1', student_id: 'student-a' }] })).status, 201); assert.deepEqual((await f.request(f.base + '/status')).json.run.flags, { ops_observe: false, ops_commands: false, ops_collect: false, ops_reports: false, ops_delivery: false });
+    assert.equal((await f.request(f.base, 'PUT', { expected_roster_revision: 0, seats: [{ seat_id: 'A1', student_id: 'student-a' }] })).status, 201); assert.deepEqual((await f.request(f.base + '/status')).json.run.flags, { ops_observe: false, ops_commands: false, ops_collect: false, ops_reports: false, ops_delivery: false, ops_distribute: false });
     assert.equal((await f.request(f.base + '/pairings', 'POST', { seat_id: 'A1', roster_revision: 1 })).json.reason, 'ops_observe_disabled'); assert.equal((await f.command('retry_diagnostics', ['A1'])).json.reason, 'ops_commands_disabled'); assert.equal((await f.request(f.base + '/control', 'PUT', { paused: true, expected_control_revision: 0 })).json.reason, 'ops_commands_disabled');
     assert.equal((await f.request(f.base + '/report-batches', 'POST', { idempotency_key: crypto.randomUUID(), roster_revision: 1, purpose: 'class_report', notice_version: 'n1', dry_run: true })).json.reason, 'ops_collect_disabled');
   });

@@ -355,11 +355,11 @@ command envelope: `schema_version, command_id, idempotency_key, payload_hash, co
 
 | 흐름 | 인수 기준 (모두 대상별로 증명) | 근거 요구 |
 |---|---|---|
-| RM-1 선택·상태 | 개별·그룹·전체를 같은 선택 모델로 고른다. 선택 요약은 대상 수·전달 가능 수·전달 불가 사유를 실행 전에 보여 준다. 좌석마다 연결·토큰(발급/앱 확인)·단계(자기보고/강사 확인)·오류 원인·마지막 신호 시각. 무신호는 `확인 불가`이지 정상·실패가 아니다 | ADM-02/09, AT-15~18 |
-| RM-2 대상 회수 | 회수 종류(수업 기록 / 학생 프롬프트 / 승인된 결과물)와 대상을 고른다. 동의·철회·수업 경계는 대상 선택보다 우선한다. 비선택 학생에게는 요청·명령·저장이 0 | ADM-03/06/13/14, AT-26~28 |
-| RM-3 대상 배포 | 배포물은 **버전이 있는 서버 보관 객체**(수업 프롬프트 / 공지·자료 / 수업 설정)이고 원장에는 id·revision만 남는다. 완료 = 그 기기가 **그 revision을 적용했다고 보고**한 것. `send_question` 표시나 토큰 발급은 배포 완료가 아니다. 비선택 학생의 적용 revision은 변하지 않는다 | ADM-10/11, 신규 AT |
-| RM-4 원인별 복구 | 보드가 보여 준 원인(토큰·연결·runtime·preview·업로드)마다 허용 목록의 조치 하나가 1순위로 제시된다. 복구는 대화·입력·파일을 보존한다. 재설치·PC 제어는 포함하지 않는다 | ADM-10, AT-19~23 |
-| RM-5 대상별 결과 | 모든 실행은 대상별로 `접수 → 기기 수신 → 적용` 또는 `실패`/`미확인`으로 끝난다. 기존 원장 상태에 대응: queued=접수, **leased=서버가 그 기기에 배정(기기 수신 확인 전)**, accepted·running=기기 수신(기기가 보낸 receipt가 있을 때만), succeeded(+result code)=적용, failed·rejected·unsupported=실패, not_connected·expired·cancelled=전달 안 됨, outcome_unknown=미확인. `모두 성공`은 전 대상 적용일 때만 | ADM-10, AT-20/21 |
+| RM-1 선택·상태 | 개별·그룹·전체를 같은 선택 모델로 고른다. 선택 요약은 대상 수·전달 가능 수·전달 불가 사유를 실행 전에 보여 준다. 좌석마다 연결·토큰(발급/앱 확인)·단계(자기보고/강사 확인)·오류 원인·마지막 신호 시각. 무신호는 `확인 불가`이지 정상·실패가 아니다 | ADM-02/09, AT-15~18, AT-42 |
+| RM-2 대상 회수 | 회수 종류(수업 기록 / 학생 프롬프트 / 승인된 결과물)와 대상을 고른다. 동의·철회·수업 경계는 대상 선택보다 우선한다. 비선택 학생에게는 요청·명령·저장이 0 | ADM-03/06/13/14, AT-26~28, AT-43 |
+| RM-3 대상 배포 | 배포물은 **버전이 있는 서버 보관 객체**(수업 프롬프트 / 공지·자료 / 수업 설정)이고 원장에는 id·revision만 남는다. 완료 = 그 기기가 **그 revision을 적용했다고 보고**한 것. `send_question` 표시나 토큰 발급은 배포 완료가 아니다. 비선택 학생의 적용 revision은 변하지 않는다 | ADM-10/11, AT-44 · [U2 계약](#remote-management-u2-20260921) |
+| RM-4 원인별 복구 | 보드가 보여 준 원인(토큰·연결·runtime·preview·업로드)마다 허용 목록의 조치 하나가 1순위로 제시된다. 복구는 대화·입력·파일을 보존한다. 재설치·PC 제어는 포함하지 않는다 | ADM-10, AT-19~23, AT-40 |
+| RM-5 대상별 결과 | 모든 실행은 대상별로 `접수 → 기기 수신 → 적용` 또는 `실패`/`미확인`으로 끝난다. 기존 원장 상태에 대응: queued=접수, **leased=서버가 그 기기에 배정(기기 수신 확인 전)**, accepted·running=기기 수신(기기가 보낸 receipt가 있을 때만), succeeded(+result code)=적용, failed·rejected·unsupported=실패, not_connected·expired·cancelled=전달 안 됨, outcome_unknown=미확인. `모두 성공`은 전 대상 적용일 때만 | ADM-10, AT-20/21, AT-41 |
 
 **경계 조건(세 실행 흐름 공통).** 오프라인: 전달되지 않았음을 즉시 표시하고, 재접속 시 적용할지(배포)·버릴지(복구 명령)는 종류별로 정한다 — 조용히 성공 처리하지 않는다. 만료: 실행 전 만료는 `실행되지 않음`, 실행 후 영수증 없음은 `미확인`. 재접속·재발급·기기 교체: 이전 연결 세대 앞으로 나간 요청은 새 연결에 전달되지 않는다. 중복 요청: 같은 idempotency key는 같은 결과, 같은 배포 revision의 재요청은 새 적용을 만들지 않는다. 부분 실패: 대상별로 남고 실패 대상만 다시 고를 수 있다. 수업 경계: 다른 회차·좌석이 바뀐 학생에게는 아무것도 전달·회수되지 않는다. 종료된 회차는 둘로 나눈다 — **종료 전에 이미 요청·승인된 업로드**는 유예 시간(`upload_until`, 종료 뒤 24시간) 안에 계속 받고, **종료된 회차에 대한 새 요청**(새 회수·새 배포·새 명령)은 거부한다(`run_ended`).
 
@@ -367,20 +367,20 @@ command envelope: `schema_version, command_id, idempotency_key, payload_hash, co
 
 #### U1 — 공통 대상 선택과 선택한 학생의 수업 기록 회수 · 2026-09-21 (구현)
 
-RM-1의 선택 모델과 RM-2 중 ‘수업 기록’만 다룬다. 배포·PC 제어·평가 확장은 포함하지 않는다. 기존 인증(`collect` capability)·명령 원장·snapshot 경로·동의 모델을 그대로 쓴다.
+RM-1의 선택 모델과 RM-2 중 ‘수업 기록’만 다룬다. (인수 ID 정정 2026-09-21: 이 절의 선택 모델 = **AT-42**, 선택 회수 = **AT-43**. 작성 당시 AT-37/38로 적었으나 그 번호는 2026-09-18의 다른 인수 조건이 먼저 쓰고 있었다 — [정정 원장](../testing/classroom-admin.md#at-id-ledger-20260921).) 배포·PC 제어·평가 확장은 포함하지 않는다. 기존 인증(`collect` capability)·명령 원장·snapshot 경로·동의 모델을 그대로 쓴다.
 
 | 항목 | 계약 | 검증 |
 |---|---|---|
-| 선택 모델 | `/manage`에서 개별(좌석 ‘선택’)·전체·상태 묶음(도움 필요/연결됨/미연결)·해제. 저장 그룹 없음. 선택은 만든 시점의 명단 revision에 묶이며 revision이 바뀌면 비운다. 요약은 실행 전에 대상 수·명단 차수·연결됨/연결 없음·좌석 목록을 보여 준다. 선택이 비면 어떤 조치도 나가지 않으며 새 조치의 기본값은 전체가 아니다. `collect`만 있고 `command`가 없는 강사도 선택과 회수를 쓴다(`/status.collection{enabled,held}`) | AT-37 |
-| 요청의 두 종류 | `targets` 생략 = 기존 ‘수업 마무리’(명단 전체 · mode `finish` · 평가로 이어질 수 있음). `targets` 명시 = 그 좌석만 · mode `collect_only`. 빈 배열·중복·형식 오류·이번 회차에 없는 좌석·알 수 없는 필드(`target`, `seats` 등)·`targets`+`finish`·`targets` 없는 `collect_only`는 **거부**하며 어떤 경우에도 전체로 넓히지 않는다 | AT-38 |
-| 비선택 학생 | 배치 명단에 `not_selected` 메타데이터 행만 남는다. 동의 조회 결과에 따른 동작·명령·업로드 문(`not_requested`)·R2 객체·평가 입력 모두 0 | AT-38 |
-| 선택은 동의를 덮지 않는다 | 선택한 좌석도 동의 없음·보호자 동의 전·철회·기기 연결 없음이면 그 사유로 배치에 남고 요청되지 않는다. 고지 버전·목적·업로드 유예는 기존과 같다 | AT-26, AT-38 |
-| 회수만 한다 | `collect_only` 배치는 seal에서 평가 입력(outbox)을 만들지 않고, 보고서·발송 라우트는 `409 collect_only_batch`. Chalk의 선택 회수는 `/advance`를 부르지 않으며 평가·발송 UI를 열지 않는다 | AT-38 |
-| 불변 범위와 멱등 | migration 0022 `classroom_collect_scopes`(additive): scope·mode·좌석·정규화 요청 해시(scope, mode, 정렬된 좌석, 목적, 고지, dry-run, 명단 revision)를 한 번 기록. 같은 key + 같은 요청 = 같은 결과(응답 유실·경합 더블클릭 포함, 명단이 이후 바뀌었어도). 같은 key + 다른 대상/목적/고지/모드/dry-run = `409 idempotency_conflict` | AT-38 |
-| 범위 조회는 fail-closed | scope 행이 **정상 조회에서 없을 때만** 0022 이전 배치(명단 전체·finish)로 읽는다. 조회 예외·파싱 불가·모르는 scope/mode·해시 없음은 이전 배치로 승격하지 않고 `503 scope_unavailable/scope_invalid` — seal·reports·delivery·배치 조회·멱등 재생이 같은 계약. 아무것도 봉인·큐잉되지 않는다 | AT-38 |
-| 커밋 경계의 원자성 | 읽기(명단·동의)와 쓰기 사이의 좌석 교체·회차 종료·flag 끔·동의 철회·tombstone을 **조건부 batch 한 트랜잭션**으로 막는다: 배치 INSERT가 전제 조건 전체(명단 revision, 모든 좌석의 revision·학생, `ops_collect`, 선택 회수는 회차 미종료, 요청 대상 동의 유효, tombstone 없음)를 갖고 나머지 쓰기는 그 행이 있을 때만 존재한다. 어긋나면 배치·scope·item·명령·target 0건, `409 revision_conflict/run_ended/changed_during_request` 또는 `403 ops_collect_disabled`. 재조회 한 번으로 대체하지 않는다 | AT-38 |
-| 확인은 본 것에만 유효 (2026-09-21 보완) | 미리 확인 요청이 **나가기 전에** 회차·명단 revision·좌석·좌석별 학생·연결 여부·회수 권한을 고정하고 요청마다 선택 세대(ticket)를 붙인다. 선택·명단·연결·권한 변경, 취소, 더 새로운 요청, 연결 해제는 세대를 올리며 **늦게 도착한 응답은 확인 화면을 열지 못한다**(화면만 지우는 것으로는 진행 중인 응답을 막지 못한다). 응답 자체의 revision·좌석·학생도 요청과 대조한다. 확정 시 현재 화면의 선택·명단과 다시 대조하고, 명단이 바뀌면 행을 그리기 전에 선택을 비워 체크박스와 실제 선택이 어긋나지 않는다. 이전 요청의 종료가 새 요청의 버튼 상태를 정하지 않으며, 진행 중인 요청이 다음 미리 확인을 잠그지 않는다. 확정 응답이 역순으로 오면 최신 확정이 결과 영역을 갖고, 접수된 이전 확정은 이름을 밝혀 알린다(중복 생성 0) | AT-37 |
-| 대상별 결과와 재선택 (2026-09-21 보완 2) | 아래 ‘회수 생명주기’ 표가 정본이다. 선택 좌석의 상태는 **Service가** 회수 item × 기기 요청 × 업로드 유예에서 정하고(`collectStatus`) 화면은 그것을 말로 옮길 뿐이다. 화면은 **현재 수집 결과와 과거 기기 요청 결과를 나란히** 보여 주고, 관측 시각과 ‘더 바뀔 수 있는가’를 밝힌다. `결과 확정`은 바뀔 수 있는 대상이 하나도 없을 때만 쓴다. 재선택은 새 요청을 보내지 않으며, 누르는 순간 최신 배치와 현재 보드를 다시 읽어 그사이 검증됨·전송 중·철회·좌석 교체된 대상을 뺀다. 수업이 끝났으면 재선택은 비활성이고 이유를 말한다 | AT-37, AT-38 |
+| 선택 모델 | `/manage`에서 개별(좌석 ‘선택’)·전체·상태 묶음(도움 필요/연결됨/미연결)·해제. 저장 그룹 없음. 선택은 만든 시점의 명단 revision에 묶이며 revision이 바뀌면 비운다. 요약은 실행 전에 대상 수·명단 차수·연결됨/연결 없음·좌석 목록을 보여 준다. 선택이 비면 어떤 조치도 나가지 않으며 새 조치의 기본값은 전체가 아니다. `collect`만 있고 `command`가 없는 강사도 선택과 회수를 쓴다(`/status.collection{enabled,held}`) | AT-42 |
+| 요청의 두 종류 | `targets` 생략 = 기존 ‘수업 마무리’(명단 전체 · mode `finish` · 평가로 이어질 수 있음). `targets` 명시 = 그 좌석만 · mode `collect_only`. 빈 배열·중복·형식 오류·이번 회차에 없는 좌석·알 수 없는 필드(`target`, `seats` 등)·`targets`+`finish`·`targets` 없는 `collect_only`는 **거부**하며 어떤 경우에도 전체로 넓히지 않는다 | AT-43 |
+| 비선택 학생 | 배치 명단에 `not_selected` 메타데이터 행만 남는다. 동의 조회 결과에 따른 동작·명령·업로드 문(`not_requested`)·R2 객체·평가 입력 모두 0 | AT-43 |
+| 선택은 동의를 덮지 않는다 | 선택한 좌석도 동의 없음·보호자 동의 전·철회·기기 연결 없음이면 그 사유로 배치에 남고 요청되지 않는다. 고지 버전·목적·업로드 유예는 기존과 같다 | AT-26, AT-43 |
+| 회수만 한다 | `collect_only` 배치는 seal에서 평가 입력(outbox)을 만들지 않고, 보고서·발송 라우트는 `409 collect_only_batch`. Chalk의 선택 회수는 `/advance`를 부르지 않으며 평가·발송 UI를 열지 않는다 | AT-43 |
+| 불변 범위와 멱등 | migration 0022 `classroom_collect_scopes`(additive): scope·mode·좌석·정규화 요청 해시(scope, mode, 정렬된 좌석, 목적, 고지, dry-run, 명단 revision)를 한 번 기록. 같은 key + 같은 요청 = 같은 결과(응답 유실·경합 더블클릭 포함, 명단이 이후 바뀌었어도). 같은 key + 다른 대상/목적/고지/모드/dry-run = `409 idempotency_conflict` | AT-43 |
+| 범위 조회는 fail-closed | scope 행이 **정상 조회에서 없을 때만** 0022 이전 배치(명단 전체·finish)로 읽는다. 조회 예외·파싱 불가·모르는 scope/mode·해시 없음은 이전 배치로 승격하지 않고 `503 scope_unavailable/scope_invalid` — seal·reports·delivery·배치 조회·멱등 재생이 같은 계약. 아무것도 봉인·큐잉되지 않는다 | AT-43 |
+| 커밋 경계의 원자성 | 읽기(명단·동의)와 쓰기 사이의 좌석 교체·회차 종료·flag 끔·동의 철회·tombstone을 **조건부 batch 한 트랜잭션**으로 막는다: 배치 INSERT가 전제 조건 전체(명단 revision, 모든 좌석의 revision·학생, `ops_collect`, 선택 회수는 회차 미종료, 요청 대상 동의 유효, tombstone 없음)를 갖고 나머지 쓰기는 그 행이 있을 때만 존재한다. 어긋나면 배치·scope·item·명령·target 0건, `409 revision_conflict/run_ended/changed_during_request` 또는 `403 ops_collect_disabled`. 재조회 한 번으로 대체하지 않는다 | AT-43 |
+| 확인은 본 것에만 유효 (2026-09-21 보완) | 미리 확인 요청이 **나가기 전에** 회차·명단 revision·좌석·좌석별 학생·연결 여부·회수 권한을 고정하고 요청마다 선택 세대(ticket)를 붙인다. 선택·명단·연결·권한 변경, 취소, 더 새로운 요청, 연결 해제는 세대를 올리며 **늦게 도착한 응답은 확인 화면을 열지 못한다**(화면만 지우는 것으로는 진행 중인 응답을 막지 못한다). 응답 자체의 revision·좌석·학생도 요청과 대조한다. 확정 시 현재 화면의 선택·명단과 다시 대조하고, 명단이 바뀌면 행을 그리기 전에 선택을 비워 체크박스와 실제 선택이 어긋나지 않는다. 이전 요청의 종료가 새 요청의 버튼 상태를 정하지 않으며, 진행 중인 요청이 다음 미리 확인을 잠그지 않는다. 확정 응답이 역순으로 오면 최신 확정이 결과 영역을 갖고, 접수된 이전 확정은 이름을 밝혀 알린다(중복 생성 0) | AT-42 |
+| 대상별 결과와 재선택 (2026-09-21 보완 2) | 아래 ‘회수 생명주기’ 표가 정본이다. 선택 좌석의 상태는 **Service가** 회수 item × 기기 요청 × 업로드 유예에서 정하고(`collectStatus`) 화면은 그것을 말로 옮길 뿐이다. 화면은 **현재 수집 결과와 과거 기기 요청 결과를 나란히** 보여 주고, 관측 시각과 ‘더 바뀔 수 있는가’를 밝힌다. `결과 확정`은 바뀔 수 있는 대상이 하나도 없을 때만 쓴다. 재선택은 새 요청을 보내지 않으며, 누르는 순간 최신 배치와 현재 보드를 다시 읽어 그사이 검증됨·전송 중·철회·좌석 교체된 대상을 뺀다. 수업이 끝났으면 재선택은 비활성이고 이유를 말한다 | AT-42, AT-43 |
 | 유지되는 제한 | `reset_runtime` 1명 제한, 위험 조치 확인, 기존 ‘수업 마무리’(명시적 별도 동작, 기본 미리 확인) | 기존 AT |
 
 ##### 회수 생명주기 — 선택 좌석 하나의 상태 (위에서 아래로 첫 일치)
@@ -410,6 +410,369 @@ RM-1의 선택 모델과 RM-2 중 ‘수업 기록’만 다룬다. 배포·PC �
 
 ‘더 바뀔 수 있음’이 있는 대상이 남아 있으면 화면은 확정이라 하지 않고 다시 관측한다: 진행 중 대상이 있으면 3초(명령 TTL로 한정), 진행 중은 없지만 바뀔 수 있으면 5→10→20→40→60초로 늦추다가 10분 동안 변화가 없으면 멈추고 그렇게 말한다. ‘회수 결과 새로 확인’과 보드의 ‘현황 새로 확인’은 언제나 배치를 다시 읽고, 숨겨진 탭은 관측하지 않는다. **유예**(이미 요청된 전송을 받는 시간, 배치별)와 **새 요청 가능 여부**(회차가 열려 있고 회수가 켜져 있는가)는 별개의 사실로 표시한다. 호환: `status`를 보내지 않는 이전 Service에서는 ‘구분 불가’로 표시하고 재선택을 제공하지 않는다. schema 변경 없음(배치 조회에 `observed_at`·`upload_open`·`new_request_allowed`·`new_request_blocked_by`·item `seat_revision`·`status`·요청 `updated_at` 추가).
 
+
+<a id="remote-management-u2-20260921"></a>
+
+#### U2 — 공지·자료의 대상 배포 · 2026-09-21 (설계 → 보완 1회 → 구현 · 운영 비활성)
+
+상태: **구현됨(2026-09-21) · 운영 비활성.** 회차 flag `ops_distribute` 기본 OFF, migration 0023은 어느 원격 DB에도 적용하지 않았다. 실행한 검증과 NOT RUN은 [테스트 문서의 실행 기록](../testing/classroom-admin.md#remote-management-u2-run-20260921)이 정본이다. 아래 본문은 설계 계약이고, 구현하며 바꾼 곳은 바로 아래 ‘구현에서 확정·변경한 계약’이 우선한다. RM-3·RM-5와 ADM-10/11의 구체화이고 인수는 [AT-44](../testing/classroom-admin.md#remote-management-u2-plan-20260921)다. Intent 연결은 #1165(`docs/intents/remote-classroom-operations.md`, 브랜치 `docs/751-classroom-ops-intent`)의 **INT-CO-04 — 2026-09-21 개정 제안, owner 승인 전**이다. 이 절은 그 제안이 승인됐다고 전제하지 않으며, 승인 전에는 구현·합성 검증까지만 가능하고 운영 활성화는 하지 않는다. 그 문서를 이 브랜치에 복제하지 않는다. 범위: **평문 공지(`notice`)와 자료(`material` = 본문 + 허용된 HTTPS 링크)**. 수업 프롬프트·수업 설정은 U3이고 아래 ‘U3와의 연결’만 정한다. 새 제품·인증 체계·상주 프로세스·WebSocket·화면 스트리밍을 만들지 않는다. 사용자 참고 DOCX는 UI 원칙의 참고일 뿐 그 예시를 정책으로 옮기지 않았다.
+
+**보완 이력.** 첫 계약(`17aef2b`)을 독립 검토가 읽고 **미구현 계약의 공백** 일곱 가지를 짚었다(재현된 제품 결함이 아니다 — 코드가 없다): 배포 강사의 권한 철회 경계, 기존 자료를 잃지 않는 기기 쪽 커밋, 배포 실행과 카드의 단위 불일치, 미반영 파일의 복구와 receipt·ack 결속, sync 조건의 충돌, D1 한도 안의 원자성과 비용, 공통 확정 UI의 남는 안내. 이 절은 그 보완본이며 바뀐 결정은 각 소절에 ‘(보완)’으로 표시했다.
+
+##### 구현에서 확정·변경한 계약 · 2026-09-21 (아래 설계 문장과 다르면 이 표가 우선)
+
+인계 때 받은 세 경계(현재 판 기준 coverage, 회수의 receipt, 적용 기한과 잠금)를 포함해, 코드와 시험으로 확정한 것이다. 더 단순해진 곳은 이유를 적었다.
+
+| 설계 문장 | 구현된 계약 | 이유 · 시험 |
+|---|---|---|
+| coverage = ‘다른 유효 배포가 있으면 카드 유지’ (자료 단위) | **카드가 지금 보여 주는 판(revision)과 hash를 허용하는 배포**가 남아 있을 때만 유지한다. v1 실행이 남아 있어도 v2 카드를 받치지 못하고, v2의 마지막 허용 배포를 회수하면 카드가 내려가며 **v1으로 조용히 되돌아가지 않는다.** 대기 중인 배포는 살아 있는 동안만 받치고, 실패·만료·대상 변경·회수로 빠지면 그 자리에서 coverage를 다시 정산한다(`coverageStatements`). 배포 강사 폐기(sweep)로 닫힌 실행은 **이미 반영한 것**에 한해 계속 받친다 | D8 Service · 기기 왕복 시험 · 브라우저 e2e · M1 (v1→v2→같은 v2→두 v2 실행 순서대로 회수) |
+| `card_state`는 targets 행의 열 | 별도 테이블 **`classroom_distribution_cards`**(참가자 × 자료 1행: 현재 기기·판·hash·`seq`·상태·회수 전달 정보). 화면의 `card`는 Service가 (대상 행, 카드 행, 그 좌석의 현재 기기)에서 계산한다: `none·present·replaced(더 새 판이 있음)·covered·withdraw_pending·withdrawn·withdraw_unconfirmed·detached`. 과거 실행의 반영 증거(`state`)는 회수로 바뀌지 않는다 | `no_change`로 본문을 받은 적 없는 실행도 같은 카드를 가리켜야 해서, 실행별 열로는 표현이 안 됐다 |
+| 회수 tombstone = `{object_id, seq, reason}`, receipt는 공통 stage `withdrawn` | 회수는 **자기 전달 키와 자기 receipt**를 갖는다: `withdraw[] = {withdraw_key, object_id, seq, revision, reason}`, 기기는 `withdraw_receipts[] = {withdraw_key, object_id, seq, result: withdrawn｜not_held｜stale}`, Service는 `withdraw_acks[] = {withdraw_key, recorded, reason, final}`. `withdraw_key` = SHA-256(`'withdraw'·회차·좌석·학생·자료·회수 seq·grant·epoch·기기`) 앞 32자 — 제안의 `offer_key`(`'offer'·…`)와 **이름 공간이 다르다.** 기기 저널은 `(종류, 키, 단계)`로만 지워지므로 옛 회수 ack가 새 제안·새 회수의 저널을 지우지 못한다. `stale`(기기가 더 새 사건을 갖고 있음)만으로는 회수 완료로 기록하지 않는다. 제안 receipt의 단계는 `received·reflected·failed·superseded` 넷 | `no_change`였던 실행을 마지막으로 회수하거나 retire로 여러 실행이 한꺼번에 닫혀도 기기가 보고할 키가 하나로 정해진다. D6·D8·D13 |
+| receipt는 대상 행의 `offer_key`와 비교 | 그에 더해 **그 sync가 들어온 연결(grant·epoch)로 키를 다시 계산해** 비교한다. 재발급으로 epoch가 오른 뒤에는 새 제안이 나가기 전이라도 옛 키의 receipt가 `stale_offer`다 | 시험이 잡은 실제 빈틈(행에 남은 옛 키와 일치해 통과하던 것). D6 |
+| `index.lock`(O_EXCL, 10초 stale) + `index.json` rename | **잠금 파일이 없다.** index는 `index.<n>.json`이고 commit은 다음 번호를 **`link()`로 만드는 것**(이미 있으면 실패)이다. 진 쪽은 다시 읽고 다시 판정한다(무작위 간격, 최대 40회). 살아 있는 느린 writer·SIGSTOP된 writer·다른 창이 늦게 깨어나도 **더 새 index를 덮을 방법이 없고**, 훔칠 잠금도 없다. 현재 index = 파싱되는 가장 큰 번호. 저널은 별도 파일이 아니라 index 문서 안에 있어 ‘포인터 이동’과 ‘`reflected` 기록’이 한 commit이다. 그 뒤 같은 읽기 경로로 다시 읽어 확인하고, 읽히지 않으면 `reflected`를 빼고 `failed: store_corrupt`로 바꾼다 | ‘10초 지난 잠금을 훔친다’는 살아 있는 writer와 동시 commit을 허용했다. 기기 시험: 경계별 중단 · 정지된 writer · 8개 동시 writer · 실제 프로세스 SIGKILL · SIGSTOP/SIGCONT |
+| 적용 기한 = 수신 뒤 30초, `failed: apply_deadline` | 기한은 **요청을 보낸 시각**부터 센다(늦게 온 응답은 시간을 벌지 못한다). Service는 `apply_within_ms = min(30초, 의도의 남은 시간 − 요청 제한 4초 − 여유 1초)`를 주고 0 이하면 아예 싣지 않는다. 기기는 monotonic과 wall **두 시계의 경과를 모두** 보고 엄격한 쪽을 따른다(잠자기 동안 monotonic이 멈추는 경우, 시계를 돌린 경우). 거꾸로 간 시계는 실패다. 기한은 메모리에만 있어 재시작을 넘지 못한다. 기한을 넘긴 시도는 **receipt 없이 버린다** — ‘적용 안 됨’의 정직한 표현은 무보고이고, 의도가 유효하면 Service가 다시 싣는다(`apply_deadline` 실패 코드는 쓰지 않는다). `expires_at`과 기기의 절대 시각은 어디서도 비교하지 않는다. 이미 commit된 자료를 다시 여는 것은 기한과 무관한 로컬 읽기다 | 기기 시험(늦은 응답 · 잠자기 · 시계 앞/뒤 · 재시작 · 종료 직전의 500ms 예산) |
+| idle sync 증가분 ‘문장 +0’, 확정 ‘≤ 12쿼리’ | 실측(로컬 workerd D1): **flag OFF면 +0, ON이면 +1문장**(부분 인덱스 probe, 읽기 +1행, 쓰기 0). probe를 grant 조회에 넣지 않고 **별도 문장 + try/catch**로 뺐다 — migration 0023이 없는 DB에 새 Service가 먼저 배포돼도 기존 sync가 죽지 않게 하려는 것이다. flag OFF 회차에서는 45초 상태 주기에만 probe가 돌아 rollback 중 발급된 회수도 전달된다. 확정은 인증 읽기·정산·결과 view를 포함해 **20문장(batch 2개)**, 30·100·200석 동일, 문장당 bound ≤ 25 | 호환·장애 격리가 문장 1개보다 중요하다고 판단. `classroom-ops-distribution-d1.test.mjs` |
+| 공지에도 링크 가능(암묵) | **공지(`notice`)는 링크를 받지 않는다**(`material`만). 허용 host 목록이 비어 있으면 어떤 링크도 거부 | 종류의 뜻을 분명히 |
+| 최종 거부 뒤 ‘과거 기록으로 읽기’ | 최종 거부(연결 폐기·좌석 교체·기기 교체)를 받은 기기는 그 보관함을 **숨긴다**. 표시되는 보관함은 ‘지금 유효하거나 정상 만료된 마지막 연결’ 하나이며, 토큰으로 확인된 학생이 그 보관함의 학생과 같을 때만 보인다. 앱을 완전히 끄고 켠 뒤 연결이 복원되지 않은 상태에서는 ‘끝난 수업의 자료’로 읽힌다 | 회수를 통보받을 길이 없는 기기 |
+| 기기 교체 시 Service가 sync에서 되돌림 | **`/connect`에서** 그 참가자의 유효한 대상(`offered·received·reflected·no_change·unsupported`)을 `device_generation`+1·`accepted`로 되돌리고 옛 기기 카드를 `detached`로 둔다. 실패해도 연결은 성립하고(격리), 결과 view는 ‘카드의 기기 ≠ 지금 연결된 기기’를 직접 계산해 `detached`로 보여 준다 | 매 sync에 기기 비교 조회를 넣지 않기 위해 |
+| sync 응답의 제안 = ‘후보를 읽고 → 원장에 기록하고 → 싣는다’ (기록 조건은 대상 행의 상태·`offer_key`뿐) | **기록하는 그 UPDATE가 전체 전제조건을 스스로 검사**하고, 응답에는 **그 문장이 실제로 1행을 바꾼 항목만** 싣는다(batch 성공이 아니라 문장별 변경 수). 전제조건: 배포 미회수·자료 미회수·미만료, 회차 flag ON·수업 미종료, 그 좌석이 같은 명단 revision에서 같은 학생 소유·미교체, 이 sync의 grant·epoch가 활성, 이 창이 좌석 lease 보유, 로그인 세대(`device_generation`) 불변. ‘이미 같은 판 보유(`no_change`)’와 ‘더 새 판으로 대체(`superseded`)’ 판정도 같은 조건 + **그 순간의 카드**를 본다. 회수 tombstone도 그 UPDATE가 1행을 바꿨을 때만 싣는다. receipt는 **이긴 전이에 결속된 조건부 쓰기**로만 카드·감사 행을 만들고, CAS에서 진 receipt는 `changed · final=false`로 답해 기기가 **지금의 행** 기준으로 다시 보내게 한다(그 결과 회수된 실행이면 `revoked · final` + tombstone). ‘한 번 더 읽어 확인’ 방식은 쓰지 않는다 — 읽기와 쓰기 사이의 창은 다시 읽어도 남는다. | **독립 검토가 `51708c7`에서 재현한 결함.** 후보 SELECT와 원장 UPDATE 사이에 정상 회수 API·flag OFF·좌석 교체가 끼면 원장은 `revoked/accepted · offers=0`인데 항목이 응답에 실렸다. 기기는 저장했고 receipt는 `stale_offer(final)`로 거부돼 저널이 비워졌으며 회수 tombstone은 영영 오지 않아 **본문이 계속 보였다.** 수정 뒤: 끼어든 6종(회수·자료 회수·flag OFF·수업 종료·재로그인·lease 이전)+좌석 교체 모두 응답 0건·원장 그대로, 조건이 돌아오면 같은 의도가 다시 제안된다. **양성 대조군**(제안이 기록된 뒤 회수): 기기가 저장한 자료는 tombstone으로 내려간다. D5(Service)·실제 기기 루프+디스크 |
+| 회수된 실행의 대상 `revoked`는 `card: none` | 제안이 **기록된**(`offers>0`) 뒤 회수된 대상은 전달을 증명하지 못했어도 기기가 저장했을 수 있고 Service는 그 카드를 추적해 내린다. 결과 view는 그 카드의 `withdraw_pending·withdrawn·withdraw_unconfirmed`를 보여 준다(제안이 기록된 적 없으면 `none`, 다른 실행이 받치는 `present`는 이 실행의 것이 아니므로 `none`). | 위 양성 대조군에서 기기는 회수했는데 강사 화면은 ‘없음’이었다. 대조군 표 5행 |
+| 강사 화면: `대상 선택` → 회수 결과 → 공지 작성기(항상 펼침) → 이력 → 학생 목록 | **기존 구성요소의 순서·접힘만 바꿨다.** 원격 수업 운영 절이 공유 패널보다 먼저 오고, 그 안은 현황 → 대상 선택 → 조치 버튼(진단·기록 회수·공지·자료 보내기)과 조치별 ‘먼저 확인’ → **학생 목록** → 조치 결과 → 보낸 자료 이력. 공지 작성기는 닫힌 `<details>`이고 요약줄이 저장 상태를 말하며, 보내기가 접수되면 다시 접힌다. 설명문은 ‘이 화면이 보여 주는 것’으로 접었다. 선택 요약과 조치별 대상 확인은 그대로다. | 독립 검토 실측: 연결 직후 첫 학생 행이 문서 top 1742px(뷰포트 720px). 수정 뒤 1280×720에서 선택·조치·첫 학생 행이 첫 화면 안(e2e 단언, 실제 Mac 676px). 새 화면·새 PRD 없음 |
+| 공통 선택 요약 ‘연결 없는 좌석에는 전달되지 않습니다’ | 요약은 수만 말하고, **가능한 조치별 정책을 따로 한 줄**로 말한다: 진단·기록 회수는 전달되지 않음 / 공지·자료는 접수해 두었다가 수업 종료 전 재연결 시 전달. 정확한 대상별 예정은 각 조치의 ‘먼저 확인’이 기준 | U2의 `accepted_offline` 계약과 충돌하던 문장 |
+| 작성기 ‘저장했습니다 … 아직 아무에게도 보내지 않았습니다’ | 작성기는 **‘보낸 적 없음’을 주장하지 않는다.** 저장줄과 접힌 요약줄은 한 함수에서, ‘화면에 있는 실행이 바로 이 판을 보냈는가(보냄/회수함/모름)’로 만든다. 저장 버튼은 ‘저장만으로는 보내지지 않음’ | 전송·회수 성공 옆에 ‘아무에게도 보내지 않았습니다’가 남았다. U1 선택 회수는 확정 시 확인 안내가 이미 교체되고(9/21 보완) 저장 상태라는 뿌리가 없어 같은 잔류가 없다 |
+| 회수된 배포의 요약도 ‘… · 이 배포는 회수됨 · 모두 반영’ | 회수된 실행은 머리말이 `회수한 배포`이고 ‘모두 반영’으로 끝나지 않는다. **전달 기록(역사)** 줄과 **지금 기기** 줄을 나눈다: 회수 요청·기기 확인 전 / 기기 보관함에서 회수 확인 / 회수 확인 불가 / 다른 배포로 남아 있음 — 끝나지 않았으면 그렇게 말한다 | 과거 실적과 현재 상태를 한눈에 구분 |
+| 학생 보관함: 연결이 없으면 ‘끝난 수업의 자료’ | **연결 없음 ≠ 수업 종료.** 기기가 ‘끝났다’고 말하는 근거는 정상 만료(`ops_grant_expired`) 또는 회차의 종료 시각 경과뿐이다. 그 밖의 미연결(앱 재시작 등)은 ‘수업 연결 확인 전’ + ‘이미 받은 자료는 그대로, 그 뒤의 수정·회수는 다시 연결되면 반영’ | M1 재시작 뒤 열린 회차에서 ‘끝난 수업’이라고 말했다 |
+| 자료 ID·내용 확인값을 저장줄·편집줄·확인문에 표기 | 주 흐름에는 제목과 판 번호만. ID·sha256 전체는 작성기의 ‘검증용 상세’에 둔다 | 강사 주 흐름을 차지하지 않게 |
+
+##### 이름과 권한 — `ops_delivery`와 섞지 않는다
+
+| 말 | 뜻 (고정) | 식별자 |
+|---|---|---|
+| **발송**(delivery) | 검수·승인된 **보고서**를 수업 뒤 **수신자(보호자 등)**에게 보낸다. 기존 의미 그대로 | run flag `ops_delivery` · issuer capability `deliver` · `classroom_report_deliveries` — **변경 없음** |
+| **배포**(distribution) | 수업 중 강사가 **고른 학생의 Studio 보관함**에 공지·자료를 넣는다 | run flag **`ops_distribute`**(신규, 기본 OFF) · issuer capability **`distribute`**(신규) · App 선언 capability **`distribution_inbox`** · 테이블 접두 `classroom_content_*` / `classroom_distribution*` |
+
+- `distribute`는 `OPS_CAPABILITIES`에 추가되는 **독립** 권한이다. 기존 issuer 토큰은 어떤 조합(`observe`·`coach`·`collect`·`command`·`deliver`·`manage` 포함)을 갖고 있어도 배포할 수 없다 — 새로 발급한 토큰의 `scope.ops`에 `distribute`가 명시돼야 한다(`admin.ts`의 기존 `scope.ops` 검증이 목록 밖 값을 이미 거부하므로 발급 경로는 그대로 쓴다). 인증은 기존 `authorizeIssuerForOps(c, cohort, 'distribute')` 하나이고, 그 위에 아래 ‘배포 권한의 철회 경계’의 D1 fence가 얹힌다.
+- `ops_distribute`는 `OPS_FLAGS`에 추가되는 회차 flag이고 `class_run_ops.flags_json`에서 요청마다 D1 primary로 읽는다(끄면 다음 요청부터 새 콘텐츠·새 배포·새 제안이 멈춘다 — receipt 정산과 회수 전달은 아래 sync 조건 표대로 계속된다). 전역 `HPS_CLASSROOM_OPS`가 꺼져 있으면 경로 자체가 404다. 구버전 Service는 이 flag 이름을 400으로 거부하고(`PUT …/runs/:run`의 기존 검증), 구버전 Chalk는 이 flag를 보내지 않으므로 OFF로 남는다.
+- `/status`는 `collection{enabled,held}`와 같은 모양으로 `distribution{enabled,held,link_hosts_configured}`를 주고, 좌석마다 `distribution_inbox: declared | not_declared | unknown(연결 없음)`을 준다. Chalk는 `held && enabled`일 때만 배포 조치를 보인다.
+- `send_question`·`mark_checkpoint`(`coach`)는 그대로 둔다. 질문 표시는 배포가 아니고, 배포는 질문을 대신하지 않는다.
+
+##### 배포 권한의 철회 경계 — D1 fence (보완 1)
+
+**첫 계약의 문장 ‘요청 시작 1회 검사, 창은 요청 1회’는 틀렸다.** 현재 코드에서 issuer 폐기는 KV 기록이고(`revokeToken`, `/admin/tokens/revoke`의 주석대로 다른 위치에 1분가량 늦을 수 있다) D1에서 닫히는 것은 `revokeOpsGrantsForIssuer`가 닫는 **그 issuer가 발급한 학생 연결뿐**이다. 배포한 강사 A와 학생 연결을 발급한 강사 B가 다르면 A의 폐기는 B의 연결을 닫지 않으므로, A가 이미 걸어 둔 배포는 계속 전달된다. KV 호출 지점은 세 곳이고 D1에 닿는 것은 하나뿐이다: `POST /admin/tokens/revoke`(D1 연동 있음) · `POST /admin/issuers`의 `revoke_jti` 재범위화(KV만) · `POST …/session/close`의 `jti`(KV만). 기존 인증 체계는 그대로 두고 **배포에 한해** D1에서 확정되는 경계를 하나 추가한다.
+
+- **fence 테이블** `ops_issuer_fences(issuer_jti PK, state 'revoked'|'lifted', reason, recorded_by, revision, created_at, updated_at)` — 폐기된 issuer jti의 D1 기록(같은 migration). 새 인증 저장소가 아니라 폐기 사실의 primary 사본이며 토큰·scope를 담지 않는다. 지금은 배포만 이것을 읽는다(회수·명령의 기존 경계를 조용히 바꾸지 않는다).
+- **enqueue에 연결.** `POST …/contents`·`POST …/distributions`·revoke/retire의 첫 조건부 INSERT/UPDATE guard에 `NOT EXISTS (SELECT 1 FROM ops_issuer_fences f WHERE f.issuer_jti=?요청 jti AND f.state='revoked')`가 들어간다. 권한을 읽은(KV 검증 통과) 뒤 폐기가 커밋되면 그 요청은 0건 기록으로 `403 issuer_revoked`다. D1은 쓰기를 직렬 처리하므로 ‘fence 커밋’과 ‘배포 커밋’ 사이에 틈이 없다: fence가 먼저면 guard가 막고, 배포가 먼저면 아래 sweep이 잡는다.
+- **offer에 연결.** fence를 기록하는 **같은 batch**가 그 jti의 열린 배포를 닫는다(sweep): `classroom_distributions.revoked_at/revoked_by='system'/revoke_reason='issuer_revoked'`, 아직 반영되지 않은 대상(`accepted`·`offered`·`received`)은 `revoked`. sync의 제안 조건은 `d.revoked_at IS NULL`이므로 **학생 연결을 누가 발급했든** 그 배포는 다음 sync부터 실리지 않는다. 문장 수는 대상 수와 무관하다(UPDATE 2개 + fence 1개 + 감사 1개).
+- **기존 경로와의 순서·부분 실패·재시도.**
+
+| 경로 | 순서 | 부분 실패 | 재시도 |
+|---|---|---|---|
+| `POST /admin/tokens/revoke` | KV 폐기 → **D1 batch 1개**(기존 `revokeOpsGrantsForIssuer` UPDATE + fence upsert + sweep) → 그 뒤에만 `ok:true` | D1 실패 = 기존처럼 `500 {ok:false, kv_revoked:true}` — 폐기 **미완료**로 응답한다. 그동안 KV가 아직 닿지 않은 위치에서는 그 토큰의 새 배포가 접수될 수 있고, 대기 중 배포도 계속 실린다(이것을 막았다고 쓰지 않는다) | 같은 요청 반복 — fence upsert·sweep·grant UPDATE 모두 멱등 |
+| `POST /admin/issuers` + `revoke_jti`(재범위화) | 새 토큰 서명(메모리) → **D1 fence**(+ 새 scope에 그 cohort의 `distribute`가 **없을 때만** sweep) → KV 폐기 → 감사 → 토큰 반환 | D1 실패 = `500`, KV 폐기 안 함, 새 토큰 **반환 안 함**(아무것도 바뀌지 않음). KV 실패 = fence는 선 상태 — 옛 토큰은 배포만 못 하고, `500 kv_revoke_failed`로 알린다 | 같은 `revoke_jti`로 다시 호출(fence 멱등, 새 토큰은 새로 서명) |
+| `POST …/session/close` + `jti` | 기존 종료 처리 → D1 fence + sweep → KV 폐기 | D1 실패 = 종료는 성립(기존 동작 불변), 응답에 `distribute_fenced:false`. 회차가 끝났으므로 새 배포·제안은 어차피 `run_ended`로 막힌다 | close 재호출 또는 `/tokens/revoke` |
+| `DELETE /admin/tokens/revoke/:jti`(un-revoke) | KV 삭제 → D1 fence `lifted`(revision+1) | fence 해제 실패 = 토큰은 되살아났으나 배포는 계속 막힘(닫힌 쪽으로 실패) · `500`으로 알림 | 반복. **sweep으로 닫힌 배포는 되살아나지 않는다** — 다시 보내려면 강사가 새로 배포한다(같은 revision은 기기에서 중복 카드를 만들지 않는다) |
+| issuer 토큰 발급 | 변화 없음 — 새 jti는 fence에 없으므로 허용. 자연 만료(`exp`)는 폐기가 아니며 만료 전 접수된 배포는 회차 종료까지 유효 | — | — |
+| 학습 토큰 재발급 | 변화 없음 — 학생 쪽 `connection_epoch`만 오른다(아래 재연결 표) | — | — |
+
+- **주장하지 않는 것.** ① KV 재조회나 성공 응답만으로 철회가 원자적이라고 쓰지 않는다 — 원자적인 것은 **D1 batch가 커밋된 뒤**의 enqueue 거부와 제안 중단이다. ② **이미 기기에 보낸 sync 응답은 회수할 수 없다.** sweep 전에 나간 항목을 기기가 저장했다면 그 기기의 다음 receipt에 Service는 `recorded:false, reason:'revoked'`와 회수 tombstone으로 답하고 기기는 카드를 내린다. 그 기기가 다시 sync하지 않으면 카드는 남아 있고 Service는 그것을 `회수 확인 불가`로 표시한다(삭제 완료로 세지 않는다). ③ 폐기 **전에** 이미 반영된 자료는 그대로 둔다 — 그때의 권한으로 정당하게 간 것이다. 내리려면 `distribute`를 가진 다른 강사가 그 자료를 회수(retire)한다(자료는 작성자가 아니라 회차에 속한다).
+
+##### 강사의 실제 흐름 (Chalk `/manage`, U1의 선택을 그대로 쓴다)
+
+1. **선택** — U1의 공통 선택(개별·전체·상태 묶음). 새 배포의 대상 기본값은 **빈 선택**이며 선택이 비면 ‘보내기’는 비활성이다. 직전 배포의 대상을 기본값으로 되살리지 않는다.
+2. **작성** — 종류(공지/자료)·제목·본문·링크. ‘저장’은 **불변 revision**을 만든다(아래 `POST …/contents`). 기존 자료를 고치면 같은 object의 다음 revision이다. 저장만으로는 어떤 학생에게도 아무것도 가지 않는다.
+3. **미리 확인** (`dry_run`) — 한 화면에 ① 내용(제목·본문·링크 그대로)과 `object · revision · hash 앞 8자` ② 대상 좌석과 좌석별 예정: `지금 전달 가능` / `미연결 — 회차가 끝나기 전에 다시 연결되면 전달` / `이 앱은 보관함을 지원하지 않음` / `이미 같은 revision이 이 기기 보관함에 있음(예상)` / `더 새 revision이 이미 있음(보내지 않음)` ③ 만료(기본 = 회차 종료 시각) ④ 영향: `학생의 과제·입력·대화·파일은 바뀌지 않습니다. 비선택 N명에게는 아무것도 가지 않습니다.` 확인 화면의 Primary는 ‘N명에게 보내기’ 하나(DT-07).
+4. **확정** — U1의 **선택 세대(ticket) 검증을 그대로 재사용**한다: 요청 전에 회차·명단 revision·좌석·좌석별 학생·연결·권한(`distribution.held/enabled`)을 고정하고, 선택·명단·연결·권한 변경/취소/더 새로운 요청/연결 해제는 세대를 올리며, 늦게 도착한 미리 확인 응답은 확인 화면을 열지 못한다. 확정 시 현재 화면의 선택·명단·`content_hash`와 다시 대조한다. 새 검증 장치를 만들지 않고 `pickTicket`·`selectionKeyNow()` 계열을 조치 종류에 무관한 공통 함수로 쓴다. **(보완 7)** 공통 함수로 옮길 때 확인 단계의 안내(`확인만 했습니다. 아래에서 요청해야 기기에 전달됩니다.`)는 **확정이 접수되는 순간 확정 뒤의 말로 바뀌고**, 결과 영역이 최종 상태를 말하는 동안 그와 모순되는 과거 안내는 화면에 남지 않는다. 회수(U1)와 배포가 같은 규칙을 쓴다 — 실제 Mac의 U1 선택 회수에서 ‘서버 검증됨 · 결과 확정’ 옆에 이 안내가 남아 있던 것이 관측됐다(U1 기능 인수와는 별개의 문구 후속).
+5. **대상별 결과** — 아래 ‘대상 상태’ 표의 말로 좌석마다 **전달 증거**와 **현재 보관함 상태**를 나란히 표시하고 관측 시각과 ‘더 바뀔 수 있는가’를 밝힌다. 재관측: 확정 뒤 2분 동안 또는 최근 30초 안에 변화가 있었으면 3초, 그 밖에는 5→10→20→40→60초, 10분 무변화 시 정지(수동 새로 확인, 숨겨진 탭은 관측 안 함). 오프라인 대상이 회차 끝까지 열려 있어도 3초 관측이 이어지지 않는다. **‘실패·미확인만 다시 선택’**은 새 요청을 보내지 않고, 누르는 순간 최신 결과와 보드를 다시 읽어 그사이 반영됨·좌석 교체·철회된 대상을 뺀 뒤 선택만 채운다. 반영된 학생은 다시 실행하지 않는다.
+6. **이전 배포물 다시 찾기** — 같은 화면의 ‘보낸 자료’ 목록(`GET …/contents`, 최신순 50개씩): 제목·종류·최신 revision·회수 여부·배포 횟수·마지막 배포 시각(**결과 집계는 목록에 싣지 않는다** — 대상 원장을 훑게 되기 때문이다). 항목을 열면 revision별 내용과 그 revision의 배포 실행들, 실행을 열면 대상별 결과(그때 한 번 집계)가 나온다. 결과를 다시 열어도 아무것도 재전송되지 않는다.
+
+##### 서버 저장 — 불변 콘텐츠와 배포 실행을 나눈다 (additive migration 1개)
+
+착수 시점의 다음 번호(현재 기준 `0023-classroom-distribution.sql`). 기존 테이블은 건드리지 않는다. `worker/schema.sql`에 같은 정의를 넣고 기존 D1 리허설(0011→…)에 포함한다. `*_at`은 unix ms.
+
+| 테이블 | 열 (핵심) | 불변성·키 |
+|---|---|---|
+| `classroom_content_objects` — 자료 머리 | `object_id` PK · `class_run_id` · `cohort_id` · `kind` · `latest_revision` · **`event_seq`** · `retired_at` · `retired_by` · `retire_seq` · `created_by` · `created_at` | `kind`는 생성 뒤 불변. `latest_revision`은 **object마다** 따로 오른다(전역 revision 없음), revision 생성은 CAS. `event_seq`는 **이 자료에 일어난 배포·회수 사건의 순번**(보완 3) — 배포 확정·배포 회수·자료 회수가 같은 batch 안에서 1씩 올린다 |
+| `classroom_content_revisions` — 불변 내용 | `object_id` · `revision`(1부터) · `class_run_id` · `kind` · `title` · `payload_json`(kind별 검증된 본문: notice/material = `{body, links:[{label,url}]}`) · `content_hash` · `schema`=`hps-classroom-content/1` · `created_by` · `issuer_jti` · `created_at` · `idempotency_key` | PK(`object_id`,`revision`) · UNIQUE(`class_run_id`,`idempotency_key`). 제품 경로에 UPDATE·DELETE 없음. `content_hash` = SHA-256(`[schema, kind, title, body, [[label,url]…]]`의 정규 JSON) |
+| `classroom_distributions` — 배포 실행 1건 | `id` · `class_run_id` · `cohort_id` · `object_id` · `revision` · `content_hash` · **`seq`**(확정 때의 `event_seq`) · `roster_revision` · `targets_json` · `request_hash` · `idempotency_key` · `expires_at` · `created_by` · `issuer_jti` · `created_at` · `revoked_at` · `revoked_by` · `revoke_reason` · **`revoke_seq`** · `row_revision` | UNIQUE(`class_run_id`,`idempotency_key`). 대상·내용·만료는 생성 뒤 불변. 바뀌는 것은 회수(`revoked_*`, `row_revision` CAS)뿐 |
+| `classroom_distribution_cards` — 참가자×자료의 현재 카드 | `class_run_id` · `seat_id` · `student_id` · `object_id` · `seat_revision` · `device_registration_id` · `revision` · `content_hash` · `seq` · `state` · `withdraw_seq` · `withdraw_reason` · `withdraw_key` · `withdraw_offers` · `next_withdraw_at` · `pending` | PK(`class_run_id`,`seat_id`,`student_id`,`object_id`) · 부분 인덱스 `(class_run_id, seat_id) WHERE pending=1` · INDEX(`class_run_id`,`object_id`,`state`) |
+| `classroom_distribution_targets` — 대상 결속과 결과 | `distribution_id` · `class_run_id` · `seat_id` · `seat_revision` · `student_id` · `object_id` · `revision` · **`state`**(전달 증거) · `result_code` · `device_generation` · `device_registration_id` · `grant_id` · `connection_epoch` · `offer_key` · `offers` · `next_offer_at` · `first_offered_at` · `received_at` · `reflected_at` · **`pending`**(0/1: Service가 이 대상에게 실을 것이 있음) · `updated_at` | PK(`distribution_id`,`seat_id`) · **부분 인덱스** `(class_run_id, seat_id) WHERE pending=1`(idle sync가 훑는 행 0) · INDEX(`class_run_id`,`student_id`,`object_id`)(대체·같은 revision·회수 coverage 조회). 최종 전이는 기존 `ops_audit`. 본문 없음 |
+| `ops_issuer_fences` — 폐기된 issuer의 D1 기록 | 위 ‘철회 경계’ | PK(`issuer_jti`) |
+
+여러 자료가 한 회차에 공존한다(object가 다르면 서로의 revision·`event_seq`·결과에 영향이 없다). 같은 자료의 수정은 새 revision이고, 이전 revision 행과 그 배포 결과는 그대로 남는다. 보존 기간·만기 삭제는 새로 정하지 않는다(아래 ‘미결’). 철회·보존 정리(`classroom_erasure`)가 이 테이블을 다루는 방식은 구현 단계에서 기존 원장에 **추가**로 연결한다 — 학생 식별자(`student_id`)를 가진 것은 targets뿐이고 학생이 쓴 내용은 어디에도 없다.
+
+##### API — 기존 강사 prefix와 기존 App sync를 확장한다
+
+강사(`/admin/cohorts/:cohort/classroom/runs/:run` 아래, `distribute` + `ops_distribute`, 모두 `no-store`, 모르는 필드는 **거부**). `instructor-auth.ts`의 issuer 허용 경로 정규식과 Chalk forwarder에 `contents`·`distributions` 하위 경로를 추가한다.
+
+| 경로 | 요청 | 응답·실패 |
+|---|---|---|
+| `POST …/contents` | `{idempotency_key, kind, title, body, links?, object_id?, expected_latest_revision?}` — `object_id` 없음 = 새 자료(rev 1), 있음 = 다음 revision(`expected_latest_revision` 필수) | `201 {object_id, revision, content_hash, kind, title, created_at}` · 같은 key+같은 내용 `200` 같은 결과 · 같은 key+다른 내용 `409 idempotency_conflict` · `409 revision_conflict`(다른 강사가 먼저 고침, 입력은 화면에 유지) · `409 object_retired` · `409 run_ended` · `403 issuer_revoked` · `400 content_invalid{field}` · `400 link_host_not_allowed` · `429 content_limit` · 저장 실패 `503 storage`(아무것도 만들어지지 않음) |
+| `GET …/contents?cursor=` | — | 자료 머리 + 최신 revision 메타 + 배포 횟수·마지막 배포 시각, 50개씩. 본문·결과 집계 없음 |
+| `GET …/contents/:object/revisions/:rev` | — | 그 revision의 내용(작성 강사 화면용) |
+| `POST …/distributions` | `{idempotency_key, object_id, revision, content_hash, targets[], expected_roster_revision, expires?:{at}, dry_run}` | `dry_run:true` → `200` 대상별 예정만, **쓰기 0**, key 소모 없음 · 확정 `201` 배포 view · 같은 key+같은 요청 `200` 같은 결과(응답 유실·더블클릭·이후 명단이 바뀌었어도) · 같은 key+다른 내용/대상/만료/revision `409 idempotency_conflict` · 아래 ‘원자성’의 `409`/`403` · 빈 대상·중복·형식 오류·회차 밖 좌석·모르는 필드(`target`,`seats`,`all` 등) `400/404` — **어떤 경우에도 전체로 넓히지 않는다** |
+| `GET …/distributions?object_id=&cursor=` · `GET …/distributions/:id` | — | 실행 목록(50개씩, 집계 없음) · 실행 1건의 대상별 `state·card_state·status·result_code·시각·can_change·reselectable` + `observed_at`·`new_request_allowed`·`new_request_blocked_by`. 조회는 먼저 **그 실행의** 기한 지난 대상을 정산한다(타이머 없음 — 기존 `settleOverdue` 방식, PK 접두로 한정) |
+| `POST …/distributions/:id/revoke` | `{expected_row_revision}` | **배포 1건의 회수**(아래 ‘배포와 카드의 단위’). 이미 회수됐으면 같은 결과. 회차가 끝난 뒤에도 가능 |
+| `POST …/contents/:object/retire` | `{expected_latest_revision}` | **자료 전체의 회수**: 머리에 `retired_at`·`retire_seq`, 그 object의 열린 배포 전부 회수, 이후 그 object의 새 revision·새 배포 `409 object_retired`. 조건부 batch 한 번 |
+
+App(`POST /v1/classroom/ops/sync`, 기존 자격·4초 제한·single-flight·backoff 그대로). **학생용 콘텐츠 조회 API는 만들지 않는다** — 내용은 자격이 확인된 그 sync 응답으로만 나간다. 블록이 오가는 조건은 아래 ‘sync 조건과 한도’ 표 하나가 정본이다.
+
+```jsonc
+// 요청에 추가 (보낼 receipt가 없으면 생략)
+"distribution": { "receipts": [ { "offer_key": "…32hex", "distribution_id": "…", "object_id": "…", "revision": 2,
+    "content_hash": "…64hex", "seq": 7,
+    "stage": "received | reflected | failed | superseded", "result_code": "", "observed_at": 0 } ],               // ≤ 6
+  "withdraw_receipts": [ { "withdraw_key": "…32hex", "object_id": "…", "seq": 9, "result": "withdrawn | not_held | stale", "observed_at": 0 } ] }   // ≤ 10
+// 응답에 추가 (말할 것이 없거나 · 미선언이거나 · 교환이 실패하면 블록 자체가 없다 — 없음은 ‘소식 없음’이지 성공이 아니다)
+"distribution": {
+  "items": [ { "offer_key": "…", "distribution_id": "…", "seq": 7, "object_id": "…", "revision": 2, "kind": "notice",
+      "schema": "hps-classroom-content/1", "title": "…", "body": "…", "links": [ { "label": "…", "url": "https://…" } ],
+      "content_hash": "…", "from": "instructor", "issued_at": 0,
+      "expires_at": 0, "apply_within_ms": 30000 } ],                           // ≤ 2개 그리고 ≤ 24 KiB · apply_within_ms는 요청을 보낸 시각부터
+  "withdraw": [ { "withdraw_key": "…32hex", "object_id": "…", "seq": 9, "revision": 2, "reason": "revoked | retired" } ],   // ≤ 10
+  "receipt_acks": [ { "offer_key": "…", "stage": "reflected", "recorded": true, "reason": "", "final": true } ], // 받은 receipt 수만큼
+  "withdraw_acks": [ { "withdraw_key": "…", "recorded": true, "reason": "", "final": true } ],
+  "more": false }                                                               // true면 1초 뒤 다시
+```
+
+##### 대상의 정체성, 커밋 경계의 원자성, 멱등 — D1 한도 안에서 (보완 6)
+
+- **대상 = `(class_run_id, seat_id, seat_revision, student_id)`** 의 명시적 집합이다. 연결(grant)·epoch·기기는 대상의 일부가 **아니다** — 그것은 전달 시점마다 다시 검사하는 자격이다. 선택은 요청의 `targets`에 적힌 좌석뿐이며 ‘현재 필터’ 같은 서버 쪽 해석은 없다.
+- **문장 수가 대상 수에 비례하지 않는 조건부 batch 한 트랜잭션.** [D1 한도](https://developers.cloudflare.com/d1/platform/limits/)(2026-09-21 확인분: Worker 호출당 쿼리 Free 50 / Paid 1,000, 문장당 bound parameter 100, SQL 100 KB, batch 포함 30초)에서 200석도 **한 batch**로 끝나야 한다. 대상을 좌석마다 한 문장으로 펼치거나 큰 `VALUES`에 바인딩하지 않는다. 읽은 좌석을 `[[seat_id, seat_revision, student_id], …]`의 **JSON 문자열 하나**(`?targets`, 식별자 상한 128자 × 200석 ≈ 최악 60 KB, 보통 수 KB — bound 값 1개)로 묶어 `json_each`로 푼다:
+
+| # | 문장 (모두 같은 `db.batch`) | bound 수(대략) |
+|---|---|---|
+| 1 | `INSERT INTO classroom_distributions(…, seq) SELECT …, (SELECT event_seq+1 FROM classroom_content_objects WHERE object_id=?) WHERE <guard>` | ≤ 25 |
+| 2 | `INSERT INTO classroom_distribution_targets(…) SELECT ?id, ?run, json_extract(j.value,'$[0]'), json_extract(j.value,'$[1]'), json_extract(j.value,'$[2]'), …, CASE WHEN <같은 학생·같은 object의 더 높은 revision이 유효> THEN 'superseded' ELSE 'accepted' END, … FROM json_each(?targets) j WHERE EXISTS(<1의 행>)` | ≤ 12 |
+| 3 | `UPDATE classroom_distribution_targets SET state='superseded', pending=0 … WHERE class_run_id=? AND object_id=? AND revision<? AND state IN ('accepted','offered','received') AND student_id IN (SELECT json_extract(value,'$[2]') FROM json_each(?targets)) AND EXISTS(<1의 행>)` | ≤ 8 |
+| 4 | `UPDATE classroom_content_objects SET event_seq=event_seq+1 WHERE object_id=? AND EXISTS(<1의 행>)` | ≤ 3 |
+| 5 | `INSERT INTO ops_audit … SELECT … WHERE EXISTS(<1의 행>)` | ≤ 8 |
+
+  확정 1회의 전체 쿼리 = 사전 읽기(회차 1 · 멱등 조회 1 · 활성 좌석 1 · revision 1 · 분당 횟수 1) + 위 5 + 결과 view 2 = **≤ 12**, 30석이든 200석이든 같다. 여러 transaction으로 나누지 않으며, 나눠야만 한다면 전 대상 원자성을 주장하지 않는다. sweep·revoke·retire도 같은 모양(UPDATE … WHERE 집합)이라 문장 수가 고정이다. (관찰: 기존 U1 `report-batches`는 item·target을 좌석마다 한 문장으로 넣는다 — 큰 회차에서 Free 한도와 부딪칠 수 있는지는 이 설계의 범위 밖이며 U2는 그 모양을 따라 하지 않는다.)
+- guard: ① 회차 존재 + `roster_revision` 일치 ② `json_extract(flags_json,'$.ops_distribute')=1` ③ 회차 미종료(`ends_at>now` 그리고 `sessions.ended_at IS NULL`) ④ **요청한 모든 좌석**이 `replaced_at IS NULL`이고 `seat_revision`·`student_id`가 읽은 값과 같음(`NOT EXISTS (… json_each(?targets) … NOT EXISTS (class_run_seats …))` — 고유 인덱스 probe N회) ⑤ 그 `(object_id, revision)` 행이 있고 `content_hash`가 같으며 object가 `retired_at IS NULL` ⑥ `expires_at`이 `now`보다 뒤이고 회차 종료 시각 이하 ⑦ **요청 jti에 `revoked` fence 없음**. 어긋나면 배포·대상·감사 **0건**이고 새로 읽어 `409 revision_conflict / run_ended / changed_during_request / object_retired / content_mismatch` 또는 `403 ops_distribute_disabled / issuer_revoked`. 재조회 한 번으로 대체하지 않는다. `POST …/contents`도 같은 방식이다(머리 CAS + revision INSERT + 회차·flag·fence guard).
+- `request_hash` = SHA-256(정규화한 `[object_id, revision, content_hash, 정렬된 targets, expires_at, roster_revision]`). 같은 key + 같은 hash = 기존 결과 재생, 같은 key + 다른 hash = `409`. 배포 행을 **정상 조회에서** 읽지 못하면(조회 예외·손상) 재생·결과 조회·전달 모두 `503`으로 닫는다 — 서버 오류를 ‘전체 대상’이나 ‘이전 revision 성공’으로 읽지 않는다.
+- **같은 revision의 재배포는 새 적용을 만들지 않는다 — 단, 아래 조건이 모두 참일 때만**(보완 3). 그 참가자가 **지금 연결된 그 기기**(`device_registration_id`)에서 같은 `(object, revision, hash)`를 `reflected`했고, 그 뒤 그 참가자·그 자료에 회수 tombstone이 나간 적이 없으며(`withdraw_seq` 없음), 자료가 회수(retire)되지 않았다. 이 판정은 **확정 때가 아니라 제안하려는 순간**에 한다(확정 때는 오프라인이라 기기를 모를 수 있다) — 참이면 본문을 싣지 않고 그 대상을 `no_change`·`card_state='present'`로 닫는다. 더 새 revision이 이미 유효하면 확정 때 `superseded`다(되돌리려면 옛 내용으로 새 revision을 만든다).
+
+##### 대상 상태 — 전달 증거(`state`)와 현재 보관함 상태(`card_state`)를 나눈다 (보완 3)
+
+과거 실행이 남긴 **수신·반영 증거**와 그 자료가 **지금 그 기기 보관함에 있는가**는 다른 사실이다. 회수는 앞의 것을 지우지 않는다. Service가 둘에서 화면 말(`status`)·`can_change`·`reselectable`을 계산해 주고 Chalk는 옮길 뿐이다(U1 `collectStatus`와 같은 자리). 기기가 보고할 수 있는 단계는 `received·reflected·failed·superseded·withdrawn`뿐이다. `state`는 같은 `device_generation` 안에서 앞으로만 간다.
+
+| `state` (전달 증거) | 화면의 말 (RM-5 공통 어휘) | 누가 아는 사실인가 | 더 바뀔 수 있음 | 재선택 |
+|---|---|---|---|---|
+| `accepted` | 접수 — 아직 어떤 기기에도 보내지 않음(미연결이면 `다시 연결되면 전달`) | Service: 의도가 기록됨 | 예 | – |
+| `offered` | 수신 확인 전 — 서버가 응답에 실었음 | Service만. 기기가 받았다는 증거가 아니다(HTTP 200 포함) | 예 | – |
+| `received` | 기기 수신 — 보관함 반영 확인 전 | 기기 receipt: 받은 내용의 hash를 다시 계산해 일치 | 예 | – |
+| `reflected` | **보관함 반영**(= 이 흐름의 ‘적용’) | 기기 receipt: 아래 ‘적용의 정의’ | – | – |
+| `no_change` | 이미 같은 revision이 이 기기에 반영돼 있음 | Service(위 조건) | – | – |
+| `failed` | 실패 · 사유(`hash_mismatch`·`store_failed`·`inbox_full`·`schema`·`unsupported_kind`·`hash_conflict`·`apply_deadline`) | 기기 receipt | – | 가능 |
+| `unsupported` | 이 앱은 보관함을 지원하지 않음 | Service: 자격 있는 기기가 `distribution_inbox`를 선언하지 않음 | 새 기기 세대면 예 | 가능(앱 교체 뒤) |
+| `superseded` | 더 새 revision으로 대체됨 | Service 또는 기기 receipt | – | – |
+| `revoked` | 회수됨 — 반영 전에 멈춤(`revoked`·`retired`·`issuer_revoked`) | Service | – | – |
+| `expired` | 전달 안 됨 · 만료 | Service: 만료까지 **한 번도** 싣지 못함 | – | 회차가 열려 있을 때만 |
+| `unconfirmed` | **미확인** — `기기에 도착했을 수 있으나 반영 보고가 없습니다. 성공으로 세지 않습니다. 다시 보내도 같은 revision은 중복 카드를 만들지 않습니다.` | Service: 한 번 이상 실었으나 만료까지 최종 receipt 없음 | 예(늦은 `reflected`만) | 가능 |
+| `target_changed` | 대상 변경 — 좌석 주인이 바뀜/좌석에서 빠짐 | Service | – | 새 명단에서 다시 선택 |
+| (모르는 값) | 결과 미확인 — 추측하지 않음 | – | 예 | – |
+
+| `card_state` (현재 보관함) | 화면의 말 | 뜻 |
+|---|---|---|
+| `none` | – | 이 실행으로 이 기기에 카드가 생긴 적 없음 |
+| `present` | 보관함에 있음 | `reflected`/`no_change`이고 회수되지 않음 |
+| `covered` | 회수됨 — 같은 자료가 다른 배포로 유지됨(그 실행 표시) | 이 실행은 회수됐으나 같은 참가자·같은 자료의 **다른 유효 배포**가 카드를 받치고 있어 기기에 tombstone을 보내지 않음 |
+| `withdraw_pending` | 회수 요청 — 기기 확인 전 | tombstone을 실을 차례이거나 실었으나 `withdrawn` receipt 없음 |
+| `withdrawn` | 기기 보관함에서 회수됨 | 기기 receipt `withdrawn` |
+| `detached` | 좌석이 바뀌어 학생 화면에 더 나타나지 않음(기기에 파일은 남아 있을 수 있음) | 대상이 `target_changed`가 됐고 그 전에 카드가 있었음. 회수 완료로 세지 않는다 |
+| `withdraw_unconfirmed` | **회수 확인 불가** — `이 기기가 다시 연결되지 않아 카드가 남아 있을 수 있습니다. 이미 본 내용은 되돌릴 수 없습니다.` | 그 기기의 연결이 폐기·만료돼 tombstone을 전할 길이 없음. **원격 삭제 완료로 세지 않는다** |
+
+`모두 반영`은 전 대상이 `reflected`·`no_change`일 때만 쓴다. **회수의 ‘서버 검증됨’, 배포의 ‘보관함 반영’, 복구의 결과 코드는 같은 단계 어휘(접수 → 수신 확인 전 → 기기 수신 → 적용 / 실패 / 미확인 / 만료·대상 변경) 위의 서로 다른 사실**이며 한 ‘성공’ 숫자로 합치지 않는다(AT-41). 비선택 학생은 targets 행 자체가 없다: 제안 0 · 콘텐츠 읽기 0 · 보관함 파일 변화 0.
+
+##### 배포와 카드의 단위 — 실행별 회수, 자료 전체 회수, 사건 순번 (보완 3)
+
+기기의 카드는 **자료(object) 하나에 한 장**이고 배포·회수는 **실행(distribution) 단위**다. 둘을 잇는 것은 두 가지다.
+
+- **coverage — 카드를 내릴지는 Service가 정한다.** 한 참가자의 한 자료에 대해 *유효한 배포* = 회수되지 않았고(`revoked_at IS NULL`), 자료가 retire되지 않았고, 그 참가자의 대상이 `reflected`·`no_change`이거나 아직 열려 있는(`accepted`·`offered`·`received`) 실행. `…/distributions/:id/revoke`는 같은 batch에서 그 실행의 미반영 대상을 `revoked`로 닫고, 반영된 대상은 **다른 유효한 배포가 없을 때만** `card_state='withdraw_pending'`(+`withdraw_seq`, `pending=1`), 있으면 `covered`로 둔다(한 UPDATE의 `CASE WHEN EXISTS(…)`). 그래서 **D1(v1) 반영 → D2(같은 v1 `no_change` 또는 v2 `reflected`) → D1 회수**에서 D2가 받치는 카드는 내려가지 않는다. `…/contents/:object/retire`는 coverage를 보지 않고 그 자료의 모든 유효 카드를 `withdraw_pending`으로 만든다.
+- **사건 순번 `seq` — 늦게 온 것이 이기지 못하게 한다.** 자료마다 `event_seq`가 배포 확정·실행 회수·자료 회수 때 1씩 오르고(같은 batch), 제안 항목은 그 실행의 `seq`를, tombstone은 회수 사건의 `seq`를 싣는다. 기기의 index는 자료마다 **마지막으로 적용한 `seq`**를 갖고 규칙은 하나다: **들어온 사건의 `seq`가 가진 `seq`보다 클 때만** 적용한다(제안은 추가로 `revision ≥ 가진 revision`). 서버가 더 낮은 revision의 확정을 `superseded`로 닫으므로 `seq` 순서와 revision 순서는 어긋나지 않는다.
+
+| 경우 | 결과 |
+|---|---|
+| D1(v1, seq 1) 반영 → D2(v1) 확정 → D1 회수(seq 3) | D2는 제안 순간 `no_change`·`present`. D1은 `covered` — tombstone 없음. 뒤에 D2도 회수(seq 4)되면 그때 tombstone(seq 4 > 1) |
+| D1(v1, seq 1) 반영 → D2(v2, seq 2) 반영 → D1의 늦은 회수(seq 3) | D2가 유효 → D1 `covered`, tombstone 없음, 카드는 v2 그대로 |
+| D1 회수가 먼저 커밋돼 tombstone(seq 3)이 대기 중일 때 D2(seq 4) 확정 | 두 사건 모두 기기로 간다. 어느 순서로 도착해도 끝은 같다: tombstone 먼저면 내렸다가 seq 4 제안으로 다시 생기고, 제안이 먼저면 seq 3 tombstone은 `seq` 비교로 버려진다(ack `stale`) |
+| 회수 뒤 늦은 제안(이미 나간 응답, seq 1) | 기기가 tombstone(seq 3)을 갖고 있으면 저장하지 않음. 아직 못 받았으면 저장될 수 있고, 그 receipt에 Service가 `recorded:false, reason:'revoked'` + tombstone으로 답해 다음 sync에 내려간다 — 그 사이 보이는 시간이 이 경계다 |
+| retire 뒤 늦은 제안 | 위와 같다. 이후 그 자료의 새 배포·새 revision은 `409 object_retired` |
+| 같은 자료의 동시 배포·회수(강사 둘) | D1의 직렬 쓰기가 `event_seq`로 순서를 정한다. 회수는 `row_revision` CAS — 진 쪽은 `409`로 다시 읽는다 |
+
+##### 오프라인·재연결 — 의도는 참가자에 묶이고, 연결은 매번 다시 검사한다
+
+배포 의도는 **같은 회차의 같은 참가자**(`seat_revision`·`student_id`)에 결속되고 기본 만료는 **회차 종료**(`class_run_ops.ends_at`, 강사가 더 이르게만 줄일 수 있다)다. 옛 연결의 명령을 새 grant/epoch에 복사하지 않는다 — 대상 행은 참가자에 묶여 있고, sync마다 아래 ‘sync 조건과 한도’의 제안 조건을 **모두** 새로 확인한 뒤에만 싣는다. 싣는 순간 `grant_id`·`connection_epoch`·`device_registration_id`·`offer_key`를 그 제안의 증거로 대상 행에 적는다. 좌석 lease는 지금 `ops_commands`가 켜져 있거나 receipt가 있을 때만 `commandExchange` 안에서 잡히므로, 구현은 lease 확보를 공통 함수로 빼 `ops_distribute`만 켜진 회차에서도 owner 창이 정해지게 한다(명령 전달 조건은 바꾸지 않는다).
+
+| 사건 | 연결에 일어나는 일 (기존 동작) | 아직 반영되지 않은 의도 | 이미 반영된 보관함 |
+|---|---|---|---|
+| 일시 단절 → 같은 앱 재접속 | 같은 grant·epoch·기기 세대 → **같은 `offer_key`** | **허용** — 다음 sync에서 다시 싣는다(backoff). 기기는 `object·revision·hash·seq`로 중복 제거 | 그대로 |
+| 앱 재시작(같은 기기, 새 `boot_id`) | 같은 grant(`resume()`) → 같은 `offer_key` | **허용** — 위와 같다. 미전송 receipt는 디스크 저널에서 재전송. **재시작 전에 받아 두기만 한 미반영 파일은 스스로 승격하지 않는다**(아래 보관함) | 디스크에서 복구돼 카드가 다시 보인다 |
+| 같은 기기의 다른 창이 lease owner가 됨 | 같은 grant·epoch, lease 세대만 +1 | **허용** — 보관함·저널은 같은 디스크라 새 owner 창이 이어서 보고한다. `offer_key` 불변, 두 창의 동시 쓰기는 보관함 잠금이 막는다 | 그대로 |
+| 학습 토큰 재발급(같은 학생·좌석) | 같은 grant, `connection_epoch`+1 → **새 `offer_key`** | **허용** — 같은 참가자다. 옛 key의 receipt는 `stale_offer`로 거부되고 현재 epoch로 다시 싣는다. 이미 가진 항목이면 기기는 다시 쓰지 않고 새 key로 `reflected`를 보고한다 | 그대로(같은 학생) |
+| 기기 교체(같은 학생이 새 1회용 코드로 연결) | 옛 grant `revoked: device_replaced`, 새 grant·새 `device_registration_id` | **허용** — 새 기기에 싣는다. 옛 기기의 늦은 receipt는 거부(grant 불일치) | 새 기기 보관함은 비어 있다. 의도가 아직 유효(미회수·미만료·회차 열림)하면 Service가 그 대상을 `device_generation`+1·`accepted`·`card_state='none'`으로 **되돌려 새 기기에 다시 싣고** 감사에 `target_rebound_device`를 남긴다(이전 세대의 반영 시각은 감사에 남는다). 옛 기기는 최종 거부를 받으면 그 회차 보관함을 **숨긴다** |
+| 좌석의 학생 교체(a→b) | `seat_revision`+1, a의 grant는 `seat_replaced`로 거부 | **거부** — a의 대상은 `target_changed`. b에게는 **아무것도 가지 않는다**(b는 대상이 아니다) | a의 기기는 최종 거부를 받고 그 회차 보관함을 숨긴다 |
+| 같은 학생이 다른 좌석으로 이동 | 옛 좌석 행 교체, 새 좌석·새 연결 | **거부** — 옛 좌석 대상은 `target_changed`. 자동 이관하지 않는다(명시적 선택 집합). 강사가 새 좌석을 다시 선택 | 보관함은 좌석·학생 단위라 새 좌석은 빈 보관함으로 시작한다. 옛 좌석의 카드는 더 나타나지 않고 그 대상의 `card_state`는 `detached` |
+| 강사가 연결 해제 / 학생 연결을 발급한 issuer 폐기 | grant `revoked` | **거부** — 새 연결이 생기기 전에는 실을 곳이 없다. 같은 참가자가 다시 연결되면 ‘기기 교체’와 같다 | 최종 거부 → 숨김. 대기 중이던 회수는 `withdraw_unconfirmed` |
+| **배포한** 강사의 issuer 폐기·재범위화 | 학생 연결은 그대로(다른 강사가 발급했을 수 있다) | **거부** — D1 sweep으로 그 강사의 열린 배포가 `revoked`(위 ‘철회 경계’) | 그대로. 이미 나간 응답의 경계는 위에 적었다 |
+| 회차 종료(강사 종료·시각 경과) | sync는 grant 만료(`ends_at`+1h 상한)까지 계속되나 poll 60초 | **거부** — 새 콘텐츠·새 배포·새 제안 없음(`run_ended`). 한 번도 못 실은 대상은 `expired`, 실었던 대상은 늦은 receipt만 받고 그 밖에는 `unconfirmed` | 읽기는 계속 가능(로컬, ‘끝난 수업의 자료’ 표시). 회수 tombstone은 grant가 살아 있는 동안 전달된다 |
+| 새 회차 | 새 `class_run_id`·새 연결 | **거부** — 의도는 회차에 묶여 있다 | 작업 화면·진입 화면은 **현재 회차 보관함만** 보인다. 지난 회차 자료는 나타나지 않는다 |
+
+##### sync 조건과 한도 — 세 가지 흐름을 따로 정한다 (보완 5)
+
+첫 계약의 ‘flag가 켜져 있을 때만 블록’과 ‘꺼져 있어도 receipt 기록’, ‘종료 뒤 늦은 reflected만’과 ‘회수의 withdrawn 확인’은 서로 부딪쳤다. 블록 하나 안에 **조건이 다른 세 흐름**이 있다. 공통 전제: 기존 sync 검사(자격 서명 · grant `active`·미만료 · `seat_live` · `ops_observe`)를 통과했고, 이 `(grant, app_instance, boot)`가 `distribution_inbox`를 선언했으며, 좌석 lease의 **owner 창**이다. 전제가 깨지면 셋 다 없다.
+
+| 조건 | ① 새 내용 제안(`items`) | ② 과거 receipt 정산·ack | ③ 회수 tombstone 전달(`withdraw`) |
+|---|---|---|---|
+| `ops_distribute` ON · 회차 진행 중 | **예** — `target.seat_revision·student_id = grant의 값` · 배포 미회수 · 자료 미retire · `now < expires_at` · `state ∈ {accepted, offered, received}` · `next_offer_at ≤ now` | 예 | 예 |
+| `ops_distribute` OFF | 아니오 | **예** — 이미 나간 제안의 증거다. 끄는 것은 rollback이지 증거 폐기가 아니다 | **예** — 회수는 안전 조치라 rollback 중에도 나간다 |
+| 회차 종료 뒤(grant는 유효) | 아니오 | 예 — `first_offered_at < 종료 시각`인 제안의 `received`·`reflected`·`failed`·`superseded`와 모든 `withdrawn` | 예(grant 만료까지) |
+| 배포가 자체 `expires_at`을 넘김 | 아니오 | 예 — 만료 전에 실었던 것의 늦은 receipt만 | 예 |
+| 배포 회수·자료 retire·배포 강사 fence | 아니오 | receipt는 **기록하지 않고** `recorded:false, reason:'revoked'` + tombstone으로 답한다. `withdrawn` receipt는 기록 | 예 |
+| 좌석 교체·참가자 불일치 | 아니오(`target_changed`) | 도달 불가 — 그 자격의 sync는 `403 seat_replaced` | 도달 불가 |
+| grant 폐기·만료 | **sync 자체가 401/403** — 셋 다 없다. 대기 중이던 회수는 `withdraw_unconfirmed`, 미반영 대상은 만료 때 `expired`/`unconfirmed` | | |
+| lease owner가 아닌 창 | 아니오 | 아니오 — 그 창은 보내지 않는다(저널은 공유 디스크, owner 창이 보낸다) | 아니오 |
+| 배포 교환 중 예외 | 블록 없음 · 관측/명령/채팅은 계속 | 기기는 저널을 지우지 않는다 | — |
+
+블록은 위 전제 아래 **말할 것(①②③ 중 하나)이 있을 때만** 응답에 있다. flag가 꺼져 있고 말할 것이 없으면 기존 응답과 바이트까지 같다.
+
+| 유한해야 하는 것 | 한도 | 넘으면 |
+|---|---|---|
+| 회차당 자료(object) / 자료당 revision | 50 / 20 | `429 content_limit` — 기존 자료·수업 불변 |
+| 회차당 배포 실행 / 분당 | 200 / 20 | `429 rate_limited` |
+| 배포 1건의 대상 | `MAX_SEATS`(200) | `400` |
+| sync 응답 `items` | 2개 그리고 24 KiB | 나머지는 `more:true` → 1초 뒤 |
+| sync 응답 `withdraw` | 10 | `more:true` |
+| sync 요청 `receipts` (= 응답 `receipt_acks`) | 6 — receipt마다 조회 1 + 갱신 1이라 호출당 쿼리 예산을 지키기 위한 값 | 나머지는 다음 sync. 7개 이상이면 `400`이 아니라 앞의 6개만 처리하고 `more:true` |
+| 같은 기기 세대에 대한 제안 재시도 | 5→10→20→60초로 10회, 이후 5분에 1회, 만료까지(2시간 수업 기준 ≤ 34회) | 멈춤 · `수신 확인 전` 유지 → 만료 시 `unconfirmed` |
+| tombstone 재시도 | 같은 간격 | grant 만료 시 `withdraw_unconfirmed` |
+| 기기 receipt 저널 | 200건 | 가득 차면 **새 항목을 받지 않는다**(`failed: journal_full`은 다음 기회에 보고) — 기존 카드·채팅 불변 |
+| 목록 page | 자료·배포 50, 대상 200(한 page) | cursor |
+| 기기 보관함 | 회차당 50 object · 1 MiB, 전체 5 MiB | `failed: inbox_full` — **조용히 밀어내지 않는다** |
+| sync 1회의 U2 문장 수 | 대기 없음 0(기존 grant 조회의 subquery 1개) · 최악 ≤ 18(제안 조회 1 + 제안 기록 1 + receipt 6×2 + tombstone 조회 1·기록 1 + 정산 2) | 기존 경로와 합쳐 호출당 ≤ 45를 시험에서 센다 |
+
+부분 결과(`more:true`), 미확인, `offered`는 어느 집계에서도 성공이 아니다.
+
+##### 기기 보관함 — 저장·표시·‘적용’의 정의
+
+- **위치와 결속.** `globalStorageUri/classroom-inbox/<cohort>/<class_run>/<seat>.<student>/`(식별자는 기존 `safe()` 방식으로 정규화) — 대상과 같은 단위(회차·좌석·학생)다. 화면에 보이는 보관함은 **지금 유효하거나 정상 만료된 마지막 연결**이 증명한 그 단위 하나뿐이며, 연결이 없으면(최종 거부 뒤 포함) 아무것도 보이지 않는다. 학생 workspace·대화·초안·spool 밖이며 보관함 코드는 이 디렉터리 밖에 **쓰지 않는다**.
+- **파일 계약 (보완 2) — 가진 자료를 잃지 않는 커밋.** 첫 계약의 `item-<object>.json` 덮어쓰기는 ‘v2로 덮은 뒤 index rename 실패 → index는 v1인데 파일은 v2 → reconciler가 v1 카드까지 제거’가 가능했다. 바꾼다:
+
+```
+rev/<object>.<revision>.<hash 앞 16자>.json   불변. 한 번 쓰면 덮어쓰지 않는다(tmp → rename, 이미 있으면 hash 검증 뒤 재사용)
+index.json      유일한 가변 파일. {schema:'hps-classroom-inbox/2', index_revision, objects:{<object>:{revision, content_hash, seq,
+                file, kind, title, reflected_at, tombstone?:{seq, reason}, sources:[{offer_key, reflected_acked}]}}}
+journal.json    보낼 receipt (offer_key, stage, …) — 보내기 전에 기록, ack 뒤에만 삭제
+(index.lock 없음 — 구현에서 `index.<n>.json` + link() compare-and-swap으로 대체. 위 ‘구현에서 확정·변경한 계약’)
+quarantine/     hash가 맞지 않는 수신물
+```
+
+  한 항목의 적용 순서 — **모든 `await` 뒤에 연결 세대·학생 신원·`apply_within_ms`를 다시 검사**하고 어긋나면 그 자리에서 멈춘다(그때까지 쓴 것은 참조되지 않는 rev 파일뿐이라 무해하다): ① 검증·hash 재계산 → 저널 `received` ② rev 파일 쓰기(불변) ③ 잠금 획득 → index를 **다시 읽어** 순수 reducer로 판정(`seq`·revision·tombstone) → 새 index를 tmp에 쓰고 rename(`index_revision`+1) → 잠금 해제 ④ `readInbox()`로 디스크에서 다시 읽어 pointer → rev 파일 → hash 재검증 ⑤ 저널 `reflected` ⑥ index가 더는 가리키지 않는 옛 rev 파일 정리(**index commit이 성공한 뒤에만**, 가리키는 파일은 절대 지우지 않는다). 같은 object의 쓰기는 host 안에서 object별 큐로 직렬화하고, 창 사이는 잠금과 `index_revision` 재확인(CAS)으로 막는다.
+
+| 중단 지점 (v1이 이미 있고 v2를 적용하는 중) | 디스크 | 재시작 뒤 | 거짓 `reflected` |
+|---|---|---|---|
+| rev 파일 tmp 쓰는 중 | index=v1, v1 파일 온전, tmp 조각 | tmp 삭제. **v1 카드 그대로.** v2는 다시 제안될 때 적용 | 0 — 저널에 `received`뿐 |
+| rev 파일 rename 뒤, index 전 | index=v1, v1·v2 파일 | 참조되지 않는 v2 파일은 **승격하지 않고 지운다**(아래). v1 카드 그대로 | 0 |
+| index tmp 쓰는 중 / rename 실패 | index=v1(rename은 전부 아니면 전무) | 위와 같다. rename이 거부되면(Windows에서 다른 프로세스가 파일을 열고 있을 때의 `EPERM`/`EBUSY` 등) 50→100→200ms 3회 뒤 `failed: store_failed`, **index 불변·v1 카드 유지** | 0 |
+| index rename 뒤, 저널 `reflected` 전 | index=v2 | reconciler가 index의 `sources[].reflected_acked=false`를 보고 v2를 재검증한 뒤 저널에 `reflected`를 만든다 | 0 — 반영은 사실이다 |
+| 저널 `reflected` 뒤, 전송·ack 전 | index=v2, 저널 보유 | 저널 재전송. ack가 오면 `reflected_acked=true` | 0 |
+| v2 반영 뒤 **늦은 v1 writer**(지연된 응답·다른 창) | — | ③에서 다시 읽은 index의 `seq`/revision이 더 크다 → 쓰지 않고 `superseded` | 0 |
+| 회수 뒤 늦은 writer | — | index의 tombstone `seq`가 더 크다 → 쓰지 않음 · 저널 `superseded`(`result_code: withdrawn_newer`) | 0 |
+| index가 가리키는 rev 파일이 없거나 hash가 다름(디스크 손상) | — | 그 항목만 ‘읽을 수 없는 자료 — 강사에게 다시 요청하세요’로 표시하고 저널 `failed: store_corrupt`. **다른 카드는 건드리지 않는다** | 0 |
+
+  Windows의 rename-over-existing 동작, 보안 프로그램의 파일 점유, 한글 사용자 폴더 경로는 **실기 NOT RUN**이며 위 재시도·실패 규칙은 그 환경에서 확인하기 전까지 설계일 뿐이다.
+- **미반영 파일은 스스로 승격하지 않는다 (보완 4).** 첫 계약의 ‘index에 없는 항목 파일은 검증해 index에 올린다’를 버린다 — 상대 시간(`expires_in_ms`)만 가진 파일은 재시작하면 monotonic 원점을 잃고, 그사이 회차가 끝났거나 회수됐을 수 있다. **이미 `reflected`된 자료를 다시 여는 것**은 로컬 읽기이고 새 검증이 필요 없다. **미반영 항목을 새로 적용하는 것**은 언제나 *방금 받은 sync 응답*(= Service가 그 순간의 자격·만료·회수 여부를 확인했다는 증거)에서만 시작하고, 받은 시점부터 monotonic으로 `apply_within_ms`(30초) 안에 index commit까지 끝나야 한다. 넘기거나(`failed: apply_deadline`), 연결 세대가 바뀌거나, 재시작하면 그 시도는 버려지고 reconciler는 **참조되지 않는 rev 파일을 전부 지운다** — 다시 필요하면 Service가 다시 싣는다(≤ 12 KiB). 기기 시계(`Date.now()`)는 어떤 판정에도 쓰지 않고, 표시용 시각은 응답의 `server_time`을 쓴다.
+- **오프라인 기기에 대한 경계.** 제안이 나간 뒤 회수·폐기가 있었고 그 기기가 그 사실을 모른 채 오프라인이면 즉시 막을 방법은 없다. 보장하는 것은 상한이다: 그 기기가 적용을 끝낼 수 있는 시간은 응답을 받은 뒤 **30초**이고, 그 뒤에는 새 sync 응답 없이는 아무것도 새로 나타나지 않는다. 이미 나타난 카드는 다음 sync에서 tombstone을 받아 내려가며, 다시 sync하지 않는 기기는 Service에서 `withdraw_unconfirmed`로 남는다.
+- **receipt와 ack의 결속 (보완 4).** `offer_key` = SHA-256(`distribution_id · seat_id · device_generation · grant_id · connection_epoch · object_id · revision · content_hash`)의 앞 32자 — Service가 제안 때 계산해 대상 행에 적는다. 같은 grant·epoch·기기 세대의 재전달은 같은 key(멱등)이고 그 셋 중 하나라도 바뀌면 다른 key다. receipt는 `offer_key`와 풀어 쓴 필드를 함께 보내고 Service는 **현재 대상 행의 `offer_key`와 같고** 풀어 쓴 필드가 일치할 때만 기록한다(아니면 `recorded:false, reason:'stale_offer'`). ack는 `(offer_key, stage)`를 되돌려 주며 기기는 **정확히 그 쌍**의 저널 항목만 지운다 — 옛 연결의 늦은 ack가 새 저널을 지우지 못한다. `recorded:false`의 사유가 최종(`stale_offer`·`revoked`·`target_changed`·`expired`)이면 그 저널 항목을 내리고, 그 밖(`storage` 등)이면 보관한다. 구분: **같은 기기의 새 boot·lease owner 변경**은 key가 그대로라 이어서 보고하고, **토큰 재발급**은 epoch가 바뀌어 새 key로 다시 실리며, **기기 교체**는 `device_generation`이 올라 옛 기기의 receipt가 전부 `stale_offer`다.
+- **서로 다른 증거.** ① 접수(Service) ② 제안/수신 확인 전(Service) ③ 기기 수신 = 받은 항목의 schema가 유효하고 다시 계산한 hash가 `content_hash`와 같으며 이 순간에도 같은 연결 세대·같은 학생임 → `received` ④ 저장 = 위 ②③ 단계(기기 내부, 단독 보고 없음) ⑤ **보관함 반영 = 적용**: index commit 뒤 host가 **카드 목록이 쓰는 바로 그 읽기 경로**(`readInbox()`)로 디스크에서 다시 읽어 hash를 재검증했고, 그 항목이 현재 `(학생, 회차)`의 표시 목록에 들어 있음 → `reflected` ⑥ 실제 열람(학생이 카드를 펼침)은 **수집하지 않는다** — 기기 안에서만 ‘새 자료’ 표시를 끄는 데 쓴다.
+- **완료로 세지 않는 것.** sync HTTP 200, `offered`, 알림(toast) 호출, webview로의 `postMessage` 호출. 알림은 ‘강사가 자료를 보냈습니다 · 보관함에서 열기’ 한 줄의 편의일 뿐이고 실패해도 결과에 영향이 없다. 반대로 **webview가 닫혀 있어도** 반영은 성립한다(사이드바를 접은 학생을 영원히 ‘실패’로 두지 않기 위해). 그래서 화면의 말은 ‘읽음’이 아니라 ‘보관함 반영’이고, 열람·이해·학습 완료를 뜻하지 않는다고 결과 영역에 적는다.
+- **카드가 실제로 보이는 경로(인수에서 증명할 것).** host → webview `inboxState{run, student, inbox_generation, items[]}`. webview는 mount·다시 보일 때 `inboxRequest`를 보내고 host는 **항상 디스크에서** 답한다(메모리 목록을 정본으로 두지 않는다 — 지금의 `coachingNotes` 배열·`showInformationMessage` 방식은 재시작에 사라지므로 쓰지 않는다). 반영 직후에도 같은 메시지를 민다.
+  - **작업 중 화면**(`ChatPanel.tsx` 코치 rail, ‘이번 단계 안내’ 아래): `<details>` ‘강사가 보낸 공지·자료 (N)’ — 기본 닫힘, 새 항목은 **글자**로 `새 자료 1개`(색만으로 표시하지 않음), 항목마다 `강사가 보냄 · 공지|자료 · 받은 시각 · 수정됨(rev N)`과 본문. SX-06이 rail에 허용한 ‘강사 메시지’ 유형이며 메시지 스트림·canvas·evidence drawer에 넣지 않는다(SX-05·SX-13). Primary를 추가하지 않는다(SX-04). 모달·자동 펼침·자동 스크롤 없음.
+  - **‘이어서 하기’ 진입 화면**(`StartPage.tsx` 연결된 활동 카드): Primary ‘이어서 하기’ 아래의 조용한 텍스트 줄 `강사가 보낸 공지·자료 N개`를 펼치면 같은 목록. 두 번째 Primary·숫자 배지 강조 없음(SX-02/04).
+  - 두 화면은 같은 host 읽기 경로·같은 메시지를 쓴다. 키보드만으로 펼치기·링크 조치가 되고 포커스가 보이며, 200% 확대·390px에서 본문이 가로로 넘치지 않는다(DES-02/03/06, DT-02/04).
+- **재시작 reconciler의 순서.** ① 잠금 ② index 읽기 — 읽을 수 없으면 보관함을 비어 있는 것으로 표시하고 파일은 `quarantine/`으로 옮긴다(지우지 않는다) ③ tmp·참조되지 않는 rev 파일 삭제 ④ index의 각 pointer 재검증(위 ‘디스크 손상’ 행) ⑤ 저널 읽기: `received`만 있고 index에 없는 항목은 저널에서 내린다(보고할 반영이 없다 — 다시 실리면 새로 시작), index에 있고 `reflected_acked=false`인 source는 저널에 `reflected`가 없으면 만든다 ⑥ 잠금 해제 ⑦ 그 뒤에야 sync가 저널을 보낸다.
+- **끝난 renderer의 callback.** webview에서 오는 `inboxRequest`·`inboxOpen`·`inboxLink`는 `{run, student, inbox_generation}`을 싣고, host는 답하기 직전에 현재 연결 세대·현재 검증된 학생 신원·현재 회차와 다시 대조한다. 어긋나면 빈 상태로 답하고 아무것도 열지 않는다. sync 응답도 기존 연결 generation 검사를 그대로 거친다: 연결이 끝났거나 바뀐 뒤 도착한 `items`·`withdraw`·`receipt_acks`는 **적용하지 않고 버린다**(U1·F2와 같은 규칙).
+- **권한 철회 뒤의 캐시 (보완 4·5).** 최종 거부(`ops_grant_revoked`·`seat_replaced`·`device_replaced`)를 받은 기기는 그 연결의 회차 보관함을 **숨긴다**(삭제하지 않는다): 그 기기는 이제 회수를 통보받을 길이 없으므로 강사 소유 내용을 계속 보여 주는 쪽이 더 위험하다. 미반영 항목은 위 규칙대로 어차피 새로 나타나지 않는다. **정상 만료**(수업이 끝남)는 최종 거부가 아니며 카드는 ‘끝난 수업의 자료’로 계속 열린다. 다른 학생의 토큰이 확인된 공용 PC에서는 목록 자체가 비어 있다(디렉터리가 좌석·학생별이고 host가 연결의 학생과 현재 검증된 토큰의 학생을 대조한다).
+
+##### 순서·회수·종료 (요약 — 단위와 순번의 규칙은 위 두 소절이 정본)
+
+| 경우 | 기기 | Service / 강사 화면 |
+|---|---|---|
+| v2 반영 뒤 **늦은 v1** | index의 `seq`·revision이 더 크다 → 저장하지 않고 `superseded`. 카드는 v2 한 장 | v1 대상 `superseded`. 확정 시점에 이미 아는 경우는 제안조차 하지 않는다 |
+| 같은 revision 재전달(응답 유실·재시작) | hash가 같으면 다시 쓰지 않고 `reflected`를 다시 보고 | 같은 `(offer_key, stage)`의 재보고는 `recorded`(멱등). 상태·시각 불변 |
+| 같은 revision인데 hash가 다름 | 저장하지 않음. 가진 것을 유지하고 받은 것은 격리 · `failed: hash_conflict` | 불변 revision 위반 — 감사에 남기고 자동 재시도하지 않는다 |
+| 저장 뒤 receipt 유실 | 저널이 보관, 다음 sync(재시작 포함)에 재전송 | 만료까지 못 받으면 `unconfirmed`(성공으로 세지 않음). 늦은 `reflected`는 반영 |
+| 저장 실패(디스크·권한·용량·rename 거부) | index 불변·**기존 카드 유지** · `failed: store_failed`/`inbox_full` | 실패 — 재선택 대상 |
+| 적용 도중 중단(어느 경계든) | 위 중단 지점 표 | 그동안 `offered`/`received`로 보이고, 다시 실려 끝난 뒤에야 `reflected` |
+| 실행 회수 — 반영 전 | 받지 않는다 | 대상 `revoked` |
+| 실행 회수 — 반영 뒤 | 다른 유효 배포가 없을 때만 tombstone → 본문을 지우고 `강사가 회수한 자료입니다` → `withdrawn` receipt. **학생의 초안·대화·파일은 건드리지 않는다**(학생이 옮겨 적은 글은 학생의 것이다) | `card_state`: `covered` 또는 `withdraw_pending` → `withdrawn` / 기기가 돌아오지 않으면 `withdraw_unconfirmed`. `state`의 반영 증거는 그대로 남는다. 화면은 `이미 본 내용은 되돌릴 수 없습니다`를 함께 말한다 |
+| 자료 전체 회수(retire) | 그 자료의 카드가 내려간다 | 그 자료의 모든 실행 회수 + 새 revision·배포 거부 |
+| 회차 종료 뒤 | 새 항목 없음. 반영돼 있던 카드는 로컬에서 계속 열린다 | 새 콘텐츠·배포 `409 run_ended`, 결과 조회·‘보낸 자료’·회수는 계속 가능 |
+
+##### 내용과 학생 통제
+
+- **평문만.** 제목 ≤ 80자, 본문 ≤ 2,000자(UTF-8 ≤ 8 KiB), 제어문자 거부, 저장 전 기존 `scrubSecrets`. 기기와 Chalk 모두 `textContent` + `white-space: pre-wrap`으로 그린다 — `MarkdownText`·`innerHTML`을 쓰지 않으므로 HTML·script·마크다운은 **글자로 보일 뿐 실행·해석되지 않는다.** 셸 명령·파일 경로도 데이터다: 보관함은 어떤 문자열도 명령·경로·URL로 **자동 해석하지 않는다**.
+- **링크.** ≤ 5개, `label` ≤ 60자, `https:`만, userinfo·IP 리터럴·`localhost`·`.local`·443 외 포트 거부, URL ≤ 500자, host는 Service 설정 `HPS_CLASSROOM_LINK_HOSTS`(쉼표 목록, **기본 빈 값 = 모든 링크 거부**)에 있어야 한다. 기기는 링크를 `이름 + 주소 글자`로 보여 주고 학생이 누른 **‘브라우저에서 열기’/‘주소 복사’**에서만 기존 `openExternal` 경로(https 재검사)를 쓴다. 자동 열기·미리 가져오기·다운로드·AI 호출·프롬프트 자동 삽입은 없다. 화면과 결과 어디에도 링크 배포를 ‘파일 전달/다운로드 완료’로 쓰지 않는다 — 말은 `링크가 보관함에 반영됨`이다.
+- **덮어쓰지 않는다.** 기존 미션·단계·입력창·대화·workspace 파일·spool에 쓰지 않는다. 강사 출처(`강사가 보냄`)를 항상 표시하고 학생 작업물·현재 미션이 화면의 중심에 남는다(Mission header·canvas 불변). 학생은 카드를 접어 둘 수 있고 읽기를 강요받지 않는다(모달·차단 0).
+- 본문은 Service의 `classroom_content_revisions`와 대상 기기의 보관함에만 있다. 보드·감사·대상 원장에는 id·revision·hash뿐이다.
+
+##### U3와의 연결 — 지금 막아 두지 않을 것
+
+- **프롬프트**는 같은 object/revision 모델의 `kind:'prompt'`다. 학생은 카드에서 **보고**, ‘초안에 가져오기’를 직접 눌렀을 때만 입력 초안에 들어간다(자동 전송·자동 삽입 없음). ‘보관함 반영’은 ‘사용함’이 아니다. 그래서 `kind`는 열거형 TEXT, 내용은 kind별 검증기를 가진 `payload_json`이다.
+- **수업 설정**은 `kind:'setting'`, payload = 승인된 `{module, version, settings{허용 목록 키}}` 참조다. 실행 중인 turn은 고정하고 **다음 경계**에서 App과 Service가 **같은 effective revision**을 적용한다. 참가자별 effective 값은 회차·참가자에 묶인 `classroom_distribution_targets`(유효한 배포의 coverage 규칙 그대로)에서 읽으며, `modules.ts`의 profile/cohort 전역 pin을 바꾸는 것으로 학생별 배포를 대신하지 않는다. receipt `stage`와 `state`가 TEXT이고 앞으로만 가는 규칙이라 `reflected` 뒤에 `applied_at_boundary` 같은 단계를 **추가**할 수 있다.
+- 수업 텍스트는 권한이 아니다. 어떤 kind의 payload도 새 도구 접근·더 비싼 모델·권한 상승을 만들 수 없고, 설정 검증기는 profile이 이미 허용한 범위 안의 값만 받는다(ADM-11).
+- U2 구현은 `notice`·`material` 외의 kind를 `400 content_invalid{kind}`로 거부하고, 모르는 kind를 받은 기기는 저장하지 않고 `failed: unsupported_kind`로 답한다.
+
+##### 비용 — 기존 sync와 U2 증가분, 그리고 실측 계획 (보완 6)
+
+기존 HTTPS sync(4초 제한·single-flight·5→10→20→60초 backoff)와 기존 outbox/저널 방식을 그대로 쓴다. 새 연결·daemon·스트리밍 없음. 아래는 **소스를 읽어 센 문장 수와 산술 모델**이며 실측이 아니다. D1의 과금·한도 단위는 반환 행이 아니라 **훑은 행(`rows_read`)과 쓴 행(`rows_written`, 인덱스 갱신 포함)**이다([가격](https://developers.cloudflare.com/d1/platform/pricing/) · [한도](https://developers.cloudflare.com/d1/platform/limits/), 2026-09-21 확인분). **이 계정이 Free인지 Paid인지는 확인하지 않았다** — ‘포함량 대비 무시할 크기’라고 쓰지 않는다. Free라면 일 읽기 500만·쓰기 10만·호출당 50쿼리를 넘는 순간 쿼리가 거부된다.
+
+| 구간 | 기존 (U2와 무관, 현재 소스) | U2 증가분 |
+|---|---|---|
+| idle sync 1회 | 읽기 4문장(grant·기기·최신 상태·control) + 45초마다 쓰기 batch 1(2문장). `ops_commands` ON이면 lease 조회, 정산 UPDATE 3, lease 갱신/배정, 대기 명령 조회로 +6 안팎 | **문장 +0, 쓰기 0.** grant 조회에 subquery 1개(부분 인덱스 `pending=1` probe — 대기가 없으면 훑는 행 0~1) |
+| 수업 2시간의 sync 수 | 30석 43,200 · 100석 144,000 · 200석 288,000 (기존 비용표의 5초 polling 전제) | 위 probe만큼: ≤ 43,200 · 144,000 · 288,000행 읽기(대기 없을 때의 상한 가정 1행/회) |
+| 배포 확정 1회 | — | ≤ 12쿼리. 쓰기 ≈ 1 + 대상 N×4(행 1 + PK·부분·학생 인덱스 3) + 머리 1 + 감사 2 → 30석 ≈ 125행, 100석 ≈ 405행, 200석 ≈ 805행. guard의 좌석 probe N행 읽기 |
+| 대상 1명의 정상 전달 | — | 제안 기록 1회·`received` 1회·`reflected` 1회, 각 ≈ 3행(행 + 바뀌는 인덱스) + 감사 2 ≈ **11행 쓰기** → 확정분 포함 대상당 ≈ 15행 |
+| 대상 1명의 최악(만료까지 무응답) | — | 제안 ≤ 34회 × ≈ 2행 ≈ 68행 + 정산 3행. 본문 재전송 ≤ 34 × 12 KiB |
+| 재접속 폭주(전 좌석이 동시에 돌아옴) | 좌석당 sync 1회 | 좌석당 대기 항목 ≤ 2개/응답, 1초 간격으로 소진. 좌석당 추가 문장 ≤ 18/회 |
+| 강사 결과 관측 | — | 실행 1건 조회 = 대상 N행 읽기(PK 접두) + 정산 UPDATE 2. 실행당 관측 상한 ≈ 52회(2분×3초 + backoff→10분 정지) → 30석 ≈ 1,560행 · 100석 ≈ 5,200행 · 200석 ≈ 10,400행 읽기/실행/강사 |
+| ‘보낸 자료’ 목록 | — | page당 ≤ 50행(자료 머리) + 배포 횟수 집계(실행 테이블, 자료당 ≤ 200행). 대상 원장은 훑지 않는다 |
+
+전 좌석 대상 배포 10건, 2시간, 강사 1명의 **증가분 합(모델)**:
+
+| | 30석 | 100석 | 200석 |
+|---|---:|---:|---:|
+| 쓰기 — 전원 정상 | ≈ 4,500행 | ≈ 15,000행 | ≈ 30,000행 |
+| 쓰기 — 전원 최악(무응답) | ≈ 22,500행 | ≈ 75,000행 | ≈ 150,000행 |
+| 읽기 — probe + 확정 + 관측 | ≈ 60,000행 | ≈ 200,000행 | ≈ 395,000행 |
+| 본문 전송 — 정상 / 최악 | ≤ 3.5 / 120 MiB | ≤ 11.7 / 400 MiB | ≤ 23.4 / 800 MiB |
+
+최악 쓰기는 Free의 일 10만 행을 100석 한 수업으로 위협하고 200석에서는 넘는다 — 그래서 재시도 상한을 위 표처럼 두었고, **실측 전에는 어느 plan에서도 ‘된다’고 쓰지 않는다.**
+
+**측정 계획과 허용 한도(구현 단위 3·4의 종료 조건).** 시험 harness가 D1 응답의 `meta.rows_read`·`meta.rows_written`과 호출당 문장 수를 경로별로 합산해 기록한다. 허용 한도: ① idle sync의 U2 증가분 `rows_written = 0`, `rows_read ≤ 1`, 문장 +0 ② 확정 1회 ≤ 12쿼리·문장당 bound ≤ 30·200석에서도 batch 1개 ③ 대상 1명의 정상 전달 `rows_written ≤ 20` ④ sync 1회 전체 문장 ≤ 45 ⑤ 30/100/200석 합성에서 위 모델 대비 +25% 이내, 넘으면 인덱스·문장을 고치고 모델을 고친다. 실행 층은 **로컬 workerd의 D1**이다(Node SQLite의 값은 인덱스 계수가 달라 참고만). **운영 D1의 latency·쿼터·직렬 처리 대기·30초 batch 한도는 staging에서 실행하기 전까지 NOT RUN**이고, 로컬 결과를 운영 실측이라고 부르지 않는다.
+
+**장애 격리.** sync 안의 배포 교환은 기존 `commandExchange`처럼 try/catch로 감싸 실패 시 블록만 빠지고 관측·명령·채팅은 계속된다. 기기의 보관함 I/O 오류는 채팅·수업 패널을 막지 않는다. Service가 죽어 있어도 이미 반영된 카드는 로컬에서 열린다. 오래된 데이터의 **시간 기준 삭제는 정하지 않았다**(아래).
+
+##### 재사용 지점과 구현 때의 소유 파일 (지금은 어느 것도 수정하지 않았다)
+
+| 층 | 재사용 | 새로 만들/고칠 파일 |
+|---|---|---|
+| Service | `authorizeIssuerForOps` · `parseFlags`/`OPS_FLAGS`/`OPS_CAPABILITIES` · U1 조건부 batch guard · `settleOverdue`식 lazy 정산 · `ops_audit` · `scrubSecrets` · sync의 grant·seat_live·lease 검사 · `sha256Hex`·`canonicalPayload` · `budget-views.ts`의 revision guard 모양(참고) | 신규 `worker/src/lib/classroom-distribution.ts`(순수: 검증·정규화·hash·상태 전이·status·`offer_key`) · 신규 `worker/src/routes/classroom-distribution.ts` · `worker/migrations/0023-classroom-distribution.sql` + `worker/schema.sql` · 수정 `worker/src/lib/classroom-ops.ts`(flag·capability 목록) · `worker/src/routes/classroom-ops.ts`(sync 블록, `/status`, lease 공통화, fence·sweep 함수) · **`worker/src/routes/admin.ts`(폐기·재범위화·un-revoke·session close의 세 호출 지점)** · `worker/src/lib/instructor-auth.ts`(경로) · route mount |
+| App | `ClassroomOpsHost`의 연결 generation·`globalStorageUri`·저널 패턴 · `startOpsSync` deps · 기존 `openExternal` 가드 · `protocol.ts` 메시지 계약 | 신규 `extensions/hypeproof-chat/src/classroomInbox.ts`(순수 reducer: `seq`·revision·tombstone·저널) · 수정 `classroomOps.ts`(sync 본문/응답 타입, capability) · `classroomOpsHost.ts`(보관함 adapter·잠금·저널·reconciler) · `chatPanelProvider.ts`·`startPage.ts`·`protocol.ts` · webview `ChatPanel.tsx`·`StartPage.tsx`(+ 작은 `InstructorInbox.tsx`) |
+| Chalk | `/manage`의 공통 선택·`pickTicket`/`selectionKeyNow`·재관측 cadence·`element()`/`text()` 안전 렌더 · 기존 forwarder | 수정 `chalk/src/ui/manage.html`(작성·미리 확인·결과·보낸 자료, 확정 뒤 안내 정리) · forwarder 경로 |
+| 시험 | 기존 fixture(합성 강사 A/B·학생·30석), `mac-demo*.mjs`, D1 리허설 | 신규 `worker/test/classroom-ops-distribution.test.mjs` · `extensions/hypeproof-chat/test/classroom-inbox.test.mjs` · `e2e/classroom/ops-distribution.mjs` · `mac-demo*.mjs` 확장 |
+
+##### 미결 결정과 권고 (조사로 정할 수 없는 것만)
+
+| 결정 | 선택지 | 권고와 근거 | 미정이어도 가능한 일 |
+|---|---|---|---|
+| INT-CO-04 승인과 ‘적용’의 뜻 | 승인 / 수정 / 보류 (owner) | 승인 시 ‘적용 = 보관함 반영(열람 아님)’을 함께 확인. 이 절은 제안 문구와 충돌하지 않아 Intent 추가 수정은 준비하지 않았다 | 구현·합성·로컬 실기 |
+| 허용 링크 host 목록 | 빈 값 유지 / 운영 도메인만 / 교육 자료 도메인 추가 | **빈 값으로 시작**하고 첫 수업 전 운영자가 목록을 정한다 — 임의 도메인을 기본값으로 박지 않는다 | 공지·본문만 있는 자료 |
+| 열람(펼침) 사실의 수집 | 수집 안 함 / 고지 뒤 수집 | **수집 안 함.** 읽음 표시는 감시로 읽히고 열람은 이해의 증거가 아니다. 바꾸려면 수집 고지 문안에 포함해야 한다 | 전부 |
+| 보관함·서버 콘텐츠의 시간 기준 보존 | 기존 보존 결정(목적별 일수)에 포함 / 별도 | 기존 ‘보존 일수’ 결정에 **항목으로 추가**해 함께 정한다. 그때까지 기기는 용량 한도만 있고, 가득 차면 실패로 알린다. 권고: 끝난 회차 보관함부터 오래된 순으로 비우기 | 단일·소수 회차 시험 |
+| 배포 권한을 누구에게 줄지 | 강사 전원 / 지정 강사 | 회차를 맡은 강사에게만 명시 발급(`distribute`). 운영 승인 사항 | 합성 issuer |
+| Cloudflare plan과 D1 예산 | Free / Paid (계정 사실 — 미확인) | 운영 전 운영자가 확인. Free라면 위 최악 쓰기 모델이 일 한도를 넘으므로 100석 이상 회차에서 `ops_distribute`를 켜지 않거나 Paid 전환이 선행 | 로컬 workerd 실측 |
+| 운영 활성화(`ops_distribute` ON, production migration) | — | U1과 같은 순서: additive migration → flag OFF 호환 배포 → 성인 canary 회차 | — |
 
 #### 발송 공급자 선택 근거
 

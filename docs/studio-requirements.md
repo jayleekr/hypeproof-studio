@@ -662,3 +662,26 @@ Automatic collection requires the new explicit consent/grant contract; this
 proposal does not relax existing manual-upload or operator-only log access.
 New reports follow MC-17/19; legacy HAIN7 stays a separate versioned adapter.
 Implementation phases and rollback are in [E5](plan/learning-agent-experience-epics.md#remote-classroom-delivery).
+
+### Targeted distribution of notices and materials (U2) — implemented 2026-09-21, off by default
+
+Implemented behind the per-run switch `ops_distribute` (default OFF); no REQ row is claimed. What was run and what was NOT RUN
+is in the [AT-44 run record](testing/classroom-admin.md#remote-management-u2-run-20260921).
+The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u2-20260921).
+The Studio behavior it adds is bounded as follows. The App host owns a
+durable per-learner, per-class-run inbox under extension global storage; it never writes
+to the learner's workspace, conversation, input draft or spool (REQ-Q ownership unchanged).
+An item is stored only after its hash is verified, as an immutable per-revision file followed
+by one atomic index commit, so an interrupted update never costs the learner the material they
+already had; a file that was received but not committed is never promoted on restart without a
+fresh sync response. "Applied" means the host re-read the committed item
+through the same disk path the card list uses — a sync HTTP 200, a notification or a
+webview `postMessage` is not completion, and opening a card is not reported. The card is a
+closed-by-default `<details>` in the coach rail of the work screen and a quiet line on the
+"이어서 하기" entry card: no modal, no second Primary (SX-04), nothing in the message stream,
+canvas or evidence drawer (SX-05/06/13). Text is rendered as text; links open only on a
+learner click through the existing https-guarded `openExternal` path. A late response or
+webview callback from an ended connection generation changes nothing.
+Without a valid connection the list stays readable and says "수업 연결 확인 전"; it says "끝난 수업의 자료"
+only on a normal expiry or once the run's own end time has passed — a missing connection (an app restart in a
+running class) is not evidence that the class ended.
