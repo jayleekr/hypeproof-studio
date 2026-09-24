@@ -40,7 +40,7 @@
 | `chalk_generator_brief` | `course`, `file`(`lesson`/`ops`) | `GET /admin/chalk/courses/:course/brief?file=` | 생성 지침 묶음(아래 2절) | E2-6 |
 | `chalk_get_knowledge` | `kind`, `doc_id?` | `GET /admin/chalk/knowledge/:version/docs…` | 지식 문서(초안의 지식 버전으로 고정) | E1-2 |
 | `chalk_save_plan` | `course`, `file`, `expected_revision` | `PUT /admin/chalk/courses/:course/plan` (계획서 원문은 `chalk_plan_files`, 초안 `content` 에는 `plan_ref` 만. 두 쓰기를 한 batch 로) | 새 revision + **자동 검사 결과** | E2-6 |
-| `chalk_check_plan` | `course` | `POST /admin/chalk/courses/:course/check` | 검사 결과(3절 모양) | E2-3 |
+| `chalk_check_plan` | `course` | `POST /admin/chalk/cohorts/:cohort/courses/:course/check` | 검사 결과(3절 모양) | E2-3 |
 | `chalk_judge_items` | `course`, `items[]` | `GET …/judge-brief` → 모델 판정 → `POST …/judgements` | 문맥 판정 결과 저장 | E2-5 (A-02) |
 | `chalk_record_feedback` | `course`, `text` | `POST /admin/chalk/courses/:course/feedback` | 기록 ID | E2-7 (A-02) |
 | `chalk_diff` | `course`, `from_revision`, `to_revision?` | `GET …/diff` | 바뀐 절·단계 목록 | E2-7 (A-02) |
@@ -156,7 +156,7 @@ E1-1 §2-7 모양에 두 칸을 더한다.
 |---|---|---|
 | `POST /admin/chalk/courses/:course/recommend` | E2-2 | 결정적 함수 |
 | `GET /admin/chalk/courses/:course/brief` | E2-6 | 지침 묶음 조립 |
-| `POST /admin/chalk/courses/:course/check` | E2-3 | 규격 + v0 + 확장 |
+| `POST /admin/chalk/cohorts/:cohort/courses/:course/check` | E2-3 | 규격 + v0 + 확장 |
 | `GET …/judge-brief` · `POST …/judgements` | E2-5 | 판정 기록 테이블 필요(마이그레이션, 번호는 리드 배정) |
 | `POST …/feedback` · `GET …/diff` | E2-7 | 🔴 `authoring_drafts` 는 최신 revision 만 갖는다. 비교(FB-01)와 이력(FB-05)을 위해 **초안 revision 이력 테이블**이 필요하다(E2-7 설계에서 정함) |
 
