@@ -2189,7 +2189,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 진입·목록 (UX)"
+          "section": "## 진입·목록 (UX)"
         }
       ]
     },
@@ -2204,7 +2204,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 생성 (GEN)"
+          "section": "## 생성 (GEN)"
         }
       ]
     },
@@ -2218,7 +2218,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 피드백과 검사 (FB)"
+          "section": "## 피드백과 검사 (FB)"
         }
       ]
     },
@@ -2233,7 +2233,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 강의 만들기 (OUT)"
+          "section": "## 강의 만들기 (OUT)"
         }
       ]
     },
@@ -2247,7 +2247,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 리허설 (RH)"
+          "section": "## 리허설 (RH)"
         }
       ]
     },
@@ -2261,7 +2261,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 강의 계획안 (PLAN)"
+          "section": "## 강의 계획안 (PLAN)"
         }
       ]
     },
@@ -2275,7 +2275,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 강사 구독 연결 (SUB)"
+          "section": "## 강사 구독 연결 (SUB)"
         }
       ]
     },
@@ -2289,7 +2289,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 계획서 형식 (HTML)"
+          "section": "## 계획서 형식 (HTML)"
         }
       ]
     },
@@ -2303,7 +2303,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 저장 형식 (SCH)"
+          "section": "## 저장 형식 (SCH)"
         }
       ]
     },
@@ -2317,7 +2317,7 @@
       "sources": [
         {
           "path": "docs/requirements/chalk-mvp.md",
-          "section": "### 지식원 (KB)"
+          "section": "## 지식원 (KB)"
         }
       ]
     },
