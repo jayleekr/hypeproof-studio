@@ -213,3 +213,51 @@ npm --prefix chalk run typecheck
 - **문서:** operations 음성 대조를 `requirement-work.json`과 `requirements-activation.md`에서 같은 문장으로 맞췄다(눈으로 대조). 작업 머신 경로·비공개 금고 경로 제거, flag 저장소(D1) 명시. 실수로 포함됐던 `docs/ui-concepts/` PNG 11개를 추적에서 제거했다.
 - 재실행(스택 끝 `93da3b1` 기준 + 이 기록, Mac arm64, Node 22.22.1): worker test·typecheck, `test:classroom-ops:d1`, chalk test·typecheck, 확장 test·typecheck, e2e `test:classroom`·`test:classroom-ops`, `next-work --check`, docs harness, `check-registry` 모두 exit 0. 중간 브랜치는 그 PR이 건드린 계층만 재실행했다.
 - **NOT RUN은 그대로다:** 실제 Mac/Windows Studio·SDK·학교망·운영 D1/R2·실제 발송. NAT 시험은 in-process KV이며 Cloudflare KV의 eventual consistency에서는 차단 시점이 늦을 수 있다.
+
+<a id="remote-classroom-review-20260919"></a>
+
+### 독립 검토에서 확인한 수정 인수 · 2026-09-19
+
+대상은 R7 끝 `1432b27fac32bcfd2ea0420233f92579478dd8be`다. 기존 합성 suite와 브라우저 시험 통과는 아래 결함을 배제하지 못했다. F 번호는 이번 검토의 식별자이며 새 요구사항/별도 PRD가 아니다. 이 절의 테스트·문서 인계는 제품 구현 완료나 출시 승인이 아니다.
+
+| 결함 / 기존 인수 | 직접 확인한 동작 | 반드시 통과해야 할 수정 인수 |
+|---|---|---|
+| F1 · P1 · AT-19/23/26/27 | 실제 spool처럼 metadata에만 `user={u,c,p}`가 있고 events에 user가 없으면, 다른 학생/cohort/profile 파일도 해당 좌석의 verified 입력이 됨 | App의 현재 활동과 Service의 학생·cohort·profile·회차·활동 binding을 immutable snapshot에 결속. 서로 다른 신원·회차·활동은 수집/평가 전 격리. 정당한 자기 기록은 정상 통과. 레거시 회차 귀속이 없으면 현재 회차로 추정하지 않음 |
+| F2 · P1 · AT-21/23/24 | sync 요청 중 disconnect 후 늦은 proceed가 도착하면 reset 실행 1회. 이전 pause도 다시 적용됨 | 연결 generation/cancellation을 응답 후 및 실제 실행 직전에 확인. disconnect/재연결 전 응답으로 새 명령·hold 적용 0회. 정상 연결 명령은 1회. 이미 실행 중인 작업은 중지 요청과 결과 확정/불명을 구분 |
+| F3 · P1 · AT-31 | 형제자매 2명·동일 guardian·동일 초안을 승인하면 예상 2건인데 adapter/원장 각각 1건. 두 번째가 replay로 표시됨 | delivery key를 논리 발송의 학생·회차·job·수신자 revision에 결속. 두 학생은 각각 1건, 같은 발송 재시도는 추가 0건. 타 회차에서 재사용한 recipient_ref, 같은 내용/다른 주소도 별개. send_unknown 재조정 유지 |
+| F4 · P1 · AT-15/17/18/36 | 실제 host는 profile/trace만 관측. step/evidence builder, runtime_ready, 실제 SDK/도구 오류 발행이 빠짐. browser 시험은 사건을 직접 주입함 | 확정 수업의 실제 단계 선택·완료/근거 행동과 SDK/proxy/도구 오류·해결을 App에서 발행. 실제 UI→host→Service→보드 왕복 시험. raw 대화/파일은 상태 전송에서 제외. 미지원은 unknown, 토큰 수/클릭으로 학습 완료를 추정하지 않음 |
+| F5 · P1 · AT-28 | 정상 수업 만료 뒤 pending snapshot을 둔 실제 host.resume은 자격 삭제 후 종료, 업로드 0회 | 관측/명령과 upload-only 수명을 분리. 정상 만료는 승인된 기존 snapshot만 24시간 범위 내 재개. 관측·AI·명령은 재개하지 않음. 철회·좌석/사용자 변경은 이전 자격으로 신규 수집 금지. 다른 학생의 pending 파일을 현재 자격으로 순회하지 않음 |
+| F6 · P2 · AT-29/36/37 | 없는 event_id나 다른 사건의 인용도 전역 문자열 검색으로 통과. 반대로 따옴표·줄바꿈을 포함한 정상 인용은 거부 | 검증된 event_id 또는 레거시 turn/line locator와 해당 사건의 JSON 해석 후 원문을 연결. actor/source_state를 구조적으로 대조. AI/강사/가상 사례를 학생의 실제 독립 수행으로 승격 금지. 정확한 인용과 이스케이프 문자는 정상 통과 |
+| F7 · P2 · AT-27/29 | seq 1 / 깨진 JSON / seq 2를 complete로 판정. 시작/마지막 확정 경계 없이 연속 꼬리만으로도 완전성 판정 가능 | 잘못된 JSON/스키마를 버리고 complete로 만들지 않음. snapshot의 선언된 시작·종료 범위와 최종 확정 사건을 검증. 범위 불명은 불완전/격리, 레거시 seq 없음은 sequence_unavailable 유지 |
+
+수정 시작점: Service의 `worker/src/routes/classroom-collect.ts`, `worker/src/lib/classroom-collect.ts`, `worker/src/routes/classroom-delivery.ts`, `worker/src/lib/classroom-report.ts`; App의 `extensions/hypeproof-chat/src/classroomOps.ts`, `classroomOpsHost.ts`, `classroomOpsCommands.ts`, `chatPanelProvider.ts`, `sessionSpool.ts`, `evidenceSnapshot.ts`. 이 목록은 파일 소유권을 바꾸거나 전체 재작성을 허용하지 않는다.
+
+#### 실행 가능한 실패 테스트
+
+`test/751-ops-review-regressions`는 제품 코드 수정 없이 회귀 조건을 인계하는 로컬 브랜치다. Node 22.22.1에서 다음 두 명령을 각각 실행한다.
+
+```sh
+npm --prefix worker run test:classroom-ops:review
+npm --prefix extensions/hypeproof-chat run test:classroom-ops:review
+```
+
+- `worker/test/classroom-ops-review.test.mjs`: F1의 학생/cohort/profile 혼입, F3의 동일 초안 형제자매+재시도, F6의 locator/다른 사건/이스케이프 인용, F7의 깨진 JSON/레거시 대조군. 실제 HTTP route·SQLite·메모리 R2·외부 요청 없는 발송 adapter를 사용한다.
+- `extensions/hypeproof-chat/test/classroom-ops-review.test.mjs`: 실제 sync/CommandRunner로 정상 연결과 disconnect 뒤 늦은 명령·control 응답을 대조한다.
+- `extensions/hypeproof-chat/test/classroom-ops-expiry-review.test.mjs`: 실제 host를 VS Code stub과 번들해 uploader가 만든 frozen pending state를 재개한다. 정상 만료와 명시적 disconnect를 구분한다. 설치 앱/운영 Service 검증은 아니다.
+- 인계 시 **총 15건 중 4 PASS / 11 FAIL**. FAIL은 올바른 동작을 기대하는 assertion이며 known-bug를 PASS 처리하지 않았다. F4는 실제 App 연결이 없어 이 테스트 묶음으로 검증되지 않는다. F1 회차/활동, F2 재연결·실행 도중, F3 다른 회차, F5 철회·공유 PC, F6 주체/출처, F7 경계 조건은 수정 시 추가한다.
+- 신원/업로드 scope에 새 versioned 계약을 도입하면 fixture도 정상 발급 경로로 갱신한다. 특히 기존 mock metadata `{"s":1}`와 전역 snapshot 파일은 정상 귀속의 증거가 아니다. fixture만 바꾸고 혼입·늦은 응답·발송 누락·정상 만료 시나리오를 제거해서는 안 된다. App spool 세션 ID를 class_run ID로 단순 치환해 실제 기기 검증을 대신하지 않는다.
+- 현재는 명시적 review 스크립트로 실행하며 기존 CI 성공과 구분한다. 수정 PR에서는 모두 green으로 만든 뒤 worker `test:classroom-ops`와 확장 기본 test/CI에 편입한다. `skip`/`todo`/항상 실패 기대 방식으로 통과시키지 않는다. 실패 테스트만 담은 이 브랜치를 제품 완료 PR로 병합하지 않는다.
+
+#### 구현 누락과 실제 운영 미실행을 구분한다
+
+| 현재 상태 | 필요한 코드 | 완료 증거 |
+|---|---|---|
+| R5 runner 기본값은 모든 항목이 unobserved인 emptyDraft | 기존 공통 측정 계약과 승인된 rubric/evaluator를 쓰는 실제 평가 adapter, 별도의 legacy HAIN7 adapter. evaluator 미설정은 명시적 미설정 상태로 표시 | 검증된 실제 형식의 합성 기록에서 근거 있는 초안·근거 부족 결과가 각각 생성. version/hash/주체/출처 유지. 새 점수 체계나 7→6 변환 없음 |
+| 수집 이후 별도 jobs 버튼·수동 runner 실행 필요 | 수집 receipt→dedupe job→제한 runner→검수 대기 자동 연결, sleep/offline/재시도·진행률/부분 실패 복구 | ‘수업 마무리’ 1회로 동의된 대상만 자동 진행. 재클릭/재시작 중복 0. 검수/발송 승인 단계는 유지 |
+| 보고서 JSON만 있고 실제 HTML/PDF renderer 없음 | 기존 보고서 산출/스타일 재사용, 보호 링크의 읽기 화면·PDF 렌더, 데이터와 서술 일치 | 합성 보고서를 실제 브라우저·PDF 지면으로 확인. 빈 근거를 저점수로 표현하지 않고 개인정보/원문 불필요 노출 없음 |
+| R6는 dry-run/test adapter만 존재, Chalk도 dry-run만 호출 | 실제 provider adapter 한 개, 서명 검증 webhook·중복/역순/unknown 조정, 승인된 묶음의 발송 UI | 자격 없이 가능한 전송 계약/서명 fixture 시험은 로컬 완료. 공급자 sandbox/실수신은 해당 환경에서 별도 확인. 계정만 넣으면 이미 완성된 상태라고 기록하지 않음 |
+| refresh_connection은 기존 학습 토큰 재검증 | 기존 발급·재발급·기기 연결 흐름과 표시/권한 통합. 원격 전달을 구현할 경우 SecretStorage·학생/좌석 binding·epoch 반영 | 발급/전달/검증/수업 입장/runtime 준비를 혼동하지 않고 확인 가능. 보드·URL·로그에 bearer 미노출 |
+| 동의 철회 tombstone는 있으나 R2/산출물/링크/캐시 삭제·보존 정리가 미완 | 기존 보존 정책을 실행하는 제한된 정리·철회 경로와 재수집 방지 | 삭제/보존 대상과 감사 기록을 분리, 늦은 재전송으로 부활 0. 이미 외부에 전달한 사본은 회수했다고 주장하지 않음 |
+| 기존 학생 목록과 원격 목록 중복, 선택 상세가 긴 화면 하단 | 기존 관리 화면 안에서 중복 정리·목록+오른쪽 상세(좁은 폭은 drawer 등), 화면 기준 주요 CTA 하나 | 30좌석·공통 장애·키보드·200%·5개 폭에서 실제 렌더. forest/lime, 코칭/복구 분리, 도움받은 수행 출처 유지 |
+
+실제 macOS/Windows Studio·SDK 중지/복구, 학교망, staging/운영 D1/R2, 실제 평가 공급자 호출·메일 발송은 이번 인계에서도 **NOT RUN**이다. mock/브라우저/타입검사로 이 행을 PASS로 바꾸지 않는다. 코드로 가능한 부분은 계정 대기와 분리해 끝내고, 운영 활성화에 필요한 결정만 마지막에 남긴다.

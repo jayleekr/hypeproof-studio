@@ -22,7 +22,7 @@ import {
   ID_RE, MAX_SEATS, MAX_SYNC_BYTES, MAX_SYNC_EVENTS, OPS_FLAGS, OPS_PROTOCOL, OPS_SCHEMA_VERSION, PAIRING_TTL_MS,
   RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
   newPairingTicket, normalizeTicket, parseFlags, parseLesson, pollAfterMs, sha256Hex, shouldApply, signalOf,
-  stepDisposition, validateEvent, type OpsCapability, type SeatState,
+  stepDisposition, validateEvent, reduceTokenCheck, tokenCheckOf, type OpsCapability, type SeatState,
   REVIEW_STATES, SERVICE_ISSUED_ACTIONS, COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
 } from '../lib/classroom-ops';
 
@@ -205,9 +205,10 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
  (SELECT count(*) FROM ops_grants p WHERE p.class_run_id=s.class_run_id AND p.seat_id=s.seat_id AND p.seat_revision=s.seat_revision AND p.kind='pairing' AND p.state='issued' AND p.expires_at>?) AS pairing_open,
  (SELECT g.id||'|'||g.state||'|'||g.connection_epoch||'|'||g.expires_at FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' ORDER BY g.created_at DESC LIMIT 1) AS conn,
  (SELECT t.jti||'|'||t.expires_at FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS token,
- (SELECT c.action||'|'||ct.state||'|'||ct.result_code||'|'||ct.updated_at||'|'||ct.command_id FROM ops_command_targets ct JOIN ops_commands c ON c.id=ct.command_id WHERE ct.class_run_id=s.class_run_id AND ct.seat_id=s.seat_id AND ct.seat_revision=s.seat_revision ORDER BY ct.updated_at DESC LIMIT 1) AS last_command
+ (SELECT c.action||'|'||ct.state||'|'||ct.result_code||'|'||ct.updated_at||'|'||ct.command_id FROM ops_command_targets ct JOIN ops_commands c ON c.id=ct.command_id WHERE ct.class_run_id=s.class_run_id AND ct.seat_id=s.seat_id AND ct.seat_revision=s.seat_revision ORDER BY ct.updated_at DESC LIMIT 1) AS last_command,
+ (SELECT d.capabilities_json FROM ops_device_connections d JOIN ops_grants g3 ON g3.id=d.grant_id WHERE g3.class_run_id=s.class_run_id AND g3.seat_id=s.seat_id AND g3.seat_revision=s.seat_revision AND g3.kind='connection' AND g3.state='active' ORDER BY d.last_seen_at DESC LIMIT 1) AS device_caps
  FROM class_run_seats s LEFT JOIN ops_latest_state l ON l.class_run_id=s.class_run_id AND l.seat_id=s.seat_id AND l.seat_revision=s.seat_revision
- WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; pairing_open: number; conn: string | null; token: string | null; last_command: string | null }>;
+ WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; pairing_open: number; conn: string | null; token: string | null; last_command: string | null; device_caps: string | null }>;
   const control = await readRunControl(c.env, run.class_run_id) ?? { paused: false, control_revision: 0 };
   const seats = rows.map((r) => {
     let state: SeatState = {}; try { state = JSON.parse(r.state_json ?? '{}'); } catch { state = {}; }
@@ -217,16 +218,18 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
     const inputs = { pairing_issued: r.pairing_open > 0, connected, token_issued: !!issueId, state, last_received_at: connected ? r.last_received_at : null, grant_revoked: connState === 'revoked' };
     const { attention, reason } = attentionOf(inputs, now);
     const slot = (k: keyof SeatState) => state[k] ? { ...state[k]!.value, observed_at: state[k]!.observed_at, received_at: state[k]!.received_at, actor: state[k]!.actor } : null;
-    const reported = state.activation?.value.token_jti;
     return {
       seat_id: r.seat_id, seat_revision: r.seat_revision, student_id: r.student_id,
       entry_stage: entryStage(inputs), signal: signalOf(inputs.last_received_at, now), last_received_at: r.last_received_at,
       attention, reason, state_revision: r.state_revision ?? 0,
       control_applied: !connected || signalOf(inputs.last_received_at, now) !== 'fresh' || state.sample?.value.control_revision === undefined ? 'unknown' : state.sample.value.control_revision === control.control_revision ? 'applied' : 'pending',
       connection: grantId ? { grant_id: grantId, state: connected ? 'active' : connState === 'active' ? 'expired' : connState, epoch: Number(epoch) } : null,
-      token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: reported === undefined ? 'unknown' : reported === issueId ? 'matches_issue' : 'other_token' } : null,
+      token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: tokenCheckOf(state, issueId, grantId ?? '') } : null,
       // The latest instructor action on this seat, in ledger terms: queued is not done.
       last_command: r.last_command ? (([action, state, result_code, updated_at, command_id]) => ({ action, state, result_code, updated_at: Number(updated_at), command_id }))(r.last_command.split('|')) : null,
+      // Review F4: which signals this device's build can report from its real runtime path. An absent signal from a
+      // build that cannot report it is "unknown", not "nothing happened". A build that predates the declaration says nothing.
+      observes: ((): { step: boolean | null; runtime: boolean | null; evidence: boolean | null } => { let caps: string[] | null = null; try { caps = r.device_caps ? JSON.parse(r.device_caps) : null; } catch { caps = null; } const has = (k: string) => (!connected || !caps ? null : caps.includes(k)); return { step: has('observe_step'), runtime: has('observe_runtime'), evidence: has('observe_evidence') }; })(),
       activation: slot('activation'), step: slot('step'), runtime: slot('runtime'), error: slot('error'), upload: slot('upload'), sample: slot('sample'),
     };
   });
@@ -302,6 +305,8 @@ classroomOpsApp.post('/connect', async (c) => {
     credential: await signOpsCredential(id, c.env.HPS_SIGNING_SECRET), grant_id: id, device_registration_id: device,
     class_run_id: run.class_run_id, seat_id: pairing.seat_id, connection_epoch: grant?.connection_epoch ?? 1, expires_at: expires,
     protocol: OPS_PROTOCOL, server_capabilities: ['observe'], lesson: parseLesson(run.lesson_json),
+    // What a collected snapshot must be bound to (review F1). The app copies these, it never invents them.
+    student: { u: pairing.student_id, c: pairing.cohort_id, p: pairing.profile_id }, run: { starts_at: run.starts_at, ends_at: run.ends_at },
     poll_after_ms: pollAfterMs({ starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at }, now),
     // What this credential is for — shown to the student by the app.
     allows: ['status_report', 'own_command_receipts'], denies: ['ai_requests', 'log_bodies', 'other_seats'],
@@ -361,7 +366,7 @@ classroomOpsApp.post('/sync', async (c) => {
   // Board state never crosses a seat reassignment: a new binding starts empty.
   let state: SeatState = {}; const carried = latest && latest.seat_revision === g.seat_revision;
   if (carried) { try { state = JSON.parse(latest!.state_json); } catch { state = {}; } }
-  let changed = false; const quarantined: number[] = [], rejected: Array<{ seq: number; error: string }> = [], stored: number[] = [];
+  let changed = reduceTokenCheck(state, { grantId: g.id, bootId: b.boot_id, bootSeenAt: device.first_seen_at }); const quarantined: number[] = [], rejected: Array<{ seq: number; error: string }> = [], stored: number[] = [];
   for (const e of raw) {
     const seq = (e as any).seq as number, v = validateEvent(e);
     // A malformed event still consumes its seq so the cursor can move, but its content is not kept.
@@ -378,6 +383,8 @@ classroomOpsApp.post('/sync', async (c) => {
     }
     if (!v.ok) continue;
     if (v.value.kind === 'step' && stepDisposition(v.value.payload, lesson) !== 'applied') continue;
+    // Token evidence has its own ordering: a stage that arrives later must not erase it, and a resend must not revive it.
+    if (v.value.kind === 'activation' && reduceTokenCheck(state, { grantId: g.id, bootId: b.boot_id, bootSeenAt: device.first_seen_at }, { seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, payload: v.value.payload })) changed = true;
     if (shouldApply(state[v.value.kind], device.first_seen_at, seq)) { state[v.value.kind] = { boot_seen_at: device.first_seen_at, seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, value: v.value.payload }; changed = true; }
   }
   const ack = contiguousAck(device.contiguous_seq, [...new Set([...existing.keys(), ...stored])].filter((s) => s > device!.contiguous_seq).sort((x, y) => x - y));

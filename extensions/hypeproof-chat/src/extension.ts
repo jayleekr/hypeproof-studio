@@ -187,7 +187,7 @@ export async function activate(context: vscode.ExtensionContext) {
     runtimeGeneration: () => provider.opsRuntimeGeneration(),
     newGeneration: () => provider.opsNewGeneration(),
     setHold: (hold) => provider.opsSetHold(hold),
-    readSpool: () => provider.opsReadSpool(),
+    readSpool: (sinceMs) => provider.opsReadSpool(sinceMs),
     recoverPreview: async () => {
       const probe = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(4000) })).status < 500; } catch { return false; } };
       const r = await liveServer.recover(probe);

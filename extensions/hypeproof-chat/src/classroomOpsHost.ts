@@ -8,16 +8,21 @@ import { randomUUID } from "crypto";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { CommandRunner, type Executor, type JournalState } from "./classroomOpsCommands";
-import { uploadSnapshot, type SnapshotDeps, type SnapshotState } from "./evidenceSnapshot";
+import { freezeSnapshot, uploadSnapshot, WINDOW_LEAD_MS, type SnapshotBinding, type SnapshotDeps, type SnapshotScope, type SnapshotState } from "./evidenceSnapshot";
+import { removeFrozenCopy } from "./evidenceSnapshotStore";
 import { resetPostcondition, runPreservingReset, stopAndConfirm, type Preservation, type ResetManifest, type ResetSteps } from "./runtimeReset";
 import {
   ChangeGate, OPS_CLIENT_CAPABILITIES, OPS_PROTOCOL, OpsOutbox, activationPayload, classifyFailure, errorPayload,
-  runtimePayload, uploadPayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
+  evidencePayload, runtimePayload, stepPayload, turnObservations, uploadPayload, startOpsSync, tokenIdentityUnverified, type OpsSyncLoop, type OutboxState, type RuntimeStatus, type SyncResponse,
 } from "./classroomOps";
 
 const CREDENTIAL_KEY = "hypeproof.classroomOps.credential";
 const META_KEY = "hypeproof.classroomOps.connection";
-interface ConnectionMeta { grant_id: string; class_run_id: string; seat_id: string; expires_at: number; poll_after_ms: number }
+/** `student`/`run`/`lesson` come from the Service's connect response: they are what a collected snapshot is bound to. */
+interface ConnectionMeta { grant_id: string; class_run_id: string; seat_id: string; expires_at: number; poll_after_ms: number; student?: { u: string; c: string; p: string }; run?: { starts_at: number; ends_at: number }; lesson?: { course_id: string; version: string } | null }
+/** After its normal expiry a connection can only finish an upload that was already authorized, for this long after class. */
+const UPLOAD_GRACE_MS = 24 * 3_600_000;
+const FINAL_CREDENTIAL_REFUSALS = ["ops_credential_invalid", "ops_grant_revoked", "ops_grant_expired"];
 
 /** The only things a remote command may touch. No shell, no file access, no history, no arbitrary VS Code command. */
 export interface ClassroomOpsActions {
@@ -34,13 +39,20 @@ export interface ClassroomOpsActions {
   newGeneration(): Promise<number>;
   setHold(hold: "paused" | "stop_unconfirmed" | null): void;
   // R4 — allowlisted spool files of the current session, read-only.
-  readSpool(): Promise<Array<{ name: string; data: Uint8Array }> | null>;
+  /** The current spool session's files with its sequence state, read under the spool's write queue. `sinceMs` = start of the class window. */
+  readSpool(sinceMs: number): Promise<import("./sessionSpool").SpoolSnapshotSource | null>;
 }
 
 /** What the chat provider is allowed to tell this adapter. No message text, no paths. */
 export interface ClassroomOpsObserver {
   profileResult(r: { ok: boolean; status?: number; code?: string; requestId?: string; network?: boolean }, token: string): void;
   traceResult(status: number): void;
+  /** A turn finished in the real runtime path. No text, only what happened. */
+  turnResult(t: import("./classroomOps").TurnOutcome): void;
+  /** The learner's own, explicit step action in the lesson panel. Never inferred from chat volume or an AI "done". */
+  lessonStep(lessonVersion: string, stepId: string, status: "in_progress" | "submitted"): void;
+  /** A real change to the learner's artifact, as digests only. */
+  artifactChanged(before: string | undefined, after: string, stepId?: string): void;
 }
 
 export class ClassroomOpsHost implements ClassroomOpsObserver {
@@ -73,18 +85,36 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     await vscode.window.showQuickPick(this.coachingNotes.map((n) => ({ label: n.title, detail: n.text, description: new Date(n.at).toLocaleTimeString() })), { title: "강사가 보낸 질문·확인 지점", placeHolder: "읽기만 합니다. 답을 대신 써 주지 않습니다." });
   }
   private credential = "";
-  private snapshotDeps(): SnapshotDeps {
+  private meta: ConnectionMeta | null = null;
+  /** Bumped on every connect, disconnect and expiry. A callback that captured an older value belongs to a connection that is gone. */
+  private generation = 0;
+  private runner: CommandRunner | null = null;
+  private scope(): SnapshotScope | null {
+    const m = this.meta; if (!m?.student || !m.run) return null; // a connection made before the binding contract cannot collect
+    return { grant_id: m.grant_id, class_run_id: m.class_run_id, seat_id: m.seat_id, student: m.student, activity: m.lesson ? { course_id: m.lesson.course_id, version: m.lesson.version } : null, run: m.run };
+  }
+  private snapshotDeps(consent: { purpose: string; notice_version: string } | null = null): SnapshotDeps {
     const dir = path.join(this.context.globalStorageUri.fsPath, "classroom-snapshots"), safe = (s: string) => s.replace(/[^A-Za-z0-9-]/g, "");
     const stateFile = (b: string) => path.join(dir, `${safe(b)}.state.json`), copyDir = (b: string, r: number) => path.join(dir, safe(b), `r${r}`);
     const call = async (url: string, init: RequestInit) => { try { const res = await fetch(`${this.base()}/classroom/ops/collect/${url}`, { ...init, signal: AbortSignal.timeout(30000), headers: { authorization: `Bearer ${this.credential}`, ...(init.headers ?? {}) } }); const j = (await res.json().catch(() => ({}))) as Record<string, string>; return { status: res.status, reason: j.reason, receipt_id: j.receipt_id, coverage: j.coverage }; } catch { return { status: 0 }; } };
     return {
-      // The immutable copy: written once per (batch, revision) and only ever read back afterwards.
+      scope: () => this.scope(),
+      // The immutable copy: written once per (batch, revision) and only ever read back afterwards — with the binding it was frozen under.
       copy: async (b, r) => {
-        const target = copyDir(b, r);
-        try { const names = await fs.readdir(target); if (names.length) return Promise.all(names.map(async (name) => ({ name, data: new Uint8Array(await fs.readFile(path.join(target, name))) }))); } catch { /* not copied yet */ }
-        const files = await this.actions.readSpool(); if (!files) return null;
-        await fs.mkdir(target, { recursive: true }); for (const f of files) await fs.writeFile(path.join(target, f.name), f.data, { flag: "wx" }).catch(() => undefined);
-        return files;
+        const target = copyDir(b, r), bindingFile = path.join(target, "binding.json");
+        try {
+          const binding = JSON.parse(await fs.readFile(bindingFile, "utf8")) as SnapshotBinding;
+          const files = await Promise.all(["session.meta.json", "events.jsonl"].map(async (name) => ({ name, data: new Uint8Array(await fs.readFile(path.join(target, name))) })));
+          return { files, binding };
+        } catch { /* not copied yet */ }
+        // Resuming never reads the live spool: without the frozen copy and an explicit consent scope there is nothing to send.
+        const scope = this.scope(); if (!scope || !consent) return null;
+        const live = await this.actions.readSpool(scope.run.starts_at - WINDOW_LEAD_MS); if (!live) return null;
+        const frozen = freezeSnapshot(live.files, scope, b, consent, Date.now(), live); if (!frozen.ok) return { code: frozen.code };
+        await fs.mkdir(target, { recursive: true });
+        for (const f of frozen.files) await fs.writeFile(path.join(target, f.name), f.data, { flag: "wx" });
+        await fs.writeFile(bindingFile, JSON.stringify(frozen.binding), { flag: "wx" });
+        return { files: frozen.files, binding: frozen.binding };
       },
       loadState: async (b) => { try { return JSON.parse(await fs.readFile(stateFile(b), "utf8")) as SnapshotState; } catch { return null; } },
       saveState: async (st) => { await fs.mkdir(dir, { recursive: true }); const tmp = `${stateFile(st.batch_id)}.${process.pid}.tmp`; await fs.writeFile(tmp, JSON.stringify(st), "utf8"); await fs.rename(tmp, stateFile(st.batch_id)); },
@@ -92,11 +122,35 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       seal: (b, r, manifest) => call(`snapshots/${safe(b)}/${r}/seal`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(manifest) }),
     };
   }
-  /** Uploads that were cut off (offline, laptop closed) are finished on the next start, from their frozen copy. */
+  private async pendingStates(): Promise<SnapshotState[]> {
+    const dir = path.join(this.context.globalStorageUri.fsPath, "classroom-snapshots"), out: SnapshotState[] = [];
+    let names: string[] = []; try { names = await fs.readdir(dir); } catch { return out; }
+    for (const n of names.filter((x) => x.endsWith(".state.json"))) { try { const st = JSON.parse(await fs.readFile(path.join(dir, n), "utf8")) as SnapshotState; if (!st.receipt_id && !st.result) out.push(st); } catch { /* unreadable state is not work */ } }
+    return out;
+  }
+  /**
+   * Uploads that were cut off (offline, laptop closed) are finished from their frozen copy — only those frozen under THIS
+   * grant. A copy left by another learner on a shared PC, or by a replaced seat, is never walked with this credential.
+   */
   private async resumePendingUploads(): Promise<void> {
-    const dir = path.join(this.context.globalStorageUri.fsPath, "classroom-snapshots");
-    let names: string[] = []; try { names = await fs.readdir(dir); } catch { return; }
-    for (const n of names.filter((x) => x.endsWith(".state.json"))) { try { const st = JSON.parse(await fs.readFile(path.join(dir, n), "utf8")) as SnapshotState; if (!st.receipt_id && !st.result) await uploadSnapshot(st.batch_id, this.snapshotDeps()); } catch { /* next start tries again */ } }
+    const gen = this.generation, grant = this.meta?.grant_id;
+    for (const st of await this.pendingStates()) {
+      if (gen !== this.generation || !grant || st.scope?.grant_id !== grant) continue;
+      try {
+        const r = await uploadSnapshot(st.batch_id, this.snapshotDeps());
+        // The Service says this credential is finished (revoked, seat replaced, window closed): stop, and drop it.
+        if (FINAL_CREDENTIAL_REFUSALS.includes(r.code) && gen === this.generation) { await this.forget(); return; }
+      } catch { /* next start tries again */ }
+    }
+  }
+  /** Withdrawal ends collection on this device too: the frozen copies made for this connection are removed, not kept "just in case". */
+  private async dropPendingCopies(result: string): Promise<void> {
+    const dir = path.join(this.context.globalStorageUri.fsPath, "classroom-snapshots"), grant = this.meta?.grant_id, deps = this.snapshotDeps();
+    for (const st of await this.pendingStates()) {
+      if (!grant || st.scope?.grant_id !== grant) continue;
+      await deps.saveState({ ...st, result });
+      await removeFrozenCopy(dir, st.batch_id);
+    }
   }
   /** Adult learners decide for themselves, after reading what is sent and to whom. A child class needs a guardian consent recorded by the operator. */
   async collectionConsentInteractively(): Promise<void> {
@@ -105,6 +159,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     if (!pick) return;
     const res = await fetch(`${this.base()}/classroom/ops/collect/consent`, { method: "POST", headers: { authorization: `Bearer ${this.credential}`, "content-type": "application/json" }, body: JSON.stringify({ consent: pick === "동의하고 보내기 허용", purpose: "class_report", notice_version: "notice-v1" }), signal: AbortSignal.timeout(10000) }).catch(() => null);
     const reason = res && !res.ok ? ((await res.json().catch(() => ({}))) as { reason?: string }).reason : "";
+    if (res?.ok && pick === "동의 철회") await this.dropPendingCopies("withdrawn");
     void vscode.window.showInformationMessage(!res ? "서버에 연결하지 못했습니다. 동의 상태는 바뀌지 않았습니다." : res.ok ? (pick === "동의 철회" ? "동의를 철회했습니다. 이 수업의 기록은 더 수집되지 않습니다." : "동의를 기록했습니다.") : reason === "guardian_consent_required" ? "이 수업은 보호자 동의가 필요합니다. 앱에서 직접 동의할 수 없습니다." : reason === "ops_collect_disabled" ? "이 수업은 기록 수집을 사용하지 않습니다." : "동의를 기록하지 못했습니다.");
   }
   private stopUnconfirmed = false;
@@ -142,13 +197,13 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
         if (this.actions.hasActiveRun()) return { ok: false, code: "busy_active_run" };
         return (await this.actions.refreshProfile()) ? { ok: true, code: "profile_verified" } : { ok: false, code: "profile_not_verified" };
       } },
-      cancel_current_run: { mutating: true, run: async () => {
+      cancel_current_run: { mutating: true, label: "지금 실행 중인 작업 멈추기", run: async () => {
         const stopped = await stopAndConfirm({ requestStop: () => this.actions.requestStop(), isStopped: () => !this.actions.hasActiveRun(), wait: (ms) => new Promise((r) => setTimeout(r, ms)) });
         // An unconfirmed stop holds NEW runs only. What already happened outside is not undone, and is not claimed to be.
         this.stopUnconfirmed = !stopped; this.applyHold();
         return stopped ? { ok: true, code: "run_stopped" } : { ok: false, code: "stop_unconfirmed" };
       } },
-      reset_runtime: { mutating: true,
+      reset_runtime: { mutating: true, label: "AI 세션 다시 시작 (대화와 파일은 그대로)",
         run: async (signal, command) => {
           const r = await runPreservingReset(command.command_id, this.resetSteps(command.command_id), signal);
           if (r.code === "stop_unconfirmed") { this.stopUnconfirmed = true; this.applyHold(); }
@@ -159,7 +214,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       },
       // R4 — issued by the Service as part of a collection batch the learner consented to. Reads the spool; changes nothing.
       retry_evidence_upload: { mutating: false, acceptsArgs: (a) => typeof a.batch_id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(a.batch_id) && Object.keys(a).every((k) => ["batch_id", "purpose", "notice_version"].includes(k)),
-        run: async (_s, command) => { const r = await uploadSnapshot(String(command.args.batch_id), this.snapshotDeps()); void this.outbox?.add("upload", uploadPayload(r.ok ? "verified" : r.code === "offline_pending" ? "pending" : "failed")); return r; } },
+        run: async (_s, command) => { const r = await uploadSnapshot(String(command.args.batch_id), this.snapshotDeps({ purpose: String(command.args.purpose ?? ""), notice_version: String(command.args.notice_version ?? "") })); void this.outbox?.add("upload", uploadPayload(r.ok ? "verified" : r.code === "offline_pending" ? "pending" : "failed")); return r; } },
       // Coaching: a question or a pointer, shown without covering the work. Nothing on disk or in the conversation changes.
       send_question: { mutating: false, acceptsArgs: (a) => Object.keys(a).join() === "text" && typeof a.text === "string" && a.text.length <= 300,
         run: async (_s, command) => { this.showCoaching("강사의 질문", String(command.args.text)); return { ok: true, code: "shown" }; } },
@@ -186,8 +241,22 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     const meta = this.context.globalState.get<ConnectionMeta>(META_KEY);
     const credential = await this.context.secrets.get(CREDENTIAL_KEY);
     if (!meta || !credential) return;
-    if (meta.expires_at <= Date.now()) { await this.forget(); return; }
+    if (meta.expires_at <= Date.now()) { await this.resumeUploadOnly(meta, credential); return; }
     await this.start(meta, credential);
+  }
+
+  /**
+   * The connection expired the normal way (class over). Observation, commands and the instructor's pause do NOT come
+   * back. The credential is kept for one thing only: finishing a snapshot the learner already agreed to send and this
+   * device already froze, inside the Service's upload window. After that, or when the Service refuses it, it is dropped.
+   */
+  private async resumeUploadOnly(meta: ConnectionMeta, credential: string): Promise<void> {
+    const until = Math.max(meta.run?.ends_at ?? 0, meta.expires_at) + UPLOAD_GRACE_MS;
+    this.meta = meta; this.generation++;
+    const mine = (await this.pendingStates()).filter((st) => st.scope?.grant_id === meta.grant_id);
+    if (Date.now() > until || !mine.length) { await this.forget(); return; }
+    this.credential = credential;
+    void this.resumePendingUploads().then(async () => { if (!(await this.pendingStates()).some((st) => st.scope?.grant_id === meta.grant_id && this.meta?.grant_id === meta.grant_id)) await this.forget(); });
   }
 
   /** Learner-initiated: type the one-time code the instructor handed over. */
@@ -210,9 +279,10 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     if (res.status === 429) { void vscode.window.showWarningMessage("연결 시도가 너무 많습니다. 1분 뒤 다시 시도하세요."); return; }
     if (res.status !== 201) { void vscode.window.showWarningMessage("연결 코드가 맞지 않거나 이미 사용됐거나 시간이 지났습니다. 강사에게 새 코드를 요청하세요."); return; }
     const b = (await res.json()) as ConnectionMeta & { credential: string };
-    await this.loop?.stop();
+    // A new pairing replaces whatever this window was connected to; responses still in flight for it are void.
+    this.stopConnection();
     await this.context.secrets.store(CREDENTIAL_KEY, b.credential);
-    const meta: ConnectionMeta = { grant_id: b.grant_id, class_run_id: b.class_run_id, seat_id: b.seat_id, expires_at: b.expires_at, poll_after_ms: b.poll_after_ms };
+    const meta: ConnectionMeta = { grant_id: b.grant_id, class_run_id: b.class_run_id, seat_id: b.seat_id, expires_at: b.expires_at, poll_after_ms: b.poll_after_ms, ...(b.student ? { student: b.student } : {}), ...(b.run ? { run: b.run } : {}), lesson: b.lesson ? { course_id: b.lesson.course_id, version: b.lesson.version } : null };
     await this.context.globalState.update(META_KEY, meta);
     await this.start(meta, b.credential);
     void vscode.window.showInformationMessage(
@@ -225,16 +295,23 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
     void vscode.window.showInformationMessage("수업 연결을 끊었습니다. 수업 참여와 작업 파일은 그대로입니다.");
   }
 
-  private async forget(): Promise<void> {
-    this.loop?.stop(); this.loop = null; this.outbox = null; this.credential = "";
+  /** End the current connection in this window: no late response, queued approval or pause may act after this line. */
+  private stopConnection(): void {
+    this.generation++;
+    this.loop?.stop(); this.runner?.close(); this.loop = null; this.runner = null; this.outbox = null;
     // Disconnecting ends the instructor's pause on this device; the Service's own admission still applies.
     this.paused = false; this.stopUnconfirmed = false; this.applyHold();
+  }
+  private async forget(): Promise<void> {
+    this.stopConnection(); this.credential = ""; this.meta = null;
     await this.context.secrets.delete(CREDENTIAL_KEY);
     await this.context.globalState.update(META_KEY, undefined);
   }
 
   private async start(meta: ConnectionMeta, credential: string): Promise<void> {
-    this.credential = credential; void this.resumePendingUploads();
+    this.stopConnection();
+    const gen = this.generation, live = () => gen === this.generation;
+    this.credential = credential; this.meta = meta; void this.resumePendingUploads();
     const dir = this.context.globalStorageUri.fsPath; await fs.mkdir(dir, { recursive: true });
     // One file per grant: a shared PC's next learner never inherits the previous seat's queue.
     const file = path.join(dir, `classroom-ops-outbox-${meta.grant_id}.json`);
@@ -253,18 +330,27 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       notify: (line) => void vscode.window.showInformationMessage(line),
     });
     await runner.recover();
+    if (!live()) { runner.close(); return; } // disconnected while the journal was being read
+    this.runner = runner;
     this.loop = startOpsSync({
-      capabilities: ["observe", "commands", ...Object.keys(executors)], onEpoch: (e) => { this.epoch = e; },
+      capabilities: [...OPS_CLIENT_CAPABILITIES, "commands", ...Object.keys(executors)], onEpoch: (e) => { if (live()) this.epoch = e; },
       commands: runner as unknown as NonNullable<Parameters<typeof startOpsSync>[0]["commands"]>,
       post: (body, timeoutMs) => this.post(credential, body, timeoutMs), outbox: this.outbox, appInstanceId: this.appInstanceId,
       sample: () => { const r = this.runtime(); const changed = this.runtimeGate.next(r.status); if (changed) void this.outbox?.add("runtime", runtimePayload(changed)); return { idle_ms: Math.max(0, Math.round(r.idleMs)), runtime_status: r.status, control_revision: this.controlRevision }; },
       // The revision is reported only after the hold is actually in place on this device.
-      onControl: (control) => { this.paused = control.paused; this.applyHold(); this.controlRevision = control.control_revision; },
+      onControl: (control) => { if (!live()) return; this.paused = control.paused; this.applyHold(); this.controlRevision = control.control_revision; },
       now: () => Date.now(), random: Math.random, setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
       log: this.log,
-      onDisconnected: (reason) => { this.log(`[ops] disconnected: ${reason}`); void this.forget(); },
+      // Normal expiry keeps the credential for the upload-only afterlife; a revoked or replaced connection is dropped outright.
+      onDisconnected: (reason) => { if (!live()) return; this.log(`[ops] disconnected: ${reason}`); if (reason === "ops_grant_expired") { this.stopConnection(); void this.resumeUploadOnly(meta, credential); } else void this.forget(); },
     }, meta.poll_after_ms);
     this.context.subscriptions.push({ dispose: () => this.loop?.stop() });
+    // The usual order in a class is "token first, pair later": the token was verified BEFORE this connection existed, so that
+    // result had nowhere to go and the board would show the token as unknown until some later refresh. Ask once, now.
+    // …but only as the FIRST word on this connection. The answer can come back after the learner's first turn has already
+    // reported "runtime ready" or a fault; an older fact must not overwrite a newer one.
+    this.activationGate.reset(); this.errorGate.reset();
+    void Promise.resolve().then(() => this.actions.probeProfile()).then((p) => { if (live() && !p.noToken && this.activationGate.untouched && this.errorGate.untouched) this.profileResult(p, this.token); }).catch(() => {});
   }
 
   private async post(credential: string, body: unknown, timeoutMs: number): Promise<SyncResponse> {
@@ -281,8 +367,13 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
 
   profileResult(r: { ok: boolean; status?: number; code?: string; requestId?: string; network?: boolean }, token: string): void {
     this.token = token || this.token;
+    const id = tokenIdentityUnverified(token), seat = this.meta?.student;
+    // Shared PC: someone else signed in. This seat's connection must not report, run commands or upload for them.
+    if (r.ok && seat && id.u && id.c && (id.u !== seat.u || id.c !== seat.c)) {
+      this.log("[ops] a different learner signed in on this device — classroom connection dropped");
+      void this.forget(); void vscode.window.showInformationMessage("다른 사용자로 로그인되어 이전 수업 연결을 끊었습니다. 이번 수업에 연결하려면 강사에게 새 연결 코드를 받으세요."); return;
+    }
     if (!this.outbox) return;
-    const id = tokenIdentityUnverified(token);
     if (r.ok) {
       if (this.activationGate.next(`verified:${id.jti}`)) void this.outbox.add("activation", activationPayload("token_verified", { tokenJti: id.jti, tokenExp: id.exp }));
       if (this.errorGate.next("clear")) void this.outbox.add("error", errorPayload("unknown", { blocking: false, cleared: true }));
@@ -292,6 +383,31 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
       if (cls !== "network" && this.activationGate.next(`rejected:${cls}`)) void this.outbox.add("activation", activationPayload("token_rejected", { reason: cls, httpStatus: r.status }));
       if (this.errorGate.next(`${cls}:${r.status}`)) void this.outbox.add("error", errorPayload(cls, { code: r.status ? `http_${r.status}` : undefined, requestId: r.requestId, blocking: cls !== "network" }));
     }
+    this.loop?.nudge();
+  }
+
+  turnResult(t: import("./classroomOps").TurnOutcome): void {
+    if (!this.outbox) return;
+    let added = false;
+    for (const o of turnObservations(t)) {
+      const gate = o.kind === "activation" ? this.activationGate : this.errorGate;
+      // Reported on change, not per turn. "cleared" shares its key with the profile check so the two do not echo each other.
+      if (gate.next(o.payload.cleared ? "clear" : JSON.stringify(o.payload))) { void this.outbox.add(o.kind, o.payload, o.actor); added = true; }
+    }
+    if (added) this.loop?.nudge();
+  }
+  private currentStep = "";
+  lessonStep(lessonVersion: string, stepId: string, status: "in_progress" | "submitted"): void {
+    if (!this.outbox || !/^[A-Za-z0-9_.:+-]{1,64}$/.test(lessonVersion) || !/^[A-Za-z0-9_-]{1,128}$/.test(stepId)) return;
+    this.currentStep = stepId;
+    void this.outbox.add("step", stepPayload(lessonVersion, status, stepId), "student");
+    // "I finished this step" is the learner's own statement: self-reported, not a verified completion.
+    if (status === "submitted") void this.outbox.add("evidence", evidencePayload("decision", { sourceState: "self_reported", stepId }), "student");
+    this.loop?.nudge();
+  }
+  artifactChanged(before: string | undefined, after: string, stepId?: string): void {
+    if (!this.outbox || before === after) return;
+    void this.outbox.add("evidence", evidencePayload("change", { sourceState: "real", stepId: stepId ?? (this.currentStep || undefined), before, after }), "ai");
     this.loop?.nudge();
   }
 
