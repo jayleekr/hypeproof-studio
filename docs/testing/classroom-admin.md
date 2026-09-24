@@ -1372,3 +1372,49 @@ NOT RUN: 실제 모델, Windows, 학교망, hosted/staging/운영 D1·R2, 실제
 NOT RUN: 여러 물리 PC(한 Mac 두 창이다), Windows(link/rename·백신), 학교망, hosted D1/R2, 실제 모델·메일, Keychain 기반 설치 앱, 정전 중 쓰기, 미성년·보호자 동의(#1175).
 
 증거(공통 git-dir): `remote-classroom-evidence/management-20260921/native-help/storage/` — `before/`(수정 전 재현), `store-checks.log`·`host-checks.{log,json}`·`extension-npm-test-fe37a72.log`, `mac-run-fe37a72/`(`help/` H1~H9 결과·화면, `help-windows/` 두 창 결과·화면, manifest·run log), `takeover-u4fix-runner/`(정지 전 이전 runner 기록).
+
+
+## G3/G4 single-class completion — 2026-09-24 (#1301)
+
+The accepted single-class boundary connects explicit whole-roster `mode: finish`,
+`kinds: [record]` collection to reviewed reports across restarts. An omitted `kinds`
+keeps the legacy /1-/2 path. Selected collect-only batches never feed evaluation.
+A report pins the verified snapshot digest and rechecks input file hashes. Each /3
+quote carries its session and original line; unqualified or cross-session evidence
+is refused. The report lists included sessions and missing-session counts. Mixed or
+unreadable lesson bases remain held; this does not implement cross-version scoring.
+Approval, recipient approval, provider acceptance and confirmed delivery remain separate.
+
+Regression: `worker/test/classroom-ops-report-sessions.test.mjs` exercises the real
+spool/freezer/upload/routes/evaluator adapter/review/delivery ledger with synthetic
+people, SQLite, in-memory R2 and transport substitutes. Existing collect, basis,
+withdrawal, evaluator, provider and erasure suites remain required.
+Mac integration: `HPS_G4_JOURNEY=1` runs `e2e/classroom/mac-curriculum.mjs` through
+authored and rehearsed lessons into `g4-journey.mjs` on the same local Service.
+Execution evidence is recorded separately after the run; a test file is not a PASS.
+
+Explicit follow-ups: cross-week pattern prose, PDF mail attachments, Kakao/SMS/QR,
+additional work surfaces and a general visual composer are outside this single-class
+completion. Existing PDF export and approved report-link email remain. Local/legacy
+external evaluators retain their single-spool contract and explicitly refuse /3;
+the Service evaluator supports /3. Real learners, real model quality, installed
+Keychain, Windows, multiple physical PCs, school network, hosted D1/R2 and actual
+recipients are separate field/release gates, not synthetic successes.
+
+### Observed local G4 result — 2026-09-24
+
+PASS on implementation `4cb0a29`: authored A/B lesson rehearsal and confirmation;
+native learner mission across restart; voluntary help and instructor feedback;
+actual device diagnostic receipt `succeeded`; notice distributed only to A1;
+explicit whole-roster finish collecting two same-learner sessions; reviewed
+session-qualified report; recipient approval and one sandbox send followed by a
+synthetic delivered event. Work files were unchanged. Screenshots were inspected.
+The shell was a copy of installed Mac 0.1.16 with current extension bundles built
+at `c6e65f2`; this is extension-level evidence, not a newly packaged release.
+The recorder model, identities, SQLite/R2 and mail transport were synthetic/local.
+
+The same implementation passed Worker full tests, classroom-ops regressions,
+typecheck, Chalk tests, report/G1-wrap/ops browser checks and docs integrity.
+Review fixes also reproduce thirty concurrent wrong viewer checks, signed bounce
+before accepted/lost send response, and 25 stalled plus 25 delayed erasures ahead
+of runnable work. These prove bounded local behavior; the field gates above remain.

@@ -211,7 +211,7 @@ async function rehearse(code, label, expect) {
   await press(chat, '[data-rehearsal-send]', 'the rehearsal send button'); const verdict = await wait(() => chat.evaluate("document.querySelector('[data-rehearsal-result]')?.dataset.rehearsalResult"), 'the verdict');
   const p1 = await panelOf(chat); await shot(win, `g2-mac-${label}-rehearsal-${verdict}.png`); await quit();
   const judged = db('SELECT verdict_json FROM authoring_rehearsals WHERE learner_id=? AND verdict IS NOT NULL ORDER BY judged_at DESC LIMIT 1', REHEARSER)[0];
-  return { verdict, header, first: p0, last: p1, call: callsFor(`Q-R${label}`)[0], mission_check: JSON.parse(judged.verdict_json).checks.mission };
+  return { verdict, header, first: p0, last: p1, call: callsFor(`Q-R${label}`).findLast((c) => c.tools.length > 0) ?? callsFor(`Q-R${label}`).at(-1), mission_check: JSON.parse(judged.verdict_json).checks.mission };
 }
 
 const session = { pid: process.pid, service: origin, instructor: 'http://127.0.0.1:' + boardPort + '/authoring', cohort: local.cohort, profile: local.profile, app: copy, source_sha: head, extension_source_sha: manifest.extension.source_sha, extension_bundles: manifest.extension.bundles, shell: manifest.shell, agent_sdk: { version: manifest.agent_sdk.version, binary_sha256: manifest.agent_sdk.binary.sha256 }, ports: { service: servicePort, instructor: boardPort, app_debug: debugPort } };
@@ -250,6 +250,12 @@ try {
   assert.equal(result.rehearsal_B.verdict, 'passed', JSON.stringify(result.rehearsal_B)); assert.deepEqual([result.rehearsal_B.call.lesson, result.rehearsal_B.call.help?.mode], [VB, '함께 수정']);
   assert.ok(result.rehearsal_B.call.tools.includes('Write'), 'B admits writing at the model boundary: ' + result.rehearsal_B.call.tools);
   assert.match(await readinessText(teacher), /통과/); await confirm(teacher, 'g2-mac-07-confirmed-B.png'); step('B confirmed');
+
+  if (process.env.HPS_G4_JOURNEY === '1') {
+    result.journey = await (await import('./g4-journey.mjs')).journey({ local, course, VA, seats, teacherToken, browser, boardPort, prefix, launch, attach, enterWork, palette, toasts, wait, ask, idle, quit, ws, shot, out, press, setValue, step, workFiles, A, waitHeader });
+    result.steps = steps; writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 2));
+    console.log('PASS G4 integrated Mac journey'); await cleanup(0);
+  }
 
   // ── the class: A1 in a real window on V1; A2 connected and never selected; A3 invited but offline ──
   launch('learner', codes.A1, ws); const win = await attach(); let chat = await enterWork();
