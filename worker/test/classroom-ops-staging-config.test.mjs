@@ -30,3 +30,8 @@ test('negative controls: every way of leaning on production is unsafe, and unsaf
   bad((f) => ({ ...f, workerStaging: f.workerStaging.replace(/\[\[r2_buckets\]\]\nbinding = "HPS_TRACES"\nbucket_name = "hps-traces-staging"\n/, '') }), 'must declare its own');
   assert.equal(checkStaging({ ...committed, workerStaging: committed.workerStaging.replace('REPLACE_WITH_STAGING_D1_ID', prodD1) }).status, 'unsafe', 'a half-filled file that names production is unsafe, not merely pending');
 });
+
+test('every staging URL variable is checked, including gallery upload destinations', () => {
+  const r = checkStaging({ ...committed, workerStaging: committed.workerStaging.replace('[vars]', '[vars]\nGALLERY_LOGS_BASE = "https://api.hypeproof-ai.xyz/session-logs"') });
+  assert.equal(r.status, 'unsafe'); assert.ok(r.unsafe.some((x) => x.includes('GALLERY_LOGS_BASE')));
+});

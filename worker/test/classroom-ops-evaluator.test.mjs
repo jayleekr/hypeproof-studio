@@ -245,3 +245,16 @@ test('late input: the current queue replaces only that learner missing placehold
   }
   assert.equal(f.db.prepare("SELECT count(*) n FROM classroom_report_jobs WHERE batch_id=? AND state='missing'").get(batch).n, 2, 'historical rows remain for audit; nothing is deleted');
 });
+
+for (const reason of ['evaluator_not_configured', 'evaluator_mismatch']) test(`configuration wait does not consume provider attempts: ${reason}`, async (t) => {
+  const f = await fixture(t, { inputs: [record] });
+  await f.request(f.B + '/jobs', 'POST', { evaluator: EVALUATOR_REVISION, rubric: rubricVersion(CANDIDATE_CAPABILITY_V1) });
+  const runner = (await f.request(f.B + '/runner-grants', 'POST', {})).json.runner_credential;
+  const job = (await f.request('/v1/classroom/ops/runner/claim', 'POST', {}, runner)).json.job;
+  if (reason === 'evaluator_not_configured') delete f.env.ANTHROPIC_API_KEY;
+  else f.db.prepare("UPDATE classroom_report_jobs SET evaluator='old' WHERE id=?").run(job.id);
+  const r = await f.request(`/v1/classroom/ops/runner/jobs/${job.id}/evaluate`, 'POST', { lease_generation: job.lease_generation }, runner);
+  assert.equal(r.json.reason, reason);
+  const row = f.db.prepare('SELECT attempts,last_reason,next_attempt_at FROM classroom_report_job_attempts WHERE job_id=?').get(job.id);
+  assert.equal(row.attempts, 0); assert.equal(row.last_reason, reason); assert.ok(row.next_attempt_at > Date.now());
+});

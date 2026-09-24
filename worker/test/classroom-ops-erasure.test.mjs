@@ -187,3 +187,19 @@ test('recovery rides EVERY scheduled tick and needs no retention setting; with r
   pending.length = 0; await worker.scheduled({ cron: '0 17 * * *', scheduledTime: Date.now() }, f.env, ctx); await Promise.all(pending); assert.equal(f.holds(words).length, 2, 'retention is not configured: a 900-day-old run is left alone');
   assert.equal(f.db.prepare("SELECT count(*) n FROM classroom_erasure_log WHERE student_id='student-b'").get().n, 0);
 });
+
+test('recovery quota excludes stalled and backoff rows so fresh erasures and settling continue', async (t) => {
+  const f = await delivered(t), del = f.env.HPS_TRACES.delete, now = Date.now() + 3 * DAY;
+  f.env.HPS_TRACES.delete = async () => { throw Error('synthetic outage'); };
+  await f.request('/v1/classroom/ops/collect/consent', 'POST', { consent: false, purpose: 'class_report', notice_version: 'notice-v1' }, f.conns[0].credential); f.env.HPS_TRACES.delete = del;
+  f.db.prepare("UPDATE classroom_erasure_log SET updated_at=? WHERE student_id='student-a'").run(now - DAY);
+  const insert = f.db.prepare("INSERT INTO classroom_erasure_log(class_run_id,student_id,reason,state,attempts,last_error,started_at,updated_at) VALUES(?,?,'withdrawn','started',?,'content_delete_failed',0,?)");
+  for (let i = 0; i < 25; i++) insert.run(f.run, 'stalled-' + i, MAX_ERASURE_ATTEMPTS, now - 10 * DAY);
+  for (let i = 0; i < 25; i++) insert.run(f.run, 'waiting-' + i, 4, now - 2 * 3600000);
+  const first = await runClassroomErasureRecovery(f.env, now);
+  assert.deepEqual([first.stalled, first.waiting, first.finished], [25,25,1]);
+  for (let i = 1; i <= 5; i++) await runClassroomErasureRecovery(f.env, now + SETTLE_AFTER_MS + i);
+  assert.equal(f.db.prepare("SELECT state FROM classroom_erasure_log WHERE student_id='student-a'").get().state, 'settled');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM ops_audit WHERE action='collection_erasure_stalled'").get().n, 25);
+  assert.ok(f.holds(words).every((k) => k.includes('/student-b/')));
+});
