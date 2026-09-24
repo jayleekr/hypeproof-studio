@@ -150,10 +150,14 @@ classroomDeliveryTeacher.post(root + '/deliver', async (c) => {
     }
     const token = crypto.randomUUID() + crypto.randomUUID().replace(/-/g, ''), linkId = crypto.randomUUID();
     await db.prepare('INSERT INTO classroom_report_links(id,token_hash,job_id,class_run_id,student_id,recipient_ref,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?)').bind(linkId, await sha256Hex(token), r.job_id, t.run.class_run_id, r.student_id, r.recipient_ref, now, now + LINK_TTL_MS).run();
+    await db.prepare("UPDATE classroom_report_deliveries SET link_id=? WHERE delivery_key=? AND state='sending'").bind(linkId, key).run();
     let out; try { out = await adapter.send({ to: r.address, link: `/v1/classroom/report-links/${token}`, template_revision: ap.template_revision, idempotency_key: key }); } catch { out = { status: 'unknown' as const }; }
     const state = out.status === 'accepted' ? 'provider_accepted' : out.status === 'unknown' ? 'send_unknown' : out.reason === 'dry_run' ? 'dry_run' : 'failed';
-    await db.prepare('UPDATE classroom_report_deliveries SET state=?,provider_message_id=?,link_id=?,detail=?,updated_at=? WHERE delivery_key=?').bind(state, out.status === 'accepted' ? out.provider_message_id : '', linkId, out.status === 'rejected' ? out.reason.slice(0, 64) : '', Date.now(), key).run();
-    results.push({ student_id: r.student_id, recipient_ref: r.recipient_ref, state });
+    // A signed provider event can settle this row while send() is still in flight.
+    // Only the still-sending writer may apply its HTTP result; terminal evidence wins.
+    const applied = await db.prepare("UPDATE classroom_report_deliveries SET state=?,provider_message_id=CASE WHEN provider_message_id='' THEN ? ELSE provider_message_id END,link_id=?,detail=?,updated_at=? WHERE delivery_key=? AND state='sending' RETURNING state").bind(state, out.status === 'accepted' ? out.provider_message_id : '', linkId, out.status === 'rejected' ? out.reason.slice(0, 64) : '', Date.now(), key).first<{ state: string }>();
+    const finalState = applied?.state ?? (await db.prepare('SELECT state FROM classroom_report_deliveries WHERE delivery_key=?').bind(key).first<{ state: string }>())?.state ?? 'send_unknown';
+    results.push({ student_id: r.student_id, recipient_ref: r.recipient_ref, state: finalState });
   }
   await audit(db, t.run.class_run_id, 'instructor', t.auth.payload.u, b.dry_run ? 'delivery_dry_run' : 'delivery_requested', { approval_id: ap.id, adapter: adapter.id, messages: results.length }, now).run();
   return c.json({ adapter: adapter.id, external_sends: adapter.external ? results.filter((r) => !r.replay && r.state !== 'not_sent_viewer_check_missing').length : 0, results, note: 'provider_accepted is not delivered; delivered is not read' }, 202);
@@ -199,12 +203,19 @@ async function openLink(c: any, supplied: string | null): Promise<Response> {
     if (tries?.locked_at) return c.json({ error: NOT_AVAILABLE }, 404);
     const prompt = VIEWER_CHECK_PROMPT[check.kind] ?? VIEWER_CHECK_PROMPT.passphrase;
     if (supplied === null) return wantsJson ? c.json({ error: 'viewer check required', reason: 'viewer_check_required', kind: check.kind }, 401) : checkPage(prompt, '', 200);
+    // Reserve a guess before hashing: at most five failed or in-flight guesses.
+    // A successful check releases its reservation; failures cannot lose increments.
+    const reserved = await db.prepare("INSERT INTO classroom_link_attempts(link_id,failed,locked_at,updated_at) VALUES(?,1,NULL,?) ON CONFLICT(link_id) DO UPDATE SET failed=classroom_link_attempts.failed+1,updated_at=excluded.updated_at WHERE classroom_link_attempts.locked_at IS NULL AND classroom_link_attempts.failed<? RETURNING failed").bind(link.id, now, MAX_VIEWER_ATTEMPTS).first<{ failed: number }>();
+    if (!reserved) return c.json({ error: NOT_AVAILABLE }, 404);
     if (!sameHash(await viewerCheckHash(c.env.HPS_SIGNING_SECRET, check.salt, check.kind, supplied.slice(0, 128)), check.check_hash)) {
-      const failed = (tries?.failed ?? 0) + 1, locked = failed >= MAX_VIEWER_ATTEMPTS;
-      await db.batch([db.prepare('INSERT INTO classroom_link_attempts(link_id,failed,locked_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(link_id) DO UPDATE SET failed=excluded.failed,locked_at=excluded.locked_at,updated_at=excluded.updated_at').bind(link.id, failed, locked ? now : null, now), audit(db, link.class_run_id, 'recipient', link.recipient_ref, locked ? 'report_link_locked' : 'report_link_check_failed', { link_id: link.id, failed }, now)]);
+      const result = await db.prepare("UPDATE classroom_link_attempts SET locked_at=CASE WHEN failed>=? THEN COALESCE(locked_at,?) ELSE locked_at END,updated_at=? WHERE link_id=? RETURNING failed,locked_at").bind(MAX_VIEWER_ATTEMPTS, now, now, link.id).first<{ failed: number; locked_at: number | null }>();
+      const failed = result!.failed, locked = result!.locked_at != null;
+      await audit(db, link.class_run_id, 'recipient', link.recipient_ref, locked ? 'report_link_locked' : 'report_link_check_failed', { link_id: link.id, failed }, now).run();
       if (locked) return c.json({ error: NOT_AVAILABLE }, 404);
       return wantsJson ? c.json({ error: 'viewer check did not match', reason: 'viewer_check_failed', attempts_left: MAX_VIEWER_ATTEMPTS - failed }, 403) : checkPage(prompt, `확인 값이 맞지 않습니다. 남은 시도 ${MAX_VIEWER_ATTEMPTS - failed}회. 모두 틀리면 이 주소는 닫히고 새 주소를 받아야 합니다.`, 403);
     }
+    const released = await db.prepare('UPDATE classroom_link_attempts SET failed=failed-1,updated_at=? WHERE link_id=? AND locked_at IS NULL RETURNING failed').bind(now, link.id).first();
+    if (!released) return c.json({ error: NOT_AVAILABLE }, 404);
   }
   await db.batch([db.prepare('UPDATE classroom_report_links SET views=views+1 WHERE id=?').bind(link.id), audit(db, link.class_run_id, 'recipient', link.recipient_ref, 'report_link_viewed', { link_id: link.id, viewer_check: check ? 'passed' : 'not_configured' }, now)]);
   const obj = await c.env.HPS_TRACES.get(draftKey(job as never, job.lease_generation)); if (!obj) return c.json({ error: NOT_AVAILABLE }, 404);
