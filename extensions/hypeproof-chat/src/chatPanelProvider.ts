@@ -129,6 +129,7 @@ import {
   sdkFallbackLogLine,
   resolveCoachRuntime,
   classifyTurnError,
+  lessonStepSignal,
   pendingCloseLabel,
   WRITE_TOOL_NAMES,
 } from "./chatPanelHelpers";
@@ -714,6 +715,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
   /** #751 — metadata-only observer for remote classroom operations; null unless the learner connected. */
   opsObserver: import("./classroomOpsHost").ClassroomOpsObserver | null = null;
+  private opsLastArtifact: string | undefined;
   // #751 R3 — why new AI runs are held. Local editing, saving, Stop and export never consult this.
   private opsHold: "paused" | "stop_unconfirmed" | null = null;
   private opsGeneration = 0;
@@ -721,7 +723,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   opsRuntimeGeneration(): number { return this.opsGeneration; }
   /** Ask every running turn and pending approval to end. Entries leave the maps through their normal finally paths — that is the confirmation. */
   opsRequestStop(): void {
-    for (const [streamId, ctrl] of [...this.activeStreams]) { try { ctrl.abort(); } catch { /* best-effort */ } void this.post({ type: "streamStopped", streamId }); }
+    for (const [streamId, ctrl] of [...this.activeStreams]) { try { ctrl.abort(); } catch { /* best-effort */ } void this.post({ type: "streamStopped", streamId, by: "instructor" }); }
     for (const resolve of [...this.pendingApprovals.values()]) resolve(false);
     this.observationAssessment?.abort();
   }
@@ -738,13 +740,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const dir = this.spool?.currentSessionDir() ?? null;
     return { history_count: history.length, history_sha256: digest(history), draft_sha256: draft === undefined ? null : digest(draft), spool_session: dir ? path.basename(dir) : null, spool_flushed: flushed };
   }
-  /** #751 R4 — read the allowlisted spool files of the current session. Reads only: the live spool is not sealed, truncated or moved. */
-  async opsReadSpool(): Promise<Array<{ name: string; data: Uint8Array }> | null> {
-    try { await this.spool?.flush(); } catch { return null; }
-    const dir = this.spool?.currentSessionDir(); if (!dir) return null;
-    const out: Array<{ name: string; data: Uint8Array }> = [];
-    for (const name of ["session.meta.json", "events.jsonl"]) { try { out.push({ name, data: new Uint8Array(await fs.promises.readFile(path.join(dir, name))) }); } catch { /* absent file is simply not part of the copy */ } }
-    return out.length ? out : null;
+  /**
+   * #751 R4 — the allowlisted spool files of the current session plus the spool's sequence state, read under the
+   * spool's own write queue so the counter matches the bytes. Reads only: the live spool is not sealed, truncated or moved.
+   */
+  async opsReadSpool(sinceMs: number): Promise<import("./sessionSpool").SpoolSnapshotSource | null> {
+    try { return (await this.spool?.readForSnapshot(sinceMs)) ?? null; } catch { return null; }
   }
   /** New execution generation on the same files: cached runtime handles are dropped, nothing stored is touched. */
   async opsNewGeneration(): Promise<number> {
@@ -1577,6 +1578,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       path: "index.html",
       content: checked.html,
     });
+    // #751 F4 — a real change to the artifact, reported to the class board as digests only (never the HTML).
+    { const after = createHash("sha256").update(checked.html, "utf8").digest("hex"); this.opsObserver?.artifactChanged(this.opsLastArtifact, after); this.opsLastArtifact = after; }
 
     // 2026-08-17, Windows real device — the screen stayed blank for a long time
     // **even after** the coach said "완성됐어요!". Between the stream ending and the
@@ -2309,6 +2312,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // this spool and send, so the two paths share one schema. The mapping is owned
       // by a vscode-free helper (traceMsgToWorkflowRecord), and agreement with
       // trace.ts's field names is pinned by test/trace-workflow-map.smoke.mjs.
+      // #751 F4 — the learner's own step action in the lesson panel. Only a step of the CONFIRMED lesson this profile
+      // carries is accepted; the record stays in the local spool first, then goes to the class board as ids only.
+      case "lessonStep": {
+        const signal = lessonStepSignal(this.cachedProfile?.lesson, msg);
+        if (!signal) return;
+        this.spool?.recordWorkflow({ event: "lesson_step", payload: signal });
+        this.opsObserver?.lessonStep(signal.lesson_version, signal.step_id, signal.status);
+        return;
+      }
       case "traceTrialStart":
       case "traceTrialEnd":
       case "traceValidationRun":
@@ -2594,6 +2606,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     let spoolErrorKind: string | undefined;
     // Why a holder: TS's CFA cannot see the reassignment inside the callback, so a
     // plain let is narrowed to null by the time finally runs.
+    let opsSdkFallback = false;
+    let opsFailure: { status?: number; code?: string; requestId?: string } = {};
     const sdkTurnTotal: {
       current: { usage: Record<string, unknown>; totalCostUsd: number | null } | null;
     } = { current: null };
@@ -3022,6 +3036,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           // #580 — the runtime this turn actually ran on is proxy. A fallback is a
           // state, but it is recorded as an event too — the evidence for quantifying
           // "why did a turn with no usage happen?".
+          opsSdkFallback = true;
           spoolRuntime = "proxy";
           this.spool?.recordWorkflow({
             turnId: streamId,
@@ -3067,11 +3082,17 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     } catch (err) {
       spoolStatus = "error";
       spoolErrorKind = classifyTurnError(err);
-      await this.handleSendError(err, streamId);
+      { const e = err as { status?: unknown; kind?: unknown; requestId?: unknown }; opsFailure = { ...(typeof e?.status === "number" ? { status: e.status } : {}), ...(typeof e?.kind === "string" ? { code: e.kind } : {}), ...(typeof e?.requestId === "string" ? { requestId: e.requestId } : {}) }; }
+      // #751 — a stop (the learner's or the instructor's) is judged by THIS turn's abort signal, not by the shape of what
+      // the runtime threw while dying: the SDK can surface an abort as a transport-looking error, and the learner then
+      // read a deliberate stop as "연결이 끊겼어요". The stop notice was already posted by whoever stopped it.
+      if (!ctrl.signal.aborted) await this.handleSendError(err, streamId);
     } finally {
       // #580 — always record the end of the turn. A user abort also arrives through
       // catch, so the signal is checked first. When there is an SDK turn total it is
       // carried along — the control against the sum of the per-request usage records.
+      // #751 F4 — what actually happened to this turn, from the real runtime path. No text leaves here.
+      this.opsObserver?.turnResult({ ok: spoolStatus === "ok", aborted: ctrl.signal.aborted, runtime: spoolRuntime === "agent-sdk" ? "agent-sdk" : "proxy", sdkFallback: opsSdkFallback, ...(spoolErrorKind ? { errorKind: spoolErrorKind } : {}), ...opsFailure });
       const total = sdkTurnTotal.current;
       const finalSpoolStatus = ctrl.signal.aborted ? "aborted" : spoolStatus;
       await Promise.all(observationCaptures);
