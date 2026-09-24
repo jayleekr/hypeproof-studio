@@ -32,6 +32,8 @@ export interface OutcomeInput {
   /** Did the app that ran it declare FOLLOWUP_CAPABILITY? null = unknown (no live connection to read it from). */
   reports_followup: boolean | null;
   /** The newest unexpired learning-token issue the Service recorded for this learner; `count` = how many it recorded. */
+  /** Current fault from the same seat and connection; missing means it could not be read. */
+  current_cause?: string | null;
   latest_issue?: { id: string; count: number } | null;
 }
 export interface Outcome { verdict: OutcomeVerdict; cause: string; basis: string; next: string; observed_at: number | null }
@@ -58,7 +60,12 @@ export function recoveryOutcome(i: OutcomeInput): Outcome {
 
   if (i.action === 'retry_diagnostics') {
     // The diagnosis finishing is not the fault being gone: its finding is the verdict.
-    if (code === 'token_ok') return out('resolved', '', 'service_and_token_ok');
+    if (code === 'token_ok') {
+      const covered = ['', 'auth_expired', 'auth_signature', 'auth_revoked', 'auth_rejected', 'class_not_open', 'profile_mismatch', 'roster_missing', 'network'];
+      return typeof i.current_cause === 'string' && covered.includes(i.current_cause)
+        ? out('resolved', '', 'service_and_token_ok')
+        : out('executed', i.current_cause ?? '', 'token_ok_cause_not_covered', 'check_remaining_cause');
+    }
     if (code === 'service_unreachable' || code === 'profile_network') return out('remains', 'network', code, 'check_network_not_pc');
     if (code === 'no_token') return out('remains', 'no_token', code, 'issue_and_deliver_token');
     if (code === 'profile_401') return out('remains', 'token_rejected', code, 'reissue_token');
