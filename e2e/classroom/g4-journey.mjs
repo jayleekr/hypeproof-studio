@@ -24,7 +24,7 @@ export async function journey(x) {
   await press(chat,'.hp-help summary','help entry');await wait(()=>chat.evaluate("!!document.querySelector('[data-help-question]')"),'help form');
   await setValue(chat,'[data-help-question]','G4 예약 버튼 확인 위치를 알려주세요');await press(chat,'[data-help-preview]','help preview');await wait(()=>chat.evaluate("!!document.querySelector('[data-help-consent]')"),'consent preview');await press(chat,'[data-help-consent]','help consent');await press(chat,'[data-help-send]','send help');
   await wait(()=>local.db.prepare('SELECT id FROM classroom_shares WHERE student_id=?').get(seats[0].student_id),'help stored');
-  await page.locator('#refresh').click();if(await page.locator('#ops-help-toggle').filter({hasText:'펼치기'}).isVisible())await page.locator('#ops-help-toggle').click();
+  await page.locator('#refresh').click();await page.locator('#ops-help-toggle').filter({hasText:'펼치기'}).click();
   await page.locator('#ops-help-list li').filter({hasText:seats[0].student_id}).getByRole('button',{name:'요청 열기'}).click();
   await page.locator('#review-state').selectOption('answered');await page.locator('#feedback-text').fill('G4 버튼을 누르고 화면 변화를 확인해 보세요');await page.locator('#next-action').fill('직접 확인하고 결과 남기기');await page.locator('#feedback button').click();
   await page.screenshot({path:path.join(out,'g4-02-help-feedback.png')});step('G4 help and instructor feedback');
