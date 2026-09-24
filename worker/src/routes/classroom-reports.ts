@@ -134,9 +134,9 @@ async function saveResult(env: Env, job: Job, generation: number, v: ReturnType<
 async function evaluateLeased(env: Env, job: Job, profileId: string, actor: { kind: string; id: string }, now: number) {
   const db = env.HPS_DB, cfg = evaluatorConfig(env, profileModel(profileId)), model = modelById(job.capability_model);
   // Back to the queue WITH a pause: a job that cannot run right now must not be the next one picked again.
-  const release = async (reason: string) => { await db.batch([
+  const release = async (reason: string, attempted = false) => { const increment = attempted ? 1 : 0; await db.batch([
     db.prepare("UPDATE classroom_report_jobs SET state='queued',reason=?,lease_expires_at=0,updated_at=? WHERE id=? AND state='leased' AND lease_generation=?").bind(reason, now, job.id, job.lease_generation),
-    db.prepare('INSERT INTO classroom_report_job_attempts(job_id,attempts,next_attempt_at,last_reason,updated_at) VALUES(?,1,?,?,?) ON CONFLICT(job_id) DO UPDATE SET attempts=attempts+1,next_attempt_at=?,last_reason=excluded.last_reason,updated_at=excluded.updated_at').bind(job.id, now + RETRY_STEPS_MS[0]!, reason, now, now + RETRY_STEPS_MS[Math.min(await attemptsOf(db, job.id), RETRY_STEPS_MS.length - 1)]!),
+    db.prepare('INSERT INTO classroom_report_job_attempts(job_id,attempts,next_attempt_at,last_reason,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET attempts=attempts+excluded.attempts,next_attempt_at=?,last_reason=excluded.last_reason,updated_at=excluded.updated_at').bind(job.id, increment, now + RETRY_STEPS_MS[0]!, reason, now, now + RETRY_STEPS_MS[attempted ? Math.min(await attemptsOf(db, job.id), RETRY_STEPS_MS.length - 1) : 0]!),
   ]); };
   if (!cfg) { await release('evaluator_not_configured'); return { state: 'queued', reason: 'evaluator_not_configured', ok: false }; }
   // The job is pinned to an evaluator/rubric. This Service evaluates only jobs pinned to what it actually runs.
@@ -155,7 +155,7 @@ async function evaluateLeased(env: Env, job: Job, profileId: string, actor: { ki
   } catch (err) {
     const code = String((err as Error)?.message ?? 'evaluator_failed').replace(/[^a-z0-9_]/g, '').slice(0, 48) || 'evaluator_failed';
     // Transient provider trouble: back to the queue, at most 3 leases. After that it is a visible failure, not a silent loop.
-    if ((await attemptsOf(db, job.id)) < MAX_TRANSIENT_ATTEMPTS - 1 && /^evaluator_provider_(429|5\d\d)$/.test(code)) { await release(code); return { state: 'queued', reason: code, ok: false }; }
+    if ((await attemptsOf(db, job.id)) < MAX_TRANSIENT_ATTEMPTS - 1 && /^evaluator_provider_(429|5\d\d)$/.test(code)) { await release(code, true); return { state: 'queued', reason: code, ok: false }; }
     return saveResult(env, job, job.lease_generation, { ok: false, state: 'failed', reason: code }, actor, now);
   }
 }
