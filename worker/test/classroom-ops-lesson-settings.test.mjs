@@ -223,5 +223,22 @@ try {
     f.fail('FROM classroom_lesson_bindings b WHERE'); const blind = await f.sync(conn.A3.credential, [stepEvent(V2, 'review', 'in_progress')], 3); f.fail('');
     assert.equal(blind.json.quarantined.length, 1, 'an unreadable basis stores the step as basis_unknown; it is not judged by the run pin instead'); assert.equal(one("SELECT disposition d FROM ops_events WHERE seq=? AND grant_id=?", seq, conn.A3.grant_id).d, 'basis_unknown');
   });
+  await check('S14 rescope drops prepared settings while retaining notices in the same cohort', async () => {
+    const current = one('SELECT latest_revision revision FROM classroom_content_objects WHERE object_id=?', setting.object_id);
+    const next = await save({ kind: 'setting', title: '권한 검사', body: '새 설정', lesson: ref(V2), object_id: setting.object_id, expected_latest_revision: current.revision });
+    assert.equal(next.status, 201, next.raw);
+    const d = (await send({ object_id: setting.object_id, revision: next.json.revision, content_hash: next.json.content_hash, targets: ['A1'] })).json.distribution;
+    const [item] = (await take(conn.A1, 1)).filter(i => i.distribution_id === d.id); assert.ok(item);
+    const notice = (await save({ kind: 'notice', title: '유지', body: '일반 공지' })).json;
+    const nd = (await send({ object_id: notice.object_id, revision: 1, content_hash: notice.content_hash, targets: ['A2'] })).json.distribution;
+    const jti = (await (await import('../src/lib/tokens.ts')).verify(L, TEST_SECRET)).jti;
+    const r = await f.request('/admin/issuers', 'POST', { instructor: 'teacher-l', scopes: [{ cohort: f.cohort, profiles: [f.profile], ops: ['observe', 'distribute'] }], days: 1, revoke_jti: jti }, null, { authorization: 'Basic ' + Buffer.from('admin:pw').toString('base64') });
+    assert.equal(r.status, 200, r.raw);
+    assert.ok(one('SELECT revoked_at FROM classroom_distributions WHERE id=?', d.id).revoked_at);
+    assert.equal(one('SELECT revoked_at FROM classroom_distributions WHERE id=?', nd.id).revoked_at, null);
+    const switched = await switchTo('A1', 1, item, 99);
+    assert.notEqual(switched.status, 201, switched.raw);
+    assert.equal(switched.json.recorded, false);
+  });
 } finally { f?.close(); }
 console.log(`\n${count} passed`);
