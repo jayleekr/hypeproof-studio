@@ -108,3 +108,5 @@ also clears its hidden cohort/profile binding and blocks create/save until a ver
 setting or manual target is selected, while preserving the in-progress curriculum.
 This does not implement AI
 generation, new cohort provisioning, persistent login or independent course storage.
+
+생성기(대상·에셋 입력)와 강의 만들기(대상·에셋 출력)는 [chalk-mvp.md](./chalk-mvp.md) GEN·OUT 묶음이 맡는다.
