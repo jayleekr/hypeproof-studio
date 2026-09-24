@@ -2455,9 +2455,6 @@
         },
         {
           "path": "extensions/hypeproof-chat/test/sx-source-state.smoke.mjs"
-        },
-        {
-          "path": "docs/testing/chalk-mvp.md"
         }
       ]
     },
@@ -2490,9 +2487,40 @@
         },
         {
           "path": "extensions/hypeproof-chat/webview-ui/src/tokens.css"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-SCH-FIELDS",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SCH",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/session-design.ts"
+        },
+        {
+          "path": "worker/src/lib/learning-prompt.ts"
         },
         {
           "path": "worker/src/lib/lesson-delivery.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-SCH-FIELDS",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SCH",
+        "ST-IMP-CHALK-SCH-FIELDS"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/chalk-mvp.md"
         }
       ]
     },
