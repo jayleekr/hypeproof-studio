@@ -180,3 +180,10 @@ a successful-settings claim. Rollback keeps all data. Older Service builds do no
 accept the new frozen effort schema: stop issuing new effort lessons and restore the
 prior lesson/version before using an older Service. This does not change retention,
 pricing, raw-content logging or existing students' credentials.
+
+### Viewer-check signing-secret rotation
+
+Recipient viewer-check hashes use `HPS_SIGNING_SECRET`. Rotating this secret also
+invalidates existing imported checks: coordinate a fresh recipient import with
+new salts/check hashes before reopening report links. Do not enable delivery
+with stale checks or treat the rotation as transparent to existing recipients.
