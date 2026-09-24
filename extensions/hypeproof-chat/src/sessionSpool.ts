@@ -292,7 +292,7 @@ export class SessionSpool {
     });
   }
 
-  recordPrompt(e: { turnId: string; runtime: string; text: string; imagesCount?: number }): void {
+  recordPrompt(e: { turnId: string; runtime: string; text: string; imagesCount?: number; model?: string }): void {
     this.enqueue(async () => {
       const s = await this.materialize();
       this.pinTurn(e.turnId, s);
@@ -306,6 +306,8 @@ export class SessionSpool {
         // 무성 절단 금지 — 잘렸으면 잘렸다고, 원래 몇 자였는지 남긴다.
         ...(clamped ? { text_truncated: true, text_original_chars: text.length } : {}),
         ...(e.imagesCount ? { images_count: e.imagesCount } : {}),
+        // #1298 — record which model this turn actually ran on.
+        ...(e.model ? { model: e.model } : {}),
       });
     });
   }

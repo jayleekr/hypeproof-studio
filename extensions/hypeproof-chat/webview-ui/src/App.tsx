@@ -14,6 +14,7 @@ import {
 import { onHostMessage, postToHost } from "./vscode";
 import { runVoiceCapabilityProbe } from "./voiceProbe";
 import { ChatPanel } from "./ChatPanel";
+import { InstructorChatPanel } from "./InstructorChatPanel"; // #1298
 import { ChatErrorBoundary } from "./ChatErrorBoundary";
 
 interface State {
@@ -282,6 +283,46 @@ export function App() {
   return (
     <ChatErrorBoundary onReset={() => { setShouldCrash(false); postToHost({ type: "ready" }); }}>
       <CrashIfFlagged crash={shouldCrash} />
+      {/* #1298 — instructor tokens get the extended panel; student tokens get the standard one. */}
+      {state.config?.isInstructor ? (
+        <InstructorChatPanel
+          key={state.config?.activity?.id ?? "disconnected-instructor"}
+          incomingImage={incomingImage}
+          config={state.config}
+          messages={messages}
+          pageNotice={state.pageNotice}
+          aiNotice={state.aiNotice}
+          stopNotice={state.stopNotice}
+          openWorldId={state.openWorldId}
+          publish={state.publish}
+          onPublish={() => {
+            dispatch({ type: "publishStart" });
+            postToHost({ type: "publishToGallery" });
+          }}
+          streaming={!!state.streamId}
+          streamingId={state.timeline.openId}
+          error={state.error}
+          errorRequestId={state.errorRequestId}
+          errorRunbookUrl={state.errorRunbookUrl}
+          canRetryLast={hasLastUserPrompt && !state.streamId}
+          onSend={send}
+          onRetry={retry}
+          onRetryLast={retryLast}
+          onDismissError={dismissError}
+          onCancel={cancel}
+          onClear={() => postToHost({ type: "clearHistory" })}
+          onSetToken={() => postToHost({ type: "setToken" })}
+          onSettings={() => postToHost({ type: "openSettings" })}
+          onRunCode={(html) => postToHost({ type: "runCode", html })}
+          onNamingRitual={() => postToHost({ type: "namingRitual" })}
+          onSaveCoach={(name, personality) =>
+            postToHost({ type: "saveCoach", name, personality })
+          }
+          onReportProblem={() => postToHost({ type: "openReportModal" })}
+          onInstallUpdate={() => postToHost({ type: "installUpdate" })}
+          onDismissUpdate={(version) => postToHost({ type: "dismissUpdate", version })}
+        />
+      ) : (
       <ChatPanel
         key={state.config?.activity?.id ?? "disconnected"}
         incomingImage={incomingImage}
@@ -321,6 +362,7 @@ export function App() {
         onInstallUpdate={() => postToHost({ type: "installUpdate" })}
         onDismissUpdate={(version) => postToHost({ type: "dismissUpdate", version })}
       />
+      )}
     </ChatErrorBoundary>
   );
 }

@@ -206,6 +206,13 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private profileGeneration=0;
+  // #1298 — cached instructor-mode flag. Null means "not yet checked".
+  // Reset in invalidateProfile() whenever the token changes.
+  private _isInstructor: boolean | null = null;
+  private _isInstructorToken: string | undefined = undefined;
+  // #1298 — cached instructor brief text. Reset with instructor state.
+  private _instructorBrief: string | undefined = undefined;
+  private _instructorBriefVersion: number | undefined = undefined;
   private nativeObservationError: string | null = null;
   private nativeLearningPath: {title:string;url:string;reason:string} | null = null;
   private observationAssessment: AbortController | null = null;
@@ -796,6 +803,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.lastProfileFailure = null;
     this.activeCohortId = null;
     this.nativeHistoryScope = null;
+    // #1298 — re-check instructor status + brief after token change.
+    this._isInstructor = null;
+    this._isInstructorToken = undefined;
+    this._instructorBrief = undefined;
+    this._instructorBriefVersion = undefined;
   }
 
   /** #381 — cause of the most recent failed profile fetch, if any. */
@@ -2216,6 +2228,34 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.postConfig();
         return;
       }
+      // #1298 — instructor-only: free-form model id. Validate by sending a
+      // zero-message probe to /v1/chat/completions; revert on error.
+      case "selectModelDirect": {
+        const cfg2 = vscode.workspace.getConfiguration('hypeproofChat');
+        const proxyUrl2 = cfg2.get<string>('proxyUrl', 'https://api.hypeproof-ai.xyz/v1');
+        const token2 = await this.context.secrets.get(TOKEN_KEY);
+        const modelId = msg.modelId.trim();
+        if (!modelId) { await this.postConfig(); return; }
+        // Optimistically store; restore on error.
+        const prevChoice = this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice');
+        await this.context.workspaceState.update('hps.modelChoice', { scope: 'instructor', alias: modelId });
+        try {
+          const testRes = await fetch(`${proxyUrl2}/chat/completions`, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json', authorization: `Bearer ${token2 ?? ''}` },
+            body: JSON.stringify({ model: modelId, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+            signal: AbortSignal.timeout(8000),
+          });
+          if (!testRes.ok) {
+            // Non-2xx → invalid model. Revert.
+            await this.context.workspaceState.update('hps.modelChoice', prevChoice);
+          }
+        } catch {
+          await this.context.workspaceState.update('hps.modelChoice', prevChoice);
+        }
+        await this.postConfig();
+        return;
+      }
       case "sendMessage":
         await this.handleSend(msg.text, msg.history, msg.images);
         return;
@@ -2628,6 +2668,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         runtime,
         text,
         imagesCount: effectiveImages?.length ?? 0,
+        model, // #1298 — record which model this turn ran on
       });
       const onDelta = (delta: string) => {
         if (pendingShown) clearPending();
@@ -2899,6 +2940,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         const result=await runLocalCoach({config:local,profile,cwd,
           history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
           signal:ctrl.signal,onDelta,onActivity,
+          // #1298 — pass instructor brief as system prompt override when in instructor mode.
+          ...(this._isInstructor && this._instructorBrief ? { systemPrompt: this._instructorBrief } : {}),
           requestApproval:async action=>{
             let prompted=false;
             const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
@@ -3549,6 +3592,48 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return pick === verb;
   }
 
+  // #1298 — check GET /admin/chalk/whoami with the current token.
+  // Caches result per token so we don't hammer the server on every postConfig.
+  private async checkInstructorMode(token: string | undefined, proxyUrl: string): Promise<boolean> {
+    if (!token) { this._isInstructor = false; this._isInstructorToken = undefined; return false; }
+    if (this._isInstructor !== null && this._isInstructorToken === token) return this._isInstructor;
+    try {
+      const base = proxyUrl.replace(/\/v1\/?$/, '');
+      const res = await fetch(`${base}/admin/chalk/whoami`, {
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      this._isInstructor = res.ok;
+    } catch {
+      this._isInstructor = false;
+    }
+    this._isInstructorToken = token;
+    return this._isInstructor;
+  }
+
+  // #1298 — fetch GET /admin/chalk/instructor-brief once per session.
+  // Caches by version: if the server returns up_to_date:true the cached text is reused.
+  // Falls back to undefined on network error (instructor chat still works, just no system prompt).
+  private async fetchInstructorBrief(token: string, proxyUrl: string): Promise<string | undefined> {
+    const base = proxyUrl.replace(/\/v1\/?$/, '');
+    const versionParam = this._instructorBriefVersion !== undefined
+      ? `?version=${this._instructorBriefVersion}` : '';
+    try {
+      const res = await fetch(`${base}/admin/chalk/instructor-brief${versionParam}`, {
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!res.ok) return this._instructorBrief;
+      const body = await res.json() as { id: string; version: number; text?: string | null; up_to_date?: boolean };
+      if (body.up_to_date) return this._instructorBrief;
+      this._instructorBriefVersion = body.version;
+      this._instructorBrief = body.text ?? undefined;
+    } catch {
+      // network failure — reuse cached value
+    }
+    return this._instructorBrief;
+  }
+
   private async postConfig(): Promise<void> {
     const activity=activityConnections(this.context)?.current;
     const scope=activity?.id;
@@ -3568,10 +3653,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     }
     if (scope!==activityConnections(this.context)?.scope) return;
     const local=localRuntimeConfig(vscode.env.appName,cfg.get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'));
+    const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+    const isInstructor = await this.checkInstructorMode(token, proxyUrl);
+    const instructorBrief = (isInstructor && token)
+      ? await this.fetchInstructorBrief(token, proxyUrl)
+      : undefined;
     await this.post({
       type: "config",
       config: {
-        proxyUrl: cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1"),
+        proxyUrl,
         model:local?.model??model,
         hasToken: !!token,
         ...(activity ? {activity:{id:activity.id,name:activity.name,kind:activity.kind,workspace:activity.workspace,verified:!!profile},
@@ -3581,6 +3671,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         coach: this.getCoach(),
         profile: profile ? { ...profile, model_selection: local?localModelSelection(local):selection } : null,
         update: local ? undefined : this.availableUpdate,
+        ...(isInstructor ? { isInstructor: true } : {}),
+        ...(instructorBrief ? { instructorBrief } : {}),
       },
     });
     // #649 — when the webview remounts (panel hide → show, reload) the highlight

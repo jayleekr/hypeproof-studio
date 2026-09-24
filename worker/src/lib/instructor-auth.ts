@@ -89,7 +89,45 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   if (path === "/admin/issuers" && method === "POST") return true;
   // GET /admin/cohorts/:id/state (#352) is deliberately ABSENT: it moved to
   // Chalk with plan task F and is answered there, never forwarded.
+  // #1298 — instructor-mode identity check. No cohort required: any valid issuer
+  // token gets 200. The client uses this to decide whether to open instructor mode.
+  if (path === "/admin/chalk/whoami" && method === "GET") return true;
+  // #1298 — instructor system prompt (brief). Returns versioned instruction text
+  // the client injects as system prompt for instructor-mode chat turns.
+  if (path === "/admin/chalk/instructor-brief" && method === "GET") return true;
   return false;
+}
+
+// #1298 — verify issuer-role without a cohort requirement. Used by GET
+// /admin/chalk/whoami: any valid, un-revoked issuer token returns its scopes.
+// Returns `null` if no Bearer was present (admin Basic/CF Access path).
+// Returns a Response on token present but invalid / wrong role / revoked.
+export async function authorizeIssuer(
+  c: InstructorAuthRequest,
+): Promise<IssuerAuthz | null | Response> {
+  const auth = c.req.header("authorization") ?? "";
+  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
+  if (!bearerMatch || !bearerMatch[1]) return null;
+
+  let payload: TokenPayload;
+  try {
+    payload = await verify(bearerMatch[1], c.env.HPS_SIGNING_SECRET);
+  } catch (err) {
+    return Response.json(
+      { error: publicVerifyError(err, "issuer") },
+      { status: 401 },
+    );
+  }
+  if (payload.role !== "issuer") {
+    return Response.json({ error: "token is not an issuer" }, { status: 403 });
+  }
+  if (payload.jti) {
+    const rev = await isTokenRevoked(c.env.HPS_KV, payload.jti);
+    if (rev) return Response.json({ error: "issuer token revoked" }, { status: 401 });
+  }
+  // Return the first scope as representative; whoami callers only need confirmation.
+  const scope = (payload.scopes ?? [])[0] ?? { cohort: "" };
+  return { scope, payload };
 }
 
 // #167 / #290 — when an issuer-role Bearer is presented, re-verify + scope
