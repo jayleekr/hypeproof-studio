@@ -141,6 +141,10 @@
       {
         "command": "hypeproof-chat.classroomCollectionConsent",
         "title": "HypeProof: 수업 기록 보내기 동의·철회"
+      },
+      {
+        "command": "hypeproof-chat.classroomApproveArtifact",
+        "title": "HypeProof: 지금 결과물을 수업 결과물로 승인·취소"
       }
     ],
     "menus": {

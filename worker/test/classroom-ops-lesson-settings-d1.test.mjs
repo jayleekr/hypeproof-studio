@@ -30,14 +30,17 @@ try {
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await raw.prepare(s).run(); };
   await raw.prepare('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, cohort_id TEXT, profile_id TEXT, starts_at TEXT, ends_at TEXT, ended_at TEXT)').run();
   const files = readdirSync(new URL('../migrations/', import.meta.url)).filter((x) => /^\d{4}-.*\.sql$/.test(x) && Number(x.slice(0, 4)) >= 11).sort();
-  assert.equal(files.at(-1), '0024-classroom-lesson-bindings.sql', 'this test describes the newest migration');
-  for (const m of files.slice(0, -1)) await apply(readFileSync(new URL(`../migrations/${m}`, import.meta.url), 'utf8'));
+  // 0024 is measured on its own; later additive migrations (0025 U1b collection kinds) are applied after it and checked in classroom-ops-d1.
+  const u3At = files.indexOf('0024-classroom-lesson-bindings.sql'); assert.ok(u3At >= 0, 'this test describes migration 0024');
+  for (const m of files.slice(0, u3At)) await apply(readFileSync(new URL(`../migrations/${m}`, import.meta.url), 'utf8'));
   const master = async () => Object.fromEntries((await raw.prepare("SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all()).results.map((r) => [r.name, r.sql]));
   const before = await master();
   for (let pass = 0; pass < 2; pass++) await apply(readFileSync(new URL('../migrations/0024-classroom-lesson-bindings.sql', import.meta.url), 'utf8'));
-  const after = await master();
+  let after = await master();
   for (const [name, sql] of Object.entries(before)) assert.equal(after[name], sql, 'unchanged by 0024: ' + name);
   assert.deepEqual(Object.keys(after).filter((n) => !(n in before)).sort(), [...U3].sort(), '0024 adds exactly these objects, and applying it twice adds nothing more');
+  for (const m of files.slice(u3At + 1)) await apply(readFileSync(new URL(`../migrations/${m}`, import.meta.url), 'utf8'));
+  { const later = await master(); for (const n of U3) assert.equal(later[n], after[n], 'a later migration leaves the U3 object alone: ' + n); after = later; }
   // fresh = cumulative: schema.sql (what a new database gets) defines the U3 objects exactly as the migration chain does.
   const fresh = new DatabaseSync(':memory:'); fresh.exec(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8'));
   for (const n of U3) assert.equal(squash(fresh.prepare('SELECT sql FROM sqlite_master WHERE name=?').get(n)?.sql), squash(after[n]), 'schema.sql and the migration agree on ' + n);
@@ -45,7 +48,7 @@ try {
   // The measurements below need the tables that predate 0011 (usage, authoring): schema.sql is all IF NOT EXISTS, so applying it
   // on top supplies them and must leave every object the migration chain made exactly as it was.
   await apply(readFileSync(new URL('../schema.sql', import.meta.url), 'utf8').replace(/--[^\n]*/g, '')); { const now = await master(); for (const [name, sql] of Object.entries(after)) assert.equal(now[name], sql, 'unchanged by schema.sql: ' + name); }
-  console.log('PASS local D1: 0011→0023 then 0024 twice — earlier objects byte-identical, exactly six objects added, schema.sql agrees');
+  console.log('PASS local D1: 0011→0023 then 0024 twice — earlier objects byte-identical, exactly six objects added, later migrations leave them alone, schema.sql agrees');
 
   // ── metering wrapper: counts what the Service really sends to D1 ──
   let m = null; const meter = () => (m = { statements: 0, batches: 0, max_binds: 0, rows_read: 0, rows_written: 0, unmetered: 0 });

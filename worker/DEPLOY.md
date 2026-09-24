@@ -246,13 +246,14 @@ tables, the rollback for a bad rollout is "flags off + previous Worker", not a r
 (`wrangler d1 time-travel restore <name> --bookmark=<bookmark>`) is for a damaged database only, rewinds EVERY table
 including usage and budgets, and is a separate decision with its own confirmation.
 
-### 3. Apply 0011 → 0024, then verify
+### 3. Apply 0011 → 0025, then verify
 
 ```bash
 for f in 0011-classroom-ops 0012-classroom-ops-commands 0013-classroom-ops-control 0014-classroom-ops-evidence-review \
          0015-classroom-collection 0016-classroom-report-jobs 0017-classroom-delivery 0018-classroom-snapshot-binding \
          0019-classroom-report-attempts 0020-classroom-viewer-check 0021-classroom-erasure-log \
-         0022-classroom-collect-scope 0023-classroom-distribution 0024-classroom-lesson-bindings; do
+         0022-classroom-collect-scope 0023-classroom-distribution 0024-classroom-lesson-bindings \
+         0025-classroom-collect-kinds; do
   npx wrangler d1 execute <name> --remote --file=migrations/$f.sql || break
 done
 node scripts/classroom-ops-d1-check.mjs --database <name> --expect-id <uuid> --require all

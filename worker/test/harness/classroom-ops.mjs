@@ -73,7 +73,7 @@ export async function localOps({ enabled = true, binding, profile: profileOverri
   const sync = (credential, events = [], n = 1, extra = {}) => request('/v1/classroom/ops/sync', 'POST', { schema_version: 1, app_instance_id: instance(n).app_instance_id, boot_id: instance(n).boot_id, capabilities: instance(n).capabilities, events, ...extra }, credential);
   // A snapshot the way the real App issues it (review F1): real-shaped spool metadata, and the binding produced by the
   // App's own freezer from the connect response. Tests never hand-write a binding.
-  const { freezeSnapshot } = await import('../../../extensions/hypeproof-chat/src/evidenceSnapshot.ts');
+  const { freezeSnapshot, freezeCollection } = await import('../../../extensions/hypeproof-chat/src/evidenceSnapshot.ts');
   const enc = (t) => new TextEncoder().encode(t), hex = (t) => createHash('sha256').update(t).digest('hex');
   // The App freezes a copy once and keeps its binding; the fixture freezes at a fixed instant so a re-seal is the same manifest.
   const opts_now = (conn) => conn.run.ends_at;
@@ -89,11 +89,33 @@ export async function localOps({ enabled = true, binding, profile: profileOverri
     if (!frozen.ok) throw Error('the App would not send this: ' + frozen.code);
     return { schema: 'hps-classroom-snapshot/2', files: files ?? [{ name: 'session.meta.json', bytes: Buffer.byteLength(meta), sha256: hex(meta) }, { name: 'events.jsonl', bytes: Buffer.byteLength(eventsText), sha256: hex(eventsText) }], binding: frozen.binding };
   }
-  /** PUT both files and seal, as the device uploader does. */
+  /**
+   * #751 U1b — a batch that asked for kinds is collected the way the current App does it: the App's freezeCollection over the
+   * current session (this fixture's text), sealed as schema /3. `spool.other_sessions` = sessions the App could not include.
+   */
+  const kindsOf = (batchId) => { try { const r = db?.prepare('SELECT kinds_json FROM classroom_collect_kinds WHERE batch_id=?').get(batchId); return r ? JSON.parse(r.kinds_json) : null; } catch { return null; } };
+  /** The exact /3 files the App would freeze for this fixture text (a test that sends one file by hand sends these bytes). */
+  function collectionFiles(conn, batchId, eventsText, kinds, { meta = metaFor(conn), consent = { purpose: 'class_report', notice_version: 'notice-v1' }, spool } = {}) {
+    const scope = { grant_id: conn.grant_id, class_run_id: conn.class_run_id, seat_id: conn.seat_id, student: conn.student, activity: conn.lesson ? { course_id: conn.lesson.course_id, version: conn.lesson.version } : null, run: conn.run };
+    const src = { current: { files: [{ name: 'session.meta.json', data: enc(meta) }, { name: 'events.jsonl', data: enc(eventsText) }], sequence: { session_id: JSON.parse(meta).session_id, last_seq: spool?.last_seq ?? lastSeqOf(eventsText) } }, others: [], omitted: { unreadable: spool?.other_sessions ?? 0, over_limit: 0 } };
+    const frozen = freezeCollection(src, scope, batchId, consent, kinds ?? kindsOf(batchId), opts_now(conn));
+    if (!frozen.ok) throw Error('the App would not send this: ' + frozen.code);
+    return frozen;
+  }
+  async function uploadCollectionAs(conn, batchId, revision, eventsText, kinds, { meta = metaFor(conn), consent = { purpose: 'class_report', notice_version: 'notice-v1' }, spool } = {}) {
+    const scope = { grant_id: conn.grant_id, class_run_id: conn.class_run_id, seat_id: conn.seat_id, student: conn.student, activity: conn.lesson ? { course_id: conn.lesson.course_id, version: conn.lesson.version } : null, run: conn.run };
+    const src = { current: { files: [{ name: 'session.meta.json', data: enc(meta) }, { name: 'events.jsonl', data: enc(eventsText) }], sequence: { session_id: JSON.parse(meta).session_id, last_seq: spool?.last_seq ?? lastSeqOf(eventsText) } }, others: [], omitted: { unreadable: spool?.other_sessions ?? 0, over_limit: 0 } };
+    const frozen = freezeCollection(src, scope, batchId, consent, kinds, opts_now(conn));
+    if (!frozen.ok) throw Error('the App would not send this: ' + frozen.code);
+    for (const f of frozen.files) { const r = await app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${batchId}/${revision}/${f.name}`, { method: 'PUT', headers: { authorization: 'Bearer ' + conn.credential }, body: f.data }), env, { waitUntil() {} }); if (r.status !== 201 && r.status !== 200) { const raw = await r.text(); let json; try { json = JSON.parse(raw); } catch {} return { status: r.status, json, raw }; } }
+    return request(`/v1/classroom/ops/collect/snapshots/${batchId}/${revision}/seal`, 'POST', { schema: 'hps-classroom-snapshot/3', files: frozen.files.map((f) => ({ name: f.name, bytes: f.data.byteLength, sha256: createHash('sha256').update(f.data).digest('hex') })), collection: frozen.binding }, conn.credential);
+  }
+  /** PUT both files and seal, as the device uploader does (schema /3 when the batch asked for kinds). */
   async function uploadSnapshotAs(conn, batchId, revision, eventsText, opts = {}) {
+    const kinds = opts.legacy ? null : kindsOf(batchId); if (kinds) return uploadCollectionAs(conn, batchId, revision, eventsText, kinds, opts);
     const meta = opts.meta ?? metaFor(conn);
     for (const [name, body] of [['session.meta.json', meta], ['events.jsonl', eventsText]]) { const r = await app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${batchId}/${revision}/${name}`, { method: 'PUT', headers: { authorization: 'Bearer ' + conn.credential }, body }), env, makeCtx()); if (!r.ok) return { status: r.status, json: await r.json() }; }
     return request(`/v1/classroom/ops/collect/snapshots/${batchId}/${revision}/seal`, 'POST', sealBody(conn, batchId, eventsText, { ...opts, meta }), conn.credential);
   }
-  return { r2, app, env, db, cohort, profile, run, base, metaFor, sealBody, uploadSnapshotAs, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, command, receipt, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
+  return { r2, app, env, db, cohort, profile, run, base, metaFor, sealBody, uploadSnapshotAs, collectionFiles, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, command, receipt, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
 }
