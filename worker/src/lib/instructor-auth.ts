@@ -89,6 +89,8 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   if (path === "/admin/issuers" && method === "POST") return true;
   // GET /admin/cohorts/:id/state (#352) is deliberately ABSENT: it moved to
   // Chalk with plan task F and is answered there, never forwarded.
+  // #1288 — Chalk knowledge read-only endpoints. No cohort scope needed.
+  if (method === 'GET' && /^\/admin\/chalk\/knowledge\/(?:versions|[0-9]+\/docs(?:\/[^/]+)?)$/.test(path)) return true;
   return false;
 }
 
