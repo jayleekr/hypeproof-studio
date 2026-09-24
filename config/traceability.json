@@ -2165,6 +2165,21 @@
           "path": ".github/workflows/requirement-work.yml"
         }
       ]
+    },
+    {
+      "id": "ST-DES-CHALK-OUTPUT",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-OUT",
+        "ST-REQ-CHALK-SCH",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-plan-to-lesson.md"
+        }
+      ]
     }
   ]
 }
