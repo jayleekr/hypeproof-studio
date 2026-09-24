@@ -26,6 +26,7 @@
 
 import { Hono } from "hono";
 import { authoring } from "./authoring";
+import { chalkCourses } from "./chalk-courses";
 import { accessAdmin } from './access';
 import { classroomTeacher } from "./classroom";
 import { classroomOpsTeacher, recordTokenIssue, revokeOpsGrantsForIssuer } from "./classroom-ops";
@@ -140,6 +141,7 @@ admin.use("*", async (c, next) => {
 });
 
 admin.route("/", authoring);
+admin.route("/", chalkCourses);
 admin.route('/', accessAdmin);
 admin.route("/", classroomTeacher);
 admin.route("/", classroomOpsTeacher);

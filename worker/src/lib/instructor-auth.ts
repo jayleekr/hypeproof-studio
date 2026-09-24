@@ -87,6 +87,10 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   // instructor issuers via Bearer. The handler re-verifies the token AND the
   // capability; a Bearer minter still cannot create another admin-minter.
   if (path === "/admin/issuers" && method === "POST") return true;
+  // #1293 — Chalk method recommendation. Handler re-verifies issuer + cohort scope.
+  if (method === "POST" && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/recommend$/.test(path)) return true;
+  // #1295 — Chalk course generation: inputs, plan save, brief, plan read.
+  if ((method === "PUT" || method === "GET") && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/(inputs|plan|brief)$/.test(path)) return true;
   // GET /admin/cohorts/:id/state (#352) is deliberately ABSENT: it moved to
   // Chalk with plan task F and is answered there, never forwarded.
   return false;
