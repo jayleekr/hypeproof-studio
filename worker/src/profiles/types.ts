@@ -5,8 +5,34 @@
 import type { LLMProvider } from "../env.ts";
 
 export interface Profile {
-  /** Explicit opt-in; observation does not grant any execution tools. */
-  observation?: { enabled: boolean };
+  /**
+   * Explicit opt-in; observation does not grant any execution tools.
+   *
+   * `format` picks which observation contract this cohort's seats are served
+   * (design §관측 이벤트와 필드: "the profile's observation.format decides which one is used").
+   * Absent means `hps-observation/1` — every cohort that existed before this
+   * field keeps its exact behaviour. `hps-observation/2` is the superset that
+   * carries the eight learning kinds, and it is what makes the completion gate
+   * and the Evidence drawer reachable at all: with no cohort declaring it, the
+   * client never builds a /2 recorder and those screens never render.
+   */
+  observation?: {
+    /**
+     * @deprecated ADR 0010. It meant four things — record, assess,
+     * `/v1/profile` session gating and individual-trial minting. Steps 1 and 2
+     * moved all four out: the last two now read `session.requires_open_session`
+     * and `trial.individual`, so this flag is down to being the fallback
+     * `observationCapability()` reads for `record` and `assess` on profiles
+     * that have not been rewritten. It is still the only field any profile
+     * sets. Removed in the ADR's last step, once they have been.
+     */
+    enabled?: boolean;
+    /** Write learning events on the student's device. The drawer and the completion gate turn on with this. */
+    record?: boolean;
+    /** May call `POST /v1/observations/assess` — the batch leaves the device. Off unless a cohort opts in. */
+    assess?: boolean;
+    format?: "hps-observation/1" | "hps-observation/2";
+  };
   /** Empty starts wait for a task; absent preserves existing web curriculum. */
   workspace_start?: 'empty' | 'html';
   id: string;
@@ -56,11 +82,14 @@ export interface Profile {
     /** Derived from a validated frozen lesson, never from client input. */
     lesson_locked?: boolean;
     /**
-     * 이 프로필만 다른 상류로 보낸다. 없으면 배포 기본값(LLM_PROVIDER)을 쓴다.
+     * Sends only this profile to a different upstream. Absent → the deployment
+     * default (LLM_PROVIDER) is used.
      *
-     * 쓰임새마다 맞는 모델이 다르다 — 아이들 수업은 싸고 빠른 쪽, 고위험 산출물은
-     * 비싸도 정확한 쪽. 배포 전체를 한 모델로 묶을 이유가 없다.
-     * 여기에 적은 프로바이더의 키가 없으면 **이 프로필만** 502 가 된다 (나머지는 정상).
+     * Different uses want different models — a kids' lesson wants the cheap, fast
+     * one; a high-risk artifact wants the accurate one even if it costs more. There
+     * is no reason to tie the whole deployment to one model.
+     * If the key for the provider named here is missing, **only this profile** 502s
+     * (the rest are fine).
      */
     provider?: LLMProvider;
     /** Per-profile output-token ceiling used when the client omits max_tokens.
@@ -75,30 +104,30 @@ export interface Profile {
   };
   sandbox: {
     /**
-     * @deprecated 읽는 코드가 없다. 도구 정책의 canonical owner 는
-     * `sdk_tools.write` 다 (#282 P2 / ADR 0003). 이 필드는 그보다 앞선
-     * 시기의 잔재이며 값이 무엇이든 런타임에 아무 영향이 없다.
+     * @deprecated No code reads it. The canonical owner of tool policy is
+     * `sdk_tools.write` (#282 P2 / ADR 0003). This field is a leftover from an
+     * earlier period and whatever its value, it has no runtime effect at all.
      *
-     * **왜 지우지 않고 남겨 두는가:** 프로필 4종이 이미 값을 갖고 있어
-     * 일괄 제거는 별건이다. 그때까지 이 주석이 오독을 막는다 —
-     * 2026-08-10 에 실제로 두 사람(프로필 작성자·검증자)이 이 필드를
-     * 보고 "파일 쓰기가 켜져 있다"고 판단했다.
+     * **Why it is kept instead of deleted:** 4 profiles already carry a value, so
+     * removing them all is a separate job. Until then this comment stops the
+     * misreading — on 2026-08-10 two people (the profile author and the verifier)
+     * actually looked at this field and concluded "file writing is on".
      *
-     * **아동 코호트에서 산출물이 저장되는 진짜 경로:** 코치는 Write 도구가
-     * 없고(chat-only, L3 결정), 대신 확장이 코치의 ```html 펜스를 파싱해
-     * 워크스페이스 루트의 `index.html` 로 쓴다
+     * **The real path by which a child cohort's artifact gets saved:** the coach has
+     * no Write tool (chat-only, L3 decision); instead the extension parses the
+     * coach's ```html fence and writes it to `index.html` at the workspace root
      * (`chatPanelProvider.ts` `revealBuilt()` → `saveGameToWorkspace()`).
-     * 즉 이 필드가 false 든 true 든 산출물은 저장된다.
+     * That is, the artifact is saved whether this field is false or true.
      */
     file_write: boolean;
-    /** 코호트 작업 폴더. 읽힘 — chat.ts 가 /v1/profile 로 내보내고 클라이언트가 폴더를 전환한다. */
+    /** The cohort work folder. READ — chat.ts serves it over /v1/profile and the client switches folder. */
     workspace_root?: string;
     /**
-     * @deprecated 읽는 코드가 없다. 실제 셸 정책은 `sdk_tools.shell` 이
-     * 소유한다 (#431). 위 `file_write` 와 같은 잔재.
+     * @deprecated No code reads it. The real shell policy is owned by
+     * `sdk_tools.shell` (#431). The same leftover as `file_write` above.
      */
     execute_shell: boolean;
-    /** 읽힘 — translate.ts 가 클라이언트 tools 배열을 이 목록으로 필터한다. empty = no tools */
+    /** READ — translate.ts filters the client tools array down to this list. empty = no tools */
     mcp_tools_enabled: string[];
   };
   preview: {
@@ -107,8 +136,8 @@ export interface Profile {
   };
   /**
    * Optional input capabilities — all default off so minor cohorts never expose
-   * them unless a profile opts in. `page_context` (#278) lets "현재 페이지를
-   * 코치에게" inject the native browser tab's content into a chat turn.
+   * them unless a profile opts in. `page_context` (#278) lets "send the current
+   * page to the coach" inject the native browser tab's content into a chat turn.
    * `image_paste` is the website-copyclone screenshot path.
    */
   input?: {
@@ -139,10 +168,12 @@ export interface Profile {
   publishing: {
     enabled: boolean;
     /**
-     * `hypeproof_gallery` — 우리 사이트의 `/live/**` 갤러리. 검색에 안 걸리고
-     * (noindex) 회차 코드로 격리되며 학습 리포트는 암호 뒤에 따로 있다.
-     * 공개 GitHub Pages 와 **다른 층위**다: 거기는 색인되고 영구적이며 우리가
-     * 회수할 수 없다. 미성년 코호트에 열 수 있는 것은 전자까지다.
+     * `hypeproof_gallery` — the `/live/**` gallery on our own site. It does not
+     * turn up in search (noindex), it is isolated by cohort-session code, and the
+     * learning report sits separately behind a password.
+     * It is a **different tier** from public GitHub Pages: that one is indexed and
+     * permanent and we cannot take it back. For a minor cohort, the former is as
+     * far as we can open it.
      */
     strategy: "per_user_github_pages" | "shared_repo" | "local_only" | "hypeproof_gallery";
     repo_template?: string;
@@ -275,21 +306,60 @@ export interface Profile {
     series_total: number;
     series_index: number;
     hours: number;
+    /**
+     * ADR 0010 step 2 — does `GET /v1/profile` require an open class session?
+     *
+     * Scope: this route ONLY. `/v1/chat/completions`, `/v1/messages`,
+     * `/v1/observations/*` and `/v1/request-settings` call `gateChatRequest`
+     * unconditionally and are not affected either way — a seat that reads its
+     * profile before class still cannot send anything.
+     *
+     * It exists because the answer used to be `observation.enabled`. Nothing
+     * about reading your cohort, greeting and model list depends on being
+     * observed; the coupling was an accident of one boolean meaning four
+     * things, and it is the one that would have flipped seven cohorts from
+     * 200 to 403 the day `record` defaults on (ADR step 4).
+     *
+     * Absent → false: a seat may read its profile before the instructor opens
+     * the class. Cohorts whose seat is only meaningful inside a session (the
+     * individual trial, whose observation scope IS the session) declare true
+     * and keep today's 403.
+     */
+    requires_open_session?: boolean;
+  };
+  /**
+   * ADR 0010 step 2 — individual ("native") trial seats.
+   *
+   * Two things read this and they must agree: `POST /admin/tokens/issue` will
+   * not mint a `native_trial` token for a cohort that does not declare it, and
+   * `gateChatRequest` will not open a grant-backed session for one. Splitting
+   * them is how a minted seat that 403s forever gets made, so they move
+   * together.
+   *
+   * Absent → false (fail closed). It used to be `observation.enabled`, which
+   * meant turning observation on for a kids cohort silently made that cohort
+   * mintable as a personal trial — an admin-authority change riding on a
+   * measurement change.
+   */
+  trial?: {
+    individual: boolean;
   };
   analytics: {
     log_user_messages: boolean;     // store message bodies (privacy)
     log_metadata: boolean;          // store token usage + timing
     /**
-     * #596 — 학생 PC 의 세션 로그 스풀(#580)을 R2 로 업로드하는 것을 이
-     * 코호트에 허용하는가. 질문 원문이 PC 를 떠나는 지점이라 fail-closed:
-     * 생략/false = 서버가 업로드를 거부한다. 동의·보존정책이 선 코호트만
-     * true 로 켠다 (log_user_messages 와 같은 규율).
+     * #596 — does this cohort allow uploading the session-log spool on the
+     * student's PC (#580) to R2? This is the point where the raw text of the
+     * questions leaves the PC, so it is fail-closed: omitted/false = the server
+     * refuses the upload. Only a cohort that has consent and a retention policy in
+     * place turns it true (the same discipline as log_user_messages).
      */
     upload_session_logs?: boolean;
     /**
-     * 미성년 코호트가 위 플래그를 켤 때의 동의 어서션 (하네스
-     * `child.upload_consent_key`). 검증이 아니라 **주장 기록**이다 — 누가
-     * 언제 동의를 확보했는지 문자열로 남긴다. 없으면 하네스가 HARD FAIL.
+     * The consent assertion for a minor cohort turning the flag above on (harness
+     * `child.upload_consent_key`). It is not verification, it is a **record of a
+     * claim** — a string saying who secured consent and when. Absent → the harness
+     * HARD FAILs.
      */
     child_upload_consent?: string;
   };
@@ -449,31 +519,38 @@ export const GEMINI_MODEL_MAP: Record<ModelAlias, string> = {
 // OpenAI model ids (third peer). Conservative GA-stable defaults; the team
 // can point any alias at a newer GA flagship (e.g. gpt-5*) with a one-line
 // edit here — profiles stay untouched.
-// 세 alias 가 모두 gpt-5.6-luna 를 가리킨다 — GLM_MODEL_MAP 과 같은 이유·같은 모양이다.
+// All three aliases point at gpt-5.6-luna — the same reason and the same shape as
+// GLM_MODEL_MAP.
 //
-// 2026-09-10 정정: 이 표는 `gpt-4o-mini`/`gpt-4o` 를 가리키고 있었다. 바로 위
-// `OPENAI_MODELS` 는 2026-09-08 에 공식 문서 + `codex model/list` 로 대조한 gpt-5.6
-// 계열인데, alias 경로만 한 세대 전에 멈춰 있었다. 죽은 코드도 아니었다 —
-// `model.provider` 가 없는 프로필(아동·치과 코호트 등 여섯 개)은 env `LLM_PROVIDER` 로
-// 공급자가 결정되므로, `LLM_PROVIDER=openai` 인 환경(이 레포의 테스트 하네스 기본값)에서
-// `hypeproof-default` 가 실제로 `gpt-4o` 로 번역됐다. 프로덕션은
-// `LLM_PROVIDER=anthropic` 이라 노출되지 않았지만, openai 공급자 프로필을 하나 더
-// 추가하는 **자연스러운 변경**이 조용히 구세대 모델을 쓰게 만드는 상태였다.
+// 2026-09-10 correction: this table was pointing at `gpt-4o-mini`/`gpt-4o`.
+// `OPENAI_MODELS` right above is the gpt-5.6 family, checked on 2026-09-08 against
+// the official docs + `codex model/list`, but the alias path alone was stuck a
+// generation back. It was not dead code either — a profile with no
+// `model.provider` (six of them: the kids and dental cohorts among others) has its
+// provider decided by env `LLM_PROVIDER`, so in an environment with
+// `LLM_PROVIDER=openai` (this repo's test-harness default) `hypeproof-default`
+// actually translated to `gpt-4o`. Production runs `LLM_PROVIDER=anthropic` so it
+// was not exposed there — but adding one more openai-provider profile, a
+// **perfectly natural change**, would have quietly started using a
+// previous-generation model.
 //
-// fast/default/strong 의 **구분은 OpenAI 쪽에 대해 아직 정해지지 않았다.** luna·terra·sol
-// 이라는 이름에서 강도 순서를 읽어낼 근거가 이 레포에 없고, 짐작해서 넣으면 그 짐작이
-// 계약처럼 굳는다. 그래서 증거가 있는 하나(`studio-gpt-practice` 가 선언한 기본값)로
-// 셋을 모두 모아둔다. 구분이 필요해지는 날 `OPENAI_MODELS` 를 보고 **명시적으로** 정한다.
+// The fast/default/strong **split has not been decided for the OpenAI side yet.**
+// Nothing in this repo justifies reading a strength order out of the names
+// luna·terra·sol, and a guess put in here hardens into a contract. So all three are
+// collected on the one there is evidence for (the default `studio-gpt-practice`
+// declares). The day the split is actually needed, look at `OPENAI_MODELS` and
+// decide **explicitly**.
 export const OPENAI_MODEL_MAP: Record<ModelAlias, string> = {
   "hypeproof-fast":    "gpt-5.6-luna",
   "hypeproof-default": "gpt-5.6-luna",
   "hypeproof-strong":  "gpt-5.6-luna",
 };
 
-// GLM (Z.ai) model ids. 지금은 세 alias 가 모두 glm-5.2 를 가리킨다 — 5.2 가 플래그십이고
-// 계열 내 하위 모델을 쓸 이유가 아직 없다. GLM-5.3 은 2026-08-14 출시됐으나 일반
-// pay-as-you-go API 가 아직 "coming soon" 이라 여기에 못 넣는다 (hypeprooflab#545).
-// 5.3 의 per-token API 가 열리면 이 한 줄만 바꾸면 된다 — base model 이 같은 계열이다.
+// GLM (Z.ai) model ids. For now all three aliases point at glm-5.2 — 5.2 is the
+// flagship and there is no reason yet to use a lower model in the family. GLM-5.3
+// shipped on 2026-08-14 but its general pay-as-you-go API is still "coming soon",
+// so it cannot go in here (hypeprooflab#545). When 5.3's per-token API opens, only
+// this one line changes — the base model is the same family.
 export const GLM_MODEL_MAP: Record<ModelAlias, string> = {
   "hypeproof-fast":    "glm-5.2",
   "hypeproof-default": "glm-5.2",

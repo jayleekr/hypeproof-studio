@@ -5,7 +5,9 @@ Strategic + phase plan: see [METAPLAN.md](./METAPLAN.md). Do not duplicate it he
 
 ## Product philosophy (READ BEFORE DESIGNING UX)
 
-Studio is a prepared environment where learners exercise and examine their agency, judgment and responsibility while working with AI. The **7 AI Native Assets** are the current research model, not established learning outcomes. Every UX decision in the chat panel, welcome flow, approval modals and onboarding must connect to observable learner behavior and a testable hypothesis.
+Studio is a prepared environment where learners exercise and examine their agency, judgment and responsibility while working with AI. The current research model is the **six-capability candidate model** (`candidate-capability-v1` — FRAMING, JUDGMENT, ORCHESTRATE, VERIFY, ADAPT, OWNERSHIP), adopted 2026-09-13 (#1020). The **7 AI Native Assets** are `legacy-seven-assets`: historical, still readable, never produced by a new assessment. Neither is an established learning outcome, and there is deliberately no conversion table between them — see `worker/src/lib/measurement-core/capability-models.ts`. Every UX decision in the chat panel, welcome flow, approval modals and onboarding must connect to observable learner behavior and a testable hypothesis.
+
+**Capability names are not learner-facing during work.** SX-01/06/07/59 keep scores, capability labels and evaluation sentences off the work screen; the observation results panel is drawn only where a cohort opted in via `observation.assess` (ADR 0010).
 
 Use this traceability order for product decisions:
 
@@ -44,6 +46,26 @@ Progress tracking: METAPLAN §10. Latest detail: git history.
 - `extensions/hypeproof-chat/` — own VS Code extension (React webview). Will be bundled as a built-in extension at Phase 5.
 - `proxy-poc/` — HypeProof Proxy (OpenAI-compatible). Extension talks to this.
 - `METAPLAN.md` — phased build plan. Always cross-reference by section (§N) rather than copying.
+
+## Language
+
+The global rule is "English only" for documents, code, comments and commit
+messages. This repo carves out one exception, and only one.
+
+| What | Language | Why |
+|---|---|---|
+| Code comments, commit messages, PR bodies, ADRs, CLAUDE.md, dev docs | **English** | The global rule. No exception. |
+| Student-facing UI copy and the fixtures/assertions quoting it | **Korean** | It is the product. Elementary-school learners read it. |
+| Requirement / design / testing / evaluation docs for the learning experience (`docs/requirements/studio-learning-experience.md`, `docs/testing/…`, `.claude/hypeproof/ux/**`) | **Korean** | They quote and reason about that Korean copy sentence by sentence. Translating them splits a requirement from the string it governs. |
+
+Two consequences worth stating, because a session got both wrong on 2026-09-20:
+
+- **Never translate a string literal** when converting comments. Korean inside
+  quotes, template literals, regexes, assertion messages and fixtures is
+  load-bearing: it is either the product's copy or the thing a test measures.
+- **Surrounding-code convention does not override this.** Many files here are
+  heavily Korean; that is not permission to write new Korean comments. If the
+  rule and the neighbourhood disagree, follow the rule and say so.
 
 ## Hard rules
 
@@ -87,7 +109,8 @@ existing philosophy, autonomy, and verification rules in their canonical files.
 - [.claude/rules/build-pipeline.md](.claude/rules/build-pipeline.md) — build failure modes, env vars, jq patterns
 - [.claude/rules/branding-swap.md](.claude/rules/branding-swap.md) — asset replacement checklist
 - [.claude/rules/extension-dev.md](.claude/rules/extension-dev.md) — hypeproof-chat React webview
-- [.claude/rules/verification.md](.claude/rules/verification.md) — 관측 규율. **판정 기준을 세우기 전에 대상을 열어본다** · 대조군 먼저 · CI 초록은 아무것도 보장하지 않는다
+- [.claude/rules/verification.md](.claude/rules/verification.md) — 관측 규율. **판정 기준을 세우기 전에 대상을 열어본다** · 대조군 먼저 · CI 초록은 아무것도 보장하지 않는다 · 물려받은 주장은 증거가 아니다 · 일괄 치환 전에 걸린 줄을 본다
+- [.claude/rules/gh-budget.md](.claude/rules/gh-budget.md) — GitHub API 예산. `gh` 부르는 에이전트는 하나만 · `rate_limit` 은 2차 리밋을 **못 본다** · `HTTP unknown` 이 토큰 문제라는 보장이 없다 · `hype-pr` 함정
 - [e2e/observe/README.md](e2e/observe/README.md) — 실사용 관측 도구. 큐시트는 강사가 채팅으로 몰고, 이건 그동안 무슨 일이 일어났는지 보는 용도
 - [docs/seven-assets.md](docs/seven-assets.md) — upstream philosophy reference and Studio asset compatibility index
 

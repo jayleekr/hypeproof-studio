@@ -18,7 +18,7 @@
 | **코치** (AI, 학생과 대화) | 학생에게 어떻게 굴어야 하는지 | 새 칸 `coach_brief` (아래 3절) — 코치 system prompt 에 이름 붙은 문장으로 |
 | **강사** | 전부 | 계획서 원문(`chalk_plan_files`), issuer 경로로만 |
 
-- 🔴 확정본 `content` 는 학생 앱(`/v1/profile`, `chat.ts:283`)과 코치 프롬프트(`JSON.stringify(coachVisibleLesson(content))`, `chat-gate.ts:300-320`)로 **둘 다** 간다. 그래서 학생에게 가면 안 되는 것은 `content` 에 아예 넣지 않거나, 넣더라도 두 투영에서 뺀다
+- 🔴 확정본 `content` 는 학생 앱(`/v1/profile`, `chat.ts:283`)과 코치 프롬프트(`JSON.stringify(coachVisibleLesson(content))`, `chat-gate.ts:311-324`)로 **둘 다** 간다. 그래서 학생에게 가면 안 되는 것은 `content` 에 아예 넣지 않거나, 넣더라도 두 투영에서 뺀다
 - `coach_brief` 는 코치에게는 가야 하지만 학생 앱에는 가면 안 된다 → `/v1/profile` 투영에서 뺀다(4절)
 
 ---
@@ -126,7 +126,7 @@ coach_brief?: {
 | 학생 앱 `/v1/profile` (`chat.ts:283`) | lesson 전체 | **`prohibited_moves` · `coach_brief` 를 뺀 투영.** 나머지는 그대로 |
 | 확정본 바이트 / sha256 | `content` 전체 | 그대로 전체(투영은 전달할 때만) |
 
-- 🔴 **두 투영 모두 "새 칸이 없는 옛 강의는 같은 참조를 그대로 돌려준다"** 를 지킨다. 기존 계약(`learning-prompt.ts:66-80`: 옛 강의 코치 프롬프트 바이트 불변)과 시험(`authoring.test.mjs`)이 깨지지 않아야 한다
+- 🔴 **두 투영 모두 "새 칸이 없는 옛 강의는 같은 참조를 그대로 돌려준다"** 를 지킨다. 기존 계약(`learning-prompt.ts:72-75`: `coachVisibleLesson` line 76, 옛 강의 코치 프롬프트 바이트 불변)과 시험(`authoring.test.mjs` 의 `T-08/T-09 deliver immutable lesson only to registered students in a matching session` 안 단언, 140행 `system_prompt.includes(JSON.stringify(frozen.content))` — 독립 시험이 아니라 해당 시험 안 단언)이 깨지지 않아야 한다. E5-2 는 이 단언을 통과해야 한다
 - ⚠️ 스택 관계: `chat-gate.ts`·`chat.ts` 는 열린 원격 수업 PR 스택이 바꾼 파일이다(plan §4-1 R1). 투영 변경(E5-2)은 스택 머지 뒤에 하거나, 스택이 건드리지 않은 함수(`coachVisibleLesson` 은 `learning-prompt.ts`)에서만 한다. `/v1/profile` 투영은 `chat.ts` 라 스택 머지 뒤 — **E5-2 착수 시점을 이 이유로 정한다**
 
 ---

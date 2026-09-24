@@ -1,8 +1,56 @@
-// hps-observation/1: App/Service data contract (legacy seven-Asset findings).
-// Moved verbatim from worker/src/lib/native-observation.ts (#1042). App and Service
-// both import this one file; behaviour is pinned to the pre-extraction verdicts in
-// worker/test/fixtures/measurement-core/legacy-verdicts.json (MC-T01).
+// hps-observation/1 and /2: App/Service data contract.
+//
+// /1 was moved verbatim from worker/src/lib/native-observation.ts (#1042). App and
+// Service both import this one file; /1 behaviour is pinned to the pre-extraction
+// verdicts in worker/test/fixtures/measurement-core/legacy-verdicts.json (MC-T01)
+// and must reproduce them byte for byte **for that corpus**.
+//
+// That claim is narrower than it first reads, and the difference matters.
+// /2 widened the human-evidence rule from `kind ∈ {user, correction}` to
+// `isHumanEvidence()`, which ALSO reads `actor`. /1 never constrained `actor`
+// outside `approval`, so a valid /1 event like `{kind:"user", actor:"policy"}`
+// is accepted by the old rule and refused by the new one. The golden corpus
+// carries no such event, so the fixtures stay byte-identical while the RULE has
+// moved. The direction is the one SX-45 wants (AI prose is not the student's),
+// but saying "byte for byte" without this paragraph is a scope claim wider than
+// its evidence.
+//
+// /2 (P1-A; SX-44–SX-48) is a SUPERSET handled in this same file, because a second
+// validator is exactly what SX-48 forbids. `validateObservation()` looks at
+// `format` and applies either the /1 rules or "/1 + the /2 rules". A /1 batch stays
+// valid, is not upgraded, and a /2 batch is never downgraded — the batch comes back
+// carrying the format it arrived with. Which one a cohort sends is decided by the
+// profile's `observation.format`, not here.
+//
+// The /2 table (kinds, enums, per-kind required fields, defaults) lives in
+// ./learning-events.ts so the gates and the session-design schema read the same
+// list. This file stays the one place that decides whether a batch is valid.
+import { CANDIDATE_CAPABILITY_V1, LEGACY_SEVEN_ASSETS } from "./capability-models.ts";
+import {
+  ARTIFACT_REF_KEYS,
+  EVIDENCE_TYPES,
+  LEARNING_EVENT_KEYS,
+  LEARNING_EVENT_KINDS,
+  LEARNING_EVENT_SPEC,
+  LEARNING_OUTCOMES,
+  OBSERVATION_ACTORS,
+  REF_KEYS,
+  SOURCE_KINDS,
+  SOURCE_STATES,
+  forbidPersonalMetrics,
+  isHumanEvidence,
+  isLearningEventKind,
+  type EvidenceType,
+  type LearningEventKind,
+  type ObservationActor,
+  type SourceKind,
+  type SourceState,
+} from "./learning-events.ts";
+
 export const OBSERVATION_FORMAT = "hps-observation/1";
+export const OBSERVATION_FORMAT_V2 = "hps-observation/2";
+export const OBSERVATION_FORMATS = [OBSERVATION_FORMAT, OBSERVATION_FORMAT_V2] as const;
+export type ObservationFormat = (typeof OBSERVATION_FORMATS)[number];
 export const OBSERVATION_ASSETS = [
   "TASTE",
   "INTENT",
@@ -13,15 +61,19 @@ export const OBSERVATION_ASSETS = [
   "OWNERSHIP",
 ] as const;
 export type ObservationAsset = (typeof OBSERVATION_ASSETS)[number];
-export type ObservationKind =
-  | "user"
-  | "coach"
-  | "tool_request"
-  | "approval"
-  | "tool_result"
-  | "artifact"
-  | "turn_end"
-  | "correction";
+/** /1 kinds. Preserved exactly; the eight learning kinds are a separate layer (SX-47). */
+export const LEGACY_OBSERVATION_KINDS = [
+  "user",
+  "coach",
+  "tool_request",
+  "approval",
+  "tool_result",
+  "artifact",
+  "turn_end",
+  "correction",
+] as const;
+export type LegacyObservationKind = (typeof LEGACY_OBSERVATION_KINDS)[number];
+export type ObservationKind = LegacyObservationKind | LearningEventKind;
 export interface ObservationEvent {
   id: string;
   seq: number;
@@ -30,13 +82,33 @@ export interface ObservationEvent {
   kind: ObservationKind;
   text: string;
   tool_id?: string;
-  outcome?: "allowed" | "denied" | "success" | "error" | "cancelled";
-  actor?: "user" | "policy";
+  outcome?: "allowed" | "denied" | "success" | "error" | "cancelled" | "match" | "mismatch" | "unknown";
+  /** /1 carries `user` | `policy`; /2 widens the enum without remapping either value (SX-44). */
+  actor?: ObservationActor;
   sha256?: string;
   assistance: "unknown" | "assisted" | "independent";
+  // ── /2 only (SX-44). Absent on every /1 event, which is why /1 is untouched. ──
+  context?: { week: number; step_id: string; task: string; module_version: string };
+  evidence_type?: EvidenceType;
+  source_kind?: SourceKind;
+  /** Fixed when stored (SX-46). A change is a new `correction` event, never an edit. */
+  source_state?: SourceState;
+  /** The student's own words. Only on an event the student authored. */
+  student_text?: string;
+  artifact_before?: string;
+  artifact_after?: string;
+  criterion_ref?: string;
+  turn_ref?: string;
+  result_ref?: string;
+  evidence_refs?: string[];
+  provenance?: { who: string; when: string; where: string };
+  /** A coach-proposed criterion the student accepted: the coach's event id (design rule 4). */
+  adopted_from?: string;
+  decision?: { from: string; to: string };
+  next_experiment?: string;
 }
 export interface ObservationBatch {
-  format: typeof OBSERVATION_FORMAT;
+  format: ObservationFormat;
   scope: string;
   session: string;
   program: string;
@@ -44,7 +116,14 @@ export interface ObservationBatch {
   incomplete?: boolean;
 }
 export interface ObservationFinding {
-  asset: ObservationAsset;
+  /**
+   * A capability key from the model this findings array was written against —
+   * one of the seven Assets, or one of the six candidate capabilities. Not a
+   * union of both: nothing maps one model onto the other (capability-models.ts),
+   * so a mixed array is invalid, and `validateFindings` is the thing that says
+   * which model applies.
+   */
+  asset: string;
   status: "observed" | "unobserved";
   interpretation: string;
   evidence: Array<{ event_id: string; quote: string }>;
@@ -58,14 +137,106 @@ const str = (v: unknown, n = 200): v is string =>
 function check(ok: unknown, code: string): asserts ok {
   if (!ok) throw new Error(code);
 }
+
+// ── /2 field checks ───────────────────────────────────────────────────────────
+// Only ever reached for a /2 batch. Every refusal is named: a student reading
+// "invalid event" learns nothing, and a host cannot tell a typo from a policy.
+
+const shapeOf = (v: unknown, keys: readonly string[], max = 200): boolean =>
+  object(v) && Object.keys(v).length === keys.length && keys.every((k) => str(v[k], max));
+
+/** Is this /2 field present and well-formed? Presence is the caller's question. */
+function fieldOk(e: Record<string, unknown>, field: string): boolean {
+  switch (field) {
+    case "context":
+      return (
+        object(e.context) &&
+        shapeOf({ step_id: e.context.step_id, task: e.context.task, module_version: e.context.module_version }, ["step_id", "task", "module_version"]) &&
+        Object.keys(e.context).length === 4 &&
+        Number.isSafeInteger(e.context.week) &&
+        Number(e.context.week) >= 1
+      );
+    case "provenance":
+      return shapeOf(e.provenance, ["who", "when", "where"]);
+    case "decision":
+      return shapeOf(e.decision, ["from", "to"], 500);
+    case "evidence_refs":
+      return Array.isArray(e.evidence_refs) && e.evidence_refs.length >= 1 && e.evidence_refs.length <= 8 && e.evidence_refs.every((r) => str(r));
+    case "outcome":
+      return (LEARNING_OUTCOMES as readonly string[]).includes(String(e.outcome));
+    case "student_text":
+    case "next_experiment":
+      return str(e[field], 2000);
+    case "source_state":
+      return (SOURCE_STATES as readonly string[]).includes(String(e.source_state));
+    case "artifact_before":
+    case "artifact_after":
+      return typeof e[field] === "string" && /^[a-f0-9]{64}$/.test(String(e[field]));
+    default:
+      return str(e[field]);
+  }
+}
+
+/**
+ * The /2 rules for one event. `/1` events inside a /2 batch pass through this with
+ * nothing to check — the new fields are all absent on them.
+ */
+function checkLearningFields(e: Record<string, unknown>): void {
+  const kind = String(e.kind);
+  const learning = isLearningEventKind(kind);
+
+  if (e.actor !== undefined) check((OBSERVATION_ACTORS as readonly string[]).includes(String(e.actor)), "invalid_actor");
+  if (learning) check((OBSERVATION_ACTORS as readonly string[]).includes(String(e.actor)), "invalid_actor");
+
+  // SX-45 — AI text is never recorded as the student's. The one exception is the
+  // quote in `external_feedback_received`, whose own required-field row names
+  // `student_text` while its default actor is `external_user`; the student typed
+  // that quote in. Every other actor, on every kind, is refused by name.
+  if (e.student_text !== undefined) {
+    check(fieldOk(e, "student_text"), "invalid_learning_event");
+    const quoting = kind === "external_feedback_received" && e.actor === "external_user";
+    check(e.actor === "user" || quoting, "ai_text_as_student");
+  }
+
+  if (e.evidence_type !== undefined) check((EVIDENCE_TYPES as readonly string[]).includes(String(e.evidence_type)), "invalid_evidence_type");
+  if (e.source_kind !== undefined) check((SOURCE_KINDS as readonly string[]).includes(String(e.source_kind)), "invalid_source_kind");
+  if (e.source_state !== undefined) check(fieldOk(e, "source_state"), "invalid_source_state");
+  if (e.context !== undefined) check(fieldOk(e, "context"), "invalid_context");
+  if (e.provenance !== undefined) check(fieldOk(e, "provenance"), "invalid_provenance");
+
+  // SX-46 — `real` is not a word a host gets to write on its own: it takes either
+  // provenance (who/when/where) or an executed result bound to the revision.
+  if (e.source_state === "real") check(e.provenance !== undefined || e.result_ref !== undefined, "missing_provenance");
+
+  if (!learning) return;
+  const spec = LEARNING_EVENT_SPEC[kind as LearningEventKind];
+  check(e.evidence_type !== undefined, "invalid_evidence_type");
+  if (spec.evidence_type) check(e.evidence_type === spec.evidence_type, "invalid_evidence_type");
+  for (const field of spec.required) {
+    if (field === "source_state") {
+      // No default for this kind: the student picks, and nothing is filled in for them.
+      check(e.source_state !== undefined, "missing_source_state");
+      continue;
+    }
+    if (field === "student_text" && e.actor !== "user" && kind !== "external_feedback_received") {
+      // A learning event someone else authored (SX-45 keeps an actor=ai decision
+      // recordable) has no student_text at all; its own words stay in `text`.
+      check(str(e.text, 20000), "invalid_learning_event");
+      continue;
+    }
+    check(e[field] !== undefined && fieldOk(e, field), "invalid_learning_event");
+  }
+}
+
 export function validateObservation(value: unknown): {
   batch: ObservationBatch;
   missing: number[];
 } {
   check(
-    object(value) && value.format === OBSERVATION_FORMAT,
+    object(value) && (OBSERVATION_FORMATS as readonly string[]).includes(String(value.format)),
     "unsupported_observation",
   );
+  const v2 = value.format === OBSERVATION_FORMAT_V2;
   check(
     str(value.scope) && str(value.session) && str(value.program),
     "invalid_scope",
@@ -80,24 +251,27 @@ export function validateObservation(value: unknown): {
   );
   const ids = new Map<string, ObservationEvent>(),
     seqs = new Map<number, string>();
+  const allowedKeys = [
+    "id",
+    "seq",
+    "task",
+    "at",
+    "kind",
+    "text",
+    "tool_id",
+    "outcome",
+    "actor",
+    "sha256",
+    "assistance",
+    ...(v2 ? LEARNING_EVENT_KEYS : []),
+  ];
   for (const e of value.events) {
+    // A personal score has no place in an observed event either; named before the
+    // key allowlist so the refusal says what it is instead of "unknown field".
+    if (v2) forbidPersonalMetrics(e);
     check(
       object(e) &&
-        Object.keys(e).every((k) =>
-          [
-            "id",
-            "seq",
-            "task",
-            "at",
-            "kind",
-            "text",
-            "tool_id",
-            "outcome",
-            "actor",
-            "sha256",
-            "assistance",
-          ].includes(k),
-        ) &&
+        Object.keys(e).every((k) => allowedKeys.includes(k)) &&
         str(e.id) &&
         str(e.task) &&
         Number.isSafeInteger(e.seq) &&
@@ -107,16 +281,8 @@ export function validateObservation(value: unknown): {
       "invalid_event",
     );
     check(
-      [
-        "user",
-        "coach",
-        "tool_request",
-        "approval",
-        "tool_result",
-        "artifact",
-        "turn_end",
-        "correction",
-      ].includes(String(e.kind)),
+      (LEGACY_OBSERVATION_KINDS as readonly string[]).includes(String(e.kind)) ||
+        (v2 && (LEARNING_EVENT_KINDS as readonly string[]).includes(String(e.kind))),
       "invalid_kind",
     );
     check(
@@ -125,6 +291,7 @@ export function validateObservation(value: unknown): {
         ["unknown", "assisted", "independent"].includes(String(e.assistance)),
       "invalid_event_text",
     );
+    if (v2) checkLearningFields(e);
     if (["tool_request", "approval", "tool_result"].includes(String(e.kind)))
       check(str(e.tool_id), "missing_tool_id");
     if (e.kind === "approval")
@@ -165,9 +332,26 @@ export function validateObservation(value: unknown): {
     if (e.kind === "tool_result" || e.kind === "approval")
       check(requests.has(e.task + ":" + e.tool_id), "orphan_tool_event");
   }
+  if (v2) {
+    // A reference names something that is in this batch, or it names nothing.
+    // Order is not required: a criterion may be written after the test that cites
+    // it, and the gates are what care about order.
+    const artifacts = new Set(events.filter((e) => e.kind === "artifact").map((e) => e.sha256));
+    for (const e of events) {
+      for (const key of REF_KEYS) {
+        const ref = e[key];
+        if (ref !== undefined) check(ids.has(String(ref)), "orphan_ref");
+      }
+      for (const ref of e.evidence_refs ?? []) check(ids.has(ref), "orphan_ref");
+      for (const key of ARTIFACT_REF_KEYS) {
+        const ref = e[key];
+        if (ref !== undefined) check(artifacts.has(String(ref)), "unknown_artifact");
+      }
+    }
+  }
   return {
     batch: {
-      format: OBSERVATION_FORMAT,
+      format: value.format as ObservationFormat,
       scope: value.scope,
       session: value.session,
       program: value.program,
@@ -177,31 +361,118 @@ export function validateObservation(value: unknown): {
     missing,
   };
 }
-export function observableAssets(batch: ObservationBatch): ObservationAsset[] {
+/**
+ * Which capability model a findings array is written against.
+ *
+ * Jay's 2026-09-13 decision (#1020, recorded in `capability-models.ts`): new
+ * interpretations default to the six-capability candidate model, and the seven
+ * Assets stay readable under their own id. Nothing maps one onto the other, so
+ * a findings array belongs to exactly one model and is validated against it.
+ *
+ * The default is the LEGACY model on purpose. Every stored findings record
+ * written before this change carries seven Asset keys, and the App re-validates
+ * saved records from `workspaceState` on load — defaulting to the new model
+ * would turn all of that history into "이전 관찰 근거를 확인하지 못했습니다."
+ * The producer of new findings passes its model explicitly.
+ */
+export type CapabilityModelId = "legacy-seven-assets" | "candidate-capability-v1";
+
+const MODEL_KEYS: Record<CapabilityModelId, readonly string[]> = {
+  "legacy-seven-assets": LEGACY_SEVEN_ASSETS.capabilities.map((c) => c.key),
+  "candidate-capability-v1": CANDIDATE_CAPABILITY_V1.capabilities.map((c) => c.key),
+};
+
+/** The keys a findings array for this model must carry — exactly once each. */
+export const capabilityKeys = (model: CapabilityModelId): readonly string[] => MODEL_KEYS[model];
+
+/**
+ * Read a stored record's model id. Anything unrecognized — including absent — is
+ * the legacy seven Assets, because a record with no model id was written before
+ * the field existed, and that is what it was written in.
+ */
+export const asCapabilityModel = (value: unknown): CapabilityModelId =>
+  value === "candidate-capability-v1" ? value : "legacy-seven-assets";
+
+/**
+ * Which capability model one seat's ASSESSMENT is written in — the same
+ * client-generation negotiation `servedObservationFormat` does for the batch
+ * format, for the same reason.
+ *
+ * Every Studio already installed bundles a validator that hardcodes seven keys
+ * (`v0.1.56 nativeObservationContract.ts:194`: `value.length === 7`) and calls
+ * `validateFindings` with no model argument. Serving it six would make the app
+ * throw `invalid_findings` **after** the provider call was paid for, show
+ * "관찰 결과를 확인하지 못했습니다", and never store the result — so it never
+ * recovers. Worker and app ship independently, so that skew is the normal state,
+ * not an edge case.
+ *
+ * An app that can parse the candidate model says so with
+ * `x-hps-capability-model`. Absent means an older build: it gets the seven
+ * Assets, exactly as it does today. The declaration is a ceiling, not an order.
+ */
+export const CAPABILITY_MODEL_HEADER = "x-hps-capability-model";
+
+export const servedCapabilityModel = (client: string | undefined): CapabilityModelId =>
+  client === "candidate-capability-v1" ? "candidate-capability-v1" : "legacy-seven-assets";
+
+/**
+ * Capabilities that cannot be `observed` without a particular kind of evidence
+ * in the batch, whatever the model calls them.
+ *
+ * Where each rule comes from, stated exactly:
+ *
+ *   VERIFY   candidate model's own `insufficient`:
+ *            "AI가 '테스트 통과'라고 말함; 테스트 요청만 존재"      -> executed result
+ *   ADAPT    candidate model's own `insufficient`:
+ *            "같은 요청 반복, 결과 변화 없이 재시도 횟수 증가"       -> >= 2 artifact versions
+ *   ITERATE  NOT from the model. Every `legacy-seven-assets` capability carries
+ *            `observe: "historical"` / `insufficient: "historical"` — the legacy
+ *            model states no criteria at all. This entry is the PRE-EXISTING /1
+ *            rule, moved here unchanged from the old hardcoded
+ *            `asset !== "ITERATE" || versions.size >= 2`. Its wording lives in the
+ *            seven-Asset rubric prompt, not in `capability-models.ts`.
+ *
+ * So the candidate half is read off the definitions and the legacy half is
+ * preserved behaviour. An earlier version of this comment said both halves came
+ * from the model and quoted an `insufficient` line for ITERATE that does not
+ * exist. VERIFY is in both models and keeps one rule; no other key has a floor.
+ */
+const EVIDENCE_FLOOR: Record<string, "executed" | "revised"> = {
+  VERIFY: "executed",
+  ITERATE: "revised",
+  ADAPT: "revised",
+};
+
+export function observableAssets(
+  batch: ObservationBatch,
+  model: CapabilityModelId = "legacy-seven-assets",
+): string[] {
   const executed = batch.events.some(
     (e) => e.kind === "tool_result" && e.outcome === "success",
   );
   const versions = new Set(
     batch.events.filter((e) => e.kind === "artifact").map((e) => e.sha256),
   );
-  return OBSERVATION_ASSETS.filter(
-    (asset) =>
-      (asset !== "VERIFY" || executed) &&
-      (asset !== "ITERATE" || versions.size >= 2),
-  );
+  const met = { executed, revised: versions.size >= 2 };
+  return capabilityKeys(model).filter((key) => {
+    const floor = EVIDENCE_FLOOR[key];
+    return floor === undefined || met[floor];
+  });
 }
 export function validateFindings(
   value: unknown,
   batch: ObservationBatch,
+  model: CapabilityModelId = "legacy-seven-assets",
 ): ObservationFinding[] {
-  check(Array.isArray(value) && value.length === 7, "invalid_findings");
+  const keys = capabilityKeys(model);
+  // Length AND membership. Length alone would accept six of the seven Assets
+  // plus one candidate key, which is the mixed array the models forbid.
+  check(Array.isArray(value) && value.length === keys.length, "invalid_findings");
   const events = new Map(batch.events.map((e) => [e.id, e]));
   const seen = new Set<string>();
   for (const f of value) {
     check(
-      object(f) &&
-        OBSERVATION_ASSETS.includes(f.asset as ObservationAsset) &&
-        !seen.has(String(f.asset)),
+      object(f) && keys.includes(String(f.asset)) && !seen.has(String(f.asset)),
       "invalid_asset",
     );
     seen.add(String(f.asset));
@@ -225,14 +496,15 @@ export function validateFindings(
       );
       const e = events.get(ref.event_id);
       check(e && e.text.includes(ref.quote), "fabricated_quote");
-      if (e.kind === "user" || e.kind === "correction") human = true;
+      // Same predicate as interpretation.ts, one definition (learning-events.ts).
+      // For a /1 event it answers exactly what `kind ∈ {user, correction}` did.
+      if (isHumanEvidence(e)) human = true;
       if (f.assistance === "independent")
         check(e.assistance === "independent", "unsupported_independence");
     }
     check(f.status !== "observed" || human, "missing_human_evidence");
     check(
-      f.status !== "observed" ||
-        observableAssets(batch).includes(f.asset as ObservationAsset),
+      f.status !== "observed" || observableAssets(batch, model).includes(String(f.asset)),
       "missing_execution_evidence",
     );
     check(
@@ -243,4 +515,110 @@ export function validateFindings(
     check(!("score" in f) && !("level" in f), "unsupported_score");
   }
   return value as ObservationFinding[];
+}
+
+/**
+ * Which observation contract one seat is actually served (SX-44~48, P1 F-1).
+ *
+ * Two inputs, both of which can say "only /1":
+ *   - `declared` — what the cohort's profile asks for. Absent means /1, so every
+ *     cohort that existed before the field keeps its exact behaviour.
+ *   - `client` — the `x-hps-observation-format` header, i.e. what the app build
+ *     in front of us can parse. An older Studio bundles a validator that has
+ *     never heard of /2 and rejects such a batch outright, so serving it /2
+ *     would break observation for that seat completely.
+ *
+ * The cohort's declaration is therefore a **ceiling, not an order**: /2 is
+ * served only when both sides can carry it.
+ *
+ * `/v1/profile` and `/observations/context` both call this, which is the whole
+ * point — if they computed it separately the client could build a /2 recorder
+ * and then be handed a /1 context, and every learning event would be dropped
+ * with `observation_format` while the screen looked fine.
+ */
+export function servedObservationFormat(
+  declared: string | undefined,
+  client: string | undefined,
+): ObservationFormat {
+  const wants = declared === OBSERVATION_FORMAT_V2;
+  const canParse = client === OBSERVATION_FORMAT_V2;
+  return wants && canParse ? OBSERVATION_FORMAT_V2 : OBSERVATION_FORMAT;
+}
+
+/**
+ * Is this a contract the app knows how to record against?
+ *
+ * The screen's question is "is observation on for this seat", not "which
+ * version is it". Two places used to ask `=== "hps-observation/1"`, so the
+ * moment a cohort was served /2 the observation panel vanished and a
+ * "this connection does not support observation" notice appeared next to a
+ * perfectly working Evidence drawer.
+ */
+export const isObservationFormat = (value: unknown): value is ObservationFormat =>
+  (OBSERVATION_FORMATS as readonly string[]).includes(String(value));
+
+/**
+ * May the observation RESULTS panel be drawn on the work screen for this seat?
+ *
+ * Not the same question as "is observation on". On the work screen the panel
+ * draws its entry point — "내 작업 돌아보기" and a filled "이 작업의 기록 확인" button —
+ * and one press further, per-capability verdicts (독립 수행 근거 / 도움을 받은 수행 /
+ * 도움 사용 범위 미확인). An assessment of the learner, offered mid-task.
+ *
+ * The row that forbids this is **SX-59**, and it is the only one that reaches it:
+ *
+ *   SX-59  "작업 중 어떤 화면에도 역량 점수·등급·'개선 필요' 배지가 없다"   <- applies
+ *   SX-01  scoped to the inside of the mission header                    <- does not
+ *   SX-06  scoped to the coach rail (`hps-messages`/`hps-input-area`)    <- does not
+ *   SX-07  scoped to coach-initiated interventions, not always-on UI     <- does not
+ *
+ * SX-03 (변화 기록 진입은 작은 링크이며 `studio-primary` 급 스타일을 쓰지 않는다) is
+ * arguable and not relied on here. An earlier version of this comment claimed all
+ * four rows said the same thing; counting them is the point of
+ * `.claude/rules/verification.md` §1b, and I had not counted.
+ *
+ * SX-59 also names the remedy — "제거하거나 **학습 경험 프로필에서 비활성**한다" — because
+ * the trial cohort's own requirement (TUX-OBS-07) is to read observation results.
+ * So the panel follows `assess`, the cohort's opt-in to assessment, and recording
+ * keeps its own switch. A cohort that records but does not assess gets the drawer
+ * and the completion gate with no verdict shown back at the learner.
+ *
+ * Takes the SERVED block, not the profile: the client is the caller that matters,
+ * and a worker too old to send `assess` must read as "no", never as permission.
+ */
+export const showsObservationResults = (
+  served: { format?: unknown; assess?: unknown } | null | undefined,
+): boolean => isObservationFormat(served?.format) && served?.assess === true;
+
+/** What a profile's observation block actually permits. */
+export interface ObservationCapability {
+  /** Write learning events on the student's device. */
+  readonly record: boolean;
+  /** May call `POST /v1/observations/assess` — the batch leaves the device. */
+  readonly assess: boolean;
+}
+
+/**
+ * The ONE place `observation.record` / `observation.assess` are decided
+ * (ADR 0010).
+ *
+ * There is a reason this is a function and not two `??` expressions at each
+ * call site. The P1 repair put the same negotiation in two callers, wrote
+ * "same function, so the two answers cannot drift" in a comment, and the two
+ * answers drifted — a third literal elsewhere gave every observation seat a
+ * "please update Studio" banner. A flag read in eight places gets eight
+ * chances to disagree.
+ *
+ * Step 1 changes nothing that ships: `record` and `assess` both fall back to
+ * the legacy `enabled`, and no profile sets either field yet. The
+ * profile-serving snapshot is what proves that, not this comment.
+ */
+export function observationCapability(
+  observation: { enabled?: boolean; record?: boolean; assess?: boolean } | undefined,
+): ObservationCapability {
+  const legacy = observation?.enabled === true;
+  return {
+    record: observation?.record ?? legacy,
+    assess: observation?.assess ?? legacy,
+  };
 }
