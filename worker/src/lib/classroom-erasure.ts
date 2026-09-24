@@ -114,13 +114,20 @@ export async function runClassroomErasureRecovery(env: Env, now: number, limit =
   const db = env.HPS_DB, tick: RecoveryTick = { open: 0, finished: 0, failed: 0, waiting: 0, stalled: 0, settled: 0, late_objects: 0 };
   let rows: Array<{ class_run_id: string; student_id: string; cohort_id: string; reason: 'withdrawn' | 'retention'; state: string; attempts: number; last_error: string; updated_at: number }>;
   try {
-    rows = ((await db.prepare("SELECT l.class_run_id,l.student_id,o.cohort_id,l.reason,l.state,l.attempts,l.last_error,l.updated_at FROM classroom_erasure_log l JOIN class_run_ops o ON o.class_run_id=l.class_run_id WHERE l.state IN ('started','done') ORDER BY l.updated_at,l.class_run_id,l.student_id LIMIT ?").bind(limit).all()).results ?? []) as typeof rows;
+    // Count/mark stalled work independently; it must never consume the runnable quota.
+    const delay = `CASE WHEN l.state='done' THEN ${SETTLE_AFTER_MS} WHEN l.attempts<=1 THEN ${ERASURE_RETRY_STEPS_MS[0]} WHEN l.attempts=2 THEN ${ERASURE_RETRY_STEPS_MS[1]} WHEN l.attempts=3 THEN ${ERASURE_RETRY_STEPS_MS[2]} ELSE ${ERASURE_RETRY_STEPS_MS[3]} END`;
+    const counts = await db.prepare(`SELECT COUNT(*) AS open, COALESCE(SUM(state='started' AND attempts>=?),0) AS stalled, COALESCE(SUM((state='done' OR attempts<?) AND updated_at+${delay}>?),0) AS waiting FROM classroom_erasure_log l WHERE state IN ('started','done')`).bind(MAX_ERASURE_ATTEMPTS, MAX_ERASURE_ATTEMPTS, now).first<{ open: number; stalled: number; waiting: number }>();
+    Object.assign(tick, counts);
+    const stalled = ((await db.prepare("SELECT class_run_id,student_id,attempts FROM classroom_erasure_log WHERE state='started' AND attempts>=? AND last_error!='retry_limit' ORDER BY updated_at LIMIT ?").bind(MAX_ERASURE_ATTEMPTS, limit).all()).results ?? []) as Array<{class_run_id: string; student_id: string; attempts: number}>;
+    for (const r of stalled) await db.batch([
+      db.prepare("INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) SELECT class_run_id,'','system','erasure-recovery','collection_erasure_stalled',?,? FROM classroom_erasure_log WHERE class_run_id=? AND student_id=? AND state='started' AND last_error!='retry_limit'").bind(JSON.stringify({ student_id: r.student_id, attempts: r.attempts }), now, r.class_run_id, r.student_id),
+      db.prepare("UPDATE classroom_erasure_log SET last_error='retry_limit' WHERE class_run_id=? AND student_id=? AND state='started'").bind(r.class_run_id, r.student_id),
+    ]);
+    rows = ((await db.prepare(`SELECT l.class_run_id,l.student_id,o.cohort_id,l.reason,l.state,l.attempts,l.last_error,l.updated_at FROM classroom_erasure_log l JOIN class_run_ops o ON o.class_run_id=l.class_run_id WHERE (l.state='done' OR (l.state='started' AND l.attempts<?)) AND l.updated_at+${delay}<=? ORDER BY l.updated_at,l.class_run_id,l.student_id LIMIT ?`).bind(MAX_ERASURE_ATTEMPTS, now, limit).all()).results ?? []) as typeof rows;
   } catch (err) { if (/no such table/i.test(String((err as Error)?.message))) return { ...tick, not_migrated: true }; throw err; }
-  tick.open = rows.length;
   for (const r of rows) {
     const who = { class_run_id: r.class_run_id, cohort_id: r.cohort_id, student_id: r.student_id };
     if (r.state === 'done') {
-      if (now < r.updated_at + SETTLE_AFTER_MS) { tick.waiting++; continue; }
       try {
         const late = (await deletePrefix(env.HPS_TRACES, `classroom-snapshots/${who.cohort_id}/${who.class_run_id}/${who.student_id}/`)) + (await deletePrefix(env.HPS_TRACES, `classroom-reports/${who.cohort_id}/${who.class_run_id}/${who.student_id}/`));
         const stmts = [db.prepare("UPDATE classroom_erasure_log SET state='settled',last_error='',updated_at=? WHERE class_run_id=? AND student_id=? AND state='done'").bind(now, r.class_run_id, r.student_id)];
@@ -129,15 +136,6 @@ export async function runClassroomErasureRecovery(env: Env, now: number, limit =
       } catch { tick.failed++; } // stays `done`; the next tick looks again
       continue;
     }
-    if (r.attempts >= MAX_ERASURE_ATTEMPTS) {
-      tick.stalled++;
-      if (r.last_error !== 'retry_limit') await db.batch([
-        db.prepare("UPDATE classroom_erasure_log SET last_error='retry_limit' WHERE class_run_id=? AND student_id=? AND state='started'").bind(r.class_run_id, r.student_id),
-        db.prepare("INSERT INTO ops_audit(class_run_id,seat_id,actor_kind,actor_id,action,detail_json,at) VALUES(?,'','system','erasure-recovery','collection_erasure_stalled',?,?)").bind(r.class_run_id, JSON.stringify({ student_id: r.student_id, attempts: r.attempts }), now),
-      ]);
-      continue;
-    }
-    if (now < r.updated_at + ERASURE_RETRY_STEPS_MS[Math.min(Math.max(r.attempts, 1), ERASURE_RETRY_STEPS_MS.length) - 1]!) { tick.waiting++; continue; }
     // The reason that was recorded is kept: a withdrawal is finished as a withdrawal, whatever retention is set to today.
     try { await eraseLearnerCollection(env, who, r.reason === 'retention' ? 'retention' : 'withdrawn', { kind: 'system', id: 'erasure-recovery' }, now); tick.finished++; }
     catch (err) { tick.failed++; console.error('classroom erasure recovery: still not finished', r.class_run_id, (err as Error)?.name ?? 'error'); }
