@@ -77,7 +77,7 @@ export function freezeSnapshot(files: Array<{ name: string; data: Uint8Array }>,
 export const SNAPSHOT_FILE_NAMES = ["session.meta.json", "events.jsonl"] as const;
 export interface SnapshotFile { name: string; bytes: number; sha256: string; uploaded: boolean }
 /** `scope` and `binding` are what the copy was frozen FOR. A state without them predates the binding contract and is never resumed. */
-export interface SnapshotState { batch_id: string; revision: number; files: SnapshotFile[]; scope?: { grant_id: string; class_run_id: string; seat_id: string; student: { u: string; c: string; p: string } }; binding?: SnapshotBinding; receipt_id?: string; coverage?: string; result?: string }
+export interface SnapshotState { batch_id: string; revision: number; files: SnapshotFile[]; scope?: { grant_id: string; class_run_id: string; seat_id: string; student: { u: string; c: string; p: string } }; binding?: SnapshotBinding; receipt_id?: string; coverage?: string; coverage_reason?: string; result?: string }
 export interface SnapshotDeps {
   /** Take (or re-open) the immutable copy for this batch+revision, with the binding it was frozen under. */
   copy(batchId: string, revision: number): Promise<{ files: Array<{ name: string; data: Uint8Array }>; binding: SnapshotBinding } | { code: string } | null>;
@@ -87,7 +87,7 @@ export interface SnapshotDeps {
   saveState(s: SnapshotState): Promise<void>;
   /** status 0 = never reached the Service. */
   put(batchId: string, revision: number, name: string, data: Uint8Array): Promise<{ status: number; reason?: string }>;
-  seal(batchId: string, revision: number, manifest: unknown): Promise<{ status: number; reason?: string; receipt_id?: string; coverage?: string }>;
+  seal(batchId: string, revision: number, manifest: unknown): Promise<{ status: number; reason?: string; receipt_id?: string; coverage?: string; coverage_reason?: string }>;
 }
 export interface SnapshotResult { ok: boolean; code: string }
 const sha = (d: Uint8Array) => createHash("sha256").update(d).digest("hex");
@@ -135,7 +135,7 @@ export async function uploadSnapshot(batchId: string, deps: SnapshotDeps): Promi
     if (moved) { state = await nextRevision(batchId, revision, deps, scope); if (!state) return { ok: false, code: "nothing_recorded" }; continue; }
     const sealed = await deps.seal(batchId, revision, { schema: SNAPSHOT_SCHEMA, files: state.files.map((f) => ({ name: f.name, bytes: f.bytes, sha256: f.sha256 })), binding: state.binding });
     if (sealed.status === 0 || sealed.status >= 500) return { ok: false, code: "offline_pending" };
-    if ((sealed.status === 200 || sealed.status === 201) && sealed.receipt_id) { state.receipt_id = sealed.receipt_id; state.coverage = sealed.coverage; state.result = "receipt_verified"; await deps.saveState(state); return { ok: true, code: "receipt_verified" }; }
+    if ((sealed.status === 200 || sealed.status === 201) && sealed.receipt_id) { state.receipt_id = sealed.receipt_id; state.coverage = sealed.coverage; if (sealed.coverage_reason) state.coverage_reason = sealed.coverage_reason; state.result = "receipt_verified"; await deps.saveState(state); return { ok: true, code: "receipt_verified" }; }
     return await refused(state, sealed.reason, "verify_failed", deps);
   }
   return { ok: false, code: "revision_limit" };

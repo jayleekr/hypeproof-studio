@@ -744,7 +744,7 @@ async function commandView(db: Db, run: Pick<RunRow, 'class_run_id' | 'cohort_id
   const shaped = targets.map((t) => {
     let receipt: { observed_at?: number; received_at?: number } = {}; try { receipt = JSON.parse(t.receipt_json); } catch { receipt = {}; }
     const outcome = recoveryOutcome({ action, current_cause: causes.get(t.seat_id), state: t.state, result_code: t.result_code, receipt, followups: followups === 'unknown' ? [] : followups.get(`${id}|${t.seat_id}`) ?? [], reports_followup: caps.has(t.grant_id) ? caps.get(t.grant_id)! : null, latest_issue: issues.get(t.seat_id) ?? null });
-    return { seat_id: t.seat_id, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt, outcome };
+    return { seat_id: t.seat_id, seat_revision: t.seat_revision, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt, outcome };
   });
   return { command: cmd, now, summary: { ...summarize(targets), outcomes: summarizeOutcomes(shaped.map((t) => t.outcome)), ...(followups === 'unknown' ? { followups: 'unknown' } : {}) }, targets: shaped };
 }

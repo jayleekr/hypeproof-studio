@@ -131,7 +131,7 @@ export class ClassroomOpsHost implements ClassroomOpsObserver {
   private snapshotDeps(consent: { purpose: string; notice_version: string } | null = null): SnapshotDeps {
     const dir = path.join(this.context.globalStorageUri.fsPath, "classroom-snapshots"), safe = (s: string) => s.replace(/[^A-Za-z0-9-]/g, "");
     const stateFile = (b: string) => path.join(dir, `${safe(b)}.state.json`), copyDir = (b: string, r: number) => path.join(dir, safe(b), `r${r}`);
-    const call = async (url: string, init: RequestInit) => { try { const res = await fetch(`${this.base()}/classroom/ops/collect/${url}`, { ...init, signal: AbortSignal.timeout(30000), headers: { authorization: `Bearer ${this.credential}`, ...(init.headers ?? {}) } }); const j = (await res.json().catch(() => ({}))) as Record<string, string>; return { status: res.status, reason: j.reason, receipt_id: j.receipt_id, coverage: j.coverage }; } catch { return { status: 0 }; } };
+    const call = async (url: string, init: RequestInit) => { try { const res = await fetch(`${this.base()}/classroom/ops/collect/${url}`, { ...init, signal: AbortSignal.timeout(30000), headers: { authorization: `Bearer ${this.credential}`, ...(init.headers ?? {}) } }); const j = (await res.json().catch(() => ({}))) as Record<string, string>; return { status: res.status, reason: j.reason, receipt_id: j.receipt_id, coverage: j.coverage, coverage_reason: j.coverage_reason }; } catch { return { status: 0 }; } };
     return {
       scope: () => this.scope(),
       // The immutable copy: written once per (batch, revision) and only ever read back afterwards — with the binding it was frozen under.
