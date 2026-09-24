@@ -304,7 +304,7 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
     const lc = seat.last_command, x = seat as Record<string, unknown>;
     if (lc) {
       const { target_grant, created_at, receipt_at, ...shown } = lc; void target_grant; void created_at;
-      x.last_command = { ...shown, outcome: recoveryOutcome({ action: lc.action, state: lc.state, result_code: lc.result_code, receipt: { observed_at: receipt_at, received_at: lc.updated_at }, followups: followups === 'unknown' ? [] : followups.get(`${lc.command_id}|${seat.seat_id}`) ?? [], reports_followup: seat.reports_followup, latest_issue: seat.token ? { id: seat.token.issue_id, count: seat.issue_count } : null }), ...(followups === 'unknown' ? { followups: 'unknown' } : {}) };
+      x.last_command = { ...shown, outcome: recoveryOutcome({ action: lc.action, current_cause: seat.reason, state: lc.state, result_code: lc.result_code, receipt: { observed_at: receipt_at, received_at: lc.updated_at }, followups: followups === 'unknown' ? [] : followups.get(`${lc.command_id}|${seat.seat_id}`) ?? [], reports_followup: seat.reports_followup, latest_issue: seat.token ? { id: seat.token.issue_id, count: seat.issue_count } : null }), ...(followups === 'unknown' ? { followups: 'unknown' } : {}) };
     }
     x.recommended = recommendAction({ connected: seat.connection?.state === 'active', attention: seat.attention, reason: seat.reason, entry_stage: seat.entry_stage, runtime_status: (seat.runtime as { status?: unknown } | null)?.status ?? (seat.sample as { runtime_status?: unknown } | null)?.runtime_status, token_app_verified: seat.token?.app_verified ?? null, upload_status: (seat.upload as { status?: unknown } | null)?.status, in_shared_incident: inIncident.has(seat.seat_id) });
     delete x.issue_count; delete x.reports_followup;
@@ -713,7 +713,7 @@ async function commandView(db: Db, run: Pick<RunRow, 'class_run_id' | 'cohort_id
   const runId = run.class_run_id;
   const cmd = await db.prepare('SELECT id,action,reason_code,issued_by,created_at,expires_at,cancelled_at FROM ops_commands WHERE id=? AND class_run_id=?').bind(id, runId).first<Record<string, unknown>>();
   if (!cmd) return null;
-  const targets = ((await db.prepare('SELECT seat_id,grant_id,state,result_code,lease_generation,connection_epoch,receipt_json,updated_at FROM ops_command_targets WHERE command_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; state: string; result_code: string; lease_generation: number; connection_epoch: number; receipt_json: string; updated_at: number }>;
+  const targets = ((await db.prepare('SELECT seat_id,seat_revision,grant_id,state,result_code,lease_generation,connection_epoch,receipt_json,updated_at FROM ops_command_targets WHERE command_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<{ seat_id: string; seat_revision: number; grant_id: string; state: string; result_code: string; lease_generation: number; connection_epoch: number; receipt_json: string; updated_at: number }>;
   // U4 — `succeeded` is the device saying it ran. What that achieved is a separate answer, per target, from linked evidence only.
   const action = String(cmd.action), recovery = COMMAND_ACTIONS[action]?.kind === 'recovery' || !!SERVICE_ISSUED_ACTIONS[action];
   const ran = recovery ? targets.filter((t) => (FOLLOWUP_LINKABLE_STATES as readonly string[]).includes(t.state)) : [];
@@ -725,9 +725,25 @@ async function commandView(db: Db, run: Pick<RunRow, 'class_run_id' | 'cohort_id
       if (action === 'refresh_connection') for (const r of ((await db.prepare(`SELECT s.seat_id,(SELECT t.jti FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS jti,(SELECT count(*) FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=?) AS n FROM class_run_seats s WHERE s.class_run_id=? AND s.replaced_at IS NULL AND s.seat_id IN (SELECT value FROM json_each(?))`).bind(run.cohort_id, run.profile_id, now, run.cohort_id, run.profile_id, runId, JSON.stringify(ran.map((t) => t.seat_id))).all()).results ?? []) as Array<{ seat_id: string; jti: string | null; n: number }>) if (r.jti) issues.set(r.seat_id, { id: r.jti, count: r.n });
     } catch (err) { console.error('ops outcome inputs unavailable:', err); }
   }
+  const causes = new Map<string, string>();
+  if (action === 'retry_diagnostics') {
+    try {
+      const latest = (await db.prepare('SELECT seat_id,seat_revision,grant_id,state_json FROM ops_latest_state WHERE class_run_id=?').bind(runId).all()).results ?? [];
+      for (const row of latest) {
+        if (!targets.some(t => t.seat_id === row.seat_id && t.seat_revision === row.seat_revision && t.grant_id === row.grant_id)) continue;
+        const state = JSON.parse(String(row.state_json)) as SeatState;
+        const error = state.error?.value;
+        const activation = state.activation?.value;
+        const cause = error && error.cleared !== true ? String(error.class)
+          : activation?.stage === 'runtime_failed' ? String(activation.reason ?? 'sdk_not_ready')
+          : activation?.stage === 'token_rejected' ? String(activation.reason ?? 'auth_rejected') : '';
+        causes.set(String(row.seat_id), cause);
+      }
+    } catch (err) { console.error('ops diagnostic cause unavailable:', err); }
+  }
   const shaped = targets.map((t) => {
     let receipt: { observed_at?: number; received_at?: number } = {}; try { receipt = JSON.parse(t.receipt_json); } catch { receipt = {}; }
-    const outcome = recoveryOutcome({ action, state: t.state, result_code: t.result_code, receipt, followups: followups === 'unknown' ? [] : followups.get(`${id}|${t.seat_id}`) ?? [], reports_followup: caps.has(t.grant_id) ? caps.get(t.grant_id)! : null, latest_issue: issues.get(t.seat_id) ?? null });
+    const outcome = recoveryOutcome({ action, current_cause: causes.get(t.seat_id), state: t.state, result_code: t.result_code, receipt, followups: followups === 'unknown' ? [] : followups.get(`${id}|${t.seat_id}`) ?? [], reports_followup: caps.has(t.grant_id) ? caps.get(t.grant_id)! : null, latest_issue: issues.get(t.seat_id) ?? null });
     return { seat_id: t.seat_id, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt, outcome };
   });
   return { command: cmd, now, summary: { ...summarize(targets), outcomes: summarizeOutcomes(shaped.map((t) => t.outcome)), ...(followups === 'unknown' ? { followups: 'unknown' } : {}) }, targets: shaped };
