@@ -12,14 +12,16 @@ function sqliteBinding(db) {
     const params = () => { const n = [...sql.matchAll(/\?(\d+)/g)]; return n.length ? n.map((m) => args[Number(m[1]) - 1]) : args; };
     const q = () => db.prepare(sql.replace(/\?\d+/g, '?'));
     const stmt = { bind(...a) { args = a; return stmt; },
-      _run() { const r = q().run(...params()); return { success: true, results: [], meta: { changes: Number(r.changes) } }; },
+      // D1 returns the rows of a SELECT inside a batch; the U3 turn admission reads its stored row back that way.
+      _run() { if (/^\s*SELECT/i.test(sql)) return { success: true, results: q().all(...params()), meta: { changes: 0 } }; const r = q().run(...params()); return { success: true, results: [], meta: { changes: Number(r.changes) } }; },
       async run() { return stmt._run(); }, async first() { return q().get(...params()) ?? null; },
       async all() { return { success: true, results: q().all(...params()) }; } };
     return stmt;
   }, async batch(statements) { db.exec('BEGIN'); try { const r = statements.map((x) => x._run()); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } } };
 }
 export const OPS_ALL = ['observe', 'manage', 'command', 'reset', 'pause', 'coach', 'collect', 'review', 'deliver'];
-export async function localOps({ enabled = true, binding } = {}) {
+// `profile`: another compiled profile that serves the same synthetic cohort (e.g. a proxy-runtime one) — the run, the frozen lesson and the tokens follow it.
+export async function localOps({ enabled = true, binding, profile: profileOverride } = {}) {
   const app = await bootApp();
   const { issue, issueIssuer } = await import('../../src/lib/tokens.ts');
   const { setRoster, startSession } = await import('../../src/lib/kv.ts');
@@ -32,7 +34,7 @@ export async function localOps({ enabled = true, binding } = {}) {
   const env = createMockEnv({ withSession: false, withRoster: false, environment: 'dev', adminPassword: 'pw', env: { HPS_DB: guarded, ...(enabled ? { HPS_CLASSROOM_OPS: 'enabled' } : {}) } });
   // In-memory R2: put/get/list, with the same "object first, row second" failure window as production.
   const r2 = new Map(); env.HPS_TRACES = { async put(key, value) { if (failure === 'R2 put') throw Error('injected R2 failure'); r2.set(key, value instanceof ArrayBuffer ? value.slice(0) : new TextEncoder().encode(String(value)).buffer); }, async get(key) { const v = r2.get(key); return v ? { arrayBuffer: async () => v, text: async () => new TextDecoder().decode(v) } : null; }, async delete(key) { r2.delete(key); }, async list({ prefix = '' } = {}) { return { objects: [...r2.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })) }; } };
-  const cohort = 'boah-dental-2026-a', profile = 'boah-dental-director-copyclone-2026-s1', run = 'ops-test-run';
+  const cohort = 'boah-dental-2026-a', profile = profileOverride ?? 'boah-dental-director-copyclone-2026-s1', run = 'ops-test-run';
   // Mirror what persistSessionStart writes, so usage rows attribute to the run like production.
   if (db) { db.prepare('INSERT OR IGNORE INTO cohorts(id,display_name) VALUES(?,?)').run(cohort, cohort); db.prepare('INSERT OR IGNORE INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES(?,?,?,?,?)').run(run, cohort, profile, new Date(Date.now() - 60000).toISOString(), new Date(Date.now() + 3600000).toISOString()); }
   await setRoster(env.HPS_KV, cohort, ['student-a', 'student-b', 'student-c', 'legacy-test-seat']);

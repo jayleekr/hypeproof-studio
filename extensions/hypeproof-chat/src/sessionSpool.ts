@@ -308,7 +308,15 @@ export class SessionSpool {
     });
   }
 
-  recordPrompt(e: { turnId: string; runtime: string; text: string; imagesCount?: number }): void {
+  /**
+   * #751 U3 — the lesson basis changed at this point of the record: every `prompt` after it ran under `to`. A marker for
+   * the learner's own record only; the Service's turn ledger, not this line, decides which basis a turn ran under.
+   */
+  recordLessonBinding(e: { from: { key: string; version?: string }; to: { key: string; version?: string; source: string; object_id?: string | null; revision?: number | null } }): void {
+    this.enqueue(async () => { const s = await this.materialize(); await this.writeEvent(s, { type: "lesson_binding", from: e.from, to: e.to }); });
+  }
+
+  recordPrompt(e: { turnId: string; runtime: string; text: string; imagesCount?: number; instructorPromptRefs?: Array<{ object_id: string; revision: number }> }): void {
     this.enqueue(async () => {
       const s = await this.materialize();
       this.pinTurn(e.turnId, s);
@@ -322,6 +330,9 @@ export class SessionSpool {
         // 무성 절단 금지 — 잘렸으면 잘렸다고, 원래 몇 자였는지 남긴다.
         ...(clamped ? { text_truncated: true, text_original_chars: text.length } : {}),
         ...(e.imagesCount ? { images_count: e.imagesCount } : {}),
+        // #751 U3 — "the draft this prompt came from had instructor prompt X rev N imported into it". Nothing about how
+        // much of it remains. Bodiless, local to this record, and absent when nothing was imported.
+        ...(e.instructorPromptRefs?.length ? { instructor_prompt_refs: e.instructorPromptRefs.slice(0, 8) } : {}),
       });
     });
   }

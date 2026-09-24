@@ -31,7 +31,7 @@ try {
     for (const k of ["MAX_TITLE_CHARS", "MAX_BODY_CHARS", "MAX_BODY_BYTES", "MAX_LINKS", "MAX_LINK_LABEL_CHARS", "MAX_LINK_URL_CHARS", "MAX_SYNC_RECEIPTS", "MAX_SYNC_WITHDRAWS", "APPLY_WITHIN_MS", "CONTENT_SCHEMA"]) assert.equal(inbox[k], svc[k], k);
     assert.equal(inbox.INBOX_CAPABILITY, svc.DIST_CLIENT_CAPABILITY);
     const v = inbox.validateItem(item(1, 1, { content: c })); assert.equal(v.ok, true); assert.equal(v.value.body, c.body, "markup is not stripped, escaped or interpreted here — it is data, and it is drawn as text");
-    for (const [bad, code] of [[{ kind: "prompt" }, "unsupported_kind"], [{ kind: "setting" }, "unsupported_kind"], [{ schema: "hps-classroom-content/9" }, "unsupported_kind"], [{ title: "" }, "schema"], [{ body: "가".repeat(2001) }, "schema"], [{ links: [{ label: "a", url: "http://docs.example.org/" }] }, "schema"], [{ links: [{ label: "a", url: "javascript:alert(1)" }] }, "schema"], [{ links: [{ label: "a", url: "file:///etc/passwd" }] }, "schema"], [{ links: [{ label: "a", url: "https://u:p@docs.example.org/" }] }, "schema"], [{ apply_within_ms: 0 }, "schema"], [{ apply_within_ms: 30001 }, "schema"], [{ offer_key: "short" }, "schema"]]) assert.equal(inbox.validateItem({ ...item(1, 1), ...bad }).code, code, JSON.stringify(bad));
+    for (const [bad, code] of [[{ kind: "video" }, "unsupported_kind"], [{ kind: "setting" }, "schema"] /* U3: a setting without its lesson reference */, [{ schema: "hps-classroom-content/9" }, "unsupported_kind"], [{ title: "" }, "schema"], [{ body: "가".repeat(2001) }, "schema"], [{ links: [{ label: "a", url: "http://docs.example.org/" }] }, "schema"], [{ links: [{ label: "a", url: "javascript:alert(1)" }] }, "schema"], [{ links: [{ label: "a", url: "file:///etc/passwd" }] }, "schema"], [{ links: [{ label: "a", url: "https://u:p@docs.example.org/" }] }, "schema"], [{ apply_within_ms: 0 }, "schema"], [{ apply_within_ms: 30001 }, "schema"], [{ offer_key: "short" }, "schema"]]) assert.equal(inbox.validateItem({ ...item(1, 1), ...bad }).code, code, JSON.stringify(bad));
   });
 
   await check("controls: one ordering rule — an event of an object applies only with a HIGHER number; an offer never lowers the revision", async () => {
@@ -164,11 +164,24 @@ try {
     const root = fresh(), dir = inboxDir(root, { cohort: "c/../x", run: "run 1", seat: "A1", student: "student-a" }); assert.ok(dir.startsWith(path.join(root, "classroom-inbox")) && !dir.includes(".."), "identifiers cannot walk out of the inbox root: " + dir);
     writeFileSync(path.join(root, "learner-work.txt"), "mine"); const a = session(dir);
     await a.s.onBlock({ items: [{ ...item(1, 1), body: "tampered on the way" }] }, a.win(), 10); assert.deepEqual(await journalOf(dir), ["failed:r1:hash_mismatch"]); assert.deepEqual(await cardsOf(dir), []);
-    await a.s.onBlock({ items: [{ ...item(1, 2, { k: "p" }), kind: "prompt" }] }, a.win(), 10); assert.ok((await journalOf(dir)).includes("failed:r1:unsupported_kind"), "a kind this build does not know (U3) is refused as such, never stored");
+    await a.s.onBlock({ items: [{ ...item(1, 2, { k: "p" }), kind: "video" }] }, a.win(), 10); assert.ok((await journalOf(dir)).includes("failed:r1:unsupported_kind"), "a kind this build does not know is refused as such, never stored");
     await a.s.onBlock({ items: [item(1, 3, { k: "ok" })] }, a.win(), 10); await a.s.onBlock({ items: [item(1, 4, { k: "conflict", content: { body: "different text, same revision" } })] }, a.win(), 11);
     assert.ok((await journalOf(dir)).includes("failed:r1:hash_conflict")); assert.deepEqual(await cardsOf(dir), [["M", 1, "v1 본문"]], "an immutable revision cannot be replaced by other bytes");
     writeFileSync(path.join(dir, "rev", a.store.revFile(item(1, 3))), "{broken"); assert.deepEqual(await cardsOf(dir), [["M", 1, "unreadable"]], "a damaged file is shown as unreadable — not as empty, not as someone else's text");
     assert.deepEqual([readFileSync(path.join(root, "learner-work.txt"), "utf8"), readdirSync(root).sort()], ["mine", ["classroom-inbox", "learner-work.txt"]], "nothing outside classroom-inbox/ was created or changed");
+  });
+
+  await check("two windows of one learner: a REPLACED connection does not hide the inbox the newer connection owns (seen on the real Mac: board 'reflected', no inbox in either window)", async () => {
+    const first = { run: "r", seat: "A1", student: "s", hidden: false, grant: "g1" }, second = { ...first, grant: "g2" };
+    assert.equal(inbox.mayHideInbox(first, "g1"), true, "control: the device whose own connection was closed for good hides its inbox (U2 contract: seat re-assigned, revoked, replaced by ANOTHER device)");
+    assert.equal(inbox.mayHideInbox(second, "g1"), false, "window 2 paired with a new code and owns the pointer: window 1's late 'I was replaced' hides nothing");
+    assert.equal(inbox.mayHideInbox({ run: "r", seat: "A1", student: "s", hidden: false }, "g1"), true, "a pointer written before this rule keeps the old behaviour");
+    assert.equal(inbox.mayHideInbox(undefined, "g1"), false); assert.equal(inbox.mayHideInbox({ ...first, hidden: true }, "g1"), false);
+    const wrong = (p) => !!p && !p.hidden; /* negative control: the U2 rule — any final refusal hides the shared pointer */ assert.equal(wrong(second), true); assert.notEqual(wrong(second), inbox.mayHideInbox(second, "g1"), "the control is caught");
+    // the live connection is authoritative for its own window and repairs what a stale window wrote
+    const live = { grant: "g2", run: "r", seat: "A1", student: "s" };
+    assert.equal(inbox.pointerIsStale({ ...first, hidden: true }, live), true, "window 1's stale write (hidden, g1) over window 2's pointer is repaired"); assert.equal(inbox.pointerIsStale(second, live), false);
+    assert.equal(inbox.pointerIsStale(undefined, live), true); assert.equal(inbox.pointerIsStale({ ...second, student: "other" }, live), true);
   });
 
   console.log(`\n${count} inbox checks passed`);

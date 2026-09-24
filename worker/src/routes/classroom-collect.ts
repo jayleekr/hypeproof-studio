@@ -10,6 +10,7 @@
 //  - `verified` is issued only after the Service re-hashes what it holds.
 //  - Instructors get states and digests here. Never content.
 import { Hono } from 'hono';
+import { basisTables, sealBasisStatement } from '../lib/lesson-basis';
 import { bodyLimit } from 'hono/body-limit';
 import type { Env } from '../env';
 import { bearer, verifyOpsCredential } from '../lib/tokens';
@@ -217,8 +218,13 @@ classroomCollectApp.post('/snapshots/:batch/:revision/seal', async (c) => {
   const receipt = crypto.randomUUID(), inputRevision = (item.input_revision ?? 0) + 1;
   // A collect-only batch ends at the verified receipt: it queues no evaluation input, so collecting can never start an evaluation by itself.
   let feedsEvaluation: boolean; try { feedsEvaluation = (await batchScope(db, item.batch_id)).mode === 'finish'; } catch (err) { const no = scopeRefusal(c, err); if (no) return no; throw err; }
+  // #751 U3 — under how many lesson bases was this input made? Computed in SQL INSIDE the seal batch (atomic with it) wherever
+  // the U3 tables exist. If they cannot be read the seal fails and the device retries: there is no seal without a basis row.
+  // The outbox row is still written: the report pipeline turns a non-single basis into a HELD job that the reviewer can see.
+  const u3 = await basisTables(db); if (u3 === 'unreadable') return c.json({ error: 'the lesson basis of this input cannot be established right now; nothing was sealed — retry', reason: 'lesson_basis_unreadable' }, 503, { 'retry-after': '30' });
   // Seal, item state and the job outbox commit together: no verified receipt without a queued job, and no job for an unverified input.
   await db.batch([
+    ...(u3 ? [sealBasisStatement(db, { batch_id: item.batch_id, student_id: g.student_id, revision, class_run_id: g.class_run_id, now })] : []),
     db.prepare("UPDATE classroom_snapshots SET state='sealed',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,sealed_at=? WHERE batch_id=? AND student_id=? AND revision=? AND state='uploading'").bind(digest, coverage, receipt, now, item.batch_id, g.student_id, revision),
     // A later verified revision is a NEW input revision. It never silently replaces what a report was built from.
     db.prepare("UPDATE classroom_collect_items SET state='verified',reason='',manifest_digest=?,integrity='verified',coverage=?,receipt_id=?,input_revision=?,updated_at=? WHERE batch_id=? AND seat_id=?").bind(digest, coverage, receipt, inputRevision, now, item.batch_id, item.seat_id),

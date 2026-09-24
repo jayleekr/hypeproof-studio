@@ -10,6 +10,8 @@ export interface Env {
   /** #751 R5 — 'service-anthropic' turns the Service-side report evaluator on. Unset (default): jobs wait as `evaluator_not_configured`. */
   /** #751 U2 — comma-separated https hosts a distributed material may link to. Unset (default) = every link is refused. */
   HPS_CLASSROOM_LINK_HOSTS?: string;
+  /** #751 U3 — `enforce` makes the chat gate and /v1/profile resolve a participant's switched lesson version. Independent of HPS_CLASSROOM_OPS on purpose: switching operations off must not undo a setting that was already applied. */
+  HPS_LESSON_BINDINGS?: string;
   HPS_CLASSROOM_EVALUATOR?: string;
   HPS_CLASSROOM_EVALUATOR_MODEL?: string;
   /** #751 — scheduled retention. Unset days (default) = the run does nothing. With days set it only reports (dry-run) until HPS_CLASSROOM_RETENTION='enforce'. */

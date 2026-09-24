@@ -2297,6 +2297,54 @@
         },
         {
           "path": "e2e/classroom/ops-distribution.mjs"
+        },
+        {
+          "path": "worker/src/lib/lesson-binding.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-binding-store.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-binding-activate.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-basis.ts"
+        },
+        {
+          "path": "worker/migrations/0024-classroom-lesson-bindings.sql"
+        },
+        {
+          "path": "worker/test/lesson-binding.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-settings.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-basis.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-settings-device.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-settings-d1.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/lessonBinding.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/draftImport.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/lesson-binding.smoke.mjs"
+        },
+        {
+          "path": "e2e/classroom/ops-lesson-settings.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-lesson-settings.mjs"
         }
       ]
     },

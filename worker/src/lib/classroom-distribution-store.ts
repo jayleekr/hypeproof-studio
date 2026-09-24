@@ -8,7 +8,7 @@
 //   ops_issuer_fences               the D1 copy of "this issuer token was revoked" (KV revocation can lag a minute)
 import type { Env } from '../env';
 import {
-  DIST_CLIENT_CAPABILITY, MAX_SYNC_ITEMS, MAX_SYNC_ITEM_BYTES, MAX_SYNC_RECEIPTS, MAX_SYNC_WITHDRAWS, applyWithinMs,
+  DIST_CLIENT_CAPABILITY, declaresKind, MAX_SYNC_ITEMS, MAX_SYNC_ITEM_BYTES, MAX_SYNC_RECEIPTS, MAX_SYNC_WITHDRAWS, applyWithinMs,
   deliveryKey, nextDistState, offerDelayMs, offerKeyInput, validateOfferReceipt, validateWithdrawReceipt, withdrawKeyInput,
 } from './classroom-distribution';
 
@@ -81,9 +81,9 @@ export function settleStatements(db: Db, o: { scope: string; args: unknown[]; ca
  * transaction closes every open distribution that token created, so the next sync of ANY learner stops carrying it, no
  * matter which instructor paired that learner. Idempotent: repeating a revocation changes nothing more.
  */
-export function issuerFenceStatements(db: Db, jti: string, o: { reason: string; by: string; sweep: boolean; retainedCohorts?: string[]; now: number }): Stmt[] {
-  const scope = `issuer_jti=? AND revoked_at IS NULL${o.retainedCohorts ? ' AND cohort_id NOT IN (SELECT value FROM json_each(?))' : ''}`;
-  const args = o.retainedCohorts ? [jti, JSON.stringify(o.retainedCohorts)] : [jti];
+export function issuerFenceStatements(db: Db, jti: string, o: { reason: string; by: string; sweep: boolean; retainedCohorts?: string[]; retainedSettingCohorts?: string[]; now: number }): Stmt[] {
+  const scope = `issuer_jti=? AND revoked_at IS NULL${o.retainedCohorts ? ` AND (cohort_id NOT IN (SELECT value FROM json_each(?))${o.retainedSettingCohorts ? " OR (cohort_id NOT IN (SELECT value FROM json_each(?)) AND object_id IN (SELECT object_id FROM classroom_content_objects WHERE kind='setting'))" : ''})` : ''}`;
+  const args = o.retainedCohorts ? [jti, JSON.stringify(o.retainedCohorts), ...(o.retainedSettingCohorts ? [JSON.stringify(o.retainedSettingCohorts)] : [])] : [jti];
   const mine = `(SELECT id FROM ${D} WHERE ${scope})`;
   const stmts = [db.prepare("INSERT INTO ops_issuer_fences(issuer_jti,state,reason,recorded_by,created_at,updated_at) VALUES(?,'revoked',?,?,?,?) ON CONFLICT(issuer_jti) DO UPDATE SET state='revoked',reason=excluded.reason,recorded_by=excluded.recorded_by,revision=ops_issuer_fences.revision+1,updated_at=excluded.updated_at WHERE ops_issuer_fences.state<>'revoked'").bind(jti, o.reason.slice(0, 64), o.by.slice(0, 64), o.now, o.now)];
   if (!o.sweep) return stmts;
@@ -137,7 +137,7 @@ type TargetRow = { distribution_id: string; seat_id: string; seat_revision: numb
  * The caller has already verified the credential, the grant, the live seat and the lease owner. Returns null when there
  * is nothing to say, so an idle sync answers byte-for-byte as it did before this existed.
  */
-export async function distributionExchange(db: Db, g: SyncGrant, o: { body: unknown; declared: boolean; instance: string; flagOn: boolean; runEnded: boolean; runEndsAt: number; pendingHint: boolean; now: number; meter?: DbMeter }): Promise<DistributionBlock | null> {
+export async function distributionExchange(db: Db, g: SyncGrant, o: { body: unknown; declared: boolean; caps?: unknown; settingsOn?: boolean; instance: string; flagOn: boolean; runEnded: boolean; runEndsAt: number; pendingHint: boolean; now: number; meter?: DbMeter }): Promise<DistributionBlock | null> {
   const body = (o.body && typeof o.body === 'object' && !Array.isArray(o.body) ? o.body : {}) as Record<string, unknown>;
   const receiptsIn = Array.isArray(body.receipts) ? body.receipts : [], withdrawIn = Array.isArray(body.withdraw_receipts) ? body.withdraw_receipts : [];
   if (!o.pendingHint && !receiptsIn.length && !withdrawIn.length) return null;
@@ -240,6 +240,13 @@ export async function distributionExchange(db: Db, g: SyncGrant, o: { body: unkn
     const CARD = `EXISTS (SELECT 1 FROM ${C} c WHERE c.class_run_id=${T}.class_run_id AND c.seat_id=${T}.seat_id AND c.student_id=${T}.student_id AND c.object_id=${T}.object_id AND c.state='present' AND c.device_registration_id=?`;
     const writes: Stmt[] = [], offers: Array<Record<string, unknown> | null> = []; let bytes = 0, count = 0;
     for (const t of rows) {
+      // U3 — capability is per KIND and decided here, before a body leaves: an app that holds notices but cannot import a
+      // prompt or switch a lesson binding is told apart ("not supported"), and nothing of that kind is sent to it.
+      if (!declaresKind(o.caps ?? [DIST_CLIENT_CAPABILITY], t.kind)) {
+        writes.push(db.prepare(`UPDATE ${T} SET state='unsupported',result_code='capability_missing',pending=0,grant_id=?,device_registration_id=?,connection_epoch=?,updated_at=? WHERE distribution_id=? AND seat_id=? AND ${OFFER_GUARD}`).bind(g.id, device, g.connection_epoch, now, t.distribution_id, t.seat_id, ...guardArgs)); offers.push(null); continue;
+      }
+      // A setting is offered only while its own switch is on; switched off, it waits (the notice/material flow is untouched).
+      if (t.kind === 'setting' && !o.settingsOn) continue;
       // Same revision, same hash, on THIS device, not withdrawn since: nothing to send, and nothing new is claimed.
       if (t.card_state === 'present' && t.card_device === device && t.card_revision === t.revision && t.card_hash === t.content_hash) {
         writes.push(db.prepare(`UPDATE ${T} SET state='no_change',result_code='same_revision_held',pending=0,grant_id=?,device_registration_id=?,connection_epoch=?,updated_at=? WHERE distribution_id=? AND seat_id=? AND ${OFFER_GUARD} AND ${CARD} AND c.revision=? AND c.content_hash=?)`).bind(g.id, device, g.connection_epoch, now, t.distribution_id, t.seat_id, ...guardArgs, device, t.revision, t.content_hash)); offers.push(null); continue;
@@ -250,8 +257,10 @@ export async function distributionExchange(db: Db, g: SyncGrant, o: { body: unkn
       const within = applyWithinMs(Math.min(t.expires_at, o.runEndsAt) - now);
       if (within <= 0) continue; // too close to the end to apply honestly; settlement will call it expired or unconfirmed
       if (count >= MAX_SYNC_ITEMS) { block.more = true; break; }
-      let payload: { body?: unknown; links?: unknown }; try { payload = JSON.parse(t.payload_json); } catch { continue; }
-      const item = { offer_key: '', distribution_id: t.distribution_id, seq: t.seq, object_id: t.object_id, revision: t.revision, kind: t.kind, schema: t.content_schema, title: t.title, body: payload.body, links: payload.links ?? [], content_hash: t.content_hash, from: 'instructor', issued_at: t.created_at, expires_at: t.expires_at, apply_within_ms: within };
+      let payload: { body?: unknown; links?: unknown; lesson?: unknown }; try { payload = JSON.parse(t.payload_json); } catch { continue; }
+      const item: Record<string, unknown> & { offer_key: string } = { offer_key: '', distribution_id: t.distribution_id, seq: t.seq, object_id: t.object_id, revision: t.revision, kind: t.kind, schema: t.content_schema, title: t.title, body: payload.body, links: payload.links ?? [], content_hash: t.content_hash, from: 'instructor', issued_at: t.created_at, expires_at: t.expires_at, apply_within_ms: within,
+        // A setting carries a REFERENCE (and the learner-facing notice in `body`), never lesson content: that arrives through /v1/profile.
+        ...(t.kind === 'setting' ? { lesson: payload.lesson } : {}) };
       item.offer_key = await deliveryKey(offerKeyInput({ distribution_id: t.distribution_id, seat_id: t.seat_id, device_generation: t.device_generation, grant_id: g.id, connection_epoch: g.connection_epoch, object_id: t.object_id, revision: t.revision, content_hash: t.content_hash }));
       const size = new TextEncoder().encode(JSON.stringify(item)).length;
       if (bytes + size > MAX_SYNC_ITEM_BYTES) { block.more = true; break; }

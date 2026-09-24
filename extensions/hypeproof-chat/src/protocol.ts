@@ -130,7 +130,11 @@ export interface CoachInfo {
  * cached client-side. Stays in sync with Worker's UxConfig type — keep both
  * sides updated together.
  */
+/** Kept in this file (not in lessonBinding.ts) because the webview build type-checks protocol.ts and must not follow Node-side imports. */
+export interface LessonBindingView { key: string; seq: number; source: "token" | "setting" | "base"; object_id: string | null; revision: number | null; enforced: boolean; not_applied?: string }
 export interface ResolvedProfile {
+  /** #751 U3 — which lesson binding the Service executes this seat under. Present only where bindings are enforced. The app sends `key` back as its expectation; it never selects a lesson with it. */
+  lesson_binding?: LessonBindingView;
   /** Server-verified identity; never an execution grant. */
   activity_id?: string;
   /** Presentation only; derived from authenticated Service access, never grants authority. */
@@ -348,7 +352,7 @@ export type WebviewMessage = (
   | { type: "selectModel"; alias: string }
   | { type: "selectEffort"; value: CourseEffort }
   | { type: "refreshEffort" }
-  | { type: "sendMessage"; activityId?:string; text: string; history: ChatMessage[]; images?: string[] }
+  | { type: "sendMessage"; activityId?:string; text: string; history: ChatMessage[]; images?: string[]; /** #751 U3 — instructor prompts imported into the draft this message was sent from (bodiless). */ imports?: Array<{ object_id: string; revision: number; hash16: string }> }
   | { type: "retryMessage"; activityId?:string; prompt: string; history: ChatMessage[]; images?: string[] }
   | { type: "cancelStream"; streamId: string }
   | { type: "requestAction"; action: ActionRequest }

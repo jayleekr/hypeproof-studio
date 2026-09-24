@@ -918,6 +918,8 @@ export function buildSdkGatewayEnv(
     effort?: "low" | "medium" | "high";
     turnId?: string;
   fundingSource?: string;
+  /** #751 U3 — the lesson binding this turn EXPECTS (from the profile it was started under). An expectation, never a selector. */
+  lessonBinding?: string;
     proxyUrl: string;
     token: string;
     /** 작업 폴더 절대경로 — 워커가 `x-hps-workspace` 로 받아 시스템 블록에 넣는다. */
@@ -977,13 +979,14 @@ export function buildSdkGatewayEnv(
   // 같은 이유로 인코딩이 필요하다(HTTP 헤더는 바이트 안전해야 한다).
   // Owned headers never inherit an ambient course choice or correlation ID.
   const inheritedHeaders = (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n')
-    .filter(line => !/^\s*x-hps-(effort|turn-id|funding-source)\s*:/i.test(line)).join('\n').trim();
+    .filter(line => !/^\s*x-hps-(effort|turn-id|funding-source|lesson-binding)\s*:/i.test(line)).join('\n').trim();
   if (inheritedHeaders) env.ANTHROPIC_CUSTOM_HEADERS = inheritedHeaders;
   else delete env.ANTHROPIC_CUSTOM_HEADERS;
   delete env.CLAUDE_CODE_EFFORT_LEVEL;
   const custom: string[] = [];
   if(args.fundingSource){if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(args.fundingSource))throw Error('invalid funding source');custom.push(`x-hps-funding-source: ${args.fundingSource}`);}
   if (args.effort) custom.push(`x-hps-effort: ${args.effort}`);
+  if (args.lessonBinding && /^(token:[a-f0-9]{16}|[a-f0-9]{32})$/.test(args.lessonBinding)) custom.push(`x-hps-lesson-binding: ${args.lessonBinding}`);
   if (args.turnId && /^[a-zA-Z0-9_-]{1,128}$/.test(args.turnId)) custom.push(`x-hps-turn-id: ${args.turnId}`);
   if (args.workspace?.trim()) {
     custom.push(`x-hps-workspace: ${encodeURIComponent(args.workspace.trim())}`);
@@ -1027,6 +1030,8 @@ export function buildSdkQueryOptions(
     effort?: "low" | "medium" | "high";
     turnId?: string;
   fundingSource?: string;
+  /** #751 U3 — the lesson binding this turn EXPECTS (from the profile it was started under). An expectation, never a selector. */
+  lessonBinding?: string;
     proxyUrl: string;
     token: string;
     cwd?: string;
@@ -1082,6 +1087,7 @@ export function buildSdkQueryOptions(
       effort: args.effort,
       turnId: args.turnId,
       fundingSource: args.fundingSource,
+      lessonBinding: args.lessonBinding,
       token: args.token,
       ...(args.configDir ? { configDir: args.configDir } : {}),
       // 시스템 프롬프트 경로는 워커가 버리므로 헤더로 보낸다 (#431).

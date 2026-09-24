@@ -611,7 +611,8 @@ admin.post("/issuers", async (c) => {
     // exactly what they had. Open distributions of the replaced token are closed only when the new scope no longer holds
     // `distribute` in that cohort — re-issuing a token mid-class must not cancel what is waiting for offline learners.
     const retainedCohorts = scopes.filter((s: { ops?: string[] }) => (s.ops ?? []).includes("distribute")).map((s: { cohort: string }) => s.cohort);
-    try { await fenceIssuerForDistribution(c.env, body.revoke_jti, { reason: "issuer_rescope", by: minter, sweep: true, retainedCohorts }); }
+    const retainedSettingCohorts = scopes.filter((s: { ops?: string[] }) => (s.ops ?? []).includes("lesson_settings")).map((s: { cohort: string }) => s.cohort);
+    try { await fenceIssuerForDistribution(c.env, body.revoke_jti, { reason: "issuer_rescope", by: minter, sweep: true, retainedCohorts, retainedSettingCohorts }); }
     catch (err) { console.error("issuer re-scope: distribution fence not written:", err); return c.json({ error: "re-scope not applied: the replaced token could not be fenced — nothing changed, retry", reason: "distribute_fence_failed" }, 500); }
     try {
       await revokeToken(

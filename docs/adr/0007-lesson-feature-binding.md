@@ -210,3 +210,25 @@ the gate's single return spread, the schema's optional-key list and its validato
 branch, the three validation sites, and the `/v1/profile` serializer. Landing them in
 parallel would conflict in all four files, which is how this epic already produced one
 duplicate pair of PRs.
+
+## Proposed amendment, 2026-09-21 — which lesson the two call sites narrow by (U3 design; not implemented, not accepted)
+
+Decision §2 stays: the narrowing is applied at the shared chat gate **and** at the
+`/v1/profile` serializer. What the targeted-settings design
+([classroom ADM, U3](../requirements/classroom-admin.md#remote-management-u3-20260921))
+would change is how those two sites obtain the lesson. Today each calls
+`resolveTokenLesson` on its own. Under the proposal both call one
+`resolveEffectiveLesson`, which may return another **frozen version of the same course**
+recorded for that participant and class run. Nothing in this ADR's rules moves: the
+version is still read through `readLesson`, so `allowed ⊆ granted(profile)` is
+re-checked on every read and a grant that shrank closes the lesson rather than serving
+a wider set. A setting cannot add a feature the compiled profile does not grant.
+
+The section "Where this is not a boundary" is the reason for one rule in that design.
+SDK tools are enforced on the device from the profile the app cached. If the Service
+resolved a narrower version while an app still held the wider cached profile, the two
+would disagree on exactly the route where the Service is not the boundary. So an app
+that does not send the binding expectation is refused new execution on a seat whose
+effective lesson differs from its token lesson, and an in-flight turn keeps the
+execution snapshot the Service recorded when it admitted that turn. A storage failure
+holds execution; it never falls back to the token lesson.

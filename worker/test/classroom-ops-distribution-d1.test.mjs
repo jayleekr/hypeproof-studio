@@ -19,7 +19,7 @@ try {
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await raw.prepare(s).run(); };
   await raw.prepare('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, cohort_id TEXT, profile_id TEXT, starts_at TEXT, ends_at TEXT, ended_at TEXT)').run();
   const files = readdirSync(new URL('../migrations/', import.meta.url)).filter((x) => /^\d{4}-.*\.sql$/.test(x) && Number(x.slice(0, 4)) >= 11).sort();
-  assert.equal(files.at(-1), '0023-classroom-distribution.sql');
+  assert.ok(files.includes('0023-classroom-distribution.sql'));
   const before = (await raw.prepare("SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name").all()).results;
   for (let pass = 0; pass < 2; pass++) for (const m of files) await apply(readFileSync(new URL(`../migrations/${m}`, import.meta.url), 'utf8'));
   // additive: every object that existed before 0023 is byte-identical after it, and applying twice is a no-op

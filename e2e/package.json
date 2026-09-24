@@ -27,7 +27,8 @@
     "test:voice:lifecycle": "node voice-conversation/probe-lifecycle.mjs",
     "test:voice:popup": "node voice-conversation/popup-browser.mjs",
     "test:chalk-simple": "node --experimental-strip-types --experimental-sqlite chalk-authoring/simple.mjs",
-    "test:classroom-ops-distribution": "node --experimental-strip-types --experimental-sqlite classroom/ops-distribution.mjs"
+    "test:classroom-ops-distribution": "node --experimental-strip-types --experimental-sqlite classroom/ops-distribution.mjs",
+    "test:classroom-ops-lesson-settings": "node --experimental-strip-types --experimental-sqlite classroom/ops-lesson-settings.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

@@ -22,7 +22,7 @@ await check('controls: content is plain text, links are https on an allowlist th
   // Markup is not refused — it is text. It is stored as typed and DRAWN as text on both ends (browser and webview tests).
   assert.equal(ok({ body: '<script>alert(1)</script> [x](javascript:alert(1)) rm -rf ~ /etc/passwd' }).ok, true);
   for (const [o, hosts, reason] of [
-    [{ kind: 'prompt' }, [], 'content_invalid'], [{ kind: 'setting' }, [], 'content_invalid'], [{ title: '' }, [], 'content_invalid'], [{ title: 'a\nb' }, [], 'content_invalid'], [{ title: 'x'.repeat(81) }, [], 'content_invalid'],
+    [{ kind: 'video' }, [], 'content_invalid'], [{ kind: 'setting' }, [], 'content_invalid'] /* U3: a setting without a lesson reference (prompt/setting themselves are covered in classroom-ops-lesson-settings) */, [{ title: '' }, [], 'content_invalid'], [{ title: 'a\nb' }, [], 'content_invalid'], [{ title: 'x'.repeat(81) }, [], 'content_invalid'],
     [{ body: '가'.repeat(2001) }, [], 'content_invalid'], [{ body: 'bad\u0000byte' }, [], 'content_invalid'], [{ body: 'rtl\u202Eoverride' }, [], 'content_invalid'], [{ links: [{ label: 'a', url: 'https://docs.example.org/' }] }, ['docs.example.org'], 'content_invalid'] /* a notice carries no links */,
     [{ kind: 'material', links: [{ label: 'a', url: 'https://docs.example.org/' }] }, [], 'link_host_not_allowed'] /* empty allowlist = no link at all */,
     [{ kind: 'material', links: [{ label: 'a', url: 'https://evil.example.com/' }] }, ['docs.example.org'], 'link_host_not_allowed'],

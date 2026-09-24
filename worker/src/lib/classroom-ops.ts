@@ -9,12 +9,12 @@
 export const OPS_SCHEMA_VERSION = 1;
 export const OPS_PROTOCOL = 1;
 /** `ops_delivery` is sending REPORTS to recipients. `ops_distribute` (U2) is putting notices/materials into selected learners' inboxes. */
-export const OPS_FLAGS = ['ops_observe', 'ops_commands', 'ops_collect', 'ops_reports', 'ops_delivery', 'ops_distribute'] as const;
+export const OPS_FLAGS = ['ops_observe', 'ops_commands', 'ops_collect', 'ops_reports', 'ops_delivery', 'ops_distribute', 'ops_lesson_settings'] as const;
 export type OpsFlag = (typeof OPS_FLAGS)[number];
 /** Issuer-scope capabilities. Absent on every issuer minted before this landed — new authority is opt-in. */
 /** `coach` is deliberately separate from `command`/`reset`: fixing a PC and guiding a learner are different authorities. */
 /** `distribute` (U2) is its own authority: holding `deliver`, `coach`, `collect` or anything else never implies it. */
-export const OPS_CAPABILITIES = ['observe', 'manage', 'command', 'reset', 'pause', 'coach', 'collect', 'review', 'deliver', 'distribute'] as const;
+export const OPS_CAPABILITIES = ['observe', 'manage', 'command', 'reset', 'pause', 'coach', 'collect', 'review', 'deliver', 'distribute', 'lesson_settings'] as const;
 export type OpsCapability = (typeof OPS_CAPABILITIES)[number];
 
 /** Every ops_* timestamp is unix milliseconds (token expiries included, converted at the edge). */
@@ -57,7 +57,7 @@ export const COMMON_CAUSE_CLASSES: readonly ErrorClass[] = ['provider_rate_limit
 export const EVENT_KINDS = ['activation', 'step', 'runtime', 'error', 'upload', 'evidence'] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
-export interface LessonPin { course_id: string; version: string; steps: string[] }
+export interface LessonPin { course_id: string; version: string; steps: string[]; sha256?: string }
 export interface OpsEvent {
   event_id: string; seq: number; observed_at: number; kind: EventKind;
   actor: (typeof ACTORS)[number]; payload: Record<string, unknown>;
@@ -142,11 +142,13 @@ export function parseFlags(json: string | null | undefined): Record<OpsFlag, boo
   return Object.fromEntries(OPS_FLAGS.map((f) => [f, raw[f] === true])) as Record<OpsFlag, boolean>;
 }
 export function parseLesson(json: string | null | undefined): LessonPin | null {
-  try { const l = JSON.parse(json ?? '{}'); return l && typeof l.version === 'string' ? { course_id: String(l.course_id ?? ''), version: l.version, steps: Array.isArray(l.steps) ? l.steps : [] } : null; } catch { return null; }
+  try { const l = JSON.parse(json ?? '{}'); return l && typeof l.version === 'string' ? { course_id: String(l.course_id ?? ''), version: l.version, steps: Array.isArray(l.steps) ? l.steps : [], ...(typeof l.sha256 === 'string' ? { sha256: l.sha256 } : {}) } : null; } catch { return null; }
 }
 
 /** Why an otherwise valid step event is not allowed to move the board. */
-export function stepDisposition(payload: Record<string, unknown>, lesson: LessonPin | null): 'applied' | 'lesson_mismatch' | 'unknown_step' {
+export function stepDisposition(payload: Record<string, unknown>, lesson: LessonPin | null | 'unknown'): 'applied' | 'lesson_mismatch' | 'unknown_step' | 'basis_unknown' {
+  // U3 — the participant's lesson basis could not be read: the event is kept but moves nothing. It is never judged by the run pin instead.
+  if (lesson === 'unknown') return payload.status === 'free_activity' ? 'applied' : 'basis_unknown';
   if (!lesson) return payload.status === 'free_activity' ? 'applied' : 'lesson_mismatch';
   if (payload.lesson_version !== lesson.version) return 'lesson_mismatch';
   if (payload.status === 'free_activity') return 'applied';
