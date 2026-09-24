@@ -58,7 +58,7 @@ CREATE TABLE chalk_knowledge_docs (
 |---|---|---|---|
 | `method` | `method:m-001` | `methods/m-*.md` 중 `family` ≠ `reference` | `id` · `family` · `evidence_grade` · `prior_knowledge` · `requires_guidance` · `best_for[]` · `weak_for[]` · `avoid_when[]` |
 | `vocab` | `vocab:goal` · `vocab:condition` · `vocab:prior` | `rules/curriculum-schema.md` §method | `keys: [{key, label}]` — 목표 29 · 조건 9 · 선행지식 3 |
-| `gate` | `gate:G2-2` | `design/lesson-plan-quality-checklist.md` | `id` · `gate`(1~3) · `judge`(`machine`/`model`/`human`, 읽기 계약 §4) · `reads[]`(읽는 칸) |
+| `gate` | `gate:G2-2` | `design/lesson-plan-quality-checklist.md` | `id` · `gate`(1~3) · `judge`(`machine`/`model`/`human`/`unassigned`, 읽기 계약 §4 명시 항목만 machine·model·human; 표 밖은 `unassigned`) · `reads[]`(읽는 칸) |
 | `constitution` | `constitution:A-2` | `rules/edu-constitution.md` | 조항 ID · 적용 대상 층 |
 | `prohibited-move` | `move:P1` | `rules/prohibited-moves.md` | 계열(P1~P4) · 표시 문구 |
 | `placement` | `placement:<id>` | `rules/placement-rules.md` (🔴 C-2a 제외) | 규칙 ID · 조건 |
