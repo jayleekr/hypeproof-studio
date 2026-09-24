@@ -33,6 +33,15 @@ Press **Ctrl+C** to stop the app, server, and remove the worktree.
 - `node`, `npm`, `npx wrangler`, `python3` in PATH
 - `gh` logged in (for PR-number mode)
 
+## Model connection
+
+`--provider service` (default) routes chat through the local wrangler server on port 8787.
+The script does **not** inject `ANTHROPIC_API_KEY` or `ANTHROPIC_PROXY_URL` into `.dev.vars`.
+Without those, a real LLM call returns 502 — which is the correct behaviour for local review.
+
+To run the chat flow end-to-end with a fake model (no real API calls), use the T0-e approach:
+set `ANTHROPIC_PROXY_URL` to a local mock server in `.dev.vars` before starting.
+
 ## Security notes
 
 - Uses a freshly generated random signing secret every run — never copies or symlinks the production `.dev.vars`.
