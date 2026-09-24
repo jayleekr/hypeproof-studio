@@ -255,6 +255,12 @@ try {
     const re1 = await mint({ instructor: 'teacher-keep', scopes: scope(['observe', 'distribute']), days: 1, revoke_jti: keepJti }); assert.equal(re1.status, 200, JSON.stringify(re1.json));
     assert.equal(stateOf(kd.id, 'A3').state, 'accepted', 're-issued WITH distribute: what is waiting for a learner is not cancelled'); assert.equal((await send({ object_id: kq.object_id, revision: 1, content_hash: kq.content_hash, targets: ['A2'] }, keep)).json.reason, 'issuer_revoked', '…but the OLD token cannot distribute any more');
     f.env.HPS_KV.put = kvPut;
+    const move = await f.teacher('teacher-move', ['observe', 'distribute']), moveJti = await jtiOf(move);
+    const mq = (await save({ kind: 'notice', title: 'move', body: 'm' }, move)).json;
+    const md = (await send({ object_id: mq.object_id, revision: 1, content_hash: mq.content_hash, targets: ['A3'] }, move)).json.distribution;
+    const moved = await mint({ instructor: 'teacher-move', scopes: [{ cohort: 'other-cohort', profiles: [f.profile], ops: ['observe', 'distribute'] }], days: 1, revoke_jti: moveJti });
+    assert.equal(moved.status, 200, moved.raw);
+    assert.equal(stateOf(md.id, 'A3').state, 'revoked', 'distribution authority in another cohort cannot preserve this cohort');
     const drop = re1.json.token, dropJti = re1.json.jti, dd = (await send({ object_id: kq.object_id, revision: 1, content_hash: kq.content_hash, targets: ['A2'] }, drop)).json.distribution;
     f.fail('ops_issuer_fences'); const bad = await mint({ instructor: 'teacher-keep', scopes: scope(['observe']), days: 1, revoke_jti: dropJti }); f.fail('');
     assert.deepEqual([bad.status, bad.json.reason, bad.json.token], [500, 'distribute_fence_failed', undefined], 'the fence could not be written: no new token is handed out and nothing was revoked'); assert.equal((await send({ object_id: kq.object_id, revision: 1, content_hash: kq.content_hash, targets: ['A5'] }, drop)).status, 201);

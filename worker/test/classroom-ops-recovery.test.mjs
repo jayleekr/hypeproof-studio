@@ -19,7 +19,7 @@ await check('controls: `succeeded` alone never means resolved — every action, 
   }
   assert.equal(verdict('retry_diagnostics', 'not_connected', '').basis, 'not_reached_app');
   // Diagnosis: finishing is not fixing. The finding decides.
-  assert.deepEqual([verdict('retry_diagnostics', 'succeeded', 'token_ok').verdict, verdict('retry_diagnostics', 'succeeded', 'token_ok').basis], ['resolved', 'service_and_token_ok']);
+  assert.deepEqual([verdict('retry_diagnostics', 'succeeded', 'token_ok').verdict, verdict('retry_diagnostics', 'succeeded', 'token_ok').basis], ['executed', 'token_ok_cause_not_covered']);
   for (const [code, cause, next] of [['service_unreachable', 'network', 'check_network_not_pc'], ['profile_network', 'network', 'check_network_not_pc'], ['no_token', 'no_token', 'issue_and_deliver_token'], ['profile_401', 'token_rejected', 'reissue_token'], ['profile_403', 'class_or_roster', 'check_class_open_and_roster'], ['profile_500', 'service_error', 'wait_then_diagnose_again']]) {
     const o = verdict('retry_diagnostics', 'succeeded', code); assert.deepEqual([o.verdict, o.cause, o.next], ['remains', cause, next], code);
   }
@@ -40,6 +40,13 @@ await check('controls: `succeeded` alone never means resolved — every action, 
   assert.deepEqual([verdict('restart_preview', 'succeeded', 'preview_reloaded').verdict, verdict('restart_preview', 'succeeded', 'preview_reloaded').basis], ['executed', 'server_health_only']);
   for (const [code, cause] of [['preview_artifact_missing', 'artifact_not_found'], ['preview_restarted_new_url', 'preview_tab_stale'], ['preview_unhealthy', 'preview_server_down']]) assert.deepEqual([verdict('restart_preview', 'failed', code).verdict, verdict('restart_preview', 'failed', code).cause], ['remains', cause]);
   assert.equal(verdict('restart_preview', 'failed', 'no_preview').verdict, 'not_executed');
+  for (const current_cause of ['provider_5xx', 'provider_rate_limit', 'budget_limit', 'sdk_not_ready']) {
+    const o = verdict('retry_diagnostics', 'succeeded', 'token_ok', { current_cause });
+    assert.deepEqual([o.verdict, o.cause, o.basis], ['executed', current_cause, 'token_ok_cause_not_covered']);
+  }
+  for (const current_cause of ['network', 'auth_expired', 'class_not_open', '']) {
+    assert.equal(verdict('retry_diagnostics', 'succeeded', 'token_ok', { current_cause }).verdict, 'resolved');
+  }
   // Token: which issue the app verified. No issue id = no claim about a re-issued token.
   assert.equal(verdict('refresh_connection', 'succeeded', 'profile_verified').verdict, 'executed');
   assert.equal(verdict('refresh_connection', 'succeeded', 'profile_verified', { reports_followup: false }).basis, 'profile_valid_app_cannot_name_issue');
@@ -95,6 +102,7 @@ try {
   };
 
   await check('AT-40 selected seats only: a batch reports each target\'s outcome; offline and old-app seats are never counted as resolved', async () => {
+    await f.sync(a1.credential, [f.event(++seq[1], 'error', { class: 'network', blocking: true })], 1);
     const sent = (await f.command('retry_diagnostics', ['A1', 'A3', 'A4'])).json; assert.deepEqual(sent.targets.map((t) => [t.seat_id, t.outcome.verdict]), [['A1', 'pending'], ['A3', 'pending'], ['A4', 'not_executed']]);
     assert.equal(sent.targets[2].outcome.basis, 'not_reached_app'); assert.deepEqual([sent.summary.outcomes.resolved, sent.summary.outcomes.not_executed], [0, 1]);
     await runOn(a1, 1, sent.command.id, 'succeeded', 'token_ok'); await runOn(a3, 3, sent.command.id, 'succeeded', 'service_unreachable');
@@ -105,6 +113,18 @@ try {
     // The seat that was not selected has no command and no outcome at all.
     const a2seat = await seatOf('A2'); assert.equal(a2seat.last_command, null); assert.equal(f.db.prepare("SELECT count(*) n FROM ops_command_targets WHERE seat_id='A2'").get().n, 0);
     const a3seat = await seatOf('A3'); assert.deepEqual([a3seat.last_command.outcome.verdict, a3seat.last_command.outcome.next], ['remains', 'check_network_not_pc']); assert.equal(a3seat.last_command.target_grant, undefined, 'ledger internals stay out of the board');
+  });
+
+  await check('AT-40 token diagnostics cannot resolve provider, budget or SDK faults in either API view', async () => {
+    for (const reason of ['provider_5xx', 'provider_rate_limit', 'budget_limit', 'sdk_not_ready']) {
+      await f.sync(a1.credential, [f.event(++seq[1], 'error', { class: reason, blocking: true })], 1);
+      const sent = (await f.command('retry_diagnostics', ['A1'])).json;
+      await runOn(a1, 1, sent.command.id, 'succeeded', 'token_ok');
+      const outcome = (await view(sent.command.id)).targets[0].outcome;
+      const seat = await seatOf('A1');
+      assert.deepEqual([outcome.verdict, outcome.cause, seat.last_command.outcome.verdict, seat.reason], ['executed', reason, 'executed', reason]);
+    }
+    await f.sync(a1.credential, [f.event(++seq[1], 'error', { class: 'sdk_not_ready', blocking: false, cleared: true })], 1);
   });
 
   await check('AT-40 token: an existing issue re-checked, a re-issued token activated, and the old one still in the app are three different answers', async () => {
