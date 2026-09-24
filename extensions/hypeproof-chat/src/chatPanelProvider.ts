@@ -2898,8 +2898,19 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         const cwd=this.resolveCoachCwd();
         if(!cwd) throw new Error('개발 작업 폴더를 먼저 여세요.');
         // #1297 (E4-2): 강사 모드(issuer 토큰)일 때만 Chalk 도구를 붙인다(SUB-06).
+        // #1295 (E2-6): cwd와 requestConfirmation 추가 — 작업 사본 파일 I/O 및 덮어쓰기 확인.
         const chalkCtx = await chalkToolsEnabled(this.context.secrets)
-          ? { serverUrl: proxyUrl, secrets: this.context.secrets }
+          ? {
+              serverUrl: proxyUrl,
+              secrets: this.context.secrets,
+              cwd,
+              requestConfirmation: async (message: string): Promise<boolean> => {
+                const answer = await vscode.window.showWarningMessage(
+                  message, { modal: true }, "계속", "취소",
+                );
+                return answer === "계속";
+              },
+            }
           : undefined;
         const result=await runLocalCoach({config:local,profile,cwd,
           history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,

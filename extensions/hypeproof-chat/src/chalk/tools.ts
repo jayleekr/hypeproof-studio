@@ -1,13 +1,15 @@
-// Chalk 도구 층 (E4-2 / #1297).
+// Chalk 도구 층 (E4-2 / #1297, E2-6 / #1295).
 //
 // 도구는 한 벌이다(SUB-07): 버튼·Claude MCP·Codex dynamicTools 셋 다
 // 여기 정의된 실행 함수를 부른다. 판단 로직은 없다 — 서버가 판정한다.
 // 인증은 저장된 issuer 토큰. 토큰은 서버로만 가고 모델 입력·결과에 섞이지 않는다.
 //
-// 이번 PR 에 넣는 도구: chalk_check_plan · chalk_get_knowledge · chalk_recommend_methods.
-// 나머지(set_inputs·save_plan·generator_brief)는 E2-6 에서 추가한다.
+// 이번 PR(#1295, E2-6)에 추가하는 도구:
+//   chalk_set_inputs · chalk_generator_brief · chalk_save_plan · chalk_open_course
 
 import type * as vscode from "vscode";
+import * as nodePath from "node:path";
+import * as nodeFs from "node:fs/promises";
 
 // ─── 공통 타입 ─────────────────────────────────────────────────────────────
 
@@ -18,6 +20,16 @@ export interface ChalkToolContext {
   secrets: vscode.SecretStorage;
   /** AbortSignal: 사용자가 중단하면 in-flight 요청도 끊는다. */
   signal?: AbortSignal;
+  /**
+   * 강사 작업 폴더 (cwd). 작업 사본 파일(chalk/<course>/지도안.html)을 여기에 쓴다.
+   * chalk_open_course · chalk_generator_brief · chalk_save_plan 이 사용한다.
+   */
+  cwd?: string;
+  /**
+   * 덮어쓰기 전에 강사에게 물을 때 호출하는 콜백 (extension.ts 쪽이 VS Code modal로 구현).
+   * `true` 반환 → 진행, `false` → 취소.
+   */
+  requestConfirmation?: (message: string) => Promise<boolean>;
 }
 
 export interface ChalkToolDefinition {
@@ -250,12 +262,275 @@ export async function execRecommendMethods(
   );
 }
 
+// ─── 작업 사본 파일 유틸 ──────────────────────────────────────────────────
+
+/** 강사 작업 폴더의 작업 사본 절대 경로. chalk/<course>/지도안.html 또는 운영안.html */
+export function workingCopyPath(cwd: string, course: string, file: string): string {
+  const fileName = file === "ops" ? "운영안.html" : "지도안.html";
+  return nodePath.join(cwd, "chalk", course, fileName);
+}
+
+/** 로컬 변경 여부: 파일이 없으면 false, 서버본과 다르면 true */
+async function hasLocalChanges(filePath: string, serverHtml: string): Promise<boolean> {
+  try {
+    const local = await nodeFs.readFile(filePath, "utf-8");
+    return local.trimEnd() !== serverHtml.trimEnd();
+  } catch {
+    return false;
+  }
+}
+
+// ─── E2-6 도구 추가 (#1295) ────────────────────────────────────────────────
+
+// chalk_set_inputs — PUT /admin/chalk/cohorts/:cohort/courses/:course/inputs
+// 입력 다섯 가지를 서버 초안에 기록한다.
+export const CHALK_SET_INPUTS_DEF: ChalkToolDefinition = {
+  name: "chalk_set_inputs",
+  description:
+    "강의 초안에 입력 다섯 가지(대상·자산·방식·요구·형식)와 모형 추천용 닫힌 어휘 키(vocab)를 저장합니다. " +
+    "vocab.goals·vocab.conditions 키는 chalk_get_knowledge로 vocab:goal·vocab:condition 문서를 읽고 그 안에서만 골라야 합니다. " +
+    "어휘 밖 키는 서버가 400으로 막습니다. 강사에게 선택 키를 어휘 문서의 label로 보여주고 확인을 받으세요.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID. 강사 토큰 scope에서 선택" },
+      course: { ...str, description: "강의 ID (예: lesson-01)" },
+      audience: { ...str, description: "학습 대상 설명" },
+      assets: {
+        type: "array",
+        items: { type: "string" },
+        description: "적용할 7 AI Native Assets (예: [\"intent\",\"verify\"])",
+      },
+      teaching_style: { ...str, description: "수업 방식 설명" },
+      requirements: { ...str, description: "강사 추가 요구사항" },
+      format: {
+        type: "string",
+        enum: ["workshop", "track"],
+        description: "수업 형식",
+      },
+      vocab: {
+        type: "object",
+        description: "모형 추천용 닫힌 어휘 키. chalk_get_knowledge(vocab:goal·vocab:condition)에서 고른 값만 유효",
+        properties: {
+          goals: { type: "array", items: { type: "string" }, description: "학습 목표 키 목록" },
+          conditions: { type: "array", items: { type: "string" }, description: "학습 조건 키 목록" },
+          learner_level: {
+            type: "string",
+            enum: ["novice", "intermediate", "any"],
+            description: "학습자 수준",
+          },
+          has_guidance: { type: "boolean", description: "교사 지도 여부" },
+        },
+        required: ["goals", "conditions", "learner_level", "has_guidance"],
+        additionalProperties: false,
+      },
+      expected_revision: { type: "number", description: "현재 초안 revision (충돌 방지)" },
+      request_id: { ...str, description: "멱등 키 (UUID). 강사 세션마다 새 UUID" },
+      profile_id: { ...str, description: "프로필 ID (신규 초안이면 생략)" },
+    },
+    ["cohort", "course", "audience", "assets", "teaching_style", "requirements", "format", "vocab", "expected_revision", "request_id"],
+  ),
+};
+
+export async function execSetInputs(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, audience, assets, teaching_style, requirements, format,
+    vocab, expected_revision, request_id, profile_id } =
+    input as {
+      cohort: string; course: string;
+      audience: string; assets: string[]; teaching_style: string;
+      requirements: string; format: "workshop" | "track";
+      vocab: { goals: string[]; conditions: string[]; learner_level: string; has_guidance: boolean };
+      expected_revision: number; request_id: string; profile_id?: string;
+    };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+  const body: Record<string, unknown> = {
+    audience, assets, teaching_style, requirements, format,
+    vocab, expected_revision, request_id,
+  };
+  if (profile_id !== undefined) body.profile_id = profile_id;
+  return issuerFetch(
+    ctx,
+    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/inputs`,
+    { method: "PUT", body },
+  );
+}
+
+// chalk_generator_brief — GET /admin/chalk/cohorts/:cohort/courses/:course/brief?file=
+// 생성 지침 묶음(authoring_order·skeleton_html 등)을 가져오고 작업 사본 뼈대를 초기화한다.
+export const CHALK_GENERATOR_BRIEF_DEF: ChalkToolDefinition = {
+  name: "chalk_generator_brief",
+  description:
+    "생성 지침 묶음을 가져옵니다. skeleton_html을 강사 작업 폴더 chalk/<course>/지도안.html에 씁니다. 로컬 변경이 있으면 덮어쓰기 전에 확인합니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+      file: { type: "string", enum: ["lesson", "ops"], description: "파일 종류 (기본: lesson)" },
+    },
+    ["cohort", "course"],
+  ),
+};
+
+export async function execGeneratorBrief(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, file = "lesson" } = input as {
+    cohort: string; course: string; file?: string;
+  };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+
+  const brief = await issuerFetch(
+    ctx,
+    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/brief?file=${encodeURIComponent(file)}`,
+  ) as { skeleton_html?: string };
+
+  // 작업 사본에 뼈대 쓰기 (cwd가 있을 때만)
+  if (ctx.cwd && brief.skeleton_html) {
+    const filePath = workingCopyPath(ctx.cwd, course, file);
+    const dirty = await hasLocalChanges(filePath, brief.skeleton_html);
+    if (dirty) {
+      const ok = await ctx.requestConfirmation?.(
+        `chalk/${course}/지도안.html에 저장되지 않은 변경이 있습니다. 서버 뼈대로 덮어씁니까?`,
+      );
+      if (ok === false) {
+        return { ...brief, local_file: filePath, overwrite_skipped: true };
+      }
+    }
+    await nodeFs.mkdir(nodePath.dirname(filePath), { recursive: true });
+    await nodeFs.writeFile(filePath, brief.skeleton_html, "utf-8");
+    return { ...brief, local_file: filePath };
+  }
+
+  return brief;
+}
+
+// chalk_open_course — GET /admin/chalk/cohorts/:cohort/courses/:course/plan?file=
+// 서버 계획서 원문을 가져와 작업 사본 파일로 연다.
+export const CHALK_OPEN_COURSE_DEF: ChalkToolDefinition = {
+  name: "chalk_open_course",
+  description:
+    "서버 계획서 원문(HTML)을 chalk/<course>/지도안.html에 가져옵니다. 로컬 변경이 있으면 덮어쓰기 전에 확인합니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+      file: { type: "string", enum: ["lesson", "ops"], description: "파일 종류 (기본: lesson)" },
+    },
+    ["cohort", "course"],
+  ),
+};
+
+export async function execOpenCourse(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, file = "lesson" } = input as {
+    cohort: string; course: string; file?: string;
+  };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+
+  const result = await issuerFetch(
+    ctx,
+    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan?file=${encodeURIComponent(file)}`,
+  ) as { html?: string; sha256?: string; knowledge_version?: number; ref_kind?: string; ref?: string };
+
+  if (ctx.cwd && result.html) {
+    const filePath = workingCopyPath(ctx.cwd, course, file);
+    const dirty = await hasLocalChanges(filePath, result.html);
+    if (dirty) {
+      const ok = await ctx.requestConfirmation?.(
+        `chalk/${course}/지도안.html에 저장되지 않은 변경이 있습니다. 서버 원문으로 덮어씁니까?`,
+      );
+      if (ok === false) {
+        return { ...result, local_file: filePath, overwrite_skipped: true };
+      }
+    }
+    await nodeFs.mkdir(nodePath.dirname(filePath), { recursive: true });
+    await nodeFs.writeFile(filePath, result.html, "utf-8");
+    return { ...result, local_file: filePath };
+  }
+
+  return result;
+}
+
+// chalk_save_plan — PUT /admin/chalk/cohorts/:cohort/courses/:course/plan
+// 작업 사본 파일을 읽어 서버 초안에 저장한다. revision 충돌 시 "다시 열기"를 안내한다.
+export const CHALK_SAVE_PLAN_DEF: ChalkToolDefinition = {
+  name: "chalk_save_plan",
+  description:
+    "chalk/<course>/지도안.html을 읽어 서버 초안에 저장합니다. 저장 응답에 검사 결과(findings)가 포함됩니다. revision 충돌 시 chalk_open_course로 다시 열도록 안내합니다.",
+  inputSchema: schema(
+    {
+      cohort: { ...str, description: "코호트 ID" },
+      course: { ...str, description: "강의 ID" },
+      file: { type: "string", enum: ["lesson", "ops"], description: "파일 종류 (기본: lesson)" },
+      knowledge_version: { type: "number", description: "초안에 쓴 지식 버전 (필수)" },
+      expected_revision: { type: "number", description: "현재 초안 revision (충돌 방지)" },
+      request_id: { ...str, description: "멱등 키 (UUID)" },
+    },
+    ["cohort", "course", "knowledge_version", "expected_revision", "request_id"],
+  ),
+};
+
+export async function execSavePlan(
+  ctx: ChalkToolContext,
+  input: Record<string, unknown>,
+): Promise<unknown> {
+  const { cohort, course, file = "lesson", knowledge_version, expected_revision, request_id } =
+    input as {
+      cohort: string; course: string; file?: string;
+      knowledge_version: number; expected_revision: number; request_id: string;
+    };
+  if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
+  if (!ctx.cwd) throw new Error("작업 폴더(cwd)가 설정되지 않았습니다.");
+
+  const filePath = workingCopyPath(ctx.cwd, course, file);
+
+  // chalk/<course>/ 안의 파일만 허용 (evaluateSdkToolUse workspace_root 경계와 같은 원칙)
+  const chalkRoot = nodePath.resolve(ctx.cwd, "chalk", course);
+  const resolved = nodePath.resolve(filePath);
+  if (!resolved.startsWith(chalkRoot + nodePath.sep) && resolved !== chalkRoot) {
+    throw new Error("chalk 작업 폴더 밖의 파일은 저장할 수 없습니다.");
+  }
+
+  let html: string;
+  try {
+    html = await nodeFs.readFile(filePath, "utf-8");
+  } catch {
+    throw new Error(`작업 사본을 찾을 수 없습니다: ${filePath}. chalk_open_course 또는 chalk_generator_brief를 먼저 실행하세요.`);
+  }
+
+  try {
+    return await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/plan`,
+      { method: "PUT", body: { file, html, knowledge_version, expected_revision, request_id } },
+    );
+  } catch (err) {
+    // 409 = revision 충돌 — 조용히 덮어쓰지 않고 다시 열기 안내
+    if (err instanceof Error && err.message.startsWith("서버 오류 409")) {
+      return {
+        error: "revision_conflict",
+        message: "다른 곳에서 저장됐습니다. chalk_open_course로 최신 버전을 다시 열고 변경을 다시 적용하세요.",
+      };
+    }
+    throw err;
+  }
+}
+
 // ─── 도구 묶음 ─────────────────────────────────────────────────────────────
 
 export const CHALK_TOOL_DEFINITIONS: ChalkToolDefinition[] = [
   CHALK_CHECK_PLAN_DEF,
   CHALK_GET_KNOWLEDGE_DEF,
   CHALK_RECOMMEND_METHODS_DEF,
+  CHALK_SET_INPUTS_DEF,
+  CHALK_GENERATOR_BRIEF_DEF,
+  CHALK_OPEN_COURSE_DEF,
+  CHALK_SAVE_PLAN_DEF,
 ];
 
 type ExecutorMap = Record<
@@ -267,6 +542,10 @@ export const CHALK_TOOL_EXECUTORS: ExecutorMap = {
   chalk_check_plan: execCheckPlan,
   chalk_get_knowledge: execGetKnowledge,
   chalk_recommend_methods: execRecommendMethods,
+  chalk_set_inputs: execSetInputs,
+  chalk_generator_brief: execGeneratorBrief,
+  chalk_open_course: execOpenCourse,
+  chalk_save_plan: execSavePlan,
 };
 
 /**

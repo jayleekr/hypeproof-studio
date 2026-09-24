@@ -104,6 +104,14 @@
         "title": "Chalk: 초안 검사 (강사용)"
       },
       {
+        "command": "hypeproof-chat.chalk.openCourse",
+        "title": "Chalk: 강의 초안 열기 (강사용)"
+      },
+      {
+        "command": "hypeproof-chat.chalk.savePlan",
+        "title": "Chalk: 계획서 저장 (강사용)"
+      },
+      {
         "command": "hypeproof-chat.previewActiveFile",
         "title": "HypeProof: HTML 미리보기 (옆 패널)",
         "icon": "$(open-preview)"
