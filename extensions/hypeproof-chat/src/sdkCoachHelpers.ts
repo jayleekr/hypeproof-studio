@@ -920,6 +920,9 @@ export function buildSdkGatewayEnv(
   fundingSource?: string;
   /** #751 U3 — the lesson binding this turn EXPECTS (from the profile it was started under). An expectation, never a selector. */
   lessonBinding?: string;
+  /** #751 G2 — the lesson step on screen and the learner's help mode for this turn. Teaching pointers the Service re-checks; never grants. */
+  lessonStep?: string;
+  helpMode?: string;
     proxyUrl: string;
     token: string;
     /** 작업 폴더 절대경로 — 워커가 `x-hps-workspace` 로 받아 시스템 블록에 넣는다. */
@@ -979,7 +982,7 @@ export function buildSdkGatewayEnv(
   // 같은 이유로 인코딩이 필요하다(HTTP 헤더는 바이트 안전해야 한다).
   // Owned headers never inherit an ambient course choice or correlation ID.
   const inheritedHeaders = (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n')
-    .filter(line => !/^\s*x-hps-(effort|turn-id|funding-source|lesson-binding)\s*:/i.test(line)).join('\n').trim();
+    .filter(line => !/^\s*x-hps-(effort|turn-id|funding-source|lesson-binding|lesson-step|help-mode)\s*:/i.test(line)).join('\n').trim();
   if (inheritedHeaders) env.ANTHROPIC_CUSTOM_HEADERS = inheritedHeaders;
   else delete env.ANTHROPIC_CUSTOM_HEADERS;
   delete env.CLAUDE_CODE_EFFORT_LEVEL;
@@ -987,6 +990,11 @@ export function buildSdkGatewayEnv(
   if(args.fundingSource){if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(args.fundingSource))throw Error('invalid funding source');custom.push(`x-hps-funding-source: ${args.fundingSource}`);}
   if (args.effort) custom.push(`x-hps-effort: ${args.effort}`);
   if (args.lessonBinding && /^(token:[a-f0-9]{16}|[a-f0-9]{32})$/.test(args.lessonBinding)) custom.push(`x-hps-lesson-binding: ${args.lessonBinding}`);
+  // A help mode is meaningful only for a named step: the Service refuses one without it, so neither goes out alone.
+  if (args.lessonStep && /^[a-zA-Z0-9_-]{1,64}$/.test(args.lessonStep)) {
+    custom.push(`x-hps-lesson-step: ${args.lessonStep}`);
+    if (args.helpMode && /^[a-z_]{1,32}$/.test(args.helpMode)) custom.push(`x-hps-help-mode: ${args.helpMode}`);
+  }
   if (args.turnId && /^[a-zA-Z0-9_-]{1,128}$/.test(args.turnId)) custom.push(`x-hps-turn-id: ${args.turnId}`);
   if (args.workspace?.trim()) {
     custom.push(`x-hps-workspace: ${encodeURIComponent(args.workspace.trim())}`);
@@ -1032,6 +1040,9 @@ export function buildSdkQueryOptions(
   fundingSource?: string;
   /** #751 U3 — the lesson binding this turn EXPECTS (from the profile it was started under). An expectation, never a selector. */
   lessonBinding?: string;
+  /** #751 G2 — the lesson step on screen and the learner's help mode for this turn. Teaching pointers the Service re-checks; never grants. */
+  lessonStep?: string;
+  helpMode?: string;
     proxyUrl: string;
     token: string;
     cwd?: string;
@@ -1088,6 +1099,8 @@ export function buildSdkQueryOptions(
       turnId: args.turnId,
       fundingSource: args.fundingSource,
       lessonBinding: args.lessonBinding,
+      lessonStep: args.lessonStep,
+      helpMode: args.helpMode,
       token: args.token,
       ...(args.configDir ? { configDir: args.configDir } : {}),
       // 시스템 프롬프트 경로는 워커가 버리므로 헤더로 보낸다 (#431).

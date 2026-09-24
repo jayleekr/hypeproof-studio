@@ -11,6 +11,7 @@ import { logs } from "./routes/logs";
 import { admin } from "./routes/admin";
 import { report } from "./routes/report";
 import { classroomStudent, purgeExpiredClassroomShares } from "./routes/classroom";
+import { rehearsalReport } from './routes/rehearsal-report';
 import { classroomOpsApp } from "./routes/classroom-ops";
 import { classroomCollectApp } from "./routes/classroom-collect";
 import { classroomReportsRunner } from "./routes/classroom-reports";
@@ -99,6 +100,8 @@ app.route("/v1/classroom/delivery-webhooks", classroomDeliveryWebhooks);
 app.route("/v1/classroom/ops/collect", classroomCollectApp);
 app.route("/v1/classroom/ops/runner", classroomReportsRunner);
 app.route("/v1/classroom/ops", classroomOpsApp);
+// #1012 · #751 G2 — the rehearsal App report; its own learner-code check, before the sharing router's `*` middleware.
+app.route('/v1/classroom/rehearsal', rehearsalReport);
 app.route("/v1/classroom", classroomStudent);
 app.route("/admin", admin);
 
