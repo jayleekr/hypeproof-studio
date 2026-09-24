@@ -46,6 +46,9 @@ fi
 SAFE_BRANCH="${BRANCH//\//-}"
 WORKTREE_DIR="${TMPDIR:-/tmp}studio-review-${SAFE_BRANCH}"
 
+# macOS BSD date does not support %N; use python3 for millisecond timestamps.
+ms() { python3 -c 'import time;print(int(time.time()*1000))'; }
+
 cleanup() {
   echo ""
   echo "=== Cleanup ==="
@@ -69,21 +72,25 @@ echo ""
 echo "=== [1/6] Worktree ==="
 if [[ -d "$WORKTREE_DIR" ]]; then
   echo "Reusing existing worktree at $WORKTREE_DIR"
+  git -C "$REPO" fetch origin "$BRANCH" --quiet
+  git -C "$WORKTREE_DIR" checkout --detach "origin/$BRANCH" 2>&1
+  echo "Updated to: $(git -C "$WORKTREE_DIR" rev-parse HEAD)"
 else
-  T1=$(date +%s%3N)
+  T1=$(ms)
   git -C "$REPO" fetch origin "$BRANCH" --quiet
   git -C "$REPO" worktree add "$WORKTREE_DIR" "origin/$BRANCH" 2>&1
-  T1_END=$(date +%s%3N)
+  T1_END=$(ms)
   echo "Worktree ready in $(( T1_END - T1 ))ms"
+  echo "Building: $(git -C "$WORKTREE_DIR" rev-parse HEAD)"
 fi
 
 # ── Step 2: extension deps ────────────────────────────────────────────────────
 echo ""
 echo "=== [2/6] npm ci ==="
-T2=$(date +%s%3N)
+T2=$(ms)
 (cd "$WORKTREE_DIR/extensions/hypeproof-chat" && npm ci --prefer-offline --silent 2>&1)
 (cd "$WORKTREE_DIR/extensions/hypeproof-chat/webview-ui" && npm ci --prefer-offline --silent 2>&1)
-T2_END=$(date +%s%3N)
+T2_END=$(ms)
 echo "npm ci done in $(( T2_END - T2 ))ms"
 
 # ── Step 3: local server ──────────────────────────────────────────────────────
@@ -118,7 +125,7 @@ if ls "$WORKER_DIR"/migrations/*.sql >/dev/null 2>&1; then
   done
 fi
 
-T3=$(date +%s%3N)
+T3=$(ms)
 (cd "$WORKER_DIR" && npx wrangler dev --local --port "$WRANGLER_PORT" 2>&1 &)
 SERVER_PID=$!
 echo "wrangler dev PID: $SERVER_PID"
@@ -131,7 +138,7 @@ for i in $(seq 1 30); do
   fi
   sleep 1
 done
-T3_END=$(date +%s%3N)
+T3_END=$(ms)
 echo "Server ready in $(( T3_END - T3 ))ms"
 
 # ── Step 4: instructor token ──────────────────────────────────────────────────
@@ -178,11 +185,11 @@ fi
 # ── Step 5: Dev app ───────────────────────────────────────────────────────────
 echo ""
 echo "=== [5/6] Dev app ==="
-T5=$(date +%s%3N)
+T5=$(ms)
 python3 "$WORKTREE_DIR/scripts/studio-dev.py" run \
   --provider "$PROVIDER" \
   --service local 2>&1
-T5_END=$(date +%s%3N)
+T5_END=$(ms)
 echo "studio-dev.py run done in $(( T5_END - T5 ))ms"
 
 # ── Step 6: instructions ──────────────────────────────────────────────────────
