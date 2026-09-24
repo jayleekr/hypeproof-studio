@@ -4,6 +4,7 @@ import {NativeObservationPanel} from './NativeObservationPanel';
 import { MissionHeader } from './MissionHeader';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { InstructorInbox } from './InstructorInbox';
+import { HelpRequest } from './HelpRequest';
 import { addImportRef, canUndoImport, dropImportRef, importIntoDraft, type ImportRef, type LastImport } from './draftImport';
 import { isObservationFormat, showsObservationResults } from '../../src/nativeObservationContract';
 import { MarkdownText } from './MarkdownText';
@@ -254,6 +255,15 @@ export function ChatPanel(props: Props) {
   useEffect(() => {
     const off = onHostMessage((msg) => { if (msg.type === "inboxState") setInbox(msg.inbox); });
     const ask = () => { if (document.visibilityState !== "hidden") postToHost({ type: "inboxRequest" }); };
+    ask(); document.addEventListener("visibilitychange", ask);
+    const stop = () => { off(); document.removeEventListener("visibilitychange", ask); };
+    return stop;
+  }, []);
+  // #751 native help — the host reads the learner, class connection and Service again for every draw; nothing is kept here.
+  const [help, setHelp] = useState<import("../../src/classroomHelp").HelpView | null>(null);
+  useEffect(() => {
+    const off = onHostMessage((msg) => { if (msg.type === "helpState") setHelp(msg.help); });
+    const ask = () => { if (document.visibilityState !== "hidden") postToHost({ type: "helpRequest" }); };
     ask(); document.addEventListener("visibilitychange", ask);
     const stop = () => { off(); document.removeEventListener("visibilitychange", ask); };
     return stop;
@@ -750,6 +760,8 @@ export function ChatPanel(props: Props) {
       {/* #751 U2 — instructor notices/materials: the coach rail's "강사 메시지" kind (SX-06), outside the message stream
           (SX-05), closed by default, no Primary (SX-04). Drawn with or without a lesson. */}
       <InstructorInbox inbox={inbox} post={postToHost} promptImport={{ onImport: importPrompt, onUndo: undoImport, disabled: frozen, draft, last: lastImport, note: importNote }} />
+      {/* #751 native help — the learner's own request to the instructor of this class. Same rail, closed by default, no Primary. */}
+      <HelpRequest view={help} post={postToHost} />
 
       {/* Region D — the completion gate and the Evidence drawer (SX-14·17). Drawn only
           when the host sends `learningState`. On a connection that does not send it (a
