@@ -10,6 +10,38 @@
 
 ## 로드맵
 
+<a id="one-instructor-classroom"></a>
+
+### New umbrella feature: curriculum-connected operation by one instructor
+
+Added 2026-09-21 from **TJ's explicit product request**. This is a development
+roadmap item, not a completed feature. [Product intent](../PRODUCT-INTENT.md#one-instructor-classroom-intent)
+owns the motivation and attribution. The existing epics below remain the execution
+units; this grouping creates neither another product nor another implementation queue.
+
+| Category | Intent and user-visible addition | Existing delivery path | Remaining boundary |
+|---|---|---|---|
+| Curriculum authoring | Combine reusable lesson components and adapt examples to the audience; curriculum changes configure Studio's AI role, available tools, exercise flow and completion criteria | Chalk BASE-04, CH-01/04/06/07, ENV-01/03, EDU-02, VER-01/02; E1/E2; #1011/#1012/#1015 | Existing authoring and U3 version switching are partial foundations. A usable component-composition flow and student-context rehearsal still need acceptance; a visual block editor is not claimed implemented |
+| Live monitoring and communication | See who has entered, their stage, submissions and help requests; connect individual feedback and group recurring problems to reduce instructor attention switching | ADM-02/04/05/09; CLS-01/02/03; E5 #751 and #732 | Existing metadata boards and selected sharing remain useful. One-instructor operation and reduced waiting are field outcomes, still unmeasured |
+| Remote intervention | Issue/verify participation tokens, distribute to selected/all learners, collect permitted data and recover known faults with per-learner effect confirmation | ADM-01/03/07/10/11/13/14; E5 U1–U4, E3 recovery | U1/U2 have local acceptance; U3 has direct Mac prompt-flow evidence but a remaining mixed-basis predicate defect is under correction. Cause-specific recovery and collection extensions follow; external environments remain NOT RUN |
+
+**Finish the current delivery slice before expanding.** First close the reproduced
+U3 basis defect, then accept the bounded U4 known-fault actions and the minimum
+remaining collection flow needed for the agreed class scenario. Reuse the current
+authoring, selection and result UI. Do not start a general block editor, unrestricted
+remote desktop, new messaging product or a second storage/auth system to finish
+this slice. Keep curriculum-composition improvements and optional extensions in
+their existing linked backlog rather than silently dropping or implementing them.
+
+**Consolidation after completion.** In the product's main Features section retain
+one entry, “Curriculum-connected classroom operation”, with these three categories
+inside it. Promote a capability only with linked implementation and actual supported-
+environment acceptance. Preserve unfinished categories and known limits in the
+roadmap. Do not equate local acceptance, release, operational activation and measured
+one-instructor operation. The [integrated acceptance scenario](../testing/classroom-admin.md#one-instructor-acceptance)
+is the finish criterion; the individual U1/U2/U3 records remain the evidence for their
+own scope. No new deadline, seat-capacity claim or production approval is introduced.
+
 GitHub 하위 에픽: [E1 #747](https://github.com/jayleekr/hypeproof-studio/issues/747),
 [E2 #748](https://github.com/jayleekr/hypeproof-studio/issues/748),
 [E3 #749](https://github.com/jayleekr/hypeproof-studio/issues/749),
@@ -365,7 +397,7 @@ rollback은 먼저 delivery/collect/commands 신규 enqueue를 끄고 관측을 
 | U1 공통 선택 + 대상 회수 — **구현·실행 완료(2026-09-21)**, 독립 검토 인수(tip `4867ddf`, 인계 지시 기준: 선택 범위·명단 경합·늦은 확인·실패/만료·늦은 검증·시간 순서 4건 대조, 최종 CI 완료·실패 0). 인수 ID는 AT-42/43([정정 원장](../testing/classroom-admin.md#at-id-ledger-20260921)) | Chalk 공통 선택(개별·전체·도움 필요/연결됨/미연결) + `report-batches`의 명시적 `targets`(collect_only). 예상과 달리 **migration 0022가 필요했다**(불변 범위·요청 해시). 독립 재현 2건(범위 조회 fail-open, 커밋 경계 좌석 교체)을 같은 단계에서 닫음. [계약](../requirements/classroom-admin.md#remote-management-u1-20260921) · [실행 기록](../testing/classroom-admin.md#remote-management-u1-run-20260921) | 작음→중간 | 그룹은 상태 필터로 확정(저장 그룹 없음) |
 | U2 대상 배포 — 공지/자료 — **구현·실행 완료(2026-09-21) · 운영 비활성 · 첫 인수 반려 → 수정(`9d85718`) → 조율 측 로컬 인수**(병합·운영 승인 아님 · 남은 NOT RUN은 [AT 원장](../testing/classroom-admin.md#at-id-ledger-20260921)) ([실행 기록](../testing/classroom-admin.md#remote-management-u2-run-20260921) · [재인수 수정](../testing/classroom-admin.md#remote-management-u2-reaccept-20260921)) | [계약](../requirements/classroom-admin.md#remote-management-u2-20260921) · [인수 계획 AT-44](../testing/classroom-admin.md#remote-management-u2-plan-20260921). 처음 적었던 ‘좌석별 원하는 revision 하나(`control_revision` 방식)’는 버렸다 — 여러 자료가 한 회차에 공존하므로 **object별 revision + 배포 실행 + 참가자에 묶인 대상 행**이다. sync 응답으로 자격이 확인된 그 좌석에만 전달, 완료 = 기기의 **보관함 반영** 보고. 아래 ‘U2 설계 계약과 구현 순서’ | 중간→큼 (migration 1, Service route 1, App 보관함 + 표시면 2, Chalk 작성·결과) | 아래 표의 미결(링크 host·열람 수집·보존·권한 부여·활성화). 배포 1순위와 오프라인 처리는 사용자 지시로 정해짐 |
 | U3 대상 배포 — 수업 프롬프트·수업 설정 — **구현 · 로컬 합성·workerd D1·브라우저·실제 Mac M2 실행 · 인수 전 · 운영 미승인** (2026-09-21: 설계 `75f1f37`→`1190e5f` → 구현(Draft PR #1227) → `d32a191` 독립 검토의 결함 9건 보완 → `e7d719a` 검토의 실패 요청 마스킹 보완(기준 판정을 개수 대조에서 요청 단위 식별 연결로). [실행 기록](../testing/classroom-admin.md#remote-management-u3-run-20260921) · [검토 보완 기록](../testing/classroom-admin.md#remote-management-u3-review-20260921). 섞인 기준의 보류는 보고서 기능의 완료가 아니며 기준별 분할 보고서·U4·U1b는 후속) | [계약](../requirements/classroom-admin.md#remote-management-u3-20260921) · [인수 계획 AT-45/46](../testing/classroom-admin.md#remote-management-u3-plan-20260921). 프롬프트는 U2의 객체 종류 확장(migration 없음)이고, 설정은 그것만으로 되지 않는다 — 실행 설정이 토큰에 서명으로 고정돼 있어 **참가자별 binding + gate·`/v1/profile` 공통 resolver + Service가 승인한 turn snapshot + 실행 경계의 증거 + 섞인 기준의 보고서 차단**이 필요하다. ADM-11은 학생에게 보이는 안내 카드와 강사의 영향 요약으로 지킨다. 아래 ‘U3 설계 계약과 구현 순서’ | 큼 (migration 1(테이블 3), resolver 1, 전환 endpoint 1, 실행 경계 2곳, 보고서 진입점 5곳, App preflight·거부 처리, Chalk 종류 2) | 적용 시점의 운영 정책(로컬 가정: 다음 질문부터 — 승인 아님) · class 개설 좌석 허용 여부 |
-| U4 원인별 복구 대응표 + 실제 창 | 원인 5종 × 1순위 조치를 코드 상수·시험으로 고정하고 Chalk에서 눌러 실제 창으로 확인. AT-40 | 작음 | — |
+| U4 원인별 복구 — 원인 → 조치 → 조치 뒤 검증 — **구현 · 로컬 합성·workerd D1·브라우저·실제 Mac M3 실행 · 인수 전 · 운영 비활성**(2026-09-22, migration 없음, 기존 flag·권한) | 기기의 `succeeded`를 해결로 읽지 않는다: 해결 확인·문제 남음·실행만 됨·미확인·실행 안 됨을 그 명령에 연결된 근거(결과 코드 · command_id로 묶인 후속 관측 · Service 자신의 기록)로만 판정. 원인 → 먼저 할 조치, 공통 장애는 개별 PC 조치 없음, 보존 기준값은 조치 전, 강사 중지 뒤 자동 전송 없음, 미리보기 404는 복구 아님, 일시정지의 세 관측. AT-40 ([계약](../requirements/classroom-admin.md#remote-management-u4-20260922) · [실행 기록](../testing/classroom-admin.md#remote-management-u4-run-20260922)) | 작음→중간 | **남김:** 학생별 일시정지 · 승인된 turn의 후속 요청 유예 · 미리보기 상태 신호 · 시작 화면의 재발급 토큰 입력 실기 · 새 포트 재시작 실기 · AT-41 나머지 · U1b |
 
 **결정 필요.** ① 배포 1순위(수업 프롬프트 / 공지·자료 / 수업 설정) ② 오프라인 학생: 재접속 시 적용할지, 언제 만료할지 ③ 그룹의 정의 ④ 학생 프롬프트·결과물 회수를 학생 공유 기반으로 둘지, 강사 요청형을 추가할지(동의 모델이 달라짐) ⑤ 수업 중 설정 version 교체 허용 여부 ⑥ 앱 설치·업데이트·PC 전체 제어 포함 여부(사용자 확인 중 — 현재 범위 아님). (정정 2026-09-21: 이 문단의 원래 끝 문장 ‘Intent 문서에는 **배포 Intent가 없다** — U2 전에 Intent 개정이 먼저다’는 작성 시점의 #1165 원문(INT-CO-01~03) 기준이었다. 같은 날 #1165 브랜치 `docs/751-classroom-ops-intent`에 **INT-CO-04(대상 배포) 개정 제안**이 `ab7ee2f`로 추가됐다. **제안의 존재와 승인은 별개다** — 제안은 있고 owner 승인은 아직 없다. U2 설계는 그 제안에 연결하되 승인된 것으로 쓰지 않으며, 그 문서를 이 브랜치에 복제하지 않는다. ①②는 아래처럼 정해졌고 ③은 U1에서 상태 필터로 확정됐다. ④⑤⑥은 그대로 열려 있다.)
 

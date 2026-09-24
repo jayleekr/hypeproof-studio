@@ -48,5 +48,16 @@ try {
   const key = crypto.randomUUID(), enq = await Promise.all([1, 2, 3, 4].map(() => f.command('retry_diagnostics', [seat], { expected_roster_revision: 2, idempotency_key: key })));
   assert.deepEqual(enq.map((r) => r.status).sort(), [200, 200, 200, 202], enq.map((r) => r.raw).join()); assert.equal((await db.prepare('SELECT count(*) AS n FROM ops_commands').first()).n, 1);
   const windows = await Promise.all([n, 8, 9].map((w) => f.sync(credential, [], w))); assert.equal(windows.filter((r) => r.json?.commands?.length === 1).length, 1, 'exactly one window receives the command'); assert.equal(windows.filter((r) => r.json?.lease === 'owner').length, 1);
-  console.log('PASS actual local workerd/D1: re-runnable migration 0011, atomic roster CAS, single-use pairing under 4 parallel connects, state CAS, one-read status, idempotent parallel enqueue, single lease owner');
+  // U4 on real D1: the follow-up join (json_each + the (run, seat, received_at) index), the outcome in both reads, and what the join costs.
+  { const owner = windows.find((r) => r.json?.commands?.length === 1), w = [n, 8, 9][windows.indexOf(owner)], cmd = owner.json.commands[0];
+    assert.equal((await f.sync(credential, [], w, { receipts: [f.receipt(cmd, 'accepted')] })).json.receipt_acks[0].proceed, true);
+    const done = await f.sync(credential, [f.event(5, 'recovery', { command_id: cmd.command_id, check: 'turn_completed' }), f.event(6, 'recovery', { command_id: 'not-this-command-0001', check: 'turn_completed' })], n, { receipts: [] });
+    assert.deepEqual(done.json.quarantined, [6], 'a follow-up that names no command of this connection is unlinked on real D1 too');
+    await f.sync(credential, [], w, { receipts: [f.receipt(cmd, 'succeeded', 'token_ok')] });
+    const view = (await f.request(f.base + '/commands/' + cmd.command_id)).json; assert.deepEqual([view.targets[0].state, view.targets[0].outcome.verdict, view.summary.outcomes.resolved], ['succeeded', 'resolved', 1]);
+    const board = (await f.request(f.base + '/status')).json.seats.find((x) => x.seat_id === seat); assert.deepEqual([board.last_command.outcome.verdict, board.recommended.action !== undefined, board.control_outcome.service], ['resolved', true, 'never_set']);
+    const cost = await db.prepare("SELECT e.seat_id FROM json_each(?) j JOIN ops_events e ON e.class_run_id=? AND e.seat_id=json_extract(j.value,'$[0]') AND e.received_at>=json_extract(j.value,'$[1]') WHERE e.kind='recovery' AND e.disposition='applied'").bind(JSON.stringify([[seat, 0]]), f.run).all();
+    const total = (await db.prepare('SELECT count(*) AS n FROM ops_events').first()).n, mine = (await db.prepare('SELECT count(*) AS n FROM ops_events WHERE seat_id=?').bind(seat).first()).n;
+    console.log(`U4 follow-up read on local D1: rows_read=${cost.meta.rows_read} for ${mine} event(s) of the seat, ${total} in the run`); assert.ok(cost.meta.rows_read <= mine + 2, 'the read is bounded by the seat\'s own events, not the run\'s ledger'); }
+  console.log('PASS actual local workerd/D1: re-runnable migration 0011, atomic roster CAS, single-use pairing under 4 parallel connects, state CAS, one-read status, idempotent parallel enqueue, single lease owner, U4 linked follow-up + outcome + bounded follow-up read');
 } finally { f?.close(); await mf.dispose(); }

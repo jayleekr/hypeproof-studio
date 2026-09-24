@@ -114,6 +114,8 @@ try {
     assert.ok(!keys.some((k) => /student-(b|d|e|f)\//.test(k)));
     const after = counts(); assert.deepEqual([after.commands - before.commands, after.targets - before.targets, after.outbox - before.outbox], [1, 2, 0], 'one command, two targets, NO evaluation input queued');
     const v = (await f.request(B + '/' + batch)).json; assert.deepEqual(v.items.map((i) => i.state), ['verified', 'not_selected', 'verified', 'not_selected', 'not_selected', 'not_selected']); assert.deepEqual([v.summary.selected, v.summary.verified], [2, 2]);
+    // U4 — the same verdict words as recovery: `resolved` only where the SERVICE verified the receipt; an unselected seat has no verdict at all.
+    assert.deepEqual(v.items.map((i) => i.outcome ?? null), ['resolved', null, 'resolved', null, null, null]);
     // Collecting is not evaluating and not sending, now or by a later click.
     for (const [path, method, body] of [['/advance', 'POST', {}], ['/jobs', 'POST', {}], ['/reports', 'GET'], ['/runner-grants', 'POST', {}], ['/recipients?template_revision=report-link-ko-1', 'GET'], ['/deliver', 'POST', { approval_id: 'x', dry_run: true }]]) { const x = await f.request(B + '/' + batch + path, method, body); assert.deepEqual([x.status, x.json.reason], [409, 'collect_only_batch'], path); }
     assert.equal(evaluatorCalls, 0); assert.equal(f.db.prepare('SELECT count(*) n FROM classroom_report_jobs').get().n, 0);
@@ -122,6 +124,7 @@ try {
   await check('AT-38 a selection does not override consent, withdrawal or presence: each selected seat stays on the batch with its own reason', async () => {
     const before = counts(), r = await post({ idempotency_key: KEY(), ...base, targets: ['A2', 'A4', 'A5', 'A6'] }); assert.equal(r.status, 201, r.raw);
     assert.deepEqual(r.json.items.map((i) => [i.seat_id, i.state]), [['A1', 'not_selected'], ['A2', 'requested'], ['A3', 'not_selected'], ['A4', 'consent_missing'], ['A5', 'withdrawn'], ['A6', 'not_connected']]);
+    const seen = (await f.request(B + '/' + r.json.batch.id)).json.items.map((i) => [i.seat_id, i.outcome ?? null]); assert.deepEqual(seen, [['A1', null], ['A2', 'pending'], ['A3', null], ['A4', 'not_executed'], ['A5', 'not_executed'], ['A6', 'not_executed']], 'U4: asked is pending, no consent / no device is never a success');
     assert.deepEqual([r.json.summary.selected, r.json.summary.held], [4, 2]); assert.equal(counts().targets - before.targets, 1, 'only the one reachable, consenting learner is asked');
     assert.equal((await put(conn.A4.credential, r.json.batch.id, 'events.jsonl', record('student-d'))).json.reason, 'not_requested');
   });

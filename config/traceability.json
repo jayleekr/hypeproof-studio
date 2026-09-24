@@ -2345,6 +2345,24 @@
         },
         {
           "path": "e2e/classroom/mac-lesson-settings.mjs"
+        },
+        {
+          "path": "worker/src/lib/classroom-recovery.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-recovery.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/previewRecovery.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-recovery.test.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-recovery.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-window.mjs"
         }
       ]
     },

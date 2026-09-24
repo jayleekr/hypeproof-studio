@@ -775,6 +775,17 @@ export function classifyTurnError(err: unknown): string {
   return name && name !== "Error" ? name.slice(0, 60) : "error";
 }
 
+/**
+ * #751 U4 — a turn the SDK ended with an error result, in the fields every consumer of a finished turn already reads
+ * (spool `error_kind`, the ops failure status, closeTurn/observation outcome = failed). `status` passes through only when
+ * this turn's stream carried it; otherwise the cause stays unclassified.
+ */
+export function sdkTurnEndFailure(end: { failed: boolean; subtype?: string; status?: number }): { errorKind: string; failure: { status?: number } } | null {
+  if (!end.failed) return null;
+  const subtype = end.subtype && end.subtype !== "success" ? end.subtype : "is_error";
+  return { errorKind: `sdk_result:${subtype}`, failure: end.status !== undefined ? { status: end.status } : {} };
+}
+
 
 /** 파일을 실제로 바꾸는 SDK 도구 — 이 셋의 성공만이 "고쳤다"의 근거다. */
 export const WRITE_TOOL_NAMES = ["Write", "Edit", "MultiEdit"] as const;
@@ -807,4 +818,18 @@ export function lessonStepSignal(
   if (!lesson || typeof msg.stepId !== "string" || (msg.status !== "in_progress" && msg.status !== "submitted")) return null;
   const step = lesson.content.steps.find((x) => x.id === msg.stepId);
   return step ? { lesson_version: lesson.version, step_id: step.id, status: msg.status, source_state: msg.status === "submitted" ? "self_reported" : "real" } : null;
+}
+
+/**
+ * #751 U4 — the work folder a newly entered code should open. A code for the activity that is ALREADY open in this window
+ * (a re-issued code: same class, same learner) keeps the folder the learner is working in — the saved record's folder, or,
+ * for a window entered before records existed, the open folder. Any other activity takes its own default (undefined).
+ * Seen on a real Mac: without this, typing a re-issued code moved the learner to the profile's default folder and away from
+ * their files, draft and conversation.
+ */
+export function reentryWorkspace(o: { candidateActivity?: string; record?: { serverId: string; workspace: string } | null; recordServiceMatches: boolean; openFolder?: string; runningActivity?: string }): string | undefined {
+  const a = o.candidateActivity;
+  if (!a) return undefined;
+  if (o.record) return o.recordServiceMatches && o.record.serverId === a ? o.record.workspace : undefined;
+  return o.openFolder && o.runningActivity === a ? o.openFolder : undefined;
 }
