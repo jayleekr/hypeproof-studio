@@ -73,12 +73,13 @@ try {
     assert.equal(shareCount(), 0, 'no refused request wrote a row');
   });
 
-  let first;
+  let first, firstRequest;
   await check('AT-03/47 a help request with only the learner\'s own question; exact content, recipient and token-capped expiry are what was stored', async () => {
-    const r = await req(SH, 'POST', await body('help-1', A), sa); assert.equal(r.status, 201, r.raw); first = r.json;
+    firstRequest = await body('help-1', A);
+    const r = await req(SH, 'POST', firstRequest, sa); assert.equal(r.status, 201, r.raw); first = r.json;
     assert.deepEqual(first.content, { question: '[합성] 예약 버튼이 안 보여요', prompt: '', response: '', tool_summary: '', artifact_url: '', verification: '' });
     assert.deepEqual([first.recipient_id, first.session_id, first.status, first.revision], ['teacher-a', L.run, 'received', 1]);
-    const p = await verify(sa, L.env.HPS_SIGNING_SECRET); assert.equal(first.expires_at, Math.min(p.exp, first.created_at + 30 * 60));
+    const p = await verify(sa, L.env.HPS_SIGNING_SECRET); assert.equal(first.expires_at, Math.min(p.exp, firstRequest.consent_envelope.expires_at));
     // a request without the new field keeps the exact stored shape it always had (no `question` key)
     const legacy = await req(SH, 'POST', await body('help-legacy', A, { content: { prompt: '내 질문', response: 'AI 답' } }), sa); assert.equal(legacy.status, 201); assert.ok(!('question' in legacy.json.content));
     assert.equal((await req(SH + '/help-legacy', 'DELETE', undefined, sa)).status, 200);
@@ -88,7 +89,10 @@ try {
   });
 
   await check('AT-03/47 lost response: the same id and envelope returns the stored record; any change of the envelope is a conflict', async () => {
-    const again = await req(SH, 'POST', await body('help-1', A), sa); assert.equal(again.status, 200); assert.deepEqual(again.json, first);
+    // A retry sends the SAME consent envelope, even after the clock crosses a second.
+    const realClock = Date.now; Date.now = () => realClock() + 2000;
+    try { const again = await req(SH, 'POST', firstRequest, sa); assert.equal(again.status, 200, again.raw); assert.deepEqual(again.json, first); }
+    finally { Date.now = realClock; }
     for (const [patch, what] of [[{ duration_minutes: 60 }, 'longer expiry'], [{ duration_minutes: 10 }, 'shorter expiry'], [{ content: { question: '다른 질문' } }, 'content'], [{ kind: 'submission' }, 'kind']]) {
       const r = await req(SH, 'POST', await body('help-1', A, patch), sa); assert.deepEqual([r.status, r.json.reason], [409, 'request_id_conflict'], what);
     }
