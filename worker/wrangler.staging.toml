@@ -51,7 +51,6 @@ fallthrough = true
 [vars]
 ENVIRONMENT = "staging"
 LLM_PROVIDER = "anthropic"
-GALLERY_LOGS_BASE = "https://hypeproof-ai.xyz"
 # After the first deploy of chalk/wrangler.staging.toml, put its workers.dev URL here and redeploy.
 HPS_CHALK_ORIGIN = "REPLACE_WITH_STAGING_CHALK_ORIGIN"
 # HPS_CLASSROOM_OPS and every evaluator / delivery / retention switch stay unset here: DEPLOY.md step 5 turns them on
