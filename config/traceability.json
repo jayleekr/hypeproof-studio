@@ -3069,6 +3069,42 @@
       "sources": [
         {
           "path": "worker/test/chalk-knowledge-import.test.mjs"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/_templates/lesson-plan.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/design/activity-acceptance-checklist.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/design/lesson-plan-authoring-guide.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/design/lesson-plan-quality-checklist.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/design/lesson-plan-to-steps-mapping.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/methods/m-explicit-instruction.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/curriculum-schema.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/edu-11-16-session-format.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/edu-constitution.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/measurement-axes.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/placement-rules.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/prohibited-moves.md"
         }
       ]
     },
