@@ -3175,7 +3175,7 @@
     {
       "id": "ST-IMP-CHALK-PLAN-PARSER",
       "stage": "implementation",
-      "owner": "chalk",
+      "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-CHALK-FB",
         "ST-DES-CHALK-GATELOOP"
@@ -3188,7 +3188,7 @@
     {
       "id": "ST-TEST-CHALK-PLAN-PARSER",
       "stage": "test",
-      "owner": "chalk",
+      "owner": "jayleekr",
       "depends_on": [
         "ST-REQ-CHALK-FB",
         "ST-DES-CHALK-GATELOOP"
