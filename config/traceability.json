@@ -3184,12 +3184,6 @@
       "sources": [
         {
           "path": "worker/src/routes/chalk-knowledge.ts"
-        },
-        {
-          "path": "worker/src/lib/instructor-auth.ts"
-        },
-        {
-          "path": "worker/src/routes/admin.ts"
         }
       ]
     },
