@@ -62,8 +62,30 @@ import type { SessionDesign } from './session-design.ts';
 type Step = SessionDesign['steps'][number];
 
 /**
- * The lesson as the coach sees it. Exactly one field comes out today:
- * `learning.observe` (SX-57).
+ * The lesson as the student (and coach) sees it: `prohibited_moves` removed from
+ * every step (SCH-03, #1291). Instructor-only data; must never reach the student
+ * profile or the coach JSON dump.
+ *
+ * **Same-reference invariant**: when no step carries `prohibited_moves`, the
+ * original object is returned unchanged. Old lessons without the new field pass
+ * through byte-identical (T-08/T-09 in authoring.test.mjs depend on this).
+ */
+export function studentVisibleLesson(content: SessionDesign): SessionDesign {
+  if (!content.steps.some(s => 'prohibited_moves' in s)) return content;
+  return {
+    ...content,
+    steps: content.steps.map(s => {
+      if (!('prohibited_moves' in s)) return s;
+      const { prohibited_moves: _hidden, ...rest } = s;
+      return rest as typeof s;
+    }),
+  };
+}
+
+/**
+ * The lesson as the coach sees it. Fields the coach must not see are removed:
+ * `learning.observe` (SX-57) and `prohibited_moves` (SCH-03, via
+ * `studentVisibleLesson()`).
  *
  * **When there is nothing to remove, the object received is returned as is.**
  * Building a new object could change the serialization by even one byte — key
@@ -74,12 +96,13 @@ type Step = SessionDesign['steps'][number];
  * reference**.
  */
 export function coachVisibleLesson(content: SessionDesign): SessionDesign {
-  const learning = content.learning;
-  if (!learning || !('observe' in learning)) return content;
+  const noMoves = studentVisibleLesson(content);
+  const learning = noMoves.learning;
+  if (!learning || !('observe' in learning)) return noMoves;
   const { observe: _hidden, ...visible } = learning;
   // `learning` is already a present key, so the spread does not move its position —
   // the top-level key order is the original's, and inside learning only observe drops.
-  return { ...content, learning: visible };
+  return { ...noMoves, learning: visible };
 }
 
 /** §9 Intervention ladder. Six rungs, in the source's order and wording. */
