@@ -3075,7 +3075,8 @@
       "stage": "test",
       "owner": "JinyongShin",
       "depends_on": [
-        "ST-IMP-CHALK-PLAN-PARSER"
+        "ST-REQ-CHALK-HTML",
+        "ST-DES-CHALK-PLANSPEC"
       ],
       "sources": [
         {
