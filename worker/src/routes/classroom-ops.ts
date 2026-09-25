@@ -10,20 +10,25 @@
 //  - A 2xx from /sync means "stored and acked up to `ack.contiguous_seq`".
 //    It never means a command ran or that the evidence is complete.
 import { Hono } from 'hono';
+import { activateBinding, normalizeActivate } from '../lib/lesson-binding-activate';
+import { bindingsEnforced, effectiveBySeat, effectiveForSeat } from '../lib/lesson-binding-store';
+import { declaresKind } from '../lib/classroom-distribution';
 import { bodyLimit } from 'hono/body-limit';
 import type { Env } from '../env';
 import { bearer, signOpsCredential, verifyOpsCredential } from '../lib/tokens';
 import { authorizeIssuerForOps, type IssuerAuthz } from '../lib/instructor-auth';
 import { bumpRateCounter, getActiveSession, getRoster } from '../lib/kv';
 import { readLesson } from '../lib/lesson-delivery';
-import { readRunControl } from '../lib/classroom-ops-control';
+import { readRunControl, readRunControlDetail } from '../lib/classroom-ops-control';
+import { FOLLOWUP_CAPABILITY, FOLLOWUP_LINKABLE_STATES, controlOutcome, recommendAction, recoveryOutcome, summarizeOutcomes, type Followup } from '../lib/classroom-recovery';
 import { scrubSecrets } from '../lib/scrub-secrets';
+import { PENDING_PROBE, declaresInbox, deviceRebindStatements, distributionExchange, issuerFenceStatements, type DistributionBlock } from '../lib/classroom-distribution-store';
 import {
   ID_RE, MAX_SEATS, MAX_SYNC_BYTES, MAX_SYNC_EVENTS, OPS_FLAGS, OPS_PROTOCOL, OPS_SCHEMA_VERSION, PAIRING_TTL_MS,
   RUNTIME_STATUSES, STALE_AFTER_MS, UUIDISH_RE, attentionOf, canonicalPayload, commonIncidents, contiguousAck, entryStage,
   newPairingTicket, normalizeTicket, parseFlags, parseLesson, pollAfterMs, sha256Hex, shouldApply, signalOf,
-  stepDisposition, validateEvent, type OpsCapability, type SeatState,
-  REVIEW_STATES, SERVICE_ISSUED_ACTIONS, COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
+  stepDisposition, validateEvent, reduceTokenCheck, tokenCheckOf, type OpsCapability, type SeatState,
+  REVIEW_STATES, SERVICE_ISSUED_ACTIONS, keepsRuntimeFault, COMMAND_ACTIONS, COMMAND_TTL_MS, LEASE_TAKEOVER_MS, REASON_CODES, isTerminal, nextTargetState, summarize, validateReceipt,
 } from '../lib/classroom-ops';
 
 type Db = Env['HPS_DB'];
@@ -64,9 +69,33 @@ export async function recordTokenIssue(env: Env, t: { jti: string; cohort: strin
 }
 
 /** Throws on storage failure: the caller must not report the revocation as complete. */
-export async function revokeOpsGrantsForIssuer(env: Env, issuerJti: string): Promise<void> {
+export async function revokeOpsGrantsForIssuer(env: Env, issuerJti: string, by = 'operator'): Promise<void> {
   if (!opsEnabled(env)) return;
-  await env.HPS_DB.prepare("UPDATE ops_grants SET state='revoked',revoked_at=?,revoked_reason='issuer_revoked',revision=revision+1 WHERE issuer_jti=? AND state IN ('issued','active')").bind(Date.now(), issuerJti).run();
+  const now = Date.now(), grants = env.HPS_DB.prepare("UPDATE ops_grants SET state='revoked',revoked_at=?,revoked_reason='issuer_revoked',revision=revision+1 WHERE issuer_jti=? AND state IN ('issued','active')").bind(now, issuerJti);
+  // U2: the same transaction records the revocation in D1 (the distribution guards read it, not KV) and closes every open
+  // distribution this token created — so it stops reaching learners even when ANOTHER instructor paired their devices.
+  try { await env.HPS_DB.batch([grants, ...issuerFenceStatements(env.HPS_DB, issuerJti, { reason: 'issuer_revoked', by, sweep: true, now })]); }
+  catch (err) {
+    // A database without migration 0023 has no fence table. The pre-existing guarantee (grants closed) must not regress
+    // because of that, and the caller is still told the revocation is incomplete.
+    await grants.run();
+    throw err;
+  }
+}
+/**
+ * Issuer re-scope and class close revoke a token in KV only. For distribution that is not a boundary, so the D1 fence is
+ * written here. `sweep` = the replaced token's open distributions are closed too (always for a plain revocation; for a
+ * re-scope only when the new scope no longer holds `distribute`, so re-issuing a token mid-class does not cancel what is
+ * still waiting for offline learners). Throws on storage failure: the caller must not report the fence as written.
+ */
+export async function fenceIssuerForDistribution(env: Env, issuerJti: string, o: { reason: string; by: string; sweep: boolean; retainedCohorts?: string[]; retainedSettingCohorts?: string[] }): Promise<void> {
+  if (!opsEnabled(env)) return;
+  await env.HPS_DB.batch(issuerFenceStatements(env.HPS_DB, issuerJti, { ...o, now: Date.now() }));
+}
+export async function liftIssuerFence(env: Env, issuerJti: string): Promise<void> {
+  if (!opsEnabled(env)) return;
+  const { issuerFenceLiftStatement } = await import('../lib/classroom-distribution-store');
+  await issuerFenceLiftStatement(env.HPS_DB, issuerJti, Date.now()).run();
 }
 
 // ── instructor surface (/admin/cohorts/:cohort/classroom/runs/…) ────────────
@@ -201,33 +230,48 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
   const run = await loadRun(c, auth); if (run instanceof Response) return run;
   const now = Date.now(), db = c.env.HPS_DB;
   await settleOverdueRun(db, run.class_run_id, now);
-  const rows = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,s.student_id,l.state_json,l.revision AS state_revision,l.last_received_at,
+  const rows = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,s.student_id,l.state_json,l.revision AS state_revision,l.last_received_at,l.grant_id AS state_grant,
  (SELECT count(*) FROM ops_grants p WHERE p.class_run_id=s.class_run_id AND p.seat_id=s.seat_id AND p.seat_revision=s.seat_revision AND p.kind='pairing' AND p.state='issued' AND p.expires_at>?) AS pairing_open,
  (SELECT g.id||'|'||g.state||'|'||g.connection_epoch||'|'||g.expires_at FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' ORDER BY g.created_at DESC LIMIT 1) AS conn,
- (SELECT t.jti||'|'||t.expires_at FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS token,
- (SELECT c.action||'|'||ct.state||'|'||ct.result_code||'|'||ct.updated_at||'|'||ct.command_id FROM ops_command_targets ct JOIN ops_commands c ON c.id=ct.command_id WHERE ct.class_run_id=s.class_run_id AND ct.seat_id=s.seat_id AND ct.seat_revision=s.seat_revision ORDER BY ct.updated_at DESC LIMIT 1) AS last_command
+ (SELECT t.jti||'|'||t.expires_at||'|'||(SELECT count(*) FROM ops_token_issues n WHERE n.cohort_id=t.cohort_id AND n.student_id=t.student_id AND n.profile_id=t.profile_id) FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS token,
+ (SELECT c.action||'|'||ct.state||'|'||ct.result_code||'|'||ct.updated_at||'|'||ct.command_id||'|'||ct.grant_id||'|'||c.created_at||'|'||COALESCE(json_extract(ct.receipt_json,'$.observed_at'),'') FROM ops_command_targets ct JOIN ops_commands c ON c.id=ct.command_id WHERE ct.class_run_id=s.class_run_id AND ct.seat_id=s.seat_id AND ct.seat_revision=s.seat_revision ORDER BY ct.updated_at DESC LIMIT 1) AS last_command,
+ (SELECT d.capabilities_json FROM ops_device_connections d JOIN ops_grants g3 ON g3.id=d.grant_id WHERE g3.class_run_id=s.class_run_id AND g3.seat_id=s.seat_id AND g3.seat_revision=s.seat_revision AND g3.kind='connection' AND g3.state='active' ORDER BY d.last_seen_at DESC LIMIT 1) AS device_caps
  FROM class_run_seats s LEFT JOIN ops_latest_state l ON l.class_run_id=s.class_run_id AND l.seat_id=s.seat_id AND l.seat_revision=s.seat_revision
- WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; pairing_open: number; conn: string | null; token: string | null; last_command: string | null }>;
-  const control = await readRunControl(c.env, run.class_run_id) ?? { paused: false, control_revision: 0 };
+ WHERE s.class_run_id=? AND s.replaced_at IS NULL ORDER BY s.seat_id`).bind(now, run.cohort_id, run.profile_id, now, run.class_run_id).all()).results ?? []) as Array<SeatRow & { state_json: string | null; state_revision: number | null; last_received_at: number | null; state_grant: string | null; pairing_open: number; conn: string | null; token: string | null; last_command: string | null; device_caps: string | null }>;
+  const controlRow = await readRunControlDetail(c.env, run.class_run_id), control = { paused: controlRow?.paused ?? false, control_revision: controlRow?.control_revision ?? 0 };
+  // U3 — what each participant executes under, by the gate's own rule. Read only where settings can exist.
+  const pinnedLesson = parseLesson(run.lesson_json);
+  const bases = parseFlags(run.flags_json).ops_lesson_settings || bindingsEnforced(c.env) ? await effectiveBySeat(db, pinnedLesson, run.class_run_id) : new Map();
   const seats = rows.map((r) => {
     let state: SeatState = {}; try { state = JSON.parse(r.state_json ?? '{}'); } catch { state = {}; }
     const [grantId, connState, epoch, connExpires] = (r.conn ?? '|||').split('|');
     const connected = connState === 'active' && Number(connExpires) > now;
-    const [issueId, tokenExpires] = (r.token ?? '|').split('|');
+    const [issueId, tokenExpires, issueCount] = (r.token ?? '||').split('|');
     const inputs = { pairing_issued: r.pairing_open > 0, connected, token_issued: !!issueId, state, last_received_at: connected ? r.last_received_at : null, grant_revoked: connState === 'revoked' };
     const { attention, reason } = attentionOf(inputs, now);
     const slot = (k: keyof SeatState) => state[k] ? { ...state[k]!.value, observed_at: state[k]!.observed_at, received_at: state[k]!.received_at, actor: state[k]!.actor } : null;
-    const reported = state.activation?.value.token_jti;
+    const controlApplied = !connected || signalOf(inputs.last_received_at, now) !== 'fresh' || state.sample?.value.control_revision === undefined ? 'unknown' as const : state.sample.value.control_revision === control.control_revision ? 'applied' as const : 'pending' as const;
     return {
       seat_id: r.seat_id, seat_revision: r.seat_revision, student_id: r.student_id,
       entry_stage: entryStage(inputs), signal: signalOf(inputs.last_received_at, now), last_received_at: r.last_received_at,
       attention, reason, state_revision: r.state_revision ?? 0,
-      control_applied: !connected || signalOf(inputs.last_received_at, now) !== 'fresh' || state.sample?.value.control_revision === undefined ? 'unknown' : state.sample.value.control_revision === control.control_revision ? 'applied' : 'pending',
+      control_applied: controlApplied,
+      // U4 — three separate observations: the Service's admission, this device's hold, and a run seen after a resume.
+      control_outcome: controlOutcome({ ...control, control_updated_at: controlRow?.updated_at ?? null, device: controlApplied, runtime: state.last_run ? { status: 'running', received_at: state.last_run.received_at } : null, state_from_current_connection: !!grantId && state.last_run?.value.grant_id === grantId }),
       connection: grantId ? { grant_id: grantId, state: connected ? 'active' : connState === 'active' ? 'expired' : connState, epoch: Number(epoch) } : null,
-      token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: reported === undefined ? 'unknown' : reported === issueId ? 'matches_issue' : 'other_token' } : null,
+      token: issueId ? { issue_id: issueId, expires_at: Number(tokenExpires), app_verified: tokenCheckOf(state, issueId, grantId ?? '') } : null,
       // The latest instructor action on this seat, in ledger terms: queued is not done.
-      last_command: r.last_command ? (([action, state, result_code, updated_at, command_id]) => ({ action, state, result_code, updated_at: Number(updated_at), command_id }))(r.last_command.split('|')) : null,
-      activation: slot('activation'), step: slot('step'), runtime: slot('runtime'), error: slot('error'), upload: slot('upload'), sample: slot('sample'),
+      last_command: r.last_command ? (([action = '', state = '', result_code = '', updated_at = '', command_id = '', target_grant = '', created_at = '', receipt_at = '']) => ({ action, state, result_code, updated_at: Number(updated_at), command_id, target_grant, created_at: Number(created_at), receipt_at: receipt_at ? Number(receipt_at) : undefined }))(r.last_command.split('|')) : null,
+      issue_count: Number(issueCount) || 0, reports_followup: ((): boolean | null => { if (!connected || !r.device_caps) return null; try { return (JSON.parse(r.device_caps) as string[]).includes(FOLLOWUP_CAPABILITY); } catch { return null; } })(),
+      // Review F4: which signals this device's build can report from its real runtime path. An absent signal from a
+      // build that cannot report it is "unknown", not "nothing happened". A build that predates the declaration says nothing.
+      observes: ((): { step: boolean | null; runtime: boolean | null; evidence: boolean | null } => { let caps: string[] | null = null; try { caps = r.device_caps ? JSON.parse(r.device_caps) : null; } catch { caps = null; } const has = (k: string) => (!connected || !caps ? null : caps.includes(k)); return { step: has('observe_step'), runtime: has('observe_runtime'), evidence: has('observe_evidence') }; })(),
+      distribution_inbox: ((): 'declared' | 'not_declared' | 'unknown' => { if (!connected || !r.device_caps) return 'unknown'; try { return declaresInbox(JSON.parse(r.device_caps)) ? 'declared' : 'not_declared'; } catch { return 'unknown'; } })(),
+      inbox_prompt: capOf(r.device_caps, connected, 'prompt'), lesson_binding: capOf(r.device_caps, connected, 'setting'),
+      // `basis: 'previous'` = the step on the board was reported under another version than the one this seat runs now. It
+      // is shown as history; it is never the new version's progress, submission or instructor confirmation.
+      lesson: bases === 'unknown' ? { state: 'unknown' } : ((e) => e ? { state: 'known', version: e.version, source: e.source, binding_seq: e.seq, ...(e.not_applied ? { not_applied: e.not_applied } : {}) } : pinnedLesson ? { state: 'known', version: pinnedLesson.version, source: 'run', binding_seq: 0 } : null)(bases.get(r.seat_id)),
+      step_seq: state.step?.seq, activation: slot('activation'), step: ((st) => { if (!st) return st; const e = bases === 'unknown' ? null : bases.get(r.seat_id); const now_v = e ? e.version : pinnedLesson?.version; return { ...st, basis: bases === 'unknown' ? 'unknown' : (st as any).lesson_version === undefined || (st as any).lesson_version === now_v ? 'current' : 'previous' }; })(slot('step')), runtime: slot('runtime'), error: slot('error'), upload: slot('upload'), sample: slot('sample'),
     };
   });
   // Evidence the instructor may want to look at — provenance and review state only, never the learner's words.
@@ -235,17 +279,48 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
  FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL
  LEFT JOIN ops_event_reviews r ON r.grant_id=e.grant_id AND r.boot_id=e.boot_id AND r.seq=e.seq
  WHERE e.class_run_id=? AND e.kind='evidence' AND e.disposition='applied' ORDER BY e.received_at DESC LIMIT 1000`).bind(run.class_run_id).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; boot_id: string; seq: number; actor: string; payload_json: string; observed_at: number; review_state: string; review_revision: number }>;
+  const stepRows = ((await db.prepare(`SELECT e.seat_id,e.grant_id,e.boot_id,e.seq,e.payload_json,COALESCE(r.state,'unreviewed') AS review_state,COALESCE(r.revision,0) AS review_revision,COALESCE(r.reviewer_id,'') AS reviewer_id
+ FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL
+ LEFT JOIN ops_event_reviews r ON r.grant_id=e.grant_id AND r.boot_id=e.boot_id AND r.seq=e.seq
+ WHERE e.class_run_id=? AND e.kind='step' AND e.disposition='applied' ORDER BY e.received_at DESC,e.seq DESC LIMIT 2000`).bind(run.class_run_id).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; boot_id: string; seq: number; payload_json: string; review_state: string; review_revision: number; reviewer_id: string }>;
+  for (const seat of seats) {
+    // The review belongs to the exact event the board is showing: same seat, same seq, same step. A later step starts unreviewed.
+    const st = seat.step as (Record<string, unknown> & { step_id?: string; status?: string }) | null, shown = (seat as unknown as { step_seq?: number }).step_seq;
+    if (st && st.status === 'submitted') { const row = stepRows.find((e) => { if (e.seat_id !== seat.seat_id || e.seq !== shown) return false; try { const p = JSON.parse(e.payload_json); return p.step_id === st.step_id && p.status === 'submitted'; } catch { return false; } }); if (row) (seat.step as Record<string, unknown>).review = { ref: `${row.grant_id}.${row.boot_id}.${row.seq}`, state: row.review_state, revision: row.review_revision, reviewed_by: row.reviewer_id || null }; }
+    delete (seat as unknown as { step_seq?: number }).step_seq;
+  }
   for (const seat of seats) {
     const mine = evidenceRows.filter((e) => e.seat_id === seat.seat_id).map((e) => { let p: Record<string, unknown> = {}; try { p = JSON.parse(e.payload_json); } catch { p = {}; } return { ref: `${e.grant_id}.${e.boot_id}.${e.seq}`, evidence_type: p.evidence_type, source_state: p.source_state ?? 'unverified', step_id: p.step_id ?? null, actor: e.actor, changed: typeof p.artifact_before === 'string' && typeof p.artifact_after === 'string' ? p.artifact_before !== p.artifact_after : null, observed_at: e.observed_at, review_state: e.review_state, review_revision: e.review_revision }; });
     const by: Record<string, number> = {}; for (const e of mine) by[String(e.source_state)] = (by[String(e.source_state)] ?? 0) + 1;
     // Zero is "not seen yet", and the UI says so. It is never a score.
     (seat as Record<string, unknown>).evidence = { observed: mine.length, unreviewed: mine.filter((e) => e.review_state === 'unreviewed').length, by_source_state: by, latest: mine.slice(0, 5) };
   }
+  // U4 — what the last action on each seat achieved, and the one first action for what the seat shows now. Follow-ups
+  // are read only for seats whose last action ran on a device, through the (run, seat, received_at) index.
+  const incidents = commonIncidents(seats), inIncident = new Set(incidents.flatMap((x) => x.seats));
+  const ran = seats.filter((s) => s.last_command && (FOLLOWUP_LINKABLE_STATES as readonly string[]).includes(s.last_command.state) && COMMAND_ACTIONS[s.last_command.action]?.kind === 'recovery');
+  const followups = await readFollowups(db, run.class_run_id, ran.map((s) => ({ seat_id: s.seat_id, command_id: s.last_command!.command_id, grant_id: s.last_command!.target_grant, since: s.last_command!.created_at })));
+  for (const seat of seats) {
+    const lc = seat.last_command, x = seat as Record<string, unknown>;
+    if (lc) {
+      const { target_grant, created_at, receipt_at, ...shown } = lc; void target_grant; void created_at;
+      x.last_command = { ...shown, outcome: recoveryOutcome({ action: lc.action, current_cause: seat.attention === 'ok' ? '' : seat.reason, state: lc.state, result_code: lc.result_code, receipt: { observed_at: receipt_at, received_at: lc.updated_at }, followups: followups === 'unknown' ? [] : followups.get(`${lc.command_id}|${seat.seat_id}`) ?? [], reports_followup: seat.reports_followup, latest_issue: seat.token ? { id: seat.token.issue_id, count: seat.issue_count } : null }), ...(followups === 'unknown' ? { followups: 'unknown' } : {}) };
+    }
+    x.recommended = recommendAction({ connected: seat.connection?.state === 'active', attention: seat.attention, reason: seat.reason, entry_stage: seat.entry_stage, runtime_status: (seat.runtime as { status?: unknown } | null)?.status ?? (seat.sample as { runtime_status?: unknown } | null)?.runtime_status, token_app_verified: seat.token?.app_verified ?? null, upload_status: (seat.upload as { status?: unknown } | null)?.status, in_shared_incident: inIncident.has(seat.seat_id) });
+    delete x.issue_count; delete x.reports_followup;
+  }
   const history = (await db.prepare('SELECT seat_id,seat_revision,student_id,replaced_at,replaced_reason,changed_by FROM class_run_seats WHERE class_run_id=? AND replaced_at IS NOT NULL ORDER BY replaced_at DESC LIMIT 100').bind(run.class_run_id).all()).results ?? [];
   const count = (f: (s: (typeof seats)[number]) => boolean) => seats.filter(f).length;
   return c.json({
     schema_version: OPS_SCHEMA_VERSION, now, stale_after_ms: STALE_AFTER_MS, viewer: auth.payload.u,
     actions: Object.entries(COMMAND_ACTIONS).map(([action, a]) => ({ action, kind: a.kind, capability: a.capability, mutating: a.mutating, enabled: parseFlags(run.flags_json)[a.flag], held: (auth.scope.ops ?? []).includes(a.capability) })),
+    // Collection is not a command: an instructor may hold `collect` without `command`, and the board has to know that to offer the selection.
+    collection: { enabled: parseFlags(run.flags_json).ops_collect, held: (auth.scope.ops ?? []).includes('collect') },
+    // Distribution (U2) is neither a command nor a collection: its own switch, its own authority. `link_hosts_configured` tells the
+    // author up front whether a material may carry links at all.
+    // U3 — settings have their own switch and authority, and need a Service that enforces bindings at all.
+    lesson_settings: { enabled: parseFlags(run.flags_json).ops_lesson_settings, held: (auth.scope.ops ?? []).includes('lesson_settings') && (auth.scope.ops ?? []).includes('distribute'), enforced: bindingsEnforced(c.env), pinned: !!pinnedLesson?.course_id },
+    distribution: { enabled: parseFlags(run.flags_json).ops_distribute, held: (auth.scope.ops ?? []).includes('distribute'), link_hosts_configured: !!(c.env.HPS_CLASSROOM_LINK_HOSTS ?? '').trim() },
     run: { class_run_id: run.class_run_id, profile_id: run.profile_id, roster_revision: run.roster_revision, flags: parseFlags(run.flags_json), lesson: parseLesson(run.lesson_json), starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at },
     // Scope note for the UI: this is the run snapshot, not the cumulative cohort roster.
     roster: { source: 'class_run_seats', total: seats.length },
@@ -253,7 +328,7 @@ classroomOpsTeacher.get(root + '/status', async (c) => {
     // Server admission is applied the moment `control` is saved. Device-side tool admission is per seat:
     // applied / not yet / unknown (old app or no signal) are different answers.
     control: { ...control, devices: { applied: count((s) => s.control_applied === 'applied'), pending: count((s) => s.control_applied === 'pending'), unknown: count((s) => s.control_applied === 'unknown') } },
-    incidents: commonIncidents(seats), seats, seat_history: history,
+    incidents, seats, seat_history: history,
   });
 });
 
@@ -298,15 +373,24 @@ classroomOpsApp.post('/connect', async (c) => {
     audit(db, run.class_run_id, pairing.seat_id, 'device', device, 'device_connected', { grant_id: id, protocol: b.protocol, app_version: version }, now),
   ]);
   const grant = await db.prepare('SELECT connection_epoch FROM ops_grants WHERE id=?').bind(id).first<{ connection_epoch: number }>();
+  // U2: a new device starts with an empty inbox. Intents that are still valid go to it again; what the old device held is no
+  // longer what this learner sees. Isolated on purpose — pairing must succeed even on a database without migration 0023,
+  // and the instructor's result view derives "not on this device" on its own if this did not run.
+  try { await db.batch(deviceRebindStatements(db, { class_run_id: run.class_run_id, seat_id: pairing.seat_id, seat_revision: pairing.seat_revision, student_id: pairing.student_id }, device, now)); }
+  catch (err) { console.error('distribution rebind skipped:', err); }
   return c.json({
     credential: await signOpsCredential(id, c.env.HPS_SIGNING_SECRET), grant_id: id, device_registration_id: device,
     class_run_id: run.class_run_id, seat_id: pairing.seat_id, connection_epoch: grant?.connection_epoch ?? 1, expires_at: expires,
     protocol: OPS_PROTOCOL, server_capabilities: ['observe'], lesson: parseLesson(run.lesson_json),
+    // What a collected snapshot must be bound to (review F1). The app copies these, it never invents them.
+    student: { u: pairing.student_id, c: pairing.cohort_id, p: pairing.profile_id }, run: { starts_at: run.starts_at, ends_at: run.ends_at },
     poll_after_ms: pollAfterMs({ starts_at: run.starts_at, ends_at: run.ends_at, ended: !!run.ended_at }, now),
     // What this credential is for — shown to the student by the app.
     allows: ['status_report', 'own_command_receipts'], denies: ['ai_requests', 'log_bodies', 'other_seats'],
   }, 201);
 });
+
+const capOf = (caps: string | null, connected: boolean, kind: string): 'declared' | 'not_declared' | 'unknown' => { if (!connected || !caps) return 'unknown'; try { return declaresKind(JSON.parse(caps), kind) ? 'declared' : 'not_declared'; } catch { return 'unknown'; } };
 
 classroomOpsApp.post('/sync', async (c) => {
   const credential = bearer(c.req.header('authorization'));
@@ -340,15 +424,22 @@ classroomOpsApp.post('/sync', async (c) => {
   const receiptsIn: unknown[] = b.receipts === undefined ? [] : b.receipts;
   if (!Array.isArray(receiptsIn) || receiptsIn.length > 50) return c.json({ error: 'receipts[] ≤ 50', reason: 'batch_limit' }, 400);
 
-  let device = await db.prepare('SELECT first_seen_at,last_seen_at,contiguous_seq FROM ops_device_connections WHERE grant_id=? AND app_instance_id=? AND boot_id=?').bind(g.id, b.app_instance_id, b.boot_id).first<{ first_seen_at: number; last_seen_at: number; contiguous_seq: number }>();
+  let device = await db.prepare('SELECT first_seen_at,last_seen_at,contiguous_seq,capabilities_json FROM ops_device_connections WHERE grant_id=? AND app_instance_id=? AND boot_id=?').bind(g.id, b.app_instance_id, b.boot_id).first<{ first_seen_at: number; last_seen_at: number; contiguous_seq: number; capabilities_json?: string }>();
   const stmts = [];
   if (!device) {
-    device = { first_seen_at: now, last_seen_at: 0, contiguous_seq: 0 };
+    device = { first_seen_at: now, last_seen_at: 0, contiguous_seq: 0, capabilities_json: JSON.stringify(Array.isArray(b.capabilities) ? b.capabilities.filter((x: unknown) => typeof x === 'string').slice(0, 32) : []) };
     // A window that did not do the pairing itself (second window, restart) declares what it can run here.
     const caps = Array.isArray(b.capabilities) && b.capabilities.length <= 32 && b.capabilities.every((x: unknown) => typeof x === 'string' && /^[a-z_]{1,48}$/.test(x)) ? b.capabilities : [];
     stmts.push(db.prepare("INSERT INTO ops_device_connections(grant_id,app_instance_id,boot_id,protocol,capabilities_json,first_seen_at,last_seen_at) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING").bind(g.id, b.app_instance_id, b.boot_id, OPS_PROTOCOL, JSON.stringify(caps), now, now));
   }
-  const lesson = parseLesson(g.lesson_json);
+  const pinned = parseLesson(g.lesson_json);
+  // U3 — a step is judged by what THIS participant executes under (the same applicableBinding() as the gate), read only
+  // when the batch carries a step. Unreadable = the step is stored as `basis_unknown` and moves nothing.
+  let lesson: typeof pinned | 'unknown' = pinned;
+  if (raw.some((e) => (e as any)?.kind === 'step')) {
+    const eff = await effectiveForSeat(db, pinned, g.class_run_id, g.student_id);
+    lesson = eff === 'unknown' ? 'unknown' : eff && eff.source === 'setting' ? { course_id: eff.course_id, version: eff.version, steps: eff.steps ?? [] } : pinned;
+  }
   const existing = new Map<number, string>();
   // Everything stored above the cursor feeds both duplicate detection and the
   // ack: a late event that fills a hole must see the seqs already waiting past it.
@@ -357,11 +448,16 @@ classroomOpsApp.post('/sync', async (c) => {
     await stored_('SELECT seq,payload_hash FROM ops_events WHERE grant_id=? AND boot_id=? AND seq>? ORDER BY seq LIMIT 1000', device.contiguous_seq);
     if (Math.min(...seqs) <= device.contiguous_seq) await stored_('SELECT seq,payload_hash FROM ops_events WHERE grant_id=? AND boot_id=? AND seq BETWEEN ? AND ? LIMIT 1000', Math.min(...seqs), device.contiguous_seq);
   }
+  // U4 — a follow-up is evidence only for a command this connection was actually given, under the login generation it still has.
+  // Anything else is stored as `unlinked` and never read by a verdict.
+  const namedCommands = [...new Set(raw.filter((e) => (e as any)?.kind === 'recovery' && typeof (e as any)?.payload?.command_id === 'string').map((e) => (e as any).payload.command_id as string))].slice(0, MAX_SYNC_EVENTS);
+  const linkable = new Set<string>();
+  if (namedCommands.length) for (const t of ((await db.prepare(`SELECT command_id FROM ops_command_targets WHERE class_run_id=? AND seat_id=? AND grant_id=? AND connection_epoch=? AND state IN (${FOLLOWUP_LINKABLE_STATES.map((x) => `'${x}'`).join(',')}) AND command_id IN (SELECT value FROM json_each(?))`).bind(g.class_run_id, g.seat_id, g.id, g.connection_epoch, JSON.stringify(namedCommands)).all()).results ?? []) as Array<{ command_id: string }>) linkable.add(t.command_id);
   const latest = await db.prepare('SELECT seat_revision,grant_id,revision,state_json,last_received_at FROM ops_latest_state WHERE class_run_id=? AND seat_id=?').bind(g.class_run_id, g.seat_id).first<{ seat_revision: number; grant_id: string; revision: number; state_json: string; last_received_at: number }>();
   // Board state never crosses a seat reassignment: a new binding starts empty.
   let state: SeatState = {}; const carried = latest && latest.seat_revision === g.seat_revision;
   if (carried) { try { state = JSON.parse(latest!.state_json); } catch { state = {}; } }
-  let changed = false; const quarantined: number[] = [], rejected: Array<{ seq: number; error: string }> = [], stored: number[] = [];
+  let changed = reduceTokenCheck(state, { grantId: g.id, bootId: b.boot_id, bootSeenAt: device.first_seen_at }); const quarantined: number[] = [], rejected: Array<{ seq: number; error: string }> = [], stored: number[] = [];
   for (const e of raw) {
     const seq = (e as any).seq as number, v = validateEvent(e);
     // A malformed event still consumes its seq so the cursor can move, but its content is not kept.
@@ -369,7 +465,7 @@ classroomOpsApp.post('/sync', async (c) => {
     if (existing.has(seq)) {
       if (existing.get(seq) !== hash) { quarantined.push(seq); stmts.push(audit(db, g.class_run_id, g.seat_id, 'system', 'sync', 'event_conflict', { grant_id: g.id, boot_id: b.boot_id, seq }, now)); continue; }
     } else {
-      const disposition = !v.ok ? 'rejected_schema' : v.value.kind === 'step' ? stepDisposition(v.value.payload, lesson) : 'applied';
+      const disposition = !v.ok ? 'rejected_schema' : v.value.kind === 'step' ? stepDisposition(v.value.payload, lesson) : v.value.kind === 'recovery' && !linkable.has(v.value.payload.command_id as string) ? 'unlinked' : 'applied';
       if (!v.ok) rejected.push({ seq, error: v.error });
       stmts.push(db.prepare('INSERT INTO ops_events(grant_id,boot_id,seq,event_id,class_run_id,seat_id,kind,actor,payload_json,payload_hash,disposition,observed_at,received_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING').bind(g.id, b.boot_id, seq, v.ok ? v.value.event_id : '', g.class_run_id, g.seat_id, v.ok ? v.value.kind : 'rejected', v.ok ? v.value.actor : 'unknown', v.ok ? JSON.stringify(v.value.payload) : '{}', hash, disposition, v.ok ? v.value.observed_at : 0, now));
       stored.push(seq);
@@ -377,8 +473,14 @@ classroomOpsApp.post('/sync', async (c) => {
       if (!v.ok || disposition !== 'applied') continue;
     }
     if (!v.ok) continue;
+    if (v.value.kind === 'recovery') continue; // read from the event ledger by command id; it is not a board slot
     if (v.value.kind === 'step' && stepDisposition(v.value.payload, lesson) !== 'applied') continue;
+    // Token evidence has its own ordering: a stage that arrives later must not erase it, and a resend must not revive it.
+    if (v.value.kind === 'activation' && reduceTokenCheck(state, { grantId: g.id, bootId: b.boot_id, bootSeenAt: device.first_seen_at }, { seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, payload: v.value.payload })) changed = true;
+    if (v.value.kind === 'activation' && keepsRuntimeFault(state.activation, v.value.payload.stage, device.first_seen_at)) continue;
     if (shouldApply(state[v.value.kind], device.first_seen_at, seq)) { state[v.value.kind] = { boot_seen_at: device.first_seen_at, seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, value: v.value.payload }; changed = true; }
+    // U4 — "a run was seen after the resume" must survive the idle report that follows it, and must name the connection that reported it.
+    if (v.value.kind === 'runtime' && v.value.payload.status === 'running' && shouldApply(state.last_run, device.first_seen_at, seq)) { state.last_run = { boot_seen_at: device.first_seen_at, seq, observed_at: v.value.observed_at, received_at: now, actor: v.value.actor, value: { grant_id: g.id } }; changed = true; }
   }
   const ack = contiguousAck(device.contiguous_seq, [...new Set([...existing.keys(), ...stored])].filter((s) => s > device!.contiguous_seq).sort((x, y) => x - y));
   // Unchanged, recently written state is not rewritten: the 5 s poll must not become a 5 s D1 write.
@@ -408,13 +510,55 @@ classroomOpsApp.post('/sync', async (c) => {
     try { exchange = await commandExchange(db, g, b.app_instance_id, receiptsIn, now, parseFlags(g.flags_json).ops_commands); }
     catch (err) { console.error('ops command exchange failed:', err); exchange = { commands: [], receipt_acks: [], lease: 'unknown' }; }
   }
+  // U2 — targeted distribution. Isolated like the command exchange: a failure here drops this block only, and an absent
+  // block is "no news", never success. The probe is a partial-index lookup; it runs when the feature is on for this run,
+  // when the device has something to report, or (feature off) at the slow state cadence so that a withdrawal issued
+  // during a rollback still reaches the device.
+  let distribution: DistributionBlock | null = null;
+  let declared = false, deviceCaps: unknown = []; try { deviceCaps = JSON.parse(device.capabilities_json ?? '[]'); declared = declaresInbox(deviceCaps); } catch { declared = false; }
+  const distFlag = parseFlags(g.flags_json).ops_distribute, distBody = b.distribution;
+  if (distBody !== undefined || (declared && (distFlag || due)) || (!declared && distFlag && due)) {
+    try {
+      const hint = await db.prepare(`SELECT ${PENDING_PROBE} AS pending FROM ops_grants g WHERE g.id=?`).bind(g.id).first<{ pending: number }>();
+      if (hint?.pending || distBody !== undefined) {
+        const lease = exchange.lease === 'unknown' ? await seatLease(db, g, b.app_instance_id, now) : { owner: exchange.lease === 'owner' };
+        if (lease.owner) distribution = await distributionExchange(db, g, { body: distBody, declared, caps: deviceCaps, settingsOn: parseFlags(g.flags_json).ops_lesson_settings, instance: b.app_instance_id, flagOn: distFlag, runEnded: !!g.run_ended || now > g.run_ends, runEndsAt: g.run_ends, pendingHint: !!hint?.pending, now });
+      }
+    } catch (err) { console.error('ops distribution exchange failed:', err); distribution = null; }
+  }
   return c.json({
     schema_version: OPS_SCHEMA_VERSION, server_time: now, connection_epoch: g.connection_epoch,
     ack: { boot_id: b.boot_id, contiguous_seq: ack.contiguous, missing: ack.missing }, quarantined, rejected,
     commands: exchange.commands, receipt_acks: exchange.receipt_acks, lease: exchange.lease,
     // The device applies this to its own new-run admission and reports the revision it applied.
-    control: await readRunControl(c.env, g.class_run_id) ?? { paused: false, control_revision: 0 }, poll_after_ms: exchange.commands.length ? 1000 : poll,
+    control: await readRunControl(c.env, g.class_run_id) ?? { paused: false, control_revision: 0 }, poll_after_ms: exchange.commands.length || distribution?.more || distribution?.items.length ? 1000 : poll,
+    ...(distribution ? { distribution } : {}),
   });
+});
+
+// ── U3: switch this participant to the lesson version a setting distribution named ──
+// Called by the device at the START of its next turn (never mid-turn; an in-flight turn keeps its admitted snapshot anyway).
+// Same credential and the same identity checks as /sync; the conditional batch lives in lib/lesson-binding-activate.ts.
+classroomOpsApp.post('/lesson-binding', async (c) => {
+  c.header('cache-control', 'no-store');
+  const credential = bearer(c.req.header('authorization'));
+  const grantId = credential ? await verifyOpsCredential(credential, c.env.HPS_SIGNING_SECRET) : null;
+  if (!grantId) return c.json({ error: 'operations credential required', reason: 'ops_credential_invalid' }, 401);
+  const db = c.env.HPS_DB, now = Date.now();
+  const g = await db.prepare(`SELECT g.*,o.flags_json,o.lesson_json,
+ (SELECT 1 FROM class_run_seats x WHERE x.class_run_id=g.class_run_id AND x.seat_id=g.seat_id AND x.seat_revision=g.seat_revision AND x.replaced_at IS NULL) AS seat_live
+ FROM ops_grants g JOIN class_run_ops o ON o.class_run_id=g.class_run_id WHERE g.id=? AND g.kind='connection'`).bind(grantId).first<GrantRow & { flags_json: string; lesson_json: string; seat_live: number | null }>();
+  if (!g) return c.json({ error: 'operations credential required', reason: 'ops_credential_invalid' }, 401);
+  if (g.state !== 'active') return c.json({ error: 'operations connection was closed', reason: 'ops_grant_revoked' }, 401);
+  if (g.expires_at <= now) return c.json({ error: 'operations connection expired', reason: 'ops_grant_expired' }, 401);
+  if (!g.seat_live) return c.json({ error: 'seat was reassigned', reason: 'seat_replaced' }, 403);
+  const req = normalizeActivate(await json(c));
+  if (!req) return c.json({ error: 'offer_key, distribution_id, object_id, revision, content_hash and base_lesson_sha256 required; unknown fields are refused', reason: 'schema' }, 400);
+  // Only the window that holds the seat changes what the seat runs under; another window learns of it from /v1/profile.
+  const lease = await seatLease(db, g, req.app_instance_id, now);
+  if (!lease.owner) return c.json({ recorded: false, reason: 'not_owner', final: false }, 409);
+  const out = await activateBinding(c.env, g as any, req, now);
+  return out.recorded ? c.json(out, out.replayed ? 200 : 201) : c.json({ recorded: false, reason: out.reason, final: out.final }, out.status);
 });
 
 // ── commands (R2) ───────────────────────────────────────────────────────────
@@ -430,8 +574,8 @@ function settleOverdue(db: Db, where: string, args: unknown[], now: number) {
   ];
 }
 
-async function commandExchange(db: Db, g: GrantRow, instance: string, receiptsIn: unknown[], now: number, deliver: boolean) {
-  // Seat execution lease: one window per seat may run commands; the others only observe.
+/** Seat execution lease: one window per seat may run commands or take inbox items; the others only observe. */
+async function seatLease(db: Db, g: GrantRow, instance: string, now: number) {
   let lease = await db.prepare('SELECT app_instance_id,generation,renewed_at FROM ops_seat_leases WHERE grant_id=?').bind(g.id).first<{ app_instance_id: string; generation: number; renewed_at: number }>();
   if (!lease) {
     await db.prepare('INSERT INTO ops_seat_leases(grant_id,app_instance_id,generation,renewed_at) VALUES(?,?,1,?) ON CONFLICT(grant_id) DO NOTHING').bind(g.id, instance, now).run();
@@ -442,7 +586,11 @@ async function commandExchange(db: Db, g: GrantRow, instance: string, receiptsIn
   } else if (lease.app_instance_id === instance && now - lease.renewed_at >= 45_000) {
     await db.prepare('UPDATE ops_seat_leases SET renewed_at=? WHERE grant_id=? AND app_instance_id=?').bind(now, g.id, instance).run();
   }
-  const owner = lease?.app_instance_id === instance;
+  return { owner: lease?.app_instance_id === instance, lease };
+}
+
+async function commandExchange(db: Db, g: GrantRow, instance: string, receiptsIn: unknown[], now: number, deliver: boolean) {
+  const { owner, lease } = await seatLease(db, g, instance, now);
   const scope = 'class_run_id=? AND seat_id=?', scopeArgs = [g.class_run_id, g.seat_id];
   await db.batch([
     ...settleOverdue(db, scope, scopeArgs, now),
@@ -494,12 +642,18 @@ classroomOpsTeacher.post(root + '/commands', async (c) => {
   let args: Record<string, unknown> = {};
   if (spec.args) { const v = spec.args(b.args ?? {}); if (!v.ok) return c.json({ error: v.error, reason: 'args_invalid' }, 400); args = Object.fromEntries(Object.entries(v.value).map(([k, x]) => [k, typeof x === 'string' ? scrubSecrets(x) : x])); }
   else if (b.args && Object.keys(b.args).length) return c.json({ error: 'this action takes no arguments', reason: 'args_not_allowed' }, 400);
-  if (args.step_id !== undefined && !parseLesson(run.lesson_json)?.steps.includes(args.step_id as string)) return c.json({ error: 'step is not part of the confirmed lesson for this run', reason: 'unknown_step' }, 400);
+  if (args.step_id !== undefined) {
+    // U3 — a checkpoint names a step of the lesson EACH TARGET executes under, by the same rule as the gate and the board.
+    const pinned = parseLesson(run.lesson_json), bySeat = await effectiveBySeat(c.env.HPS_DB, pinned, run.class_run_id);
+    if (bySeat === 'unknown') return c.json({ error: "the targets' lesson basis cannot be read right now; nothing was sent", reason: 'lesson_basis_unknown' }, 503);
+    const off = (b.targets as string[]).filter((seat) => { const e = bySeat.get(seat); const steps = e && e.source === 'setting' ? e.steps ?? [] : pinned?.steps ?? []; return !steps.includes(args.step_id as string); });
+    if (off.length) return c.json({ error: 'step is not part of the confirmed lesson these seats run', reason: 'unknown_step', seats: off.slice(0, 20) }, 400);
+  }
   if (b.expected_roster_revision !== run.roster_revision) return c.json({ error: 'roster changed; reload before acting', reason: 'revision_conflict', roster_revision: run.roster_revision }, 409);
   const db = c.env.HPS_DB, now = Date.now(), targets = [...b.targets].sort();
   const payloadHash = await sha256Hex(JSON.stringify([b.action, targets, b.reason_code, run.roster_revision, args]));
   const prior = await db.prepare('SELECT id,payload_hash FROM ops_commands WHERE class_run_id=? AND idempotency_key=?').bind(run.class_run_id, b.idempotency_key).first<{ id: string; payload_hash: string }>();
-  if (prior) return prior.payload_hash === payloadHash ? c.json(await commandView(db, run.class_run_id, prior.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
+  if (prior) return prior.payload_hash === payloadHash ? c.json(await commandView(db, run, prior.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
   const recent = await db.prepare('SELECT count(*) AS n FROM ops_commands WHERE class_run_id=? AND created_at>?').bind(run.class_run_id, now - 60_000).first<{ n: number }>();
   if ((recent?.n ?? 0) >= 60) return c.json({ error: 'too many commands in the last minute', reason: 'rate_limited' }, 429, { 'retry-after': '30' });
   const seats = ((await db.prepare(`SELECT s.seat_id,s.seat_revision,(SELECT g.id||'|'||g.connection_epoch FROM ops_grants g WHERE g.class_run_id=s.class_run_id AND g.seat_id=s.seat_id AND g.seat_revision=s.seat_revision AND g.kind='connection' AND g.state='active' AND g.expires_at>? ORDER BY g.created_at DESC LIMIT 1) AS conn,
@@ -527,27 +681,79 @@ classroomOpsTeacher.post(root + '/commands', async (c) => {
   try { await db.batch(stmts); }
   catch (err) {
     const again = await db.prepare('SELECT id,payload_hash FROM ops_commands WHERE class_run_id=? AND idempotency_key=?').bind(run.class_run_id, b.idempotency_key).first<{ id: string; payload_hash: string }>();
-    if (again) return again.payload_hash === payloadHash ? c.json(await commandView(db, run.class_run_id, again.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
+    if (again) return again.payload_hash === payloadHash ? c.json(await commandView(db, run, again.id, now), 200) : c.json({ error: 'idempotency key was used for a different request', reason: 'idempotency_conflict' }, 409);
     console.error('ops command enqueue failed:', err); return c.json({ error: 'command not recorded; nothing was sent', reason: 'storage' }, 503);
   }
   // 202: recorded and queued. Not delivered, not started, not done.
-  return c.json(await commandView(db, run.class_run_id, id, now), 202);
+  return c.json(await commandView(db, run, id, now), 202);
 });
 
 const settleOverdueRun = (db: Db, runId: string, now: number) => db.batch(settleOverdue(db, 'class_run_id=?', [runId], now));
 
-async function commandView(db: Db, runId: string, id: string, now: number) {
+type FollowupKey = { seat_id: string; command_id: string; grant_id: string; since: number };
+/**
+ * Follow-up observations for the given (command, seat) pairs — through the (run, seat, received_at) index, so the cost is the
+ * events of THOSE seats since THEIR command, not the run's ledger. A row counts only when it names that command and came over
+ * the connection the command was addressed to. 'unknown' = the read failed; the caller shows no follow-up and says so.
+ */
+async function readFollowups(db: Db, runId: string, keys: FollowupKey[]): Promise<Map<string, Followup[]> | 'unknown'> {
+  const out = new Map<string, Followup[]>(); if (!keys.length) return out;
+  try {
+    const rows = ((await db.prepare(`SELECT e.seat_id,e.grant_id,e.payload_json,e.observed_at,e.received_at FROM json_each(?) j JOIN ops_events e ON e.class_run_id=? AND e.seat_id=json_extract(j.value,'$[0]') AND e.received_at>=json_extract(j.value,'$[1]') WHERE e.kind='recovery' AND e.disposition='applied' ORDER BY e.received_at LIMIT 2000`).bind(JSON.stringify(keys.map((k) => [k.seat_id, k.since])), runId).all()).results ?? []) as Array<{ seat_id: string; grant_id: string; payload_json: string; observed_at: number; received_at: number }>;
+    for (const r of rows) {
+      let p: Record<string, unknown> = {}; try { p = JSON.parse(r.payload_json); } catch { continue; }
+      const k = keys.find((x) => x.seat_id === r.seat_id && x.command_id === p.command_id && x.grant_id === r.grant_id && r.received_at >= x.since); if (!k) continue;
+      const key = `${k.command_id}|${k.seat_id}`; out.set(key, [...(out.get(key) ?? []), { check: String(p.check), ...(typeof p.token_jti === 'string' ? { token_jti: p.token_jti } : {}), ...(typeof p.error_class === 'string' ? { error_class: p.error_class } : {}), ...(typeof p.runtime === 'string' ? { runtime: p.runtime } : {}), observed_at: r.observed_at, received_at: r.received_at }]);
+    }
+    return out;
+  } catch (err) { console.error('ops follow-up read failed:', err); return 'unknown'; }
+}
+
+async function commandView(db: Db, run: Pick<RunRow, 'class_run_id' | 'cohort_id' | 'profile_id'>, id: string, now: number) {
+  const runId = run.class_run_id;
   const cmd = await db.prepare('SELECT id,action,reason_code,issued_by,created_at,expires_at,cancelled_at FROM ops_commands WHERE id=? AND class_run_id=?').bind(id, runId).first<Record<string, unknown>>();
   if (!cmd) return null;
-  const targets = ((await db.prepare('SELECT seat_id,state,result_code,lease_generation,connection_epoch,receipt_json,updated_at FROM ops_command_targets WHERE command_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<{ seat_id: string; state: string; result_code: string; lease_generation: number; connection_epoch: number; receipt_json: string; updated_at: number }>;
-  return { command: cmd, now, summary: summarize(targets), targets: targets.map((t) => { let receipt = {}; try { receipt = JSON.parse(t.receipt_json); } catch { receipt = {}; } return { seat_id: t.seat_id, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt }; }) };
+  const targets = ((await db.prepare('SELECT seat_id,seat_revision,grant_id,state,result_code,lease_generation,connection_epoch,receipt_json,updated_at FROM ops_command_targets WHERE command_id=? ORDER BY seat_id').bind(id).all()).results ?? []) as Array<{ seat_id: string; seat_revision: number; grant_id: string; state: string; result_code: string; lease_generation: number; connection_epoch: number; receipt_json: string; updated_at: number }>;
+  // U4 — `succeeded` is the device saying it ran. What that achieved is a separate answer, per target, from linked evidence only.
+  const action = String(cmd.action), recovery = COMMAND_ACTIONS[action]?.kind === 'recovery' || !!SERVICE_ISSUED_ACTIONS[action];
+  const ran = recovery ? targets.filter((t) => (FOLLOWUP_LINKABLE_STATES as readonly string[]).includes(t.state)) : [];
+  const followups = await readFollowups(db, runId, ran.map((t) => ({ seat_id: t.seat_id, command_id: id, grant_id: t.grant_id, since: Number(cmd.created_at) })));
+  const caps = new Map<string, boolean>(), issues = new Map<string, { id: string; count: number }>();
+  if (ran.length) {
+    try {
+      for (const r of ((await db.prepare('SELECT grant_id,capabilities_json FROM ops_device_connections WHERE grant_id IN (SELECT value FROM json_each(?))').bind(JSON.stringify(ran.map((t) => t.grant_id))).all()).results ?? []) as Array<{ grant_id: string; capabilities_json: string }>) { let has = false; try { has = (JSON.parse(r.capabilities_json) as string[]).includes(FOLLOWUP_CAPABILITY); } catch { has = false; } caps.set(r.grant_id, (caps.get(r.grant_id) ?? false) || has); }
+      if (action === 'refresh_connection') for (const r of ((await db.prepare(`SELECT s.seat_id,(SELECT t.jti FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=? AND t.expires_at>? ORDER BY t.issued_at DESC LIMIT 1) AS jti,(SELECT count(*) FROM ops_token_issues t WHERE t.cohort_id=? AND t.student_id=s.student_id AND t.profile_id=?) AS n FROM class_run_seats s WHERE s.class_run_id=? AND s.replaced_at IS NULL AND s.seat_id IN (SELECT value FROM json_each(?))`).bind(run.cohort_id, run.profile_id, now, run.cohort_id, run.profile_id, runId, JSON.stringify(ran.map((t) => t.seat_id))).all()).results ?? []) as Array<{ seat_id: string; jti: string | null; n: number }>) if (r.jti) issues.set(r.seat_id, { id: r.jti, count: r.n });
+    } catch (err) { console.error('ops outcome inputs unavailable:', err); }
+  }
+  const causes = new Map<string, string>();
+  if (action === 'retry_diagnostics') {
+    try {
+      const latest = (await db.prepare('SELECT seat_id,seat_revision,grant_id,state_json FROM ops_latest_state WHERE class_run_id=?').bind(runId).all()).results ?? [];
+      for (const row of latest) {
+        if (!targets.some(t => t.seat_id === row.seat_id && t.seat_revision === row.seat_revision && t.grant_id === row.grant_id)) continue;
+        const state = JSON.parse(String(row.state_json)) as SeatState;
+        const error = state.error?.value;
+        const activation = state.activation?.value;
+        const cause = error && error.cleared !== true ? String(error.class)
+          : activation?.stage === 'runtime_failed' ? String(activation.reason ?? 'sdk_not_ready')
+          : activation?.stage === 'token_rejected' ? String(activation.reason ?? 'auth_rejected') : '';
+        causes.set(String(row.seat_id), cause);
+      }
+    } catch (err) { console.error('ops diagnostic cause unavailable:', err); }
+  }
+  const shaped = targets.map((t) => {
+    let receipt: { observed_at?: number; received_at?: number } = {}; try { receipt = JSON.parse(t.receipt_json); } catch { receipt = {}; }
+    const outcome = recoveryOutcome({ action, current_cause: causes.get(t.seat_id), state: t.state, result_code: t.result_code, receipt, followups: followups === 'unknown' ? [] : followups.get(`${id}|${t.seat_id}`) ?? [], reports_followup: caps.has(t.grant_id) ? caps.get(t.grant_id)! : null, latest_issue: issues.get(t.seat_id) ?? null });
+    return { seat_id: t.seat_id, seat_revision: t.seat_revision, state: t.state, result_code: t.result_code, lease_generation: t.lease_generation, connection_epoch: t.connection_epoch, updated_at: t.updated_at, receipt, outcome };
+  });
+  return { command: cmd, now, summary: { ...summarize(targets), outcomes: summarizeOutcomes(shaped.map((t) => t.outcome)), ...(followups === 'unknown' ? { followups: 'unknown' } : {}) }, targets: shaped };
 }
 
 classroomOpsTeacher.get(root + '/commands/:id', async (c) => {
   const auth = await teacher(c, 'observe'); if (auth instanceof Response) return auth;
   const run = await loadRun(c, auth); if (run instanceof Response) return run;
   const now = Date.now(); await settleOverdueRun(c.env.HPS_DB, run.class_run_id, now);
-  const view = await commandView(c.env.HPS_DB, run.class_run_id, c.req.param('id')!, now);
+  const view = await commandView(c.env.HPS_DB, run, c.req.param('id')!, now);
   return view ? c.json(view) : c.json({ error: 'command not found' }, 404);
 });
 
@@ -562,7 +768,7 @@ classroomOpsTeacher.delete(root + '/commands/:id', async (c) => {
     db.prepare("UPDATE ops_command_targets SET state='cancelled',result_code='instructor_cancelled',updated_at=? WHERE command_id=? AND state IN ('queued','leased')").bind(now, id),
     audit(db, run.class_run_id, '', 'instructor', auth.payload.u, 'command_cancelled', { command_id: id }, now),
   ]);
-  return c.json(await commandView(db, run.class_run_id, id, now));
+  return c.json(await commandView(db, run, id, now));
 });
 
 // ── class-run control (R3): pause / resume new runs ─────────────────────────
@@ -601,12 +807,15 @@ classroomOpsTeacher.put(root + '/evidence/:ref', async (c) => {
   const run = await loadRun(c, auth); if (run instanceof Response) return run;
   const [grantId, bootId, seqText] = (c.req.param('ref') ?? '').split('.'), seq = Number(seqText), b = await json(c), now = Date.now(), db = c.env.HPS_DB;
   if (!UUIDISH_RE.test(grantId ?? '') || !UUIDISH_RE.test(bootId ?? '') || !Number.isSafeInteger(seq) || !b || !(REVIEW_STATES as readonly string[]).includes(b.state) || !Number.isInteger(b.expected_revision)) return c.json({ error: 'evidence ref, state and expected_revision required' }, 400);
-  const ev = await db.prepare("SELECT e.seat_id FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL WHERE e.grant_id=? AND e.boot_id=? AND e.seq=? AND e.class_run_id=? AND e.kind='evidence' AND e.disposition='applied'").bind(grantId, bootId, seq, run.class_run_id).first<{ seat_id: string }>();
+  // An instructor may look at an evidence event, or at a step the LEARNER marked as finished. Nothing else is reviewable:
+  // a step the learner has not submitted cannot be "reviewed" into completion from the instructor's side.
+  const ev = await db.prepare("SELECT e.seat_id,e.kind,e.payload_json FROM ops_events e JOIN ops_grants g ON g.id=e.grant_id JOIN class_run_seats s ON s.class_run_id=g.class_run_id AND s.seat_id=g.seat_id AND s.seat_revision=g.seat_revision AND s.replaced_at IS NULL WHERE e.grant_id=? AND e.boot_id=? AND e.seq=? AND e.class_run_id=? AND e.kind IN ('evidence','step') AND e.disposition='applied'").bind(grantId, bootId, seq, run.class_run_id).first<{ seat_id: string; kind: string; payload_json: string }>();
   if (!ev) return c.json({ error: 'evidence not found in this run' }, 404);
+  if (ev.kind === 'step') { let status = ''; try { status = JSON.parse(ev.payload_json).status; } catch { status = ''; } if (status !== 'submitted') return c.json({ error: 'only a step the learner submitted can be reviewed', reason: 'step_not_submitted' }, 409); }
   const saved = b.expected_revision === 0
     ? await db.prepare('INSERT INTO ops_event_reviews(grant_id,boot_id,seq,class_run_id,seat_id,state,reviewer_id,revision,updated_at) VALUES(?,?,?,?,?,?,?,1,?) ON CONFLICT(grant_id,boot_id,seq) DO NOTHING RETURNING state,revision').bind(grantId, bootId, seq, run.class_run_id, ev.seat_id, b.state, auth.payload.u, now).first<{ state: string; revision: number }>()
     : await db.prepare('UPDATE ops_event_reviews SET state=?,reviewer_id=?,revision=revision+1,updated_at=? WHERE grant_id=? AND boot_id=? AND seq=? AND revision=? RETURNING state,revision').bind(b.state, auth.payload.u, now, grantId, bootId, seq, b.expected_revision).first<{ state: string; revision: number }>();
   if (!saved) return c.json({ error: 'another instructor reviewed this; reload', reason: 'revision_conflict' }, 409);
-  await audit(db, run.class_run_id, ev.seat_id, 'instructor', auth.payload.u, 'evidence_' + b.state, { ref: c.req.param('ref') }, now).run();
-  return c.json({ ref: c.req.param('ref'), review_state: saved.state, review_revision: saved.revision, means: 'instructor looked at this evidence', does_not_mean: ['delivery approval', 'lesson completion', 'a grade'] });
+  await audit(db, run.class_run_id, ev.seat_id, 'instructor', auth.payload.u, (ev.kind === 'step' ? 'step_' : 'evidence_') + b.state, { ref: c.req.param('ref') }, now).run();
+  return c.json({ ref: c.req.param('ref'), kind: ev.kind, review_state: saved.state, review_revision: saved.revision, reviewed_by: auth.payload.u, means: ev.kind === 'step' ? 'an instructor looked at the step the learner said they finished' : 'instructor looked at this evidence', does_not_mean: ['delivery approval', 'lesson completion', 'a grade'] });
 });

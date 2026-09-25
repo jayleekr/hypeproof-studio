@@ -10,6 +10,38 @@
 
 ## 로드맵
 
+<a id="one-instructor-classroom"></a>
+
+### New umbrella feature: curriculum-connected operation by one instructor
+
+Added 2026-09-21 from **TJ's explicit product request**. This is a development
+roadmap item, not a completed feature. [Product intent](../PRODUCT-INTENT.md#one-instructor-classroom-intent)
+owns the motivation and attribution. The existing epics below remain the execution
+units; this grouping creates neither another product nor another implementation queue.
+
+| Category | Intent and user-visible addition | Existing delivery path | Remaining boundary |
+|---|---|---|---|
+| Curriculum authoring | Combine reusable lesson components and adapt examples to the audience; curriculum changes configure Studio's AI role, available tools, exercise flow and completion criteria | Chalk BASE-04, CH-01/04/06/07, ENV-01/03, EDU-02, VER-01/02; E1/E2; #1011/#1012/#1015 | Existing authoring and U3 version switching are partial foundations. A usable component-composition flow and student-context rehearsal still need acceptance; a visual block editor is not claimed implemented |
+| Live monitoring and communication | See who has entered, their stage, submissions and help requests; connect individual feedback and group recurring problems to reduce instructor attention switching | ADM-02/04/05/09; CLS-01/02/03; E5 #751 and #732 | Existing metadata boards and selected sharing remain useful. One-instructor operation and reduced waiting are field outcomes, still unmeasured |
+| Remote intervention | Issue/verify participation tokens, distribute to selected/all learners, collect permitted data and recover known faults with per-learner effect confirmation | ADM-01/03/07/10/11/13/14; E5 U1–U4, E3 recovery | U1/U2 have local acceptance; U3 has direct Mac prompt-flow evidence but a remaining mixed-basis predicate defect is under correction. Cause-specific recovery and collection extensions follow; external environments remain NOT RUN |
+
+**Finish the current delivery slice before expanding.** First close the reproduced
+U3 basis defect, then accept the bounded U4 known-fault actions and the minimum
+remaining collection flow needed for the agreed class scenario. Reuse the current
+authoring, selection and result UI. Do not start a general block editor, unrestricted
+remote desktop, new messaging product or a second storage/auth system to finish
+this slice. Keep curriculum-composition improvements and optional extensions in
+their existing linked backlog rather than silently dropping or implementing them.
+
+**Consolidation after completion.** In the product's main Features section retain
+one entry, “Curriculum-connected classroom operation”, with these three categories
+inside it. Promote a capability only with linked implementation and actual supported-
+environment acceptance. Preserve unfinished categories and known limits in the
+roadmap. Do not equate local acceptance, release, operational activation and measured
+one-instructor operation. The [integrated acceptance scenario](../testing/classroom-admin.md#one-instructor-acceptance)
+is the finish criterion; the individual U1/U2/U3 records remain the evidence for their
+own scope. No new deadline, seat-capacity claim or production approval is introduced.
+
 GitHub 하위 에픽: [E1 #747](https://github.com/jayleekr/hypeproof-studio/issues/747),
 [E2 #748](https://github.com/jayleekr/hypeproof-studio/issues/748),
 [E3 #749](https://github.com/jayleekr/hypeproof-studio/issues/749),
@@ -269,3 +301,141 @@ rollback은 먼저 delivery/collect/commands 신규 enqueue를 끄고 관측을 
 - `check-registry`용 격리 Python/PyYAML은 `.git/remote-classroom-evidence/check-env/`에 준비했다. 전역 Python 환경은 변경하지 않았다.
 - 전체 VSCodium build·새 앱 설치·production deploy·실수업 토큰 발급·실제 발송은 하지 않았다. full build는 CLAUDE.md의 별도 승인/10~20GB 조건이며 당시 여유 공간 약16GB라 이번 소스·확장 개발 세팅과 구분한다.
 - 검증 결과와 실제 제한은 [테스트 문서](../testing/classroom-admin.md#2026-09-18-설계-작업의-기반-검증)에 남긴다. 다음 구현자는 여기서 시작하고 원격 main 변동과 #751 등의 현재 claim을 다시 확인한다.
+
+### R0~R7 구현 후 수정 인계 · 2026-09-19
+
+독립 검토 기준 `1432b27`에는 [P1 5건·P2 2건과 수정 인수](../testing/classroom-admin.md#remote-classroom-review-20260919)가 남아 있다. R5/R6의 evaluator/renderer/provider 및 App 관측 연결은 코드 미완성이므로 운영 계정 대기나 실기 NOT RUN에 포함해 숨기지 않는다. 새 에픽/PRD를 만들지 않고 #751의 원격 운영 범위와 #1020의 측정 소유권을 유지한다.
+
+진행 순서:
+
+1. 현재 main·스택 PR·작업 중 변경을 확인한다. `next-work`에서 operations는 2026-09-19 확인 시 in_review이며 #1119~1127/#1129/#1165가 연결돼 있다. 기존 리뷰와 PR 경계를 먼저 읽고 최신 코드에도 아래 문제가 남는지 확인한다. 준비 브랜치 `test/751-ops-review-regressions`의 테스트/문서만 이어받으며 다른 사람의 작업을 reset/덮어쓰기 하지 않는다.
+2. R0/R2/R4/R6의 F1/F2/F3/F5부터 수정한다. 수집 신원·명령 취소·발송 dedupe·만료 후 scoped upload를 코드 계약으로 확정하고 applied migration을 바꾸지 않는다. 새 스키마가 필요하면 additive migration과 old-client 처리를 함께 만든다.
+3. R1의 F4와 R4/R5의 F6/F7을 실제 App 신호/근거 계약에 연결한다. 상태를 관측할 수 없는 구현에는 해당 capability/준비 완료 표시를 켜지 않는다. UI 표시 시험과 실제 신호 발행 시험을 구분한다.
+4. R5/R6에서 수집→job→실제 평가 adapter→검수→승인→renderer/전달을 연결한다. API 계약이나 emptyDraft만으로 멈추지 않는다. 계정 없이 가능한 adapter·서명 검증·UI·합성 통합 시험을 끝낸다. 발송 공급자는 기존 설정/정책을 우선 재사용하고, 없다면 후보와 비용·보존·webhook/idempotency 근거를 기록한 뒤 한 adapter만 구현한다. 실제 계정/수신자는 임의로 만들거나 발송하지 않는다.
+5. 기존 관리 화면에 UX 철학을 적용한다. 학습을 앞에, 관측은 뒤에 두고 질문/확인 지점 코칭과 기술 복구를 분리한다. 실제/가상 출처, 학생의 결정권, 미관찰≠저점수, forest/lime 토큰, 화면 기준 주요 CTA 하나를 유지한다. GlobalBuddy·6주·고정 도움 순서는 예시로만 취급한다. 30좌석 목록과 오른쪽 상세의 실제 탐색을 확인한다.
+6. R7에서 새 실패 테스트를 모두 통과시켜 기본 CI에 편입하고 기존 입장·토큰·모델·SDK·preview·저장·업로드·공유·예산 회귀를 검사한다. 외부 계정이 필요한 검증과 실제 Mac/Windows/학교망은 상태·해제 조건을 정확히 기록한다. 최종 변경은 저장소 PR 규칙에 맞춰 나누되 운영 flag는 기본 OFF로 유지한다.
+
+**2026-09-19 진행:** 위 1~6을 `fix/751-ops-review-f1-f7`에서 수행했다. 결함별 수정과 실행한 시험, NOT RUN, 아직 코드가 없는 항목은 [테스트 문서의 실행 기록](../testing/classroom-admin.md#검토-결함-수정과-미완-기능-보강의-실행-기록--2026-09-19)이 정본이다. 남은 것은 실기·운영 gate(실제 Studio/SDK/학교망, D1 0011~0018 적용, 평가기·메일 계정, 동의·보존 기간 결정)와 PR 리뷰다.
+
+인계 브랜치는 제품 코드를 수정하지 않는다. 테스트 실행/추적에 쓰는 package scripts와 traceability만 보강했으며 실패 테스트를 포함한 준비 커밋을 그대로 완료 PR로 병합하는 것은 종료 조건이 아니다. 새 계약 때문에 fixture를 고칠 때는 해당 양성·음성 시나리오를 보존하고 정상 spool/기기 흐름까지 검증한다. 모의 검증만으로 실제 수업 인수를 완료 처리하지 않는다.
+
+<a id="remote-readiness-plan-20260920"></a>
+
+### E5 다음 작업: 추가 결함 수정 → 실기 인수 → 제한된 운영 · 2026-09-20
+
+기준은 #1169 HEAD `c58dbc8`, 상태·새 결함·직접 실행한 근거는 [독립 재검토 기록](../testing/classroom-admin.md#remote-readiness-review-20260920)이 소유한다. 기존 F1~F7과 평가 큐 수정·CI 편입은 진전했지만, **남은 것이 환경/사람 결정뿐인 상태는 아니다.** 원격 관제+단일 회차 보고서라는 현재 인수 범위를 유지하고 삭제 경합과 복구를 먼저 닫는다. 누적 패턴·PDF 첨부·Kakao/SMS·QR·강한 본인 인증을 이번 수정에 섞어 범위를 늘리지 않는다. 후속 요구는 폐기하지 않는다.
+
+| 순서 | Claude가 지금 진행할 일 | 종료 근거 / 다음 의존성 |
+|---|---|---|
+| 1. 철회·결과 저장 경합 | 늦은 평가 결과의 R2 재생성과 실패한 철회의 재시도 누락 수정. #1168의 보고서 저장, #1169의 정리 원장을 재사용하고 관련 PR 스택에 반영 | 위 재현 2건과 late PUT/CAS 실패/crash 대조군, 정상 학생/다른 학생 불변. 실제 인용 객체가 남지 않고 삭제 완료의 의미가 맞음. 추가 migration이 필요하면 다음 번호 사용 |
+| 2. PR 검토 준비 정리 | #1120의 schema fixture/NAT 실패만 집계 수정, #1121의 PNG 제거를 각 현재 HEAD에서 대조해 기존 리뷰 답변과 근거를 정리. #1167~1169 최신 문서/CI 결과 갱신 | 변경 요청의 해소 근거와 아직 필요한 비작성자 리뷰를 분리. 기술 gate 해소와 사람 승인을 혼동하지 않음. source/base 변경 때 hype-pr 준비/CI 재생성 |
+| 3. 현재 Mac의 실제 UI | 기존 mac-devhost를 현재 소스로 다시 준비. 공식 최신 사용 가능 shell을 먼저 조사하고 현재 확장/SDK의 호환성·bundle/vendor 해시 확인. 합성 2좌석, 격리 user-data·workspace·로컬 Service로 실제 GUI 관측 | pairing→토큰 검증→실제 단계→강사 reviewed→오류·해결→disconnect/재연결→작업 보존. source SHA/shell/SDK 버전·화면·파일 전후 해시. 기존 설치 앱과 production 자격은 사용하지 않음. SDK 없는 fallback 결과는 SDK 중지/복구 인수로 쓰지 않음 |
+| 4. Windows·staging 실행 준비 | Windows는 기존 CI 산출물/원격 Windows 장치를 쓰는 실행 패키지, 학교망은 현장 큐시트를 준비. Cloudflare는 production과 분리된 명시적 staging binding/config 및 migration/검증/rollback 명령을 준비 | 장치·계정 없이도 fixture·설정 템플릿·명령·판정/해제 조건은 완성. 무조건 production 설정을 상속하거나 로컬에서 Windows 명령을 실행하지 않음. 실제 권한이 준비되면 staging D1/R2에서 동시성·삭제·네트워크 단절 확인 |
+| 5. 평가/발송 제한 검증 | 합성 또는 승인된 비식별 사례의 모델 품질 비교표, 호출/토큰/시간/비용 상한과 중단 조건을 준비. 발신 도메인·검수 수신자·webhook 설정 절차와 서명/반송/unknown 확인 시나리오를 준비 | 실제 모델/메일 계정 사용 승인을 받은 제한된 시험 결과. 관찰 주장↔근거 정확도·미관찰·AI/학생 출처·원가, accepted/delivered/bounced 구분. 승인 없는 실학생/보호자 발송 없음 |
+| 6. 성인 소규모 canary | 위 인수 뒤 운영자가 승인한 회차에서 기능을 순차 활성화하고 rollback 연습. 관측→저위험 조치→보존형 reset→수집→평가→검수/승인된 발송 | 먼저 성인 2~3석, 이후 30석. 실제 학교망/Windows와 100석 합성 부하 결과를 분리. 목표 상태 지연·명령 지연·기존 채팅 p95 영향(AT-25/34)을 측정. 아동 수집은 동의/고지 인수 뒤 별도 활성화 |
+
+**Mac 준비를 단순 실행 안내로 끝내지 않는다.** 준비본에 실제 Agent SDK가 없고 최신 소스의 dist 교체가 기존 vendor를 제거할 수 있으므로 기존 SDK packaging/seed 경로와 manifest를 대조한다. 실기용 로컬 Service는 실제 성공/오류/지연을 재현하는 제한 provider fixture와 외부 통신 거부를 갖춘다. 준비 SHA와 실행 bundle 해시가 다르면 인수 결과를 쓰지 않는다. 최신 공식 shell+현재 확장 조합은 개발 host 시험이고, 공식 release 자체의 설치/업데이트/서명 시험을 대체하지 않는다. full VSCodium build가 정말 필요할 때만 CLAUDE.md의 별도 자원/승인 조건을 적용한다.
+
+**migration·flag 순서는 개발자가 제안하고 리허설할 일이다.** 사람에게 순서 자체를 설계하도록 넘기지 않는다. 실행 전 target account/database/bucket·적용 이력·backup/restore 가능성·스택별 schema 의존성을 확인하는 검사를 만들고, additive migration 0011~0021(및 후속 수정 번호) → flag OFF의 호환 Service/Chalk/App → 단일 회차 단계별 flag 순서를 구체 명령으로 적는다. 기존 최초 Chalk 분리 배포 절차와 이번 기능 배포를 구분한다. 실패 시 신규 enqueue/수집/발송 차단, 진행 중 작업의 결과 확인, 원장 보존을 우선하고 schema drop을 rollback으로 쓰지 않는다. staging/운영의 실제 리소스 변경·활성화는 해당 권한/승인 후 실행한다.
+
+| 사람에게 남길 결정 | Claude가 승인 전에 준비할 것 |
+|---|---|
+| 목적별 보존 일수, enforce 시점 | 원문/초안/보고서/감사/수신자 확인 값/로컬 사본별 범위, dry-run 예상 삭제량, 철회와 만기 삭제 구분. 임의 일수를 제품 기본값으로 박지 않음 |
+| 평가 모델과 시험 비용 상한, 운영 활성화 | 재현 가능한 평가 사례, 품질 기준, 예상 최대 호출/토큰, 비용 계산 근거, kill switch. 실제 비용은 호출 후 실측 |
+| 발신 도메인·계정·테스트 수신자 | 기존 설정 재사용 조사, DNS/secret 필드별 설정 절차, sandbox/실수신 판정, 비밀값 없는 설정 템플릿. secret의 내용은 사람이 프롬프트에 적게 하지 않음 |
+| 열람 확인 방법, 수집 고지·동의 증빙 | 현재 사전 공유 확인 값과 강한 본인 인증의 차이, 수집/변경/오답 잠금/재발급 절차, 고지문·동의 기록 항목의 검토 가능한 초안. 생일/전화번호를 임의 수집하지 않음 |
+| 운영 적용 및 PR 비작성자 승인 | 최신 HEAD별 검증/남은 제한·배포/rollback 명령·성인 canary 계획. 자기 승인이나 CLEAN으로 대체하지 않음 |
+
+병합 검토 순서는 현재 의존성에 따라 #1165 → #1119 → #1120 → #1121 → #1122 → #1123 → #1124 → #1125 → #1126 → #1127 → #1129 → #1167 → #1168 → #1169다. 앞 PR 병합 후 다음 base/검증이 달라지므로 전체 스택을 오늘의 CLEAN만 보고 한 번에 완료 처리하지 않는다. 지금은 Draft/리뷰 준비를 개선하는 단계이며 이 계획이 병합·운영 실행 승인을 뜻하지 않는다.
+
+**2026-09-20 진행(위 표 1번):** 철회·결과 저장 경합과 철회 삭제 재시도 누락을 #1168·#1169에서 수정했다. 시나리오별 결과와 한계는 [테스트 문서의 수정 기록](../testing/classroom-admin.md#위-두-결함의-수정과-실행-결과--2026-09-20)이 소유한다. 2~6번의 진행과 남은 실행은 같은 문서의 이후 기록을 따른다.
+
+**2026-09-20 진행(표 2~5번)과 사람 결정의 권고안.** 실행 결과·NOT RUN은 [테스트 문서](../testing/classroom-admin.md#실제-mac-guisdk-실행--2026-09-20), 배포 순서는 [`worker/DEPLOY.md`](../../worker/DEPLOY.md)가 소유한다. 아래는 결정을 대신하지 않는다. 고를 수 있는 안과 권고, 그 근거다.
+
+| 결정 | 선택지 | 권고와 근거 |
+|---|---|---|
+| 보존 일수 | 30일 / **90일** / 180일 | 90일. 기존 `studio-logs/` 보존과 같은 숫자라 설명할 기준이 하나가 된다. 30일은 보호자 문의·정정 요청이 오기 전에 근거가 사라질 수 있고, 180일은 그만큼 보유할 목적을 따로 밝혀야 한다. 값을 넣은 뒤 최소 1주 dry-run 보고를 보고 enforce |
+| 평가기 | 끔 유지 / **회차 단위로 켬** / 전체 켬 | 제한 시험 통과 뒤 회차 단위. 모델은 `HPS_CLASSROOM_EVALUATOR_MODEL`로 명시 고정(프로필 모델을 따라가면 수업 모델을 바꿀 때 평가 기준도 같이 움직인다). 예산: 좌석당 최악 약 $0.34 → 30석 회차 $10 상한, API workspace 월 한도 $50부터 |
+| 발신 계정 | **보유 도메인의 발신 전용 하위 도메인 + 전용 key** / 루트 도메인 / 개인 메일 | 하위 도메인. 반송·신고가 루트 도메인 평판과 섞이지 않고 key 권한을 그 도메인으로 좁힐 수 있다. 회신 주소는 운영자 사서함 |
+| 열람 확인 | **운영자가 등록 때 정해 주는 확인 문구(passphrase)** / 전화번호 뒤 4자리 / 생일 4자리 | passphrase. 새 개인정보를 수집하지 않고 지인이 추측할 수 없다. 전화 뒤 4자리는 이미 연락처를 보유한 과정의 대안. 생일은 권하지 않는다(주변인이 안다). 어느 쪽도 본인 인증은 아니며 강한 인증은 후속 범위 |
+| 고지·동의 증빙 | **버전이 붙은 고지문 + 성인은 앱 내 동의 기록, 아동은 보호자 서명본을 운영자가 보관하고 Service에는 참조만** / 구두 동의 | 앞의 안. Service는 이미 `notice_version`·`basis`·`evidence_ref`·기록자·만료·철회 시각을 남긴다. 서명본 자체(이름·서명)는 Service에 올리지 않는다. 고지문에는 수집 항목(질문·AI 응답·작업 이벤트), 목적(수업 보고서), 보는 사람, 보존 일수, 철회 방법과 ‘이미 받은 메일은 회수되지 않음’을 적는다 |
+
+후속 범위(누적 패턴 본문·PDF 첨부·Kakao/SMS·QR·강한 본인 인증)는 그대로 후속이며 이번 작업에서 구현하지 않았다.
+
+
+
+### E5 다음 순서 갱신 · 2026-09-21
+
+[공식 shell 복사본의 직접 실행 기록](../testing/classroom-admin.md#remote-mac-readiness-20260921)을 기준으로 다음 순서를 적용한다. 기존 9/20 철회 P1 두 건은 수정 및 관련 31개 시험 통과를 확인했으므로 같은 수정을 다시 지시하지 않는다.
+
+1. 로컬 `fix/751-mac-devhost-launch`의 실행기·초대 발급 hook·검수 중복 행 수정 및 회귀를 기존 PR 소유 범위에 반영한다. 기존 스택 위의 준비 커밋이며 별도 중복 PR/무단 base 변경은 하지 않았다.
+2. 최신 main `19ff881`의 학생 경험 개편(#1170/#1178)을 관제 스택과 통합한다. 5개 충돌을 어느 한쪽으로 덮지 말고 현재 과제 중심 UI, 변경 전후 보기, real/simulated 표시, 단계 자기보고·강사 확인·원격 명령 보존 계약을 함께 유지한다. 최신 source/base에서 필수 체크와 실제 Mac 경로를 재실행한다.
+3. 발급 토큰 확인이 후속 runtime_ready에 덮여 unknown이 되는 재현(`activation-regression.mjs`)을 먼저 닫는다. 현재 상태와 확인 근거의 저장을 분리하고 재발급/다른 token/new boot/좌석 변경을 대조한다. 이어서 실제 SessionSpool의 sequence 계약을 보강한다. 최신 기록을 ‘구형’으로 설명하는 문구, 의도적인 강사 중지를 연결 장애로 설명하는 문구도 고친다. 재시작·동시 append·부분 쓰기·회차 경계·legacy 대조 없이는 complete를 올리지 않는다.
+4. 위 통합본으로 Mac 재실행 가능한 시연 패키지를 기존 devhost에 연결한다. Windows 실행 패키지/현장 큐시트, production과 분리된 staging 설정·대상 검사·rollback을 준비한다. 스크립트 존재와 실제 실행을 구분한다.
+5. 계정·운영 결정이 갖춰지면 기존 제한 평가 시험 → Resend sandbox·실수신·webhook → staging D1/R2 삭제·복구 → 성인 2~3석 canary → 30석 순서로 진행한다. 상한/수신자/실행 대상은 구체적으로 확정하고 증거 없이 NOT RUN을 지우지 않는다.
+
+#### 2026-09-21 오후 진행 결과
+
+[통합본 실행 기록](../testing/classroom-admin.md#remote-mac-integrated-20260921) 기준. 위 1~4는 코드·로컬 실행까지 끝났고 5는 그대로다.
+
+| # | 상태 | 남은 것 |
+|---|---|---|
+| 1 | 완료 — `6a7f33c`를 소유 PR별로 분할 반영(#1167 초대 발급 원장, #1168 보고서 중복 행, #1169 실행기·문서) | — |
+| 2 | 완료 — main `19ff881`과 작업 중 들어온 `f44cce3`(#1218)을 스택 맨 아래에서 병합해 13개 브랜치로 전파. 학생 화면은 main 구조 + 단계 자기보고(Primary 1개 유지) | 학생 화면 요구(SX) owner의 확인: 자기보고 버튼의 위치·문구 |
+| 3 | 완료 — 토큰 확인 근거 분리, 실제 spool seq·범위 계약, ‘구형 기록’·강사 중지 문구 | 재시작 전 세션을 **합쳐** 회수하는 기능은 없다(선언만). `coverage_reason`은 감사·seal 응답에만 있고 Chalk에 표시하지 않는다 |
+| 4 | Mac 완료(실제 창 14/14, 실제 spool 회수 `complete`) · Windows 패키지·staging 설정·검사기·메일 시험 실행기 준비 | Windows 현장·staging·실제 메일은 **NOT RUN**(계정·현장 필요) |
+| 5 | 미착수 | 아래 결정 뒤 순서대로 |
+
+**5로 넘어가기 위해 사람이 정할 것(그 외에는 없음).** ① Cloudflare 계정에서 staging D1·KV·R2를 만들 사람과 시점(id 세 개를 `wrangler.staging.toml` 두 곳에 기입). ② 제한 모델 시험용 Anthropic workspace와 지출 한도(예상 $0.10 미만, 최악 $2.72). ③ Resend 발신 하위 도메인과 운영자 시험 사서함 1~2개. ④ 수집 고지·동의 문안과 보존 기간(기본값 없음). ⑤ #1165 Intent 승인과 #1119~#1169 비작성자 검토자. ⑥ 성인 canary 2~3석의 일시와 Windows PC 확보.
+
+#### 원격관리 갭과 다음 구현 단위 · 2026-09-21 (제안 — 지시 전 착수하지 않음)
+
+사용자 요구의 중심은 원격관리(선택 → 상태 → 회수·배포·복구 → 대상별 적용 결과)다. [인수 계약 RM-1~5](../requirements/classroom-admin.md#remote-management-acceptance-20260921) · [현재 구현 매핑](../testing/classroom-admin.md#remote-management-map-20260921). 있는 것: 상태 보드, 허용 목록 복구와 대상별 영수증, 명단 전체 기록 회수. 없는 것: 그룹·전체 선택과 공통 선택 모델, 대상 선택 회수, **배포 전부**, 세 흐름 공통 결과 화면.
+
+| 단위 | 내용 (기존 원장·Chalk `/manage`·연결 자격을 재사용) | 크기 | 선행 결정 |
+|---|---|---|---|
+| U1 공통 선택 + 대상 회수 — **구현·실행 완료(2026-09-21)**, 독립 검토 인수(tip `4867ddf`, 인계 지시 기준: 선택 범위·명단 경합·늦은 확인·실패/만료·늦은 검증·시간 순서 4건 대조, 최종 CI 완료·실패 0). 인수 ID는 AT-42/43([정정 원장](../testing/classroom-admin.md#at-id-ledger-20260921)) | Chalk 공통 선택(개별·전체·도움 필요/연결됨/미연결) + `report-batches`의 명시적 `targets`(collect_only). 예상과 달리 **migration 0022가 필요했다**(불변 범위·요청 해시). 독립 재현 2건(범위 조회 fail-open, 커밋 경계 좌석 교체)을 같은 단계에서 닫음. [계약](../requirements/classroom-admin.md#remote-management-u1-20260921) · [실행 기록](../testing/classroom-admin.md#remote-management-u1-run-20260921) | 작음→중간 | 그룹은 상태 필터로 확정(저장 그룹 없음) |
+| U2 대상 배포 — 공지/자료 — **구현·실행 완료(2026-09-21) · 운영 비활성 · 첫 인수 반려 → 수정(`9d85718`) → 조율 측 로컬 인수**(병합·운영 승인 아님 · 남은 NOT RUN은 [AT 원장](../testing/classroom-admin.md#at-id-ledger-20260921)) ([실행 기록](../testing/classroom-admin.md#remote-management-u2-run-20260921) · [재인수 수정](../testing/classroom-admin.md#remote-management-u2-reaccept-20260921)) | [계약](../requirements/classroom-admin.md#remote-management-u2-20260921) · [인수 계획 AT-44](../testing/classroom-admin.md#remote-management-u2-plan-20260921). 처음 적었던 ‘좌석별 원하는 revision 하나(`control_revision` 방식)’는 버렸다 — 여러 자료가 한 회차에 공존하므로 **object별 revision + 배포 실행 + 참가자에 묶인 대상 행**이다. sync 응답으로 자격이 확인된 그 좌석에만 전달, 완료 = 기기의 **보관함 반영** 보고. 아래 ‘U2 설계 계약과 구현 순서’ | 중간→큼 (migration 1, Service route 1, App 보관함 + 표시면 2, Chalk 작성·결과) | 아래 표의 미결(링크 host·열람 수집·보존·권한 부여·활성화). 배포 1순위와 오프라인 처리는 사용자 지시로 정해짐 |
+| U3 대상 배포 — 수업 프롬프트·수업 설정 — **구현 · 로컬 합성·workerd D1·브라우저·실제 Mac M2 실행 · 인수 전 · 운영 미승인** (2026-09-21: 설계 `75f1f37`→`1190e5f` → 구현(Draft PR #1227) → `d32a191` 독립 검토의 결함 9건 보완 → `e7d719a` 검토의 실패 요청 마스킹 보완(기준 판정을 개수 대조에서 요청 단위 식별 연결로). [실행 기록](../testing/classroom-admin.md#remote-management-u3-run-20260921) · [검토 보완 기록](../testing/classroom-admin.md#remote-management-u3-review-20260921). 섞인 기준의 보류는 보고서 기능의 완료가 아니며 기준별 분할 보고서·U4·U1b는 후속) | [계약](../requirements/classroom-admin.md#remote-management-u3-20260921) · [인수 계획 AT-45/46](../testing/classroom-admin.md#remote-management-u3-plan-20260921). 프롬프트는 U2의 객체 종류 확장(migration 없음)이고, 설정은 그것만으로 되지 않는다 — 실행 설정이 토큰에 서명으로 고정돼 있어 **참가자별 binding + gate·`/v1/profile` 공통 resolver + Service가 승인한 turn snapshot + 실행 경계의 증거 + 섞인 기준의 보고서 차단**이 필요하다. ADM-11은 학생에게 보이는 안내 카드와 강사의 영향 요약으로 지킨다. 아래 ‘U3 설계 계약과 구현 순서’ | 큼 (migration 1(테이블 3), resolver 1, 전환 endpoint 1, 실행 경계 2곳, 보고서 진입점 5곳, App preflight·거부 처리, Chalk 종류 2) | 적용 시점의 운영 정책(로컬 가정: 다음 질문부터 — 승인 아님) · class 개설 좌석 허용 여부 |
+| U4 원인별 복구 — 원인 → 조치 → 조치 뒤 검증 — **구현 · 로컬 합성·workerd D1·브라우저·실제 Mac M3 실행 · 인수 전 · 운영 비활성**(2026-09-22, migration 없음, 기존 flag·권한) | 기기의 `succeeded`를 해결로 읽지 않는다: 해결 확인·문제 남음·실행만 됨·미확인·실행 안 됨을 그 명령에 연결된 근거(결과 코드 · command_id로 묶인 후속 관측 · Service 자신의 기록)로만 판정. 원인 → 먼저 할 조치, 공통 장애는 개별 PC 조치 없음, 보존 기준값은 조치 전, 강사 중지 뒤 자동 전송 없음, 미리보기 404는 복구 아님, 일시정지의 세 관측. AT-40 ([계약](../requirements/classroom-admin.md#remote-management-u4-20260922) · [실행 기록](../testing/classroom-admin.md#remote-management-u4-run-20260922)) | 작음→중간 | **남김:** 학생별 일시정지 · 승인된 turn의 후속 요청 유예 · 미리보기 상태 신호 · 시작 화면의 재발급 토큰 입력 실기 · 새 포트 재시작 실기 · AT-41 나머지 · U1b |
+
+**결정 필요.** ① 배포 1순위(수업 프롬프트 / 공지·자료 / 수업 설정) ② 오프라인 학생: 재접속 시 적용할지, 언제 만료할지 ③ 그룹의 정의 ④ 학생 프롬프트·결과물 회수를 학생 공유 기반으로 둘지, 강사 요청형을 추가할지(동의 모델이 달라짐) ⑤ 수업 중 설정 version 교체 허용 여부 ⑥ 앱 설치·업데이트·PC 전체 제어 포함 여부(사용자 확인 중 — 현재 범위 아님). (정정 2026-09-21: 이 문단의 원래 끝 문장 ‘Intent 문서에는 **배포 Intent가 없다** — U2 전에 Intent 개정이 먼저다’는 작성 시점의 #1165 원문(INT-CO-01~03) 기준이었다. 같은 날 #1165 브랜치 `docs/751-classroom-ops-intent`에 **INT-CO-04(대상 배포) 개정 제안**이 `ab7ee2f`로 추가됐다. **제안의 존재와 승인은 별개다** — 제안은 있고 owner 승인은 아직 없다. U2 설계는 그 제안에 연결하되 승인된 것으로 쓰지 않으며, 그 문서를 이 브랜치에 복제하지 않는다. ①②는 아래처럼 정해졌고 ③은 U1에서 상태 필터로 확정됐다. ④⑤⑥은 그대로 열려 있다.)
+
+#### U2 설계 계약과 구현 순서 · 2026-09-21 (설계 → 보완 1회 → 8단위 구현)
+
+**작업 범위 표시.** #751 전체를 새로 claim하지 않았고 다른 열린 작업을 가져오지 않았다. 이 단위는 #751의 하위 범위 **‘U2 설계’**이며 브랜치 `feat/751-u2-classroom-distribution`(기준 `4867ddf`, 예정 PR base `feat/751-review-c-ops-ui-retention-ci`)에서 **기존 문서 4개만** 고쳤다: 요구·시험·이 계획·`docs/studio-requirements.md`(+ 요구 문서 hash를 담는 `config/requirement-work.json` 한 줄). 제품 코드·시험 파일·migration·Mac 시연 프로세스는 건드리지 않았다. 구현 파일의 소유권과 Mac 실행권은 독립 검토 뒤 따로 인계된다.
+
+**정해진 것(사용자 지시 + 기존 코드 조사).** ① 배포 1순위 = 공지·자료, 프롬프트·설정은 U3. ② 오프라인 = 같은 회차·같은 참가자에 묶인 의도를 재접속 때의 자격 재검사 뒤 전달, 기본 만료 = 회차 종료. ③ 이름 = 회차 flag `ops_distribute` · issuer capability `distribute` · App capability `distribution_inbox` — `ops_delivery`/`deliver`(보고서 발송)는 뜻도 이름도 그대로. ④ 명령 원장(`ops_commands`)을 쓰지 않는다: 그 원장은 접수 시점에 `not_connected`를 확정하고 TTL 120초·grant/epoch 결속이라 ‘다시 연결되면 전달’과 맞지 않는다(코칭 `send_question`은 그대로 그 원장). ⑤ ‘적용’ = **보관함 반영**(디스크 저장 + 카드 목록의 읽기 경로로 재검증). HTTP 200·제안·알림·webview 메시지는 완료가 아니고 열람은 수집하지 않는다. ⑥ 학생용 콘텐츠 조회 API 없음 — 내용은 자격이 확인된 sync 응답으로만 나간다. ⑦ 새 연결·daemon·WebSocket 없음.
+
+**보완(같은 날, 독립 검토의 계약 공백 7건 — 재현된 제품 결함이 아니다).** ⑧ 배포 권한의 철회는 KV가 아니라 **D1 fence**(`ops_issuer_fences`) + 같은 batch의 sweep이 경계다: 기존 KV 폐기 호출 세 곳(`/admin/tokens/revoke` · `/admin/issuers`의 `revoke_jti` · `session/close`의 `jti`)과 un-revoke에 순서·부분 실패·재시도 계약을 붙였고, 배포 강사와 연결 발급 강사가 달라도 열린 배포가 멈춘다. 이미 나간 sync 응답은 회수할 수 없다고 적었다. ⑨ 기기 저장은 **불변 revision 파일 + 원자적 index commit**(+ 창 사이 잠금, `await` 뒤 세대 검사)이고 미반영 파일은 재시작 뒤 스스로 승격하지 않는다. ⑩ 카드(자료 단위)와 배포·회수(실행 단위)는 **coverage**(다른 유효 배포가 받치면 tombstone 없음)와 자료별 **사건 순번 `seq`**로 잇고, 전달 증거 `state`와 현재 보관함 `card_state`를 나눴다. ⑪ receipt·ack는 `offer_key`(grant·epoch·기기 세대·object·revision·hash)에 묶인다. ⑫ sync는 새 제안 / receipt 정산 / 회수 전달의 조건을 따로 갖는다(flag OFF·회차 종료 뒤에도 뒤의 둘은 동작, 연결이 끝난 기기는 `회수 확인 불가`). ⑬ 확정은 대상 수와 무관한 **5문장 batch**(`json_each`)·≤ 12쿼리이고, 비용은 기존 sync와 증가분을 나눠 `meta.rows_read/rows_written`으로 계측한다 — 계정 plan은 미확인. ⑭ 공통 확정 UI의 확정 뒤 안내 정리(U1 선택 회수에도 적용되는 문구 후속).
+
+| 순서 | 구현 단위 (각 단위는 자기 시험과 함께 끝난다) | 주 위치 | 끝났다는 근거 |
+|---|---|---|---|
+| 1 | 순수 계약: 내용 검증·정규 hash·링크 규칙·요청 정규화·대상 상태 전이·`status` 계산. 양성·음성 대조군 먼저 | 신규 `worker/src/lib/classroom-distribution.ts` | 전이 표·거부 목록이 요구 문서의 행과 1:1 (D7·D8·D12의 순수 부분) |
+| 2 | additive migration(착수 시 다음 번호, 현재 0023: 콘텐츠 2 + 배포 2 + `ops_issuer_fences`, 부분 인덱스 `pending=1`) + `schema.sql` + D1 리허설 편입 | `worker/migrations/`, `worker/schema.sql` | fresh = 누적, 재적용 멱등, 기존 테이블 불변 (D15) |
+| 3 | 강사 API: contents·distributions·실행 회수/자료 회수(coverage·`event_seq`), **대상 수와 무관한 5문장 조건부 batch**, 멱등, fail-closed, `OPS_FLAGS`/`OPS_CAPABILITIES`·issuer 경로·`/status.distribution`. **배포 권한 fence + sweep을 기존 폐기·재범위화·un-revoke·session close에 연결** | 신규 `worker/src/routes/classroom-distribution.ts`, `classroom-ops.ts`(lib·route), `instructor-auth.ts`, **`admin.ts`** | D1·D2·D5·D7·D8·D11·D13·D14의 Service 부분. 경합 주입은 U1의 7종과 같은 구조. 확정 ≤ 12쿼리·문장당 bound ≤ 30을 시험이 센다 |
+| 4 | sync 확장: 세 흐름(새 제안 / receipt 정산·ack / 회수 tombstone)의 조건 표 그대로, `offer_key` 결속, 기기 세대 되돌림, lazy 정산, 교환 실패 격리, 한도(`more`). 좌석 lease 확보를 공통 함수로 분리. `rows_read/rows_written`·문장 수 계측 harness | `worker/src/routes/classroom-ops.ts`, 시험 harness | D3·D4·D6·D13·D14. idle sync 증가분 쓰기 0·문장 +0. 기존 sync·명령 시험 불변 |
+| 5 | App 보관함: 순수 reducer(`seq`·revision·tombstone·hash) + host adapter(불변 rev 파일 → 잠금 아래 index commit → 같은 읽기 경로로 재검증 → 저널, `await` 뒤 세대·기한 검사, 미반영 파일을 승격하지 않는 reconciler, `(offer_key, stage)` 단위 ack 처리) | 신규 `extensions/hypeproof-chat/src/classroomInbox.ts`, `classroomOps.ts`, `classroomOpsHost.ts` | D6·D8·D9의 기기 부분 — 경계별 fault 주입에서 기존 카드 보존·역전 0·거짓 reflected 0. Windows 파일 동작은 NOT RUN으로 남긴다 |
+| 6 | 학생 표시면 2곳: 작업 화면 rail의 `<details>`와 ‘이어서 하기’ 진입 화면의 조용한 줄. 같은 host 메시지·같은 읽기 경로 | `protocol.ts`, `chatPanelProvider.ts`, `startPage.ts`, webview `ChatPanel.tsx`·`StartPage.tsx` | D12 렌더·D16, SX-04/05/06/13 불변 |
+| 7 | Chalk: 작성 → 미리 확인 → 확정 → 대상별 결과(전달 증거와 현재 보관함 상태를 나란히) → 실패·미확인 재선택 → ‘보낸 자료’ → 실행 회수/자료 회수. U1의 선택 세대 함수를 조치 공통으로 옮기면서 **확정 뒤 안내를 바꾸고 최종 상태와 모순되는 과거 안내를 지운다 — 회수(U1)와 배포 양쪽**. 근거: 실제 Mac의 U1 선택 회수에서 ‘서버 검증됨’ 옆에 `확인만 했습니다. 아래에서 요청해야…`가 남아 있던 관측(공통 git-dir 증거 `codex-actual-mac-selected-collect-cb09c68.png`). U1 기능 인수는 그대로이며 이 단위 전에 따로 고치지 않는다 | `chalk/src/ui/manage.html`, forwarder | D1·D10·D13·D16 브라우저 e2e(응답 도착 시점은 U1처럼 네트워크 층에서 제어). D10이 두 흐름에서 남는 안내 0을 검사 |
+| 8 | 회귀 + 실제 Mac M1 + 실행 기록·NOT RUN 정리. 시험 제목의 옛 AT 표기를 새 번호로 | 기존 suite, `e2e/classroom/mac-demo*.mjs`, 문서 | D15·M1. 로컬 SQLite / 로컬 workerd D1 / 실제 Mac 증거를 구분해 기록 |
+
+1→2→3→4는 직렬, 5는 1 뒤에 3·4와 병렬 가능, 6은 5 뒤, 7은 3 뒤, 8은 전부 뒤. 한 PR로 묶되(예정 base 위 stacked) 단위마다 커밋을 나눈다. 운영 flag는 기본 OFF로 남기고 production·staging 자원은 건드리지 않는다.
+
+**구현 결과(같은 날).** 8단위를 단위별 커밋으로 끝냈다: 순수 계약 → migration 0023(테이블 6개: 콘텐츠 2·배포 2·카드 1·fence 1) → 강사 API + D1 fence(기존 폐기·재범위화·session close·un-revoke 연결) → sync 교환 → App 보관함(불변 rev 파일 + `link()` CAS) → 학생 표시면 2곳 → Chalk → 브라우저 e2e·회귀·실제 Mac M1. 인계 때 받은 세 경계(현재 판 기준 coverage / 회수 전용 키와 ack / 요청 시각 기준 적용 기한과 잠금 없는 commit)와 구현 중 시험이 잡은 빈틈(재발급 뒤 옛 키 receipt가 통과하던 것)은 [요구 문서의 ‘구현에서 확정·변경한 계약’](../requirements/classroom-admin.md#remote-management-u2-20260921)에 있다. 공통 확정 UI의 남는 안내는 회수·배포 양쪽에서 고쳤고 두 브라우저 시험이 검사한다. 시험 제목의 옛 AT 표기(`AT-38 …`)는 이번 PR에서 바꾸지 않았다 — U1 시험 파일의 제목만 바꾸는 변경을 U2 PR에 섞지 않기 위해서이며 정정 원장이 대응표를 갖고 있다.
+
+**재인수 수정(같은 날).** 첫 인수 요청(`51708c7`)은 반려됐다: 제안을 원장에 기록하는 UPDATE가 0행을 바꿨는데도 item이 sync 응답에 실려, 회수·flag OFF·좌석 교체와 경합하면 기기에 본문이 남았다. 기록하는 문장이 전제조건을 스스로 검사하고 응답·카드·감사 행을 ‘실제로 바뀐 행’에서만 만들도록 고쳤고(receipt·회수 확인 receipt의 신원 결속 포함), 같은 PR에서 강사 화면을 ‘현황 → 선택 → 조치 → 학생 목록 → 결과·이력’ 순서로 정리하고 상태와 모순되던 문구 5건을 고쳤다. 재현 전후·회귀·실제 Mac 재실행은 [재인수 수정 기록](../testing/classroom-admin.md#remote-management-u2-reaccept-20260921). U3는 U2 재인수 전에 시작하지 않는다.
+
+**이 설계로 닫히지 않는 것.** 미결 결정과 권고는 [요구 문서의 표](../requirements/classroom-admin.md#remote-management-u2-20260921)가 소유한다(INT-CO-04 owner 승인, 허용 링크 host, 열람 수집 여부, 시간 기준 보존, `distribute` 부여 대상, Cloudflare plan과 D1 예산, 운영 활성화). 이어질 범위는 그대로 남는다: U3(프롬프트·수업 설정 — U2의 object/revision·`kind`·`payload_json`·receipt 단계를 확장, 수업 중 version 교체 허용 여부가 선행 결정), 학생 프롬프트·승인 결과물의 대상 회수(④), U4 원인별 복구(AT-40), 세 흐름 공통 결과 화면(AT-41), 재시작 전 세션 병합 회수와 `coverage_reason` 표시, 그리고 기존 보고서 생성·검수·허용된 전달의 실제 모델·메일 인수. 실제 기기 업로드 실패·재전송, Windows·학교망·staging/production D1은 계속 NOT RUN이다.
+
+#### U3 설계 계약과 구현 순서 · 2026-09-21 (구현됨 · 인수 전 — 원격관리 전체나 운영의 완료가 아니다)
+
+**작업 범위 표시.** #751 상위 claim을 새로 가져오지 않았고 #1011(2026-09-21 조회: ready · 담당·댓글 없음)도 claim하지 않았다. 브랜치 `feat/751-u3-prompt-settings`(기준 = U2 인수본 `bdebdd3`, 예정 PR base = #1223 브랜치)에서 **기존 문서만** 고쳤다: 요구·시험·이 계획·`docs/studio-requirements.md`(+ `config/requirement-work.json`의 요구 문서 hash 한 줄). 제품 코드·migration·시험 파일·실행기·GUI는 건드리지 않았고, U2 worktree·실행 중인 U2 runner와 데모 포트도 그대로다.
+
+**코드를 읽어 정한 것.** ① 실행 설정은 학습 토큰의 `lesson{course_id,version,sha256}`에 고정돼 있고 gate(`chat-gate.ts`)와 `/v1/profile`(`routes/chat.ts`)이 **각자** `resolveTokenLesson`을 부른다 — 한쪽만 바꾸면 App의 도구 정책과 Service의 모델·프롬프트가 다른 버전으로 실행된다. 그래서 공통 지점은 신규 `resolveEffectiveLesson` 하나이고 두 호출부가 그것을 쓴다. cohort 전역 pin·회차 pin·토큰은 바꾸지 않는다. ② SDK runtime은 turn마다 새 `query()`를 만들고 헤더는 turn 동안 env에 고정되므로, 장수 세션의 캐시가 아니라 **turn 하나가 보내는 여러 요청**이 고정 대상이다. 식별자는 이미 있는 `x-hps-turn-id`이고, **고정의 근거는 헤더가 아니라 Service가 그 turn id에 기록한 실행 snapshot**(`classroom_lesson_turns`)이다 — 새 turn은 현재 binding으로만 승인되고, 승인된 turn은 그 뒤 몇 번 전환되든 같은 snapshot으로 끝난다(수명 30분 · 연장 불가). `x-hps-lesson-binding`은 App의 기대값일 뿐이다. ③ `activity_id`는 토큰에서 나오므로 설정 전환은 같은 activity 안의 일이고 대화·초안·파일·사용량 귀속이 옮겨 가지 않는다. ④ 입력 초안은 webview state라 ‘초안에 가져오기’는 host 왕복 없는 함수형 갱신 한 번이다(읽기–쓰기 틈 없음, 덧붙이기만). ⑤ 단계 판정·`mark_checkpoint`는 회차 pin 기준이라 참가자별 기준으로 바꿔야 하고, 회수 snapshot의 `activity`는 회차 pin에서 읽으므로 U3로 `foreign_activity`가 생기지 않는다. ⑥ ‘적용’의 증거는 기기 보고도 gate 통과도 아니라 **정규화된 wire가 upstream으로 나가는 자리**(`messages.ts` `callAnthropic` 앞 · `chat.ts` `admit()` 뒤)와 기존 `record()` funnel에서 만든다: 실행 시도 / 상류 실패 / 결과 미확인 / 응답 성공을 나누고 응답 성공만 `적용됨`이다. `/v1/profile`·preflight·`count_tokens`·거절된 요청은 증거를 만들지 않는다. ⑦ 회수는 설정을 되돌리지 않고, 복귀는 새 배포 + 새 적용 증거다. ⑧ **끄는 것·집행·복귀를 분리한다:** 회차 flag와 전역 ops OFF는 새 변경만 멈추고, 이미 전환된 설정의 집행은 독립 환경값 `HPS_LESSON_BINDINGS`가 맡는다. binding을 읽지 못하면 토큰 강의로 내려가지 않고 **보류**한다(실행 전이면 입력 복원 · 일부 실행됐으면 부분 실행 표시 · 자동 재전송 0). lesson 좌석은 이미 요청마다 같은 D1을 읽으므로 새 가용성 의존은 아니지만, turn마다 쓰기가 생긴다 — 비용 표를 다시 계산했다. ⑨ **섞인 기준의 회수 입력은 이번 단위에서 막는다:** 기준은 서버 `activated_at`이 아니라 실제 turn 행에서 판정하고, seal·`createJobs`·`saveResult`(직접 결과 제출 포함)·review·발송 범위·링크 열람 각각에 조건을 넣는다. 구간별 서술 보고서만 후속이다.
+
+**구현 단위 10개와 의존**은 [요구 문서의 표](../requirements/classroom-admin.md#remote-management-u3-20260921)가 소유한다(여기에 복제하지 않는다): 순수 계약 → migration 0024 → (강사 API ∥ 실행 경로: resolver·turn 승인·실행 증거) → 전환 endpoint → 기준 판정과 보고서 차단(선택 사항이 아니다 — 같은 PR에 있어야 한다) → App 프롬프트(서버와 병렬 가능 · migration 불필요) → App 설정 preflight·거부 처리 → Chalk → 회귀·M2. 각 단위의 종료 근거는 [AT-45/46 시나리오](../testing/classroom-admin.md#remote-management-u3-plan-20260921) P1~P7·S1~S19·M2이며 전부 NOT RUN이다.
+
+**이 설계로 닫히지 않는 것.** 적용 시점의 운영 정책, INT-CO-04 승인 범위, class 개설 좌석 허용, `lesson_settings` 부여 대상, 학생 안내 문구(SX owner), spool 출처 필드의 고지 포함, Cloudflare plan — [요구 문서의 미결 표](../requirements/classroom-admin.md#remote-management-u3-20260921). 보고서가 기준 변경 구간을 turn 단위로 나눠 서술하는 일(그때까지 섞인 입력은 평가 보류), 학생 프롬프트·결과물의 대상 회수, U4(AT-40)·공통 결과 화면(AT-41)은 이 단위의 범위가 아니다. Windows·학교망·staging/production D1·실제 모델·메일은 계속 NOT RUN이다.
+
+(당시 #1119~#1169 스택의 범위 기준) 인수는 관제·보존형 복구·단일 회차 보고서다. 현재 사용자 목표인 원격관리 RM-1~5의 인수와 혼동하지 않는다 — 그쪽의 현황(2026-09-21 저녁): **U1은 구현·인수**, **U2(공지·자료 배포)는 구현되고 조율 측이 로컬 범위를 인수**(병합·운영 활성화·Windows·학교망·staging은 아님), **U3(프롬프트·설정)는 설계가 독립 검토 중이며 인수 전**(코드 없음), U4(AT-40)와 공통 결과 화면(AT-41)은 미착수다. 원래 요청의 누적 패턴/PDF 첨부/다른 전달 채널은 후속 범위를 유지하며 ‘제품 전체 개발 완료’로 표현하지 않는다. 현재 CI CLEAN은 비작성자 승인·최신 main 통합·실수업 가동을 대신하지 않는다.
