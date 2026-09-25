@@ -3030,7 +3030,7 @@
     {
       "id": "ST-DES-CHALK-KB",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-KB"
       ],
@@ -3044,7 +3044,7 @@
     {
       "id": "ST-DES-CHALK-PLANSPEC",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-HTML",
         "ST-REQ-CHALK-SCH",
@@ -3175,7 +3175,7 @@
     {
       "id": "ST-IMP-CHALK-PLAN-PARSER",
       "stage": "implementation",
-      "owner": "chalk",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-FB",
         "ST-DES-CHALK-GATELOOP"
@@ -3188,7 +3188,7 @@
     {
       "id": "ST-TEST-CHALK-PLAN-PARSER",
       "stage": "test",
-      "owner": "chalk",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-FB",
         "ST-DES-CHALK-GATELOOP"
