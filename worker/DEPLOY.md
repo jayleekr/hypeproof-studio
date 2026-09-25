@@ -180,3 +180,136 @@ a successful-settings claim. Rollback keeps all data. Older Service builds do no
 accept the new frozen effort schema: stop issuing new effort lessons and restore the
 prior lesson/version before using an older Service. This does not change retention,
 pricing, raw-content logging or existing students' credentials.
+
+## Remote classroom operations (#751) — staging rehearsal, schema order, flags, recovery
+
+Everything here is OFF until someone turns it on: no `HPS_CLASSROOM_OPS`, no per-run flag, no evaluator, no mail
+provider, no retention period. Merging and deploying the code changes nothing a learner or instructor can see.
+What each switch means is owned by `docs/requirements/classroom-admin.md`; this section is only the order of operations.
+
+**Facts that shape the procedure (checked 2026-09-20).** Migrations are applied with `wrangler d1 execute --file`, so
+there is no `d1_migrations` table: the schema itself is the applied history, read by
+`scripts/classroom-ops-d1-check.mjs` (read-only). `deploy-worker.yml` applied 0002–0010 unconditionally and did not
+know 0011–0023; it now has an explicit `apply_classroom_ops_schema` input (default off). `wrangler.toml` has no
+staging environment — `[env.dev]` declares no D1/KV/R2 of its own and named environments do not inherit bindings, so
+**a staging target does not exist yet and must not be improvised by pointing `--env dev` at production ids.**
+0011–0023 contain only `CREATE TABLE|INDEX IF NOT EXISTS` (the D1 test asserts this), so order matters only for
+readability and every file can be re-applied.
+
+### 0. Staging target (once; needs the Cloudflare account — not done)
+
+```bash
+npx wrangler d1 create hypeproof-studio-staging          # note the uuid it prints
+npx wrangler r2 bucket create hps-traces-staging
+npx wrangler kv namespace create HPS_KV_STAGING
+```
+
+The staging pair is already in the repository as **separate files** — `wrangler.staging.toml` here and in `chalk/` —
+so a plain `wrangler deploy` can never pick it up and nothing is inherited from production's file. Paste the three ids
+printed above over the `REPLACE_WITH_STAGING_*` placeholders in BOTH files, then:
+
+```bash
+node scripts/classroom-ops-staging-check.mjs     # exit 2 = a placeholder remains · exit 1 = UNSAFE (something is production's) · 0 = independent
+npx wrangler secret put HPS_SIGNING_SECRET -c wrangler.staging.toml    # a NEW value: a staging token must never open production
+npx wrangler secret put ADMIN_PASSWORD     -c wrangler.staging.toml
+npx wrangler deploy -c wrangler.staging.toml                            # prints the workers.dev URL → chalk's HPS_SERVICE_ORIGIN
+(cd ../chalk && npx wrangler secret put HPS_SIGNING_SECRET -c wrangler.staging.toml && npx wrangler deploy -c wrangler.staging.toml)
+```
+
+The checker (also run by `npm run test:classroom-ops:review`) refuses any D1/KV/R2/dataset id or name, Worker name, route
+or `*_ORIGIN` that production uses, and a Worker/Chalk staging pair that does not share the same staging resources.
+Every later command in this section takes `-c wrangler.staging.toml` on staging. Removing staging afterwards is
+`wrangler delete -c wrangler.staging.toml` for both Workers plus deleting the three staging resources; production is not involved.
+Give staging production's real shape, not `schema.sql` (which already contains this feature): export production's
+schema WITHOUT data (`npx wrangler d1 export hypeproof-studio --remote --no-data --output=<outside the repo>/prod-schema.sql`)
+and execute that file against staging. Staging then starts exactly where production is, without a single production row.
+
+### 1. Before touching any database — confirm the target and what it already has
+
+```bash
+npx wrangler whoami                                        # the account you expect?
+node scripts/classroom-ops-d1-check.mjs --database <name> --expect-id <uuid>      # refuses if name→uuid differs
+```
+
+Expected before the first rollout: every file `not_applied`. `partial` or `out_of_order` (exit 1) means an earlier
+attempt stopped midway: re-apply from the first file listed in `apply_next_in_this_order`; do not hand-edit tables.
+
+### 2. Backup you can actually restore from
+
+```bash
+npx wrangler d1 export <name> --remote --output=backup-$(date -u +%Y%m%dT%H%MZ).sql      # keep OUTSIDE the repo
+npx wrangler d1 time-travel info <name>                   # note the bookmark printed here in the rollout log
+```
+
+The nightly R2 backup (`cron/d1-backup.ts`) is a second copy, not the rollback plan. Because the migrations only ADD
+tables, the rollback for a bad rollout is "flags off + previous Worker", not a restore. A restore
+(`wrangler d1 time-travel restore <name> --bookmark=<bookmark>`) is for a damaged database only, rewinds EVERY table
+including usage and budgets, and is a separate decision with its own confirmation.
+
+### 3. Apply 0011 → 0024, then verify
+
+```bash
+for f in 0011-classroom-ops 0012-classroom-ops-commands 0013-classroom-ops-control 0014-classroom-ops-evidence-review \
+         0015-classroom-collection 0016-classroom-report-jobs 0017-classroom-delivery 0018-classroom-snapshot-binding \
+         0019-classroom-report-attempts 0020-classroom-viewer-check 0021-classroom-erasure-log \
+         0022-classroom-collect-scope 0023-classroom-distribution 0024-classroom-lesson-bindings; do
+  npx wrangler d1 execute <name> --remote --file=migrations/$f.sql || break
+done
+node scripts/classroom-ops-d1-check.mjs --database <name> --expect-id <uuid> --require all
+```
+
+A migration added after 0023 for this feature goes to the end of both lists (here and in `deploy-worker.yml`); the
+checker picks up any `migrations/00NN-*.sql` ≥ 0011 by itself. On production this step is the workflow input
+`apply_classroom_ops_schema: true` on ONE deploy, after the staging rehearsal below has passed.
+
+### 4. Deploy with everything off, and prove it is off
+
+Deploy Service, then Chalk (`deploy-chalk.yml`), App last. With no `HPS_CLASSROOM_OPS`:
+`curl -s -o /dev/null -w '%{http_code}' -X POST https://<service>/v1/classroom/ops/connect -d '{}'` → `404`;
+Chalk `/manage` shows no operations panel; existing chat, board and budgets behave as before (`scripts/verify-prod.sh`).
+The 15-minute cron runs erasure recovery on an empty ledger (one SELECT); without the tables it reports
+`not_migrated` and does nothing.
+
+### 5. Turn on in this order — one class run at a time, each step reversible by the line in step 6
+
+| # | Switch (where) | Proves before moving on |
+|---|---|---|
+| 1 | `HPS_CLASSROOM_OPS=enabled` (Worker var; per-run flags still all false) | the routes exist but refuse: the instructor's pairing request for a run answers `403 ops_observe_disabled`, `/connect` answers `403 ticket_invalid` instead of `404 ops_disabled`; nothing else changed |
+| 2 | run flag `ops_observe` (instructor's run configuration) | adult 2–3 seats pair, token/step/runtime appear, p95 of existing chat unchanged (AT-25/34) |
+| 3 | `ops_commands` | low-risk actions first (`retry_diagnostics`, `send_question`), then one `cancel_current_run`, then one `reset_runtime` with file hashes before/after |
+| 4 | `ops_collect` | only after the collection notice/consent decision; adult learners; withdrawal exercised once end to end incl. `GET /admin/classroom/erasures` → `settled` |
+| 5 | `ops_reports` + `HPS_CLASSROOM_EVALUATOR=service-anthropic` | the limited model trial in `docs/testing/classroom-admin.md` passed; cost within the stated ceiling |
+| 6 | `ops_delivery` + `HPS_DELIVERY_PROVIDER=resend` and its secrets | the limited mail trial passed; first real batch is dry-run, then test recipients only |
+| 7 | `HPS_CLASSROOM_RETENTION_DAYS` (dry-run reports for ≥ 1 week) → `HPS_CLASSROOM_RETENTION=enforce` | the dry-run count matches what the operator expects to lose |
+| 8 | **Lesson settings (#751 U3 — not accepted; do not enable in production yet).** `HPS_LESSON_BINDINGS=enforce` (Worker var, needs migration 0024) **before class, with the apps closed**, then the run flag `ops_lesson_settings` and the instructor capability `lesson_settings` | with the var set and no setting sent: `/v1/profile` carries `lesson_binding.enforced=true`, a question is admitted (one `classroom_lesson_turns` row, closed by the app), existing chat p95 unchanged (not yet measured — AT-46 S16 ⑧). Then one adult seat: prepared → switched → applied on the instructor page, and the explicit return. Every learner question now writes ≈ 7 D1 rows plus 2 per later model request of that question — each permitted request has its own row and its usage row is linked to it (≈ 135k rows for a 200-seat, 2-hour class and ≈ 68k for 100 seats in the measured scenario; the Free plan allows 100k/day): **do not enable beyond a small adult canary (tens of seats) before the Cloudflare plan is known** (measured model in `docs/requirements/classroom-admin.md`) |
+
+### 6. Recovery — stop new work first, keep the ledgers, never drop a table
+
+| Symptom | Do | Do not |
+|---|---|---|
+| anything wrong with sending | unset `HPS_DELIVERY_PROVIDER` (live sends stop; `send_unknown` rows stay and are settled by webhook or by hand) | re-send a batch to "make sure" |
+| evaluation cost or quality | unset `HPS_CLASSROOM_EVALUATOR` (jobs wait as `evaluator_not_configured`; drafts that exist are kept) | delete jobs |
+| collection | run flag `ops_collect=false` (no new batch; a learner can still withdraw; pending erasures still finish) | turn off `HPS_CLASSROOM_OPS` to "stop deletion" — recovery of requested erasures is deliberately independent |
+| a lesson setting misbehaves | send the explicit return (`기본 수업으로 복귀`) to the affected learners, then run flag `ops_lesson_settings=false` (no new setting can be saved, sent or switched; learners already switched **stay** switched and enforced). Unsetting `HPS_LESSON_BINDINGS` makes every learner run the token's lesson again — that WIDENS anything a setting had narrowed, so it is a deliberate rollback, not a pause. Report inputs already marked mixed stay held either way | withdraw the distribution and expect learners to go back (a withdrawal only stops those who have not switched); `DROP` the binding/turn tables (they are the evidence the collection seal reads) |
+| commands misbehave | run flag `ops_commands=false` (queued commands expire; running ones report their own receipt) | assume a cancelled command was undone |
+| everything | unset `HPS_CLASSROOM_OPS` (all routes 404, devices disconnect on next sync, chat is unaffected) → if needed deploy the previous Worker: it ignores the new tables | `DROP TABLE`, `time-travel restore` |
+| retention deleted too much | `HPS_CLASSROOM_RETENTION` unset immediately; already-started erasures finish (content is unreachable the moment they start) | expect a restore to bring R2 objects back — it cannot |
+
+After any rollback, `GET /admin/classroom/erasures?class_run_id=…` must show no `started` row older than a day with
+`needs_operator=false`; a `needs_operator=true` row is a person's task, not a background one.
+
+**Status 2026-09-21:** the staging files, the independence checker and its controls exist; the committed pair reports
+`not_provisioned` (exit 2). No Cloudflare command was run, no resource was created, nothing was deployed.
+The 2026-09-21 code changes (token evidence slot, spool sequence contract, `coverage_reason`) add **no migration**: they live
+in `ops_latest_state.state_json`, the snapshot binding JSON and the audit detail.
+
+**Status 2026-09-20:** steps 1–3 rehearsed on local workerd D1 with the same checker (`npm run test:classroom-ops:d1`:
+none → interrupted → all → re-applied, plus a half-created negative control). Steps 0 and 1–6 against a real
+Cloudflare staging or production target: NOT RUN — no staging target exists and no account action was taken.
+
+### Viewer-check signing-secret rotation
+
+Recipient viewer-check hashes use `HPS_SIGNING_SECRET`. Rotating this secret also
+invalidates existing imported checks: coordinate a fresh recipient import with
+new salts/check hashes before reopening report links. Do not enable delivery
+with stale checks or treat the rotation as transparent to existing recipients.
