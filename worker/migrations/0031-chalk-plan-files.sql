@@ -6,9 +6,9 @@
 CREATE TABLE IF NOT EXISTS chalk_plan_files (
   cohort_id         TEXT NOT NULL,
   course_id         TEXT NOT NULL,
-  ref_kind          TEXT NOT NULL,         -- 'draft' | 'version'
-  ref               TEXT NOT NULL,         -- draft: revision as text, version: version string
-  file              TEXT NOT NULL,         -- 'lesson' | 'ops' | 'runbook' | 'handout'
+  ref_kind          TEXT NOT NULL,
+  ref               TEXT NOT NULL,
+  file              TEXT NOT NULL,
   html              TEXT NOT NULL,
   sha256            TEXT NOT NULL,
   knowledge_version INTEGER NOT NULL,
@@ -20,14 +20,14 @@ CREATE TABLE IF NOT EXISTS chalk_plan_files (
 CREATE TABLE IF NOT EXISTS chalk_course_inputs (
   cohort_id       TEXT NOT NULL,
   course_id       TEXT NOT NULL,
-  revision        INTEGER NOT NULL,        -- authoring_drafts revision at write time
+  revision        INTEGER NOT NULL,
   audience        TEXT NOT NULL,
-  assets_json     TEXT NOT NULL,           -- JSON: string[] subset of ASSETS constant
+  assets_json     TEXT NOT NULL,
   teaching_style  TEXT NOT NULL,
   requirements    TEXT NOT NULL,
-  format          TEXT NOT NULL,           -- 'workshop' | 'track'
-  family_session  INTEGER NOT NULL DEFAULT 0,  -- 1=true; drives parent column in skeleton
-  vocab_json      TEXT,                    -- JSON: {goals, conditions, learner_level, has_guidance} | null
+  format          TEXT NOT NULL,
+  family_session  INTEGER NOT NULL DEFAULT 0,
+  vocab_json      TEXT,
   updated_at      INTEGER NOT NULL,
   PRIMARY KEY (cohort_id, course_id),
   FOREIGN KEY (cohort_id, course_id) REFERENCES authoring_drafts(cohort_id, course_id)
