@@ -3029,7 +3029,7 @@
       "id": "ST-IMP-CHALK-KB-STORE",
       "stage": "implementation",
       "label": "Chalk knowledge store — worker implementation",
-      "owner": "chalk-engineer",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-KB",
         "ST-DES-CHALK-KB"
@@ -3044,7 +3044,7 @@
       "id": "ST-TEST-CHALK-KB-STORE",
       "stage": "test",
       "label": "Chalk knowledge store — unit + integration tests",
-      "owner": "chalk-engineer",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-IMP-CHALK-KB-STORE"
       ]
