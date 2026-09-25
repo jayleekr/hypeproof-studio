@@ -18,7 +18,7 @@
 // Run (+ real vault):    CHALK_VAULT_PATH=/path/to/curriculum_wiki node --experimental-strip-types worker/test/chalk-knowledge-import.test.mjs
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -302,6 +302,104 @@ test("fixture: guide docs present (authoring-order, conversion, etc.)", () => {
   assert(sql.includes("'guide:plan-spec'"), "guide:plan-spec missing");
   assert(sql.includes("'guide:session-format'"), "guide:session-format missing");
   // workshop-core is skipped in fixture vault (file not found) — not asserted here
+});
+
+// ---------------------------------------------------------------------------
+// KB-04 integration: out-of-vocab method card → no SQL written, non-zero exit
+// ---------------------------------------------------------------------------
+
+function runImportExpectFail(vaultPath) {
+  const outPath = makeTempPath();
+  let threw = false;
+  try {
+    execFileSync(
+      process.execPath,
+      ["--experimental-strip-types", IMPORT_SCRIPT,
+        "--vault-path", vaultPath,
+        "--vault-commit", "test-kb04",
+        "--version", "99",
+        "--note", "kb04 negative test",
+        "--created-by", "test",
+        "--out", outPath,
+      ],
+      { encoding: "utf-8", cwd: REPO_ROOT, stdio: "pipe" },
+    );
+  } catch {
+    threw = true;
+  }
+  const sqlWritten = existsSync(outPath);
+  if (sqlWritten) unlinkSync(outPath);
+  return { threw, sqlWritten };
+}
+
+function withBadMethod(fm, fn) {
+  const tmpFile = join(FIXTURE_VAULT, "methods", `m-bad-kb04-${Date.now()}.md`);
+  const fmStr = Object.entries(fm)
+    .map(([k, v]) => (Array.isArray(v) ? `${k}: [${v.join(", ")}]` : `${k}: ${v}`))
+    .join("\n");
+  writeFileSync(tmpFile, `---\n${fmStr}\n---\n\nNegative test method for KB-04.\n`);
+  try {
+    fn();
+  } finally {
+    unlinkSync(tmpFile);
+  }
+}
+
+const VALID_METHOD_FM = {
+  id: "bad-kb04-base",
+  family: "explicit",
+  evidence_grade: "A",
+  prior_knowledge: "novice",
+  requires_guidance: false,
+  best_for: ["acquire-procedure"],
+  weak_for: ["transfer"],
+  avoid_when: [],
+};
+
+console.log("\n[KB-04 integration: out-of-vocab → no SQL]");
+
+test("KB-04 integration: out-of-vocab best_for → no SQL written, non-zero exit", () => {
+  withBadMethod(
+    { ...VALID_METHOD_FM, id: "bad-kb04-best", best_for: ["nonexistent-goal"] },
+    () => {
+      const { threw, sqlWritten } = runImportExpectFail(FIXTURE_VAULT);
+      assert(threw, "expected non-zero exit with out-of-vocab best_for");
+      assert(!sqlWritten, "SQL file must not be written with out-of-vocab best_for");
+    }
+  );
+});
+
+test("KB-04 integration: out-of-vocab weak_for → no SQL written, non-zero exit", () => {
+  withBadMethod(
+    { ...VALID_METHOD_FM, id: "bad-kb04-weak", weak_for: ["nonexistent-condition"] },
+    () => {
+      const { threw, sqlWritten } = runImportExpectFail(FIXTURE_VAULT);
+      assert(threw, "expected non-zero exit with out-of-vocab weak_for");
+      assert(!sqlWritten, "SQL file must not be written with out-of-vocab weak_for");
+    }
+  );
+});
+
+test("KB-04 integration: out-of-vocab avoid_when → no SQL written, non-zero exit", () => {
+  withBadMethod(
+    { ...VALID_METHOD_FM, id: "bad-kb04-avoid", avoid_when: ["nonexistent-condition"] },
+    () => {
+      const { threw, sqlWritten } = runImportExpectFail(FIXTURE_VAULT);
+      assert(threw, "expected non-zero exit with out-of-vocab avoid_when");
+      assert(!sqlWritten, "SQL file must not be written with out-of-vocab avoid_when");
+    }
+  );
+});
+
+test("KB-04 integration: out-of-vocab prior_knowledge → no SQL written, non-zero exit", () => {
+  withBadMethod(
+    { ...VALID_METHOD_FM, id: "bad-kb04-prior", prior_knowledge: "unknown-level" },
+    () => {
+      const { threw, sqlWritten } = runImportExpectFail(FIXTURE_VAULT);
+      assert(threw, "expected non-zero exit with out-of-vocab prior_knowledge");
+      assert(!sqlWritten, "SQL file must not be written with out-of-vocab prior_knowledge");
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------
