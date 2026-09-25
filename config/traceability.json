@@ -3005,6 +3005,37 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-KB-IMPORT",
+      "stage": "implementation",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "scripts/chalk-knowledge-import/index.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-vocab-check.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-KB-IMPORT",
+      "stage": "test",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-knowledge-import.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-DES-CHALK-PLANSPEC",
       "stage": "design",
       "owner": "jayleekr",
