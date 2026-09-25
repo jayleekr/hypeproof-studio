@@ -3177,15 +3177,21 @@
       "stage": "implementation",
       "owner": "JinyongShin",
       "depends_on": [
-        "ST-REQ-CHALK-FB",
-        "ST-DES-CHALK-GATELOOP"
+        "ST-REQ-CHALK-HTML",
+        "ST-DES-CHALK-PLANSPEC"
       ],
       "sources": [
         {
           "path": "worker/src/lib/chalk-plan/parser.ts"
         },
         {
+          "path": "worker/src/lib/chalk-plan/tokenizer.ts"
+        },
+        {
           "path": "worker/src/lib/chalk-plan/types.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/index.ts"
         }
       ]
     },
@@ -3194,8 +3200,8 @@
       "stage": "test",
       "owner": "JinyongShin",
       "depends_on": [
-        "ST-REQ-CHALK-FB",
-        "ST-DES-CHALK-GATELOOP"
+        "ST-REQ-CHALK-HTML",
+        "ST-DES-CHALK-PLANSPEC"
       ],
       "sources": [
         {
