@@ -550,20 +550,10 @@ test("checkVocab: bad avoid_when value rejected", () => {
 console.log("\n[SQL escape: malicious body round-trip]");
 
 {
-  const SCHEMA = `
-    CREATE TABLE IF NOT EXISTS chalk_knowledge_versions (
-      version INTEGER PRIMARY KEY, parent_version INTEGER,
-      origin TEXT NOT NULL, source_repo TEXT, source_commit TEXT,
-      note TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
-      doc_count INTEGER NOT NULL, digest TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
-      version INTEGER NOT NULL REFERENCES chalk_knowledge_versions(version),
-      doc_id TEXT NOT NULL, kind TEXT NOT NULL, fields_json TEXT NOT NULL,
-      body TEXT NOT NULL DEFAULT '', source_path TEXT,
-      PRIMARY KEY (version, doc_id)
-    );
-  `;
+  const SCHEMA = readFileSync(
+    join(REPO_ROOT, "worker/migrations/0030-chalk-knowledge.sql"),
+    "utf-8"
+  );
 
   const EXPECTED_B3_BODY =
     "SQL escape fixture (test-only — do not translate)\n\n" +
