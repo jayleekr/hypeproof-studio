@@ -11,6 +11,7 @@ PROVIDER="service"
 INPUT="${1:-}"
 WRANGLER_PORT=8787
 VAULT_PATH_ARG=""
+KB_SQL=""
 
 if [[ -z "$INPUT" ]]; then
   echo "Usage: bash scripts/review-pr.sh <PR-number-or-branch> [--provider claude|codex|service] [--vault <path>]" >&2
@@ -64,6 +65,7 @@ cleanup() {
   fi
   pkill -f "wrangler dev.*--port $WRANGLER_PORT" 2>/dev/null || true
   pkill -f "HypeProof Studio Dev.app/Contents/" 2>/dev/null || true
+  [[ -n "${KB_SQL:-}" ]] && rm -f "$KB_SQL" 2>/dev/null || true
   if [[ -d "$WORKTREE_DIR" ]]; then
     echo "Removing worktree $WORKTREE_DIR..."
     git -C "$REPO" worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
@@ -172,12 +174,25 @@ if [[ -f "$IMPORT_SCRIPT" ]]; then
       VAULT_COMMIT="$(grep 'source_commit:' "$KB_SQL" | head -1 | sed 's/.*source_commit: *//' | tr -d ' ')"
       DOC_COUNT="$(grep 'doc_count:' "$KB_SQL" | head -1 | sed 's/.*doc_count: *//' | tr -d ' ')"
       echo "적재 중... (commit: ${VAULT_COMMIT:-unknown}, docs: ${DOC_COUNT:-?})"
-      (cd "$WORKER_DIR" && npx wrangler d1 execute hypeproof-studio --local --file "$KB_SQL" 2>&1 | grep -v "^$\|Reading\|Executing" || true)
-      echo "지식 적재 완료 — vault commit: ${VAULT_COMMIT:-unknown}, docs: ${DOC_COUNT:-?}"
-      rm -f "$KB_SQL"
+      LOAD_OUT="$(cd "$WORKER_DIR" && npx wrangler d1 execute hypeproof-studio --local --file "$KB_SQL" 2>&1)"
+      LOAD_RC=$?
+      echo "$LOAD_OUT" | grep -v "^$\|Reading\|Executing" || true
+      if [[ $LOAD_RC -ne 0 ]]; then
+        echo "WARNING: D1 적재 실패 (wrangler exit $LOAD_RC). 모형 추천·brief는 409로 응답합니다." >&2
+      else
+        LOADED_COUNT="$(cd "$WORKER_DIR" && npx wrangler d1 execute hypeproof-studio --local \
+          --command "SELECT COUNT(*) FROM chalk_knowledge_docs WHERE version=1" 2>/dev/null \
+          | grep -oE '[0-9]+' | tail -1 || echo 0)"
+        if [[ -n "${DOC_COUNT:-}" ]] && [[ "${LOADED_COUNT:-0}" == "$DOC_COUNT" ]]; then
+          echo "지식 적재 완료 — vault commit: ${VAULT_COMMIT:-unknown}, docs: ${DOC_COUNT}"
+        else
+          echo "WARNING: 적재된 문서 수 불일치 — 기대 ${DOC_COUNT:-?}, 실제 ${LOADED_COUNT:-?}. 추천·brief가 409일 수 있습니다." >&2
+        fi
+      fi
+      rm -f "$KB_SQL"; KB_SQL=""
     else
       echo "WARNING: 지식 가져오기 실패 (어휘 검사 오류 가능). 계속 진행합니다." >&2
-      rm -f "$KB_SQL"
+      rm -f "$KB_SQL"; KB_SQL=""
     fi
   fi
 fi
