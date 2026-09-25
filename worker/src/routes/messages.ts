@@ -49,7 +49,9 @@ import {NATIVE_TRIAL_LIMITS} from '../lib/native-trial-grants';
 
 import { Hono } from "hono";
 import type { Env } from "../env";
-import { gateChatRequest } from "../lib/chat-gate";
+import { gateChatRequest, bindingRefusalMessage } from "../lib/chat-gate";
+import { recordDispatch, recordOutcome } from "../lib/lesson-binding-store";
+import { BINDING_HEADER, classifyOutcome } from "../lib/lesson-binding";
 import {
   buildAnthropicSystemBlocks,
   clampMaxTokens,
@@ -257,6 +259,14 @@ messages.post("/messages", async (c) => {
   catch(error){return budgetErrorResponse(c,error);}
   if(executionAccess)profile=applyLessonFeatures(profile,{allowed:permittedFeatureKeys(profile).filter(f=>f!=='web_search'&&executionAccess!.choice.plan.allowed.features.includes(f))});
   let budgetReserved=false;
+  // #751 U3 — execution evidence for the turn this request was admitted into. `dispatched` is set only once the normalized
+  // request is about to leave for the provider; everything that is refused before that leaves no evidence at all.
+  const lessonTurn = gate.turn;
+  // #751 U3 — under enforcement every permitted request is recorded with its lesson before it runs, turn id or not, and the
+  // usage row it produces is linked to that record. With enforcement unset both are null and nothing is added to this route.
+  const lessonUntracked = gate.binding?.enforced && !gate.turn && gate.lessonSha ? { class_run_id: session.session_id, student_id: payload.u, binding_seq: gate.binding.seq, lesson_sha256: gate.lessonSha } : null;
+  const usageLink = () => (dispatched && (lessonTurn || lessonUntracked) ? { class_run_id: (lessonTurn?.class_run_id ?? lessonUntracked!.class_run_id), student_id: payload.u, request_id: usageRequestId } : null);
+  let dispatched = false, upstreamStatus: number | null = null, streamBroke = false, protocolDone = false;
 
   // #684 — accounting declared above every failure exit, mirroring chat.ts.
   // The SDK route wrote the same literal `status: 200` on the success path
@@ -292,6 +302,7 @@ messages.post("/messages", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    if (dispatched && lessonTurn) c.executionCtx.waitUntil(recordOutcome(env, lessonTurn, classifyOutcome({ upstreamStatus, protocolComplete: protocolDone, streamError: streamBroke, outputTokens: log.tokens_out, recordedStatus: log.status }), { status: upstreamStatus, now: Date.now() }));
     if(budgetReserved){budgetReserved=false;c.executionCtx.waitUntil(finishModelRequest(env,usageRequestId,log.status,returnedModel,measureUsage('anthropic',reportedUsage,log.status<400)).catch(()=>console.error('SDK usage finish unavailable')));}
     c.executionCtx.waitUntil(captureUsageCost(env,usageRequestId,{usage:reportedUsage,model:returnedModel,
       tier:typeof reportedUsage.service_tier==='string'?reportedUsage.service_tier:null,
@@ -299,7 +310,7 @@ messages.post("/messages", async (c) => {
       complete:costComplete,ended:costEnded}).catch(()=>console.error('SDK cost evidence unavailable; unresolved reservation retained')));
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }));
+    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }, usageLink()));
   };
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>
@@ -561,6 +572,11 @@ messages.post("/messages", async (c) => {
       budgetReserved=true;await dispatchBudgetAttempt(env,usageRequestId);
     }
     if(env.HPS_ACCESS_CONTRACTS==='enabled')c.header('x-hps-usage-request-id',usageRequestId);
+    // #751 U3 — the durable intent comes BEFORE the call. If the first dispatch of this turn cannot be recorded, the
+    // provider is not called: "nothing on record" may only ever mean "nothing was executed".
+    const intent = await recordDispatch(env, lessonTurn, { request: usageRequestId, runtime: 'agent-sdk', model: modelLabel, now: Date.now(), untracked: lessonUntracked });
+    if (!intent.ok) { recordFailure(403, ERROR_KIND.BAD_REQUEST); return c.json({ error: { type: 'lesson_binding', code: intent.code, message: bindingRefusalMessage(intent.code) } }, 403); }
+    dispatched = true;
     upstream = await callAnthropic(stripped.body as unknown as AnthropicRequest, apiKey, {
       signal: nativeTrialSignal(c.req.raw),
       url: env.ANTHROPIC_PROXY_URL,
@@ -578,6 +594,7 @@ messages.post("/messages", async (c) => {
     return c.json(anthropicError(c, "api_error", "upstream request failed"), 502);
   }
 
+  upstreamStatus = upstream.status;
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
     // #257 — the upstream error body (provider prose, key hints, quota info)
@@ -620,6 +637,8 @@ messages.post("/messages", async (c) => {
       };
     };
     reportedUsage=j.usage??{};returnedModel=typeof j.model==='string'?j.model:null;costComplete=true;costEnded=true;
+    // A body without the provider's own end marker is not a finished answer, whatever the status line said.
+    protocolDone = typeof (j as { stop_reason?: unknown }).stop_reason === 'string';
     const tin = j.usage?.input_tokens ?? 0;
     const tout = j.usage?.output_tokens ?? 0;
     const cr = j.usage?.cache_read_input_tokens ?? 0;
@@ -724,14 +743,14 @@ messages.post("/messages", async (c) => {
   };
 
   const outStream = tapAnthropicStream(upstream.body, onUsage, {
-    onProtocolComplete:()=>{costComplete=true;costEnded=true;},
+    onProtocolComplete:()=>{costComplete=true;costEnded=true;protocolDone=true;},
     onUsageReport:(raw,model)=>{reportedUsage={...reportedUsage,...raw};if(model)returnedModel=model;},
     requestId: c.get("requestId"),
     onTextDelta: (delta) => {
       responseChars += delta.length;
     },
     onStreamError: () => {
-      streamFailed = true;
+      streamFailed = true; streamBroke = true;
     },
   });
 
@@ -741,6 +760,7 @@ messages.post("/messages", async (c) => {
       "cache-control": "no-cache",
       "x-accel-buffering": "no",
       "x-hps-model": modelLabel,
+      ...(gate.binding ? { [BINDING_HEADER]: gate.binding.key } : {}),
       "x-hps-module": module.version,
       ...(module.fallback ? { "x-hps-module-fallback": module.fallback.pinned } : {}),
       // #1008 — the gate's c.header() receipt does not survive a raw Response.
