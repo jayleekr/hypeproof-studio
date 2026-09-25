@@ -3,7 +3,7 @@
 // browser, real D1 concurrency or a school network: those rows stay NOT RUN
 // until their own layer runs (docs/testing/classroom-admin.md).
 import assert from 'node:assert/strict';
-import { localOps } from './harness/classroom-ops.mjs';
+import { localOps, OPS_ALL } from './harness/classroom-ops.mjs';
 import * as ops from '../src/lib/classroom-ops.ts';
 let count = 0; async function check(name, fn) { await fn(); count++; console.log('PASS ' + name); }
 
@@ -25,6 +25,26 @@ await check('controls: silence is unknown, only a fresh confirmed block is red, 
   assert.equal(ops.entryStage({ ...base, connected: false, state: {}, last_received_at: null }), 'token_issued');
   assert.equal(ops.entryStage({ ...base, state: { activation: slot({ stage: 'token_verified' }) }, last_received_at: now }), 'token_verified');
 });
+await check('controls: token evidence outlives later stages and is never inherited across a connection, a newer boot or a rejection', async () => {
+  const at = (boot, seq, payload) => ({ seq, observed_at: 1, received_at: 2, actor: 'system', payload }), g1 = { grantId: 'grant-1', bootId: 'boot-a', bootSeenAt: 100 };
+  const st = {};
+  assert.equal(ops.tokenCheckOf(st, 'jti-1', 'grant-1'), 'unknown', 'negative control: nothing reported');
+  assert.equal(ops.reduceTokenCheck(st, g1, at('a', 1, { stage: 'token_verified', token_jti: 'jti-1' })), true);
+  assert.equal(ops.reduceTokenCheck(st, g1, at('a', 2, { stage: 'runtime_ready' })), false, 'a later stage is not evidence about the token');
+  assert.equal(ops.tokenCheckOf(st, 'jti-1', 'grant-1'), 'matches_issue', 'positive control');
+  assert.equal(ops.tokenCheckOf(st, 'jti-2', 'grant-1'), 'other_token', 're-issue: the app is still on the previous token');
+  assert.equal(ops.tokenCheckOf(st, 'jti-1', 'grant-2'), 'unknown', 'a new connection has verified nothing yet');
+  assert.equal(ops.reduceTokenCheck(st, g1, at('a', 1, { stage: 'token_verified', token_jti: 'jti-9' })), false, 'a delayed resend never replaces newer evidence');
+  assert.equal(ops.reduceTokenCheck(st, { ...g1, bootId: 'boot-old', bootSeenAt: 50 }), false, 'an older boot\'s late sync clears nothing');
+  assert.equal(ops.reduceTokenCheck(st, { ...g1, bootId: 'boot-b', bootSeenAt: 200 }), true, 'a newer boot starts without evidence'); assert.equal(st.token_check, undefined);
+  ops.reduceTokenCheck(st, g1, at('a', 3, { stage: 'token_verified', token_jti: 'jti-1' }));
+  assert.equal(ops.reduceTokenCheck(st, g1, at('a', 4, { stage: 'token_rejected', reason: 'auth_rejected' })), true); assert.equal(ops.tokenCheckOf(st, 'jti-1', 'grant-1'), 'unknown');
+  ops.reduceTokenCheck(st, g1, at('a', 5, { stage: 'token_verified', token_jti: 'jti-1' }));
+  assert.equal(ops.reduceTokenCheck(st, { grantId: 'grant-2', bootId: 'boot-a', bootSeenAt: 100 }), true, 'a different grant drops it even on the same boot');
+  // Rows stored before the evidence slot existed keep working, and only while the stage itself is token_verified.
+  assert.equal(ops.tokenCheckOf({ activation: { boot_seen_at: 1, seq: 1, observed_at: 1, received_at: 1, actor: 'system', value: { stage: 'token_verified', token_jti: 'jti-1' } } }, 'jti-1', 'grant-1'), 'matches_issue');
+});
+
 await check('controls: ack is the highest contiguous seq with explicit holes; stale boots and lower seqs never win', async () => {
   assert.deepEqual(ops.contiguousAck(0, [1, 2, 3]), { contiguous: 3, missing: [] });
   assert.deepEqual(ops.contiguousAck(2, [3, 5, 6, 9]), { contiguous: 3, missing: [[4, 4], [7, 8]] });
@@ -111,6 +131,7 @@ try {
     s = await f.request(f.base + '/status'); assert.equal(s.json.seats[0].entry_stage, 'token_verified'); assert.equal(s.json.seats[0].token.app_verified, 'matches_issue');
     await f.sync(credential, [f.event(2, 'activation', { stage: 'class_entered' }), f.event(3, 'activation', { stage: 'runtime_ready' })]);
     s = await f.request(f.base + '/status'); assert.equal(s.json.seats[0].entry_stage, 'runtime_ready'); assert.equal(s.json.counts.runtime_ready, 1);
+    assert.equal(s.json.seats[0].token.app_verified, 'matches_issue', 'a later entry stage does not erase what the app verified');
     assert.equal(s.json.seats[1].entry_stage, 'unregistered');
   });
   await check('AT-19 the operations credential is not a student token, and a student token is not a credential', async () => {
@@ -225,6 +246,73 @@ try {
       const r = await k.sync(cred, [k.event(2, 'runtime', { status: 'ready', secret: 'x' }), k.event(3, 'runtime', { status: 'ready', secret: 'y' })]);
       assert.equal(r.status, 200, r.raw); assert.equal(r.json.ack.contiguous_seq, 3); assert.equal(r.json.rejected.length, 2);
       assert.equal(k.db.prepare('SELECT contiguous_seq n FROM ops_device_connections').get().n, 3, 'stored cursor follows the acked stream');
+    } finally { k.close(); }
+  });
+  await check('AT-15/23 lesson participant mint records issuance and fences only that student on reissue', async () => {
+    const e = await localOps(); try {
+      const { issueIssuer, verify } = await import('../src/lib/tokens.ts');
+      const teacher = (await issueIssuer({ issuer: 'teacher-a', scopes: [{ cohort: e.cohort, profiles: [e.profile], ops: OPS_ALL }] }, 4, e.env.HPS_SIGNING_SECRET)).token;
+      await e.freeze(); assert.equal((await e.configure(seats2)).status, 201);
+      const path = `/admin/cohorts/${e.cohort}/authoring/${e.lesson.course_id}/versions/${e.lesson.version}/participants`;
+      const mint = () => e.request(path, 'POST', { user: 'student-a', hours: 1 }, teacher);
+      const first = await mint(); assert.equal(first.status, 200, first.raw);
+      const payload = await verify(first.json.token, e.env.HPS_SIGNING_SECRET);
+      assert.deepEqual(payload.lesson, first.json.lesson, 'lesson binding is preserved');
+      const before = await e.request(e.base + '/status');
+      assert.equal(before.json.seats[0].entry_stage, 'token_issued');
+      assert.equal(before.json.seats[0].token.issue_id, payload.jti);
+      assert.ok(!before.raw.includes(first.json.token));
+      const a = (await e.pair('A1', 1)).conn.json, b = (await e.pair('A2', 1, 2)).conn.json;
+      const second = await mint(); assert.equal(second.status, 200, second.raw);
+      assert.deepEqual(second.json.ops, { epoch_advanced: true });
+      assert.equal((await e.sync(a.credential)).json.connection_epoch, a.connection_epoch + 1);
+      assert.equal((await e.sync(b.credential, [], 2)).json.connection_epoch, b.connection_epoch);
+      assert.equal(e.db.prepare('SELECT count(*) n FROM ops_token_issues').get().n, 2);
+      e.fail('connection_epoch=connection_epoch+1');
+      const degraded = await mint(); e.fail(null);
+      assert.equal(degraded.status, 200, degraded.raw); assert.ok(degraded.json.token);
+      assert.deepEqual(degraded.json.ops, { epoch_advanced: false }, 'storage outage is reported without blocking lesson entry');
+    } finally { e.close(); }
+  });
+  await check('AT-32 lesson participant mint with operations OFF preserves the existing route without a ledger', async () => {
+    const e = await localOps({ enabled: false }); try {
+      const { issueIssuer } = await import('../src/lib/tokens.ts');
+      const teacher = (await issueIssuer({ issuer: 'teacher-a', scopes: [{ cohort: e.cohort, profiles: [e.profile] }] }, 4, e.env.HPS_SIGNING_SECRET)).token;
+      await e.freeze();
+      const minted = await e.request(`/admin/cohorts/${e.cohort}/authoring/${e.lesson.course_id}/versions/${e.lesson.version}/participants`, 'POST', { user: 'student-a', hours: 1 }, teacher);
+      assert.equal(minted.status, 200, minted.raw); assert.ok(minted.json.token); assert.equal(minted.json.ops, undefined);
+      assert.equal(e.db.prepare('SELECT count(*) n FROM ops_token_issues').get().n, 0);
+    } finally { e.close(); }
+  });
+  await check('AT-15/23 token evidence: survives runtime_ready; re-issue, another token, rejection, a new boot, a new connection and a seat change never inherit it', async () => {
+    const k = await localOps(); try {
+      await k.freeze(); assert.equal((await k.configure([{ seat_id: 'A1', student_id: 'student-a' }])).status, 201);
+      const verified = async () => (await k.request(k.base + '/status')).json.seats[0].token?.app_verified, pause = () => new Promise((r) => setTimeout(r, 5));
+      const mint = () => k.request('/admin/tokens/issue', 'POST', { u: 'student-a', c: k.cohort, p: k.profile, hours: 2 });
+      const first = (await mint()).json.jti, c1 = (await k.pair('A1', 1)).conn.json.credential;
+      await k.sync(c1, [k.event(1, 'activation', { stage: 'token_verified', token_jti: first })]); assert.equal(await verified(), 'matches_issue');
+      await k.sync(c1, [k.event(2, 'activation', { stage: 'class_entered' }), k.event(3, 'activation', { stage: 'runtime_ready' })]);
+      assert.equal(await verified(), 'matches_issue', 'the reproduced defect: runtime_ready used to turn this back into unknown');
+      const stage = (await k.request(k.base + '/status')).json.seats[0]; assert.equal(stage.entry_stage, 'runtime_ready'); assert.equal(stage.activation.token_jti, undefined, 'the stage slot itself is unchanged');
+      // Re-issue: the app still holds the previous token until it reports the new one.
+      const second = (await mint()).json.jti; assert.notEqual(second, first); assert.equal(await verified(), 'other_token');
+      await k.sync(c1, [k.event(4, 'activation', { stage: 'token_verified', token_jti: second })]); assert.equal(await verified(), 'matches_issue');
+      // The app switches to a token that was not the latest issue.
+      await k.sync(c1, [k.event(5, 'activation', { stage: 'token_verified', token_jti: first }), k.event(6, 'activation', { stage: 'runtime_ready' })]); assert.equal(await verified(), 'other_token');
+      await k.sync(c1, [k.event(7, 'activation', { stage: 'token_rejected', reason: 'auth_rejected', http_status: 401 })]); assert.equal(await verified(), 'unknown', 'a rejected token is not verified evidence');
+      await k.sync(c1, [k.event(8, 'activation', { stage: 'token_verified', token_jti: second })]); assert.equal(await verified(), 'matches_issue');
+      // A newer app process on the same connection has not verified anything until it says so; the old process's late sync changes nothing.
+      await pause(); await k.sync(c1, [k.event(1, 'activation', { stage: 'runtime_ready' })], 2); assert.equal(await verified(), 'unknown', 'new boot');
+      await k.sync(c1, [k.event(9, 'runtime', { status: 'ready' })], 1); assert.equal(await verified(), 'unknown');
+      await k.sync(c1, [k.event(2, 'activation', { stage: 'token_verified', token_jti: second })], 2); assert.equal(await verified(), 'matches_issue');
+      await k.sync(c1, [], 1); assert.equal(await verified(), 'matches_issue', 'an older boot never clears newer evidence');
+      // A new connection: unknown from the moment it exists, before its first sync, and until that connection's app reports.
+      await pause(); const c2 = (await k.pair('A1', 1, 3)).conn.json.credential; assert.equal(await verified(), 'unknown', 'new connection, no sync yet');
+      await k.sync(c2, [k.event(1, 'activation', { stage: 'runtime_ready' })], 3); assert.equal(await verified(), 'unknown');
+      await k.sync(c2, [k.event(2, 'activation', { stage: 'token_verified', token_jti: second })], 3); assert.equal(await verified(), 'matches_issue');
+      // Seat change: the next learner starts with no evidence, even with an issued token of their own.
+      await k.request('/admin/tokens/issue', 'POST', { u: 'student-b', c: k.cohort, p: k.profile, hours: 2 });
+      assert.equal((await k.configure([{ seat_id: 'A1', student_id: 'student-b' }], 1)).status, 200); assert.equal(await verified(), 'unknown');
     } finally { k.close(); }
   });
   console.log(`${count} remote classroom operations controls passed`);

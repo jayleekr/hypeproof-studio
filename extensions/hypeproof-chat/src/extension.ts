@@ -187,14 +187,12 @@ export async function activate(context: vscode.ExtensionContext) {
     runtimeGeneration: () => provider.opsRuntimeGeneration(),
     newGeneration: () => provider.opsNewGeneration(),
     setHold: (hold) => provider.opsSetHold(hold),
-    readSpool: () => provider.opsReadSpool(),
-    recoverPreview: async () => {
-      const probe = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(4000) })).status < 500; } catch { return false; } };
-      const r = await liveServer.recover(probe);
-      return { state: r.state, healthy: r.url ? await probe(r.url) : false };
-    },
+    readSpool: (sinceMs) => provider.opsReadSpool(sinceMs),
+    recoverPreview: () => provider.opsRecoverPreview(),
   }, (line) => console.log(line));
   provider.opsObserver = classroomOps;
+  provider.inboxSource = classroomOps;
+  context.subscriptions.push(classroomOps.onInboxChanged(() => { void provider.postInbox(); startPage.inboxChanged(); }));
   void classroomOps.resume();
   context.subscriptions.push(
     { dispose: () => liveServer.dispose() },
@@ -533,6 +531,19 @@ export async function activate(context: vscode.ExtensionContext) {
     if (Number.isFinite(ms) && ms >= 0) {
       setTimeout(() => provider.postTestCrash(), ms);
     }
+  }
+
+  // Test-only (#751 U4): with HPS_TEST_PREVIEW_FAULT=<file>, the appearance of that file drops the live preview server the
+  // way a crash would, so a real window can exercise the new-port recovery. Unset = nothing is watched, nothing registered.
+  const previewFault = process.env.HPS_TEST_PREVIEW_FAULT;
+  if (previewFault) {
+    const timer = setInterval(() => {
+      if (!fs.existsSync(previewFault)) return;
+      try { fs.rmSync(previewFault); } catch { /* the next tick retries */ return; }
+      liveServer.simulateCrashForTest();
+      console.log("[test] preview server dropped (HPS_TEST_PREVIEW_FAULT)");
+    }, 500);
+    context.subscriptions.push({ dispose: () => clearInterval(timer) });
   }
 
   // #72: kick off background update checks. Scheduler is disposable so we

@@ -73,6 +73,20 @@ export class LiveServer {
     return { state: "restarted", url };
   }
 
+  /**
+   * #751 U4 — test builds only (extension.ts arms it under HPS_TEST_PREVIEW_FAULT). The listening socket and every open
+   * connection die the way a crashed server's do, while root and address are kept — so `recover` meets a dead server and
+   * has to start one on a new port, as it would in class. No file, process or port outside this server is touched.
+   */
+  simulateCrashForTest(): void {
+    const server = this.server;
+    if (!server) return;
+    for (const res of this.sseClients) res.destroy();
+    this.sseClients.clear();
+    server.close();
+    server.closeAllConnections();
+  }
+
   /** Push a reload to all connected browser pages. */
   reload(): void {
     for (const res of this.sseClients) {

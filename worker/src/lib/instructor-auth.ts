@@ -73,7 +73,7 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   // #751 — remote classroom operations. Admitting the Bearer here grants
   // nothing: every handler re-checks the explicit scope.ops capability
   // (authorizeIssuerForOps) and the per-run feature flag.
-  if (/^\/admin\/cohorts\/[^/]+\/classroom\/runs\/[^/]+(?:\/(?:status|pairings|control|grants\/[^/]+|evidence\/[^/]+|report-batches(?:\/[^/]+(?:\/(?:reconcile|jobs|runner-grants|reports(?:\/[^/]+(?:\/review)?)?|recipients|approve|deliver|deliveries(?:\/[^/]+\/(?:resolve|link))?))?)?|commands(?:\/[^/]+)?))?$/.test(path) && ['GET', 'PUT', 'POST', 'DELETE'].includes(method)) return true;
+  if (/^\/admin\/cohorts\/[^/]+\/classroom\/runs\/[^/]+(?:\/(?:status|pairings|control|grants\/[^/]+|evidence\/[^/]+|contents(?:\/[^/]+\/(?:retire|revisions\/[^/]+))?|setting-options|distributions(?:\/[^/]+(?:\/revoke)?)?|report-batches(?:\/[^/]+(?:\/(?:reconcile|advance|jobs|runner-grants|reports(?:\/[^/]+(?:\/review)?)?|recipients|approve|deliver|deliveries(?:\/[^/]+\/(?:resolve|link))?))?)?|commands(?:\/[^/]+)?))?$/.test(path) && ['GET', 'PUT', 'POST', 'DELETE'].includes(method)) return true;
   // #1294 — chalk draft check. Handler re-verifies issuer identity and course ownership.
   if (method === 'POST' && /^\/admin\/chalk\/cohorts\/[^/]+\/courses\/[^/]+\/check$/.test(path)) return true;
   if (path === "/admin/tokens/issue" && method === "POST") return true;

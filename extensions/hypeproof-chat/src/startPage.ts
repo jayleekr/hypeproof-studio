@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import { ChatPanelProvider } from "./chatPanelProvider";
 import { ActivityConnectionError, activityConnections } from "./activityConnections";
 import { fetchProfileResult, verifyActivity, ProxyTransportError } from "./proxyClient";
-import { sanitizeWorkshopToken, looksLikeIssuerTokenUnverified } from "./chatPanelHelpers";
+import { sanitizeWorkshopToken, looksLikeIssuerTokenUnverified, reentryWorkspace } from "./chatPanelHelpers";
 import type { ResolvedProfile } from "./protocol";
 import type { StartRequest, StartState } from "./startPageProtocol";
 
@@ -34,6 +34,9 @@ export class StartPage {
     private chat: ChatPanelProvider,
     private begin: (profile: ResolvedProfile, commit: (directory?: string) => Promise<void>) => Promise<boolean>,
   ) {}
+
+  /** #751 U2 — a card arrived, changed or came down while this tab is open. */
+  inboxChanged(): void { if (this.panel) void this.refresh(); }
 
   async show(): Promise<void> {
     if (this.panel) { this.panel.reveal(); void this.refresh(); return; }
@@ -77,6 +80,7 @@ export class StartPage {
       error: this.error ?? (!p ? this.chat.profileFailure()?.friendly : undefined),
       version: this.context.extension.packageJSON.version,
       workspace: vscode.workspace.workspaceFolders?.[0]?.name,
+      ...(this.chat.inboxSource ? { inbox: await this.chat.inboxSource.inboxView() } : {}),
       ...(p ? { coachName: this.chat.coachDisplayName(p), profile: { kind: p.activity_kind, id: p.profile_id, name: p.lesson?.content.title ?? p.display_name,
         // #747 — the row is labelled "AI 이름", so it shows the name the rest of
         // the card uses. A student-named cohort that has not been named yet
@@ -91,6 +95,8 @@ export class StartPage {
     if (!msg || typeof msg !== "object") return;
     if (msg.type === "openLocalReview") { await vscode.commands.executeCommand("hypeproof-chat.localReview"); return; }
     if (msg.type === "startReady") { await this.refresh(); return; }
+    if (msg.type === "inboxOpen") { await this.chat.inboxSource?.inboxOpened(msg.objectId, msg.generation); return; }
+    if (msg.type === "inboxLink") { await this.chat.handleInboxLink(msg); return; }
     if (msg.type === "openStudioFiles" || msg.type === "openStudioSettings") {
       await vscode.commands.executeCommand(msg.type === "openStudioFiles" ? "workbench.view.explorer" : "workbench.action.openSettings");
       return;
@@ -245,7 +251,9 @@ export class StartPage {
       }
       if (!entryPanel || this.panel!==entryPanel) return;
       // Preview only. Existing runtime and credential stay bound until workspace preparation succeeds.
-      this.candidate = { token, profile: p, proxyUrl, previousConnected: !!await this.chat.ensureProfile() };
+      const running = await this.chat.ensureProfile(), connections = activityConnections(this.context);
+      const workspace = reentryWorkspace({ candidateActivity: p.activity_id, record: connections?.current ?? null, recordServiceMatches: !!connections?.matchesService, openFolder: vscode.workspace.workspaceFolders?.[0]?.uri.fsPath, runningActivity: running?.activity_id });
+      this.candidate = { token, profile: workspace ? { ...p, workspace_root: workspace } : p, proxyUrl, previousConnected: !!running, ...(workspace ? { workspace } : {}) };
     } catch {
       this.error = "수업에 연결하지 못했습니다. 연결 상태를 확인하고 다시 시도하세요.";
     } finally {

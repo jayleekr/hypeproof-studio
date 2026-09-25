@@ -92,7 +92,7 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
   // Parsing context stack for sections
   type SectionCtx = { key: string; depth: number };
   const sectionStack: SectionCtx[] = [];
-  const currentSection = () => sectionStack.length > 0 ? sectionStack[sectionStack.length - 1].key : null;
+  const currentSection = () => sectionStack.at(-1)?.key ?? null;
 
   let tagDepth = 0; // overall element depth (for section tracking)
 
@@ -101,10 +101,8 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
   let inFlowRow = false;
   let flowRowDepth = 0;
   let currentStep: ParsedStep | null = null;
-  let currentStepRoleCurrent: { role: string; parentRole?: string } | null = null;
 
   let inSupport = false;
-  let supportDepth = 0;
   let currentStuck: ParsedStuck | null = null;
   let currentStuckDepth = 0;
   let currentStuckField: string | null = null;
@@ -210,7 +208,7 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
         sections.set(key, { key, present: true });
         sectionStack.push({ key, depth: tagDepth + 1 });
 
-        if (key === 'support') { inSupport = true; supportDepth = tagDepth + 1; }
+        if (key === 'support') { inSupport = true; }
       }
 
       // --- Flow table ---
@@ -254,7 +252,6 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
           collectTarget = { kind: 'step_cell', role, parentRole };
           collectDepth = tagDepth + 1;
           collectedText = '';
-          currentStepRoleCurrent = { role, parentRole };
         }
       }
 
@@ -355,7 +352,7 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
         }
 
         // Section exit (pop-후 tagDepth 기준: depth는 push-후 값이므로 < 비교)
-        if (sectionStack.length > 0 && sectionStack[sectionStack.length - 1].depth > tagDepth) {
+        if ((sectionStack.at(-1)?.depth ?? -1) > tagDepth) {
           const exiting = sectionStack.pop()!;
           if (exiting.key === 'support') inSupport = false;
         }
@@ -364,7 +361,6 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
         if (inFlowRow && tagDepth < flowRowDepth) {
           inFlowRow = false;
           currentStep = null;
-          currentStepRoleCurrent = null;
         }
         // Flow table exit
         if (inFlowTable && tagDepth < flowTableDepth) {

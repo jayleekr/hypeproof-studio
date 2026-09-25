@@ -58,6 +58,7 @@ import {
   type SdkBinaryResolution,
   type SdkBinaryStat,
 } from "./sdkCoachHelpers";
+import type { SdkTurnEnd } from "./sdkCoachHelpers";
 
 export type { BrowserMcpHost } from "./browserMcp";
 
@@ -84,9 +85,12 @@ export class SdkUnavailableError extends Error {
  * problem report) can tell "the coach wedged" apart from a real API error.
  */
 export class CoachStallError extends Error {
-  constructor(message: string) {
+  /** #751 U4 — the HTTP status of the retries still standing when the budget ran out (this turn only); absent = none seen. */
+  readonly status?: number;
+  constructor(message: string, status?: number) {
     super(message);
     this.name = "CoachStallError";
+    if (status !== undefined) this.status = status;
   }
 }
 
@@ -94,6 +98,8 @@ export interface SdkCoachArgs {
   effort?: import('./protocol').CourseEffort;
   turnId?: string;
   fundingSource?: string;
+  /** #751 U3 — sent on every request of this turn as `x-hps-lesson-binding` (the CLI's headers are fixed for the process, i.e. for the turn). */
+  lessonBinding?: string;
   /**
    * The extension's proxyUrl setting (OpenAI-compat base ending in /v1).
    * ANTHROPIC_BASE_URL is DERIVED from it (the /v1 suffix stripped — the SDK
@@ -470,7 +476,7 @@ function abortError(): Error {
  * code. The host now holds `withCoachSeatLock` around the whole turn —
  * both runtimes and the fallback inside one guard.
  */
-export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
+export async function runSdkCoach(args: SdkCoachArgs): Promise<SdkTurnEnd> {
   // Bridge the caller's signal to an SDK AbortController UP FRONT — before any
   // await — so a stop during loadSdk() still cancels. (addEventListener added
   // after the signal already fired would never run.)
@@ -570,6 +576,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
       effort: args.effort,
       turnId: args.turnId,
       fundingSource: args.fundingSource,
+      lessonBinding: args.lessonBinding,
       token: args.token,
       cwd: args.cwd,
       baseEnv: process.env,
@@ -712,7 +719,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
   // (onCitations / onAssetScore are wired for parity but the SDK stream
   // mapping for those lands in a later phase.)
   const stallMs = args.stallTimeoutMs ?? SDK_STREAM_STALL_MS;
-  await consumeSdkStream(stream, {
+  return await consumeSdkStream(stream, {
     isAborted: () => args.signal.aborted,
     makeAbortError: abortError,
     abortQuery: () => abortController.abort(),
@@ -742,7 +749,7 @@ export async function runSdkCoach(args: SdkCoachArgs): Promise<void> {
         `[coach] SDK stream stalled: no progress for ${stallMs}ms — aborting the turn (#403). ` +
           `Likely a gateway retry storm (429/529/5xx) or a first turn that never produced a token.`,
       );
-      return new CoachStallError(status===429?'요청 한도에 도달해 응답을 받지 못했습니다. 잠시 후 다시 시도하거나 강사에게 체험 한도를 확인해 주세요. (429)':status&&status>=500?'AI 서비스 오류로 응답을 받지 못했습니다. 작업 파일은 보존돼 있습니다. ('+status+')':stallNotice(args.coachName));
+      return new CoachStallError(status===429?'요청 한도에 도달해 응답을 받지 못했습니다. 잠시 후 다시 시도하거나 강사에게 체험 한도를 확인해 주세요. (429)':status&&status>=500?'AI 서비스 오류로 응답을 받지 못했습니다. 작업 파일은 보존돼 있습니다. ('+status+')':stallNotice(args.coachName), status);
     },
     // Silence that is NOT a stall: an open modal, or a tool the SDK is still
     // running (one budget of slack after the decision — a long subagent gets
