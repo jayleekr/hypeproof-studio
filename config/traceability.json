@@ -2991,6 +2991,41 @@
       ]
     },
     {
+      "id": "ST-DES-CHALK-KB",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-knowledge-and-plan-spec.md",
+          "section": "## 1. 제품 지식 저장 (KB-01 · 03 · 05)"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-PLANSPEC",
+      "stage": "design",
+      "owner": "jayleekr",
+      "depends_on": [
+        "ST-REQ-CHALK-HTML",
+        "ST-REQ-CHALK-SCH",
+        "ST-REQ-CHALK-GEN",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-knowledge-and-plan-spec.md",
+          "section": "## 2. 계획서 HTML 규격 `chalk-plan/1` (HTML-01~04 · GEN-04 · 결정 2 · 9)"
+        },
+        {
+          "path": "docs/design/chalk-knowledge-and-plan-spec.md",
+          "section": "## 3. 초안 저장 (결정 3 · OUT-04)"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-CHALK-MVP",
       "stage": "test",
       "owner": "JinyongShin",
