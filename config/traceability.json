@@ -3076,6 +3076,20 @@
           "path": "docs/design/chalk-generator-and-tools.md"
         }
       ]
+    },
+    {
+      "id": "ST-DES-CHALK-REHEARSAL",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-RH",
+        "ST-REQ-CHALK-SUB"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-rehearsal.md"
+        }
+      ]
     }
   ]
 }
