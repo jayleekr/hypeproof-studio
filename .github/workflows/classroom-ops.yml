@@ -1,0 +1,114 @@
+name: classroom-ops
+# Browser layer of remote classroom operations (#751): the real Chalk pages, the built Studio
+# webview and the real ops host against the in-process Service. Synthetic accounts only; the
+# evaluator and mail provider are replaced at their transport seams. This is NOT evidence of a
+# real Studio app, SDK, school network, D1/R2, model or mailbox.
+on:
+  pull_request:
+    paths:
+      - 'chalk/**'
+      - 'worker/**'
+      - 'extensions/hypeproof-chat/**'
+      - 'scripts/classroom-*.mjs'
+      - 'e2e/classroom/**'
+      - 'e2e/package*.json'
+      - '.github/workflows/classroom-ops.yml'
+permissions:
+  contents: read
+jobs:
+  classroom-browser:
+    name: classroom / browser
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test e2e/classroom/mac-devhost.test.mjs
+      - run: npm ci
+        working-directory: worker
+      - run: npm ci
+        working-directory: chalk
+      - run: npm ci
+        working-directory: extensions/hypeproof-chat/webview-ui
+      - run: npm run build
+        working-directory: extensions/hypeproof-chat/webview-ui
+      - run: npm ci
+        working-directory: e2e
+      - run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - run: npm run test:classroom
+        working-directory: e2e
+      - run: npm run test:classroom-ops
+        working-directory: e2e
+      - run: npm run test:classroom-ops-roster
+        working-directory: e2e
+      - run: npm run test:classroom-ops-selection
+        working-directory: e2e
+      - run: npm run test:classroom-ops-distribution
+        working-directory: e2e
+      - run: npm run test:classroom-ops-lesson-settings
+        working-directory: e2e
+      - run: npm run test:classroom-ops-help
+        working-directory: e2e
+      - run: npm run test:classroom-ops-results
+        working-directory: e2e
+      - run: npm run test:classroom-report
+        working-directory: e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: classroom-ops-evidence
+          path: |
+            e2e/test-results/classroom-ops-roster/
+            e2e/test-results/classroom-ops-selection/
+            e2e/test-results/classroom-ops-distribution/
+            e2e/test-results/classroom-ops-lesson-settings/
+            e2e/test-results/classroom-ops-results/
+            e2e/test-results/classroom-report/
+  # The extension build a venue PC injects into a copy of an official shell (e2e/classroom/field-bundle.mjs). Built from
+  # the PR's own commit; the manifest carries the source SHA and every file's sha256.
+  classroom-field-bundle:
+    name: classroom / field bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: extensions/hypeproof-chat
+      - run: npm ci
+        working-directory: extensions/hypeproof-chat/webview-ui
+      - run: npm run build:extension
+        working-directory: extensions/hypeproof-chat
+      - run: npm run build
+        working-directory: extensions/hypeproof-chat/webview-ui
+      - run: node e2e/classroom/field-bundle.mjs e2e/test-results/classroom-field-bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: classroom-field-bundle
+          path: e2e/test-results/classroom-field-bundle/
+          if-no-files-found: error
+  # Windows commands never run on a developer Mac (CLAUDE.md). The venue scripts are executed HERE, on a fake shell:
+  # that proves they parse and refuse what they must on real Windows PowerShell 5.1 - not that a Studio window works.
+  classroom-windows-field-scripts:
+    name: classroom / windows field scripts
+    needs: classroom-field-bundle
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: classroom-field-bundle
+          path: field-bundle
+      - name: prepare-devhost self-test (Windows PowerShell 5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File e2e\classroom\win-field\prepare-devhost.ps1 -SelfTest -Bundle "$env:GITHUB_WORKSPACE\field-bundle"
+      - name: preflight self-test (Windows PowerShell 5.1)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File e2e\classroom\win-field\preflight.ps1 -SelfTest
+

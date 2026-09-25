@@ -8,11 +8,13 @@
 
 export const OPS_SCHEMA_VERSION = 1;
 export const OPS_PROTOCOL = 1;
-export const OPS_FLAGS = ['ops_observe', 'ops_commands', 'ops_collect', 'ops_reports', 'ops_delivery'] as const;
+/** `ops_delivery` is sending REPORTS to recipients. `ops_distribute` (U2) is putting notices/materials into selected learners' inboxes. */
+export const OPS_FLAGS = ['ops_observe', 'ops_commands', 'ops_collect', 'ops_reports', 'ops_delivery', 'ops_distribute', 'ops_lesson_settings'] as const;
 export type OpsFlag = (typeof OPS_FLAGS)[number];
 /** Issuer-scope capabilities. Absent on every issuer minted before this landed — new authority is opt-in. */
 /** `coach` is deliberately separate from `command`/`reset`: fixing a PC and guiding a learner are different authorities. */
-export const OPS_CAPABILITIES = ['observe', 'manage', 'command', 'reset', 'pause', 'coach', 'collect', 'review', 'deliver'] as const;
+/** `distribute` (U2) is its own authority: holding `deliver`, `coach`, `collect` or anything else never implies it. */
+export const OPS_CAPABILITIES = ['observe', 'manage', 'command', 'reset', 'pause', 'coach', 'collect', 'review', 'deliver', 'distribute', 'lesson_settings'] as const;
 export type OpsCapability = (typeof OPS_CAPABILITIES)[number];
 
 /** Every ops_* timestamp is unix milliseconds (token expiries included, converted at the edge). */
@@ -52,10 +54,12 @@ export const ERROR_CLASSES = [
 export type ErrorClass = (typeof ERROR_CLASSES)[number];
 /** Shared-cause classes: many seats at once means one incident, not N broken PCs. */
 export const COMMON_CAUSE_CLASSES: readonly ErrorClass[] = ['provider_rate_limit', 'provider_5xx', 'network', 'class_not_open', 'budget_limit'];
-export const EVENT_KINDS = ['activation', 'step', 'runtime', 'error', 'upload', 'evidence'] as const;
+/** `recovery` (U4) = what the device observed AFTER a remote action, named by that action's command id. It moves no board slot. */
+export const EVENT_KINDS = ['activation', 'step', 'runtime', 'error', 'upload', 'evidence', 'recovery'] as const;
+export const RECOVERY_CHECKS = ['profile_verified', 'turn_completed', 'turn_failed'] as const;
 export type EventKind = (typeof EVENT_KINDS)[number];
 
-export interface LessonPin { course_id: string; version: string; steps: string[] }
+export interface LessonPin { course_id: string; version: string; steps: string[]; sha256?: string }
 export interface OpsEvent {
   event_id: string; seq: number; observed_at: number; kind: EventKind;
   actor: (typeof ACTORS)[number]; payload: Record<string, unknown>;
@@ -108,6 +112,16 @@ export function validatePayload(kind: EventKind, p: unknown): Verdict<Record<str
     for (const k of ['artifact_before', 'artifact_after']) if (o[k] !== undefined && (typeof o[k] !== 'string' || !SHA256_RE.test(o[k] as string))) return bad('evidence.' + k);
     return { ok: true, value: { ...o, source_state: o.source_state ?? 'unverified' } };
   }
+  if (kind === 'recovery') {
+    // An id, a code and at most the token's public issue id. No text, no path, no token.
+    if (!exactKeys(o, ['command_id', 'check', 'token_jti', 'error_class', 'runtime'])) return bad('unsupported recovery field');
+    if (typeof o.command_id !== 'string' || !UUIDISH_RE.test(o.command_id)) return bad('recovery.command_id');
+    if (!oneOf(RECOVERY_CHECKS, o.check)) return bad('recovery.check');
+    if (o.token_jti !== undefined && (o.check !== 'profile_verified' || typeof o.token_jti !== 'string' || !UUIDISH_RE.test(o.token_jti))) return bad('recovery.token_jti');
+    if (o.error_class !== undefined && (o.check !== 'turn_failed' || !oneOf(ERROR_CLASSES, o.error_class))) return bad('recovery.error_class');
+    if (o.runtime !== undefined && o.runtime !== 'agent-sdk' && o.runtime !== 'proxy') return bad('recovery.runtime');
+    return { ok: true, value: o };
+  }
   if (!exactKeys(o, ['status', 'snapshot_revision'])) return bad('unsupported upload field');
   if (!oneOf(UPLOAD_STATUSES, o.status)) return bad('upload.status');
   if (o.snapshot_revision !== undefined && !(Number.isInteger(o.snapshot_revision) && (o.snapshot_revision as number) >= 0)) return bad('upload.snapshot_revision');
@@ -140,11 +154,13 @@ export function parseFlags(json: string | null | undefined): Record<OpsFlag, boo
   return Object.fromEntries(OPS_FLAGS.map((f) => [f, raw[f] === true])) as Record<OpsFlag, boolean>;
 }
 export function parseLesson(json: string | null | undefined): LessonPin | null {
-  try { const l = JSON.parse(json ?? '{}'); return l && typeof l.version === 'string' ? { course_id: String(l.course_id ?? ''), version: l.version, steps: Array.isArray(l.steps) ? l.steps : [] } : null; } catch { return null; }
+  try { const l = JSON.parse(json ?? '{}'); return l && typeof l.version === 'string' ? { course_id: String(l.course_id ?? ''), version: l.version, steps: Array.isArray(l.steps) ? l.steps : [], ...(typeof l.sha256 === 'string' ? { sha256: l.sha256 } : {}) } : null; } catch { return null; }
 }
 
 /** Why an otherwise valid step event is not allowed to move the board. */
-export function stepDisposition(payload: Record<string, unknown>, lesson: LessonPin | null): 'applied' | 'lesson_mismatch' | 'unknown_step' {
+export function stepDisposition(payload: Record<string, unknown>, lesson: LessonPin | null | 'unknown'): 'applied' | 'lesson_mismatch' | 'unknown_step' | 'basis_unknown' {
+  // U3 — the participant's lesson basis could not be read: the event is kept but moves nothing. It is never judged by the run pin instead.
+  if (lesson === 'unknown') return payload.status === 'free_activity' ? 'applied' : 'basis_unknown';
   if (!lesson) return payload.status === 'free_activity' ? 'applied' : 'lesson_mismatch';
   if (payload.lesson_version !== lesson.version) return 'lesson_mismatch';
   if (payload.status === 'free_activity') return 'applied';
@@ -152,7 +168,48 @@ export function stepDisposition(payload: Record<string, unknown>, lesson: Lesson
 }
 
 export interface SeatStateSlot { boot_seen_at: number; seq: number; observed_at: number; received_at: number; actor: string; value: Record<string, unknown> }
-export type SeatState = Partial<Record<EventKind | 'sample', SeatStateSlot>>;
+/** `last_run` (U4) = the latest `running` report, kept apart because the runtime slot itself is overwritten by the `idle` that follows a short run. */
+export type SeatState = Partial<Record<EventKind | 'sample' | 'token_check' | 'last_run', SeatStateSlot>>;
+
+/**
+ * What the app said about ITS token is evidence, not an entry stage. `activation` holds only the latest stage, so a
+ * later `runtime_ready` used to erase the `token_jti` that `token_verified` carried and the board fell back to
+ * "unknown". The evidence lives in its own slot, bound to the connection (grant) and the app process (boot) that
+ * reported it, and is dropped — never inherited — when either changes or the app reports a rejected token.
+ */
+export function reduceTokenCheck(state: SeatState, ctx: { grantId: string; bootId: string; bootSeenAt: number }, event?: { seq: number; observed_at: number; received_at: number; actor: string; payload: Record<string, unknown> }): boolean {
+  let changed = false;
+  const held = state.token_check;
+  // A new connection or a newer app process has not verified anything yet. An older boot's late sync clears nothing.
+  if (held && (held.value.grant_id !== ctx.grantId || (held.value.boot_id !== ctx.bootId && ctx.bootSeenAt >= held.boot_seen_at))) { delete state.token_check; changed = true; }
+  if (!event) return changed;
+  const stage = event.payload.stage, jti = event.payload.token_jti;
+  const newer = shouldApply(state.token_check, ctx.bootSeenAt, event.seq);
+  if (stage === 'token_verified' && typeof jti === 'string' && newer) {
+    state.token_check = { boot_seen_at: ctx.bootSeenAt, seq: event.seq, observed_at: event.observed_at, received_at: event.received_at, actor: event.actor, value: { token_jti: jti, grant_id: ctx.grantId, boot_id: ctx.bootId } };
+    return true;
+  }
+  if (stage === 'token_rejected' && state.token_check && newer) { delete state.token_check; return true; }
+  return changed;
+}
+
+/** `unknown` = this connection's app has not reported a verified token. Never inferred from the entry stage. */
+export function tokenCheckOf(state: SeatState, issueId: string, currentGrantId: string): 'unknown' | 'matches_issue' | 'other_token' {
+  const held = state.token_check;
+  // Rows written before the evidence slot existed kept the jti inside the activation slot itself.
+  const legacy = !held && state.activation?.value.stage === 'token_verified' ? state.activation.value.token_jti : undefined;
+  const reported = held ? (held.value.grant_id === currentGrantId ? held.value.token_jti : undefined) : legacy;
+  return typeof reported !== 'string' ? 'unknown' : reported === issueId ? 'matches_issue' : 'other_token';
+}
+
+/**
+ * U4 — re-verifying a token proves nothing about the AI runtime. Within one app process, a `token_verified` that arrives
+ * after `runtime_failed` updates the token evidence (its own slot) but leaves the failed stage on the board: only a run
+ * that actually completed (`runtime_ready`) or a new app process replaces it.
+ */
+export function keepsRuntimeFault(current: SeatStateSlot | undefined, incomingStage: unknown, bootSeenAt: number): boolean {
+  return incomingStage === 'token_verified' && current?.value.stage === 'runtime_failed' && current.boot_seen_at === bootSeenAt;
+}
 
 /** Later boot wins; within a boot, only a higher seq. A delayed resend never rolls the board back. */
 export function shouldApply(current: SeatStateSlot | undefined, bootSeenAt: number, seq: number): boolean {

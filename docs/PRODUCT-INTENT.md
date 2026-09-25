@@ -135,6 +135,51 @@ Judgment, Verify, Orchestrate, Adapt, Ownership은 이를 연구할 잠정 후�
 [Intent·요구사항 충족 현황](testing/access-intent-fulfillment-2026-09-08.md)은 연결된 기준과
 실제로 확인한 행동을 구분한다. 이 구현은 판매 활성화·결제 연동·연구 타당화 완료를 뜻하지 않는다.
 
+<a id="one-instructor-classroom-intent"></a>
+
+## Curriculum-connected operation by one instructor
+
+Requirement source: **TJ (Taejin Kang), 2026-09-21**, from firsthand teaching and
+curriculum-partner experience. TJ is the proposer and field-context source here;
+this attribution does not change criterion ownership, implementation authorship,
+approval authority or IP ownership. Existing owners and Git history retain those roles.
+
+TJ observed that a reusable curriculum document can be copied and delivered by
+another provider after changing only examples or exercises, putting the customer
+relationship at risk. The product direction is therefore to make the curriculum
+work through Studio: reusable lesson components configure the learner's AI role,
+available capabilities, exercises and completion criteria. The durable value is
+the maintained execution environment, verified curriculum integration and accumulated
+operating knowledge. “Cannot be copied” is an aspiration for product differentiation,
+not a technical guarantee or a reason to prevent learners exporting their own work.
+
+There are three distinct intents within one classroom capability:
+
+- **Curriculum authoring:** compose and adapt approved lesson components as one
+  would assemble blocks. A changed curriculum changes the relevant Studio behavior
+  through a versioned, validated contract, not just a different handout. Exact
+  drag-and-drop UI remains a design choice; arbitrary code or authority expansion
+  is not implied. Reuse the existing Chalk authoring and lesson-binding contracts.
+- **Live monitoring and communication:** TJ's Padlet use exposed the importance
+  of seeing progress and communicating during class. Carry that interaction into
+  structured stages, help requests, submissions and instructor feedback. Group
+  recurring technical problems so one instructor can prioritize support. These are
+  operating signals, not learner ability scores or continuous screen surveillance.
+- **Remote intervention:** attach a bounded action to known failure cases,
+  including participation/token readiness, selected or class-wide distribution,
+  permitted collection and recovery. Show the actual result for each learner;
+  accepting a command is not solving the learner's problem.
+
+The outcome to test is **one instructor sustaining the lesson while handling
+individual exceptions**, preserving learner work and judgment. Use intervention
+time, waiting time, unresolved cases and verified recovery as operating evidence;
+do not infer that outcome from endpoint coverage or claim it has already been measured.
+The [roadmap](plan/learning-agent-experience-epics.md#one-instructor-classroom)
+connects these intents to existing requirements and the completion boundary.
+The 2026-09-22 [instructor UI pass](requirements/classroom-design.md#instructor-ui-pass-20260922) applies the
+live-monitoring and remote-intervention intents to the existing Chalk screens (list first, cause → action → result);
+it is a draft for user review, not evidence that the one-instructor outcome was measured.
+
 ## 공통 측정 코어와 Jay dogfood
 
 [INT-MC-01–03](intents/measurement-core.md)은 Studio의 관찰·근거·해석 기능을
