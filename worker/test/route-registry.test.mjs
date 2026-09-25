@@ -30,6 +30,7 @@ const ROUTES_DIR = 'worker/src/routes';
  * 요구·시험 부모 없이 구현 노드를 만들면 owner·부모를 발명하는 것이라 하지 않았다.
  */
 export const KNOWN_UNMAPPED = {
+  'admin.ts': '레지스트리 테스트 노드 10여 개가 /admin 을 호출하지만 대부분 픽스처 준비 호출이다 — 전부 부모로 달면 admin 변경마다 무관한 노드가 깨어난다. 관리 기능 자체의 요구 노드 결정 필요 (#996)',
   'authoring.ts': '/admin 아래 하위 라우터(admin.ts:137). authoring.test.mjs 가 호출하지만 그 테스트가 레지스트리에 없다 (#996)',
   'classroom.ts': 'classroom.test.mjs · classroom-d1.test.mjs 가 호출하지만 둘 다 레지스트리에 없고 대응 요구 노드도 없다 (#996)',
   'logs.ts': 'logs-upload.test.mjs 가 호출하지만 레지스트리에 없다. 업로드 허용 목록 계약의 요구 노드 결정 필요 (#996)',
