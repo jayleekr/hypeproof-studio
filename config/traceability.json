@@ -2758,6 +2758,9 @@
       "sources": [
         {
           "path": "docs/testing/chalk-mvp.md"
+        },
+        {
+          "path": "worker/test/chalk-session-design-fields.test.mjs"
         }
       ]
     },
