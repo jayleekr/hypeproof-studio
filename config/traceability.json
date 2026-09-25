@@ -3026,6 +3026,30 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-KB-STORE",
+      "stage": "implementation",
+      "label": "Chalk knowledge store — worker implementation",
+      "owner": "chalk-engineer",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/chalk-knowledge.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-KB-STORE",
+      "stage": "test",
+      "label": "Chalk knowledge store — unit + integration tests",
+      "owner": "chalk-engineer",
+      "depends_on": [
+        "ST-IMP-CHALK-KB-STORE"
+      ]
+    },
+    {
       "id": "ST-TEST-CHALK-MVP",
       "stage": "test",
       "owner": "JinyongShin",
