@@ -3119,6 +3119,32 @@
           "path": "docs/design/chalk-rehearsal.md"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-TOOL-LAYER",
+      "stage": "implementation",
+      "owner": "chalk",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-DES-CHALK-TOOLS"
+      ],
+      "sources": [
+        "extensions/hypeproof-chat/src/chalk/tools.ts",
+        "extensions/hypeproof-chat/src/localRuntime/index.ts",
+        "extensions/hypeproof-chat/src/extension.ts"
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-TOOL-LAYER",
+      "stage": "test",
+      "owner": "chalk",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-DES-CHALK-TOOLS"
+      ],
+      "sources": [
+        "extensions/hypeproof-chat/test/chalk-tools.test.mjs"
+      ]
     }
   ]
 }
