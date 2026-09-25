@@ -22,7 +22,7 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { join, relative, dirname } from "node:path";
 import { createHash } from "node:crypto";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { checkVocab, type KnowledgeDoc } from "../../worker/src/lib/chalk-vocab-check.ts";
 
 // --- CLI ---------------------------------------------------------------
@@ -626,7 +626,7 @@ const args = parseArgs();
 let vaultCommit = args.vaultCommit;
 if (!vaultCommit) {
   try {
-    vaultCommit = execSync(`git -C ${args.vaultPath} rev-parse HEAD`, { encoding: "utf-8" }).trim();
+    vaultCommit = execFileSync("git", ["-C", args.vaultPath, "rev-parse", "HEAD"], { encoding: "utf-8" }).trim();
   } catch {
     console.error("Could not determine vault commit. Pass --vault-commit explicitly.");
     process.exit(1);

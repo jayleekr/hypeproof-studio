@@ -3044,7 +3044,7 @@
     {
       "id": "ST-IMP-CHALK-KB-IMPORT",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-KB",
         "ST-DES-CHALK-KB"
@@ -3061,10 +3061,10 @@
     {
       "id": "ST-TEST-CHALK-KB-IMPORT",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
-        "ST-REQ-CHALK-KB",
-        "ST-DES-CHALK-KB"
+        "ST-IMP-CHALK-KB-IMPORT",
+        "ST-REQ-CHALK-KB"
       ],
       "sources": [
         {
