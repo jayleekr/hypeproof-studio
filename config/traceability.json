@@ -3092,36 +3092,6 @@
       ]
     },
     {
-      "id": "ST-IMP-CHALK-KB-STORE",
-      "stage": "implementation",
-      "label": "Chalk knowledge store — worker implementation",
-      "owner": "JinyongShin",
-      "depends_on": [
-        "ST-REQ-CHALK-KB",
-        "ST-DES-CHALK-KB"
-      ],
-      "sources": [
-        {
-          "path": "worker/src/routes/chalk-knowledge.ts"
-        }
-      ]
-    },
-    {
-      "id": "ST-TEST-CHALK-KB-STORE",
-      "stage": "test",
-      "label": "Chalk knowledge store — unit + integration tests",
-      "owner": "JinyongShin",
-      "depends_on": [
-        "ST-IMP-CHALK-KB-STORE",
-        "ST-REQ-CHALK-KB"
-      ],
-      "sources": [
-        {
-          "path": "worker/test/chalk-knowledge.test.mjs"
-        }
-      ]
-    },
-    {
       "id": "ST-TEST-CHALK-MVP",
       "stage": "test",
       "owner": "JinyongShin",
@@ -3203,28 +3173,58 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-KB-STORE",
+      "stage": "implementation",
+      "label": "Chalk knowledge store — worker implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/chalk-knowledge.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-KB-STORE",
+      "stage": "test",
+      "label": "Chalk knowledge store — unit + integration tests",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-KB-STORE",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-knowledge.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-CHALK-PLAN-PARSER",
       "stage": "implementation",
-      "owner": "jayleekr",
+      "owner": "chalk",
       "depends_on": [
         "ST-REQ-CHALK-FB",
         "ST-DES-CHALK-GATELOOP"
       ],
       "sources": [
-        {"path": "worker/src/lib/chalk-plan/parser.ts"},
-        {"path": "worker/src/lib/chalk-plan/types.ts"}
+        "worker/src/lib/chalk-plan/parser.ts",
+        "worker/src/lib/chalk-plan/types.ts"
       ]
     },
     {
       "id": "ST-TEST-CHALK-PLAN-PARSER",
       "stage": "test",
-      "owner": "jayleekr",
+      "owner": "chalk",
       "depends_on": [
         "ST-REQ-CHALK-FB",
         "ST-DES-CHALK-GATELOOP"
       ],
       "sources": [
-        {"path": "worker/test/chalk-plan-parser.test.mjs"}
+        "worker/test/chalk-plan-parser.test.mjs"
       ]
     }
   ]
