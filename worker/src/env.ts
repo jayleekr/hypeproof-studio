@@ -7,6 +7,22 @@ export interface Env {
   HPS_CLASSROOM_OPS?: string;
   /** #751 R6 — id of a registered live delivery adapter. Unset (the default) means only dry-run delivery can run. */
   HPS_DELIVERY_PROVIDER?: string;
+  /** #751 R5 — 'service-anthropic' turns the Service-side report evaluator on. Unset (default): jobs wait as `evaluator_not_configured`. */
+  /** #751 U2 — comma-separated https hosts a distributed material may link to. Unset (default) = every link is refused. */
+  HPS_CLASSROOM_LINK_HOSTS?: string;
+  /** #751 U3 — `enforce` makes the chat gate and /v1/profile resolve a participant's switched lesson version. Independent of HPS_CLASSROOM_OPS on purpose: switching operations off must not undo a setting that was already applied. */
+  HPS_LESSON_BINDINGS?: string;
+  HPS_CLASSROOM_EVALUATOR?: string;
+  HPS_CLASSROOM_EVALUATOR_MODEL?: string;
+  /** #751 — scheduled retention. Unset days (default) = the run does nothing. With days set it only reports (dry-run) until HPS_CLASSROOM_RETENTION='enforce'. */
+  HPS_CLASSROOM_RETENTION_DAYS?: string;
+  HPS_CLASSROOM_RETENTION?: string;
+  /** #751 R6 — live report delivery. All four are needed for HPS_DELIVERY_PROVIDER='resend'; none is set by default. */
+  RESEND_API_KEY?: string;
+  RESEND_WEBHOOK_SECRET?: string;
+  HPS_DELIVERY_FROM?: string;
+  /** Public https origin of this Service, for the link inside the message. */
+  HPS_PUBLIC_BASE_URL?: string;
   /** Explicit opt-in; migrations and approved contracts must precede activation. */
   HPS_ACCESS_CONTRACTS?: string;
   /** Exact SHA-256 digests of approved sales publications; never provider prices. */

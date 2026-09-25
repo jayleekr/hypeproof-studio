@@ -20,6 +20,8 @@ export interface StartState {
   coachName?: string;
   workspace?: string;
   version: string;
+  /** #751 U2 — instructor notices/materials of the connected class, read from disk by the host. */
+  inbox?: import("./classroomInbox").InboxView;
 }
 export type StartRequest =
   | { type: "startReady" }
@@ -33,5 +35,7 @@ export type StartRequest =
   | { type: "beginCourse" }
   | { type: "disconnectCourse" }
   | { type: "cancelCandidate" }
-  | { type: "openLocalFolder" };
+  | { type: "openLocalFolder" }
+  | { type: "inboxOpen"; objectId: string; generation: number }
+  | { type: "inboxLink"; objectId: string; url: string; generation: number; action: "open" | "copy" };
 export type StartResponse = { type: "startState"; state: StartState };
