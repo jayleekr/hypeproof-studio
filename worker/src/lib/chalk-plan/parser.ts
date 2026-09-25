@@ -19,7 +19,14 @@ const REQUIRED_META_KEYS: ReadonlyArray<string> = [
   'chalk:course', 'chalk:knowledge-version', 'chalk:format', 'chalk:audience-tier', 'chalk:duration-min',
 ];
 
-function decodeEntities(s: string): string {
+function decodeEntities(s: string, violations: Violation[], file: string, section: string | null, step: string | null): string {
+  const safeCodePoint = (match: string, cp: number): string => {
+    if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+      violations.push(violation('markup.bad_entity', ['HTML-02'], `잘못된 수치 참조: ${match}`, file, section, step));
+      return '\uFFFD';
+    }
+    return String.fromCodePoint(cp);
+  };
   return s
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
@@ -27,11 +34,12 @@ function decodeEntities(s: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
-    .replace(/&#(\d+);/g, (_, n) => String.fromCodePoint(parseInt(n, 10)));
+    .replace(/&#x([0-9a-fA-F]+);/g, (m, n) => safeCodePoint(m, parseInt(n, 16)))
+    .replace(/&#(\d+);/g, (m, n) => safeCodePoint(m, parseInt(n, 10)));
 }
 
-function cleanText(s: string): string {
-  return decodeEntities(s.replace(/\s+/g, ' ').trim());
+function cleanText(s: string, violations: Violation[], file: string, section: string | null, step: string | null): string {
+  return decodeEntities(s.replace(/\s+/g, ' ').trim(), violations, file, section, step);
 }
 
 function hasExternalUrl(attrs: Record<string, string>): string | null {
@@ -64,8 +72,19 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
   const enc = new TextEncoder();
   if (enc.encode(html).length > MAX_SIZE_BYTES) {
     violations.push(violation('markup.too_large', ['HTML-03'], `파일 크기가 256KB 를 초과한다`, file, null, null));
+    return { meta: { kind: null, course: null, knowledgeVersion: null, format: null, audienceTier: null, familySession: false, durationMin: null, methods: [] }, sections: [], steps: [], stucks: [], objectives: [], essentialQuestion: null, evidence: [], keyQuestions: [], prohibitedMoves: [], safety: null, bridgingOpener: null, violations };
   }
 
+  // 잘못된 수치 참조를 전체 HTML에서 사전 스캔 (텍스트 수집 경로와 무관하게 감지)
+  const scanBadRef = (m: string, cp: number) => {
+    if (cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF)) {
+      violations.push(violation('markup.bad_entity', ['HTML-02'], `잘못된 수치 참조: ${m}`, file, null, null));
+    }
+  };
+  html.replace(/&#x([0-9a-fA-F]+);/g, (m, n) => { scanBadRef(m, parseInt(n, 16)); return m; });
+  html.replace(/&#(\d+);/g, (m, n) => { scanBadRef(m, parseInt(n, 10)); return m; });
+
+  try {
   const tokens = Array.from(tokenize(html));
   const stack: string[] = [];
 
@@ -125,7 +144,7 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
 
   const flushCollect = () => {
     if (!collectTarget) return;
-    const text = cleanText(collectedText);
+    const text = cleanText(collectedText, violations, file, sectionStack.at(-1)?.key ?? null, currentStep?.id ?? null);
     const ct = collectTarget;
     collectTarget = null;
     collectedText = '';
@@ -447,4 +466,8 @@ export function parsePlan(html: string, file = 'lesson'): ParsedPlan {
     bridgingOpener,
     violations,
   };
+  } catch (err) {
+    violations.push(violation('markup.internal', ['HTML-02'], `내부 오류: ${err instanceof Error ? err.message : String(err)}`, file, null, null));
+    return { meta: { kind: null, course: null, knowledgeVersion: null, format: null, audienceTier: null, familySession: false, durationMin: null, methods: [] }, sections: [], steps: [], stucks: [], objectives: [], essentialQuestion: null, evidence: [], keyQuestions: [], prohibitedMoves: [], safety: null, bridgingOpener: null, violations };
+  }
 }
