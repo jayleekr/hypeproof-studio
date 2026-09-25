@@ -5,6 +5,8 @@ import { startPageCopy } from "../../src/coachIdentity";
 import { Brand } from "./Brand";
 import "./start.css";
 
+import { InstructorInbox } from "./InstructorInbox";
+
 export function StartPage() {
   const [state, setState] = useState<StartState>({ checking: true, version: "" });
   const [token, setToken] = useState("");
@@ -53,6 +55,8 @@ export function StartPage() {
         {state.profile && !editing ? <>
           <div className="studio-course"><span className="studio-verified">{activity}</span><h3>{state.profile.name}</h3><dl><div><dt>{copy.coachRowLabel}</dt><dd>{state.profile.coach}</dd></div>{state.profile.kind !== "trial" && state.profile.kind !== "personal" && <div><dt>회차</dt><dd>{state.profile.series}</dd></div>}<div><dt>작업 폴더</dt><dd>{state.profile.workspace}</dd></div></dl></div>
           <button className="studio-primary" disabled={state.checking} onClick={() => { setState(s => ({ ...s, checking: true, error: undefined })); postToHost({ type: "beginCourse" }); }}>{state.checking ? "활동 여는 중…" : state.started ? copy.continueButton : state.candidate ? "이 활동 시작하기" : "이어서 하기"} <span aria-hidden="true">↗</span></button>
+          {/* #751 U2 — a quiet line under the one Primary (SX-02/04): the same list, from the same host read, as the work screen. */}
+          {!state.candidate && <InstructorInbox inbox={state.inbox ?? null} post={postToHost} quiet />}
           {state.candidate && <button className="studio-text-button" disabled={state.checking} onClick={() => postToHost({type:"chooseActivityFolder"})}>다른 작업 폴더 선택</button>}
           <div className="studio-course-actions"><button className="studio-text-button" onClick={() => { setEditing(true); setEntry(null); setToken(""); }} disabled={state.checking}>다른 활동 선택</button><button className="studio-text-button" onClick={() => postToHost({ type: state.candidate ? "cancelCandidate" : "disconnectCourse" })} disabled={state.checking}>{state.candidate ? "선택 취소" : "연결 해제"}</button></div>
         </> : entry === null ? <div className="studio-entry-options" role="group" aria-label="시작 방법 고르기">

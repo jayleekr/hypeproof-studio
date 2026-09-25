@@ -130,7 +130,11 @@ export interface CoachInfo {
  * cached client-side. Stays in sync with Worker's UxConfig type — keep both
  * sides updated together.
  */
+/** Kept in this file (not in lessonBinding.ts) because the webview build type-checks protocol.ts and must not follow Node-side imports. */
+export interface LessonBindingView { key: string; seq: number; source: "token" | "setting" | "base"; object_id: string | null; revision: number | null; enforced: boolean; not_applied?: string }
 export interface ResolvedProfile {
+  /** #751 U3 — which lesson binding the Service executes this seat under. Present only where bindings are enforced. The app sends `key` back as its expectation; it never selects a lesson with it. */
+  lesson_binding?: LessonBindingView;
   /** Server-verified identity; never an execution grant. */
   activity_id?: string;
   /** Presentation only; derived from authenticated Service access, never grants authority. */
@@ -348,7 +352,7 @@ export type WebviewMessage = (
   | { type: "selectModel"; alias: string }
   | { type: "selectEffort"; value: CourseEffort }
   | { type: "refreshEffort" }
-  | { type: "sendMessage"; activityId?:string; text: string; history: ChatMessage[]; images?: string[] }
+  | { type: "sendMessage"; activityId?:string; text: string; history: ChatMessage[]; images?: string[]; /** #751 U3 — instructor prompts imported into the draft this message was sent from (bodiless). */ imports?: Array<{ object_id: string; revision: number; hash16: string }> }
   | { type: "retryMessage"; activityId?:string; prompt: string; history: ChatMessage[]; images?: string[] }
   | { type: "cancelStream"; streamId: string }
   | { type: "requestAction"; action: ActionRequest }
@@ -376,6 +380,13 @@ export type WebviewMessage = (
   // Trace signals (#9). Webview fires; host forwards via POST /v1/trace/event.
   // The host-side HTTP forwarding lands in a follow-up — keep these in sync
   // with worker/src/routes/trace.ts TraceEvent union.
+  // #751 F4 — explicit learner step action in the lesson panel (never inferred from chat volume).
+  | { type: "lessonStep"; stepId: string; status: "in_progress" | "submitted" }
+  // #751 U2 — the inbox of instructor notices/materials. `generation` is the connection the card list was drawn under: the
+  // host answers a callback from an older one with nothing. Opening a card is kept on this device; it is not reported.
+  | { type: "inboxRequest" }
+  | { type: "inboxOpen"; objectId: string; generation: number }
+  | { type: "inboxLink"; objectId: string; url: string; generation: number; action: "open" | "copy" }
   | { type: "traceTrialStart"; taskLabel?: string }
   | { type: "traceTrialEnd"; trialId: string }
   | {
@@ -421,6 +432,8 @@ export type HostMessage = (
   | { type: 'learningState'; state: import('./learningStateHelpers').LearningStatePayload }
   | StartResponse
   | { type: "config"; config: ChatConfig }
+  /** #751 U2 — always read from disk by the host; the webview holds no copy of record. */
+  | { type: "inboxState"; inbox: import("./classroomInbox").InboxView }
   | { type: "history"; messages: ChatMessage[] }
   | { type: "streamStart"; streamId: string; messageId: string }
   | { type: "streamChunk"; streamId: string; delta: string }
@@ -438,7 +451,8 @@ export type HostMessage = (
   // and from streamError (nothing went wrong — the user asked for this, so no
   // "문제가 생겼어요" banner and no 🚨 신고하기 button). The webview leaves the
   // streaming state and shows a plain notice inviting the next message.
-  | { type: "streamStopped"; streamId: string }
+  /** `by: "instructor"` — stopped by a classroom command (#751), so the learner is told who stopped it and that nothing was lost. */
+  | { type: "streamStopped"; streamId: string; by?: "instructor" }
   // #278 Phase 3 — agentic browser tool loop action log (auto-run + log, no
   // modal). One line per tool call; `state` flips running → done/error.
   // #503 — there is one channel, so arrival order IS occurrence order. The webview

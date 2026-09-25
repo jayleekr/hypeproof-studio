@@ -2,6 +2,7 @@
 // SQLite with transactional batch. Two teachers, two students, another cohort.
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { bootApp, createMockEnv, makeCtx, TEST_SECRET } from './index.mjs';
 // Node SQLite binds positionally; the existing board SQL uses ?N, so numbered
 // parameters are mapped here exactly as harness/classroom.mjs does. SQL is unchanged.
@@ -11,14 +12,16 @@ function sqliteBinding(db) {
     const params = () => { const n = [...sql.matchAll(/\?(\d+)/g)]; return n.length ? n.map((m) => args[Number(m[1]) - 1]) : args; };
     const q = () => db.prepare(sql.replace(/\?\d+/g, '?'));
     const stmt = { bind(...a) { args = a; return stmt; },
-      _run() { const r = q().run(...params()); return { success: true, results: [], meta: { changes: Number(r.changes) } }; },
+      // D1 returns the rows of a SELECT inside a batch; the U3 turn admission reads its stored row back that way.
+      _run() { if (/^\s*SELECT/i.test(sql)) return { success: true, results: q().all(...params()), meta: { changes: 0 } }; const r = q().run(...params()); return { success: true, results: [], meta: { changes: Number(r.changes) } }; },
       async run() { return stmt._run(); }, async first() { return q().get(...params()) ?? null; },
       async all() { return { success: true, results: q().all(...params()) }; } };
     return stmt;
   }, async batch(statements) { db.exec('BEGIN'); try { const r = statements.map((x) => x._run()); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } } };
 }
 export const OPS_ALL = ['observe', 'manage', 'command', 'reset', 'pause', 'coach', 'collect', 'review', 'deliver'];
-export async function localOps({ enabled = true, binding } = {}) {
+// `profile`: another compiled profile that serves the same synthetic cohort (e.g. a proxy-runtime one) — the run, the frozen lesson and the tokens follow it.
+export async function localOps({ enabled = true, binding, profile: profileOverride } = {}) {
   const app = await bootApp();
   const { issue, issueIssuer } = await import('../../src/lib/tokens.ts');
   const { setRoster, startSession } = await import('../../src/lib/kv.ts');
@@ -30,8 +33,8 @@ export async function localOps({ enabled = true, binding } = {}) {
   const guarded = { prepare(sql) { const st = inner.prepare(sql); if (!(failure && sql.includes(failure))) return st; const boom = () => { throw Error('injected storage failure'); }; return { bind() { return this; }, _run: boom, run: async () => boom(), first: async () => boom(), all: async () => boom() }; }, batch: (s) => inner.batch(s) };
   const env = createMockEnv({ withSession: false, withRoster: false, environment: 'dev', adminPassword: 'pw', env: { HPS_DB: guarded, ...(enabled ? { HPS_CLASSROOM_OPS: 'enabled' } : {}) } });
   // In-memory R2: put/get/list, with the same "object first, row second" failure window as production.
-  const r2 = new Map(); env.HPS_TRACES = { async put(key, value) { if (failure === 'R2 put') throw Error('injected R2 failure'); r2.set(key, value instanceof ArrayBuffer ? value.slice(0) : new TextEncoder().encode(String(value)).buffer); }, async get(key) { const v = r2.get(key); return v ? { arrayBuffer: async () => v, text: async () => new TextDecoder().decode(v) } : null; }, async list({ prefix = '' } = {}) { return { objects: [...r2.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })) }; } };
-  const cohort = 'boah-dental-2026-a', profile = 'boah-dental-director-copyclone-2026-s1', run = 'ops-test-run';
+  const r2 = new Map(); env.HPS_TRACES = { async put(key, value) { if (failure === 'R2 put') throw Error('injected R2 failure'); r2.set(key, value instanceof ArrayBuffer ? value.slice(0) : new TextEncoder().encode(String(value)).buffer); }, async get(key) { const v = r2.get(key); return v ? { arrayBuffer: async () => v, text: async () => new TextDecoder().decode(v) } : null; }, async delete(key) { r2.delete(key); }, async list({ prefix = '' } = {}) { return { objects: [...r2.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })) }; } };
+  const cohort = 'boah-dental-2026-a', profile = profileOverride ?? 'boah-dental-director-copyclone-2026-s1', run = 'ops-test-run';
   // Mirror what persistSessionStart writes, so usage rows attribute to the run like production.
   if (db) { db.prepare('INSERT OR IGNORE INTO cohorts(id,display_name) VALUES(?,?)').run(cohort, cohort); db.prepare('INSERT OR IGNORE INTO sessions(id,cohort_id,profile_id,starts_at,ends_at) VALUES(?,?,?,?,?)').run(run, cohort, profile, new Date(Date.now() - 60000).toISOString(), new Date(Date.now() + 3600000).toISOString()); }
   await setRoster(env.HPS_KV, cohort, ['student-a', 'student-b', 'student-c', 'legacy-test-seat']);
@@ -68,5 +71,29 @@ export async function localOps({ enabled = true, binding } = {}) {
   const command = (action, targets, extra = {}, token) => request(base + '/commands', 'POST', { action, targets, idempotency_key: crypto.randomUUID(), reason_code: 'blocked_error', expected_roster_revision: 1, ...extra }, token);
   const receipt = (cmd, state, result_code = '') => ({ command_id: cmd.command_id, lease_generation: cmd.lease_generation, connection_epoch: cmd.connection_epoch, state, result_code, observed_at: Date.now() });
   const sync = (credential, events = [], n = 1, extra = {}) => request('/v1/classroom/ops/sync', 'POST', { schema_version: 1, app_instance_id: instance(n).app_instance_id, boot_id: instance(n).boot_id, capabilities: instance(n).capabilities, events, ...extra }, credential);
-  return { r2, app, env, db, cohort, profile, run, base, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, command, receipt, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
+  // A snapshot the way the real App issues it (review F1): real-shaped spool metadata, and the binding produced by the
+  // App's own freezer from the connect response. Tests never hand-write a binding.
+  const { freezeSnapshot } = await import('../../../extensions/hypeproof-chat/src/evidenceSnapshot.ts');
+  const enc = (t) => new TextEncoder().encode(t), hex = (t) => createHash('sha256').update(t).digest('hex');
+  // The App freezes a copy once and keeps its binding; the fixture freezes at a fixed instant so a re-seal is the same manifest.
+  const opts_now = (conn) => conn.run.ends_at;
+  const metaFor = (conn, over = {}) => JSON.stringify({ schema_version: 1, session_id: 'spool-' + conn.grant_id, user: conn.student, app_version: '0.1.56', os: 'synthetic', started_at: new Date(conn.run.starts_at).toISOString(), ...over });
+  // `spool` is what the live SessionSpool reported with the bytes (its own counter, and other sessions of this learner in
+  // the class window). Default: a healthy single session whose counter equals the last seq in the text. `spool: null`
+  // is an App build that predates the sequence contract. A committed spool always ends with a newline.
+  const lastSeqOf = (text) => Math.max(0, ...text.split('\n').map((l) => { try { const q = JSON.parse(l).seq; return Number.isSafeInteger(q) ? q : 0; } catch { return 0; } }));
+  function sealBody(conn, batchId, eventsText, { meta = metaFor(conn), files, consent = { purpose: 'class_report', notice_version: 'notice-v1' }, spool } = {}) {
+    const source = spool === null ? undefined : { sequence: { session_id: JSON.parse(meta).session_id, last_seq: spool?.last_seq ?? lastSeqOf(eventsText) }, other_sessions: spool?.other_sessions === undefined ? 0 : spool.other_sessions };
+    const scope = { grant_id: conn.grant_id, class_run_id: conn.class_run_id, seat_id: conn.seat_id, student: conn.student, activity: conn.lesson ? { course_id: conn.lesson.course_id, version: conn.lesson.version } : null, run: conn.run };
+    const frozen = freezeSnapshot([{ name: 'session.meta.json', data: enc(meta) }, { name: 'events.jsonl', data: enc(eventsText) }], scope, batchId, consent, opts_now(conn), source);
+    if (!frozen.ok) throw Error('the App would not send this: ' + frozen.code);
+    return { schema: 'hps-classroom-snapshot/2', files: files ?? [{ name: 'session.meta.json', bytes: Buffer.byteLength(meta), sha256: hex(meta) }, { name: 'events.jsonl', bytes: Buffer.byteLength(eventsText), sha256: hex(eventsText) }], binding: frozen.binding };
+  }
+  /** PUT both files and seal, as the device uploader does. */
+  async function uploadSnapshotAs(conn, batchId, revision, eventsText, opts = {}) {
+    const meta = opts.meta ?? metaFor(conn);
+    for (const [name, body] of [['session.meta.json', meta], ['events.jsonl', eventsText]]) { const r = await app.fetch(new Request(`https://service.test/v1/classroom/ops/collect/snapshots/${batchId}/${revision}/${name}`, { method: 'PUT', headers: { authorization: 'Bearer ' + conn.credential }, body }), env, makeCtx()); if (!r.ok) return { status: r.status, json: await r.json() }; }
+    return request(`/v1/classroom/ops/collect/snapshots/${batchId}/${revision}/seal`, 'POST', sealBody(conn, batchId, eventsText, { ...opts, meta }), conn.credential);
+  }
+  return { r2, app, env, db, cohort, profile, run, base, metaFor, sealBody, uploadSnapshotAs, lesson, freeze, teacher, student, teacherToken, request, configure, pair, event, sync, command, receipt, instance, fail: (s) => { failure = s; }, close: () => db?.close() };
 }
