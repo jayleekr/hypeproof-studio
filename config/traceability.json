@@ -2833,6 +2833,184 @@
           "path": "worker/src/lib/harness-rules.ts"
         }
       ]
+    },
+    {
+      "id": "ST-INT-CHALK-MVP",
+      "stage": "intent",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/intents/chalk-mvp.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-UX",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 진입·목록 (UX)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-GEN",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP",
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 생성 (GEN)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-FB",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 피드백과 검사 (FB)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-OUT",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP",
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 강의 만들기 (OUT)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-RH",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 리허설 (RH)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-PLAN",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 강의 계획안 (PLAN)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-SUB",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 강사 구독 연결 (SUB)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-HTML",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 계획서 형식 (HTML)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-SCH",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 저장 형식 (SCH)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-KB",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 지식원 (KB)"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-MVP",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-UX",
+        "ST-REQ-CHALK-GEN",
+        "ST-REQ-CHALK-FB",
+        "ST-REQ-CHALK-OUT",
+        "ST-REQ-CHALK-RH",
+        "ST-REQ-CHALK-PLAN",
+        "ST-REQ-CHALK-SUB",
+        "ST-REQ-CHALK-HTML",
+        "ST-REQ-CHALK-SCH",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/chalk-mvp.md"
+        }
+      ]
     }
   ]
 }
