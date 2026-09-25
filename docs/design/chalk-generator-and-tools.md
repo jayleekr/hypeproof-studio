@@ -33,18 +33,20 @@
 
 | 도구 | 입력 | 부르는 서버 API | 돌려주는 것 | 이슈 |
 |---|---|---|---|---|
-| `chalk_list_courses` | — | `GET /admin/chalk/courses` | 강사의 강의 목록(초안·확정) | E4-5 (A-02) |
-| `chalk_open_course` | `course` | `GET …/authoring/:course` | 초안(revision · 입력 · 계획서 파일 경로) | 기존 API |
-| `chalk_set_inputs` | `course`, `audience`, `assets[]`(7개 중), `teaching_style`, `requirements`, `format`(`workshop`/`track`) | `PUT /admin/chalk/courses/:course/inputs` (입력은 `chalk_plan_files` 옆 입력 기록에. `content` 에 넣지 않는다) | 새 revision | E2-6 |
-| `chalk_recommend_methods` | `course` | `POST /admin/chalk/courses/:course/recommend` | 후보·제외 모형과 근거, 쓴 지식 버전 | E2-2 |
-| `chalk_generator_brief` | `course`, `file`(`lesson`/`ops`) | `GET /admin/chalk/courses/:course/brief?file=` | 생성 지침 묶음(아래 2절) | E2-6 |
+| `chalk_list_courses` | `cohort` | `GET /admin/chalk/cohorts/:cohort/courses` | 강사의 강의 목록(초안·확정) | E4-5 (A-02) |
+| `chalk_open_course` | `cohort`, `course` | `GET /admin/chalk/cohorts/:cohort/courses/:course` | 초안(revision · 입력 · 계획서 파일 경로) | 기존 API |
+| `chalk_set_inputs` | `cohort`, `course`, `audience`, `assets[]`(7개 중), `teaching_style`, `requirements`, `format`(`workshop`/`track`) | `PUT /admin/chalk/cohorts/:cohort/courses/:course/inputs` (입력은 `chalk_plan_files` 옆 입력 기록에. `content` 에 넣지 않는다) | 새 revision | E2-6 |
+| `chalk_recommend_methods` | `cohort`, `course` | `POST /admin/chalk/cohorts/:cohort/courses/:course/recommend` | 후보·제외 모형과 근거, 쓴 지식 버전 | E2-2 |
+| `chalk_generator_brief` | `cohort`, `course`, `file`(`lesson`/`ops`) | `GET /admin/chalk/cohorts/:cohort/courses/:course/brief?file=` | 생성 지침 묶음(아래 2절) | E2-6 |
 | `chalk_get_knowledge` | `kind`, `doc_id?` | `GET /admin/chalk/knowledge/:version/docs…` | 지식 문서(초안의 지식 버전으로 고정) | E1-2 |
-| `chalk_save_plan` | `course`, `file`, `expected_revision` | `PUT /admin/chalk/courses/:course/plan` (계획서 원문은 `chalk_plan_files`, 초안 `content` 에는 `plan_ref` 만. 두 쓰기를 한 batch 로) | 새 revision + **자동 검사 결과** | E2-6 |
-| `chalk_check_plan` | `course` | `POST /admin/chalk/cohorts/:cohort/courses/:course/check` | 검사 결과(3절 모양) | E2-3 |
-| `chalk_judge_items` | `course`, `items[]` | `GET …/judge-brief` → 모델 판정 → `POST …/judgements` | 문맥 판정 결과 저장 | E2-5 (A-02) |
-| `chalk_record_feedback` | `course`, `text` | `POST /admin/chalk/courses/:course/feedback` | 기록 ID | E2-7 (A-02) |
-| `chalk_diff` | `course`, `from_revision`, `to_revision?` | `GET …/diff` | 바뀐 절·단계 목록 | E2-7 (A-02) |
+| `chalk_save_plan` | `cohort`, `course`, `file`, `expected_revision` | `PUT /admin/chalk/cohorts/:cohort/courses/:course/plan` (계획서 원문은 `chalk_plan_files`, 초안 `content` 에는 `plan_ref` 만. 두 쓰기를 한 batch 로) | 새 revision + **자동 검사 결과** | E2-6 |
+| `chalk_check_plan` | `cohort`, `course` | `POST /admin/chalk/cohorts/:cohort/courses/:course/check` | 검사 결과(3절 모양) | E2-3 |
+| `chalk_judge_items` | `cohort`, `course`, `items[]` | `GET /admin/chalk/cohorts/:cohort/courses/:course/judge-brief` → 모델 판정 → `POST /admin/chalk/cohorts/:cohort/courses/:course/judgements` | 문맥 판정 결과 저장 | E2-5 (A-02) |
+| `chalk_record_feedback` | `cohort`, `course`, `text` | `POST /admin/chalk/cohorts/:cohort/courses/:course/feedback` | 기록 ID | E2-7 (A-02) |
+| `chalk_diff` | `cohort`, `course`, `from_revision`, `to_revision?` | `GET /admin/chalk/cohorts/:cohort/courses/:course/diff` | 바뀐 절·단계 목록 | E2-7 (A-02) |
 | 리허설 · 확정 · 내보내기 도구 | — | E6 · E5 설계가 정한다 | — | E5 · E6 |
+
+> `cohort` 를 입력으로 받는 이유: 강사 토큰의 scope 에 코호트가 여럿일 수 있어 입력으로 받는다
 
 - 🔴 **계획서 편집은 파일로 한다.** 계획서 HTML 은 강사 작업 폴더에 작업 사본(`<course>/지도안.html` 등)으로 열린다(UX-03 "편집기로 원문을 열어 고칠 수 있다"). 모델은 기존 `Read`·`Edit` 도구로 이 파일을 고치고, `chalk_save_plan` 이 파일 내용을 서버 초안에 올린다. 강사가 편집기에서 직접 고쳐도 같은 버튼(=같은 도구)으로 올린다. **서버 초안이 원본이고, 파일은 작업 사본이다**
 - `chalk_save_plan` 은 저장이 성공하면 **같은 응답에 검사 결과를 싣는다.** 모델이 따로 검사를 부르지 않아도 고칠 때마다 검사가 돈다(FB-02)
@@ -154,8 +156,8 @@ E1-1 §2-7 모양에 두 칸을 더한다.
 
 | 경로 | 이슈 | 비고 |
 |---|---|---|
-| `POST /admin/chalk/courses/:course/recommend` | E2-2 | 결정적 함수 |
-| `GET /admin/chalk/courses/:course/brief` | E2-6 | 지침 묶음 조립 |
+| `POST /admin/chalk/cohorts/:cohort/courses/:course/recommend` | E2-2 | 결정적 함수 |
+| `GET /admin/chalk/cohorts/:cohort/courses/:course/brief` | E2-6 | 지침 묶음 조립 |
 | `POST /admin/chalk/cohorts/:cohort/courses/:course/check` | E2-3 | 규격 + v0 + 확장 |
 | `GET …/judge-brief` · `POST …/judgements` | E2-5 | 판정 기록 테이블 필요(마이그레이션, 번호는 리드 배정) |
 | `POST …/feedback` · `GET …/diff` | E2-7 | 🔴 `authoring_drafts` 는 최신 revision 만 갖는다. 비교(FB-01)와 이력(FB-05)을 위해 **초안 revision 이력 테이블**이 필요하다(E2-7 설계에서 정함) |
