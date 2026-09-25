@@ -45,7 +45,7 @@
     "test:budget-recovery:d1": "node --experimental-strip-types --experimental-sqlite test/budget-recovery.test.mjs --d1",
     "test:classroom-ops:review": "node --experimental-strip-types --experimental-sqlite --test test/classroom-ops-review.test.mjs test/classroom-ops-staging-config.test.mjs",
     "test:chalk-knowledge": "node --experimental-strip-types test/chalk-knowledge.test.mjs",
-    "test:chalk-knowledge-import": "node --experimental-strip-types test/chalk-knowledge-import.test.mjs"
+    "test:chalk-knowledge-import": "node --experimental-strip-types --experimental-sqlite test/chalk-knowledge-import.test.mjs"
   },
   "dependencies": {
     "hono": "^4.13.7"

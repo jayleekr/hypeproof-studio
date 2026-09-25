@@ -19,3 +19,7 @@ status: active
 
 ### B-2. 측정 결과를 단일 합성 점수로 내지 않는다
 **근거: A-1, A-4.** 합성 점수는 서열을 만든다.
+
+### B-3. SQL escape fixture (test-only — do not translate)
+it's a 'quoted' value; SELECT 1 -- comment
+line two with semicolon; and more

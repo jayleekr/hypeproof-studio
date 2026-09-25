@@ -593,6 +593,7 @@ function buildSql(
     `-- source_commit: ${sourceCommit}`,
     `-- doc_count: ${docs.length}`,
     `-- digest: ${digest}`,
+    `-- atomicity: wrangler d1 execute --file is atomic per-file (local confirmed 2026-09-25)`,
     "",
     `INSERT INTO chalk_knowledge_versions`,
     `  (version, parent_version, origin, source_repo, source_commit, note, created_by, created_at, doc_count, digest)`,

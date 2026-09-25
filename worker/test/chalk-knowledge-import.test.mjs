@@ -5,9 +5,9 @@
 // Real vault tests: conditional on CHALK_VAULT_PATH env var. Skip when absent.
 //
 // Fixture vault counts (from fixtures/chalk-vault/):
-//   vocab=3, method=1, gate=7, constitution=4, prohibited-move=2,
+//   vocab=3, method=1, gate=7, constitution=5, prohibited-move=2,
 //   placement=3, axis=2, acceptance=3, guide=4 (workshop-core skipped, not in fixture)
-//   total=29
+//   total=30
 //
 // Real vault counts (from curriculum_wiki/, validated 2026-09-24):
 //   vocab=3, method=8, gate=26, constitution=11, prohibited-move=5,
@@ -22,6 +22,7 @@ import { readFileSync, writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import { checkVocab } from "../src/lib/chalk-vocab-check.ts";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -541,6 +542,46 @@ test("checkVocab: bad avoid_when value rejected", () => {
   assert(result.errors.some(e => e.bad_values.includes("INVALID-CONDITION")), "INVALID-CONDITION should be reported");
   assert(result.errors.some(e => e.field === "avoid_when"), "field=avoid_when should be reported");
 });
+
+// ---------------------------------------------------------------------------
+// SQL escape: malicious string body round-trip via node:sqlite
+// ---------------------------------------------------------------------------
+
+console.log("\n[SQL escape: malicious body round-trip]");
+
+{
+  const SCHEMA = `
+    CREATE TABLE IF NOT EXISTS chalk_knowledge_versions (
+      version INTEGER PRIMARY KEY, parent_version INTEGER,
+      origin TEXT NOT NULL, source_repo TEXT, source_commit TEXT,
+      note TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL,
+      doc_count INTEGER NOT NULL, digest TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
+      version INTEGER NOT NULL REFERENCES chalk_knowledge_versions(version),
+      doc_id TEXT NOT NULL, kind TEXT NOT NULL, fields_json TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '', source_path TEXT,
+      PRIMARY KEY (version, doc_id)
+    );
+  `;
+
+  const EXPECTED_B3_BODY =
+    "SQL escape fixture (test-only — do not translate)\n\n" +
+    "it's a 'quoted' value; SELECT 1 -- comment\n" +
+    "line two with semicolon; and more";
+
+  test("SQL escape: constitution:B-3 body round-trips through sqlite unchanged", () => {
+    const { sql } = runImport(FIXTURE_VAULT);
+    const db = new DatabaseSync(":memory:");
+    db.exec(SCHEMA);
+    db.exec(sql);
+    const row = db.prepare(
+      "SELECT body FROM chalk_knowledge_docs WHERE version=1 AND doc_id='constitution:B-3'"
+    ).get();
+    assert(row !== undefined, "constitution:B-3 row not found in DB");
+    assertEqual(row.body, EXPECTED_B3_BODY, "B-3 body should round-trip unchanged (byte-exact)");
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Summary
