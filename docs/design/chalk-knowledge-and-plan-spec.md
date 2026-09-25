@@ -239,8 +239,8 @@ plan_ref?: {
 };
 ```
 
-- **초안 저장**: 도구가 계획서 파일을 `chalk_plan_files`(`ref_kind='draft'`, `ref=<새 revision>`)에 쓰고, 같은 요청에서 `authoring_drafts` 를 `SAVE-01` CAS 로 올린다. 새 경로(`PUT /admin/chalk/courses/:course/plan`)가 두 쓰기를 한 트랜잭션(D1 batch)으로 묶는다. revision 이 어긋나면 둘 다 쓰지 않는다
-- **요청 크기 한도**: `PUT /admin/chalk/courses/:course/plan` 은 기존 authoring 라우트(`bodyLimit` 128KB, `authoring.ts:47`)와 별개 파일이므로 자기 한도를 따로 둔다. 요청 하나에 파일 하나(lesson 또는 ops), 파일당 **256KB**. 초과하면 413과 함께 `"계획서가 너무 큽니다"` 로 거부한다. E2-6 구현이 이 값을 지킨다
+- **초안 저장**: 도구가 계획서 파일을 `chalk_plan_files`(`ref_kind='draft'`, `ref=<새 revision>`)에 쓰고, 같은 요청에서 `authoring_drafts` 를 `SAVE-01` CAS 로 올린다. 새 경로(`PUT /admin/chalk/cohorts/:cohort/courses/:course/plan`)가 두 쓰기를 한 트랜잭션(D1 batch)으로 묶는다. revision 이 어긋나면 둘 다 쓰지 않는다
+- **요청 크기 한도**: `PUT /admin/chalk/cohorts/:cohort/courses/:course/plan` 은 기존 authoring 라우트(`bodyLimit` 128KB, `authoring.ts:47`)와 별개 파일이므로 자기 한도를 따로 둔다. 요청 하나에 파일 하나(lesson 또는 ops), 파일당 **256KB**. 초과하면 413과 함께 `"계획서가 너무 큽니다"` 로 거부한다. E2-6 구현이 이 값을 지킨다
 - **확정**: 확정 시점에 그 revision 의 계획서 행을 `ref_kind='version'` 으로 복사한다. `content.plan_ref.files` 의 sha256 이 확정본 바이트에 들어가므로 계획서가 바뀌면 확정본 해시와 어긋나 드러난다(VER-01 과 같은 효과). 확정 경로(`authoring.ts`)는 고치지 않으므로, 복사는 E5 확정 도구가 확정 직후 한다(스택 머지 뒤에는 스택 확정 서명 경로에 맞춘다)
 - **읽기**: 계획서 원문은 issuer 전용 경로로만 나간다. 학생 경로·코치 프롬프트에는 `plan_ref` 만 간다
 - 🔴 **시험(필수 부정 대조)**: 계획서가 있는 강의로 학생 토큰 대화를 열었을 때 코치 system prompt 와 `/v1/profile` 응답에 계획서 문장(교사 칸 문장 하나를 표본으로)이 **없다**
