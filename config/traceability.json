@@ -3063,6 +3063,35 @@
       ]
     },
     {
+      "id": "ST-DES-CHALK-INSTRUCTOR",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-REQ-CHALK-UX",
+        "ST-REQ-CHALK-RH",
+        "ST-REQ-CHALK-GEN"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-instructor-mode.md",
+          "section": "## 1. 강사 모드 (SUB-08)"
+        },
+        {
+          "path": "docs/design/chalk-instructor-mode.md",
+          "section": "## 2. 구독 연결 (SUB-01 · 02 · 04)"
+        },
+        {
+          "path": "docs/design/chalk-instructor-mode.md",
+          "section": "## 5. 서버 AI 강사용 경로 (SUB-03 · GEN-06, E4-8)"
+        },
+        {
+          "path": "docs/design/chalk-instructor-mode.md",
+          "section": "## 6. 디자인 기준 (UX-04 · UX-05)"
+        }
+      ]
+    },
+    {
       "id": "ST-TEST-CHALK-MVP",
       "stage": "test",
       "owner": "JinyongShin",
@@ -3111,6 +3140,20 @@
       "sources": [
         {
           "path": "docs/design/chalk-generator-and-tools.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-REHEARSAL",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-RH",
+        "ST-REQ-CHALK-SUB"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-rehearsal.md"
         }
       ]
     }
