@@ -15,7 +15,10 @@
 export const OPS_SCHEMA_VERSION = 1;
 export const OPS_PROTOCOL = 1;
 /** Base capability. The host appends "commands" plus each action it registered an executor for. */
-export const OPS_CLIENT_CAPABILITIES = ["observe"] as const;
+/** `observe_*` say WHAT this build reports from its real runtime path. A board must show a missing one as "unknown", never as "nothing happened". */
+export const OPS_CLIENT_CAPABILITIES = ["observe", "observe_step", "observe_runtime", "observe_evidence"] as const;
+/** U4 — this build names the command a follow-up observation belongs to. Without it the Service expects none and says so. */
+export const RECOVERY_FOLLOWUP_CAPABILITY = "recovery_followup";
 export const SYNC_TIMEOUT_MS = 4000;
 export const BACKOFF_STEPS_MS = [5000, 10000, 20000, 60000] as const;
 export const MAX_BATCH_EVENTS = 100;
@@ -27,7 +30,7 @@ export type OpsErrorClass =
   | "auth_expired" | "auth_signature" | "auth_revoked" | "auth_rejected" | "class_not_open" | "profile_mismatch"
   | "roster_missing" | "budget_limit" | "provider_rate_limit" | "provider_5xx" | "network" | "sdk_not_ready"
   | "tool_not_ready" | "review_error" | "upload_failed" | "unknown";
-export type OpsEventKind = "activation" | "step" | "runtime" | "error" | "upload" | "evidence";
+export type OpsEventKind = "activation" | "step" | "runtime" | "error" | "upload" | "evidence" | "recovery";
 /** Who acted. Kept per event so a learner's own decision is never merged with what the AI or an instructor did. */
 export type OpsActor = "student" | "ai" | "teacher" | "external_user" | "tool" | "system" | "unknown";
 export type SourceState = "real" | "simulated" | "self_reported" | "unverified";
@@ -122,11 +125,79 @@ export const evidencePayload = (type: EvidenceType, o: { sourceState?: SourceSta
   ...(o.after && /^[a-f0-9]{64}$/.test(o.after) ? { artifact_after: o.after } : {}),
 });
 
+/**
+ * What a finished turn tells the board (review F4). Only what the App actually observed:
+ *  - the first turn that completes is the evidence that the runtime works (`runtime_ready`);
+ *  - an SDK that could not start and fell back is `sdk_not_ready`, non-blocking because the turn went on;
+ *  - a failed turn names its observed cause; an unrecognised one stays `unknown` — never upgraded to a guess;
+ *  - a later successful turn clears the error. Token counts, clicks and message volume are never read here.
+ */
+export interface TurnOutcome { ok: boolean; aborted?: boolean; runtime?: "agent-sdk" | "proxy"; sdkFallback?: boolean; errorKind?: string; status?: number; code?: string; requestId?: string; toolFailed?: boolean }
+export function turnObservations(t: TurnOutcome): Array<{ kind: "activation" | "error"; actor: OpsActor; payload: Record<string, unknown> }> {
+  if (t.aborted) return []; // the learner pressed Stop: that is their decision, not a fault
+  const out: Array<{ kind: "activation" | "error"; actor: OpsActor; payload: Record<string, unknown> }> = [];
+  if (t.sdkFallback) out.push({ kind: "error", actor: "system", payload: errorPayload("sdk_not_ready", { code: "sdk_fallback", blocking: false }) });
+  if (t.ok) {
+    out.push({ kind: "activation", actor: "system", payload: activationPayload("runtime_ready") });
+    if (t.toolFailed) out.push({ kind: "error", actor: "tool", payload: errorPayload("tool_not_ready", { code: "tool_error", blocking: false }) });
+    else if (!t.sdkFallback) out.push({ kind: "error", actor: "system", payload: errorPayload("unknown", { blocking: false, cleared: true }) });
+    return out;
+  }
+  const kind = t.errorKind ?? "", cls = turnFailureClass(t);
+  out.push({ kind: "error", actor: "system", payload: errorPayload(cls, { code: safeCode(kind.replace(/[^a-z0-9_.-]/gi, "_").toLowerCase()) ?? undefined, requestId: t.requestId, blocking: true }) });
+  if (cls === "unknown" && !kind.startsWith("auth:")) out.push({ kind: "activation", actor: "system", payload: activationPayload("runtime_failed") });
+  return out;
+}
+
+/** The failure class of a finished turn, by the same rule the board's error report uses. */
+export function turnFailureClass(t: TurnOutcome): OpsErrorClass {
+  const kind = t.errorKind ?? "";
+  return kind.startsWith("auth:") || t.status !== undefined
+    ? classifyFailure({ status: t.status ?? (kind.startsWith("auth:") ? 401 : undefined), code: t.code ?? (kind.startsWith("auth:") ? kind.slice(5) : undefined) })
+    : kind === "transport" ? "network" : "unknown";
+}
+
+// ── U4: what happened AFTER a remote action, named by that action's command id ──
+/** An id, a code and at most the token's public issue id. No text, no path, no token. */
+export const recoveryPayload = (commandId: string, check: "profile_verified" | "turn_completed" | "turn_failed", o: { tokenJti?: string; errorClass?: OpsErrorClass; runtime?: "agent-sdk" | "proxy" } = {}) => ({
+  command_id: commandId, check,
+  ...(check === "profile_verified" && safeId(o.tokenJti) ? { token_jti: o.tokenJti } : {}),
+  ...(check === "turn_failed" && o.errorClass ? { error_class: o.errorClass } : {}),
+  ...(o.runtime ? { runtime: o.runtime } : {}),
+});
+/**
+ * A stop or a preserving restart proves a READY state, not a working AI. Whether it works is known from the learner's own
+ * next question — never from a request this app makes on its own (that would spend the class budget and put words in the
+ * learner's mouth). The watch is armed by the action and answered ONCE, by the first turn that really finished.
+ */
+export class RecoveryWatch {
+  private armed: { commandId: string; epoch: number } | null = null;
+  arm(commandId: string, epoch: number): void { this.armed = { commandId, epoch }; }
+  clear(): void { this.armed = null; }
+  get pending(): string | null { return this.armed?.commandId ?? null; }
+  /** `epoch` = the login generation now. A turn after the learner signed in again belongs to another generation: it proves nothing about the old command. */
+  onTurn(t: TurnOutcome, epoch: number): ReturnType<typeof recoveryPayload> | null {
+    const a = this.armed; if (!a) return null;
+    if (a.epoch !== epoch) { this.armed = null; return null; }
+    if (t.aborted) return null; // the learner pressed Stop: neither a success nor a fault, keep waiting
+    this.armed = null;
+    // A turn that only completed because the SDK was given up on is not the SDK working again.
+    if (t.ok && t.sdkFallback) return recoveryPayload(a.commandId, "turn_failed", { errorClass: "sdk_not_ready", runtime: t.runtime });
+    return t.ok ? recoveryPayload(a.commandId, "turn_completed", { runtime: t.runtime }) : recoveryPayload(a.commandId, "turn_failed", { errorClass: turnFailureClass(t), runtime: t.runtime });
+  }
+}
+/**
+ * Re-verifying the token can only disprove faults that ARE about the token, the class gate or the network. A runtime, tool or
+ * provider fault stays on the board until a turn really completes — otherwise "diagnostics ran" would read as "fixed".
+ */
+const PROFILE_DISPROVABLE: readonly string[] = ["auth_expired", "auth_signature", "auth_revoked", "auth_rejected", "class_not_open", "profile_mismatch", "roster_missing", "network"];
+export const profileCheckClears = (faultClass: string | null): boolean => faultClass === null || PROFILE_DISPROVABLE.includes(faultClass);
+
 /** jti/exp are not secrets; the token itself never enters this module. */
-export function tokenIdentityUnverified(token: string): { jti?: string; exp?: number } {
+export function tokenIdentityUnverified(token: string): { jti?: string; exp?: number; u?: string; c?: string } {
   try {
     const p = JSON.parse(Buffer.from(token.split(".")[0] ?? "", "base64url").toString("utf8"));
-    return { jti: typeof p.jti === "string" ? p.jti : undefined, exp: typeof p.exp === "number" ? p.exp : undefined };
+    return { ...(typeof p.jti === "string" ? { jti: p.jti } : {}), ...(typeof p.exp === "number" ? { exp: p.exp } : {}), ...(typeof p.u === "string" ? { u: p.u } : {}), ...(typeof p.c === "string" ? { c: p.c } : {}) };
   } catch {
     return {};
   }
@@ -153,6 +224,9 @@ export class OpsOutbox {
   private store: OutboxStore;
   private now: () => number;
   private uuid: () => string;
+  /** Writes are serialized: observers fire `add()` without awaiting, and two saves racing on one temp file lose an event. */
+  private chain: Promise<unknown> = Promise.resolve();
+  private persist(): Promise<void> { const next = this.chain.then(() => this.store.save(this.state)); this.chain = next.catch(() => undefined); return next; }
   // Explicit fields: the smoke tests load this file with Node's type stripping, which has no parameter properties.
   private constructor(store: OutboxStore, state: OutboxState, now: () => number, uuid: () => string) { this.store = store; this.state = state; this.now = now; this.uuid = uuid; }
 
@@ -175,9 +249,9 @@ export class OpsOutbox {
 
   /** Persisted before it is ever sent. Returns false when the cap refused it. */
   async add(kind: OpsEventKind, payload: Record<string, unknown>, actor: OpsActor = "system"): Promise<boolean> {
-    if (this.state.events.length >= OUTBOX_CAP) { this.state.refused++; await this.store.save(this.state); return false; }
+    if (this.state.events.length >= OUTBOX_CAP) { this.state.refused++; await this.persist(); return false; }
     this.state.events.push({ event_id: this.uuid(), seq: this.state.next_seq++, observed_at: this.now(), kind, actor, payload });
-    await this.store.save(this.state);
+    await this.persist();
     return true;
   }
 
@@ -197,7 +271,7 @@ export class OpsOutbox {
     if (bootId !== this.state.boot_id || !Number.isSafeInteger(contiguousSeq)) return 0;
     const before = this.state.events.length;
     this.state.events = this.state.events.filter((e) => e.seq > contiguousSeq);
-    if (this.state.events.length !== before) await this.store.save(this.state);
+    if (this.state.events.length !== before) await this.persist();
     return before - this.state.events.length;
   }
 }
@@ -207,7 +281,7 @@ export class OpsOutbox {
 export interface SyncResponse {
   status: number;
   /** Parsed JSON body when there was one. */
-  body?: { reason?: string; poll_after_ms?: number; connection_epoch?: number; ack?: { boot_id: string; contiguous_seq: number; missing: Array<[number, number]> }; commands?: unknown[]; receipt_acks?: unknown[]; control?: { paused: boolean; control_revision: number } };
+  body?: { reason?: string; poll_after_ms?: number; connection_epoch?: number; ack?: { boot_id: string; contiguous_seq: number; missing: Array<[number, number]> }; commands?: unknown[]; receipt_acks?: unknown[]; control?: { paused: boolean; control_revision: number }; server_time?: number; distribution?: { items?: unknown[]; withdraw?: unknown[]; receipt_acks?: unknown[]; withdraw_acks?: unknown[]; more?: boolean } };
   retryAfterSec?: number;
 }
 export interface SyncDeps {
@@ -228,8 +302,16 @@ export interface SyncDeps {
   onEpoch?(epoch: number): void;
   /** Declared on every sync: a window that did not pair itself still says what it can run. */
   capabilities?: string[];
+  /**
+   * U2 inbox of instructor notices/materials. Absent → this client declares no inbox and is never offered one.
+   * `window` is when THIS request was sent, on two clocks: an item must be committed within its budget counted from there,
+   * so a slow answer buys no time and nothing fetched before a restart can be applied after it.
+   */
+  distribution?: { pending(): Promise<{ receipts: unknown[]; withdraw_receipts: unknown[] } | undefined>; onBlock(block: NonNullable<SyncResponse["body"]>["distribution"], window: { monoStart: number; wallStart: number }, serverTime: number): Promise<boolean> };
+  /** Monotonic milliseconds. Defaults to performance.now(). */
+  mono?(): number;
   /** R2 command ledger. Absent → this client observes only. */
-  commands?: { pendingReceipts(): unknown[]; onAcks(acks: unknown[]): Promise<boolean>; onCommands(cmds: unknown[]): Promise<void> };
+  commands?: { pendingReceipts(): unknown[]; onAcks(acks: unknown[]): Promise<boolean>; onCommands(cmds: unknown[]): Promise<void>; /** The connection ended: nothing new may start, a running action is told to stop. */ close?(): void };
 }
 export interface OpsSyncLoop { stop(): void; tick(): Promise<void>; nudge(): void; readonly state: "running" | "stopped"; }
 
@@ -245,10 +327,17 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
     let next = pollMs;
     try {
       const events = deps.outbox.batch();
-      const r = await deps.post({ schema_version: OPS_SCHEMA_VERSION, app_instance_id: deps.appInstanceId, boot_id: deps.outbox.bootId, events, sample: { ...deps.sample(), observed_at: deps.now() }, ...(deps.capabilities ? { capabilities: deps.capabilities } : {}), ...(deps.commands ? { receipts: deps.commands.pendingReceipts() } : {}) }, SYNC_TIMEOUT_MS);
+      const distribution = deps.distribution ? await deps.distribution.pending().catch(() => undefined) : undefined;
+      if (stopped) return;
+      const window = { monoStart: (deps.mono ?? (() => performance.now()))(), wallStart: deps.now() };
+      const r = await deps.post({ ...(distribution ? { distribution } : {}), schema_version: OPS_SCHEMA_VERSION, app_instance_id: deps.appInstanceId, boot_id: deps.outbox.bootId, events, sample: { ...deps.sample(), observed_at: deps.now() }, ...(deps.capabilities ? { capabilities: deps.capabilities } : {}), ...(deps.commands ? { receipts: deps.commands.pendingReceipts() } : {}) }, SYNC_TIMEOUT_MS);
+      // The learner disconnected (or re-paired) while this request was in flight. Whatever it carries — a pause,
+      // an approval to run, new commands — was addressed to a connection that no longer exists: drop all of it.
+      if (stopped) return;
       if (r.status === 200 && r.body?.ack) {
         failures = 0;
         await deps.outbox.acked(r.body.ack.boot_id, r.body.ack.contiguous_seq);
+        if (stopped) return;
         if (typeof r.body.poll_after_ms === "number") pollMs = Math.min(Math.max(r.body.poll_after_ms, 1000), 120000);
         if (typeof r.body.connection_epoch === "number") deps.onEpoch?.(r.body.connection_epoch);
         if (r.body.control && typeof r.body.control.paused === "boolean") deps.onControl?.(r.body.control);
@@ -256,8 +345,14 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
         if (deps.commands) {
           // Epoch first, then the Service's answers, then new work: a command never runs on a stale epoch or an unanswered ask.
           const ran = await deps.commands.onAcks(r.body.receipt_acks ?? []);
+          if (stopped) return;
           await deps.commands.onCommands(r.body.commands ?? []);
           if (ran || deps.commands.pendingReceipts().length) next = 1000;
+        }
+        if (deps.distribution && !stopped) {
+          // Isolated: an inbox fault never stops observation or commands, and an absent block is "no news", not success.
+          try { if (await deps.distribution.onBlock(r.body.distribution, window, typeof r.body.server_time === "number" ? r.body.server_time : deps.now())) next = 1000; }
+          catch (err) { deps.log?.(`[ops] inbox: ${(err as Error).message}`); }
         }
       } else if (r.status === 401) {
         deps.log?.(`[ops] connection closed by the Service (${r.body?.reason ?? "401"}) — stopping`);
@@ -278,11 +373,12 @@ export function startOpsSync(deps: SyncDeps, initialPollMs = 5000): OpsSyncLoop 
     } finally {
       inflight = false;
     }
+    if (stopped) return;
     schedule(jitter(next, deps.random));
   };
 
   const loop: OpsSyncLoop = {
-    stop() { stopped = true; if (handle !== null) deps.clearTimeout(handle); handle = null; },
+    stop() { if (!stopped) deps.commands?.close?.(); stopped = true; if (handle !== null) deps.clearTimeout(handle); handle = null; },
     tick,
     /** A step/error/result should not wait out a 30 s prepare poll. */
     nudge() { if (!stopped && !inflight) schedule(0); },
@@ -297,4 +393,6 @@ export class ChangeGate<T> {
   private last: string | null = null;
   next(value: T): T | null { const k = JSON.stringify(value); if (k === this.last) return null; this.last = k; return value; }
   reset(): void { this.last = null; }
+  /** Nothing has passed through yet (since construction or the last reset). */
+  get untouched(): boolean { return this.last === null; }
 }

@@ -48,7 +48,8 @@ else
 fi
 
 SAFE_BRANCH="${BRANCH//\//-}"
-WORKTREE_DIR="${TMPDIR:-/tmp}studio-review-${SAFE_BRANCH}"
+TMP_BASE="${TMPDIR:-/tmp}"; TMP_BASE="${TMP_BASE%/}"
+WORKTREE_DIR="$TMP_BASE/studio-review-${SAFE_BRANCH}"
 
 # macOS BSD date does not support %N; use python3 for millisecond timestamps.
 ms() { python3 -c 'import time;print(int(time.time()*1000))'; }
@@ -110,7 +111,7 @@ LOCAL_SECRET="dev-local-$(LC_ALL=C tr -dc 'a-f0-9' </dev/urandom | head -c 20)"
 
 cat > "$DEV_VARS" << EOF
 HPS_SIGNING_SECRET="$LOCAL_SECRET"
-ENVIRONMENT="production"
+ENVIRONMENT="dev"
 LLM_PROVIDER="anthropic"
 EOF
 echo "Created $DEV_VARS with local random signing secret."

@@ -883,3 +883,315 @@ CREATE TABLE IF NOT EXISTS classroom_delivery_events (
  kind TEXT NOT NULL,
  received_at INTEGER NOT NULL
 );
+-- ── migrations/0018-classroom-snapshot-binding.sql (remote classroom operations review F1, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_snapshot_bindings (
+ batch_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ class_run_id TEXT NOT NULL,
+ cohort_id TEXT NOT NULL,
+ profile_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ grant_id TEXT NOT NULL,
+ consent_id TEXT NOT NULL,
+ spool_session_id TEXT NOT NULL,
+ attribution TEXT NOT NULL,
+ activity_json TEXT NOT NULL DEFAULT 'null',
+ range_json TEXT NOT NULL DEFAULT 'null',
+ malformed_lines INTEGER NOT NULL DEFAULT 0,
+ created_at INTEGER NOT NULL,
+ PRIMARY KEY(batch_id,student_id,revision)
+);
+-- ── migrations/0019-classroom-report-attempts.sql (remote classroom operations, report job retry pacing, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_report_job_attempts (
+ job_id TEXT PRIMARY KEY,
+ attempts INTEGER NOT NULL DEFAULT 0,
+ next_attempt_at INTEGER NOT NULL DEFAULT 0,
+ last_reason TEXT NOT NULL DEFAULT '',
+ updated_at INTEGER NOT NULL
+);
+-- ── migrations/0020-classroom-viewer-check.sql (remote classroom operations R6, link viewer check, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_recipient_checks (
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ recipient_ref TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ salt TEXT NOT NULL,
+ check_hash TEXT NOT NULL,
+ revision INTEGER NOT NULL DEFAULT 1,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(class_run_id,student_id,recipient_ref)
+);
+CREATE TABLE IF NOT EXISTS classroom_link_attempts (
+ link_id TEXT PRIMARY KEY,
+ failed INTEGER NOT NULL DEFAULT 0,
+ locked_at INTEGER,
+ updated_at INTEGER NOT NULL
+);
+-- ── migrations/0021-classroom-erasure-log.sql (remote classroom operations, erasure progress, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_erasure_log (
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ reason TEXT NOT NULL,
+ state TEXT NOT NULL,
+ attempts INTEGER NOT NULL DEFAULT 0,
+ last_error TEXT NOT NULL DEFAULT '',
+ started_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(class_run_id,student_id)
+);
+CREATE INDEX IF NOT EXISTS classroom_erasure_log_state ON classroom_erasure_log(state,updated_at);
+
+-- ── migrations/0022-classroom-collect-scope.sql (remote classroom operations, immutable collection scope, #751) ──
+CREATE TABLE IF NOT EXISTS classroom_collect_scopes (
+ batch_id TEXT PRIMARY KEY,
+ class_run_id TEXT NOT NULL,
+ scope TEXT NOT NULL,
+ mode TEXT NOT NULL,
+ targets_json TEXT NOT NULL DEFAULT '[]',
+ request_hash TEXT NOT NULL,
+ created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS classroom_collect_scopes_run ON classroom_collect_scopes(class_run_id,created_at);
+
+-- ── migrations/0023-classroom-distribution.sql (remote classroom operations, targeted distribution, #751 U2) ──
+-- Remote classroom operations (#751, U2) — targeted distribution of notices and materials. Additive only; *_at is unix ms.
+-- DISTRIBUTION (`ops_distribute`, capability `distribute`) puts an instructor's text into the inbox of SELECTED learners
+-- during class. It is not DELIVERY (`ops_delivery`, `deliver`, classroom_report_deliveries), which sends reports.
+-- Content is immutable per (object, revision); a distribution run and its targets are a separate, participant-bound ledger;
+-- the card a learner's device currently holds is a third fact. None of these tables holds anything a learner wrote.
+CREATE TABLE IF NOT EXISTS classroom_content_objects (
+ object_id TEXT PRIMARY KEY,
+ class_run_id TEXT NOT NULL,
+ cohort_id TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ latest_revision INTEGER NOT NULL DEFAULT 0,
+ event_seq INTEGER NOT NULL DEFAULT 0,
+ retired_at INTEGER,
+ retired_by TEXT,
+ retire_seq INTEGER,
+ created_by TEXT NOT NULL,
+ created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS classroom_content_objects_run ON classroom_content_objects(class_run_id,created_at);
+CREATE TABLE IF NOT EXISTS classroom_content_revisions (
+ object_id TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ class_run_id TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ title TEXT NOT NULL,
+ payload_json TEXT NOT NULL,
+ content_hash TEXT NOT NULL,
+ content_schema TEXT NOT NULL,
+ request_hash TEXT NOT NULL,
+ idempotency_key TEXT NOT NULL,
+ created_by TEXT NOT NULL,
+ issuer_jti TEXT,
+ created_at INTEGER NOT NULL,
+ PRIMARY KEY(object_id,revision)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_content_revisions_idempotency ON classroom_content_revisions(class_run_id,idempotency_key);
+CREATE TABLE IF NOT EXISTS classroom_distributions (
+ id TEXT PRIMARY KEY,
+ class_run_id TEXT NOT NULL,
+ cohort_id TEXT NOT NULL,
+ object_id TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ content_hash TEXT NOT NULL,
+ seq INTEGER NOT NULL,
+ roster_revision INTEGER NOT NULL,
+ targets_json TEXT NOT NULL,
+ request_hash TEXT NOT NULL,
+ idempotency_key TEXT NOT NULL,
+ expires_at INTEGER NOT NULL,
+ created_by TEXT NOT NULL,
+ issuer_jti TEXT,
+ created_at INTEGER NOT NULL,
+ revoked_at INTEGER,
+ revoked_by TEXT,
+ revoke_reason TEXT,
+ revoke_seq INTEGER,
+ row_revision INTEGER NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_distributions_idempotency ON classroom_distributions(class_run_id,idempotency_key);
+CREATE INDEX IF NOT EXISTS classroom_distributions_object ON classroom_distributions(class_run_id,object_id,created_at);
+CREATE INDEX IF NOT EXISTS classroom_distributions_issuer ON classroom_distributions(issuer_jti) WHERE revoked_at IS NULL;
+CREATE TABLE IF NOT EXISTS classroom_distribution_targets (
+ distribution_id TEXT NOT NULL,
+ class_run_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ seat_revision INTEGER NOT NULL,
+ student_id TEXT NOT NULL,
+ object_id TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ state TEXT NOT NULL,
+ result_code TEXT NOT NULL DEFAULT '',
+ device_generation INTEGER NOT NULL DEFAULT 0,
+ device_registration_id TEXT NOT NULL DEFAULT '',
+ grant_id TEXT NOT NULL DEFAULT '',
+ connection_epoch INTEGER NOT NULL DEFAULT 0,
+ offer_key TEXT NOT NULL DEFAULT '',
+ offers INTEGER NOT NULL DEFAULT 0,
+ next_offer_at INTEGER NOT NULL DEFAULT 0,
+ first_offered_at INTEGER,
+ received_at INTEGER,
+ reflected_at INTEGER,
+ pending INTEGER NOT NULL DEFAULT 0,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(distribution_id,seat_id)
+);
+-- What an idle sync probes: nothing to say for this seat = nothing scanned.
+CREATE INDEX IF NOT EXISTS classroom_distribution_targets_pending ON classroom_distribution_targets(class_run_id,seat_id) WHERE pending=1;
+CREATE INDEX IF NOT EXISTS classroom_distribution_targets_student ON classroom_distribution_targets(class_run_id,student_id,object_id);
+-- The card one participant's CURRENT device holds for one object: which revision, and whether a withdrawal is owed to it.
+-- Delivery evidence stays on the target rows; this is only "is it there now".
+CREATE TABLE IF NOT EXISTS classroom_distribution_cards (
+ class_run_id TEXT NOT NULL,
+ seat_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ object_id TEXT NOT NULL,
+ seat_revision INTEGER NOT NULL,
+ device_registration_id TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ content_hash TEXT NOT NULL,
+ seq INTEGER NOT NULL,
+ state TEXT NOT NULL,
+ withdraw_seq INTEGER,
+ withdraw_reason TEXT NOT NULL DEFAULT '',
+ withdraw_key TEXT NOT NULL DEFAULT '',
+ withdraw_offers INTEGER NOT NULL DEFAULT 0,
+ next_withdraw_at INTEGER NOT NULL DEFAULT 0,
+ pending INTEGER NOT NULL DEFAULT 0,
+ updated_at INTEGER NOT NULL,
+ PRIMARY KEY(class_run_id,seat_id,student_id,object_id)
+);
+CREATE INDEX IF NOT EXISTS classroom_distribution_cards_pending ON classroom_distribution_cards(class_run_id,seat_id) WHERE pending=1;
+CREATE INDEX IF NOT EXISTS classroom_distribution_cards_object ON classroom_distribution_cards(class_run_id,object_id,state);
+-- The D1 copy of "this issuer token was revoked". KV revocation can lag other locations; distribution reads this instead.
+-- Holds a token id and a reason — never a token or a scope.
+CREATE TABLE IF NOT EXISTS ops_issuer_fences (
+ issuer_jti TEXT PRIMARY KEY,
+ state TEXT NOT NULL,
+ reason TEXT NOT NULL DEFAULT '',
+ recorded_by TEXT NOT NULL DEFAULT '',
+ revision INTEGER NOT NULL DEFAULT 1,
+ created_at INTEGER NOT NULL,
+ updated_at INTEGER NOT NULL
+);
+
+-- ── #751 U3: targeted lesson settings (migration 0024) ──
+-- Append-only history per participant. The CURRENT row is the highest binding_seq of (class_run_id, student_id); the
+-- primary key serves both that lookup and the compare-and-swap of the next INSERT. Only the evidence columns are ever
+-- updated (write-once), and nothing is deleted.
+CREATE TABLE IF NOT EXISTS classroom_lesson_bindings (
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ binding_seq INTEGER NOT NULL,
+ seat_id TEXT NOT NULL,
+ seat_revision INTEGER NOT NULL,
+ binding_key TEXT NOT NULL,
+ source TEXT NOT NULL,
+ distribution_id TEXT NOT NULL,
+ object_id TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ content_hash TEXT NOT NULL,
+ course_id TEXT NOT NULL,
+ version TEXT NOT NULL,
+ lesson_sha256 TEXT NOT NULL,
+ base_lesson_sha256 TEXT NOT NULL,
+ steps_json TEXT NOT NULL DEFAULT '[]',
+ runtime TEXT NOT NULL DEFAULT '',
+ grant_id TEXT NOT NULL DEFAULT '',
+ connection_epoch INTEGER NOT NULL DEFAULT 0,
+ device_registration_id TEXT NOT NULL DEFAULT '',
+ app_instance_id TEXT NOT NULL DEFAULT '',
+ activated_at INTEGER NOT NULL,
+ first_dispatched_at INTEGER,
+ first_completed_at INTEGER,
+ last_failure_kind TEXT NOT NULL DEFAULT '',
+ last_failure_at INTEGER,
+ PRIMARY KEY(class_run_id,student_id,binding_seq)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_lesson_bindings_distribution ON classroom_lesson_bindings(distribution_id,seat_id);
+
+-- A turn the Service admitted, and the execution snapshot it runs under until the host closes it. Keyed by the turn id
+-- the App already sends on every request of a turn. admitted_at is never refreshed.
+CREATE TABLE IF NOT EXISTS classroom_lesson_turns (
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ turn_id TEXT NOT NULL,
+ token_jti TEXT NOT NULL,
+ binding_seq INTEGER NOT NULL,
+ binding_key TEXT NOT NULL,
+ course_id TEXT NOT NULL,
+ version TEXT NOT NULL,
+ lesson_sha256 TEXT NOT NULL,
+ admitted_at INTEGER NOT NULL,
+ closed_at INTEGER,
+ close_outcome TEXT NOT NULL DEFAULT '',
+ first_dispatched_at INTEGER,
+ first_dispatch_request TEXT NOT NULL DEFAULT '',
+ runtime TEXT NOT NULL DEFAULT '',
+ model TEXT NOT NULL DEFAULT '',
+ first_completed_at INTEGER,
+ last_failure_kind TEXT NOT NULL DEFAULT '',
+ last_failure_status INTEGER,
+ last_failure_at INTEGER,
+ PRIMARY KEY(class_run_id,student_id,turn_id)
+);
+
+-- One row per provider request the Service PERMITTED under enforcement, written BEFORE the provider is called: which
+-- request, which turn, which lesson. When the usage ledger row of that request is stored, its id is written here in the
+-- same batch. A usage row of this participant that no row here points at is a request the Service cannot attribute to a
+-- lesson (enforcement was off, or the link was lost) — the collection seal holds such an input instead of counting.
+CREATE TABLE IF NOT EXISTS classroom_lesson_requests (
+ class_run_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ request_id TEXT NOT NULL,
+ turn_id TEXT NOT NULL DEFAULT '',
+ binding_seq INTEGER NOT NULL DEFAULT 0,
+ lesson_sha256 TEXT NOT NULL,
+ permitted_at INTEGER NOT NULL,
+ usage_row_id INTEGER,
+ PRIMARY KEY(class_run_id,student_id,request_id)
+) WITHOUT ROWID;
+
+-- How many lesson bases a sealed collection input was produced under. Written inside the seal batch, immutable after.
+CREATE TABLE IF NOT EXISTS classroom_input_basis (
+ batch_id TEXT NOT NULL,
+ student_id TEXT NOT NULL,
+ revision INTEGER NOT NULL,
+ class_run_id TEXT NOT NULL,
+ basis TEXT NOT NULL,
+ lessons INTEGER NOT NULL DEFAULT 0,
+ turns INTEGER NOT NULL DEFAULT 0,
+ created_at INTEGER NOT NULL,
+ PRIMARY KEY(batch_id,student_id,revision)
+);
+
+-- One setting object per class run: every change of version is the next revision of that one object, so the per-object
+-- event order of U2 is a total order per participant. No row of kind 'setting' exists before this migration.
+CREATE UNIQUE INDEX IF NOT EXISTS classroom_content_objects_setting ON classroom_content_objects(class_run_id) WHERE kind='setting';
+
+-- ── migrations/0030-chalk-knowledge-store.sql (#1288 E1-2) ──
+CREATE TABLE IF NOT EXISTS chalk_knowledge_versions (
+  version        INTEGER PRIMARY KEY,
+  parent_version INTEGER,
+  origin         TEXT NOT NULL CHECK (origin IN ('vault-import', 'product-edit')),
+  source_repo    TEXT,
+  source_commit  TEXT,
+  note           TEXT NOT NULL,
+  created_by     TEXT NOT NULL,
+  created_at     INTEGER NOT NULL,
+  doc_count      INTEGER NOT NULL,
+  digest         TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
+  version     INTEGER NOT NULL REFERENCES chalk_knowledge_versions(version),
+  doc_id      TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  fields_json TEXT NOT NULL,
+  body        TEXT NOT NULL DEFAULT '',
+  source_path TEXT,
+  PRIMARY KEY (version, doc_id)
+);

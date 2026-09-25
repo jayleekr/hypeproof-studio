@@ -1993,6 +1993,15 @@
       "sources": [
         {
           "path": "docs/testing/classroom-admin.md"
+        },
+        {
+          "path": "worker/test/classroom-ops-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-expiry-review.test.mjs"
         }
       ]
     },
@@ -2126,6 +2135,234 @@
         },
         {
           "path": "worker/test/classroom-ops-regression.test.mjs"
+        },
+        {
+          "path": "worker/migrations/0018-classroom-snapshot-binding.sql"
+        },
+        {
+          "path": "worker/src/lib/classroom-evaluator.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-evaluator.test.mjs"
+        },
+        {
+          "path": "scripts/classroom-legacy-hain7.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/evidenceSnapshotStore.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-expiry-review.test.mjs"
+        },
+        {
+          "path": "worker/src/lib/classroom-report-html.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-delivery-resend.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-provider.test.mjs"
+        },
+        {
+          "path": "scripts/classroom-report-pdf.mjs"
+        },
+        {
+          "path": "e2e/classroom/report-page.mjs"
+        },
+        {
+          "path": "worker/src/lib/classroom-erasure.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-erasure.test.mjs"
+        },
+        {
+          "path": "e2e/classroom/ops-roster.mjs"
+        },
+        {
+          "path": "worker/migrations/0019-classroom-report-attempts.sql"
+        },
+        {
+          "path": ".github/workflows/classroom-ops.yml"
+        },
+        {
+          "path": "worker/migrations/0021-classroom-erasure-log.sql"
+        },
+        {
+          "path": "worker/migrations/0020-classroom-viewer-check.sql"
+        },
+        {
+          "path": "e2e/classroom/mac-devhost.mjs"
+        },
+        {
+          "path": "e2e/classroom/README.md"
+        },
+        {
+          "path": "e2e/classroom/mac-gui.mjs"
+        },
+        {
+          "path": "e2e/classroom/evaluator-trial.mjs"
+        },
+        {
+          "path": "worker/scripts/classroom-ops-d1-check.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-demo.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-demo-board.mjs"
+        },
+        {
+          "path": "e2e/classroom/ops-selection.mjs"
+        },
+        {
+          "path": "worker/migrations/0022-classroom-collect-scope.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-selected-collect.test.mjs"
+        },
+        {
+          "path": "e2e/classroom/delivery-trial.mjs"
+        },
+        {
+          "path": "e2e/classroom/field-bundle.mjs"
+        },
+        {
+          "path": "e2e/classroom/win-field/prepare-devhost.ps1"
+        },
+        {
+          "path": "e2e/classroom/win-field/preflight.ps1"
+        },
+        {
+          "path": "e2e/classroom/win-field/README.md"
+        },
+        {
+          "path": "worker/scripts/classroom-ops-staging-check.mjs"
+        },
+        {
+          "path": "worker/wrangler.staging.toml"
+        },
+        {
+          "path": "chalk/wrangler.staging.toml"
+        },
+        {
+          "path": "worker/test/classroom-ops-spool-seq.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-staging-config.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/session-spool-seq.smoke.mjs"
+        },
+        {
+          "path": "worker/src/routes/classroom-distribution.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-distribution.ts"
+        },
+        {
+          "path": "worker/src/lib/classroom-distribution-store.ts"
+        },
+        {
+          "path": "worker/migrations/0023-classroom-distribution.sql"
+        },
+        {
+          "path": "worker/test/classroom-ops-distribution.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-distribution-device.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-distribution-d1.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomInbox.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/classroomInboxStore.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/InstructorInbox.tsx"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-inbox.smoke.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/fixtures/inbox-writer.mjs"
+        },
+        {
+          "path": "e2e/classroom/ops-distribution.mjs"
+        },
+        {
+          "path": "worker/src/lib/lesson-binding.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-binding-store.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-binding-activate.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-basis.ts"
+        },
+        {
+          "path": "worker/migrations/0024-classroom-lesson-bindings.sql"
+        },
+        {
+          "path": "worker/test/lesson-binding.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-settings.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-basis.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-settings-device.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-settings-d1.test.mjs"
+        },
+        {
+          "path": "worker/test/classroom-ops-lesson-review.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/lessonBinding.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/webview-ui/src/draftImport.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/lesson-binding.smoke.mjs"
+        },
+        {
+          "path": "e2e/classroom/ops-lesson-settings.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-lesson-settings.mjs"
+        },
+        {
+          "path": "worker/src/lib/classroom-recovery.ts"
+        },
+        {
+          "path": "worker/test/classroom-ops-recovery.test.mjs"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/previewRecovery.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/test/classroom-ops-recovery.test.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-recovery.mjs"
+        },
+        {
+          "path": "e2e/classroom/mac-window.mjs"
         }
       ]
     },
@@ -2491,6 +2728,43 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-SCH-FIELDS",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SCH",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/session-design.ts"
+        },
+        {
+          "path": "worker/src/lib/learning-prompt.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-delivery.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-SCH-FIELDS",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SCH",
+        "ST-IMP-CHALK-SCH-FIELDS"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/chalk-mvp.md"
+        },
+        {
+          "path": "worker/test/chalk-session-design-fields.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-SX-P1",
       "stage": "implementation",
       "owner": "jayleekr",
@@ -2594,6 +2868,374 @@
         },
         {
           "path": "worker/src/lib/harness-rules.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-INT-CHALK-MVP",
+      "stage": "intent",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "LAB-PRODUCT-ROLES",
+        "ST-INT-NATIVE"
+      ],
+      "sources": [
+        {
+          "path": "docs/intents/chalk-mvp.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-UX",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 진입·목록 (UX)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-GEN",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP",
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 생성 (GEN)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-FB",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 피드백과 검사 (FB)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-OUT",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP",
+        "ST-REQ-CHALK-AUTHORING"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 강의 만들기 (OUT)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-RH",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 리허설 (RH)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-PLAN",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 강의 계획안 (PLAN)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-SUB",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 강사 구독 연결 (SUB)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-HTML",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 계획서 형식 (HTML)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-SCH",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 저장 형식 (SCH)"
+        }
+      ]
+    },
+    {
+      "id": "ST-REQ-CHALK-KB",
+      "stage": "requirement",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-INT-CHALK-MVP"
+      ],
+      "sources": [
+        {
+          "path": "docs/requirements/chalk-mvp.md",
+          "section": "## 지식원 (KB)"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-KB",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-knowledge-and-plan-spec.md",
+          "section": "## 1. 제품 지식 저장 (KB-01 · 03 · 05)"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-PLANSPEC",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-HTML",
+        "ST-REQ-CHALK-SCH",
+        "ST-REQ-CHALK-GEN",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-knowledge-and-plan-spec.md",
+          "section": "## 2. 계획서 HTML 규격 `chalk-plan/1` (HTML-01~04 · GEN-04 · 결정 2 · 9)"
+        },
+        {
+          "path": "docs/design/chalk-knowledge-and-plan-spec.md",
+          "section": "## 3. 초안 저장 (결정 3 · OUT-04)"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-INSTRUCTOR",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-REQ-CHALK-UX",
+        "ST-REQ-CHALK-RH",
+        "ST-REQ-CHALK-GEN"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-instructor-mode.md",
+          "section": "## 1. 강사 모드 (SUB-08)"
+        },
+        {
+          "path": "docs/design/chalk-instructor-mode.md",
+          "section": "## 2. 구독 연결 (SUB-01 · 02 · 04)"
+        },
+        {
+          "path": "docs/design/chalk-instructor-mode.md",
+          "section": "## 5. 서버 AI 강사용 경로 (SUB-03 · GEN-06, E4-8)"
+        },
+        {
+          "path": "docs/design/chalk-instructor-mode.md",
+          "section": "## 6. 디자인 기준 (UX-04 · UX-05)"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-MVP",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-UX",
+        "ST-REQ-CHALK-GEN",
+        "ST-REQ-CHALK-FB",
+        "ST-REQ-CHALK-OUT",
+        "ST-REQ-CHALK-RH",
+        "ST-REQ-CHALK-PLAN",
+        "ST-REQ-CHALK-SUB",
+        "ST-REQ-CHALK-HTML",
+        "ST-REQ-CHALK-SCH",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/chalk-mvp.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-TOOLS",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-GEN",
+        "ST-REQ-CHALK-FB",
+        "ST-REQ-CHALK-SUB"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-generator-and-tools.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-GATELOOP",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-GEN",
+        "ST-REQ-CHALK-FB",
+        "ST-REQ-CHALK-SUB"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-generator-and-tools.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-REHEARSAL",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-RH",
+        "ST-REQ-CHALK-SUB"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-rehearsal.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-OUTPUT",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-OUT",
+        "ST-REQ-CHALK-SCH",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-plan-to-lesson.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-KB-STORE",
+      "stage": "implementation",
+      "label": "Chalk knowledge store — worker implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/chalk-knowledge.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-KB-STORE",
+      "stage": "test",
+      "label": "Chalk knowledge store — unit + integration tests",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-KB-STORE",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-knowledge.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-PLAN-PARSER",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-HTML",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/chalk-plan/parser.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/tokenizer.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/types.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-PLAN-PARSER",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-HTML",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-plan-parser.test.mjs"
         }
       ]
     }
