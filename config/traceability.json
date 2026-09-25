@@ -3201,6 +3201,31 @@
           "path": "docs/design/chalk-plan-to-lesson.md"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-PLAN-PARSER",
+      "stage": "implementation",
+      "owner": "chalk",
+      "depends_on": [
+        "ST-REQ-CHALK-FB",
+        "ST-DES-CHALK-GATELOOP"
+      ],
+      "sources": [
+        "worker/src/lib/chalk-plan/parser.ts",
+        "worker/src/lib/chalk-plan/types.ts"
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-PLAN-PARSER",
+      "stage": "test",
+      "owner": "chalk",
+      "depends_on": [
+        "ST-REQ-CHALK-FB",
+        "ST-DES-CHALK-GATELOOP"
+      ],
+      "sources": [
+        "worker/test/chalk-plan-parser.test.mjs"
+      ]
     }
   ]
 }
