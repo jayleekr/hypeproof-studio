@@ -3076,6 +3076,11 @@
       "owner": "JinyongShin",
       "depends_on": [
         "ST-IMP-CHALK-KB-STORE"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-knowledge.test.mjs"
+        }
       ]
     },
     {
