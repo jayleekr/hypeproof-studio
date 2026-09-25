@@ -3075,7 +3075,8 @@
       "label": "Chalk knowledge store — unit + integration tests",
       "owner": "JinyongShin",
       "depends_on": [
-        "ST-IMP-CHALK-KB-STORE"
+        "ST-IMP-CHALK-KB-STORE",
+        "ST-REQ-CHALK-KB"
       ],
       "sources": [
         {
