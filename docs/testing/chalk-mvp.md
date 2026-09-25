@@ -97,11 +97,16 @@
 
 ## 저장 형식 (SCH)
 
+SCH-01~03 구현: `worker/src/lib/session-design.ts` · `learning-prompt.ts` · `lesson-delivery.ts` (#1291).
+
 | ID | 정상 대조 | 부정 대조 | 증거 |
 |---|---|---|---|
-| SCH-01 | 추가 칸 저장·읽기 | — | NOT RUN |
-| SCH-02 | `scope` 아닌 `audience_tier` 사용 | — | NOT RUN |
-| SCH-03 | `evidence` 개념 분리 | — | NOT RUN |
+| SCH-01 | `duration_min`·`requires`·`forbids`·`audience_tier`·`plan_ref` 포함 강의 저장·읽기 성공 | `duration_min:0` → 검증 오류; `duration_min:241` → 검증 오류; `audience_tier:"pro"` → 검증 오류; `plan_ref.spec:"chalk/1"` → 검증 오류 | NOT RUN |
+| SCH-01b | 기존 강의(`duration_min` 없음) `validateSessionDesign` 통과 | — | NOT RUN |
+| SCH-02 | `scope` 키 포함 객체 → `validateSessionDesign` 오류("invalid session-design fields") | `audience_tier` 키 → 통과 | NOT RUN |
+| SCH-03 | `prohibited_moves` 포함 강의 → `resolveTokenLesson` 반환값에 `prohibited_moves` 없음 | — | NOT RUN |
+| SCH-03b | `prohibited_moves` 포함 강의 → `coachVisibleLesson` 반환값에 `prohibited_moves` 없음 | — | NOT RUN |
+| SCH-03c | 기존 강의(`prohibited_moves` 없음) → `studentVisibleLesson` 동일 참조 반환 (T-08/T-09 불변식) | — | NOT RUN |
 
 ## 지식원 (KB)
 
