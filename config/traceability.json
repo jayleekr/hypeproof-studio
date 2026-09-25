@@ -3030,7 +3030,7 @@
     {
       "id": "ST-DES-CHALK-KB",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-KB"
       ],
@@ -3044,7 +3044,7 @@
     {
       "id": "ST-DES-CHALK-PLANSPEC",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-HTML",
         "ST-REQ-CHALK-SCH",
@@ -3175,26 +3175,38 @@
     {
       "id": "ST-IMP-CHALK-PLAN-PARSER",
       "stage": "implementation",
-      "owner": "chalk",
+      "owner": "JinyongShin",
       "depends_on": [
-        "ST-REQ-CHALK-FB",
-        "ST-DES-CHALK-GATELOOP"
+        "ST-REQ-CHALK-HTML",
+        "ST-DES-CHALK-PLANSPEC"
       ],
       "sources": [
-        "worker/src/lib/chalk-plan/parser.ts",
-        "worker/src/lib/chalk-plan/types.ts"
+        {
+          "path": "worker/src/lib/chalk-plan/parser.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/tokenizer.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/types.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/index.ts"
+        }
       ]
     },
     {
       "id": "ST-TEST-CHALK-PLAN-PARSER",
       "stage": "test",
-      "owner": "chalk",
+      "owner": "JinyongShin",
       "depends_on": [
-        "ST-REQ-CHALK-FB",
-        "ST-DES-CHALK-GATELOOP"
+        "ST-REQ-CHALK-HTML",
+        "ST-DES-CHALK-PLANSPEC"
       ],
       "sources": [
-        "worker/test/chalk-plan-parser.test.mjs"
+        {
+          "path": "worker/test/chalk-plan-parser.test.mjs"
+        }
       ]
     }
   ]
