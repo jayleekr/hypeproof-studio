@@ -918,6 +918,8 @@ export function buildSdkGatewayEnv(
     effort?: "low" | "medium" | "high";
     turnId?: string;
   fundingSource?: string;
+  /** #751 U3 — the lesson binding this turn EXPECTS (from the profile it was started under). An expectation, never a selector. */
+  lessonBinding?: string;
     proxyUrl: string;
     token: string;
     /** 작업 폴더 절대경로 — 워커가 `x-hps-workspace` 로 받아 시스템 블록에 넣는다. */
@@ -977,13 +979,14 @@ export function buildSdkGatewayEnv(
   // 같은 이유로 인코딩이 필요하다(HTTP 헤더는 바이트 안전해야 한다).
   // Owned headers never inherit an ambient course choice or correlation ID.
   const inheritedHeaders = (env.ANTHROPIC_CUSTOM_HEADERS ?? '').split('\n')
-    .filter(line => !/^\s*x-hps-(effort|turn-id|funding-source)\s*:/i.test(line)).join('\n').trim();
+    .filter(line => !/^\s*x-hps-(effort|turn-id|funding-source|lesson-binding)\s*:/i.test(line)).join('\n').trim();
   if (inheritedHeaders) env.ANTHROPIC_CUSTOM_HEADERS = inheritedHeaders;
   else delete env.ANTHROPIC_CUSTOM_HEADERS;
   delete env.CLAUDE_CODE_EFFORT_LEVEL;
   const custom: string[] = [];
   if(args.fundingSource){if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(args.fundingSource))throw Error('invalid funding source');custom.push(`x-hps-funding-source: ${args.fundingSource}`);}
   if (args.effort) custom.push(`x-hps-effort: ${args.effort}`);
+  if (args.lessonBinding && /^(token:[a-f0-9]{16}|[a-f0-9]{32})$/.test(args.lessonBinding)) custom.push(`x-hps-lesson-binding: ${args.lessonBinding}`);
   if (args.turnId && /^[a-zA-Z0-9_-]{1,128}$/.test(args.turnId)) custom.push(`x-hps-turn-id: ${args.turnId}`);
   if (args.workspace?.trim()) {
     custom.push(`x-hps-workspace: ${encodeURIComponent(args.workspace.trim())}`);
@@ -1027,6 +1030,8 @@ export function buildSdkQueryOptions(
     effort?: "low" | "medium" | "high";
     turnId?: string;
   fundingSource?: string;
+  /** #751 U3 — the lesson binding this turn EXPECTS (from the profile it was started under). An expectation, never a selector. */
+  lessonBinding?: string;
     proxyUrl: string;
     token: string;
     cwd?: string;
@@ -1082,6 +1087,7 @@ export function buildSdkQueryOptions(
       effort: args.effort,
       turnId: args.turnId,
       fundingSource: args.fundingSource,
+      lessonBinding: args.lessonBinding,
       token: args.token,
       ...(args.configDir ? { configDir: args.configDir } : {}),
       // 시스템 프롬프트 경로는 워커가 버리므로 헤더로 보낸다 (#431).
@@ -1649,16 +1655,35 @@ export interface SdkStreamHandlers {
  * possible; the early-exit paths close the iterator explicitly, which
  * `for await` used to do for us.
  */
+/**
+ * #751 U4 — how the turn ended, as the SDK itself said it. A `result` flagged as an error (explicit `error_*` subtype, or a
+ * `success` envelope with `is_error`) is a FAILED turn even though the stream closes normally and the learner already read
+ * the notice. `status` is only ever an HTTP status this turn's stream carried: the result's own `api_error_status`, else
+ * the retry status still standing when the stream ended (a later good response clears it). Never one from another turn.
+ */
+export type SdkTurnEnd = { failed: false } | { failed: true; subtype: string; status?: number };
+
+/** The failure a terminal `result` states, or null for a result that is not one (success, truncation notice only). */
+export function sdkTerminalFailure(msg: Record<string, unknown>, standingRetryStatus: number | undefined): Extract<SdkTurnEnd, { failed: true }> | null {
+  if (String(msg["type"] ?? "") !== "result") return null;
+  const subtype = String(msg["subtype"] ?? "");
+  if (!(subtype.startsWith("error") || msg["is_error"] === true)) return null;
+  const own = msg["api_error_status"];
+  const status = typeof own === "number" ? own : standingRetryStatus;
+  return { failed: true, subtype: /^[a-z_]{1,40}$/.test(subtype) ? subtype : "unknown", ...(status !== undefined ? { status } : {}) };
+}
+
 export async function consumeSdkStream(
   stream: AsyncIterable<unknown>,
   h: SdkStreamHandlers,
-): Promise<void> {
+): Promise<SdkTurnEnd> {
   const budget = h.stallMs ?? SDK_STREAM_STALL_MS;
   const it = stream[Symbol.asyncIterator]();
   /** In-flight it.next(); kept across timer re-arms so it is never called twice. */
   let pending: Promise<IteratorResult<unknown>> | null = null;
   let progressAt = Date.now();
   let lastRetryStatus: number | undefined;
+  let end: SdkTurnEnd = { failed: false };
   /**
    * The blocked state is only sampled when the budget expires, so a modal that
    * closes mid-window would otherwise leave the coach ~0ms to answer. One grace
@@ -1712,11 +1737,15 @@ export async function consumeSdkStream(
   try {
     for (;;) {
       const step = await nextEvent();
-      if (step.done) return;
+      if (step.done) return end;
       // Check BEFORE emitting so a chunk isn't flushed to the webview after stop.
       if (h.isAborted()) throw h.makeAbortError();
       const msg = (step.value ?? {}) as Record<string, unknown>;
-      if(isSdkRetryEvent(msg)&&typeof msg.error_status==='number')lastRetryStatus=msg.error_status;
+      if (isSdkRetryEvent(msg)) lastRetryStatus = typeof msg.error_status === "number" ? msg.error_status : undefined;
+      // A response that came back after the retries answers them: their status no longer describes this turn.
+      // The CLI's own "API Error: …" line is an assistant message too — it is the failure, not an answer (`error` set, or
+      // the CLI's `<synthetic>` model).
+      else if (msg["type"] === "assistant" && msg["error"] === undefined && (msg["message"] as { model?: unknown } | undefined)?.model !== "<synthetic>") lastRetryStatus = undefined;
       const fatal = sdkFatalAuthStatus(msg);
       if (fatal !== null) {
         // Kill the subprocess's retry loop first, then surface the token error.
@@ -1769,6 +1798,8 @@ export async function consumeSdkStream(
       // 무슨 일이 있었는지를, 그리고 한 일이 디스크에 남아 있음을 우리 말로
       // 알려 준다. 판정은 sdkResultNotice 가 소유한다 — 미지 subtype 도 침묵
       // 대신 폴백으로 떨어진다.
+      const failure = sdkTerminalFailure(msg, lastRetryStatus);
+      if (failure) end = failure;
       const notice = sdkResultNotice(msg);
       if (notice) {
         console.warn(`[coach] SDK 종료 오류 subtype=${String(msg["subtype"] ?? "(none)")}`);
@@ -1780,6 +1811,13 @@ export async function consumeSdkStream(
   } catch (err) {
     // `for await` closed the iterator on an early exit; the manual loop must.
     void Promise.resolve(it.return?.()).catch(() => {});
+    // #751 U4 — the real SDK can end a failing turn by THROWING a plain Error after its retries (seen on a real Mac: the
+    // provider answered 5xx eleven times, then query() threw). That error carries no status; this turn's stream did. Only
+    // an error without its own status gets one, and only a status this very stream reported.
+    const standing = end.failed ? end.status ?? lastRetryStatus : lastRetryStatus;
+    if (standing !== undefined && err instanceof Error && (err as { status?: unknown }).status === undefined) {
+      try { Object.defineProperty(err, "status", { value: standing, enumerable: false }); } catch { /* a frozen error stays unclassified */ }
+    }
     throw err;
   }
 }

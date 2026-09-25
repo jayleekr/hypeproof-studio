@@ -125,7 +125,7 @@ Adult instructor practice (`homepage-practice-s1`, #737) uses a separate `homepa
 | REQ-C13 | 이미지 입력 profile 게이트 (default OFF) | `Profile.input.image_paste` 미설정/false 면 (1) 웹뷰 paste 핸들러가 텍스트 전용으로 동작 + (2) **워커가 `filterMessages` 에서 image 블록 server-side strip** (클라가 보내도 차단). 현 3개 cohort 전부 OFF — 미성년 cohort 가 이미지 흐름에 노출되지 않음. `/v1/profile` 이 resolved boolean 으로 노출 | U |
 | REQ-C14 | AI 상호작용 고지 (세션 시작) (#320) | Anthropic Usage Policy — consumer-facing chat 은 최소 세션 시작 시 "AI 와 대화 중" 고지. `AiDisclosureGate`(호스트측): 세션 첫 webview mount 에서 1회 + history clear 직후 재고지; 같은 세션 내 hide/show remount 에는 미재노출. 문구는 오답 가능성·확인 권고 문장 포함(ToS §D.3, verification_reflex). webview 는 메시지 리스트 상단에 `role=note` + `aria-live=polite` 배너로 렌더 | U (`test/ai-disclosure`) |
 | REQ-C15 | 요청-shaped 업스트림 4xx 분류 (#358) | worker `/v1/chat` 이 업스트림 4xx(400/413/422/429)를 502 로 뭉개지 않고 **실제 status + sanitized `type`** 으로 통과(raw prose 는 로그만; `routes/messages.ts` PASSTHROUGH_4XX 와 동형). 클라는 `friendlyTransportMessage(status)` 로 413→"이미지가 너무 커요" 친절 메시지, 그 외는 generic 카드. 5xx/네트워크는 여전히 502 | U (`test/proxy-transport-friendly`) |
-| REQ-C16 | 응답 중 입력 + 예약 전송 (#416) | 입력창은 스트리밍 중에도 **절대 `disabled` 가 아니다**. 프록시 턴 20~30 s 시절엔 티가 안 났지만 agent-sdk 턴은 실측 5~10분(실강의 9분 사례) — 그동안 참가자는 떠오른 것을 적어둘 수조차 없었다. **적어두지 못한 생각은 사라진다 (iteration_reflex 직접 방해).** 계약(pure `webview-ui/src/sendQueue.ts`): ① `decideEnter` — 유휴면 즉시 전송(기존 그대로, 이미지만 있어도 전송), 스트리밍 중 Enter 는 **예약**; ② 예약은 **정확히 1건** — 다시 Enter 하면 교체(먼저 친 문장 소실)도 무한 큐(다음에 뭐가 갈지 예측 불가)도 아닌 **줄바꿈 덧붙이기**로 한 건에 누적; ③ `shouldFlushQueue` — 자동 전송은 `streaming → idle` **엣지에서만** (스트림이 열린 채 flush 하면 `submit()` 자체 가드에 걸려 **에러 없이 증발**); ④ `draftAfterStop` — Stop·예약취소는 예약 문장을 입력창으로 되돌린다(예약 이후 더 친 문장은 그 아래에 순서대로). 어떤 경로로도 사용자가 친 글자를 버리지 않는다; ⑤ 한글 IME 조합 중 Enter 는 여전히 전송/예약이 아님(`composing`·`isComposing`·keyCode 229 유지); ⑥ Send 버튼은 기존대로 스트리밍 중 Stop — 예약은 Enter 경로 전용. 화면엔 "다음에 보낼 메시지" 한 줄 + × (× 는 삭제가 아니라 되돌리기) | U (`test/send-queue`) |
+| REQ-C16 | 응답 중 입력 + 예약 전송 (#416) | 입력창은 스트리밍 중에도 **절대 `disabled` 가 아니다**. 프록시 턴 20~30 s 시절엔 티가 안 났지만 agent-sdk 턴은 실측 5~10분(실강의 9분 사례) — 그동안 참가자는 떠오른 것을 적어둘 수조차 없었다. **적어두지 못한 생각은 사라진다 (iteration_reflex 직접 방해).** 계약(pure `webview-ui/src/sendQueue.ts`): ① `decideEnter` — 유휴면 즉시 전송(기존 그대로, 이미지만 있어도 전송), 스트리밍 중 Enter 는 **예약**; ② 예약은 **정확히 1건** — 다시 Enter 하면 교체(먼저 친 문장 소실)도 무한 큐(다음에 뭐가 갈지 예측 불가)도 아닌 **줄바꿈 덧붙이기**로 한 건에 누적; ③ `shouldFlushQueue` — 자동 전송은 `streaming → idle` **엣지에서만** (스트림이 열린 채 flush 하면 `submit()` 자체 가드에 걸려 **에러 없이 증발**); ④ `draftAfterStop` — Stop·예약취소는 예약 문장을 입력창으로 되돌린다(예약 이후 더 친 문장은 그 아래에 순서대로). **강사가 원격으로 끊은 turn도 같다(#751 U4, `shouldRestoreQueue`)** — 끊긴 turn의 끝에서는 flush 하지 않는다: 강사가 멈춘 순간 학생이 아직 보내지 않은 문장으로 새 AI 실행이 시작되면 안 된다. 어떤 경로로도 사용자가 친 글자를 버리지 않는다; ⑤ 한글 IME 조합 중 Enter 는 여전히 전송/예약이 아님(`composing`·`isComposing`·keyCode 229 유지); ⑥ Send 버튼은 기존대로 스트리밍 중 Stop — 예약은 Enter 경로 전용. 화면엔 "다음에 보낼 메시지" 한 줄 + × (× 는 삭제가 아니라 되돌리기) | U (`test/send-queue`) |
 | REQ-C17 | 대화와 툴 실행은 하나의 타임라인 (#503) | 실행은 말풍선 → 툴 → 말풍선 순서로 일어나는데 화면은 [말풍선 전부] 아래 [툴 전부] 두 덩어리였다 — 참가자가 "코치가 무슨 말을 하고 나서 무슨 일을 했는지"를 읽을 수 없다(**verification_reflex** 정면 훼손: 확인하려면 말과 행동이 시간 순으로 붙어 있어야 한다). 원인은 리듀서가 `messages[]` 와 `toolLog[]` 두 배열로 갈라 담은 것(교점 없음)이고, 같은 뿌리에서 두 번째 결함이 나왔다 — `streamStart` 의 `toolLog: []` 때문에 **다음 턴이 시작되는 순간 직전 턴의 툴 기록이 통째로 증발**. 계약(pure `src/chatTimeline.ts`, 호스트·웹뷰가 **같은 리듀서**를 돌린다 — 규칙이 두 벌이면 창을 다시 열 때 순서가 달라진다): ① 툴 도착 시 열린 말풍선을 닫고 `role:"tool"` 아이템을 그 자리에 넣으며, 다음 델타가 **새 말풍선**을 연다 → `[말풍선]→[툴]→[말풍선]`; ② 같은 id 는 제자리 갱신(running → done/error) — 줄이 늘면 같은 툴을 두 번 실행한 것처럼 보인다; ③ **코드펜스가 열려 있는 동안 도착한 툴은 보류**했다가 펜스가 닫힐 때(또는 턴 종료 시) 흘려 넣는다 — 펜스가 두 말풍선에 걸리면 `extractRenderableHtml` 이 못 찾아 자동 프리뷰(REQ-D2)가 죽는다; ④ 툴 줄은 대화 기록의 일부라 턴이 넘어가도 남고 workspaceState 에 함께 저장된다(창을 다시 열어도 보인다). `Clear`/history 는 대화와 툴을 **함께** 비운다; ⑤ **모델에 나가는 히스토리에는 `role:"tool"` 이 절대 들어가지 않는다**(`modelHistory()` — 호스트 진입점 + `proxyClient` 이중 방어); ⑥ 순서의 출처는 단일 postMessage 채널의 도착순이다(별도 시퀀스 번호 없음) — 2026-07-28 벤더 SDK 0.3.207 실측에서 assistant 메시지 12/12 의 `message.content` 길이가 1이라 한 이벤트가 텍스트와 툴을 동시에 내지 않는다. 툴 줄의 `createdAt` 은 SDK 가 실어 보낸 `timestamp`; ⑦ DOM 클래스(`.hps-tool-log-line`/`.hps-tool-icon`/`.hps-tool-label`/`.hps-tool-<state>`)는 e2e·관측기 셀렉터 호환으로 **유지**, 컨테이너 `.hps-tool-log` 는 삭제; ⑧ 히스토리 상한(REQ-C3, 200)은 **말한 것(user/assistant) 기준**으로 센다(`clampTimeline`) — 전체 메시지 수로 세면 SDK 턴 한 번의 툴 수십 줄이 대화를 통째로 밀어낸다 | U (`test/chat-timeline` — 양성/음성 대조군) + E |
 | REQ-C18 | 붙여넣은 이미지를 워크스페이스 파일로 남긴다 (#421) | 붙여넣기는 모델로만 가고 **디스크에는 안 남았다** — 그래서 코치가 `<img src>` 로 걸 대상이 없어 참가자에게 "파일로 저장해 주시겠어요?" 라고 일을 떠넘겼다(2026-07-24 실강의 실측 발화). 워크숍에서 참가자가 원하는 건 대개 "이 사진을 우리 홈페이지에 넣어줘" 이고, 그러려면 파일이 어차피 필요하다. 계약(pure `src/pastedImages.ts` + 호스트 `savePastedImages`): ① 그 턴에 첨부된 이미지를 `<작업폴더>/assets/pasted-<YYYYMMDD-HHMMSS>-<n>.<ext>` 로 쓴다 — 작업 폴더는 `resolveCoachCwd()`(라이브 서버가 서빙하는 루트와 동일), 그래서 상대경로 `assets/…` 가 페이지에서 바로 뜬다; ② **mime 화이트리스트**(`image/{png,jpeg,webp,gif}`)를 통과한 base64 data URL 만 저장 — `image/svg+xml`·`text/html`·비-base64·비-data URL 은 전부 거절(값의 출처가 샌드박스 웹뷰다); ③ 파일명은 시각+순번+mime 확장자로만 조립 — **참가자·모델 문자열이 파일명에 닿는 경로가 없다**(경로 이탈 불가). 같은 초 충돌은 접미사를 올려 가며 피한다(덮어쓰면 참가자가 앞서 붙인 사진이 소리 없이 사라진다); ④ 저장한 경로를 `<pasted-images>` 블록으로 **그 턴의 모델 입력에만** 얹는다 — 프록시·SDK 두 런타임이 같은 문구를 본다. 문구는 존재를 사실로 알리고 "저장해 달라"는 되묻기를 명시적으로 막는다; ⑤ 화면에도 저장 사실을 남긴다(`toolLog` 한 줄) — 조용히 저장하면 참가자도 코치도 확인할 근거가 없다(REQ-C17 과 같은 이유); ⑥ 실패는 삼키지 않는다 — 저장 못 한 장수를 한 줄로 알리고 그 턴의 문구를 비운다(코치가 없는 파일을 있다고 믿는 것보다 낫다); ⑦ **저장 대상은 참가자가 붙인 이미지뿐**이다 — #278 의 페이지 캡처(`pendingPageImage`)는 참가자가 간직하겠다고 붙인 자료가 아니라 브라우저 캡처라 저장하지 않는다. **승인 게이트와의 관계**: 이건 모델발 쓰기가 아니라 참가자 자기 자료의 호스트측 보관이라 `resolveActionApproval` 모달을 태우지 않는다 — `saveGameToWorkspace`(index.html)·`saveAgentMdIfPresent`(agent.md) 와 같은 계열이고, 그 정책의 핵심인 "워크스페이스 밖 절대경로 금지"는 ③ 으로 구조적으로 성립한다 | U (`test/pasted-images` — 양성/음성 대조군) |
 
@@ -307,7 +307,7 @@ Service 집행이 없다는 뜻이다.
 | REQ-M11 | 모델 정책 clamp와 fast 예외 | `/v1/messages`는 default/fallback에 `hypeproof-fast`를 항상 추가해 요청 alias/id를 clamp하며 `claude-*haiku*`도 fast 핀으로 보낸다. 프로필에 fast fallback이 없어도 허용된다. SDK 보조 호출 비용이 도입 이유이지만 현재 resolver는 일반 요청과 보조 요청을 구분하지 않음. 그 외는 프로필 default 강제. 이 예외를 수업의 엄격한 단일 모델 제한으로 표현하지 않으며 AE-25/26의 수업별 정책 집행은 별도 계획 | R (`worker/test/messages-integration.test.mjs`) |
 | REQ-M12 | Anthropic-native passthrough + 계량 | 응답은 원형 그대로 (non-stream JSON verbatim; stream 은 Anthropic SSE verbatim — OpenAI chunk/[DONE]/asset_score 미주입) + usage tap 으로 `usage_log`/`turns` 를 chat 과 동일 스키마로 기록; upstream 에러·stream 중단은 #257 규율 (request_id 만 노출) | R (`worker/test/messages-integration.test.mjs`) |
 | REQ-M13 | 로컬 자격증명 불요·불허 | agent-sdk 경로의 유일한 자격증명은 workshop 토큰. `buildSdkGatewayEnv` 가 ambient `ANTHROPIC_API_KEY`(AUTH_TOKEN 보다 우선순위 높음)·`CLAUDE_CODE_OAUTH_TOKEN`·`CLAUDE_CODE_USE_BEDROCK`·`CLAUDE_CODE_USE_VERTEX` 를 스크럽하고, **`CLAUDE_CONFIG_DIR` 을 코치 전용 디렉터리로 격리**(`sdkConfigDirFor`) — env 스크럽은 **디스크에 저장된** 자격증명에 닿지 못한다. CLI 는 자기 config dir 의 Claude Code/Desktop OAuth 자격증명을 `ANTHROPIC_AUTH_TOKEN` 보다 **우선**하므로, 격리 없이는 `claude` 를 한 번이라도 쓴 머신에서 코치가 그 사람 개인 계정으로 게이트웨이에 붙고 401 로 죽는다(2026-07-28 Windows 실측: 유효 토큰인데 401×9 → 격리 후 1회 성공). 개인 자격증명이 게이트웨이로 **유출되지도** 않는다. classroom Anthropic key 는 worker 밖으로 안 나감 | U (`test/sdk-gateway`) |
-| REQ-M31 | 미성년은 어느 경로로도 agent-sdk 에 닿지 않는다 | 런타임 선택은 `resolveCoachRuntime`(chatPanelHelpers, pure)이 소유한다. 워커가 미성년 프로필의 `coach_runtime` 을 proxy 로 강제하는 것(routes/chat.ts)과 **짝을 이루는 클라이언트 측 가드**다. 2026-08-11 실측에서 비대칭이 드러났다 — 인라인 판단이 프로필 경로만 미성년을 걸렀고 머신 스코프 `hypeproofChat.coachRuntime` 경로는 안 걸러, 그 설정이 켜진 기기에서 워커의 핀이 우회됐다. 권한 침해는 아니다(도구는 `sdk_tools` 가 소유하고 미성년 프로필은 이를 두지 않아 `permittedToolsFor` 가 빈 배열을 낸다). 그러나 **도구 0개로 SDK 루프가 돌면서 툴 호출 원문이 아이 화면에 그대로 렌더되고, 쓰지도 않은 파일을 썼다고 단언**했다(R0 위반) — 실기기 관측. 계약: 설정·프로필 두 경로의 **합집합 바깥**에 미성년 검사를 둔다. `minor_cohort` 를 모르는 응답(구 워커)에서는 기존 동작을 유지한다 — fail-closed 로 바꾸면 성인 코호트가 조용히 강등된다 | U (`test/coach-runtime`) |
+| REQ-M31 | ~~미성년은 어느 경로로도 agent-sdk 에 닿지 않는다~~ **대체됨(2026-08-11 d116c2a7, REQ-M32)** | 런타임 선택은 `resolveCoachRuntime`(chatPanelHelpers, pure)이 소유한다. 워커가 미성년 프로필의 `coach_runtime` 을 proxy 로 강제하는 것(routes/chat.ts)과 **짝을 이루는 클라이언트 측 가드**다. 2026-08-11 실측에서 비대칭이 드러났다 — 인라인 판단이 프로필 경로만 미성년을 걸렀고 머신 스코프 `hypeproofChat.coachRuntime` 경로는 안 걸러, 그 설정이 켜진 기기에서 워커의 핀이 우회됐다. 권한 침해는 아니다(도구는 `sdk_tools` 가 소유하고 미성년 프로필은 이를 두지 않아 `permittedToolsFor` 가 빈 배열을 낸다). 그러나 **도구 0개로 SDK 루프가 돌면서 툴 호출 원문이 아이 화면에 그대로 렌더되고, 쓰지도 않은 파일을 썼다고 단언**했다(R0 위반) — 실기기 관측. 계약: 설정·프로필 두 경로의 **합집합 바깥**에 미성년 검사를 둔다. `minor_cohort` 를 모르는 응답(구 워커)에서는 기존 동작을 유지한다 — fail-closed 로 바꾸면 성인 코호트가 조용히 강등된다 | U (`test/coach-runtime`) |
 | REQ-M32 | 아동 코호트의 workspace read/write (2026-08-11 결정) | 커리큘럼이 "코치가 워크스페이스 파일을 읽고 고친다" 를 전제로 바뀌어, SK 두 아동 트랙이 `sdk_tools: {read,write}` + `coach_runtime: "agent-sdk"` 를 명시적으로 opt-in 한다. 이전 불변식("minors never gain workspace write capability", #282 P2)을 이 행이 대체한다. **함께 유지되는 것:** ① 인바운드/아웃바운드 모더레이션(REQ-O2/O3)은 `isMinorCohort` 로 그대로 돈다 — 이 변경과 무관한 계층이다; ② `shell`·`browser`·`subagents` 는 아동에게 여전히 닫혀 있고 하네스가 `child_sdk_browser`/`child_sdk_subagents` HARD FAIL 로 막는다; ③ 모든 툴 호출은 `canUseTool` 승인 게이트를 지나고 `workspace_root` 밖 경로는 `evaluateSdkToolUse` 가 거부한다. **새 배선 검사:** `write` 를 열었으면 실행될 런타임이 있어야 한다 — `coach_runtime != "agent-sdk"` 이면 워커가 proxy 로 내려주고 코치는 도구가 있다고 믿은 채 실패한다(#476 오진 패턴). 하네스 `child_sdk_write_without_runtime` HARD FAIL. 클라이언트의 minor-tier write 스트립도 제거했다 — 정책 owner 는 프로필이며(ADR 0003) 클라이언트가 다시 깎으면 권한이 조용히 사라진다 | R (`worker/test/chat-integration`, `worker/test/smoke`) + U (`extensions/…/test/sdk-coach-helpers`) |
 | REQ-M33 | 톤 문구는 tier 를 따라간다 (게임 프레임 금지 트랙) | `appToneOf` 가 `template_tier` → 톤을 정하고 `TONE_LABELS` 가 문구를 소유한다. **웹뷰는 같은 로직을 손으로 미러링**한다 — `chatPanelHelpers` 가 Node `Buffer` 를 쓰기 때문에 import 할 수 없다(extension-dev.md Boundaries). 미러는 없앨 수 없으므로 **어긋나면 잡는다**: `test/tone-mirror.smoke.mjs` 가 tier 분기·buildingLabel·namingEmoji 일치를 강제하고, "게임 프레임 금지" 트랙(world)의 문구에 `게임`·🎮 가 없음을 검사한다. 2026-08-17 Windows 실기기에서 `kids-world` 가 톤 판정에 없어 `game` 으로 떨어졌고, 커리큘럼이 금지한 "게임" 낱말이 UI 8곳에 노출됐다 | U (`test/tone-mirror`) |
 | REQ-M34 | "띄워줘" 는 다시 만들지 않는다 | `isShowIntent` 가 참이면 기존 산출물을 **여는** 것으로 처리하고 코치에게 넘기지 않는다. 동사 목록에 `띄워`·`띄어` 가 없어 2026-08-17 실기기에서 "띄워봐" 가 생성 요청으로 흘러 **세계를 처음부터 다시 그렸다** — 아이는 보려던 것을 더 오래 기다렸다. 접두사도 `게임` 뿐이라 `미래/그림/세계/동네 보여줘` 가 전부 빠져나갔다. 대조군: 양성(띄워봐·미래 보여줘·run) / 음성(별이 떨어지는 게임 보여줘·비 내리게 해줘 — 생성 요청은 통과해야 한다) | U (`test/chat-panel-helpers`) |
@@ -662,3 +662,103 @@ Automatic collection requires the new explicit consent/grant contract; this
 proposal does not relax existing manual-upload or operator-only log access.
 New reports follow MC-17/19; legacy HAIN7 stays a separate versioned adapter.
 Implementation phases and rollback are in [E5](plan/learning-agent-experience-epics.md#remote-classroom-delivery).
+
+### Targeted distribution of notices and materials (U2) — implemented 2026-09-21, off by default
+
+Implemented behind the per-run switch `ops_distribute` (default OFF); no REQ row is claimed. What was run and what was NOT RUN
+is in the [AT-44 run record](testing/classroom-admin.md#remote-management-u2-run-20260921).
+The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u2-20260921).
+The Studio behavior it adds is bounded as follows. The App host owns a
+durable per-learner, per-class-run inbox under extension global storage; it never writes
+to the learner's workspace, conversation, input draft or spool (REQ-Q ownership unchanged).
+An item is stored only after its hash is verified, as an immutable per-revision file followed
+by one atomic index commit, so an interrupted update never costs the learner the material they
+already had; a file that was received but not committed is never promoted on restart without a
+fresh sync response. "Applied" means the host re-read the committed item
+through the same disk path the card list uses — a sync HTTP 200, a notification or a
+webview `postMessage` is not completion, and opening a card is not reported. The card is a
+closed-by-default `<details>` in the coach rail of the work screen and a quiet line on the
+"이어서 하기" entry card: no modal, no second Primary (SX-04), nothing in the message stream,
+canvas or evidence drawer (SX-05/06/13). Text is rendered as text; links open only on a
+learner click through the existing https-guarded `openExternal` path. A late response or
+webview callback from an ended connection generation changes nothing.
+Without a valid connection the list stays readable and says "수업 연결 확인 전"; it says "끝난 수업의 자료"
+only on a normal expiry or once the run's own end time has passed — a missing connection (an app restart in a
+running class) is not evidence that the class ended.
+
+### Targeted distribution of lesson prompts and lesson settings (U3) — implemented, locally run, not accepted, default OFF, 2026-09-21
+
+Implemented on `feat/751-u3-prompt-settings` and run locally (unit, Service, local workerd D1, browser, a real
+Studio window on a Mac with a scripted model provider): see the
+[run record](testing/classroom-admin.md#remote-management-u3-run-20260921). Not accepted, not deployed, OFF by default
+(`HPS_LESSON_BINDINGS` unset and the per-run `ops_lesson_settings` flag false); no REQ row is claimed until acceptance.
+Found only on the real window and fixed: a profile cached before enforcement began made the host send no binding key,
+never switch and never close a turn — the preflight now re-reads the profile once when the device's own inbox holds a
+lesson setting. "Applied" on the instructor screen is request-level evidence (one provider request under the binding
+ended protocol-complete), not "the learner's question succeeded".
+An independent review at `d32a191` then found, on the real window, that neither Studio window drew the inbox although the
+board said "reflected": windows of one app share `globalState` and the inbox directory, and the window whose connection a
+second window's pairing had replaced marked the shared pointer hidden. The pointer now names its connection, only that
+connection may hide it, a live connection is authoritative, and a window re-reads the shared inbox on focus (a read — no
+new "opened" tracking). The switch request now carries the learner's token for the Service to verify (the device's own
+statement of its base lesson decides nothing); a parked message that goes out when a turn ends carries no prompt
+provenance and no longer empties the draft typed meanwhile; a turn is looked up and closed where it was admitted.
+See the [review record](testing/classroom-admin.md#remote-management-u3-review-20260921). A further review at `e7d719a` changed only the Service:
+the lesson basis of a collected input is established by joining each permitted request to its own usage row (no counting) —
+no Studio behavior changed ([record](testing/classroom-admin.md#remote-management-u3-basis-identity-20260921)).
+The contract lives in the [classroom ADM document](requirements/classroom-admin.md#remote-management-u3-20260921);
+its first draft was revised the same day after an independent review (turn pinning, fallback under
+outage/off, execution evidence, mixed-basis reports). The Studio behavior it adds is bounded as follows. **Prompt:** an instructor prompt is an inbox card; only the learner's own press of
+`초안에 가져오기` changes the input draft, as one functional update inside the webview that appends to
+the latest draft and never replaces it, touches no attachment or queued send, sends nothing and calls
+no model. Undo restores the previous draft only while the text is byte-identical to the just-imported
+state. Withdrawal removes the card body and never the learner's draft, conversation or files.
+Importing and sending are not reported to the instructor; the only provenance is a bodiless reference
+kept with the local draft and, when the learner sends it, on that turn's spool `prompt` event.
+**Setting:** a setting is a reference to a frozen lesson version of the same course, never free-form
+values, and can only narrow within the compiled profile (ADR 0006/0007). The host switches at the
+turn-start preflight: it asks the Service to record the binding, re-fetches `/v1/profile` as a
+candidate and swaps the cached profile only when the served `lesson_binding.key` matches. It sends
+that key as its expectation with the existing per-turn `x-hps-turn-id` on every request of the turn,
+for both runtimes. The header is never the authority: the Service admits each turn id once, records
+the execution snapshot for it, and runs every later request of that turn from that snapshot however
+many times the setting changes afterwards; a new turn carrying an old key is refused before anything
+runs. If the switch succeeded but the new profile could not be verified, the host does not send a
+turn at all and the learner's text and attachments stay in the input. A turn that ends in a
+`lesson_binding` refusal is closed from the Service's record of that turn, not from guesswork:
+nothing dispatched → text and attachments return to the input (existing `inputRejected`); something
+dispatched → the turn is marked as partially executed and is never re-sent automatically; record
+unreadable → marked unknown, never re-sent automatically. When the binding cannot be read the
+Service holds new execution instead of falling back to the wider token lesson, and turning classroom
+operations off does not undo a setting that was already switched. The activity identity,
+conversation, draft, workspace files and usage attribution do not move. Step signals carry the new
+lesson version after the switch, and earlier self-reports are never shown as completion of the new
+version. "Applied" is the Service's record that a request pinned to that binding reached the
+upstream with its normalized wire and got a response — not a gate pass, a device receipt, a profile
+200, `count_tokens`, or the inbox card.
+
+### Cause-specific remote recovery (U4) — implemented, locally run, not accepted, default OFF, 2026-09-22
+
+Implemented on `feat/751-u4-remote-recovery` (stacked on U3) and run locally (unit, Service, local workerd D1, browser, a
+real Studio window on a Mac with a scripted model provider and locally made faults): see the
+[contract](requirements/classroom-admin.md#remote-management-u4-20260922) and the
+[run record](testing/classroom-admin.md#remote-management-u4-run-20260922). Not accepted, not deployed, behind the existing
+per-run `ops_commands` flag (default false); no migration; no REQ row is claimed until acceptance.
+A remote action that a device reports as `succeeded` is not shown as a fix. Per target the Service says one of: resolved,
+remains, executed (ran; nothing yet says whether the cause is gone), unverified, not executed — from that command's own
+receipt, from follow-up observations the app links to that command id over the same connection and login generation, and
+from the Service's own records (latest token issue, verified upload). Learner-side behaviour that changed:
+a token re-check names the public issue id of the token the app holds (never the token); a stop or a preserving restart
+is answered once by the learner's own next finished turn — the app never sends a question or calls a model to find out;
+a stop takes its preservation baseline before acting and compares the learner's words (parked message + typed text +
+attachments + import references), not which slot holds them; a turn the instructor cut off hands the parked message back
+to the draft like the learner's own Stop (REQ-C16); a token re-check no longer clears a runtime, tool or provider fault;
+preview recovery checks the page the learner had open (a 404 is a named fault) and touches only tabs on the learner's
+preview server as it was before the action (other localhost tools and sites are never read, moved or closed); it reports
+the page back only when that tab itself loaded a fresh document at the page's address (on one session bound to that
+tab, stopping if the tab goes) and every learner page answered as a document, never from an HTTP answer alone;
+an Agent SDK turn whose result is an error is a failed turn for the spool, the observation log, the turn close and the
+board alike (the learner's notice is shown once, nothing is retried), classified only from the HTTP status this turn's own
+stream carried (5xx → provider, 429 → rate limit, none → unknown). A re-issued code typed on the start page for the activity already open in
+the window keeps the learner's work folder (it used to move them to the profile's default folder). Pause still refuses only NEW model requests: a request already streaming is not
+cut, the next request of the same turn is a new request and is refused, nothing is re-sent on resume.

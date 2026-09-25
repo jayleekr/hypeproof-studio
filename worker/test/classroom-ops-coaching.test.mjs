@@ -58,5 +58,26 @@ try {
     const s = (await f.request(f.base + '/status')).json; assert.equal(s.seats[0].evidence.unreviewed, 3); assert.equal(s.seats[0].step, null, 'reviewing evidence does not move the learning step');
     assert.equal(f.db.prepare("SELECT count(*) n FROM sqlite_master WHERE name LIKE '%evidence%' AND type='table' AND name<>'ops_event_reviews' AND name NOT LIKE 'native%' AND name NOT LIKE 'usage%' AND name NOT LIKE 'trial%'").get().n, 0, 'no second evidence store was added');
   });
+  await check('reviewed: an instructor may confirm only a step the LEARNER submitted; it needs the coach capability; two instructors cannot both win; a later step starts unreviewed', async () => {
+    const r = await localOps(); try {
+      await r.freeze(); assert.equal((await r.configure([{ seat_id: 'A1', student_id: 'student-a' }], 0, { flags: { ops_observe: true, ops_commands: true } })).status, 201);
+      const cred = (await r.pair('A1', 1)).conn.json.credential, v = r.lesson.version, stepOf = async () => (await r.request(r.base + '/status')).json.seats[0].step;
+      await r.sync(cred, [r.event(1, 'step', { lesson_version: v, step_id: 'build', status: 'in_progress' }, { actor: 'student' })]);
+      assert.equal((await stepOf()).review, undefined, 'a step in progress offers nothing to review');
+      const progressRef = r.db.prepare("SELECT grant_id||'.'||boot_id||'.'||seq AS ref FROM ops_events WHERE kind='step'").get().ref;
+      assert.equal((await r.request(r.base + '/evidence/' + progressRef, 'PUT', { state: 'confirmed', expected_revision: 0 })).json.reason, 'step_not_submitted', 'the instructor cannot complete a step for the learner');
+      await r.sync(cred, [r.event(2, 'step', { lesson_version: v, step_id: 'build', status: 'submitted' }, { actor: 'student' })]);
+      let step = await stepOf(); assert.deepEqual([step.status, step.actor, step.review.state, step.review.revision], ['submitted', 'student', 'unreviewed', 0]);
+      const observer = await r.teacher('observer-only', ['observe']); assert.equal((await r.request(r.base + '/evidence/' + step.review.ref, 'PUT', { state: 'confirmed', expected_revision: 0 }, observer)).json.reason, 'ops_capability_missing');
+      const other = await r.teacher('second-coach', ['observe', 'coach']), [x, y] = await Promise.all([r.request(r.base + '/evidence/' + step.review.ref, 'PUT', { state: 'confirmed', expected_revision: 0 }), r.request(r.base + '/evidence/' + step.review.ref, 'PUT', { state: 'disputed', expected_revision: 0 }, other)]);
+      assert.deepEqual([x.status, y.status].sort(), [200, 409], 'one of two simultaneous reviews wins, the other is told to reload'); const won = x.status === 200 ? x : y; assert.deepEqual(won.json.does_not_mean, ['delivery approval', 'lesson completion', 'a grade']); assert.equal(won.json.kind, 'step');
+      step = await stepOf(); assert.deepEqual([step.status, step.review.state, step.review.revision], ['submitted', won.json.review_state, 1], 'the learner-reported status is kept; the review sits next to it');
+      assert.equal((await r.request(r.base + '/evidence/' + step.review.ref, 'PUT', { state: 'confirmed', expected_revision: 0 })).status, 409, 'a stale revision is refused');
+      assert.equal((await r.request(r.base + '/evidence/' + step.review.ref, 'PUT', { state: 'confirmed', expected_revision: 1 })).status, 200);
+      await r.sync(cred, [r.event(3, 'step', { lesson_version: v, step_id: 'review', status: 'submitted' }, { actor: 'student' })]);
+      step = await stepOf(); assert.deepEqual([step.step_id, step.review.state, step.review.revision], ['review', 'unreviewed', 0], 'the next step is not reviewed by inheritance');
+      assert.equal(r.db.prepare("SELECT count(*) n FROM ops_audit WHERE action LIKE 'step_%'").get().n, 2);
+    } finally { r.close(); }
+  });
   console.log(`${count} coaching/provenance controls passed`);
 } finally { f.close(); }
