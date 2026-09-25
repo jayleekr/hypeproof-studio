@@ -34,7 +34,8 @@ import type { Profile } from "../profiles/types";
 // so both LLM routes serve the same bytes and neither has to know a module
 // layer exists. lib/modules.ts explains the layer and the fallback chain.
 import { resolveProfile, type ModuleResolution } from "./modules";
-import { resolveTokenLesson } from './lesson-delivery';
+import { resolveEffectiveLesson, type BindingView } from './lesson-binding-store';
+import { BINDING_HEADER, TURN_HEADER, type TurnRow } from './lesson-binding';
 import { profileServesCohort } from './cohort-binding';
 import { lessonAssistantName, spokenAssistantName } from './session-design';
 import {startNativeGrant,readNativeGrant} from './native-trial-grants';
@@ -68,8 +69,33 @@ export type ChatGateResult =
        * they must attach this themselves.
        */
       help: string | null;
+      /**
+       * #751 U3 — which lesson binding this request runs under (null for a seat without a lesson), and the turn the
+       * Service admitted it into. Model routes record execution evidence against `turn`; a raw streaming Response must
+       * attach `x-hps-lesson-binding` itself, like the help receipt.
+       */
+      binding: BindingView | null;
+      turn: TurnRow | null;
+      /** The sha256 of the lesson this request runs under (null without a lesson): what a permitted request is recorded with. */
+      lessonSha: string | null;
     }
   | { ok: false; response: Response };
+
+/**
+ * The SDK CLI hands the host only the MESSAGE of a refused request ("API Error: 403 <message>", observed on the pinned SDK),
+ * never the JSON body. The trailing tag is how the host recognises a lesson-binding refusal there; the learner-facing copy
+ * is the app's own.
+ */
+export const bindingRefusalMessage = (code: string) => `${BINDING_REFUSALS[code] ?? BINDING_REFUSALS.lesson_binding_unknown} [hps:${code}]`;
+/** Student-facing words for a refusal of the lesson-binding contract. 403 on purpose: the SDK CLI does not retry it. */
+const BINDING_REFUSALS: Record<string, string> = {
+  lesson_binding_changed: '수업 설정이 바뀌었습니다. 다시 보내 주세요.',
+  lesson_binding_app_unsupported: '이 앱은 바뀐 수업 설정으로 실행할 수 없습니다. 앱을 업데이트하거나 강사에게 알려 주세요.',
+  lesson_turn_mismatch: '이 요청은 진행 중인 질문과 맞지 않습니다. 다시 보내 주세요.',
+  lesson_turn_expired: '이 질문은 너무 오래 이어졌고 그사이 수업 설정이 바뀌었습니다. 다시 보내 주세요.',
+  lesson_turn_closed: '이미 끝난 질문입니다. 새로 보내 주세요.',
+  lesson_binding_unknown: '수업 설정을 확인할 수 없어 실행하지 않았습니다. 잠시 뒤 다시 보내 주세요.',
+};
 
 type GateContext = Context<{ Bindings: Env }>;
 
@@ -163,7 +189,7 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
       if(!crossProviderEnabled(profile)||payload.lesson||payload.native_trial)throw new AccessError('unsupported_personal_profile',403);
       // An account execution context has no class/session row. The immutable
       // paid period is selected and checked separately before every dispatch.
-      return {ok:true,payload,profile:{...profile,session:{...profile.session,cohort_id:''}},module,identity:null,help:null,
+      return {ok:true,payload,profile:{...profile,session:{...profile.session,cohort_id:''}},module,identity:null,help:null,binding:null,turn:null,lessonSha:null,
         session:{session_id:'account:'+payload.account,profile_id:profile.id,starts_at:new Date(payload.iat*1000).toISOString(),ends_at:new Date(payload.exp*1000).toISOString()}};
     }catch(error){
       return{ok:false,response:c.json({error:{type:'access',code:error instanceof AccessError?error.code:'account_unavailable',message:'개인 이용권을 확인할 수 없습니다.'}},403)};
@@ -271,11 +297,24 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
   }
 
   if (payload.lesson) {
-    const lesson = await resolveTokenLesson(env, payload, cohortDecision.lessonCohort);
-    if (!lesson) return { ok: false, response: c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 확인하세요.' } }, 409) };
+    // #751 U3 — the ONE place a lesson seat's lesson is resolved (GET /v1/profile calls the same function). A model route
+    // is admitted into a turn; everything else reads the current binding. An unreadable binding HOLDS the request.
+    let path = ''; try { path = new URL(c.req.url).pathname; } catch { path = ''; }
+    const modelRoute = path.startsWith('/v1/messages') || path === '/v1/chat/completions';
+    const resolved = await resolveEffectiveLesson(env, payload, { classRunId: payload.native_trial ? null : session.session_id, lessonCohort: cohortDecision.lessonCohort, mode: modelRoute ? 'turn' : 'read', turnId: c.req.header(TURN_HEADER), expectKey: c.req.header(BINDING_HEADER), now: Date.now() });
+    if (!resolved.ok) {
+      // The token's own lesson keeps its existing 409. A SWITCHED version that stopped resolving (a profile whose grants or model
+      // pins shrank) is refused with 403 on the model routes: observed on the pinned Agent SDK, the CLI retries a 409 for a
+      // minute and more (14 attempts in 62 s, until aborted), while a 403 ends the turn at once. Nothing runs under a wider lesson.
+      if (resolved.code === 'lesson_unavailable') return { ok: false, response: resolved.switched && modelRoute
+        ? c.json({ error: { type: 'lesson_binding', code: 'lesson_unavailable', message: '바뀐 수업 설정의 강의 버전을 열 수 없어 실행하지 않았습니다. 강사에게 알려 주세요. [hps:lesson_unavailable]' } }, 403)
+        : c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 확인하세요.' } }, 409) };
+      return { ok: false, response: c.json({ error: { type: 'lesson_binding', code: resolved.code, message: bindingRefusalMessage(resolved.code), ...(resolved.current_key ? { current_key: resolved.current_key } : {}) } }, 403) };
+    }
+    const lesson = resolved.lesson;
+    c.header(BINDING_HEADER, resolved.binding.key);
     const modelPolicy = lesson.content.model;
     if (modelPolicy?.binding) {
-      const path = new URL(c.req.url).pathname;
       const requestedRuntime = path.startsWith('/v1/messages') ? 'agent-sdk' : path === '/v1/chat/completions' ? 'proxy' : null;
       if (requestedRuntime && requestedRuntime !== modelPolicy.binding.runtime) return { ok: false, response: c.json({ error: { type: 'config', code: 'lesson_runtime_unavailable', message: '이 수업의 모델 실행 환경을 사용할 수 없습니다. 강사에게 확인하세요.' } }, 409) };
     }
@@ -321,10 +360,10 @@ export async function gateChatRequest(c: GateContext): Promise<ChatGateResult> {
     // prompt and the client's minor-specific UX cannot disagree about who this
     // seat belongs to.
     const learning = learningInstruction(visibleLesson, c.req.header('x-hps-lesson-step'), isMinorCohort(profile));
-    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(visibleLesson) + helpInstruction + learning }, session, module, identity: assistantName ? { fixed_name: assistantName } : null, help: help.help ? helpModeReceipt(help.help) : null };
+    return { ok: true, payload, profile: { ...lessonProfile, system_prompt: profile.system_prompt + instruction + identity + JSON.stringify(visibleLesson) + helpInstruction + learning }, session, module, identity: assistantName ? { fixed_name: assistantName } : null, help: help.help ? helpModeReceipt(help.help) : null, binding: resolved.binding, turn: resolved.turn, lessonSha: lesson.sha256 };
   }
   // A help mode without a lesson has nothing to apply to — say so instead of
   // letting the student believe it took effect.
   if (c.req.header('x-hps-help-mode')) return { ok: false, response: c.json({ error: { type: 'config', code: 'help_mode_not_offered', message: '수업에 연결되지 않은 좌석은 도움 방식을 선택할 수 없습니다.' } }, 409) };
-  return { ok: true, payload, profile, session, module, identity: null, help: null };
+  return { ok: true, payload, profile, session, module, identity: null, help: null, binding: null, turn: null, lessonSha: null };
 }

@@ -3,6 +3,8 @@ import { EffortControl } from './EffortControl';
 import {NativeObservationPanel} from './NativeObservationPanel';
 import { MissionHeader } from './MissionHeader';
 import { EvidenceDrawer } from './EvidenceDrawer';
+import { InstructorInbox } from './InstructorInbox';
+import { addImportRef, canUndoImport, dropImportRef, importIntoDraft, type ImportRef, type LastImport } from './draftImport';
 import { isObservationFormat, showsObservationResults } from '../../src/nativeObservationContract';
 import { MarkdownText } from './MarkdownText';
 import { DisconnectedChat } from "./StartPage";
@@ -20,7 +22,7 @@ import type { LearningStatePayload } from "../../src/learningStateHelpers";
 import { onHostMessage, postToHost } from "./vscode";
 import { hasActivityThisTurn } from "../../src/chatTimeline";
 import { composerLabel, copulaParticle, resolveCoachIdentity } from "../../src/coachIdentity";
-import { decideEnter, draftAfterStop, shouldFlushQueue } from "./sendQueue";
+import { decideEnter, draftAfterStop, shouldFlushQueue, shouldRestoreQueue } from "./sendQueue";
 import {
   RUNNER_PHRASE_MS,
   isRunnerCohort,
@@ -66,7 +68,7 @@ interface Props {
   errorRequestId: string | null;
   errorRunbookUrl: string | null;  // #165 — render as clickable runbook link
   canRetryLast: boolean;
-  onSend: (text: string, images?: string[]) => void;
+  onSend: (text: string, images?: string[], imports?: ImportRef[]) => void;
   onRetry: (prompt: string) => void;
   onRetryLast: () => void;
   onDismissError: () => void;
@@ -197,6 +199,8 @@ export function ChatPanel(props: Props) {
   const [draftError, setDraftError] = useState<string | null>(null);
   // SX-01/SX-02 — the step currently being viewed. A **view state**. Not a completion judgment.
   const [currentStepId, setCurrentStepId] = useState<string | null>(null);
+  // #751 F4 — local display state for the learner's step self-report; it is separate from task completion.
+  const [lessonSteps, setLessonSteps] = useState<Record<string, 'in_progress' | 'submitted'>>({});
   /**
    * SX-14·15·17 — the learning state the host computed and sent. **It is not
    * recomputed here.** null means this connection does not use learning events (it is
@@ -206,14 +210,20 @@ export function ChatPanel(props: Props) {
   const [learning, setLearning] = useState<LearningStatePayload | null>(null);
   /** Drawer open/closed is a **view state**, so the webview owns it. Closed by default (SX-17). */
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const snapshot = useRef({text:draft,images:pendingImages,queued});
-  snapshot.current = {text:draft,images:pendingImages,queued};
+  // #751 U3 — instructor prompts imported into THIS draft (bodiless refs, saved with the draft, handed over with the send).
+  const [imports, setImports] = useState<ImportRef[]>(() => config?.activityDraft?.imports ?? []);
+  const [lastImport, setLastImport] = useState<LastImport | null>(null);
+  const [importNote, setImportNote] = useState<string | null>(null);
+  // A draft that never imported an instructor prompt is saved exactly as before U3: no `imports` key at all.
+  const draftPayload = () => ({text:draft,images:pendingImages,queued,...(imports.length?{imports}:{})});
+  const snapshot = useRef(draftPayload());
+  snapshot.current = draftPayload();
   const activityId = config?.activity?.id;
   const initialDraft = useRef(true);
   useEffect(() => {
     if (initialDraft.current) { initialDraft.current=false; return; }
-    if (activityId) postToHost({type:"saveActivityDraft",activityId,draft:{text:draft,images:pendingImages,queued}});
-  }, [activityId,draft,pendingImages,queued]);
+    if (activityId) postToHost({type:"saveActivityDraft",activityId,draft:draftPayload()});
+  }, [activityId,draft,pendingImages,queued,imports]);
   useEffect(() => {
     const off = onHostMessage(msg => {
       if (!activityId || msg.activityId !== activityId) return;
@@ -237,6 +247,16 @@ export function ChatPanel(props: Props) {
       if (msg.type === "learningState") setLearning(msg.state);
     });
     return off;
+  }, []);
+  // #751 U2 — notices/materials an instructor sent. Nothing is kept here as a record: the host reads the inbox from disk
+  // and sends it; this panel asks again whenever it (re)appears, so a restart or a hidden sidebar loses nothing.
+  const [inbox, setInbox] = useState<import("../../src/classroomInbox").InboxView | null>(null);
+  useEffect(() => {
+    const off = onHostMessage((msg) => { if (msg.type === "inboxState") setInbox(msg.inbox); });
+    const ask = () => { if (document.visibilityState !== "hidden") postToHost({ type: "inboxRequest" }); };
+    ask(); document.addEventListener("visibilitychange", ask);
+    const stop = () => { off(); document.removeEventListener("visibilitychange", ask); };
+    return stop;
   }, []);
   /**
    * #642/#649 (2026-08-20 review) — the **unguarded window** between pressing a friend
@@ -360,8 +380,13 @@ export function ChatPanel(props: Props) {
   const submit = (text?: string) => {
     const value = (text ?? draft).trim();
     if ((!value && pendingImages.length === 0) || streaming || unavailable) return;
-    props.onSend(value, pendingImages.length > 0 ? pendingImages : undefined);
-    setDraft("");
+    // `text` given = the PARKED message going out when the turn ended (#416). It is its own message: it never contained the
+    // prompt the learner imported into the draft meanwhile, so it carries no import reference — and the draft typed while
+    // waiting is not thrown away with it (observed in the browser run: the parked send took the draft's provenance and
+    // emptied the input). Pasted images still ride along with the next turn that goes out, as #416 defined.
+    const parked = text !== undefined;
+    props.onSend(value, pendingImages.length > 0 ? pendingImages : undefined, !parked && imports.length ? imports : undefined);
+    if (!parked) { setDraft(""); setImports([]); setLastImport(null); setImportNote(null); }
     setPendingImages([]);
     setImgNote(null);
     setRollExpand(null);
@@ -373,12 +398,36 @@ export function ChatPanel(props: Props) {
   useEffect(() => {
     const prev = prevStreamingRef.current;
     prevStreamingRef.current = streaming;
-    if (unavailable || !shouldFlushQueue(prev, streaming, queued)) return;
+    // #751 U4 — a turn the instructor cut off hands the parked message back, exactly like the learner's own Stop. Never sent.
+    if (shouldRestoreQueue(prev, streaming, queued, !!props.stopNotice)) { restoreQueuedToDraft(); return; }
+    if (unavailable || !shouldFlushQueue(prev, streaming, queued, !!props.stopNotice)) return;
     const text = queued as string;
     setQueued(null);
     submit(text);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streaming, queued]);
+
+  /**
+   * #751 U3 — the learner pressed `초안에 가져오기`. One functional update of the draft: it merges into whatever the draft is
+   * at the moment it is applied, so nothing typed between drawing the card and pressing the button can be lost. It appends,
+   * it never replaces; attachments and a parked message are not touched; nothing is sent.
+   */
+  const importPrompt = (card: { object_id: string; revision: number; body: string; content_hash?: string }) => {
+    if (frozen) return;
+    const before = snapshot.current.text, merged = importIntoDraft(before, card.body);
+    if (!merged.ok) { setImportNote(merged.reason === "too_long" ? "입력창이 가득 차서 가져오지 못했습니다. 입력한 글은 그대로입니다." : null); return; }
+    setDraft((d) => { if (d === before) return merged.draft; const again = importIntoDraft(d, card.body); return again.ok ? again.draft : d; });
+    setLastImport({ before, after: merged.draft, object_id: card.object_id, revision: card.revision });
+    setImports((refs) => addImportRef(refs, { object_id: card.object_id, revision: card.revision, hash16: (card.content_hash ?? "").slice(0, 16).padEnd(16, "0") }));
+    setImportNote(null);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+  /** Only while the draft is byte-identical to the just-imported state; after one keystroke it is the learner's text. */
+  const undoImport = () => {
+    const last = lastImport; if (!last) return;
+    setDraft((d) => (canUndoImport(d, last) ? last.before : d));
+    if (canUndoImport(snapshot.current.text, last)) { setImports((refs) => dropImportRef(refs, last)); setLastImport(null); }
+  };
 
   /** Stop / cancel-reservation: the parked text goes back to the draft, never away. */
   const restoreQueuedToDraft = () => {
@@ -653,6 +702,8 @@ export function ChatPanel(props: Props) {
           setCurrentStepId(step.id);
           const lesson = config?.profile?.lesson;
           if (!lesson) return;
+          postToHost({ type: 'lessonStep', stepId: step.id, status: 'in_progress' });
+          setLessonSteps(prev => ({ ...prev, [step.id]: prev[step.id] === 'submitted' ? 'submitted' : 'in_progress' }));
           handleChip({
             style: 'good',
             text: `수업: ${lesson.content.title} (${lesson.version})\n과제: ${step.instructions}\n확인 기준: ${step.acceptance}\n현재 작업을 보존하면서 이 과제를 도와주세요.`,
@@ -679,16 +730,26 @@ export function ChatPanel(props: Props) {
         if (!step) return null;
         const index = steps.indexOf(step);
         return (
-          <details className="hp-rail-lesson">
-            <summary>이번 단계 안내 · {index + 1}. {step.title}</summary>
-            <p className="hp-rail-lesson-meta">{lesson.content.title} · 버전 {lesson.version} · {lesson.content.duration_minutes}분</p>
-            <p>{step.instructions}</p>
-            {step.hint ? <details><summary>힌트 보기</summary><p>{step.hint}</p></details> : null}
-            <p>확인 기준: {step.acceptance}</p>
-            <p className="hp-rail-lesson-note">안내를 읽은 것만으로 이 단계가 끝나지는 않습니다. 직접 만들고 확인한 기록이 남아야 합니다.</p>
-          </details>
+          <>
+            <details className="hp-rail-lesson">
+              <summary>이번 단계 안내 · {index + 1}. {step.title}</summary>
+              <p className="hp-rail-lesson-meta">{lesson.content.title} · 버전 {lesson.version} · {lesson.content.duration_minutes}분</p>
+              <p>{step.instructions}</p>
+              {step.hint ? <details><summary>힌트 보기</summary><p>{step.hint}</p></details> : null}
+              <p>확인 기준: {step.acceptance}</p>
+              <p className="hp-rail-lesson-note">안내를 읽은 것만으로 이 단계가 끝나지는 않습니다. 직접 만들고 확인한 기록이 남아야 합니다.</p>
+            </details>
+            {/* #751 F4 — a learner self-report for the current step, separate from region D's task completion gate. */}
+            <p className="hp-rail-step-report">
+              <button type="button" className="hp-cta-quiet hps-lesson-done" aria-pressed={lessonSteps[step.id] === 'submitted'} disabled={lessonSteps[step.id] === 'submitted'} onClick={() => { postToHost({ type: 'lessonStep', stepId: step.id, status: 'submitted' }); setLessonSteps(prev => ({ ...prev, [step.id]: 'submitted' })); }}>{lessonSteps[step.id] === 'submitted' ? '마쳤다고 표시함 · 강사 확인 전' : '이 단계를 마쳤어요'}</button>
+            </p>
+          </>
         );
       })()}
+
+      {/* #751 U2 — instructor notices/materials: the coach rail's "강사 메시지" kind (SX-06), outside the message stream
+          (SX-05), closed by default, no Primary (SX-04). Drawn with or without a lesson. */}
+      <InstructorInbox inbox={inbox} post={postToHost} promptImport={{ onImport: importPrompt, onUndo: undoImport, disabled: frozen, draft, last: lastImport, note: importNote }} />
 
       {/* Region D — the completion gate and the Evidence drawer (SX-14·17). Drawn only
           when the host sends `learningState`. On a connection that does not send it (a

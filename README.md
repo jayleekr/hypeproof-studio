@@ -51,6 +51,17 @@ the single source of truth. `docs/essence-v0.1.md` is deprecated history.
 | **"Think again" expansion** — short inputs get rolled back into the learner so they practice Intent clarity. | <img src=".github/assets/roll-input.png" alt="Roll-input expansion banner" width="380"> |
 | **Per-cohort profiles** — each workshop session is one profile file: system prompt, model policy, UX copy. Adding a cohort is one file, zero code. | See [docs/COHORT-AUTHORING.md](./docs/COHORT-AUTHORING.md) |
 
+## Roadmap: curriculum-connected classroom operation
+
+**In development, not a released feature.** One instructor should be able to
+configure a curriculum, see each learner's progress and help requests, and run
+bounded remote actions with per-learner results. The three categories and their
+distinct purposes are in the [existing roadmap](docs/plan/learning-agent-experience-epics.md#one-instructor-classroom).
+After integrated acceptance, present this as **one main Features entry** with
+curriculum authoring, live classroom communication and remote intervention as its
+three capabilities. Keep incomplete capabilities in the roadmap; a merged PR or
+local demo alone does not promote the whole entry to shipped.
+
 ## Architecture
 
 ```
