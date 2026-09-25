@@ -33,13 +33,16 @@ import {
   type LLMProvider,
 } from "../env";
 import { bearer, verify, TokenError, type TokenPayload } from "../lib/tokens";
-import { gateChatRequest } from "../lib/chat-gate";
+import { gateChatRequest, bindingRefusalMessage } from "../lib/chat-gate";
 import { resolveProfile } from "../lib/modules";
 import { applyLessonFeatures } from '../lib/lesson-feature-policy';
-import { resolveTokenLesson } from '../lib/lesson-delivery';
+import { resolveEffectiveLesson, recordDispatch, recordOutcome, closeTurn, readTurn, bindingsEnforced, type BindingView } from '../lib/lesson-binding-store';
+import { BINDING_HEADER, CLOSE_OUTCOMES, TURN_ID_RE, classifyOutcome, turnState } from '../lib/lesson-binding';
 import { profileServesCohort } from '../lib/cohort-binding';
 import { lessonAssistantName } from '../lib/session-design';
-import { isTokenRevoked, getRoster } from '../lib/kv';
+import { isTokenRevoked, getRoster, getActiveSession, isSessionLive } from '../lib/kv';
+/** #751 U3 — the first dispatch of a turn could not be put on record, so the provider is not called. */
+class LessonHold extends Error { code: string; constructor(code: string) { super(code); this.code = code; } }
 import { translate, translateOpenAI, modelAnnouncement, type CoachContext } from "../lib/translate";
 import { callAnthropic, callAnthropicResilient } from "../lib/anthropic";
 import { glmUpstreamUrl } from "../lib/glm";
@@ -217,6 +220,38 @@ chat.get('/activity', async c => {
   return c.json({ activity_id: await activityIdentity(gate.payload) });
 });
 
+// #751 U3 — what the Service has on record about ONE turn of THIS token, and the host's statement that the turn ended.
+// The SDK host cannot read a refused request's body, so it asks here before it decides whether the learner's input goes
+// back into the composer (nothing dispatched) or the turn is marked partially executed (something dispatched). "Not
+// started" is answered only from a successful read of an enforced Service; everything else is `unknown`.
+async function turnCaller(c: any): Promise<{ payload: TokenPayload; run: string | null } | Response> {
+  c.header('cache-control', 'no-store');
+  const auth = await authenticateToken(c.req.header('authorization'), c.env.HPS_SIGNING_SECRET);
+  if (!auth.ok) return c.json({ error: { type: 'auth', code: auth.code, message: auth.message } }, 401);
+  if (auth.payload.role === 'issuer') return c.json({ error: { type: 'auth', code: 'wrong_role', message: 'issuer tokens have no turns' } }, 401);
+  if (auth.payload.jti && await isTokenRevoked(c.env.HPS_KV, auth.payload.jti)) return c.json({ error: { type: 'auth', code: 'revoked', message: '참여 코드가 폐기되었습니다.' } }, 401);
+  if (!TURN_ID_RE.test(c.req.param('turn') ?? '')) return c.json({ error: { type: 'request', code: 'turn_id', message: 'turn id' } }, 400);
+  const active = await getActiveSession(c.env.HPS_KV, auth.payload.c);
+  return { payload: auth.payload, run: active?.session_id ?? null };
+}
+chat.get('/lesson-turns/:turn', async (c) => {
+  const who = await turnCaller(c); if (who instanceof Response) return who;
+  // Looked up where the turn was admitted (any run of this cohort), not only in the run that is active now.
+  const read = await readTurn(c.env, who.payload, who.run, c.req.param('turn')!);
+  if (!read.known) return c.json({ turn_id: c.req.param('turn'), state: 'unknown' });
+  const row = read.row;
+  return c.json({ turn_id: c.req.param('turn'), state: turnState(row), admitted: !!row, closed: !!row?.closed_at, binding_key: row?.binding_key ?? null, ...(row?.last_failure_kind ? { last_failure: row.last_failure_kind } : {}) });
+});
+chat.post('/lesson-turns/:turn/close', async (c) => {
+  const who = await turnCaller(c); if (who instanceof Response) return who;
+  let b: any = null; try { b = await c.req.json(); } catch { b = null; }
+  const outcome = b && typeof b === 'object' && Object.keys(b).every((k) => k === 'outcome') && (CLOSE_OUTCOMES as readonly unknown[]).includes(b.outcome) ? b.outcome as string : null;
+  if (!outcome) return c.json({ error: { type: 'request', code: 'outcome', message: `outcome is one of ${CLOSE_OUTCOMES.join(', ')}` } }, 400);
+  if (!bindingsEnforced(c.env)) return c.json({ turn_id: c.req.param('turn'), closed: false, reason: 'not_tracked' });
+  const r = await closeTurn(c.env, who.payload, { classRunId: who.run, turnId: c.req.param('turn')!, outcome, now: Date.now() });
+  return r === 'unavailable' ? c.json({ turn_id: c.req.param('turn'), closed: false, reason: 'storage' }, 503) : c.json({ turn_id: c.req.param('turn'), closed: r !== 'not_found', reason: r });
+});
+
 chat.get("/profile", async (c) => {
   const auth = await authenticateToken(c.req.header("authorization"), c.env.HPS_SIGNING_SECRET);
   if (!auth.ok) {
@@ -305,14 +340,22 @@ chat.get("/profile", async (c) => {
     : null;
 
   let lesson = null;
+  let lessonBinding: BindingView | null = null;
   if (auth.payload.lesson) {
     c.header('cache-control', 'no-store');
     if (auth.payload.jti && await isTokenRevoked(c.env.HPS_KV, auth.payload.jti)) return c.json({ error: { type: 'auth', code: 'revoked', message: '참여 코드가 폐기되었습니다.' } }, 401);
     const cohortDecision = await profileServesCohort(c.env, profile, auth.payload);
     if (!cohortDecision.ok || !(await getRoster(c.env.HPS_KV, auth.payload.c))?.users.includes(auth.payload.u))
       return c.json({ error: { type: 'auth', code: 'not_in_roster', message: '수업 명단을 강사에게 확인하세요.' } }, 403);
-    lesson = await resolveTokenLesson(c.env, auth.payload, cohortDecision.lessonCohort);
-    if (!lesson) return c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 알려주세요.' } }, 409);
+    // #751 U3 — the SAME resolver the chat gate uses, with the same class run: the app's tool policy, model list and steps
+    // come from the binding the Service would execute this seat under. An unreadable binding is a 503 here — the app keeps
+    // the profile it already has rather than being handed the (possibly wider) token lesson.
+    const active = bindingsEnforced(c.env) ? await getActiveSession(c.env.HPS_KV, auth.payload.c) : null;
+    const resolved = await resolveEffectiveLesson(c.env, auth.payload, { classRunId: active && isSessionLive(active) && active.profile_id === profile.id ? active.session_id : null, lessonCohort: cohortDecision.lessonCohort, mode: 'read', now: Date.now() });
+    if (!resolved.ok) return resolved.code === 'lesson_unavailable'
+      ? c.json({ error: { type: 'config', code: 'lesson_unavailable', message: '지정한 강의 버전을 열 수 없습니다. 강사에게 알려주세요.' } }, 409)
+      : c.json({ error: { type: 'lesson_binding', code: resolved.code, message: '수업 설정을 확인할 수 없습니다. 잠시 뒤 다시 시도해 주세요.' } }, 503);
+    lesson = resolved.lesson; lessonBinding = resolved.binding;
   }
 
   const assistantName = lessonAssistantName(lesson?.content);
@@ -326,6 +369,8 @@ chat.get("/profile", async (c) => {
   const served = lesson?.content.features ? applyLessonFeatures(profile, lesson.content.features) : profile;
   return c.json({
     ...(lesson ? { lesson } : {}),
+    // Served only where bindings are enforced: without enforcement the response is byte-identical to what it was.
+    ...(lessonBinding?.enforced ? { lesson_binding: lessonBinding } : {}),
     activity_id: await activityIdentity(auth.payload),
     activity_kind: auth.payload.native_trial ? "trial" : auth.payload.account ? "personal" : "classroom",
     profile_id: profile.id,
@@ -574,6 +619,13 @@ chat.post("/chat/completions", async (c) => {
   let reportedUsage: Record<string, unknown> = {};
   let returnedModel: string | null = null;
   let costComplete=false, costEnded=false;
+  // #751 U3 — execution evidence of the turn this request was admitted into (see `admit` below).
+  const lessonTurn = gate.turn;
+  // #751 U3 — under enforcement every permitted request is recorded with its lesson before it runs, turn id or not, and the
+  // usage row it produces is linked to that record. With enforcement unset both are null and nothing is added to this route.
+  const lessonUntracked = gate.binding?.enforced && !gate.turn && gate.lessonSha ? { class_run_id: session.session_id, student_id: payload.u, binding_seq: gate.binding.seq, lesson_sha256: gate.lessonSha } : null;
+  const usageLink = () => (dispatched && (lessonTurn || lessonUntracked) ? { class_run_id: (lessonTurn?.class_run_id ?? lessonUntracked!.class_run_id), student_id: payload.u, request_id: usageRequestId } : null);
+  let dispatched = false, upstreamStatus: number | null = null, streamBroke = false, protocolDone = false;
   const requestSignal = (multi||executionAccess) ? AbortSignal.any([c.req.raw.signal, AbortSignal.timeout(60000)]) : undefined;
 
   let effortReceipt: EffortReceipt | undefined;
@@ -603,6 +655,7 @@ chat.post("/chat/completions", async (c) => {
     module_fallback: module.fallback?.pinned ?? null,
   });
   const record = (log: ChatLog) => {
+    if (dispatched && lessonTurn) c.executionCtx.waitUntil(recordOutcome(env, lessonTurn, classifyOutcome({ upstreamStatus, protocolComplete: protocolDone, streamError: streamBroke, outputTokens: log.tokens_out, recordedStatus: log.status }), { status: upstreamStatus, now: Date.now() }));
     c.executionCtx.waitUntil(captureUsageCost(env,usageRequestId,{usage:reportedUsage,model:returnedModel,
       tier:typeof reportedUsage.service_tier==='string'?reportedUsage.service_tier:null,
       region:typeof reportedUsage.inference_geo==='string'?reportedUsage.inference_geo:(env.HPS_USAGE_REGION??null),
@@ -621,7 +674,7 @@ chat.post("/chat/completions", async (c) => {
 
     c.executionCtx.waitUntil(persistRequestSettings(env,payload,c.req.header('x-hps-turn-id'),settingsRequestId,modelLabel,effortReceipt,log.status));
     logChat(env, log);
-    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }));
+    c.executionCtx.waitUntil(persistUsage(env, { ...log, session_id: payload.account?null:session.session_id }, usageLink()));
   };
   /** #684 — a turn that never produced tokens. The row is the whole point. */
   const recordFailure = (status: number, error_kind: string) =>
@@ -749,7 +802,16 @@ chat.post("/chat/completions", async (c) => {
     c.header('x-hps-usage-request-id',usageRequestId);
     if (!reserved) return c.json({error:{code:'model_usage_limit',message:'실행 중인 작업이 있거나 이 수업의 요청 한도에 도달했습니다.'}},429);
   }
+  // #751 U3 — called by every provider branch right before its upstream call, AFTER budget admission: a request that is
+  // refused for its body, its effort or its budget has left no execution evidence. The first dispatch of a turn is a
+  // durable record that precedes the call; if it cannot be written the provider is not called (LessonHold).
   const admit=async(wire:Record<string,any>,protocol:'anthropic-messages'|'openai-chat')=>{
+    await reserve(wire,protocol);
+    const intent = await recordDispatch(env, lessonTurn, { request: usageRequestId, runtime: 'proxy', model: String(wire.model ?? modelLabel), now: Date.now(), untracked: lessonUntracked });
+    if (!intent.ok) throw new LessonHold(intent.code);
+    dispatched = true;
+  };
+  const reserve=async(wire:Record<string,any>,protocol:'anthropic-messages'|'openai-chat')=>{
     if(!executionAccess)return;
     await reserveBudgetAttempt(env,executionAccess,{request_id:usageRequestId,turn_id:c.req.header('x-hps-turn-id'),session_id:session.session_id,payload,
       provider,model:wire.model,runtime:'proxy',features:permittedFeatureKeys(profile),effort:effortReceipt?.applied,protocol,body:wire});
@@ -832,6 +894,10 @@ chat.post("/chat/completions", async (c) => {
     }
   } catch (err) {
     if (err instanceof AccessError) return budgetErrorResponse(c,err);
+    if (err instanceof LessonHold) {
+      recordFailure(403, ERROR_KIND.BAD_REQUEST);
+      return c.json({ error: { type: 'lesson_binding', code: err.code, message: bindingRefusalMessage(err.code) } }, 403);
+    }
     if (err instanceof EffortPolicyError) {
       recordFailure(403, ERROR_KIND.BAD_REQUEST);
       return c.json({error:{type:'permission_error',message:err.message,code:'effort_not_allowed'}},403);
@@ -852,6 +918,7 @@ chat.post("/chat/completions", async (c) => {
   }
 
   // 7. Upstream guard
+  upstreamStatus = upstream.status;
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => "");
     costEnded=upstream.status>=400&&upstream.status<500;
@@ -898,6 +965,8 @@ chat.post("/chat/completions", async (c) => {
     reportedUsage = {...(j.usage??{}),...(typeof j.service_tier==='string'?{service_tier:j.service_tier}:{})};
     returnedModel = typeof j.model === 'string' ? j.model : null;
     costComplete=true;costEnded=true;
+    // The provider's own end marker, not "a 2xx with a body": Anthropic `stop_reason`, OpenAI-shape `finish_reason`.
+    protocolDone = typeof j?.stop_reason === 'string' || typeof j?.choices?.[0]?.finish_reason === 'string';
     let text = "";
     let tin = 0;
     let tout = 0;
@@ -1025,7 +1094,7 @@ chat.post("/chat/completions", async (c) => {
   // died is this hook, which the SSE layer fires BEFORE onUsage.
   let streamFailed = false;
   const streamOptions = {
-    onProtocolComplete:()=>{costComplete=true;costEnded=true;},
+    onProtocolComplete:()=>{costComplete=true;costEnded=true;protocolDone=true;},
     // #257 — lets the SSE layer emit a sanitized stream_error carrying the
     // request_id instead of raw internal prose.
     requestId: c.get("requestId"),
@@ -1038,7 +1107,7 @@ chat.post("/chat/completions", async (c) => {
       streamedAssistantText += delta;
     },
     onStreamError: () => {
-      streamFailed = true;
+      streamFailed = true; streamBroke = true;
     },
     onBeforeDone: () => ({
       type: "asset_score",
@@ -1112,6 +1181,7 @@ chat.post("/chat/completions", async (c) => {
   if (fellBack) streamHeaders["x-hps-fallback"] = "1";
   // #1008 — the gate's c.header() receipt does not survive a raw Response.
   if (gate.help) streamHeaders["x-hps-help-mode"] = gate.help;
+  if (gate.binding) streamHeaders[BINDING_HEADER] = gate.binding.key;
   // Carry it on the streaming path too. Carrying it on only one side opens a new
   // hole: "it goes quiet when it streams".
   const streamAnnounce = modelAnnouncement((body as any)?.model, profile, modelLabel);
