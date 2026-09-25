@@ -3173,6 +3173,36 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-KB-STORE",
+      "stage": "implementation",
+      "label": "Chalk knowledge store — worker implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/chalk-knowledge.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-KB-STORE",
+      "stage": "test",
+      "label": "Chalk knowledge store — unit + integration tests",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-KB-STORE",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-knowledge.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-CHALK-PLAN-PARSER",
       "stage": "implementation",
       "owner": "JinyongShin",
