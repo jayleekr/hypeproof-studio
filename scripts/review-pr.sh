@@ -174,16 +174,29 @@ if [[ -f "$IMPORT_SCRIPT" ]]; then
       VAULT_COMMIT="$(grep 'source_commit:' "$KB_SQL" | head -1 | sed 's/.*source_commit: *//' | tr -d ' ')"
       DOC_COUNT="$(grep 'doc_count:' "$KB_SQL" | head -1 | sed 's/.*doc_count: *//' | tr -d ' ')"
       echo "적재 중... (commit: ${VAULT_COMMIT:-unknown}, docs: ${DOC_COUNT:-?})"
-      LOAD_OUT="$(cd "$WORKER_DIR" && npx wrangler d1 execute hypeproof-studio --local --file "$KB_SQL" 2>&1)"
-      LOAD_RC=$?
+      LOAD_RC=0
+      LOAD_OUT="$(cd "$WORKER_DIR" && npx wrangler d1 execute hypeproof-studio --local --file "$KB_SQL" 2>&1)" || LOAD_RC=$?
       echo "$LOAD_OUT" | grep -v "^$\|Reading\|Executing" || true
       if [[ $LOAD_RC -ne 0 ]]; then
         echo "WARNING: D1 적재 실패 (wrangler exit $LOAD_RC). 모형 추천·brief는 409로 응답합니다." >&2
       else
-        LOADED_COUNT="$(cd "$WORKER_DIR" && npx wrangler d1 execute hypeproof-studio --local \
-          --command "SELECT COUNT(*) FROM chalk_knowledge_docs WHERE version=1" 2>/dev/null \
-          | grep -oE '[0-9]+' | tail -1 || echo 0)"
-        if [[ -n "${DOC_COUNT:-}" ]] && [[ "${LOADED_COUNT:-0}" == "$DOC_COUNT" ]]; then
+        COUNT_RC=0
+        COUNT_OUT="$(cd "$WORKER_DIR" && npx wrangler d1 execute hypeproof-studio --local \
+          --command "SELECT COUNT(*) FROM chalk_knowledge_docs WHERE version=1" \
+          --json 2>/dev/null)" || COUNT_RC=$?
+        if [[ $COUNT_RC -ne 0 ]]; then
+          LOADED_COUNT="?"
+        else
+          LOADED_COUNT="$(python3 -c "
+import sys, json
+try:
+    rows = json.loads(sys.stdin.read())
+    print(rows[0]['results'][0].get('COUNT(*)', '?'))
+except Exception:
+    print('?')
+" <<< "$COUNT_OUT")"
+        fi
+        if [[ -n "${DOC_COUNT:-}" ]] && [[ "${LOADED_COUNT:-?}" == "$DOC_COUNT" ]]; then
           echo "지식 적재 완료 — vault commit: ${VAULT_COMMIT:-unknown}, docs: ${DOC_COUNT}"
         else
           echo "WARNING: 적재된 문서 수 불일치 — 기대 ${DOC_COUNT:-?}, 실제 ${LOADED_COUNT:-?}. 추천·brief가 409일 수 있습니다." >&2
