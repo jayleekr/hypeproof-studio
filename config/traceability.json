@@ -3365,6 +3365,40 @@
           "path": "worker/test/chalk-recommend.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-TOOL-LAYER",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-DES-CHALK-TOOLS"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/src/chalk/tools.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/localRuntime/index.ts"
+        },
+        {
+          "path": "extensions/hypeproof-chat/src/extension.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-TOOL-LAYER",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SUB",
+        "ST-DES-CHALK-TOOLS"
+      ],
+      "sources": [
+        {
+          "path": "extensions/hypeproof-chat/test/chalk-tools.test.mjs"
+        }
+      ]
     }
   ]
 }

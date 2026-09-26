@@ -100,6 +100,10 @@
         "title": "HypeProof Chat: 저장된 issuer 토큰 지우기"
       },
       {
+        "command": "hypeproof-chat.chalk.checkPlan",
+        "title": "Chalk: 초안 검사 (강사용)"
+      },
+      {
         "command": "hypeproof-chat.previewActiveFile",
         "title": "HypeProof: HTML 미리보기 (옆 패널)",
         "icon": "$(open-preview)"
@@ -276,11 +280,12 @@
     "build:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js",
     "build:webview": "cd webview-ui && npm install && npm run build",
     "typecheck": "tsc --noEmit",
-    "test": "for f in test/*.smoke.mjs; do echo \"— $f\"; node --experimental-strip-types \"$f\" || exit 1; done && npm run test:classroom-ops:review",
+    "test": "for f in test/*.smoke.mjs; do echo \"— $f\"; node --experimental-strip-types \"$f\" || exit 1; done && npm run test:classroom-ops:review && npm run test:chalk-tools",
     "watch:extension": "esbuild src/extension.ts --bundle --platform=node --target=node18 --external:vscode --outfile=dist/extension.js --watch",
     "watch:webview": "cd webview-ui && npm run dev",
     "package": "vsce package --no-dependencies",
-    "test:classroom-ops:review": "node --experimental-strip-types --test test/classroom-ops-review.test.mjs test/classroom-ops-expiry-review.test.mjs test/classroom-ops-recovery.test.mjs test/sdk-terminal-failure.test.mjs"
+    "test:classroom-ops:review": "node --experimental-strip-types --test test/classroom-ops-review.test.mjs test/classroom-ops-expiry-review.test.mjs test/classroom-ops-recovery.test.mjs test/sdk-terminal-failure.test.mjs",
+    "test:chalk-tools": "node --experimental-strip-types test/chalk-tools.test.mjs"
   },
   "devDependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.207",
