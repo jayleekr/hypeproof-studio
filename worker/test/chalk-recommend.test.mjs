@@ -408,4 +408,20 @@ await check("I-09 vocab:prior missing → 409 knowledge incomplete", async () =>
   assert.ok(r.json.error.includes("incomplete"));
 });
 
+await check("I-10 oversized body without valid token → 401 not 413", async () => {
+  // Auth middleware runs before bodyLimit; unauthenticated oversized request must get 401.
+  const db = makeDb();
+  const env = makeEnv(db);
+  const bigBody = JSON.stringify({ conditions: [], goals: [], padding: "x".repeat(256 * 1024 + 1) });
+  const res = await app.fetch(
+    new Request("https://service.test" + base, {
+      method: "POST",
+      headers: { authorization: "Bearer not-a-valid-token", "content-type": "application/json" },
+      body: bigBody,
+    }),
+    env, makeCtx(),
+  );
+  assert.equal(res.status, 401);
+});
+
 console.log(`\n${passed} tests passed.`);

@@ -5,7 +5,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
-import { authorizeIssuerForCohort } from "../lib/instructor-auth";
+import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-auth";
 import { owns, type Draft } from "./authoring";
 import { recommendMethods, VocabError, type MethodFields } from "../lib/chalk-recommend";
 
@@ -18,7 +18,18 @@ interface KbDoc {
   source_path: string | null;
 }
 
-export const chalkRecommend = new Hono<{ Bindings: Env }>();
+type Vars = { Variables: { author: IssuerAuthz } };
+
+export const chalkRecommend = new Hono<{ Bindings: Env } & Vars>();
+
+// Auth middleware — runs before bodyLimit so oversized unauthenticated requests get 401.
+chalkRecommend.use("/chalk/cohorts/:cohort/courses/:course/recommend", async (c, next) => {
+  const auth = await authorizeIssuerForCohort(c, c.req.param("cohort")!);
+  if (auth instanceof Response) return auth;
+  if (!auth) return c.json({ error: "instructor Bearer required" }, 401);
+  c.set("author", auth);
+  await next();
+});
 
 chalkRecommend.post(
   "/chalk/cohorts/:cohort/courses/:course/recommend",
@@ -26,10 +37,7 @@ chalkRecommend.post(
   async (c) => {
     const cohort = c.req.param("cohort")!;
     const course = c.req.param("course")!;
-
-    const auth = await authorizeIssuerForCohort(c, cohort);
-    if (auth instanceof Response) return auth;
-    if (!auth) return c.json({ error: "instructor Bearer required" }, 401);
+    const auth = c.get("author");
 
     c.header("cache-control", "no-store");
 
