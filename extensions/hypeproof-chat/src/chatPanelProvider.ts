@@ -1,4 +1,5 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
+import { InstructorModeManager } from './chalk/instructorMode';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
 import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
@@ -219,13 +220,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   private profileGeneration=0;
-  // #1298 — cached instructor-mode flag. Null means "not yet checked".
-  // Reset in invalidateProfile() whenever the token changes.
-  private _isInstructor: boolean | null = null;
-  private _isInstructorToken: string | undefined = undefined;
-  // #1298 — cached instructor brief text. Reset with instructor state.
-  private _instructorBrief: string | undefined = undefined;
-  private _instructorBriefVersion: number | undefined = undefined;
+  // #1298 — instructor-mode state and server calls. Reset in invalidateProfile().
+  private _instructorMode = new InstructorModeManager();
   private nativeObservationError: string | null = null;
   private nativeLearningPath: {title:string;url:string;reason:string} | null = null;
   private observationAssessment: AbortController | null = null;
@@ -900,10 +896,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     this.activeCohortId = null;
     this.nativeHistoryScope = null;
     // #1298 — re-check instructor status + brief after token change.
-    this._isInstructor = null;
-    this._isInstructorToken = undefined;
-    this._instructorBrief = undefined;
-    this._instructorBriefVersion = undefined;
+    this._instructorMode.reset();
   }
 
   /** #381 — cause of the most recent failed profile fetch, if any. */
@@ -3064,7 +3057,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           history:history.map(m=>({role:m.role,content:m.content})),userText:userTextForModel,
           signal:ctrl.signal,onDelta,onActivity,
           // #1298 — pass instructor brief as system prompt override when in instructor mode.
-          ...(this._isInstructor && this._instructorBrief ? { systemPrompt: this._instructorBrief } : {}),
+          ...(this._instructorMode.isInstructor && this._instructorMode.brief ? { systemPrompt: this._instructorMode.brief } : {}),
           requestApproval:async action=>{
             let prompted=false;
             const approved=await this.resolveActionApproval({requestId:randomId(),...sdkToolToActionRequest(action)},()=>{prompted=true;});
@@ -3736,48 +3729,6 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     return pick === verb;
   }
 
-  // #1298 — check GET /admin/chalk/whoami with the current token.
-  // Caches result per token so we don't hammer the server on every postConfig.
-  private async checkInstructorMode(token: string | undefined, proxyUrl: string): Promise<boolean> {
-    if (!token) { this._isInstructor = false; this._isInstructorToken = undefined; return false; }
-    if (this._isInstructor !== null && this._isInstructorToken === token) return this._isInstructor;
-    try {
-      const base = proxyUrl.replace(/\/v1\/?$/, '');
-      const res = await fetch(`${base}/admin/chalk/whoami`, {
-        headers: { authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(5000),
-      });
-      this._isInstructor = res.ok;
-    } catch {
-      this._isInstructor = false;
-    }
-    this._isInstructorToken = token;
-    return this._isInstructor;
-  }
-
-  // #1298 — fetch GET /admin/chalk/instructor-brief once per session.
-  // Caches by version: if the server returns up_to_date:true the cached text is reused.
-  // Falls back to undefined on network error (instructor chat still works, just no system prompt).
-  private async fetchInstructorBrief(token: string, proxyUrl: string): Promise<string | undefined> {
-    const base = proxyUrl.replace(/\/v1\/?$/, '');
-    const versionParam = this._instructorBriefVersion !== undefined
-      ? `?version=${this._instructorBriefVersion}` : '';
-    try {
-      const res = await fetch(`${base}/admin/chalk/instructor-brief${versionParam}`, {
-        headers: { authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!res.ok) return this._instructorBrief;
-      const body = await res.json() as { id: string; version: number; text?: string | null; up_to_date?: boolean };
-      if (body.up_to_date) return this._instructorBrief;
-      this._instructorBriefVersion = body.version;
-      this._instructorBrief = body.text ?? undefined;
-    } catch {
-      // network failure — reuse cached value
-    }
-    return this._instructorBrief;
-  }
-
   private async postConfig(): Promise<void> {
     const activity=activityConnections(this.context)?.current;
     const scope=activity?.id;
@@ -3798,9 +3749,9 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     if (scope!==activityConnections(this.context)?.scope) return;
     const local=localRuntimeConfig(vscode.env.appName,cfg.get<string>('proxyUrl','https://api.hypeproof-ai.xyz/v1'));
     const proxyUrl = cfg.get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
-    const isInstructor = await this.checkInstructorMode(token, proxyUrl);
+    const isInstructor = await this._instructorMode.checkInstructorMode(token, proxyUrl);
     const instructorBrief = (isInstructor && token)
-      ? await this.fetchInstructorBrief(token, proxyUrl)
+      ? await this._instructorMode.fetchInstructorBrief(token, proxyUrl)
       : undefined;
     await this.post({
       type: "config",

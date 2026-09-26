@@ -36,6 +36,7 @@ import { classroomReportsTeacher } from "./classroom-reports";
 import { classroomDeliveryOperator, classroomDeliveryTeacher } from "./classroom-delivery";
 import {nativeTrials} from './native-trials';
 import { chalkKnowledge } from './chalk-knowledge';
+import { chalkInstructor } from './chalk-instructor';
 import type { Env } from "../env";
 import { listProfiles, getProfile } from "../profiles";
 import {createNativeGrant,NATIVE_TRIAL_LIMITS} from "../lib/native-trial-grants";
@@ -155,6 +156,7 @@ admin.route("/", classroomDeliveryOperator);
 admin.route("/", classroomCollectOperator);
 admin.route('/',nativeTrials);
 admin.route('/', chalkKnowledge);
+admin.route('/', chalkInstructor);
 
 // ---- cohort list ------------------------------------------------------------
 
@@ -1217,48 +1219,4 @@ admin.post("/reports/:id/resolve", async (c) => {
     });
   }
   return c.json({ ok: true, report_id: id, status: "resolved" });
-});
-
-// #1298 — instructor-mode identity check. Any valid, un-revoked issuer token
-// returns 200 + scopes. A student token or an absent Bearer → 401/403.
-// The Studio extension calls this after token entry to decide whether to open
-// the instructor chat panel. No cohort is required: the token itself carries
-// the scopes, and the client is only asking "am I an instructor?".
-admin.get("/chalk/whoami", async (c) => {
-  const result = await authorizeIssuer({ env: c.env, req: { header: (k) => c.req.header(k) } });
-  if (result === null) return c.json({ error: "no bearer token" }, 401);
-  if (result instanceof Response) return result;
-  const { payload } = result;
-  return c.json({
-    role: payload.role,
-    cohorts: (payload.scopes ?? []).map((s) => s.cohort),
-  });
-});
-
-// #1298 — versioned instructor system prompt. The client fetches this once at
-// instructor-mode activation and uses it as the system prompt for instructor
-// chat turns. Stored server-side so updates reach all clients without a build.
-// Version is a monotonic integer; the client may cache and skip re-fetch when
-// the cached version matches.
-const INSTRUCTOR_BRIEF_VERSION = 1;
-const INSTRUCTOR_BRIEF_TEXT = `You are an AI assistant helping a course instructor author Chalk lessons.
-
-Chalk lesson authoring workflow:
-1. Fill fields in order: input context → recommended structure → brief text → step-by-step sections → save and validate → up to 3 revision cycles.
-2. Use only server-recommended models. Do not suggest or switch to other models.
-3. Vocabulary keys must come from the vocab:* namespace only.
-4. Do not block draft validation — run checks and surface results without stopping the flow.
-5. Confirm with the instructor before applying structural changes.
-
-This is an instructor workspace. Cohort safety rules and student coach prompts do not apply here.`;
-
-admin.get("/chalk/instructor-brief", async (c) => {
-  const result = await authorizeIssuer({ env: c.env, req: { header: (k) => c.req.header(k) } });
-  if (result === null) return c.json({ error: "no bearer token" }, 401);
-  if (result instanceof Response) return result;
-  const requestedVersion = Number(c.req.query("version") ?? 0);
-  if (requestedVersion === INSTRUCTOR_BRIEF_VERSION) {
-    return c.json({ id: "chalk-instructor-brief", version: INSTRUCTOR_BRIEF_VERSION, text: null, up_to_date: true });
-  }
-  return c.json({ id: "chalk-instructor-brief", version: INSTRUCTOR_BRIEF_VERSION, text: INSTRUCTOR_BRIEF_TEXT });
 });
