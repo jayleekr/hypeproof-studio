@@ -321,7 +321,7 @@ await check('T-L17 409 from check passes through as IssuerHttpError, not 지식 
 await check('T-L18 400 VocabError from recommend → field and unknown_values in message', async () => {
   await withMockServer((req, res) => {
     res.writeHead(400, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ field: 'conditions', unknown_values: ['bad-key'] }));
+    res.end(JSON.stringify({ error: 'unknown vocabulary values', field: 'conditions', unknown_values: ['bad-key'] }));
   }, async (port) => {
     let threw = null;
     try {
