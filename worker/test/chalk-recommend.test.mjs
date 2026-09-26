@@ -424,4 +424,20 @@ await check("I-10 oversized body without valid token → 401 not 413", async () 
   assert.equal(res.status, 401);
 });
 
+await check("I-11 oversized body with valid token → 413", async () => {
+  // bodyLimit runs after auth; authenticated oversized request must get 413.
+  const db = makeDb();
+  const env = makeEnv(db);
+  const bigBody = JSON.stringify({ conditions: [], goals: [], padding: "x".repeat(256 * 1024 + 1) });
+  const res = await app.fetch(
+    new Request("https://service.test" + base, {
+      method: "POST",
+      headers: { authorization: `Bearer ${issuerTok}`, "content-type": "application/json" },
+      body: bigBody,
+    }),
+    env, makeCtx(),
+  );
+  assert.equal(res.status, 413);
+});
+
 console.log(`\n${passed} tests passed.`);
