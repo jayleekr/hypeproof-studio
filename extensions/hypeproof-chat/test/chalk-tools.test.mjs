@@ -271,9 +271,10 @@ await check('T-L15 execRecommendMethods → POST /admin/chalk/cohorts/:cohort/co
     await execRecommendMethods(fakeCtx(port), {
       cohort: 'sk-biopharm-kids-s1',
       course: 'lesson-01',
-      conditions: ['short-time'],
-      goals: ['build-concept'],
+      conditions: ['short-session'],
+      goals: ['conceptual-understanding'],
     });
+    // 키는 kids_edu_vault/curriculum_wiki/rules/curriculum-schema.md §조건·목표 어휘에서 복사
     assert.match(
       captured,
       /\/admin\/chalk\/cohorts\/sk-biopharm-kids-s1\/courses\/lesson-01\/recommend/,
@@ -291,7 +292,7 @@ await check('T-L16 409 from recommend → 지식이 적재되지 않았습니다
     try {
       await execRecommendMethods(fakeCtx(port), {
         cohort: 'sk-biopharm-kids-s1', course: 'lesson-01',
-        conditions: ['short-time'], goals: ['build-concept'],
+        conditions: ['short-session'], goals: ['conceptual-understanding'],
       });
     } catch (e) { threw = e; }
     assert.ok(threw, '409 should throw');
