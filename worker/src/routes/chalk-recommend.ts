@@ -1,10 +1,9 @@
 // #1293 — POST /admin/chalk/cohorts/:cohort/courses/:course/recommend
 // Issuer Bearer only. Deterministic closed-vocabulary method recommendation.
 // Depends on chalk_knowledge_versions and chalk_knowledge_docs from #1288 (migration 0030).
-//
-// Note: this route will be merged into chalk-courses.ts once worker4's #1294
-// (POST …/check) lands — whichever PR merges second does the consolidation.
+// TODO(#1295): readDraft 통합
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
 import { authorizeIssuerForCohort } from "../lib/instructor-auth";
 import { owns, type Draft } from "./authoring";
@@ -23,6 +22,7 @@ export const chalkRecommend = new Hono<{ Bindings: Env }>();
 
 chalkRecommend.post(
   "/chalk/cohorts/:cohort/courses/:course/recommend",
+  bodyLimit({ maxSize: 256 * 1024, onError: (c) => c.json({ error: "request body too large" }, 413) }),
   async (c) => {
     const cohort = c.req.param("cohort")!;
     const course = c.req.param("course")!;
@@ -88,9 +88,33 @@ chalkRecommend.post(
     }
     const kbVersion = versionRow.version;
 
-    // Load method docs
+    // Load vocab docs — all three required; missing any → knowledge incomplete
+    const [goalVocabRow, condVocabRow, priorVocabRow] = await Promise.all([
+      c.env.HPS_DB
+        .prepare("SELECT fields_json FROM chalk_knowledge_docs WHERE version=? AND doc_id='vocab:goal'")
+        .bind(kbVersion)
+        .first<{ fields_json: string }>(),
+      c.env.HPS_DB
+        .prepare("SELECT fields_json FROM chalk_knowledge_docs WHERE version=? AND doc_id='vocab:condition'")
+        .bind(kbVersion)
+        .first<{ fields_json: string }>(),
+      c.env.HPS_DB
+        .prepare("SELECT fields_json FROM chalk_knowledge_docs WHERE version=? AND doc_id='vocab:prior'")
+        .bind(kbVersion)
+        .first<{ fields_json: string }>(),
+    ]);
+
+    if (!goalVocabRow || !condVocabRow || !priorVocabRow) {
+      return c.json({ error: "knowledge incomplete; reload knowledge data" }, 409);
+    }
+
+    const goalKeys = (JSON.parse(goalVocabRow.fields_json) as { keys: Array<{ key: string }> }).keys.map((k) => k.key);
+    const condKeys = (JSON.parse(condVocabRow.fields_json) as { keys: Array<{ key: string }> }).keys.map((k) => k.key);
+    const priorKeys = (JSON.parse(priorVocabRow.fields_json) as { keys: Array<{ key: string }> }).keys.map((k) => k.key);
+
+    // Load method docs — ORDER BY doc_id for deterministic ordering
     const methodRows = await c.env.HPS_DB
-      .prepare("SELECT * FROM chalk_knowledge_docs WHERE version=? AND kind='method'")
+      .prepare("SELECT * FROM chalk_knowledge_docs WHERE version=? AND kind='method' ORDER BY doc_id")
       .bind(kbVersion)
       .all<KbDoc>();
 
@@ -106,23 +130,6 @@ chalkRecommend.post(
       };
     });
 
-    // Load vocab docs
-    const goalVocabRow = await c.env.HPS_DB
-      .prepare("SELECT fields_json FROM chalk_knowledge_docs WHERE version=? AND doc_id='vocab:goal'")
-      .bind(kbVersion)
-      .first<{ fields_json: string }>();
-    const condVocabRow = await c.env.HPS_DB
-      .prepare("SELECT fields_json FROM chalk_knowledge_docs WHERE version=? AND doc_id='vocab:condition'")
-      .bind(kbVersion)
-      .first<{ fields_json: string }>();
-
-    const goalKeys = goalVocabRow
-      ? (JSON.parse(goalVocabRow.fields_json) as { keys: Array<{ key: string }> }).keys.map((k) => k.key)
-      : [];
-    const condKeys = condVocabRow
-      ? (JSON.parse(condVocabRow.fields_json) as { keys: Array<{ key: string }> }).keys.map((k) => k.key)
-      : [];
-
     try {
       const result = recommendMethods(
         {
@@ -132,7 +139,7 @@ chalkRecommend.post(
           has_guidance: hasGuidance,
         },
         methods,
-        { goals: goalKeys, conditions: condKeys },
+        { goals: goalKeys, conditions: condKeys, prior: priorKeys },
         kbVersion,
       );
       return c.json(result);

@@ -27,6 +27,7 @@ const GOAL_VOCAB = [
   "evidence-based-reasoning", "questioning", "pattern-recognition",
   "systems-thinking", "reflection", "transfer",
 ];
+const PRIOR_VOCAB = ["novice", "intermediate", "any"];
 // Four methods: three biopharm-compatible, one excluded by condition
 const BASE_METHODS = [
   {
@@ -84,7 +85,7 @@ const METHODS_EXTRA = [
   },
   {
     id: "m-weak-overlap",
-    best_for: ["design-thinking", "creativity"],
+    best_for: ["design-thinking", "creative-thinking"],
     weak_for: ["cooperative-skills"],  // weak overlap with cooperative goals
     avoid_when: [],
     prior_knowledge: "any",
@@ -92,7 +93,7 @@ const METHODS_EXTRA = [
   },
 ];
 
-const VOCAB = { goals: GOAL_VOCAB, conditions: COND_VOCAB };
+const VOCAB = { goals: GOAL_VOCAB, conditions: COND_VOCAB, prior: PRIOR_VOCAB };
 
 // ── Unit tests (pure function, no DB) ─────────────────────────────────────────
 let passed = 0;
@@ -148,6 +149,7 @@ await check("U-06 goal rationale: matched goals shown when input goals provided"
     [BASE_METHODS[2]], VOCAB, 1,
   );
   assert.deepEqual(result.chosen[0].rationale, ["cooperative-skills"]);
+  assert.equal(result.chosen[0].no_goal_match, undefined);
 });
 
 await check("U-07 empty conditions → all methods are candidates", () => {
@@ -206,6 +208,50 @@ await check("U-12 weak_for overlap: penalised methods sorted after clean ones", 
   assert.deepEqual(result.chosen[1].weak_overlap, ["cooperative-skills"]);
 });
 
+await check("U-13 unknown learner_level throws VocabError('learner_level')", () => {
+  assert.throws(
+    () => recommendMethods({ conditions: [], goals: [], learner_level: "advanced" }, BASE_METHODS, VOCAB, 1),
+    (err) => err instanceof VocabError && err.field === "learner_level",
+  );
+});
+
+await check("U-14 card with invalid prior_knowledge → excluded with 'invalid_card_field'", () => {
+  const badCard = {
+    id: "m-bad-card",
+    best_for: ["inquiry-skills"],
+    avoid_when: [],
+    prior_knowledge: "advanced",  // not in vocab:prior
+    requires_guidance: false,
+  };
+  const result = recommendMethods({ conditions: [], goals: [] }, [badCard], VOCAB, 1);
+  assert.equal(result.excluded.length, 1);
+  assert.equal(result.excluded[0].id, "m-bad-card");
+  assert.ok(result.excluded[0].because.includes("invalid_card_field"));
+});
+
+await check("U-15 no goal match → rationale=[], no_goal_match=true", () => {
+  // m-predict-observe-explain: best_for has no overlap with goals
+  const result = recommendMethods(
+    { conditions: [], goals: ["cooperative-skills"] },
+    [BASE_METHODS[1]], VOCAB, 1,
+  );
+  assert.equal(result.chosen.length, 1);
+  assert.deepEqual(result.chosen[0].rationale, []);
+  assert.equal(result.chosen[0].no_goal_match, true);
+});
+
+await check("U-16 sort by goal match count: more matches rank higher", () => {
+  // m-guided-discovery matches 2 goals; m-cooperative-learning matches 1
+  const result = recommendMethods(
+    { conditions: [], goals: ["inquiry-skills", "observation", "cooperative-skills"] },
+    [BASE_METHODS[2], BASE_METHODS[0]], VOCAB, 1,
+    // cooperative-learning: best_for=["cooperative-skills","communication","leadership"] → 1 match
+    // guided-discovery: best_for=["inquiry-skills","observation","critical-thinking"] → 2 matches
+  );
+  assert.equal(result.chosen[0].id, "m-guided-discovery");   // 2 matches first
+  assert.equal(result.chosen[1].id, "m-cooperative-learning"); // 1 match second
+});
+
 // ── Integration tests (real routing, in-memory D1) ────────────────────────────
 // Tables defined inline to avoid depending on #1288 migration file (not in main yet).
 const KB_SCHEMA = `
@@ -230,13 +276,14 @@ const AUTHORING_SCHEMA = readFileSync(AUTHORING_SCHEMA_FILE, "utf8");
 const profileId = listProfiles().find((p) => p.session.cohort_id === COHORT)?.id;
 assert.ok(profileId, "profile not found for COHORT");
 
-function makeDb({ seed = true, seedDraft = true, draftOwner = "tester" } = {}) {
+function makeDb({ seed = true, seedDraft = true, draftOwner = "tester", omitPriorVocab = false } = {}) {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
   db.exec(KB_SCHEMA);
   db.exec(AUTHORING_SCHEMA);
   if (seed) {
-    db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,${BASE_METHODS.length + 2},'digest0')`).run();
+    const vocabCount = omitPriorVocab ? 2 : 3;
+    db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,${BASE_METHODS.length + vocabCount},'digest0')`).run();
     db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
       1, "vocab:goal", "vocab",
       JSON.stringify({ keys: GOAL_VOCAB.map((k) => ({ key: k, label: k })) }), "", null,
@@ -245,6 +292,12 @@ function makeDb({ seed = true, seedDraft = true, draftOwner = "tester" } = {}) {
       1, "vocab:condition", "vocab",
       JSON.stringify({ keys: COND_VOCAB.map((k) => ({ key: k, label: k })) }), "", null,
     );
+    if (!omitPriorVocab) {
+      db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
+        1, "vocab:prior", "vocab",
+        JSON.stringify({ keys: PRIOR_VOCAB.map((k) => ({ key: k, label: k })) }), "", null,
+      );
+    }
     for (const m of BASE_METHODS) {
       db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
         1, `method:${m.id}`, "method",
@@ -347,6 +400,12 @@ await check("I-08 other issuer's course → 404", async () => {
   // Draft is owned by "tester". otherIssuerTok.u = "other-instructor" → 404.
   const r = await req({ conditions: [], goals: [] }, otherIssuerTok);
   assert.equal(r.status, 404);
+});
+
+await check("I-09 vocab:prior missing → 409 knowledge incomplete", async () => {
+  const r = await req({ conditions: [], goals: [] }, issuerTok, makeDb({ omitPriorVocab: true }));
+  assert.equal(r.status, 409);
+  assert.ok(r.json.error.includes("incomplete"));
 });
 
 console.log(`\n${passed} tests passed.`);
