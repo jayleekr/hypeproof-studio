@@ -74,6 +74,9 @@ async function issuerFetch(
 
   const text = await res.text();
   if (!res.ok) {
+    if (res.status === 409) {
+      throw new Error("지식이 적재되지 않았습니다. 먼저 지식을 적재하세요.");
+    }
     throw new Error(`서버 오류 ${res.status}: ${text.slice(0, 200)}`);
   }
   try {

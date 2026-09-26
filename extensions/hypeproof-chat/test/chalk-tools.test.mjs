@@ -282,4 +282,21 @@ await check('T-L15 execRecommendMethods → POST /admin/chalk/cohorts/:cohort/co
   });
 });
 
+await check('T-L16 409 from recommend → 지식이 적재되지 않았습니다 message', async () => {
+  await withMockServer((req, res) => {
+    res.writeHead(409, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'knowledge_incomplete' }));
+  }, async (port) => {
+    let threw = null;
+    try {
+      await execRecommendMethods(fakeCtx(port), {
+        cohort: 'sk-biopharm-kids-s1', course: 'lesson-01',
+        conditions: ['no_prior'], goals: ['concept_understanding'],
+      });
+    } catch (e) { threw = e; }
+    assert.ok(threw, '409 should throw');
+    assert.ok(threw.message.includes('지식이 적재되지 않았습니다'), `409 message mismatch: ${threw.message}`);
+  });
+});
+
 console.log(`\n${passed} tests passed`);
