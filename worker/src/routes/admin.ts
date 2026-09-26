@@ -29,12 +29,14 @@ import { authoring } from "./authoring";
 import { chalkRecommend } from "./chalk-recommend";
 import { accessAdmin } from './access';
 import { classroomTeacher } from "./classroom";
-import { classroomOpsTeacher, recordTokenIssue, revokeOpsGrantsForIssuer } from "./classroom-ops";
+import { classroomOpsTeacher, fenceIssuerForDistribution, liftIssuerFence, recordTokenIssue, revokeOpsGrantsForIssuer } from "./classroom-ops";
+import { classroomDistributionTeacher } from "./classroom-distribution";
 import { OPS_CAPABILITIES } from "../lib/classroom-ops";
 import { classroomCollectOperator, classroomCollectTeacher } from "./classroom-collect";
 import { classroomReportsTeacher } from "./classroom-reports";
 import { classroomDeliveryOperator, classroomDeliveryTeacher } from "./classroom-delivery";
 import {nativeTrials} from './native-trials';
+import { chalkKnowledge } from './chalk-knowledge';
 import type { Env } from "../env";
 import { listProfiles, getProfile } from "../profiles";
 import {createNativeGrant,NATIVE_TRIAL_LIMITS} from "../lib/native-trial-grants";
@@ -146,12 +148,14 @@ admin.route('/', accessAdmin);
 admin.route("/", classroomTeacher);
 admin.route("/", classroomOpsTeacher);
 admin.route("/", classroomCollectTeacher);
+admin.route("/", classroomDistributionTeacher);
 admin.route("/", classroomReportsTeacher);
 admin.route("/", classroomDeliveryTeacher);
 admin.route("/", classroomDeliveryOperator);
 // Operator-only (admin auth): deliberately absent from isIssuerAllowedEndpoint.
 admin.route("/", classroomCollectOperator);
 admin.route('/',nativeTrials);
+admin.route('/', chalkKnowledge);
 
 // ---- cohort list ------------------------------------------------------------
 
@@ -375,6 +379,10 @@ admin.delete("/tokens/revoke/:jti", async (c) => {
   const jti = c.req.param("jti");
   if (!UUID_RE.test(jti)) return c.json({ error: "jti must be a valid UUID" }, 400);
   await unrevokeToken(c.env.HPS_KV, jti);
+  // #751 U2 — the D1 fence is lifted LAST, so a failure leaves distribution closed rather than open. Distributions that the
+  // revocation swept stay closed: restoring a token does not resurrect what was stopped under it.
+  try { await liftIssuerFence(c.env, jti); }
+  catch (err) { console.error("distribution fence not lifted:", err); return c.json({ ok: false, jti, kv_unrevoked: true, error: "token restored, but it still cannot distribute — retry this un-revoke" }, 500); }
   return c.json({ ok: true });
 });
 
@@ -602,12 +610,22 @@ admin.post("/issuers", async (c) => {
   // mint failure leaves the instructor with their OLD token rather than
   // neither. TTL = 90-day hard cap >= any issuer lifetime → no resurrection.
   if (body.revoke_jti !== undefined) {
-    await revokeToken(
-      c.env.HPS_KV,
-      body.revoke_jti,
-      { reason: "issuer re-scope", user: instructor },
-      MAX_DAYS * 24 * 60 * 60,
-    );
+    // #751 U2 — KV alone is not a boundary for distribution (it can reach other locations late). The replaced token is
+    // fenced in D1 FIRST; if that fails nothing is revoked and the new token is not returned, so the instructor keeps
+    // exactly what they had. Open distributions of the replaced token are closed only when the new scope no longer holds
+    // `distribute` in that cohort — re-issuing a token mid-class must not cancel what is waiting for offline learners.
+    const retainedCohorts = scopes.filter((s: { ops?: string[] }) => (s.ops ?? []).includes("distribute")).map((s: { cohort: string }) => s.cohort);
+    const retainedSettingCohorts = scopes.filter((s: { ops?: string[] }) => (s.ops ?? []).includes("lesson_settings")).map((s: { cohort: string }) => s.cohort);
+    try { await fenceIssuerForDistribution(c.env, body.revoke_jti, { reason: "issuer_rescope", by: minter, sweep: true, retainedCohorts, retainedSettingCohorts }); }
+    catch (err) { console.error("issuer re-scope: distribution fence not written:", err); return c.json({ error: "re-scope not applied: the replaced token could not be fenced — nothing changed, retry", reason: "distribute_fence_failed" }, 500); }
+    try {
+      await revokeToken(
+        c.env.HPS_KV,
+        body.revoke_jti,
+        { reason: "issuer re-scope", user: instructor },
+        MAX_DAYS * 24 * 60 * 60,
+      );
+    } catch (err) { console.error("issuer re-scope: KV revocation failed:", err); return c.json({ error: "the replaced token can no longer distribute but is not yet revoked — retry with the same revoke_jti", reason: "kv_revoke_failed" }, 500); }
   }
 
   // ⑦ audit — metadata only (NEVER the token). Root-of-trust issuance must be
@@ -967,7 +985,7 @@ admin.post("/cohorts/:id/session/close", async (c) => {
     );
   }
 
-  let revoked: string | null = null;
+  let revoked: string | null = null, distributeFenced = true;
   if (body.jti) {
     if (!UUID_RE.test(body.jti)) return c.json({ error: "jti must be a valid UUID" }, 400);
     const now = Math.floor(Date.now() / 1000);
@@ -977,8 +995,12 @@ admin.post("/cohorts/:id/session/close", async (c) => {
     const ttl = typeof body.exp === "number" && body.exp > now ? body.exp - now : 60 * 60 * 24;
     await revokeToken(c.env.HPS_KV, body.jti, { reason: "session-close", cohort: cohortId }, ttl);
     revoked = body.jti;
+    // #751 U2 — closing the class already stops new distribution (`run_ended`). The fence is written as well so the same
+    // token cannot distribute into ANOTHER open run; a failure does not undo the close and is reported, not hidden.
+    try { await fenceIssuerForDistribution(c.env, body.jti, { reason: "session_close", by: "session-close", sweep: true }); }
+    catch (err) { console.error("session close: distribution fence not written:", err); distributeFenced = false; }
   }
-  return c.json({ ok: true, ended: existing, revoked });
+  return c.json({ ok: true, ended: existing, revoked, ...(distributeFenced ? {} : { distribute_fenced: false }) });
 });
 
 // ---- live stats snapshot (S-09 / #50) ---------------------------------------

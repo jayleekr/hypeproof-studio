@@ -16,6 +16,9 @@
     "test:lesson:mac": "node --experimental-strip-types --experimental-sqlite lesson-studio/mac.mjs",
     "test:classroom": "node --experimental-strip-types --experimental-sqlite classroom/run.mjs",
     "test:classroom-ops": "node --experimental-strip-types --experimental-sqlite classroom/ops.mjs",
+    "test:classroom-report": "node --experimental-strip-types classroom/report-page.mjs",
+    "test:classroom-ops-selection": "node --experimental-strip-types --experimental-sqlite classroom/ops-selection.mjs",
+    "test:classroom-ops-roster": "node --experimental-strip-types --experimental-sqlite classroom/ops-roster.mjs",
     "test:trial-ux": "node trial-ux/run.mjs",
     "test:budgets:browser": "node --experimental-strip-types --experimental-sqlite access-budgets/browser.mjs",
     "test:budgets:mac": "node --experimental-strip-types --experimental-sqlite access-budgets/mac.mjs",
@@ -23,7 +26,11 @@
     "test:budgets:live-sdk": "node --experimental-strip-types --experimental-sqlite access-budgets/live-sdk.mjs",
     "test:voice:lifecycle": "node voice-conversation/probe-lifecycle.mjs",
     "test:voice:popup": "node voice-conversation/popup-browser.mjs",
-    "test:chalk-simple": "node --experimental-strip-types --experimental-sqlite chalk-authoring/simple.mjs"
+    "test:chalk-simple": "node --experimental-strip-types --experimental-sqlite chalk-authoring/simple.mjs",
+    "test:classroom-ops-distribution": "node --experimental-strip-types --experimental-sqlite classroom/ops-distribution.mjs",
+    "test:classroom-ops-lesson-settings": "node --experimental-strip-types --experimental-sqlite classroom/ops-lesson-settings.mjs",
+    "test:classroom-ops-help": "node --experimental-strip-types --experimental-sqlite classroom/ops-help.mjs",
+    "test:classroom-ops-results": "node --experimental-strip-types --experimental-sqlite classroom/ops-results.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

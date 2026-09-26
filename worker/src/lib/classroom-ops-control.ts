@@ -21,3 +21,18 @@ export async function readRunControl(env: Env, classRunId: string): Promise<RunC
     return null;
   }
 }
+
+/**
+ * U4 — the same row plus when it last changed (Service clock), for the instructor status view only. One read, so the
+ * status poll costs what it did before. The learning path keeps using readRunControl and never sees `updated_at`.
+ */
+export async function readRunControlDetail(env: Env, classRunId: string): Promise<(RunControl & { updated_at: number }) | null> {
+  if (env.HPS_CLASSROOM_OPS !== 'enabled') return null;
+  try {
+    const row = await env.HPS_DB.prepare('SELECT paused,control_revision,updated_at FROM class_run_control WHERE class_run_id=?').bind(classRunId).first<{ paused: number; control_revision: number; updated_at: number }>();
+    return row ? { paused: row.paused === 1, control_revision: row.control_revision, updated_at: row.updated_at } : null;
+  } catch (err) {
+    console.error('class run control unavailable — shown as never set:', err);
+    return null;
+  }
+}
