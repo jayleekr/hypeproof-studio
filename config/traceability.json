@@ -3390,6 +3390,7 @@
       "label": "Chalk 도구 층 단위 시험 (E4-2 / #1297)",
       "owner": "JinyongShin",
       "depends_on": [
+        "ST-REQ-CHALK-SUB",
         "ST-IMP-CHALK-TOOL-LAYER"
       ],
       "sources": [
@@ -3415,6 +3416,7 @@
       "label": "Chalk 생성 도구 단위 시험 (E2-6 / #1295, #1306)",
       "owner": "JinyongShin",
       "depends_on": [
+        "ST-REQ-CHALK-GEN",
         "ST-IMP-CHALK-GEN-APP"
       ],
       "sources": [
