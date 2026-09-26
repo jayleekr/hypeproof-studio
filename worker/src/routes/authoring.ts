@@ -12,9 +12,10 @@ import { checkLessonPedagogy, blockingPedagogyFindings } from "../lib/lesson-ped
 import { readLesson } from '../lib/lesson-delivery';
 import { issue } from '../lib/tokens';
 import { getRoster, getActiveSession } from '../lib/kv';
+import { recordTokenIssue } from './classroom-ops';
 
 type Bindings = { Bindings: Env; Variables: { author: IssuerAuthz } };
-interface Draft { cohort_id: string; course_id: string; owner_id: string; profile_id: string; revision: number; content_json: string; request_id: string; request_hash: string; updated_at: string; independent?: number }
+export interface Draft { cohort_id: string; course_id: string; owner_id: string; profile_id: string; revision: number; content_json: string; request_id: string; request_hash: string; updated_at: string; independent?: number }
 interface Version { source_revision: number; module_json: string }
 const root = "/cohorts/:cohort/authoring/:course";
 const validId = (s: string) => /^[a-zA-Z0-9_-]{1,128}$/.test(s);
@@ -86,15 +87,18 @@ authoring.post(root + '/versions/:version/participants', async c => {
   const roster = await getRoster(c.env.HPS_KV, cohort);
   if (!roster?.users.includes(b.user)) return c.json({ error: 'register this student in the session console first' }, 403);
   const ref = { course_id: course, version: lesson.version, sha256: lesson.sha256 };
-  const { token } = await issue({ u: b.user, c: cohort, p: d.profile_id, lesson: ref }, b.hours, c.env.HPS_SIGNING_SECRET);
-  return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal: 'not_run' });
+  const { token, jti } = await issue({ u: b.user, c: cohort, p: d.profile_id, lesson: ref }, b.hours, c.env.HPS_SIGNING_SECRET);
+  // Lesson-bound invitations are token issuance too: mirror the normal mint
+  // ledger and reissue fence without letting an ops outage block the lesson.
+  const opsIssue = await recordTokenIssue(c.env, { jti, cohort, student: b.user, profile: d.profile_id, issuedBy: a.payload.u, hours: b.hours });
+  return c.json({ token, lesson: ref, user: b.user, expires_at: Math.floor(Date.now() / 1000) + b.hours * 3600, session_ends_at: session.ends_at, rehearsal: 'not_run', ...(opsIssue ? { ops: opsIssue } : {}) });
 });
 
 async function readDraft(db: D1Database, cohort: string, course: string) {
   return db.prepare(`SELECT d.*, EXISTS(SELECT 1 FROM authoring_independent_courses m WHERE m.cohort_id=d.cohort_id AND m.course_id=d.course_id) AS independent
     FROM authoring_drafts d WHERE d.cohort_id=? AND d.course_id=?`).bind(cohort, course).first<Draft>();
 }
-function owns(d: Draft, a: IssuerAuthz) {
+export function owns(d: Draft, a: IssuerAuthz) {
   return d.owner_id === a.payload.u && (d.profile_id === '' || a.scope.profiles.includes(d.profile_id));
 }
 

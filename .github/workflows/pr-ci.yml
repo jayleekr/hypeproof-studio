@@ -110,6 +110,11 @@ jobs:
       - name: Run individual trials against local D1
         working-directory: worker
         run: npm run test:native-trial:d1
+      # #751 — the remote classroom ledgers on local workerd/D1, incl. the statement/row-count gates of targeted distribution.
+      # Local D1 only: not evidence about production quotas, latency or the account's plan.
+      - name: Run remote classroom operations against local D1
+        working-directory: worker
+        run: npm run test:classroom-ops:d1
 
   worker-typecheck:
     name: worker / typecheck

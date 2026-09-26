@@ -126,6 +126,8 @@ interface ProxyChatArgs {
   effort?: import('./protocol').CourseEffort;
   turnId?: string;
   fundingSource?: string;
+  /** #751 U3 — the lesson binding this turn expects; an expectation, never a selector. */
+  lessonBinding?: string;
   proxyUrl: string;
   model: string;
   token: string | undefined;
@@ -216,6 +218,7 @@ export async function proxyChat(args: ProxyChatArgs): Promise<ProxyChatResult> {
 
   if (args.effort) headers['x-hps-effort'] = args.effort;
   if (args.turnId) headers['x-hps-turn-id'] = args.turnId;
+  if (args.lessonBinding && /^(token:[a-f0-9]{16}|[a-f0-9]{32})$/.test(args.lessonBinding)) headers['x-hps-lesson-binding'] = args.lessonBinding;
   if(args.fundingSource){if(!/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/.test(args.fundingSource))throw Error('invalid funding source');headers['x-hps-funding-source']=args.fundingSource;}
   const res = await fetch(url, {
     method: "POST",
