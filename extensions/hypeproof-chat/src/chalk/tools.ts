@@ -48,6 +48,17 @@ export async function chalkToolsEnabled(
 
 // ─── 내부 유틸 ─────────────────────────────────────────────────────────────
 
+export class IssuerHttpError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+  constructor(status: number, body: unknown) {
+    super(`서버 오류 ${status}`);
+    this.name = "IssuerHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function issuerFetch(
   ctx: ChalkToolContext,
   path: string,
@@ -73,17 +84,13 @@ async function issuerFetch(
   });
 
   const text = await res.text();
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { parsed = text; }
+
   if (!res.ok) {
-    if (res.status === 409) {
-      throw new Error("지식이 적재되지 않았습니다. 먼저 지식을 적재하세요.");
-    }
-    throw new Error(`서버 오류 ${res.status}: ${text.slice(0, 200)}`);
+    throw new IssuerHttpError(res.status, parsed);
   }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
+  return parsed;
 }
 
 // ─── 도구 정의 ─────────────────────────────────────────────────────────────
@@ -246,11 +253,28 @@ export async function execRecommendMethods(
   if (learner_level !== undefined) body.learner_level = learner_level;
   if (has_guidance !== undefined) body.has_guidance = has_guidance;
 
-  return issuerFetch(
-    ctx,
-    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/recommend`,
-    { method: "POST", body },
-  );
+  try {
+    return await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/recommend`,
+      { method: "POST", body },
+    );
+  } catch (e) {
+    if (e instanceof IssuerHttpError) {
+      if (e.status === 409) {
+        throw new Error("지식이 적재되지 않았습니다. 먼저 지식을 적재하세요.");
+      }
+      if (e.status === 400) {
+        const b = e.body as Record<string, unknown> | null;
+        const field = b?.field;
+        const unknown_values = b?.unknown_values;
+        throw new Error(
+          `입력 오류: field=${JSON.stringify(field)}, unknown_values=${JSON.stringify(unknown_values)}`,
+        );
+      }
+    }
+    throw e;
+  }
 }
 
 // ─── 도구 묶음 ─────────────────────────────────────────────────────────────

@@ -271,8 +271,8 @@ await check('T-L15 execRecommendMethods → POST /admin/chalk/cohorts/:cohort/co
     await execRecommendMethods(fakeCtx(port), {
       cohort: 'sk-biopharm-kids-s1',
       course: 'lesson-01',
-      conditions: ['no_prior'],
-      goals: ['concept_understanding'],
+      conditions: ['short-time'],
+      goals: ['build-concept'],
     });
     assert.match(
       captured,
@@ -291,11 +291,47 @@ await check('T-L16 409 from recommend → 지식이 적재되지 않았습니다
     try {
       await execRecommendMethods(fakeCtx(port), {
         cohort: 'sk-biopharm-kids-s1', course: 'lesson-01',
-        conditions: ['no_prior'], goals: ['concept_understanding'],
+        conditions: ['short-time'], goals: ['build-concept'],
       });
     } catch (e) { threw = e; }
     assert.ok(threw, '409 should throw');
     assert.ok(threw.message.includes('지식이 적재되지 않았습니다'), `409 message mismatch: ${threw.message}`);
+  });
+});
+
+const { IssuerHttpError } = await import('../src/chalk/tools.ts');
+
+await check('T-L17 409 from check passes through as IssuerHttpError, not 지식 message', async () => {
+  await withMockServer((req, res) => {
+    res.writeHead(409, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'conflict' }));
+  }, async (port) => {
+    let threw = null;
+    try {
+      await execCheckPlan(fakeCtx(port), { cohort: 'sk-biopharm-kids-s1', course: 'lesson-01' });
+    } catch (e) { threw = e; }
+    assert.ok(threw, '409 should throw');
+    assert.ok(threw instanceof IssuerHttpError, `should be IssuerHttpError, got: ${threw.constructor.name}`);
+    assert.ok(!threw.message.includes('지식'), `check 409 must not include 지식 message: ${threw.message}`);
+    assert.equal(threw.status, 409);
+  });
+});
+
+await check('T-L18 400 VocabError from recommend → field and unknown_values in message', async () => {
+  await withMockServer((req, res) => {
+    res.writeHead(400, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ field: 'conditions', unknown_values: ['bad-key'] }));
+  }, async (port) => {
+    let threw = null;
+    try {
+      await execRecommendMethods(fakeCtx(port), {
+        cohort: 'sk-biopharm-kids-s1', course: 'lesson-01',
+        conditions: ['bad-key'], goals: ['build-concept'],
+      });
+    } catch (e) { threw = e; }
+    assert.ok(threw, '400 should throw');
+    assert.ok(threw.message.includes('conditions'), `field not in message: ${threw.message}`);
+    assert.ok(threw.message.includes('bad-key'), `unknown_values not in message: ${threw.message}`);
   });
 });
 
