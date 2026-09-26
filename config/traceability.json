@@ -3307,6 +3307,20 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-DRAFT-CHECK",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-FB",
+        "ST-DES-CHALK-GATELOOP"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/chalk-courses.ts"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-CHALK-METHOD-RECOMMEND",
       "stage": "implementation",
       "owner": "JinyongShin",
@@ -3321,6 +3335,20 @@
         },
         {
           "path": "worker/src/routes/chalk-recommend.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-DRAFT-CHECK",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-FB",
+        "ST-DES-CHALK-GATELOOP"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-draft-check.test.mjs"
         }
       ]
     },

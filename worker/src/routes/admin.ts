@@ -36,6 +36,7 @@ import { classroomCollectOperator, classroomCollectTeacher } from "./classroom-c
 import { classroomReportsTeacher } from "./classroom-reports";
 import { classroomDeliveryOperator, classroomDeliveryTeacher } from "./classroom-delivery";
 import {nativeTrials} from './native-trials';
+import { chalkCourses } from './chalk-courses';
 import { chalkKnowledge } from './chalk-knowledge';
 import type { Env } from "../env";
 import { listProfiles, getProfile } from "../profiles";
@@ -155,6 +156,7 @@ admin.route("/", classroomDeliveryOperator);
 // Operator-only (admin auth): deliberately absent from isIssuerAllowedEndpoint.
 admin.route("/", classroomCollectOperator);
 admin.route('/',nativeTrials);
+admin.route('/', chalkCourses);
 admin.route('/', chalkKnowledge);
 
 // ---- cohort list ------------------------------------------------------------
