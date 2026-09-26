@@ -3317,9 +3317,6 @@
       "sources": [
         {
           "path": "worker/src/routes/chalk-courses.ts"
-        },
-        {
-          "path": "worker/src/routes/authoring.ts"
         }
       ]
     },
