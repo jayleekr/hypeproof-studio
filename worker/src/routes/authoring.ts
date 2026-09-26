@@ -15,7 +15,7 @@ import { getRoster, getActiveSession } from '../lib/kv';
 import { recordTokenIssue } from './classroom-ops';
 
 type Bindings = { Bindings: Env; Variables: { author: IssuerAuthz } };
-interface Draft { cohort_id: string; course_id: string; owner_id: string; profile_id: string; revision: number; content_json: string; request_id: string; request_hash: string; updated_at: string; independent?: number }
+export interface Draft { cohort_id: string; course_id: string; owner_id: string; profile_id: string; revision: number; content_json: string; request_id: string; request_hash: string; updated_at: string; independent?: number }
 interface Version { source_revision: number; module_json: string }
 const root = "/cohorts/:cohort/authoring/:course";
 const validId = (s: string) => /^[a-zA-Z0-9_-]{1,128}$/.test(s);
@@ -98,7 +98,7 @@ async function readDraft(db: D1Database, cohort: string, course: string) {
   return db.prepare(`SELECT d.*, EXISTS(SELECT 1 FROM authoring_independent_courses m WHERE m.cohort_id=d.cohort_id AND m.course_id=d.course_id) AS independent
     FROM authoring_drafts d WHERE d.cohort_id=? AND d.course_id=?`).bind(cohort, course).first<Draft>();
 }
-function owns(d: Draft, a: IssuerAuthz) {
+export function owns(d: Draft, a: IssuerAuthz) {
   return d.owner_id === a.payload.u && (d.profile_id === '' || a.scope.profiles.includes(d.profile_id));
 }
 
