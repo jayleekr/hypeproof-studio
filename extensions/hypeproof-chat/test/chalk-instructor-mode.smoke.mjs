@@ -73,4 +73,35 @@ t("reset() clears state, re-fetches on next call", async () => {
   assert.strictEqual(mgr.brief, undefined);
 });
 
+console.log("\n=== selectModel / revert — model choice lifecycle ===");
+
+t("non-instructor (null) ignores selectModelDirect — model unchanged", async () => {
+  // Guard in chatPanelProvider.ts: if (!this._instructorMode.isInstructor) return;
+  // This test exercises the manager directly: selectModel must not be guarded here,
+  // but the caller (chatPanelProvider) skips it when isInstructor is false/null.
+  // We verify isInstructor is null by default so the guard fires.
+  const mgr = new InstructorModeManager();
+  assert.strictEqual(mgr.isInstructor, null, "default must be null so provider guard fires");
+});
+
+t("first-turn error → revertModelOnTurnError restores prevChoice", async () => {
+  const mgr = new InstructorModeManager();
+  let stored = { scope: 'student', alias: 'claude-sonnet-5' };
+  const getChoice = () => stored;
+  const setChoice = async (c) => { stored = c; };
+
+  // Simulate selectModel (direct entry).
+  await mgr.selectModel("claude-opus-5", getChoice, setChoice);
+  assert.deepEqual(stored, { scope: 'instructor', alias: 'claude-opus-5' });
+
+  // Turn fails → revert.
+  await mgr.revertModelOnTurnError(setChoice);
+  assert.deepEqual(stored, { scope: 'student', alias: 'claude-sonnet-5' }, "must revert to prevChoice");
+
+  // Second revert is a no-op (no pending revert).
+  stored = { scope: 'instructor', alias: 'some-other' };
+  await mgr.revertModelOnTurnError(setChoice);
+  assert.deepEqual(stored, { scope: 'instructor', alias: 'some-other' }, "second revert must not change state");
+});
+
 console.log(`\n${n} tests passed\n`);

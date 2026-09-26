@@ -7,6 +7,10 @@ export class InstructorModeManager {
   private _instructorBrief: string | undefined = undefined;
   private _instructorBriefVersion: number | undefined = undefined;
 
+  // Model choice: remembered so first-turn error can revert to prevChoice.
+  private _hasPendingModelRevert = false;
+  private _pendingPrevModelChoice: unknown = undefined;
+
   get isInstructor(): boolean | null { return this._isInstructor; }
   get brief(): string | undefined { return this._instructorBrief; }
 
@@ -16,6 +20,32 @@ export class InstructorModeManager {
     this._isInstructorToken = undefined;
     this._instructorBrief = undefined;
     this._instructorBriefVersion = undefined;
+  }
+
+  // Stores modelId as the active model choice; remembers prevChoice for revert.
+  // No pre-flight ping: validation happens on the first turn (server or CLI).
+  selectModel(
+    modelId: string,
+    getChoice: () => unknown,
+    setChoice: (c: unknown) => Promise<void>,
+  ): Promise<void> {
+    this._pendingPrevModelChoice = getChoice();
+    this._hasPendingModelRevert = true;
+    return setChoice({ scope: 'instructor', alias: modelId });
+  }
+
+  // Clears the pending revert after a successful turn.
+  onTurnSuccess(): void {
+    this._hasPendingModelRevert = false;
+    this._pendingPrevModelChoice = undefined;
+  }
+
+  // Reverts to prevChoice when a turn fails after selectModel was called.
+  async revertModelOnTurnError(setChoice: (c: unknown) => Promise<void>): Promise<void> {
+    if (!this._hasPendingModelRevert) return;
+    this._hasPendingModelRevert = false;
+    await setChoice(this._pendingPrevModelChoice);
+    this._pendingPrevModelChoice = undefined;
   }
 
   // Checks GET /admin/chalk/whoami with the current token.

@@ -3179,7 +3179,8 @@
       ],
       "sources": [
         { "path": "worker/test/chalk-instructor-whoami.test.mjs" },
-        { "path": "worker/test/chalk-instructor-brief.test.mjs" }
+        { "path": "worker/test/chalk-instructor-brief.test.mjs" },
+        { "path": "extensions/hypeproof-chat/test/chalk-instructor-mode.smoke.mjs" }
       ]
     },
     {

@@ -2323,31 +2323,18 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.postConfig();
         return;
       }
-      // #1298 — instructor-only: free-form model id. Validate by sending a
-      // zero-message probe to /v1/chat/completions; revert on error.
+      // #1298 — instructor-only: free-form model id. Saved immediately; the first
+      // turn that runs with this model validates it (server rejects unknown models,
+      // CLI errors on first turn). revertModelOnTurnError() restores prevChoice.
       case "selectModelDirect": {
-        const cfg2 = vscode.workspace.getConfiguration('hypeproofChat');
-        const proxyUrl2 = cfg2.get<string>('proxyUrl', 'https://api.hypeproof-ai.xyz/v1');
-        const token2 = await this.context.secrets.get(TOKEN_KEY);
+        if (!this._instructorMode.isInstructor) return;
         const modelId = msg.modelId.trim();
         if (!modelId) { await this.postConfig(); return; }
-        // Optimistically store; restore on error.
-        const prevChoice = this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice');
-        await this.context.workspaceState.update('hps.modelChoice', { scope: 'instructor', alias: modelId });
-        try {
-          const testRes = await fetch(`${proxyUrl2}/chat/completions`, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json', authorization: `Bearer ${token2 ?? ''}` },
-            body: JSON.stringify({ model: modelId, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
-            signal: AbortSignal.timeout(8000),
-          });
-          if (!testRes.ok) {
-            // Non-2xx → invalid model. Revert.
-            await this.context.workspaceState.update('hps.modelChoice', prevChoice);
-          }
-        } catch {
-          await this.context.workspaceState.update('hps.modelChoice', prevChoice);
-        }
+        await this._instructorMode.selectModel(
+          modelId,
+          () => this.context.workspaceState.get('hps.modelChoice'),
+          c => this.context.workspaceState.update('hps.modelChoice', c),
+        );
         await this.postConfig();
         return;
       }
@@ -3241,6 +3228,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const refused = bindingKey ? bindingRefusalCode(err) : null;
       if (refused && !ctrl.signal.aborted) await this.endRefusedTurn({ code: refused, streamId, proxyUrl, token, text, images });
       else if (!ctrl.signal.aborted) await this.handleSendError(err, streamId);
+      // #1298 — revert model choice if a direct-entry model caused this turn to fail.
+      await this._instructorMode.revertModelOnTurnError(c => this.context.workspaceState.update('hps.modelChoice', c));
     } finally {
       // The host is the only party that knows a turn ended (an auxiliary request of the same turn ends with end_turn before
       // the main loop does). A closed turn id is refused by the Service from then on; best effort, bounded by the Service.
@@ -3252,6 +3241,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       this.opsObserver?.turnResult({ ok: spoolStatus === "ok", aborted: ctrl.signal.aborted, runtime: spoolRuntime === "agent-sdk" ? "agent-sdk" : "proxy", sdkFallback: opsSdkFallback, ...(spoolErrorKind ? { errorKind: spoolErrorKind } : {}), ...opsFailure });
       const total = sdkTurnTotal.current;
       const finalSpoolStatus = ctrl.signal.aborted ? "aborted" : spoolStatus;
+      // #1298 — clear pending model revert when the turn succeeded.
+      if (finalSpoolStatus === "ok") this._instructorMode.onTurnSuccess();
       await Promise.all(observationCaptures);
       if (assistantText) recordObservation('coach',assistantText);
       recordObservation('turn_end',finalSpoolStatus,{outcome:ctrl.signal.aborted?'cancelled':spoolStatus==='ok'?'success':'error'});
