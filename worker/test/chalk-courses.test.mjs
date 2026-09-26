@@ -157,22 +157,25 @@ const VALID_INPUTS = {
     learner_level: "novice",
     has_guidance: false,
   },
-  expected_revision: 0,
+  expected_revision: 1,
   request_id: "req-inputs-01",
   profile_id: "",
 };
 
 // ── PUT /inputs tests ─────────────────────────────────────────────────────────
 
-await check("I-01 PUT /inputs creates draft and inputs row, returns revision 1", async () => {
+await check("I-01 PUT /inputs saves inputs and bumps draft revision, returns revision 2", async () => {
+  const db = makeDb();
+  seedDraft(db);
   const tok = await issuerTok();
-  const r = await req("PUT", `${base}/inputs`, VALID_INPUTS, tok);
+  const r = await req("PUT", `${base}/inputs`, VALID_INPUTS, tok, db);
   assert.equal(r.status, 200, JSON.stringify(r.json));
-  assert.equal(r.json.revision, 1);
+  assert.equal(r.json.revision, 2);
 });
 
 await check("I-02 PUT /inputs idempotent: same request_id returns same revision", async () => {
   const db = makeDb();
+  seedDraft(db);
   const tok = await issuerTok();
   const r1 = await req("PUT", `${base}/inputs`, VALID_INPUTS, tok, db);
   assert.equal(r1.status, 200);
@@ -225,13 +228,23 @@ await check("I-07 PUT /inputs vocab with no KB → 409", async () => {
 });
 
 await check("I-08 PUT /inputs without vocab saves OK", async () => {
+  const db = makeDb();
+  seedDraft(db);
   const tok = await issuerTok();
   const { vocab: _, ...noVocab } = VALID_INPUTS;
   const r = await req("PUT", `${base}/inputs`, {
     ...noVocab, request_id: "req-no-vocab",
-  }, tok);
+  }, tok, db);
   assert.equal(r.status, 200);
-  assert.equal(r.json.revision, 1);
+  assert.equal(r.json.revision, 2);
+});
+
+await check("I-09 PUT /inputs no existing draft → 404", async () => {
+  const db = makeDb();
+  const tok = await issuerTok();
+  // No draft seeded — PUT /inputs must reject when no course draft exists.
+  const r = await req("PUT", `${base}/inputs`, VALID_INPUTS, tok, db);
+  assert.equal(r.status, 404, JSON.stringify(r.json));
 });
 
 // ── PUT /plan tests ───────────────────────────────────────────────────────────
@@ -249,22 +262,38 @@ const SAMPLE_HTML = `<!DOCTYPE html>
 <body><p>test plan</p></body>
 </html>`;
 
+// Insert a minimal draft row directly — PUT /inputs now requires an existing draft.
+function seedDraft(db, { ownerId = "tester", cohort = COHORT, course = "test-course" } = {}) {
+  const now = new Date().toISOString();
+  db.prepare(
+    `INSERT INTO authoring_drafts (cohort_id,course_id,owner_id,profile_id,revision,content_json,request_id,request_hash,updated_at)
+     VALUES (?,?,?,?,?,?,?,?,?)`
+  ).run(
+    cohort, course, ownerId, "", 1,
+    '{"schema":"hps-session-design/1","title":"","audience":"","duration_minutes":120,"objective":"","prerequisites":"","starter":"","steps":[]}',
+    "req-seed-initial", "hash-seed-initial", now,
+  );
+}
+
 async function seedDraftAndInputs(db) {
   const tok = await issuerTok();
-  // Create draft via PUT /inputs
+  // Seed draft at revision 1 first; PUT /inputs requires an existing draft.
+  seedDraft(db);
+  // PUT /inputs bumps draft to revision 2.
   await req("PUT", `${base}/inputs`, VALID_INPUTS, tok, db);
   return tok;
 }
 
-await check("P-01 PUT /plan saves file and returns revision + sha256", async () => {
+await check("P-01 PUT /plan saves file and returns revision + sha256 + findings", async () => {
   const db = makeDb();
   const tok = await seedDraftAndInputs(db);
+  // seedDraftAndInputs: seed at revision 1, PUT /inputs bumps to revision 2.
   const r = await req("PUT", `${base}/plan`, {
     file: "lesson", html: SAMPLE_HTML, knowledge_version: 1,
-    expected_revision: 1, request_id: "req-plan-01",
+    expected_revision: 2, request_id: "req-plan-01",
   }, tok, db);
   assert.equal(r.status, 200, JSON.stringify(r.json));
-  assert.equal(r.json.revision, 2);
+  assert.equal(r.json.revision, 3);
   assert.ok(typeof r.json.sha256 === "string" && r.json.sha256.length === 64);
   assert.ok(Array.isArray(r.json.findings));
 });
@@ -274,7 +303,7 @@ await check("P-02 PUT /plan revision conflict → 409", async () => {
   const tok = await seedDraftAndInputs(db);
   const r = await req("PUT", `${base}/plan`, {
     file: "lesson", html: SAMPLE_HTML, knowledge_version: 1,
-    expected_revision: 2, // wrong — draft is at revision 1
+    expected_revision: 3, // wrong — draft is at revision 2 after seedDraftAndInputs
     request_id: "req-plan-conflict",
   }, tok, db);
   assert.equal(r.status, 409);
@@ -286,7 +315,7 @@ await check("P-03 PUT /plan other issuer → 404", async () => {
   const otherTok = await issuerTok("other-issuer");
   const r = await req("PUT", `${base}/plan`, {
     file: "lesson", html: SAMPLE_HTML, knowledge_version: 1,
-    expected_revision: 1, request_id: "req-plan-other",
+    expected_revision: 2, request_id: "req-plan-other",
   }, otherTok, db);
   assert.equal(r.status, 404);
 });
@@ -305,9 +334,26 @@ await check("P-05 PUT /plan knowledge_version not found → 409", async () => {
   const tok = await seedDraftAndInputs(db);
   const r = await req("PUT", `${base}/plan`, {
     file: "lesson", html: SAMPLE_HTML, knowledge_version: 99,
-    expected_revision: 1, request_id: "req-plan-badkb",
+    expected_revision: 2, request_id: "req-plan-badkb",
   }, tok, db);
   assert.equal(r.status, 409);
+});
+
+await check("P-06 PUT /plan auto-check: plan with violations returns non-empty findings", async () => {
+  const db = makeDb();
+  const tok = await seedDraftAndInputs(db);
+  // Minimal HTML without required chalk:methods meta — parsePlan should emit a violation.
+  const badHtml = `<!DOCTYPE html><html lang="ko" data-chalk-plan="1" data-chalk-kind="lesson"><head>
+    <meta name="chalk:course" content="test-course">
+    <meta name="chalk:knowledge-version" content="1">
+  </head><body></body></html>`;
+  const r = await req("PUT", `${base}/plan`, {
+    file: "lesson", html: badHtml, knowledge_version: 1,
+    expected_revision: 2, request_id: "req-plan-violations",
+  }, tok, db);
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  assert.ok(Array.isArray(r.json.findings));
+  assert.ok(r.json.findings.length > 0, "expected violations in findings but got none");
 });
 
 // ── GET /brief tests ──────────────────────────────────────────────────────────
@@ -342,7 +388,8 @@ await check("B-02 GET /brief no inputs → 409", async () => {
 await check("B-03 GET /brief no KB → 409", async () => {
   const db = makeDb({ seedKb: false });
   const tok = await issuerTok();
-  // Seed inputs without vocab (no KB needed for that path)
+  seedDraft(db);
+  // Seed inputs without vocab (no KB needed for that save path)
   const { vocab: _, ...noVocab } = VALID_INPUTS;
   await req("PUT", `${base}/inputs`, { ...noVocab, request_id: "req-no-kb" }, tok, db);
   // Now try brief (no KB)
@@ -363,7 +410,7 @@ await check("R-01 GET /plan returns saved HTML after PUT /plan", async () => {
   const tok = await seedDraftAndInputs(db);
   await req("PUT", `${base}/plan`, {
     file: "lesson", html: SAMPLE_HTML, knowledge_version: 1,
-    expected_revision: 1, request_id: "req-plan-read",
+    expected_revision: 2, request_id: "req-plan-read",
   }, tok, db);
   const r = await req("GET", `${base}/plan?file=lesson`, null, tok, db);
   assert.equal(r.status, 200, JSON.stringify(r.json));
@@ -436,7 +483,7 @@ await check("N-01 student token /v1/profile does not contain plan content", asyn
   const planWithMarker = SAMPLE_HTML.replace("<p>test plan</p>", `<td data-chalk-role="teacher">${markerSentence}</td>`);
   await req("PUT", `${base}/plan`, {
     file: "lesson", html: planWithMarker, knowledge_version: 1,
-    expected_revision: 1, request_id: "req-plan-marker",
+    expected_revision: 2, request_id: "req-plan-marker",
   }, tok, db);
 
   // Now fetch /v1/profile as a student — must not contain the marker

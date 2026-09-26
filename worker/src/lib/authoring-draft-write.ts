@@ -44,6 +44,8 @@ export interface WriteDraftParams {
   hash: string;
   now: string;
   independent: boolean;
+  // used in idempotent fallback: owns() check must use caller's profile scope, not the stored profile_id
+  profile_scope: string[];
   // for IC-02 batch (authoring.ts independent course creation)
   independent_marker_stmt?: D1PreparedStatement;
   // for /plan route: run atomically with the UPDATE
@@ -56,7 +58,7 @@ export async function writeDraft(
   params: WriteDraftParams,
 ): Promise<WriteDraftResult> {
   const { cohort, course, owner_id, expected_revision, request_id, profile_id,
-          content_json, hash, now, independent,
+          content_json, hash, now, independent, profile_scope,
           independent_marker_stmt, extra_batch_stmts } = params;
 
   // Request_id idempotency: same id + same hash → return existing.
@@ -116,7 +118,7 @@ export async function writeDraft(
 
   // Concurrent retry may have won the conditional write after our first read.
   const latest = await readDraft(db, cohort, course);
-  if (latest && owns(latest, owner_id, [latest.profile_id])
+  if (latest && owns(latest, owner_id, profile_scope)
       && latest.request_id === request_id && latest.request_hash === hash) {
     return { kind: 'idempotent', draft: latest };
   }

@@ -10,7 +10,7 @@ import type { Env } from "../env";
 import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-auth";
 import { sha256Hex } from "../lib/modules";
 import { ASSETS } from "../lib/trial-evidence";
-import { readDraft, owns, writeDraft } from "../lib/authoring-draft-write";
+import { readDraft, owns, writeDraft, type Draft } from "../lib/authoring-draft-write";
 import { recommendMethods, VocabError, KnowledgeIncompatibleError, type MethodFields } from "../lib/chalk-recommend";
 import { checkLessonPedagogy, type PedagogyFinding } from "../lib/lesson-pedagogy";
 import { parsePlan, type Violation } from "../lib/chalk-plan";
@@ -215,8 +215,8 @@ chalkCourses.put(
       return c.json({ error: "requirements is required" }, 400);
     if (!VALID_FORMATS.includes(b.format as any))
       return c.json({ error: `format must be one of: ${VALID_FORMATS.join(", ")}` }, 400);
-    if (!Number.isSafeInteger(b.expected_revision) || (b.expected_revision as number) < 0)
-      return c.json({ error: "expected_revision required" }, 400);
+    if (!Number.isSafeInteger(b.expected_revision) || (b.expected_revision as number) < 1)
+      return c.json({ error: "expected_revision required (≥1; use the draft save endpoint to create a new course)" }, 400);
     if (typeof b.request_id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(b.request_id))
       return c.json({ error: "request_id required" }, 400);
     const profile_id = typeof b.profile_id === "string" ? b.profile_id : "";
@@ -252,9 +252,9 @@ chalkCourses.put(
       });
     }
 
-    // CAS write: read existing draft (if any), then upsert
+    // Require existing draft: inputs can only be saved against an existing course
     const prior = await readDraft(c.env.HPS_DB, cohort, course);
-    if (prior && !owns(prior, auth.payload.u, auth.scope.profiles))
+    if (!prior || !owns(prior, auth.payload.u, auth.scope.profiles))
       return c.json({ error: "course not found" }, 404);
 
     // Content for new drafts: minimal valid SessionDesign
@@ -270,24 +270,23 @@ chalkCourses.put(
       b.requirements, b.format, familySession, vocabJson,
     ]));
 
-    // Extra batch stmt: upsert chalk_course_inputs
-    const inputsUpsert = c.env.HPS_DB.prepare(
+    // Extra batch stmt: upsert chalk_course_inputs, conditional on the draft UPDATE succeeding.
+    // SELECT WHERE EXISTS ensures this is a no-op if the CAS UPDATE matched 0 rows.
+    const newRevision = (b.expected_revision as number) + 1;
+    const boundInputsUpsert = c.env.HPS_DB.prepare(
       `INSERT INTO chalk_course_inputs (cohort_id,course_id,revision,audience,assets_json,teaching_style,requirements,format,family_session,vocab_json,updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)
+       SELECT ?,?,?,?,?,?,?,?,?,?,?
+       WHERE EXISTS (SELECT 1 FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND revision=? AND request_id=? AND request_hash=?)
        ON CONFLICT(cohort_id,course_id) DO UPDATE SET
          revision=excluded.revision, audience=excluded.audience, assets_json=excluded.assets_json,
          teaching_style=excluded.teaching_style, requirements=excluded.requirements,
          format=excluded.format, family_session=excluded.family_session,
          vocab_json=excluded.vocab_json, updated_at=excluded.updated_at`
-    );
-    // revision for inputs is the new revision (expected+1), bound later via extra_batch_stmts
-    // We insert with the new revision: for expected_revision=0 it will be 1; for >0 it will be expected+1.
-    // Since writeDraft does the authoring_drafts write first, we use expected+1 to match.
-    const newRevision = (b.expected_revision as number) + 1;
-    const boundInputsUpsert = inputsUpsert.bind(
+    ).bind(
       cohort, course, newRevision,
       b.audience as string, JSON.stringify(b.assets), b.teaching_style as string,
-      b.requirements as string, b.format as string, familySession, vocabJson, nowMs
+      b.requirements as string, b.format as string, familySession, vocabJson, nowMs,
+      cohort, course, newRevision, b.request_id as string, hash
     );
 
     const wr = await writeDraft(c.env.HPS_DB, prior, {
@@ -297,7 +296,8 @@ chalkCourses.put(
       profile_id,
       content_json: existingContent,
       hash, now,
-      independent: prior ? !!prior.independent : profile_id === '',
+      independent: !!prior.independent,
+      profile_scope: auth.scope.profiles ?? [],
       extra_batch_stmts: [boundInputsUpsert],
     });
 
@@ -352,11 +352,9 @@ chalkCourses.put(
     const nowMs = Date.now();
     const newRevision = (b.expected_revision as number) + 1;
 
-    // Extract method IDs from HTML meta tag (simple regex, no full parse needed)
-    const methodsMeta = /data-chalk-plan[^>]*>.*?<meta[^>]+chalk:methods[^>]+content="([^"]*)"/.exec(
-      (b.html as string).slice(0, 2000)
-    );
-    const methodIds = methodsMeta?.[1]?.split(/\s+/).filter(Boolean) ?? [];
+    // Parse plan to extract method IDs (avoids fragile regex on raw HTML)
+    const parsed = parsePlan(b.html as string, 'lesson');
+    const methodIds = parsed.meta.methods;
 
     // Build updated plan_ref
     const existingContent = JSON.parse(prior!.content_json);
@@ -374,11 +372,14 @@ chalkCourses.put(
     const hash = await sha256Hex(JSON.stringify([b.expected_revision, prior!.profile_id, newContent]));
     const now = new Date().toISOString();
 
-    // Plan file insert (part of atomic batch with authoring_drafts update)
+    // Plan file insert: conditional on the draft UPDATE succeeding (SELECT WHERE EXISTS).
+    // This is a no-op if the CAS UPDATE matched 0 rows, preserving data integrity.
     const planFileInsert = c.env.HPS_DB.prepare(
       `INSERT INTO chalk_plan_files (cohort_id,course_id,ref_kind,ref,file,html,sha256,knowledge_version,created_at)
-       VALUES (?,?,?,?,?,?,?,?,?)`
-    ).bind(cohort, course, 'draft', String(newRevision), b.file, b.html, sha256, b.knowledge_version, nowMs);
+       SELECT ?,?,?,?,?,?,?,?,?
+       WHERE EXISTS (SELECT 1 FROM authoring_drafts WHERE cohort_id=? AND course_id=? AND revision=? AND request_id=? AND request_hash=?)`
+    ).bind(cohort, course, 'draft', String(newRevision), b.file, b.html, sha256, b.knowledge_version, nowMs,
+           cohort, course, newRevision, b.request_id as string, hash);
 
     const wr = await writeDraft(c.env.HPS_DB, prior!, {
       cohort, course, owner_id: auth.payload.u,
@@ -387,13 +388,12 @@ chalkCourses.put(
       profile_id: prior!.profile_id,
       content_json: newContent, hash, now,
       independent: !!prior!.independent,
+      profile_scope: auth.scope.profiles ?? [],
       extra_batch_stmts: [planFileInsert],
     });
 
     if (wr.kind === 'ok' || wr.kind === 'idempotent') {
-      // Auto-check: stub for now. Worker4's #1294 will provide checkChalkPlan().
-      // Returns empty findings until #1294 lands.
-      const findings: unknown[] = [];
+      const findings = runPlanCheck(wr.draft, b.html as string);
       return c.json({ revision: wr.draft.revision, sha256, findings });
     }
     if (wr.kind === 'request_id_reused')
@@ -573,6 +573,43 @@ chalkCourses.get(
   },
 );
 
+// ── Shared check logic ───────────────────────────────────────────────────────
+
+function runPlanCheck(draft: Draft, htmlOverride?: string): CheckResultItem[] {
+  const results: CheckResultItem[] = [];
+
+  if (htmlOverride !== undefined) {
+    const parsed = parsePlan(htmlOverride, 'lesson');
+    for (const v of parsed.violations) {
+      results.push(fromParserViolation(v));
+    }
+  }
+
+  let content: SessionDesign | null = null;
+  try {
+    content = JSON.parse(draft.content_json) as SessionDesign;
+  } catch {
+    results.push({
+      item: null,
+      severity: 'warn',
+      judge: 'machine',
+      at: { file: 'lesson', section: null, step: null, field: 'content_json' },
+      message: '저장된 초안을 읽지 못해 관문 검사를 건너뜀',
+      skipped: true,
+      source: 'chalk-draft-check',
+      blocks_confirm: false,
+    });
+    return results;
+  }
+
+  const pedagogyFindings = checkLessonPedagogy(content);
+  for (const f of pedagogyFindings) {
+    results.push(fromPedagogyFinding(f));
+  }
+
+  return results;
+}
+
 // ── POST /check ──────────────────────────────────────────────────────────────
 
 chalkCourses.post(
@@ -591,39 +628,7 @@ chalkCourses.post(
     const rawBody = await c.req.json().catch(() => null) as Record<string, unknown> | null;
     const html: string | undefined = typeof rawBody?.html === 'string' ? rawBody.html : undefined;
 
-    const results: CheckResultItem[] = [];
-
-    // 1. 규격 검사 (파서): HTML이 요청 본문에 있을 때
-    if (html !== undefined) {
-      const parsed = parsePlan(html, 'lesson');
-      for (const v of parsed.violations) {
-        results.push(fromParserViolation(v));
-      }
-    }
-
-    // 2. 관문 v0 검사 (checkLessonPedagogy): 저장된 초안 content로
-    let content: SessionDesign | null = null;
-    try {
-      content = JSON.parse(draft.content_json) as SessionDesign;
-    } catch {
-      results.push({
-        item: null,
-        severity: 'warn',
-        judge: 'machine',
-        at: { file: 'lesson', section: null, step: null, field: 'content_json' },
-        message: '저장된 초안을 읽지 못해 관문 검사를 건너뜀',
-        skipped: true,
-        source: 'chalk-draft-check',
-        blocks_confirm: false,
-      });
-    }
-    if (content !== null) {
-      const pedagogyFindings = checkLessonPedagogy(content);
-      for (const f of pedagogyFindings) {
-        results.push(fromPedagogyFinding(f));
-      }
-    }
-
+    const results = runPlanCheck(draft, html);
     return c.json({ results });
   },
 );

@@ -145,6 +145,7 @@ authoring.put(root, async (c) => {
     cohort, course, owner_id: a.payload.u,
     expected_revision: b.expected_revision, request_id: b.request_id,
     profile_id: b.profile_id, content_json: content, hash, now, independent,
+    profile_scope: a.scope.profiles ?? [],
     independent_marker_stmt: markerStmt,
   });
   if (wr.kind === 'ok' || wr.kind === 'idempotent') return c.json(draftView(wr.draft));
