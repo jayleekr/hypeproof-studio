@@ -89,6 +89,8 @@ export function InstructorChatPanel(props: Props) {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div className="hps-instructor-band" role="status" aria-live="polite">
         <span className="hps-instructor-badge">강사 모드</span>
+        <span className="hps-instructor-connection">연결: {config?.instructorConnection ?? "서버"}</span>
+        <span className="hps-instructor-model-label">· 모델:</span>
         <span className="hps-instructor-model">{config?.model ?? "—"}</span>
 
         {choices.length > 0 && (

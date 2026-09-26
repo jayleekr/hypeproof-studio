@@ -112,6 +112,9 @@ export interface ChatConfig {
   // #1298 — versioned instructor system prompt text from GET /admin/chalk/instructor-brief.
   // Injected as system prompt for instructor-mode chat turns. Absent = use no extra system prompt.
   instructorBrief?: string;
+  // #1298 — human-readable connection label shown in the instructor band.
+  // "내 Claude 구독" | "내 Codex 구독" (local runtime) or "서버" (proxy/worker path).
+  instructorConnection?: string;
 }
 
 /**

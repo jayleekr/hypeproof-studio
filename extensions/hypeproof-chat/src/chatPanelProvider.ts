@@ -3744,6 +3744,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const instructorBrief = (isInstructor && token)
       ? await this._instructorMode.fetchInstructorBrief(token, proxyUrl)
       : undefined;
+    const instructorConnection = isInstructor
+      ? (local?.provider === "claude" ? "내 Claude 구독"
+        : local?.provider === "codex" ? "내 Codex 구독"
+        : "서버")
+      : undefined;
     await this.post({
       type: "config",
       config: {
@@ -3759,6 +3764,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         update: local ? undefined : this.availableUpdate,
         ...(isInstructor ? { isInstructor: true } : {}),
         ...(instructorBrief ? { instructorBrief } : {}),
+        ...(instructorConnection ? { instructorConnection } : {}),
       },
     });
     // #649 — when the webview remounts (panel hide → show, reload) the highlight
