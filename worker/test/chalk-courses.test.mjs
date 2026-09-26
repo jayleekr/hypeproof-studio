@@ -377,6 +377,7 @@ await check("P-05 PUT /plan knowledge_version not found → 409", async () => {
     expected_revision: 2, request_id: "req-plan-badkb",
   }, tok, db);
   assert.equal(r.status, 409);
+  assert.equal(r.json.code, "knowledge_missing");
 });
 
 await check("P-07 PUT /plan CAS conflict: 409 must NOT insert into chalk_plan_files", async () => {
