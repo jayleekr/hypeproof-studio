@@ -27,6 +27,7 @@
 import { Hono } from "hono";
 import { authoring } from "./authoring";
 import { chalkCourses } from "./chalk-courses";
+import { chalkRecommend } from "./chalk-recommend";
 import { accessAdmin } from './access';
 import { classroomTeacher } from "./classroom";
 import { classroomOpsTeacher, fenceIssuerForDistribution, liftIssuerFence, recordTokenIssue, revokeOpsGrantsForIssuer } from "./classroom-ops";
@@ -144,6 +145,7 @@ admin.use("*", async (c, next) => {
 
 admin.route("/", authoring);
 admin.route("/", chalkCourses);
+admin.route("/", chalkRecommend);
 admin.route('/', accessAdmin);
 admin.route("/", classroomTeacher);
 admin.route("/", classroomOpsTeacher);
@@ -155,6 +157,7 @@ admin.route("/", classroomDeliveryOperator);
 // Operator-only (admin auth): deliberately absent from isIssuerAllowedEndpoint.
 admin.route("/", classroomCollectOperator);
 admin.route('/',nativeTrials);
+admin.route('/', chalkCourses);
 admin.route('/', chalkKnowledge);
 
 // ---- cohort list ------------------------------------------------------------

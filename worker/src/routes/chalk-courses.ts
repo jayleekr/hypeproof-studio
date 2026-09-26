@@ -3,9 +3,7 @@
 // PUT  /chalk/cohorts/:cohort/courses/:course/plan    — save plan file + auto-check
 // GET  /chalk/cohorts/:cohort/courses/:course/brief   — generation brief bundle
 // GET  /chalk/cohorts/:cohort/courses/:course/plan    — read plan file (issuer only)
-//
-// Note: chalk-courses.ts merges with chalk-recommend.ts once #1293 lands
-// (whichever PR merges second does the consolidation — #1294 comment).
+// POST /chalk/cohorts/:cohort/courses/:course/check   — pedagogy + parser check (#1294)
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
@@ -13,7 +11,10 @@ import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-au
 import { sha256Hex } from "../lib/modules";
 import { ASSETS } from "../lib/trial-evidence";
 import { readDraft, owns, writeDraft } from "../lib/authoring-draft-write";
-import { recommendMethods, VocabError, type MethodFields } from "../lib/chalk-recommend";
+import { recommendMethods, VocabError, KnowledgeIncompatibleError, type MethodFields } from "../lib/chalk-recommend";
+import { checkLessonPedagogy, type PedagogyFinding } from "../lib/lesson-pedagogy";
+import { parsePlan, type Violation } from "../lib/chalk-plan";
+import type { SessionDesign } from "../lib/session-design";
 
 type Vars = { Variables: { author: IssuerAuthz } };
 
@@ -62,17 +63,21 @@ async function latestKbVersion(db: D1Database): Promise<number | null> {
 }
 
 async function loadVocab(db: D1Database, version: number) {
-  const [goalRow, condRow] = await Promise.all([
+  const [goalRow, condRow, priorRow] = await Promise.all([
     db.prepare("SELECT fields_json FROM chalk_knowledge_docs WHERE version=? AND doc_id='vocab:goal'")
       .bind(version).first<{ fields_json: string }>(),
     db.prepare("SELECT fields_json FROM chalk_knowledge_docs WHERE version=? AND doc_id='vocab:condition'")
+      .bind(version).first<{ fields_json: string }>(),
+    db.prepare("SELECT fields_json FROM chalk_knowledge_docs WHERE version=? AND doc_id='vocab:prior'")
       .bind(version).first<{ fields_json: string }>(),
   ]);
   const goalKeys = goalRow
     ? (JSON.parse(goalRow.fields_json) as { keys: Array<{ key: string }> }).keys.map(k => k.key) : [];
   const condKeys = condRow
     ? (JSON.parse(condRow.fields_json) as { keys: Array<{ key: string }> }).keys.map(k => k.key) : [];
-  return { goals: goalKeys, conditions: condKeys };
+  const priorKeys = priorRow
+    ? (JSON.parse(priorRow.fields_json) as { keys: Array<{ key: string }> }).keys.map(k => k.key) : [];
+  return { goals: goalKeys, conditions: condKeys, prior: priorKeys };
 }
 
 // ── Skeleton HTML ────────────────────────────────────────────────────────────
@@ -460,6 +465,8 @@ chalkCourses.get(
         kbVersion,
       );
     } catch (err) {
+      if (err instanceof KnowledgeIncompatibleError)
+        return c.json({ error: "knowledge incompatible", field: err.field, unranked: err.unranked }, 409);
       if (err instanceof VocabError)
         return c.json({ error: err.message, field: err.field, unknown_values: err.unknown_values }, 409);
       throw err;
@@ -565,3 +572,98 @@ chalkCourses.get(
     });
   },
 );
+
+// ── POST /check ──────────────────────────────────────────────────────────────
+
+chalkCourses.post(
+  '/chalk/cohorts/:cohort/courses/:course/check',
+  bodyLimit({ maxSize: PLAN_MAX_BYTES, onError: (c) => c.json({ error: 'request too large' }, 413) }),
+  async (c) => {
+    const cohort = c.req.param('cohort')!;
+    const course = c.req.param('course')!;
+    const author = c.get('author');
+
+    const draft = await readDraft(c.env.HPS_DB, cohort, course);
+    if (!draft || !owns(draft, author.payload.u, author.scope.profiles)) {
+      return c.json({ error: 'course not found' }, 404);
+    }
+
+    const rawBody = await c.req.json().catch(() => null) as Record<string, unknown> | null;
+    const html: string | undefined = typeof rawBody?.html === 'string' ? rawBody.html : undefined;
+
+    const results: CheckResultItem[] = [];
+
+    // 1. 규격 검사 (파서): HTML이 요청 본문에 있을 때
+    if (html !== undefined) {
+      const parsed = parsePlan(html, 'lesson');
+      for (const v of parsed.violations) {
+        results.push(fromParserViolation(v));
+      }
+    }
+
+    // 2. 관문 v0 검사 (checkLessonPedagogy): 저장된 초안 content로
+    let content: SessionDesign | null = null;
+    try {
+      content = JSON.parse(draft.content_json) as SessionDesign;
+    } catch {
+      results.push({
+        item: null,
+        severity: 'warn',
+        judge: 'machine',
+        at: { file: 'lesson', section: null, step: null, field: 'content_json' },
+        message: '저장된 초안을 읽지 못해 관문 검사를 건너뜀',
+        skipped: true,
+        source: 'chalk-draft-check',
+        blocks_confirm: false,
+      });
+    }
+    if (content !== null) {
+      const pedagogyFindings = checkLessonPedagogy(content);
+      for (const f of pedagogyFindings) {
+        results.push(fromPedagogyFinding(f));
+      }
+    }
+
+    return c.json({ results });
+  },
+);
+
+interface CheckResultItem {
+  item: string | null;
+  check?: string;
+  severity: 'fail' | 'warn' | 'info';
+  judge: 'machine' | 'model' | 'human';
+  at: { file: string; section: string | null; step: string | null; field: string | null };
+  message: string;
+  remedy?: string;
+  skipped?: boolean;
+  source: string;
+  blocks_confirm: boolean;
+}
+
+function fromParserViolation(v: Violation): CheckResultItem {
+  return {
+    item: null,
+    severity: 'warn',
+    judge: 'machine',
+    at: v.at,
+    message: v.message,
+    source: `chalk-plan/1 parser (${v.item})`,
+    blocks_confirm: false,
+  };
+}
+
+function fromPedagogyFinding(f: PedagogyFinding): CheckResultItem {
+  return {
+    item: null,
+    check: f.check,
+    severity: f.severity,
+    judge: 'machine',
+    at: { file: 'lesson', section: null, step: f.step_id ?? null, field: null },
+    message: f.message,
+    remedy: f.remedy,
+    skipped: f.skipped,
+    source: f.source,
+    blocks_confirm: f.severity === 'fail',
+  };
+}

@@ -20,6 +20,8 @@ const COND_VOCAB = [
   "no-prep-time", "large-group", "requires-materials",
   "low-autonomy", "high-tech-required", "family-mixed-age",
 ];
+// vocab:prior (LEVEL_RANK keys + 'any')
+const PRIOR_VOCAB = ["novice", "intermediate", "any"];
 // 29 goals
 const GOAL_VOCAB = [
   "creative-thinking", "cooperative-skills", "critical-thinking",
@@ -69,12 +71,15 @@ function makeDb({ seedKb = true } = {}) {
   db.exec(AUTHORING_SCHEMA);
   db.exec(PLAN_SCHEMA);
   if (seedKb) {
-    db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,${BASE_METHODS.length + 2},'digest0')`).run();
+    db.prepare(`INSERT INTO chalk_knowledge_versions VALUES(1,NULL,'vault-import',NULL,NULL,'test','tester',0,${BASE_METHODS.length + 3},'digest0')`).run();
     db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
       1, "vocab:goal", "vocab", JSON.stringify({ keys: GOAL_VOCAB.map(k => ({ key: k, label: k })) }), "", null,
     );
     db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
       1, "vocab:condition", "vocab", JSON.stringify({ keys: COND_VOCAB.map(k => ({ key: k, label: k })) }), "", null,
+    );
+    db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
+      1, "vocab:prior", "vocab", JSON.stringify({ keys: PRIOR_VOCAB.map(k => ({ key: k, label: k })) }), "", null,
     );
     for (const m of BASE_METHODS) {
       db.prepare("INSERT INTO chalk_knowledge_docs VALUES(?,?,?,?,?,?)").run(
@@ -378,6 +383,45 @@ await check("R-03 GET /plan student token → 403", async () => {
   const tok = await studentTok();
   const r = await req("GET", `${base}/plan?file=lesson`, null, tok);
   assert.equal(r.status, 403);
+});
+
+// ── PUT /plan body-limit gate ─────────────────────────────────────────────────
+// G-01/G-02: auth runs before bodyLimit — oversized body + valid token → 413;
+// oversized body + invalid token → 401.
+
+const OVER_LIMIT_PLAN_BODY = JSON.stringify({
+  file: "lesson",
+  html: "x".repeat(270 * 1024),
+  knowledge_version: 1,
+  expected_revision: 1,
+  request_id: "req-g01",
+});
+
+await check("G-01 PUT /plan valid-token 270KB body → 413", async () => {
+  const tok = await issuerTok();
+  const env = makeEnv(makeDb());
+  const res = await app.fetch(
+    new Request("https://service.test" + base + "/plan", {
+      method: "PUT",
+      headers: { authorization: `Bearer ${tok}`, "content-type": "application/json" },
+      body: OVER_LIMIT_PLAN_BODY,
+    }),
+    env, makeCtx(),
+  );
+  assert.equal(res.status, 413, `expected 413 got ${res.status}`);
+});
+
+await check("G-02 PUT /plan invalid-token 270KB body → 401 (auth before bodyLimit)", async () => {
+  const env = makeEnv(makeDb());
+  const res = await app.fetch(
+    new Request("https://service.test" + base + "/plan", {
+      method: "PUT",
+      headers: { authorization: "Bearer not-a-valid-token", "content-type": "application/json" },
+      body: OVER_LIMIT_PLAN_BODY,
+    }),
+    env, makeCtx(),
+  );
+  assert.equal(res.status, 401, `expected 401 got ${res.status}`);
 });
 
 // ── Negative: plan text NOT in student profile ────────────────────────────────
