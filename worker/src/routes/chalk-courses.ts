@@ -52,10 +52,27 @@ chalkCourses.post(
     }
 
     // 2. 관문 v0 검사 (checkLessonPedagogy): 저장된 초안 content로
-    const content = JSON.parse(draft.content_json) as SessionDesign;
-    const pedagogyFindings = checkLessonPedagogy(content);
-    for (const f of pedagogyFindings) {
-      results.push(fromPedagogyFinding(f));
+    // TODO(#1295): readDraft 통합
+    let content: SessionDesign | null = null;
+    try {
+      content = JSON.parse(draft.content_json) as SessionDesign;
+    } catch {
+      results.push({
+        item: null,
+        severity: 'warn',
+        judge: 'machine',
+        at: { file: 'lesson', section: null, step: null, field: 'content_json' },
+        message: '저장된 초안을 읽지 못해 관문 검사를 건너뜀',
+        skipped: true,
+        source: 'chalk-draft-check',
+        blocks_confirm: false,
+      });
+    }
+    if (content !== null) {
+      const pedagogyFindings = checkLessonPedagogy(content);
+      for (const f of pedagogyFindings) {
+        results.push(fromPedagogyFinding(f));
+      }
     }
 
     return c.json({ results });

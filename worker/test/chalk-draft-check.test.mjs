@@ -151,4 +151,20 @@ await check('T-C5 draft with blocking pedagogy can be saved and checked; freeze 
   assert.ok([400, 422].includes(freezeR.status), `freeze status should be 400 or 422, got ${freezeR.status}`);
 });
 
+// ─── T-C6: 깨진 content_json → 200 + skipped 항목 ──────────────────────────
+await check('T-C6 broken content_json returns 200 with a skipped gate-check item', async () => {
+  const brokenCourse = 'broken-content-course';
+  db.prepare(
+    `INSERT INTO authoring_drafts (cohort_id, course_id, owner_id, profile_id, revision, content_json, request_id, request_hash, updated_at)
+     VALUES (?,?,?,?,1,?,?,?,datetime('now'))`
+  ).run(cohort, brokenCourse, 'alice', profileId, 'NOT_VALID_JSON', 'broken-req', 'x');
+
+  const r = await req(`/admin/chalk/cohorts/${cohort}/courses/${brokenCourse}/check`, 'POST', {});
+  assert.equal(r.status, 200, r.raw);
+  const skipped = r.json?.results?.find(i => i.skipped === true);
+  assert.ok(skipped, 'broken content_json must produce a skipped result item');
+  assert.equal(skipped.blocks_confirm, false, 'skipped item must not block confirm');
+  assert.ok(typeof skipped.message === 'string' && skipped.message.length > 0, 'skipped item has a message');
+});
+
 console.log(`\n${passed} tests passed`);
