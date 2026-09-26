@@ -247,6 +247,33 @@ await check("I-09 PUT /inputs no existing draft → 404", async () => {
   assert.equal(r.status, 404, JSON.stringify(r.json));
 });
 
+await check("I-10 PUT /inputs CAS conflict: 409 must NOT mutate chalk_course_inputs", async () => {
+  const db = makeDb();
+  seedDraft(db);
+  const tok = await issuerTok();
+  // Request A: succeeds, audience X, revision 1 → 2.
+  const audienceX = "초등학교 3-4학년";
+  const rA = await req("PUT", `${base}/inputs`, {
+    ...VALID_INPUTS, audience: audienceX, request_id: "req-i10-a",
+  }, tok, db);
+  assert.equal(rA.status, 200, JSON.stringify(rA.json));
+  assert.equal(rA.json.revision, 2);
+
+  // Request B: stale expected_revision=1, audience Y → must be 409.
+  const audienceY = "중학교 1학년";
+  const rB = await req("PUT", `${base}/inputs`, {
+    ...VALID_INPUTS, audience: audienceY, expected_revision: 1, request_id: "req-i10-b",
+  }, tok, db);
+  assert.equal(rB.status, 409, JSON.stringify(rB.json));
+
+  // Side-effect check: inputs row must still hold X, not Y.
+  const row = db.prepare(
+    "SELECT audience, revision FROM chalk_course_inputs WHERE cohort_id=? AND course_id=?"
+  ).get(COHORT, "test-course");
+  assert.equal(row.audience, audienceX, `inputs row was mutated by the 409 request: ${row.audience}`);
+  assert.equal(row.revision, 2, `inputs revision was mutated: ${row.revision}`);
+});
+
 // ── PUT /plan tests ───────────────────────────────────────────────────────────
 
 const SAMPLE_HTML = `<!DOCTYPE html>
@@ -337,6 +364,28 @@ await check("P-05 PUT /plan knowledge_version not found → 409", async () => {
     expected_revision: 2, request_id: "req-plan-badkb",
   }, tok, db);
   assert.equal(r.status, 409);
+});
+
+await check("P-07 PUT /plan CAS conflict: 409 must NOT insert into chalk_plan_files", async () => {
+  const db = makeDb();
+  const tok = await seedDraftAndInputs(db);
+  // Draft is at revision 2 after seedDraftAndInputs. Bump to 3 directly to simulate a concurrent write.
+  db.prepare(
+    "UPDATE authoring_drafts SET revision=3, request_id='req-concurrent', request_hash='hash-concurrent' WHERE cohort_id=? AND course_id=?"
+  ).run(COHORT, "test-course");
+
+  // PUT /plan with stale expected_revision=2 → must return 409.
+  const r = await req("PUT", `${base}/plan`, {
+    file: "lesson", html: SAMPLE_HTML, knowledge_version: 1,
+    expected_revision: 2, request_id: "req-p07-stale",
+  }, tok, db);
+  assert.equal(r.status, 409, JSON.stringify(r.json));
+
+  // Side-effect check: no chalk_plan_files row for ref='3' must have been inserted.
+  const row = db.prepare(
+    "SELECT COUNT(*) as n FROM chalk_plan_files WHERE cohort_id=? AND course_id=? AND ref='3'"
+  ).get(COHORT, "test-course");
+  assert.equal(row.n, 0, `chalk_plan_files was mutated by the 409 request: ${row.n} row(s) for ref='3'`);
 });
 
 await check("P-06 PUT /plan auto-check: plan with violations returns non-empty findings", async () => {
