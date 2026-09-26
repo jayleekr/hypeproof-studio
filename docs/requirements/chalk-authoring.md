@@ -69,6 +69,22 @@ Chalk console/issuer/board, Service 인증, live-server, module envelope는 재�
 | AUTH-01 | 신규 프로젝트 공유는 별도 권한 계약으로 설계한다. 기존 메타데이터 조회 권한을 원문 접근으로 확대하지 않는다. | P0 |
 | SAVE-01 | 중복 요청·응답 유실·동시 편집에서 중복 생성과 조용한 덮어쓰기를 방지한다. | P0 |
 
+### 커리큘럼 구성과 Studio 동작의 연결 · 2026-09-21
+
+[TJ 제안의 제품 의도](../PRODUCT-INTENT.md#one-instructor-classroom-intent)에 따라
+BASE-04·CH-01/04/06/07·ENV-01/03·EDU-02·VER-01/02를 하나의 작성 흐름으로 해석한다.
+강사는 검증된 단계·예제·실습·AI 역할/도움·도구·완료 기준을 구성 단위로 조합하고,
+고객 대상에 맞는 변형을 만든다. 바뀐 확정 커리큘럼은 Studio의 해당 기능과 역할에
+반영돼야 한다. 문구 교체나 자료 복제만으로 이 목표를 완료했다고 하지 않는다.
+
+초안 편집 → 변경 영향 확인 → 학생 조건 리허설 → 확정 버전 → 대상 배포 → 실제
+학생 실행의 버전·기능 확인으로 이어진다. 진행 중 수업을 초안 수정으로 바꾸지 않고,
+허용된 기능 카탈로그 안에서 구성하며 학생 데이터·자격은 커리큘럼 복제에서 제외한다.
+“블록코딩처럼”은 구성 가능성의 의도이며 시각적 드래그 편집기가 이미 있다는 뜻은 아니다.
+U3의 수업 버전 전환은 이 흐름의 전달 부분이다. 작성·리허설 전체의 완료 증거로 대신하지 않는다.
+검증은 기존 [Chalk 테스트](../testing/chalk-authoring.md)와
+[통합 인수](../testing/classroom-admin.md#one-instructor-acceptance)를 연결한다.
+
 ## 첫 구현 경계
 
 기본 예제 선택 → 초안 작성 → 준비 점검 → 학생 조건 리허설 → 수업 버전 확정 →
@@ -108,3 +124,10 @@ also clears its hidden cohort/profile binding and blocks create/save until a ver
 setting or manual target is selected, while preserving the in-progress curriculum.
 This does not implement AI
 generation, new cohort provisioning, persistent login or independent course storage.
+
+2026-09-22: the authoring page carries the shared instructor flow bar (prepare → run → wrap up) from the
+[instructor UI pass](classroom-design.md#instructor-ui-pass-20260922). Layout and contracts of the page are unchanged.
+The same day's [second pass](classroom-design.md#instructor-ui-pass2-20260922) only moved the bar's help link from wrap-up to "2 수업 진행"
+(`/manage#ops-help-title`); the authoring page itself is unchanged.
+
+생성기(대상·에셋 입력)와 강의 만들기(대상·에셋 출력)는 [chalk-mvp.md](./chalk-mvp.md) GEN·OUT 묶음이 맡는다.
