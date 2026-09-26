@@ -3305,6 +3305,38 @@
           "path": "worker/test/chalk-plan-parser.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-METHOD-RECOMMEND",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB",
+        "ST-IMP-CHALK-KB-STORE"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/chalk-recommend.ts"
+        },
+        {
+          "path": "worker/src/routes/chalk-recommend.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-METHOD-RECOMMEND",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-METHOD-RECOMMEND",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-recommend.test.mjs"
+        }
+      ]
     }
   ]
 }
