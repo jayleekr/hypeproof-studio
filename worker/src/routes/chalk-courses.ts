@@ -196,29 +196,29 @@ chalkCourses.put(
     c.header("cache-control", "no-store");
 
     let body: unknown;
-    try { body = await c.req.json(); } catch { return c.json({ error: "invalid JSON" }, 400); }
-    if (typeof body !== "object" || body === null) return c.json({ error: "request body must be a JSON object" }, 400);
+    try { body = await c.req.json(); } catch { return c.json({ code: "invalid_request", error: "invalid JSON" }, 400); }
+    if (typeof body !== "object" || body === null) return c.json({ code: "invalid_request", error: "request body must be a JSON object" }, 400);
     const b = body as Record<string, unknown>;
 
     // Validate required fields
     if (typeof b.audience !== "string" || !b.audience.trim())
-      return c.json({ error: "audience is required" }, 400);
+      return c.json({ code: "invalid_request", error: "audience is required" }, 400);
     if (!Array.isArray(b.assets) || b.assets.length === 0)
-      return c.json({ error: "assets must be a non-empty array" }, 400);
+      return c.json({ code: "invalid_request", error: "assets must be a non-empty array" }, 400);
     // Closed vocabulary check for assets
     const badAssets = (b.assets as unknown[]).filter(a => typeof a !== "string" || !ASSETS.includes(a as any));
     if (badAssets.length > 0)
-      return c.json({ error: "unknown asset values", field: "assets", unknown_values: badAssets }, 400);
+      return c.json({ code: "vocab_unknown", error: "unknown asset values", field: "assets", unknown_values: badAssets }, 400);
     if (typeof b.teaching_style !== "string" || !b.teaching_style.trim())
-      return c.json({ error: "teaching_style is required" }, 400);
+      return c.json({ code: "invalid_request", error: "teaching_style is required" }, 400);
     if (typeof b.requirements !== "string")
-      return c.json({ error: "requirements is required" }, 400);
+      return c.json({ code: "invalid_request", error: "requirements is required" }, 400);
     if (!VALID_FORMATS.includes(b.format as any))
-      return c.json({ error: `format must be one of: ${VALID_FORMATS.join(", ")}` }, 400);
+      return c.json({ code: "invalid_request", error: `format must be one of: ${VALID_FORMATS.join(", ")}` }, 400);
     if (!Number.isSafeInteger(b.expected_revision) || (b.expected_revision as number) < 1)
-      return c.json({ error: "expected_revision required (≥1; use the draft save endpoint to create a new course)" }, 400);
+      return c.json({ code: "invalid_request", error: "expected_revision required (≥1; use the draft save endpoint to create a new course)" }, 400);
     if (typeof b.request_id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(b.request_id))
-      return c.json({ error: "request_id required" }, 400);
+      return c.json({ code: "invalid_request", error: "request_id required" }, 400);
     const profile_id = typeof b.profile_id === "string" ? b.profile_id : "";
 
     const familySession = b.family_session === true ? 1 : 0;
@@ -227,22 +227,22 @@ chalkCourses.put(
     let vocabJson: string | null = null;
     if (b.vocab !== undefined) {
       if (typeof b.vocab !== "object" || b.vocab === null || Array.isArray(b.vocab))
-        return c.json({ error: "vocab must be an object" }, 400);
+        return c.json({ code: "invalid_request", error: "vocab must be an object" }, 400);
       const v = b.vocab as Record<string, unknown>;
       if (!Array.isArray(v.goals) || v.goals.some(g => typeof g !== "string"))
-        return c.json({ error: "vocab.goals must be a string array" }, 400);
+        return c.json({ code: "invalid_request", error: "vocab.goals must be a string array" }, 400);
       if (!Array.isArray(v.conditions) || v.conditions.some(cc => typeof cc !== "string"))
-        return c.json({ error: "vocab.conditions must be a string array" }, 400);
+        return c.json({ code: "invalid_request", error: "vocab.conditions must be a string array" }, 400);
 
       // Must have a knowledge version to validate vocab against
       const kbVersion = await latestKbVersion(c.env.HPS_DB);
-      if (!kbVersion) return c.json({ error: "제품 지식이 아직 없습니다; 지식을 먼저 적재하세요" }, 409);
+      if (!kbVersion) return c.json({ code: "knowledge_missing", error: "제품 지식이 아직 없습니다; 지식을 먼저 적재하세요" }, 409);
       const closedVocab = await loadVocab(c.env.HPS_DB, kbVersion);
 
       const badGoals = (v.goals as string[]).filter(g => !closedVocab.goals.includes(g));
-      if (badGoals.length > 0) return c.json({ error: "unknown goal values", field: "vocab.goals", unknown_values: badGoals }, 400);
+      if (badGoals.length > 0) return c.json({ code: "vocab_unknown", error: "unknown goal values", field: "vocab.goals", unknown_values: badGoals }, 400);
       const badConds = (v.conditions as string[]).filter(cc => !closedVocab.conditions.includes(cc));
-      if (badConds.length > 0) return c.json({ error: "unknown condition values", field: "vocab.conditions", unknown_values: badConds }, 400);
+      if (badConds.length > 0) return c.json({ code: "vocab_unknown", error: "unknown condition values", field: "vocab.conditions", unknown_values: badConds }, 400);
 
       vocabJson = JSON.stringify({
         goals: v.goals,
@@ -304,8 +304,8 @@ chalkCourses.put(
     if (wr.kind === 'ok' || wr.kind === 'idempotent')
       return c.json({ revision: wr.draft.revision });
     if (wr.kind === 'request_id_reused')
-      return c.json({ error: "request id reused with different content" }, 409);
-    return c.json({ error: "revision conflict; reload before saving" }, 409);
+      return c.json({ code: "request_id_reused", error: "request id reused with different content" }, 409);
+    return c.json({ code: "revision_conflict", error: "revision conflict; reload before saving" }, 409);
   },
 );
 
@@ -323,20 +323,20 @@ chalkCourses.put(
     c.header("cache-control", "no-store");
 
     let body: unknown;
-    try { body = await c.req.json(); } catch { return c.json({ error: "invalid JSON" }, 400); }
-    if (typeof body !== "object" || body === null) return c.json({ error: "request body must be a JSON object" }, 400);
+    try { body = await c.req.json(); } catch { return c.json({ code: "invalid_request", error: "invalid JSON" }, 400); }
+    if (typeof body !== "object" || body === null) return c.json({ code: "invalid_request", error: "request body must be a JSON object" }, 400);
     const b = body as Record<string, unknown>;
 
     if (!VALID_FILES.includes(b.file as any))
-      return c.json({ error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
+      return c.json({ code: "invalid_request", error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
     if (typeof b.html !== "string")
-      return c.json({ error: "html is required" }, 400);
+      return c.json({ code: "invalid_request", error: "html is required" }, 400);
     if (!Number.isInteger(b.knowledge_version) || (b.knowledge_version as number) < 1)
-      return c.json({ error: "knowledge_version must be a positive integer" }, 400);
+      return c.json({ code: "invalid_request", error: "knowledge_version must be a positive integer" }, 400);
     if (!Number.isSafeInteger(b.expected_revision) || (b.expected_revision as number) < 1)
-      return c.json({ error: "expected_revision required (plan requires existing draft)" }, 400);
+      return c.json({ code: "invalid_request", error: "expected_revision required (plan requires existing draft)" }, 400);
     if (typeof b.request_id !== "string" || !/^[a-zA-Z0-9_-]{1,128}$/.test(b.request_id))
-      return c.json({ error: "request_id required" }, 400);
+      return c.json({ code: "invalid_request", error: "request_id required" }, 400);
 
     const htmlBytes = new TextEncoder().encode(b.html as string).length;
     if (htmlBytes > PLAN_MAX_BYTES)
@@ -346,7 +346,7 @@ chalkCourses.put(
     const kbRow = await c.env.HPS_DB.prepare(
       "SELECT version FROM chalk_knowledge_versions WHERE version=?"
     ).bind(b.knowledge_version).first<KbVersionRow>();
-    if (!kbRow) return c.json({ error: "knowledge version not found" }, 409);
+    if (!kbRow) return c.json({ code: "knowledge_missing", error: "knowledge version not found" }, 409);
 
     const sha256 = await sha256Hex(b.html as string);
     const nowMs = Date.now();
@@ -397,8 +397,8 @@ chalkCourses.put(
       return c.json({ revision: wr.draft.revision, sha256, findings });
     }
     if (wr.kind === 'request_id_reused')
-      return c.json({ error: "request id reused with different content" }, 409);
-    return c.json({ error: "revision conflict; reload before saving" }, 409);
+      return c.json({ code: "request_id_reused", error: "request id reused with different content" }, 409);
+    return c.json({ code: "revision_conflict", error: "revision conflict; reload before saving" }, 409);
   },
 );
 
@@ -416,20 +416,20 @@ chalkCourses.get(
 
     const file = c.req.query("file") ?? "lesson";
     if (!VALID_FILES.includes(file as any))
-      return c.json({ error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
+      return c.json({ code: "invalid_request", error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
 
     // Load inputs
     const inputs = await c.env.HPS_DB.prepare(
       "SELECT * FROM chalk_course_inputs WHERE cohort_id=? AND course_id=?"
     ).bind(cohort, course).first<InputsRow>();
-    if (!inputs) return c.json({ error: "입력을 먼저 저장하세요 (PUT .../inputs)" }, 409);
-    if (!inputs.vocab_json) return c.json({ error: "어휘(vocab)를 입력에 포함해야 brief를 만들 수 있습니다" }, 409);
+    if (!inputs) return c.json({ code: "inputs_missing", error: "입력을 먼저 저장하세요 (PUT .../inputs)" }, 409);
+    if (!inputs.vocab_json) return c.json({ code: "inputs_missing", error: "어휘(vocab)를 입력에 포함해야 brief를 만들 수 있습니다" }, 409);
 
     const vocab = JSON.parse(inputs.vocab_json) as VocabInput;
 
     // Load knowledge version
     const kbVersion = await latestKbVersion(c.env.HPS_DB);
-    if (!kbVersion) return c.json({ error: "제품 지식이 아직 없습니다; 지식을 먼저 적재하세요" }, 409);
+    if (!kbVersion) return c.json({ code: "knowledge_missing", error: "제품 지식이 아직 없습니다; 지식을 먼저 적재하세요" }, 409);
 
     // Load methods and vocab from knowledge
     const [methodRows, closedVocab] = await Promise.all([
@@ -466,9 +466,9 @@ chalkCourses.get(
       );
     } catch (err) {
       if (err instanceof KnowledgeIncompatibleError)
-        return c.json({ error: "knowledge incompatible", field: err.field, unranked: err.unranked }, 409);
+        return c.json({ code: "knowledge_incompatible", error: "knowledge incompatible", field: err.field, unranked: err.unranked }, 409);
       if (err instanceof VocabError)
-        return c.json({ error: err.message, field: err.field, unknown_values: err.unknown_values }, 409);
+        return c.json({ code: "knowledge_incompatible", error: err.message, field: err.field, unknown_values: err.unknown_values }, 409);
       throw err;
     }
 
@@ -552,7 +552,7 @@ chalkCourses.get(
 
     const file = c.req.query("file") ?? "lesson";
     if (!VALID_FILES.includes(file as any))
-      return c.json({ error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
+      return c.json({ code: "invalid_request", error: `file must be one of: ${VALID_FILES.join(", ")}` }, 400);
 
     // Read latest draft plan file
     const planRow = await c.env.HPS_DB.prepare(

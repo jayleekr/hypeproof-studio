@@ -382,6 +382,7 @@ await check("I-02 no knowledge version → 409", async () => {
 await check("I-03 unknown condition → 400 with field", async () => {
   const r = await req({ conditions: ["not-a-real-condition"], goals: [] }, issuerTok);
   assert.equal(r.status, 400);
+  assert.equal(r.json.code, "vocab_unknown");
   assert.equal(r.json.field, "condition");
 });
 
@@ -421,6 +422,7 @@ await check("I-08 other issuer's course → 404", async () => {
 await check("I-09 vocab:prior missing → 409 knowledge incomplete", async () => {
   const r = await req({ conditions: [], goals: [] }, issuerTok, makeDb({ omitPriorVocab: true }));
   assert.equal(r.status, 409);
+  assert.equal(r.json.code, "knowledge_incomplete");
   assert.ok(r.json.error.includes("incomplete"));
 });
 
@@ -472,6 +474,7 @@ await check("I-12 vocab:prior has unranked value → 409 knowledge incompatible"
   );
   const r = await req({ conditions: [], goals: [] }, issuerTok, db);
   assert.equal(r.status, 409, JSON.stringify(r.json));
+  assert.equal(r.json.code, "knowledge_incompatible");
   assert.equal(r.json.error, "knowledge incompatible");
   assert.equal(r.json.field, "vocab:prior");
   assert.ok(Array.isArray(r.json.unranked) && r.json.unranked.includes("advanced"));

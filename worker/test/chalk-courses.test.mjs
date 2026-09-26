@@ -197,6 +197,7 @@ await check("I-04 PUT /inputs unknown asset → 400", async () => {
     assets: ["INTENT", "NOT_AN_ASSET"],
   }, tok);
   assert.equal(r.status, 400);
+  assert.equal(r.json.code, "vocab_unknown");
   assert.equal(r.json.field, "assets");
 });
 
@@ -225,6 +226,7 @@ await check("I-07 PUT /inputs vocab with no KB → 409", async () => {
   const tok = await issuerTok();
   const r = await req("PUT", `${base}/inputs`, VALID_INPUTS, tok, db);
   assert.equal(r.status, 409);
+  assert.equal(r.json.code, "knowledge_missing");
 });
 
 await check("I-08 PUT /inputs without vocab saves OK", async () => {
@@ -272,6 +274,16 @@ await check("I-10 PUT /inputs CAS conflict: 409 must NOT mutate chalk_course_inp
   ).get(COHORT, "test-course");
   assert.equal(row.audience, audienceX, `inputs row was mutated by the 409 request: ${row.audience}`);
   assert.equal(row.revision, 2, `inputs revision was mutated: ${row.revision}`);
+});
+
+await check("I-11 PUT /inputs missing audience → 400 invalid_request", async () => {
+  const db = makeDb();
+  seedDraft(db);
+  const tok = await issuerTok();
+  const { audience: _, ...noAudience } = VALID_INPUTS;
+  const r = await req("PUT", `${base}/inputs`, { ...noAudience, request_id: "req-no-audience" }, tok, db);
+  assert.equal(r.status, 400);
+  assert.equal(r.json.code, "invalid_request");
 });
 
 // ── PUT /plan tests ───────────────────────────────────────────────────────────
@@ -334,6 +346,7 @@ await check("P-02 PUT /plan revision conflict → 409", async () => {
     request_id: "req-plan-conflict",
   }, tok, db);
   assert.equal(r.status, 409);
+  assert.equal(r.json.code, "revision_conflict");
 });
 
 await check("P-03 PUT /plan other issuer → 404", async () => {
@@ -388,6 +401,26 @@ await check("P-07 PUT /plan CAS conflict: 409 must NOT insert into chalk_plan_fi
   assert.equal(row.n, 0, `chalk_plan_files was mutated by the 409 request: ${row.n} row(s) for ref='3'`);
 });
 
+await check("P-08 PUT /plan request_id_reused → 409 request_id_reused", async () => {
+  const db = makeDb();
+  const tok = await seedDraftAndInputs(db);
+  // First PUT /plan succeeds with request_id="req-p08".
+  const r1 = await req("PUT", `${base}/plan`, {
+    file: "lesson", html: SAMPLE_HTML, knowledge_version: 1,
+    expected_revision: 2, request_id: "req-p08",
+  }, tok, db);
+  assert.equal(r1.status, 200, JSON.stringify(r1.json));
+
+  // Second PUT /plan: same request_id but different content → request_id_reused.
+  const differentHtml = SAMPLE_HTML.replace("<p>test plan</p>", "<p>different plan content</p>");
+  const r2 = await req("PUT", `${base}/plan`, {
+    file: "lesson", html: differentHtml, knowledge_version: 1,
+    expected_revision: 3, request_id: "req-p08",
+  }, tok, db);
+  assert.equal(r2.status, 409, JSON.stringify(r2.json));
+  assert.equal(r2.json.code, "request_id_reused");
+});
+
 await check("P-06 PUT /plan auto-check: plan with violations returns non-empty findings", async () => {
   const db = makeDb();
   const tok = await seedDraftAndInputs(db);
@@ -432,6 +465,7 @@ await check("B-02 GET /brief no inputs → 409", async () => {
   ).run(COHORT, "test-course", "tester", "", 1, '{"schema":"hps-session-design/1","title":"","audience":"","duration_minutes":120,"objective":"","prerequisites":"","starter":"","steps":[]}', "req-bare", "hash-bare", now);
   const r = await req("GET", `${base}/brief?file=lesson`, null, tok, db);
   assert.equal(r.status, 409);
+  assert.equal(r.json.code, "inputs_missing");
 });
 
 await check("B-03 GET /brief no KB → 409", async () => {
