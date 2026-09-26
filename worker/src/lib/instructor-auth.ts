@@ -130,38 +130,6 @@ export function isIssuerAllowedEndpoint(path: string, method: string): boolean {
   return false;
 }
 
-// #1298 — verify issuer-role without a cohort requirement. Used by GET
-// /admin/chalk/whoami: any valid, un-revoked issuer token returns its scopes.
-// Returns `null` if no Bearer was present (admin Basic/CF Access path).
-// Returns a Response on token present but invalid / wrong role / revoked.
-export async function authorizeIssuer(
-  c: InstructorAuthRequest,
-): Promise<IssuerAuthz | null | Response> {
-  const auth = c.req.header("authorization") ?? "";
-  const bearerMatch = /^Bearer\s+(.+)$/i.exec(auth.trim());
-  if (!bearerMatch || !bearerMatch[1]) return null;
-
-  let payload: TokenPayload;
-  try {
-    payload = await verify(bearerMatch[1], c.env.HPS_SIGNING_SECRET);
-  } catch (err) {
-    return Response.json(
-      { error: publicVerifyError(err, "issuer") },
-      { status: 401 },
-    );
-  }
-  if (payload.role !== "issuer") {
-    return Response.json({ error: "token is not an issuer" }, { status: 403 });
-  }
-  if (payload.jti) {
-    const rev = await isTokenRevoked(c.env.HPS_KV, payload.jti);
-    if (rev) return Response.json({ error: "issuer token revoked" }, { status: 401 });
-  }
-  // Return the first scope as representative; whoami callers only need confirmation.
-  const scope = (payload.scopes ?? [])[0] ?? { cohort: "" };
-  return { scope, payload };
-}
-
 // #167 / #290 — when an issuer-role Bearer is presented, re-verify + scope
 // check. Returns `null` if no Bearer was present (so the caller knows the
 // middleware admitted via Basic/CF Access on the Service — Chalk treats null
