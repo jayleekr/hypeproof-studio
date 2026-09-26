@@ -60,6 +60,17 @@ export async function chalkToolsEnabled(
 
 // ─── 내부 유틸 ─────────────────────────────────────────────────────────────
 
+export class IssuerHttpError extends Error {
+  readonly status: number;
+  readonly body: unknown;
+  constructor(status: number, body: unknown) {
+    super(`서버 오류 ${status}`);
+    this.name = "IssuerHttpError";
+    this.status = status;
+    this.body = body;
+  }
+}
+
 async function issuerFetch(
   ctx: ChalkToolContext,
   path: string,
@@ -86,7 +97,9 @@ async function issuerFetch(
 
   const text = await res.text();
   if (!res.ok) {
-    throw new Error(`서버 오류 ${res.status}: ${text.slice(0, 200)}`);
+    let body: unknown = text;
+    try { body = JSON.parse(text); } catch { /* keep text */ }
+    throw new IssuerHttpError(res.status, body);
   }
   try {
     return JSON.parse(text);
@@ -255,11 +268,24 @@ export async function execRecommendMethods(
   if (learner_level !== undefined) body.learner_level = learner_level;
   if (has_guidance !== undefined) body.has_guidance = has_guidance;
 
-  return issuerFetch(
-    ctx,
-    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/recommend`,
-    { method: "POST", body },
-  );
+  try {
+    return await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/recommend`,
+      { method: "POST", body },
+    );
+  } catch (err) {
+    if (err instanceof IssuerHttpError && err.status === 409) {
+      return { error: "지식이 적재되지 않았습니다. chalk_get_knowledge로 버전을 확인하세요." };
+    }
+    if (err instanceof IssuerHttpError && err.status === 400) {
+      const b = err.body as { error?: string; field?: string; unknown_values?: string[] } | null;
+      const field = b?.field ?? "";
+      const unknown = b?.unknown_values ?? [];
+      return { error: `어휘 오류 (${field}): 알 수 없는 값 [${unknown.join(", ")}]` };
+    }
+    throw err;
+  }
 }
 
 // ─── 작업 사본 파일 유틸 ──────────────────────────────────────────────────
@@ -350,11 +376,26 @@ export async function execSetInputs(
     vocab, expected_revision, request_id,
   };
   if (profile_id !== undefined) body.profile_id = profile_id;
-  return issuerFetch(
-    ctx,
-    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/inputs`,
-    { method: "PUT", body },
-  );
+  try {
+    return await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/inputs`,
+      { method: "PUT", body },
+    );
+  } catch (err) {
+    if (err instanceof IssuerHttpError && err.status === 409) {
+      const b = err.body as { error?: string } | null;
+      const msg = b?.error ?? "";
+      if (msg.startsWith("제품 지식이 아직 없습니다")) {
+        return { error: "지식이 적재되지 않았습니다. chalk_get_knowledge로 버전을 확인하세요." };
+      }
+      if (msg.startsWith("revision conflict")) {
+        return { error: "revision_conflict", message: "다른 곳에서 저장됐습니다. chalk_open_course로 최신 버전을 다시 열고 변경을 다시 적용하세요." };
+      }
+      throw err;
+    }
+    throw err;
+  }
 }
 
 // chalk_generator_brief — GET /admin/chalk/cohorts/:cohort/courses/:course/brief?file=
@@ -382,10 +423,33 @@ export async function execGeneratorBrief(
   };
   if (!cohort || !course) throw new Error("cohort와 course는 필수입니다.");
 
-  const brief = await issuerFetch(
-    ctx,
-    `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/brief?file=${encodeURIComponent(file)}`,
-  ) as { skeleton_html?: string };
+  let briefRaw: unknown;
+  try {
+    briefRaw = await issuerFetch(
+      ctx,
+      `/admin/chalk/cohorts/${encodeURIComponent(cohort)}/courses/${encodeURIComponent(course)}/brief?file=${encodeURIComponent(file)}`,
+    );
+  } catch (err) {
+    if (err instanceof IssuerHttpError && err.status === 409) {
+      const b = err.body as { error?: string; field?: string; unranked?: string[] } | null;
+      const msg = b?.error ?? "";
+      if (msg.startsWith("입력을 먼저 저장하세요")) {
+        return { error: "inputs_missing", message: "입력을 먼저 저장하세요. chalk_set_inputs를 먼저 실행하세요." };
+      }
+      if (msg.startsWith("어휘(vocab)를 입력에 포함해야")) {
+        return { error: "vocab_missing", message: "vocab을 입력에 포함해야 brief를 만들 수 있습니다. chalk_set_inputs에 vocab을 포함하세요." };
+      }
+      if (msg.startsWith("제품 지식이 아직 없습니다")) {
+        return { error: "지식이 적재되지 않았습니다. chalk_get_knowledge로 버전을 확인하세요." };
+      }
+      if (msg === "knowledge incompatible") {
+        return { error: "knowledge_incompatible", field: b?.field, unranked: b?.unranked };
+      }
+      throw err;
+    }
+    throw err;
+  }
+  const brief = briefRaw as { skeleton_html?: string };
 
   // 작업 사본에 뼈대 쓰기 (cwd가 있을 때만)
   if (ctx.cwd && brief.skeleton_html) {
@@ -510,12 +574,14 @@ export async function execSavePlan(
       { method: "PUT", body: { file, html, knowledge_version, expected_revision, request_id } },
     );
   } catch (err) {
-    // 409 = revision 충돌 — 조용히 덮어쓰지 않고 다시 열기 안내
-    if (err instanceof Error && err.message.startsWith("서버 오류 409")) {
-      return {
-        error: "revision_conflict",
-        message: "다른 곳에서 저장됐습니다. chalk_open_course로 최신 버전을 다시 열고 변경을 다시 적용하세요.",
-      };
+    if (err instanceof IssuerHttpError && err.status === 409) {
+      const b = err.body as { error?: string } | null;
+      const msg = b?.error ?? "";
+      if (msg === "knowledge version not found") {
+        return { error: "knowledge_version_not_found", message: "지식 버전을 찾을 수 없습니다. chalk_get_knowledge로 유효한 버전을 확인하세요." };
+      }
+      // revision 충돌 (revision conflict; reload before saving) 또는 기타 409
+      return { error: "revision_conflict", message: "다른 곳에서 저장됐습니다. chalk_open_course로 최신 버전을 다시 열고 변경을 다시 적용하세요." };
     }
     throw err;
   }

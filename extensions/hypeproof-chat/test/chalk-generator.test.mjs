@@ -177,7 +177,7 @@ await check('T-G7 execOpenCourse calls requestConfirmation when local file diffe
 });
 
 // ─── T-G8: revision 충돌(409) → error: revision_conflict 반환 ─────────────
-await check('T-G8 execSavePlan returns revision_conflict on 409 (not throw)', async () => {
+await check('T-G8 execSavePlan returns revision_conflict on 409 revision conflict (not throw)', async () => {
   const tmpDir = join(tmpdir(), `chalk-test-conflict-${Date.now()}`);
   const course = 'lesson-01';
   const filePath = workingCopyPath(tmpDir, course, 'lesson');
@@ -186,7 +186,7 @@ await check('T-G8 execSavePlan returns revision_conflict on 409 (not throw)', as
 
   await withMockServer((req, res) => {
     res.writeHead(409, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ error: 'revision_mismatch' }));
+    res.end(JSON.stringify({ error: 'revision conflict; reload before saving' }));
   }, async (port) => {
     const result = JSON.parse(await callChalkTool(
       fakeCtx(port, { cwd: tmpDir }),
@@ -195,6 +195,60 @@ await check('T-G8 execSavePlan returns revision_conflict on 409 (not throw)', as
     ));
     assert.equal(result.error, 'revision_conflict', `409 충돌이 revision_conflict로 반환되지 않았다: ${JSON.stringify(result)}`);
     assert.ok(result.message.includes('chalk_open_course'), '다시 열기 안내에 chalk_open_course가 없다');
+  });
+});
+
+// ─── T-G10: knowledge version not found(409) → error: knowledge_version_not_found ──
+await check('T-G10 execSavePlan returns knowledge_version_not_found on 409 knowledge version not found', async () => {
+  const tmpDir = join(tmpdir(), `chalk-test-kv-${Date.now()}`);
+  const course = 'lesson-01';
+  const filePath = workingCopyPath(tmpDir, course, 'lesson');
+  await mkdir(join(tmpDir, 'chalk', course), { recursive: true });
+  await writeFile(filePath, '<html>draft</html>', 'utf-8');
+
+  await withMockServer((req, res) => {
+    res.writeHead(409, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'knowledge version not found' }));
+  }, async (port) => {
+    const result = JSON.parse(await callChalkTool(
+      fakeCtx(port, { cwd: tmpDir }),
+      'chalk_save_plan',
+      { cohort: 'c1', course, knowledge_version: 999, expected_revision: 1, request_id: 'uuid-kv' },
+    ));
+    assert.equal(result.error, 'knowledge_version_not_found', `지식 버전 오류가 knowledge_version_not_found로 반환되지 않았다: ${JSON.stringify(result)}`);
+    assert.ok(result.message.includes('chalk_get_knowledge'), '안내에 chalk_get_knowledge가 없다');
+  });
+});
+
+// ─── T-G11: brief inputs 없음(409) → error: inputs_missing ───────────────
+await check('T-G11 execGeneratorBrief returns inputs_missing on 409 inputs missing', async () => {
+  await withMockServer((req, res) => {
+    res.writeHead(409, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: '입력을 먼저 저장하세요 (PUT .../inputs)' }));
+  }, async (port) => {
+    const result = JSON.parse(await callChalkTool(
+      fakeCtx(port),
+      'chalk_generator_brief',
+      { cohort: 'c1', course: 'lesson-01' },
+    ));
+    assert.equal(result.error, 'inputs_missing', `inputs 없음이 inputs_missing으로 반환되지 않았다: ${JSON.stringify(result)}`);
+    assert.ok(result.message.includes('chalk_set_inputs'), '안내에 chalk_set_inputs가 없다');
+  });
+});
+
+// ─── T-G12: knowledge incompatible(409) → error: knowledge_incompatible ──
+await check('T-G12 execGeneratorBrief returns knowledge_incompatible on 409 knowledge incompatible', async () => {
+  await withMockServer((req, res) => {
+    res.writeHead(409, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ error: 'knowledge incompatible', field: 'conditions', unranked: ['no_prior'] }));
+  }, async (port) => {
+    const result = JSON.parse(await callChalkTool(
+      fakeCtx(port),
+      'chalk_generator_brief',
+      { cohort: 'c1', course: 'lesson-01' },
+    ));
+    assert.equal(result.error, 'knowledge_incompatible', `knowledge incompatible이 knowledge_incompatible로 반환되지 않았다: ${JSON.stringify(result)}`);
+    assert.equal(result.field, 'conditions', 'field가 전달되지 않았다');
   });
 });
 
