@@ -3305,6 +3305,34 @@
           "path": "worker/test/chalk-plan-parser.test.mjs"
         }
       ]
+    },
+    {
+      "id": "ST-IMP-CHALK-GEN-SERVER",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB",
+        "ST-IMP-CHALK-KB-STORE"
+      ],
+      "sources": [
+        {"path": "worker/src/routes/chalk-courses.ts"},
+        {"path": "worker/src/lib/authoring-draft-write.ts"},
+        {"path": "worker/migrations/0031-chalk-plan-files.sql"}
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-GEN-SERVER",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-GEN-SERVER",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {"path": "worker/test/chalk-courses.test.mjs"},
+        {"path": "worker/test/chalk-draft-check.test.mjs"}
+      ]
     }
   ]
 }

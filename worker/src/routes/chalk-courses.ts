@@ -9,17 +9,27 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { Env } from "../env";
-import { authorizeIssuerForCohort } from "../lib/instructor-auth";
+import { authorizeIssuerForCohort, type IssuerAuthz } from "../lib/instructor-auth";
 import { sha256Hex } from "../lib/modules";
 import { ASSETS } from "../lib/trial-evidence";
-import { readDraft, owns, writeDraft, type Draft } from "../lib/authoring-draft-write";
+import { readDraft, owns, writeDraft } from "../lib/authoring-draft-write";
 import { recommendMethods, VocabError, type MethodFields } from "../lib/chalk-recommend";
 
-export const chalkCourses = new Hono<{ Bindings: Env }>();
+type Vars = { Variables: { author: IssuerAuthz } };
+
+export const chalkCourses = new Hono<{ Bindings: Env } & Vars>();
+
+// Auth middleware — runs before bodyLimit so oversized unauthenticated requests get 401.
+chalkCourses.use("/chalk/cohorts/:cohort/courses/:course/*", async (c, next) => {
+  const auth = await authorizeIssuerForCohort(c, c.req.param("cohort")!);
+  if (auth instanceof Response) return auth;
+  if (!auth) return c.json({ error: "instructor Bearer required" }, 401);
+  c.set("author", auth);
+  await next();
+});
 
 const PLAN_MAX_BYTES = 256 * 1024;
 const VALID_FILES = ["lesson", "ops"] as const;
-type PlanFile = typeof VALID_FILES[number];
 const VALID_FORMATS = ["workshop", "track"] as const;
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -36,9 +46,7 @@ interface VocabInput { goals: string[]; conditions: string[]; learner_level?: st
 // ── Auth helper ──────────────────────────────────────────────────────────────
 
 async function authAndOwn(c: any, cohort: string, course: string) {
-  const auth = await authorizeIssuerForCohort(c, cohort);
-  if (auth instanceof Response) return { err: auth };
-  if (!auth) return { err: c.json({ error: "instructor Bearer required" }, 401) };
+  const auth = c.get("author") as IssuerAuthz;
   const draft = await readDraft(c.env.HPS_DB, cohort, course);
   if (!draft || !owns(draft, auth.payload.u, auth.scope.profiles))
     return { err: c.json({ error: "course not found" }, 404) };
@@ -178,9 +186,7 @@ chalkCourses.put(
   async (c) => {
     const cohort = c.req.param("cohort")!;
     const course = c.req.param("course")!;
-    const auth = await authorizeIssuerForCohort(c, cohort);
-    if (auth instanceof Response) return auth;
-    if (!auth) return c.json({ error: "instructor Bearer required" }, 401);
+    const auth = c.get("author");
 
     c.header("cache-control", "no-store");
 
@@ -345,7 +351,7 @@ chalkCourses.put(
     const methodsMeta = /data-chalk-plan[^>]*>.*?<meta[^>]+chalk:methods[^>]+content="([^"]*)"/.exec(
       (b.html as string).slice(0, 2000)
     );
-    const methodIds = methodsMeta ? methodsMeta[1].split(/\s+/).filter(Boolean) : [];
+    const methodIds = methodsMeta?.[1]?.split(/\s+/).filter(Boolean) ?? [];
 
     // Build updated plan_ref
     const existingContent = JSON.parse(prior!.content_json);
@@ -532,7 +538,7 @@ chalkCourses.get(
   async (c) => {
     const cohort = c.req.param("cohort")!;
     const course = c.req.param("course")!;
-    const { err, draft } = await authAndOwn(c, cohort, course) as any;
+    const { err } = await authAndOwn(c, cohort, course) as any;
     if (err) return err;
 
     c.header("cache-control", "no-store");
