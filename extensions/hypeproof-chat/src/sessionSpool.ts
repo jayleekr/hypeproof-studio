@@ -220,6 +220,22 @@ interface SessionState {
   metaWritten: boolean;
   seenRequestKeys: Set<string>;
   seenArtifactHashes: Set<string>;
+  /**
+   * #751 — the highest event seq this session ever ALLOCATED (1-based, one stream per events.jsonl). It is allocated
+   * before the append and never reused: an append that fails burns its number, so the loss stays visible as a gap
+   * instead of being renumbered away.
+   */
+  lastSeq: number;
+  /** A failed append may have left a line without its newline; the next append isolates it rather than gluing onto it. */
+  tornTail: boolean;
+}
+
+/** What the snapshot freezer needs to say what a copy covers — read under the write queue, so it matches the bytes. */
+export interface SpoolSnapshotSource {
+  files: Array<{ name: string; data: Uint8Array }>;
+  sequence: { session_id: string; last_seq: number };
+  /** Other sessions of the same learner with events since `sinceMs` (app restart, second window, sealed session). null = could not tell. */
+  other_sessions: number | null;
 }
 
 export type SpoolArtifactSource =
@@ -292,7 +308,15 @@ export class SessionSpool {
     });
   }
 
-  recordPrompt(e: { turnId: string; runtime: string; text: string; imagesCount?: number; model?: string }): void {
+  /**
+   * #751 U3 — the lesson basis changed at this point of the record: every `prompt` after it ran under `to`. A marker for
+   * the learner's own record only; the Service's turn ledger, not this line, decides which basis a turn ran under.
+   */
+  recordLessonBinding(e: { from: { key: string; version?: string }; to: { key: string; version?: string; source: string; object_id?: string | null; revision?: number | null } }): void {
+    this.enqueue(async () => { const s = await this.materialize(); await this.writeEvent(s, { type: "lesson_binding", from: e.from, to: e.to }); });
+  }
+
+  recordPrompt(e: { turnId: string; runtime: string; text: string; imagesCount?: number; model?: string; instructorPromptRefs?: Array<{ object_id: string; revision: number }> }): void {
     this.enqueue(async () => {
       const s = await this.materialize();
       this.pinTurn(e.turnId, s);
@@ -308,6 +332,9 @@ export class SessionSpool {
         ...(e.imagesCount ? { images_count: e.imagesCount } : {}),
         // #1298 — record which model this turn actually ran on.
         ...(e.model ? { model: e.model } : {}),
+        // #751 U3 — "the draft this prompt came from had instructor prompt X rev N imported into it". Nothing about how
+        // much of it remains. Bodiless, local to this record, and absent when nothing was imported.
+        ...(e.instructorPromptRefs?.length ? { instructor_prompt_refs: e.instructorPromptRefs.slice(0, 8) } : {}),
       });
     });
   }
@@ -442,6 +469,43 @@ export class SessionSpool {
     });
   }
 
+  /**
+   * #751 — the current session's files together with its sequence state, read INSIDE the write queue: every event
+   * queued before this call is on disk, none queued after it is, and `last_seq` is the counter at that same instant.
+   * Reads only. Resolves null when there is no session or the files cannot be read.
+   */
+  readForSnapshot(sinceMs: number): Promise<SpoolSnapshotSource | null> {
+    return new Promise((resolve) => {
+      this.enqueue(async () => {
+        const s = this.session;
+        if (!s) { resolve(null); return; }
+        const files: Array<{ name: string; data: Uint8Array }> = [];
+        for (const name of ["session.meta.json", "events.jsonl"]) {
+          try { files.push({ name, data: new Uint8Array(await fs.promises.readFile(path.join(s.dir, name))) }); } catch { /* an absent file is simply not part of the copy */ }
+        }
+        const other = await this.otherSessionsSince(s, sinceMs).catch(() => null);
+        resolve(files.length ? { files, sequence: { session_id: s.id, last_seq: s.lastSeq }, other_sessions: other } : null);
+      });
+      void this.queue.then(() => resolve(null));
+    });
+  }
+
+  private async otherSessionsSince(current: SessionState, sinceMs: number): Promise<number | null> {
+    if (!current.identity) return null;
+    let n = 0;
+    for (const { dir } of await listSessionDirs(this.env.root)) {
+      if (path.resolve(dir) === path.resolve(current.dir)) continue;
+      let at: number;
+      try { at = (await fs.promises.stat(path.join(dir, "events.jsonl"))).mtimeMs; } catch { continue; } // no events there
+      if (at < sinceMs) continue;
+      let user: unknown;
+      try { user = JSON.parse(await fs.promises.readFile(path.join(dir, "session.meta.json"), "utf8"))?.user; } catch { return null; } // recent events of unknown ownership
+      const u = user as SpoolIdentity | null;
+      if (u && sameIdentity(u, current.identity)) n++;
+    }
+    return n;
+  }
+
   /** 큐를 비운다 — 테스트와 dispose 용. 결코 reject 하지 않는다. */
   flush(): Promise<void> {
     return this.queue;
@@ -571,6 +635,8 @@ export class SessionSpool {
       metaWritten: false,
       seenRequestKeys: new Set(),
       seenArtifactHashes: new Set(),
+      lastSeq: 0,
+      tornTail: false,
     };
     await fs.promises.mkdir(s.dir, { recursive: true });
     // meta 실패는 세션을 버릴 이유가 아니다 — 이벤트가 본체고, meta 는 다음
@@ -622,12 +688,16 @@ export class SessionSpool {
         });
       }
     }
-    const record = { schema_version: SPOOL_SCHEMA_VERSION, ts: this.now().toISOString(), ...fields };
-    const line = JSON.stringify(record) + "\n";
+    // `seq` comes last so no caller field can replace it.
+    const record = { schema_version: SPOOL_SCHEMA_VERSION, ts: this.now().toISOString(), ...fields, seq: ++s.lastSeq };
     const file = path.join(s.dir, "events.jsonl");
+    let line = JSON.stringify(record) + "\n";
+    if (s.tornTail && !(await endsWithNewline(file))) line = "\n" + line;
     try {
       await fs.promises.appendFile(file, line, "utf8");
+      s.tornTail = false;
     } catch (err) {
+      s.tornTail = true;
       // 세션 디렉토리가 밑에서 사라진 경우(다른 창의 보존 스윕 등) — 되살려서
       // 한 번 재시도한다. 안 하면 이 세션의 남은 이벤트가 전부 무음 유실된다.
       if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
@@ -635,6 +705,7 @@ export class SessionSpool {
       s.metaWritten = false;
       await this.writeMeta(s, s.identity).catch(() => undefined);
       await fs.promises.appendFile(file, line, "utf8");
+      s.tornTail = false;
     }
   }
 
@@ -670,6 +741,22 @@ function clampPayload(payload: Record<string, unknown>): Record<string, unknown>
  * 물러났다 재시도하고, 끝내 실패하면 .tmp 를 치우고 던진다 — 고아 .tmp 를
  * 남기면 업로더가 밟는다.
  */
+async function endsWithNewline(file: string): Promise<boolean> {
+  let fh: fs.promises.FileHandle | null = null;
+  try {
+    fh = await fs.promises.open(file, "r");
+    const { size } = await fh.stat();
+    if (size === 0) return true;
+    const buf = Buffer.alloc(1);
+    await fh.read(buf, 0, 1, size - 1);
+    return buf[0] === 0x0a;
+  } catch {
+    return true; // nothing there to glue onto
+  } finally {
+    await fh?.close().catch(() => undefined);
+  }
+}
+
 async function renameWithRetry(tmp: string, target: string): Promise<void> {
   try {
     await fs.promises.rename(tmp, target);

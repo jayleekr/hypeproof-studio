@@ -5,6 +5,7 @@ import type { Env } from '../env';
 import type { TokenPayload } from './tokens';
 import { isModuleVersion, validateModuleDoc } from './modules';
 import { validateSessionDesign, type SessionDesign } from './session-design';
+import { studentVisibleLesson } from './learning-prompt';
 
 export async function readLesson(env: Env, cohort: string, course: string, version: string, profile: string) {
   if (!/^[a-zA-Z0-9_-]{1,128}$/.test(course) || !isModuleVersion(version)) return null;
@@ -35,5 +36,8 @@ export async function resolveTokenLesson(env: Env, p: TokenPayload, lessonCohort
   const ref = p.lesson;
   if (typeof ref.course_id !== 'string' || typeof ref.version !== 'string' || typeof ref.sha256 !== 'string') return null;
   const lesson = await readLesson(env, lessonCohort, ref.course_id, ref.version, p.p);
-  return lesson?.sha256 === ref.sha256 ? lesson : null;
+  if (!lesson || lesson.sha256 !== ref.sha256) return null;
+  // SCH-03 (#1291): strip prohibited_moves AFTER sha256 check so the stored bytes
+  // are never altered by the projection.
+  return { ...lesson, content: studentVisibleLesson(lesson.content) };
 }

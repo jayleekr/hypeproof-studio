@@ -1,6 +1,6 @@
 import {localRuntimeConfig,localModelSelection,runLocalCoach} from './localRuntime';
 import { ActivityConnectionError, activityConnections } from './activityConnections';
-import { emptyActivityDraft, validActivityDraft } from './activityDraft';
+import { emptyActivityDraft, preservedDraftContent, validActivityDraft } from './activityDraft';
 import { verifyActivity } from './proxyClient';
 import { fetchAccessView, sendBudgetRequest, accessProfile, type AccessState } from './accessClient';
 import { availableModelSelection, selectedModel, modelSelectionScope, type SavedModelChoice, selectedEffort, observedEffortResult, type SavedEffortChoice } from './modelSelection';
@@ -19,6 +19,7 @@ import { TOKEN_KEY, resolveWorkspaceRoot } from "./extension";
 import { proxyChat, fetchProfileResult, ProxyAuthError, ProxyTransportError } from "./proxyClient";
 import { TOKEN_MISSING_FRIENDLY, type ProfileFailure } from "./proxyClientHelpers";
 import { runSdkCoach, SdkUnavailableError, type BrowserMcpHost } from "./sdkCoach";
+import { REFUSAL_COPY, bindingRefusalCode, candidateMatches, closeTurn, fetchTurnState, planPreflight, refusedTurnEnding, shouldRecheckEnforcement, tokenLessonSha } from "./lessonBinding";
 import {
   coachSeatKeyFor,
   isAbortError,
@@ -74,6 +75,7 @@ import {
 } from "./coachIdentity.ts";
 import { CdpSession } from "./cdpSession";
 import { LiveServer } from "./liveServer";
+import { recoverLearnerPreview, type ArtifactState, type PreviewTabsState } from "./previewRecovery";
 import { BrowserControl, type BrowserToolCall } from "./browserControl";
 import { resolveBrowserSafety } from "./browserSafetyHelpers";
 import { extractAgentMd } from "./agentHandoff";
@@ -129,6 +131,8 @@ import {
   sdkFallbackLogLine,
   resolveCoachRuntime,
   classifyTurnError,
+  sdkTurnEndFailure,
+  lessonStepSignal,
   pendingCloseLabel,
   WRITE_TOOL_NAMES,
 } from "./chatPanelHelpers";
@@ -158,6 +162,15 @@ import {
  * default name they are byte-identical to the previous literals here.
  */
 
+
+/** #751 U3 — what the webview said was imported, reduced to the two fields the record keeps. Anything malformed is dropped. */
+function promptRefs(raw: unknown): Array<{ object_id: string; revision: number }> | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out = raw.filter((r) => r && typeof r.object_id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(r.object_id) && Number.isSafeInteger(r.revision) && r.revision > 0).slice(0, 8).map((r) => ({ object_id: r.object_id as string, revision: r.revision as number }));
+  return out.length ? out : undefined;
+}
+/** #751 U3 — the switch was recorded but the new profile could not be verified: the turn is not sent, the input is returned. */
+class LessonBindingPreflightError extends Error {}
 
 export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private effortNotice?: string;
@@ -720,7 +733,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   }
 
   /** #751 — metadata-only observer for remote classroom operations; null unless the learner connected. */
-  opsObserver: import("./classroomOpsHost").ClassroomOpsObserver | null = null;
+  opsObserver: (import("./classroomOpsHost").ClassroomOpsObserver & Partial<Pick<import("./classroomOpsHost").ClassroomOpsHost, "switchPendingSetting" | "confirmSettingBound" | "knownBindingKey" | "holdsLessonSetting">>) | null = null;
+  /** #751 U2 — set by extension.ts. The provider only relays: every answer is read from disk by the host adapter. */
+  inboxSource: { inboxView(): Promise<import("./classroomInbox").InboxView>; inboxOpened(objectId: string, generation: number): Promise<void>; inboxLink(objectId: string, url: string, generation: number): Promise<string | null> } | null = null;
+  async postInbox(): Promise<void> { if (this.inboxSource) await this.post({ type: "inboxState", inbox: await this.inboxSource.inboxView() }); }
+  /** Shared with the start page: one rule for what a click on an instructor link may do. */
+  async handleInboxLink(msg: { objectId: string; url: string; generation: number; action: "open" | "copy" }): Promise<void> {
+    const url = await this.inboxSource?.inboxLink(msg.objectId, msg.url, msg.generation); if (!url) return;
+    if (msg.action === "copy") await vscode.env.clipboard.writeText(url); else void vscode.env.openExternal(vscode.Uri.parse(url));
+  }
+  private opsLastArtifact: string | undefined;
   // #751 R3 — why new AI runs are held. Local editing, saving, Stop and export never consult this.
   private opsHold: "paused" | "stop_unconfirmed" | null = null;
   private opsGeneration = 0;
@@ -728,7 +750,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   opsRuntimeGeneration(): number { return this.opsGeneration; }
   /** Ask every running turn and pending approval to end. Entries leave the maps through their normal finally paths — that is the confirmation. */
   opsRequestStop(): void {
-    for (const [streamId, ctrl] of [...this.activeStreams]) { try { ctrl.abort(); } catch { /* best-effort */ } void this.post({ type: "streamStopped", streamId }); }
+    for (const [streamId, ctrl] of [...this.activeStreams]) { try { ctrl.abort(); } catch { /* best-effort */ } void this.post({ type: "streamStopped", streamId, by: "instructor" }); }
     for (const resolve of [...this.pendingApprovals.values()]) resolve(false);
     this.observationAssessment?.abort();
   }
@@ -743,21 +765,43 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     let flushed = true;
     try { await this.spool?.flush(); } catch { flushed = false; }
     const dir = this.spool?.currentSessionDir() ?? null;
-    return { history_count: history.length, history_sha256: digest(history), draft_sha256: draft === undefined ? null : digest(draft), spool_session: dir ? path.basename(dir) : null, spool_flushed: flushed };
+    return { history_count: history.length, history_sha256: digest(history), draft_sha256: draft === undefined ? null : digest(preservedDraftContent(draft)), spool_session: dir ? path.basename(dir) : null, spool_flushed: flushed };
   }
-  /** #751 R4 — read the allowlisted spool files of the current session. Reads only: the live spool is not sealed, truncated or moved. */
-  async opsReadSpool(): Promise<Array<{ name: string; data: Uint8Array }> | null> {
-    try { await this.spool?.flush(); } catch { return null; }
-    const dir = this.spool?.currentSessionDir(); if (!dir) return null;
-    const out: Array<{ name: string; data: Uint8Array }> = [];
-    for (const name of ["session.meta.json", "events.jsonl"]) { try { out.push({ name, data: new Uint8Array(await fs.promises.readFile(path.join(dir, name))) }); } catch { /* absent file is simply not part of the copy */ } }
-    return out.length ? out : null;
+  /**
+   * #751 R4 — the allowlisted spool files of the current session plus the spool's sequence state, read under the
+   * spool's own write queue so the counter matches the bytes. Reads only: the live spool is not sealed, truncated or moved.
+   */
+  async opsReadSpool(sinceMs: number): Promise<import("./sessionSpool").SpoolSnapshotSource | null> {
+    try { return (await this.spool?.readForSnapshot(sinceMs)) ?? null; } catch { return null; }
   }
   /** New execution generation on the same files: cached runtime handles are dropped, nothing stored is touched. */
   async opsNewGeneration(): Promise<number> {
     // Reached only after the stop was confirmed, so there is no run state to force-clear here.
     await this.ensureProfile(true);
     return ++this.opsGeneration;
+  }
+  /**
+   * #751 U4 — bring the learner's preview back and report what the learner's OWN tabs then hold. Touches no file. Only tabs
+   * on the preview server as it was before the action are re-loaded (each at its own path) — any other localhost tool or
+   * site is left exactly as it was. The re-load goes through a tab-pinned CDP session that never falls back to another tab.
+   */
+  async opsRecoverPreview(): Promise<{ state: "no_preview" | "reloaded" | "restarted"; artifact: ArtifactState; tabs: PreviewTabsState }> {
+    const answers = async (url: string) => { try { return (await fetch(url, { signal: AbortSignal.timeout(4000) })).status < 500; } catch { return false; } };
+    const column = () => (this.editorChat ? vscode.ViewColumn.Two : vscode.ViewColumn.One);
+    const driven = this.mcpBrowser?.currentTab();
+    return recoverLearnerPreview<vscode.BrowserTab>({
+      tabs: () => vscode.window.browserTabs ?? [],
+      serverUrl: () => this.liveServer.currentUrl(),
+      recover: () => this.liveServer.recover(answers),
+      fetchPage: async (url) => { const res = await fetch(url, { signal: AbortSignal.timeout(4000) }); return { status: res.status, contentType: res.headers.get("content-type") }; },
+      load: async (tab, url) => { const pinned = new BrowserControl(); pinned.setTargetTab(tab); try { return await pinned.loadInPinnedTab(url); } finally { await pinned.dispose(); } },
+      close: async (tab) => { await tab.close(); },
+      open: async (url) => {
+        const opened = await vscode.window.openBrowserTab(url, { viewColumn: column(), preserveFocus: true });
+        this.mcpBrowser ??= new BrowserControl(); this.mcpBrowser.setTargetTab(opened);
+        return opened;
+      },
+    }, driven);
   }
   /** #751 — approval wait is reported as such, never as a failure or as "running". */
   opsRuntime(): { idleMs: number; status: "idle" | "running" | "waiting_approval" } {
@@ -790,6 +834,58 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // A cleared chat starts a new conversation, not a new trial allowance.
       void this.post({ type: "aiDisclosure", text: this.aiDisclosure.noticeForHistoryClear() });
     } finally { this.clearingHistory = false; }
+  }
+
+  /**
+   * #751 U3 — the turn-start preflight of a targeted lesson setting. Switch (owner window) or learn of a switch (any other
+   * window), fetch the profile as a CANDIDATE, and adopt it only when the Service serves exactly that binding.
+   */
+  private async lessonBindingPreflight(): Promise<void> {
+    const ops = this.opsObserver; if (!ops?.switchPendingSetting || !ops.knownBindingKey) return;
+    let current = await this.ensureProfile(); if (!current?.lesson) return;
+    const token = await this.context.secrets.get(TOKEN_KEY), base = tokenLessonSha(token); if (!token || !base) return;
+    if (shouldRecheckEnforcement(current.lesson_binding, (await ops.holdsLessonSetting?.()) === true)) {
+      const fresh = await this.fetchCandidateProfile(token);
+      if (fresh?.lesson_binding?.enforced) { await this.adoptProfile(fresh, token); current = fresh; }
+    }
+    if (!current.lesson_binding?.enforced) return;
+    const sw = await ops.switchPendingSetting(base);
+    const plan = planPreflight(current.lesson_binding, sw, sw.state === "switched" ? null : await ops.knownBindingKey());
+    if (plan.action === "proceed") { if (sw.state === "switched") await ops.confirmSettingBound?.(sw); return; }
+    const candidate = await this.fetchCandidateProfile(token);
+    if (!candidateMatches(plan, candidate)) {
+      // Switched at the Service but not verified here: sending this turn with the old key would only be refused, and with a
+      // guessed key it would run under a tool policy this window does not hold. Nothing is sent.
+      if (plan.confirm) throw new LessonBindingPreflightError("수업 설정을 확인하지 못했습니다. 입력한 글과 첨부는 그대로입니다 — 잠시 뒤 다시 보내 주세요.");
+      return;
+    }
+    const from = current.lesson_binding!, fromVersion = current.lesson?.version;
+    await this.adoptProfile(candidate!, token);
+    if (sw.state === "switched") await ops.confirmSettingBound?.(sw);
+    this.spool?.recordLessonBinding({ from: { key: from.key, version: fromVersion }, to: { key: candidate!.lesson_binding!.key, version: candidate!.lesson?.version, source: candidate!.lesson_binding!.source, object_id: candidate!.lesson_binding!.object_id, revision: candidate!.lesson_binding!.revision } });
+  }
+  private async fetchCandidateProfile(token: string): Promise<ResolvedProfile | null> {
+    const proxyUrl = vscode.workspace.getConfiguration("hypeproofChat").get<string>("proxyUrl", "https://api.hypeproof-ai.xyz/v1");
+    const r = await fetchProfileResult({ proxyUrl, token }).catch(() => null);
+    if (!r?.ok) return null;
+    const connections = activityConnections(this.context);
+    if (connections?.current) return r.profile.activity_id !== connections.current.serverId ? null : { ...r.profile, workspace_root: connections.current.workspace };
+    return r.profile;
+  }
+  /** Same token, same activity: only what the lesson version decides changes (steps, AI name, model list, tool policy). */
+  private async adoptProfile(p: ResolvedProfile, token: string): Promise<void> {
+    if (await this.context.secrets.get(TOKEN_KEY) !== token) return;
+    this.cachedProfile = p; this.profileFetchPromise = null;
+    await this.postConfig();
+  }
+  /** A turn refused under the lesson-binding contract. The Service's record decides how it ends; nothing is re-sent automatically. */
+  private async endRefusedTurn(o: { code: string; streamId: string; proxyUrl: string; token: string | undefined; text: string; images?: string[] }): Promise<void> {
+    const ending = refusedTurnEnding(o.token ? await fetchTurnState({ proxyUrl: o.proxyUrl, token: o.token, turnId: o.streamId }) : null);
+    console.warn(`[lesson-binding] turn ${o.streamId} refused: ${o.code} → ${ending}`);
+    if (ending === "restore_input") await this.post({ type: "inputRejected", text: o.text, images: o.images });
+    await this.post({ type: "streamError", streamId: o.streamId, error: REFUSAL_COPY[ending] });
+    // The next turn must start from what the Service runs now; a profile that cannot be verified stays as it is.
+    if (o.token) { const candidate = await this.fetchCandidateProfile(o.token); if (candidate?.lesson_binding && candidate.lesson_binding.key !== this.cachedProfile?.lesson_binding?.key) await this.adoptProfile(candidate, o.token); }
   }
 
   /** Force re-fetch on next config push (e.g. after token change). */
@@ -1589,6 +1685,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       path: "index.html",
       content: checked.html,
     });
+    // #751 F4 — a real change to the artifact, reported to the class board as digests only (never the HTML).
+    { const after = createHash("sha256").update(checked.html, "utf8").digest("hex"); this.opsObserver?.artifactChanged(this.opsLastArtifact, after); this.opsLastArtifact = after; }
 
     // 2026-08-17, Windows real device — the screen stayed blank for a long time
     // **even after** the coach said "완성됐어요!". Between the stream ending and the
@@ -2161,7 +2259,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         await this.postLearningState();
         return;
       }
+      case "inboxRequest": await this.postInbox(); return;
+      case "inboxOpen": await this.inboxSource?.inboxOpened(msg.objectId, msg.generation); return;
+      case "inboxLink": await this.handleInboxLink(msg); return;
       case "ready":
+        await this.postInbox();
         await this.postConfig();
         await this.postHistory();
         await this.postLearningState();
@@ -2257,7 +2359,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         return;
       }
       case "sendMessage":
-        await this.handleSend(msg.text, msg.history, msg.images);
+        await this.handleSend(msg.text, msg.history, msg.images, promptRefs(msg.imports));
         return;
       case "retryMessage":
         // #358 — carry the failed turn's image(s) through the retry so the
@@ -2349,6 +2451,15 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       // this spool and send, so the two paths share one schema. The mapping is owned
       // by a vscode-free helper (traceMsgToWorkflowRecord), and agreement with
       // trace.ts's field names is pinned by test/trace-workflow-map.smoke.mjs.
+      // #751 F4 — the learner's own step action in the lesson panel. Only a step of the CONFIRMED lesson this profile
+      // carries is accepted; the record stays in the local spool first, then goes to the class board as ids only.
+      case "lessonStep": {
+        const signal = lessonStepSignal(this.cachedProfile?.lesson, msg);
+        if (!signal) return;
+        this.spool?.recordWorkflow({ event: "lesson_step", payload: signal });
+        this.opsObserver?.lessonStep(signal.lesson_version, signal.step_id, signal.status);
+        return;
+      }
       case "traceTrialStart":
       case "traceTrialEnd":
       case "traceValidationRun":
@@ -2405,6 +2516,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     text: string,
     rawHistory: ChatMessage[],
     images?: string[],
+    instructorPromptRefs?: Array<{ object_id: string; revision: number }>,
   ): Promise<void> {
     this.pendingSends++;
     let releaseActivity: (()=>void) | undefined;
@@ -2416,6 +2528,10 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
       const token=await connections.token();
       await verifyActivity({token:token!,proxyUrl:connections.current!.service},connections.current!.serverId);
     }
+    // #751 U3 — a lesson setting this device holds is switched HERE, before the turn consumes the input. A failure to
+    // switch leaves the turn exactly as it would have been; only "switched but the new profile could not be verified"
+    // stops it, and then the learner's text and attachments go straight back into the composer.
+    if (this.opsObserver?.switchPendingSetting) await this.lessonBindingPreflight();
     preflightComplete=true;
     // #503 — the webview's history now has tool lines (role:"tool") mixed in. This is
     // the only path out to the model, so they are filtered once right at the entrance.
@@ -2494,6 +2610,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     const fundingSource=this.accessState?.selected;
     const chosenAccess=this.accessState?.view?.choices.find(c=>c.id===fundingSource);
     const profile=resolvedProfile?accessProfile(resolvedProfile,chosenAccess):null;
+    // #751 U3 — captured ONCE for this turn: every request of the turn names the binding the turn started under.
+    const bindingKey = profile?.lesson_binding?.enforced ? profile.lesson_binding.key : undefined;
     const selection = availableModelSelection(profile, cfg.get<'proxy' | 'agent-sdk'>('coachRuntime', 'proxy'));
     const savedModel = this.context.workspaceState.get<SavedModelChoice>('hps.modelChoice');
     if (profile && selection) model = selectedModel(profile, selection, savedModel, model);
@@ -2634,6 +2752,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     let spoolErrorKind: string | undefined;
     // Why a holder: TS's CFA cannot see the reassignment inside the callback, so a
     // plain let is narrowed to null by the time finally runs.
+    let opsSdkFallback = false;
+    let opsFailure: { status?: number; code?: string; requestId?: string } = {};
     const sdkTurnTotal: {
       current: { usage: Record<string, unknown>; totalCostUsd: number | null } | null;
     } = { current: null };
@@ -2669,6 +2789,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         text,
         imagesCount: effectiveImages?.length ?? 0,
         model, // #1298 — record which model this turn ran on
+        ...(instructorPromptRefs?.length ? { instructorPromptRefs } : {}),
       });
       const onDelta = (delta: string) => {
         if (pendingShown) clearPending();
@@ -2872,6 +2993,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             model,
             effort,
             fundingSource,
+            lessonBinding: bindingKey,
 
             token,
             history,
@@ -2895,6 +3017,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           effort,
           turnId: streamId,
             fundingSource,
+          lessonBinding: bindingKey,
 
           token,
           history,
@@ -2956,11 +3079,12 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           throw new ProxyAuthError("missing", TOKEN_MISSING_FRIENDLY);
         }
         try {
-          await runSdkCoach({
+          const sdkEnd = await runSdkCoach({
             gatewayUrl: proxyUrl,
             effort,
             turnId: streamId,
             fundingSource,
+            lessonBinding: bindingKey,
 
             token,
             model,
@@ -3038,6 +3162,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             // when the profile grants sdk_tools.browser (minors never do).
             browserHost: this.buildBrowserMcpHost(),
           });
+          // #751 U4 — the SDK closed the stream normally but its result said the turn failed (the learner already read the
+          // notice). Not thrown: the notice and the words stay in the conversation exactly as shown, nothing is re-sent. The
+          // failure is recorded ONCE here so closeTurn, the ops observation, the spool and the observation log all say the same.
+          const ended = sdkTurnEndFailure(sdkEnd);
+          if (ended) { spoolStatus = "error"; spoolErrorKind = ended.errorKind; opsFailure = ended.failure; }
         } catch (err) {
           if (!(err instanceof SdkUnavailableError)||fundingSource) throw err;
           if (selection && (selection.source === 'lesson' || (profile && savedModel?.scope === modelSelectionScope(profile)))) throw new Error('선택한 모델의 실행 환경을 사용할 수 없습니다. Studio의 Agent SDK 설치를 확인하거나 강사에게 알려주세요. 대화와 작업은 보존됩니다.');
@@ -3065,6 +3194,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           // #580 — the runtime this turn actually ran on is proxy. A fallback is a
           // state, but it is recorded as an event too — the evidence for quantifying
           // "why did a turn with no usage happen?".
+          opsSdkFallback = true;
           spoolRuntime = "proxy";
           this.spool?.recordWorkflow({
             turnId: streamId,
@@ -3110,11 +3240,23 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     } catch (err) {
       spoolStatus = "error";
       spoolErrorKind = classifyTurnError(err);
-      await this.handleSendError(err, streamId);
+      { const e = err as { status?: unknown; kind?: unknown; requestId?: unknown }; opsFailure = { ...(typeof e?.status === "number" ? { status: e.status } : {}), ...(typeof e?.kind === "string" ? { code: e.kind } : {}), ...(typeof e?.requestId === "string" ? { requestId: e.requestId } : {}) }; }
+      // #751 — a stop (the learner's or the instructor's) is judged by THIS turn's abort signal, not by the shape of what
+      // the runtime threw while dying: the SDK can surface an abort as a transport-looking error, and the learner then
+      // read a deliberate stop as "연결이 끊겼어요". The stop notice was already posted by whoever stopped it.
+      // #751 U3 — a turn the Service refused under the lesson-binding contract is closed from the Service's record of it.
+      const refused = bindingKey ? bindingRefusalCode(err) : null;
+      if (refused && !ctrl.signal.aborted) await this.endRefusedTurn({ code: refused, streamId, proxyUrl, token, text, images });
+      else if (!ctrl.signal.aborted) await this.handleSendError(err, streamId);
     } finally {
+      // The host is the only party that knows a turn ended (an auxiliary request of the same turn ends with end_turn before
+      // the main loop does). A closed turn id is refused by the Service from then on; best effort, bounded by the Service.
+      if (bindingKey && token) void closeTurn({ proxyUrl, token, turnId: streamId, outcome: ctrl.signal.aborted ? "aborted" : spoolStatus === "ok" ? "completed" : "failed" });
       // #580 — always record the end of the turn. A user abort also arrives through
       // catch, so the signal is checked first. When there is an SDK turn total it is
       // carried along — the control against the sum of the per-request usage records.
+      // #751 F4 — what actually happened to this turn, from the real runtime path. No text leaves here.
+      this.opsObserver?.turnResult({ ok: spoolStatus === "ok", aborted: ctrl.signal.aborted, runtime: spoolRuntime === "agent-sdk" ? "agent-sdk" : "proxy", sdkFallback: opsSdkFallback, ...(spoolErrorKind ? { errorKind: spoolErrorKind } : {}), ...opsFailure });
       const total = sdkTurnTotal.current;
       const finalSpoolStatus = ctrl.signal.aborted ? "aborted" : spoolStatus;
       await Promise.all(observationCaptures);
@@ -3150,7 +3292,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
     } catch (error) {
       if (preflightComplete) throw error;
       await this.post({type:"inputRejected",text,images});
-      await this.post({type:"streamError",streamId:"activity",error:error instanceof ActivityConnectionError || error instanceof ProxyTransportError ? error.message : "활동 연결 또는 작업 폴더를 확인하지 못했습니다. 연결 상태를 확인한 뒤 다시 보내 주세요."});
+      await this.post({type:"streamError",streamId:"activity",error:error instanceof ActivityConnectionError || error instanceof ProxyTransportError || error instanceof LessonBindingPreflightError ? error.message : "활동 연결 또는 작업 폴더를 확인하지 못했습니다. 연결 상태를 확인한 뒤 다시 보내 주세요."});
     } finally {
       try { releaseActivity?.(); } finally { this.pendingSends--; }
     }
@@ -3228,6 +3370,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
   private async runBrowserLoop(p: {
     effort?: import('./protocol').CourseEffort;
     fundingSource?: string;
+    lessonBinding?: string;
     proxyUrl: string;
     model: string;
     token: string | undefined;
@@ -3255,6 +3398,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
           effort: p.effort,
           turnId: p.streamId,
           fundingSource:p.fundingSource,
+          lessonBinding: p.lessonBinding,
           token: p.token,
           history: p.history,
           userText: p.userText,

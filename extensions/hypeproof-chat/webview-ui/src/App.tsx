@@ -52,7 +52,7 @@ type Action =
   | { type: "pageAttached"; label: string }
   | { type: "aiDisclosure"; text: string }
   | { type: "streamEnd" }
-  | { type: "streamStopped" }
+  | { type: "streamStopped"; by?: "instructor" }
   | { type: "worldOpened"; id: string }
   | { type: "publishStart" }
   | { type: "publishResult"; state: "uploading" | "done" | "error"; url?: string; message?: string }
@@ -62,6 +62,8 @@ type Action =
 // #497 — 사용자가 Stop 을 눌렀을 때의 안내. 오류가 아니므로 에러 배너를 쓰지
 // 않는다 ("문제가 생겼어요" + 🚨 신고하기 는 정상 조작을 사고로 만든다).
 const STOP_NOTICE = "답변 생성이 중지되었습니다. 다시 채팅을 입력해주세요.";
+// #751 — a classroom stop is not a fault and not the learner's own click: say who stopped it and that nothing was lost.
+const INSTRUCTOR_STOP_NOTICE = "강사가 지금 실행 중이던 작업을 멈췄어요. 대화와 파일은 그대로예요. 준비되면 다시 입력해 주세요.";
 
 const initialState: State = {
   config: null,
@@ -145,7 +147,7 @@ function reducer(state: State, action: Action): State {
         error: null,
         errorRequestId: null,
         errorRunbookUrl: null,
-        stopNotice: STOP_NOTICE,
+        stopNotice: action.by === "instructor" ? INSTRUCTOR_STOP_NOTICE : STOP_NOTICE,
       };
     case "streamError":
       return {
@@ -216,7 +218,7 @@ export function App() {
         case "worldOpened": dispatch({ type: "worldOpened", id: msg.id }); break;
         case "publishResult": dispatch({ type: "publishResult", state: msg.state, url: msg.url, message: msg.message }); break;
         case "streamEnd":   dispatch({ type: "streamEnd" }); break;
-        case "streamStopped": dispatch({ type: "streamStopped" }); break;
+        case "streamStopped": dispatch({ type: "streamStopped", by: msg.by }); break;
         case "streamError": dispatch({ type: "streamError", error: msg.error, requestId: msg.requestId, runbookUrl: msg.runbookUrl }); break;
         case "actionResult": /* not yet routed to UI */ break;
         case "attachImage": setIncomingImage({ dataUrl: msg.dataUrl, nonce: Date.now() }); break;
@@ -235,12 +237,12 @@ export function App() {
   // 전에 role:"tool" 이 걸러진다(chatTimeline.modelHistory).
   const messages = state.timeline.items;
 
-  const send = (text: string, images?: string[]) => {
+  const send = (text: string, images?: string[], imports?: Array<{ object_id: string; revision: number; hash16: string }>) => {
     const trimmed = text.trim();
     const hasImages = !!images && images.length > 0;
     if ((!trimmed && !hasImages) || state.streamId) return;
     dispatch({ type: "userSent", text: trimmed, images });
-    postToHost({ type: "sendMessage", activityId: state.config?.activity?.id, text: trimmed, history: messages, images });
+    postToHost({ type: "sendMessage", activityId: state.config?.activity?.id, text: trimmed, history: messages, images, ...(imports?.length ? { imports } : {}) });
   };
 
   const retry = (prompt: string) => {

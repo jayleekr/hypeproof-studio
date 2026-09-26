@@ -381,3 +381,18 @@ This PR fixes the provider-count and key-requirement drift, and the one operatio
 dangerous line: the deploy guide's live secret command sets the Gemini key while the
 Anthropic key — which `/v1/messages` always needs — is commented out as optional. None
 of these edits change behavior.
+
+## Proposed note, 2026-09-21 — targeted lesson settings (U3 design; not implemented, not accepted)
+
+The targeted-settings design
+([classroom ADM, U3](../requirements/classroom-admin.md#remote-management-u3-20260921))
+lets an instructor point selected participants of a running class at another frozen
+version of the same course. It relies on three statements of this ADR and changes none:
+the version's `binding` is compared with the current pins on every read and drift is
+`lesson_unavailable`, never a silent substitute; a frozen policy binds **one runtime**,
+so a setting whose version binds a different runtime than the run's pinned version is
+refused when it is saved (a class does not switch runtime mid-session); and the app's
+saved model choice is scoped to the lesson digest, so after a switch the learner is
+back on the new version's default, which the learner-facing notice says. The model
+actually sent is evidenced where the normalized request leaves for the provider, not at
+the gate.
