@@ -286,4 +286,45 @@ const BIOPHARM_SAMPLE = `<!DOCTYPE html>
   console.log('T-P18 PASS: ops 종류 필수 절 검사 안 함');
 }
 
-console.log('\nchalk-plan-parser: 모든 테스트 통과 (18개)');
+// ─── T-E1~T-E5: 잘못된 수치 참조 / 크기 초과 ──────────────────────────────
+{
+  // T-E1: 10진 범위 초과 → throw 없이 markup.bad_entity 위반
+  const r = parsePlan('<!DOCTYPE html><html><head></head><body>&#1114112;</body></html>', 'f');
+  assert.doesNotThrow(() => parsePlan('<!DOCTYPE html><html><head></head><body>&#1114112;</body></html>', 'f'));
+  const v = r.violations.find(x => x.item === 'markup.bad_entity');
+  assert.ok(v, `T-E1: markup.bad_entity 위반 없음. violations=${JSON.stringify(r.violations)}`);
+  console.log('T-E1 PASS: &#1114112; → markup.bad_entity, throw 없음');
+}
+{
+  // T-E2: 16진 범위 초과 → throw 없이 markup.bad_entity 위반
+  const r = parsePlan('<!DOCTYPE html><html><head></head><body>&#x110000;</body></html>', 'f');
+  assert.doesNotThrow(() => parsePlan('<!DOCTYPE html><html><head></head><body>&#x110000;</body></html>', 'f'));
+  const v = r.violations.find(x => x.item === 'markup.bad_entity');
+  assert.ok(v, `T-E2: markup.bad_entity 위반 없음. violations=${JSON.stringify(r.violations)}`);
+  console.log('T-E2 PASS: &#x110000; → markup.bad_entity, throw 없음');
+}
+{
+  // T-E3: 서로게이트 → throw 없이 markup.bad_entity 위반
+  const r = parsePlan('<!DOCTYPE html><html><head></head><body>&#xD800;</body></html>', 'f');
+  const v = r.violations.find(x => x.item === 'markup.bad_entity');
+  assert.ok(v, `T-E3: markup.bad_entity 위반 없음 (surrogate). violations=${JSON.stringify(r.violations)}`);
+  console.log('T-E3 PASS: &#xD800; → markup.bad_entity, throw 없음');
+}
+{
+  // T-E4: 256KB 초과 → markup.too_large, throw 없음, 파싱 중단
+  const big = '<!DOCTYPE html><html><head></head><body>' + 'x'.repeat(256 * 1024 + 1) + '</body></html>';
+  let r;
+  assert.doesNotThrow(() => { r = parsePlan(big, 'f'); });
+  const v = r.violations.find(x => x.item === 'markup.too_large');
+  assert.ok(v, `T-E4: markup.too_large 없음`);
+  console.log('T-E4 PASS: 256KB 초과 → markup.too_large, throw 없음');
+}
+{
+  // T-E5: 정상 범위 수치 참조는 문자로 변환되고 위반 없음
+  const r = parsePlan('<!DOCTYPE html><html><head></head><body>&#65;&#x41;</body></html>', 'f');
+  const v = r.violations.filter(x => x.item === 'markup.bad_entity');
+  assert.equal(v.length, 0, `T-E5: 정상 참조에 bad_entity 위반 생김`);
+  console.log('T-E5 PASS: &#65; &#x41; → 위반 없음');
+}
+
+console.log('\nchalk-plan-parser: 모든 테스트 통과 (23개)');

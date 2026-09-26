@@ -3,6 +3,25 @@ import { validateLessonModel, type LessonModelPolicy } from './lesson-model-poli
 import { validateStepHelp, type StepHelpPolicy } from './lesson-help-mode.ts';
 import { validateLearningBlock, validateStepLearning, type LearningBlock, type StepLearningFields } from './learning-design.ts';
 
+// SCH-01~03 (#1291) — inspection fields derived from the lesson plan HTML. All optional.
+// `scope` is intentionally absent: in the vault that name means document scope (SCH-02).
+// `prohibited_moves` is instructor/server only — stripped before student or coach
+// JSON serialisation; see studentVisibleLesson() in learning-prompt.ts.
+export interface StepInspectionFields {
+  /** Minutes budgeted for this step; 1..240. Summed against chalk:duration-min (G2-9). */
+  duration_min?: number;
+  /**
+   * Prohibited-move entries attached to this step. Instructor/server only —
+   * stripped by studentVisibleLesson() before student profile or coach prompt JSON.
+   * family P1..P4 mirrors vault prohibited-moves.md series.
+   */
+  prohibited_moves?: Array<{ family: 'P1' | 'P2' | 'P3' | 'P4'; text: string }>;
+  /** Prerequisite activity/condition references (data-chalk-requires). Values unchecked (Q4). */
+  requires?: string[];
+  /** Excluded activity/condition references (data-chalk-forbids). Values unchecked (Q4). */
+  forbids?: string[];
+}
+
 // Chalk authoring content v1. Data only: never grants tools or stores credentials.
 export interface SessionDesign {
   schema: "hps-session-design/1";
@@ -16,7 +35,7 @@ export interface SessionDesign {
    * `help` (#1008, optional) — the help modes this step offers and its default.
    * A teaching strategy, never a grant; see lesson-help-mode.ts.
    */
-  steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string; help?: StepHelpPolicy } & StepLearningFields>;
+  steps: Array<{ id: string; title: string; instructions: string; hint: string; acceptance: string; help?: StepHelpPolicy } & StepLearningFields & StepInspectionFields>;
   /**
    * SX-55~58 (optional) — week, mission, completion conditions, observation items,
    * forbidden list. The 6-week curriculum is **six data files** filling this slot,
@@ -42,6 +61,23 @@ export interface SessionDesign {
    * for where it is and is not a Service boundary.
    */
   features?: LessonFeaturePolicy;
+  /**
+   * #1291 (SCH-01) — audience tier from chalk:audience-tier meta tag.
+   * lv1 = elementary, lv2 = middle/high, adult = adult product course.
+   * `scope` is not used (SCH-02 — vault uses that name for document scope).
+   */
+  audience_tier?: 'lv1' | 'lv2' | 'adult';
+  /**
+   * #1291 (SCH-01) — plan file reference. Holds sha256 digests and metadata
+   * pointing to the lesson plan in chalk_plan_files. The HTML itself never
+   * enters `content`; only this reference does (design §3-1).
+   */
+  plan_ref?: {
+    spec: 'chalk-plan/1';
+    knowledge_version: number;
+    files: { lesson: string; ops?: string };
+    methods: string[];
+  };
 }
 
 /** Bounds for `assistant.display_name`: single line, trimmed, 1..40 UTF-16 code units. */
@@ -63,13 +99,15 @@ const MARK_STACK = /\p{M}{3,}/u;
 const LONE_SURROGATE = /\p{Cs}/u;
 
 const REQUIRED_KEYS = ["schema", "title", "audience", "duration_minutes", "objective", "prerequisites", "starter", "steps"];
-const OPTIONAL_KEYS = ["assistant", "model", "features", "learning"];
+// `audience_tier` and `plan_ref` are #1291 additions. `scope` is intentionally absent (SCH-02).
+const OPTIONAL_KEYS = ["assistant", "model", "features", "learning", "audience_tier", "plan_ref"];
 const ALLOWED_KEYS = [...REQUIRED_KEYS, ...OPTIONAL_KEYS];
 const STEP_KEYS = ["id", "title", "instructions", "hint", "acceptance"];
 // Optional step keys. `help` (#1008) is a teaching strategy; `ui`/`evidence`/`gate`
-// (SX-56) are learning-design data. Required step keys do not change, so the schema
-// id stays hps-session-design/1 — a `/2` is opened only when a REQUIRED key moves.
-const STEP_OPTIONAL_KEYS = ["help", "ui", "evidence", "gate"];
+// (SX-56) are learning-design data. #1291 adds inspection fields (SCH-01~03).
+// Required step keys do not change, so the schema id stays hps-session-design/1 —
+// a `/2` is opened only when a REQUIRED key moves.
+const STEP_OPTIONAL_KEYS = ["help", "ui", "evidence", "gate", "duration_min", "prohibited_moves", "requires", "forbids"];
 
 const isObject = (x: unknown): x is Record<string, unknown> =>
   !!x && typeof x === "object" && !Array.isArray(x);
@@ -134,12 +172,50 @@ export function validateSessionDesign(value: unknown, complete = false): string 
     // SX-57 — a step that declares what will be observed must name the artifact
     // it leaves behind. See learning-design.ts for why this bites drafts too.
     { const bad = validateStepLearning(step); if (bad) return `step ${step.id}: ${bad}`; }
+    // #1291 inspection fields (SCH-01~03) — all optional.
+    if ("duration_min" in step) {
+      if (!Number.isInteger(step.duration_min) || (step.duration_min as number) < 1 || (step.duration_min as number) > 240)
+        return `step ${step.id}: duration_min must be 1..240`;
+    }
+    if ("prohibited_moves" in step) {
+      if (!Array.isArray(step.prohibited_moves)) return `step ${step.id}: prohibited_moves must be an array`;
+      for (const m of step.prohibited_moves as unknown[]) {
+        if (!isObject(m as unknown)) return `step ${step.id}: prohibited_moves entry must be an object`;
+        const move = m as Record<string, unknown>;
+        if (!['P1','P2','P3','P4'].includes(move.family as string)) return `step ${step.id}: prohibited_moves family must be P1..P4`;
+        if (!text(move.text, 500)) return `step ${step.id}: prohibited_moves text invalid`;
+      }
+    }
+    if ("requires" in step) {
+      if (!Array.isArray(step.requires)) return `step ${step.id}: requires must be an array`;
+      for (const r of step.requires as unknown[]) { if (!text(r, 500)) return `step ${step.id}: requires entry invalid`; }
+    }
+    if ("forbids" in step) {
+      if (!Array.isArray(step.forbids)) return `step ${step.id}: forbids must be an array`;
+      for (const f of step.forbids as unknown[]) { if (!text(f, 500)) return `step ${step.id}: forbids entry invalid`; }
+    }
   }
   // SX-55~59 — teaching data only. It grants nothing; it says what the week is
   // about, what counts as done, and what the coach must never do (learning.never).
   if ('learning' in value) { const bad = validateLearningBlock(value.learning); if (bad) return bad; }
   if ('model' in value) { const bad = validateLessonModel(value.model); if (bad) return bad; }
   if ('features' in value) { const bad = validateLessonFeatures(value.features); if (bad) return bad; }
+  // #1291 (SCH-01~02) — audience tier and plan reference.
+  if ('audience_tier' in value) {
+    if (!['lv1','lv2','adult'].includes(value.audience_tier as string)) return "audience_tier must be lv1, lv2, or adult";
+  }
+  if ('plan_ref' in value) {
+    if (!isObject(value.plan_ref)) return "plan_ref must be an object";
+    const pr = value.plan_ref as Record<string, unknown>;
+    if (pr.spec !== 'chalk-plan/1') return "plan_ref.spec must be 'chalk-plan/1'";
+    if (!Number.isInteger(pr.knowledge_version) || (pr.knowledge_version as number) < 1) return "plan_ref.knowledge_version must be a positive integer";
+    if (!isObject(pr.files)) return "plan_ref.files must be an object";
+    const files = pr.files as Record<string, unknown>;
+    if (!text(files.lesson, 64) || !(files.lesson as string).trim()) return "plan_ref.files.lesson must be a non-empty string";
+    if ('ops' in files && !text(files.ops, 64)) return "plan_ref.files.ops invalid";
+    if (!Array.isArray(pr.methods)) return "plan_ref.methods must be an array";
+    for (const m of pr.methods as unknown[]) { if (!text(m, 200)) return "plan_ref.methods entry invalid"; }
+  }
   // Optional identity block: when present it must be exactly { display_name }.
   // An empty name is rejected rather than treated as "unset" — Chalk omits the
   // block instead, so a saved draft never carries an ambiguous blank.

@@ -15,7 +15,7 @@ function parseAttrs(raw: string): Record<string, string> {
   const re = /([a-zA-Z_:][a-zA-Z0-9_.:\-]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]*)))?/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw)) !== null) {
-    const name = m[1]!.toLowerCase();
+    const name = (m[1] ?? '').toLowerCase();
     const val = m[2] ?? m[3] ?? m[4] ?? '';
     attrs[name] = val;
   }

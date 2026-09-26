@@ -29,8 +29,8 @@ try {
   const raw = await mf.getD1Database('HPS_DB');
   const apply = async (sql) => { for (const s of sql.replace(/^--.*$/gm, '').split(';').map((x) => x.trim()).filter(Boolean)) await raw.prepare(s).run(); };
   await raw.prepare('CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, cohort_id TEXT, profile_id TEXT, starts_at TEXT, ends_at TEXT, ended_at TEXT)').run();
-  const files = readdirSync(new URL('../migrations/', import.meta.url)).filter((x) => /^\d{4}-.*\.sql$/.test(x) && Number(x.slice(0, 4)) >= 11).sort();
-  assert.equal(files.at(-1), '0024-classroom-lesson-bindings.sql', 'this test describes the newest migration');
+  const files = readdirSync(new URL('../migrations/', import.meta.url)).filter((x) => /^\d{4}-.*\.sql$/.test(x) && Number(x.slice(0, 4)) >= 11 && Number(x.slice(0, 4)) <= 24).sort();
+  assert.equal(files.at(-1), '0024-classroom-lesson-bindings.sql', 'this test describes the newest classroom-ops migration');
   for (const m of files.slice(0, -1)) await apply(readFileSync(new URL(`../migrations/${m}`, import.meta.url), 'utf8'));
   const master = async () => Object.fromEntries((await raw.prepare("SELECT name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%'").all()).results.map((r) => [r.name, r.sql]));
   const before = await master();

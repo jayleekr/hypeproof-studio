@@ -2728,6 +2728,43 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-SCH-FIELDS",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SCH",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/session-design.ts"
+        },
+        {
+          "path": "worker/src/lib/learning-prompt.ts"
+        },
+        {
+          "path": "worker/src/lib/lesson-delivery.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-SCH-FIELDS",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-SCH",
+        "ST-IMP-CHALK-SCH-FIELDS"
+      ],
+      "sources": [
+        {
+          "path": "docs/testing/chalk-mvp.md"
+        },
+        {
+          "path": "worker/test/chalk-session-design-fields.test.mjs"
+        }
+      ]
+    },
+    {
       "id": "ST-IMP-SX-P1",
       "stage": "implementation",
       "owner": "jayleekr",
@@ -2993,7 +3030,7 @@
     {
       "id": "ST-DES-CHALK-KB",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-KB"
       ],
@@ -3005,9 +3042,76 @@
       ]
     },
     {
+      "id": "ST-IMP-CHALK-KB-IMPORT",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "scripts/chalk-knowledge-import/index.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-vocab-check.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-KB-IMPORT",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-KB-IMPORT",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-knowledge-import.test.mjs"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/_templates/lesson-plan.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/design/activity-acceptance-checklist.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/design/lesson-plan-authoring-guide.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/design/lesson-plan-quality-checklist.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/design/lesson-plan-to-steps-mapping.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/methods/m-explicit-instruction.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/curriculum-schema.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/edu-11-16-session-format.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/edu-constitution.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/measurement-axes.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/placement-rules.md"
+        },
+        {
+          "path": "worker/test/fixtures/chalk-vault/rules/prohibited-moves.md"
+        }
+      ]
+    },
+    {
       "id": "ST-DES-CHALK-PLANSPEC",
       "stage": "design",
-      "owner": "jayleekr",
+      "owner": "JinyongShin",
       "depends_on": [
         "ST-REQ-CHALK-HTML",
         "ST-REQ-CHALK-SCH",
@@ -3117,6 +3221,88 @@
       "sources": [
         {
           "path": "docs/design/chalk-rehearsal.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-DES-CHALK-OUTPUT",
+      "stage": "design",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-OUT",
+        "ST-REQ-CHALK-SCH",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "docs/design/chalk-plan-to-lesson.md"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-KB-STORE",
+      "stage": "implementation",
+      "label": "Chalk knowledge store — worker implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-KB",
+        "ST-DES-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/routes/chalk-knowledge.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-KB-STORE",
+      "stage": "test",
+      "label": "Chalk knowledge store — unit + integration tests",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-IMP-CHALK-KB-STORE",
+        "ST-REQ-CHALK-KB"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-knowledge.test.mjs"
+        }
+      ]
+    },
+    {
+      "id": "ST-IMP-CHALK-PLAN-PARSER",
+      "stage": "implementation",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-HTML",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "worker/src/lib/chalk-plan/parser.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/tokenizer.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/types.ts"
+        },
+        {
+          "path": "worker/src/lib/chalk-plan/index.ts"
+        }
+      ]
+    },
+    {
+      "id": "ST-TEST-CHALK-PLAN-PARSER",
+      "stage": "test",
+      "owner": "JinyongShin",
+      "depends_on": [
+        "ST-REQ-CHALK-HTML",
+        "ST-DES-CHALK-PLANSPEC"
+      ],
+      "sources": [
+        {
+          "path": "worker/test/chalk-plan-parser.test.mjs"
         }
       ]
     },

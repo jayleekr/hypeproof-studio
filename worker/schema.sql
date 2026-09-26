@@ -1172,3 +1172,26 @@ CREATE TABLE IF NOT EXISTS classroom_input_basis (
 -- One setting object per class run: every change of version is the next revision of that one object, so the per-object
 -- event order of U2 is a total order per participant. No row of kind 'setting' exists before this migration.
 CREATE UNIQUE INDEX IF NOT EXISTS classroom_content_objects_setting ON classroom_content_objects(class_run_id) WHERE kind='setting';
+
+-- ── migrations/0030-chalk-knowledge-store.sql (#1288 E1-2) ──
+CREATE TABLE IF NOT EXISTS chalk_knowledge_versions (
+  version        INTEGER PRIMARY KEY,
+  parent_version INTEGER,
+  origin         TEXT NOT NULL CHECK (origin IN ('vault-import', 'product-edit')),
+  source_repo    TEXT,
+  source_commit  TEXT,
+  note           TEXT NOT NULL,
+  created_by     TEXT NOT NULL,
+  created_at     INTEGER NOT NULL,
+  doc_count      INTEGER NOT NULL,
+  digest         TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chalk_knowledge_docs (
+  version     INTEGER NOT NULL REFERENCES chalk_knowledge_versions(version),
+  doc_id      TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  fields_json TEXT NOT NULL,
+  body        TEXT NOT NULL DEFAULT '',
+  source_path TEXT,
+  PRIMARY KEY (version, doc_id)
+);
