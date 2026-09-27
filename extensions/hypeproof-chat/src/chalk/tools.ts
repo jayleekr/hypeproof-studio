@@ -275,8 +275,14 @@ export async function execRecommendMethods(
     if (e instanceof IssuerHttpError) {
       const b = e.body as Record<string, unknown> | null;
       const code = typeof b?.code === "string" ? b.code : null;
-      if (e.status === 409 && code === "knowledge_missing") {
+      if (e.status === 409 && (code === "knowledge_missing" || code === "knowledge_incomplete")) {
         throw new Error("지식이 적재되지 않았습니다. 먼저 지식을 적재하세요.");
+      }
+      if (e.status === 409 && code === "knowledge_incompatible") {
+        const unranked = (b as Record<string, unknown>)?.unranked;
+        throw new Error(
+          `제품 지식과 앱 버전이 맞지 않습니다. unranked=${JSON.stringify(unranked)}`,
+        );
       }
       if (e.status === 400 && code === "vocab_unknown") {
         throw new Error(
