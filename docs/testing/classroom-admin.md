@@ -1418,3 +1418,15 @@ typecheck, Chalk tests, report/G1-wrap/ops browser checks and docs integrity.
 Review fixes also reproduce thirty concurrent wrong viewer checks, signed bounce
 before accepted/lost send response, and 25 stalled plus 25 delayed erasures ahead
 of runnable work. These prove bounded local behavior; the field gates above remain.
+
+### Instructor progressive disclosure · 2026-09-27 · #1363
+
+The latest instructor request supersedes the seven-column overview and green/lime palette. The browser checks now exercise the four-column overview, charcoal/cyan styling and actual user clicks into folded detail; action, consent and resolution assertions remain in place.
+
+- `npm --prefix chalk test` and `npm --prefix chalk run typecheck`: route/auth/forwarding, authoring, operations and budget contracts.
+- `npm --prefix e2e run test:classroom-ops-g1`: 24 synthetic seats through the real local Service; eight complete rows at 1280×720 and six at 1024×640, 14px+ row text, filter versus selection, unknown/approval/help distinction, keyboard/drawer/focus return, disclosure, no writes when merely selecting, result cards and wrap-up state. Includes 390px controls and read-only selection.
+- `npm --prefix e2e run test:classroom-ops`: actual device sync/command runner, confirmed reset with preserved work, question delivery and code refusal, evidence review, pause application, collection consent, measured contrast and 44px targets.
+- `npm --prefix e2e run test:classroom-authoring-g2`: authoring → rehearsal → confirmation → built learner webview → selected-target setting picker.
+- `npm --prefix e2e run test:budgets:browser`: actual browser budget allocation/pause, keyboard/zoom and role-negative controls.
+
+These are local synthetic fixtures, not live students, production activation, real model evaluation or human visual acceptance of the original concept. The original concept is a design reference, not runtime evidence.
