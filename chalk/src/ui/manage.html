@@ -495,7 +495,7 @@ function seatStatus(s){const why=reasonLabels[s.reason],ask=seatHelp(s),wait=app
   else if(ask)stage='도움 요청 '+ask+'건';
   else if(wait)stage='학생의 승인을 기다리는 중';
   else if(s.runtime&&s.runtime.status)stage=runtimeLabels[s.runtime.status]||'확인 불가';
-  else if(s.observes?.step===false)stage='학습 단계 확인 불가';
+  else if(s.observes?.step===false&&!s.step)stage='학습 단계 확인 불가';
   else if(s.entry_stage&&s.entry_stage!=='runtime_ready')stage=entryLabels[s.entry_stage]||'확인 불가';
   else if(s.step&&s.step.status)stage=stepLabels[s.step.status]||'확인 불가';
   else if(s.observes?.step===true)stage='아직 선택한 단계 없음';
